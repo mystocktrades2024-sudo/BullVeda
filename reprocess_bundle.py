@@ -25,8 +25,16 @@ def main():
     bundle = json.loads(BUNDLE_PATH.read_text())
     regime = (bundle.get("regime") or {}).get("regime4") or "risk_on_choppy"
 
-    # Apply engine to all decision-relevant sections
-    sections = ("buy_candidates", "watch_list", "all_scored")
+    # Walk EVERY top-level list section that contains ticker dicts.
+    # build_data.py reads from many sources (buy_candidates, watch_list,
+    # all_scored, medium_term_picks, long_term_picks, extended_leaders, ...)
+    # and falls back to score-based stage when decision.verdict is missing.
+    # We must overwrite verdict in every section to prevent ghost BUYs.
+    sections = []
+    for k, v in bundle.items():
+        if isinstance(v, list) and v and isinstance(v[0], dict) and "ticker" in v[0]:
+            sections.append(k)
+    print(f"Reprocessing sections: {sections}")
     apply_count = 0
     for sec in sections:
         rows = bundle.get(sec) or []
@@ -38,6 +46,12 @@ def main():
             r["reject_reason"] = res["reason"] if res["verdict"] != "BUY" else ""
             r["caveats"] = res["caveats"]
             r["gates_evaluated"] = res["gates_evaluated"]
+            # Also write nested decision.* so legacy readers (build_data.py:1139)
+            # see consistent verdict — single source of truth, two locations.
+            dec = r.setdefault("decision", {})
+            if isinstance(dec, dict):
+                dec["verdict"] = res["verdict"]
+                dec["reason"] = res["reason"]
             r["audit_trail"] = {
                 "ticker": r.get("ticker"),
                 "verdict": res["verdict"],
