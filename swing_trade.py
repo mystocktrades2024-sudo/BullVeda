@@ -3050,6 +3050,71 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _sr_e:
         log.warning(f"Sector ranking step failed (skipped, no impact): {_sr_e}")
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Decision engine — single source of truth for verdicts.
+    # Per 2026-05-06 architecture review: 7 independent verdict engines were
+    # disagreeing (AVT case). compute_final_verdict() is the AND-gate cascade
+    # that overwrites every ticker's verdict before bundle write.
+    # ─────────────────────────────────────────────────────────────────────────
+    try:
+        from decision_engine import compute_final_verdict
+        # Load config defensively — variable name varies (config/cfg) across scopes
+        try:
+            import json as _json
+            _de_cfg = _json.loads((BASE_DIR / "config" / "config.json").read_text())
+        except Exception:
+            _de_cfg = {}
+        _cfg_thr = _de_cfg.get("regime4_thresholds")
+        _bundle_regime = (bundle.get("regime") or {}).get("regime4") or "risk_on_choppy"
+        _de_count = 0
+        _de_failed = 0
+        for _sec_key, _sec_val in bundle.items():
+            if not (isinstance(_sec_val, list) and _sec_val
+                    and isinstance(_sec_val[0], dict) and "ticker" in _sec_val[0]):
+                continue
+            for _row in _sec_val:
+                if not isinstance(_row, dict):
+                    continue
+                _r = compute_final_verdict(_row, regime=_bundle_regime, thresholds=_cfg_thr)
+                _row["verdict"] = _r["verdict"]
+                _row["reject_reason"] = _r["reason"] if _r["verdict"] != "BUY" else ""
+                _row["caveats"] = _r["caveats"]
+                _row["gates_evaluated"] = _r["gates_evaluated"]
+                _dec = _row.setdefault("decision", {})
+                if isinstance(_dec, dict):
+                    _dec["verdict"] = _r["verdict"]
+                    _dec["reason"]  = _r["reason"]
+                _row["audit_trail"] = {
+                    "ticker": _row.get("ticker"),
+                    "verdict": _r["verdict"],
+                    "reason":  _r["reason"],
+                    "hard_gates_passed": all(g["passed"] for g in _r["gates_evaluated"]),
+                    "gate_failures": [g["name"] for g in _r["gates_evaluated"] if not g["passed"]],
+                    "caveats": _r["caveats"],
+                    "decided_by": "decision_engine.compute_final_verdict",
+                }
+                _de_count += 1
+                if _r["verdict"] != "BUY":
+                    _de_failed += 1
+        # Re-route buy_candidates: only keep verdict==BUY; rest move to watch_list
+        _bc_orig = list(bundle.get("buy_candidates") or [])
+        _new_buy   = [r for r in _bc_orig if isinstance(r, dict) and r.get("verdict") == "BUY"]
+        _demoted   = [r for r in _bc_orig if isinstance(r, dict) and r.get("verdict") != "BUY"]
+        if _demoted:
+            _wl = list(bundle.get("watch_list") or [])
+            _seen = {r.get("ticker") for r in _wl if isinstance(r, dict)}
+            for _r in _demoted:
+                if _r.get("ticker") not in _seen:
+                    _wl.append(_r); _seen.add(_r.get("ticker"))
+            bundle["watch_list"] = _wl
+        bundle["buy_candidates"] = _new_buy
+        bundle["decision_engine_version"] = "1.0"
+        log.info(f"  Decision engine: scored {_de_count} tickers, "
+                 f"buy_candidates {len(_bc_orig)}→{len(_new_buy)} "
+                 f"(rerouted {len(_demoted)} BUY→WATCH for failed gates)")
+    except Exception as _de_e:
+        log.warning(f"Decision engine step failed (skipped, no impact): {_de_e}")
+
     # Persist bundle for fast re-render (html_generator changes, no re-scan needed).
     # Write atomically via a .tmp + rename so a failed write never leaves a truncated file,
     # and surface errors at warning level so silent skips are visible.
