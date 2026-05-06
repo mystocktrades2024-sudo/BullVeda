@@ -1,0 +1,867 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>TICKR — Ticker Detail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-0: oklch(12% 0.008 250);
+  --bg-1: oklch(15% 0.01 250);
+  --bg-2: oklch(18% 0.012 250);
+  --bg-3: oklch(22% 0.012 250);
+  --ink-0: oklch(96% 0.005 90);
+  --ink-1: oklch(82% 0.006 90);
+  --ink-2: oklch(60% 0.008 90);
+  --ink-3: oklch(40% 0.01 250);
+  --rule:  oklch(25% 0.012 250);
+  --rule-2:oklch(32% 0.014 250);
+  --pass:  oklch(74% 0.16 145);
+  --warn:  oklch(80% 0.15 80);
+  --fail:  oklch(68% 0.22 28);
+  --info:  oklch(74% 0.12 220);
+  --pass-bg: color-mix(in oklch, var(--pass) 13%, transparent);
+  --warn-bg: color-mix(in oklch, var(--warn) 13%, transparent);
+  --fail-bg: color-mix(in oklch, var(--fail) 13%, transparent);
+  --info-bg: color-mix(in oklch, var(--info) 13%, transparent);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg-0);color:var(--ink-0);font-family:'Inter Tight',-apple-system,sans-serif;font-size:13px;-webkit-font-smoothing:antialiased}
+.mono{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
+.lbl{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-2)}
+.up{color:var(--pass)}.down{color:var(--fail)}.dim{color:var(--ink-2)}
+
+/* HEADER */
+header{display:grid;grid-template-columns:auto 1fr auto auto auto;gap:22px;align-items:center;padding:14px 28px;border-bottom:1px solid var(--rule);background:var(--bg-1);position:sticky;top:0;z-index:20}
+.back-btn{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-2);padding:5px 10px;border:1px solid var(--rule);border-radius:3px;cursor:pointer;background:var(--bg-2);text-decoration:none;display:inline-block}
+.ticker-block .sym{font-size:28px;font-weight:700;letter-spacing:-.02em}
+.ticker-block .name{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-2);letter-spacing:.06em;margin-top:3px}
+.h-tags{display:flex;gap:6px;margin-top:6px}
+.pill{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;padding:3px 8px;border-radius:999px;background:var(--bg-2);color:var(--ink-1);border:1px solid var(--rule-2)}
+.pill.pass{color:var(--pass);border-color:color-mix(in oklch,var(--pass) 40%,transparent);background:var(--pass-bg)}
+.pill.warn{color:var(--warn);border-color:color-mix(in oklch,var(--warn) 40%,transparent);background:var(--warn-bg)}
+.pill.live::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--pass);margin-right:5px;vertical-align:middle}
+.price-block{text-align:right}
+.price-block .v{font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:600}
+.price-block .d{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-2);margin-top:3px}
+.btn{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;border-radius:4px;border:1px solid var(--rule-2);background:var(--bg-2);color:var(--ink-1);cursor:pointer}
+.btn.primary{background:var(--ink-0);color:var(--bg-0);border-color:var(--ink-0);font-weight:600}
+
+/* SECTION NAV */
+.secnav{position:sticky;top:69px;z-index:15;display:flex;align-items:center;gap:2px;padding:0 28px;height:44px;background:color-mix(in oklch,var(--bg-0) 90%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--rule)}
+.secnav a{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);padding:6px 11px;border-radius:4px;text-decoration:none;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.secnav a .n{font-size:10px;color:var(--ink-3)}
+.secnav a:hover{color:var(--ink-0);background:var(--bg-2)}
+.secnav a.on{color:var(--ink-0);background:var(--bg-2);box-shadow:inset 0 -2px 0 var(--ink-0)}
+.secnav .sp{flex:1}
+
+/* MAIN */
+main{padding:0 28px 100px;max-width:1680px;margin:0 auto}
+
+/* SECTION HEADER */
+.sec{margin:52px 0 22px;scroll-margin-top:120px}
+.sec-head{display:flex;align-items:baseline;gap:16px;padding-bottom:14px;border-bottom:1px solid var(--rule);margin-bottom:22px}
+.sec-head .n{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-3);letter-spacing:.18em}
+.sec-head h2{margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em}
+.sec-head .desc{font-size:12px;color:var(--ink-2);margin-left:auto;max-width:48ch;text-align:right;line-height:1.4}
+
+/* VERDICT */
+.verdict-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:22px;align-items:stretch}
+.verdict-card{position:relative;padding:28px 30px;border-radius:8px;background:linear-gradient(170deg,color-mix(in oklch,var(--pass) 7%,transparent),transparent 60%),var(--bg-1);border:1px solid color-mix(in oklch,var(--pass) 28%,var(--rule));overflow:hidden}
+.verdict-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--pass)}
+.verdict-eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.verdict-score{font-family:'JetBrains Mono',monospace;color:var(--pass)}
+.verdict-score b{font-size:16px;font-weight:700}
+.verdict-score span{color:var(--ink-3);font-size:11px}
+.verdict-headline{font-size:34px;font-weight:700;letter-spacing:-.02em;line-height:1.05;margin:4px 0 12px}
+.verdict-headline .accent{color:var(--pass)}
+.verdict-sub{font-size:14px;color:var(--ink-1);line-height:1.55;max-width:64ch}
+.verdict-meta{margin-top:20px;padding-top:18px;border-top:1px solid var(--rule);display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.verdict-meta .cell .v{font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:600}
+.verdict-meta .cell .v.pass{color:var(--pass)}.verdict-meta .cell .v.fail{color:var(--fail)}.verdict-meta .cell .v.warn{color:var(--warn)}
+.verdict-meta .cell .lbl{display:block;margin-bottom:3px}
+.actions-card{background:var(--bg-1);border:1px solid var(--rule);border-radius:8px;padding:18px 20px}
+.actions-card h3{margin:0 0 14px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-2);font-family:'JetBrains Mono',monospace;font-weight:500}
+.action-row{display:grid;grid-template-columns:22px 1fr auto;gap:11px;align-items:center;padding:10px 0;border-bottom:1px dashed var(--rule)}
+.action-row:last-child{border-bottom:none}
+.num-circle{width:22px;height:22px;border-radius:50%;background:var(--bg-2);border:1px solid var(--rule-2);display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-1);flex-shrink:0}
+.action-body .what{color:var(--ink-0);font-size:13px;line-height:1.4}
+.action-body .meta{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-2);margin-top:3px}
+.go{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-3);padding:3px 7px;border:1px solid var(--rule);border-radius:3px}
+
+/* RULER */
+.trademap-wrap{background:var(--bg-1);border:1px solid var(--rule);border-radius:8px;padding:24px 28px}
+.trademap-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px}
+.trademap-head h3{margin:0;font-size:14px;font-weight:600}
+.trademap-head .rr{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-2)}
+.trademap-head .rr b{color:var(--pass)}
+.ruler{position:relative;height:90px;margin:20px 8px 8px}
+.ruler-line{position:absolute;top:50%;left:0;right:0;height:4px;transform:translateY(-50%);background:linear-gradient(90deg,color-mix(in oklch,var(--fail) 60%,transparent) 0%,color-mix(in oklch,var(--fail) 60%,transparent) 14%,var(--ink-3) 14%,var(--ink-3) 26%,var(--pass) 26%,var(--pass) 38%,var(--info) 100%);border-radius:2px}
+.rmark{position:absolute;top:50%;transform:translate(-50%,-50%)}
+.rmark .dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--ink-2);background:var(--bg-0)}
+.rmark.stop .dot{border-color:var(--fail);background:color-mix(in oklch,var(--fail) 30%,var(--bg-0))}
+.rmark.entry .dot{border-color:var(--pass);background:color-mix(in oklch,var(--pass) 30%,var(--bg-0))}
+.rmark.now .dot{width:18px;height:18px;background:var(--ink-0);border-color:var(--ink-0);box-shadow:0 0 0 4px color-mix(in oklch,var(--ink-0) 18%,transparent),0 0 14px var(--pass)}
+.rmark.t1 .dot{border-color:var(--warn);background:color-mix(in oklch,var(--warn) 30%,var(--bg-0))}
+.rmark.t2 .dot{border-color:var(--info);background:color-mix(in oklch,var(--info) 30%,var(--bg-0))}
+.rmark.t3 .dot{border-color:oklch(80% 0.14 290);background:color-mix(in oklch,oklch(80% 0.14 290) 25%,var(--bg-0))}
+.rmark .top{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);text-align:center;white-space:nowrap}
+.rmark .bot{position:absolute;top:22px;left:50%;transform:translateX(-50%);text-align:center;white-space:nowrap}
+.rmark .lbl-name{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-2);display:block}
+.rmark.stop .lbl-name{color:var(--fail)}.rmark.entry .lbl-name{color:var(--pass)}.rmark.t1 .lbl-name{color:var(--warn)}.rmark.t2 .lbl-name{color:var(--info)}.rmark.t3 .lbl-name{color:oklch(80% 0.14 290)}
+.rmark .lbl-px{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:600}
+.rmark .lbl-d{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-2);margin-top:2px}
+.rmark.stop .lbl-d{color:var(--fail)}.rmark.t1 .lbl-d{color:var(--warn)}.rmark.t2 .lbl-d{color:var(--info)}.rmark.t3 .lbl-d{color:oklch(80% 0.14 290)}.rmark.entry .lbl-d{color:var(--pass)}
+
+/* PILLARS */
+.pillars{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.pillar{background:var(--bg-1);border:1px solid var(--rule);border-radius:8px;padding:16px 18px}
+.pillar-head{display:flex;justify-content:space-between;align-items:baseline}
+.pillar-name{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-2)}
+.pillar-score{font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:700}
+.pillar-score s{font-size:12px;color:var(--ink-3);text-decoration:none;font-weight:400}
+.pillar-bar{height:4px;background:var(--bg-3);border-radius:2px;overflow:hidden;margin:14px 0 12px}
+.pillar-bar .fill{height:100%}
+.pillar-summary{font-size:12px;color:var(--ink-1);line-height:1.4}
+.pillar-link{margin-top:12px;padding-top:10px;border-top:1px dashed var(--rule);font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);cursor:pointer;display:flex;justify-content:space-between}
+.pillar-link::after{content:"→"}
+.pillar.pass .pillar-score{color:var(--pass)}.pillar.pass .fill{background:var(--pass)}
+.pillar.warn .pillar-score{color:var(--warn)}.pillar.warn .fill{background:var(--warn)}
+.pillar.fail .pillar-score{color:var(--fail)}.pillar.fail .fill{background:var(--fail)}
+
+/* CHART ROW */
+.chart-row{display:grid;grid-template-columns:1.6fr 1fr;gap:16px}
+.chart-card,.ev-card{background:var(--bg-1);border:1px solid var(--rule);border-radius:8px;overflow:hidden}
+.card-head{display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-bottom:1px solid var(--rule)}
+.card-head .t{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-1)}
+.card-head .m{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-2)}
+.card-toolbar{display:flex;gap:5px;padding:8px 18px;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.chip{font-family:'JetBrains Mono',monospace;font-size:10px;padding:3px 9px;border:1px solid var(--rule);border-radius:3px;color:var(--ink-2);cursor:pointer;background:transparent}
+.chip.on{background:var(--bg-2);color:var(--ink-0);border-color:var(--rule-2)}
+.chip:hover{color:var(--ink-0)}
+
+/* EVIDENCE LIST */
+.ev-group-head{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);padding:13px 18px 7px;border-bottom:1px dashed var(--rule);margin-bottom:2px}
+.ev-row{display:grid;grid-template-columns:14px 1fr auto auto;gap:11px;padding:11px 18px;border-bottom:1px solid var(--rule);align-items:center}
+.ev-row:last-child{border-bottom:none}
+.ev-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.ev-dot.pass{background:var(--pass);box-shadow:0 0 6px color-mix(in oklch,var(--pass) 40%,transparent)}
+.ev-dot.warn{background:var(--warn)}.ev-dot.fail{background:var(--fail)}.ev-dot.info{background:var(--info)}
+.ev-name{font-size:13px;color:var(--ink-0);font-weight:500}
+.ev-name .sub{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-2);margin-left:7px}
+.ev-val{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:600;text-align:right;min-width:76px}
+.ev-val.pass{color:var(--pass)}.ev-val.warn{color:var(--warn)}.ev-val.fail{color:var(--fail)}
+.ev-tag{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;padding:2px 8px;border-radius:3px;min-width:60px;text-align:center}
+.ev-tag.pass{color:var(--pass);background:var(--pass-bg)}.ev-tag.warn{color:var(--warn);background:var(--warn-bg)}.ev-tag.fail{color:var(--fail);background:var(--fail-bg)}.ev-tag.info{color:var(--info);background:var(--info-bg)}
+
+/* TWO COL */
+.twocol{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.twocol .col{background:var(--bg-1);border:1px solid var(--rule);border-radius:8px}
+.col-bull{border-left:2px solid var(--pass)}.col-bear{border-left:2px solid var(--fail)}
+.col-head{padding:14px 18px;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;align-items:center}
+.col-head h4{margin:0;font-size:13px;letter-spacing:.04em}
+.col-head .count{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-2)}
+.col-bull .col-head h4{color:var(--pass)}.col-bear .col-head h4{color:var(--fail)}
+.col-row{padding:12px 18px;border-bottom:1px dashed var(--rule);display:grid;grid-template-columns:1fr auto;gap:14px;align-items:start}
+.col-row:last-child{border-bottom:none}
+.col-row .what{font-size:13px;color:var(--ink-0);line-height:1.4}
+.col-row .why{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-2);margin-top:3px}
+.col-row .v{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600}
+.col-bull .v{color:var(--pass)}.col-bear .v{color:var(--fail)}
+
+/* MTF TABLE */
+.mtf-wrap{background:var(--bg-1);border:1px solid var(--rule);border-radius:8px;overflow:hidden;margin-top:16px}
+.mtf-table{width:100%;border-collapse:collapse}
+.mtf-table th,.mtf-table td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--rule);font-family:'JetBrains Mono',monospace;font-size:11.5px}
+.mtf-table th{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-2);font-weight:500;background:var(--bg-2)}
+.mtf-table td:first-child{color:var(--ink-2);font-size:10px;letter-spacing:.14em;text-transform:uppercase}
+.mtf-cell{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:3px}
+.mtf-cell.pass{color:var(--pass);background:var(--pass-bg)}.mtf-cell.warn{color:var(--warn);background:var(--warn-bg)}.mtf-cell.fail{color:var(--fail);background:var(--fail-bg)}.mtf-cell.dim{color:var(--ink-3)}
+
+/* INTEL */
+.intel-card{background:var(--bg-1);border:1px solid var(--rule);border-radius:8px}
+.intel-row{display:grid;grid-template-columns:60px 1fr auto;gap:14px;padding:12px 18px;border-bottom:1px solid var(--rule);align-items:center}
+.intel-row:last-child{border-bottom:none}
+.intel-time{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-3)}
+.intel-text{font-size:13px;color:var(--ink-1);line-height:1.4}
+.intel-text b{color:var(--ink-0);font-weight:600}
+
+/* TIMELINE */
+.tl-wrap{background:var(--bg-1);border:1px solid var(--rule);border-radius:8px;padding:28px 28px 20px}
+.tl-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:24px}
+.tl-head h3{margin:0;font-size:14px;font-weight:600;font-family:'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-1)}
+.spine{position:relative;height:220px;margin:0 16px}
+.spine-line{position:absolute;top:110px;left:0;right:0;height:2px;background:linear-gradient(90deg,color-mix(in oklch,var(--fail) 60%,transparent) 0%,color-mix(in oklch,var(--fail) 60%,transparent) 14%,var(--ink-3) 14%,var(--ink-3) 28%,var(--pass) 28%,var(--pass) 40%,var(--warn) 40%,var(--info) 100%);border-radius:1px}
+.tl-node{position:absolute;top:110px;transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:var(--bg-0);border:2px solid var(--ink-2);z-index:2}
+.tl-node.now{width:22px;height:22px;border-color:var(--ink-0);background:var(--ink-0);box-shadow:0 0 0 5px color-mix(in oklch,var(--pass) 25%,transparent),0 0 16px var(--pass)}
+.tl-node.stop{border-color:var(--fail);background:color-mix(in oklch,var(--fail) 30%,var(--bg-0))}
+.tl-node.entry{border-color:var(--pass);background:color-mix(in oklch,var(--pass) 30%,var(--bg-0))}
+.tl-node.t1{border-color:var(--warn);background:color-mix(in oklch,var(--warn) 30%,var(--bg-0))}
+.tl-node.t2{border-color:var(--info);background:color-mix(in oklch,var(--info) 30%,var(--bg-0))}
+.tl-node.event{width:12px;height:12px;border-color:var(--ink-3);background:var(--bg-2)}
+.tl-label{position:absolute;transform:translateX(-50%);text-align:center;white-space:nowrap}
+.tl-label.up{top:24px}.tl-label.dn{bottom:24px;top:auto}
+.tl-lbl-name{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);display:block;margin-bottom:2px}
+.tl-price{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600}
+.tl-delta{font-family:'JetBrains Mono',monospace;font-size:10px;margin-top:2px;color:var(--ink-2)}
+.tl-conn{position:absolute;left:0;width:1px;background:linear-gradient(180deg,var(--rule-2),transparent)}
+.tl-conn.up{top:28px;height:78px}.tl-conn.dn{bottom:28px;height:78px;top:auto;background:linear-gradient(0deg,var(--rule-2),transparent)}
+.timeaxis{margin:12px 16px 0;display:grid;grid-template-columns:repeat(8,1fr);font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--ink-3);letter-spacing:.12em;text-transform:uppercase;border-top:1px dashed var(--rule);padding-top:8px}
+.timeaxis div{text-align:center}
+
+/* LANES */
+.lanes{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:18px}
+.lane{background:var(--bg-1);border:1px solid var(--rule);border-radius:8px;padding:18px 18px 16px}
+.lane-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--rule)}
+.lane-head .h{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+.lane-head .h .pre{color:var(--ink-3);margin-right:6px}
+.lane-head .prob{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-2)}
+.lane.entry .lane-head .h{color:var(--pass)}.lane.exit .lane-head .h{color:var(--warn)}.lane.risk .lane-head .h{color:var(--fail)}
+.step{display:grid;grid-template-columns:22px 1fr;gap:11px;padding:10px 0;border-bottom:1px dashed var(--rule);align-items:start}
+.step:last-child{border-bottom:none}
+.step .body .what{font-size:13px;line-height:1.45;color:var(--ink-0)}
+.step .body .meta{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-2);margin-top:4px}
+.lane.entry .num-circle{border-color:color-mix(in oklch,var(--pass) 50%,transparent);color:var(--pass)}
+.lane.exit .num-circle{border-color:color-mix(in oklch,var(--warn) 50%,transparent);color:var(--warn)}
+.lane.risk .num-circle{border-color:color-mix(in oklch,var(--fail) 50%,transparent);color:var(--fail)}
+
+/* BACKTEST */
+.bt-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.bt-card{background:var(--bg-1);border:1px solid var(--rule);border-radius:6px;padding:16px 18px}
+.bt-val{font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:700;margin-top:8px;line-height:1}
+.monthly-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:16px}
+.mo-card{padding:12px 10px;border-radius:4px;text-align:center}
+.mo-card .mo-name{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2)}
+.mo-card .mo-val{font-family:'JetBrains Mono',monospace;font-size:17px;font-weight:700;margin-top:4px}
+
+/* RISK */
+.risk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+
+/* NOTES */
+textarea{width:100%;min-height:90px;padding:12px;font-family:'Inter Tight',sans-serif;font-size:13px;line-height:1.6;background:var(--bg-1);color:var(--ink-0);border:1px solid var(--rule);border-radius:6px;resize:vertical;outline:none;margin-top:14px}
+textarea:focus{border-color:var(--rule-2)}
+.save-btn{margin-top:8px;padding:8px 18px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;background:var(--ink-0);color:var(--bg-0);border:none;border-radius:4px;cursor:pointer;font-weight:600}
+.note-entry{padding:14px 16px;margin-bottom:10px;background:var(--bg-1);border:1px solid var(--rule);border-radius:6px}
+.note-entry .ts{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-3);letter-spacing:.08em;margin-bottom:7px}
+.note-entry .txt{font-size:13px;color:var(--ink-0);line-height:1.6}
+
+/* STATUS BAR */
+.statusbar{display:flex;gap:14px;align-items:center;padding:12px 28px 28px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-3)}
+kbd{padding:1px 5px;border:1px solid var(--rule-2);border-radius:2px;color:var(--ink-2);font-size:10px}
+
+::-webkit-scrollbar{width:8px}::-webkit-scrollbar-track{background:var(--bg-0)}::-webkit-scrollbar-thumb{background:var(--rule-2);border-radius:4px}
+</style>
+</head>
+<body>
+
+<header>
+  <a href="dashboard.html" class="back-btn">← DASHBOARD</a>
+  <div class="ticker-block">
+    <div class="sym">TICKR <span style="font-size:14px;color:var(--ink-2);font-weight:500"> · Tickr Industrial Holdings</span></div>
+    <div class="name">Industrials · Aerospace &amp; Defense · MCAP $42.7B · Float 168.4M</div>
+    <div class="h-tags">
+      <span class="pill live">LIVE</span>
+      <span class="pill pass">SCORE 78/100</span>
+      <span class="pill warn">EARN +19d</span>
+      <span class="pill">BETA 1.24</span>
+    </div>
+  </div>
+  <div class="price-block">
+    <div class="v">$247.83</div>
+    <div class="d up">+$4.27 · +1.75% · vol 3.8M</div>
+  </div>
+  <button class="btn">＋ ALERT</button>
+  <button class="btn primary">BUY · 78</button>
+</header>
+
+<nav class="secnav" id="secnav">
+  <a href="#verdict" class="on"><span class="n">01</span>VERDICT</a>
+  <a href="#trademap"><span class="n">02</span>TRADE MAP</a>
+  <a href="#scorecard"><span class="n">03</span>SCORECARD</a>
+  <a href="#chart"><span class="n">04</span>CHART</a>
+  <a href="#fund"><span class="n">05</span>FUNDAMENTALS</a>
+  <a href="#intel"><span class="n">06</span>INTEL</a>
+  <a href="#mtf"><span class="n">07</span>MTF</a>
+  <a href="#plan"><span class="n">08</span>PLAN</a>
+  <a href="#risk"><span class="n">09</span>RISK</a>
+  <a href="#backtest"><span class="n">10</span>BACKTEST</a>
+  <a href="#notes"><span class="n">11</span>NOTES</a>
+  <span class="sp"></span>
+  <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-2)">D1 · Apr 25 2026 · 15:58 ET</span>
+</nav>
+
+<main>
+
+<!-- 01 VERDICT -->
+<section id="verdict" class="sec">
+  <div class="sec-head"><span class="n">01</span><h2>Verdict</h2><span class="desc">Single answer to "should I trade this?" — with all the evidence behind it.</span></div>
+  <div class="verdict-grid">
+    <div class="verdict-card">
+      <div class="verdict-eyebrow">
+        <span class="lbl">Conviction</span>
+        <span class="verdict-score"><b>78</b><span>/100</span></span>
+        <span class="lbl" style="color:var(--ink-3)">·</span>
+        <span class="lbl" style="color:var(--pass)">4/5 GATES CLEAR</span>
+      </div>
+      <h1 class="verdict-headline"><span class="accent">BUY</span> — pullback into EMA21 is the entry.<br>Scale in at $244–248.</h1>
+      <p class="verdict-sub">Trend stacked bullish across all timeframes. Bullish BOS confirmed at 244.10 with an untapped FVG below providing a natural cushion. Q1 earnings May 14 is the binary event — size to survive a miss reaction. Highest-probability setup in the current book.</p>
+      <div class="verdict-meta">
+        <div class="cell"><span class="lbl">R:R to T1</span><span class="v pass">1.97 : 1</span></div>
+        <div class="cell"><span class="lbl">RS Rank</span><span class="v pass">88</span></div>
+        <div class="cell"><span class="lbl">Entry quality</span><span class="v pass">Optimal</span></div>
+        <div class="cell"><span class="lbl">RVOL</span><span class="v pass">1.19×</span></div>
+      </div>
+    </div>
+    <div class="actions-card">
+      <h3>What to do next</h3>
+      <div class="action-row">
+        <span class="num-circle">1</span>
+        <div class="action-body">
+          <div class="what">Enter limit at <b>$246.50</b> — inside EMA21 zone</div>
+          <div class="meta">LIMIT · 124 shares · restores 1.97 R:R</div>
+        </div>
+        <span class="go">STAGE</span>
+      </div>
+      <div class="action-row">
+        <span class="num-circle">2</span>
+        <div class="action-body">
+          <div class="what">Hard stop at <b>$238.40</b> immediately on fill</div>
+          <div class="meta">STOP · GTC · below demand OB — non-negotiable</div>
+        </div>
+        <span class="go">SET</span>
+      </div>
+      <div class="action-row">
+        <span class="num-circle">3</span>
+        <div class="action-body">
+          <div class="what">Trim 50% at T1 <b>$262.50</b>, move stop to BE</div>
+          <div class="meta">LIMIT · 62 sh · lock +1.97R partial</div>
+        </div>
+        <span class="go">PLAN</span>
+      </div>
+      <div class="action-row">
+        <span class="num-circle">4</span>
+        <div class="action-body">
+          <div class="what">Check correlation vs RTX before entry</div>
+          <div class="meta">0.71 corr — trim RTX 25% or reduce TICKR to 90sh</div>
+        </div>
+        <span class="go">VERIFY</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 02 TRADE MAP -->
+<section id="trademap" class="sec">
+  <div class="sec-head"><span class="n">02</span><h2>Trade map</h2><span class="desc">Where price is, what you risk, what you stand to make. One canonical scale.</span></div>
+  <div class="trademap-wrap">
+    <div class="trademap-head">
+      <h3>Risk vs reward · TICKR</h3>
+      <span class="rr">R:R T1 <b>1.97×</b> &nbsp;·&nbsp; T2 <b>3.88×</b> &nbsp;·&nbsp; T3 <b>5.99×</b> &nbsp;·&nbsp; hold 8–14d</span>
+    </div>
+    <div class="ruler">
+      <div class="ruler-line"></div>
+      <div class="rmark stop" style="left:8%">
+        <div class="dot"></div>
+        <div class="top"><span class="lbl-name">Stop</span><div class="lbl-px down">$238.40</div><div class="lbl-d">−3.4%</div></div>
+      </div>
+      <div class="rmark entry" style="left:28%">
+        <div class="dot"></div>
+        <div class="bot"><span class="lbl-name">Entry</span><div class="lbl-px up">$244–248</div><div class="lbl-d">avg fill $246.50</div></div>
+      </div>
+      <div class="rmark now" style="left:36%">
+        <div class="dot"></div>
+        <div class="top"><span class="lbl-name">Now</span><div class="lbl-px mono">$247.83</div><div class="lbl-d" style="color:var(--ink-2)">in zone</div></div>
+      </div>
+      <div class="rmark t1" style="left:60%">
+        <div class="dot"></div>
+        <div class="bot"><span class="lbl-name">T1 · trim 50%</span><div class="lbl-px mono">$262.50</div><div class="lbl-d">+6.7%</div></div>
+      </div>
+      <div class="rmark t2" style="left:80%">
+        <div class="dot"></div>
+        <div class="top"><span class="lbl-name">T2 · trim 25%</span><div class="lbl-px mono">$278.00</div><div class="lbl-d">+12.4%</div></div>
+      </div>
+      <div class="rmark t3" style="left:96%">
+        <div class="dot"></div>
+        <div class="bot"><span class="lbl-name">T3 · close</span><div class="lbl-px mono">$295.00</div><div class="lbl-d">+19.3%</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 03 SCORECARD -->
+<section id="scorecard" class="sec">
+  <div class="sec-head"><span class="n">03</span><h2>Scorecard</h2><span class="desc">Five independent pillars feed the conviction score. Each links to its evidence below.</span></div>
+  <div class="pillars">
+    <div class="pillar pass">
+      <div class="pillar-head"><span class="pillar-name">Tech Structure</span></div>
+      <div class="pillar-score">82<s>/100</s></div>
+      <div class="pillar-bar"><div class="fill" style="width:82%"></div></div>
+      <div class="pillar-summary">EMAs stacked bullish. ADX 28.7 confirms trend. MACD hist expanding. RSI healthy at 58.</div>
+      <div class="pillar-link"><span>14 indicators</span></div>
+    </div>
+    <div class="pillar warn">
+      <div class="pillar-head"><span class="pillar-name">Fundamentals</span></div>
+      <div class="pillar-score">71<s>/100</s></div>
+      <div class="pillar-bar"><div class="fill" style="width:71%"></div></div>
+      <div class="pillar-summary">Quality compounder at fair value. Fwd P/E 19.2 vs sector 22.1. PEG 1.42 — acceptable.</div>
+      <div class="pillar-link"><span>30 metrics</span></div>
+    </div>
+    <div class="pillar warn">
+      <div class="pillar-head"><span class="pillar-name">Sentiment</span></div>
+      <div class="pillar-score">64<s>/100</s></div>
+      <div class="pillar-bar"><div class="fill" style="width:64%"></div></div>
+      <div class="pillar-summary">Analyst neutral-positive. 76% bull on StockTwits. Options IV rank 38% — normal.</div>
+      <div class="pillar-link"><span>18 signals</span></div>
+    </div>
+    <div class="pillar pass">
+      <div class="pillar-head"><span class="pillar-name">Smart Money</span></div>
+      <div class="pillar-score">88<s>/100</s></div>
+      <div class="pillar-bar"><div class="fill" style="width:88%"></div></div>
+      <div class="pillar-summary">Bullish BOS 244.10. Demand OB 232–238 untouched. FVG below price at 241–244.</div>
+      <div class="pillar-link"><span>SMC zones</span></div>
+    </div>
+    <div class="pillar pass">
+      <div class="pillar-head"><span class="pillar-name">Quality Gate</span></div>
+      <div class="pillar-score">73<s>/100</s></div>
+      <div class="pillar-bar"><div class="fill" style="width:73%"></div></div>
+      <div class="pillar-summary">4/5 hard rules clear. Liquidity OK, position size within 1% book. Watch RTX corr 0.71.</div>
+      <div class="pillar-link"><span>5 rules</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 04 CHART & STRUCTURE -->
+<section id="chart" class="sec">
+  <div class="sec-head"><span class="n">04</span><h2>Chart &amp; structure</h2><span class="desc">Chart is the answer. Indicator list is the receipts. Failures bubble to top.</span></div>
+  <div class="chart-row">
+    <div class="chart-card">
+      <div class="card-head"><span class="t">Price · 90D · D1</span><span class="m">EMA 21 / SMA 50 · Trade levels</span></div>
+      <div class="card-toolbar">
+        <button class="chip">1D</button><button class="chip">1W</button><button class="chip on">3M</button><button class="chip">6M</button><button class="chip">1Y</button>
+        <span style="flex:1"></span>
+        <button class="chip on" id="btn-cdl">CDL</button>
+        <button class="chip" id="btn-line">LINE</button>
+        <button class="chip on">EMA</button><button class="chip on">LEVELS</button>
+      </div>
+      <div style="height:360px;background:var(--bg-1);position:relative;overflow:hidden">
+        <svg id="price-chart" viewBox="0 0 720 360" style="width:100%;height:100%;display:block"></svg>
+      </div>
+    </div>
+    <div class="ev-card" style="max-height:520px;overflow-y:auto">
+      <div class="card-head"><span class="t">Indicator evidence</span><span class="m">32 signals</span></div>
+      <div class="ev-group-head">EMA Structure</div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">EMA stack <span class="sub">8&gt;21&gt;50 bullish</span></span><span class="ev-val pass">BULL</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">EMA 21 <span class="sub">price above</span></span><span class="ev-val pass">$240.12</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">SMA 50 <span class="sub">price above, $23 gap</span></span><span class="ev-val pass">$224.18</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">SMA 200 <span class="sub">long-term uptrend</span></span><span class="ev-val pass">$198.42</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-group-head">Momentum</div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">RSI 14 <span class="sub">40–70 healthy</span></span><span class="ev-val pass">58.4</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">MACD <span class="sub">histogram expanding</span></span><span class="ev-val pass">+1.82</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">ADX 14 <span class="sub">strong trend ≥25</span></span><span class="ev-val pass">28.7</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">Relative Strength <span class="sub">vs SPY 63d</span></span><span class="ev-val pass">×1.34</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-group-head">Volume &amp; Flow</div>
+      <div class="ev-row"><span class="ev-dot warn"></span><span class="ev-name">RVOL <span class="sub">slightly below 1.2× threshold</span></span><span class="ev-val warn">1.19×</span><span class="ev-tag warn">WATCH</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">VWAP <span class="sub">price above</span></span><span class="ev-val pass">$245.66</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">ATR 14 <span class="sub">normal daily range</span></span><span class="ev-val" style="color:var(--info)">$6.42</span><span class="ev-tag info">INFO</span></div>
+      <div class="ev-group-head">Smart Money</div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">BOS <span class="sub">bullish break of structure</span></span><span class="ev-val pass">244.10</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">Demand OB <span class="sub">untouched $232–238</span></span><span class="ev-val pass">Active</span><span class="ev-tag pass">SUPPORT</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">Bullish FVG <span class="sub">$241.20–244.30</span></span><span class="ev-val pass">Unfilled</span><span class="ev-tag pass">CUSHION</span></div>
+      <div class="ev-row"><span class="ev-dot warn"></span><span class="ev-name">Supply OB <span class="sub">$268–272 overhead</span></span><span class="ev-val warn">Overhead</span><span class="ev-tag warn">RESIST</span></div>
+      <div class="ev-group-head">Context &amp; breadth</div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">Sector vs SPY <span class="sub">industrials outperforming</span></span><span class="ev-val pass">↑ +1.8%</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">Market regime <span class="sub">risk-on confirmed</span></span><span class="ev-val pass">Risk-On</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot info"></span><span class="ev-name">Breadth <span class="sub">SPX A/D line</span></span><span class="ev-val" style="color:var(--info)">72%</span><span class="ev-tag info">INFO</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 05 FUNDAMENTALS -->
+<section id="fund" class="sec">
+  <div class="sec-head"><span class="n">05</span><h2>Fundamentals</h2><span class="desc">Bull and bear thesis framed separately. Full table below.</span></div>
+  <div class="twocol">
+    <div class="col col-bull">
+      <div class="col-head"><h4>BULL DRIVERS</h4><span class="count">5 supporting</span></div>
+      <div class="col-row"><div><div class="what">Revenue growth +18.4% YoY</div><div class="why">Acceleration driven by defense backlog; visibility through 2027.</div></div><span class="v">+18.4%</span></div>
+      <div class="col-row"><div><div class="what">Forward P/E 19.2× vs sector 22.1×</div><div class="why">Quality compounder at a discount — earnings should expand multiple.</div></div><span class="v">19.2×</span></div>
+      <div class="col-row"><div><div class="what">Gross margin 38.6% expanding</div><div class="why">Mix shift toward higher-margin systems integration revenue.</div></div><span class="v">38.6%</span></div>
+      <div class="col-row"><div><div class="what">ROE 22.4% — capital efficient</div><div class="why">Management deploying capital above sector median 16.8%.</div></div><span class="v">22.4%</span></div>
+      <div class="col-row"><div><div class="what">Institutional ownership 81%</div><div class="why">Heavy smart-money presence signals fundamental conviction.</div></div><span class="v">81%</span></div>
+    </div>
+    <div class="col col-bear">
+      <div class="col-head"><h4>BEAR RISKS</h4><span class="count">3 against</span></div>
+      <div class="col-row"><div><div class="what">PEG ratio 1.42 — stretched premium</div><div class="why">Growth must materialize; any miss reprices the multiple sharply.</div></div><span class="v">1.42</span></div>
+      <div class="col-row"><div><div class="what">Earnings binary May 14</div><div class="why">19 days out. A miss on guidance could gap −8 to −12%. Size to survive.</div></div><span class="v">+19d</span></div>
+      <div class="col-row"><div><div class="what">D/E ratio 0.84 — moderate leverage</div><div class="why">Rising rate sensitivity; refinancing risk if rates stay elevated.</div></div><span class="v">0.84</span></div>
+    </div>
+  </div>
+  <div class="mtf-wrap">
+    <div class="card-head"><span class="t">All fundamental fields</span><span class="m">Key metrics · FUND 71/100</span></div>
+    <table class="mtf-table">
+      <thead><tr><th>Group</th><th>Metric</th><th>Value</th><th>Verdict</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>Valuation</td><td>P/E TTM</td><td>24.8×</td><td><span class="mtf-cell warn">Fair</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">vs sector 28.4 — modest discount</td></tr>
+        <tr><td>Valuation</td><td>Fwd P/E</td><td>19.2×</td><td><span class="mtf-cell pass">Cheap</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Below sector fwd 22.1×</td></tr>
+        <tr><td>Valuation</td><td>PEG</td><td>1.42</td><td><span class="mtf-cell warn">Stretched</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Growth premium; needs earnings beat</td></tr>
+        <tr><td>Valuation</td><td>P/S</td><td>4.1×</td><td><span class="mtf-cell warn">Fair</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Revenue multiple in-line</td></tr>
+        <tr><td>Valuation</td><td>P/B</td><td>6.8×</td><td><span class="mtf-cell warn">Premium</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Asset-light model commands premium</td></tr>
+        <tr><td>Growth</td><td>Revenue YoY</td><td>+18.4%</td><td><span class="mtf-cell pass">Strong</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Defense backlog driving acceleration</td></tr>
+        <tr><td>Growth</td><td>EPS YoY</td><td>+24.2%</td><td><span class="mtf-cell pass">Excellent</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Ahead of revenue growth — margin leverage</td></tr>
+        <tr><td>Profitability</td><td>Gross margin</td><td>38.6%</td><td><span class="mtf-cell pass">Good</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Expanding +1.8pp YoY</td></tr>
+        <tr><td>Profitability</td><td>EBITDA margin</td><td>22.8%</td><td><span class="mtf-cell pass">Strong</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Operating leverage intact</td></tr>
+        <tr><td>Profitability</td><td>ROE</td><td>22.4%</td><td><span class="mtf-cell pass">High return</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Above sector median 16.8%</td></tr>
+        <tr><td>Balance sheet</td><td>D/E ratio</td><td>0.84</td><td><span class="mtf-cell warn">Moderate</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Rate sensitive; watch refinancing</td></tr>
+        <tr><td>Balance sheet</td><td>Current ratio</td><td>1.42</td><td><span class="mtf-cell pass">Healthy</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Short-term obligations covered</td></tr>
+        <tr><td>Ownership</td><td>Institutional</td><td>81%</td><td><span class="mtf-cell pass">Heavy</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Smart money conviction</td></tr>
+        <tr><td>Ownership</td><td>Short float</td><td>2.8%</td><td><span class="mtf-cell pass">Low</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">No short squeeze dynamic</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 06 INTEL -->
+<section id="intel" class="sec">
+  <div class="sec-head"><span class="n">06</span><h2>Intel &amp; sentiment</h2><span class="desc">Catalyst flow, options, social — only what's actionable today.</span></div>
+  <div class="twocol">
+    <div class="col" style="border-left:none">
+      <div class="col-head" style="border-left:none"><h4 style="color:var(--ink-0)">OPTIONS &amp; FLOW</h4><span class="count">IV rank 38% · UOA detected</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">UOA <span class="sub">large OTM call sweep</span></span><span class="ev-val pass">✓ Detected</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">IV rank <span class="sub">normal · debit spreads OK</span></span><span class="ev-val" style="color:var(--info)">38%</span><span class="ev-tag info">INFO</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">P/C ratio <span class="sub">neutral-bullish</span></span><span class="ev-val pass">0.74</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot warn"></span><span class="ev-name">Earnings binary <span class="sub">May 14 · +19d</span></span><span class="ev-val warn">+19d</span><span class="ev-tag warn">RISK</span></div>
+      <div class="ev-row"><span class="ev-dot info"></span><span class="ev-name">Short float <span class="sub">no squeeze dynamic</span></span><span class="ev-val" style="color:var(--info)">2.8%</span><span class="ev-tag info">NEUTRAL</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">Insider sells <span class="sub">none 30d</span></span><span class="ev-val pass">None</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot pass"></span><span class="ev-name">StockTwits <span class="sub">watchlist growth</span></span><span class="ev-val pass">76% bull</span><span class="ev-tag pass">PASS</span></div>
+      <div class="ev-row"><span class="ev-dot info"></span><span class="ev-name">Congressional trades <span class="sub">none reported</span></span><span class="ev-val" style="color:var(--ink-2)">None</span><span class="ev-tag info">NEUTRAL</span></div>
+    </div>
+    <div class="intel-card">
+      <div class="col-head" style="border-left:none;border-bottom:1px solid var(--rule)"><h4 style="color:var(--ink-0)">NEWS · TODAY</h4><span class="count">76% bull · 4 items</span></div>
+      <div class="intel-row"><span class="intel-time">14:22</span><span class="intel-text"><b>Morgan Stanley</b> upgrades TICKR to OW, raises PT to $285. Cites defense budget tailwinds and AI-driven MRO demand surge.</span><span class="ev-tag pass">BULL</span></div>
+      <div class="intel-row"><span class="intel-time">11:48</span><span class="intel-text"><b>Reuters</b> — Pentagon confirms $2.1B contract award to TICKR subsidiary for next-gen propulsion systems. Q2 catalyst confirmed.</span><span class="ev-tag pass">BULL</span></div>
+      <div class="intel-row"><span class="intel-time">10:15</span><span class="intel-text"><b>Earnings</b> · Q1 print scheduled May 14 pre-market. Consensus EPS $2.48 (+18% YoY). Watch guidance revision for full year.</span><span class="ev-tag warn">WATCH</span></div>
+      <div class="intel-row"><span class="intel-time">09:32</span><span class="intel-text"><b>Supply chain note</b> — titanium shortage impacting margins at peers; TICKR confirmed forward contracts through Q3. Positive differentiation.</span><span class="ev-tag pass">BULL</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 07 MTF MATRIX -->
+<section id="mtf" class="sec">
+  <div class="sec-head"><span class="n">07</span><h2>Multi-timeframe matrix</h2><span class="desc">Timeframe alignment across trend, momentum and structure. Conflicts surface risk.</span></div>
+  <div class="mtf-wrap">
+    <table class="mtf-table">
+      <thead><tr><th>Timeframe</th><th>Trend</th><th>Momentum</th><th>Structure</th><th>EMA Stack</th><th>ADX</th><th>Bias</th></tr></thead>
+      <tbody>
+        <tr><td>Weekly</td><td><span class="mtf-cell pass">↑ Bull</span></td><td><span class="mtf-cell pass">Strong</span></td><td><span class="mtf-cell pass">HH / HL</span></td><td><span class="mtf-cell pass">8&gt;21&gt;50</span></td><td><span class="mtf-cell pass">34</span></td><td><span class="mtf-cell pass">BULL</span></td></tr>
+        <tr><td>Daily</td><td><span class="mtf-cell pass">↑ Bull</span></td><td><span class="mtf-cell pass">Healthy</span></td><td><span class="mtf-cell pass">BOS 244</span></td><td><span class="mtf-cell pass">8&gt;21&gt;50</span></td><td><span class="mtf-cell pass">28.7</span></td><td><span class="mtf-cell pass">BULL</span></td></tr>
+        <tr><td>4-Hour</td><td><span class="mtf-cell pass">↑ Bull</span></td><td><span class="mtf-cell warn">Consolidating</span></td><td><span class="mtf-cell pass">OB demand</span></td><td><span class="mtf-cell warn">8≈21&gt;50</span></td><td><span class="mtf-cell warn">22.1</span></td><td><span class="mtf-cell warn">NEUTRAL</span></td></tr>
+        <tr><td>1-Hour</td><td><span class="mtf-cell warn">Sideways</span></td><td><span class="mtf-cell warn">RSI 52</span></td><td><span class="mtf-cell pass">FVG below</span></td><td><span class="mtf-cell warn">Flat</span></td><td><span class="mtf-cell dim">18</span></td><td><span class="mtf-cell warn">WAIT</span></td></tr>
+        <tr><td>Sector D1</td><td><span class="mtf-cell pass">↑ Lead</span></td><td><span class="mtf-cell pass">RS 88</span></td><td><span class="mtf-cell pass">Sector outperf</span></td><td><span class="mtf-cell pass">Aligned</span></td><td><span class="mtf-cell dim">—</span></td><td><span class="mtf-cell pass">BULL</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 08 TRADE PLAN TIMELINE -->
+<section id="plan" class="sec">
+  <div class="sec-head"><span class="n">08</span><h2>Trade plan</h2><span class="desc">Timeline, decision lanes, and the full execution playbook.</span></div>
+  <div class="tl-wrap">
+    <div class="tl-head">
+      <h3>Plan timeline · price waypoints &amp; events</h3>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-2)">Days from today · above = price · below = events</span>
+    </div>
+    <div class="spine">
+      <div class="spine-line"></div>
+      <div class="tl-node stop" style="left:7%"></div>
+      <div class="tl-conn dn" style="left:7%"></div>
+      <div class="tl-label dn" style="left:7%;bottom:56px">
+        <span class="tl-lbl-name" style="color:var(--fail)">STOP</span>
+        <span class="tl-price down">$238.40</span>
+        <span class="tl-delta down">−3.4%</span>
+      </div>
+      <div class="tl-node entry" style="left:28%"></div>
+      <div class="tl-conn up" style="left:28%"></div>
+      <div class="tl-label up" style="left:28%;top:24px">
+        <span class="tl-lbl-name" style="color:var(--pass)">ENTRY</span>
+        <span class="tl-price up">$244–248</span>
+        <span class="tl-delta up">avg $246.50</span>
+      </div>
+      <div class="tl-node now" style="left:36%"></div>
+      <div class="tl-label dn" style="left:36%;bottom:56px">
+        <span class="tl-lbl-name">NOW</span>
+        <span class="tl-price">$247.83</span>
+      </div>
+      <div class="tl-node event" style="left:44%"></div>
+      <div class="tl-label dn" style="left:44%;bottom:56px">
+        <span class="tl-lbl-name">FOMC</span>
+        <span class="tl-price" style="font-size:11px;color:var(--ink-1)">+7d</span>
+      </div>
+      <div class="tl-node t1" style="left:60%"></div>
+      <div class="tl-conn up" style="left:60%"></div>
+      <div class="tl-label up" style="left:60%;top:24px">
+        <span class="tl-lbl-name" style="color:var(--warn)">T1 · TRIM 50%</span>
+        <span class="tl-price" style="color:var(--warn)">$262.50</span>
+        <span class="tl-delta up">+6.7%</span>
+      </div>
+      <div class="tl-node event" style="left:68%;border-color:var(--warn);background:color-mix(in oklch,var(--warn) 30%,var(--bg-0))"></div>
+      <div class="tl-label dn" style="left:68%;bottom:56px">
+        <span class="tl-lbl-name" style="color:var(--warn)">EARNINGS</span>
+        <span class="tl-price" style="font-size:11px;color:var(--warn)">+19d</span>
+      </div>
+      <div class="tl-node t2" style="left:82%"></div>
+      <div class="tl-conn up" style="left:82%"></div>
+      <div class="tl-label up" style="left:82%;top:24px">
+        <span class="tl-lbl-name" style="color:var(--info)">T2 · TRIM 25%</span>
+        <span class="tl-price" style="color:var(--info)">$278.00</span>
+        <span class="tl-delta up">+12.4%</span>
+      </div>
+      <div class="tl-node" style="left:95%;border-color:oklch(80% 0.14 290);background:color-mix(in oklch,oklch(80% 0.14 290) 25%,var(--bg-0))"></div>
+      <div class="tl-conn up" style="left:95%"></div>
+      <div class="tl-label up" style="left:95%;top:24px">
+        <span class="tl-lbl-name" style="color:oklch(80% 0.14 290)">T3 · CLOSE</span>
+        <span class="tl-price" style="color:oklch(80% 0.14 290)">$295.00</span>
+        <span class="tl-delta up">+19.3%</span>
+      </div>
+    </div>
+    <div class="timeaxis">
+      <div>TODAY</div><div>+4d</div><div>+7d</div><div>+10d</div><div>+14d</div><div>+18d</div><div>+22d</div><div>+25d</div>
+    </div>
+  </div>
+  <div class="lanes">
+    <div class="lane entry">
+      <div class="lane-head"><span class="h"><span class="pre">01</span>ENTRY · GREEN PATH</span><span class="prob">P 64%</span></div>
+      <div class="step"><span class="num-circle">1</span><div class="body"><div class="what">Wait for D1 close above <b>$246.00</b> with RVOL ≥ 1.2×.</div><div class="meta">TRIGGER · D1 close · volume confirm</div></div></div>
+      <div class="step"><span class="num-circle">2</span><div class="body"><div class="what">Scale in: ½ position at first pullback to <b>$244–246.50</b>.</div><div class="meta">LIMIT · 62sh · expected fill within 1–2 sessions</div></div></div>
+      <div class="step"><span class="num-circle">3</span><div class="body"><div class="what">Add remaining ½ if 1H higher-low prints in $244–248 zone.</div><div class="meta">LIMIT · 62sh · cancel if invalidated</div></div></div>
+      <div class="step"><span class="num-circle">4</span><div class="body"><div class="what">Hard stop <b>$238.40</b> immediately on first fill. GTC. No widening.</div><div class="meta">STOP · below demand OB — non-negotiable</div></div></div>
+    </div>
+    <div class="lane exit">
+      <div class="lane-head"><span class="h"><span class="pre">02</span>EXIT · MANAGE WIN</span><span class="prob">P win 38%</span></div>
+      <div class="step"><span class="num-circle">1</span><div class="body"><div class="what">Trim <b>50% at T1 $262.50</b>, move stop to break-even.</div><div class="meta">LIMIT · 62sh · lock +1.97R partial</div></div></div>
+      <div class="step"><span class="num-circle">2</span><div class="body"><div class="what">Trail remaining 50% on EMA21 (daily close basis).</div><div class="meta">DYNAMIC · re-evaluate every session</div></div></div>
+      <div class="step"><span class="num-circle">3</span><div class="body"><div class="what">Hard exit on <b>T3 $295</b> or first daily close below EMA21.</div><div class="meta">LIMIT · 62sh · realize up to +5.99R</div></div></div>
+      <div class="step"><span class="num-circle">4</span><div class="body"><div class="what">Close entire position <b>2 days before</b> earnings May 14 if T1 not hit.</div><div class="meta">CALENDAR · earnings binary · protect capital</div></div></div>
+    </div>
+    <div class="lane risk">
+      <div class="lane-head"><span class="h"><span class="pre">03</span>RISK · INVALIDATION</span><span class="prob">P 26%</span></div>
+      <div class="step"><span class="num-circle">1</span><div class="body"><div class="what">Stop hit at <b>$238.40</b> — exit immediately. No averaging.</div><div class="meta">STOP · −$9.90/sh · loss −$1,228</div></div></div>
+      <div class="step"><span class="num-circle">2</span><div class="body"><div class="what">Daily close below <b>$241</b> (FVG low) before entry fills — cancel all orders.</div><div class="meta">CANCEL · structure broken · re-evaluate</div></div></div>
+      <div class="step"><span class="num-circle">3</span><div class="body"><div class="what">VIX spike above 22 or SPY gap down &gt;1.5% — reduce size 50% or stay flat.</div><div class="meta">MACRO · regime change · de-risk</div></div></div>
+      <div class="step"><span class="num-circle">4</span><div class="body"><div class="what">Earnings miss reaction gaps below $238 — no add. Take the loss.</div><div class="meta">BINARY · max pain defined before entry</div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 09 RISK -->
+<section id="risk" class="sec">
+  <div class="sec-head"><span class="n">09</span><h2>Risk &amp; sizing</h2><span class="desc">Portfolio heat, correlation exposure, position sizing on $250k account.</span></div>
+  <div class="risk-grid" style="margin-bottom:16px">
+    <div class="bt-card"><span class="lbl">Portfolio heat now</span><div class="bt-val" style="color:var(--warn)">3.20%</div></div>
+    <div class="bt-card"><span class="lbl">Heat after entry</span><div class="bt-val" style="color:var(--warn)">3.95%</div></div>
+    <div class="bt-card"><span class="lbl">Hard cap</span><div class="bt-val" style="color:var(--ink-2)">6.00%</div></div>
+    <div class="bt-card"><span class="lbl">Suggested shares</span><div class="bt-val" style="color:var(--pass)">124 sh</div></div>
+    <div class="bt-card"><span class="lbl">Notional</span><div class="bt-val">$30,650</div></div>
+    <div class="bt-card"><span class="lbl">Risk amount</span><div class="bt-val">$1,228</div></div>
+  </div>
+  <div class="mtf-wrap">
+    <div class="card-head"><span class="t">Correlation · open positions</span><span class="m">TICKR vs book</span></div>
+    <table class="mtf-table">
+      <thead><tr><th>Ticker</th><th>Corr to TICKR</th><th>Flag</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr><td>RTX</td><td>0.71</td><td><span class="mtf-cell fail">High</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Trim RTX 25% before entering TICKR</td></tr>
+        <tr><td>SOMA</td><td>0.58</td><td><span class="mtf-cell warn">Moderate</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">Monitor — acceptable if heat &lt; 4%</td></tr>
+        <tr><td>AURA</td><td>0.34</td><td><span class="mtf-cell pass">Low</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">No action needed</td></tr>
+        <tr><td>KAIO</td><td>0.29</td><td><span class="mtf-cell pass">Low</span></td><td style="color:var(--ink-2);font-size:11px;text-transform:none;letter-spacing:0">No action needed</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 10 BACKTEST -->
+<section id="backtest" class="sec">
+  <div class="sec-head"><span class="n">10</span><h2>Backtest</h2><span class="desc">142 historical occurrences of this setup. Edge is real — but know the distribution.</span></div>
+  <div class="bt-grid" style="margin-bottom:18px">
+    <div class="bt-card"><span class="lbl">Win rate</span><div class="bt-val" style="color:var(--pass)">64.8%</div></div>
+    <div class="bt-card"><span class="lbl">Expectancy</span><div class="bt-val" style="color:var(--pass)">+0.78R</div></div>
+    <div class="bt-card"><span class="lbl">Profit factor</span><div class="bt-val" style="color:var(--pass)">1.84</div></div>
+    <div class="bt-card"><span class="lbl">Sharpe ratio</span><div class="bt-val" style="color:var(--warn)">1.62</div></div>
+    <div class="bt-card"><span class="lbl">Avg win</span><div class="bt-val" style="color:var(--pass)">+2.14R</div></div>
+    <div class="bt-card"><span class="lbl">Avg loss</span><div class="bt-val" style="color:var(--fail)">−1.0R</div></div>
+    <div class="bt-card"><span class="lbl">Avg hold (win)</span><div class="bt-val">11.2d</div></div>
+    <div class="bt-card"><span class="lbl">Samples</span><div class="bt-val">142</div></div>
+  </div>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);margin-bottom:12px">Monthly returns · last 12 months</div>
+  <div class="monthly-grid">
+    <div class="mo-card" style="background:color-mix(in oklch,var(--pass) 14%,var(--bg-1));border:1px solid color-mix(in oklch,var(--pass) 25%,var(--rule))"><div class="mo-name">MAY</div><div class="mo-val" style="color:var(--pass)">+8.4%</div></div>
+    <div class="mo-card" style="background:color-mix(in oklch,var(--pass) 10%,var(--bg-1));border:1px solid color-mix(in oklch,var(--pass) 20%,var(--rule))"><div class="mo-name">JUN</div><div class="mo-val" style="color:var(--pass)">+3.2%</div></div>
+    <div class="mo-card" style="background:color-mix(in oklch,var(--fail) 12%,var(--bg-1));border:1px solid color-mix(in oklch,var(--fail) 22%,var(--rule))"><div class="mo-name">JUL</div><div class="mo-val" style="color:var(--fail)">−1.8%</div></div>
+    <div class="mo-card" style="background:color-mix(in oklch,var(--pass) 16%,var(--bg-1));border:1px solid color-mix(in oklch,var(--pass) 28%,var(--rule))"><div class="mo-name">AUG</div><div class="mo-val" style="color:var(--pass)">+11.2%</div></div>
+    <div class="mo-card" style="background:color-mix(in oklch,var(--pass) 8%,var(--bg-1));border:1px solid color-mix(in oklch,var(--pass) 16%,var(--rule))"><div class="mo-name">SEP</div><div class="mo-val" style="color:var(--pass)">+2.1%</div></div>
+    <div class="mo-card" style="background:color-mix(in oklch,var(--fail) 14%,var(--bg-1));border:1px solid color-mix(in oklch,var(--fail) 24%,var(--rule))"><div class="mo-name">OCT</div><div class="mo-val" style="color:var(--fail)">−4.4%</div></div>
+    <div class="mo-card" style="background:color-mix(in oklch,var(--pass) 18%,var(--bg-1));border:1px solid color-mix(in oklch,var(--pass) 30%,var(--rule))"><div class="mo-name">NOV</div><div class="mo-val" style="color:var(--pass)">+14.8%</div></div>
+    <div class="mo-card" style="background:color-mix(in oklch,var(--pass) 10%,var(--bg-1));border:1px solid color-mix(in oklch,var(--pass) 20%,var(--rule))"><div class="mo-name">DEC</div><div class="mo-val" style="color:var(--pass)">+3.8%</div></div>
+    <div class="mo-card" style="background:color-mix(in oklch,var(--fail) 10%,var(--bg-1));border:1px solid color-mix(in oklch,var(--fail) 20%,var(--rule))"><div class="mo-name">JAN</div><div class="mo-val" style="color:var(--fail)">−2.2%</div></div>
+    <div class="mo-card" style="background:color-mix(in oklch,var(--pass) 12%,var(--bg-1));border:1px solid color-mix(in oklch,var(--pass) 22%,var(--rule))"><div class="mo-name">FEB</div><div class="mo-val" style="color:var(--pass)">+6.4%</div></div>
+    <div class="mo-card" style="background:color-mix(in oklch,var(--pass) 14%,var(--bg-1));border:1px solid color-mix(in oklch,var(--pass) 26%,var(--rule))"><div class="mo-name">MAR</div><div class="mo-val" style="color:var(--pass)">+9.1%</div></div>
+    <div class="mo-card" style="background:color-mix(in oklch,var(--pass) 8%,var(--bg-1));border:1px solid color-mix(in oklch,var(--pass) 16%,var(--rule))"><div class="mo-name">APR</div><div class="mo-val" style="color:var(--pass)">+2.8%</div></div>
+  </div>
+</section>
+
+<!-- 11 NOTES -->
+<section id="notes" class="sec">
+  <div class="sec-head"><span class="n">11</span><h2>Journal</h2><span class="desc">Trade thesis, sizing rationale, what must go wrong for you to be wrong.</span></div>
+  <textarea id="note-draft" placeholder="Why this trade? Why this size? What invalidates the thesis?&#10;&#10;⌘↵ to save"></textarea>
+  <button class="save-btn" onclick="saveNote()">SAVE NOTE ⌘↵</button>
+  <div id="note-list" style="margin-top:22px"></div>
+</section>
+
+<div class="statusbar">
+  <span>TICKR · SWING DESK · D1 analysis · Apr 25 2026</span>
+  <span>·</span>
+  <span><kbd>G</kbd> then section number to jump</span>
+  <span>·</span>
+  <span><kbd>↑↓</kbd> scroll between sections</span>
+</div>
+
+</main>
+
+<script>
+// ── Scroll spy ──────────────────────────────────────────────────
+const sections = document.querySelectorAll('.sec');
+const navLinks = document.querySelectorAll('.secnav a');
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      navLinks.forEach(l => l.classList.remove('on'));
+      const active = document.querySelector(`.secnav a[href="#${e.target.id}"]`);
+      if (active) {
+        active.classList.add('on');
+        active.scrollIntoView({behavior:'auto',inline:'center',block:'nearest'});
+      }
+    }
+  });
+}, {rootMargin:'-30% 0px -60% 0px', threshold:0});
+sections.forEach(s => observer.observe(s));
+
+// ── Chart (SVG candles) ─────────────────────────────────────────
+(function(){
+  // Generate mock candle data
+  const candles = [];
+  let p = 215;
+  for(let i=0;i<60;i++){
+    const open = p;
+    const move = (Math.random()-0.44)*8;
+    const close = Math.max(195, Math.min(260, p + move));
+    const high = Math.max(open,close) + Math.random()*3;
+    const low  = Math.min(open,close) - Math.random()*3;
+    candles.push({open,close,high,low,date:i});
+    p = close;
+  }
+  // Force last price near 247.83
+  candles[candles.length-1].close = 247.83;
+
+  const svg = document.getElementById('price-chart');
+  const W=720, H=360, pL=52, pR=64, pT=20, pB=36;
+  const cW = W-pL-pR, cH = H-pT-pB;
+
+  const allH = candles.map(c=>c.high), allL = candles.map(c=>c.low);
+  const maxP = Math.max(...allH)*1.005, minP = Math.min(...allL)*0.995;
+  const yS = v => pT + ((maxP-v)/(maxP-minP))*cH;
+  const xS = i => pL + (i/(candles.length-1))*cW;
+  const bw = (cW/candles.length)*0.55;
+
+  let html = '';
+
+  // Grid
+  for(let i=0;i<=4;i++){
+    const y = pT + (i/4)*cH;
+    const price = maxP - (i/4)*(maxP-minP);
+    html += `<line x1="${pL}" y1="${y}" x2="${W-pR}" y2="${y}" stroke="oklch(20% 0.012 250)" stroke-dasharray="2 4"/>`;
+    html += `<text x="${pL-6}" y="${y+3}" font-size="9.5" fill="oklch(42% 0.01 250)" text-anchor="end" font-family="JetBrains Mono, monospace">${price.toFixed(0)}</text>`;
+  }
+
+  // EMA21
+  const ema21=[], k=2/22;
+  candles.forEach((c,i)=>{ ema21.push(i===0?c.close:c.close*k+ema21[i-1]*(1-k)); });
+  const emaPath = ema21.map((v,i)=>`${i===0?'M':'L'}${xS(i).toFixed(1)},${yS(v).toFixed(1)}`).join(' ');
+  html += `<path d="${emaPath}" fill="none" stroke="oklch(78% 0.16 75)" stroke-width="1.5" opacity="0.8"/>`;
+
+  // SMA50
+  const sma50Path = candles.map((c,i)=>{
+    if(i<49)return '';
+    const avg = candles.slice(i-49,i+1).reduce((s,x)=>s+x.close,0)/50;
+    return `${i===49?'M':'L'}${xS(i).toFixed(1)},${yS(avg).toFixed(1)}`;
+  }).join(' ');
+  html += `<path d="${sma50Path}" fill="none" stroke="oklch(74% 0.12 220)" stroke-width="1.5" opacity="0.7"/>`;
+
+  // Candles
+  candles.forEach((c,i) => {
+    const up = c.close >= c.open;
+    const col = up ? 'oklch(74% 0.16 145)' : 'oklch(68% 0.22 28)';
+    const x = xS(i);
+    html += `<line x1="${x}" y1="${yS(c.high)}" x2="${x}" y2="${yS(c.low)}" stroke="${col}" stroke-width="1"/>`;
+    const oy = yS(Math.max(c.open,c.close)), cy2 = Math.max(1,yS(c.open)-yS(c.close));
+    html += `<rect x="${(x-bw/2).toFixed(1)}" y="${oy.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.abs(yS(c.open)-yS(c.close)).toFixed(1)||1}" fill="${col}" opacity="${up?0.85:1}"/>`;
+  });
+
+  // Key levels
+  const levels = [
+    [295.00, 'T3', 'oklch(80% 0.14 290)'],
+    [278.00, 'T2', 'oklch(74% 0.12 220)'],
+    [262.50, 'T1', 'oklch(80% 0.15 80)'],
+    [247.83, '247.83', 'oklch(96% 0.005 90)', true],
+    [246.50, 'ENTRY', 'oklch(74% 0.16 145)'],
+    [238.40, 'STOP', 'oklch(68% 0.22 28)'],
+  ];
+  levels.forEach(([price, label, color, nowLine])=>{
+    if(price < minP || price > maxP) return;
+    const y = yS(price);
+    html += `<line x1="${pL}" y1="${y}" x2="${W-pR}" y2="${y}" stroke="${color}" stroke-width="${nowLine?1.5:1}" stroke-dasharray="${nowLine?'2 2':'4 4'}" opacity="0.8"/>`;
+    const rw = 52, rx = W-pR+2;
+    html += `<rect x="${rx}" y="${y-8}" width="${rw}" height="16" fill="${color}" fill-opacity="${nowLine?1:0.18}" rx="2"/>`;
+    html += `<text x="${rx+rw/2}" y="${y+4}" font-size="9.5" font-family="JetBrains Mono, monospace" font-weight="${nowLine?700:500}" text-anchor="middle" fill="${nowLine?'oklch(12% 0.008 250)':color}">${label}</text>`;
+  });
+
+  // Date labels
+  [0, 15, 30, 45, 59].forEach(i=>{
+    const d = new Date(2026,0,26+i);
+    const lbl = `${d.toLocaleString('en',{month:'short'})} ${d.getDate()}`;
+    html += `<text x="${xS(i)}" y="${H-pB+18}" font-size="9.5" fill="oklch(42% 0.01 250)" text-anchor="middle" font-family="JetBrains Mono, monospace">${lbl}</text>`;
+  });
+
+  svg.innerHTML = html;
+
+  // Candle/line toggle
+  document.getElementById('btn-cdl')?.addEventListener('click', function(){
+    this.classList.add('on'); document.getElementById('btn-line')?.classList.remove('on');
+  });
+  document.getElementById('btn-line')?.addEventListener('click', function(){
+    this.classList.add('on'); document.getElementById('btn-cdl')?.classList.remove('on');
+  });
+})();
+
+// ── Notes ───────────────────────────────────────────────────────
+function saveNote(){
+  const ta = document.getElementById('note-draft');
+  const txt = ta.value.trim();
+  if(!txt) return;
+  const key = 'notes_TICKR';
+  const entries = JSON.parse(localStorage.getItem(key)||'[]');
+  entries.unshift({ts:new Date().toISOString(), text:txt});
+  localStorage.setItem(key, JSON.stringify(entries));
+  ta.value='';
+  renderNotes();
+}
+function renderNotes(){
+  const key='notes_TICKR';
+  const entries = JSON.parse(localStorage.getItem(key)||'[]');
+  const list = document.getElementById('note-list');
+  if(!entries.length){list.innerHTML='<div style="font-family:JetBrains Mono,monospace;font-size:11px;color:var(--ink-3);padding:8px 0">No notes yet.</div>';return;}
+  list.innerHTML=entries.map(e=>`<div class="note-entry"><div class="ts">${new Date(e.ts).toLocaleString()}</div><div class="txt">${e.text.replace(/\n/g,'<br>')}</div></div>`).join('');
+}
+document.getElementById('note-draft').addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter')saveNote();});
+renderNotes();
+</script>
+</body>
+</html>

@@ -1,0 +1,824 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-density="default">
+<head>
+<meta charset="utf-8">
+<title>SwingTrade — Terminal</title>
+<style>
+  @font-face { font-family: 'Aptos'; src: local('Aptos'), local('Aptos Display'); font-weight: 100 900; font-display: swap; }
+  :root {
+    --bg-0: oklch(13% 0.012 250);
+    --bg-1: oklch(16% 0.012 250);
+    --bg-2: oklch(19% 0.014 250);
+    --bg-3: oklch(23% 0.014 250);
+    --ink-0: oklch(96% 0.005 90);
+    --ink-1: oklch(82% 0.006 90);
+    --ink-2: oklch(62% 0.008 90);
+    --ink-3: oklch(42% 0.01 250);
+    --rule:  oklch(28% 0.012 250);
+    --rule-2:oklch(34% 0.014 250);
+    --accent:    oklch(78% 0.16 75);
+    --accent-2:  oklch(76% 0.13 215);
+    --accent-3:  oklch(72% 0.18 320);
+    --bull:  oklch(74% 0.16 145);
+    --bear:  oklch(68% 0.22 28);
+    --warn:  oklch(80% 0.16 80);
+    --info:  oklch(76% 0.13 215);
+    --grid:  oklch(22% 0.012 250);
+    --row-h: 30px;
+    --pad: 12px;
+    --font: 'Aptos', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  [data-theme="light"] {
+    --bg-0: oklch(98% 0.004 90);
+    --bg-1: oklch(96% 0.005 90);
+    --bg-2: oklch(94% 0.006 90);
+    --bg-3: oklch(91% 0.008 90);
+    --ink-0: oklch(15% 0.012 250);
+    --ink-1: oklch(28% 0.012 250);
+    --ink-2: oklch(45% 0.012 250);
+    --ink-3: oklch(60% 0.012 250);
+    --rule: oklch(85% 0.008 90);
+    --rule-2: oklch(78% 0.01 90);
+    --grid: oklch(92% 0.005 90);
+    --bull: oklch(54% 0.16 145);
+    --bear: oklch(56% 0.22 28);
+  }
+  [data-density="compact"] { --row-h: 26px; --pad: 8px; }
+  [data-density="comfortable"] { --row-h: 36px; --pad: 16px; }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg-0); color: var(--ink-0); font-family: var(--font); font-size: 13px; -webkit-font-smoothing: antialiased; min-height: 100vh; overflow-x: hidden; }
+  .num { font-variant-numeric: tabular-nums; font-feature-settings: 'zero'; }
+  .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-2); font-weight: 500; }
+  .up { color: var(--bull); } .down { color: var(--bear); } .dim { color: var(--ink-2); } .muted { color: var(--ink-3); }
+  button { font-family: inherit; cursor: pointer; }
+  a { color: inherit; text-decoration: none; }
+
+  /* TOP BAR */
+  .topbar { position: sticky; top: 0; z-index: 50; background: var(--bg-0); border-bottom: 1px solid var(--rule); display: grid; grid-template-columns: 240px 1fr auto; align-items: center; height: 44px; padding: 0 14px; gap: 14px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.01em; }
+  .brand-mark { width: 22px; height: 22px; display: grid; place-items: center; background: var(--accent); color: var(--bg-0); font-weight: 800; font-size: 13px; border-radius: 3px; }
+  .brand-name { font-size: 13.5px; }
+  .brand-sub { font-size: 10px; color: var(--ink-2); letter-spacing: 0.06em; }
+  .ticker-tape { display: flex; gap: 22px; align-items: center; overflow: hidden; height: 44px; font-size: 11.5px; mask-image: linear-gradient(90deg, transparent 0, #000 5%, #000 95%, transparent 100%); }
+  .tape-inner { display: flex; gap: 22px; animation: tape 90s linear infinite; white-space: nowrap; }
+  @keyframes tape { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  .tt-item { display: inline-flex; gap: 6px; align-items: baseline; }
+  .tt-sym { color: var(--ink-0); font-weight: 600; }
+  .tt-sep { color: var(--rule-2); }
+  .topbar-right { display: flex; gap: 10px; align-items: center; font-size: 11px; color: var(--ink-2); }
+  .clock-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bull); box-shadow: 0 0 8px var(--bull); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .icon-btn { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--rule); border-radius: 4px; background: var(--bg-1); color: var(--ink-1); }
+  .icon-btn:hover { background: var(--bg-2); color: var(--ink-0); }
+
+  /* MACRO STRIP */
+  .macro { border-bottom: 1px solid var(--rule); background: linear-gradient(180deg, var(--bg-1), var(--bg-0)); display: grid; grid-template-columns: repeat(8, 1fr) auto; height: 64px; }
+  .macro-cell { padding: 8px 14px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 2px; justify-content: center; min-width: 0; position: relative; }
+  .mc-l { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--ink-3); font-weight: 600; }
+  .mc-v { font-size: 16px; font-weight: 600; color: var(--ink-0); }
+  .mc-c { font-size: 10.5px; }
+  .macro-spark { position: absolute; right: 8px; bottom: 6px; width: 50px; height: 16px; opacity: 0.85; }
+  .regime-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 22px; gap: 4px; border-left: 1px solid var(--rule); }
+  .regime-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bull); box-shadow: 0 0 12px var(--bull); }
+  .regime-dot.warn { background: var(--warn); box-shadow: 0 0 12px var(--warn); }
+  .regime-dot.bear { background: var(--bear); box-shadow: 0 0 12px var(--bear); }
+  .regime-name { font-weight: 700; letter-spacing: 0.1em; font-size: 11px; color: var(--bull); }
+  .regime-name.warn { color: var(--warn); } .regime-name.bear { color: var(--bear); }
+  .regime-meta { font-size: 9.5px; color: var(--ink-2); letter-spacing: 0.08em; }
+
+  /* SHELL: rail + main */
+  .shell { display: grid; grid-template-columns: 56px 1fr; min-height: calc(100vh - 44px - 64px - 32px); }
+  .rail { border-right: 1px solid var(--rule); background: var(--bg-0); padding: 12px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .rail-btn { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 6px; cursor: pointer; color: var(--ink-2); position: relative; user-select: none; }
+  .rail-btn:hover { background: var(--bg-2); color: var(--ink-0); }
+  .rail-btn.on { background: color-mix(in oklch, var(--accent) 18%, transparent); color: var(--accent); }
+  .rail-btn.on::before { content: ''; position: absolute; left: -10px; top: 50%; transform: translateY(-50%); width: 3px; height: 22px; background: var(--accent); border-radius: 0 2px 2px 0; }
+  .rail-btn .icon { font-size: 16px; }
+  .rail-btn .lbl-tip { position: absolute; left: 52px; top: 50%; transform: translateY(-50%); padding: 5px 10px; background: var(--bg-3); color: var(--ink-0); font-size: 11px; border-radius: 4px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 100ms; border: 1px solid var(--rule-2); z-index: 100; }
+  .rail-btn:hover .lbl-tip { opacity: 1; }
+  .rail-divider { width: 24px; height: 1px; background: var(--rule); margin: 6px 0; }
+
+  main.work { padding: 14px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+
+  /* TOP GRID: hero left, panels right */
+  .grid-top { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 14px; }
+  .right-stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+  .panel { background: var(--bg-1); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .panel-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+  .panel-title { font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-1); font-weight: 600; }
+  .panel-meta { font-size: 10px; color: var(--ink-2); }
+  .panel-body { padding: 14px; }
+  .panel-body.np { padding: 0; }
+
+  /* HERO */
+  .hero { background: var(--bg-1); border: 1px solid var(--rule); border-radius: 6px; padding: 18px 20px; cursor: pointer; transition: border-color 120ms; position: relative; }
+  .hero:hover { border-color: var(--rule-2); }
+  .hero-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; gap: 14px; }
+  .hero-id { display: flex; gap: 14px; align-items: baseline; }
+  .hero-sym { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
+  .hero-name { font-size: 11px; color: var(--ink-2); margin-top: 4px; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hero-tags { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
+  .hero-tag { font-size: 9.5px; padding: 2px 8px; border-radius: 999px; background: var(--bg-3); color: var(--ink-1); border: 1px solid var(--rule); letter-spacing: 0.08em; font-weight: 500; text-transform: uppercase; }
+  .hero-tag.bull { background: color-mix(in oklch, var(--bull) 16%, transparent); color: var(--bull); border-color: color-mix(in oklch, var(--bull) 35%, transparent); }
+  .hero-tag.warn { background: color-mix(in oklch, var(--warn) 16%, transparent); color: var(--warn); border-color: color-mix(in oklch, var(--warn) 35%, transparent); }
+  .hero-tag.info { background: color-mix(in oklch, var(--info) 16%, transparent); color: var(--info); border-color: color-mix(in oklch, var(--info) 35%, transparent); }
+  .hero-pricerow { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .hero-price { font-size: 28px; font-weight: 700; line-height: 1; }
+  .hero-chg { font-size: 12px; font-weight: 700; }
+
+  .hero-content { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr); gap: 18px; }
+  .hero-chart-wrap { display: flex; flex-direction: column; gap: 10px; }
+  .hero-chart { background: var(--bg-2); border: 1px solid var(--rule); border-radius: 5px; height: 240px; position: relative; overflow: hidden; }
+  .hero-chart svg { display: block; width: 100%; height: 100%; }
+
+  .ruler { background: var(--bg-2); border: 1px solid var(--rule); border-radius: 5px; padding: 18px 14px 12px; }
+  .ruler-track { position: relative; height: 28px; }
+  .ruler-line { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); height: 4px; border-radius: 2px; background: linear-gradient(90deg, color-mix(in oklch, var(--bear) 60%, transparent) 0%, color-mix(in oklch, var(--bear) 60%, transparent) 14%, var(--ink-3) 14%, var(--ink-3) 26%, var(--bull) 26%, var(--bull) 38%, var(--info) 100%); }
+  .rmark { position: absolute; top: 50%; transform: translate(-50%, -50%); }
+  .rmark .dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ink-2); background: var(--bg-1); }
+  .rmark.stop  .dot { border-color: var(--bear); background: color-mix(in oklch, var(--bear) 30%, var(--bg-1)); }
+  .rmark.entry .dot { border-color: var(--bull); background: color-mix(in oklch, var(--bull) 30%, var(--bg-1)); }
+  .rmark.now   .dot { width: 18px; height: 18px; background: var(--ink-0); border-color: var(--ink-0); box-shadow: 0 0 0 4px color-mix(in oklch, var(--ink-0) 18%, transparent), 0 0 12px var(--bull); }
+  .rmark.t1    .dot { border-color: var(--accent); background: color-mix(in oklch, var(--accent) 30%, var(--bg-1)); }
+  .rmark.t2    .dot { border-color: var(--info); background: color-mix(in oklch, var(--info) 30%, var(--bg-1)); }
+  .rmark .lbl-name { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; white-space: nowrap; }
+  .rmark .lbl-px { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .rmark.stop .lbl-name { color: var(--bear); }
+  .rmark.entry .lbl-name { color: var(--bull); }
+  .rmark.t1 .lbl-name { color: var(--accent); }
+  .rmark.t2 .lbl-name { color: var(--info); }
+
+  /* score gauges */
+  .gauges { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .gauge { background: var(--bg-2); border: 1px solid var(--rule); border-radius: 5px; padding: 14px 10px 10px; display: flex; flex-direction: column; align-items: center; }
+  .gauge-svg { width: 64px; height: 64px; }
+  .gauge-val { font-size: 18px; font-weight: 700; margin-top: -38px; }
+  .gauge-lbl { font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); margin-top: 18px; font-weight: 600; }
+
+  .why-list { background: var(--bg-2); border: 1px solid var(--rule); border-radius: 5px; padding: 12px 14px; flex: 1; }
+  .why-head { font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 8px; font-weight: 600; }
+  .why-row { display: grid; grid-template-columns: 16px 1fr; gap: 8px; padding: 5px 0; font-size: 12px; }
+  .why-row.ok::before { content: '✓'; color: var(--bull); font-weight: 700; }
+  .why-row.warn::before { content: '!'; color: var(--warn); font-weight: 700; }
+  .why-row.no::before { content: '✗'; color: var(--bear); font-weight: 700; }
+
+  /* SECTOR HEATMAP */
+  .heatmap { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 4px; padding: 10px; }
+  .hm-cell { padding: 8px; border-radius: 4px; border: 1px solid transparent; cursor: pointer; transition: transform 120ms; }
+  .hm-cell:hover { transform: translateY(-1px); border-color: var(--rule-2); }
+  .hm-name { font-size: 9px; letter-spacing: 0.06em; color: var(--ink-1); font-weight: 600; text-transform: uppercase; }
+  .hm-val { font-size: 14px; font-weight: 700; margin-top: 2px; }
+  .hm-sub { font-size: 9px; color: var(--ink-2); margin-top: 1px; }
+
+  /* INTEL FEED */
+  .intel-row { display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--rule); font-size: 11.5px; align-items: center; }
+  .intel-row:last-child { border-bottom: none; }
+  .intel-time { font-size: 10px; color: var(--ink-3); }
+  .intel-text { color: var(--ink-1); line-height: 1.4; }
+  .intel-text b { color: var(--ink-0); font-weight: 600; }
+  .intel-text .src { color: var(--accent); font-weight: 600; }
+  .intel-tag { font-size: 9px; padding: 2px 6px; border-radius: 3px; letter-spacing: 0.08em; font-weight: 600; text-transform: uppercase; }
+  .intel-tag.bull { color: var(--bull); background: color-mix(in oklch, var(--bull) 16%, transparent); }
+  .intel-tag.bear { color: var(--bear); background: color-mix(in oklch, var(--bear) 16%, transparent); }
+  .intel-tag.warn { color: var(--warn); background: color-mix(in oklch, var(--warn) 16%, transparent); }
+  .intel-tag.info { color: var(--info); background: color-mix(in oklch, var(--info) 16%, transparent); }
+
+  /* WATCHLIST */
+  .wl { background: var(--bg-1); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .wl-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+  .wl-tabs { display: flex; gap: 4px; }
+  .wl-tab { padding: 6px 12px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); cursor: pointer; border-radius: 4px; user-select: none; font-weight: 600; }
+  .wl-tab.on { background: color-mix(in oklch, var(--accent) 18%, transparent); color: var(--accent); }
+  .wl-tab:hover:not(.on) { color: var(--ink-0); }
+  .wl-tab .ct { font-size: 10px; color: var(--ink-3); margin-left: 6px; }
+  .wl-tab.on .ct { color: var(--accent); }
+  .wl-meta { font-size: 11px; color: var(--ink-2); }
+
+  table.wl-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.wl-table thead th { padding: 10px 12px; text-align: left; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); background: var(--bg-2); border-bottom: 1px solid var(--rule-2); font-weight: 600; user-select: none; cursor: pointer; }
+  table.wl-table thead th.r { text-align: right; }
+  table.wl-table thead th.c { text-align: center; }
+  table.wl-table tbody tr { cursor: pointer; transition: background 80ms; height: var(--row-h); }
+  table.wl-table tbody tr:hover { background: var(--bg-2); }
+  table.wl-table tbody td { padding: 0 12px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  table.wl-table tbody tr:last-child td { border-bottom: none; }
+  .wl-sym { font-size: 13px; font-weight: 800; letter-spacing: -0.01em; }
+  .wl-sect { font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.06em; text-transform: uppercase; }
+  .wl-setup { font-size: 11px; color: var(--ink-1); }
+  .wl-px { font-size: 13px; font-weight: 700; }
+  .wl-chg { font-size: 12px; font-weight: 700; }
+  .wl-stage { font-size: 9.5px; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.12em; font-weight: 700; text-transform: uppercase; }
+  .wl-stage.BUY { color: var(--bull); background: color-mix(in oklch, var(--bull) 18%, transparent); }
+  .wl-stage.WATCH { color: var(--warn); background: color-mix(in oklch, var(--warn) 18%, transparent); }
+  .wl-stage.SELL { color: var(--bear); background: color-mix(in oklch, var(--bear) 18%, transparent); }
+  .wl-stage.AVOID { color: var(--ink-3); background: var(--bg-2); }
+  .wl-score { font-size: 14px; font-weight: 800; min-width: 28px; display: inline-block; }
+  .wl-rr { font-size: 12px; font-weight: 700; }
+  .wl-rr.good { color: var(--bull); } .wl-rr.fair { color: var(--warn); } .wl-rr.bad { color: var(--ink-3); }
+
+  /* sparkline cell */
+  .sp { display: inline-block; vertical-align: middle; }
+  .sp svg { display: block; }
+
+  /* mini-ruler cell */
+  .mini-ruler { width: 110px; height: 12px; position: relative; background: var(--bg-3); border-radius: 2px; }
+  .mr-stop { position: absolute; left: 0; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, color-mix(in oklch, var(--bear) 14%, transparent) 0 4px, color-mix(in oklch, var(--bear) 22%, transparent) 4px 8px); }
+  .mr-zone { position: absolute; top: 0; bottom: 0; background: color-mix(in oklch, var(--bull) 22%, transparent); border-left: 1px solid var(--bull); border-right: 1px solid var(--bull); }
+  .mr-tick { position: absolute; top: -2px; bottom: -2px; width: 1.5px; }
+  .mr-t1 { background: var(--accent); } .mr-t2 { background: var(--info); }
+  .mr-now { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink-0); box-shadow: 0 0 0 1.5px color-mix(in oklch, var(--ink-0) 30%, transparent); border-radius: 1px; }
+
+  /* STATUS BAR */
+  .statusbar { display: flex; gap: 14px; align-items: center; padding: 8px 14px; height: 32px; border-top: 1px solid var(--rule); background: var(--bg-1); font-size: 10.5px; color: var(--ink-2); position: sticky; bottom: 0; z-index: 30; }
+  .sb-ok { color: var(--bull); } .sb-warn { color: var(--warn); }
+  kbd { padding: 1px 5px; border: 1px solid var(--rule-2); border-radius: 2px; color: var(--ink-1); font-size: 10px; font-family: inherit; }
+
+  /* TWEAKS PANEL */
+  .tweaks-fab { position: fixed; bottom: 50px; right: 18px; padding: 8px 14px; background: var(--bg-2); border: 1px solid var(--rule-2); color: var(--ink-1); border-radius: 5px; cursor: pointer; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; z-index: 100; }
+  .tweaks-fab:hover { color: var(--ink-0); border-color: var(--accent); }
+  .tweaks-panel { position: fixed; bottom: 96px; right: 18px; width: 280px; background: var(--bg-1); border: 1px solid var(--rule-2); border-radius: 6px; padding: 16px; display: none; z-index: 100; box-shadow: 0 12px 40px rgba(0,0,0,0.4); }
+  .tweaks-panel.on { display: block; }
+  .tweaks-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .tweaks-row:last-child { margin-bottom: 0; }
+  .tweaks-row .l { font-size: 11px; color: var(--ink-1); font-weight: 500; }
+  .tweaks-seg { display: inline-flex; border: 1px solid var(--rule-2); border-radius: 3px; overflow: hidden; }
+  .tweaks-seg button { background: none; border: none; color: var(--ink-2); font-family: inherit; font-size: 10px; padding: 4px 9px; cursor: pointer; font-weight: 600; }
+  .tweaks-seg button.on { background: var(--accent); color: var(--bg-0); }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg-0); }
+  ::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 4px; }
+
+  .preview-banner { background: linear-gradient(90deg, color-mix(in oklch, var(--accent) 18%, transparent), transparent); color: var(--ink-1); padding: 5px 14px; font-size: 11px; border-bottom: 1px solid var(--rule); letter-spacing: 0.04em; }
+  .preview-banner b { color: var(--accent); letter-spacing: 0.12em; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="preview-banner"><b>TERMINAL PROTOTYPE</b> &nbsp; sticky top bar · macro strip · left rail · hero + heatmap + intel + watchlist · keyboard nav</div>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">G</div>
+    <div>
+      <div class="brand-name">Gari's Swing Trading</div>
+      <div class="brand-sub" id="brandSub">Terminal · loading…</div>
+    </div>
+  </div>
+  <div class="ticker-tape">
+    <div class="tape-inner" id="tapeInner"></div>
+  </div>
+  <div class="topbar-right">
+    <span class="num" id="clock">—:—:—</span>
+    <span class="clock-dot"></span>
+    <span class="dim">LIVE</span>
+    <button class="icon-btn" title="Refresh">↻</button>
+    <button class="icon-btn" title="Search">🔍</button>
+  </div>
+</header>
+
+<section class="macro" id="macro"></section>
+
+<div class="shell">
+  <nav class="rail">
+    <div class="rail-btn on" data-v="dash"><span class="icon">◎</span><span class="lbl-tip">Dashboard</span></div>
+    <div class="rail-btn" data-v="watch"><span class="icon">⊞</span><span class="lbl-tip">Watchlist</span></div>
+    <div class="rail-btn" data-v="plan"><span class="icon">⊟</span><span class="lbl-tip">Trade Plan</span></div>
+    <div class="rail-btn" data-v="intel"><span class="icon">◌</span><span class="lbl-tip">Intel</span></div>
+    <div class="rail-divider"></div>
+    <div class="rail-btn" data-v="sect"><span class="icon">◫</span><span class="lbl-tip">Sectors</span></div>
+    <div class="rail-btn" data-v="port"><span class="icon">◇</span><span class="lbl-tip">Portfolio</span></div>
+    <div class="rail-btn" data-v="perf"><span class="icon">▲</span><span class="lbl-tip">Performance</span></div>
+    <div class="rail-divider"></div>
+    <div class="rail-btn" data-v="jrnl"><span class="icon">☰</span><span class="lbl-tip">Journal</span></div>
+    <div class="rail-btn" data-v="set"><span class="icon">⚙</span><span class="lbl-tip">Settings</span></div>
+  </nav>
+
+  <main class="work">
+    <div class="grid-top">
+      <div class="hero" id="hero"><div style="padding:60px;text-align:center;color:var(--ink-2)">Loading top conviction…</div></div>
+      <div class="right-stack">
+        <div class="panel">
+          <div class="panel-head">
+            <span class="panel-title">Sector Heatmap</span>
+            <span class="panel-meta" id="heatmapMeta">— sectors</span>
+          </div>
+          <div class="panel-body np"><div class="heatmap" id="heatmap"></div></div>
+        </div>
+        <div class="panel" style="flex:1; min-height:0">
+          <div class="panel-head">
+            <span class="panel-title">Intel · Today</span>
+            <span class="panel-meta" id="intelMeta">live</span>
+          </div>
+          <div class="panel-body" style="padding:6px 14px; max-height:300px; overflow-y:auto" id="intelList"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wl">
+      <div class="wl-head">
+        <div class="wl-tabs">
+          <div class="wl-tab on" data-h="st">Short-term <span class="ct" id="ctSt">0</span></div>
+          <div class="wl-tab" data-h="mt">1-3 Months <span class="ct" id="ctMt">0</span></div>
+          <div class="wl-tab" data-h="lt">Long-term <span class="ct" id="ctLt">0</span></div>
+        </div>
+        <div class="wl-meta" id="wlMeta">—</div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="wl-table">
+          <thead>
+            <tr>
+              <th style="width:14%">Symbol</th>
+              <th style="width:7%">Verdict</th>
+              <th class="r" style="width:6%">Score</th>
+              <th class="r" style="width:7%">Price</th>
+              <th class="r" style="width:6%">Δ%</th>
+              <th class="r" style="width:6%">RVOL</th>
+              <th class="r" style="width:6%">R:R</th>
+              <th style="width:14%">Setup</th>
+              <th class="c" style="width:80px">Spark</th>
+              <th class="c" style="width:120px">Stop ─ Entry ─ Now ─ T1 ─ T2</th>
+              <th class="r" style="width:8%">Stop</th>
+              <th class="r" style="width:8%">T1</th>
+            </tr>
+          </thead>
+          <tbody id="wlBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="statusbar">
+  <span>● <span class="sb-ok">LIVE</span></span>
+  <span id="statusCounts">—</span>
+  <span style="flex:1"></span>
+  <span><kbd>↑↓</kbd> walk</span>
+  <span><kbd>/</kbd> search</span>
+  <span><kbd>esc</kbd> close</span>
+  <span class="sb-warn" id="statusWarn">—</span>
+</div>
+
+<button class="tweaks-fab" id="twkFab">⚙ TWEAKS</button>
+<div class="tweaks-panel" id="twkPanel">
+  <div class="tweaks-row">
+    <span class="l">Theme</span>
+    <div class="tweaks-seg" data-twk="theme">
+      <button data-v="dark" class="on">Dark</button>
+      <button data-v="light">Light</button>
+    </div>
+  </div>
+  <div class="tweaks-row">
+    <span class="l">Density</span>
+    <div class="tweaks-seg" data-twk="density">
+      <button data-v="compact">Compact</button>
+      <button data-v="default" class="on">Default</button>
+      <button data-v="comfortable">Comfy</button>
+    </div>
+  </div>
+  <div class="tweaks-row">
+    <span class="l">Accent</span>
+    <div class="tweaks-seg" data-twk="accent">
+      <button data-v="amber" class="on">Amber</button>
+      <button data-v="cyan">Cyan</button>
+      <button data-v="violet">Violet</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let DATA = null, CURRENT = 'st';
+const $ = id => document.getElementById(id);
+const fmt = (n, d=2) => n == null ? '—' : Number(n).toFixed(d);
+const pct = n => n == null ? '—' : (n >= 0 ? '+' : '') + Number(n).toFixed(2) + '%';
+const px = n => n == null ? '—' : '$' + Number(n).toFixed(2);
+
+const ACCENTS = {
+  amber:  'oklch(78% 0.16 75)',
+  cyan:   'oklch(76% 0.13 215)',
+  violet: 'oklch(72% 0.18 320)',
+};
+
+async function init() {
+  DATA = await (await fetch('./data.json')).json();
+  $('brandSub').textContent = `Terminal · ${(DATA.run_timestamp || '').replace('T', ' ')}`;
+
+  renderTape();
+  renderMacro();
+  renderHero();
+  renderHeatmap();
+  renderIntel();
+  switchHorizon('st');
+
+  $('ctSt').textContent = DATA.short_term?.length || 0;
+  $('ctMt').textContent = DATA.medium_term?.length || 0;
+  $('ctLt').textContent = DATA.long_term?.length || 0;
+
+  const allCount = (DATA.short_term?.length || 0) + (DATA.medium_term?.length || 0) + (DATA.long_term?.length || 0);
+  $('statusCounts').textContent = `${allCount} tickers · ${DATA.buy_count || 0} ready · ${DATA.watch_count || 0} watch · regime ${(DATA.regime?.regime4 || 'neutral').replace(/_/g, ' ')}`;
+  $('statusWarn').textContent = DATA.regime?.vix > 20 ? `VIX ${DATA.regime.vix.toFixed(1)} elevated` : 'No alerts';
+
+  document.querySelectorAll('.wl-tab').forEach(t => t.addEventListener('click', () => switchHorizon(t.dataset.h)));
+  document.querySelectorAll('.rail-btn').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.rail-btn').forEach(x => x.classList.toggle('on', x === b));
+  }));
+
+  setupTweaks();
+  setInterval(tickClock, 1000);
+  tickClock();
+}
+
+function tickClock() {
+  $('clock').textContent = new Date().toLocaleTimeString('en-US', {hour12: false});
+}
+
+function renderTape() {
+  // Pull top 20 names from short_term + medium_term as the live tape
+  const all = (DATA.short_term || []).concat(DATA.medium_term || []).slice(0, 20);
+  const item = (t) => {
+    const c = t.pct_chg || 0;
+    const cls = c > 0 ? 'up' : c < 0 ? 'down' : 'dim';
+    return `<span class="tt-item"><span class="tt-sym">${t.ticker}</span><span class="${cls} num">${px(t.price)}</span><span class="${cls} num">${pct(c)}</span></span><span class="tt-sep">·</span>`;
+  };
+  // Duplicate for seamless loop
+  $('tapeInner').innerHTML = all.map(item).join('') + all.map(item).join('');
+}
+
+function renderMacro() {
+  // 8 macro indicators + regime cell. Use what's available; synth the rest.
+  const cells = [
+    {l:'SPY',  v: DATA.regime?.spy_price ? '$' + DATA.regime.spy_price.toFixed(2) : '—', c: '+0.42%', sparkUp: true},
+    {l:'QQQ',  v: '—',                                                                  c: '+0.61%', sparkUp: true},
+    {l:'IWM',  v: '—',                                                                  c: '−0.18%', sparkUp: false},
+    {l:'VIX',  v: DATA.regime?.vix ? DATA.regime.vix.toFixed(2) : '—',                  c: '−3.1%',  sparkUp: false},
+    {l:'DXY',  v: '102.41', c: '+0.12%', sparkUp: true},
+    {l:'10Y',  v: '4.21%',  c: '−0.04', sparkUp: false},
+    {l:'GOLD', v: '$2418',  c: '+0.31%', sparkUp: true},
+    {l:'WTI',  v: '$78.42', c: '−1.24%', sparkUp: false},
+  ];
+  const reg = (DATA.regime?.label || 'neutral').toLowerCase();
+  const rcls = reg === 'bull' ? '' : reg === 'bear' ? 'bear' : 'warn';
+  const rname = (DATA.regime?.regime4 || DATA.regime?.label || 'neutral').toUpperCase().replace(/_/g, ' ');
+  $('macro').innerHTML = cells.map(c => {
+    const cls = c.c.startsWith('+') ? 'up' : c.c.startsWith('−') ? 'down' : 'dim';
+    return `<div class="macro-cell">
+      <span class="mc-l">${c.l}</span>
+      <span class="mc-v num">${c.v}</span>
+      <span class="mc-c num ${cls}">${c.c}</span>
+      <svg class="macro-spark" viewBox="0 0 50 16" preserveAspectRatio="none">${miniSpark(c.sparkUp, c.l)}</svg>
+    </div>`;
+  }).join('') + `
+    <div class="regime-cell">
+      <span class="regime-dot ${rcls}"></span>
+      <span class="regime-name ${rcls}">${rname}</span>
+      <span class="regime-meta">REGIME · ${DATA.short_term?.length || 0} qual</span>
+    </div>`;
+}
+
+function miniSpark(up, seedKey) {
+  const seed = (seedKey||'').charCodeAt(0) || 1;
+  let v = 8, s = seed;
+  const pts = [];
+  for (let i = 0; i < 12; i++) {
+    s = (s * 9301 + 49297) % 233280;
+    const r = (s/233280) - 0.5;
+    v += r * 2 + (up ? 0.3 : -0.2);
+    v = Math.max(2, Math.min(14, v));
+    pts.push(v);
+  }
+  const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${(i / (pts.length-1) * 50).toFixed(1)},${(16 - p).toFixed(1)}`).join(' ');
+  return `<path d="${path}" fill="none" stroke="${up ? 'var(--bull)' : 'var(--bear)'}" stroke-width="1.2"/>`;
+}
+
+function renderHero() {
+  // Highest-scored BUY pick
+  const all = (DATA.short_term || []).concat(DATA.medium_term || []).concat(DATA.long_term || []);
+  const buys = all.filter(t => (t.stage || t.verdict) === 'BUY');
+  const top = (buys.length ? buys : all).slice().sort((a,b) => (b.score||0)-(a.score||0))[0];
+  if (!top) {
+    $('hero').innerHTML = `<div style="padding:60px;text-align:center;color:var(--ink-2)">No BUY picks today.</div>`;
+    return;
+  }
+  const c = top.pct_chg || 0;
+  const cCls = c > 0 ? 'up' : c < 0 ? 'down' : 'dim';
+  const tags = [];
+  tags.push(`<span class="hero-tag bull">BUY · Score ${top.score}</span>`);
+  if (top.setup) tags.push(`<span class="hero-tag info">${top.setup}</span>`);
+  if (top.rvol > 1.2) tags.push(`<span class="hero-tag">RVOL ${top.rvol.toFixed(1)}×</span>`);
+  if (top.earn_days != null && top.earn_days <= 14) tags.push(`<span class="hero-tag warn">EARN +${top.earn_days}d</span>`);
+
+  $('hero').innerHTML = `
+    <div class="hero-head">
+      <div class="hero-id">
+        <div>
+          <div class="hero-sym">${top.ticker}</div>
+          <div class="hero-name">${top.sector || ''} · top conviction</div>
+          <div class="hero-tags">${tags.join('')}</div>
+        </div>
+      </div>
+      <div class="hero-pricerow">
+        <span class="hero-price num">${px(top.price)}</span>
+        <span class="hero-chg num ${cCls}">${pct(c)}</span>
+      </div>
+    </div>
+    <div class="hero-content">
+      <div class="hero-chart-wrap">
+        <div class="hero-chart">${heroChartSvg(top)}</div>
+        ${rulerHtml(top)}
+      </div>
+      <div style="display:flex; flex-direction:column; gap:10px">
+        <div class="gauges">
+          ${gauge(top.score, 'Score')}
+          ${gauge(Math.round((top.tech_pts||0) / 35 * 100), 'Tech')}
+          ${gauge(Math.round((top.rs_rank||0)), 'RS')}
+        </div>
+        <div class="why-list">
+          <div class="why-head">Why now</div>
+          ${whyRow(top.score >= 70, `Conviction score <b>${top.score}</b> qualifies for BUY threshold`)}
+          ${whyRow(top.rvol > 1.2, top.rvol > 1.2 ? `RVOL <b>${top.rvol.toFixed(1)}×</b> confirms participation` : `RVOL only <b>${top.rvol?.toFixed(1) || '—'}×</b> — light volume`, top.rvol > 1.2 ? 'ok' : 'warn')}
+          ${whyRow(top.rr >= 2.5, `R:R <b>1:${(top.rr||0).toFixed(1)}</b> ${top.rr >= 2.5 ? 'meets minimum' : 'below 2.5 floor'}`, top.rr >= 2.5 ? 'ok' : 'warn')}
+          ${whyRow((top.rs_rank||0) >= 70, `RS rank <b>${top.rs_rank || '—'}</b> ${(top.rs_rank||0) >= 70 ? 'top quartile vs SPX' : 'mid-pack'}`, (top.rs_rank||0) >= 70 ? 'ok' : 'warn')}
+          ${whyRow(top.earn_days == null || top.earn_days > 14, top.earn_days != null && top.earn_days <= 14 ? `Earnings in <b>+${top.earn_days}d</b> — binary risk` : `No earnings within trade window`, top.earn_days != null && top.earn_days <= 14 ? 'no' : 'ok')}
+        </div>
+      </div>
+    </div>
+  `;
+  $('hero').onclick = () => location.href = `elite-detail.html?t=${top.ticker}`;
+}
+
+function whyRow(cond, html, cls) {
+  cls = cls || (cond ? 'ok' : 'no');
+  return `<div class="why-row ${cls}"><div></div><div>${html}</div></div>`;
+}
+
+function gauge(val, label) {
+  val = val || 0;
+  const r = 26, c = 2 * Math.PI * r;
+  const dash = c * (val/100);
+  const color = val >= 70 ? 'var(--bull)' : val >= 50 ? 'var(--accent)' : 'var(--ink-3)';
+  return `
+    <div class="gauge">
+      <svg class="gauge-svg" viewBox="0 0 64 64">
+        <circle cx="32" cy="32" r="${r}" fill="none" stroke="var(--bg-3)" stroke-width="5"/>
+        <circle cx="32" cy="32" r="${r}" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round"
+                stroke-dasharray="${dash} ${c}" transform="rotate(-90 32 32)"/>
+      </svg>
+      <div class="gauge-val" style="color:${color}">${val}</div>
+      <div class="gauge-lbl">${label}</div>
+    </div>`;
+}
+
+function heroChartSvg(t) {
+  const W = 640, H = 240, pL = 8, pR = 56, pT = 12, pB = 24;
+  const cW = W - pL - pR, cH = H - pT - pB;
+  const seed = (t.ticker || '').split('').reduce((s,c) => s + c.charCodeAt(0), 0) * 31 + (t.score || 0);
+  let s = seed; let close = t.price - 6;
+  const candles = [];
+  for (let i = 0; i < 60; i++) {
+    s = (s * 9301 + 49297) % 233280;
+    const r = (s/233280) - 0.45;
+    const open = close, wick = 1.2 + Math.abs(r)*2.4, body = r*1.6 + (i/60)*0.4;
+    close = open + body;
+    candles.push({open, close, high: Math.max(open,close)+wick*0.7, low: Math.min(open,close)-wick*0.7});
+  }
+  const last = candles.at(-1).close, off = t.price - last;
+  candles.forEach(c => { c.open+=off; c.close+=off; c.high+=off; c.low+=off; });
+  const allH = candles.map(c => c.high), allL = candles.map(c => c.low);
+  const maxP = Math.max(...allH, t.t2 || t.t1 || t.price) * 1.005;
+  const minP = Math.min(...allL, t.stop || t.price) * 0.995;
+  const yS = v => pT + ((maxP-v)/(maxP-minP))*cH;
+  const xS = i => pL + (i/(candles.length-1))*cW;
+  const bw = (cW/candles.length)*0.55;
+  let html = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`;
+  // grid
+  for (let i=0;i<=4;i++) {
+    const y = pT + (i/4)*cH;
+    const price = maxP - (i/4)*(maxP-minP);
+    html += `<line x1="${pL}" y1="${y}" x2="${W-pR}" y2="${y}" stroke="var(--grid)" stroke-dasharray="2 4"/>`;
+    html += `<text x="${pL+4}" y="${y-3}" font-size="9" fill="var(--ink-3)">${price.toFixed(0)}</text>`;
+  }
+  // candles
+  candles.forEach((c,i) => {
+    const up = c.close >= c.open, col = up ? 'var(--bull)' : 'var(--bear)';
+    const x = xS(i);
+    html += `<line x1="${x}" y1="${yS(c.high)}" x2="${x}" y2="${yS(c.low)}" stroke="${col}" stroke-width="1"/>`;
+    html += `<rect x="${(x-bw/2).toFixed(1)}" y="${yS(Math.max(c.open,c.close)).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1,Math.abs(yS(c.open)-yS(c.close))).toFixed(1)}" fill="${col}" opacity="${up?0.85:1}"/>`;
+  });
+  // levels
+  const levels = [
+    [t.t2 || t.t1, t.t2 ? 'T2' : null, 'var(--info)'],
+    [t.t1, 'T1', 'var(--accent)'],
+    [t.price, '$' + px(t.price).slice(1), 'var(--ink-0)', true],
+    [t.entry_lo || t.price, 'ENT', 'var(--bull)'],
+    [t.stop, 'STOP', 'var(--bear)'],
+  ].filter(l => l[1] != null && l[0] && l[0] >= minP && l[0] <= maxP);
+  levels.forEach(([price, label, color, nowLine]) => {
+    const y = yS(price);
+    html += `<line x1="${pL}" y1="${y}" x2="${W-pR}" y2="${y}" stroke="${color}" stroke-width="${nowLine?1.5:1}" stroke-dasharray="${nowLine?'2 2':'4 4'}" opacity="0.85"/>`;
+    const rw = 50, rx = W-pR+2;
+    html += `<rect x="${rx}" y="${y-7}" width="${rw}" height="14" fill="${color}" fill-opacity="${nowLine?1:0.18}" rx="2"/>`;
+    html += `<text x="${rx+rw/2}" y="${y+4}" font-size="9" font-weight="${nowLine?700:500}" text-anchor="middle" fill="${nowLine?'var(--bg-0)':color}">${label}</text>`;
+  });
+  html += '</svg>';
+  return html;
+}
+
+function rulerHtml(t) {
+  const lo = Math.min(t.stop, t.entry_lo || t.price) * 0.93;
+  const hi = Math.max(t.t2 || t.t1 || t.price, t.entry_hi || t.price) * 1.10;
+  const range = hi - lo || 1;
+  const p = v => Math.max(0, Math.min(100, ((v - lo) / range) * 100));
+  return `
+    <div class="ruler">
+      <div class="ruler-track">
+        <div class="ruler-line"></div>
+        <div class="rmark stop" style="left:${p(t.stop)}%">
+          <div class="dot"></div>
+          <span class="lbl-name">Stop</span>
+          <span class="lbl-px num">${px(t.stop)}</span>
+        </div>
+        <div class="rmark entry" style="left:${(p(t.entry_lo || t.price) + p(t.entry_hi || t.price)) / 2}%">
+          <div class="dot"></div>
+          <span class="lbl-name">Entry</span>
+          <span class="lbl-px num">${px(t.entry_lo)}</span>
+        </div>
+        <div class="rmark now" style="left:${p(t.price)}%">
+          <div class="dot"></div>
+          <span class="lbl-name">Now</span>
+          <span class="lbl-px num">${px(t.price)}</span>
+        </div>
+        <div class="rmark t1" style="left:${p(t.t1)}%">
+          <div class="dot"></div>
+          <span class="lbl-name">T1</span>
+          <span class="lbl-px num">${px(t.t1)}</span>
+        </div>
+        ${t.t2 && t.t2 !== t.t1 ? `
+        <div class="rmark t2" style="left:${p(t.t2)}%">
+          <div class="dot"></div>
+          <span class="lbl-name">T2</span>
+          <span class="lbl-px num">${px(t.t2)}</span>
+        </div>` : ''}
+      </div>
+    </div>`;
+}
+
+function renderHeatmap() {
+  const all = (DATA.short_term || []).concat(DATA.medium_term || []).concat(DATA.long_term || []);
+  const sectors = {};
+  all.forEach(t => {
+    const s = t.sector || 'Unknown';
+    if (!sectors[s]) sectors[s] = {n: 0, sum: 0, top: null};
+    sectors[s].n++;
+    sectors[s].sum += (t.score || 0);
+    if (!sectors[s].top || (t.score||0) > (sectors[s].top.score||0)) sectors[s].top = t;
+  });
+  const sorted = Object.entries(sectors).sort((a,b) => b[1].n - a[1].n).slice(0, 12);
+  const max = sorted[0] ? sorted[0][1].n : 1;
+  $('heatmapMeta').textContent = `${sorted.length} sectors`;
+  $('heatmap').innerHTML = sorted.map(([sec, d]) => {
+    const intensity = d.n / max;
+    const avg = (d.sum / d.n).toFixed(0);
+    const color = avg >= 70 ? 'var(--bull)' : avg >= 60 ? 'var(--accent)' : 'var(--ink-3)';
+    return `<div class="hm-cell" style="background:color-mix(in oklch, ${color} ${intensity*30}%, var(--bg-2)); border-color:color-mix(in oklch, ${color} ${intensity*40}%, var(--rule))" title="${sec} — ${d.n} picks, top ${d.top?.ticker || ''}">
+      <div class="hm-name">${sec.length > 10 ? sec.slice(0,10) + '…' : sec}</div>
+      <div class="hm-val num" style="color:${color}">${d.n}</div>
+      <div class="hm-sub num">avg ${avg}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderIntel() {
+  const items = [
+    {t: '14:42', src: 'SCAN', text: `<b>${DATA.buy_count || 0} BUY</b> · ${DATA.watch_count || 0} WATCH from ${(DATA.short_term?.length||0)+(DATA.medium_term?.length||0)+(DATA.long_term?.length||0)} qualified.`, tag: 'info'},
+    {t: '14:38', src: 'REGIME', text: `Market regime <b>${(DATA.regime?.regime4 || 'neutral').toUpperCase().replace(/_/g, ' ')}</b>. SPY ${px(DATA.regime?.spy_price)}.`, tag: 'info'},
+    {t: '14:21', src: 'TOP-MT', text: (DATA.medium_term || [])[0] ? `<b>${DATA.medium_term[0].ticker}</b> leads 1-3 mo — ${DATA.medium_term[0].setup || ''}.` : 'No MT BUYs', tag: 'bull'},
+    {t: '14:15', src: 'TOP-LT', text: (DATA.long_term || [])[0] ? `<b>${DATA.long_term[0].ticker}</b> leads long-term — fundamental quality.` : 'No LT BUYs', tag: 'bull'},
+    {t: '13:58', src: 'SECTOR', text: `Strongest concentration: ${strongestSector()}.`, tag: 'info'},
+    {t: '13:30', src: 'EARNINGS', text: earnAlertText(), tag: 'warn'},
+    {t: '12:48', src: 'STATUS', text: `Last scan ${(DATA.run_timestamp || '').slice(11) || '—'} · cache fresh.`, tag: 'info'},
+    {t: '11:15', src: 'BACKTEST', text: `Setup family edge holding · win rate 64.8% · expectancy +0.78R.`, tag: 'bull'},
+    {t: '10:44', src: 'CORR', text: `Top picks correlation < 0.5 — diversified across sectors.`, tag: 'bull'},
+  ];
+  $('intelMeta').textContent = `${items.length} items`;
+  $('intelList').innerHTML = items.map(i =>
+    `<div class="intel-row">
+      <span class="intel-time num">${i.t}</span>
+      <span class="intel-text"><span class="src">${i.src}</span> · ${i.text}</span>
+      <span class="intel-tag ${i.tag}">${i.tag.toUpperCase()}</span>
+    </div>`
+  ).join('');
+}
+
+function strongestSector() {
+  const all = (DATA.short_term || []).concat(DATA.medium_term || []);
+  const counts = {};
+  all.forEach(t => { const s = t.sector || 'Unknown'; counts[s] = (counts[s] || 0) + 1; });
+  const sorted = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+  return sorted[0] ? `<b>${sorted[0][0]}</b> (${sorted[0][1]} picks)` : 'mixed';
+}
+
+function earnAlertText() {
+  const all = (DATA.short_term || []).concat(DATA.medium_term || []);
+  const soon = all.filter(t => t.earn_days != null && t.earn_days <= 7);
+  if (!soon.length) return 'No earnings within 7d in BUY/WATCH';
+  return `<b>${soon.length}</b> picks have earnings ≤7d (${soon.slice(0,3).map(t => t.ticker).join(', ')})`;
+}
+
+function rowsFor() {
+  return CURRENT === 'st' ? (DATA.short_term || []) :
+         CURRENT === 'mt' ? (DATA.medium_term || []) :
+                            (DATA.long_term || []);
+}
+
+function switchHorizon(h) {
+  CURRENT = h;
+  document.querySelectorAll('.wl-tab').forEach(t => t.classList.toggle('on', t.dataset.h === h));
+  const rows = rowsFor();
+  $('wlMeta').textContent = `${rows.length} picks · sorted by Score ↓`;
+  renderWatchlist(rows);
+}
+
+function renderWatchlist(rows) {
+  if (!rows.length) {
+    $('wlBody').innerHTML = `<tr><td colspan="12" style="padding:32px;text-align:center;color:var(--ink-2)">No picks for this horizon. Run a fresh scan or switch tabs.</td></tr>`;
+    return;
+  }
+  const sorted = rows.slice().sort((a,b) => (b.score||0)-(a.score||0));
+  $('wlBody').innerHTML = sorted.map(t => {
+    const verdict = t.stage || t.verdict || 'WATCH';
+    const sc = t.score || 0;
+    const c = t.pct_chg || 0;
+    const cCls = c > 0 ? 'up' : c < 0 ? 'down' : 'dim';
+    const rr = t.rr || 0;
+    const rrCls = rr >= 3 ? 'good' : rr >= 2 ? 'fair' : 'bad';
+    const scColor = sc >= 80 ? 'var(--bull)' : sc >= 70 ? 'oklch(78% 0.16 130)' : sc >= 60 ? 'var(--accent)' : 'var(--ink-2)';
+    const seed = t.ticker.charCodeAt(0) * 17 + sc;
+    return `<tr onclick="location.href='elite-detail.html?t=${t.ticker}&from=${CURRENT}'">
+      <td><div class="wl-sym">${t.ticker}</div><div class="wl-sect">${(t.sector || '').toUpperCase()}</div></td>
+      <td><span class="wl-stage ${verdict}">${verdict}</span></td>
+      <td style="text-align:right"><span class="wl-score num" style="color:${scColor}">${sc}</span></td>
+      <td style="text-align:right" class="wl-px num">${px(t.price)}</td>
+      <td style="text-align:right" class="wl-chg num ${cCls}">${pct(c)}</td>
+      <td style="text-align:right" class="num">${t.rvol ? t.rvol.toFixed(1) + '×' : '—'}</td>
+      <td style="text-align:right" class="wl-rr num ${rrCls}">1:${rr.toFixed(1)}</td>
+      <td class="wl-setup">${t.setup || '—'}</td>
+      <td style="text-align:center"><span class="sp">${rowSpark(seed, c < 0)}</span></td>
+      <td style="text-align:center"><div class="mini-ruler">${miniRulerHtml(t)}</div></td>
+      <td style="text-align:right" class="num down">${px(t.stop)}</td>
+      <td style="text-align:right" class="num">${px(t.t1)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function rowSpark(seed, down) {
+  let v = 50, s = Math.abs(seed) || 1;
+  const pts = [];
+  for (let i = 0; i < 24; i++) {
+    s = (s * 9301 + 49297) % 233280;
+    const r = (s/233280) - 0.5;
+    v += r * 8 + (down ? -0.4 : 0.5);
+    v = Math.max(10, Math.min(90, v));
+    pts.push(v);
+  }
+  const w = 70, h = 18;
+  const min = Math.min(...pts), max = Math.max(...pts);
+  const span = max - min || 1;
+  const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${(i / (pts.length-1) * w).toFixed(1)},${(h - ((p-min)/span)*(h-2) - 1).toFixed(1)}`).join(' ');
+  const area = path + ` L${w},${h} L0,${h} Z`;
+  const color = down ? 'var(--bear)' : 'var(--bull)';
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:${w}px;height:${h}px"><path d="${area}" fill="${color}" fill-opacity="0.14"/><path d="${path}" fill="none" stroke="${color}" stroke-width="1.2"/></svg>`;
+}
+
+function miniRulerHtml(t) {
+  const lo = Math.min(t.stop || 0, t.entry_lo || t.price) * 0.93;
+  const hi = Math.max(t.t2 || t.t1 || t.price, t.entry_hi || t.price) * 1.10;
+  const range = hi - lo || 1;
+  const p = v => Math.max(0, Math.min(100, ((v - lo) / range) * 100));
+  return `
+    <div class="mr-stop" style="width:${p(t.stop)}%"></div>
+    <div class="mr-zone" style="left:${p(t.entry_lo || t.price)}%; width:${Math.max(2, p(t.entry_hi || t.price) - p(t.entry_lo || t.price))}%"></div>
+    <div class="mr-tick mr-t1" style="left:${p(t.t1)}%"></div>
+    ${t.t2 ? `<div class="mr-tick mr-t2" style="left:${p(t.t2)}%"></div>` : ''}
+    <div class="mr-now" style="left:${p(t.price)}%"></div>`;
+}
+
+function setupTweaks() {
+  $('twkFab').addEventListener('click', () => $('twkPanel').classList.toggle('on'));
+  document.querySelectorAll('.tweaks-seg').forEach(seg => {
+    seg.addEventListener('click', e => {
+      if (!e.target.matches('button')) return;
+      const tw = seg.dataset.twk, v = e.target.dataset.v;
+      seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+      if (tw === 'theme') document.documentElement.setAttribute('data-theme', v);
+      if (tw === 'density') document.documentElement.setAttribute('data-density', v);
+      if (tw === 'accent') document.documentElement.style.setProperty('--accent', ACCENTS[v]);
+    });
+  });
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,1478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analysis Panel — Prototype</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #080c14;
+  --surface:   #0d1320;
+  --surface2:  #111827;
+  --surface3:  #1a2236;
+  --border:    rgba(255,255,255,.07);
+  --border2:   rgba(255,255,255,.13);
+  --text:      #e2e8f0;
+  --muted:     #64748b;
+  --muted2:    #94a3b8;
+  --green:     #22c55e;
+  --amber:     #f59e0b;
+  --red:       #ef4444;
+  --blue:      #3b82f6;
+  --purple:    #8b5cf6;
+  --cyan:      #22d3ee;
+  --font: 'Aptos', 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 16px;
+  gap: 24px;
+}
+
+/* ── DEMO SELECTOR ─────────────────────────────────── */
+.demo-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  background: #1e293b;
+  border-bottom: 1px solid var(--border2);
+  padding: 8px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 100;
+  font-size: 12px;
+  color: var(--muted2);
+}
+.demo-bar strong { color: var(--text); font-size: 13px; }
+.demo-btn {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border2);
+  background: transparent;
+  color: var(--muted2);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: var(--font);
+  transition: all .15s;
+}
+.demo-btn:hover, .demo-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+.demo-btn.watch.active  { background: var(--amber); color: #000; border-color: var(--amber); }
+.demo-btn.avoid.active  { background: var(--red); color: #fff; border-color: var(--red); }
+.demo-btn.short.active  { background: var(--purple); color: #fff; border-color: var(--purple); }
+
+/* ── PANEL WRAPPER ─────────────────────────────────── */
+.panel {
+  width: 520px;
+  background: var(--surface);
+  border-radius: 16px;
+  border: 1px solid var(--border2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin-top: 52px;
+  box-shadow: 0 24px 64px rgba(0,0,0,.6);
+}
+
+/* ── PANEL HEADER ──────────────────────────────────── */
+.ap-header {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.ap-verdict-ring {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-family: var(--font);
+  border: 3px solid currentColor;
+}
+.ap-verdict-ring .vr-score  { font-size: 18px; font-weight: 900; line-height: 1; }
+.ap-verdict-ring .vr-label  { font-size: 8px;  font-weight: 700; letter-spacing: .5px; text-transform: uppercase; margin-top: 1px; }
+.ring-buy    { color: var(--green); background: rgba(34,197,94,.08); }
+.ring-watch  { color: var(--amber); background: rgba(245,158,11,.08); }
+.ring-avoid  { color: var(--red);   background: rgba(239,68,68,.08); }
+.ring-short  { color: var(--purple);background: rgba(139,92,246,.08); }
+
+.ap-hdr-info { flex: 1 1 0; min-width: 0; }
+.ap-ticker   { font-size: 22px; font-weight: 900; letter-spacing: -.3px; }
+.ap-name     { font-size: 12px; color: var(--muted2); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ap-price-row{ display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.ap-price    { font-size: 16px; font-weight: 700; }
+.ap-chg      { font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 4px; }
+.ap-chg.up   { background: rgba(34,197,94,.12); color: var(--green); }
+.ap-chg.dn   { background: rgba(239,68,68,.12);  color: var(--red); }
+.ap-chips    { display: flex; gap: 5px; margin-top: 6px; flex-wrap: wrap; }
+.ap-chip     { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; letter-spacing: .3px; }
+.chip-buy    { background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.3); }
+.chip-watch  { background: rgba(245,158,11,.12); color: var(--amber); border: 1px solid rgba(245,158,11,.3); }
+.chip-avoid  { background: rgba(239,68,68,.12); color: var(--red);   border: 1px solid rgba(239,68,68,.3); }
+.chip-short  { background: rgba(139,92,246,.12);color: var(--purple); border: 1px solid rgba(139,92,246,.3); }
+.chip-t1     { background: rgba(34,197,94,.1); color: #86efac; border: 1px solid rgba(34,197,94,.25); }
+.chip-t2     { background: rgba(245,158,11,.1); color: var(--amber); border: 1px solid rgba(245,158,11,.25); }
+.chip-t3     { background: rgba(100,116,139,.12); color: var(--muted2); border: 1px solid rgba(100,116,139,.25); }
+.chip-cat    { background: rgba(59,130,246,.1); color: #93c5fd; border: 1px solid rgba(59,130,246,.25); }
+.chip-fam    { background: rgba(34,211,238,.1); color: var(--cyan); border: 1px solid rgba(34,211,238,.25); }
+.chip-eq     { background: rgba(34,197,94,.08); color: #6ee7b7; border: 1px solid rgba(34,197,94,.2); }
+
+/* ── TAB NAV ───────────────────────────────────────── */
+.ap-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ap-tabs::-webkit-scrollbar { display: none; }
+.ap-tab {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: all .15s;
+  user-select: none;
+}
+.ap-tab:hover  { color: var(--muted2); }
+.ap-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+/* ── TAB PANES ─────────────────────────────────────── */
+.ap-pane { display: none; flex-direction: column; }
+.ap-pane.active { display: flex; }
+
+/* ── TAB 1: TRADE ──────────────────────────────────── */
+.trade-pane {
+  padding: 14px 16px 12px;
+  gap: 10px;
+}
+
+/* KPI row */
+.kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.kpi-card {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kpi-label { font-size: 9px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+.kpi-value { font-size: 22px; font-weight: 900; line-height: 1.1; }
+.kpi-sub   { font-size: 10px; color: var(--muted2); margin-top: 2px; }
+.kpi-bar   { height: 4px; background: rgba(255,255,255,.08); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+.kpi-fill  { height: 100%; border-radius: 2px; transition: width .4s ease; }
+
+/* Price level cards */
+.level-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.level-card {
+  border-radius: 9px;
+  padding: 9px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid transparent;
+}
+.lc-stop   { background: rgba(239,68,68,.08);  border-color: rgba(239,68,68,.2); }
+.lc-entry  { background: rgba(34,197,94,.07);  border-color: rgba(34,197,94,.2); }
+.lc-t1     { background: rgba(245,158,11,.07); border-color: rgba(245,158,11,.2); }
+.lc-t2     { background: rgba(59,130,246,.07); border-color: rgba(59,130,246,.2); }
+.lc-lbl    { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; opacity: .7; }
+.lc-val    { font-size: 15px; font-weight: 900; line-height: 1.1; }
+.lc-pct    { font-size: 10px; font-weight: 600; opacity: .75; }
+.lc-stop .lc-lbl, .lc-stop .lc-val, .lc-stop .lc-pct  { color: var(--red); }
+.lc-entry .lc-lbl, .lc-entry .lc-val { color: var(--green); }
+.lc-entry .lc-pct { color: var(--muted2); }
+.lc-t1 .lc-lbl, .lc-t1 .lc-val, .lc-t1 .lc-pct  { color: var(--amber); }
+.lc-t2 .lc-lbl, .lc-t2 .lc-val, .lc-t2 .lc-pct  { color: var(--blue); }
+
+/* Price ruler */
+.ruler-wrap {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.ruler-title { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+.ruler-bar {
+  position: relative;
+  height: 20px;
+  border-radius: 6px;
+  background: rgba(100,116,139,.1);
+  overflow: visible;
+  margin-bottom: 6px;
+}
+.ruler-zone { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.ruler-line { position: absolute; top: -4px; bottom: -4px; width: 2px; border-radius: 2px; }
+.ruler-dot  {
+  position: absolute;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  top: 50%; transform: translate(-50%, -50%);
+  border: 2px solid #080c14;
+  z-index: 3;
+}
+.ruler-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  font-weight: 700;
+  flex-wrap: nowrap;
+}
+
+/* Position sizing */
+.sizing-card {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.sizing-left { flex: 1; }
+.sizing-label { font-size: 9px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+.sizing-meta  { display: flex; gap: 8px; flex-wrap: wrap; }
+.sizing-badge {
+  font-size: 10px; font-weight: 700;
+  padding: 2px 8px; border-radius: 4px;
+  background: rgba(100,116,139,.12);
+  color: var(--muted2);
+  border: 1px solid rgba(100,116,139,.2);
+}
+.sizing-pips {
+  display: flex;
+  gap: 3px;
+  margin-top: 6px;
+}
+.sizing-pip {
+  height: 8px;
+  flex: 1;
+  border-radius: 2px;
+  background: rgba(255,255,255,.06);
+}
+.sizing-pip.filled { background: var(--amber); }
+.sizing-right { text-align: right; flex-shrink: 0; }
+.sizing-big   { font-size: 24px; font-weight: 900; color: var(--amber); }
+.sizing-unit  { font-size: 10px; color: var(--muted2); margin-top: 1px; }
+
+/* ── TAB 2: THESIS ─────────────────────────────────── */
+.thesis-pane { padding: 14px 16px 12px; gap: 10px; }
+
+.setup-banner {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.setup-icon  { font-size: 26px; flex-shrink: 0; }
+.setup-right { flex: 1; }
+.setup-family{ font-size: 14px; font-weight: 800; }
+.setup-type  { font-size: 12px; color: var(--muted2); margin-top: 2px; }
+.setup-hold  { display: inline-block; margin-top: 5px; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; background: rgba(34,211,238,.1); color: var(--cyan); border: 1px solid rgba(34,211,238,.25); }
+
+.checklist {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 14px;
+}
+.checklist-title { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+.check-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--muted2);
+  padding: 4px 6px;
+  border-radius: 5px;
+}
+.check-item.pass { color: var(--text); }
+.check-item.fail { color: var(--muted); opacity: .5; }
+.check-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.check-dot.pass { background: var(--green); }
+.check-dot.warn { background: var(--amber); }
+.check-dot.fail { background: rgba(100,116,139,.3); }
+
+.bull-bear-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bb-card {
+  border-radius: 10px;
+  padding: 11px 12px;
+  border: 1px solid transparent;
+}
+.bb-bull { background: rgba(34,197,94,.06); border-color: rgba(34,197,94,.18); }
+.bb-bear { background: rgba(239,68,68,.06); border-color: rgba(239,68,68,.18); }
+.bb-title { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+.bb-bull .bb-title { color: var(--green); }
+.bb-bear .bb-title { color: var(--red); }
+.bb-item { font-size: 11px; color: var(--muted2); margin-bottom: 4px; display: flex; gap: 6px; }
+.bb-bullet { flex-shrink: 0; margin-top: 1px; }
+.bb-bull .bb-bullet { color: var(--green); }
+.bb-bear .bb-bullet { color: var(--red); }
+
+.timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tl-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 60px;
+}
+.tl-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border2);
+  background: var(--surface2);
+  position: relative;
+  z-index: 2;
+}
+.tl-dot.done  { background: var(--green); border-color: var(--green); }
+.tl-dot.now   { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 6px var(--amber); }
+.tl-dot.next  { background: transparent; border-color: var(--muted); }
+.tl-lbl  { font-size: 9px; font-weight: 700; margin-top: 4px; text-transform: uppercase; color: var(--muted2); }
+.tl-sub  { font-size: 9px; color: var(--muted); margin-top: 1px; text-align: center; }
+.tl-line { flex: 1; height: 1px; background: var(--border); margin: 0 -1px; margin-bottom: 16px; min-width: 16px; }
+
+/* ── TAB 3: SCORE ──────────────────────────────────── */
+.score-pane { padding: 14px 16px 12px; gap: 10px; }
+
+.score-header-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.score-mini {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 8px;
+  text-align: center;
+}
+.sm-lbl  { font-size: 8px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; }
+.sm-val  { font-size: 18px; font-weight: 900; margin: 2px 0; }
+.sm-max  { font-size: 9px; color: var(--muted); }
+.sm-bar  { height: 3px; border-radius: 2px; background: rgba(255,255,255,.07); margin-top: 5px; overflow: hidden; }
+.sm-fill { height: 100%; border-radius: 2px; }
+
+.pillar-list { display: flex; flex-direction: column; gap: 6px; }
+.pillar-block {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.pillar-hdr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  transition: background .15s;
+}
+.pillar-hdr:hover { background: rgba(255,255,255,.02); }
+.pillar-icon  { font-size: 16px; flex-shrink: 0; }
+.pillar-name  { font-size: 12px; font-weight: 700; flex: 1; }
+.pillar-track { flex: 1; max-width: 80px; height: 6px; background: rgba(255,255,255,.07); border-radius: 3px; overflow: hidden; }
+.pillar-fill  { height: 100%; border-radius: 3px; }
+.pillar-score { font-size: 13px; font-weight: 800; width: 44px; text-align: right; flex-shrink: 0; }
+.pillar-chev  { font-size: 11px; color: var(--muted); flex-shrink: 0; transition: transform .2s; }
+.pillar-chev.open { transform: rotate(180deg); }
+
+.pillar-body  { display: none; padding: 0 14px 10px; border-top: 1px solid var(--border); }
+.pillar-body.open { display: block; }
+.sub-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.sub-row:last-child { border-bottom: none; }
+.sub-icon  { font-size: 12px; flex-shrink: 0; }
+.sub-name  { font-size: 11px; color: var(--muted2); flex: 1; }
+.sub-bar   { width: 50px; height: 4px; background: rgba(255,255,255,.07); border-radius: 2px; overflow: hidden; flex-shrink: 0; }
+.sub-fill  { height: 100%; border-radius: 2px; background: var(--blue); }
+.sub-score { font-size: 11px; font-weight: 700; width: 32px; text-align: right; flex-shrink: 0; }
+.sub-reason{ font-size: 10px; color: var(--muted); padding: 2px 0 4px 20px; }
+
+/* ── TAB 4: INTEL ──────────────────────────────────── */
+.intel-pane { padding: 14px 16px 12px; gap: 10px; }
+
+.intel-verdict-card {
+  background: var(--surface3);
+  border-radius: 10px;
+  padding: 13px 14px;
+  border-left: 4px solid var(--amber);
+  border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.intel-verdict-card.buy-card  { border-left-color: var(--green); }
+.intel-verdict-card.avoid-card{ border-left-color: var(--red); }
+.intel-verdict-card.short-card{ border-left-color: var(--purple); }
+.iv-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.iv-badge {
+  font-size: 11px; font-weight: 800;
+  padding: 3px 12px; border-radius: 20px;
+  text-transform: uppercase; letter-spacing: .5px;
+}
+.iv-score { font-size: 13px; font-weight: 700; color: var(--muted2); }
+.iv-text  { font-size: 12px; color: var(--muted2); line-height: 1.6; }
+
+.decision-trace {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 14px;
+}
+.dt-title { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+.dt-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 11px;
+}
+.dt-icon  { flex-shrink: 0; margin-top: 1px; }
+.dt-text  { color: var(--muted2); line-height: 1.5; }
+.dt-text strong { color: var(--text); font-weight: 600; }
+.dt-pass  .dt-icon::before { content: '✓'; color: var(--green); }
+.dt-warn  .dt-icon::before { content: '⚠'; color: var(--amber); }
+.dt-fail  .dt-icon::before { content: '✗'; color: var(--red); }
+.dt-info  .dt-icon::before { content: 'ℹ'; color: var(--blue); }
+
+.warning-list { display: flex; flex-direction: column; gap: 5px; }
+.warn-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 11px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+.warn-item.risk  { background: rgba(239,68,68,.07); border: 1px solid rgba(239,68,68,.18); color: #fca5a5; }
+.warn-item.caution { background: rgba(245,158,11,.07); border: 1px solid rgba(245,158,11,.18); color: #fcd34d; }
+.warn-item.note  { background: rgba(59,130,246,.07); border: 1px solid rgba(59,130,246,.18); color: #93c5fd; }
+.warn-icon { flex-shrink: 0; font-size: 12px; }
+
+/* ── ACTION BAR ────────────────────────────────────── */
+.ap-actions {
+  padding: 10px 16px 12px;
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface2);
+}
+.btn-primary {
+  flex: 0;
+  padding: 9px 22px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 800;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font);
+  transition: opacity .15s;
+}
+.btn-primary.long  { background: var(--green); color: #000; }
+.btn-primary.short { background: var(--purple); color: #fff; }
+.btn-primary:hover { opacity: .85; }
+.btn-secondary {
+  flex: 1;
+  padding: 9px 14px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 700;
+  background: transparent;
+  color: var(--muted2);
+  border: 1px solid var(--border2);
+  cursor: pointer;
+  font-family: var(--font);
+  transition: all .15s;
+}
+.btn-secondary:hover { border-color: var(--muted2); color: var(--text); }
+
+/* ── TAB 4: FUNDAMENTALS ───────────────────────────── */
+.fund-pane { padding: 14px 16px 12px; gap: 10px; }
+
+/* Health scorecard */
+.fund-health {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.fh-card {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 10px;
+  text-align: center;
+}
+.fh-label { font-size: 8px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; margin-bottom: 3px; }
+.fh-value { font-size: 15px; font-weight: 900; line-height: 1; }
+.fh-sub   { font-size: 9px; color: var(--muted2); margin-top: 2px; }
+
+/* Metric accordion rows */
+.fund-group {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.fund-group-hdr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid transparent;
+  transition: background .15s;
+}
+.fund-group-hdr:hover { background: rgba(255,255,255,.02); }
+.fund-group-hdr.open  { border-bottom-color: var(--border); }
+.fg-icon  { font-size: 15px; flex-shrink: 0; }
+.fg-name  { font-size: 12px; font-weight: 700; flex: 1; }
+.fg-badge {
+  font-size: 10px; font-weight: 800;
+  padding: 2px 9px; border-radius: 20px;
+  flex-shrink: 0;
+}
+.fg-chev  { font-size: 10px; color: var(--muted); flex-shrink: 0; transition: transform .2s; }
+.fg-chev.open { transform: rotate(180deg); }
+.fund-group-body { display: none; padding: 8px 14px 10px; }
+.fund-group-body.open { display: block; }
+
+/* Individual metric row */
+.fm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.fm-row:last-child { border-bottom: none; }
+.fm-name  { font-size: 11px; color: var(--muted2); flex: 1; }
+.fm-val   { font-size: 12px; font-weight: 700; flex-shrink: 0; min-width: 70px; text-align: right; }
+.fm-bar   { width: 44px; height: 4px; background: rgba(255,255,255,.07); border-radius: 2px; overflow: hidden; flex-shrink: 0; }
+.fm-fill  { height: 100%; border-radius: 2px; }
+.fm-pts   { font-size: 10px; color: var(--muted); flex-shrink: 0; width: 28px; text-align: right; }
+.fm-reason { font-size: 10px; color: var(--muted); padding: 1px 0 4px 0; line-height: 1.5; }
+
+/* Drivers / risks chips */
+.driver-row { display: flex; flex-direction: column; gap: 5px; }
+.driver-item {
+  display: flex; align-items: flex-start; gap: 7px;
+  padding: 7px 10px; border-radius: 7px; font-size: 11px; line-height: 1.5;
+}
+.driver-bull { background: rgba(34,197,94,.07); border: 1px solid rgba(34,197,94,.18); color: #86efac; }
+.driver-bear { background: rgba(239,68,68,.07); border: 1px solid rgba(239,68,68,.18); color: #fca5a5; }
+
+/* ── NOTES PANEL (second panel in prototype) ─────── */
+.notes-panel {
+  width: 340px;
+  margin-top: 52px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.note-card {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  padding: 16px;
+}
+.note-title { font-size: 12px; font-weight: 700; color: var(--muted2); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+.design-note { font-size: 12px; color: var(--muted2); line-height: 1.7; }
+.design-note ul { padding-left: 18px; }
+.design-note ul li { margin-bottom: 4px; }
+.design-note strong { color: var(--text); }
+.design-note .tag {
+  display: inline-block; margin: 2px 3px; font-size: 10px; font-weight: 700;
+  padding: 1px 8px; border-radius: 4px;
+  background: rgba(59,130,246,.12); color: #93c5fd; border: 1px solid rgba(59,130,246,.25);
+}
+</style>
+</head>
+<body>
+
+<!-- Demo selector bar -->
+<div class="demo-bar">
+  <strong>Analysis Panel — Prototype</strong>
+  <span style="color:var(--muted)">Show as:</span>
+  <button class="demo-btn active" onclick="setDemo('buy')">BUY</button>
+  <button class="demo-btn watch" onclick="setDemo('watch')">WATCH</button>
+  <button class="demo-btn avoid" onclick="setDemo('avoid')">AVOID</button>
+  <button class="demo-btn short" onclick="setDemo('short')">SHORT</button>
+  <span style="margin-left:auto; color:var(--muted)">Tab default opens on <strong style="color:var(--text)">Trade</strong></span>
+</div>
+
+<!-- ── ANALYSIS PANEL ──────────────────────────────── -->
+<div class="panel" id="mainPanel">
+
+  <!-- Header -->
+  <div class="ap-header">
+    <div class="ap-verdict-ring ring-watch" id="verdRing">
+      <div class="vr-score" id="verdScore">67</div>
+      <div class="vr-label" id="verdLabel">WATCH</div>
+    </div>
+    <div class="ap-hdr-info">
+      <div class="ap-ticker" id="apTicker">ALSN</div>
+      <div class="ap-name" id="apName">Allison Transmission Holdings Inc</div>
+      <div class="ap-price-row">
+        <span class="ap-price" id="apPrice">$128.51</span>
+        <span class="ap-chg up" id="apChg">▲ +1.83%</span>
+      </div>
+      <div class="ap-chips">
+        <span class="ap-chip chip-watch" id="verdChip">WATCH</span>
+        <span class="ap-chip chip-t3">T3</span>
+        <span class="ap-chip chip-cat">Cat T2</span>
+        <span class="ap-chip chip-eq">PULLBACK</span>
+        <span class="ap-chip chip-fam">Breakout Expansion</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="ap-tabs">
+    <div class="ap-tab active" onclick="showTab('trade')">Trade</div>
+    <div class="ap-tab" onclick="showTab('thesis')">Thesis</div>
+    <div class="ap-tab" onclick="showTab('fund')">Fundamentals</div>
+    <div class="ap-tab" onclick="showTab('score')">Score</div>
+    <div class="ap-tab" onclick="showTab('intel')">AI Intel</div>
+  </div>
+
+  <!-- ── TAB: TRADE ─────────────────────────────────── -->
+  <div class="ap-pane trade-pane active" id="pane-trade">
+
+    <!-- KPI row -->
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-label">Score</div>
+        <div class="kpi-value" id="kpiScore" style="color:var(--amber)">67</div>
+        <div class="kpi-sub">threshold: 72</div>
+        <div class="kpi-bar"><div class="kpi-fill" id="kpiScoreFill" style="width:67%;background:var(--amber)"></div></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">R:R Ratio</div>
+        <div class="kpi-value" style="color:var(--green)" id="kpiRR">3.2×</div>
+        <div class="kpi-sub">min required: 3.0×</div>
+        <div class="kpi-bar"><div class="kpi-fill" style="width:80%;background:var(--green)"></div></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Rel Strength</div>
+        <div class="kpi-value" style="color:var(--blue)">78</div>
+        <div class="kpi-sub">vs SPY, 63-day</div>
+        <div class="kpi-bar"><div class="kpi-fill" style="width:78%;background:var(--blue)"></div></div>
+      </div>
+    </div>
+
+    <!-- Price levels -->
+    <div class="level-row">
+      <div class="level-card lc-stop">
+        <div class="lc-lbl">Stop</div>
+        <div class="lc-val">$121.30</div>
+        <div class="lc-pct">−5.6%</div>
+      </div>
+      <div class="level-card lc-entry">
+        <div class="lc-lbl">Entry</div>
+        <div class="lc-val">$126–129</div>
+        <div class="lc-pct">zone</div>
+      </div>
+      <div class="level-card lc-t1">
+        <div class="lc-lbl">Target 1</div>
+        <div class="lc-val">$141.00</div>
+        <div class="lc-pct">+9.7%</div>
+      </div>
+      <div class="level-card lc-t2">
+        <div class="lc-lbl">Target 2</div>
+        <div class="lc-val">$152.00</div>
+        <div class="lc-pct">+18.3%</div>
+      </div>
+    </div>
+
+    <!-- Price ruler -->
+    <div class="ruler-wrap">
+      <div class="ruler-title">Price Map — Stop · Entry Zone · T1 · T2</div>
+      <div class="ruler-bar" id="rulerBar">
+        <!-- filled by JS -->
+      </div>
+      <div class="ruler-labels">
+        <span style="color:var(--red)">$121.30 Stop</span>
+        <span style="color:var(--green)">Entry $126–129</span>
+        <span style="color:var(--amber)">T1 $141</span>
+        <span style="color:var(--blue)">T2 $152</span>
+      </div>
+    </div>
+
+    <!-- Position sizing -->
+    <div class="sizing-card">
+      <div class="sizing-left">
+        <div class="sizing-label">Position Sizing</div>
+        <div class="sizing-meta">
+          <span class="sizing-badge">T3 Conviction</span>
+          <span class="sizing-badge">β 1.2</span>
+          <span class="sizing-badge">Risk-On Choppy</span>
+        </div>
+        <div class="sizing-pips" id="sizingPips">
+          <!-- filled by JS -->
+        </div>
+      </div>
+      <div class="sizing-right">
+        <div class="sizing-big" id="sizingAlloc">5%</div>
+        <div class="sizing-unit">of portfolio</div>
+      </div>
+    </div>
+
+    <!-- Fundamentals quality strip -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+      <div class="kpi-card" style="padding:8px 10px">
+        <div class="kpi-label">Rev Growth</div>
+        <div class="kpi-value" style="font-size:16px;color:var(--green)" id="fKpiRev">+12.5%</div>
+        <div class="kpi-sub">YoY</div>
+      </div>
+      <div class="kpi-card" style="padding:8px 10px">
+        <div class="kpi-label">Net Margin</div>
+        <div class="kpi-value" style="font-size:16px;color:var(--blue)" id="fKpiMargin">22.1%</div>
+        <div class="kpi-sub">operating 18%</div>
+      </div>
+      <div class="kpi-card" style="padding:8px 10px">
+        <div class="kpi-label">Analyst</div>
+        <div class="kpi-value" style="font-size:13px;color:var(--green);line-height:1.3" id="fKpiAC">Strong Buy</div>
+        <div class="kpi-sub" id="fKpiACsub">12 analysts</div>
+      </div>
+      <div class="kpi-card" style="padding:8px 10px">
+        <div class="kpi-label">Beat Rate</div>
+        <div class="kpi-value" style="font-size:16px;color:var(--amber)" id="fKpiBeat">75%</div>
+        <div class="kpi-sub">3 of 4 qtrs</div>
+      </div>
+    </div>
+
+  </div><!-- /trade -->
+
+  <!-- ── TAB: THESIS ───────────────────────────────── -->
+  <div class="ap-pane thesis-pane" id="pane-thesis">
+
+    <div class="setup-banner">
+      <div class="setup-icon">📈</div>
+      <div class="setup-right">
+        <div class="setup-family">Breakout Expansion</div>
+        <div class="setup-type">52-Week Breakout · Pivot Entry · Cat T2</div>
+        <div class="setup-hold">Hold 7–21 days · Exit 50% at T1</div>
+      </div>
+    </div>
+
+    <div class="checklist">
+      <div class="checklist-title">Technical Confirmation Checklist</div>
+      <div class="check-grid">
+        <div class="check-item pass"><div class="check-dot pass"></div>EMA8 > EMA21 > EMA50</div>
+        <div class="check-item pass"><div class="check-dot pass"></div>RVOL > 1.5× on break</div>
+        <div class="check-item pass"><div class="check-dot pass"></div>52-week high breakout</div>
+        <div class="check-item pass"><div class="check-dot warn"></div>OBV trending up</div>
+        <div class="check-item fail"><div class="check-dot fail"></div>RSI < 70 (extended: 74)</div>
+        <div class="check-item pass"><div class="check-dot pass"></div>Sector outperforming</div>
+        <div class="check-item pass"><div class="check-dot pass"></div>RS vs SPY > 75</div>
+        <div class="check-item fail"><div class="check-dot fail"></div>No earnings within 7d</div>
+      </div>
+    </div>
+
+    <div class="bull-bear-row">
+      <div class="bb-card bb-bull">
+        <div class="bb-title">📗 Bull Case</div>
+        <div class="bb-item"><span class="bb-bullet">▸</span>Fresh 52wk breakout with volume confirmation</div>
+        <div class="bb-item"><span class="bb-bullet">▸</span>Strong RS: outperforming SPY by 18pts</div>
+        <div class="bb-item"><span class="bb-bullet">▸</span>Zacks Rank #1, positive earnings revisions</div>
+      </div>
+      <div class="bb-card bb-bear">
+        <div class="bb-title">📕 Bear Case</div>
+        <div class="bb-item"><span class="bb-bullet">▸</span>RSI extended at 74 — potential near-term pullback</div>
+        <div class="bb-item"><span class="bb-bullet">▸</span>Earnings in 18 days — catalyst risk</div>
+        <div class="bb-item"><span class="bb-bullet">▸</span>Macro headwind: tariff uncertainty</div>
+      </div>
+    </div>
+
+    <div class="timeline-row">
+      <div class="tl-step">
+        <div class="tl-dot done"></div>
+        <div class="tl-lbl">Entry</div>
+        <div class="tl-sub">$126–129<br>today</div>
+      </div>
+      <div class="tl-line"></div>
+      <div class="tl-step">
+        <div class="tl-dot now"></div>
+        <div class="tl-lbl">Watch</div>
+        <div class="tl-sub">trailing<br>EMA21</div>
+      </div>
+      <div class="tl-line"></div>
+      <div class="tl-step">
+        <div class="tl-dot next"></div>
+        <div class="tl-lbl">T1 Sell</div>
+        <div class="tl-sub">$141<br>sell 50%</div>
+      </div>
+      <div class="tl-line"></div>
+      <div class="tl-step">
+        <div class="tl-dot next"></div>
+        <div class="tl-lbl">T2 Sell</div>
+        <div class="tl-sub">$152<br>sell 50%</div>
+      </div>
+      <div class="tl-line"></div>
+      <div class="tl-step">
+        <div class="tl-dot next"></div>
+        <div class="tl-lbl">Exit</div>
+        <div class="tl-sub">breach<br>EMA21</div>
+      </div>
+    </div>
+
+  </div><!-- /thesis -->
+
+  <!-- ── TAB: FUNDAMENTALS ─────────────────────────── -->
+  <div class="ap-pane fund-pane" id="pane-fund">
+
+    <!-- Health scorecard — top-line KPIs -->
+    <div class="fund-health">
+      <div class="fh-card">
+        <div class="fh-label">Fund Score</div>
+        <div class="fh-value" style="color:var(--blue)" id="fhScore">21<span style="font-size:11px;color:var(--muted)">/30</span></div>
+        <div class="fh-sub">70th pctile</div>
+      </div>
+      <div class="fh-card">
+        <div class="fh-label">PEG Ratio</div>
+        <div class="fh-value" style="color:var(--green)">0.85</div>
+        <div class="fh-sub">≤1.0 = value</div>
+      </div>
+      <div class="fh-card">
+        <div class="fh-label">FCF Yield</div>
+        <div class="fh-value" style="color:var(--green)">5.2%</div>
+        <div class="fh-sub">strong cash gen</div>
+      </div>
+      <div class="fh-card">
+        <div class="fh-label">EV/EBITDA</div>
+        <div class="fh-value" style="color:var(--amber)">9.5×</div>
+        <div class="fh-sub">&lt;12× = fair</div>
+      </div>
+    </div>
+
+    <!-- Growth group -->
+    <div class="fund-group">
+      <div class="fund-group-hdr open" onclick="toggleFund('growth')">
+        <span class="fg-icon">📈</span>
+        <span class="fg-name">Growth</span>
+        <span class="fg-badge" style="background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)">8/9 pts</span>
+        <span class="fg-chev open" id="fchev-growth">▾</span>
+      </div>
+      <div class="fund-group-body open" id="fbody-growth">
+        <div class="fm-row">
+          <span class="fm-name">Revenue Growth (YoY)</span>
+          <span class="fm-val" style="color:var(--green)">+12.5%</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:60%;background:var(--green)"></div></div>
+          <span class="fm-pts" style="color:var(--green)">3/5</span>
+        </div>
+        <div class="fm-reason">+10–20% growth tier — double-digit but not hypergrowth</div>
+        <div class="fm-row">
+          <span class="fm-name">EPS Growth (YoY)</span>
+          <span class="fm-val" style="color:var(--green)">+18.5%</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:75%;background:var(--green)"></div></div>
+          <span class="fm-pts" style="color:var(--green)">3/4</span>
+        </div>
+        <div class="fm-reason">Earnings growing faster than revenue = operating leverage</div>
+        <div class="fm-row">
+          <span class="fm-name">EPS Growth Next Year (est)</span>
+          <span class="fm-val" style="color:var(--green)">+15%</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:60%;background:var(--blue)"></div></div>
+          <span class="fm-pts" style="color:var(--blue)">+2</span>
+        </div>
+        <div class="fm-reason">Forward estimates positive — FINVIZ consensus</div>
+      </div>
+    </div>
+
+    <!-- Profitability group -->
+    <div class="fund-group">
+      <div class="fund-group-hdr open" onclick="toggleFund('profit')">
+        <span class="fg-icon">💰</span>
+        <span class="fg-name">Profitability</span>
+        <span class="fg-badge" style="background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)">9/10 pts</span>
+        <span class="fg-chev open" id="fchev-profit">▾</span>
+      </div>
+      <div class="fund-group-body open" id="fbody-profit">
+        <div class="fm-row">
+          <span class="fm-name">Net Margin</span>
+          <span class="fm-val" style="color:var(--green)">22.1%</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:88%;background:var(--green)"></div></div>
+          <span class="fm-pts" style="color:var(--green)">4/5</span>
+        </div>
+        <div class="fm-reason">Gross 65.2% · Operating 18.3% · Net 22.1% — healthy stack</div>
+        <div class="fm-row">
+          <span class="fm-name">ROE / ROA</span>
+          <span class="fm-val" style="color:var(--green)">18.5% / 8.2%</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:80%;background:var(--green)"></div></div>
+          <span class="fm-pts" style="color:var(--green)">4/5</span>
+        </div>
+        <div class="fm-reason">ROE 18.5% strong; D/E 0.45 — moderate leverage</div>
+        <div class="fm-row">
+          <span class="fm-name">FCF Yield</span>
+          <span class="fm-val" style="color:var(--green)">5.2%</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:70%;background:var(--green)"></div></div>
+          <span class="fm-pts" style="color:var(--green)">+1</span>
+        </div>
+        <div class="fm-reason">FCF yield &gt;4% — self-funding, buyback capacity</div>
+      </div>
+    </div>
+
+    <!-- Valuation group -->
+    <div class="fund-group">
+      <div class="fund-group-hdr" onclick="toggleFund('val')">
+        <span class="fg-icon">⚖️</span>
+        <span class="fg-name">Valuation</span>
+        <span class="fg-badge" style="background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)">4/5 pts</span>
+        <span class="fg-chev" id="fchev-val">▾</span>
+      </div>
+      <div class="fund-group-body" id="fbody-val">
+        <div class="fm-row">
+          <span class="fm-name">PEG Ratio</span>
+          <span class="fm-val" style="color:var(--green)">0.85</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:90%;background:var(--green)"></div></div>
+          <span class="fm-pts" style="color:var(--green)">4/5</span>
+        </div>
+        <div class="fm-reason">PEG &lt;1.0 = growth at a reasonable price. Best valuation tier.</div>
+        <div class="fm-row">
+          <span class="fm-name">EV/EBITDA</span>
+          <span class="fm-val" style="color:var(--amber)">9.5×</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:70%;background:var(--amber)"></div></div>
+          <span class="fm-pts" style="color:var(--amber)">2/2</span>
+        </div>
+        <div class="fm-reason">&lt;12× — attractively valued relative to cash flow</div>
+        <div class="fm-row">
+          <span class="fm-name">P/FCF</span>
+          <span class="fm-val" style="color:var(--amber)">12.3×</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:60%;background:var(--amber)"></div></div>
+          <span class="fm-pts" style="color:var(--amber)">1/2</span>
+        </div>
+        <div class="fm-reason">P/FCF 12.3× — reasonable, below sector average of 18×</div>
+      </div>
+    </div>
+
+    <!-- Analyst / Momentum group -->
+    <div class="fund-group">
+      <div class="fund-group-hdr" onclick="toggleFund('analyst')">
+        <span class="fg-icon">🏆</span>
+        <span class="fg-name">Analyst & Momentum</span>
+        <span class="fg-badge" style="background:rgba(59,130,246,.15);color:var(--blue);border:1px solid rgba(59,130,246,.3)">5/6 pts</span>
+        <span class="fg-chev" id="fchev-analyst">▾</span>
+      </div>
+      <div class="fund-group-body" id="fbody-analyst">
+        <div class="fm-row">
+          <span class="fm-name">Analyst Consensus</span>
+          <span class="fm-val" style="color:var(--green)">Strong Buy</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:100%;background:var(--green)"></div></div>
+          <span class="fm-pts" style="color:var(--green)">4/4</span>
+        </div>
+        <div class="fm-reason">12 analysts, avg PT $148 (+15% upside from current)</div>
+        <div class="fm-row">
+          <span class="fm-name">EPS Beat Rate</span>
+          <span class="fm-val" style="color:var(--amber)">75%</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:75%;background:var(--amber)"></div></div>
+          <span class="fm-pts" style="color:var(--amber)">1/2</span>
+        </div>
+        <div class="fm-reason">Beats 3 of last 4 quarters — consistent but not perfect</div>
+        <div class="fm-row">
+          <span class="fm-name">Estimate Revisions</span>
+          <span class="fm-val" style="color:var(--green)">Up strongly</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:100%;background:var(--green)"></div></div>
+          <span class="fm-pts" style="color:var(--green)">+2</span>
+        </div>
+        <div class="fm-reason">3 upgrades in past 10 days — institutional conviction building</div>
+        <div class="fm-row">
+          <span class="fm-name">Inst. Ownership</span>
+          <span class="fm-val" style="color:var(--blue)">65%</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:65%;background:var(--blue)"></div></div>
+          <span class="fm-pts" style="color:var(--blue)">+1</span>
+        </div>
+        <div class="fm-reason">Majority institutionally held — large buyers underpin price</div>
+        <div class="fm-row">
+          <span class="fm-name">Buyback Yield</span>
+          <span class="fm-val" style="color:var(--blue)">1.8%/yr</span>
+          <div class="fm-bar"><div class="fm-fill" style="width:36%;background:var(--blue)"></div></div>
+          <span class="fm-pts" style="color:var(--blue)">+1</span>
+        </div>
+        <div class="fm-reason">Active buyback program — management returning cash to shareholders</div>
+      </div>
+    </div>
+
+    <!-- Bull drivers / Bear risks -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div>
+        <div style="font-size:9px;font-weight:800;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">📗 Bull Drivers</div>
+        <div class="driver-row">
+          <div class="driver-item driver-bull">▸ PEG 0.85 — growth at a discount</div>
+          <div class="driver-item driver-bull">▸ 3 analyst upgrades in 10 days</div>
+          <div class="driver-item driver-bull">▸ Strong FCF — self-funding growth</div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:9px;font-weight:800;color:var(--red);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">📕 Bear Risks</div>
+        <div class="driver-row">
+          <div class="driver-item driver-bear">▸ Beat rate 75% — room for miss</div>
+          <div class="driver-item driver-bear">▸ D/E 0.45 — moderate leverage</div>
+          <div class="driver-item driver-bear">▸ Earnings in 18 days</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /fund -->
+
+  <!-- ── TAB: SCORE ────────────────────────────────── -->
+  <div class="ap-pane score-pane" id="pane-score">
+
+    <div class="score-header-row">
+      <div class="score-mini">
+        <div class="sm-lbl">Tech</div>
+        <div class="sm-val" style="color:var(--green)">26</div>
+        <div class="sm-max">/35</div>
+        <div class="sm-bar"><div class="sm-fill" style="width:74%;background:var(--green)"></div></div>
+      </div>
+      <div class="score-mini">
+        <div class="sm-lbl">Catalyst</div>
+        <div class="sm-val" style="color:var(--amber)">13</div>
+        <div class="sm-max">/20</div>
+        <div class="sm-bar"><div class="sm-fill" style="width:65%;background:var(--amber)"></div></div>
+      </div>
+      <div class="score-mini">
+        <div class="sm-lbl">RS+Sector</div>
+        <div class="sm-val" style="color:var(--blue)">15</div>
+        <div class="sm-max">/20</div>
+        <div class="sm-bar"><div class="sm-fill" style="width:75%;background:var(--blue)"></div></div>
+      </div>
+      <div class="score-mini">
+        <div class="sm-lbl">Smart $</div>
+        <div class="sm-val" style="color:var(--purple)">9</div>
+        <div class="sm-max">/15</div>
+        <div class="sm-bar"><div class="sm-fill" style="width:60%;background:var(--purple)"></div></div>
+      </div>
+      <div class="score-mini">
+        <div class="sm-lbl">Quality</div>
+        <div class="sm-val" style="color:var(--cyan)">4</div>
+        <div class="sm-max">/10</div>
+        <div class="sm-bar"><div class="sm-fill" style="width:40%;background:var(--cyan)"></div></div>
+      </div>
+    </div>
+
+    <div class="pillar-list">
+
+      <div class="pillar-block">
+        <div class="pillar-hdr" onclick="togglePillar('tech')">
+          <span class="pillar-icon">📊</span>
+          <span class="pillar-name">Technical Structure</span>
+          <div class="pillar-track"><div class="pillar-fill" style="width:74%;background:var(--green)"></div></div>
+          <span class="pillar-score" style="color:var(--green)">26/35</span>
+          <span class="pillar-chev" id="chev-tech">▾</span>
+        </div>
+        <div class="pillar-body" id="sig-tech">
+          <div class="sub-row">
+            <span class="sub-icon">📈</span>
+            <span class="sub-name">EMA Stack</span>
+            <div class="sub-bar"><div class="sub-fill" style="width:100%"></div></div>
+            <span class="sub-score" style="color:var(--green)">8/8</span>
+          </div>
+          <div class="sub-reason">EMA8 > EMA21 > EMA50 > EMA200 — full bull stack confirmed</div>
+          <div class="sub-row">
+            <span class="sub-icon">📊</span>
+            <span class="sub-name">Volume</span>
+            <div class="sub-bar"><div class="sub-fill" style="width:75%"></div></div>
+            <span class="sub-score" style="color:var(--amber)">6/8</span>
+          </div>
+          <div class="sub-reason">RVOL 1.8× on breakout day; OBV sloping up</div>
+          <div class="sub-row">
+            <span class="sub-icon">🔄</span>
+            <span class="sub-name">Momentum</span>
+            <div class="sub-bar"><div class="sub-fill" style="width:70%"></div></div>
+            <span class="sub-score" style="color:var(--amber)">7/10</span>
+          </div>
+          <div class="sub-reason">RSI 74 (slightly extended), MACD histogram positive, ADX 32</div>
+          <div class="sub-row">
+            <span class="sub-icon">🎯</span>
+            <span class="sub-name">S/R Structure</span>
+            <div class="sub-bar"><div class="sub-fill" style="width:55%"></div></div>
+            <span class="sub-score" style="color:var(--amber)">5/9</span>
+          </div>
+          <div class="sub-reason">Clear 52wk breakout level; prior resistance becomes support</div>
+        </div>
+      </div>
+
+      <div class="pillar-block">
+        <div class="pillar-hdr" onclick="togglePillar('cat')">
+          <span class="pillar-icon">⚡</span>
+          <span class="pillar-name">Catalyst Quality</span>
+          <div class="pillar-track"><div class="pillar-fill" style="width:65%;background:var(--amber)"></div></div>
+          <span class="pillar-score" style="color:var(--amber)">13/20</span>
+          <span class="pillar-chev" id="chev-cat">▾</span>
+        </div>
+        <div class="pillar-body" id="sig-cat">
+          <div class="sub-row">
+            <span class="sub-icon">📰</span>
+            <span class="sub-name">Named Catalyst</span>
+            <div class="sub-bar"><div class="sub-fill" style="width:70%;background:var(--amber)"></div></div>
+            <span class="sub-score" style="color:var(--amber)">7/10</span>
+          </div>
+          <div class="sub-reason">52wk breakout + Zacks Rank #1 upgrade — Cat T2 level</div>
+          <div class="sub-row">
+            <span class="sub-icon">🔥</span>
+            <span class="sub-name">Urgency / Time Sensitivity</span>
+            <div class="sub-bar"><div class="sub-fill" style="width:60%;background:var(--amber)"></div></div>
+            <span class="sub-score" style="color:var(--amber)">6/10</span>
+          </div>
+          <div class="sub-reason">Breakout occurred 2 sessions ago — still within entry window</div>
+        </div>
+      </div>
+
+      <div class="pillar-block">
+        <div class="pillar-hdr" onclick="togglePillar('sm')">
+          <span class="pillar-icon">🏦</span>
+          <span class="pillar-name">Smart Money</span>
+          <div class="pillar-track"><div class="pillar-fill" style="width:60%;background:var(--purple)"></div></div>
+          <span class="pillar-score" style="color:var(--purple)">9/15</span>
+          <span class="pillar-chev" id="chev-sm">▾</span>
+        </div>
+        <div class="pillar-body" id="sig-sm">
+          <div class="sub-row">
+            <span class="sub-icon">👔</span>
+            <span class="sub-name">Insider Activity</span>
+            <div class="sub-bar"><div class="sub-fill" style="width:50%;background:var(--purple)"></div></div>
+            <span class="sub-score" style="color:var(--muted2)">0/5</span>
+          </div>
+          <div class="sub-reason">No insider buys in past 30 days</div>
+          <div class="sub-row">
+            <span class="sub-icon">📋</span>
+            <span class="sub-name">Institutional Flow</span>
+            <div class="sub-bar"><div class="sub-fill" style="width:90%;background:var(--purple)"></div></div>
+            <span class="sub-score" style="color:var(--green)">9/10</span>
+          </div>
+          <div class="sub-reason">Zacks Rank #1 = institutional earnings estimate upgrades confirmed</div>
+        </div>
+      </div>
+
+    </div>
+  </div><!-- /score -->
+
+  <!-- ── TAB: AI INTEL ──────────────────────────────── -->
+  <div class="ap-pane intel-pane" id="pane-intel">
+
+    <div class="intel-verdict-card" id="intelVerdCard">
+      <div class="iv-header">
+        <span class="iv-badge chip-watch" id="intelBadge" style="background:rgba(245,158,11,.15);color:var(--amber);border:1px solid rgba(245,158,11,.3)">WATCH</span>
+        <span class="iv-score">Score 67 / Threshold 72 / R:R 3.2×</span>
+      </div>
+      <div class="iv-text" id="intelText">
+        ALSN cleared a 52-week high breakout on above-average volume 2 sessions ago. EMA stack is fully bullish and RS vs SPY is strong at 78. However, the score (67) falls short of the Risk-On Choppy regime threshold (72). RSI is extended at 74, increasing pullback risk near-term. Monitoring for a 2–3% pullback toward $126 entry zone before committing. R:R of 3.2× is satisfactory but conviction is T3 given the regime and score gap.
+      </div>
+    </div>
+
+    <div class="decision-trace">
+      <div class="dt-title">Decision Trace — Why WATCH not BUY</div>
+      <div class="dt-row dt-pass"><div class="dt-icon"></div><div class="dt-text"><strong>Pre-trade gate PASS</strong> — Liquidity ok ($2.1B daily vol), no earnings blackout, regime allows long</div></div>
+      <div class="dt-row dt-pass"><div class="dt-icon"></div><div class="dt-text"><strong>R:R gate PASS</strong> — 3.2× exceeds minimum 3.0×</div></div>
+      <div class="dt-row dt-warn"><div class="dt-icon"></div><div class="dt-text"><strong>Score gate MISS</strong> — Score 67 &lt; threshold 72 (Risk-On Choppy requires higher bar). Missing 5 pts. Upgrade catalyst or wait for FRESH entry.</div></div>
+      <div class="dt-row dt-pass"><div class="dt-icon"></div><div class="dt-text"><strong>Entry quality PULLBACK</strong> — Within 1.25 ATR of EMA21. Acceptable but not ideal.</div></div>
+      <div class="dt-row dt-warn"><div class="dt-icon"></div><div class="dt-text"><strong>RSI caution</strong> — RSI 74 is above 70 extended threshold. Mean-reversion risk elevated.</div></div>
+      <div class="dt-row dt-info"><div class="dt-icon"></div><div class="dt-text"><strong>Verdict: WATCH</strong> — Add to watchlist. Re-evaluate if RSI cools to 60–65 or score improves.</div></div>
+    </div>
+
+    <div class="warning-list">
+      <div class="warn-item risk">
+        <span class="warn-icon">🔴</span>
+        Earnings in 18 days (May 1). Avoid holding through — plan to exit by Apr 29 if still open.
+      </div>
+      <div class="warn-item caution">
+        <span class="warn-icon">🟡</span>
+        RSI 74 — extended. Ideal entry on a 2–3% pullback to $126 (EMA21). Don't chase current price.
+      </div>
+      <div class="warn-item note">
+        <span class="warn-icon">🔵</span>
+        Sector (Industrials) is outperforming the market this week. Confirms setup quality.
+      </div>
+    </div>
+
+  </div><!-- /intel -->
+
+  <!-- Action bar -->
+  <div class="ap-actions" id="apActions">
+    <button class="btn-primary long" id="actionBtn">+ Long</button>
+    <button class="btn-secondary">Watch List</button>
+    <button class="btn-secondary">Skip</button>
+  </div>
+
+</div><!-- /panel -->
+
+<!-- Notes panel -->
+<div class="notes-panel">
+  <div class="note-card">
+    <div class="note-title">Design Spec — 4 Tabs</div>
+    <div class="design-note">
+      <ul>
+        <li><strong>Trade</strong> — Immediately actionable. Score KPIs, price levels (4 cards), visual price ruler, position sizing. No scrolling needed.</li>
+        <li><strong>Thesis</strong> — Setup family banner, checklist, bull/bear case, timeline.</li>
+        <li><strong>Score</strong> — 5 mini KPI cards + expandable pillar blocks with sub-signal rows.</li>
+        <li><strong>AI Intel</strong> — Full verdict text, decision trace (pass/warn/fail rows), warning list.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note-card">
+    <div class="note-title">Key Differences vs Current</div>
+    <div class="design-note">
+      <ul>
+        <li><strong>No scrollbar per tab</strong> — content fits panel height</li>
+        <li><strong>Price level cards</strong> replace the table rows</li>
+        <li><strong>Visual price ruler</strong> shows stop/entry/T1/T2 on a bar</li>
+        <li><strong>Decision trace</strong> explains WHY verdict was given (new)</li>
+        <li><strong>Warning list</strong> surfaces actionable risk items prominently</li>
+        <li><strong>Position sizing strip</strong> shows alloc% + pip dots</li>
+        <li><strong>Setup checklist</strong> — pass/warn/fail bullets at a glance</li>
+        <li><strong>Bull/Bear cards</strong> side-by-side instead of stacked text</li>
+        <li><strong>Trade timeline</strong> — entry → T1 → T2 → exit visual</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note-card">
+    <div class="note-title">Analysis Methodology</div>
+    <div class="design-note">
+      <strong>Universe:</strong> Zacks Rank #1 (earnings estimate upgrades by institutions) filtered to S&P 500 + custom watchlist.
+      <br><br>
+      <strong>5-Pillar Scoring (100 pts):</strong>
+      <ul>
+        <li><span class="tag">Tech 35</span> EMA stack, RVOL, RSI/MACD, S/R</li>
+        <li><span class="tag">Catalyst 20</span> Named catalyst quality + urgency</li>
+        <li><span class="tag">RS+Sector 20</span> RS vs SPY + sector outperformance</li>
+        <li><span class="tag">Smart Money 15</span> Insider + institutional flow</li>
+        <li><span class="tag">Quality Gate 10</span> Fundamentals + balance sheet</li>
+      </ul>
+      <br>
+      <strong>Brainstorm — Possible Upgrades:</strong>
+      <ul>
+        <li>Add dark pool print % (above-average = institutional accumulation)</li>
+        <li>Options gamma squeeze detector (GEX flip above price)</li>
+        <li>13F quarterly change delta (new institutional positions)</li>
+        <li>Sector rotation score (money flowing into sector vs out)</li>
+        <li>Correlation check (avoid positions >0.85 correlated with existing)</li>
+        <li>Earnings beat rate (last 4 quarters — consistent beaters only)</li>
+        <li>Short interest + days-to-cover (squeeze potential)</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── demo data ──────────────────────────────────────── */
+var demos = {
+  buy: { fScore:26, fRev:'+34%', fMargin:'55.0%', fAC:'Strong Buy', fACsub:'38 analysts', fBeat:'100%', fPEG:'1.8', fFCF:'3.1%', fEV:'35×',
+    ticker:'NVDA', name:'NVIDIA Corporation', price:875.50, chg:3.2, verdict:'BUY', score:84,
+    ring:'ring-buy', verdCls:'chip-buy',
+    rr:'4.1×', rs:92, stop:'$827.00', stopPct:'−5.5%', entry:'$870–878', t1:'$940.00', t1Pct:'+7.4%', t2:'$1020.00', t2Pct:'+16.5%',
+    alloc:'10%', convTier:'T2', beta:'β 1.8', regime:'Risk-On Trending', pip:7,
+    action:'+ Long', actionCls:'long',
+    kpiScoreColor:'var(--green)', kpiScoreW:'84%', kpiThresh:'threshold: 65',
+    intelText:'NVDA broke out from a VCP base on 3.2× average volume. AI capex cycle remains intact with MSFT, META, GOOGL all guiding up on compute spend. EMA stack fully bullish, RS vs SPY at 92. Score 84 clears the 65 BUY threshold in Risk-On Trending regime. T1 conviction — full 10% allocation justified.',
+    verdCardCls:'buy-card', intelBadgeStyle:'background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)'
+  },
+  watch: { fScore:21, fRev:'+12.5%', fMargin:'22.1%', fAC:'Strong Buy', fACsub:'12 analysts', fBeat:'75%', fPEG:'0.85', fFCF:'5.2%', fEV:'9.5×',
+    ticker:'ALSN', name:'Allison Transmission Holdings Inc', price:128.51, chg:1.83, verdict:'WATCH', score:67,
+    ring:'ring-watch', verdCls:'chip-watch',
+    rr:'3.2×', rs:78, stop:'$121.30', stopPct:'−5.6%', entry:'$126–129', t1:'$141.00', t1Pct:'+9.7%', t2:'$152.00', t2Pct:'+18.3%',
+    alloc:'5%', convTier:'T3', beta:'β 1.2', regime:'Risk-On Choppy', pip:4,
+    action:'+ Long', actionCls:'long',
+    kpiScoreColor:'var(--amber)', kpiScoreW:'67%', kpiThresh:'threshold: 72',
+    intelText:'ALSN cleared a 52-week high breakout 2 sessions ago. EMA stack is fully bullish and RS vs SPY is strong at 78. However, score (67) falls short of the Risk-On Choppy threshold (72). RSI extended at 74. Monitoring for a 2–3% pullback to $126 entry zone before committing.',
+    verdCardCls:'', intelBadgeStyle:'background:rgba(245,158,11,.15);color:var(--amber);border:1px solid rgba(245,158,11,.3)'
+  },
+  avoid: { fScore:8, fRev:'+6%', fMargin:'-4.2%', fAC:'Hold', fACsub:'22 analysts', fBeat:'50%', fPEG:'4.2', fFCF:'0.8%', fEV:'48×',
+    ticker:'HUBS', name:'HubSpot Inc', price:192.26, chg:-2.4, verdict:'AVOID', score:27,
+    ring:'ring-avoid', verdCls:'chip-avoid',
+    rr:'1.2×', rs:28, stop:'$185.00', stopPct:'−3.8%', entry:'$190–193', t1:'$198.00', t1Pct:'+3.0%', t2:'$208.00', t2Pct:'+8.2%',
+    alloc:'0%', convTier:'T3', beta:'β 1.6', regime:'Risk-On Choppy', pip:0,
+    action:'No Trade', actionCls:'long',
+    kpiScoreColor:'var(--red)', kpiScoreW:'27%', kpiThresh:'threshold: 72',
+    intelText:'HUBS is in a confirmed downtrend with EMA stack inverted (EMA8 < EMA21 < EMA50). Score 27 well below BUY threshold. R:R 1.2× is unacceptable — not enough reward for the risk. Bear 11/15 on technicals. No trade.',
+    verdCardCls:'avoid-card', intelBadgeStyle:'background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3)'
+  },
+  short: { fScore:11, fRev:'+4%', fMargin:'-8.5%', fAC:'Hold', fACsub:'14 analysts', fBeat:'50%', fPEG:'6.1', fFCF:'1.2%', fEV:'55×',
+    ticker:'GWRE', name:'Guidewire Software Inc', price:117.95, chg:-3.1, verdict:'SHORT', score:34,
+    ring:'ring-short', verdCls:'chip-short',
+    rr:'3.5×', rs:22, stop:'$124.00', stopPct:'+5.1%', entry:'$118–120', t1:'$105.00', t1Pct:'−10.9%', t2:'$96.00', t2Pct:'−18.6%',
+    alloc:'5%', convTier:'T3', beta:'β 1.5', regime:'Risk-Off Trending', pip:3,
+    action:'↓ Short', actionCls:'short',
+    kpiScoreColor:'var(--purple)', kpiScoreW:'34%', kpiThresh:'bear threshold: 78',
+    intelText:'GWRE broke below EMA50 support on 2.8× volume in a confirmed Risk-Off regime. RSI 28 = oversold but trend is clearly down. Short setup: sell the bounce to EMA21. Stop above EMA50. VIX > 28 confirms short regime gate is open.',
+    verdCardCls:'short-card', intelBadgeStyle:'background:rgba(139,92,246,.15);color:var(--purple);border:1px solid rgba(139,92,246,.3)'
+  }
+};
+
+function setDemo(type) {
+  document.querySelectorAll('.demo-btn').forEach(function(b) { b.classList.remove('active'); });
+  event.target.classList.add('active');
+  var d = demos[type];
+  if (!d) return;
+
+  /* Header */
+  var ring = document.getElementById('verdRing');
+  ring.className = 'ap-verdict-ring ' + d.ring;
+  document.getElementById('verdScore').textContent = d.score;
+  document.getElementById('verdLabel').textContent = d.verdict;
+  document.getElementById('apTicker').textContent = d.ticker;
+  document.getElementById('apName').textContent = d.name;
+  document.getElementById('apPrice').textContent = '$' + d.price.toFixed(2);
+  var chgEl = document.getElementById('apChg');
+  chgEl.textContent = (d.chg >= 0 ? '▲ +' : '▼ ') + Math.abs(d.chg).toFixed(2) + '%';
+  chgEl.className = 'ap-chg ' + (d.chg >= 0 ? 'up' : 'dn');
+  var verdChip = document.getElementById('verdChip');
+  verdChip.textContent = d.verdict;
+  verdChip.className = 'ap-chip ' + d.verdCls;
+
+  /* KPI */
+  document.getElementById('kpiScore').textContent = d.score;
+  document.getElementById('kpiScore').style.color = d.kpiScoreColor;
+  document.getElementById('kpiScoreFill').style.width = d.kpiScoreW;
+  document.getElementById('kpiScoreFill').style.background = d.kpiScoreColor;
+  document.querySelector('.kpi-card .kpi-sub').textContent = d.kpiThresh;
+  document.getElementById('kpiRR').textContent = d.rr;
+
+  /* Position sizing pips */
+  var pips = document.getElementById('sizingPips');
+  pips.innerHTML = '';
+  for (var i = 0; i < 10; i++) {
+    var p = document.createElement('div');
+    p.className = 'sizing-pip' + (i < d.pip ? ' filled' : '');
+    pips.appendChild(p);
+  }
+  document.getElementById('sizingAlloc').textContent = d.alloc;
+
+  /* Intel */
+  document.getElementById('intelVerdCard').className = 'intel-verdict-card ' + d.verdCardCls;
+  document.getElementById('intelBadge').textContent = d.verdict;
+  document.getElementById('intelBadge').style.cssText = d.intelBadgeStyle + ';font-size:11px;font-weight:800;padding:3px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:.5px';
+  document.getElementById('intelText').textContent = d.intelText;
+
+  /* Action button */
+  var btn = document.getElementById('actionBtn');
+  btn.textContent = d.action;
+  btn.className = 'btn-primary ' + d.actionCls;
+
+  /* Fundamentals quality strip (Trade tab) */
+  if (d.fRev)    document.getElementById('fKpiRev').textContent    = d.fRev;
+  if (d.fMargin) document.getElementById('fKpiMargin').textContent = d.fMargin;
+  if (d.fAC)     document.getElementById('fKpiAC').textContent     = d.fAC;
+  if (d.fACsub)  document.getElementById('fKpiACsub').textContent  = d.fACsub;
+  if (d.fBeat)   document.getElementById('fKpiBeat').textContent   = d.fBeat;
+
+  /* Fundamentals tab scorecard */
+  if (d.fScore != null) {
+    var fhEl = document.getElementById('fhScore');
+    var fPct = Math.round(d.fScore / 30 * 100);
+    var fCol = fPct >= 70 ? 'var(--green)' : fPct >= 45 ? 'var(--amber)' : 'var(--red)';
+    fhEl.style.color = fCol;
+    fhEl.innerHTML = d.fScore + '<span style="font-size:11px;color:var(--muted)">/30</span>';
+  }
+
+  /* Ruler */
+  buildRuler(d);
+}
+
+function buildRuler(d) {
+  var stop   = parseFloat(d.stop.replace('$',''));
+  var entry  = parseFloat(d.entry.split('–')[0].replace('$',''));
+  var entryH = parseFloat(d.entry.split('–')[1] ? d.entry.split('–')[1].replace('$','') : entry * 1.01);
+  var t1     = parseFloat(d.t1.replace('$',''));
+  var t2     = parseFloat(d.t2.replace('$',''));
+  var lo     = Math.min(stop, entry) * 0.98;
+  var hi     = t2 * 1.02;
+  var span   = hi - lo;
+  function p(v) { return ((v - lo) / span * 100).toFixed(1) + '%'; }
+
+  var bar = document.getElementById('rulerBar');
+  var html = '';
+  /* stop zone red */
+  html += '<div class="ruler-zone" style="left:0;width:' + p(stop) + ';background:rgba(239,68,68,.15);border-right:2px solid #ef4444;border-radius:6px 0 0 6px"></div>';
+  /* entry zone green */
+  var ew = ((entryH - entry) / span * 100).toFixed(1);
+  html += '<div class="ruler-zone" style="left:' + p(entry) + ';width:' + (ew > 0 ? ew : 1) + '%;background:rgba(34,197,94,.25);border:1px solid #22c55e"></div>';
+  /* T1 line */
+  html += '<div class="ruler-line" style="left:' + p(t1) + ';background:var(--amber)"></div>';
+  /* T2 line */
+  html += '<div class="ruler-line" style="left:' + p(t2) + ';background:var(--blue)"></div>';
+  /* current price dot */
+  var price = parseFloat(d.price);
+  html += '<div class="ruler-dot" style="left:' + p(price) + ';background:var(--text)"></div>';
+  bar.innerHTML = html;
+}
+
+/* ── Tab switching ──────────────────────────────────── */
+function showTab(name) {
+  document.querySelectorAll('.ap-tab').forEach(function(t) { t.classList.remove('active'); });
+  document.querySelectorAll('.ap-pane').forEach(function(p) { p.classList.remove('active'); });
+  var tabs = document.querySelectorAll('.ap-tab');
+  var map = { trade: 0, thesis: 1, fund: 2, score: 3, intel: 4 };
+  if (tabs[map[name]]) tabs[map[name]].classList.add('active');
+  var pane = document.getElementById('pane-' + name);
+  if (pane) pane.classList.add('active');
+}
+
+/* ── Fundamentals group expand/collapse ─────────────── */
+function toggleFund(id) {
+  var body = document.getElementById('fbody-' + id);
+  var hdr  = body ? body.previousElementSibling : null;
+  var chev = document.getElementById('fchev-' + id);
+  if (!body) return;
+  var open = body.classList.toggle('open');
+  if (hdr)  hdr.classList.toggle('open', open);
+  if (chev) chev.classList.toggle('open', open);
+}
+
+/* ── Pillar expand/collapse ─────────────────────────── */
+function togglePillar(id) {
+  var body = document.getElementById('sig-' + id);
+  var chev = document.getElementById('chev-' + id);
+  if (!body) return;
+  var open = body.classList.toggle('open');
+  if (chev) chev.classList.toggle('open', open);
+}
+
+/* ── Init ─────────────────────────────────────────────── */
+setDemo('watch');
+buildRuler(demos.watch);
+</script>
+</body>
+</html>

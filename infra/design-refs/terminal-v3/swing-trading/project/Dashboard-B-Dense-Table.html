@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Dashboard B — Dense Table</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-0: oklch(13% 0.012 250);
+    --bg-1: oklch(16% 0.012 250);
+    --bg-2: oklch(19% 0.014 250);
+    --bg-3: oklch(23% 0.014 250);
+    --ink-0: oklch(96% 0.005 90);
+    --ink-1: oklch(82% 0.006 90);
+    --ink-2: oklch(62% 0.008 90);
+    --ink-3: oklch(42% 0.01 250);
+    --rule: oklch(28% 0.012 250);
+    --rule-2: oklch(34% 0.014 250);
+    --accent: oklch(78% 0.16 75);
+    --accent-2: oklch(76% 0.13 215);
+    --green: oklch(74% 0.16 145);
+    --red:   oklch(68% 0.22 28);
+    --grid: oklch(22% 0.012 250);
+    --row-h: 26px;
+  }
+  [data-theme="light"] {
+    --bg-0: oklch(98% 0.004 90); --bg-1: oklch(96% 0.005 90); --bg-2: oklch(94% 0.006 90); --bg-3: oklch(91% 0.008 90);
+    --ink-0: oklch(15% 0.012 250); --ink-1: oklch(28% 0.012 250); --ink-2: oklch(45% 0.012 250); --ink-3: oklch(60% 0.012 250);
+    --rule: oklch(85% 0.008 90); --rule-2: oklch(78% 0.01 90); --grid: oklch(92% 0.005 90);
+    --green: oklch(54% 0.16 145); --red: oklch(56% 0.22 28);
+  }
+  [data-density="comfortable"] { --row-h: 32px; }
+  [data-density="ultra"] { --row-h: 22px; }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg-0); color: var(--ink-0);
+    font-family: 'Inter Tight', -apple-system, sans-serif; font-size: 13px;
+    -webkit-font-smoothing: antialiased; }
+  body { min-height: 100vh; overflow-x: hidden; }
+  .mono { font-family: 'JetBrains Mono', monospace; font-feature-settings: 'zero','ss01'; }
+  .num  { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; font-feature-settings: 'zero'; }
+  .up { color: var(--green); }
+  .down { color: var(--red); }
+  .dim { color: var(--ink-2); }
+
+  /* topbar */
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--bg-0); border-bottom: 1px solid var(--rule);
+    display: grid; grid-template-columns: 280px 1fr auto;
+    align-items: center; height: 44px; padding: 0 14px; gap: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark { width: 22px; height: 22px; display: grid; place-items: center; background: var(--accent); color: var(--bg-0); font-family: 'JetBrains Mono', monospace; font-weight: 800; font-size: 13px; border-radius: 3px; }
+  .brand-name { font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em; }
+  .brand-sub { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink-2); }
+  .topbar-c { display: flex; align-items: center; gap: 14px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-2); }
+  .topbar-c .v { color: var(--ink-0); }
+  .pill { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.1em; padding: 2px 7px; border-radius: 3px; border: 1px solid var(--rule-2); color: var(--ink-1); background: var(--bg-2); }
+  .pill.green { color: var(--green); border-color: color-mix(in oklch, var(--green) 40%, transparent); background: color-mix(in oklch, var(--green) 10%, transparent); }
+  .pill.red   { color: var(--red);   border-color: color-mix(in oklch, var(--red) 40%, transparent);   background: color-mix(in oklch, var(--red) 10%, transparent); }
+  .pill.amber { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 40%, transparent); background: color-mix(in oklch, var(--accent) 10%, transparent); }
+  .pill.blue  { color: var(--accent-2); border-color: color-mix(in oklch, var(--accent-2) 40%, transparent); background: color-mix(in oklch, var(--accent-2) 10%, transparent); }
+  .topbar-r { display: flex; gap: 8px; align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-2); }
+  .clock-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* macro strip */
+  .macro {
+    border-bottom: 1px solid var(--rule);
+    background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
+    display: grid; grid-template-columns: repeat(8, 1fr) auto;
+    height: 56px;
+  }
+  .mc { padding: 6px 12px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 2px; justify-content: center; min-width: 0; }
+  .mc:last-child { border-right: none; }
+  .mc-l { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--ink-3); }
+  .mc-v { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600; color: var(--ink-0); font-variant-numeric: tabular-nums; }
+  .mc-c { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .regime { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 18px; gap: 4px; }
+  .regime-name { font-family: 'JetBrains Mono', monospace; font-weight: 700; letter-spacing: 0.1em; font-size: 11px; color: var(--green); display: flex; align-items: center; gap: 6px; }
+  .regime-meta { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--ink-2); letter-spacing: 0.08em; }
+  .regime-name::before { content:''; width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px var(--green); }
+
+  /* toolbar */
+  .toolbar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+    border-bottom: 1px solid var(--rule); background: var(--bg-0);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  }
+  .tb-tabs { display: flex; gap: 0; }
+  .tb-tab { padding: 4px 12px; color: var(--ink-2); cursor: pointer; border-bottom: 2px solid transparent; letter-spacing: 0.04em; }
+  .tb-tab.on { color: var(--ink-0); border-bottom-color: var(--accent); }
+  .tb-tab:hover { color: var(--ink-0); }
+  .tb-spacer { flex: 1; }
+  .tb-search { background: var(--bg-2); border: 1px solid var(--rule); color: var(--ink-0); font-family: inherit; font-size: 11px; padding: 4px 8px; border-radius: 3px; width: 220px; }
+  .tb-search:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .chip { font-size: 10px; padding: 3px 8px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 4px; }
+  .chip.on { background: var(--bg-3); color: var(--ink-0); border-color: var(--rule-2); }
+  .chip.accent { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 50%, transparent); }
+  .chip:hover { color: var(--ink-0); }
+  .icon-btn { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--rule); border-radius: 3px; background: var(--bg-1); color: var(--ink-2); cursor: pointer; }
+  .icon-btn:hover { background: var(--bg-2); color: var(--ink-0); }
+  .icon-btn.on { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 50%, transparent); }
+
+  /* table */
+  .tbl-wrap { background: var(--bg-0); }
+  table.dt { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; }
+  table.dt thead th {
+    text-align: left; font-weight: 500; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-2); padding: 7px 8px; border-bottom: 1px solid var(--rule-2); background: var(--bg-1);
+    position: sticky; top: 0; user-select: none; cursor: pointer; white-space: nowrap;
+  }
+  table.dt thead th:hover { color: var(--ink-0); }
+  table.dt thead th.sorted { color: var(--accent); }
+  table.dt thead th.sorted::after { content:' ▾'; }
+  table.dt thead th.sorted.asc::after { content:' ▴'; }
+  table.dt td { padding: 0 8px; height: var(--row-h); border-bottom: 1px solid var(--rule); font-variant-numeric: tabular-nums; vertical-align: middle; white-space: nowrap; }
+  table.dt tbody tr { cursor: pointer; transition: background 0.06s; }
+  table.dt tbody tr:hover { background: var(--bg-2); }
+  table.dt tbody tr.active { background: color-mix(in oklch, var(--accent) 12%, transparent); }
+  table.dt tbody tr.active td:first-child { box-shadow: inset 2px 0 var(--accent); }
+  table.dt tbody tr.has-drawer { background: color-mix(in oklch, var(--accent) 10%, transparent); }
+  .num-r { text-align: right; }
+  .num-c { text-align: center; }
+  .sym { color: var(--ink-0); font-weight: 700; font-size: 12.5px; font-family: 'Inter Tight', sans-serif; letter-spacing: -0.01em; }
+  .sect { color: var(--ink-3); font-size: 9.5px; letter-spacing: 0.06em; }
+  .setup { color: var(--ink-1); font-family: 'Inter Tight', sans-serif; font-size: 11.5px; }
+  .stage-cell { font-size: 9.5px; letter-spacing: 0.1em; }
+  .stage-cell.ready { color: var(--accent); }
+  .stage-cell.in    { color: var(--accent-2); }
+  .stage-cell.watch { color: var(--ink-2); }
+  .stage-cell.cool  { color: var(--red); }
+  .bap-cell { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; }
+  .bap-bar { width: 32px; height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden; display: inline-block; vertical-align: middle; }
+  .bap-bar-fill { display: block; height: 100%; }
+  .news-tag { font-size: 9px; padding: 1px 5px; border-radius: 2px; letter-spacing: 0.08em; }
+  .news-tag.up { color: var(--green); border: 1px solid color-mix(in oklch, var(--green) 50%, transparent); }
+  .news-tag.dn { color: var(--red); border: 1px solid color-mix(in oklch, var(--red) 50%, transparent); }
+  .news-tag.nu { color: var(--accent); border: 1px solid color-mix(in oklch, var(--accent) 50%, transparent); }
+  .earn-soon { color: var(--accent); font-weight: 600; }
+  .earn-warn { color: var(--red); font-weight: 600; }
+
+  /* sparkline */
+  .spark-cell { width: 78px; }
+  .spark-svg { width: 78px; height: 18px; display: block; }
+
+  /* mini ruler */
+  .ruler-cell { width: 130px; }
+  .mini-ruler { position: relative; height: 14px; border-radius: 2px; overflow: visible; background: var(--bg-3); }
+  .mr-stop { position: absolute; left: 0; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, color-mix(in oklch, var(--red) 18%, transparent) 0 4px, color-mix(in oklch, var(--red) 28%, transparent) 4px 8px); }
+  .mr-entry { position: absolute; top: 0; bottom: 0; background: color-mix(in oklch, var(--green) 24%, transparent); border-left: 1px solid var(--green); border-right: 1px dashed var(--green); }
+  .mr-runway { position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, color-mix(in oklch, var(--green) 8%, transparent), color-mix(in oklch, var(--accent-2) 14%, transparent)); }
+  .mr-tick { position: absolute; top: -2px; bottom: -2px; width: 1px; }
+  .mr-t1 { background: var(--accent); }
+  .mr-t2 { background: var(--accent-2); }
+  .mr-now { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink-0); box-shadow: 0 0 0 2px color-mix(in oklch, var(--ink-0) 30%, transparent); }
+
+  /* drawer */
+  .drawer {
+    background: var(--bg-1); border-top: 2px solid var(--accent); border-bottom: 1px solid var(--rule);
+    display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 0;
+    overflow: hidden;
+    animation: slide-in 0.18s ease-out;
+  }
+  @keyframes slide-in { from { max-height: 0; opacity: 0; } to { max-height: 600px; opacity: 1; } }
+  .dwr-pane { padding: 14px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .dwr-pane:last-child { border-right: none; }
+  .dwr-h { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-2); display: flex; justify-content: space-between; align-items: center; }
+  .dwr-chart { background: var(--bg-2); border: 1px solid var(--rule); border-radius: 4px; height: 220px; position: relative; overflow: hidden; }
+  .dwr-grid { position: absolute; inset: 8px; background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px), linear-gradient(to bottom, var(--grid) 1px, transparent 1px); background-size: 10% 25%; opacity: 0.5; }
+  .dwr-chart svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .plan-grid { display: grid; grid-template-columns: 90px 1fr 70px; gap: 6px 10px; align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .plan-lbl { color: var(--ink-2); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; }
+  .plan-val { font-weight: 600; color: var(--ink-0); }
+  .plan-pct { text-align: right; color: var(--ink-2); }
+  .plan-pct.up { color: var(--green); }
+  .plan-pct.dn { color: var(--red); }
+  .plan-row { display: contents; }
+  .pillar-row { display: grid; grid-template-columns: 60px 1fr 36px; gap: 8px; align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; padding: 3px 0; }
+  .pillar-name { color: var(--ink-1); font-size: 10px; letter-spacing: 0.08em; }
+  .pillar-bar { height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden; }
+  .pillar-fill { height: 100%; }
+  .pillar-pts { text-align: right; color: var(--ink-2); }
+  .intel-line { display: grid; grid-template-columns: 36px 1fr auto; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--rule); font-family: 'JetBrains Mono', monospace; font-size: 10.5px; align-items: center; }
+  .intel-line:last-child { border-bottom: none; }
+  .intel-line .t { color: var(--ink-3); font-size: 9.5px; }
+  .intel-line .x { color: var(--ink-1); font-family: 'Inter Tight', sans-serif; font-size: 11.5px; line-height: 1.35; min-width: 0; }
+  .intel-line .x b { color: var(--ink-0); font-weight: 600; }
+  .key { font-family: inherit; padding: 1px 5px; border: 1px solid var(--rule-2); border-radius: 2px; color: var(--ink-1); font-size: 10px; }
+
+  /* footer status */
+  .statusbar {
+    display: flex; gap: 14px; align-items: center; padding: 6px 14px; height: 28px;
+    border-top: 1px solid var(--rule); background: var(--bg-1);
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--ink-2);
+    position: sticky; bottom: 0; z-index: 30;
+  }
+  .statusbar .ok { color: var(--green); }
+  .statusbar .warn { color: var(--accent); }
+  .statusbar kbd { font-family: inherit; padding: 1px 5px; border: 1px solid var(--rule-2); border-radius: 2px; color: var(--ink-1); font-size: 10px; }
+  .grow { flex: 1; }
+
+  /* tweaks */
+  .tw-fab { position: fixed; bottom: 38px; right: 14px; z-index: 100; padding: 8px 12px; background: var(--bg-2); border: 1px solid var(--rule-2); color: var(--ink-1); border-radius: 4px; cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .tw-fab:hover { color: var(--ink-0); border-color: var(--accent); }
+  .tw-panel { position: fixed; bottom: 78px; right: 14px; z-index: 100; width: 280px; background: var(--bg-1); border: 1px solid var(--rule-2); border-radius: 6px; padding: 14px; display: none; box-shadow: 0 12px 40px rgba(0,0,0,0.4); }
+  .tw-panel.on { display: block; }
+  .tw-h { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 10px; display: flex; justify-content: space-between; }
+  .tw-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .tw-lbl { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-1); }
+  .tw-seg { display: inline-flex; border: 1px solid var(--rule-2); border-radius: 3px; overflow: hidden; }
+  .tw-seg button { background: none; border: none; color: var(--ink-2); font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 4px 8px; cursor: pointer; }
+  .tw-seg button.on { background: var(--accent); color: var(--bg-0); }
+  .tw-x { background: none; border: none; color: var(--ink-2); cursor: pointer; font-size: 14px; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg-0); }
+  ::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 5px; }
+</style>
+</head>
+<body data-theme="dark" data-density="compact">
+
+<!-- top bar -->
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">G</div>
+    <div>
+      <div class="brand-name">Gari's Trading Terminal</div>
+      <div class="brand-sub">DASHBOARD · DENSE TABLE</div>
+    </div>
+  </div>
+  <div class="topbar-c">
+    <span><span class="dim">P&L D</span> <span class="v up num">+$842</span></span>
+    <span><span class="dim">P&L W</span> <span class="v up num">+$3.4k</span></span>
+    <span><span class="dim">RISK IN MKT</span> <span class="v num">$4,210</span></span>
+    <span><span class="dim">POSITIONS</span> <span class="v num">3</span></span>
+    <span class="pill green">RISK ON</span>
+  </div>
+  <div class="topbar-r">
+    <span class="num">14:32:08 ET</span>
+    <span class="clock-dot"></span>
+    <span class="dim">LIVE</span>
+  </div>
+</header>
+
+<!-- macro strip -->
+<section class="macro">
+  <div class="mc"><span class="mc-l">SPX</span><span class="mc-v">5,847.21</span><span class="mc-c up">+0.42%</span></div>
+  <div class="mc"><span class="mc-l">NDX</span><span class="mc-v">20,512.4</span><span class="mc-c up">+0.61%</span></div>
+  <div class="mc"><span class="mc-l">RUT</span><span class="mc-v">2,318.7</span><span class="mc-c down">−0.18%</span></div>
+  <div class="mc"><span class="mc-l">VIX</span><span class="mc-v">14.20</span><span class="mc-c up">−3.10%</span></div>
+  <div class="mc"><span class="mc-l">DXY</span><span class="mc-v">102.41</span><span class="mc-c dim">+0.12%</span></div>
+  <div class="mc"><span class="mc-l">10Y</span><span class="mc-v">4.213%</span><span class="mc-c up">−0.04</span></div>
+  <div class="mc"><span class="mc-l">GOLD</span><span class="mc-v">$2,418</span><span class="mc-c up">+0.31%</span></div>
+  <div class="mc"><span class="mc-l">WTI</span><span class="mc-v">$78.42</span><span class="mc-c down">−1.24%</span></div>
+  <div class="regime">
+    <span class="regime-name">RISK ON</span>
+    <span class="regime-meta">BREADTH 68% · 4/4 GATES</span>
+  </div>
+</section>
+
+<!-- toolbar -->
+<div class="toolbar">
+  <div class="tb-tabs">
+    <span class="tb-tab on">WATCHLIST</span>
+    <span class="tb-tab">POSITIONS · 3</span>
+    <span class="tb-tab">SCANS · 8</span>
+    <span class="tb-tab">JOURNAL</span>
+  </div>
+  <span style="margin-left:18px" class="dim">SHOWING <span class="num" style="color:var(--ink-0)">20</span> · 22 IN UNIVERSE · SORTED BY <span style="color:var(--accent)">BAP ▾</span></span>
+  <span class="tb-spacer"></span>
+  <span class="chip on">All Sectors</span>
+  <span class="chip on">BAP > 50</span>
+  <span class="chip">No earn ≤ 7d</span>
+  <span class="chip">Above 200D</span>
+  <span class="chip accent">+ Filter</span>
+  <input class="tb-search" placeholder="/ search ticker, sector, setup…" />
+  <span class="icon-btn on" title="Density: compact">≡</span>
+  <span class="icon-btn" title="Columns">⊞</span>
+  <span class="icon-btn" title="Export">⤓</span>
+</div>
+
+<!-- the table -->
+<main class="tbl-wrap">
+  <table class="dt" id="dt">
+    <thead>
+      <tr>
+        <th style="width:24px">#</th>
+        <th>SYM</th>
+        <th>SECT</th>
+        <th>SETUP</th>
+        <th>STG</th>
+        <th class="num-r sorted">BAP</th>
+        <th class="num-r">TECH</th>
+        <th class="num-r">FUND</th>
+        <th class="num-r">SMC</th>
+        <th class="num-r">PX</th>
+        <th class="num-r">%D</th>
+        <th class="num-r">5D</th>
+        <th class="num-r">20D</th>
+        <th class="num-r">RVOL</th>
+        <th class="num-c">SPARK 1M</th>
+        <th class="num-c">RULER (STOP·ENT·NOW·T1·T2)</th>
+        <th class="num-r">ENT</th>
+        <th class="num-r">STOP</th>
+        <th class="num-r">T1</th>
+        <th class="num-r">R:R</th>
+        <th class="num-r">EARN</th>
+        <th class="num-c">N</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</main>
+
+<!-- footer -->
+<footer class="statusbar">
+  <span><span class="ok">●</span> LIVE · 22 SYMBOLS · 312 ALERTS</span>
+  <span>SCAN <span class="ok">PASS</span> 4/4 GATES</span>
+  <span>LAST UPDATE <span style="color:var(--ink-0)">14:32:08 ET</span></span>
+  <span class="grow"></span>
+  <span><kbd>↑↓</kbd> WALK ROWS · <kbd>↵</kbd> EXPAND · <kbd>F</kbd> FILTER · <kbd>/</kbd> SEARCH · <kbd>D</kbd> DENSITY · <kbd>?</kbd> HELP</span>
+</footer>
+
+<!-- tweaks panel -->
+<button class="tw-fab" id="twFab">⚙ Tweaks</button>
+<div class="tw-panel" id="twPanel">
+  <div class="tw-h"><span>Tweaks</span><button class="tw-x" id="twX">×</button></div>
+  <div class="tw-row"><span class="tw-lbl">Theme</span>
+    <div class="tw-seg" data-tw="theme">
+      <button data-v="dark" class="on">Dark</button>
+      <button data-v="light">Light</button>
+    </div>
+  </div>
+  <div class="tw-row"><span class="tw-lbl">Density</span>
+    <div class="tw-seg" data-tw="density">
+      <button data-v="ultra">Ultra</button>
+      <button data-v="compact" class="on">Compact</button>
+      <button data-v="comfortable">Comfy</button>
+    </div>
+  </div>
+  <div class="tw-row"><span class="tw-lbl">Highlight ≥ BAP</span>
+    <div class="tw-seg" data-tw="bapMin">
+      <button data-v="60">60</button>
+      <button data-v="70" class="on">70</button>
+      <button data-v="80">80</button>
+    </div>
+  </div>
+  <div class="tw-row"><span class="tw-lbl">Show drawer</span>
+    <div class="tw-seg" data-tw="drawer">
+      <button data-v="auto" class="on">Auto</button>
+      <button data-v="off">Off</button>
+    </div>
+  </div>
+</div>
+
+<!-- drawer template -->
+<template id="drawer-tpl">
+  <tr class="drawer-row"><td colspan="22" style="padding:0 !important; height:auto !important;">
+    <div class="drawer">
+      <!-- chart -->
+      <div class="dwr-pane">
+        <div class="dwr-h"><span>CHART · D1 · 90 BARS</span><span class="dim">Daily · log</span></div>
+        <div class="dwr-chart">
+          <div class="dwr-grid"></div>
+          <svg id="dwrChart" preserveAspectRatio="none" viewBox="0 0 600 220"></svg>
+        </div>
+        <div class="dwr-h" style="margin-top:4px"><span>RULER</span><span class="dim" id="rulerRange"></span></div>
+        <div class="mini-ruler" style="height:22px" id="bigRuler"></div>
+        <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:6px; font-family:'JetBrains Mono',monospace; font-size:10px;">
+          <div><div class="dim">STOP</div><div id="rStop" class="num" style="font-size:11px;font-weight:600">—</div></div>
+          <div><div class="dim">ENTRY</div><div id="rEnt" class="num" style="font-size:11px;font-weight:600">—</div></div>
+          <div><div class="dim">NOW</div><div id="rNow" class="num" style="font-size:11px;font-weight:600;color:var(--accent)">—</div></div>
+          <div><div class="dim" style="color:var(--accent)">T1</div><div id="rT1" class="num" style="font-size:11px;font-weight:600">—</div></div>
+          <div><div class="dim" style="color:var(--accent-2)">T2</div><div id="rT2" class="num" style="font-size:11px;font-weight:600">—</div></div>
+        </div>
+      </div>
+      <!-- plan + scores -->
+      <div class="dwr-pane">
+        <div class="dwr-h"><span>PLAN</span><span class="dim" id="rrLabel"></span></div>
+        <div class="plan-grid" id="planGrid"></div>
+        <div class="dwr-h" style="margin-top:8px"><span>SCORE PILLARS</span><span class="dim">BAP composite</span></div>
+        <div id="pillarBox"></div>
+      </div>
+      <!-- intel -->
+      <div class="dwr-pane">
+        <div class="dwr-h"><span>INTEL & CATALYSTS</span><span class="dim" id="intelMeta"></span></div>
+        <div id="intelBox"></div>
+      </div>
+    </div>
+  </td></tr>
+</template>
+
+<script>
+// ───────────── data (subset of terminal-data.jsx) ─────────────
+const WATCHLIST = [
+  { rank:1, sym:'NVDA', sect:'SEMI', setup:'Bull flag · D1', bap:88, tech:74, fund:91, smc:68,
+    px:192.40, chg:+1.84, d5:+4.2, d20:+11.4, rvol:1.4, stage:'READY', earn:12, news:'up',
+    entry:[189,194], stop:182, t1:208, t2:224, lo:175, hi:230, seed: 11 },
+  { rank:2, sym:'AVGO', sect:'SEMI', setup:'Bull flag · D1', bap:82, tech:78, fund:85, smc:72,
+    px:1742.10, chg:+0.92, d5:+2.8, d20:+8.4, rvol:1.2, stage:'READY', earn:null, news:'up',
+    entry:[1720,1755], stop:1670, t1:1880, t2:1980, lo:1620, hi:2020, seed: 21 },
+  { rank:3, sym:'META', sect:'INET', setup:'Pullback to 50', bap:79, tech:71, fund:84, smc:64,
+    px:612.30, chg:+0.41, d5:-1.2, d20:+5.1, rvol:0.9, stage:'READY', earn:8, news:'up',
+    entry:[605,618], stop:585, t1:650, t2:684, lo:560, hi:700, seed: 31 },
+  { rank:4, sym:'PANW', sect:'CYBR', setup:'Cup & handle', bap:76, tech:68, fund:79, smc:71,
+    px:382.41, chg:-0.22, d5:+0.8, d20:+6.2, rvol:1.1, stage:'READY', earn:22, news:'up',
+    entry:[378,388], stop:362, t1:412, t2:438, lo:340, hi:450, seed: 41 },
+  { rank:5, sym:'SHOP', sect:'INET', setup:'Breakout retest', bap:74, tech:78, fund:62, smc:74,
+    px:98.10, chg:+1.10, d5:+3.4, d20:+9.1, rvol:1.5, stage:'READY', earn:null, news:'nu',
+    entry:[96,100], stop:91, t1:108, t2:118, lo:84, hi:122, seed: 51 },
+  { rank:6, sym:'MSFT', sect:'SOFT', setup:'Trail · base', bap:72, tech:66, fund:82, smc:62,
+    px:432.18, chg:+0.55, d5:+1.4, d20:+4.2, rvol:0.8, stage:'IN TRADE', earn:18, news:'nu',
+    entry:[420,435], stop:408, t1:462, t2:482, lo:390, hi:495, seed: 61 },
+  { rank:7, sym:'GOOGL', sect:'INET', setup:'Stage 2 trend', bap:70, tech:72, fund:78, smc:60,
+    px:182.44, chg:+1.12, d5:+2.1, d20:+5.8, rvol:1.0, stage:'IN TRADE', earn:9, news:'up',
+    entry:[178,184], stop:172, t1:198, t2:212, lo:164, hi:222, seed: 71 },
+  { rank:8, sym:'CRWD', sect:'CYBR', setup:'Base building', bap:68, tech:64, fund:74, smc:58,
+    px:342.50, chg:+0.66, d5:+1.2, d20:+3.4, rvol:0.9, stage:'WATCH', earn:31, news:'nu',
+    entry:[338,348], stop:322, t1:368, t2:388, lo:308, hi:402, seed: 81 },
+  { rank:9, sym:'NOW', sect:'SOFT', setup:'Wait trigger', bap:66, tech:60, fund:78, smc:56,
+    px:912.40, chg:+0.34, d5:-0.4, d20:+2.1, rvol:0.7, stage:'WATCH', earn:14, news:'nu',
+    entry:[905,924], stop:875, t1:962, t2:1004, lo:840, hi:1040, seed: 91 },
+  { rank:10, sym:'UBER', sect:'CONS', setup:'Above 200', bap:64, tech:62, fund:68, smc:54,
+    px:76.10, chg:+1.45, d5:+1.8, d20:+4.1, rvol:1.1, stage:'WATCH', earn:25, news:'up',
+    entry:[75,77], stop:71, t1:82, t2:88, lo:68, hi:92, seed: 101 },
+  { rank:11, sym:'LLY', sect:'HLTH', setup:'Cooling base', bap:62, tech:58, fund:74, smc:52,
+    px:812.30, chg:+0.88, d5:-2.1, d20:-1.4, rvol:0.9, stage:'WATCH', earn:6, news:'nu',
+    entry:[800,820], stop:768, t1:868, t2:912, lo:740, hi:940, seed: 111 },
+  { rank:12, sym:'COIN', sect:'FIN', setup:'High vol · choppy', bap:55, tech:52, fund:48, smc:60,
+    px:218.40, chg:+3.12, d5:+5.1, d20:+12.4, rvol:1.8, stage:'WATCH', earn:32, news:'up',
+    entry:[212,224], stop:198, t1:248, t2:272, lo:182, hi:288, seed: 121 },
+  { rank:13, sym:'JPM', sect:'FIN', setup:'Stage 1', bap:54, tech:48, fund:62, smc:50,
+    px:218.40, chg:+0.21, d5:+0.4, d20:+1.1, rvol:0.7, stage:'WATCH', earn:11, news:'nu',
+    entry:[216,222], stop:208, t1:232, t2:244, lo:198, hi:252, seed: 131 },
+  { rank:14, sym:'HD', sect:'CONS', setup:'Sideways', bap:50, tech:46, fund:56, smc:48,
+    px:412.40, chg:+0.38, d5:-0.2, d20:+0.4, rvol:0.6, stage:'WATCH', earn:28, news:'nu',
+    entry:[408,418], stop:395, t1:434, t2:452, lo:380, hi:464, seed: 141 },
+  { rank:15, sym:'AAPL', sect:'CONS', setup:'Failing', bap:45, tech:42, fund:54, smc:38,
+    px:228.20, chg:-0.42, d5:-1.4, d20:-2.1, rvol:0.9, stage:'COOLING', earn:21, news:'nu',
+    entry:[226,232], stop:218, t1:242, t2:254, lo:210, hi:262, seed: 151 },
+  { rank:16, sym:'MARA', sect:'FIN', setup:'Wait reset', bap:42, tech:48, fund:32, smc:46,
+    px:18.40, chg:-1.21, d5:-3.1, d20:-8.4, rvol:1.4, stage:'COOLING', earn:38, news:'nu',
+    entry:[18,19.2], stop:16.8, t1:21.2, t2:23.4, lo:15.2, hi:24.8, seed: 161 },
+  { rank:17, sym:'TSLA', sect:'CONS', setup:'Failed breakout', bap:38, tech:34, fund:42, smc:32,
+    px:248.10, chg:-2.14, d5:-3.4, d20:-8.1, rvol:1.6, stage:'COOLING', earn:14, news:'dn',
+    entry:[244,252], stop:232, t1:268, t2:284, lo:218, hi:292, seed: 171 },
+  { rank:18, sym:'XOM', sect:'ENRG', setup:'Distribution', bap:32, tech:28, fund:48, smc:24,
+    px:104.20, chg:-1.40, d5:-2.8, d20:-5.4, rvol:1.2, stage:'COOLING', earn:9, news:'dn',
+    entry:[102,106], stop:97, t1:112, t2:118, lo:91, hi:124, seed: 181 },
+  { rank:19, sym:'UNH', sect:'HLTH', setup:'Below 200', bap:30, tech:26, fund:54, smc:24,
+    px:542.10, chg:-0.42, d5:-3.8, d20:-7.2, rvol:1.1, stage:'COOLING', earn:16, news:'dn',
+    entry:[538,548], stop:518, t1:572, t2:598, lo:498, hi:610, seed: 191 },
+  { rank:20, sym:'CVX', sect:'ENRG', setup:'Stage 4', bap:28, tech:22, fund:46, smc:20,
+    px:148.10, chg:-1.12, d5:-2.4, d20:-4.8, rvol:0.9, stage:'COOLING', earn:13, news:'dn',
+    entry:[146,150], stop:138, t1:158, t2:166, lo:132, hi:172, seed: 201 },
+];
+
+const PILLARS = {
+  TECH: [
+    { name:'Trend',    val:'Stage 2',     pts:18, max:20 },
+    { name:'Momentum', val:'+11.4 / 20D', pts:14, max:20 },
+    { name:'Volume',   val:'1.4× RVOL',   pts:18, max:20 },
+    { name:'Pattern',  val:'Bull flag',   pts:14, max:20 },
+    { name:'Rel Str',  val:'+8 vs SPX',   pts:15, max:20 },
+  ],
+  FUND: [
+    { name:'Growth',   val:'+82% YoY',    pts:46, max:50 },
+    { name:'Profit',   val:'76% gross',   pts:44, max:50 },
+    { name:'Quality',  val:'42% ROIC',    pts:43, max:50 },
+    { name:'Value',    val:'42x fwd',     pts:28, max:50 },
+    { name:'Mom',      val:'8/8 beats',   pts:48, max:50 },
+  ],
+};
+
+const INTEL = [
+  { t:'13:42', sym:'NVDA', text:'<b>Citi</b> raises PT to $215 — datacenter capex', sent:'up' },
+  { t:'12:55', sym:'NVDA', text:'<b>CES</b> keynote details leak — edge inference SKU', sent:'nu' },
+  { t:'09:55', sym:'NVDA', text:'TSMC capex $42B for 2026 — bullish for cap-ex chain', sent:'up' },
+  { t:'09:22', sym:'NVDA', text:'GTC dates announced — March 17–20', sent:'nu' },
+  { t:'08:14', sym:'NVDA', text:'Earnings Feb 26 — consensus $0.85', sent:'nu' },
+];
+
+// ───────────── helpers ─────────────
+function bapColor(b){
+  if (b>=80) return 'var(--green)';
+  if (b>=70) return 'oklch(78% 0.16 130)';
+  if (b>=60) return 'var(--accent)';
+  if (b>=50) return 'oklch(70% 0.15 50)';
+  return 'var(--red)';
+}
+function chgClass(v){ return v>0?'up':v<0?'down':'dim'; }
+function fmt(v, d=2){ return v == null ? '—' : (v>=0?'+':'') + v.toFixed(d); }
+function px(v){
+  if (v < 25) return v.toFixed(2);
+  if (v < 1000) return v.toFixed(2);
+  return v.toFixed(2);
+}
+
+function spark(seed, n=24, trend=0){
+  let v=50, s=seed; const pts=[];
+  for(let i=0;i<n;i++){ s=(s*9301+49297)%233280; const r=(s/233280)-0.5; v+=r*8+trend; v=Math.max(10,Math.min(90,v)); pts.push(v); }
+  return pts;
+}
+function sparkSvg(seed, down, w=78, h=18){
+  const pts = spark(seed, 24, down ? -0.4 : 0.5);
+  const min = Math.min(...pts), max = Math.max(...pts);
+  const span = max - min || 1;
+  const path = pts.map((v,i)=>{
+    const x = (i/(pts.length-1))*w;
+    const y = h - ((v-min)/span)*(h-2) - 1;
+    return (i===0?'M':'L') + x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+  const area = path + ` L${w},${h} L0,${h} Z`;
+  const color = down ? 'var(--red)' : 'var(--green)';
+  return `<svg class="spark-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <path d="${area}" fill="${color}" fill-opacity="0.12" stroke="none"/>
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.2"/>
+  </svg>`;
+}
+
+function miniRuler(t){
+  const lo = t.lo, hi = t.hi, range = hi - lo;
+  const pct = (v) => ((v-lo)/range)*100;
+  const eL = pct(t.entry[0]), eR = pct(t.entry[1]);
+  return `<div class="mini-ruler">
+    <div class="mr-stop" style="width:${pct(t.stop).toFixed(1)}%"></div>
+    <div class="mr-runway" style="left:${pct(t.stop)}%; right:0"></div>
+    <div class="mr-entry" style="left:${eL.toFixed(1)}%; width:${(eR-eL).toFixed(1)}%"></div>
+    <div class="mr-tick mr-t1" style="left:${pct(t.t1).toFixed(1)}%"></div>
+    <div class="mr-tick mr-t2" style="left:${pct(t.t2).toFixed(1)}%"></div>
+    <div class="mr-now" style="left:${pct(t.px).toFixed(1)}%"></div>
+  </div>`;
+}
+
+// ───────────── render rows ─────────────
+const tbody = document.getElementById('tbody');
+function renderRows(){
+  const bapMin = Number(state.bapMin);
+  tbody.innerHTML = WATCHLIST.map((t, i) => {
+    const stClass = t.stage === 'READY' ? 'ready' : t.stage === 'IN TRADE' ? 'in' : t.stage === 'COOLING' ? 'cool' : 'watch';
+    const earnCell = t.earn == null ? '<span class="dim">—</span>' :
+      t.earn <= 7 ? `<span class="earn-warn">+${t.earn}d⚠</span>` :
+      t.earn <= 14 ? `<span class="earn-soon">+${t.earn}d</span>` :
+      `<span class="dim">+${t.earn}d</span>`;
+    const newsCell = t.news === 'up' ? '<span class="news-tag up">+</span>' :
+                     t.news === 'dn' ? '<span class="news-tag dn">−</span>' :
+                     '<span class="news-tag nu">·</span>';
+    const dim = t.bap < bapMin ? 'opacity:0.45' : '';
+    const rr = (t.t1 - t.entry[0]) / (t.entry[0] - t.stop);
+    const down = t.chg < 0 || t.d20 < 0;
+    return `<tr data-idx="${i}" style="${dim}">
+      <td class="dim num">${t.rank}</td>
+      <td><span class="sym">${t.sym}</span></td>
+      <td><span class="sect">${t.sect}</span></td>
+      <td><span class="setup">${t.setup}</span></td>
+      <td><span class="stage-cell ${stClass}">${t.stage}</span></td>
+      <td class="num-r"><span class="bap-cell" style="color:${bapColor(t.bap)}">${t.bap}<span class="bap-bar"><span class="bap-bar-fill" style="width:${t.bap}%; background:${bapColor(t.bap)}"></span></span></span></td>
+      <td class="num-r dim">${t.tech}</td>
+      <td class="num-r dim">${t.fund}</td>
+      <td class="num-r dim">${t.smc}</td>
+      <td class="num-r" style="color:var(--ink-0)">${px(t.px)}</td>
+      <td class="num-r ${chgClass(t.chg)}">${fmt(t.chg, 2)}</td>
+      <td class="num-r ${chgClass(t.d5)}">${fmt(t.d5, 1)}</td>
+      <td class="num-r ${chgClass(t.d20)}">${fmt(t.d20, 1)}</td>
+      <td class="num-r" style="color:${t.rvol>1.2?'var(--accent)':'var(--ink-1)'}">${t.rvol.toFixed(1)}×</td>
+      <td class="spark-cell">${sparkSvg(t.seed, down)}</td>
+      <td class="ruler-cell">${miniRuler(t)}</td>
+      <td class="num-r dim">${px(t.entry[0])}</td>
+      <td class="num-r dim">${px(t.stop)}</td>
+      <td class="num-r dim">${px(t.t1)}</td>
+      <td class="num-r" style="color:${rr>=2.5?'var(--green)':'var(--ink-1)'}">1:${rr.toFixed(1)}</td>
+      <td class="num-r">${earnCell}</td>
+      <td class="num-c">${newsCell}</td>
+    </tr>`;
+  }).join('');
+  attachRowHandlers();
+}
+
+// ───────────── drawer ─────────────
+let openIdx = null;
+function attachRowHandlers(){
+  tbody.querySelectorAll('tr[data-idx]').forEach(tr => {
+    tr.addEventListener('click', () => toggleDrawer(Number(tr.dataset.idx)));
+  });
+}
+function closeDrawer(){
+  const d = tbody.querySelector('.drawer-row');
+  if (d) d.remove();
+  tbody.querySelectorAll('tr.has-drawer').forEach(r => r.classList.remove('has-drawer'));
+  openIdx = null;
+}
+function toggleDrawer(idx){
+  if (state.drawer === 'off') return;
+  if (openIdx === idx) { closeDrawer(); return; }
+  closeDrawer();
+  const tr = tbody.querySelector(`tr[data-idx="${idx}"]`);
+  tr.classList.add('has-drawer');
+  const tpl = document.getElementById('drawer-tpl').content.cloneNode(true);
+  tr.after(tpl);
+  populateDrawer(WATCHLIST[idx]);
+  openIdx = idx;
+}
+
+function populateDrawer(t){
+  // chart
+  const W = 600, H = 220;
+  const seed = t.seed;
+  const candles = [];
+  let s = seed;
+  let close = t.px - 18;
+  for (let i = 0; i < 90; i++) {
+    s = (s * 9301 + 49297) % 233280;
+    const r = (s / 233280) - 0.45;
+    const open = close;
+    const wick = 1.2 + Math.abs(r) * 2.4;
+    const body = r * 1.8 + (i / 90) * 0.4;
+    close = open + body;
+    const high = Math.max(open, close) + wick * 0.7;
+    const low  = Math.min(open, close) - wick * 0.7;
+    candles.push({ open, high, low, close });
+  }
+  // calibrate
+  const last = candles[candles.length-1].close;
+  const off = t.px - last;
+  candles.forEach(c => { c.open+=off; c.close+=off; c.high+=off; c.low+=off; });
+  const lo = Math.min(...candles.map(c=>c.low), t.stop) - 2;
+  const hi = Math.max(...candles.map(c=>c.high), t.t2) + 2;
+  const yScale = v => H - ((v - lo)/(hi - lo)) * (H - 20) - 10;
+  const xScale = i => 8 + (i/(candles.length-1)) * (W - 16);
+  const cw = (W - 16) / candles.length * 0.7;
+  let svg = '';
+  // zones
+  svg += `<rect x="0" y="${yScale(t.entry[1])}" width="${W}" height="${yScale(t.entry[0])-yScale(t.entry[1])}" fill="color-mix(in oklch, var(--green) 12%, transparent)"/>`;
+  // lines
+  const line = (y, color, dash, label) =>
+    `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="${color}" stroke-width="1" stroke-dasharray="${dash}"/>` +
+    `<text x="${W-4}" y="${y-3}" font-family="JetBrains Mono" font-size="9" fill="${color}" text-anchor="end">${label}</text>`;
+  svg += line(yScale(t.stop), 'var(--red)', '3 3', `STOP ${px(t.stop)}`);
+  svg += line(yScale(t.entry[0]), 'var(--green)', '0', `ENT ${px(t.entry[0])}`);
+  svg += line(yScale(t.t1), 'var(--accent)', '4 2', `T1 ${px(t.t1)}`);
+  svg += line(yScale(t.t2), 'var(--accent-2)', '4 2', `T2 ${px(t.t2)}`);
+  // candles
+  candles.forEach((c, i) => {
+    const up = c.close >= c.open;
+    const color = up ? 'var(--green)' : 'var(--red)';
+    const x = xScale(i);
+    svg += `<line x1="${x}" y1="${yScale(c.high)}" x2="${x}" y2="${yScale(c.low)}" stroke="${color}" stroke-width="1"/>`;
+    svg += `<rect x="${x-cw/2}" y="${yScale(Math.max(c.open,c.close))}" width="${cw}" height="${Math.max(1, Math.abs(yScale(c.close)-yScale(c.open)))}" fill="${color}" fill-opacity="${up?0.85:0.95}"/>`;
+  });
+  // current price line
+  svg += `<line x1="0" y1="${yScale(t.px)}" x2="${W}" y2="${yScale(t.px)}" stroke="var(--ink-0)" stroke-width="1.2"/>`;
+  svg += `<rect x="${W-50}" y="${yScale(t.px)-8}" width="48" height="14" fill="var(--ink-0)"/>`;
+  svg += `<text x="${W-26}" y="${yScale(t.px)+3}" font-family="JetBrains Mono" font-size="10" font-weight="700" fill="var(--bg-0)" text-anchor="middle">${px(t.px)}</text>`;
+  document.getElementById('dwrChart').innerHTML = svg;
+
+  // big ruler
+  const lo2 = t.lo, hi2 = t.hi, range = hi2 - lo2;
+  const pct = v => ((v-lo2)/range)*100;
+  const eL = pct(t.entry[0]), eR = pct(t.entry[1]);
+  document.getElementById('bigRuler').innerHTML = `
+    <div class="mr-stop" style="width:${pct(t.stop).toFixed(1)}%"></div>
+    <div class="mr-runway" style="left:${pct(t.stop)}%; right:0"></div>
+    <div class="mr-entry" style="left:${eL}%; width:${(eR-eL)}%"></div>
+    <div class="mr-tick mr-t1" style="left:${pct(t.t1)}%"></div>
+    <div class="mr-tick mr-t2" style="left:${pct(t.t2)}%"></div>
+    <div class="mr-now" style="left:${pct(t.px)}%"></div>`;
+  document.getElementById('rulerRange').textContent = `${px(lo2)} → ${px(hi2)}`;
+  document.getElementById('rStop').textContent = px(t.stop);
+  document.getElementById('rEnt').textContent  = `${px(t.entry[0])}–${px(t.entry[1])}`;
+  document.getElementById('rNow').textContent  = px(t.px);
+  document.getElementById('rT1').textContent   = px(t.t1);
+  document.getElementById('rT2').textContent   = px(t.t2);
+
+  // plan
+  const stopPct = ((t.stop - t.entry[0])/t.entry[0])*100;
+  const t1Pct = ((t.t1 - t.entry[0])/t.entry[0])*100;
+  const t2Pct = ((t.t2 - t.entry[0])/t.entry[0])*100;
+  const rr = (t.t1 - t.entry[0]) / (t.entry[0] - t.stop);
+  const risk = 4200 * 0.01 / Math.max(0.01, (t.entry[0] - t.stop));
+  const shares = Math.max(1, Math.floor(risk));
+  document.getElementById('rrLabel').textContent = `R:R 1:${rr.toFixed(1)} · ${shares} sh`;
+  document.getElementById('planGrid').innerHTML = `
+    <div class="plan-lbl">ENTRY</div><div class="plan-val">${px(t.entry[0])} – ${px(t.entry[1])}</div><div class="plan-pct dim">zone</div>
+    <div class="plan-lbl">STOP</div> <div class="plan-val" style="color:var(--red)">${px(t.stop)}</div><div class="plan-pct dn">${stopPct.toFixed(1)}%</div>
+    <div class="plan-lbl">T1 · ⅔</div><div class="plan-val" style="color:var(--accent)">${px(t.t1)}</div><div class="plan-pct up">+${t1Pct.toFixed(1)}%</div>
+    <div class="plan-lbl">T2 · ⅓</div><div class="plan-val" style="color:var(--accent-2)">${px(t.t2)}</div><div class="plan-pct up">+${t2Pct.toFixed(1)}%</div>
+    <div class="plan-lbl">SHARES</div><div class="plan-val">${shares} sh · 1% risk</div><div class="plan-pct dim">$${(shares*t.entry[0]).toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+    <div class="plan-lbl">EARNINGS</div><div class="plan-val ${t.earn && t.earn<=14?'':'dim'}">${t.earn==null?'—':`+${t.earn} days`}</div><div class="plan-pct ${t.earn && t.earn<=7?'dn':'dim'}">${t.earn && t.earn<=7?'⚠ within trade':'ok'}</div>
+  `;
+
+  // pillars
+  const pillarHtml = (label, items, color) => `
+    <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.14em;color:${color};margin:8px 0 4px;text-transform:uppercase">${label}</div>
+    ${items.map(p => `
+      <div class="pillar-row">
+        <span class="pillar-name">${p.name}</span>
+        <div class="pillar-bar"><div class="pillar-fill" style="width:${(p.pts/p.max)*100}%; background:${color}"></div></div>
+        <span class="pillar-pts">${p.pts}/${p.max}</span>
+      </div>`).join('')}`;
+  document.getElementById('pillarBox').innerHTML =
+    pillarHtml('TECH · ' + t.tech, PILLARS.TECH, 'var(--accent-2)') +
+    pillarHtml('FUND · ' + t.fund, PILLARS.FUND, 'var(--accent)');
+
+  // intel
+  document.getElementById('intelMeta').textContent = `${t.sym} · 5 items`;
+  document.getElementById('intelBox').innerHTML = INTEL.map(it => `
+    <div class="intel-line">
+      <span class="t">${it.t}</span>
+      <span class="x">${it.text}</span>
+      <span class="news-tag ${it.sent}">${it.sent==='up'?'+':it.sent==='dn'?'−':'·'}</span>
+    </div>`).join('');
+}
+
+// ───────────── tweaks ─────────────
+const state = { theme:'dark', density:'compact', bapMin:'70', drawer:'auto' };
+const fab = document.getElementById('twFab');
+const panel = document.getElementById('twPanel');
+fab.addEventListener('click', () => panel.classList.toggle('on'));
+document.getElementById('twX').addEventListener('click', () => panel.classList.remove('on'));
+document.querySelectorAll('.tw-seg').forEach(seg => {
+  seg.addEventListener('click', e => {
+    if (!e.target.matches('button')) return;
+    const tw = seg.dataset.tw, v = e.target.dataset.v;
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+    state[tw] = v;
+    if (tw === 'theme') document.body.dataset.theme = v;
+    if (tw === 'density') document.body.dataset.density = v;
+    if (tw === 'bapMin') renderRows();
+    if (tw === 'drawer' && v === 'off') closeDrawer();
+  });
+});
+
+// ───────────── kbd ─────────────
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input,textarea')) return;
+  if (e.key === 'Escape') { closeDrawer(); return; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (openIdx == null) { toggleDrawer(0); return; }
+    const next = e.key === 'ArrowDown' ? Math.min(WATCHLIST.length-1, openIdx+1) : Math.max(0, openIdx-1);
+    toggleDrawer(next);
+    document.querySelector(`tr[data-idx="${next}"]`).scrollIntoView({ block:'center', behavior:'instant' });
+  }
+});
+
+renderRows();
+toggleDrawer(0);
+</script>
+
+</body>
+</html>

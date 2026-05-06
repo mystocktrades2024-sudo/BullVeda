@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MOCK · Tab Visibility — Option C (tree + inline ⚙)</title>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#0d1117; --panel2:#11171f; --line:#1f2937; --line2:#2a3441;
+    --ink-0:#e6edf3; --ink-1:#9ca3af; --ink-2:#6b7280; --ink-3:#4b5563;
+    --pass:#22c55e; --warn:#eab308; --fail:#ef4444; --info:#3b82f6; --accent:#a855f7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink-0);font-family:'Aptos','Segoe UI',-apple-system,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased;font-size:14px}
+
+  .mockbar{background:linear-gradient(135deg,rgba(168,85,247,0.12),transparent);border-bottom:1px dashed var(--accent);padding:10px 24px;font-size:12px;color:var(--ink-1)}
+  .mockbar b{color:var(--accent)}
+
+  /* TOPBAR */
+  .topbar{background:var(--panel2);border-bottom:1px solid var(--line);padding:12px 24px;display:flex;align-items:center;gap:18px}
+  .logo{font-weight:800;font-size:16px;letter-spacing:.04em}
+  .logo .dot{color:var(--accent)}
+  .topbar-spacer{flex:1}
+
+  /* PROFILE SELECTOR */
+  .profile-selector{display:flex;align-items:center;gap:10px;padding:6px 14px;background:var(--panel);border:1px solid var(--line2);border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;letter-spacing:.04em;position:relative}
+  .profile-selector:hover{border-color:var(--info)}
+  .profile-selector .pcat{font-size:10px;color:var(--ink-2);letter-spacing:.05em;text-transform:uppercase}
+  .profile-selector .pname{color:var(--accent);font-weight:700}
+  .profile-selector .pchev{color:var(--ink-2);margin-left:6px}
+
+  /* MAIN GRID */
+  .demo-wrap{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:24px;max-width:1400px;margin:0 auto}
+  .panel-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px}
+  .panel-card h2{margin:0 0 14px;font-size:14px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-0);padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .panel-card .sub{font-size:12px;color:var(--ink-2);margin:-6px 0 14px}
+
+  /* TREE VIEW */
+  .tree{font-size:12.5px}
+  .node{padding:6px 10px;border-radius:6px;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;transition:background .12s}
+  .node:hover{background:var(--panel2)}
+  .node.parent{font-weight:600}
+  .node.selected{background:var(--panel2);border-left:2px solid var(--accent)}
+  .chev{width:14px;color:var(--ink-3);font-size:10px;text-align:center;transition:transform .15s}
+  .chev.open{transform:rotate(90deg)}
+  .chev.leaf{visibility:hidden}
+  .check{width:14px;height:14px;border-radius:3px;border:1px solid var(--line2);background:var(--panel2);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--pass);cursor:pointer;flex-shrink:0}
+  .check.on{background:rgba(34,197,94,0.18);border-color:var(--pass);color:var(--pass)}
+  .check.partial{background:rgba(234,179,8,0.18);border-color:var(--warn);color:var(--warn)}
+  .check.locked{opacity:.4;cursor:not-allowed}
+  .label{flex:1;color:var(--ink-0)}
+  .label.dim{color:var(--ink-2)}
+  .count{font-size:10.5px;color:var(--ink-2);font-family:'Cascadia Code',monospace;letter-spacing:.04em}
+  .badge{font-size:9.5px;padding:1px 6px;border-radius:6px;font-weight:700;letter-spacing:.05em}
+  .badge.req{background:rgba(239,68,68,0.10);color:var(--fail);border:1px solid rgba(239,68,68,0.25)}
+  .badge.recommend{background:rgba(168,85,247,0.10);color:var(--accent);border:1px solid rgba(168,85,247,0.25)}
+  .children{display:none;padding-left:22px;border-left:1px dashed var(--line);margin-left:12px}
+  .children.open{display:block}
+
+  /* INLINE COG / CONTEXT MENU */
+  .preview-tab{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:14px}
+  .preview-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line);font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--ink-0)}
+  .preview-head .cog{margin-left:auto;color:var(--ink-3);font-size:14px;cursor:pointer;transition:color .12s;padding:4px 6px;border-radius:4px}
+  .preview-head .cog:hover{color:var(--accent);background:var(--panel)}
+
+  .tile-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .tile{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px;font-size:11.5px}
+  .tile .tile-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+  .tile .tile-name{font-weight:600;color:var(--ink-0);font-size:11.5px}
+  .tile .tile-cog{color:var(--ink-3);cursor:pointer;font-size:11px;opacity:0;transition:opacity .12s}
+  .tile:hover .tile-cog{opacity:1}
+  .tile .tile-cog:hover{color:var(--accent)}
+  .tile .tile-val{color:var(--accent);font-family:'Cascadia Code',monospace;font-size:13px}
+  .tile.hidden{opacity:0.35;background:repeating-linear-gradient(45deg,var(--panel),var(--panel) 6px,var(--panel2) 6px,var(--panel2) 12px)}
+  .tile.hidden .tile-val{color:var(--ink-3)}
+
+  /* CONTEXT MENU */
+  .ctx-menu{position:absolute;background:var(--panel);border:1px solid var(--line2);border-radius:6px;padding:4px;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:50;font-size:12px;display:none}
+  .ctx-menu.show{display:block}
+  .ctx-item{padding:6px 10px;border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:8px}
+  .ctx-item:hover{background:var(--panel2)}
+  .ctx-item .ctx-icon{width:14px;text-align:center;font-size:11px;color:var(--ink-2)}
+  .ctx-divider{height:1px;background:var(--line);margin:4px 0}
+  .ctx-item.danger{color:var(--fail)}
+
+  /* INFO CALLOUTS */
+  .callout{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--info);border-radius:6px;padding:10px 14px;font-size:12.5px;color:var(--ink-1);margin:14px 0}
+  .callout b{color:var(--info)}
+  .callout.warn{border-left-color:var(--warn)}
+  .callout.warn b{color:var(--warn)}
+
+  /* SEGMENT PILLS */
+  .seg-pills{display:flex;gap:4px;margin-bottom:14px}
+  .seg-pill{padding:5px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;font-size:11.5px;cursor:pointer;color:var(--ink-1);font-weight:600}
+  .seg-pill.on{background:rgba(168,85,247,0.12);border-color:var(--accent);color:var(--accent)}
+
+  /* COMPACT TABLE */
+  .tabletable{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:8px}
+  .tabletable td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  .tabletable td:first-child{color:var(--ink-2);font-weight:600;width:40%}
+  .tabletable td:nth-child(2){color:var(--ink-0)}
+
+  /* SAVE BAR */
+  .save-row{display:flex;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+  .btn{padding:7px 14px;border:1px solid var(--line2);background:var(--panel2);color:var(--ink-0);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}
+  .btn:hover{border-color:var(--info)}
+  .btn.primary{background:rgba(168,85,247,0.15);border-color:var(--accent);color:var(--accent)}
+  .btn.primary:hover{background:rgba(168,85,247,0.25)}
+  .btn.admin{background:rgba(239,68,68,0.10);border-color:rgba(239,68,68,0.4);color:var(--fail)}
+
+  /* ADMIN STRIPE */
+  .admin-stripe{background:linear-gradient(135deg,rgba(239,68,68,0.06),transparent);border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:10px 14px;margin-top:14px;font-size:12px;color:var(--ink-1)}
+  .admin-stripe b{color:var(--fail)}
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  <b>📐 PROTOTYPE — Option C: Tree settings + inline ⚙ icons.</b> Click ▸ to expand · ☑ to toggle · hover any tile to see its ⚙ · right-click a tile for the hide menu. Cascading profiles included.
+</div>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="logo">SwingTrade<span class="dot">.</span></div>
+  <span style="color:var(--ink-2);font-size:12px">Settings → Tab Visibility</span>
+  <div class="topbar-spacer"></div>
+  <div class="profile-selector">
+    <span style="font-size:14px">👤</span>
+    <div>
+      <div class="pcat">Profile</div>
+      <div class="pname">Trader</div>
+    </div>
+    <span class="pchev">▾</span>
+  </div>
+</div>
+
+<!-- DEMO GRID -->
+<div class="demo-wrap">
+
+  <!-- LEFT: SETTINGS TREE -->
+  <div class="panel-card">
+    <h2>⚙ Settings · Tab Visibility</h2>
+    <p class="sub">Hierarchical control over what's shown · 3 levels deep · ~80 togglable elements.</p>
+
+    <div class="seg-pills">
+      <span class="seg-pill on">Dashboard</span>
+      <span class="seg-pill">Per-Ticker</span>
+      <span class="seg-pill">Tiles only</span>
+      <span class="seg-pill">🔍 Search</span>
+    </div>
+
+    <div class="tree">
+
+      <!-- DASHBOARD ROOT -->
+      <div class="node parent" onclick="toggleNode(event)">
+        <span class="chev open">▶</span>
+        <span class="check on">✓</span>
+        <span class="label">Dashboard tabs</span>
+        <span class="count">12 of 22 shown</span>
+      </div>
+      <div class="children open">
+
+        <!-- Picks group -->
+        <div class="node parent" onclick="toggleNode(event)">
+          <span class="chev open">▶</span>
+          <span class="check on">✓</span>
+          <span class="label">Picks &amp; Scanner</span>
+          <span class="count">5 of 5</span>
+        </div>
+        <div class="children open">
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">⌬ Elite Picks</span>
+            <span class="badge recommend">RECOMMEND</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">Signal Scanner</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">Watchlist</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">Killed / AVOID</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">Industries</span>
+          </div>
+        </div>
+
+        <!-- Quant group with sub-tabs nested -->
+        <div class="node parent" onclick="toggleNode(event)">
+          <span class="chev">▶</span>
+          <span class="check partial">∼</span>
+          <span class="label">Quant</span>
+          <span class="count">1 of 3 shown</span>
+        </div>
+        <div class="children">
+          <div class="node parent" onclick="toggleNode(event)">
+            <span class="chev open">▶</span>
+            <span class="check on">✓</span>
+            <span class="label">Risk Lab</span>
+            <span class="count">2 of 3 sub-tabs</span>
+          </div>
+          <!-- Sub-tabs of Risk Lab -->
+          <div class="children open">
+            <div class="node">
+              <span class="chev leaf">·</span>
+              <span class="check on">✓</span>
+              <span class="label">V-8 CVaR optimizer</span>
+            </div>
+            <div class="node">
+              <span class="chev leaf">·</span>
+              <span class="check on">✓</span>
+              <span class="label">V-10 Sector pairs</span>
+            </div>
+            <div class="node">
+              <span class="chev leaf">·</span>
+              <span class="check">·</span>
+              <span class="label dim">V-11 DCC-GARCH</span>
+            </div>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check">·</span>
+            <span class="label dim">Pairs · S-6</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check">·</span>
+            <span class="label dim">Audit 360</span>
+          </div>
+        </div>
+
+        <!-- Themed group (collapsed, all hidden) -->
+        <div class="node parent" onclick="toggleNode(event)">
+          <span class="chev">▶</span>
+          <span class="check">·</span>
+          <span class="label dim">Themed</span>
+          <span class="count">0 of 4</span>
+        </div>
+
+        <!-- Reference group -->
+        <div class="node parent" onclick="toggleNode(event)">
+          <span class="chev">▶</span>
+          <span class="check on">✓</span>
+          <span class="label">Reference</span>
+          <span class="count">5 of 5</span>
+        </div>
+
+        <!-- Locked essentials -->
+        <div class="node">
+          <span class="chev leaf">·</span>
+          <span class="check on locked">✓</span>
+          <span class="label">⚙ Settings</span>
+          <span class="badge req">REQUIRED</span>
+        </div>
+      </div>
+
+      <!-- PER-TICKER ROOT -->
+      <div class="node parent" onclick="toggleNode(event)">
+        <span class="chev">▶</span>
+        <span class="check partial">∼</span>
+        <span class="label">Per-Ticker tabs (Elite Detail)</span>
+        <span class="count">11 of 14 shown</span>
+      </div>
+      <div class="children">
+        <!-- Overview tab with tile-level overrides -->
+        <div class="node parent" onclick="toggleNode(event)">
+          <span class="chev open">▶</span>
+          <span class="check on">✓</span>
+          <span class="label">Overview</span>
+          <span class="count">10 of 12 tiles</span>
+        </div>
+        <div class="children open">
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">Score arc</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">R:R · RSI · RVOL · IV tiles</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">Verdict banner</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">52w range bar</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">Pre-trade gate results</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">Forward distribution tile</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">Monte Carlo tile</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check">·</span>
+            <span class="label dim">HMM regime tile</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check">·</span>
+            <span class="label dim">CVaR tile</span>
+          </div>
+        </div>
+
+        <!-- Institution tab with sub-tabs -->
+        <div class="node parent" onclick="toggleNode(event)">
+          <span class="chev open">▶</span>
+          <span class="check on">✓</span>
+          <span class="label">🏛 Institution</span>
+          <span class="count">3 of 4 sub-tabs</span>
+        </div>
+        <div class="children open">
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">⭐ Zacks Intelligence</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">🐋 Institutional Ownership</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check">·</span>
+            <span class="label dim">📊 Smart Money Flow</span>
+          </div>
+          <div class="node">
+            <span class="chev leaf">·</span>
+            <span class="check on">✓</span>
+            <span class="label">✅ Pre-Trade Check</span>
+            <span class="badge recommend">NEW</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- SAVE BAR -->
+    <div class="save-row">
+      <button class="btn primary">💾 Save</button>
+      <button class="btn">↺ Reset to profile</button>
+      <button class="btn">📥 Export config</button>
+      <button class="btn">📤 Import</button>
+    </div>
+
+    <!-- ADMIN -->
+    <div class="admin-stripe">
+      <b>🔐 Admin (you · gari):</b> set defaults for new sessions · force-hide tabs globally · lock essentials. <button class="btn admin" style="margin-left:8px">Open admin section ▾</button>
+    </div>
+  </div>
+
+  <!-- RIGHT: PREVIEW + INLINE COG -->
+  <div class="panel-card">
+    <h2>👁 Preview · inline ⚙ on actual tabs</h2>
+    <p class="sub">When viewing any tab/tile in the real UI, hover for ⚙ · right-click for hide menu. Changes flip you to Custom profile.</p>
+
+    <div class="callout">
+      <b>Try it:</b> hover the tiles below, click the ⚙ that appears, OR right-click any tile for the context menu.
+    </div>
+
+    <!-- Mock tab preview -->
+    <div class="preview-tab">
+      <div class="preview-head">
+        <span>📋 Overview tab · AVGO</span>
+        <span class="cog" onclick="alert('Tab settings popup → Hide entire tab · Show only essential tiles · Reorder · Reset')">⚙</span>
+      </div>
+      <div class="tile-grid">
+        <div class="tile" oncontextmenu="showCtxMenu(event); return false;">
+          <div class="tile-h"><span class="tile-name">Score arc</span><span class="tile-cog" onclick="showCtxMenu(event)">⋯</span></div>
+          <div class="tile-val">84 / 100</div>
+        </div>
+        <div class="tile" oncontextmenu="showCtxMenu(event); return false;">
+          <div class="tile-h"><span class="tile-name">R:R ratio</span><span class="tile-cog" onclick="showCtxMenu(event)">⋯</span></div>
+          <div class="tile-val">3.0:1</div>
+        </div>
+        <div class="tile" oncontextmenu="showCtxMenu(event); return false;">
+          <div class="tile-h"><span class="tile-name">RSI</span><span class="tile-cog" onclick="showCtxMenu(event)">⋯</span></div>
+          <div class="tile-val">66.0</div>
+        </div>
+        <div class="tile" oncontextmenu="showCtxMenu(event); return false;">
+          <div class="tile-h"><span class="tile-name">Monte Carlo</span><span class="tile-cog" onclick="showCtxMenu(event)">⋯</span></div>
+          <div class="tile-val">P(+) 70.7%</div>
+        </div>
+        <div class="tile hidden" oncontextmenu="showCtxMenu(event); return false;">
+          <div class="tile-h"><span class="tile-name">HMM regime</span><span class="tile-cog" onclick="showCtxMenu(event)">⋯</span></div>
+          <div class="tile-val">— hidden</div>
+        </div>
+        <div class="tile hidden" oncontextmenu="showCtxMenu(event); return false;">
+          <div class="tile-h"><span class="tile-name">CVaR</span><span class="tile-cog" onclick="showCtxMenu(event)">⋯</span></div>
+          <div class="tile-val">— hidden</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cascading explainer -->
+    <div class="callout warn">
+      <b>Cascading profiles ON:</b> switching to <b>Beginner</b> automatically hides Models, SMC, Audit Trail AND their sub-tabs/tiles. Custom mode preserves your overrides on top.
+    </div>
+
+    <h2 style="margin-top:18px">📊 Current visibility · Trader profile</h2>
+    <table class="tabletable">
+      <tr><td>Dashboard tabs</td><td>12 of 22 shown</td></tr>
+      <tr><td>Per-ticker tabs</td><td>11 of 14 shown</td></tr>
+      <tr><td>Sub-tabs</td><td>9 of 16 shown</td></tr>
+      <tr><td>Tiles</td><td>34 of 48 shown</td></tr>
+      <tr><td><b>Total togglable elements</b></td><td><b>66 of 100</b></td></tr>
+    </table>
+
+    <!-- Context menu (hidden by default) -->
+    <div class="ctx-menu" id="ctxMenu">
+      <div class="ctx-item">
+        <span class="ctx-icon">👁</span>
+        <span>Hide this tile</span>
+      </div>
+      <div class="ctx-item">
+        <span class="ctx-icon">🔄</span>
+        <span>Move to top</span>
+      </div>
+      <div class="ctx-item">
+        <span class="ctx-icon">📌</span>
+        <span>Pin to dashboard</span>
+      </div>
+      <div class="ctx-divider"></div>
+      <div class="ctx-item">
+        <span class="ctx-icon">⚙</span>
+        <span>Tile settings…</span>
+      </div>
+      <div class="ctx-item danger">
+        <span class="ctx-icon">🚫</span>
+        <span>Hide all "Tile" type</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  function toggleNode(e) {
+    e.stopPropagation();
+    const node = e.currentTarget;
+    const chev = node.querySelector('.chev');
+    const next = node.nextElementSibling;
+    if (next && next.classList.contains('children')) {
+      next.classList.toggle('open');
+      chev.classList.toggle('open');
+    }
+  }
+  function showCtxMenu(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const m = document.getElementById('ctxMenu');
+    m.classList.add('show');
+    const x = (e.clientX || 100) + 'px';
+    const y = (e.clientY || 100) + 'px';
+    m.style.left = x;
+    m.style.top = y;
+  }
+  document.addEventListener('click', () => {
+    document.getElementById('ctxMenu').classList.remove('show');
+  });
+</script>
+
+</body>
+</html>

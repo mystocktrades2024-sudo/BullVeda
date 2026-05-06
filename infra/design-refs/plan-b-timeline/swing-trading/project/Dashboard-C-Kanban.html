@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Dashboard C — Kanban by Stage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-0: oklch(13% 0.012 250);
+    --bg-1: oklch(16% 0.012 250);
+    --bg-2: oklch(19% 0.014 250);
+    --bg-3: oklch(23% 0.014 250);
+    --ink-0: oklch(96% 0.005 90);
+    --ink-1: oklch(82% 0.006 90);
+    --ink-2: oklch(62% 0.008 90);
+    --ink-3: oklch(42% 0.01 250);
+    --rule: oklch(28% 0.012 250);
+    --rule-2: oklch(34% 0.014 250);
+    --accent: oklch(78% 0.16 75);
+    --accent-2: oklch(76% 0.13 215);
+    --green: oklch(74% 0.16 145);
+    --red:   oklch(68% 0.22 28);
+    --grey:  oklch(60% 0.012 250);
+  }
+  [data-theme="light"] {
+    --bg-0: oklch(98% 0.004 90); --bg-1: oklch(96% 0.005 90); --bg-2: oklch(94% 0.006 90); --bg-3: oklch(91% 0.008 90);
+    --ink-0: oklch(15% 0.012 250); --ink-1: oklch(28% 0.012 250); --ink-2: oklch(45% 0.012 250); --ink-3: oklch(60% 0.012 250);
+    --rule: oklch(85% 0.008 90); --rule-2: oklch(78% 0.01 90);
+    --green: oklch(54% 0.16 145); --red: oklch(56% 0.22 28); --grey: oklch(50% 0.012 250);
+  }
+  [data-density="comfortable"] .kc { padding: 14px; gap: 10px; }
+  [data-density="compact"] .kc { padding: 10px; gap: 8px; }
+
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background: var(--bg-0); color: var(--ink-0);
+    font-family: 'Inter Tight', -apple-system, sans-serif; font-size: 13px; -webkit-font-smoothing: antialiased; }
+  body { min-height: 100vh; overflow-x: hidden; }
+  .mono { font-family: 'JetBrains Mono', monospace; font-feature-settings: 'zero','ss01'; }
+  .num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+  .serif { font-family: 'Instrument Serif', serif; font-style: italic; }
+  .up { color: var(--green); }
+  .down { color: var(--red); }
+  .dim { color: var(--ink-2); }
+
+  /* topbar */
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--bg-0); border-bottom: 1px solid var(--rule);
+    display: grid; grid-template-columns: 280px 1fr auto;
+    align-items: center; height: 44px; padding: 0 14px; gap: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark { width: 22px; height: 22px; display: grid; place-items: center; background: var(--accent); color: var(--bg-0); font-family: 'JetBrains Mono', monospace; font-weight: 800; font-size: 13px; border-radius: 3px; }
+  .brand-name { font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em; }
+  .brand-sub { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink-2); }
+  .topbar-c { display: flex; align-items: center; gap: 14px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-2); }
+  .topbar-c .v { color: var(--ink-0); }
+  .pill { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.1em; padding: 2px 7px; border-radius: 3px; border: 1px solid var(--rule-2); color: var(--ink-1); background: var(--bg-2); }
+  .pill.green { color: var(--green); border-color: color-mix(in oklch, var(--green) 40%, transparent); background: color-mix(in oklch, var(--green) 10%, transparent); }
+  .topbar-r { display: flex; gap: 8px; align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-2); }
+  .clock-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* macro strip — same as B */
+  .macro {
+    border-bottom: 1px solid var(--rule);
+    background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
+    display: grid; grid-template-columns: repeat(8, 1fr) auto;
+    height: 56px;
+  }
+  .mc { padding: 6px 12px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 2px; justify-content: center; min-width: 0; }
+  .mc:last-child { border-right: none; }
+  .mc-l { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--ink-3); }
+  .mc-v { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600; color: var(--ink-0); font-variant-numeric: tabular-nums; }
+  .mc-c { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .regime { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 18px; gap: 4px; }
+  .regime-name { font-family: 'JetBrains Mono', monospace; font-weight: 700; letter-spacing: 0.1em; font-size: 11px; color: var(--green); display: flex; align-items: center; gap: 6px; }
+  .regime-meta { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--ink-2); letter-spacing: 0.08em; }
+  .regime-name::before { content:''; width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px var(--green); }
+
+  /* toolbar */
+  .toolbar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+    border-bottom: 1px solid var(--rule); background: var(--bg-0);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  }
+  .tb-tabs { display: flex; gap: 0; }
+  .tb-tab { padding: 4px 12px; color: var(--ink-2); cursor: pointer; border-bottom: 2px solid transparent; letter-spacing: 0.04em; }
+  .tb-tab.on { color: var(--ink-0); border-bottom-color: var(--accent); }
+  .tb-tab:hover { color: var(--ink-0); }
+  .tb-spacer { flex: 1; }
+  .chip { font-size: 10px; padding: 3px 8px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); cursor: pointer; user-select: none; }
+  .chip.on { background: var(--bg-3); color: var(--ink-0); border-color: var(--rule-2); }
+  .chip.accent { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 50%, transparent); }
+  .chip:hover { color: var(--ink-0); }
+  .icon-btn { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--rule); border-radius: 3px; background: var(--bg-1); color: var(--ink-2); cursor: pointer; }
+  .icon-btn.on { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 50%, transparent); }
+
+  /* board layout */
+  .board {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    padding: 0;
+    height: calc(100vh - 44px - 56px - 39px - 28px);
+    min-height: 720px;
+    overflow: hidden;
+  }
+  .col {
+    border-right: 1px solid var(--rule);
+    display: flex; flex-direction: column;
+    background: var(--bg-0);
+    min-width: 0;
+    transition: background 0.15s;
+  }
+  .col:last-child { border-right: none; }
+  .col.drag-over { background: color-mix(in oklch, var(--accent) 6%, var(--bg-0)); }
+
+  /* column header */
+  .col-h {
+    padding: 12px 14px 10px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--bg-1);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .col-h-top { display: flex; align-items: baseline; justify-content: space-between; }
+  .col-name {
+    font-family: 'Instrument Serif', serif; font-style: italic;
+    font-weight: 400; font-size: 22px; letter-spacing: -0.01em;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .col-name::before {
+    content:''; width: 8px; height: 8px; border-radius: 50%; background: var(--col-tone);
+    box-shadow: 0 0 12px var(--col-tone);
+  }
+  .col-tag {
+    font-family: 'JetBrains Mono', monospace; font-size: 9.5px; letter-spacing: 0.16em;
+    color: var(--col-tone); text-transform: uppercase;
+  }
+  .col-count {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-2);
+  }
+  .col-count b { color: var(--ink-0); font-weight: 700; }
+  .col-meta {
+    font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--ink-3);
+    display: flex; gap: 10px; flex-wrap: wrap;
+  }
+  .col-meta span b { color: var(--ink-1); font-weight: 600; }
+
+  .col-watching { --col-tone: var(--grey); }
+  .col-ready    { --col-tone: var(--accent); }
+  .col-in       { --col-tone: var(--accent-2); }
+  .col-cooling  { --col-tone: var(--red); }
+
+  /* card list */
+  .col-body {
+    padding: 10px;
+    overflow-y: auto;
+    display: flex; flex-direction: column; gap: 8px;
+    flex: 1;
+  }
+  .col-body::-webkit-scrollbar { width: 6px; }
+  .col-body::-webkit-scrollbar-track { background: transparent; }
+  .col-body::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 3px; }
+
+  /* card */
+  .kc {
+    background: var(--bg-1);
+    border: 1px solid var(--rule);
+    border-left: 2px solid var(--col-tone);
+    border-radius: 4px;
+    padding: 10px;
+    cursor: grab;
+    transition: transform 0.08s, box-shadow 0.12s, border-color 0.12s;
+    position: relative;
+  }
+  .kc:hover { border-color: var(--rule-2); box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
+  .kc.dragging { opacity: 0.5; cursor: grabbing; transform: rotate(-1deg); }
+  .kc.hot { border-left-width: 3px; }
+  .kc.hot::after {
+    content: 'HOT'; position: absolute; top: 8px; right: 8px;
+    font-family: 'JetBrains Mono', monospace; font-size: 8.5px; letter-spacing: 0.16em;
+    color: var(--accent); padding: 1px 5px; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .kc-top {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  }
+  .kc-l { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .kc-sym { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; line-height: 1; }
+  .kc-sect { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.06em; }
+  .kc-bap {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 13px;
+  }
+  .kc-bap-bar { width: 26px; height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden; }
+  .kc-bap-bar-fill { display: block; height: 100%; }
+
+  .kc-setup { font-size: 11.5px; color: var(--ink-1); margin-top: 4px; line-height: 1.3; }
+
+  .kc-meta {
+    display: flex; gap: 10px; margin-top: 6px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink-2);
+  }
+  .kc-meta b { color: var(--ink-1); font-weight: 600; }
+
+  .kc-spark { margin-top: 6px; }
+  .kc-spark svg { width: 100%; height: 18px; display: block; }
+
+  /* mini ruler — reused styles */
+  .mini-ruler { position: relative; height: 12px; border-radius: 2px; overflow: visible; background: var(--bg-3); margin-top: 6px; }
+  .mr-stop { position: absolute; left: 0; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, color-mix(in oklch, var(--red) 18%, transparent) 0 4px, color-mix(in oklch, var(--red) 28%, transparent) 4px 8px); }
+  .mr-runway { position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, color-mix(in oklch, var(--green) 8%, transparent), color-mix(in oklch, var(--accent-2) 14%, transparent)); }
+  .mr-entry { position: absolute; top: 0; bottom: 0; background: color-mix(in oklch, var(--green) 24%, transparent); border-left: 1px solid var(--green); border-right: 1px dashed var(--green); }
+  .mr-tick { position: absolute; top: -2px; bottom: -2px; width: 1px; }
+  .mr-t1 { background: var(--accent); }
+  .mr-t2 { background: var(--accent-2); }
+  .mr-now { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink-0); box-shadow: 0 0 0 2px color-mix(in oklch, var(--ink-0) 30%, transparent); }
+  .mr-label { display: flex; justify-content: space-between; margin-top: 3px; font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--ink-3); }
+  .mr-label b { color: var(--ink-1); font-weight: 600; }
+
+  /* IN TRADE specific bits */
+  .pos-pnl { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 13px; }
+  .pos-bar { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--rule); display: flex; justify-content: space-between; align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink-2); }
+
+  /* cooling specific */
+  .cool-reason { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--red); letter-spacing: 0.06em; margin-top: 4px; }
+
+  /* footer + drop hint */
+  .col-foot {
+    padding: 8px 14px;
+    border-top: 1px solid var(--rule);
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink-3);
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--bg-1);
+  }
+  .col-foot button {
+    background: none; border: 1px dashed var(--rule-2); color: var(--ink-2);
+    font-family: inherit; font-size: 10px; padding: 3px 8px; border-radius: 3px; cursor: pointer;
+  }
+  .col-foot button:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* footer status */
+  .statusbar {
+    display: flex; gap: 14px; align-items: center; padding: 6px 14px; height: 28px;
+    border-top: 1px solid var(--rule); background: var(--bg-1);
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--ink-2);
+    position: sticky; bottom: 0; z-index: 30;
+  }
+  .statusbar .ok { color: var(--green); }
+  .statusbar kbd { font-family: inherit; padding: 1px 5px; border: 1px solid var(--rule-2); border-radius: 2px; color: var(--ink-1); font-size: 10px; }
+  .grow { flex: 1; }
+
+  /* tweaks */
+  .tw-fab { position: fixed; bottom: 38px; right: 14px; z-index: 100; padding: 8px 12px; background: var(--bg-2); border: 1px solid var(--rule-2); color: var(--ink-1); border-radius: 4px; cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .tw-fab:hover { color: var(--ink-0); border-color: var(--accent); }
+  .tw-panel { position: fixed; bottom: 78px; right: 14px; z-index: 100; width: 280px; background: var(--bg-1); border: 1px solid var(--rule-2); border-radius: 6px; padding: 14px; display: none; box-shadow: 0 12px 40px rgba(0,0,0,0.4); }
+  .tw-panel.on { display: block; }
+  .tw-h { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 10px; display: flex; justify-content: space-between; }
+  .tw-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .tw-lbl { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-1); }
+  .tw-seg { display: inline-flex; border: 1px solid var(--rule-2); border-radius: 3px; overflow: hidden; }
+  .tw-seg button { background: none; border: none; color: var(--ink-2); font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 4px 8px; cursor: pointer; }
+  .tw-seg button.on { background: var(--accent); color: var(--bg-0); }
+  .tw-x { background: none; border: none; color: var(--ink-2); cursor: pointer; font-size: 14px; }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg-0); }
+  ::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 5px; }
+</style>
+</head>
+<body data-theme="dark" data-density="comfortable">
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">G</div>
+    <div>
+      <div class="brand-name">Gari's Trading Terminal</div>
+      <div class="brand-sub">DASHBOARD · KANBAN BY STAGE</div>
+    </div>
+  </div>
+  <div class="topbar-c">
+    <span><span class="dim">P&L D</span> <span class="v up num">+$842</span></span>
+    <span><span class="dim">P&L W</span> <span class="v up num">+$3.4k</span></span>
+    <span><span class="dim">RISK IN MKT</span> <span class="v num">$4,210</span></span>
+    <span><span class="dim">POSITIONS</span> <span class="v num">3</span></span>
+    <span class="pill green">RISK ON</span>
+  </div>
+  <div class="topbar-r">
+    <span class="num">14:32:08 ET</span>
+    <span class="clock-dot"></span>
+    <span class="dim">LIVE</span>
+  </div>
+</header>
+
+<section class="macro">
+  <div class="mc"><span class="mc-l">SPX</span><span class="mc-v">5,847.21</span><span class="mc-c up">+0.42%</span></div>
+  <div class="mc"><span class="mc-l">NDX</span><span class="mc-v">20,512.4</span><span class="mc-c up">+0.61%</span></div>
+  <div class="mc"><span class="mc-l">RUT</span><span class="mc-v">2,318.7</span><span class="mc-c down">−0.18%</span></div>
+  <div class="mc"><span class="mc-l">VIX</span><span class="mc-v">14.20</span><span class="mc-c up">−3.10%</span></div>
+  <div class="mc"><span class="mc-l">DXY</span><span class="mc-v">102.41</span><span class="mc-c dim">+0.12%</span></div>
+  <div class="mc"><span class="mc-l">10Y</span><span class="mc-v">4.213%</span><span class="mc-c up">−0.04</span></div>
+  <div class="mc"><span class="mc-l">GOLD</span><span class="mc-v">$2,418</span><span class="mc-c up">+0.31%</span></div>
+  <div class="mc"><span class="mc-l">WTI</span><span class="mc-v">$78.42</span><span class="mc-c down">−1.24%</span></div>
+  <div class="regime">
+    <span class="regime-name">RISK ON</span>
+    <span class="regime-meta">BREADTH 68% · 4/4 GATES</span>
+  </div>
+</section>
+
+<div class="toolbar">
+  <div class="tb-tabs">
+    <span class="tb-tab">WATCHLIST</span>
+    <span class="tb-tab on">BOARD</span>
+    <span class="tb-tab">POSITIONS · 3</span>
+    <span class="tb-tab">SCANS · 8</span>
+    <span class="tb-tab">JOURNAL</span>
+  </div>
+  <span style="margin-left:18px" class="dim">GROUP BY <span style="color:var(--accent)">STAGE ▾</span> · 22 SYMBOLS</span>
+  <span class="tb-spacer"></span>
+  <span class="chip on">All Sectors</span>
+  <span class="chip on">BAP > 50</span>
+  <span class="chip">Above 200D</span>
+  <span class="chip accent">+ Filter</span>
+  <span class="icon-btn on" title="Board view">▦</span>
+  <span class="icon-btn" title="Settings">⚙</span>
+</div>
+
+<main class="board" id="board"></main>
+
+<footer class="statusbar">
+  <span><span class="ok">●</span> LIVE · 22 SYMBOLS · DRAG CARDS BETWEEN COLUMNS</span>
+  <span>READY → IN TRADE = open position</span>
+  <span class="grow"></span>
+  <span><kbd>1-4</kbd> JUMP COLUMN · <kbd>↵</kbd> OPEN · <kbd>D</kbd> DENSITY · <kbd>?</kbd> HELP</span>
+</footer>
+
+<button class="tw-fab" id="twFab">⚙ Tweaks</button>
+<div class="tw-panel" id="twPanel">
+  <div class="tw-h"><span>Tweaks</span><button class="tw-x" id="twX">×</button></div>
+  <div class="tw-row"><span class="tw-lbl">Theme</span>
+    <div class="tw-seg" data-tw="theme">
+      <button data-v="dark" class="on">Dark</button>
+      <button data-v="light">Light</button>
+    </div>
+  </div>
+  <div class="tw-row"><span class="tw-lbl">Card density</span>
+    <div class="tw-seg" data-tw="density">
+      <button data-v="compact">Compact</button>
+      <button data-v="comfortable" class="on">Comfy</button>
+    </div>
+  </div>
+  <div class="tw-row"><span class="tw-lbl">Show ruler</span>
+    <div class="tw-seg" data-tw="ruler">
+      <button data-v="on" class="on">On</button>
+      <button data-v="off">Off</button>
+    </div>
+  </div>
+  <div class="tw-row"><span class="tw-lbl">Sort cards by</span>
+    <div class="tw-seg" data-tw="sort">
+      <button data-v="bap" class="on">BAP</button>
+      <button data-v="alpha">Sym</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TICKERS = [
+  // WATCHING
+  { sym:'CRWD', sect:'CYBR', stage:'WATCHING', bap:68, setup:'Base building above 50D', px:342.50, chg:+0.66, d20:+3.4, rvol:0.9, entry:[338,348], stop:322, t1:368, t2:388, lo:308, hi:402, seed:81, note:'No trigger yet' },
+  { sym:'NOW',  sect:'SOFT', stage:'WATCHING', bap:66, setup:'Coiling — wait for breakout', px:912.40, chg:+0.34, d20:+2.1, rvol:0.7, entry:[905,924], stop:875, t1:962, t2:1004, lo:840, hi:1040, seed:91, note:'Earn +14d' },
+  { sym:'UBER', sect:'CONS', stage:'WATCHING', bap:64, setup:'Above 200D, basing', px:76.10, chg:+1.45, d20:+4.1, rvol:1.1, entry:[75,77], stop:71, t1:82, t2:88, lo:68, hi:92, seed:101, note:'' },
+  { sym:'LLY',  sect:'HLTH', stage:'WATCHING', bap:62, setup:'Cooling base · stage 2', px:812.30, chg:+0.88, d20:-1.4, rvol:0.9, entry:[800,820], stop:768, t1:868, t2:912, lo:740, hi:940, seed:111, note:'Earn +6d ⚠' },
+  { sym:'COIN', sect:'FIN',  stage:'WATCHING', bap:55, setup:'High vol · choppy', px:218.40, chg:+3.12, d20:+12.4, rvol:1.8, entry:[212,224], stop:198, t1:248, t2:272, lo:182, hi:288, seed:121, note:'Volatile' },
+  { sym:'JPM',  sect:'FIN',  stage:'WATCHING', bap:54, setup:'Stage 1 base', px:218.40, chg:+0.21, d20:+1.1, rvol:0.7, entry:[216,222], stop:208, t1:232, t2:244, lo:198, hi:252, seed:131, note:'' },
+  { sym:'HD',   sect:'CONS', stage:'WATCHING', bap:50, setup:'Sideways — no edge', px:412.40, chg:+0.38, d20:+0.4, rvol:0.6, entry:[408,418], stop:395, t1:434, t2:452, lo:380, hi:464, seed:141, note:'' },
+  // READY
+  { sym:'NVDA', sect:'SEMI', stage:'READY', bap:88, setup:'Bull flag · D1 · in buy zone', px:192.40, chg:+1.84, d20:+11.4, rvol:1.4, entry:[189,194], stop:182, t1:208, t2:224, lo:175, hi:230, seed:11, hot:true, note:'TRIGGER LIVE' },
+  { sym:'AVGO', sect:'SEMI', stage:'READY', bap:82, setup:'Bull flag — pullback to 21EMA', px:1742.10, chg:+0.92, d20:+8.4, rvol:1.2, entry:[1720,1755], stop:1670, t1:1880, t2:1980, lo:1620, hi:2020, seed:21, note:'' },
+  { sym:'META', sect:'INET', stage:'READY', bap:79, setup:'Pullback to rising 50D', px:612.30, chg:+0.41, d20:+5.1, rvol:0.9, entry:[605,618], stop:585, t1:650, t2:684, lo:560, hi:700, seed:31, note:'Earn +8d' },
+  { sym:'PANW', sect:'CYBR', stage:'READY', bap:76, setup:'Cup & handle — neckline test', px:382.41, chg:-0.22, d20:+6.2, rvol:1.1, entry:[378,388], stop:362, t1:412, t2:438, lo:340, hi:450, seed:41, note:'' },
+  { sym:'SHOP', sect:'INET', stage:'READY', bap:74, setup:'Breakout retest at $96', px:98.10, chg:+1.10, d20:+9.1, rvol:1.5, entry:[96,100], stop:91, t1:108, t2:118, lo:84, hi:122, seed:51, note:'' },
+  // IN TRADE — these have actual position fields
+  { sym:'MSFT', sect:'SOFT', stage:'IN_TRADE', bap:72, setup:'Trail · holding above $420', px:432.18, chg:+0.55, d20:+4.2, rvol:0.8, entry:[420,425], stop:408, t1:462, t2:482, lo:390, hi:495, seed:61,
+    pos: { entry:422, shares:24, pnl:+244, pnlPct:+2.4, t1Hit:false, days:6 } },
+  { sym:'GOOGL',sect:'INET', stage:'IN_TRADE', bap:70, setup:'Stage 2 trend · trail 21EMA', px:182.44, chg:+1.12, d20:+5.8, rvol:1.0, entry:[178,182], stop:172, t1:198, t2:212, lo:164, hi:222, seed:71,
+    pos: { entry:179.50, shares:56, pnl:+165, pnlPct:+1.6, t1Hit:false, days:4 } },
+  { sym:'ANET', sect:'SEMI', stage:'IN_TRADE', bap:68, setup:'Hit T1 · trailing remainder', px:344.10, chg:+0.84, d20:+9.4, rvol:1.1, entry:[312,320], stop:328, t1:344, t2:368, lo:300, hi:380, seed:155,
+    pos: { entry:316.20, shares:32, pnl:+893, pnlPct:+8.8, t1Hit:true, days:11 } },
+  // COOLING
+  { sym:'TSLA', sect:'CONS', stage:'COOLING', bap:38, setup:'Failed breakout — rejected $260', px:248.10, chg:-2.14, d20:-8.1, rvol:1.6, entry:[244,252], stop:232, t1:268, t2:284, lo:218, hi:292, seed:171, reason:'Failed at resistance' },
+  { sym:'XOM',  sect:'ENRG', stage:'COOLING', bap:32, setup:'Distribution — below 50D', px:104.20, chg:-1.40, d20:-5.4, rvol:1.2, entry:[102,106], stop:97, t1:112, t2:118, lo:91, hi:124, seed:181, reason:'Stage 4 transition' },
+  { sym:'MARA', sect:'FIN',  stage:'COOLING', bap:42, setup:'Wait for reset', px:18.40, chg:-1.21, d20:-8.4, rvol:1.4, entry:[18,19.2], stop:16.8, t1:21.2, t2:23.4, lo:15.2, hi:24.8, seed:161, reason:'High vol · no edge' },
+  { sym:'AAPL', sect:'CONS', stage:'COOLING', bap:45, setup:'Sideways · no momentum', px:228.20, chg:-0.42, d20:-2.1, rvol:0.9, entry:[226,232], stop:218, t1:242, t2:254, lo:210, hi:262, seed:151, reason:'No setup' },
+  { sym:'UNH',  sect:'HLTH', stage:'COOLING', bap:30, setup:'Below 200D · downtrend', px:542.10, chg:-0.42, d20:-7.2, rvol:1.1, entry:[538,548], stop:518, t1:572, t2:598, lo:498, hi:610, seed:191, reason:'Stage 4' },
+  { sym:'CVX',  sect:'ENRG', stage:'COOLING', bap:28, setup:'Stage 4 · weak sector', px:148.10, chg:-1.12, d20:-4.8, rvol:0.9, entry:[146,150], stop:138, t1:158, t2:166, lo:132, hi:172, seed:201, reason:'Sector weakness' },
+];
+
+const STAGES = [
+  { key:'WATCHING', name:'Watching',  tag:'OBSERVE',         meta:'No edge yet · no risk',                   cls:'col-watching' },
+  { key:'READY',    name:'Ready',     tag:'TRIGGER PENDING', meta:'Trigger live · click to size & arm',      cls:'col-ready' },
+  { key:'IN_TRADE', name:'In Trade',  tag:'POSITION OPEN',   meta:'Manage stop · take T1 · trail T2',        cls:'col-in' },
+  { key:'COOLING',  name:'Cooling',   tag:'AVOID',           meta:'Failed or weak · no new risk',             cls:'col-cooling' },
+];
+
+// helpers
+function bapColor(b){ if (b>=80) return 'var(--green)'; if (b>=70) return 'oklch(78% 0.16 130)'; if (b>=60) return 'var(--accent)'; if (b>=50) return 'oklch(70% 0.15 50)'; return 'var(--red)'; }
+function px(v){ return v.toFixed(2); }
+function fmt(v, d=2){ return (v>=0?'+':'') + v.toFixed(d); }
+
+function spark(seed, n=24, trend=0){
+  let v=50, s=seed; const pts=[];
+  for(let i=0;i<n;i++){ s=(s*9301+49297)%233280; const r=(s/233280)-0.5; v+=r*8+trend; v=Math.max(10,Math.min(90,v)); pts.push(v); }
+  return pts;
+}
+function sparkSvg(seed, down){
+  const pts = spark(seed, 24, down ? -0.5 : 0.4);
+  const min = Math.min(...pts), max = Math.max(...pts);
+  const span = max - min || 1;
+  const w = 100, h = 18;
+  const path = pts.map((v,i)=>{
+    const x = (i/(pts.length-1))*w;
+    const y = h - ((v-min)/span)*(h-2) - 1;
+    return (i===0?'M':'L') + x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+  const area = path + ` L${w},${h} L0,${h} Z`;
+  const color = down ? 'var(--red)' : 'var(--green)';
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <path d="${area}" fill="${color}" fill-opacity="0.12"/>
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.2"/>
+  </svg>`;
+}
+
+function miniRulerHtml(t){
+  const range = t.hi - t.lo;
+  const pct = v => Math.max(0, Math.min(100, ((v-t.lo)/range)*100));
+  const eL = pct(t.entry[0]), eR = pct(t.entry[1]);
+  return `<div class="mini-ruler">
+    <div class="mr-stop" style="width:${pct(t.stop).toFixed(1)}%"></div>
+    <div class="mr-runway" style="left:${pct(t.stop)}%; right:0"></div>
+    <div class="mr-entry" style="left:${eL}%; width:${(eR-eL)}%"></div>
+    <div class="mr-tick mr-t1" style="left:${pct(t.t1)}%"></div>
+    <div class="mr-tick mr-t2" style="left:${pct(t.t2)}%"></div>
+    <div class="mr-now" style="left:${pct(t.px).toFixed(1)}%"></div>
+  </div>
+  <div class="mr-label"><span>STOP <b>${px(t.stop)}</b></span><span>NOW <b style="color:var(--ink-0)">${px(t.px)}</b></span><span>T1 <b>${px(t.t1)}</b></span></div>`;
+}
+
+function cardHtml(t){
+  const stCls = t.stage === 'IN_TRADE' ? 'col-in' : t.stage === 'READY' ? 'col-ready' : t.stage === 'WATCHING' ? 'col-watching' : 'col-cooling';
+  const down = t.chg < 0 || (t.d20 != null && t.d20 < 0);
+  let extra = '';
+  if (t.stage === 'IN_TRADE' && t.pos) {
+    const p = t.pos;
+    const pcls = p.pnl >= 0 ? 'up' : 'down';
+    extra = `<div class="pos-bar">
+      <span><span style="color:var(--ink-3)">@</span> <b style="color:var(--ink-1)">${px(p.entry)}</b> · <b style="color:var(--ink-1)">${p.shares}sh</b> · <span style="color:var(--ink-3)">${p.days}d</span></span>
+      <span class="pos-pnl ${pcls}">${p.pnl>=0?'+':''}$${Math.abs(p.pnl)} · ${fmt(p.pnlPct,1)}%</span>
+    </div>`;
+    if (p.t1Hit) extra = `<div class="pos-bar" style="border-color:color-mix(in oklch, var(--accent) 40%, transparent)">
+      <span style="color:var(--accent);font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.14em">★ T1 HIT · TRAILING T2</span>
+      <span class="pos-pnl up">+$${p.pnl} · ${fmt(p.pnlPct,1)}%</span>
+    </div>`;
+  }
+  if (t.stage === 'COOLING' && t.reason) {
+    extra = `<div class="cool-reason">→ ${t.reason}</div>`;
+  }
+  const ruler = state.ruler === 'on' ? miniRulerHtml(t) : '';
+  return `<div class="kc ${stCls} ${t.hot?'hot':''}" draggable="true" data-sym="${t.sym}">
+    <div class="kc-top">
+      <div class="kc-l">
+        <span class="kc-sym">${t.sym}</span>
+        <span class="kc-sect">${t.sect}</span>
+      </div>
+      <span class="kc-bap" style="color:${bapColor(t.bap)}">${t.bap}<span class="kc-bap-bar"><span class="kc-bap-bar-fill" style="width:${t.bap}%; background:${bapColor(t.bap)}"></span></span></span>
+    </div>
+    <div class="kc-setup">${t.setup}</div>
+    <div class="kc-meta">
+      <span><b style="color:var(--ink-0)">${px(t.px)}</b></span>
+      <span class="${t.chg>=0?'up':'down'}">${fmt(t.chg,2)}%</span>
+      <span class="${t.d20>=0?'up':'down'}">20D ${fmt(t.d20,1)}</span>
+      ${t.rvol ? `<span style="color:${t.rvol>1.2?'var(--accent)':'var(--ink-2)'}">${t.rvol.toFixed(1)}× vol</span>` : ''}
+    </div>
+    <div class="kc-spark">${sparkSvg(t.seed, down)}</div>
+    ${ruler}
+    ${extra}
+  </div>`;
+}
+
+// state
+const state = { theme:'dark', density:'comfortable', ruler:'on', sort:'bap' };
+
+function render(){
+  const board = document.getElementById('board');
+  board.innerHTML = STAGES.map(stg => {
+    let items = TICKERS.filter(t => t.stage === stg.key);
+    if (state.sort === 'bap') items.sort((a,b) => b.bap - a.bap);
+    else items.sort((a,b) => a.sym.localeCompare(b.sym));
+    const sumRisk = items.reduce((s,t) => s + (t.pos ? Math.abs(t.pos.entry - t.stop)*t.pos.shares : 0), 0);
+    const sumPnl = items.reduce((s,t) => s + (t.pos ? t.pos.pnl : 0), 0);
+    let metaLine = '';
+    if (stg.key === 'WATCHING') metaLine = `<span><b>${items.length}</b> tracked</span><span>avg BAP <b>${Math.round(items.reduce((s,t)=>s+t.bap,0)/Math.max(1,items.length))}</b></span><span>0 risk</span>`;
+    else if (stg.key === 'READY') metaLine = `<span><b>${items.length}</b> primed</span><span>${items.filter(x=>x.hot).length} HOT</span><span>est. risk <b>$${Math.round(items.length*420)}</b></span>`;
+    else if (stg.key === 'IN_TRADE') metaLine = `<span><b>${items.length}</b> open</span><span>risk <b>$${Math.round(sumRisk)}</b></span><span class="${sumPnl>=0?'up':'down'}">P&L <b style="color:inherit">${sumPnl>=0?'+':'−'}$${Math.abs(sumPnl)}</b></span>`;
+    else metaLine = `<span><b>${items.length}</b> shelved</span><span>no risk</span>`;
+    return `<div class="col ${stg.cls}" data-stage="${stg.key}">
+      <div class="col-h">
+        <div class="col-h-top">
+          <div>
+            <div class="col-name">${stg.name}</div>
+            <div class="col-tag">${stg.tag}</div>
+          </div>
+          <div class="col-count"><b>${items.length}</b> ${items.length === 1 ? 'ticker' : 'tickers'}</div>
+        </div>
+        <div class="col-meta">${metaLine}</div>
+      </div>
+      <div class="col-body" data-stage-body="${stg.key}">
+        ${items.map(cardHtml).join('')}
+      </div>
+      <div class="col-foot">
+        <span>${stg.meta}</span>
+        <button>+ Add ticker</button>
+      </div>
+    </div>`;
+  }).join('');
+  attachDnd();
+}
+
+// drag and drop
+function attachDnd(){
+  document.querySelectorAll('.kc').forEach(card => {
+    card.addEventListener('dragstart', e => {
+      card.classList.add('dragging');
+      e.dataTransfer.setData('text/plain', card.dataset.sym);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  });
+  document.querySelectorAll('.col').forEach(col => {
+    col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('drag-over'); });
+    col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
+    col.addEventListener('drop', e => {
+      e.preventDefault();
+      col.classList.remove('drag-over');
+      const sym = e.dataTransfer.getData('text/plain');
+      const t = TICKERS.find(x => x.sym === sym);
+      if (!t) return;
+      const newStage = col.dataset.stage;
+      if (t.stage === newStage) return;
+      t.stage = newStage;
+      // entering IN_TRADE → mock a position
+      if (newStage === 'IN_TRADE' && !t.pos) {
+        t.pos = { entry: t.entry[0], shares: 24, pnl: 0, pnlPct: 0, t1Hit: false, days: 0 };
+      }
+      // leaving IN_TRADE clears position
+      if (newStage !== 'IN_TRADE') t.pos = null;
+      render();
+    });
+  });
+}
+
+// tweaks
+const fab = document.getElementById('twFab');
+const panel = document.getElementById('twPanel');
+fab.addEventListener('click', () => panel.classList.toggle('on'));
+document.getElementById('twX').addEventListener('click', () => panel.classList.remove('on'));
+document.querySelectorAll('.tw-seg').forEach(seg => {
+  seg.addEventListener('click', e => {
+    if (!e.target.matches('button')) return;
+    const tw = seg.dataset.tw, v = e.target.dataset.v;
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+    state[tw] = v;
+    if (tw === 'theme') document.body.dataset.theme = v;
+    if (tw === 'density') document.body.dataset.density = v;
+    render();
+  });
+});
+
+// keyboard nav
+document.addEventListener('keydown', e => {
+  const map = { '1':'WATCHING', '2':'READY', '3':'IN_TRADE', '4':'COOLING' };
+  if (map[e.key]) {
+    const col = document.querySelector(`[data-stage="${map[e.key]}"]`);
+    col && col.scrollIntoView({ block:'nearest', inline:'center', behavior:'smooth' });
+  }
+});
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,1039 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Gari · Terminal v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-0: oklch(14% 0.008 250);
+  --bg-1: oklch(17% 0.01 250);
+  --bg-2: oklch(20% 0.012 250);
+  --bg-3: oklch(24% 0.014 250);
+  --ink-0: oklch(97% 0.004 90);
+  --ink-1: oklch(84% 0.005 90);
+  --ink-2: oklch(64% 0.008 90);
+  --ink-3: oklch(46% 0.01 250);
+  --rule: oklch(28% 0.012 250);
+  --rule-2: oklch(34% 0.014 250);
+  --accent: oklch(82% 0.14 78);
+  --accent-2: oklch(78% 0.12 215);
+  --green: oklch(74% 0.16 145);
+  --red:   oklch(68% 0.22 28);
+  --grid:  oklch(22% 0.01 250);
+  --row-h: 30px;
+}
+[data-theme="light"] {
+  --bg-0: oklch(98% 0.003 90); --bg-1: oklch(96% 0.004 90); --bg-2: oklch(94% 0.005 90); --bg-3: oklch(91% 0.007 90);
+  --ink-0: oklch(15% 0.012 250); --ink-1: oklch(28% 0.012 250); --ink-2: oklch(48% 0.012 250); --ink-3: oklch(62% 0.012 250);
+  --rule: oklch(86% 0.008 90); --rule-2: oklch(78% 0.01 90); --grid: oklch(92% 0.005 90);
+  --green: oklch(54% 0.16 145); --red: oklch(56% 0.22 28);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg-0); color: var(--ink-0);
+  font-family: 'IBM Plex Sans', -apple-system, sans-serif; font-size: 13px;
+  -webkit-font-smoothing: antialiased; }
+body { min-height: 100vh; overflow-x: hidden; }
+.mono { font-family: 'IBM Plex Mono', monospace; }
+.num  { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+.serif { font-family: 'IBM Plex Serif', serif; }
+.up { color: var(--green); } .down { color: var(--red); } .dim { color: var(--ink-2); } .dim2 { color: var(--ink-3); }
+.lbl { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-2); }
+button { font: inherit; border: none; background: none; color: inherit; cursor: pointer; }
+
+/* topbar */
+.topbar { position: sticky; top: 0; z-index: 50; background: var(--bg-0); border-bottom: 1px solid var(--rule);
+  display: grid; grid-template-columns: 240px 1fr auto; align-items: center; height: 48px; padding: 0 16px; gap: 16px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-mark { width: 26px; height: 26px; display: grid; place-items: center; background: var(--accent); color: var(--bg-0);
+  font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 14px; border-radius: 4px; }
+.brand-name { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.brand-sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-2); letter-spacing: 0.04em; }
+.tape { display: flex; gap: 24px; align-items: center; overflow: hidden; height: 48px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 5%, #000 95%, transparent 100%);
+          mask-image: linear-gradient(90deg, transparent 0, #000 5%, #000 95%, transparent 100%); }
+.tape-inner { display: flex; gap: 24px; animation: tape 90s linear infinite; white-space: nowrap; }
+@keyframes tape { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.tt { display: inline-flex; gap: 6px; align-items: baseline; }
+.tt b { color: var(--ink-0); font-weight: 600; }
+.tb-r { display: flex; gap: 10px; align-items: center; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-2); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* macro strip */
+.macro { border-bottom: 1px solid var(--rule); background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
+  display: grid; grid-template-columns: repeat(8, 1fr) auto; height: 64px; }
+.mc { padding: 8px 14px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 3px; justify-content: center; min-width: 0; position: relative; }
+.mc:last-child { border-right: none; }
+.mc-l { font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--ink-3); }
+.mc-v { font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 500; color: var(--ink-0); font-variant-numeric: tabular-nums; }
+.mc-c { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.mc-spark { position: absolute; right: 8px; bottom: 8px; width: 50px; height: 14px; opacity: 0.7; }
+.regime { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 22px; gap: 4px; min-width: 160px; }
+.regime-name { font-family: 'IBM Plex Mono', monospace; font-weight: 600; letter-spacing: 0.14em; font-size: 11px; color: var(--green); display: flex; align-items: center; gap: 6px; }
+.regime-name::before { content:''; width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px var(--green); }
+.regime-meta { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-2); letter-spacing: 0.06em; }
+
+/* shell */
+.shell { display: grid; grid-template-columns: 60px 1fr; min-height: calc(100vh - 48px - 64px); }
+.rail { border-right: 1px solid var(--rule); background: var(--bg-0); padding: 14px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.rail-btn { width: 40px; height: 40px; border-radius: 6px; display: grid; place-items: center; color: var(--ink-2); cursor: pointer; border: 1px solid transparent; position: relative; }
+.rail-btn:hover { background: var(--bg-2); color: var(--ink-0); }
+.rail-btn.on { background: var(--bg-2); border-color: var(--rule-2); color: var(--accent); }
+.rail-btn.on::before { content:''; position: absolute; left: -1px; top: 8px; bottom: 8px; width: 2px; background: var(--accent); border-radius: 2px; }
+.rail-btn svg { width: 18px; height: 18px; stroke-width: 1.5; }
+.rail-spacer { flex: 1; }
+.rail-lbl { font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.12em; color: var(--ink-3); text-transform: uppercase; margin-top: 2px; }
+
+main { padding: 18px; max-width: 100%; }
+.view { display: none; } .view.on { display: block; }
+
+/* page header */
+.ph { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; gap: 16px; }
+.ph-title { font-family: 'IBM Plex Serif', serif; font-style: italic; font-weight: 400; font-size: 28px; letter-spacing: -0.01em; }
+.ph-sub { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-2); letter-spacing: 0.04em; }
+.ph-r { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-2); display: flex; gap: 12px; }
+.ph-r b { color: var(--ink-0); font-weight: 600; }
+
+/* tags */
+.tag { font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 3px; border: 1px solid var(--rule-2); color: var(--ink-1); background: var(--bg-2); }
+.tag.green { color: var(--green); border-color: color-mix(in oklch, var(--green) 40%, transparent); background: color-mix(in oklch, var(--green) 10%, transparent); }
+.tag.amber { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 40%, transparent); background: color-mix(in oklch, var(--accent) 10%, transparent); }
+.tag.red   { color: var(--red); border-color: color-mix(in oklch, var(--red) 40%, transparent); background: color-mix(in oklch, var(--red) 10%, transparent); }
+.tag.blue  { color: var(--accent-2); border-color: color-mix(in oklch, var(--accent-2) 40%, transparent); background: color-mix(in oklch, var(--accent-2) 10%, transparent); }
+
+/* dashboard layout */
+.dash { display: grid; grid-template-columns: 1.55fr 1fr; gap: 14px; }
+.panel { background: var(--bg-1); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.panel-h { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--rule); background: var(--bg-1); }
+.panel-t { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-1); }
+.panel-m { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-2); }
+.panel-b { padding: 14px; }
+.panel-b.np { padding: 0; }
+
+/* hero */
+.hero { background: var(--bg-1); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; position: relative; }
+.hero-stripe { position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+.hero-h { display: flex; justify-content: space-between; align-items: flex-start; padding: 16px 18px 12px; gap: 14px; }
+.hero-rank { font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); padding: 3px 8px; border: 1px solid var(--accent); border-radius: 3px; }
+.hero-t { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.hero-sym { font-size: 36px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
+.hero-name { color: var(--ink-2); font-size: 12px; font-family: 'IBM Plex Mono', monospace; }
+.hero-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.hero-px { text-align: right; font-family: 'IBM Plex Mono', monospace; }
+.hero-px-v { font-size: 28px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
+.hero-px-c { font-size: 12.5px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.hero-body { display: grid; grid-template-columns: 1.7fr 1fr; gap: 14px; padding: 0 18px 16px; }
+
+/* gauges */
+.gauges { display: flex; gap: 12px; }
+.gauge { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.gauge svg { width: 64px; height: 64px; }
+.gauge-n { font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 18px; }
+.gauge-l { font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.16em; color: var(--ink-2); text-transform: uppercase; }
+
+/* chart */
+.chart { background: var(--bg-2); border: 1px solid var(--rule); border-radius: 4px; padding: 10px; position: relative; min-height: 240px; overflow: hidden; }
+.chart-grid { position: absolute; inset: 36px 12px 32px 12px; background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px), linear-gradient(to bottom, var(--grid) 1px, transparent 1px); background-size: 10% 25%; opacity: 0.5; }
+.chart-tools { display: flex; justify-content: space-between; align-items: center; position: relative; z-index: 2; margin-bottom: 4px; }
+.chart-tools-l, .chart-tools-r { display: flex; gap: 6px; align-items: center; }
+.chip { font-family: 'IBM Plex Mono', monospace; font-size: 10px; padding: 3px 7px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); cursor: pointer; }
+.chip.on { background: var(--bg-3); color: var(--ink-0); border-color: var(--rule-2); }
+.chip.accent { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 50%, transparent); }
+.chart-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* ruler */
+.ruler-wrap { padding: 12px 0 4px; }
+.ruler-track { position: relative; height: 28px; border-radius: 4px; overflow: hidden; background: var(--bg-3); border: 1px solid var(--rule); }
+.r-stop { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, color-mix(in oklch, var(--red) 18%, transparent) 0 6px, color-mix(in oklch, var(--red) 28%, transparent) 6px 12px); }
+.r-entry { position: absolute; top: 0; bottom: 0; background: color-mix(in oklch, var(--green) 22%, transparent); border-left: 1px solid var(--green); border-right: 1px dashed var(--green); }
+.r-runway { position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, color-mix(in oklch, var(--green) 8%, transparent), color-mix(in oklch, var(--accent-2) 14%, transparent)); }
+.r-tick { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--ink-1); }
+.r-tick.t1 { background: var(--accent); } .r-tick.t2 { background: var(--accent-2); }
+.r-now { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink-0); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ink-0) 30%, transparent); }
+.r-now::after { content: ""; position: absolute; top: -4px; left: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--ink-0); box-shadow: 0 0 12px var(--accent); }
+.r-labels { display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; gap: 6px; }
+.r-labels .l { color: var(--ink-3); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; }
+.r-labels .v { font-size: 12px; font-weight: 600; }
+
+/* heatmap */
+.heatmap { display: grid; grid-template-columns: 2fr 1.2fr 1fr; grid-template-rows: 1fr 1fr 0.8fr; gap: 2px; background: var(--rule); padding: 1px; }
+.heat { padding: 9px 11px; display: flex; flex-direction: column; justify-content: space-between; cursor: pointer; min-height: 64px; transition: filter 0.15s; }
+.heat:hover { filter: brightness(1.15); }
+.heat-n { font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 11px; letter-spacing: 0.05em; }
+.heat-p { font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.heat-m { font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; opacity: 0.7; }
+
+/* watchlist */
+.wl-h { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+.wl-tabs { display: flex; gap: 0; }
+.wl-tab { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.04em; padding: 4px 12px; color: var(--ink-2); cursor: pointer; border-bottom: 2px solid transparent; }
+.wl-tab.on { color: var(--ink-0); border-bottom-color: var(--accent); }
+.wl-search { background: var(--bg-2); border: 1px solid var(--rule); color: var(--ink-0); font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 5px 9px; border-radius: 3px; width: 220px; }
+.wl-search:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
+table.wl { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; }
+table.wl th { text-align: left; font-weight: 500; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); padding: 8px 10px; border-bottom: 1px solid var(--rule); background: var(--bg-1); position: sticky; top: 0; user-select: none; cursor: pointer; }
+table.wl th:hover { color: var(--ink-0); }
+table.wl th.sorted { color: var(--accent); }
+table.wl td { padding: 0 10px; height: var(--row-h); border-bottom: 1px solid var(--rule); font-variant-numeric: tabular-nums; vertical-align: middle; }
+table.wl tbody tr { cursor: pointer; transition: background 0.06s; }
+table.wl tbody tr:hover { background: var(--bg-2); }
+table.wl tbody tr.active { background: color-mix(in oklch, var(--accent) 12%, transparent); }
+table.wl tbody tr.active td:first-child { box-shadow: inset 2px 0 var(--accent); }
+.wl-sym { color: var(--ink-0); font-weight: 600; font-size: 12.5px; font-family: 'IBM Plex Sans', sans-serif; letter-spacing: -0.01em; }
+.wl-sect { color: var(--ink-3); font-size: 10px; }
+.bap-bar { display: inline-block; width: 36px; height: 4px; background: var(--bg-3); border-radius: 2px; vertical-align: middle; margin-left: 6px; overflow: hidden; }
+.bap-bar > span { display: block; height: 100%; }
+.spark-cell { width: 80px; }
+.spark-svg { width: 80px; height: 22px; display: block; }
+.ruler-mini { width: 120px; height: 14px; position: relative; border-radius: 2px; background: var(--bg-3); }
+
+/* intel feed */
+.intel { display: flex; flex-direction: column; }
+.intel-row { display: grid; grid-template-columns: 50px 1fr auto; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--rule); align-items: center; }
+.intel-row:last-child { border-bottom: none; }
+.intel-t { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-3); }
+.intel-x { font-size: 12.5px; line-height: 1.4; color: var(--ink-1); }
+.intel-x b { color: var(--ink-0); font-weight: 600; }
+.intel-x .sym { color: var(--accent); font-family: 'IBM Plex Mono', monospace; font-size: 11px; margin-right: 6px; }
+
+/* plan ladder */
+.ladder { position: relative; height: 360px; padding: 0 8px; }
+.ladder-rung { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 12px; }
+.ladder-px { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; width: 80px; }
+.ladder-line { flex: 1; height: 0; border-top-width: 1.5px; border-top-style: solid; }
+.ladder-line.dashed { border-top-style: dashed; }
+.ladder-tag { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); }
+.ladder-pct { font-family: 'IBM Plex Mono', monospace; font-size: 11px; width: 70px; text-align: right; }
+.ladder-zone { position: absolute; left: 86px; right: 110px; border-radius: 2px; }
+.ladder-zone.buy { background: color-mix(in oklch, var(--green) 12%, transparent); border: 1px solid color-mix(in oklch, var(--green) 50%, transparent); }
+.ladder-zone.nogo { background: repeating-linear-gradient(45deg, color-mix(in oklch, var(--red) 8%, transparent) 0 4px, color-mix(in oklch, var(--red) 16%, transparent) 4px 8px); border: 1px dashed color-mix(in oklch, var(--red) 50%, transparent); }
+.ladder-zone-l { position: absolute; top: 4px; right: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; }
+.ladder-now { position: absolute; left: -4px; right: -4px; height: 0; border-top: 2px solid var(--accent); }
+.ladder-now-tag { position: absolute; right: -4px; top: -10px; background: var(--accent); color: var(--bg-0); padding: 2px 7px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 600; border-radius: 2px; }
+
+/* sectors view */
+.sect-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; }
+.sect-tm { display: grid; grid-template-columns: 2fr 1.4fr 1fr 1fr; grid-template-rows: 1.2fr 1fr 1fr 0.8fr; gap: 3px; height: 540px; }
+.sect-list { display: flex; flex-direction: column; }
+.sect-row { display: grid; grid-template-columns: 80px 60px 1fr 70px; gap: 10px; align-items: center; padding: 9px 14px; border-bottom: 1px solid var(--rule); font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; }
+.sect-row:last-child { border-bottom: none; }
+.sect-row .name { color: var(--ink-0); font-weight: 600; }
+.sect-bar { height: 6px; background: var(--bg-3); border-radius: 3px; overflow: hidden; position: relative; }
+.sect-bar .center { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--rule-2); }
+.sect-bar .fill { position: absolute; top: 0; bottom: 0; }
+
+/* journal */
+.jrnl-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+.jrnl-card { background: var(--bg-1); border: 1px solid var(--rule); border-radius: 6px; padding: 14px; }
+.jrnl-card h3 { font-family: 'IBM Plex Serif', serif; font-style: italic; font-weight: 400; font-size: 18px; margin: 0 0 6px; }
+.jrnl-meta { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-2); display: flex; justify-content: space-between; margin-bottom: 8px; }
+.jrnl-pnl { font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 16px; }
+.jrnl-text { font-size: 12.5px; color: var(--ink-1); line-height: 1.5; margin: 8px 0; }
+.jrnl-tags { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+
+/* watch view (full table) */
+.watch-toolbar { display: flex; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--rule); align-items: center; font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+
+/* status */
+.statusbar { display: flex; gap: 14px; align-items: center; padding: 6px 14px; height: 28px;
+  border-top: 1px solid var(--rule); background: var(--bg-1);
+  font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: var(--ink-2);
+  position: sticky; bottom: 0; z-index: 30; }
+.statusbar .ok { color: var(--green); }
+.statusbar kbd { font-family: inherit; padding: 1px 5px; border: 1px solid var(--rule-2); border-radius: 2px; color: var(--ink-1); font-size: 10px; }
+.grow { flex: 1; }
+
+/* tweaks */
+.tw-fab { position: fixed; bottom: 38px; right: 14px; z-index: 100; padding: 8px 12px; background: var(--bg-2); border: 1px solid var(--rule-2); color: var(--ink-1); border-radius: 4px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+.tw-fab:hover { color: var(--ink-0); border-color: var(--accent); }
+.tw-panel { position: fixed; bottom: 78px; right: 14px; z-index: 100; width: 280px; background: var(--bg-1); border: 1px solid var(--rule-2); border-radius: 6px; padding: 14px; display: none; box-shadow: 0 12px 40px rgba(0,0,0,0.4); }
+.tw-panel.on { display: block; }
+.tw-h { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 10px; display: flex; justify-content: space-between; }
+.tw-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+.tw-lbl { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-1); }
+.tw-seg { display: inline-flex; border: 1px solid var(--rule-2); border-radius: 3px; overflow: hidden; }
+.tw-seg button { background: none; border: none; color: var(--ink-2); font-family: 'IBM Plex Mono', monospace; font-size: 10px; padding: 4px 8px; cursor: pointer; }
+.tw-seg button.on { background: var(--accent); color: var(--bg-0); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg-0); }
+::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 5px; }
+</style>
+</head>
+<body data-theme="dark">
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">G</div>
+    <div>
+      <div class="brand-name">Gari · Swing</div>
+      <div class="brand-sub">TERMINAL v2 · 2026.04.26</div>
+    </div>
+  </div>
+  <div class="tape">
+    <div class="tape-inner" id="tape"></div>
+  </div>
+  <div class="tb-r">
+    <span class="dot"></span>
+    <span id="clock">14:32:08 ET</span>
+    <span class="dim2">·</span>
+    <span class="up">MKT OPEN</span>
+    <span class="dim2">·</span>
+    <span>2h 14m to close</span>
+  </div>
+</header>
+
+<section class="macro" id="macro"></section>
+
+<div class="shell">
+  <nav class="rail" id="rail">
+    <button class="rail-btn on" data-view="dash" title="Dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/></svg>
+    </button>
+    <button class="rail-btn" data-view="watch" title="Watch">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>
+    <button class="rail-btn" data-view="plan" title="Plan">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 5h12v3H3zm0 5h18v3H3zm0 5h9v3H3z"/></svg>
+    </button>
+    <button class="rail-btn" data-view="intel" title="Intel">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 4h18v4H3zM3 10h18v4H3zM3 16h12v4H3z"/></svg>
+    </button>
+    <button class="rail-btn" data-view="sect" title="Sectors">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 4h7v9H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 15h7v5H4z"/></svg>
+    </button>
+    <button class="rail-btn" data-view="jrnl" title="Journal">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 3h11l5 5v13H4zM14 3v6h6"/></svg>
+    </button>
+    <div class="rail-spacer"></div>
+  </nav>
+
+  <main>
+    <!-- DASHBOARD -->
+    <section class="view on" id="v-dash">
+      <div class="ph">
+        <div>
+          <div class="ph-title">Dashboard</div>
+          <div class="ph-sub">Wednesday · April 26 · 2026 — risk on, breadth strong</div>
+        </div>
+        <div class="ph-r">
+          <span><span class="dim">P&L D</span> <b class="up">+$842</b></span>
+          <span><span class="dim">P&L W</span> <b class="up">+$3.4k</b></span>
+          <span><span class="dim">RISK</span> <b>$4,210</b></span>
+          <span><span class="dim">POS</span> <b>3</b></span>
+        </div>
+      </div>
+
+      <div class="dash">
+        <!-- Hero (#1 setup) -->
+        <div class="hero">
+          <div class="hero-stripe"></div>
+          <div class="hero-h">
+            <div>
+              <span class="hero-rank">#1 Setup of the day</span>
+              <div class="hero-t">
+                <span class="hero-sym">NVDA</span>
+                <span class="hero-name">NVIDIA Corp · SEMI · 4.7T</span>
+              </div>
+              <div class="hero-tags">
+                <span class="tag green">BUY ZONE</span>
+                <span class="tag amber">BAP 88</span>
+                <span class="tag blue">Bull flag · D1</span>
+                <span class="tag">RVOL 1.4×</span>
+              </div>
+            </div>
+            <div class="hero-px">
+              <div class="hero-px-v">192.40</div>
+              <div class="hero-px-c up">+1.84% · +$3.48</div>
+            </div>
+          </div>
+          <div class="hero-body">
+            <div>
+              <div class="chart">
+                <div class="chart-grid"></div>
+                <div class="chart-tools">
+                  <div class="chart-tools-l">
+                    <span class="chip on">D</span><span class="chip">W</span><span class="chip">M</span>
+                  </div>
+                  <div class="chart-tools-r">
+                    <span class="chip">21EMA</span><span class="chip on">50D</span><span class="chip on">200D</span>
+                  </div>
+                </div>
+                <svg class="chart-svg" id="heroChart" preserveAspectRatio="none"></svg>
+              </div>
+              <div class="ruler-wrap">
+                <div class="ruler-track">
+                  <div class="r-stop" style="left:0; width:14%"></div>
+                  <div class="r-runway" style="left:14%; right:0"></div>
+                  <div class="r-entry" style="left:25%; width:12%"></div>
+                  <div class="r-tick t1" style="left:60%"></div>
+                  <div class="r-tick t2" style="left:89%"></div>
+                  <div class="r-now" style="left:33%"></div>
+                </div>
+                <div class="r-labels">
+                  <div><span class="l">Stop</span><span class="v">$182</span><span class="dim">−5.2%</span></div>
+                  <div><span class="l">Entry</span><span class="v">$189–194</span><span class="dim">zone</span></div>
+                  <div><span class="l">Now</span><span class="v" style="color:var(--accent)">$192.40</span><span class="dim">in zone</span></div>
+                  <div><span class="l" style="color:var(--accent)">T1 ⅔</span><span class="v">$208</span><span class="up">+8.1%</span></div>
+                  <div><span class="l" style="color:var(--accent-2)">T2 ⅓</span><span class="v">$224</span><span class="up">+16.4%</span></div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div style="font-family: 'IBM Plex Mono',monospace; font-size: 9.5px; letter-spacing: 0.16em; color: var(--ink-2); text-transform: uppercase; margin-bottom: 10px;">Scores</div>
+              <div class="gauges" style="margin-bottom: 14px">
+                <div class="gauge"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" fill="none" stroke="var(--bg-3)" stroke-width="5"/><circle cx="32" cy="32" r="26" fill="none" stroke="var(--green)" stroke-width="5" stroke-dasharray="143.6 163.4" transform="rotate(-90 32 32)" stroke-linecap="round"/><text x="32" y="36" text-anchor="middle" font-family="IBM Plex Mono" font-size="14" font-weight="600" fill="var(--ink-0)">88</text></svg><span class="gauge-l">BAP</span></div>
+                <div class="gauge"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" fill="none" stroke="var(--bg-3)" stroke-width="5"/><circle cx="32" cy="32" r="26" fill="none" stroke="var(--accent-2)" stroke-width="5" stroke-dasharray="120.9 163.4" transform="rotate(-90 32 32)" stroke-linecap="round"/><text x="32" y="36" text-anchor="middle" font-family="IBM Plex Mono" font-size="14" font-weight="600" fill="var(--ink-0)">74</text></svg><span class="gauge-l">TECH</span></div>
+                <div class="gauge"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" fill="none" stroke="var(--bg-3)" stroke-width="5"/><circle cx="32" cy="32" r="26" fill="none" stroke="var(--accent)" stroke-width="5" stroke-dasharray="148.6 163.4" transform="rotate(-90 32 32)" stroke-linecap="round"/><text x="32" y="36" text-anchor="middle" font-family="IBM Plex Mono" font-size="14" font-weight="600" fill="var(--ink-0)">91</text></svg><span class="gauge-l">FUND</span></div>
+              </div>
+              <div style="font-family: 'IBM Plex Mono',monospace; font-size: 9.5px; letter-spacing: 0.16em; color: var(--ink-2); text-transform: uppercase; margin-bottom: 10px;">Why now</div>
+              <ul style="font-size: 12px; color: var(--ink-1); line-height: 1.5; padding-left: 16px; margin: 0;">
+                <li>Bull flag completed on D1, breakout above $190</li>
+                <li>RVOL 1.4× confirms institutional interest</li>
+                <li>Citi raise to $215 PT this morning</li>
+                <li>Stage 2 trend, +8 RS vs SPX over 4 weeks</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right column -->
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <div class="panel">
+            <div class="panel-h">
+              <span class="panel-t">Sector Heat</span>
+              <span class="panel-m">today · % change</span>
+            </div>
+            <div class="panel-b np">
+              <div class="heatmap">
+                <div class="heat" style="background: color-mix(in oklch, var(--green) 32%, var(--bg-2)); color: var(--ink-0)"><div class="heat-n">SEMIS</div><div class="heat-p">+1.84</div><div class="heat-m">12 W · 2 L</div></div>
+                <div class="heat" style="background: color-mix(in oklch, var(--green) 18%, var(--bg-2)); color: var(--ink-0)"><div class="heat-n">SOFTWARE</div><div class="heat-p">+0.91</div><div class="heat-m">18 · 6</div></div>
+                <div class="heat" style="background: color-mix(in oklch, var(--green) 12%, var(--bg-2)); color: var(--ink-0)"><div class="heat-n">CONSUMER</div><div class="heat-p">+0.42</div><div class="heat-m">14 · 8</div></div>
+                <div class="heat" style="background: var(--bg-2); color: var(--ink-1)"><div class="heat-n">FINANCE</div><div class="heat-p">+0.04</div><div class="heat-m">22 · 22</div></div>
+                <div class="heat" style="background: color-mix(in oklch, var(--red) 8%, var(--bg-2)); color: var(--ink-1)"><div class="heat-n">HEALTH</div><div class="heat-p">−0.18</div><div class="heat-m">12 · 16</div></div>
+                <div class="heat" style="background: var(--bg-2); color: var(--ink-1)"><div class="heat-n">STAPLES</div><div class="heat-p">+0.10</div><div class="heat-m">10 · 9</div></div>
+                <div class="heat" style="background: color-mix(in oklch, var(--red) 14%, var(--bg-2)); color: var(--ink-1)"><div class="heat-n">UTIL</div><div class="heat-p">−0.62</div><div class="heat-m">4 · 14</div></div>
+                <div class="heat" style="background: color-mix(in oklch, var(--red) 28%, var(--bg-2)); color: var(--ink-0)"><div class="heat-n">ENERGY</div><div class="heat-p">−1.42</div><div class="heat-m">3 · 18</div></div>
+                <div class="heat" style="background: color-mix(in oklch, var(--red) 10%, var(--bg-2)); color: var(--ink-1)"><div class="heat-n">MAT</div><div class="heat-p">−0.34</div><div class="heat-m">6 · 11</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h">
+              <span class="panel-t">Live Intel</span>
+              <span class="panel-m">9 items · streaming</span>
+            </div>
+            <div class="panel-b" id="intelMini"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Watchlist -->
+      <div class="panel" style="margin-top: 14px;">
+        <div class="wl-h">
+          <div class="wl-tabs">
+            <span class="wl-tab on">★ Watchlist · 20</span>
+            <span class="wl-tab">Positions · 3</span>
+            <span class="wl-tab">Scans · 8</span>
+            <span class="wl-tab">Journal</span>
+          </div>
+          <input class="wl-search" placeholder="/ search ticker, sector, setup…" />
+        </div>
+        <div style="overflow-x: auto;">
+          <table class="wl">
+            <thead>
+              <tr>
+                <th style="width:24px">#</th>
+                <th>Sym</th>
+                <th>Sect</th>
+                <th>Setup</th>
+                <th class="sorted">BAP ▾</th>
+                <th>Tech</th>
+                <th>Fund</th>
+                <th>Px</th>
+                <th>%D</th>
+                <th>20D</th>
+                <th>RVOL</th>
+                <th>1M</th>
+                <th>Plan</th>
+                <th>R:R</th>
+              </tr>
+            </thead>
+            <tbody id="wlBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- WATCH (full-screen table) -->
+    <section class="view" id="v-watch">
+      <div class="ph">
+        <div>
+          <div class="ph-title">Watch</div>
+          <div class="ph-sub">22 symbols · sorted by BAP · click row to focus</div>
+        </div>
+        <div class="ph-r">
+          <span><span class="dim">Filter</span> <b>BAP > 50</b></span>
+          <span><span class="dim">Sort</span> <b style="color:var(--accent)">BAP ▾</b></span>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="watch-toolbar">
+          <span class="chip on">All</span>
+          <span class="chip on">BAP > 50</span>
+          <span class="chip">Above 200D</span>
+          <span class="chip">No earn ≤ 7d</span>
+          <span class="chip accent">+ Filter</span>
+          <span class="grow"></span>
+          <input class="wl-search" placeholder="/ search…" />
+        </div>
+        <div style="overflow-x: auto;">
+          <table class="wl">
+            <thead>
+              <tr>
+                <th style="width:24px">#</th>
+                <th>Sym</th>
+                <th>Sect</th>
+                <th>Setup</th>
+                <th class="sorted">BAP ▾</th>
+                <th>Tech</th>
+                <th>Fund</th>
+                <th>SMC</th>
+                <th>Px</th>
+                <th>%D</th>
+                <th>5D</th>
+                <th>20D</th>
+                <th>RVOL</th>
+                <th>1M</th>
+                <th>Plan</th>
+                <th>R:R</th>
+                <th>Earn</th>
+              </tr>
+            </thead>
+            <tbody id="watchBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- PLAN -->
+    <section class="view" id="v-plan">
+      <div class="ph">
+        <div>
+          <div class="ph-title">Plan</div>
+          <div class="ph-sub">NVDA · Bull flag breakout · trade card</div>
+        </div>
+        <div class="ph-r">
+          <span><span class="dim">Risk budget</span> <b>$420 · 1%</b></span>
+          <span><span class="dim">Position</span> <b>142 sh @ $191</b></span>
+          <span><span class="dim">R:R</span> <b style="color:var(--green)">1:3.2</b></span>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px;">
+        <div class="panel">
+          <div class="panel-h"><span class="panel-t">Trade Ladder</span><span class="panel-m">price · zones · now</span></div>
+          <div class="panel-b">
+            <div class="ladder">
+              <!-- buy zone -->
+              <div class="ladder-zone buy" style="top: 33%; height: 11%;">
+                <span class="ladder-zone-l up">Buy zone</span>
+              </div>
+              <!-- nogo -->
+              <div class="ladder-zone nogo" style="top: 78%; height: 11%;">
+                <span class="ladder-zone-l down">Stop / no-go</span>
+              </div>
+              <!-- rungs -->
+              <div class="ladder-rung" style="top: 6%;">
+                <span class="ladder-px" style="color:var(--accent-2)">$224</span>
+                <span class="ladder-line dashed" style="border-color: var(--accent-2)"></span>
+                <span class="ladder-tag">T2 ⅓</span>
+                <span class="ladder-pct up">+16.4%</span>
+              </div>
+              <div class="ladder-rung" style="top: 22%;">
+                <span class="ladder-px" style="color:var(--accent)">$208</span>
+                <span class="ladder-line dashed" style="border-color: var(--accent)"></span>
+                <span class="ladder-tag">T1 ⅔</span>
+                <span class="ladder-pct up">+8.1%</span>
+              </div>
+              <div class="ladder-rung" style="top: 36%;">
+                <span class="ladder-px">$194</span>
+                <span class="ladder-line" style="border-color: var(--green)"></span>
+                <span class="ladder-tag" style="color:var(--green)">Top entry</span>
+                <span class="ladder-pct">+1.4%</span>
+              </div>
+              <div class="ladder-now" style="top: 42%;">
+                <span class="ladder-now-tag">NOW $192.40</span>
+              </div>
+              <div class="ladder-rung" style="top: 44%;">
+                <span class="ladder-px" style="color:var(--accent)">$191</span>
+                <span class="ladder-line" style="border-color: var(--accent)"></span>
+                <span class="ladder-tag">Mid · pivot</span>
+                <span class="ladder-pct">−0.7%</span>
+              </div>
+              <div class="ladder-rung" style="top: 51%;">
+                <span class="ladder-px">$189</span>
+                <span class="ladder-line" style="border-color: var(--green)"></span>
+                <span class="ladder-tag" style="color:var(--green)">Bottom entry</span>
+                <span class="ladder-pct">−1.8%</span>
+              </div>
+              <div class="ladder-rung" style="top: 78%;">
+                <span class="ladder-px" style="color:var(--red)">$182</span>
+                <span class="ladder-line dashed" style="border-color: var(--red)"></span>
+                <span class="ladder-tag">Stop · 21EMA</span>
+                <span class="ladder-pct down">−5.2%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <div class="panel">
+            <div class="panel-h"><span class="panel-t">Sizing</span><span class="panel-m">1% acct risk</span></div>
+            <div class="panel-b" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-family: 'IBM Plex Mono', monospace; font-size: 12px;">
+              <div><div class="lbl">Account</div><div style="font-size: 14px; font-weight: 600">$42,000</div></div>
+              <div><div class="lbl">Risk per</div><div style="font-size: 14px; font-weight: 600; color: var(--accent)">$420</div></div>
+              <div><div class="lbl">Per share</div><div style="font-size: 14px; font-weight: 600; color: var(--red)">$2.96</div></div>
+              <div><div class="lbl">Shares</div><div style="font-size: 14px; font-weight: 600">142</div></div>
+              <div><div class="lbl">Position</div><div style="font-size: 14px; font-weight: 600">$27,128</div></div>
+              <div><div class="lbl">% account</div><div style="font-size: 14px; font-weight: 600">64%</div></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-h"><span class="panel-t">Pre-flight</span><span class="panel-m">9/11 cleared</span></div>
+            <div class="panel-b" style="font-size: 12px; line-height: 1.7;">
+              <div style="color: var(--green);">✓ Regime risk-on, breadth 68%</div>
+              <div style="color: var(--green);">✓ Sector SEMI leading +1.84%</div>
+              <div style="color: var(--green);">✓ BAP 88 ≥ threshold 70</div>
+              <div style="color: var(--green);">✓ Stage 2 confirmed</div>
+              <div style="color: var(--green);">✓ Pattern: bull flag complete</div>
+              <div style="color: var(--green);">✓ RVOL 1.4× ≥ 1.2</div>
+              <div style="color: var(--green);">✓ R:R 1:3.2 ≥ 1:2.5</div>
+              <div style="color: var(--green);">✓ Position 64% ≤ max 80%</div>
+              <div style="color: var(--green);">✓ Stop placement valid</div>
+              <div style="color: var(--accent);">⚠ Earnings in 12 days — exit before</div>
+              <div style="color: var(--accent);">⚠ CES keynote +7d (vol risk)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- INTEL -->
+    <section class="view" id="v-intel">
+      <div class="ph">
+        <div>
+          <div class="ph-title">Intel</div>
+          <div class="ph-sub">Curated stream · sentiment-tagged · dedup'd</div>
+        </div>
+        <div class="ph-r">
+          <span><span class="dim">Today</span> <b>9 items</b></span>
+          <span><span class="dim">Bull</span> <b class="up">5</b></span>
+          <span><span class="dim">Bear</span> <b class="down">2</b></span>
+          <span><span class="dim">Neutral</span> <b style="color:var(--accent)">2</b></span>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-b" id="intelFull"></div>
+      </div>
+    </section>
+
+    <!-- SECTORS -->
+    <section class="view" id="v-sect">
+      <div class="ph">
+        <div>
+          <div class="ph-title">Sectors</div>
+          <div class="ph-sub">Rotation map · 5-day · breadth-weighted</div>
+        </div>
+        <div class="ph-r">
+          <span><span class="dim">Leading</span> <b class="up">SEMIS · SOFT</b></span>
+          <span><span class="dim">Lagging</span> <b class="down">ENRG · UTIL</b></span>
+        </div>
+      </div>
+      <div class="sect-grid">
+        <div class="panel">
+          <div class="panel-h"><span class="panel-t">Treemap · today</span><span class="panel-m">size = market cap, color = % change</span></div>
+          <div class="panel-b np" style="padding: 2px;">
+            <div class="sect-tm" id="sectTm"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-h"><span class="panel-t">5-Day Performance</span><span class="panel-m">sorted by 5d ranking</span></div>
+          <div class="sect-list" id="sectList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- JOURNAL -->
+    <section class="view" id="v-jrnl">
+      <div class="ph">
+        <div>
+          <div class="ph-title">Journal</div>
+          <div class="ph-sub">Trade post-mortems · personal record · queryable</div>
+        </div>
+        <div class="ph-r">
+          <span><span class="dim">YTD</span> <b class="up">+12.4%</b></span>
+          <span><span class="dim">Trades</span> <b>34</b></span>
+          <span><span class="dim">Win rate</span> <b>62%</b></span>
+          <span><span class="dim">Avg R</span> <b class="up">+1.8</b></span>
+        </div>
+      </div>
+      <div class="jrnl-grid">
+        <div class="jrnl-card">
+          <div class="jrnl-meta"><span>NVDA · Apr 8 → Apr 17</span><span class="up">+2.4R</span></div>
+          <h3>Bull flag — clean R</h3>
+          <div class="jrnl-pnl up">+$1,142 · +12.1%</div>
+          <p class="jrnl-text">Took the trigger above $182, sized properly, took T1 at $208 trim ⅔. Trailed the rest below 21EMA, exited at $216 on Citi PT raise. Discipline held.</p>
+          <div class="jrnl-tags"><span class="tag green">Worked</span><span class="tag">Bull flag</span><span class="tag blue">D1</span></div>
+        </div>
+        <div class="jrnl-card">
+          <div class="jrnl-meta"><span>TSLA · Mar 29 → Apr 2</span><span class="down">−0.9R</span></div>
+          <h3>Breakout fade · stop hit</h3>
+          <div class="jrnl-pnl down">−$378 · −0.9%</div>
+          <p class="jrnl-text">Bought the breakout at $260, faded the next session. Hit stop at $246. In hindsight RVOL was only 1.0× — should have demanded 1.3× minimum on a leading group breakout.</p>
+          <div class="jrnl-tags"><span class="tag red">Failed</span><span class="tag">Low RVOL</span><span class="tag">Lesson</span></div>
+        </div>
+        <div class="jrnl-card">
+          <div class="jrnl-meta"><span>PANW · Mar 12 → Mar 24</span><span class="up">+1.2R</span></div>
+          <h3>Cup & handle · partial</h3>
+          <div class="jrnl-pnl up">+$508 · +5.8%</div>
+          <p class="jrnl-text">Decent execution. Hit T1 at $384 but stopped on the trail before T2 — gave back some. Exit was correct, the move just stalled. Win is a win.</p>
+          <div class="jrnl-tags"><span class="tag green">Worked</span><span class="tag">Cup & handle</span></div>
+        </div>
+        <div class="jrnl-card">
+          <div class="jrnl-meta"><span>SHOP · Mar 4 → Mar 7</span><span class="down">−1.0R</span></div>
+          <h3>Choppy entry · stopped fast</h3>
+          <div class="jrnl-pnl down">−$420 · −2.1%</div>
+          <p class="jrnl-text">Forced trade. Setup wasn't ready; entered before trigger. Stopped on day 3 on a SPX dip. Lesson: don't anticipate, wait for confirmation.</p>
+          <div class="jrnl-tags"><span class="tag red">Failed</span><span class="tag amber">Forced</span><span class="tag">Lesson</span></div>
+        </div>
+        <div class="jrnl-card">
+          <div class="jrnl-meta"><span>META · Feb 14 → Feb 28</span><span class="up">+3.1R</span></div>
+          <h3>Pullback to 50D · home run</h3>
+          <div class="jrnl-pnl up">+$1,440 · +14.4%</div>
+          <p class="jrnl-text">Best trade of the quarter. Pullback to rising 50D, BAP popped to 84 the morning of entry. Held through earnings (lower risk, in profit). T2 hit, stopped trail.</p>
+          <div class="jrnl-tags"><span class="tag green">Worked</span><span class="tag blue">Pullback</span><span class="tag">Home run</span></div>
+        </div>
+        <div class="jrnl-card">
+          <div class="jrnl-meta"><span>AVGO · Feb 5 → Feb 9</span><span class="up">+0.4R</span></div>
+          <h3>Stopped at break-even</h3>
+          <div class="jrnl-pnl" style="color: var(--ink-1)">+$84 · +0.2%</div>
+          <p class="jrnl-text">Setup faded after a half-day of strength. Stopped at break-even per the trail rule. Neither right nor wrong — process worked.</p>
+          <div class="jrnl-tags"><span class="tag">Lucky</span><span class="tag blue">Trail BE</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer class="statusbar">
+  <span><span class="ok">●</span> LIVE · 22 SYMBOLS · 312 ALERTS</span>
+  <span>SCAN <span class="ok">PASS</span> 4/4 GATES · regime risk-on</span>
+  <span>LAST UPDATE <span style="color:var(--ink-0)">14:32:08 ET</span></span>
+  <span class="grow"></span>
+  <span><kbd>1-6</kbd> VIEWS · <kbd>↵</kbd> OPEN · <kbd>/</kbd> SEARCH · <kbd>?</kbd> HELP</span>
+</footer>
+
+<button class="tw-fab" id="twFab">⚙ Tweaks</button>
+<div class="tw-panel" id="twPanel">
+  <div class="tw-h"><span>Tweaks</span><button class="tw-x" id="twX" style="background:none;border:none;color:var(--ink-2);cursor:pointer;font-size:14px">×</button></div>
+  <div class="tw-row"><span class="tw-lbl">Theme</span>
+    <div class="tw-seg" data-tw="theme">
+      <button data-v="dark" class="on">Dark</button>
+      <button data-v="light">Light</button>
+    </div>
+  </div>
+  <div class="tw-row"><span class="tw-lbl">Density</span>
+    <div class="tw-seg" data-tw="density">
+      <button data-v="compact">Compact</button>
+      <button data-v="normal" class="on">Normal</button>
+      <button data-v="comfy">Comfy</button>
+    </div>
+  </div>
+  <div class="tw-row"><span class="tw-lbl">Accent</span>
+    <div class="tw-seg" data-tw="accent">
+      <button data-v="amber" class="on">Amber</button>
+      <button data-v="cyan">Cyan</button>
+      <button data-v="green">Green</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TAPE = [['NVDA',192.40,1.84],['AVGO',1742.10,0.92],['META',612.30,0.41],['MSFT',432.18,0.55],['GOOGL',182.44,1.12],['TSLA',248.10,-2.14],['AMD',164.20,2.01],['PANW',382.41,-0.22],['SHOP',98.10,1.10],['CRWD',342.50,0.66],['NOW',912.40,0.34],['UBER',76.10,1.45],['LLY',812.30,0.88],['COIN',218.40,3.12]];
+const MACRO = [
+  { l:'SPX', v:'5,847.21', c:+0.42, t:'up' },
+  { l:'NDX', v:'20,512.4', c:+0.61, t:'up' },
+  { l:'RUT', v:'2,318.7', c:-0.18, t:'down' },
+  { l:'VIX', v:'14.20', c:-3.10, t:'up' },
+  { l:'DXY', v:'102.41', c:+0.12, t:'flat' },
+  { l:'10Y', v:'4.213%', c:-0.04, t:'up' },
+  { l:'GOLD', v:'$2,418', c:+0.31, t:'up' },
+  { l:'WTI', v:'$78.42', c:-1.24, t:'down' },
+];
+const WL = [
+  ['NVDA','SEMI','Bull flag · D1',88,74,91,68,192.40,+1.84,+11.4,1.4,11,'1:3.2'],
+  ['AVGO','SEMI','Bull flag · D1',82,78,85,72,1742.10,+0.92,+8.4,1.2,21,'1:3.0'],
+  ['META','INET','Pullback to 50',79,71,84,64,612.30,+0.41,+5.1,0.9,31,'1:2.8'],
+  ['PANW','CYBR','Cup & handle',76,68,79,71,382.41,-0.22,+6.2,1.1,41,'1:2.6'],
+  ['SHOP','INET','Breakout retest',74,78,62,74,98.10,+1.10,+9.1,1.5,51,'1:3.5'],
+  ['MSFT','SOFT','Trail · base',72,66,82,62,432.18,+0.55,+4.2,0.8,61,'1:2.4'],
+  ['GOOGL','INET','Stage 2 trend',70,72,78,60,182.44,+1.12,+5.8,1.0,71,'1:2.5'],
+  ['CRWD','CYBR','Base building',68,64,74,58,342.50,+0.66,+3.4,0.9,81,'1:2.2'],
+  ['NOW','SOFT','Wait trigger',66,60,78,56,912.40,+0.34,+2.1,0.7,91,'1:2.1'],
+  ['UBER','CONS','Above 200',64,62,68,54,76.10,+1.45,+4.1,1.1,101,'1:2.0'],
+];
+const INTEL = [
+  ['13:42','NVDA','<b>Citi</b> raises PT to $215 — datacenter capex acceleration','up'],
+  ['12:55','AVGO','<b>VMware</b> integration ahead of plan, mgmt reaffirms FY guide','up'],
+  ['12:14','AMD','Supply chain note flags MI300 lead times slipping 2 weeks','nu'],
+  ['11:30','MKT','<b>CPI</b> +2.4% YoY in line — risk-on bid across growth','up'],
+  ['11:02','TSLA','Q1 deliveries miss by 4%; FSD progress noted; margins compress','dn'],
+  ['10:14','PANW','Defense win — $1.2B 5-year IDIQ contract awarded','up'],
+  ['09:55','NVDA','<b>CES</b> keynote details leak — new edge inference SKU','nu'],
+  ['09:22','XOM','Refining margins compressed Q-on-Q, downgrade at JPM','dn'],
+  ['08:14','TSMC','TSMC capex raised to $42B for 2026 — bullish for cap-ex chain','up'],
+];
+const SECTORS = [
+  ['SEMIS', +1.84, 6.4, 12, 2],
+  ['SOFTWARE', +0.91, 3.2, 18, 6],
+  ['CONSUMER', +0.42, 0.8, 14, 8],
+  ['FINANCE', +0.04, -0.2, 22, 22],
+  ['HEALTH', -0.18, -1.2, 12, 16],
+  ['STAPLES', +0.10, 0.4, 10, 9],
+  ['UTIL', -0.62, -2.1, 4, 14],
+  ['ENERGY', -1.42, -3.8, 3, 18],
+  ['MATERIALS', -0.34, -0.9, 6, 11],
+];
+
+// helpers
+function bapColor(b){ if (b>=80) return 'var(--green)'; if (b>=70) return 'oklch(78% 0.16 130)'; if (b>=60) return 'var(--accent)'; if (b>=50) return 'oklch(70% 0.15 50)'; return 'var(--red)'; }
+function fmt(v, d=2){ return (v>=0?'+':'') + v.toFixed(d); }
+function clsChg(v){ return v>0?'up':v<0?'down':'dim'; }
+
+function spark(seed, n=24, trend=0){
+  let v=50, s=seed; const pts=[];
+  for(let i=0;i<n;i++){ s=(s*9301+49297)%233280; const r=(s/233280)-0.5; v+=r*8+trend; v=Math.max(10,Math.min(90,v)); pts.push(v); }
+  return pts;
+}
+function sparkSvg(seed, down, w=80, h=22){
+  const pts = spark(seed, 24, down ? -0.4 : 0.5);
+  const min = Math.min(...pts), max = Math.max(...pts);
+  const span = max - min || 1;
+  const path = pts.map((v,i)=>{ const x=(i/(pts.length-1))*w; const y=h-((v-min)/span)*(h-2)-1; return (i===0?'M':'L')+x.toFixed(1)+','+y.toFixed(1); }).join(' ');
+  const area = path + ` L${w},${h} L0,${h} Z`;
+  const color = down ? 'var(--red)' : 'var(--green)';
+  return `<svg class="spark-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><path d="${area}" fill="${color}" fill-opacity="0.12"/><path d="${path}" fill="none" stroke="${color}" stroke-width="1.2"/></svg>`;
+}
+function miniRuler(){
+  return `<div class="ruler-mini">
+    <div style="position:absolute;left:0;top:0;bottom:0;width:14%;background:repeating-linear-gradient(45deg,color-mix(in oklch,var(--red) 20%,transparent) 0 4px,color-mix(in oklch,var(--red) 30%,transparent) 4px 8px)"></div>
+    <div style="position:absolute;left:14%;right:0;top:0;bottom:0;background:linear-gradient(90deg,color-mix(in oklch,var(--green) 10%,transparent),color-mix(in oklch,var(--accent-2) 14%,transparent))"></div>
+    <div style="position:absolute;left:24%;width:12%;top:0;bottom:0;background:color-mix(in oklch,var(--green) 24%,transparent);border-left:1px solid var(--green);border-right:1px dashed var(--green)"></div>
+    <div style="position:absolute;left:60%;top:-2px;bottom:-2px;width:1px;background:var(--accent)"></div>
+    <div style="position:absolute;left:89%;top:-2px;bottom:-2px;width:1px;background:var(--accent-2)"></div>
+    <div style="position:absolute;left:33%;top:-2px;bottom:-2px;width:2px;background:var(--ink-0);box-shadow:0 0 0 2px color-mix(in oklch,var(--ink-0) 30%,transparent)"></div>
+  </div>`;
+}
+
+// tape
+document.getElementById('tape').innerHTML = TAPE.concat(TAPE).map(([s,p,c]) =>
+  `<span class="tt"><b>${s}</b><span class="num">${p.toFixed(2)}</span><span class="num ${c>=0?'up':'down'}">${fmt(c)}%</span></span>`
+).join('');
+
+// macro
+document.getElementById('macro').innerHTML = MACRO.map(m => {
+  const cls = m.t === 'up' ? 'up' : m.t === 'down' ? 'down' : 'dim';
+  return `<div class="mc"><span class="mc-l">${m.l}</span><span class="mc-v">${m.v}</span><span class="mc-c ${cls}">${fmt(m.c)}%</span></div>`;
+}).join('') + `<div class="regime"><span class="regime-name">RISK ON</span><span class="regime-meta">BREADTH 68% · 4/4 GATES</span></div>`;
+
+// hero chart
+(function(){
+  const W = 600, H = 240;
+  const seed = 11;
+  const candles = [];
+  let s = seed, close = 192.40 - 22;
+  for (let i = 0; i < 80; i++) {
+    s = (s * 9301 + 49297) % 233280;
+    const r = (s / 233280) - 0.45;
+    const open = close;
+    const wick = 1.2 + Math.abs(r) * 2.4;
+    const body = r * 1.8 + (i / 80) * 0.3;
+    close = open + body;
+    const high = Math.max(open, close) + wick * 0.7;
+    const low  = Math.min(open, close) - wick * 0.7;
+    candles.push({ open, high, low, close });
+  }
+  const last = candles[candles.length-1].close;
+  const off = 192.40 - last;
+  candles.forEach(c => { c.open+=off; c.close+=off; c.high+=off; c.low+=off; });
+  const lo = Math.min(...candles.map(c=>c.low), 182) - 2;
+  const hi = Math.max(...candles.map(c=>c.high), 224) + 2;
+  const yScale = v => H - ((v - lo)/(hi - lo)) * (H - 30) - 10;
+  const xScale = i => 8 + (i/(candles.length-1)) * (W - 16);
+  const cw = (W - 16) / candles.length * 0.7;
+  let svg = '';
+  svg += `<rect x="0" y="${yScale(194)}" width="${W}" height="${yScale(189)-yScale(194)}" fill="color-mix(in oklch, var(--green) 12%, transparent)"/>`;
+  const line = (y, color, dash, label) =>
+    `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="${color}" stroke-width="1" stroke-dasharray="${dash}"/>` +
+    `<text x="${W-4}" y="${y-3}" font-family="IBM Plex Mono" font-size="9" fill="${color}" text-anchor="end">${label}</text>`;
+  svg += line(yScale(182), 'var(--red)', '3 3', 'STOP $182');
+  svg += line(yScale(189), 'var(--green)', '0', 'ENT $189–194');
+  svg += line(yScale(208), 'var(--accent)', '4 2', 'T1 $208');
+  svg += line(yScale(224), 'var(--accent-2)', '4 2', 'T2 $224');
+  candles.forEach((c, i) => {
+    const up = c.close >= c.open;
+    const color = up ? 'var(--green)' : 'var(--red)';
+    const x = xScale(i);
+    svg += `<line x1="${x}" y1="${yScale(c.high)}" x2="${x}" y2="${yScale(c.low)}" stroke="${color}" stroke-width="1"/>`;
+    svg += `<rect x="${x-cw/2}" y="${yScale(Math.max(c.open,c.close))}" width="${cw}" height="${Math.max(1, Math.abs(yScale(c.close)-yScale(c.open)))}" fill="${color}" fill-opacity="${up?0.85:0.95}"/>`;
+  });
+  svg += `<line x1="0" y1="${yScale(192.40)}" x2="${W}" y2="${yScale(192.40)}" stroke="var(--ink-0)" stroke-width="1.2"/>`;
+  svg += `<rect x="${W-50}" y="${yScale(192.40)-8}" width="48" height="14" fill="var(--ink-0)"/>`;
+  svg += `<text x="${W-26}" y="${yScale(192.40)+3}" font-family="IBM Plex Mono" font-size="10" font-weight="700" fill="var(--bg-0)" text-anchor="middle">192.40</text>`;
+  document.getElementById('heroChart').innerHTML = svg;
+  document.getElementById('heroChart').setAttribute('viewBox', `0 0 ${W} ${H}`);
+})();
+
+// watchlist (dashboard)
+function fillWL(target, rows){
+  document.getElementById(target).innerHTML = rows.map((r, i) => {
+    const [sym,sect,setup,bap,tech,fund,smc,px,chg,d20,rvol,seed,rr] = r;
+    return `<tr ${i===0?'class="active"':''}>
+      <td class="dim">${i+1}</td>
+      <td><span class="wl-sym">${sym}</span></td>
+      <td><span class="wl-sect">${sect}</span></td>
+      <td>${setup}</td>
+      <td><b style="color:${bapColor(bap)}">${bap}</b><span class="bap-bar"><span style="width:${bap}%; background:${bapColor(bap)}"></span></span></td>
+      <td class="dim">${tech}</td>
+      <td class="dim">${fund}</td>
+      <td style="color:var(--ink-0)">${px.toFixed(2)}</td>
+      <td class="${clsChg(chg)}">${fmt(chg,2)}</td>
+      <td class="${clsChg(d20)}">${fmt(d20,1)}</td>
+      <td style="color:${rvol>1.2?'var(--accent)':'var(--ink-1)'}">${rvol.toFixed(1)}×</td>
+      <td class="spark-cell">${sparkSvg(seed, chg<0)}</td>
+      <td>${miniRuler()}</td>
+      <td style="color:${rr.endsWith('2.5')||rr>'1:2.5'?'var(--green)':'var(--ink-1)'}">${rr}</td>
+    </tr>`;
+  }).join('');
+}
+fillWL('wlBody', WL);
+
+// watch view (extra cols)
+document.getElementById('watchBody').innerHTML = WL.concat(WL.slice(0,6)).map((r, i) => {
+  const [sym,sect,setup,bap,tech,fund,smc,px,chg,d20,rvol,seed,rr] = r;
+  const earn = (i % 4 === 0) ? '+12d' : (i % 5 === 0) ? '+6d ⚠' : '—';
+  return `<tr ${i===0?'class="active"':''}>
+    <td class="dim">${i+1}</td>
+    <td><span class="wl-sym">${sym}</span></td>
+    <td><span class="wl-sect">${sect}</span></td>
+    <td>${setup}</td>
+    <td><b style="color:${bapColor(bap)}">${bap}</b><span class="bap-bar"><span style="width:${bap}%; background:${bapColor(bap)}"></span></span></td>
+    <td class="dim">${tech}</td>
+    <td class="dim">${fund}</td>
+    <td class="dim">${smc}</td>
+    <td style="color:var(--ink-0)">${px.toFixed(2)}</td>
+    <td class="${clsChg(chg)}">${fmt(chg,2)}</td>
+    <td class="${clsChg(d20/2)}">${fmt(d20/2,1)}</td>
+    <td class="${clsChg(d20)}">${fmt(d20,1)}</td>
+    <td style="color:${rvol>1.2?'var(--accent)':'var(--ink-1)'}">${rvol.toFixed(1)}×</td>
+    <td class="spark-cell">${sparkSvg(seed, chg<0)}</td>
+    <td>${miniRuler()}</td>
+    <td>${rr}</td>
+    <td class="${earn.includes('⚠')?'down':'dim'}">${earn}</td>
+  </tr>`;
+}).join('');
+
+// intel
+function intelHtml(items){ return items.map(([t,sym,text,sent]) =>
+  `<div class="intel-row">
+    <span class="intel-t">${t}</span>
+    <span class="intel-x"><span class="sym">${sym}</span>${text}</span>
+    <span class="tag ${sent==='up'?'green':sent==='dn'?'red':'amber'}">${sent==='up'?'BULL':sent==='dn'?'BEAR':'NEUT'}</span>
+  </div>`).join(''); }
+document.getElementById('intelMini').innerHTML = intelHtml(INTEL.slice(0,5));
+document.getElementById('intelFull').innerHTML = intelHtml(INTEL);
+
+// sectors
+const tmCells = [
+  { s:'SEMIS', size:'span 2 / span 2', pct:+1.84 },
+  { s:'SOFTWARE', size:'auto', pct:+0.91 },
+  { s:'FINANCE', size:'auto', pct:+0.04 },
+  { s:'CONSUMER', size:'auto', pct:+0.42 },
+  { s:'HEALTH', size:'auto', pct:-0.18 },
+  { s:'STAPLES', size:'auto', pct:+0.10 },
+  { s:'ENERGY', size:'auto', pct:-1.42 },
+  { s:'UTIL', size:'auto', pct:-0.62 },
+  { s:'MATERIALS', size:'auto', pct:-0.34 },
+];
+function tmColor(p){
+  if (p > 1) return `color-mix(in oklch, var(--green) 32%, var(--bg-2))`;
+  if (p > 0.3) return `color-mix(in oklch, var(--green) 18%, var(--bg-2))`;
+  if (p > 0) return `color-mix(in oklch, var(--green) 8%, var(--bg-2))`;
+  if (p > -0.3) return `var(--bg-2)`;
+  if (p > -1) return `color-mix(in oklch, var(--red) 12%, var(--bg-2))`;
+  return `color-mix(in oklch, var(--red) 28%, var(--bg-2))`;
+}
+document.getElementById('sectTm').innerHTML = tmCells.map((c, i) => {
+  let style = `background: ${tmColor(c.pct)}; color: var(--ink-0);`;
+  if (i === 0) style += 'grid-column: span 2; grid-row: span 2;';
+  return `<div class="heat" style="${style}"><div class="heat-n">${c.s}</div><div class="heat-p">${fmt(c.pct,2)}</div><div class="heat-m">today</div></div>`;
+}).join('');
+document.getElementById('sectList').innerHTML = SECTORS.sort((a,b)=>b[2]-a[2]).map(([n,d,d5,w,l]) => {
+  const pct = Math.min(50, Math.abs(d5*8));
+  const isUp = d5 >= 0;
+  return `<div class="sect-row">
+    <span class="name">${n}</span>
+    <span class="${clsChg(d5)}">${fmt(d5,1)}%</span>
+    <div class="sect-bar"><div class="center"></div><div class="fill" style="${isUp?'left:50%':'right:50%'}; width:${pct}%; background:${isUp?'var(--green)':'var(--red)'}"></div></div>
+    <span class="dim">${w}W · ${l}L</span>
+  </div>`;
+}).join('');
+
+// rail
+document.querySelectorAll('.rail-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.rail-btn').forEach(b => b.classList.remove('on'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('on'));
+    btn.classList.add('on');
+    document.getElementById('v-' + btn.dataset.view).classList.add('on');
+  });
+});
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input,textarea')) return;
+  const map = {'1':'dash','2':'watch','3':'plan','4':'intel','5':'sect','6':'jrnl'};
+  if (map[e.key]) document.querySelector(`[data-view="${map[e.key]}"]`).click();
+});
+
+// clock
+setInterval(() => {
+  const d = new Date();
+  document.getElementById('clock').textContent = d.toLocaleTimeString('en-US', { hour12: false, timeZone: 'America/New_York' }) + ' ET';
+}, 1000);
+
+// tweaks
+document.getElementById('twFab').addEventListener('click', () => document.getElementById('twPanel').classList.toggle('on'));
+document.getElementById('twX').addEventListener('click', () => document.getElementById('twPanel').classList.remove('on'));
+const ACCENTS = { amber:'oklch(82% 0.14 78)', cyan:'oklch(78% 0.13 215)', green:'oklch(74% 0.16 145)' };
+document.querySelectorAll('.tw-seg').forEach(seg => {
+  seg.addEventListener('click', e => {
+    if (!e.target.matches('button')) return;
+    const tw = seg.dataset.tw, v = e.target.dataset.v;
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+    if (tw === 'theme') document.body.dataset.theme = v;
+    if (tw === 'accent') document.documentElement.style.setProperty('--accent', ACCENTS[v]);
+    if (tw === 'density') {
+      const map = { compact: 26, normal: 30, comfy: 36 };
+      document.documentElement.style.setProperty('--row-h', map[v] + 'px');
+    }
+  });
+});
+</script>
+</body>
+</html>

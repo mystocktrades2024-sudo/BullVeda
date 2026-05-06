@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trades Tab — 1 Ticker Per Row</title>
+<style>
+  :root {
+    --bg: #0f1729; --surface: #1a2332; --surface-alt: #1e293b;
+    --border: #2a3a4e; --text: #e2e8f0; --text-muted: #64748b;
+    --primary: #3b82f6; --green: #4ade80; --amber: #fbbf24; --red: #f87171;
+    --purple: #a78bfa;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; padding:20px; }
+
+  /* Regime Bar */
+  .regime-bar {
+    display:flex; align-items:center; gap:16px; padding:10px 20px;
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    margin-bottom:20px; flex-wrap:wrap;
+  }
+  .regime-pill { padding:4px 12px; border-radius:20px; font-size:11px; font-weight:800; background:rgba(74,222,128,.12); color:#4ade80; border:1px solid rgba(74,222,128,.3); }
+  .regime-stat { font-size:12px; color:var(--text-muted); }
+  .regime-stat b { color:var(--text); font-weight:800; }
+
+  /* Section Header */
+  .section-hdr { display:flex; align-items:center; gap:10px; margin:24px 0 12px 0; }
+  .section-hdr h2 { font-size:15px; font-weight:800; }
+  .section-count { font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; }
+
+  /* Row Card */
+  .signal-row {
+    display:grid;
+    grid-template-columns: 60px 90px 1fr 100px 80px 70px 90px 130px 100px 120px;
+    align-items:center; gap:0;
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:12px 16px; margin-bottom:6px; cursor:pointer;
+    transition:all .2s;
+  }
+  .signal-row:hover { border-color:var(--primary); background:var(--surface-alt); transform:translateX(2px); }
+  .signal-row-buy { border-left:3px solid var(--green); }
+  .signal-row-watch { border-left:3px solid var(--amber); }
+  .signal-row-short { border-left:3px solid var(--purple); }
+
+  .sr-ticker { font-size:16px; font-weight:900; }
+  .sr-score {
+    font-size:13px; font-weight:900; width:32px; height:32px;
+    display:flex; align-items:center; justify-content:center;
+    border-radius:6px; border:2px solid;
+  }
+  .score-high { color:var(--green); border-color:var(--green); background:rgba(74,222,128,.08); }
+  .score-mid { color:var(--amber); border-color:var(--amber); background:rgba(251,191,36,.08); }
+
+  .sr-setup { display:flex; flex-direction:column; gap:2px; }
+  .sr-setup-name { font-size:12px; font-weight:700; color:var(--text); }
+  .sr-setup-reason { font-size:10px; color:var(--text-muted); max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  .sr-price { text-align:right; }
+  .sr-price-main { font-size:15px; font-weight:800; }
+  .sr-price-chg { font-size:10px; font-weight:700; }
+
+  .sr-rr { text-align:center; font-size:13px; font-weight:800; color:var(--green); }
+  .sr-rs { text-align:center; font-size:13px; font-weight:700; color:#60a5fa; }
+  .sr-stop { text-align:right; font-size:12px; font-weight:700; color:var(--red); font-family:monospace; }
+
+  /* TF chips */
+  .sr-tf { display:flex; gap:3px; justify-content:center; }
+  .tf-chip { font-size:9px; font-weight:800; padding:2px 5px; border-radius:4px; }
+  .tf-bull { background:rgba(74,222,128,.12); color:#4ade80; }
+  .tf-neutral { background:rgba(251,191,36,.1); color:#fbbf24; }
+  .tf-bear { background:rgba(248,113,113,.1); color:#f87171; }
+
+  .sr-earn { font-size:11px; color:var(--text-muted); text-align:center; }
+  .sr-earn-warn { color:var(--amber); font-weight:700; }
+
+  .sr-action { text-align:right; }
+  .btn-long {
+    padding:5px 14px; border-radius:6px; font-size:10px; font-weight:700;
+    cursor:pointer; border:1px solid rgba(34,197,94,.3);
+    background:rgba(34,197,94,.1); color:#4ade80; transition:all .15s;
+  }
+  .btn-long:hover { background:rgba(34,197,94,.25); }
+
+  /* Verdict badge */
+  .vb { font-size:9px; font-weight:800; padding:2px 7px; border-radius:12px; margin-left:6px; }
+  .vb-buy { background:rgba(34,197,94,.15); color:#4ade80; }
+  .vb-watch { background:rgba(245,158,11,.12); color:#fbbf24; }
+
+  /* Table header */
+  .signal-hdr {
+    display:grid;
+    grid-template-columns: 60px 90px 1fr 100px 80px 70px 90px 130px 100px 120px;
+    padding:6px 16px; margin-bottom:4px;
+  }
+  .signal-hdr span { font-size:9px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; }
+
+  /* Extended Leaders row */
+  .ext-row {
+    display:grid;
+    grid-template-columns: 60px 50px 50px 90px 90px 80px 140px 80px 160px 1fr;
+    align-items:center;
+    background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    padding:8px 14px; margin-bottom:4px; cursor:pointer; transition:border-color .2s;
+  }
+  .ext-row:hover { border-color:var(--primary); }
+  .ext-hdr {
+    display:grid;
+    grid-template-columns: 60px 50px 50px 90px 90px 80px 140px 80px 160px 1fr;
+    padding:4px 14px; margin-bottom:4px;
+  }
+  .ext-hdr span { font-size:9px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; }
+  .ext-status { font-size:9px; font-weight:700; padding:2px 8px; border-radius:4px; }
+</style>
+</head>
+<body>
+
+<!-- REGIME BAR -->
+<div class="regime-bar">
+  <span class="regime-pill">RISK-ON CHOPPY</span>
+  <span class="regime-stat"><b>SPY $704.08</b></span>
+  <span class="regime-stat">VIX <b>19.1</b></span>
+  <span class="regime-stat">Breadth <b>70%</b></span>
+  <span class="regime-stat">Dist <b>5</b></span>
+  <span class="regime-stat" style="color:#4ade80">1M <b>+7.4%</b></span>
+  <span style="flex:1"></span>
+  <span class="regime-stat">2026-04-23 06:53</span>
+</div>
+
+<!-- BUY SIGNALS -->
+<div class="section-hdr">
+  <span style="font-size:18px">&#9650;</span>
+  <h2 style="color:var(--green)">BUY SIGNALS</h2>
+  <span class="section-count" style="background:rgba(34,197,94,.15);color:#4ade80">5</span>
+</div>
+
+<div class="signal-hdr">
+  <span>Ticker</span>
+  <span>Score</span>
+  <span>Setup</span>
+  <span style="text-align:right">Price</span>
+  <span style="text-align:center">R:R</span>
+  <span style="text-align:center">RS</span>
+  <span style="text-align:right">Stop</span>
+  <span style="text-align:center">Timeframes</span>
+  <span style="text-align:center">Earnings</span>
+  <span style="text-align:right">Action</span>
+</div>
+
+<div class="signal-row signal-row-buy">
+  <div class="sr-ticker">ESI</div>
+  <div><div class="sr-score score-high">76</div></div>
+  <div class="sr-setup">
+    <div class="sr-setup-name">Trend Continuation</div>
+    <div class="sr-setup-reason">Score 76/100, RS 85, weekly bull, R:R 3.0:1 + catalyst</div>
+  </div>
+  <div class="sr-price">
+    <div class="sr-price-main">$38.23</div>
+    <div class="sr-price-chg" style="color:#4ade80">+1.2% <span style="color:#64748b;font-size:8px">LIVE</span></div>
+  </div>
+  <div class="sr-rr">3.0:1</div>
+  <div class="sr-rs">85</div>
+  <div class="sr-stop">$35.20</div>
+  <div class="sr-tf">
+    <span class="tf-chip tf-bull">W &#10003;</span>
+    <span class="tf-chip tf-bull">D &#10003;</span>
+    <span class="tf-chip tf-bull">4H &#10003;</span>
+  </div>
+  <div class="sr-earn">Jun 5 (43d)</div>
+  <div class="sr-action"><button class="btn-long">+ Long</button></div>
+</div>
+
+<div class="signal-row signal-row-buy">
+  <div class="sr-ticker">RNG</div>
+  <div><div class="sr-score score-high">76</div></div>
+  <div class="sr-setup">
+    <div class="sr-setup-name">Trend Continuation</div>
+    <div class="sr-setup-reason">Score 76/100, RS 82, weekly bull, R:R 3.0:1 + catalyst</div>
+  </div>
+  <div class="sr-price">
+    <div class="sr-price-main">$41.09</div>
+    <div class="sr-price-chg" style="color:#f87171">-0.3%</div>
+  </div>
+  <div class="sr-rr">3.0:1</div>
+  <div class="sr-rs">82</div>
+  <div class="sr-stop">$38.50</div>
+  <div class="sr-tf">
+    <span class="tf-chip tf-bull">W &#10003;</span>
+    <span class="tf-chip tf-bull">D &#10003;</span>
+    <span class="tf-chip tf-neutral">4H —</span>
+  </div>
+  <div class="sr-earn">May 15 (22d)</div>
+  <div class="sr-action"><button class="btn-long">+ Long</button></div>
+</div>
+
+<div class="signal-row signal-row-buy">
+  <div class="sr-ticker">Q</div>
+  <div><div class="sr-score score-mid">75</div></div>
+  <div class="sr-setup">
+    <div class="sr-setup-name">52wk Breakout</div>
+    <div class="sr-setup-reason">Score 75/100, RS 90, weekly bull, R:R 3.0:1 + catalyst</div>
+  </div>
+  <div class="sr-price">
+    <div class="sr-price-main">$139.56</div>
+    <div class="sr-price-chg" style="color:#4ade80">+0.8%</div>
+  </div>
+  <div class="sr-rr">3.0:1</div>
+  <div class="sr-rs">90</div>
+  <div class="sr-stop">$130.40</div>
+  <div class="sr-tf">
+    <span class="tf-chip tf-bull">W &#10003;</span>
+    <span class="tf-chip tf-bull">D &#10003;</span>
+    <span class="tf-chip tf-bull">4H &#10003;</span>
+  </div>
+  <div class="sr-earn">May 8 (15d)</div>
+  <div class="sr-action"><button class="btn-long">+ Long</button></div>
+</div>
+
+<div class="signal-row signal-row-buy">
+  <div class="sr-ticker">BALL</div>
+  <div><div class="sr-score score-mid">75</div></div>
+  <div class="sr-setup">
+    <div class="sr-setup-name">EMA21 Pullback</div>
+    <div class="sr-setup-reason">Score 75/100, RS 78, weekly bull, R:R 3.0:1</div>
+  </div>
+  <div class="sr-price">
+    <div class="sr-price-main">$63.58</div>
+    <div class="sr-price-chg" style="color:#4ade80">+0.2%</div>
+  </div>
+  <div class="sr-rr">3.0:1</div>
+  <div class="sr-rs">78</div>
+  <div class="sr-stop">$59.80</div>
+  <div class="sr-tf">
+    <span class="tf-chip tf-bull">W &#10003;</span>
+    <span class="tf-chip tf-bull">D &#10003;</span>
+    <span class="tf-chip tf-bull">4H &#10003;</span>
+  </div>
+  <div class="sr-earn sr-earn-warn">May 1 (8d)</div>
+  <div class="sr-action"><button class="btn-long">+ Long</button></div>
+</div>
+
+<div class="signal-row signal-row-buy">
+  <div class="sr-ticker">ST</div>
+  <div><div class="sr-score score-mid">75</div></div>
+  <div class="sr-setup">
+    <div class="sr-setup-name">Trend Continuation</div>
+    <div class="sr-setup-reason">Score 75/100, RS 80, weekly bull, R:R 3.0:1</div>
+  </div>
+  <div class="sr-price">
+    <div class="sr-price-main">$40.39</div>
+    <div class="sr-price-chg" style="color:#f87171">-0.5%</div>
+  </div>
+  <div class="sr-rr">3.0:1</div>
+  <div class="sr-rs">80</div>
+  <div class="sr-stop">$37.60</div>
+  <div class="sr-tf">
+    <span class="tf-chip tf-bull">W &#10003;</span>
+    <span class="tf-chip tf-bull">D &#10003;</span>
+    <span class="tf-chip tf-bear">4H &#10007;</span>
+  </div>
+  <div class="sr-earn">May 20 (27d)</div>
+  <div class="sr-action"><button class="btn-long">+ Long</button></div>
+</div>
+
+<!-- WATCH SIGNALS -->
+<div class="section-hdr" style="margin-top:28px">
+  <span style="font-size:18px">&#128065;</span>
+  <h2 style="color:var(--amber)">WATCH</h2>
+  <span class="section-count" style="background:rgba(245,158,11,.12);color:#fbbf24">5</span>
+  <span style="font-size:11px;color:var(--text-muted);margin-left:8px">Waiting for pullback, 4H confirmation, or score improvement</span>
+</div>
+
+<div class="signal-row signal-row-watch">
+  <div class="sr-ticker">CGNX</div>
+  <div><div class="sr-score score-mid">73</div></div>
+  <div class="sr-setup">
+    <div class="sr-setup-name">Trend Continuation</div>
+    <div class="sr-setup-reason" style="color:#fbbf24">4H bearish — wait for momentum to confirm</div>
+  </div>
+  <div class="sr-price">
+    <div class="sr-price-main">$53.72</div>
+    <div class="sr-price-chg" style="color:#f87171">-1.5%</div>
+  </div>
+  <div class="sr-rr" style="color:var(--text-muted)">3.0:1</div>
+  <div class="sr-rs">88</div>
+  <div class="sr-stop" style="color:var(--text-muted)">$48.12</div>
+  <div class="sr-tf">
+    <span class="tf-chip tf-bull">W &#10003;</span>
+    <span class="tf-chip tf-bull">D &#10003;</span>
+    <span class="tf-chip tf-bear">4H &#10007;</span>
+  </div>
+  <div class="sr-earn">May 6 (13d)</div>
+  <div class="sr-action"></div>
+</div>
+
+<div class="signal-row signal-row-watch">
+  <div class="sr-ticker">VNOM</div>
+  <div><div class="sr-score score-mid">74</div></div>
+  <div class="sr-setup">
+    <div class="sr-setup-name">EMA21 Pullback</div>
+    <div class="sr-setup-reason" style="color:#fbbf24">Score 74 &lt; 78 buy bar — needs catalyst or higher score</div>
+  </div>
+  <div class="sr-price">
+    <div class="sr-price-main">$47.14</div>
+    <div class="sr-price-chg" style="color:#4ade80">+0.4%</div>
+  </div>
+  <div class="sr-rr" style="color:var(--text-muted)">3.0:1</div>
+  <div class="sr-rs">75</div>
+  <div class="sr-stop" style="color:var(--text-muted)">$44.20</div>
+  <div class="sr-tf">
+    <span class="tf-chip tf-bull">W &#10003;</span>
+    <span class="tf-chip tf-bull">D &#10003;</span>
+    <span class="tf-chip tf-bull">4H &#10003;</span>
+  </div>
+  <div class="sr-earn">May 12 (19d)</div>
+  <div class="sr-action"></div>
+</div>
+
+<div class="signal-row signal-row-watch">
+  <div class="sr-ticker">WDC</div>
+  <div><div class="sr-score score-mid">69</div></div>
+  <div class="sr-setup">
+    <div class="sr-setup-name">52wk Breakout</div>
+    <div class="sr-setup-reason" style="color:#f87171">Earnings in 5 days — blackout window active</div>
+  </div>
+  <div class="sr-price">
+    <div class="sr-price-main">$370.92</div>
+    <div class="sr-price-chg" style="color:#4ade80">+3.5%</div>
+  </div>
+  <div class="sr-rr" style="color:var(--text-muted)">3.0:1</div>
+  <div class="sr-rs">92</div>
+  <div class="sr-stop" style="color:var(--text-muted)">$348.00</div>
+  <div class="sr-tf">
+    <span class="tf-chip tf-bull">W &#10003;</span>
+    <span class="tf-chip tf-bull">D &#10003;</span>
+    <span class="tf-chip tf-bull">4H &#10003;</span>
+  </div>
+  <div class="sr-earn sr-earn-warn">Apr 28 (5d) !</div>
+  <div class="sr-action"></div>
+</div>
+
+<!-- EXTENDED LEADERS -->
+<div class="section-hdr" style="margin-top:28px">
+  <span style="font-size:18px">&#128293;</span>
+  <h2 style="color:#f97316">EXTENDED LEADERS — PULLBACK WATCHLIST</h2>
+  <span class="section-count" style="background:rgba(249,115,22,.12);color:#f97316">87</span>
+</div>
+
+<div class="ext-hdr">
+  <span>Ticker</span>
+  <span>Score</span>
+  <span>RS</span>
+  <span style="text-align:right">Price</span>
+  <span style="text-align:right">EMA21</span>
+  <span style="text-align:center">Dist</span>
+  <span>Entry Zone</span>
+  <span style="text-align:center">Status</span>
+  <span>Setup</span>
+  <span>Sector</span>
+</div>
+
+<div class="ext-row" style="border-left:3px solid #4ade80">
+  <div style="font-size:13px;font-weight:800">SLB</div>
+  <div style="font-size:12px;font-weight:700;color:#fbbf24">66</div>
+  <div style="font-size:12px;color:#60a5fa">78</div>
+  <div style="text-align:right;font-size:12px;font-family:monospace">$53.00</div>
+  <div style="text-align:right;font-size:12px;font-family:monospace;color:var(--text-muted)">$51.20</div>
+  <div style="text-align:center;font-size:12px;font-weight:700;color:#4ade80">1.3 ATR</div>
+  <div style="font-size:11px;color:var(--text-muted)">$50.80 – $51.50</div>
+  <div style="text-align:center"><span class="ext-status" style="background:rgba(74,222,128,.15);color:#4ade80">READY</span></div>
+  <div style="font-size:11px;color:var(--text-muted)">VCP Breakout</div>
+  <div style="font-size:11px;color:var(--text-muted)">Energy</div>
+</div>
+
+<div class="ext-row">
+  <div style="font-size:13px;font-weight:800">TWLO</div>
+  <div style="font-size:12px;font-weight:700;color:#4ade80">76</div>
+  <div style="font-size:12px;color:#60a5fa">85</div>
+  <div style="text-align:right;font-size:12px;font-family:monospace">$145.30</div>
+  <div style="text-align:right;font-size:12px;font-family:monospace;color:var(--text-muted)">$138.00</div>
+  <div style="text-align:center;font-size:12px;font-weight:700;color:#fbbf24">2.8 ATR</div>
+  <div style="font-size:11px;color:var(--text-muted)">$137.50 – $139.00</div>
+  <div style="text-align:center"><span class="ext-status" style="background:rgba(251,191,36,.15);color:#fbbf24">Approaching</span></div>
+  <div style="font-size:11px;color:var(--text-muted)">VCP Breakout</div>
+  <div style="font-size:11px;color:var(--text-muted)">Technology</div>
+</div>
+
+<div class="ext-row">
+  <div style="font-size:13px;font-weight:800">NVT</div>
+  <div style="font-size:12px;font-weight:700;color:#fbbf24">71</div>
+  <div style="font-size:12px;color:#60a5fa">78</div>
+  <div style="text-align:right;font-size:12px;font-family:monospace">$137.00</div>
+  <div style="text-align:right;font-size:12px;font-family:monospace;color:var(--text-muted)">$130.00</div>
+  <div style="text-align:center;font-size:12px;font-weight:700;color:#fbbf24">2.6 ATR</div>
+  <div style="font-size:11px;color:var(--text-muted)">$129.50 – $131.00</div>
+  <div style="text-align:center"><span class="ext-status" style="background:rgba(251,191,36,.15);color:#fbbf24">Approaching</span></div>
+  <div style="font-size:11px;color:var(--text-muted)">VCP Breakout</div>
+  <div style="font-size:11px;color:var(--text-muted)">Industrials</div>
+</div>
+
+<div class="ext-row">
+  <div style="font-size:13px;font-weight:800">CSCO</div>
+  <div style="font-size:12px;font-weight:700;color:#fbbf24">71</div>
+  <div style="font-size:12px;color:#60a5fa">80</div>
+  <div style="text-align:right;font-size:12px;font-family:monospace">$90.00</div>
+  <div style="text-align:right;font-size:12px;font-family:monospace;color:var(--text-muted)">$84.00</div>
+  <div style="text-align:center;font-size:12px;font-weight:700;color:#94a3b8">3.7 ATR</div>
+  <div style="font-size:11px;color:var(--text-muted)">$83.50 – $85.00</div>
+  <div style="text-align:center"><span class="ext-status" style="background:rgba(100,116,139,.15);color:#94a3b8">Wait</span></div>
+  <div style="font-size:11px;color:var(--text-muted)">Trend Cont.</div>
+  <div style="font-size:11px;color:var(--text-muted)">Technology</div>
+</div>
+
+<div class="ext-row">
+  <div style="font-size:13px;font-weight:800">MU</div>
+  <div style="font-size:12px;font-weight:700;color:#fbbf24">68</div>
+  <div style="font-size:12px;color:#60a5fa">88</div>
+  <div style="text-align:right;font-size:12px;font-family:monospace">$460.00</div>
+  <div style="text-align:right;font-size:12px;font-family:monospace;color:var(--text-muted)">$440.00</div>
+  <div style="text-align:center;font-size:12px;font-weight:700;color:#94a3b8">3.1 ATR</div>
+  <div style="font-size:11px;color:var(--text-muted)">$438.00 – $442.00</div>
+  <div style="text-align:center"><span class="ext-status" style="background:rgba(100,116,139,.15);color:#94a3b8">Wait</span></div>
+  <div style="font-size:11px;color:var(--text-muted)">Trend Cont.</div>
+  <div style="font-size:11px;color:var(--text-muted)">Technology</div>
+</div>
+
+</body>
+</html>

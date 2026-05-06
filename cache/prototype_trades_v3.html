@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trades Tab — Elite Expandable Rows</title>
+<style>
+  :root {
+    --bg: #0f1729; --surface: #1a2332; --surface-alt: #1e293b;
+    --border: #2a3a4e; --text: #e2e8f0; --text-muted: #64748b;
+    --primary: #3b82f6; --green: #4ade80; --amber: #fbbf24; --red: #f87171;
+    --purple: #a78bfa;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; padding:20px; max-width:1400px; margin:0 auto; }
+
+  .section-hdr { display:flex; align-items:center; gap:10px; margin:24px 0 10px 0; }
+  .section-hdr h2 { font-size:14px; font-weight:800; letter-spacing:.3px; }
+  .cnt { font-size:10px; font-weight:800; padding:2px 8px; border-radius:10px; }
+
+  /* Signal Row — Compact */
+  .sig {
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    margin-bottom:6px; cursor:pointer; transition:all .15s; overflow:hidden;
+  }
+  .sig:hover { border-color:var(--primary); }
+  .sig-buy { border-left:3px solid var(--green); }
+  .sig-watch { border-left:3px solid var(--amber); }
+  .sig-short { border-left:3px solid var(--purple); }
+
+  .sig-main {
+    display:grid; align-items:center; padding:10px 14px; gap:0;
+    grid-template-columns: 70px 36px 1fr 110px 60px 50px 80px 110px 90px 90px;
+  }
+
+  .s-ticker { font-size:17px; font-weight:900; letter-spacing:-.3px; }
+  .s-score { width:32px; height:32px; border-radius:7px; border:2px solid; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:900; }
+  .sc-hi { color:var(--green); border-color:var(--green); background:rgba(74,222,128,.06); }
+  .sc-md { color:var(--amber); border-color:var(--amber); background:rgba(251,191,36,.06); }
+  .sc-lo { color:var(--red); border-color:var(--red); background:rgba(248,113,113,.06); }
+
+  .s-info { display:flex; flex-direction:column; padding:0 12px; }
+  .s-name { font-size:11px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:280px; }
+  .s-badges { display:flex; gap:4px; margin-top:3px; flex-wrap:wrap; }
+
+  .badge { font-size:8px; font-weight:800; padding:1px 6px; border-radius:10px; text-transform:uppercase; letter-spacing:.3px; white-space:nowrap; }
+  .b-buy { background:rgba(34,197,94,.15); color:#4ade80; }
+  .b-watch { background:rgba(245,158,11,.12); color:#fbbf24; }
+  .b-t1 { background:rgba(59,130,246,.15); color:#60a5fa; }
+  .b-t2 { background:rgba(96,165,250,.1); color:#93c5fd; }
+  .b-t3 { background:rgba(100,116,139,.1); color:#94a3b8; }
+  .b-fresh { background:rgba(34,197,94,.12); color:#4ade80; }
+  .b-pull { background:rgba(59,130,246,.12); color:#60a5fa; }
+  .b-valid { background:rgba(100,116,139,.1); color:#94a3b8; }
+  .b-cat1 { background:rgba(239,68,68,.1); color:#f87171; }
+  .b-cat2 { background:rgba(251,191,36,.1); color:#fbbf24; }
+  .b-cat3 { background:rgba(100,116,139,.08); color:#64748b; }
+  .b-trend { background:rgba(34,197,94,.08); color:#34d399; }
+  .b-squeeze { background:rgba(167,139,250,.12); color:#a78bfa; }
+
+  .s-price { text-align:right; }
+  .s-px { font-size:15px; font-weight:800; font-family:monospace; }
+  .s-chg { font-size:10px; font-weight:700; }
+  .s-live { font-size:7px; color:#64748b; margin-left:2px; }
+
+  .s-rr { text-align:center; font-size:13px; font-weight:800; }
+  .s-rs { text-align:center; font-size:13px; font-weight:700; color:#60a5fa; }
+  .s-stop { text-align:right; font-size:11px; font-weight:700; color:var(--red); font-family:monospace; }
+
+  .s-tf { display:flex; gap:2px; justify-content:center; }
+  .tf { font-size:8px; font-weight:800; padding:2px 4px; border-radius:3px; }
+  .tf-b { background:rgba(74,222,128,.12); color:#4ade80; }
+  .tf-n { background:rgba(251,191,36,.08); color:#fbbf24; }
+  .tf-r { background:rgba(248,113,113,.08); color:#f87171; }
+
+  .s-earn { font-size:10px; text-align:center; }
+  .s-warn { color:var(--amber); font-weight:700; }
+
+  .s-act { text-align:right; }
+  .btn-l { padding:5px 12px; border-radius:6px; font-size:10px; font-weight:700; cursor:pointer; border:1px solid rgba(34,197,94,.3); background:rgba(34,197,94,.08); color:#4ade80; transition:all .12s; }
+  .btn-l:hover { background:rgba(34,197,94,.2); }
+
+  /* Expanded Detail Panel */
+  .sig-detail {
+    display:none; padding:0 14px 14px 14px;
+    border-top:1px solid var(--border);
+    background:var(--surface-alt);
+  }
+  .sig.open .sig-detail { display:block; }
+  .sig.open { border-color:var(--primary); }
+
+  .det-grid {
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-top:12px;
+  }
+  .det-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px 12px;
+  }
+  .det-title { font-size:9px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
+  .det-row { display:flex; justify-content:space-between; font-size:11px; margin-bottom:3px; }
+  .det-label { color:var(--text-muted); }
+  .det-val { font-weight:700; }
+
+  .cat-chips { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }
+  .cat-chip { font-size:9px; font-weight:700; padding:2px 7px; border-radius:4px; background:rgba(59,130,246,.1); color:#60a5fa; }
+
+  .reason-bar {
+    margin-top:10px; padding:8px 12px; border-radius:6px;
+    background:rgba(59,130,246,.06); border:1px solid rgba(59,130,246,.15);
+    font-size:11px; color:#93c5fd;
+  }
+
+  /* Stars */
+  .stars { color:#fbbf24; font-size:12px; letter-spacing:1px; }
+
+  /* Expandable Extended Leaders */
+  .ext { background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:4px; padding:8px 14px; cursor:pointer; transition:border-color .15s; }
+  .ext:hover { border-color:var(--primary); }
+  .ext-main { display:grid; grid-template-columns:70px 36px 50px 100px 100px 70px 140px 80px 1fr; align-items:center; gap:0; }
+  .ext-status { font-size:9px; font-weight:700; padding:2px 7px; border-radius:4px; }
+</style>
+</head>
+<body>
+
+<!-- BUY SIGNALS -->
+<div class="section-hdr">
+  <span style="font-size:16px;color:var(--green)">&#9650;</span>
+  <h2 style="color:var(--green)">BUY SIGNALS</h2>
+  <span class="cnt" style="background:rgba(34,197,94,.12);color:#4ade80">5</span>
+</div>
+
+<!-- ROW 1: ESI — collapsed -->
+<div class="sig sig-buy" onclick="this.classList.toggle('open')">
+  <div class="sig-main">
+    <div class="s-ticker">ESI</div>
+    <div class="s-score sc-hi">76</div>
+    <div class="s-info">
+      <div class="s-name">ELEMENT SOLUTIONS · Technology · Trend Continuation</div>
+      <div class="s-badges">
+        <span class="badge b-buy">BUY</span>
+        <span class="badge b-t2">T2</span>
+        <span class="badge b-fresh">FRESH</span>
+        <span class="badge b-cat2">Cat T2</span>
+        <span class="badge b-trend">Trend</span>
+        <span class="stars">&#9733;&#9733;&#9733;&#9733;&#9734;</span>
+      </div>
+    </div>
+    <div class="s-price">
+      <div class="s-px">$38.23</div>
+      <div class="s-chg" style="color:#4ade80">+1.2%<span class="s-live">LIVE</span></div>
+    </div>
+    <div class="s-rr" style="color:var(--green)">3.0:1</div>
+    <div class="s-rs">85</div>
+    <div class="s-stop">$35.20</div>
+    <div class="s-tf">
+      <span class="tf tf-b">W&#10003;</span>
+      <span class="tf tf-b">D&#10003;</span>
+      <span class="tf tf-b">4H&#10003;</span>
+    </div>
+    <div class="s-earn">Jun 5 (43d)</div>
+    <div class="s-act"><button class="btn-l" onclick="event.stopPropagation()">+ Long</button></div>
+  </div>
+
+  <!-- Expanded Details -->
+  <div class="sig-detail">
+    <div class="det-grid">
+      <!-- Trade Plan -->
+      <div class="det-card">
+        <div class="det-title">&#127919; Trade Plan</div>
+        <div class="det-row"><span class="det-label">Entry Zone</span><span class="det-val">$37.50 – $38.40</span></div>
+        <div class="det-row"><span class="det-label">Stop</span><span class="det-val" style="color:var(--red)">$35.20</span></div>
+        <div class="det-row"><span class="det-label">Target 1</span><span class="det-val" style="color:var(--green)">$43.80</span></div>
+        <div class="det-row"><span class="det-label">Target 2</span><span class="det-val" style="color:var(--green)">$47.20</span></div>
+        <div class="det-row"><span class="det-label">R:R</span><span class="det-val" style="color:var(--green)">3.0:1</span></div>
+        <div class="det-row"><span class="det-label">Risk/Share</span><span class="det-val">$3.03</span></div>
+        <div class="det-row"><span class="det-label">Hold Period</span><span class="det-val">7-21d</span></div>
+        <div class="det-row"><span class="det-label">Allocation</span><span class="det-val">5.9%</span></div>
+      </div>
+
+      <!-- Scoring -->
+      <div class="det-card">
+        <div class="det-title">&#128202; Scoring Breakdown</div>
+        <div class="det-row"><span class="det-label">Trend (30)</span><span class="det-val">24</span></div>
+        <div class="det-row"><span class="det-label">RS (25)</span><span class="det-val">21</span></div>
+        <div class="det-row"><span class="det-label">Catalyst (20)</span><span class="det-val">14</span></div>
+        <div class="det-row"><span class="det-label">Smart Money (10)</span><span class="det-val">7</span></div>
+        <div class="det-row"><span class="det-label">Quality (5)</span><span class="det-val">3</span></div>
+        <div class="det-row"><span class="det-label">Entry R:R (10)</span><span class="det-val">7</span></div>
+        <div class="det-row" style="border-top:1px solid var(--border);padding-top:4px;margin-top:4px"><span class="det-label" style="font-weight:700">Total</span><span class="det-val" style="color:var(--green);font-size:14px">76/100</span></div>
+      </div>
+
+      <!-- Technicals -->
+      <div class="det-card">
+        <div class="det-title">&#128200; Technicals</div>
+        <div class="det-row"><span class="det-label">Trend</span><span class="det-val" style="color:var(--green)">Strong &#8593; ADX 28</span></div>
+        <div class="det-row"><span class="det-label">RSI</span><span class="det-val">58</span></div>
+        <div class="det-row"><span class="det-label">RVOL</span><span class="det-val">1.3x</span></div>
+        <div class="det-row"><span class="det-label">EMA Stack</span><span class="det-val" style="color:var(--green)">Bullish</span></div>
+        <div class="det-row"><span class="det-label">MACD</span><span class="det-val" style="color:var(--green)">Bullish</span></div>
+        <div class="det-row"><span class="det-label">Squeeze</span><span class="det-val">No</span></div>
+        <div class="det-row"><span class="det-label">52w High</span><span class="det-val">$41.20 (-7.2%)</span></div>
+        <div class="det-row"><span class="det-label">ATR%</span><span class="det-val">2.8%</span></div>
+      </div>
+
+      <!-- Fundamentals + Sentiment -->
+      <div class="det-card">
+        <div class="det-title">&#128176; Fundamentals & Sentiment</div>
+        <div class="det-row"><span class="det-label">Sector</span><span class="det-val">Technology</span></div>
+        <div class="det-row"><span class="det-label">P/E</span><span class="det-val">22.4</span></div>
+        <div class="det-row"><span class="det-label">EPS Growth</span><span class="det-val" style="color:var(--green)">+18%</span></div>
+        <div class="det-row"><span class="det-label">Insider</span><span class="det-val" style="color:var(--green)">3 buys / 0 sells</span></div>
+        <div class="det-row"><span class="det-label">Short %</span><span class="det-val">2.1%</span></div>
+        <div class="det-row"><span class="det-label">IV Rank</span><span class="det-val">28% (cheap)</span></div>
+        <div class="det-row"><span class="det-label">P/C Ratio</span><span class="det-val">0.65</span></div>
+        <div class="cat-chips">
+          <span class="cat-chip">MOMENTUM</span>
+          <span class="cat-chip">CONTINUATION</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="reason-bar">
+      <strong>Decision:</strong> Score 76/100, RS 85, weekly &#10003;, R:R 3.0:1 + catalyst [risk_on_choppy] | 4H bullish &#10003;
+    </div>
+  </div>
+</div>
+
+<!-- ROW 2: RNG -->
+<div class="sig sig-buy" onclick="this.classList.toggle('open')">
+  <div class="sig-main">
+    <div class="s-ticker">RNG</div>
+    <div class="s-score sc-hi">76</div>
+    <div class="s-info">
+      <div class="s-name">RINGCENTRAL · Technology · Trend Continuation</div>
+      <div class="s-badges">
+        <span class="badge b-buy">BUY</span>
+        <span class="badge b-t2">T2</span>
+        <span class="badge b-pull">PULLBACK</span>
+        <span class="badge b-cat2">Cat T2</span>
+        <span class="stars">&#9733;&#9733;&#9733;&#9733;&#9734;</span>
+      </div>
+    </div>
+    <div class="s-price">
+      <div class="s-px">$41.09</div>
+      <div class="s-chg" style="color:var(--red)">-0.3%</div>
+    </div>
+    <div class="s-rr" style="color:var(--green)">3.0:1</div>
+    <div class="s-rs">82</div>
+    <div class="s-stop">$38.50</div>
+    <div class="s-tf">
+      <span class="tf tf-b">W&#10003;</span>
+      <span class="tf tf-b">D&#10003;</span>
+      <span class="tf tf-n">4H&#8212;</span>
+    </div>
+    <div class="s-earn">May 15 (22d)</div>
+    <div class="s-act"><button class="btn-l" onclick="event.stopPropagation()">+ Long</button></div>
+  </div>
+  <div class="sig-detail">
+    <div class="det-grid">
+      <div class="det-card">
+        <div class="det-title">&#127919; Trade Plan</div>
+        <div class="det-row"><span class="det-label">Entry Zone</span><span class="det-val">$40.20 – $41.30</span></div>
+        <div class="det-row"><span class="det-label">Stop</span><span class="det-val" style="color:var(--red)">$38.50</span></div>
+        <div class="det-row"><span class="det-label">Target 1</span><span class="det-val" style="color:var(--green)">$46.80</span></div>
+        <div class="det-row"><span class="det-label">R:R</span><span class="det-val" style="color:var(--green)">3.0:1</span></div>
+        <div class="det-row"><span class="det-label">Hold Period</span><span class="det-val">7-21d</span></div>
+      </div>
+      <div class="det-card">
+        <div class="det-title">&#128202; Scoring</div>
+        <div class="det-row"><span class="det-label">Trend (30)</span><span class="det-val">22</span></div>
+        <div class="det-row"><span class="det-label">RS (25)</span><span class="det-val">20</span></div>
+        <div class="det-row"><span class="det-label">Catalyst (20)</span><span class="det-val">16</span></div>
+        <div class="det-row"><span class="det-label">Smart Money (10)</span><span class="det-val">8</span></div>
+        <div class="det-row"><span class="det-label">Quality (5)</span><span class="det-val">3</span></div>
+        <div class="det-row"><span class="det-label">Entry R:R (10)</span><span class="det-val">7</span></div>
+      </div>
+      <div class="det-card">
+        <div class="det-title">&#128200; Technicals</div>
+        <div class="det-row"><span class="det-label">Trend</span><span class="det-val" style="color:var(--green)">Uptrend ADX 25</span></div>
+        <div class="det-row"><span class="det-label">RSI</span><span class="det-val">55</span></div>
+        <div class="det-row"><span class="det-label">RVOL</span><span class="det-val">1.1x</span></div>
+        <div class="det-row"><span class="det-label">EMA Stack</span><span class="det-val" style="color:var(--green)">Bullish</span></div>
+        <div class="det-row"><span class="det-label">Squeeze</span><span class="det-val">No</span></div>
+      </div>
+      <div class="det-card">
+        <div class="det-title">&#128176; Fundamentals</div>
+        <div class="det-row"><span class="det-label">Sector</span><span class="det-val">Technology</span></div>
+        <div class="det-row"><span class="det-label">P/E</span><span class="det-val">28.5</span></div>
+        <div class="det-row"><span class="det-label">EPS Growth</span><span class="det-val" style="color:var(--green)">+25%</span></div>
+        <div class="det-row"><span class="det-label">IV Rank</span><span class="det-val">32%</span></div>
+        <div class="cat-chips"><span class="cat-chip">CONTINUATION</span></div>
+      </div>
+    </div>
+    <div class="reason-bar">
+      <strong>Decision:</strong> Score 76/100, RS 82, weekly &#10003;, R:R 3.0:1 + catalyst [risk_on_choppy] | 4H neutral
+    </div>
+  </div>
+</div>
+
+<!-- ROW 3: Q — collapsed -->
+<div class="sig sig-buy" onclick="this.classList.toggle('open')">
+  <div class="sig-main">
+    <div class="s-ticker">Q</div>
+    <div class="s-score sc-md">75</div>
+    <div class="s-info">
+      <div class="s-name">QUINTILES IMS · Healthcare · 52wk Breakout</div>
+      <div class="s-badges">
+        <span class="badge b-buy">BUY</span>
+        <span class="badge b-t2">T2</span>
+        <span class="badge b-fresh">FRESH</span>
+        <span class="badge b-cat1">Cat T1</span>
+        <span class="badge b-squeeze">BREAKOUT</span>
+        <span class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+      </div>
+    </div>
+    <div class="s-price">
+      <div class="s-px">$139.56</div>
+      <div class="s-chg" style="color:var(--green)">+0.8%</div>
+    </div>
+    <div class="s-rr" style="color:var(--green)">3.0:1</div>
+    <div class="s-rs">90</div>
+    <div class="s-stop">$130.40</div>
+    <div class="s-tf">
+      <span class="tf tf-b">W&#10003;</span>
+      <span class="tf tf-b">D&#10003;</span>
+      <span class="tf tf-b">4H&#10003;</span>
+    </div>
+    <div class="s-earn">May 8 (15d)</div>
+    <div class="s-act"><button class="btn-l" onclick="event.stopPropagation()">+ Long</button></div>
+  </div>
+  <div class="sig-detail">
+    <div class="det-grid">
+      <div class="det-card">
+        <div class="det-title">&#127919; Trade Plan</div>
+        <div class="det-row"><span class="det-label">Entry Zone</span><span class="det-val">$137.80 – $140.00</span></div>
+        <div class="det-row"><span class="det-label">Stop</span><span class="det-val" style="color:var(--red)">$130.40</span></div>
+        <div class="det-row"><span class="det-label">Target 1</span><span class="det-val" style="color:var(--green)">$155.20</span></div>
+        <div class="det-row"><span class="det-label">Target 2</span><span class="det-val" style="color:var(--green)">$162.80</span></div>
+        <div class="det-row"><span class="det-label">R:R</span><span class="det-val" style="color:var(--green)">3.0:1</span></div>
+        <div class="det-row"><span class="det-label">Hold Period</span><span class="det-val">5-10d</span></div>
+        <div class="det-row"><span class="det-label">Allocation</span><span class="det-val">7.5%</span></div>
+      </div>
+      <div class="det-card">
+        <div class="det-title">&#128202; Scoring</div>
+        <div class="det-row"><span class="det-label">Trend (30)</span><span class="det-val">22</span></div>
+        <div class="det-row"><span class="det-label">RS (25)</span><span class="det-val">22</span></div>
+        <div class="det-row"><span class="det-label">Catalyst (20)</span><span class="det-val">15</span></div>
+        <div class="det-row"><span class="det-label">Smart Money (10)</span><span class="det-val">6</span></div>
+        <div class="det-row"><span class="det-label">Quality (5)</span><span class="det-val">4</span></div>
+        <div class="det-row"><span class="det-label">Entry R:R (10)</span><span class="det-val">6</span></div>
+      </div>
+      <div class="det-card">
+        <div class="det-title">&#128200; Technicals</div>
+        <div class="det-row"><span class="det-label">Trend</span><span class="det-val" style="color:var(--green)">Strong &#8593; ADX 32</span></div>
+        <div class="det-row"><span class="det-label">RSI</span><span class="det-val">62</span></div>
+        <div class="det-row"><span class="det-label">RVOL</span><span class="det-val" style="color:var(--green)">1.8x</span></div>
+        <div class="det-row"><span class="det-label">EMA Stack</span><span class="det-val" style="color:var(--green)">Bullish</span></div>
+        <div class="det-row"><span class="det-label">At 52w High</span><span class="det-val" style="color:var(--green)">YES</span></div>
+      </div>
+      <div class="det-card">
+        <div class="det-title">&#128176; Fundamentals</div>
+        <div class="det-row"><span class="det-label">Sector</span><span class="det-val">Healthcare</span></div>
+        <div class="det-row"><span class="det-label">P/E</span><span class="det-val">18.2</span></div>
+        <div class="det-row"><span class="det-label">EPS Growth</span><span class="det-val" style="color:var(--green)">+32%</span></div>
+        <div class="det-row"><span class="det-label">Insider</span><span class="det-val" style="color:var(--green)">5 buys / 0 sells</span></div>
+        <div class="det-row"><span class="det-label">IV Rank</span><span class="det-val">18% (cheap)</span></div>
+        <div class="cat-chips"><span class="cat-chip" style="background:rgba(248,113,113,.12);color:#f87171">BREAKOUT</span><span class="cat-chip">52WK HIGH</span></div>
+      </div>
+    </div>
+    <div class="reason-bar">
+      <strong>Decision:</strong> Score 75/100, RS 90, weekly &#10003;, R:R 3.0:1 + T1 catalyst [risk_on_choppy] | All 3 timeframes aligned &#10003;
+    </div>
+  </div>
+</div>
+
+<!-- WATCH -->
+<div class="section-hdr" style="margin-top:24px">
+  <span style="font-size:16px;color:var(--amber)">&#128065;</span>
+  <h2 style="color:var(--amber)">WATCH</h2>
+  <span class="cnt" style="background:rgba(245,158,11,.12);color:#fbbf24">5</span>
+  <span style="font-size:10px;color:var(--text-muted);margin-left:8px">Waiting for pullback, 4H confirmation, or score improvement</span>
+</div>
+
+<div class="sig sig-watch" onclick="this.classList.toggle('open')">
+  <div class="sig-main">
+    <div class="s-ticker">CGNX</div>
+    <div class="s-score sc-md">73</div>
+    <div class="s-info">
+      <div class="s-name">COGNEX · Industrials · Trend Continuation</div>
+      <div class="s-badges">
+        <span class="badge b-watch">WATCH</span>
+        <span class="badge b-t3">T3</span>
+        <span class="badge b-valid">VALID</span>
+        <span class="badge b-cat3">Cat T3</span>
+      </div>
+    </div>
+    <div class="s-price">
+      <div class="s-px">$53.72</div>
+      <div class="s-chg" style="color:var(--red)">-1.5%</div>
+    </div>
+    <div class="s-rr" style="color:var(--text-muted)">3.0:1</div>
+    <div class="s-rs">88</div>
+    <div class="s-stop" style="color:var(--text-muted)">$48.12</div>
+    <div class="s-tf">
+      <span class="tf tf-b">W&#10003;</span>
+      <span class="tf tf-b">D&#10003;</span>
+      <span class="tf tf-r">4H&#10007;</span>
+    </div>
+    <div class="s-earn">May 6 (13d)</div>
+    <div class="s-act"></div>
+  </div>
+  <div class="sig-detail">
+    <div class="reason-bar" style="background:rgba(251,191,36,.06);border-color:rgba(251,191,36,.15);color:#fbbf24">
+      <strong>Why WATCH:</strong> 4H bearish — momentum declining on intraday timeframe. Wait for 4H EMA8 to cross above EMA21 before entry.
+    </div>
+  </div>
+</div>
+
+<div class="sig sig-watch" onclick="this.classList.toggle('open')">
+  <div class="sig-main">
+    <div class="s-ticker">WDC</div>
+    <div class="s-score sc-md">69</div>
+    <div class="s-info">
+      <div class="s-name">WESTERN DIGITAL · Technology · 52wk Breakout</div>
+      <div class="s-badges">
+        <span class="badge b-watch">WATCH</span>
+        <span class="badge b-t3">T3</span>
+        <span class="badge b-fresh">FRESH</span>
+        <span class="badge b-cat1">Cat T1</span>
+        <span class="badge b-squeeze">BREAKOUT</span>
+      </div>
+    </div>
+    <div class="s-price">
+      <div class="s-px">$370.92</div>
+      <div class="s-chg" style="color:var(--green)">+3.5%</div>
+    </div>
+    <div class="s-rr" style="color:var(--text-muted)">3.0:1</div>
+    <div class="s-rs">92</div>
+    <div class="s-stop" style="color:var(--text-muted)">$348.00</div>
+    <div class="s-tf">
+      <span class="tf tf-b">W&#10003;</span>
+      <span class="tf tf-b">D&#10003;</span>
+      <span class="tf tf-b">4H&#10003;</span>
+    </div>
+    <div class="s-earn s-warn">Apr 28 (5d) !</div>
+    <div class="s-act"></div>
+  </div>
+  <div class="sig-detail">
+    <div class="reason-bar" style="background:rgba(248,113,113,.06);border-color:rgba(248,113,113,.15);color:#f87171">
+      <strong>Why WATCH:</strong> Earnings in 5 days (Apr 28) — blackout window active. All timeframes bullish, RS 92, Cat T1 BREAKOUT. Re-evaluate after earnings if price holds.
+    </div>
+  </div>
+</div>
+
+<!-- EXTENDED LEADERS -->
+<div class="section-hdr" style="margin-top:24px">
+  <span style="font-size:16px">&#128293;</span>
+  <h2 style="color:#f97316">EXTENDED LEADERS</h2>
+  <span class="cnt" style="background:rgba(249,115,22,.1);color:#f97316">87</span>
+  <span style="font-size:10px;color:var(--text-muted);margin-left:8px">Strong names too extended — watch for EMA21 pullback</span>
+</div>
+
+<div class="ext" style="border-left:3px solid var(--green)">
+  <div class="ext-main">
+    <div style="font-size:14px;font-weight:900">SLB</div>
+    <div class="s-score sc-md" style="width:28px;height:28px;font-size:11px">66</div>
+    <div style="font-size:12px;color:#60a5fa;text-align:center">78</div>
+    <div style="text-align:right;font-size:12px;font-family:monospace">$53.00</div>
+    <div style="text-align:right;font-size:11px;font-family:monospace;color:var(--text-muted)">EMA $51.20</div>
+    <div style="text-align:center;font-size:12px;font-weight:800;color:var(--green)">1.3 ATR</div>
+    <div style="font-size:10px;color:var(--text-muted)">$50.80 – $51.50</div>
+    <div style="text-align:center"><span class="ext-status" style="background:rgba(74,222,128,.12);color:#4ade80">READY</span></div>
+    <div style="font-size:10px;color:var(--text-muted)">VCP Breakout · Energy</div>
+  </div>
+</div>
+
+<div class="ext">
+  <div class="ext-main">
+    <div style="font-size:14px;font-weight:900">TWLO</div>
+    <div class="s-score sc-hi" style="width:28px;height:28px;font-size:11px">76</div>
+    <div style="font-size:12px;color:#60a5fa;text-align:center">85</div>
+    <div style="text-align:right;font-size:12px;font-family:monospace">$145.30</div>
+    <div style="text-align:right;font-size:11px;font-family:monospace;color:var(--text-muted)">EMA $138.00</div>
+    <div style="text-align:center;font-size:12px;font-weight:800;color:var(--amber)">2.8 ATR</div>
+    <div style="font-size:10px;color:var(--text-muted)">$137.50 – $139.00</div>
+    <div style="text-align:center"><span class="ext-status" style="background:rgba(251,191,36,.12);color:#fbbf24">Approaching</span></div>
+    <div style="font-size:10px;color:var(--text-muted)">VCP Breakout · Tech</div>
+  </div>
+</div>
+
+<div class="ext">
+  <div class="ext-main">
+    <div style="font-size:14px;font-weight:900">CSCO</div>
+    <div class="s-score sc-md" style="width:28px;height:28px;font-size:11px">71</div>
+    <div style="font-size:12px;color:#60a5fa;text-align:center">80</div>
+    <div style="text-align:right;font-size:12px;font-family:monospace">$90.00</div>
+    <div style="text-align:right;font-size:11px;font-family:monospace;color:var(--text-muted)">EMA $84.00</div>
+    <div style="text-align:center;font-size:12px;font-weight:800;color:var(--text-muted)">3.7 ATR</div>
+    <div style="font-size:10px;color:var(--text-muted)">$83.50 – $85.00</div>
+    <div style="text-align:center"><span class="ext-status" style="background:rgba(100,116,139,.1);color:#94a3b8">Wait</span></div>
+    <div style="font-size:10px;color:var(--text-muted)">Trend Cont. · Tech</div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>NVDA — Ticker Detail · Tabbed Classic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-0: oklch(13% 0.012 250);
+    --bg-1: oklch(16% 0.012 250);
+    --bg-2: oklch(19% 0.014 250);
+    --bg-3: oklch(23% 0.014 250);
+    --ink-0: oklch(96% 0.005 90);
+    --ink-1: oklch(82% 0.006 90);
+    --ink-2: oklch(62% 0.008 90);
+    --ink-3: oklch(42% 0.01 250);
+    --rule: oklch(28% 0.012 250);
+    --rule-2: oklch(34% 0.014 250);
+    --accent: oklch(78% 0.16 75);
+    --accent-2: oklch(76% 0.13 215);
+    --green: oklch(74% 0.16 145);
+    --red:   oklch(68% 0.22 28);
+    --grid: oklch(22% 0.012 250);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg-0); color: var(--ink-0);
+    font-family: 'Inter Tight', -apple-system, sans-serif; font-size: 13px;
+    -webkit-font-smoothing: antialiased; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  .num  { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+  .up { color: var(--green); } .down { color: var(--red); } .dim { color: var(--ink-2); } .dim2 { color: var(--ink-3); }
+  .lbl { font-family: 'JetBrains Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-2); }
+
+  /* head */
+  .head { display: grid; grid-template-columns: auto 1fr auto auto; gap: 18px; align-items: center;
+    padding: 14px 22px; border-bottom: 1px solid var(--rule); background: var(--bg-1); }
+  .head-back { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-2); padding: 5px 10px; border: 1px solid var(--rule); border-radius: 3px; cursor: pointer; }
+  .head-meta { display: flex; align-items: baseline; gap: 14px; }
+  .h-sym  { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }
+  .h-name { color: var(--ink-2); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .h-tags { display: flex; gap: 6px; margin-top: 4px; }
+  .tag { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; padding: 2px 7px; border: 1px solid var(--rule-2); border-radius: 3px; color: var(--ink-1); background: var(--bg-2); }
+  .tag.green { color: var(--green); border-color: color-mix(in oklch, var(--green) 40%, transparent); background: color-mix(in oklch, var(--green) 10%, transparent); }
+  .tag.amber { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 40%, transparent); background: color-mix(in oklch, var(--accent) 10%, transparent); }
+  .tag.blue  { color: var(--accent-2); border-color: color-mix(in oklch, var(--accent-2) 40%, transparent); background: color-mix(in oklch, var(--accent-2) 10%, transparent); }
+  .h-price-val { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .h-price-chg { font-family: 'JetBrains Mono', monospace; font-size: 12px; margin-top: 3px; }
+
+  /* tab strip */
+  .tabs { display: flex; gap: 0; padding: 0 22px; border-bottom: 1px solid var(--rule); background: var(--bg-1); align-items: stretch; }
+  .tab { padding: 10px 18px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-2); cursor: pointer;
+    border-bottom: 2px solid transparent; letter-spacing: 0.06em; background: none; border-left: none; border-right: none; border-top: none; }
+  .tab:hover { color: var(--ink-0); }
+  .tab.on { color: var(--ink-0); border-bottom-color: var(--accent); }
+  .tab-counter { color: var(--ink-3); margin-left: 6px; font-size: 10px; }
+
+  /* layout */
+  main { padding: 16px 22px 40px; }
+  .row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  .col { display: flex; flex-direction: column; gap: 16px; }
+  .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  .panel { background: var(--bg-1); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .panel-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--rule); }
+  .panel-title { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-1); }
+  .panel-meta  { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink-2); }
+  .panel-body { padding: 14px; }
+  .panel-body.np { padding: 0; }
+
+  /* chart */
+  .chart-toolbar { display: flex; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--rule); background: var(--bg-1); }
+  .chip { font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 3px 8px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); cursor: pointer; background: var(--bg-2); }
+  .chip.on { background: var(--bg-3); color: var(--ink-0); border-color: var(--rule-2); }
+
+  /* gauge */
+  .gauges { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; padding: 14px 8px; }
+  .gauge { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .gauge-svg { width: 64px; height: 64px; }
+  .gauge-lbl { font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.16em; color: var(--ink-2); text-transform: uppercase; }
+
+  /* sub-score row */
+  .sub { display: grid; grid-template-columns: 110px 60px 1fr 60px; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--rule); }
+  .sub:last-child { border-bottom: none; }
+  .sub-name { font-size: 12px; color: var(--ink-1); }
+  .sub-val  { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; text-align: right; }
+  .sub-bar  { height: 6px; background: var(--bg-3); border-radius: 3px; overflow: hidden; }
+  .sub-fill { height: 100%; }
+  .sub-pts  { font-family: 'JetBrains Mono', monospace; font-size: 11px; text-align: right; color: var(--ink-2); }
+
+  /* ruler */
+  .ruler-track { position: relative; height: 26px; border-radius: 4px; overflow: hidden; background: var(--bg-3); border: 1px solid var(--rule); }
+  .ruler-zone { position: absolute; top: 0; bottom: 0; }
+  .ruler-stop  { background: repeating-linear-gradient(45deg, color-mix(in oklch, var(--red) 18%, transparent) 0 6px, color-mix(in oklch, var(--red) 28%, transparent) 6px 12px); }
+  .ruler-entry { background: color-mix(in oklch, var(--green) 22%, transparent); border-left: 1px solid var(--green); border-right: 1px dashed var(--green); }
+  .ruler-runway { background: linear-gradient(90deg, color-mix(in oklch, var(--green) 8%, transparent), color-mix(in oklch, var(--accent-2) 14%, transparent)); }
+  .ruler-tick { position: absolute; top: -3px; bottom: -3px; width: 1px; }
+  .ruler-tick.t1 { background: var(--accent); }
+  .ruler-tick.t2 { background: var(--accent-2); }
+  .ruler-now { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink-0); }
+  .ruler-now::after { content: ""; position: absolute; top: -4px; left: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--ink-0); box-shadow: 0 0 12px var(--accent); }
+  .ruler-labels { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 8px; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+
+  /* trade plan box */
+  .plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .plan-grid .v { font-weight: 600; }
+
+  /* intel rows */
+  .intel-row { display: grid; grid-template-columns: 50px 1fr auto; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--rule); align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .intel-row:last-child { border-bottom: none; }
+  .intel-time { color: var(--ink-3); font-size: 10px; }
+  .intel-text { color: var(--ink-1); font-family: 'Inter Tight', sans-serif; font-size: 12px; line-height: 1.35; }
+  .intel-text b { color: var(--ink-0); font-weight: 600; }
+  .intel-tag { font-size: 9.5px; }
+  .intel-tag.up { color: var(--green); } .intel-tag.dn { color: var(--red); } .intel-tag.nu { color: var(--accent); }
+
+  /* fundamental table */
+  .ft { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; }
+  .ft th, .ft td { padding: 6px 10px; border-bottom: 1px solid var(--rule); text-align: right; font-variant-numeric: tabular-nums; }
+  .ft th:first-child, .ft td:first-child { text-align: left; color: var(--ink-2); }
+  .ft th { font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); font-weight: 500; }
+
+  /* SMC list */
+  .smc-row { display: grid; grid-template-columns: 90px 1fr auto; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--rule); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; align-items: center; }
+  .smc-row:last-child { border-bottom: none; }
+  .smc-tag { font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; padding: 2px 7px; border-radius: 3px; }
+
+  /* footer status */
+  .statusbar { display: flex; gap: 14px; align-items: center; padding: 6px 22px; height: 28px;
+    border-top: 1px solid var(--rule); background: var(--bg-1);
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--ink-2); }
+  kbd { padding: 1px 5px; border: 1px solid var(--rule-2); border-radius: 2px; color: var(--ink-1); font-size: 10px; }
+
+  /* utility */
+  .stripe { position: relative; }
+  .stripe::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg-0); }
+  ::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 5px; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="head stripe">
+  <button class="head-back">← BACK</button>
+  <div class="head-meta">
+    <div>
+      <div class="h-sym">NVDA</div>
+      <div class="h-name">NVIDIA Corp · Semiconductors · MCAP $4.7T</div>
+      <div class="h-tags">
+        <span class="tag amber">RANK #1</span>
+        <span class="tag amber">BULL FLAG · D1</span>
+        <span class="tag green">BUY ZONE</span>
+        <span class="tag blue">RVOL 1.4×</span>
+        <span class="tag amber">EARN +12d</span>
+      </div>
+    </div>
+  </div>
+  <div style="text-align:right">
+    <div class="h-price-val">$192.40</div>
+    <div class="h-price-chg up">▲ +1.84% &nbsp;·&nbsp; +$3.48</div>
+  </div>
+  <div style="display:flex;gap:8px">
+    <button class="chip">＋ ADD ALERT</button>
+    <button class="chip" style="color:var(--accent);border-color:color-mix(in oklch,var(--accent) 50%,transparent)">⊕ NEW PLAN</button>
+  </div>
+</header>
+
+<!-- TABS -->
+<nav class="tabs">
+  <button class="tab on">OVERVIEW</button>
+  <button class="tab">CHART+</button>
+  <button class="tab">TRADINGVIEW</button>
+  <button class="tab">FUND+ <span class="tab-counter">5 pillars</span></button>
+  <button class="tab">INTEL <span class="tab-counter">4 today</span></button>
+  <button class="tab">SMC</button>
+  <button class="tab">PLAN</button>
+</nav>
+
+<main>
+  <!-- ROW 1: chart + scores/plan -->
+  <div class="row" style="margin-bottom:16px">
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Price · 6mo · Daily</span>
+        <span class="panel-meta">CDL · MA20 · MA50 · MA200 · Ichimoku</span>
+      </div>
+      <div class="chart-toolbar">
+        <button class="chip">1D</button>
+        <button class="chip">1W</button>
+        <button class="chip on">1M</button>
+        <button class="chip">3M</button>
+        <button class="chip on">6M</button>
+        <button class="chip">YTD</button>
+        <button class="chip">1Y</button>
+        <span style="flex:1"></span>
+        <button class="chip">CDL</button>
+        <button class="chip on">LEVELS</button>
+        <button class="chip on">MA</button>
+        <button class="chip">VOL</button>
+        <button class="chip">RSI</button>
+      </div>
+      <div class="panel-body np" style="height:280px;position:relative">
+        <svg viewBox="0 0 720 280" preserveAspectRatio="none" style="width:100%;height:100%;display:block">
+          <!-- grid -->
+          <g stroke="var(--grid)" stroke-dasharray="2 4">
+            <line x1="0" x2="720" y1="56"  y2="56"/>
+            <line x1="0" x2="720" y1="112" y2="112"/>
+            <line x1="0" x2="720" y1="168" y2="168"/>
+            <line x1="0" x2="720" y1="224" y2="224"/>
+          </g>
+          <!-- candles (procedural-ish hand placed) -->
+          <g id="candles"></g>
+          <!-- level lines -->
+          <g font-family="JetBrains Mono" font-size="9" font-weight="600">
+            <!-- T2 -->
+            <line x1="0" x2="670" y1="40"  y2="40"  stroke="oklch(76% 0.13 215)" opacity="0.7"/>
+            <rect x="672" y="33" width="44" height="14" fill="oklch(76% 0.13 215)" opacity="0.18"/>
+            <text x="676" y="43" fill="oklch(76% 0.13 215)">T2 $224</text>
+            <!-- T1 -->
+            <line x1="0" x2="670" y1="92"  y2="92"  stroke="var(--accent)" opacity="0.7"/>
+            <rect x="672" y="85" width="44" height="14" fill="var(--accent)" opacity="0.18"/>
+            <text x="676" y="95" fill="var(--accent)">T1 $208</text>
+            <!-- ENTRY -->
+            <line x1="0" x2="670" y1="148" y2="148" stroke="var(--green)" opacity="0.7"/>
+            <rect x="672" y="141" width="44" height="14" fill="var(--green)" opacity="0.18"/>
+            <text x="676" y="151" fill="var(--green)">$194</text>
+            <line x1="0" x2="670" y1="170" y2="170" stroke="var(--green)" opacity="0.7" stroke-dasharray="3 3"/>
+            <rect x="672" y="163" width="44" height="14" fill="var(--green)" opacity="0.18"/>
+            <text x="676" y="173" fill="var(--green)">$189</text>
+            <!-- STOP -->
+            <line x1="0" x2="670" y1="216" y2="216" stroke="var(--red)" opacity="0.7"/>
+            <rect x="672" y="209" width="44" height="14" fill="var(--red)" opacity="0.18"/>
+            <text x="676" y="219" fill="var(--red)">$182</text>
+          </g>
+          <!-- current price marker -->
+          <line x1="0" x2="670" y1="158" y2="158" stroke="var(--ink-0)" stroke-dasharray="1 2" opacity="0.5"/>
+          <rect x="672" y="150" width="44" height="16" fill="var(--ink-0)"/>
+          <text x="676" y="161" fill="var(--bg-0)" font-family="JetBrains Mono" font-size="10" font-weight="700">192.40</text>
+        </svg>
+      </div>
+    </div>
+
+    <div class="col">
+      <!-- gauges -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">Composite Scores</span>
+          <span class="panel-meta">BAP 88 / 100</span>
+        </div>
+        <div class="panel-body np">
+          <div class="gauges" id="gauges"></div>
+        </div>
+      </div>
+
+      <!-- trade plan -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">Trade Plan</span>
+          <span class="panel-meta">R:R 1:2.6 / 1:4.5</span>
+        </div>
+        <div class="panel-body">
+          <!-- ruler -->
+          <div class="ruler-track" style="height:26px">
+            <div class="ruler-zone ruler-stop"   style="left:0;width:13%"></div>
+            <div class="ruler-zone ruler-entry"  style="left:25%;width:9%"></div>
+            <div class="ruler-zone ruler-runway" style="left:34%;width:66%"></div>
+            <span class="ruler-tick t1" style="left:60%"></span>
+            <span class="ruler-tick t2" style="left:89%"></span>
+            <span class="ruler-now" style="left:31%"></span>
+          </div>
+          <div class="ruler-labels">
+            <div><span class="lbl down">STOP</span><span class="num down" style="font-size:12px;font-weight:600">$182.00</span></div>
+            <div><span class="lbl up">ENTRY</span><span class="num up" style="font-size:12px;font-weight:600">$189–194</span></div>
+            <div><span class="lbl" style="color:var(--accent)">T1</span><span class="num" style="font-size:12px;font-weight:600;color:var(--accent)">$208.00</span></div>
+            <div><span class="lbl" style="color:var(--accent-2)">T2</span><span class="num" style="font-size:12px;font-weight:600;color:var(--accent-2)">$224.00</span></div>
+          </div>
+
+          <div class="plan-grid" style="margin-top:14px">
+            <div><div class="lbl">SETUP</div><span class="v">Bull flag · D1</span></div>
+            <div><div class="lbl">EARN</div><span class="v">+12d</span></div>
+            <div><div class="lbl">SIZE</div><span class="v" style="color:var(--accent)">142 sh</span></div>
+            <div><div class="lbl">NOTIONAL</div><span class="v">$26,838</span></div>
+            <div><div class="lbl">RISK / SHARE</div><span class="v down">$7.00</span></div>
+            <div><div class="lbl">RISK $</div><span class="v down">$1,000 (0.5%)</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 2: sub-scores · fundamentals · SMC -->
+  <div class="row-3" style="margin-bottom:16px">
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Technical Sub-Scores</span>
+        <span class="panel-meta">TECH 74 / 100</span>
+      </div>
+      <div class="panel-body" id="techsub"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Fundamental Pillars</span>
+        <span class="panel-meta">FUND 91 / 100</span>
+      </div>
+      <div class="panel-body" id="fundsub"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Smart Money Concepts</span>
+        <span class="panel-meta">SMC 68 / 100</span>
+      </div>
+      <div class="panel-body">
+        <div class="smc-row">
+          <span class="tag green smc-tag">BOS</span>
+          <span>Break of structure · D1 · 4 weeks ago</span>
+          <span class="num up">+14/20</span>
+        </div>
+        <div class="smc-row">
+          <span class="tag green smc-tag">OB</span>
+          <span>Demand order block · $185 zone</span>
+          <span class="num up">+16/20</span>
+        </div>
+        <div class="smc-row">
+          <span class="tag amber smc-tag">FVG</span>
+          <span>Fair value gap · $190–192 (filling)</span>
+          <span class="num" style="color:var(--accent)">+14/20</span>
+        </div>
+        <div class="smc-row">
+          <span class="tag blue smc-tag">LIQ</span>
+          <span>Liquidity sweep at $179 · stops grabbed</span>
+          <span class="num" style="color:var(--accent-2)">+12/20</span>
+        </div>
+        <div class="smc-row">
+          <span class="tag green smc-tag">CHOCH</span>
+          <span>Change of character → bullish bias</span>
+          <span class="num up">+12/20</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 3: fundamentals table · intel · key levels -->
+  <div class="row" style="margin-bottom:16px">
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Fundamentals · Quarterly</span>
+        <span class="panel-meta">Last 5 quarters · YoY</span>
+      </div>
+      <div class="panel-body np">
+        <table class="ft">
+          <thead><tr><th>Metric</th><th>Q1 '25</th><th>Q2 '25</th><th>Q3 '25</th><th>Q4 '25</th><th>Q1 '26 E</th></tr></thead>
+          <tbody>
+            <tr><td>Revenue ($B)</td><td>26.0</td><td>30.0</td><td>35.1</td><td>39.3</td><td class="up">42.5</td></tr>
+            <tr><td>Rev YoY %</td><td class="up">+262%</td><td class="up">+122%</td><td class="up">+94%</td><td class="up">+78%</td><td class="up">+64%</td></tr>
+            <tr><td>Gross Margin</td><td>78.4%</td><td>75.1%</td><td>74.6%</td><td>76.0%</td><td>76.5%</td></tr>
+            <tr><td>EPS ($)</td><td>0.61</td><td>0.68</td><td>0.81</td><td>0.89</td><td class="up">0.96</td></tr>
+            <tr><td>EPS Beat</td><td class="up">+9%</td><td class="up">+7%</td><td class="up">+11%</td><td class="up">+8%</td><td class="dim">—</td></tr>
+            <tr><td>Free Cash Flow ($B)</td><td>15.0</td><td>13.5</td><td>16.8</td><td>19.4</td><td class="up">22.1</td></tr>
+            <tr><td>Net Cash ($B)</td><td>26.0</td><td>30.4</td><td>34.8</td><td>38.1</td><td class="dim">42.0</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Intel · Today · NVDA</span>
+        <span class="panel-meta">4 items · sentiment colored</span>
+      </div>
+      <div class="panel-body" style="padding:4px 14px">
+        <div class="intel-row">
+          <span class="intel-time">13:42</span>
+          <span class="intel-text"><b>Citi</b> raises PT to $215 — cites datacenter capex acceleration & rack-scale platform demand</span>
+          <span class="intel-tag up">▲ BULL</span>
+        </div>
+        <div class="intel-row">
+          <span class="intel-time">11:30</span>
+          <span class="intel-text"><b>CPI</b> +2.4% YoY in line — risk-on bid across growth names; semis lead</span>
+          <span class="intel-tag up">▲ BULL</span>
+        </div>
+        <div class="intel-row">
+          <span class="intel-time">09:55</span>
+          <span class="intel-text"><b>CES</b> keynote details leak — new edge inference SKU expected at GTC</span>
+          <span class="intel-tag nu">◆ NEUT</span>
+        </div>
+        <div class="intel-row">
+          <span class="intel-time">08:14</span>
+          <span class="intel-text"><b>TSMC</b> capex raised to $42B — bullish for NVDA's CoWoS supply</span>
+          <span class="intel-tag up">▲ BULL</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 4: key levels + journal -->
+  <div class="row">
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Key Levels</span>
+        <span class="panel-meta">Support · Resistance · Volatility</span>
+      </div>
+      <div class="panel-body np">
+        <table class="ft">
+          <thead><tr><th>Level</th><th>Price</th><th>Δ to NOW</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>52-Wk High</td><td>$224.10</td><td class="up">+16.5%</td><td>RES</td><td class="dim">Tested 2x · failed</td></tr>
+            <tr><td>T2 Target</td><td class="num" style="color:var(--accent-2)">$224.00</td><td class="up">+16.4%</td><td>TGT</td><td class="dim">Measured move from base</td></tr>
+            <tr><td>T1 Target</td><td class="num" style="color:var(--accent)">$208.00</td><td class="up">+8.1%</td><td>TGT</td><td class="dim">Prior swing high</td></tr>
+            <tr><td>20-day MA</td><td>$194.20</td><td class="up">+0.9%</td><td>SUP</td><td class="dim">Slope rising</td></tr>
+            <tr><td>50-day MA</td><td>$188.40</td><td class="down">-2.1%</td><td>SUP</td><td class="dim">Confluence with entry</td></tr>
+            <tr><td>200-day MA</td><td>$162.80</td><td class="down">-15.4%</td><td>SUP</td><td class="dim">Long-term trend</td></tr>
+            <tr><td>Stop</td><td class="num down">$182.00</td><td class="down">-5.4%</td><td>STP</td><td class="dim">Below 50MA + OB</td></tr>
+            <tr><td>52-Wk Low</td><td>$108.20</td><td class="down">-43.8%</td><td>SUP</td><td class="dim">Aug '25 capitulation</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Journal</span>
+        <span class="panel-meta">2 entries · NVDA</span>
+      </div>
+      <div class="panel-body" style="font-size:13px;line-height:1.55">
+        <div style="padding:10px 0;border-bottom:1px solid var(--rule)">
+          <div class="lbl" style="margin-bottom:4px">2026-04-25 · 09:14</div>
+          <div>"Setup looks clean. Tight flag, 50MA support, RVOL building. Worried about earnings 12d out — may scale aggressively at T1 first. Watching for daily close above $192 to trigger."</div>
+        </div>
+        <div style="padding:10px 0">
+          <div class="lbl" style="margin-bottom:4px">2026-04-22 · 16:02</div>
+          <div>"Added to watchlist after BOS confirmation. Target zone $189–194 if pullback materializes. Position sizing pre-set at 142sh / 0.5% risk."</div>
+        </div>
+        <div style="padding:10px 0;border-top:1px solid var(--rule);margin-top:6px">
+          <textarea placeholder="New journal entry..." style="width:100%;min-height:60px;background:var(--bg-2);border:1px solid var(--rule);border-radius:4px;color:var(--ink-0);padding:8px;font-family:'JetBrains Mono',monospace;font-size:11.5px;resize:vertical"></textarea>
+          <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="chip" style="color:var(--accent);border-color:color-mix(in oklch,var(--accent) 50%, transparent)">SAVE ENTRY</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="statusbar">
+  <span>● <span style="color:var(--green)">LIVE</span></span>
+  <span>NVDA · last tick 14:00:12 ET</span>
+  <span style="flex:1"></span>
+  <span><kbd>←→</kbd> walk tabs</span>
+  <span><kbd>1-7</kbd> jump tab</span>
+  <span><kbd>P</kbd> add to plan</span>
+  <span><kbd>esc</kbd> back</span>
+</footer>
+
+<script>
+/* ─── candle generator (procedural) ─── */
+(function(){
+  const svg = document.getElementById('candles');
+  if (!svg) return;
+  let close = 168, seed = 7;
+  const out = [];
+  for (let i = 0; i < 80; i++) {
+    seed = (seed * 9301 + 49297) % 233280;
+    const r = (seed / 233280) - 0.45;
+    const open = close;
+    const wick = 1.4 + Math.abs(r) * 2.8;
+    const body = r * 2.8 + 0.12;
+    close = open + body;
+    const high = Math.max(open, close) + wick * Math.random();
+    const low  = Math.min(open, close) - wick * Math.random();
+    out.push({ open, high, low, close });
+  }
+  // calibrate so last close = 192.4
+  const last = out[out.length - 1].close;
+  const offset = 192.4 - last;
+  out.forEach(c => { c.open += offset; c.high += offset; c.low += offset; c.close += offset; });
+  // y mapping: $228 top → y=20, $172 bottom → y=240
+  const yMin = 172, yMax = 228;
+  const yScale = v => 20 + ((yMax - v) / (yMax - yMin)) * 220;
+  const cw = 8, x0 = 6;
+  let html = '';
+  out.forEach((c, i) => {
+    const x = x0 + i * cw + cw / 2;
+    const yo = yScale(c.open), yc = yScale(c.close), yh = yScale(c.high), yl = yScale(c.low);
+    const up = c.close >= c.open;
+    const col = up ? 'var(--green)' : 'var(--red)';
+    html += `<line x1="${x}" x2="${x}" y1="${yh.toFixed(1)}" y2="${yl.toFixed(1)}" stroke="${col}" stroke-width="1"/>`;
+    html += `<rect x="${(x - 2.6).toFixed(1)}" y="${Math.min(yo,yc).toFixed(1)}" width="5.2" height="${Math.max(1, Math.abs(yc-yo)).toFixed(1)}" fill="${col}" fill-opacity="${up?0.85:1}"/>`;
+  });
+  svg.innerHTML = html;
+})();
+
+/* ─── gauges ─── */
+(function(){
+  const data = [['BAP',88],['TECH',74],['FUND',91],['SMC',68],['INTEL',82]];
+  const target = document.getElementById('gauges');
+  if (!target) return;
+  const arc = (start, end, r, c) => {
+    const sr = (start - 90) * Math.PI / 180, er = (end - 90) * Math.PI / 180;
+    const x1 = c + r * Math.cos(sr), y1 = c + r * Math.sin(sr);
+    const x2 = c + r * Math.cos(er), y2 = c + r * Math.sin(er);
+    const large = Math.abs(end - start) > 180 ? 1 : 0;
+    return `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+  };
+  let html = '';
+  data.forEach(([lbl, v]) => {
+    const valEnd = -130 + (v / 100) * 260;
+    const col = v >= 75 ? 'var(--green)' : v >= 50 ? 'var(--accent)' : 'var(--red)';
+    html += `
+      <div class="gauge">
+        <svg class="gauge-svg" viewBox="0 0 64 64">
+          <path d="${arc(-130, 130, 27, 32)}" fill="none" stroke="var(--bg-3)" stroke-width="4" stroke-linecap="round"/>
+          <path d="${arc(-130, valEnd, 27, 32)}" fill="none" stroke="${col}" stroke-width="4" stroke-linecap="round"/>
+          <text x="32" y="36" text-anchor="middle" font-size="18" font-weight="700" font-family="JetBrains Mono" fill="${col}">${v}</text>
+        </svg>
+        <span class="gauge-lbl">${lbl}</span>
+      </div>`;
+  });
+  target.innerHTML = html;
+})();
+
+/* ─── sub-score lists ─── */
+(function(){
+  function render(id, items) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = items.map(([name, val, pts, max]) => {
+      const pct = (pts / max) * 100;
+      const c = pct >= 75 ? 'var(--green)' : pct >= 50 ? 'var(--accent)' : 'var(--red)';
+      return `<div class="sub">
+        <span class="sub-name">${name}</span>
+        <span class="sub-val">${val}</span>
+        <div class="sub-bar"><div class="sub-fill" style="width:${pct}%;background:${c}"></div></div>
+        <span class="sub-pts" style="color:${c}">${pts}/${max}</span>
+      </div>`;
+    }).join('');
+  }
+  render('techsub', [
+    ['Trend',         'Stage 2',          18, 20],
+    ['Momentum',      '+11.4 / 20D',      14, 20],
+    ['Volume',        '1.4× RVOL',        18, 20],
+    ['Pattern',       'Bull flag · D1',   14, 20],
+    ['Rel. Strength', '+8 vs SPX',        15, 20],
+  ]);
+  render('fundsub', [
+    ['Growth',        '+82% YoY rev',     46, 50],
+    ['Profitability', '76% gross',        44, 50],
+    ['Quality',       '42% ROIC',         43, 50],
+    ['Valuation',     '42x fwd',          28, 50],
+    ['Momentum',      '8/8 beats',        48, 50],
+  ]);
+})();
+
+/* ─── tabs (visual only) ─── */
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('on'));
+  t.classList.add('on');
+}));
+</script>
+</body>
+</html>

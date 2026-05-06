@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trades Tab Prototype</title>
+<style>
+  :root {
+    --bg: #0f1729; --surface: #1a2332; --surface-alt: #1e293b;
+    --border: #2a3a4e; --text: #e2e8f0; --text-muted: #64748b;
+    --primary: #3b82f6; --green: #4ade80; --amber: #fbbf24; --red: #f87171;
+    --purple: #a78bfa;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; padding:20px; }
+
+  /* Regime Bar */
+  .regime-bar {
+    display:flex; align-items:center; gap:16px; padding:10px 20px;
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    margin-bottom:20px; flex-wrap:wrap;
+  }
+  .regime-pill {
+    padding:4px 12px; border-radius:20px; font-size:11px; font-weight:800;
+    background:rgba(74,222,128,.12); color:#4ade80; border:1px solid rgba(74,222,128,.3);
+  }
+  .regime-stat { font-size:12px; color:var(--text-muted); }
+  .regime-stat b { color:var(--text); font-weight:800; }
+
+  /* Section Header */
+  .section-hdr {
+    display:flex; align-items:center; gap:10px; margin:20px 0 12px 0;
+  }
+  .section-hdr h2 { font-size:15px; font-weight:800; }
+  .section-count {
+    font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px;
+  }
+
+  /* Tile Grid */
+  .tile-grid {
+    display:grid; grid-template-columns:repeat(5, 1fr); gap:12px;
+  }
+  @media (max-width:1200px) { .tile-grid { grid-template-columns:repeat(3,1fr); } }
+  @media (max-width:768px) { .tile-grid { grid-template-columns:1fr; } }
+
+  /* Tile Card */
+  .tile {
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:16px; cursor:pointer; transition:all .2s;
+    position:relative; overflow:hidden;
+  }
+  .tile:hover { border-color:var(--primary); transform:translateY(-2px); box-shadow:0 8px 24px rgba(0,0,0,.3); }
+  .tile-buy { border-left:3px solid var(--green); }
+  .tile-watch { border-left:3px solid var(--amber); }
+  .tile-short { border-left:3px solid var(--purple); }
+
+  /* Tile Header */
+  .tile-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  .tile-ticker { font-size:18px; font-weight:900; color:var(--text); }
+  .tile-score {
+    font-size:14px; font-weight:900; width:36px; height:36px;
+    display:flex; align-items:center; justify-content:center;
+    border-radius:8px; border:2px solid;
+  }
+  .score-high { color:var(--green); border-color:var(--green); background:rgba(74,222,128,.08); }
+  .score-mid { color:var(--amber); border-color:var(--amber); background:rgba(251,191,36,.08); }
+  .score-low { color:var(--red); border-color:var(--red); background:rgba(248,113,113,.08); }
+
+  /* Tile Body */
+  .tile-price { font-size:20px; font-weight:800; margin-bottom:4px; }
+  .tile-change { font-size:12px; font-weight:700; margin-bottom:10px; }
+  .tile-meta { display:flex; flex-direction:column; gap:6px; }
+  .tile-row { display:flex; justify-content:space-between; align-items:center; font-size:11px; }
+  .tile-label { color:var(--text-muted); font-weight:600; }
+  .tile-value { font-weight:700; }
+
+  /* Chips */
+  .chip {
+    display:inline-flex; align-items:center; gap:4px; padding:2px 8px;
+    border-radius:6px; font-size:10px; font-weight:700;
+  }
+  .chip-bull { background:rgba(74,222,128,.12); color:#4ade80; }
+  .chip-neutral { background:rgba(251,191,36,.1); color:#fbbf24; }
+  .chip-bear { background:rgba(248,113,113,.1); color:#f87171; }
+
+  /* Verdict Badge */
+  .verdict-badge {
+    font-size:10px; font-weight:800; padding:3px 10px; border-radius:20px;
+    text-transform:uppercase; letter-spacing:.5px;
+  }
+  .vb-buy { background:rgba(34,197,94,.15); color:#4ade80; border:1px solid rgba(34,197,94,.3); }
+  .vb-watch { background:rgba(245,158,11,.12); color:#fbbf24; border:1px solid rgba(245,158,11,.3); }
+
+  /* Action Button */
+  .tile-action {
+    margin-top:12px; width:100%; padding:7px; border-radius:8px;
+    font-size:11px; font-weight:700; cursor:pointer; border:1px solid;
+    transition:all .15s; text-align:center;
+  }
+  .btn-long { background:rgba(34,197,94,.1); color:#4ade80; border-color:rgba(34,197,94,.3); }
+  .btn-long:hover { background:rgba(34,197,94,.25); }
+
+  /* Extended Leaders Compact */
+  .ext-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }
+  @media (max-width:1200px) { .ext-grid { grid-template-columns:repeat(3,1fr); } }
+  .ext-chip {
+    background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; cursor:pointer; transition:border-color .2s;
+  }
+  .ext-chip:hover { border-color:var(--primary); }
+  .ext-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+  .ext-ticker { font-size:13px; font-weight:800; }
+  .ext-score { font-size:11px; font-weight:700; }
+  .ext-detail { font-size:10px; color:var(--text-muted); }
+  .ext-status { font-size:9px; font-weight:700; padding:1px 6px; border-radius:4px; margin-top:4px; display:inline-block; }
+</style>
+</head>
+<body>
+
+<!-- REGIME BAR -->
+<div class="regime-bar">
+  <span class="regime-pill">RISK-ON CHOPPY</span>
+  <span class="regime-stat"><b>SPY $704.08</b></span>
+  <span class="regime-stat">VIX <b>19.1</b></span>
+  <span class="regime-stat">Breadth <b>70%</b></span>
+  <span class="regime-stat">Dist <b>5</b></span>
+  <span class="regime-stat" style="color:#4ade80">1M <b>+7.4%</b></span>
+  <span style="flex:1"></span>
+  <span class="regime-stat">2026-04-23 06:53</span>
+</div>
+
+<!-- BUY SIGNALS -->
+<div class="section-hdr">
+  <span style="font-size:18px">&#9650;</span>
+  <h2 style="color:var(--green)">BUY SIGNALS</h2>
+  <span class="section-count" style="background:rgba(34,197,94,.15);color:#4ade80">5</span>
+  <span style="font-size:11px;color:var(--text-muted);margin-left:8px">All 3 timeframes aligned bullish</span>
+</div>
+
+<div class="tile-grid">
+  <!-- Tile 1 -->
+  <div class="tile tile-buy">
+    <div class="tile-top">
+      <div>
+        <span class="tile-ticker">ESI</span>
+        <span class="verdict-badge vb-buy" style="margin-left:8px">BUY</span>
+      </div>
+      <div class="tile-score score-high">76</div>
+    </div>
+    <div class="tile-price">$38.23</div>
+    <div class="tile-change" style="color:#4ade80">+1.2% <span style="font-size:9px;color:#64748b">&#9679; LIVE</span></div>
+    <div class="tile-meta">
+      <div class="tile-row"><span class="tile-label">Setup</span><span class="tile-value">Trend Continuation</span></div>
+      <div class="tile-row"><span class="tile-label">R:R</span><span class="tile-value" style="color:#4ade80">3.0:1</span></div>
+      <div class="tile-row"><span class="tile-label">RS Rank</span><span class="tile-value" style="color:#60a5fa">85</span></div>
+      <div class="tile-row"><span class="tile-label">Stop</span><span class="tile-value" style="color:#f87171">$35.20</span></div>
+      <div class="tile-row">
+        <span class="tile-label">Timeframes</span>
+        <span><span class="chip chip-bull">W &#10003;</span> <span class="chip chip-bull">D &#10003;</span> <span class="chip chip-bull">4H &#10003;</span></span>
+      </div>
+      <div class="tile-row"><span class="tile-label">Earnings</span><span class="tile-value" style="color:#64748b">Jun 5 (43d)</span></div>
+    </div>
+    <button class="tile-action btn-long">+ Long Position</button>
+  </div>
+
+  <!-- Tile 2 -->
+  <div class="tile tile-buy">
+    <div class="tile-top">
+      <div>
+        <span class="tile-ticker">RNG</span>
+        <span class="verdict-badge vb-buy" style="margin-left:8px">BUY</span>
+      </div>
+      <div class="tile-score score-high">76</div>
+    </div>
+    <div class="tile-price">$41.09</div>
+    <div class="tile-change" style="color:#f87171">-0.3% <span style="font-size:9px;color:#64748b">&#9679; LIVE</span></div>
+    <div class="tile-meta">
+      <div class="tile-row"><span class="tile-label">Setup</span><span class="tile-value">Trend Continuation</span></div>
+      <div class="tile-row"><span class="tile-label">R:R</span><span class="tile-value" style="color:#4ade80">3.0:1</span></div>
+      <div class="tile-row"><span class="tile-label">RS Rank</span><span class="tile-value" style="color:#60a5fa">82</span></div>
+      <div class="tile-row"><span class="tile-label">Stop</span><span class="tile-value" style="color:#f87171">$38.50</span></div>
+      <div class="tile-row">
+        <span class="tile-label">Timeframes</span>
+        <span><span class="chip chip-bull">W &#10003;</span> <span class="chip chip-bull">D &#10003;</span> <span class="chip chip-neutral">4H &#8212;</span></span>
+      </div>
+      <div class="tile-row"><span class="tile-label">Earnings</span><span class="tile-value" style="color:#64748b">May 15 (22d)</span></div>
+    </div>
+    <button class="tile-action btn-long">+ Long Position</button>
+  </div>
+
+  <!-- Tile 3 -->
+  <div class="tile tile-buy">
+    <div class="tile-top">
+      <div>
+        <span class="tile-ticker">Q</span>
+        <span class="verdict-badge vb-buy" style="margin-left:8px">BUY</span>
+      </div>
+      <div class="tile-score score-mid">75</div>
+    </div>
+    <div class="tile-price">$139.56</div>
+    <div class="tile-change" style="color:#4ade80">+0.8% <span style="font-size:9px;color:#64748b">&#9679; LIVE</span></div>
+    <div class="tile-meta">
+      <div class="tile-row"><span class="tile-label">Setup</span><span class="tile-value">52wk Breakout</span></div>
+      <div class="tile-row"><span class="tile-label">R:R</span><span class="tile-value" style="color:#4ade80">3.0:1</span></div>
+      <div class="tile-row"><span class="tile-label">RS Rank</span><span class="tile-value" style="color:#60a5fa">90</span></div>
+      <div class="tile-row"><span class="tile-label">Stop</span><span class="tile-value" style="color:#f87171">$130.40</span></div>
+      <div class="tile-row">
+        <span class="tile-label">Timeframes</span>
+        <span><span class="chip chip-bull">W &#10003;</span> <span class="chip chip-bull">D &#10003;</span> <span class="chip chip-bull">4H &#10003;</span></span>
+      </div>
+      <div class="tile-row"><span class="tile-label">Earnings</span><span class="tile-value" style="color:#64748b">May 8 (15d)</span></div>
+    </div>
+    <button class="tile-action btn-long">+ Long Position</button>
+  </div>
+
+  <!-- Tile 4 -->
+  <div class="tile tile-buy">
+    <div class="tile-top">
+      <div>
+        <span class="tile-ticker">BALL</span>
+        <span class="verdict-badge vb-buy" style="margin-left:8px">BUY</span>
+      </div>
+      <div class="tile-score score-mid">75</div>
+    </div>
+    <div class="tile-price">$63.58</div>
+    <div class="tile-change" style="color:#4ade80">+0.2% <span style="font-size:9px;color:#64748b">&#9679; LIVE</span></div>
+    <div class="tile-meta">
+      <div class="tile-row"><span class="tile-label">Setup</span><span class="tile-value">EMA21 Pullback</span></div>
+      <div class="tile-row"><span class="tile-label">R:R</span><span class="tile-value" style="color:#4ade80">3.0:1</span></div>
+      <div class="tile-row"><span class="tile-label">RS Rank</span><span class="tile-value" style="color:#60a5fa">78</span></div>
+      <div class="tile-row"><span class="tile-label">Stop</span><span class="tile-value" style="color:#f87171">$59.80</span></div>
+      <div class="tile-row">
+        <span class="tile-label">Timeframes</span>
+        <span><span class="chip chip-bull">W &#10003;</span> <span class="chip chip-bull">D &#10003;</span> <span class="chip chip-bull">4H &#10003;</span></span>
+      </div>
+      <div class="tile-row"><span class="tile-label">Earnings</span><span class="tile-value" style="color:#fbbf24">May 1 (8d)</span></div>
+    </div>
+    <button class="tile-action btn-long">+ Long Position</button>
+  </div>
+
+  <!-- Tile 5 -->
+  <div class="tile tile-buy">
+    <div class="tile-top">
+      <div>
+        <span class="tile-ticker">ST</span>
+        <span class="verdict-badge vb-buy" style="margin-left:8px">BUY</span>
+      </div>
+      <div class="tile-score score-mid">75</div>
+    </div>
+    <div class="tile-price">$40.39</div>
+    <div class="tile-change" style="color:#f87171">-0.5% <span style="font-size:9px;color:#64748b">&#9679; LIVE</span></div>
+    <div class="tile-meta">
+      <div class="tile-row"><span class="tile-label">Setup</span><span class="tile-value">Trend Continuation</span></div>
+      <div class="tile-row"><span class="tile-label">R:R</span><span class="tile-value" style="color:#4ade80">3.0:1</span></div>
+      <div class="tile-row"><span class="tile-label">RS Rank</span><span class="tile-value" style="color:#60a5fa">80</span></div>
+      <div class="tile-row"><span class="tile-label">Stop</span><span class="tile-value" style="color:#f87171">$37.60</span></div>
+      <div class="tile-row">
+        <span class="tile-label">Timeframes</span>
+        <span><span class="chip chip-bull">W &#10003;</span> <span class="chip chip-bull">D &#10003;</span> <span class="chip chip-bear">4H &#10007;</span></span>
+      </div>
+      <div class="tile-row"><span class="tile-label">Earnings</span><span class="tile-value" style="color:#64748b">May 20 (27d)</span></div>
+    </div>
+    <button class="tile-action btn-long">+ Long Position</button>
+  </div>
+</div>
+
+<!-- WATCH SIGNALS -->
+<div class="section-hdr" style="margin-top:28px">
+  <span style="font-size:18px">&#128065;</span>
+  <h2 style="color:var(--amber)">WATCH</h2>
+  <span class="section-count" style="background:rgba(245,158,11,.12);color:#fbbf24">5</span>
+  <span style="font-size:11px;color:var(--text-muted);margin-left:8px">Waiting for pullback or 4H confirmation</span>
+</div>
+
+<div class="tile-grid">
+  <div class="tile tile-watch">
+    <div class="tile-top">
+      <div><span class="tile-ticker">CGNX</span> <span class="verdict-badge vb-watch" style="margin-left:6px">WATCH</span></div>
+      <div class="tile-score score-mid">73</div>
+    </div>
+    <div class="tile-price">$53.72</div>
+    <div class="tile-change" style="color:#f87171">-1.5%</div>
+    <div class="tile-meta">
+      <div class="tile-row"><span class="tile-label">Setup</span><span class="tile-value">Trend Continuation</span></div>
+      <div class="tile-row"><span class="tile-label">Reason</span><span class="tile-value" style="color:#fbbf24;font-size:10px">4H bearish — wait</span></div>
+      <div class="tile-row">
+        <span class="tile-label">Timeframes</span>
+        <span><span class="chip chip-bull">W &#10003;</span> <span class="chip chip-bull">D &#10003;</span> <span class="chip chip-bear">4H &#10007;</span></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="tile tile-watch">
+    <div class="tile-top">
+      <div><span class="tile-ticker">VNOM</span> <span class="verdict-badge vb-watch" style="margin-left:6px">WATCH</span></div>
+      <div class="tile-score score-mid">74</div>
+    </div>
+    <div class="tile-price">$47.14</div>
+    <div class="tile-change" style="color:#4ade80">+0.4%</div>
+    <div class="tile-meta">
+      <div class="tile-row"><span class="tile-label">Setup</span><span class="tile-value">EMA21 Pullback</span></div>
+      <div class="tile-row"><span class="tile-label">Reason</span><span class="tile-value" style="color:#fbbf24;font-size:10px">Score 74 < 78 bar</span></div>
+      <div class="tile-row">
+        <span class="tile-label">Timeframes</span>
+        <span><span class="chip chip-bull">W &#10003;</span> <span class="chip chip-bull">D &#10003;</span> <span class="chip chip-bull">4H &#10003;</span></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="tile tile-watch">
+    <div class="tile-top">
+      <div><span class="tile-ticker">FTNT</span> <span class="verdict-badge vb-watch" style="margin-left:6px">WATCH</span></div>
+      <div class="tile-score score-mid">71</div>
+    </div>
+    <div class="tile-price">$85.26</div>
+    <div class="tile-change" style="color:#4ade80">+0.9%</div>
+    <div class="tile-meta">
+      <div class="tile-row"><span class="tile-label">Setup</span><span class="tile-value">Squeeze Expansion</span></div>
+      <div class="tile-row"><span class="tile-label">Reason</span><span class="tile-value" style="color:#fbbf24;font-size:10px">Entry quality VALID</span></div>
+      <div class="tile-row">
+        <span class="tile-label">Timeframes</span>
+        <span><span class="chip chip-bull">W &#10003;</span> <span class="chip chip-bull">D &#10003;</span> <span class="chip chip-neutral">4H &#8212;</span></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="tile tile-watch">
+    <div class="tile-top">
+      <div><span class="tile-ticker">ACHC</span> <span class="verdict-badge vb-watch" style="margin-left:6px">WATCH</span></div>
+      <div class="tile-score score-mid">70</div>
+    </div>
+    <div class="tile-price">$27.24</div>
+    <div class="tile-change" style="color:#f87171">-0.8%</div>
+    <div class="tile-meta">
+      <div class="tile-row"><span class="tile-label">Setup</span><span class="tile-value">Trend Continuation</span></div>
+      <div class="tile-row"><span class="tile-label">Reason</span><span class="tile-value" style="color:#fbbf24;font-size:10px">RS 72 < 80 bar</span></div>
+      <div class="tile-row">
+        <span class="tile-label">Timeframes</span>
+        <span><span class="chip chip-bull">W &#10003;</span> <span class="chip chip-neutral">D &#8212;</span> <span class="chip chip-bear">4H &#10007;</span></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="tile tile-watch">
+    <div class="tile-top">
+      <div><span class="tile-ticker">WDC</span> <span class="verdict-badge vb-watch" style="margin-left:6px">WATCH</span></div>
+      <div class="tile-score score-mid">69</div>
+    </div>
+    <div class="tile-price">$370.92</div>
+    <div class="tile-change" style="color:#4ade80">+3.5%</div>
+    <div class="tile-meta">
+      <div class="tile-row"><span class="tile-label">Setup</span><span class="tile-value">52wk Breakout</span></div>
+      <div class="tile-row"><span class="tile-label">Reason</span><span class="tile-value" style="color:#fbbf24;font-size:10px">Earnings in 5d</span></div>
+      <div class="tile-row">
+        <span class="tile-label">Timeframes</span>
+        <span><span class="chip chip-bull">W &#10003;</span> <span class="chip chip-bull">D &#10003;</span> <span class="chip chip-bull">4H &#10003;</span></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- EXTENDED LEADERS -->
+<div class="section-hdr" style="margin-top:28px">
+  <span style="font-size:18px">&#128293;</span>
+  <h2 style="color:#f97316">EXTENDED LEADERS</h2>
+  <span class="section-count" style="background:rgba(249,115,22,.12);color:#f97316">87</span>
+  <span style="font-size:11px;color:var(--text-muted);margin-left:8px">Quality stocks too extended — watch for pullback to EMA21</span>
+</div>
+
+<div class="ext-grid">
+  <div class="ext-chip">
+    <div class="ext-top"><span class="ext-ticker">TWLO</span><span class="ext-score" style="color:var(--green)">76</span></div>
+    <div class="ext-detail">$145 &rarr; EMA21 $138</div>
+    <div class="ext-detail">2.8 ATR above</div>
+    <span class="ext-status" style="background:rgba(251,191,36,.15);color:#fbbf24">Approaching</span>
+  </div>
+  <div class="ext-chip">
+    <div class="ext-top"><span class="ext-ticker">CSCO</span><span class="ext-score" style="color:var(--amber)">71</span></div>
+    <div class="ext-detail">$90 &rarr; EMA21 $84</div>
+    <div class="ext-detail">3.7 ATR above</div>
+    <span class="ext-status" style="background:rgba(100,116,139,.15);color:#94a3b8">Wait</span>
+  </div>
+  <div class="ext-chip">
+    <div class="ext-top"><span class="ext-ticker">NVT</span><span class="ext-score" style="color:var(--amber)">71</span></div>
+    <div class="ext-detail">$137 &rarr; EMA21 $130</div>
+    <div class="ext-detail">2.6 ATR above</div>
+    <span class="ext-status" style="background:rgba(251,191,36,.15);color:#fbbf24">Approaching</span>
+  </div>
+  <div class="ext-chip">
+    <div class="ext-top"><span class="ext-ticker">MU</span><span class="ext-score" style="color:var(--amber)">68</span></div>
+    <div class="ext-detail">$460 &rarr; EMA21 $440</div>
+    <div class="ext-detail">3.1 ATR above</div>
+    <span class="ext-status" style="background:rgba(100,116,139,.15);color:#94a3b8">Wait</span>
+  </div>
+  <div class="ext-chip">
+    <div class="ext-top"><span class="ext-ticker">MRVL</span><span class="ext-score" style="color:var(--amber)">70</span></div>
+    <div class="ext-detail">$268 &rarr; EMA21 $252</div>
+    <div class="ext-detail">3.3 ATR above</div>
+    <span class="ext-status" style="background:rgba(100,116,139,.15);color:#94a3b8">Wait</span>
+  </div>
+  <div class="ext-chip" style="border-color:rgba(74,222,128,.3)">
+    <div class="ext-top"><span class="ext-ticker">SLB</span><span class="ext-score" style="color:var(--amber)">66</span></div>
+    <div class="ext-detail">$53 &rarr; EMA21 $51</div>
+    <div class="ext-detail">1.3 ATR above</div>
+    <span class="ext-status" style="background:rgba(74,222,128,.15);color:#4ade80">READY</span>
+  </div>
+</div>
+
+</body>
+</html>

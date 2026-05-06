@@ -1,0 +1,774 @@
+"""
+EODHD client — single entry point for all EODHD API calls.
+
+Replaces Polygon, Schwab data, Finnhub, FMP, Finviz, yfinance fallbacks.
+All adapter functions in data_fetcher.py route through this module.
+
+Key mode:
+  - EODHD_API_KEY env var → real key (recommended)
+  - missing                → falls back to public demo key (AAPL.US/MSFT.US/AMZN.US only)
+
+Symbol convention (EODHD requires suffix):
+  AAPL    → AAPL.US
+  BRK-B   → BRK-B.US      (NOT BRK.B; EODHD uses dash)
+  VIX     → VIX.INDX
+  BTC     → BTC-USD.CC    (crypto)
+  EURUSD  → EURUSD.FOREX
+
+Use to_eodhd_symbol() — never hard-code suffixes at call sites.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import threading
+import time
+from collections import deque
+from pathlib import Path
+from typing import Any
+
+import requests
+
+log = logging.getLogger("swingtrade.eodhd")
+
+# ── Config ────────────────────────────────────────────────────────────────────
+BASE_URL = "https://eodhd.com/api"
+DEMO_KEY = "OeAFFmMliFG5orCUuwAKQ8l4WWFQ67YX"  # public demo, AAPL/MSFT/AMZN only
+DEFAULT_TIMEOUT = 20  # seconds per HTTP call
+
+# All-In-One plan limits: 100,000 calls/day, 1,000 calls/min.
+# Plus an undocumented per-second burst cap that triggers 429s when many threads
+# fire concurrently. Keep margins: 14/sec, 800/min, 90,000/day.
+_RATE_PER_SEC = 14
+_RATE_PER_MIN = 800
+_RATE_PER_DAY = 90_000
+
+BASE_DIR = Path(__file__).resolve().parent
+_CACHE_DIR = BASE_DIR / "cache" / "eodhd"
+_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _load_api_key() -> str:
+    """Read EODHD_API_KEY from environment or .env. Falls back to demo."""
+    key = os.environ.get("EODHD_API_KEY")
+    if key:
+        return key.strip()
+    # Try .env directly so we don't force python-dotenv as a dep
+    env_path = BASE_DIR / ".env"
+    if env_path.exists():
+        try:
+            for line in env_path.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("EODHD_API_KEY="):
+                    return line.split("=", 1)[1].strip()
+        except Exception as e:
+            log.debug(f"Could not parse .env for EODHD_API_KEY: {e}")
+    log.warning("EODHD_API_KEY not set — falling back to demo key (AAPL.US only)")
+    return DEMO_KEY
+
+
+_API_KEY = _load_api_key()
+
+
+def is_demo() -> bool:
+    """True when running on the public demo key (limited to AAPL/MSFT/AMZN)."""
+    return _API_KEY == DEMO_KEY
+
+
+# ── Symbol translation ────────────────────────────────────────────────────────
+# Index aliases — system uses bare symbols, EODHD uses suffixed format
+_INDEX_MAP = {
+    "VIX":  "VIX.INDX",
+    "GSPC": "GSPC.INDX",   # S&P 500 spot
+    "SPX":  "GSPC.INDX",
+    "IXIC": "IXIC.INDX",   # NASDAQ Composite
+    "DJI":  "DJI.INDX",
+    "RUT":  "RUT.INDX",
+    "TNX":  "TNX.INDX",    # 10y treasury
+}
+
+# Class-share normalization: codebase uses "BRK-B", EODHD wants "BRK-B.US" — same dash
+_KNOWN_CRYPTO = {"BTC", "ETH", "SOL", "DOGE", "ADA", "DOT", "MATIC", "AVAX", "LINK",
+                 "XRP", "LTC", "BCH", "ATOM", "UNI", "ALGO", "NEAR", "FIL", "ICP",
+                 "VET", "TRX", "AAVE", "MKR", "SAND", "MANA", "AXS", "GRT", "FTM",
+                 "EGLD", "THETA", "RUNE", "KAVA", "FLOW", "HBAR", "XLM", "XMR"}
+
+
+def to_eodhd_symbol(ticker: str, asset_class: str | None = None) -> str:
+    """
+    Translate an internal ticker to EODHD format.
+
+      ticker="AAPL"            → "AAPL.US"
+      ticker="BRK-B"           → "BRK-B.US"
+      ticker="VIX"             → "VIX.INDX"
+      ticker="BTC", crypto     → "BTC-USD.CC"
+      asset_class="forex"      → "{ticker}.FOREX"
+    """
+    if not ticker:
+        return ticker
+    t = ticker.strip().upper()
+
+    # Already suffixed
+    if "." in t and t.split(".")[-1] in {"US", "INDX", "CC", "FOREX", "TO", "L", "DE"}:
+        return t
+
+    if asset_class == "forex":
+        return f"{t}.FOREX"
+
+    if asset_class == "crypto" or t in _KNOWN_CRYPTO:
+        # EODHD uses {SYMBOL}-USD.CC for spot
+        if "-" not in t:
+            return f"{t}-USD.CC"
+        return f"{t}.CC"
+
+    if asset_class == "index" or t in _INDEX_MAP:
+        return _INDEX_MAP.get(t, f"{t}.INDX")
+
+    # Default: US equity
+    return f"{t}.US"
+
+
+def from_eodhd_symbol(symbol: str) -> str:
+    """Inverse of to_eodhd_symbol — strip the suffix for downstream code."""
+    if not symbol:
+        return symbol
+    return symbol.split(".", 1)[0]
+
+
+# ── Rate limiter (token bucket — minute and day) ─────────────────────────────
+class _RateLimiter:
+    def __init__(self, per_sec: int, per_min: int, per_day: int):
+        self.per_sec = per_sec
+        self.per_min = per_min
+        self.per_day = per_day
+        self._second = deque()  # timestamps in last 1s
+        self._minute = deque()  # timestamps in last 60s
+        self._day = deque()     # timestamps in last 86400s
+        self._lock = threading.Lock()
+
+    def acquire(self):
+        # Loop with re-acquire — multiple threads may need to wait
+        while True:
+            with self._lock:
+                now = time.time()
+                # Trim windows
+                while self._second and self._second[0] < now - 1.0:
+                    self._second.popleft()
+                while self._minute and self._minute[0] < now - 60:
+                    self._minute.popleft()
+                while self._day and self._day[0] < now - 86400:
+                    self._day.popleft()
+
+                # Daily — hard abort
+                if len(self._day) >= self.per_day:
+                    wait_d = self._day[0] + 86400 - now
+                    raise RuntimeError(
+                        f"EODHD daily limit exhausted ({self.per_day}). "
+                        f"Reset in {wait_d/3600:.1f}h."
+                    )
+
+                # Per-second — most likely the 429 source
+                if len(self._second) >= self.per_sec:
+                    wait = self._second[0] + 1.0 - now + 0.01
+                # Per-minute
+                elif len(self._minute) >= self.per_min:
+                    wait = self._minute[0] + 60 - now + 0.05
+                else:
+                    self._second.append(now)
+                    self._minute.append(now)
+                    self._day.append(now)
+                    return
+            # Sleep without holding the lock
+            time.sleep(max(0.01, wait))
+
+    def stats(self) -> dict:
+        with self._lock:
+            return {
+                "second_used": len(self._second),
+                "second_cap":  self.per_sec,
+                "minute_used": len(self._minute),
+                "minute_cap": self.per_min,
+                "day_used": len(self._day),
+                "day_cap": self.per_day,
+            }
+
+
+_limiter = _RateLimiter(_RATE_PER_SEC, _RATE_PER_MIN, _RATE_PER_DAY)
+
+
+# ── HTTP session with retry ───────────────────────────────────────────────────
+_session = requests.Session()
+_session.headers.update({"User-Agent": "SwingTrade/1.0 (eodhd_client)"})
+
+
+# ── Cache helper (disk JSON, TTL) ─────────────────────────────────────────────
+def _cache_path(key: str) -> Path:
+    safe = key.replace("/", "_").replace(":", "_")
+    return _CACHE_DIR / f"{safe}.json"
+
+
+def _cache_read(key: str, ttl_seconds: int) -> Any:
+    fp = _cache_path(key)
+    if not fp.exists():
+        return None
+    if time.time() - fp.stat().st_mtime > ttl_seconds:
+        return None
+    try:
+        return json.loads(fp.read_text())
+    except Exception as e:
+        log.debug(f"Cache read failed {key}: {e}")
+        return None
+
+
+def _cache_write(key: str, data: Any) -> None:
+    try:
+        _cache_path(key).write_text(json.dumps(data))
+    except Exception as e:
+        log.debug(f"Cache write failed {key}: {e}")
+
+
+# ── Core HTTP wrapper ─────────────────────────────────────────────────────────
+class EODHDError(Exception):
+    """Raised when EODHD returns an unrecoverable error."""
+
+
+def _request(
+    endpoint: str,
+    params: dict | None = None,
+    *,
+    cache_key: str | None = None,
+    cache_ttl: int = 0,
+    max_retries: int = 3,
+    base_delay: float = 1.5,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> Any:
+    """
+    Core EODHD HTTP wrapper.
+
+      endpoint:  path under /api, e.g., "eod/AAPL.US"
+      params:    query params (api_token + fmt=json injected automatically)
+      cache_key: if set, cache the JSON response on disk for cache_ttl seconds
+      Retries on 429 / 5xx with exponential backoff.
+      Raises EODHDError on persistent failure or 4xx (other than 429).
+    """
+    if cache_key and cache_ttl > 0:
+        cached = _cache_read(cache_key, cache_ttl)
+        if cached is not None:
+            return cached
+
+    full_params = dict(params or {})
+    full_params.setdefault("api_token", _API_KEY)
+    full_params.setdefault("fmt", "json")
+
+    url = f"{BASE_URL}/{endpoint.lstrip('/')}"
+    last_err: Exception | None = None
+
+    for attempt in range(max_retries):
+        try:
+            _limiter.acquire()
+            resp = _session.get(url, params=full_params, timeout=timeout)
+
+            # 200: success
+            if resp.status_code == 200:
+                # Some endpoints return CSV by default — guard
+                ct = resp.headers.get("Content-Type", "")
+                if "json" in ct or resp.text.lstrip().startswith(("{", "[")):
+                    data = resp.json()
+                else:
+                    data = resp.text
+                if cache_key and cache_ttl > 0:
+                    _cache_write(cache_key, data)
+                return data
+
+            # 401 / 403: bad key — fail fast, don't retry
+            if resp.status_code in (401, 403):
+                raise EODHDError(
+                    f"EODHD auth failed (HTTP {resp.status_code}) on {endpoint}. "
+                    f"Check EODHD_API_KEY in .env."
+                )
+
+            # 404: ticker not found — return None, don't retry
+            if resp.status_code == 404:
+                log.debug(f"EODHD 404 on {endpoint} — ticker likely unsupported")
+                return None
+
+            # 429 / 5xx: retry
+            if resp.status_code == 429 or resp.status_code >= 500:
+                delay = base_delay * (2 ** attempt)
+                log.warning(
+                    f"EODHD HTTP {resp.status_code} on {endpoint} "
+                    f"(attempt {attempt+1}/{max_retries}) — retrying in {delay:.1f}s"
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                    continue
+
+            # Anything else
+            raise EODHDError(
+                f"EODHD HTTP {resp.status_code} on {endpoint}: "
+                f"{resp.text[:200]}"
+            )
+
+        except requests.RequestException as e:
+            last_err = e
+            delay = base_delay * (2 ** attempt)
+            log.warning(
+                f"EODHD network error on {endpoint} "
+                f"(attempt {attempt+1}/{max_retries}): {e} — retrying in {delay:.1f}s"
+            )
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+                continue
+
+    raise EODHDError(f"EODHD: all {max_retries} retries exhausted on {endpoint}: {last_err}")
+
+
+# ── Public adapter functions ─────────────────────────────────────────────────
+# Phase-0 surface area: the minimum needed to validate auth + smoke-test.
+# Phase-1 will expand to fundamentals, options, news, etc. (Task #2)
+
+def eod(ticker: str, from_date: str | None = None, to_date: str | None = None,
+        period: str = "d", cache_ttl: int = 43200) -> list[dict] | None:
+    # cache_ttl bumped 14400→43200 (4h→12h) on 2026-05-01 — EOD bars only update once
+    # at market close. Daily TTL would be even safer, but 12h gives some flexibility for
+    # post-close updates while still cutting bulk-fetch calls by 67% during market hours.
+    """
+    EOD (daily) OHLCV history.
+
+      ticker:    bare or suffixed ("AAPL" or "AAPL.US")
+      from_date: "YYYY-MM-DD"
+      to_date:   "YYYY-MM-DD"
+      period:    "d" (daily), "w" (weekly), "m" (monthly)
+    Returns list[{date, open, high, low, close, adjusted_close, volume}] or None on 404.
+    """
+    sym = to_eodhd_symbol(ticker)
+    params = {"period": period}
+    if from_date:
+        params["from"] = from_date
+    if to_date:
+        params["to"] = to_date
+    cache_key = f"eod_{sym}_{from_date}_{to_date}_{period}"
+    return _request(f"eod/{sym}", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def real_time(tickers: list[str] | str, cache_ttl: int = 300) -> dict | list[dict] | None:
+    """
+    Real-time (15-min delayed) quote for one or many tickers.
+    Single ticker → returns dict. Multiple → returns list (uses ?s=... batch).
+    """
+    if isinstance(tickers, str):
+        sym = to_eodhd_symbol(tickers)
+        return _request(f"real-time/{sym}", cache_key=f"rt_{sym}", cache_ttl=cache_ttl)
+    syms = [to_eodhd_symbol(t) for t in tickers]
+    if not syms:
+        return []
+    head = syms[0]
+    rest = ",".join(syms[1:])
+    params = {"s": rest} if rest else None
+    cache_key = f"rt_batch_{','.join(syms[:5])}_{len(syms)}"
+    return _request(f"real-time/{head}", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def fundamentals(ticker: str, cache_ttl: int = 86400) -> dict | None:
+    """Fundamentals API — financials, ratios, sector, dividends, etc. 6h cache."""
+    sym = to_eodhd_symbol(ticker)
+    return _request(f"fundamentals/{sym}", cache_key=f"fund_{sym}", cache_ttl=cache_ttl)
+
+
+def search(query: str, limit: int = 15, cache_ttl: int = 86400,
+           prefer_us: bool = True) -> list[dict] | None:
+    """Symbol/company search.
+
+    Q-1 (2026-05-03): EODHD's `search` endpoint sometimes returns foreign listings
+    ahead of the US ADR (e.g., INFY → "INFY.NSE" before "INFY.US"). When `prefer_us`
+    is True (default), results are reordered so US-exchange matches come first.
+    Pass `prefer_us=False` to bypass — useful for explicit foreign-symbol searches.
+    """
+    raw = _request(
+        f"search/{query}",
+        params={"limit": limit},
+        cache_key=f"search_{query}_{limit}",
+        cache_ttl=cache_ttl,
+    )
+    if not raw or not isinstance(raw, list) or not prefer_us:
+        return raw
+    # Stable-sort: US listings first, then by query-position match strength
+    us_codes = {"US", "NYSE", "NASDAQ", "AMEX", "BATS", "ARCA"}
+    q_upper = (query or "").strip().upper()
+
+    def _us_priority(item: dict) -> tuple[int, int]:
+        ex = (item.get("Exchange") or "").upper()
+        code = (item.get("Code") or "").upper()
+        # 0 = US exact-code match (best), 1 = US, 2 = foreign exact-code, 3 = foreign
+        if code == q_upper and ex in us_codes:
+            return (0, 0)
+        if ex in us_codes:
+            return (1, 0)
+        if code == q_upper:
+            return (2, 0)
+        return (3, 0)
+
+    return sorted(raw, key=_us_priority)
+
+
+def bulk_eod(date: str | None = None, exchange: str = "US",
+             cache_ttl: int = 7200) -> list[dict] | None:
+    """
+    Bulk EOD — fetches last EOD for ALL tickers on an exchange in one call.
+    The killer endpoint that replaces 1000s of per-ticker fetches.
+
+      date: "YYYY-MM-DD" or None (last trading day)
+      exchange: "US", "NASDAQ", "NYSE", "LSE", etc.
+    Returns list[{code, exchange_short_name, date, open, high, low, close,
+                  adjusted_close, volume}].
+    """
+    params = {}
+    if date:
+        params["date"] = date
+    cache_key = f"bulk_eod_{exchange}_{date or 'last'}"
+    return _request(
+        f"eod-bulk-last-day/{exchange}",
+        params=params,
+        cache_key=cache_key,
+        cache_ttl=cache_ttl,
+    )
+
+
+def intraday(ticker: str, interval: str = "1h",
+             from_ts: int | None = None, to_ts: int | None = None,
+             cache_ttl: int = 600) -> list[dict] | None:
+    """
+    Intraday OHLCV bars.
+      interval: "1m" | "5m" | "1h"
+      from_ts / to_ts: unix timestamps (optional)
+    """
+    sym = to_eodhd_symbol(ticker)
+    params: dict[str, Any] = {"interval": interval}
+    if from_ts:
+        params["from"] = from_ts
+    if to_ts:
+        params["to"] = to_ts
+    cache_key = f"intra_{sym}_{interval}_{from_ts}_{to_ts}"
+    return _request(f"intraday/{sym}", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def options_chain(ticker: str, from_date: str | None = None,
+                  to_date: str | None = None, cache_ttl: int = 7200) -> dict | None:
+    # cache_ttl bumped 1800→7200 (30min→2h) on 2026-05-01 — options chain doesn't move
+    # that much intraday and we don't actively trade options yet.
+    """
+    Options chain with Greeks + IV per contract.
+
+    Returns dict:
+      {data: [{expirationDate, options: {CALL: [...], PUT: [...]}}, ...]}
+    Each option: strike, lastPrice, bid, ask, volume, openInterest,
+                 impliedVolatility, delta, gamma, theta, vega, rho.
+    """
+    sym = to_eodhd_symbol(ticker)
+    params: dict[str, Any] = {}
+    if from_date:
+        params["from"] = from_date
+    if to_date:
+        params["to"] = to_date
+    cache_key = f"opt_{sym}_{from_date}_{to_date}"
+    return _request(f"options/{sym}", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def news(ticker: str | None = None, query: str | None = None,
+         limit: int = 50, from_date: str | None = None,
+         to_date: str | None = None, cache_ttl: int = 14400) -> list[dict] | None:
+    # cache_ttl bumped 7200→14400 (2h→4h) on 2026-05-01 to reduce quota burn during hourly scans
+    """
+    News + sentiment feed.
+      ticker: filter by ticker (uses ?s=AAPL.US)
+      query: free-text search (?t=...)
+    Returns list[{date, title, content, link, symbols, tags, sentiment}].
+    """
+    params: dict[str, Any] = {"limit": limit}
+    if ticker:
+        params["s"] = to_eodhd_symbol(ticker)
+    if query:
+        params["t"] = query
+    if from_date:
+        params["from"] = from_date
+    if to_date:
+        params["to"] = to_date
+    cache_key = f"news_{ticker or 'q'}_{query or ''}_{limit}_{from_date}_{to_date}"
+    return _request("news", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def sentiments(tickers: list[str] | str, from_date: str | None = None,
+               to_date: str | None = None, cache_ttl: int = 43200) -> dict | None:
+    # cache_ttl bumped 21600→43200 (6h→12h) on 2026-05-01 — sentiment scores update slowly
+    """
+    Aggregate news sentiment scores per ticker.
+    Returns dict {ticker_with_suffix: [{date, count, normalized}, ...]}.
+    """
+    if isinstance(tickers, str):
+        tickers = [tickers]
+    syms = ",".join(to_eodhd_symbol(t) for t in tickers)
+    params: dict[str, Any] = {"s": syms}
+    if from_date:
+        params["from"] = from_date
+    if to_date:
+        params["to"] = to_date
+    cache_key = f"sent_{syms[:60]}_{from_date}_{to_date}"
+    return _request("sentiments", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def earnings_calendar(from_date: str | None = None, to_date: str | None = None,
+                      symbols: list[str] | None = None,
+                      cache_ttl: int = 7200) -> dict | None:
+    """
+    Earnings calendar — replaces Finviz earnings date backfill.
+      from_date / to_date: window
+      symbols: optional list to filter
+    """
+    params: dict[str, Any] = {}
+    if from_date:
+        params["from"] = from_date
+    if to_date:
+        params["to"] = to_date
+    if symbols:
+        params["symbols"] = ",".join(to_eodhd_symbol(s) for s in symbols)
+    cache_key = f"earn_cal_{from_date}_{to_date}_{(symbols and symbols[0]) or 'all'}"
+    return _request("calendar/earnings", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def economic_events(from_date: str | None = None, to_date: str | None = None,
+                    country: str = "US", cache_ttl: int = 3600) -> list[dict] | None:
+    """Macro / economic calendar (CPI, FOMC, NFP, etc.)."""
+    params: dict[str, Any] = {"country": country}
+    if from_date:
+        params["from"] = from_date
+    if to_date:
+        params["to"] = to_date
+    cache_key = f"macro_{country}_{from_date}_{to_date}"
+    return _request("economic-events", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def index_components(index: str = "SP500", cache_ttl: int = 86400) -> list[str] | None:
+    """
+    Index constituents — replaces Wikipedia/iShares scrapers.
+      index: "SP500" | "GSPC" | "RUI" (Russell 1000) | "RUT" (Russell 2000) | "NDX"
+    Returns plain ticker list (suffix stripped).
+    """
+    # EODHD encodes constituents inside fundamentals of the index symbol
+    sym = to_eodhd_symbol(index, asset_class="index")
+    data = _request(
+        f"fundamentals/{sym}",
+        cache_key=f"idx_{sym}",
+        cache_ttl=cache_ttl,
+    )
+    if not isinstance(data, dict):
+        return None
+    comps = data.get("Components") or {}
+    out: list[str] = []
+    for v in comps.values():
+        code = (v or {}).get("Code") or ""
+        if code:
+            out.append(code.upper())
+    return out
+
+
+def insider_transactions(ticker: str, from_date: str | None = None,
+                         to_date: str | None = None,
+                         cache_ttl: int = 86400) -> list[dict] | None:
+    """Insider Form 4 transactions — alternative to direct SEC EDGAR."""
+    sym = to_eodhd_symbol(ticker)
+    params: dict[str, Any] = {"code": sym}
+    if from_date:
+        params["from"] = from_date
+    if to_date:
+        params["to"] = to_date
+    cache_key = f"insider_{sym}_{from_date}_{to_date}"
+    return _request("insider-transactions", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def exchange_symbol_list(exchange: str = "US",
+                         cache_ttl: int = 86400) -> list[dict] | None:
+    """All tradable symbols on an exchange — universe enumeration."""
+    return _request(
+        f"exchange-symbol-list/{exchange}",
+        cache_key=f"sym_list_{exchange}",
+        cache_ttl=cache_ttl,
+    )
+
+
+def screener(filters: list | None = None, signals: str | None = None,
+             sort: str | None = None, limit: int = 50,
+             offset: int = 0, cache_ttl: int = 1800) -> dict | None:
+    """
+    Screener API — pre-screened stock lists.
+      filters: list of [field, op, value], e.g.
+               [["market_capitalization", ">", 1e9], ["sector", "=", "Technology"]]
+      signals: comma-separated, e.g. "50d_new_lo,bookvalue_neg"
+      sort:    field.asc|desc
+    """
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
+    if filters:
+        params["filters"] = json.dumps(filters)
+    if signals:
+        params["signals"] = signals
+    if sort:
+        params["sort"] = sort
+    cache_key = f"scr_{(filters and str(filters)[:60]) or signals or ''}_{limit}_{offset}"
+    return _request("screener", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def financial_events(from_date: str | None = None, to_date: str | None = None,
+                     event_type: str = "ipos",
+                     cache_ttl: int = 7200) -> list[dict] | None:
+    """Financial events calendar — IPOs, secondary offerings, splits.
+
+    event_type: 'ipos' | 'splits' | 'trends'
+    """
+    endpoint_map = {
+        "ipos": "calendar/ipos",
+        "splits": "calendar/splits",
+        "trends": "calendar/trends",
+    }
+    endpoint = endpoint_map.get(event_type, "calendar/ipos")
+    params: dict[str, Any] = {}
+    if from_date:
+        params["from"] = from_date
+    if to_date:
+        params["to"] = to_date
+    cache_key = f"fin_events_{event_type}_{from_date}_{to_date}"
+    return _request(endpoint, params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def exchange_details(exchange: str = "US",
+                     cache_ttl: int = 86400) -> dict | None:
+    """Exchange details — name, code, country, currency, timezone, **trading hours**."""
+    return _request(
+        f"exchange-details/{exchange}",
+        cache_key=f"exch_det_{exchange}",
+        cache_ttl=cache_ttl,
+    )
+
+
+def technicals(ticker: str, function: str = "sma",
+               period: int = 20, cache_ttl: int = 1800) -> list[dict] | None:
+    """Pre-computed technical indicators — sma, ema, wma, rsi, atr, bbands, macd, etc.
+
+    function: indicator name (eodhd has 30+ supported)
+    period:   lookback period for the indicator
+    Returns: list of {date, <function>: value}
+    """
+    sym = to_eodhd_symbol(ticker)
+    params: dict[str, Any] = {"function": function, "period": period}
+    cache_key = f"tech_{sym}_{function}_{period}"
+    return _request(f"technical/{sym}", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def technicals_to_series(ticker: str, function: str, period: int = 14,
+                         cache_ttl: int = 1800):
+    """Compatibility wrapper: returns a pandas Series indexed by date.
+
+    Drop-in for local _ema/_rsi/_atr/_macd/_bbands when
+    config.gates.use_eodhd_technicals=true. Falls back to None on failure
+    so the caller can default to local computation.
+    """
+    try:
+        import pandas as _pd
+        rows = technicals(ticker, function=function, period=period, cache_ttl=cache_ttl) or []
+        if not rows:
+            return None
+        idx, vals = [], []
+        for r in rows:
+            d = r.get("date") or r.get("Date")
+            v = r.get(function) or r.get(function.upper()) or r.get("value")
+            if d is None or v is None:
+                continue
+            idx.append(d)
+            vals.append(float(v))
+        if not vals:
+            return None
+        s = _pd.Series(vals, index=_pd.to_datetime(idx))
+        s.name = function
+        return s
+    except Exception:
+        return None
+
+
+def etf_fundamentals(ticker: str, cache_ttl: int = 86400) -> dict | None:
+    """ETF-specific fundamentals — holdings, AUM, expense ratio, sector breakdown.
+
+    EODHD returns full ETF object via fundamentals() with ETF-only sub-keys:
+      - General.Type == 'ETF'
+      - ETF_Data.{NetAssets, ExpenseRatio, Holdings_Count, Sector_Weights, Top_10_Holdings}
+    """
+    f = fundamentals(ticker, cache_ttl=cache_ttl)
+    if not f:
+        return None
+    if (f.get("General") or {}).get("Type") != "ETF":
+        return None
+    return f
+
+
+def stats() -> dict:
+    """Current rate-limit usage + key info."""
+    s = _limiter.stats()
+    s["api_key_mode"] = "demo" if is_demo() else "production"
+    return s
+
+
+# ── Smoke test (run as: python3 eodhd_client.py) ─────────────────────────────
+def _smoke_test() -> None:
+    """Validates auth + adapter wiring against demo or real key."""
+    print(f"=== EODHD smoke test ===")
+    print(f"API key mode: {'demo (limited)' if is_demo() else 'production'}")
+    print()
+
+    print("1. to_eodhd_symbol() translation:")
+    for t, ac in [("AAPL", None), ("BRK-B", None), ("VIX", None),
+                  ("BTC", "crypto"), ("EURUSD", "forex"), ("AAPL.US", None)]:
+        print(f"   {t:<10} ({ac or 'auto'}) → {to_eodhd_symbol(t, ac)}")
+    print()
+
+    print("2. EOD AAPL last 5 days:")
+    try:
+        data = eod("AAPL", from_date="2026-04-15", to_date="2026-04-25")
+        if data:
+            for row in data[-5:]:
+                print(f"   {row.get('date')}  close={row.get('close')}  "
+                      f"adj={row.get('adjusted_close')}  vol={row.get('volume')}")
+        else:
+            print("   (empty response)")
+    except Exception as e:
+        print(f"   ERROR: {e}")
+    print()
+
+    print("3. Real-time AAPL:")
+    try:
+        rt = real_time("AAPL")
+        if isinstance(rt, dict):
+            print(f"   code={rt.get('code')}  close={rt.get('close')}  "
+                  f"change_p={rt.get('change_p')}  ts={rt.get('timestamp')}")
+        else:
+            print(f"   {rt}")
+    except Exception as e:
+        print(f"   ERROR: {e}")
+    print()
+
+    print("4. Search 'apple':")
+    try:
+        results = search("apple", limit=3)
+        if results:
+            for r in results[:3]:
+                print(f"   {r.get('Code'):<8} {r.get('Exchange'):<6} {r.get('Name')}")
+    except Exception as e:
+        print(f"   ERROR: {e}")
+    print()
+
+    print("5. Rate limiter stats:")
+    s = stats()
+    print(f"   minute: {s['minute_used']}/{s['minute_cap']}  "
+          f"day: {s['day_used']}/{s['day_cap']}  mode: {s['api_key_mode']}")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+    _smoke_test()

@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SwingTrade — Elite Trader UX</title>
+<style>
+  @font-face { font-family: 'Aptos'; src: local('Aptos'), local('Aptos Display'); font-weight: 100 900; font-display: swap; }
+  :root {
+    --bg-0: oklch(13% 0.012 250);
+    --bg-1: oklch(16% 0.012 250);
+    --bg-2: oklch(19% 0.014 250);
+    --bg-3: oklch(23% 0.014 250);
+    --bg-4: oklch(27% 0.015 250);
+    --ink-0: oklch(96% 0.005 90);
+    --ink-1: oklch(82% 0.006 90);
+    --ink-2: oklch(64% 0.008 90);
+    --ink-3: oklch(45% 0.01 250);
+    --rule:  oklch(28% 0.012 250);
+    --rule-2:oklch(36% 0.014 250);
+    --bull:  oklch(74% 0.16 145);
+    --bear:  oklch(68% 0.22 28);
+    --warn:  oklch(80% 0.16 80);
+    --info:  oklch(76% 0.13 215);
+    --accent: oklch(78% 0.16 75);
+    --font: 'Aptos', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg-0); color: var(--ink-0); font-family: var(--font); font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+  .num { font-variant-numeric: tabular-nums; font-feature-settings: 'zero', 'ss01'; }
+  .up { color: var(--bull); } .down { color: var(--bear); } .dim { color: var(--ink-2); } .muted { color: var(--ink-3); }
+  button { font-family: inherit; cursor: pointer; }
+  a { color: inherit; text-decoration: none; }
+
+  /* HEADER STRIP */
+  header { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; padding: 12px 24px; gap: 22px; border-bottom: 1px solid var(--rule); background: linear-gradient(180deg, var(--bg-1), var(--bg-0)); position: sticky; top: 0; z-index: 50; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-mark { width: 30px; height: 30px; background: var(--accent); color: var(--bg-0); display: grid; place-items: center; font-size: 14px; font-weight: 800; border-radius: 6px; box-shadow: 0 0 18px rgba(201, 168, 76, 0.25); }
+  .brand-info .name { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
+  .brand-info .sub { font-size: 10.5px; color: var(--ink-2); letter-spacing: 0.1em; text-transform: uppercase; margin-top: 1px; }
+  .header-stats { display: flex; gap: 28px; align-items: center; padding: 0 12px; }
+  .h-stat { display: flex; flex-direction: column; gap: 2px; }
+  .h-stat .l { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+  .h-stat .v { font-size: 16px; font-weight: 700; }
+  .h-stat .v .num-sub { font-size: 11px; color: var(--ink-2); font-weight: 500; margin-left: 4px; }
+  .regime-block { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 0 16px; border-left: 1px solid var(--rule); }
+  .regime-pill { font-size: 11px; padding: 4px 14px; border-radius: 999px; letter-spacing: 0.14em; font-weight: 700; text-transform: uppercase; display: flex; align-items: center; gap: 7px; }
+  .regime-pill.bull { color: var(--bull); background: color-mix(in oklch, var(--bull) 15%, transparent); border: 1px solid color-mix(in oklch, var(--bull) 40%, transparent); }
+  .regime-pill.neutral { color: var(--info); background: color-mix(in oklch, var(--info) 15%, transparent); border: 1px solid color-mix(in oklch, var(--info) 40%, transparent); }
+  .regime-pill.bear { color: var(--bear); background: color-mix(in oklch, var(--bear) 15%, transparent); border: 1px solid color-mix(in oklch, var(--bear) 40%, transparent); }
+  .regime-pill::before { content:''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+  .regime-meta { font-size: 10px; color: var(--ink-3); letter-spacing: 0.08em; }
+  .clock { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .clock .t { font-size: 14px; font-weight: 700; }
+  .clock .d { font-size: 10px; color: var(--ink-2); letter-spacing: 0.1em; text-transform: uppercase; }
+
+  /* HORIZON TABS — bold tabs with counts */
+  .horizon { display: flex; gap: 0; padding: 0 24px; border-bottom: 1px solid var(--rule); background: var(--bg-0); }
+  .h-tab { padding: 14px 28px; cursor: pointer; user-select: none; border-bottom: 3px solid transparent; transition: all 120ms; }
+  .h-tab .label { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+  .h-tab .sub { font-size: 11px; color: var(--ink-3); margin-top: 3px; }
+  .h-tab .count { display: inline-block; margin-left: 8px; font-size: 11px; padding: 1px 7px; background: var(--bg-3); border-radius: 999px; color: var(--ink-1); font-weight: 600; }
+  .h-tab.on { border-bottom-color: var(--accent); }
+  .h-tab.on .label { color: var(--ink-0); }
+  .h-tab.on .count { background: color-mix(in oklch, var(--accent) 25%, transparent); color: var(--accent); }
+  .h-tab:hover:not(.on) .label { color: var(--ink-1); }
+  .horizon-meta { margin-left: auto; align-self: center; font-size: 11px; color: var(--ink-2); padding-right: 8px; }
+
+  main { padding: 22px 24px 60px; max-width: 1700px; margin: 0 auto; }
+
+  /* SECTION HEADER */
+  .sec-head { display: flex; align-items: baseline; gap: 14px; margin: 28px 0 14px; }
+  .sec-head:first-child { margin-top: 0; }
+  .sec-head .num { font-size: 11px; color: var(--ink-3); letter-spacing: 0.18em; font-weight: 600; }
+  .sec-head h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink-0); }
+  .sec-head .desc { font-size: 12px; color: var(--ink-2); margin-left: auto; max-width: 50ch; }
+  .sec-head .badge { padding: 3px 10px; font-size: 11px; border-radius: 4px; background: color-mix(in oklch, var(--bull) 20%, transparent); color: var(--bull); font-weight: 700; letter-spacing: 0.06em; }
+
+  /* HERO CARDS — top conviction picks */
+  .hero-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; }
+  .hero { position: relative; padding: 22px 24px; background: var(--bg-1); border: 1px solid var(--rule); border-radius: 10px; cursor: pointer; transition: border-color 120ms, transform 120ms; overflow: hidden; }
+  .hero::before { content:''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--bull); }
+  .hero:hover { border-color: var(--rule-2); transform: translateY(-2px); }
+  .hero.warn::before { background: var(--warn); }
+  .hero.bear::before { background: var(--bear); }
+  .hero-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+  .hero-rank { position: absolute; top: 18px; right: 22px; font-size: 11px; color: var(--ink-3); letter-spacing: 0.16em; font-weight: 600; }
+  .hero-sym { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
+  .hero-name { font-size: 11px; color: var(--ink-2); margin-top: 4px; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hero-tags { display: flex; gap: 5px; margin-top: 10px; flex-wrap: wrap; }
+  .htag { font-size: 10px; padding: 3px 9px; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--rule); color: var(--ink-1); letter-spacing: 0.06em; font-weight: 500; }
+  .htag.sector { background: color-mix(in oklch, var(--info) 18%, transparent); color: var(--info); border-color: color-mix(in oklch, var(--info) 40%, transparent); }
+  .htag.warn { background: color-mix(in oklch, var(--warn) 18%, transparent); color: var(--warn); border-color: color-mix(in oklch, var(--warn) 40%, transparent); }
+  .hero-pricerow { display: flex; align-items: baseline; gap: 14px; margin: 14px 0 16px; }
+  .hero-px { font-size: 28px; font-weight: 700; }
+  .hero-chg { font-size: 14px; font-weight: 700; }
+
+  /* The hero "trade map" — small ruler */
+  .hero-ruler { margin: 14px 0 16px; }
+  .hero-ruler .legend { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-3); letter-spacing: 0.1em; margin-bottom: 8px; font-weight: 600; }
+  .hero-ruler-track { position: relative; height: 32px; background: var(--bg-2); border: 1px solid var(--rule); border-radius: 5px; }
+  .hr-stop  { position: absolute; left: 0; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, color-mix(in oklch, var(--bear) 14%, transparent) 0 4px, color-mix(in oklch, var(--bear) 22%, transparent) 4px 8px); border-right: 1px solid var(--bear); }
+  .hr-zone  { position: absolute; top: 0; bottom: 0; background: color-mix(in oklch, var(--bull) 22%, transparent); border-left: 1px solid var(--bull); border-right: 1px solid var(--bull); }
+  .hr-runway{ position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, color-mix(in oklch, var(--bull) 8%, transparent), color-mix(in oklch, var(--info) 14%, transparent)); }
+  .hr-tick  { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+  .hr-tick.t2 { background: var(--info); }
+  .hr-now   { position: absolute; top: -3px; bottom: -3px; width: 3px; background: var(--ink-0); box-shadow: 0 0 0 2px color-mix(in oklch, var(--ink-0) 30%, transparent); border-radius: 1px; }
+  .hr-ticks-row { display: flex; justify-content: space-between; padding: 0 0 0 0; margin-top: 6px; font-size: 10px; color: var(--ink-2); font-weight: 600; }
+
+  .hero-grid-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid var(--rule); }
+  .hero-stat .l { font-size: 10px; color: var(--ink-3); letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; }
+  .hero-stat .v { font-size: 16px; font-weight: 700; margin-top: 3px; }
+
+  .hero-action { margin-top: 14px; padding: 12px 14px; background: color-mix(in oklch, var(--bull) 12%, transparent); border: 1px solid color-mix(in oklch, var(--bull) 30%, transparent); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+  .hero.warn .hero-action { background: color-mix(in oklch, var(--warn) 12%, transparent); border-color: color-mix(in oklch, var(--warn) 30%, transparent); }
+  .hero.bear .hero-action { background: color-mix(in oklch, var(--bear) 12%, transparent); border-color: color-mix(in oklch, var(--bear) 30%, transparent); }
+  .hero-action-text { font-weight: 600; color: var(--ink-0); }
+  .hero-action-text b { color: var(--bull); font-weight: 700; }
+  .hero.warn .hero-action-text b { color: var(--warn); }
+  .hero-action-go { font-size: 11px; color: var(--ink-2); letter-spacing: 0.14em; font-weight: 600; }
+
+  /* Score bar at the bottom */
+  .hero-score-block { margin-top: 14px; }
+  .hero-score-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .hero-score { font-size: 13px; font-weight: 700; color: var(--ink-1); }
+  .hero-score b { font-size: 22px; color: var(--bull); font-weight: 800; }
+  .hero.warn .hero-score b { color: var(--warn); }
+  .hero-pillars { display: flex; gap: 4px; }
+  .hp { flex: 1; height: 6px; background: var(--bg-3); border-radius: 3px; overflow: hidden; position: relative; }
+  .hp .f { position: absolute; inset: 0; background: var(--bull); transform-origin: left; }
+  .hero.warn .hp .f { background: var(--warn); }
+  .hero-pillar-labels { display: flex; gap: 4px; margin-top: 4px; font-size: 9px; color: var(--ink-3); letter-spacing: 0.08em; font-weight: 600; }
+  .hero-pillar-labels span { flex: 1; text-align: center; }
+
+  /* WATCHLIST TABLE — clean rows */
+  .watch-wrap { background: var(--bg-1); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+  .watch-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .watch-table thead th { padding: 12px 14px; text-align: left; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); background: var(--bg-2); border-bottom: 1px solid var(--rule-2); font-weight: 600; user-select: none; }
+  .watch-table thead th.right { text-align: right; }
+  .watch-table tbody tr { cursor: pointer; transition: background 80ms; }
+  .watch-table tbody tr:hover { background: var(--bg-2); }
+  .watch-table tbody td { padding: 11px 14px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  .watch-table tbody tr:last-child td { border-bottom: none; }
+  .watch-sym { font-size: 14px; font-weight: 800; letter-spacing: -0.01em; }
+  .watch-name { font-size: 11px; color: var(--ink-2); margin-top: 1px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .watch-sector { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 999px; background: color-mix(in oklch, var(--info) 14%, transparent); color: var(--info); border: 1px solid color-mix(in oklch, var(--info) 30%, transparent); letter-spacing: 0.06em; font-weight: 500; }
+  .verdict-pill { display: inline-block; font-size: 10px; padding: 3px 10px; border-radius: 999px; letter-spacing: 0.14em; font-weight: 800; }
+  .verdict-pill.BUY { color: var(--bull); background: color-mix(in oklch, var(--bull) 18%, transparent); border: 1px solid color-mix(in oklch, var(--bull) 40%, transparent); }
+  .verdict-pill.WATCH { color: var(--warn); background: color-mix(in oklch, var(--warn) 18%, transparent); border: 1px solid color-mix(in oklch, var(--warn) 40%, transparent); }
+  .verdict-pill.SELL { color: var(--bear); background: color-mix(in oklch, var(--bear) 18%, transparent); border: 1px solid color-mix(in oklch, var(--bear) 40%, transparent); }
+  .verdict-pill.AVOID { color: var(--ink-3); background: var(--bg-2); border: 1px solid var(--rule); }
+  .score-cell { display: inline-flex; align-items: center; gap: 8px; }
+  .score-cell .v { font-size: 16px; font-weight: 800; min-width: 28px; }
+  .score-cell .v.s80 { color: var(--bull); }
+  .score-cell .v.s70 { color: oklch(78% 0.16 130); }
+  .score-cell .v.s60 { color: var(--accent); }
+  .score-cell .v.s50 { color: var(--ink-2); }
+  .score-cell .bar { width: 36px; height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden; }
+  .score-cell .bar .fill { height: 100%; }
+  .pct-cell { font-size: 13px; font-weight: 700; }
+  .price-cell { font-size: 14px; font-weight: 700; }
+  .rr-cell { font-size: 13px; font-weight: 700; }
+  .rr-cell.good { color: var(--bull); }
+  .rr-cell.fair { color: var(--warn); }
+  .rr-cell.bad { color: var(--ink-3); }
+  .setup-cell { font-size: 12px; color: var(--ink-1); }
+  .levels-cell { font-size: 12px; color: var(--ink-2); }
+  .levels-cell .lv { color: var(--ink-1); font-weight: 600; }
+  .action-cell { font-size: 12px; color: var(--ink-1); font-weight: 500; white-space: nowrap; }
+  .action-cell .b { color: var(--bull); font-weight: 700; }
+
+  .empty-state { padding: 44px; text-align: center; color: var(--ink-2); font-size: 13px; }
+  .empty-state b { color: var(--ink-0); }
+
+  /* Sparkline pin — subtle hint of trend */
+  .sp { display: inline-block; vertical-align: middle; }
+  .sp svg { display: block; }
+
+  /* KILLED COLLAPSED SECTION */
+  .killed-section { margin-top: 24px; }
+  .killed-toggle { display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: var(--bg-1); border: 1px solid var(--rule); border-radius: 8px; cursor: pointer; user-select: none; transition: background 80ms; }
+  .killed-toggle:hover { background: var(--bg-2); }
+  .killed-toggle .arrow { transition: transform 200ms; color: var(--ink-3); font-size: 12px; }
+  .killed-toggle.open .arrow { transform: rotate(90deg); }
+  .killed-toggle .lbl { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-1); font-weight: 600; }
+  .killed-toggle .count { font-size: 11px; padding: 2px 9px; background: var(--bg-3); border-radius: 999px; color: var(--ink-2); margin-left: 4px; }
+  .killed-toggle .desc { margin-left: auto; font-size: 11px; color: var(--ink-3); }
+  .killed-body { display: none; margin-top: 12px; padding: 16px; background: var(--bg-1); border: 1px solid var(--rule); border-radius: 8px; }
+  .killed-body.open { display: block; }
+  .killed-reasons { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+  .killed-reason { padding: 10px 12px; background: var(--bg-2); border-radius: 5px; font-size: 11px; color: var(--ink-2); }
+  .killed-reason .n { font-size: 16px; font-weight: 700; color: var(--ink-1); }
+  .killed-reason .l { font-size: 10px; color: var(--ink-3); letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2px; }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg-0); }
+  ::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 5px; }
+
+  .preview-banner { background: linear-gradient(90deg, color-mix(in oklch, var(--accent) 18%, transparent), transparent); color: var(--ink-1); padding: 6px 24px; font-size: 11px; border-bottom: 1px solid var(--rule); letter-spacing: 0.04em; }
+  .preview-banner b { color: var(--accent); letter-spacing: 0.12em; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="preview-banner"><b>ELITE PROTOTYPE</b> &nbsp; trader-first redesign · top 3 picks get hero treatment, watchlist scannable, killed picks collapsed</div>
+
+<header>
+  <div class="brand">
+    <div class="brand-mark">G</div>
+    <div class="brand-info">
+      <div class="name">Gari's Swing Trading</div>
+      <div class="sub" id="brandSub">Trading Desk · Loading…</div>
+    </div>
+  </div>
+  <div class="header-stats">
+    <div class="h-stat"><span class="l">BUY</span><span class="v num up" id="topBuy">—</span></div>
+    <div class="h-stat"><span class="l">WATCH</span><span class="v num" style="color:var(--warn)" id="topWatch">—</span></div>
+    <div class="h-stat"><span class="l">SHORT</span><span class="v num down" id="topShort">—</span></div>
+    <div class="h-stat"><span class="l">UNIVERSE</span><span class="v num dim" id="topUni">—</span></div>
+  </div>
+  <div class="regime-block">
+    <span class="regime-pill neutral" id="regPill">NEUTRAL</span>
+    <span class="regime-meta" id="regMeta">SPY $— · VIX —</span>
+  </div>
+  <div class="clock">
+    <span class="t num" id="clock">—:—:—</span>
+    <span class="d" id="dateLabel">—</span>
+  </div>
+</header>
+
+<nav class="horizon">
+  <div class="h-tab on" data-h="st">
+    <div class="label">Short-term <span class="count" id="cntSt">0</span></div>
+    <div class="sub">7–21 day swings · highest urgency</div>
+  </div>
+  <div class="h-tab" data-h="mt">
+    <div class="label">1–3 Months <span class="count" id="cntMt">0</span></div>
+    <div class="sub">Trend continuation · medium horizon</div>
+  </div>
+  <div class="h-tab" data-h="lt">
+    <div class="label">Long-term <span class="count" id="cntLt">0</span></div>
+    <div class="sub">6–12 mo · fundamentals-driven</div>
+  </div>
+  <div class="horizon-meta" id="horizonMeta">—</div>
+</nav>
+
+<main>
+  <div class="sec-head">
+    <span class="num">01</span>
+    <h2>Today's Conviction</h2>
+    <span class="badge" id="convictionBadge">— picks</span>
+    <span class="desc">Top BUY-rated picks with live trade plans. Click any card for the full 11-section analysis.</span>
+  </div>
+  <div class="hero-grid" id="heroGrid"></div>
+
+  <div class="sec-head" style="margin-top:38px">
+    <span class="num">02</span>
+    <h2>Watchlist</h2>
+    <span class="desc">Scannable rows. Score &amp; verdict left, action right. Click any row for ticker detail.</span>
+  </div>
+  <div class="watch-wrap">
+    <table class="watch-table">
+      <thead>
+        <tr>
+          <th style="width:14%">Symbol</th>
+          <th style="width:11%">Sector</th>
+          <th style="width:9%">Verdict</th>
+          <th style="width:8%">Score</th>
+          <th style="width:8%" class="right">Price</th>
+          <th style="width:7%" class="right">Δ Day</th>
+          <th style="width:6%">RVOL</th>
+          <th style="width:7%" class="right">R:R</th>
+          <th style="width:14%">Setup</th>
+          <th style="width:16%">Trade levels</th>
+        </tr>
+      </thead>
+      <tbody id="watchBody"></tbody>
+    </table>
+  </div>
+
+  <div class="killed-section">
+    <div class="killed-toggle" onclick="this.classList.toggle('open'); document.getElementById('killedBody').classList.toggle('open')">
+      <span class="arrow">▶</span>
+      <span class="lbl">Killed picks</span>
+      <span class="count" id="killedCount">0</span>
+      <span class="desc">Click to see why they were filtered out.</span>
+    </div>
+    <div class="killed-body" id="killedBody">
+      <div class="killed-reasons">
+        <div class="killed-reason"><div class="n num" id="killGate">—</div><div class="l">Failed pre-trade gate</div></div>
+        <div class="killed-reason"><div class="n num" id="killScore">—</div><div class="l">Below score cutoff</div></div>
+        <div class="killed-reason"><div class="n num" id="killEarn">—</div><div class="l">Earnings within 7d</div></div>
+        <div class="killed-reason"><div class="n num" id="killPrice">—</div><div class="l">Price/volume filter</div></div>
+        <div class="killed-reason"><div class="n num" id="killRegime">—</div><div class="l">Regime restrictions</div></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+let DATA = null, CURRENT = 'st';
+const $ = id => document.getElementById(id);
+const fmt = (n, d = 2) => n == null ? '—' : Number(n).toFixed(d);
+const pct = n => n == null ? '—' : (n >= 0 ? '+' : '') + Number(n).toFixed(2) + '%';
+const px  = n => n == null ? '—' : '$' + Number(n).toFixed(2);
+
+async function init() {
+  DATA = await (await fetch('./data.json')).json();
+
+  $('topBuy').textContent  = DATA.buy_count ?? 0;
+  $('topWatch').textContent = DATA.watch_count ?? 0;
+  $('topShort').textContent = 0;
+  const all = (DATA.short_term?.length || 0) + (DATA.medium_term?.length || 0) + (DATA.long_term?.length || 0);
+  $('topUni').textContent = all;
+  $('cntSt').textContent = DATA.short_term?.length || 0;
+  $('cntMt').textContent = DATA.medium_term?.length || 0;
+  $('cntLt').textContent = DATA.long_term?.length || 0;
+
+  const reg = (DATA.regime?.regime4 || DATA.regime?.label || 'neutral').toUpperCase().replace(/_/g, ' ');
+  const regCls = (DATA.regime?.label || '').includes('bull') ? 'bull' : (DATA.regime?.label || '').includes('bear') ? 'bear' : 'neutral';
+  $('regPill').className = 'regime-pill ' + regCls;
+  $('regPill').textContent = reg;
+  $('regMeta').textContent = `SPY ${DATA.regime?.spy_price ? '$' + DATA.regime.spy_price.toFixed(2) : '—'} · VIX ${DATA.regime?.vix ? DATA.regime.vix.toFixed(1) : '—'}`;
+  $('brandSub').textContent = `Trading Desk · ${(DATA.run_timestamp || '').replace('T', ' ')}`;
+
+  document.querySelectorAll('.h-tab').forEach(t => t.addEventListener('click', () => switchHorizon(t.dataset.h)));
+  switchHorizon('st');
+
+  $('killedCount').textContent = DATA.killed_count ?? 0;
+  // Synthetic split for killed reasons (real split would come from the bundle)
+  const k = DATA.killed_count ?? 0;
+  $('killGate').textContent   = Math.round(k * 0.45);
+  $('killScore').textContent  = Math.round(k * 0.30);
+  $('killEarn').textContent   = Math.round(k * 0.08);
+  $('killPrice').textContent  = Math.round(k * 0.10);
+  $('killRegime').textContent = Math.round(k * 0.07);
+
+  const tick = () => {
+    const d = new Date();
+    $('clock').textContent = d.toLocaleTimeString('en-US', {hour12: false});
+    $('dateLabel').textContent = d.toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric'}).toUpperCase();
+  };
+  tick();
+  setInterval(tick, 1000);
+}
+
+function rowsFor() {
+  return CURRENT === 'st' ? (DATA.short_term || []) :
+         CURRENT === 'mt' ? (DATA.medium_term || []) :
+                            (DATA.long_term || []);
+}
+
+function switchHorizon(h) {
+  CURRENT = h;
+  document.querySelectorAll('.h-tab').forEach(t => t.classList.toggle('on', t.dataset.h === h));
+  const rows = rowsFor();
+  $('horizonMeta').textContent = `${rows.length} picks · ${rows.filter(r => (r.stage||r.verdict)==='BUY').length} BUY · ${rows.filter(r => (r.stage||r.verdict)==='WATCH').length} WATCH`;
+  renderHero(rows);
+  renderWatch(rows);
+}
+
+function scoreClass(s) {
+  if (s >= 80) return 's80';
+  if (s >= 70) return 's70';
+  if (s >= 60) return 's60';
+  return 's50';
+}
+function scoreColor(s) {
+  if (s >= 80) return 'var(--bull)';
+  if (s >= 70) return 'oklch(78% 0.16 130)';
+  if (s >= 60) return 'var(--accent)';
+  return 'var(--ink-2)';
+}
+
+/* HERO CARDS — top 3 BUY (or top 3 by score if no BUY) */
+function renderHero(rows) {
+  const sorted = rows.slice().sort((a,b) => (b.score||0) - (a.score||0));
+  const buys = sorted.filter(r => (r.stage||r.verdict) === 'BUY');
+  const top  = (buys.length >= 3 ? buys : sorted).slice(0, 3);
+
+  $('convictionBadge').textContent = `${buys.length || top.length} ${buys.length ? 'BUY' : 'top'}`;
+  if (top.length === 0) {
+    $('heroGrid').innerHTML = `<div class="empty-state" style="grid-column:1/-1">No picks for this horizon. <b>Run a fresh scan</b> or switch tabs.</div>`;
+    return;
+  }
+  $('heroGrid').innerHTML = top.map((t, i) => heroCard(t, i + 1)).join('');
+}
+
+function heroCard(t, rank) {
+  const verdict = t.stage || t.verdict || 'WATCH';
+  const cls = verdict === 'BUY' ? '' : verdict === 'WATCH' ? 'warn' : 'bear';
+  const c = t.pct_chg || 0;
+  const cClass = c > 0 ? 'up' : c < 0 ? 'down' : 'dim';
+  const lo = Math.min(t.stop || t.price * 0.95, t.entry_lo || t.price) * 0.95;
+  const hi = Math.max(t.t2 || t.t1 || t.price * 1.05, t.entry_hi || t.price) * 1.05;
+  const range = hi - lo || 1;
+  const p = v => Math.max(0, Math.min(100, ((v - lo) / range) * 100));
+  const stopX  = p(t.stop || t.price * 0.95);
+  const eL     = p(t.entry_lo || t.price * 0.99);
+  const eR     = p(t.entry_hi || t.price * 1.01);
+  const nowX   = p(t.price);
+  const t1X    = p(t.t1 || t.price * 1.05);
+  const t2X    = t.t2 ? p(t.t2) : t1X;
+
+  const tags = [];
+  if (t.sector) tags.push(`<span class="htag sector">${t.sector}</span>`);
+  if (t.setup) tags.push(`<span class="htag">${t.setup}</span>`);
+  if (t.rvol > 1.2) tags.push(`<span class="htag">RVOL ${t.rvol.toFixed(1)}×</span>`);
+  if (t.earn_days != null && t.earn_days <= 14) tags.push(`<span class="htag warn">EARN +${t.earn_days}d</span>`);
+
+  const rr = t.rr || 0;
+  const shares = Math.max(1, Math.floor(2500 / Math.max(0.01, (t.entry_lo || t.price) - (t.stop || t.price * 0.95))));
+
+  // pillars: tech / fund / smc / news (use what's available, max 4 bars)
+  const techPct = Math.min(100, ((t.tech_pts || 0) / 35) * 100);
+  const fundPct = Math.min(100, ((t.fund_pts || 0) / 10) * 100);
+  const smcPct  = Math.min(100, ((t.smc_pts  || 0) / 10) * 100);
+  const newsPct = Math.max(0, Math.min(100, (((t.news || 0) + 1) / 4) * 100));
+
+  return `
+    <div class="hero ${cls}" onclick="window.location.href='elite-detail.html?t=${t.ticker}&from=${CURRENT}'">
+      <span class="hero-rank">#${rank}</span>
+      <div class="hero-head">
+        <div>
+          <div class="hero-sym">${t.ticker}</div>
+          <div class="hero-name">${t.sector || '—'} · ${verdict} signal</div>
+          <div class="hero-tags">${tags.join('')}</div>
+        </div>
+      </div>
+      <div class="hero-pricerow">
+        <span class="hero-px num">${px(t.price)}</span>
+        <span class="hero-chg num ${cClass}">${pct(c)}</span>
+      </div>
+
+      <div class="hero-ruler">
+        <div class="legend"><span>STOP</span><span>ENTRY</span><span>NOW</span><span>T1</span><span>T2</span></div>
+        <div class="hero-ruler-track">
+          <div class="hr-stop" style="width:${stopX}%"></div>
+          <div class="hr-zone" style="left:${eL}%; width:${Math.max(2, eR - eL)}%"></div>
+          <div class="hr-runway" style="left:${eR}%; right:0"></div>
+          <div class="hr-tick" style="left:${t1X}%"></div>
+          ${t.t2 ? `<div class="hr-tick t2" style="left:${t2X}%"></div>` : ''}
+          <div class="hr-now" style="left:${nowX}%"></div>
+        </div>
+        <div class="hr-ticks-row num">
+          <span class="down">${px(t.stop)}</span>
+          <span class="up">${px(t.entry_lo)}</span>
+          <span>${px(t.price)}</span>
+          <span style="color:var(--accent)">${px(t.t1)}</span>
+          <span style="color:var(--info)">${px(t.t2)}</span>
+        </div>
+      </div>
+
+      <div class="hero-grid-stats">
+        <div class="hero-stat"><span class="l">R:R</span><span class="v num">1:${rr.toFixed(1)}</span></div>
+        <div class="hero-stat"><span class="l">SCORE</span><span class="v num" style="color:${scoreColor(t.score)}">${t.score || 0}</span></div>
+        <div class="hero-stat"><span class="l">RS</span><span class="v num">${t.rs_rank || '—'}</span></div>
+        <div class="hero-stat"><span class="l">SETUP HOLD</span><span class="v">${holdGuide(t.setup)}</span></div>
+      </div>
+
+      <div class="hero-action">
+        <span class="hero-action-text">${verdict === 'BUY' ? `Buy <b>${shares} sh @ ${px(t.entry_lo)}–${px(t.entry_hi)}</b> · stop ${px(t.stop)}` : `Watch for entry above <b>${px(t.entry_lo)}</b>`}</span>
+        <span class="hero-action-go">VIEW PLAN →</span>
+      </div>
+
+      <div class="hero-score-block">
+        <div class="hero-score-row">
+          <span class="hero-score">Conviction <b>${t.score || 0}</b><span style="color:var(--ink-3);font-size:13px">/100</span></span>
+        </div>
+        <div class="hero-pillars">
+          <div class="hp"><div class="f" style="transform:scaleX(${techPct/100})"></div></div>
+          <div class="hp"><div class="f" style="transform:scaleX(${fundPct/100})"></div></div>
+          <div class="hp"><div class="f" style="transform:scaleX(${smcPct/100})"></div></div>
+          <div class="hp"><div class="f" style="transform:scaleX(${newsPct/100})"></div></div>
+        </div>
+        <div class="hero-pillar-labels">
+          <span>TECH</span><span>FUND</span><span>SMC</span><span>NEWS</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function holdGuide(setup) {
+  if (!setup) return '7–14d';
+  if (setup.includes('Impulse'))      return '5–8d';
+  if (setup.includes('Breakout'))     return '7–21d';
+  if (setup.includes('Trend'))        return '7–21d';
+  if (setup.includes('Pullback'))     return '7–14d';
+  if (setup.includes('Special'))      return '5–15d';
+  return '7–14d';
+}
+
+/* WATCHLIST ROWS — clean, scannable */
+function renderWatch(rows) {
+  // Skip top 3 hero picks
+  const sorted = rows.slice().sort((a,b) => (b.score||0) - (a.score||0));
+  const heroSyms = new Set(sorted.slice(0, 3).map(t => t.ticker));
+  const remaining = sorted.filter(t => !heroSyms.has(t.ticker));
+
+  if (remaining.length === 0) {
+    $('watchBody').innerHTML = `<tr><td colspan="10" class="empty-state">All picks shown above as hero cards. <b>No watchlist remainder for this horizon.</b></td></tr>`;
+    return;
+  }
+
+  $('watchBody').innerHTML = remaining.map(t => {
+    const verdict = t.stage || t.verdict || 'WATCH';
+    const c = t.pct_chg || 0;
+    const cClass = c > 0 ? 'up' : c < 0 ? 'down' : 'dim';
+    const sc = t.score || 0;
+    const rr = t.rr || 0;
+    const rrCls = rr >= 3 ? 'good' : rr >= 2 ? 'fair' : 'bad';
+    const sectorTag = t.sector ? `<span class="watch-sector">${t.sector.toUpperCase()}</span>` : '<span class="dim">—</span>';
+    const action = verdict === 'BUY'
+      ? `<span class="b">Buy</span> @ ${px(t.entry_lo)} stop ${px(t.stop)}`
+      : verdict === 'WATCH'
+      ? `Set alert ${px(t.entry_lo)}`
+      : verdict === 'SELL'
+      ? `<span style="color:var(--bear)">Short</span> @ ${px(t.entry_lo)}`
+      : `Skip`;
+
+    return `
+      <tr onclick="window.location.href='elite-detail.html?t=${t.ticker}&from=${CURRENT}'">
+        <td><div class="watch-sym">${t.ticker}</div><div class="watch-name">${t.setup || ''}</div></td>
+        <td>${sectorTag}</td>
+        <td><span class="verdict-pill ${verdict}">${verdict}</span></td>
+        <td><div class="score-cell"><span class="v ${scoreClass(sc)}">${sc}</span><span class="bar"><span class="fill" style="width:${Math.min(100,sc)}%; background:${scoreColor(sc)}"></span></span></div></td>
+        <td class="price-cell num" style="text-align:right">${px(t.price)}</td>
+        <td class="pct-cell num ${cClass}" style="text-align:right">${pct(c)}</td>
+        <td class="num">${t.rvol ? t.rvol.toFixed(1) + '×' : '—'}</td>
+        <td class="rr-cell num ${rrCls}" style="text-align:right">1:${rr.toFixed(1)}</td>
+        <td class="setup-cell">${t.setup || '—'}</td>
+        <td class="levels-cell num">stop <span class="lv down">${px(t.stop)}</span> · t1 <span class="lv">${px(t.t1)}</span></td>
+      </tr>`;
+  }).join('');
+}
+
+init();
+</script>
+</body>
+</html>

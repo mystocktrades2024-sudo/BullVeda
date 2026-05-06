@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SwingTrade Mobile Prototype</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Aptos', -apple-system, system-ui, sans-serif;
+  background: #07111f; color: #e2e8f0; max-width: 420px; margin: 0 auto;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Header */
+.m-header {
+  background: linear-gradient(135deg, #06101e, #0b1a2e);
+  padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.m-header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.m-logo { font-size: 16px; font-weight: 900; }
+.m-logo-accent { color: #22d3ee; }
+.m-regime {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px;
+  border-radius: 16px; background: rgba(14,165,233,.18); border: 1px solid #0ea5e944;
+  font-size: 10px; font-weight: 800; color: #38bdf8;
+}
+.m-kpis { display: flex; gap: 6px; flex-wrap: wrap; }
+.m-kpi {
+  font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 6px;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06);
+}
+.m-kpi b { color: #e2e8f0; }
+.m-kpi-green b { color: #22c55e; }
+.m-kpi-amber b { color: #f59e0b; }
+.m-kpi-red b { color: #ef4444; }
+.m-date { font-size: 9px; color: #475569; }
+
+/* Alert bar */
+.m-alert {
+  display: flex; align-items: center; gap: 6px; padding: 8px 16px;
+  background: rgba(239,68,68,.06); border-bottom: 1px solid rgba(239,68,68,.15);
+  font-size: 11px; overflow-x: auto; white-space: nowrap;
+}
+.m-alert-badge { font-weight: 700; }
+.m-alert-red { color: #f87171; }
+.m-alert-amber { color: #fbbf24; }
+.m-alert-btn {
+  margin-left: auto; padding: 4px 12px; border-radius: 6px; font-size: 10px;
+  font-weight: 700; background: rgba(59,130,246,.15); color: #63b3ed;
+  border: 1px solid rgba(59,130,246,.3); cursor: pointer; flex-shrink: 0;
+}
+
+/* Tab nav */
+.m-tabs {
+  display: flex; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  background: linear-gradient(180deg, rgba(12,22,41,.95), rgba(7,17,31,.98));
+  border-bottom: 1px solid rgba(255,255,255,.06); padding: 0 4px;
+}
+.m-tabs::-webkit-scrollbar { display: none; }
+.m-tab {
+  flex-shrink: 0; padding: 10px 14px; font-size: 12px; font-weight: 700;
+  color: #475569; cursor: pointer; border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.m-tab.active { color: #22d3ee; border-bottom-color: #22d3ee; }
+
+/* Filters */
+.m-filters {
+  display: flex; gap: 6px; padding: 10px 12px; flex-wrap: wrap;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.m-fbtn {
+  padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700;
+  background: transparent; color: #64748b; border: 1px solid rgba(255,255,255,.09);
+  cursor: pointer;
+}
+.m-fbtn.active { background: rgba(59,130,246,.12); color: #63b3ed; border-color: rgba(59,130,246,.3); }
+
+/* Section header */
+.m-section {
+  display: flex; align-items: center; gap: 8px; padding: 12px 16px 8px;
+  font-size: 11px; font-weight: 800; color: #22c55e; letter-spacing: .8px; text-transform: uppercase;
+}
+.m-section::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,.07); }
+
+/* Tile card */
+.m-tile {
+  margin: 8px 12px; background: linear-gradient(180deg, rgba(19,34,58,.9), rgba(12,22,37,.96));
+  border: 1px solid rgba(255,255,255,.07); border-radius: 14px; padding: 14px;
+  position: relative; overflow: hidden;
+}
+.m-tile::before {
+  content: ''; position: absolute; top: 0; left: 0; width: 3px; height: 100%;
+  background: #22c55e; opacity: .6;
+}
+.m-tile-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
+.m-ticker { font-size: 22px; font-weight: 900; letter-spacing: -.4px; }
+.m-stars { color: #f59e0b; font-size: 12px; margin-left: 6px; }
+.m-price { font-size: 18px; font-weight: 800; }
+.m-chg {
+  display: inline-flex; font-size: 11px; font-weight: 700; padding: 2px 8px;
+  border-radius: 20px; margin-left: 6px;
+}
+.m-chg-up { background: rgba(34,197,94,.12); color: #22c55e; border: 1px solid rgba(34,197,94,.3); }
+.m-chg-dn { background: rgba(239,68,68,.1); color: #ef4444; border: 1px solid rgba(239,68,68,.2); }
+.m-name { font-size: 12px; color: #94a3b8; margin-bottom: 2px; }
+.m-sector { font-size: 10px; color: #64748b; }
+.m-score-ring {
+  width: 48px; height: 48px; border-radius: 50%; border: 2.5px solid #22c55e;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(34,197,94,.06); box-shadow: 0 0 14px rgba(34,197,94,.2);
+  flex-shrink: 0;
+}
+.m-score-val { font-size: 18px; font-weight: 900; color: #22c55e; line-height: 1; }
+.m-score-sub { font-size: 7px; color: #64748b; font-weight: 600; }
+
+/* Sparkline */
+.m-spark { margin: 8px 0 6px; }
+
+/* Badges */
+.m-badges { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
+.m-badge {
+  font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 20px;
+  border: 1px solid; letter-spacing: .3px;
+}
+.m-b-buy { background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.4); color: #22c55e; }
+.m-b-watch { background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.35); color: #f59e0b; }
+.m-b-t3 { background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.3); color: #fcd34d; }
+.m-b-cat { background: rgba(167,139,250,.12); border-color: rgba(167,139,250,.4); color: #a78bfa; }
+.m-b-ext { background: rgba(251,146,60,.1); border-color: rgba(251,146,60,.35); color: #fb923c; }
+.m-b-state { background: rgba(59,130,246,.12); border-color: rgba(59,130,246,.4); color: #93c5fd; }
+.m-b-trend { background: rgba(34,197,94,.1); border-color: rgba(34,197,94,.3); color: #22c55e; }
+
+/* Zone + timing */
+.m-zone { display: flex; gap: 6px; margin: 6px 0; }
+.m-zone-badge {
+  font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 6px;
+}
+.m-z-mod { background: rgba(245,158,11,.08); color: #f59e0b; border: 1px solid rgba(245,158,11,.2); }
+.m-z-late { background: rgba(239,68,68,.08); color: #f87171; border: 1px solid rgba(239,68,68,.2); }
+.m-z-strong { background: rgba(34,197,94,.08); color: #4ade80; border: 1px solid rgba(34,197,94,.2); }
+
+/* Earnings warning */
+.m-earnings {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px;
+  background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.2); margin: 8px 0;
+  font-size: 12px;
+}
+.m-earnings-icon { font-size: 16px; }
+.m-earnings-text { font-weight: 700; color: #f59e0b; }
+.m-earnings-sub { font-size: 11px; color: #94a3b8; }
+
+/* Checklist */
+.m-checklist { margin: 8px 0; }
+.m-check-title { font-size: 11px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 6px; }
+.m-check-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #94a3b8; padding: 3px 0; }
+.m-check-pass { color: #22c55e; font-weight: 700; }
+.m-check-fail { color: #64748b; font-weight: 700; }
+
+/* Sizing + family */
+.m-sizing { font-size: 11px; color: #64748b; margin: 6px 0; }
+.m-sizing b { color: #94a3b8; }
+.m-family {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700;
+  padding: 5px 12px; border-radius: 20px; background: rgba(34,197,94,.1);
+  border: 1px solid rgba(34,197,94,.3); color: #22c55e; margin: 6px 0;
+}
+
+/* Trade plan */
+.m-plan {
+  display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid rgba(255,255,255,.09);
+  border-radius: 8px; overflow: hidden; margin: 8px 0;
+}
+.m-plan-cell { padding: 8px 4px; text-align: center; border-right: 1px solid rgba(255,255,255,.09); }
+.m-plan-cell:last-child { border-right: none; }
+.m-pc-lbl { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #64748b; margin-bottom: 3px; }
+.m-pc-val { font-size: 13px; font-weight: 900; color: #e2e8f0; }
+.m-pc-sub { font-size: 9px; color: #64748b; margin-top: 2px; }
+.m-pc-stop .m-pc-lbl, .m-pc-stop .m-pc-val { color: #ef4444; }
+.m-pc-t1 .m-pc-lbl, .m-pc-t1 .m-pc-val { color: #22c55e; }
+.m-pc-t2 .m-pc-lbl, .m-pc-t2 .m-pc-val { color: #3b82f6; }
+
+/* Actions */
+.m-actions { display: flex; gap: 8px; margin-top: 10px; }
+.m-btn-long {
+  flex: 0; padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 700;
+  background: #22c55e; color: #000; border: none; cursor: pointer;
+}
+.m-btn-analysis {
+  flex: 1; padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  background: transparent; color: #94a3b8; border: 1px solid rgba(255,255,255,.09);
+  cursor: pointer; text-align: center;
+}
+
+/* Fund strip */
+.m-fund {
+  display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 10px; margin: 6px 0;
+  background: rgba(59,130,246,.04); border: 1px solid rgba(59,130,246,.12);
+  border-radius: 7px; font-size: 11px; color: #94a3b8;
+}
+.m-fund b { font-weight: 800; }
+
+/* VP chips */
+.m-vp { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
+.m-vp-chip {
+  font-size: 9px; font-weight: 700; padding: 3px 8px; border-radius: 4px;
+}
+.m-vp-poc { background: rgba(249,115,22,.15); color: #fb923c; border: 1px solid rgba(249,115,22,.3); }
+.m-vp-va { background: rgba(59,130,246,.1); color: #60a5fa; border: 1px solid rgba(59,130,246,.2); }
+.m-vp-lvn { background: rgba(167,139,250,.1); color: #a78bfa; border: 1px solid rgba(167,139,250,.2); }
+
+/* Thesis */
+.m-thesis {
+  font-size: 11px; color: #94a3b8; line-height: 1.5; padding: 6px 0;
+  border-top: 1px solid rgba(255,255,255,.06); margin-top: 6px;
+}
+
+/* KPI chips row */
+.m-kpi-row { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0; }
+.m-kpi-chip {
+  font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 4px;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); color: #94a3b8;
+}
+.m-kpi-chip b { color: #e2e8f0; }
+
+/* Portfolio cards */
+.m-portfolio-card {
+  margin: 6px 12px; padding: 12px 14px; border-radius: 10px;
+  background: linear-gradient(180deg, rgba(19,34,58,.9), rgba(12,22,37,.96));
+  border: 1px solid rgba(255,255,255,.07); display: flex; align-items: center; gap: 12px;
+}
+.m-pf-left { flex: 1; }
+.m-pf-ticker { font-size: 16px; font-weight: 900; }
+.m-pf-meta { font-size: 11px; color: #64748b; }
+.m-pf-right { text-align: right; }
+.m-pf-price { font-size: 14px; font-weight: 800; }
+.m-pf-pnl { font-size: 13px; font-weight: 800; }
+.m-pf-green { color: #22c55e; }
+.m-pf-red { color: #ef4444; }
+
+/* Summary card */
+.m-summary {
+  margin: 8px 12px; padding: 14px; border-radius: 10px;
+  background: linear-gradient(135deg, rgba(12,22,41,.8), rgba(19,34,58,.6));
+  border: 1px solid rgba(255,255,255,.07);
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+}
+.m-sum-item { text-align: center; }
+.m-sum-val { font-size: 20px; font-weight: 900; }
+.m-sum-lbl { font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
+
+/* Stop alerts */
+.m-stop-alert {
+  margin: 6px 12px; padding: 10px 14px; border-radius: 8px; display: flex;
+  align-items: center; gap: 8px; font-size: 12px; font-weight: 700;
+}
+.m-sa-green { background: rgba(34,197,94,.08); border: 1px solid rgba(34,197,94,.2); color: #4ade80; }
+.m-sa-amber { background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.2); color: #fbbf24; }
+.m-sa-red { background: rgba(239,68,68,.08); border: 1px solid rgba(239,68,68,.2); color: #f87171; }
+
+/* Page divider */
+.m-divider { height: 6px; background: rgba(0,0,0,.3); }
+
+/* Bottom nav (fixed) */
+.m-bottom-nav {
+  position: fixed; bottom: 0; left: 0; right: 0; max-width: 420px; margin: 0 auto;
+  display: flex; background: linear-gradient(180deg, #0b1a2e, #06101e);
+  border-top: 1px solid rgba(255,255,255,.08); padding: 6px 0;
+  padding-bottom: env(safe-area-inset-bottom, 8px);
+}
+.m-bnav-item {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font-size: 9px; font-weight: 700; color: #475569; cursor: pointer; padding: 4px;
+}
+.m-bnav-item.active { color: #22d3ee; }
+.m-bnav-icon { font-size: 18px; }
+
+body { padding-bottom: 70px; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="m-header">
+  <div class="m-header-top">
+    <div>
+      <div class="m-logo">&#128200; Gari's <span class="m-logo-accent">Swing Trading</span></div>
+    </div>
+    <span class="m-regime">&#9670; RISK-ON CHOPPY</span>
+  </div>
+  <div class="m-kpis">
+    <span class="m-kpi m-kpi-amber">VIX <b>19.1</b></span>
+    <span class="m-kpi m-kpi-green">Breadth <b>70%</b></span>
+    <span class="m-kpi">SPY <b>$704</b></span>
+    <span class="m-kpi">Dist <b style="color:#f59e0b">5</b></span>
+    <span class="m-kpi">Size <b>70%</b></span>
+    <span class="m-date">2026-04-22 08:00</span>
+  </div>
+</div>
+
+<!-- ALERT BAR -->
+<div class="m-alert">
+  <span class="m-alert-badge m-alert-red">&#128308; NLP 0%</span>
+  <span class="m-alert-badge m-alert-red">&#128308; Analyst 0%</span>
+  <span class="m-alert-badge m-alert-amber">&#128992; Insider 48%</span>
+  <span style="color:#64748b;font-size:10px">12/15</span>
+  <button class="m-alert-btn">&#8635; Rescan</button>
+</div>
+
+<!-- FILTERS -->
+<div class="m-filters">
+  <button class="m-fbtn active">All (15)</button>
+  <button class="m-fbtn">BUY Only</button>
+  <button class="m-fbtn">Watch</button>
+  <button class="m-fbtn">Shorts</button>
+</div>
+<div class="m-filters" style="padding-top:0">
+  <button class="m-fbtn active">Under $100</button>
+  <button class="m-fbtn">$100-250</button>
+  <button class="m-fbtn">$250+</button>
+  <button class="m-fbtn">All</button>
+</div>
+
+<!-- BUY SIGNALS SECTION -->
+<div class="m-section" style="color:#22c55e">&#9654; BUY SIGNALS (5)</div>
+
+<!-- TILE 1: CC -->
+<div class="m-tile">
+  <div class="m-tile-header">
+    <div>
+      <div>
+        <span class="m-ticker">CC</span>
+        <span class="m-stars">&#9733;&#9733;&#9733;&#9734;</span>
+        <span class="m-price" style="margin-left:8px">$23.76</span>
+        <span class="m-chg m-chg-up">&#9650; 2.1%</span>
+      </div>
+      <div class="m-name">CHEMOURS CO</div>
+      <div class="m-sector">Basic Materials &middot; CHEMICALS</div>
+    </div>
+    <div class="m-score-ring">
+      <div class="m-score-val">79</div>
+      <div class="m-score-sub">/100</div>
+    </div>
+  </div>
+
+  <!-- Sparkline -->
+  <div class="m-spark">
+    <svg width="100%" height="32" viewBox="0 0 300 32">
+      <rect x="0" y="18" width="300" height="8" fill="rgba(34,197,94,.08)" rx="2"/>
+      <polyline points="0,28 15,26 30,24 45,25 60,22 75,20 90,18 105,16 120,17 135,15 150,14 165,12 180,13 195,10 210,8 225,9 240,6 255,5 270,4 285,3 300,2" fill="none" stroke="#22c55e" stroke-width="1.5" stroke-linejoin="round"/>
+    </svg>
+  </div>
+
+  <div class="m-badges">
+    <span class="m-badge m-b-buy">BUY</span>
+    <span class="m-badge m-b-state">POST BREAKOUT DRIFT</span>
+    <span class="m-badge m-b-t3">T3</span>
+    <span class="m-badge m-b-cat">Cat T1</span>
+    <span class="m-badge m-b-ext">EXTENDED</span>
+  </div>
+
+  <div class="m-badges">
+    <span class="m-badge m-b-trend">Trend</span>
+    <span class="m-badge m-b-trend">Shallow PB</span>
+  </div>
+
+  <div class="m-zone">
+    <span class="m-zone-badge m-z-mod">Zone: Moderate</span>
+    <span class="m-zone-badge m-z-late">Timing: Late</span>
+  </div>
+
+  <div class="m-checklist">
+    <div class="m-check-title">Reaction Checklist</div>
+    <div class="m-check-item"><span class="m-check-fail">&#10007;</span> Bullish candle (close in upper 40%)</div>
+    <div class="m-check-item"><span class="m-check-fail">&#10007;</span> Volume expansion (>1.2x 20d avg)</div>
+    <div class="m-check-item"><span class="m-check-pass">&#10003;</span> MACD histogram rising 2+ bars</div>
+    <div class="m-check-item"><span class="m-check-pass">&#10003;</span> Price holding above zone low</div>
+    <div class="m-check-item"><span class="m-check-fail">&#10007;</span> RSI turning up (>40 cross or >50 rising)</div>
+  </div>
+
+  <div class="m-sizing">&beta;1.4 &rarr; <b>25% size &middot; 6% alloc</b></div>
+
+  <div class="m-family">Breakout Expansion &middot; 7-21d</div>
+
+  <!-- Trade Plan -->
+  <div class="m-plan">
+    <div class="m-plan-cell m-pc-stop">
+      <div class="m-pc-lbl">Stop</div>
+      <div class="m-pc-val">$21.30</div>
+      <div class="m-pc-sub">-10.3%</div>
+    </div>
+    <div class="m-plan-cell">
+      <div class="m-pc-lbl">Entry</div>
+      <div class="m-pc-val">$23.76</div>
+      <div class="m-pc-sub">6% alloc</div>
+    </div>
+    <div class="m-plan-cell m-pc-t1">
+      <div class="m-pc-lbl">T1</div>
+      <div class="m-pc-val">$28.50</div>
+      <div class="m-pc-sub">+19.9%</div>
+    </div>
+    <div class="m-plan-cell m-pc-t2">
+      <div class="m-pc-lbl">T2</div>
+      <div class="m-pc-val">$32.00</div>
+      <div class="m-pc-sub">+34.7%</div>
+    </div>
+  </div>
+
+  <!-- Fund strip -->
+  <div class="m-fund">
+    <span>16/30 &middot;</span>
+    <span>Rev <b style="color:#22c55e">+12%</b> &middot;</span>
+    <span>Margin <b>-6.7%</b> &middot;</span>
+    <span>Analyst <b style="color:#22c55e">strong_buy</b> &middot;</span>
+    <span>PEG <b>0.24</b> &middot;</span>
+    <span>Beat <b style="color:#22c55e">50%</b></span>
+  </div>
+
+  <!-- VP chips -->
+  <div class="m-vp">
+    <span class="m-vp-chip m-vp-poc">POC $18 (+33%)</span>
+    <span class="m-vp-chip m-vp-va">VA $16-$22</span>
+    <span class="m-vp-chip m-vp-lvn">LVN $24-$24</span>
+  </div>
+
+  <!-- KPI row -->
+  <div class="m-kpi-row">
+    <span class="m-kpi-chip">IV <b>75%ile</b></span>
+    <span class="m-kpi-chip">P/C <b>0.1</b></span>
+    <span class="m-kpi-chip">&#9679;+ stabilizing</span>
+  </div>
+
+  <!-- Thesis -->
+  <div class="m-thesis">
+    CC T3 long &mdash; 52wk Breakout. Catalyst: BREAKOUT + MOMENTUM.
+    Confirmation: strong uptrend with EMA8 at $23.26. Entry: $23.48 (EXTENDED), Stop: $22.53...
+  </div>
+
+  <div class="m-actions">
+    <button class="m-btn-long">+ Long</button>
+    <button class="m-btn-analysis">Full Analysis &rarr;</button>
+  </div>
+</div>
+
+<!-- TILE 2: BHE (compact) -->
+<div class="m-tile">
+  <div class="m-tile-header">
+    <div>
+      <div>
+        <span class="m-ticker">BHE</span>
+        <span class="m-stars">&#9733;&#9733;&#9733;&#9733;</span>
+        <span class="m-price" style="margin-left:8px">$65.82</span>
+        <span class="m-chg m-chg-up">&#9650; 1.3%</span>
+      </div>
+      <div class="m-name">BENCHMARK ELECTRS INC</div>
+      <div class="m-sector">Technology &middot; PRINTED CIRCUIT BOARDS</div>
+    </div>
+    <div class="m-score-ring">
+      <div class="m-score-val">77</div>
+      <div class="m-score-sub">/100</div>
+    </div>
+  </div>
+  <div class="m-spark">
+    <svg width="100%" height="32" viewBox="0 0 300 32">
+      <polyline points="0,30 30,28 60,25 90,22 120,20 150,18 180,15 210,12 240,8 270,5 300,3" fill="none" stroke="#22c55e" stroke-width="1.5" stroke-linejoin="round"/>
+    </svg>
+  </div>
+  <div class="m-badges">
+    <span class="m-badge m-b-buy">BUY</span>
+    <span class="m-badge m-b-ext">MISSED</span>
+    <span class="m-badge m-b-t3">T3</span>
+    <span class="m-badge m-b-cat">Cat T1</span>
+  </div>
+  <div class="m-earnings">
+    <span class="m-earnings-icon">&#9888;&#65039;</span>
+    <div>
+      <div class="m-earnings-text">Earnings in 6 days (Apr 29)</div>
+      <div class="m-earnings-sub">Consider exiting before or sizing down</div>
+    </div>
+  </div>
+  <div class="m-plan">
+    <div class="m-plan-cell m-pc-stop"><div class="m-pc-lbl">Stop</div><div class="m-pc-val">$59.20</div></div>
+    <div class="m-plan-cell"><div class="m-pc-lbl">Entry</div><div class="m-pc-val">$65.82</div></div>
+    <div class="m-plan-cell m-pc-t1"><div class="m-pc-lbl">T1</div><div class="m-pc-val">$75.40</div></div>
+    <div class="m-plan-cell m-pc-t2"><div class="m-pc-lbl">T2</div><div class="m-pc-val">$82.00</div></div>
+  </div>
+  <div class="m-actions">
+    <button class="m-btn-long">+ Long</button>
+    <button class="m-btn-analysis">Full Analysis &rarr;</button>
+  </div>
+</div>
+
+<!-- WATCH SECTION -->
+<div class="m-section" style="color:#f59e0b">&#128065; WATCH LIST (5)</div>
+
+<div class="m-tile" style="padding:10px 14px">
+  <div style="display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <span style="font-size:16px;font-weight:900">CIEN</span>
+      <span style="font-size:12px;color:#94a3b8;margin-left:8px">$477.56</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="m-badge m-b-watch">WATCH</span>
+      <div style="font-size:16px;font-weight:900;color:#f59e0b">72</div>
+    </div>
+  </div>
+</div>
+<div class="m-tile" style="padding:10px 14px">
+  <div style="display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <span style="font-size:16px;font-weight:900">LSCC</span>
+      <span style="font-size:12px;color:#94a3b8;margin-left:8px">$112.27</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="m-badge m-b-watch">WATCH</span>
+      <div style="font-size:16px;font-weight:900;color:#f59e0b">70</div>
+    </div>
+  </div>
+</div>
+
+<div class="m-divider"></div>
+
+<!-- ======================== PORTFOLIO PAGE ======================== -->
+<div style="padding-top:8px">
+  <div class="m-section" style="color:#63b3ed">&#128188; PORTFOLIO</div>
+
+  <div class="m-summary">
+    <div class="m-sum-item">
+      <div class="m-sum-val" style="color:#e2e8f0">$100,000</div>
+      <div class="m-sum-lbl">Equity</div>
+    </div>
+    <div class="m-sum-item">
+      <div class="m-sum-val" style="color:#22c55e">+$1,247</div>
+      <div class="m-sum-lbl">Total P&L</div>
+    </div>
+    <div class="m-sum-item">
+      <div class="m-sum-val" style="color:#e2e8f0">12</div>
+      <div class="m-sum-lbl">Positions</div>
+    </div>
+    <div class="m-sum-item">
+      <div class="m-sum-val" style="color:#22c55e">67%</div>
+      <div class="m-sum-lbl">Win Rate</div>
+    </div>
+  </div>
+
+  <!-- Stop Alerts -->
+  <div class="m-stop-alert m-sa-green">
+    &#9650; CRUS hit T1 &mdash; move stop to breakeven ($161.00)
+  </div>
+  <div class="m-stop-alert m-sa-amber">
+    &#9888; NVT stop approaching &mdash; $133.83 vs stop $130.00 (2.9%)
+  </div>
+
+  <!-- Position Cards -->
+  <div class="m-portfolio-card">
+    <div class="m-pf-left">
+      <div class="m-pf-ticker">CRUS</div>
+      <div class="m-pf-meta">Entry $161.00 &middot; 10 shares</div>
+    </div>
+    <div class="m-pf-right">
+      <div class="m-pf-price">$167.81</div>
+      <div class="m-pf-pnl m-pf-green">+$68.10 (+4.2%)</div>
+    </div>
+  </div>
+
+  <div class="m-portfolio-card">
+    <div class="m-pf-left">
+      <div class="m-pf-ticker">JAZZ</div>
+      <div class="m-pf-meta">Entry $193.97 &middot; 51 shares</div>
+    </div>
+    <div class="m-pf-right">
+      <div class="m-pf-price">$203.28</div>
+      <div class="m-pf-pnl m-pf-green">+$474.81 (+4.8%)</div>
+    </div>
+  </div>
+
+  <div class="m-portfolio-card">
+    <div class="m-pf-left">
+      <div class="m-pf-ticker">CGNX</div>
+      <div class="m-pf-meta">Entry $53.58 &middot; 186 shares</div>
+    </div>
+    <div class="m-pf-right">
+      <div class="m-pf-price">$55.49</div>
+      <div class="m-pf-pnl m-pf-green">+$355.26 (+3.6%)</div>
+    </div>
+  </div>
+
+  <div class="m-portfolio-card">
+    <div class="m-pf-left">
+      <div class="m-pf-ticker">NVT</div>
+      <div class="m-pf-meta">Entry $133.83 &middot; 10 shares</div>
+    </div>
+    <div class="m-pf-right">
+      <div class="m-pf-price">$134.76</div>
+      <div class="m-pf-pnl m-pf-green">+$9.30 (+0.7%)</div>
+    </div>
+  </div>
+</div>
+
+<!-- BOTTOM NAV -->
+<div class="m-bottom-nav">
+  <div class="m-bnav-item active">
+    <span class="m-bnav-icon">&#127919;</span>
+    <span>Trades</span>
+  </div>
+  <div class="m-bnav-item">
+    <span class="m-bnav-icon">&#128188;</span>
+    <span>Portfolio</span>
+  </div>
+  <div class="m-bnav-item">
+    <span class="m-bnav-icon">&#9878;</span>
+    <span>Analysis</span>
+  </div>
+  <div class="m-bnav-item">
+    <span class="m-bnav-icon">&#128202;</span>
+    <span>Perf</span>
+  </div>
+  <div class="m-bnav-item">
+    <span class="m-bnav-icon">&#128268;</span>
+    <span>More</span>
+  </div>
+</div>
+
+</body>
+</html>

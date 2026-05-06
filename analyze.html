@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SwingTrade — Live Analysis</title>
+<style>
+:root {
+  --bg: #f0f2f5; --surface: #ffffff; --border: #e2e8f0;
+  --text: #1e293b; --text-muted: #64748b; --text-light: #94a3b8;
+  --primary: #2563eb; --primary-light: #dbeafe;
+  --green: #059669; --green-bg: #ecfdf5; --green-border: #a7f3d0;
+  --red: #dc2626; --red-bg: #fef2f2; --red-border: #fecaca;
+  --amber: #d97706; --amber-bg: #fffbeb; --amber-border: #fde68a;
+  --radius: 12px; --radius-sm: 8px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background: var(--bg); color: var(--text); }
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
+.topbar h1 { font-size: 18px; font-weight: 700; }
+.topbar a { color: var(--primary); text-decoration: none; font-size: 13px; font-weight: 600; }
+.topbar a:hover { text-decoration: underline; }
+.container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+/* Search bar */
+.search-bar { display: flex; gap: 10px; margin-bottom: 20px; }
+.search-bar input { flex: 1; max-width: 300px; padding: 12px 16px; border: 2px solid var(--border); border-radius: var(--radius); font-size: 16px; font-weight: 600; text-transform: uppercase; background: var(--surface); transition: border-color .2s; }
+.search-bar input:focus { outline: none; border-color: var(--primary); }
+.search-bar button { background: var(--primary); color: #fff; border: none; border-radius: var(--radius); padding: 12px 32px; font-weight: 700; font-size: 15px; cursor: pointer; transition: background .2s; }
+.search-bar button:hover { background: #1d4ed8; }
+.search-bar button:disabled { background: var(--text-light); cursor: not-allowed; }
+
+/* Layout */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 20px; }
+@media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+/* Cards */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 14px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); display: flex; align-items: center; gap: 8px; }
+.card-body { padding: 20px; }
+
+/* Verdict banner */
+.verdict-banner { padding: 24px; border-radius: var(--radius); margin-bottom: 0; display: flex; align-items: center; gap: 20px; }
+.verdict-banner.buy { background: var(--green-bg); border: 2px solid var(--green-border); }
+.verdict-banner.watch { background: var(--amber-bg); border: 2px solid var(--amber-border); }
+.verdict-banner.avoid { background: var(--red-bg); border: 2px solid var(--red-border); }
+.verdict-badge { font-size: 28px; font-weight: 800; padding: 8px 24px; border-radius: var(--radius-sm); color: #fff; }
+.verdict-badge.buy { background: var(--green); }
+.verdict-badge.watch { background: var(--amber); }
+.verdict-badge.avoid { background: var(--red); }
+.verdict-info { flex: 1; }
+.verdict-ticker { font-size: 24px; font-weight: 800; }
+.verdict-reason { font-size: 14px; color: var(--text-muted); margin-top: 4px; }
+.verdict-score { font-size: 36px; font-weight: 800; text-align: right; }
+.verdict-score small { font-size: 14px; color: var(--text-muted); display: block; }
+
+/* ── Tab Bar ──────────────────────────────────── */
+.tab-bar {
+  display: flex; gap: 0; margin: 20px 0 0 0;
+  border-bottom: 2px solid var(--border);
+}
+.tab-btn {
+  padding: 12px 28px; font-size: 14px; font-weight: 700; cursor: pointer;
+  background: none; border: none; color: var(--text-muted);
+  border-bottom: 3px solid transparent; margin-bottom: -2px;
+  transition: color .15s, border-color .15s;
+  text-transform: uppercase; letter-spacing: .5px;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab-panel { display: none; padding-top: 20px; }
+.tab-panel.active { display: block; }
+
+/* Pillar scores */
+.pillar { padding: 16px; }
+.pillar-name { font-size: 13px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+.pillar-score { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
+.pillar-bar { height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+.pillar-fill { height: 100%; border-radius: 4px; transition: width .5s ease; }
+.pillar-details { margin-top: 12px; }
+.pillar-detail { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
+.pillar-detail:last-child { border-bottom: none; }
+.pillar-detail .label { color: var(--text-muted); }
+.pillar-detail .value { font-weight: 600; }
+
+/* Trade plan */
+.plan-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; }
+.plan-row:last-child { border-bottom: none; }
+.plan-label { color: var(--text-muted); }
+.plan-value { font-weight: 700; }
+.plan-value.green { color: var(--green); }
+.plan-value.red { color: var(--red); }
+.plan-value.amber { color: var(--amber); }
+
+/* TradingView containers */
+.tv-chart { width: 100%; height: 500px; }
+.tv-ta { width: 100%; height: 420px; }
+
+/* Loading */
+.loading { text-align: center; padding: 60px 20px; }
+.loading .spinner { width: 40px; height: 40px; border: 4px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 16px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { font-size: 16px; font-weight: 600; color: var(--text-muted); }
+.loading-sub { font-size: 13px; color: var(--text-light); margin-top: 4px; }
+
+/* Gate info */
+.gate-pass { color: var(--green); font-weight: 700; }
+.gate-fail { color: var(--red); font-weight: 700; }
+.gate-reasons { margin-top: 8px; }
+.gate-reasons li { font-size: 13px; color: var(--red); margin-bottom: 4px; }
+
+/* Initial state */
+.empty-state { text-align: center; padding: 80px 20px; color: var(--text-light); }
+.empty-state .icon { font-size: 48px; margin-bottom: 16px; }
+.empty-state .title { font-size: 20px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; }
+.empty-state .subtitle { font-size: 14px; }
+
+/* Bear setup */
+.bear-card { background: #fef2f2; border: 1px solid var(--red-border); border-radius: var(--radius-sm); padding: 12px 16px; margin-top: 12px; }
+.bear-card.low { background: var(--green-bg); border-color: var(--green-border); }
+
+/* ── SMC Matrix (dark theme) ─────────────────── */
+.smc-matrix-wrap {
+  background: #080c14; border-radius: var(--radius); overflow: hidden;
+  border: 1px solid rgba(255,255,255,.07);
+}
+.smc-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; background: #0d1320; border-bottom: 1px solid rgba(255,255,255,.07);
+}
+.smc-header .smc-title { font-size: 15px; font-weight: 700; color: #e2e8f0; text-transform: uppercase; letter-spacing: .5px; }
+.smc-header .smc-price { font-size: 15px; font-weight: 700; color: #e2e8f0; }
+.smc-header .smc-change { font-size: 13px; font-weight: 600; margin-left: 8px; }
+.smc-section-label {
+  padding: 10px 20px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1px; color: #64748b; background: #0d1320;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+}
+.smc-table {
+  width: 100%; border-collapse: collapse; font-size: 13px; color: #e2e8f0;
+  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
+}
+.smc-table th {
+  background: #111827; color: #64748b; font-size: 10px; text-transform: uppercase;
+  letter-spacing: .7px; padding: 8px 10px; text-align: left; font-weight: 700;
+  position: sticky; top: 0; border-bottom: 1px solid rgba(255,255,255,.1);
+}
+.smc-table td {
+  padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,.04);
+  white-space: nowrap; vertical-align: middle; line-height: 1.3;
+}
+.smc-table tr:nth-child(odd) td { background: #0d1320; }
+.smc-table tr:nth-child(even) td { background: #111827; }
+.smc-table tr:hover td { background: #1a2236 !important; }
+.smc-table .tf-col { font-weight: 700; color: #94a3b8; width: 52px; }
+.smc-table .confluence-col { font-weight: 800; }
+
+.smc-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; line-height: 1.4; }
+.smc-green { color: #22c55e; }
+.smc-red { color: #ef4444; }
+.smc-amber { color: #f59e0b; }
+.smc-cyan { color: #22d3ee; }
+.smc-dim { color: #475569; }
+.smc-badge-green { background: rgba(34,197,94,.15); color: #22c55e; }
+.smc-badge-red { background: rgba(239,68,68,.15); color: #ef4444; }
+.smc-badge-amber { background: rgba(245,158,11,.15); color: #f59e0b; }
+.smc-badge-neutral { background: rgba(100,116,139,.15); color: #94a3b8; }
+.smc-squeeze-dot { font-size: 14px; vertical-align: middle; margin-right: 3px; }
+
+.smc-confluence-card { margin: 0; padding: 20px; background: #0d1320; border-top: 1px solid rgba(255,255,255,.07); }
+.smc-confluence-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 32px; font-size: 13px; color: #94a3b8; }
+.smc-confluence-grid .label { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+.smc-confluence-grid .value { font-weight: 700; color: #e2e8f0; margin-top: 2px; }
+.smc-verdict { margin-top: 16px; padding: 12px 16px; border-radius: 8px; font-weight: 800; font-size: 14px; }
+.smc-verdict-buy { background: rgba(34,197,94,.12); color: #22c55e; border-left: 4px solid #22c55e; }
+.smc-verdict-short { background: rgba(239,68,68,.12); color: #ef4444; border-left: 4px solid #ef4444; }
+.smc-verdict-wait { background: rgba(245,158,11,.12); color: #f59e0b; border-left: 4px solid #f59e0b; }
+.smc-verdict-notrade { background: rgba(100,116,139,.12); color: #94a3b8; border-left: 4px solid #64748b; }
+.smc-findings { margin-top: 12px; font-size: 12px; color: #94a3b8; list-style: none; }
+.smc-findings li { padding: 2px 0; }
+
+.smc-loading { text-align: center; padding: 40px; color: #64748b; font-size: 14px; }
+.smc-loading .spinner { width: 28px; height: 28px; border: 3px solid #1a2236; border-top-color: #3b82f6; border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 12px; }
+
+@media (max-width: 900px) {
+  .smc-table { font-size: 11px; }
+  .smc-table td, .smc-table th { padding: 5px 6px; }
+  .smc-confluence-grid { grid-template-columns: 1fr; }
+  .tab-btn { padding: 10px 16px; font-size: 12px; }
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>SwingTrade</h1>
+  <a href="/dashboard">Dashboard</a>
+  <a href="/analyze" style="color:var(--text);font-weight:800">Live Analysis</a>
+</div>
+
+<div class="container">
+  <div class="search-bar">
+    <input id="ticker-input" placeholder="Enter ticker (e.g. NVDA)" autofocus
+           onkeydown="if(event.key==='Enter')runAnalysis()">
+    <button id="analyze-btn" onclick="runAnalysis()">Analyze</button>
+  </div>
+
+  <!-- Empty state -->
+  <div id="empty-state" class="empty-state">
+    <div class="icon">&#128270;</div>
+    <div class="title">Live Ticker Analysis</div>
+    <div class="subtitle">Enter any ticker to get full 4-pillar scoring, SMC multi-timeframe matrix, trade plan, and verdict</div>
+  </div>
+
+  <!-- Loading -->
+  <div id="loading" style="display:none" class="loading">
+    <div class="spinner"></div>
+    <div class="loading-text">Analyzing <span id="loading-ticker"></span>...</div>
+    <div class="loading-sub">Running 4-pillar scoring engine + SMC multi-timeframe matrix</div>
+  </div>
+
+  <!-- Results -->
+  <div id="results" style="display:none">
+
+    <!-- Verdict banner (always visible) -->
+    <div id="verdict-banner" class="verdict-banner"></div>
+
+    <!-- Tab bar -->
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('overview',this)">Overview</button>
+      <button class="tab-btn" onclick="switchTab('smc-matrix',this)">SMC Matrix</button>
+      <button class="tab-btn" onclick="switchTab('chart',this)">Chart</button>
+    </div>
+
+    <!-- Tab: Overview -->
+    <div id="tab-overview" class="tab-panel active">
+      <!-- 4 Pillar Scores -->
+      <div class="grid-3" id="pillars"></div>
+
+      <!-- Trade Plan + Gate + Bear Setup -->
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">Trade Plan</div>
+          <div class="card-body" id="trade-plan"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">Pre-Trade Gate</div>
+          <div class="card-body" id="gate-info"></div>
+          <div class="card-header" style="border-top:1px solid var(--border)">Bear Setup</div>
+          <div class="card-body" id="bear-info"></div>
+        </div>
+      </div>
+
+      <!-- Sentiment + Extras -->
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">News &amp; Sentiment</div>
+          <div class="card-body" id="news-info"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">Elliott Wave + Patterns</div>
+          <div class="card-body" id="extras-info"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: SMC Matrix -->
+    <div id="tab-smc-matrix" class="tab-panel">
+      <div class="smc-matrix-wrap">
+        <div class="smc-header">
+          <span class="smc-title">SMC Multi-Timeframe Matrix</span>
+          <span id="smc-price-info"></span>
+        </div>
+        <div id="smc-matrix-content">
+          <div class="smc-loading"><div class="spinner"></div>Loading SMC matrix...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Chart -->
+    <div id="tab-chart" class="tab-panel">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">TradingView Chart</div>
+          <div class="card-body" style="padding:0">
+            <div id="tv-chart" class="tv-chart"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">TradingView Technical Analysis</div>
+          <div class="card-body" style="padding:0">
+            <div id="tv-ta" class="tv-ta"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+var currentTicker = '';
+
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-panel').forEach(function(el) { el.classList.remove('active'); });
+  document.querySelectorAll('.tab-btn').forEach(function(el) { el.classList.remove('active'); });
+  document.getElementById('tab-' + name).classList.add('active');
+  if (btn) btn.classList.add('active');
+  // Lazy-load TV chart only when Chart tab is opened
+  if (name === 'chart' && currentTicker && !document.getElementById('tv-chart').innerHTML) {
+    loadTVChart(currentTicker);
+    loadTVTA(currentTicker);
+  }
+}
+
+function runAnalysis() {
+  var input = document.getElementById('ticker-input');
+  var ticker = input.value.trim().toUpperCase();
+  if (!ticker) return;
+  currentTicker = ticker;
+
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('loading-ticker').textContent = ticker;
+  document.getElementById('analyze-btn').disabled = true;
+
+  // Clear TV chart so it reloads fresh when Chart tab is opened
+  document.getElementById('tv-chart').innerHTML = '';
+  document.getElementById('tv-ta').innerHTML = '';
+
+  // Kick off SMC matrix fetch immediately (it loads in parallel)
+  loadSmcMatrix(ticker);
+
+  fetch('/api/analyze/' + ticker)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) throw new Error(data.error);
+      renderResults(data);
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('results').style.display = 'block';
+      document.getElementById('analyze-btn').disabled = false;
+      document.title = ticker + ' \u2014 SwingTrade Analysis';
+      // Default to Overview tab
+      switchTab('overview', document.querySelector('.tab-btn'));
+    })
+    .catch(function(e) {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('analyze-btn').disabled = false;
+      alert('Analysis failed: ' + (e.message || 'Server not running.\nStart with: cd SwingTrade && python3 server.py'));
+    });
+}
+
+function loadTVChart(ticker) {
+  var el = document.getElementById('tv-chart');
+  el.innerHTML = '';
+  new TradingView.widget({
+    "autosize": true, "symbol": ticker, "interval": "D",
+    "timezone": "America/New_York", "theme": "light", "style": "1",
+    "locale": "en", "toolbar_bg": "#f1f3f6",
+    "enable_publishing": false, "hide_side_toolbar": false,
+    "allow_symbol_change": true,
+    "studies": ["MAExp@tv-basicstudies","RSI@tv-basicstudies","MACD@tv-basicstudies"],
+    "container_id": "tv-chart", "hide_volume": false,
+  });
+}
+
+function loadTVTA(ticker) {
+  var el = document.getElementById('tv-ta');
+  el.innerHTML = '';
+  var s = document.createElement('script');
+  s.src = 'https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js';
+  s.async = true;
+  s.innerHTML = JSON.stringify({
+    "interval": "1D", "width": "100%", "height": "100%",
+    "isTransparent": false, "symbol": ticker,
+    "showIntervalTabs": true, "locale": "en", "colorTheme": "light",
+  });
+  var c = document.createElement('div');
+  c.className = 'tradingview-widget-container';
+  var inner = document.createElement('div');
+  inner.className = 'tradingview-widget-container__widget';
+  c.appendChild(inner); c.appendChild(s); el.appendChild(c);
+}
+
+function toggleWhyPanel() {
+  var panel = document.getElementById('why-panel');
+  var caret = document.getElementById('why-caret');
+  if (!panel) return;
+  var open = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
+  if (caret) caret.textContent = open ? '\u25B8' : '\u25BE';
+}
+
+function renderResults(d) {
+  var v = d.decision || {};
+  var verdict = (v.verdict || 'AVOID').toUpperCase();
+  var cls = verdict === 'BUY' ? 'buy' : verdict === 'WATCH' ? 'watch' : 'avoid';
+  var banner = document.getElementById('verdict-banner');
+  banner.className = 'verdict-banner ' + cls;
+  var gates = d.gates_hit || [];
+  var whyChips = '';
+  if (gates.length) {
+    whyChips = gates.map(function(g){
+      var passed = (g && typeof g === 'object') ? (g.passed !== false) : true;
+      var name = (g && typeof g === 'object') ? (g.name || '') : String(g);
+      var detail = (g && typeof g === 'object' && g.detail) ? (': ' + g.detail) : '';
+      var bg = passed ? '#ecfdf5' : '#fef2f2';
+      var c  = passed ? 'var(--green)' : 'var(--red)';
+      return '<span style="display:inline-block;background:'+bg+';color:'+c+';padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;margin:2px 3px 2px 0">'+name+detail+'</span>';
+    }).join('');
+  } else {
+    whyChips = '<div style="font-size:12px;color:var(--text-muted)">'+(v.reason || 'No gate detail available.')+'</div>';
+  }
+  banner.innerHTML =
+    '<div class="verdict-badge ' + cls + '">' + verdict + '</div>' +
+    '<div class="verdict-info">' +
+      '<div class="verdict-ticker">' + d.ticker + ' \u00b7 ' + (d.name || '') + '</div>' +
+      '<div class="verdict-reason">' + (v.reason || '') + '</div>' +
+      '<div style="margin-top:6px;font-size:13px;color:var(--text-muted)">' +
+        d.sector + ' \u00b7 ' + d.industry + ' \u00b7 $' + (d.price||0).toFixed(2) +
+        (d.direction === 'short' ? ' \u00b7 <span style="color:var(--red);font-weight:700">SHORT</span>' : '') +
+      '</div>' +
+      '<div style="margin-top:8px">' +
+        '<button id="why-toggle-btn" type="button" onclick="toggleWhyPanel()" style="background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:11px;font-weight:700;padding:4px 10px;border-radius:5px;cursor:pointer;text-transform:uppercase;letter-spacing:.3px"><span id="why-caret">\u25B8</span> Why?</button>' +
+        '<div id="why-panel" class="why-panel" style="display:none;margin-top:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px">'+whyChips+'</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="verdict-score">' + (d.score||0).toFixed(0) + '<small>/100</small></div>';
+
+  renderPillars(d);
+  renderPlan(d.trade_plan || {});
+  renderGate(d.gate || {});
+  renderBear(d.bear_setup || {});
+  renderNews(d);
+  renderExtras(d);
+}
+
+function renderPillars(d) {
+  var pillars = [
+    { name: 'Fundamentals', data: d.fundamentals, max: 30, color: '#2563eb' },
+    { name: 'Technicals',   data: d.technicals,   max: 30, color: '#7c3aed' },
+    { name: 'Optionality',  data: d.optionality,  max: 20, color: '#059669' },
+    { name: 'Sentiment',    data: d.sentiment,     max: 10, color: '#d97706' },
+  ];
+  var el = document.getElementById('pillars');
+  el.innerHTML = '';
+  pillars.forEach(function(p) {
+    var score = p.data ? p.data.score : 0;
+    var pct = Math.min(100, (score / p.max) * 100);
+    var details = p.data ? (p.data.details || {}) : {};
+    var html = '<div class="card"><div class="pillar">';
+    html += '<div class="pillar-name">' + p.name + '</div>';
+    html += '<div class="pillar-score" style="color:' + p.color + '">' + score.toFixed(1) + '<span style="font-size:14px;color:var(--text-muted)">/' + p.max + '</span></div>';
+    html += '<div class="pillar-bar"><div class="pillar-fill" style="width:' + pct + '%;background:' + p.color + '"></div></div>';
+    html += '<div class="pillar-details">';
+    for (var k in details) {
+      var val = details[k];
+      if (val === null || val === undefined) continue;
+      var label = k.replace(/_/g, ' ');
+      html += '<div class="pillar-detail"><span class="label">' + label + '</span><span class="value">' + val + '</span></div>';
+    }
+    html += '</div></div></div>';
+    el.innerHTML += html;
+  });
+}
+
+function renderPlan(plan) {
+  var el = document.getElementById('trade-plan');
+  if (!plan || !plan.entry_zone) { el.innerHTML = '<div style="color:var(--text-muted)">No trade plan</div>'; return; }
+  var rows = [
+    ['Setup', plan.setup_type || '-', ''],
+    ['Entry Zone', plan.entry_zone || '-', ''],
+    ['Stop Loss', '$' + (plan.stop||0).toFixed(2), 'red'],
+    ['Target 1', '$' + (plan.target1||0).toFixed(2), 'green'],
+    ['Target 2', '$' + (plan.target2||0).toFixed(2), 'green'],
+    ['R:R Ratio', (plan.rr_ratio||0).toFixed(1) + ':1', plan.rr_ratio >= 3 ? 'green' : 'red'],
+    ['Risk/Share', '$' + (plan.risk_per_share||0).toFixed(2), ''],
+    ['Price Tier', plan.price_tier || '-', ''],
+  ];
+  var html = '';
+  rows.forEach(function(r) {
+    html += '<div class="plan-row"><span class="plan-label">' + r[0] + '</span><span class="plan-value ' + r[2] + '">' + r[1] + '</span></div>';
+  });
+  el.innerHTML = html;
+}
+
+function renderGate(gate) {
+  var el = document.getElementById('gate-info');
+  var html = '<div class="' + (gate.passed ? 'gate-pass' : 'gate-fail') + '">' +
+    (gate.passed ? 'PASSED' : 'FAILED') + '</div>';
+  if (!gate.passed && gate.reasons) {
+    html += '<ul class="gate-reasons">';
+    gate.reasons.forEach(function(r) { html += '<li>' + r + '</li>'; });
+    html += '</ul>';
+  }
+  if (gate.checks) {
+    html += '<div style="margin-top:12px">';
+    for (var k in gate.checks) {
+      var ok = gate.checks[k];
+      html += '<div style="font-size:13px;padding:3px 0"><span style="color:' + (ok ? 'var(--green)' : 'var(--red)') + ';font-weight:700">' + (ok ? '&#10003;' : '&#10007;') + '</span> ' + k.replace(/_/g, ' ') + '</div>';
+    }
+    html += '</div>';
+  }
+  el.innerHTML = html;
+}
+
+function renderBear(bear) {
+  var el = document.getElementById('bear-info');
+  if (!bear || bear.score === undefined) { el.innerHTML = '<div style="color:var(--text-muted)">N/A</div>'; return; }
+  var cls = bear.score >= 10 ? '' : ' low';
+  var html = '<div class="bear-card' + cls + '">';
+  html += '<div style="font-weight:700;font-size:16px">Bear Score: ' + bear.score + '/15</div>';
+  if (bear.signals && bear.signals.length) {
+    html += '<div style="margin-top:8px;font-size:13px">';
+    bear.signals.forEach(function(s) { html += '<div style="padding:2px 0">&#x2022; ' + s + '</div>'; });
+    html += '</div>';
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function renderNews(d) {
+  var el = document.getElementById('news-info');
+  var news = d.news_data || {};
+  var insider = d.insider_data || {};
+  var html = '';
+  if (news.sentiment) {
+    var sentColor = news.sentiment > 0 ? 'var(--green)' : news.sentiment < 0 ? 'var(--red)' : 'var(--text-muted)';
+    html += '<div class="plan-row"><span class="plan-label">News Sentiment</span><span class="plan-value" style="color:' + sentColor + '">' + (news.sentiment > 0 ? '+' : '') + (news.sentiment||0).toFixed(2) + '</span></div>';
+  }
+  if (news.headline_count !== undefined) {
+    html += '<div class="plan-row"><span class="plan-label">Headlines</span><span class="plan-value">' + news.headline_count + '</span></div>';
+  }
+  if (insider.net_shares !== undefined) {
+    var iColor = insider.net_shares > 0 ? 'var(--green)' : insider.net_shares < 0 ? 'var(--red)' : 'var(--text-muted)';
+    html += '<div class="plan-row"><span class="plan-label">Insider Net Shares (90d)</span><span class="plan-value" style="color:' + iColor + '">' + (insider.net_shares > 0 ? '+' : '') + (insider.net_shares||0).toLocaleString() + '</span></div>';
+  }
+  if (insider.buy_count !== undefined || insider.sell_count !== undefined) {
+    html += '<div class="plan-row"><span class="plan-label">Insider Buys / Sells</span><span class="plan-value">' + (insider.buy_count||0) + ' / ' + (insider.sell_count||0) + '</span></div>';
+  }
+  if (!html) html = '<div style="color:var(--text-muted)">No news data</div>';
+  el.innerHTML = html;
+}
+
+function renderExtras(d) {
+  var el = document.getElementById('extras-info');
+  var html = '';
+  var ew = d.elliott_wave || {};
+  if (ew.wave_label) {
+    html += '<div class="plan-row"><span class="plan-label">Elliott Wave</span><span class="plan-value">' + ew.wave_label + '</span></div>';
+    if (ew.bonus) html += '<div class="plan-row"><span class="plan-label">EW Bonus</span><span class="plan-value" style="color:' + (ew.bonus > 0 ? 'var(--green)' : 'var(--red)') + '">' + (ew.bonus > 0 ? '+' : '') + ew.bonus + ' pts</span></div>';
+  }
+  var patterns = d.patterns || {};
+  if (patterns.patterns && patterns.patterns.length) {
+    html += '<div style="margin-top:12px;font-weight:700;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Chart Patterns</div>';
+    patterns.patterns.forEach(function(p) {
+      html += '<div style="font-size:13px;padding:3px 0">&#x2022; ' + (p.name || p) + (p.bias ? ' (' + p.bias + ')' : '') + '</div>';
+    });
+  }
+  var vwap = d.vwap || {};
+  if (vwap.vwap !== undefined) {
+    html += '<div class="plan-row"><span class="plan-label">VWAP</span><span class="plan-value">$' + (vwap.vwap||0).toFixed(2) + '</span></div>';
+    if (vwap.position) html += '<div class="plan-row"><span class="plan-label">Price vs VWAP</span><span class="plan-value">' + vwap.position + '</span></div>';
+  }
+  if (d.squeeze) {
+    html += '<div class="plan-row"><span class="plan-label">Squeeze</span><span class="plan-value" style="color:var(--amber)">ACTIVE</span></div>';
+  }
+  if (d.rs_rank !== undefined) {
+    html += '<div class="plan-row"><span class="plan-label">RS vs SPY Rank</span><span class="plan-value">' + d.rs_rank + '</span></div>';
+  }
+  if (!html) html = '<div style="color:var(--text-muted)">No extra data</div>';
+  el.innerHTML = html;
+}
+
+// ── SMC Matrix ──────────────────────────────────────────────────────────────
+
+function loadSmcMatrix(ticker) {
+  var content = document.getElementById('smc-matrix-content');
+  content.innerHTML = '<div class="smc-loading"><div class="spinner"></div>Loading SMC matrix...</div>';
+
+  fetch('/api/smc-matrix/' + ticker)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { content.innerHTML = '<div class="smc-loading" style="color:#ef4444">Error: ' + data.error + '</div>'; return; }
+      renderSmcMatrix(data);
+    })
+    .catch(function(e) {
+      content.innerHTML = '<div class="smc-loading" style="color:#ef4444">Failed to load SMC matrix</div>';
+    });
+}
+
+function _smcRatingBadge(rating) {
+  if (!rating) return '<span class="smc-dim">-</span>';
+  var arrow = '', cls = 'smc-badge-neutral';
+  if (rating.indexOf('Strong Bullish') >= 0) { arrow = '&#9650;&#9650; '; cls = 'smc-badge-green'; }
+  else if (rating.indexOf('Bullish') >= 0)   { arrow = '&#9650; '; cls = 'smc-badge-green'; }
+  else if (rating.indexOf('Strong Bearish') >= 0) { arrow = '&#9660;&#9660; '; cls = 'smc-badge-red'; }
+  else if (rating.indexOf('Bearish') >= 0)   { arrow = '&#9660; '; cls = 'smc-badge-red'; }
+  else { arrow = '&#8212; '; }
+  return '<span class="smc-badge ' + cls + '">' + arrow + rating + '</span>';
+}
+
+function _smcStructBadge(structure, dir) {
+  if (!structure) return '<span class="smc-dim">-</span>';
+  var cls = 'smc-badge-neutral';
+  if (structure.indexOf('BOS') >= 0) cls = dir === 'bullish' ? 'smc-badge-green' : 'smc-badge-red';
+  else if (structure.indexOf('CHoCH') >= 0) cls = 'smc-badge-amber';
+  return '<span class="smc-badge ' + cls + '">' + structure + '</span>';
+}
+
+function _smcOBCell(status, type) {
+  if (status === 'Inside') {
+    var cls = type === 'bullish' ? 'smc-green' : 'smc-red';
+    return '<span class="' + cls + '" style="font-weight:700">Inside</span>';
+  }
+  if (status === 'Mitigated') return '<span class="smc-dim">Mitigated</span>';
+  return '<span class="smc-dim">Outside</span>';
+}
+
+function _fmtVol(v) {
+  if (!v || v === 0) return '<span class="smc-dim">-</span>';
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+  return v.toFixed(0);
+}
+
+function _smcFVGCell(fvg) {
+  if (fvg === 'Bullish') return '<span class="smc-green">' + fvg + '</span>';
+  if (fvg === 'Bearish') return '<span class="smc-red">' + fvg + '</span>';
+  if (fvg === 'Mitigated') return '<span class="smc-dim">' + fvg + '</span>';
+  return '<span class="smc-dim">None</span>';
+}
+
+function _smcPGCell(pg) {
+  if (pg === 'Below Equilibrium') return '<span class="smc-green">Discount</span>';
+  if (pg === 'Above Equilibrium') return '<span class="smc-red">Premium</span>';
+  return '<span class="smc-amber">Equilibrium</span>';
+}
+
+function _smcLiqCell(liq) {
+  if (liq === 'Bullish') return '<span class="smc-green">Bullish</span>';
+  if (liq === 'Bearish') return '<span class="smc-red">Bearish</span>';
+  return '<span class="smc-dim">None</span>';
+}
+
+function _smcEQHLCell(eqhl) {
+  if (eqhl === 'Both') return '<span class="smc-amber">EQH + EQL</span>';
+  if (eqhl === 'EQH') return '<span class="smc-red">EQH &#9650;</span>';
+  if (eqhl === 'EQL') return '<span class="smc-green">EQL &#9660;</span>';
+  return '<span class="smc-dim">None</span>';
+}
+
+function _smcSignalCell(sig) {
+  if (!sig) return '-';
+  if (sig.indexOf('Strong Bullish') >= 0) return '<span class="smc-green" style="font-weight:700">&#9650;&#9650; ' + sig + '</span>';
+  if (sig.indexOf('Bullish') >= 0) return '<span class="smc-green">&#9650; ' + sig + '</span>';
+  if (sig.indexOf('Strong Bearish') >= 0) return '<span class="smc-red" style="font-weight:700">&#9660;&#9660; ' + sig + '</span>';
+  if (sig.indexOf('Bearish') >= 0) return '<span class="smc-red">&#9660; ' + sig + '</span>';
+  return '<span class="smc-amber">' + sig + '</span>';
+}
+
+function _smcRSICell(rsi) {
+  if (rsi === undefined || rsi === null) return '-';
+  var color = rsi > 70 ? '#22c55e' : rsi > 50 ? '#4ade80' : rsi < 30 ? '#ef4444' : rsi < 50 ? '#f87171' : '#94a3b8';
+  return '<span style="color:' + color + ';font-weight:600;font-family:monospace">' + rsi.toFixed(1) + '</span>';
+}
+
+function _smcMACDCell(macd) {
+  if (macd === 'Bullish') return '<span class="smc-green">&#8593; Bullish</span>';
+  if (macd === 'Bearish') return '<span class="smc-red">&#8595; Bearish</span>';
+  if (macd === 'Turning Up') return '<span class="smc-amber">&#8599; Turning Up</span>';
+  if (macd === 'Turning Down') return '<span class="smc-amber">&#8600; Turning Down</span>';
+  return '<span class="smc-dim">Neutral</span>';
+}
+
+function _smcSqueezeCell(sq, mom) {
+  if (sq === 'on') return '<span class="smc-squeeze-dot" style="color:#ef4444">&#9679;</span><span class="smc-red">Squeeze ON</span>';
+  if (sq === 'firing') {
+    var c = mom === 'positive' ? '#22c55e' : '#3b82f6';
+    var label = mom === 'positive' ? 'Fired Bull' : 'Fired Bear';
+    return '<span class="smc-squeeze-dot" style="color:' + c + '">&#9679;</span><span style="color:' + c + '">' + label + '</span>';
+  }
+  return '<span class="smc-squeeze-dot" style="color:#475569">&#9679;</span><span class="smc-dim">Off</span>';
+}
+
+function _smcMFCell(label) {
+  if (label === 'Inflow') return '<span class="smc-green">' + label + '</span>';
+  if (label === 'Outflow') return '<span class="smc-red">' + label + '</span>';
+  return '<span class="smc-dim">' + label + '</span>';
+}
+
+function _smcVolSentCell(vs) {
+  if (vs === 'High') return '<span class="smc-green" style="font-weight:700">' + vs + '</span>';
+  if (vs === 'Low') return '<span class="smc-red">' + vs + '</span>';
+  return '<span class="smc-dim">' + vs + '</span>';
+}
+
+function _smcDivCell(div) {
+  if (div === 'Bullish Div') return '<span class="smc-cyan">' + div + '</span>';
+  if (div === 'Bearish Div') return '<span class="smc-amber">' + div + '</span>';
+  return '<span class="smc-dim">None</span>';
+}
+
+function _smcTrendCell(label, val) {
+  var color = label === 'Strong' ? '#22c55e' : label === 'Weak' ? '#ef4444' : '#f59e0b';
+  return '<span style="color:' + color + ';font-weight:600">' + (val !== undefined ? val.toFixed(0) : '-') + '</span> <span class="smc-dim">' + (label || '') + '</span>';
+}
+
+function _smcReversalCell(rev) {
+  if (!rev || rev === 'None') return '<span class="smc-dim">None</span>';
+  var cls = rev.indexOf('Bullish') >= 0 || rev.indexOf('Up') >= 0 ? 'smc-green' : 'smc-red';
+  return '<span class="' + cls + '">' + rev + '</span>';
+}
+
+function _smcConfluenceCell(score, label) {
+  var cls = 'smc-dim';
+  if (label === 'Strong') cls = 'smc-green';
+  else if (label === 'Moderate') cls = 'smc-amber';
+  else if (label === 'Mixed') cls = 'smc-red';
+  return '<span class="confluence-col ' + cls + '" style="font-weight:800">' + (score || 0) + '/5 ' + (label || '') + '</span>';
+}
+
+function renderSmcMatrix(data) {
+  var content = document.getElementById('smc-matrix-content');
+  var priceInfo = document.getElementById('smc-price-info');
+
+  var chgColor = (data.change_pct || 0) >= 0 ? '#22c55e' : '#ef4444';
+  var chgArrow = (data.change_pct || 0) >= 0 ? '&#9650;' : '&#9660;';
+  priceInfo.innerHTML = '<span class="smc-price">' + data.ticker + ' $' + (data.price || 0).toFixed(2) + '</span>' +
+    '<span class="smc-change" style="color:' + chgColor + '">' + chgArrow + ' ' + ((data.change_pct || 0) >= 0 ? '+' : '') + (data.change_pct || 0).toFixed(2) + '%</span>';
+
+  var tfOrder = ['30m', '1H', '4H', '1W', '1M'];
+  var html = '';
+
+  // Table 1: Structure & Liquidity
+  html += '<div class="smc-section-label">Structure &amp; Liquidity</div>';
+  html += '<div style="overflow-x:auto"><table class="smc-table">';
+  html += '<thead><tr><th>TF</th><th>Rating</th><th>Structure</th><th>Order Block</th><th>OB Vol</th><th>FVG</th><th>P&amp;G Zone</th><th>Liquidity</th><th>EQH/EQL</th></tr></thead>';
+  html += '<tbody>';
+  tfOrder.forEach(function(tf) {
+    var r = data.timeframes[tf] || {};
+    if (r.error) { html += '<tr><td class="tf-col">' + tf + '</td><td colspan="8" class="smc-dim">' + r.error + '</td></tr>'; return; }
+    html += '<tr>';
+    html += '<td class="tf-col">' + tf + '</td>';
+    html += '<td>' + _smcRatingBadge(r.rating) + '</td>';
+    html += '<td>' + _smcStructBadge(r.structure, r.structure_direction) + '</td>';
+    html += '<td>' + _smcOBCell(r.order_block, r.ob_type) + '</td>';
+    html += '<td style="font-family:monospace">' + _fmtVol(r.ob_volume) + '</td>';
+    html += '<td>' + _smcFVGCell(r.fvg) + '</td>';
+    html += '<td>' + _smcPGCell(r.pg_zone) + '</td>';
+    html += '<td>' + _smcLiqCell(r.liquidity) + '</td>';
+    html += '<td>' + _smcEQHLCell(r.eqhl) + '</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+
+  // Table 2: Momentum & Flow
+  html += '<div class="smc-section-label" style="margin-top:0">Momentum &amp; Flow</div>';
+  html += '<div style="overflow-x:auto"><table class="smc-table">';
+  html += '<thead><tr><th>TF</th><th>Signal</th><th>RSI</th><th>MACD</th><th>Squeeze</th><th>Money Flow</th><th>Vol Sent.</th><th>Divergence</th><th>Trend Str.</th><th>Reversals</th><th style="font-weight:900">Confluence</th></tr></thead>';
+  html += '<tbody>';
+  tfOrder.forEach(function(tf) {
+    var r = data.timeframes[tf] || {};
+    if (r.error) { html += '<tr><td class="tf-col">' + tf + '</td><td colspan="10" class="smc-dim">' + r.error + '</td></tr>'; return; }
+    html += '<tr>';
+    html += '<td class="tf-col">' + tf + '</td>';
+    html += '<td>' + _smcSignalCell(r.signal) + '</td>';
+    html += '<td>' + _smcRSICell(r.rsi) + '</td>';
+    html += '<td>' + _smcMACDCell(r.macd) + '</td>';
+    html += '<td>' + _smcSqueezeCell(r.squeeze, r.squeeze_momentum) + '</td>';
+    html += '<td>' + _smcMFCell(r.money_flow_label) + '</td>';
+    html += '<td>' + _smcVolSentCell(r.volume_sentiment) + '</td>';
+    html += '<td>' + _smcDivCell(r.divergence) + '</td>';
+    html += '<td>' + _smcTrendCell(r.trend_strength_label, r.trend_strength) + '</td>';
+    html += '<td>' + _smcReversalCell(r.reversals) + '</td>';
+    html += '<td>' + _smcConfluenceCell(r.confluence, r.confluence_label) + '</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+
+  // Confluence Summary
+  var s = data.summary || {};
+  var biasColor = function(b) {
+    if (!b) return '#94a3b8';
+    if (b.indexOf('Bullish') >= 0) return '#22c55e';
+    if (b.indexOf('Bearish') >= 0) return '#ef4444';
+    return '#f59e0b';
+  };
+  var biasArrow = function(b) {
+    if (!b) return '&#8212;';
+    if (b.indexOf('Bullish') >= 0) return '&#9650;';
+    if (b.indexOf('Bearish') >= 0) return '&#9660;';
+    return '&#8594;';
+  };
+
+  html += '<div class="smc-confluence-card">';
+  html += '<div class="smc-section-label" style="padding:0 0 12px 0;background:transparent;border:none">Confluence Summary</div>';
+  html += '<div class="smc-confluence-grid">';
+  html += '<div><div class="label">HTF Bias (W+M)</div><div class="value" style="color:' + biasColor(s.htf_bias) + '">' + biasArrow(s.htf_bias) + ' ' + (s.htf_bias || '-') + '</div></div>';
+  html += '<div><div class="label">LTF Trigger (30m+1H)</div><div class="value" style="color:' + biasColor(s.ltf_bias) + '">' + biasArrow(s.ltf_bias) + ' ' + (s.ltf_bias || '-') + '</div></div>';
+  html += '<div><div class="label">ITF Swing (4H)</div><div class="value" style="color:' + biasColor(s.itf_bias) + '">' + biasArrow(s.itf_bias) + ' ' + (s.itf_bias || '-') + '</div></div>';
+  html += '<div><div class="label">Confluence Score</div><div class="value">' + (s.confluence_score || 0) + ' / 5 TFs aligned</div></div>';
+  html += '</div>';
+
+  var verdictCls = 'smc-verdict-notrade';
+  var v = (s.verdict || '').toUpperCase();
+  if (v.indexOf('BUY') === 0) verdictCls = 'smc-verdict-buy';
+  else if (v.indexOf('SHORT') >= 0) verdictCls = 'smc-verdict-short';
+  else if (v.indexOf('WAIT') >= 0) verdictCls = 'smc-verdict-wait';
+  else if (v.indexOf('FADE') >= 0) verdictCls = 'smc-verdict-short';
+  html += '<div class="smc-verdict ' + verdictCls + '">&#9733; ' + (s.verdict || 'N/A') + '</div>';
+
+  if (s.findings && s.findings.length) {
+    html += '<ul class="smc-findings">';
+    s.findings.forEach(function(f) { html += '<li>&#8226; ' + f + '</li>'; });
+    html += '</ul>';
+  }
+  html += '</div>';
+
+  content.innerHTML = html;
+}
+</script>
+
+<!-- TradingView Widget Library -->
+<script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+
+</body>
+</html>

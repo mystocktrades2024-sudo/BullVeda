@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MOCK · Pre-Trade Check (Option A · click-filter chips) — AVGO</title>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#0d1117; --line:#1f2937; --line2:#2a3441;
+    --ink-0:#e6edf3; --ink-1:#9ca3af; --ink-2:#6b7280; --ink-3:#4b5563;
+    --pass:#22c55e; --warn:#eab308; --fail:#ef4444; --info:#3b82f6;
+    --pass-bg:rgba(34,197,94,0.12); --warn-bg:rgba(234,179,8,0.12);
+    --fail-bg:rgba(239,68,68,0.12); --info-bg:rgba(59,130,246,0.12);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:24px;background:var(--bg);color:var(--ink-0);font-family:'Aptos','Segoe UI',-apple-system,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1100px;margin:0 auto}
+  .mockbar{background:linear-gradient(135deg,rgba(59,130,246,0.1),transparent);border:1px dashed var(--info);border-radius:8px;padding:10px 14px;margin-bottom:18px;font-size:12px;color:var(--ink-1)}
+  .mockbar b{color:var(--info)}
+
+  /* Verdict banner */
+  .verdict{display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;border-radius:12px;padding:18px 22px;margin-bottom:14px;border:1px solid}
+  .verdict.skip{background:linear-gradient(135deg,rgba(239,68,68,0.08),transparent);border-color:var(--fail)}
+  .verdict.cond{background:linear-gradient(135deg,rgba(234,179,8,0.08),transparent);border-color:var(--warn)}
+  .verdict.clear{background:linear-gradient(135deg,rgba(34,197,94,0.08),transparent);border-color:var(--pass)}
+  .v-icon{font-size:42px;line-height:1}
+  .v-meta h3{margin:0;font-size:24px;letter-spacing:-0.3px}
+  .v-meta p{margin:4px 0 0;color:var(--ink-1);font-size:13.5px}
+  .verdict.skip .v-meta h3{color:var(--fail)}
+  .verdict.cond .v-meta h3{color:var(--warn)}
+  .verdict.clear .v-meta h3{color:var(--pass)}
+  .v-counts{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;max-width:280px}
+
+  /* Count chips — now clickable filters */
+  .v-count{
+    padding:5px 12px;border-radius:14px;font-size:11px;font-weight:700;letter-spacing:.4px;
+    white-space:nowrap;cursor:pointer;transition:all .12s;
+    border:1px solid transparent;user-select:none;
+  }
+  .v-count:hover{transform:translateY(-1px)}
+  .v-count.pass{background:var(--pass-bg);color:var(--pass);border-color:rgba(34,197,94,0.3)}
+  .v-count.warn{background:var(--warn-bg);color:var(--warn);border-color:rgba(234,179,8,0.3)}
+  .v-count.fail{background:var(--fail-bg);color:var(--fail);border-color:rgba(239,68,68,0.3)}
+  .v-count.info{background:var(--info-bg);color:var(--info);border-color:rgba(59,130,246,0.3)}
+  .v-count.on{box-shadow:0 0 0 2px currentColor inset;font-weight:800}
+  .v-count.dimmed{opacity:0.4}
+
+  .showstop{background:rgba(239,68,68,0.06);border:1px solid var(--fail);border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:13.5px}
+  .showstop b{color:var(--fail)}
+  .softwarn{background:rgba(234,179,8,0.06);border:1px solid var(--warn);border-radius:8px;padding:10px 16px;margin-bottom:14px;font-size:13px;color:var(--ink-1)}
+  .softwarn b{color:var(--warn)}
+
+  /* Filter status pill — appears when a filter is active */
+  .filter-active{
+    display:none;align-items:center;gap:10px;padding:8px 14px;
+    background:var(--info-bg);border:1px solid var(--info);border-radius:6px;
+    margin-bottom:14px;font-size:12.5px;color:var(--ink-0);
+  }
+  .filter-active.show{display:flex}
+  .filter-active b{color:var(--info)}
+  .filter-active .clear-x{margin-left:auto;cursor:pointer;color:var(--info);font-weight:700;padding:2px 8px;border-radius:4px}
+  .filter-active .clear-x:hover{background:rgba(59,130,246,0.15)}
+
+  /* Verdict-logic legend */
+  .legend{display:flex;gap:14px;font-size:11.5px;color:var(--ink-2);margin-bottom:18px;padding:10px 14px;background:var(--panel);border:1px solid var(--line);border-radius:6px;flex-wrap:wrap}
+  .legend b{color:var(--ink-0);font-size:11px;letter-spacing:.05em}
+  .legend .lkey{padding:2px 8px;border-radius:8px;font-weight:700;font-size:10px;margin-right:4px}
+  .legend .lkey.must{background:rgba(239,68,68,0.15);color:var(--fail)}
+  .legend .lkey.should{background:rgba(234,179,8,0.15);color:var(--warn)}
+  .legend .lkey.info{background:rgba(59,130,246,0.15);color:var(--info)}
+
+  /* Section group */
+  .grp{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin-bottom:12px;transition:opacity .15s}
+  .grp.empty{display:none}
+  .grp-h{display:flex;align-items:center;gap:10px;margin:0 0 10px;font-size:13.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-0)}
+  .grp-h .grp-tally{margin-left:auto;font-size:11px;font-weight:600;color:var(--ink-2);letter-spacing:.05em}
+  .grp-desc{font-size:11.5px;color:var(--ink-2);margin:-6px 0 10px;font-style:italic}
+
+  /* Item row */
+  .row{display:grid;grid-template-columns:auto auto 1fr auto auto;gap:12px;align-items:start;padding:8px 0;border-top:1px solid var(--line)}
+  .row:first-of-type{border-top:none}
+  .row.hidden{display:none}
+  .chip{padding:3px 9px;border-radius:11px;font-size:10.5px;font-weight:700;letter-spacing:.06em;align-self:center;white-space:nowrap;min-width:50px;text-align:center}
+  .chip.pass{background:var(--pass-bg);color:var(--pass)}
+  .chip.warn{background:var(--warn-bg);color:var(--warn)}
+  .chip.fail{background:var(--fail-bg);color:var(--fail)}
+  .chip.info{background:var(--info-bg);color:var(--info)}
+  .chip.na{background:rgba(107,114,128,0.12);color:var(--ink-2)}
+  .gate{padding:2px 7px;border-radius:9px;font-size:9.5px;font-weight:700;letter-spacing:.06em;align-self:center;white-space:nowrap;min-width:48px;text-align:center}
+  .gate.must{background:rgba(239,68,68,0.10);color:var(--fail);border:1px solid rgba(239,68,68,0.3)}
+  .gate.should{background:rgba(234,179,8,0.10);color:var(--warn);border:1px solid rgba(234,179,8,0.25)}
+  .gate.info{background:rgba(59,130,246,0.08);color:var(--info);border:1px solid rgba(59,130,246,0.2)}
+  .rule{font-size:13px;color:var(--ink-0);min-width:0}
+  .rule b{font-weight:600}
+  .rule .why{color:var(--ink-2);font-size:11.5px;margin-top:2px}
+  .actual{font-size:12.5px;color:var(--ink-0);font-weight:600;font-family:'Cascadia Code','Fira Code',monospace;text-align:right;align-self:center;white-space:nowrap}
+  .actual .needs{display:block;color:var(--ink-2);font-size:10.5px;font-weight:400;margin-top:1px;font-family:inherit}
+  .req{font-size:11px;color:var(--ink-2);align-self:center;white-space:nowrap;text-align:right}
+
+  /* Sub-tab styling */
+  .subtabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:18px;flex-wrap:wrap}
+  .subtab{padding:9px 14px;cursor:pointer;font-size:12px;letter-spacing:.06em;font-weight:700;color:var(--ink-1);border-bottom:2px solid transparent}
+  .subtab.on{color:var(--ink-0);border-bottom-color:var(--info)}
+
+  .summary-explain{margin-top:18px;padding:14px 18px;background:var(--panel);border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--ink-2)}
+  .summary-explain b{color:var(--ink-0)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="mockbar">
+  <b>📐 MOCK — Option A row style + click-to-filter chips.</b> Click any of <b>32 PASS · 7 WARN · 1 FAIL · 16 INFO</b> to filter rows. Click again to clear. Real AVGO data.
+</div>
+
+<div class="subtabs">
+  <div class="subtab">⭐ Zacks Intelligence</div>
+  <div class="subtab">🐋 Institutional Ownership</div>
+  <div class="subtab">📊 Smart Money Flow</div>
+  <div class="subtab on">✅ Pre-Trade Check</div>
+</div>
+
+<!-- Verdict banner -->
+<div class="verdict skip">
+  <div class="v-icon">⛔</div>
+  <div class="v-meta">
+    <h3>SKIP — entry blocked by 1 hard gate</h3>
+    <p>AVGO clears 32 of 56 chips. Click any count to filter rows.</p>
+  </div>
+  <div class="v-counts">
+    <span class="v-count pass" data-filter="pass">32 PASS</span>
+    <span class="v-count warn" data-filter="warn">7 WARN</span>
+    <span class="v-count fail" data-filter="fail">1 FAIL</span>
+    <span class="v-count info" data-filter="info">16 INFO</span>
+  </div>
+</div>
+
+<div class="filter-active" id="filterStatus">
+  <b id="filterLabel">Showing PASS only</b>
+  <span style="color:var(--ink-2)">— <span id="filterCount">32</span> rows visible</span>
+  <span class="clear-x" onclick="clearFilter()">✕ Clear</span>
+</div>
+
+<div class="showstop">
+  <b>🚧 Showstopper:</b> <b>Entry quality = EXTENDED</b> (current $416.50, optimal pullback $387.64–$394.62). Set a price alert at $419 and revisit when price pulls to the EMA21 zone.
+</div>
+
+<div class="softwarn">
+  <b>⚠ Soft warnings:</b> Conviction T3 · RVOL 0.69× · Forward CVaR -8.6% · Forward P(profit) 50% · Stars/IV/earnings_days not in payload.
+</div>
+
+<div class="legend">
+  <span><span class="lkey must">MUST</span><b>Hard gate.</b> Any FAIL → SKIP.</span>
+  <span><span class="lkey should">SHOULD</span><b>Soft check.</b> 3+ FAILs → CONDITIONAL.</span>
+  <span><span class="lkey info">INFO</span><b>Evidence-only.</b></span>
+</div>
+
+<!-- ======== 1. MARKET & REGIME ======== -->
+<div class="grp" data-section="market">
+  <div class="grp-h">🌍 Market &amp; Regime <span class="grp-tally">3 PASS · 0 WARN · 0 FAIL · 2 INFO</span></div>
+  <div class="grp-desc">Global state · same for every ticker today.</div>
+
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>Regime tradeable</b><div class="why">Not panic / risk_off</div></div><span class="actual">risk_on_choppy</span><span class="req">≠ panic</span></div>
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>VIX under 28</b><div class="why">Volatility manageable</div></div><span class="actual">17.0</span><span class="req">&lt; 28</span></div>
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Breadth healthy</b><div class="why">Pct above 50d EMA</div></div><span class="actual">65%</span><span class="req">≥ 50%</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Day &amp; time</b><div class="why">Friday late = gap risk</div></div><span class="actual">Mon · 14:50 ET</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Macro events 24h</b><div class="why">FOMC / CPI / NFP</div></div><span class="actual">none</span><span class="req">—</span></div>
+</div>
+
+<!-- ======== 2. OVERVIEW GATES ======== -->
+<div class="grp" data-section="overview">
+  <div class="grp-h">🎯 Overview Gates · per AVGO <span class="grp-tally">5 PASS · 1 WARN · 1 FAIL</span></div>
+  <div class="grp-desc">Core scoring + verdict gates.</div>
+
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>Score ≥ 70</b><div class="why">5-pillar composite</div></div><span class="actual">84</span><span class="req">≥ 70</span></div>
+  <div class="row" data-status="warn"><span class="gate must">MUST</span><span class="chip warn">N/A</span><div class="rule"><b>Stars ≥ 4</b><div class="why">Tail filter</div></div><span class="actual">— <span class="needs">stars not in payload</span></span><span class="req">≥ 4</span></div>
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>R:R ≥ 3.0</b><div class="why">(t1-entry)/(entry-stop)</div></div><span class="actual">3.0</span><span class="req">≥ 3.0</span></div>
+  <div class="row" data-status="warn"><span class="gate should">SHOULD</span><span class="chip warn">WARN</span><div class="rule"><b>Conviction T1 / T2</b><div class="why">T3 = small-size only</div></div><span class="actual">T3 · 33% size</span><span class="req">T1 / T2</span></div>
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>Verdict = BUY</b><div class="why">Final-decision label</div></div><span class="actual">BUY</span><span class="req">BUY</span></div>
+  <div class="row" data-status="fail"><span class="gate must">MUST</span><span class="chip fail">FAIL</span><div class="rule"><b>Entry quality FRESH/PULLBACK</b><div class="why">Not EXTENDED or MISSED</div></div><span class="actual">EXTENDED</span><span class="req">FRESH/PULLBACK</span></div>
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>R:R coherent</b><div class="why">Cached &amp; computed agree</div></div><span class="actual">consistent</span><span class="req">no flag</span></div>
+</div>
+
+<!-- ======== 3. CHART & TECHNICALS ======== -->
+<div class="grp" data-section="chart">
+  <div class="grp-h">📈 Chart &amp; Technicals · per AVGO <span class="grp-tally">3 PASS · 2 WARN · 0 FAIL</span></div>
+  <div class="grp-desc">Daily structure · momentum · volume · RS.</div>
+
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>RSI in 40-70</b><div class="why">Trending bullish</div></div><span class="actual">66.0</span><span class="req">40-70</span></div>
+  <div class="row" data-status="warn"><span class="gate should">SHOULD</span><span class="chip warn">WARN</span><div class="rule"><b>RVOL ≥ 1.0</b><div class="why">Volume vs 30d avg</div></div><span class="actual">0.69×</span><span class="req">≥ 1.0</span></div>
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>RS rank ≥ 75</b><div class="why">vs SPY · 63d</div></div><span class="actual">100</span><span class="req">≥ 75</span></div>
+  <div class="row" data-status="warn"><span class="gate info">INFO</span><span class="chip warn">WARN</span><div class="rule"><b>Squeeze active</b><div class="why">Volatility compression</div></div><span class="actual">no squeeze</span><span class="req">prefer: active</span></div>
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Weekly bullish</b><div class="why">Higher TF aligned</div></div><span class="actual">true</span><span class="req">true</span></div>
+</div>
+
+<!-- ======== 4. FUNDAMENTALS ======== -->
+<div class="grp" data-section="fund">
+  <div class="grp-h">🏦 Fundamentals · per AVGO <span class="grp-tally">3 PASS · 0 WARN · 0 FAIL · 1 INFO</span></div>
+  <div class="grp-desc">Quality · ownership · growth.</div>
+
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Quality score ≥ 60%</b><div class="why">fund_score / fund_max</div></div><span class="actual">19/30 · 63%</span><span class="req">≥ 60%</span></div>
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Inst ownership &gt; 50%</b><div class="why">Smart money in</div></div><span class="actual">79.7% · increasing</span><span class="req">&gt; 50%</span></div>
+  <div class="row" data-status="pass"><span class="gate info">INFO</span><span class="chip pass">PASS</span><div class="rule"><b>Inst quarterly trend</b><div class="why">Adding or trimming?</div></div><span class="actual">+3.84%</span><span class="req">accumulating</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Top 5 holders</b><div class="why">Concentration check</div></div><span class="actual">Vanguard, BlackRock, State Street</span><span class="req">—</span></div>
+</div>
+
+<!-- ======== 5. INTELLIGENCE ======== -->
+<div class="grp" data-section="intel">
+  <div class="grp-h">🕵 Intelligence · per AVGO <span class="grp-tally">2 PASS · 2 WARN · 0 FAIL · 1 INFO</span></div>
+  <div class="grp-desc">News · options · insider · short.</div>
+
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>News sentiment ≥ 0</b><div class="why">14d weighted</div></div><span class="actual">+0.32 bullish</span><span class="req">≥ 0</span></div>
+  <div class="row" data-status="warn"><span class="gate must">MUST</span><span class="chip warn">N/A</span><div class="rule"><b>Earnings ≥ 7d away</b><div class="why">No blackout</div></div><span class="actual">— <span class="needs">earn_days not in payload</span></span><span class="req">≥ 7d</span></div>
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Insider not selling cluster</b><div class="why">3+ sells = warning</div></div><span class="actual">22 buys · 0 sells</span><span class="req">sells &lt; 3</span></div>
+  <div class="row" data-status="warn"><span class="gate should">SHOULD</span><span class="chip warn">N/A</span><div class="rule"><b>IV rank &lt; 60</b><div class="why">Options pricing</div></div><span class="actual">— <span class="needs">iv_rank null</span></span><span class="req">&lt; 60</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>UOA</b><div class="why">Calls &gt;&gt; OI</div></div><span class="actual">no UOA flagged</span><span class="req">prefer: bullish</span></div>
+</div>
+
+<!-- ======== 6. TRADE PLAN ======== -->
+<div class="grp" data-section="plan">
+  <div class="grp-h">🗺 Trade Plan complete · per AVGO <span class="grp-tally">5 PASS · 0 WARN · 0 FAIL · 2 INFO</span></div>
+  <div class="grp-desc">Levels · setup family · exit rules.</div>
+
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>Setup family identified</b><div class="why">Hold-period guide</div></div><span class="actual">Trend Continuation · 7-21d</span><span class="req">any</span></div>
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>Entry zone defined</b><div class="why">For LIMIT order</div></div><span class="actual">$412.66 – $419.06</span><span class="req">low/high</span></div>
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>Stop loss defined</b><div class="why">Hard exit rule</div></div><span class="actual">$399.87 (1.25× ATR)</span><span class="req">defined</span></div>
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>Target 1 defined</b><div class="why">50% off · move stop to entry</div></div><span class="actual">$463.83</span><span class="req">defined</span></div>
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Target 2 defined</b><div class="why">Stretch · 25% off · trail rest</div></div><span class="actual">$495.81</span><span class="req">defined</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Hold period guide</b><div class="why">Setup-specific time stop</div></div><span class="actual">14d max · flat-exit 5d</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Exit rules defined</b><div class="why">7 rules from setup</div></div><span class="actual">Hard stop · Time stop · T1 · Trail · Trend break · Reversal · Gap</span><span class="req">—</span></div>
+</div>
+
+<!-- ======== 7. POSITION SIZING ======== -->
+<div class="grp" data-section="sizing">
+  <div class="grp-h">📐 Position Sizing — would-fit check <span class="grp-tally">3 PASS · 0 WARN · 0 FAIL · 2 INFO</span></div>
+  <div class="grp-desc">Reads current portfolio state.</div>
+
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>Open positions &lt; 4</b><div class="why">config_e cap</div></div><span class="actual">0 open</span><span class="req">&lt; 4</span></div>
+  <div class="row" data-status="pass"><span class="gate must">MUST</span><span class="chip pass">PASS</span><div class="rule"><b>Industry exposure ≤ 30%</b><div class="why">Industry: Semis</div></div><span class="actual">0% · 0 positions</span><span class="req">≤ 30%</span></div>
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Drawdown not in safety mode</b><div class="why">&gt; 15% triggers ×0.20</div></div><span class="actual">0% from peak</span><span class="req">&lt; 15%</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Conviction-based size</b><div class="why">T3 = 33% of full</div></div><span class="actual">$2,250 · 5sh · β-adj 0.8×</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>1% account-risk cap</b><div class="why">shares × (entry-stop)</div></div><span class="actual">$83 · 0.08% account</span><span class="req">≤ 1%</span></div>
+</div>
+
+<!-- ======== 8. QUANT MODELS ======== -->
+<div class="grp" data-section="quant">
+  <div class="grp-h">🎲 Quant Models · per AVGO <span class="grp-tally">3 PASS · 2 WARN · 0 FAIL · 3 INFO</span></div>
+  <div class="grp-desc">V-series · Monte Carlo · Forward dist · Elliott Wave.</div>
+
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>MC P(profit) ≥ 55%</b><div class="why">3K paths · 63d horizon</div></div><span class="actual">70.7%</span><span class="req">≥ 55%</span></div>
+  <div class="row" data-status="warn"><span class="gate should">SHOULD</span><span class="chip warn">WARN</span><div class="rule"><b>Forward P(profit) ≥ 55%</b><div class="why">Empirical bootstrap · 10d</div></div><span class="actual">50.0%</span><span class="req">≥ 55%</span></div>
+  <div class="row" data-status="warn"><span class="gate should">SHOULD</span><span class="chip warn">WARN</span><div class="rule"><b>Forward CVaR-97.5 &gt; -8%</b><div class="why">Worst 2.5% avg</div></div><span class="actual">-8.61%</span><span class="req">&gt; -8%</span></div>
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Forward Sharpe ≥ 1.0</b><div class="why">Annualised mean / std</div></div><span class="actual">1.38</span><span class="req">≥ 1.0</span></div>
+  <div class="row" data-status="pass"><span class="gate info">INFO</span><span class="chip pass">PASS</span><div class="rule"><b>MC median (P50)</b><div class="why">Over 63d</div></div><span class="actual">+12.1% · P75: +28.7%</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>MC tail risk</b><div class="why">P5 / VaR-95 / CVaR-97.5</div></div><span class="actual">-20.3% / -20.3% / -30.5%</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Elliott Wave</b><div class="why">Wave count + trend</div></div><span class="actual">Consolidating · neutral · low conf</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Earnings jump risk</b><div class="why">σ_J · V-5 calibration</div></div><span class="actual">σ_J 0.062 · λ 4.0/yr</span><span class="req">—</span></div>
+</div>
+
+<!-- ======== 9. ZACKS INTELLIGENCE ======== -->
+<div class="grp" data-section="zacks">
+  <div class="grp-h">⭐ Zacks Intelligence · per AVGO <span class="grp-tally">3 PASS · 1 WARN · 0 FAIL · 2 INFO</span></div>
+  <div class="grp-desc">Rank · VGM · ESP · premium services.</div>
+
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Zacks Rank ≤ 2</b><div class="why">EPS-revision based</div></div><span class="actual">#1 · Strong Buy</span><span class="req">≤ 2</span></div>
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>VGM grade ≥ B</b><div class="why">Composite VGM</div></div><span class="actual">A</span><span class="req">≥ B</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>VGM breakdown</b><div class="why">Individual style scores</div></div><span class="actual">G:A · V:D · M:A</span><span class="req">—</span></div>
+  <div class="row" data-status="warn"><span class="gate should">SHOULD</span><span class="chip warn">N/A</span><div class="rule"><b>Industry rank top 50%</b><div class="why">vs 250 industries</div></div><span class="actual">— <span class="needs">not populated</span></span><span class="req">top 125</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Earnings ESP</b><div class="why">Surprise edge</div></div><span class="actual">— <span class="needs">N/A</span></span><span class="req">&gt; 0</span></div>
+  <div class="row" data-status="pass"><span class="gate info">INFO</span><span class="chip pass">PASS</span><div class="rule"><b>Held by premium service</b><div class="why">Active Ultimate / HRI / II</div></div><span class="actual">3 services · Ultimate +591%</span><span class="req">—</span></div>
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Not on Zacks Sell List</b><div class="why">Rank #4/#5 = avoid</div></div><span class="actual">false</span><span class="req">false</span></div>
+</div>
+
+<!-- ======== 10. TIER-1 DETECTORS ======== -->
+<div class="grp" data-section="tier1">
+  <div class="grp-h">🔬 Tier-1 Detectors · per AVGO <span class="grp-tally">1 detected · 6 not active · INFO only</span></div>
+  <div class="grp-desc">Additive signals — present any = bonus, none = no penalty.</div>
+
+  <div class="row" data-status="pass"><span class="gate info">INFO</span><span class="chip pass">DETECTED</span><div class="rule"><b>Insider cluster</b><div class="why">3+ buys in 30d (5+ = strong)</div></div><span class="actual">+7 pts · 22 buys</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip na">none</span><div class="rule"><b>NR7 / Inside Day</b><div class="why">Range compression</div></div><span class="actual">not detected</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip na">none</span><div class="rule"><b>Volume dry-up</b><div class="why">5d &lt; 0.7× 20d at support</div></div><span class="actual">not detected</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip na">none</span><div class="rule"><b>OBV bullish divergence</b><div class="why">Price-flow asymmetry</div></div><span class="actual">not detected</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip na">none</span><div class="rule"><b>Failed Breakdown / Spring</b><div class="why">100% WR · +2.66R historical</div></div><span class="actual">not detected</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip na">none</span><div class="rule"><b>Mean reversion setup</b><div class="why">RSI &lt;35 + above 200SMA</div></div><span class="actual">not relevant (RSI 66)</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip na">none</span><div class="rule"><b>Beat-and-Raise PEAD</b><div class="why">EPS+Rev beat + raised</div></div><span class="actual">no recent earnings</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Tier-1 net contribution</b><div class="why">Capped ±8 if apply_to_score</div></div><span class="actual">+7 pts (informational)</span><span class="req">—</span></div>
+</div>
+
+<!-- ======== 11. SMC + MULTI-TIMEFRAME ======== -->
+<div class="grp" data-section="smc">
+  <div class="grp-h">🛡 SMC &amp; Multi-Timeframe · per AVGO <span class="grp-tally">3 PASS · 1 WARN · 0 FAIL · 4 INFO</span></div>
+  <div class="grp-desc">Smart Money Concepts (BOS, OB, FVG) + VWAP + MTF alignment.</div>
+
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Price above 20d VWAP</b><div class="why">Institutional reference</div></div><span class="actual">$416.50 &gt; $389.56</span><span class="req">above</span></div>
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Above anchored VWAP (swing low)</b><div class="why">Trend baseline</div></div><span class="actual">$416.50 &gt; $373.73</span><span class="req">above</span></div>
+  <div class="row" data-status="pass"><span class="gate info">INFO</span><span class="chip pass">PASS</span><div class="rule"><b>Recent bullish BOS</b><div class="why">Break of structure</div></div><span class="actual">last BOS bullish</span><span class="req">prefer: bullish</span></div>
+  <div class="row" data-status="warn"><span class="gate info">INFO</span><span class="chip warn">WARN</span><div class="rule"><b>SMC composite score</b><div class="why">OB + FVG + BOS quality</div></div><span class="actual">0.0 / 15 (low)</span><span class="req">prefer: ≥ 5</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Order blocks visible</b><div class="why">Untested institutional zones</div></div><span class="actual">2 bull · 1 bear ($342-$354)</span><span class="req">—</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Fair Value Gaps</b><div class="why">Imbalance retest zones</div></div><span class="actual">FVG zones tracked</span><span class="req">—</span></div>
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Multi-TF alignment (D + W)</b><div class="why">Both bullish</div></div><span class="actual">D ✓ · W ✓</span><span class="req">both</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Ichimoku cloud</b><div class="why">Senkou span</div></div><span class="actual">not in payload</span><span class="req">—</span></div>
+</div>
+
+<!-- ======== 12. ELITE CRITIC ======== -->
+<div class="grp" data-section="elite">
+  <div class="grp-h">💎 Elite Critic Score · per AVGO <span class="grp-tally">2 PASS · 1 WARN · 0 FAIL · 2 INFO</span></div>
+  <div class="grp-desc">Multi-factor critic — 8 weighted dimensions.</div>
+
+  <div class="row" data-status="pass"><span class="gate should">SHOULD</span><span class="chip pass">PASS</span><div class="rule"><b>Elite score ≥ 70</b><div class="why">8-factor weighted</div></div><span class="actual">76</span><span class="req">≥ 70</span></div>
+  <div class="row" data-status="warn"><span class="gate should">SHOULD</span><span class="chip warn">WARN</span><div class="rule"><b>Elite tier T1 / T2</b><div class="why">Below T3 = WATCH</div></div><span class="actual">T2 · narrow margin</span><span class="req">T1/T2</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Sector pct rank</b><div class="why">Within Semiconductors</div></div><span class="actual">82nd percentile</span><span class="req">≥ 60</span></div>
+  <div class="row" data-status="info"><span class="gate info">INFO</span><span class="chip info">INFO</span><div class="rule"><b>Score-band historical WR</b><div class="why">240 closed signals · 80-89 band</div></div><span class="actual">85.2% WR · n=27</span><span class="req">—</span></div>
+  <div class="row" data-status="pass"><span class="gate info">INFO</span><span class="chip pass">PASS</span><div class="rule"><b>Elite verdict line</b><div class="why">Critic's one-sentence summary</div></div><span class="actual">"Strong RS · clean trend · entry extended — wait."</span><span class="req">—</span></div>
+</div>
+
+<div class="summary-explain">
+  <b>How the verdict works:</b><br>
+  • <b style="color:var(--fail)">SKIP</b> — any MUST chip fails. Trade blocked at gate level.<br>
+  • <b style="color:var(--warn)">CONDITIONAL</b> — 0 MUST fails but 3+ SHOULD warnings.<br>
+  • <b style="color:var(--pass)">CLEAR</b> — 0 MUST fails, ≤2 SHOULD warnings.<br><br>
+  <b>Click any count chip</b> (32 PASS · 7 WARN · 1 FAIL · 16 INFO) to filter rows. Click again to clear.
+</div>
+
+</div>
+
+<script>
+  // Click-to-filter on the count chips
+  let activeFilter = null;
+
+  function applyFilter(status) {
+    if (activeFilter === status) {
+      // Toggle off
+      clearFilter();
+      return;
+    }
+    activeFilter = status;
+    // Show/hide rows
+    let visibleCount = 0;
+    document.querySelectorAll('.row').forEach(r => {
+      const match = r.dataset.status === status;
+      r.classList.toggle('hidden', !match);
+      if (match) visibleCount++;
+    });
+    // Hide groups that are entirely empty after filter
+    document.querySelectorAll('.grp').forEach(g => {
+      const visible = g.querySelectorAll('.row:not(.hidden)').length;
+      g.classList.toggle('empty', visible === 0);
+    });
+    // Update count chip styles
+    document.querySelectorAll('.v-count').forEach(c => {
+      c.classList.toggle('on', c.dataset.filter === status);
+      c.classList.toggle('dimmed', c.dataset.filter !== status);
+    });
+    // Show filter status pill
+    const pill = document.getElementById('filterStatus');
+    pill.classList.add('show');
+    document.getElementById('filterLabel').textContent = `Showing ${status.toUpperCase()} only`;
+    document.getElementById('filterCount').textContent = visibleCount;
+  }
+
+  function clearFilter() {
+    activeFilter = null;
+    document.querySelectorAll('.row').forEach(r => r.classList.remove('hidden'));
+    document.querySelectorAll('.grp').forEach(g => g.classList.remove('empty'));
+    document.querySelectorAll('.v-count').forEach(c => {
+      c.classList.remove('on');
+      c.classList.remove('dimmed');
+    });
+    document.getElementById('filterStatus').classList.remove('show');
+  }
+
+  document.querySelectorAll('.v-count').forEach(c => {
+    c.addEventListener('click', () => applyFilter(c.dataset.filter));
+  });
+</script>
+
+</body>
+</html>

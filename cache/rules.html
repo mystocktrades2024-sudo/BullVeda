@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>SwingTrade Decision Rules</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 24px 40px; background: #0b0f19; color: #e5e7eb; max-width: 1200px; margin: 0 auto; }
+  h1 { color: #60a5fa; font-size: 28px; border-bottom: 2px solid #1e293b; padding-bottom: 12px; }
+  h2 { color: #34d399; font-size: 20px; margin-top: 36px; }
+  h3 { color: #fbbf24; font-size: 16px; margin-top: 24px; }
+  .card { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 16px 20px; margin: 12px 0; }
+  .card-red { border-left: 4px solid #ef4444; }
+  .card-green { border-left: 4px solid #10b981; }
+  .card-yellow { border-left: 4px solid #f59e0b; }
+  .card-blue { border-left: 4px solid #3b82f6; }
+  .card-purple { border-left: 4px solid #8b5cf6; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  th { text-align: left; padding: 8px 12px; color: #94a3b8; border-bottom: 2px solid #334155; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  td { padding: 8px 12px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+  tr:hover { background: rgba(255,255,255,0.02); }
+  code { background: #1e293b; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #93c5fd; }
+  .verdict { display: inline-block; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 11px; }
+  .v-buy { background: #05966922; color: #34d399; border: 1px solid #05966944; }
+  .v-watch { background: #d9770622; color: #fbbf24; border: 1px solid #d9770644; }
+  .v-short { background: #7c3aed22; color: #a78bfa; border: 1px solid #7c3aed44; }
+  .v-avoid { background: #dc262622; color: #f87171; border: 1px solid #dc262644; }
+  .flow { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 16px; font-family: monospace; font-size: 12px; line-height: 1.8; color: #94a3b8; margin: 12px 0; }
+  .flow .step { color: #60a5fa; font-weight: 700; }
+  .flow .yes { color: #34d399; }
+  .flow .no { color: #f87171; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-right: 4px; }
+  .tag-gate { background: #dc262622; color: #f87171; }
+  .tag-score { background: #3b82f622; color: #60a5fa; }
+  .tag-setup { background: #8b5cf622; color: #c4b5fd; }
+  .tag-adaptive { background: #06b6d422; color: #22d3ee; }
+  a { color: #60a5fa; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .toc { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 16px 24px; margin: 20px 0; }
+  .toc a { display: block; padding: 4px 0; font-size: 13px; }
+  .updated { font-size: 11px; color: #64748b; }
+</style>
+</head><body>
+
+<h1>SwingTrade Decision Rules <span class="updated">Updated 2026-04-16</span></h1>
+<p style="color:#94a3b8;font-size:14px">Complete reference of all rules applied to determine <span class="verdict v-buy">BUY</span> <span class="verdict v-watch">WATCH</span> <span class="verdict v-short">SHORT</span> <span class="verdict v-avoid">AVOID</span> verdicts. Source: <code>analysis.py:make_decision()</code> + <code>swing_trade.py</code> adaptive engine.</p>
+
+<div class="toc">
+<strong style="color:#e5e7eb">Contents</strong>
+<a href="#flow">1. Decision Flow (Sequential Ladder)</a>
+<a href="#scoring">2. Scoring Engine (5 Pillars)</a>
+<a href="#regime">3. Regime-Adaptive Thresholds</a>
+<a href="#gates">4. Hard Gates (Pre-Trade)</a>
+<a href="#setup">5. Per-Setup Quality Gates</a>
+<a href="#long">6. LONG BUY Rules</a>
+<a href="#bear-long">7. Bear-Regime LONG Rules</a>
+<a href="#short">8. SHORT Rules (10 Hard Gates)</a>
+<a href="#adaptive">9. Adaptive Engine (p90 + Setup Bonus + Top-N)</a>
+<a href="#state">10. State Classification (Phase / Location / Edge)</a>
+<a href="#entry">11. Entry Zone + Structural Stops</a>
+<a href="#options">12. Options Intelligence Signals</a>
+<a href="#volume">13. Volume Profile (POC / VA / LVN)</a>
+</div>
+
+<h2 id="flow">1. Decision Flow</h2>
+<div class="flow">
+<span class="step">Step 1</span> &rarr; Hard gates: SPY crash, VIX capitulation, breadth collapse &rarr; <span class="no">REJECT</span><br>
+<span class="step">Step 2</span> &rarr; Regime check: set score/RR/RS thresholds from regime4 or legacy 3-regime<br>
+<span class="step">Step 3</span> &rarr; Score check: total_score vs regime threshold &rarr; <span class="no">AVOID</span> if below<br>
+<span class="step">Step 4</span> &rarr; Entry quality: EXTENDED/MISSED &rarr; <span class="no">WATCH</span><br>
+<span class="step">Step 5</span> &rarr; R:R + RS + weekly + catalyst checks &rarr; <span class="yes">BUY</span> / <span class="no">WATCH</span> / <span class="no">AVOID</span><br>
+<br>
+Post-decision overrides:<br>
+&nbsp;&nbsp;- Gate failure &rarr; force <span class="no">AVOID</span><br>
+&nbsp;&nbsp;- MTF conflict (daily bull + weekly bear) &rarr; cap <span class="yes">BUY</span> &rarr; <span class="no">WATCH</span><br>
+&nbsp;&nbsp;- <span class="step">Adaptive engine</span> &rarr; p90-relative promote WATCH &rarr; <span class="yes">BUY</span><br>
+&nbsp;&nbsp;- <span class="step">Entry-zone check</span> &rarr; price in pullback zone &rarr; WATCH &rarr; <span class="yes">BUY</span>
+</div>
+
+<h2 id="scoring">2. Scoring Engine (5 Pillars = 100 pts)</h2>
+<div class="card card-blue">
+<table>
+<thead><tr><th>Pillar</th><th>Max</th><th>What it measures</th></tr></thead>
+<tbody>
+<tr><td><strong>Technicals</strong></td><td>35</td><td>EMA stack, MACD, RSI, ADX, supertrend, breakout quality, volume, squeeze, fractals</td></tr>
+<tr><td><strong>Catalyst / Quality</strong></td><td>20</td><td>News sentiment, earnings, UOA, congressional, Zacks rank, insider activity</td></tr>
+<tr><td><strong>RS / Sector</strong></td><td>20</td><td>Relative strength vs SPY (percentile rank), sector outperformance</td></tr>
+<tr><td><strong>Smart Money</strong></td><td>15</td><td>Institutional ownership, insider buying, dark pool activity, borrow rate</td></tr>
+<tr><td><strong>Fundamentals</strong></td><td>10</td><td>Margins, growth, D/E, ROE, valuation (P/E, PEG), analyst estimates</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="regime">3. Regime-Adaptive Thresholds</h2>
+<div class="card card-green">
+<table>
+<thead><tr><th>Regime</th><th>buy_min</th><th>rs_min</th><th>rr_min</th><th>max_size</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><strong>risk_on_trending</strong></td><td>55-58</td><td>60-65</td><td>2.0</td><td>100%</td><td>Full aggression</td></tr>
+<tr><td><strong>risk_on_choppy</strong></td><td>48-60</td><td>50-60</td><td>2.0</td><td>50-70%</td><td>Half-size, prefer pullbacks</td></tr>
+<tr><td><strong>risk_off_trending</strong></td><td>65-78</td><td>65-80</td><td>3.0-4.0</td><td>30-35%</td><td>Leaders only</td></tr>
+<tr><td><strong>panic</strong></td><td>999</td><td>999</td><td>999</td><td>0%</td><td>No new longs</td></tr>
+</tbody>
+</table>
+<p style="font-size:11px;color:#94a3b8">Values depend on active profile (quality_lock / industry_standard / adaptive / aggressive). Managed in <code>config/profiles/*.json</code>.</p>
+</div>
+
+<h2 id="gates">4. Hard Gates (Pre-Trade)</h2>
+<div class="card card-red">
+<table>
+<thead><tr><th>#</th><th>Gate</th><th>Threshold</th><th>Result if failed</th></tr></thead>
+<tbody>
+<tr><td>H1</td><td>SPY crash</td><td>SPY drop > -2.5% intraday</td><td>AVOID all</td></tr>
+<tr><td>H2</td><td>VIX capitulation</td><td>VIX > 35-40</td><td>AVOID all longs</td></tr>
+<tr><td>H3</td><td>Breadth collapse</td><td>&lt; 25% above 50d SMA</td><td>AVOID all longs</td></tr>
+<tr><td>H4</td><td>Direction neutral</td><td>ADX too low, no trend</td><td>WATCH</td></tr>
+<tr><td>H5</td><td>Earnings blackout</td><td>Earnings within 3 days</td><td>-15 pts penalty</td></tr>
+<tr><td>H6</td><td>Liquidity</td><td>Daily $ vol &lt; $5M</td><td>REJECT</td></tr>
+<tr><td>H7</td><td>Price range</td><td>&lt; $2 or &gt; $500</td><td>REJECT</td></tr>
+<tr><td>H8</td><td>Extended ATR</td><td>&gt; 1.25 ATR above EMA21</td><td>WATCH (entry quality = EXTENDED)</td></tr>
+<tr><td>H9</td><td>Gap risk</td><td>Today's gap &gt; 3%</td><td>BUY &rarr; WATCH (FOMO protect)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="setup">5. Per-Setup Quality Gates</h2>
+<div class="card card-purple">
+<p style="font-size:12px;color:#94a3b8">Thresholds from active profile's <code>setup_gates</code> section. Values shown are adaptive profile defaults.</p>
+<table>
+<thead><tr><th>Setup</th><th>RS min</th><th>RVOL min</th><th>Weekly Bull?</th><th>Score Bonus</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><strong>Pocket Pivot</strong></td><td>70</td><td>1.2</td><td>No</td><td>0</td><td>80% WR in backtest</td></tr>
+<tr><td><strong>VCP Breakout</strong></td><td>65</td><td>0.9</td><td>No</td><td>0</td><td>Needs volume confirmation</td></tr>
+<tr><td><strong>52wk Breakout</strong></td><td>70</td><td>1.0</td><td>No</td><td>0</td><td>Excluded in choppy regime</td></tr>
+<tr><td><strong>EMA21 Pullback</strong></td><td>60</td><td>0.7</td><td>No</td><td>0</td><td>Pullback bonus +5 in chop</td></tr>
+<tr><td><strong>EMA50 Pullback</strong></td><td>55</td><td>0.7</td><td>No</td><td>0</td><td>Deep pullback, wider stop</td></tr>
+<tr><td><strong>Trend Continuation</strong></td><td>55</td><td>0.7</td><td>No</td><td>0</td><td>Pullback bonus +5 in chop</td></tr>
+<tr><td><strong>Bounce off Support</strong></td><td>65</td><td>0.9</td><td>No</td><td>0</td><td>Needs RS &ge; 85 for high confidence</td></tr>
+<tr><td><strong>Near-VCP</strong></td><td>75</td><td>1.1</td><td>No</td><td>3</td><td>40% WR in backtest</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="long">6. LONG BUY Rules (Bull / Neutral Regime)</h2>
+<div class="card card-green">
+<p>All must pass for <span class="verdict v-buy">BUY</span>. Any failure &rarr; <span class="verdict v-watch">WATCH</span>.</p>
+<table>
+<thead><tr><th>#</th><th>Rule</th><th>Default</th></tr></thead>
+<tbody>
+<tr><td>B1</td><td>Score &ge; regime buy_min</td><td>58 (industry_standard)</td></tr>
+<tr><td>B2</td><td>R:R &ge; regime rr_min</td><td>2.0</td></tr>
+<tr><td>B3</td><td>RS rank &ge; regime rs_min</td><td>60</td></tr>
+<tr><td>B4</td><td>RSI &le; 75 (not overbought)</td><td>75 (80 for elite RS&ge;85)</td></tr>
+<tr><td>B5</td><td>Per-setup gates pass (RS, RVOL, weekly)</td><td>See table above</td></tr>
+<tr><td>B6</td><td>Weekly EMA bullish (if required by regime)</td><td>Varies</td></tr>
+<tr><td>B7</td><td>VIX not elevated, or score high enough</td><td>VIX&ge;22: need score + 6-10 pts extra</td></tr>
+<tr><td>B8</td><td>Has catalyst OR score &ge; buy_min + 10-15</td><td>Catalyst = PEAD/UOA/VCP/Squeeze/etc</td></tr>
+<tr><td>B9</td><td>Breakout RVOL &ge; 1.0 (VCP / 52wk only)</td><td>No-volume breakouts fail</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="bear-long">7. Bear-Regime LONG Rules (Tiered)</h2>
+<div class="card card-yellow">
+<table>
+<thead><tr><th>Tier</th><th>Requires</th><th>Size</th></tr></thead>
+<tbody>
+<tr><td><strong>Hard block</strong></td><td>VIX &ge; 35-40</td><td>0% (no longs)</td></tr>
+<tr><td><strong>Tier 1: Leader</strong></td><td>Score &ge; buy_min + RS &ge; 70 + R:R &ge; 4.0 + weekly bull</td><td>Half size</td></tr>
+<tr><td><strong>Tier 2: Defensive</strong></td><td>Sector in {XLU,XLP,XLV,XLE} leading + score &ge; 72 + RS &ge; 60</td><td>Quarter size</td></tr>
+<tr><td><strong>Otherwise</strong></td><td>Score &ge; watch_min</td><td>WATCH only</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="short">8. SHORT Rules (10 Hard Gates)</h2>
+<div class="card card-red">
+<p>ALL must pass. Any failure &rarr; <span class="verdict v-avoid">AVOID</span>.</p>
+<table>
+<thead><tr><th>#</th><th>Gate</th><th>Default</th></tr></thead>
+<tbody>
+<tr><td>S1</td><td>Shorts enabled (not long-only mode)</td><td>short_disabled = false</td></tr>
+<tr><td>S2</td><td>VIX &ge; short_min_vix</td><td>25</td></tr>
+<tr><td>S3</td><td>Bear/risk-off regime required</td><td>Must be weak_regime</td></tr>
+<tr><td>S4</td><td>RSI &ge; short_min_rsi (not oversold)</td><td>70 (distribution zone)</td></tr>
+<tr><td>S5</td><td>RS rank &le; short_max_rs</td><td>30 (only short weak stocks)</td></tr>
+<tr><td>S6</td><td>No earnings within 7 days</td><td>Beat-and-raise = squeeze risk</td></tr>
+<tr><td>S7</td><td>Sector underperforming SPY</td><td>Don't short into leading sector</td></tr>
+<tr><td>S8</td><td>Short float &le; 15%</td><td>High SI = squeeze trap</td></tr>
+<tr><td>S9</td><td>Days-to-cover &le; 5</td><td>DTC &gt; 5 = concentrated shorts</td></tr>
+<tr><td>S10</td><td>No active TTM Squeeze</td><td>Expansion direction unknown</td></tr>
+</tbody>
+</table>
+<p style="margin-top:12px"><strong>SHORT verdict:</strong> bear_score &ge; 12/15 AND weak_regime AND R:R &ge; 3:1</p>
+<p><strong>Near-Short (blocked):</strong> bear_score &ge; 4 but gates failed &rarr; shown separately in Slack + dashboard</p>
+</div>
+
+<h2 id="adaptive">9. Adaptive Engine</h2>
+<div class="card card-blue" style="border-left-color:#22d3ee">
+<p style="font-size:12px;color:#94a3b8">Active when profile has <code>adaptive_mode: true</code>. Runs in Step 5d after scoring, before pick selection.</p>
+<h3>Pass 1: p90-Relative Threshold</h3>
+<p><code>adaptive_buy_min = max(p90 - 8, floor=40)</code></p>
+<p>If today's p90=49, buy_min drops from 60 &rarr; 41. Promotes WATCH &rarr; BUY when score &ge; adaptive bar AND RS &ge; rs_min AND R:R &ge; rr_min.</p>
+<p><strong>Guards:</strong> only promote when state data has valid zones (not default LOST_STRUCTURE from missing data). RVOL &ge; 0.3 (regular-session volume).</p>
+
+<h3>Pass 2: Setup Bonuses in Choppy Regime</h3>
+<table>
+<thead><tr><th>Setup family</th><th>Bonus</th></tr></thead>
+<tbody>
+<tr><td>EMA21/EMA50 Pullback, Bounce, Trend Continuation, 10-Week Pullback</td><td><strong>+5 pts</strong></td></tr>
+<tr><td>52wk Breakout, VCP Breakout</td><td><strong>-3 pts</strong> (breakouts fail in chop)</td></tr>
+</tbody>
+</table>
+
+<h3>Pass 3: Top-N Fallback</h3>
+<p>If fewer than <code>adaptive_top_n</code> (default 5) BUYs after passes 1+2, take the top WATCH tickers by score (floor=40, R:R passes) to guarantee minimum signal volume.</p>
+</div>
+
+<h2 id="state">10. State Classification</h2>
+<div class="card card-purple">
+<p style="font-size:12px;color:#94a3b8">Forward-looking labels replacing legacy MISSED/EXTENDED. Source: <code>decision_state.py</code>.</p>
+<table>
+<thead><tr><th>Field</th><th>Values</th><th>What it means</th></tr></thead>
+<tbody>
+<tr><td><strong>Phase</strong></td><td>BREAKOUT, POST_BREAKOUT_DRIFT, PULLBACK, CONSOLIDATION, RANGE, TREND_CONTINUATION</td><td>Where in the move lifecycle</td></tr>
+<tr><td><strong>Location</strong></td><td>AT_VALUE, ABOVE_VALUE, EXTENDED, NO_EDGE, LOST_STRUCTURE</td><td>Price relative to value zones (EMA21/support/VWAP)</td></tr>
+<tr><td><strong>Edge</strong></td><td>VALID, NONE</td><td>Is there an actionable entry?</td></tr>
+<tr><td><strong>Action</strong></td><td>BUY, WATCH, WAIT_FOR_PULLBACK, AVOID</td><td>What to do right now</td></tr>
+</tbody>
+</table>
+<p><strong>BUY only when:</strong> location = AT_VALUE + confirmation score &ge; 2 + score &ge; buy_min + R:R &ge; rr_min</p>
+</div>
+
+<h2 id="entry">11. Entry Zone + Structural Stops</h2>
+<div class="card card-green">
+<h3>Entry Zone</h3>
+<p><strong>Ceiling:</strong> EMA21 (buy at or below)<br>
+<strong>Floor:</strong> max(support, VP-VAL) — structural support from volume profile value area low<br>
+<strong>Entry:</strong> midpoint of zone</p>
+<p><strong>Auto-promote (Step 5f):</strong> if WATCH ticker's current price is within entry_low &ndash; entry_high AND R:R &ge; 2.0 &rarr; promote to <span class="verdict v-buy">BUY</span> with reason "Pullback entry".</p>
+
+<h3>Structural Stop-Loss</h3>
+<p><code>stop = min(prior_swing_low_5bar, VP_VAL, EMA50) - 0.5 &times; ATR</code></p>
+<p>Uses actual price structure instead of generic ATR multiple. 0.5 ATR buffer below structure for noise protection.</p>
+</div>
+
+<h2 id="options">12. Options Intelligence (Stock-Trading Signals)</h2>
+<div class="card card-yellow">
+<p style="font-size:12px;color:#94a3b8">From Schwab <code>/chains</code>. NOT for trading options &mdash; for reading options market to improve stock decisions.</p>
+<table>
+<thead><tr><th>Signal</th><th>Bullish</th><th>Bearish</th><th>Action for stock trade</th></tr></thead>
+<tbody>
+<tr><td><strong>IV Percentile</strong></td><td>&lt; 30%</td><td>&gt; 70%</td><td>High IV: tighter stop, smaller size. Low IV: full size.</td></tr>
+<tr><td><strong>Put/Call Ratio</strong></td><td>&lt; 0.5</td><td>&gt; 1.5</td><td>Low P/C: institutions bullish. High P/C: hedging/bearish.</td></tr>
+<tr><td><strong>UOA Calls</strong></td><td>Vol/OI &gt; 3&times;</td><td>&mdash;</td><td>Strongest bullish confirmation. Upgrade size.</td></tr>
+<tr><td><strong>UOA Puts</strong></td><td>&mdash;</td><td>Vol/OI &gt; 3&times;</td><td>Warning: informed bearish bet. Reduce size or skip.</td></tr>
+<tr><td><strong>Max Pain</strong></td><td>Price below MP</td><td>Price above MP</td><td>Price gravitates toward MP near expiry. Set targets near it.</td></tr>
+<tr><td><strong>Gamma</strong></td><td>&gamma;+ (stabilizing)</td><td>&gamma;- (volatile)</td><td>Positive: shallow pullbacks. Negative: widen stops.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="volume">13. Volume Profile</h2>
+<div class="card card-blue">
+<table>
+<thead><tr><th>Level</th><th>What it is</th><th>How to use</th></tr></thead>
+<tbody>
+<tr><td><strong>POC</strong> (Point of Control)</td><td>Price with highest traded volume</td><td>Fair-value magnet. Support if above, resistance if below.</td></tr>
+<tr><td><strong>VAH</strong> (Value Area High)</td><td>Upper bound of 70% volume zone</td><td>Breakout above VAH on volume = expansion signal.</td></tr>
+<tr><td><strong>VAL</strong> (Value Area Low)</td><td>Lower bound of 70% volume zone</td><td>Used as structural stop-loss floor.</td></tr>
+<tr><td><strong>LVN</strong> (Low Volume Node)</td><td>Price gap with &lt; 20% avg volume</td><td>Price moves FAST through LVN gaps. Breakout targets.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="sector">14. Sector Rotation Bonus</h2>
+<div class="card card-green">
+<p>Sectors outperforming SPY by &gt; 2% get <strong>+3 score pts</strong> for all tickers within that sector. Follows institutional capital flow &mdash; leading sectors have tailwinds that improve pullback entry win rates.</p>
+</div>
+
+<div style="margin-top:40px;padding:20px;background:#111827;border-radius:10px;border:1px solid #1f2937">
+<h3 style="color:#94a3b8;margin-top:0">Data Sources</h3>
+<p style="font-size:12px;color:#64748b">
+<strong>Schwab:</strong> Live quotes + basic fundamentals + option chains + movers<br>
+<strong>Polygon:</strong> OHLCV archive (1028 tickers) + per-ticker news<br>
+<strong>Yahoo:</strong> Deep fundamentals (margins, growth, D/E, FCF)<br>
+<strong>FINVIZ:</strong> News + insider + UOA + sector screeners<br>
+<strong>Zacks:</strong> Rank #1 list + Sell List + Ultimate trades + VGM grades<br>
+<strong>Finnhub:</strong> Analyst data + deep fundamentals (cached 7d)<br>
+<strong>Caching:</strong> sqlite fundamentals (30d TTL) + enrichment cache (per-source TTL 1d-30d)
+</p>
+</div>
+
+<div style="margin-top:20px;text-align:center;color:#475569;font-size:11px">
+SwingTrade Decision Rules v2.0 &mdash; Generated 2026-04-16<br>
+<a href="/">Back to Dashboard</a>
+</div>
+
+</body></html>
