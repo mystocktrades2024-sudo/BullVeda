@@ -5243,6 +5243,16 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
 
         rr_ratio = round((target1 - entry_mid) / max(entry_mid - stop, 0.01), 1)
 
+        # EMA21 Pullback: tightened stop per 2026-05-06 signal_tracker analysis.
+        # Winners bounce immediately (avg MAE -0.36%); losers crater (avg MAE -7.47%).
+        # 1.5% stop kills bad trades fast, preserves winners' +7.15% MFE upside.
+        if setup == "EMA21 Pullback":
+            stop = round(entry_mid * 0.985, 2)
+            risk = entry_mid - stop
+            target1 = round(entry_mid + risk * 3.0, 2)
+            target2 = round(entry_mid + risk * 5.0, 2)
+            rr_ratio = round((target1 - entry_mid) / max(entry_mid - stop, 0.01), 1)
+
         # Phase 3D: Trade plan coherence validation
         if stop >= entry_mid:
             stop = round(entry_mid - atr * 1.0, 2)  # force stop below entry

@@ -459,7 +459,15 @@ def update_outcomes() -> int:
 
         # Determine result + Tier A exit attribution
         # exit_reason: target_hit / stop_hit / time_stop_win / time_stop_loss
-        if stop > 0 and cur_price <= stop:
+        # EMA21 Pullback 2-day no-move exit (per 2026-05-06 signal_tracker analysis):
+        # losers without a Day-2 gain rarely recover and avg MAE -7.47%.
+        if e.get("strategy") == "EMA21 Pullback" and age >= 2 and pnl_pct <= 0:
+            e["result"] = "STOPPED"
+            e["status"] = "CLOSED"
+            e.setdefault("exit_reason", "ema21_no_move_2d")
+            if e.get("days_to_stop_hit") is None:
+                e["days_to_stop_hit"] = age
+        elif stop > 0 and cur_price <= stop:
             e["result"] = "STOPPED"
             e["status"] = "CLOSED"
             e.setdefault("exit_reason", "stop_hit")
