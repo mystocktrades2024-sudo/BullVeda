@@ -23,6 +23,26 @@ _PREV_BUNDLE_INDEX: dict = {}
 _PREV_BUNDLE_DATE: str = ""
 
 
+def _reject_reason_for(r: dict):
+    """Resolve the reject_reason field for V2 display.
+
+    BUYs never get a reject_reason (would contradict the verdict). Non-BUYs
+    cascade: engine output → decision_state.label → kill_reason → vgm_verdict.
+    """
+    v = (r.get("verdict") or "").upper()
+    if v == "BUY":
+        return None
+    rr = r.get("reject_reason")
+    if rr:
+        return rr
+    ds = r.get("decision_state")
+    if isinstance(ds, dict):
+        label = ds.get("label")
+        if label:
+            return label
+    return r.get("kill_reason") or r.get("vgm_verdict") or None
+
+
 def _load_previous_bundle_index() -> dict:
     """Return {ticker: prior_record} from the most recent prior dated snapshot.
 
@@ -1016,8 +1036,10 @@ def compact_row(r: dict) -> dict:
         "peg":            r.get("peg"),
         "earnings_beat":  ((r.get("earnings") or {}).get("beat_rate") if isinstance(r.get("earnings"), dict) else None),
         "thesis":         r.get("trade_thesis") or r.get("dashboard_message"),
-        # For Killed/AVOID tab — explain why it was killed
-        "reject_reason": r.get("reject_reason") or (r.get("decision_state") or {}).get("label") if isinstance(r.get("decision_state"), dict) else r.get("reject_reason") or r.get("kill_reason") or r.get("vgm_verdict") or None,
+        # For Killed/AVOID tab — explain why it was killed.
+        # Bug fix #1 (2026-05-06): never display reject_reason on BUY tickers
+        # (was showing decision_state.label even on BUYs, contradicting verdict).
+        "reject_reason": _reject_reason_for(r),
         # Decision engine outputs (Phase 1+2 — for Why-this-is-BUY/WAIT panel)
         "gates_evaluated":         r.get("gates_evaluated") or [],
         "caveats":                 r.get("caveats") or [],

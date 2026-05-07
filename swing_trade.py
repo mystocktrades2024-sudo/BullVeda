@@ -3071,6 +3071,12 @@ def run_daily_scan(force_fresh: bool = False):
         if _setup_kills:
             log.info(f"  Decision engine: setup-kill list = {list(_setup_kills.keys())} "
                      f"(killed setups will be blocked from BUY)")
+        # Bug fix #2 (2026-05-06): wire system circuit breaker into verdict
+        _sys_status = bundle.get("system_status") or {}
+        _cb = _sys_status.get("circuit_breaker") or {}
+        if _cb.get("active"):
+            log.warning(f"  Decision engine: CIRCUIT BREAKER ACTIVE ({_cb.get('level')}) — "
+                        f"all BUYs will be force-routed to WATCH/WAIT")
         # Task #3: per-setup position-size multipliers (informational; written to bundle for dashboard)
         _setup_mults = compute_setup_size_multipliers()
         if _setup_mults:
@@ -3087,7 +3093,8 @@ def run_daily_scan(force_fresh: bool = False):
                 if not isinstance(_row, dict):
                     continue
                 _r = compute_final_verdict(_row, regime=_bundle_regime, thresholds=_cfg_thr,
-                                           setup_kill_list=_setup_kills)
+                                           setup_kill_list=_setup_kills,
+                                           system_status=_sys_status)
                 # Task #3: write per-ticker setup size multiplier (dashboard reads this)
                 _setup_name = _row.get("setup_family") or _row.get("setup") or _row.get("setup_type")
                 _mult = _setup_mults.get(_setup_name) if _setup_name else None

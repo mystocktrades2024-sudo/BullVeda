@@ -49,7 +49,8 @@ def main():
             if not isinstance(r, dict):
                 continue
             res = compute_final_verdict(r, regime=regime, thresholds=thresholds,
-                                         setup_kill_list=setup_kills)
+                                         setup_kill_list=setup_kills,
+                                         system_status=bundle.get("system_status") or {})
             # Task #3 + #14.3: write multiplier and apply it to kelly_size sizing
             setup_name = r.get("setup_family") or r.get("setup") or r.get("setup_type")
             mult = setup_mults.get(setup_name) if setup_name else None

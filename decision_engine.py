@@ -287,7 +287,8 @@ def _resolve_buy_threshold(regime: str | None, thresholds: dict | None) -> int:
 
 def compute_final_verdict(t: dict, regime: str | None = None,
                           thresholds: dict | None = None,
-                          setup_kill_list: dict | None = None) -> dict:
+                          setup_kill_list: dict | None = None,
+                          system_status: dict | None = None) -> dict:
     """
     Single source of truth for ticker verdict. Aggregates all decision-engine
     outputs into one verdict + reason + caveats + audit-grade gate trail.
@@ -315,6 +316,27 @@ def compute_final_verdict(t: dict, regime: str | None = None,
         t = {**t, "_setup_kill_list": setup_kill_list}
     # Bear setup is a parallel path — keep upstream short logic
     bear = (t.get("bear_setup") or {})
+    # System-level circuit breakers (drawdown / forced cash / macro blackout)
+    # — checked BEFORE bear-setup so SHORT signals also respect them.
+    ss = (system_status or {})
+    cb = (ss.get("circuit_breaker") or {})
+    fc = (ss.get("forced_cash") or {})
+    mc = (ss.get("macro_calendar") or {})
+    if cb.get("active") or fc.get("active") or mc.get("blackout_today"):
+        reason_parts = []
+        if cb.get("active"):
+            reason_parts.append("Circuit breaker: " + (cb.get("reasons", ["drawdown limit"])[0] if cb.get("reasons") else cb.get("level", "tripped")))
+        if fc.get("active"):
+            reason_parts.append("Forced cash mode active")
+        if mc.get("blackout_today"):
+            reason_parts.append("Macro blackout: " + (mc.get("blackout_reason") or "FOMC/CPI"))
+        return {
+            "verdict": "WAIT",
+            "reason": " · ".join(reason_parts),
+            "caveats": [],
+            "gates_evaluated": [{"name": "system_circuit_breaker", "passed": False, "reason": " · ".join(reason_parts)}],
+            "demote_to": "watch_list",
+        }
     if t.get("direction") == "short" or bear.get("score", 0) >= 10:
         return {
             "verdict": "AVOID",
