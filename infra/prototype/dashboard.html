@@ -1898,15 +1898,21 @@ document.addEventListener('click', () => {
     _initialApply();
   }
 
-  // Then fetch admin defaults + whoami for force-hidden tabs and admin gating
+  // Then fetch admin defaults + whoami for force-hidden tabs and admin gating.
+  // Phase 1 (2026-05-07): also fetch /api/whoami for user-assigned tab_profile.
+  // Priority: localStorage user override > server-assigned tab_profile > admin default > 'trader'
   Promise.all([
     fetch('/api/admin/tab_defaults').then(r => r.ok ? r.json() : null).catch(() => null),
     fetch('/api/admin/whoami').then(r => r.ok ? r.json() : null).catch(() => null),
-  ]).then(([defaults, whoami]) => {
+    fetch('/api/whoami', {credentials: 'include'}).then(r => r.ok ? r.json() : null).catch(() => null),
+  ]).then(([defaults, whoami_legacy, whoami_v2]) => {
     window._ADMIN_DEFAULTS = defaults || { default_profile: 'trader', force_hidden_tabs: [], locked_essential_tabs: ['settings'] };
-    window._WHOAMI = whoami || { is_admin: false, username: '?' };
-    // If user has no localStorage profile, fall back to admin default
-    if (!profile && defaults?.default_profile) {
+    window._WHOAMI = whoami_legacy || whoami_v2?.user || { is_admin: false, username: '?' };
+    window._WHOAMI_V2 = whoami_v2 || null;
+    // Apply user's assigned tab_profile if no localStorage override
+    if (!profile && whoami_v2?.user?.tab_profile) {
+      window._VIS_PROFILE = whoami_v2.user.tab_profile;
+    } else if (!profile && defaults?.default_profile) {
       window._VIS_PROFILE = defaults.default_profile;
     }
     _applyVisibility();

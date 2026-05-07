@@ -139,14 +139,19 @@ def _validate_username(username: str) -> None:
         raise ValueError("username must be 2-31 chars, lowercase letters/digits/_/-, starting with a letter")
 
 
+VALID_TAB_PROFILES = ("beginner", "trader", "quant", "all", "custom")
+
+
 def create_user(username: str, password: str, role: str,
                 display_name: str = "", email: str = "",
-                disabled: bool = False) -> dict:
+                disabled: bool = False, tab_profile: str = "trader") -> dict:
     _validate_username(username)
     if not get_role(role):
         raise ValueError(f"role '{role}' does not exist")
     if len(password) < 8:
         raise ValueError("password must be at least 8 characters")
+    if tab_profile not in VALID_TAB_PROFILES:
+        raise ValueError(f"tab_profile must be one of {VALID_TAB_PROFILES}")
     data = _load_users()
     if username in data.get("users", {}):
         raise ValueError(f"user '{username}' already exists")
@@ -155,6 +160,7 @@ def create_user(username: str, password: str, role: str,
         "display_name":  display_name or username,
         "email":         email or "",
         "role":          role,
+        "tab_profile":   tab_profile,
         "password_hash": hash_password(password),
         "created_at":    datetime.now().isoformat(timespec="seconds"),
         "last_login":    None,
@@ -175,12 +181,14 @@ def update_user(username: str, **fields) -> dict:
         raise ValueError(f"user '{username}' not found")
     if username == OWNER and fields.get("disabled"):
         raise ValueError("owner account cannot be disabled")
-    allowed = {"display_name", "email", "role", "disabled", "must_change_password"}
+    allowed = {"display_name", "email", "role", "disabled", "must_change_password", "tab_profile"}
     for k, v in fields.items():
         if k not in allowed:
             continue
         if k == "role" and not get_role(v):
             raise ValueError(f"role '{v}' does not exist")
+        if k == "tab_profile" and v not in VALID_TAB_PROFILES:
+            raise ValueError(f"tab_profile must be one of {VALID_TAB_PROFILES}")
         u[k] = v
     _save_users(data)
     return _public_user(u)
@@ -337,6 +345,7 @@ def ensure_seed() -> None:
                 "display_name":  "Gari Phaniraj",
                 "email":         "garimella.phaniraj@gmail.com",
                 "role":          "admin",
+                "tab_profile":   "all",
                 "password_hash": hash_password("swing2026"),
                 "created_at":    datetime.now().isoformat(timespec="seconds"),
                 "last_login":    None,
@@ -349,6 +358,7 @@ def ensure_seed() -> None:
                 "display_name":  "Vinod",
                 "email":         "",
                 "role":          "trader",
+                "tab_profile":   "trader",
                 "password_hash": hash_password("swing2026"),
                 "created_at":    datetime.now().isoformat(timespec="seconds"),
                 "last_login":    None,

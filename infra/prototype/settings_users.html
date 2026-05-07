@@ -115,15 +115,16 @@
 <table class="users">
   <thead>
     <tr>
-      <th style="width: 32%">User</th>
+      <th style="width: 28%">User</th>
       <th>Role</th>
+      <th>Tab Profile</th>
       <th>Status</th>
       <th>Last Login</th>
       <th class="actions-cell">Actions</th>
     </tr>
   </thead>
   <tbody id="userTbody">
-    <tr><td colspan="5" class="empty">Loading users…</td></tr>
+    <tr><td colspan="6" class="empty">Loading users…</td></tr>
   </tbody>
 </table>
 
@@ -150,17 +151,27 @@
     </div>
     <div class="field-row">
       <div class="field">
-        <label>Role</label>
+        <label>Role <span style="color:var(--ink-3);font-weight:400;text-transform:none;letter-spacing:0">(security/access)</span></label>
         <select id="fRole"></select>
       </div>
-      <div class="field" id="passwordField">
-        <label id="pwdLabel">Initial Password</label>
-        <div class="pwd-row">
-          <input type="text" id="fPassword" autocomplete="off">
-          <button class="btn tiny" type="button" onclick="regenPassword()">↻</button>
-        </div>
-        <div class="hint" id="pwdHint">Min 8 chars. User must change on first login.</div>
+      <div class="field">
+        <label>Tab Profile <span style="color:var(--ink-3);font-weight:400;text-transform:none;letter-spacing:0">(UI density)</span></label>
+        <select id="fTabProfile">
+          <option value="beginner">Beginner — 7 tabs (essentials only)</option>
+          <option value="trader" selected>Trader — 15 tabs (default daily-active)</option>
+          <option value="quant">Quant — 22 tabs (+ Risk Lab, Pairs, Audit 360)</option>
+          <option value="all">All — 26 tabs (everything visible)</option>
+          <option value="custom">Custom — user picks per their preference</option>
+        </select>
       </div>
+    </div>
+    <div class="field" id="passwordField">
+      <label id="pwdLabel">Initial Password</label>
+      <div class="pwd-row">
+        <input type="text" id="fPassword" autocomplete="off">
+        <button class="btn tiny" type="button" onclick="regenPassword()">↻</button>
+      </div>
+      <div class="hint" id="pwdHint">Min 8 chars. User must change on first login.</div>
     </div>
     <div class="modal-actions">
       <button class="btn" onclick="closeUserModal()">Cancel</button>
@@ -250,12 +261,20 @@ function renderUsers() {
     tbody.innerHTML = `<tr><td colspan="5" class="empty">No users match "${filter}"</td></tr>`;
     return;
   }
+  const PROFILE_LABELS = {
+    beginner: 'Beginner · 7 tabs',
+    trader:   'Trader · 15 tabs',
+    quant:    'Quant · 22 tabs',
+    all:      'All · 26 tabs',
+    custom:   'Custom · user-set',
+  };
   tbody.innerHTML = filtered.map(u => {
     const initial = (u.username||'?').charAt(0).toUpperCase();
     const roleClass = u.disabled ? 'disabled' : (u.role || 'viewer');
     const roleLabel = u.disabled ? `${u.role} · disabled` : u.role;
     const ll = u.last_login ? new Date(u.last_login).toLocaleString() : 'never';
     const ownerLock = u.is_owner ? 'disabled title="Owner cannot be disabled"' : '';
+    const tabProfile = u.tab_profile || 'trader';
     return `<tr>
       <td>
         <div class="user-cell">
@@ -267,6 +286,12 @@ function renderUsers() {
         </div>
       </td>
       <td><span class="role-pill ${roleClass}">${roleLabel}</span></td>
+      <td>
+        <select class="profile-inline" data-username="${u.username}" onchange="quickSetProfile('${u.username}', this.value)" style="background:var(--bg-2);border:1px solid var(--rule-2);color:var(--ink-0);padding:5px 8px;border-radius:3px;font-family:var(--mono);font-size:11px">
+          ${Object.entries(PROFILE_LABELS).map(([k,lbl]) =>
+            `<option value="${k}" ${k===tabProfile?'selected':''}>${lbl}</option>`).join('')}
+        </select>
+      </td>
       <td>${u.disabled ? '<span style="color:var(--ink-3)">Disabled</span>' : '<span style="color:var(--pass)">● Active</span>'}</td>
       <td><span class="last-login">${ll}</span></td>
       <td class="actions-cell">
@@ -300,15 +325,26 @@ function openEditModal(username) {
   if (!u) return;
   document.getElementById('modalEditUsername').value = username;
   document.getElementById('modalTitle').textContent = `Edit ${username}`;
-  document.getElementById('modalDesc').textContent = 'Update display name, email, or role. Password reset is a separate action (🔑 button).';
+  document.getElementById('modalDesc').textContent = 'Update display name, email, role, or tab profile. Password reset is a separate action (🔑 button).';
   document.getElementById('fUsername').value = username;
   document.getElementById('fUsername').readOnly = true;
   document.getElementById('fDisplayName').value = u.display_name || '';
   document.getElementById('fEmail').value = u.email || '';
   document.getElementById('fRole').value = u.role || 'viewer';
+  document.getElementById('fTabProfile').value = u.tab_profile || 'trader';
   document.getElementById('passwordField').style.display = 'none';
   document.getElementById('modalSubmit').textContent = 'Save Changes';
   document.getElementById('userModal').classList.add('show');
+}
+
+async function quickSetProfile(username, newProfile) {
+  try {
+    await api(`/api/users/${username}`, {method: 'PATCH', body: JSON.stringify({tab_profile: newProfile})});
+    showToast(`${username}: tab profile → ${newProfile}`);
+    loadAll();
+  } catch (e) {
+    showToast('Failed: ' + e.message, 'err');
+  }
 }
 
 function closeUserModal() {
@@ -321,6 +357,7 @@ async function submitUser() {
     display_name: document.getElementById('fDisplayName').value,
     email:        document.getElementById('fEmail').value,
     role:         document.getElementById('fRole').value,
+    tab_profile:  document.getElementById('fTabProfile').value,
   };
   try {
     if (editing) {
