@@ -44,6 +44,16 @@ def _mac_notify(title: str, message: str, subtitle: str = "") -> None:
         pass
 
 
+def _alert(level: str, title: str, body: str) -> None:
+    """Try Slack via alerts.send_alert (also fires Mac notify); fall back to bare Mac."""
+    try:
+        sys.path.insert(0, str(ROOT))
+        from alerts import send_alert
+        send_alert(level=level, title=title, body=body)
+    except Exception:
+        _mac_notify(title=f"🚨 {title}", message=body[:200])
+
+
 def check_health(notify: bool = True) -> tuple[bool, list[str]]:
     """Returns (healthy, list_of_failures)."""
     failures: list[str] = []
@@ -94,10 +104,10 @@ def check_health(notify: bool = True) -> tuple[bool, list[str]]:
 
     healthy = len(failures) == 0
     if not healthy and notify:
-        _mac_notify(
-            title="🚨 SwingTrade engine health: FAIL",
-            message=failures[0][:120],
-            subtitle=f"{len(failures)} check(s) failed — see engine_health_check output",
+        _alert(
+            level="CRITICAL",
+            title=f"Engine health FAIL — {len(failures)} check(s)",
+            body="; ".join(failures[:3])[:300],
         )
     return healthy, failures
 

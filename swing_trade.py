@@ -3160,11 +3160,12 @@ def run_daily_scan(force_fresh: bool = False):
                 "type": "ZeroTickers",
             }
             try:
-                from alerts import _mac_notify
-                _mac_notify(
-                    title="🚨 SwingTrade ENGINE: 0 TICKERS",
-                    message="Engine ran but scored 0 tickers — bundle may be empty or structure changed",
-                    subtitle="Verdicts in V2 will be stale",
+                from alerts import send_alert
+                send_alert(
+                    level="CRITICAL",
+                    title="Decision engine: 0 tickers scored",
+                    body=("Engine ran but processed 0 tickers — bundle may be empty or structure changed. "
+                          "V2 dashboard verdicts will be stale."),
                 )
             except Exception:
                 pass
@@ -3280,11 +3281,12 @@ def run_daily_scan(force_fresh: bool = False):
             "scan_run": str(run_date) if "run_date" in dir() else "",
         }
         try:
-            from alerts import _mac_notify
-            _mac_notify(
-                title="🚨 SwingTrade ENGINE FAILURE",
-                message=f"Decision engine crashed — verdicts may be stale. Error: {type(_de_e).__name__}",
-                subtitle="Scan continued but trust is degraded — check logs",
+            from alerts import send_alert
+            send_alert(
+                level="CRITICAL",
+                title="Decision engine FAILED",
+                body=(f"Engine crashed: {type(_de_e).__name__}: {str(_de_e)[:200]}. "
+                      f"Scan continued but verdicts may be stale. Check cache/logs/scan_*.log."),
             )
         except Exception:
             pass
