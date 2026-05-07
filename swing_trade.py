@@ -3147,8 +3147,41 @@ def run_daily_scan(force_fresh: bool = False):
         log.info(f"  Decision engine: scored {_de_count} tickers, "
                  f"buy_candidates {len(_bc_orig)}→{len(_new_buy)} "
                  f"(rerouted {len(_demoted)} BUY→WATCH for failed gates)")
+        # Silent-failure detection: engine ran but processed nothing.
+        if _de_count == 0:
+            log.error("❌ DECISION ENGINE: 0 tickers scored — bundle structure changed or empty?")
+            bundle["decision_engine_failed"] = {
+                "error": "engine ran but processed 0 tickers",
+                "type": "ZeroTickers",
+            }
+            try:
+                from alerts import _mac_notify
+                _mac_notify(
+                    title="🚨 SwingTrade ENGINE: 0 TICKERS",
+                    message="Engine ran but scored 0 tickers — bundle may be empty or structure changed",
+                    subtitle="Verdicts in V2 will be stale",
+                )
+            except Exception:
+                pass
     except Exception as _de_e:
-        log.warning(f"Decision engine step failed (skipped, no impact): {_de_e}")
+        # Engine failure is a P0 — would silently emit stale verdicts to dashboard.
+        # Log loud, send Mac notification, and persist a flag in the bundle so
+        # downstream consumers (dashboard, V2 builder) can show a banner.
+        log.error(f"❌ DECISION ENGINE FAILED: {_de_e}", exc_info=True)
+        bundle["decision_engine_failed"] = {
+            "error": str(_de_e),
+            "type": type(_de_e).__name__,
+            "scan_run": str(run_date) if "run_date" in dir() else "",
+        }
+        try:
+            from alerts import _mac_notify
+            _mac_notify(
+                title="🚨 SwingTrade ENGINE FAILURE",
+                message=f"Decision engine crashed — verdicts may be stale. Error: {type(_de_e).__name__}",
+                subtitle="Scan continued but trust is degraded — check logs",
+            )
+        except Exception:
+            pass
 
     # Persist bundle for fast re-render (html_generator changes, no re-scan needed).
     # Write atomically via a .tmp + rename so a failed write never leaves a truncated file,
