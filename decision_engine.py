@@ -298,13 +298,20 @@ def _eval_hard_gates(t: dict) -> tuple[list[dict], list[str]]:
     if not passed:
         failures.append("decision_state")
 
-    # 5. Tail-loss filter (conviction.tail_filter_demoted)
+    # 5. Tail-loss filter — broadened to catch all conviction-engine demotions
+    # (2026-05-07: ATEN had conviction.tier=0 / label=WATCH but tail_filter_demoted=None.
+    # Original narrow check missed this — engine still allowed BUY despite zero conviction.)
     conv = t.get("conviction") or {}
-    demoted = bool(conv.get("tail_filter_demoted"))
+    tail_demoted = bool(conv.get("tail_filter_demoted"))
+    tier_zero = (conv.get("tier") == 0 and (conv.get("label") or "").upper() in ("WATCH", "AVOID", "WAIT"))
+    demoted = tail_demoted or tier_zero
     passed = not demoted
     reason = ""
     if demoted:
-        reason = (conv.get("description") or "tail-loss filter demoted")[:140]
+        if tier_zero and not tail_demoted:
+            reason = f"conviction tier=0 / label={conv.get('label')} — engine demoted"
+        else:
+            reason = (conv.get("description") or "tail-loss filter demoted")[:140]
     gates.append({"name": "tail_loss_filter", "passed": passed, "reason": reason})
     if not passed:
         failures.append("tail_loss_filter")
@@ -377,6 +384,28 @@ def _eval_hard_gates(t: dict) -> tuple[list[dict], list[str]]:
     if not passed:
         failures.append("fundamental_adequacy")
 
+    # 9. Technical alignment — price vs EMA stack (2026-05-07: ATEN passed score
+    # threshold 72 but was below ALL 3 EMAs — that's a downtrend, not a BUY setup).
+    # Hard fail when price is below all of (21EMA, 50EMA, 200SMA). Caveat handled
+    # in _eval_soft_gates when partial breach.
+    above_21 = t.get("above_21ema")
+    above_50 = t.get("above_50ema")
+    above_200 = t.get("above_200sma")
+    # Only evaluate if at least one MA flag is populated (otherwise data may be missing)
+    if any(v is not None for v in (above_21, above_50, above_200)):
+        # All False = price below entire EMA stack = structural downtrend
+        if above_21 is False and above_50 is False and above_200 is False:
+            gates.append({
+                "name": "technical_alignment",
+                "passed": False,
+                "reason": "price below 21EMA, 50EMA, AND 200SMA — structural downtrend, not BUY setup",
+            })
+            failures.append("technical_alignment")
+        else:
+            gates.append({"name": "technical_alignment", "passed": True, "reason": ""})
+    else:
+        gates.append({"name": "technical_alignment", "passed": True, "reason": "no MA data — gate skipped"})
+
     return gates, failures
 
 
@@ -401,6 +430,17 @@ def _eval_soft_gates(t: dict) -> list[str]:
         ed = (t.get("earnings") or {}).get("days_to_earnings")
     if ed is not None and EARNINGS_BLOCK_DAYS <= ed < EARNINGS_CAVEAT_DAYS:
         caveats.append(f"earnings in {int(ed)} days")
+
+    # Partial EMA breach — soft caveat (full breach is a hard gate above)
+    above_21 = t.get("above_21ema")
+    above_50 = t.get("above_50ema")
+    above_200 = t.get("above_200sma")
+    breach_count = sum(1 for v in (above_21, above_50, above_200) if v is False)
+    if 0 < breach_count < 3:  # 1 or 2 MAs below — caveat, not block
+        breached = [name for name, v in
+                    (("21EMA", above_21), ("50EMA", above_50), ("200SMA", above_200))
+                    if v is False]
+        caveats.append(f"price below {' & '.join(breached)} — incomplete trend confirmation")
 
     return caveats
 
