@@ -28,9 +28,116 @@ from typing import Any
 
 DEFAULT_FUND_ADEQUACY = 0.50  # fund_score/fund_max ratio required to pass gate
 DEFAULT_BUY_THRESHOLD = 60    # fallback if regime/threshold lookup fails
+EARNINGS_BLOCK_DAYS = 5       # block BUY if earnings within N days (institutional standard)
+EARNINGS_CAVEAT_DAYS = 10     # soft caveat for 5-10 day earnings proximity
+SETUP_KILL_MIN_WR = 0.35      # setups below 35% WR over min_n closed get killed
+SETUP_KILL_MIN_PNL = 0.0      # AND avg_pnl below this threshold
+SETUP_KILL_MIN_N = 30         # require >=30 closed signals before any kill decision
 
 # Gates that, when failed, mean "wait for better setup" rather than structural reject
 WATCH_WORTHY_FAILURES = {"entry_quality", "decision_state", "multi_timeframe"}
+
+
+def compute_setup_size_multipliers(signal_log_path: str | None = None,
+                                     min_n: int = 20) -> dict:
+    """Per-setup position-size multiplier based on real signal_tracker outcomes.
+
+    Returns dict: {setup_name: multiplier_float}. Expectancy-based scale:
+        1.5  — avg_pnl >= +4% AND WR >= 60%   (high-edge setups, e.g., 10-Week Pullback)
+        1.3  — avg_pnl >= +2%                  (positive expectancy proven, e.g., VCP/Trend Cont.)
+        1.0  — avg_pnl >= 0  OR  n < min_n     (default)
+        0.7  — avg_pnl <  0 but WR >= kill threshold (loss-prone but not killed)
+        0.0  — failed performance floor        (killed)
+
+    Expectancy (avg_pnl) drives the call — a setup with WR<50% but +3% avg_pnl
+    has positive expectancy and deserves full size, not a discount.
+
+    Forward-looking only. Open positions retain their original size.
+    """
+    import json as _json
+    from pathlib import Path as _P
+    from collections import defaultdict as _dd
+    if signal_log_path is None:
+        signal_log_path = _P(__file__).parent / "data" / "signal_log.json"
+    try:
+        sigs = _json.loads(_P(signal_log_path).read_text())
+    except Exception:
+        return {}
+    by_setup: dict = _dd(list)
+    for s in sigs or []:
+        if s.get("status") != "CLOSED":
+            continue
+        pnl = s.get("actual_pnl_pct")
+        setup = s.get("strategy")
+        if pnl is None or not setup:
+            continue
+        by_setup[setup].append(float(pnl))
+    multipliers: dict = {}
+    for setup, pnls in by_setup.items():
+        n = len(pnls)
+        if n < min_n:
+            multipliers[setup] = 1.0
+            continue
+        wins = sum(1 for p in pnls if p > 0)
+        wr = wins / n
+        avg = sum(pnls) / n
+        if wr < SETUP_KILL_MIN_WR and avg < SETUP_KILL_MIN_PNL:
+            multipliers[setup] = 0.0
+        elif avg >= 4.0 and wr >= 0.60:
+            multipliers[setup] = 1.5
+        elif avg >= 2.0:
+            multipliers[setup] = 1.3
+        elif avg >= 0.0:
+            multipliers[setup] = 1.0
+        else:
+            multipliers[setup] = 0.7  # negative expectancy but not killed → discount
+    return multipliers
+
+
+def compute_setup_kill_list(signal_log_path: str | None = None,
+                             min_wr: float = SETUP_KILL_MIN_WR,
+                             min_pnl: float = SETUP_KILL_MIN_PNL,
+                             min_n: int = SETUP_KILL_MIN_N) -> dict:
+    """Read signal_tracker outcomes; return setups that fail performance floor.
+
+    Returns dict: {setup_name: {'wr': pct, 'avg_pnl': pct, 'n': count, 'reason': str}}.
+    Only setups meeting all three thresholds (WR<min_wr AND avg_pnl<min_pnl AND
+    n>=min_n) are included. Empty dict if log unavailable or no kills.
+    """
+    import json as _json
+    from pathlib import Path as _P
+    from collections import defaultdict as _dd
+    if signal_log_path is None:
+        signal_log_path = _P(__file__).parent / "data" / "signal_log.json"
+    try:
+        sigs = _json.loads(_P(signal_log_path).read_text())
+    except Exception:
+        return {}
+    by_setup: dict = _dd(list)
+    for s in sigs or []:
+        if s.get("status") != "CLOSED":
+            continue
+        pnl = s.get("actual_pnl_pct")
+        setup = s.get("strategy")
+        if pnl is None or not setup:
+            continue
+        by_setup[setup].append(float(pnl))
+    kills: dict = {}
+    for setup, pnls in by_setup.items():
+        n = len(pnls)
+        if n < min_n:
+            continue
+        wins = sum(1 for p in pnls if p > 0)
+        wr = wins / n
+        avg_pnl = sum(pnls) / n
+        if wr < min_wr and avg_pnl < min_pnl:
+            kills[setup] = {
+                "wr": round(wr * 100, 1),
+                "avg_pnl": round(avg_pnl, 2),
+                "n": n,
+                "reason": f"setup performance floor: WR {wr*100:.1f}%<{min_wr*100:.0f}% over {n} closed",
+            }
+    return kills
 
 
 def _normalize_decision_state(ds: Any) -> str | None:
@@ -100,7 +207,33 @@ def _eval_hard_gates(t: dict) -> tuple[list[dict], list[str]]:
     if not passed:
         failures.append("tail_loss_filter")
 
-    # 6. Fundamental adequacy
+    # 6. Earnings proximity (Phase 4.1) — never enter swing pos with earnings <5d
+    ed = t.get("earn_days")
+    if ed is not None and isinstance(ed, (int, float)) and 0 <= ed < EARNINGS_BLOCK_DAYS:
+        gates.append({
+            "name": "earnings_proximity",
+            "passed": False,
+            "reason": f"earnings in {int(ed)} day(s) — institutional standard blocks BUY <{EARNINGS_BLOCK_DAYS}d",
+        })
+        failures.append("earnings_proximity")
+    else:
+        gates.append({"name": "earnings_proximity", "passed": True, "reason": ""})
+
+    # 7. Setup performance floor (Phase 3.2) — auto-kill chronically losing setups
+    setup_kills = t.get("_setup_kill_list") or {}
+    setup_name = t.get("setup_family") or t.get("setup") or t.get("setup_type")
+    if setup_name and setup_name in setup_kills:
+        info = setup_kills[setup_name]
+        gates.append({
+            "name": "setup_performance",
+            "passed": False,
+            "reason": f"{setup_name}: {info['reason']}, avg_pnl {info['avg_pnl']:+.2f}%",
+        })
+        failures.append("setup_performance")
+    else:
+        gates.append({"name": "setup_performance", "passed": True, "reason": ""})
+
+    # 8. Fundamental adequacy
     fs = t.get("fund_score")
     fm = t.get("fund_max")
     # Some tickers store these inside fund_total
@@ -139,8 +272,8 @@ def _eval_soft_gates(t: dict) -> list[str]:
         caveats.append("Zacks growth grade: F")
 
     ed = t.get("earn_days")
-    if ed is not None and 0 < ed < 5:
-        caveats.append(f"earnings in {ed} days")
+    if ed is not None and EARNINGS_BLOCK_DAYS <= ed < EARNINGS_CAVEAT_DAYS:
+        caveats.append(f"earnings in {int(ed)} days")
 
     return caveats
 
@@ -153,7 +286,8 @@ def _resolve_buy_threshold(regime: str | None, thresholds: dict | None) -> int:
 
 
 def compute_final_verdict(t: dict, regime: str | None = None,
-                          thresholds: dict | None = None) -> dict:
+                          thresholds: dict | None = None,
+                          setup_kill_list: dict | None = None) -> dict:
     """
     Single source of truth for ticker verdict. Aggregates all decision-engine
     outputs into one verdict + reason + caveats + audit-grade gate trail.
@@ -176,6 +310,9 @@ def compute_final_verdict(t: dict, regime: str | None = None,
     if not isinstance(t, dict):
         return {"verdict": "WAIT", "reason": "no ticker data", "caveats": [],
                 "gates_evaluated": [], "demote_to": None}
+    # Inject setup_kill_list into ticker dict for _eval_hard_gates to use (Phase 3.2)
+    if setup_kill_list:
+        t = {**t, "_setup_kill_list": setup_kill_list}
     # Bear setup is a parallel path — keep upstream short logic
     bear = (t.get("bear_setup") or {})
     if t.get("direction") == "short" or bear.get("score", 0) >= 10:

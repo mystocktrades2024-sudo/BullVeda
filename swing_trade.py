@@ -3057,7 +3057,7 @@ def run_daily_scan(force_fresh: bool = False):
     # that overwrites every ticker's verdict before bundle write.
     # ─────────────────────────────────────────────────────────────────────────
     try:
-        from decision_engine import compute_final_verdict
+        from decision_engine import compute_final_verdict, compute_setup_kill_list, compute_setup_size_multipliers
         # Load config defensively — variable name varies (config/cfg) across scopes
         try:
             import json as _json
@@ -3066,6 +3066,17 @@ def run_daily_scan(force_fresh: bool = False):
             _de_cfg = {}
         _cfg_thr = _de_cfg.get("regime4_thresholds")
         _bundle_regime = (bundle.get("regime") or {}).get("regime4") or "risk_on_choppy"
+        # Phase 3.2: compute live setup-kill list from signal_tracker (auto-prune losing setups)
+        _setup_kills = compute_setup_kill_list()
+        if _setup_kills:
+            log.info(f"  Decision engine: setup-kill list = {list(_setup_kills.keys())} "
+                     f"(killed setups will be blocked from BUY)")
+        # Task #3: per-setup position-size multipliers (informational; written to bundle for dashboard)
+        _setup_mults = compute_setup_size_multipliers()
+        if _setup_mults:
+            _nondefault = {s: m for s, m in _setup_mults.items() if m != 1.0}
+            if _nondefault:
+                log.info(f"  Decision engine: setup size multipliers (non-default) = {_nondefault}")
         _de_count = 0
         _de_failed = 0
         for _sec_key, _sec_val in bundle.items():
@@ -3075,7 +3086,12 @@ def run_daily_scan(force_fresh: bool = False):
             for _row in _sec_val:
                 if not isinstance(_row, dict):
                     continue
-                _r = compute_final_verdict(_row, regime=_bundle_regime, thresholds=_cfg_thr)
+                _r = compute_final_verdict(_row, regime=_bundle_regime, thresholds=_cfg_thr,
+                                           setup_kill_list=_setup_kills)
+                # Task #3: write per-ticker setup size multiplier (dashboard reads this)
+                _setup_name = _row.get("setup_family") or _row.get("setup") or _row.get("setup_type")
+                if _setup_name and _setup_name in _setup_mults:
+                    _row["setup_size_multiplier"] = _setup_mults[_setup_name]
                 _row["verdict"] = _r["verdict"]
                 _row["reject_reason"] = _r["reason"] if _r["verdict"] != "BUY" else ""
                 _row["caveats"] = _r["caveats"]

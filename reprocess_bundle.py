@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from copy import deepcopy
-from decision_engine import compute_final_verdict
+from decision_engine import compute_final_verdict, compute_setup_kill_list, compute_setup_size_multipliers
 
 ROOT = Path(__file__).parent
 BUNDLE_PATH = ROOT / "cache" / "last_bundle.json"
@@ -24,6 +24,13 @@ def main():
     thresholds = cfg.get("regime4_thresholds") or {}
     bundle = json.loads(BUNDLE_PATH.read_text())
     regime = (bundle.get("regime") or {}).get("regime4") or "risk_on_choppy"
+    setup_kills = compute_setup_kill_list()
+    setup_mults = compute_setup_size_multipliers()
+    if setup_kills:
+        print(f"Setup-kill list: {list(setup_kills.keys())}")
+    nd_mults = {s: m for s, m in (setup_mults or {}).items() if m != 1.0}
+    if nd_mults:
+        print(f"Setup size multipliers (non-default): {nd_mults}")
 
     # Walk EVERY top-level list section that contains ticker dicts.
     # build_data.py reads from many sources (buy_candidates, watch_list,
@@ -41,7 +48,12 @@ def main():
         for r in rows:
             if not isinstance(r, dict):
                 continue
-            res = compute_final_verdict(r, regime=regime, thresholds=thresholds)
+            res = compute_final_verdict(r, regime=regime, thresholds=thresholds,
+                                         setup_kill_list=setup_kills)
+            # Task #3: write per-ticker setup size multiplier
+            setup_name = r.get("setup_family") or r.get("setup") or r.get("setup_type")
+            if setup_name and setup_name in setup_mults:
+                r["setup_size_multiplier"] = setup_mults[setup_name]
             r["verdict"] = res["verdict"]
             r["reject_reason"] = res["reason"] if res["verdict"] != "BUY" else ""
             r["caveats"] = res["caveats"]

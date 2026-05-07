@@ -716,13 +716,27 @@ def _zacks_email_mentions_for_ticker(ticker, gmail_zacks: dict) -> dict:
 
 
 def stage_of(row: dict) -> str:
-    """Derive stage label from decision dict / direction / score."""
+    """Derive stage label — prefer top-level verdict (decision_engine output).
+
+    Phase 2.1 (2026-05-06): top-level `verdict` is the single source of truth
+    written by decision_engine.compute_final_verdict(). Fall back to nested
+    decision.verdict for legacy rows, and finally to score-based heuristic only
+    if neither is set (defense-in-depth, should never fire post-engine wire-in).
+    """
+    # Single source of truth: top-level verdict from decision_engine
+    top = (row.get("verdict") or "").upper()
+    if top in {"BUY", "WATCH", "SELL", "SHORT", "AVOID", "WAIT"}:
+        if top == "SHORT": return "SELL"
+        if top == "WAIT": return "WATCH"  # WAIT renders as WATCH in stage taxonomy
+        return top
+    # Legacy fallback: nested decision.verdict
     dec = row.get("decision") or {}
     v = (dec.get("verdict") or "").upper()
     if v in {"BUY", "WATCH", "SELL", "SHORT", "AVOID"}:
         return "SELL" if v == "SHORT" else v
     if (row.get("direction") or "").lower() == "short":
         return "SELL"
+    # Last-resort score heuristic — should not reach here post-engine wire-in
     s = row.get("score") or 0
     return "BUY" if s >= 70 else "WATCH" if s >= 60 else "AVOID"
 
