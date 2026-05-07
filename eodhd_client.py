@@ -233,6 +233,21 @@ class EODHDError(Exception):
     """Raised when EODHD returns an unrecoverable error."""
 
 
+# Per-process EODHD call counter — for budget audit + duplicate-scan detection
+_CALL_COUNTER = {"network": 0, "cache_hit": 0, "errors": 0}
+
+
+def get_call_stats() -> dict:
+    """Return per-process EODHD call statistics. Reset at process start."""
+    return dict(_CALL_COUNTER)
+
+
+def reset_call_stats() -> None:
+    _CALL_COUNTER["network"] = 0
+    _CALL_COUNTER["cache_hit"] = 0
+    _CALL_COUNTER["errors"] = 0
+
+
 def _request(
     endpoint: str,
     params: dict | None = None,
@@ -255,6 +270,7 @@ def _request(
     if cache_key and cache_ttl > 0:
         cached = _cache_read(cache_key, cache_ttl)
         if cached is not None:
+            _CALL_COUNTER["cache_hit"] += 1
             return cached
 
     full_params = dict(params or {})
@@ -267,6 +283,7 @@ def _request(
     for attempt in range(max_retries):
         try:
             _limiter.acquire()
+            _CALL_COUNTER["network"] += 1  # tally every network call (incl. retries)
             resp = _session.get(url, params=full_params, timeout=timeout)
 
             # 200: success

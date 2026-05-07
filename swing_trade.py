@@ -3368,6 +3368,18 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _sae:
         log.debug(f"bundle_archive.save_snapshot skipped: {_sae}")
 
+    # EODHD call counter — log per-scan budget audit
+    try:
+        from eodhd_client import get_call_stats as _eodhd_stats
+        _stats = _eodhd_stats()
+        _net = _stats.get("network", 0); _hit = _stats.get("cache_hit", 0)
+        _total = _net + _hit
+        _hit_rate = (_hit / _total * 100) if _total > 0 else 0
+        log.info(f"  EODHD calls this scan: {_net} network + {_hit} cache_hit "
+                 f"= {_total} total (cache hit rate {_hit_rate:.1f}%)")
+    except Exception as _ce:
+        log.debug(f"EODHD call stats unavailable: {_ce}")
+
     # #9: 90-day retention on bundle snapshots — prevents unbounded disk growth
     try:
         from datetime import timedelta as _td
@@ -4077,6 +4089,22 @@ def _build_sample_bundle() -> dict:
 
 if __name__ == "__main__":
     args = sys.argv[1:]
+
+    # File lock: prevent concurrent swing_trade.py runs racing on bundle write.
+    # 2026-05-07: caught 2 schedulers (cron + launchd) firing overlapping scans.
+    # Lock applies only to the daily scan path; deep-dive / history etc. don't lock.
+    if not args or (len(args) == 1 and args[0].lower() == "--fresh"):
+        import fcntl as _fcntl
+        _LOCK_PATH = "/tmp/swing_trade_scan.lock"
+        try:
+            _scan_lock = open(_LOCK_PATH, "w")
+            _fcntl.flock(_scan_lock, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            _scan_lock.write(f"pid={os.getpid()} started={datetime.now().isoformat()}\n")
+            _scan_lock.flush()
+        except (IOError, OSError) as _le:
+            print(f"❌ ABORT: another swing_trade.py scan is running ({_LOCK_PATH} locked). "
+                  f"Kill it manually if stuck. Error: {_le}", file=sys.stderr)
+            sys.exit(2)
 
     if not args or (len(args) == 1 and args[0].lower() == "--fresh"):
         run_daily_scan(force_fresh="--fresh" in args)
