@@ -1062,7 +1062,6 @@
   <div class="sb-link" data-tab="portfolio"><span class="ico">◉</span>Portfolio<span class="ct" id="sbPortCt">0</span></div>
   <div class="sb-link" data-tab="performance"><span class="ico">▲</span>Performance<span class="ct" id="sbPerfCt">0</span></div>
   <div class="sb-link" data-tab="audit"><span class="ico">⌖</span>Audit Trail<span class="ct" id="sbAuditCt">0</span></div>
-  <a class="sb-link" id="sbSettingsLink" href="settings_users.html" style="text-decoration:none;display:none"><span class="ico">⚙</span>Settings · Users</a>
   <div class="sb-link" data-tab="strategies"><span class="ico">⚙</span>Strategies</div>
   <div class="sb-link" data-tab="screener"><span class="ico">⌕</span>Screener<span class="ct" id="sbScreenCt">0</span></div>
   <div class="sb-link" data-tab="themes"><span class="ico">◆</span>Themes</div>
@@ -2211,16 +2210,7 @@ window.addEventListener('DOMContentLoaded', () => {
     b.classList.toggle('on', b.dataset.mode === FS_STATE.mode);
     b.setAttribute('aria-selected', b.dataset.mode === FS_STATE.mode ? 'true' : 'false');
   });
-  // Reveal Settings · Users link only for admin users (2026-05-07)
-  fetch('/api/whoami', {credentials: 'include'})
-    .then(r => r.ok ? r.json() : null)
-    .then(d => {
-      if (d && d.is_admin) {
-        const lnk = document.getElementById('sbSettingsLink');
-        if (lnk) lnk.style.display = '';
-      }
-    })
-    .catch(() => {});
+  // (Settings · Users link removed — integrated as sub-tab in existing Settings tab)
   // Audit 360 — fetch system health score and color the sidebar badge
   fetch('/api/audit_360?quick=true')
     .then(r => r.ok ? r.json() : null)
@@ -7874,6 +7864,8 @@ async function renderSettings() {
       <div class="stg-tab on" data-stg="visibility">🎯 Tab Visibility</div>
       <div class="stg-tab" data-stg="config">📋 Config</div>
       <div class="stg-tab" data-stg="admin">🔐 Admin</div>
+      <div class="stg-tab" data-stg="users" id="stgTabUsers" style="display:none">👥 Users</div>
+      <div class="stg-tab" data-stg="roles" id="stgTabRoles" style="display:none">🎭 Roles</div>
     </div>
 
     <!-- VISIBILITY PANE -->
@@ -7940,6 +7932,16 @@ async function renderSettings() {
         <button class="stg-btn">📤 Audit log · who changed what</button>
       </div>
     </div>
+
+    <!-- USERS PANE (admin-only, embeds settings_users.html via iframe) -->
+    <div class="stg-pane" data-stgpane="users">
+      <iframe id="stgUsersFrame" src="" style="width:100%;height:78vh;border:1px solid var(--rule);border-radius:6px;background:var(--bg-1)"></iframe>
+    </div>
+
+    <!-- ROLES PANE (admin-only, embeds settings_roles.html via iframe) -->
+    <div class="stg-pane" data-stgpane="roles">
+      <iframe id="stgRolesFrame" src="" style="width:100%;height:78vh;border:1px solid var(--rule);border-radius:6px;background:var(--bg-1)"></iframe>
+    </div>
   `;
 
   // Wire stg-tab switching
@@ -7949,8 +7951,29 @@ async function renderSettings() {
       document.querySelectorAll('.stg-tab').forEach(x => x.classList.toggle('on', x === t));
       document.querySelectorAll('.stg-pane').forEach(p => p.classList.toggle('on', p.dataset.stgpane === id));
       if (id === 'config') _stgRenderConfig();
+      if (id === 'users') {
+        const f = document.getElementById('stgUsersFrame');
+        if (f && !f.src) f.src = 'settings_users.html';
+      }
+      if (id === 'roles') {
+        const f = document.getElementById('stgRolesFrame');
+        if (f && !f.src) f.src = 'settings_roles.html';
+      }
     });
   });
+
+  // Reveal Users + Roles sub-tabs only for admins
+  fetch('/api/whoami', {credentials: 'include'})
+    .then(r => r.ok ? r.json() : null)
+    .then(d => {
+      if (d && d.is_admin) {
+        const u = document.getElementById('stgTabUsers');
+        const r = document.getElementById('stgTabRoles');
+        if (u) u.style.display = '';
+        if (r) r.style.display = '';
+      }
+    })
+    .catch(() => {});
 
   // Build tree
   _stgBuildTree();
