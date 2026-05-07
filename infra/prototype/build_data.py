@@ -12,9 +12,67 @@ from pathlib import Path
 import sys
 ROOT   = Path(__file__).resolve().parents[2]
 BUNDLE = ROOT / "cache/last_bundle.json"
+BUNDLE_HISTORY = ROOT / "cache/bundles"  # dated snapshots for scan-over-scan diff
 PORTFOLIO = ROOT / "data/portfolio_state.json"
 SIGNAL_LOG = ROOT / "data/signal_log.json"
 sys.path.insert(0, str(ROOT))  # so we can import eodhd_client
+
+
+# Module-level cache for prior-bundle index (set by main(), read by compact_row())
+_PREV_BUNDLE_INDEX: dict = {}
+_PREV_BUNDLE_DATE: str = ""
+
+
+def _load_previous_bundle_index() -> dict:
+    """Return {ticker: prior_record} from the most recent prior dated snapshot.
+
+    Used for scan-over-scan diff (audit log panel). Returns {} if no prior
+    snapshot exists or load fails — diff fields will simply be absent.
+    """
+    try:
+        if not BUNDLE_HISTORY.exists():
+            return {}
+        snaps = sorted(BUNDLE_HISTORY.glob("20[0-9][0-9]-[0-9][0-9]-[0-9][0-9].json"))
+        if len(snaps) < 2:
+            return {}
+        # Use second-most-recent (most recent might be today's, just-written)
+        prev = json.loads(snaps[-2].read_text())
+        idx: dict = {}
+        for sec in ("buy_candidates", "watch_list", "all_scored", "killed",
+                    "medium_term_picks", "extended_leaders"):
+            for r in prev.get(sec) or []:
+                if isinstance(r, dict) and r.get("ticker") and r["ticker"] not in idx:
+                    idx[r["ticker"]] = r
+        idx["_snapshot_date"] = snaps[-2].stem  # type: ignore
+        return idx
+    except Exception:
+        return {}
+
+
+def _compute_change_log(today: dict, prior: dict, prior_date: str) -> dict:
+    """Compute scan-over-scan changes for one ticker. Returns {} if no prior."""
+    if not prior:
+        return {}
+    cl: dict = {"prior_date": prior_date, "changes": []}
+    # Verdict change
+    pv = (prior.get("decision") or {}).get("verdict") if isinstance(prior.get("decision"), dict) else prior.get("verdict")
+    cv = (today.get("decision") or {}).get("verdict") if isinstance(today.get("decision"), dict) else today.get("verdict")
+    if pv and cv and pv != cv:
+        cl["changes"].append({"field": "verdict", "from": pv, "to": cv})
+    # Score delta
+    ps, cs = prior.get("score"), today.get("score")
+    if isinstance(ps, (int, float)) and isinstance(cs, (int, float)) and abs(cs - ps) >= 1:
+        cl["changes"].append({"field": "score", "from": round(float(ps), 1), "to": round(float(cs), 1),
+                              "delta": round(float(cs) - float(ps), 1)})
+    # Entry quality change
+    pe, ce = prior.get("entry_quality"), today.get("entry_quality")
+    if pe and ce and pe != ce:
+        cl["changes"].append({"field": "entry_quality", "from": pe, "to": ce})
+    # Stop change
+    ps_st, cs_st = prior.get("stop"), today.get("stop")
+    if isinstance(ps_st, (int, float)) and isinstance(cs_st, (int, float)) and abs(cs_st - ps_st) > 0.01:
+        cl["changes"].append({"field": "stop", "from": round(float(ps_st), 2), "to": round(float(cs_st), 2)})
+    return cl if cl["changes"] else {}
 
 
 def _fetch_fundamentals_enrichment(tickers: list) -> dict:
@@ -965,6 +1023,8 @@ def compact_row(r: dict) -> dict:
         "caveats":                 r.get("caveats") or [],
         "setup_size_multiplier":   r.get("setup_size_multiplier"),
         "audit_trail":             r.get("audit_trail") or {},
+        # Scan-over-scan diff (audit log panel)
+        "change_log":              _compute_change_log(r, _PREV_BUNDLE_INDEX.get(r.get("ticker"), {}), _PREV_BUNDLE_DATE),
     }
 
 
@@ -1358,6 +1418,10 @@ def rich_row(r: dict, b: dict = None) -> dict:
 
 
 def main():
+    global _PREV_BUNDLE_INDEX, _PREV_BUNDLE_DATE
+    _prev = _load_previous_bundle_index()
+    _PREV_BUNDLE_DATE = _prev.pop("_snapshot_date", "") if _prev else ""
+    _PREV_BUNDLE_INDEX = _prev or {}
     b = json.loads(BUNDLE.read_text())
 
     # Enrich with EODHD data (Beta, MarketCap, Float, 52wk, Sentiment, Events)
