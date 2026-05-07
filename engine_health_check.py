@@ -54,9 +54,24 @@ def _alert(level: str, title: str, body: str) -> None:
         _mac_notify(title=f"🚨 {title}", message=body[:200])
 
 
+def _scan_in_progress() -> bool:
+    """True if a swing_trade.py scan is currently running.
+    Health check should not flag missing engine line during in-progress scans.
+    """
+    try:
+        out = subprocess.run(["pgrep", "-f", "swing_trade.py"], capture_output=True, text=True, timeout=3)
+        return bool(out.stdout.strip())
+    except Exception:
+        return False
+
+
 def check_health(notify: bool = True) -> tuple[bool, list[str]]:
     """Returns (healthy, list_of_failures)."""
     failures: list[str] = []
+
+    # If scan is currently running, defer the engine-line check — it'll fire
+    # only at scan completion, not during enrichment/scoring (which can take 15+ min).
+    in_progress = _scan_in_progress()
 
     # 1+2: bundle exists and has engine version
     if not BUNDLE.exists():
@@ -73,11 +88,11 @@ def check_health(notify: bool = True) -> tuple[bool, list[str]]:
         de = b["decision_engine_failed"]
         failures.append(f"bundle flagged engine failure: {de.get('type')}: {de.get('error')}")
 
-    # 3: latest scan log contains the engine line with N > 0
+    # 3: latest scan log contains the engine line with N > 0 — skip if scan still running
     logs = sorted(LOG_DIR.glob("scan_*.log"), key=lambda p: p.stat().st_mtime, reverse=True) if LOG_DIR.exists() else []
     if not logs:
         failures.append("no scan logs found — system may not be running")
-    else:
+    elif not in_progress:
         latest = logs[0]
         text = latest.read_text(errors="ignore")
         m = re.search(r"Decision engine: scored (\d+) tickers", text)
@@ -122,7 +137,8 @@ def main():
 
     if healthy:
         if not args.quiet:
-            print(f"✓ Engine health: OK ({date.today()})")
+            in_prog = _scan_in_progress()
+            print(f"✓ Engine health: OK ({date.today()})" + (" — scan currently running, deferred engine-line check" if in_prog else ""))
             b = json.loads(BUNDLE.read_text())
             print(f"  Bundle decision_engine_version: {b.get('decision_engine_version')}")
             print(f"  buy_candidates: {len(b.get('buy_candidates') or [])}")
