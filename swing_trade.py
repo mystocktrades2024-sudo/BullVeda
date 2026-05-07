@@ -3198,6 +3198,72 @@ def run_daily_scan(force_fresh: bool = False):
                              f"(cap={_sec_cap} per sector)")
         except Exception as _sc_e:
             log.warning(f"Sector concentration cap step failed (skipped): {_sc_e}")
+
+        # #11: Portfolio-level position cap — don't emit more BUYs than slots available
+        try:
+            _max_open = int(_de_cfg.get("max_total_open_positions", 15))
+            _ps_path = BASE_DIR / "data" / "portfolio_state.json"
+            _cur_open = 0
+            if _ps_path.exists():
+                try:
+                    _ps = json.loads(_ps_path.read_text())
+                    _cur_open = len(_ps.get("positions") or [])
+                except Exception:
+                    _cur_open = 0
+            _slots = max(0, _max_open - _cur_open)
+            _bcs = bundle.get("buy_candidates") or []
+            if len(_bcs) > _slots:
+                _bcs.sort(key=lambda x: -(x.get("score") or 0))
+                _kept = _bcs[:_slots]
+                _excess = _bcs[_slots:]
+                for _r in _excess:
+                    _r["verdict"] = "WATCH"
+                    _r["reject_reason"] = (f"Portfolio cap: {_cur_open}/{_max_open} positions open, "
+                                            f"only {_slots} slot(s) available — top score(s) prioritized")
+                    _dec = _r.setdefault("decision", {})
+                    if isinstance(_dec, dict):
+                        _dec["verdict"] = "WATCH"
+                bundle["buy_candidates"] = _kept
+                _wl = list(bundle.get("watch_list") or [])
+                _seen = {x.get("ticker") for x in _wl if isinstance(x, dict)}
+                for _r in _excess:
+                    if _r.get("ticker") not in _seen:
+                        _wl.append(_r); _seen.add(_r.get("ticker"))
+                bundle["watch_list"] = _wl
+                log.info(f"  Portfolio cap: {_cur_open} open, {_slots} slots → "
+                         f"{len(_kept)} BUYs kept, {len(_excess)} demoted")
+        except Exception as _pc_e:
+            log.warning(f"Portfolio cap step failed (skipped): {_pc_e}")
+
+        # #13: Elite picks — top 5 BUYs by expected-value score
+        # ev_score = ticker_score × setup_size_multiplier × forward_dist.fwd_sharpe
+        try:
+            _elite: list = []
+            for _r in bundle.get("buy_candidates") or []:
+                if not isinstance(_r, dict):
+                    continue
+                _sc = float(_r.get("score") or 0)
+                _sm = _r.get("setup_size_multiplier") or 1.0
+                _fd = _r.get("forward_dist") or {}
+                _shp = float(_fd.get("fwd_sharpe") or 1.0)
+                # composite EV score; clamp sharpe to avoid blowups
+                _ev = _sc * _sm * max(0.5, min(_shp, 3.0))
+                _elite.append({
+                    "ticker": _r.get("ticker"),
+                    "score": _sc,
+                    "size_mult": _sm,
+                    "fwd_sharpe": _shp,
+                    "ev_score": round(_ev, 1),
+                    "setup": _r.get("setup_family") or _r.get("setup"),
+                    "p_profit": _fd.get("p_profit"),
+                    "median_pct": _fd.get("p50_pct"),
+                })
+            _elite.sort(key=lambda x: -x["ev_score"])
+            bundle["elite_picks"] = _elite[:5]
+            if _elite[:5]:
+                log.info(f"  Elite picks: {[e['ticker'] for e in _elite[:5]]}")
+        except Exception as _ep_e:
+            log.warning(f"Elite picks step failed (skipped): {_ep_e}")
     except Exception as _de_e:
         # Engine failure is a P0 — would silently emit stale verdicts to dashboard.
         # Log loud, send Mac notification, and persist a flag in the bundle so
