@@ -22,6 +22,12 @@ sys.path.insert(0, str(ROOT))  # so we can import eodhd_client
 _PREV_BUNDLE_INDEX: dict = {}
 _PREV_BUNDLE_DATE: str = ""
 
+# System-level gating state (circuit breaker / forced cash / macro blackout) —
+# set by main() so _compute_mode_verdicts can demote Position/Invest BUYs in
+# lockdown, matching what the engine already does for Swing.
+_SYSTEM_GATE_ACTIVE: bool = False
+_SYSTEM_GATE_REASON: str = ""
+
 
 def _reject_reason_for(r: dict):
     """Resolve the reject_reason field for V2 display.
@@ -1154,13 +1160,27 @@ def _compute_mode_verdicts(r: dict) -> dict:
 
     # Pull gate info from analysis.py path (still informative even when score differs)
     mt_analysis = r.get("medium_term") or {}
+
+    # System gate enforcement — if circuit breaker / forced cash / macro blackout
+    # is active, demote Position/Invest BUYs to WATCH (mirrors what decision_engine
+    # already does for Swing). Same trust principle: a system-wide stop must
+    # affect ALL timeframes, not just short-term.
+    pos_v = _verdict(pos_score, "position")
+    inv_v = _verdict(inv_score, "invest")
+    if _SYSTEM_GATE_ACTIVE:
+        if pos_v == "BUY":
+            pos_v = "WATCH"
+        if inv_v == "BUY":
+            inv_v = "WATCH"
+
     return {
         "medium_term_score":         pos_score,
-        "medium_term_verdict":       _verdict(pos_score, "position"),
-        "medium_term_gate_status":   mt_analysis.get("gate_status"),
-        "medium_term_gate_reasons":  mt_analysis.get("gate_reasons") or [],
+        "medium_term_verdict":       pos_v,
+        "medium_term_gate_status":   "system_gate_active" if _SYSTEM_GATE_ACTIVE else mt_analysis.get("gate_status"),
+        "medium_term_gate_reasons":  ([_SYSTEM_GATE_REASON] if _SYSTEM_GATE_ACTIVE
+                                       else (mt_analysis.get("gate_reasons") or [])),
         "long_term_score":           inv_score,
-        "long_term_verdict":         _verdict(inv_score, "invest"),
+        "long_term_verdict":         inv_v,
         "long_term_breakdown":       (r.get("long_term") or {}).get("breakdown") or {},
     }
 
@@ -1440,11 +1460,25 @@ def rich_row(r: dict, b: dict = None) -> dict:
 
 
 def main():
-    global _PREV_BUNDLE_INDEX, _PREV_BUNDLE_DATE
+    global _PREV_BUNDLE_INDEX, _PREV_BUNDLE_DATE, _SYSTEM_GATE_ACTIVE, _SYSTEM_GATE_REASON
     _prev = _load_previous_bundle_index()
     _PREV_BUNDLE_DATE = _prev.pop("_snapshot_date", "") if _prev else ""
     _PREV_BUNDLE_INDEX = _prev or {}
     b = json.loads(BUNDLE.read_text())
+    # Capture system-level gates so _compute_mode_verdicts can honor them too
+    _ss = b.get("system_status") or {}
+    _cb = (_ss.get("circuit_breaker") or {}).get("active")
+    _fc = (_ss.get("forced_cash") or {}).get("active")
+    _mb = (_ss.get("macro_calendar") or {}).get("blackout_today")
+    _SYSTEM_GATE_ACTIVE = bool(_cb or _fc or _mb)
+    if _cb:
+        _SYSTEM_GATE_REASON = (_ss["circuit_breaker"].get("reasons") or ["circuit breaker active"])[0]
+    elif _fc:
+        _SYSTEM_GATE_REASON = "forced cash mode active"
+    elif _mb:
+        _SYSTEM_GATE_REASON = "macro blackout: " + (_ss["macro_calendar"].get("blackout_reason") or "FOMC/CPI")
+    else:
+        _SYSTEM_GATE_REASON = ""
 
     # Enrich with EODHD data (Beta, MarketCap, Float, 52wk, Sentiment, Events)
     all_candidate_rows = (b.get("buy_candidates") or []) + (b.get("watch_list") or []) + \
@@ -1603,7 +1637,10 @@ def main():
             cr = compact_row(r)
             cr["mode"]    = "position"
             cr["score"]   = round(pos, 1)
-            cr["stage"]   = "BUY" if pos >= 68 else "WATCH"
+            # System gate: circuit breaker / forced cash / macro blackout demotes BUYs to WATCH
+            cr["stage"]   = "WATCH" if _SYSTEM_GATE_ACTIVE else ("BUY" if pos >= 68 else "WATCH")
+            if _SYSTEM_GATE_ACTIVE and pos >= 68:
+                cr["reject_reason"] = _SYSTEM_GATE_REASON
             cr["market_cap"] = mcap or cr.get("market_cap")
             cr["hold_period_min"] = 21
             cr["hold_period_max"] = 90
@@ -1620,7 +1657,10 @@ def main():
             cr = compact_row(r)
             cr["mode"]    = "invest"
             cr["score"]   = round(inv, 1)
-            cr["stage"]   = "BUY" if inv >= 72 else "WATCH"
+            # System gate: same lockdown applies to long-term BUYs
+            cr["stage"]   = "WATCH" if _SYSTEM_GATE_ACTIVE else ("BUY" if inv >= 72 else "WATCH")
+            if _SYSTEM_GATE_ACTIVE and inv >= 72:
+                cr["reject_reason"] = _SYSTEM_GATE_REASON
             cr["market_cap"] = mcap or cr.get("market_cap")
             cr["hold_period_min"] = 90
             cr["hold_period_max"] = 540
