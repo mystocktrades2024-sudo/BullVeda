@@ -1676,6 +1676,55 @@
     background: repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(255,255,255,0.02) 6px, rgba(255,255,255,0.02) 12px) !important;
     pointer-events: none;
   }
+
+  /* ─── Decision-engine panels (2026-05-06 architecture port) ─── */
+  /* Why-this-is-X gate cascade walkthrough */
+  .de-gates-panel, .de-audit-panel { margin-top: 18px; padding: 22px 26px; background: var(--bg-1); border: 1px solid var(--rule); border-radius: 8px; position: relative; }
+  .de-gates-panel::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--info); border-radius: 8px 0 0 8px; }
+  .de-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px; }
+  .de-head h3 { margin: 0; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-0); font-weight: 700; }
+  .de-meta { font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
+  .de-gate { display: grid; grid-template-columns: 28px 1fr 24px; gap: 14px; align-items: center; padding: 10px 0; border-bottom: 1px dashed var(--rule); }
+  .de-gate:last-of-type { border-bottom: none; }
+  .de-gate .de-num { font-family: var(--mono); font-size: 10px; color: var(--ink-3); text-align: center; padding-top: 1px; }
+  .de-gate .de-body { display: flex; flex-direction: column; gap: 2px; }
+  .de-gate .de-name { font-size: 13px; font-weight: 700; color: var(--ink-0); letter-spacing: 0.02em; }
+  .de-gate .de-reason { font-size: 11.5px; color: var(--ink-2); line-height: 1.4; }
+  .de-gate .de-icon { font-family: var(--mono); font-size: 17px; font-weight: 800; text-align: center; }
+  .de-gate.pass .de-icon { color: var(--pass); }
+  .de-gate.fail .de-icon { color: var(--fail); }
+  .de-gate.fail { background: color-mix(in oklch, var(--fail) 5%, transparent); margin: 0 -14px; padding-left: 14px; padding-right: 14px; border-radius: 4px; }
+  .de-foot { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 10px; }
+  .de-summary { font-size: 13px; padding: 11px 14px; border-radius: 4px; }
+  .de-summary.pass { background: var(--pass-bg); border-left: 3px solid var(--pass); color: var(--ink-0); }
+  .de-summary.warn { background: var(--warn-bg); border-left: 3px solid var(--warn); color: var(--ink-0); }
+  .de-summary.fail { background: var(--fail-bg); border-left: 3px solid var(--fail); color: var(--ink-0); }
+  .de-caveats { font-size: 11.5px; color: var(--warn); }
+  .de-caveats b { letter-spacing: 0.06em; text-transform: uppercase; font-size: 10px; }
+
+  /* Setup edge sizing badge */
+  .de-size { display: inline-flex; align-items: center; gap: 14px; margin-top: 14px; padding: 8px 14px; background: var(--bg-2); border: 1px solid var(--rule); border-radius: 4px; font-size: 11.5px; }
+  .de-size .lbl { font-size: 10px; color: var(--ink-2); }
+  .de-size .de-size-v { font-weight: 800; font-size: 13px; }
+  .de-size .de-size-tag { font-weight: 500; font-size: 10px; color: var(--ink-2); margin-left: 6px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .de-size.up    { border-left: 3px solid var(--pass); }
+  .de-size.up    .de-size-v { color: var(--pass); }
+  .de-size.down  { border-left: 3px solid var(--warn); }
+  .de-size.down  .de-size-v { color: var(--warn); }
+  .de-size.kill  { border-left: 3px solid var(--fail); }
+  .de-size.kill  .de-size-v { color: var(--fail); }
+
+  /* Audit log */
+  .de-audit-panel::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--warn); border-radius: 8px 0 0 8px; }
+  .de-audit-row { display: grid; grid-template-columns: 130px 1fr; gap: 18px; align-items: center; padding: 9px 0; border-bottom: 1px dashed var(--rule); font-size: 12px; }
+  .de-audit-row:last-of-type { border-bottom: none; }
+  .de-audit-row .de-field { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; }
+  .de-audit-row .de-from { font-family: var(--mono); color: var(--ink-2); text-decoration: line-through; margin-right: 6px; }
+  .de-audit-row .de-arrow { color: var(--ink-3); font-family: var(--mono); margin-right: 6px; }
+  .de-audit-row .de-to   { font-family: var(--mono); color: var(--ink-0); font-weight: 800; }
+  .de-audit-row .de-delta { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 3px; margin-left: 8px; font-weight: 700; }
+  .de-audit-row .de-delta.up   { background: var(--pass-bg); color: var(--pass); }
+  .de-audit-row .de-delta.down { background: var(--fail-bg); color: var(--fail); }
 </style>
 <link rel="stylesheet" href="./floor.css?v=20260504b" />
 </head>
@@ -2404,7 +2453,85 @@ function renderVerdict() {
           <span class="go">${a.go}</span>
         </div>`).join('')}
     </div>
-  </div>`;
+  </div>
+  ${_renderDecisionEnginePanels()}`;
+}
+
+// ─── Decision-engine panels (Phase 1+2 architecture, 2026-05-06) ───────────
+// Three panels added to verdictBody: gate cascade walkthrough, setup-edge sizing
+// badge, and scan-over-scan audit log. All read from fields written by
+// decision_engine.compute_final_verdict() through bundle → tickers.json.
+function _renderDecisionEnginePanels() {
+  const v = T.verdict || 'WATCH';
+
+  // Gate cascade walkthrough — "Why this is BUY/WATCH"
+  const gates = T.gates_evaluated || [];
+  const caveats = T.caveats || [];
+  let gatesHtml = '';
+  if (gates.length) {
+    const passed = gates.filter(g => g.passed).length;
+    const summaryCls = v === 'BUY' ? 'pass' : v === 'WAIT' ? 'fail' : 'warn';
+    const summaryText = v === 'BUY'
+      ? `All ${gates.length} gates passed. Score ${T.score} clears threshold; signal is actionable.`
+      : `${gates.length - passed} gate(s) failed → ${T.reject_reason || v}. Wait for the failing condition to clear.`;
+    gatesHtml = `
+      <div class="de-gates-panel">
+        <div class="de-head">
+          <h3>Why this is ${v}</h3>
+          <span class="de-meta">${passed}/${gates.length} gates passed</span>
+        </div>
+        ${gates.map((g, i) => `
+          <div class="de-gate ${g.passed ? 'pass' : 'fail'}">
+            <span class="de-num">${String(i+1).padStart(2,'0')}</span>
+            <div class="de-body">
+              <div class="de-name">${g.name.replace(/_/g, ' ').replace(/\b\w/g, c=>c.toUpperCase())}</div>
+              ${g.reason ? `<div class="de-reason">${g.reason}</div>` : ''}
+            </div>
+            <span class="de-icon">${g.passed ? '✓' : '✗'}</span>
+          </div>`).join('')}
+        <div class="de-foot">
+          <div class="de-summary ${summaryCls}">${summaryText}</div>
+          ${caveats.length ? `<div class="de-caveats"><b>Caveats:</b> ${caveats.join(' · ')}</div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  // Setup edge sizing badge
+  const sm = T.setup_size_multiplier;
+  let sizeHtml = '';
+  if (sm != null && sm !== 1.0) {
+    const cls = sm > 1 ? 'up' : sm === 0 ? 'kill' : 'down';
+    const tag = sm > 1 ? 'elevated' : sm === 0 ? 'killed' : 'reduced';
+    sizeHtml = `
+      <div class="de-size ${cls}">
+        <span class="lbl">Setup edge sizing (live, vs n=${(T.audit_trail||{}).setup_n || '—'} closed signals)</span>
+        <span class="de-size-v">${sm.toFixed(2)}× <span class="de-size-tag">${tag}</span></span>
+      </div>`;
+  }
+
+  // Audit log — scan-over-scan changes
+  const cl = T.change_log || {};
+  let auditHtml = '';
+  if (cl.changes && cl.changes.length) {
+    const rows = cl.changes.map(c => {
+      let body = `<span class="de-from">${c.from}</span><span class="de-arrow">→</span><span class="de-to">${c.to}</span>`;
+      if (c.delta != null) {
+        const dCls = c.delta > 0 ? 'up' : 'down';
+        body += `<span class="de-delta ${dCls}">${c.delta > 0 ? '+' : ''}${c.delta}</span>`;
+      }
+      return `<div class="de-audit-row"><span class="de-field">${c.field.replace(/_/g, ' ')}</span><span>${body}</span></div>`;
+    }).join('');
+    auditHtml = `
+      <div class="de-audit-panel">
+        <div class="de-head">
+          <h3>Change since last scan</h3>
+          <span class="de-meta">vs ${cl.prior_date}</span>
+        </div>
+        ${rows}
+      </div>`;
+  }
+
+  return gatesHtml + sizeHtml + auditHtml;
 }
 
 function renderScorecard() {
