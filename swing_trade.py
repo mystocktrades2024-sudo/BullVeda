@@ -3057,7 +3057,8 @@ def run_daily_scan(force_fresh: bool = False):
     # that overwrites every ticker's verdict before bundle write.
     # ─────────────────────────────────────────────────────────────────────────
     try:
-        from decision_engine import compute_final_verdict, compute_setup_kill_list, compute_setup_size_multipliers
+        from decision_engine import (compute_final_verdict, compute_setup_kill_list,
+                                       compute_setup_size_multipliers, compute_setup_score_band_kills)
         # Load config defensively — variable name varies (config/cfg) across scopes
         try:
             import json as _json
@@ -3068,9 +3069,12 @@ def run_daily_scan(force_fresh: bool = False):
         _bundle_regime = (bundle.get("regime") or {}).get("regime4") or "risk_on_choppy"
         # Phase 3.2: compute live setup-kill list from signal_tracker (auto-prune losing setups)
         _setup_kills = compute_setup_kill_list()
+        # #7: stratified — also kill specific (setup, score_band) combos
+        _setup_band_kills = compute_setup_score_band_kills()
         if _setup_kills:
-            log.info(f"  Decision engine: setup-kill list = {list(_setup_kills.keys())} "
-                     f"(killed setups will be blocked from BUY)")
+            log.info(f"  Decision engine: setup-kill list = {list(_setup_kills.keys())}")
+        if _setup_band_kills:
+            log.info(f"  Decision engine: stratified kill = {list(_setup_band_kills.keys())}")
         # Bug fix #2 (2026-05-06): wire system circuit breaker into verdict
         _sys_status = bundle.get("system_status") or {}
         _cb = _sys_status.get("circuit_breaker") or {}
@@ -3094,6 +3098,7 @@ def run_daily_scan(force_fresh: bool = False):
                     continue
                 _r = compute_final_verdict(_row, regime=_bundle_regime, thresholds=_cfg_thr,
                                            setup_kill_list=_setup_kills,
+                                           setup_band_kill_list=_setup_band_kills,
                                            system_status=_sys_status)
                 # Task #3: write per-ticker setup size multiplier (dashboard reads this)
                 _setup_name = _row.get("setup_family") or _row.get("setup") or _row.get("setup_type")

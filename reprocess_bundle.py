@@ -12,7 +12,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from copy import deepcopy
-from decision_engine import compute_final_verdict, compute_setup_kill_list, compute_setup_size_multipliers
+from decision_engine import (compute_final_verdict, compute_setup_kill_list,
+                              compute_setup_size_multipliers, compute_setup_score_band_kills)
 
 ROOT = Path(__file__).parent
 BUNDLE_PATH = ROOT / "cache" / "last_bundle.json"
@@ -25,6 +26,7 @@ def main():
     bundle = json.loads(BUNDLE_PATH.read_text())
     regime = (bundle.get("regime") or {}).get("regime4") or "risk_on_choppy"
     setup_kills = compute_setup_kill_list()
+    setup_band_kills = compute_setup_score_band_kills()  # #7: stratified
     setup_mults = compute_setup_size_multipliers(regime=regime)  # #8: regime-conditional
     if setup_kills:
         print(f"Setup-kill list: {list(setup_kills.keys())}")
@@ -50,6 +52,7 @@ def main():
                 continue
             res = compute_final_verdict(r, regime=regime, thresholds=thresholds,
                                          setup_kill_list=setup_kills,
+                                         setup_band_kill_list=setup_band_kills,
                                          system_status=bundle.get("system_status") or {})
             # Task #3 + #14.3: write multiplier and apply it to kelly_size sizing
             setup_name = r.get("setup_family") or r.get("setup") or r.get("setup_type")

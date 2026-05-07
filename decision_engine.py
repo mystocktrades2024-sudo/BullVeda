@@ -114,6 +114,62 @@ def compute_setup_size_multipliers(signal_log_path: str | None = None,
     return multipliers
 
 
+def compute_setup_score_band_kills(signal_log_path: str | None = None,
+                                     min_wr: float = 0.30,
+                                     min_pnl: float = 0.0,
+                                     min_n: int = 15) -> dict:
+    """Stratified kill list: (setup, score_band) combos that historically lose.
+
+    Today's whole-setup kill is too coarse — analyze_signals 2026-05-06 showed
+    52wk Breakout@>=80 has WR 23.5%/avg -1.69% while 52wk Breakout@70-79 has
+    WR 38.3%/avg +0.80%. Killing the whole setup throws away the working bands.
+
+    Returns: {(setup, score_band): {wr, avg_pnl, n, reason}}.
+    Lower n threshold (15 vs 30) since combos are smaller buckets.
+    """
+    import json as _json
+    from pathlib import Path as _P
+    from collections import defaultdict as _dd
+    if signal_log_path is None:
+        signal_log_path = _P(__file__).parent / "data" / "signal_log.json"
+    try:
+        sigs = _json.loads(_P(signal_log_path).read_text())
+    except Exception:
+        return {}
+    def _band(score: float) -> str:
+        if score >= 80: return ">=80"
+        if score >= 70: return "70-79"
+        if score >= 60: return "60-69"
+        if score >= 50: return "50-59"
+        return "<50"
+    by_combo: dict = _dd(list)
+    for s in sigs or []:
+        if s.get("status") != "CLOSED":
+            continue
+        pnl = s.get("actual_pnl_pct")
+        setup = s.get("strategy")
+        score = s.get("score")
+        if pnl is None or not setup or score is None:
+            continue
+        by_combo[(setup, _band(float(score)))].append(float(pnl))
+    kills: dict = {}
+    for (setup, band), pnls in by_combo.items():
+        n = len(pnls)
+        if n < min_n:
+            continue
+        wins = sum(1 for p in pnls if p > 0)
+        wr = wins / n
+        avg_pnl = sum(pnls) / n
+        if wr < min_wr and avg_pnl < min_pnl:
+            kills[(setup, band)] = {
+                "wr": round(wr * 100, 1),
+                "avg_pnl": round(avg_pnl, 2),
+                "n": n,
+                "reason": f"setup×score-band kill: {setup}@{band} WR {wr*100:.1f}%/avg {avg_pnl:+.2f}% over {n} closed",
+            }
+    return kills
+
+
 def compute_setup_kill_list(signal_log_path: str | None = None,
                              min_wr: float = SETUP_KILL_MIN_WR,
                              min_pnl: float = SETUP_KILL_MIN_PNL,
@@ -243,16 +299,26 @@ def _eval_hard_gates(t: dict) -> tuple[list[dict], list[str]]:
     else:
         gates.append({"name": "earnings_proximity", "passed": True, "reason": ""})
 
-    # 7. Setup performance floor (Phase 3.2) — auto-kill chronically losing setups
+    # 7. Setup performance floor (Phase 3.2 + #7 stratified) — auto-kill chronically
+    # losing setups AND specific (setup, score_band) combos.
     setup_kills = t.get("_setup_kill_list") or {}
+    band_kills = t.get("_setup_band_kill_list") or {}
     setup_name = t.get("setup_family") or t.get("setup") or t.get("setup_type")
+    score = float(t.get("score") or 0)
+    if score >= 80: band = ">=80"
+    elif score >= 70: band = "70-79"
+    elif score >= 60: band = "60-69"
+    elif score >= 50: band = "50-59"
+    else: band = "<50"
+    killed_reason = None
     if setup_name and setup_name in setup_kills:
         info = setup_kills[setup_name]
-        gates.append({
-            "name": "setup_performance",
-            "passed": False,
-            "reason": f"{setup_name}: {info['reason']}, avg_pnl {info['avg_pnl']:+.2f}%",
-        })
+        killed_reason = f"{setup_name}: {info['reason']}, avg_pnl {info['avg_pnl']:+.2f}%"
+    elif setup_name and (setup_name, band) in band_kills:
+        info = band_kills[(setup_name, band)]
+        killed_reason = info["reason"]
+    if killed_reason:
+        gates.append({"name": "setup_performance", "passed": False, "reason": killed_reason})
         failures.append("setup_performance")
     else:
         gates.append({"name": "setup_performance", "passed": True, "reason": ""})
@@ -314,7 +380,8 @@ def _resolve_buy_threshold(regime: str | None, thresholds: dict | None) -> int:
 def compute_final_verdict(t: dict, regime: str | None = None,
                           thresholds: dict | None = None,
                           setup_kill_list: dict | None = None,
-                          system_status: dict | None = None) -> dict:
+                          system_status: dict | None = None,
+                          setup_band_kill_list: dict | None = None) -> dict:
     """
     Single source of truth for ticker verdict. Aggregates all decision-engine
     outputs into one verdict + reason + caveats + audit-grade gate trail.
@@ -337,9 +404,11 @@ def compute_final_verdict(t: dict, regime: str | None = None,
     if not isinstance(t, dict):
         return {"verdict": "WAIT", "reason": "no ticker data", "caveats": [],
                 "gates_evaluated": [], "demote_to": None}
-    # Inject setup_kill_list into ticker dict for _eval_hard_gates to use (Phase 3.2)
-    if setup_kill_list:
-        t = {**t, "_setup_kill_list": setup_kill_list}
+    # Inject kill lists into ticker dict for _eval_hard_gates to use (Phase 3.2 + #7)
+    if setup_kill_list or setup_band_kill_list:
+        t = {**t,
+             "_setup_kill_list": setup_kill_list or {},
+             "_setup_band_kill_list": setup_band_kill_list or {}}
     # Bear setup is a parallel path — keep upstream short logic
     bear = (t.get("bear_setup") or {})
     # System-level circuit breakers (drawdown / forced cash / macro blackout)

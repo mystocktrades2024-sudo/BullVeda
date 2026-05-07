@@ -1758,13 +1758,32 @@ def main():
 
     # ---- Pre-compute elite picks BEFORE the audit_trail merge so we can
     # ---- tag each live audit entry with its elite_score + rank.
-    _elite = _compute_elite_picks_safe(
-        short_term=short_term, medium_term=medium_term, long_term=long_term,
-        st_rows=st_rows, mt_rows=mt_rows, invest_rows=invest_rows,
-        accuracy=_compute_accuracy_safe(),
-        hmm=_compute_hmm_regime_safe(),
-        macro=(b.get("regime") or {}).get("macro_signals") or b.get("macro_signals") or {},
-    )
+    # Bug fix (2026-05-06): respect system circuit breaker — when active,
+    # elite_picks must not surface BUYs that have been gated out.
+    _ss = b.get("system_status") or {}
+    _cb_active = (_ss.get("circuit_breaker") or {}).get("active") or \
+                 (_ss.get("forced_cash") or {}).get("active") or \
+                 (_ss.get("macro_calendar") or {}).get("blackout_today")
+    if _cb_active:
+        _cb_reasons = (_ss.get("circuit_breaker") or {}).get("reasons") or ["system gate active"]
+        _elite = {
+            "Swing":    {"BUY": [], "WATCH": [], "SHORT": []},
+            "Position": {"BUY": [], "WATCH": [], "SHORT": []},
+            "Invest":   {"BUY": [], "WATCH": [], "SHORT": []},
+            "meta": {
+                "blocked": True,
+                "reason": "; ".join(_cb_reasons),
+                "note":   "Elite Picks suppressed — system circuit breaker active",
+            },
+        }
+    else:
+        _elite = _compute_elite_picks_safe(
+            short_term=short_term, medium_term=medium_term, long_term=long_term,
+            st_rows=st_rows, mt_rows=mt_rows, invest_rows=invest_rows,
+            accuracy=_compute_accuracy_safe(),
+            hmm=_compute_hmm_regime_safe(),
+            macro=(b.get("regime") or {}).get("macro_signals") or b.get("macro_signals") or {},
+        )
     # Build {(ticker, mode, stage): {elite_score, rank, verdict_line}} lookup
     _elite_lookup = {}
     for _mode in ("Swing", "Position", "Invest"):
