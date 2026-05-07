@@ -16,19 +16,35 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 from starlette.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# -- Basic Auth --
+# -- Basic Auth (file-backed user/role store via auth.py, 2026-05-07 migration) --
 _security = HTTPBasic()
-_USERS = {
-    "gari": "swing2026",
-    "vinod": "swing2026",
-}
+import auth as _auth_mod
+_auth_mod.ensure_seed()  # creates data/users.json from defaults if missing
 
 def _check_auth(credentials: HTTPBasicCredentials = Depends(_security)):
-    expected_pass = _USERS.get(credentials.username)
-    if not expected_pass or not secrets.compare_digest(credentials.password, expected_pass):
+    user = _auth_mod.verify_user(credentials.username, credentials.password)
+    if not user:
         from fastapi.responses import Response
         return Response(status_code=401, headers={"WWW-Authenticate": "Basic"},
                         content="Unauthorized")
+    # Update last_login timestamp (best-effort, non-blocking on failure)
+    try:
+        _auth_mod.set_last_login(credentials.username)
+    except Exception:
+        pass
+    return credentials
+
+
+def _require_admin(credentials: HTTPBasicCredentials = Depends(_security)):
+    """Dependency that authenticates AND requires admin role."""
+    user = _auth_mod.verify_user(credentials.username, credentials.password)
+    if not user:
+        from fastapi.responses import Response
+        return Response(status_code=401, headers={"WWW-Authenticate": "Basic"},
+                        content="Unauthorized")
+    if not _auth_mod.is_admin(credentials.username):
+        from fastapi.responses import Response
+        return Response(status_code=403, content="Admin role required")
     return credentials
 
 # -- Serve prototype (new-design dashboard) at /v2/ behind same auth --
@@ -3073,6 +3089,138 @@ async def alerts_check():
         return {"alerts": alerts, "ts": time.time(), "count": len(alerts)}
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+# ─── User & Role Management API (2026-05-07) ──────────────────────────────
+# Admin-only endpoints for managing users and custom roles.
+
+@app.get("/api/whoami")
+async def api_whoami(credentials: HTTPBasicCredentials = Depends(_check_auth)):
+    """Return the current authenticated user + their role permissions."""
+    if isinstance(credentials, Response):
+        return credentials
+    u = _auth_mod.get_user(credentials.username) or {}
+    perms = _auth_mod.get_user_permissions(credentials.username)
+    role = _auth_mod.get_role(u.get("role") or "viewer") or {}
+    return {
+        "user": u,
+        "role": role,
+        "permissions": perms,
+        "is_admin": _auth_mod.is_admin(credentials.username),
+    }
+
+
+@app.get("/api/users")
+async def api_list_users(credentials: HTTPBasicCredentials = Depends(_require_admin)):
+    if isinstance(credentials, Response):
+        return credentials
+    return {"users": _auth_mod.list_users()}
+
+
+@app.post("/api/users")
+async def api_create_user(payload: dict, credentials: HTTPBasicCredentials = Depends(_require_admin)):
+    if isinstance(credentials, Response):
+        return credentials
+    try:
+        u = _auth_mod.create_user(
+            username     = payload.get("username", "").lower().strip(),
+            password     = payload.get("password", ""),
+            role         = payload.get("role", "viewer"),
+            display_name = payload.get("display_name", ""),
+            email        = payload.get("email", ""),
+            disabled     = bool(payload.get("disabled", False)),
+        )
+        return {"ok": True, "user": u}
+    except ValueError as e:
+        return Response(status_code=400, content=str(e))
+
+
+@app.patch("/api/users/{username}")
+async def api_update_user(username: str, payload: dict,
+                           credentials: HTTPBasicCredentials = Depends(_require_admin)):
+    if isinstance(credentials, Response):
+        return credentials
+    try:
+        u = _auth_mod.update_user(username, **payload)
+        return {"ok": True, "user": u}
+    except ValueError as e:
+        return Response(status_code=400, content=str(e))
+
+
+@app.delete("/api/users/{username}")
+async def api_delete_user(username: str,
+                           credentials: HTTPBasicCredentials = Depends(_require_admin)):
+    if isinstance(credentials, Response):
+        return credentials
+    try:
+        ok = _auth_mod.delete_user(username)
+        return {"ok": ok}
+    except ValueError as e:
+        return Response(status_code=400, content=str(e))
+
+
+@app.post("/api/users/{username}/reset-password")
+async def api_reset_password(username: str, payload: dict,
+                              credentials: HTTPBasicCredentials = Depends(_require_admin)):
+    if isinstance(credentials, Response):
+        return credentials
+    try:
+        ok = _auth_mod.change_password(username, payload.get("new_password", ""))
+        return {"ok": ok}
+    except ValueError as e:
+        return Response(status_code=400, content=str(e))
+
+
+@app.get("/api/roles")
+async def api_list_roles(credentials: HTTPBasicCredentials = Depends(_check_auth)):
+    """Anyone authenticated can read roles (needed for V2 to show role names).
+    Mutating endpoints below require admin."""
+    if isinstance(credentials, Response):
+        return credentials
+    return {"roles": _auth_mod.list_roles()}
+
+
+@app.post("/api/roles")
+async def api_create_role(payload: dict,
+                           credentials: HTTPBasicCredentials = Depends(_require_admin)):
+    if isinstance(credentials, Response):
+        return credentials
+    try:
+        r = _auth_mod.create_role(
+            role_id     = payload.get("id", "").lower().strip(),
+            name        = payload.get("name", ""),
+            description = payload.get("description", ""),
+            color       = payload.get("color", "info"),
+            tabs        = payload.get("permissions", {}).get("tabs") or payload.get("tabs"),
+            actions     = payload.get("permissions", {}).get("actions") or payload.get("actions"),
+        )
+        return {"ok": True, "role": r}
+    except ValueError as e:
+        return Response(status_code=400, content=str(e))
+
+
+@app.patch("/api/roles/{role_id}")
+async def api_update_role(role_id: str, payload: dict,
+                           credentials: HTTPBasicCredentials = Depends(_require_admin)):
+    if isinstance(credentials, Response):
+        return credentials
+    try:
+        r = _auth_mod.update_role(role_id, **payload)
+        return {"ok": True, "role": r}
+    except ValueError as e:
+        return Response(status_code=400, content=str(e))
+
+
+@app.delete("/api/roles/{role_id}")
+async def api_delete_role(role_id: str,
+                           credentials: HTTPBasicCredentials = Depends(_require_admin)):
+    if isinstance(credentials, Response):
+        return credentials
+    try:
+        ok = _auth_mod.delete_role(role_id)
+        return {"ok": ok}
+    except ValueError as e:
+        return Response(status_code=400, content=str(e))
 
 
 # -- Health check --
