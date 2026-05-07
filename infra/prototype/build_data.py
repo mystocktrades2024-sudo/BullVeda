@@ -959,7 +959,12 @@ def compact_row(r: dict) -> dict:
         "earnings_beat":  ((r.get("earnings") or {}).get("beat_rate") if isinstance(r.get("earnings"), dict) else None),
         "thesis":         r.get("trade_thesis") or r.get("dashboard_message"),
         # For Killed/AVOID tab — explain why it was killed
-        "reject_reason": (r.get("decision_state") or {}).get("label") or r.get("kill_reason") or r.get("reject_reason") or r.get("vgm_verdict") or None,
+        "reject_reason": r.get("reject_reason") or (r.get("decision_state") or {}).get("label") if isinstance(r.get("decision_state"), dict) else r.get("reject_reason") or r.get("kill_reason") or r.get("vgm_verdict") or None,
+        # Decision engine outputs (Phase 1+2 — for Why-this-is-BUY/WAIT panel)
+        "gates_evaluated":         r.get("gates_evaluated") or [],
+        "caveats":                 r.get("caveats") or [],
+        "setup_size_multiplier":   r.get("setup_size_multiplier"),
+        "audit_trail":             r.get("audit_trail") or {},
     }
 
 

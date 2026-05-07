@@ -443,12 +443,97 @@ function renderOverview() {
     {n:'QUALITY',  pts:T.fund_score, max:T.fund_max || 10,   sum:`Fundamentals score ${T.fund_score}/${T.fund_max}. ${T.earn_days!=null?'Earn +'+T.earn_days+'d.':'No upcoming earn.'}`, color:'oklch(78% 0.16 75)'},
   ];
 
+  // #14.4 — Sector rotation overlay: classify sector strength
+  const sectorRank = T.sector_pct_rank;
+  let sectorBadge = '';
+  if (sectorRank != null && T.sector) {
+    const lead = sectorRank >= 75, lag = sectorRank <= 25;
+    const color = lead ? 'var(--green)' : lag ? 'var(--red)' : 'var(--ink-2)';
+    const tag = lead ? '🚀 leading' : lag ? '⚠ lagging' : 'mid';
+    sectorBadge = `<span class="gate" style="color:${color}">${T.sector} · ${sectorRank.toFixed(0)}th pct · ${tag}</span>`;
+  }
+
+  // #14.2 — Multi-timeframe coherence
+  const mtV = T.medium_term_verdict || '—', ltV = T.long_term_verdict || '—', stV = verdict;
+  const mtfAgree = (stV === mtV && mtV === ltV);
+  const mtfPill = (label, v) => {
+    const cls = v === 'BUY' ? 'bull' : (v === 'WATCH' || v === 'WAIT') ? 'warn' : '';
+    return `<span class="pill ${cls}" style="font-size:10px;padding:2px 8px">${label} ${v}</span>`;
+  };
+  const mtfRow = `
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px; padding-top:14px; border-top:1px solid var(--rule)">
+      <span class="lbl" style="font-size:10px;color:var(--ink-3)">TIMEFRAMES</span>
+      ${mtfPill('SWING', stV)}${mtfPill('POSITION', mtV)}${mtfPill('INVEST', ltV)}
+      <span style="font-size:10px;color:${mtfAgree?'var(--green)':'oklch(78% 0.16 75)'};margin-left:6px">${mtfAgree?'✓ aligned':'⚠ divergence — size down'}</span>
+    </div>`;
+
+  // #13.2 — Why this is BUY/WATCH: gate cascade panel
+  const gates = T.gates_evaluated || [];
+  const caveats = T.caveats || [];
+  const gatesHtml = gates.length ? `
+    <div class="gates-panel" style="margin-top:18px;padding:18px 22px;background:var(--bg-1);border:1px solid var(--rule);border-radius:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="margin:0;font-size:13px;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-1)">Why this is ${verdict}</h3>
+        <span style="font-size:11px;color:var(--ink-3)">${gates.filter(g=>g.passed).length}/${gates.length} gates passed</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 18px">
+        ${gates.map(g => {
+          const ok = g.passed;
+          const sym = ok ? '✓' : '✗';
+          const color = ok ? 'var(--green)' : 'var(--red)';
+          const reason = g.reason ? ` — ${g.reason}` : '';
+          return `<div style="display:flex;gap:8px;font-size:12px;padding:4px 0">
+            <span style="color:${color};font-weight:700;width:14px">${sym}</span>
+            <span style="color:${ok?'var(--ink-1)':'var(--ink-0)'};flex:1">
+              <span style="font-weight:600">${g.name.replace(/_/g,' ')}</span>
+              <span style="color:var(--ink-3)">${reason}</span>
+            </span></div>`;
+        }).join('')}
+      </div>
+      ${caveats.length ? `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--rule);font-size:11px;color:oklch(78% 0.16 75)">⚠ Caveats: ${caveats.join(' · ')}</div>` : ''}
+      ${T.reject_reason && verdict !== 'BUY' ? `<div style="margin-top:10px;font-size:12px;color:var(--ink-1);font-style:italic">→ ${T.reject_reason}</div>` : ''}
+    </div>` : '';
+
+  // #14.5 — Forward-distribution panel
+  const fd = T.forward_dist;
+  const fwdHtml = (fd && fd.n_samples) ? `
+    <div class="fwd-panel" style="margin-top:18px;padding:18px 22px;background:var(--bg-1);border:1px solid var(--rule);border-radius:8px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
+        <h3 style="margin:0;font-size:13px;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-1)">Forward ${fd.horizon_days}-day distribution</h3>
+        <span style="font-size:11px;color:var(--ink-3)">empirical · n=${fd.n_samples}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:14px">
+        <div><span class="lbl" style="font-size:10px;color:var(--ink-3)">P(profit)</span><div style="font-size:18px;font-weight:700;color:${fd.p_profit>=60?'var(--green)':'var(--ink-0)'}">${fd.p_profit?.toFixed(0)}%</div></div>
+        <div><span class="lbl" style="font-size:10px;color:var(--ink-3)">Median</span><div style="font-size:18px;font-weight:700;color:${fd.p50_pct>=0?'var(--green)':'var(--red)'}">${fd.p50_pct>=0?'+':''}${fd.p50_pct?.toFixed(2)}%</div></div>
+        <div><span class="lbl" style="font-size:10px;color:var(--ink-3)">Sharpe</span><div style="font-size:18px;font-weight:700">${fd.fwd_sharpe?.toFixed(2)}</div></div>
+        <div><span class="lbl" style="font-size:10px;color:var(--ink-3)">VaR-95</span><div style="font-size:18px;font-weight:700;color:var(--red)">${fd.var_95_pct?.toFixed(2)}%</div></div>
+      </div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--rule);display:grid;grid-template-columns:repeat(5, 1fr);gap:10px;font-size:11px;color:var(--ink-2)">
+        <div><span style="color:var(--ink-3)">P25</span> ${fd.p25_pct>=0?'+':''}${fd.p25_pct?.toFixed(2)}%</div>
+        <div><span style="color:var(--ink-3)">P50</span> ${fd.p50_pct>=0?'+':''}${fd.p50_pct?.toFixed(2)}%</div>
+        <div><span style="color:var(--ink-3)">P75</span> ${fd.p75_pct>=0?'+':''}${fd.p75_pct?.toFixed(2)}%</div>
+        <div><span style="color:var(--ink-3)">CVaR-97.5</span> <span style="color:var(--red)">${fd.cvar_975_pct?.toFixed(2)}%</span></div>
+        <div><span style="color:var(--ink-3)">Mean ± σ</span> ${fd.mean_pct>=0?'+':''}${fd.mean_pct?.toFixed(2)} ± ${fd.std_pct?.toFixed(2)}%</div>
+      </div>
+    </div>` : '';
+
+  // Setup-size multiplier badge (Task #3 / #14.3)
+  const sizeMult = T.setup_size_multiplier;
+  const sizeBadge = (sizeMult != null && sizeMult !== 1.0) ? `
+    <div style="margin-top:8px;font-size:11px;color:var(--ink-2)">
+      <span class="lbl" style="font-size:10px">SETUP EDGE SIZING</span>
+      <span style="color:${sizeMult>1?'var(--green)':sizeMult===0?'var(--red)':'oklch(78% 0.16 75)'};font-weight:600;margin-left:6px">
+        ${sizeMult.toFixed(2)}× ${sizeMult>1?'(elevated)':sizeMult===0?'(killed)':'(reduced)'}
+      </span>
+    </div>` : '';
+
   $('pane-overview').innerHTML = `
     <div class="verdict-grid">
       <div class="verdict-card">
         <div class="verdict-eyebrow">
           <span class="lbl">VERDICT</span>
           <span class="gate">${T.score}/100 · ${T.tech_score||0}+${T.fund_score||0}+${T.sent_score||0}+${T.smc_score||0}</span>
+          ${sectorBadge}
         </div>
         <div class="verdict-headline"><span class="accent">${verdict}</span> · ${T.ticker}</div>
         <div class="verdict-sub">${sub}</div>
@@ -458,6 +543,8 @@ function renderOverview() {
           <div class="cell"><span class="lbl">R:R</span><span class="v">1:${(T.rr_ratio||0).toFixed(1)}</span></div>
           <div class="cell"><span class="lbl">EARN</span><span class="v">${T.earn_days==null?'—':'+'+T.earn_days+'d'}</span></div>
         </div>
+        ${mtfRow}
+        ${sizeBadge}
       </div>
       <div class="actions">
         <h3>What to do next · 4 steps</h3>
@@ -470,6 +557,8 @@ function renderOverview() {
       </div>
     </div>
 
+    ${gatesHtml}
+
     <div class="pillars">
       ${pillars.map(p => `
         <div class="pillar">
@@ -478,6 +567,8 @@ function renderOverview() {
           <div class="pillar-summary">${p.sum}</div>
         </div>`).join('')}
     </div>
+
+    ${fwdHtml}
   `;
 }
 
