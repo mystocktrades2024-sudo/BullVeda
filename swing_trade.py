@@ -3077,8 +3077,8 @@ def run_daily_scan(force_fresh: bool = False):
         if _cb.get("active"):
             log.warning(f"  Decision engine: CIRCUIT BREAKER ACTIVE ({_cb.get('level')}) — "
                         f"all BUYs will be force-routed to WATCH/WAIT")
-        # Task #3: per-setup position-size multipliers (informational; written to bundle for dashboard)
-        _setup_mults = compute_setup_size_multipliers()
+        # Task #3 + #8: per-setup multipliers, now regime-conditional
+        _setup_mults = compute_setup_size_multipliers(regime=_bundle_regime)
         if _setup_mults:
             _nondefault = {s: m for s, m in _setup_mults.items() if m != 1.0}
             if _nondefault:
@@ -3163,6 +3163,41 @@ def run_daily_scan(force_fresh: bool = False):
                 )
             except Exception:
                 pass
+        # #5: Sector concentration cap — no more than N BUYs per sector.
+        # Excess BUYs (lowest score) demote to watch_list with cap reason.
+        try:
+            _sec_cap = int(_de_cfg.get("sector_concentration_cap", 3))
+            if _sec_cap > 0 and len(bundle.get("buy_candidates") or []) > _sec_cap:
+                from collections import defaultdict as _dd
+                _by_sec: dict = _dd(list)
+                for r in bundle.get("buy_candidates") or []:
+                    if isinstance(r, dict):
+                        _by_sec[r.get("sector") or "Unknown"].append(r)
+                _kept: list = []
+                _capped: list = []
+                for _sec, _rows in _by_sec.items():
+                    _rows.sort(key=lambda x: -(x.get("score") or 0))
+                    _kept.extend(_rows[:_sec_cap])
+                    for _r in _rows[_sec_cap:]:
+                        _r["verdict"] = "WATCH"
+                        _r["reject_reason"] = (f"Sector concentration cap: only top {_sec_cap} BUYs per sector "
+                                                f"({_sec} had {len(_rows)})")
+                        _dec = _r.setdefault("decision", {})
+                        if isinstance(_dec, dict):
+                            _dec["verdict"] = "WATCH"
+                        _capped.append(_r)
+                if _capped:
+                    bundle["buy_candidates"] = _kept
+                    _wl = list(bundle.get("watch_list") or [])
+                    _seen = {x.get("ticker") for x in _wl if isinstance(x, dict)}
+                    for _r in _capped:
+                        if _r.get("ticker") not in _seen:
+                            _wl.append(_r); _seen.add(_r.get("ticker"))
+                    bundle["watch_list"] = _wl
+                    log.info(f"  Sector cap: {len(_capped)} excess BUYs demoted "
+                             f"(cap={_sec_cap} per sector)")
+        except Exception as _sc_e:
+            log.warning(f"Sector concentration cap step failed (skipped): {_sc_e}")
     except Exception as _de_e:
         # Engine failure is a P0 — would silently emit stale verdicts to dashboard.
         # Log loud, send Mac notification, and persist a flag in the bundle so
@@ -3236,6 +3271,26 @@ def run_daily_scan(force_fresh: bool = False):
             log.info(f"  Bundle snapshot saved: {_snap.name}")
     except Exception as _sae:
         log.debug(f"bundle_archive.save_snapshot skipped: {_sae}")
+
+    # #9: 90-day retention on bundle snapshots — prevents unbounded disk growth
+    try:
+        from datetime import timedelta as _td
+        _bundles_dir = BASE_DIR / "cache" / "bundles"
+        if _bundles_dir.exists():
+            _cutoff = (datetime.now() - _td(days=90)).date()
+            _purged = 0
+            for _p in _bundles_dir.glob("[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].json"):
+                try:
+                    _file_date = datetime.strptime(_p.stem, "%Y-%m-%d").date()
+                    if _file_date < _cutoff:
+                        _p.unlink()
+                        _purged += 1
+                except Exception:
+                    pass
+            if _purged:
+                log.info(f"  Bundle retention: purged {_purged} snapshots older than 90 days")
+    except Exception as _ret_e:
+        log.debug(f"Bundle retention step skipped: {_ret_e}")
 
     # Unified audit log (2026-04-15) — one row per scan run for attribution joins
     try:

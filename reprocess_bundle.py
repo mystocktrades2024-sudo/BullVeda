@@ -25,7 +25,7 @@ def main():
     bundle = json.loads(BUNDLE_PATH.read_text())
     regime = (bundle.get("regime") or {}).get("regime4") or "risk_on_choppy"
     setup_kills = compute_setup_kill_list()
-    setup_mults = compute_setup_size_multipliers()
+    setup_mults = compute_setup_size_multipliers(regime=regime)  # #8: regime-conditional
     if setup_kills:
         print(f"Setup-kill list: {list(setup_kills.keys())}")
     nd_mults = {s: m for s, m in (setup_mults or {}).items() if m != 1.0}

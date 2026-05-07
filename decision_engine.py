@@ -38,8 +38,23 @@ SETUP_KILL_MIN_N = 30         # require >=30 closed signals before any kill deci
 WATCH_WORTHY_FAILURES = {"entry_quality", "decision_state", "multi_timeframe"}
 
 
+REGIME_SIZE_MODIFIER = {
+    # 4-regime taxonomy
+    "risk_on_trending": 1.00,
+    "risk_on_choppy":   0.85,
+    "risk_off_trending": 0.70,
+    "risk_off_choppy":  0.70,
+    "panic":            0.50,
+    # 3-regime legacy fallback
+    "bull":             1.00,
+    "neutral":          0.85,
+    "bear":             0.70,
+}
+
+
 def compute_setup_size_multipliers(signal_log_path: str | None = None,
-                                     min_n: int = 20) -> dict:
+                                     min_n: int = 20,
+                                     regime: str | None = None) -> dict:
     """Per-setup position-size multiplier based on real signal_tracker outcomes.
 
     Returns dict: {setup_name: multiplier_float}. Expectancy-based scale:
@@ -91,6 +106,11 @@ def compute_setup_size_multipliers(signal_log_path: str | None = None,
             multipliers[setup] = 1.0
         else:
             multipliers[setup] = 0.7  # negative expectancy but not killed → discount
+    # #8: regime-conditional sizing — discount across all setups in unfavorable regimes
+    if regime:
+        regime_mod = REGIME_SIZE_MODIFIER.get(regime.lower(), 1.0)
+        if regime_mod != 1.0:
+            multipliers = {k: round(v * regime_mod, 2) for k, v in multipliers.items()}
     return multipliers
 
 
@@ -207,8 +227,12 @@ def _eval_hard_gates(t: dict) -> tuple[list[dict], list[str]]:
     if not passed:
         failures.append("tail_loss_filter")
 
-    # 6. Earnings proximity (Phase 4.1) — never enter swing pos with earnings <5d
+    # 6. Earnings proximity (Phase 4.1) — never enter swing pos with earnings <5d.
+    # Bundle stores earnings under r.earnings.days_to_earnings; V2 tickers.json
+    # surfaces as r.earn_days. Check both so engine works at both layers.
     ed = t.get("earn_days")
+    if ed is None:
+        ed = (t.get("earnings") or {}).get("days_to_earnings")
     if ed is not None and isinstance(ed, (int, float)) and 0 <= ed < EARNINGS_BLOCK_DAYS:
         gates.append({
             "name": "earnings_proximity",
@@ -272,6 +296,8 @@ def _eval_soft_gates(t: dict) -> list[str]:
         caveats.append("Zacks growth grade: F")
 
     ed = t.get("earn_days")
+    if ed is None:
+        ed = (t.get("earnings") or {}).get("days_to_earnings")
     if ed is not None and EARNINGS_BLOCK_DAYS <= ed < EARNINGS_CAVEAT_DAYS:
         caveats.append(f"earnings in {int(ed)} days")
 
