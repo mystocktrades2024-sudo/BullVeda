@@ -38,6 +38,32 @@ SETUP_KILL_MIN_N = 30         # require >=30 closed signals before any kill deci
 WATCH_WORTHY_FAILURES = {"entry_quality", "decision_state", "multi_timeframe"}
 
 
+def compute_regime_confidence_modifier(hmm: dict | None) -> float:
+    """Tier 1C: scale sizing by HMM regime probability + confidence.
+
+    Strong bull-regime confidence → full size; uncertain/bearish → discount.
+    Reads from build_data.py's _compute_hmm_regime_safe() output:
+      p_bull, p_neutral, p_bear, confidence (0.0-1.0).
+
+    Returns multiplier in [0.5, 1.0]. Default 1.0 if no HMM data.
+    """
+    if not hmm or not isinstance(hmm, dict):
+        return 1.0
+    p_bull = float(hmm.get("p_bull") or 0.5)
+    confidence = float(hmm.get("confidence") or 0.5)
+    # Strong bull AND confident: full size
+    if p_bull >= 0.85 and confidence >= 0.60:
+        return 1.0
+    # Solid bull: light discount
+    if p_bull >= 0.70:
+        return 0.90
+    # Mixed: meaningful caution
+    if p_bull >= 0.50:
+        return 0.75
+    # Bear-leaning: half size
+    return 0.50
+
+
 REGIME_SIZE_MODIFIER = {
     # 4-regime taxonomy
     "risk_on_trending": 1.00,

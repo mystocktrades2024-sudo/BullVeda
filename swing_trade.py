@@ -3058,7 +3058,8 @@ def run_daily_scan(force_fresh: bool = False):
     # ─────────────────────────────────────────────────────────────────────────
     try:
         from decision_engine import (compute_final_verdict, compute_setup_kill_list,
-                                       compute_setup_size_multipliers, compute_setup_score_band_kills)
+                                       compute_setup_size_multipliers, compute_setup_score_band_kills,
+                                       compute_regime_confidence_modifier)
         # Load config defensively — variable name varies (config/cfg) across scopes
         try:
             import json as _json
@@ -3081,8 +3082,30 @@ def run_daily_scan(force_fresh: bool = False):
         if _cb.get("active"):
             log.warning(f"  Decision engine: CIRCUIT BREAKER ACTIVE ({_cb.get('level')}) — "
                         f"all BUYs will be force-routed to WATCH/WAIT")
-        # Task #3 + #8: per-setup multipliers, now regime-conditional
+        # Task #3 + #8 + Tier 1C: per-setup multipliers, regime-conditional + HMM-confidence-weighted
         _setup_mults = compute_setup_size_multipliers(regime=_bundle_regime)
+        # Tier 1C: HMM regime confidence further scales sizing.
+        # Compute HMM here (same logic as build_data.py) — read SPY closes from market data
+        try:
+            import regime_history as _rh
+            _md = bundle.get("regime") or {}
+            _spy_close_series = []
+            # Try to pull SPY closes from bundle's regime cache or fetch fresh
+            from data_fetcher import fetch_market_data as _fmd
+            _spy_data = _fmd(["SPY"], period="3mo").get("SPY")
+            if _spy_data is not None and "Close" in _spy_data.columns:
+                _spy_close_series = _spy_data["Close"].dropna().tolist()
+            _hmm = _rh.regime_probabilities_from_closes(_spy_close_series, lookback=21) if _spy_close_series else {}
+            _regime_conf_mult = compute_regime_confidence_modifier(_hmm)
+            bundle["regime_confidence"] = {**_hmm, "size_modifier": _regime_conf_mult}
+            if _regime_conf_mult != 1.0:
+                # Apply to all setup multipliers: regime confidence is a portfolio-wide scalar
+                _setup_mults = {k: round(v * _regime_conf_mult, 2) for k, v in _setup_mults.items()}
+                log.info(f"  Decision engine: regime confidence modifier = {_regime_conf_mult} "
+                         f"(p_bull={_hmm.get('p_bull')}, confidence={_hmm.get('confidence')})")
+        except Exception as _hmm_e:
+            log.debug(f"HMM regime confidence step skipped: {_hmm_e}")
+            _regime_conf_mult = 1.0
         if _setup_mults:
             _nondefault = {s: m for s, m in _setup_mults.items() if m != 1.0}
             if _nondefault:

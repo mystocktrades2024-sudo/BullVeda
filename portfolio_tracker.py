@@ -1155,7 +1155,17 @@ def check_circuit_breaker() -> dict:
         else:
             break
 
-    # Equity peak + current drawdown
+    # Tier 1A (2026-05-07): institutional-standard drawdown calculation.
+    # Hard halt uses REALIZED drawdown (closed trades only) to prevent paper-gain
+    # volatility from halting all trading. MTM drawdown still tracked for soft
+    # warnings + progressive sizing.
+    starting_eq = float(state.get("starting_equity") or 100000)
+    realized_pnl = sum(float(t.get("pnl_dollars") or 0) for t in closed)
+    realized_eq = starting_eq + realized_pnl
+    realized_peak = max(starting_eq, realized_eq)  # peak = high-water mark of realized
+    realized_dd_pct = max(0.0, (realized_peak - realized_eq) / realized_peak * 100) if realized_peak > 0 else 0.0
+
+    # MTM drawdown — kept for size scaling + soft warnings only, NOT for hard halt
     peak = 0.0
     cur_eq = state.get("equity") or 0
     for pt in curve:
@@ -1164,7 +1174,7 @@ def check_circuit_breaker() -> dict:
             peak = eq
     drawdown_pct = ((peak - cur_eq) / peak * 100) if peak > 0 else 0.0
 
-    # Drawdown over last 10 trading days
+    # Drawdown over last 10 trading days (MTM, used for risk-off mode)
     drawdown_10d_pct = 0.0
     if len(curve) >= 11:
         recent = curve[-11:]
@@ -1182,10 +1192,11 @@ def check_circuit_breaker() -> dict:
         reasons.append(f"{consecutive_losers} consecutive losers — pause new entries 3 trading days")
     if drawdown_10d_pct > 4 and level not in ("pause_3d", "stop_new_trades"):
         level = "risk_off"
-        reasons.append(f"drawdown {drawdown_10d_pct:.1f}% in last 10d > 4% threshold — risk-off mode")
-    if drawdown_pct > 8:
+        reasons.append(f"MTM drawdown {drawdown_10d_pct:.1f}% in last 10d > 4% — risk-off mode (sizing reduced)")
+    # Hard halt uses REALIZED drawdown only — paper-gain volatility doesn't trigger this
+    if realized_dd_pct > 8:
         level = "stop_new_trades"
-        reasons.append(f"drawdown {drawdown_pct:.1f}% from peak > 8% — stop new trades until review")
+        reasons.append(f"realized drawdown {realized_dd_pct:.1f}% > 8% — stop new trades until review")
 
     next_unlock = None
     if level == "pause_3d":
@@ -1203,7 +1214,8 @@ def check_circuit_breaker() -> dict:
         "level": level,
         "reasons": reasons,
         "consecutive_losers": consecutive_losers,
-        "drawdown_pct": round(drawdown_pct, 2),
+        "drawdown_pct": round(drawdown_pct, 2),                # MTM (mark-to-market, includes paper)
+        "realized_drawdown_pct": round(realized_dd_pct, 2),     # closed trades only — used for hard halt
         "drawdown_10d_pct": round(drawdown_10d_pct, 2),
         "next_unlock_date": next_unlock,
     }
