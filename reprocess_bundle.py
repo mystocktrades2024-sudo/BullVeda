@@ -50,10 +50,19 @@ def main():
                 continue
             res = compute_final_verdict(r, regime=regime, thresholds=thresholds,
                                          setup_kill_list=setup_kills)
-            # Task #3: write per-ticker setup size multiplier
+            # Task #3 + #14.3: write multiplier and apply it to kelly_size sizing
             setup_name = r.get("setup_family") or r.get("setup") or r.get("setup_type")
-            if setup_name and setup_name in setup_mults:
-                r["setup_size_multiplier"] = setup_mults[setup_name]
+            mult = setup_mults.get(setup_name) if setup_name else None
+            if mult is not None:
+                r["setup_size_multiplier"] = mult
+                if mult != 1.0:
+                    ks = r.get("kelly_size")
+                    if isinstance(ks, dict):
+                        for fld in ("suggested_shares", "position_value", "final_alloc_pct", "dollar_risk"):
+                            v = ks.get(fld)
+                            if isinstance(v, (int, float)):
+                                ks[fld] = (round(v * mult, 0) if fld == "suggested_shares"
+                                           else round(v * mult, 2))
             r["verdict"] = res["verdict"]
             r["reject_reason"] = res["reason"] if res["verdict"] != "BUY" else ""
             r["caveats"] = res["caveats"]

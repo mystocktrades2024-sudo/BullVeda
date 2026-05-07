@@ -479,11 +479,13 @@ def update_outcomes() -> int:
             e.setdefault("exit_reason", "target_hit")
             if e.get("days_to_first_target_hit") is None:
                 e["days_to_first_target_hit"] = age
-        elif age >= 10:
-            # Auto-close after 10 days
+        elif age >= (15 if (e.get("mfe_pct") or 0) >= 8.0 else 10):
+            # Auto-close after 10 days (or 15 for trades trending toward target)
+            # Task #15 (2026-05-06): 53% of WIN_EXPIRED reached 70%+ of target1.
+            # Extending hold to 15 days when MFE>=8% lets winners develop further.
             if pnl_pct >= 0:
                 e["result"] = "WIN_EXPIRED"
-                e.setdefault("exit_reason", "time_stop_win")
+                e.setdefault("exit_reason", "time_stop_win_extended" if age > 10 else "time_stop_win")
             else:
                 e["result"] = "LOSS_EXPIRED"
                 e.setdefault("exit_reason", "time_stop_loss")

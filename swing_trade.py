@@ -3090,8 +3090,20 @@ def run_daily_scan(force_fresh: bool = False):
                                            setup_kill_list=_setup_kills)
                 # Task #3: write per-ticker setup size multiplier (dashboard reads this)
                 _setup_name = _row.get("setup_family") or _row.get("setup") or _row.get("setup_type")
-                if _setup_name and _setup_name in _setup_mults:
-                    _row["setup_size_multiplier"] = _setup_mults[_setup_name]
+                _mult = _setup_mults.get(_setup_name) if _setup_name else None
+                if _mult is not None:
+                    _row["setup_size_multiplier"] = _mult
+                    # Phase 4 / #14.3: wire multiplier into actual position sizing.
+                    # Apply to kelly_size's monetary/share fields so live trade plans
+                    # honor historical setup edge.
+                    if _mult != 1.0:
+                        _ks = _row.get("kelly_size")
+                        if isinstance(_ks, dict):
+                            for _fld in ("suggested_shares", "position_value", "final_alloc_pct", "dollar_risk"):
+                                _v = _ks.get(_fld)
+                                if isinstance(_v, (int, float)):
+                                    _ks[_fld] = (round(_v * _mult, 0) if _fld == "suggested_shares"
+                                                 else round(_v * _mult, 2))
                 _row["verdict"] = _r["verdict"]
                 _row["reject_reason"] = _r["reason"] if _r["verdict"] != "BUY" else ""
                 _row["caveats"] = _r["caveats"]
