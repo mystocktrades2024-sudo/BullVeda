@@ -447,6 +447,9 @@
   .ep-cell-count { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--ink-2); }
 
   .ep-cell-empty { padding: 28px 14px; text-align: center; }
+  .ep-cell-empty.cb-block { background: color-mix(in oklch, var(--fail) 6%, transparent); border: 1px dashed color-mix(in oklch, var(--fail) 40%, var(--rule-2)); border-radius: 6px; }
+  .ep-cell-empty.cb-block .ep-cell-empty-icon { font-size: 24px; }
+  .ep-cell-empty.cb-block .ep-cell-empty-h { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 800; margin-top: 4px; }
   .ep-cell-empty-icon { font-size: 24px; color: var(--paper-3); }
   .ep-cell-empty-h { font-size: 11.5px; color: var(--ink-1); font-weight: 700; margin: 6px 0 4px; }
   .ep-cell-empty-sub { font-size: 10.5px; color: var(--ink-2); line-height: 1.5; max-width: 240px; margin: 0 auto; }
@@ -5112,7 +5115,13 @@ function renderElitePicks() {
   const totalPicks = ['Swing','Position','Invest'].reduce((s, m) =>
     s + ['BUY','WATCH','SHORT'].reduce((s2, st) => s2 + ((ep[m] || {})[st] || []).length, 0), 0);
   if (sbCt) sbCt.textContent = totalPicks;
-  if (meta) meta.textContent = `${ep.meta?.n_passing_hard_gates ?? 0} passed hard gates · ${totalPicks} picks across 9 cells · top 5 each`;
+  if (meta) {
+    if (ep.meta?.blocked) {
+      meta.innerHTML = `<span style="color:var(--fail)">🔴 SUPPRESSED</span> · ${ep.meta.reason || 'system gate active'}`;
+    } else {
+      meta.textContent = `${ep.meta?.n_passing_hard_gates ?? 0} passed hard gates · ${totalPicks} picks across 9 cells · top 5 each`;
+    }
+  }
 
   // Color-coding helpers
   const verdictColor = (eliteScore) => eliteScore >= 80 ? 'var(--green)' : eliteScore >= 65 ? 'var(--accent)' : eliteScore >= 50 ? 'var(--warn)' : 'var(--paper-3)';
@@ -5230,21 +5239,31 @@ function renderElitePicks() {
         <span class="ep-cell-stage" style="color:${stageColor};border-color:${stageColor}">${stageIcon} ${stage}</span>
         <span class="ep-cell-count">${picks.length}/5</span>
       </div>
-      ${picks.length === 0 ? `
+      ${picks.length === 0 ? (
+        ep.meta?.blocked ? `
+        <div class="ep-cell-empty cb-block">
+          <div class="ep-cell-empty-icon" style="color:var(--fail)">🔴</div>
+          <div class="ep-cell-empty-h" style="color:var(--fail)">Picks suppressed</div>
+          <div class="ep-cell-empty-sub" style="color:var(--ink-1)"><b>${ep.meta.note || 'System circuit breaker active'}</b></div>
+          <div class="ep-cell-empty-sub" style="margin-top:6px">${ep.meta.reason || ''}</div>
+        </div>
+      ` : `
         <div class="ep-cell-empty">
           <div class="ep-cell-empty-icon">${stageIcon}</div>
           <div class="ep-cell-empty-h">No qualifying ${stage.toLowerCase()} picks</div>
           <div class="ep-cell-empty-sub">${stage === 'SHORT' ? 'Current regime is bullish — shorts gated. Need bearish HMM probability + RSI > 75 + score ≤ 50.' : stage === 'WATCH' ? 'No tickers in the 55-75 score band passed all gates.' : 'No tickers passed both score≥60 AND multi-factor checks. Either regime mismatch, weak entry, or all candidates failed hard gates.'}</div>
         </div>
-      ` : picks.map((p, i) => renderPickCard(p, i)).join('')}
+      `) : picks.map((p, i) => renderPickCard(p, i)).join('')}
     </div>`;
   };
 
   // Main grid — 3 columns (modes), 3 sections per column (stages)
   body.innerHTML = `
-    <div class="ep-meta-bar">
-      <span class="ep-meta-l">FRAMEWORK</span>
-      <span>8 weighted factors · hard gates filter inconsistent plans · mode-specific multipliers · ${ep.meta?.n_candidates_evaluated || 0} evaluated</span>
+    <div class="ep-meta-bar"${ep.meta?.blocked ? ' style="border-color:var(--fail);background:color-mix(in oklch, var(--fail) 8%, var(--bg-2))"' : ''}>
+      <span class="ep-meta-l"${ep.meta?.blocked ? ' style="color:var(--fail)"' : ''}>${ep.meta?.blocked ? 'SUPPRESSED' : 'FRAMEWORK'}</span>
+      <span>${ep.meta?.blocked
+        ? `🔴 <b>${ep.meta.note || 'Circuit breaker active'}</b> — ${ep.meta.reason || 'all picks gated until risk normalizes'}`
+        : `8 weighted factors · hard gates filter inconsistent plans · mode-specific multipliers · ${ep.meta?.n_candidates_evaluated || 0} evaluated`}</span>
       <span class="ep-meta-r">${ep.meta?.computed_at?.slice(11, 16) || ''}</span>
     </div>
 
