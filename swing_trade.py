@@ -3087,7 +3087,7 @@ def run_daily_scan(force_fresh: bool = False):
         # Tier 1C: HMM regime confidence further scales sizing.
         # Compute HMM here (same logic as build_data.py) — read SPY closes from market data
         try:
-            import regime_history as _rh
+            import regime_hmm as _rh
             _md = bundle.get("regime") or {}
             _spy_close_series = []
             # Try to pull SPY closes from bundle's regime cache or fetch fresh
