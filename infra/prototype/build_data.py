@@ -1637,10 +1637,24 @@ def main():
             cr = compact_row(r)
             cr["mode"]    = "position"
             cr["score"]   = round(pos, 1)
-            # System gate: circuit breaker / forced cash / macro blackout demotes BUYs to WATCH
-            cr["stage"]   = "WATCH" if _SYSTEM_GATE_ACTIVE else ("BUY" if pos >= 68 else "WATCH")
-            if _SYSTEM_GATE_ACTIVE and pos >= 68:
-                cr["reject_reason"] = _SYSTEM_GATE_REASON
+            # Gate check (2026-05-07): Position must also honor decision_engine gates,
+            # not just score threshold. Otherwise BUY headlines contradict 'entry MISSED'
+            # / 'tail filter demoted' / 'fund < 50%' details (186-issue audit caught this).
+            _gates = cr.get("gates_evaluated") or []
+            _gates_ok = all(g.get("passed") for g in _gates) if _gates else True
+            if _SYSTEM_GATE_ACTIVE:
+                cr["stage"] = "WATCH"
+                if pos >= 68:
+                    cr["reject_reason"] = _SYSTEM_GATE_REASON
+            elif not _gates_ok and pos >= 68:
+                cr["stage"] = "WATCH"
+                _failed = next((g for g in _gates if not g.get("passed")), None)
+                if _failed:
+                    cr["reject_reason"] = _failed.get("reason") or f"gate {_failed.get('name')} failed"
+            else:
+                cr["stage"] = "BUY" if pos >= 68 else "WATCH"
+                if cr["stage"] == "BUY":
+                    cr["reject_reason"] = None  # clear any stale carry-over reject text
             cr["market_cap"] = mcap or cr.get("market_cap")
             cr["hold_period_min"] = 21
             cr["hold_period_max"] = 90
@@ -1657,10 +1671,21 @@ def main():
             cr = compact_row(r)
             cr["mode"]    = "invest"
             cr["score"]   = round(inv, 1)
-            # System gate: same lockdown applies to long-term BUYs
-            cr["stage"]   = "WATCH" if _SYSTEM_GATE_ACTIVE else ("BUY" if inv >= 72 else "WATCH")
-            if _SYSTEM_GATE_ACTIVE and inv >= 72:
-                cr["reject_reason"] = _SYSTEM_GATE_REASON
+            _gates = cr.get("gates_evaluated") or []
+            _gates_ok = all(g.get("passed") for g in _gates) if _gates else True
+            if _SYSTEM_GATE_ACTIVE:
+                cr["stage"] = "WATCH"
+                if inv >= 72:
+                    cr["reject_reason"] = _SYSTEM_GATE_REASON
+            elif not _gates_ok and inv >= 72:
+                cr["stage"] = "WATCH"
+                _failed = next((g for g in _gates if not g.get("passed")), None)
+                if _failed:
+                    cr["reject_reason"] = _failed.get("reason") or f"gate {_failed.get('name')} failed"
+            else:
+                cr["stage"] = "BUY" if inv >= 72 else "WATCH"
+                if cr["stage"] == "BUY":
+                    cr["reject_reason"] = None
             cr["market_cap"] = mcap or cr.get("market_cap")
             cr["hold_period_min"] = 90
             cr["hold_period_max"] = 540

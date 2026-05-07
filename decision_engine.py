@@ -350,13 +350,22 @@ def _eval_hard_gates(t: dict) -> tuple[list[dict], list[str]]:
         gates.append({"name": "setup_performance", "passed": True, "reason": ""})
 
     # 8. Fundamental adequacy
+    # Three possible field paths used across bundle/V2 layers — check all:
+    #   1. r.fund_score / r.fund_max          (V2 tickers.json after build_data)
+    #   2. r.fund_total.{score,max}            (some legacy paths)
+    #   3. r.fundamentals.{score,max}          (raw bundle from swing_trade scan)
+    # Bug fix 2026-05-07: engine was missing path 3, allowing tickers like AMAT
+    # to bypass fund gate (fundamentals.score=14, max=30 = 47% < 50% should fail).
     fs = t.get("fund_score")
     fm = t.get("fund_max")
-    # Some tickers store these inside fund_total
     if (fs is None or fm is None):
         ft = t.get("fund_total") or {}
         fs = fs if fs is not None else ft.get("score")
         fm = fm if fm is not None else ft.get("max")
+    if (fs is None or fm is None):
+        ftn = t.get("fundamentals") or {}
+        fs = fs if fs is not None else ftn.get("score")
+        fm = fm if fm is not None else ftn.get("max")
     if fs is not None and fm and fm > 0:
         ratio = fs / fm
         passed = ratio >= DEFAULT_FUND_ADEQUACY
