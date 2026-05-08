@@ -7131,12 +7131,16 @@ function renderAudit() {
     return;
   }
 
-  const cellPct = (v) => {
-    if (v == null) return `<td style="padding:7px 8px; text-align:right; color:var(--paper-5);">—</td>`;
+  // cellPct can take an optional class so live-poll can target specific
+  // day-cells (audit-d1-pct ... audit-d5-pct) and synthesize them from the
+  // live quote when the parquet hasn't caught up yet.
+  const cellPct = (v, klass = '') => {
+    const cls = klass ? ` class="${klass}"` : '';
+    if (v == null) return `<td${cls} style="padding:7px 8px; text-align:right; color:var(--paper-5);">—</td>`;
     const c = v > 0 ? 'var(--green)' : v < 0 ? 'var(--red)' : 'var(--paper-3)';
     const bg = v > 0 ? `background:color-mix(in oklch, var(--green) ${Math.min(20, Math.abs(v))}%, transparent);`
              : v < 0 ? `background:color-mix(in oklch, var(--red) ${Math.min(20, Math.abs(v))}%, transparent);` : '';
-    return `<td style="padding:7px 8px; text-align:right; color:${c}; font-weight:600; ${bg}">${v >= 0 ? '+' : ''}${v.toFixed(1)}</td>`;
+    return `<td${cls} style="padding:7px 8px; text-align:right; color:${c}; font-weight:600; ${bg}">${v >= 0 ? '+' : ''}${v.toFixed(1)}</td>`;
   };
 
   // Build row HTML — `data-ticker` and `data-entry` let live poller update cells in-place
@@ -7156,7 +7160,7 @@ function renderAudit() {
     // Row key for expand-row matching: unique per (ticker, date, mode)
     const rowKey = `${s.ticker}__${s.date}__${mode}`;
     return `
-      <tr data-ticker="${s.ticker}" data-entry="${ent}" data-rowkey="${rowKey}" class="audit-row" style="border-bottom:1px dashed var(--line); cursor:pointer;" onclick="auditToggleExpand('${rowKey}', event)" onmouseover="this.style.background='var(--surf-elev)'" onmouseout="this.style.background=''">
+      <tr data-ticker="${s.ticker}" data-entry="${ent}" data-date="${s.date || ''}" data-rowkey="${rowKey}" class="audit-row" style="border-bottom:1px dashed var(--line); cursor:pointer;" onclick="auditToggleExpand('${rowKey}', event)" onmouseover="this.style.background='var(--surf-elev)'" onmouseout="this.style.background=''">
         <td style="padding:7px 8px; font-weight:700; color:var(--paper); position:sticky; left:0; background:var(--surf-card);"><a href="elite-detail.html?t=${s.ticker}" onclick="event.stopPropagation()" style="color:var(--paper); text-decoration:none;">${s.ticker || '—'}</a>${s.is_elite ? ` <span title="Elite pick · #${s.elite_rank}/5 · ${s.elite_score}/100" style="color:var(--accent);font-weight:800;font-size:10px;margin-left:3px">⌬${s.elite_score?.toFixed(0) || '?'}</span>` : ''} <span class="audit-row-arrow" style="color:var(--paper-4); font-size:10px; margin-left:4px; transition:transform 0.15s ease; display:inline-block;">▶</span></td>
         <td style="padding:7px 8px;"><span style="display:inline-block; padding:2px 8px; border-radius:3px; background:color-mix(in oklch, ${modeColor} 14%, transparent); color:${modeColor}; border:1px solid color-mix(in oklch, ${modeColor} 40%, transparent); font-weight:700; font-size:10px; letter-spacing:0.06em;">${mode}</span></td>
         <td style="padding:7px 8px; color:var(--paper-2);">${s.date || '—'}</td>
@@ -7166,7 +7170,7 @@ function renderAudit() {
         <td style="padding:7px 8px; text-align:center;"><span style="display:inline-block; padding:2px 8px; border-radius:3px; background:color-mix(in oklch, ${verdictColor} 18%, transparent); color:${verdictColor}; border:1px solid ${verdictColor}; font-weight:700; font-size:10px; letter-spacing:0.06em;">${verdict}</span></td>
         <td class="audit-today" style="padding:7px 8px; text-align:right; color:var(--paper);">${s.today != null ? '$' + s.today.toFixed(2) : '—'}</td>
         <td class="audit-pctnow" style="padding:7px 8px; text-align:right; color:${pctNowColor}; font-weight:800; font-size:12.5px;">${s.pct_now != null ? (s.pct_now >= 0 ? '+' : '') + s.pct_now.toFixed(1) + '%' : '—'}</td>
-        ${AUDIT_DAY_COLS.map(c => cellPct(s[`${c}_pct`])).join('')}
+        ${AUDIT_DAY_COLS.map((c, i) => cellPct(s[`${c}_pct`], `audit-d${i+1}-pct`)).join('')}
         ${AUDIT_WEEK_COLS.map(c => cellPct(s[`${c}_pct`])).join('')}
         ${AUDIT_MONTH_COLS.map(c => cellPct(s[`${c}_pct`])).join('')}
         <td style="padding:7px 8px; color:${statusColor}; font-size:10px; font-weight:700; letter-spacing:0.05em;">${s.status || 'OPEN'}</td>
@@ -7182,7 +7186,25 @@ function renderAudit() {
   _auditLivePoll();
 }
 
-// Live update Today + %Δ cells via /api/live/quote (Schwab primary, EODHD fallback)
+// Live update Today + %Δ cells via /api/live/quote (Schwab primary, EODHD fallback).
+// Trading-day math: how many trading days between entry_date and today.
+// (2026-05-08 fix: D1 was null for yesterday's signals because the OHLCV
+// archive parquet's last bar is yesterday — today's bar isn't written until
+// after-hours. We synthesize today's bar from the live quote.)
+function _tradingDaysSince(entryISO) {
+  if (!entryISO) return null;
+  const entry = new Date(entryISO + 'T00:00:00');
+  const today = new Date();
+  let n = 0;
+  const cur = new Date(entry);
+  while (cur < today) {
+    cur.setDate(cur.getDate() + 1);
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) n++;  // skip Sat/Sun
+  }
+  return n;
+}
+
 let _auditPollIntervalId = null;
 async function _auditLivePoll() {
   try {
@@ -7190,27 +7212,78 @@ async function _auditLivePoll() {
     if (!tbody) return;
     const rows = [...tbody.querySelectorAll('tr[data-ticker]')];
     if (rows.length === 0) return;
-    // Collect unique tickers (cap at 200 to stay under Schwab's batch limit)
-    const tickers = [...new Set(rows.map(r => r.dataset.ticker).filter(Boolean))].slice(0, 200);
+
+    // Two pools of tickers:
+    //   1. Recent rows (entry within last 7 trading days) — ALWAYS update,
+    //      because their D1-D5 cells are still actively being filled.
+    //   2. The first 100 visible rows that aren't already in pool 1 —
+    //      keeps the visible-area Today + %Δ cells live for browsing.
+    // Combined cap: 250 tickers per poll, chunked into 2 requests of 125
+    // to stay under Schwab's batch quote limit.
+    const recentTickers = new Set();
+    const otherTickers = [];
+    rows.forEach(row => {
+      const t = row.dataset.ticker;
+      if (!t) return;
+      const date = row.dataset.date;  // YYYY-MM-DD entry date
+      const tdSince = _tradingDaysSince(date);
+      if (tdSince != null && tdSince <= 7) {
+        recentTickers.add(t);
+      } else if (otherTickers.length < 100 && !recentTickers.has(t)) {
+        otherTickers.push(t);
+      }
+    });
+    const tickers = [...new Set([...recentTickers, ...otherTickers])].slice(0, 250);
     if (tickers.length === 0) return;
-    const r = await fetch(`/api/live/quote?tickers=${tickers.join(',')}`, { signal: AbortSignal.timeout(4000) });
-    if (!r.ok) return;
-    const d = await r.json();
-    const prices = d.prices || {};
-    const source = d.source || 'unknown';
+
+    // Chunk into 125-ticker batches to fit Schwab batch limits
+    const CHUNK = 125;
+    const batches = [];
+    for (let i = 0; i < tickers.length; i += CHUNK) {
+      batches.push(tickers.slice(i, i + CHUNK));
+    }
+    const results = await Promise.all(batches.map(batch =>
+      fetch(`/api/live/quote?tickers=${batch.join(',')}`, { signal: AbortSignal.timeout(6000) })
+        .then(r => r.ok ? r.json() : null)
+        .catch(() => null)
+    ));
+    const prices = {};
+    let source = 'unknown';
+    for (const d of results) {
+      if (!d) continue;
+      Object.assign(prices, d.prices || {});
+      if (d.source) source = d.source;
+    }
+
     rows.forEach(row => {
       const t = row.dataset.ticker;
       const entry = parseFloat(row.dataset.entry || 0);
       const px = prices[t];
       if (px == null || !entry) return;
-      const todayCell = row.querySelector('.audit-today');
-      const pctCell = row.querySelector('.audit-pctnow');
       const pct = (px / entry - 1) * 100;
       const c = pct > 0 ? 'var(--green)' : pct < 0 ? 'var(--red)' : 'var(--paper-3)';
+
+      // Update Today + pct_now
+      const todayCell = row.querySelector('.audit-today');
+      const pctCell = row.querySelector('.audit-pctnow');
       if (todayCell) todayCell.textContent = '$' + px.toFixed(2);
       if (pctCell) {
         pctCell.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
         pctCell.style.color = c;
+      }
+
+      // Synthesize the right DN_pct cell from live price. For a signal that
+      // entered N trading days ago, today's price IS the DN close. Without
+      // this, parquet-only enrichment leaves DN blank until the EOD archive
+      // catches up overnight.
+      const tdSince = _tradingDaysSince(row.dataset.date);
+      if (tdSince != null && tdSince >= 1 && tdSince <= 5) {
+        const dCell = row.querySelector(`.audit-d${tdSince}-pct`);
+        if (dCell) {
+          dCell.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+          dCell.style.color = c;
+          dCell.dataset.synthetic = '1';  // marker — debug
+        }
       }
     });
     // Show source pill in audit meta
@@ -7218,7 +7291,7 @@ async function _auditLivePoll() {
     if (meta && source) {
       const srcLabel = source === 'schwab' ? '🟢 SCHWAB · LIVE' : source === 'eodhd' ? '🟡 EODHD · 15m' : source === 'cache' ? '🔘 CACHED' : source;
       const baseTxt = meta.textContent.split(' · ')[0];
-      meta.textContent = `${baseTxt} · ${srcLabel}`;
+      meta.textContent = `${baseTxt} · ${srcLabel} · ${recentTickers.size} recent`;
     }
   } catch (e) { /* silent */ }
 }
