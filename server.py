@@ -109,6 +109,13 @@ async def _v2_file(path: str, request: Request, auth: HTTPBasicCredentials = Dep
             "CDN-Cache-Control":   "no-store",
             "Cloudflare-CDN-Cache-Control": "no-store",
         }
+    # JSON files: read content and return as Response so GZipMiddleware
+    # compresses them (~92% on data.json, ~71% on tickers.json). FileResponse
+    # uses sendfile() which can bypass middleware; that's fine for HTML/JS/CSS
+    # but we want compression on the multi-MB JSON payloads. (2026-05-08)
+    if suffix == ".json":
+        body = full.read_bytes()
+        return Response(content=body, media_type=_MIME.get(suffix, "application/json"), headers=headers)
     return FileResponse(full, media_type=_MIME.get(suffix, "application/octet-stream"), headers=headers)
 
 # -- Redirect / to V2 dashboard (Phase A: legacy cache/dashboard.html retired

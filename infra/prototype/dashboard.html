@@ -1794,6 +1794,22 @@
 
 <script>
 let DATA = null, CURRENT = 'st', TIER = 'all', SEARCH = '', expandedKey = null;
+// Lazy-loaded full ticker payload cache. Two call sites (compare-modal,
+// inline drawer) both need tickers.json; without this each user-action
+// re-downloaded 3.5MB. (2026-05-08 — perf fix for 20+ user load.)
+let _TICKERS_CACHE = null;
+let _TICKERS_PROMISE = null;
+async function _getTickers() {
+  if (_TICKERS_CACHE) return _TICKERS_CACHE;
+  if (_TICKERS_PROMISE) return _TICKERS_PROMISE;  // dedupe in-flight fetches
+  _TICKERS_PROMISE = (async () => {
+    const r = await fetch('./tickers.json');
+    if (!r.ok) throw new Error('tickers.json not available');
+    _TICKERS_CACHE = await r.json();
+    return _TICKERS_CACHE;
+  })();
+  return _TICKERS_PROMISE;
+}
 const $ = id => document.getElementById(id);
 
 // ─────────────────────────────────────────────────────────────────
@@ -3349,12 +3365,9 @@ window._sc2OpenCompare = async () => {
       <div class="sc2-cmp-body" id="sc2CmpBody">Loading…</div>
     </div>`;
   document.body.appendChild(modal);
-  // Fetch full ticker payloads
+  // Fetch full ticker payloads (cached after first call via _getTickers)
   let all = {};
-  try {
-    const r = await fetch('./tickers.json');
-    if (r.ok) all = await r.json();
-  } catch (_) {}
+  try { all = await _getTickers(); } catch (_) {}
   const ts = tickers.map(t => all[t] || (DATA?.short_term || []).find(r => r.ticker === t) || { ticker: t });
   // Build comparison table — rows are metrics, columns are tickers
   const metrics = [
@@ -3798,11 +3811,9 @@ async function _toggleInlineDrawer(ticker, rowEl) {
       <button class="fsd-x" onclick="event.stopPropagation();this.closest('.fs-drawer').remove();_OPEN_DRAWER_TICKER=null">×</button>
     </div>`;
   rowEl.insertAdjacentElement('afterend', drawer);
-  // Fetch ticker details
+  // Fetch ticker details (cached after first call via _getTickers)
   try {
-    const r = await fetch('./tickers.json');
-    if (!r.ok) throw new Error('tickers.json not available');
-    const all = await r.json();
+    const all = await _getTickers();
     const T = all[ticker];
     if (!T) {
       drawer.querySelector('.fsd-loading').textContent = `${ticker} not in current bundle`;
