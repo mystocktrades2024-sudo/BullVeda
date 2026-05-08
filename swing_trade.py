@@ -3913,9 +3913,9 @@ def run_deep_dive(ticker: str):
         "total_passed": 1 if gate["passed"] else 0,
     }
 
-    output_path = BASE_DIR / "cache" / f"deep_{ticker}.html"
-    html_path = build_dashboard(bundle, output_path)
-    print(f"  Report: {html_path}")
+    # Phase B (2026-05-08): legacy single-ticker deep-dive HTML retired with
+    # html_generator. View ticker detail in V2 instead:
+    print(f"  View: http://localhost:7432/v2/elite-detail.html?t={ticker}")
 
     return result
 

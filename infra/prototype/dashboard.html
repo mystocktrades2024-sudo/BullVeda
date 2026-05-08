@@ -2158,6 +2158,19 @@ function renderSystemStatusBanner(data) {
 
 async function init() {
   DATA = await (await fetch('./data.json')).json();
+  // Overlay intraday options_flow.json (refreshed every 30 min during market
+  // hours) onto data.json's options_flow_top30 if newer. Last-scan flow is
+  // shown when off-hours; live flow when market is open. (2026-05-08)
+  try {
+    const fr = await fetch('./options_flow.json', { cache: 'no-cache' });
+    if (fr.ok) {
+      const flow = await fr.json();
+      if (flow && Array.isArray(flow.top30) && flow.top30.length) {
+        DATA.options_flow_top30 = flow.top30;
+        DATA.options_flow_refreshed_at = flow.refreshed_at;
+      }
+    }
+  } catch (_) { /* non-fatal — fall through to in-data.json copy */ }
   renderSystemStatusBanner(DATA);
   renderFloorTape();
   const lf = document.getElementById('lastScanFooter');
