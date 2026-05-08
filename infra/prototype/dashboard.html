@@ -921,6 +921,7 @@
     <div class="fs-h">Workspaces</div>
     <div class="fs-link fs-link-elite" data-tab="elite"><span>⌬ Elite Picks</span><span class="fb" id="fsEliteCt">0</span></div>
     <div class="fs-link" data-tab="optionsflow"><span>⚡ Options Flow</span><span class="fb" id="fsOpFlowCt">0</span></div>
+    <div class="fs-link" data-tab="earnings"><span>📅 Earnings</span><span class="fb" id="fsEarnCt">0</span></div>
     <div class="fs-link on" data-tab="scanner"><span>Signal Scanner</span><span class="fk">G</span></div>
     <div class="fs-link" data-tab="watchlist"><span>Watchlist</span><span class="fb" id="fsWatchlistCt">0</span></div>
     <div class="fs-link" data-tab="portfolio"><span>Portfolio · Positions</span><span class="fb" id="fsPosCt">0</span></div>
@@ -1065,6 +1066,7 @@
   <div class="sb-divider"></div>
   <div class="sb-link sb-link-elite" data-tab="elite"><span class="ico">⌬</span>Elite Picks<span class="ct" id="sbEliteCt">0</span></div>
   <div class="sb-link" data-tab="optionsflow"><span class="ico">⚡</span>Options Flow<span class="ct" id="sbOpFlowCt">0</span></div>
+  <div class="sb-link" data-tab="earnings"><span class="ico">📅</span>Earnings<span class="ct" id="sbEarnCt">0</span></div>
   <div class="sb-link" data-tab="industries"><span class="ico">▥</span>Industries<span class="ct" id="sbIndCt">0</span></div>
   <div class="sb-link" data-tab="pairs"><span class="ico">⇄</span>Pairs<span class="ct" id="sbPairsCt">0</span></div>
   <div class="sb-link" data-tab="risklab"><span class="ico">⚛</span>Risk Lab</div>
@@ -1337,6 +1339,16 @@
     <span class="meta" id="opFlowMeta">—</span>
   </div>
   <div class="panel-body" id="opFlowBody"></div>
+</div>
+
+<!-- Earnings playbook — pre-earnings watchlist + recent BEAT/MISS -->
+<div class="tab-panel" data-tab="earnings">
+  <div class="panel-head">
+    <span class="title">Earnings Playbook</span>
+    <span class="desc">Tickers reporting in next 10 days · pre-earnings drift candidates · sortable · cross-referenced with portfolio for risk flags</span>
+    <span class="meta" id="earnMeta">—</span>
+  </div>
+  <div class="panel-body" id="earnBody"></div>
 </div>
 
 <!-- Risk Lab: V-8 DCC-GARCH · V-10 Student-t copula · V-11 CVaR optimizer -->
@@ -5585,6 +5597,136 @@ function renderOptionsFlow() {
 }
 window.renderOptionsFlow = renderOptionsFlow;
 
+// ── Earnings Playbook tab ─────────────────────────────────────────────
+// Sortable table of upcoming earnings (next 10 days) with pre-earnings
+// runup, sector, and portfolio-risk flag. Surfaces names like INOD that
+// have a known catalyst within striking distance of the scan.
+function renderEarnings() {
+  const body = document.getElementById('earnBody');
+  const meta = document.getElementById('earnMeta');
+  if (!body) return;
+  const wl = (DATA && DATA.earnings_watchlist) || [];
+  const meta_d = (DATA && DATA.earnings_watchlist_meta) || {};
+  const outcomes = (DATA && DATA.earnings_outcomes_30d) || [];
+  if (!wl.length) {
+    body.innerHTML = `
+      <div style="padding:32px 28px; text-align:center; color:var(--ink-2); border:1px dashed var(--rule); border-radius:8px;">
+        <div style="font-size:13px; font-weight:600; margin-bottom:6px;">Earnings watchlist not built yet.</div>
+        <div style="font-size:11px; color:var(--ink-3); line-height:1.6;">Run <code style="font-family:var(--mono); background:var(--bg-3); padding:1px 5px; border-radius:3px;">python3 build_earnings_watchlist.py</code> or wait for the 5:30am PT cron.</div>
+      </div>`;
+    if (meta) meta.textContent = '0 entries';
+    return;
+  }
+
+  // Cross-reference with open positions for risk flag
+  const myPositions = new Set();
+  try {
+    const ps = (DATA && DATA.portfolio && DATA.portfolio.positions) || [];
+    ps.forEach(p => { if (p.status === 'OPEN') myPositions.add((p.ticker || '').toUpperCase()); });
+  } catch (_) {}
+
+  // Build ticker→data lookup for runup and sector (limited to today's scan tickers)
+  const tickerData = {};
+  for (const sec of ['short_term','medium_term','long_term']) {
+    for (const r of (DATA[sec] || [])) {
+      if (r.ticker && !tickerData[r.ticker]) tickerData[r.ticker] = r;
+    }
+  }
+
+  const beatStats = {};
+  outcomes.forEach(o => {
+    const t = o.ticker;
+    if (!beatStats[t]) beatStats[t] = {beats: 0, misses: 0, inline: 0, total: 0};
+    beatStats[t].total++;
+    if (o.beat === 'BEAT') beatStats[t].beats++;
+    else if (o.beat === 'MISS') beatStats[t].misses++;
+    else beatStats[t].inline++;
+  });
+
+  // Bucket by days
+  const byDay = {};
+  wl.forEach(e => {
+    const d = e.days_to_earnings;
+    if (!byDay[d]) byDay[d] = [];
+    byDay[d].push(e);
+  });
+  const inPortfolio = wl.filter(e => myPositions.has(e.ticker)).length;
+  const totalUS = wl.length;
+
+  if (meta) meta.textContent = `${totalUS} reporting · ${meta_d.from_date} → ${meta_d.to_date}` +
+                                (inPortfolio > 0 ? ` · ⚠ ${inPortfolio} in your portfolio` : '');
+  const sb = document.getElementById('sbEarnCt'); if (sb) sb.textContent = totalUS;
+  const fs = document.getElementById('fsEarnCt'); if (fs) fs.textContent = totalUS;
+
+  // Build the row HTML
+  const fmtPx = v => v == null || isNaN(v) ? '—' : Number(v).toFixed(2);
+  const rows = wl.map(e => {
+    const t = e.ticker;
+    const td = tickerData[t] || {};
+    const ownsTag = myPositions.has(t)
+      ? `<span style="background:var(--fail);color:#fff;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700;">⚠ OWNED</span>` : '';
+    const when = e.before_after_market === 'BeforeMarket' ? 'BMO'
+              : e.before_after_market === 'AfterMarket' ? 'AMC' : '—';
+    const days = e.days_to_earnings;
+    const daysStyle = days <= 1 ? 'color:var(--fail);font-weight:700'
+                    : days <= 3 ? 'color:var(--warn);font-weight:700'
+                    : days <= 5 ? 'color:var(--accent)' : 'color:var(--ink-2)';
+    const setup = td.setup_family || td.setup || '';
+    const score = td.score != null ? td.score.toFixed(0) : '—';
+    const verdict = td.verdict || td.stage || '';
+    const verdictColor = verdict === 'BUY' ? 'var(--green)' : verdict === 'WATCH' ? 'var(--accent)' : 'var(--ink-3)';
+    const sector = td.sector || '—';
+    const stats = beatStats[t];
+    const beatTag = stats && stats.total > 0
+      ? `<span style="color:var(--ink-3);font-size:10px;" title="${stats.total} prior reports">${stats.beats}B/${stats.misses}M/${stats.inline}I</span>`
+      : '<span style="color:var(--ink-3);font-size:10px;">—</span>';
+    return `
+      <tr style="border-bottom:1px solid var(--rule);">
+        <td style="padding:8px 12px;font-family:var(--mono);font-weight:700;">
+          <a href="elite-detail.html?t=${encodeURIComponent(t)}" style="color:var(--ink-0);text-decoration:none;">${t}</a> ${ownsTag}
+        </td>
+        <td style="padding:8px 12px;${daysStyle};font-family:var(--mono);">${days}d</td>
+        <td style="padding:8px 12px;color:var(--ink-2);">${e.report_date}</td>
+        <td style="padding:8px 12px;color:var(--ink-2);font-size:11px;">${when}</td>
+        <td style="padding:8px 12px;text-align:center;">${score !== '—' ? `<b>${score}</b>` : '<span style="color:var(--ink-3)">—</span>'}</td>
+        <td style="padding:8px 12px;text-align:center;">
+          ${verdict ? `<span style="color:${verdictColor};font-weight:700;font-size:10px;">${verdict}</span>` : '<span style="color:var(--ink-3)">—</span>'}
+        </td>
+        <td style="padding:8px 12px;color:var(--ink-2);font-size:11px;">${setup}</td>
+        <td style="padding:8px 12px;text-align:right;font-family:var(--mono);">${e.estimate != null ? fmtPx(e.estimate) : '—'}</td>
+        <td style="padding:8px 12px;text-align:center;">${beatTag}</td>
+        <td style="padding:8px 12px;color:var(--ink-2);font-size:11px;">${sector.slice(0, 24)}</td>
+      </tr>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div style="padding:0 0 14px;color:var(--ink-2);font-size:11.5px;line-height:1.55;">
+      <b style="color:var(--fail)">Red days = ≤1d</b> (highest risk) · <b style="color:var(--warn)">Yellow = ≤3d</b> · <b style="color:var(--accent)">Amber = ≤5d</b>.
+      <b>BEAT/MISS/INLINE</b> column = last 30 days of prior reports for that ticker (pattern hint, not promise).
+      <b>OWNED</b> tag = currently in your portfolio.
+    </div>
+    <div style="overflow-x:auto;max-height:70vh;overflow-y:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead style="position:sticky;top:0;z-index:5;">
+          <tr style="background:var(--bg-2);color:var(--ink-3);text-align:left;border-bottom:1px solid var(--rule-2);">
+            <th style="padding:9px 12px;font-weight:600;letter-spacing:0.04em;font-size:10px;">TICKER</th>
+            <th style="padding:9px 12px;font-weight:600;letter-spacing:0.04em;font-size:10px;">DAYS</th>
+            <th style="padding:9px 12px;font-weight:600;letter-spacing:0.04em;font-size:10px;">REPORT</th>
+            <th style="padding:9px 12px;font-weight:600;letter-spacing:0.04em;font-size:10px;">WHEN</th>
+            <th style="padding:9px 12px;text-align:center;font-weight:600;letter-spacing:0.04em;font-size:10px;">SCORE</th>
+            <th style="padding:9px 12px;text-align:center;font-weight:600;letter-spacing:0.04em;font-size:10px;">VERDICT</th>
+            <th style="padding:9px 12px;font-weight:600;letter-spacing:0.04em;font-size:10px;">SETUP</th>
+            <th style="padding:9px 12px;text-align:right;font-weight:600;letter-spacing:0.04em;font-size:10px;">EPS EST</th>
+            <th style="padding:9px 12px;text-align:center;font-weight:600;letter-spacing:0.04em;font-size:10px;" title="BEAT / MISS / INLINE — last 30d of prior reports">PRIOR</th>
+            <th style="padding:9px 12px;font-weight:600;letter-spacing:0.04em;font-size:10px;">SECTOR</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+window.renderEarnings = renderEarnings;
+
 // ── Risk Lab renderer (V-8 DCC-GARCH · V-10 Student-t copula · V-11 CVaR) ──
 function renderRiskLab() {
   const dcc     = DATA.dcc_garch || {};
@@ -8846,6 +8988,7 @@ const TAB_RENDERERS = {
   risklab:     renderRiskLab,
   elite:       renderElitePicks,
   optionsflow: renderOptionsFlow,
+  earnings:    renderEarnings,
   market:      renderMarket,
   themes:      renderThemes,
   screener:    renderScreener,

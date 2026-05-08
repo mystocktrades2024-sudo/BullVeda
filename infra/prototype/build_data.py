@@ -2231,6 +2231,63 @@ def main():
     # institutional-flow-following entry triggers.
     data["options_flow_top30"] = b.get("options_flow_top30") or []
 
+    # Earnings playbook — 1840+ US tickers reporting in next 10 days.
+    # Built daily 5:30am PT by build_earnings_watchlist.py. The dashboard
+    # Earnings tab sorts by days_to_earnings; cross-references with the
+    # ticker payload (5d runup, sector, in-portfolio flag).
+    try:
+        _ew_path = Path(__file__).resolve().parent.parent.parent / "data" / "earnings_watchlist.json"
+        if _ew_path.exists():
+            _ew = json.loads(_ew_path.read_text())
+            data["earnings_watchlist"] = _ew.get("watchlist") or []
+            data["earnings_watchlist_meta"] = {
+                "generated_at": _ew.get("generated_at"),
+                "from_date":    _ew.get("from_date"),
+                "to_date":      _ew.get("to_date"),
+                "total_us":     _ew.get("total_us"),
+                "window_days":  _ew.get("window_days"),
+            }
+            # Earnings outcomes — last 30 days of BEAT/MISS/INLINE
+            _eo_path = _ew_path.parent / "earnings_outcomes.jsonl"
+            outcomes_recent = []
+            if _eo_path.exists():
+                from datetime import datetime as _dt, timedelta as _td
+                _cutoff = (_dt.now() - _td(days=30)).strftime("%Y-%m-%d")
+                for _line in _eo_path.read_text().splitlines():
+                    _line = _line.strip()
+                    if not _line: continue
+                    try:
+                        _e = json.loads(_line)
+                        if (_e.get("report_date") or "") >= _cutoff:
+                            outcomes_recent.append(_e)
+                    except Exception:
+                        continue
+            data["earnings_outcomes_30d"] = outcomes_recent
+        else:
+            data["earnings_watchlist"] = []
+            data["earnings_watchlist_meta"] = {}
+            data["earnings_outcomes_30d"] = []
+    except Exception as _ew_err:
+        print(f"[earnings_watchlist] non-fatal: {_ew_err}")
+        data["earnings_watchlist"] = []
+        data["earnings_outcomes_30d"] = []
+
+    # Pre-earnings BUY badge (#3) — for each ticker, attach earnings_in_Nd
+    # if it appears in the earnings_watchlist within 10 days. Surfaces in
+    # elite-detail and audit trail as a "🎯 EARN+5D" tag.
+    _ew_by_t = {x["ticker"]: x for x in (data.get("earnings_watchlist") or []) if isinstance(x, dict)}
+    for _section_key in ("short_term", "medium_term", "long_term"):
+        _section = data.get(_section_key) or []
+        if not isinstance(_section, list): continue
+        for _r in _section:
+            if not isinstance(_r, dict): continue
+            _t = _r.get("ticker")
+            _ew_e = _ew_by_t.get(_t)
+            if _ew_e:
+                _r["earnings_in_days"] = _ew_e.get("days_to_earnings")
+                _r["earnings_report_date"] = _ew_e.get("report_date")
+                _r["earnings_when"] = _ew_e.get("before_after_market")
+
     data = _clean(data)
     DATA.write_text(json.dumps(data, default=str, indent=0, allow_nan=False))
     print(f"wrote {DATA} ({DATA.stat().st_size:,} bytes)")
