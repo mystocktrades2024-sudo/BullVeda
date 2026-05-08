@@ -501,6 +501,15 @@ def _compute_monte_carlo_safe(r: dict) -> dict:
         mu_annual    = mu_daily * 252
         sigma_annual = sigma_daily * np.sqrt(252)
 
+        # Basel YELLOW recalibration (2026-05-08): empirical sigma underpredicts
+        # tail events. Audit_360 reports 18 exceptions vs 12 expected over 250
+        # closed signals (7.2% rate vs 5% target). Inflate σ by sqrt(7.2/5.0)
+        # ≈ 1.20 to bring exception rate to target. This widens MC's 95%/97.5%
+        # bands (VaR-95, CVaR-975) by the same factor and de-biases p_profit
+        # downward toward reality. Re-measure after 50+ new signals close.
+        _BASEL_SIGMA_INFLATION = 1.20
+        sigma_annual *= _BASEL_SIGMA_INFLATION
+
         # V-5: Earnings jump calibration with sector fallback
         jcal = ej.calibrate(r.get("ticker", ""), closes, sector=r.get("sector"))
         lambda_jump = float(jcal.get("lambda_J", 0.0))
