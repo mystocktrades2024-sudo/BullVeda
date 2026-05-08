@@ -2911,6 +2911,40 @@ def run_daily_scan(force_fresh: bool = False):
     log.info(f"  Top 10 medium-term: {[p['ticker'] for p in medium_term_picks]}")
     log.info(f"  Top 10 long-term:   {[p['ticker'] for p in long_term_picks]}")
 
+    # Live Options Flow — institutional UOA imbalance scanner. Returns top 30
+    # tickers by call/put dollar-volume imbalance, ranked STRONG > MODERATE > WEAK.
+    # Surfaced in V2 dashboard as a separate panel for "smart money following"
+    # entry triggers. (2026-05-07 — wired from previously orphan options_flow_scanner.)
+    options_flow_top30: list = []
+    try:
+        from options_flow_scanner import scan as _options_flow_scan
+        # Build the (price, fundamentals) sidecars from all_results — already enriched.
+        _flow_prices = {r.get("ticker"): r.get("price") for r in all_results
+                        if r.get("ticker") and r.get("price")}
+        _flow_funds = {}
+        for r in all_results:
+            t = r.get("ticker")
+            if not t:
+                continue
+            _flow_funds[t] = {
+                "sector": r.get("sector") or "Unknown",
+                "days_to_earnings": ((r.get("earnings") or {}).get("days_to_earnings")
+                                     if isinstance(r.get("earnings"), dict) else None),
+            }
+        _flow_all = _options_flow_scan(options_iv_data, _flow_prices, _flow_funds)
+        options_flow_top30 = _flow_all[:30]
+        if options_flow_top30:
+            _strong = sum(1 for x in options_flow_top30 if x.get("status") == "STRONG")
+            _mod    = sum(1 for x in options_flow_top30 if x.get("status") == "MODERATE")
+            log.info(f"  Live Options Flow: {len(options_flow_top30)} candidates "
+                     f"(STRONG={_strong}, MODERATE={_mod}); top: "
+                     f"{[(x['ticker'], x['status']) for x in options_flow_top30[:5]]}")
+        else:
+            log.info("  Live Options Flow: 0 candidates (no UOA imbalance detected)")
+    except Exception as _of_err:
+        log.warning(f"  Live Options Flow scan failed: {_of_err}")
+        options_flow_top30 = []
+
     bundle = {
         "run_date":         run_date,
         "run_timestamp":    run_timestamp,
@@ -2922,6 +2956,7 @@ def run_daily_scan(force_fresh: bool = False):
         "watch_list":       watch_list,
         "all_scored":       all_results,
         "killed":           killed,
+        "options_flow_top30": options_flow_top30,
         "medium_term_picks": medium_term_picks,
         "long_term_picks":   long_term_picks,
         "extended_leaders": extended_leaders,
