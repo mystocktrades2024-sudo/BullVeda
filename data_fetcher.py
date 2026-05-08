@@ -4959,11 +4959,12 @@ def _eodhd_fundamentals_to_schwab_schema(d: dict, ticker: str) -> dict | None:
         "dividend_date":       SD.get("ExDividendDate"),
         "high_52w":            T.get("52WeekHigh"),
         "low_52w":             T.get("52WeekLow"),
-        # Bonus fields downstream uses for sector/industry backfill
+        # Bonus fields downstream uses for sector/industry/short backfill
         "sector":              G.get("Sector"),
         "industry":            G.get("Industry"),
         "market_cap":          G.get("MarketCapitalization"),
         "beta":                T.get("Beta"),
+        "short_pct":           T.get("ShortPercent"),  # decimal: 0.0092 = 0.92%
         "country":             G.get("CountryName") or G.get("CountryISO"),
         "source":              "eodhd",
         "error":               None,

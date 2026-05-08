@@ -1427,7 +1427,45 @@ def run_daily_scan(force_fresh: bool = False):
     if _earn_patched:
         log.info(f"  Earnings date backfill from FINVIZ: {_earn_patched} tickers")
 
-    # Backfill missing info fields from Finviz bulk (beta, short_pct, sector gaps)
+    # EODHD-first backfill (2026-05-08): EODHD's get_fundamentals returns
+    # beta + sector + industry from Technicals + General blocks. Calling it
+    # here is cheap (7-day cache hit on second use). Runs BEFORE Finviz so
+    # EODHD wins; Finviz becomes pure cleanup for what EODHD missed.
+    _eodhd_patched = 0
+    try:
+        from data_fetcher import get_fundamentals as _get_eodhd_fund
+        for t in tickers_to_analyze:
+            info_d = infos.get(t, {})
+            need_any = (info_d.get("beta") is None or
+                        info_d.get("short_pct") is None or
+                        info_d.get("sector") in (None, "Unknown", "") or
+                        info_d.get("industry") in (None, "Unknown", ""))
+            if not need_any:
+                continue
+            ef = _get_eodhd_fund(t)  # cached 7d
+            if not isinstance(ef, dict):
+                continue
+            patched = False
+            if info_d.get("beta") is None and ef.get("beta") is not None:
+                info_d["beta"] = ef["beta"]; patched = True
+            if info_d.get("short_pct") is None and ef.get("short_pct") is not None:
+                info_d["short_pct"] = ef["short_pct"]; patched = True
+            if info_d.get("sector") in (None, "Unknown", "") and ef.get("sector"):
+                info_d["sector"] = ef["sector"]; patched = True
+            if info_d.get("industry") in (None, "Unknown", "") and ef.get("industry"):
+                info_d["industry"] = ef["industry"]; patched = True
+            if patched:
+                infos[t] = info_d
+                _eodhd_patched += 1
+    except Exception as _ee:
+        log.debug(f"EODHD backfill skipped: {_ee}")
+    if _eodhd_patched:
+        log.info(f"  EODHD backfill: patched {_eodhd_patched} info dicts (beta/sector/industry)")
+
+    # Finviz fallback — only fills what EODHD didn't have. Free public
+    # scraping; fragile but covers gaps when EODHD returns null. Memory:
+    # feedback_data_source_priority.md (Finviz Elite paid was decommissioned;
+    # this is the free-scrape supplement).
     _fv_patched = 0
     if finviz_bulk:
         for t in tickers_to_analyze:
@@ -1451,7 +1489,7 @@ def run_daily_scan(force_fresh: bool = False):
             if patched:
                 infos[t] = info_d
                 _fv_patched += 1
-        log.info(f"  Finviz backfill: patched {_fv_patched} info dicts (beta/short/sector)")
+        log.info(f"  Finviz backfill (post-EODHD residual): patched {_fv_patched} info dicts")
 
     # ── Sector fallback: Finnhub /stock/profile2 for tickers still missing sector ──
     _fh_sector_patched = 0
