@@ -52,6 +52,54 @@ def _strip_suffix(code: str) -> str:
     return code.split(".")[0].upper() if code else ""
 
 
+def _load_tradeable_universe() -> set[str]:
+    """Build the set of tickers we actually scan: S&P 500 + Russell 1000 +
+    Russell 2000 + Zacks #1 + custom watchlist + open positions.
+
+    Filters out ADRs (5-letter codes ending in F/Y), pink sheets, and
+    foreign listings that the user would never trade.
+    """
+    universe: set[str] = set()
+    import eodhd_client as e
+    try:
+        for idx in ("SP500", "RUI", "RUT"):
+            tickers = e.index_components(idx) or []
+            universe |= {t.upper() for t in tickers if isinstance(t, str)}
+        log.info(f"  Universe loaded: SP500 + R1000 + R2000 = {len(universe)} tickers")
+    except Exception as ex:
+        log.warning(f"index_components fetch failed: {ex}")
+
+    # Zacks #1 from cache (built by daily scan)
+    try:
+        zk = json.loads((BASE / "cache" / "zacks_data.json").read_text())
+        for t in (zk.get("zacks_rank1") or []):
+            if isinstance(t, str):
+                universe.add(t.upper())
+    except Exception:
+        pass
+
+    # Custom watchlist from config
+    try:
+        cfg = json.loads((BASE / "config" / "config.json").read_text())
+        for t in (cfg.get("universe", {}).get("custom_watchlist") or []):
+            if isinstance(t, str):
+                universe.add(t.upper())
+    except Exception:
+        pass
+
+    # Currently held positions — always include even if outside universe
+    try:
+        ps = json.loads((BASE / "data" / "portfolio_state.json").read_text())
+        for p in (ps.get("positions") or []):
+            t = (p.get("ticker") or "").upper()
+            if t and p.get("status") == "OPEN":
+                universe.add(t)
+    except Exception:
+        pass
+
+    return universe
+
+
 def main(days_ahead: int = 10) -> int:
     # Lazy-load .env so SCHWAB_APP_KEY etc. are present (not used here, but
     # keeps the env consistent with other scripts).
@@ -64,6 +112,12 @@ def main(days_ahead: int = 10) -> int:
     today = date.today()
     end   = today + timedelta(days=days_ahead)
 
+    # Build the tradeable-universe filter so we drop foreign ADRs / pinks /
+    # noise tickers that pollute the watchlist (AAFRF, AKEJF, etc.).
+    log.info(f"Loading tradeable universe (SP500 + R1000 + R2000 + Zacks + positions)...")
+    universe = _load_tradeable_universe()
+    log.info(f"  Universe size: {len(universe)} tickers")
+
     log.info(f"Fetching EODHD earnings calendar {today} → {end} ({days_ahead}d)")
     import eodhd_client as e
     raw = e.earnings_calendar(from_date=str(today), to_date=str(end))
@@ -73,9 +127,13 @@ def main(days_ahead: int = 10) -> int:
     entries = raw.get("earnings") or raw.get("data") or []
     log.info(f"Total earnings entries (global): {len(entries)}")
 
-    # Filter to US + dedupe (some symbols appear multiple times)
+    # Filter to US + universe + dedupe. The raw US filter alone leaves 1,840
+    # entries including a lot of foreign ADRs (AAFRF, AKEJF) and pinks the
+    # user never trades. Intersecting with the tradeable universe collapses
+    # to a focused list (~150-300 names).
     seen: set[str] = set()
     out: list[dict] = []
+    n_universe_filtered = 0
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -86,6 +144,10 @@ def main(days_ahead: int = 10) -> int:
         if ticker in seen or not ticker:
             continue
         seen.add(ticker)
+        # Universe filter — only keep tickers we actually scan/hold
+        if universe and ticker not in universe:
+            n_universe_filtered += 1
+            continue
         rep_date = entry.get("report_date")
         if not rep_date:
             continue
@@ -117,7 +179,8 @@ def main(days_ahead: int = 10) -> int:
     OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     OUT_FILE.write_text(json.dumps(payload, indent=2, default=str))
 
-    log.info(f"Wrote {OUT_FILE.name}: {len(out)} US tickers reporting in next {days_ahead}d")
+    log.info(f"Wrote {OUT_FILE.name}: {len(out)} tradeable tickers reporting in next {days_ahead}d "
+             f"(filtered out {n_universe_filtered} non-universe US listings)")
     log.info(f"  by day-bucket: {dict([(d, sum(1 for x in out if x['days_to_earnings'] == d)) for d in range(0, days_ahead + 1)])}")
     if out:
         next5 = ", ".join("{}({}d)".format(x["ticker"], x["days_to_earnings"]) for x in out[:5])
