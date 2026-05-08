@@ -8,12 +8,20 @@ log = logging.getLogger("position_alerts")
 BASE_DIR = Path(__file__).parent
 ALERT_LOG_PATH = BASE_DIR / "data" / "alert_sent_log.json"
 
-ET = timezone(timedelta(hours=-5))
-
 
 def _is_market_hours() -> bool:
-    """Return True if currently within 9:30-16:00 ET, Mon-Fri."""
-    now = datetime.now(ET)
+    """Return True if currently within 9:30-16:00 America/New_York, Mon-Fri.
+
+    DST-aware (uses zoneinfo). Previously this used hardcoded UTC-5 (EST),
+    which made the gate off by 1 hour during EDT (March-November) — alerts
+    could fire 1 hour after close. Fixed 2026-05-08."""
+    try:
+        import zoneinfo
+        now = datetime.now(zoneinfo.ZoneInfo("America/New_York"))
+    except ImportError:
+        # Python <3.9 fallback (unlikely path)
+        ET = timezone(timedelta(hours=-4))  # rough EDT, only used in fallback
+        now = datetime.now(ET)
     if now.weekday() >= 5:  # weekend
         return False
     t = now.time()
