@@ -6315,13 +6315,16 @@ function openAddPositionModal() {
         <button onclick="_closeModal('_addPosModal')" style="background:transparent;border:none;color:var(--ink-3);font-size:18px;cursor:pointer;">×</button>
       </div>
       <p style="color:var(--ink-2);font-size:12px;margin:0 0 14px;line-height:1.5;">
-        Track an existing or new holding. Live P&amp;L updates every 5s; intraday alerts fire on stop/T1 within 60s.
+        Type a ticker, then tab/blur — entry/stop/T1/T2 auto-fill from the latest scan's trade plan.
+        Override any field manually. Live P&amp;L updates every 5s; intraday alerts fire on stop/T1 within 60s.
       </p>
       <form id="_addPosForm" onsubmit="return _submitAddPosition(event)" style="display:grid;gap:10px;">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <label style="display:flex;flex-direction:column;gap:4px;">
             <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">TICKER *</span>
             <input id="_apTicker" required maxlength="6" placeholder="AAPL"
+              onblur="_apAutofillFromTicker()"
+              onchange="_apAutofillFromTicker()"
               style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;text-transform:uppercase;">
           </label>
           <label style="display:flex;flex-direction:column;gap:4px;">
@@ -6330,23 +6333,23 @@ function openAddPositionModal() {
               style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
           </label>
           <label style="display:flex;flex-direction:column;gap:4px;">
-            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">ENTRY $ *</span>
-            <input id="_apEntry" type="number" step="0.01" min="0.01" required placeholder="180.00"
+            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">ENTRY $ <span id="_apEntryAuto" style="color:var(--info);font-size:10px;"></span></span>
+            <input id="_apEntry" type="number" step="0.01" min="0.01" required placeholder="auto"
               style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
           </label>
           <label style="display:flex;flex-direction:column;gap:4px;">
-            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">STOP $ *</span>
-            <input id="_apStop" type="number" step="0.01" min="0.01" required placeholder="168.50"
+            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">STOP $ <span id="_apStopAuto" style="color:var(--info);font-size:10px;"></span></span>
+            <input id="_apStop" type="number" step="0.01" min="0.01" placeholder="auto from trade plan"
               style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
           </label>
           <label style="display:flex;flex-direction:column;gap:4px;">
-            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">T1 $ *</span>
-            <input id="_apT1" type="number" step="0.01" min="0.01" required placeholder="200.00"
+            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">T1 $ <span id="_apT1Auto" style="color:var(--info);font-size:10px;"></span></span>
+            <input id="_apT1" type="number" step="0.01" min="0.01" placeholder="auto from trade plan"
               style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
           </label>
           <label style="display:flex;flex-direction:column;gap:4px;">
-            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">T2 $ (optional)</span>
-            <input id="_apT2" type="number" step="0.01" min="0.01" placeholder="215.00"
+            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">T2 $ <span id="_apT2Auto" style="color:var(--info);font-size:10px;"></span></span>
+            <input id="_apT2" type="number" step="0.01" min="0.01" placeholder="auto from trade plan"
               style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
           </label>
           <label style="display:flex;flex-direction:column;gap:4px;">
@@ -6378,16 +6381,81 @@ function openAddPositionModal() {
   setTimeout(() => document.getElementById('_apTicker')?.focus(), 50);
 }
 
+// Auto-fill entry/stop/T1/T2 from the system's computed trade_plan when the
+// user types a ticker. Looks in the cached tickers.json first (fast), falls
+// back to /api/ticker/{t}/analyze for tickers outside today's scan universe.
+async function _apAutofillFromTicker() {
+  const tEl = document.getElementById('_apTicker');
+  const t = (tEl?.value || '').trim().toUpperCase();
+  if (!t || t.length < 1) return;
+  tEl.value = t;  // normalize to uppercase
+
+  // Reset auto markers
+  ['_apEntryAuto','_apStopAuto','_apT1Auto','_apT2Auto'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.textContent = '';
+  });
+
+  let plan = null, price = null;
+  try {
+    const all = await _getTickers();   // cached; same path as compare modal
+    const T = all && all[t];
+    if (T) {
+      plan = T.trade_plan || {};
+      price = T.price ?? T.last;
+    }
+  } catch (_) {}
+
+  // Fall back to a live analysis if ticker isn't in today's scan universe.
+  // /api/analyze runs run_deep_dive() server-side and returns the trade_plan.
+  if (!plan || (!plan.stop && !plan.target1)) {
+    try {
+      const r = await fetch(`/api/analyze/${encodeURIComponent(t)}`, {credentials:'include'});
+      if (r.ok) {
+        const d = await r.json();
+        plan = d.trade_plan || plan || {};
+        price = price ?? d.price;
+      }
+    } catch (_) {}
+  }
+
+  if (!plan) return;
+
+  // Populate ONLY when the user hasn't already typed something
+  const setIfEmpty = (id, val, autoId, label) => {
+    const el = document.getElementById(id);
+    if (!el || val == null || isNaN(Number(val))) return;
+    if (!el.value) {
+      el.value = Number(val).toFixed(2);
+      const auto = document.getElementById(autoId);
+      if (auto) auto.textContent = `· ${label} auto`;
+    }
+  };
+  // Entry: prefer the entry_low (start of zone), or current price
+  const entryFill = plan.entry_low ?? plan.entry ?? price;
+  setIfEmpty('_apEntry', entryFill, '_apEntryAuto', 'plan');
+  setIfEmpty('_apStop',  plan.stop,    '_apStopAuto', 'plan');
+  setIfEmpty('_apT1',    plan.target1, '_apT1Auto',   'plan');
+  setIfEmpty('_apT2',    plan.target2, '_apT2Auto',   'plan');
+}
+
 async function _submitAddPosition(e) {
   e.preventDefault();
   const msg = document.getElementById('_apMsg');
   msg.textContent = '';
+  // If user left stop/T1 blank, try one more autofill pass (idempotent)
+  await _apAutofillFromTicker();
+  const stopV = document.getElementById('_apStop').value;
+  const t1V   = document.getElementById('_apT1').value;
+  if (!stopV || !t1V) {
+    msg.textContent = `No trade plan found for this ticker — set ${!stopV ? 'STOP' : ''}${!stopV && !t1V ? ' and ' : ''}${!t1V ? 'T1' : ''} manually.`;
+    return false;
+  }
   const body = {
     ticker:        document.getElementById('_apTicker').value.trim().toUpperCase(),
     entry_price:   parseFloat(document.getElementById('_apEntry').value),
     shares:        parseInt(document.getElementById('_apShares').value, 10),
-    stop:          parseFloat(document.getElementById('_apStop').value),
-    target1:       parseFloat(document.getElementById('_apT1').value),
+    stop:          parseFloat(stopV),
+    target1:       parseFloat(t1V),
     target2:       document.getElementById('_apT2').value ? parseFloat(document.getElementById('_apT2').value) : null,
     direction:     document.getElementById('_apDir').value,
     entry_date:    document.getElementById('_apDate').value || null,
