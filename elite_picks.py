@@ -204,16 +204,26 @@ def _mode_multipliers(mode: str) -> dict:
 
 
 def _stage_filter(r: dict, stage: str, raw_score: float) -> bool:
-    """Stage-specific filter: must pass before composite scoring."""
+    """Stage-specific filter: must pass before composite scoring.
+
+    Bug fix (2026-05-08): now requires the row's actual verdict to match
+    the requested stage. Previously a score-64 WATCH ticker would surface
+    in BUY picks because the filter only checked `score >= 60`. That made
+    Elite Picks contradict the decision engine's verdict — the very thing
+    the gate cascade is supposed to enforce.
+    """
     score = raw_score
+    # Mode rows expose stage in either `verdict` or `stage`. Normalize SELL→SHORT.
+    actual = (r.get("verdict") or r.get("stage") or "").upper()
+    if actual == "SELL":
+        actual = "SHORT"
+
     if stage == "BUY":
-        return score >= 60
+        return score >= 60 and actual == "BUY"
     if stage == "SHORT":
-        # Require score ≤ 50 OR explicit short verdict
-        return score <= 50 or (r.get("verdict") or "").upper() in ("SHORT", "SELL")
+        return actual == "SHORT" and (score <= 50 or actual in ("SHORT", "SELL"))
     if stage == "WATCH":
-        # Score in 55-75 range — close to BUY but not there yet
-        return 55 <= score <= 75
+        return 55 <= score <= 75 and actual == "WATCH"
     return False
 
 
