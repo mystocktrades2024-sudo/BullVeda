@@ -7140,7 +7140,10 @@ function renderAudit() {
   };
 
   // Build row HTML — `data-ticker` and `data-entry` let live poller update cells in-place
-  tbody.innerHTML = filtered.slice(0, 500).map(s => {
+  // Cap at 5000 rows: lifted from 500 so users with 20+ accounts can audit a
+  // full quarter of signals in one view. Browser handles 5000 DOM rows fine
+  // (~30MB DOM, well under Chromium's per-tab limit).
+  tbody.innerHTML = filtered.slice(0, 5000).map(s => {
     const pctNowColor = s.pct_now == null ? 'var(--paper-5)' : s.pct_now > 0 ? 'var(--green)' : s.pct_now < 0 ? 'var(--red)' : 'var(--paper-3)';
     const statusColor = s.status === 'OPEN' ? 'var(--accent)' : s.status === 'CLOSED' ? 'var(--paper-3)' : s.status === 'TARGET_HIT' ? 'var(--green)' : s.status === 'STOPPED' ? 'var(--red)' : 'var(--paper-3)';
     // Verdict pill: BUY (green) / WATCH (amber) / SHORT (red)
@@ -7171,8 +7174,8 @@ function renderAudit() {
     `;
   }).join('');
 
-  if (filtered.length > 500) {
-    tbody.innerHTML += `<tr><td colspan="26" style="padding:14px; text-align:center; color:var(--paper-3); font-size:12px;">Showing first 500 of ${filtered.length} — narrow filters to see more.</td></tr>`;
+  if (filtered.length > 5000) {
+    tbody.innerHTML += `<tr><td colspan="26" style="padding:14px; text-align:center; color:var(--paper-3); font-size:12px;">Showing first 5,000 of ${filtered.length.toLocaleString()} — narrow filters to see more.</td></tr>`;
   }
 
   // Kick off live updates immediately + every 5s
