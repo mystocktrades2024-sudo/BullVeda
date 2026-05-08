@@ -97,7 +97,10 @@ from tracker import (record_run, evaluate_pending, compute_stats, get_full_histo
 from portfolio_tracker import refresh_prices, get_portfolio_summary
 from gmail_zacks import fetch_zacks_emails, get_zacks_email_bonus
 from alerts import send_scan_alerts
-from email_report import send_dashboard_email
+# Phase B (2026-05-08): email_report.send_dashboard_email retired —
+# depended on cache/dashboard.html (legacy single-page dump) which is no
+# longer generated. Slack alerts via alerts.send_alert cover the use case.
+# Source preserved at email_report.py if you want to revive for V2.
 from crypto_screener import run_crypto_scan
 
 # Logging
@@ -3593,16 +3596,8 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception:
         pass  # alerts are non-critical
 
-    # Email dashboard report
-    try:
-        send_dashboard_email(
-            html_path=html_path,
-            buy_count=len(buy_candidates),
-            sell_count=len(sell_candidates),
-            regime=regime.get("regime", "unknown"),
-        )
-    except Exception:
-        pass  # email is non-critical
+    # Email report retired with html_generator (Phase B). Slack handles
+    # high-signal events; email-the-dashboard would need a V2 export path.
 
     # Position-level alerts (stop-approach + T1-hit) — market-hours gated, throttled
     try:

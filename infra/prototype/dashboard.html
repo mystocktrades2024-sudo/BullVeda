@@ -1875,6 +1875,15 @@ function _updateProfileUI() {
 
 function _selectProfile(profile, e) {
   if (e) e.stopPropagation();
+  // Non-admin users with a server-assigned tab_profile cannot switch.
+  // (Phase 2 enforcement — admin pins them to a profile.)
+  const isAdmin = !!(window._WHOAMI_V2?.is_admin);
+  const serverProfile = window._WHOAMI_V2?.user?.tab_profile;
+  if (!isAdmin && serverProfile) {
+    alert(`Your tab profile is set to "${serverProfile}" by your administrator and cannot be changed here. Contact admin to update.`);
+    document.getElementById('fhPdrop')?.classList.remove('open');
+    return;
+  }
   window._VIS_PROFILE = profile;
   if (profile !== 'custom') {
     delete window._VIS_CUSTOM;
@@ -1929,8 +1938,10 @@ document.addEventListener('click', () => {
   }
 
   // Then fetch admin defaults + whoami for force-hidden tabs and admin gating.
-  // Phase 1 (2026-05-07): also fetch /api/whoami for user-assigned tab_profile.
-  // Priority: localStorage user override > server-assigned tab_profile > admin default > 'trader'
+  // Phase 2 (2026-05-08): admin-assigned tab_profile is now AUTHORITATIVE for
+  // non-admin users — localStorage cannot override server-side assignment.
+  // This is what makes per-user tab restrictions actually enforce.
+  // Priority: server-assigned tab_profile (non-admin) > localStorage (admin) > default > 'trader'
   Promise.all([
     fetch('/api/admin/tab_defaults').then(r => r.ok ? r.json() : null).catch(() => null),
     fetch('/api/admin/whoami').then(r => r.ok ? r.json() : null).catch(() => null),
@@ -1939,10 +1950,23 @@ document.addEventListener('click', () => {
     window._ADMIN_DEFAULTS = defaults || { default_profile: 'trader', force_hidden_tabs: [], locked_essential_tabs: ['settings'] };
     window._WHOAMI = whoami_legacy || whoami_v2?.user || { is_admin: false, username: '?' };
     window._WHOAMI_V2 = whoami_v2 || null;
-    // Apply user's assigned tab_profile if no localStorage override
-    if (!profile && whoami_v2?.user?.tab_profile) {
-      window._VIS_PROFILE = whoami_v2.user.tab_profile;
-    } else if (!profile && defaults?.default_profile) {
+
+    const isAdmin = !!(whoami_v2?.is_admin);
+    const serverProfile = whoami_v2?.user?.tab_profile;
+
+    // Server-assigned profile wins for non-admin users — admin self-service
+    // can override via localStorage. This way admin can pin a beginner to
+    // 'beginner' and they cannot DevTools their way out.
+    if (serverProfile && !isAdmin) {
+      window._VIS_PROFILE = serverProfile;
+      // Strip stale localStorage so DevTools-curious users don't get confused
+      try { localStorage.removeItem('_swing_profile'); } catch (_) {}
+    } else if (profile) {
+      // Admin or no server assignment — honor user's last selection
+      window._VIS_PROFILE = profile;
+    } else if (serverProfile) {
+      window._VIS_PROFILE = serverProfile;
+    } else if (defaults?.default_profile) {
       window._VIS_PROFILE = defaults.default_profile;
     }
     _applyVisibility();
@@ -2156,7 +2180,73 @@ function renderSystemStatusBanner(data) {
   }
 }
 
+// Force password change before allowing dashboard access if the user's
+// must_change_password flag is set. (Phase 2 — 2026-05-08)
+async function _enforceMustChangePassword() {
+  try {
+    const r = await fetch('/api/whoami', {credentials: 'include'});
+    if (!r.ok) return;
+    const w = await r.json();
+    if (!w?.user?.must_change_password) return;
+    // Block UI with full-page password-change modal
+    document.body.innerHTML = `
+      <div style="position:fixed; inset:0; background:#08090d; display:flex; align-items:center; justify-content:center; z-index:99999;">
+        <div style="background:#0e1015; border:1px solid #1f2330; border-radius:10px; padding:32px; width:420px; font-family:'DM Sans','Aptos',system-ui,sans-serif; color:#e7e9ee;">
+          <h2 style="margin:0 0 8px; font-size:18px;">Set a new password</h2>
+          <p style="color:#a4a8b4; font-size:13px; margin:0 0 18px; line-height:1.5;">
+            Welcome <b>${w.user.display_name || w.user.username}</b>. You're using a temporary password.
+            Choose a new one (8+ characters) before continuing.
+          </p>
+          <form id="_pwForm" onsubmit="return _submitPwChange(event)" style="display:grid; gap:10px;">
+            <input type="password" id="_oldPw" placeholder="Current (temporary) password" required
+                   style="padding:10px 12px; background:#14171e; border:1px solid #2a2f3d; border-radius:6px; color:#e7e9ee; font-family:inherit; font-size:13px;">
+            <input type="password" id="_newPw" placeholder="New password (8+ chars)" required minlength="8"
+                   style="padding:10px 12px; background:#14171e; border:1px solid #2a2f3d; border-radius:6px; color:#e7e9ee; font-family:inherit; font-size:13px;">
+            <input type="password" id="_newPw2" placeholder="Confirm new password" required minlength="8"
+                   style="padding:10px 12px; background:#14171e; border:1px solid #2a2f3d; border-radius:6px; color:#e7e9ee; font-family:inherit; font-size:13px;">
+            <div id="_pwErr" style="color:#f87171; font-size:12px; min-height:16px;"></div>
+            <button type="submit" style="padding:10px 14px; background:#60a5fa; color:#08090d; border:none; border-radius:6px; font-weight:600; cursor:pointer; font-family:inherit;">Change password and continue</button>
+          </form>
+        </div>
+      </div>`;
+    // Halt the rest of init until the user submits
+    return new Promise(resolve => { window._pwResolve = resolve; });
+  } catch (e) {
+    console.warn('must_change_password check failed:', e);
+  }
+}
+
+async function _submitPwChange(e) {
+  e.preventDefault();
+  const oldPw = document.getElementById('_oldPw').value;
+  const newPw = document.getElementById('_newPw').value;
+  const newPw2 = document.getElementById('_newPw2').value;
+  const errEl = document.getElementById('_pwErr');
+  errEl.textContent = '';
+  if (newPw !== newPw2) { errEl.textContent = 'New passwords do not match.'; return false; }
+  try {
+    const r = await fetch('/api/users/me/change-password', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({old_password: oldPw, new_password: newPw}),
+    });
+    if (!r.ok) { errEl.textContent = (await r.text()) || 'Server rejected the change.'; return false; }
+    // Reload — basic-auth credentials in browser still hold the OLD password,
+    // so we must force the user to re-authenticate with their NEW password.
+    alert('Password changed. You will be asked to log in again with the new password.');
+    location.replace(location.origin + '/');
+  } catch (err) {
+    errEl.textContent = String(err);
+  }
+  return false;
+}
+
 async function init() {
+  // Block UI if user must change password (returns a never-resolving Promise
+  // which short-circuits the rest of init until the user submits + reloads).
+  await _enforceMustChangePassword();
+
   DATA = await (await fetch('./data.json')).json();
   // Overlay intraday options_flow.json (refreshed every 30 min during market
   // hours) onto data.json's options_flow_top30 if newer. Last-scan flow is

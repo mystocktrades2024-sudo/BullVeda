@@ -47,6 +47,31 @@ def _require_admin(credentials: HTTPBasicCredentials = Depends(_security)):
         return Response(status_code=403, content="Admin role required")
     return credentials
 
+
+def _require_action(action: str):
+    """Dependency factory: requires a specific action permission.
+
+    Usage:  Depends(_require_action("submit_trade"))
+
+    Admins always pass. Non-admins must have the action in their role's
+    permissions.actions list, OR have wildcard '*'. Returns 403 with the
+    action name in the body so the frontend can surface why a click failed.
+    (Phase 2 — 2026-05-08, role enforcement on write endpoints.)
+    """
+    def _dep(credentials: HTTPBasicCredentials = Depends(_security)):
+        from fastapi.responses import Response
+        user = _auth_mod.verify_user(credentials.username, credentials.password)
+        if not user:
+            return Response(status_code=401, headers={"WWW-Authenticate": "Basic"},
+                            content="Unauthorized")
+        if _auth_mod.is_admin(credentials.username):
+            return credentials
+        if _auth_mod.user_has_permission(credentials.username, "actions", action):
+            return credentials
+        return Response(status_code=403,
+                        content=f"Forbidden: action '{action}' not allowed for your role")
+    return _dep
+
 # -- Serve prototype (new-design dashboard) at /v2/ behind same auth --
 from fastapi.responses import FileResponse, Response
 _PROTOTYPE_DIR = BASE_DIR / "infra" / "prototype"
@@ -417,7 +442,7 @@ async def portfolio_get():
     return summary
 
 @app.post("/api/portfolio/add")
-async def portfolio_add(req: Request):
+async def portfolio_add(req: Request, _: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
     body = await req.json()
     import portfolio_tracker as pt
     required = ["ticker", "entry", "shares", "stop", "target1"]
@@ -456,7 +481,7 @@ async def portfolio_add(req: Request):
         raise HTTPException(500, str(e))
 
 @app.post("/api/portfolio/close")
-async def portfolio_close(req: Request):
+async def portfolio_close(req: Request, _: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
     body = await req.json()
     import portfolio_tracker as pt
     if "ticker" not in body or "exit_price" not in body:
@@ -474,7 +499,7 @@ async def portfolio_close(req: Request):
         raise HTTPException(500, str(e))
 
 @app.post("/api/portfolio/undo_close")
-async def portfolio_undo(req: Request):
+async def portfolio_undo(req: Request, _: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
     body = await req.json()
     import portfolio_tracker as pt
     try:
@@ -483,7 +508,7 @@ async def portfolio_undo(req: Request):
         raise HTTPException(400, str(e))
 
 @app.post("/api/portfolio/set_equity")
-async def portfolio_set_equity(req: Request):
+async def portfolio_set_equity(req: Request, _: HTTPBasicCredentials = Depends(_require_action("edit_sizing"))):
     body = await req.json()
     import portfolio_tracker as pt
     try:
@@ -492,7 +517,7 @@ async def portfolio_set_equity(req: Request):
         raise HTTPException(400, str(e))
 
 @app.post("/api/portfolio/move_stop_be")
-async def portfolio_move_stop_be(req: Request):
+async def portfolio_move_stop_be(req: Request, _: HTTPBasicCredentials = Depends(_require_action("move_stops"))):
     body = await req.json()
     import portfolio_tracker as pt
     try:
@@ -501,7 +526,7 @@ async def portfolio_move_stop_be(req: Request):
         raise HTTPException(400, str(e))
 
 @app.post("/api/portfolio/trail_stop")
-async def portfolio_trail_stop(req: Request):
+async def portfolio_trail_stop(req: Request, _: HTTPBasicCredentials = Depends(_require_action("move_stops"))):
     body = await req.json()
     import portfolio_tracker as pt
     try:
@@ -510,7 +535,7 @@ async def portfolio_trail_stop(req: Request):
         raise HTTPException(400, str(e))
 
 @app.post("/api/portfolio/partial_close")
-async def portfolio_partial_close(req: Request):
+async def portfolio_partial_close(req: Request, _: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
     body = await req.json()
     import portfolio_tracker as pt
     try:
@@ -523,7 +548,7 @@ async def portfolio_partial_close(req: Request):
         raise HTTPException(400, str(e))
 
 @app.post("/api/portfolio/adjust_stop")
-async def portfolio_adjust_stop(req: Request):
+async def portfolio_adjust_stop(req: Request, _: HTTPBasicCredentials = Depends(_require_action("move_stops"))):
     body = await req.json()
     import portfolio_tracker as pt
     try:
@@ -532,7 +557,7 @@ async def portfolio_adjust_stop(req: Request):
         raise HTTPException(400, str(e))
 
 @app.post("/api/portfolio/close_on_alpaca")
-async def portfolio_close_on_alpaca(req: Request):
+async def portfolio_close_on_alpaca(req: Request, _: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
     """Close an Alpaca paper position by submitting a market order to flatten.
 
     For LONG positions: market SELL the qty.
@@ -613,7 +638,7 @@ async def portfolio_close_on_alpaca(req: Request):
 
 
 @app.post("/api/portfolio/sync_alpaca")
-async def portfolio_sync_alpaca():
+async def portfolio_sync_alpaca(_: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
     """Pull live Alpaca paper positions and mirror them into local portfolio_state.
 
     Strategy:
@@ -752,7 +777,7 @@ async def portfolio_sync_alpaca():
 
 
 @app.post("/api/portfolio/update_notes")
-async def portfolio_update_notes(req: Request):
+async def portfolio_update_notes(req: Request, _: HTTPBasicCredentials = Depends(_require_action("edit_watchlist"))):
     body = await req.json()
     import portfolio_tracker as pt
     try:
@@ -762,7 +787,7 @@ async def portfolio_update_notes(req: Request):
 
 # -- Position tracker (actual trades) --
 @app.post("/api/positions/open")
-async def positions_open(req: Request):
+async def positions_open(req: Request, _: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
     body = await req.json()
     import position_tracker as pt
     required = ["ticker", "entry_price", "shares", "stop", "target1"]
@@ -784,7 +809,7 @@ async def positions_open(req: Request):
     return result
 
 @app.post("/api/positions/close")
-async def positions_close(req: Request):
+async def positions_close(req: Request, _: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
     body = await req.json()
     import position_tracker as pt
     if "ticker" not in body or "exit_price" not in body:
@@ -1938,7 +1963,7 @@ async def universe_add(req: Request):
 
 # -- Portfolio clear --
 @app.post("/api/portfolio/clear")
-async def portfolio_clear():
+async def portfolio_clear(_: HTTPBasicCredentials = Depends(_require_admin)):
     import portfolio_tracker as pt
     try:
         state = pt._load_state()
@@ -3156,6 +3181,28 @@ async def api_reset_password(username: str, payload: dict,
     try:
         ok = _auth_mod.change_password(username, payload.get("new_password", ""))
         return {"ok": ok}
+    except ValueError as e:
+        return Response(status_code=400, content=str(e))
+
+
+@app.post("/api/users/me/change-password")
+async def api_self_change_password(payload: dict,
+                                    credentials: HTTPBasicCredentials = Depends(_security)):
+    """Self-service password change. Verifies old password, updates to new,
+    clears must_change_password. (Phase 2 — 2026-05-08)"""
+    user = _auth_mod.verify_user(credentials.username, credentials.password)
+    if not user:
+        return Response(status_code=401, headers={"WWW-Authenticate": "Basic"},
+                        content="Unauthorized")
+    old_pw = payload.get("old_password", "")
+    new_pw = payload.get("new_password", "")
+    if not _auth_mod.verify_user(credentials.username, old_pw):
+        return Response(status_code=400, content="Old password is incorrect")
+    if len(new_pw) < 8:
+        return Response(status_code=400, content="New password must be at least 8 characters")
+    try:
+        _auth_mod.change_password(credentials.username, new_pw)
+        return {"ok": True}
     except ValueError as e:
         return Response(status_code=400, content=str(e))
 
