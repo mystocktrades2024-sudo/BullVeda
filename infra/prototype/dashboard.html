@@ -5598,9 +5598,31 @@ function renderOptionsFlow() {
 window.renderOptionsFlow = renderOptionsFlow;
 
 // ── Earnings Playbook tab ─────────────────────────────────────────────
-// Sortable table of upcoming earnings (next 10 days) with pre-earnings
-// runup, sector, and portfolio-risk flag. Surfaces names like INOD that
-// have a known catalyst within striking distance of the scan.
+// Sortable + filterable table of upcoming earnings (next 10 days) with
+// pre-earnings runup, sector, portfolio-risk flag. Surfaces names like
+// INOD that have a known catalyst within striking distance of the scan.
+
+// Filter state — persists in window object during the session
+window._earnFilters = window._earnFilters || {
+  days: 'all',         // '1', '3', '5', '10', 'all'
+  verdict: 'all',      // 'BUY', 'WATCH', 'has_signal', 'all'
+  ownership: 'all',    // 'owned', 'all'
+  sector: 'all',
+  search: '',
+  sort: 'days',        // 'days', 'score', 'ticker'
+};
+
+function _earnFilterChange(key, val) {
+  window._earnFilters[key] = val;
+  renderEarnings();
+}
+function _earnSearch(val) {
+  window._earnFilters.search = (val || '').trim().toUpperCase();
+  // Debounce
+  clearTimeout(window._earnSearchTimer);
+  window._earnSearchTimer = setTimeout(() => renderEarnings(), 200);
+}
+
 function renderEarnings() {
   const body = document.getElementById('earnBody');
   const meta = document.getElementById('earnMeta');
@@ -5608,6 +5630,7 @@ function renderEarnings() {
   const wl = (DATA && DATA.earnings_watchlist) || [];
   const meta_d = (DATA && DATA.earnings_watchlist_meta) || {};
   const outcomes = (DATA && DATA.earnings_outcomes_30d) || [];
+  const F = window._earnFilters;
   if (!wl.length) {
     body.innerHTML = `
       <div style="padding:32px 28px; text-align:center; color:var(--ink-2); border:1px dashed var(--rule); border-radius:8px;">
@@ -5643,24 +5666,48 @@ function renderEarnings() {
     else beatStats[t].inline++;
   });
 
-  // Bucket by days
-  const byDay = {};
-  wl.forEach(e => {
-    const d = e.days_to_earnings;
-    if (!byDay[d]) byDay[d] = [];
-    byDay[d].push(e);
-  });
   const inPortfolio = wl.filter(e => myPositions.has(e.ticker)).length;
   const totalUS = wl.length;
 
-  if (meta) meta.textContent = `${totalUS} reporting · ${meta_d.from_date} → ${meta_d.to_date}` +
-                                (inPortfolio > 0 ? ` · ⚠ ${inPortfolio} in your portfolio` : '');
+  // Build sector list for the dropdown — pulled from cross-referenced ticker data
+  const sectorSet = new Set();
+  wl.forEach(e => {
+    const sec = (tickerData[e.ticker] || {}).sector;
+    if (sec && sec !== 'Unknown') sectorSet.add(sec);
+  });
+  const sectors = [...sectorSet].sort();
+
+  // Apply filters
+  let filtered = wl.filter(e => {
+    if (F.days !== 'all' && e.days_to_earnings > parseInt(F.days, 10)) return false;
+    const td = tickerData[e.ticker] || {};
+    const v = (td.verdict || td.stage || '').toUpperCase();
+    if (F.verdict === 'BUY' && v !== 'BUY') return false;
+    if (F.verdict === 'WATCH' && v !== 'WATCH') return false;
+    if (F.verdict === 'has_signal' && !v) return false;
+    if (F.ownership === 'owned' && !myPositions.has(e.ticker)) return false;
+    if (F.sector !== 'all' && td.sector !== F.sector) return false;
+    if (F.search && !e.ticker.includes(F.search)) return false;
+    return true;
+  });
+
+  // Sort
+  if (F.sort === 'score') {
+    filtered.sort((a, b) => ((tickerData[b.ticker] || {}).score || 0) - ((tickerData[a.ticker] || {}).score || 0));
+  } else if (F.sort === 'ticker') {
+    filtered.sort((a, b) => a.ticker.localeCompare(b.ticker));
+  } else {
+    filtered.sort((a, b) => a.days_to_earnings - b.days_to_earnings || a.ticker.localeCompare(b.ticker));
+  }
+
+  if (meta) meta.textContent = `${filtered.length} of ${totalUS} reporting · ${meta_d.from_date} → ${meta_d.to_date}` +
+                                (inPortfolio > 0 ? ` · ⚠ ${inPortfolio} owned` : '');
   const sb = document.getElementById('sbEarnCt'); if (sb) sb.textContent = totalUS;
   const fs = document.getElementById('fsEarnCt'); if (fs) fs.textContent = totalUS;
 
   // Build the row HTML
   const fmtPx = v => v == null || isNaN(v) ? '—' : Number(v).toFixed(2);
-  const rows = wl.map(e => {
+  const rows = filtered.map(e => {
     const t = e.ticker;
     const td = tickerData[t] || {};
     const ownsTag = myPositions.has(t)
@@ -5699,7 +5746,51 @@ function renderEarnings() {
       </tr>`;
   }).join('');
 
+  // Filter bar
+  const sectorOptions = ['<option value="all">All sectors</option>']
+    .concat(sectors.map(s => `<option value="${s}" ${F.sector === s ? 'selected' : ''}>${s}</option>`))
+    .join('');
+  const filterBar = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:0 0 12px;font-size:11.5px;">
+      <input type="text" placeholder="Search ticker…" value="${F.search}" oninput="_earnSearch(this.value)"
+        style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:11.5px;width:130px;">
+      <select onchange="_earnFilterChange('days', this.value)"
+        style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:11.5px;">
+        <option value="all" ${F.days==='all'?'selected':''}>All days</option>
+        <option value="1" ${F.days==='1'?'selected':''}>≤ 1 day (urgent)</option>
+        <option value="3" ${F.days==='3'?'selected':''}>≤ 3 days</option>
+        <option value="5" ${F.days==='5'?'selected':''}>≤ 5 days</option>
+        <option value="10" ${F.days==='10'?'selected':''}>≤ 10 days</option>
+      </select>
+      <select onchange="_earnFilterChange('verdict', this.value)"
+        style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:11.5px;">
+        <option value="all" ${F.verdict==='all'?'selected':''}>Any verdict</option>
+        <option value="BUY" ${F.verdict==='BUY'?'selected':''}>BUY only</option>
+        <option value="WATCH" ${F.verdict==='WATCH'?'selected':''}>WATCH only</option>
+        <option value="has_signal" ${F.verdict==='has_signal'?'selected':''}>Any signal</option>
+      </select>
+      <select onchange="_earnFilterChange('ownership', this.value)"
+        style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:11.5px;">
+        <option value="all" ${F.ownership==='all'?'selected':''}>All</option>
+        <option value="owned" ${F.ownership==='owned'?'selected':''}>⚠ Owned only</option>
+      </select>
+      <select onchange="_earnFilterChange('sector', this.value)"
+        style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:11.5px;max-width:160px;">
+        ${sectorOptions}
+      </select>
+      <select onchange="_earnFilterChange('sort', this.value)"
+        style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:11.5px;">
+        <option value="days" ${F.sort==='days'?'selected':''}>Sort: Days asc</option>
+        <option value="score" ${F.sort==='score'?'selected':''}>Sort: Score desc</option>
+        <option value="ticker" ${F.sort==='ticker'?'selected':''}>Sort: Ticker A-Z</option>
+      </select>
+      <span style="margin-left:auto;color:var(--ink-3);font-size:11px;">
+        showing <b style="color:var(--ink-1)">${filtered.length}</b> / ${totalUS}
+      </span>
+    </div>`;
+
   body.innerHTML = `
+    ${filterBar}
     <div style="padding:0 0 14px;color:var(--ink-2);font-size:11.5px;line-height:1.55;">
       <b style="color:var(--fail)">Red days = ≤1d</b> (highest risk) · <b style="color:var(--warn)">Yellow = ≤3d</b> · <b style="color:var(--accent)">Amber = ≤5d</b>.
       <b>BEAT/MISS/INLINE</b> column = last 30 days of prior reports for that ticker (pattern hint, not promise).
