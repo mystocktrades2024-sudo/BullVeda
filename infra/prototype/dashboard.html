@@ -1286,7 +1286,9 @@
     <span class="title">Portfolio</span>
     <span class="desc">Open positions · closed trades · equity · monthly P&amp;L</span>
     <span class="meta" id="portfolioMeta">—</span>
-    <button id="syncAlpacaBtn" onclick="syncAlpacaPositions(true)" style="margin-left:auto; background:linear-gradient(135deg, color-mix(in oklch, var(--green) 30%, var(--bg-2)), var(--bg-2)); border:1px solid var(--green); color:var(--green); padding:6px 14px; border-radius:5px; font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.08em; cursor:pointer; text-transform:uppercase;">↻ Sync Alpaca</button>
+    <button id="addPosBtn" onclick="openAddPositionModal()" style="margin-left:auto; background:linear-gradient(135deg, color-mix(in oklch, var(--accent) 30%, var(--bg-2)), var(--bg-2)); border:1px solid var(--accent); color:var(--accent); padding:6px 14px; border-radius:5px; font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.08em; cursor:pointer; text-transform:uppercase;">+ Add Position</button>
+    <button id="bulkImportBtn" onclick="openBulkImportModal()" style="margin-left:8px; background:linear-gradient(135deg, color-mix(in oklch, var(--info) 30%, var(--bg-2)), var(--bg-2)); border:1px solid var(--info); color:var(--info); padding:6px 14px; border-radius:5px; font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.08em; cursor:pointer; text-transform:uppercase;">⇡ CSV Import</button>
+    <button id="syncAlpacaBtn" onclick="syncAlpacaPositions(true)" style="margin-left:8px; background:linear-gradient(135deg, color-mix(in oklch, var(--green) 30%, var(--bg-2)), var(--bg-2)); border:1px solid var(--green); color:var(--green); padding:6px 14px; border-radius:5px; font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.08em; cursor:pointer; text-transform:uppercase;">↻ Sync Alpaca</button>
     <span id="syncAlpacaStatus" style="font-family:var(--mono); font-size:10.5px; color:var(--ink-3); margin-left:8px;"></span>
   </div>
   <div class="panel-body">
@@ -6290,6 +6292,223 @@ function renderStatus() {
 // =============================================================================
 // PORTFOLIO TAB
 // =============================================================================
+// ── Add Position UI (Phase 2 — 2026-05-08) ────────────────────────────
+// Two surfaces:
+//   openAddPositionModal()  → single-position form, POSTs /api/portfolio/add
+//   openBulkImportModal()   → paste CSV (or upload .csv), POSTs each row
+// Auth carries via the existing browser Basic Auth header — server gates
+// these via _require_action("submit_trade").
+function _closeModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+function openAddPositionModal() {
+  _closeModal('_addPosModal');
+  const m = document.createElement('div');
+  m.id = '_addPosModal';
+  m.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;font-family:DM Sans,Aptos,system-ui,sans-serif;color:var(--ink-0);';
+  m.innerHTML = `
+    <div style="background:var(--bg-1);border:1px solid var(--rule);border-radius:10px;padding:24px;width:480px;max-width:92vw;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <h2 style="margin:0;font-size:16px;letter-spacing:0.04em;">+ Add Paper Position</h2>
+        <button onclick="_closeModal('_addPosModal')" style="background:transparent;border:none;color:var(--ink-3);font-size:18px;cursor:pointer;">×</button>
+      </div>
+      <p style="color:var(--ink-2);font-size:12px;margin:0 0 14px;line-height:1.5;">
+        Track an existing or new holding. Live P&amp;L updates every 5s; intraday alerts fire on stop/T1 within 60s.
+      </p>
+      <form id="_addPosForm" onsubmit="return _submitAddPosition(event)" style="display:grid;gap:10px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <label style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">TICKER *</span>
+            <input id="_apTicker" required maxlength="6" placeholder="AAPL"
+              style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;text-transform:uppercase;">
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">SHARES *</span>
+            <input id="_apShares" type="number" min="1" required placeholder="100"
+              style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">ENTRY $ *</span>
+            <input id="_apEntry" type="number" step="0.01" min="0.01" required placeholder="180.00"
+              style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">STOP $ *</span>
+            <input id="_apStop" type="number" step="0.01" min="0.01" required placeholder="168.50"
+              style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">T1 $ *</span>
+            <input id="_apT1" type="number" step="0.01" min="0.01" required placeholder="200.00"
+              style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">T2 $ (optional)</span>
+            <input id="_apT2" type="number" step="0.01" min="0.01" placeholder="215.00"
+              style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">DIRECTION</span>
+            <select id="_apDir" style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
+              <option value="long">Long</option>
+              <option value="short">Short</option>
+            </select>
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">ENTRY DATE</span>
+            <input id="_apDate" type="date"
+              style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
+          </label>
+        </div>
+        <label style="display:flex;flex-direction:column;gap:4px;">
+          <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.06em;">SETUP / NOTES</span>
+          <input id="_apNotes" placeholder="e.g. Trend Continuation — held since IPO"
+            style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:13px;">
+        </label>
+        <div id="_apMsg" style="font-size:12px;min-height:18px;color:var(--fail);"></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button type="button" onclick="_closeModal('_addPosModal')" style="padding:9px 16px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-1);font-family:DM Sans;cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:9px 18px;background:var(--accent);border:none;border-radius:5px;color:var(--bg-0);font-weight:700;cursor:pointer;font-family:DM Sans;">Add Position</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(m);
+  setTimeout(() => document.getElementById('_apTicker')?.focus(), 50);
+}
+
+async function _submitAddPosition(e) {
+  e.preventDefault();
+  const msg = document.getElementById('_apMsg');
+  msg.textContent = '';
+  const body = {
+    ticker:        document.getElementById('_apTicker').value.trim().toUpperCase(),
+    entry_price:   parseFloat(document.getElementById('_apEntry').value),
+    shares:        parseInt(document.getElementById('_apShares').value, 10),
+    stop:          parseFloat(document.getElementById('_apStop').value),
+    target1:       parseFloat(document.getElementById('_apT1').value),
+    target2:       document.getElementById('_apT2').value ? parseFloat(document.getElementById('_apT2').value) : null,
+    direction:     document.getElementById('_apDir').value,
+    entry_date:    document.getElementById('_apDate').value || null,
+    notes:         document.getElementById('_apNotes').value || '',
+    setup:         '',
+  };
+  // Sanity check: stop must be on the right side of entry
+  if (body.direction === 'long' && body.stop >= body.entry_price) {
+    msg.textContent = 'For LONG: stop must be BELOW entry.'; return false;
+  }
+  if (body.direction === 'short' && body.stop <= body.entry_price) {
+    msg.textContent = 'For SHORT: stop must be ABOVE entry.'; return false;
+  }
+  try {
+    const r = await fetch('/api/portfolio/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'include',
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      msg.textContent = (await r.text()) || `HTTP ${r.status}`;
+      return false;
+    }
+    _closeModal('_addPosModal');
+    if (typeof renderPortfolio === 'function') renderPortfolio();
+    return false;
+  } catch (err) {
+    msg.textContent = String(err);
+    return false;
+  }
+}
+
+function openBulkImportModal() {
+  _closeModal('_bulkImportModal');
+  const m = document.createElement('div');
+  m.id = '_bulkImportModal';
+  m.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;font-family:DM Sans,Aptos,system-ui,sans-serif;color:var(--ink-0);';
+  m.innerHTML = `
+    <div style="background:var(--bg-1);border:1px solid var(--rule);border-radius:10px;padding:24px;width:640px;max-width:92vw;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <h2 style="margin:0;font-size:16px;letter-spacing:0.04em;">⇡ Bulk Import Positions (CSV)</h2>
+        <button onclick="_closeModal('_bulkImportModal')" style="background:transparent;border:none;color:var(--ink-3);font-size:18px;cursor:pointer;">×</button>
+      </div>
+      <p style="color:var(--ink-2);font-size:12px;margin:0 0 8px;line-height:1.5;">
+        Paste CSV below, one row per holding. <b>Required columns:</b> ticker, entry, shares, stop, target1.
+        <b>Optional:</b> target2, direction, entry_date, notes.
+      </p>
+      <p style="color:var(--ink-3);font-size:11px;margin:0 0 12px;font-family:var(--mono);">
+        Example header: <code>ticker,entry,shares,stop,target1,target2,direction,entry_date,notes</code>
+      </p>
+      <textarea id="_biCsv" rows="9" placeholder="ticker,entry,shares,stop,target1
+AAPL,180.00,100,168.50,200.00
+NVDA,500.00,50,470.00,560.00"
+        style="width:100%;box-sizing:border-box;padding:10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:JetBrains Mono,monospace;font-size:12px;"></textarea>
+      <div id="_biMsg" style="font-size:12px;min-height:18px;color:var(--ink-2);margin-top:8px;"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;">
+        <button type="button" onclick="_closeModal('_bulkImportModal')" style="padding:9px 16px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-1);font-family:DM Sans;cursor:pointer;">Cancel</button>
+        <button type="button" onclick="_submitBulkImport()" style="padding:9px 18px;background:var(--info);border:none;border-radius:5px;color:var(--bg-0);font-weight:700;cursor:pointer;font-family:DM Sans;">Import All</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  setTimeout(() => document.getElementById('_biCsv')?.focus(), 50);
+}
+
+async function _submitBulkImport() {
+  const txt = document.getElementById('_biCsv').value.trim();
+  const msg = document.getElementById('_biMsg');
+  if (!txt) { msg.textContent = 'Paste CSV first.'; msg.style.color = 'var(--fail)'; return; }
+
+  // Parse CSV — header row required
+  const lines = txt.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) { msg.textContent = 'Need a header row + at least one data row.'; msg.style.color = 'var(--fail)'; return; }
+  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+  const required = ['ticker','entry','shares','stop','target1'];
+  const missing = required.filter(r => !headers.includes(r));
+  if (missing.length) { msg.textContent = 'Missing required columns: ' + missing.join(', '); msg.style.color = 'var(--fail)'; return; }
+
+  msg.style.color = 'var(--ink-2)';
+  msg.textContent = `Parsed ${lines.length - 1} rows. Importing...`;
+
+  let added = 0, skipped = 0, failed = 0;
+  const errors = [];
+  for (let i = 1; i < lines.length; i++) {
+    const row = lines[i].split(',').map(c => c.trim());
+    const obj = {}; headers.forEach((h, idx) => obj[h] = row[idx] || '');
+    const body = {
+      ticker:      obj.ticker.toUpperCase(),
+      entry_price: parseFloat(obj.entry),
+      shares:      parseInt(obj.shares, 10),
+      stop:        parseFloat(obj.stop),
+      target1:     parseFloat(obj.target1),
+      target2:     obj.target2 ? parseFloat(obj.target2) : null,
+      direction:   (obj.direction || 'long').toLowerCase(),
+      entry_date:  obj.entry_date || null,
+      notes:       obj.notes || '',
+      setup:       obj.setup || '',
+    };
+    try {
+      const r = await fetch('/api/portfolio/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      if (r.ok) { added++; }
+      else {
+        const err = await r.text();
+        if (err.includes('already has')) skipped++;
+        else { failed++; errors.push(`${body.ticker}: ${err}`); }
+      }
+    } catch (e) {
+      failed++; errors.push(`${body.ticker}: ${e}`);
+    }
+  }
+  msg.style.color = failed > 0 ? 'var(--warn)' : 'var(--pass)';
+  msg.textContent = `✓ ${added} added · ⊘ ${skipped} already open · ✗ ${failed} failed`;
+  if (errors.length) msg.textContent += '  →  ' + errors.slice(0, 3).join(' | ');
+  if (added > 0 && typeof renderPortfolio === 'function') renderPortfolio();
+}
+
 function renderPortfolio() {
   const p   = DATA.portfolio || {};
   const pos = p.positions || [];
