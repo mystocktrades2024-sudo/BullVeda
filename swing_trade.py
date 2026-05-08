@@ -89,7 +89,9 @@ def get_schwab_options(ticker: str, expiry: Optional[str] = None) -> dict:
                     })
     return out
 from analysis import analyze_ticker, raw_value_score, raw_growth_score, raw_momentum_score
-from html_generator import build_dashboard
+# Phase B (2026-05-08): html_generator.build_dashboard import removed. The
+# legacy single-page HTML dashboard generator is no longer called from any
+# live code path. Source preserved in _legacy/html_generator.py if needed.
 from tracker import (record_run, evaluate_pending, compute_stats, get_full_history,
                      mark_to_market, compute_stats_by_setup)
 from portfolio_tracker import refresh_prices, get_portfolio_summary
@@ -4202,17 +4204,16 @@ if __name__ == "__main__":
             except Exception as _pe:
                 print(f"FAIL: {_pe}")
     elif args[0].lower() == "sample":
-        # Generate a sample dashboard with mock data — no scan, no API calls
+        # Phase B (2026-05-08): legacy sample-dashboard generation retired.
+        # Sample bundle is still saved so V2 dev can regen V2 from mock data.
         _sample_bundle = _build_sample_bundle()
-        _out = BASE_DIR / "cache" / "dashboard.html"
-        from html_generator import build_dashboard
-        _path = build_dashboard(_sample_bundle, _out)
-        # Also save as sample_bundle.json for future dev regen
         _sbp = BASE_DIR / "cache" / "sample_bundle.json"
         _sbp.parent.mkdir(parents=True, exist_ok=True)
         with open(_sbp, "w") as _sf:
             json.dump(_sample_bundle, _sf, default=str)
-        print(f"Sample dashboard generated: {_path}")
+        print(f"Sample bundle saved: {_sbp}")
+        print(f"To preview in V2 dev mode, copy to cache/last_bundle.json then run:")
+        print(f"  python3 swing_trade.py regen")
     else:
         print("Usage:")
         print("  python3 swing_trade.py                              # Daily scan (uses Zacks cache if <20h old)")

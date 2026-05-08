@@ -122,26 +122,10 @@ async def root(auth: HTTPBasicCredentials = Depends(_check_auth)):
 
 _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
 
-@app.get("/dashboard.css")
-async def dashboard_css():
-    p = BASE_DIR / "cache" / "dashboard.css"
-    if p.exists():
-        return HTMLResponse(p.read_text(), media_type="text/css", headers=_NO_CACHE)
-    raise HTTPException(404)
-
-@app.get("/dashboard.js")
-async def dashboard_js():
-    p = BASE_DIR / "cache" / "dashboard.js"
-    if p.exists():
-        return HTMLResponse(p.read_text(), media_type="application/javascript", headers=_NO_CACHE)
-    raise HTTPException(404)
-
-@app.get("/dashboard-data.js")
-async def dashboard_data_js():
-    p = BASE_DIR / "cache" / "dashboard-data.js"
-    if p.exists():
-        return HTMLResponse(p.read_text(), media_type="application/javascript", headers=_NO_CACHE)
-    raise HTTPException(404)
+# Phase B (2026-05-08): /dashboard.css, /dashboard.js, /dashboard-data.js
+# routes removed. They served legacy assets that haven't been generated
+# since Phase A retired html_generator. Anyone hitting these gets a clean
+# 404 from FastAPI's default handler.
 
 # -- Portfolio --
 @app.get("/api/ohlcv/{ticker}")
