@@ -2220,7 +2220,7 @@ def main():
     # Live Options Flow — top 30 UOA imbalance candidates from
     # options_flow_scanner. Surfaced as a separate dashboard panel for
     # institutional-flow-following entry triggers.
-    data["options_flow_top30"] = bundle.get("options_flow_top30") or []
+    data["options_flow_top30"] = b.get("options_flow_top30") or []
 
     data = _clean(data)
     DATA.write_text(json.dumps(data, default=str, indent=0, allow_nan=False))
