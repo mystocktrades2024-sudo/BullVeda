@@ -21,12 +21,48 @@ _security = HTTPBasic()
 import auth as _auth_mod
 _auth_mod.ensure_seed()  # creates data/users.json from defaults if missing
 
+
+# ── Session-idle tracking (Phase 2 — 2026-05-08) ──────────────────────────
+# Browser caches Basic Auth indefinitely. Without active expiry, an
+# unlocked laptop = open dashboard. We track per-user last-activity
+# in-process; when last activity > _SESSION_IDLE_TIMEOUT, we return 401
+# (forcing browser to re-prompt for credentials). Frontend has an idle
+# timer that warns + reloads to trigger the re-auth.
+import time as _time
+import threading as _threading
+_SESSION_IDLE_TIMEOUT = 30 * 60  # 30 minutes
+_session_last_activity: dict[str, float] = {}
+_session_lock = _threading.Lock()
+
+def _session_check_and_bump(username: str) -> bool:
+    """Returns True if session is fresh (or new). False if expired."""
+    now = _time.time()
+    with _session_lock:
+        last = _session_last_activity.get(username)
+        if last is not None and (now - last) > _SESSION_IDLE_TIMEOUT:
+            # Expired — caller should reject. Reset so next valid auth bumps fresh.
+            _session_last_activity.pop(username, None)
+            return False
+        _session_last_activity[username] = now
+        return True
+
+
 def _check_auth(credentials: HTTPBasicCredentials = Depends(_security)):
     user = _auth_mod.verify_user(credentials.username, credentials.password)
     if not user:
         from fastapi.responses import Response
         return Response(status_code=401, headers={"WWW-Authenticate": "Basic"},
                         content="Unauthorized")
+    # Idle timeout check (skip the bump if the session is already expired —
+    # we don't auto-renew without an active request, but each successful
+    # request DOES bump the timer).
+    if not _session_check_and_bump(credentials.username):
+        from fastapi.responses import Response
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": "Basic", "X-Session-Expired": "idle-timeout"},
+            content="Session expired (30 min idle). Re-authenticate.",
+        )
     # Update last_login timestamp (best-effort, non-blocking on failure)
     try:
         _auth_mod.set_last_login(credentials.username)
@@ -42,6 +78,13 @@ def _require_admin(credentials: HTTPBasicCredentials = Depends(_security)):
         from fastapi.responses import Response
         return Response(status_code=401, headers={"WWW-Authenticate": "Basic"},
                         content="Unauthorized")
+    if not _session_check_and_bump(credentials.username):
+        from fastapi.responses import Response
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": "Basic", "X-Session-Expired": "idle-timeout"},
+            content="Session expired (30 min idle). Re-authenticate.",
+        )
     if not _auth_mod.is_admin(credentials.username):
         from fastapi.responses import Response
         return Response(status_code=403, content="Admin role required")
@@ -56,20 +99,52 @@ def _require_action(action: str):
     Admins always pass. Non-admins must have the action in their role's
     permissions.actions list, OR have wildcard '*'. Returns 403 with the
     action name in the body so the frontend can surface why a click failed.
-    (Phase 2 — 2026-05-08, role enforcement on write endpoints.)
+
+    Side effect: every call (allow OR deny) is recorded in the audit log
+    via audit_log.log_action(). Forensic trail for write actions across
+    all users. (Phase 2 — 2026-05-08, role enforcement; 2026-05-08 audit
+    log added.)
     """
-    def _dep(credentials: HTTPBasicCredentials = Depends(_security)):
+    def _dep(request: Request, credentials: HTTPBasicCredentials = Depends(_security)):
         from fastapi.responses import Response
+        import audit_log as _alog
         user = _auth_mod.verify_user(credentials.username, credentials.password)
+        ip = request.client.host if request.client else ""
+        ua = request.headers.get("user-agent", "")
+        endpoint = request.url.path
+        method = request.method
         if not user:
+            _alog.log_action(user=credentials.username or "?", action=action,
+                              endpoint=endpoint, method=method,
+                              ip=ip, user_agent=ua, status="denied",
+                              error="Unauthorized")
             return Response(status_code=401, headers={"WWW-Authenticate": "Basic"},
                             content="Unauthorized")
-        if _auth_mod.is_admin(credentials.username):
-            return credentials
-        if _auth_mod.user_has_permission(credentials.username, "actions", action):
-            return credentials
-        return Response(status_code=403,
-                        content=f"Forbidden: action '{action}' not allowed for your role")
+        if not _session_check_and_bump(credentials.username):
+            _alog.log_action(user=credentials.username, action=action,
+                              endpoint=endpoint, method=method,
+                              ip=ip, user_agent=ua, status="denied",
+                              error="Session expired (30 min idle)")
+            return Response(
+                status_code=401,
+                headers={"WWW-Authenticate": "Basic", "X-Session-Expired": "idle-timeout"},
+                content="Session expired (30 min idle). Re-authenticate.",
+            )
+        is_adm = _auth_mod.is_admin(credentials.username)
+        has_perm = is_adm or _auth_mod.user_has_permission(credentials.username, "actions", action)
+        if not has_perm:
+            _alog.log_action(user=credentials.username, action=action,
+                              endpoint=endpoint, method=method,
+                              ip=ip, user_agent=ua, status="denied",
+                              error=f"action '{action}' not allowed for role")
+            return Response(status_code=403,
+                            content=f"Forbidden: action '{action}' not allowed for your role")
+        # Audit successful authorization. Note: we log BEFORE the handler runs
+        # so even if the handler crashes, we still know the action was attempted.
+        _alog.log_action(user=credentials.username, action=action,
+                          endpoint=endpoint, method=method,
+                          ip=ip, user_agent=ua, status="ok")
+        return credentials
     return _dep
 
 # -- Serve prototype (new-design dashboard) at /v2/ behind same auth --
@@ -3205,6 +3280,25 @@ async def api_self_change_password(payload: dict,
         return {"ok": True}
     except ValueError as e:
         return Response(status_code=400, content=str(e))
+
+
+@app.get("/api/audit_log")
+async def api_audit_log(limit: int = 100, user: Optional[str] = None,
+                         action: Optional[str] = None, since_iso: Optional[str] = None,
+                         credentials: HTTPBasicCredentials = Depends(_require_admin)):
+    """Admin-only: tail the write-action audit log (newest first).
+
+    Query params:
+      limit       max entries to return (default 100)
+      user        filter to one username
+      action      filter to one action key (submit_trade, move_stops, ...)
+      since_iso   only entries after this ISO timestamp
+    """
+    if isinstance(credentials, Response):
+        return credentials
+    import audit_log as _alog
+    return {"entries": _alog.list_recent(limit=limit, user=user, action=action,
+                                            since_iso=since_iso)}
 
 
 @app.get("/api/roles")

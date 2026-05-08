@@ -2233,6 +2233,50 @@ async function _submitPwChange(e) {
   return false;
 }
 
+// Idle timeout (Phase 2 — 2026-05-08). Server expires sessions at 30 min
+// idle and returns 401 + X-Session-Expired header. Frontend warns the user
+// 60s before expiry and shows a force-reload button. Activity (mouse/key/
+// scroll) bumps the timer locally; any API call to the server bumps the
+// server-side timer too. So the browser timer is just for UX heads-up.
+const _IDLE_LIMIT_MS = 30 * 60 * 1000;
+const _IDLE_WARN_MS  = 29 * 60 * 1000;  // warn 60s before expiry
+let _lastActivity = Date.now();
+let _idleWarnShown = false;
+['mousemove','keydown','click','scroll','touchstart'].forEach(ev => {
+  window.addEventListener(ev, () => { _lastActivity = Date.now(); _hideIdleWarning(); }, { passive: true });
+});
+function _hideIdleWarning() {
+  const el = document.getElementById('_idleWarn'); if (el) el.remove();
+  _idleWarnShown = false;
+}
+function _showIdleWarning() {
+  if (_idleWarnShown) return;
+  _idleWarnShown = true;
+  const div = document.createElement('div');
+  div.id = '_idleWarn';
+  div.style.cssText = 'position:fixed;top:24px;right:24px;z-index:99999;background:linear-gradient(135deg,#2a1810,#1a0f08);border:1px solid #f59e0b;border-radius:10px;padding:14px 18px;color:#fbbf24;font-family:DM Sans,system-ui,sans-serif;font-size:13px;line-height:1.5;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,0.5)';
+  div.innerHTML = `
+    <div style="font-weight:700;margin-bottom:4px">⏱ Session expiring</div>
+    <div style="color:#a4a8b4;font-size:12px;margin-bottom:8px">You'll be signed out in <span id="_idleCount">60</span>s due to inactivity. Move the mouse to stay signed in.</div>
+    <button onclick="_hideIdleWarning()" style="background:#f59e0b;color:#08090d;border:none;border-radius:5px;padding:6px 12px;font-weight:600;cursor:pointer;font-family:inherit;font-size:12px">Stay</button>`;
+  document.body.appendChild(div);
+  let s = 60;
+  const tick = setInterval(() => {
+    s--;
+    const c = document.getElementById('_idleCount');
+    if (c) c.textContent = s;
+    if (s <= 0 || !document.getElementById('_idleWarn')) clearInterval(tick);
+  }, 1000);
+}
+setInterval(() => {
+  const idle = Date.now() - _lastActivity;
+  if (idle >= _IDLE_LIMIT_MS) {
+    location.reload();  // forces re-auth via 401 from server
+  } else if (idle >= _IDLE_WARN_MS) {
+    _showIdleWarning();
+  }
+}, 5000);
+
 async function init() {
   // Block UI if user must change password (returns a never-resolving Promise
   // which short-circuits the rest of init until the user submits + reloads).
