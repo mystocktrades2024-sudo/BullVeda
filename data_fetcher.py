@@ -3742,23 +3742,21 @@ def get_sector_etf_data(lookback_days: int = 63) -> dict:
 @_mem_cached(ttl_seconds=1800)
 def get_options_iv_data(ticker: str) -> dict:
     """
-    Options IV / chain summary.
+    Options IV / chain summary via Schwab Trader API.
 
-    2026-05-07 — Schwab options re-decommissioned. Refresh tokens expire after
-    7 days and were causing every scan to spam HTTP-400 stack traces. EODHD
-    options endpoint (/api/options + /api/mp/unicornbay/options) is NOT
-    included in the user's All-In-One plan (returns 404/403). With no working
-    provider, this function is a clean stub that returns nulls + a clear
-    'unavailable' source. V2 dashboard renders these as '—' instead of error
-    blobs.
-
-    To re-enable: either (a) re-auth Schwab via `python3 schwab_auth.py oauth`
-    AND set OPTIONS_PROVIDER=schwab, or (b) subscribe to EODHD Unicorn Bay
-    options add-on and wire eodhd_client.options_chain.
+    Schwab is the authorized options data provider. Refresh tokens roll every
+    7 days; on expiry, callers see HTTP 400 'unsupported_token_type' and
+    options panels show NO_DATA — recovery is `python3 schwab_auth.py oauth`
+    in a browser-capable session. EODHD options endpoint is not included in
+    the user's All-In-One plan, so Schwab is the only working source.
 
     Returns: {iv_rank, iv_pct, current_iv, put_call_ratio, total_call_oi,
               total_put_oi, total_call_vol, total_put_vol, max_pain,
               uoa_calls, uoa_puts, source, error}
+
+    Skips the call when Schwab credentials are not configured (returns clean
+    nulls). No provider gate needed — analysis.py:_options_intelligence and
+    other paths already detect Schwab via SCHWAB_APP_KEY presence the same way.
     """
     out = {"iv_rank": None, "iv_pct": None, "current_iv": None,
            "put_call_ratio": None, "total_call_oi": 0, "total_put_oi": 0,
@@ -3766,8 +3764,25 @@ def get_options_iv_data(ticker: str) -> dict:
            "uoa_calls": 0, "uoa_puts": 0,
            "source": "unavailable", "error": None}
 
-    # Allow opt-in re-enable via env var. Default OFF so we don't spam errors.
-    if os.environ.get("OPTIONS_PROVIDER", "").lower() != "schwab":
+    # Lazy-load .env so this works whether or not the parent process exported
+    # SCHWAB_APP_KEY into os.environ — same pattern as analysis.py uses for
+    # options_intelligence. Without this, schwab_auth refresh fails silently
+    # and options data never populates per-ticker.
+    if not os.environ.get("SCHWAB_APP_KEY"):
+        try:
+            from pathlib import Path as _Path
+            _env_path = _Path(__file__).resolve().parent / ".env"
+            if _env_path.exists():
+                for _line in _env_path.read_text().splitlines():
+                    _line = _line.strip()
+                    if _line and not _line.startswith("#") and "=" in _line:
+                        _k, _v = _line.split("=", 1)
+                        os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+        except Exception:
+            pass
+
+    # Bail cleanly if Schwab credentials still missing.
+    if not (os.environ.get("SCHWAB_APP_KEY") and os.environ.get("SCHWAB_REFRESH_TOKEN")):
         return out
 
     cache_key = f"opts_iv_{ticker}_{int(time.time()//7200)}"

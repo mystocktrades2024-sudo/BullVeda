@@ -57,11 +57,8 @@ def get_schwab_options(ticker: str, expiry: Optional[str] = None) -> dict:
     """Fetch a Schwab option chain for one expiry. Returns {calls:[...], puts:[...]} or {}.
     Schwab's response uses callExpDateMap[date]: {strike: [contract,...]} — we flatten.
 
-    2026-05-07: gated behind OPTIONS_PROVIDER=schwab — Schwab decommissioned per
-    EODHD migration. Skips silently when env var unset."""
-    import os as _os
-    if _os.environ.get("OPTIONS_PROVIDER", "").lower() != "schwab":
-        return {}
+    Schwab is the authorized options provider. Returns {} if credentials missing
+    or refresh fails (caller handles missing data gracefully)."""
     try:
         import schwab_client as _sc
     except Exception:
