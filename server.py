@@ -111,16 +111,14 @@ async def _v2_file(path: str, request: Request, auth: HTTPBasicCredentials = Dep
         }
     return FileResponse(full, media_type=_MIME.get(suffix, "application/octet-stream"), headers=headers)
 
-# -- Serve dashboard.html at / --
-@app.get("/", response_class=HTMLResponse)
+# -- Redirect / to V2 dashboard (Phase A: legacy cache/dashboard.html retired
+#    2026-05-08; V2 at /v2/dashboard.html is the only authoritative surface).
+#    Existing bookmarks to / keep working — they just bounce to V2. --
+from fastapi.responses import RedirectResponse
+
+@app.get("/")
 async def root(auth: HTTPBasicCredentials = Depends(_check_auth)):
-    p = BASE_DIR / "cache" / "dashboard.html"
-    content = p.read_text() if p.exists() else "<h1>Run swing_trade.py first</h1>"
-    return HTMLResponse(content, headers={
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-        "Expires": "0",
-    })
+    return RedirectResponse(url="/v2/dashboard.html", status_code=302)
 
 _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
 

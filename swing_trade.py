@@ -3007,8 +3007,15 @@ def run_daily_scan(force_fresh: bool = False):
     # key is always present in persisted bundles.
     bundle.setdefault("suppression", {})
 
+    # Phase A (2026-05-08): legacy cache/dashboard.html generation retired —
+    # V2 (infra/prototype/) is the only authoritative dashboard. Saves ~30-60s
+    # of scan time and removes the dual-truth-source confusion. The
+    # html_generator.build_dashboard() call previously lived here.
+    # html_path kept defined so downstream references (logging, email,
+    # function return) don't NameError. send_dashboard_email already handles
+    # 'file does not exist' gracefully (warns + returns).
     output_path = BASE_DIR / cfg.get("output", {}).get("html_output", "cache/dashboard.html")
-    html_path = build_dashboard(bundle, output_path)
+    html_path = output_path
 
     # P2.21/2.22/2.23 — Populate system_status BEFORE bundle write (so v2 reads it)
     bundle.setdefault("system_status", {})
@@ -3384,7 +3391,7 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _pe:
         log.warning(f"v2 build_data.py error; v2 dashboard is now stale: {_pe}")
 
-    log.info(f"=== Done! Dashboard: {html_path} ===")
+    log.info(f"=== Done! Dashboard: http://localhost:7432/v2/dashboard.html ===")
     log.info(f"  BUY: {len(buy_candidates)} | WATCH: {len(watch_list)} | SHORT: {len(sell_candidates)} | Near-Short Blocked: {len(near_short_blocked)} | Killed: {len(killed)}")
 
     # P2.21/22/23 — log warnings for any active system_status flags
@@ -3567,7 +3574,7 @@ def run_daily_scan(force_fresh: bool = False):
             print(f"    {ind['industry'][:35]:35s}  Avg:{ind['avg_score']:.0f}  "
                   f"({ind['count']} stocks)")
 
-    print(f"\n  Dashboard: {html_path}")
+    print(f"\n  Dashboard: http://localhost:7432/v2/dashboard.html")
     print("=" * 60)
 
     # Send alerts (Slack + macOS notification)
@@ -4169,41 +4176,31 @@ if __name__ == "__main__":
         if result:
             print(f"Closed: {result['ticker']} @ ${result['exit_price']} | P&L {result['pnl_pct']:+.1f}%")
     elif args[0].lower() in ("regen", "dev"):
-        # Re-render dashboard from cached bundle — no scan, no API calls
-        bundle_path   = BASE_DIR / "cache" / "last_bundle.json"
-        sample_path   = BASE_DIR / "cache" / "sample_bundle.json"
-        from html_generator import build_dashboard
-        if bundle_path.exists():
-            with open(bundle_path) as _bf:
-                _bundle = json.load(_bf)
-            _cfg = _bundle.get("config", {})
-            _out = BASE_DIR / _cfg.get("output", {}).get("html_output", "cache/dashboard.html")
-            _path = build_dashboard(_bundle, _out)
-            print(f"Dashboard re-rendered from cached bundle: {_path}")
+        # Phase A (2026-05-08): regen now rebuilds V2 prototype data from the
+        # cached bundle — no scan, no API calls, no legacy HTML generation.
+        # Use case: pull a tested change to build_data.py / V2 templates and
+        # see it on the V2 dashboard without a full 12-min scan.
+        bundle_path = BASE_DIR / "cache" / "last_bundle.json"
+        if not bundle_path.exists():
+            print("No cached bundle found at cache/last_bundle.json.")
+            print("Run a full scan first: python3 swing_trade.py")
+        else:
             try:
                 import subprocess
                 _pb = BASE_DIR / "infra" / "prototype" / "build_data.py"
-                if _pb.exists():
+                if not _pb.exists():
+                    print("ERROR: infra/prototype/build_data.py is missing")
+                else:
                     _r = subprocess.run(["python3", str(_pb)], check=False, capture_output=True, timeout=180)
                     if _r.returncode == 0:
-                        print(f"Prototype data refreshed: infra/prototype/data.json")
+                        print("V2 prototype data refreshed: http://localhost:7432/v2/dashboard.html")
                     else:
-                        _err = (_r.stderr or b"").decode("utf-8", errors="replace").strip()[-500:]
-                        print(f"WARN: v2 build_data.py failed (exit {_r.returncode}); v2 dashboard is now stale. stderr tail: {_err}")
+                        _err = (_r.stderr or b"").decode("utf-8", errors="replace").strip()[-800:]
+                        print(f"FAIL: build_data.py exited {_r.returncode}\n{_err}")
             except subprocess.TimeoutExpired:
-                print("WARN: v2 build_data.py timed out after 180s; v2 dashboard is now stale")
+                print("FAIL: build_data.py timed out after 180s")
             except Exception as _pe:
-                print(f"WARN: v2 build_data.py error; v2 dashboard is now stale: {_pe}")
-        elif sample_path.exists():
-            with open(sample_path) as _bf:
-                _bundle = json.load(_bf)
-            _cfg = _bundle.get("config", {})
-            _out = BASE_DIR / _cfg.get("output", {}).get("html_output", "cache/dashboard.html")
-            _path = build_dashboard(_bundle, _out)
-            print(f"Dashboard re-rendered from sample bundle: {_path}")
-        else:
-            print("No cached bundle found. Run a full scan first, or use:")
-            print("  python3 swing_trade.py sample   # generate sample dashboard")
+                print(f"FAIL: {_pe}")
     elif args[0].lower() == "sample":
         # Generate a sample dashboard with mock data — no scan, no API calls
         _sample_bundle = _build_sample_bundle()
