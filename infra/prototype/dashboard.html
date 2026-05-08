@@ -789,46 +789,14 @@
 
 <!-- System Status Banner (macro / circuit breaker / forced cash) — full-width above floor-app -->
 <!-- S-7: Cross-Asset Momentum overlay banner -->
+<!-- Merged macro banner: cross-asset + HMM regime in one row -->
 <div id="crossAssetBanner" style="display:none; padding:9px 22px; font-family:var(--mono, monospace); font-size:12px; gap:14px; align-items:center; flex-wrap:wrap; width:100%; box-sizing:border-box; border-bottom:1px solid var(--rule);"></div>
-
-<!-- V-2: HMM Regime Pill (compact, fits above ticker tape) -->
-<div id="hmmRegimeBanner" style="display:none; padding:8px 22px; font-family:var(--mono, monospace); font-size:12px; gap:14px; align-items:center; width:100%; box-sizing:border-box; border-bottom:1px solid var(--rule); background:linear-gradient(90deg, color-mix(in oklch, var(--ink-3) 8%, var(--bg-1)) 0%, var(--bg-1) 70%);"></div>
-<script>
-(function() {
-  const tryRender = () => {
-    if (typeof DATA === 'undefined' || !DATA) { setTimeout(tryRender, 400); return; }
-    const h = DATA.hmm_regime || {};
-    const el = document.getElementById('hmmRegimeBanner');
-    if (!el || h.error || h.regime == null) return;
-    const pBull = (h.p_bull || 0) * 100;
-    const pNeu  = (h.p_neutral || 0) * 100;
-    const pBear = (h.p_bear || 0) * 100;
-    const conf  = (h.confidence || 0) * 100;
-    const reg   = (h.regime || '').toUpperCase();
-    const dom   = pBull >= 50 ? 'pass' : pBear >= 50 ? 'fail' : 'warn';
-    const colorVar = dom === 'pass' ? 'var(--green)' : dom === 'fail' ? 'var(--red)' : 'var(--accent)';
-    el.style.display = 'flex';
-    el.style.borderBottom = `1px solid ${colorVar}`;
-    el.innerHTML = `
-      <span style="font-size:14px;color:${colorVar}">⌬</span>
-      <span style="font-weight:800;letter-spacing:0.16em;color:${colorVar};text-transform:uppercase">HMM REGIME: ${reg}</span>
-      <span style="color:var(--ink-3)">·</span>
-      <span style="display:inline-flex;gap:5px;align-items:center"><b style="color:var(--green);font-weight:800">BULL ${pBull.toFixed(1)}%</b></span>
-      <span style="color:var(--ink-3)">·</span>
-      <span style="display:inline-flex;gap:5px;align-items:center"><b style="color:var(--accent);font-weight:800">NEUTRAL ${pNeu.toFixed(1)}%</b></span>
-      <span style="color:var(--ink-3)">·</span>
-      <span style="display:inline-flex;gap:5px;align-items:center"><b style="color:var(--red);font-weight:800">BEAR ${pBear.toFixed(1)}%</b></span>
-      <span style="margin-left:auto;color:var(--ink-1);font-size:11px">confidence <b style="color:var(--ink-0)">${conf.toFixed(0)}%</b> · 21d window · μ ${h.avg_ret_pct?.toFixed(2)}% σ ${h.avg_vol_pct?.toFixed(2)}%</span>
-    `;
-  };
-  tryRender();
-})();
-</script>
 <script>
 (function() {
   const tryRender = () => {
     if (typeof DATA === 'undefined' || !DATA) { setTimeout(tryRender, 400); return; }
     const ms = DATA.macro_signals || (DATA.regime || {}).macro_signals || {};
+    const h  = DATA.hmm_regime || {};
     const el = document.getElementById('crossAssetBanner');
     if (!el || !ms || !ms.dxy) return;
     const rs = ms.risk_signal || 'neutral';
@@ -846,6 +814,29 @@
     const tile = (label, obj) => obj && obj.price != null
       ? `<span style="display:inline-flex;align-items:center;gap:5px"><b style="letter-spacing:0.1em">${label}</b><span style="color:${trendCol(obj.trend)}">${trendEmoji(obj.trend)}</span><span style="font-family:var(--mono);color:var(--ink-0);font-weight:700">${obj.price.toFixed(2)}</span><span style="color:${(obj.chg5d||0) >= 0 ? 'var(--green)' : 'var(--red)'};font-size:11px">${(obj.chg5d||0) >= 0 ? '+' : ''}${(obj.chg5d||0).toFixed(2)}%</span></span>`
       : '';
+
+    // HMM probabilities — only render if loaded successfully
+    let hmmBlock = '';
+    if (!h.error && h.regime != null) {
+      const pBull = (h.p_bull || 0) * 100;
+      const pNeu  = (h.p_neutral || 0) * 100;
+      const pBear = (h.p_bear || 0) * 100;
+      const reg   = (h.regime || '').toUpperCase();
+      const conf  = (h.confidence || 0) * 100;
+      const dom   = pBull >= 50 ? 'green' : pBear >= 50 ? 'red' : 'accent';
+      const hmmColor = `var(--${dom})`;
+      hmmBlock = `
+        <span style="color:var(--rule-2);margin:0 4px">|</span>
+        <span style="font-size:14px;color:${hmmColor}">⌬</span>
+        <span style="font-weight:800;letter-spacing:0.12em;color:${hmmColor};text-transform:uppercase">HMM ${reg}</span>
+        <span style="color:var(--ink-3)">·</span>
+        <span><b style="color:var(--green);font-weight:700">B ${pBull.toFixed(0)}%</b></span>
+        <span><b style="color:var(--accent);font-weight:700">N ${pNeu.toFixed(0)}%</b></span>
+        <span><b style="color:var(--red);font-weight:700">X ${pBear.toFixed(0)}%</b></span>
+        <span style="color:var(--ink-3);font-size:11px;margin-left:6px" title="HMM confidence (21d window)">conf ${conf.toFixed(0)}%</span>
+      `;
+    }
+
     el.innerHTML = `
       <span style="font-size:18px;line-height:1">${cls === 'pass' ? '🟢' : cls === 'fail' ? '🔴' : '🟡'}</span>
       <span style="font-weight:800;letter-spacing:0.16em;color:${colorVar};text-transform:uppercase">CROSS-ASSET: ${rs.toUpperCase().replace(/_/g,' ')}</span>
@@ -855,7 +846,7 @@
       ${tile('HYG', ms.hyg)}
       <span style="color:var(--ink-3)">·</span>
       ${tile('GLD', ms.gld)}
-      <span style="margin-left:auto;color:var(--ink-2);font-size:11px">${rs === 'risk_on' ? 'Currency weak + Credit firm + Commodities mixed = green light for risk' : rs === 'risk_off' ? 'Defensive bid in DXY/Gold + HYG selling = reduce size' : 'Mixed signals — no clear bias'}</span>
+      ${hmmBlock}
     `;
   };
   tryRender();
