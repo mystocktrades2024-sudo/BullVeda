@@ -29,6 +29,31 @@ _SYSTEM_GATE_ACTIVE: bool = False
 _SYSTEM_GATE_REASON: str = ""
 
 
+def _sanitize_options(od: dict) -> dict:
+    """Collapse stale Schwab OAuth error blobs into a clean placeholder.
+
+    When source==schwab AND there's an error AND iv_rank is None, the data
+    is unusable. Return a minimal placeholder so V2 renders cleanly without
+    a 200-character OAuth stack trace leaking into the bundle.
+    """
+    if not isinstance(od, dict) or not od:
+        return od
+    has_data = od.get("iv_rank") is not None or od.get("put_call_ratio") is not None
+    if has_data:
+        return od
+    err = od.get("error") or ""
+    if err or od.get("source") in ("schwab", "unavailable"):
+        return {
+            "iv_rank": None, "iv_pct": None, "current_iv": None,
+            "put_call_ratio": None, "total_call_oi": 0, "total_put_oi": 0,
+            "total_call_vol": 0, "total_put_vol": 0, "max_pain": None,
+            "uoa_calls": 0, "uoa_puts": 0,
+            "source": "unavailable",
+            "error": None,
+        }
+    return od
+
+
 def _reject_reason_for(r: dict):
     """Resolve the reject_reason field for V2 display.
 
@@ -933,8 +958,14 @@ def compact_row(r: dict) -> dict:
         "rs_rank":    r.get("rs_rank"),
         "rsi":        techs.get("rsi") or r.get("rsi"),
         "rvol":       r.get("rvol"),
-        "above_50ema": bool(techs.get("above_ema50") or techs.get("ema_stack")),
-        "above_200sma": bool(techs.get("above_sma200")),
+        # MA flags actually live at technicals.indicators.above_{20,50}ema /
+        # above_200sma — set by analysis.py:2779. Fall back to legacy paths
+        # for older bundles. (2026-05-07 — ATEN was rendering as below all EMAs
+        # because we were reading the wrong key.)
+        "above_50ema": bool((techs.get("indicators") or {}).get("above_50ema")
+                            or techs.get("above_ema50") or techs.get("ema_stack")),
+        "above_200sma": bool((techs.get("indicators") or {}).get("above_200sma")
+                             or techs.get("above_sma200")),
         "macd_bullish": bool((r.get("macd_signal") or "") in ("bullish","bull")),
         "price":      r.get("price"),
         "pct_chg":    techs.get("pct_chg") or r.get("pct_chg") or 0,
@@ -1002,8 +1033,13 @@ def compact_row(r: dict) -> dict:
         "market_phase":   r.get("market_phase"),
         "catalyst_tags":  r.get("catalyst_tags"),
         "catalyst_tier":  r.get("catalyst_tier"),
-        "above_8ema":     bool((r.get("technicals") or {}).get("above_ema8")),
-        "above_21ema":    bool((r.get("technicals") or {}).get("above_ema21")),
+        # Same nested-vs-flat issue as above_50ema — real flags live in
+        # technicals.indicators.above_{8,20}ema. above_20ema is treated as the
+        # 21EMA proxy (analysis.py uses 20-period ema for the short MA).
+        "above_8ema":     bool(((r.get("technicals") or {}).get("indicators") or {}).get("above_8ema")
+                               or (r.get("technicals") or {}).get("above_ema8")),
+        "above_21ema":    bool(((r.get("technicals") or {}).get("indicators") or {}).get("above_20ema")
+                               or (r.get("technicals") or {}).get("above_ema21")),
         "adx":            (r.get("technicals") or {}).get("adx"),
         "alloc_pct":      ((r.get("trade_plan") or {}).get("allocation_pct")
                           or r.get("allocation_pct") or 0),
@@ -1441,7 +1477,10 @@ def rich_row(r: dict, b: dict = None) -> dict:
         "zacks_brokerage_recommendations": r.get("zacks_brokerage_recommendations"),
         "tv_rating":    r.get("tv_rating") or {},
         "uoa":          r.get("uoa") or {},
-        "options_data": r.get("options_data") or {},
+        # Sanitize stale Schwab refresh-token error blobs — when source unavailable,
+        # collapse to a clean placeholder so V2 renders '—' instead of a 200-char
+        # OAuth error string. (2026-05-07 — Schwab options decommissioned.)
+        "options_data": _sanitize_options(r.get("options_data") or {}),
         "gamma":        r.get("gamma") or {},
         "optionality":  r.get("optionality") or {},
 

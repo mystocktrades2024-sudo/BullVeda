@@ -388,9 +388,15 @@ def _eval_hard_gates(t: dict) -> tuple[list[dict], list[str]]:
     # threshold 72 but was below ALL 3 EMAs — that's a downtrend, not a BUY setup).
     # Hard fail when price is below all of (21EMA, 50EMA, 200SMA). Caveat handled
     # in _eval_soft_gates when partial breach.
-    above_21 = t.get("above_21ema")
-    above_50 = t.get("above_50ema")
-    above_200 = t.get("above_200sma")
+    # Flags live at t.technicals.indicators.above_{20,50}ema/200sma — fall back
+    # to top-level / build_data flattening for compatibility.
+    _ind = ((t.get("technicals") or {}).get("indicators") or {}) if isinstance(t.get("technicals"), dict) else {}
+    above_21 = (t.get("above_21ema") if t.get("above_21ema") is not None
+                else _ind.get("above_20ema"))
+    above_50 = (t.get("above_50ema") if t.get("above_50ema") is not None
+                else _ind.get("above_50ema"))
+    above_200 = (t.get("above_200sma") if t.get("above_200sma") is not None
+                 else _ind.get("above_200sma"))
     # Only evaluate if at least one MA flag is populated (otherwise data may be missing)
     if any(v is not None for v in (above_21, above_50, above_200)):
         # All False = price below entire EMA stack = structural downtrend

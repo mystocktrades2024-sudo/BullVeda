@@ -3995,12 +3995,48 @@ def _adjust_plan_by_entry_quality(plan: dict, entry_quality: str, indicators: di
         plan["target_r_multiple"] = 2.5
         plan["entry_quality_adj"] = "VALID: wide stop EMA50-1xATR, hold 5d, target 2.5R"
 
-    # Recompute target1 from new R-multiple (don't override user-specified target)
+    # Recompute target1 + target2 + risk_per_share + rr_ratio + refresh exit_rules
+    # from the new stop. Without this, target2 stays at its pre-EQ value (5R from
+    # the OLD risk) and ends up below target1 (2.5R from NEW, larger risk) — the
+    # ATEN inversion bug. exit_rules Rule 1 and Rule 3 also embed stale prices.
     if "target_r_multiple" in plan and plan.get("stop") is not None and entry:
         try:
-            risk = abs(entry - float(plan["stop"]))
+            stop_new = float(plan["stop"])
+            risk = abs(entry - stop_new)
             if risk > 0:
-                plan["target1"] = round(entry + risk * plan["target_r_multiple"], 2)
+                tr_mult = plan["target_r_multiple"]
+                direction = plan.get("direction", "long")
+                if direction == "long":
+                    plan["target1"] = round(entry + risk * tr_mult, 2)
+                    # T2 always > T1: keep the +2R buffer used in compute_trade_plan
+                    plan["target2"] = round(entry + risk * (tr_mult + 2.0), 2)
+                else:
+                    plan["target1"] = round(entry - risk * tr_mult, 2)
+                    plan["target2"] = round(entry - risk * (tr_mult + 2.0), 2)
+                plan["risk_per_share"] = round(risk, 2)
+                # rr_ratio = (target1 - entry) / risk  (== target_r_multiple)
+                plan["rr_ratio"] = round(tr_mult, 1)
+
+                # Refresh exit_rules so Rule 1 (hard stop) + Rule 3 (T1 partial)
+                # show the post-adjustment numbers, not the pre-adjustment ones.
+                rules = plan.get("exit_rules")
+                if isinstance(rules, list) and rules:
+                    t1_p = float(plan["target1"])
+                    be_stop = round(entry * 1.005, 2) if direction == "long" else round(entry * 0.995, 2)
+                    partial_pct = (plan.get("exit_params") or {}).get("partial_at_t1_pct", 50)
+                    for i, r in enumerate(rules):
+                        if isinstance(r, str):
+                            if r.startswith("Rule 1 —"):
+                                if direction == "long":
+                                    rules[i] = (f"Rule 1 — Hard Stop: Exit ALL at ${stop_new:.2f} immediately "
+                                                f"— no exceptions, no averaging down")
+                                else:
+                                    rules[i] = f"Rule 1 — Hard Stop: Cover ALL at ${stop_new:.2f} immediately — no exceptions"
+                            elif r.startswith("Rule 3 —"):
+                                verb = "Sell" if direction == "long" else "Cover"
+                                rules[i] = (f"Rule 3 — T1 Partial: {verb} {partial_pct}% at T1 ${t1_p:.2f}, "
+                                            f"move stop to breakeven ${be_stop:.2f} on remainder")
+                    plan["exit_rules"] = rules
         except (TypeError, ValueError):
             pass
 

@@ -3741,24 +3741,40 @@ def get_sector_etf_data(lookback_days: int = 63) -> dict:
 @_mem_cached(ttl_seconds=1800)
 def get_options_iv_data(ticker: str) -> dict:
     """
-    Options IV / chain summary via Schwab Trader API (re-activated 2026-05-03).
-    Replaces the no-op stub installed during the 2026-04-25 EODHD migration.
+    Options IV / chain summary.
+
+    2026-05-07 — Schwab options re-decommissioned. Refresh tokens expire after
+    7 days and were causing every scan to spam HTTP-400 stack traces. EODHD
+    options endpoint (/api/options + /api/mp/unicornbay/options) is NOT
+    included in the user's All-In-One plan (returns 404/403). With no working
+    provider, this function is a clean stub that returns nulls + a clear
+    'unavailable' source. V2 dashboard renders these as '—' instead of error
+    blobs.
+
+    To re-enable: either (a) re-auth Schwab via `python3 schwab_auth.py oauth`
+    AND set OPTIONS_PROVIDER=schwab, or (b) subscribe to EODHD Unicorn Bay
+    options add-on and wire eodhd_client.options_chain.
 
     Returns: {iv_rank, iv_pct, current_iv, put_call_ratio, total_call_oi,
               total_put_oi, total_call_vol, total_put_vol, max_pain,
               uoa_calls, uoa_puts, source, error}
-
-    Cached 2h via eodhd_client.options TTL contract.
     """
+    out = {"iv_rank": None, "iv_pct": None, "current_iv": None,
+           "put_call_ratio": None, "total_call_oi": 0, "total_put_oi": 0,
+           "total_call_vol": 0, "total_put_vol": 0, "max_pain": None,
+           "uoa_calls": 0, "uoa_puts": 0,
+           "source": "unavailable", "error": None}
+
+    # Allow opt-in re-enable via env var. Default OFF so we don't spam errors.
+    if os.environ.get("OPTIONS_PROVIDER", "").lower() != "schwab":
+        return out
+
     cache_key = f"opts_iv_{ticker}_{int(time.time()//7200)}"
     cached = _cache_read(cache_key, 7200)
     if cached is not None:
         return cached
 
-    out = {"iv_rank": None, "iv_pct": None, "current_iv": None,
-           "put_call_ratio": None, "total_call_oi": 0, "total_put_oi": 0,
-           "total_call_vol": 0, "total_put_vol": 0, "max_pain": None,
-           "uoa_calls": 0, "uoa_puts": 0, "source": "schwab", "error": None}
+    out["source"] = "schwab"
 
     try:
         import schwab_client as sc
