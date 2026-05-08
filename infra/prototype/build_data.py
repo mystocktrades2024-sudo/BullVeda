@@ -2272,6 +2272,19 @@ def main():
         data["earnings_watchlist"] = []
         data["earnings_outcomes_30d"] = []
 
+    # Earnings beat predictions (#6 INOD-class) — composite 0-100 score
+    # per upcoming-earnings ticker. Built daily by predict_earnings_beats.py.
+    try:
+        _bp_path = Path(__file__).resolve().parent.parent.parent / "data" / "earnings_beat_predictions.json"
+        if _bp_path.exists():
+            _bp = json.loads(_bp_path.read_text())
+            data["earnings_beat_predictions"] = _bp.get("predictions") or []
+        else:
+            data["earnings_beat_predictions"] = []
+    except Exception as _bp_err:
+        print(f"[earnings_beat_predictions] non-fatal: {_bp_err}")
+        data["earnings_beat_predictions"] = []
+
     # Pre-earnings BUY badge (#3) — for each ticker, attach earnings_in_Nd
     # if it appears in the earnings_watchlist within 10 days. Surfaces in
     # elite-detail and audit trail as a "🎯 EARN+5D" tag.

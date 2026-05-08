@@ -5608,8 +5608,9 @@ window._earnFilters = window._earnFilters || {
   verdict: 'all',      // 'BUY', 'WATCH', 'has_signal', 'all'
   ownership: 'all',    // 'owned', 'all'
   sector: 'all',
+  beat: 'all',         // 'STRONG', 'SOLID', 'has_pred', 'all'
   search: '',
-  sort: 'days',        // 'days', 'score', 'ticker'
+  sort: 'days',        // 'days', 'score', 'ticker', 'beat'
 };
 
 function _earnFilterChange(key, val) {
@@ -5656,6 +5657,12 @@ function renderEarnings() {
     }
   }
 
+  // Beat predictions lookup
+  const beatByT = {};
+  for (const p of (DATA.earnings_beat_predictions || [])) {
+    if (p.ticker) beatByT[p.ticker] = p;
+  }
+
   const beatStats = {};
   outcomes.forEach(o => {
     const t = o.ticker;
@@ -5687,6 +5694,10 @@ function renderEarnings() {
     if (F.verdict === 'has_signal' && !v) return false;
     if (F.ownership === 'owned' && !myPositions.has(e.ticker)) return false;
     if (F.sector !== 'all' && td.sector !== F.sector) return false;
+    const bp = beatByT[e.ticker];
+    if (F.beat === 'STRONG' && (!bp || bp.tier !== 'STRONG')) return false;
+    if (F.beat === 'SOLID' && (!bp || !['STRONG','SOLID'].includes(bp.tier))) return false;
+    if (F.beat === 'has_pred' && !bp) return false;
     if (F.search && !e.ticker.includes(F.search)) return false;
     return true;
   });
@@ -5696,6 +5707,8 @@ function renderEarnings() {
     filtered.sort((a, b) => ((tickerData[b.ticker] || {}).score || 0) - ((tickerData[a.ticker] || {}).score || 0));
   } else if (F.sort === 'ticker') {
     filtered.sort((a, b) => a.ticker.localeCompare(b.ticker));
+  } else if (F.sort === 'beat') {
+    filtered.sort((a, b) => ((beatByT[b.ticker] || {}).beat_score || 0) - ((beatByT[a.ticker] || {}).beat_score || 0));
   } else {
     filtered.sort((a, b) => a.days_to_earnings - b.days_to_earnings || a.ticker.localeCompare(b.ticker));
   }
@@ -5727,6 +5740,23 @@ function renderEarnings() {
     const beatTag = stats && stats.total > 0
       ? `<span style="color:var(--ink-3);font-size:10px;" title="${stats.total} prior reports">${stats.beats}B/${stats.misses}M/${stats.inline}I</span>`
       : '<span style="color:var(--ink-3);font-size:10px;">—</span>';
+
+    // Beat-probability prediction (composite 0-100)
+    const bp = beatByT[t] || {};
+    const bs = bp.beat_score;
+    const tier = bp.tier;
+    let beatScoreCell;
+    if (bs == null) {
+      beatScoreCell = '<span style="color:var(--ink-3);font-size:10px">—</span>';
+    } else {
+      const tColor = tier === 'STRONG' ? 'var(--green)'
+                  : tier === 'SOLID' ? 'var(--accent)'
+                  : tier === 'MODERATE' ? 'var(--ink-1)' : 'var(--ink-3)';
+      const tooltip = bp.breakdown
+        ? `H${bp.breakdown.historical?.pts || 0}/Run${bp.breakdown.runup_10d?.pts || 0}/Vol${bp.breakdown.vol_accum?.pts || 0}/An${bp.breakdown.analyst_upside?.pts || 0}/Op${bp.breakdown.options?.pts || 0}/Sec${bp.breakdown.sector_beats?.pts || 0}` : '';
+      const tierIcon = tier === 'STRONG' ? '🎯 ' : '';
+      beatScoreCell = `<span style="color:${tColor};font-weight:700;font-size:11.5px;" title="${tooltip}">${tierIcon}${bs.toFixed(0)}</span>`;
+    }
     return `
       <tr style="border-bottom:1px solid var(--rule);">
         <td style="padding:8px 12px;font-family:var(--mono);font-weight:700;">
@@ -5742,6 +5772,7 @@ function renderEarnings() {
         <td style="padding:8px 12px;color:var(--ink-2);font-size:11px;">${setup}</td>
         <td style="padding:8px 12px;text-align:right;font-family:var(--mono);">${e.estimate != null ? fmtPx(e.estimate) : '—'}</td>
         <td style="padding:8px 12px;text-align:center;">${beatTag}</td>
+        <td style="padding:8px 12px;text-align:center;">${beatScoreCell}</td>
         <td style="padding:8px 12px;color:var(--ink-2);font-size:11px;">${sector.slice(0, 24)}</td>
       </tr>`;
   }).join('');
@@ -5778,9 +5809,17 @@ function renderEarnings() {
         style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:11.5px;max-width:160px;">
         ${sectorOptions}
       </select>
+      <select onchange="_earnFilterChange('beat', this.value)"
+        style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:11.5px;">
+        <option value="all" ${F.beat==='all'?'selected':''}>Any beat-score</option>
+        <option value="STRONG" ${F.beat==='STRONG'?'selected':''}>🎯 STRONG only</option>
+        <option value="SOLID" ${F.beat==='SOLID'?'selected':''}>STRONG + SOLID</option>
+        <option value="has_pred" ${F.beat==='has_pred'?'selected':''}>Has prediction</option>
+      </select>
       <select onchange="_earnFilterChange('sort', this.value)"
         style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:DM Sans;font-size:11.5px;">
         <option value="days" ${F.sort==='days'?'selected':''}>Sort: Days asc</option>
+        <option value="beat" ${F.sort==='beat'?'selected':''}>Sort: Beat-score desc</option>
         <option value="score" ${F.sort==='score'?'selected':''}>Sort: Score desc</option>
         <option value="ticker" ${F.sort==='ticker'?'selected':''}>Sort: Ticker A-Z</option>
       </select>
@@ -5809,6 +5848,7 @@ function renderEarnings() {
             <th style="padding:9px 12px;font-weight:600;letter-spacing:0.04em;font-size:10px;">SETUP</th>
             <th style="padding:9px 12px;text-align:right;font-weight:600;letter-spacing:0.04em;font-size:10px;">EPS EST</th>
             <th style="padding:9px 12px;text-align:center;font-weight:600;letter-spacing:0.04em;font-size:10px;" title="BEAT / MISS / INLINE — last 30d of prior reports">PRIOR</th>
+            <th style="padding:9px 12px;text-align:center;font-weight:600;letter-spacing:0.04em;font-size:10px;" title="Composite beat-probability score 0-100 — historical beat rate + price runup + volume accumulation + analyst sentiment + options flow + sector co-movers">BEAT %</th>
             <th style="padding:9px 12px;font-weight:600;letter-spacing:0.04em;font-size:10px;">SECTOR</th>
           </tr>
         </thead>
