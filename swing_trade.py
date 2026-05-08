@@ -1147,6 +1147,25 @@ def run_daily_scan(force_fresh: bool = False):
             return 0.0
 
     _max_enrich = cfg.get("performance", {}).get("max_enrichment_tickers", 350)
+
+    # Earnings-window guarantee (2026-05-08 — INOD-class fix).
+    # Any ticker reporting earnings in the next 10 days gets GUARANTEED
+    # inclusion in the prescreen, regardless of momentum score. Catches
+    # consolidating names with a known catalyst that the score-based
+    # filter would otherwise cut. Watchlist refreshed daily 5:30am PT
+    # by build_earnings_watchlist.py → data/earnings_watchlist.json.
+    _earnings_guaranteed: set = set()
+    try:
+        _ew_path = BASE_DIR / "data" / "earnings_watchlist.json"
+        if _ew_path.exists():
+            import json as _json_ew
+            _ew = _json_ew.loads(_ew_path.read_text())
+            _earnings_guaranteed = {x["ticker"] for x in (_ew.get("watchlist") or [])
+                                     if isinstance(x, dict) and x.get("ticker")}
+            log.info(f"  Earnings watchlist loaded: {len(_earnings_guaranteed)} tickers reporting in next 10d")
+    except Exception as _ew_err:
+        log.debug(f"earnings_watchlist load skipped: {_ew_err}")
+
     if len(qualified) > _max_enrich:
         _prescores      = {t: _fast_prescreen_score(df) for t, df in qualified.items()}
         _zr1_qualified  = [t for t in qualified if t in zacks_r1_set]
@@ -1155,7 +1174,9 @@ def run_daily_scan(force_fresh: bool = False):
         # even when their short-term pre-screen score is low. Without this, they
         # never appear in `all_scored` and Long-term picks miss the obvious names.
         _sp500_in_qualified = [t for t in qualified if t in sp500_set and t not in zacks_r1_set]
-        _guaranteed = set(_zr1_qualified) | set(_sp500_in_qualified)
+        # Earnings-window guarantee — overlap with qualified universe
+        _earnings_in_qualified = [t for t in qualified if t in _earnings_guaranteed]
+        _guaranteed = set(_zr1_qualified) | set(_sp500_in_qualified) | set(_earnings_in_qualified)
         _non_guaranteed_sorted = sorted(
             [(t, s) for t, s in _prescores.items() if t not in _guaranteed],
             key=lambda x: x[1], reverse=True
@@ -1165,7 +1186,8 @@ def run_daily_scan(force_fresh: bool = False):
         qualified       = {t: df for t, df in qualified.items() if t in _selected}
         log.info(f"  Pre-screen: {len(_prescores)} → {len(qualified)} tickers "
                  f"({len(_zr1_qualified)} Zacks #1 guaranteed + "
-                 f"{len(_selected) - len(_zr1_qualified)} top-ranked by OHLCV score)")
+                 f"{len(_earnings_in_qualified)} earnings-window guaranteed + "
+                 f"{len(_selected) - len(_zr1_qualified) - len(_earnings_in_qualified)} top-ranked by OHLCV score)")
     else:
         log.info(f"  Pre-screen: {len(qualified)} tickers (under {_max_enrich} threshold, no cut)")
 
