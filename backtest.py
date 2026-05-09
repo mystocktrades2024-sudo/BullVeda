@@ -627,10 +627,41 @@ def _forward_returns(df_full: pd.DataFrame, as_of_date: pd.Timestamp,
 
 # ── Main Backtest Engine ─────────────────────────────────────────────────────
 
+def _deep_merge(dst: dict, src: dict) -> dict:
+    """Recursively merge src into dst (in place). Used by --config-override
+    so walk_forward_v2 can pass {setup_score_multiplier: {Trend Continuation: 1.10}}
+    without overwriting all of setup_score_multiplier."""
+    for k, v in (src or {}).items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            _deep_merge(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
+
+
+def _apply_config_override(cfg: dict, override: str | None) -> dict:
+    """Parse --config-override (file path or inline JSON string) and deep-merge."""
+    if not override:
+        return cfg
+    try:
+        from pathlib import Path as _P
+        path = _P(override)
+        if path.exists():
+            data = json.loads(path.read_text())
+        else:
+            # Treat as inline JSON
+            data = json.loads(override)
+        _deep_merge(cfg, data)
+    except Exception as e:
+        log.warning(f"--config-override failed to parse ({e}); using base config")
+    return cfg
+
+
 def run_backtest(days: int = 252, hold_days: int = 5,
                  min_score: int = 50, min_rs: int = 65,
                  top_n: int = 5, end_date: str | None = None,
-                 profile: str | None = None) -> list[dict]:
+                 profile: str | None = None,
+                 config_override: str | None = None) -> list[dict]:
     """
     Single-window backtest. For true walk-forward, use backtest/walk_forward_v2.py.
 
@@ -647,6 +678,9 @@ def run_backtest(days: int = 252, hold_days: int = 5,
     Data source: Polygon.io (5yr history, no rate limits) with yfinance fallback.
     """
     cfg = json.loads((BASE_DIR / "config" / "config.json").read_text())
+
+    # Apply --config-override (used by walk_forward_v2 for grid search)
+    cfg = _apply_config_override(cfg, config_override)
 
     # Merge trading profile if specified
     if profile:
@@ -692,20 +726,43 @@ def run_backtest(days: int = 252, hold_days: int = 5,
     calendar_days_needed = int(days * 1.45) + 350
 
     # ── Universe: S&P 500 + Russell 1000 (deduplicated) filtered to $2–$250 ──
-    sp500 = get_sp500()
-    russell = []
-    try:
-        russell = get_russell1000()
-    except Exception:
-        log.warning("Russell 1000 fetch failed, using S&P 500 only")
-    # Merge and deduplicate, preserving order (S&P 500 first)
-    _seen = set()
-    universe = []
-    for t in sp500 + russell:
-        if t and t not in _seen:
-            _seen.add(t)
-            universe.append(t)
-    log.info(f"Universe: {len(universe)} tickers (S&P 500 + Russell 1000 merged) — will filter by price after download")
+    # 2026-05-09: support point-in-time membership via AS_OF_MEMBERSHIP env var
+    # (set by main() when --as-of-membership flag passed). Closes audit #1
+    # Tier 2 — eliminates survivorship bias by using monthly snapshots from
+    # data/membership/sp500_YYYY-MM.csv (built by build_membership_snapshots.py).
+    import os as _os_uni
+    if _os_uni.environ.get("AS_OF_MEMBERSHIP") == "1":
+        from data_fetcher import get_universe_as_of as _get_as_of
+        from datetime import date as _d, timedelta as _td
+        # Window covers backtest days + lookback for indicators
+        end = _d.fromisoformat(end_date) if end_date else _d.today()
+        start = end - _td(days=int(days * 1.45))
+        # Union of monthly membership across the window: captures every ticker
+        # that was an S&P 500 member at any point during the test period.
+        # Avoids the survivorship trap of using today's membership for past dates.
+        all_tickers: set = set()
+        cur = start.replace(day=1)
+        while cur <= end:
+            all_tickers.update(_get_as_of(cur.isoformat(), include_r1000=True, include_custom=True))
+            cur = cur.replace(year=cur.year + 1, month=1) if cur.month == 12 else cur.replace(month=cur.month + 1)
+        universe = sorted(all_tickers)
+        log.info(f"Universe (AS-OF point-in-time): {len(universe)} tickers from {start.isoformat()}→{end.isoformat()} "
+                 f"(union of monthly S&P 500 snapshots ∪ R1000 ∪ custom) — survivorship-corrected")
+    else:
+        sp500 = get_sp500()
+        russell = []
+        try:
+            russell = get_russell1000()
+        except Exception:
+            log.warning("Russell 1000 fetch failed, using S&P 500 only")
+        # Merge and deduplicate, preserving order (S&P 500 first)
+        _seen = set()
+        universe = []
+        for t in sp500 + russell:
+            if t and t not in _seen:
+                _seen.add(t)
+                universe.append(t)
+        log.info(f"Universe: {len(universe)} tickers (S&P 500 + Russell 1000 merged) — will filter by price after download")
 
     # ── Try loading from data archive first (instant vs 60+ min API download) ──
     _archive_loaded = False
@@ -1309,6 +1366,7 @@ def run_portfolio_backtest(
     trail_atr_mult: float = 1.25, trail_activate_pct: float = 2.0,
     time_stop_flat_pct: float = 1.0,
     exclude_setups: list = None,
+    config_override: str | None = None,
 ) -> dict:
     """
     Walk-forward portfolio backtest with:
@@ -1329,7 +1387,8 @@ def run_portfolio_backtest(
     log.info(f"Starting equity: ${starting_equity:,.0f}")
 
     all_picks = run_backtest(days=days, hold_days=hold_days,
-                             min_score=min_score, min_rs=min_rs, top_n=top_n)
+                             min_score=min_score, min_rs=min_rs, top_n=top_n,
+                             config_override=config_override)
     if not all_picks:
         return {"error": "No picks generated"}
 
@@ -1786,6 +1845,9 @@ def main():
     parser.add_argument("--size-pct", type=float, default=0.25, help="Position size as pct of equity (default: 0.25)")
     parser.add_argument("--end-date", type=str, default=None, help="Optional ISO date (YYYY-MM-DD) capping the backtest window end")
     parser.add_argument("--profile", type=str, default=None, help="Load a trading profile (e.g. trending_leaders) to override config thresholds")
+    parser.add_argument("--config-override", type=str, default=None,
+                        help="Path to JSON file (or inline JSON string) with config keys to deep-merge over config.json. "
+                             "Used by walk_forward_v2.py to grid-search setup multipliers without mutating the canonical config.")
     # 2026-05-09 — hedge-fund overlays
     parser.add_argument("--max-sector-pct", type=float, default=None,
                         help="Concentration cap: max %% of equity per sector (e.g. 0.30 for 30%%)")
@@ -1794,7 +1856,19 @@ def main():
     parser.add_argument("--macro-filter", choices=["off", "spy200", "death_cross"],
                         default="off",
                         help="Macro overlay: 'spy200' blocks longs when SPY < SMA200; 'death_cross' blocks when SMA50<SMA200")
+    parser.add_argument("--as-of-membership", action="store_true",
+                        help="Use point-in-time S&P 500 membership (data/membership/sp500_YYYY-MM.csv) "
+                             "instead of today's. Eliminates survivorship bias (audit #1, Tier 2). "
+                             "Requires snapshots — run build_membership_snapshots.py first.")
     args = parser.parse_args()
+
+    # 2026-05-09 — propagate --as-of-membership via env var so the universe
+    # loader (line ~728) picks it up without threading another arg through
+    # run_backtest / run_portfolio_backtest signatures.
+    if args.as_of_membership:
+        import os as _os_main
+        _os_main.environ["AS_OF_MEMBERSHIP"] = "1"
+        log.info("Using point-in-time S&P 500 membership (--as-of-membership)")
 
     if args.portfolio:
         # 2026-05-09 — log hedge-fund overlay flags. Parsed and recorded in the
@@ -1810,6 +1884,7 @@ def main():
             min_score=args.min_score, min_rs=args.min_rs, top_n=args.top_n,
             starting_equity=args.equity, max_positions=args.positions,
             pct_per_trade=args.size_pct,
+            config_override=getattr(args, "config_override", None),
         )
         # Annotate result with overlay flags for audit/report
         if "config" not in result:
@@ -1864,7 +1939,8 @@ def main():
     picks = run_backtest(days=args.days, hold_days=args.hold,
                          min_score=args.min_score, min_rs=args.min_rs,
                          top_n=args.top_n, end_date=args.end_date,
-                         profile=args.profile)
+                         profile=args.profile,
+                         config_override=getattr(args, "config_override", None))
     if not picks:
         log.error("No picks generated — check universe + data download")
         return

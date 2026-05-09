@@ -274,6 +274,69 @@ def get_russell2000() -> list[str]:
     return _eodhd_universe("RUT") or []
 
 
+def get_universe_as_of(as_of_date: str, include_r1000: bool = True,
+                        include_custom: bool = True) -> list[str]:
+    """Point-in-time universe = S&P 500 (historical) ∪ R1000 (current) ∪ custom.
+
+    Used by backtest.py to filter the universe to "names that were in the
+    index on the test date" — fixes the survivorship bias of using today's
+    membership for historical backtests (audit #1, Tier 2).
+
+    Args:
+        as_of_date: ISO date "YYYY-MM-DD". Reads
+                    data/membership/sp500_YYYY-MM.csv (built by
+                    build_membership_snapshots.py from Wikipedia).
+                    If snapshot missing, falls back to current S&P 500.
+        include_r1000: Add current Russell 1000 (no historical data freely
+                       available for R1000 — partial bias remains, but
+                       smaller than full survivorship).
+        include_custom: Add tickers from data/custom_tracked.json.
+
+    Returns: deduplicated list, dot/dash convention matching get_sp500().
+    """
+    from pathlib import Path as _P
+    yyyy_mm = (as_of_date or "")[:7]
+    snap_path = _P(__file__).parent / "data" / "membership" / f"sp500_{yyyy_mm}.csv"
+    seen: set[str] = set()
+    out: list[str] = []
+    if snap_path.exists():
+        for line in snap_path.read_text().splitlines():
+            t = line.strip()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+    else:
+        # Fallback: current S&P 500. Logged once per call so the bias is visible.
+        log.info(f"get_universe_as_of: no snapshot for {yyyy_mm}, falling back to current S&P 500")
+        for t in get_sp500():
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+    if include_r1000:
+        try:
+            for t in get_russell1000():
+                if t and t not in seen:
+                    seen.add(t)
+                    out.append(t)
+        except Exception:
+            pass
+    if include_custom:
+        try:
+            import json as _json
+            custom_path = _P(__file__).parent / "data" / "custom_tracked.json"
+            if custom_path.exists():
+                d = _json.loads(custom_path.read_text())
+                raw = d.get("tickers") or [] if isinstance(d, dict) else []
+                for entry in raw:
+                    t = entry if isinstance(entry, str) else entry.get("ticker")
+                    if t and t not in seen:
+                        seen.add(t)
+                        out.append(t)
+        except Exception:
+            pass
+    return out
+
+
 def _scrape_zacks_sell_list(driver) -> list[dict]:
     """
     Scrape Zacks sell list with VGM grades.
