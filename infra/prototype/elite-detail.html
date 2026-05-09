@@ -7607,10 +7607,19 @@ const INST_SUB_PROFILES = {
 };
 
 function _ptApplyVisibility() {
+  // 2026-05-09 — read tab_profile from server-side user record FIRST
+  // (set when admin assigned it). LocalStorage is fallback for users who
+  // explicitly chose a different profile in this browser. Default 'trader'
+  // only used if both server and localStorage are silent.
   let profile = 'trader';
   let custom = null;
   try {
-    profile = localStorage.getItem('_swing_profile') || 'trader';
+    // Highest priority: server-side tab_profile from /api/me (cached on window._me)
+    if (window._me && window._me.tab_profile) {
+      profile = window._me.tab_profile;
+    } else {
+      profile = localStorage.getItem('_swing_profile') || 'trader';
+    }
     if (profile === 'custom') {
       const raw = localStorage.getItem('_swing_custom_pt_tabs');
       if (raw) custom = JSON.parse(raw);
@@ -7635,10 +7644,19 @@ function _ptApplyVisibility() {
   });
 }
 // Apply on load AND whenever localStorage changes (cross-tab profile sync)
+// 2026-05-09: also fetch /api/me to get server-side tab_profile (overrides
+// localStorage default 'trader' for users like vinod whose admin role gives
+// them tab_profile=all).
+function _fetchMeAndApplyVisibility() {
+  fetch('/api/me', { credentials: 'include' })
+    .then(r => r.ok ? r.json() : null)
+    .then(me => { if (me) window._me = me; _ptApplyVisibility(); })
+    .catch(() => _ptApplyVisibility());
+}
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', _ptApplyVisibility);
+  document.addEventListener('DOMContentLoaded', _fetchMeAndApplyVisibility);
 } else {
-  _ptApplyVisibility();
+  _fetchMeAndApplyVisibility();
 }
 window.addEventListener('storage', e => {
   if (e.key === '_swing_profile' || e.key === '_swing_custom_pt_tabs') _ptApplyVisibility();

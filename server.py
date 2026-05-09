@@ -227,6 +227,30 @@ from fastapi.responses import RedirectResponse
 async def root(auth: HTTPBasicCredentials = Depends(_check_auth)):
     return RedirectResponse(url="/v2/dashboard.html", status_code=302)
 
+# -- /api/me — surface current user's role + tab_profile to the client.
+# Lets V2 dashboard + elite-detail apply the right tab visibility profile
+# automatically based on the server-side user record, instead of falling back
+# to the localStorage default ('trader') which hides quant-only tabs like Models.
+@app.get("/api/me")
+async def whoami(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    if isinstance(auth, Response):
+        return auth
+    username = auth.username
+    user = _auth_mod.get_user(username) or {}
+    perms = _auth_mod.get_user_permissions(username) or {}
+    return JSONResponse({
+        "username":       username,
+        "display_name":   user.get("display_name") or username,
+        "role":           user.get("role") or "viewer",
+        "is_admin":       _auth_mod.is_admin(username),
+        "is_owner":       bool(user.get("is_owner")),
+        "tab_profile":    user.get("tab_profile") or "trader",
+        "tabs_allowed":   (perms.get("tabs") or []),
+        "actions_allowed": (perms.get("actions") or []),
+        "must_change_password": bool(user.get("must_change_password")),
+    })
+
+
 # -- Backtest report (hedge_fund_report.py output) --
 # Serves the latest backtest_report_latest.html. /api/backtest-report/history
 # returns a list of all dated reports for navigation.
