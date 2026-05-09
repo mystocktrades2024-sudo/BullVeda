@@ -999,9 +999,22 @@ def run_backtest(days: int = 252, hold_days: int = 5,
                     continue
                 day_scored.append(res)
 
-        # Sort by score, take top_n — mirrors live system's max positions
+        # Sort by score, take top_n — mirrors live system's max positions.
+        # 2026-05-09 — Trend Continuation cap: 750d evidence shows this setup
+        # accounted for 264/384 trades (69%) at PF 0.65. Limit to ≤30% of any
+        # single day's picks so it can't dominate the slate.
         day_scored.sort(key=lambda x: x["score"], reverse=True)
-        day_picks = day_scored[:top_n]
+        _cap = max(1, int(top_n * 0.40))   # max 40% of slate per setup
+        _setup_count: dict = {}
+        day_picks = []
+        for r in day_scored:
+            if len(day_picks) >= top_n:
+                break
+            _s = r.get("setup_type") or r.get("setup_family") or "?"
+            if _setup_count.get(_s, 0) >= _cap and len(day_picks) >= 2:
+                continue   # cap reached for this setup; skip in favor of variety
+            day_picks.append(r)
+            _setup_count[_s] = _setup_count.get(_s, 0) + 1
 
         buy_count   = sum(1 for p in day_picks if p["verdict"] == "BUY")
         watch_count = sum(1 for p in day_picks if p["verdict"] == "WATCH")

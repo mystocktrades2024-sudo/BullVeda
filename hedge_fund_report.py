@@ -697,6 +697,36 @@ def section_bayesian_setups(trades: list[dict]) -> list[dict]:
     return rows
 
 
+def section_train_test_holdout(trades: list[dict]) -> dict:
+    """70/15/15 time-ordered split — overfit detection."""
+    try:
+        from hedge_fund_enhancers import train_test_holdout_split
+    except ImportError:
+        return {"available": False}
+    sorted_trades = sorted(trades, key=lambda t: t.get("entry_date") or "")
+    return train_test_holdout_split(sorted_trades, ratios=(0.7, 0.15, 0.15))
+
+
+def section_kfold_cv(trades: list[dict]) -> dict:
+    """K-fold time-series CV — variance check across disjoint windows."""
+    try:
+        from hedge_fund_enhancers import kfold_timeseries_cv
+    except ImportError:
+        return {"available": False}
+    sorted_trades = sorted(trades, key=lambda t: t.get("entry_date") or "")
+    return kfold_timeseries_cv(sorted_trades, k=5)
+
+
+def section_signal_stability(trades: list[dict]) -> dict:
+    """Per-setup WR stability across Q1/Q2/Q3/Q4 of the period."""
+    try:
+        from hedge_fund_enhancers import signal_stability_quartiles
+    except ImportError:
+        return {"available": False}
+    sorted_trades = sorted(trades, key=lambda t: t.get("entry_date") or "")
+    return signal_stability_quartiles(sorted_trades)
+
+
 def section_drift_status() -> dict:
     """Read most recent drift alert from data/drift_alerts.jsonl."""
     p = BASE / "data" / "drift_alerts.jsonl"
@@ -1423,13 +1453,19 @@ def main() -> int:
     print("Hold-period replay (uses data/ohlcv/*.parquet)...")
     hold_sweep = section_hold_sweep(trades)
     print("  Horizons evaluated: %d" % len(hold_sweep))
-    print("Hedge-fund enhancers (bootstrap CI, Bayesian, drift)...")
+    print("Hedge-fund enhancers (bootstrap CI, Bayesian, drift, CV, stability)...")
     boot_ci = section_bootstrap_ci(trades)
     bayes = section_bayesian_setups(trades)
     drift = section_drift_status()
+    tt_split = section_train_test_holdout(trades)
+    kfold = section_kfold_cv(trades)
+    stability = section_signal_stability(trades)
     print(f"  Bootstrap PF CI: [{boot_ci.get('pf_lo')}, {boot_ci.get('pf_hi')}]")
     print(f"  Bayesian setups pooled: {len(bayes)}")
     print(f"  Drift available: {drift.get('available', False)}")
+    print(f"  Train/test/holdout: {tt_split.get('interpretation','?')}")
+    print(f"  K-fold CV (5): mean PF={kfold.get('mean_pf','?')} CV={kfold.get('cv','?')} ({kfold.get('interpretation','?')})")
+    print(f"  Signal stability: {len(stability.get('rows',[]))} setups analyzed")
 
     html = render_html(in_path, summary, eq_curve, setup_table, score_band,
                        risk, decay, counter, trades, regime_data=regime_data,
