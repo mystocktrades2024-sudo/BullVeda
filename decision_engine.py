@@ -100,12 +100,18 @@ def compute_setup_size_multipliers(signal_log_path: str | None = None,
     import json as _json
     from pathlib import Path as _P
     from collections import defaultdict as _dd
+    # Phase B.1: route through state_layer when caller doesn't override path
     if signal_log_path is None:
-        signal_log_path = _P(__file__).parent / "data" / "signal_log.json"
-    try:
-        sigs = _json.loads(_P(signal_log_path).read_text())
-    except Exception:
-        return {}
+        try:
+            from state_layer import load_signal_log
+            sigs = load_signal_log()
+        except Exception:
+            sigs = []
+    else:
+        try:
+            sigs = _json.loads(_P(signal_log_path).read_text())
+        except Exception:
+            return {}
     by_setup: dict = _dd(list)
     for s in sigs or []:
         if s.get("status") != "CLOSED":
@@ -158,12 +164,18 @@ def compute_setup_score_band_kills(signal_log_path: str | None = None,
     import json as _json
     from pathlib import Path as _P
     from collections import defaultdict as _dd
+    # Phase B.1: route through state_layer when caller doesn't override path
     if signal_log_path is None:
-        signal_log_path = _P(__file__).parent / "data" / "signal_log.json"
-    try:
-        sigs = _json.loads(_P(signal_log_path).read_text())
-    except Exception:
-        return {}
+        try:
+            from state_layer import load_signal_log
+            sigs = load_signal_log()
+        except Exception:
+            sigs = []
+    else:
+        try:
+            sigs = _json.loads(_P(signal_log_path).read_text())
+        except Exception:
+            return {}
     def _band(score: float) -> str:
         if score >= 80: return ">=80"
         if score >= 70: return "70-79"
