@@ -3,11 +3,13 @@
 Usage:
     python3 backtest/walk_forward_v2.py --folds 4 --train-days 250 --test-days 50
 """
+from __future__ import annotations
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import subprocess
 import json
 import logging
+import os
 from pathlib import Path
 import math
 
@@ -51,26 +53,10 @@ def tune_on_train(train_start: str, train_end: str) -> dict:
     Optimized (2026-04-15): coarser grid (3×4=12 vs 5×5=25), parallel execution
     (4 workers), 3600s timeout. Cuts tuning time ~5× vs original.
 
-    TODO (P2 follow-up, 2026-05-08): extend grid to also tune
-      config["setup_score_multiplier"] candidates per setup family. Today the
-      multipliers (Trend Continuation +8%, etc.) are hand-edited based on
-      eyeballing 60d backtest output — exactly the noise-driven tuning the
-      Wilson CI gates in decision_engine.py defend against.
-
-      Implementation sketch:
-        1. backtest.py needs a new --config-override <json> CLI arg that
-           merges into the loaded config before analyze_ticker runs.
-        2. tune_on_train() then iterates a multiplier grid per setup family:
-             {"Trend Continuation": [1.00, 1.05, 1.10],
-              "EMA21 Pullback":     [1.00, 0.95, 0.90], ...}
-        3. Per fold: pick best multipliers on train, validate they ALSO
-           improve on test (no train→test sign flip allowed), then write
-           config["setup_score_multiplier"]["_validations"][setup] with
-           {"n": fold_n, "wr_lb": fold_wr_lb, "source": f"wf_fold_{i}"}.
-        4. Only multipliers with passing _validations actually take effect
-           (analysis.py:8503 enforces this).
-
-      Effort: ~3 hours once 3y OHLCV backfill is done (P1).
+    Setup-multiplier tuning is a separate phase — see tune_setup_multipliers()
+    below. tune_on_train picks (min_score, min_rs); tune_setup_multipliers
+    picks the per-setup multipliers using the chosen (min_score, min_rs) as
+    fixed.
     """
     score_grid = [55, 62, 72]
     rs_grid = [55, 65, 75, 85]
@@ -111,8 +97,222 @@ def tune_on_train(train_start: str, train_end: str) -> dict:
     return best
 
 
-def run_backtest_subset(start: str, end: str, min_score: int, min_rs: int) -> dict:
-    """Invoke backtest.py with date range + thresholds; parse summary."""
+# Default setup multiplier grid (2026-05-09). Centered on 1.0 with ±10%
+# steps. Promotions (>1.0) and demotions (<1.0) both eligible — Wilson gates
+# in decision_engine + analysis.py keep noise out at runtime.
+SETUP_MULT_CANDIDATES = [0.80, 0.90, 1.00, 1.10, 1.20]
+
+
+def tune_setup_multipliers(train_start: str, train_end: str,
+                            min_score: int, min_rs: int,
+                            setups_to_tune: list[str] | None = None) -> dict:
+    """Per-setup multiplier grid search on the train window.
+
+    For each setup in setups_to_tune (default: all setup families with mults
+    in current config), iterate SETUP_MULT_CANDIDATES and record the best by
+    objective = sharpe × √n. Returns dict: {setup: best_mult}.
+
+    Uses --config-override to mutate setup_score_multiplier without touching
+    config.json on disk. _validations is also overridden so the demotion gate
+    in analysis.py doesn't reject the test mult.
+
+    Cost: len(setups) × len(SETUP_MULT_CANDIDATES) backtest runs per fold.
+    With 4 setups × 5 candidates = 20 runs per fold. At ~30s per run with the
+    3y window, that's 10 min per fold.
+    """
+    if setups_to_tune is None:
+        # Read current setup_score_multiplier keys from config (excluding meta)
+        cfg_path = BASE_DIR / "config" / "config.json"
+        try:
+            cfg = json.loads(cfg_path.read_text())
+            mults = cfg.get("setup_score_multiplier") or {}
+            setups_to_tune = [k for k, v in mults.items()
+                              if not k.startswith("_") and isinstance(v, (int, float))]
+        except Exception:
+            setups_to_tune = []
+    if not setups_to_tune:
+        log.warning("No setups to tune — returning empty multiplier dict")
+        return {}
+
+    out: dict = {}
+    for setup in setups_to_tune:
+        log.info(f"  Tuning multiplier for: {setup}")
+        best_obj = -float("inf")
+        best_mult = 1.0
+        for mult in SETUP_MULT_CANDIDATES:
+            override = {
+                "setup_score_multiplier": {
+                    setup: mult,
+                    # Bypass the _validations gate by injecting a synthetic
+                    # passing entry — we want to actually MEASURE the effect
+                    # of mult<1.0, not have analysis.py revert it.
+                    "_validations": {
+                        setup: {"n": 999, "wr_lb": 0.0, "source": "wf_grid_tune"}
+                    } if mult < 1.0 else {},
+                }
+            }
+            try:
+                result = run_backtest_subset(
+                    start=train_start, end=train_end,
+                    min_score=min_score, min_rs=min_rs,
+                    config_override=override,
+                )
+                sharpe = result.get("sharpe", 0)
+                n = result.get("n_trades", 0)
+                obj = sharpe * math.sqrt(max(n, 1))
+                log.info(f"    mult={mult:.2f} → sharpe={sharpe:.2f} n={n} obj={obj:.2f}")
+                if obj > best_obj:
+                    best_obj = obj
+                    best_mult = mult
+            except Exception as e:
+                log.warning(f"    mult={mult} failed: {e}")
+        out[setup] = best_mult
+        log.info(f"  Best for {setup}: mult={best_mult:.2f} (obj={best_obj:.2f})")
+    return out
+
+
+def validate_multipliers_on_test(test_start: str, test_end: str,
+                                  min_score: int, min_rs: int,
+                                  proposed_multipliers: dict) -> dict:
+    """Run test fold with proposed multipliers vs baseline (mult=1.0).
+
+    Returns:
+      {
+        "test_metrics_with_mults": {sharpe, wr, n_trades, ...},
+        "test_metrics_baseline":   {sharpe, wr, n_trades, ...},
+        "improvement":             baseline_sharpe - mults_sharpe,
+        "passes":                  bool — True if proposed mults didn't make
+                                   things worse on the test fold.
+      }
+    """
+    baseline_override = {"setup_score_multiplier": {"_validations": {}}}
+    # Force all to 1.0 in baseline so the comparison is clean
+    for setup in proposed_multipliers:
+        baseline_override["setup_score_multiplier"][setup] = 1.0
+
+    proposed_override = {
+        "setup_score_multiplier": {
+            **{s: m for s, m in proposed_multipliers.items()},
+            "_validations": {
+                s: {"n": 999, "wr_lb": 0.0, "source": "wf_test_validation"}
+                for s, m in proposed_multipliers.items() if m < 1.0
+            },
+        }
+    }
+
+    log.info("  Validating proposed multipliers on test fold...")
+    test_with_mults = run_backtest_subset(
+        start=test_start, end=test_end,
+        min_score=min_score, min_rs=min_rs,
+        config_override=proposed_override,
+    )
+    test_baseline = run_backtest_subset(
+        start=test_start, end=test_end,
+        min_score=min_score, min_rs=min_rs,
+        config_override=baseline_override,
+    )
+
+    sharpe_with = test_with_mults.get("sharpe", 0)
+    sharpe_base = test_baseline.get("sharpe", 0)
+    improvement = sharpe_with - sharpe_base
+    # Pass if mults didn't make Sharpe materially worse (within 0.1 tolerance)
+    passes = improvement >= -0.10
+
+    log.info(f"  Test fold: with_mults sharpe={sharpe_with:.2f}, "
+             f"baseline sharpe={sharpe_base:.2f}, delta={improvement:+.2f} → "
+             f"{'PASS' if passes else 'FAIL'}")
+    return {
+        "test_metrics_with_mults": test_with_mults,
+        "test_metrics_baseline": test_baseline,
+        "improvement": improvement,
+        "passes": passes,
+    }
+
+
+def write_validations_from_folds(per_fold_results: list[dict],
+                                  multiplier_proposals_by_fold: list[dict]) -> dict:
+    """Aggregate fold-level multiplier proposals into final _validations entries.
+
+    A multiplier ships only if:
+      - Same direction (>1.0 or <1.0) chosen in ≥3 of 4 folds (rank stability)
+      - Test-fold validation passed in ≥3 of 4 folds
+      - Average of accepted folds' multipliers used as final value
+
+    Returns dict suitable for writing to config["setup_score_multiplier"]:
+      {
+        "<setup>": <final_mult>,
+        "_validations": {
+          "<setup>": {"n": <test_n_total>, "wr_lb": <wr_lb>,
+                      "source": "wf_<n>folds", "approved_at": "<iso>"}
+        }
+      }
+    """
+    from collections import defaultdict
+    by_setup = defaultdict(list)
+    for fold_idx, (fold_result, fold_proposals) in enumerate(
+            zip(per_fold_results, multiplier_proposals_by_fold)):
+        if not fold_result.get("validation", {}).get("passes"):
+            continue
+        for setup, mult in (fold_proposals or {}).items():
+            by_setup[setup].append((fold_idx, mult, fold_result))
+
+    finals: dict = {}
+    validations: dict = {}
+    n_folds = len(per_fold_results)
+    threshold = max(1, int(round(n_folds * 0.75)))  # 3 of 4
+
+    for setup, fold_data in by_setup.items():
+        if len(fold_data) < threshold:
+            log.info(f"  {setup}: only {len(fold_data)}/{n_folds} folds passed — skipping (<{threshold})")
+            continue
+        directions = [1 if m > 1.0 else (-1 if m < 1.0 else 0) for _, m, _ in fold_data]
+        majority = max(set(directions), key=directions.count)
+        consistent = sum(1 for d in directions if d == majority)
+        if consistent < threshold:
+            log.info(f"  {setup}: direction unstable across folds ({consistent}/{n_folds} agree) — skipping")
+            continue
+        consistent_mults = [m for _, m, _ in fold_data if (m > 1.0) == (majority > 0) or (m < 1.0) == (majority < 0) or (m == 1.0 and majority == 0)]
+        final_mult = sum(consistent_mults) / len(consistent_mults)
+        finals[setup] = round(final_mult, 3)
+
+        # Aggregate test n + Wilson LB across passing folds
+        test_n_total = sum(fr["validation"]["test_metrics_with_mults"].get("n_trades", 0)
+                            for _, _, fr in fold_data)
+        test_wr_avg = sum(fr["validation"]["test_metrics_with_mults"].get("wr", 0)
+                           for _, _, fr in fold_data) / len(fold_data)
+        # Wilson LB approx: estimate with avg WR + total n
+        from math import sqrt as _sqrt
+        wins_est = int(test_wr_avg * test_n_total)
+        if test_n_total > 0:
+            z = 1.96
+            phat = wins_est / test_n_total
+            denom = 1 + z * z / test_n_total
+            center = (phat + z * z / (2 * test_n_total)) / denom
+            spread = z * _sqrt((phat * (1 - phat) + z * z / (4 * test_n_total)) / test_n_total) / denom
+            wr_lb = max(0.0, center - spread)
+        else:
+            wr_lb = 0.0
+
+        validations[setup] = {
+            "n": test_n_total,
+            "wr": round(test_wr_avg, 3),
+            "wr_lb": round(wr_lb, 3),
+            "source": f"wf_{len(fold_data)}folds_{datetime.now().strftime('%Y%m%d')}",
+            "approved_at": datetime.now().isoformat(),
+        }
+        log.info(f"  {setup}: SHIP — final mult={final_mult:.3f}, n={test_n_total}, wr_lb={wr_lb:.3f}")
+
+    return {**finals, "_validations": validations}
+
+
+def run_backtest_subset(start: str, end: str, min_score: int, min_rs: int,
+                         config_override: dict | None = None) -> dict:
+    """Invoke backtest.py with date range + thresholds; parse summary.
+
+    config_override (2026-05-09): pass a dict to deep-merge over config.json
+    before backtest.py runs. Used for setup multiplier grid search. Written
+    to a temp JSON file so the path is the same regardless of override size.
+    """
     # Use existing backtest.py CLI. Days = (end - start).days
     from datetime import date as _d
     s = _d.fromisoformat(start); e = _d.fromisoformat(end)
@@ -125,7 +325,28 @@ def run_backtest_subset(start: str, end: str, min_score: int, min_rs: int) -> di
         "--min-rs", str(min_rs),
         "--end-date", end,  # backtest.py must support --end-date flag
     ]
+    # Write override to a temp file (cleaner than inline JSON in CLI args)
+    _override_tempfile = None
+    if config_override:
+        import tempfile, json as _json_w
+        fd, _override_tempfile = tempfile.mkstemp(suffix="_wf_override.json", prefix="wf_")
+        try:
+            with os.fdopen(fd, "w") as fp:
+                _json_w.dump(config_override, fp)
+            cmd.extend(["--config-override", _override_tempfile])
+        except Exception:
+            try:
+                os.unlink(_override_tempfile)
+            except Exception:
+                pass
+            _override_tempfile = None
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+    # Cleanup temp override file
+    if _override_tempfile:
+        try:
+            os.unlink(_override_tempfile)
+        except Exception:
+            pass
     # Parse summary from stdout. backtest.py prints machine-readable aliases
     # (lowercase "Total trades:" etc.) at lines 1754-1757 specifically for us
     # WHEN --portfolio is passed. Without --portfolio, only the signal-mode
@@ -160,12 +381,20 @@ def run_backtest_subset(start: str, end: str, min_score: int, min_rs: int) -> di
 
 
 def run_walk_forward(folds: int = 3, train_days: int = 120, test_days: int = 30,
-                     end_date: str = None) -> list:
-    """Run walk-forward with N folds ending at end_date (or today)."""
+                     end_date: str = None, tune_multipliers: bool = False) -> list:
+    """Run walk-forward with N folds ending at end_date (or today).
+
+    tune_multipliers (2026-05-09): when True, also runs tune_setup_multipliers
+    on each fold's train window and validates on the test window. Per-fold
+    multiplier proposals attached to FoldResult.tuned_extras for downstream
+    write_validations_from_folds() aggregation.
+    """
     from datetime import date as _d
     end = _d.fromisoformat(end_date) if end_date else _d.today()
 
     results = []
+    multiplier_proposals_by_fold: list[dict] = []
+
     for i in range(folds):
         # Fold i's test ends at (end - i*test_days)
         test_end = end - timedelta(days=i * test_days)
@@ -176,18 +405,51 @@ def run_walk_forward(folds: int = 3, train_days: int = 120, test_days: int = 30,
         log.info(f"=== Fold {i+1}/{folds} ===")
         log.info(f"Train: {train_start} -> {train_end}  Test: {test_start} -> {test_end}")
 
-        # Tune on train
+        # Phase 1: tune (min_score, min_rs) on train
         try:
             tuned = tune_on_train(train_start.isoformat(), train_end.isoformat())
         except Exception as e:
             log.error(f"Fold {i+1} tune failed: {e} — skipping")
             continue
 
-        # Score on test
+        # Phase 2: tune setup multipliers on train (using chosen min_score, min_rs as fixed)
+        fold_multipliers: dict = {}
+        validation_result: dict | None = None
+        if tune_multipliers:
+            try:
+                fold_multipliers = tune_setup_multipliers(
+                    train_start.isoformat(), train_end.isoformat(),
+                    min_score=tuned["min_score"], min_rs=tuned["min_rs"],
+                )
+                # Validate proposed multipliers on test fold
+                if fold_multipliers:
+                    validation_result = validate_multipliers_on_test(
+                        test_start.isoformat(), test_end.isoformat(),
+                        min_score=tuned["min_score"], min_rs=tuned["min_rs"],
+                        proposed_multipliers=fold_multipliers,
+                    )
+            except Exception as e:
+                log.warning(f"Fold {i+1} multiplier tuning failed: {e} — proceeding without multipliers")
+
+        multiplier_proposals_by_fold.append(fold_multipliers)
+
+        # Phase 3: score on test (with the proposed multipliers if validation passed)
+        test_override = None
+        if fold_multipliers and validation_result and validation_result.get("passes"):
+            test_override = {
+                "setup_score_multiplier": {
+                    **fold_multipliers,
+                    "_validations": {
+                        s: {"n": 999, "wr_lb": 0.0, "source": "wf_test_scoring"}
+                        for s, m in fold_multipliers.items() if m < 1.0
+                    },
+                }
+            }
         try:
             test_result = run_backtest_subset(
                 start=test_start.isoformat(), end=test_end.isoformat(),
                 min_score=tuned["min_score"], min_rs=tuned["min_rs"],
+                config_override=test_override,
             )
         except Exception as e:
             log.error(f"Fold {i+1} test scoring failed: {e} — skipping")
@@ -207,8 +469,39 @@ def run_walk_forward(folds: int = 3, train_days: int = 120, test_days: int = 30,
             max_dd=test_result["max_dd"],
             sharpe=test_result["sharpe"],
         )
+        # Attach multiplier proposal + validation under tuned_extras (FoldResult
+        # is a frozen dataclass field, so we use setattr defensively)
+        try:
+            fold.tuned_extras = {
+                "multipliers": fold_multipliers,
+                "validation": validation_result,
+            }
+        except Exception:
+            pass
         results.append(fold)
         log.info(f"Fold {i+1}: N={fold.n_trades} WR={fold.wr:.1%} PF={fold.pf:.2f}")
+
+    # Phase 4: aggregate multiplier proposals across folds (write candidate _validations)
+    if tune_multipliers and any(multiplier_proposals_by_fold):
+        try:
+            log.info("=== Aggregating multiplier proposals across folds ===")
+            # Build per-fold result list with validation attached
+            per_fold_for_agg = [
+                {"validation": getattr(r, "tuned_extras", {}).get("validation")
+                                or {"passes": False}}
+                for r in results
+            ]
+            shipped = write_validations_from_folds(per_fold_for_agg, multiplier_proposals_by_fold)
+            cache_path = BASE_DIR / "cache" / "wf_multiplier_proposals.json"
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps({
+                "generated_at": datetime.now().isoformat(),
+                "shipped_multipliers": shipped,
+                "per_fold_proposals": multiplier_proposals_by_fold,
+            }, indent=2))
+            log.info(f"Wrote shipped-multiplier candidates to {cache_path}")
+        except Exception as e:
+            log.warning(f"Multiplier aggregation failed: {e}")
 
     return results
 
@@ -309,6 +602,10 @@ if __name__ == "__main__":
                         help="Skip running WF — just apply weights from cache/walk_forward_v2_results.json")
     parser.add_argument("--dry-run", action="store_true",
                         help="With --apply-config: show diff without writing config.json")
+    parser.add_argument("--tune-multipliers", action="store_true",
+                        help="Also tune setup_score_multiplier per setup family on each fold's "
+                             "train window. Validate on test fold. Aggregate into shipped "
+                             "multipliers (3 of 4 folds must agree). Adds ~10min per fold.")
     args = parser.parse_args()
 
     if args.apply_config:
@@ -318,7 +615,8 @@ if __name__ == "__main__":
             raise SystemExit(1)
         raise SystemExit(0)
 
-    results = run_walk_forward(args.folds, args.train_days, args.test_days, args.end_date)
+    results = run_walk_forward(args.folds, args.train_days, args.test_days, args.end_date,
+                               tune_multipliers=args.tune_multipliers)
     summary = summarize(results)
     # Preserve current weight shifts so --apply-config can replay them
     try:
