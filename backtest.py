@@ -1896,10 +1896,21 @@ def main():
             result["config"]["min_score"]       = args.min_score
             result["config"]["hold_days"]       = args.hold
         print_portfolio_results(result)
-        # Save results
+        # Save results — 2026-05-09: write BOTH a timestamped snapshot (preserves
+        # every run) AND the stable `portfolio_backtest.json` pointer (latest).
+        # Filename encodes the key params so directory listings are scannable:
+        # portfolio_backtest_<days>d_min<score>_h<hold>_<timestamp>.json
+        from datetime import datetime as _dt
+        _ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        _snap_name = f"portfolio_backtest_{args.days}d_min{args.min_score}_h{args.hold}_{_ts}.json"
+        snapshot_path = BASE_DIR / "cache" / _snap_name
         json_path = BASE_DIR / "cache" / "portfolio_backtest.json"
-        json_path.write_text(json.dumps(result, indent=2, default=str))
-        print(f"\nResults saved: {json_path}")
+        _payload = json.dumps(result, indent=2, default=str)
+        snapshot_path.write_text(_payload)
+        json_path.write_text(_payload)
+        print(f"\nResults saved:")
+        print(f"  snapshot:  {snapshot_path}")
+        print(f"  pointer:   {json_path}")
 
         # 2026-05-08 — Supabase dual-write via push_backtest_to_supabase.py.
         # That module owns the backtest_runs / backtest_trades tables (see
