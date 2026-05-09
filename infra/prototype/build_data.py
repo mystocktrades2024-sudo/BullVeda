@@ -1862,11 +1862,18 @@ def main():
         if r.get('verdict'):      by_verdict[r['verdict']]    += 1
 
     # ---- Portfolio (open + closed positions, equity) ----
+    # Phase B.1 (2026-05-09): route through state_layer for cache + future Mode 2.
     portfolio = {"positions": [], "closed": [], "equity": None, "cash": None,
                  "monthly_pnl": {}, "equity_curve": []}
-    if PORTFOLIO.exists():
+    try:
+        import sys
+        sys.path.insert(0, str(ROOT))
+        from state_layer import load_portfolio_state
+        ps = load_portfolio_state()
+    except Exception:
+        ps = json.loads(PORTFOLIO.read_text()) if PORTFOLIO.exists() else {}
+    if ps:
         try:
-            ps = json.loads(PORTFOLIO.read_text())
             portfolio["positions"]    = ps.get("positions") or []
             portfolio["closed"]       = ps.get("closed_trades") or []
             portfolio["equity"]       = ps.get("equity")
@@ -1978,9 +1985,21 @@ def main():
             "win_rate": None, "by_strategy": {}, "by_score_bucket": {},
             "mae_avg": None, "mfe_avg": None, "rr_avg": None,
             "recent": [], "audit_trail": []}
-    if SIGNAL_LOG.exists():
+    # Phase B.1 (2026-05-09): route through state_layer for cache.
+    sl: list = []
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(ROOT))
+        from state_layer import load_signal_log
+        sl = load_signal_log()
+    except Exception:
+        if SIGNAL_LOG.exists():
+            try:
+                sl = json.loads(SIGNAL_LOG.read_text())
+            except Exception:
+                sl = []
+    if sl:
         try:
-            sl = json.loads(SIGNAL_LOG.read_text())
             perf["total"]  = len(sl)
             perf["open"]   = sum(1 for r in sl if r.get("status") == "OPEN")
             done = [r for r in sl if r.get("outcome_10d") in ("win", "loss", "breakeven")]

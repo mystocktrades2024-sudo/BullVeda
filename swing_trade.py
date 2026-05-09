@@ -3373,14 +3373,20 @@ def run_daily_scan(force_fresh: bool = False):
         # #11: Portfolio-level position cap — don't emit more BUYs than slots available
         try:
             _max_open = int(_de_cfg.get("max_total_open_positions", 15))
-            _ps_path = BASE_DIR / "data" / "portfolio_state.json"
+            # Phase B.1 (2026-05-09): route through state_layer for cache + future Mode 2.
             _cur_open = 0
-            if _ps_path.exists():
-                try:
-                    _ps = json.loads(_ps_path.read_text())
-                    _cur_open = len(_ps.get("positions") or [])
-                except Exception:
-                    _cur_open = 0
+            try:
+                from state_layer import load_portfolio_state
+                _ps = load_portfolio_state()
+                _cur_open = len(_ps.get("positions") or [])
+            except Exception:
+                _ps_path = BASE_DIR / "data" / "portfolio_state.json"
+                if _ps_path.exists():
+                    try:
+                        _ps = json.loads(_ps_path.read_text())
+                        _cur_open = len(_ps.get("positions") or [])
+                    except Exception:
+                        _cur_open = 0
             _slots = max(0, _max_open - _cur_open)
             _bcs = bundle.get("buy_candidates") or []
             if len(_bcs) > _slots:
