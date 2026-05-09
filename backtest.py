@@ -661,7 +661,8 @@ def run_backtest(days: int = 252, hold_days: int = 5,
                  min_score: int = 50, min_rs: int = 65,
                  top_n: int = 5, end_date: str | None = None,
                  profile: str | None = None,
-                 config_override: str | None = None) -> list[dict]:
+                 config_override: str | None = None,
+                 max_score: int | None = None) -> list[dict]:
     """
     Single-window backtest. For true walk-forward, use backtest/walk_forward_v2.py.
 
@@ -991,6 +992,7 @@ def run_backtest(days: int = 252, hold_days: int = 5,
                 res = fut.result()
                 if not (res and res["gate_passed"]
                         and res["score"] >= min_score
+                        and (max_score is None or res["score"] <= max_score)
                         and res.get("rs_rank", 0) >= min_rs):
                     continue
                 # Apply kill list — same rule as live decision_engine
@@ -1380,6 +1382,7 @@ def run_portfolio_backtest(
     time_stop_flat_pct: float = 1.0,
     exclude_setups: list = None,
     config_override: str | None = None,
+    max_score: int | None = None,
 ) -> dict:
     """
     Walk-forward portfolio backtest with:
@@ -1401,6 +1404,7 @@ def run_portfolio_backtest(
 
     all_picks = run_backtest(days=days, hold_days=hold_days,
                              min_score=min_score, min_rs=min_rs, top_n=top_n,
+                             max_score=max_score,
                              config_override=config_override)
     if not all_picks:
         return {"error": "No picks generated"}
@@ -1905,6 +1909,8 @@ def main():
             min_score=args.min_score, min_rs=args.min_rs, top_n=args.top_n,
             starting_equity=args.equity, max_positions=args.positions,
             pct_per_trade=args.size_pct,
+            trail_activate_pct=args.trail_trigger,  # 2026-05-09 wired CLI
+            max_score=args.max_score,                # 2026-05-09 wired CLI
             config_override=getattr(args, "config_override", None),
         )
         # Annotate result with overlay flags for audit/report
