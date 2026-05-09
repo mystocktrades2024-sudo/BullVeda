@@ -325,6 +325,8 @@ def run_backtest_subset(start: str, end: str, min_score: int, min_rs: int,
         "--min-rs", str(min_rs),
         "--end-date", end,  # backtest.py must support --end-date flag
     ]
+    if os.environ.get("WF_AS_OF_MEMBERSHIP") == "1":
+        cmd.append("--as-of-membership")
     # Write override to a temp file (cleaner than inline JSON in CLI args)
     _override_tempfile = None
     if config_override:
@@ -340,7 +342,10 @@ def run_backtest_subset(start: str, end: str, min_score: int, min_rs: int,
             except Exception:
                 pass
             _override_tempfile = None
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+    # 2026-05-09: bumped timeout 3600 → 14400 (4h). With CPU contention + the
+    # ~1000-ticker as-of-membership universe, individual backtests can exceed
+    # the previous 1h cap. Tradeoff: a true hang now ties up a worker for 4h.
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=14400)
     # Cleanup temp override file
     if _override_tempfile:
         try:
@@ -606,7 +611,14 @@ if __name__ == "__main__":
                         help="Also tune setup_score_multiplier per setup family on each fold's "
                              "train window. Validate on test fold. Aggregate into shipped "
                              "multipliers (3 of 4 folds must agree). Adds ~10min per fold.")
+    parser.add_argument("--as-of-membership", action="store_true",
+                        help="Pass --as-of-membership to backtest.py subprocess calls so "
+                             "each fold uses point-in-time S&P 500 membership instead of "
+                             "today's. Closes survivorship-bias bias in walk-forward.")
     args = parser.parse_args()
+    # Persist the as-of-membership flag for run_backtest_subset to pick up
+    if args.as_of_membership:
+        os.environ["WF_AS_OF_MEMBERSHIP"] = "1"
 
     if args.apply_config:
         result = apply_config_from_results(dry_run=args.dry_run)
