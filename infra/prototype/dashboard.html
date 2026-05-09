@@ -1088,6 +1088,9 @@
 <div class="tab-content">
 <div class="tab-panel scanner on" data-tab="scanner">
 
+<!-- TOP BUY TILES — hero strip showing the day's highest-conviction picks -->
+<div id="topBuyTiles" style="display:none; margin:0 0 18px;"></div>
+
 <!-- Earnings This Week widget (auto-shows when ≥1 BUY/WATCH/watchlist ticker reports in 7d) -->
 <div id="earningsWeekWidget" style="display:none"></div>
 
@@ -2312,6 +2315,7 @@ async function init() {
   } catch (_) { /* non-fatal — fall through to in-data.json copy */ }
   renderSystemStatusBanner(DATA);
   renderFloorTape();
+  renderTopBuyTiles();
   const lf = document.getElementById('lastScanFooter');
   if (lf) lf.textContent = (DATA.run_timestamp || '—').slice(0, 16);
   setText('runTs', `DASHBOARD · ${DATA.run_timestamp || ''}`);
@@ -5596,6 +5600,118 @@ function renderOptionsFlow() {
     </div>`;
 }
 window.renderOptionsFlow = renderOptionsFlow;
+
+// ── Top Buy Tiles — hero strip on Scanner tab ──────────────────────────
+// Surfaces the day's highest-conviction BUYs as visual tiles. Pulls from
+// elite_picks across all 3 modes, ranks by elite_score, takes top 6.
+// Each tile click → elite-detail.html for that ticker.
+function renderTopBuyTiles() {
+  const host = document.getElementById('topBuyTiles');
+  if (!host || !DATA) return;
+
+  // Aggregate BUY picks from all modes, dedupe by ticker (keep highest score)
+  const ep = DATA.elite_picks || {};
+  const collected = {};
+  for (const mode of ['Swing', 'Position', 'Invest']) {
+    const buys = (ep[mode] && ep[mode].BUY) || [];
+    for (const p of buys) {
+      const t = p.ticker;
+      if (!t) continue;
+      if (!collected[t] || (p.elite_score || 0) > (collected[t].elite_score || 0)) {
+        collected[t] = { ...p, _mode: mode };
+      }
+    }
+  }
+
+  // Cross-reference with full ticker payload for live price + plan
+  const byT = {};
+  for (const sec of ['short_term','medium_term','long_term']) {
+    for (const r of (DATA[sec] || [])) {
+      if (r.ticker && !byT[r.ticker]) byT[r.ticker] = r;
+    }
+  }
+
+  // Beat predictions for badge
+  const beatByT = {};
+  for (const p of (DATA.earnings_beat_predictions || [])) {
+    if (p.ticker) beatByT[p.ticker] = p;
+  }
+
+  let picks = Object.values(collected).sort((a, b) => (b.elite_score || 0) - (a.elite_score || 0)).slice(0, 6);
+
+  // Fallback: if no elite BUYs (system circuit-breaker active or empty),
+  // surface top BEAT-predictions instead, so the strip is never blank.
+  let fallbackMode = false;
+  if (picks.length === 0) {
+    const bp = (DATA.earnings_beat_predictions || []).slice(0, 6);
+    picks = bp.map(p => ({ ticker: p.ticker, elite_score: p.beat_score, _isBeat: true,
+                            verdict_line: `Beat-prediction ${p.beat_score}/100 · reports ${p.report_date}` }));
+    fallbackMode = true;
+  }
+
+  if (picks.length === 0) {
+    host.style.display = 'none';
+    return;
+  }
+  host.style.display = 'block';
+
+  const tileColor = (s) => s >= 80 ? 'var(--green)'
+                          : s >= 65 ? 'var(--accent)'
+                          : s >= 50 ? 'var(--info)' : 'var(--ink-3)';
+  const fmtPx = v => v == null ? '—' : '$' + Number(v).toFixed(2);
+
+  const tiles = picks.map(p => {
+    const t = p.ticker;
+    const td = byT[t] || {};
+    const plan = td.trade_plan || {};
+    const score = td.score || td.composite_score;
+    const eliteSc = p.elite_score || 0;
+    const sc = tileColor(eliteSc);
+    const setup = td.setup_family || td.setup || (p._isBeat ? 'Beat candidate' : '');
+    const px = td.price || td.last;
+    const stop = plan.stop || td.stop;
+    const t1 = plan.target1 || td.target1;
+    const rr = plan.rr_ratio || td.rr;
+    const verdict = td.verdict || td.stage || (p._isBeat ? 'BEAT' : 'BUY');
+    const bp = beatByT[t];
+    const bpBadge = bp && bp.tier === 'STRONG' ? `<span style="position:absolute;top:8px;right:8px;background:var(--green);color:var(--bg-0);font-size:9px;font-weight:800;padding:2px 6px;border-radius:3px;letter-spacing:0.06em;">🎯 BEAT ${bp.beat_score.toFixed(0)}</span>` : '';
+    const earnings = td.earnings_in_days != null
+      ? `<div style="margin-top:4px;color:var(--accent);font-size:10px;font-weight:600;">📅 EARN +${td.earnings_in_days}d</div>` : '';
+    return `
+      <a href="elite-detail.html?t=${t}" style="text-decoration:none;color:var(--ink-0);">
+      <div style="position:relative;background:linear-gradient(135deg, color-mix(in oklch, ${sc} 16%, var(--bg-1)) 0%, var(--bg-2) 70%);
+        border:1px solid ${sc};border-left:4px solid ${sc};border-radius:8px;
+        padding:14px 16px;min-width:180px;flex:1 1 180px;cursor:pointer;
+        transition:transform 0.15s ease;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+        ${bpBadge}
+        <div style="display:flex;align-items:baseline;gap:8px;">
+          <span style="font-family:var(--mono);font-size:18px;font-weight:800;letter-spacing:-0.02em;color:${sc};">${t}</span>
+          <span style="font-size:10px;color:var(--ink-3);font-weight:600;letter-spacing:0.05em;">${p._mode || ''}</span>
+        </div>
+        <div style="margin-top:4px;color:var(--ink-1);font-size:11.5px;font-weight:600;">${verdict} · ${setup}</div>
+        <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-size:10.5px;">
+          <div><span style="color:var(--ink-3);">PRICE</span><br><b style="color:var(--ink-0);font-family:var(--mono);">${fmtPx(px)}</b></div>
+          <div><span style="color:var(--ink-3);">ELITE</span><br><b style="color:${sc};font-family:var(--mono);">${eliteSc.toFixed(0)}/100</b></div>
+          <div><span style="color:var(--ink-3);">STOP</span><br><b style="color:var(--red);font-family:var(--mono);">${fmtPx(stop)}</b></div>
+          <div><span style="color:var(--ink-3);">T1</span><br><b style="color:var(--green);font-family:var(--mono);">${fmtPx(t1)}</b></div>
+        </div>
+        ${rr ? `<div style="margin-top:6px;font-size:10.5px;color:var(--ink-2);">R:R <b style="color:var(--ink-0)">${Number(rr).toFixed(1)}:1</b></div>` : ''}
+        ${earnings}
+      </div>
+      </a>`;
+  }).join('');
+
+  const headerLabel = fallbackMode
+    ? 'TOP BEAT CANDIDATES — earnings this week'
+    : `TOP ${picks.length} BUY${picks.length>1?'S':''} — highest-conviction`;
+  host.innerHTML = `
+    <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px;">
+      <span style="font-size:11px;color:var(--ink-3);letter-spacing:0.1em;font-weight:700;">${headerLabel}</span>
+      <span style="color:var(--ink-3);font-size:10.5px;">click any tile → full deep-dive</span>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">${tiles}</div>`;
+}
+window.renderTopBuyTiles = renderTopBuyTiles;
 
 // ── Earnings Playbook tab ─────────────────────────────────────────────
 // Sortable + filterable table of upcoming earnings (next 10 days) with
