@@ -449,6 +449,260 @@ def backtest_vs_live_drift(live_trades: list[dict], backtest_metrics: dict,
     }
 
 
+# ─── #1.1 Train/Test/Holdout split ──────────────────────────────────────────
+
+def train_test_holdout_split(trades_sorted_by_date: list[dict],
+                              ratios: tuple[float, float, float] = (0.7, 0.15, 0.15)) -> dict:
+    """Time-ordered 70/15/15 split. Reports WR/PF for each segment.
+
+    OVERFIT DETECTION: if train.PF >> test.PF, the system is over-fit to early data.
+    test.PF and holdout.PF should be within ~20% of train.PF for confidence.
+    """
+    n = len(trades_sorted_by_date)
+    if n < 30:
+        return {"available": False, "reason": f"need ≥30 trades, have {n}"}
+    n_train = int(n * ratios[0])
+    n_test = int(n * ratios[1])
+    train = trades_sorted_by_date[:n_train]
+    test = trades_sorted_by_date[n_train:n_train + n_test]
+    holdout = trades_sorted_by_date[n_train + n_test:]
+
+    def _stats(items):
+        if not items:
+            return {"n": 0, "wr_pct": 0, "pf": 0, "total_pct": 0, "avg_pct": 0}
+        n_ = len(items)
+        wins = sum(1 for t in items if t.get("win"))
+        rets = [t.get("pnl_pct", 0) for t in items]
+        gw = sum(r for r in rets if r > 0)
+        gl = abs(sum(r for r in rets if r <= 0))
+        return {
+            "n": n_,
+            "wr_pct": round(wins / n_ * 100, 1),
+            "pf": round(gw / gl, 2) if gl > 0 else 999,
+            "total_pct": round(sum(rets), 2),
+            "avg_pct": round(sum(rets) / n_, 2),
+        }
+
+    train_s = _stats(train); test_s = _stats(test); holdout_s = _stats(holdout)
+    # Overfit verdict: test.PF / train.PF
+    pf_ratio_test = test_s["pf"] / train_s["pf"] if train_s["pf"] else 0
+    pf_ratio_holdout = holdout_s["pf"] / train_s["pf"] if train_s["pf"] else 0
+    overfit = pf_ratio_test < 0.5 or pf_ratio_holdout < 0.5
+    return {
+        "available": True,
+        "train": train_s, "test": test_s, "holdout": holdout_s,
+        "pf_ratio_test_vs_train": round(pf_ratio_test, 2),
+        "pf_ratio_holdout_vs_train": round(pf_ratio_holdout, 2),
+        "overfit_detected": overfit,
+        "interpretation": ("⚠ OVERFIT — test/holdout PF much lower than train"
+                           if overfit else
+                           "stable — train/test/holdout consistent"),
+    }
+
+
+# ─── #1.2 K-fold time-series CV ──────────────────────────────────────────────
+
+def kfold_timeseries_cv(trades_sorted_by_date: list[dict], k: int = 5) -> dict:
+    """K-fold time-series CV. Reports per-fold WR/PF + variance across folds.
+
+    Stability indicator: if CV std(PF) is large relative to mean(PF), edge isn't
+    consistent. Mean ± 2σ should ideally NOT include 1.0.
+    """
+    n = len(trades_sorted_by_date)
+    if n < k * 5:
+        return {"available": False, "reason": f"need ≥{k*5} trades for {k}-fold, have {n}"}
+    fold_size = n // k
+    fold_results = []
+    for i in range(k):
+        start = i * fold_size
+        end = start + fold_size if i < k - 1 else n
+        items = trades_sorted_by_date[start:end]
+        n_ = len(items)
+        wins = sum(1 for t in items if t.get("win"))
+        rets = [t.get("pnl_pct", 0) for t in items]
+        gw = sum(r for r in rets if r > 0)
+        gl = abs(sum(r for r in rets if r <= 0))
+        pf = gw / gl if gl > 0 else 999
+        fold_results.append({
+            "fold": i + 1, "n": n_,
+            "date_start": (items[0].get("entry_date") or "")[:10] if items else "",
+            "date_end": (items[-1].get("exit_date") or "")[:10] if items else "",
+            "wr_pct": round(wins / n_ * 100, 1),
+            "pf": round(min(pf, 999), 2),
+            "total_pct": round(sum(rets), 2),
+        })
+    pfs = [f["pf"] for f in fold_results if f["pf"] < 999]
+    wrs = [f["wr_pct"] for f in fold_results]
+    mean_pf = statistics.mean(pfs) if pfs else 0
+    std_pf = statistics.stdev(pfs) if len(pfs) > 1 else 0
+    mean_wr = statistics.mean(wrs) if wrs else 0
+    std_wr = statistics.stdev(wrs) if len(wrs) > 1 else 0
+    # Stability: CV (coefficient of variation) — std/mean
+    cv = std_pf / mean_pf if mean_pf else 999
+    if cv < 0.20:
+        verdict = "very stable"
+    elif cv < 0.40:
+        verdict = "stable"
+    elif cv < 0.70:
+        verdict = "moderate variance — edge regime-dependent"
+    else:
+        verdict = "high variance — edge inconsistent across time"
+    return {
+        "available": True,
+        "folds": fold_results,
+        "mean_pf": round(mean_pf, 2),
+        "std_pf":  round(std_pf, 2),
+        "mean_wr": round(mean_wr, 1),
+        "std_wr":  round(std_wr, 1),
+        "cv":      round(cv, 2),
+        "interpretation": verdict,
+    }
+
+
+# ─── #1.4 White's Reality Check (Bonferroni-corrected multi-strategy) ────────
+
+def whites_reality_check(strategies: dict[str, list[float]],
+                          benchmark_pf: float = 1.0,
+                          n_iter: int = 1000, seed: int = 42) -> dict:
+    """Bonferroni-corrected p-value across multiple competing strategies.
+
+    When you test K strategies and pick the best, the naïve p-value is
+    inflated by data snooping. Bonferroni correction divides α by K. Reports
+    per-strategy p-value AND Bonferroni threshold for K-strategy comparison.
+
+    Strategies: {strategy_name: list of pnl_pct returns}
+    """
+    if not strategies:
+        return {"available": False, "reason": "no strategies"}
+    rng = random.Random(seed)
+    K = len(strategies)
+    bonferroni_alpha = 0.05 / K  # adjusted significance threshold
+    results = []
+    for name, returns in strategies.items():
+        if not returns or len(returns) < 5:
+            continue
+        gw = sum(r for r in returns if r > 0)
+        gl = abs(sum(r for r in returns if r <= 0))
+        obs_pf = gw / gl if gl > 0 else 999
+        # Bootstrap p-value
+        n_better = 0
+        rets = list(returns)
+        for _ in range(n_iter):
+            sample = [rng.choice(rets) * rng.choice([-1, 1]) for _ in range(len(rets))]
+            s_gw = sum(r for r in sample if r > 0)
+            s_gl = abs(sum(r for r in sample if r <= 0))
+            sim_pf = s_gw / s_gl if s_gl > 0 else 999
+            if sim_pf >= obs_pf:
+                n_better += 1
+        p_raw = n_better / n_iter
+        results.append({
+            "strategy": name,
+            "n_trades": len(returns),
+            "observed_pf": round(min(obs_pf, 999), 2),
+            "p_raw": round(p_raw, 4),
+            "p_bonferroni_corrected": round(min(p_raw * K, 1.0), 4),
+            "passes_naive_alpha":      p_raw < 0.05,
+            "passes_bonferroni":       p_raw < bonferroni_alpha,
+        })
+    return {
+        "available": True,
+        "n_strategies": K,
+        "bonferroni_threshold_alpha": round(bonferroni_alpha, 4),
+        "strategies": results,
+        "n_iter": n_iter,
+    }
+
+
+# ─── #3.1 Setup × score-band stability over time quartiles ───────────────────
+
+def signal_stability_quartiles(trades_sorted_by_date: list[dict]) -> dict:
+    """Partition trades into time quartiles, recompute WR per setup per quartile.
+
+    Reveals whether Trend Continuation's 44% WR is stable or whether it spiked
+    in Q3 and faded. If WR oscillates Q1→Q2→Q3→Q4 by >15pp, edge is NOT durable.
+    """
+    n = len(trades_sorted_by_date)
+    if n < 16:
+        return {"available": False, "reason": f"need ≥16 trades for quartile stability"}
+    q_size = n // 4
+    quartiles = {
+        "Q1": trades_sorted_by_date[:q_size],
+        "Q2": trades_sorted_by_date[q_size:q_size*2],
+        "Q3": trades_sorted_by_date[q_size*2:q_size*3],
+        "Q4": trades_sorted_by_date[q_size*3:],
+    }
+    # Per setup, per quartile WR
+    setups = set(t.get("setup_type") or "?" for t in trades_sorted_by_date)
+    rows = []
+    for setup in setups:
+        cells = {"setup": setup}
+        wrs = []
+        for qname, q_trades in quartiles.items():
+            items = [t for t in q_trades if (t.get("setup_type") or "?") == setup]
+            n_ = len(items)
+            if n_ < 2:
+                cells[qname] = {"n": n_, "wr": None}
+                continue
+            wins = sum(1 for t in items if t.get("win"))
+            wr = wins / n_ * 100
+            cells[qname] = {"n": n_, "wr": round(wr, 1)}
+            wrs.append(wr)
+        if len(wrs) >= 2:
+            cells["wr_range"] = round(max(wrs) - min(wrs), 1)
+            cells["wr_stdev"] = round(statistics.stdev(wrs) if len(wrs) > 1 else 0, 1)
+            cells["stable"]   = (max(wrs) - min(wrs)) < 15
+        else:
+            cells["wr_range"] = None
+            cells["stable"] = None
+        rows.append(cells)
+    return {"available": True, "rows": rows,
+            "quartile_dates": {q: {"start": (lst[0].get("entry_date") or "")[:10] if lst else "",
+                                     "end":   (lst[-1].get("exit_date") or "")[:10] if lst else "",
+                                     "n": len(lst)}
+                                for q, lst in quartiles.items()}}
+
+
+# ─── #7.4 VIX size-halving counterfactual ────────────────────────────────────
+
+def vix_size_halving_cf(trades: list[dict],
+                          vix_lookup_fn,
+                          vix_threshold: float = 25.0,
+                          size_haircut: float = 0.5) -> dict:
+    """What if we'd halved size when entering during VIX > threshold?
+
+    Args:
+      vix_lookup_fn: callable(date_str) -> float (VIX value at trade entry)
+      vix_threshold: trades entered above this get reduced size
+      size_haircut: multiplier (0.5 = half size)
+
+    Returns: {original_total, modified_total, n_affected, delta_pct}
+    """
+    original_total = sum(t.get("pnl_pct", 0) for t in trades)
+    modified = []
+    n_affected = 0
+    for t in trades:
+        try:
+            vix = vix_lookup_fn(t.get("entry_date") or "")
+        except Exception:
+            vix = None
+        ret = t.get("pnl_pct", 0)
+        if vix is not None and vix >= vix_threshold:
+            modified.append(ret * size_haircut)
+            n_affected += 1
+        else:
+            modified.append(ret)
+    modified_total = sum(modified)
+    return {
+        "vix_threshold": vix_threshold,
+        "size_haircut": size_haircut,
+        "n_affected": n_affected,
+        "n_total": len(trades),
+        "original_total_pct": round(original_total, 2),
+        "modified_total_pct": round(modified_total, 2),
+        "delta_pct": round(modified_total - original_total, 2),
+    }
+
+
 if __name__ == "__main__":
     # Smoke tests
     import json
