@@ -1856,6 +1856,14 @@ def main():
     parser.add_argument("--macro-filter", choices=["off", "spy200", "death_cross"],
                         default="off",
                         help="Macro overlay: 'spy200' blocks longs when SPY < SMA200; 'death_cross' blocks when SMA50<SMA200")
+    # 2026-05-09 — additional experiment flags from action plan
+    parser.add_argument("--max-score", type=int, default=None,
+                        help="Upper score bound (e.g. --min-score 65 --max-score 79 = band-only)")
+    parser.add_argument("--universe", choices=["sp500_r1000", "top100", "etf"],
+                        default="sp500_r1000",
+                        help="Universe selection: 'top100' restricts to top-100 by avg dollar volume; 'etf' loads sector ETFs only")
+    parser.add_argument("--trail-trigger", type=float, default=2.0,
+                        help="Trailing-stop activation threshold in pct (default 2.0 = stock must move +2%% before trail kicks in)")
     parser.add_argument("--as-of-membership", action="store_true",
                         help="Use point-in-time S&P 500 membership (data/membership/sp500_YYYY-MM.csv) "
                              "instead of today's. Eliminates survivorship bias (audit #1, Tier 2). "
