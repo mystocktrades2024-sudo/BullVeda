@@ -29,6 +29,19 @@ _SYSTEM_GATE_ACTIVE: bool = False
 _SYSTEM_GATE_REASON: str = ""
 
 
+def _setup_distribution_in_scan(b: dict) -> dict:
+    """Count tickers per setup_family across the analyzed universe.
+    Powers the Strategies tab — shows what scans are firing this run."""
+    from collections import Counter
+    counts = Counter()
+    for sec_key in ("buy_candidates", "watch_list", "near_short_blocked"):
+        for r in (b.get(sec_key) or []):
+            if not isinstance(r, dict): continue
+            sf = r.get("setup_family") or r.get("setup") or "Unknown"
+            counts[sf] += 1
+    return dict(counts.most_common())
+
+
 def _cap_bucket(mkt_cap) -> str:
     """Classify market cap into screener buckets (industry-standard).
     Mega: >$200B · Large: $10-200B · Mid: $2-10B · Small: $300M-2B · Micro: <$300M.
@@ -2248,6 +2261,51 @@ def main():
     # options_flow_scanner. Surfaced as a separate dashboard panel for
     # institutional-flow-following entry triggers.
     data["options_flow_top30"] = b.get("options_flow_top30") or []
+
+    # Crypto scan — bundle.crypto contains BTC/ETH/SOL/etc scored through
+    # the same gate cascade. Surface to V2 Crypto tab.
+    data["crypto"] = b.get("crypto") or {}
+
+    # Strategies — surface setup-family stats so the Strategies tab can
+    # show per-strategy hit rate / which scans are firing today.
+    data["strategies"] = {
+        "setup_stats": b.get("setup_stats") or {},
+        "by_setup_in_scan": _setup_distribution_in_scan(b),
+    }
+
+    # Leveraged ETFs — score the watchlist tickers from config that made
+    # it through the scan. Surface as a tactical-leverage tab.
+    _bundle_cfg = b.get("config") or {}
+    _lev_set = set(((_bundle_cfg.get("universe") or {}).get("leveraged_watchlist") or []))
+    _lev_picks = []
+    for sec_key, sec_val in b.items():
+        if not (isinstance(sec_val, list) and sec_val
+                and isinstance(sec_val[0], dict) and "ticker" in sec_val[0]):
+            continue
+        for r in sec_val:
+            t = (r.get("ticker") or "").upper()
+            if t in _lev_set:
+                _lev_picks.append({
+                    "ticker":   t,
+                    "price":    r.get("price"),
+                    "score":    r.get("score") or r.get("composite_score"),
+                    "verdict":  r.get("verdict") or (r.get("decision") or {}).get("verdict") or r.get("stage"),
+                    "setup":    r.get("setup_family") or r.get("setup"),
+                    "sector":   r.get("sector"),
+                    "rs_rank":  r.get("rs_rank"),
+                    "trade_plan": r.get("trade_plan") or {},
+                })
+    # Dedupe (same ticker may appear in multiple sections)
+    _seen = set(); _dedup = []
+    for p in sorted(_lev_picks, key=lambda x: -(x.get("score") or 0)):
+        if p["ticker"] in _seen: continue
+        _seen.add(p["ticker"]); _dedup.append(p)
+    data["leveraged"] = {
+        "watchlist": sorted(_lev_set),
+        "picks":     _dedup,
+        "in_scan":   len(_dedup),
+        "total":     len(_lev_set),
+    }
 
     # Earnings playbook — 1840+ US tickers reporting in next 10 days.
     # Built daily 5:30am PT by build_earnings_watchlist.py. The dashboard

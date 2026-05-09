@@ -1517,16 +1517,33 @@ async def etf_holdings(ticker: str):
 
 @app.get("/api/events/financial")
 async def financial_events_endpoint(event_type: str = "ipos", days_ahead: int = 30):
-    """Financial events — IPOs / splits / secondary offerings."""
+    """Financial events — IPOs / splits / secondary offerings.
+
+    EODHD returns variable shapes:
+      - list of events directly
+      - dict with 'data' or 'events' key
+      - dict keyed by ticker → list of events (rare)
+    Normalize to a flat list. (2026-05-08 — fixed unhashable-slice crash.)
+    """
     try:
         import eodhd_client as ec, datetime as _dt
         today = _dt.date.today()
         end = today + _dt.timedelta(days=days_ahead)
-        events = ec.financial_events(from_date=today.isoformat(), to_date=end.isoformat(), event_type=event_type) or []
-        # Normalize various EODHD shapes
-        if isinstance(events, dict) and "data" in events:
-            events = events["data"]
-        return {"event_type": event_type, "events": events[:50], "from": today.isoformat(), "to": end.isoformat()}
+        raw = ec.financial_events(from_date=today.isoformat(), to_date=end.isoformat(), event_type=event_type)
+        # Normalize to a flat list
+        if raw is None:
+            events = []
+        elif isinstance(raw, list):
+            events = raw
+        elif isinstance(raw, dict):
+            events = raw.get("data") or raw.get("events") or raw.get("ipos") or raw.get("splits") or []
+            if not isinstance(events, list):
+                events = []
+        else:
+            events = []
+        return {"event_type": event_type, "events": events[:50],
+                "count": len(events),
+                "from": today.isoformat(), "to": end.isoformat()}
     except Exception as e:
         raise HTTPException(500, str(e))
 
