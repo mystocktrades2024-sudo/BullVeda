@@ -2307,6 +2307,80 @@ def main():
         "by_setup_in_scan": _setup_distribution_in_scan(b),
     }
 
+    # 2026-05-09 — research_setup_stats: per-setup historical performance from
+    # the most-recent portfolio backtest. Powers the Research tab's rigor +
+    # decay sub-tabs on elite-detail (replaces previous hard-coded literals).
+    # Source: cache/portfolio_backtest.json (auto-written by backtest.py).
+    try:
+        import math as _math
+        bt_path = ROOT / "cache" / "portfolio_backtest.json"
+        if bt_path.exists():
+            bt = json.loads(bt_path.read_text())
+            trades = bt.get("trades") or []
+            # Per-setup aggregate
+            from collections import defaultdict as _dd
+            by_setup = _dd(list)
+            for t in trades:
+                s = t.get("setup_type") or "?"
+                by_setup[s].append(t)
+            setup_metrics = {}
+            def _wilson_lb(wins, n, z=1.96):
+                if n == 0: return 0.0
+                p = wins / n
+                denom = 1 + z*z/n
+                centre = p + z*z/(2*n)
+                spread = z * _math.sqrt((p*(1-p) + z*z/(4*n)) / n)
+                return max(0.0, (centre - spread) / denom)
+            for setup, items in by_setup.items():
+                n = len(items)
+                wins = sum(1 for t in items if t.get("win"))
+                wr = (wins / n) * 100 if n else 0
+                wr_lb = _wilson_lb(wins, n) * 100
+                pnls = [t.get("pnl_pct", 0) for t in items]
+                avg = sum(pnls) / n if n else 0
+                # Quartile WR (chronological partition)
+                trades_sorted = sorted(items, key=lambda x: x.get("entry_date", ""))
+                q_size = max(1, n // 4)
+                q_wrs = []
+                for qi in range(4):
+                    start = qi * q_size
+                    end = start + q_size if qi < 3 else n
+                    sub = trades_sorted[start:end]
+                    if len(sub) >= 2:
+                        q_wins = sum(1 for t in sub if t.get("win"))
+                        q_wrs.append({"q": f"Q{qi+1}", "wr": round(q_wins / len(sub) * 100, 1), "n": len(sub)})
+                    else:
+                        q_wrs.append({"q": f"Q{qi+1}", "wr": None, "n": len(sub)})
+                # Verdict
+                if wr_lb >= 30 and avg > 0.5:
+                    verdict = "real edge (CI > 30%)"
+                elif wr_lb >= 15:
+                    verdict = "marginal — CI low"
+                elif n < 10:
+                    verdict = "sample too small"
+                elif avg < -0.5:
+                    verdict = "killed (negative expectancy)"
+                else:
+                    verdict = "below edge threshold"
+                setup_metrics[setup] = {
+                    "n": n,
+                    "wr": round(wr, 1),
+                    "wr_lb": round(wr_lb, 1),
+                    "avg_pnl_pct": round(avg, 2),
+                    "verdict": verdict,
+                    "quartiles": q_wrs,
+                }
+            data["research_setup_stats"] = setup_metrics
+            data["research_backtest_meta"] = {
+                "source": "cache/portfolio_backtest.json",
+                "n_trades": len(trades),
+                "generated_at": bt.get("generated_at") or "",
+                "config": bt.get("config") or {},
+            }
+    except Exception as _rs_err:
+        data["research_setup_stats"] = {}
+        data["research_backtest_meta"] = {"error": str(_rs_err)[:200]}
+
     # Leveraged ETFs — score the watchlist tickers from config that made
     # it through the scan. Surface as a tactical-leverage tab.
     _bundle_cfg = b.get("config") or {}
