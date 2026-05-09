@@ -719,43 +719,84 @@ _CSS = """
   --bg-0: #0a0e1a; --bg-1: #111827; --bg-2: #1e293b; --bg-3: #334155;
   --ink-0: #f1f5f9; --ink-1: #cbd5e1; --ink-2: #94a3b8; --ink-3: #64748b;
   --rule: #334155; --rule-2: #475569;
-  --accent: #60a5fa; --pass: #10b981; --fail: #ef4444; --warn: #f59e0b; --info: #06b6d4;
+  --accent: #60a5fa; --pass: #10b981; --fail: #ef4444; --warn: #f59e0b;
+  --info: #06b6d4; --purple: #a78bfa;
   --mono: 'JetBrains Mono', 'SF Mono', monospace;
 }
 * { box-sizing: border-box; }
-body { margin:0; padding:0; font-family: 'Inter', -apple-system, system-ui, sans-serif;
-       background: var(--bg-0); color: var(--ink-0); line-height:1.5; }
-header { padding: 28px 36px 20px; border-bottom: 1px solid var(--rule);
-         background: linear-gradient(135deg, var(--bg-1), var(--bg-0)); position:sticky; top:0; z-index:10; }
-header h1 { margin:0; font-size:24px; font-weight:800; letter-spacing:-0.01em; }
-header .sub { color: var(--ink-2); font-size:12.5px; margin-top:4px; font-family: var(--mono); }
-nav { display:flex; gap:18px; flex-wrap:wrap; padding: 10px 36px; background: var(--bg-1);
-      border-bottom: 1px solid var(--rule); position:sticky; top:88px; z-index:9; font-size:11.5px; }
-nav a { color: var(--ink-2); text-decoration:none; font-family: var(--mono); letter-spacing:0.05em;
-        text-transform:uppercase; font-weight:600; padding:6px 0; }
-nav a:hover { color: var(--accent); }
-main { padding: 24px 36px; max-width: 1400px; margin: 0 auto; }
+body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, system-ui, sans-serif;
+       background: var(--bg-0); color: var(--ink-0); line-height: 1.5; }
+
+/* Header — gradient hero with KPI-style sub-meta */
+header { padding: 32px 40px 22px; border-bottom: 1px solid var(--rule);
+         background: linear-gradient(135deg, #1e293b, #0a0e1a); position: sticky; top: 0; z-index: 10; }
+header h1 { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.01em; }
+header .sub { color: var(--ink-2); font-size: 13px; margin-top: 6px; font-family: var(--mono); max-width: 880px; line-height: 1.55; }
+.preview-banner { background: linear-gradient(135deg, color-mix(in oklch, var(--accent) 14%, transparent), transparent);
+                  border: 1px solid var(--accent); border-radius: 8px; padding: 11px 16px; margin: 14px 40px 0;
+                  font-size: 12.5px; color: var(--ink-1); display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.preview-banner b { color: var(--accent); }
+
+/* Nav — sticky chips */
+nav { display: flex; gap: 6px; flex-wrap: wrap; padding: 12px 40px; background: var(--bg-1);
+      border-bottom: 1px solid var(--rule); position: sticky; top: 96px; z-index: 9; }
+nav a { color: var(--ink-2); text-decoration: none; font-family: var(--mono); letter-spacing: 0.04em;
+        font-weight: 600; padding: 5px 10px; font-size: 11px; border-radius: 5px;
+        background: var(--bg-2); border: 1px solid var(--rule-2); transition: all 0.15s; }
+nav a:hover { color: var(--accent); border-color: var(--accent); }
+
+main { padding: 24px 40px; max-width: 1500px; margin: 0 auto; }
+
+/* Sections — richer card style */
 section { margin-bottom: 36px; background: var(--bg-1); border: 1px solid var(--rule);
-          border-radius: 10px; padding: 22px 26px; }
-section h2 { margin:0 0 4px; font-size: 16px; font-weight: 800; letter-spacing:-0.01em; color: var(--ink-0); }
-section .desc { color: var(--ink-2); font-size: 12.5px; margin-bottom: 18px; line-height: 1.55; }
-.kpi-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
-.kpi { background: var(--bg-2); padding: 14px 16px; border-radius: 6px; border-top: 2px solid var(--accent); }
+          border-radius: 12px; padding: 24px 28px; }
+section h2 { margin: 0 0 6px; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: var(--ink-0);
+             display: flex; align-items: baseline; gap: 12px; }
+section h2 .num { font-size: 14px; color: var(--accent); font-family: var(--mono); }
+section h2 .tag { font-size: 9.5px; padding: 3px 8px; border-radius: 3px; letter-spacing: 0.08em;
+                  font-weight: 800; text-transform: uppercase; }
+section h2 .tag.live { background: var(--pass); color: var(--bg-0); }
+section h2 .tag.partial { background: var(--warn); color: var(--bg-0); }
+section h2 .tag.mock { background: var(--purple); color: var(--bg-0); }
+section .desc { color: var(--ink-2); font-size: 13px; margin-bottom: 18px; line-height: 1.6; max-width: 1000px; }
+section .narrative { background: color-mix(in oklch, var(--accent) 10%, var(--bg-2)); border-left: 3px solid var(--accent);
+                      padding: 11px 16px; margin: 12px 0 18px; border-radius: 0 6px 6px 0;
+                      font-size: 13px; line-height: 1.6; color: var(--ink-1); }
+section .narrative b { color: var(--accent); }
+section .insight { background: color-mix(in oklch, var(--warn) 8%, var(--bg-2)); border-left: 3px solid var(--warn);
+                    padding: 10px 14px; margin: 14px 0 0; border-radius: 0 4px 4px 0;
+                    font-size: 12.5px; line-height: 1.6; color: var(--ink-1); }
+section .insight b { color: var(--warn); }
+section .verdict-good { background: color-mix(in oklch, var(--pass) 10%, var(--bg-2)); border-left: 3px solid var(--pass);
+                         padding: 10px 14px; margin: 14px 0 0; border-radius: 0 4px 4px 0;
+                         font-size: 12.5px; line-height: 1.6; color: var(--ink-1); }
+
+/* KPI grid — richer with subtitles + color tops */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.kpi { background: var(--bg-2); padding: 14px 16px; border-radius: 7px; border-top: 2.5px solid var(--accent);
+       transition: transform 0.15s; }
+.kpi:hover { transform: translateY(-1px); }
 .kpi.pos { border-top-color: var(--pass); }
 .kpi.neg { border-top-color: var(--fail); }
 .kpi.warn { border-top-color: var(--warn); }
 .kpi.info { border-top-color: var(--info); }
-.kpi-l { font-size: 10.5px; color: var(--ink-3); letter-spacing:0.06em; text-transform:uppercase; font-weight: 600; }
-.kpi-v { font-size: 22px; font-family: var(--mono); font-weight: 800; margin-top:6px; color: var(--ink-0); }
-.kpi-sub { font-size: 11px; color: var(--ink-2); margin-top: 3px; }
-table { width:100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
-th { text-align: left; padding: 9px 8px; color: var(--ink-2); border-bottom: 1px solid var(--rule);
-     font-weight: 600; letter-spacing: 0.05em; cursor: pointer; user-select: none; }
+.kpi.purple { border-top-color: var(--purple); }
+.kpi-l { font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+.kpi-v { font-size: 22px; font-family: var(--mono); font-weight: 800; margin-top: 6px; color: var(--ink-0);
+         font-variant-numeric: tabular-nums; }
+.kpi-sub { font-size: 10.5px; color: var(--ink-2); margin-top: 4px; line-height: 1.4; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+th { text-align: left; padding: 10px 8px; color: var(--ink-2); border-bottom: 1px solid var(--rule);
+     font-weight: 600; letter-spacing: 0.05em; cursor: pointer; user-select: none; transition: color 0.15s; }
 th.num { text-align: right; }
 th:hover { color: var(--accent); }
 td { padding: 9px 8px; border-bottom: 1px solid color-mix(in oklch, var(--rule-2) 30%, transparent); color: var(--ink-1); }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
-tbody tr:hover { background: var(--bg-2); }
+tbody tr:hover { background: color-mix(in oklch, var(--bg-2) 60%, transparent); }
+
+/* Tags / verdict pills */
 .pass { color: var(--pass); }
 .fail { color: var(--fail); }
 .warn { color: var(--warn); }
@@ -767,9 +808,58 @@ tbody tr:hover { background: var(--bg-2); }
 .tag.fail { background: var(--fail); color: var(--bg-0); }
 .tag.warn { background: var(--warn); color: var(--bg-0); }
 .tag.info { background: var(--info); color: var(--bg-0); }
+
+/* Bars — for tables AND inline visualizations */
 .bar { background: var(--bg-3); height: 5px; border-radius: 2px; overflow: hidden; margin-top: 4px; }
 .bar > div { height: 100%; background: var(--accent); }
-footer { padding: 20px 36px 40px; color: var(--ink-3); font-size: 11px; text-align: center; }
+
+/* Forest plot rows (Bayesian, Setup CI) */
+.fp-row { display: grid; grid-template-columns: 220px 1fr 110px; gap: 12px; align-items: center;
+           padding: 9px 0; border-bottom: 1px solid color-mix(in oklch, var(--rule-2) 30%, transparent); }
+.fp-row:last-child { border-bottom: none; }
+.fp-row .nm { font-family: var(--mono); font-size: 12.5px; color: var(--ink-0); }
+.fp-row .nm small { color: var(--ink-3); font-weight: 400; font-size: 11px; }
+.fp-row .ci { position: relative; height: 26px; background: var(--bg-3); border-radius: 4px; overflow: visible; }
+.fp-row .ci::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
+                       background: var(--ink-3); opacity: 0.4; }
+.fp-row .ci .band { position: absolute; height: 16px; top: 5px; border-radius: 3px;
+                     background: var(--accent); opacity: 0.45; }
+.fp-row .ci .point { position: absolute; width: 12px; height: 12px; top: 7px; border-radius: 50%;
+                      background: var(--accent); border: 2px solid var(--bg-1); box-shadow: 0 0 6px rgba(96,165,250,0.6); }
+.fp-row .ci .band.fail { background: var(--fail); }
+.fp-row .ci .point.fail { background: var(--fail); box-shadow: 0 0 6px rgba(239,68,68,0.6); }
+.fp-row .ci .band.warn { background: var(--warn); }
+.fp-row .ci .point.warn { background: var(--warn); box-shadow: 0 0 6px rgba(245,158,11,0.6); }
+.fp-row .ci .band.pass { background: var(--pass); }
+.fp-row .ci .point.pass { background: var(--pass); box-shadow: 0 0 6px rgba(16,185,129,0.6); }
+.fp-row .v { font-family: var(--mono); font-size: 11.5px; color: var(--ink-1); text-align: right; }
+.fp-axis { display: grid; grid-template-columns: 220px 1fr 110px; gap: 12px; padding: 4px 0; margin-bottom: 6px;
+            font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+.fp-axis .ticks { display: flex; justify-content: space-between; }
+
+/* SHAP/Bonus waterfall */
+.wf-row { display: grid; grid-template-columns: 240px 1fr 90px; gap: 12px; align-items: center;
+           padding: 7px 0; font-size: 12.5px; border-bottom: 1px solid color-mix(in oklch, var(--rule-2) 30%, transparent); }
+.wf-row .lbl { font-family: var(--mono); color: var(--ink-1); }
+.wf-row .bar-c { position: relative; height: 18px; background: var(--bg-3); border-radius: 3px; overflow: hidden; }
+.wf-row .bar-c::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--ink-3); opacity: 0.3; }
+.wf-row .b { position: absolute; height: 100%; }
+.wf-row .b.pos { background: var(--pass); left: 50%; }
+.wf-row .b.neg { background: var(--fail); right: 50%; }
+.wf-row .v { font-family: var(--mono); font-weight: 800; text-align: right; }
+.wf-row .v.pos { color: var(--pass); }
+.wf-row .v.neg { color: var(--fail); }
+.wf-row .v.dim { color: var(--ink-3); }
+
+/* Section header pill row (used for sub-sections) */
+.subhead { font-size: 12.5px; color: var(--ink-2); margin: 18px 0 8px; letter-spacing: 0.06em;
+            text-transform: uppercase; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.subhead::before { content: ''; width: 6px; height: 6px; background: var(--accent); border-radius: 50%; }
+.subhead .count { color: var(--ink-3); font-weight: 600; font-family: var(--mono); }
+
+footer { padding: 26px 40px 36px; color: var(--ink-3); font-size: 11px; text-align: center;
+          border-top: 1px solid var(--rule); margin-top: 30px; }
+footer a { color: var(--accent); text-decoration: none; }
 """
 
 
@@ -874,8 +964,23 @@ def render_html(in_path: Path, summary: dict, eq_curve: dict, setup_table: list[
 </section>
 
 <section id="setup">
-  <h2>③ Setup performance — Wilson CI gated</h2>
-  <div class="desc">For each setup, point WR vs <b>Wilson 95% lower-bound</b>. ALPHA = real edge (WR_LB ≥45% + expectancy &gt;0.5%). KILL = negative expectancy. SAMPLE = n&lt;10. Trust the lower-bound, not the point estimate.</div>
+  <h2><span class="num">③</span> Setup Performance — Wilson CI Gated <span class="tag live">LIVE</span></h2>
+  <div class="desc">For each setup: point WR vs <b>Wilson 95% lower-bound</b>. ALPHA = real edge (WR_LB ≥45% + expectancy &gt;0.5%). KILL = negative expectancy. SAMPLE = n&lt;10.</div>
+  <div class="narrative">
+    <b>Trust the lower bound, not the point.</b> A setup at 50% WR with n=4 looks real but Wilson LB might be 9%. Always read the LB column first.
+  </div>
+
+  <h3 class="subhead">Win-rate forest plot</h3>
+  <div style="background: var(--bg-2); padding: 16px 20px; border-radius: 8px;">
+    <div class="fp-axis">
+      <span></span>
+      <span class="ticks"><span>0%</span><span>20%</span><span style="color:var(--warn);font-weight:700">50%</span><span>80%</span><span>100%</span></span>
+      <span style="text-align:right;">point · LB</span>
+    </div>
+    <div id="setupForest"></div>
+  </div>
+
+  <h3 class="subhead">Detail table <span class="count">— sortable, expectancy + PF + verdict</span></h3>
   <table id="setupTable"><thead><tr>
     <th>Setup</th><th class="num">N</th><th class="num">WR%</th><th class="num">WR LB%</th>
     <th class="num">Avg P&amp;L%</th><th class="num">Total P&amp;L%</th>
@@ -978,8 +1083,22 @@ def render_html(in_path: Path, summary: dict, eq_curve: dict, setup_table: list[
 </section>
 
 <section id="bayes">
-  <h2>⑭ Bayesian hierarchical pooling — sparse-setup correction</h2>
-  <div class="desc">Setups with low n (Pocket Pivot @3 trades) borrow strength from a family-level prior (breakout / pullback / continuation / reversal). Posterior WR is more honest than raw WR for sparse cases. Compare raw → posterior; the gap is "shrinkage."</div>
+  <h2><span class="num">⑭</span> Bayesian Hierarchical Pooling <span class="tag live">LIVE</span></h2>
+  <div class="desc">Sparse-setup correction. Each setup borrows strength from its family prior (breakout / pullback / continuation / reversal) via Beta-Binomial conjugate update. The wider the gap between <i>raw</i> and <i>posterior</i>, the less you should trust the raw estimate.</div>
+  <div class="narrative">
+    <b>How to read this:</b> The colored bar shows the posterior WR. Width = sample size (more trades → tighter band). When the bar is mostly inside the green zone (≥45%), the setup has real edge. Mostly red zone = kill candidate.
+  </div>
+
+  <div style="background: var(--bg-2); padding: 16px 20px; border-radius: 8px; margin-top: 14px;">
+    <div class="fp-axis">
+      <span></span>
+      <span class="ticks"><span>0%</span><span>20%</span><span style="color:var(--warn);font-weight:700">50%</span><span>80%</span><span>100%</span></span>
+      <span style="text-align:right;">posterior · CI</span>
+    </div>
+    <div id="bayesForest"></div>
+  </div>
+
+  <h3 class="subhead">Detail table <span class="count">— same data, sortable</span></h3>
   <table id="bayesTable"><thead><tr>
     <th>Setup</th><th>Family</th><th class="num">N</th>
     <th class="num">Raw WR%</th><th class="num">Prior WR%</th><th class="num">Posterior WR%</th>
