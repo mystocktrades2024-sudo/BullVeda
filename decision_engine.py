@@ -33,6 +33,8 @@ EARNINGS_CAVEAT_DAYS = 10     # soft caveat for 5-10 day earnings proximity
 SETUP_KILL_MIN_WR = 0.35      # setups below 35% WR over min_n closed get killed
 SETUP_KILL_MIN_PNL = 0.0      # AND avg_pnl below this threshold
 SETUP_KILL_MIN_N = 30         # require >=30 closed signals before any kill decision
+SETUP_KILL_MIN_WR_LB = 0.30   # Wilson 95% lower-bound floor — point WR alone is noise at small N
+STATIC_KILL_MIN_N = 10        # static_setup_kill_list entries must declare n >= this
 
 # Gates that, when failed, mean "wait for better setup" rather than structural reject
 WATCH_WORTHY_FAILURES = {"entry_quality", "decision_state", "multi_timeframe"}
@@ -178,6 +180,7 @@ def compute_setup_score_band_kills(signal_log_path: str | None = None,
         if pnl is None or not setup or score is None:
             continue
         by_combo[(setup, _band(float(score)))].append(float(pnl))
+    from tracker import wilson_ci as _wilson  # local import to avoid circulars
     kills: dict = {}
     for (setup, band), pnls in by_combo.items():
         n = len(pnls)
@@ -186,12 +189,16 @@ def compute_setup_score_band_kills(signal_log_path: str | None = None,
         wins = sum(1 for p in pnls if p > 0)
         wr = wins / n
         avg_pnl = sum(pnls) / n
-        if wr < min_wr and avg_pnl < min_pnl:
+        wr_lb, _wr_hi = _wilson(wins, n, 0.95)
+        # Kill only when both point WR is below floor AND Wilson lower-bound also fails.
+        # Prevents 5-trade noise from triggering kills.
+        if wr < min_wr and wr_lb < SETUP_KILL_MIN_WR_LB and avg_pnl < min_pnl:
             kills[(setup, band)] = {
                 "wr": round(wr * 100, 1),
+                "wr_lb": round(wr_lb * 100, 1),
                 "avg_pnl": round(avg_pnl, 2),
                 "n": n,
-                "reason": f"setup×score-band kill: {setup}@{band} WR {wr*100:.1f}%/avg {avg_pnl:+.2f}% over {n} closed",
+                "reason": f"setup×score-band kill: {setup}@{band} WR {wr*100:.1f}% (LB {wr_lb*100:.1f}%) avg {avg_pnl:+.2f}% over {n} closed",
             }
     return kills
 
@@ -229,6 +236,7 @@ def compute_setup_kill_list(signal_log_path: str | None = None,
         if pnl is None or not setup:
             continue
         by_setup[setup].append(float(pnl))
+    from tracker import wilson_ci as _wilson  # local import to avoid circulars
     kills: dict = {}
     for setup, pnls in by_setup.items():
         n = len(pnls)
@@ -237,31 +245,59 @@ def compute_setup_kill_list(signal_log_path: str | None = None,
         wins = sum(1 for p in pnls if p > 0)
         wr = wins / n
         avg_pnl = sum(pnls) / n
-        if wr < min_wr and avg_pnl < min_pnl:
+        wr_lb, _wr_hi = _wilson(wins, n, 0.95)
+        # Wilson lower-bound gate: catches the case where point WR looks bad but
+        # the sample is too small to distinguish from a true 35%+ WR.
+        if wr < min_wr and wr_lb < SETUP_KILL_MIN_WR_LB and avg_pnl < min_pnl:
             kills[setup] = {
                 "wr": round(wr * 100, 1),
+                "wr_lb": round(wr_lb * 100, 1),
                 "avg_pnl": round(avg_pnl, 2),
                 "n": n,
-                "reason": f"setup performance floor: WR {wr*100:.1f}%<{min_wr*100:.0f}% over {n} closed",
+                "reason": f"setup performance floor: WR {wr*100:.1f}% (Wilson LB {wr_lb*100:.1f}%) over {n} closed",
             }
-    # Merge in static (manual) kill list from config
+    # Merge in static (manual) kill list from config — gated on declared n + reason.
+    # Pre-2026-05-08 entries could be bare strings or dicts with no `n`; those are
+    # rejected to prevent the back-door noise-kill that triggered VCP Breakout.
     try:
         cfg_path = _P(__file__).parent / "config" / "config.json"
         if cfg_path.exists():
             cfg = _json.loads(cfg_path.read_text())
+            rejected: list = []
             for entry in (cfg.get("static_setup_kill_list") or []):
-                # Each entry can be string (just setup name) or dict with reason
                 if isinstance(entry, str):
-                    name = entry
-                    reason = "manually killed (static_setup_kill_list)"
-                elif isinstance(entry, dict):
-                    name = entry.get("setup")
-                    reason = entry.get("reason") or "manually killed"
-                else:
+                    rejected.append(f"{entry}: bare-string entries no longer accepted (declare n + wr_lb)")
                     continue
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("setup")
                 if not name or name in kills:
                     continue
-                kills[name] = {"wr": None, "avg_pnl": None, "n": 0, "reason": reason}
+                declared_n = int(entry.get("n") or 0)
+                declared_wr_lb = entry.get("wr_lb")  # caller-provided Wilson LB (0-1)
+                reason = entry.get("reason") or "manually killed"
+                # Gate: must declare n>=STATIC_KILL_MIN_N AND either an explicit
+                # wr_lb<SETUP_KILL_MIN_WR_LB or be marked override=true (audit trail).
+                if declared_n < STATIC_KILL_MIN_N and not entry.get("override"):
+                    rejected.append(f"{name}: n={declared_n} < {STATIC_KILL_MIN_N} (set override=true to force)")
+                    continue
+                if declared_wr_lb is not None:
+                    try:
+                        if float(declared_wr_lb) >= SETUP_KILL_MIN_WR_LB and not entry.get("override"):
+                            rejected.append(f"{name}: declared wr_lb={declared_wr_lb} >= {SETUP_KILL_MIN_WR_LB} (insufficient evidence)")
+                            continue
+                    except (TypeError, ValueError):
+                        pass
+                kills[name] = {
+                    "wr": entry.get("wr"),
+                    "wr_lb": declared_wr_lb,
+                    "avg_pnl": entry.get("avg_pnl"),
+                    "n": declared_n,
+                    "reason": reason,
+                    "source": "static",
+                }
+            if rejected:
+                kills["_rejected_static"] = {"reason": "; ".join(rejected)}
     except Exception:
         pass
     return kills

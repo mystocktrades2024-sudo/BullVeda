@@ -289,6 +289,12 @@ def _save_state(state: dict):
     state["_last_saved"] = datetime.now().isoformat()
     with open(STATE_PATH, "w") as f:
         json.dump(state, f, indent=2, default=str)
+    # Dual-write to Supabase (no-op when SUPABASE_MODE=0; never raises).
+    try:
+        from supabase_sync import sync_portfolio_state
+        sync_portfolio_state(state)
+    except Exception:
+        pass
 
 
 # ── Mechanical paper-trading gates (BUY-only, 4/day, 60-day window) ─────────

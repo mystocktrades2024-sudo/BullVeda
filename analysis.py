@@ -8039,6 +8039,58 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             _bonuses["eps_trend"] = -1.0
             _bonus_notes.append(f"EPS estimates falling (-1)")
 
+    # 2026-05-08 — Performance Decay scoring (Finviz Elite).
+    # Stocks with consistent positive trajectory (week → month → quarter all up)
+    # tend to keep trending. Trend breaks (strong quarter but red week) flag
+    # exhaustion. Uses Finviz Elite pre-computed performance buckets.
+    if finviz:
+        _pw = finviz.get("perf_week_pct")
+        _pm = finviz.get("perf_month_pct")
+        _pq = finviz.get("perf_quarter_pct")
+        _py = finviz.get("perf_year_pct")
+        _ph = finviz.get("perf_half_pct")
+        if all(x is not None for x in (_pw, _pm, _pq)):
+            # All-positive trajectory (clean trend)
+            if _pw > 0 and _pm > 0 and _pq > 0:
+                if _pq >= 20 and _pm >= 5 and _pw >= 0:
+                    _bonuses["perf_decay"] = 2.0
+                    _bonus_notes.append(f"Strong trend: W{_pw:+.1f}% M{_pm:+.1f}% Q{_pq:+.1f}% (+2)")
+                else:
+                    _bonuses["perf_decay"] = 1.0
+                    _bonus_notes.append(f"Trend up: W{_pw:+.1f}% M{_pm:+.1f}% Q{_pq:+.1f}% (+1)")
+            # Trend break — strong quarter but red recent week (exhaustion / distribution)
+            elif _pq >= 10 and _pw <= -3:
+                _bonuses["perf_decay"] = -1.5
+                _bonus_notes.append(f"Trend break: Q+{_pq:.1f}% but W{_pw:+.1f}% (-1.5)")
+            # Persistent weakness across timeframes (avoid catching falling knife)
+            elif _pq <= -10 and _pm <= -5:
+                _bonuses["perf_decay"] = -1.0
+                _bonus_notes.append(f"Persistent weakness: Q{_pq:.1f}% M{_pm:+.1f}% (-1)")
+
+    # 2026-05-08 — Squeeze candidate detection (Finviz Elite).
+    # Heavy short interest + concentrated institutional ownership + unusual volume
+    # = high probability of a short squeeze on positive catalyst. Adds bonus AND
+    # surfaces a flag downstream so the V2 dashboard can render a squeeze badge.
+    _squeeze_flag = None
+    _squeeze_score = 0
+    if finviz:
+        _sf = finviz.get("short_float_pct") or 0
+        _io = finviz.get("inst_own_pct") or 0
+        _rv = finviz.get("rel_volume") or 0
+        _sr = finviz.get("short_ratio") or 0  # days-to-cover
+        if _sf >= 15 and _io >= 80 and _rv >= 2:
+            _squeeze_flag = "high"
+            _squeeze_score = min(100, int(_sf * 3 + _rv * 5 + (_sr * 2)))
+            _bonuses["squeeze"] = 2.0
+            _bonus_notes.append(f"Squeeze candidate HIGH: SF{_sf:.0f}% IO{_io:.0f}% RV{_rv:.1f}× (+2)")
+        elif _sf >= 10 and _io >= 60 and _rv >= 1.5:
+            _squeeze_flag = "moderate"
+            _squeeze_score = min(100, int(_sf * 2 + _rv * 4 + _sr))
+            _bonuses["squeeze"] = 1.0
+            _bonus_notes.append(f"Squeeze potential moderate: SF{_sf:.0f}% IO{_io:.0f}% (+1)")
+        elif _sf >= 5:
+            _squeeze_flag = "low"
+
     # SEC EDGAR catalyst signals: material 8-K events, insider clusters, activist filings
     if sec:
         _sec_signal = sec.get("catalyst_signal", "none")
@@ -8496,14 +8548,30 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     except Exception:
         _todays_gap_pct_val = 0.0
 
-    # 2026-05-08 — per-setup score multiplier (config-driven, not data-driven).
-    # Lets us boost/demote specific setups based on backtest evidence. Default
-    # 1.0 (no change). See config["setup_score_multiplier"]. Applied BEFORE
-    # ranking-flaw-13 rounding so the boost is cleanly captured in the int.
+    # 2026-05-08 — per-setup score multiplier (config-driven). Demotions
+    # (mult < 1.0) require statistical backing; promotions (mult > 1.0) need
+    # a documented n. The 2026-05-08 audit found bare-config multipliers were
+    # acting as back-door kills (4 setups at 0.0 with no Wilson backing).
+    #
+    # Config schema:
+    #   "setup_score_multiplier": {
+    #     "_validations": {  # required for any demotion to apply
+    #       "VCP Breakout": {"n": 30, "wr_lb": 0.25, "source": "wf_2026Q1"}
+    #     },
+    #     "Trend Continuation": 1.08
+    #   }
     try:
         _setup_mults = (config or {}).get("setup_score_multiplier") or {}
+        _validations = _setup_mults.get("_validations") or {}
         _setup_for_mult = (plan.get("setup_type") or setup_family or "").strip()
         _setup_mult = float(_setup_mults.get(_setup_for_mult, 1.0))
+        # Demotion gate: require validation entry with n>=30 AND wr_lb<0.30
+        if _setup_mult < 1.0:
+            _v = _validations.get(_setup_for_mult) or {}
+            _vn = int(_v.get("n") or 0)
+            _vlb = float(_v.get("wr_lb") or 1.0)
+            if _vn < 30 or _vlb >= 0.30:
+                _setup_mult = 1.0  # silently revert to no-op (audit trail in config)
         if _setup_mult != 1.0 and _setup_mult > 0:
             normalized = float(normalized) * _setup_mult
     except Exception:
@@ -8876,6 +8944,17 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         "premarket":        premarket or {},
         "inst_trend":       inst_trend or {},
         "gamma":            gamma or {},
+        # 2026-05-08 — Finviz Elite-derived squeeze candidate flag.
+        # Levels: high (SF≥15% + IO≥80% + RV≥2×), moderate (SF≥10% + IO≥60%),
+        # low (SF≥5%), or None. Score 0-100 estimates squeeze severity.
+        "squeeze_flag": {
+            "level": _squeeze_flag,
+            "score": _squeeze_score,
+            "short_float_pct": (finviz or {}).get("short_float_pct"),
+            "short_ratio":     (finviz or {}).get("short_ratio"),
+            "inst_own_pct":    (finviz or {}).get("inst_own_pct"),
+            "rel_volume":      (finviz or {}).get("rel_volume"),
+        } if _squeeze_flag else {"level": None, "score": 0},
         "eps_trend":        eps_trend or {},
         "quote_snapshot":    quote_snapshot or {},
         "news_articles":        news_articles or [],

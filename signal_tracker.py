@@ -101,6 +101,12 @@ def _save_log(entries: list[dict]) -> None:
     SIGNAL_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     SIGNAL_LOG_PATH.write_text(json.dumps(entries, indent=2, default=str), encoding="utf-8")
     _write_meta_version()
+    # Dual-write to Supabase (no-op when SUPABASE_MODE=0; never raises).
+    try:
+        from supabase_sync import sync_signal_log
+        sync_signal_log(entries)
+    except Exception:
+        pass
 
 
 def _mae_mfe_from_ohlc(hist, entry_price: float, direction: str) -> tuple[float, float]:
