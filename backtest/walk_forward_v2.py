@@ -50,6 +50,27 @@ def tune_on_train(train_start: str, train_end: str) -> dict:
 
     Optimized (2026-04-15): coarser grid (3×4=12 vs 5×5=25), parallel execution
     (4 workers), 3600s timeout. Cuts tuning time ~5× vs original.
+
+    TODO (P2 follow-up, 2026-05-08): extend grid to also tune
+      config["setup_score_multiplier"] candidates per setup family. Today the
+      multipliers (Trend Continuation +8%, etc.) are hand-edited based on
+      eyeballing 60d backtest output — exactly the noise-driven tuning the
+      Wilson CI gates in decision_engine.py defend against.
+
+      Implementation sketch:
+        1. backtest.py needs a new --config-override <json> CLI arg that
+           merges into the loaded config before analyze_ticker runs.
+        2. tune_on_train() then iterates a multiplier grid per setup family:
+             {"Trend Continuation": [1.00, 1.05, 1.10],
+              "EMA21 Pullback":     [1.00, 0.95, 0.90], ...}
+        3. Per fold: pick best multipliers on train, validate they ALSO
+           improve on test (no train→test sign flip allowed), then write
+           config["setup_score_multiplier"]["_validations"][setup] with
+           {"n": fold_n, "wr_lb": fold_wr_lb, "source": f"wf_fold_{i}"}.
+        4. Only multipliers with passing _validations actually take effect
+           (analysis.py:8503 enforces this).
+
+      Effort: ~3 hours once 3y OHLCV backfill is done (P1).
     """
     score_grid = [55, 62, 72]
     rs_grid = [55, 65, 75, 85]
@@ -98,25 +119,43 @@ def run_backtest_subset(start: str, end: str, min_score: int, min_rs: int) -> di
     days = (e - s).days
     cmd = [
         "python3", str(BASE_DIR / "backtest.py"),
+        "--portfolio",  # 2026-05-08: required to get Sharpe/MaxDD/Total trades aliases
         "--days", str(days),
         "--min-score", str(min_score),
         "--min-rs", str(min_rs),
         "--end-date", end,  # backtest.py must support --end-date flag
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-    # Parse summary from stdout (match existing format)
+    # Parse summary from stdout. backtest.py prints machine-readable aliases
+    # (lowercase "Total trades:" etc.) at lines 1754-1757 specifically for us
+    # WHEN --portfolio is passed. Without --portfolio, only the signal-mode
+    # summary prints ("Total signals:") and we silently get zeros — that's the
+    # bug the audit caught. The fallback below handles signal mode gracefully
+    # so a missing flag returns *something* meaningful instead of all zeros.
     result = {"n_trades": 0, "wr": 0, "pf": 0, "max_dd": 0, "sharpe": 0}
     for line in proc.stdout.splitlines():
-        if "Total trades:" in line:
-            result["n_trades"] = int(line.split(":")[-1].strip())
-        elif "Win rate:" in line:
-            result["wr"] = float(line.split(":")[-1].strip().rstrip("%")) / 100
-        elif "Profit factor:" in line:
-            result["pf"] = float(line.split(":")[-1].strip())
-        elif "Max drawdown:" in line:
-            result["max_dd"] = float(line.split(":")[-1].strip().rstrip("%")) / 100
-        elif "Sharpe:" in line:
-            result["sharpe"] = float(line.split(":")[-1].strip())
+        # Strip percentage signs and commas before parsing
+        def _num(s: str) -> float:
+            return float(s.replace(",", "").replace("%", "").strip())
+        try:
+            if "Total trades:" in line or "Total Trades:" in line:
+                result["n_trades"] = int(_num(line.split(":")[-1]))
+            elif "Total signals:" in line and result["n_trades"] == 0:
+                result["n_trades"] = int(_num(line.split(":")[-1]))
+            elif "Win rate:" in line and "raw" not in line:
+                result["wr"] = _num(line.split(":")[-1]) / 100
+            elif "Win Rate (adj):" in line:
+                # "Win Rate (adj):   X.X%  (minus ...)" → take leading number
+                v = line.split(":")[-1].split("(")[0]
+                result["wr"] = _num(v) / 100
+            elif "Profit factor:" in line or "Profit Factor:" in line:
+                result["pf"] = _num(line.split(":")[-1])
+            elif "Max drawdown:" in line or "Max Drawdown:" in line:
+                result["max_dd"] = _num(line.split(":")[-1]) / 100
+            elif "Sharpe:" in line:
+                result["sharpe"] = _num(line.split(":")[-1])
+        except (ValueError, IndexError):
+            continue  # skip malformed lines, don't crash whole parse
     return result
 
 
