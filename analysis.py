@@ -8091,6 +8091,25 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         elif _sf >= 5:
             _squeeze_flag = "low"
 
+    # 2026-05-08 — Finviz Elite Quality enrichment (additive bonus).
+    # Clean compounder = high ROE/margin + healthy balance sheet (current ratio).
+    # Doesn't replace fund_score (which uses many sources); adds a small bonus
+    # when Finviz pre-computed quality metrics align.
+    if finviz:
+        _roe = finviz.get("roe_pct")
+        _pm = finviz.get("profit_margin_pct")
+        _cr = finviz.get("current_ratio")
+        if _roe is not None and _pm is not None:
+            if _roe >= 30 and _pm >= 20:
+                _bonuses["fv_quality"] = 1.5
+                _bonus_notes.append(f"High-quality compounder: ROE {_roe:.0f}% PM {_pm:.0f}% (+1.5)")
+            elif _roe >= 20 and _pm >= 15 and (_cr is None or _cr >= 1.2):
+                _bonuses["fv_quality"] = 1.0
+                _bonus_notes.append(f"Quality compounder: ROE {_roe:.0f}% PM {_pm:.0f}% (+1)")
+            elif _roe < 0 or (_cr is not None and _cr < 1.0):
+                _bonuses["fv_quality"] = -1.0
+                _bonus_notes.append(f"Balance-sheet concern: ROE {_roe:.0f}% CR {_cr or 'n/a'} (-1)")
+
     # SEC EDGAR catalyst signals: material 8-K events, insider clusters, activist filings
     if sec:
         _sec_signal = sec.get("catalyst_signal", "none")

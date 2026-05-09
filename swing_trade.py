@@ -1420,7 +1420,7 @@ def run_daily_scan(force_fresh: bool = False):
             try:    options_chain_data[t] = fut.result()
             except: options_chain_data[t] = {}
 
-    log.info(f"  Enriched {len(infos)} tickers (incl. congressional + WSB + UOA + borrow + Finnhub + FMP + SEC + pre-mkt + gamma + FINVIZ + Polygon)")
+    log.info(f"  Enriched {len(infos)} tickers (EODHD + Schwab + SEC EDGAR + FINVIZ scrape + congressional + WSB + UOA + borrow + pre-mkt + gamma)")
 
     # Backfill missing earnings dates from FINVIZ bulk
     _earn_patched = 0
@@ -1802,6 +1802,38 @@ def run_daily_scan(force_fresh: bool = False):
         result["finnhub"]        = finnhub_data.get(ticker, {})
         result["fmp"]            = fmp_data.get(ticker, {})
         result["sec_filings"]    = sec_data.get(ticker, {})
+        # 2026-05-08 — surface Finviz Elite fields on the ticker row so the
+        # V2 dashboard can render performance strip / short pressure / quality KPIs.
+        # analyze_ticker already consumes some, but we keep the raw bundle here too.
+        _fv_row = finviz_bulk.get(ticker) or {}
+        if _fv_row:
+            result["finviz_elite"] = {
+                # Performance decay strip (Week / Month / Quarter / Half / Year / YTD)
+                "perf_week_pct":    _fv_row.get("perf_week_pct"),
+                "perf_month_pct":   _fv_row.get("perf_month_pct"),
+                "perf_quarter_pct": _fv_row.get("perf_quarter_pct"),
+                "perf_half_pct":    _fv_row.get("perf_half_pct"),
+                "perf_year_pct":    _fv_row.get("perf_year_pct"),
+                "perf_ytd_pct":     _fv_row.get("perf_ytd_pct"),
+                # Short pressure
+                "short_float_pct":  _fv_row.get("short_float_pct"),
+                "short_ratio":      _fv_row.get("short_ratio"),
+                "inst_own_pct":     _fv_row.get("inst_own_pct"),
+                "insider_own_pct":  _fv_row.get("insider_own_pct"),
+                "shares_float":     _fv_row.get("shares_float"),
+                # Quality / fundamentals (pre-computed by Finviz)
+                "roe_pct":          _fv_row.get("roe_pct"),
+                "roa_pct":          _fv_row.get("roa_pct"),
+                "gross_margin_pct": _fv_row.get("gross_margin_pct"),
+                "oper_margin_pct":  _fv_row.get("oper_margin_pct"),
+                "profit_margin_pct":_fv_row.get("profit_margin_pct"),
+                "current_ratio":    _fv_row.get("current_ratio"),
+                # Misc (intra-day move, volatility)
+                "change_pct":       _fv_row.get("change_pct"),
+                "gap_pct":          _fv_row.get("gap_pct"),
+                "volatility_w_pct": _fv_row.get("volatility_w_pct"),
+                "rel_volume":       _fv_row.get("rel_volume"),
+            }
         # VGM raw scores (per-ticker, grades assigned post-scan)
         try:
             rev_qoq = get_quarterly_revenue_growth(ticker)

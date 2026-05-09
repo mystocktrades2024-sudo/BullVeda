@@ -1110,8 +1110,11 @@ def compact_row(r: dict) -> dict:
         "perf_1w":        (r.get("technicals") or {}).get("perf_week"),
         "insider_recent": ((r.get("insider_data") or {}).get("recent_buys") or 0) - ((r.get("insider_data") or {}).get("recent_sells") or 0),
         "insider_days":   (r.get("insider_data") or {}).get("days_since_last"),
-        "short_pct":      r.get("short_float_pct") or (r.get("borrow") or {}).get("short_float_pct"),
+        "short_pct":      r.get("short_float_pct") or (r.get("borrow") or {}).get("short_float_pct") or (r.get("finviz_elite") or {}).get("short_float_pct"),
         "tv_rec_str":     (r.get("tv_rating") or {}).get("recommendation") if isinstance(r.get("tv_rating"), dict) else None,
+        # 2026-05-08 — Finviz Elite performance strip + squeeze flag for tile/row UI
+        "finviz_elite":   r.get("finviz_elite") or {},
+        "squeeze_flag":   r.get("squeeze_flag") or {"level": None, "score": 0},
         "rev_growth":     r.get("rev_growth"),
         "net_margin":     r.get("net_margin"),
         "peg":            r.get("peg"),
@@ -1534,15 +1537,38 @@ def rich_row(r: dict, b: dict = None) -> dict:
         "news_score":   news.get("score", 0),
         "insider_buys": ins.get("buys", 0),
         "insider_sells":ins.get("sells", 0),
+        # 2026-05-08 — Finviz Elite enrichment (performance strip, squeeze, quality KPIs)
+        "finviz_elite": r.get("finviz_elite") or {},
+        "squeeze_flag": r.get("squeeze_flag") or {"level": None, "score": 0},
+        # Promote a few Finviz fields to top-level for direct UI access
+        "perf_week_pct":    (r.get("finviz_elite") or {}).get("perf_week_pct"),
+        "perf_month_pct":   (r.get("finviz_elite") or {}).get("perf_month_pct"),
+        "perf_quarter_pct": (r.get("finviz_elite") or {}).get("perf_quarter_pct"),
+        "perf_half_pct":    (r.get("finviz_elite") or {}).get("perf_half_pct"),
+        "perf_year_pct":    (r.get("finviz_elite") or {}).get("perf_year_pct"),
+        "perf_ytd_pct":     (r.get("finviz_elite") or {}).get("perf_ytd_pct"),
+        "short_float_pct":  (r.get("finviz_elite") or {}).get("short_float_pct"),
+        "short_ratio":      (r.get("finviz_elite") or {}).get("short_ratio"),
+        "inst_own_pct":     (r.get("finviz_elite") or {}).get("inst_own_pct") or r.get("inst_own_pct"),
+        "insider_own_pct":  (r.get("finviz_elite") or {}).get("insider_own_pct"),
+        "fv_roe_pct":       (r.get("finviz_elite") or {}).get("roe_pct"),
+        "fv_roa_pct":       (r.get("finviz_elite") or {}).get("roa_pct"),
+        "fv_gross_margin":  (r.get("finviz_elite") or {}).get("gross_margin_pct"),
+        "fv_oper_margin":   (r.get("finviz_elite") or {}).get("oper_margin_pct"),
+        "fv_profit_margin": (r.get("finviz_elite") or {}).get("profit_margin_pct"),
+        "fv_current_ratio": (r.get("finviz_elite") or {}).get("current_ratio"),
     })
     # 2026-05-08 — Path C thesis card. Auto-generated structured thesis (4 sections:
     # score breakdown, why bullish, risks, trade plan). LLM narration optional via
     # narrate_thesis.py — pulled in if cache/thesis_narrations.json exists.
     try:
         from build_thesis import build_thesis as _bt
-        base["thesis"] = _bt(r)
+        # 2026-05-08 — keep "thesis" reserved for the legacy trade_thesis STRING
+        # (rendered in the Overview bottom strip). The structured thesis card
+        # lives on a separate key "thesis_card" so we don't shadow the string.
+        base["thesis_card"] = _bt(r)
     except Exception as _bt_err:
-        base["thesis"] = {"error": str(_bt_err)[:120]}
+        base["thesis_card"] = {"error": str(_bt_err)[:120]}
     return base
 
 

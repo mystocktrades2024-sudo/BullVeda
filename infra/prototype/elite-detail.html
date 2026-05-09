@@ -3015,7 +3015,7 @@ function renderHorizons() {
     hold:      `${T.max_hold_days || '—'}d max`,
     sizing:    T.alloc_pct != null ? `${(+T.alloc_pct).toFixed(1)}%` : '—',
     conviction: T.conviction_tier || (swing => swing >= 80 ? 'T1' : swing >= 70 ? 'T2' : 'T3')(+(T.score || 0)),
-    decision_label: T.decision_label || T.thesis || '',
+    decision_label: T.decision_label || (typeof T.thesis === 'string' ? T.thesis : '') || '',
   };
 
   // ── POSITION (medium-term — synthesize entry/stop/target from price + ATR + fractals) ──
@@ -4483,6 +4483,46 @@ function renderFund() {
           <div class="ins-hz-h">🚀 INVEST<span class="impact">${ltScore >= 80 ? 'MAJOR' : ltScore >= 60 ? 'MEDIUM' : 'MAJOR'}</span></div>
           <div class="ins-hz-t">${ltScore >= 80 ? 'Premium fundamentals — high-conviction long-term hold. Compounding works in your favor.' : ltScore >= 60 ? 'Middling quality — only worth holding 12+ months if technical/valuation thesis is exceptionally strong.' : `Weak quality — long-term hold ${ltb.gate_fails && ltb.gate_fails.length ? 'gated by '+ltb.gate_fails.join(', ') : 'not advised'}. Demands a clear catalyst or turnaround thesis.`}</div>
         </div>
+      </div>
+    </div>
+
+    ${_renderFvQualityKPIs(T)}`;
+}
+
+// ── Finviz Elite Quality KPIs (Fundamentals tab — 2026-05-08) ──────────
+// 6-cell grid showing pre-computed Finviz quality metrics: ROE, ROA, gross/
+// operating/profit margin, current ratio. Color-coded against industry-typical
+// thresholds. Source-tagged "FINVIZ Elite" so users see which provider.
+function _renderFvQualityKPIs(T) {
+  if (!T) return '';
+  const roe = T.fv_roe_pct, roa = T.fv_roa_pct;
+  const gm  = T.fv_gross_margin, om = T.fv_oper_margin, pm = T.fv_profit_margin;
+  const cr  = T.fv_current_ratio;
+  if ([roe, roa, gm, om, pm, cr].every(v => v == null)) return '';
+  const cell = (label, val, suffix, thrGood, thrOk) => {
+    const has = (val != null && !isNaN(val));
+    const c = !has ? 'var(--ink-3)' : val >= thrGood ? 'var(--pass)' : val >= thrOk ? 'var(--warn)' : 'var(--fail)';
+    const v = has ? Number(val).toFixed(1) + suffix : '—';
+    return `<div style="background:var(--bg-2);padding:11px 14px;border-radius:6px;border-top:2px solid ${c};">
+      <div style="font-size:10.5px;color:var(--ink-3);letter-spacing:0.06em;font-weight:600;">${label}</div>
+      <div style="font-size:18px;font-family:var(--mono);font-weight:800;color:${c};margin-top:4px;">${v}</div>
+    </div>`;
+  };
+  return `
+    <div class="ins-pat" style="margin-top:18px;">
+      <div class="smc-card-h">
+        <span class="ico">⚙</span>QUALITY METRICS · FINVIZ ELITE
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:10px 4px 4px;">
+        ${cell('ROE',           roe, '%', 20, 10)}
+        ${cell('ROA',           roa, '%', 10, 5)}
+        ${cell('CURRENT RATIO', cr,  'x', 1.5, 1.0)}
+        ${cell('GROSS MARGIN',  gm,  '%', 40, 25)}
+        ${cell('OPER MARGIN',   om,  '%', 20, 10)}
+        ${cell('PROFIT MARGIN', pm,  '%', 15, 8)}
+      </div>
+      <div style="font-size:11px;color:var(--ink-3);margin:8px 4px 0;font-style:italic;">
+        ROE ≥20% + Profit Margin ≥15% with healthy Current Ratio = compounder grade. Sourced from Finviz Elite — real-time precomputed.
       </div>
     </div>`;
 }
@@ -6404,6 +6444,56 @@ function renderSentimentTab() {
           <div class="ins-hz-t">${netIns > 0 || inst.inst_trend === 'increasing' ? 'Smart money flow positive — institutional and insider conviction supports long-term hold.' : netIns < 0 || inst.inst_trend === 'decreasing' ? 'Smart money distributing — re-examine fundamental thesis.' : 'No clear smart-money signal.'}</div>
         </div>
       </div>
+    </div>
+
+    ${_renderShortPressureCard(T)}`;
+}
+
+// ── Short Pressure / Squeeze card (Finviz Elite — 2026-05-08) ─────────
+// Surfaces short_float_pct, days-to-cover (short_ratio), inst ownership and
+// the squeeze_flag derived in analysis.py. High squeeze level → red badge.
+function _renderShortPressureCard(T) {
+  if (!T) return '';
+  const sf = T.squeeze_flag || {};
+  const sfPct = T.short_float_pct;
+  const dtc   = T.short_ratio;
+  const io    = T.inst_own_pct;
+  const insOwn= T.insider_own_pct;
+  if (sfPct == null && io == null && !sf.level) return '';
+  const lvl   = sf.level || 'low';
+  const lvlC  = lvl === 'high' ? 'var(--fail)' : lvl === 'moderate' ? 'var(--warn)' : 'var(--ink-2)';
+  const lvlL  = lvl === 'high' ? '🔥 HIGH SQUEEZE' : lvl === 'moderate' ? '⚠ MODERATE' : 'Low';
+  const score = sf.score || 0;
+  const fmt = (v, suffix='%') => v == null ? '—' : (typeof v === 'number' ? v.toFixed(1) + suffix : String(v));
+  return `
+    <div class="ins-pat" style="margin-top:18px;">
+      <div class="smc-card-h">
+        <span class="ico">🔻</span>SHORT PRESSURE
+        ${sf.level ? `<span class="badge" style="background:${lvlC};color:var(--bg-0);">${lvlL}${score > 0 ? ' · ' + score : ''}</span>` : ''}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:12px 4px;">
+        <div>
+          <div style="font-size:10.5px;color:var(--ink-3);letter-spacing:0.06em;margin-bottom:4px;">SHORT FLOAT</div>
+          <div style="font-size:18px;font-family:var(--mono);font-weight:700;color:${sfPct != null && sfPct >= 15 ? 'var(--fail)' : sfPct != null && sfPct >= 10 ? 'var(--warn)' : 'var(--ink-0)'};">${fmt(sfPct)}</div>
+          <div style="font-size:10.5px;color:var(--ink-2);">${sfPct != null && sfPct >= 15 ? 'Heavy short interest' : sfPct != null && sfPct >= 5 ? 'Moderate short interest' : 'Low short interest'}</div>
+        </div>
+        <div>
+          <div style="font-size:10.5px;color:var(--ink-3);letter-spacing:0.06em;margin-bottom:4px;">DAYS TO COVER</div>
+          <div style="font-size:18px;font-family:var(--mono);font-weight:700;color:${dtc != null && dtc >= 5 ? 'var(--fail)' : dtc != null && dtc >= 3 ? 'var(--warn)' : 'var(--ink-0)'};">${dtc != null ? Number(dtc).toFixed(1) + 'd' : '—'}</div>
+          <div style="font-size:10.5px;color:var(--ink-2);">${dtc != null && dtc >= 5 ? 'Multi-day cover risk' : dtc != null && dtc >= 3 ? 'Several-day cover' : 'Quick to cover'}</div>
+        </div>
+        <div>
+          <div style="font-size:10.5px;color:var(--ink-3);letter-spacing:0.06em;margin-bottom:4px;">INST OWN</div>
+          <div style="font-size:18px;font-family:var(--mono);font-weight:700;color:${io != null && io >= 80 ? 'var(--pass)' : 'var(--ink-0)'};">${fmt(io)}</div>
+          <div style="font-size:10.5px;color:var(--ink-2);">${io != null && io >= 80 ? 'Concentrated holders' : io != null && io >= 60 ? 'Solid institutional' : 'Dispersed ownership'}</div>
+        </div>
+        <div>
+          <div style="font-size:10.5px;color:var(--ink-3);letter-spacing:0.06em;margin-bottom:4px;">INSIDER OWN</div>
+          <div style="font-size:18px;font-family:var(--mono);font-weight:700;color:${insOwn != null && insOwn >= 10 ? 'var(--pass)' : 'var(--ink-0)'};">${fmt(insOwn)}</div>
+          <div style="font-size:10.5px;color:var(--ink-2);">${insOwn != null && insOwn >= 10 ? 'Insiders aligned' : 'Limited insider stake'}</div>
+        </div>
+      </div>
+      ${sf.level === 'high' ? `<div style="margin:6px 8px 4px;padding:9px 12px;background:color-mix(in oklch, var(--fail) 14%, var(--bg-2));border-left:3px solid var(--fail);border-radius:0 4px 4px 0;font-size:12px;color:var(--ink-0);"><b style="color:var(--fail);">Squeeze setup:</b> ${fmt(sfPct)} short + ${fmt(io)} inst + RV ${fmt(sf.rel_volume, '×')}. Catalyst (earnings, news, breakout) could trigger sharp upside on covering.</div>` : ''}
     </div>`;
 }
 
@@ -8398,7 +8488,7 @@ function renderRuleEngine() {
         </div>
         <div class="re-stage-body">
           ${narrative}
-          ${T.thesis ? `<div style="margin-top:8px;padding:8px 10px;background:var(--bg-2);border-radius:4px;font-size:11.5px;color:var(--ink-1);font-style:italic">${T.thesis.slice(0, 280)}</div>` : ''}
+          ${(typeof T.thesis === 'string' && T.thesis) ? `<div style="margin-top:8px;padding:8px 10px;background:var(--bg-2);border-radius:4px;font-size:11.5px;color:var(--ink-1);font-style:italic">${T.thesis.slice(0, 280)}</div>` : ''}
         </div>
       </div>
 
@@ -8688,23 +8778,32 @@ try { localStorage.removeItem('ttkHidden'); } catch(_) {}
 
 // ─── THESIS DETAIL TAB (Path C — 2026-05-08) ──────────────────────────
 // Renders the auto-generated thesis card on the per-ticker detail page.
-// Reads T.thesis (built by build_thesis.py and embedded in tickers.json).
+// Reads T.thesis_card (built by build_thesis.py and embedded in tickers.json).
+// Note: the legacy `T.thesis` field is the trade_thesis STRING used by the
+// Overview tab's bottom strip — don't confuse them.
 function renderThesisDetail() {
   const body = document.getElementById('thesisSecBody');
   if (!body) return;
-  const th = (T && T.thesis) || null;
+  const th = (T && (T.thesis_card || (typeof T.thesis === 'object' ? T.thesis : null))) || null;
   if (!th || th.error) {
     body.innerHTML = `<div style="color:var(--ink-2);font-size:13px;padding:8px 0;">No thesis available${th && th.error ? ` — ${th.error}` : ''}.</div>`;
     return;
   }
+  // Defensive coercion — never render an object directly as text
+  const _s = (v, fallback = '') => {
+    if (v == null) return fallback;
+    if (typeof v === 'string' || typeof v === 'number') return String(v);
+    if (typeof v === 'object') return v.label || v.name || v.value || JSON.stringify(v).slice(0, 60);
+    return String(v);
+  };
   const escape = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  const verdict = th.verdict || '?';
+  const verdict = _s(th.verdict, '?');
   const verdictColor = verdict === 'BUY' ? 'var(--pass)' : verdict === 'SELL' ? 'var(--fail)' : 'var(--info)';
-  const score = th.score || 0;
-  const tier = th.tier || '';
-  const regime = th.regime || '';
-  const sector = th.sector || T.sector || '—';
-  const industry = th.industry || T.industry || '';
+  const score = (typeof th.score === 'number') ? th.score : 0;
+  const tier = _s(th.tier);
+  const regime = _s(th.regime);
+  const sector = _s(th.sector || T.sector, '—');
+  const industry = _s(th.industry || T.industry);
 
   let html = `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-size:12px;font-family:var(--mono);">
     <span style="background:${verdictColor};color:var(--bg-0);padding:3px 9px;border-radius:4px;font-weight:700;">${verdict}</span>
@@ -9146,8 +9245,8 @@ function renderEliteOverview() {
     </div>`;
   })()}
 
-  <!-- THESIS at bottom (full sentence) -->
-  ${T.thesis ? `<div class="ex-thesis"><span class="ex-thesis-l">THESIS</span> ${T.thesis}</div>` : ''}
+  <!-- THESIS at bottom (full sentence) — guard against object (thesis_card) -->
+  ${(typeof T.thesis === 'string' && T.thesis) ? `<div class="ex-thesis"><span class="ex-thesis-l">THESIS</span> ${T.thesis}</div>` : (T.thesis_card && T.thesis_card.narrative ? `<div class="ex-thesis"><span class="ex-thesis-l">THESIS</span> ${T.thesis_card.narrative}</div>` : '')}
   `;
 }
 

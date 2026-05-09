@@ -1180,6 +1180,16 @@
       <button class="chip"    data-fsp="gt250" onclick="fsSetPriceTier('gt250')" aria-label="Over $250">$250+</button>
     </div>
     <div class="filt-rule"></div>
+    <!-- 2026-05-08 — Finviz Elite performance filters -->
+    <div class="filt-grp filt-grp-perf" id="fsPerfGrp" title="Performance pattern (Finviz Elite)">
+      <button class="chip on" data-fsperf="ALL"      onclick="fsSetPerf('ALL')" aria-label="All performance">⚡ Perf</button>
+      <button class="chip"    data-fsperf="STEADY"   onclick="fsSetPerf('STEADY')"   title="W/M/Q all positive — steady uptrend">📈 Steady up</button>
+      <button class="chip"    data-fsperf="PULLBACK" onclick="fsSetPerf('PULLBACK')" title="Q≥10% but W≤0 — strong stock taking a break">↩ Pullback</button>
+      <button class="chip"    data-fsperf="BREAKOUT" onclick="fsSetPerf('BREAKOUT')" title="W≥3% AND M≥5% — fresh momentum">🚀 Breakout</button>
+      <button class="chip"    data-fsperf="SQUEEZE"  onclick="fsSetPerf('SQUEEZE')"  title="High short float + concentrated inst own">🔥 Squeeze</button>
+      <button class="chip"    data-fsperf="WEAK"     onclick="fsSetPerf('WEAK')"     title="Q≤-10% AND M≤-5% — persistent weakness">⚠ Weak</button>
+    </div>
+    <div class="filt-rule"></div>
     <button class="filt-reset" onclick="sc2Clear()" title="Clear all filters">⟲</button>
   </div>
 
@@ -2389,6 +2399,7 @@ let FS_STATE = {
   entryQ: 'ALL',                    // NEW — FRESH/PULLBACK/EXTENDED/MISSED
   priceTier: 'ALL',                 // NEW — ALL / lt100 / lt250 / gt250
   capBucket: 'ALL',                 // NEW — ALL / Mega / Large / Mid / Small / Micro
+  perfPattern: 'ALL',               // NEW — ALL / STEADY / PULLBACK / BREAKOUT / SQUEEZE / WEAK (Finviz Elite)
   scoreMin: 0,
   scoreMax: 100,
   rrMin: 0,
@@ -2409,6 +2420,34 @@ window.fsSetCap = function(c) {
   FS_STATE.capBucket = c;
   document.querySelectorAll('.chip[data-fsc]').forEach(el => el.classList.toggle('on', el.dataset.fsc === c));
   if (typeof renderFloorScanner === 'function') renderFloorScanner();
+};
+
+window.fsSetPerf = function(p) {
+  FS_STATE.perfPattern = p;
+  document.querySelectorAll('.chip[data-fsperf]').forEach(el => el.classList.toggle('on', el.dataset.fsperf === p));
+  if (typeof renderFloorScanner === 'function') renderFloorScanner();
+};
+
+// Helper: does row match the selected perfPattern? Used by renderFloorScanner row filter.
+window._matchesPerfPattern = function(row, pattern) {
+  if (!pattern || pattern === 'ALL') return true;
+  const fv = (row && row.finviz_elite) || {};
+  const w = fv.perf_week_pct, m = fv.perf_month_pct, q = fv.perf_quarter_pct;
+  switch (pattern) {
+    case 'STEADY':
+      return typeof w === 'number' && typeof m === 'number' && typeof q === 'number'
+             && w > 0 && m > 0 && q > 0;
+    case 'PULLBACK':
+      return typeof w === 'number' && typeof q === 'number' && q >= 10 && w <= 0;
+    case 'BREAKOUT':
+      return typeof w === 'number' && typeof m === 'number' && w >= 3 && m >= 5;
+    case 'SQUEEZE':
+      return (row.squeeze_flag && (row.squeeze_flag.level === 'high' || row.squeeze_flag.level === 'moderate'));
+    case 'WEAK':
+      return typeof q === 'number' && typeof m === 'number' && q <= -10 && m <= -5;
+    default:
+      return true;
+  }
 };
 
 // Sync mode buttons with state on load
@@ -2529,11 +2568,11 @@ window.sc2ToggleAdvanced = () => {
 window.sc2Clear = () => {
   FS_STATE.verdict = 'ALL'; FS_STATE.sector = 'ALL'; FS_STATE.setupFamily = 'ALL';
   FS_STATE.tier = 'ALL'; FS_STATE.entryQ = 'ALL';
-  FS_STATE.priceTier = 'ALL'; FS_STATE.capBucket = 'ALL';
+  FS_STATE.priceTier = 'ALL'; FS_STATE.capBucket = 'ALL'; FS_STATE.perfPattern = 'ALL';
   FS_STATE.scoreMin = 0; FS_STATE.scoreMax = 100; FS_STATE.rrMin = 0;
   FS_STATE.watchOnly = false; FS_STATE.hideEarnings = false;
-  document.querySelectorAll('[data-fsv],[data-fss],[data-fsf],[data-fst],[data-fseq],[data-fsp],[data-fsc]').forEach(el => {
-    const isAll = ['ALL'].includes(el.dataset.fsv) || ['ALL'].includes(el.dataset.fss) || ['ALL'].includes(el.dataset.fsf) || ['ALL'].includes(el.dataset.fst) || ['ALL'].includes(el.dataset.fseq) || ['ALL'].includes(el.dataset.fsp) || ['ALL'].includes(el.dataset.fsc);
+  document.querySelectorAll('[data-fsv],[data-fss],[data-fsf],[data-fst],[data-fseq],[data-fsp],[data-fsc],[data-fsperf]').forEach(el => {
+    const isAll = ['ALL'].includes(el.dataset.fsv) || ['ALL'].includes(el.dataset.fss) || ['ALL'].includes(el.dataset.fsf) || ['ALL'].includes(el.dataset.fst) || ['ALL'].includes(el.dataset.fseq) || ['ALL'].includes(el.dataset.fsp) || ['ALL'].includes(el.dataset.fsc) || ['ALL'].includes(el.dataset.fsperf);
     el.classList.toggle('on', isAll);
   });
   const sMin = document.getElementById('sc2ScoreMin'); if (sMin) sMin.value = 0;
@@ -2797,6 +2836,9 @@ function renderFloorScanner() {
   }
   if (FS_STATE.entryQ !== 'ALL') {
     rows = rows.filter(r => (r.entry_quality || '').toUpperCase() === FS_STATE.entryQ);
+  }
+  if (FS_STATE.perfPattern && FS_STATE.perfPattern !== 'ALL') {
+    rows = rows.filter(r => window._matchesPerfPattern(r, FS_STATE.perfPattern));
   }
   if (FS_STATE.capBucket && FS_STATE.capBucket !== 'ALL') {
     rows = rows.filter(r => (r.cap_bucket || '') === FS_STATE.capBucket);
@@ -5604,6 +5646,59 @@ function renderOptionsFlow() {
 }
 window.renderOptionsFlow = renderOptionsFlow;
 
+// ── Finviz Elite Performance Strip (W/M/Q/H/Y bars on tiles) ──────────
+// Adapted from any row carrying `finviz_elite` performance fields. 5 mini-bars,
+// each colored green/red by sign, height proportional to magnitude (capped).
+function _renderPerfStrip(td) {
+  if (!td) return '';
+  const fv = td.finviz_elite || {};
+  const periods = [
+    ['W', fv.perf_week_pct],
+    ['M', fv.perf_month_pct],
+    ['Q', fv.perf_quarter_pct],
+    ['H', fv.perf_half_pct],
+    ['Y', fv.perf_year_pct],
+  ];
+  if (!periods.some(p => typeof p[1] === 'number')) return '';
+  // Bar height: cap |pct| at 50%, map to 4-22px
+  const barHeight = (pct) => {
+    if (typeof pct !== 'number') return 0;
+    const m = Math.min(Math.abs(pct), 50);
+    return Math.round(4 + (m / 50) * 18);
+  };
+  const barColor = (pct) => {
+    if (typeof pct !== 'number') return 'var(--ink-3)';
+    if (pct > 5) return 'var(--pass)';
+    if (pct > 0) return 'color-mix(in oklch, var(--pass) 70%, var(--ink-3))';
+    if (pct > -5) return 'color-mix(in oklch, var(--warn) 70%, var(--ink-3))';
+    return 'var(--fail)';
+  };
+  const cells = periods.map(([label, pct]) => {
+    const h = barHeight(pct);
+    const c = barColor(pct);
+    const tip = (typeof pct === 'number') ? `${label}: ${pct.toFixed(1)}%` : `${label}: —`;
+    return `<div title="${tip}" style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;">
+      <div style="width:6px;height:22px;display:flex;align-items:flex-end;justify-content:center;">
+        ${typeof pct === 'number' ? `<div style="width:6px;height:${h}px;background:${c};border-radius:1px;"></div>` : '<div style="width:6px;height:1px;background:var(--ink-3);"></div>'}
+      </div>
+      <span style="font-size:8px;color:var(--ink-3);font-family:var(--mono);">${label}</span>
+    </div>`;
+  }).join('');
+  return `<div style="margin-top:8px;padding-top:6px;border-top:1px dashed color-mix(in oklch, var(--rule-2) 50%, transparent);">
+    <div style="display:flex;gap:4px;align-items:flex-end;">${cells}</div>
+  </div>`;
+}
+
+// ── Squeeze badge — high/moderate short-squeeze candidate (Finviz Elite) ──
+function _renderSqueezeBadge(td) {
+  if (!td) return '';
+  const sf = td.squeeze_flag || {};
+  if (!sf.level || sf.level === 'low') return '';
+  const color = sf.level === 'high' ? 'var(--warn)' : 'color-mix(in oklch, var(--warn) 60%, var(--ink-3))';
+  const txt = sf.level === 'high' ? `🔥 SQUEEZE ${sf.score}` : `SQUEEZE ${sf.score}`;
+  return `<div style="margin-top:4px;display:inline-block;background:${color};color:var(--bg-0);font-size:9px;font-weight:800;padding:2px 6px;border-radius:3px;letter-spacing:0.06em;">${txt}</div>`;
+}
+
 // ── Top Buy Tiles — hero strip on Scanner tab ──────────────────────────
 // Surfaces the day's highest-conviction BUYs as visual tiles. Pulls from
 // elite_picks across all 3 modes, ranks by elite_score, takes top 6.
@@ -5699,6 +5794,8 @@ function renderTopBuyTiles() {
           <div><span style="color:var(--ink-3);">T1</span><br><b style="color:var(--green);font-family:var(--mono);">${fmtPx(t1)}</b></div>
         </div>
         ${rr ? `<div style="margin-top:6px;font-size:10.5px;color:var(--ink-2);">R:R <b style="color:var(--ink-0)">${Number(rr).toFixed(1)}:1</b></div>` : ''}
+        ${_renderPerfStrip(td)}
+        ${_renderSqueezeBadge(td)}
         ${earnings}
       </div>
       </a>`;
@@ -7025,7 +7122,9 @@ async function openThesisModal(ticker) {
   } catch (_e) { /* fall through */ }
   const body = document.getElementById('_thesisBody');
   if (!body) return;
-  const th = (row && row.thesis) || null;
+  // 2026-05-08 — structured thesis lives on `thesis_card` (the legacy `thesis`
+  // string field is reserved for the Overview tab's one-liner).
+  const th = (row && (row.thesis_card || (typeof row.thesis === 'object' ? row.thesis : null))) || null;
   if (!th || th.error) {
     body.innerHTML = `<div style="color:var(--ink-2);font-size:13px;">No thesis available for ${ticker}${th && th.error ? ` — ${th.error}` : ''}.</div>`;
     return;
@@ -7035,14 +7134,21 @@ async function openThesisModal(ticker) {
 }
 
 function _renderThesisCard(row, th) {
-  const score = th.score || 0;
-  const verdict = th.verdict || '?';
+  // Defensive scalar coercion — never render an object directly
+  const _s = (v, fallback = '') => {
+    if (v == null) return fallback;
+    if (typeof v === 'string' || typeof v === 'number') return String(v);
+    if (typeof v === 'object') return v.label || v.name || v.value || JSON.stringify(v).slice(0, 60);
+    return String(v);
+  };
+  const score = (typeof th.score === 'number') ? th.score : 0;
+  const verdict = _s(th.verdict, '?');
   const verdictColor = verdict === 'BUY' ? 'var(--pass)' : verdict === 'SELL' ? 'var(--fail)' : 'var(--info)';
-  const sector = th.sector || row.sector || '—';
-  const industry = th.industry || row.industry || '';
-  const tier = th.tier || '';
-  const regime = th.regime || '';
-  const price = row.price || row.last_price || 0;
+  const sector = _s(th.sector || row.sector, '—');
+  const industry = _s(th.industry || row.industry);
+  const tier = _s(th.tier);
+  const regime = _s(th.regime);
+  const price = (typeof row.price === 'number' ? row.price : (typeof row.last_price === 'number' ? row.last_price : 0));
   // Header strip
   let html = `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-size:12px;font-family:var(--mono);">
     <span style="background:${verdictColor};color:var(--bg-0);padding:3px 9px;border-radius:4px;font-weight:700;">${verdict}</span>
@@ -7156,7 +7262,11 @@ async function renderThesisLibrary() {
 
   let tickersData = {};
   try { tickersData = await _getTickers(); } catch (_e) {}
-  const rows = Object.values(tickersData || {}).filter(r => r && r.thesis && !r.thesis.error);
+  // Use thesis_card (structured) — legacy "thesis" was a string for Overview strip
+  const rows = Object.values(tickersData || {}).filter(r => {
+    const tc = r && (r.thesis_card || (typeof r.thesis === 'object' ? r.thesis : null));
+    return tc && !tc.error;
+  });
   if (sbCt) sbCt.textContent = rows.length;
   if (fsCt) fsCt.textContent = rows.length;
   if (!rows.length) {
@@ -7178,7 +7288,11 @@ async function renderThesisLibrary() {
     if (positionV === 'BUY' || positionV === 'WATCH') modes.Position.push(r);
     if (investV === 'BUY' || investV === 'WATCH') modes.Invest.push(r);
   }
-  for (const k of Object.keys(modes)) modes[k].sort((a,b) => (b.thesis.score||0) - (a.thesis.score||0));
+  const _tcScore = (r) => {
+    const tc = r.thesis_card || (typeof r.thesis === 'object' ? r.thesis : null) || {};
+    return tc.score || 0;
+  };
+  for (const k of Object.keys(modes)) modes[k].sort((a,b) => _tcScore(b) - _tcScore(a));
 
   let html = '';
   // Toolbar
@@ -7232,13 +7346,21 @@ async function renderThesisLibrary() {
 }
 
 function _renderThesisRow(r) {
-  const th = r.thesis || {};
-  const verdict = th.verdict || '?';
+  // structured card lives on thesis_card (legacy "thesis" string is for Overview)
+  const th = (r.thesis_card || (typeof r.thesis === 'object' ? r.thesis : null)) || {};
+  // Coerce everything to string defensively — guards against accidental objects
+  const _s = (v, fallback = '') => {
+    if (v == null) return fallback;
+    if (typeof v === 'string' || typeof v === 'number') return String(v);
+    if (typeof v === 'object') return v.label || v.name || v.value || JSON.stringify(v).slice(0, 60);
+    return String(v);
+  };
+  const verdict = _s(th.verdict, '?');
   const verdictColor = verdict === 'BUY' ? 'var(--pass)' : verdict === 'SELL' ? 'var(--fail)' : 'var(--info)';
-  const score = th.score || 0;
-  const narr = (th.narrative || '').slice(0, 200);
-  const sector = th.sector || '';
-  const cap = r.cap_bucket || '';
+  const score = (typeof th.score === 'number') ? th.score : 0;
+  const narr = _s(th.narrative).slice(0, 200);
+  const sector = _s(th.sector);
+  const cap = _s(r.cap_bucket);
   return `<div data-th-row data-thesis-ticker="${r.ticker}" data-th-ticker="${r.ticker}" data-th-sector="${_escapeHtml(sector)}" data-th-verdict="${verdict}" data-th-score="${score}" style="background:var(--bg-2);border:1px solid var(--rule-2);border-radius:6px;padding:10px;cursor:pointer;transition:border-color 0.15s;" onmouseenter="this.style.borderColor='var(--accent)'" onmouseleave="this.style.borderColor='var(--rule-2)'">
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;font-family:var(--mono);">
       <div style="display:flex;align-items:baseline;gap:8px;">

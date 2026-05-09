@@ -2129,61 +2129,15 @@ def get_stock_info(ticker: str) -> dict:
     # Schwab fills: sector*, industry*, mcap, pe_ratio, trailing_eps, 52w_high/low,
     # dividend_yield, shares_float, avg_volume. Deep fields remain None → Layer 3.
     # (*sector/industry come only when Schwab returns reference data; often Unknown.)
-    # Layer 2.5: Polygon ticker details — sector/industry (runs early, enriches Schwab)
-    # Polygon /v3/reference/tickers/{ticker} provides SIC-based sector classification.
+    # 2026-05-08 cleanup: Polygon SIC-based sector classification removed.
+    # `_polygon_get` was deleted on 2026-04-25 during the EODHD migration; the
+    # try/except block here was silently failing on every call. Sector/industry/
+    # market_cap now come exclusively from EODHD Highlights + Schwab fundamentals
+    # (downstream layers). Variables kept as None placeholders for `or` fallbacks
+    # at lines below.
     _poly_sector = None
     _poly_industry = None
     _poly_mcap = None
-    try:
-        _ptd = _polygon_get(f"/v3/reference/tickers/{ticker}")
-        if _ptd and _ptd.get("results"):
-            _pr = _ptd["results"]
-            _sic_desc = _pr.get("sic_description", "")
-            _poly_industry = _sic_desc or None
-            _poly_mcap = _pr.get("market_cap")
-            _SIC_SECTOR_MAP = {
-                "pharma": "Healthcare", "biotech": "Healthcare", "medical": "Healthcare",
-                "drug": "Healthcare", "health": "Healthcare", "surgical": "Healthcare",
-                "electromedical": "Healthcare", "dental": "Healthcare",
-                "biological": "Healthcare", "diagnostic": "Healthcare", "vaccine": "Healthcare",
-                "semiconductor": "Technology", "software": "Technology", "computer": "Technology",
-                "data processing": "Technology", "optical": "Technology",
-                "printed circuit": "Technology", "communication equip": "Technology",
-                "telecom": "Communication Services", "broadcast": "Communication Services",
-                "cable tv": "Communication Services", "telephone": "Communication Services",
-                "bank": "Financial Services", "insurance": "Financial Services",
-                "invest": "Financial Services", "loan": "Financial Services", "credit": "Financial Services",
-                "security broker": "Financial Services", "savings": "Financial Services",
-                "crude petroleum": "Energy", "petroleum refin": "Energy", "natural gas": "Energy",
-                "coal mining": "Energy", "oil field": "Energy",
-                "mining": "Basic Materials", "metal": "Basic Materials", "chemical": "Basic Materials",
-                "gold": "Basic Materials", "steel": "Basic Materials", "paper": "Basic Materials",
-                "plastic": "Basic Materials", "fertilizer": "Basic Materials",
-                "retail": "Consumer Cyclical", "restaurant": "Consumer Cyclical",
-                "hotel": "Consumer Cyclical", "auto": "Consumer Cyclical", "apparel": "Consumer Cyclical",
-                "eating place": "Consumer Cyclical", "department store": "Consumer Cyclical",
-                "food": "Consumer Defensive", "beverage": "Consumer Defensive", "tobacco": "Consumer Defensive",
-                "household": "Consumer Defensive", "grocery": "Consumer Defensive", "soap": "Consumer Defensive",
-                "electric service": "Utilities", "water supply": "Utilities", "gas distribution": "Utilities",
-                "electric, gas": "Utilities", "cogeneration": "Utilities",
-                "real estate": "Real Estate", "reit": "Real Estate",
-                "aerospace": "Industrials", "defense": "Industrials", "transport": "Industrials",
-                "construction": "Industrials", "machinery": "Industrials", "engineering": "Industrials",
-                "railroad": "Industrials", "trucking": "Industrials", "air transport": "Industrials",
-                "wholesale": "Industrials", "industrial instrument": "Industrials",
-                "electronic": "Industrials", "electrical apparatus": "Industrials",
-                "special industry": "Industrials", "fabricated metal": "Industrials",
-            }
-            if _sic_desc:
-                _sic_lower = _sic_desc.lower()
-                for _kw, _sect in _SIC_SECTOR_MAP.items():
-                    if _kw in _sic_lower:
-                        _poly_sector = _sect
-                        break
-                if not _poly_sector and _sic_desc:
-                    log.debug(f"SIC unmapped for {ticker}: '{_sic_desc}' — sector left to downstream sources")
-    except Exception:
-        pass
 
     # Layer 2: EODHD real-time + fundamentals (replaces Schwab+Polygon+Finnhub+FMP)
     try:
@@ -5516,11 +5470,17 @@ def get_finviz_bulk() -> dict[str, dict]:
             "Institutional Ownership": "inst_own_pct",
         },
         "performance": {
-            "Relative Volume":       "rel_volume",
-            "Average Volume":        "avg_volume",
-            "Performance (Week)":    "perf_week_pct",
-            "Performance (Month)":   "perf_month_pct",
-            "Volatility (Week)":     "volatility_w_pct",
+            "Relative Volume":         "rel_volume",
+            "Average Volume":          "avg_volume",
+            "Performance (Week)":      "perf_week_pct",
+            "Performance (Month)":     "perf_month_pct",
+            "Performance (Quarter)":   "perf_quarter_pct",
+            "Performance (Half Year)": "perf_half_pct",
+            "Performance (Year)":      "perf_year_pct",
+            "Performance (YTD)":       "perf_ytd_pct",
+            "Volatility (Week)":       "volatility_w_pct",
+            "Change":                  "change_pct",
+            "Gap":                     "gap_pct",
         },
         "financial": {
             "Return on Equity":      "roe_pct",
@@ -5568,6 +5528,8 @@ def get_finviz_bulk() -> dict[str, dict]:
     pct_fields = {
         "eps_growth_this_yr", "eps_growth_next_yr", "short_float_pct",
         "insider_own_pct", "inst_own_pct", "perf_week_pct", "perf_month_pct",
+        "perf_quarter_pct", "perf_half_pct", "perf_year_pct", "perf_ytd_pct",
+        "change_pct", "gap_pct",
         "volatility_w_pct", "roe_pct", "roa_pct", "gross_margin_pct",
         "oper_margin_pct", "profit_margin_pct", "sma20_pct", "sma50_pct", "sma200_pct",
     }
@@ -5909,109 +5871,10 @@ def get_news_articles_legacy(ticker: str, limit: int = 10) -> list[dict]:
     return get_news_articles(ticker, limit)
 
 
-def get_polygon_technicals(ticker: str) -> dict:
-    """
-    Fetch EMAs (8, 21, 50, 200), RSI(14), and MACD from Polygon indicators API.
-    Returns {ema8, ema21, ema50, ema200, rsi14, macd_val, macd_signal, macd_hist}
-    Cached 1 hour.
-    """
-    cache_key = f"polygon_tech_{ticker}_{int(time.time()//3600)}"
-    cached = _cache_read(cache_key, 3600)
-    if cached is not None:
-        return cached
-
-    result: dict = {}
-
-    def _ema(period: int) -> float | None:
-        d = _polygon_get(f"/v1/indicators/ema/{ticker}", params={"timespan": "day", "window": period, "series_type": "close", "limit": 1})
-        v = (d or {}).get("results", {}).get("values", [{}])
-        return v[0].get("value") if v else None
-
-    def _rsi() -> float | None:
-        d = _polygon_get(f"/v1/indicators/rsi/{ticker}", params={"timespan": "day", "window": 14, "series_type": "close", "limit": 1})
-        v = (d or {}).get("results", {}).get("values", [{}])
-        return v[0].get("value") if v else None
-
-    def _macd() -> tuple:
-        d = _polygon_get(f"/v1/indicators/macd/{ticker}", params={"timespan": "day", "short_window": 12, "long_window": 26, "signal_window": 9, "series_type": "close", "limit": 1})
-        vals = (d or {}).get("results", {}).get("values", [{}])
-        if vals:
-            return vals[0].get("value"), vals[0].get("signal"), vals[0].get("histogram")
-        return None, None, None
-
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
-        f_e8   = ex.submit(_ema, 8)
-        f_e21  = ex.submit(_ema, 21)
-        f_e50  = ex.submit(_ema, 50)
-        f_e200 = ex.submit(_ema, 200)
-        f_rsi  = ex.submit(_rsi)
-        f_macd = ex.submit(_macd)
-
-        result["ema8"]        = f_e8.result()
-        result["ema21"]       = f_e21.result()
-        result["ema50"]       = f_e50.result()
-        result["ema200"]      = f_e200.result()
-        result["rsi14"]       = f_rsi.result()
-        mv, ms, mh            = f_macd.result()
-        result["macd_val"]    = mv
-        result["macd_signal"] = ms
-        result["macd_hist"]   = mh
-
-    _cache_write(cache_key, result)
-    return result
-
-
-def get_polygon_multi_timeframe(ticker: str) -> dict:
-    """
-    Fetch 1H, 4H, Daily, Weekly OHLCV for the Timeframes tab.
-    Returns {"1H": df, "4H": df, "Daily": df, "Weekly": df}
-    """
-    cache_key = f"polygon_mtf_{ticker}_{int(time.time()//1800)}"
-    cached = _cache_read(cache_key, 1800)
-    if cached is not None:
-        # Deserialise
-        out = {}
-        for tf, recs in cached.items():
-            if recs:
-                df = pd.DataFrame(recs)
-                df["t"] = pd.to_datetime(df["t"], unit="ms", utc=True).dt.tz_convert("America/New_York")
-                out[tf] = df.set_index("t").rename(columns={"o":"Open","h":"High","l":"Low","c":"Close","v":"Volume","vw":"VWAP"})
-        return out
-
-    import concurrent.futures
-    configs = {
-        "1H":     (1, "hour",  30),
-        "4H":     (4, "hour",  60),
-        "Daily":  (1, "day",  180),
-        "Weekly": (1, "week", 365),
-    }
-
-    raw: dict = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
-        futures = {ex.submit(get_polygon_ohlcv, ticker, days=d, timespan=ts, multiplier=m): tf
-                   for tf, (m, ts, d) in configs.items()}
-        for f, tf in futures.items():
-            try:
-                raw[tf] = f.result()
-            except Exception:
-                raw[tf] = None
-
-    # Serialise for cache
-    serial = {}
-    out = {}
-    for tf, df in raw.items():
-        if df is not None:
-            records = df.reset_index().assign(t=lambda d: d["t"].astype("int64") // 10**6).to_dict("records")
-            serial[tf] = records
-            out[tf] = df
-        else:
-            serial[tf] = []
-            out[tf] = None
-
-    _cache_write(cache_key, serial)
-    return out
-
+# 2026-05-08 cleanup: removed get_polygon_technicals + get_polygon_multi_timeframe.
+# Both relied on _polygon_get (deleted 2026-04-25 in EODHD migration) and had zero
+# callers — the indicator functions live in analysis.py, MTF charts source from
+# get_polygon_ohlcv shim → fetch_ohlcv_with_failover → EODHD.
 
 # ── Backward-compat aliases (renamed 2026-04-29; old names kept for callers) ──
 # get_schwab_fundamentals → get_fundamentals (Schwab decommissioned, body uses EODHD)
