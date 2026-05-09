@@ -227,6 +227,44 @@ from fastapi.responses import RedirectResponse
 async def root(auth: HTTPBasicCredentials = Depends(_check_auth)):
     return RedirectResponse(url="/v2/dashboard.html", status_code=302)
 
+# -- Backtest report (hedge_fund_report.py output) --
+# Serves the latest backtest_report_latest.html. /api/backtest-report/history
+# returns a list of all dated reports for navigation.
+@app.get("/v2/backtest-report")
+async def backtest_report_latest(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    p = BASE_DIR / "cache" / "backtest_report_latest.html"
+    if not p.exists():
+        return HTMLResponse("<h1>No backtest report yet</h1><p>Run <code>python3 hedge_fund_report.py</code> to generate one.</p>", status_code=404)
+    return HTMLResponse(p.read_text(), headers=_NO_CACHE)
+
+@app.get("/v2/backtest-report/{filename}")
+async def backtest_report_by_filename(filename: str, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Serve a specific historical report by filename (backtest_report_YYYYMMDD_HHMMSS.html)."""
+    if not filename.startswith("backtest_report_") or not filename.endswith(".html") or "/" in filename or ".." in filename:
+        return HTMLResponse("Bad filename", status_code=400)
+    p = BASE_DIR / "cache" / filename
+    if not p.exists():
+        return HTMLResponse(f"Report not found: {filename}", status_code=404)
+    return HTMLResponse(p.read_text(), headers=_NO_CACHE)
+
+@app.get("/api/backtest-report/history")
+async def backtest_report_history(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """List available backtest reports, newest first."""
+    reports_dir = BASE_DIR / "cache"
+    rows = []
+    for p in sorted(reports_dir.glob("backtest_report_2*.html"), reverse=True):
+        try:
+            stat = p.stat()
+            rows.append({
+                "filename": p.name,
+                "size": stat.st_size,
+                "modified": stat.st_mtime,
+                "url": f"/v2/backtest-report/{p.name}",
+            })
+        except Exception:
+            continue
+    return JSONResponse({"reports": rows[:50], "count": len(rows)})
+
 _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
 
 # Phase B (2026-05-08): /dashboard.css, /dashboard.js, /dashboard-data.js

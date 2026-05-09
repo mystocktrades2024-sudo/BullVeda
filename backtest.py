@@ -1800,6 +1800,40 @@ def main():
         json_path = BASE_DIR / "cache" / "portfolio_backtest.json"
         json_path.write_text(json.dumps(result, indent=2, default=str))
         print(f"\nResults saved: {json_path}")
+
+        # 2026-05-08 — Supabase dual-write via push_backtest_to_supabase.py.
+        # That module owns the backtest_runs / backtest_trades tables (see
+        # migrations/002_backtest_runs.sql). Failures are logged, never block.
+        try:
+            from push_backtest_to_supabase import push as _push_bt
+            push_result = _push_bt(json_path)
+            if push_result.get("ok"):
+                log.info(f"  Supabase: pushed run {push_result.get('run_id')}")
+            elif push_result.get("errors"):
+                log.warning(f"  Supabase push had errors: {push_result['errors'][0][:200]}")
+        except Exception as _dw_err:
+            log.warning(f"  Supabase backtest dual-write skipped: {_dw_err}")
+
+        # 2026-05-08 — Auto-generate hedge_fund_report HTML after every
+        # portfolio backtest. Reads the just-written cache/portfolio_backtest.json.
+        try:
+            import subprocess
+            log.info("Generating hedge_fund_report HTML...")
+            r = subprocess.run(
+                ["python3", str(BASE_DIR / "hedge_fund_report.py")],
+                capture_output=True, text=True, timeout=120,
+            )
+            if r.returncode == 0:
+                # Last "Generated:" line tells us where it landed
+                for line in r.stdout.splitlines():
+                    if "Generated:" in line or "Latest copy:" in line:
+                        log.info(f"  {line.strip()}")
+                log.info("  → http://localhost:7432/v2/backtest-report")
+            else:
+                log.warning(f"hedge_fund_report failed (rc={r.returncode}): {r.stderr[:300]}")
+        except Exception as _hf_err:
+            log.warning(f"hedge_fund_report auto-trigger skipped: {_hf_err}")
+
         return
 
     picks = run_backtest(days=args.days, hold_days=args.hold,
