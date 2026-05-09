@@ -3976,24 +3976,28 @@ def _adjust_plan_by_entry_quality(plan: dict, entry_quality: str, indicators: di
     except (TypeError, ValueError):
         entry = 0.0
 
+    # 2026-05-08: stops widened +0.25×ATR across all tiers. Backtest 60d/58 trades
+    # showed 50% stop-out rate with 0% WR on stop_loss exits. Trailing stops drove
+    # all alpha (93.8% WR). Wider initial stops give the trade room to mean-revert
+    # before activating the trailing logic at +2%.
     if entry_quality == "FRESH":
         if support and atr:
-            plan["stop"] = round(support - 0.5 * atr, 2)
+            plan["stop"] = round(support - 0.75 * atr, 2)
         plan["max_hold_days"]     = 10
         plan["target_r_multiple"] = 4.0
-        plan["entry_quality_adj"] = "FRESH: tight stop 0.5xATR, hold 10d, target 4R"
+        plan["entry_quality_adj"] = "FRESH: stop 0.75xATR, hold 10d, target 4R"
     elif entry_quality == "PULLBACK":
         if support and atr:
-            plan["stop"] = round(support - 0.75 * atr, 2)
+            plan["stop"] = round(support - 1.0 * atr, 2)
         plan["max_hold_days"]     = 7
         plan["target_r_multiple"] = 3.0
-        plan["entry_quality_adj"] = "PULLBACK: stop 0.75xATR, hold 7d, target 3R"
+        plan["entry_quality_adj"] = "PULLBACK: stop 1.0xATR, hold 7d, target 3R"
     elif entry_quality == "VALID":
         if ema50 and atr:
-            plan["stop"] = round(ema50 - 1.0 * atr, 2)
+            plan["stop"] = round(ema50 - 1.25 * atr, 2)
         plan["max_hold_days"]     = 5
         plan["target_r_multiple"] = 2.5
-        plan["entry_quality_adj"] = "VALID: wide stop EMA50-1xATR, hold 5d, target 2.5R"
+        plan["entry_quality_adj"] = "VALID: stop EMA50-1.25xATR, hold 5d, target 2.5R"
 
     # Recompute target1 + target2 + risk_per_share + rr_ratio + refresh exit_rules
     # from the new stop. Without this, target2 stays at its pre-EQ value (5R from

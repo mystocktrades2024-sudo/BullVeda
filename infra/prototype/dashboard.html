@@ -920,6 +920,7 @@
   <div class="fs-section">
     <div class="fs-h">Workspaces</div>
     <div class="fs-link fs-link-elite" data-tab="elite"><span>⌬ Elite Picks</span><span class="fb" id="fsEliteCt">0</span></div>
+    <div class="fs-link" data-tab="thesis"><span>📋 Thesis</span><span class="fb" id="fsThesisCt">0</span></div>
     <div class="fs-link" data-tab="optionsflow"><span>⚡ Options Flow</span><span class="fb" id="fsOpFlowCt">0</span></div>
     <div class="fs-link" data-tab="earnings"><span>📅 Earnings</span><span class="fb" id="fsEarnCt">0</span></div>
     <div class="fs-link on" data-tab="scanner"><span>Signal Scanner</span><span class="fk">G</span></div>
@@ -1065,6 +1066,7 @@
   <div class="sb-link" data-tab="leveraged"><span class="ico">×</span>Leveraged</div>
   <div class="sb-divider"></div>
   <div class="sb-link sb-link-elite" data-tab="elite"><span class="ico">⌬</span>Elite Picks<span class="ct" id="sbEliteCt">0</span></div>
+  <div class="sb-link" data-tab="thesis"><span class="ico">📋</span>Thesis<span class="ct" id="sbThesisCt">0</span></div>
   <div class="sb-link" data-tab="optionsflow"><span class="ico">⚡</span>Options Flow<span class="ct" id="sbOpFlowCt">0</span></div>
   <div class="sb-link" data-tab="earnings"><span class="ico">📅</span>Earnings<span class="ct" id="sbEarnCt">0</span></div>
   <div class="sb-link" data-tab="industries"><span class="ico">▥</span>Industries<span class="ct" id="sbIndCt">0</span></div>
@@ -1341,6 +1343,16 @@
     <span class="meta" id="elitePicksMeta">—</span>
   </div>
   <div class="panel-body" id="elitePicksBody"></div>
+</div>
+
+<!-- Thesis tab — auto-generated AMAT-style thesis card per ticker (Path C) -->
+<div class="tab-panel" data-tab="thesis">
+  <div class="panel-head">
+    <span class="title">Thesis Library</span>
+    <span class="desc">Per-ticker thesis card — score breakdown, why bullish, risks, trade plan · click any row to expand · Swing / Position / Invest</span>
+    <span class="meta" id="thesisMeta">—</span>
+  </div>
+  <div class="panel-body" id="thesisBody"></div>
 </div>
 
 <!-- Live Options Flow — institutional UOA imbalance scanner -->
@@ -6982,6 +6994,266 @@ async function _submitBulkImport() {
   if (added > 0 && typeof renderPortfolio === 'function') renderPortfolio();
 }
 
+// ── Thesis Modal (Path C — 2026-05-08) ────────────────────────────────
+// Click-to-expand thesis card available everywhere a ticker name is rendered.
+// Uses _getTickers() (cached) to read tickers.json[ticker].thesis. Each card
+// has 4 sections: narrative · score breakdown · why bullish · risks · trade plan.
+async function openThesisModal(ticker) {
+  if (!ticker) return;
+  ticker = String(ticker).toUpperCase();
+  _closeModal('_thesisModal');
+  const m = document.createElement('div');
+  m.id = '_thesisModal';
+  m.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;font-family:DM Sans,Aptos,system-ui,sans-serif;color:var(--ink-0);padding:20px;';
+  m.innerHTML = `<div id="_thesisCard" style="background:var(--bg-1);border:1px solid var(--rule);border-radius:12px;padding:0;width:760px;max-width:96vw;max-height:90vh;overflow:auto;box-shadow:0 12px 60px rgba(0,0,0,0.6);">
+    <div style="padding:20px 24px;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--bg-1);z-index:1;">
+      <div style="display:flex;align-items:baseline;gap:14px;">
+        <h2 style="margin:0;font-size:22px;letter-spacing:0.02em;font-weight:700;">${ticker}</h2>
+        <span id="_thNarrSrc" style="font-size:10px;color:var(--ink-3);font-family:var(--mono);letter-spacing:0.1em;text-transform:uppercase;"></span>
+      </div>
+      <button onclick="_closeModal('_thesisModal')" style="background:transparent;border:none;color:var(--ink-3);font-size:22px;cursor:pointer;line-height:1;padding:4px 8px;">×</button>
+    </div>
+    <div id="_thesisBody" style="padding:20px 24px;">Loading thesis…</div>
+  </div>`;
+  document.body.appendChild(m);
+  m.addEventListener('click', (ev) => { if (ev.target === m) _closeModal('_thesisModal'); });
+
+  let row = null;
+  try {
+    const all = await _getTickers();
+    row = all && all[ticker];
+  } catch (_e) { /* fall through */ }
+  const body = document.getElementById('_thesisBody');
+  if (!body) return;
+  const th = (row && row.thesis) || null;
+  if (!th || th.error) {
+    body.innerHTML = `<div style="color:var(--ink-2);font-size:13px;">No thesis available for ${ticker}${th && th.error ? ` — ${th.error}` : ''}.</div>`;
+    return;
+  }
+  document.getElementById('_thNarrSrc').textContent = 'auto-generated';
+  body.innerHTML = _renderThesisCard(row, th);
+}
+
+function _renderThesisCard(row, th) {
+  const score = th.score || 0;
+  const verdict = th.verdict || '?';
+  const verdictColor = verdict === 'BUY' ? 'var(--pass)' : verdict === 'SELL' ? 'var(--fail)' : 'var(--info)';
+  const sector = th.sector || row.sector || '—';
+  const industry = th.industry || row.industry || '';
+  const tier = th.tier || '';
+  const regime = th.regime || '';
+  const price = row.price || row.last_price || 0;
+  // Header strip
+  let html = `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-size:12px;font-family:var(--mono);">
+    <span style="background:${verdictColor};color:var(--bg-0);padding:3px 9px;border-radius:4px;font-weight:700;">${verdict}</span>
+    <span style="color:var(--ink-2);">Score <b style="color:var(--ink-0);">${score}</b></span>
+    <span style="color:var(--ink-3);">·</span>
+    <span style="color:var(--ink-2);">$${(+price).toFixed(2)}</span>
+    <span style="color:var(--ink-3);">·</span>
+    <span style="color:var(--ink-2);">${sector}${industry ? ' · ' + industry : ''}</span>
+    ${tier ? `<span style="color:var(--ink-3);">·</span><span style="color:var(--accent);">${tier}</span>` : ''}
+    ${regime ? `<span style="color:var(--ink-3);">·</span><span style="color:var(--ink-2);">${regime}</span>` : ''}
+  </div>`;
+
+  // Narrative
+  html += `<div style="background:var(--bg-2);border-left:3px solid var(--accent);padding:12px 14px;border-radius:0 6px 6px 0;font-size:14px;line-height:1.55;color:var(--ink-0);margin-bottom:18px;">
+    ${_escapeHtml(th.narrative || '')}
+  </div>`;
+
+  // Score breakdown
+  if (Array.isArray(th.score_breakdown) && th.score_breakdown.length) {
+    html += `<h3 style="font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-3);margin:14px 0 8px;">Score Breakdown</h3>`;
+    html += `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;margin-bottom:18px;">
+      <thead><tr style="text-align:left;color:var(--ink-3);border-bottom:1px solid var(--rule-2);">
+        <th style="padding:6px 4px;font-weight:600;">Pillar</th>
+        <th style="padding:6px 4px;font-weight:600;text-align:right;">Pts</th>
+        <th style="padding:6px 4px;font-weight:600;text-align:right;">Max</th>
+        <th style="padding:6px 4px;font-weight:600;text-align:center;">Bar</th>
+      </tr></thead><tbody>`;
+    for (const p of th.score_breakdown) {
+      const ok = p.verdict === 'check' ? '✓' : p.verdict === 'warn' ? '⚠' : '✗';
+      const okC = p.verdict === 'check' ? 'var(--pass)' : p.verdict === 'warn' ? 'var(--warn)' : 'var(--fail)';
+      const isNum = typeof p.max === 'number';
+      const pct = isNum ? Math.max(0, Math.min(100, (p.pts / p.max) * 100)) : 0;
+      html += `<tr style="border-bottom:1px solid color-mix(in oklch, var(--rule-2) 40%, transparent);">
+        <td style="padding:6px 4px;color:var(--ink-1);"><span style="color:${okC};margin-right:6px;">${ok}</span>${_escapeHtml(p.pillar)}</td>
+        <td style="padding:6px 4px;text-align:right;color:var(--ink-0);">${p.pts}</td>
+        <td style="padding:6px 4px;text-align:right;color:var(--ink-2);">${p.max}</td>
+        <td style="padding:6px 4px;width:140px;">${isNum ? `<div style="background:var(--bg-2);height:6px;border-radius:3px;overflow:hidden;"><div style="width:${pct}%;height:100%;background:${okC};"></div></div>` : ''}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+  }
+
+  // Why bullish & risks (two columns)
+  html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px;">`;
+  html += `<div><h3 style="font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--pass);margin:0 0 8px;">Why Bullish</h3>`;
+  if (Array.isArray(th.why_bullish) && th.why_bullish.length) {
+    html += '<ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--ink-1);">';
+    for (const b of th.why_bullish) html += `<li>${_escapeHtml(b)}</li>`;
+    html += '</ul>';
+  } else { html += '<div style="color:var(--ink-3);font-size:12px;">—</div>'; }
+  html += '</div>';
+  html += `<div><h3 style="font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--warn);margin:0 0 8px;">Risks</h3>`;
+  if (Array.isArray(th.risks) && th.risks.length) {
+    html += '<ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--ink-1);">';
+    for (const r of th.risks) html += `<li>${_escapeHtml(r)}</li>`;
+    html += '</ul>';
+  } else { html += '<div style="color:var(--ink-3);font-size:12px;">—</div>'; }
+  html += '</div></div>';
+
+  // Trade plan
+  const tp = th.trade_plan || {};
+  if (tp && (tp.entry_low || tp.stop || tp.target1)) {
+    html += `<h3 style="font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-3);margin:14px 0 8px;">Trade Plan</h3>`;
+    html += `<div style="background:var(--bg-2);padding:12px 14px;border-radius:6px;font-family:var(--mono);font-size:12px;color:var(--ink-1);line-height:1.7;">`;
+    if (tp.setup_type) html += `<div><span style="color:var(--ink-3);">Setup:</span> ${_escapeHtml(tp.setup_type)}${tp.entry_quality_adj ? ` <span style="color:var(--ink-3);">— ${_escapeHtml(tp.entry_quality_adj)}</span>` : ''}</div>`;
+    if (tp.entry_low && tp.entry_high) html += `<div><span style="color:var(--ink-3);">Entry:</span> $${tp.entry_low} – $${tp.entry_high}</div>`;
+    if (tp.stop) html += `<div><span style="color:var(--ink-3);">Stop:</span> <span style="color:var(--fail);">$${tp.stop}</span></div>`;
+    if (tp.target1) html += `<div><span style="color:var(--ink-3);">T1:</span> <span style="color:var(--pass);">$${tp.target1}</span>${tp.rr_ratio ? ` <span style="color:var(--ink-3);">(${tp.rr_ratio}R)</span>` : ''}</div>`;
+    if (tp.target2) html += `<div><span style="color:var(--ink-3);">T2:</span> <span style="color:var(--pass);">$${tp.target2}</span></div>`;
+    if (tp.max_hold_days) html += `<div><span style="color:var(--ink-3);">Hold:</span> ${tp.max_hold_days} ${typeof tp.max_hold_days === 'number' ? 'days' : ''}</div>`;
+    if (tp.size_pct) html += `<div><span style="color:var(--ink-3);">Size:</span> ${(+tp.size_pct).toFixed(2)}% of account</div>`;
+    html += `</div>`;
+  }
+
+  if (th.decision_reason) {
+    html += `<div style="margin-top:14px;padding:10px 14px;background:color-mix(in oklch, var(--info) 8%, var(--bg-2));border-left:3px solid var(--info);border-radius:0 4px 4px 0;font-size:12px;color:var(--ink-2);">
+      <b style="color:var(--info);">Decision:</b> ${_escapeHtml(th.decision_reason)}
+    </div>`;
+  }
+
+  html += `<div style="margin-top:18px;text-align:right;font-size:11px;color:var(--ink-3);">
+    <a href="/v2/elite-detail.html?t=${row.ticker}" style="color:var(--accent);text-decoration:none;">Open full detail page →</a>
+  </div>`;
+
+  return html;
+}
+
+function _escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Global click handler — any element with data-thesis-ticker triggers the modal
+document.addEventListener('click', function(ev) {
+  const el = ev.target.closest && ev.target.closest('[data-thesis-ticker]');
+  if (!el) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  openThesisModal(el.getAttribute('data-thesis-ticker'));
+});
+
+// ── Thesis Library tab — grid of per-ticker thesis cards ────────────────
+async function renderThesisLibrary() {
+  const body = document.getElementById('thesisBody');
+  const meta = document.getElementById('thesisMeta');
+  const sbCt = document.getElementById('sbThesisCt');
+  const fsCt = document.getElementById('fsThesisCt');
+  if (!body) return;
+  body.innerHTML = `<div style="padding:24px;color:var(--ink-3);font-size:13px;">Loading theses…</div>`;
+
+  let tickersData = {};
+  try { tickersData = await _getTickers(); } catch (_e) {}
+  const rows = Object.values(tickersData || {}).filter(r => r && r.thesis && !r.thesis.error);
+  if (sbCt) sbCt.textContent = rows.length;
+  if (fsCt) fsCt.textContent = rows.length;
+  if (!rows.length) {
+    body.innerHTML = `<div style="padding:24px;color:var(--ink-3);font-size:13px;">No theses available — re-run scan + build_data.py.</div>`;
+    return;
+  }
+  if (meta) meta.textContent = `${rows.length} ticker${rows.length === 1 ? '' : 's'} · click any card to expand full thesis`;
+
+  // Group by mode preference: prefer position_verdict if BUY, else invest_verdict, else swing
+  // We'll show three columns: Swing / Position / Invest. Each gets all tickers
+  // routed by which mode flagged them BUY (or WATCH if no BUYs).
+  const modes = { Swing: [], Position: [], Invest: [] };
+  for (const r of rows) {
+    // route to ALL modes where it's surfaced as BUY/WATCH
+    const swingV    = (r.swing_verdict || r.verdict || '').toUpperCase();
+    const positionV = (r.position_verdict || '').toUpperCase();
+    const investV   = (r.invest_verdict || '').toUpperCase();
+    if (swingV === 'BUY' || swingV === 'WATCH') modes.Swing.push(r);
+    if (positionV === 'BUY' || positionV === 'WATCH') modes.Position.push(r);
+    if (investV === 'BUY' || investV === 'WATCH') modes.Invest.push(r);
+  }
+  for (const k of Object.keys(modes)) modes[k].sort((a,b) => (b.thesis.score||0) - (a.thesis.score||0));
+
+  let html = '';
+  // Toolbar
+  html += `<div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;">
+    <input id="_thFilter" type="text" placeholder="Filter ticker / sector…" style="flex:1;min-width:220px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-0);font-family:inherit;">
+    <select id="_thVerdict" style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-1);font-family:inherit;">
+      <option value="">All verdicts</option><option value="BUY">BUY only</option><option value="WATCH">WATCH only</option>
+    </select>
+    <select id="_thMin" style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--rule-2);border-radius:5px;color:var(--ink-1);font-family:inherit;">
+      <option value="0">Score ≥ 0</option><option value="60">Score ≥ 60</option><option value="70">Score ≥ 70</option><option value="80">Score ≥ 80</option>
+    </select>
+  </div>`;
+
+  html += `<div id="_thGrid" style="display:grid;grid-template-columns:repeat(3, 1fr);gap:14px;">`;
+  for (const mode of ['Swing','Position','Invest']) {
+    const list = modes[mode];
+    html += `<div data-th-mode="${mode}" style="background:var(--bg-1);border:1px solid var(--rule-2);border-radius:8px;padding:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--rule-2);">
+        <h3 style="margin:0;font-size:13px;letter-spacing:0.06em;text-transform:uppercase;color:var(--accent);">${mode}</h3>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--ink-3);">${list.length} picks</span>
+      </div>
+      <div data-th-list="${mode}" style="display:flex;flex-direction:column;gap:8px;max-height:72vh;overflow-y:auto;">`;
+    for (const r of list) {
+      html += _renderThesisRow(r);
+    }
+    html += `</div></div>`;
+  }
+  html += `</div>`;
+  body.innerHTML = html;
+
+  // wire filter
+  const apply = () => {
+    const q = (document.getElementById('_thFilter')?.value || '').toUpperCase().trim();
+    const vf = document.getElementById('_thVerdict')?.value || '';
+    const mn = +(document.getElementById('_thMin')?.value || 0);
+    document.querySelectorAll('#_thGrid [data-th-row]').forEach(el => {
+      const t = el.getAttribute('data-th-ticker') || '';
+      const s = (el.getAttribute('data-th-sector') || '').toUpperCase();
+      const v = el.getAttribute('data-th-verdict') || '';
+      const sc = +(el.getAttribute('data-th-score') || 0);
+      const matchQ = !q || t.includes(q) || s.includes(q);
+      const matchV = !vf || v === vf;
+      const matchM = sc >= mn;
+      el.style.display = (matchQ && matchV && matchM) ? '' : 'none';
+    });
+  };
+  ['_thFilter','_thVerdict','_thMin'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', apply);
+  });
+}
+
+function _renderThesisRow(r) {
+  const th = r.thesis || {};
+  const verdict = th.verdict || '?';
+  const verdictColor = verdict === 'BUY' ? 'var(--pass)' : verdict === 'SELL' ? 'var(--fail)' : 'var(--info)';
+  const score = th.score || 0;
+  const narr = (th.narrative || '').slice(0, 200);
+  const sector = th.sector || '';
+  const cap = r.cap_bucket || '';
+  return `<div data-th-row data-thesis-ticker="${r.ticker}" data-th-ticker="${r.ticker}" data-th-sector="${_escapeHtml(sector)}" data-th-verdict="${verdict}" data-th-score="${score}" style="background:var(--bg-2);border:1px solid var(--rule-2);border-radius:6px;padding:10px;cursor:pointer;transition:border-color 0.15s;" onmouseenter="this.style.borderColor='var(--accent)'" onmouseleave="this.style.borderColor='var(--rule-2)'">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;font-family:var(--mono);">
+      <div style="display:flex;align-items:baseline;gap:8px;">
+        <b style="font-size:14px;color:var(--ink-0);">${r.ticker}</b>
+        <span style="font-size:10px;color:var(--ink-3);">${_escapeHtml(sector)}${cap ? ` · ${cap}` : ''}</span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;font-size:10px;">
+        <span style="background:${verdictColor};color:var(--bg-0);padding:2px 6px;border-radius:3px;font-weight:700;">${verdict}</span>
+        <span style="color:var(--ink-2);">${score}</span>
+      </div>
+    </div>
+    <div style="font-size:12px;line-height:1.45;color:var(--ink-1);">${_escapeHtml(narr)}</div>
+  </div>`;
+}
+
 function renderPortfolio() {
   const p   = DATA.portfolio || {};
   const pos = p.positions || [];
@@ -9329,6 +9601,7 @@ const TAB_RENDERERS = {
   pairs:       renderPairs,
   risklab:     renderRiskLab,
   elite:       renderElitePicks,
+  thesis:      renderThesisLibrary,
   optionsflow: renderOptionsFlow,
   earnings:    renderEarnings,
   market:      renderMarket,

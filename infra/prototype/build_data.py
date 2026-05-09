@@ -1535,6 +1535,14 @@ def rich_row(r: dict, b: dict = None) -> dict:
         "insider_buys": ins.get("buys", 0),
         "insider_sells":ins.get("sells", 0),
     })
+    # 2026-05-08 — Path C thesis card. Auto-generated structured thesis (4 sections:
+    # score breakdown, why bullish, risks, trade plan). LLM narration optional via
+    # narrate_thesis.py — pulled in if cache/thesis_narrations.json exists.
+    try:
+        from build_thesis import build_thesis as _bt
+        base["thesis"] = _bt(r)
+    except Exception as _bt_err:
+        base["thesis"] = {"error": str(_bt_err)[:120]}
     return base
 
 

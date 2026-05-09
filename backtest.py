@@ -683,8 +683,13 @@ def run_backtest(days: int = 252, hold_days: int = 5,
     from data_fetcher import get_sp500, get_russell1000, get_stock_info_batch, get_finviz_bulk, get_polygon_ohlcv
     import time
 
-    # Calendar days needed to cover `days` trading days (~1.4× buffer)
-    calendar_days_needed = int(days * 1.45) + 60
+    # Calendar days = test window + indicator lookback buffer.
+    # 2026-05-08 fix: was +60 → backtest scored 0 picks because the early
+    # test-window dates had <200 bars of pre-date history (200-day SMA needs
+    # 200 bars before bt_date). Bumped lookback to +350 calendar days
+    # (~240 trading days) which covers all common indicators (200d SMA,
+    # 252d RS rank, etc.). Parquet archive has 533 rows so plenty available.
+    calendar_days_needed = int(days * 1.45) + 350
 
     # ── Universe: S&P 500 + Russell 1000 (deduplicated) filtered to $2–$250 ──
     sp500 = get_sp500()
@@ -897,6 +902,21 @@ def run_backtest(days: int = 252, hold_days: int = 5,
     # Score each ticker for each backtest date
     all_picks: list[dict] = []
 
+    # 2026-05-08 fix: backtest now respects the decision_engine kill list.
+    # Live system gates EMA21 Pullback / 52wk Breakout via compute_final_verdict
+    # (swing_trade.py:3122) but backtest's _score_as_of path bypasses it. Result:
+    # backtest fired 31 EMA21 Pullback trades at 22.6% WR (-$144 in 60d sample).
+    # Now load the kill list once and reject killed setups before they enter
+    # day_scored.
+    _kill_list: dict = {}
+    try:
+        from decision_engine import compute_setup_kill_list
+        _kill_list = compute_setup_kill_list() or {}
+        if _kill_list:
+            log.info(f"  Backtest kill list active: {list(_kill_list.keys())}")
+    except Exception as _kl_err:
+        log.warning(f"  Backtest kill list unavailable: {_kl_err}")
+
     for bt_date in backtest_dates:
         day_scored = []
 
@@ -912,10 +932,15 @@ def run_backtest(days: int = 252, hold_days: int = 5,
             futures = {pool.submit(_score_one, t): t for t in active_universe}
             for fut in as_completed(futures):
                 res = fut.result()
-                if (res and res["gate_passed"]
+                if not (res and res["gate_passed"]
                         and res["score"] >= min_score
                         and res.get("rs_rank", 0) >= min_rs):
-                    day_scored.append(res)
+                    continue
+                # Apply kill list — same rule as live decision_engine
+                _setup_name = res.get("setup_type") or res.get("setup_family") or ""
+                if _setup_name in _kill_list:
+                    continue
+                day_scored.append(res)
 
         # Sort by score, take top_n — mirrors live system's max positions
         day_scored.sort(key=lambda x: x["score"], reverse=True)
