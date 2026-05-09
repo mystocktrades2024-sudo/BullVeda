@@ -8496,6 +8496,19 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     except Exception:
         _todays_gap_pct_val = 0.0
 
+    # 2026-05-08 — per-setup score multiplier (config-driven, not data-driven).
+    # Lets us boost/demote specific setups based on backtest evidence. Default
+    # 1.0 (no change). See config["setup_score_multiplier"]. Applied BEFORE
+    # ranking-flaw-13 rounding so the boost is cleanly captured in the int.
+    try:
+        _setup_mults = (config or {}).get("setup_score_multiplier") or {}
+        _setup_for_mult = (plan.get("setup_type") or setup_family or "").strip()
+        _setup_mult = float(_setup_mults.get(_setup_for_mult, 1.0))
+        if _setup_mult != 1.0 and _setup_mult > 0:
+            normalized = float(normalized) * _setup_mult
+    except Exception:
+        pass
+
     # Ranking flaw #13: collapse 0.1pp float noise. Keep the full-precision value
     # in `normalized_raw` for debugging; use integer 0-100 for ranking, thresholds,
     # and the public `score` field. Two picks at 68.9 and 69.1 now both display 69.

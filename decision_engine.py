@@ -205,6 +205,11 @@ def compute_setup_kill_list(signal_log_path: str | None = None,
     Returns dict: {setup_name: {'wr': pct, 'avg_pnl': pct, 'n': count, 'reason': str}}.
     Only setups meeting all three thresholds (WR<min_wr AND avg_pnl<min_pnl AND
     n>=min_n) are included. Empty dict if log unavailable or no kills.
+
+    Also merges in any setups listed under config["static_setup_kill_list"] —
+    used for setups that don't have ≥min_n closed signals yet but were
+    identified as broken via backtest (e.g., VCP Breakout 0% WR over 5 trades
+    in the 60d backtest, 2026-05-08).
     """
     import json as _json
     from pathlib import Path as _P
@@ -214,7 +219,7 @@ def compute_setup_kill_list(signal_log_path: str | None = None,
     try:
         sigs = _json.loads(_P(signal_log_path).read_text())
     except Exception:
-        return {}
+        sigs = []
     by_setup: dict = _dd(list)
     for s in sigs or []:
         if s.get("status") != "CLOSED":
@@ -239,6 +244,26 @@ def compute_setup_kill_list(signal_log_path: str | None = None,
                 "n": n,
                 "reason": f"setup performance floor: WR {wr*100:.1f}%<{min_wr*100:.0f}% over {n} closed",
             }
+    # Merge in static (manual) kill list from config
+    try:
+        cfg_path = _P(__file__).parent / "config" / "config.json"
+        if cfg_path.exists():
+            cfg = _json.loads(cfg_path.read_text())
+            for entry in (cfg.get("static_setup_kill_list") or []):
+                # Each entry can be string (just setup name) or dict with reason
+                if isinstance(entry, str):
+                    name = entry
+                    reason = "manually killed (static_setup_kill_list)"
+                elif isinstance(entry, dict):
+                    name = entry.get("setup")
+                    reason = entry.get("reason") or "manually killed"
+                else:
+                    continue
+                if not name or name in kills:
+                    continue
+                kills[name] = {"wr": None, "avg_pnl": None, "n": 0, "reason": reason}
+    except Exception:
+        pass
     return kills
 
 
