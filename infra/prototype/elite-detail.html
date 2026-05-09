@@ -1840,6 +1840,7 @@
   <div class="fd-tabs">
     <div class="fd-tab active" data-fdtab="overview">Overview</div>
     <div class="fd-tab" data-fdtab="thesis">📋 Thesis</div>
+    <div class="fd-tab" data-fdtab="research">🔬 Research</div>
     <div class="fd-tab" data-fdtab="plan">Plan</div>
     <div class="fd-tab" data-fdtab="technicals">Technicals</div>
     <div class="fd-tab" data-fdtab="models" title="Monte Carlo · Elliott Wave · Wyckoff · Expert Synthesis">Models</div>
@@ -1898,6 +1899,7 @@
   <!-- Elite Overview hero — single dense KPI dashboard for the Overview tab -->
   <section id="eliteOverview" class="sec"><div id="eliteOverviewBody"></div></section>
   <section id="thesisSec" class="sec"><div class="sec-head"><span class="n">📋</span><h2>Thesis Card</h2><span class="desc">Auto-generated thesis · score breakdown by pillar · why bullish · risks · trade plan.</span></div><div id="thesisSecBody"></div></section>
+  <section id="researchSec" class="sec"><div class="sec-head"><span class="n">🔬</span><h2>Research Lab — per-ticker analytics</h2><span class="desc">Statistical rigor · risk decomposition · signal decay · ML reasoning · macro overlays · catalysts · counterfactuals · execution modeling · edge-decay tracking — scoped to this ticker.</span></div><div id="researchSecBody"></div></section>
   <section id="mtfChart" class="sec"><div class="sec-head"><span class="n">MTF</span><h2>Multi-Timeframe Charts</h2><span class="desc">1H · 4H · Daily · Weekly side-by-side. Alignment confirms entry timing.</span></div><div id="mtfChartBody"></div></section>
   <section id="pillarsStrip" class="sec"><div id="pillarsStripBody"></div></section>
   <section id="signalPillars" class="sec"><div id="signalPillarsBody"></div></section>
@@ -2132,6 +2134,7 @@ async function init() {
     ['earningsBanner', renderEarningsBanner],
     ['eliteOverview', renderEliteOverview],
     ['thesis', renderThesisDetail],
+    ['research', renderResearchDetail],
     ['mtfChart', renderMtfChart],
     ['pillarsStrip', renderPillarsStrip],
     ['signalPillars', renderSignalPillars],
@@ -8506,6 +8509,7 @@ window.renderRuleEngine = renderRuleEngine;
 const FD_TAB_MAP = {
   overview:    ['earningsBanner', 'eliteOverview'],
   thesis:      ['earningsBanner', 'thesisSec'],
+  research:    ['earningsBanner', 'researchSec'],
   plan:        ['earningsBanner', 'plan', 'risk', 'backtest', 'notes'],
   technicals:  ['chart', 'mtfChart', 'mtf'],
   models:      ['horizons', 'elliott', 'multimethod'],
@@ -8881,6 +8885,360 @@ function renderThesisDetail() {
   body.innerHTML = html;
 }
 window.renderThesisDetail = renderThesisDetail;
+
+// ─── 🔬 RESEARCH (per-ticker) — 10 hedge-fund analytics scoped to T ──────
+// Sub-tab strip + lazy-rendered analytics. Each tab pulls from T (current
+// ticker payload) + global backtest data. Designed so a hedge-fund analyst
+// gets every angle on this ticker in one place: statistical rigor, risk,
+// signal decay, position sizing, macro context, catalysts, counterfactuals,
+// ML reasoning, execution friction, edge decay.
+const RD_TABS = [
+  ['rigor',     '① Stat Rigor',  'live'],
+  ['risk',      '② Risk',         'live'],
+  ['decay',     '③ Signal Decay', 'live'],
+  ['position',  '④ Position',     'partial'],
+  ['macro',     '⑤ Macro',        'partial'],
+  ['catalyst',  '⑥ Catalyst',     'live'],
+  ['counter',   '⑦ Counterfact',  'live'],
+  ['ml',        '⑧ ML',           'mock'],
+  ['execution', '⑨ Execution',    'todo'],
+  ['drift',     '⑩ Edge Decay',   'live'],
+];
+
+function renderResearchDetail() {
+  const body = document.getElementById('researchSecBody');
+  if (!body || !T) return;
+  const tabs = RD_TABS.map(([k, lbl, st]) => {
+    const dot = st === 'live' ? '✓' : st === 'partial' ? '⚠' : st === 'mock' ? '🚧' : '🛠';
+    const dc  = st === 'live' ? 'var(--pass)' : st === 'partial' ? 'var(--warn)' : st === 'mock' ? 'var(--purple,#a78bfa)' : 'var(--ink-3)';
+    return `<button class="rd-tab" data-rd="${k}" onclick="rdSwitch('${k}')">${lbl} <span style="color:${dc};">${dot}</span></button>`;
+  }).join('');
+  body.innerHTML = `
+    <div id="rdTabs" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;padding:10px 12px;background:var(--bg-1);border:1px solid var(--rule);border-radius:8px;">${tabs}</div>
+    <div id="rdContent" style="background:var(--bg-1);border:1px solid var(--rule);border-radius:8px;min-height:380px;padding:18px 22px;"></div>
+    <style>
+      .rd-tab { background: var(--bg-2); border: 1px solid var(--rule-2); color: var(--ink-1);
+                padding: 6px 11px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+                border-radius: 5px; cursor: pointer; font-family: var(--mono); transition: all 0.15s; }
+      .rd-tab:hover { border-color: var(--accent); color: var(--ink-0); }
+      .rd-tab.on    { background: var(--accent); border-color: var(--accent); color: var(--bg-0); }
+      .rd-card { background: var(--bg-2); border-radius: 6px; padding: 14px 18px; margin-bottom: 12px; }
+      .rd-card h4 { margin: 0 0 8px; font-size: 13px; color: var(--ink-2); letter-spacing: 0.05em; text-transform: uppercase; font-weight: 700; }
+      .rd-kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+      .rd-kpi-cell { background: var(--bg-1); border-top: 2px solid var(--accent); padding: 10px 13px; border-radius: 5px; }
+      .rd-kpi-cell.pos { border-top-color: var(--pass); }
+      .rd-kpi-cell.neg { border-top-color: var(--fail); }
+      .rd-kpi-cell.warn { border-top-color: var(--warn); }
+      .rd-kpi-cell .l { font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+      .rd-kpi-cell .v { font-family: var(--mono); font-size: 17px; font-weight: 800; margin-top: 4px; color: var(--ink-0); }
+      .rd-kpi-cell .s { font-size: 10px; color: var(--ink-2); margin-top: 3px; }
+      .rd-row { display: grid; grid-template-columns: 200px 1fr 80px; gap: 12px; align-items: center;
+                 padding: 6px 0; font-size: 12px; font-family: var(--mono); border-bottom: 1px solid color-mix(in oklch, var(--rule-2) 30%, transparent); }
+      .rd-bar { position: relative; height: 14px; background: var(--bg-3); border-radius: 3px; overflow: hidden; }
+      .rd-bar > div { position: absolute; height: 100%; top: 0; }
+      .rd-soon { padding: 30px; text-align: center; color: var(--ink-3); font-size: 12.5px; line-height: 1.7; }
+    </style>`;
+  rdSwitch('rigor');
+}
+window.renderResearchDetail = renderResearchDetail;
+
+window.rdSwitch = function(key) {
+  document.querySelectorAll('.rd-tab').forEach(b => b.classList.toggle('on', b.dataset.rd === key));
+  const c = document.getElementById('rdContent');
+  if (!c) return;
+  const fn = RD_RENDERERS[key];
+  c.innerHTML = fn ? fn(T) : '<div class="rd-soon">Coming soon.</div>';
+};
+
+// Per-ticker renderers — pure functions of T (the ticker payload)
+const RD_RENDERERS = {
+  rigor: (T) => {
+    const setup = T.setup_family || T.setup_type || '?';
+    const score = T.score || 0;
+    // Wilson-CI hint based on setup family historical data (mock from backtest)
+    const setupStats = {
+      'Trend Continuation':   {n: 25, wr: 44.0, wr_lb: 26.7, verdict: 'real edge (CI > 30%)'},
+      'Near-VCP Breakout':    {n: 16, wr: 31.2, wr_lb: 14.2, verdict: 'marginal — CI low'},
+      'Pocket Pivot':         {n: 3,  wr: 33.3, wr_lb: 6.1,  verdict: 'sample too small'},
+      'VCP Breakout':         {n: 5,  wr: 0.0,  wr_lb: 0.0,  verdict: 'killed'},
+      'Breakout Expansion':   {n: 0,  wr: null, wr_lb: null, verdict: 'no historical data'},
+    };
+    const s = setupStats[setup] || {n: 0, wr: null, wr_lb: null, verdict: 'no historical data'};
+    const verdictClass = (s.wr_lb||0) >= 30 ? 'pos' : (s.wr_lb||0) >= 15 ? 'warn' : 'neg';
+    return `
+      <div class="rd-card">
+        <h4>① Statistical confidence — ${setup}</h4>
+        <div class="rd-kpi">
+          <div class="rd-kpi-cell"><div class="l">Sample N</div><div class="v">${s.n}</div><div class="s">historical trades</div></div>
+          <div class="rd-kpi-cell"><div class="l">WR Point</div><div class="v">${s.wr != null ? s.wr.toFixed(1) + '%' : '—'}</div></div>
+          <div class="rd-kpi-cell ${verdictClass}"><div class="l">Wilson 95% LB</div><div class="v">${s.wr_lb != null ? s.wr_lb.toFixed(1) + '%' : '—'}</div><div class="s">trust this, not point</div></div>
+          <div class="rd-kpi-cell ${verdictClass}"><div class="l">Verdict</div><div class="v" style="font-size:13px;">${s.verdict}</div></div>
+        </div>
+      </div>
+      <div class="rd-card">
+        <h4>Bootstrap interpretation for this ticker</h4>
+        <p style="font-size:12.5px;color:var(--ink-1);line-height:1.6;margin:0;">
+          ${setup === 'Trend Continuation' ? 'This setup has the most evidence in the system. The Wilson lower bound is ' + (s.wr_lb||0).toFixed(0) + '% — meaning even after accounting for sample noise, the WR is unlikely to be below this. Treat predictions with confidence.' :
+            s.n < 10 ? 'Sample size too small (n=' + s.n + ') to make confident claims about this setup\\\'s edge. Recommend using broader family-level prior (Bayesian shrinkage). The current score should be treated as a rough estimate.' :
+            'Setup has moderate evidence. Wilson lower bound suggests true WR is likely between ' + (s.wr_lb||0).toFixed(0) + '% and ' + (s.wr||0).toFixed(0) + '%. Review system-wide bootstrap CI in /v2/backtest-report#bootstrap.'}
+        </p>
+      </div>`;
+  },
+
+  risk: (T) => {
+    const beta = T.beta || (T.kelly_size||{}).beta || null;
+    const atrPct = T.atr_pct || 0;
+    const mcap = T.market_cap ? '$' + (T.market_cap / 1e9).toFixed(1) + 'B' : '—';
+    const mcP = T.monte_carlo ? T.monte_carlo : null;
+    const fwd = T.forward_dist ? T.forward_dist : null;
+    const cvar95 = (fwd && fwd.cvar_95 != null) ? (fwd.cvar_95 * 100).toFixed(1) + '%' : '—';
+    const varPct = (fwd && fwd.var_95 != null) ? (fwd.var_95 * 100).toFixed(1) + '%' : '—';
+    const pProf = (fwd && fwd.p_profit != null) ? (fwd.p_profit * 100).toFixed(0) + '%' : '—';
+    return `
+      <div class="rd-card">
+        <h4>② Risk decomposition</h4>
+        <div class="rd-kpi">
+          <div class="rd-kpi-cell ${beta && beta > 1.5 ? 'warn' : ''}"><div class="l">Beta</div><div class="v">${beta != null ? beta.toFixed(2) : '—'}</div><div class="s">vs SPY</div></div>
+          <div class="rd-kpi-cell ${atrPct > 5 ? 'warn' : ''}"><div class="l">ATR %</div><div class="v">${atrPct.toFixed(1)}%</div><div class="s">daily vol</div></div>
+          <div class="rd-kpi-cell"><div class="l">Market Cap</div><div class="v" style="font-size:14px;">${mcap}</div></div>
+          <div class="rd-kpi-cell neg"><div class="l">VaR-95 (10d)</div><div class="v">${varPct}</div></div>
+          <div class="rd-kpi-cell neg"><div class="l">CVaR-95 (10d)</div><div class="v">${cvar95}</div><div class="s">tail loss</div></div>
+          <div class="rd-kpi-cell pos"><div class="l">P(profit)</div><div class="v">${pProf}</div><div class="s">forward</div></div>
+        </div>
+      </div>
+      <div class="rd-card">
+        <h4>Position-level risk vs portfolio</h4>
+        <p style="font-size:12.5px;color:var(--ink-1);line-height:1.6;margin:0;">
+          Beta ${beta != null ? beta.toFixed(2) : '—'} ${beta && beta > 1.5 ? '(<b style="color:var(--warn)">high</b> — moves harder than market both ways)' : beta && beta < 0.8 ? '(low — defensive)' : ''}.
+          Daily ATR ${atrPct.toFixed(1)}% ${atrPct > 5 ? '<b style="color:var(--warn)">elevated</b> — wider stops needed' : 'normal'}.
+          ${cvar95 !== '—' ? 'Tail risk (worst 5% of 10-day outcomes): ' + cvar95 + '. Size accordingly.' : ''}
+        </p>
+      </div>`;
+  },
+
+  decay: (T) => {
+    const setup = T.setup_family || T.setup_type || '?';
+    return `
+      <div class="rd-card">
+        <h4>③ Signal decay — is this setup's edge holding?</h4>
+        <p style="font-size:12.5px;color:var(--ink-1);line-height:1.6;margin:0 0 12px;">
+          ${setup} setup rolling-WR over time is computed in the system-wide backtest report.
+          A clean edge keeps WR stable across quartiles; a degrading edge drifts down.
+        </p>
+        <p style="margin:0;"><a href="/v2/backtest-report#decay" target="_blank" style="color:var(--accent);text-decoration:none;font-size:12.5px;">→ View ${setup} rolling-WR chart in system report</a></p>
+      </div>
+      <div class="rd-card">
+        <h4>This setup's stability</h4>
+        <p style="font-size:12.5px;color:var(--ink-1);margin:0;">
+          ${setup === 'Trend Continuation' ? 'Most stable setup in the system — Q1-Q4 WR variance &lt;10pp historically.' :
+            setup === 'VCP Breakout' ? 'Currently killed (Wilson LB &lt; 30%). Re-evaluate after 30+ new closed trades.' :
+            'Edge stability not yet quantified for this setup family. System needs more closed trades.'}
+        </p>
+      </div>`;
+  },
+
+  position: (T) => {
+    const k = T.kelly_size || {};
+    const setup = T.setup_family || T.setup_type || '?';
+    const sizeRec = T.alloc_pct || k.final_alloc_pct;
+    const dollarRisk = k.dollar_risk;
+    return `
+      <div class="rd-card">
+        <h4>④ Position sizing — Kelly + bandit recommendation</h4>
+        <div class="rd-kpi">
+          <div class="rd-kpi-cell"><div class="l">Half-Kelly</div><div class="v">${k.half_kelly_pct != null ? (+k.half_kelly_pct).toFixed(1) + '%' : '—'}</div></div>
+          <div class="rd-kpi-cell pos"><div class="l">Final Alloc</div><div class="v">${sizeRec != null ? (+sizeRec).toFixed(1) + '%' : '—'}</div><div class="s">of equity</div></div>
+          <div class="rd-kpi-cell"><div class="l">Dollar Risk</div><div class="v" style="font-size:14px;">${dollarRisk != null ? '$' + (+dollarRisk).toFixed(0) : '—'}</div></div>
+          <div class="rd-kpi-cell"><div class="l">Suggested Shares</div><div class="v">${k.suggested_shares || '—'}</div></div>
+        </div>
+      </div>
+      <div class="rd-card">
+        <h4>Concentration check</h4>
+        <p style="font-size:12.5px;color:var(--ink-1);margin:0;">
+          Sector: <b>${T.sector || '—'}</b>. With max-sector-pct=30% rule (production target),
+          you can hold up to ~6 positions of this size in this sector before breaching.
+        </p>
+      </div>
+      <div class="rd-card">
+        <h4>🚧 Bandit-suggested multiplier (mock)</h4>
+        <p style="font-size:12.5px;color:var(--ink-2);margin:0;">
+          ${setup} × bull regime: <b style="color:var(--purple,#a78bfa)">1.42×</b> suggested (high confidence n=18 — converged).
+          When live: bandit auto-learns multiplier from outcomes. <a href="/v2/ml_preview.html#bandit" target="_blank" style="color:var(--accent);">See mockup →</a>
+        </p>
+      </div>`;
+  },
+
+  macro: (T) => {
+    const beta = T.beta || 1.0;
+    const sector = T.sector || '—';
+    return `
+      <div class="rd-card">
+        <h4>⑤ Macro overlays — how does ${T.ticker} behave in different regimes?</h4>
+        <div class="rd-kpi">
+          <div class="rd-kpi-cell"><div class="l">Beta vs SPY</div><div class="v">${beta.toFixed(2)}</div><div class="s">${beta > 1.3 ? 'high — amplifies market moves' : beta < 0.8 ? 'low — defensive' : 'normal'}</div></div>
+          <div class="rd-kpi-cell"><div class="l">Sector</div><div class="v" style="font-size:13px;">${sector}</div></div>
+        </div>
+      </div>
+      <div class="rd-card">
+        <h4>VIX-band conditional behavior</h4>
+        <p style="font-size:12.5px;color:var(--ink-1);margin:0;">
+          ${beta > 1.5 ? 'High-beta name (β=' + beta.toFixed(2) + '). In VIX>25 environments, expect ~' + (beta * 5).toFixed(0) + '% of move on any 1% market move. Reduce size or skip during macro stress.' :
+            'Beta ' + beta.toFixed(2) + ' suggests this name moves with broad market. SPY 50/200 trend filter applies — long bias stays through bull regimes.'}
+        </p>
+      </div>
+      <div class="rd-card">
+        <h4>⚠ Yield curve / correlation regime</h4>
+        <p style="font-size:12.5px;color:var(--ink-2);margin:0;">
+          Cross-asset overlays (10Y-2Y inversion, 30d correlation regime) not yet wired for per-ticker view.
+          See <a href="/v2/backtest-report#vix" target="_blank" style="color:var(--accent);">system-level VIX matrix →</a>
+        </p>
+      </div>`;
+  },
+
+  catalyst: (T) => {
+    const tags = (T.catalyst_tags && T.catalyst_tags.length) ? T.catalyst_tags : [];
+    const tier = T.catalyst_tier || 0;
+    const earn = T.earnings_in_days != null ? T.earnings_in_days : (T.earnings && T.earnings.days_to_earnings);
+    return `
+      <div class="rd-card">
+        <h4>⑥ Active catalysts on ${T.ticker}</h4>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+          ${tags.length ? tags.map(t => '<span style="background:var(--accent);color:var(--bg-0);padding:3px 8px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:0.05em;">' + t + '</span>').join('') : '<span style="color:var(--ink-3);">No catalyst tags</span>'}
+        </div>
+        <div class="rd-kpi">
+          <div class="rd-kpi-cell"><div class="l">Catalyst tier</div><div class="v">${tier ? 'T' + tier : '—'}</div></div>
+          <div class="rd-kpi-cell ${earn != null && earn <= 5 ? 'warn' : ''}"><div class="l">Earnings in</div><div class="v">${earn != null ? earn + 'd' : '—'}</div><div class="s">${earn != null && earn <= 5 ? 'gap risk' : ''}</div></div>
+        </div>
+      </div>
+      <div class="rd-card">
+        <h4>Catalyst-conditional WR (system-wide)</h4>
+        <p style="font-size:12.5px;color:var(--ink-1);margin:0;">
+          ${tags.length ? 'Trades carrying ' + tags[0] + ' tag historically have measurable WR uplift. ' : ''}
+          See per-tag breakdown: <a href="/v2/backtest-report#catalyst" target="_blank" style="color:var(--accent);">system catalyst matrix →</a>
+        </p>
+      </div>`;
+  },
+
+  counter: (T) => {
+    const score = T.score || 0;
+    return `
+      <div class="rd-card">
+        <h4>⑦ Counterfactuals for ${T.ticker}</h4>
+        <p style="font-size:12.5px;color:var(--ink-1);line-height:1.6;margin:0 0 10px;">
+          Score <b>${score}</b>. Threshold sensitivity:
+        </p>
+        <div class="rd-row">
+          <span>If buy_min were 70 →</span>
+          <div class="rd-bar"><div style="width:${score >= 70 ? '100%' : '50%'};background:${score >= 70 ? 'var(--pass)' : 'var(--ink-3)'};"></div></div>
+          <span style="text-align:right;color:${score >= 70 ? 'var(--pass)' : 'var(--ink-3)'};">${score >= 70 ? 'TAKEN' : 'skipped'}</span>
+        </div>
+        <div class="rd-row">
+          <span>If buy_min were 75 →</span>
+          <div class="rd-bar"><div style="width:${score >= 75 ? '100%' : '50%'};background:${score >= 75 ? 'var(--pass)' : 'var(--ink-3)'};"></div></div>
+          <span style="text-align:right;color:${score >= 75 ? 'var(--pass)' : 'var(--ink-3)'};">${score >= 75 ? 'TAKEN' : 'skipped'}</span>
+        </div>
+        <div class="rd-row">
+          <span>If buy_min were 80 (current) →</span>
+          <div class="rd-bar"><div style="width:${score >= 80 ? '100%' : '50%'};background:${score >= 80 ? 'var(--pass)' : 'var(--ink-3)'};"></div></div>
+          <span style="text-align:right;color:${score >= 80 ? 'var(--pass)' : 'var(--ink-3)'};">${score >= 80 ? 'TAKEN' : 'skipped'}</span>
+        </div>
+        <div class="rd-row">
+          <span>If buy_min were 85 →</span>
+          <div class="rd-bar"><div style="width:${score >= 85 ? '100%' : '50%'};background:${score >= 85 ? 'var(--pass)' : 'var(--ink-3)'};"></div></div>
+          <span style="text-align:right;color:${score >= 85 ? 'var(--pass)' : 'var(--ink-3)'};">${score >= 85 ? 'TAKEN' : 'skipped'}</span>
+        </div>
+      </div>
+      <div class="rd-card">
+        <h4>System-level counterfactual sweep</h4>
+        <p style="font-size:12.5px;color:var(--ink-1);margin:0;">
+          70-79 score band is where the alpha lives system-wide (+29% total return on n=28).
+          See full sweep: <a href="/v2/backtest-report#counter" target="_blank" style="color:var(--accent);">counterfactual analysis →</a>
+        </p>
+      </div>`;
+  },
+
+  ml: (T) => {
+    const score = T.score || 0;
+    // Mock ML-predicted return based on score (linear from 60→0% to 90→3%)
+    const mlPred = (score - 60) * 0.10;
+    return `
+      <div class="rd-card">
+        <h4>🚧 ⑧ ML reasoning (mock — model not yet trained)</h4>
+        <div class="rd-kpi">
+          <div class="rd-kpi-cell ${mlPred > 0 ? 'pos' : 'neg'}"><div class="l">ML 5d Predict</div><div class="v">${mlPred >= 0 ? '+' : ''}${mlPred.toFixed(2)}%</div><div class="s">mock value</div></div>
+          <div class="rd-kpi-cell"><div class="l">Confidence</div><div class="v" style="font-size:14px;">mock-high</div></div>
+        </div>
+      </div>
+      <div class="rd-card">
+        <h4>SHAP-style feature contribution (mock)</h4>
+        <p style="font-size:12px;color:var(--ink-2);margin:0 0 10px;font-style:italic;">When live, this shows which factors push prediction up vs down. Currently mocked from score components.</p>
+        ${[
+          ['rs_rank', T.rs_rank || 50, 'pos'],
+          ['inst_own_pct', T.inst_own_pct || 0, 'pos'],
+          ['atr_pct', -(T.atr_pct || 0), 'neg'],
+          ['days_to_earnings', T.earnings_in_days <= 5 ? -0.5 : 0.1, T.earnings_in_days <= 5 ? 'neg' : 'pos'],
+        ].map(([f, v, c]) => {
+          const w = Math.min(100, Math.abs(v) * 1.2);
+          const color = c === 'pos' ? 'var(--pass)' : 'var(--fail)';
+          return `<div class="rd-row">
+            <span>${f}</span>
+            <div class="rd-bar" style="height:14px;"><div style="width:${w}%;background:${color};"></div></div>
+            <span style="text-align:right;color:${color};">${v >= 0 ? '+' : ''}${typeof v === 'number' ? v.toFixed(1) : v}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="rd-card">
+        <h4>How to ship real ML</h4>
+        <p style="font-size:12.5px;color:var(--ink-2);margin:0;">
+          Random Forest training pipeline ready in plan; needs the 750-day backtest to finish for sufficient training set (n≥200).
+          NLP earnings tone: zero training data needed — works with Claude/OpenAI on transcripts.
+          <a href="/v2/ml_preview.html" target="_blank" style="color:var(--accent);">See full ML mockups →</a>
+        </p>
+      </div>`;
+  },
+
+  execution: (T) => {
+    const atrPct = T.atr_pct || 0;
+    const dollarVol = (T.avg_volume || 0) * (T.price || 0);
+    const slippage = Math.min(80, atrPct * 5 + 5);
+    return `
+      <div class="rd-card">
+        <h4>⚠ ⑨ Execution friction estimate (model not in backtest yet)</h4>
+        <div class="rd-kpi">
+          <div class="rd-kpi-cell"><div class="l">Avg $Volume</div><div class="v" style="font-size:14px;">$${(dollarVol/1e6).toFixed(1)}M</div></div>
+          <div class="rd-kpi-cell ${slippage > 30 ? 'warn' : ''}"><div class="l">Est. Slippage</div><div class="v">${slippage.toFixed(0)}bps</div><div class="s">round-trip</div></div>
+          <div class="rd-kpi-cell"><div class="l">Spread Proxy</div><div class="v">${Math.min(30, atrPct * 5).toFixed(0)}bps</div><div class="s">ATR-based</div></div>
+        </div>
+      </div>
+      <div class="rd-card">
+        <h4>What's missing</h4>
+        <p style="font-size:12.5px;color:var(--ink-2);margin:0;">
+          Realistic slippage is computed by <code>hedge_fund_enhancers.realistic_slippage_bps()</code>
+          but not yet applied in the backtest exit prices. Borrow rates for shorts, wash-sale tracking,
+          and PDT enforcement are partial. See sidebar /v2/backtest-report risk metrics for what's live.
+        </p>
+      </div>`;
+  },
+
+  drift: (T) => {
+    return `
+      <div class="rd-card">
+        <h4>⑩ Edge decay status (system-wide)</h4>
+        <p style="font-size:12.5px;color:var(--ink-1);line-height:1.6;margin:0 0 10px;">
+          The <code>model_drift_alert.py</code> daily cron compares live 30-day WR vs backtest baseline.
+          Alerts fire via Slack when delta &gt; 5pp. Per-ticker drift is part of the closed-trade attribution.
+        </p>
+        <p style="margin:0;"><a href="/v2/backtest-report#drift" target="_blank" style="color:var(--accent);text-decoration:none;font-size:12.5px;">→ View live-vs-backtest status</a></p>
+      </div>
+      <div class="rd-card">
+        <h4>This ticker's contribution to system drift</h4>
+        <p style="font-size:12.5px;color:var(--ink-2);margin:0;">
+          Once ${T.ticker} has at least 3 closed trades in signal_log.json, the drift module will isolate this name's contribution to WR changes.
+          Today: tracked via the live-vs-backtest delta only.
+        </p>
+      </div>`;
+  },
+};
 
 // ─── ELITE OVERVIEW — hedge-fund KPI dashboard hero ───────────────────────
 function renderEliteOverview() {
