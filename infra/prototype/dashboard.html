@@ -1162,6 +1162,15 @@
       <button class="chip on" data-fss="ALL" onclick="fsSetSector('ALL')" aria-label="All sectors">All sectors</button>
     </div>
     <div class="filt-rule"></div>
+    <div class="filt-grp filt-grp-cap" id="fsCapGrp" title="Market cap bucket">
+      <button class="chip on" data-fsc="ALL"   onclick="fsSetCap('ALL')" aria-label="All caps">All caps</button>
+      <button class="chip"    data-fsc="Mega"  onclick="fsSetCap('Mega')"  title="≥ $200B" aria-label="Mega">Mega</button>
+      <button class="chip"    data-fsc="Large" onclick="fsSetCap('Large')" title="$10B–200B" aria-label="Large">Large</button>
+      <button class="chip"    data-fsc="Mid"   onclick="fsSetCap('Mid')"   title="$2B–10B" aria-label="Mid">Mid</button>
+      <button class="chip"    data-fsc="Small" onclick="fsSetCap('Small')" title="$300M–2B" aria-label="Small">Small</button>
+      <button class="chip"    data-fsc="Micro" onclick="fsSetCap('Micro')" title="< $300M" aria-label="Micro">Micro</button>
+    </div>
+    <div class="filt-rule"></div>
     <div class="filt-grp filt-grp-price" id="fsPriceGrp">
       <button class="chip on" data-fsp="ALL"   onclick="fsSetPriceTier('ALL')" aria-label="All prices">$ All</button>
       <button class="chip"    data-fsp="lt100" onclick="fsSetPriceTier('lt100')" aria-label="Under $100">&lt;$100</button>
@@ -2396,6 +2405,7 @@ let FS_STATE = {
   tier: 'ALL',                      // NEW — T1/T2/T3
   entryQ: 'ALL',                    // NEW — FRESH/PULLBACK/EXTENDED/MISSED
   priceTier: 'ALL',                 // NEW — ALL / lt100 / lt250 / gt250
+  capBucket: 'ALL',                 // NEW — ALL / Mega / Large / Mid / Small / Micro
   scoreMin: 0,
   scoreMax: 100,
   rrMin: 0,
@@ -2409,6 +2419,12 @@ let FS_STATE = {
 window.fsSetPriceTier = function(t) {
   FS_STATE.priceTier = t;
   document.querySelectorAll('.chip[data-fsp]').forEach(c => c.classList.toggle('on', c.dataset.fsp === t));
+  if (typeof renderFloorScanner === 'function') renderFloorScanner();
+};
+
+window.fsSetCap = function(c) {
+  FS_STATE.capBucket = c;
+  document.querySelectorAll('.chip[data-fsc]').forEach(el => el.classList.toggle('on', el.dataset.fsc === c));
   if (typeof renderFloorScanner === 'function') renderFloorScanner();
 };
 
@@ -2530,10 +2546,11 @@ window.sc2ToggleAdvanced = () => {
 window.sc2Clear = () => {
   FS_STATE.verdict = 'ALL'; FS_STATE.sector = 'ALL'; FS_STATE.setupFamily = 'ALL';
   FS_STATE.tier = 'ALL'; FS_STATE.entryQ = 'ALL';
+  FS_STATE.priceTier = 'ALL'; FS_STATE.capBucket = 'ALL';
   FS_STATE.scoreMin = 0; FS_STATE.scoreMax = 100; FS_STATE.rrMin = 0;
   FS_STATE.watchOnly = false; FS_STATE.hideEarnings = false;
-  document.querySelectorAll('[data-fsv],[data-fss],[data-fsf],[data-fst],[data-fseq]').forEach(el => {
-    const isAll = ['ALL'].includes(el.dataset.fsv) || ['ALL'].includes(el.dataset.fss) || ['ALL'].includes(el.dataset.fsf) || ['ALL'].includes(el.dataset.fst) || ['ALL'].includes(el.dataset.fseq);
+  document.querySelectorAll('[data-fsv],[data-fss],[data-fsf],[data-fst],[data-fseq],[data-fsp],[data-fsc]').forEach(el => {
+    const isAll = ['ALL'].includes(el.dataset.fsv) || ['ALL'].includes(el.dataset.fss) || ['ALL'].includes(el.dataset.fsf) || ['ALL'].includes(el.dataset.fst) || ['ALL'].includes(el.dataset.fseq) || ['ALL'].includes(el.dataset.fsp) || ['ALL'].includes(el.dataset.fsc);
     el.classList.toggle('on', isAll);
   });
   const sMin = document.getElementById('sc2ScoreMin'); if (sMin) sMin.value = 0;
@@ -2797,6 +2814,9 @@ function renderFloorScanner() {
   }
   if (FS_STATE.entryQ !== 'ALL') {
     rows = rows.filter(r => (r.entry_quality || '').toUpperCase() === FS_STATE.entryQ);
+  }
+  if (FS_STATE.capBucket && FS_STATE.capBucket !== 'ALL') {
+    rows = rows.filter(r => (r.cap_bucket || '') === FS_STATE.capBucket);
   }
   if (FS_STATE.priceTier && FS_STATE.priceTier !== 'ALL') {
     rows = rows.filter(r => {

@@ -29,6 +29,22 @@ _SYSTEM_GATE_ACTIVE: bool = False
 _SYSTEM_GATE_REASON: str = ""
 
 
+def _cap_bucket(mkt_cap) -> str:
+    """Classify market cap into screener buckets (industry-standard).
+    Mega: >$200B · Large: $10-200B · Mid: $2-10B · Small: $300M-2B · Micro: <$300M.
+    Returns '' if cap missing/invalid."""
+    try:
+        mc = float(mkt_cap) if mkt_cap else 0
+    except (TypeError, ValueError):
+        return ""
+    if mc <= 0:           return ""
+    if mc >= 200e9:       return "Mega"
+    if mc >= 10e9:        return "Large"
+    if mc >= 2e9:         return "Mid"
+    if mc >= 300e6:       return "Small"
+    return "Micro"
+
+
 def _sanitize_options(od: dict) -> dict:
     """Collapse stale Schwab OAuth error blobs into a clean placeholder.
 
@@ -1027,6 +1043,7 @@ def compact_row(r: dict) -> dict:
         "reaction_checklist": r.get("reaction_checklist") or [],
         "beta":         r.get("beta") or (r.get("kelly_size") or {}).get("beta"),
         "market_cap":   r.get("market_cap"),
+        "cap_bucket":   _cap_bucket(r.get("market_cap")),
         "week52_high":  r.get("week52_high"),
         "week52_low":   r.get("week52_low"),
         "conviction_tier": r.get("conviction_tier"),
@@ -1446,6 +1463,7 @@ def rich_row(r: dict, b: dict = None) -> dict:
         "sizing_multiplier": r.get("sizing_multiplier"),
         "beta":         r.get("beta") or (r.get("kelly_size") or {}).get("beta"),
         "market_cap":   r.get("market_cap"),
+        "cap_bucket":   _cap_bucket(r.get("market_cap")),
         "float_shares": r.get("float_shares"),
         "shares_out":   r.get("shares_out"),
         "week52_high":  r.get("week52_high"),
