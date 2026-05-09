@@ -1786,15 +1786,40 @@ def main():
     parser.add_argument("--size-pct", type=float, default=0.25, help="Position size as pct of equity (default: 0.25)")
     parser.add_argument("--end-date", type=str, default=None, help="Optional ISO date (YYYY-MM-DD) capping the backtest window end")
     parser.add_argument("--profile", type=str, default=None, help="Load a trading profile (e.g. trending_leaders) to override config thresholds")
+    # 2026-05-09 — hedge-fund overlays
+    parser.add_argument("--max-sector-pct", type=float, default=None,
+                        help="Concentration cap: max %% of equity per sector (e.g. 0.30 for 30%%)")
+    parser.add_argument("--max-name-pct", type=float, default=None,
+                        help="Concentration cap: max %% of equity per name (e.g. 0.05 for 5%%)")
+    parser.add_argument("--macro-filter", choices=["off", "spy200", "death_cross"],
+                        default="off",
+                        help="Macro overlay: 'spy200' blocks longs when SPY < SMA200; 'death_cross' blocks when SMA50<SMA200")
     args = parser.parse_args()
 
     if args.portfolio:
+        # 2026-05-09 — log hedge-fund overlay flags. Parsed and recorded in the
+        # result config snapshot. Full enforcement (per-trade rejection on
+        # cap breach + macro-gated long blocking) is a follow-up commit;
+        # the flags surface in the report so we can later compare with/without.
+        if args.max_sector_pct or args.max_name_pct or args.macro_filter != "off":
+            log.info(f"  Hedge-fund overlays: sector_cap={args.max_sector_pct}, "
+                     f"name_cap={args.max_name_pct}, macro_filter={args.macro_filter} "
+                     f"(captured in config snapshot; enforcement TODO)")
         result = run_portfolio_backtest(
             days=args.days, hold_days=args.hold,
             min_score=args.min_score, min_rs=args.min_rs, top_n=args.top_n,
             starting_equity=args.equity, max_positions=args.positions,
             pct_per_trade=args.size_pct,
         )
+        # Annotate result with overlay flags for audit/report
+        if "config" not in result:
+            result["config"] = {}
+        if isinstance(result["config"], dict):
+            result["config"]["max_sector_pct"]  = args.max_sector_pct
+            result["config"]["max_name_pct"]    = args.max_name_pct
+            result["config"]["macro_filter"]    = args.macro_filter
+            result["config"]["min_score"]       = args.min_score
+            result["config"]["hold_days"]       = args.hold
         print_portfolio_results(result)
         # Save results
         json_path = BASE_DIR / "cache" / "portfolio_backtest.json"

@@ -661,6 +661,57 @@ def section_catalyst_wr(trades: list[dict]) -> list[dict]:
     return rows
 
 
+# ─── Section 13-15: Hedge-fund enhancers (statistical, Bayesian, drift) ─────
+
+def section_bootstrap_ci(trades: list[dict]) -> dict:
+    """Bootstrap 95% CI on profit factor + WR + total return."""
+    try:
+        from hedge_fund_enhancers import bootstrap_pf_ci
+    except ImportError:
+        return {}
+    rets = [t.get("pnl_pct", 0) for t in trades]
+    return bootstrap_pf_ci(rets, n_iter=2000)
+
+
+def section_bayesian_setups(trades: list[dict]) -> list[dict]:
+    """Bayesian hierarchical pooling — sparse setups borrow from family priors."""
+    try:
+        from hedge_fund_enhancers import bayesian_setup_pool
+    except ImportError:
+        return []
+    by_setup: dict = defaultdict(lambda: {"wins": 0, "n": 0, "family": "default"})
+    for t in trades:
+        s = t.get("setup_type") or "?"
+        family = ("pullback"     if "Pullback" in s else
+                  "breakout"     if "Breakout" in s or "Pivot" in s else
+                  "continuation" if "Continuation" in s else "default")
+        by_setup[s]["family"] = family
+        by_setup[s]["n"] += 1
+        if t.get("win"):
+            by_setup[s]["wins"] += 1
+    pooled = bayesian_setup_pool(dict(by_setup))
+    rows = []
+    for setup, m in pooled.items():
+        rows.append({"setup": setup, **m})
+    rows.sort(key=lambda r: -r["posterior_wr"])
+    return rows
+
+
+def section_drift_status() -> dict:
+    """Read most recent drift alert from data/drift_alerts.jsonl."""
+    p = BASE / "data" / "drift_alerts.jsonl"
+    if not p.exists():
+        return {"available": False, "reason": "drift_alerts.jsonl not yet generated; run model_drift_alert.py"}
+    try:
+        lines = p.read_text().strip().splitlines()
+        if not lines:
+            return {"available": False, "reason": "drift log empty"}
+        last = json.loads(lines[-1])
+        return {"available": True, **last}
+    except Exception as e:
+        return {"available": False, "reason": f"parse error: {e}"}
+
+
 # ─── HTML rendering ──────────────────────────────────────────────────────────
 
 _CSS = """
@@ -736,7 +787,8 @@ def render_html(in_path: Path, summary: dict, eq_curve: dict, setup_table: list[
                 score_band: list[dict], risk: dict, decay: dict, counter: dict,
                 trades: list[dict], regime_data: dict | None = None,
                 hold_sweep: list[dict] | None = None, vix_band: list[dict] | None = None,
-                catalyst: list[dict] | None = None) -> str:
+                catalyst: list[dict] | None = None, boot_ci: dict | None = None,
+                bayes: list[dict] | None = None, drift: dict | None = None) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     json_setup = json.dumps(setup_table, default=str)
     json_band = json.dumps(score_band, default=str)
@@ -746,6 +798,9 @@ def render_html(in_path: Path, summary: dict, eq_curve: dict, setup_table: list[
     json_hold = json.dumps(hold_sweep or [], default=str)
     json_vix = json.dumps(vix_band or [], default=str)
     json_catalyst = json.dumps(catalyst or [], default=str)
+    json_boot = json.dumps(boot_ci or {}, default=str)
+    json_bayes = json.dumps(bayes or [], default=str)
+    json_drift = json.dumps(drift or {}, default=str)
     json_trades = json.dumps([{
         "ticker": t.get("ticker"), "entry_date": (t.get("entry_date") or "")[:10],
         "exit_date": (t.get("exit_date") or "")[:10], "setup": t.get("setup_type"),
@@ -802,6 +857,7 @@ def render_html(in_path: Path, summary: dict, eq_curve: dict, setup_table: list[
   <a href="#hold">⑥ Hold Sweep</a><a href="#risk">⑦ Risk</a><a href="#vix">⑧ VIX</a>
   <a href="#catalyst">⑨ Catalysts</a><a href="#decay">⑩ Signal Decay</a>
   <a href="#counter">⑪ Counterfactuals</a><a href="#trades">⑫ Trades</a>
+  <a href="#bootstrap">⑬ Bootstrap CI</a><a href="#bayes">⑭ Bayesian</a><a href="#drift">⑮ Drift</a>
 </nav>
 <main>
 
@@ -914,6 +970,29 @@ def render_html(in_path: Path, summary: dict, eq_curve: dict, setup_table: list[
   </tr></thead><tbody></tbody></table>
 </section>
 
+<section id="bootstrap">
+  <h2>⑬ Bootstrap profit-factor confidence interval</h2>
+  <div class="desc">Resamples trades with replacement 2000× to estimate uncertainty in PF / WR / total return. The point estimate alone is dangerous — if the 95% CI straddles PF=1.0, the system has not <i>statistically</i> proven edge despite a positive nominal result.</div>
+  <div id="bootstrapKpis" class="kpi-grid"></div>
+  <div id="bootstrapVerdict" style="margin-top:12px;font-size:13px;color:var(--ink-1);"></div>
+</section>
+
+<section id="bayes">
+  <h2>⑭ Bayesian hierarchical pooling — sparse-setup correction</h2>
+  <div class="desc">Setups with low n (Pocket Pivot @3 trades) borrow strength from a family-level prior (breakout / pullback / continuation / reversal). Posterior WR is more honest than raw WR for sparse cases. Compare raw → posterior; the gap is "shrinkage."</div>
+  <table id="bayesTable"><thead><tr>
+    <th>Setup</th><th>Family</th><th class="num">N</th>
+    <th class="num">Raw WR%</th><th class="num">Prior WR%</th><th class="num">Posterior WR%</th>
+    <th class="num">Shrinkage</th>
+  </tr></thead><tbody></tbody></table>
+</section>
+
+<section id="drift">
+  <h2>⑮ Live-vs-backtest drift status</h2>
+  <div class="desc">Compares last 30 days of CLOSED live signals to backtest baseline. Alerts when live WR diverges by &gt;5pp. Run <code>python3 model_drift_alert.py</code> daily to populate.</div>
+  <div id="driftBody" style="font-family: var(--mono); font-size: 13px; line-height: 1.7;"></div>
+</section>
+
 <section id="trades">
   <h2>⑫ Trade-level table</h2>
   <div class="desc">Every backtest trade. Click any column header to sort. Win=green row, loss=red.</div>
@@ -938,6 +1017,9 @@ const REGIME = {json_regime};
 const HOLD = {json_hold};
 const VIX = {json_vix};
 const CATALYST = {json_catalyst};
+const BOOT = {json_boot};
+const BAYES = {json_bayes};
+const DRIFT = {json_drift};
 const COUNTER = {{
   buy_min: {json.dumps(counter.get("buy_min_sweep", []))},
   setup_kill: {json.dumps(counter.get("setup_removal", []))},
@@ -1057,6 +1139,53 @@ fillTable('catTable', CATALYST, [
   {{ key: 'total_pnl_pct', num: true, fmt: v => v.toFixed(1), cls: v => v > 0 ? 'num pass' : 'num fail' }},
 ]);
 
+// Section ⑬ — Bootstrap CI
+if (BOOT && BOOT.pf_point !== null && BOOT.pf_point !== undefined) {{
+  const pfClass = BOOT.pf_lo >= 1.5 ? 'pos' : BOOT.pf_lo >= 1.0 ? 'info' : BOOT.pf_lo >= 0.8 ? 'warn' : 'neg';
+  document.getElementById('bootstrapKpis').innerHTML = `
+    <div class="kpi info"><div class="kpi-l">PF point</div><div class="kpi-v">${{BOOT.pf_point}}</div><div class="kpi-sub">observed</div></div>
+    <div class="kpi ${{pfClass}}"><div class="kpi-l">PF 95% CI</div><div class="kpi-v">[${{BOOT.pf_lo}}, ${{BOOT.pf_hi}}]</div><div class="kpi-sub">${{BOOT.n_iter}} resamples</div></div>
+    <div class="kpi info"><div class="kpi-l">WR point</div><div class="kpi-v">${{BOOT.wr_point}}%</div></div>
+    <div class="kpi info"><div class="kpi-l">WR 95% CI</div><div class="kpi-v">[${{BOOT.wr_lo}}, ${{BOOT.wr_hi}}]%</div></div>
+    <div class="kpi neg"><div class="kpi-l">Total CI lo</div><div class="kpi-v">${{BOOT.total_lo}}%</div></div>
+    <div class="kpi pos"><div class="kpi-l">Total CI hi</div><div class="kpi-v">${{BOOT.total_hi}}%</div></div>
+  `;
+  const verdictColor = BOOT.pf_lo >= 1.5 ? 'var(--pass)' : BOOT.pf_lo >= 1.0 ? 'var(--info)' : BOOT.pf_lo >= 0.8 ? 'var(--warn)' : 'var(--fail)';
+  document.getElementById('bootstrapVerdict').innerHTML =
+    '<b style="color:' + verdictColor + ';">' + BOOT.interpretation.toUpperCase() + '</b> — ' +
+    (BOOT.pf_lo >= 1.0
+      ? 'sample size sufficient to claim edge with 95% confidence.'
+      : 'sample too small to statistically prove edge. Need more trades or longer backtest window.');
+}}
+
+// Section ⑭ — Bayesian
+fillTable('bayesTable', BAYES, [
+  {{ key: 'setup' }},
+  {{ key: 'family' }},
+  {{ key: 'n', num: true }},
+  {{ key: 'raw_wr', num: true, fmt: v => v.toFixed(1) }},
+  {{ key: 'prior_wr', num: true, fmt: v => v.toFixed(1), cls: () => 'num dim' }},
+  {{ key: 'posterior_wr', num: true, fmt: v => v.toFixed(1), cls: v => v >= 50 ? 'num pass' : v >= 35 ? 'num info' : 'num fail' }},
+  {{ key: 'shrinkage_pp', num: true, fmt: v => v.toFixed(1) + 'pp' }},
+]);
+
+// Section ⑮ — Drift
+const dEl = document.getElementById('driftBody');
+if (DRIFT && DRIFT.available) {{
+  const cls = DRIFT.alert_fired ? 'fail' : Math.abs(DRIFT.delta_pp) > 3 ? 'warn' : 'pass';
+  const icon = DRIFT.alert_fired ? '🚨' : Math.abs(DRIFT.delta_pp) > 3 ? '⚠️' : '✓';
+  dEl.innerHTML = `
+    <div>${{icon}} Drift status: <b class="${{cls}}">${{DRIFT.alert_fired ? 'ALERT FIRED' : 'within tolerance'}}</b></div>
+    <div style="margin-top:8px;color:var(--ink-2);">
+      Last check: ${{DRIFT.timestamp}}<br>
+      Window: ${{DRIFT.window_days}} days · Trades observed: ${{DRIFT.n_live}}<br>
+      Live WR: <b>${{DRIFT.live_wr_pct}}%</b> · Backtest WR: <b>${{DRIFT.backtest_wr_pct}}%</b><br>
+      Delta: <b class="${{cls}}">${{DRIFT.delta_pp >= 0 ? '+' : ''}}${{DRIFT.delta_pp}}pp</b> (alert threshold: ±${{DRIFT.alert_threshold_pp}}pp)
+    </div>`;
+}} else {{
+  dEl.innerHTML = `<div class="dim">${{DRIFT.reason || 'Drift log not yet generated.'}}<br>Run <code>python3 model_drift_alert.py</code> to start tracking.</div>`;
+}}
+
 // Trades table
 fillTable('tradesTable', TRADES, [
   {{ key: 'ticker', fmt: (v, r) => '<a href="/v2/elite-detail.html?t=' + v + '" style="color:var(--accent);text-decoration:none;">' + v + '</a>' }},
@@ -1175,10 +1304,18 @@ def main() -> int:
     print("Hold-period replay (uses data/ohlcv/*.parquet)...")
     hold_sweep = section_hold_sweep(trades)
     print("  Horizons evaluated: %d" % len(hold_sweep))
+    print("Hedge-fund enhancers (bootstrap CI, Bayesian, drift)...")
+    boot_ci = section_bootstrap_ci(trades)
+    bayes = section_bayesian_setups(trades)
+    drift = section_drift_status()
+    print(f"  Bootstrap PF CI: [{boot_ci.get('pf_lo')}, {boot_ci.get('pf_hi')}]")
+    print(f"  Bayesian setups pooled: {len(bayes)}")
+    print(f"  Drift available: {drift.get('available', False)}")
 
     html = render_html(in_path, summary, eq_curve, setup_table, score_band,
                        risk, decay, counter, trades, regime_data=regime_data,
-                       hold_sweep=hold_sweep, vix_band=vix_band, catalyst=catalyst)
+                       hold_sweep=hold_sweep, vix_band=vix_band, catalyst=catalyst,
+                       boot_ci=boot_ci, bayes=bayes, drift=drift)
 
     out_path = (Path(args.out_path) if args.out_path
                 else BASE / "cache" / f"backtest_report_{datetime.now():%Y%m%d_%H%M%S}.html")
