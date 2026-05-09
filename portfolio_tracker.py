@@ -147,14 +147,28 @@ def _check_legacy_migration():
 
 
 def _load_state() -> dict:
+    """Read canonical portfolio state.
+
+    Phase B.1 (2026-05-08): goes through state_layer.load_portfolio_state()
+    which today reads JSON (Mode 1) but in Mode 2 will read from Supabase
+    with JSON fallback. Adds a 5-sec LRU cache that collapses the 25+
+    _load_state() calls per scan in this file into a single read.
+    """
     global _LEGACY_CHECKED
     if not _LEGACY_CHECKED:
         _check_legacy_migration()
         _LEGACY_CHECKED = True
     if not STATE_PATH.exists():
         return _default_state()
-    with open(STATE_PATH) as f:
-        state = json.load(f)
+
+    try:
+        from state_layer import load_portfolio_state
+        state = load_portfolio_state()
+    except Exception:
+        # Defensive fallback — never let the shim break a scan
+        with open(STATE_PATH) as f:
+            state = json.load(f)
+
     current = state.get("_schema_version", 0)
     if current < PORTFOLIO_SCHEMA_VERSION:
         state = _migrate_state(state, from_version=current)
@@ -289,6 +303,12 @@ def _save_state(state: dict):
     state["_last_saved"] = datetime.now().isoformat()
     with open(STATE_PATH, "w") as f:
         json.dump(state, f, indent=2, default=str)
+    # Invalidate state_layer cache so the next _load_state sees fresh data.
+    try:
+        from state_layer import cache_invalidate
+        cache_invalidate("portfolio_state")
+    except Exception:
+        pass
     # Dual-write to Supabase (no-op when SUPABASE_MODE=0; never raises).
     try:
         from supabase_sync import sync_portfolio_state

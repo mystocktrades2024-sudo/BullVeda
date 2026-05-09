@@ -221,12 +221,19 @@ def compute_setup_kill_list(signal_log_path: str | None = None,
     import json as _json
     from pathlib import Path as _P
     from collections import defaultdict as _dd
+    # Phase B.1: route through state_layer for cache + future Supabase support.
+    # Caller can still pass signal_log_path explicitly to override (used by tests).
     if signal_log_path is None:
-        signal_log_path = _P(__file__).parent / "data" / "signal_log.json"
-    try:
-        sigs = _json.loads(_P(signal_log_path).read_text())
-    except Exception:
-        sigs = []
+        try:
+            from state_layer import load_signal_log
+            sigs = load_signal_log()
+        except Exception:
+            sigs = []
+    else:
+        try:
+            sigs = _json.loads(_P(signal_log_path).read_text())
+        except Exception:
+            sigs = []
     by_setup: dict = _dd(list)
     for s in sigs or []:
         if s.get("status") != "CLOSED":

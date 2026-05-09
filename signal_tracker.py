@@ -74,14 +74,26 @@ def _migrate_signal_log(entries: list[dict], from_version: int) -> list[dict]:
 
 
 def _load_log() -> list[dict]:
-    """Load the persistent signal log from disk, auto-migrating legacy entries."""
+    """Load the persistent signal log from disk, auto-migrating legacy entries.
+
+    Phase B.1 (2026-05-08): goes through state_layer.load_signal_log() which
+    today reads JSON (Mode 1) but in Mode 2 will read from Supabase. 5-sec
+    LRU cache reduces the per-scan re-read overhead — decision_engine and
+    tracker both call this on every analysis.
+    """
     if not SIGNAL_LOG_PATH.exists():
         return []
+
     try:
-        entries = json.loads(SIGNAL_LOG_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, IOError):
-        log.warning("Corrupt signal_log.json — starting fresh")
-        return []
+        from state_layer import load_signal_log
+        entries = load_signal_log()
+    except Exception:
+        try:
+            entries = json.loads(SIGNAL_LOG_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, IOError):
+            log.warning("Corrupt signal_log.json — starting fresh")
+            return []
+
     if not isinstance(entries, list):
         log.warning("signal_log.json is not a list — starting fresh")
         return []
@@ -101,6 +113,13 @@ def _save_log(entries: list[dict]) -> None:
     SIGNAL_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     SIGNAL_LOG_PATH.write_text(json.dumps(entries, indent=2, default=str), encoding="utf-8")
     _write_meta_version()
+    # Invalidate state_layer cache so the next _load_log sees fresh data.
+    try:
+        from state_layer import cache_invalidate
+        # signal_log keys vary by since_id/limit; clear all of them
+        cache_invalidate(None)
+    except Exception:
+        pass
     # Dual-write to Supabase (no-op when SUPABASE_MODE=0; never raises).
     try:
         from supabase_sync import sync_signal_log
