@@ -123,14 +123,9 @@ async function _loadAndOverride(modulePath) {
   console.log(`[detail-shell] sub-tab module load complete: ${ok} OK · ${fail} fail`);
   performance.mark('detail-shell-modules-loaded');
 
-  // Step 5: wait for init() to set T, then re-render ALL sub-tab renderers.
-  // init() in elite-detail.html runs SYNC at parse end and is async (fetches
-  // ticker data, sets T, then calls renderXxx). But renderXxx is now stubbed
-  // — modules win once shell installs window.X = mod.render. So we need to
-  // explicitly call all module renders AFTER T is set.
-  //
-  // We poll for T to be defined (init() sets it on a successful fetch), then
-  // walk every (sub_tabs.*.module + extras) and call its window-bound version.
+  // Step 5: wait for init() to set T, then render ONLY the active sub-tab.
+  // (PERF-3 2026-05-09 — was: render all 25 modules up-front. Now: render
+  // active sub-tab on boot, lazy-render others when fdSwitchTab fires.)
   const tReady = await new Promise(resolve => {
     let attempts = 0;
     const max = 60;  // 6s total at 100ms
@@ -147,23 +142,56 @@ async function _loadAndOverride(modulePath) {
   });
   if (!tReady) return;
 
-  // Render every module known to the registry (covers all sub-tab content
-  // regardless of which is currently active — fdSwitchTab is pure CSS toggle,
-  // so all sections need to be rendered up-front).
-  const renderedFns = new Set();
-  for (const [id, meta] of Object.entries(REGISTRY.sub_tabs || {})) {
-    const allPaths = [meta.module, ...(meta.extras || [])].filter(Boolean);
-    for (const p of allPaths) {
-      const fnName = FILE_TO_WINDOW_FN[p];
-      if (!fnName || renderedFns.has(fnName)) continue;
-      if (typeof window[fnName] !== 'function') continue;
-      renderedFns.add(fnName);
-      const rt0 = performance.now();
-      try { window[fnName](); }
-      catch (e) { console.warn(`[detail-shell] render '${fnName}' failed:`, e); }
-      window.__detailMetrics.renderMs[fnName] = +(performance.now() - rt0).toFixed(1);
-    }
+  // Group module renderers by sub-tab id (derived from path: subtabs/<id>/<file>.js).
+  // overview/* includes head + earningsBanner — those paint with overview and stay
+  // visible across other tabs (FD_TAB_MAP toggles section visibility, not chrome).
+  const SUBTAB_RENDERERS = {};
+  for (const [path, fnName] of Object.entries(FILE_TO_WINDOW_FN)) {
+    const m = path.match(/^subtabs\/([^/]+)\//);
+    if (!m) continue;
+    const id = m[1];
+    if (!SUBTAB_RENDERERS[id]) SUBTAB_RENDERERS[id] = [];
+    SUBTAB_RENDERERS[id].push(fnName);
   }
-  console.log(`[detail-shell] painted ${renderedFns.size} sub-tab renderers from modules`);
+
+  // Render-once cache so re-activating a sub-tab is free.
+  const _rendered = new Set();
+  function _renderFn(name) {
+    if (_rendered.has(name)) return;
+    if (typeof window[name] !== 'function') return;
+    _rendered.add(name);
+    const t0 = performance.now();
+    try { window[name](); }
+    catch (e) { console.warn(`[detail-shell] render '${name}' failed:`, e); }
+    window.__detailMetrics.renderMs[name] = +(performance.now() - t0).toFixed(1);
+  }
+  function _renderSubtab(id) {
+    const fns = SUBTAB_RENDERERS[id] || [];
+    for (const f of fns) _renderFn(f);
+  }
+
+  // Determine the active sub-tab. Hash route wins; otherwise default 'overview'.
+  // (elite-detail.html's init() calls fdSwitchTab('overview') after sections paint.)
+  function _activeSubtab() {
+    const h = (location.hash || '').replace(/^#/, '').trim();
+    if (h && SUBTAB_RENDERERS[h]) return h;
+    return 'overview';
+  }
+
+  // Boot paint — only the active sub-tab.
+  const initial = _activeSubtab();
+  _renderSubtab(initial);
+  console.log(`[detail-shell] PERF-3 lazy: painted '${initial}' (${_rendered.size} fns); other ${Object.keys(SUBTAB_RENDERERS).length - 1} sub-tabs deferred`);
   performance.mark('detail-shell-painted');
+
+  // Wrap fdSwitchTab — render destination's renderers on first switch.
+  // Idempotent: _renderFn caches per fn, so re-activations are O(1).
+  const _origFdSwitch = window.fdSwitchTab;
+  window.fdSwitchTab = function _lazyFdSwitch(tab) {
+    _renderSubtab(tab);
+    if (typeof _origFdSwitch === 'function') {
+      return _origFdSwitch.apply(this, arguments);
+    }
+  };
+  console.log('[detail-shell] PERF-3 wrapped fdSwitchTab for lazy paint-on-switch');
 })();
