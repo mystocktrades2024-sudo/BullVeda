@@ -149,6 +149,23 @@ discipline they don't always have.
 | Drift detection | `model_drift_alert.py` + `LaunchAgents/com.swingtrade.driftalert.plist` |
 | Mechanism hypotheses | `canonical_trade_plan.py:MECHANISM_HYPOTHESES` |
 
+### Hard constraint — no new data licenses
+
+User policy (2026-05-10): **no new paid data subscriptions will be procured.**
+The current paid stack is EODHD + Zacks + Schwab (free with brokerage) + Alpaca
+(broker). Any proposed solution requiring Sharadar SF1, Finviz Elite, Finnhub
+Premium, FMP, Polygon, or any other new license is **automatically rejected**.
+
+When you encounter a problem whose "best" solution needs a paid source:
+1. Find a free alternative even if imperfect (Wikipedia revision history,
+   SEC EDGAR, Senate Stock Watcher, Reddit/WSB scrapes are all free).
+2. If no free alternative exists, accept the residual issue and document it
+   as a known limitation in the relevant audit trail.
+3. Don't propose paying for it. Don't add it to the open-items list as P0/P1.
+
+Items already marked REJECTED under this policy:
+  - H1 (R1000 historical membership / Sharadar SF1) — accept residual bias
+
 ### When this mindset conflicts with user instruction
 
 The user has explicitly asked you to push back. If they say "boost setup X

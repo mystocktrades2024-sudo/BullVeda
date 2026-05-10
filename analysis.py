@@ -2874,7 +2874,17 @@ def score_technicals(df: pd.DataFrame, regime: dict,
     adx_suffix = f", ADX {adx_val:.0f} {'↑trend' if trending else '↓choppy'}"
     details["trend"] = f"{trend_dir}{adx_suffix} ({trend_pts}/10)"
     indicators.update({
+        # K4 (2026-05-10): EMA 5 + EMA 13 surfaced for Vinod's faster-stack
+        # signal (5/13/21/50). Already computed at line 2775-2779 + driving
+        # Holy Grail detection via ema5_above_13. Exposing raw values now so
+        # the V2 Technicals tab can display them. Per OPERATING MINDSET
+        # principle 7 (no knob-tweaking without evidence): NO score weight
+        # added. They influence scoring ONLY through the existing Holy Grail
+        # trigger (line 2839). After 30 days of signal data with these
+        # logged, run a backtest with explicit score weight to decide.
+        "ema5":  round(e5, 2),
         "ema8":  round(e8, 2),
+        "ema13": round(e13, 2),
         "ema20": round(e20, 2),
         "ema21": round(e21, 2),
         "ema50": round(e50, 2),
