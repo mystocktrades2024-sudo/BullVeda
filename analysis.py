@@ -1084,6 +1084,112 @@ def _pocket_pivot(df) -> dict:
     }
 
 
+# ── Elliott Wave classification (K5, 2026-05-09) ─────────────────────────────
+
+def classify_elliott_wave(df, lookback: int = 90,
+                           fib_extensions: list[float] | None = None,
+                           min_swing_pct: float = 0.10) -> dict:
+    """K5: Identify Elliott Wave context for target derivation.
+
+    Vinod feedback (HPE 2026-05-09): "we are at a Wave3 (Impulse): T1=50.37, T2=55.75"
+    Maps to Fib extensions of the most recent (swing_low → swing_high) impulse:
+      T1 = swing_low + 1.272 × (swing_high - swing_low)
+      T2 = swing_low + 1.618 × (swing_high - swing_low)
+
+    Heuristic Wave-3 detection (refined 2026-05-09 to use RECENT swings):
+      1. Use last `lookback` bars (default 90 = ~4 months) — Elliott Wave
+         analysis is about the CURRENT impulse, not all-time history.
+      2. Find lowest low → highest high AFTER it (Wave 1 candidate).
+      3. If swing range < min_swing_pct, expand lookback once to 180.
+      4. If current price has BROKEN above swing_high → Wave 3 Impulse.
+
+    Returns dict with wave/type/swing_low/swing_high/t1_extension/t2_extension/confidence.
+    """
+    fib_extensions = fib_extensions or [1.272, 1.618]
+    out = {
+        "wave": None, "type": "incomplete",
+        "swing_low": None, "swing_high": None, "swing_range": None,
+        "t1_extension": None, "t2_extension": None,
+        "confidence": "low",
+    }
+    if df is None or len(df) < 30:
+        return out
+
+    def _try_lookback(window: int) -> dict | None:
+        try:
+            sub = df.tail(window)
+            lows = sub["Low"].squeeze() if hasattr(sub["Low"], "squeeze") else sub["Low"]
+            highs = sub["High"].squeeze() if hasattr(sub["High"], "squeeze") else sub["High"]
+            closes = sub["Close"].squeeze() if hasattr(sub["Close"], "squeeze") else sub["Close"]
+
+            idx_low = int(lows.values.argmin())
+            swing_low = float(lows.iloc[idx_low])
+
+            if idx_low >= len(highs) - 5:
+                return None
+            post = highs.iloc[idx_low + 1:]
+            idx_high_in_post = int(post.values.argmax())
+            swing_high = float(post.iloc[idx_high_in_post])
+
+            if swing_high <= swing_low:
+                return None
+            swing_range = swing_high - swing_low
+            if swing_range / max(swing_low, 1) < min_swing_pct:
+                return None  # swing too small for this window
+
+            current_price = float(closes.iloc[-1])
+            return {
+                "swing_low": swing_low, "swing_high": swing_high,
+                "swing_range": swing_range, "current_price": current_price,
+            }
+        except Exception:
+            return None
+
+    # Try the requested lookback first; expand if no qualifying swing found
+    swing = _try_lookback(lookback) or _try_lookback(min(lookback * 2, 252)) or _try_lookback(252)
+    if not swing:
+        return out
+
+    swing_low = swing["swing_low"]
+    swing_high = swing["swing_high"]
+    swing_range = swing["swing_range"]
+    current_price = swing["current_price"]
+
+    t1_ext = swing_low + fib_extensions[0] * swing_range
+    t2_ext = swing_low + (fib_extensions[1] if len(fib_extensions) > 1 else 1.618) * swing_range
+
+    out["swing_low"] = round(swing_low, 2)
+    out["swing_high"] = round(swing_high, 2)
+    out["swing_range"] = round(swing_range, 2)
+    out["t1_extension"] = round(t1_ext, 2)
+    out["t2_extension"] = round(t2_ext, 2)
+
+    if current_price >= swing_high:
+        out["wave"] = 3
+        out["type"] = "impulse"
+        breakout_pct = (current_price - swing_high) / swing_high
+        if breakout_pct > 0.05:
+            out["confidence"] = "high"
+        elif breakout_pct > 0.01:
+            out["confidence"] = "medium"
+        else:
+            out["confidence"] = "low"
+    elif current_price >= swing_low + swing_range * 0.5:
+        out["wave"] = 2
+        out["type"] = "corrective"
+        out["confidence"] = "medium"
+    elif current_price >= swing_low + swing_range * 0.382:
+        out["wave"] = 2
+        out["type"] = "corrective"
+        out["confidence"] = "low"
+    else:
+        out["wave"] = 2
+        out["type"] = "corrective"
+        out["confidence"] = "low"
+
+    return out
+
+
 # ── Williams Fractals ─────────────────────────────────────────────────────────
 
 def _williams_fractals(df, lookback: int = 60) -> dict:
@@ -5335,6 +5441,32 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
             target2 = round(entry_mid + risk * 5.0, 2)
             rr_ratio = round((target1 - entry_mid) / max(entry_mid - stop, 0.01), 1)
 
+        # K5 (2026-05-09): Elliott Wave Fib-extension targets when Wave 3 Impulse detected.
+        # Vinod feedback (HPE): "we are at a Wave3 (Impulse): T1=50.37, T2=55.75"
+        # T1/T2 derived from Fib extensions of the most recent (swing_low → swing_high) impulse.
+        # Override default ATR/resistance-based targets when Wave 3 is detected with
+        # at least medium confidence.
+        _ew_data = None
+        try:
+            _ew_cfg = (_cfg.get("scoring") or {}).get("elliott_wave") or {}
+            if _ew_cfg.get("enabled", True):
+                _ew_fib = _ew_cfg.get("fib_extensions", [1.272, 1.618])
+                _ew_data = classify_elliott_wave(df, fib_extensions=_ew_fib)
+                if (_ew_data.get("wave") == 3 and _ew_data.get("type") == "impulse"
+                        and _ew_data.get("confidence") in ("high", "medium")
+                        and _ew_data.get("t1_extension") and _ew_data.get("t2_extension")):
+                    _t1_ew = float(_ew_data["t1_extension"])
+                    _t2_ew = float(_ew_data["t2_extension"])
+                    # Only override if EW targets are higher (more aspirational) than current
+                    # and within reason (≤ 50% above current price)
+                    if _t1_ew > target1 and _t1_ew <= price * 1.50:
+                        target1 = round(_t1_ew, 2)
+                    if _t2_ew > target2 and _t2_ew <= price * 2.00:
+                        target2 = round(_t2_ew, 2)
+                    rr_ratio = round((target1 - entry_mid) / max(entry_mid - stop, 0.01), 1)
+        except Exception:
+            pass  # never fail trade_plan due to EW classifier
+
         # Phase 3D: Trade plan coherence validation
         if stop >= entry_mid:
             stop = round(entry_mid - atr * 1.0, 2)  # force stop below entry
@@ -5627,6 +5759,14 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
     except Exception:
         pass
     plan["exit_rules"] = exit_rules
+
+    # K5 (2026-05-09): expose Elliott Wave dict so Models tab can display it.
+    # _ew_data is set inside the long-direction branch above when applicable.
+    if direction == "long":
+        try:
+            plan["elliott_wave"] = _ew_data
+        except NameError:
+            pass
 
     # K2 (2026-05-09): VWAP/AVWAP-below-stop validation flag.
     # Vinod feedback: "VWAP & AVWAP are below stop loss" — if either is below
