@@ -201,9 +201,17 @@ export function render() {
       if (!_validPrice(fvgPrice)) return;
       levels.push({ tf: 'D1', kind: f.type === 'bullish' ? 'Bull FVG' : 'Bear FVG', price: fvgPrice, dist: (fvgPrice/px - 1)*100, src: f.status || 'open' });
     });
-    if (_validPrice(T.entry_low)) levels.push({ tf: 'PLN', kind: 'Entry', price: T.entry_low, dist: ((T.entry_low/px - 1)*100), src: 'Plan' });
-    if (_validPrice(T.target1))   levels.push({ tf: 'PLN', kind: 'T1',    price: T.target1,   dist: ((T.target1/px - 1)*100),   src: 'Plan' });
-    if (_validPrice(T.stop))      levels.push({ tf: 'PLN', kind: 'Stop',  price: T.stop,      dist: ((T.stop/px - 1)*100),      src: 'Plan' });
+    // K8 (2026-05-09): SMC trade-plan levels read canonical_trade_plan first.
+    // Vinod feedback: "SMC Driven trade plan is different to tool generate plan
+    // in overview tab" — root cause was each tab pulling from different fields.
+    // Now: SMC and every other tab show identical entry/stop/T1 from one source.
+    const _ctp = T?.canonical_trade_plan;
+    const _tpEntry = _ctp?.entry?.low ?? T.entry_low;
+    const _tpT1    = _ctp?.target1   ?? T.target1;
+    const _tpStop  = _ctp?.stop      ?? T.stop;
+    if (_validPrice(_tpEntry)) levels.push({ tf: 'PLN', kind: 'Entry', price: _tpEntry, dist: ((_tpEntry/px - 1)*100), src: 'Plan' });
+    if (_validPrice(_tpT1))    levels.push({ tf: 'PLN', kind: 'T1',    price: _tpT1,    dist: ((_tpT1/px - 1)*100),    src: 'Plan' });
+    if (_validPrice(_tpStop))  levels.push({ tf: 'PLN', kind: 'Stop',  price: _tpStop,  dist: ((_tpStop/px - 1)*100),  src: 'Plan' });
     levels.sort((a,b) => Math.abs(a.dist) - Math.abs(b.dist));
     return `<table class="lux-tbl">
       <thead><tr><th>TF</th><th>Type</th><th class="r">Level</th><th class="r">Dist %</th><th>Source</th></tr></thead>
