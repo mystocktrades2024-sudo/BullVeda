@@ -4,13 +4,14 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>FLOOR — Trader's Terminal</title>
-<!-- PERF-1c/1d (2026-05-09): warm bootstrap + per-user perms + dashboard data
-     before scripts parse. crossorigin must match the fetch's credentials mode:
-     - /api/v2-bootstrap + /api/me → fetched with `credentials: 'include'` → use-credentials
-     - data.json → fetched with default same-origin credentials → no crossorigin attr -->
+<!-- PERF-1c/1d (2026-05-09): warm critical fetches before scripts parse.
+     ALL preloads use crossorigin="use-credentials" — Chrome treats "no
+     crossorigin" as credentials: omit even for same-origin, which then fails
+     to match a default-credentialed fetch. Each fetch() below uses
+     `credentials: 'include'` to match. -->
 <link rel="preload" as="fetch" crossorigin="use-credentials" href="/api/v2-bootstrap" />
 <link rel="preload" as="fetch" crossorigin="use-credentials" href="/api/me" />
-<link rel="preload" as="fetch" href="./data.json" />
+<link rel="preload" as="fetch" crossorigin="use-credentials" href="./data.json" />
 <style>
   @font-face { font-family: 'Aptos'; src: local('Aptos'), local('Aptos Display'); font-weight: 100 900; font-display: swap; }
   :root {
@@ -2606,7 +2607,11 @@ async function init() {
   // which short-circuits the rest of init until the user submits + reloads).
   await _enforceMustChangePassword();
 
-  DATA = await (await fetch('./data.json')).json();
+  // PERF-1d (2026-05-09): match credentials mode with the <link rel="preload"
+  // crossorigin="use-credentials"> in <head> so the browser actually reuses
+  // the warmed response instead of re-fetching. Same-origin HTTP Basic auth
+  // sends credentials either way; this is purely about preload deduplication.
+  DATA = await (await fetch('./data.json', { credentials: 'include' })).json();
   // Overlay intraday options_flow.json (refreshed every 30 min during market
   // hours) onto data.json's options_flow_top30 if newer. Last-scan flow is
   // shown when off-hours; live flow when market is open. (2026-05-08)

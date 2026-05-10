@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>FLOOR — Stock Detail</title>
 <!-- PERF-1c/1d (2026-05-09): warm bootstrap + tickers.json (3.7MB) + data.json (5.3MB)
-     before scripts parse. crossorigin must match the fetch's credentials mode:
-     - /api/* → fetched with `credentials: 'include'` → use-credentials
-     - tickers.json/data.json → fetched with default same-origin → no crossorigin -->
+     before scripts parse. ALL preloads use crossorigin="use-credentials" so the
+     credentials mode matches the fetch() calls below (see init() — each fetch
+     uses `credentials: 'include'`). Without this match Chrome won't dedup. -->
 <link rel="preload" as="fetch" crossorigin="use-credentials" href="/api/v2-bootstrap" />
 <link rel="preload" as="fetch" crossorigin="use-credentials" href="/api/me" />
-<link rel="preload" as="fetch" href="./tickers.json" />
-<link rel="preload" as="fetch" href="./data.json" />
+<link rel="preload" as="fetch" crossorigin="use-credentials" href="./tickers.json" />
+<link rel="preload" as="fetch" crossorigin="use-credentials" href="./data.json" />
 <style>
   @font-face { font-family: 'Aptos'; src: local('Aptos'), local('Aptos Display');
                font-weight: 100 900; font-display: swap; }
@@ -2080,15 +2080,15 @@ async function init() {
   const wanted = (params.get('t') || '').toUpperCase();
   const fromTab = params.get('from') || 'st';
   $('backBtn').href = `dashboard.html#${fromTab}`;
-  // PERF-2b: kick off data.json (5.3MB) in parallel with the ticker fetch.
-  // Independent — GLOBAL_ACCURACY/GLOBAL_REGIME are read with null guards by renderPlan.
-  // Saves ~150-200ms on cold load by overlapping the two big network fetches.
-  const _globalDataP = fetch('./data.json')
+  // PERF-2b + PERF-1d: kick off data.json (5.3MB) in parallel with ticker fetch.
+  // credentials: 'include' matches the <link rel="preload" crossorigin="use-credentials">
+  // in <head> so the browser dedups instead of fetching twice.
+  const _globalDataP = fetch('./data.json', { credentials: 'include' })
     .then(r => r.ok ? r.json() : null)
     .catch(() => null);
   try {
     if (wanted) {
-      const all = await (await fetch('./tickers.json')).json();
+      const all = await (await fetch('./tickers.json', { credentials: 'include' })).json();
       T = all[wanted];
       if (!T) {
         // Ticker isn't in the current scan bundle — run on-demand deep-dive.
