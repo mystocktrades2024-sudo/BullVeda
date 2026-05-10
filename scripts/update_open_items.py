@@ -171,7 +171,8 @@ def cmd_xlsx(args: argparse.Namespace) -> int:
     headers = ["#", "ID", "Priority", "Section", "Item",
                "What we're trying to fix", "How we're fixing it",
                "Effort", "Risk / Win", "Notes",
-               "Status", "Date Fixed", "Commit"]
+               "Status", "Date Fixed", "Commit",
+               "How to Test"]   # 2026-05-10: user-facing manual verification per fix
     ws.append(headers)
 
     header_fill = PatternFill("solid", fgColor="1F4E78")
@@ -230,6 +231,7 @@ def cmd_xlsx(args: argparse.Namespace) -> int:
             it["status"],
             it.get("date_fixed") or "",
             it.get("commit") or "",
+            it.get("how_to_test") or "",   # col 14: how-to-test
         ]
         ws.append(row)
         r = idx + 1
@@ -246,25 +248,28 @@ def cmd_xlsx(args: argparse.Namespace) -> int:
         # Center for compact columns
         for col in (1, 2, 3, 8, 11, 12, 13):
             ws.cell(row=r, column=col).alignment = Alignment(horizontal="center", vertical="top", wrap_text=True)
-        for col in (4, 5, 6, 7, 9, 10):
+        # Left-align long prose columns (incl. col 14 How to Test)
+        for col in (4, 5, 6, 7, 9, 10, 14):
             ws.cell(row=r, column=col).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
         # ID + commit monospace
         for col in (2, 13):
             ws.cell(row=r, column=col).font = Font(name="Menlo", size=10)
+        # How to Test in monospace too (commands)
+        ws.cell(row=r, column=14).font = Font(name="Menlo", size=9)
         # Item bold
         ws.cell(row=r, column=5).font = Font(bold=True, size=10)
         # All borders
         for col in range(1, len(row) + 1):
             ws.cell(row=r, column=col).border = border
 
-        # Row height proportional to longest prose
-        max_len = max(len(it.get(k, "") or "") for k in ("what", "how", "notes", "item"))
+        # Row height proportional to longest prose (now includes how_to_test)
+        max_len = max(len(it.get(k, "") or "") for k in ("what", "how", "notes", "item", "how_to_test"))
         lines = max(3, min(20, max_len // 80 + 2))
         ws.row_dimensions[r].height = 15 * lines
 
     ws.freeze_panes = "B2"
 
-    widths = [4, 12, 7, 22, 38, 52, 60, 12, 22, 26, 13, 12, 13]
+    widths = [4, 12, 7, 22, 38, 52, 60, 12, 22, 26, 13, 12, 13, 60]   # 14th = How to Test (wide)
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
