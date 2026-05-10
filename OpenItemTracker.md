@@ -1,6 +1,6 @@
 # 📋 SwingTrade — Open Item Tracker
 
-> **Last updated:** 2026-05-09 (PT)
+> **Last updated:** 2026-05-09 PM (PT) — afternoon perf + redesign + quant session
 > **Update cadence:** every working session — mark `✅ done`, `🔄 in progress`, `⏸ blocked`, `🟡 pending` (with priority), `❌ won't do` (with reason)
 > **Single source of truth.** When in doubt, this file wins over conversation memory.
 
@@ -41,9 +41,14 @@
 
 | ID | Item | Effort | Estimated win | Priority |
 |----|------|--------|---------------|----------|
-| ~~PERF-1~~ | ~~Add `performance.mark()` perf marks + `?perf=1` URL flag → console table~~ ✅ DONE 2026-05-09 — both `dashboard.html` and `elite-detail.html` instrumented; `window.__perfReport(true)` works any time | done | done | done |
-| PERF-2 | **Defer Plotly.js** in elite-detail (only load on first chart) | 1 hr | -500ms cold per-ticker | high |
-| PERF-3 | **Lazy-render elite-detail sub-tabs** (only active, not all 25 at init) | 2 hrs | -300-500ms first-paint | high |
+| ~~PERF-1~~ | ~~Add `performance.mark()` perf marks~~ ✅ DONE 2026-05-09 | done | done | done |
+| ~~PERF-1a~~ | ~~Promise.all drawer/widgets/actions in shell.js~~ ✅ DONE 2026-05-09 PM | done | -317ms | done |
+| ~~PERF-1b~~ | ~~Combined `/api/v2-bootstrap` endpoint~~ ✅ DONE 2026-05-09 PM | done | -341ms | done |
+| ~~PERF-1c~~ | ~~`<link rel="preload">` for critical fetches~~ ✅ DONE 2026-05-09 PM | done | -134ms shell-loader | done |
+| ~~PERF-1d~~ | ~~Preload + credentials mode match for data/tickers JSON~~ ✅ DONE 2026-05-09 PM | done | -62ms init | done |
+| ~~PERF-2~~ | ~~Defer Plotly.js~~ ✅ DONE 2026-05-09 PM (3.5MB CDN no longer blocks parse) | done | done | done |
+| ~~PERF-2b~~ | ~~Parallel data.json/tickers.json fetch in elite-detail init()~~ ✅ DONE 2026-05-09 PM | done | done | done |
+| ~~PERF-3~~ | ~~Lazy-render elite-detail sub-tabs~~ ✅ DONE 2026-05-09 PM | done | done | done |
 | PERF-4 | **Brotli compression** (currently Gzip) | 30 min | -15% transfer | medium |
 | PERF-5 | **`requestIdleCallback` for `_capScanAndDisableButtons`** | 15 min | -50ms FCP | low |
 | PERF-6 | **Critical CSS extraction** (split 775-line `<style>` to above-fold + lazy) | 1 hr | -100ms FCP | medium |
@@ -63,8 +68,9 @@
 
 | ID | Item | Effort | Priority |
 |----|------|--------|----------|
-| QUANT-1 | **Act on 750-day backtest findings** — system PF 0.70 | days | high (real P&L impact) |
-| QUANT-2 | **Cap Trend Continuation share** in scoring | 1-2 hrs | high |
+| ~~QUANT-1 (Fix 1+3)~~ | ~~Kill Trend Continuation + restore VCP Breakout~~ ✅ SHIPPED 2026-05-09 PM, validation backtest running (PID 25081, ETA ~60min) | done | — |
+| QUANT-1b | **Fix 2: add `buy_max_score: 80` cap** — held conditional on Fix 1+3 backtest validation | 30 min | conditional on backtest result |
+| ~~QUANT-2~~ | ~~Cap Trend Continuation share~~ — MOOTED by QUANT-1 Fix 1 (killed entirely) | done | — |
 | QUANT-3 | **Score-band filters** (e.g., min 70 in choppy regime) | 2-4 hrs | medium |
 | QUANT-4 | **Walk-forward fold persistence** (Supabase dual-write for `walk_forward_folds`) | 1 hr | low |
 | QUANT-5 | **Mover predictor v3** — NLP earnings tone, options flow features | days | research bet |
@@ -109,6 +115,14 @@ See `tests/MOBILE_REVIEW.md` for the full audit.
 
 | Date | ID | Item |
 |------|----|------|
+| 2026-05-09 PM | QUANT-1 (Fix 1+3) | Killed Trend Continuation (multiplier 0.7→0.0 + static_setup_kill_list dict entry: n=264, wr_lb=0.195). Restored VCP Breakout (0.0→1.2). Validation backtest running (PID 25081). Fix 2 (buy_max_score=80) HELD pending validation. |
+| 2026-05-09 PM | Elite Picks v2 | Full redesign — hero band (top 3 picks across all 9 cells) + per-mode tracks + plain-English thesis. Replaced dense 3×3 grid that wasted space on empty cells. Tier colors fixed (MARGINAL no longer yellow-on-yellow). |
+| 2026-05-09 PM | PERF-3 | Lazy-render elite-detail sub-tabs. Was: 25 module renders on init. Now: only active sub-tab on boot, others render on first fdSwitchTab. |
+| 2026-05-09 PM | PERF-2/2b | Defer Plotly (3.5MB CDN no longer blocks parse) + parallel data.json/tickers.json fetch in elite-detail init(). |
+| 2026-05-09 PM | PERF-1d | Match credentials mode on preload AND fetch (5 fetch sites updated to `credentials: 'include'`). Eliminated browser warning + duplicate fetch. |
+| 2026-05-09 PM | PERF-1c | `<link rel="preload" as="fetch">` for /api/v2-bootstrap, /api/me, data.json, tickers.json. Warms responses during HTML parse. shell-loader-start dropped 143ms→9.7ms. |
+| 2026-05-09 PM | PERF-1b | Combined endpoint `/api/v2-bootstrap` returns {version, registry} in 1 RTT. shell-modules-installed dropped 381ms→40ms (-341ms). |
+| 2026-05-09 PM | PERF-1a | Promise.all parallel load of drawer/widgets/actions in shell.js. shell-core-modules-all dropped 551ms→234ms. |
 | 2026-05-09 | PERF-1 | Boot-timing instrumentation: dashboard + elite-detail + shell + detail-shell. `window.__perfReport(true)` dumps 3-section console.table any time. |
 | 2026-05-09 | P13 | Playwright suite (3 spec files) + no-auth route test (passes) |
 | 2026-05-09 | P12 | Audit log on PATCH /api/roles + lazy-load metering + action gating UX |
