@@ -16,8 +16,16 @@
 
 ```
 /Volumes/MyMacDisk/Claude Skills/SwingTrade/      ← project root
-├── analysis.py                ← scoring engine (core, ~6000+ lines)
-├── swing_trade.py             ← main scan entrypoint
+├── analysis.py                ← scoring engine (core, ~6000+ lines). Includes K1-K3 stop rules (Fib+EMA50 confluence, fractal-low alignment, VWAP risk_flag) + K5 classify_elliott_wave (Wave-3 Fib-extension targets)
+├── swing_trade.py             ← main scan entrypoint. A6 entry-time feature logger (30 fields per signal) + K6 canonical_trade_plan attach
+├── canonical_trade_plan.py    ← K6 single source of truth — every dashboard tab binds to fields of this dataclass (TradeZone/RiskMetrics/StatisticalContext/RegimeContext/CatalystContext/SetupAttribution/GateResults). Live Wilson-CI lookup from signal_log per setup×regime. Mechanism hypothesis per setup family.
+├── signal_filter.py           ← A2 declarative whitelist gate. Demotes BUY→WATCH for non-whitelisted (setup × regime × score_band × entry_quality) combos. _validations gate enforces n>=20 AND wr_lb>=0.40 per rule. OFF by default; flip config["signal_filter"]["_enabled"]=true after per-subtype attribution review of A5 finding.
+├── decompose_catalyst_trades.py ← A5 forensic decomposition. Outputs cache/catalyst_decomposition_*.html. Found pullback meta-pattern WR 53% / Wilson LB 44.6% / PF 1.83 (n=134) — but at meta-family granularity, attribution to specific subtypes still pending.
+├── apply_wf_proposals.py      ← walk-forward → config.json applier (preview, then --apply). Closes the WF auto-validation loop.
+├── morning_briefing.py        ← wake-up summary HTML. Auto-detects backtest/WF state, paper-trading day, recent commits → priority-ordered action plan.
+├── elite_research_note.py     ← institutional-grade strategy assessment (AQR/Two Sigma format). Stance-badge auto-derived from Wilson statistics.
+├── hedge_fund_report.py       ← 12-section quant analytics. Train/test/holdout (08c481198) + bootstrap CI + Bayesian beta-binomial WR posteriors.
+├── mover_predictor.py + train_mover_predictor.py ← v1+v2 ML attempts. AUC 0.546 (definitive negative). Don't retrain — needs new features (NLP earnings tone, options flow), not retraining.
 ├── server.py                  ← FastAPI server (was BaseHTTPRequestHandler, legacy preserved as server_legacy.py)
 ├── html_generator.py          ← LEGACY dashboard renderer (~19K lines, scheduled for deprecation — v2 in infra/prototype/ is canonical)
 ├── tier1_signals.py           ← 6 additive strategy signals (insider cluster, NR7, vol dry-up, OBV div, mean rev, beat-and-raise)

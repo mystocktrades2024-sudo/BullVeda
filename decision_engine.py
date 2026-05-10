@@ -602,6 +602,25 @@ def compute_final_verdict(t: dict, regime: str | None = None,
             "demote_to": None,
         }
 
+    # A3 (2026-05-09): Regime gate. Per 750d backtest: strategy is bull-only;
+    # losses concentrate in risk_off and panic regimes. Refuse new BUY entries
+    # in those regimes — leaves existing positions to their exit rules but
+    # stops adding to losing exposure. Vinod-style risk discipline.
+    _regime_lower = (regime or "").lower()
+    if _regime_lower in ("panic", "risk_off_trending"):
+        return {
+            "verdict": "WATCH",
+            "reason": f"regime gate: no new longs in {regime} (bull-only strategy)",
+            "caveats": [f"regime={regime} blocks new BUYs; existing positions unaffected"],
+            "gates_evaluated": [{
+                "name": "regime_gate",
+                "passed": False,
+                "reason": f"regime is {regime} — strategy bull-only per 750d backtest evidence",
+                "severity": "high",
+            }],
+            "demote_to": "watch_list",
+        }
+
     gates, failures = _eval_hard_gates(t)
     caveats = _eval_soft_gates(t)
 
