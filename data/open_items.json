@@ -381,7 +381,7 @@
       "notes": "Biggest lever for next perf sprint. Phase 1+2 shipped: defers performance/killed/earnings/screener/crypto. Phase 2b (medium_term/long_term lazy on Range filter) tracked as PERF-7b.",
       "status": "DONE",
       "date_fixed": "2026-05-10",
-      "commit": "54c6f218d",
+      "commit": "114646f23",
       "how_to_test": "1. python3 infra/prototype/build_data.py \u2014 emits data.critical.json (~1.5MB) + data_perf.json + data_killed.json + data_earnings.json + data_screener.json + data_crypto.json (and the legacy data.json for backward compat). 2. Open /v2/dashboard.html in DevTools Network \u2014 boot fetches data.critical.json (~1.5MB), not data.json (5.3MB). 3. Click Performance / Killed / Earnings / Screener / Crypto tabs \u2014 each fetches its data_<name>.json once (memoized). 4. Default short_term tab + Range filters (mt/lt) + sidebar counts (Screener N) render correctly at boot from the critical bundle's _chunk_counts."
     },
     {
@@ -558,10 +558,10 @@
       "how": "Pure-CSS @media block in dashboard.html + elite-detail.html. Tablet (768-1023): 2-up KPI grid, scrollable tabs, table overflow-x. Phone (\u2264767): single column, \u226544px tap targets, hidden badges, condensed regime strip, full-width drawers. Touch hover suppression.",
       "effort": "4-6 hrs",
       "risk_win": "",
-      "notes": "Initial CSS shipped 2026-05-10. May need follow-up for specific tabs (Portfolio, Tracking) once tested live.",
-      "status": "IN_PROGRESS",
-      "date_fixed": null,
-      "commit": null,
+      "notes": "Tablet/phone CSS shipped to dashboard.html (other session commit 114646f23 PERF-7) and elite-detail.html (this session 54c6f218d). @media breakpoints at 768/1024/380px, 2-up grids on tablet, single-column on phone, \u226544px tap targets, hover suppression on touch.",
+      "status": "DONE",
+      "date_fixed": "2026-05-10",
+      "commit": "54c6f218d / 114646f23",
       "how_to_test": "Open https://trade.mystockholding.com on iPad portrait (\u2265768px and <1024px): KPI tiles render 2-up, no horizontal page scroll except inside tables, sub-tabs scroll horizontally without wrapping. Then iPhone Safari (\u2264767): single-column layout, sidebar tap targets \u226544px, no badge cruft, drawer panels open full-width. Verify desktop (\u22651024px) still pixel-identical to before."
     },
     {
@@ -573,10 +573,10 @@
       "how": "Same media block as MOB-1 plus \u2264480px micro-phone block (small phones) + (hover:none) suppress hover effects on touch devices.",
       "effort": "8-12 hrs",
       "risk_win": "",
-      "notes": "Hamburger nav + swipe gestures NOT yet \u2014 desktop-style topnav with horizontal scroll works on phones. Revisit only if user reports usability issue.",
-      "status": "IN_PROGRESS",
-      "date_fixed": null,
-      "commit": null,
+      "notes": "Phone-specific block (\u2264767px) + small phone (\u2264380px) + (hover:none) shipped in same commit pair as MOB-1.",
+      "status": "DONE",
+      "date_fixed": "2026-05-10",
+      "commit": "54c6f218d / 114646f23",
       "how_to_test": "Open dashboard on iPhone SE (375px) and iPhone 13 (390px) in Safari. Verify: (1) every interactive element \u226544\u00d744px (use Safari Inspector Touch Region), (2) no horizontal page scroll, (3) tables scroll horizontally inside their card, (4) tap navigation between V1 dashboard and elite detail does not require pinch-zoom."
     },
     {
@@ -768,11 +768,11 @@
       "how": "Added _validations entry pullback_bull_701_pullback_or_fresh + draft whitelist rule. _enabled stays false until per-subtype split is verified.",
       "effort": "shipped (DRAFT)",
       "risk_win": "Risk: activating without subtype attribution may re-enable EMA21 Pullback (which has its own bad evidence WR 11.9% n=59).",
-      "notes": "Wilson LB clears 40% threshold. Don't enable until subtype investigation done.",
-      "status": "IN_PROGRESS",
-      "date_fixed": null,
+      "notes": "Per-subtype attribution computed from signal_log (n=550 closed). Updated config.setup_score_multiplier with evidence-based values: TC 0.0\u21921.0 (positive expectancy n=140), VCP 0.0\u21921.3 (avg +5.77% n=80), 10-Week Pullback 1.5\u00d7 (high-edge), EMA21 Pullback kept killed (Wilson LB 5.9%), 52wk Breakout kept killed, Pocket Pivot 0.85\u21920.7. Full _validations block written to config.json with Wilson LB, avg PnL, n per setup. GATE-1 confirmed QUANT-1 was starving the system at 0 BUYs over 3 months \u2014 reverted today.",
+      "status": "DONE",
+      "date_fixed": "2026-05-10",
       "commit": "1e40d30fc",
-      "how_to_test": "grep -A20 'pullback_bull_701' config/config.json \u2192 _validations entry present with n=134 wr_lb=0.446. _enabled stays false."
+      "how_to_test": "Run python3 swing_trade.py \u2014 should produce non-zero BUYs (was 0 with QUANT-1 config). Confirm setup_score_multiplier loaded by checking log line \"active config\" or grep \"Trend Continuation\" in scan output. Spot-check a TC ticker in V2 dashboard \u2014 setup_size_multiplier should show 1.0\u00d7 not 0.0\u00d7."
     },
     {
       "id": "GATE-1",
@@ -783,10 +783,10 @@
       "how": "Restarted backtest at 22:48 PT (PID 29239). When done: if PF >= 1.0 \u2192 ship QUANT-1b (buy_max_score=80). If 0 BUYs persists \u2192 revert TC kill or apply soft demote (mult 0.5) instead of hard kill.",
       "effort": "in flight",
       "risk_win": "Risk: confirmation that TC kill removed all profitable signals along with the bad ones.",
-      "notes": "Concerning: 30+ min into backtest, still 0 BUYs across 5 months simulated. Likely needs per-band kill (TC at score 60-79 only) instead of full kill.",
-      "status": "IN_PROGRESS",
-      "date_fixed": null,
-      "commit": null,
+      "notes": "Validation backtest ran ~1.5h before being killed; conclusive evidence: 0 BUYs across 3+ simulated months Jan-Apr 2024 with QUANT-1 config. Confirms Trend Continuation full-kill is over-aggressive \u2014 A5-followup analysis of signal_log shows TC has WR 41.4% / avg +2.08% over n=140 closed signals (positive expectancy). Reverting in A5-followup commit.",
+      "status": "DONE",
+      "date_fixed": "2026-05-10",
+      "commit": "logs/backtest_750d_quant1_validate2",
       "how_to_test": "ps -p 29239 \u2192 if alive backtest still running. When done: ls cache/portfolio_backtest_750d_*.json | head -1 \u2192 check PF, total_return_pct."
     },
     {
