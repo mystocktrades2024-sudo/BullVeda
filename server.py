@@ -12,7 +12,17 @@ BASE_DIR = Path(__file__).parent
 app = FastAPI(title="SwingTrade", version="2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# Gzip compression — reduces 28MB → ~3MB transfer
+# PERF-4 (2026-05-09): Brotli compression first, GZip fallback.
+# Brotli typically ~15-20% smaller than gzip on JSON/HTML at similar CPU cost.
+# Cloudflare tunnel passes Accept-Encoding through, so the browser dictates.
+# Order matters: ASGI middleware wraps responses outside-in. brotli-asgi runs
+# AFTER gzip in the response chain, so when the client supports br, it short-
+# circuits gzip and produces br directly. When it doesn't, gzip applies.
+try:
+    from brotli_asgi import BrotliMiddleware
+    app.add_middleware(BrotliMiddleware, minimum_size=1000, quality=4)  # quality 4 = balanced speed/ratio
+except ImportError:
+    pass  # fall through to gzip-only if brotli-asgi not installed
 from starlette.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
