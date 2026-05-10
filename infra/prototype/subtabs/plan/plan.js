@@ -8,6 +8,28 @@ const _T = () => (window.__getDetailTicker ? window.__getDetailTicker() : window
 
 export function render() {
   const T = _T();
+  // K7 (2026-05-09): canonical_trade_plan is the source of truth. Vinod feedback:
+  // "Trade plan entry, Stop, T1 and T2 has to align with rest of the numbers in
+  // the outlook" — Plan, Thesis, SMC, Models, Overview now read identical
+  // entry/stop/T1/T2 from one place. Falls back to legacy fields for older
+  // ticker dicts that predate K6 (commit 2c9b9f339).
+  const ctp = T?.canonical_trade_plan;
+  const tpLegacy = T.trade_plan || {};
+  const _stop      = ctp?.stop          ?? T.stop          ?? tpLegacy.stop;
+  const _t1        = ctp?.target1       ?? T.target1       ?? tpLegacy.target1;
+  const _t2        = ctp?.target2       ?? T.target2       ?? tpLegacy.target2;
+  const _eLo       = ctp?.entry?.low    ?? T.entry_low     ?? tpLegacy.entry_low;
+  const _eHi       = ctp?.entry?.high   ?? T.entry_high    ?? tpLegacy.entry_high;
+  const _setupFam  = ctp?.setup?.setup_family ?? T.setup_family;
+  // Re-bind these onto T so later code in this function can keep using T.stop/T.entry_low etc.
+  // without changing every reference. This is the canonical-first behavior.
+  T.stop       = _stop;
+  T.target1    = _t1;
+  T.target2    = _t2;
+  T.entry_low  = _eLo;
+  T.entry_high = _eHi;
+  T.setup_family = _setupFam ?? T.setup_family;
+
   const lo = Math.min(T.stop, T.entry_low) * 0.93;
   const hi = Math.max(T.target2 || T.target1, T.entry_high) * 1.10;
   const range = hi - lo || 1;
