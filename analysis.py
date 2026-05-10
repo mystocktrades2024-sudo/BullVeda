@@ -6961,6 +6961,15 @@ def make_decision(total_score: float, rr_ratio: float, config: dict,
         _effective_buy_min = max(55, buy_min - 5)
 
     if total_score >= _effective_buy_min and rr_ratio >= buy_rr:
+        # Q1-step6 (2026-05-10): per-regime buy_max_score cap. Score band 90+
+        # showed n=19, PF 0.32 in Saturday post-kill subset (anti-predictive).
+        # Override-shipped pending 250d backtest verification — see
+        # config._validations.q1_step6_buy_max_cap audit entry.
+        buy_max = _rt.get("buy_max_score")
+        if buy_max is not None and total_score > buy_max:
+            return {"verdict": "WATCH", "emoji": "eye", "color": "#d97706",
+                    "bear_type": "",
+                    "reason": f"Score {total_score} > buy_max_score {buy_max} (Q1-step6 cap — 90+ band anti-predictive in post-kill subset, n=19 PF 0.32)"}
         long_min_rs    = _rt.get("rs_min",               gates_cfg.get("long_min_rs_rank", 65))
         require_w_bull = _rt.get("weekly_bull_required",  gates_cfg.get("long_require_weekly_bull", True))
         high_vix       = _rt.get("high_vix_threshold",    gates_cfg.get("high_vix_threshold", 22))
