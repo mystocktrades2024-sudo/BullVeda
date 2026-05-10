@@ -400,6 +400,15 @@ def _score_as_of(ticker: str, df_full: pd.DataFrame, as_of_date: pd.Timestamp,
     plan = compute_trade_plan(ticker, df, sr, ind, direction, beta=info.get("beta"))
     bear_setup = score_bear_setup(df, ind)
 
+    # 2026-05-10 — populate entry_quality so trade record can be diagnosed.
+    # Without this, cache/portfolio_backtest.json has entry_quality=None
+    # for every trade, blocking Variant A (FRESH-only) attribution analysis.
+    try:
+        from analysis import classify_entry_quality as _ceq
+        _entry_quality = _ceq(plan["price"], ind, sr)
+    except Exception:
+        _entry_quality = None
+
     # Audit #9 — Backtest scoring now matches live path:
     # apply the same historical-WR multiplier analyze_ticker() applies.
     # Before any trades are logged this returns 1.0 (no-op), so deterministic.
@@ -453,6 +462,7 @@ def _score_as_of(ticker: str, df_full: pd.DataFrame, as_of_date: pd.Timestamp,
         "direction":    direction,
         "verdict":      decision["verdict"],
         "setup_type":   plan["setup_type"],
+        "entry_quality": _entry_quality,    # 2026-05-10 — propagated for trade diagnosis
         "rr_ratio":     plan["rr_ratio"],
         "entry_price":  plan["price"],
         "stop":         plan["stop"],

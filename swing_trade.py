@@ -712,6 +712,7 @@ def run_daily_scan(force_fresh: bool = False):
             ticker_sources.setdefault(t, "custom")
         log.info(f"  Universe: {len(universe)} "
                  f"(S&P 500={len(sp500)}, Russell 1000={len(russell1000)}, "
+                 f"Russell 2000={len(russell2000)}, "
                  f"Zacks #1={len(zacks_r1)}, custom={len(custom)})")
 
     # Add Zacks premium service tickers to universe

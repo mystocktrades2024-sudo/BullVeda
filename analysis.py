@@ -8811,6 +8811,42 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             _vlb = float(_v.get("wr_lb") or 1.0)
             if _vn < 30 or _vlb >= 0.30:
                 _setup_mult = 1.0  # silently revert to no-op (audit trail in config)
+
+        # Variant F (2026-05-10) — regime-conditional override.
+        # Agent-4 finding from 250d backtest: TC in bull regime carries 79.5%
+        # of all losses (n=85, WR 28.2%, PF 0.55); same setup is profitable
+        # in neutral (PF 1.75) and bear (PF 2.68). Global multiplier averages
+        # them out. Regime-specific override gives the right size in each.
+        #
+        # Config schema:
+        #   "setup_score_multiplier_by_regime": {
+        #     "_validations": {                             # required for any demotion
+        #       "Trend Continuation": {
+        #         "bull":    {"n": 85, "wr_lb": 0.20, "source": "bt_250d_2026-05-10"}
+        #       }
+        #     },
+        #     "Trend Continuation": {"bull": 0.0, "neutral": 1.0, "bear": 1.5}
+        #   }
+        #
+        # When this block contains an entry, it OVERRIDES the global mult.
+        # Same demotion gate applies (n>=30, wr_lb<0.30).
+        _by_regime = (config or {}).get("setup_score_multiplier_by_regime") or {}
+        if _by_regime:
+            _br_validations = _by_regime.get("_validations") or {}
+            _setup_overrides = _by_regime.get(_setup_for_mult) or {}
+            _regime_key = (regime_name or "neutral").lower()
+            if _regime_key in _setup_overrides:
+                _regime_mult = float(_setup_overrides[_regime_key])
+                # Apply demotion gate to regime-specific too
+                if _regime_mult < 1.0:
+                    _vbr = (_br_validations.get(_setup_for_mult) or {}).get(_regime_key) or {}
+                    _vbn = int(_vbr.get("n") or 0)
+                    _vblb = float(_vbr.get("wr_lb") or 1.0)
+                    if _vbn < 30 or _vblb >= 0.30:
+                        _regime_mult = 1.0  # gate not cleared
+                # The regime-specific overrides the global
+                _setup_mult = _regime_mult
+
         if _setup_mult != 1.0 and _setup_mult > 0:
             normalized = float(normalized) * _setup_mult
     except Exception:
