@@ -192,8 +192,10 @@ By setup at score >= 80:
 
 ```bash
 cd "/Volumes/MyMacDisk/Claude Skills/SwingTrade"
-git pull origin main
-ls SESSION_HANDOFF.md OpenItemTracker.md          # this file + master tracker
+git pull --rebase origin main
+bash scripts/install_hooks.sh                      # one-time per clone (open-items + F11 hooks)
+ls SESSION_HANDOFF.md OpenItemTracker.md data/open_items.json  # this file + trackers
+python3 scripts/update_open_items.py list --open  # see what's still open
 # Confirm current config state:
 python3 -c "
 import json
@@ -203,6 +205,32 @@ print('Kill list:', [e.get('setup') if isinstance(e, dict) else e for e in c['st
 "
 # Then run the analysis script in section 3 to confirm Saturday's findings
 ```
+
+### Open-items registry workflow (NEW — adopt for every fix)
+
+`data/open_items.json` is now the single source of truth for OPEN/DONE work.
+The pre-commit hook auto-rebuilds `cache/open_items_<DATE>.xlsx` whenever the
+registry changes, so user-facing tracking stays current with no manual step.
+
+After shipping any fix that maps to a registry ID:
+
+```bash
+python3 scripts/update_open_items.py done <ID>     # auto-fills today's date + HEAD commit
+git add data/open_items.json
+git commit -m "<ID>: <short>"                      # hook regenerates Excel + stages it
+```
+
+For a brand-new item not yet in the registry:
+
+```bash
+python3 scripts/update_open_items.py add NEW-ID P1 "Section" "Item title" "What problem" "How fixed"
+# Then mark done immediately if already shipped:
+python3 scripts/update_open_items.py done NEW-ID
+```
+
+Concurrent-session safety: ALWAYS `git pull --rebase` before editing the
+registry. `data/open_items.json` is the most likely conflict point if both
+sessions ship in parallel. Rebase keeps conflicts trivial.
 
 **Tell the new session:**
 > "Read `SESSION_HANDOFF.md`. Sunday — markets closed. Re-derive the empirical analysis in section 3 from raw JSON before changing any config. Then proceed through the 7-step QUANT-1 follow-up plan, validating each change with a 250d backtest before the full 750d. Save the deeper changes (`buy_max_score: 90`) for after the 750d confirms."

@@ -280,6 +280,9 @@ All 10 addressed in "Audit Batch" commit. Tier 1 mitigations shipped; Tier 2 req
 - **Dashboard hard-refresh** (Cmd+Shift+R) to pick up `html_generator.py` (legacy) or `infra/prototype/elite-detail.html` (v2) changes.
 - **v2 dashboard is canonical** as of 2026-05-01. Legacy `html_generator.py` stays for transition but new features land in v2 only.
 - **Python 3.9 union syntax** — files using `str | None` type hints must have `from __future__ import annotations` at top, otherwise use `Optional[str]` or untyped args.
+- **Open-items registry is the source of truth** — `data/open_items.json` tracks every OPEN/IN_PROGRESS/DONE/DEFERRED/REJECTED item with what+how+status+date+commit. After shipping ANY fix that maps to a registry ID, run `python3 scripts/update_open_items.py done <ID>` BEFORE the commit. The pre-commit hook auto-rebuilds `cache/open_items_<DATE>.xlsx` and ships it in the same commit. If the fix is a brand-new item, `add` it first: `python3 scripts/update_open_items.py add NEW-ID P1 "Section" "Item" "What" "How"`. CLI: `list` / `list --open` / `done` / `status` / `add` / `xlsx`.
+- **Install git hooks on every fresh clone** — `bash scripts/install_hooks.sh` (idempotent). Hooks live at `infra/hooks/*` (tracked) and get copied to `.git/hooks/*` (local-only, never tracked by git). The two hooks are pre-commit's open-items rebuild + F11 schema-drift check. See `infra/hooks/README.md`.
+- **Always `git pull --rebase` before editing the registry** if another session might also be working — `data/open_items.json` is the most likely concurrent-edit conflict point. Rebase makes conflicts easier to resolve than merge.
 
 ## Completed Today (single session, 8 commits)
 
