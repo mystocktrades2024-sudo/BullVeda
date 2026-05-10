@@ -1,0 +1,85 @@
+#!/bin/bash
+# SwingTrade pre-commit hook — F11 + F11-followup (2026-05-09)
+# Only checks fields ADDED by THIS commit's diff, not the full repo.
+# Pre-existing drift is documented technical debt, not a commit-blocker.
+#
+# To bypass entirely: git commit --no-verify
+
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# ─── Open-items Excel auto-rebuild ────────────────────────────────────────
+# If this commit touches data/open_items.json (or the rebuild script itself),
+# regenerate cache/open_items_<DATE>.xlsx and stage it so it ships with the commit.
+STAGED_ALL=$(git diff --cached --name-only)
+if echo "$STAGED_ALL" | grep -qE '^(data/open_items\.json|scripts/update_open_items\.py)$'; then
+    if [ -f "$REPO_ROOT/scripts/update_open_items.py" ]; then
+        echo "→ open-items hook: rebuilding Excel from registry..."
+        if python3 "$REPO_ROOT/scripts/update_open_items.py" xlsx >/dev/null; then
+            # Stage every cache/open_items_*.xlsx that exists (today's + any prior dates touched)
+            git add "$REPO_ROOT"/cache/open_items_*.xlsx 2>/dev/null || true
+            echo "  ✓ Excel rebuilt and staged"
+        else
+            echo "  ✗ rebuild failed — commit blocked. Run manually: python3 scripts/update_open_items.py xlsx"
+            exit 1
+        fi
+    fi
+fi
+
+# ─── F11 schema drift check ───────────────────────────────────────────────
+SCRIPT="$REPO_ROOT/check_schema_drift.py"
+
+if [ ! -f "$SCRIPT" ]; then
+    exit 0
+fi
+
+# Only fire on commits that touch JSON canonical OR migrations OR db.py
+STAGED=$(git diff --cached --name-only)
+if ! echo "$STAGED" | grep -qE '(data/.*\.json|migrations/.*\.sql|db\.py)'; then
+    exit 0
+fi
+
+# Detect NEW JSON keys added by this commit
+NEW_KEYS=$(git diff --cached --unified=0 -- 'data/*.json' 2>/dev/null \
+    | grep -E '^\+' \
+    | grep -vE '^\+\+\+' \
+    | grep -oE '"[a-zA-Z_][a-zA-Z0-9_]*"\s*:' \
+    | sort -u || true)
+
+if [ -z "$NEW_KEYS" ]; then
+    # No new keys → commit can't introduce new drift. Pass.
+    exit 0
+fi
+
+echo "→ F11 hook: checking $(echo "$NEW_KEYS" | wc -l | tr -d ' ') new JSON keys for Postgres column coverage..."
+
+# Run schema drift check; capture json-only fields
+DRIFT_OUTPUT=$(python3 "$SCRIPT" 2>&1 || true)
+
+# Cross-reference: any of NEW_KEYS that appear in DRIFT_OUTPUT (in json-only sections)
+NEW_DRIFT=""
+while IFS= read -r key_quoted; do
+    # Strip quotes and colon
+    key=$(echo "$key_quoted" | sed -E 's/^"([a-zA-Z_][a-zA-Z0-9_]*)".*/\1/')
+    # Search for "- KEY" pattern in DRIFT_OUTPUT (the linter's report format)
+    if echo "$DRIFT_OUTPUT" | grep -qE "^\s*-\s+${key}\s*$"; then
+        NEW_DRIFT+="$key "
+    fi
+done <<< "$NEW_KEYS"
+
+if [ -n "$NEW_DRIFT" ]; then
+    echo ""
+    echo "✗ NEW schema drift introduced by this commit:"
+    for k in $NEW_DRIFT; do
+        echo "    - $k (in JSON but no Postgres column)"
+    done
+    echo ""
+    echo "  Add the column in a new migrations/*.sql,"
+    echo "  OR whitelist in check_schema_drift.py KNOWN_JSON_ONLY,"
+    echo "  OR bypass: git commit --no-verify"
+    exit 1
+fi
+
+# Clean — pre-existing drift OK, no NEW drift introduced
+exit 0
