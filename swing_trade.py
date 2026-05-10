@@ -3344,6 +3344,16 @@ def run_daily_scan(force_fresh: bool = False):
                     "caveats": _r["caveats"],
                     "decided_by": "decision_engine.compute_final_verdict",
                 }
+                # K6 (2026-05-09): attach single canonical trade plan AFTER verdict is final.
+                # All dashboard tabs (Plan, Thesis, SMC, Models, Overview) bind to this dict
+                # instead of computing their own. Per Vinod feedback: "SMC plan ≠ Overview plan",
+                # "Bear case ≠ Plan/Thesis", "Thesis T1/T2 ≠ outlook" — root cause was each tab
+                # had its own derivation. Now: one source, all tabs read it.
+                try:
+                    from canonical_trade_plan import attach_to_result
+                    attach_to_result(_row, regime_thresholds=_cfg_thr)
+                except Exception:
+                    pass  # never break the scan due to canonical-plan attach
                 _de_count += 1
                 if _r["verdict"] != "BUY":
                     _de_failed += 1
