@@ -52,18 +52,21 @@ function renderTopBar() {
     (regime === 'bull' || regime === 'risk_on_trending' ? 'bull' :
      regime === 'neutral' || regime === 'risk_on_choppy' ? 'neutral' : 'bear');
 
-  const t = (d.scan_time || d.last_scan_time || d.run_date || '').slice(0, 16).replace('T', ' ');
-  $('ipScanTime').textContent = t || '—';
+  // Bundle uses `run_timestamp` (e.g. "2026-05-10 07:35:29") or `run_date`.
+  const t = d.run_timestamp || d.scan_time || d.last_scan_time || d.run_date || '';
+  $('ipScanTime').textContent = t.slice(0, 16).replace('T', ' ') || '—';
 }
 
 // ─── ROW BUILDER ──────────────────────────────────────────────────────
 function buildRow(r) {
   const t = r.ticker || '';
-  const px = +(r.price || 0);
-  const score = +(r.score || 0);
+  const px = +(r.price || (r.snapshot || {}).price || 0);
+  // Score: regular short_term uses `score`; elite picks use `score_raw` or `elite_score`.
+  const score = +(r.score || r.score_raw || r.elite_score || 0);
   const verdict = (r.verdict || r.stage || 'WATCH').toUpperCase();
-  const setup = r.strategy || r.setup || '';
-  const rs = r.rs_rank || 0;
+  // Setup family fallback: `strategy` (short_term), `setup` (legacy), `name` (elite).
+  const setup = r.strategy || r.setup || r.setup_family || r.name || '';
+  const rs = r.rs_rank || (r.snapshot || {}).rs_rank || 0;
   const sel = state.selectedTicker === t ? ' on' : '';
   const scoreCls = score >= 80 ? 'high' : score >= 65 ? 'mid' : 'low';
   return `
@@ -92,18 +95,27 @@ function getRowsForTab(tab) {
   const d = state.data || {};
 
   if (tab === 'scanner') {
-    // BUY + WATCH from short_term, sorted by score desc
+    // BUY + WATCH from short_term, sorted by score desc.
+    // Bundle uses `stage` field, not `verdict` — fall through to `stage`
+    // (matches buildRow() resolution at line ~52).
     const all = (d.short_term || []).concat(d.medium_term || []);
     return all
-      .filter(r => ['BUY', 'WATCH'].includes((r.verdict || '').toUpperCase()))
+      .filter(r => {
+        const v = (r.verdict || r.stage || '').toUpperCase();
+        return v === 'BUY' || v === 'WATCH';
+      })
       .sort((a, b) => (b.score || 0) - (a.score || 0))
       .slice(0, 100);
   }
   if (tab === 'elite') {
-    // Top by EV — fall through to elite_picks if present, else top-25 by score
-    const elite = (d.elite_picks || {}).picks || (d.elite_picks || []) ||
-                  (d.short_term || []).slice(0, 25);
-    return Array.isArray(elite) ? elite : [];
+    // elite_picks shape: {Swing: {BUY: [], WATCH: [], SHORT: []}, Position: {...}, Invest: {...}, meta: {}}
+    // Aggregate the Swing-mode BUY+WATCH (most relevant for short-term iPad use).
+    const ep = d.elite_picks || {};
+    const sw = ep.Swing || {};
+    const all = (sw.BUY || []).concat(sw.WATCH || []).concat(sw.SHORT || []);
+    if (all.length) return all;
+    // Fallback: top-25 by score from short_term
+    return (d.short_term || []).slice(0, 25);
   }
   if (tab === 'watchlist') {
     // Custom watchlist — pull anything with custom_added flag or watchlist=true
