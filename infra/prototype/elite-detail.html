@@ -1735,7 +1735,8 @@
 <script src="./tooltips.js"></script>
 <script src="./ws-live.js"></script>
 <!-- Plotly for the Research tab visualizations (loaded once per page) -->
-<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<!-- defer: 3.5MB CDN bundle no longer blocks HTML parse; Plotly is referenced via window.Plotly with !window.Plotly guards (PERF-2 2026-05-09) -->
+<script defer src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
 
 <div class="floor-app">
 
@@ -2071,6 +2072,12 @@ async function init() {
   const wanted = (params.get('t') || '').toUpperCase();
   const fromTab = params.get('from') || 'st';
   $('backBtn').href = `dashboard.html#${fromTab}`;
+  // PERF-2b: kick off data.json (5.3MB) in parallel with the ticker fetch.
+  // Independent — GLOBAL_ACCURACY/GLOBAL_REGIME are read with null guards by renderPlan.
+  // Saves ~150-200ms on cold load by overlapping the two big network fetches.
+  const _globalDataP = fetch('./data.json')
+    .then(r => r.ok ? r.json() : null)
+    .catch(() => null);
   try {
     if (wanted) {
       const all = await (await fetch('./tickers.json')).json();
@@ -2133,10 +2140,10 @@ async function init() {
   }
   // Load global scan-level data (accuracy framework + regime) for per-ticker slicing.
   // Fails silently — renderPlan falls back gracefully if window.GLOBAL_ACCURACY is null.
+  // PERF-2b: fetch was kicked off in parallel at top of init(); this just awaits the result.
   try {
-    const dResp = await fetch('./data.json');
-    if (dResp.ok) {
-      const dj = await dResp.json();
+    const dj = await _globalDataP;
+    if (dj) {
       window.GLOBAL_ACCURACY = dj.accuracy || null;
       window.GLOBAL_REGIME   = dj.regime || null;
     }

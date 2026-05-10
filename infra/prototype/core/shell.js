@@ -147,43 +147,33 @@ async function _installOverrides() {
   // Step 3: install overrides
   _installOverrides();
 
-  // Step 4: load core/drawer.js and expose its renderInlineDrawer to window
-  // so the inline `_renderInlineDrawer(T)` proxy in dashboard.html resolves.
-  // (CapStudio keystone — used by 3 row-expand surfaces.)
-  try {
-    const v = window.__moduleVersion || '1';
-    const drawer = await import(`./drawer.js?v=${v}`);
-    window.__drawer = drawer;
-    console.log('[shell] drawer module loaded');
-    performance.mark('shell-drawer-loaded');
-  } catch (e) {
-    console.error('[shell] drawer module failed to load:', e);
-  }
+  // Step 4: load core modules in PARALLEL (PERF-1a 2026-05-09)
+  // Previously sequential awaits — drawer (168ms) → widgets → actions added up.
+  // These three are independent; Promise.allSettled overlaps their fetches.
+  const v = window.__moduleVersion || '1';
+  await Promise.allSettled([
+    // drawer — _renderInlineDrawer keystone, used by 3 row-expand surfaces
+    import(`./drawer.js?v=${v}`).then(drawer => {
+      window.__drawer = drawer;
+      console.log('[shell] drawer module loaded');
+      performance.mark('shell-drawer-loaded');
+    }).catch(e => console.error('[shell] drawer module failed to load:', e)),
 
-  // Load core/widgets.js → cross-cutting render widgets (perf strip, squeeze badge).
-  // Module auto-binds its exports to window at evaluation time, so inline
-  // HTML callers (`_renderPerfStrip(td)`) resolve via global lookup.
-  try {
-    const v = window.__moduleVersion || '1';
-    await import(`./widgets.js?v=${v}`);
-    console.log('[shell] widgets module loaded');
-    performance.mark('shell-widgets-loaded');
-  } catch (e) {
-    console.error('[shell] widgets module failed to load:', e);
-  }
+    // widgets — auto-binds exports to window for inline HTML callers
+    import(`./widgets.js?v=${v}`).then(() => {
+      console.log('[shell] widgets module loaded');
+      performance.mark('shell-widgets-loaded');
+    }).catch(e => console.error('[shell] widgets module failed to load:', e)),
 
-  // Load core/actions.js → set window.X = actions.X for each exported handler.
-  // These are referenced by inline onclick="posMoveToBE(...)" in rendered HTML.
-  try {
-    const v = window.__moduleVersion || '1';
-    const actions = await import(`./actions.js?v=${v}`);
-    window.__actions = actions;
-    for (const [name, fn] of Object.entries(actions)) {
-      if (typeof fn === 'function') window[name] = fn;
-    }
-    console.log(`[shell] actions module loaded: ${Object.keys(actions).filter(k => typeof actions[k] === 'function').length} handlers`);
-    performance.mark('shell-actions-loaded');
-  } catch (e) {
-    console.error('[shell] actions module failed to load:', e);
-  }
+    // actions — sets window.X = actions.X for inline onclick="posMoveToBE(...)"
+    import(`./actions.js?v=${v}`).then(actions => {
+      window.__actions = actions;
+      for (const [name, fn] of Object.entries(actions)) {
+        if (typeof fn === 'function') window[name] = fn;
+      }
+      console.log(`[shell] actions module loaded: ${Object.keys(actions).filter(k => typeof actions[k] === 'function').length} handlers`);
+      performance.mark('shell-actions-loaded');
+    }).catch(e => console.error('[shell] actions module failed to load:', e)),
+  ]);
+  performance.mark('shell-core-modules-all-loaded');
 })();
