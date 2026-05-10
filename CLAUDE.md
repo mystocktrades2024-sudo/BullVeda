@@ -461,6 +461,85 @@ All 10 addressed in "Audit Batch" commit. Tier 1 mitigations shipped; Tier 2 req
 | 9 | Backtest ≠ live scoring | `apply_setup_wr_multiplier` unified | — (done) |
 | 10 | entry_quality unused | FRESH/PULLBACK/VALID → stop/target/hold | — (done) |
 
+## Lessons learned (2026-05-10 overnight)
+
+Three production-relevant patterns discovered while debugging GATE-1 / Q1-step5
+"system not generating profit" symptoms.
+
+### Lesson 1 — Two-source kill list
+
+`decision_engine.compute_setup_kill_list()` MERGES two sources:
+1. **Live signal_log evidence** (computed each scan from `data/signal_log.json`)
+2. **`config.static_setup_kill_list`** (manual entries with declared n+wr_lb+source)
+
+When reverting a setup kill, you must remove from BOTH:
+- `setup_score_multiplier[setup] = 1.0` (multiplier)
+- `static_setup_kill_list[]` (manual entry)
+
+Skipping step 2 leaves the setup kill-listed even if multiplier says 1.0×.
+Verify with: `python3 -c "from decision_engine import compute_setup_kill_list; print(compute_setup_kill_list())"`
+
+Real incident: 2026-05-10 A5-followup set TC mult to 1.0 but forgot to remove
+the static_setup_kill_list entry; backtest still showed 0 BUYs because TC was
+kill-listed via the static path. Fix in commit b02935ad8.
+
+### Lesson 2 — `weekly_df` must be passed to `score_technicals` in backtest
+
+`backtest._score_as_of()` must explicitly resample daily OHLCV to weekly
+(`W-FRI`) and pass it to `score_technicals(df, regime, spy_close, weekly_df=...)`.
+Without it, `_weekly_ema_alignment(None)` returns `bullish: False`,
+`weekly_bull` is False everywhere, and every `setup_gates.*.weekly_bull_required: True`
+demotes the BUY to WATCH.
+
+Symptom: backtest produces 0 BUYs across 60+ days even with reasonable thresholds.
+Root cause was NOT the kill list, NOT the score floor — it was missing weekly_df.
+
+Resampling daily → weekly is leakage-free (uses only data ≤ as_of_date).
+Fix in commit 985cd182b.
+
+### Lesson 3 — Global multipliers can mask regime-specific failures
+
+A setup can have positive expectancy GLOBALLY but lose heavily in ONE regime.
+
+Example (250d backtest 2026-05-10): Trend Continuation had:
+- Global: n=140, WR 41%, avg +2.08% — positive expectancy
+- BUT in bull regime: n=85, WR 28%, PF 0.55, avg −1.05% — disaster
+- AND in neutral regime: n=27, PF 1.75 — works
+- AND in bear regime: n=6, PF 2.68 — works
+
+A single global multiplier averages these out. The fix is `setup_score_multiplier_by_regime`
+config block (Variant F, commit f0a66543e) which lets you set
+`{setup: {bull: 0.0, neutral: 1.0, bear: 1.5}}` per setup. Read by
+`analysis.py:8790` block; same demotion gate (n≥30, wr_lb<0.30) applies.
+
+### Lesson 4 — Score floor isn't always the live-BUY blocker
+
+Counterintuitive finding: regime4_thresholds at 80 was raised in 2026-05-08
+based on score-band attribution (60-79 band losing). But today's live scan
+showed top 5 WATCH all scoring 81-103, blocked by `entry_quality` (EXTENDED
+or MISSED), not score floor. **Lowering thresholds doesn't help when the
+gate that's actually firing is entry_quality.** Diagnose by reading
+`reject_reason` field on WATCH picks before tuning thresholds.
+
+## Backtest variant playbook (config-override JSONs at config/variants/)
+
+Pre-built `--config-override` files for the four candidate fixes from Q1-step5
+diagnosis (2026-05-10):
+
+| File | Fix | Hypothesis | Predicted PF |
+|------|-----|------------|--------------|
+| `A_fresh_entries_only.json` | entry_quality=FRESH only | Cuts late-entry whipsaws | 1.1-1.3 |
+| `E2_regime_plus_wider_stops.json` | Variant F + 1.5× ATR stops | Combines kill + stop relief | 1.2-1.5 |
+| `G_combined.json` | Variant F + FRESH-only | Most aggressive cut | 1.4-1.8 (target) |
+
+Run via: `python3 backtest.py --portfolio --days 250 --config-override config/variants/<file>.json`.
+Use `--smoke` first for sanity (won't tell you the real PF — too few trades —
+but catches config errors in 60s).
+
+Counterfactual analysis (Agent 3, 2026-05-10) showed wider stops alone don't
+lift PF (the losers are sustained adverse moves, not whipsaws). Don't bother
+running a "wider stops alone" variant.
+
 ## Conventions
 
 - **EODHD is primary data source** (post-2026-04-25 migration), yfinance is news fallback only (used by `get_news_articles` when EODHD rate-limits). All price/OHLCV/fundamentals/sentiment route through `eodhd_client.py`.
