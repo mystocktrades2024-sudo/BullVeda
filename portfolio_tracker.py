@@ -1755,6 +1755,18 @@ def refresh_prices() -> list[dict]:
     state = _load_state()
     positions = state.get("positions", [])
     if not positions:
+        # P0 (2026-05-10): even with no open positions, snapshot today's
+        # equity (= cash) so the curve is dense enough for drawdown lookback.
+        today = date.today().isoformat()
+        curve = state.get("equity_curve") or []
+        eq = round(state.get("cash", state.get("equity", 0)), 2)
+        if not curve or curve[-1].get("date") != today:
+            curve.append({"date": today, "equity": eq})
+        else:
+            curve[-1]["equity"] = eq
+        state["equity"] = eq
+        state["equity_curve"] = curve
+        _save_state(state)
         return []
 
     tickers = [p["ticker"] for p in positions]
@@ -1773,6 +1785,21 @@ def refresh_prices() -> list[dict]:
                     pass
     except Exception as e:
         _log_compat.warning(f"refresh_prices download failed: {e}")
+        # P0 (2026-05-10): even on price-fetch failure, snapshot today's
+        # equity using last-known prices so the curve doesn't go stale.
+        today = date.today().isoformat()
+        invested = 0.0
+        for pos in positions:
+            if pos.get("direction", "long") != "long":
+                continue
+            px = float(pos.get("current_price") or pos.get("entry_price") or 0)
+            invested += px * pos.get("shares", 0)
+        state["equity"] = round(state.get("cash", 0) + invested, 2)
+        curve = state.get("equity_curve") or []
+        if not curve or curve[-1].get("date") != today:
+            curve.append({"date": today, "equity": state["equity"]})
+        state["equity_curve"] = curve
+        _save_state(state)
         return positions
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1824,6 +1851,28 @@ def refresh_prices() -> list[dict]:
                 pos["t1_partial_alert"] = True
         except Exception:
             pass
+
+    # P0 (2026-05-10): daily equity_curve snapshot from mark-to-market.
+    # Without this, equity_curve only gets a point on close_position(), so
+    # compute_current_drawdown_pct stays stale → kelly_size.drawdown_mult is
+    # a no-op. Append/update today's point using current cash + invested
+    # value of LONG positions only (shorts are liabilities tracked
+    # separately, matches close_position invariant).
+    invested = 0.0
+    for pos in state["positions"]:
+        if pos.get("direction", "long") != "long":
+            continue
+        t = pos["ticker"]
+        px = float(prices.get(t, pos.get("current_price") or pos.get("entry_price") or 0) or 0)
+        invested += px * pos.get("shares", 0)
+    state["equity"] = round(state.get("cash", 0) + invested, 2)
+    today = date.today().isoformat()
+    curve = state.get("equity_curve") or []
+    if not curve or curve[-1].get("date") != today:
+        curve.append({"date": today, "equity": state["equity"]})
+    else:
+        curve[-1]["equity"] = state["equity"]
+    state["equity_curve"] = curve
 
     _save_state(state)
     return positions

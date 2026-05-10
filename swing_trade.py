@@ -438,6 +438,16 @@ def run_daily_scan(force_fresh: bool = False):
     run_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     log.info(f"=== SwingTrade Daily Scan — {run_timestamp} ===")
 
+    # ── P0-1 (2026-05-10): refresh prices THEN compute drawdown ──
+    # refresh_prices() now appends/updates today's equity_curve point so
+    # compute_current_drawdown_pct sees a fresh mark-to-market. Previously
+    # the curve only updated on close_position, leaving drawdown_mult stale.
+    try:
+        from portfolio_tracker import refresh_prices as _refresh_prices_early
+        _refresh_prices_early()
+    except Exception as e:
+        log.debug(f"Early price refresh failed (non-fatal): {e}")
+
     # ── P0-1: inject current drawdown_pct into vol-targeting config ──
     # kelly_position_size reads cfg.portfolio_vol_targeting._runtime_drawdown_pct
     # to scale position size during drawdowns. Without this injection it's a no-op.
