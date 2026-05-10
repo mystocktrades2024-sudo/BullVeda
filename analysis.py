@@ -5263,6 +5263,48 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
         # Phase 3C: Stop relative to entry midpoint — max 1.25×ATR (tightened from 1.5)
         stop = round(max(support - atr * 0.15, entry_mid - atr * min(stop_mult, 1.25)), 2)
 
+        # K1 (2026-05-09): stop confluence with Fibonacci + EMA 50.
+        # Vinod feedback: "Stop loss should be a confluence of Fibonacci levels
+        # and EMA 50". Snap stop to the nearest of {Fib retracement level, EMA50}
+        # that's BELOW current stop (preserve safety) within tolerance.
+        try:
+            _conf = (_cfg.get("scoring") or {}).get("stop_confluence") or {}
+            if _conf.get("enabled", True):
+                _ema50 = float(indicators.get("ema50") or 0)
+                _fib_levels = _conf.get("fib_levels", [0.382, 0.5, 0.618])
+                _tol_pct = float(_conf.get("snap_tolerance_pct", 1.0)) / 100.0
+                _swing_high = float(indicators.get("recent_high") or sr.get("recent_high") or price * 1.10)
+                _swing_low = float(indicators.get("recent_low") or sr.get("recent_low") or price * 0.85)
+                _swing_range = max(_swing_high - _swing_low, atr * 2)
+                # Fib retracements from swing_high (longs retrace TO support)
+                _fib_stops = [round(_swing_high - _swing_range * f, 2) for f in _fib_levels]
+                _candidates = [s for s in _fib_stops + [round(_ema50, 2)] if s and s < entry_mid and s >= entry_mid * 0.85]
+                if _candidates:
+                    # Pick highest candidate within tolerance of current stop (preserves R:R)
+                    _close_to_stop = [c for c in _candidates if abs(c - stop) / max(stop, 1) <= _tol_pct * 5]
+                    if _close_to_stop:
+                        stop = max(stop, max(_close_to_stop))  # pull stop up to confluence if very close
+                    elif min(_candidates) < stop:
+                        # All candidates below stop; widen slightly to nearest
+                        _below = [c for c in _candidates if c < stop]
+                        stop = round(max(_below), 2)
+        except Exception:
+            pass  # never fail compute_trade_plan due to confluence math
+
+        # K3 (2026-05-09): stop must be AT or BELOW nearest fractal low.
+        # Vinod feedback: "Entry and Stop loss numbers does align with fractal low".
+        # If the calculated stop is ABOVE the active fractal low (a key swing low
+        # the market has been respecting), the stop is too tight — widen down to
+        # just below fractal_low so a normal pullback doesn't get stopped out.
+        try:
+            _fractal_low = indicators.get("fractal_low")
+            if _fractal_low and float(_fractal_low) > 0:
+                _fl = float(_fractal_low)
+                if stop > _fl and _fl > entry_mid * 0.80:  # sanity: don't widen >20%
+                    stop = round(_fl - atr * 0.10, 2)  # just below fractal low (small buffer)
+        except Exception:
+            pass
+
         # Phase 3A: Resistance-aware targets
         risk = entry_mid - stop
         _raw_t1 = entry_mid + risk * 3.0  # ideal 3:1
@@ -5585,6 +5627,34 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
     except Exception:
         pass
     plan["exit_rules"] = exit_rules
+
+    # K2 (2026-05-09): VWAP/AVWAP-below-stop validation flag.
+    # Vinod feedback: "VWAP & AVWAP are below stop loss" — if either is below
+    # the stop, the stop placement is likely wrong (stop is too high). Emit a
+    # risk_flag so decision_engine can surface it; do NOT auto-fail (some
+    # strategies legitimately have stops above VWAP), but the flag bubbles up.
+    try:
+        _stop_val = plan.get("stop") or 0
+        _vwap_val_check = indicators.get("vwap") or indicators.get("vwap_20d")
+        _avwap_val_check = indicators.get("avwap_swing_low") or indicators.get("avwap_anchor_low")
+        risk_flags = list(plan.get("risk_flags") or [])
+        if direction == "long" and _stop_val:
+            if _vwap_val_check and _vwap_val_check < _stop_val:
+                risk_flags.append({
+                    "name": "vwap_below_stop",
+                    "severity": "high",
+                    "detail": f"VWAP ${_vwap_val_check:.2f} < stop ${_stop_val:.2f} — stop placement likely too tight"
+                })
+            if _avwap_val_check and _avwap_val_check < _stop_val:
+                risk_flags.append({
+                    "name": "avwap_below_stop",
+                    "severity": "high",
+                    "detail": f"AVWAP ${_avwap_val_check:.2f} < stop ${_stop_val:.2f} — anchored VWAP below stop indicates weak structure"
+                })
+        if risk_flags:
+            plan["risk_flags"] = risk_flags
+    except Exception:
+        pass
 
     return plan
 
