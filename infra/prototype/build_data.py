@@ -2508,6 +2508,60 @@ def main():
     DATA.write_text(json.dumps(data, default=str, indent=0, allow_nan=False))
     print(f"wrote {DATA} ({DATA.stat().st_size:,} bytes)")
 
+    # PERF-7: emit critical + 5 deferred chunks for lazy dashboard loading.
+    # Cuts cold-load payload by ~3.7 MB (70% reduction). Lazy splits:
+    #   data_perf.json     (1.7 MB) → Performance tab
+    #   data_killed.json   (1.1 MB) → Killed tab
+    #   data_earnings.json (430 KB) → Earnings tab + beat predictions
+    #   data_screener.json (255 KB) → Screener tab
+    #   data_crypto.json   (132 KB) → Crypto tab
+    # Critical bundle keeps small stubs (killed:[], screener:[], crypto:[],
+    # performance:{total}) so boot-time render() and sidebar counts continue
+    # to work — chunks overlay the stubs when they arrive on tab activation.
+    _PERF_KEYS     = ("performance",)
+    _KILLED_KEYS   = ("killed",)
+    _EARNINGS_KEYS = ("earnings_beat_predictions", "earnings_outcomes_30d",
+                      "earnings_watchlist", "earnings_watchlist_meta")
+    _SCREENER_KEYS = ("screener",)
+    _CRYPTO_KEYS   = ("crypto",)
+    _LAZY_KEYS = (set(_PERF_KEYS) | set(_KILLED_KEYS) | set(_EARNINGS_KEYS)
+                  | set(_SCREENER_KEYS) | set(_CRYPTO_KEYS))
+
+    _critical = {k: v for k, v in data.items() if k not in _LAZY_KEYS}
+    # Stubs — match the SHAPE of the real chunk so renderers using `?.` / `||`
+    # guards don't crash before the chunk arrives. killed/screener are lists in
+    # the source bundle; crypto is a dict ({top_picks, ...}); performance is a
+    # dict with `.total` exposed for the sidebar count.
+    _critical["killed"] = []
+    _critical["screener"] = []
+    _critical["crypto"] = {}
+    _perf_total = (data.get("performance") or {}).get("total")
+    if _perf_total is not None:
+        _critical["performance"] = {"total": _perf_total}
+    # Pre-computed counts so sidebar/floor strip can render at boot without
+    # waiting for chunks. Read by dashboard.html in _updateSidebarCounts().
+    _critical["_chunk_counts"] = {
+        "screener":  len(data.get("screener") or []),
+        "crypto":    len(data.get("crypto") or []),
+        "killed":    len(data.get("killed") or []),
+    }
+
+    _chunks = {
+        "perf":     {k: data[k] for k in _PERF_KEYS     if k in data},
+        "killed":   {k: data[k] for k in _KILLED_KEYS   if k in data},
+        "earnings": {k: data[k] for k in _EARNINGS_KEYS if k in data},
+        "screener": {k: data[k] for k in _SCREENER_KEYS if k in data},
+        "crypto":   {k: data[k] for k in _CRYPTO_KEYS   if k in data},
+    }
+
+    _crit_path = OUT / "data.critical.json"
+    _crit_path.write_text(json.dumps(_critical, default=str, indent=0, allow_nan=False))
+    print(f"wrote {_crit_path.name} ({_crit_path.stat().st_size:,} bytes)")
+    for _name, _chunk in _chunks.items():
+        _path = OUT / f"data_{_name}.json"
+        _path.write_text(json.dumps(_chunk, default=str, indent=0, allow_nan=False))
+        print(f"wrote {_path.name} ({_path.stat().st_size:,} bytes)")
+
     # Tickers — rich payload for elite-detail page
     all_rich = {}
     for src in (st_rows + mt_rows):

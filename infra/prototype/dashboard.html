@@ -11,7 +11,8 @@
      `credentials: 'include'` to match. -->
 <link rel="preload" as="fetch" crossorigin="use-credentials" href="/api/v2-bootstrap" />
 <link rel="preload" as="fetch" crossorigin="use-credentials" href="/api/me" />
-<link rel="preload" as="fetch" crossorigin="use-credentials" href="./data.json" />
+<!-- PERF-7: critical bundle = ~2 MB; perf/killed/earnings chunks lazy-fetched per tab -->
+<link rel="preload" as="fetch" crossorigin="use-credentials" href="./data.critical.json" />
 <style>
   @font-face { font-family: 'Aptos'; src: local('Aptos'), local('Aptos Display'); font-weight: 100 900; font-display: swap; }
   :root {
@@ -965,6 +966,81 @@
   /* Admin stripe */
   .stg-admin { background: linear-gradient(135deg, rgba(239,68,68,0.06), transparent); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; padding: 12px 14px; margin-top: 14px; font-size: 12px; color: var(--paper-1); }
   .stg-admin b { color: var(--red); }
+
+  /* ────────────────────────────────────────────────────────────────────────
+     MOB-1 + MOB-2 (2026-05-10) — RESPONSIVE BREAKPOINTS
+     Tablet portrait + phone usability. Pure CSS, additive. Desktop unchanged.
+     ──────────────────────────────────────────────────────────────────────── */
+
+  /* TABLET portrait (≥768px and <1024px) */
+  @media (min-width: 768px) and (max-width: 1023px) {
+    main { padding: 12px 12px; }
+    .topnav { padding: 0 10px; gap: 2px; }
+    .sb-link { padding: 0 10px; font-size: 11px; height: 38px; min-height: 38px; }
+    .mc { padding: 6px 10px; }
+    .mc .lbl { font-size: 9px; }
+    .mc .val { font-size: 12px; }
+    .kpi-grid { grid-template-columns: repeat(2, 1fr) !important; }
+    .strat-cards { grid-template-columns: repeat(2, 1fr) !important; }
+    table { display: block; overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
+  }
+
+  /* PHONE (≤767px) */
+  @media (max-width: 767px) {
+    main { padding: 8px 6px; }
+    .topnav { padding: 0 6px; gap: 0; height: 36px; top: 44px; }
+    .sb-link {
+      padding: 0 8px; font-size: 11px; height: 36px; min-height: 44px;
+      letter-spacing: 0.02em;
+    }
+    .sb-link .ico { font-size: 11px; }
+    .sb-link .ext, .sb-link .ct { display: none; }   /* hide badges on phone */
+
+    /* Regime strip — smaller, wraps */
+    .mc { padding: 4px 8px; min-width: auto; }
+    .mc .lbl { font-size: 8px; }
+    .mc .val { font-size: 11px; }
+
+    /* Single-column for multi-column grids */
+    .kpi-grid { grid-template-columns: 1fr !important; gap: 8px; }
+    .strat-cards { grid-template-columns: 1fr !important; gap: 8px; }
+    .grid-2 { grid-template-columns: 1fr !important; }
+    .grid-3 { grid-template-columns: 1fr !important; }
+
+    /* Cards: tighter padding */
+    .card { padding: 12px 14px; }
+    .card-h { font-size: 12px; }
+    h2 { font-size: 18px; }
+    h3 { font-size: 14px; }
+
+    /* Tables horizontal-scroll within card */
+    table { display: block; overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; font-size: 11px; }
+    th, td { padding: 6px 8px !important; }
+
+    /* Tap targets: ≥44×44 px (Apple HIG / Material) */
+    button, .ex-btn, .stg-btn { min-height: 44px; }
+    button.compact, .small-btn { min-height: 36px; }   /* opt-out for explicit small */
+
+    body { font-size: 13px; }
+
+    /* Drawer / inline panel → full-width on phone */
+    .drawer, .ex-drawer { width: 100% !important; left: 0 !important; right: 0 !important; }
+  }
+
+  /* SMALL PHONE (≤380px) */
+  @media (max-width: 380px) {
+    .sb-link { padding: 0 6px; font-size: 10px; }
+    .mc .lbl { font-size: 7px; }
+    .mc .val { font-size: 10px; }
+    main { padding: 6px 4px; }
+  }
+
+  /* TOUCH-OPTIMIZED — disable hover hints on touch devices */
+  @media (hover: none) {
+    .sb-link:hover { color: var(--paper-3); border-bottom-color: transparent; }
+    .sb-link.on:hover { color: var(--ink-0); border-bottom-color: var(--accent); }
+    .tip:hover::after, .tip:hover::before { display: none; }
+  }
 </style>
 <link rel="stylesheet" href="./floor.css?v=20260430a" />
   <link rel="stylesheet" href="theme_dell.css?v=20260507"/>
@@ -2062,6 +2138,31 @@ async function _getTickers() {
   })();
   return _TICKERS_PROMISE;
 }
+
+// PERF-7 (2026-05-10): lazy chunk loader for the heaviest tabs.
+// data.critical.json carries placeholder stubs (`killed: []`, `performance: {total}`)
+// so boot-time render() and sidebar counts work without the full payload.
+// Full sections arrive from data_perf.json / data_killed.json / data_earnings.json
+// and merge into DATA on first activation. Memoized — each chunk fetches once.
+const _CHUNK_PROMISES = {};
+async function loadChunk(name) {
+  if (_CHUNK_PROMISES[name]) return _CHUNK_PROMISES[name];
+  _CHUNK_PROMISES[name] = (async () => {
+    try {
+      const r = await fetch(`./data_${name}.json`, { credentials: 'include' });
+      if (!r.ok) return null;
+      const chunk = await r.json();
+      if (DATA && chunk && typeof chunk === 'object') Object.assign(DATA, chunk);
+      return chunk;
+    } catch (e) {
+      console.error(`[chunk] ${name} fetch failed`, e);
+      return null;
+    }
+  })();
+  return _CHUNK_PROMISES[name];
+}
+window.loadChunk = loadChunk;
+
 const $ = id => document.getElementById(id);
 
 // ─────────────────────────────────────────────────────────────────
@@ -2620,7 +2721,15 @@ async function init() {
   // crossorigin="use-credentials"> in <head> so the browser actually reuses
   // the warmed response instead of re-fetching. Same-origin HTTP Basic auth
   // sends credentials either way; this is purely about preload deduplication.
-  DATA = await (await fetch('./data.json', { credentials: 'include' })).json();
+  // PERF-7 (2026-05-10): boot now fetches data.critical.json (~2 MB) instead
+  // of data.json (5.3 MB). Performance/Killed/Earnings tabs lazy-fetch their
+  // chunks on activation via loadChunk(). Saves ~3.3 MB on cold load.
+  DATA = await (await fetch('./data.critical.json', { credentials: 'include' })).json();
+  // Kick off the deferred chunks in parallel — non-blocking. By the time
+  // the user clicks a deferred tab, the chunk is usually already merged into
+  // DATA. If not, the wrapped TAB_RENDERERS entry awaits loadChunk() first.
+  // perf/killed first (most likely tabs), earnings/screener/crypto trail.
+  ['perf', 'killed', 'earnings', 'screener', 'crypto'].forEach(n => loadChunk(n));
   // Overlay intraday options_flow.json (refreshed every 30 min during market
   // hours) onto data.json's options_flow_top30 if newer. Last-scan flow is
   // shown when off-hours; live flow when market is open. (2026-05-08)
@@ -4657,16 +4766,21 @@ function toggleRow(ticker, e) {
 // SIDEBAR TAB SWITCHING
 // =============================================================================
 function setupTabSwitcher() {
+  // PERF-7: screener is now lazy-loaded, so .length is 0 at boot. Read the
+  // pre-computed count from _chunk_counts (built into data.critical.json by
+  // build_data.py) so sidebar shows the real number before the chunk arrives.
+  const _chunkCt = (DATA && DATA._chunk_counts) || {};
+  const _screenerCt = (DATA.screener && DATA.screener.length) || _chunkCt.screener || 0;
   // Sidebar / topnav counts (hidden topnav still needs valid IDs)
   if ($('sbScanCt'))   $('sbScanCt').textContent   = (DATA.short_term?.length || 0);
-  if ($('sbScreenCt')) $('sbScreenCt').textContent = DATA.screener?.length || 0;
+  if ($('sbScreenCt')) $('sbScreenCt').textContent = _screenerCt;
   if ($('sbIndCt'))    $('sbIndCt').textContent    = DATA.industries?.length || 0;
   if ($('sbPortCt'))   $('sbPortCt').textContent   = (DATA.portfolio?.positions?.length || 0);
   if ($('sbPerfCt'))   $('sbPerfCt').textContent   = (DATA.performance?.total || 0);
   // FLOOR sidebar counts
   if ($('fsPosCt'))    $('fsPosCt').textContent    = (DATA.portfolio?.positions?.length || 0);
   if ($('fsPerfCt'))   $('fsPerfCt').textContent   = (DATA.performance?.total || 0);
-  if ($('fsScreenCt')) $('fsScreenCt').textContent = (DATA.screener?.length || 0);
+  if ($('fsScreenCt')) $('fsScreenCt').textContent = _screenerCt;
   if ($('fsIndCt'))    $('fsIndCt').textContent    = (DATA.industries?.length || 0);
   // Signal mix
   if ($('fsLongCt'))   $('fsLongCt').textContent   = (DATA.short_term||[]).filter(r => r.stage === 'BUY').length;
@@ -5780,9 +5894,20 @@ function _showToast(msg, type='ok') {
 function renderLeveraged() { /* moved to tabs/leveraged/leveraged.js — CapStudio modular loader */ }
 window.renderLeveraged = renderLeveraged;
 
+// PERF-7: wrappers that await the lazy chunk before invoking the real renderer.
+// loadChunk is memoized; if the boot-time prefetch already resolved, this is a
+// no-op and the renderer fires synchronously. Tab dispatcher (TAB_RENDERERS[tab]())
+// fires-and-forgets, so awaiting here just delays render — there's no caller
+// expecting a return value.
+const _renderPerformanceLazy = async () => { await loadChunk('perf');     renderPerformance(); };
+const _renderKilledLazy      = async () => { await loadChunk('killed');   _renderKilledTab(); };
+const _renderEarningsLazy    = async () => { await loadChunk('earnings'); renderEarnings(); };
+const _renderScreenerLazy    = async () => { await loadChunk('screener'); renderScreener(); };
+const _renderCryptoLazy      = async () => { await loadChunk('crypto');   renderCrypto(); };
+
 const TAB_RENDERERS = {
   portfolio:   renderPortfolio,
-  performance: renderPerformance,
+  performance: _renderPerformanceLazy,
   audit:       renderAudit,
   industries:  renderIndustries,
   pairs:       renderPairs,
@@ -5791,21 +5916,21 @@ const TAB_RENDERERS = {
   thesis:      renderThesisLibrary,
   research:    renderResearchTab,
   optionsflow: renderOptionsFlow,
-  earnings:    renderEarnings,
+  earnings:    _renderEarningsLazy,
   market:      renderMarket,
   themes:      renderThemes,
-  screener:    renderScreener,
+  screener:    _renderScreenerLazy,
   strategies:  renderStrategies,
   status:      renderStatus,
   playbook:    renderPlaybook,
   accuracy:    renderAccuracy,
   reference:   renderReference,
-  crypto:      renderCrypto,
+  crypto:      _renderCryptoLazy,
   leveraged:   renderLeveraged,
   settings:    renderSettings,
   watchlist:   _renderWatchlistTab,
   alerts:      _renderAlertsTab,
-  killed:      _renderKilledTab,
+  killed:      _renderKilledLazy,
   macro:       _renderMacroTab,
   premarket:   _renderPremarket,
   events:      () => _renderEvents('ipos'),
