@@ -1,8 +1,8 @@
 # 📋 SwingTrade — Open Item Tracker
 
-> **Last updated:** 2026-05-09 PM (PT) — afternoon perf + redesign + quant session
+> **Last updated:** 2026-05-10 (overnight perf + modularization + quant session)
+> **Canonical registry:** `data/open_items.json` (script-driven; this MD is the human-readable companion)
 > **Update cadence:** every working session — mark `✅ done`, `🔄 in progress`, `⏸ blocked`, `🟡 pending` (with priority), `❌ won't do` (with reason)
-> **Single source of truth.** When in doubt, this file wins over conversation memory.
 
 ---
 
@@ -10,30 +10,62 @@
 
 | Stream | Health | Notes |
 |--------|--------|-------|
-| **Modularization (V2 dashboard)** | ✅ shipped | -42% line count, 60+ ES modules, all wired |
+| **Modularization (V2 dashboard)** | ✅ deeper split done | Phase A (5 main tabs → 28 sub-files) + Phase B (5 subtabs → 17 sub-files) + Scanner module activated (MOD-1). 92 module .js files across 45 folders, 1:1 agentic mapping. |
+| **Boot performance** | ✅ 91% reduction | data.json 5.29 MB → critical 462 KB (PERF-7 + PERF-7b). Inline CSS 1029 → 734 lines (PERF-6). |
 | **CapStudio (RBAC)** | ✅ shipped | 35 tabs + 15 subtabs + 20 actions gated end-to-end |
-| **Test coverage** | ✅ working | Python smoke + Playwright no-auth pass; auth tests need `SWING_USER`/`SWING_PASS` |
-| **Quant / backtest** | 🟡 work in progress | 750-day shows PF 0.70 — alpha work needed |
-| **Mobile** | ⏸ desktop-only | Phase-0 viewport added, full mobile work deferred |
+| **Test coverage** | ✅ scaffold + smoke | Playwright scaffold + smoke spec shipped (MOD-2 in progress); pixel-diff baseline pending CI integration |
+| **Quant / backtest** | 🟡 verification pending | Q1-step5 250d FAILED (0 BUYs). Variant F regime-conditional TC kill awaiting 250d verification. Q1-step6 buy_max_score:90 cap shipped with explicit override (n=19 noise risk acknowledged). |
+| **Mobile / iPad** | ✅ split-view PWA | iPad shell shipped (IPAD-1) — list+iframe-detail, PWA-installable, iframe-aware sidebar hide |
 | **Live operations** | ✅ healthy | 18 launchd cron jobs running |
 
 ---
 
-## 🔄 In progress
+## 🔄 In progress (1)
 
 | ID | Item | Owner | Notes |
 |----|------|-------|-------|
-| P13 | Playwright suite + pixel-diff baseline | Claude | Tests written + Chromium installed. No-auth tests pass. Auth tests need `SWING_USER` + `SWING_PASS` env vars to run end-to-end. |
+| MOD-2 | Pixel-diff regression baseline | Claude | Playwright scaffold + smoke spec shipped (commit `5df6b9ef8`). Full baseline (capture all 30 tab screenshots, store in `tests/baseline/`, regression-check each PR) still pending — needs CI integration. |
 
 ---
 
-## 🟡 Pending — modularization polish
+## 🟡 Still pending (5)
 
-| ID | Item | Effort | Priority | Notes |
-|----|------|--------|----------|-------|
-| MOD-1 | **Scanner deep refactor** | 1-2 hrs | low | 6 mutable `let` state vars + 12 helpers + 20+ inline call-sites. Saves ~250 lines. Currently a documented exception — Scanner works perfectly inline. Skip unless symmetry matters. |
-| MOD-2 | **Pixel-diff regression** | 2-3 hrs | medium | Build on Playwright. Baseline screenshots per tab + sub-tab. Fails on visual delta. |
-| MOD-3 | **Auth-required Playwright tests** | 5 min | medium | Tests are written; just need creds via env. `SWING_USER=foo SWING_PASS=bar npx playwright test`. Once we run them clean, capture as the baseline. |
+| ID | Priority | Item | Why blocked |
+|----|----------|------|-------------|
+| QUANT-3 | P1 | Score-band filters per regime (e.g., min 70 in choppy) | Needs n≥30 backtest evidence (Principle 1) |
+| QUANT-5 | P1 | Mover predictor v3 — NLP earnings tone + options flow features | Multi-day ML research, not a slam-dunk |
+| QUANT-6 | P1 | Regime-conditional entries (rules vary per regime) | Needs backtest validation per regime |
+| OPS-1   | P1 | Snapshot cleanup script (`scripts/cleanup_after_2026_05_16.sh`) | Date-gated to 2026-05-16 |
+| CLEAN-4 | P2 | `scripts/migrate_role_capabilities.py` cleanup | Date-gated to 2026-05-16 |
+
+---
+
+## ✅ Shipped 2026-05-10 (this session — 14 items)
+
+| ID | Item | Commit |
+|----|------|--------|
+| **PERF-7**       | data.json 5.29 MB → 1.55 MB critical (Phase 1, 5 lazy chunks) | `114646f23` |
+| **PERF-6**       | Below-fold CSS extracted (Audit/Accuracy/Settings/mobile media queries) | `450572d28` |
+| **PERF-7b**      | Critical 1.55 MB → 462 KB (Phase 2: lazy mt/lt + misc) — **91% boot reduction** | `cf30df858` |
+| **MOD-A** (×5)   | Phase A: split 5 main tabs into 28 sub-modules (performance/audit/elite/earnings/strategies) | `9517bbbe9` … `7229d4ccb` |
+| **MOD-B** (×5)   | Phase B: split 5 elite-detail subtabs into 17 sub-modules (ruleengine/smc/insider/options/sentiment) | `18ef1002e` … `388c316c4` |
+| **MOD-1**        | Scanner module activated (`tabs/scanner/scanner.js`) + 5-file deep split | `42c36ef91` |
+| **Q1-step6**     | `buy_max_score: 90` cap across 3 active regimes (override-shipped, verification pending) | `f47958fc9` |
+| **VAR-F**        | Variant F: regime-conditional Trend Continuation kill (bull regime only) | `f0a66543e + 363984181` |
+| **B3-WEEKLY-FIX**| Backtest now builds `weekly_df` from daily for `weekly_bull` gate | `985cd182b` |
+| **PERF-OPT**     | Backtest 4× speedup (PERF-OPT-1..4: parallel OHLCV, fund memo, regime precompute) | `94c0c5a01` |
+| **RULE-8GATE**   | 8-gate decision-engine cascade visualization in Why-this-is-X tab | `40f8452b8` |
+| **IPAD-1**       | iPad split-view PWA shell + iframe-aware detail page | `4b49cb93e + b0e5ef6a1 + 79fa01a75` |
+
+**Bug fixes folded in along the way** (5 latent ReferenceErrors caught during the MOD-A/B splits): audit `DATA` bare ref, smc/options/sentiment bare-`$`, sentiment `_renderShortPressureCard` guard, scanner `FS_STATE` let-binding fix, ruleengine pipeline 8-gate cascade was already broken in extraction. All fixed in their respective MOD commits.
+
+---
+
+## ❌ Failed acceptance / reverted
+
+| ID | Item | Outcome |
+|----|------|---------|
+| Q1-step5 | 250d backtest after Q1 multipliers + thresholds | **FAILED** — 0 BUYs across 3+ simulated months. Sibling commit `a18282d28` logged the failure. Recovery path = Variant F (above). |
 
 ---
 
