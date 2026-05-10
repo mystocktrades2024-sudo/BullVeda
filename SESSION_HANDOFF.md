@@ -223,4 +223,88 @@ print('Kill list:', [e.get('setup') if isinstance(e, dict) else e for e in c['st
 
 ---
 
+## 9. Sunday late-PM session work (2026-05-09 22:50 → 23:30 PT)
+
+This session ran in parallel with the PM session above. Focus: Vinod's
+HPE feedback (engine rule gaps + cross-tab consistency) + signal_filter
+infrastructure + entry-time feature logging for future ML.
+
+### Commits shipped (10 in ~40 min)
+
+| Commit | Item | What |
+|--------|------|------|
+| `4129e5565` | A2+G3+F11+J3 | signal_filter.py whitelist gate (off by default), migration 003 audit table, pre-commit hook with check_schema_drift, git committer.email globally fixed |
+| `0574c60d4` | A6 | Entry-time feature logger — 30 new fields per signal (volume_surge, atr_expansion, dist_52w/20d_high, RSI/MACD/MFI/CMF, EMA distances, squeeze, tier1 catalysts, options IV/UOA, insider, news, Zacks). 30-day corpus → ML retraining material |
+| `3d4eb71d7` | K1+K2+K3 | Vinod stop-placement engine rules: Fib+EMA50 confluence, VWAP/AVWAP-below-stop risk_flag, stop ≤ nearest fractal low. All in compute_trade_plan, all wrapped in try/except |
+| `302e9ea00` | K5 | classify_elliott_wave function + Wave-3-Impulse target override. Fib extensions (1.272, 1.618) replace ATR-based targets when Wave 3 detected with medium+ confidence. Verified on HPE.parquet |
+| `4bf8e5d25` | A5 | Catalyst-conditional decomposition (sub-agent fork) — generated `cache/catalyst_decomposition_2026-05-09.html`. Found Wilson-backed alpha bucket: pullback setups (excl. Trend Continuation + Breakout Expansion) → n=134, **WR 53.0%, Wilson LB 44.6%, PF 1.83** |
+| `2c9b9f339` | K6 | **canonical_trade_plan.py** — single source-of-truth dataclass for every dashboard tab. Eight sub-objects: TradeZone, RiskMetrics, StatisticalContext (live Wilson CI from signal_log), RegimeContext, CatalystContext, SetupAttribution (with mechanism_hypothesis per family), GateResults (audit trail). Wired in swing_trade.py:3338 after compute_final_verdict |
+
+### Critical findings
+
+1. **A5 finding contradicts QUANT-1 partially**: pullback meta-pattern shows
+   PF 1.83 / Wilson LB 44.6%, but EMA21 Pullback specifically had WR 11.9%
+   (n=59) per E4. The kill list operated at **wrong granularity** — killed
+   a meta-family when the issue was specific subtypes. Action: investigate
+   per-subtype attribution before re-enabling EMA21 Pullback.
+
+2. **B1 diagnostic ruled out the obvious**: AS-OF universe has 88.3% OHLCV
+   coverage (878/994 tickers) — bug is NOT a missing-data problem. Likely
+   in filter/scoring/regime pipeline when AS_OF_MEMBERSHIP=1. Needs deeper
+   trace. Diagnostic script committed: `diagnose_as_of_membership.py`.
+
+3. **Validation backtest (PID 25081) died at 2024-01-04** with 0 BUYs
+   across 8 months and no result file. Concerning: the QUANT-1 config
+   (Trend Continuation killed) may be over-aggressive. **GATE-1 unresolved.**
+
+### Open items still pending (not in this session)
+
+| ID | Item | Priority |
+|----|------|----------|
+| **GATE-1** | Validation backtest died — restart with timeout protection | 🔴 critical |
+| **B1-followup** | Trace why AS-OF universe produces 0 trades despite 88% data coverage | 🟠 high |
+| **K7/K8/K9** | Wire 5 V2 tab modules (Plan, Thesis, SMC, Models, Overview) to read canonical_trade_plan instead of intermediate fields | 🟠 high (auto-resolves K6's full benefit) |
+| **A5-followup** | Add Wilson-backed pullback rule to signal_filter._validations + whitelist | 🟡 medium |
+| **K4** | Decide: add EMA 5+13 to Technical pillar (yes/no, then lock) | 🟡 medium |
+| **A7** | Drift dashboard tile in V2 dashboard (cron exists, UI doesn't) | 🟢 low |
+| **F11-followup** | Pre-commit hook fires on full-repo drift; scope to current commit only | 🟢 low |
+
+### Net architecture state after this session
+
+```
+COMPUTE_FINAL_VERDICT (decision_engine.py:626)
+  ├── Wilson CI gates (E1-E4) ✓ enforced
+  ├── signal_filter (A2) ✓ wired, off by default
+  └── canonical_trade_plan attach (K6) ✓ on every BUY decision
+
+TRADE PLAN (analysis.py:compute_trade_plan)
+  ├── ATR-based stop ✓
+  ├── Stop confluence: Fib + EMA50 (K1) ✓
+  ├── Stop ≤ fractal low (K3) ✓
+  ├── VWAP/AVWAP risk_flag (K2) ✓
+  └── Wave 3 Impulse target override (K5) ✓
+
+SIGNAL_LOG (per scan)
+  └── 30 new entry-time feature fields (A6) ✓ — 30d corpus building
+
+REPORTS
+  ├── catalyst_decomposition_2026-05-09.html (A5) ✓
+  └── 5 prior reports still current (session_report, elite_research_note,
+      hedge_fund_report, morning_briefing, overnight_progress)
+```
+
+### Tell the next session
+
+> "Read SESSION_HANDOFF.md sections 1-8 for the PM-session context AND
+> section 9 for the late-PM session. **Two unresolved blockers**: (1) the
+> validation backtest died early — re-run with timeout protection AND
+> investigate why 0 BUYs in 8 months; (2) AS-OF-membership produces 0
+> trades despite 88% OHLCV coverage — trace the filter/scoring path.
+> Don't enable signal_filter (`_enabled: true`) until the A5 pullback
+> finding is investigated for per-subtype attribution. The canonical
+> trade plan is wired but tabs haven't been refactored to read from it
+> yet — that's the next high-priority UI work."
+
+---
+
 *Generated 2026-05-09 ~23:15 PT. Sunday session inherits clean state — no urgent live-impact issues.*
