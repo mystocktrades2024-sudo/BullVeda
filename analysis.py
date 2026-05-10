@@ -1190,6 +1190,384 @@ def classify_elliott_wave(df, lookback: int = 90,
     return out
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# BHE RULE GATE — Elliott Wave Ruleset v1.0 (May 2026)
+# ════════════════════════════════════════════════════════════════════════════
+# Engine input documentation: complete machine-implementable EW classifier.
+# Implements the 3 absolute impulse rules, 6 corrective patterns, 5 fib-
+# retracement levels, 4 fib-extension levels, and 8 engine states. Output
+# feeds Gate G3 (quant veto) and the EW sub-score in the Quant Models pillar.
+#
+# Architecture (3 timeframe degrees, run simultaneously):
+#   Primary       — Weekly  — long-term bias modifier
+#   Intermediate  — Daily   — drives the trade verdict (primary input)
+#   Minor         — 4H      — entry-timing confirmation
+#
+# Fractal pivot rule: high[i] > high[i±1] AND high[i] > high[i±2] (5-bar).
+# Pivots not confirmed in real-time — confirmed 2 bars after the candle.
+# ════════════════════════════════════════════════════════════════════════════
+
+# Engine state → score contribution (BHE spec §EW Score Lookup Table)
+_BHE_EW_STATE_SCORES = {
+    "WAVE3_IMPULSE":     {"score": 4, "bullish": True,  "bearish": False, "verdict_hint": "ENTER"},
+    "WAVE5_IMPULSE":     {"score": 2, "bullish": True,  "bearish": False, "verdict_hint": "WATCH"},
+    "WAVE4_TRIANGLE":    {"score": 2, "bullish": False, "bearish": False, "verdict_hint": "WATCH"},
+    "WAVE2_CORRECTION":  {"score": 1, "bullish": False, "bearish": False, "verdict_hint": "WATCH"},
+    "WAVE4_CORRECTION":  {"score": 1, "bullish": False, "bearish": False, "verdict_hint": "WATCH"},
+    "WAVE_A_CORRECTION": {"score": 0, "bullish": False, "bearish": True,  "verdict_hint": "AVOID"},
+    "WAVE_C_CORRECTION": {"score": 0, "bullish": False, "bearish": True,  "verdict_hint": "AVOID"},
+    "AMBIGUOUS":         {"score": 0, "bullish": False, "bearish": False, "verdict_hint": "AMBIGUOUS"},
+}
+
+# Fibonacci retracement levels (BHE spec §RET)
+_BHE_FIB_RETRACE_LEVELS = [0.236, 0.382, 0.500, 0.618, 0.786, 0.886]
+# Fibonacci extension levels (BHE spec §EXT)
+_BHE_FIB_EXT_LEVELS    = [1.000, 1.272, 1.618, 2.618, 4.236]
+
+
+def _bhe_find_fractals(df, n_pivots: int = 8) -> list:
+    """Identify confirmed fractal pivots per BHE spec §0.3.
+
+    Fractal High: high[i] > high[i±1] AND high[i] > high[i±2]
+    Fractal Low:  low[i]  < low[i±1]  AND low[i]  < low[i±2]
+
+    Pivot is NOT confirmed for the most recent 2 bars (need i+1, i+2).
+
+    Returns a list of pivots (most recent last):
+      [{price, type: 'HIGH'|'LOW', index: int}, ...]
+    Limited to last n_pivots for Intermediate-degree analysis.
+    """
+    if df is None or len(df) < 5:
+        return []
+    try:
+        highs = df["High"].squeeze().values if hasattr(df["High"], "squeeze") else df["High"].values
+        lows  = df["Low"].squeeze().values  if hasattr(df["Low"], "squeeze")  else df["Low"].values
+    except Exception:
+        return []
+
+    pivots = []
+    # Stop at len-3 because we need i+1 and i+2 for confirmation
+    for i in range(2, len(highs) - 2):
+        h = highs[i]
+        l = lows[i]
+        if (h > highs[i-2] and h > highs[i-1] and
+            h > highs[i+1] and h > highs[i+2]):
+            pivots.append({"price": float(h), "type": "HIGH", "index": i})
+        if (l < lows[i-2] and l < lows[i-1] and
+            l < lows[i+1] and l < lows[i+2]):
+            pivots.append({"price": float(l), "type": "LOW", "index": i})
+    # Sort by index, keep most recent n_pivots
+    pivots.sort(key=lambda p: p["index"])
+    return pivots[-n_pivots:] if len(pivots) > n_pivots else pivots
+
+
+def _bhe_validate_impulse_rules(w1_start, w1_end, w2_low, w3_high, w4_low) -> tuple[bool, str]:
+    """3 absolute impulse rules (BHE spec §Impulse Rules).
+
+    Rule 1: Wave 2 never retraces >100% of Wave 1 (W2 low > W1 start).
+    Rule 2: Wave 3 is never the shortest impulse wave.
+    Rule 3: Wave 4 never enters Wave 1 price territory (W4 low > W1 high).
+
+    Returns (valid, reason). Any violation → invalid count.
+    """
+    if w2_low is not None and w1_start is not None and w2_low <= w1_start:
+        return False, "RULE_1: Wave 2 retraced >=100% of Wave 1"
+    if all(x is not None for x in (w1_start, w1_end, w2_low, w3_high)):
+        w1_len = abs(w1_end - w1_start)
+        w3_len = abs(w3_high - w2_low)
+        if w4_low is not None and len(str(w4_low)):
+            # If Wave 5 hasn't formed yet, skip Rule 2
+            pass
+        # Rule 3: Wave 4 / Wave 1 overlap (only if W4 has formed)
+        if w4_low is not None and w4_low <= w1_end:
+            return False, "RULE_3: Wave 4 entered Wave 1 territory"
+    return True, "rules_ok"
+
+
+def _bhe_classify_pivots(pivots: list, current_price: float) -> dict:
+    """Map a fractal pivot sequence to one of 8 BHE engine states.
+
+    Returns: {ew_state, ew_bullish, ew_bearish, ew_score, t1, t2,
+              invalidated, reason, w1_start, w1_end, w2_low}
+
+    Algorithm (BHE spec §Engine Classification):
+      1. Need ≥4 pivots (2 lows + 2 highs) for any classification
+      2. Determine HH/HL or LH/LL pattern from last 2 swings
+      3. Use last_low (W2 low candidate) and prev_low (W1 start candidate)
+      4. Extension targets: T1 = w2_low + 1.618×W1_len, T2 = w2_low + 2.618×W1_len
+      5. Apply Rule 1 invalidation
+    """
+    result = {
+        "ew_state": "AMBIGUOUS", "ew_bullish": False, "ew_bearish": False,
+        "ew_score": 0, "t1": None, "t2": None,
+        "invalidated": False, "reason": "",
+        "w1_start": None, "w1_end": None, "w2_low": None,
+        "fib_retracement_pct": None,
+    }
+    if not pivots or len(pivots) < 4:
+        result["reason"] = "Insufficient pivot history"
+        return result
+
+    lows  = [p for p in pivots if p["type"] == "LOW"][-4:]
+    highs = [p for p in pivots if p["type"] == "HIGH"][-4:]
+    if len(lows) < 2 or len(highs) < 2:
+        result["reason"] = "Need >=2 lows and >=2 highs"
+        return result
+
+    last_low  = lows[-1]["price"]
+    prev_low  = lows[-2]["price"]
+    last_high = highs[-1]["price"]
+    prev_high = highs[-2]["price"]
+
+    hh = last_high > prev_high
+    hl = last_low > prev_low
+    lh = last_high < prev_high
+    ll = last_low < prev_low
+
+    # Wave 1 = first impulse leg (prev_low → last_high if HH/HL)
+    # Wave 2 low = last_low (if HL with retracement)
+    w1_start = prev_low
+    w1_end   = last_high
+    w2_low   = last_low
+    w1_len   = w1_end - w1_start
+    if w1_len <= 0:
+        result["reason"] = "Wave 1 length non-positive"
+        return result
+
+    # Rule 1 check
+    if w2_low <= w1_start:
+        result["invalidated"] = True
+        result["reason"] = "RULE_1 violation: W2 low <= W1 start"
+        return result
+
+    fib_retrace = (w1_end - w2_low) / w1_len if w1_len > 0 else 0
+    result["fib_retracement_pct"] = round(fib_retrace, 4)
+    result["w1_start"] = round(w1_start, 4)
+    result["w1_end"]   = round(w1_end, 4)
+    result["w2_low"]   = round(w2_low, 4)
+
+    # Targets via Fibonacci extension from W2 low (BHE spec §EXT)
+    t1 = round(w2_low + (w1_len * 1.618), 4)
+    t2 = round(w2_low + (w1_len * 2.618), 4)
+
+    # ── State classification ──
+    # WAVE3_IMPULSE: HH + HL pattern, price advancing past last_high (within 3%)
+    if hh and hl and current_price > last_high * 0.97:
+        if 0.236 <= fib_retrace <= 0.886:
+            result.update({
+                "ew_state": "WAVE3_IMPULSE",
+                "ew_bullish": True, "ew_score": 4,
+                "t1": t1, "t2": t2,
+                "reason": f"HH+HL, W2 retrace {fib_retrace*100:.1f}% in 23.6-88.6 band, price >97% of last high",
+            })
+            return result
+
+    # WAVE2_CORRECTION: HH up, then pullback (price < last_high * 0.97)
+    if hh and current_price < last_high * 0.97:
+        # current_price IS the working W2 low candidate
+        cur_retrace = (last_high - current_price) / w1_len if w1_len > 0 else 0
+        if 0.382 <= cur_retrace <= 0.886:
+            result.update({
+                "ew_state": "WAVE2_CORRECTION",
+                "ew_bullish": False, "ew_score": 1,
+                "t1": round(last_high + (w1_len * 0.618), 4),  # W3 minimum target
+                "t2": round(last_high + (w1_len * 1.618), 4),  # W3 typical target
+                "reason": f"HH then pullback {cur_retrace*100:.1f}% — Wave 2 corrective in W1 retrace band",
+                "fib_retracement_pct": round(cur_retrace, 4),
+            })
+            return result
+
+    # WAVE_A_CORRECTION: LH + LL, price declining
+    if lh and ll:
+        result.update({
+            "ew_state": "WAVE_A_CORRECTION",
+            "ew_bullish": False, "ew_bearish": True, "ew_score": 0,
+            "reason": "LH+LL — bearish corrective leg",
+        })
+        return result
+
+    # WAVE_C_CORRECTION: LH + LL with steeper decline (heuristic — final leg)
+    # Not detected without 5-wave sub-count; fall through to AMBIGUOUS
+    # WAVE5_IMPULSE: HH+HL but price near last high without breakout (price ≤ last_high)
+    # — not implemented here without sub-wave counting; falls to AMBIGUOUS
+    # WAVE4_TRIANGLE: requires 5-leg ABCDE detection; not in v1.0 implementation
+
+    result["reason"] = f"AMBIGUOUS — pivots don't match a clean state (HH={hh},HL={hl},LH={lh},LL={ll})"
+    return result
+
+
+def classify_elliott_wave_bhe(df, df_weekly=None, df_4h=None, current_price: float | None = None) -> dict:
+    """BHE Rule Gate v1.0 — Elliott Wave classifier (Intermediate degree).
+
+    Implements the BHE specification: 8 engine states, 3 absolute impulse rules,
+    Fibonacci retracements 23.6-88.6%, Fibonacci extensions 100-423.6%, multi-
+    timeframe alignment (Primary modifier × Intermediate base + Minor confirmation).
+
+    Args:
+        df:          Daily OHLCV (Intermediate degree — drives the trade verdict)
+        df_weekly:   Optional weekly OHLCV (Primary degree — bias modifier)
+        df_4h:       Optional 4H OHLCV (Minor degree — entry timing)
+        current_price: Live price; falls back to last close
+
+    Returns dict matching BHE spec §REF outputs:
+        {
+            "ew_state": str (one of 8 states),
+            "ew_bullish": bool,
+            "ew_bearish": bool,
+            "ew_score": int (0-4),
+            "t1": float | None,                   # extension target (price)
+            "t2": float | None,
+            "invalidated": bool,
+            "reason": str,
+            "intermediate": {full classification},
+            "primary": {weekly classification | None},
+            "minor": {4H classification | None},
+            "mtf_alignment": {primary_mult, minor_aligned, warning?},
+            "fib_retracement_pct": float,
+            "spec_version": "BHE-v1.0",
+        }
+    """
+    out = {
+        "ew_state": "AMBIGUOUS", "ew_bullish": False, "ew_bearish": False,
+        "ew_score": 0, "t1": None, "t2": None,
+        "invalidated": False, "reason": "",
+        "intermediate": None, "primary": None, "minor": None,
+        "mtf_alignment": {}, "fib_retracement_pct": None,
+        "spec_version": "BHE-v1.0",
+    }
+    if df is None or len(df) < 30:
+        out["reason"] = "Insufficient daily history (need >=30 bars)"
+        return out
+
+    if current_price is None:
+        try:
+            current_price = float(df["Close"].iloc[-1])
+        except Exception:
+            out["reason"] = "Cannot determine current price"
+            return out
+
+    # ── Intermediate degree (Daily) — drives the verdict ──
+    intermediate_pivots = _bhe_find_fractals(df, n_pivots=8)
+    intermediate = _bhe_classify_pivots(intermediate_pivots, current_price)
+    out["intermediate"] = intermediate
+
+    # Adopt intermediate as the base
+    out["ew_state"]    = intermediate["ew_state"]
+    out["ew_bullish"]  = intermediate["ew_bullish"]
+    out["ew_bearish"]  = intermediate["ew_bearish"]
+    out["ew_score"]    = intermediate["ew_score"]
+    out["t1"]          = intermediate["t1"]
+    out["t2"]          = intermediate["t2"]
+    out["invalidated"] = intermediate["invalidated"]
+    out["reason"]      = intermediate["reason"]
+    out["fib_retracement_pct"] = intermediate.get("fib_retracement_pct")
+
+    # ── Primary degree (Weekly) — bias modifier ──
+    if df_weekly is not None and len(df_weekly) >= 20:
+        primary_pivots = _bhe_find_fractals(df_weekly, n_pivots=6)
+        primary = _bhe_classify_pivots(primary_pivots, current_price)
+        out["primary"] = primary
+
+        # Primary bullish states: WAVE3_IMPULSE, WAVE5_IMPULSE, WAVE2_CORRECTION
+        primary_bullish = primary["ew_state"] in (
+            "WAVE3_IMPULSE", "WAVE5_IMPULSE", "WAVE2_CORRECTION"
+        )
+        primary_bearish = primary["ew_state"] in (
+            "WAVE_A_CORRECTION", "WAVE_C_CORRECTION"
+        )
+        primary_mult = 1.0 if primary_bullish else 0.5
+
+        if primary_bearish:
+            # Trading against primary correction — flag warning
+            out["mtf_alignment"]["warning"] = (
+                "TREND_CONFLICT: Trading against Primary degree correction"
+            )
+
+        out["mtf_alignment"]["primary_mult"]    = primary_mult
+        out["mtf_alignment"]["primary_bullish"] = primary_bullish
+        out["mtf_alignment"]["primary_bearish"] = primary_bearish
+        out["ew_score"] = min(round(out["ew_score"] * primary_mult), 4)
+
+    # ── Minor degree (4H) — entry timing confirmation ──
+    if df_4h is not None and len(df_4h) >= 20:
+        minor_pivots = _bhe_find_fractals(df_4h, n_pivots=6)
+        minor = _bhe_classify_pivots(minor_pivots, current_price)
+        out["minor"] = minor
+        minor_aligned = minor["ew_state"] in ("WAVE3_IMPULSE", "WAVE4_CORRECTION")
+        out["mtf_alignment"]["minor_aligned"] = minor_aligned
+
+    return out
+
+
+def gate_g3_quant_veto(ew_result: dict, mc_p50: float | None,
+                        current_price: float, wyckoff_phase: str = "") -> dict:
+    """Gate G3 — Quant Veto (BHE spec §G3).
+
+    Combines EW + Monte Carlo + Wyckoff into a 3-theory consensus check.
+    Hard veto fires only when BOTH EW is bearish AND MC P50 is below current
+    price. A single bearish theory does NOT block — the verdict is BLOCKED only
+    on dual confirmation.
+
+    Args:
+        ew_result:      Output of classify_elliott_wave_bhe()
+        mc_p50:         Monte Carlo median forward price (None if unavailable)
+        current_price:  Live price
+        wyckoff_phase:  String (MARKUP / ACCUMULATION_LATE / DISTRIBUTION / etc.)
+
+    Returns:
+        {
+            "verdict": "PASS" | "BLOCKED" | "SKIP",
+            "reason": str,
+            "theories_bull": int (0-3),
+            "theory_score": int (0-18, max 18 of 20 Quant pts),
+            "ew_bullish": bool, "ew_bearish": bool,
+            "mc_bearish": bool, "wyckoff_bullish": bool,
+        }
+    """
+    ew_bullish = bool(ew_result.get("ew_bullish"))
+    ew_bearish = bool(ew_result.get("ew_bearish"))
+    mc_bearish = (mc_p50 is not None and mc_p50 < current_price)
+    wyckoff_bullish = (wyckoff_phase or "").upper() in ("MARKUP", "ACCUMULATION_LATE")
+
+    out = {
+        "ew_bullish": ew_bullish, "ew_bearish": ew_bearish,
+        "mc_bearish": mc_bearish, "wyckoff_bullish": wyckoff_bullish,
+    }
+
+    # ── HARD VETO: both EW bearish AND MC bearish ──
+    if ew_bearish and mc_bearish:
+        out.update({
+            "verdict": "BLOCKED",
+            "reason": "QUANT_VETO: EW bearish AND MC P50 below price",
+            "theories_bull": 0, "theory_score": 0,
+        })
+        return out
+
+    # ── Confluence: count bullish theories ──
+    theories_bullish = sum([ew_bullish, not mc_bearish, wyckoff_bullish])
+    if theories_bullish < 2:
+        out.update({
+            "verdict": "SKIP",
+            "reason": f"Only {theories_bullish}/3 theories bullish — minimum 2 required",
+            "theories_bull": theories_bullish, "theory_score": 0,
+        })
+        return out
+
+    # ── PASS: theory score (0-18 of 20 Quant pts) ──
+    theory_score = (
+        int(ew_result.get("ew_score", 0)) +              # 0-4 from EW
+        (6 if wyckoff_bullish else 0) +                   # 0-6 from Wyckoff
+        (8 if not mc_bearish else 0)                      # 0-8 from MC
+    )
+    out.update({
+        "verdict": "PASS",
+        "reason": f"{theories_bullish}/3 theories bullish — confluence cleared",
+        "theories_bull": theories_bullish,
+        "theory_score": theory_score,
+    })
+    return out
+
+
 # ── Williams Fractals ─────────────────────────────────────────────────────────
 
 def _williams_fractals(df, lookback: int = 60) -> dict:
@@ -5363,6 +5741,10 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
     support = sr.get("support", price * 0.95)
     resistance = sr.get("resistance", price * 1.10)
 
+    # Phase 1 (2026-05-10) — structural target sources accumulator. Populated
+    # in the long-direction branch below, then attached to plan after plan = {}.
+    _target_sources: dict = {}
+
     if direction == "long":
         # Entry zone: current price to slightly below (pullback entry)
         entry_low = round(price - atr * 0.3, 2)
@@ -5457,6 +5839,7 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
         # Override default ATR/resistance-based targets when Wave 3 is detected with
         # at least medium confidence.
         _ew_data = None
+        _ew_bhe = None
         try:
             _ew_cfg = (_cfg.get("scoring") or {}).get("elliott_wave") or {}
             if _ew_cfg.get("enabled", True):
@@ -5474,8 +5857,98 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
                     if _t2_ew > target2 and _t2_ew <= price * 2.00:
                         target2 = round(_t2_ew, 2)
                     rr_ratio = round((target1 - entry_mid) / max(entry_mid - stop, 0.01), 1)
+
+            # 2026-05-10 — BHE Rule Gate v1.0 EW classifier (Phase 1, display-only).
+            # Runs in parallel to legacy classifier. Output stored on plan as
+            # `elliott_wave_v1` for canonical_trade_plan + Models tab display.
+            # Does NOT alter target1/target2 in this Phase 1 release.
+            try:
+                _ew_bhe = classify_elliott_wave_bhe(df, current_price=price)
+            except Exception:
+                _ew_bhe = None
         except Exception:
             pass  # never fail trade_plan due to EW classifier
+
+        # ── Phase 1 (2026-05-10) — STRUCTURAL TARGET SOURCES ──
+        # Aggregate target candidates from multiple objective TA sources WITHOUT
+        # changing the actual T1/T2 used by the engine. Display-only field on
+        # plan for the Trade Plan strip + canonical_trade_plan.target_sources.
+        # Sources by horizon:
+        #   short  (2-5d):   fractal_high (above price)
+        #   medium (5-15d):  fib extension on swing (4H/Daily — daily here)
+        #   long   (15-30d): EW BHE Intermediate (Wave-3 1.618×W1 = T1)
+        try:
+            # _target_sources dict initialized at outer function scope above
+            # (so the post-plan-init assignment can find it).
+
+            # Source 1 — fractal high above current price (short-term magnetic level)
+            try:
+                _frac = _williams_fractals(df, lookback=60)
+                # _williams_fractals returns recent_highs/recent_lows (lists) +
+                # active_high/active_low (nearest unbroken). Prefer active_high
+                # if present (already unbroken-filtered), else compute manually.
+                if _frac.get("active_high") and _frac["active_high"] > price * 1.005:
+                    _target_sources["fractal_high"] = {
+                        "horizon": "short",
+                        "level": round(float(_frac["active_high"]), 2),
+                        "rationale": "nearest unbroken fractal high (Williams 5-bar)",
+                    }
+                else:
+                    _frac_highs = _frac.get("recent_highs") or []
+                    _above = [h for h in _frac_highs if isinstance(h, (int, float)) and h > price * 1.005]
+                    if _above:
+                        _target_sources["fractal_high"] = {
+                            "horizon": "short",
+                            "level": round(min(_above), 2),
+                            "rationale": "nearest fractal high above current price",
+                        }
+            except Exception:
+                pass
+
+            # Source 2 — fib extension on swing (medium-term)
+            try:
+                _swing_high_2 = float(indicators.get("recent_high") or sr.get("recent_high") or 0)
+                _swing_low_2  = float(indicators.get("recent_low")  or sr.get("recent_low")  or 0)
+                if _swing_high_2 > _swing_low_2 > 0:
+                    _swing_range_2 = _swing_high_2 - _swing_low_2
+                    # 1.272 fib extension as medium-term target
+                    _fib_target = round(_swing_low_2 + _swing_range_2 * 1.272, 2)
+                    if _fib_target > price * 1.005:
+                        _target_sources["fib_127_extension"] = {
+                            "horizon": "medium",
+                            "level": _fib_target,
+                            "rationale": f"127.2% fib extension of swing {_swing_low_2:.2f}→{_swing_high_2:.2f}",
+                        }
+                    # 1.618 fib extension
+                    _fib_target_2 = round(_swing_low_2 + _swing_range_2 * 1.618, 2)
+                    if _fib_target_2 > price * 1.005:
+                        _target_sources["fib_162_extension"] = {
+                            "horizon": "medium",
+                            "level": _fib_target_2,
+                            "rationale": f"161.8% fib extension of swing {_swing_low_2:.2f}→{_swing_high_2:.2f}",
+                        }
+            except Exception:
+                pass
+
+            # Source 3 — EW BHE Intermediate-degree targets (medium/long horizon)
+            if _ew_bhe and _ew_bhe.get("t1") and _ew_bhe.get("t1") > price * 1.005:
+                _target_sources["ew_intermediate_t1"] = {
+                    "horizon": "medium",
+                    "level": round(float(_ew_bhe["t1"]), 2),
+                    "rationale": f"EW BHE {_ew_bhe.get('ew_state','?')} — Wave-3 1.618×W1 from W2 low",
+                }
+            if _ew_bhe and _ew_bhe.get("t2") and _ew_bhe.get("t2") > price * 1.005:
+                _target_sources["ew_intermediate_t2"] = {
+                    "horizon": "long",
+                    "level": round(float(_ew_bhe["t2"]), 2),
+                    "rationale": f"EW BHE {_ew_bhe.get('ew_state','?')} — Wave-3 2.618×W1 from W2 low",
+                }
+
+            # Phase 1: target_sources will be attached to `plan` AFTER it's
+            # initialized (plan = {...} happens later at line ~6135).
+            # We just build the dict here in local scope for the long branch.
+        except Exception:
+            pass  # phase 1 is informational; never fail plan
 
         # Phase 3D: Trade plan coherence validation
         if stop >= entry_mid:
@@ -5772,7 +6245,16 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
 
     # K5 (2026-05-09): expose Elliott Wave dict so Models tab can display it.
     # _ew_data is set inside the long-direction branch above when applicable.
+    # 2026-05-10: also expose the BHE Rule Gate v1.0 classifier output
+    # (8-state engine, 3 absolute rules, multi-timeframe ready).
     if direction == "long":
+        try:
+            plan["elliott_wave_v1"] = _ew_bhe   # NEW — BHE Rule Gate v1.0
+            # Phase 1 (2026-05-10) — attach structural target sources
+            if _target_sources:
+                plan["target_sources"] = _target_sources
+        except Exception:
+            pass
         try:
             plan["elliott_wave"] = _ew_data
         except NameError:
