@@ -6759,7 +6759,15 @@ def make_decision(total_score: float, rr_ratio: float, config: dict,
                 "reason": f"Price extended — wait for value zone (broke through resistance, wait for next base)"}
 
     # Profile-driven entry quality enforcement (e.g. trending_leaders: VALID → WATCH)
-    _eq_rules = config.get("entry_quality_rules", {})
+    # QUANT-6 (2026-05-10): per-regime entry_quality_rules. When the active
+    # regime defines its own entry_quality_rules in regime4_thresholds.<regime>,
+    # those OVERRIDE the global entry_quality_rules. Use case: choppy regime
+    # may demand FRESH-only entries while trending regime accepts PULLBACK.
+    # Falls back to global config.entry_quality_rules when regime-specific
+    # rules are not declared.
+    _eq_rules_regime = (_rt or {}).get("entry_quality_rules") or {}
+    _eq_rules_global = config.get("entry_quality_rules", {})
+    _eq_rules = _eq_rules_regime if _eq_rules_regime else _eq_rules_global
     if _eq_rules and direction == "long" and entry_quality:
         _eq_verdict = _eq_rules.get(entry_quality, "")
         if _eq_verdict == "WATCH" and entry_quality not in ("EXTENDED", "MISSED"):
