@@ -1848,6 +1848,9 @@
 <div class="toast-wrap" id="floorToasts"></div>
 
 <script>
+// PERF instrumentation (CapStudio 2026-05-09) — opt-in via ?perf=1 URL flag
+performance.mark('script-parse-start');
+
 let DATA = null, CURRENT = 'st', TIER = 'all', SEARCH = '', expandedKey = null;
 // Closure-based getter for ES module access (CapStudio modular loader).
 // `let DATA` doesn't bind to window like `var` does, so window.DATA is
@@ -2413,6 +2416,7 @@ setInterval(() => {
 }, 5000);
 
 async function init() {
+  performance.mark('init-start');
   // Block UI if user must change password (returns a never-resolving Promise
   // which short-circuits the rest of init until the user submits + reloads).
   await _enforceMustChangePassword();
@@ -2480,7 +2484,51 @@ async function init() {
   // FLOOR scanner: build sector chips + initial render
   try { _fsBuildSectors(); } catch (e) { console.error('fs sectors', e); }
   render();
+  performance.mark('init-end');
+  if (typeof window.__perfReport === 'function') {
+    window.__perfReport();
+    // Discovery hint: print once even without ?perf=1 so users know the tool exists.
+    if (!/[?&]perf=1\b/.test(location.search)) {
+      console.log('%c[perf] timings recorded — run window.__perfReport(true) to see them, or reload with ?perf=1', 'color:#9ca3af;font-style:italic');
+    }
+  }
 }
+
+// PERF report — dumps timing table to console.
+// Auto-fires on init-end if ?perf=1 in URL; manual call works any time:
+//   window.__perfReport()  → forces the report regardless of URL flag
+// (CapStudio 2026-05-09 — measure first, then optimize.)
+window.__perfReport = function _perfReport(force) {
+  if (!force && !/[?&]perf=1\b/.test(location.search)) return;
+  const marks = performance.getEntriesByType('mark').map(m => ({ name: m.name, startTime: +m.startTime.toFixed(1) }));
+  if (!marks.length) { console.warn('[perf] no marks recorded'); return; }
+  const t0 = marks[0].startTime;
+  const rows = [];
+  let prev = t0;
+  for (const m of marks) {
+    rows.push({
+      mark: m.name,
+      'since-start (ms)': +(m.startTime - t0).toFixed(1),
+      'delta (ms)':       +(m.startTime - prev).toFixed(1),
+    });
+    prev = m.startTime;
+  }
+  console.log('%c[perf] dashboard.html boot timeline (?perf=1)', 'color:#6ea8fa;font-weight:700');
+  console.table(rows);
+  // Module timings from shell.js
+  if (window.__capStudioMetrics) {
+    const ml = window.__capStudioMetrics.moduleLoadMs || {};
+    const rm = window.__capStudioMetrics.renderMs || {};
+    if (Object.keys(ml).length) {
+      console.log('%c[perf] module load timings', 'color:#34d399;font-weight:700');
+      console.table(Object.entries(ml).map(([path, ms]) => ({ module: path, 'load (ms)': ms })));
+    }
+    if (Object.keys(rm).length) {
+      console.log('%c[perf] tab render timings', 'color:#a78bfa;font-weight:700');
+      console.table(Object.entries(rm).map(([id, ms]) => ({ tab: id, 'render (ms)': ms })));
+    }
+  }
+};
 
 function rowsFor() {
   return CURRENT === 'st' ? (DATA.short_term || []) :
@@ -5570,6 +5618,7 @@ const TAB_RENDERERS = {
 // (CapStudio modular loader, 2026-05-09 — second attempt; inline bodies
 // kept intact as a fallback if module load fails for any reason.)
 window.TAB_RENDERERS = TAB_RENDERERS;
+performance.mark('tab-renderers-defined');
 
 // =============================================================================
 // LIVE UPDATES — poll for data refresh + live price ticks

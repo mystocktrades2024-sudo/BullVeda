@@ -14,6 +14,7 @@
 //  per-tab browser verify between extractions, console-log for debug.)
 
 console.log('[shell] CapStudio module loader booting…');
+performance.mark('shell-loader-start');
 
 const _moduleCache = {};   // id → import promise (cached/idempotent)
 const _disposers   = {};   // id → disposer function from the previous activation
@@ -104,6 +105,7 @@ async function _installOverrides() {
   }
   console.log(`[shell] installed ${installed} module override(s) for tabs:`,
     Object.keys(REGISTRY.tabs || {}).filter(id => REGISTRY.tabs[id].module && id in window.TAB_RENDERERS));
+  performance.mark('shell-modules-installed');
 
   // If the user has already activated an extracted tab (e.g. landed on
   // /v2/#playbook), force a re-render so the module's render fires now
@@ -153,6 +155,7 @@ async function _installOverrides() {
     const drawer = await import(`./drawer.js?v=${v}`);
     window.__drawer = drawer;
     console.log('[shell] drawer module loaded');
+    performance.mark('shell-drawer-loaded');
   } catch (e) {
     console.error('[shell] drawer module failed to load:', e);
   }
@@ -164,6 +167,7 @@ async function _installOverrides() {
     const v = window.__moduleVersion || '1';
     await import(`./widgets.js?v=${v}`);
     console.log('[shell] widgets module loaded');
+    performance.mark('shell-widgets-loaded');
   } catch (e) {
     console.error('[shell] widgets module failed to load:', e);
   }
@@ -178,6 +182,7 @@ async function _installOverrides() {
       if (typeof fn === 'function') window[name] = fn;
     }
     console.log(`[shell] actions module loaded: ${Object.keys(actions).filter(k => typeof actions[k] === 'function').length} handlers`);
+    performance.mark('shell-actions-loaded');
   } catch (e) {
     console.error('[shell] actions module failed to load:', e);
   }

@@ -12,6 +12,10 @@
 // (CapStudio sub-tab wiring 2026-05-09)
 
 console.log('[detail-shell] CapStudio sub-tab loader booting…');
+performance.mark('detail-shell-loader-start');
+
+// Metrics container — inspect at runtime: window.__detailMetrics
+window.__detailMetrics = window.__detailMetrics || { moduleLoadMs: {}, renderMs: {} };
 
 const _moduleCache = {};
 let REGISTRY = null;
@@ -52,8 +56,11 @@ async function _loadAndOverride(modulePath) {
   const v = window.__moduleVersion || '1';
   const url = `../${modulePath}?v=${v}`;
   _moduleCache[modulePath] = (async () => {
+    const t0 = performance.now();
     try {
       const mod = await import(url);
+      const ms = +(performance.now() - t0).toFixed(1);
+      window.__detailMetrics.moduleLoadMs[modulePath] = ms;
       const fnName = FILE_TO_WINDOW_FN[modulePath];
       if (!fnName) {
         console.warn(`[detail-shell] no window function name mapped for ${modulePath}`);
@@ -110,6 +117,7 @@ async function _loadAndOverride(modulePath) {
   const ok   = results.filter(r => r.status === 'fulfilled' && r.value).length;
   const fail = results.filter(r => r.status === 'rejected' || !r.value).length;
   console.log(`[detail-shell] sub-tab module load complete: ${ok} OK · ${fail} fail`);
+  performance.mark('detail-shell-modules-loaded');
 
   // Step 5: wait for init() to set T, then re-render ALL sub-tab renderers.
   // init() in elite-detail.html runs SYNC at parse end and is async (fetches
@@ -146,9 +154,12 @@ async function _loadAndOverride(modulePath) {
       if (!fnName || renderedFns.has(fnName)) continue;
       if (typeof window[fnName] !== 'function') continue;
       renderedFns.add(fnName);
+      const rt0 = performance.now();
       try { window[fnName](); }
       catch (e) { console.warn(`[detail-shell] render '${fnName}' failed:`, e); }
+      window.__detailMetrics.renderMs[fnName] = +(performance.now() - rt0).toFixed(1);
     }
   }
   console.log(`[detail-shell] painted ${renderedFns.size} sub-tab renderers from modules`);
+  performance.mark('detail-shell-painted');
 })();

@@ -41,7 +41,7 @@
 
 | ID | Item | Effort | Estimated win | Priority |
 |----|------|--------|---------------|----------|
-| PERF-1 | **Add `performance.mark()` perf marks** + `?perf=1` URL flag → console table | 30 min | n/a (measurement) | high — measure first |
+| ~~PERF-1~~ | ~~Add `performance.mark()` perf marks + `?perf=1` URL flag → console table~~ ✅ DONE 2026-05-09 — both `dashboard.html` and `elite-detail.html` instrumented; `window.__perfReport(true)` works any time | done | done | done |
 | PERF-2 | **Defer Plotly.js** in elite-detail (only load on first chart) | 1 hr | -500ms cold per-ticker | high |
 | PERF-3 | **Lazy-render elite-detail sub-tabs** (only active, not all 25 at init) | 2 hrs | -300-500ms first-paint | high |
 | PERF-4 | **Brotli compression** (currently Gzip) | 30 min | -15% transfer | medium |
@@ -109,6 +109,7 @@ See `tests/MOBILE_REVIEW.md` for the full audit.
 
 | Date | ID | Item |
 |------|----|------|
+| 2026-05-09 | PERF-1 | Boot-timing instrumentation: dashboard + elite-detail + shell + detail-shell. `window.__perfReport(true)` dumps 3-section console.table any time. |
 | 2026-05-09 | P13 | Playwright suite (3 spec files) + no-auth route test (passes) |
 | 2026-05-09 | P12 | Audit log on PATCH /api/roles + lazy-load metering + action gating UX |
 | 2026-05-09 | P11 | Fix elite-detail T accessor naming + render-all-after-T-ready |

@@ -2050,6 +2050,9 @@
 </div><!-- /floor-app -->
 
 <script>
+// PERF instrumentation (CapStudio 2026-05-09) — opt-in via ?perf=1 URL flag
+performance.mark('detail-script-parse-start');
+
 let T = null;
 // Closure-based getter for ES module access (CapStudio sub-tab loader).
 // `let T` doesn't bind to window like `var` does. Subtab modules read
@@ -2063,6 +2066,7 @@ const px  = v => v == null ? '—' : Number(v).toFixed(2);
 const pct = v => v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%';
 
 async function init() {
+  performance.mark('detail-init-start');
   const params = new URLSearchParams(location.search);
   const wanted = (params.get('t') || '').toUpperCase();
   const fromTab = params.get('from') || 'st';
@@ -2176,7 +2180,50 @@ async function init() {
   try { renderFloorTape(); } catch (e) { /* tape optional */ }
   $('statusLine').textContent = `${T.ticker} · SWING DESK · D1 analysis · ${new Date().toLocaleString()}`;
   $('navMeta').textContent = `D1 · ${T.regime || 'neutral'} · ${T.ticker}`;
+  performance.mark('detail-init-end');
+  if (typeof window.__perfReport === 'function') {
+    window.__perfReport();
+    if (!/[?&]perf=1\b/.test(location.search)) {
+      console.log('%c[perf] timings recorded — run window.__perfReport(true) to see them, or reload with ?perf=1', 'color:#9ca3af;font-style:italic');
+    }
+  }
 }
+
+// PERF report — dumps timing table to console.
+// Auto-fires on init-end if ?perf=1 in URL; manual call works any time:
+//   window.__perfReport(true)  → forces the report regardless of URL flag
+// (CapStudio 2026-05-09 — measure first, then optimize.)
+window.__perfReport = function _perfReport(force) {
+  if (!force && !/[?&]perf=1\b/.test(location.search)) return;
+  const marks = performance.getEntriesByType('mark').map(m => ({ name: m.name, startTime: +m.startTime.toFixed(1) }));
+  if (!marks.length) { console.warn('[perf] no marks recorded'); return; }
+  const t0 = marks[0].startTime;
+  const rows = [];
+  let prev = t0;
+  for (const m of marks) {
+    rows.push({
+      mark: m.name,
+      'since-start (ms)': +(m.startTime - t0).toFixed(1),
+      'delta (ms)':       +(m.startTime - prev).toFixed(1),
+    });
+    prev = m.startTime;
+  }
+  console.log('%c[perf] elite-detail.html boot timeline', 'color:#6ea8fa;font-weight:700');
+  console.table(rows);
+  // Module timings from elite-detail-shell.js
+  if (window.__detailMetrics) {
+    const ml = window.__detailMetrics.moduleLoadMs || {};
+    const rm = window.__detailMetrics.renderMs || {};
+    if (Object.keys(ml).length) {
+      console.log('%c[perf] subtab module load timings', 'color:#34d399;font-weight:700');
+      console.table(Object.entries(ml).map(([path, ms]) => ({ module: path, 'load (ms)': ms })));
+    }
+    if (Object.keys(rm).length) {
+      console.log('%c[perf] subtab render timings', 'color:#a78bfa;font-weight:700');
+      console.table(Object.entries(rm).map(([id, ms]) => ({ subtab: id, 'render (ms)': ms })));
+    }
+  }
+};
 
 function renderHead() { /* moved to subtabs/overview/head.js — CapStudio sub-tab loader */ }
 
