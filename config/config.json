@@ -759,6 +759,45 @@
     "breadth_bearish_enter": 47,
     "_note": "Buffer thresholds for regime switching. Require overshoot before flipping to prevent whipsaws."
   },
+  "regime_classifier": {
+    "_note": "Regime classifier thresholds (what triggers panic/risk_off_trending/risk_on_trending). V4 settings from backtest 2026-05-10 \u2014 see _validations below. Separate from regime_thresholds (legacy 3-regime score gates) and regime4_thresholds (4-regime score gates).",
+    "panic_vix": 35.0,
+    "panic_breadth": 20.0,
+    "trending_vix": 20.0,
+    "trending_breadth": 60.0,
+    "risk_off_consecutive_closes": 2,
+    "_validations": {
+      "source": "backtest/regime_backtest.py --variants --years 5 --breadth-source {proxy|real}",
+      "ran_at": "2026-05-10",
+      "output_artifacts": {
+        "v1_proxy_breadth": "cache/regime_backtest_latest.json",
+        "v2_real_breadth": "cache/regime_backtest_real_breadth.json",
+        "breadth_cache": "cache/breadth_history_5y.parquet"
+      },
+      "n_bars": 1297,
+      "period": "2021-03-11 to 2026-05-08",
+      "winner": "V4_2bar+loose",
+      "baseline_vs_V4_v2_real_breadth": {
+        "trending_days_fired": "205 \u2192 304 (1.5x more often)",
+        "trending_wilson_lb_10d": "57.6% \u2192 58.9% (small reliability gain)",
+        "risk_off_whipsaws_<3d": "29 \u2192 18 (-38%)",
+        "long_eligible_10d_wr_lb": "61.4% \u2192 61.1% (essentially flat \u2014 within noise)"
+      },
+      "baseline_vs_V4_v1_proxy_breadth": {
+        "trending_days_fired": "36 \u2192 196 (5.4x more often)",
+        "trending_wilson_lb_10d": "57.9% \u2192 61.3%",
+        "risk_off_whipsaws_<3d": "25 \u2192 10 (-60%)",
+        "long_eligible_10d_wr_lb": "61.2% \u2192 61.1%",
+        "note": "v1 proxy systematically under-counted breadth; v2 real numbers are more honest."
+      },
+      "interpretation": "Long-eligible 10d WR ceiling is ~61% LB across all variants and both breadth sources. Regime classifier can't move WR past this \u2014 setup-level work needed (deferred per user 2026-05-10). V4's two real wins are: 2-bar SPY/EMA50 cuts whipsaws -38% (real-breadth backtest), loose-trending raises trend-day reachability 1.5x. Both pass Wilson floor (LB \u2265 40, n past 30).",
+      "mechanism": "2-bar SPY/EMA50: single close is noise (intraday wick / news gap); two consecutive closes confirms break. VIX<20 + breadth>60 (vs 18/65): the original 'perfect bull' gate fires too rarely on real breadth in 2024-26 to estimate WR with confidence.",
+      "open_caveats": [
+        "Survivorship: real-breadth backtest uses CURRENT SP500 constituents against historical prices (principle 6). Wikipedia point-in-time membership is deferred (audit #1 Tier 2).",
+        "Breadth definition mismatch: live get_market_breadth() computes from R1000+custom universe; v2 backtest from SP500 constituents only. Today's reading: live=64.0, backtest=50.9. The V4 thresholds were validated on backtest definition; aligning these is the next step. Until aligned, _validations confidence is overstated."
+      ]
+    }
+  },
   "sector_rotation": {
     "etfs": {
       "XLK": "Technology",

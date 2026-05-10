@@ -2533,6 +2533,10 @@ def get_market_regime(breadth: dict | None = None) -> dict:
         ema50  = _ema(close, 50)
         sma200 = _sma(close, 200)
 
+        # Full EMA50 series for consecutive-close confirmation (regime_thresholds.risk_off_consecutive_closes).
+        # Cheap — same series used as input to scalar _ema above.
+        _ema50_full = pd.Series(close).ewm(span=50, adjust=False).mean().values if len(close) >= 50 else None
+
         # QQQ technicals
         qqq_close = _qqq_df["Close"].squeeze().dropna().values
         qqq_ema50 = _ema(qqq_close, 50) if len(qqq_close) >= 50 else qqq_close[-1]
@@ -2588,25 +2592,50 @@ def get_market_regime(breadth: dict | None = None) -> dict:
         _breadth_bull_enter = _hyst_cfg.get("breadth_bullish_enter", 53)
         _breadth_bear_enter = _hyst_cfg.get("breadth_bearish_enter", 47)
 
+        # Load regime classifier thresholds (V4 backtest 2026-05-10: cache/regime_backtest_latest.json).
+        # See config.regime_classifier._validations for the evidence trail.
+        # NOTE: separate from config.regime_thresholds (legacy 3-regime score gates)
+        # and config.regime4_thresholds (4-regime score/RS/RR gates).
+        _thr_cfg = _cfg_loaded.get("regime_classifier", {})
+        _panic_vix          = _thr_cfg.get("panic_vix", 35.0)
+        _panic_breadth      = _thr_cfg.get("panic_breadth", 20.0)
+        _trending_vix       = _thr_cfg.get("trending_vix", 20.0)         # was 18 pre-V4
+        _trending_breadth   = _thr_cfg.get("trending_breadth", 60.0)     # was 65 pre-V4
+        _risk_off_n_closes  = int(_thr_cfg.get("risk_off_consecutive_closes", 2))  # was 1 pre-V4
+
         # Apply hysteresis: use buffered thresholds based on current regime direction
         _is_currently_risk_off = _prev_regime4 in ("risk_off_trending", "panic")
         _is_currently_risk_on = _prev_regime4 in ("risk_on_trending",)
 
         # VIX hysteresis: harder to enter risk-off, harder to leave it
-        _vix_threshold_for_risk_on = _vix_risk_on_return if _is_currently_risk_off else 18
+        _vix_threshold_for_risk_on = _vix_risk_on_return if _is_currently_risk_off else _trending_vix
         _vix_threshold_for_risk_off = _vix_risk_off_enter if not _is_currently_risk_off else 18
 
         # Breadth hysteresis: require overshoot before flipping
         _breadth_for_bull = _breadth_bull_enter if not _is_currently_risk_on else 50
         _breadth_for_bear = _breadth_bear_enter if _is_currently_risk_on else 50
 
-        if (vix_cur is not None and vix_cur > 35) or (pct_above_50d is not None and pct_above_50d < 20):
+        # Compute consecutive-close streak below EMA50 (risk_off confirmation).
+        # n=1 reproduces legacy single-bar trigger; n=2 (V4 default) requires
+        # two consecutive closes below before flipping risk-off.
+        _risk_off_confirmed = False
+        if _risk_off_n_closes <= 1:
+            _risk_off_confirmed = not above_50
+        elif _ema50_full is not None and len(close) >= _risk_off_n_closes:
+            _risk_off_confirmed = all(
+                close[-i] < _ema50_full[-i] for i in range(1, _risk_off_n_closes + 1)
+            )
+        else:
+            # Insufficient history — fall back to single-bar behavior to stay safe
+            _risk_off_confirmed = not above_50
+
+        if (vix_cur is not None and vix_cur > _panic_vix) or (pct_above_50d is not None and pct_above_50d < _panic_breadth):
             regime4 = "panic"
-        elif not above_50:
+        elif _risk_off_confirmed:
             regime4 = "risk_off_trending"
         elif (above_50 and above_200 and qqq_above_ema50
               and vix_cur is not None and vix_cur < _vix_threshold_for_risk_on
-              and pct_above_50d is not None and pct_above_50d > max(65, _breadth_for_bull)):
+              and pct_above_50d is not None and pct_above_50d > max(_trending_breadth, _breadth_for_bull)):
             regime4 = "risk_on_trending"
         else:
             regime4 = "risk_on_choppy"

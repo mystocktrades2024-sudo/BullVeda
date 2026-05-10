@@ -197,76 +197,22 @@ Examples of correct push-back:
 
 ## Path Layout
 
-```
-/Volumes/MyMacDisk/Claude Skills/SwingTrade/      ← project root
-├── analysis.py                ← scoring engine (core, ~6000+ lines). Includes K1-K3 stop rules (Fib+EMA50 confluence, fractal-low alignment, VWAP risk_flag) + K5 classify_elliott_wave (Wave-3 Fib-extension targets)
-├── swing_trade.py             ← main scan entrypoint. A6 entry-time feature logger (30 fields per signal) + K6 canonical_trade_plan attach
-├── canonical_trade_plan.py    ← K6 single source of truth — every dashboard tab binds to fields of this dataclass (TradeZone/RiskMetrics/StatisticalContext/RegimeContext/CatalystContext/SetupAttribution/GateResults). Live Wilson-CI lookup from signal_log per setup×regime. Mechanism hypothesis per setup family.
-├── signal_filter.py           ← A2 declarative whitelist gate. Demotes BUY→WATCH for non-whitelisted (setup × regime × score_band × entry_quality) combos. _validations gate enforces n>=20 AND wr_lb>=0.40 per rule. OFF by default; flip config["signal_filter"]["_enabled"]=true after per-subtype attribution review of A5 finding.
-├── decompose_catalyst_trades.py ← A5 forensic decomposition. Outputs cache/catalyst_decomposition_*.html. Found pullback meta-pattern WR 53% / Wilson LB 44.6% / PF 1.83 (n=134) — but at meta-family granularity, attribution to specific subtypes still pending.
-├── apply_wf_proposals.py      ← walk-forward → config.json applier (preview, then --apply). Closes the WF auto-validation loop.
-├── morning_briefing.py        ← wake-up summary HTML. Auto-detects backtest/WF state, paper-trading day, recent commits → priority-ordered action plan.
-├── elite_research_note.py     ← institutional-grade strategy assessment (AQR/Two Sigma format). Stance-badge auto-derived from Wilson statistics.
-├── hedge_fund_report.py       ← 12-section quant analytics. Train/test/holdout (08c481198) + bootstrap CI + Bayesian beta-binomial WR posteriors.
-├── mover_predictor.py + train_mover_predictor.py ← v1+v2 ML attempts. AUC 0.546 (definitive negative). Don't retrain — needs new features (NLP earnings tone, options flow), not retraining.
-├── server.py                  ← FastAPI server (was BaseHTTPRequestHandler, legacy preserved as server_legacy.py)
-├── html_generator.py          ← LEGACY dashboard renderer (~19K lines, scheduled for deprecation — v2 in infra/prototype/ is canonical)
-├── tier1_signals.py           ← 6 additive strategy signals (insider cluster, NR7, vol dry-up, OBV div, mean rev, beat-and-raise)
-├── zacks_per_ticker.py        ← per-ticker Zacks enrichment (Industry Rank, ESP, Revisions, Surprise History, Broker Recs)
-├── tracker.py / signal_tracker.py  ← state tracking, MAE/MFE, Wilson CI
-├── portfolio_tracker.py       ← portfolio state (SQLite-backed via db.py)
-├── db.py                      ← SQLite data layer (18 tables)
-├── migrate_json_to_sqlite.py  ← one-shot JSON→SQLite migrator
-├── executor.py                ← Alpaca paper trade executor
-├── eod_manager.py             ← end-of-day position management + gap handling
-├── data_fetcher.py            ← EODHD primary → archive → yfinance news fallback (Polygon decommissioned 2026-04-25, names renamed 2026-05-01)
-├── eodhd_client.py            ← EODHD All-In-One single entry point (cache TTLs: fundamentals 1d, eod 12h, sentiments 12h, news 4h, options 2h)
-├── custom_tracker.py          ← user-added custom tickers
-├── performance_metrics.py     ← equity curve / Sharpe / drawdown
-├── leaderboard.py             ← setup-family leaderboard with CIs
-├── drift_check.py             ← live vs backtest WR drift alerter
-├── position_alerts.py         ← stop/T1/EOD alerts (throttled)
-├── state_backup.py            ← daily state file snapshots
-├── log_rotation.py            ← compress >30d logs, delete >90d
-├── config_validator.py        ← pydantic config schema
-│
-├── backtest.py                ← single-window backtest
-├── backtest/walk_forward_v2.py ← true walk-forward (4 folds × grid search)
-│
-├── config/
-│   ├── config.json            ← main config (secrets scrubbed to .env)
-│   ├── gmail_token.json       ← Gmail OAuth (gitignored)
-│   └── zacks_credentials.json ← Zacks login (gitignored)
-├── data/
-│   ├── swingtrade.db          ← SQLite PRIMARY (18 tables, 160 KB)
-│   ├── portfolio_state.json   ← legacy fallback
-│   ├── signal_log.json + signal_log.meta.json  ← trade journal (v2 schema)
-│   ├── custom_tracked.json
-│   ├── alert_sent_log.json
-│   ├── scan_health.json
-│   ├── gap_events.json
-│   ├── paper_trading_start.json  ← activation marker
-│   └── backups/YYYY-MM-DD/    ← daily snapshots (7d retention)
-├── cache/                     ← all regenerable (gitignored)
-│   ├── dashboard.html (~3.6 MB shell)
-│   ├── dashboard.css / dashboard.js / dashboard-data.js  ← split assets
-│   ├── last_bundle.json       ← latest scan output (executor reads this)
-│   ├── picks_history.json     ← scan run history
-│   ├── orders.jsonl           ← Alpaca order audit
-│   ├── eod_actions.jsonl      ← EOD manager audit
-│   ├── logs/                  ← scan logs (rotated)
-│   ├── ohlcv/*.parquet        ← daily OHLCV archive
-│   └── weekly/*.parquet       ← weekly timeframe archive
-├── tests/                     ← pytest (24+ tests)
-├── docs/system_review_and_roadmap.html
-├── infra/prototype/           ← v2 dashboard (canonical — replacing html_generator.py)
-│   ├── build_data.py          ← reads cache/last_bundle.json → emits data.json + tickers.json
-│   ├── data.json              ← scan-wide state (regime, sectors, performance, zacks_universe, zacks_premium_services, zacks_email_digest, economic_events)
-│   ├── tickers.json           ← per-ticker rich payload (~65 tickers post-filter, ~2.4 MB)
-│   ├── elite-detail.html      ← per-ticker analysis page with FD tabs (Overview, Plan, Technicals, Models, TradingView, SMC, Fundamentals, Sentiment, Options, News, Insider, Zacks)
-│   └── dashboard.html         ← v2 main dashboard
-└── .env                       ← secrets (EODHD, Alpaca, Slack, Gmail)
-```
+Use `ls` / `find` to discover files. Key entry points:
+
+- `swing_trade.py` — main scan entrypoint
+- `analysis.py` — scoring engine (~6000+ lines, K1–K6 trade-plan rules)
+- `canonical_trade_plan.py` — K6 single source of truth for every dashboard tab
+- `decision_engine.py` — Wilson-gated kill list / score-band kills / regime gate
+- `signal_filter.py` — A2 declarative whitelist gate (OFF by default)
+- `data_fetcher.py` + `eodhd_client.py` — EODHD primary, yfinance news fallback
+- `server.py` — FastAPI server on port 7432
+- `infra/prototype/` — v2 dashboard (canonical; replaces legacy `html_generator.py`)
+- `backtest.py` + `backtest/walk_forward_v2.py` — single-window + walk-forward
+- `config/config.json` — main config; variants in `config/variants/`
+- `data/swingtrade.db` — SQLite PRIMARY (18 tables); `data/signal_log.json` — trade journal
+- `cache/` — regenerable (gitignored); `cache/last_bundle.json` = latest scan output
+- `_legacy/` — quarantined Polygon/Schwab/Finviz-Elite stubs
+- `.env` — secrets (EODHD, Alpaca, Slack, Gmail)
 
 ## Data Architecture (post-2026-04-25 migration)
 
@@ -311,81 +257,9 @@ Examples of correct push-back:
 
 If `apply_to_score: false` on `tier1_signals`, signals compute but don't mutate canonical score (informational only). Flip to `true` after validation.
 
-## Strategy Enhancements (shipped 2026-05-01)
+## Strategy Enhancements
 
-All four phases below are config-flagged in `config/config.json` and additive — they do not break existing scoring. Set `_enabled: false` on any block to roll back.
-
-### Phase 1 — Walk-forward regime weights (live scoring)
-
-Per-regime tech/qg pillar shifts now read from `config.regime_weight_shifts` (was hardcoded). Walk-forward optimal weights paste directly into config:
-
-```json
-"regime_weight_shifts": {
-  "_enabled": true,
-  "risk_on_trending":  { "tech":  3, "qg": -3 },
-  "risk_on_choppy":    { "tech":  0, "qg":  0 },
-  "risk_off_trending": { "tech": -5, "qg":  5 },
-  "panic":             { "tech": -8, "qg":  8 }
-}
-```
-
-Wire location: `analysis.py:7769` (replaces hardcoded `_bear_shift` / `_bull_shift`).
-
-### Phase 2 — Vol-targeted / drawdown sizing
-
-`config.portfolio_vol_targeting` adds per-trade size multiplier based on drawdown from peak equity. Currently a no-op (multiplier=1.0) until equity history is wired by `portfolio_tracker`. Bands:
-
-| Drawdown | Size multiplier |
-|---|---|
-| Above peak / 0–3% | 1.00× |
-| 3–5% | 0.85× |
-| 5–10% | 0.65× |
-| 10–15% | 0.40× |
-| > 15% | 0.20× |
-
-Wire location: `analysis.py:kelly_position_size`. Bundle field: `kelly_size.drawdown_mult`, `kelly_size.drawdown_pct`.
-
-### Phase 3 — Cross-sectional sector ranking
-
-Post-scoring step computes `sector_pct_rank` (0–100) per ticker, demotes BUY → WATCH if rank < threshold (default 60th percentile within sector). Forces relative-strength selection vs absolute score floor.
-
-```json
-"sector_relative_ranking": {
-  "_enabled": true,
-  "min_sector_percentile_for_buy": 60.0,
-  "demote_to_watch_below_threshold": true,
-  "min_candidates_per_sector_for_ranking": 3
-}
-```
-
-Wire location: `swing_trade.py:2871` (after VIX kill switches, before bundle write). Uses `cfg`, not `config` (caught in 2026-05-01 hot fix).
-
-### Tier 1 — 6 additive strategy signals (`tier1_signals.py`)
-
-Pure-function detectors that compute additive points per ticker. Default `apply_to_score: false` (informational only — surfaced in `tier1_signals` bundle field for ranking tiebreakers and dashboard display).
-
-| # | Detector | Trigger | Points |
-|---|---|---|---|
-| 1 | Insider cluster | 3+ insiders 30d, +CEO/CFO bonus, +urgency bonus | up to +12 |
-| 2 | Beat-and-Raise | EPS+Rev+ guidance="raised" (currently no-ops — needs guidance data wired) | +8 / -3 |
-| 3 | NR7 / Inside Day | Today's range = narrowest of 7 OR inside yesterday's | up to +6 |
-| 4 | Volume Dry-Up | 5d vol < 0.7× 20d AND price near EMA21/50 AND not declining | +3 |
-| 5 | OBV Divergence | Bull/bear divergence over 20d window | +5 / -5 |
-| 6 | Mean Reversion | RSI<35 + above 200SMA + fund≥4 + ATR<6% + not falling-knife | up to +10 |
-
-Cap: ±8 net points when `apply_to_score: true`.
-
-### Zacks v2 (rebuild for legacy retirement)
-
-Surfaced bundle-level Zacks data + new per-ticker enrichment:
-
-- **Bundle-level**: `zacks_universe` (r1_full, r1_missing, r1_scores, sell_list), `zacks_premium_services` (16 services), `zacks_email_digest`
-- **Per-ticker**: `zacks_held_by_services`, `zacks_email_mentions`, `zacks_rank_rationale`, plus Phase 1 enrichment fields (`zacks_industry_rank`, `zacks_earnings_esp`, `zacks_lt_growth`, `zacks_recommendation`, `zacks_estimate_revisions`, `zacks_revision_counts`, `zacks_eps_surprise_history`, `zacks_brokerage_recommendations`)
-- **v2 Zacks tab**: new tab in elite-detail.html (verdict banner + style scores + service membership + email digests + Phase 1 enrichment panels + horizon impact)
-
-Premium services scraped (12 of 14 currently): ultimate, tazr, bbt, counterstrike, headlinetrader, alt_energy, blockchain, tech_innovators, surprise_trader, insider_trader, value_investor, home_run_investor, income_investor (added 2026-05-01).
-
-Per-ticker enrichment (`zacks_per_ticker.py`): lightweight `requests` pass for Industry Rank + ESP + LT Growth + Recommendation; Selenium pass (uses logged-in driver) for Estimate Revisions + Surprise History + Broker Recs. Capped at top 60 R1 tickers per scan, 6h cache.
+Shipped feature blocks (regime weight shifts, vol/drawdown sizing, sector relative ranking, Tier-1 signals, Zacks v2) live in `docs/changelog.md`. All are config-flagged in `config/config.json` — set `_enabled: false` on any block to roll back.
 
 ## Environment Flags
 
@@ -461,84 +335,10 @@ All 10 addressed in "Audit Batch" commit. Tier 1 mitigations shipped; Tier 2 req
 | 9 | Backtest ≠ live scoring | `apply_setup_wr_multiplier` unified | — (done) |
 | 10 | entry_quality unused | FRESH/PULLBACK/VALID → stop/target/hold | — (done) |
 
-## Lessons learned (2026-05-10 overnight)
+## Lessons Learned & Backtest Variants
 
-Three production-relevant patterns discovered while debugging GATE-1 / Q1-step5
-"system not generating profit" symptoms.
-
-### Lesson 1 — Two-source kill list
-
-`decision_engine.compute_setup_kill_list()` MERGES two sources:
-1. **Live signal_log evidence** (computed each scan from `data/signal_log.json`)
-2. **`config.static_setup_kill_list`** (manual entries with declared n+wr_lb+source)
-
-When reverting a setup kill, you must remove from BOTH:
-- `setup_score_multiplier[setup] = 1.0` (multiplier)
-- `static_setup_kill_list[]` (manual entry)
-
-Skipping step 2 leaves the setup kill-listed even if multiplier says 1.0×.
-Verify with: `python3 -c "from decision_engine import compute_setup_kill_list; print(compute_setup_kill_list())"`
-
-Real incident: 2026-05-10 A5-followup set TC mult to 1.0 but forgot to remove
-the static_setup_kill_list entry; backtest still showed 0 BUYs because TC was
-kill-listed via the static path. Fix in commit b02935ad8.
-
-### Lesson 2 — `weekly_df` must be passed to `score_technicals` in backtest
-
-`backtest._score_as_of()` must explicitly resample daily OHLCV to weekly
-(`W-FRI`) and pass it to `score_technicals(df, regime, spy_close, weekly_df=...)`.
-Without it, `_weekly_ema_alignment(None)` returns `bullish: False`,
-`weekly_bull` is False everywhere, and every `setup_gates.*.weekly_bull_required: True`
-demotes the BUY to WATCH.
-
-Symptom: backtest produces 0 BUYs across 60+ days even with reasonable thresholds.
-Root cause was NOT the kill list, NOT the score floor — it was missing weekly_df.
-
-Resampling daily → weekly is leakage-free (uses only data ≤ as_of_date).
-Fix in commit 985cd182b.
-
-### Lesson 3 — Global multipliers can mask regime-specific failures
-
-A setup can have positive expectancy GLOBALLY but lose heavily in ONE regime.
-
-Example (250d backtest 2026-05-10): Trend Continuation had:
-- Global: n=140, WR 41%, avg +2.08% — positive expectancy
-- BUT in bull regime: n=85, WR 28%, PF 0.55, avg −1.05% — disaster
-- AND in neutral regime: n=27, PF 1.75 — works
-- AND in bear regime: n=6, PF 2.68 — works
-
-A single global multiplier averages these out. The fix is `setup_score_multiplier_by_regime`
-config block (Variant F, commit f0a66543e) which lets you set
-`{setup: {bull: 0.0, neutral: 1.0, bear: 1.5}}` per setup. Read by
-`analysis.py:8790` block; same demotion gate (n≥30, wr_lb<0.30) applies.
-
-### Lesson 4 — Score floor isn't always the live-BUY blocker
-
-Counterintuitive finding: regime4_thresholds at 80 was raised in 2026-05-08
-based on score-band attribution (60-79 band losing). But today's live scan
-showed top 5 WATCH all scoring 81-103, blocked by `entry_quality` (EXTENDED
-or MISSED), not score floor. **Lowering thresholds doesn't help when the
-gate that's actually firing is entry_quality.** Diagnose by reading
-`reject_reason` field on WATCH picks before tuning thresholds.
-
-## Backtest variant playbook (config-override JSONs at config/variants/)
-
-Pre-built `--config-override` files for the four candidate fixes from Q1-step5
-diagnosis (2026-05-10):
-
-| File | Fix | Hypothesis | Predicted PF |
-|------|-----|------------|--------------|
-| `A_fresh_entries_only.json` | entry_quality=FRESH only | Cuts late-entry whipsaws | 1.1-1.3 |
-| `E2_regime_plus_wider_stops.json` | Variant F + 1.5× ATR stops | Combines kill + stop relief | 1.2-1.5 |
-| `G_combined.json` | Variant F + FRESH-only | Most aggressive cut | 1.4-1.8 (target) |
-
-Run via: `python3 backtest.py --portfolio --days 250 --config-override config/variants/<file>.json`.
-Use `--smoke` first for sanity (won't tell you the real PF — too few trades —
-but catches config errors in 60s).
-
-Counterfactual analysis (Agent 3, 2026-05-10) showed wider stops alone don't
-lift PF (the losers are sustained adverse moves, not whipsaws). Don't bother
-running a "wider stops alone" variant.
+- Production debugging patterns (kill-list two-source merge, weekly_df in backtest, regime-conditional multipliers, entry_quality vs score floor) live in `docs/lessons.md`. Append new lessons there.
+- Backtest variant playbook (`A_fresh_entries_only`, `G_combined`, etc.) lives in `config/variants/README.md`.
 
 ## Conventions
 
@@ -554,14 +354,6 @@ running a "wider stops alone" variant.
 - **Open-items registry is the source of truth** — `data/open_items.json` tracks every OPEN/IN_PROGRESS/DONE/DEFERRED/REJECTED item with what+how+status+date+commit. After shipping ANY fix that maps to a registry ID, run `python3 scripts/update_open_items.py done <ID>` BEFORE the commit. The pre-commit hook auto-rebuilds `cache/open_items_<DATE>.xlsx` and ships it in the same commit. If the fix is a brand-new item, `add` it first: `python3 scripts/update_open_items.py add NEW-ID P1 "Section" "Item" "What" "How"`. CLI: `list` / `list --open` / `done` / `status` / `add` / `xlsx`.
 - **Install git hooks on every fresh clone** — `bash scripts/install_hooks.sh` (idempotent). Hooks live at `infra/hooks/*` (tracked) and get copied to `.git/hooks/*` (local-only, never tracked by git). The two hooks are pre-commit's open-items rebuild + F11 schema-drift check. See `infra/hooks/README.md`.
 - **Always `git pull --rebase` before editing the registry** if another session might also be working — `data/open_items.json` is the most likely concurrent-edit conflict point. Rebase makes conflicts easier to resolve than merge.
-
-## Completed Today (single session, 8 commits)
-
-- Batch 1 (10 items): tests, UX polish, correlation banner, DOM-patch, gap handling, what-if simulator, schema versioning, killed-drift alert
-- Batch 2 (7 items): legacy migration, undo-close, live price polling, log rotation, position alerts, earnings warnings, daily backups
-- Batch 3 (6 items): **FastAPI migration**, + Add Position button, HTML split (18MB→3.6MB), **SQLite migration**, paper trading activation CLI, + Add custom ticker
-- Audit Batch (all 10 flaws): backtest-live parity, Kelly sizing, Wilson CI, walk-forward v2, realistic slippage, entry_quality mapping, survivorship haircut, scoring normalization flag, fundamentals flag
-- Earlier: secrets rotation, portfolio.py deprecation, correlation gate, industry cap, conditional 52wk Breakout, elite-RS override
 
 ## Do Not
 
@@ -604,43 +396,9 @@ Login: gari / swing2026 (FastAPI Basic auth).
 
 Healthcheck: `infra/healthcheck/tunnel-healthcheck.sh` runs every 5 min via `com.swingtrade.tunnel-healthcheck` user-launchd agent. Slack-alerts on 2 consecutive failures, debounces re-alerts to 1/hour, sends recovery message when domain comes back. State at `/tmp/tunnel-healthcheck.state`, log at `/tmp/tunnel-healthcheck.log`.
 
-## Cloudflare Tunnel Recovery (if trade.mystockholding.com is down)
+## Cloudflare Tunnel Recovery
 
-**Symptom**: HTTP 1033 (tunnel not registered) or 530 (origin error) at https://trade.mystockholding.com.
-
-**Diagnosis** — run these to pinpoint:
-```
-ps -p $(pgrep cloudflared 2>/dev/null | head -1) -o command=  # should show: cloudflared --config /etc/cloudflared/config.yml tunnel run
-cat /etc/cloudflared/config.yml                                # should NOT be empty
-tail -10 /Library/Logs/com.cloudflare.cloudflared.err.log     # check what daemon is complaining about
-curl -sI https://trade.mystockholding.com/ | head -3
-```
-
-**Common failure modes & fixes** (all fixes need sudo, run from Terminal):
-
-1. **Plist corrupted** — `cloudflared` running with no args, error log says "Use `cloudflared tunnel run`":
-   ```
-   sudo cp "/Volumes/MyMacDisk/Claude Skills/SwingTrade/infra/launchd/com.cloudflare.cloudflared.plist" /Library/LaunchDaemons/
-   sudo launchctl unload /Library/LaunchDaemons/com.cloudflare.cloudflared.plist
-   sudo launchctl load /Library/LaunchDaemons/com.cloudflare.cloudflared.plist
-   ```
-
-2. **Root config missing or empty** — `/etc/cloudflared/config.yml` doesn't exist:
-   ```
-   sudo mkdir -p /etc/cloudflared
-   sudo cp "/Volumes/MyMacDisk/Claude Skills/SwingTrade/infra/cloudflared/config.yml" /etc/cloudflared/config.yml
-   sudo launchctl unload /Library/LaunchDaemons/com.cloudflare.cloudflared.plist
-   sudo launchctl load /Library/LaunchDaemons/com.cloudflare.cloudflared.plist
-   ```
-
-3. **FastAPI server itself down** (`localhost:7432` returns nothing) — restart `python3 server.py --no-reload`.
-
-**Verify recovery**: `curl -sI https://trade.mystockholding.com/` should return `HTTP/2 401` (Basic auth challenge from FastAPI = origin reachable).
-
-**Pitfalls to avoid:**
-- Don't run `cloudflared service install` — it produces a malformed plist with empty `ProgramArguments`. Always copy the snapshot from `infra/launchd/`.
-- Don't run `cloudflared tunnel --url ...` (the old broken `start-tunnel.sh` pattern). That creates an *ephemeral* `*.trycloudflare.com` URL and ignores the named-tunnel config — the public domain stays dead.
-- Don't try to fix this from a Claude/agent shell — sudo can't prompt for password through `!` shell prefix. Always real Terminal.
+If `trade.mystockholding.com` is down (HTTP 1033 / 530), see `docs/tunnel-recovery.md` for the full diagnosis + fix runbook (plist restore, root config restore, FastAPI restart). All fixes need sudo from a real Terminal — agent shells can't prompt for password.
 
 ## Memory References
 
