@@ -84,17 +84,30 @@ export function render() {
   } else { html += '<div style="color:var(--ink-2);font-size:12px;">—</div>'; }
   html += '</div></div>';
 
+  // K9 (2026-05-09): prefer canonical_trade_plan; fall back to legacy trade_plan dict.
+  // The canonical plan is the authoritative source — if present, all sub-tabs (Plan,
+  // Thesis, SMC, Models, Overview) display IDENTICAL entry/stop/T1/T2 numbers.
+  const ctp = th?.canonical_trade_plan;
   const tp = th.trade_plan || {};
-  if (tp && (tp.entry_low || tp.stop || tp.target1)) {
+  const _stop = ctp?.stop ?? tp.stop;
+  const _t1   = ctp?.target1 ?? tp.target1;
+  const _t2   = ctp?.target2 ?? tp.target2;
+  const _eLo  = ctp?.entry?.low  ?? tp.entry_low;
+  const _eHi  = ctp?.entry?.high ?? tp.entry_high;
+  const _setupType = ctp?.setup?.setup_type ?? tp.setup_type;
+  const _rr   = ctp?.risk?.rr_ratio ?? tp.rr_ratio;
+  const _hold = ctp?.hold_period_days ?? tp.max_hold_days;
+  const _sizePct = ctp?.position_size_pct ?? tp.size_pct;
+  if ((_eLo || _stop || _t1)) {
     html += `<h3 style="font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-2);margin:14px 0 8px;">Trade Plan</h3>`;
     html += `<div style="background:var(--bg-1);padding:14px 18px;border-radius:6px;border:1px solid var(--rule);font-family:var(--mono);font-size:13px;color:var(--ink-0);line-height:1.85;">`;
-    if (tp.setup_type) html += `<div><span style="color:var(--ink-2);">Setup:</span> ${escape(tp.setup_type)}${tp.entry_quality_adj ? ` <span style="color:var(--ink-2);">— ${escape(tp.entry_quality_adj)}</span>` : ''}</div>`;
-    if (tp.entry_low && tp.entry_high) html += `<div><span style="color:var(--ink-2);">Entry:</span> $${tp.entry_low} – $${tp.entry_high}</div>`;
-    if (tp.stop) html += `<div><span style="color:var(--ink-2);">Stop:</span> <span style="color:var(--fail);">$${tp.stop}</span></div>`;
-    if (tp.target1) html += `<div><span style="color:var(--ink-2);">T1:</span> <span style="color:var(--pass);">$${tp.target1}</span>${tp.rr_ratio ? ` <span style="color:var(--ink-2);">(${tp.rr_ratio}R)</span>` : ''}</div>`;
-    if (tp.target2) html += `<div><span style="color:var(--ink-2);">T2:</span> <span style="color:var(--pass);">$${tp.target2}</span></div>`;
-    if (tp.max_hold_days) html += `<div><span style="color:var(--ink-2);">Hold:</span> ${tp.max_hold_days} ${typeof tp.max_hold_days === 'number' ? 'days' : ''}</div>`;
-    if (tp.size_pct) html += `<div><span style="color:var(--ink-2);">Size:</span> ${(+tp.size_pct).toFixed(2)}% of account</div>`;
+    if (_setupType) html += `<div><span style="color:var(--ink-2);">Setup:</span> ${escape(_setupType)}${tp.entry_quality_adj ? ` <span style="color:var(--ink-2);">— ${escape(tp.entry_quality_adj)}</span>` : ''}</div>`;
+    if (_eLo && _eHi) html += `<div><span style="color:var(--ink-2);">Entry:</span> $${_eLo} – $${_eHi}</div>`;
+    if (_stop) html += `<div><span style="color:var(--ink-2);">Stop:</span> <span style="color:var(--fail);">$${_stop}</span></div>`;
+    if (_t1) html += `<div><span style="color:var(--ink-2);">T1:</span> <span style="color:var(--pass);">$${_t1}</span>${_rr ? ` <span style="color:var(--ink-2);">(${_rr}R)</span>` : ''}</div>`;
+    if (_t2) html += `<div><span style="color:var(--ink-2);">T2:</span> <span style="color:var(--pass);">$${_t2}</span></div>`;
+    if (_hold) html += `<div><span style="color:var(--ink-2);">Hold:</span> ${_hold} ${typeof _hold === 'number' ? 'days' : ''}</div>`;
+    if (_sizePct) html += `<div><span style="color:var(--ink-2);">Size:</span> ${(+_sizePct).toFixed(2)}% of account</div>`;
     html += `</div>`;
   }
 
