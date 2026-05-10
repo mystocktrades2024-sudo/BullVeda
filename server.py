@@ -302,6 +302,150 @@ async def capability_registry(auth: HTTPBasicCredentials = Depends(_check_auth))
                         headers={"Cache-Control": "private, must-revalidate, max-age=0"})
 
 
+# OPS-3 (2026-05-10) — admin endpoint for capability_registry edits.
+# Replaces hand-editing capability_registry.json + risk of typo breaking RBAC.
+# Validates schema, logs to audit_log.jsonl, only admin role allowed.
+@app.patch("/api/capability-registry/items/{kind}/{item_id}")
+async def capability_registry_patch(
+    kind: str, item_id: str, request: Request,
+    auth: HTTPBasicCredentials = Depends(_check_auth),
+):
+    """Edit a single registry entry. kind ∈ {tabs, sub_tabs, actions}.
+    Admin role required. Validates payload + logs to audit_log.jsonl."""
+    if isinstance(auth, Response):
+        return auth
+    # Admin-only check
+    actor = auth.username
+    try:
+        from auth import role_for_user
+        actor_role = role_for_user(actor)
+    except Exception:
+        actor_role = None
+    if actor_role != "admin":
+        return JSONResponse({"error": "admin role required"}, status_code=403)
+
+    if kind not in ("tabs", "sub_tabs", "actions"):
+        return JSONResponse({"error": f"invalid kind '{kind}'; expected tabs|sub_tabs|actions"}, status_code=400)
+
+    p = BASE_DIR / "data" / "capability_registry.json"
+    if not p.exists():
+        return JSONResponse({"error": "capability_registry.json missing"}, status_code=404)
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "payload must be a JSON object"}, status_code=400)
+
+    reg = json.loads(p.read_text())
+    section = reg.setdefault(kind, {})
+    before = section.get(item_id)
+
+    # Schema-light validation: required keys depend on kind
+    REQUIRED_KEYS = {
+        "tabs":     ["label", "default_roles"],
+        "sub_tabs": ["label", "default_roles"],
+        "actions":  ["label", "default_roles"],
+    }
+    missing = [k for k in REQUIRED_KEYS[kind] if k not in payload]
+    if missing and before is None:
+        return JSONResponse({"error": f"missing required keys for new entry: {missing}"}, status_code=400)
+
+    # Merge (allow partial update) but only on whitelisted keys
+    ALLOWED_KEYS = {"label", "default_roles", "module", "description", "deprecated"}
+    new_entry = dict(before or {})
+    for k, v in payload.items():
+        if k in ALLOWED_KEYS:
+            new_entry[k] = v
+    section[item_id] = new_entry
+
+    # Audit-log first, then write registry (so audit captures intent even on write fail)
+    try:
+        from audit_log import append as _audit_append
+        _audit_append({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "actor": actor,
+            "action": "capability_registry_patch",
+            "kind": kind,
+            "item_id": item_id,
+            "before": before,
+            "after": new_entry,
+            "ip": request.client.host if request.client else "?",
+        })
+    except Exception as _ae:
+        log.warning(f"OPS-3 audit append failed (proceeding): {_ae}")
+
+    p.write_text(json.dumps(reg, indent=2))
+    return JSONResponse({"ok": True, "kind": kind, "item_id": item_id, "before": before, "after": new_entry})
+
+
+# OPS-4 (2026-05-10) — audit log viewer endpoint for the CapStudio UI.
+# Exposes data/audit_log.jsonl as paginated JSON. Admin only.
+@app.get("/api/audit-log")
+async def audit_log_view(
+    limit: int = 100, offset: int = 0,
+    actor: str | None = None, action: str | None = None,
+    auth: HTTPBasicCredentials = Depends(_check_auth),
+):
+    """Paginated audit log read. Filters by actor / action substring."""
+    if isinstance(auth, Response):
+        return auth
+    try:
+        from auth import role_for_user
+        if role_for_user(auth.username) != "admin":
+            return JSONResponse({"error": "admin role required"}, status_code=403)
+    except Exception:
+        return JSONResponse({"error": "auth check failed"}, status_code=403)
+
+    log_path = BASE_DIR / "data" / "audit_log.jsonl"
+    if not log_path.exists():
+        return JSONResponse({"entries": [], "total": 0, "log_exists": False})
+
+    rows = []
+    try:
+        for line in log_path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                e = json.loads(line)
+                if actor and actor.lower() not in (e.get("actor", "").lower()):
+                    continue
+                if action and action.lower() not in (e.get("action", "").lower()):
+                    continue
+                rows.append(e)
+            except Exception:
+                continue
+    except Exception as _e:
+        return JSONResponse({"error": str(_e)[:200]}, status_code=500)
+
+    rows.reverse()  # newest first
+    total = len(rows)
+    page = rows[offset:offset + limit]
+    return JSONResponse({"entries": page, "total": total, "offset": offset, "limit": limit, "log_exists": True})
+
+
+# OPS-2 (2026-05-10) — uptime ping endpoint for self-monitoring cron.
+@app.get("/api/health-ping")
+async def health_ping():
+    """Lightweight liveness check, no auth (for external uptime monitor).
+    Returns 200 OK with timestamp + scan_health snapshot."""
+    try:
+        sh_path = BASE_DIR / "data" / "scan_health.json"
+        latest = None
+        if sh_path.exists():
+            sh = json.loads(sh_path.read_text())
+            history = sh.get("history") or []
+            if history:
+                latest = history[-1]
+        return JSONResponse({
+            "ok": True,
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "scan_health_last_ts": (latest or {}).get("ts"),
+            "scan_health_pct": (latest or {}).get("pct"),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+
+
 # -- V2 bootstrap (PERF-1b 2026-05-09) -----------------------------------------
 # Combines /v2/_v + /api/capability-registry into ONE round-trip. shell.js and
 # elite-detail-shell.js prefer this endpoint; fall back to the two split routes

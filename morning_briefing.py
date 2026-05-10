@@ -65,7 +65,7 @@ def load_json(p: Path) -> dict | list | None:
 def assess_750d_backtest() -> dict:
     """750d portfolio backtest status."""
     bt_json = ROOT / "cache" / "portfolio_backtest.json"
-    bt_log = sorted(ROOT.glob("cache/logs/backtest_v2.log"))
+    bt_log = sorted(ROOT.glob("cache/logs/backtest_*.log"))   # any timestamped backtest log
     age = file_age_minutes(bt_json)
     is_running = is_process_running("backtest.py --portfolio --days 750")
     result = load_json(bt_json) or {}

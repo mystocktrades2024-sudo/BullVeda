@@ -644,6 +644,73 @@ if __name__ == "__main__":
     with open(out_path, "w") as f:
         json.dump(summary, f, indent=2)
 
+    # QUANT-4 (2026-05-10): Supabase dual-write of fold results.
+    # Mirrors the cache JSON to walk_forward_runs + walk_forward_folds tables
+    # (already in migrations/002_backtest_runs.sql). Enables cross-run
+    # analytics queries: "average WR per fold over the last 3 walk-forward
+    # runs", "is fold-1 systematically worse than fold-3 (regime drift)?",
+    # etc. Failures swallowed silently — never breaks WF execution.
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(BASE_DIR))
+        from supabase_client import sb_client, supabase_mode
+        if supabase_mode() != 0:
+            sb = sb_client()
+            if sb is not None:
+                import hashlib as _hashlib
+                from datetime import datetime as _dt
+                # Build run_id from fold count + timestamp
+                run_id = "wf_" + _hashlib.sha1(
+                    f"{summary.get('n_folds')}_{_dt.now().isoformat()}".encode()
+                ).hexdigest()[:12]
+                # Push run row to backtest_runs (mode=walk_forward)
+                run_row = {
+                    "run_id": run_id,
+                    "started_at": _dt.now().isoformat(),
+                    "finished_at": _dt.now().isoformat(),
+                    "mode": "walk_forward",
+                    "days": int(summary.get("aggregate_window_days") or 0),
+                    "n_trades": summary.get("total_trades"),
+                    "wr_raw": summary.get("aggregate_wr"),
+                    "sharpe": summary.get("mean_sharpe"),
+                    "max_drawdown": summary.get("mean_max_dd"),
+                    "notes": f"WF {summary.get('n_folds')} folds, mean PF/Sharpe per fold",
+                }
+                try:
+                    sb.table("backtest_runs").upsert(run_row, on_conflict="run_id").execute()
+                except Exception as _e:
+                    print(f"  Supabase backtest_runs upsert failed: {_e}")
+                # Push per-fold rows to walk_forward_folds
+                fold_rows = []
+                for f_idx, f in enumerate(summary.get("folds") or [], start=1):
+                    fold_rows.append({
+                        "run_id": run_id,
+                        "fold_index": f_idx,
+                        "train_start": f.get("train_start"),
+                        "train_end": f.get("train_end"),
+                        "test_start": f.get("test_start"),
+                        "test_end": f.get("test_end"),
+                        "tuned_min_score": f.get("tuned_min_score"),
+                        "tuned_min_rs": f.get("tuned_min_rs"),
+                        "test_n_trades": f.get("n_trades"),
+                        "test_wr": f.get("wr"),
+                        "test_pf": f.get("pf"),
+                        "test_sharpe": f.get("sharpe"),
+                        "test_max_dd": f.get("max_dd"),
+                        "tuned_extras": f.get("tuned_extras"),
+                    })
+                if fold_rows:
+                    try:
+                        # Replace any existing rows for this run_id (idempotent)
+                        sb.table("walk_forward_folds").delete().eq("run_id", run_id).execute()
+                        sb.table("walk_forward_folds").insert(fold_rows).execute()
+                        print(f"  ✓ Supabase: pushed {len(fold_rows)} folds + run_id {run_id}")
+                    except Exception as _e:
+                        print(f"  Supabase walk_forward_folds insert failed: {_e}")
+    except Exception as _e:
+        # Pure best-effort — never fail WF because Supabase is down.
+        log.debug(f"QUANT-4 Supabase dual-write skipped: {_e}")
+
     print("\n=== WALK-FORWARD V2 RESULTS ===")
     print(f"Folds: {summary['n_folds']}")
     print(f"Total trades: {summary['total_trades']}")

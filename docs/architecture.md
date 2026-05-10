@@ -130,7 +130,8 @@ All panels are populated from fields in `tickers.json` produced by `build_data.p
 | `reprocess_bundle.py` | Re-applies decision_engine to existing bundle without re-scan |
 | `analyze_signals.py` | Auto-generates per-setup/regime/score performance breakdown |
 | `engine_health_check.py` | Cron-friendly health check; alerts on engine failure |
-| `backtest_v2.py` | EODHD-based backtest using the live scoring path |
+| `backtest.py` | EODHD-based backtest using the live scoring path (single-window + portfolio modes) |
+| `backtest/walk_forward_v2.py` | True walk-forward (4 folds × grid search) |
 | `infra/prototype/build_data.py` | V2 dashboard data builder; computes change_log |
 | `infra/prototype/elite-detail.html` | Per-ticker drill-down (production) |
 | `infra/prototype/dashboard.html` | Main V2 dashboard (signal scanner, lists) |
@@ -188,7 +189,7 @@ After bundle write:
 
 - **Engine logic**: `python3 -c "from decision_engine import compute_final_verdict; ..."` — run on any bundle ticker
 - **Health**: `python3 engine_health_check.py`
-- **Backtest**: `python3 backtest_v2.py` (uses live scoring path via EODHD)
+- **Backtest**: `python3 backtest.py --portfolio --days 750` (uses live scoring path via EODHD; walk-forward via `python3 backtest/walk_forward_v2.py --folds 4`)
 - **Re-process without re-scan**: `python3 reprocess_bundle.py` (cheap iteration on engine logic)
 
 ## Known limitations / not-yet-built
