@@ -622,12 +622,40 @@ def compute_final_verdict(t: dict, regime: str | None = None,
     threshold = _resolve_buy_threshold(regime, thresholds)
 
     if score >= threshold:
+        # A2 (2026-05-09): signal_filter whitelist gate. Demote to WATCH if
+        # the (setup × regime × score_band × entry_quality) combination isn't
+        # whitelisted. Off by default (config["signal_filter"]["_enabled"]=false)
+        # → fail-open (returns allow=True with reason="filter_disabled").
+        try:
+            from signal_filter import evaluate as _sf_eval
+            sf = _sf_eval(t)
+            if not sf.get("allow"):
+                return {
+                    "verdict": "WATCH",
+                    "reason": f"signal_filter demoted: {sf.get('reason')}",
+                    "caveats": caveats + [f"signal_filter:{sf.get('reason')}"],
+                    "gates_evaluated": gates + [{
+                        "name": "signal_filter",
+                        "passed": False,
+                        "reason": sf.get("reason"),
+                        "matched_rule_id": sf.get("matched_rule_id"),
+                    }],
+                    "demote_to": "watch_list",
+                    "signal_filter": sf,
+                }
+            # allowed — fall through to BUY, attach audit info
+            _filter_audit = sf
+        except Exception as _sf_e:
+            log.debug(f"signal_filter eval failed (allowing through): {_sf_e}") if 'log' in dir() else None
+            _filter_audit = None
+
         return {
             "verdict": "BUY",
             "reason": f"all gates passed; score {score} >= {threshold} ({regime or 'default'})",
             "caveats": caveats,
             "gates_evaluated": gates,
             "demote_to": None,
+            "signal_filter": _filter_audit,
         }
 
     return {
