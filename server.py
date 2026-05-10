@@ -159,6 +159,29 @@ async def _v2_root(auth: HTTPBasicCredentials = Depends(_check_auth)):
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/v2/dashboard.html")
 
+@app.api_route("/v2/_v", methods=["GET","HEAD"])
+async def _v2_module_version(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Max mtime under infra/prototype/{core,tabs}/. Used as ?v= cache-buster
+    on dynamic ES module imports so edits to per-tab modules surface without
+    a hard refresh of the page. (2026-05-09)"""
+    if isinstance(auth, Response):
+        return auth
+    latest = 0
+    for root in (_PROTOTYPE_DIR / "core", _PROTOTYPE_DIR / "tabs"):
+        if not root.exists():
+            continue
+        for p in root.rglob("*"):
+            if p.is_file() and p.suffix in (".js", ".mjs"):
+                try:
+                    m = int(p.stat().st_mtime)
+                    if m > latest:
+                        latest = m
+                except OSError:
+                    pass
+    return Response(content=str(latest or int(_time.time())),
+                    media_type="text/plain",
+                    headers={"Cache-Control": "no-store"})
+
 @app.api_route("/v2/{path:path}", methods=["GET","HEAD"])
 async def _v2_file(path: str, request: Request, auth: HTTPBasicCredentials = Depends(_check_auth)):
     if isinstance(auth, Response):
@@ -246,9 +269,27 @@ async def whoami(auth: HTTPBasicCredentials = Depends(_check_auth)):
         "is_owner":       bool(user.get("is_owner")),
         "tab_profile":    user.get("tab_profile") or "trader",
         "tabs_allowed":   (perms.get("tabs") or []),
+        "sub_tabs_allowed":(perms.get("sub_tabs") or []),
         "actions_allowed": (perms.get("actions") or []),
         "must_change_password": bool(user.get("must_change_password")),
     })
+
+
+# -- CapStudio: Capability Registry --
+# Serves the master function registry (data/capability_registry.json).
+# Read-only for everyone; the matrix UI in settings_capstudio.html consumes
+# this to render the role × function checkbox grid. Edits to role assignments
+# go through POST /api/roles/{role_id}, NOT this endpoint.
+# (2026-05-09 — CapStudio Phase A.)
+@app.get("/api/capability-registry")
+async def capability_registry(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    if isinstance(auth, Response):
+        return auth
+    p = BASE_DIR / "data" / "capability_registry.json"
+    if not p.exists():
+        return JSONResponse({"error": "capability_registry.json missing", "tabs": {}, "sub_tabs": {}, "actions": {}}, status_code=404)
+    return JSONResponse(json.loads(p.read_text()),
+                        headers={"Cache-Control": "private, must-revalidate, max-age=0"})
 
 
 # -- Backtest report (hedge_fund_report.py output) --
@@ -3409,12 +3450,31 @@ async def api_create_role(payload: dict,
 
 
 @app.patch("/api/roles/{role_id}")
-async def api_update_role(role_id: str, payload: dict,
+async def api_update_role(role_id: str, payload: dict, request: Request,
                            credentials: HTTPBasicCredentials = Depends(_require_admin)):
     if isinstance(credentials, Response):
         return credentials
+    # CapStudio audit (2026-05-09): snapshot the role's permissions BEFORE
+    # the change so the log records the exact diff.
+    try:
+        before = (_auth_mod.get_role(role_id) or {}).get("permissions") or {}
+    except Exception:
+        before = {}
     try:
         r = _auth_mod.update_role(role_id, **payload)
+        # Emit to the existing audit log (data/audit_log.jsonl)
+        try:
+            import audit_log as _alog
+            _alog.log_action(
+                user=credentials.username, action="capstudio_edit_role",
+                endpoint=request.url.path, method="PATCH",
+                ip=(request.client.host if request.client else ""),
+                user_agent=request.headers.get("user-agent", ""),
+                status="ok",
+                payload={"role_id": role_id, "before": before, "after": (payload.get("permissions") or {})},
+            )
+        except Exception as _e:
+            pass
         return {"ok": True, "role": r}
     except ValueError as e:
         return Response(status_code=400, content=str(e))

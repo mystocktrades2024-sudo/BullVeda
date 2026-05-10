@@ -296,8 +296,14 @@ def delete_role(role_id: str) -> bool:
 # ───── Permission checks ────────────────────────────────────────────────
 
 def user_has_permission(username: str, perm_type: str, perm: str) -> bool:
-    """perm_type: 'tabs' or 'actions'. perm: e.g. 'submit_trade' or 'elite'.
-    Wildcard '*' in role permissions grants everything."""
+    """Check whether the user's role grants `perm` of `perm_type`.
+
+    perm_type: one of 'tabs' | 'sub_tabs' | 'actions'.
+    perm:       the specific item (e.g. 'submit_trade', 'elite', 'plan').
+
+    Wildcard '*' in the role's permission list grants everything in that perm_type.
+    (CapStudio 2026-05-09 — added 'sub_tabs' alongside 'tabs' and 'actions'.)
+    """
     data = _load_users()
     u = data.get("users", {}).get(username)
     if not u or u.get("disabled"):
@@ -310,15 +316,23 @@ def user_has_permission(username: str, perm_type: str, perm: str) -> bool:
 
 
 def get_user_permissions(username: str) -> dict:
-    """Return tabs + actions arrays for the user's role."""
+    """Return tabs + sub_tabs + actions arrays for the user's role.
+    (CapStudio 2026-05-09 — added sub_tabs in returned dict.)"""
     data = _load_users()
     u = data.get("users", {}).get(username)
+    empty = {"tabs": [], "sub_tabs": [], "actions": []}
     if not u:
-        return {"tabs": [], "actions": []}
+        return empty
     role = get_role(u.get("role") or "viewer")
     if not role:
-        return {"tabs": [], "actions": []}
-    return role.get("permissions") or {"tabs": [], "actions": []}
+        return empty
+    perms = role.get("permissions") or {}
+    # Ensure all three keys present in returned dict (clients may iterate).
+    return {
+        "tabs":     perms.get("tabs")     or [],
+        "sub_tabs": perms.get("sub_tabs") or [],
+        "actions":  perms.get("actions")  or [],
+    }
 
 
 def is_admin(username: str) -> bool:

@@ -1,4 +1,7 @@
-# 📋 SwingTrade Open Items Tracker
+# 📋 SwingTrade Open Items Tracker (LEGACY — April 2026 sprint)
+
+> ⚠️ **Superseded 2026-05-09** — primary tracker is now `OpenItemTracker.md` at the repo root.
+> This file is kept for the April decision-engine sprint history. **All new items go to `OpenItemTracker.md`.**
 
 **Branch:** `feature/decision-engine-v2` (not yet merged to main)
 **Last updated:** 2026-04-14

@@ -17,7 +17,12 @@ const WS_LIVE = (() => {
   let lastPrices = {};
   let reconnectDelay = 2000;
   let statusEl = null;
-  let usePoll = false;
+  // EODHD WebSocket requires a paid add-on (~$30/mo) NOT in All-In-One.
+  // Default to REST polling so the browser doesn't log a "WS failed" error
+  // every page load. To re-enable WS later (after subscribing to the add-on),
+  // append `?ws=1` to the dashboard URL.
+  // (2026-05-09 — silenced cosmetic console spam)
+  let usePoll = !/[?&]ws=1\b/.test(location.search);
 
   function setStatus(text, ok = true) {
     if (statusEl) {
