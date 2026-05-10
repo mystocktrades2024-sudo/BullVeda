@@ -16,6 +16,18 @@ export function render() {
   const isBuy = effectiveV === 'BUY';
   const cardCls = isBuy ? '' : 'warn';
   const accent = isBuy ? 'var(--pass)' : 'var(--warn)';
+  // K-extra (2026-05-09): canonical_trade_plan first, then T fields. Re-bind onto
+  // T so the dozens of references downstream auto-pick canonical numbers without
+  // per-line rewrites. Keeps the audit trail tight.
+  const ctp = T?.canonical_trade_plan;
+  if (ctp) {
+    if (ctp.stop != null)        T.stop       = ctp.stop;
+    if (ctp.target1 != null)     T.target1    = ctp.target1;
+    if (ctp.target2 != null)     T.target2    = ctp.target2;
+    if (ctp.entry?.low != null)  T.entry_low  = ctp.entry.low;
+    if (ctp.entry?.high != null) T.entry_high = ctp.entry.high;
+    if (ctp.risk?.rr_ratio != null) T.rr_ratio = ctp.risk.rr_ratio;
+  }
   // Compute real R:R from CURRENT price (not cached entry_low)
   const curPrice = T.price || T.entry_low || 0;
   const realRR = (curPrice && T.stop && T.target1 && curPrice > T.stop && T.target1 > curPrice)

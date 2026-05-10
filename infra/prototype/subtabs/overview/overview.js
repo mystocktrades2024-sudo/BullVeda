@@ -30,15 +30,19 @@ export function render() {
                (score >= 88 ? 'T1' : score >= 78 ? 'T2' : score >= 70 ? 'T3' : 'WATCH');
   const c = +T.pct_chg || 0, upDn = c > 0 ? 'up' : c < 0 ? 'dn' : '';
   const pX = +T.price || 0;
-  const stop = +(T.trade_plan?.stop || T.stop || 0);
-  const t1   = +(T.trade_plan?.target1 || T.target1 || T.t1 || 0);
-  const t2   = +(T.trade_plan?.target2 || T.target2 || T.t2 || 0);
-  const eLo  = +(T.trade_plan?.entry_low  || T.entry_lo || pX);
-  const eHi  = +(T.trade_plan?.entry_high || T.entry_hi || pX);
+  // K-extra (2026-05-09): canonical_trade_plan first, then legacy fields. The
+  // Overview tab is the source from which Vinod calibrates other tabs — must
+  // surface identical numbers as Plan/Thesis/SMC/Models.
+  const _ctp = T?.canonical_trade_plan;
+  const stop = +(_ctp?.stop ?? T.trade_plan?.stop ?? T.stop ?? 0);
+  const t1   = +(_ctp?.target1 ?? T.trade_plan?.target1 ?? T.target1 ?? T.t1 ?? 0);
+  const t2   = +(_ctp?.target2 ?? T.trade_plan?.target2 ?? T.target2 ?? T.t2 ?? 0);
+  const eLo  = +(_ctp?.entry?.low  ?? T.trade_plan?.entry_low  ?? T.entry_lo ?? pX);
+  const eHi  = +(_ctp?.entry?.high ?? T.trade_plan?.entry_high ?? T.entry_hi ?? pX);
   const stopPct = stop && pX ? ((stop - pX) / pX * 100) : 0;
   const t1Pct   = t1 && pX ? ((t1 - pX) / pX * 100) : 0;
   const t2Pct   = t2 && pX ? ((t2 - pX) / pX * 100) : 0;
-  const cachedRR = +(T.trade_plan?.rr_ratio || T.rr_ratio || T.rr || 0);
+  const cachedRR = +(_ctp?.risk?.rr_ratio ?? T.trade_plan?.rr_ratio ?? T.rr_ratio ?? T.rr ?? 0);
   // Compute real R:R from CURRENT price (not entry-zone midpoint)
   const realRR = (pX && stop && t1 && pX > stop && t1 > pX)
                  ? (t1 - pX) / (pX - stop) : null;

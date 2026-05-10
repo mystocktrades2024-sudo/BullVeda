@@ -26,7 +26,7 @@ export function render() {
       summary:`SMC zones ${T.smc_score || 0}/10. ${T.above_200sma ? 'Above 200 SMA — Stage 2.' : 'Below 200 SMA.'}`,
       tier: tier(T.smc_score || 0, 10) },
     { name:'Quality Gate', score: T.score >= 70 ? 4 : T.score >= 50 ? 3 : 2, max:5,
-      summary:`${T.score >= 70 ? '4/5 hard rules clear' : T.score >= 50 ? '3/5 rules — partial pass' : '2/5 rules — gated'}. Liquidity OK, RR ${(T.rr_ratio||0).toFixed(1)}.`,
+      summary:`${T.score >= 70 ? '4/5 hard rules clear' : T.score >= 50 ? '3/5 rules — partial pass' : '2/5 rules — gated'}. Liquidity OK, RR ${((T?.canonical_trade_plan?.risk?.rr_ratio)||T.rr_ratio||0).toFixed(1)}.`,
       tier: T.score >= 70 ? 'pass' : T.score >= 50 ? 'warn' : 'fail' },
   ];
   $('scorecardBody').innerHTML = `

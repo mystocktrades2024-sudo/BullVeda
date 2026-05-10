@@ -56,13 +56,14 @@ export function render() {
   $('armBtn').textContent = `${v} · ${sc}`;
   $('armBtn').classList.toggle('primary', isBuy);
 
-  // Top row 2 — dense data strip
+  // Top row 2 — dense data strip. K-extra (2026-05-09): canonical_trade_plan first.
+  const ctp = T?.canonical_trade_plan;
   const tp = T.trade_plan || {};
-  const stop = T.stop ?? tp.stop;
-  const t1 = T.target1 ?? tp.target1;
-  const t2 = T.target2 ?? tp.target2;
-  const eLo = T.entry_low ?? tp.entry_low;
-  const eHi = T.entry_high ?? tp.entry_high;
+  const stop = ctp?.stop ?? T.stop ?? tp.stop;
+  const t1 = ctp?.target1 ?? T.target1 ?? tp.target1;
+  const t2 = ctp?.target2 ?? T.target2 ?? tp.target2;
+  const eLo = ctp?.entry?.low ?? T.entry_low ?? tp.entry_low;
+  const eHi = ctp?.entry?.high ?? T.entry_high ?? tp.entry_high;
   const rrT1 = (t1 && eLo && stop) ? ((t1 - eLo) / Math.max(0.01, eLo - stop)) : null;
   const stopPct = (stop && eLo) ? (((stop - eLo) / eLo) * 100) : null;
   const t1Pct   = (t1 && eLo)   ? (((t1   - eLo) / eLo) * 100) : null;
