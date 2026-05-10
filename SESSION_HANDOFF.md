@@ -36,9 +36,64 @@
 **Cumulative dashboard cold load:** 715ms → 644ms (-71ms, bound now by 5.3MB data.json parse).
 **Cumulative elite-detail:** 576ms → 524ms + lazy subtabs save more on first paint.
 
-## 3. ⚠️ Critical pending — backtest validation gate
+## 3. ⚠️ Critical update (2026-05-09 ~23:10 PT)
 
-**DO NOT** ship QUANT-1b (Fix 2: `buy_max_score: 80` cap) until the running backtest finishes.
+**Backtest was killed at 22% completion. Reason: empirical analysis on the existing 384-trade backtest gave the answer faster than the new run would have.**
+
+### Empirical filter analysis (run with `cache/portfolio_backtest_750d_20260509_100501.json`)
+
+```
+                                   n     WR     PF     Total
+Original (all 384 trades)        384   27.3%  0.70   -224%
+Trend Continuation killed        120   34.2%  0.86    -25%   ← Fix 1 alone
+TC killed + score >= 80 (live)    56   39.3%  1.07   +5.65%  ← new live config
+```
+
+Fix 1 swung return from -224% to +5.65% over 3 years. PF 1.07 (borderline break-even after survivorship/look-ahead haircuts of ~3-7pp → realistic PF 0.95-1.05).
+
+### Score-band table (TC excluded) — BIG insight overturning agent's Fix 2
+
+```
+65-70:  n=18  PF 0.87
+70-75:  n=28  PF 0.61   ← worst middle band
+75-80:  n=18  PF 0.76
+80-85:  n=21  PF 1.72   ← THE alpha sweet spot
+85-90:  n=15  PF 0.97
+90-100: n=19  PF 0.32   ← anti-predictive at top
+```
+
+**Agent's Fix 2 (`buy_max_score: 80`) would EXCLUDE the 80-85 band which has PF 1.72.** That recommendation was wrong — DO NOT IMPLEMENT IT. Instead consider `buy_max_score: 90` (cuts the truly bad 90-100 band).
+
+### My QUANT-1 Fix 3 (VCP Breakout 0.0 → 1.2) was based on bad evidence
+
+Agent claimed n=12 PF 1.79 for VCP Breakout. **At score ≥80, only 1 of those 12 trades fired, and it lost (-4.5%).** The other 11 fired below 80 — irrelevant for the new live config. Recommend reverting to 0.0 or holding at 0.7.
+
+### By-setup at score ≥ 80 (the live config universe)
+
+```
+Trend Continuation:  n=187  PF 0.60   ← killed (correct)
+Near-VCP Breakout:   n=50   PF 1.07   ← workhorse, multiplier 0.7 demotes it
+Pocket Pivot:        n=5    PF 5.58   ← n=5 too small to trust
+VCP Breakout:        n=1    PF 0.00   ← my Fix 3 has n=1 evidence (!!)
+```
+
+## 4. Pro recommendations for the new session
+
+Ranked by evidence strength, not agent's "Fix 1/2/3" framing:
+
+| ID | Action | Evidence | Risk |
+|----|--------|----------|------|
+| QUANT-1c | **Keep Trend Continuation kill** | 187 of 263 high-score trades, PF 0.60 | HIGH confidence — keep |
+| QUANT-1d | **Revert Fix 3 (VCP Breakout 1.2 → 0.7 or 0.0)** | Only n=1 fired at ≥80, lost | MEDIUM confidence — revert |
+| QUANT-1e | **Boost Near-VCP Breakout 0.7 → 1.0** | n=50, PF 1.07 at ≥80. Actually performing. | HIGH confidence — boost |
+| QUANT-1f | **Add `buy_max_score: 90`** to all regime blocks | 90+ band PF 0.32 — anti-predictive | MEDIUM — small sample warning |
+| QUANT-1g | **REJECT** Fix 2 (`buy_max_score: 80`) | Would exclude 80-85 PF 1.72 | HIGH — do not implement |
+
+**Validate any of these with a fresh 250d backtest first** (faster cycle than 750d).
+
+## OLD section 3 (VOID — backtest gate replaced by empirical filter)
+
+~~DO NOT ship QUANT-1b until backtest finishes~~
 
 **When backtest finishes:**
 ```bash
