@@ -352,6 +352,38 @@ async def backtest_report_by_filename(filename: str, auth: HTTPBasicCredentials 
         return HTMLResponse(f"Report not found: {filename}", status_code=404)
     return HTMLResponse(p.read_text(), headers=_NO_CACHE)
 
+@app.get("/api/drift-alerts")
+async def drift_alerts(limit: int = 30, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """A7 (2026-05-09): surface model_drift_alert.py history for dashboard tile.
+    Reads data/drift_alerts.jsonl (written by the daily drift cron at
+    LaunchAgents/com.swingtrade.driftalert.plist) and returns the last N
+    entries, newest first."""
+    import json as _json
+    drift_log = BASE_DIR / "data" / "drift_alerts.jsonl"
+    if not drift_log.exists():
+        return JSONResponse({"alerts": [], "count": 0, "log_exists": False})
+    rows = []
+    try:
+        for line in drift_log.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(_json.loads(line))
+            except Exception:
+                continue
+    except Exception as e:
+        return JSONResponse({"alerts": [], "count": 0, "error": str(e)[:200]}, status_code=500)
+    # Newest first
+    rows.reverse()
+    return JSONResponse({
+        "alerts": rows[:limit],
+        "count": len(rows),
+        "log_exists": True,
+        "log_path": str(drift_log.relative_to(BASE_DIR)),
+    })
+
+
 @app.post("/api/backtest-report/regen")
 async def backtest_report_regen(auth: HTTPBasicCredentials = Depends(_check_auth)):
     """OPS-5 (2026-05-09): regenerate hedge_fund_report.py from latest cached
