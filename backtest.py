@@ -344,7 +344,21 @@ def _score_as_of(ticker: str, df_full: pd.DataFrame, as_of_date: pd.Timestamp,
                               skip_market_gates=True)  # backtest: evaluate regardless of crash-day gates
         fund = score_fundamentals(info, zacks=None, beat_rate=None,
                                   extra_fund=_ef if _ef else None)
-        tech = score_technicals(df, regime, spy_close if not spy_close.empty else None)
+        # P0 fix 2026-05-10: derive weekly_df from daily so weekly_bull
+        # actually computes. Without this, weekly_bull=False for every backtest
+        # pick, and setup_gates.*.weekly_bull_required=True blocks every BUY.
+        # Resampling daily → weekly is leakage-free (uses only data up to as_of).
+        try:
+            weekly_df = df[["Open","High","Low","Close","Volume"]].resample("W-FRI").agg(
+                {"Open":"first", "High":"max", "Low":"min",
+                 "Close":"last", "Volume":"sum"}
+            ).dropna(how="all")
+            if len(weekly_df) < 10:
+                weekly_df = None  # not enough weekly bars; let alignment default
+        except Exception:
+            weekly_df = None
+        tech = score_technicals(df, regime, spy_close if not spy_close.empty else None,
+                                weekly_df=weekly_df)
         opt  = score_optionality(df, info, tech["sr"], earnings, news, options_data=None)
         sent = score_sentiment(news, insider, info,
                                borrow_data=_borrow if _borrow else None)
@@ -661,7 +675,8 @@ def _load_or_fetch_infos_cached(universe: list[str], ttl_hours: int = 24) -> dic
 
     log.info(f"Fetching yfinance info for {len(universe)} tickers "
              f"(current snapshot — see audit #4 look-ahead warning above)...")
-    infos = get_stock_info_batch(universe, max_workers=16)
+    from data_fetcher import get_stock_info_batch as _gsib
+    infos = _gsib(universe, max_workers=16)
     try:
         cache_path.write_text(_json.dumps({"ts": _time.time(), "infos": infos}))
         log.info(f"yfinance info cached → {cache_path.name} ({len(infos)} tickers)")
