@@ -426,7 +426,7 @@
       "notes": "Conservative slice shipped: extracted ~295 lines of below-fold CSS (Audit date picker, D-1 Cross-Mode card, D-4 Factor heatmap, Accuracy framework, Settings rebuild, mobile media queries) into dashboard.deferred.css, loaded non-blocking via media=\"print\" onload=\"this.media='all'\". Inline <style> reduced 1029 → 734 lines. Elite Picks v2 styles intentionally kept inline (Elite is the default tab for all profiles).",
       "status": "DONE",
       "date_fixed": "2026-05-10",
-      "commit": "5df6b9ef8",
+      "commit": "450572d28",
       "how_to_test": "1. Open https://trade.mystockholding.com/v2/dashboard.html in DevTools Network tab. 2. Hard-refresh — confirm dashboard.deferred.css loads as a separate request with media=print first then promoted to media=all. 3. Click Audit / Portfolio / Accuracy / Settings tabs — all styled correctly (no FOUC). 4. Resize viewport to <1024px — tablet/phone media queries fire correctly. 5. View source — inline <style> ends around line 749 (vs 1044 before). 6. Lighthouse FCP should improve ~50-150ms vs PERF-7-only baseline."
     },
     {
@@ -888,10 +888,11 @@
       "how": "Add data_signals_ext.json (mt+lt) and data_misc.json. Wrap the Range filter handler in scanner module to await loadChunk('signals_ext') before re-rendering. Pre-compute mt_count/lt_count in _chunk_counts so boot ctMt/ctLt/scanCount fields don't go to zero.",
       "effort": "",
       "risk_win": "",
-      "notes": "",
-      "status": "OPEN",
-      "date_fixed": null,
-      "commit": null
+      "notes": "Shipped same night as PERF-7. Adds 2 more chunks: data_signals_ext.json (medium_term + long_term, 1.0 MB) and data_misc.json (strategies + zacks_*, 67 KB). Critical bundle now 456 KB — total cold-load reduction 5.29 MB → 456 KB (91.4% smaller). fsSetMode awaits signals_ext when user clicks Position/Invest. loadChunk(\"signals_ext\") arrival re-fires earnings widget, sidebar counts, killed corr-drop scan, and (if user is on non-default mode) the scanner.",
+      "status": "DONE",
+      "date_fixed": "2026-05-10",
+      "commit": "b02935ad8",
+      "how_to_test": "1. python3 infra/prototype/build_data.py — emits data.critical.json (~456 KB) plus 7 chunks. 2. Open /v2/dashboard.html in DevTools Network — boot only fetches data.critical.json (~456 KB), then 7 chunks load in parallel without blocking first paint. 3. Click POSITION mode in scanner — table populates with mt rows (may briefly show empty if signals_ext chunk hasn't arrived yet — should resolve within 100-300ms). 4. Click INVEST mode — same with lt rows. 5. Verify earnings widget at top of scanner shows imminent earnings from BOTH short_term and medium_term. 6. Verify scanCount/ctMt/ctLt counts at boot show real numbers (from _chunk_counts)."
     }
   ]
 }

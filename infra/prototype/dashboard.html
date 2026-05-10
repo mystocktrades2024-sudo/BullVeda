@@ -1850,11 +1850,15 @@ async function _getTickers() {
   return _TICKERS_PROMISE;
 }
 
-// PERF-7 (2026-05-10): lazy chunk loader for the heaviest tabs.
-// data.critical.json carries placeholder stubs (`killed: []`, `performance: {total}`)
-// so boot-time render() and sidebar counts work without the full payload.
-// Full sections arrive from data_perf.json / data_killed.json / data_earnings.json
-// and merge into DATA on first activation. Memoized — each chunk fetches once.
+// PERF-7 + PERF-7b (2026-05-10): lazy chunk loader for the heaviest tabs.
+// data.critical.json carries placeholder stubs so boot-time render() and
+// sidebar counts work without the full payload. Full sections arrive from
+// data_<name>.json and merge into DATA on activation. Memoized — each
+// chunk fetches at most once.
+//
+// signals_ext (medium_term + long_term) arrival also re-fires the earnings
+// widget, sidebar counts, and the scanner — those boot using the empty-array
+// stubs and need a re-render once mt/lt rows are available.
 const _CHUNK_PROMISES = {};
 async function loadChunk(name) {
   if (_CHUNK_PROMISES[name]) return _CHUNK_PROMISES[name];
@@ -1864,6 +1868,22 @@ async function loadChunk(name) {
       if (!r.ok) return null;
       const chunk = await r.json();
       if (DATA && chunk && typeof chunk === 'object') Object.assign(DATA, chunk);
+      // PERF-7b: signals_ext arrival re-fires everything that reads mt/lt at
+      // boot. Wrapped in try/catch because some helpers may not be defined
+      // yet on first call (boot-order race).
+      if (name === 'signals_ext' && DATA && chunk) {
+        try { if (typeof _renderEarningsWidget === 'function') _renderEarningsWidget(); } catch (_) {}
+        try { if (typeof _updateSidebarCounts === 'function') _updateSidebarCounts(); } catch (_) {}
+        // Re-render scanner if user is on a non-default mode (default 'swing'
+        // reads only short_term, which is in critical — no re-render needed).
+        try {
+          if (window.FS_STATE && (FS_STATE.mode === 'position' || FS_STATE.mode === 'invest')) {
+            if (typeof renderFloorScanner === 'function') renderFloorScanner();
+          }
+        } catch (_) {}
+        // Killed tab corr-drop scan reads all 3 arrays — refresh if rendered
+        try { if (typeof _renderKilledTab === 'function') _renderKilledTab(); } catch (_) {}
+      }
       return chunk;
     } catch (e) {
       console.error(`[chunk] ${name} fetch failed`, e);
@@ -2439,8 +2459,11 @@ async function init() {
   // Kick off the deferred chunks in parallel — non-blocking. By the time
   // the user clicks a deferred tab, the chunk is usually already merged into
   // DATA. If not, the wrapped TAB_RENDERERS entry awaits loadChunk() first.
-  // perf/killed first (most likely tabs), earnings/screener/crypto trail.
-  ['perf', 'killed', 'earnings', 'screener', 'crypto'].forEach(n => loadChunk(n));
+  // signals_ext loaded eagerly because Position/Invest scanner modes + the
+  // earnings widget + corr-drop scan all read mt/lt — re-render fires when
+  // it arrives (see loadChunk).
+  ['signals_ext', 'misc', 'perf', 'killed', 'earnings', 'screener', 'crypto']
+    .forEach(n => loadChunk(n));
   // Overlay intraday options_flow.json (refreshed every 30 min during market
   // hours) onto data.json's options_flow_top30 if newer. Last-scan flow is
   // shown when off-hours; live flow when market is open. (2026-05-08)
@@ -2472,15 +2495,20 @@ async function init() {
   const spyVal = typeof regime.spy_price === 'number' ? regime.spy_price : null;
   setText('mSpy', spyVal != null ? '$' + spyVal.toFixed(2) : '—');
   setText('mVix', vixVal != null ? Number(vixVal).toFixed(2) : '—');
-  setText('scanCount', (DATA.short_term?.length || 0) + (DATA.medium_term?.length || 0) + (DATA.long_term?.length || 0));
+  // PERF-7b: medium_term/long_term are lazy chunks — fall back to _chunk_counts
+  // for boot-time totals, then real lengths once signals_ext arrives.
+  const _bcc = (DATA && DATA._chunk_counts) || {};
+  const _mtN = (DATA.medium_term && DATA.medium_term.length) || _bcc.medium_term || 0;
+  const _ltN = (DATA.long_term   && DATA.long_term.length)   || _bcc.long_term   || 0;
+  setText('scanCount', (DATA.short_term?.length || 0) + _mtN + _ltN);
   setText('lastRun', (DATA.run_timestamp || '').slice(11) || '—');
   const regimeText = (regime.regime4 || regime.regime || regime.label || 'neutral').toString();
   setText('regimeLabel', regimeText.toUpperCase().replace(/_/g, ' '));
   setText('regimeMeta', 'REGIME GATES');
   setText('regimePill', (regime.label || regime.regime || regime.regime4 || 'neutral').toString().toUpperCase().replace(/_/g, ' '));
   setText('ctSt', DATA.short_term?.length || 0);
-  setText('ctMt', DATA.medium_term?.length || 0);
-  setText('ctLt', DATA.long_term?.length || 0);
+  setText('ctMt', _mtN);
+  setText('ctLt', _ltN);
 
   document.querySelectorAll('.tb-tab').forEach(t => t.addEventListener('click', () => {
     CURRENT = t.dataset.h;
@@ -2659,13 +2687,18 @@ window.addEventListener('DOMContentLoaded', () => {
     .catch(() => {});
 });
 
-window.fsSetMode = function(mode) {
+window.fsSetMode = async function(mode) {
   FS_STATE.mode = mode;
   try { localStorage.setItem('_fs_mode', mode); } catch (_) {}
   document.querySelectorAll('.sc2-mode').forEach(b => {
     b.classList.toggle('on', b.dataset.mode === mode);
     b.setAttribute('aria-selected', b.dataset.mode === mode ? 'true' : 'false');
   });
+  // PERF-7b: position/invest modes need medium_term/long_term — lazy chunk.
+  // Boot pre-fetched it in parallel, so this usually resolves immediately.
+  if (mode === 'position' || mode === 'invest') {
+    await loadChunk('signals_ext');
+  }
   if (typeof renderFloorScanner === 'function') renderFloorScanner();
 };
 
@@ -4497,7 +4530,10 @@ function setupTabSwitcher() {
   if ($('fsLongCt'))   $('fsLongCt').textContent   = (DATA.short_term||[]).filter(r => r.stage === 'BUY').length;
   if ($('fsShortCt'))  $('fsShortCt').textContent  = (DATA.short_term||[]).filter(r => r.stage === 'SELL').length;
   if ($('fsWatchCt'))  $('fsWatchCt').textContent  = (DATA.short_term||[]).filter(r => r.stage === 'WATCH').length;
-  if ($('fsUnivCt'))   $('fsUnivCt').textContent   = (DATA.scan_count || (DATA.short_term?.length || 0) + (DATA.medium_term?.length || 0));
+  // PERF-7b: medium_term is lazy — use _chunk_counts.medium_term until chunk loads.
+  if ($('fsUnivCt'))   $('fsUnivCt').textContent   = (DATA.scan_count
+                                                       || (DATA.short_term?.length || 0)
+                                                          + ((DATA.medium_term && DATA.medium_term.length) || _chunkCt.medium_term || 0));
   if ($('fsKilledCt')) $('fsKilledCt').textContent = (DATA.killed?.length || DATA.killed_count || 0);
   // Open P/L
   const pf = DATA.portfolio || {};
