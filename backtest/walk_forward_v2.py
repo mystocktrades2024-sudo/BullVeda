@@ -385,18 +385,158 @@ def run_backtest_subset(start: str, end: str, min_score: int, min_rs: int,
     return result
 
 
+def _run_single_fold(args_tuple):
+    """Worker function for parallel fold execution.
+
+    Pulled out to module level (vs nested) so multiprocessing.Pool can pickle.
+    Accepts a single tuple to keep Pool.map() ergonomic.
+    """
+    (i, folds, end_iso, train_days, test_days, tune_multipliers) = args_tuple
+    from datetime import date as _d2
+    end2 = _d2.fromisoformat(end_iso)
+
+    test_end = end2 - timedelta(days=i * test_days)
+    test_start = test_end - timedelta(days=test_days)
+    train_end = test_start - timedelta(days=1)
+    train_start = train_end - timedelta(days=train_days)
+
+    log.info(f"=== Fold {i+1}/{folds} (parallel) ===")
+    log.info(f"Train: {train_start} -> {train_end}  Test: {test_start} -> {test_end}")
+
+    try:
+        tuned = tune_on_train(train_start.isoformat(), train_end.isoformat())
+    except Exception as e:
+        log.error(f"Fold {i+1} tune failed: {e} — skipping")
+        return None
+
+    fold_multipliers: dict = {}
+    validation_result: dict | None = None
+    if tune_multipliers:
+        try:
+            fold_multipliers = tune_setup_multipliers(
+                train_start.isoformat(), train_end.isoformat(),
+                min_score=tuned["min_score"], min_rs=tuned["min_rs"],
+            )
+            if fold_multipliers:
+                validation_result = validate_multipliers_on_test(
+                    test_start.isoformat(), test_end.isoformat(),
+                    min_score=tuned["min_score"], min_rs=tuned["min_rs"],
+                    proposed_multipliers=fold_multipliers,
+                )
+        except Exception as e:
+            log.warning(f"Fold {i+1} multiplier tuning failed: {e} — proceeding without multipliers")
+
+    test_override = None
+    if fold_multipliers and validation_result and validation_result.get("passes"):
+        test_override = {
+            "setup_score_multiplier": {
+                **fold_multipliers,
+                "_validations": {
+                    s: {"n": 999, "wr_lb": 0.0, "source": "wf_test_scoring"}
+                    for s, m in fold_multipliers.items() if m < 1.0
+                },
+            }
+        }
+    try:
+        test_result = run_backtest_subset(
+            start=test_start.isoformat(), end=test_end.isoformat(),
+            min_score=tuned["min_score"], min_rs=tuned["min_rs"],
+            config_override=test_override,
+        )
+    except Exception as e:
+        log.error(f"Fold {i+1} test scoring failed: {e} — skipping")
+        return None
+
+    fold = FoldResult(
+        fold_id=i + 1,
+        train_start=train_start.isoformat(),
+        train_end=train_end.isoformat(),
+        test_start=test_start.isoformat(),
+        test_end=test_end.isoformat(),
+        tuned_min_score=tuned["min_score"],
+        tuned_min_rs=tuned["min_rs"],
+        n_trades=test_result["n_trades"],
+        wr=test_result["wr"],
+        pf=test_result["pf"],
+        max_dd=test_result["max_dd"],
+        sharpe=test_result["sharpe"],
+    )
+    try:
+        fold.tuned_extras = {
+            "multipliers": fold_multipliers,
+            "validation": validation_result,
+        }
+    except Exception:
+        pass
+    log.info(f"Fold {i+1}: N={fold.n_trades} WR={fold.wr:.1%} PF={fold.pf:.2f}")
+    return (fold, fold_multipliers)
+
+
 def run_walk_forward(folds: int = 3, train_days: int = 120, test_days: int = 30,
-                     end_date: str = None, tune_multipliers: bool = False) -> list:
+                     end_date: str = None, tune_multipliers: bool = False,
+                     parallel: bool = False, n_workers: int = 4) -> list:
     """Run walk-forward with N folds ending at end_date (or today).
 
     tune_multipliers (2026-05-09): when True, also runs tune_setup_multipliers
     on each fold's train window and validates on the test window. Per-fold
     multiplier proposals attached to FoldResult.tuned_extras for downstream
     write_validations_from_folds() aggregation.
+
+    parallel (2026-05-10): when True, run folds concurrently via
+    multiprocessing.Pool(n_workers). 4-fold WF goes from ~8-12h to ~2-3h
+    (limited by EODHD rate-limit and Parquet I/O contention, not CPU).
     """
     from datetime import date as _d
     end = _d.fromisoformat(end_date) if end_date else _d.today()
 
+    if parallel and folds > 1:
+        log.info(f"=== Parallel walk-forward ON: {n_workers} workers ===")
+        from multiprocessing import Pool
+        args_list = [(i, folds, end.isoformat(), train_days, test_days, tune_multipliers)
+                     for i in range(folds)]
+        # spawn-mode safer on macOS than fork (yfinance/EODHD clients hold sockets)
+        try:
+            from multiprocessing import get_context
+            ctx = get_context("spawn")
+            with ctx.Pool(processes=min(n_workers, folds)) as pool:
+                raw_results = pool.map(_run_single_fold, args_list)
+        except Exception as e:
+            log.warning(f"Parallel pool failed ({e}) — falling back to sequential")
+            raw_results = [_run_single_fold(a) for a in args_list]
+
+        results = []
+        multiplier_proposals_by_fold: list[dict] = []
+        for r in raw_results:
+            if r is None:
+                continue
+            fold, mults = r
+            results.append(fold)
+            multiplier_proposals_by_fold.append(mults)
+        # Sort folds back into chronological order (parallel may scramble)
+        results.sort(key=lambda f: f.fold_id)
+
+        if tune_multipliers and any(multiplier_proposals_by_fold):
+            try:
+                log.info("=== Aggregating multiplier proposals across folds ===")
+                per_fold_for_agg = [
+                    {"validation": getattr(r, "tuned_extras", {}).get("validation")
+                                    or {"passes": False}}
+                    for r in results
+                ]
+                shipped = write_validations_from_folds(per_fold_for_agg, multiplier_proposals_by_fold)
+                cache_path = BASE_DIR / "cache" / "wf_multiplier_proposals.json"
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_text(json.dumps({
+                    "generated_at": datetime.now().isoformat(),
+                    "shipped_multipliers": shipped,
+                    "per_fold_proposals": multiplier_proposals_by_fold,
+                }, indent=2))
+                log.info(f"Wrote shipped-multiplier candidates to {cache_path}")
+            except Exception as e:
+                log.warning(f"Multiplier aggregation failed: {e}")
+        return results
+
+    # Sequential path (default — preserves existing behavior)
     results = []
     multiplier_proposals_by_fold: list[dict] = []
 
@@ -615,6 +755,14 @@ if __name__ == "__main__":
                         help="Pass --as-of-membership to backtest.py subprocess calls so "
                              "each fold uses point-in-time S&P 500 membership instead of "
                              "today's. Closes survivorship-bias bias in walk-forward.")
+    # 2026-05-10 — fold parallelization. Cuts 4-fold WF from ~8-12h to ~2-3h.
+    parser.add_argument("--parallel", action="store_true",
+                        help="Run folds concurrently via multiprocessing.Pool. "
+                             "Workers default to min(folds, 4). Watch EODHD rate-limit.")
+    parser.add_argument("--workers", type=int, default=4,
+                        help="Worker count when --parallel is set (default 4). "
+                             "EODHD bursts at ~14/sec — keep workers ≤ 4 to stay "
+                             "under daily quota.")
     args = parser.parse_args()
     # Persist the as-of-membership flag for run_backtest_subset to pick up
     if args.as_of_membership:
@@ -628,7 +776,8 @@ if __name__ == "__main__":
         raise SystemExit(0)
 
     results = run_walk_forward(args.folds, args.train_days, args.test_days, args.end_date,
-                               tune_multipliers=args.tune_multipliers)
+                               tune_multipliers=args.tune_multipliers,
+                               parallel=args.parallel, n_workers=args.workers)
     summary = summarize(results)
     # Preserve current weight shifts so --apply-config can replay them
     try:

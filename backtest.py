@@ -627,6 +627,49 @@ def _forward_returns(df_full: pd.DataFrame, as_of_date: pd.Timestamp,
 
 # ── Main Backtest Engine ─────────────────────────────────────────────────────
 
+def _load_or_fetch_infos_cached(universe: list[str], ttl_hours: int = 24) -> dict:
+    """Disk-cached wrapper around get_stock_info_batch.
+
+    yfinance info is "current snapshot" data — same value over 24h.
+    Re-running backtest 5× in a session shouldn't re-fetch 711 ticker info
+    dicts every time. Cache is keyed by the universe-set hash so switching
+    universes (top100 vs sp500_r1000) invalidates automatically.
+
+    Cache file: cache/infos_<sha1>.json with {ts, infos}. Stale -> refetch.
+    """
+    import hashlib, json as _json, time as _time
+    cache_dir = BASE_DIR / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    key = hashlib.sha1(",".join(sorted(universe)).encode()).hexdigest()[:12]
+    cache_path = cache_dir / f"infos_{key}.json"
+    ttl_seconds = ttl_hours * 3600
+
+    if cache_path.exists():
+        try:
+            payload = _json.loads(cache_path.read_text())
+            age = _time.time() - payload.get("ts", 0)
+            if age < ttl_seconds:
+                infos = payload.get("infos", {})
+                if infos:
+                    log.info(f"Cached yfinance info hit ({len(infos)} tickers, "
+                             f"age {age/60:.1f}min, key={key})")
+                    return infos
+            else:
+                log.info(f"yfinance info cache stale (age {age/3600:.1f}h > {ttl_hours}h) — refetching")
+        except Exception as e:
+            log.debug(f"yfinance info cache read failed: {e}")
+
+    log.info(f"Fetching yfinance info for {len(universe)} tickers "
+             f"(current snapshot — see audit #4 look-ahead warning above)...")
+    infos = get_stock_info_batch(universe, max_workers=16)
+    try:
+        cache_path.write_text(_json.dumps({"ts": _time.time(), "infos": infos}))
+        log.info(f"yfinance info cached → {cache_path.name} ({len(infos)} tickers)")
+    except Exception as e:
+        log.debug(f"yfinance info cache write failed: {e}")
+    return infos
+
+
 def _deep_merge(dst: dict, src: dict) -> dict:
     """Recursively merge src into dst (in place). Used by --config-override
     so walk_forward_v2 can pass {setup_score_multiplier: {Trend Continuation: 1.10}}
@@ -944,9 +987,10 @@ def run_backtest(days: int = 252, hold_days: int = 5,
                  f"(BACKTEST_NO_FUNDAMENTALS=1) — using empty info dicts.")
         infos = {t: {"ticker": t} for t in active_universe}
     else:
-        log.info(f"Fetching yfinance info for {len(active_universe)} tickers "
-                 f"(current snapshot — see audit #4 look-ahead warning above)...")
-        infos = get_stock_info_batch(active_universe, max_workers=16)
+        # 2026-05-10 — disk-cache the yfinance info batch with 24h TTL. Saves
+        # ~30-60s per backtest run (re-runs hit cache instantly). Cache key is
+        # the universe set; switching universes invalidates automatically.
+        infos = _load_or_fetch_infos_cached(active_universe, ttl_hours=24)
 
     # Fetch FINVIZ Elite bulk data — better fundamentals + short interest
     log.info("Fetching FINVIZ Elite bulk data...")
@@ -1937,7 +1981,24 @@ def main():
                         help="Use point-in-time S&P 500 membership (data/membership/sp500_YYYY-MM.csv) "
                              "instead of today's. Eliminates survivorship bias (audit #1, Tier 2). "
                              "Requires snapshots — run build_membership_snapshots.py first.")
+    # 2026-05-10 — resource-optimization flags
+    parser.add_argument("--smoke", action="store_true",
+                        help="SMOKE-TEST mode: 5-day window, top 25 by avg dollar volume, "
+                             "auto-portfolio. Designed to validate config changes in <60s "
+                             "before kicking off long runs. Overrides --days, --top-n, --universe.")
+    parser.add_argument("--profile-cprof", action="store_true",
+                        help="Run under cProfile and write top-50 hotspots to "
+                             "cache/logs/backtest_cprofile_<timestamp>.txt. Adds ~5%% overhead.")
     args = parser.parse_args()
+
+    # SMOKE-TEST mode (--smoke) — fastest possible iteration loop
+    if args.smoke:
+        args.days = 5
+        args.top_n = 5
+        args.universe = "top100"
+        args.portfolio = True
+        log.info("=== SMOKE-TEST MODE — 5d window, top-100 universe, portfolio mode ===")
+        log.info("Use this to validate config changes; for real evidence run --days >= 60")
 
     # 2026-05-09 — propagate --as-of-membership via env var so the universe
     # loader (line ~728) picks it up without threading another arg through
@@ -1946,6 +2007,16 @@ def main():
         import os as _os_main
         _os_main.environ["AS_OF_MEMBERSHIP"] = "1"
         log.info("Using point-in-time S&P 500 membership (--as-of-membership)")
+
+    # cProfile wrapper (--profile-cprof). Enables on-demand performance audit
+    # to identify the actual hot paths in backtest.py — guides resource
+    # optimization without guesses. Output written next to scan logs.
+    _profiler = None
+    if args.profile_cprof:
+        import cProfile
+        _profiler = cProfile.Profile()
+        _profiler.enable()
+        log.info("cProfile ON — top-50 hotspots will be written to cache/logs/")
 
     if args.portfolio:
         # 2026-05-09 — log hedge-fund overlay flags. Parsed and recorded in the
@@ -2099,5 +2170,42 @@ def main():
     print(f"Raw results JSON: {json_path}")
 
 
+def _dump_cprofile_if_active():
+    """Write cProfile output if --profile-cprof was passed.
+
+    Called from a finally-block in main() so it fires regardless of
+    success/error.
+    """
+    import sys
+    # Find the profiler in main's frame — set up at top of main() under
+    # `_profiler = cProfile.Profile(); _profiler.enable()`. Walk the stack
+    # to avoid threading the profiler through every function.
+    frame = sys._getframe(1)
+    while frame:
+        prof = frame.f_locals.get("_profiler")
+        if prof is not None:
+            break
+        frame = frame.f_back
+    if not prof:
+        return
+    try:
+        prof.disable()
+        from datetime import datetime as _dt
+        import pstats, io as _io
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        out = BASE_DIR / "cache" / "logs" / f"backtest_cprofile_{ts}.txt"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        s = _io.StringIO()
+        ps = pstats.Stats(prof, stream=s).sort_stats("cumulative")
+        ps.print_stats(50)
+        out.write_text(s.getvalue())
+        log.info(f"cProfile written: {out}")
+    except Exception as e:
+        log.warning(f"cProfile dump failed: {e}")
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        _dump_cprofile_if_active()
