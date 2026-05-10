@@ -34,6 +34,61 @@ function _ctpElliottBannerHTML(T) {
     </div>`;
 }
 
+// 2026-05-10 — EW Rule Gate v1.0 (spec) banner.
+// Distinct from canonical_trade_plan.setup.elliott_wave (which is the legacy
+// heuristic classifier). This banner shows the new 8-state classifier output:
+// elliott_wave_v1 = { ew_state, ew_bullish, ew_bearish, ew_score, t1, t2,
+//                     invalidated, reason, fib_retracement_pct, primary,
+//                     intermediate, minor, mtf_alignment }
+function _ewV1BannerHTML(T) {
+  const v1 = T?.trade_plan?.elliott_wave_v1
+           || T?.canonical_trade_plan?.setup?.elliott_wave_v1
+           || T?.elliott_wave_v1;
+  if (!v1 || v1.ew_state === 'AMBIGUOUS' && v1.ew_score === 0 && !v1.invalidated) {
+    return '';
+  }
+
+  const stateColors = {
+    WAVE3_IMPULSE:     { bg: '#0e2a16', border: '#1a5a32', accent: '#4ade80', label: 'BULLISH · STRONGEST' },
+    WAVE5_IMPULSE:     { bg: '#0e2a16', border: '#1a5a32', accent: '#84cc16', label: 'BULLISH · WEAKENING' },
+    WAVE2_CORRECTION:  { bg: '#2a230e', border: '#5a4a1a', accent: '#f5b441', label: 'NEUTRAL · POTENTIAL W3 ENTRY' },
+    WAVE4_CORRECTION:  { bg: '#2a230e', border: '#5a4a1a', accent: '#f5b441', label: 'NEUTRAL · POTENTIAL W5 ENTRY' },
+    WAVE4_TRIANGLE:    { bg: '#2a230e', border: '#5a4a1a', accent: '#f59e0b', label: 'NEUTRAL · W5 THRUST IMMINENT' },
+    WAVE_A_CORRECTION: { bg: '#2a0e0e', border: '#5a1a1a', accent: '#f87171', label: 'BEARISH · CORRECTIVE LEG A' },
+    WAVE_C_CORRECTION: { bg: '#2a0e0e', border: '#5a1a1a', accent: '#f87171', label: 'BEARISH · FINAL DOWN LEG' },
+    AMBIGUOUS:         { bg: '#1a1f24', border: '#3a4350', accent: '#8a929c', label: 'UNCLEAR · WAIT' },
+  };
+  const c = stateColors[v1.ew_state] || stateColors.AMBIGUOUS;
+  const fibPct = v1.fib_retracement_pct != null ? (v1.fib_retracement_pct * 100).toFixed(1) + '%' : '—';
+  const mtf = v1.mtf_alignment || {};
+  const mtfWarning = mtf.warning ? `<div style="background:rgba(248,113,113,0.12);border:1px solid rgba(248,113,113,0.3);border-radius:4px;padding:6px 10px;margin-top:8px;font-size:11px;color:#fca5a5">⚠ ${mtf.warning}</div>` : '';
+  const invalidated = v1.invalidated ? `<div style="background:rgba(248,113,113,0.18);border:1px solid #ef4444;border-radius:4px;padding:6px 10px;margin-top:8px;font-size:11px;color:#fca5a5">✗ INVALIDATED · ${v1.reason}</div>` : '';
+
+  return `
+    <div style="background:linear-gradient(90deg, ${c.bg}, ${c.bg}cc);border:1px solid ${c.border};border-radius:6px;padding:14px 18px;margin-bottom:12px;font-family:var(--mono);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:10px;letter-spacing:0.18em;color:${c.accent};text-transform:uppercase;font-weight:700">EW Rule Gate v1.0 · Intermediate (Daily)</div>
+        <div style="font-size:9px;color:var(--ink-3);letter-spacing:0.04em">spec ${v1.spec_version || 'v1.0'}</div>
+      </div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--ink-0);align-items:center">
+        <div style="font-size:15px;font-weight:700;color:${c.accent};letter-spacing:0.02em">${(v1.ew_state || '').replace(/_/g, ' ')}</div>
+        <span style="font-size:10px;color:var(--ink-2);font-weight:500">${c.label}</span>
+        <span style="margin-left:auto;background:${c.accent};color:#000;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700">SCORE ${v1.ew_score}/4</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(140px, 1fr));gap:10px;margin-top:10px;font-size:12px;color:var(--ink-1)">
+        ${v1.t1 ? `<div><span style="color:var(--ink-2);font-size:10px">T1 (1.618×W1)</span><br><b style="color:${c.accent};font-size:13px">$${v1.t1}</b></div>` : ''}
+        ${v1.t2 ? `<div><span style="color:var(--ink-2);font-size:10px">T2 (2.618×W1)</span><br><b style="color:${c.accent};font-size:13px">$${v1.t2}</b></div>` : ''}
+        <div><span style="color:var(--ink-2);font-size:10px">W2 retrace</span><br><b style="color:var(--ink-1);font-size:13px">${fibPct}</b></div>
+        ${v1.w1_start != null ? `<div><span style="color:var(--ink-2);font-size:10px">W1 swing</span><br><b style="color:var(--ink-1);font-size:11px">$${v1.w1_start} → $${v1.w1_end}</b></div>` : ''}
+        <div><span style="color:var(--ink-2);font-size:10px">Bullish / Bearish</span><br><b style="font-size:13px">${v1.ew_bullish ? '<span class="green">✓ BULL</span>' : v1.ew_bearish ? '<span class="red">✗ BEAR</span>' : '<span style="color:var(--warn)">○ NEUTRAL</span>'}</b></div>
+        ${mtf.primary_mult != null ? `<div><span style="color:var(--ink-2);font-size:10px">Primary mult</span><br><b style="color:var(--ink-1);font-size:13px">${mtf.primary_mult.toFixed(1)}×</b></div>` : ''}
+      </div>
+      ${v1.reason && !v1.invalidated ? `<div style="font-size:11px;color:var(--ink-2);margin-top:8px;font-style:italic">${v1.reason}</div>` : ''}
+      ${mtfWarning}
+      ${invalidated}
+    </div>`;
+}
+
 export function render() {
   const T = _T();
   const ew = T.elliott_wave || {};
@@ -45,7 +100,7 @@ export function render() {
     const fibs = ew.fib_levels || {};
     const fibOrder = ['23.6%','38.2%','50.0%','61.8%','78.6%','100%','127.2%','161.8%'];
     const tiles = fibOrder.filter(k => fibs[k] != null).map(k => ({k, v: fibs[k]}));
-    $('elliottBody').innerHTML = _ctpElliottBannerHTML(T) + `
+    $('elliottBody').innerHTML = _ewV1BannerHTML(T) + _ctpElliottBannerHTML(T) + `
       <div class="ew-banner" style="background:linear-gradient(90deg,#3a3414,#2a2510);border:1px solid #5a4d1a">
         <span class="lbl" style="color:#e8c860">Current Structure</span>
         <span class="num-pill" style="background:#5a4d1a;color:#fff8d0">—</span>
@@ -81,7 +136,7 @@ export function render() {
   const fibOrder  = ['23.6%','38.2%','50.0%','61.8%','78.6%','100%','127.2%','161.8%'];
   const tiles     = fibOrder.filter(k => fibs[k] != null).map(k => ({k, v: fibs[k], near: nearest[0] === k}));
 
-  $('elliottBody').innerHTML = _ctpElliottBannerHTML(T) + `
+  $('elliottBody').innerHTML = _ewV1BannerHTML(T) + _ctpElliottBannerHTML(T) + `
     <div class="ew-banner">
       <span class="lbl">Current Wave</span>
       <span class="num-pill">${ew.wave_number}</span>

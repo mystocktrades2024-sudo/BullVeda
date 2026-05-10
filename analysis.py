@@ -1191,7 +1191,7 @@ def classify_elliott_wave(df, lookback: int = 90,
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# BHE RULE GATE — Elliott Wave Ruleset v1.0 (May 2026)
+# v1 RULE GATE — Elliott Wave Ruleset v1.0 (May 2026)
 # ════════════════════════════════════════════════════════════════════════════
 # Engine input documentation: complete machine-implementable EW classifier.
 # Implements the 3 absolute impulse rules, 6 corrective patterns, 5 fib-
@@ -1207,8 +1207,8 @@ def classify_elliott_wave(df, lookback: int = 90,
 # Pivots not confirmed in real-time — confirmed 2 bars after the candle.
 # ════════════════════════════════════════════════════════════════════════════
 
-# Engine state → score contribution (BHE spec §EW Score Lookup Table)
-_BHE_EW_STATE_SCORES = {
+# Engine state → score contribution (spec §EW Score Lookup Table)
+_EW_V1_STATE_SCORES = {
     "WAVE3_IMPULSE":     {"score": 4, "bullish": True,  "bearish": False, "verdict_hint": "ENTER"},
     "WAVE5_IMPULSE":     {"score": 2, "bullish": True,  "bearish": False, "verdict_hint": "WATCH"},
     "WAVE4_TRIANGLE":    {"score": 2, "bullish": False, "bearish": False, "verdict_hint": "WATCH"},
@@ -1219,14 +1219,14 @@ _BHE_EW_STATE_SCORES = {
     "AMBIGUOUS":         {"score": 0, "bullish": False, "bearish": False, "verdict_hint": "AMBIGUOUS"},
 }
 
-# Fibonacci retracement levels (BHE spec §RET)
-_BHE_FIB_RETRACE_LEVELS = [0.236, 0.382, 0.500, 0.618, 0.786, 0.886]
-# Fibonacci extension levels (BHE spec §EXT)
-_BHE_FIB_EXT_LEVELS    = [1.000, 1.272, 1.618, 2.618, 4.236]
+# Fibonacci retracement levels (spec §RET)
+_EW_V1_FIB_RETRACE = [0.236, 0.382, 0.500, 0.618, 0.786, 0.886]
+# Fibonacci extension levels (spec §EXT)
+_EW_V1_FIB_EXT    = [1.000, 1.272, 1.618, 2.618, 4.236]
 
 
-def _bhe_find_fractals(df, n_pivots: int = 8) -> list:
-    """Identify confirmed fractal pivots per BHE spec §0.3.
+def _ew_v1_find_fractals(df, n_pivots: int = 8) -> list:
+    """Identify confirmed fractal pivots per spec §0.3.
 
     Fractal High: high[i] > high[i±1] AND high[i] > high[i±2]
     Fractal Low:  low[i]  < low[i±1]  AND low[i]  < low[i±2]
@@ -1261,8 +1261,8 @@ def _bhe_find_fractals(df, n_pivots: int = 8) -> list:
     return pivots[-n_pivots:] if len(pivots) > n_pivots else pivots
 
 
-def _bhe_validate_impulse_rules(w1_start, w1_end, w2_low, w3_high, w4_low) -> tuple[bool, str]:
-    """3 absolute impulse rules (BHE spec §Impulse Rules).
+def _ew_v1_validate_impulse_rules(w1_start, w1_end, w2_low, w3_high, w4_low) -> tuple[bool, str]:
+    """3 absolute impulse rules (spec §Impulse Rules).
 
     Rule 1: Wave 2 never retraces >100% of Wave 1 (W2 low > W1 start).
     Rule 2: Wave 3 is never the shortest impulse wave.
@@ -1284,13 +1284,13 @@ def _bhe_validate_impulse_rules(w1_start, w1_end, w2_low, w3_high, w4_low) -> tu
     return True, "rules_ok"
 
 
-def _bhe_classify_pivots(pivots: list, current_price: float) -> dict:
-    """Map a fractal pivot sequence to one of 8 BHE engine states.
+def _ew_v1_classify_pivots(pivots: list, current_price: float) -> dict:
+    """Map a fractal pivot sequence to one of 8 v1 engine states.
 
     Returns: {ew_state, ew_bullish, ew_bearish, ew_score, t1, t2,
               invalidated, reason, w1_start, w1_end, w2_low}
 
-    Algorithm (BHE spec §Engine Classification):
+    Algorithm (spec §Engine Classification):
       1. Need ≥4 pivots (2 lows + 2 highs) for any classification
       2. Determine HH/HL or LH/LL pattern from last 2 swings
       3. Use last_low (W2 low candidate) and prev_low (W1 start candidate)
@@ -1346,7 +1346,7 @@ def _bhe_classify_pivots(pivots: list, current_price: float) -> dict:
     result["w1_end"]   = round(w1_end, 4)
     result["w2_low"]   = round(w2_low, 4)
 
-    # Targets via Fibonacci extension from W2 low (BHE spec §EXT)
+    # Targets via Fibonacci extension from W2 low (spec §EXT)
     t1 = round(w2_low + (w1_len * 1.618), 4)
     t2 = round(w2_low + (w1_len * 2.618), 4)
 
@@ -1396,10 +1396,10 @@ def _bhe_classify_pivots(pivots: list, current_price: float) -> dict:
     return result
 
 
-def classify_elliott_wave_bhe(df, df_weekly=None, df_4h=None, current_price: float | None = None) -> dict:
-    """BHE Rule Gate v1.0 — Elliott Wave classifier (Intermediate degree).
+def classify_elliott_wave_v1(df, df_weekly=None, df_4h=None, current_price: float | None = None) -> dict:
+    """EW Rule Gate v1.0 — Elliott Wave classifier (Intermediate degree).
 
-    Implements the BHE specification: 8 engine states, 3 absolute impulse rules,
+    Implements the EW v1.0 specification: 8 engine states, 3 absolute impulse rules,
     Fibonacci retracements 23.6-88.6%, Fibonacci extensions 100-423.6%, multi-
     timeframe alignment (Primary modifier × Intermediate base + Minor confirmation).
 
@@ -1409,7 +1409,7 @@ def classify_elliott_wave_bhe(df, df_weekly=None, df_4h=None, current_price: flo
         df_4h:       Optional 4H OHLCV (Minor degree — entry timing)
         current_price: Live price; falls back to last close
 
-    Returns dict matching BHE spec §REF outputs:
+    Returns dict matching spec §REF outputs:
         {
             "ew_state": str (one of 8 states),
             "ew_bullish": bool,
@@ -1424,7 +1424,7 @@ def classify_elliott_wave_bhe(df, df_weekly=None, df_4h=None, current_price: flo
             "minor": {4H classification | None},
             "mtf_alignment": {primary_mult, minor_aligned, warning?},
             "fib_retracement_pct": float,
-            "spec_version": "BHE-v1.0",
+            "spec_version": "v1.0",
         }
     """
     out = {
@@ -1433,7 +1433,7 @@ def classify_elliott_wave_bhe(df, df_weekly=None, df_4h=None, current_price: flo
         "invalidated": False, "reason": "",
         "intermediate": None, "primary": None, "minor": None,
         "mtf_alignment": {}, "fib_retracement_pct": None,
-        "spec_version": "BHE-v1.0",
+        "spec_version": "v1.0",
     }
     if df is None or len(df) < 30:
         out["reason"] = "Insufficient daily history (need >=30 bars)"
@@ -1447,8 +1447,8 @@ def classify_elliott_wave_bhe(df, df_weekly=None, df_4h=None, current_price: flo
             return out
 
     # ── Intermediate degree (Daily) — drives the verdict ──
-    intermediate_pivots = _bhe_find_fractals(df, n_pivots=8)
-    intermediate = _bhe_classify_pivots(intermediate_pivots, current_price)
+    intermediate_pivots = _ew_v1_find_fractals(df, n_pivots=8)
+    intermediate = _ew_v1_classify_pivots(intermediate_pivots, current_price)
     out["intermediate"] = intermediate
 
     # Adopt intermediate as the base
@@ -1464,8 +1464,8 @@ def classify_elliott_wave_bhe(df, df_weekly=None, df_4h=None, current_price: flo
 
     # ── Primary degree (Weekly) — bias modifier ──
     if df_weekly is not None and len(df_weekly) >= 20:
-        primary_pivots = _bhe_find_fractals(df_weekly, n_pivots=6)
-        primary = _bhe_classify_pivots(primary_pivots, current_price)
+        primary_pivots = _ew_v1_find_fractals(df_weekly, n_pivots=6)
+        primary = _ew_v1_classify_pivots(primary_pivots, current_price)
         out["primary"] = primary
 
         # Primary bullish states: WAVE3_IMPULSE, WAVE5_IMPULSE, WAVE2_CORRECTION
@@ -1490,8 +1490,8 @@ def classify_elliott_wave_bhe(df, df_weekly=None, df_4h=None, current_price: flo
 
     # ── Minor degree (4H) — entry timing confirmation ──
     if df_4h is not None and len(df_4h) >= 20:
-        minor_pivots = _bhe_find_fractals(df_4h, n_pivots=6)
-        minor = _bhe_classify_pivots(minor_pivots, current_price)
+        minor_pivots = _ew_v1_find_fractals(df_4h, n_pivots=6)
+        minor = _ew_v1_classify_pivots(minor_pivots, current_price)
         out["minor"] = minor
         minor_aligned = minor["ew_state"] in ("WAVE3_IMPULSE", "WAVE4_CORRECTION")
         out["mtf_alignment"]["minor_aligned"] = minor_aligned
@@ -1501,7 +1501,7 @@ def classify_elliott_wave_bhe(df, df_weekly=None, df_4h=None, current_price: flo
 
 def gate_g3_quant_veto(ew_result: dict, mc_p50: float | None,
                         current_price: float, wyckoff_phase: str = "") -> dict:
-    """Gate G3 — Quant Veto (BHE spec §G3).
+    """Gate G3 — Quant Veto (spec §G3).
 
     Combines EW + Monte Carlo + Wyckoff into a 3-theory consensus check.
     Hard veto fires only when BOTH EW is bearish AND MC P50 is below current
@@ -1509,7 +1509,7 @@ def gate_g3_quant_veto(ew_result: dict, mc_p50: float | None,
     on dual confirmation.
 
     Args:
-        ew_result:      Output of classify_elliott_wave_bhe()
+        ew_result:      Output of classify_elliott_wave_v1()
         mc_p50:         Monte Carlo median forward price (None if unavailable)
         current_price:  Live price
         wyckoff_phase:  String (MARKUP / ACCUMULATION_LATE / DISTRIBUTION / etc.)
@@ -5839,7 +5839,7 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
         # Override default ATR/resistance-based targets when Wave 3 is detected with
         # at least medium confidence.
         _ew_data = None
-        _ew_bhe = None
+        _ew_v1 = None
         try:
             _ew_cfg = (_cfg.get("scoring") or {}).get("elliott_wave") or {}
             if _ew_cfg.get("enabled", True):
@@ -5858,14 +5858,14 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
                         target2 = round(_t2_ew, 2)
                     rr_ratio = round((target1 - entry_mid) / max(entry_mid - stop, 0.01), 1)
 
-            # 2026-05-10 — BHE Rule Gate v1.0 EW classifier (Phase 1, display-only).
+            # 2026-05-10 — EW Rule Gate v1.0 EW classifier (Phase 1, display-only).
             # Runs in parallel to legacy classifier. Output stored on plan as
             # `elliott_wave_v1` for canonical_trade_plan + Models tab display.
             # Does NOT alter target1/target2 in this Phase 1 release.
             try:
-                _ew_bhe = classify_elliott_wave_bhe(df, current_price=price)
+                _ew_v1 = classify_elliott_wave_v1(df, current_price=price)
             except Exception:
-                _ew_bhe = None
+                _ew_v1 = None
         except Exception:
             pass  # never fail trade_plan due to EW classifier
 
@@ -5876,7 +5876,7 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
         # Sources by horizon:
         #   short  (2-5d):   fractal_high (above price)
         #   medium (5-15d):  fib extension on swing (4H/Daily — daily here)
-        #   long   (15-30d): EW BHE Intermediate (Wave-3 1.618×W1 = T1)
+        #   long   (15-30d): EW v1 Intermediate (Wave-3 1.618×W1 = T1)
         try:
             # _target_sources dict initialized at outer function scope above
             # (so the post-plan-init assignment can find it).
@@ -5930,18 +5930,18 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
             except Exception:
                 pass
 
-            # Source 3 — EW BHE Intermediate-degree targets (medium/long horizon)
-            if _ew_bhe and _ew_bhe.get("t1") and _ew_bhe.get("t1") > price * 1.005:
+            # Source 3 — EW v1 Intermediate-degree targets (medium/long horizon)
+            if _ew_v1 and _ew_v1.get("t1") and _ew_v1.get("t1") > price * 1.005:
                 _target_sources["ew_intermediate_t1"] = {
                     "horizon": "medium",
-                    "level": round(float(_ew_bhe["t1"]), 2),
-                    "rationale": f"EW BHE {_ew_bhe.get('ew_state','?')} — Wave-3 1.618×W1 from W2 low",
+                    "level": round(float(_ew_v1["t1"]), 2),
+                    "rationale": f"EW v1 {_ew_v1.get('ew_state','?')} — Wave-3 1.618×W1 from W2 low",
                 }
-            if _ew_bhe and _ew_bhe.get("t2") and _ew_bhe.get("t2") > price * 1.005:
+            if _ew_v1 and _ew_v1.get("t2") and _ew_v1.get("t2") > price * 1.005:
                 _target_sources["ew_intermediate_t2"] = {
                     "horizon": "long",
-                    "level": round(float(_ew_bhe["t2"]), 2),
-                    "rationale": f"EW BHE {_ew_bhe.get('ew_state','?')} — Wave-3 2.618×W1 from W2 low",
+                    "level": round(float(_ew_v1["t2"]), 2),
+                    "rationale": f"EW v1 {_ew_v1.get('ew_state','?')} — Wave-3 2.618×W1 from W2 low",
                 }
 
             # Phase 1: target_sources will be attached to `plan` AFTER it's
@@ -6245,11 +6245,11 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
 
     # K5 (2026-05-09): expose Elliott Wave dict so Models tab can display it.
     # _ew_data is set inside the long-direction branch above when applicable.
-    # 2026-05-10: also expose the BHE Rule Gate v1.0 classifier output
+    # 2026-05-10: also expose the EW Rule Gate v1.0 classifier output
     # (8-state engine, 3 absolute rules, multi-timeframe ready).
     if direction == "long":
         try:
-            plan["elliott_wave_v1"] = _ew_bhe   # NEW — BHE Rule Gate v1.0
+            plan["elliott_wave_v1"] = _ew_v1   # NEW — EW Rule Gate v1.0
             # Phase 1 (2026-05-10) — attach structural target sources
             if _target_sources:
                 plan["target_sources"] = _target_sources
@@ -7090,7 +7090,7 @@ def make_decision(total_score: float, rr_ratio: float, config: dict,
                   # Hysteresis (3.4): ticker used to look up recent verdicts
                   ticker: str = "",
                   catalyst_tier: int = 3,
-                  # BHE Gap 1: Monte Carlo P(profit) — soft gate when below threshold
+                  # v1 Gap 1: Monte Carlo P(profit) — soft gate when below threshold
                   mc_p_profit: float | None = None) -> dict:
     """
     Clean sequential decision ladder (Fix #14):
@@ -7439,7 +7439,7 @@ def make_decision(total_score: float, rr_ratio: float, config: dict,
                 "bear_type": "",
                 "reason": f"Gap risk: opened {todays_gap_pct:+.1f}% — wait for 30-min opening range before chasing"}
 
-    # BHE Gap 1: Monte Carlo P(profit) gate — demote BUY → WATCH when below threshold.
+    # v1 Gap 1: Monte Carlo P(profit) gate — demote BUY → WATCH when below threshold.
     # Default threshold 0.55, configurable via config.gates.min_mc_p_profit.
     # Disabled by default (config.gates.require_mc_p_profit=true to enable).
     if (direction == "long" and mc_p_profit is not None
@@ -8651,7 +8651,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     # consumers already read this field as the "Catalyst" pillar in result dicts.
     cat_score_norm = round(opt["score"] / max(opt.get("max", _opt_rmax), 1) * _pillar_cat_max)
 
-    # BHE Gap 6: data prep. Cap is applied AFTER direction is resolved (~line 7350).
+    # v1 Gap 6: data prep. Cap is applied AFTER direction is resolved (~line 7350).
     _fund_details = (fund or {}).get("details") or {}
     _net_margin = _fund_details.get("net_margin_pct")
     _roe = _fund_details.get("roe") or _fund_details.get("return_on_equity")
@@ -8672,7 +8672,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     # Pillar 4 — Smart Money / Sentiment
     sm_score_norm = round(sent["score"] / max(sent.get("max", _sent_rmax), 1) * _pillar_sm_max)
 
-    # BHE Gap 4: data prep. Floor is applied AFTER direction is resolved (~line 7350).
+    # v1 Gap 4: data prep. Floor is applied AFTER direction is resolved (~line 7350).
     _bhe4_uoa = bool((options_data or {}).get("uoa", False) or (opt.get("uoa", False) if isinstance(opt, dict) else False))
     if False and _bhe4_uoa:  # disabled inline; applied below after direction resolves
         _sm_floor = round(_pillar_sm_max * 8.0 / 15.0)
@@ -8912,7 +8912,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         else:
             direction = "short" if _is_downtrend else "long"
 
-    # BHE Gap 4 + 6: now that `direction` is resolved, apply pillar caps/floors
+    # v1 Gap 4 + 6: now that `direction` is resolved, apply pillar caps/floors
     # for long candidates. (See data prep above near pillar normalization.)
     # raw_total + normalized are RE-SUMMED below to reflect the cap/floor.
     if direction == "long":
@@ -9374,7 +9374,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     normalized_raw = float(max(0.0, min(100.0, float(normalized))))
     normalized = int(round(normalized_raw))
 
-    # BHE Gap 1: heuristic P(profit) computed before make_decision so it can
+    # v1 Gap 1: heuristic P(profit) computed before make_decision so it can
     # be passed in as a 5th gate input. Always computed (cheap, no I/O); only
     # gated when config.gates.require_mc_p_profit is True.
     _mc_p_profit_val = compute_mc_p_profit(
@@ -9756,7 +9756,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     }
     # Audit ranking flaw #16/#17: attach per-pillar breakdown for regression
     result["scoring_breakdown"] = scoring_breakdown
-    # BHE Gap 1: surface MC P(profit) for UI consumption
+    # v1 Gap 1: surface MC P(profit) for UI consumption
     result["mc_p_profit"] = round(_mc_p_profit_val, 3)
     return result
 

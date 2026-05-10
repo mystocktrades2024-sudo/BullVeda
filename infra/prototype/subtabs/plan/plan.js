@@ -331,11 +331,58 @@ export function render() {
     </div>`;
   })() : '';
 
+  // Phase 1 (2026-05-10) — STRUCTURAL TARGET SOURCES (display-only).
+  // Aggregates target candidates from objective TA sources by horizon:
+  //   short (2-5d):   fractal_high (Williams 5-bar)
+  //   medium (5-15d): fib_127_extension, fib_162_extension, ew_intermediate_t1
+  //   long (15-30d):  ew_intermediate_t2
+  // Source: T.target_sources or T.trade_plan.target_sources (set by
+  // compute_trade_plan in analysis.py 2026-05-10).
+  const _targetSources = T.target_sources || (T.trade_plan || {}).target_sources || {};
+  const _horizonColor = { short: 'var(--accent)', medium: 'var(--warn)', long: 'var(--info)' };
+  const _sourceLabels = {
+    fractal_high:        'Fractal High',
+    fib_127_extension:   'Fib 127.2% ext',
+    fib_162_extension:   'Fib 161.8% ext',
+    ew_intermediate_t1:  'EW Wave-3 T1 (1.618×W1)',
+    ew_intermediate_t2:  'EW Wave-3 T2 (2.618×W1)',
+    ew_major_t1:         'EW Major T1',
+    order_block:         'Order Block (SMC)',
+  };
+  const _structuralTargetsCard = Object.keys(_targetSources).length > 0 ? `
+  <div class="card" style="background:var(--bg-1);border:1px solid var(--rule);border-radius:8px;padding:14px 16px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span style="font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-2);font-weight:700">Structural Target Sources</span>
+      <span style="font-size:10px;color:var(--ink-3);font-style:italic">Phase 1 · display-only · engine T1/T2 unchanged</span>
+      <span style="margin-left:auto;font-size:9px;color:var(--ink-3);font-family:var(--mono)">${Object.keys(_targetSources).length} sources</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:8px">
+      ${Object.entries(_targetSources).map(([key, src]) => {
+        const lbl = _sourceLabels[key] || key.replace(/_/g, ' ');
+        const hzColor = _horizonColor[src.horizon] || 'var(--ink-2)';
+        const deltaPct = T.price > 0 ? ((src.level - T.price) / T.price * 100) : 0;
+        return `
+        <div style="background:var(--bg-2);border:1px solid var(--rule);border-radius:6px;padding:10px 12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;background:${hzColor};color:#000;text-transform:uppercase;letter-spacing:0.04em">${src.horizon}</span>
+            <span style="font-size:11px;font-weight:600;color:var(--ink-1)">${lbl}</span>
+            <span style="margin-left:auto;font-family:var(--mono);font-size:13px;font-weight:700;color:${hzColor}">$${px(src.level)}</span>
+          </div>
+          <div style="font-size:10px;color:var(--ink-3);line-height:1.4;margin-top:4px">
+            ${src.rationale || ''}
+            <span style="float:right;font-family:var(--mono);color:${deltaPct > 0 ? 'var(--pass)' : 'var(--fail)'}">${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)}%</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>` : '';
+
   $('planBody').innerHTML = `
   ${_rrInconsistentBanner}
   ${_auditTrailHTML}
   ${_accuracyStripHTML}
   ${_forwardDistStripHTML}
+  ${_structuralTargetsCard}
   <div class="plan-stats">
     <div class="plan-stat now">   <span class="lbl">NOW</span>    <span class="v">$${px(T.price)}</span></div>
     <div class="plan-stat stop">  <span class="lbl">STOP</span>   <span class="v">$${px(T.stop)}</span></div>
