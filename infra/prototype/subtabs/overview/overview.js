@@ -59,20 +59,38 @@ export function render() {
   const rsS   = +(T.rs_score   || sb.rs_score   || 0);
   const smS   = +(T.sm_score   || sb.sm_score   || 0);
   const qS    = +(T.qg_score   || sb.qg_score   || T.fund_score || 0);
+  // ── 2026-05-10: align Overview reads with sibling-tab canonical sources ──
+  // Technicals: read T.technicals.indicators FIRST (matches subtabs/technicals/chart.js)
   const techI = T.technicals?.indicators || {};
-  const rsi = +(T.rsi || techI.rsi || 0);
-  const rvol = +(T.rvol || techI.rvol || 0);
-  const adx = +(T.adx || techI.adx || 0);
-  const atrPct = +(T.atr_pct || techI.atr_pct || 0);
-  const above50 = !!(T.above_50ema || techI.above_ema50);
-  const above200 = !!(T.above_200sma || techI.above_sma200);
-  const macdBull = !!(T.macd_bullish || techI.macd_bullish);
-  const sqz = !!(T.squeeze_on || techI.squeeze_on);
+  const rsi = +(techI.rsi ?? T.rsi ?? 0);
+  const rvol = +(techI.rvol ?? T.rvol ?? 0);
+  const adx = +(techI.adx ?? T.adx ?? 0);
+  const atrPct = +(techI.atr_pct ?? T.atr_pct ?? 0);
+  const above50 = !!(techI.above_ema50 ?? T.above_50ema);
+  const above200 = !!(techI.above_sma200 ?? T.above_200sma);
+  const macdBull = !!(techI.macd_bullish ?? T.macd_bullish);
+  const sqz = !!(techI.squeeze_on ?? T.squeeze_on);
   const rsRank = T.rs_rank || 0;
   const setupTxt = T.setup_family || T.setup || '';
   const catTags = (T.catalyst_tags || []).slice(0, 6);
-  const ins = T.insider_data || {};
-  const ana = T.analyst || {};
+
+  // Insider: read T.insider_full FIRST (matches subtabs/insider/aggregate.js precedence)
+  const ins  = T.insider_full || T.insider || T.insider_data || {};
+
+  // Sentiment: pull from canonical objects matching subtabs/sentiment/aggregate.js
+  const ana       = T.analyst_full || T.analyst || {};
+  const eodhdSent = T.eodhd_sentiment || {};
+  const newsScore = T.news_sentiment_score || {};
+  const newsArts  = T.news_articles || [];
+
+  // Fundamentals: pull from T.fund_details / T.fund_real / T.eodhd_fund_extras
+  // FIRST (matches subtabs/fundamentals/fundamentals.js); fall back to flat fields.
+  const fd  = T.fund_details || {};
+  const fr  = T.fund_real || {};
+  const fx  = T.eodhd_fund_extras || {};
+
+  // Options: pull from T.options_iv FIRST (matches subtabs/options/*)
+  const oiv = T.options_iv || {};
   const fmtMcap = m => !m ? '—' : m >= 1e12 ? '$' + (m/1e12).toFixed(2) + 'T' : m >= 1e9 ? '$' + (m/1e9).toFixed(1) + 'B' : '$' + (m/1e6).toFixed(0) + 'M';
 
   // SVG score arc
@@ -225,44 +243,65 @@ export function render() {
   <div class="elite-ov">
     <div class="elite-ov-tile">
       <div class="elite-ov-h">FUNDAMENTALS</div>
+      <!-- 2026-05-10: pull from T.fund_details / T.fund_real / T.eodhd_fund_extras
+           FIRST so Overview matches the Fundamentals tab's numbers exactly.
+           Falls back to flat T.* fields only when objects missing. -->
       <div class="ov-mini4">
-        <div><div class="l">MCAP</div><div class="v">${fmtMcap(T.market_cap)}</div></div>
-        <div><div class="l">BETA</div><div class="v">${T.beta ? (+T.beta).toFixed(2) : '—'}</div></div>
-        <div><div class="l">FWD P/E</div><div class="v">${T.fwd_pe ? (+T.fwd_pe).toFixed(1) : '—'}</div></div>
-        <div><div class="l">PEG</div><div class="v">${T.peg ? (+T.peg).toFixed(2) : '—'}</div></div>
+        <div><div class="l">MCAP</div><div class="v">${fmtMcap(fr.market_cap ?? fd.market_cap ?? T.market_cap)}</div></div>
+        <div><div class="l">BETA</div><div class="v">${(fr.beta ?? fd.beta ?? T.beta) != null ? (+(fr.beta ?? fd.beta ?? T.beta)).toFixed(2) : '—'}</div></div>
+        <div><div class="l">FWD P/E</div><div class="v">${(fr.fwd_pe ?? fx.forward_pe ?? T.fwd_pe) != null ? (+(fr.fwd_pe ?? fx.forward_pe ?? T.fwd_pe)).toFixed(1) : '—'}</div></div>
+        <div><div class="l">PEG</div><div class="v">${(fr.peg ?? fx.peg ?? T.peg) != null ? (+(fr.peg ?? fx.peg ?? T.peg)).toFixed(2) : '—'}</div></div>
       </div>
       <div class="ov-mini4" style="margin-top:6px">
-        <div><div class="l">REV GR</div><div class="v ${(T.rev_growth||0) > 10 ? 'up' : (T.rev_growth||0) < 0 ? 'dn' : ''}">${T.rev_growth != null ? (+T.rev_growth).toFixed(1)+'%' : '—'}</div></div>
-        <div><div class="l">NET MGN</div><div class="v">${T.net_margin != null ? (+T.net_margin).toFixed(1)+'%' : '—'}</div></div>
-        <div><div class="l">ROE</div><div class="v">${T.roe ? (+T.roe).toFixed(1)+'%' : '—'}</div></div>
-        <div><div class="l">DEBT/E</div><div class="v">${T.debt_to_equity ? (+T.debt_to_equity).toFixed(1) : '—'}</div></div>
+        <div><div class="l">REV GR</div><div class="v ${((fr.rev_growth ?? fd.rev_growth ?? T.rev_growth) || 0) > 10 ? 'up' : ((fr.rev_growth ?? fd.rev_growth ?? T.rev_growth) || 0) < 0 ? 'dn' : ''}">${(fr.rev_growth ?? fd.rev_growth ?? T.rev_growth) != null ? (+(fr.rev_growth ?? fd.rev_growth ?? T.rev_growth)).toFixed(1)+'%' : '—'}</div></div>
+        <div><div class="l">NET MGN</div><div class="v">${(fr.net_margin ?? fd.net_margin ?? T.net_margin) != null ? (+(fr.net_margin ?? fd.net_margin ?? T.net_margin)).toFixed(1)+'%' : '—'}</div></div>
+        <div><div class="l">ROE</div><div class="v">${(fr.roe ?? fd.roe ?? T.roe) != null ? (+(fr.roe ?? fd.roe ?? T.roe)).toFixed(1)+'%' : '—'}</div></div>
+        <div><div class="l">DEBT/E</div><div class="v">${(fr.debt_to_equity ?? fd.debt_to_equity ?? T.debt_to_equity) != null ? (+(fr.debt_to_equity ?? fd.debt_to_equity ?? T.debt_to_equity)).toFixed(1) : '—'}</div></div>
       </div>
     </div>
 
     <div class="elite-ov-tile">
       <div class="elite-ov-h">SMART MONEY</div>
+      <!-- 2026-05-10: insider counts from T.insider_full first (matches Insider tab);
+           options metrics from T.options_iv (matches Options tab). -->
       <div class="ov-mini4">
-        <div><div class="l">INSIDER ↑</div><div class="v ${(ins.buys || T.insider_buys || 0) > 0 ? 'up' : ''}">${ins.buys || T.insider_buys || 0}</div></div>
-        <div><div class="l">INSIDER ↓</div><div class="v ${(ins.sells || T.insider_sells || 0) > 0 ? 'dn' : ''}">${ins.sells || T.insider_sells || 0}</div></div>
-        <div><div class="l">SHORT %</div><div class="v ${(T.short_pct||0) > 20 ? 'warn' : ''}">${T.short_pct != null ? (+T.short_pct).toFixed(1)+'%' : '—'}</div></div>
-        <div><div class="l">INST OWN</div><div class="v">${T.inst_own_pct != null ? (+T.inst_own_pct).toFixed(0)+'%' : '—'}</div></div>
+        <div><div class="l">INSIDER ↑</div><div class="v ${(ins.buys_30d ?? ins.buys ?? T.insider_buys ?? 0) > 0 ? 'up' : ''}">${ins.buys_30d ?? ins.buys ?? T.insider_buys ?? 0}</div></div>
+        <div><div class="l">INSIDER ↓</div><div class="v ${(ins.sells_30d ?? ins.sells ?? T.insider_sells ?? 0) > 0 ? 'dn' : ''}">${ins.sells_30d ?? ins.sells ?? T.insider_sells ?? 0}</div></div>
+        <div><div class="l">SHORT %</div><div class="v ${(fr.short_pct ?? T.short_pct ?? 0) > 20 ? 'warn' : ''}">${(fr.short_pct ?? T.short_pct) != null ? (+(fr.short_pct ?? T.short_pct)).toFixed(1)+'%' : '—'}</div></div>
+        <div><div class="l">INST OWN</div><div class="v">${(fr.inst_own_pct ?? T.inst_own_pct) != null ? (+(fr.inst_own_pct ?? T.inst_own_pct)).toFixed(0)+'%' : '—'}</div></div>
       </div>
       <div class="ov-mini4" style="margin-top:6px">
-        <div><div class="l">FLOAT</div><div class="v">${T.float_shares ? fmtMcap(T.float_shares).replace('$','') : '—'}</div></div>
-        <div><div class="l">UOA</div><div class="v ${T.uoa_score > 0 ? 'up' : ''}">${T.uoa_score || '—'}</div></div>
-        <div><div class="l">IV RANK</div><div class="v">${T.iv_rank != null ? (+T.iv_rank).toFixed(0) : '—'}</div></div>
-        <div><div class="l">P/C</div><div class="v">${T.put_call_ratio != null ? (+T.put_call_ratio).toFixed(2) : '—'}</div></div>
+        <div><div class="l">FLOAT</div><div class="v">${(fr.float_shares ?? T.float_shares) ? fmtMcap(fr.float_shares ?? T.float_shares).replace('$','') : '—'}</div></div>
+        <div><div class="l">UOA</div><div class="v ${(oiv.uoa_calls ?? T.uoa_score ?? 0) > 0 ? 'up' : ''}">${oiv.uoa_calls ?? T.uoa_score ?? '—'}</div></div>
+        <div><div class="l">IV RANK</div><div class="v">${(oiv.iv_rank ?? T.iv_rank) != null ? (+(oiv.iv_rank ?? T.iv_rank)).toFixed(0) : '—'}</div></div>
+        <div><div class="l">P/C</div><div class="v">${(oiv.put_call_ratio ?? T.put_call_ratio) != null ? (+(oiv.put_call_ratio ?? T.put_call_ratio)).toFixed(2) : '—'}</div></div>
       </div>
     </div>
 
     <div class="elite-ov-tile">
       <div class="elite-ov-h">SENTIMENT</div>
-      <div class="ov-stat-grid">
-        <div><span class="l">News</span><span class="v ${(T.news||0) > 0 ? 'up' : (T.news||0) < 0 ? 'dn' : ''}">${(T.news||0) > 0 ? 'Bullish' : (T.news||0) < 0 ? 'Bearish' : 'Neutral'}</span></div>
-        <div><span class="l">Analyst</span><span class="v ${(ana.consensus||'').toLowerCase().includes('buy') ? 'up' : (ana.consensus||'').toLowerCase().includes('sell') ? 'dn' : ''}">${ana.consensus && ana.consensus !== '—' ? ana.consensus : T.analyst_consensus || '—'}</span></div>
-        <div><span class="l">PT mean</span><span class="v">${ana.target_mean ? '$' + (+ana.target_mean).toFixed(2) : T.analyst_target ? '$' + (+T.analyst_target).toFixed(2) : '—'}</span></div>
-        <div><span class="l">Upside</span><span class="v ${(ana.upside_pct || T.analyst_upside || 0) > 0 ? 'up' : 'dn'}">${ana.upside_pct != null ? (+ana.upside_pct).toFixed(0)+'%' : T.analyst_upside != null ? (+T.analyst_upside).toFixed(0)+'%' : '—'}</span></div>
-      </div>
+      <!-- 2026-05-10: news bias from T.news_sentiment_score / T.eodhd_sentiment
+           (matches Sentiment + News tabs); analyst from T.analyst_full. -->
+      ${(() => {
+        // Resolve news bias: prefer aggregate score from T.news_sentiment_score,
+        // then EODHD aggregate, then legacy T.news. Same precedence as Sentiment tab.
+        const newsAvg = newsScore.avg_sentiment != null ? +newsScore.avg_sentiment :
+                        eodhdSent.avg != null ? +eodhdSent.avg :
+                        +(T.news || 0);
+        const newsBias = newsAvg > 0.05 ? 'Bullish' : newsAvg < -0.05 ? 'Bearish' : 'Neutral';
+        const newsClass = newsAvg > 0.05 ? 'up' : newsAvg < -0.05 ? 'dn' : '';
+        const newsCount = newsArts.length || newsScore.n_articles || '—';
+        const consensus = ana.consensus || ana.recommendation || T.analyst_consensus || '—';
+        const ptMean    = ana.target_mean ?? ana.targetMeanPrice ?? T.analyst_target;
+        const upside    = ana.upside_pct ?? T.analyst_upside;
+        return `
+        <div class="ov-stat-grid">
+          <div><span class="l">News</span><span class="v ${newsClass}">${newsBias}${newsCount !== '—' ? ` <span style="opacity:.6;font-size:10px">(${newsCount})</span>` : ''}</span></div>
+          <div><span class="l">Analyst</span><span class="v ${(consensus||'').toLowerCase().includes('buy') ? 'up' : (consensus||'').toLowerCase().includes('sell') ? 'dn' : ''}">${consensus !== '—' ? consensus : '—'}</span></div>
+          <div><span class="l">PT mean</span><span class="v">${ptMean ? '$' + (+ptMean).toFixed(2) : '—'}</span></div>
+          <div><span class="l">Upside</span><span class="v ${(upside||0) > 0 ? 'up' : 'dn'}">${upside != null ? (+upside).toFixed(0)+'%' : '—'}</span></div>
+        </div>`;
+      })()}
     </div>
 
     <div class="elite-ov-tile">
