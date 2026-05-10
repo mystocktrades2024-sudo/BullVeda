@@ -2691,6 +2691,50 @@ def run_daily_scan(force_fresh: bool = False):
             mc   = c.get("monte_carlo") or {}
             fd   = c.get("forward_dist") or {}
             conv = c.get("conviction")    or {}
+            tier1 = c.get("tier1_signals") or {}
+            options = c.get("options_iv") or {}
+            ins   = c.get("insider") or {}
+            news  = c.get("news") or {}
+            zacks = c.get("zacks_per_ticker") or {}
+            # A6 (2026-05-09): entry-time features for future ML training.
+            # Per d3e6127ff lesson: mover_predictor v2 failed because these
+            # features weren't logged at scan time. Logging now → 30-90 day
+            # corpus → train classifier on real entry-time data, not derived.
+            sma = ind.get("sma_distance_pct") or {}
+            entry_features = {
+                "ef_volume_surge_5d":   ind.get("rvol_5d") or ind.get("rvol"),
+                "ef_volume_surge_20d":  ind.get("rvol_20d"),
+                "ef_atr_pct":           ind.get("atr_pct") or ind.get("atr_pct_close"),
+                "ef_atr_expansion":     ind.get("atr_expansion") or ind.get("atr_pct_change_5d"),
+                "ef_dist_52w_high_pct": ind.get("dist_52w_high_pct"),
+                "ef_dist_20d_high_pct": ind.get("dist_20d_high_pct"),
+                "ef_rsi14":             ind.get("rsi") or ind.get("rsi14"),
+                "ef_macd_hist":         ind.get("macd_hist"),
+                "ef_stoch_rsi":         ind.get("stoch_rsi"),
+                "ef_obv_slope":         ind.get("obv_slope"),
+                "ef_mfi":               ind.get("mfi"),
+                "ef_cmf":               ind.get("cmf"),
+                "ef_dist_ema8_pct":     sma.get("ema8") if isinstance(sma, dict) else None,
+                "ef_dist_ema21_pct":    sma.get("ema21") if isinstance(sma, dict) else None,
+                "ef_dist_ema50_pct":    sma.get("ema50") if isinstance(sma, dict) else None,
+                "ef_dist_ema200_pct":   sma.get("ema200") if isinstance(sma, dict) else None,
+                "ef_in_squeeze":        bool(ind.get("squeeze") or ind.get("ttm_squeeze")),
+                "ef_squeeze_release":   bool(ind.get("squeeze_released")),
+                # Catalyst density features
+                "ef_tier1_total_pts":   tier1.get("total_points"),
+                "ef_tier1_count":       tier1.get("count"),
+                "ef_has_pead":          bool(tier1.get("pead")),
+                "ef_has_uoa_calls":     options.get("uoa_calls", 0) > 0,
+                "ef_has_uoa_puts":      options.get("uoa_puts", 0) > 0,
+                "ef_iv_rank":           options.get("iv_rank") or options.get("current_iv"),
+                "ef_put_call_ratio":    options.get("put_call_ratio"),
+                "ef_insider_score":     ins.get("score") or ins.get("insider_score"),
+                "ef_insider_cluster_30d": ins.get("cluster_30d") or ins.get("buys_30d"),
+                "ef_news_sentiment":    news.get("sentiment_score") or news.get("composite_score"),
+                "ef_news_count_7d":     news.get("count_7d") or news.get("recent_count"),
+                "ef_zacks_rank":        zacks.get("rank") or zacks.get("zacks_rank"),
+                "ef_earn_days":         c.get("earn_days") or c.get("days_to_earnings"),
+            }
             return {
                 "ticker":      c.get("ticker", ""),
                 "strategy":    plan.get("setup_type") or c.get("setup_family", "Core Swing"),
@@ -2715,6 +2759,8 @@ def run_daily_scan(force_fresh: bool = False):
                 "mc_p_stop_first":      mc.get("p_hit_stop_first"),
                 "fd_var_95_pct":        fd.get("var_95_pct"),
                 "fd_cvar_975_pct":      fd.get("cvar_975_pct"),
+                # A6 (2026-05-09): entry-time feature suite for ML training corpus
+                **entry_features,
             }
         # Swing-mode signals (this scan's primary output)
         _signal_payload = (
