@@ -83,25 +83,29 @@ async function _loadAndOverride(modulePath) {
 }
 
 (async function _boot() {
-  // Step 1: cache-bust version
+  // Steps 1+2 combined (PERF-1b 2026-05-09): single /api/v2-bootstrap call.
+  // HTML head has <link rel="preload"> so browser warms this response early.
   try {
-    const r = await fetch('./_v', {cache: 'no-store', credentials: 'include'});
-    window.__moduleVersion = r.ok ? (await r.text()).trim() : String(Date.now());
-  } catch (_) { window.__moduleVersion = String(Date.now()); }
-  console.log(`[detail-shell] module cache-bust version: ${window.__moduleVersion}`);
-
-  // Step 2: registry
-  try {
-    const r = await fetch('/api/capability-registry', {credentials: 'include'});
-    if (!r.ok) {
-      console.warn(`[detail-shell] registry fetch returned ${r.status}; no overrides`);
-      return;
+    const r = await fetch('/api/v2-bootstrap', {credentials: 'include'});
+    if (r.ok) {
+      const j = await r.json();
+      window.__moduleVersion = j.version || String(Date.now());
+      REGISTRY = j.registry;
+      console.log(`[detail-shell] bootstrap: v=${window.__moduleVersion}, ${Object.keys(REGISTRY.sub_tabs || {}).length} sub-tabs (1 RTT)`);
+    } else {
+      throw new Error(`bootstrap ${r.status}`);
     }
-    REGISTRY = await r.json();
-    console.log(`[detail-shell] loaded registry: ${Object.keys(REGISTRY.sub_tabs || {}).length} sub-tabs`);
   } catch (e) {
-    console.error('[detail-shell] registry fetch failed:', e);
-    return;
+    console.warn('[detail-shell] bootstrap failed, falling back:', e.message);
+    try {
+      const r = await fetch('./_v', {cache: 'no-store', credentials: 'include'});
+      window.__moduleVersion = r.ok ? (await r.text()).trim() : String(Date.now());
+    } catch (_) { window.__moduleVersion = String(Date.now()); }
+    try {
+      const r = await fetch('/api/capability-registry', {credentials: 'include'});
+      if (!r.ok) { console.warn(`[detail-shell] registry ${r.status}; no overrides`); return; }
+      REGISTRY = await r.json();
+    } catch (e2) { console.error('[detail-shell] registry fetch failed:', e2); return; }
   }
 
   // Step 3: collect every (subtab.module + extras) into a single set

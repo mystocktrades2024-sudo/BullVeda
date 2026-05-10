@@ -121,27 +121,36 @@ async function _installOverrides() {
 // 2. Fetch /api/capability-registry to know which tabs have modules
 // 3. Install overrides into window.TAB_RENDERERS
 (async function _boot() {
-  // Step 1: cache-bust version
+  // Steps 1+2 combined (PERF-1b 2026-05-09): single /api/v2-bootstrap call returns
+  // both version + registry. HTML head has <link rel="preload"> for this URL so
+  // the browser warms the response before this code even parses.
+  // Falls back to the two split endpoints (/v2/_v + /api/capability-registry) if 404.
   try {
-    const r = await fetch('./_v', {cache: 'no-store', credentials: 'include'});
-    window.__moduleVersion = r.ok ? (await r.text()).trim() : String(Date.now());
-  } catch (_) {
-    window.__moduleVersion = String(Date.now());
-  }
-  console.log(`[shell] module cache-bust version: ${window.__moduleVersion}`);
-
-  // Step 2: registry
-  try {
-    const r = await fetch('/api/capability-registry', {credentials: 'include'});
-    if (!r.ok) {
-      console.warn(`[shell] /api/capability-registry returned ${r.status}; no overrides will install`);
-      return;
+    const r = await fetch('/api/v2-bootstrap', {credentials: 'include'});
+    if (r.ok) {
+      const j = await r.json();
+      window.__moduleVersion = j.version || String(Date.now());
+      REGISTRY = j.registry;
+      console.log(`[shell] bootstrap: v=${window.__moduleVersion}, ${Object.keys(REGISTRY.tabs || {}).length} tabs, ${Object.keys(REGISTRY.sub_tabs || {}).length} sub-tabs (1 RTT)`);
+    } else {
+      throw new Error(`bootstrap ${r.status}`);
     }
-    REGISTRY = await r.json();
-    console.log(`[shell] loaded registry: ${Object.keys(REGISTRY.tabs || {}).length} tabs, ${Object.keys(REGISTRY.sub_tabs || {}).length} sub-tabs`);
   } catch (e) {
-    console.error('[shell] registry fetch failed:', e);
-    return;
+    console.warn('[shell] bootstrap failed, falling back to split endpoints:', e.message);
+    // Fallback path — old behavior, two sequential fetches
+    try {
+      const r = await fetch('./_v', {cache: 'no-store', credentials: 'include'});
+      window.__moduleVersion = r.ok ? (await r.text()).trim() : String(Date.now());
+    } catch (_) { window.__moduleVersion = String(Date.now()); }
+    try {
+      const r = await fetch('/api/capability-registry', {credentials: 'include'});
+      if (!r.ok) {
+        console.warn(`[shell] /api/capability-registry returned ${r.status}; no overrides will install`);
+        return;
+      }
+      REGISTRY = await r.json();
+      console.log(`[shell] loaded registry: ${Object.keys(REGISTRY.tabs || {}).length} tabs, ${Object.keys(REGISTRY.sub_tabs || {}).length} sub-tabs (fallback path)`);
+    } catch (e2) { console.error('[shell] registry fetch failed:', e2); return; }
   }
 
   // Step 3: install overrides

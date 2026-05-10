@@ -292,6 +292,36 @@ async def capability_registry(auth: HTTPBasicCredentials = Depends(_check_auth))
                         headers={"Cache-Control": "private, must-revalidate, max-age=0"})
 
 
+# -- V2 bootstrap (PERF-1b 2026-05-09) -----------------------------------------
+# Combines /v2/_v + /api/capability-registry into ONE round-trip. shell.js and
+# elite-detail-shell.js prefer this endpoint; fall back to the two split routes
+# if it 404s. Saves ~100-150ms cold load (one fewer HTTP+auth handshake).
+@app.get("/api/v2-bootstrap")
+async def v2_bootstrap(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    if isinstance(auth, Response):
+        return auth
+    # version: max mtime under core/ + tabs/ — same as /v2/_v
+    latest = 0
+    for root in (_PROTOTYPE_DIR / "core", _PROTOTYPE_DIR / "tabs"):
+        if not root.exists():
+            continue
+        for p in root.rglob("*"):
+            if p.is_file() and p.suffix in (".js", ".mjs"):
+                try:
+                    m = int(p.stat().st_mtime)
+                    if m > latest:
+                        latest = m
+                except OSError:
+                    pass
+    # registry
+    reg_path = BASE_DIR / "data" / "capability_registry.json"
+    registry = json.loads(reg_path.read_text()) if reg_path.exists() else {"tabs": {}, "sub_tabs": {}, "actions": {}}
+    return JSONResponse(
+        {"version": str(latest or int(_time.time())), "registry": registry},
+        headers={"Cache-Control": "private, must-revalidate, max-age=0"},
+    )
+
+
 # -- Backtest report (hedge_fund_report.py output) --
 # Serves the latest backtest_report_latest.html. /api/backtest-report/history
 # returns a list of all dated reports for navigation.
