@@ -92,8 +92,12 @@ export function render() {
 
   // Counterfactuals — what would change verdict?
   const counters = [];
-  const buyMin   = (T.regime || {}).buy_min_score || 70;
-  const watchMin = 60;
+  // 2026-05-10: read regime4-aware threshold first (matches live engine).
+  // Falls back to legacy T.regime.buy_min_score if not populated.
+  const _regime4 = (T.regime4 || (T.regime||{}).regime4 || '').toLowerCase();
+  const _r4Thresh = (T.regime4_thresholds || {})[_regime4];
+  const buyMin   = (_r4Thresh && _r4Thresh.buy_min_score) || (T.regime || {}).buy_min_score || 70;
+  const watchMin = (_r4Thresh && _r4Thresh.watch_min_score) || 60;
   if (verdict === 'WATCH' && score < buyMin)    counters.push(`Score gap to BUY: <b>+${buyMin - score} pts</b> needed (currently ${score}, BUY requires ≥${buyMin})`);
   if (entryQ === 'MISSED' || entryQ === 'EXTENDED') counters.push(`Entry quality <b>${entryQ}</b> — pullback to fresh entry zone would re-enable entry`);
   if (rrRatio > 0 && rrRatio < 3)                counters.push(`R:R ${rrRatio.toFixed(1)}× below 3.0 minimum — needs target raise or stop tightening`);

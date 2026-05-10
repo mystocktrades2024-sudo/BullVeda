@@ -51,6 +51,47 @@ export function buildPipeline(T, ctx) {
         </div>
       </div>
 
+      <!-- STAGE 2.5: 8-Gate Decision Engine Cascade (2026-05-10) -->
+      <!-- Authoritative source per docs/architecture.md. Surfaces T.gates_evaluated,
+           T.audit_trail, and T.caveats. Falls through if engine didn't run on this
+           bundle (legacy verdict path) — Stage 2 above is the fallback. -->
+      ${(() => {
+        const gates = T.gates_evaluated || [];
+        const audit = T.audit_trail || {};
+        const caveats = T.caveats || [];
+        if (!gates.length && !audit.decided_by) {
+          return ''; // engine didn't run; nothing to render
+        }
+        const allPassed = gates.length > 0 && gates.every(g => g.passed === true);
+        const anyFailed = gates.some(g => g.passed === false);
+        const stTone = allPassed ? 'pass' : anyFailed ? 'fail' : 'warn';
+        const stPill = allPassed ? 'ALL PASSED' : anyFailed ? `${gates.filter(g=>!g.passed).length}/${gates.length} FAILED` : 'PARTIAL';
+        return `
+        <div class="re-stage ${stTone}">
+          <div class="re-stage-h">
+            <span class="re-stage-num">2.5</span>
+            <span class="re-stage-title">Decision Engine — 8-Gate Cascade</span>
+            <span class="re-stage-pill ${stTone}">${stPill}</span>
+          </div>
+          <div class="re-stage-body">
+            Single source of truth verdict per docs/architecture.md. Every BUY must clear all 8 gates. Failure routes to WATCH or WAIT.
+            ${gates.length ? `<div class="re-stage-checks">${gates.map(g => `
+              <div class="re-check ${g.passed ? 'pass' : 'fail'}">
+                <span class="mark">${g.passed ? '✓' : '✗'}</span>
+                <span class="name">${(g.name || '').replace(/_/g, ' ')}</span>
+                <span class="val">${g.reason || (g.passed ? 'ok' : '—')}</span>
+              </div>`).join('')}</div>` : ''}
+            ${audit.decided_by ? `<div style="margin-top:8px;font-size:11px;color:var(--ink-1)"><b>Decided by:</b> <code style="font-family:var(--mono)">${audit.decided_by}</code>${audit.gate_failures && audit.gate_failures.length ? ` · <b>Failed gates:</b> ${audit.gate_failures.join(', ')}` : ''}</div>` : ''}
+            ${caveats.length ? `<div style="margin-top:8px"><b style="font-size:11px;color:var(--warn)">SOFT GATE CAVEATS</b><div class="re-stage-checks" style="margin-top:4px">${caveats.map(c => `
+              <div class="re-check warn">
+                <span class="mark">⚠</span>
+                <span class="name">${c}</span>
+                <span class="val">non-blocking</span>
+              </div>`).join('')}</div></div>` : ''}
+          </div>
+        </div>`;
+      })()}
+
       <!-- STAGE 3: 5-Pillar Scoring -->
       <div class="re-stage info">
         <div class="re-stage-h">
@@ -165,9 +206,34 @@ export function buildPipeline(T, ctx) {
             : conviction === 'WATCH' ? '<b>WATCH</b> — score 60–69, no capital allocated yet.'
             : 'Conviction tier not assigned (typically because gate failed).'}
           <div class="re-stage-checks" style="margin-top:8px">
-            <div class="re-check info"><span class="mark">$</span><span class="name">Suggested allocation</span><span class="val">${T.alloc_pct ? T.alloc_pct.toFixed(1) + '%' : '—'}</span></div>
-            <div class="re-check info"><span class="mark">∽</span><span class="name">Sizing multiplier</span><span class="val">${T.sizing_multiplier ? T.sizing_multiplier.toFixed(2) + '×' : '—'}</span></div>
-            <div class="re-check info"><span class="mark">📊</span><span class="name">Half-Kelly</span><span class="val">${(T.kelly_size || {}).half_kelly_pct ? (T.kelly_size.half_kelly_pct).toFixed(1) + '%' : '—'}</span></div>
+            <div class="re-check info"><span class="mark">$</span><span class="name">Suggested allocation</span><span class="val">${T.alloc_pct ? T.alloc_pct.toFixed(1) + '%' : (T.kelly_size || {}).final_alloc_pct ? T.kelly_size.final_alloc_pct.toFixed(1) + '%' : '—'}</span></div>
+            <div class="re-check info"><span class="mark">∽</span><span class="name">Sizing multiplier (live)</span><span class="val">${T.sizing_multiplier ? T.sizing_multiplier.toFixed(2) + '×' : '—'}</span></div>
+            <div class="re-check info"><span class="mark">∽</span><span class="name">Half-Kelly</span><span class="val">${(T.kelly_size || {}).half_kelly_pct ? (T.kelly_size.half_kelly_pct).toFixed(1) + '%' : '—'}</span></div>
+            <!-- 2026-05-10: Variant F + Phase 2 + Earnings/VaR multiplier stack -->
+            ${T.setup_size_multiplier != null && T.setup_size_multiplier !== 1.0 ? `
+            <div class="re-check ${T.setup_size_multiplier === 0 ? 'fail' : T.setup_size_multiplier < 1 ? 'warn' : 'pass'}">
+              <span class="mark">⌬</span>
+              <span class="name">Setup edge multiplier${T.setup_size_multiplier === 0 ? ' — KILLED' : ''}</span>
+              <span class="val">${T.setup_size_multiplier.toFixed(2)}×</span>
+            </div>` : ''}
+            ${(T.kelly_size || {}).drawdown_mult != null && T.kelly_size.drawdown_mult !== 1.0 ? `
+            <div class="re-check ${T.kelly_size.drawdown_mult < 0.5 ? 'fail' : T.kelly_size.drawdown_mult < 1 ? 'warn' : 'pass'}">
+              <span class="mark">↓</span>
+              <span class="name">Drawdown sizing (Phase 2)${T.kelly_size.drawdown_pct != null ? ` — ${T.kelly_size.drawdown_pct.toFixed(1)}% from peak` : ''}</span>
+              <span class="val">${T.kelly_size.drawdown_mult.toFixed(2)}×</span>
+            </div>` : ''}
+            ${(T.kelly_size || {}).earnings_mult != null && T.kelly_size.earnings_mult !== 1.0 ? `
+            <div class="re-check warn">
+              <span class="mark">!</span>
+              <span class="name">Earnings shrink (within 14d)</span>
+              <span class="val">${T.kelly_size.earnings_mult.toFixed(2)}×</span>
+            </div>` : ''}
+            ${(T.kelly_size || {}).var_floor_mult != null && T.kelly_size.var_floor_mult !== 1.0 ? `
+            <div class="re-check warn">
+              <span class="mark">⊟</span>
+              <span class="name">VaR floor (CVaR-bound)</span>
+              <span class="val">${T.kelly_size.var_floor_mult.toFixed(2)}×</span>
+            </div>` : ''}
           </div>
         </div>
       </div>
