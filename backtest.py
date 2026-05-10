@@ -1563,6 +1563,17 @@ def run_portfolio_backtest(
                 monthly_pnl[month] += pnl_dollar
                 daily_pnl[date] += pnl_dollar
 
+                # B2 (2026-05-09): MAE/MFE from highest_price tracked + lowest visited.
+                # MFE = max favorable excursion as %. MAE = max adverse excursion as %.
+                _hp = float(pos.get("highest_price") or entry)
+                _lp = float(pos.get("lowest_price") or entry)
+                if direction == "long":
+                    mfe_pct = (_hp - entry) / entry * 100 if entry > 0 else 0
+                    mae_pct = (_lp - entry) / entry * 100 if entry > 0 else 0
+                else:
+                    mfe_pct = (entry - _lp) / entry * 100 if entry > 0 else 0
+                    mae_pct = (entry - _hp) / entry * 100 if entry > 0 else 0
+
                 closed_trades.append({
                     "ticker": ticker,
                     "entry_date": pos["entry_date"],
@@ -1580,9 +1591,32 @@ def run_portfolio_backtest(
                     "verdict": pos.get("verdict", ""),
                     "win": pnl_pct > 0,
                     "trail_activated": pos["trail_active"],
-                    "highest_price": round(pos.get("highest_price", entry), 2),
+                    "highest_price": round(_hp, 2),
+                    # B2 (2026-05-09): forensic decomposition fields propagated from entry
+                    "regime": pos.get("regime"),
+                    "entry_quality": pos.get("entry_quality"),
+                    "setup_family": pos.get("setup_family"),
+                    "catalyst_tier": pos.get("catalyst_tier"),
+                    "conviction_tier": pos.get("conviction_tier"),
+                    "sector": pos.get("sector"),
+                    "industry": pos.get("industry"),
+                    "rs_rank": pos.get("rs_rank"),
+                    "tier1_total_pts": pos.get("tier1_total_pts"),
+                    "has_pead": pos.get("has_pead"),
+                    "has_uoa_calls": pos.get("has_uoa_calls"),
+                    "insider_cluster_30d": pos.get("insider_cluster_30d"),
+                    "iv_rank": pos.get("iv_rank"),
+                    "earn_days": pos.get("earn_days"),
+                    # MAE/MFE for trade-quality post-mortems
+                    "mae_pct": round(mae_pct, 2),
+                    "mfe_pct": round(mfe_pct, 2),
                 })
                 continue
+
+            # B2 (2026-05-09): track lowest_price intraday for MAE computation.
+            # today_low already extracted from day_bars at line 1515.
+            if today_low < pos.get("lowest_price", entry):
+                pos["lowest_price"] = today_low
 
             # Update trailing stop
             if direction == "long":
@@ -1682,6 +1716,24 @@ def run_portfolio_backtest(
                     "setup_type": sig.get("setup_type", ""),
                     "score": sig.get("score", 0),
                     "verdict": sig.get("verdict", ""),
+                    # B2 (2026-05-09): capture entry-time context for forensic
+                    # decomposition. Per A5 fork finding, prior trade records
+                    # lacked regime/entry_quality/sector — making sub-strategy
+                    # attribution impossible. Now persisted at entry.
+                    "regime": sig.get("regime") or sig.get("regime4") or sig.get("regime_label"),
+                    "entry_quality": sig.get("entry_quality"),
+                    "setup_family": sig.get("setup_family"),
+                    "catalyst_tier": sig.get("catalyst_tier"),
+                    "conviction_tier": (sig.get("conviction") or {}).get("label") if isinstance(sig.get("conviction"), dict) else sig.get("conviction_tier"),
+                    "sector": sig.get("sector"),
+                    "industry": sig.get("industry"),
+                    "rs_rank": sig.get("rs_rank"),
+                    "tier1_total_pts": (sig.get("tier1_signals") or {}).get("total_points"),
+                    "has_pead": bool((sig.get("tier1_signals") or {}).get("pead")),
+                    "has_uoa_calls": (sig.get("options_iv") or {}).get("uoa_calls", 0) > 0,
+                    "insider_cluster_30d": (sig.get("insider") or {}).get("cluster_30d") or (sig.get("insider") or {}).get("buys_30d") or 0,
+                    "iv_rank": (sig.get("options_iv") or {}).get("iv_rank"),
+                    "earn_days": sig.get("earn_days") or sig.get("days_to_earnings"),
                 })
 
         # Record equity curve
