@@ -48,15 +48,28 @@ export function render() {
   const sameDir = composite === 'bull' ? bullCt : composite === 'bear' ? bearCt : 0;
   const compConf = sameDir === 3 ? 'high' : sameDir === 2 ? 'med' : 'low';
 
+  // K6 (2026-05-09): canonical_trade_plan first; fall back to legacy fields.
+  // The Bear/Severe scenario derivations now anchor on the same stop/T1/T2
+  // numbers as Plan/Thesis/SMC/Overview — Vinod's "Bear case & Severe Case
+  // doesn't align with overall Plan and Thesis" complaint resolved here.
+  const _ctp = T?.canonical_trade_plan;
+  const _ctpStop = _ctp?.stop;
+  const _ctpT1   = _ctp?.target1;
+  const _ctpEW   = _ctp?.setup?.elliott_wave;
+
   // Synthesized levels per method (rough — actual computation inside _drawExpertMM)
   const px0 = +(T.price || 0);
   const atr = (T.atr_pct || 0) / 100 * px0;
-  const ewW3target = ew.fib_levels && ew.fib_levels['161.8%'] ? +ew.fib_levels['161.8%'] : (T.t1 || px0 * 1.08);
-  const ewBaseStop = ew.swing_base ? +ew.swing_base * 0.97 : (T.stop || px0 * 0.95);
+  // EW Wave-3 target: prefer canonical Fib-extension T2 (1.618), then T1 (1.272),
+  // then legacy fib_levels['161.8%'], then 8% above price.
+  const ewW3target = (_ctpEW?.t2_extension) || (_ctpEW?.t1_extension)
+    || (ew.fib_levels && ew.fib_levels['161.8%'] ? +ew.fib_levels['161.8%'] : (_ctpT1 || T.t1 || px0 * 1.08));
+  const ewBaseStop = (_ctpEW?.swing_low ? +_ctpEW.swing_low * 0.97 : null)
+    ?? (ew.swing_base ? +ew.swing_base * 0.97 : (_ctpStop || T.stop || px0 * 0.95));
   const wyT1 = T.fractal_high || px0 * 1.06;
   const wySpring = T.fractal_low ? +T.fractal_low * 0.96 : px0 * 0.92;
-  const mcTarget = T.t1 || px0 * 1.05;
-  const mcStop = T.stop || px0 * 0.96;
+  const mcTarget = _ctpT1 || T.t1 || px0 * 1.05;
+  const mcStop = _ctpStop || T.stop || px0 * 0.96;
 
   // Method evidence — short narrative per method
   const wyEvidence = (tcDetails.wyckoff || {}).evidence || '—';

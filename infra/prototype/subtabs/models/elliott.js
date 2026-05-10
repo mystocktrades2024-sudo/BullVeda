@@ -6,6 +6,34 @@
 
 const _T = () => (window.__getDetailTicker ? window.__getDetailTicker() : window.T);
 
+// K5/K6 (2026-05-09): render the canonical Wave-3-Impulse Fib-extension card
+// at the top of Elliott when canonical_trade_plan.setup.elliott_wave is present.
+// This is the new analysis.classify_elliott_wave output (commit 302e9ea00):
+// {wave, type, swing_low, swing_high, swing_range, t1_extension, t2_extension, confidence}.
+// Distinct from the legacy `T.elliott_wave` schema (wave_number/fib_levels/etc),
+// which continues to render as the main body — this card is additive.
+function _ctpElliottBannerHTML(T) {
+  const ew = T?.canonical_trade_plan?.setup?.elliott_wave;
+  if (!ew || !ew.wave) return '';
+  const conf = (ew.confidence || 'low').toLowerCase();
+  const confCls = conf === 'high' ? 'green' : conf === 'low' ? 'red' : 'warn';
+  const typeStr = ew.type || 'incomplete';
+  return `
+    <div style="background:linear-gradient(90deg,#142a3a,#0e1f2c);border:1px solid #1a4a6a;border-radius:6px;padding:14px 18px;margin-bottom:12px;font-family:var(--mono);">
+      <div style="font-size:10px;letter-spacing:0.18em;color:#5eead4;text-transform:uppercase;margin-bottom:8px;">Engine Classification (canonical_trade_plan)</div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--ink-0);">
+        <div><span style="color:var(--ink-2)">Wave:</span> <span style="font-weight:600">${ew.wave}</span> <span style="color:var(--ink-2)">(${typeStr})</span></div>
+        <div><span style="color:var(--ink-2)">Confidence:</span> <span class="${confCls}" style="font-weight:600">${conf}</span></div>
+        ${ew.swing_low != null && ew.swing_high != null ? `<div><span style="color:var(--ink-2)">Swing:</span> $${ew.swing_low} → $${ew.swing_high} <span style="color:var(--ink-2)">(range $${ew.swing_range})</span></div>` : ''}
+      </div>
+      ${ew.t1_extension != null && ew.t2_extension != null ? `
+      <div style="display:flex;gap:18px;font-size:13px;margin-top:8px;color:var(--ink-0);">
+        <div><span style="color:var(--ink-2)">T1 (1.272 ext):</span> <span class="green" style="font-weight:600">$${ew.t1_extension}</span></div>
+        <div><span style="color:var(--ink-2)">T2 (1.618 ext):</span> <span class="green" style="font-weight:600">$${ew.t2_extension}</span></div>
+      </div>` : ''}
+    </div>`;
+}
+
 export function render() {
   const T = _T();
   const ew = T.elliott_wave || {};
@@ -17,7 +45,7 @@ export function render() {
     const fibs = ew.fib_levels || {};
     const fibOrder = ['23.6%','38.2%','50.0%','61.8%','78.6%','100%','127.2%','161.8%'];
     const tiles = fibOrder.filter(k => fibs[k] != null).map(k => ({k, v: fibs[k]}));
-    $('elliottBody').innerHTML = `
+    $('elliottBody').innerHTML = _ctpElliottBannerHTML(T) + `
       <div class="ew-banner" style="background:linear-gradient(90deg,#3a3414,#2a2510);border:1px solid #5a4d1a">
         <span class="lbl" style="color:#e8c860">Current Structure</span>
         <span class="num-pill" style="background:#5a4d1a;color:#fff8d0">—</span>
@@ -53,7 +81,7 @@ export function render() {
   const fibOrder  = ['23.6%','38.2%','50.0%','61.8%','78.6%','100%','127.2%','161.8%'];
   const tiles     = fibOrder.filter(k => fibs[k] != null).map(k => ({k, v: fibs[k], near: nearest[0] === k}));
 
-  $('elliottBody').innerHTML = `
+  $('elliottBody').innerHTML = _ctpElliottBannerHTML(T) + `
     <div class="ew-banner">
       <span class="lbl">Current Wave</span>
       <span class="num-pill">${ew.wave_number}</span>
