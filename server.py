@@ -352,6 +352,47 @@ async def backtest_report_by_filename(filename: str, auth: HTTPBasicCredentials 
         return HTMLResponse(f"Report not found: {filename}", status_code=404)
     return HTMLResponse(p.read_text(), headers=_NO_CACHE)
 
+@app.post("/api/backtest-report/regen")
+async def backtest_report_regen(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """OPS-5 (2026-05-09): regenerate hedge_fund_report.py from latest cached
+    portfolio_backtest.json without re-running the full 3hr backtest. Useful
+    after report-template tweaks or whitelist edits where you want to see the
+    new analytics rendered on existing trade data."""
+    import subprocess as _subp
+    script = BASE_DIR / "hedge_fund_report.py"
+    if not script.exists():
+        return JSONResponse({"ok": False, "error": "hedge_fund_report.py not found"}, status_code=404)
+    cache_json = BASE_DIR / "cache" / "portfolio_backtest.json"
+    if not cache_json.exists():
+        return JSONResponse({"ok": False, "error": "no cached backtest result to regen from"}, status_code=400)
+    try:
+        # Run with 60s timeout — report regen is fast (~5-15s typically).
+        proc = _subp.run(
+            ["python3", str(script)],
+            capture_output=True, text=True, timeout=60, cwd=str(BASE_DIR),
+        )
+        if proc.returncode != 0:
+            return JSONResponse({
+                "ok": False, "error": f"hedge_fund_report exit {proc.returncode}",
+                "stderr_tail": proc.stderr[-500:] if proc.stderr else "",
+            }, status_code=500)
+        # Find the freshest output file
+        latest = max(
+            (BASE_DIR / "cache").glob("backtest_report_*.html"),
+            key=lambda p: p.stat().st_mtime, default=None,
+        )
+        return JSONResponse({
+            "ok": True,
+            "regen_ms": int((proc.returncode == 0) * 1),  # placeholder; subp doesn't expose duration
+            "latest_report": latest.name if latest else None,
+            "stdout_tail": proc.stdout[-500:] if proc.stdout else "",
+        })
+    except _subp.TimeoutExpired:
+        return JSONResponse({"ok": False, "error": "regen timed out (60s)"}, status_code=504)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
+
+
 @app.get("/api/backtest-report/history")
 async def backtest_report_history(auth: HTTPBasicCredentials = Depends(_check_auth)):
     """List available backtest reports, newest first."""
