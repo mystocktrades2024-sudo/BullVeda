@@ -39,11 +39,47 @@ Total trades:  5
 Setup type:    Trend Continuation
 ```
 
-### Q1-step5 250d (2025-05-05 → 2026-05-01) — IN FLIGHT
-- Started 02:09, finishes ~06:20
-- Window: 12 months (covers full year cycle)
-- Acceptance bar: PF ≥ 1.4, WR ≥ 40%, MaxDD < 20%
-- Will be ready when you wake up
+### Q1-step5 250d (2025-05-05 → 2026-05-01) — FAILED ACCEPTANCE BAR
+```
+Total return:  -6.3%
+Profit factor:  0.95   ✗ (bar: ≥ 1.4)
+Win rate:      31.7%   ✗ (bar: ≥ 40%)
+Max drawdown:  32.1%   ✗ (bar: < 20%)
+Total trades:    142
+Sharpe:        -0.17
+Wins / Losses:  45 / 97
+Avg win:       +6.08%
+Avg loss:      -2.96%  (asymmetry 2.05× — needs ~2.5× to hit PF 1.4 at 32% WR)
+Final equity: $4,684.44 (started $5,000)
+```
+
+**Interpretation:**
+- Smoke 5d PF 7.74 was a small-sample fluke. The 250d (n=142) is the
+  honest number.
+- System is NOT broken — it produces actionable trades and respects all
+  gates correctly. It just doesn't clear the paper-trading bar.
+- 142 trades / 12 months = ~12 trades/month (matches target frequency).
+- The math: 45 × 6.08 vs 97 × 2.96 → net 13.5 R units lost over the year.
+- Largest drag: 97 small losers averaging -2.96% — likely premature stops
+  (many `time_stop` / `stop_loss` exits before targets).
+
+**🚫 DO NOT activate paper trading on this config.** Needs another round of
+tuning before live deployment.
+
+**Possible next iterations (need your call):**
+1. **Tighter entry quality**: only FRESH (within 0.75 ATR of pivot); no
+   PULLBACK / VALID. Reduces trade count but weeds out late entries.
+2. **Wider stops** (1.75× ATR vs 1.25×): cuts the small-loser tail at the
+   cost of larger occasional losses. Backtest both 1.5× and 1.75×.
+3. **Higher score floor** (75 vs 65): drops trade frequency ~50% but
+   raises avg quality.
+4. **Time-stop tuning**: many exits via 5-day time_stop. Try 8d for
+   trend-continuation setups, 5d for breakouts only.
+5. **Regime-conditional sizing**: 35% of losers may have been in choppy
+   regime. Drop size mult to 0.5× in choppy.
+
+Open `cache/backtest_report_latest.html` for the visual report — shows
+per-setup attribution + regime breakdown to guide which lever to pull.
 
 ## ✅ Items Closed (registry updated)
 
