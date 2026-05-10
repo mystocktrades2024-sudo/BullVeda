@@ -26,11 +26,13 @@ REGISTRY = ROOT / "data" / "open_items.json"
 OUTPUT = ROOT / "cache" / "open_items_for_sheet.csv"
 
 # Sheet column order (verified by reading the live sheet 2026-05-10)
+# how_to_test column added 2026-05-10 — user-facing manual verification per fix.
 SHEET_COLUMNS = [
     "#", "ID", "Priority", "Section", "Item",
     "What we're trying to fix", "How we're fixing it",
     "Effort", "Risk / Win", "Notes",
     "Status", "Date Fixed", "Commit",
+    "How to Test",
 ]
 
 # Map registry field name → sheet column name
@@ -47,6 +49,7 @@ FIELD_MAP = {
     "status": "Status",
     "date_fixed": "Date Fixed",
     "commit": "Commit",
+    "how_to_test": "How to Test",
 }
 
 # Status priority ordering for stable sheet rows (matches sheet's existing order)
