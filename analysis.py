@@ -6653,6 +6653,23 @@ def make_decision(total_score: float, rr_ratio: float, config: dict,
     _rt4 = config.get("regime4_thresholds", {}).get(regime4, {}) if regime4 else {}
     _rt  = _rt4 if _rt4 else config.get("regime_thresholds", {}).get(regime_name, {})
     if _rt:
+        # QUANT-3 (2026-05-10): score_band_buy shorthand. When present in the
+        # regime config as `score_band_buy: [lo, hi]`, it OVERRIDES both
+        # buy_min_score (lo) and buy_max_score (hi). Allows e.g. "buy only
+        # 70-89 in choppy regime" — kills both the noise band <70 AND the
+        # mania band >89 in one config field.
+        # Backward-compatible: separate buy_min_score / buy_max_score still work.
+        _band = _rt.get("score_band_buy")
+        if isinstance(_band, list) and len(_band) == 2:
+            try:
+                _band_lo, _band_hi = float(_band[0]), float(_band[1])
+                # Inject as buy_min_score / buy_max_score so downstream gate
+                # logic at line ~6963/6968 picks them up unchanged.
+                _rt = dict(_rt)
+                _rt.setdefault("buy_min_score", _band_lo)
+                _rt.setdefault("buy_max_score", _band_hi)
+            except (TypeError, ValueError):
+                pass
         buy_min   = _rt.get("buy_min_score",   buy_min)
         # regime4 thresholds don't have watch_min_score; derive as buy_min - 8
         watch_min = _rt.get("watch_min_score", buy_min - 8 if _rt4 else watch_min)
