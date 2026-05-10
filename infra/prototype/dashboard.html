@@ -2148,7 +2148,16 @@ window.capHasSubTab = function(subTabId) {
       if (!d) return;
       window._capStudioMe = d;
       try { _applyVisibility(); } catch (_) {}
-      _capScanAndDisableButtons();  // initial pass
+      // PERF-5 (2026-05-09): defer initial _capScanAndDisableButtons to idle
+      // time. The scan walks the entire DOM and disables 100+ buttons; running
+      // synchronously on init blocks ~50ms of FCP. requestIdleCallback fires
+      // at the next quiet moment (or 500ms timeout in Safari fallback).
+      const _runCapScan = () => _capScanAndDisableButtons();
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(_runCapScan, { timeout: 500 });
+      } else {
+        setTimeout(_runCapScan, 50);  // Safari fallback
+      }
     })
     .catch(() => {});
 })();
