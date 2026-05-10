@@ -421,8 +421,17 @@ python3 executor.py --submit     # live paper execute
 # Backtest — single window
 python3 backtest.py --days 252 --min-score 65 --min-rs 75
 
-# Backtest — true walk-forward (4 folds × grid search, ~8-12h)
+# Backtest — SMOKE-TEST mode (5d, top-100, <60s). Use BEFORE long runs.
+python3 backtest.py --smoke
+
+# Backtest — cProfile audit (writes top-50 hotspots to cache/logs/)
+python3 backtest.py --smoke --profile-cprof
+
+# Backtest — true walk-forward (4 folds × grid search)
+#   sequential: ~8-12h
 python3 backtest/walk_forward_v2.py --folds 4 --train-days 250 --test-days 50
+#   parallel: ~2-3h (4 workers, EODHD-safe)
+python3 backtest/walk_forward_v2.py --folds 4 --train-days 250 --test-days 50 --parallel
 
 # SQLite inspection
 python3 -c "import db; print(db.get_conn().execute('SELECT COUNT(*) FROM positions').fetchone())"
