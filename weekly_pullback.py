@@ -221,9 +221,14 @@ def score_weekly_pullback(ticker: str, df: pd.DataFrame):
     if entry - stop < min_risk:
         stop = round(entry - min_risk, 2)
 
-    # Target 1: recent swing high (last 20 days)
+    # Target 1: recent swing high, capped at +15% above entry.
+    # 2026-05-10 fix: was uncapped, which let an anomalous intraday spike
+    # poison the target. CAR's 04-22 spike to $847 (entry ~$170) produced 9
+    # straight losing entries with target1 = $847.70 (target +400%, RR 10),
+    # because high.iloc[-20:].max() kept finding the spike. 15% cap aligns
+    # with 7-14d hold horizon (1-2 ATR upside is realistic; +400% is not).
     recent_high = float(high.iloc[-20:].max()) if len(high) >= 20 else price * 1.05
-    target1 = round(recent_high, 2)
+    target1 = round(min(recent_high, entry * 1.15), 2)
 
     # Target 2: 2x risk above entry
     risk = entry - stop

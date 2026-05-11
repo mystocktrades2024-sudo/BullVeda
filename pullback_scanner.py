@@ -110,7 +110,11 @@ def scan(ohlcv: dict[str, pd.DataFrame], min_pullback: float = 0.03,
 
             # ── R:R calculation ──
             stop = pullback_low - atr_14 * 0.3  # small buffer below pullback low
-            target = high_252  # retest of 52-week high
+            # 2026-05-10 fix: target was raw 252d high, no cap. Same class
+            # of bug as weekly_pullback (CAR's $847 anomalous spike poisoned
+            # the target). +15% cap aligns with "orderly pullback retest of
+            # 52w high" mechanism — not a vertical-move expectation.
+            target = min(high_252, price * 1.15)
             risk = price - stop
             reward = target - price
             rr = reward / risk if risk > 0 else 0

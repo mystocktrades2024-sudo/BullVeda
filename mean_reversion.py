@@ -347,11 +347,14 @@ def score_mean_reversion(ticker: str, df: pd.DataFrame) -> dict:
     if stop < max_stop:
         stop = max_stop
 
-    # Targets: EMA21 (first), recent swing high (second)
+    # Targets: EMA21 (first), recent swing high capped at +10% (second).
+    # 2026-05-10 fix: target2 was uncapped 20-bar max high — same class of bug
+    # as weekly_pullback (CAR's anomalous spike to $847 produced unreachable
+    # targets for 9 straight days). Mean reversion trades are short-horizon;
+    # +10% cap aligns with documented bounce horizon.
     target1 = round(ema21, 2)  # Mean reversion first target
-    # Recent swing high for second target
     if len(high) >= 20:
-        target2 = round(float(high.iloc[-20:].max()), 2)
+        target2 = round(min(float(high.iloc[-20:].max()), price * 1.10), 2)
     else:
         target2 = round(price * 1.08, 2)
 
