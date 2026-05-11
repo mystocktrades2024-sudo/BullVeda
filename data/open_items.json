@@ -1336,6 +1336,51 @@
       "status": "DONE",
       "date_fixed": "2026-05-10",
       "commit": "f26e1deb2"
+    },
+    {
+      "id": "BACKTEST-MTM-CLOSE",
+      "priority": "P1",
+      "status": "OPEN",
+      "section": "Backtest infra",
+      "item": "Backtest closes unexited positions at 0% pnl instead of MTM",
+      "what": "When a backtest window ends with positions still open (no stop/target hit), those trades are recorded with pnl_pct=0.0 instead of actual mark-to-market. Discovered 2026-05-11 via WF: F3 (Oct-Dec 2025) and F4 (Jul-Oct 2025) each had only 4 'trades' \u2014 all entered day 1, exited window end, pnl=0%. They were positions held throughout the window that never hit exit conditions; the backtest closed them at 0% instead of realizing MTM.",
+      "how": "In run_portfolio_backtest end-of-window cleanup: compute exit_price as the window's last close for each ticker, then compute pnl_pct properly. Add exit_reason='end_of_backtest_mtm' for traceability. Don't drop these trades from stats.",
+      "effort": "1-2 hrs",
+      "risk_win": "Medium / Medium \u2014 exposes hidden long-hold edge that current logic masks",
+      "notes": "Discovered while diagnosing F3/F4 fold mystery. Phantom 0% trades created false 'PF 999' sentinel in WF aggregate, masking that only F1+F2 had real evidence. Verdict framework was applying to apparent 4 folds but only 2 were informative.",
+      "date_fixed": null,
+      "commit": null,
+      "how_to_test": "Run any backtest with --days 100+ on a low-volatility period. Confirm trades that don't exit show pnl != 0.0 (real MTM). Then verify F3/F4 type windows produce proper attribution data."
+    },
+    {
+      "id": "CONVICTION-TIER-WIRE",
+      "priority": "P2",
+      "status": "OPEN",
+      "section": "Strategy / Conviction",
+      "item": "Conviction tier is decorative \u2014 wire as filter or delete",
+      "what": "n=423 closed signal audit (2026-05-11): 93% of production BUYs have no conviction_label set. T1 has never fired. T2 has never fired. The tier system assigns labels via assign_conviction_tier but the live engine does not gate trades by conviction tier (size_mult or label). The ~395 unlabeled BUYs perform fine (WR 60.8%, avg +3.87%) because the OTHER filters do the work.",
+      "how": "Option A: wire tier.size_mult into kelly_position_size as a hard scale factor. Block BUYs with tier=WATCH/AVOID. Verifies via backtest. Option B: delete the tier system; replace with simpler score-based size scaling. Either way, current state is misleading.",
+      "effort": "2-4 hrs + backtest validation",
+      "risk_win": "Medium \u2014 changes live size or eliminates a layer",
+      "notes": "Discovered while reworking T1 bar today. Today's T1 88->85 was reverted because lowering doesn't matter when the tier isn't gating anyway.",
+      "date_fixed": null,
+      "commit": null,
+      "how_to_test": "python3 -c 'from collections import Counter; import json; sl=json.load(open(\"data/signal_log.json\")); c=Counter((s.get(\"conviction_label\") or \"none\").upper() for s in sl if s.get(\"status\")==\"CLOSED\"); print(c)' \u2014 expect 'NONE' (or '\u2014') for ~90%+."
+    },
+    {
+      "id": "STRUCT-TARGETS-PHASE2",
+      "priority": "P2",
+      "status": "OPEN",
+      "section": "Strategy / Targets",
+      "item": "Structural targets Phase 2 \u2014 engine uses them as T1/T2",
+      "what": "Phase 1 (shipped 2026-05-10): structural target sources (fractal, fib, EW Wave-3) display on Plan tab as informational. Phase 2: actually use these as T1/T2 instead of ATR-multiple targets. Needs per-source x regime evidence (>=30 trades each).",
+      "how": "Add config flag target_source = atr_multiple | structural. When structural, T1 = nearest_above with R:R>=3 from {fractal_high, fib_127, EW_T1}. Fall back to ATR if R:R floor not met. Backtest side-by-side with current ATR-multiple.",
+      "effort": "1 day + backtest",
+      "risk_win": "High win potential, medium risk",
+      "notes": "Awaiting evidence. Phase 1 currently just populates display field; need 3-4 weeks of trade data with target_sources captured before Phase 2 is decidable.",
+      "date_fixed": null,
+      "commit": null,
+      "how_to_test": "Run backtest with target_source=structural and target_source=atr_multiple on same window. Compare PF/WR/avg_win."
     }
   ]
 }
