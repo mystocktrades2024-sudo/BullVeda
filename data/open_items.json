@@ -1355,17 +1355,17 @@
     {
       "id": "CONVICTION-TIER-WIRE",
       "priority": "P2",
-      "status": "OPEN",
+      "status": "DONE",
       "section": "Strategy / Conviction",
-      "item": "Conviction tier is decorative \u2014 wire as filter or delete",
+      "item": "Conviction tier: simplified to score-band only",
       "what": "n=423 closed signal audit (2026-05-11): 93% of production BUYs have no conviction_label set. T1 has never fired. T2 has never fired. The tier system assigns labels via assign_conviction_tier but the live engine does not gate trades by conviction tier (size_mult or label). The ~395 unlabeled BUYs perform fine (WR 60.8%, avg +3.87%) because the OTHER filters do the work.",
       "how": "Option A: wire tier.size_mult into kelly_position_size as a hard scale factor. Block BUYs with tier=WATCH/AVOID. Verifies via backtest. Option B: delete the tier system; replace with simpler score-based size scaling. Either way, current state is misleading.",
       "effort": "2-4 hrs + backtest validation",
       "risk_win": "Medium \u2014 changes live size or eliminates a layer",
-      "notes": "Discovered while reworking T1 bar today. Today's T1 88->85 was reverted because lowering doesn't matter when the tier isn't gating anyway.",
-      "date_fixed": null,
-      "commit": null,
-      "how_to_test": "python3 -c 'from collections import Counter; import json; sl=json.load(open(\"data/signal_log.json\")); c=Counter((s.get(\"conviction_label\") or \"none\").upper() for s in sl if s.get(\"status\")==\"CLOSED\"); print(c)' \u2014 expect 'NONE' (or '\u2014') for ~90%+."
+      "notes": "Resolved 2026-05-11 by SIMPLIFYING (not deleting). The complex tier criteria (AND of score+RR+RS+regime+catalyst+entry_quality) had 0 T1/T2 trades ever fire in 423 closed signals. The intersection was empty \u2014 system was decorative. Replaced with score-only band: T1 score>=88, T2 score>=78, T3 score>=70, WATCH 60-69, AVOID <60. Win-rate setup adjustment retained (single-factor, evidence-driven). All callers preserved \u2014 they now get real tier labels instead of mostly-empty results.",
+      "date_fixed": "2026-05-11",
+      "commit": "pending",
+      "how_to_test": "python3 -c 'from analysis import assign_conviction_tier; print([assign_conviction_tier(s)[\"label\"] for s in [95,87,75,65,55]])' \u2192 ['T1','T2','T3','WATCH','AVOID']"
     },
     {
       "id": "STRUCT-TARGETS-PHASE2",

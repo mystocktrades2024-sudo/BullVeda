@@ -4827,73 +4827,50 @@ def compute_news_sentiment_score(news_articles: list | None) -> dict:
 
 # ── Conviction Tier Assignment ────────────────────────────────────────────────
 
-def assign_conviction_tier(score: float, rr_ratio: float, rs_rank: int,
-                            weekly_bull: bool, catalysts: list[str],
-                            entry_quality: str,
+def assign_conviction_tier(score: float, rr_ratio: float = 0, rs_rank: int = 50,
+                            weekly_bull: bool = False, catalysts: list = None,
+                            entry_quality: str = "",
                             setup_type: str = "",
                             regime_name: str = "neutral",
                             regime4: str = "risk_on_choppy",
                             catalyst_tier: int = 3) -> dict:
+    """SIMPLIFIED 2026-05-11 — score-band tier only.
+
+    PRIOR BEHAVIOR (2024-2026): tier required AND of {score, RR, RS, regime,
+    catalyst_tier, entry_quality} — 6 conditions. Audit on n=423 closed signals
+    revealed: 0 T1 trades ever fired, 0 T2 trades ever fired, 93% of production
+    BUYs had no tier label set. The intersection was empty — system was
+    decorative. The ~395 unlabeled BUYs in production had WR 60.8% / avg +3.87%
+    (i.e. the OTHER filters did the work, the tier didn't matter).
+
+    NEW BEHAVIOR: simple score → tier map. No multi-condition gates. Tier label
+    now reflects score band only, which makes labels actually populate and the
+    UI badges meaningful. size_mult preserved for downstream code that might
+    one day use it (currently informational). Win-rate setup adjustment retained
+    because it's a single-factor evidence-driven multiplier (tracker stats).
+
+    All extra args (rr_ratio, rs_rank, weekly_bull, etc.) kept in signature for
+    backward compat with callers — they're ignored.
     """
-    Assign conviction tier based on score, R:R, RS, catalysts, entry quality, regime4.
-
-    T1 (≥88): regime4=risk_on_trending, RS≥85, R:R≥3.5, cat_tier=1, FRESH/PULLBACK
-    T2 (≥78): regime4≠panic, RS≥75, R:R≥3.0, cat_tier≤2, FRESH/PULLBACK/VALID
-    T3 (≥70): score≥70, R:R≥3.0 — above threshold, smaller size
-    WATCH: score 50–69 or missing a T2/T3 gate
-    AVOID: below 50
-
-    Size multipliers scaled within each tier band (linear, no cliff effects).
-    Win-rate feedback adjusts size_mult for tradeable tiers based on historical edge.
-    """
-    quality_ok   = entry_quality in ("FRESH", "PULLBACK", "VALID")
-    fresh_or_pb  = entry_quality in ("FRESH", "PULLBACK")
-    has_primary  = any(c in catalysts for c in ("PEAD", "UOA", "VCP", "NEAR_VCP", "POCKET_PIVOT", "SQUEEZE"))
-    is_panic     = regime4 == "panic"
-    is_risk_on_trending = regime4 == "risk_on_trending"
-
-    # 2026-05-10: tried T1 bar 88 → 85 to fix filter audit finding that T1
-    # never fired (conv_T1_only rejected 100% of 94 evaluable). 2026-05-11:
-    # REVERTED. Deeper audit (n=423 closed signals) revealed that 93% of
-    # production BUYs have NO conviction_label populated — the tier system
-    # is currently decorative, not gating. Lowering T1 bar doesn't help
-    # because the tier doesn't actually filter trades downstream. The
-    # ~395 unlabeled BUYs perform well (WR 60.8% / avg +3.87%); the
-    # 23 'WATCH' tier labels are the contaminant. Real fix is to wire
-    # the tier into the engine OR delete it — design discussion needed.
-    if (score >= 88 and rr_ratio >= 3.5 and rs_rank >= 85
-            and is_risk_on_trending and catalyst_tier <= 1 and fresh_or_pb):
-        # T1: Full conviction — 0.85 at 88 → 1.0 at 98+ (linear)
-        _t1_mult = min(1.0, 0.85 + (score - 88) * 0.015)
-        result = {"tier": 1, "label": "T1", "size_mult": round(_t1_mult, 2),
-                  "description": "Full size — all gates cleared"}
-    elif (score >= 78 and rr_ratio >= 3.0 and rs_rank >= 75
-            and not is_panic and catalyst_tier <= 2 and quality_ok):
-        # T2: Strong setup — 0.30 at 78 → 0.60 at 87 (linear), Tier1 catalyst adds +0.10
-        _t2_base = 0.30 + (score - 78) * 0.033
-        _t2_mult = min(0.60, _t2_base + (0.10 if catalyst_tier == 1 else 0))
-        result = {"tier": 2, "label": "T2", "size_mult": round(_t2_mult, 2),
-                  "description": "Half size — strong setup"}
-    elif (score >= 70 and rr_ratio >= 3.0):
-        # T3: 0.15 at 70 → 0.30 at 77 (linear)
-        _t3_mult = 0.15 + (score - 70) * 0.021
-        result = {"tier": 3, "label": "T3", "size_mult": round(min(0.30, _t3_mult), 2),
-                  "description": "Quarter size — above threshold"}
-    elif score >= 65 and rr_ratio >= 3.0:
-        # Legacy T3 band: keeps existing 65-threshold trades alive
-        _t3_mult = 0.15 + (score - 65) * 0.010
-        result = {"tier": 3, "label": "T3", "size_mult": round(min(0.20, _t3_mult), 2),
-                  "description": "Small size — borderline threshold"}
-    elif score >= 50:
+    # Score-band tier (universal, no AND-chain)
+    if score >= 88:
+        result = {"tier": 1, "label": "T1", "size_mult": 1.0,
+                  "description": "Full size — elite score"}
+    elif score >= 78:
+        result = {"tier": 2, "label": "T2", "size_mult": 0.5,
+                  "description": "Half size — strong score"}
+    elif score >= 70:
+        result = {"tier": 3, "label": "T3", "size_mult": 0.25,
+                  "description": "Quarter size — qualifying score"}
+    elif score >= 60:
         return {"tier": 0, "label": "WATCH", "size_mult": 0.0,
-                "description": "Monitor — not ready to trade"}
+                "description": "Monitor — score below tradeable bar"}
     else:
         return {"tier": -1, "label": "AVOID", "size_mult": 0.0,
-                "description": "Pass — weak structure"}
+                "description": "Pass — weak score"}
 
-    # Apply historical win-rate sizing adjustment for tradeable tiers (T1–T3 only)
-    # Reduces size for low-WR setups; increases for high-WR setups.
-    # Does NOT re-apply the score multiplier already applied in the win-rate feedback block.
+    # Win-rate setup adjustment retained — single-factor, evidence-driven.
+    # Reduces size for low-WR setups, boosts for high-WR setups.
     if setup_type:
         try:
             from tracker import get_setup_weight_multiplier
