@@ -4911,6 +4911,78 @@ def assign_conviction_tier(score: float, rr_ratio: float, rs_rank: int,
 # (_score_as_of). Ensures backtest scoring path = production scoring path so
 # WR claims from backtests translate to live performance.
 
+# ─────────────────────────────────────────────────────────────────────────────
+# RECENCY-FLOOR (2026-05-11): recent-N-window setup WR Wilson lower bound.
+# Used as a gate against stale boost evidence (mult > 1.0) — if the
+# strategy has been losing recently, don't amplify it via boost regardless
+# of what historical _validations say.
+# ─────────────────────────────────────────────────────────────────────────────
+_RECENT_SETUP_WR_CACHE: dict[str, tuple[int, float]] = {}
+_RECENT_SETUP_WR_CACHE_LOADED = False
+
+
+def _recent_setup_wr_lb(setup: str, last_n: int = 20) -> tuple[int, float]:
+    """Return (n_found, wr_lower_bound_95pct) for the last N closed BUY signals
+    of this setup. Reads `data/signal_log.json` once per process (cached).
+
+    last_n=20 chosen to match the RECENCY-FLOOR registry item; can be tuned.
+    Returns (0, 0.0) if no data, signal_log missing, or unparseable.
+    """
+    global _RECENT_SETUP_WR_CACHE_LOADED, _RECENT_SETUP_WR_CACHE
+    if not _RECENT_SETUP_WR_CACHE_LOADED:
+        _RECENT_SETUP_WR_CACHE_LOADED = True
+        try:
+            import json as _json
+            from pathlib import Path as _P
+            from collections import defaultdict as _dd
+            _path = _P(__file__).parent / "data" / "signal_log.json"
+            if not _path.exists():
+                return (0, 0.0)
+            _sigs = _json.loads(_path.read_text())
+            # Filter to CLOSED BUY signals with pnl recorded
+            _closed = [
+                s for s in _sigs
+                if s.get("status") == "CLOSED"
+                and s.get("actual_pnl_pct") is not None
+                and (s.get("verdict") or "BUY").upper() in ("BUY", "SHORT")
+            ]
+            # Sort by date (descending) — most recent first
+            _closed.sort(key=lambda s: s.get("date", ""), reverse=True)
+
+            # Group by strategy/setup name
+            _by_setup: dict[str, list[float]] = _dd(list)
+            for s in _closed:
+                _setup_name = s.get("strategy") or s.get("setup_type") or "unknown"
+                _by_setup[_setup_name].append(s.get("actual_pnl_pct") or 0)
+
+            # Compute Wilson 95% LB on last N per setup
+            try:
+                from tracker import wilson_ci as _wilson
+            except Exception:
+                # Fallback: implement Wilson inline
+                import math as _math
+                def _wilson(wins, n, conf=0.95):
+                    if n == 0: return (0.0, 1.0)
+                    z = 1.96
+                    p = wins / n
+                    denom = 1 + z*z/n
+                    centre = p + z*z/(2*n)
+                    margin = z * _math.sqrt(p*(1-p)/n + z*z/(4*n*n))
+                    return (max(0.0, (centre - margin) / denom),
+                            min(1.0, (centre + margin) / denom))
+
+            for setup_name, pnls in _by_setup.items():
+                recent = pnls[:last_n]  # already date-desc, take first N
+                n = len(recent)
+                wins = sum(1 for p in recent if p > 0)
+                wr_lb, _ = _wilson(wins, n) if n > 0 else (0.0, 1.0)
+                _RECENT_SETUP_WR_CACHE[setup_name] = (n, wr_lb)
+        except Exception:
+            pass  # silent — never block scoring on recency cache failure
+
+    return _RECENT_SETUP_WR_CACHE.get((setup or "").strip(), (0, 0.0))
+
+
 def apply_setup_wr_multiplier(normalized_score: float,
                               setup_type: str,
                               regime_name: str) -> float:
@@ -9333,6 +9405,23 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             _vlb = float(_v.get("wr_lb") or 1.0)
             if _vn < 30 or _vlb >= 0.30:
                 _setup_mult = 1.0  # silently revert to no-op (audit trail in config)
+        # RECENCY-FLOOR (2026-05-11): boost gate.
+        # If multiplier > 1.0 (a boost), require recent-20 closed signals
+        # for this setup to clear wr_lb >= 0.40. Stale boost evidence (e.g.,
+        # 10W Pullback 1.5x backed by historical n=87/WR 73.6%) shouldn't
+        # amplify a strategy that has been losing recently. If recent
+        # evidence fails the floor OR is too sparse (n<10), silently revert.
+        if _setup_mult > 1.0:
+            try:
+                _recent = _recent_setup_wr_lb(_setup_for_mult, last_n=20)
+                # _recent returns (n_found, wr_lb) or (0, 0.0) if no data
+                _rn, _rlb = _recent
+                if _rn >= 10 and _rlb < 0.40:
+                    # We have ENOUGH recent data and it shows poor WR — revert boost
+                    _setup_mult = 1.0
+                # If _rn < 10 (sparse recent), keep the boost — historical evidence stands
+            except Exception:
+                pass  # never fail scoring on recency check error
 
         # Variant F (2026-05-10) — regime-conditional override.
         # Agent-4 finding from 250d backtest: TC in bull regime carries 79.5%
