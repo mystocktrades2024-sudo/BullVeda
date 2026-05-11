@@ -748,7 +748,11 @@ def compute_stats_by_setup(history: list[dict] | None = None) -> dict:
 
     raw_history = _load_history()
 
-    # Build a lookup: (run_date, ticker) → pick metadata (setup_type, regime)
+    # Build a lookup: (run_date, ticker) → pick metadata (setup_type, regime, verdict)
+    # 2026-05-11 (TRACKER-BUY-FILTER): also track verdict so we can exclude
+    # WATCH-stage outcomes from per-setup stats. WATCH picks get tracked but
+    # never traded — their outcomes shouldn't bias setup_score_multiplier
+    # decisions. Per OPERATING MINDSET principle 16 (per-substrategy attribution).
     pick_meta: dict[tuple, dict] = {}
     for run in raw_history.get("runs", []):
         run_regime = run.get("regime", "unknown")
@@ -757,11 +761,17 @@ def compute_stats_by_setup(history: list[dict] | None = None) -> dict:
             pick_meta[key] = {
                 "setup_type": pick.get("setup_type", "unknown") or "unknown",
                 "regime":     (pick.get("regime") or run_regime or "unknown").lower(),
+                "verdict":    (pick.get("verdict") or "").upper(),
             }
 
-    # Filter to completed trades only (have a real exit_price that is not NaN)
+    # Filter to completed trades only (have a real exit_price that is not NaN).
+    # 2026-05-11: ALSO filter to verdict=BUY (or SHORT for shorts). WATCH
+    # picks are tracked-but-never-traded; including their outcomes biases
+    # setup multipliers. Audit (n=763) showed signal_log includes WATCH at
+    # ~45% of records — same bias here.
     raw_trades = raw_history.get("trades", [])
     completed: list[dict] = []
+    n_excluded_watch = 0
     for t in raw_trades:
         ep = t.get("exit_price")
         pc = t.get("pct_chg")
@@ -769,11 +779,21 @@ def compute_stats_by_setup(history: list[dict] | None = None) -> dict:
             continue  # not yet evaluated or bad data
         key = (t.get("run_date", ""), t.get("ticker", ""))
         meta = pick_meta.get(key, {})
+        # TRACKER-BUY-FILTER (2026-05-11): drop WATCH-stage outcomes.
+        # Trades with no meta (older runs predating verdict field) are kept
+        # for back-compat. SHORT trades kept for short attribution.
+        verdict = meta.get("verdict", "")
+        if verdict and verdict not in ("BUY", "SHORT"):
+            n_excluded_watch += 1
+            continue
         completed.append({
             **t,
             "setup_type": meta.get("setup_type", "unknown") or "unknown",
             "regime":     meta.get("regime", "unknown"),
+            "verdict":    verdict or "BUY",  # back-compat: default to BUY for old trades
         })
+    if n_excluded_watch:
+        log.debug(f"compute_stats_by_setup: excluded {n_excluded_watch} WATCH-stage outcomes")
 
     total = len(completed)
     enough_data = total >= 20
