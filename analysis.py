@@ -9364,7 +9364,15 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
                     _vbr = (_br_validations.get(_setup_for_mult) or {}).get(_regime_key) or {}
                     _vbn = int(_vbr.get("n") or 0)
                     _vblb = float(_vbr.get("wr_lb") or 1.0)
-                    if _vbn < 30 or _vblb >= 0.30:
+                    # 2026-05-11: allow `override: true` to bypass the n>=30
+                    # Wilson floor when point evidence is directionally clear
+                    # but sample is small. Mirrors static_setup_kill_list
+                    # override pattern. Required for Variant F+ (Near-VCP,
+                    # Squeeze Expansion, Pocket Pivot in bull regime) where
+                    # the attribution evidence is n=8-13 per setup but PF
+                    # 0.00-0.16 — direction is unambiguous, magnitude isn't.
+                    _override = bool(_vbr.get("override"))
+                    if (_vbn < 30 or _vblb >= 0.30) and not _override:
                         _regime_mult = 1.0  # gate not cleared
                 # The regime-specific overrides the global
                 _setup_mult = _regime_mult

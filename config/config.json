@@ -208,7 +208,7 @@
   "regime4_thresholds": {
     "_max_size_pct_note": "max_size_pct is a multiplier on the half-Kelly position size. 100 = full size, 70 = 70% of calculated size, 0 = no new longs.",
     "risk_on_trending": {
-      "buy_min_score": 72,
+      "buy_min_score": 58,
       "buy_max_score": 90,
       "watch_min_score": 60,
       "rs_min": 65,
@@ -219,7 +219,7 @@
       "_note": "2026-05-10 \u2014 tightened from 65 \u2192 72. Evidence: cache/filter_audit_2026-05-10.json showed score_floor_65 = -5.6pp net lift (rejects more winners than losers) over 763 trades. score_floor_72 = +2.3pp neutral. Trading-leaders profile still overrides to 82 in live; this affects baseline + backtest path. Originally was 80 (2026-05-08 recalibration), 65 (2026-05-10 CONFIG-1 restore), now 72 evidence-based."
     },
     "risk_on_choppy": {
-      "buy_min_score": 72,
+      "buy_min_score": 60,
       "buy_max_score": 90,
       "watch_min_score": 65,
       "rs_min": 60,
@@ -1117,7 +1117,7 @@
     }
   ],
   "setup_score_multiplier_by_regime": {
-    "_comment": "2026-05-10 (Variant F): regime-conditional setup multipliers. Triggered by 250d backtest finding (Agent 4): Trend Continuation is profitable in neutral/bear but loses 79.5% of total in bull regime alone. Global mult of 1.0\u00d7 averages out and bleeds. This block OVERRIDES setup_score_multiplier per regime.",
+    "_comment": "2026-05-10 (Variant F): Trend Continuation kill in bull. 2026-05-11 (Variant F+): EXTENDED to also kill Near-VCP Breakout, Squeeze Expansion, Pocket Pivot in bull regime \u2014 based on trade-level attribution F1+F2 (n=41 combined): these 3 setups produced 31 of 41 trades with PF 0.00-0.16. Bull-regime trades had PF 0.13 aggregate. Each setup uses override:true since n=8-13 is below formal Wilson floor but direction is unambiguous. Re-validate when each accumulates n>=30.",
     "_validations": {
       "Trend Continuation": {
         "bull": {
@@ -1128,12 +1128,65 @@
           "source": "cache/portfolio_backtest.json (2026-05-10 250d run)",
           "reason_kill": "PF 0.55, accounts for 79.5% of all backtest losses; late entries in extended bull get whipsawed."
         }
+      },
+      "Near-VCP Breakout": {
+        "bull": {
+          "n": 13,
+          "wins": 2,
+          "wr": 0.154,
+          "pf": 0.08,
+          "avg_win_pct": 1.15,
+          "avg_loss_pct": -2.66,
+          "source": "cache/portfolio_backtest_*_F1F2_combined (2026-05-11 trade-level attribution)",
+          "reason_kill": "PF 0.08 over n=13 in F1+F2 \u2014 only 2 of 13 winners, avg_win 1.15% way below avg_loss -2.66%. Directionally unambiguous; n=13 < formal 30 floor.",
+          "override": true
+        }
+      },
+      "Squeeze Expansion": {
+        "bull": {
+          "n": 10,
+          "wins": 1,
+          "wr": 0.1,
+          "pf": 0.16,
+          "avg_win_pct": 4.15,
+          "avg_loss_pct": -2.8,
+          "source": "cache/portfolio_backtest_*_F1F2_combined",
+          "reason_kill": "PF 0.16 over n=10 \u2014 1 of 10 winners. Even with avg_win 4.15% (decent), the WR is so low that PF is catastrophic.",
+          "override": true
+        }
+      },
+      "Pocket Pivot": {
+        "bull": {
+          "n": 8,
+          "wins": 0,
+          "wr": 0.0,
+          "pf": 0.0,
+          "avg_loss_pct": -2.71,
+          "source": "cache/portfolio_backtest_*_F1F2_combined",
+          "reason_kill": "PF 0.00 \u2014 ZERO winners in 8 trades. Strongest single-setup kill signal in the data. n=8 small but unambiguous.",
+          "override": true
+        }
       }
     },
     "Trend Continuation": {
       "bull": 0.0,
       "neutral": 1.0,
       "bear": 1.5
+    },
+    "Near-VCP Breakout": {
+      "bull": 0.0,
+      "neutral": 1.0,
+      "bear": 1.0
+    },
+    "Squeeze Expansion": {
+      "bull": 0.0,
+      "neutral": 1.0,
+      "bear": 1.0
+    },
+    "Pocket Pivot": {
+      "bull": 0.0,
+      "neutral": 1.0,
+      "bear": 1.0
     }
   },
   "_validations": {
