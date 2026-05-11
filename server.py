@@ -1074,133 +1074,29 @@ async def portfolio_close_on_alpaca(req: Request, _: HTTPBasicCredentials = Depe
 
 @app.post("/api/portfolio/sync_alpaca")
 async def portfolio_sync_alpaca(_: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
-    """Pull live Alpaca paper positions and mirror them into local portfolio_state.
+    """Pull live Alpaca paper account → local portfolio_state.
 
-    Strategy:
-      1. Fetch /v2/account → cash, equity, buying_power
-      2. Fetch /v2/positions → live open positions
-      3. For each local position: if not in Alpaca → mark closed (Alpaca closed it)
-      4. For each Alpaca position: if not in local → insert with defaults
-      5. For all matches: update current_price + unrealized_pnl in-place
+    Thin wrapper around alpaca_sync.sync_alpaca_to_local() (single source of
+    truth as of 2026-05-10). The module also handles filled-order
+    reconciliation into closed_trades and SQLite mirror, which the old
+    inline implementation didn't.
     """
     import json as _json
-    from urllib.request import Request as _UReq, urlopen as _uopen
-    from urllib.error import URLError, HTTPError
     from pathlib import Path as _Path
-    from datetime import datetime as _dt
-    import portfolio_tracker as pt
-
-    # Resolve creds via secrets_loader (reads .env directly)
+    from alpaca_sync import sync_alpaca_to_local
     try:
-        from secrets_loader import alpaca_key, alpaca_secret
-        key = (alpaca_key() or "").strip()
-        sec = (alpaca_secret() or "").strip()
-    except Exception:
-        import os as _os
-        key = _os.environ.get("ALPACA_API_KEY", "").strip()
-        sec = _os.environ.get("ALPACA_SECRET_KEY", "").strip()
-    if not key or not sec or "YOUR_" in key:
-        raise HTTPException(412, "Alpaca credentials not configured in .env")
+        result = sync_alpaca_to_local(force=True)
+    except Exception as e:
+        raise HTTPException(502, f"alpaca_sync failed: {e}")
+    if not result.get("ok"):
+        raise HTTPException(502, f"alpaca_sync error: {result.get('error') or result.get('skipped')}")
 
-    import os as _os
-    base = _os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets").rstrip("/")
-
-    headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": sec}
-
-    def _alpaca_get(path: str):
-        req = _UReq(f"{base}{path}", headers=headers)
-        return _json.loads(_uopen(req, timeout=10).read())
-
-    try:
-        account = _alpaca_get("/v2/account")
-        positions = _alpaca_get("/v2/positions")
-    except HTTPError as e:
-        raise HTTPException(502, f"Alpaca {e.code}: {e.read().decode()[:200]}")
-    except URLError as e:
-        raise HTTPException(502, f"Alpaca network error: {e}")
-
-    # Load local state
-    state_p = _Path("data/portfolio_state.json")
-    state = _json.loads(state_p.read_text())
-    local_positions = state.get("positions", [])
-    local_by_ticker = {p["ticker"]: p for p in local_positions}
-    alpaca_by_ticker = {p["symbol"]: p for p in positions}
-
-    today = _dt.now().date().isoformat()
-    closed = []
-    updated = []
-    inserted = []
-
-    # 1. Local-only → mark closed (Alpaca closed it externally)
-    for tk, lp in list(local_by_ticker.items()):
-        if tk not in alpaca_by_ticker:
-            try:
-                # Use last known price as exit; if missing default to entry
-                exit_px = float(lp.get("current_price") or lp.get("entry_price") or 0)
-                pt.close_position(tk, exit_px, "alpaca_external_close")
-                closed.append(tk)
-            except Exception:
-                pass
-
-    # Reload after closes
-    state = _json.loads(state_p.read_text())
-    local_positions = state.get("positions", [])
-    local_by_ticker = {p["ticker"]: p for p in local_positions}
-
-    # 2. Alpaca-only → insert into local with defaults
-    # 3. Both sides → update current_price + unrealized_pnl
-    for sym, ap in alpaca_by_ticker.items():
-        avg_entry = float(ap.get("avg_entry_price") or 0)
-        cur_price = float(ap.get("current_price") or 0)
-        qty = abs(int(float(ap.get("qty") or 0)))
-        side = (ap.get("side") or "long").lower()
-        if sym in local_by_ticker:
-            # Update in place
-            lp = local_by_ticker[sym]
-            lp["current_price"] = round(cur_price, 2)
-            lp["unrealized_pnl_dollars"] = round(float(ap.get("unrealized_pl") or 0), 2)
-            lp["unrealized_pnl_pct"] = round(float(ap.get("unrealized_plpc") or 0) * 100, 2)
-            lp["last_updated"] = today
-            updated.append(sym)
-        else:
-            # Insert — use sane stop/target defaults (3% / 5%)
-            stop = round(avg_entry * (0.97 if side == "long" else 1.03), 2)
-            target = round(avg_entry * (1.05 if side == "long" else 0.95), 2)
-            try:
-                pt.add_position(
-                    ticker=sym, entry_price=avg_entry, shares=qty,
-                    stop=stop, target1=target, target2=None,
-                    setup_type="alpaca_sync", direction=side,
-                    allocation_pct=round(qty * avg_entry / max(1, float(account.get("equity") or 100000)) * 100, 1),
-                    notes="Synced from Alpaca paper account",
-                )
-                inserted.append(sym)
-            except Exception as e:
-                pass
-
-    # Sync equity/cash from Alpaca
-    state = _json.loads(state_p.read_text())
-    state["equity"] = round(float(account.get("equity") or 0), 2)
-    state["cash"] = round(float(account.get("cash") or 0), 2)
-    state["buying_power"] = round(float(account.get("buying_power") or 0), 2)
-    state["last_alpaca_sync"] = _dt.now().isoformat()
-    state["alpaca_account"] = (account.get("account_number") or "")[:6] + "***"
-    state_p.write_text(_json.dumps(state, indent=2))
-
-    # Return the fresh portfolio block so the dashboard can update DATA.portfolio
-    # without waiting for a full data.json rebuild.
+    # Re-load state to surface the fresh portfolio block for dashboard
+    state = _json.loads((_Path("data/portfolio_state.json")).read_text())
     return {
-        "ok": True,
-        "synced_at": state["last_alpaca_sync"],
-        "alpaca_account": state["alpaca_account"],
-        "equity": state["equity"],
-        "cash": state["cash"],
-        "buying_power": state["buying_power"],
-        "alpaca_positions": len(positions),
+        **result,
         "local_positions_after": len(state.get("positions", [])),
-        "closed": closed,
-        "updated": updated,
-        "inserted": inserted,
+        "alpaca_positions": result.get("alpaca_position_count", 0),
         "portfolio": {
             "equity": state.get("equity"),
             "cash": state.get("cash"),

@@ -451,6 +451,23 @@ def main():
     print("\n" + summary)
     if not args.dry_run and submitted > 0:
         _slack_notify(f"*SwingTrade executor* — {summary}")
+
+    # ALPACA-SYNC (2026-05-10): post-submit reconciliation so local state
+    # reflects the just-submitted orders. Best-effort — skip on failure (e.g.,
+    # rate limit, auth issue) since the orders themselves already landed.
+    if not args.dry_run and submitted > 0:
+        try:
+            from alpaca_sync import sync_alpaca_to_local
+            _sync = sync_alpaca_to_local(force=True, verbose=False)
+            if _sync.get("ok"):
+                log.info(
+                    f"Post-submit sync OK — equity=${_sync['equity']:,.2f} "
+                    f"new positions inserted: {len(_sync.get('inserted') or [])}"
+                )
+            else:
+                log.warning(f"Post-submit sync failed: {_sync.get('error') or _sync.get('skipped')}")
+        except Exception as e:
+            log.warning(f"Post-submit sync skipped: {e}")
     return 0 if failed == 0 else 1
 
 

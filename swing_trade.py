@@ -596,6 +596,27 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _e0:
         log.debug(f"Pre-scan cache clear failed: {_e0}")
 
+    # Step 0b: Sync Alpaca paper account state into local stores (ALPACA-SYNC,
+    # commit 2026-05-10). Best-effort — failures (auth missing, network) log
+    # but don't block the scan. Output feeds portfolio dashboard + kelly_size
+    # drawdown_haircut + future tracker pick attribution.
+    try:
+        from alpaca_sync import sync_alpaca_to_local
+        _sync = sync_alpaca_to_local(verbose=False)
+        if _sync.get("ok"):
+            log.info(
+                f"Step 0b: Alpaca sync OK — equity=${_sync['equity']:,.2f} "
+                f"positions(alpaca={_sync.get('alpaca_position_count',0)}) "
+                f"+{len(_sync.get('inserted') or [])} ~{len(_sync.get('updated') or [])} "
+                f"-{len(_sync.get('closed') or [])} new_closed_trades={_sync.get('new_closed_trades',0)}"
+            )
+        elif _sync.get("skipped"):
+            log.debug(f"Step 0b: Alpaca sync rate-limited ({_sync['skipped']})")
+        else:
+            log.warning(f"Step 0b: Alpaca sync failed: {_sync.get('error')}")
+    except Exception as _e0b:
+        log.warning(f"Step 0b: Alpaca sync skipped (best-effort): {_e0b}")
+
     # Step 1: Build universe + fetch all Zacks premium data in one browser session
     log.info("Step 1: Building universe + fetching Zacks premium data...")
     sp500 = get_sp500()
