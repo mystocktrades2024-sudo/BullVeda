@@ -4852,10 +4852,16 @@ def assign_conviction_tier(score: float, rr_ratio: float, rs_rank: int,
     is_panic     = regime4 == "panic"
     is_risk_on_trending = regime4 == "risk_on_trending"
 
-    if (score >= 88 and rr_ratio >= 3.5 and rs_rank >= 85
+    # 2026-05-10: T1 score bar 88 → 85. Source: cache/filter_audit_2026-05-10.json
+    # showed conv_T1_only rejected 100% of 94 evaluable trades — bar never
+    # cleared in production. Filter stack accumulation problem. Relaxing
+    # score requirement only (keep RR / RS / regime4 / catalyst / entry_quality
+    # criteria intact so T1 still means real elite). Audit shows score_floor_82
+    # is +9pp lift — 85 is comfortably above the noise band.
+    if (score >= 85 and rr_ratio >= 3.5 and rs_rank >= 85
             and is_risk_on_trending and catalyst_tier <= 1 and fresh_or_pb):
-        # T1: Full conviction — 0.85 at 88 → 1.0 at 98+ (linear)
-        _t1_mult = min(1.0, 0.85 + (score - 88) * 0.015)
+        # T1: Full conviction — 0.80 at 85 → 1.0 at 98+ (linear)
+        _t1_mult = min(1.0, 0.80 + (score - 85) * 0.015)
         result = {"tier": 1, "label": "T1", "size_mult": round(_t1_mult, 2),
                   "description": "Full size — all gates cleared"}
     elif (score >= 78 and rr_ratio >= 3.0 and rs_rank >= 75
