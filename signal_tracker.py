@@ -323,6 +323,10 @@ def log_signals(picks: list[dict], run_date: str | None = None) -> int:
             "raw_total":     breakdown.get("raw_total"),
             "wr_multiplier": breakdown.get("wr_multiplier"),
             "bonus_total":   breakdown.get("bonus_total"),
+            # Raw fundamentals for fund_adequacy gate audit (2026-05-11)
+            "fund_score_raw": c.get("fund_score_raw"),
+            "fund_max":       c.get("fund_max"),
+            "catalyst_tier":  c.get("catalyst_tier"),
             # Profile attribution (2026-04-15): tag every signal with the
             # active config profile so we can compute per-profile win rate / P&L.
             "profile":       _active_profile_name(),

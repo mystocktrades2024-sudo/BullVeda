@@ -2928,6 +2928,11 @@ def run_daily_scan(force_fresh: bool = False):
                 "ef_zacks_rank":        zacks.get("rank") or zacks.get("zacks_rank"),
                 "ef_earn_days":         c.get("earn_days") or c.get("days_to_earnings"),
             }
+            # Pillar breakdown + raw fundamentals — signal_tracker reads these
+            # via c.get("scoring_breakdown"). Without pass-through, every signal
+            # lands with qg_score=None and fund_adequacy gate cannot be audited.
+            _sb = c.get("scoring_breakdown") or {}
+            _fund = c.get("fundamentals") or {}
             return {
                 "ticker":      c.get("ticker", ""),
                 "strategy":    plan.get("setup_type") or c.get("setup_family", "Core Swing"),
@@ -2952,6 +2957,16 @@ def run_daily_scan(force_fresh: bool = False):
                 "mc_p_stop_first":      mc.get("p_hit_stop_first"),
                 "fd_var_95_pct":        fd.get("var_95_pct"),
                 "fd_cvar_975_pct":      fd.get("cvar_975_pct"),
+                # Scoring breakdown — pass through so signal_tracker can persist
+                # the per-pillar normalized scores (audit ranking flaws #16/#17).
+                "scoring_breakdown":    _sb,
+                # Raw fundamentals (for fund_adequacy gate audit — the existing
+                # qg_score persists the normalized 0-5 value; this captures the
+                # raw fund_score/fund_max ratio that the gate actually checks).
+                "fund_score_raw":       _fund.get("score"),
+                "fund_max":             _fund.get("max"),
+                # Catalyst tier (used by the conditional fund_adequacy bypass).
+                "catalyst_tier":        c.get("catalyst_tier"),
                 # A6 (2026-05-09): entry-time feature suite for ML training corpus
                 **entry_features,
             }
@@ -3250,7 +3265,7 @@ def run_daily_scan(force_fresh: bool = False):
     # entry triggers. (2026-05-07 — wired from previously orphan options_flow_scanner.)
     options_flow_top30: list = []
     try:
-        from options_flow_scanner import scan as _options_flow_scan
+        from options_flow_scanner import scan as _options_flow_scan, scan_broader as _options_flow_scan_broader
         # Build the (price, fundamentals) sidecars from all_results — already enriched.
         _flow_prices = {r.get("ticker"): r.get("price") for r in all_results
                         if r.get("ticker") and r.get("price")}
@@ -3266,6 +3281,14 @@ def run_daily_scan(force_fresh: bool = False):
             }
         _flow_all = _options_flow_scan(options_iv_data, _flow_prices, _flow_funds)
         options_flow_top30 = _flow_all[:30]
+        # Broader scan: bullish + bearish, looser thresholds; powers Top-50 tab
+        try:
+            _flow_broader = _options_flow_scan_broader(options_iv_data, _flow_prices, _flow_funds)
+            options_flow_top50 = _flow_broader[:50]
+            log.info(f"  Live Options Flow (BROADER): {len(_flow_broader)} candidates · top 50 taken")
+        except Exception as _br_err:
+            log.warning(f"  Options-flow broader scan failed: {_br_err}")
+            options_flow_top50 = _flow_all[:50]
         if options_flow_top30:
             _strong = sum(1 for x in options_flow_top30 if x.get("status") == "STRONG")
             _mod    = sum(1 for x in options_flow_top30 if x.get("status") == "MODERATE")
@@ -3277,6 +3300,7 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _of_err:
         log.warning(f"  Live Options Flow scan failed: {_of_err}")
         options_flow_top30 = []
+        options_flow_top50 = []
 
     bundle = {
         "run_date":         run_date,
@@ -3290,6 +3314,7 @@ def run_daily_scan(force_fresh: bool = False):
         "all_scored":       all_results,
         "killed":           killed,
         "options_flow_top30": options_flow_top30,
+        "options_flow_top50": options_flow_top50,
         "medium_term_picks": medium_term_picks,
         "long_term_picks":   long_term_picks,
         "extended_leaders": extended_leaders,

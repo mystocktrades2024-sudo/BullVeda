@@ -455,8 +455,27 @@ def _eval_hard_gates(t: dict) -> tuple[list[dict], list[str]]:
         fm = fm if fm is not None else ftn.get("max")
     if fs is not None and fm and fm > 0:
         ratio = fs / fm
-        passed = ratio >= DEFAULT_FUND_ADEQUACY
-        reason = "" if passed else f"fundamentals {fs}/{fm} = {ratio*100:.0f}% < {DEFAULT_FUND_ADEQUACY*100:.0f}% adequacy"
+        # Conditional bypass (2026-05-11): the score gate already weights qg
+        # as one of 5 pillars (max 30% contribution). Re-testing fund_adequacy
+        # in isolation double-counts and blocks strong-score / Tier-1 catalyst
+        # names where technicals + catalyst more than compensate. Evidence:
+        # picks_history n=314 shows qg<2 still wins 55.6% with PF 1.29 when
+        # other pillars are strong. Bypass conditions:
+        #   1. score >= 75 → already vetted as elite by composite
+        #   2. catalyst_tier == 1 → PEAD/UOA/VCP/52wk-breakout — catalyst-driven
+        _score = t.get("score") or 0
+        _cat_tier = t.get("catalyst_tier")
+        # Bypass conditions are gated by a score floor — pure cat_tier=1
+        # without a composite floor would let noise tickers (score=3 with
+        # a PEAD tag) slip through. Score 60 = WATCH-eligible composite floor.
+        _bypass = (_score >= 75) or (_cat_tier == 1 and _score >= 60)
+        if ratio < DEFAULT_FUND_ADEQUACY and _bypass:
+            passed = True
+            reason = (f"fundamentals {fs}/{fm} = {ratio*100:.0f}% < {DEFAULT_FUND_ADEQUACY*100:.0f}% — "
+                      f"bypassed (score={_score:.0f}, cat_tier={_cat_tier})")
+        else:
+            passed = ratio >= DEFAULT_FUND_ADEQUACY
+            reason = "" if passed else f"fundamentals {fs}/{fm} = {ratio*100:.0f}% < {DEFAULT_FUND_ADEQUACY*100:.0f}% adequacy"
     else:
         passed = True  # no data → don't block (avoid false negatives on data outages)
         reason = "no fundamentals data — gate skipped"
