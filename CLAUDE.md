@@ -257,6 +257,23 @@ Use `ls` / `find` to discover files. Key entry points:
 
 If `apply_to_score: false` on `tier1_signals`, signals compute but don't mutate canonical score (informational only). Flip to `true` after validation.
 
+## Two-Log Architecture (signal_log.json vs picks_history.json)
+
+Two PARALLEL trade-outcome logs track different realities. Knowing which one is canonical for a given consumer is critical when diagnosing performance.
+
+| Log | Written by | Read by | What it records | Today's WR snapshot |
+|---|---|---|---|---|
+| **`cache/picks_history.json`** | `tracker._save_run()` on every scan | `tracker.compute_stats_by_setup()` → `apply_setup_wr_multiplier` (live + backtest) | Each scan's "picks" + matured trade outcomes | 627 closed, **61.2%** WR |
+| **`data/signal_log.json`** | `signal_tracker.log_signals()` on every scan emit | `model_drift_alert`, `elite_research_note`, diagnostics | Every emitted signal (BUY + WATCH + SHORT, Phase 2 2026-04-30) with paper 5d/10d outcomes | 621 closed, mixed (recent BUY-only crashed to 12.7% during 04-28 CAR bug) |
+
+Key implications:
+- **Tracker feedback loop (`apply_setup_wr_multiplier`) reads `picks_history.json`** — that's the authoritative "what would we have done" log.
+- **`signal_log.json` is the diagnostic/drift log** — broader scope (includes WATCH-tier), catches scanner-output bugs first.
+- The two CAN diverge sharply. The CAR catastrophe (2026-04-28 onward) appeared in `signal_log.json` but NOT in `picks_history.json` — meaning the scanner emitted CAR signals but the main scoring pipeline (analyze_ticker → picks_history) didn't accept them as picks. Either log alone tells a partial story.
+- **When user reports "system is losing money", check `data/portfolio_state.json` first** — that's the ONLY log that reflects real trades taken. Paper-simulation outcomes in either log above can show losses with zero real exposure.
+
+When investigating WR drift, query BOTH logs and triangulate against `portfolio_state.json`.
+
 ## Strategy Enhancements
 
 Shipped feature blocks (regime weight shifts, vol/drawdown sizing, sector relative ranking, Tier-1 signals, Zacks v2) live in `docs/changelog.md`. All are config-flagged in `config/config.json` — set `_enabled: false` on any block to roll back.

@@ -1278,6 +1278,48 @@
       "status": "DONE",
       "date_fixed": "2026-05-10",
       "commit": "4442fa300"
+    },
+    {
+      "id": "RECENCY-FLOOR",
+      "priority": "P2",
+      "section": "Validation Hygiene",
+      "item": "_validations needs recency floor \u2014 auto-revert stale boosts",
+      "what": "Current setup_score_multiplier._validations gates on lifetime n>=30 + wr_lb<0.30 for demotions but NO gate for boosts. Stale boost evidence (e.g., 10W Pullback 1.5x backed by n=87 / WR 73.6% historical) can amplify a strategy that has been losing recently (last 11 BUYs: 9.1% WR, -5.31% avg). Bug class only surfaced because of the CAR target1 catastrophe.",
+      "how": "Add recency check: when a boost (mult > 1.0) is configured, require the LAST N=20 closed signals for (setup x regime) to clear wr_lb >= 0.40. If not, silently revert to 1.0 (no boost). Same pattern as existing demotion gate at analysis.py:8846. Defer until BUY-only filter discussion is resolved (TRACKER-BUY-FILTER).",
+      "effort": "",
+      "risk_win": "",
+      "notes": "",
+      "status": "OPEN",
+      "date_fixed": null,
+      "commit": null
+    },
+    {
+      "id": "TWO-LOG-DOC",
+      "priority": "P2",
+      "section": "Documentation",
+      "item": "Two-log architecture (picks_history vs signal_log) was undocumented",
+      "what": "Discovered 2026-05-10 during inflection diagnosis: cache/picks_history.json and data/signal_log.json track different realities (61.2% vs 12.7% recent WR). Tracker feedback reads picks_history; drift alerts read signal_log. Mis-attributing which log feeds which consumer wastes diagnostic time.",
+      "how": "Add 'Two-Log Architecture' section to CLAUDE.md after EODHD section, with table mapping consumers + WR snapshots. Cross-reference portfolio_state.json as the ONLY real-trades log.",
+      "effort": "",
+      "risk_win": "",
+      "notes": "",
+      "status": "DONE",
+      "date_fixed": "2026-05-10",
+      "commit": "8b06e56ae"
+    },
+    {
+      "id": "TRACKER-BUY-FILTER",
+      "priority": "P2",
+      "section": "Tracker/Feedback Loop",
+      "item": "tracker.compute_stats_by_setup should filter to verdict='BUY' only",
+      "what": "Currently reads all closed trades from picks_history.json (627: 304 BUY + 315 WATCH + 5 None + 3 SHORT, total WR 61.2%). The tracker drives apply_setup_wr_multiplier which scales future BUY scores. Learning from WATCH/SHORT outcomes (signals the system never took) biases multipliers in non-actionable directions.",
+      "how": "Add _accepted_verdicts={'BUY'} filter at tracker.py:765 area. CAVEAT: cuts available sample sizes drastically (most setup x regime cells drop to n<5 \u2192 mult=1.0). Could remove existing boosts. Verify with backtest before shipping.",
+      "effort": "",
+      "risk_win": "",
+      "notes": "",
+      "status": "OPEN",
+      "date_fixed": null,
+      "commit": null
     }
   ]
 }
