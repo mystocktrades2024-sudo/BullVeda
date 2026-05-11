@@ -201,6 +201,15 @@ _limiter = _RateLimiter(_RATE_PER_SEC, _RATE_PER_MIN, _RATE_PER_DAY)
 _session = requests.Session()
 _session.headers.update({"User-Agent": "SwingTrade/1.0 (eodhd_client)"})
 
+# Connection-pool sizing (2026-05-11): default urllib3 pool is 10 connections, but
+# the enrichment pool runs 14 concurrent workers + the prewarm script runs 14.
+# Bumping pool size to 32 prevents "Connection pool is full, discarding connection"
+# warnings and avoids the TCP handshake cost of opening/closing connections.
+from requests.adapters import HTTPAdapter as _HTTPAdapter
+_pool_adapter = _HTTPAdapter(pool_connections=32, pool_maxsize=32, max_retries=0)
+_session.mount("https://", _pool_adapter)
+_session.mount("http://", _pool_adapter)
+
 
 # ── Cache helper (disk JSON, TTL) ─────────────────────────────────────────────
 def _cache_path(key: str) -> Path:
@@ -388,9 +397,96 @@ def real_time(tickers: list[str] | str, cache_ttl: int = 300) -> dict | list[dic
 
 
 def fundamentals(ticker: str, cache_ttl: int = 86400) -> dict | None:
-    """Fundamentals API — financials, ratios, sector, dividends, etc. 6h cache."""
+    """Fundamentals API — financials, ratios, sector, dividends, etc. 24h cache."""
     sym = to_eodhd_symbol(ticker)
     return _request(f"fundamentals/{sym}", cache_key=f"fund_{sym}", cache_ttl=cache_ttl)
+
+
+def bulk_fundamentals(symbols: list[str], exchange: str = "US",
+                      cache_ttl: int = 86400) -> dict | None:
+    """Bulk fundamentals — 1 EODHD call returns simplified fundamentals for up
+    to ~100 tickers. Replaces per-ticker /fundamentals/X calls for cold-cache
+    scans (Phase 3 optimization).
+
+    Returns dict keyed by EODHD code, e.g. {"AAPL": {...}, "MSFT": {...}}.
+    Each value has the same shape as `fundamentals()` but with a SUBSET of
+    fields (General, Highlights, Valuation, Technicals, SharesStats — no full
+    Financials / Earnings history / Cashflow). Use this to pre-warm the
+    per-ticker cache; deep-field consumers still need fundamentals(ticker).
+
+    EODHD enforces ~100 symbols per call. Caller is responsible for chunking.
+    """
+    if not symbols:
+        return {}
+    symbols = symbols[:100]
+    syms_param = ",".join(to_eodhd_symbol(s) for s in symbols)
+    # Deterministic cache key (sort symbols so reordered calls share cache)
+    cache_key = f"fund_bulk_{exchange}_{','.join(sorted(symbols)).upper()}"
+    return _request(
+        f"fundamentals-bulk/{exchange}",
+        params={"symbols": syms_param},
+        cache_key=cache_key,
+        cache_ttl=cache_ttl,
+    )
+
+
+def prewarm_fundamentals(tickers: list[str], exchange: str = "US",
+                         chunk_size: int = 100, cache_ttl: int = 86400) -> dict:
+    """Pre-populate per-ticker fundamentals cache from bulk_fundamentals.
+
+    Splits `tickers` into chunks of 100, calls bulk_fundamentals on each,
+    then writes each per-ticker payload to the same cache key that
+    `fundamentals(ticker)` would consult. Subsequent fundamentals(t) calls
+    are O(1) cache hits.
+
+    Returns {ok: n, missing: list, calls: int, elapsed_sec: float}.
+    """
+    import time as _time
+    if not tickers:
+        return {"ok": 0, "missing": [], "calls": 0, "elapsed_sec": 0.0}
+
+    t0 = _time.time()
+    n_ok = 0
+    n_calls = 0
+    missing: list[str] = []
+    seen: set = set()
+    # Dedupe while preserving order
+    uniq = [t for t in tickers if not (t in seen or seen.add(t))]
+
+    for i in range(0, len(uniq), chunk_size):
+        chunk = uniq[i:i + chunk_size]
+        try:
+            bulk = bulk_fundamentals(chunk, exchange=exchange, cache_ttl=cache_ttl)
+            n_calls += 1
+        except Exception:
+            missing.extend(chunk)
+            continue
+        if not bulk or not isinstance(bulk, dict):
+            missing.extend(chunk)
+            continue
+        # bulk_fundamentals returns {SYMBOL.EXCHANGE: data} OR {SYMBOL: data}
+        # depending on EODHD response. Normalize both.
+        for t in chunk:
+            sym = to_eodhd_symbol(t)
+            data = bulk.get(sym) or bulk.get(t) or bulk.get(t.upper())
+            if not data:
+                # try matching by Code field
+                for k, v in bulk.items():
+                    if isinstance(v, dict) and (v.get("General") or {}).get("Code", "").upper() == t.upper():
+                        data = v
+                        break
+            if data:
+                _cache_write(f"fund_{sym}", data)
+                n_ok += 1
+            else:
+                missing.append(t)
+
+    return {
+        "ok": n_ok,
+        "missing": missing,
+        "calls": n_calls,
+        "elapsed_sec": round(_time.time() - t0, 2),
+    }
 
 
 def search(query: str, limit: int = 15, cache_ttl: int = 86400,
@@ -532,6 +628,96 @@ def sentiments(tickers: list[str] | str, from_date: str | None = None,
         params["to"] = to_date
     cache_key = f"sent_{syms[:60]}_{from_date}_{to_date}"
     return _request("sentiments", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
+
+
+def bulk_calendar_trends(symbols: list[str], cache_ttl: int = 21600) -> dict | None:
+    """Bulk EPS-estimate trends for up to ~100 tickers in 1 call.
+
+    Returns dict shaped:
+        { "type": "Trends", "symbols": "...",
+          "trends": [ [ {code, date, period, growth, earningsEstimate*, epsTrend*,
+                         epsRevisionsUp*, revenueEstimate*}, ... ], ... ] }
+
+    Each ticker has multiple rows (current Q, next Q, current Y, next Y). Used
+    to replace per-ticker yfinance get_earnings_estimate_trend() calls in the
+    scan enrichment phase.
+
+    EODHD enforces ~100 symbols per call. Caller chunks via prewarm_calendar_trends.
+    """
+    if not symbols:
+        return None
+    symbols = symbols[:100]
+    syms_param = ",".join(to_eodhd_symbol(s) for s in symbols)
+    cache_key = f"trends_bulk_{','.join(sorted(symbols)).upper()}"
+    return _request(
+        "calendar/trends",
+        params={"symbols": syms_param},
+        cache_key=cache_key,
+        cache_ttl=cache_ttl,
+    )
+
+
+def bulk_calendar_earnings(symbols: list[str], from_date: str | None = None,
+                           to_date: str | None = None,
+                           cache_ttl: int = 21600) -> dict | None:
+    """Bulk upcoming earnings dates for up to ~100 tickers in 1 call.
+
+    Replaces per-ticker get_earnings_date() with one call returning all
+    scheduled earnings reports.
+    """
+    if not symbols:
+        return None
+    symbols = symbols[:100]
+    params = {"symbols": ",".join(to_eodhd_symbol(s) for s in symbols)}
+    if from_date: params["from"] = from_date
+    if to_date:   params["to"]   = to_date
+    cache_key = f"earn_bulk_{from_date or 'na'}_{to_date or 'na'}_{','.join(sorted(symbols)).upper()}"
+    return _request(
+        "calendar/earnings",
+        params=params,
+        cache_key=cache_key,
+        cache_ttl=cache_ttl,
+    )
+
+
+def prewarm_calendar_trends(tickers: list[str], chunk_size: int = 100) -> dict:
+    """Pre-fetch calendar trends for many tickers; flatten into per-ticker dict.
+
+    Returns {ticker: list_of_period_rows}. The list has rows for each fiscal
+    period (current Q, next Q, current Y, next Y). Consumers can pick which
+    period they need (typically +1q for the next reporting quarter).
+    """
+    import time as _time
+    if not tickers:
+        return {}
+    t0 = _time.time()
+    n_calls = 0
+    out: dict[str, list] = {}
+    seen: set = set()
+    uniq = [t for t in tickers if not (t in seen or seen.add(t))]
+    for i in range(0, len(uniq), chunk_size):
+        chunk = uniq[i:i + chunk_size]
+        try:
+            resp = bulk_calendar_trends(chunk)
+            n_calls += 1
+        except Exception:
+            continue
+        if not resp:
+            continue
+        # response shape: {"trends": [ [rows for ticker 1], [rows for ticker 2], ...]}
+        groups = resp.get("trends") or []
+        for grp in groups:
+            if not isinstance(grp, list) or not grp:
+                continue
+            code = (grp[0].get("code") or "").split(".")[0].upper()
+            if code:
+                out[code] = grp
+    return {
+        "data": out,
+        "calls": n_calls,
+        "n_tickers": len(out),
+        "elapsed_sec": round(_time.time() - t0, 2),
+    }
 
 
 def earnings_calendar(from_date: str | None = None, to_date: str | None = None,

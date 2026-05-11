@@ -30,6 +30,16 @@ from data_fetcher import yf  # _YfStub: empty no-op (yfinance removed 2026-04-25
 # our own log.info/warn messages are unaffected.
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
+# Suppress the yfinance DeprecationWarning flood. After EODHD's fundamentals
+# endpoint started returning empty (mass failover seen 2026-05-11), every
+# ticker triggers yfinance's deprecated Ticker.earnings code path, producing
+# ~50 warning lines per ticker × 600 tickers = 30k+ lines drowning out the
+# real progress log. The warnings reach stderr via warnings.warn(), bypassing
+# the yfinance logger above, so we must use the warnings module to silence them.
+import warnings as _warnings
+_warnings.filterwarnings("ignore", category=DeprecationWarning, module="yfinance")
+_warnings.filterwarnings("ignore", category=FutureWarning, module="yfinance")
+
 from social_signals import get_social_signals
 from data_fetcher import (
     load_config, get_sp500, get_russell1000, fetch_all_zacks_data,
@@ -807,6 +817,53 @@ def run_daily_scan(force_fresh: bool = False):
         except Exception as e:
             log.warning(f"  Screener pre-filter failed (continuing without): {e}")
 
+    # ── Step 1.9: Bulk price/volume pre-filter (Phase 2 optimization) ─────
+    # Use EODHD bulk_eod (one call returns all US last-day OHLCV) to drop
+    # tickers that can't possibly qualify on price + ADV, BEFORE we pay the
+    # cost of fetching 1y history for them. Drops the history-fetch universe
+    # from ~3000 → ~1800, cutting EODHD quota usage 40%+ per scan.
+    _prefilter_pre = len(universe)
+    try:
+        _min_price = float(cfg.get("filters", {}).get("min_price", 5))
+        _max_price = float(cfg.get("filters", {}).get("max_price", 500))
+        _min_dv    = float(cfg.get("filters", {}).get("min_avg_daily_dollar_vol", 5_000_000))
+
+        from data_fetcher import _eodhd_bulk_eod_layer as _bulk_layer
+        _snap_map, _ = _bulk_layer(universe)
+        if _snap_map:
+            _kept: list[str] = []
+            _ts_keep: dict = {}
+            for _t in universe:
+                _rec = _snap_map.get(_t)
+                if not _rec:
+                    # No bulk snapshot for this ticker — keep it (custom, foreign listing, etc.)
+                    _kept.append(_t)
+                    if _t in ticker_sources:
+                        _ts_keep[_t] = ticker_sources[_t]
+                    continue
+                _close = float(_rec.get("close") or _rec.get("adjusted_close") or 0)
+                _vol   = float(_rec.get("volume") or 0)
+                _dv    = _close * _vol
+                # ALWAYS keep custom + leveraged + Zacks #1 even if out of range
+                if ticker_sources.get(_t) in ("custom", "leveraged", "zacks_r1"):
+                    _kept.append(_t)
+                    _ts_keep[_t] = ticker_sources[_t]
+                    continue
+                if _min_price <= _close <= _max_price and _dv >= _min_dv:
+                    _kept.append(_t)
+                    if _t in ticker_sources:
+                        _ts_keep[_t] = ticker_sources[_t]
+            _saved = _prefilter_pre - len(_kept)
+            if _saved > 0:
+                log.info(
+                    f"  Phase-2 prefilter: {_prefilter_pre} → {len(_kept)} "
+                    f"({_saved} dropped on bulk price/volume) · saves ~{_saved} EODHD history calls"
+                )
+                universe = _kept
+                ticker_sources = _ts_keep if _ts_keep else ticker_sources
+    except Exception as _e:
+        log.debug(f"Phase-2 bulk prefilter skipped: {_e}")
+
     # Step 2: Fetch market data + macro context
     log.info("Step 2: Fetching market data...")
     market_data = fetch_market_data(universe, period="1y")
@@ -1238,6 +1295,53 @@ def run_daily_scan(force_fresh: bool = False):
     log.info("Step 4: Fetching fundamentals & enrichment...")
     tickers_to_analyze = list(qualified.keys())
 
+    # ── Phase 5: two-stage conditional enrichment ─────────────────────────
+    # Split qualified into a "deep" tier (full enrichment) and a "light" tier
+    # (only cheap EODHD-backed endpoints). Expensive per-ticker endpoints
+    # (options chain, UOA, gamma, congressional, WSB, gamma squeeze) only fire
+    # for the deep tier. Light-tier tickers can still produce a verdict from
+    # OHLCV + cheap signals but won't get BUY upgrades (only WATCH at best).
+    _tier1_n   = int(cfg.get("performance", {}).get("deep_enrichment_top_n", 200))
+    _zr1_set   = set(zacks_r1_set) if "zacks_r1_set" in dir() else set()
+    _eg_set    = _earnings_guaranteed if "_earnings_guaranteed" in dir() else set()
+    _custom_set = {t for t, src in ticker_sources.items() if src in ("custom", "leveraged")}
+    # Score all qualifying tickers cheaply (reuse the local pre-screen helper)
+    _all_scores = {t: _fast_prescreen_score(df) for t, df in qualified.items()}
+    # Tier-1 = (guaranteed sets) + (top-N by score until we hit _tier1_n)
+    _t1_guaranteed = _zr1_set | _eg_set | _custom_set
+    _t1_guaranteed &= set(qualified.keys())
+    _sorted = sorted(
+        [(t, s) for t, s in _all_scores.items() if t not in _t1_guaranteed],
+        key=lambda x: x[1], reverse=True,
+    )
+    _t1_slots = max(0, _tier1_n - len(_t1_guaranteed))
+    tier1_tickers: set = _t1_guaranteed | {t for t, _ in _sorted[:_t1_slots]}
+    tier2_tickers: set = set(qualified.keys()) - tier1_tickers
+    log.info(
+        f"  Phase-5 tier split: tier1={len(tier1_tickers)} "
+        f"(deep: options/UOA/gamma/WSB/congressional), "
+        f"tier2={len(tier2_tickers)} (light: cheap EODHD only)"
+    )
+    # Surface the tier split so downstream code can gate BUY verdicts
+    _tier1_set = tier1_tickers
+    _tier2_set = tier2_tickers
+
+    # Phase 3: pre-fetch bulk calendar/trends so get_earnings_estimate_trend()
+    # hits an in-memory cache instead of falling through to deprecated yfinance.
+    # Cuts ~650 yfinance calls (with 50+ DeprecationWarnings each) to ~6-7 bulk
+    # EODHD calls per scan.
+    try:
+        from data_fetcher import prewarm_calendar_trends_bulk
+        _pw = prewarm_calendar_trends_bulk(tickers_to_analyze)
+        if _pw.get("ok"):
+            log.info(
+                f"  [Phase-3 prewarm] calendar/trends: warmed {_pw['tickers_warmed']}/"
+                f"{len(tickers_to_analyze)} tickers in {_pw['eodhd_calls']} EODHD calls "
+                f"({_pw['elapsed_sec']}s)"
+            )
+    except Exception as _pe:
+        log.debug(f"Phase-3 prewarm skipped: {_pe}")
+
     # Fetch info in parallel
     infos = get_stock_info_batch(tickers_to_analyze, max_workers=16)
 
@@ -1307,45 +1411,66 @@ def run_daily_scan(force_fresh: bool = False):
 
     # Enrichment-pool config (bounds API blast radius + skips dead/low-signal calls)
     enr_cfg = (cfg.get("enrichment") or {})
-    pool_workers   = int(enr_cfg.get("pool_workers", 12))         # was 64; EODHD limiter is 14/sec
+    # Workers bumped 12 → 14 (2026-05-11) to match EODHD per-sec rate limit exactly;
+    # the limiter at eodhd_client.py:_RATE_PER_SEC=14 still gates if 14 workers
+    # ever issue >14 calls in a second, so this is safe. 12 left 2 slots idle.
+    pool_workers   = int(enr_cfg.get("pool_workers", 14))
     skip_low_signal = bool(enr_cfg.get("skip_low_signal", True))  # drop social + decommissioned calls
     skip_options    = bool(enr_cfg.get("skip_options",    True))  # options data removed in EODHD migration
 
     log.info(f"  Enrichment pool: workers={pool_workers}, skip_low_signal={skip_low_signal}, skip_options={skip_options}")
     log.info(f"  Tickers: {len(tickers_to_analyze)} × ~14 endpoints ≈ {len(tickers_to_analyze)*14} EODHD calls (cache hits skip the network)")
+
+    # Heartbeat helper — surfaces enrichment progress so log doesn't go silent
+    # for 1–2 hours when EODHD failover triggers mass yfinance fallback.
+    _enrich_t0 = time.time()
+    _enrich_total = len(tickers_to_analyze)
+    def _heartbeat(loop_name: str, completed: int) -> None:
+        if _enrich_total <= 0:
+            return
+        step = max(50, _enrich_total // 10)
+        if completed == _enrich_total or completed % step == 0:
+            elapsed = time.time() - _enrich_t0
+            log.info(f"  [enrich] {loop_name}: {completed}/{_enrich_total} ({elapsed:.0f}s)")
     # When skip_low_signal/skip_options=True we leave stocktwits_data, reddit_wsb_data,
     # congressional_data, gamma_data, polygon_opts_data as their original {} init from
     # earlier in this function — downstream code uses .get(t, {}) so empty is safe.
 
+    # Phase 5 tier helpers: cheap endpoints fire for ALL qualified tickers;
+    # expensive endpoints fire ONLY for tier-1 (~200) to keep API spend bounded.
+    _t1 = [t for t in tickers_to_analyze if t in _tier1_set]
+
     with ThreadPoolExecutor(max_workers=pool_workers) as pool:
-        # Always-on (high-signal, EODHD-backed)
+        # ── CHEAP endpoints (all qualified tickers) — EODHD bulk-able or cached
         earn_futures        = {pool.submit(get_earnings_date,       t): t for t in tickers_to_analyze}
         news_futures        = {pool.submit(get_news_sentiment,      t): t for t in tickers_to_analyze}
         insider_futures     = {pool.submit(get_insider_activity,    t): t for t in tickers_to_analyze}
         analyst_futures     = {pool.submit(get_analyst_data,        t): t for t in tickers_to_analyze}
-        options_futures     = {pool.submit(get_options_iv_data,     t): t for t in tickers_to_analyze}
-        beat_futures        = {pool.submit(get_earnings_beat_rate,  t): t for t in tickers_to_analyze}
         extra_fund_futures  = {pool.submit(get_extra_fundamentals,  t): t for t in tickers_to_analyze}
-        uoa_futures         = {pool.submit(get_unusual_options,      t): t for t in tickers_to_analyze}
-        borrow_futures      = {pool.submit(get_borrow_rate,          t): t for t in tickers_to_analyze}
-        schwab_fund_futures = {pool.submit(get_schwab_fundamentals,      t): t for t in tickers_to_analyze}
-        sec_futures         = {pool.submit(get_sec_filings,              t): t for t in tickers_to_analyze}
-        premarket_futures   = {pool.submit(get_premarket_volume,         t): t for t in tickers_to_analyze}
-        inst_trend_futures  = {pool.submit(get_institutional_trend,      t): t for t in tickers_to_analyze}
-        eps_trend_futures   = {pool.submit(get_earnings_estimate_trend,  t): t for t in tickers_to_analyze}
+        schwab_fund_futures = {pool.submit(get_schwab_fundamentals, t): t for t in tickers_to_analyze}
+        eps_trend_futures   = {pool.submit(get_earnings_estimate_trend, t): t for t in tickers_to_analyze}
         news_articles_futures = {pool.submit(get_news_articles, t, 8): t for t in tickers_to_analyze}
 
-        # Optional / low-signal — only fired when skip_low_signal=False
+        # ── EXPENSIVE endpoints (tier-1 only) — Schwab options chain, UOA, etc.
+        options_futures     = {pool.submit(get_options_iv_data,     t): t for t in _t1}
+        beat_futures        = {pool.submit(get_earnings_beat_rate,  t): t for t in _t1}
+        uoa_futures         = {pool.submit(get_unusual_options,     t): t for t in _t1}
+        borrow_futures      = {pool.submit(get_borrow_rate,         t): t for t in _t1}
+        sec_futures         = {pool.submit(get_sec_filings,         t): t for t in _t1}
+        premarket_futures   = {pool.submit(get_premarket_volume,    t): t for t in _t1}
+        inst_trend_futures  = {pool.submit(get_institutional_trend, t): t for t in _t1}
+
+        # Optional / low-signal — tier-1 ONLY when not skipped
         if skip_low_signal:
             stocktwits_futures = {}
             wsb_futures        = {}
             cong_futures       = {}
             gamma_futures      = {}
         else:
-            stocktwits_futures  = {pool.submit(get_stocktwits_data,     t): t for t in tickers_to_analyze}
-            wsb_futures         = {pool.submit(get_reddit_wsb,           t): t for t in tickers_to_analyze}
-            cong_futures        = {pool.submit(get_congressional_trades, t): t for t in tickers_to_analyze}
-            gamma_futures       = {pool.submit(get_gamma_squeeze_data,   t): t for t in tickers_to_analyze}
+            stocktwits_futures  = {pool.submit(get_stocktwits_data,     t): t for t in _t1}
+            wsb_futures         = {pool.submit(get_reddit_wsb,          t): t for t in _t1}
+            cong_futures        = {pool.submit(get_congressional_trades, t): t for t in _t1}
+            gamma_futures       = {pool.submit(get_gamma_squeeze_data,   t): t for t in _t1}
 
         # Options chain — decommissioned in EODHD migration; gated for safety
         if skip_options:
@@ -1392,10 +1517,13 @@ def run_daily_scan(force_fresh: bool = False):
             try:    beat_rate_data[t] = fut.result()
             except: beat_rate_data[t] = {}
 
+        _n_extra = 0
         for fut in as_completed(extra_fund_futures):
             t = extra_fund_futures[fut]
             try:    extra_fund_data[t] = fut.result()
             except: extra_fund_data[t] = {}
+            _n_extra += 1
+            _heartbeat("extra_fund", _n_extra)
 
         for fut in as_completed(cong_futures):
             t = cong_futures[fut]
@@ -1420,10 +1548,13 @@ def run_daily_scan(force_fresh: bool = False):
 
         # Drain Schwab fundamentals (populates the shared memcache). After this
         # loop, both get_finnhub_data() and get_fmp_data() below are O(1).
+        _n_schwab = 0
         for fut in as_completed(schwab_fund_futures):
             _ = schwab_fund_futures[fut]
             try:    fut.result()
             except Exception: pass
+            _n_schwab += 1
+            _heartbeat("schwab_fund", _n_schwab)
         for t in tickers_to_analyze:
             finnhub_data[t] = get_finnhub_data(t)   # shim — reads Schwab memcache
             fmp_data[t]     = get_fmp_data(t)       # shim — reads Schwab memcache
@@ -1448,15 +1579,21 @@ def run_daily_scan(force_fresh: bool = False):
             try:    gamma_data[t] = fut.result()
             except: gamma_data[t] = {}
 
+        _n_eps = 0
         for fut in as_completed(eps_trend_futures):
             t = eps_trend_futures[fut]
             try:    eps_trend_data[t] = fut.result()
             except: eps_trend_data[t] = {}
+            _n_eps += 1
+            _heartbeat("eps_trend", _n_eps)
 
+        _n_news = 0
         for fut in as_completed(news_articles_futures):
             t = news_articles_futures[fut]
             try:    news_articles_data[t] = fut.result()
             except: news_articles_data[t] = []
+            _n_news += 1
+            _heartbeat("news_articles", _n_news)
 
         for fut in as_completed(poly_opts_futures):
             t = poly_opts_futures[fut]
@@ -1464,6 +1601,19 @@ def run_daily_scan(force_fresh: bool = False):
             except: options_chain_data[t] = {}
 
     log.info(f"  Enriched {len(infos)} tickers (EODHD + Schwab + SEC EDGAR + FINVIZ scrape + congressional + WSB + UOA + borrow + pre-mkt + gamma)")
+    # Surface yfinance circuit-breaker stats so a tripped breaker is visible.
+    try:
+        from data_fetcher import yf_circuit_stats
+        _cs = yf_circuit_stats()
+        if _cs["total_calls"] > 0:
+            state = "OPEN (yf fallback disabled mid-scan)" if _cs["open"] else "closed"
+            log.info(
+                f"  [yfinance circuit] {state} · calls={_cs['total_calls']} "
+                f"slow={_cs['slow_calls']} failed={_cs['failed_calls']} "
+                f"(trips on {_cs['trip_after']}+ slow calls)"
+            )
+    except Exception:
+        pass
 
     # Backfill missing earnings dates from FINVIZ bulk
     _earn_patched = 0
@@ -3572,6 +3722,21 @@ def run_daily_scan(force_fresh: bool = False):
         os.replace(tmp_path, bundle_path)
     except Exception as _be:
         log.warning(f"last_bundle.json write failed: {_be}")
+
+    # Mirror the full scan into Supabase (analysis-domain tables).
+    # Non-fatal: errors logged but never break the scan.
+    try:
+        from supabase_analysis_sync import sync_scan as _sync_analysis_scan
+        _res = _sync_analysis_scan(bundle)
+        if _res.get("ok"):
+            log.info(
+                f"supabase analysis sync: {_res.get('n_tickers', 0)} tickers in "
+                f"{_res.get('elapsed_sec', 0):.1f}s · errors={_res.get('errors') or 'none'}"
+            )
+        elif _res.get("reason") != "disabled":
+            log.warning(f"supabase analysis sync skipped: {_res.get('reason')}")
+    except Exception as _se:
+        log.warning(f"supabase analysis sync failed (non-fatal): {_se}")
 
     # Rebuild prototype data.json + tickers.json so the new-design dashboard
     # at /v2/ stays in sync with the production scan.

@@ -152,6 +152,90 @@ def is_degraded_mode() -> bool:
     return _DEGRADED_MODE
 
 
+# ── yfinance circuit breaker ─────────────────────────────────────────────────
+# When EODHD's fundamentals endpoint goes degraded (seen 2026-05-11), every
+# ticker falls through to yfinance for fundamentals/earnings. yfinance is slow
+# (5-10s per ticker) AND noisy (50+ DeprecationWarning lines per call), turning
+# a 30 min scan into a 2-3 hour one. This circuit breaker auto-disables yfinance
+# for the rest of the scan after N slow/failed calls — accepting some missing
+# data in exchange for finishing in reasonable time.
+#
+# Tuneable via env var YF_CIRCUIT_TRIP_AFTER (default 15 slow calls).
+_YF_CIRCUIT_OPEN = False
+_YF_SLOW_COUNT = 0
+_YF_FAIL_COUNT = 0
+_YF_TOTAL_CALLS = 0
+_YF_SLOW_THRESHOLD_SEC = float(os.environ.get("YF_SLOW_THRESHOLD_SEC", "3.0"))
+_YF_TRIP_AFTER = int(os.environ.get("YF_CIRCUIT_TRIP_AFTER", "15"))
+
+
+def yf_circuit_open() -> bool:
+    """If True, callers should short-circuit and return empty without invoking yfinance."""
+    return _YF_CIRCUIT_OPEN
+
+
+def yf_record_call(elapsed_sec: float, failed: bool = False) -> None:
+    """Record a yfinance call's outcome. Auto-trips the breaker if too many slow/failed."""
+    global _YF_CIRCUIT_OPEN, _YF_SLOW_COUNT, _YF_FAIL_COUNT, _YF_TOTAL_CALLS
+    _YF_TOTAL_CALLS += 1
+    if failed:
+        _YF_FAIL_COUNT += 1
+    if elapsed_sec >= _YF_SLOW_THRESHOLD_SEC:
+        _YF_SLOW_COUNT += 1
+    if not _YF_CIRCUIT_OPEN and (_YF_SLOW_COUNT >= _YF_TRIP_AFTER
+                                  or _YF_FAIL_COUNT >= _YF_TRIP_AFTER * 2):
+        _YF_CIRCUIT_OPEN = True
+        log.warning(
+            f"yfinance circuit OPEN after {_YF_TOTAL_CALLS} calls "
+            f"(slow={_YF_SLOW_COUNT}, failed={_YF_FAIL_COUNT}). "
+            f"Remaining yfinance fallbacks will return empty for the rest of this scan."
+        )
+
+
+def yf_circuit_stats() -> dict:
+    return {
+        "open": _YF_CIRCUIT_OPEN,
+        "total_calls": _YF_TOTAL_CALLS,
+        "slow_calls": _YF_SLOW_COUNT,
+        "failed_calls": _YF_FAIL_COUNT,
+        "slow_threshold_sec": _YF_SLOW_THRESHOLD_SEC,
+        "trip_after": _YF_TRIP_AFTER,
+    }
+
+
+# ── Phase 3: EODHD bulk calendar/trends prewarm cache ────────────────────────
+# Module-level dict populated by prewarm_calendar_trends_bulk() at scan start.
+# get_earnings_estimate_trend() consults this before falling back to yfinance.
+# Format: {ticker.upper(): [row_dicts]}  (one row per fiscal period from EODHD)
+_BULK_TRENDS_CACHE: dict = {}
+
+
+def prewarm_calendar_trends_bulk(tickers: list[str]) -> dict:
+    """Pre-fetch EPS trends via bulk calendar/trends; cache for the scan.
+
+    Cuts ~600 yfinance per-ticker calls (each with 50+ DeprecationWarnings) down
+    to ~6 bulk EODHD calls. Called once from swing_trade.py before enrichment.
+    """
+    global _BULK_TRENDS_CACHE
+    try:
+        import eodhd_client as _eod
+        res = _eod.prewarm_calendar_trends(tickers)
+        _BULK_TRENDS_CACHE = res.get("data") or {}
+        return {
+            "ok": True,
+            "tickers_warmed": res.get("n_tickers", 0),
+            "eodhd_calls": res.get("calls", 0),
+            "elapsed_sec": res.get("elapsed_sec", 0),
+        }
+    except Exception as e:
+        log.warning(f"prewarm_calendar_trends_bulk failed (non-fatal): {e}")
+        return {"ok": False, "error": str(e)}
+
+
+def bulk_trends_cache_size() -> int:
+    return len(_BULK_TRENDS_CACHE)
+
+
 # ── Batch retry helper (for snapshot-style calls) ────────────────────────────
 
 def _retry_batch_call(func, args=(), kwargs=None, max_retries=3, base_delay=2, label="batch"):
@@ -4111,6 +4195,11 @@ def get_extra_fundamentals(ticker: str) -> dict:
     empty = {"ev_ebitda": None, "p_fcf": None, "institutional_pct": None,
              "buyback_annual": None, "buyback_yield": None,
              "estimate_revision": None, "error": None}
+    # Circuit breaker: skip yfinance once we've established it's slow.
+    if yf_circuit_open():
+        empty["error"] = "yf circuit open"
+        return empty
+    _t0 = time.time()
     try:
         t  = yf.Ticker(ticker)
         info = t.info or {}
@@ -4152,11 +4241,13 @@ def get_extra_fundamentals(ticker: str) -> dict:
             elif rev_pct > -5:  estimate_revision = "flat"
             else:               estimate_revision = "down"
 
+        yf_record_call(time.time() - _t0, failed=False)
         return {"ev_ebitda": round(ev_ebitda, 1) if ev_ebitda else None,
                 "p_fcf": p_fcf, "institutional_pct": inst_pct,
                 "buyback_annual": buyback_annual, "buyback_yield": buyback_yield,
                 "estimate_revision": estimate_revision, "error": None}
     except Exception as e:
+        yf_record_call(time.time() - _t0, failed=True)
         empty["error"] = str(e)
         return empty
 
@@ -4278,6 +4369,10 @@ def get_earnings_beat_rate(ticker: str) -> dict:
     Retries once on transient errors; logs HTTP 401 (crumb expiry) explicitly.
     """
     empty = {"beat_rate": None, "beats": 0, "misses": 0, "quarters": 0, "error": None}
+    if yf_circuit_open():
+        empty["error"] = "yf circuit open"
+        return empty
+    _t0 = time.time()
 
     def _fetch():
         t = yf.Ticker(ticker)
@@ -4304,20 +4399,25 @@ def get_earnings_beat_rate(ticker: str) -> dict:
 
     for attempt in range(2):
         try:
-            return _fetch()
+            res = _fetch()
+            yf_record_call(time.time() - _t0, failed=False)
+            return res
         except Exception as e:
             err_str = str(e)
             is_401 = "401" in err_str or "Unauthorized" in err_str or "Invalid Crumb" in err_str
             if is_401:
                 log.debug(f"Beat rate {ticker}: Yahoo crumb expired (HTTP 401)")
                 empty["error"] = "HTTP 401 — crumb expired"
+                yf_record_call(time.time() - _t0, failed=True)
                 return empty  # No point retrying on auth failure
             if attempt == 0:
                 time.sleep(1)
                 continue
             log.debug(f"Beat rate {ticker}: {err_str}")
             empty["error"] = err_str
+            yf_record_call(time.time() - _t0, failed=True)
             return empty
+    yf_record_call(time.time() - _t0, failed=True)
     return empty
 
 
@@ -5297,6 +5397,9 @@ def get_gamma_squeeze_data(ticker: str) -> dict:
 
     _empty = {"gamma_score": 0, "call_oi_skew": 0.5, "short_float_pct": 0,
               "float_size_m": 0, "gamma_risk": "low"}
+    if yf_circuit_open():
+        return _empty
+    _t0 = time.time()
     try:
         t = yf.Ticker(ticker)
         info = t.info or {}
@@ -5351,9 +5454,11 @@ def get_gamma_squeeze_data(ticker: str) -> dict:
             "gamma_risk":      gamma_risk,
         }
         _cache_write(cache_key, result)
+        yf_record_call(time.time() - _t0, failed=False)
         return result
     except Exception as e:
         log.debug(f"Gamma squeeze {ticker}: {e}")
+        yf_record_call(time.time() - _t0, failed=True)
         return _empty
 
 
@@ -5381,6 +5486,42 @@ def get_earnings_estimate_trend(ticker: str) -> dict:
 
     _empty = {"trend": "stable", "current_eps_est": None, "prior_eps_est": None,
               "revision_direction": 0, "surprise_history_mean": 0}
+
+    # Phase 3: EODHD bulk calendar/trends pre-warmer. If we have a prewarmed
+    # row for this ticker, build the dict directly without yfinance.
+    bulk_rows = _BULK_TRENDS_CACHE.get(ticker.upper()) if _BULK_TRENDS_CACHE else None
+    if bulk_rows:
+        try:
+            # pick the "+1q" (next quarter) row when available
+            row = next((r for r in bulk_rows if r.get("period") == "+1q"), None) or bulk_rows[0]
+            def _f(v):
+                try: return float(v) if v not in (None, "", "null") else None
+                except (TypeError, ValueError): return None
+            current = _f(row.get("epsTrendCurrent") or row.get("earningsEstimateAvg"))
+            prior   = _f(row.get("epsTrend30daysAgo"))
+            up7   = int(_f(row.get("epsRevisionsUpLast7days")) or 0)
+            up30  = int(_f(row.get("epsRevisionsUpLast30days")) or 0)
+            down30= int(_f(row.get("epsRevisionsDownLast30days")) or 0)
+            net = up30 - down30
+            revision_direction = 1 if net > 1 else (-1 if net < -1 else 0)
+            trend = ("rising" if revision_direction > 0 else
+                     "falling" if revision_direction < 0 else "stable")
+            res = {
+                "trend": trend,
+                "current_eps_est": current,
+                "prior_eps_est": prior,
+                "revision_direction": revision_direction,
+                "surprise_history_mean": 0,
+                "_source": "eodhd_bulk_trends",
+            }
+            _cache_write(cache_key, res)
+            return res
+        except Exception:
+            pass  # fall through to yfinance
+
+    if yf_circuit_open():
+        return _empty
+    _t0 = time.time()
     try:
         t = yf.Ticker(ticker)
 
@@ -5448,9 +5589,11 @@ def get_earnings_estimate_trend(ticker: str) -> dict:
             "surprise_history_mean":  surprise_history_mean,
         }
         _cache_write(cache_key, result)
+        yf_record_call(time.time() - _t0, failed=False)
         return result
     except Exception as e:
         log.debug(f"EPS estimate trend {ticker}: {e}")
+        yf_record_call(time.time() - _t0, failed=True)
         return _empty
 
 

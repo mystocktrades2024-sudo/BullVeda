@@ -1,0 +1,2137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SwingTrade — Supabase ER Diagram (Restructure Plan)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #0b0f17;
+    --bg-2: #11161f;
+    --bg-3: #161c27;
+    --line: #1f2733;
+    --line-2: #2a3445;
+    --text: #d8dee9;
+    --muted: #8a94a6;
+    --accent: #5ab0ff;
+    --accent-2: #ffb454;
+    --green: #7bd88f;
+    --red: #ff7a7a;
+    --yellow: #ffd866;
+    --purple: #c896ff;
+    --pink: #ff86c8;
+    --cyan: #5be4cf;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif; }
+  body { min-height: 100vh; }
+
+  header.topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: linear-gradient(180deg, #0d121b 0%, #0b0f17 100%);
+    border-bottom: 1px solid var(--line);
+    padding: 10px 18px; display: flex; align-items: center; gap: 14px;
+  }
+  header h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0.2px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  header .grow { flex: 1; }
+  header input.search {
+    width: 320px; background: var(--bg-3); border: 1px solid var(--line-2);
+    color: var(--text); border-radius: 6px; padding: 6px 10px; font-size: 12px; outline: none;
+  }
+  header input.search:focus { border-color: var(--accent); }
+  header .stat { color: var(--muted); font-size: 11px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 4px; }
+  header .stat b { color: var(--text); font-weight: 600; }
+
+  .layout { display: grid; grid-template-columns: 240px 1fr 320px; min-height: calc(100vh - 49px); }
+
+  aside.sidebar { background: var(--bg-2); border-right: 1px solid var(--line); padding: 12px 0; overflow-y: auto; max-height: calc(100vh - 49px); position: sticky; top: 49px; }
+  aside h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); margin: 8px 14px 6px; font-weight: 600; }
+  aside .domain {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 14px; cursor: pointer; font-size: 12px;
+    border-left: 3px solid transparent;
+  }
+  aside .domain:hover { background: var(--bg-3); }
+  aside .domain.active { background: var(--bg-3); border-left-color: var(--accent); }
+  aside .domain .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+  aside .domain .name { flex: 1; }
+  aside .domain .count { color: var(--muted); font-size: 10px; }
+
+  main.canvas { padding: 16px 18px; overflow-y: auto; max-height: calc(100vh - 49px); }
+
+  .domain-section { margin-bottom: 24px; }
+  .domain-section h2 {
+    font-size: 13px; font-weight: 600; margin: 0 0 10px;
+    display: flex; align-items: center; gap: 8px;
+    padding-bottom: 6px; border-bottom: 1px solid var(--line);
+  }
+  .domain-section h2 .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .domain-section h2 .blurb { font-weight: 400; color: var(--muted); font-size: 11px; margin-left: 8px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+
+  .table-card {
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px;
+    overflow: hidden; cursor: pointer; transition: border-color .12s, transform .12s;
+    display: flex; flex-direction: column;
+  }
+  .table-card:hover { border-color: var(--line-2); }
+  .table-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .table-card.hit { border-color: var(--yellow); }
+
+  .table-card .head {
+    padding: 8px 10px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .table-card .head .domain-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .table-card .head .name { font-weight: 600; font-size: 12px; flex: 1; }
+  .table-card .head .badge {
+    font-size: 9px; padding: 2px 5px; border-radius: 3px; background: var(--bg-3);
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .table-card .head .badge.new { color: var(--green); border: 1px solid rgba(123,216,143,.3); }
+  .table-card .head .badge.exist { color: var(--accent); border: 1px solid rgba(90,176,255,.3); }
+  .table-card .head .field-count { color: var(--muted); font-size: 10px; margin-left: 4px; }
+
+  .table-card .body { padding: 4px 0; font-size: 11px; }
+  .table-card .field {
+    padding: 3px 10px; display: flex; align-items: center; gap: 6px;
+    border-top: 1px solid transparent;
+  }
+  .table-card .field:hover { background: var(--bg-3); }
+  .table-card .field .key {
+    width: 22px; font-size: 9px; color: var(--muted); text-align: left;
+  }
+  .table-card .field .key.pk { color: var(--accent-2); font-weight: 700; }
+  .table-card .field .key.fk { color: var(--accent); font-weight: 700; }
+  .table-card .field .key.uq { color: var(--purple); font-weight: 700; }
+  .table-card .field .key.idx { color: var(--cyan); font-weight: 600; }
+  .table-card .field .name { flex: 1; }
+  .table-card .field .type { color: var(--muted); font-size: 10px; font-family: ui-monospace, Menlo, monospace; }
+  .table-card .field.hit { background: rgba(255,216,102,.08); }
+  .table-card .field.hit .name { color: var(--yellow); }
+
+  .table-card .more {
+    padding: 5px 10px; color: var(--muted); font-size: 10px; cursor: pointer;
+    border-top: 1px solid var(--line); text-align: center;
+  }
+  .table-card .more:hover { color: var(--text); background: var(--bg-3); }
+
+  aside.detail {
+    background: var(--bg-2); border-left: 1px solid var(--line);
+    padding: 14px; overflow-y: auto; max-height: calc(100vh - 49px);
+    position: sticky; top: 49px;
+  }
+  aside.detail .empty { color: var(--muted); font-size: 12px; padding: 8px; text-align: center; }
+  aside.detail h3 { margin: 0 0 4px; font-size: 14px; }
+  aside.detail .domain-tag {
+    display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    background: var(--bg-3); margin-bottom: 8px;
+  }
+  aside.detail .blurb { color: var(--muted); font-size: 11px; margin-bottom: 12px; }
+  aside.detail .section { margin-bottom: 16px; }
+  aside.detail .section h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
+    color: var(--muted); margin: 0 0 6px; font-weight: 600; }
+  aside.detail .field-row {
+    display: flex; align-items: center; gap: 8px; padding: 3px 0;
+    border-bottom: 1px dotted var(--line); font-size: 11px;
+  }
+  aside.detail .field-row .key { width: 24px; font-size: 9px; }
+  aside.detail .field-row .key.pk { color: var(--accent-2); font-weight: 700; }
+  aside.detail .field-row .key.fk { color: var(--accent); font-weight: 700; }
+  aside.detail .field-row .key.uq { color: var(--purple); font-weight: 700; }
+  aside.detail .field-row .key.idx { color: var(--cyan); }
+  aside.detail .field-row .name { flex: 1; }
+  aside.detail .field-row .type { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 10px; }
+  aside.detail .rel-row {
+    display: flex; flex-direction: column; padding: 6px 8px; margin-bottom: 4px;
+    border: 1px solid var(--line); border-radius: 4px; cursor: pointer; font-size: 11px;
+  }
+  aside.detail .rel-row:hover { border-color: var(--accent); background: var(--bg-3); }
+  aside.detail .rel-row .arrow { color: var(--accent); margin: 0 6px; }
+  aside.detail .rel-row .relkind { color: var(--muted); font-size: 10px; }
+
+  aside.detail .source {
+    background: var(--bg-3); border-radius: 4px; padding: 6px 8px;
+    font-size: 11px; color: var(--muted); margin-bottom: 4px;
+  }
+  aside.detail .source b { color: var(--text); }
+
+  .modeswitch { display: flex; gap: 4px; }
+  .modeswitch button {
+    background: var(--bg-3); color: var(--muted); border: 1px solid var(--line);
+    padding: 5px 10px; font-size: 11px; border-radius: 4px; cursor: pointer;
+  }
+  .modeswitch button.active { background: var(--accent); color: #001020; border-color: var(--accent); font-weight: 600; }
+  .modeswitch button:hover:not(.active) { color: var(--text); }
+
+  .legend {
+    display: flex; gap: 12px; font-size: 10px; color: var(--muted); align-items: center;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .legend b { font-weight: 700; }
+
+  .hidden { display: none !important; }
+
+  .scroll-pad { height: 100px; }
+
+  .empty-state {
+    text-align: center; color: var(--muted); padding: 40px 20px;
+    border: 1px dashed var(--line); border-radius: 6px;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #38445a; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>SwingTrade ER · <span class="sub">Supabase restructure plan</span></h1>
+  <input class="search" id="searchBox" placeholder="Search tables, fields, sources…" />
+  <div class="modeswitch">
+    <button id="mode-all" class="active">All</button>
+    <button id="mode-new">New only</button>
+    <button id="mode-exist">Migrated only</button>
+  </div>
+  <div class="grow"></div>
+  <div class="legend">
+    <span><b style="color:var(--accent-2)">PK</b> primary</span>
+    <span><b style="color:var(--accent)">FK</b> foreign</span>
+    <span><b style="color:var(--purple)">UQ</b> unique</span>
+    <span><b style="color:var(--cyan)">IX</b> index</span>
+  </div>
+  <span class="stat">Tables: <b id="stat-tables">0</b></span>
+  <span class="stat">Fields: <b id="stat-fields">0</b></span>
+  <span class="stat">FKs: <b id="stat-fks">0</b></span>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <h3>Domains</h3>
+    <div id="domain-list"></div>
+    <h3 style="margin-top:16px">Migration source</h3>
+    <div class="domain" data-filter="src:sqlite">
+      <span class="dot" style="background:var(--accent)"></span>
+      <span class="name">SQLite (existing)</span>
+      <span class="count" id="count-sqlite">0</span>
+    </div>
+    <div class="domain" data-filter="src:json">
+      <span class="dot" style="background:var(--yellow)"></span>
+      <span class="name">JSON sidecars</span>
+      <span class="count" id="count-json">0</span>
+    </div>
+    <div class="domain" data-filter="src:new">
+      <span class="dot" style="background:var(--green)"></span>
+      <span class="name">New (restructure)</span>
+      <span class="count" id="count-new">0</span>
+    </div>
+    <div class="domain" data-filter="src:cache">
+      <span class="dot" style="background:var(--cyan)"></span>
+      <span class="name">Cache file</span>
+      <span class="count" id="count-cache">0</span>
+    </div>
+  </aside>
+
+  <main class="canvas" id="canvas"></main>
+
+  <aside class="detail" id="detail">
+    <div class="empty">Click a table to inspect.<br/>Click a field to see relationships.</div>
+  </aside>
+</div>
+
+<script>
+/* ============================================================================
+   SwingTrade Supabase ER Schema — embedded as data
+   ============================================================================
+   Each table:
+     { id, domain, label, source, kind, blurb, fields: [{name, type, key, ref, note}], rels: [...] }
+   key ∈ pk|fk|uq|idx|null  ; ref = "other_table.column" (for FK)
+   source ∈ sqlite|json|cache|new ; kind ∈ existing|new|wide|narrow
+   ============================================================================ */
+
+const DOMAINS = [
+  { id:'core',          label:'1 · Core (ticker · run)',           color:'#5ab0ff', blurb:'Master entities — everything else hangs off these.' },
+  { id:'analysis',      label:'2 · Ticker analysis (per-run snapshot)', color:'#ffb454', blurb:'One row per (run × ticker). Verdict/score/setup, narrow header table.' },
+  { id:'tradeplan',     label:'3 · Trade plan',                    color:'#c896ff', blurb:'Canonical entries / stops / targets / zones (K6 single-source-of-truth).' },
+  { id:'technicals',    label:'4 · Technicals',                    color:'#5be4cf', blurb:'EMA / momentum / volatility / patterns / volume — decomposed by category.' },
+  { id:'smc',           label:'5 · SMC (Smart Money Concepts)',    color:'#ff86c8', blurb:'Order blocks, FVG zones, BoS/CHoCH, liquidity sweeps.' },
+  { id:'wave',          label:'6 · Elliott Wave + Theory',         color:'#a3e635', blurb:'Wave classification + Dow/Wyckoff/Gann theory confluence.' },
+  { id:'fundamentals',  label:'7 · Fundamentals (slow-changing)',  color:'#7bd88f', blurb:'Per-ticker (NOT per-run). Refreshed daily. Analyst estimates, ratios, growth.' },
+  { id:'options',       label:'8 · Options · IV · UOA',            color:'#ffd866', blurb:'IV/skew/PCR/gamma/max-pain + UOA detection (Schwab Trader API).' },
+  { id:'smartmoney',    label:'9 · Smart money',                   color:'#f97316', blurb:'Insiders, congressional, institutional ownership, SEC filings.' },
+  { id:'sentiment',     label:'10 · Sentiment & news',             color:'#a78bfa', blurb:'News articles, StockTwits, Reddit/WSB, aggregated scores.' },
+  { id:'zacks',         label:'11 · Zacks',                        color:'#22d3ee', blurb:'Zacks Rank #1, VGM grades, gmail premium-service mentions.' },
+  { id:'risk',          label:'12 · Risk · sizing',                color:'#ef4444', blurb:'Kelly stack, Monte Carlo P(profit), CVaR, drawdown/regime/VIX mults.' },
+  { id:'signals',       label:'13 · Tier-1 signals · MTF',         color:'#84cc16', blurb:'NR7, insider clusters, OBV divergence, multi-timeframe alignment.' },
+  { id:'earnings',      label:'14 · Earnings',                     color:'#ec4899', blurb:'Calendar → predictions → outcomes. FK chain currently missing.' },
+  { id:'ohlcv',         label:'15 · OHLCV · bars',                 color:'#94a3b8', blurb:'Daily/intraday price history. Source-of-truth for backtests.' },
+  { id:'decision',      label:'16 · Decision log · audit',         color:'#f59e0b', blurb:'Every verdict for every scanned ticker (incl AVOIDS) — 33MB JSONL today.' },
+  { id:'portfolio',     label:'17 · Portfolio · trades',           color:'#10b981', blurb:'Open positions, closed trades, equity curve, Alpaca sync.' },
+  { id:'governance',    label:'18 · Governance · RBAC · config',   color:'#64748b', blurb:'Capability registry, roles, config snapshots, open-items registry.' },
+];
+
+const TABLES = [
+  // ===== 1. CORE =====
+  { id:'tickers', domain:'core', label:'tickers', source:'new', kind:'new',
+    blurb:'Master ticker registry. One row per symbol. Slow-changing identity.',
+    fields:[
+      {name:'ticker', type:'text', key:'pk'},
+      {name:'name', type:'text'},
+      {name:'sector', type:'text', key:'idx'},
+      {name:'industry', type:'text', key:'idx'},
+      {name:'beta', type:'numeric'},
+      {name:'market_cap', type:'numeric'},
+      {name:'shares_out', type:'bigint'},
+      {name:'is_active', type:'bool', note:'For survivorship-bias-safe historical snapshots'},
+      {name:'first_seen', type:'timestamptz'},
+      {name:'last_seen', type:'timestamptz', key:'idx'},
+      {name:'in_sp500', type:'bool'},
+      {name:'in_r1000', type:'bool'},
+      {name:'in_r2000', type:'bool'},
+      {name:'is_custom', type:'bool'},
+    ]
+  },
+  { id:'runs', domain:'core', label:'runs', source:'sqlite', kind:'existing',
+    blurb:'Daily scan execution. One row per swing_trade.py invocation.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'run_date', type:'date', key:'uq'},
+      {name:'run_time', type:'timestamptz'},
+      {name:'regime', type:'text', note:'bull/neutral/bear (legacy 3-class)'},
+      {name:'regime4', type:'text', note:'risk_on_trending/choppy/risk_off/panic'},
+      {name:'market_phase', type:'text', note:'Trend/Late Bull/Correction/Bear'},
+      {name:'vix', type:'numeric'},
+      {name:'breadth_pct_above_50d', type:'numeric'},
+      {name:'spy_above_ema50', type:'bool'},
+      {name:'total_scanned', type:'int'},
+      {name:'total_passed', type:'int'},
+      {name:'num_picks', type:'int'},
+      {name:'evaluated', type:'int'},
+      {name:'config_snapshot_hash', type:'text', key:'fk', ref:'config_snapshots.hash'},
+      {name:'git_commit', type:'text'},
+      {name:'duration_sec', type:'numeric'},
+      {name:'data_health_json', type:'jsonb'},
+    ]
+  },
+  { id:'regime_history', domain:'core', label:'regime_history', source:'cache', kind:'new',
+    blurb:'Historical regime classifications. Flip dates with hysteresis state.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'observed_at', type:'timestamptz', key:'idx'},
+      {name:'regime3', type:'text', note:'bull/neutral/bear'},
+      {name:'regime4', type:'text'},
+      {name:'flip_confirmed_date', type:'date'},
+      {name:'pending_flip_json', type:'jsonb'},
+      {name:'confidence_json', type:'jsonb', note:'regime_confidence dict (10 scores)'},
+    ]
+  },
+
+  // ===== 2. ANALYSIS (per-run × ticker snapshot) =====
+  { id:'ticker_analyses', domain:'analysis', label:'ticker_analyses', source:'new', kind:'wide',
+    blurb:'CENTRAL FACT TABLE. One row per (run × ticker). All sub-tables point here.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'run_id', type:'bigint', key:'fk', ref:'runs.id'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'analyzed_at', type:'timestamptz'},
+      {name:'verdict', type:'text', note:'BUY/WATCH/SHORT/AVOID — check constraint'},
+      {name:'direction', type:'text', note:'long/short/neutral'},
+      {name:'price', type:'numeric'},
+      {name:'score', type:'int', note:'Normalized 0-100 (post-multiplier)'},
+      {name:'score_raw', type:'numeric'},
+      {name:'star_rating', type:'int'},
+      {name:'setup_family', type:'text', note:'Breakout Expansion / Trend Continuation / Impulse / Special'},
+      {name:'setup_type', type:'text', note:'VCP Breakout / Pocket Pivot / EMA21 Pullback…'},
+      {name:'catalyst_tier', type:'int', note:'1/2/3'},
+      {name:'entry_quality', type:'text', note:'FRESH/PULLBACK/VALID/EXTENDED/MISSED'},
+      {name:'entry_subtype', type:'text'},
+      {name:'entry_timing', type:'text', note:'Fresh/Late/Missed'},
+      {name:'hold_period_guide', type:'text', note:'5-8d / 7-21d / 5-15d'},
+      {name:'conviction_tier', type:'text', note:'T1/T2/T3/WATCH'},
+      {name:'reject_reason', type:'text'},
+      {name:'ticker_source', type:'text', note:'sp500/r1000/r2000/custom/zacks_r1'},
+      {name:'sector_pct_rank', type:'numeric'},
+      {name:'rs_rank', type:'int'},
+      {name:'rs_63d_pct', type:'numeric'},
+      {name:'mtf_conflict', type:'bool'},
+      {name:'mtf_label', type:'text'},
+      {name:'unique_run_ticker', type:'(run_id, ticker)', key:'uq'},
+    ],
+    rels:[
+      {from:'run_id', to:'runs.id', kind:'N:1'},
+      {from:'ticker', to:'tickers.ticker', kind:'N:1'},
+    ]
+  },
+  { id:'analysis_pricing', domain:'analysis', label:'analysis_pricing', source:'new', kind:'narrow',
+    blurb:'Pricing snapshot at analysis time. 1:1 with ticker_analyses.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'price', type:'numeric'},
+      {name:'prev_close', type:'numeric'},
+      {name:'day_change_pct', type:'numeric'},
+      {name:'volume', type:'bigint'},
+      {name:'avg_volume_20d', type:'bigint'},
+      {name:'rvol', type:'numeric'},
+      {name:'atr', type:'numeric'},
+      {name:'atr_pct', type:'numeric'},
+      {name:'price_tier', type:'text', note:'$1–$25 / $25–$100 / $100–$250'},
+      {name:'quote_age_s', type:'int'},
+      {name:'spread_bp', type:'numeric'},
+      {name:'post_market_pct', type:'numeric'},
+    ]
+  },
+  { id:'analysis_scoring', domain:'analysis', label:'analysis_scoring', source:'new', kind:'narrow',
+    blurb:'5-pillar score breakdown + multipliers + bonuses. 1:1 with ticker_analyses.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'tech_score', type:'numeric', note:'Technicals pillar (max 35)'},
+      {name:'cat_score', type:'numeric', note:'Catalyst pillar (max 20)'},
+      {name:'rs_score', type:'numeric', note:'RS+Sector pillar (max 20)'},
+      {name:'sm_score', type:'numeric', note:'Smart Money pillar (max 15)'},
+      {name:'qg_score', type:'numeric', note:'Quality Gate pillar (max 10)'},
+      {name:'raw_total', type:'numeric'},
+      {name:'wr_multiplier', type:'numeric', note:'Win-rate-based multiplier from picks_history'},
+      {name:'bonus_total', type:'numeric'},
+      {name:'entry_rr_score', type:'numeric'},
+      {name:'final_score', type:'numeric'},
+      {name:'raw_score', type:'int'},
+      {name:'raw_momentum_score', type:'numeric'},
+      {name:'raw_growth_score', type:'numeric'},
+      {name:'raw_value_score', type:'numeric'},
+      {name:'sizing_multiplier', type:'numeric'},
+    ]
+  },
+  { id:'analysis_verdict', domain:'analysis', label:'analysis_verdict', source:'new', kind:'narrow',
+    blurb:'Decision-engine output: verdict, decided_by, audit, hard gates, decision_state.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'verdict', type:'text'},
+      {name:'reject_reason', type:'text'},
+      {name:'decided_by', type:'text', note:'decision_engine.compute_final_verdict'},
+      {name:'hard_gates_passed', type:'bool'},
+      {name:'decision_state', type:'text', note:'FRESH/PULLBACK/VALID/EXTENDED/MISSED'},
+      {name:'decision_label', type:'text'},
+      {name:'in_cloud', type:'bool'},
+      {name:'no_edge_zone', type:'bool'},
+      {name:'momentum_slowdown', type:'bool'},
+      {name:'size_mult_by_zone', type:'numeric'},
+      {name:'caveats_json', type:'jsonb'},
+    ]
+  },
+  { id:'analysis_conviction', domain:'analysis', label:'analysis_conviction', source:'new', kind:'narrow',
+    blurb:'Conviction tier + size multiplier (T1=full, T2=30-60%, T3=15-30%, WATCH=0).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'tier', type:'int'},
+      {name:'label', type:'text', note:'T1/T2/T3/WATCH'},
+      {name:'size_mult', type:'numeric'},
+      {name:'description', type:'text'},
+      {name:'wr_size_adj', type:'text'},
+    ]
+  },
+  { id:'analysis_gates', domain:'analysis', label:'analysis_gates', source:'new', kind:'new',
+    blurb:'8-gate cascade results — 1 row per gate per analysis.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'gate_name', type:'text'},
+      {name:'gate_order', type:'int'},
+      {name:'passed', type:'bool'},
+      {name:'reason', type:'text'},
+      {name:'is_hard', type:'bool'},
+      {name:'meta_json', type:'jsonb', note:'gap_risk / daily_dollar_vol / drawdown_from_ath / etc.'},
+    ]
+  },
+  { id:'analysis_catalysts', domain:'analysis', label:'analysis_catalysts', source:'new', kind:'new',
+    blurb:'Per-catalyst tags active for this analysis (PEAD/UOA/VCP/etc.).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'tag', type:'text', note:'PEAD/UOA/VCP/NEWS_MOMENTUM/INSIDER_CLUSTER/etc.'},
+      {name:'tier', type:'int'},
+      {name:'expiry_days', type:'int'},
+      {name:'is_expired', type:'bool'},
+    ]
+  },
+  { id:'analysis_methodology', domain:'analysis', label:'analysis_methodology', source:'new', kind:'new',
+    blurb:'Pre-pick + post-pick checklist results. methodology_checklist + reaction_checklist.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'phase', type:'text', note:'pre/post'},
+      {name:'check_name', type:'text'},
+      {name:'passed', type:'bool'},
+      {name:'detail', type:'text'},
+    ]
+  },
+  { id:'analysis_thesis', domain:'analysis', label:'analysis_thesis', source:'new', kind:'narrow',
+    blurb:'Narrative trade thesis + zone quality summary.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'thesis_text', type:'text'},
+      {name:'zone_quality_label', type:'text'},
+      {name:'zone_quality_points', type:'int'},
+      {name:'zone_quality_reasons', type:'text[]'},
+      {name:'setup_quality_label', type:'text', note:'GOOD/STRONG/WEAK'},
+      {name:'setup_quality_trend', type:'int'},
+      {name:'setup_quality_momentum', type:'int'},
+      {name:'setup_quality_strength', type:'int'},
+      {name:'setup_quality_groups_passed', type:'int'},
+    ]
+  },
+
+  // ===== 3. TRADE PLAN =====
+  { id:'trade_plans', domain:'tradeplan', label:'trade_plans', source:'new', kind:'new',
+    blurb:'K6 canonical_trade_plan — single source of truth. 1:1 with ticker_analyses.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'schema_version', type:'int'},
+      {name:'direction', type:'text'},
+      {name:'verdict', type:'text'},
+      {name:'conviction_tier', type:'text'},
+      {name:'hold_period_days', type:'int'},
+      {name:'shares', type:'int'},
+      {name:'position_size_pct', type:'numeric'},
+      {name:'allocation_pct', type:'numeric'},
+      {name:'stop', type:'numeric'},
+      {name:'target1', type:'numeric'},
+      {name:'target2', type:'numeric'},
+      {name:'risk_per_share', type:'numeric'},
+      {name:'rr_ratio', type:'numeric'},
+      {name:'mechanism_hypothesis', type:'text'},
+      {name:'decided_at', type:'timestamptz'},
+      {name:'git_commit', type:'text'},
+      {name:'config_snapshot_hash', type:'text', key:'fk', ref:'config_snapshots.hash'},
+    ]
+  },
+  { id:'trade_plan_entries', domain:'tradeplan', label:'trade_plan_entries', source:'new', kind:'narrow',
+    blurb:'Entry zone + shallow/primary/deep pullback zones + Fibonacci levels.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'entry_low', type:'numeric'},
+      {name:'entry_mid', type:'numeric'},
+      {name:'entry_high', type:'numeric'},
+      {name:'shallow_zone_low', type:'numeric'},
+      {name:'shallow_zone_high', type:'numeric'},
+      {name:'primary_zone_low', type:'numeric'},
+      {name:'primary_zone_high', type:'numeric'},
+      {name:'deep_zone_low', type:'numeric'},
+      {name:'deep_zone_high', type:'numeric'},
+      {name:'fib_382', type:'numeric'},
+      {name:'fib_500', type:'numeric'},
+      {name:'fib_618', type:'numeric'},
+      {name:'ichimoku_zone_top', type:'numeric'},
+      {name:'ichimoku_zone_bottom', type:'numeric'},
+      {name:'expected_pullback', type:'text', note:'Shallow/Moderate/Deep'},
+    ]
+  },
+  { id:'trade_plan_risk', domain:'tradeplan', label:'trade_plan_risk', source:'new', kind:'narrow',
+    blurb:'Risk numbers surfaced BEFORE targets (hedge-fund convention).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'max_loss_pct', type:'numeric'},
+      {name:'max_loss_dollars', type:'numeric'},
+      {name:'rr_ratio', type:'numeric'},
+      {name:'beta_adjusted_size_pct', type:'numeric'},
+      {name:'beta_adj_multiplier', type:'numeric'},
+      {name:'beta_adj_note', type:'text'},
+      {name:'cvar_975_pct', type:'numeric'},
+      {name:'drawdown_haircut_pct', type:'numeric'},
+    ]
+  },
+  { id:'trade_plan_exit_rules', domain:'tradeplan', label:'trade_plan_exit_rules', source:'new', kind:'new',
+    blurb:'Ordered exit rules (1:N). Trail/partial/time-stop/invalidation.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'rule_order', type:'int'},
+      {name:'rule_text', type:'text'},
+      {name:'exit_family', type:'text'},
+      {name:'trail_activate_pct', type:'numeric'},
+      {name:'trail_atr_mult', type:'numeric'},
+      {name:'partial_at_t1_pct', type:'numeric'},
+      {name:'time_stop_days', type:'int'},
+    ]
+  },
+  { id:'trade_plan_zone_confluence', domain:'tradeplan', label:'trade_plan_zone_confluence', source:'new', kind:'new',
+    blurb:'Confluence factors that make entry zones strong (EMA + Fib + S/R + VWAP).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'factor', type:'text'},
+      {name:'price_level', type:'numeric'},
+    ]
+  },
+  { id:'trade_plan_risk_flags', domain:'tradeplan', label:'trade_plan_risk_flags', source:'new', kind:'new',
+    blurb:'Per-flag risk warnings raised against the trade plan.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'flag_code', type:'text'},
+      {name:'severity', type:'text'},
+      {name:'message', type:'text'},
+    ]
+  },
+
+  // ===== 4. TECHNICALS =====
+  { id:'technicals_ema', domain:'technicals', label:'technicals_ema', source:'new', kind:'narrow',
+    blurb:'EMA ladder: 5/8/13/20/21/34/50/55/100/200 + weekly + slopes + crosses.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'ema5', type:'numeric'},
+      {name:'ema8', type:'numeric'},
+      {name:'ema13', type:'numeric'},
+      {name:'ema20', type:'numeric'},
+      {name:'ema21', type:'numeric'},
+      {name:'ema34', type:'numeric'},
+      {name:'ema50', type:'numeric'},
+      {name:'ema55', type:'numeric'},
+      {name:'ema100', type:'numeric'},
+      {name:'ema200', type:'numeric'},
+      {name:'weekly_ema8', type:'numeric'},
+      {name:'weekly_ema21', type:'numeric'},
+      {name:'weekly_ema_bullish', type:'bool'},
+      {name:'weekly_ema_bearish', type:'bool'},
+      {name:'ema5_slope_up', type:'bool'},
+      {name:'ema13_slope_up', type:'bool'},
+      {name:'ema5_above_13', type:'bool'},
+      {name:'ema5_cross_bull', type:'bool'},
+      {name:'ema5_cross_bear', type:'bool'},
+      {name:'price_above_ema5', type:'bool'},
+      {name:'emas_above', type:'int', note:'How many EMAs price is above'},
+      {name:'ema_signal', type:'text', note:'BULLISH STACK / BEARISH STACK / MIXED'},
+    ]
+  },
+  { id:'technicals_momentum', domain:'technicals', label:'technicals_momentum', source:'new', kind:'narrow',
+    blurb:'RSI / MACD / Stoch / MFI / ADX / CMF.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'rsi', type:'numeric'},
+      {name:'macd_signal', type:'text', note:'GOLDEN CROSS / DEATH CROSS / NEUTRAL'},
+      {name:'macd_bullish', type:'bool'},
+      {name:'stoch_rsi_k', type:'numeric'},
+      {name:'stoch_rsi_d', type:'numeric'},
+      {name:'stoch_k_above_d', type:'bool'},
+      {name:'stoch_overbought', type:'bool'},
+      {name:'stoch_oversold', type:'bool'},
+      {name:'mfi', type:'numeric'},
+      {name:'mfi_bullish', type:'bool'},
+      {name:'cmf', type:'numeric'},
+      {name:'cmf_accumulating', type:'bool'},
+      {name:'adx', type:'numeric'},
+      {name:'adx_plus_di', type:'numeric'},
+      {name:'adx_minus_di', type:'numeric'},
+      {name:'adx_trending', type:'bool'},
+    ]
+  },
+  { id:'technicals_volatility', domain:'technicals', label:'technicals_volatility', source:'new', kind:'narrow',
+    blurb:'ATR, Bollinger %B, TTM squeeze + enhanced-squeeze probability.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'atr', type:'numeric'},
+      {name:'atr_pct', type:'numeric'},
+      {name:'bb_pct_b', type:'numeric'},
+      {name:'squeeze_on', type:'bool'},
+      {name:'squeeze_fired', type:'bool'},
+      {name:'squeeze_direction', type:'text', note:'bullish/bearish'},
+      {name:'bars_in_squeeze', type:'int'},
+      {name:'enhanced_squeeze_label', type:'text'},
+      {name:'enhanced_squeeze_probability', type:'int'},
+      {name:'enh_short_float_pts', type:'int'},
+      {name:'enh_days_to_cover_pts', type:'int'},
+      {name:'enh_momentum_pts', type:'int'},
+      {name:'enh_si_trend_pts', type:'int'},
+    ]
+  },
+  { id:'technicals_pattern', domain:'technicals', label:'technicals_pattern', source:'new', kind:'narrow',
+    blurb:'VCP, fractals, pocket pivot, holy grail, stage 2, candle patterns.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'vcp', type:'bool'},
+      {name:'near_vcp', type:'bool'},
+      {name:'vcp_pivot', type:'numeric'},
+      {name:'vcp_contractions', type:'int'},
+      {name:'vcp_tightness', type:'numeric'},
+      {name:'vcp_vol_dry_up', type:'bool'},
+      {name:'pocket_pivot', type:'bool'},
+      {name:'holy_grail_setup', type:'bool'},
+      {name:'stage2', type:'bool'},
+      {name:'fractal_high', type:'numeric'},
+      {name:'fractal_low', type:'numeric'},
+      {name:'fractal_highs', type:'numeric[]'},
+      {name:'fractal_lows', type:'numeric[]'},
+      {name:'fractal_signal', type:'text'},
+      {name:'candle_patterns', type:'text[]'},
+    ]
+  },
+  { id:'technicals_trend', domain:'technicals', label:'technicals_trend', source:'new', kind:'narrow',
+    blurb:'Golden/death cross, supertrend, SAR, fib ribbon, trend age.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'golden_cross', type:'bool'},
+      {name:'death_cross', type:'bool'},
+      {name:'supertrend_bull', type:'bool'},
+      {name:'supertrend_value', type:'numeric'},
+      {name:'supertrend_flips', type:'int'},
+      {name:'sar', type:'numeric'},
+      {name:'sar_bullish', type:'bool'},
+      {name:'sar_flipped', type:'bool'},
+      {name:'bullish_stack', type:'bool'},
+      {name:'fib_ribbon', type:'text', note:'BULL RIBBON / BEAR RIBBON / NEUTRAL'},
+      {name:'fib_ribbon_spread', type:'numeric'},
+      {name:'fib_ribbon_state', type:'text', note:'EXPANDING / CONTRACTING'},
+      {name:'trend_direction', type:'text', note:'strong uptrend / pullback / downtrend'},
+      {name:'trend_age_bars', type:'int'},
+      {name:'trend_age_label', type:'text'},
+    ]
+  },
+  { id:'technicals_volume_flow', domain:'technicals', label:'technicals_volume_flow', source:'new', kind:'narrow',
+    blurb:'OBV trend, power days, breakout volume ratio.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'obv_rising', type:'bool'},
+      {name:'power_days', type:'int'},
+      {name:'power_trend', type:'bool'},
+      {name:'rvol', type:'numeric'},
+      {name:'breakout_vol_ratio', type:'numeric'},
+      {name:'pp_vol_ratio', type:'numeric'},
+    ]
+  },
+  { id:'technicals_position', domain:'technicals', label:'technicals_position', source:'new', kind:'narrow',
+    blurb:'Price position vs key references (200sma / 20ema / 50ema).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'above_200sma', type:'bool'},
+      {name:'above_50ema', type:'bool'},
+      {name:'above_20ema', type:'bool'},
+      {name:'price_above_ema5', type:'bool'},
+      {name:'prev_close', type:'numeric'},
+      {name:'day_change_pct', type:'numeric'},
+    ]
+  },
+  { id:'technicals_52w', domain:'technicals', label:'technicals_52w', source:'new', kind:'narrow',
+    blurb:'52-week range location + breakout flags.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'high_52w', type:'numeric'},
+      {name:'low_52w', type:'numeric'},
+      {name:'near_52w_high', type:'bool'},
+      {name:'near_52w_low', type:'bool'},
+      {name:'at_52w_breakout', type:'bool'},
+      {name:'pct_from_52w_high', type:'numeric'},
+    ]
+  },
+  { id:'technicals_relative_strength', domain:'technicals', label:'technicals_relative_strength', source:'new', kind:'narrow',
+    blurb:'RS rank, sector rank, sector rotation flow.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'rs_rank', type:'int'},
+      {name:'rs_63d_pct', type:'numeric'},
+      {name:'sector_rank', type:'int'},
+      {name:'sector_etf', type:'text'},
+      {name:'sector_vs_spy_pct', type:'numeric'},
+      {name:'outperforming_sector', type:'bool'},
+      {name:'outperforming_spy', type:'bool'},
+      {name:'sector_outperforming', type:'bool'},
+      {name:'sector_underperform', type:'bool'},
+      {name:'sector_rotation_score', type:'int'},
+      {name:'sector_rotation_label', type:'text'},
+      {name:'sector_rotation_trend', type:'text', note:'inflow/outflow/neutral'},
+    ]
+  },
+  { id:'technicals_sr_vwap', domain:'technicals', label:'technicals_sr_vwap', source:'new', kind:'narrow',
+    blurb:'Support/resistance + VWAP + anchored VWAP from swing low.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'support', type:'numeric'},
+      {name:'resistance', type:'numeric'},
+      {name:'vwap', type:'numeric'},
+      {name:'avwap_swing_low', type:'numeric'},
+      {name:'above_vwap', type:'bool'},
+      {name:'above_avwap', type:'bool'},
+    ]
+  },
+  { id:'technicals_loc_volume', domain:'technicals', label:'technicals_loc_volume', source:'new', kind:'narrow',
+    blurb:'Location-adjusted volume: distribution-at-resistance / accumulation-at-support.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'at_resistance', type:'bool'},
+      {name:'at_support', type:'bool'},
+      {name:'loc_vol_label', type:'text'},
+      {name:'loc_vol_score', type:'int'},
+    ]
+  },
+  { id:'volume_profile', domain:'technicals', label:'volume_profile', source:'new', kind:'narrow',
+    blurb:'POC/VAH/VAL + high-volume-node / low-volume-node lists.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'poc', type:'numeric'},
+      {name:'vah', type:'numeric'},
+      {name:'val', type:'numeric'},
+      {name:'hvn_levels', type:'numeric[]'},
+      {name:'lvn_levels', type:'numeric[]'},
+      {name:'support_vpn', type:'numeric'},
+      {name:'resistance_vpn', type:'numeric'},
+    ]
+  },
+  { id:'technicals_premarket', domain:'technicals', label:'technicals_premarket', source:'new', kind:'narrow',
+    blurb:'Premarket volume + move + unusual flag.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'premarket_vol', type:'bigint'},
+      {name:'avg_premarket_vol', type:'bigint'},
+      {name:'vol_ratio', type:'numeric'},
+      {name:'premarket_pct', type:'numeric'},
+      {name:'unusual', type:'bool'},
+    ]
+  },
+  { id:'chart_patterns', domain:'technicals', label:'chart_patterns', source:'new', kind:'new',
+    blurb:'Detected chart patterns (triangle / flag / wedge) — 1:N per analysis.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'pattern', type:'text'},
+      {name:'is_primary', type:'bool'},
+      {name:'confidence', type:'numeric'},
+      {name:'details_json', type:'jsonb'},
+    ]
+  },
+
+  // ===== 5. SMC =====
+  { id:'smc_summary', domain:'smc', label:'smc_summary', source:'new', kind:'narrow',
+    blurb:'SMC pillar score + direction + entry zone + stop from order block.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'score', type:'numeric'},
+      {name:'smc_direction', type:'text'},
+      {name:'fvg_target', type:'numeric'},
+      {name:'ob_entry_zone', type:'numeric'},
+      {name:'ob_stop', type:'numeric'},
+    ]
+  },
+  { id:'smc_order_blocks', domain:'smc', label:'smc_order_blocks', source:'new', kind:'new',
+    blurb:'Individual order blocks (bullish/bearish, age, mitigated, broken).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'idx', type:'int'},
+      {name:'direction', type:'text'},
+      {name:'top', type:'numeric'},
+      {name:'bottom', type:'numeric'},
+      {name:'bar_offset', type:'int'},
+      {name:'mitigated', type:'bool'},
+      {name:'broken', type:'bool'},
+    ]
+  },
+  { id:'smc_fvg_zones', domain:'smc', label:'smc_fvg_zones', source:'new', kind:'new',
+    blurb:'Fair Value Gap zones (imbalance levels).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'idx', type:'int'},
+      {name:'direction', type:'text'},
+      {name:'top', type:'numeric'},
+      {name:'bottom', type:'numeric'},
+      {name:'mid', type:'numeric'},
+      {name:'filled', type:'bool'},
+    ]
+  },
+  { id:'smc_liquidity_sweeps', domain:'smc', label:'smc_liquidity_sweeps', source:'new', kind:'new',
+    blurb:'Stop-hunt detections (sweep above resistance / below support).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'direction', type:'text'},
+      {name:'level', type:'numeric'},
+      {name:'bar_offset', type:'int'},
+    ]
+  },
+  { id:'smc_bos_choch', domain:'smc', label:'smc_bos_choch', source:'new', kind:'narrow',
+    blurb:'Break-of-structure / change-of-character signals.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'bos_bullish', type:'bool'},
+      {name:'bos_bearish', type:'bool'},
+      {name:'choch_bullish', type:'bool'},
+      {name:'choch_bearish', type:'bool'},
+      {name:'last_swing_high', type:'numeric'},
+      {name:'last_swing_low', type:'numeric'},
+    ]
+  },
+
+  // ===== 6. ELLIOTT WAVE + THEORY =====
+  { id:'elliott_wave', domain:'wave', label:'elliott_wave', source:'new', kind:'narrow',
+    blurb:'Wave number, label, fib levels, swing base/top, confidence.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'wave_number', type:'int'},
+      {name:'wave_label', type:'text'},
+      {name:'trend', type:'text'},
+      {name:'confidence', type:'text', note:'high/medium/low'},
+      {name:'swing_base', type:'numeric'},
+      {name:'swing_top', type:'numeric'},
+      {name:'bonus', type:'int'},
+      {name:'description', type:'text'},
+      {name:'fib_levels_json', type:'jsonb'},
+      {name:'nearest_fib', type:'text[]'},
+    ]
+  },
+  { id:'elliott_wave_v1', domain:'wave', label:'elliott_wave_v1', source:'new', kind:'narrow',
+    blurb:'EW v1 enhanced classifier with bull/bear scoring (14 fields).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'ew_state', type:'text'},
+      {name:'ew_bullish', type:'bool'},
+      {name:'ew_bearish', type:'bool'},
+      {name:'ew_score', type:'numeric'},
+      {name:'meta_json', type:'jsonb'},
+    ]
+  },
+  { id:'theory_confluence', domain:'wave', label:'theory_confluence', source:'new', kind:'narrow',
+    blurb:'Multi-theory alignment (Dow/Wyckoff/Elliott/Gann). Bull/bear count + hard gate.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'direction', type:'text', note:'BULL/BEAR/NEUTRAL'},
+      {name:'bull_count', type:'int'},
+      {name:'bear_count', type:'int'},
+      {name:'min_required', type:'int'},
+      {name:'hard_gate_pass', type:'bool'},
+      {name:'evidence_summary', type:'text'},
+      {name:'eligible_theories', type:'text[]'},
+    ]
+  },
+  { id:'theory_states', domain:'wave', label:'theory_states', source:'new', kind:'new',
+    blurb:'Per-theory state (one row each for dow/wyckoff/elliott/gann).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'theory', type:'text', note:'dow/wyckoff/elliott/gann'},
+      {name:'state', type:'text'},
+      {name:'bull_aligned', type:'bool'},
+      {name:'bear_aligned', type:'bool'},
+      {name:'detail_json', type:'jsonb'},
+    ]
+  },
+
+  // ===== 7. FUNDAMENTALS (per-ticker, daily refresh) =====
+  { id:'ticker_fundamentals', domain:'fundamentals', label:'ticker_fundamentals', source:'sqlite', kind:'existing',
+    blurb:'Existing fundamentals.db — slow-changing per-ticker. NOT per-run.',
+    fields:[
+      {name:'ticker', type:'text', key:'pk', ref:'tickers.ticker'},
+      {name:'fetched_at', type:'timestamptz', key:'idx'},
+      {name:'source', type:'text', key:'idx'},
+      {name:'last_earnings', type:'date'},
+      {name:'next_earnings', type:'date', key:'idx'},
+      {name:'sector', type:'text'},
+      {name:'industry', type:'text'},
+      {name:'market_cap', type:'numeric'},
+      {name:'shares_out', type:'bigint'},
+      {name:'beta', type:'numeric'},
+      {name:'week52_high', type:'numeric'},
+      {name:'week52_low', type:'numeric'},
+      {name:'eps_ttm', type:'numeric'},
+      {name:'eps_growth_qoq', type:'numeric'},
+      {name:'pe_ttm', type:'numeric'},
+      {name:'forward_pe', type:'numeric'},
+      {name:'revenue_ttm', type:'numeric'},
+      {name:'revenue_growth', type:'numeric'},
+      {name:'gross_margin', type:'numeric'},
+      {name:'operating_margin', type:'numeric'},
+      {name:'profit_margin', type:'numeric'},
+      {name:'debt_equity', type:'numeric'},
+      {name:'fcf_ttm', type:'numeric'},
+      {name:'short_float', type:'numeric'},
+      {name:'short_float_fetched', type:'timestamptz'},
+    ]
+  },
+  { id:'fundamentals_extra', domain:'fundamentals', label:'fundamentals_extra', source:'new', kind:'narrow',
+    blurb:'extra_fund: EV/EBITDA, P/FCF, ROA, ROE, dividend yield, buyback.',
+    fields:[
+      {name:'ticker', type:'text', key:'pk', ref:'tickers.ticker'},
+      {name:'fetched_at', type:'timestamptz'},
+      {name:'ev_ebitda', type:'numeric'},
+      {name:'p_fcf', type:'numeric'},
+      {name:'fcf_yield', type:'numeric'},
+      {name:'roa', type:'numeric'},
+      {name:'roe', type:'numeric'},
+      {name:'gross_margin', type:'numeric'},
+      {name:'ps_ratio', type:'numeric'},
+      {name:'pb', type:'numeric'},
+      {name:'institutional_pct', type:'numeric'},
+      {name:'buyback_annual', type:'numeric'},
+      {name:'buyback_yield', type:'numeric'},
+      {name:'dividend_yield', type:'numeric'},
+      {name:'estimate_revision', type:'numeric'},
+    ]
+  },
+  { id:'analyst_summary', domain:'fundamentals', label:'analyst_summary', source:'new', kind:'narrow',
+    blurb:'Analyst consensus + target high/low/mean + upside + total_analysts.',
+    fields:[
+      {name:'ticker', type:'text', key:'pk', ref:'tickers.ticker'},
+      {name:'fetched_at', type:'timestamptz'},
+      {name:'target_mean', type:'numeric'},
+      {name:'target_high', type:'numeric'},
+      {name:'target_low', type:'numeric'},
+      {name:'upside_pct', type:'numeric'},
+      {name:'total_analysts', type:'int'},
+      {name:'strong_buy', type:'int'},
+      {name:'buy', type:'int'},
+      {name:'hold', type:'int'},
+      {name:'sell', type:'int'},
+      {name:'strong_sell', type:'int'},
+      {name:'consensus', type:'text'},
+      {name:'recent_upgrades', type:'int'},
+      {name:'recent_downgrades', type:'int'},
+      {name:'upgrades_10d', type:'int'},
+      {name:'downgrades_10d', type:'int'},
+    ]
+  },
+  { id:'eps_estimates', domain:'fundamentals', label:'eps_estimates', source:'new', kind:'new',
+    blurb:'EPS estimates per horizon + revision counts (up7/down7/up30/down30).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'horizon', type:'text', note:'current_q / next_q / current_y / next_y'},
+      {name:'estimate', type:'numeric'},
+      {name:'est_7d_ago', type:'numeric'},
+      {name:'est_30d_ago', type:'numeric'},
+      {name:'est_60d_ago', type:'numeric'},
+      {name:'revisions_up_7d', type:'int'},
+      {name:'revisions_down_7d', type:'int'},
+      {name:'revisions_up_30d', type:'int'},
+      {name:'revisions_down_30d', type:'int'},
+      {name:'fetched_at', type:'timestamptz'},
+    ]
+  },
+  { id:'revenue_estimates', domain:'fundamentals', label:'revenue_estimates', source:'new', kind:'new',
+    blurb:'Revenue estimates per horizon.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'horizon', type:'text'},
+      {name:'estimate', type:'numeric'},
+      {name:'fetched_at', type:'timestamptz'},
+    ]
+  },
+  { id:'analyst_actions', domain:'fundamentals', label:'analyst_actions', source:'new', kind:'new',
+    blurb:'Historical upgrade/downgrade actions log.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'firm', type:'text'},
+      {name:'action', type:'text', note:'upgrade/downgrade/initiated/reiterated'},
+      {name:'from_rating', type:'text'},
+      {name:'to_rating', type:'text'},
+      {name:'price_target_old', type:'numeric'},
+      {name:'price_target_new', type:'numeric'},
+      {name:'announced_at', type:'timestamptz', key:'idx'},
+    ]
+  },
+  { id:'fundamentals_pillar', domain:'fundamentals', label:'fundamentals_pillar', source:'new', kind:'narrow',
+    blurb:'Per-analysis fundamentals pillar score (bull/bear drivers, score, max).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'score', type:'int'},
+      {name:'max', type:'int'},
+      {name:'bull_drivers', type:'text[]'},
+      {name:'bear_risks', type:'text[]'},
+      {name:'details_json', type:'jsonb'},
+    ]
+  },
+
+  // ===== 8. OPTIONS =====
+  { id:'options_snapshot', domain:'options', label:'options_snapshot', source:'new', kind:'narrow',
+    blurb:'Schwab Trader API: current_iv, P/C, OI, max_pain, UOA counts.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'source', type:'text', note:'schwab'},
+      {name:'current_iv', type:'numeric'},
+      {name:'iv_rank', type:'numeric'},
+      {name:'iv_pct', type:'numeric'},
+      {name:'put_call_ratio', type:'numeric'},
+      {name:'total_call_oi', type:'bigint'},
+      {name:'total_call_vol', type:'bigint'},
+      {name:'total_put_oi', type:'bigint'},
+      {name:'total_put_vol', type:'bigint'},
+      {name:'max_pain', type:'numeric'},
+      {name:'uoa_calls', type:'int'},
+      {name:'uoa_puts', type:'int'},
+    ]
+  },
+  { id:'options_intelligence', domain:'options', label:'options_intelligence', source:'new', kind:'narrow',
+    blurb:'IV skew, gamma walls, dominant flow direction.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'iv_skew', type:'numeric'},
+      {name:'pc_ratio_oi', type:'numeric'},
+      {name:'pc_ratio_vol', type:'numeric'},
+      {name:'gamma_wall_above', type:'numeric'},
+      {name:'gamma_wall_below', type:'numeric'},
+      {name:'max_pain', type:'numeric'},
+      {name:'dominant_flow', type:'text', note:'calls/puts/balanced'},
+      {name:'iv_rank_est', type:'numeric'},
+      {name:'call_oi_sum', type:'bigint'},
+      {name:'call_vol_sum', type:'bigint'},
+      {name:'put_oi_sum', type:'bigint'},
+      {name:'put_vol_sum', type:'bigint'},
+    ]
+  },
+  { id:'options_kpis', domain:'options', label:'options_kpis', source:'new', kind:'narrow',
+    blurb:'Per-mode KPIs: gamma_net, IV %ile, skew_25d, term_structure, verdict.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'iv_percentile', type:'numeric'},
+      {name:'iv_current', type:'numeric'},
+      {name:'put_call_ratio', type:'numeric'},
+      {name:'uoa_calls', type:'bool'},
+      {name:'uoa_puts', type:'bool'},
+      {name:'uoa_call_detail', type:'text'},
+      {name:'uoa_put_detail', type:'text'},
+      {name:'gamma_net', type:'bigint'},
+      {name:'skew_25d', type:'numeric'},
+      {name:'max_pain', type:'numeric'},
+      {name:'term_structure', type:'text', note:'contango/backwardation/flat'},
+      {name:'term_front_iv', type:'numeric'},
+      {name:'term_back_iv', type:'numeric'},
+      {name:'verdict', type:'text'},
+      {name:'verdict_confidence', type:'numeric'},
+      {name:'narrative', type:'text'},
+    ]
+  },
+  { id:'options_per_mode', domain:'options', label:'options_per_mode', source:'new', kind:'new',
+    blurb:'Per-mode KPIs (swing/position/invest).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'mode', type:'text', note:'swing/position/invest'},
+      {name:'kpi_json', type:'jsonb'},
+    ]
+  },
+  { id:'option_uoa_alerts', domain:'options', label:'option_uoa_alerts', source:'new', kind:'new',
+    blurb:'True UOA detections (vol > 3× OI on OI > 100, smart-money flag).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'side', type:'text', note:'call/put'},
+      {name:'strike', type:'numeric'},
+      {name:'expiry', type:'date'},
+      {name:'volume', type:'bigint'},
+      {name:'open_interest', type:'bigint'},
+      {name:'vol_oi_ratio', type:'numeric'},
+      {name:'premium_dollars', type:'numeric'},
+      {name:'is_smart_money', type:'bool'},
+    ]
+  },
+  { id:'option_chain', domain:'options', label:'option_chain', source:'new', kind:'new',
+    blurb:'Raw chain snapshot per strike × expiry × side. Large; consider archiving by run.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'side', type:'text'},
+      {name:'strike', type:'numeric'},
+      {name:'expiry', type:'date'},
+      {name:'open_interest', type:'bigint'},
+      {name:'volume', type:'bigint'},
+      {name:'iv', type:'numeric'},
+      {name:'delta', type:'numeric'},
+      {name:'gamma', type:'numeric'},
+      {name:'theta', type:'numeric'},
+      {name:'vega', type:'numeric'},
+      {name:'bid', type:'numeric'},
+      {name:'ask', type:'numeric'},
+    ]
+  },
+  { id:'gamma_exposure', domain:'options', label:'gamma_exposure', source:'new', kind:'narrow',
+    blurb:'Gamma exposure: score, call OI skew, short float, days to cover.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'gamma_score', type:'numeric'},
+      {name:'call_oi_skew', type:'numeric'},
+      {name:'short_float_pct', type:'numeric'},
+      {name:'float_size_m', type:'numeric'},
+    ]
+  },
+
+  // ===== 9. SMART MONEY =====
+  { id:'insider_summary', domain:'smartmoney', label:'insider_summary', source:'new', kind:'narrow',
+    blurb:'Per-analysis insider aggregate (buys/sells/sentiment/CEO+CFO flags).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'buys', type:'int'},
+      {name:'sells', type:'int'},
+      {name:'ceo_buy', type:'bool'},
+      {name:'cfo_buy', type:'bool'},
+      {name:'sentiment', type:'text', note:'bullish/neutral/bearish'},
+      {name:'days_since_last', type:'int'},
+      {name:'max_single_buy', type:'bigint'},
+      {name:'total_buy_value', type:'bigint'},
+    ]
+  },
+  { id:'insider_transactions', domain:'smartmoney', label:'insider_transactions', source:'new', kind:'new',
+    blurb:'Form-4 events from SEC EDGAR + EODHD (own-table; many-per-ticker over time).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'filer_name', type:'text'},
+      {name:'filer_role', type:'text', note:'CEO/CFO/Director/10% Owner'},
+      {name:'transaction_type', type:'text', note:'P-buy/S-sell/Gift/Option'},
+      {name:'shares', type:'bigint'},
+      {name:'price', type:'numeric'},
+      {name:'value', type:'numeric'},
+      {name:'filed_at', type:'timestamptz', key:'idx'},
+      {name:'transacted_at', type:'date', key:'idx'},
+      {name:'source', type:'text', note:'sec_edgar/eodhd'},
+    ]
+  },
+  { id:'congressional_summary', domain:'smartmoney', label:'congressional_summary', source:'new', kind:'narrow',
+    blurb:'Per-analysis congressional aggregate (Senate Stock Watcher).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'purchases', type:'int'},
+      {name:'sales', type:'int'},
+      {name:'net', type:'text'},
+      {name:'latest_member', type:'text'},
+      {name:'source', type:'text'},
+      {name:'source_unavailable', type:'bool'},
+    ]
+  },
+  { id:'congressional_trades', domain:'smartmoney', label:'congressional_trades', source:'new', kind:'new',
+    blurb:'Individual congressional trades over time (master table).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'member', type:'text'},
+      {name:'party', type:'text'},
+      {name:'chamber', type:'text', note:'House/Senate'},
+      {name:'state', type:'text'},
+      {name:'transaction_type', type:'text'},
+      {name:'amount_range', type:'text'},
+      {name:'transacted_at', type:'date'},
+      {name:'reported_at', type:'date', key:'idx'},
+      {name:'source', type:'text', note:'capitoltrades/senatestockwatcher'},
+    ]
+  },
+  { id:'institutional_trend', domain:'smartmoney', label:'institutional_trend', source:'new', kind:'narrow',
+    blurb:'Institutional ownership %, trend, net change.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'inst_pct', type:'numeric'},
+      {name:'inst_trend', type:'text', note:'increasing/decreasing/stable'},
+      {name:'net_change_pct', type:'numeric'},
+      {name:'total_holders', type:'int'},
+    ]
+  },
+  { id:'institutional_holders', domain:'smartmoney', label:'institutional_holders', source:'new', kind:'new',
+    blurb:'Top N institutional holders per ticker (refreshed quarterly per 13F).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'holder_name', type:'text'},
+      {name:'shares', type:'bigint'},
+      {name:'pct_of_float', type:'numeric'},
+      {name:'change_qoq', type:'bigint'},
+      {name:'as_of_date', type:'date'},
+    ]
+  },
+  { id:'sec_filings', domain:'smartmoney', label:'sec_filings', source:'new', kind:'new',
+    blurb:'Recent 8K/10Q/Form 4/13F filings with material-event flag.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'filing_type', type:'text', note:'8K/10Q/10K/4/13F'},
+      {name:'filed_at', type:'timestamptz', key:'idx'},
+      {name:'has_material_event', type:'bool'},
+      {name:'catalyst_signal', type:'text'},
+      {name:'url', type:'text'},
+      {name:'summary', type:'text'},
+    ]
+  },
+
+  // ===== 10. SENTIMENT =====
+  { id:'news_articles', domain:'sentiment', label:'news_articles', source:'new', kind:'new',
+    blurb:'Master article table. EODHD primary + yfinance fallback. Tagged with provider.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'external_id', type:'text', key:'uq'},
+      {name:'title', type:'text'},
+      {name:'summary', type:'text'},
+      {name:'url', type:'text'},
+      {name:'source', type:'text', note:'reuters/bloomberg/seekingalpha/etc.'},
+      {name:'provider', type:'text', note:'eodhd/yahoo'},
+      {name:'published_at', type:'timestamptz', key:'idx'},
+      {name:'sentiment_score', type:'numeric'},
+      {name:'sentiment_label', type:'text'},
+    ]
+  },
+  { id:'article_tickers', domain:'sentiment', label:'article_tickers', source:'new', kind:'new',
+    blurb:'Many-to-many: article × ticker (one article can mention multiple tickers).',
+    fields:[
+      {name:'article_id', type:'bigint', key:'fk', ref:'news_articles.id'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'mention_type', type:'text', note:'primary/secondary'},
+      {name:'pk_composite', type:'(article_id, ticker)', key:'pk'},
+    ]
+  },
+  { id:'news_sentiment_snapshot', domain:'sentiment', label:'news_sentiment_snapshot', source:'new', kind:'narrow',
+    blurb:'Per-analysis aggregate news sentiment (score, momentum, breaking flag).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'score', type:'int'},
+      {name:'max', type:'int'},
+      {name:'momentum', type:'text', note:'bullish/neutral/bearish'},
+      {name:'breaking', type:'bool'},
+      {name:'article_count', type:'int'},
+      {name:'source_score', type:'numeric'},
+      {name:'details', type:'text'},
+    ]
+  },
+  { id:'reddit_wsb_snapshot', domain:'sentiment', label:'reddit_wsb_snapshot', source:'new', kind:'narrow',
+    blurb:'Reddit/WSB scrape per analysis.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'mentions', type:'int'},
+      {name:'avg_score', type:'numeric'},
+      {name:'sentiment', type:'text'},
+    ]
+  },
+  { id:'stocktwits_snapshot', domain:'sentiment', label:'stocktwits_snapshot', source:'new', kind:'narrow',
+    blurb:'StockTwits per analysis: bull/bear/neutral counts + bull%.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'bullish', type:'int'},
+      {name:'bearish', type:'int'},
+      {name:'neutral', type:'int'},
+      {name:'bull_pct', type:'numeric'},
+      {name:'message_volume', type:'int'},
+      {name:'watchlist_count', type:'int'},
+      {name:'trending', type:'bool'},
+    ]
+  },
+  { id:'stocktwits_messages', domain:'sentiment', label:'stocktwits_messages', source:'new', kind:'new',
+    blurb:'Sampled message text per snapshot.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'message_id', type:'text'},
+      {name:'body', type:'text'},
+      {name:'sentiment', type:'text'},
+      {name:'created_at', type:'timestamptz'},
+    ]
+  },
+  { id:'sentiment_pillar', domain:'sentiment', label:'sentiment_pillar', source:'new', kind:'narrow',
+    blurb:'Sentiment pillar score for this analysis (score, max, details).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'score', type:'int'},
+      {name:'max', type:'int'},
+      {name:'details_json', type:'jsonb'},
+    ]
+  },
+  { id:'tv_rating', domain:'sentiment', label:'tv_rating', source:'new', kind:'narrow',
+    blurb:'TradingView aggregate rating (technicals/moving avg/oscillators).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'overall', type:'text'},
+      {name:'ma', type:'text'},
+      {name:'osc', type:'text'},
+      {name:'buy_count', type:'int'},
+      {name:'sell_count', type:'int'},
+      {name:'neutral_count', type:'int'},
+    ]
+  },
+
+  // ===== 11. ZACKS =====
+  { id:'zacks_data', domain:'zacks', label:'zacks_data', source:'new', kind:'narrow',
+    blurb:'Zacks grades + Rank #1 flag + Sell list flag + gmail bonus.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'grade_growth', type:'text', note:'A-F'},
+      {name:'grade_momentum', type:'text'},
+      {name:'grade_value', type:'text'},
+      {name:'grade_vgm', type:'text'},
+      {name:'vgm_verdict', type:'text', note:'Strong Buy/Buy/Hold/Sell/Strong Sell'},
+      {name:'zacks_rank1', type:'bool'},
+      {name:'zacks_sell', type:'bool'},
+      {name:'gmail_bonus_pts', type:'int'},
+      {name:'gmail_signal_count', type:'int'},
+      {name:'gmail_trade_alert', type:'text'},
+      {name:'rank_from_email', type:'text'},
+    ]
+  },
+  { id:'zacks_rank_history', domain:'zacks', label:'zacks_rank_history', source:'new', kind:'new',
+    blurb:'Zacks rank changes over time (audit trail for survivorship-safe lookback).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'observed_at', type:'timestamptz'},
+      {name:'rank', type:'int', note:'1-5'},
+      {name:'grade_vgm', type:'text'},
+    ]
+  },
+
+  // ===== 12. RISK =====
+  { id:'risk_sizing', domain:'risk', label:'risk_sizing', source:'new', kind:'narrow',
+    blurb:'Full Kelly stack (21 fields): kelly%, regime/VIX/drawdown mults, CVaR.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'kelly_pct', type:'numeric'},
+      {name:'half_kelly_pct', type:'numeric'},
+      {name:'final_alloc_pct', type:'numeric'},
+      {name:'risk_per_trade_pct', type:'numeric'},
+      {name:'dollar_risk', type:'numeric'},
+      {name:'position_value', type:'numeric'},
+      {name:'suggested_shares', type:'int'},
+      {name:'regime_mult', type:'numeric'},
+      {name:'regime_max_size_pct', type:'numeric'},
+      {name:'effective_regime_cap', type:'numeric'},
+      {name:'vix_mult', type:'numeric'},
+      {name:'drawdown_mult', type:'numeric'},
+      {name:'drawdown_pct', type:'numeric'},
+      {name:'earnings_mult', type:'numeric'},
+      {name:'earnings_days', type:'int'},
+      {name:'var_floor_mult', type:'numeric'},
+      {name:'cvar_975_pct', type:'numeric'},
+      {name:'live_stats_used', type:'bool'},
+      {name:'live_win_rate', type:'numeric'},
+      {name:'stack_note', type:'text'},
+      {name:'mc_p_profit', type:'numeric'},
+      {name:'sizing_multiplier', type:'numeric'},
+    ]
+  },
+
+  // ===== 13. TIER1 SIGNALS + MTF =====
+  { id:'tier1_signals', domain:'signals', label:'tier1_signals', source:'new', kind:'narrow',
+    blurb:'6 additive detectors (insider cluster, NR7, vol dryup, OBV div, mean rev, beat&raise).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'total_points', type:'int'},
+      {name:'active_count', type:'int'},
+      {name:'narratives', type:'text[]'},
+      {name:'insider_cluster', type:'bool'},
+      {name:'nr7_inside_day', type:'bool'},
+      {name:'volume_dryup', type:'bool'},
+      {name:'obv_divergence', type:'bool'},
+      {name:'mean_reversion', type:'bool'},
+      {name:'beat_and_raise', type:'bool'},
+      {name:'apply_to_score', type:'bool', note:'config-flagged'},
+    ]
+  },
+  { id:'mtf_summary', domain:'signals', label:'mtf_summary', source:'new', kind:'narrow',
+    blurb:'Multi-timeframe agreement + 4H/Long/Medium-term scores.',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'mtf_conflict', type:'bool'},
+      {name:'mtf_label', type:'text'},
+      {name:'lt_score', type:'numeric'},
+      {name:'lt_verdict', type:'text'},
+      {name:'lt_gate_pass', type:'bool'},
+      {name:'mt_score', type:'numeric'},
+      {name:'mt_verdict', type:'text'},
+      {name:'mt_gate_status', type:'text'},
+      {name:'tf_4h_json', type:'jsonb'},
+      {name:'weekly_aligned', type:'bool'},
+    ]
+  },
+
+  // ===== 14. EARNINGS =====
+  { id:'earnings_events', domain:'earnings', label:'earnings_events', source:'new', kind:'new',
+    blurb:'CANONICAL earnings event. Links predictions ↔ outcomes (FK chain currently broken).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'report_date', type:'date', key:'idx'},
+      {name:'before_after_market', type:'text', note:'BeforeMarket/AfterMarket/During'},
+      {name:'currency', type:'text'},
+      {name:'fiscal_quarter', type:'text', note:'Q1/Q2/Q3/Q4'},
+      {name:'fiscal_year', type:'int'},
+      {name:'created_at', type:'timestamptz'},
+      {name:'unique_event', type:'(ticker, report_date)', key:'uq'},
+    ]
+  },
+  { id:'earnings_predictions', domain:'earnings', label:'earnings_predictions', source:'new', kind:'new',
+    blurb:'Beat-score predictions (STRONG/SOLID/MODERATE tier + 5-factor breakdown).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'earnings_event_id', type:'bigint', key:'fk', ref:'earnings_events.id'},
+      {name:'predicted_at', type:'timestamptz'},
+      {name:'days_to_earnings', type:'int'},
+      {name:'beat_score', type:'numeric'},
+      {name:'tier', type:'text', note:'STRONG/SOLID/MODERATE/WEAK'},
+      {name:'historical_pts', type:'numeric'},
+      {name:'historical_rate', type:'numeric'},
+      {name:'historical_n_quarters', type:'int'},
+      {name:'runup_10d_pts', type:'numeric'},
+      {name:'runup_10d_value', type:'numeric'},
+      {name:'vol_accum_pts', type:'numeric'},
+      {name:'analyst_upside_pts', type:'numeric'},
+      {name:'analyst_upside_pct', type:'numeric'},
+      {name:'options_pts', type:'numeric'},
+      {name:'options_put_call', type:'numeric'},
+      {name:'options_current_iv', type:'numeric'},
+    ]
+  },
+  { id:'earnings_outcomes', domain:'earnings', label:'earnings_outcomes', source:'new', kind:'new',
+    blurb:'Actual results post-report. NOW joinable to prediction via earnings_event_id.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'earnings_event_id', type:'bigint', key:'fk', ref:'earnings_events.id', note:'FK was missing in JSONL'},
+      {name:'estimate', type:'numeric'},
+      {name:'actual', type:'numeric'},
+      {name:'surprise_pct', type:'numeric'},
+      {name:'beat', type:'text', note:'BEAT/MISS/INLINE'},
+      {name:'reaction_1d_pct', type:'numeric'},
+      {name:'reaction_5d_pct', type:'numeric'},
+      {name:'captured_at', type:'timestamptz'},
+    ]
+  },
+  { id:'analysis_earnings', domain:'earnings', label:'analysis_earnings', source:'new', kind:'narrow',
+    blurb:'Per-analysis earnings context (days-to-earnings, risk flag, warning).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'earnings_event_id', type:'bigint', key:'fk', ref:'earnings_events.id'},
+      {name:'days_to_earnings', type:'int'},
+      {name:'earnings_risk', type:'text', note:'within_blackout/approaching/safe'},
+      {name:'earnings_warning', type:'text'},
+    ]
+  },
+
+  // ===== 15. OHLCV =====
+  { id:'ohlcv_daily', domain:'ohlcv', label:'ohlcv_daily', source:'new', kind:'new',
+    blurb:'Daily bars. PRIMARY price source (EODHD). One row per (ticker, date).',
+    fields:[
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'bar_date', type:'date'},
+      {name:'open', type:'numeric'},
+      {name:'high', type:'numeric'},
+      {name:'low', type:'numeric'},
+      {name:'close', type:'numeric'},
+      {name:'adjusted_close', type:'numeric'},
+      {name:'volume', type:'bigint'},
+      {name:'source', type:'text', note:'eodhd'},
+      {name:'pk_composite', type:'(ticker, bar_date)', key:'pk'},
+    ]
+  },
+  { id:'ohlcv_intraday', domain:'ohlcv', label:'ohlcv_intraday', source:'new', kind:'new',
+    blurb:'1h / 4h intraday bars when needed for MTF analysis.',
+    fields:[
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'bar_time', type:'timestamptz'},
+      {name:'interval', type:'text', note:'1h/4h'},
+      {name:'open', type:'numeric'},
+      {name:'high', type:'numeric'},
+      {name:'low', type:'numeric'},
+      {name:'close', type:'numeric'},
+      {name:'volume', type:'bigint'},
+      {name:'pk_composite', type:'(ticker, bar_time, interval)', key:'pk'},
+    ]
+  },
+  { id:'analysis_ohlcv_window', domain:'ohlcv', label:'analysis_ohlcv_window', source:'new', kind:'narrow',
+    blurb:'Cached 90-day OHLCV slice attached to analysis (for fast dashboard rendering).',
+    fields:[
+      {name:'analysis_id', type:'bigint', key:'pk', ref:'ticker_analyses.id'},
+      {name:'bars_json', type:'jsonb', note:'Compressed 90-bar array'},
+      {name:'bar_count', type:'int'},
+      {name:'first_date', type:'date'},
+      {name:'last_date', type:'date'},
+    ]
+  },
+
+  // ===== 16. DECISION LOG =====
+  { id:'decision_log', domain:'decision', label:'decision_log', source:'new', kind:'new',
+    blurb:'EVERY verdict on EVERY scanned ticker (includes AVOIDS). Currently 33MB JSONL. Migrate to partitioned table.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'run_id', type:'bigint', key:'fk', ref:'runs.id', note:'FK was MISSING in JSONL'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'observed_at', type:'date', key:'idx'},
+      {name:'verdict', type:'text'},
+      {name:'reason', type:'text'},
+      {name:'score', type:'numeric'},
+      {name:'rs_rank', type:'int'},
+      {name:'setup_type', type:'text'},
+      {name:'direction', type:'text'},
+      {name:'regime4', type:'text'},
+      {name:'profile', type:'text'},
+      {name:'gates_hit_json', type:'jsonb'},
+      {name:'score_breakdown_json', type:'jsonb'},
+      {name:'has_catalyst', type:'bool'},
+      {name:'weekly_bull', type:'bool'},
+      {name:'rr_ratio', type:'numeric'},
+      {name:'entry_price', type:'numeric'},
+    ]
+  },
+  { id:'gates_evaluated', domain:'decision', label:'gates_evaluated', source:'new', kind:'new',
+    blurb:'Per-gate evaluation across 8-gate cascade (1:N with ticker_analyses).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'gate_code', type:'text', note:'A1/A2/A3/...'},
+      {name:'gate_name', type:'text'},
+      {name:'cascade_order', type:'int'},
+      {name:'passed', type:'bool'},
+      {name:'is_hard', type:'bool'},
+      {name:'reason', type:'text'},
+      {name:'evaluator', type:'text'},
+    ]
+  },
+
+  // ===== 17. PORTFOLIO =====
+  { id:'portfolio_state', domain:'portfolio', label:'portfolio_state', source:'sqlite', kind:'existing',
+    blurb:'Singleton. Equity/cash/margin. Synced from Alpaca paper.',
+    fields:[
+      {name:'id', type:'int', key:'pk', note:'CHECK (id = 1)'},
+      {name:'equity', type:'numeric'},
+      {name:'cash', type:'numeric'},
+      {name:'margin_reserved', type:'numeric'},
+      {name:'starting_equity', type:'numeric'},
+      {name:'buying_power', type:'numeric'},
+      {name:'alpaca_account', type:'text'},
+      {name:'last_alpaca_sync', type:'timestamptz'},
+      {name:'last_reset', type:'date'},
+      {name:'updated_at', type:'timestamptz'},
+    ]
+  },
+  { id:'positions', domain:'portfolio', label:'positions', source:'sqlite', kind:'existing',
+    blurb:'Active open positions. 0 currently. Synced with Alpaca.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'direction', type:'text'},
+      {name:'entry_date', type:'date'},
+      {name:'entry_price', type:'numeric'},
+      {name:'shares', type:'int'},
+      {name:'position_size', type:'numeric'},
+      {name:'stop', type:'numeric'},
+      {name:'trail_stop', type:'numeric'},
+      {name:'trail_active', type:'bool'},
+      {name:'highest_price', type:'numeric'},
+      {name:'current_price', type:'numeric'},
+      {name:'target1', type:'numeric'},
+      {name:'target2', type:'numeric'},
+      {name:'setup_type', type:'text'},
+      {name:'allocation_pct', type:'numeric'},
+      {name:'entry_regime', type:'text'},
+      {name:'entry_analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id', note:'NEW link to the analysis that triggered the buy'},
+      {name:'alpaca_order_id', type:'text'},
+      {name:'notes', type:'text'},
+    ]
+  },
+  { id:'closed_trades', domain:'portfolio', label:'closed_trades', source:'sqlite', kind:'existing',
+    blurb:'Completed trades with P&L + MAE/MFE + score breakdown. 13 rows currently.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'direction', type:'text'},
+      {name:'entry_date', type:'date'},
+      {name:'exit_date', type:'date'},
+      {name:'entry_price', type:'numeric'},
+      {name:'exit_price', type:'numeric'},
+      {name:'shares', type:'int'},
+      {name:'pnl_dollars', type:'numeric'},
+      {name:'pnl_pct', type:'numeric'},
+      {name:'win', type:'bool'},
+      {name:'setup_type', type:'text'},
+      {name:'exit_reason', type:'text'},
+      {name:'hold_days', type:'int'},
+      {name:'mae', type:'numeric', note:'Max Adverse Excursion'},
+      {name:'mfe', type:'numeric', note:'Max Favorable Excursion'},
+      {name:'regime', type:'text'},
+      {name:'tech_score', type:'numeric'},
+      {name:'cat_score', type:'numeric'},
+      {name:'rs_score', type:'numeric'},
+      {name:'sm_score', type:'numeric'},
+      {name:'qg_score', type:'numeric'},
+      {name:'raw_total', type:'numeric'},
+      {name:'wr_multiplier', type:'numeric'},
+      {name:'bonus_total', type:'numeric'},
+      {name:'entry_analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id'},
+      {name:'alpaca_buy_order_id', type:'text'},
+      {name:'alpaca_sell_order_id', type:'text'},
+    ]
+  },
+  { id:'equity_curve', domain:'portfolio', label:'equity_curve', source:'sqlite', kind:'existing',
+    blurb:'Daily equity snapshot (for Kelly drawdown_mult).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'observed_at', type:'date', key:'uq'},
+      {name:'equity', type:'numeric'},
+      {name:'cash', type:'numeric'},
+      {name:'margin_reserved', type:'numeric'},
+      {name:'open_positions', type:'int'},
+    ]
+  },
+  { id:'equity_audit', domain:'portfolio', label:'equity_audit', source:'sqlite', kind:'existing',
+    blurb:'Change events on equity (buys/sells/dividends/transfers).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'occurred_at', type:'timestamptz'},
+      {name:'event_type', type:'text'},
+      {name:'delta', type:'numeric'},
+      {name:'balance_after', type:'numeric'},
+      {name:'note', type:'text'},
+    ]
+  },
+  { id:'monthly_pnl', domain:'portfolio', label:'monthly_pnl', source:'sqlite', kind:'existing',
+    blurb:'Aggregated monthly P&L (for performance dashboard tiles).',
+    fields:[
+      {name:'year_month', type:'text', key:'pk', note:'2026-05'},
+      {name:'pnl', type:'numeric'},
+      {name:'trade_count', type:'int'},
+      {name:'win_rate', type:'numeric'},
+    ]
+  },
+  { id:'signal_log', domain:'portfolio', label:'signal_log', source:'sqlite', kind:'existing',
+    blurb:'Trade journal — every emitted signal with paper 5d/10d outcomes. WATCH-BUY-SHORT mixed.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'observed_at', type:'date'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'strategy', type:'text'},
+      {name:'verdict', type:'text', note:'BUY/WATCH/SHORT'},
+      {name:'direction', type:'text'},
+      {name:'entry_price', type:'numeric'},
+      {name:'stop', type:'numeric'},
+      {name:'target1', type:'numeric'},
+      {name:'target2', type:'numeric'},
+      {name:'rr', type:'numeric'},
+      {name:'stars', type:'int'},
+      {name:'score', type:'numeric'},
+      {name:'rs_rank', type:'int'},
+      {name:'status', type:'text'},
+      {name:'day5_price', type:'numeric'},
+      {name:'day10_price', type:'numeric'},
+      {name:'actual_pnl_pct', type:'numeric'},
+      {name:'result', type:'text', note:'WIN/LOSS/WIN_EXPIRED/EXPIRED'},
+      {name:'mae_pct', type:'numeric'},
+      {name:'mfe_pct', type:'numeric'},
+      {name:'outcome_5d', type:'text'},
+      {name:'outcome_10d', type:'text'},
+      {name:'tech_score', type:'numeric'},
+      {name:'cat_score', type:'numeric'},
+      {name:'rs_score', type:'numeric'},
+      {name:'sm_score', type:'numeric'},
+      {name:'qg_score', type:'numeric'},
+      {name:'raw_total', type:'numeric'},
+      {name:'wr_multiplier', type:'numeric'},
+      {name:'bonus_total', type:'numeric'},
+      {name:'analysis_id', type:'bigint', key:'fk', ref:'ticker_analyses.id', note:'NEW backlink to canonical analysis'},
+    ]
+  },
+  { id:'picks_history_runs', domain:'portfolio', label:'picks_history_runs', source:'cache', kind:'existing',
+    blurb:'Per-run picks + matured outcomes (drives apply_setup_wr_multiplier). Was JSON.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'run_id', type:'bigint', key:'fk', ref:'runs.id'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'direction', type:'text'},
+      {name:'verdict', type:'text'},
+      {name:'score', type:'numeric'},
+      {name:'setup_type', type:'text'},
+      {name:'entry_price', type:'numeric'},
+      {name:'rr_ratio', type:'numeric'},
+      {name:'bear_score', type:'numeric'},
+      {name:'outcome_status', type:'text'},
+      {name:'outcome_5d_pct', type:'numeric'},
+      {name:'outcome_10d_pct', type:'numeric'},
+    ]
+  },
+  { id:'watch_triggers', domain:'portfolio', label:'watch_triggers', source:'sqlite', kind:'existing',
+    blurb:'Alert thresholds on watched tickers.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'condition', type:'text'},
+      {name:'threshold', type:'numeric'},
+      {name:'created_at', type:'timestamptz'},
+      {name:'fired_at', type:'timestamptz'},
+      {name:'is_active', type:'bool'},
+    ]
+  },
+  { id:'custom_tickers', domain:'portfolio', label:'custom_tickers', source:'sqlite', kind:'existing',
+    blurb:'User-added watchlist tickers.',
+    fields:[
+      {name:'ticker', type:'text', key:'pk', ref:'tickers.ticker'},
+      {name:'added_at', type:'timestamptz'},
+      {name:'note', type:'text'},
+    ]
+  },
+  { id:'alert_log', domain:'portfolio', label:'alert_log', source:'sqlite', kind:'existing',
+    blurb:'Alert send history (Slack/email/Mac).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'sent_at', type:'timestamptz'},
+      {name:'channel', type:'text'},
+      {name:'ticker', type:'text'},
+      {name:'subject', type:'text'},
+      {name:'body', type:'text'},
+      {name:'status', type:'text'},
+    ]
+  },
+  { id:'scan_health', domain:'portfolio', label:'scan_health', source:'sqlite', kind:'existing',
+    blurb:'Scan pass/fail stats per run (fill rate, EODHD rate-limit hits).',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'run_id', type:'bigint', key:'fk', ref:'runs.id'},
+      {name:'fill_rate_pct', type:'numeric'},
+      {name:'eodhd_429_count', type:'int'},
+      {name:'yfinance_fallback_count', type:'int'},
+      {name:'aborted', type:'bool'},
+    ]
+  },
+  { id:'gap_events', domain:'portfolio', label:'gap_events', source:'sqlite', kind:'existing',
+    blurb:'Overnight gap events that triggered gap-risk gate.',
+    fields:[
+      {name:'id', type:'bigint', key:'pk'},
+      {name:'observed_at', type:'date'},
+      {name:'ticker', type:'text', key:'fk', ref:'tickers.ticker'},
+      {name:'gap_pct', type:'numeric'},
+      {name:'direction', type:'text'},
+    ]
+  },
+
+  // ===== 18. GOVERNANCE =====
+  { id:'config_snapshots', domain:'governance', label:'config_snapshots', source:'new', kind:'new',
+    blurb:'Versioned config blobs — every run links to one. Required for backtest reproducibility.',
+    fields:[
+      {name:'hash', type:'text', key:'pk'},
+      {name:'saved_at', type:'timestamptz'},
+      {name:'config_json', type:'jsonb'},
+      {name:'git_commit', type:'text'},
+      {name:'note', type:'text'},
+    ]
+  },
+  { id:'capability_registry', domain:'governance', label:'capability_registry', source:'json', kind:'existing',
+    blurb:'CapStudio RBAC matrix. Maps UI functions to role gates. Currently data/capability_registry.json.',
+    fields:[
+      {name:'id', type:'text', key:'pk'},
+      {name:'kind', type:'text', note:'tab/sub_tab/action'},
+      {name:'label', type:'text'},
+      {name:'group_id', type:'text'},
+      {name:'module', type:'text'},
+      {name:'default_roles', type:'text[]'},
+      {name:'is_enabled', type:'bool'},
+    ]
+  },
+  { id:'roles', domain:'governance', label:'roles', source:'json', kind:'existing',
+    blurb:'RBAC roles (admin/trader/quant/viewer).',
+    fields:[
+      {name:'role', type:'text', key:'pk'},
+      {name:'label', type:'text'},
+      {name:'description', type:'text'},
+      {name:'is_active', type:'bool'},
+    ]
+  },
+  { id:'role_capabilities', domain:'governance', label:'role_capabilities', source:'new', kind:'new',
+    blurb:'Many-to-many: role × capability. Normalize current JSON matrix.',
+    fields:[
+      {name:'role', type:'text', key:'fk', ref:'roles.role'},
+      {name:'capability_id', type:'text', key:'fk', ref:'capability_registry.id'},
+      {name:'granted', type:'bool'},
+      {name:'pk_composite', type:'(role, capability_id)', key:'pk'},
+    ]
+  },
+  { id:'open_items', domain:'governance', label:'open_items', source:'json', kind:'existing',
+    blurb:'Single-source-of-truth registry for OPEN/IN_PROGRESS/DONE/DEFERRED/REJECTED items.',
+    fields:[
+      {name:'id', type:'text', key:'pk', note:'K1, A5, MOB-1, etc.'},
+      {name:'priority', type:'text', note:'P0/P1/P2/P3'},
+      {name:'section', type:'text'},
+      {name:'item', type:'text'},
+      {name:'what', type:'text'},
+      {name:'how', type:'text'},
+      {name:'effort', type:'text'},
+      {name:'status', type:'text'},
+      {name:'risk_win', type:'text'},
+      {name:'notes', type:'text'},
+      {name:'how_to_test', type:'text'},
+      {name:'date_fixed', type:'date'},
+      {name:'commit', type:'text'},
+    ]
+  },
+  { id:'users', domain:'governance', label:'users', source:'new', kind:'new',
+    blurb:'Supabase Auth-backed user table. RLS policies use auth.uid().',
+    fields:[
+      {name:'id', type:'uuid', key:'pk', note:'auth.users(id)'},
+      {name:'email', type:'text', key:'uq'},
+      {name:'role', type:'text', key:'fk', ref:'roles.role'},
+      {name:'display_name', type:'text'},
+      {name:'created_at', type:'timestamptz'},
+      {name:'last_login_at', type:'timestamptz'},
+    ]
+  },
+];
+
+/* ========================================================================
+   Build & render
+   ======================================================================== */
+
+const SOURCE_COLOR = {
+  sqlite: 'var(--accent)',
+  json:   'var(--yellow)',
+  cache:  'var(--cyan)',
+  new:    'var(--green)',
+};
+
+const state = {
+  activeDomain: null,
+  activeSource: null,
+  search: '',
+  mode: 'all',
+  selectedTable: null,
+};
+
+function domainById(id) { return DOMAINS.find(d => d.id === id) || { color: '#888', label: id }; }
+
+function fieldsCount() {
+  return TABLES.reduce((n, t) => n + t.fields.length, 0);
+}
+function fksCount() {
+  return TABLES.reduce((n, t) => n + t.fields.filter(f => f.key === 'fk').length, 0);
+}
+
+function renderSidebar() {
+  const list = document.getElementById('domain-list');
+  list.innerHTML = '';
+  for (const d of DOMAINS) {
+    const cnt = TABLES.filter(t => t.domain === d.id).length;
+    const div = document.createElement('div');
+    div.className = 'domain' + (state.activeDomain === d.id ? ' active' : '');
+    div.innerHTML = `<span><span class="dot" style="background:${d.color}"></span><span class="name">${d.label}</span></span><span class="count">${cnt}</span>`;
+    div.onclick = () => {
+      state.activeDomain = state.activeDomain === d.id ? null : d.id;
+      state.activeSource = null;
+      renderAll();
+    };
+    list.appendChild(div);
+  }
+  // source counts
+  document.getElementById('count-sqlite').textContent = TABLES.filter(t => t.source === 'sqlite').length;
+  document.getElementById('count-json').textContent   = TABLES.filter(t => t.source === 'json').length;
+  document.getElementById('count-cache').textContent  = TABLES.filter(t => t.source === 'cache').length;
+  document.getElementById('count-new').textContent    = TABLES.filter(t => t.source === 'new').length;
+
+  // attach source-filter handlers (idempotent)
+  document.querySelectorAll('aside.sidebar > .domain[data-filter]').forEach(el => {
+    const k = el.dataset.filter.split(':')[1];
+    el.classList.toggle('active', state.activeSource === k);
+    el.onclick = () => {
+      state.activeSource = state.activeSource === k ? null : k;
+      state.activeDomain = null;
+      renderAll();
+    };
+  });
+}
+
+function matchSearch(t) {
+  if (!state.search) return { tableHit: true, fieldHits: [] };
+  const q = state.search.toLowerCase();
+  const inTable = t.label.toLowerCase().includes(q) || (t.blurb || '').toLowerCase().includes(q);
+  const fieldHits = t.fields.filter(f =>
+    f.name.toLowerCase().includes(q) ||
+    (f.type || '').toLowerCase().includes(q) ||
+    (f.note || '').toLowerCase().includes(q)
+  ).map(f => f.name);
+  return { tableHit: inTable || fieldHits.length > 0, fieldHits };
+}
+
+function tableVisible(t) {
+  if (state.activeDomain && t.domain !== state.activeDomain) return false;
+  if (state.activeSource && t.source !== state.activeSource) return false;
+  if (state.mode === 'new' && t.kind === 'existing') return false;
+  if (state.mode === 'exist' && t.kind !== 'existing') return false;
+  if (state.search && !matchSearch(t).tableHit) return false;
+  return true;
+}
+
+function renderCanvas() {
+  const canvas = document.getElementById('canvas');
+  canvas.innerHTML = '';
+  const visibleDomains = DOMAINS.filter(d => TABLES.some(t => t.domain === d.id && tableVisible(t)));
+  if (visibleDomains.length === 0) {
+    canvas.innerHTML = `<div class="empty-state">No tables match.</div>`;
+    return;
+  }
+  for (const d of visibleDomains) {
+    const section = document.createElement('section');
+    section.className = 'domain-section';
+    section.innerHTML = `
+      <h2>
+        <span class="dot" style="background:${d.color}"></span>
+        <span>${d.label}</span>
+        <span class="blurb">${d.blurb}</span>
+      </h2>
+      <div class="grid" id="grid-${d.id}"></div>
+    `;
+    canvas.appendChild(section);
+    const grid = section.querySelector('.grid');
+    for (const t of TABLES.filter(t => t.domain === d.id && tableVisible(t))) {
+      grid.appendChild(buildCard(t, d));
+    }
+  }
+  canvas.appendChild(Object.assign(document.createElement('div'), { className: 'scroll-pad' }));
+}
+
+function buildCard(t, d) {
+  const card = document.createElement('div');
+  card.className = 'table-card';
+  if (state.selectedTable === t.id) card.classList.add('selected');
+  const m = matchSearch(t);
+  if (state.search && m.tableHit) card.classList.add('hit');
+
+  const badgeClass = t.kind === 'existing' ? 'exist' : 'new';
+  const badgeText = t.source === 'sqlite' ? 'SQLite' :
+                    t.source === 'json'   ? 'JSON'  :
+                    t.source === 'cache'  ? 'Cache' : 'New';
+
+  card.innerHTML = `
+    <div class="head">
+      <span class="domain-dot" style="background:${d.color}"></span>
+      <span class="name">${t.label}</span>
+      <span class="field-count">· ${t.fields.length} fields</span>
+      <span class="badge ${badgeClass}">${badgeText}</span>
+    </div>
+    <div class="body"></div>
+  `;
+  const body = card.querySelector('.body');
+  const fieldsToShow = state.selectedTable === t.id ? t.fields : t.fields.slice(0, 5);
+  for (const f of fieldsToShow) {
+    const row = document.createElement('div');
+    row.className = 'field';
+    const keyTxt = f.key ? f.key.toUpperCase() : '';
+    const keyClass = f.key ? ` ${f.key}` : '';
+    if (state.search && m.fieldHits.includes(f.name)) row.classList.add('hit');
+    row.innerHTML = `
+      <span class="key${keyClass}">${keyTxt}</span>
+      <span class="name">${f.name}</span>
+      <span class="type">${f.type || ''}</span>
+    `;
+    body.appendChild(row);
+  }
+  if (t.fields.length > fieldsToShow.length) {
+    const more = document.createElement('div');
+    more.className = 'more';
+    more.textContent = `+ ${t.fields.length - fieldsToShow.length} more · click to expand`;
+    card.appendChild(more);
+  } else if (state.selectedTable === t.id && t.fields.length > 5) {
+    const less = document.createElement('div');
+    less.className = 'more';
+    less.textContent = 'collapse';
+    card.appendChild(less);
+  }
+  card.onclick = () => {
+    state.selectedTable = state.selectedTable === t.id ? null : t.id;
+    renderAll();
+  };
+  return card;
+}
+
+function renderDetail() {
+  const det = document.getElementById('detail');
+  if (!state.selectedTable) {
+    det.innerHTML = `<div class="empty">Click a table to inspect.<br/>Click a field to see relationships.</div>`;
+    return;
+  }
+  const t = TABLES.find(x => x.id === state.selectedTable);
+  if (!t) { det.innerHTML = `<div class="empty">Not found.</div>`; return; }
+  const d = domainById(t.domain);
+  const badgeText = t.source === 'sqlite' ? 'SQLite (existing)' :
+                    t.source === 'json'   ? 'JSON sidecar (existing)' :
+                    t.source === 'cache'  ? 'Cache file (existing)' : 'New (restructure)';
+
+  // FKs OUT (this table → others)
+  const out = t.fields.filter(f => f.key === 'fk' && f.ref);
+  // FKs IN (other tables → this table)
+  const inbound = [];
+  for (const other of TABLES) {
+    for (const f of other.fields) {
+      if (f.key === 'fk' && f.ref && f.ref.startsWith(t.id + '.')) {
+        inbound.push({ from: other, field: f });
+      }
+    }
+  }
+
+  let html = `
+    <h3>${t.label}</h3>
+    <div class="domain-tag" style="background:${d.color}22; color:${d.color}">${d.label}</div>
+    <div class="blurb">${t.blurb || ''}</div>
+    <div class="source"><b>Source:</b> ${badgeText}</div>
+
+    <div class="section">
+      <h4>Fields (${t.fields.length})</h4>
+      ${t.fields.map(f => `
+        <div class="field-row">
+          <span class="key ${f.key || ''}">${(f.key || '').toUpperCase()}</span>
+          <span class="name" title="${(f.note || '').replace(/"/g,'&quot;')}">${f.name}${f.note ? ` <small style="color:var(--muted)">· ${f.note}</small>` : ''}</span>
+          <span class="type">${f.type || ''}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  if (out.length) {
+    html += `<div class="section"><h4>References ↗ (FK OUT)</h4>`;
+    for (const f of out) {
+      const refTbl = f.ref.split('.')[0];
+      html += `<div class="rel-row" data-jump="${refTbl}">
+        <div><b>${f.name}</b> <span class="arrow">→</span> ${f.ref}</div>
+        <div class="relkind">N:1 ${f.note ? '· ' + f.note : ''}</div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+  if (inbound.length) {
+    html += `<div class="section"><h4>Referenced by ↙ (FK IN, ${inbound.length})</h4>`;
+    for (const r of inbound) {
+      html += `<div class="rel-row" data-jump="${r.from.id}">
+        <div><b>${r.from.label}</b>.${r.field.name} <span class="arrow">→</span> ${t.label}</div>
+        <div class="relkind">1:N ${r.field.note ? '· ' + r.field.note : ''}</div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  det.innerHTML = html;
+  det.querySelectorAll('.rel-row[data-jump]').forEach(el => {
+    el.onclick = () => {
+      state.selectedTable = el.dataset.jump;
+      renderAll();
+      // scroll the card into view
+      setTimeout(() => {
+        const card = document.querySelector('.table-card.selected');
+        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+    };
+  });
+}
+
+function renderAll() {
+  renderSidebar();
+  renderCanvas();
+  renderDetail();
+  document.getElementById('stat-tables').textContent = TABLES.filter(tableVisible).length + ' / ' + TABLES.length;
+  document.getElementById('stat-fields').textContent = fieldsCount();
+  document.getElementById('stat-fks').textContent = fksCount();
+}
+
+document.getElementById('searchBox').addEventListener('input', e => {
+  state.search = e.target.value.trim();
+  renderAll();
+});
+['all','new','exist'].forEach(m => {
+  document.getElementById('mode-' + m).onclick = () => {
+    state.mode = m;
+    document.querySelectorAll('.modeswitch button').forEach(b => b.classList.remove('active'));
+    document.getElementById('mode-' + m).classList.add('active');
+    renderAll();
+  };
+});
+
+renderAll();
+</script>
+</body>
+</html>
