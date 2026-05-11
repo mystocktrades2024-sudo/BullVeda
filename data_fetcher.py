@@ -4031,14 +4031,28 @@ def get_macro_signals() -> dict:
 
 # ── Market Breadth ────────────────────────────────────────────────────────────
 
-def get_market_breadth(market_data: dict) -> dict:
+def get_market_breadth(market_data: dict, universe_filter: set | None = None) -> dict:
     """
     Compute breadth from already-downloaded daily OHLCV: % of tickers above
     50d SMA and 100d SMA. No extra download needed.
+
+    universe_filter: optional set of tickers to restrict the breadth calculation
+      to a defined universe (e.g., S&P 500 constituents). When None, computes
+      breadth across all keys in market_data.
+
+      2026-05-10 alignment fix: the V4 regime classifier was validated
+      (backtest/regime_backtest.py) against breadth computed from CURRENT
+      S&P 500 constituents (~503 names). The live caller previously passed
+      the full scan universe (SP500 + R1000 + custom = ~1000 names), which
+      systematically produced higher breadth readings (today: 64.0 vs 50.9
+      under SP500-only). Passing universe_filter=set(get_sp500()) realigns
+      live with the validated backtest definition.
     """
     above_50 = above_100 = above_200 = total = 0
     new_highs = new_lows = 0
-    for df in market_data.values():
+    for ticker, df in market_data.items():
+        if universe_filter is not None and ticker not in universe_filter:
+            continue
         try:
             close = df["Close"].squeeze() if isinstance(df["Close"], pd.DataFrame) else df["Close"]
             close = close.dropna()

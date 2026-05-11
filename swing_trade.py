@@ -865,11 +865,22 @@ def run_daily_scan(force_fresh: bool = False):
     elif not _mkt_open_26:
         log.debug("  Live price injection skipped (market closed)")
 
-    # Market breadth (uses already-downloaded market_data — no extra download)
-    market_breadth = get_market_breadth(market_data)
-    log.info(f"  Market breadth: {market_breadth['pct_above_50d']:.0f}% above 50d "
+    # Market breadth (uses already-downloaded market_data — no extra download).
+    # 2026-05-10: restrict to S&P 500 constituents so live breadth definition
+    # matches the V4 regime classifier validation (backtest/regime_backtest.py
+    # used `get_sp500()` only). Without this filter, breadth was computed over
+    # SP500 ∪ R1000 ∪ custom (~1000 names) and read ~13pp higher than backtest
+    # breadth (today: 64.0 vs 50.9), causing the V4 thresholds to fire
+    # differently in production than in validation.
+    try:
+        _sp500_set = set(get_sp500())
+    except Exception:
+        _sp500_set = None  # fall back to legacy (full-universe) breadth on fetch failure
+    market_breadth = get_market_breadth(market_data, universe_filter=_sp500_set)
+    log.info(f"  Market breadth (SP500-filtered): {market_breadth['pct_above_50d']:.0f}% above 50d "
              f"({market_breadth['label_50']}) | "
-             f"{market_breadth['pct_above_100d']:.0f}% above 100d ({market_breadth['label_100']})")
+             f"{market_breadth['pct_above_100d']:.0f}% above 100d ({market_breadth['label_100']})"
+             f" | n={market_breadth.get('total','?')}")
 
     # Get SPY data for relative strength — EODHD primary via failover wrapper
     from data_fetcher import fetch_ohlcv_with_failover
