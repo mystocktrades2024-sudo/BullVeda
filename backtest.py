@@ -419,6 +419,31 @@ def _score_as_of(ticker: str, df_full: pd.DataFrame, as_of_date: pd.Timestamp,
         normalized, plan.get("setup_type", "unknown"), regime_name
     )
 
+    # Variant F integration (2026-05-10): apply config.setup_score_multiplier_by_regime
+    # to the backtest scoring path too. Live scoring (analysis.py:8867) was already
+    # wired; backtest was missing it — found 2026-05-10 during bull-trade decomposition
+    # (105 TC bull trades persisted despite TC bull=0.0 live kill).
+    try:
+        _by_regime = cfg.get("setup_score_multiplier_by_regime") or {}
+        if _by_regime:
+            _br_validations = _by_regime.get("_validations") or {}
+            _setup_for_mult = (plan.get("setup_type") or "").strip()
+            _setup_overrides = _by_regime.get(_setup_for_mult) or {}
+            _regime_key = (regime_name or "neutral").lower()
+            if _regime_key in _setup_overrides:
+                _regime_mult = float(_setup_overrides[_regime_key])
+                # Demotion gate (mirrors analysis.py): n>=30 AND wr_lb<0.30
+                if _regime_mult < 1.0:
+                    _vbr = (_br_validations.get(_setup_for_mult) or {}).get(_regime_key) or {}
+                    _vbn = int(_vbr.get("n") or 0)
+                    _vblb = float(_vbr.get("wr_lb") or 1.0)
+                    if _vbn < 30 or _vblb >= 0.30:
+                        _regime_mult = 1.0  # gate not cleared — silent no-op
+                if _regime_mult != 1.0:
+                    normalized = float(normalized) * _regime_mult
+    except Exception:
+        pass
+
     # Use a lower score gate for backtest since opt/sent pillars are zero
     # Map normalized (tech+fund only) to decision: 55+ = BUY signal (≈ 65 in live)
     _bt_cfg = dict(cfg)

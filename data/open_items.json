@@ -1208,6 +1208,62 @@
       "date_fixed": "2026-05-10",
       "commit": "pending",
       "how_to_test": "Test ticker \u2192 plan.target_sources dict should have 3-5 entries, each with {horizon, level, rationale}. Phase 2 will surface in elite-detail Plan tab and Overview Trade Plan strip."
+    },
+    {
+      "id": "KILL-MULT0",
+      "priority": "P0",
+      "section": "Scoring/Kill List",
+      "item": "Kill multiplier mult=0.0 silently dropped in live scoring",
+      "what": "analysis.py:9366 condition was 'mult > 0' which excluded the kill value. Result: EMA21 Pullback / 52wk Breakout / Variant F TC\u00d7bull kills (all evidence-backed n>=30 + wr_lb<0.30) never fired. 53 supposedly-killed BUYs entered signal_log over 2 weeks.",
+      "how": "Change condition to 'mult >= 0' in analysis.py:9366. Add 'silent no-op' code comment with root-cause reference. Backtest path (backtest.py:418 via apply_setup_wr_multiplier) is separate \u2014 wire Variant F into backtest.py:442 as well.",
+      "effort": "",
+      "risk_win": "",
+      "notes": "",
+      "status": "DONE",
+      "date_fixed": "2026-05-10",
+      "commit": "0cdb13340"
+    },
+    {
+      "id": "VARIANT-F-BT",
+      "priority": "P0",
+      "section": "Backtest Parity",
+      "item": "Variant F regime-conditional multipliers not wired into backtest path",
+      "what": "backtest.py:418 uses tracker.get_setup_weight_multiplier (reading picks_history) but never consults config.setup_score_multiplier_by_regime. So Variant F's TC\u00d7bull=0.0 kill never applied in backtest \u2014 explains why 105 TC bull trades persisted in 250d backtest despite live kill in config.",
+      "how": "Add Variant F lookup at backtest.py:442 mirroring analysis.py:8867 logic. Same demotion gate (n>=30 + wr_lb<0.30). Comment cross-reference live path.",
+      "effort": "",
+      "risk_win": "",
+      "notes": "",
+      "status": "DONE",
+      "date_fixed": "2026-05-10",
+      "commit": "0cdb13340"
+    },
+    {
+      "id": "TARGET-CAP-10WK",
+      "priority": "P0",
+      "section": "Strategy/Target Sanity",
+      "item": "weekly_pullback target1 uncapped \u2014 anomalous spikes poison trade plan",
+      "what": "weekly_pullback.py:226 set target1 = float(high.iloc[-20:].max()) with NO entry-relative cap. CAR (Avis) intraday spike to $847.70 on 04-22 entered the 20-bar window on 04-28, producing 9 straight losing entries with target1=$847.70 (RR 10+, stop hit, -10% loss each). Root cause of 12.7% BUY WR collapse in signal_log.",
+      "how": "Cap target1 at entry * 1.15 (aligns with 7-14d hold horizon). Validated against 9 historical CAR entries: 6 of 9 would have failed buy_min_rr=3.0 gate \u2192 not entered.",
+      "effort": "",
+      "risk_win": "",
+      "notes": "",
+      "status": "OPEN",
+      "date_fixed": null,
+      "commit": null
+    },
+    {
+      "id": "TARGET-CAP-SWEEP",
+      "priority": "P1",
+      "section": "Strategy/Target Sanity",
+      "item": "Sweep for naive swing-high-as-target pattern across all scanners",
+      "what": "mean_reversion.py:354 (target2 = high.iloc[-20:].max() uncapped, latent) and pullback_scanner.py:113 (target = high_252 uncapped, UI API) had the same class of bug as weekly_pullback.py. Both fixed proactively. analysis.py:7766 calculate_trade_plan also has it but is dead code (no callers).",
+      "how": "Cap target2 at price*1.10 in mean_reversion.py, cap target at price*1.15 in pullback_scanner.py. Add memory entry feedback_target_must_cap_vs_entry.md.",
+      "effort": "",
+      "risk_win": "",
+      "notes": "",
+      "status": "OPEN",
+      "date_fixed": null,
+      "commit": null
     }
   ]
 }

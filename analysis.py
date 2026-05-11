@@ -9363,7 +9363,11 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
                 # The regime-specific overrides the global
                 _setup_mult = _regime_mult
 
-        if _setup_mult != 1.0 and _setup_mult > 0:
+        if _setup_mult != 1.0 and _setup_mult >= 0:
+            # 2026-05-10 fix: was `> 0` — silently dropped mult=0.0 (the kill
+            # value), so EMA21 Pullback / 52wk Breakout / Variant F TC×bull
+            # kills never fired despite being in config with evidence backing.
+            # Root cause of 12.7% live BUY WR over 2 weeks (n=63).
             normalized = float(normalized) * _setup_mult
     except Exception:
         pass
