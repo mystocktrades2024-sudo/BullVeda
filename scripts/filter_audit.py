@@ -78,6 +78,55 @@ def _filter_setup_kill_list(trade: dict, killed: set) -> bool:
     return setup not in killed
 
 
+def _filter_tail_loss(trade: dict, min_score: int = 60, min_stars: int = 4) -> bool | None:
+    """Decision engine Gate 5: conviction tail-loss filter.
+
+    Demotes BUY → WATCH when score < min_score OR stars < min_stars.
+    Source: analysis.py conviction.tail_filter_demoted flag, or computed
+    from score + stars if not pre-computed.
+    """
+    if trade.get("tail_filter_demoted") is not None:
+        return not trade["tail_filter_demoted"]
+    score = trade.get("score")
+    stars = trade.get("stars")
+    if score is None and stars is None:
+        return None  # can't evaluate
+    score = score or 0
+    stars = stars or 0
+    return not (score < min_score or stars < min_stars)
+
+
+def _filter_stars_min(trade: dict, min_stars: int = 3) -> bool | None:
+    stars = trade.get("stars")
+    if stars is None:
+        return None
+    return stars >= min_stars
+
+
+def _filter_rr_with_fallback(trade: dict, threshold: float) -> bool | None:
+    """RR check — try rr_ratio (backtest), then rr (signal_log)."""
+    rr = trade.get("rr_ratio") or trade.get("rr")
+    if rr is None or rr == 0:
+        return None
+    return rr >= threshold
+
+
+def _filter_setup_dynamic_kill(trade: dict, kill_list: set) -> bool | None:
+    """Decision-engine kill list — Wilson-backed setups."""
+    setup = trade.get("setup_type") or trade.get("strategy") or ""
+    if not setup:
+        return None
+    return setup not in kill_list
+
+
+def _filter_conviction_tier(trade: dict, allowed: set) -> bool | None:
+    """conviction_label in allowed set."""
+    label = (trade.get("conviction_label") or trade.get("conviction_tier") or "").upper()
+    if not label:
+        return None
+    return label in allowed
+
+
 def _filter_regime_long_only(trade: dict, allowed: set) -> bool:
     regime = (trade.get("regime") or "").lower()
     return regime in allowed
@@ -122,25 +171,47 @@ def _filter_setup_size_mult_bull(trade: dict, killed_in_bull: set) -> bool:
 # Filter set — each entry is a tuple of (name, simulator, kwargs)
 # ──────────────────────────────────────────────────────────────────────────────
 FILTERS = [
+    # Score-based (well-populated: 763/763)
     ("score_floor_65",      _filter_score_floor,            {"threshold": 65}),
     ("score_floor_72",      _filter_score_floor,            {"threshold": 72}),
     ("score_floor_80",      _filter_score_floor,            {"threshold": 80}),
     ("score_floor_82",      _filter_score_floor,            {"threshold": 82}),
+    ("score_floor_88",      _filter_score_floor,            {"threshold": 88}),
     ("score_band_70_89",    _filter_score_band,             {"lo": 70, "hi": 89}),
     ("score_band_80_95",    _filter_score_band,             {"lo": 80, "hi": 95}),
+    # RS minimum (well-populated: 759/763)
     ("rs_min_65",           _filter_rs_minimum,             {"threshold": 65}),
     ("rs_min_75",           _filter_rs_minimum,             {"threshold": 75}),
     ("rs_min_85",           _filter_rs_minimum,             {"threshold": 85}),
-    ("rr_min_3.0",          _filter_rr_minimum,             {"threshold": 3.0}),
-    ("rr_min_3.5",          _filter_rr_minimum,             {"threshold": 3.5}),
+    ("rs_min_90",           _filter_rs_minimum,             {"threshold": 90}),
+    # RR threshold (well-populated: 621/763 via rr field)
+    ("rr_min_3.0",          _filter_rr_with_fallback,       {"threshold": 3.0}),
+    ("rr_min_3.5",          _filter_rr_with_fallback,       {"threshold": 3.5}),
+    ("rr_min_4.0",          _filter_rr_with_fallback,       {"threshold": 4.0}),
+    # Stars + tail-loss filter (well-populated: 621/763 via stars)
+    ("stars_min_3",         _filter_stars_min,              {"min_stars": 3}),
+    ("stars_min_4",         _filter_stars_min,              {"min_stars": 4}),
+    # Decision Engine Gate 5 — tail_loss_filter (score<60 OR stars<4)
+    ("tail_loss_gate5",     _filter_tail_loss,              {"min_score": 60, "min_stars": 4}),
+    ("tail_loss_strict",    _filter_tail_loss,              {"min_score": 70, "min_stars": 4}),
+    # Setup-based — kill lists (uses setup_type or strategy, 763/763 combined)
+    ("kill_EMA21_52wk",     _filter_setup_kill_list,        {"killed": {"EMA21 Pullback", "52wk Breakout"}}),
+    ("kill_EMA21_52wk_TC",  _filter_setup_kill_list,        {"killed": {"EMA21 Pullback", "52wk Breakout", "Trend Continuation"}}),
+    ("kill_static_setups",  _filter_setup_dynamic_kill,     {"kill_list": {"EMA21 Pullback", "52wk Breakout"}}),
+    # Variant F — regime-conditional TC kill in bull
+    ("variant_F_TC_in_bull", _filter_setup_size_mult_bull,  {"killed_in_bull": {"Trend Continuation"}}),
+    # Conviction tier (94/763 populated — small sample, flag)
+    ("conv_T1_only",        _filter_conviction_tier,        {"allowed": {"T1"}}),
+    ("conv_T1_T2",          _filter_conviction_tier,        {"allowed": {"T1", "T2"}}),
+    # Entry quality (94/763 populated — biased subset, flag)
     ("entry_FRESH_only",    _filter_entry_quality_fresh_only, {}),
     ("entry_not_EXTENDED",  _filter_entry_quality_not_extended, {}),
-    ("kill_EMA21_52wk",     _filter_setup_kill_list,        {"killed": {"EMA21 Pullback", "52wk Breakout"}}),
+    # Regime (231/763 populated — older signals lack regime, flag)
     ("regime_bull_neutral", _filter_regime_long_only,       {"allowed": {"bull", "neutral"}}),
     ("regime_bull_only",    _filter_regime_long_only,       {"allowed": {"bull"}}),
+    # Earnings + weekly_bull (data pipeline gaps — most records NULL)
     ("earnings_7d_blackout", _filter_earnings_blackout,     {"days": 7}),
     ("weekly_bull_required", _filter_weekly_bull,           {}),
-    ("variant_F_TC_in_bull", _filter_setup_size_mult_bull,  {"killed_in_bull": {"Trend Continuation"}}),
 ]
 
 
