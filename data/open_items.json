@@ -1340,17 +1340,17 @@
     {
       "id": "BACKTEST-MTM-CLOSE",
       "priority": "P1",
-      "status": "OPEN",
+      "status": "DONE",
       "section": "Backtest infra",
       "item": "Backtest closes unexited positions at 0% pnl instead of MTM",
       "what": "When a backtest window ends with positions still open (no stop/target hit), those trades are recorded with pnl_pct=0.0 instead of actual mark-to-market. Discovered 2026-05-11 via WF: F3 (Oct-Dec 2025) and F4 (Jul-Oct 2025) each had only 4 'trades' \u2014 all entered day 1, exited window end, pnl=0%. They were positions held throughout the window that never hit exit conditions; the backtest closed them at 0% instead of realizing MTM.",
       "how": "In run_portfolio_backtest end-of-window cleanup: compute exit_price as the window's last close for each ticker, then compute pnl_pct properly. Add exit_reason='end_of_backtest_mtm' for traceability. Don't drop these trades from stats.",
       "effort": "1-2 hrs",
       "risk_win": "Medium / Medium \u2014 exposes hidden long-hold edge that current logic masks",
-      "notes": "Discovered while diagnosing F3/F4 fold mystery. Phantom 0% trades created false 'PF 999' sentinel in WF aggregate, masking that only F1+F2 had real evidence. Verdict framework was applying to apparent 4 folds but only 2 were informative.",
-      "date_fixed": null,
-      "commit": null,
-      "how_to_test": "Run any backtest with --days 100+ on a low-volatility period. Confirm trades that don't exit show pnl != 0.0 (real MTM). Then verify F3/F4 type windows produce proper attribution data."
+      "notes": "Root cause: backtest.py:1603 day_bars.empty path skipped past the current_price update. Positions held through data gaps had current_price stuck at entry_price forever, so end-of-backtest MTM reported pnl=0.0%. Fix: when day_bars empty, look up last available close from df[df.index <= date_ts] and update current_price. End-of-backtest exit_reason still 'end_of_backtest' but pnl is now actual MTM not 0%.",
+      "date_fixed": "2026-05-11",
+      "commit": "pending",
+      "how_to_test": "Re-run F3 or F4 window (e.g. --days 50 --end-date 2025-12-31). Phantom trades should now show real pnl_pct based on entry vs window-end close, not 0.0%."
     },
     {
       "id": "CONVICTION-TIER-WIRE",

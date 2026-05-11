@@ -1602,7 +1602,19 @@ def run_portfolio_backtest(
             date_ts = pd.Timestamp(date)
             day_bars = df[(df.index.normalize() == date_ts) | (df.index.date == date_ts.date())]
             if day_bars.empty:
+                # BACKTEST-MTM-CLOSE fix (2026-05-11): when no bar exists for
+                # today (data gap, weekend, holiday, etc.), keep the position
+                # open BUT update current_price to the most recent close in
+                # the ticker's df up to today. Without this, current_price
+                # remains at entry_price forever, and end-of-backtest MTM
+                # reports pnl=0% (the F3/F4 phantom-trades bug).
                 pos["days_held"] += 1
+                try:
+                    last_avail = df[df.index <= date_ts]
+                    if not last_avail.empty:
+                        pos["current_price"] = float(last_avail["Close"].iloc[-1])
+                except Exception:
+                    pass  # never fail loop on this fallback
                 still_open.append(pos)
                 continue
 
