@@ -264,6 +264,17 @@ def log_signals(picks: list[dict], run_date: str | None = None) -> int:
             "stars": c.get("star_rating", 0),
             "score": round(c.get("score", 0), 1),
             "rs_rank": c.get("rs_rank", 0),
+            # 2026-05-10: weekly_bull was missing from signal_log entries —
+            # 100% NULL across 1191 records made the weekly_bull_required
+            # filter look like 100% rejection in filter_audit.py. Now sourced
+            # from indicators.weekly_ema_bullish (canonical) → c.weekly_bull
+            # → c.technicals.weekly_bull → False.
+            "weekly_bull": bool(
+                (c.get("indicators") or {}).get("weekly_ema_bullish") or
+                c.get("weekly_bull") or
+                (c.get("technicals") or {}).get("weekly_bull") or
+                False
+            ),
             "status": "OPEN",
             # Phase 2 logging fix (2026-04-30): capture WHAT the signal was
             # (BUY / WATCH / SHORT) and direction, so audit trail shows alert type

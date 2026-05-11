@@ -73,16 +73,6 @@ def _filter_rr_minimum(trade: dict, threshold: float) -> bool:
     return rr >= threshold
 
 
-def _filter_entry_quality_fresh_only(trade: dict) -> bool:
-    eq = (trade.get("entry_quality") or "").upper()
-    return eq == "FRESH"
-
-
-def _filter_entry_quality_not_extended(trade: dict) -> bool:
-    eq = (trade.get("entry_quality") or "").upper()
-    return eq not in ("EXTENDED", "MISSED")
-
-
 def _filter_setup_kill_list(trade: dict, killed: set) -> bool:
     setup = trade.get("setup_type") or trade.get("strategy") or ""
     return setup not in killed
@@ -100,8 +90,25 @@ def _filter_earnings_blackout(trade: dict, days: int) -> bool:
     return earn > days
 
 
-def _filter_weekly_bull(trade: dict) -> bool:
+def _filter_weekly_bull(trade: dict) -> bool | None:
+    """Return None if field not populated (caller should skip this trade)."""
+    if "weekly_bull" not in trade or trade.get("weekly_bull") is None:
+        return None  # field missing — exclude from audit
     return bool(trade.get("weekly_bull"))
+
+
+def _filter_entry_quality_fresh_only(trade: dict) -> bool | None:
+    eq = trade.get("entry_quality")
+    if not eq:
+        return None
+    return eq.upper() == "FRESH"
+
+
+def _filter_entry_quality_not_extended(trade: dict) -> bool | None:
+    eq = trade.get("entry_quality")
+    if not eq:
+        return None
+    return eq.upper() not in ("EXTENDED", "MISSED")
 
 
 def _filter_setup_size_mult_bull(trade: dict, killed_in_bull: set) -> bool:
@@ -155,20 +162,37 @@ def audit_filters(trades: list[dict]) -> list[dict]:
     rows = []
     for name, fn, kwargs in FILTERS:
         try:
-            n_passed = sum(1 for t in trades if fn(t, **kwargs))
-            n_rejected = n_total - n_passed
-            n_win_passed = sum(1 for t in winners if fn(t, **kwargs))
-            n_loss_passed = sum(1 for t in losers if fn(t, **kwargs))
+            # 2026-05-10: filters can return None when the field isn't populated
+            # on the trade. Exclude those trades from the per-filter denominator
+            # so the metric reflects "this filter's behavior on trades where it
+            # COULD make a decision", not "this filter rejected everything
+            # because the field is missing in the data pipeline."
+            scored = [(t, fn(t, **kwargs)) for t in trades]
+            scored = [(t, r) for t, r in scored if r is not None]
+            n_evaluable = len(scored)
+            if n_evaluable == 0:
+                rows.append({"filter": name, "skipped": True,
+                             "reason": "field not populated in any trade"})
+                continue
+
+            n_passed = sum(1 for _, r in scored if r)
+            n_rejected = n_evaluable - n_passed
+            win_scored = [(t, r) for t, r in scored if (t.get("pnl_pct") or t.get("actual_pnl_pct") or 0) > 0]
+            loss_scored = [(t, r) for t, r in scored if (t.get("pnl_pct") or t.get("actual_pnl_pct") or 0) <= 0]
+            n_win = len(win_scored)
+            n_loss = len(loss_scored)
+            n_win_passed = sum(1 for _, r in win_scored if r)
+            n_loss_passed = sum(1 for _, r in loss_scored if r)
             n_win_rejected = n_win - n_win_passed
             n_loss_rejected = n_loss - n_loss_passed
 
-            reject_rate = n_rejected / n_total if n_total else 0
+            reject_rate = n_rejected / n_evaluable if n_evaluable else 0
             win_rej_rate = n_win_rejected / n_win if n_win else 0
             loss_rej_rate = n_loss_rejected / n_loss if n_loss else 0
             net_lift = loss_rej_rate - win_rej_rate
 
             # PF contribution: if we remove the filter, what's the PF on rejected trades?
-            rej_trades = [t for t in trades if not fn(t, **kwargs)]
+            rej_trades = [t for t, r in scored if not r]
             rej_win_sum = sum((t.get("pnl_pct") or t.get("actual_pnl_pct") or 0)
                               for t in rej_trades
                               if (t.get("pnl_pct") or t.get("actual_pnl_pct") or 0) > 0)
@@ -180,6 +204,7 @@ def audit_filters(trades: list[dict]) -> list[dict]:
 
             rows.append({
                 "filter": name,
+                "n_evaluable": n_evaluable,
                 "passed": n_passed,
                 "rejected": n_rejected,
                 "reject_rate_pct": round(reject_rate * 100, 1),
@@ -210,6 +235,9 @@ def print_table(rows: list[dict]) -> None:
     for r in rows:
         if r.get("error"):
             print(f"{r['filter']:<28} ERROR: {r['error']}")
+            continue
+        if r.get("skipped"):
+            print(f"{r['filter']:<28} SKIPPED: {r['reason']}")
             continue
         verdict_color = {
             "STRONG_HELP":  "🟢",
