@@ -3593,6 +3593,26 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _pe:
         log.warning(f"v2 build_data.py error; v2 dashboard is now stale: {_pe}")
 
+    # ticker_snapshots — append per-scan rows so we can audit field-by-field
+    # change-over-time tomorrow. Reads the JUST-WRITTEN infra/prototype/tickers.json
+    # (post-build_data.py) so the snapshot matches what the dashboard renders.
+    # Best-effort — failures here don't block scan completion.
+    try:
+        from datetime import datetime as _dt
+        import ticker_snapshots
+        _tjson = BASE_DIR / "infra" / "prototype" / "tickers.json"
+        if _tjson.exists():
+            _t = json.loads(_tjson.read_text())
+            _now = _dt.now()
+            _run_id = _now.strftime("%Y-%m-%d_%H:%M")
+            _n = ticker_snapshots.capture_scan(_t, run_id=_run_id,
+                                                captured_at=_now.isoformat(timespec="seconds"))
+            log.info(f"  ticker_snapshots: captured {_n} rows (run_id={_run_id})")
+        else:
+            log.debug("ticker_snapshots: tickers.json not present — skipping snapshot")
+    except Exception as _se:
+        log.warning(f"ticker_snapshots capture failed: {_se}")
+
     log.info(f"=== Done! Dashboard: http://localhost:7432/v2/dashboard.html ===")
     log.info(f"  BUY: {len(buy_candidates)} | WATCH: {len(watch_list)} | SHORT: {len(sell_candidates)} | Near-Short Blocked: {len(near_short_blocked)} | Killed: {len(killed)}")
 
