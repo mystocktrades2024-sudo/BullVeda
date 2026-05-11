@@ -1477,6 +1477,7 @@ def run_portfolio_backtest(
     exclude_setups: list = None,
     config_override: str | None = None,
     max_score: int | None = None,
+    end_date: str | None = None,
 ) -> dict:
     """
     Walk-forward portfolio backtest with:
@@ -1499,6 +1500,7 @@ def run_portfolio_backtest(
     all_picks = run_backtest(days=days, hold_days=hold_days,
                              min_score=min_score, min_rs=min_rs, top_n=top_n,
                              max_score=max_score,
+                             end_date=end_date,  # 2026-05-11: plumbed through for WF
                              config_override=config_override)
     if not all_picks:
         return {"error": "No picks generated"}
@@ -2084,6 +2086,7 @@ def main():
             pct_per_trade=args.size_pct,
             trail_activate_pct=args.trail_trigger,  # 2026-05-09 wired CLI
             max_score=args.max_score,                # 2026-05-09 wired CLI
+            end_date=args.end_date,                  # 2026-05-11 wired CLI (BUG FIX)
             config_override=getattr(args, "config_override", None),
         )
         # Annotate result with overlay flags for audit/report
