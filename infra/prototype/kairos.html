@@ -15990,6 +15990,64 @@ window.QuantDetail = (function() {
                           `from max_hold_days=${h}${isDividendPayer && isLargeCap ? ' + dividend large-cap promoted' : ''}` };
     })();
 
+    // ── STRATEGY-ADJUSTED TRADE PLAN (mirrors renderPlanTab) ──
+    // When user overrides to POSITION/INVESTMENT, the trade-plan values
+    // shown in Overview's primary thesis + call section must change too
+    // (otherwise only the lens label switches and "nothing is changing").
+    const _sysStop = stop, _sysT1 = t1, _sysT2 = t2, _sysHold = maxHoldD;
+    const _stratPlan = (() => {
+      const atrDol = (atrPct != null ? atrPct : 2.0) / 100 * px;
+      const swingHold = _sysHold || 14;
+      const range = _sysT1 != null && _sysT1 > px ? (_sysT1 - px) : px * 0.08;
+      if (horizon.name === 'SWING') {
+        return { stop: _sysStop, t1: _sysT1, t2: _sysT2, hold: swingHold,
+                 eLo: eLo, eHi: eHi, trailPct: 0.02, source: 'system',
+                 stopBasis: '1.25× ATR · close-based · system canonical_trade_plan',
+                 t1Basis: 'prior swing high', t2Basis: '52w-high zone',
+                 holdBasis: `${swingHold}d max (system)` };
+      }
+      if (horizon.name === 'POSITION') {
+        const posStop = _sysStop != null ? Math.max(_sysStop * 0.95, px - 2.0 * atrDol) : (px - 2.0 * atrDol);
+        const posT2 = _sysT2 != null ? Math.max(_sysT2, px + 1.5 * range) : (px + 1.5 * range);
+        const posELo = eLo != null ? eLo : (px * 0.95);
+        const posEHi = Math.max(eHi != null ? eHi : px, px);
+        return { stop: posStop, t1: _sysT1, t2: posT2, hold: 90,
+                 eLo: posELo, eHi: posEHi, trailPct: 0.05, source: 'POSITION-adjusted',
+                 stopBasis: `2× ATR ($${atrDol.toFixed(2)}/share)`,
+                 t1Basis: 'quarterly cycle resistance', t2Basis: '1.5× swing range',
+                 holdBasis: '90d POSITION horizon' };
+      }
+      // INVESTMENT
+      const ptMean = tgtMean, ptHigh = _num('analyst_full.target_high');
+      let invStop, invT1, invT2, stopBasis, t1Basis, t2Basis;
+      if (ptMean != null && ptMean > px) {
+        invStop = Math.max(ptMean * 0.78, px * 0.75);
+        invT1 = ptMean;
+        invT2 = ptHigh != null && ptHigh > ptMean ? ptHigh : ptMean * 1.20;
+        stopBasis = `analyst PT × 0.78 = $${invStop.toFixed(2)} (22% MoS)`;
+        t1Basis = `analyst PT mean $${ptMean.toFixed(2)}`;
+        t2Basis = ptHigh ? `analyst PT high $${ptHigh.toFixed(2)}` : `PT × 1.20 = $${invT2.toFixed(2)}`;
+      } else {
+        invStop = px - 3.0 * atrDol;
+        invT1 = px * 1.25;
+        invT2 = px * 1.50;
+        stopBasis = `3× ATR — no analyst PT`;
+        t1Basis = `price × 1.25 fallback`;
+        t2Basis = `price × 1.50 fallback`;
+      }
+      const invELo = Math.max(invStop * 1.02, px * 0.90);
+      return { stop: invStop, t1: invT1, t2: invT2, hold: 365,
+               eLo: invELo, eHi: px, trailPct: 0.15, source: 'INVESTMENT-adjusted',
+               stopBasis, t1Basis, t2Basis,
+               holdBasis: '365d (1Y minimum) — long-horizon value compounding' };
+    })();
+    // Effective trade plan values (shadow the system ones for display use)
+    const effStop = _stratPlan.stop, effT1 = _stratPlan.t1, effT2 = _stratPlan.t2;
+    const effHold = _stratPlan.hold, effELo = _stratPlan.eLo, effEHi = _stratPlan.eHi;
+    // Recompute R:R against effective stop/T1 (was rr from canonical for SWING)
+    const effRR = (effStop != null && effT1 != null && px != null && px > effStop)
+                  ? (effT1 - px) / (px - effStop) : rr;
+
     // ── LENS DIRECTION VOTING — each lens votes bullish / bearish / neutral
     // Used both for cross-checks rendering and for conviction calibration.
     const lensVote = {};
@@ -16209,7 +16267,7 @@ window.QuantDetail = (function() {
     const _leadEvidence = (() => {
       const lead = horizon.lead;
       if (lead === 'SWING TRADING') {
-        return `Entry zone <b class="qov-am">$${eLo.toFixed(2)}–$${eHi.toFixed(2)}</b> · stop <b class="qov-rd">$${stop.toFixed(2)}</b> · T1 <b class="qov-gn">$${t1.toFixed(2)}</b> (R:R <b>${rr.toFixed(1)}:1</b>) · current <b>$${px.toFixed(2)}</b> · setup ${setup || 'unclassified'} · entry quality ${eqRaw || 'unknown'} · MACD ${macdBull ? 'bullish' : 'bearish'} · RSI ${rsi == null ? '—' : rsi.toFixed(0)} · RVOL ${rvol == null ? '—' : rvol.toFixed(2) + '×'}`;
+        return `Entry zone <b class="qov-am">$${effELo.toFixed(2)}–$${effEHi.toFixed(2)}</b> · stop <b class="qov-rd">$${effStop.toFixed(2)}</b> · T1 <b class="qov-gn">$${effT1.toFixed(2)}</b> (R:R <b>${effRR.toFixed(1)}:1</b>) · current <b>$${px.toFixed(2)}</b> · setup ${setup || 'unclassified'} · entry quality ${eqRaw || 'unknown'} · MACD ${macdBull ? 'bullish' : 'bearish'} · RSI ${rsi == null ? '—' : rsi.toFixed(0)} · RVOL ${rvol == null ? '—' : rvol.toFixed(2) + '×'}`;
       }
       if (lead === 'GRAHAM-BUFFETT VALUE') {
         return `Fwd P/E <b>${fwdPE == null ? '—' : fwdPE.toFixed(1)}</b> · PEG <b>${peg == null ? '—' : peg.toFixed(2)}</b> · FCF margin <b>${fcfMgn == null ? '—' : fcfMgn.toFixed(1) + '%'}</b> · rev growth <b>${revGr == null ? '—' : (revGr >= 0 ? '+' : '') + revGr.toFixed(1) + '%'}</b> · ROE <b>${roe == null ? '—' : roe.toFixed(1) + '%'}</b> · analyst PT <b>${tgtMean == null ? '—' : '$' + tgtMean.toFixed(0)}</b>${upside == null ? '' : ' (' + (upside >= 0 ? '+' : '') + upside.toFixed(0) + '% upside)'}`;
@@ -16256,14 +16314,14 @@ window.QuantDetail = (function() {
         const sizeStr = finalAllocPct != null && finalAllocPct > 0 ? `${finalAllocPct.toFixed(1)}% (Kelly-lite)` : `5–8% (regime-capped suggested)`;
         const catList = (catalystTags || []).slice(0, 3).join(' · ') || (earnDays != null && earnDays <= (maxHoldD || 21) ? `earnings in ${earnDays}d` : 'setup catalyst');
         return `
-          <div class="qsr-call-row"><span class="qsr-call-k">Entry zone</span><span class="qsr-call-v"><b>$${eLo.toFixed(2)}–$${eHi.toFixed(2)}</b> · ${eqRaw || '—'}</span></div>
-          <div class="qsr-call-row"><span class="qsr-call-k">Price target (T1)</span><span class="qsr-call-v"><b class="qov-gn">$${t1.toFixed(2)}</b> (+${t1PctSigned ? t1PctSigned.toFixed(1) : '—'}%, R-mult ${rT1 == null ? '—' : rT1.toFixed(1)}R)</span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Entry zone</span><span class="qsr-call-v"><b>$${effELo.toFixed(2)}–$${effEHi.toFixed(2)}</b> · ${eqRaw || '—'}</span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Price target (T1)</span><span class="qsr-call-v"><b class="qov-gn">$${effT1.toFixed(2)}</b> (+${t1PctSigned ? t1PctSigned.toFixed(1) : '—'}%, R-mult ${rT1 == null ? '—' : rT1.toFixed(1)}R)</span></div>
           <div class="qsr-call-row"><span class="qsr-call-k">T2 / runner</span><span class="qsr-call-v">${t2 ? '<b class="qov-gn">$' + t2.toFixed(2) + '</b> (+' + (t2PctSigned ? t2PctSigned.toFixed(1) : '—') + '%, ' + (rT2 == null ? '—' : rT2.toFixed(1) + 'R') + ')' : 'optional · scale at T1'}</span></div>
           <div class="qsr-call-row"><span class="qsr-call-k">Time horizon</span><span class="qsr-call-v"><b>${horizon.name.toLowerCase()}</b> · max hold ${maxHoldD == null ? '—' : maxHoldD + 'd'}</span></div>
           <div class="qsr-call-row"><span class="qsr-call-k">Position size</span><span class="qsr-call-v"><b>${sizeStr}</b>${sugShares ? ' · ' + sugShares + ' shares' : ''}</span></div>
           <div class="qsr-call-row"><span class="qsr-call-k">Identified catalyst</span><span class="qsr-call-v">${catList}</span></div>
           <div class="qsr-call-row"><span class="qsr-call-k">Technical confirmation</span><span class="qsr-call-v">${[macdBull && 'MACD bullish', above50 && 'above EMA50', rvol >= 1.3 && 'RVOL ≥ 1.3×', sqzFired && 'squeeze fired', eqRaw === 'FRESH' && 'fresh pivot'].filter(Boolean).join(' · ') || 'mixed signals — review tech tab'}</span></div>
-          <div class="qsr-call-row"><span class="qsr-call-k">Risk/reward</span><span class="qsr-call-v"><b>${rr.toFixed(1)}:1</b>${rr < 3 ? ' <span class="qov-am">(below 3:1 floor — size accordingly)</span>' : ''}</span></div>`;
+          <div class="qsr-call-row"><span class="qsr-call-k">Risk/reward</span><span class="qsr-call-v"><b>${effRR.toFixed(1)}:1</b>${rr < 3 ? ' <span class="qov-am">(below 3:1 floor — size accordingly)</span>' : ''}</span></div>`;
       }
       if (analystCall === 'SHORT') {
         const downsideCat = regime === 'panic' ? 'regime PANIC (no longs survive)' :
@@ -16309,7 +16367,7 @@ window.QuantDetail = (function() {
         triggers.push({ k: 'Structural trigger', v: `No single trigger identified — re-evaluate at next scan when 4-of-5 lenses align in the same direction` });
       }
       const triggersHTML = triggers.slice(0, 4).map(t => `<div class="qsr-call-row"><span class="qsr-call-k">${t.k}</span><span class="qsr-call-v">${t.v}</span></div>`).join('');
-      const shortTrigger = `<div class="qsr-call-row"><span class="qsr-call-k">↓ Converts to SHORT</span><span class="qsr-call-v">Close below stop <b class="qov-rd">$${stop.toFixed(2)}</b> on RVOL ≥ 1.5×, OR regime flips to panic, OR earnings miss with negative guidance.</span></div>`;
+      const shortTrigger = `<div class="qsr-call-row"><span class="qsr-call-k">↓ Converts to SHORT</span><span class="qsr-call-v">Close below stop <b class="qov-rd">$${effStop.toFixed(2)}</b> on RVOL ≥ 1.5×, OR regime flips to panic, OR earnings miss with negative guidance.</span></div>`;
       return triggersHTML + shortTrigger;
     })();
 
@@ -16320,7 +16378,7 @@ window.QuantDetail = (function() {
       if (callDir === 'BULLISH' || analystCall === 'WATCH') {
         if (rsRank != null && rsRank >= 75) candidates.push({ score: rsRank, text: `RS rank <b class="qov-gn">${rsRank.toFixed(0)}/100</b> — top-quartile relative strength vs SPY (252d)` });
         if (edge != null && edge >= 15) candidates.push({ score: edge, text: `Monte Carlo edge <b class="qov-gn">+${edge.toFixed(0)}pp</b> — P(T1)=${mcPT1.toFixed(0)}% vs P(stop)=${mcPS.toFixed(0)}%` });
-        if (rr >= 3) candidates.push({ score: rr * 20, text: `Risk/reward <b class="qov-gn">${rr.toFixed(1)}:1</b> at entry zone — above 3:1 institutional floor` });
+        if (rr >= 3) candidates.push({ score: rr * 20, text: `Risk/reward <b class="qov-gn">${effRR.toFixed(1)}:1</b> at entry zone — above 3:1 institutional floor` });
         if (sqzFired) candidates.push({ score: 70, text: `TTM squeeze <b class="qov-gn">FIRED</b> bullish — historically high follow-through on momentum expansion` });
         if (insiderBuys > 0 && insiderBuys > insiderSells) candidates.push({ score: 60 + insiderBuys, text: `Insider activity: <b class="qov-gn">${insiderBuys} buys</b> vs ${insiderSells} sells (30d)` });
         if (uoaCalls > 0) candidates.push({ score: 60 + uoaCalls * 5, text: `Unusual options activity: <b class="qov-gn">${uoaCalls} call(s)</b> with volume &gt; 3× OI` });
@@ -16354,7 +16412,7 @@ window.QuantDetail = (function() {
     // ── TOP 3 RISKS — specific, observable, ranked by severity
     const risksList = (() => {
       const candidates = [];
-      if (stop && px) candidates.push({ score: 100, text: `<b>Hard stop hit:</b> close below <b class="qov-rd">$${stop.toFixed(2)}</b> (${stopPctSigned == null ? '—' : Math.abs(stopPctSigned).toFixed(1)}% adverse) — thesis broken, exit no questions.` });
+      if (stop && px) candidates.push({ score: 100, text: `<b>Hard stop hit:</b> close below <b class="qov-rd">$${effStop.toFixed(2)}</b> (${stopPctSigned == null ? '—' : Math.abs(stopPctSigned).toFixed(1)}% adverse) — thesis broken, exit no questions.` });
       if (earnDays != null && earnDays >= 0 && earnDays <= 14) candidates.push({ score: 90, text: `<b>Earnings binary:</b> print in <b class="qov-am">${earnDays}d</b> with implied move <b>${impMove == null ? '—' : '±' + impMove.toFixed(1) + '%'}</b> — overnight gap risk dwarfs intraday stop discipline.` });
       if (regime !== 'panic') candidates.push({ score: 60, text: `<b>Regime shift:</b> if regime flips to <b class="qov-rd">panic</b> (VIX &gt; 35 OR breadth &lt; 20%), all longs go to cash regardless of single-name technicals.` });
       if (fwdCvar != null && fwdCvar < -10) candidates.push({ score: 80, text: `<b>Tail risk:</b> CVaR-97.5% <b class="qov-rd">${fwdCvar.toFixed(1)}%</b> (${fwdHorizon || 10}d) — tail loss exceeds nominal stop; check options hedge.` });
@@ -16374,14 +16432,14 @@ window.QuantDetail = (function() {
     // ── INVALIDATION CONDITION — what proves this call wrong
     const invalidation = (() => {
       if (analystCall === 'BUY') {
-        return `Close below <b class="qov-rd">$${stop.toFixed(2)}</b> on volume (${stopPctSigned == null ? '—' : Math.abs(stopPctSigned).toFixed(1)}% adverse). Also invalidated if: regime flips to <b>panic</b>; ${eqRaw === 'FRESH' ? 'price extends &gt; 2 ATR above entry zone before action' : 'pullback violates the value zone'}; earnings miss with negative guidance (if in window).`;
+        return `Close below <b class="qov-rd">$${effStop.toFixed(2)}</b> on volume (${stopPctSigned == null ? '—' : Math.abs(stopPctSigned).toFixed(1)}% adverse). Also invalidated if: regime flips to <b>panic</b>; ${eqRaw === 'FRESH' ? 'price extends &gt; 2 ATR above entry zone before action' : 'pullback violates the value zone'}; earnings miss with negative guidance (if in window).`;
       }
       if (analystCall === 'SHORT') {
         const upStop = wkHi != null ? `$${(wkHi * 1.02).toFixed(2)}` : `$${(px * 1.08).toFixed(2)}`;
         return `Daily close above <b class="qov-gn">${upStop}</b> on RVOL ≥ 1.5×. Also invalidated if: regime flips to <b>risk_on_trending</b>; positive surprise + guide-raise on next earnings print; institutional buying ramps (insider buys spike, UOA call-heavy).`;
       }
       // WATCH
-      return `Watch is invalidated when: (a) any trigger above fires → call upgrades to BUY/SHORT, OR (b) thesis breaks structurally — close below <b class="qov-rd">$${stop.toFixed(2)}</b> on volume invalidates the long thesis entirely (not WATCH); regime flips to panic or earnings miss with negative guidance.`;
+      return `Watch is invalidated when: (a) any trigger above fires → call upgrades to BUY/SHORT, OR (b) thesis breaks structurally — close below <b class="qov-rd">$${effStop.toFixed(2)}</b> on volume invalidates the long thesis entirely (not WATCH); regime flips to panic or earnings miss with negative guidance.`;
     })();
 
     // ── CROSS-CHECK rendering with disagreement detection
