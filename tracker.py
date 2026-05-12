@@ -337,6 +337,22 @@ def evaluate_pending(hold_days: int = 5) -> int:
                 else:
                     pct_chg = ((entry - exit_price) / entry) * 100
 
+                # CTRA-class data hygiene (2026-05-11): pct_chg > 100% in
+                # a 5-10d swing window is essentially always a data bug —
+                # unadjusted stock split, ticker re-use, or bad bar from
+                # the data source. Same class as the CAR target-spike issue.
+                # Skip the trade outright (don't record poisoned outcomes
+                # into picks_history.json — they'd corrupt setup-family
+                # WR multipliers and entry_quality stratified analysis).
+                if abs(pct_chg) > 100:
+                    log.warning(
+                        f"Skipping outlier trade for {pick.get('ticker')}: "
+                        f"pct_chg={pct_chg:.2f}% (entry={entry:.2f}, "
+                        f"exit={exit_price:.2f}) — likely split/data bug, "
+                        f"verify ticker history before re-recording"
+                    )
+                    continue
+
                 # MFE/MAE: max favorable / adverse excursion during hold period
                 high_vals = data["High"].values.flatten() if "High" in data else close_vals
                 low_vals  = data["Low"].values.flatten()  if "Low"  in data else close_vals
