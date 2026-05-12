@@ -29,6 +29,30 @@ _SYSTEM_GATE_ACTIVE: bool = False
 _SYSTEM_GATE_REASON: str = ""
 
 
+def _compute_perf_1d(ticker):
+    """Compute true 1-day % change from EODHD eod cache (last 2 closes).
+    Cache hit since scan Step 4 already pulled it. Added 2026-05-11 — the scan
+    returns 0 for pct_chg so we recompute here to populate Trending widget etc."""
+    if not ticker:
+        return None
+    try:
+        import eodhd_client as _e
+        from datetime import date, timedelta
+        # last 5 trading days as window — gives 2-3 closes even after weekends
+        end = date.today()
+        start = end - timedelta(days=7)
+        bars = _e.eod(ticker, from_date=start.isoformat(), to_date=end.isoformat(), cache_ttl=43200)
+        if not bars or len(bars) < 2:
+            return None
+        last = bars[-1].get("close") or bars[-1].get("adjusted_close")
+        prev = bars[-2].get("close") or bars[-2].get("adjusted_close")
+        if last and prev and prev != 0:
+            return round(((last / prev) - 1) * 100, 3)
+    except Exception:
+        pass
+    return None
+
+
 def _setup_distribution_in_scan(b: dict) -> dict:
     """Count tickers per setup_family across the analyzed universe.
     Powers the Strategies tab — shows what scans are firing this run."""
@@ -1039,7 +1063,10 @@ def compact_row(r: dict) -> dict:
         "tech_pts":   rb.get("technicals", {}).get("score") if isinstance(rb.get("technicals"), dict) else rb.get("technicals"),
         "fund_pts":   rb.get("fundamentals", {}).get("score") if isinstance(rb.get("fundamentals"), dict) else rb.get("fundamentals"),
         "smc_pts":    rb.get("smc", {}).get("score") if isinstance(rb.get("smc"), dict) else rb.get("smc"),
-        "earn_days":  earn.get("days_until") if isinstance(earn, dict) else None,
+        # earn_days: prefer the post-pass earnings_watchlist stamp on r (added
+        # 2026-05-11); falls back to scan-side r["earnings"]["days_until"].
+        "earn_days":  r.get("earn_days") if r.get("earn_days") is not None
+                     else (earn.get("days_until") if isinstance(earn, dict) else None),
         # P0-2: ESP Play signal — Zacks ESP > 0 + Rank ≤ 3 + earnings within 7 days
         # Documented ~70% beat rate when both conditions hold. Lights up automatically
         # as zacks_per_ticker enrichment populates the underlying fields.
@@ -1059,7 +1086,10 @@ def compact_row(r: dict) -> dict:
         "cap_bucket":   _cap_bucket(r.get("market_cap")),
         "week52_high":  r.get("week52_high"),
         "week52_low":   r.get("week52_low"),
-        "conviction_tier": r.get("conviction_tier"),
+        # conviction_tier falls back to conviction.label when the top-level
+        # field is unset by the scan (added 2026-05-11 — was null for all tickers
+        # because the scan only writes the nested conviction dict).
+        "conviction_tier": r.get("conviction_tier") or (r.get("conviction") or {}).get("label"),
         "entry_quality":  r.get("entry_quality"),
         "star_rating":    r.get("star_rating"),
         "reaction_checklist": r.get("reaction_checklist") or [],
@@ -1106,7 +1136,10 @@ def compact_row(r: dict) -> dict:
         "macd_signal":    r.get("macd_signal"),
         "weekly_bull":    r.get("weekly_bull"),
         "perf_4h":        r.get("perf_4h"),
-        "perf_1d":        r.get("pct_chg") or 0,
+        # perf_1d: scan returns 0 for pct_chg, so compute from last 2 EOD closes via
+        # eodhd_client cache (cache hit — already fetched in scan Step 4). Falls back
+        # to scan's pct_chg if cache miss. Added 2026-05-11.
+        "perf_1d":        _compute_perf_1d(r.get("ticker") or r.get("symbol")) or r.get("pct_chg") or 0,
         "perf_1w":        (r.get("technicals") or {}).get("perf_week"),
         "insider_recent": ((r.get("insider_data") or {}).get("recent_buys") or 0) - ((r.get("insider_data") or {}).get("recent_sells") or 0),
         "insider_days":   (r.get("insider_data") or {}).get("days_since_last"),
@@ -1458,6 +1491,10 @@ def rich_row(r: dict, b: dict = None) -> dict:
         "fractal_low":  r.get("fractal_low"),
         "squeeze_on":   r.get("squeeze") if isinstance(r.get("squeeze"), bool) else (r.get("squeeze") or {}).get("on"),
         "squeeze":      r.get("squeeze") if isinstance(r.get("squeeze"), dict) else {"on": bool(r.get("squeeze"))},
+        "bars_in_squeeze":   (r.get("indicators") or {}).get("bars_in_squeeze"),
+        "squeeze_fired":     (r.get("indicators") or {}).get("squeeze_fired"),
+        "squeeze_direction": (r.get("indicators") or {}).get("squeeze_direction"),
+        "sqz_series_20":     (r.get("indicators") or {}).get("sqz_series_20"),
         "patterns":     r.get("patterns") or {},
         "vwap":         r.get("vwap") or {},
         "premarket":    r.get("premarket") or {},
@@ -1570,6 +1607,712 @@ def rich_row(r: dict, b: dict = None) -> dict:
     except Exception as _bt_err:
         base["thesis_card"] = {"error": str(_bt_err)[:120]}
     return base
+
+
+def _enrich_cockpit_data(data: dict) -> None:
+    """Populate data.json with cockpit-only enrichments (in-place):
+      • data['market_news']       — EODHD market-wide news feed (top 20)
+      • data['market_movers']     — Schwab live movers across $SPX/$COMPX/$DJI
+      • per-ticker news_articles  — populated on top-N scored tickers (EODHD)
+
+    All fetches are isolated in try/except blocks — a failure on any one
+    doesn't block the build or other enrichments. Cache TTLs handle re-runs.
+    """
+    import time
+
+    # ── 1. Market-wide news (EODHD, single call, market feed) ──
+    try:
+        import eodhd_client as _eod
+        rows = _eod.news(query=None, ticker=None, limit=25, cache_ttl=14400) or []
+        market_news = []
+        for a in rows[:20]:
+            sent = a.get("sentiment") or {}
+            pol = sent.get("polarity") if isinstance(sent, dict) else None
+            label = "neutral"
+            if isinstance(pol, (int, float)):
+                label = "positive" if pol > 0.15 else ("negative" if pol < -0.15 else "neutral")
+            market_news.append({
+                "title": a.get("title", "")[:200],
+                "source": a.get("source", "")[:60],
+                "date": a.get("date", ""),
+                "url": a.get("link", ""),
+                "symbols": (a.get("symbols") or [])[:5],
+                "sentiment": label,
+                "polarity": pol,
+                "_provider": "eodhd",
+            })
+        data["market_news"] = market_news
+        print(f"  enrich: market_news ← {len(market_news)} EODHD items")
+    except Exception as e:
+        data["market_news"] = []
+        print(f"  enrich: market_news FAILED ({e})")
+
+    # ── 2. Schwab market movers ($SPX / $COMPX / $DJI · up + down) ──
+    try:
+        import schwab_client as _schwab
+        movers = {"gainers": [], "losers": [], "by_index": {}, "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        seen_up = set(); seen_dn = set()
+        for idx in ("$SPX", "$COMPX", "$DJI"):
+            try:
+                ups = _schwab.get_movers(idx, direction="up") or []
+                dns = _schwab.get_movers(idx, direction="down") or []
+            except Exception as ie:
+                print(f"  enrich: schwab movers {idx} failed ({ie})")
+                continue
+            movers["by_index"][idx] = {"up": len(ups), "down": len(dns)}
+            for m in ups:
+                sym = m.get("symbol") or m.get("description") or ""
+                if not sym or sym in seen_up: continue
+                seen_up.add(sym)
+                movers["gainers"].append({
+                    "ticker": sym,
+                    "name": m.get("description", "")[:60],
+                    "price": m.get("lastPrice") or m.get("last") or 0,
+                    "perf_1d": (m.get("netPercentChange") or m.get("netPercentChangeInDouble") or 0),
+                    "volume": m.get("totalVolume") or 0,
+                    "index": idx,
+                })
+            for m in dns:
+                sym = m.get("symbol") or m.get("description") or ""
+                if not sym or sym in seen_dn: continue
+                seen_dn.add(sym)
+                movers["losers"].append({
+                    "ticker": sym,
+                    "name": m.get("description", "")[:60],
+                    "price": m.get("lastPrice") or m.get("last") or 0,
+                    "perf_1d": (m.get("netPercentChange") or m.get("netPercentChangeInDouble") or 0),
+                    "volume": m.get("totalVolume") or 0,
+                    "index": idx,
+                })
+        # Sort and trim to 10 each
+        movers["gainers"] = sorted(movers["gainers"], key=lambda x: -(x.get("perf_1d") or 0))[:10]
+        movers["losers"]  = sorted(movers["losers"],  key=lambda x:  (x.get("perf_1d") or 0))[:10]
+        data["market_movers"] = movers
+        print(f"  enrich: market_movers ← {len(movers['gainers'])}G/{len(movers['losers'])}L (Schwab)")
+    except Exception as e:
+        data["market_movers"] = {"gainers": [], "losers": [], "error": str(e)[:120]}
+        print(f"  enrich: market_movers FAILED ({e})")
+
+    # ── 3. Options-flow enrichment: Schwab chains for top UOA tickers ──
+    #     Computes per-ticker: live IV (ATM), term structure (IV by expiry),
+    #     skew (25Δ put-IV − 25Δ call-IV), GEX per strike + gamma wall,
+    #     refined max-pain. Stored at data['options_enriched'][ticker].
+    try:
+        import schwab_client as _schwab
+        import time as _t
+        from pathlib import Path as _P
+        of = data.get("options_flow_top30") or []
+        of_b = data.get("options_flow_top50") or []
+        of_union = {x.get("ticker"): x for x in (of + of_b) if x.get("ticker")}
+        # Top 30 by call volume — covers entire imbalance table for full IV/skew/gex columns
+        top_tickers = sorted(
+            list(of_union.keys()),
+            key=lambda tk: -of_union[tk].get("call_volume", 0)
+        )[:30]
+        enriched = {}
+
+        # ── IV history cache (rolling per-ticker per-day) ──
+        IV_HIST_PATH = _P("cache/iv_history.json")
+        iv_hist: dict = {}
+        try:
+            if IV_HIST_PATH.exists():
+                iv_hist = json.loads(IV_HIST_PATH.read_text())
+        except Exception:
+            iv_hist = {}
+        today = (data.get("run_date") or _t.strftime("%Y-%m-%d"))
+
+        # ── Helper: 30d HV from EODHD close-price history ──
+        def _compute_hv30(symbol):
+            try:
+                import math as _m
+                from data_fetcher import fetch_market_data as _fmd
+                md = _fmd([symbol], period="2mo")
+                df = (md or {}).get(symbol)
+                if df is None or len(df) < 22:
+                    return None
+                closes = list(df["Close"].tail(31).values)
+                rets = []
+                for i in range(1, len(closes)):
+                    if closes[i-1] > 0 and closes[i] > 0:
+                        rets.append(_m.log(closes[i] / closes[i-1]))
+                if len(rets) < 10:
+                    return None
+                mean = sum(rets) / len(rets)
+                var = sum((r - mean) ** 2 for r in rets) / len(rets)
+                hv30 = (var ** 0.5) * (252 ** 0.5)
+                return round(hv30, 4)
+            except Exception:
+                return None
+
+        for tkr in top_tickers:
+            try:
+                ch = _schwab.get_chains(tkr, contract_type="ALL", strike_count=20, include_underlying=True)
+                if not ch:
+                    continue
+                underlying = ch.get("underlying", {}) or {}
+                spot = underlying.get("last") or underlying.get("mark") or underlying.get("regularMarketLastPrice")
+                if not spot:
+                    continue
+                spot = float(spot)
+                call_map = ch.get("callExpDateMap", {}) or {}
+                put_map = ch.get("putExpDateMap", {}) or {}
+
+                # Per-strike consolidated arrays + per-expiry buckets
+                strikes_call: dict = {}   # strike -> {oi, vol, iv, delta, gamma, theta, vega, mark, bid, ask, exp, dte}
+                strikes_put: dict = {}
+                expiries_seen: dict = {}  # exp_date -> {dte, atm_ivs[], call_oi, put_oi, call_vol, put_vol, prem_call$, prem_put$}
+                strike_oi: dict = {}      # combined OI per strike (for max-pain)
+                strike_gex: dict = {}     # for gamma exposure
+                strike_call_iv: dict = {}; strike_put_iv: dict = {}
+                strike_call_delta: dict = {}; strike_put_delta: dict = {}
+                atm_calls, atm_puts = [], []
+                premium_call_total = 0.0
+                premium_put_total = 0.0
+                net_dealer_delta = 0.0  # Σ(call_delta × OI − put_delta × OI)
+
+                def _to_iv(v):
+                    try:
+                        v = float(v)
+                        return v / 100.0 if v > 5 else v
+                    except Exception:
+                        return None
+
+                # Walk calls
+                for exp_key, strikes in call_map.items():
+                    parts = exp_key.split(":")
+                    exp_date = parts[0]
+                    try: dte = int(parts[1]) if len(parts) > 1 else 0
+                    except Exception: dte = 0
+                    exp_bucket = expiries_seen.setdefault(exp_date, {"dte": dte, "atm_ivs": [], "call_oi": 0, "put_oi": 0, "call_vol": 0, "put_vol": 0, "prem_call": 0.0, "prem_put": 0.0})
+                    exp_bucket["dte"] = dte
+                    for sstr, contracts in strikes.items():
+                        try: strike = float(sstr)
+                        except Exception: continue
+                        for c in contracts:
+                            iv = _to_iv(c.get("volatility"))
+                            oi = int(c.get("openInterest") or 0)
+                            vol = int(c.get("totalVolume") or 0)
+                            gamma = float(c.get("gamma") or 0)
+                            delta = float(c.get("delta") or 0)
+                            theta = float(c.get("theta") or 0)
+                            vega  = float(c.get("vega") or 0)
+                            mark  = float(c.get("mark") or 0)
+                            bid   = float(c.get("bid") or 0)
+                            ask   = float(c.get("ask") or 0)
+                            mid = mark if mark else ((bid + ask) / 2 if (bid and ask) else 0)
+                            # Store per-strike-per-expiry record (nearest expiry wins for the ladder)
+                            key = (strike, exp_date)
+                            if dte <= 45 or key not in strikes_call:
+                                strikes_call[strike] = {
+                                    "oi": oi, "vol": vol, "iv": iv, "delta": delta, "gamma": gamma,
+                                    "theta": theta, "vega": vega, "mark": mark, "bid": bid, "ask": ask,
+                                    "exp": exp_date, "dte": dte,
+                                }
+                            if iv is not None and 0.95 <= strike/spot <= 1.05:
+                                exp_bucket["atm_ivs"].append(iv)
+                                if dte <= 7: atm_calls.append(iv)
+                            if oi: strike_oi[strike] = strike_oi.get(strike, 0) + oi
+                            if gamma and oi:
+                                strike_gex[strike] = strike_gex.get(strike, 0) + (gamma * oi)
+                            if iv is not None and delta:
+                                strike_call_iv[strike] = iv
+                                strike_call_delta[strike] = delta
+                            net_dealer_delta += delta * oi
+                            exp_bucket["call_oi"] += oi
+                            exp_bucket["call_vol"] += vol
+                            exp_bucket["prem_call"] += vol * mid * 100  # per-contract dollars
+                            premium_call_total += vol * mid * 100
+
+                # Walk puts
+                for exp_key, strikes in put_map.items():
+                    parts = exp_key.split(":")
+                    exp_date = parts[0]
+                    try: dte = int(parts[1]) if len(parts) > 1 else 0
+                    except Exception: dte = 0
+                    exp_bucket = expiries_seen.setdefault(exp_date, {"dte": dte, "atm_ivs": [], "call_oi": 0, "put_oi": 0, "call_vol": 0, "put_vol": 0, "prem_call": 0.0, "prem_put": 0.0})
+                    for sstr, contracts in strikes.items():
+                        try: strike = float(sstr)
+                        except Exception: continue
+                        for c in contracts:
+                            iv = _to_iv(c.get("volatility"))
+                            oi = int(c.get("openInterest") or 0)
+                            vol = int(c.get("totalVolume") or 0)
+                            gamma = float(c.get("gamma") or 0)
+                            delta = float(c.get("delta") or 0)
+                            theta = float(c.get("theta") or 0)
+                            vega  = float(c.get("vega") or 0)
+                            mark  = float(c.get("mark") or 0)
+                            bid   = float(c.get("bid") or 0)
+                            ask   = float(c.get("ask") or 0)
+                            mid = mark if mark else ((bid + ask) / 2 if (bid and ask) else 0)
+                            if dte <= 45 or strike not in strikes_put:
+                                strikes_put[strike] = {
+                                    "oi": oi, "vol": vol, "iv": iv, "delta": delta, "gamma": gamma,
+                                    "theta": theta, "vega": vega, "mark": mark, "bid": bid, "ask": ask,
+                                    "exp": exp_date, "dte": dte,
+                                }
+                            if iv is not None and 0.95 <= strike/spot <= 1.05 and dte <= 7:
+                                atm_puts.append(iv)
+                            if oi: strike_oi[strike] = strike_oi.get(strike, 0) + oi
+                            if gamma and oi:
+                                strike_gex[strike] = strike_gex.get(strike, 0) - (gamma * oi)
+                            if iv is not None and delta:
+                                strike_put_iv[strike] = iv
+                                strike_put_delta[strike] = delta
+                            net_dealer_delta -= abs(delta) * oi
+                            exp_bucket["put_oi"] += oi
+                            exp_bucket["put_vol"] += vol
+                            exp_bucket["prem_put"] += vol * mid * 100
+                            premium_put_total += vol * mid * 100
+
+                # Term structure (per expiry)
+                term = []
+                expiries_ladder = []
+                for exp_date in sorted(expiries_seen.keys()):
+                    eb = expiries_seen[exp_date]
+                    atm_avg = round(sum(eb["atm_ivs"]) / len(eb["atm_ivs"]), 4) if eb["atm_ivs"] else None
+                    term.append({"expiry": exp_date, "dte": eb["dte"], "avg_iv": atm_avg})
+                    expiries_ladder.append({
+                        "expiry": exp_date,
+                        "dte": eb["dte"],
+                        "atm_iv": atm_avg,
+                        "call_oi": eb["call_oi"],
+                        "put_oi": eb["put_oi"],
+                        "call_vol": eb["call_vol"],
+                        "put_vol": eb["put_vol"],
+                        "premium_call_dollars": round(eb["prem_call"], 0),
+                        "premium_put_dollars": round(eb["prem_put"], 0),
+                    })
+
+                # Live IV (ATM blended, nearest ≤7d)
+                all_atm = atm_calls + atm_puts
+                live_iv = round(sum(all_atm)/len(all_atm), 4) if all_atm else None
+
+                # Skew (25Δ)
+                call_25d_strike = min(strike_call_delta.keys(), key=lambda k: abs(strike_call_delta[k] - 0.25)) if strike_call_delta else None
+                put_25d_strike  = min(strike_put_delta.keys(),  key=lambda k: abs(strike_put_delta[k] - (-0.25))) if strike_put_delta else None
+                call_25d_iv = strike_call_iv.get(call_25d_strike) if call_25d_strike else None
+                put_25d_iv  = strike_put_iv.get(put_25d_strike) if put_25d_strike else None
+                skew_val = (put_25d_iv - call_25d_iv) if (put_25d_iv is not None and call_25d_iv is not None) else None
+
+                # Smile slope index — IV of 10Δ wings vs ATM IV
+                wing_call_strike = min(strike_call_delta.keys(), key=lambda k: abs(strike_call_delta[k] - 0.10)) if strike_call_delta else None
+                wing_put_strike  = min(strike_put_delta.keys(),  key=lambda k: abs(strike_put_delta[k] - (-0.10))) if strike_put_delta else None
+                wing_call_iv = strike_call_iv.get(wing_call_strike) if wing_call_strike else None
+                wing_put_iv  = strike_put_iv.get(wing_put_strike) if wing_put_strike else None
+                wing_avg_iv = (wing_call_iv + wing_put_iv) / 2 if (wing_call_iv is not None and wing_put_iv is not None) else None
+                smile_slope = (wing_avg_iv - live_iv) if (wing_avg_iv is not None and live_iv is not None) else None
+
+                # Backwardation index: (front IV − back IV) / front IV
+                term_with_iv = [t for t in term if t["avg_iv"]]
+                if len(term_with_iv) >= 2:
+                    front_iv = term_with_iv[0]["avg_iv"]
+                    back_iv  = term_with_iv[-1]["avg_iv"]
+                    backwardation = round((front_iv - back_iv) / front_iv, 4) if front_iv else None
+                else:
+                    backwardation = None
+
+                # GEX
+                gex_by_strike_all = sorted(strike_gex.items(), key=lambda kv: -abs(kv[1]))
+                gex_by_strike = gex_by_strike_all[:8]
+                wall_strike, wall_gex = (gex_by_strike[0] if gex_by_strike else (None, 0))
+                wall_kind = "CALL_WALL" if wall_gex > 0 else "PUT_WALL" if wall_gex < 0 else None
+                total_gex = sum(strike_gex.values())
+
+                # Net dealer delta — $ exposure (signed)
+                net_dealer_delta_dollars = round(net_dealer_delta * 100 * spot, 0)
+
+                # Max-pain
+                max_pain = max(strike_oi.items(), key=lambda kv: kv[1])[0] if strike_oi else None
+
+                # HV-30 + IV/HV ratio
+                hv30 = _compute_hv30(tkr)
+                iv_hv_ratio = round((live_iv / hv30), 3) if (live_iv and hv30) else None
+
+                # IV history append (rolling)
+                if live_iv is not None:
+                    hist = iv_hist.setdefault(tkr, [])
+                    # remove existing entry for today if present, then append
+                    hist = [h for h in hist if h.get("date") != today]
+                    hist.append({"date": today, "iv": round(live_iv, 4)})
+                    # cap at last 260 entries (~52 weeks of daily)
+                    iv_hist[tkr] = hist[-260:]
+
+                # IV rank vs trailing 52w
+                iv_rank = None
+                iv_history_series = iv_hist.get(tkr, [])
+                if len(iv_history_series) >= 5 and live_iv is not None:
+                    ivs_hist = [h["iv"] for h in iv_history_series if h.get("iv") is not None]
+                    if ivs_hist:
+                        below = sum(1 for v in ivs_hist if v <= live_iv)
+                        iv_rank = round(below / len(ivs_hist) * 100, 1)
+
+                # ── Item #6 · Charm + Vanna — proper Black-Scholes-style approximations ──
+                # Charm = dΔ/dt — daily delta decay. BS: charm ≈ -e^(-qT) [N'(d1)(2(r-q)T - d2*σ√T)/(2T·σ√T) - q*N(d1)]
+                # Vanna = dΔ/dσ — delta sensitivity to vol. BS: vanna ≈ -e^(-qT) N'(d1) * d2/σ
+                # Practical: derive from existing greeks: vanna ≈ vega * delta / (S·σ·√T·100), charm ≈ -theta * delta / mark
+                # Aggregate exposures × OI × 100 multiplier for $ exposure
+                import math as _m
+                charm_dollar = 0.0   # net charm $ exposure (delta-decay per day, in $ terms)
+                vanna_dollar = 0.0   # net vanna $ exposure (delta change per 1% IV move)
+                def _greek_exposures(contracts, is_put):
+                    nonlocal charm_dollar, vanna_dollar
+                    for c in contracts.values():
+                        oi = c.get("oi") or 0
+                        if oi == 0: continue
+                        sigma = c.get("iv")
+                        T = c.get("dte", 0) / 365.0
+                        delta = c.get("delta", 0)
+                        vega = c.get("vega", 0)
+                        theta = c.get("theta", 0)
+                        if sigma is None or sigma <= 0 or T <= 0: continue
+                        # Vanna ≈ vega × delta / (S × σ × √T) — $ delta change per 1% σ move
+                        try:
+                            vanna_proxy = vega * delta / (spot * sigma * _m.sqrt(T))
+                            sign = -1 if is_put else 1
+                            vanna_dollar += sign * vanna_proxy * oi * 100 * spot * 0.01
+                        except Exception: pass
+                        # Charm ≈ theta × delta / mark (delta decay per day, $ per share)
+                        mark = c.get("mark") or 0
+                        if mark > 0:
+                            charm_proxy = theta * delta / mark
+                            charm_dollar += charm_proxy * oi * 100
+
+                _greek_exposures(strikes_call, False)
+                _greek_exposures(strikes_put, True)
+
+                # ── Item #4 · Earnings IV crush forecast — sector-aware + IV-bucket-aware ──
+                # Strategy: combine historical sector volatility with current IV level.
+                # Biotech/small-tech crush hardest; large-cap diversified crush least.
+                crush_pct_est = None
+                # Find ticker sector
+                tkr_sec = None
+                for src in (of, of_b):
+                    for row in src:
+                        if row.get("ticker") == tkr:
+                            tkr_sec = row.get("sector"); break
+                    if tkr_sec: break
+                # Sector base crush multipliers (empirical industry averages post-earnings)
+                SECTOR_CRUSH = {
+                    "Healthcare": 1.35,  # biotech volatility crushes hard
+                    "Technology": 1.15,
+                    "Consumer Cyclical": 1.10,
+                    "Communication Services": 1.05,
+                    "Industrials": 1.00,
+                    "Energy": 0.95,
+                    "Financial Services": 0.85,
+                    "Consumer Defensive": 0.80,
+                    "Utilities": 0.70,
+                    "Real Estate": 0.75,
+                    "Basic Materials": 0.95,
+                }
+                sec_mult = SECTOR_CRUSH.get(tkr_sec, 1.0)
+                # IV-level base: rule-of-thumb crushes
+                if live_iv is not None:
+                    if live_iv > 0.8:     base_crush = 45
+                    elif live_iv > 0.6:   base_crush = 38
+                    elif live_iv > 0.45:  base_crush = 30
+                    elif live_iv > 0.30:  base_crush = 22
+                    elif live_iv > 0.20:  base_crush = 16
+                    else:                 base_crush = 10
+                    # Adjust by backwardation: if front-month IV >> back, earnings is priced in
+                    if backwardation is not None and backwardation > 0.10:
+                        base_crush = int(base_crush * 1.25)  # more crush expected
+                    crush_pct_est = max(5, min(60, int(round(base_crush * sec_mult))))
+
+                # ── Item #10 · Per-expiry smile data for proper smile chart ──
+                # Build a strike-IV array for the NEAREST expiry only — gives a clean smile curve
+                smile_per_expiry = {}  # exp_date -> [{strike, call_iv, put_iv}]
+                for exp_key, strikes in call_map.items():
+                    exp_date = exp_key.split(":")[0]
+                    if exp_date not in smile_per_expiry:
+                        smile_per_expiry[exp_date] = {}
+                    for sstr, contracts in strikes.items():
+                        try: strike = float(sstr)
+                        except Exception: continue
+                        for c in contracts:
+                            v = _to_iv(c.get("volatility"))
+                            if v is not None:
+                                if strike not in smile_per_expiry[exp_date]:
+                                    smile_per_expiry[exp_date][strike] = {}
+                                smile_per_expiry[exp_date][strike]["call_iv"] = v
+                for exp_key, strikes in put_map.items():
+                    exp_date = exp_key.split(":")[0]
+                    if exp_date not in smile_per_expiry: continue
+                    for sstr, contracts in strikes.items():
+                        try: strike = float(sstr)
+                        except Exception: continue
+                        for c in contracts:
+                            v = _to_iv(c.get("volatility"))
+                            if v is not None:
+                                if strike not in smile_per_expiry[exp_date]:
+                                    smile_per_expiry[exp_date][strike] = {}
+                                smile_per_expiry[exp_date][strike]["put_iv"] = v
+                # Convert to nearest-expiry sorted strikes array (the smile curve)
+                nearest_exp = sorted(expiries_seen.keys())[0] if expiries_seen else None
+                smile_curve = []
+                if nearest_exp and nearest_exp in smile_per_expiry:
+                    for s in sorted(smile_per_expiry[nearest_exp].keys()):
+                        ivs = smile_per_expiry[nearest_exp][s]
+                        # blend if both exist, else take whichever is present
+                        c_iv, p_iv = ivs.get("call_iv"), ivs.get("put_iv")
+                        if c_iv is not None and p_iv is not None:
+                            blended = (c_iv + p_iv) / 2
+                        else:
+                            blended = c_iv if c_iv is not None else p_iv
+                        if blended is not None:
+                            smile_curve.append({"strike": s, "iv": round(blended, 4),
+                                                "call_iv": c_iv, "put_iv": p_iv})
+
+                # ── Item #9 · Volatility surface — strike × expiry grid with nearest-neighbor backfill ──
+                surface = {"strikes": [], "expiries": [], "grid": []}
+                strike_set_all = sorted(set(list(strikes_call.keys()) + list(strikes_put.keys())))
+                # Pick strikes within ATM ± 25% for the surface (avoids far-OTM IV outliers)
+                strike_set = [s for s in strike_set_all if 0.75 <= s/spot <= 1.25]
+                if len(strike_set) < 5:
+                    strike_set = strike_set_all  # fallback
+                # Cap at 21 strikes centered on ATM
+                if len(strike_set) > 21:
+                    atm_idx = min(range(len(strike_set)), key=lambda i: abs(strike_set[i] - spot))
+                    half = 10
+                    lo_i = max(0, atm_idx - half)
+                    hi_i = min(len(strike_set), lo_i + 21)
+                    lo_i = max(0, hi_i - 21)
+                    strike_set = strike_set[lo_i:hi_i]
+                exp_set = sorted(expiries_seen.keys())[:6]
+                surface["strikes"] = strike_set
+                surface["expiries"] = exp_set
+                # Walk per-expiry data we already built
+                raw_grid = {}
+                for exp_date in exp_set:
+                    if exp_date not in smile_per_expiry: continue
+                    for s, ivs in smile_per_expiry[exp_date].items():
+                        c_iv, p_iv = ivs.get("call_iv"), ivs.get("put_iv")
+                        blended = ((c_iv or 0) + (p_iv or 0)) / max(1, sum(1 for x in [c_iv, p_iv] if x is not None))
+                        if c_iv is None and p_iv is None: continue
+                        raw_grid[(s, exp_date)] = blended
+
+                # Nearest-neighbor backfill on the strike axis
+                # For each (strike, expiry) cell with no data, find nearest strike in same expiry that has data
+                filled_grid = {}
+                for s in strike_set:
+                    for e in exp_set:
+                        if (s, e) in raw_grid:
+                            filled_grid[(s, e)] = raw_grid[(s, e)]
+                        else:
+                            # Find nearest neighbor in same expiry
+                            candidates_e = [(abs(s2 - s), v) for (s2, e2), v in raw_grid.items() if e2 == e]
+                            if candidates_e:
+                                candidates_e.sort()
+                                # Use nearest neighbor only if within 15% of strike
+                                if candidates_e[0][0] / max(s, 0.01) < 0.15:
+                                    filled_grid[(s, e)] = candidates_e[0][1]
+                                else:
+                                    filled_grid[(s, e)] = None
+                            else:
+                                filled_grid[(s, e)] = None
+                surface["grid"] = [
+                    [filled_grid.get((s, e)) for e in exp_set]
+                    for s in strike_set
+                ]
+
+                # Chain ladder rows — ATM-bias 15 strikes
+                ladder_strikes = sorted([s for s in strike_set if 0.85 <= s/spot <= 1.15])
+                # If too few, just take all strike_set ±10 around ATM
+                if len(ladder_strikes) < 8:
+                    ladder_strikes = sorted(strike_set, key=lambda x: abs(x - spot))[:15]
+                    ladder_strikes.sort()
+                ladder = []
+                for s in ladder_strikes:
+                    c = strikes_call.get(s, {})
+                    p = strikes_put.get(s, {})
+                    call_uoa = bool(c.get("oi", 0) > 100 and c.get("vol", 0) > c.get("oi", 0) * 3)
+                    put_uoa  = bool(p.get("oi", 0) > 100 and p.get("vol", 0) > p.get("oi", 0) * 3)
+                    ladder.append({
+                        "strike": s,
+                        "atm": abs(s - spot) / spot < 0.025,
+                        "call": {"oi": c.get("oi", 0), "vol": c.get("vol", 0), "iv": c.get("iv"), "delta": c.get("delta"), "gamma": c.get("gamma"), "mark": c.get("mark"), "uoa": call_uoa},
+                        "put":  {"oi": p.get("oi", 0), "vol": p.get("vol", 0), "iv": p.get("iv"), "delta": p.get("delta"), "gamma": p.get("gamma"), "mark": p.get("mark"), "uoa": put_uoa},
+                    })
+
+                # OI profile + volume profile — strike-level summary
+                profile = []
+                for s in sorted(strike_set):
+                    c = strikes_call.get(s, {})
+                    p = strikes_put.get(s, {})
+                    profile.append({
+                        "strike": s,
+                        "call_oi": c.get("oi", 0),
+                        "put_oi": p.get("oi", 0),
+                        "call_vol": c.get("vol", 0),
+                        "put_vol": p.get("vol", 0),
+                    })
+
+                # Greeks curves — for charting
+                greeks_curve = []
+                for s in sorted(strike_set):
+                    c = strikes_call.get(s, {})
+                    p = strikes_put.get(s, {})
+                    greeks_curve.append({
+                        "strike": s,
+                        "call_delta": c.get("delta"),
+                        "call_gamma": c.get("gamma"),
+                        "call_vega": c.get("vega"),
+                        "put_delta": p.get("delta"),
+                        "put_gamma": p.get("gamma"),
+                        "put_vega": p.get("vega"),
+                    })
+
+                enriched[tkr] = {
+                    "spot": round(spot, 2),
+                    "live_iv": live_iv,
+                    "live_iv_pct": round(live_iv * 100, 1) if live_iv else None,
+                    "hv30": hv30,
+                    "hv30_pct": round(hv30 * 100, 1) if hv30 else None,
+                    "iv_hv_ratio": iv_hv_ratio,
+                    "iv_rank": iv_rank,
+                    "iv_history": iv_history_series,
+                    "term_structure": term,
+                    "backwardation_index": backwardation,
+                    "skew": {
+                        "call_25d_iv": call_25d_iv,
+                        "put_25d_iv": put_25d_iv,
+                        "call_25d_strike": call_25d_strike,
+                        "put_25d_strike": put_25d_strike,
+                        "value": round(skew_val, 4) if skew_val is not None else None,
+                        "smile_slope": round(smile_slope, 4) if smile_slope is not None else None,
+                        "wing_call_iv": wing_call_iv,
+                        "wing_put_iv": wing_put_iv,
+                    },
+                    "gex": {
+                        "by_strike": [{"strike": s, "gex": round(g * 100 * (spot ** 2) / 1e9, 3)} for s, g in gex_by_strike],
+                        "all_strikes": [{"strike": s, "gex": round(g * 100 * (spot ** 2) / 1e9, 3)} for s, g in sorted(gex_by_strike_all, key=lambda kv: kv[0])],
+                        "wall_strike": wall_strike,
+                        "wall_kind": wall_kind,
+                        "total_gex_b": round(total_gex * 100 * (spot ** 2) / 1e9, 3) if total_gex else 0,
+                    },
+                    "max_pain": max_pain,
+                    "net_dealer_delta": net_dealer_delta_dollars,
+                    "premium_flow": {
+                        "call_dollars": round(premium_call_total, 0),
+                        "put_dollars": round(premium_put_total, 0),
+                        "net_dollars": round(premium_call_total - premium_put_total, 0),
+                    },
+                    "ladder": ladder,
+                    "profile": profile,
+                    "greeks_curve": greeks_curve,
+                    "expiries": expiries_ladder,
+                    "surface": surface,
+                    "smile_curve": smile_curve,      # NEW (#10) — nearest-expiry strike-IV array for clean smile chart
+                    "charm_dollar": round(charm_dollar, 0),  # NEW (#6) — $ delta decay per day
+                    "vanna_dollar": round(vanna_dollar, 0),  # NEW (#6) — $ delta change per 1% σ
+                    "crush_pct_est": crush_pct_est,  # IMPROVED (#4) — sector-aware
+                    "fetched_at": _t.strftime("%Y-%m-%dT%H:%M:%S"),
+                }
+                _t.sleep(0.15)
+            except Exception as ie:
+                print(f"  enrich: chain({tkr}) failed ({ie})")
+                continue
+        data["options_enriched"] = enriched
+
+        # Persist IV history cache
+        try:
+            IV_HIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+            IV_HIST_PATH.write_text(json.dumps(iv_hist, separators=(",", ":")))
+        except Exception as _ihe:
+            print(f"  enrich: iv_history cache write failed ({_ihe})")
+
+        # ── Sector peers — for each enriched ticker, identify same-sector tickers ──
+        sector_map: dict = {}
+        for tk, e in enriched.items():
+            sec = None
+            for src in (of, of_b):
+                for row in src:
+                    if row.get("ticker") == tk:
+                        sec = row.get("sector"); break
+                if sec: break
+            if sec: sector_map.setdefault(sec, []).append(tk)
+        for tk, e in enriched.items():
+            sec = None
+            for src in (of, of_b):
+                for row in src:
+                    if row.get("ticker") == tk:
+                        sec = row.get("sector"); break
+                if sec: break
+            if not sec: continue
+            peers = [p for p in sector_map.get(sec, []) if p != tk][:5]
+            e["sector_peers"] = [
+                {
+                    "ticker": p,
+                    "iv_pct": enriched[p].get("live_iv_pct"),
+                    "iv_rank": enriched[p].get("iv_rank"),
+                    "skew": enriched[p].get("skew", {}).get("value"),
+                    "iv_hv": enriched[p].get("iv_hv_ratio"),
+                } for p in peers
+            ]
+            e["sector"] = sec
+        print(f"  enrich: options_enriched ← {len(enriched)} tickers (Schwab chains; full vol surface)")
+
+        # Backfill iv_percentile / gamma_net into options_flow_top30 from enriched
+        for row in (of + of_b):
+            tk = row.get("ticker")
+            if tk in enriched:
+                e = enriched[tk]
+                if row.get("iv_percentile") is None and e.get("live_iv_pct") is not None:
+                    row["live_iv_pct"] = e["live_iv_pct"]
+                if row.get("gamma_net") is None and e.get("gex", {}).get("total_gex_b") is not None:
+                    row["gamma_net"] = e["gex"]["total_gex_b"]
+                if e.get("skew", {}).get("value") is not None:
+                    row["skew_25d"] = e["skew"]["value"]
+    except Exception as e:
+        data["options_enriched"] = {}
+        print(f"  enrich: options chains FAILED ({e})")
+
+    # ── 4. Per-ticker news on top-N scored tickers (EODHD, 4h cache) ──
+    try:
+        import data_fetcher as _df
+        # Build candidate list: union of top 10 per mode by elite_score
+        candidates = set()
+        ep = data.get("elite_picks", {}) or {}
+        for mode in ("Swing", "Position", "Invest"):
+            for stage in ("BUY", "WATCH"):
+                arr = (ep.get(mode, {}) or {}).get(stage, []) or []
+                for p in sorted(arr, key=lambda x: -(x.get("elite_score") or 0))[:5]:
+                    if p.get("ticker"): candidates.add(p["ticker"])
+        # Also include top 10 of long_term scan by score
+        for t in sorted((data.get("long_term") or []), key=lambda x: -(x.get("score") or 0))[:10]:
+            if t.get("ticker"): candidates.add(t["ticker"])
+        candidates = sorted(candidates)[:50]  # cap at 50 — covers full top-50 UOA + elite picks
+
+        # Build a per-ticker news map then sprinkle into the section records
+        news_by_ticker: dict[str, list] = {}
+        for tkr in candidates:
+            try:
+                arts = _df.get_news_articles(tkr, limit=5) or []
+                if arts:
+                    news_by_ticker[tkr] = [
+                        {
+                            "title": a.get("title", "")[:200],
+                            "source": a.get("source") or (a.get("publisher", {}) or {}).get("name", ""),
+                            "date": a.get("published_utc", ""),
+                            "url": a.get("url", ""),
+                            "sentiment": (a.get("insights") or [{}])[0].get("sentiment", "neutral"),
+                        }
+                        for a in arts[:4]
+                    ]
+            except Exception:
+                continue
+        # Inject into section records (long/medium/short_term + elite_picks)
+        for section_key in ("long_term", "medium_term", "short_term"):
+            for r in (data.get(section_key) or []):
+                if not isinstance(r, dict): continue
+                t = r.get("ticker")
+                if t in news_by_ticker:
+                    r["news_articles"] = news_by_ticker[t]
+        data["_news_top_tickers"] = list(news_by_ticker.keys())
+        print(f"  enrich: per-ticker news ← {len(news_by_ticker)} tickers with articles")
+    except Exception as e:
+        print(f"  enrich: per-ticker news FAILED ({e})")
 
 
 def main():
@@ -2313,7 +3056,23 @@ def main():
     # Live Options Flow — top 30 UOA imbalance candidates from
     # options_flow_scanner. Surfaced as a separate dashboard panel for
     # institutional-flow-following entry triggers.
-    data["options_flow_top30"] = b.get("options_flow_top30") or []
+    # 2026-05-11: bundle is only refreshed during scans (4×/day), but the
+    # options-flow scanner runs every 30m in market hours and writes to
+    # infra/prototype/options_flow.json independently. Read that file
+    # directly so fresh UOA shows up between scans.
+    _of_bundle = b.get("options_flow_top30") or []
+    try:
+        _of_path = OUT / "options_flow.json"
+        if _of_path.exists():
+            _of_disk = json.loads(_of_path.read_text())
+            _of_top30 = _of_disk.get("top30") or _of_disk.get("candidates") or []
+            if isinstance(_of_top30, list) and len(_of_top30) > len(_of_bundle):
+                _of_bundle = _of_top30  # prefer the fresher standalone file
+                print(f"[options_flow] using standalone file ({len(_of_top30)} candidates, refreshed {_of_disk.get('refreshed_at','—')})")
+    except Exception as _of_err:
+        print(f"[options_flow] standalone fallback skipped: {_of_err}")
+    data["options_flow_top30"] = _of_bundle
+    data["options_flow_top50"] = b.get("options_flow_top50") or _of_bundle or []
 
     # Crypto scan — bundle.crypto contains BTC/ETH/SOL/etc scored through
     # the same gate cascade. Surface to V2 Crypto tab.
@@ -2482,11 +3241,146 @@ def main():
         if _bp_path.exists():
             _bp = json.loads(_bp_path.read_text())
             data["earnings_beat_predictions"] = _bp.get("predictions") or []
+            data["earnings_per_tier_calibration"] = _bp.get("per_tier_calibration") or {"tiers": []}
         else:
             data["earnings_beat_predictions"] = []
+            data["earnings_per_tier_calibration"] = {"tiers": []}
     except Exception as _bp_err:
         print(f"[earnings_beat_predictions] non-fatal: {_bp_err}")
         data["earnings_beat_predictions"] = []
+        data["earnings_per_tier_calibration"] = {"tiers": []}
+
+    # Setup-family stats (Wilson LB, sample size, profit factor, reliability)
+    # for Signal Scanner Quant Evidence column (added 2026-05-11).
+    # tracker.compute_stats_by_setup returns per-SETUP stats; tickers.json
+    # uses FAMILY names — aggregate granular setups up to family level.
+    FAMILY_TO_SETUPS = {
+        "Trend Continuation": ["Trend Continuation", "EMA21 Pullback", "EMA50 Pullback",
+                                "Bounce off Support", "10-Week Pullback"],
+        "Breakout Expansion": ["VCP Breakout", "Near-VCP Breakout", "52wk Breakout",
+                                "Squeeze Expansion", "Squeeze Breakout", "Pocket Pivot",
+                                "Stage 2 Breakout (52w high)"],
+        "Impulse Catalyst":   [],
+        "Special Situation":  ["Insider Cluster", "RS New High"],
+    }
+    def _wilson_lb(wins, n, z=1.96):
+        if not n or n <= 0: return None
+        p = wins / n
+        denom = 1 + z*z/n
+        center = p + z*z/(2*n)
+        margin = z * ((p*(1-p) + z*z/(4*n))/n) ** 0.5
+        return max(0.0, (center - margin) / denom)
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+        from tracker import compute_stats_by_setup as _setup_stats_fn
+        from math import isfinite
+        _stats = _setup_stats_fn() or {}
+        def _clean_inf(v):
+            try:
+                if isinstance(v, (int, float)) and not isfinite(v): return None
+            except Exception: pass
+            return v
+        _by_setup = {}
+        for k, vv in (_stats.get("by_setup") or {}).items():
+            _by_setup[k] = {kk: _clean_inf(vvv) for kk, vvv in vv.items()}
+        # Aggregate granular setups → family-level
+        _by_family = {}
+        for fam, setups in FAMILY_TO_SETUPS.items():
+            total_n = total_wins = 0
+            r_sum = pf_num = pf_den = 0.0
+            for s in setups:
+                row = _by_setup.get(s)
+                if not row: continue
+                n = row.get("trades") or 0
+                w = row.get("wins") or 0
+                total_n += n; total_wins += w
+                r_sum += (row.get("avg_r") or 0) * n
+                pf = row.get("profit_factor")
+                if pf and isinstance(pf, (int, float)) and isfinite(pf):
+                    pf_num += pf * n; pf_den += n
+            if total_n == 0: continue
+            wr  = total_wins / total_n
+            lb  = _wilson_lb(total_wins, total_n)
+            avg_r = (r_sum / total_n) if total_n else 0
+            pf_avg = (pf_num / pf_den) if pf_den else None
+            reli = 'medium' if total_n >= 30 else ('low' if total_n >= 10 else 'thin')
+            _by_family[fam] = {
+                "trades": total_n, "wins": total_wins,
+                "win_rate": round(wr, 4),
+                "wr_low_95": round(lb, 4) if lb is not None else None,
+                "avg_r": round(avg_r, 2),
+                "profit_factor": round(pf_avg, 2) if pf_avg is not None else None,
+                "reliability": reli,
+            }
+        _by_setup.update(_by_family)
+        data["setup_family_stats"] = _by_setup
+    except Exception as _ss_err:
+        print(f"[setup_family_stats] non-fatal: {_ss_err}")
+        data["setup_family_stats"] = {}
+
+    # MECHANISM hypothesis + FALSIFICATION rule per setup family
+    # (CLAUDE.md principle 2 + 15 — required before promoting any signal).
+    # Static map — derived from the setup playbook docs.
+    data["setup_mechanisms"] = {
+        "Trend Continuation":    "Institutional re-add at the rising EMA21/EMA50 pullback · trend uninterrupted · low-stress entry.",
+        "Breakout Expansion":    "Supply absorbed during the base · the lid breaks · momentum continues until volume fades.",
+        "VCP Breakout":          "Volatility Contraction Pattern · tightening price action precedes expansion · classic Minervini setup.",
+        "Near-VCP Breakout":     "Pre-VCP — base forming but pivot not yet broken · early-entry on tightening volume.",
+        "52wk Breakout":         "Price clears 52-week high on volume · attention vacuum + breakout-buyer demand drives continuation.",
+        "Stage 2 Breakout (52w high)": "Stage 2 trend with 52w high break · institutional uptrend confirmation.",
+        "EMA21 Pullback":        "Trend pulls back to rising 21EMA · institutional re-add at moving-average support.",
+        "EMA50 Pullback":        "Trend pulls back to rising 50EMA · deeper institutional re-add point.",
+        "Squeeze Breakout":      "Bollinger Band squeeze releases · volatility-compression breakout · expanding range.",
+        "Squeeze Expansion":     "Post-squeeze expansion · momentum follows the compression release.",
+        "Pocket Pivot":          "O'Neil pocket pivot · volume cluster above 10-day price during base · institutional accumulation.",
+        "Bounce off Support":    "Mean-reversion off prior support · oversold reading + reclaim.",
+        "Impulse Catalyst":      "News-driven gap on attention vacuum · post-event drift in direction of surprise (PEAD).",
+        "Special Situation":     "Forced supply imbalance — short squeeze, float rotation, or insider cluster · asymmetric upside.",
+        "Breakdown":             "Trend break to the downside · short setup · breakdown-seller demand drives continuation.",
+        "Insider Cluster":       "≥3 insider buys within 30 days · informed-buyer signal · alpha-bearing event.",
+        "RS New High":           "Relative-strength line makes a new high before price · leadership reveal.",
+        "10-Week Pullback":      "Pullback to the 10-week (50d) moving average within a Stage 2 trend.",
+    }
+    data["setup_falsifications"] = {
+        "Trend Continuation":    "Close below the 21EMA on volume — institutions stop defending the pullback.",
+        "Breakout Expansion":    "Close back inside the base on volume — failed breakout, supply re-emerges.",
+        "VCP Breakout":          "Volume breakout fails to hold above pivot for 2 closes — no follow-through demand.",
+        "Near-VCP Breakout":     "Pivot fails on first attempt with high volume — base is wider than tradeable.",
+        "52wk Breakout":         "Daily close back below the 52w high pivot on volume — breakout failure / bull trap.",
+        "Stage 2 Breakout (52w high)": "Two consecutive closes below the 50-day moving average — stage 2 broken.",
+        "EMA21 Pullback":        "Daily close below the 21EMA AND below the prior swing low.",
+        "EMA50 Pullback":        "Daily close below the 50EMA AND below the prior swing low.",
+        "Squeeze Breakout":      "Bands re-contract within 5 days of the breakout — failed expansion.",
+        "Squeeze Expansion":     "Price re-enters the squeeze range on falling volume.",
+        "Pocket Pivot":          "Volume fails to follow through in the next 3 sessions — no institutional support.",
+        "Bounce off Support":    "Support breaks on close with above-average volume — no buying demand.",
+        "Impulse Catalyst":      "Gap fills within 3 days OR catalyst is denied/walked back officially.",
+        "Special Situation":     "Catalyst is denied, hedge unwound, or float-rotation reverses on volume.",
+        "Breakdown":             "Close back above prior support level — failed breakdown, short squeeze risk.",
+        "Insider Cluster":       "Follow-on insider sells within 14 days — cluster invalidated.",
+        "RS New High":           "RS-line rolls over within 5 days while price still rising — divergence.",
+        "10-Week Pullback":      "Close below the 10-week moving average on volume.",
+    }
+
+    # Drift alert — if model_drift_alert.py wrote a recent flag (last 24h),
+    # surface it. If file absent, derive "low reliability" badges from setup_family_stats.
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        _drift_path = Path(__file__).resolve().parent.parent.parent / "cache" / "drift_alerts.json"
+        if _drift_path.exists():
+            _drift = json.loads(_drift_path.read_text())
+            data["setup_drift_alerts"] = _drift.get("alerts") or _drift
+        else:
+            # Fallback: setup with sample n<10 AND wr<0.40 + reliability=low → "drift-watch"
+            _watch = []
+            for k, v in (data["setup_family_stats"] or {}).items():
+                if v.get("reliability") == "low" and (v.get("win_rate") or 0) < 0.40 and (v.get("trades") or 0) >= 5:
+                    _watch.append({"setup": k, "reason": "low reliability + low WR", "n": v.get("trades"), "wr": v.get("win_rate")})
+            data["setup_drift_alerts"] = _watch
+    except Exception as _de:
+        print(f"[setup_drift_alerts] non-fatal: {_de}")
+        data["setup_drift_alerts"] = []
 
     # Pre-earnings BUY badge (#3) — for each ticker, attach earnings_in_Nd
     # if it appears in the earnings_watchlist within 10 days. Surfaces in
@@ -2503,6 +3397,16 @@ def main():
                 _r["earnings_in_days"] = _ew_e.get("days_to_earnings")
                 _r["earnings_report_date"] = _ew_e.get("report_date")
                 _r["earnings_when"] = _ew_e.get("before_after_market")
+                # Stamp earn_days back onto the ticker row when the scan's
+                # earnings dict didn't carry it (added 2026-05-11). Surfaces in
+                # Signal Scanner, Detail panel, and V2 earnings widget.
+                if _r.get("earn_days") in (None, 0) and _ew_e.get("days_to_earnings") is not None:
+                    _r["earn_days"] = _ew_e.get("days_to_earnings")
+
+    # ── Cockpit enrichment: market news (EODHD), market movers (Schwab),
+    #    per-ticker news for top-N picks (EODHD primary, yfinance fallback).
+    #    All wrapped in try/except so a single API failure doesn't block the build.
+    _enrich_cockpit_data(data)
 
     data = _clean(data)
     DATA.write_text(json.dumps(data, default=str, indent=0, allow_nan=False))
@@ -2523,7 +3427,8 @@ def main():
     _PERF_KEYS         = ("performance",)
     _KILLED_KEYS       = ("killed",)
     _EARNINGS_KEYS     = ("earnings_beat_predictions", "earnings_outcomes_30d",
-                          "earnings_watchlist", "earnings_watchlist_meta")
+                          "earnings_watchlist", "earnings_watchlist_meta",
+                          "earnings_per_tier_calibration")
     _SCREENER_KEYS     = ("screener",)
     _CRYPTO_KEYS       = ("crypto",)
     _SIGNALS_EXT_KEYS  = ("medium_term", "long_term")
@@ -2577,14 +3482,83 @@ def main():
         print(f"wrote {_path.name} ({_path.stat().st_size:,} bytes)")
 
     # Tickers — rich payload for elite-detail page
+    # Pre-build earn_days lookup from the loaded earnings_watchlist so we can
+    # stamp it onto each src row BEFORE rich_row() rebuilds the output dict
+    # (2026-05-11 fix — scan's r["earnings"] is null but watchlist has the data).
+    _ew_lookup = {x["ticker"]: x.get("days_to_earnings")
+                  for x in (data.get("earnings_watchlist") or [])
+                  if isinstance(x, dict) and x.get("ticker") and x.get("days_to_earnings") is not None}
+    # Build mode lookup from st_rows / mt_rows / invest_rows so each ticker
+    # carries its source horizon (swing / position / invest) — added 2026-05-11
+    # for Signal Scanner horizon-filter chips.
+    _mode_lookup = {}
+    for r in st_rows: _mode_lookup[r.get("ticker")] = 'swing'
+    for r in mt_rows: _mode_lookup.setdefault(r.get("ticker"), 'position')
+    for r in invest_rows: _mode_lookup.setdefault(r.get("ticker"), 'invest')
+    # Setup-family stats + mechanism + falsification lookups — keyed by setup_family
+    _sf_stats = data.get("setup_family_stats") or {}
+    _sf_mech  = data.get("setup_mechanisms") or {}
+    _sf_fals  = data.get("setup_falsifications") or {}
+    _sf_drift = {(d.get("setup") if isinstance(d, dict) else None) for d in (data.get("setup_drift_alerts") or [])}
+    _sf_drift.discard(None)
+    # Build a unified ticker→rich-source lookup covering ALL four list types
+    # (short / medium / long / screener) so the detail-view fast-path at
+    # server.py:/api/elite/<TICKER> hits for every ticker shown anywhere on
+    # the dashboard. Previously this loop iterated only st_rows + mt_rows,
+    # leaving long_term + screener tickers absent from tickers.json — clicks
+    # on those fell through to a slow on-demand run_quick_dive and the page
+    # rendered with empty options_kpis, which made the Options sub-tab show
+    # the misleading "Schwab refresh token may have expired" fallback.
+    _all_scored_by_t = {r.get("ticker"): r for r in (b.get("all_scored") or []) if r.get("ticker")}
+    _st_by_t = {r.get("ticker"): r for r in st_rows if r.get("ticker")}
+    _mt_by_t = {r.get("ticker"): r for r in mt_rows if r.get("ticker")}
+
+    # Preserve original iteration order so existing short_term-first dedupe
+    # semantics still hold; then layer on long_term + screener tickers.
+    _ordered_targets: list[str] = []
+    _seen: set = set()
+    for r in (st_rows + mt_rows + long_term + screener_rows):
+        t = r.get("ticker")
+        if t and t not in _seen:
+            _seen.add(t); _ordered_targets.append(t)
+
     all_rich = {}
-    for src in (st_rows + mt_rows):
-        t = src.get("ticker")
-        if not t or t in all_rich: continue
+    for t in _ordered_targets:
+        src = _st_by_t.get(t) or _mt_by_t.get(t) or _all_scored_by_t.get(t)
+        if not src: continue
+        if src.get("earn_days") in (None, 0) and t in _ew_lookup:
+            src["earn_days"] = _ew_lookup[t]
         all_rich[t] = rich_row(src, b)
+        all_rich[t]["_mode"] = _mode_lookup.get(t, 'swing')
+        # Stamp setup-family stats + mechanism + falsification per ticker so
+        # the Scanner UI can render Wilson LB / n / mechanism without
+        # cross-referencing data.setup_family_stats on every row.
+        _fam = src.get("setup_family") or all_rich[t].get("setup_family")
+        if _fam:
+            _s = _sf_stats.get(_fam) or {}
+            all_rich[t]["_setup_wr"]          = _s.get("win_rate")
+            all_rich[t]["_setup_wilson_lb"]   = _s.get("wr_low_95")
+            all_rich[t]["_setup_wilson_hi"]   = _s.get("wr_high_95")
+            all_rich[t]["_setup_n"]           = _s.get("trades")
+            all_rich[t]["_setup_pf"]          = _s.get("profit_factor")
+            all_rich[t]["_setup_avg_r"]       = _s.get("avg_r")
+            all_rich[t]["_setup_reliability"] = _s.get("reliability")
+            all_rich[t]["_mechanism"]         = _sf_mech.get(_fam) or ""
+            all_rich[t]["_falsification"]     = _sf_fals.get(_fam) or ""
+            all_rich[t]["_setup_drift"]       = _fam in _sf_drift
         if t in short_set:
             all_rich[t]["stage"] = "SELL"
             all_rich[t]["verdict"] = "SELL"
+
+    # Per-ticker earnings prediction join — surfaces 4Q pattern + revision
+    # trend + implied move + Kelly-lite + PEAD + macro overlap + sector cohort
+    # to the detail tabs (Plan / Fundamentals / Options) without duplication.
+    _ebp_by_t = {p["ticker"]: p for p in (data.get("earnings_beat_predictions") or [])
+                 if isinstance(p, dict) and p.get("ticker")}
+    for t, rec in all_rich.items():
+        if t in _ebp_by_t:
+            rec["earnings_beat_prediction"] = _ebp_by_t[t]
+
     all_rich = _clean(all_rich)
     TICKS.write_text(json.dumps(all_rich, default=str, allow_nan=False))
     print(f"wrote {TICKS} (n={len(all_rich)} tickers, {TICKS.stat().st_size:,} bytes)")

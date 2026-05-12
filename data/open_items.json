@@ -1381,6 +1381,21 @@
       "date_fixed": null,
       "commit": null,
       "how_to_test": "Run backtest with target_source=structural and target_source=atr_multiple on same window. Compare PF/WR/avg_win."
+    },
+    {
+      "id": "TV-RATING-CROSS-CHECK",
+      "priority": "P2",
+      "section": "Signals / Cross-Check",
+      "item": "tradingview-ta cross-check rating as independent confirmation signal",
+      "what": "TradingView publishes a server-computed Strong Buy/Buy/Neutral/Sell/Strong Sell rating per (symbol x timeframe), aggregated from ~26 indicators. Free unofficial library 'tradingview-ta' fetches it. Use as INFORMATIONAL second-opinion signal cross-checking the 5-pillar score. Default apply_to_score=false until Wilson-LB on agreement-conditional WR clears unconditional WR over n>=30 closed trades. No new paid data license (constraint OK).",
+      "how": "1) pip install tradingview-ta. 2) data_fetcher.get_tv_rating(ticker) returns {rating, buy_signals, sell_signals, neutral_signals, summary_score, ts} with 4h cache (matches existing news TTL discipline). 3) Add tv_rating field to last_bundle.json per-ticker payload. 4) Surface in v2 dashboard Overview sub-tab as 'TV Agrees / TV Disagrees / TV Neutral' tile next to verdict arc. 5) Log to data/signal_log.json per emit so Wilson-CI agreement-conditional WR can be computed offline. 6) Backtest hook: compute Wilson-LB(BUY | TV agrees) vs Wilson-LB(BUY) over 250d. 7) Only flip apply_to_score=true after walk-forward shows lift across regimes. 8) Failure-mode: TV endpoint 500 -> tv_rating=null, scanner continues, log 'tv_rating_unavailable' counter.",
+      "effort": "hours",
+      "risk_win": "Mechanism (Principle 2): TV rating is a server-side weighted aggregate of ~26 indicators \u2014 an independent technical signal (different weighting than ours). Two independent confirmations > one. Falsification (Principle 4): if agreement-conditional Wilson-LB after n>=30 doesn t beat unconditional Wilson-LB, kill the cross-check. Risk: TV unofficial endpoints break ~2-4x/year; needs null-safe failure path. No new paid data license (hard constraint OK).",
+      "notes": "Default apply_to_score=false per tier1_signals convention. Cache 4h TTL, well under TV daily update cadence. Pairs naturally with the existing TV sub-tab (infra/prototype/subtabs/tv/) which today is iframe-only - this is the data backbone for it. Catalyst-tier breakout in backtest: TV agreement may help T1/T2 more than pure technicals.",
+      "status": "OPEN",
+      "date_fixed": null,
+      "commit": null,
+      "how_to_test": "Smoke: python3 -c \"from data_fetcher import get_tv_rating; print(get_tv_rating(NVDA))\" returns dict. Cache: second call within 4h is cache hit. Failure: simulate TV 500 -> scanner continues, ticker payload tv_rating=null. Backtest: python3 backtest.py --days 250 prints Wilson-LB(BUY|TV agrees) vs Wilson-LB(BUY). Gate: apply_to_score=false stays locked until n>=30 with positive lift across at least 2 regimes."
     }
   ]
 }
