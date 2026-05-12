@@ -1486,6 +1486,22 @@ def rich_row(r: dict, b: dict = None) -> dict:
         "tech_details": (techs.get("details") or {}),
         "ema_signal":   r.get("ema_signal"),
         "macd_signal":  r.get("macd_signal"),
+        # 2026-05-11 · surface raw indicator values for Overview decision cards.
+        # Previously only above_X booleans were exposed; the actual numbers
+        # (ADX 27, EMA8 340.74, ATR 26.38, etc.) lived in technicals.indicators
+        # but never reached tickers.json — Overview was forced to show "—".
+        "adx":          (techs.get("indicators") or {}).get("adx"),
+        "ema8":         (techs.get("indicators") or {}).get("ema8"),
+        "ema21":        (techs.get("indicators") or {}).get("ema21"),
+        "ema50":        (techs.get("indicators") or {}).get("ema50"),
+        "ema200":       (techs.get("indicators") or {}).get("ema200"),
+        "sma200":       (techs.get("indicators") or {}).get("sma200") or (techs.get("indicators") or {}).get("ema200"),
+        "atr":          (techs.get("indicators") or {}).get("atr"),
+        "macd_bullish": (techs.get("indicators") or {}).get("macd_bullish"),
+        "macd_hist":    (techs.get("indicators") or {}).get("macd_hist"),
+        "week52_high":  (techs.get("indicators") or {}).get("high_52w") or r.get("week52_high"),
+        "week52_low":   (techs.get("indicators") or {}).get("low_52w")  or r.get("week52_low"),
+        "rs_rank":      (techs.get("indicators") or {}).get("rs_rank") or r.get("rs_rank"),
         "fractal_signal": r.get("fractal_signal"),
         "fractal_high": r.get("fractal_high"),
         "fractal_low":  r.get("fractal_low"),
@@ -2568,9 +2584,17 @@ def main():
     print(f"medium_term n={len(medium_term)} mode=position stages={dict(Counter(r['stage'] for r in medium_term))}")
     print(f"long_term   n={len(long_term)} mode=invest   stages={dict(Counter(r['stage'] for r in long_term))}")
 
-    # Top-N from all_scored for Screener tab
-    all_scored = sorted(b.get("all_scored") or [], key=lambda r: r.get("score", 0), reverse=True)[:50]
-    screener_rows = [compact_row(r) for r in all_scored if r.get("ticker")]
+    # Top-N from all_scored for Screener tab.
+    # Filter out AVOID/SELL/SHORT verdicts — the Screener tab shows
+    # actionable swing opportunities (BUY / WATCH). Killed/AVOID rows live
+    # in the dedicated Killed tab. Pre-filter then take top 50 by score
+    # so we don't waste the slot quota on rejected tickers (today: KOD
+    # score=60 stage=AVOID was leaking in pre-fix).
+    _actionable_stages = {"BUY", "WATCH", "WAIT", "ADD"}
+    all_scored = sorted(b.get("all_scored") or [], key=lambda r: r.get("score", 0), reverse=True)
+    all_scored = [r for r in all_scored
+                  if r.get("ticker") and stage_of(r) in _actionable_stages][:50]
+    screener_rows = [compact_row(r) for r in all_scored]
 
     # Themes — flatten each thematic list to a compact array
     themes = {}
