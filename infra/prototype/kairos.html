@@ -14764,6 +14764,21 @@ window.QuantDetail = (function() {
     renderSubBody();
   }
 
+  // Strategy override · called by SWING / POSITION / INVESTMENT pills in
+  // Overview & Plan meta-row. Updates URL (?strategy=...) without page reload,
+  // then re-renders the active sub-tab in place so the analysis switches.
+  window.qdSetStrategy = function(strat) {
+    if (!['SWING','POSITION','INVESTMENT'].includes(strat)) return;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('strategy', strat);
+      // Preserve current ticker as ?t= so a copy/share of URL works
+      if (_currentT && _currentT.ticker) url.searchParams.set('t', _currentT.ticker);
+      history.replaceState(null, '', url.toString());
+    } catch (e) { /* older browsers — best effort */ }
+    renderSubBody();
+  };
+
   function bindNav() {
     document.querySelectorAll('.qd-st').forEach(el => {
       el.addEventListener('click', () => switchSub(el.dataset.sub));
@@ -16589,9 +16604,10 @@ window.QuantDetail = (function() {
 .qsr-strat-pill { display:inline-block; font-family:var(--mono); font-size:10px; padding:3px 9px; margin:0 2px;
   border-radius:3px; letter-spacing:0.08em; font-weight:800; text-transform:uppercase;
   border:1px solid var(--ink-4); background:var(--bg-3); color:var(--ink-2);
-  text-decoration:none; transition:all 0.1s ease; }
+  text-decoration:none; transition:all 0.1s ease; cursor:pointer; outline:none; }
 .qsr-strat-pill:hover { color:var(--ink); border-color:var(--ink-3); background:var(--bg-2); }
 .qsr-strat-pill.on { color:var(--cy); background:var(--cy-bg); border-color:#387887; }
+.qsr-strat-pill:focus-visible { box-shadow:0 0 0 2px var(--cy-bg); }
 
 /* Lens sub-models (Value · Trader · Hedge Fund) — 10 frameworks per spec */
 .qsr-sub-models { margin-top:8px; padding:8px 0 0 14px; border-left:1px dashed var(--line); display:flex; flex-direction:column; gap:5px; }
@@ -16635,9 +16651,8 @@ window.QuantDetail = (function() {
         <div class="qsr-meta-row">
           <span><span class="qsr-meta-k">Strategy</span>
             ${['SWING','POSITION','INVESTMENT'].map(s => {
-              const url = `?t=${encodeURIComponent(t.ticker)}&strategy=${s}#overview`;
               const on = horizon.name === s;
-              return `<a href="${url}" class="qsr-strat-pill ${on ? 'on' : ''}" title="View as ${s}">${s}</a>`;
+              return `<button type="button" class="qsr-strat-pill ${on ? 'on' : ''}" onclick="window.qdSetStrategy && window.qdSetStrategy('${s}')" title="Re-render as ${s}">${s}</button>`;
             }).join('')}
             <span style="color:var(--ink-3);font-size:10px;margin-left:4px">${horizon.range} · ${horizon.override ? '<b style="color:var(--amb)">override</b>' : 'auto'}</span>
           </span>
@@ -17797,9 +17812,10 @@ window.QuantDetail = (function() {
 .qpr-strat-pill { display:inline-block; font-family:var(--mono); font-size:10px; padding:3px 9px; margin:0 2px;
   border-radius:3px; letter-spacing:0.08em; font-weight:800; text-transform:uppercase;
   border:1px solid var(--ink-4); background:var(--bg-3); color:var(--ink-2);
-  text-decoration:none; transition:all 0.1s ease; }
+  text-decoration:none; transition:all 0.1s ease; cursor:pointer; outline:none; }
 .qpr-strat-pill:hover { color:var(--ink); border-color:var(--ink-3); background:var(--bg-2); }
 .qpr-strat-pill.on { color:var(--cy); background:var(--cy-bg); border-color:#387887; }
+.qpr-strat-pill:focus-visible { box-shadow:0 0 0 2px var(--cy-bg); }
 
 /* Lens sub-models (Value · Trader · Hedge Fund) */
 .qpr-sub-models { margin-top:8px; padding:8px 0 0 14px; border-left:1px dashed var(--line-2); display:flex; flex-direction:column; gap:5px; }
@@ -17846,9 +17862,8 @@ window.QuantDetail = (function() {
         <div class="qpr-meta-row">
           <span><span class="qpr-meta-k">Strategy</span>
             ${['SWING','POSITION','INVESTMENT'].map(s => {
-              const url = `?t=${encodeURIComponent(t.ticker)}&strategy=${s}#plan`;
               const on = strategy.name === s;
-              return `<a href="${url}" class="qpr-strat-pill ${on ? 'on' : ''}" title="Re-render as ${s}">${s}</a>`;
+              return `<button type="button" class="qpr-strat-pill ${on ? 'on' : ''}" onclick="window.qdSetStrategy && window.qdSetStrategy('${s}')" title="Re-render as ${s}">${s}</button>`;
             }).join('')}
             <span style="color:var(--ink-3);font-size:10px;margin-left:4px">${strategy.range} · ${strategy.override ? '<b style="color:var(--amb)">override</b>' : 'auto'}</span>
           </span>
