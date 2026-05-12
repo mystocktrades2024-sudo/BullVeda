@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Overview · quant-grade prototype</title>
+<style>
+  @import url('https://fonts.bunny.net/css?family=aptos:400,500,600,700|aptos-display:600,700&display=swap');
+  :root {
+    --bg:#000; --bg-1:#0a0d0c; --bg-2:#0f1311; --bg-3:#141816;
+    --line:#1d2520; --line-2:#2a352e;
+    --ink:#d8d6cc; --ink-1:#b0aea3; --ink-2:#80847a;
+    --ink-3:#545851; --ink-4:#2e312c;
+    --gn:#5be57c; --gn-dim:#2f6b41; --gn-bg:rgba(91,229,124,0.08);
+    --am:#ffb95c; --am-dim:#8c5d20; --am-bg:rgba(255,185,92,0.06);
+    --rd:#ff6b5b; --rd-dim:#7a2a22; --rd-bg:rgba(255,107,91,0.06);
+    --cy:#5ec8d8; --cy-dim:#2c6a74; --cy-bg:rgba(94,200,216,0.07);
+    --copper:#d97757;
+    --mono:'Aptos Mono','JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Aptos','Aptos Display',Inter,-apple-system,BlinkMacSystemFont,system-ui,'Segoe UI',sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink-1);
+    font-family:var(--sans);font-size:12px;font-variant-numeric:tabular-nums}
+  .page{max-width:1500px;margin:0 auto;padding:0 0 60px}
+  .mono{font-family:var(--mono)}
+
+  /* sticky banner */
+  .ban{display:flex;align-items:baseline;gap:14px;padding:14px 22px 12px;
+    border-bottom:1px solid var(--line);background:var(--bg);
+    position:sticky;top:0;z-index:20}
+  .ban .tk{font-family:var(--mono);font-size:24px;font-weight:700;color:var(--ink);letter-spacing:.02em}
+  .ban .nm{font-size:12px;color:var(--ink-2)}
+  .ban .stats{display:flex;gap:7px;margin-left:auto;flex-wrap:wrap}
+  .pill{font-family:var(--mono);font-size:10.5px;padding:3px 9px;
+    border-radius:2px;background:var(--bg-2);border:1px solid var(--line);
+    color:var(--ink-2);letter-spacing:.04em;white-space:nowrap}
+  .pill b{color:var(--ink);font-weight:700}
+  .pill.gn{color:var(--gn);border-color:var(--gn-dim);background:var(--gn-bg)} .pill.gn b{color:var(--gn)}
+  .pill.am{color:var(--am);border-color:var(--am-dim);background:var(--am-bg)} .pill.am b{color:var(--am)}
+  .pill.rd{color:var(--rd);border-color:var(--rd-dim);background:var(--rd-bg)} .pill.rd b{color:var(--rd)}
+
+  /* decision strip */
+  .strip{display:grid;grid-template-columns:1.5fr 1.4fr 1fr 1fr;
+    padding:12px 22px;background:var(--bg-1);
+    border-bottom:1px solid var(--line);font-family:var(--mono);
+    position:sticky;top:47px;z-index:19;border-left:2px solid var(--am)}
+  .strip > div{padding:0 14px;border-right:1px solid var(--line)}
+  .strip > div:last-child{border-right:none}
+  .strip > div:first-child{padding-left:0}
+  .strip .k{font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--ink-3);font-weight:700;margin-bottom:4px}
+  .strip .v{font-size:12px;color:var(--ink-1);line-height:1.5}
+  .strip b{color:var(--ink);font-weight:700}
+  .strip .gn{color:var(--gn)} .strip .am{color:var(--am)} .strip .rd{color:var(--rd)}
+  .strip .dim{color:var(--ink-3)}
+
+  /* sub-tab nav */
+  .nav{display:flex;padding:0 22px;border-bottom:1px solid var(--line);
+    background:var(--bg);position:sticky;top:138px;z-index:18}
+  .nav .t{padding:10px 14px;color:var(--ink-2);border-bottom:2px solid transparent;
+    display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;
+    letter-spacing:.08em;cursor:pointer;font-weight:700}
+  .nav .t.on{color:var(--gn);border-bottom-color:var(--gn)}
+  .nav .t .k{font-size:9px;border:1px solid var(--line-2);padding:1px 5px;border-radius:2px;color:var(--ink-4)}
+  .nav .t.on .k{color:var(--gn);border-color:var(--gn-dim)}
+
+  /* body sections */
+  body-padding{padding:16px 22px 60px}
+  .body{padding:16px 22px 60px}
+  .kpi-row{display:grid;gap:8px;margin-bottom:12px}
+  .kpi{background:var(--bg-1);border:1px solid var(--line);border-radius:2px;
+    padding:10px 12px;font-family:var(--mono)}
+  .kpi-k{font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--ink-3);font-weight:700;margin-bottom:4px}
+  .kpi-v{font-size:15px;font-weight:700;line-height:1.2}
+  .kpi-sub{font-size:10px;color:var(--ink-3);margin-top:2px}
+
+  /* edge bar */
+  .edge{display:grid;grid-template-columns:auto 1fr auto;gap:12px;
+    align-items:center;padding:10px 12px;
+    background:var(--bg-1);border:1px solid var(--line);border-radius:2px;
+    margin-bottom:12px}
+  .edge .side{display:flex;flex-direction:column;font-family:var(--mono)}
+  .edge .side.r{align-items:flex-end}
+  .edge .side .k{font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--ink-3);font-weight:700}
+  .edge .side .v{font-size:18px;font-weight:700}
+  .edge .bar{display:flex;height:10px;background:var(--bg-3);border-radius:2px;overflow:hidden}
+  .edge .bar .p{background:var(--gn);height:100%}
+  .edge .bar .n{background:var(--rd);height:100%}
+
+  /* 3-lens evidence grid */
+  .lens{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+  .lens-p{background:var(--bg-1);border:1px solid var(--line);border-radius:2px;
+    padding:10px 12px;font-family:var(--mono)}
+  .lens-h{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--ink-3);font-weight:700;padding-bottom:6px;
+    border-bottom:1px solid var(--line);margin-bottom:8px}
+  .lens-sub{font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-4);font-weight:700;margin:10px 0 4px;padding-top:6px;
+    border-top:1px solid var(--line)}
+  .lens-row{display:flex;justify-content:space-between;padding:4px 0;font-size:11px;align-items:baseline}
+  .lens-row .k{color:var(--ink-3);font-size:10px}
+  .lens-row .v{color:var(--ink);font-weight:700}
+  .lens-row .v.gn{color:var(--gn)} .lens-row .v.am{color:var(--am)} .lens-row .v.rd{color:var(--rd)} .lens-row .v.dim{color:var(--ink-3)}
+  .lens-bignum{font-size:32px;font-weight:700;line-height:1;margin:4px 0 10px;font-family:var(--mono)}
+  .lens-bignum.gn{color:var(--gn)} .lens-bignum.am{color:var(--am)} .lens-bignum.rd{color:var(--rd)}
+  .lens-bignum .sub{font-size:11px;color:var(--ink-3);font-weight:500;margin-left:8px;letter-spacing:.04em}
+
+  /* 2-col mini grid */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+  .pane{background:var(--bg-1);border:1px solid var(--line);border-radius:2px;padding:10px 12px}
+  .pane-h{display:flex;justify-content:space-between;align-items:baseline;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--ink-3);font-weight:700;
+    padding-bottom:5px;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .pane-h .m{color:var(--ink-4);font-weight:500;letter-spacing:.08em}
+
+  /* tables */
+  .tbl{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px}
+  .tbl thead th{font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-3);font-weight:700;text-align:left;padding:5px 4px;
+    border-bottom:1px solid var(--line-2)}
+  .tbl thead th.r{text-align:right}
+  .tbl tbody td{padding:5px 4px;color:var(--ink-1);border-bottom:1px solid var(--line)}
+  .tbl tbody td.r{text-align:right}
+  .tbl tbody tr.now td{background:rgba(91,229,124,0.05);border-top:1px solid var(--gn-dim);border-bottom:1px solid var(--gn-dim)}
+  .dim{color:var(--ink-3)}
+  .gn{color:var(--gn)} .am{color:var(--am)} .rd{color:var(--rd)} .cy{color:var(--cy)}
+
+  /* mech block */
+  .mech{margin-top:10px;padding-top:8px;border-top:1px solid var(--line);
+    font-family:var(--mono);font-size:11px;line-height:1.65}
+  .mech-row{padding:4px 0;display:flex;gap:12px}
+  .mech-row .k{font-size:9px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--ink-3);font-weight:700;flex-shrink:0;min-width:120px}
+  .mech-row .v{color:var(--ink-1)}
+
+  /* radar */
+  .radar{width:100%;max-height:160px}
+
+  /* mini sparkline */
+  .spark{display:inline-flex;align-items:flex-end;gap:1px;height:14px;vertical-align:middle}
+  .spark span{display:inline-block;width:4px;background:var(--ink-4)}
+
+  /* legend pill mini */
+  .mpill{font-family:var(--mono);font-size:9px;padding:1px 6px;border-radius:2px;
+    background:var(--bg-2);border:1px solid var(--line-2);
+    color:var(--ink-2);letter-spacing:.06em;text-transform:uppercase;font-weight:700}
+  .mpill.gn{color:var(--gn);border-color:var(--gn-dim);background:var(--gn-bg)}
+  .mpill.am{color:var(--am);border-color:var(--am-dim);background:var(--am-bg)}
+  .mpill.rd{color:var(--rd);border-color:var(--rd-dim);background:var(--rd-bg)}
+
+  /* meta · section comments */
+  .note{padding:8px 12px;background:var(--bg-2);border:1px solid var(--line);
+    border-left:2px solid var(--am);font-family:var(--mono);font-size:10.5px;
+    color:var(--ink-2);line-height:1.6;margin-bottom:12px}
+  .note b{color:var(--ink);font-weight:700}
+  .note .why{color:var(--am)}
+
+  /* dist mini */
+  .hist{display:flex;align-items:flex-end;gap:2px;height:40px;background:linear-gradient(to top,var(--bg-3),var(--bg-1))}
+  .hist span{flex:1;background:var(--ink-3);min-width:0;border-radius:1px 1px 0 0}
+  .hist span.hi{background:var(--am)} .hist span.cur{background:var(--gn)}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ════════ BANNER ════════ -->
+  <div class="ban">
+    <div class="tk">AVGO</div>
+    <div class="nm">Broadcom Inc · NASDAQ · Technology</div>
+    <div class="stats">
+      <span class="pill gn"><b>$428.43</b> · ▲4.23% · +$18.11</span>
+      <span class="pill am">verdict <b>WATCH</b></span>
+      <span class="pill rd">entry <b>EXTENDED</b></span>
+      <span class="pill">BAP <b>76</b></span>
+      <span class="pill">setup <b>Trend Continuation</b></span>
+      <span class="pill">cat <b>T2</b></span>
+      <span class="pill">R:R <b>1:3.0</b></span>
+    </div>
+  </div>
+
+  <!-- ════════ DECISION STRIP ════════ -->
+  <div class="strip">
+    <div>
+      <div class="k">WHY WATCH · RISK_ON_CHOPPY</div>
+      <div class="v">BAP <b>76</b> ≥ 72 floor · entry <b class="rd">EXTENDED</b> (1.8 ATR above pivot)</div>
+    </div>
+    <div>
+      <div class="k">WOULD FLIP IF</div>
+      <div class="v">pullback to <b>$423.81–$431.51</b> (FRESH zone)</div>
+    </div>
+    <div>
+      <div class="k">NEXT CATALYST</div>
+      <div class="v"><b>ER +12d</b> AMC · IMPL <b>±5.8%</b></div>
+    </div>
+    <div>
+      <div class="k">POSITION SIZE · Kelly-lite</div>
+      <div class="v"><b class="dim">0%</b> <span class="dim">— entry MISSED</span></div>
+    </div>
+  </div>
+
+  <!-- ════════ SUB-TAB NAV ════════ -->
+  <div class="nav">
+    <div class="t on">Overview <span class="k">1</span></div>
+    <div class="t">Plan <span class="k">2</span></div>
+    <div class="t">Chart <span class="k">3</span></div>
+    <div class="t">Fundamentals <span class="k">4</span></div>
+    <div class="t">Intel <span class="k">5</span></div>
+    <div class="t">Logic <span class="k">6</span></div>
+    <div class="t">History <span class="k">7</span></div>
+    <div class="t">Options <span class="k">8</span></div>
+  </div>
+
+  <!-- ════════ BODY ════════ -->
+  <div class="body">
+
+    <!-- 1. TRIAGE BAND · 6 KPI tiles · decision math up front -->
+    <div class="note"><span class="why">▣ TRIAGE BAND</span> &nbsp; one row, six numbers — the decision math compressed. P(T1)/P(stop) come from Monte Carlo per-ticker; smart-money is the 5-component blend (insider · 13F · UOA · news velocity · sentiment slope).</div>
+    <div class="kpi-row" style="grid-template-columns:repeat(6,1fr)">
+      <div class="kpi"><div class="kpi-k">BAP</div><div class="kpi-v gn">76</div><div class="kpi-sub">/100 · floor 72</div></div>
+      <div class="kpi"><div class="kpi-k">P(T1) FIRST</div><div class="kpi-v gn">66%</div><div class="kpi-sub">monte-carlo · 3K paths</div></div>
+      <div class="kpi"><div class="kpi-k">P(STOP) FIRST</div><div class="kpi-v am">28%</div><div class="kpi-sub">close-based stop</div></div>
+      <div class="kpi"><div class="kpi-k">EDGE</div><div class="kpi-v gn">+38</div><div class="kpi-sub">P(T1)−P(stop)</div></div>
+      <div class="kpi"><div class="kpi-k">IV RANK</div><div class="kpi-v">42%</div><div class="kpi-sub">vs 52w · normal</div></div>
+      <div class="kpi"><div class="kpi-k">SMART-MONEY</div><div class="kpi-v gn">72/100</div><div class="kpi-sub">5-comp blend</div></div>
+    </div>
+
+    <!-- 2. EDGE BAR -->
+    <div class="edge">
+      <div class="side"><div class="k">P(T1 FIRST)</div><div class="v gn">66%</div></div>
+      <div class="bar"><span class="p" style="width:66%"></span><span class="n" style="width:28%"></span></div>
+      <div class="side r"><div class="k">P(STOP FIRST)</div><div class="v rd">28%</div></div>
+    </div>
+
+    <!-- 3. 3-LENS EVIDENCE -->
+    <div class="note"><span class="why">⬢ 3-LENS EVIDENCE</span> &nbsp; same data, three independent reads. <b>Convergence</b> across all three = high conviction. <b>Divergence</b> = pass. A 75-score with technical bullish but flow and quality saying AVOID is a red flag.</div>
+    <div class="lens">
+
+      <!-- LENS A · TECHNICAL -->
+      <div class="lens-p">
+        <div class="lens-h">▣ TECHNICAL</div>
+        <div class="radar" style="text-align:center">
+          <!-- Mini 5-pillar radar -->
+          <svg viewBox="0 0 180 160" style="width:100%;max-height:160px">
+            <polygon points="90,28 145,67 124,135 56,135 35,67" fill="none" stroke="var(--line)" stroke-width="0.5"/>
+            <polygon points="90,46 127,76 115,121 65,121 53,76" fill="none" stroke="var(--line)" stroke-width="0.5"/>
+            <polygon points="90,64 110,84 105,108 75,108 70,84" fill="none" stroke="var(--line)" stroke-width="0.5"/>
+            <line x1="90" y1="80" x2="90" y2="20" stroke="var(--line-2)" stroke-width="0.6"/>
+            <line x1="90" y1="80" x2="147" y2="61" stroke="var(--line-2)" stroke-width="0.6"/>
+            <line x1="90" y1="80" x2="125" y2="135" stroke="var(--line-2)" stroke-width="0.6"/>
+            <line x1="90" y1="80" x2="55" y2="135" stroke="var(--line-2)" stroke-width="0.6"/>
+            <line x1="90" y1="80" x2="33" y2="61" stroke="var(--line-2)" stroke-width="0.6"/>
+            <polygon points="90,32 140,68 110,128 70,128 50,75" fill="color-mix(in oklch, var(--gn) 18%, transparent)" stroke="var(--gn)" stroke-width="1.5"/>
+            <text x="90" y="14" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700" fill="var(--ink-2)">TRD</text>
+            <text x="159" y="62" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700" fill="var(--ink-2)">CAT</text>
+            <text x="138" y="149" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700" fill="var(--ink-2)">RS</text>
+            <text x="42" y="149" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700" fill="var(--ink-2)">SM</text>
+            <text x="21" y="62" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700" fill="var(--ink-2)">QUAL</text>
+          </svg>
+        </div>
+        <div class="lens-row"><span class="k">RSI(14)</span><span class="v am">68 <span class="dim">overbought-edge</span></span></div>
+        <div class="lens-row"><span class="k">MACD HIST</span><span class="v gn">+2.10 expanding</span></div>
+        <div class="lens-row"><span class="k">ADX</span><span class="v gn">28 strong trend</span></div>
+        <div class="lens-row"><span class="k">RVOL</span><span class="v gn">1.4× expansion</span></div>
+        <div class="lens-row"><span class="k">ATR%</span><span class="v">2.1%</span></div>
+        <div class="lens-row"><span class="k">SQUEEZE</span><span class="v gn">FIRED · bullish</span></div>
+        <div class="lens-sub">DISTANCE TO LEVELS</div>
+        <div class="lens-row"><span class="k">EMA 21</span><span class="v rd">$406.18 · −5.2%</span></div>
+        <div class="lens-row"><span class="k">EMA 50</span><span class="v rd">$392.40 · −8.4%</span></div>
+        <div class="lens-row"><span class="k">52W HI</span><span class="v am">$251.88 · +14.2%</span></div>
+        <div class="lens-row"><span class="k">VWAP D</span><span class="v am">$424.12 · −1.0%</span></div>
+        <div class="lens-row"><span class="k">ANCH VWAP</span><span class="v gn">$398.55 · −7.0%</span></div>
+        <div class="lens-row"><span class="k">SR / FVG</span><span class="v">$432 / $410</span></div>
+      </div>
+
+      <!-- LENS B · FLOW -->
+      <div class="lens-p">
+        <div class="lens-h">⚯ FLOW</div>
+        <div class="lens-bignum gn">72<span class="sub">/100 smart-money</span></div>
+        <div class="lens-row"><span class="k">INSIDER 30d</span><span class="v gn">3B · 0S · +$2.4M</span></div>
+        <div class="lens-row"><span class="k">FORM 4 LAST</span><span class="v dim">CEO buy · 5d ago</span></div>
+        <div class="lens-row"><span class="k">INST %</span><span class="v">82.1%</span></div>
+        <div class="lens-row"><span class="k">13F Δ 90d</span><span class="v gn">+12 funds added</span></div>
+        <div class="lens-row"><span class="k">SHORT FLOAT</span><span class="v">1.2%</span></div>
+        <div class="lens-row"><span class="k">DAYS TO COVER</span><span class="v dim">0.8d</span></div>
+        <div class="lens-sub">UOA / OPTIONS FLOW</div>
+        <div class="lens-row"><span class="k">UOA CALLS</span><span class="v gn">5 · vol&gt;3×OI</span></div>
+        <div class="lens-row"><span class="k">UOA PUTS</span><span class="v">1</span></div>
+        <div class="lens-row"><span class="k">P/C ratio</span><span class="v gn">0.34 call-heavy</span></div>
+        <div class="lens-row"><span class="k">DELTA-WEIGHTED VOL</span><span class="v gn">+$8.4M long</span></div>
+        <div class="lens-sub">NEWS / SENTIMENT</div>
+        <div class="lens-row"><span class="k">NEWS 7d</span><span class="v am">14 headlines</span></div>
+        <div class="lens-row"><span class="k">SENT TREND</span><span class="v gn">IMPROVING · slope +12pp</span></div>
+        <div class="lens-row"><span class="k">SOCIAL Z 7d</span><span class="v am">+1.8σ buzz</span></div>
+      </div>
+
+      <!-- LENS C · QUALITY -->
+      <div class="lens-p">
+        <div class="lens-h">◆ QUALITY</div>
+        <div class="lens-bignum gn">A−<span class="sub">7.8/10</span></div>
+        <div class="lens-row"><span class="k">FWD P/E</span><span class="v am">28.4 vs sector 24.6</span></div>
+        <div class="lens-row"><span class="k">PEG</span><span class="v">1.2</span></div>
+        <div class="lens-row"><span class="k">P/S</span><span class="v">8.4</span></div>
+        <div class="lens-row"><span class="k">EV/EBITDA</span><span class="v">22.1</span></div>
+        <div class="lens-row"><span class="k">REV GROWTH YoY</span><span class="v gn">+44.2%</span></div>
+        <div class="lens-row"><span class="k">EPS GROWTH YoY</span><span class="v gn">+38.9%</span></div>
+        <div class="lens-row"><span class="k">GROSS MARGIN</span><span class="v gn">68.4% · trend ↑</span></div>
+        <div class="lens-row"><span class="k">FCF MARGIN</span><span class="v gn">38.2%</span></div>
+        <div class="lens-row"><span class="k">D/E</span><span class="v am">1.8 · elevated</span></div>
+        <div class="lens-row"><span class="k">ANALYST UPSIDE</span><span class="v gn">+15.4% · PT $494</span></div>
+        <div class="lens-row"><span class="k">BUY % (n=38)</span><span class="v gn">87% buy</span></div>
+        <div class="lens-row"><span class="k">REVISIONS 30d</span><span class="v gn">BULLISH · ↑4 / ↓0</span></div>
+        <div class="lens-sub">ER IN 12d (AMC)</div>
+        <div class="lens-row"><span class="k">4Q PATTERN</span><span class="v"><b class="gn">B</b> <b class="gn">B</b> <b class="gn">B</b> <b class="gn">B</b> · 100%</span></div>
+        <div class="lens-row"><span class="k">MEDIAN SURP</span><span class="v gn">+12.4%</span></div>
+        <div class="lens-row"><span class="k">IMPL ±%</span><span class="v">±5.8%</span></div>
+        <div class="lens-row"><span class="k">EVENT VOL</span><span class="v gn">CHEAP</span></div>
+      </div>
+    </div>
+
+    <!-- 4. TRADE WINDOW -->
+    <div class="note"><span class="why">⧉ TRADE WINDOW</span> &nbsp; if the verdict allows, this is the executable plan. If not, this is what would need to happen for entry to make sense.</div>
+    <div class="grid2">
+      <div class="pane">
+        <div class="pane-h">PLAN LADDER <span class="m">live R:R from $428.43</span></div>
+        <table class="tbl">
+          <tr><td><b class="cy">T2</b></td><td class="r"><b>$542.16</b></td><td class="dim">close ⅓</td><td class="r gn">+26.5%</td></tr>
+          <tr><td><b class="gn">T1</b></td><td class="r"><b>$496.36</b></td><td class="dim">trim ⅔</td><td class="r gn">+15.9%</td></tr>
+          <tr class="now"><td><b>NOW</b></td><td class="r"><b>$428.43</b></td><td class="dim">WATCH</td><td class="r dim">+0.0%</td></tr>
+          <tr><td><b class="am">AVG</b></td><td class="r"><b>$423.81</b></td><td class="dim">entry zone top</td><td class="r rd">−1.1%</td></tr>
+          <tr><td><b class="rd">STOP</b></td><td class="r"><b>$404.76</b></td><td class="dim">1.25× ATR</td><td class="r rd">−5.5%</td></tr>
+        </table>
+      </div>
+      <div class="pane">
+        <div class="pane-h">CATALYST CALENDAR <span class="m">±30d events</span></div>
+        <table class="tbl">
+          <tr><td class="dim">+12d</td><td><b>ER · Q3 25</b></td><td class="dim">AMC · est $1.42</td><td class="r am">±5.8%</td></tr>
+          <tr><td class="dim">+18d</td><td><b>FOMC Minutes</b></td><td class="dim">HIGH</td><td class="r am">macro</td></tr>
+          <tr><td class="dim">+24d</td><td><b>CPI Print</b></td><td class="dim">HIGH</td><td class="r am">macro</td></tr>
+          <tr><td class="dim">+9d</td><td><b>Sector Conf</b></td><td class="dim">MED</td><td class="r">·</td></tr>
+          <tr><td class="dim">+15d</td><td><b>Industry print (AVGO peer)</b></td><td class="dim">peer-read</td><td class="r dim">·</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- 5. HISTORICAL EDGE · setup family Wilson LB + regime conditional -->
+    <div class="note"><span class="why">⌬ HISTORICAL EDGE</span> &nbsp; the base-rate anchor. Wilson 95% LB tells you the floor of the edge, not the point estimate. Regime-conditional WR explicitly — this setup performs DIFFERENTLY in different regimes.</div>
+    <div class="pane">
+      <div class="pane-h">SETUP : TREND CONTINUATION <span class="m">institutional re-add at rising EMA21 after prior break</span></div>
+      <div class="kpi-row" style="grid-template-columns:repeat(6,1fr)">
+        <div class="kpi"><div class="kpi-k">ALL REGIMES</div><div class="kpi-v">WR 54% · n=49</div><div class="kpi-sub">LB 41% · PF 1.42 · avg +0.62R</div></div>
+        <div class="kpi"><div class="kpi-k">CURRENT REGIME</div><div class="kpi-v gn">WR 58% · n=23</div><div class="kpi-sub">risk_on_choppy · LB 39% · PF 1.55</div></div>
+        <div class="kpi"><div class="kpi-k">5d WALK-FWD</div><div class="kpi-v gn">WR 62%</div><div class="kpi-sub">last 5 picks</div></div>
+        <div class="kpi"><div class="kpi-k">30d WALK-FWD</div><div class="kpi-v gn">WR 56% · n=18</div><div class="kpi-sub">last 30 days</div></div>
+        <div class="kpi"><div class="kpi-k">90d WALK-FWD</div><div class="kpi-v am">WR 51% · n=42</div><div class="kpi-sub">edge decay watch</div></div>
+        <div class="kpi"><div class="kpi-k">DRIFT</div><div class="kpi-v am">−3pp 90d</div><div class="kpi-sub">monitoring</div></div>
+      </div>
+      <div class="mech">
+        <div class="mech-row"><span class="k">MECHANISM</span><span class="v">After a break of the 50EMA and re-claim, institutional flows re-add on the test of the rising 21EMA — verified across 49 prior occurrences. PE & RS-conditional.</span></div>
+        <div class="mech-row"><span class="k">FALSIFICATION</span><span class="v">Daily close below EMA50 with volume &gt; 1.5× avg invalidates the re-add thesis · WR drops to 12% post-failure.</span></div>
+        <div class="mech-row"><span class="k">SURVIVORSHIP</span><span class="v">Historical n=49 spans 2026 + 2025; uses point-in-time S&amp;P membership for &gt;2023 only. −3pp WR haircut applied to estimates &lt; Wilson LB.</span></div>
+        <div class="mech-row"><span class="k">EDGE DECAY ALERT</span><span class="v">90d WR (51%) below all-regime (54%) by 3pp — soft drift signal. Wilson LB still above floor; do not demote yet.</span></div>
+      </div>
+    </div>
+
+    <!-- 6. REGIME CONDITIONAL TABLE -->
+    <div class="note"><span class="why">▦ REGIME-CONDITIONAL DECOMPOSITION</span> &nbsp; same setup, different regimes — different edge. Don't trade aggregates, trade conditional means.</div>
+    <div class="pane">
+      <div class="pane-h">SETUP × REGIME × SCORE-BAND <span class="m">Wilson LB ≥ 30% required to enter</span></div>
+      <table class="tbl">
+        <thead><tr><th>Regime</th><th class="r">WR</th><th class="r">Wilson LB</th><th class="r">PF</th><th class="r">Avg R</th><th class="r">n</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td>risk_on_trending</td><td class="r gn">68%</td><td class="r gn">53%</td><td class="r gn">2.18</td><td class="r gn">+1.12</td><td class="r dim">16</td><td><span class="mpill gn">TRADE</span></td></tr>
+          <tr class="now"><td>risk_on_choppy <span class="dim">(current)</span></td><td class="r gn">58%</td><td class="r am">39%</td><td class="r gn">1.55</td><td class="r gn">+0.62</td><td class="r dim">23</td><td><span class="mpill am">TRADE-CAREFUL</span></td></tr>
+          <tr><td>risk_off_trending</td><td class="r am">42%</td><td class="r am">26%</td><td class="r am">1.12</td><td class="r am">+0.08</td><td class="r dim">8</td><td><span class="mpill am">DEFER</span></td></tr>
+          <tr><td>panic</td><td class="r rd">25%</td><td class="r rd">11%</td><td class="r rd">0.48</td><td class="r rd">−0.54</td><td class="r dim">2</td><td><span class="mpill rd">NO-TRADE</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 7. PRIOR EARNINGS REACTIONS -->
+    <div class="note"><span class="why">⌗ PRIOR EARNINGS REACTIONS</span> &nbsp; PEAD asymmetry · does this name DRIFT after a beat, or FADE?</div>
+    <div class="pane">
+      <div class="pane-h">LAST 4 PRINTS · POST-PRINT MOVE <span class="m">B/M flag · 1d gap · 5d · 30d drift</span></div>
+      <table class="tbl">
+        <thead><tr><th>Date</th><th>Result</th><th class="r">Est</th><th class="r">Act</th><th class="r">Surp</th><th class="r">Pre 1d gap</th><th class="r">Day-of</th><th class="r">Post 5d</th><th class="r">Post 30d</th></tr></thead>
+        <tbody>
+          <tr><td>2026-03-06</td><td><span class="mpill gn">BEAT</span></td><td class="r">1.20</td><td class="r">1.42</td><td class="r gn">+18.3%</td><td class="r">+0.4%</td><td class="r gn">+5.2%</td><td class="r gn">+12.8%</td><td class="r gn">+24.1%</td></tr>
+          <tr><td>2025-12-05</td><td><span class="mpill gn">BEAT</span></td><td class="r">1.08</td><td class="r">1.21</td><td class="r gn">+12.0%</td><td class="r">−0.2%</td><td class="r gn">+4.8%</td><td class="r gn">+9.4%</td><td class="r gn">+15.6%</td></tr>
+          <tr><td>2025-09-04</td><td><span class="mpill gn">BEAT</span></td><td class="r">0.98</td><td class="r">1.05</td><td class="r gn">+7.1%</td><td class="r">+1.1%</td><td class="r gn">+2.4%</td><td class="r gn">+6.8%</td><td class="r gn">+11.2%</td></tr>
+          <tr><td>2025-06-04</td><td><span class="mpill gn">BEAT</span></td><td class="r">0.89</td><td class="r">0.94</td><td class="r gn">+5.6%</td><td class="r">−0.8%</td><td class="r am">+1.2%</td><td class="r gn">+4.1%</td><td class="r gn">+8.4%</td></tr>
+        </tbody>
+      </table>
+      <div class="mech">
+        <div class="mech-row"><span class="k">VERDICT</span><span class="v"><b class="gn">POSITIVE DRIFT</b> · 4/4 beats · median post-5d <b class="gn">+5.0%</b> · realized 5d (5.0%) ≈ implied (5.8%) → vol fair, drift cheap</span></div>
+      </div>
+    </div>
+
+    <!-- 8. PEER COHORT CROSS-CHECK -->
+    <div class="note"><span class="why">◇ PEER COHORT CROSS-CHECK</span> &nbsp; how is the SECTOR doing? Single-name picks in a cold cohort underperform. Sector tailwind / headwind matters.</div>
+    <div class="grid2">
+      <div class="pane">
+        <div class="pane-h">SECTOR · TECHNOLOGY · 45d <span class="m">peer cohort</span></div>
+        <table class="tbl">
+          <tr><td><b>Cohort tag</b></td><td class="r"><span class="mpill gn">HOT</span></td></tr>
+          <tr><td>Names reported (45d)</td><td class="r">26</td></tr>
+          <tr><td>Beat rate</td><td class="r gn">88% (n=23/26)</td></tr>
+          <tr><td>Median surprise</td><td class="r gn">+8.1%</td></tr>
+          <tr><td>Median post-5d</td><td class="r gn">+4.2%</td></tr>
+          <tr><td>Strong tier picks (current)</td><td class="r gn">7</td></tr>
+        </table>
+      </div>
+      <div class="pane">
+        <div class="pane-h">TOP 3 PEER NAMES · 30d perf <span class="m">benchmark</span></div>
+        <table class="tbl">
+          <tr><td><b>NVDA</b></td><td class="dim">Semis</td><td class="r gn">+18.4%</td><td class="r"><span class="mpill gn">BUY</span></td></tr>
+          <tr><td><b>AVGO</b></td><td class="dim">Semis</td><td class="r gn">+22.1%</td><td class="r"><span class="mpill am">WATCH</span></td></tr>
+          <tr><td><b>AMD</b></td><td class="dim">Semis</td><td class="r am">+8.2%</td><td class="r"><span class="mpill am">WATCH</span></td></tr>
+          <tr><td><b>MRVL</b></td><td class="dim">Semis</td><td class="r am">+6.5%</td><td class="r"><span class="mpill am">WATCH</span></td></tr>
+          <tr><td colspan="3" class="dim" style="padding-top:8px"><b>SECTOR RELATIVE</b>: AVGO at +22.1% vs cohort median +12.4% → top quartile</td><td class="r gn">+1.8σ</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- 9. CROSS-ASSET CONTEXT -->
+    <div class="note"><span class="why">⊠ CROSS-ASSET CONTEXT</span> &nbsp; isolated charts lie. Beta · sector ETF · macro proxies tell you if the move is the name or the regime.</div>
+    <div class="grid2">
+      <div class="pane">
+        <div class="pane-h">CROSS-ASSET LINK · 60d <span class="m">correlations</span></div>
+        <table class="tbl">
+          <tr><td>vs SPY</td><td class="r gn">+0.62 corr</td><td class="r am">β 1.45</td></tr>
+          <tr><td>vs QQQ</td><td class="r gn">+0.78 corr</td><td class="r am">β 1.31</td></tr>
+          <tr><td>vs SMH (semis ETF)</td><td class="r gn">+0.91 corr</td><td class="r gn">β 1.12</td></tr>
+          <tr><td>vs NVDA</td><td class="r gn">+0.84 corr</td><td class="r">·</td></tr>
+          <tr><td>vs VIX (inverse)</td><td class="r am">−0.41</td><td class="r dim">·</td></tr>
+          <tr><td>vs 10Y yields</td><td class="r rd">−0.32</td><td class="r dim">duration-sensitive</td></tr>
+        </table>
+      </div>
+      <div class="pane">
+        <div class="pane-h">VOL CONE · realized vs implied <span class="m">5d / 30d / 90d</span></div>
+        <table class="tbl">
+          <tr><td>5d RV</td><td class="r">28%</td><td class="r am">vs IV 36%</td><td class="r am">expensive</td></tr>
+          <tr><td>30d RV</td><td class="r">32%</td><td class="r am">vs IV 36%</td><td class="r dim">slight rich</td></tr>
+          <tr><td>90d RV</td><td class="r">38%</td><td class="r gn">vs IV 36%</td><td class="r gn">cheap</td></tr>
+          <tr><td>EARNINGS IV (front)</td><td class="r am">52%</td><td class="r">·</td><td class="r am">event premium</td></tr>
+          <tr><td>NON-ER IV (back)</td><td class="r">30%</td><td class="r">·</td><td class="r dim">baseline</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- 10. CALIBRATION & SAMPLE-SIZE PANEL -->
+    <div class="note"><span class="why">∑ CALIBRATION FOR THIS TICKER</span> &nbsp; honest sample size + Wilson CI. Researcher's rule: <b>n &lt; 30 = noise</b>; rely on Wilson LB above floor, not point estimates.</div>
+    <div class="pane">
+      <div class="pane-h">EVIDENCE SAMPLE SIZE <span class="m">n &lt; 30 flagged</span></div>
+      <table class="tbl">
+        <thead><tr><th>Claim</th><th class="r">Point estimate</th><th class="r">Wilson 95% LB</th><th class="r">n</th><th class="r">Confidence</th></tr></thead>
+        <tbody>
+          <tr><td>Setup WR (all-regime)</td><td class="r gn">54%</td><td class="r am">41%</td><td class="r">49</td><td class="r"><span class="mpill gn">OK · n≥30</span></td></tr>
+          <tr><td>Setup WR (current regime)</td><td class="r gn">58%</td><td class="r am">39%</td><td class="r">23</td><td class="r"><span class="mpill am">THIN · n&lt;30</span></td></tr>
+          <tr><td>This-ticker prior trades</td><td class="r">—</td><td class="r">—</td><td class="r">0</td><td class="r"><span class="mpill rd">NONE · cohort only</span></td></tr>
+          <tr><td>Prior earnings reactions</td><td class="r gn">100% beat</td><td class="r am">47%</td><td class="r">4</td><td class="r"><span class="mpill rd">VERY THIN · n=4</span></td></tr>
+          <tr><td>Sector cohort beat rate 45d</td><td class="r gn">88%</td><td class="r gn">71%</td><td class="r">26</td><td class="r"><span class="mpill gn">OK</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 11. RISK PROFILE -->
+    <div class="note"><span class="why">⚠ RISK PROFILE</span> &nbsp; what could go wrong. Drawdown asymmetry · correlation under stress · liquidity at exit.</div>
+    <div class="grid2">
+      <div class="pane">
+        <div class="pane-h">PORTFOLIO IMPACT <span class="m">if entered at suggested size</span></div>
+        <table class="tbl">
+          <tr><td>Implied % equity (Kelly-lite)</td><td class="r dim">0%</td><td class="r dim">verdict gate</td></tr>
+          <tr><td>If hypothetical 5% sizing</td><td class="r">$500</td><td class="r dim">on $10k account</td></tr>
+          <tr><td>Risk to stop ($)</td><td class="r rd">−$28</td><td class="r dim">5.5% adverse</td></tr>
+          <tr><td>R-multiple at T1</td><td class="r gn">+2.9R</td><td class="r dim">15.9%/5.5%</td></tr>
+          <tr><td>R-multiple at T2</td><td class="r gn">+4.8R</td><td class="r dim">26.5%/5.5%</td></tr>
+          <tr><td>Beta-weighted exposure</td><td class="r am">×1.45 SPY</td><td class="r dim">amplifies portfolio β</td></tr>
+        </table>
+      </div>
+      <div class="pane">
+        <div class="pane-h">DRAWDOWN PROFILE <span class="m">60d · 1Y · stress test</span></div>
+        <table class="tbl">
+          <tr><td>Max DD 60d</td><td class="r am">−6.2%</td></tr>
+          <tr><td>Max DD 1Y</td><td class="r am">−18.4%</td></tr>
+          <tr><td>VaR 95% (1d)</td><td class="r am">−3.8%</td></tr>
+          <tr><td>CVaR 97.5% (1d)</td><td class="r rd">−5.2%</td></tr>
+          <tr><td>Stress: panic regime</td><td class="r rd">−14% est</td></tr>
+          <tr><td>Liquidity at exit</td><td class="r gn">ADV $4.2B · ample</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- 12. CHECKLIST · pre-flight (final element) -->
+    <div class="note"><span class="why">✓ PRE-FLIGHT CHECKLIST</span> &nbsp; rules-based pass/fail. Avoid emotional commits — the system is the discipline.</div>
+    <div class="pane">
+      <div class="pane-h">7-POINT PRE-FLIGHT <span class="m">all must pass to size up</span></div>
+      <table class="tbl">
+        <tr><td><b>1. BAP ≥ regime floor</b></td><td>76 ≥ 72</td><td class="r"><span class="mpill gn">PASS</span></td></tr>
+        <tr><td><b>2. Setup Wilson LB ≥ 30%</b></td><td>39% ≥ 30%</td><td class="r"><span class="mpill gn">PASS</span></td></tr>
+        <tr><td><b>3. R:R ≥ 3</b></td><td>1:3.0 ≥ 3</td><td class="r"><span class="mpill gn">PASS</span></td></tr>
+        <tr><td><b>4. Entry quality FRESH/PULLBACK</b></td><td>EXTENDED</td><td class="r"><span class="mpill rd">FAIL</span></td></tr>
+        <tr><td><b>5. Earnings ≥ 14d clear</b></td><td>+12d</td><td class="r"><span class="mpill rd">FAIL</span></td></tr>
+        <tr><td><b>6. ADV ≥ $5M</b></td><td>$4.2B</td><td class="r"><span class="mpill gn">PASS</span></td></tr>
+        <tr><td><b>7. No macro overlap ±2d</b></td><td>FOMC +18d, CPI +24d</td><td class="r"><span class="mpill gn">PASS</span></td></tr>
+        <tr style="border-top:2px solid var(--line-2)"><td colspan="2"><b>RESULT</b></td><td class="r"><span class="mpill am">5/7 PASS · DEFER</span></td></tr>
+      </table>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

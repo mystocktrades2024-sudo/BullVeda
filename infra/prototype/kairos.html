@@ -44,9 +44,17 @@
   --rd-dim:    #7a2a22;
   --rd-bg:     rgba(255,107,91,0.06);
 
-  --mono:      'JetBrains Mono', ui-monospace, monospace;
+  --mono:      'Aptos Mono', 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  --sans:      'Aptos', 'Aptos Display', Inter, -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', sans-serif;
   --copper:    #d97757;
 }
+
+/* Aptos webfont (Microsoft) via Bunny Fonts — site-wide default sans
+   Falls through to Inter / system on browsers that can't load it. */
+@import url('https://fonts.bunny.net/css?family=aptos:400,500,600,700|aptos-display:600,700&display=swap');
+
+/* Apply Aptos as the default body font across the entire page */
+html, body { font-family: var(--sans); }
 
 /* Big Kairos brand bar — top of page, always visible */
 @import url('https://fonts.googleapis.com/css2?family=GT+Sectra:wght@500&display=swap');
@@ -16019,31 +16027,59 @@ window.QuantDetail = (function() {
 
     // ── LENS ALIGNMENT vs the call direction
     const callDir = analystCall === 'BUY' ? 'BULLISH' : analystCall === 'SHORT' ? 'BEARISH' : null;
-    const lensAlignmentCount = callDir
-      ? Object.values(lensVote).filter((v, i, a) => a.indexOf(v) === i || true).length // placeholder
-      : 0;
     // Recompute distinctly across the 5 distinct lenses (avoid duplicate GRAHAM key)
     const distinctLenses = ['SWING TRADING', 'HEDGE FUND', 'GRAHAM-BUFFETT VALUE', 'QUANT EARNINGS', 'CFP'];
     const distinctVotes = distinctLenses.map(L => ({ lens: L, vote: lensVote[L] || 'NEUTRAL' }));
+    // Strategy-weighted lens alignment: INVESTMENT de-weights Trader (SWING TRADING) + HEDGE FUND
+    // votes to 0.5× per spec "short-term noise filtered out".
+    const _lensWeight = (L) => {
+      if (!horizon.filterNoise) return 1.0;
+      if (L === 'SWING TRADING' || L === 'HEDGE FUND' || L === 'QUANT EARNINGS') return 0.5;
+      return 1.0;  // VALUE + CFP at full weight for INVESTMENT
+    };
+    const _weightedAlign = callDir ? distinctVotes.filter(v => v.vote === callDir).reduce((s, v) => s + _lensWeight(v.lens), 0) : 0;
+    const _weightedOppose = callDir ? distinctVotes.filter(v => v.vote === (callDir === 'BULLISH' ? 'BEARISH' : 'BULLISH')).reduce((s, v) => s + _lensWeight(v.lens), 0) : 0;
     const alignedCount = callDir ? distinctVotes.filter(v => v.vote === callDir).length : 0;
     const opposedCount = callDir ? distinctVotes.filter(v => v.vote === (callDir === 'BULLISH' ? 'BEARISH' : 'BULLISH')).length : 0;
     const neutralCount = distinctVotes.filter(v => v.vote === 'NEUTRAL').length;
 
+    // ── MULTI-QUARTER CATALYST validation for POSITION strategy
+    //   Spec: POSITION requires multi-quarter catalyst (≥2 ER cycles or 3+ month thematic).
+    //   Practical detection: a single ER inside catWindow is single-quarter only.
+    //   Multiple catalyst_tags OR explicit thematic catalyst OR ER+macro overlay = multi-quarter.
+    const multiQuarterCatalyst = (() => {
+      if (horizon.name !== 'POSITION') return { required:false, present:null };
+      const tagCount = catalystTags ? catalystTags.length : 0;
+      const erInWindow = earnDays != null && earnDays >= 0 && earnDays <= horizon.catWindow;
+      const setupCarriesTheme = /trend continuation|special situation|theme|secular/i.test(setup);
+      // multi-quarter present if: ≥2 catalyst tags, OR thematic setup, OR earnings cycle + dividend/buyback
+      const isDividendPayer2 = _num('fund_real.dividend_yield', 'fund_details.dividend_yield') > 1.0;
+      const present = tagCount >= 2 || setupCarriesTheme || (erInWindow && isDividendPayer2);
+      return { required:true, present, tagCount, erInWindow, setupCarriesTheme };
+    })();
+
     // ── CONVICTION calibration — per strict rules
-    //   HIGH:   4+ aligned, data COMPLETE, catalyst-in-horizon, tech+fund agree
+    //   HIGH:   4+ aligned (weighted), data COMPLETE, catalyst-in-horizon, tech+fund agree
+    //          (For INVESTMENT, VALUE alignment is REQUIRED for HIGH)
     //   MEDIUM: 3 aligned, OR minor data gaps, OR 1 lens disagrees but reasoned through
     //   LOW:    unresolved disagreement, material data gaps, single-thread thesis
     const techVote = lensVote['SWING TRADING'];
     const fundVote = lensVote['GRAHAM-BUFFETT VALUE'];
     const techFundAgree = techVote === fundVote && techVote !== 'NEUTRAL';
-    const catalystInHorizon = (earnDays != null && earnDays >= 0 && earnDays <= (maxHoldD || 21)) ||
+    // Value-aligned check for INVESTMENT strategy
+    const valueAligned = callDir && fundVote === callDir;
+    const catalystInHorizon = (earnDays != null && earnDays >= 0 && earnDays <= horizon.catWindow) ||
                               (catalystTags && catalystTags.length > 0);
+    // POSITION extra requirement: multi-quarter catalyst present
+    const positionCatOK = horizon.name !== 'POSITION' || (multiQuarterCatalyst.present === true);
+    // INVESTMENT: weighted threshold lower since 2 lenses are de-weighted
+    const highThreshold = horizon.filterNoise ? 2.5 : 4.0;
+    const medThreshold  = horizon.filterNoise ? 1.5 : 3.0;
     let convLevel, convRationale;
     if (analystCall === 'WATCH' && dataInsufficient) {
       convLevel = 'LOW';
       convRationale = `Insufficient data — Call defaults to WATCH per data discipline. Missing core: ${_dataCheck.missCore.join(', ') || 'none'}. Conviction cannot exceed LOW until data obtained.`;
     } else if (analystCall === 'WATCH') {
-      // WATCH conviction: based on how close to actionable
       const reasons = [];
       if (alignedCount >= 3) reasons.push(`${alignedCount}/5 lenses point ${callDir || 'directional'} but no actionable trigger met`);
       if (eqBad) reasons.push('entry quality bad');
@@ -16052,22 +16088,34 @@ window.QuantDetail = (function() {
       convRationale = reasons.length ? reasons.join('; ') + '. ' : '';
       convRationale += `Tech ${techVote} · Fund ${fundVote} · Earnings ${lensVote['QUANT EARNINGS']} · Flow ${lensVote['HEDGE FUND']} · CFP ${lensVote['CFP']}.`;
     } else {
-      // BUY or SHORT
-      if (alignedCount >= 4 && _dataCheck.flag === 'COMPLETE' && catalystInHorizon && techFundAgree) {
+      // BUY or SHORT — apply strategy-weighted rules
+      const investmentBlock = horizon.filterNoise && !valueAligned;
+      if (investmentBlock) {
+        convLevel = 'LOW';
+        convRationale = `INVESTMENT strategy: VALUE lens does NOT align ${callDir} (votes ${fundVote}). Short-term lenses filtered per spec; without VALUE alignment, conviction cannot exceed LOW. Consider WATCH or switch strategy.`;
+      } else if (!positionCatOK) {
+        convLevel = 'LOW';
+        convRationale = `POSITION strategy requires multi-quarter catalyst — only single-quarter (${multiQuarterCatalyst.tagCount} catalyst tag${multiQuarterCatalyst.tagCount === 1 ? '' : 's'}, ${multiQuarterCatalyst.erInWindow ? 'single ER in window' : 'no ER'}) detected. Either reclassify to SWING or wait for additional catalyst.`;
+      } else if (_weightedAlign >= highThreshold && _dataCheck.flag === 'COMPLETE' && catalystInHorizon && techFundAgree) {
         convLevel = 'HIGH';
-        convRationale = `${alignedCount}/5 lenses aligned ${callDir}. Tech+Fund agree (${techVote}). Catalyst in horizon. Data COMPLETE.`;
-      } else if (alignedCount >= 3 && opposedCount <= 1) {
+        convRationale = `${alignedCount}/5 lenses aligned ${callDir}${horizon.filterNoise ? ' (weighted ' + _weightedAlign.toFixed(1) + '/3 since INVESTMENT de-weights short-term)' : ''}. Tech+Fund agree (${techVote}). Catalyst in ${horizon.name} horizon. Data COMPLETE.`;
+      } else if (_weightedAlign >= medThreshold && _weightedOppose <= 1.0) {
         convLevel = 'MEDIUM';
         const opposers = distinctVotes.filter(v => v.vote === (callDir === 'BULLISH' ? 'BEARISH' : 'BULLISH')).map(v => v.lens);
-        convRationale = `${alignedCount}/5 lenses aligned ${callDir}` +
+        convRationale = `${alignedCount}/5 lenses aligned ${callDir}${horizon.filterNoise ? ' (weighted ' + _weightedAlign.toFixed(1) + ')' : ''}` +
           (opposers.length ? `; ${opposers.join(' + ')} opposed (reasoned through)` : '') +
           (_dataCheck.flag === 'PARTIAL' ? `; data PARTIAL (${_dataCheck.missQuality.slice(0, 2).join(', ')})` : '') +
           `.`;
       } else {
         convLevel = 'LOW';
-        convRationale = `Only ${alignedCount}/5 lenses aligned ${callDir} with ${opposedCount} opposed. ` +
+        convRationale = `Only ${alignedCount}/5 lenses aligned ${callDir}${horizon.filterNoise ? ' (weighted ' + _weightedAlign.toFixed(1) + ')' : ''} with ${opposedCount} opposed. ` +
           `Unresolved disagreement or single-thread thesis. Reconsider if low-conviction ${analystCall} should be WATCH instead.`;
       }
+    }
+    // Negative-edge cap: spec rule — call with negative quant edge cannot be HIGH
+    if (edge != null && edge < 0 && convLevel === 'HIGH') {
+      convLevel = 'MEDIUM';
+      convRationale = `Negative MC edge (${edge.toFixed(0)}pp) caps conviction at MEDIUM. ` + convRationale;
     }
     const convCls = convLevel === 'HIGH' ? 'gn' : convLevel === 'MEDIUM' ? 'am' : 'rd';
 
@@ -17108,6 +17156,32 @@ window.QuantDetail = (function() {
     const distinctLenses = ['VALUE', 'TRADER', 'HEDGE FUND', 'CFP'];
     const alignedCount = callDir ? distinctLenses.filter(L => lensVote[L] === callDir).length : 0;
     const opposedCount = callDir ? distinctLenses.filter(L => lensVote[L] === (callDir === 'BULLISH' ? 'BEARISH' : 'BULLISH')).length : 0;
+    // Strategy-weighted alignment: INVESTMENT de-weights TRADER + HEDGE FUND lens votes to 0.5×
+    // per spec "short-term noise filtered out".
+    const _lensWeightP = (L) => {
+      if (!strategy.filterNoise) return 1.0;
+      if (L === 'TRADER' || L === 'HEDGE FUND') return 0.5;
+      return 1.0;
+    };
+    const _weightedAlign = callDir ? distinctLenses.filter(L => lensVote[L] === callDir).reduce((s, L) => s + _lensWeightP(L), 0) : 0;
+    const _weightedOppose = callDir ? distinctLenses.filter(L => lensVote[L] === (callDir === 'BULLISH' ? 'BEARISH' : 'BULLISH')).reduce((s, L) => s + _lensWeightP(L), 0) : 0;
+
+    // ──────────────────── MULTI-QUARTER CATALYST validation for POSITION ────────────────────
+    // Spec: POSITION requires multi-quarter catalyst (≥2 ER cycles or 3+ month thematic).
+    const multiQuarterCatalyst = (() => {
+      if (strategy.name !== 'POSITION') return { required:false, present:null };
+      const tagCount = (t.catalyst_tags || []).length;
+      const erInWindow = earnDays != null && earnDays >= 0 && earnDays <= strategy.catWindow;
+      const setupCarriesTheme = /trend continuation|special situation|theme|secular/i.test(setup);
+      const yld = _num('fund_real.dividend_yield', 'fund_details.dividend_yield');
+      const isDividendPayer2 = yld != null && yld > 1.0;
+      const present = tagCount >= 2 || setupCarriesTheme || (erInWindow && isDividendPayer2);
+      return { required:true, present, tagCount, erInWindow, setupCarriesTheme };
+    })();
+    if (planCall === 'BUY' && strategy.name === 'POSITION' && multiQuarterCatalyst.present === false) {
+      // surface as a disagreement
+      // (added below in the disagreement list — also caps conviction)
+    }
 
     // ──────────────────── DISAGREEMENT DETECTION (5 conditions) ────────────────────
     const disagreements = [];
@@ -17136,6 +17210,10 @@ window.QuantDetail = (function() {
     }
     if (planCall === 'BUY' && strategy.name === 'SWING' && earnDays == null) {
       disagreements.push(`<b>No catalyst identified:</b> SWING strategy requires catalyst within 14d — none scheduled.`);
+    }
+    // 4b. POSITION multi-quarter catalyst requirement
+    if (planCall === 'BUY' && strategy.name === 'POSITION' && multiQuarterCatalyst.present === false) {
+      disagreements.push(`<b>Single-quarter catalyst only:</b> POSITION strategy requires multi-quarter catalyst (≥2 catalyst tags OR thematic setup OR earnings cycle + dividend). Found ${multiQuarterCatalyst.tagCount} tag${multiQuarterCatalyst.tagCount === 1 ? '' : 's'}, ${multiQuarterCatalyst.erInWindow ? 'single ER inside window' : 'no ER scheduled'}. Either reclassify to SWING or wait for additional catalyst.`);
     }
     // 5. Liquidity / β / sizing make trade impractical
     if (execBlockers.length > 0 && planCall !== 'NO_CALL') {
@@ -17167,15 +17245,25 @@ window.QuantDetail = (function() {
       convRationale = (reasons.length ? reasons.join('; ') + '. ' : '') +
                       `Lens votes: Value ${fundVote} · Trader ${techVote} · Hedge ${lensVote['HEDGE FUND']} · CFP ${lensVote['CFP']}.`;
     } else {
-      // BUY or SHORT
+      // BUY or SHORT — apply strategy-weighted + INVESTMENT/POSITION rules
+      const valueAlignedP = callDir && fundVote === callDir;
+      const investmentBlock = strategy.filterNoise && !valueAlignedP;
+      const positionCatBlock = strategy.name === 'POSITION' && multiQuarterCatalyst.present === false;
+      const highThresholdP = strategy.filterNoise ? 2.0 : 3.0;  // 4 lenses with 2 de-weighted = max 3 weighted
+      const medThresholdP  = strategy.filterNoise ? 1.5 : 2.0;
       if (negativeEdge) {
-        // Spec: a call with negative quant edge cannot be High conviction
         convLevel = alignedCount >= 3 ? 'MEDIUM' : 'LOW';
         convRationale = `Negative MC edge (${edge.toFixed(0)}pp) caps conviction. ${alignedCount}/4 lenses aligned; quant says no edge.`;
-      } else if (alignedCount >= 3 && dataFlag === 'COMPLETE' && catalystInHorizon && techFundAgree && !sampleBelowFloor) {
+      } else if (investmentBlock) {
+        convLevel = 'LOW';
+        convRationale = `INVESTMENT strategy: VALUE lens does NOT align ${callDir} (votes ${fundVote}). Short-term lenses filtered per spec; without VALUE alignment, conviction cannot exceed LOW.`;
+      } else if (positionCatBlock) {
+        convLevel = 'LOW';
+        convRationale = `POSITION strategy: multi-quarter catalyst MISSING (${multiQuarterCatalyst.tagCount} catalyst tag${multiQuarterCatalyst.tagCount === 1 ? '' : 's'}, ${multiQuarterCatalyst.erInWindow ? 'single ER only' : 'no ER'}). Per spec, POSITION needs ≥2 catalyst cycles. Either reclassify SWING or wait.`;
+      } else if (_weightedAlign >= highThresholdP && dataFlag === 'COMPLETE' && catalystInHorizon && techFundAgree && !sampleBelowFloor) {
         convLevel = 'HIGH';
-        convRationale = `${alignedCount}/4 lenses aligned ${callDir}. Tech+Value agree (${techVote}). Catalyst in ${strategy.name.toLowerCase()} horizon. Data COMPLETE. Setup sample n=${setupN || '—'}.`;
-      } else if (alignedCount >= 2 && opposedCount <= 1) {
+        convRationale = `${alignedCount}/4 lenses aligned ${callDir}${strategy.filterNoise ? ' (weighted ' + _weightedAlign.toFixed(1) + ' since INVESTMENT de-weights short-term)' : ''}. Tech+Value agree (${techVote}). Catalyst in ${strategy.name.toLowerCase()} horizon. Data COMPLETE. Setup sample n=${setupN || '—'}.`;
+      } else if (_weightedAlign >= medThresholdP && _weightedOppose <= 1.0) {
         convLevel = 'MEDIUM';
         const caveats = [];
         if (!techFundAgree) caveats.push(`Tech ${techVote}, Value ${fundVote}`);
