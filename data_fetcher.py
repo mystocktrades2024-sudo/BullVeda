@@ -2815,6 +2815,53 @@ def get_market_regime(breadth: dict | None = None) -> dict:
                 f"(dist_days={dist_days}, state={dist_state})"
             )
 
+        # HMM probability blend (audit gap #5, 2026-05-11) — soft regime
+        # probabilities computed from SPY 21-day return distribution.
+        # The discrete regime4 classifier looks at structural levels (EMAs,
+        # VIX, breadth); HMM looks at the SHAPE of recent SPY returns.
+        # When the two disagree, surface it. Disagreement most often means
+        # the structural classifier is lagging a regime shift the return
+        # distribution already detected.
+        hmm = {}
+        try:
+            import regime_hmm as _rh
+            # Reuse SPY closes already fetched at top of function.
+            _spy_closes = list(close_series.values) if close_series is not None else []
+            if len(_spy_closes) >= 22:
+                hmm = _rh.regime_probabilities_from_closes(_spy_closes[-60:], lookback=21)
+        except Exception as _he:
+            log.debug(f"HMM regime compute: {_he}")
+
+        # HMM disagreement gates:
+        #   discrete=risk_on_trending + p_bear >= 0.30 → downgrade to choppy
+        #     (return distribution shows bearish tail emerging)
+        #   discrete=risk_on_trending/choppy + p_bear >= 0.50 → downgrade to risk_off
+        #     (HMM strongly bear; structural signals haven't caught up yet)
+        #   discrete=risk_off_trending + p_bull >= 0.70 + confidence >= 0.6 → upgrade to choppy
+        #     (HMM detects recovery before SPY reclaims EMA50)
+        hmm_action = None
+        if hmm and not hmm.get("error"):
+            _p_bull = float(hmm.get("p_bull") or 0)
+            _p_bear = float(hmm.get("p_bear") or 0)
+            _conf   = float(hmm.get("confidence") or 0)
+
+            if regime4 == "risk_on_trending" and _p_bear >= 0.50:
+                regime4 = "risk_off_trending"
+                hmm_action = f"strong-bear ({_p_bear:.2f}) → risk_off"
+            elif regime4 in ("risk_on_trending", "risk_on_choppy") and _p_bear >= 0.50 and _conf >= 0.6:
+                if regime4 == "risk_on_trending":
+                    regime4 = "risk_off_trending"
+                    hmm_action = f"bear-confirmed ({_p_bear:.2f},c{_conf:.2f}) → risk_off"
+            elif regime4 == "risk_on_trending" and _p_bear >= 0.30:
+                regime4 = "risk_on_choppy"
+                hmm_action = f"bear-tail ({_p_bear:.2f}) → choppy"
+            elif regime4 == "risk_off_trending" and _p_bull >= 0.70 and _conf >= 0.6:
+                regime4 = "risk_on_choppy"
+                hmm_action = f"recovery ({_p_bull:.2f},c{_conf:.2f}) → choppy"
+
+            if hmm_action:
+                log.info(f"  Regime DOWNGRADED/UPGRADED by HMM: {hmm_action}")
+
         # Market cycle: four-phase model
         # Early bull: recovering from below 200d, breadth expanding
         # Mid bull: above all MAs, VIX low, cyclicals leading
@@ -2923,6 +2970,20 @@ def get_market_regime(breadth: dict | None = None) -> dict:
             "spy_daily_chg":        round(float(spy_daily_chg), 2),
             "distribution_days":    dist_days,
             "distribution_state":   dist_state,
+            # HMM probability blend (gap #5)
+            "hmm_regime":           hmm,
+            "hmm_action":           hmm_action,
+            # Composite blended sizing multiplier across all 3 HMM probs.
+            # Replaces compute_regime_confidence_modifier()'s p_bull-only
+            # logic with a continuous blend that uses the full distribution.
+            "hmm_size_mult": (
+                round(
+                    float(hmm.get("p_bull") or 0) * 1.00 +
+                    float(hmm.get("p_neutral") or 0) * 0.70 +
+                    float(hmm.get("p_bear") or 0) * 0.40,
+                    3,
+                ) if (hmm and not hmm.get("error")) else 1.0
+            ),
             "market_cycle":         market_cycle,
             "vix":                  vix_data,
             "vix_current":          vix_cur,
