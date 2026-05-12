@@ -3629,6 +3629,11 @@ def main():
             # downstream UI code can reference either.
             all_rich[t]["stage"] = "KILLED"
             all_rich[t]["verdict"] = "AVOID"
+            # Boolean flag for frontend filtering (Signal Scanner default
+            # 'all' view excludes killed via `!t.killed`). Without this
+            # explicit True, the field defaults to None/falsy and 263 killed
+            # tickers leak into the 'all' view as AVOID badges.
+            all_rich[t]["killed"] = True
             kr = src.get("reject_reason") or src.get("kill_reason") or ""
             if kr:
                 all_rich[t]["kill_reason"]   = kr

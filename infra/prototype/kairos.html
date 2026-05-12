@@ -11952,12 +11952,14 @@ const QuantScanner = (function() {
     // Horizon filter (swing / position / invest / all)
     if (_state.mode !== 'all' && t._mode && t._mode !== _state.mode) return false;
     // Verdict / state filter
-    if (_state.filter === 'all') return !t.killed;
-    if (_state.filter === 'killed') return !!t.killed;
+    // 'all' = actionable signals only (exclude killed AND AVOID-stage).
+    // Use 'killed' filter explicitly to investigate rejected tickers.
+    if (_state.filter === 'all') return !t.killed && t.verdict !== 'AVOID' && t.stage !== 'AVOID';
+    if (_state.filter === 'killed') return !!t.killed || t.verdict === 'AVOID' || t.stage === 'AVOID';
     if (_state.filter === 'buy')   return t.verdict === 'BUY' && !t.killed;
     if (_state.filter === 'watch') return (t.verdict === 'WATCH' || t.verdict === 'WAIT') && !t.killed;
-    if (_state.filter === 'short') return t.verdict === 'SHORT' && !t.killed;
-    if (_state.filter === 'avoid') return t.verdict === 'AVOID' && !t.killed;
+    if (_state.filter === 'short') return (t.verdict === 'SHORT' || t.verdict === 'SELL') && !t.killed;
+    if (_state.filter === 'avoid') return (t.verdict === 'AVOID' || t.stage === 'AVOID') && !t.killed;
     if (_state.filter === 'earnings_safe') return (!t.earn_days || t.earn_days >= 14) && !t.killed;
     if (_state.filter === 'fresh') return ['FRESH','PULLBACK','VALID'].includes(t.entry_quality) && !t.killed;
     return true;
@@ -14451,7 +14453,7 @@ window.QuantDetail = (function() {
       <div class="qd-tile"><div class="qd-tile-k">ATR</div><div class="qd-tile-v ${atrPct > 5 ? 'am' : ''}">${atrPct != null ? atrPct.toFixed(1) + '%' : '—'}</div></div>
       <div class="qd-tile"><div class="qd-tile-k">EMA50</div><div class="qd-tile-v ${above50 ? 'gn' : 'rd'}">${above50 ? '↑' : '↓'}</div></div>
       <div class="qd-tile"><div class="qd-tile-k">SMA200</div><div class="qd-tile-v ${above200 ? 'gn' : 'rd'}">${above200 ? '↑' : '↓'}</div></div>
-      <div class="qd-tile"><div class="qd-tile-k">MACD</div><div class="qd-tile-v ${macdH > 0 ? 'gn' : macdH < 0 ? 'rd' : 'dim'}">${macdH != null ? (macdH > 0 ? '↑' : macdH < 0 ? '↓' : '·') : '↓'}</div></div>
+      <div class="qd-tile"><div class="qd-tile-k">MACD</div><div class="qd-tile-v ${macdH > 0 || _g('macd_bullish') === true ? 'gn' : macdH < 0 || _g('macd_bullish') === false ? 'rd' : 'dim'}">${macdH > 0 ? '↑' : macdH < 0 ? '↓' : _g('macd_bullish') === true ? '↑' : _g('macd_bullish') === false ? '↓' : '·'}</div></div>
       <div class="qd-tile"><div class="qd-tile-k">SQUEEZE</div><div class="qd-tile-v ${sqzFired ? 'gn' : sqzOn ? 'am' : 'dim'}">${sqzFired ? 'fired' : sqzOn ? 'on' : 'off'}</div></div>
     </div>`;
     const techCard = _card('TECHNICALS', '', techBody);
