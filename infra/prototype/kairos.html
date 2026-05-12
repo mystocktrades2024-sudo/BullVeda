@@ -12363,9 +12363,21 @@ const QuantScanner = (function() {
     }
     return true;
   }
+  // Entry-quality rank for sort (better entries get higher rank in desc).
+  // ENTRY-Q-SORT (2026-05-12): string sort would give alphabetical order
+  // (EXTENDED < FRESH < MISSED < PULLBACK < VALID) — meaningless. This map
+  // sorts by actual entry quality so clicking "Entry" header surfaces
+  // FRESH/PULLBACK first in desc, EXTENDED/MISSED last.
+  const _ENTRY_Q_RANK = { FRESH: 5, PULLBACK: 4, VALID: 3, EXTENDED: 2, MISSED: 1 };
   function _sortFn(a, b) {
     const k = _state.sortKey;
-    const av = a[k], bv = b[k];
+    let av = a[k], bv = b[k];
+    // Special-case entry_quality — sort by quality rank, not alphabetically
+    if (k === 'entry_quality') {
+      av = _ENTRY_Q_RANK[(av || '').toUpperCase()] || 0;
+      bv = _ENTRY_Q_RANK[(bv || '').toUpperCase()] || 0;
+      return _state.sortDir === 'desc' ? (bv - av) : (av - bv);
+    }
     if (av == null && bv == null) return 0;
     if (av == null) return 1;
     if (bv == null) return -1;
