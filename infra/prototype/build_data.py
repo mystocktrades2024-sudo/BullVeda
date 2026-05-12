@@ -2584,17 +2584,47 @@ def main():
     print(f"medium_term n={len(medium_term)} mode=position stages={dict(Counter(r['stage'] for r in medium_term))}")
     print(f"long_term   n={len(long_term)} mode=invest   stages={dict(Counter(r['stage'] for r in long_term))}")
 
-    # Top-N from all_scored for Screener tab.
-    # Filter out AVOID/SELL/SHORT verdicts — the Screener tab shows
-    # actionable swing opportunities (BUY / WATCH). Killed/AVOID rows live
-    # in the dedicated Killed tab. Pre-filter then take top 50 by score
-    # so we don't waste the slot quota on rejected tickers (today: KOD
-    # score=60 stage=AVOID was leaking in pre-fix).
-    _actionable_stages = {"BUY", "WATCH", "WAIT", "ADD"}
-    all_scored = sorted(b.get("all_scored") or [], key=lambda r: r.get("score", 0), reverse=True)
-    all_scored = [r for r in all_scored
-                  if r.get("ticker") and stage_of(r) in _actionable_stages][:50]
-    screener_rows = [compact_row(r) for r in all_scored]
+    # Top-N for Scanner tab. Show actionable signals only:
+    # BUY (long entry), WATCH (forming setup), SELL/SHORT (bear entry).
+    # AVOID/KILLED rows live ONLY in the dedicated Killed tab.
+    # Source pool = all_scored UNION near_short_blocked. SHORT signals
+    # don't appear in all_scored (separate list from bear-setup detection)
+    # and tend to score lower than long WATCH rows, so they'd never make
+    # the top-50 by score. Reserve up to 10 slots for SHORT signals, then
+    # fill the rest with top-scoring longs (BUY/WATCH).
+    _actionable_stages = {"BUY", "WATCH", "WAIT", "ADD", "SELL", "SHORT"}
+    _short_pool = b.get("near_short_blocked") or []
+    _short_set = {(r.get("ticker") or "") for r in _short_pool}
+    _SHORT_SLOT_CAP = 10
+
+    # SHORT slots first
+    _shorts_sorted = sorted(_short_pool, key=lambda r: r.get("score", 0) or 0, reverse=True)
+    _short_picks = [r for r in _shorts_sorted if r.get("ticker")][:_SHORT_SLOT_CAP]
+    _picked_tickers = {r.get("ticker") for r in _short_picks}
+
+    # Remaining slots → top-scoring longs (BUY/WATCH/etc.) from all_scored,
+    # excluding any ticker already picked as a SHORT.
+    _remaining = 50 - len(_short_picks)
+    _longs_sorted = sorted(b.get("all_scored") or [],
+                           key=lambda r: r.get("score", 0) or 0, reverse=True)
+    _long_picks = []
+    for r in _longs_sorted:
+        t = r.get("ticker")
+        if not t or t in _picked_tickers:
+            continue
+        if stage_of(r) not in _actionable_stages:
+            continue
+        _long_picks.append(r)
+        _picked_tickers.add(t)
+        if len(_long_picks) >= _remaining:
+            break
+
+    _scanner_pool = _short_picks + _long_picks
+    screener_rows = [compact_row(r) for r in _scanner_pool]
+    # Force SELL on near_short tickers (mirror short_term logic above)
+    for cr in screener_rows:
+        if cr.get("ticker") in _short_set:
+            cr["stage"] = "SELL"
 
     # Themes — flatten each thematic list to a compact array
     themes = {}
