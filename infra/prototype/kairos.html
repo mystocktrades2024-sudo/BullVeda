@@ -12332,23 +12332,34 @@ const QuantScanner = (function() {
     if (_state.filter === 'avoid') return (t.verdict === 'AVOID' || t.stage === 'AVOID') && !t.killed;
     if (_state.filter === 'earnings_safe') return (!t.earn_days || t.earn_days >= 14) && !t.killed;
     if (_state.filter === 'fresh') return ['FRESH','PULLBACK','VALID'].includes(t.entry_quality) && !t.killed;
-    // ENTRY-QUALITY-FILTER (2026-05-12 v2) — original v1 filtered on the
-    // entry_low/entry_high band, but that band is computed as price ±
-    // ATR_offset and always brackets current price by construction (100%
-    // of tickers "in zone" — useless filter). v2 uses the entry_quality
-    // classifier which is the meaningful signal:
-    //   FRESH / PULLBACK = textbook entry → ⚡ in zone NOW
-    //   VALID            = acceptable entry → ◇ near zone
-    //   EXTENDED / MISSED = too late → don't take
+    // ENTRY-QUALITY-FILTER · strategy-aware (2026-05-12 v3)
+    // Acceptance bands widen for POSITION/INVESTMENT because longer-horizon
+    // trades can accept more extended entries (still have weeks/months to
+    // accumulate on retraces). Strategy override read from URL ?strategy=.
+    //   SWING:      in_zone = FRESH/PULLBACK · near_zone = VALID
+    //   POSITION:   in_zone = FRESH/PULLBACK/VALID · near_zone = EXTENDED
+    //   INVESTMENT: in_zone = anything except MISSED · near_zone = MISSED
+    const _wlStrat = (() => {
+      try {
+        const p = new URLSearchParams(location.search).get('strategy');
+        if (!p) return 'SWING';
+        const u = p.toUpperCase();
+        return ['SWING','POSITION','INVESTMENT'].includes(u) ? u : 'SWING';
+      } catch { return 'SWING'; }
+    })();
     if (_state.filter === 'in_zone') {
       if (t.killed || t.verdict === 'AVOID' || t.stage === 'AVOID') return false;
       const eq = (t.entry_quality || '').toUpperCase();
-      return eq === 'FRESH' || eq === 'PULLBACK';
+      if (_wlStrat === 'INVESTMENT') return eq !== 'MISSED' && eq !== '';
+      if (_wlStrat === 'POSITION')   return ['FRESH','PULLBACK','VALID'].includes(eq);
+      return eq === 'FRESH' || eq === 'PULLBACK';  // SWING
     }
     if (_state.filter === 'near_zone') {
       if (t.killed || t.verdict === 'AVOID' || t.stage === 'AVOID') return false;
       const eq = (t.entry_quality || '').toUpperCase();
-      return eq === 'VALID';
+      if (_wlStrat === 'INVESTMENT') return eq === 'MISSED';
+      if (_wlStrat === 'POSITION')   return eq === 'EXTENDED';
+      return eq === 'VALID';  // SWING
     }
     return true;
   }
@@ -16374,130 +16385,210 @@ window.QuantDetail = (function() {
     })();
 
     // ── TOP 3 SUPPORTING FACTS — pick strongest signals in the call's direction
+    // Strategy-specific category weights — heavier weight for facts/risks
+    // relevant to the active horizon. SWING leans on TECH/QUANT, POSITION on
+    // VALUE+TECH, INVESTMENT on VALUE+FUNDAMENTAL.
+    const _catWeight = (cat) => {
+      const W = {
+        SWING:      { TECH:1.5, QUANT:1.3, FLOW:1.2, VALUE:0.6, EARN:0.8, MACRO:0.7 },
+        POSITION:   { TECH:1.0, QUANT:1.0, FLOW:1.0, VALUE:1.3, EARN:1.2, MACRO:1.0 },
+        INVESTMENT: { TECH:0.4, QUANT:0.6, FLOW:0.6, VALUE:1.8, EARN:0.8, MACRO:1.2 },
+      }[horizon.name] || {};
+      return W[cat] != null ? W[cat] : 1.0;
+    };
     const supportingFacts = (() => {
       const candidates = [];
-      // Bullish facts
+      // Bullish facts — each tagged with a category so we can reweight per strategy
       if (callDir === 'BULLISH' || analystCall === 'WATCH') {
-        if (rsRank != null && rsRank >= 75) candidates.push({ score: rsRank, text: `RS rank <b class="qov-gn">${rsRank.toFixed(0)}/100</b> — top-quartile relative strength vs SPY (252d)` });
-        if (edge != null && edge >= 15) candidates.push({ score: edge, text: `Monte Carlo edge <b class="qov-gn">+${edge.toFixed(0)}pp</b> — P(T1)=${mcPT1.toFixed(0)}% vs P(stop)=${mcPS.toFixed(0)}%` });
-        if (rr >= 3) candidates.push({ score: rr * 20, text: `Risk/reward <b class="qov-gn">${effRR.toFixed(1)}:1</b> at entry zone — above 3:1 institutional floor` });
-        if (sqzFired) candidates.push({ score: 70, text: `TTM squeeze <b class="qov-gn">FIRED</b> bullish — historically high follow-through on momentum expansion` });
-        if (insiderBuys > 0 && insiderBuys > insiderSells) candidates.push({ score: 60 + insiderBuys, text: `Insider activity: <b class="qov-gn">${insiderBuys} buys</b> vs ${insiderSells} sells (30d)` });
-        if (uoaCalls > 0) candidates.push({ score: 60 + uoaCalls * 5, text: `Unusual options activity: <b class="qov-gn">${uoaCalls} call(s)</b> with volume &gt; 3× OI` });
-        if (revGr != null && revGr > 15) candidates.push({ score: 60 + revGr, text: `Revenue growth <b class="qov-gn">+${revGr.toFixed(1)}% YoY</b> — above 15% threshold` });
-        if (fcfMgn != null && fcfMgn > 15) candidates.push({ score: 60 + fcfMgn, text: `FCF margin <b class="qov-gn">+${fcfMgn.toFixed(1)}%</b> — strong cash generation` });
-        if (peg != null && peg < 1.0) candidates.push({ score: 60 + (1 - peg) * 40, text: `PEG <b class="qov-gn">${peg.toFixed(2)}</b> — growth at reasonable price` });
-        if (recentEarn.length >= 2 && beatCount / recentEarn.length >= 0.75) candidates.push({ score: 70, text: `Earnings track record: <b class="qov-gn">${beatCount}/${recentEarn.length} recent prints beat</b> consensus` });
-        if (revUp30 != null && revDown30 != null && revUp30 > revDown30) candidates.push({ score: 50 + revUp30 * 5, text: `Analyst revisions 30d: <b class="qov-gn">↑${revUp30} / ↓${revDown30}</b> — net bullish` });
-        if (above50 && above200) candidates.push({ score: 50, text: `Price above both EMA50 and SMA200 — bullish technical stack` });
-        if (newsAvg > 0.05) candidates.push({ score: 50 + Math.abs(newsAvg) * 100, text: `News sentiment <b class="qov-gn">improving</b> (${newsCount == null ? '' : newsCount + ' articles, '}avg sentiment ${(newsAvg).toFixed(2)})` });
+        if (rsRank != null && rsRank >= 75) candidates.push({ cat:'TECH', score: rsRank, text: `RS rank <b class="qov-gn">${rsRank.toFixed(0)}/100</b> — top-quartile relative strength vs SPY (252d)` });
+        if (edge != null && edge >= 15) candidates.push({ cat:'QUANT', score: edge, text: `Monte Carlo edge <b class="qov-gn">+${edge.toFixed(0)}pp</b> — P(T1)=${mcPT1.toFixed(0)}% vs P(stop)=${mcPS.toFixed(0)}%` });
+        if (effRR >= 3) candidates.push({ cat:'TECH', score: effRR * 20, text: `Risk/reward <b class="qov-gn">${effRR.toFixed(1)}:1</b> at entry zone — above 3:1 institutional floor` });
+        if (sqzFired) candidates.push({ cat:'TECH', score: 70, text: `TTM squeeze <b class="qov-gn">FIRED</b> bullish — historically high follow-through on momentum expansion` });
+        if (insiderBuys > 0 && insiderBuys > insiderSells) candidates.push({ cat:'FLOW', score: 60 + insiderBuys, text: `Insider activity: <b class="qov-gn">${insiderBuys} buys</b> vs ${insiderSells} sells (30d)` });
+        if (uoaCalls > 0) candidates.push({ cat:'FLOW', score: 60 + uoaCalls * 5, text: `Unusual options activity: <b class="qov-gn">${uoaCalls} call(s)</b> with volume &gt; 3× OI` });
+        if (revGr != null && revGr > 15) candidates.push({ cat:'VALUE', score: 60 + revGr, text: `Revenue growth <b class="qov-gn">+${revGr.toFixed(1)}% YoY</b> — above 15% threshold` });
+        if (fcfMgn != null && fcfMgn > 15) candidates.push({ cat:'VALUE', score: 60 + fcfMgn, text: `FCF margin <b class="qov-gn">+${fcfMgn.toFixed(1)}%</b> — strong cash generation` });
+        if (peg != null && peg < 1.0) candidates.push({ cat:'VALUE', score: 60 + (1 - peg) * 40, text: `PEG <b class="qov-gn">${peg.toFixed(2)}</b> — growth at reasonable price` });
+        if (roe != null && roe > 15) candidates.push({ cat:'VALUE', score: 60 + roe, text: `ROE <b class="qov-gn">${roe.toFixed(1)}%</b> — high return on capital (quality compounder signal)` });
+        if (upside != null && upside > 15) candidates.push({ cat:'VALUE', score: 60 + upside, text: `Analyst PT upside <b class="qov-gn">+${upside.toFixed(1)}%</b> (PT ${tgtMean == null ? '—' : '$' + tgtMean.toFixed(0)}) — long-term value gap` });
+        if (recentEarn.length >= 2 && beatCount / recentEarn.length >= 0.75) candidates.push({ cat:'EARN', score: 70, text: `Earnings track record: <b class="qov-gn">${beatCount}/${recentEarn.length} recent prints beat</b> consensus` });
+        if (revUp30 != null && revDown30 != null && revUp30 > revDown30) candidates.push({ cat:'EARN', score: 50 + revUp30 * 5, text: `Analyst revisions 30d: <b class="qov-gn">↑${revUp30} / ↓${revDown30}</b> — net bullish` });
+        if (above50 && above200) candidates.push({ cat:'TECH', score: 50, text: `Price above both EMA50 and SMA200 — bullish technical stack` });
+        if (newsAvg > 0.05) candidates.push({ cat:'FLOW', score: 50 + Math.abs(newsAvg) * 100, text: `News sentiment <b class="qov-gn">improving</b> (${newsCount == null ? '' : newsCount + ' articles, '}avg sentiment ${(newsAvg).toFixed(2)})` });
       }
-      // Bearish facts (for SHORT or for risk side of WATCH)
       if (callDir === 'BEARISH') {
-        if (regime === 'panic') candidates.push({ score: 100, text: `Market regime <b class="qov-rd">PANIC</b> — no long setups historically work; defensive only` });
-        if (edge != null && edge < -5) candidates.push({ score: -edge, text: `Negative MC edge: P(stop) ${mcPS.toFixed(0)}% &gt; P(T1) ${mcPT1.toFixed(0)}%` });
-        if (mcPS != null && mcPS > 50) candidates.push({ score: mcPS, text: `Monte Carlo: P(stop hit first) <b class="qov-rd">${mcPS.toFixed(0)}%</b>` });
-        if (insiderSells > insiderBuys && insiderSells > 0) candidates.push({ score: 60 + insiderSells, text: `Insider distribution: <b class="qov-rd">${insiderSells} sells</b> vs ${insiderBuys || 0} buys (30d)` });
-        if (fwdPE != null && fwdPE > 40) candidates.push({ score: fwdPE, text: `Forward P/E <b class="qov-rd">${fwdPE.toFixed(1)}</b> — significantly above sector` });
-        if (revGr != null && revGr < 0) candidates.push({ score: 60 - revGr, text: `Revenue contracting <b class="qov-rd">${revGr.toFixed(1)}%</b> YoY` });
-        if (revUp30 != null && revDown30 != null && revDown30 > revUp30) candidates.push({ score: 50 + revDown30 * 5, text: `Analyst revisions 30d: <b class="qov-rd">↑${revUp30} / ↓${revDown30}</b> — net bearish` });
-        if (cohortTag === 'COLD') candidates.push({ score: 60, text: `Sector cohort tag <b class="qov-rd">COLD</b> (avg ${cohortAvgScore == null ? '—' : cohortAvgScore.toFixed(1)}) — peer weakness` });
+        if (regime === 'panic') candidates.push({ cat:'MACRO', score: 100, text: `Market regime <b class="qov-rd">PANIC</b> — no long setups historically work; defensive only` });
+        if (edge != null && edge < -5) candidates.push({ cat:'QUANT', score: -edge, text: `Negative MC edge: P(stop) ${mcPS.toFixed(0)}% &gt; P(T1) ${mcPT1.toFixed(0)}%` });
+        if (mcPS != null && mcPS > 50) candidates.push({ cat:'QUANT', score: mcPS, text: `Monte Carlo: P(stop hit first) <b class="qov-rd">${mcPS.toFixed(0)}%</b>` });
+        if (insiderSells > insiderBuys && insiderSells > 0) candidates.push({ cat:'FLOW', score: 60 + insiderSells, text: `Insider distribution: <b class="qov-rd">${insiderSells} sells</b> vs ${insiderBuys || 0} buys (30d)` });
+        if (fwdPE != null && fwdPE > 40) candidates.push({ cat:'VALUE', score: fwdPE, text: `Forward P/E <b class="qov-rd">${fwdPE.toFixed(1)}</b> — significantly above sector` });
+        if (revGr != null && revGr < 0) candidates.push({ cat:'VALUE', score: 60 - revGr, text: `Revenue contracting <b class="qov-rd">${revGr.toFixed(1)}%</b> YoY` });
+        if (revUp30 != null && revDown30 != null && revDown30 > revUp30) candidates.push({ cat:'EARN', score: 50 + revDown30 * 5, text: `Analyst revisions 30d: <b class="qov-rd">↑${revUp30} / ↓${revDown30}</b> — net bearish` });
+        if (cohortTag === 'COLD') candidates.push({ cat:'MACRO', score: 60, text: `Sector cohort tag <b class="qov-rd">COLD</b> (avg ${cohortAvgScore == null ? '—' : cohortAvgScore.toFixed(1)}) — peer weakness` });
       }
-      candidates.sort((a, b) => b.score - a.score);
+      // Apply strategy-specific category weight
+      candidates.forEach(c => { c.wScore = c.score * _catWeight(c.cat); });
+      candidates.sort((a, b) => b.wScore - a.wScore);
       const top = candidates.slice(0, 3);
       if (top.length === 0) {
         return `<li class="qov-dim">No standout supporting facts in current dataset — see EVIDENCE PACK below.</li>`;
       }
-      return top.map(c => `<li>${c.text}</li>`).join('');
+      return top.map(c => `<li>${c.text}<span style="font-size:9.5px;color:var(--ink-3);margin-left:6px;font-family:var(--mono)">[${c.cat} · w=${_catWeight(c.cat).toFixed(1)}×]</span></li>`).join('');
     })();
 
-    // ── TOP 3 RISKS — specific, observable, ranked by severity
+    // ── TOP 3 RISKS — specific, observable, strategy-weighted
     const risksList = (() => {
       const candidates = [];
-      if (stop && px) candidates.push({ score: 100, text: `<b>Hard stop hit:</b> close below <b class="qov-rd">$${effStop.toFixed(2)}</b> (${stopPctSigned == null ? '—' : Math.abs(stopPctSigned).toFixed(1)}% adverse) — thesis broken, exit no questions.` });
-      if (earnDays != null && earnDays >= 0 && earnDays <= 14) candidates.push({ score: 90, text: `<b>Earnings binary:</b> print in <b class="qov-am">${earnDays}d</b> with implied move <b>${impMove == null ? '—' : '±' + impMove.toFixed(1) + '%'}</b> — overnight gap risk dwarfs intraday stop discipline.` });
-      if (regime !== 'panic') candidates.push({ score: 60, text: `<b>Regime shift:</b> if regime flips to <b class="qov-rd">panic</b> (VIX &gt; 35 OR breadth &lt; 20%), all longs go to cash regardless of single-name technicals.` });
-      if (fwdCvar != null && fwdCvar < -10) candidates.push({ score: 80, text: `<b>Tail risk:</b> CVaR-97.5% <b class="qov-rd">${fwdCvar.toFixed(1)}%</b> (${fwdHorizon || 10}d) — tail loss exceeds nominal stop; check options hedge.` });
-      if (advDol != null && advDol < 5e6) candidates.push({ score: 75, text: `<b>Liquidity:</b> ADV <b class="qov-rd">${_money(advDol)}</b> &lt; $5M floor — slippage at exit may exceed 0.5%.` });
-      if (shortFloat != null && shortFloat > 25) candidates.push({ score: 70, text: `<b>Squeeze risk:</b> short float <b class="qov-am">${shortFloat.toFixed(1)}%</b>, days-to-cover ${daysToCover == null ? '—' : daysToCover.toFixed(1)}d — gamma squeeze on adverse moves.` });
-      if (cohortTag === 'COLD') candidates.push({ score: 65, text: `<b>Cohort weakness:</b> sector cohort tag <b class="qov-rd">COLD</b> — single-name picks underperform when peer breadth deteriorates.` });
-      if (eqBad) candidates.push({ score: 85, text: `<b>Entry extension:</b> entry quality <b class="qov-rd">${eqRaw}</b> — chase territory; risk/reward at current price likely below 3:1.` });
-      if (_dataCheck.flag !== 'COMPLETE') candidates.push({ score: 50, text: `<b>Data risk:</b> completeness flag <b class="qov-am">${_dataCheck.flag}</b> — ${_dataCheck.missCore.length ? 'missing core: ' + _dataCheck.missCore.join(', ') : 'missing quality: ' + _dataCheck.missQuality.slice(0, 3).join(', ')}.` });
+      if (stop && px) candidates.push({ cat:'TECH', score: 100, text: `<b>Hard stop hit:</b> close below <b class="qov-rd">$${effStop.toFixed(2)}</b> (${stopPctSigned == null ? '—' : Math.abs(stopPctSigned).toFixed(1)}% adverse) — thesis broken, exit no questions.` });
+      if (earnDays != null && earnDays >= 0 && earnDays <= 14) candidates.push({ cat:'EARN', score: 90, text: `<b>Earnings binary:</b> print in <b class="qov-am">${earnDays}d</b> with implied move <b>${impMove == null ? '—' : '±' + impMove.toFixed(1) + '%'}</b> — overnight gap risk dwarfs intraday stop discipline.` });
+      if (regime !== 'panic') candidates.push({ cat:'MACRO', score: 60, text: `<b>Regime shift:</b> if regime flips to <b class="qov-rd">panic</b> (VIX &gt; 35 OR breadth &lt; 20%), all longs go to cash regardless of single-name technicals.` });
+      if (fwdCvar != null && fwdCvar < -10) candidates.push({ cat:'QUANT', score: 80, text: `<b>Tail risk:</b> CVaR-97.5% <b class="qov-rd">${fwdCvar.toFixed(1)}%</b> (${fwdHorizon || 10}d) — tail loss exceeds nominal stop; check options hedge.` });
+      if (advDol != null && advDol < 5e6) candidates.push({ cat:'FLOW', score: 75, text: `<b>Liquidity:</b> ADV <b class="qov-rd">${_money(advDol)}</b> &lt; $5M floor — slippage at exit may exceed 0.5%.` });
+      if (shortFloat != null && shortFloat > 25) candidates.push({ cat:'FLOW', score: 70, text: `<b>Squeeze risk:</b> short float <b class="qov-am">${shortFloat.toFixed(1)}%</b>, days-to-cover ${daysToCover == null ? '—' : daysToCover.toFixed(1)}d — gamma squeeze on adverse moves.` });
+      if (cohortTag === 'COLD') candidates.push({ cat:'MACRO', score: 65, text: `<b>Cohort weakness:</b> sector cohort tag <b class="qov-rd">COLD</b> — single-name picks underperform when peer breadth deteriorates.` });
+      if (eqBad) candidates.push({ cat:'TECH', score: 85, text: `<b>Entry extension:</b> entry quality <b class="qov-rd">${eqRaw}</b> — chase territory; risk/reward at current price likely below 3:1.` });
+      if (_dataCheck.flag !== 'COMPLETE') candidates.push({ cat:'QUANT', score: 50, text: `<b>Data risk:</b> completeness flag <b class="qov-am">${_dataCheck.flag}</b> — ${_dataCheck.missCore.length ? 'missing core: ' + _dataCheck.missCore.join(', ') : 'missing quality: ' + _dataCheck.missQuality.slice(0, 3).join(', ')}.` });
       const failChecklist = (_g('reaction_checklist') || []).filter(r => !r.checked);
-      if (failChecklist.length >= 2) candidates.push({ score: 55, text: `<b>Reaction-checklist gaps:</b> ${failChecklist.slice(0, 2).map(r => r.item).join(' · ')}.` });
-      candidates.sort((a, b) => b.score - a.score);
+      if (failChecklist.length >= 2) candidates.push({ cat:'TECH', score: 55, text: `<b>Reaction-checklist gaps:</b> ${failChecklist.slice(0, 2).map(r => r.item).join(' · ')}.` });
+      // Strategy-specific risks injected
+      if (horizon.name === 'POSITION') {
+        if (revUp30 != null && revDown30 != null && revDown30 > revUp30) candidates.push({ cat:'EARN', score: 90, text: `<b>Quarterly-cycle risk:</b> analyst revisions <b class="qov-rd">↓${revDown30} / ↑${revUp30}</b> — POSITION thesis (multi-quarter compounding) breaks if next 2 prints miss.` });
+        if (fwdPE != null && fwdPE > 40) candidates.push({ cat:'VALUE', score: 70, text: `<b>Multiple compression:</b> fwd P/E <b class="qov-rd">${fwdPE.toFixed(1)}</b> elevated — POSITION hold exposed to multi-quarter de-rating if growth disappoints.` });
+      }
+      if (horizon.name === 'INVESTMENT') {
+        if (debtEq != null && debtEq > 3) candidates.push({ cat:'VALUE', score: 95, text: `<b>Solvency / leverage risk:</b> D/E <b class="qov-rd">${debtEq.toFixed(1)}</b> elevated — INVESTMENT-grade compounders should have D/E &lt; 2 (Graham balance-sheet test fails).` });
+        if (fcfMgn != null && fcfMgn < 5) candidates.push({ cat:'VALUE', score: 85, text: `<b>Cash-generation risk:</b> FCF margin <b class="qov-rd">${fcfMgn.toFixed(1)}%</b> — INVESTMENT thesis depends on durable FCF; sub-5% margins fragile to cost shocks.` });
+        candidates.push({ cat:'MACRO', score: 75, text: `<b>Secular risk:</b> 1Y+ hold exposed to regulatory shifts, secular demand changes, M&amp;A activity, and macro regime changes outside the model's 10d empirical horizon.` });
+      }
+      if (horizon.name === 'SWING' && earnDays != null && earnDays > 14 && earnDays <= 90) {
+        candidates.push({ cat:'EARN', score: 60, text: `<b>Catalyst out of SWING window:</b> earnings in ${earnDays}d — SWING (14d) ends before catalyst fires. POSITION reframe may be more honest.` });
+      }
+      // Apply strategy-specific category weight (same weights as facts)
+      candidates.forEach(c => { c.wScore = c.score * _catWeight(c.cat); });
+      candidates.sort((a, b) => b.wScore - a.wScore);
       const top = candidates.slice(0, 3);
       if (top.length === 0) return `<li class="qov-dim">No specific risks surfaced — absence of risk evidence is not evidence of safety.</li>`;
-      return top.map(c => `<li>${c.text}</li>`).join('');
+      return top.map(c => `<li>${c.text}<span style="font-size:9.5px;color:var(--ink-3);margin-left:6px;font-family:var(--mono)">[${c.cat} · w=${_catWeight(c.cat).toFixed(1)}×]</span></li>`).join('');
     })();
 
-    // ── INVALIDATION CONDITION — what proves this call wrong
+    // ── INVALIDATION CONDITION — strategy-specific wording
     const invalidation = (() => {
       if (analystCall === 'BUY') {
-        return `Close below <b class="qov-rd">$${effStop.toFixed(2)}</b> on volume (${stopPctSigned == null ? '—' : Math.abs(stopPctSigned).toFixed(1)}% adverse). Also invalidated if: regime flips to <b>panic</b>; ${eqRaw === 'FRESH' ? 'price extends &gt; 2 ATR above entry zone before action' : 'pullback violates the value zone'}; earnings miss with negative guidance (if in window).`;
+        if (horizon.name === 'SWING') {
+          return `Close below <b class="qov-rd">$${effStop.toFixed(2)}</b> on volume (${stopPctSigned == null ? '—' : Math.abs(stopPctSigned).toFixed(1)}% adverse · 1.25× ATR). Also invalidated if: regime flips to <b>panic</b>; ${eqRaw === 'FRESH' ? 'price extends &gt; 2 ATR above entry zone before action' : 'pullback violates the value zone'}; earnings miss within 14d swing window.`;
+        }
+        if (horizon.name === 'POSITION') {
+          return `Close below <b class="qov-rd">$${effStop.toFixed(2)}</b> on volume (2× ATR stop · wider for multi-quarter hold). Also invalidated if: (a) <b>2 consecutive quarterly earnings miss + guide-down</b> — POSITION thesis depends on multi-quarter compounding; (b) regime flips to <b>risk_off_trending</b> for &gt; 30d; (c) sector ETF breaks down on volume (cohort weakness undermines single-name thesis); (d) M&amp;A speculation evaporates if that was part of the thesis.`;
+        }
+        // INVESTMENT
+        const ptRef = tgtMean != null ? '$' + (tgtMean * 0.78).toFixed(2) : `$${effStop.toFixed(2)}`;
+        return `Sustained close below <b class="qov-rd">${ptRef}</b> on volume (= analyst PT mean × 0.78, 22% margin-of-safety floor breached). Also invalidated if: (a) <b>structural thesis breaks</b> — regulatory action, secular demand shift, FCF turns negative for 2+ quarters, business-model change; (b) <b>dividend cut</b> (signals capital-allocation discipline failure); (c) debt-to-equity rises above 4.0 (balance-sheet deterioration); (d) D-rated quality grade (ROE &lt; 5% sustained, gross margins collapse).`;
       }
       if (analystCall === 'SHORT') {
         const upStop = wkHi != null ? `$${(wkHi * 1.02).toFixed(2)}` : `$${(px * 1.08).toFixed(2)}`;
         return `Daily close above <b class="qov-gn">${upStop}</b> on RVOL ≥ 1.5×. Also invalidated if: regime flips to <b>risk_on_trending</b>; positive surprise + guide-raise on next earnings print; institutional buying ramps (insider buys spike, UOA call-heavy).`;
       }
-      // WATCH
-      return `Watch is invalidated when: (a) any trigger above fires → call upgrades to BUY/SHORT, OR (b) thesis breaks structurally — close below <b class="qov-rd">$${effStop.toFixed(2)}</b> on volume invalidates the long thesis entirely (not WATCH); regime flips to panic or earnings miss with negative guidance.`;
+      // WATCH — same logic, strategy-aware stop reference
+      return `Watch is invalidated when: (a) any trigger above fires → call upgrades to BUY/SHORT, OR (b) thesis breaks structurally — close below <b class="qov-rd">$${effStop.toFixed(2)}</b>${horizon.name !== 'SWING' ? ` (${horizon.name} stop)` : ''} on volume invalidates the long thesis entirely; regime flips to panic or earnings miss with negative guidance.`;
     })();
 
     // ── CROSS-CHECK rendering with disagreement detection
+    // Lens narratives — adapt the metric mix per strategy. SWING emphasizes
+    // momentum/setup, POSITION emphasizes trend continuation + fundamentals,
+    // INVESTMENT emphasizes quality/value/durability.
     const _lensSwingTrading = () => {
       const parts = [];
       if (rsi != null) parts.push(`RSI ${rsi.toFixed(0)}${rsi > 70 ? ' (OB)' : rsi < 30 ? ' (OS)' : ''}`);
       parts.push(`MACD ${macdBull ? 'bull' : 'bear'}`);
-      if (adx != null) parts.push(`ADX ${adx.toFixed(0)}`);
-      if (rvol != null) parts.push(`RVOL ${rvol.toFixed(2)}×`);
-      if (sqzFired) parts.push('squeeze fired');
-      else if (sqzOn) parts.push('squeeze coiling');
-      if (rsRank != null) parts.push(`RS ${rsRank.toFixed(0)}/100`);
-      parts.push(`entry ${eqRaw || '—'}`);
+      if (horizon.name === 'SWING') {
+        // momentum-heavy
+        if (adx != null) parts.push(`ADX ${adx.toFixed(0)}`);
+        if (rvol != null) parts.push(`RVOL ${rvol.toFixed(2)}×`);
+        if (sqzFired) parts.push('squeeze fired');
+        else if (sqzOn) parts.push('squeeze coiling');
+        if (rsRank != null) parts.push(`RS ${rsRank.toFixed(0)}/100`);
+        parts.push(`entry ${eqRaw || '—'}`);
+      } else if (horizon.name === 'POSITION') {
+        // trend-continuation + multi-quarter levels
+        if (adx != null) parts.push(`ADX ${adx.toFixed(0)} (trend strength)`);
+        if (rsRank != null) parts.push(`RS ${rsRank.toFixed(0)}/100`);
+        parts.push(`above EMA50 ${above50 ? '✓' : '✗'}`);
+        parts.push(`above SMA200 ${above200 ? '✓' : '✗'} (multi-quarter trend)`);
+      } else {
+        // INVESTMENT — short-term tech de-weighted, only check trend integrity
+        parts.push(`above SMA200 ${above200 ? '✓ (long-term uptrend intact)' : '✗ (long-term downtrend — re-think)'}`);
+        if (rsRank != null) parts.push(`RS ${rsRank.toFixed(0)}/100 (annualized)`);
+        parts.push(`<i style="color:var(--ink-3)">short-term momentum filtered per INVESTMENT spec</i>`);
+      }
       return parts.join(', ');
     };
     const _lensHedgeFund = () => {
       const parts = [];
       parts.push(`regime ${regime.replace(/_/g, ' ')} (BAP ${score}/${regimeF})`);
+      if (horizon.name === 'INVESTMENT') {
+        // 1Y+ hold — Monte Carlo 63d is too short to drive call
+        if (mcPT1 != null && mcPS != null) parts.push(`MC edge ${edge >= 0 ? '+' : ''}${edge.toFixed(0)}pp <span style="color:var(--ink-3);font-size:11px">(63d sim — short for INVESTMENT)</span>`);
+        if (insiderBuys || insiderSells) parts.push(`insider ${insiderBuys}B/${insiderSells}S (long-term conviction signal)`);
+        if (newsMom) parts.push(`news ${newsMom}`);
+        return parts.join(', ');
+      }
       if (mcPT1 != null && mcPS != null) parts.push(`MC edge ${edge >= 0 ? '+' : ''}${edge.toFixed(0)}pp`);
+      if (horizon.name === 'POSITION' && mcPT1 != null) parts.push(`P(T1)=${mcPT1.toFixed(0)}% within ${horizon.catWindow || 90}d window`);
       if (insiderBuys || insiderSells) parts.push(`insider ${insiderBuys}B/${insiderSells}S`);
       if (uoaCalls > 0) parts.push(`UOA ${uoaCalls}C`);
       if (uoaPuts > 0) parts.push(`UOA ${uoaPuts}P`);
-      if (shortFloat != null) parts.push(`short ${shortFloat.toFixed(1)}%`);
+      if (horizon.name === 'SWING' && shortFloat != null) parts.push(`short ${shortFloat.toFixed(1)}%`);
       if (newsMom) parts.push(`news ${newsMom}`);
       return parts.join(', ');
     };
     const _lensValue = () => {
       const parts = [];
-      if (fwdPE != null) parts.push(`fwd P/E ${fwdPE.toFixed(1)}`);
-      if (peg != null) parts.push(`PEG ${peg.toFixed(2)}`);
-      if (revGr != null) parts.push(`rev ${revGr >= 0 ? '+' : ''}${revGr.toFixed(1)}%`);
-      if (fcfMgn != null) parts.push(`FCF ${fcfMgn >= 0 ? '+' : ''}${fcfMgn.toFixed(1)}%`);
-      if (roe != null) parts.push(`ROE ${roe.toFixed(1)}%`);
-      if (debtEq != null) parts.push(`D/E ${debtEq.toFixed(1)}`);
-      if (upside != null) parts.push(`PT upside ${upside >= 0 ? '+' : ''}${upside.toFixed(0)}%`);
+      if (horizon.name === 'INVESTMENT') {
+        // Quality-of-business + value-anchor heavy
+        if (roe != null) parts.push(`ROE <b>${roe.toFixed(1)}%</b>${roe > 15 ? ' (compounder grade)' : roe < 5 ? ' (sub-quality)' : ''}`);
+        if (fcfMgn != null) parts.push(`FCF margin <b>${fcfMgn >= 0 ? '+' : ''}${fcfMgn.toFixed(1)}%</b>${fcfMgn > 15 ? ' (durable cash gen)' : ''}`);
+        if (debtEq != null) parts.push(`D/E ${debtEq.toFixed(1)}${debtEq > 3 ? ' <span style="color:var(--rd)">(Graham fail)</span>' : ''}`);
+        if (upside != null) parts.push(`PT upside ${upside >= 0 ? '+' : ''}${upside.toFixed(0)}%${upside > 25 ? ' (large value gap)' : ''}`);
+        if (peg != null) parts.push(`PEG ${peg.toFixed(2)}${peg < 1.5 ? ' (growth at reasonable price)' : ''}`);
+        if (parts.length === 0) parts.push('fundamentals not wired — INVESTMENT call requires this data');
+      } else if (horizon.name === 'POSITION') {
+        // Multi-quarter compounding + reasonable valuation
+        if (fwdPE != null) parts.push(`fwd P/E ${fwdPE.toFixed(1)}`);
+        if (peg != null) parts.push(`PEG ${peg.toFixed(2)}`);
+        if (revGr != null) parts.push(`rev growth ${revGr >= 0 ? '+' : ''}${revGr.toFixed(1)}% (multi-quarter trajectory)`);
+        if (upside != null) parts.push(`PT upside ${upside >= 0 ? '+' : ''}${upside.toFixed(0)}%`);
+      } else {
+        // SWING — value is a sanity check, not the decision driver
+        if (fwdPE != null) parts.push(`fwd P/E ${fwdPE.toFixed(1)}`);
+        if (peg != null) parts.push(`PEG ${peg.toFixed(2)}`);
+        if (upside != null) parts.push(`PT upside ${upside >= 0 ? '+' : ''}${upside.toFixed(0)}%`);
+        parts.push(`<i style="color:var(--ink-3)">value sanity-checked, not decision-driving for SWING</i>`);
+      }
       return parts.length ? parts.join(', ') : 'fundamentals not wired';
     };
     const _lensEarnings = () => {
       const parts = [];
       if (earnDays != null && earnDays >= 0) parts.push(`ER +${earnDays}d`);
       else parts.push(earnHist.length ? 'no upcoming ER' : 'no earnings data');
-      if (impMove != null) parts.push(`implied ±${impMove.toFixed(1)}%`);
+      if (horizon.name === 'SWING' && impMove != null) parts.push(`implied ±${impMove.toFixed(1)}% (binary risk in window)`);
       if (recentEarn.length) parts.push(`${beatCount}/${recentEarn.length} beats`);
       if (medianSurp != null) parts.push(`median surprise ${medianSurp >= 0 ? '+' : ''}${medianSurp.toFixed(1)}%`);
       if (revUp30 != null && revDown30 != null) parts.push(`revs ↑${revUp30}/↓${revDown30}`);
+      if (horizon.name === 'POSITION') parts.push('multi-quarter revisions are the POSITION catalyst signal');
+      if (horizon.name === 'INVESTMENT' && recentEarn.length >= 4) parts.push(`<i style="color:var(--ink-3)">single-quarter print less material than multi-year EPS trajectory</i>`);
       if (ivRank != null) parts.push(`IV rank ${ivRank.toFixed(0)}`);
       return parts.join(', ');
     };
     const _lensCFP = () => {
       const parts = [];
-      if (finalAllocPct != null) parts.push(`Kelly ${finalAllocPct.toFixed(1)}%`);
+      if (finalAllocPct != null) parts.push(`Kelly ${finalAllocPct.toFixed(1)}%${horizon.name === 'POSITION' ? ' (× 1.3 POSITION boost)' : ''}`);
       if (beta != null) parts.push(`β ${beta.toFixed(2)}`);
       if (mcap != null) parts.push(`mcap ${_money(mcap)}`);
       if (advDol != null) parts.push(`ADV ${_money(advDol)}`);
+      if (horizon.name === 'INVESTMENT' && mcap != null && mcap >= 10e9) parts.push('<i style="color:var(--ink-3)">large-cap suits INVESTMENT — adequate liquidity for multi-year hold</i>');
+      if (horizon.name === 'POSITION' && advDol != null && advDol > 100e6) parts.push('<i style="color:var(--ink-3)">ample liquidity for 90d POSITION exit</i>');
       if (ddMult != null && ddMult < 1) parts.push(`DD haircut ${ddMult.toFixed(2)}×`);
-      if (erMult != null && erMult < 1) parts.push(`ER haircut ${erMult.toFixed(2)}×`);
+      if (erMult != null && erMult < 1 && horizon.name === 'SWING') parts.push(`ER haircut ${erMult.toFixed(2)}× (SWING binary risk)`);
       return parts.join(', ');
     };
     const lensSummaries = {
@@ -17830,18 +17921,38 @@ window.QuantDetail = (function() {
     // risk per spec data discipline).
     const stopATRmult = strategy.name === 'SWING' ? 1.25 : strategy.name === 'POSITION' ? 2.0 : 3.0;
     const riskMismatch = _stratPlan.riskHorizon !== (fwdHorizon || 10);
+    // Gaussian-scaling for VaR/CVaR: σ_T ≈ σ_t × √(T/t). This is a textbook
+    // approximation under iid log-returns — accurate for short-medium horizons,
+    // understates fat-tail risk at long horizons (no autocorrelation, no jumps).
+    // Show alongside the empirical 10d so the user sees both and the
+    // approximation is labeled honestly.
+    const _scaleFactor = (fwdHorizon && _stratPlan.riskHorizon) ? Math.sqrt(_stratPlan.riskHorizon / fwdHorizon) : 1;
+    const scaledVaR  = (fwdVar != null && riskMismatch)  ? fwdVar  * _scaleFactor : null;
+    const scaledCVaR = (fwdCvar != null && riskMismatch) ? fwdCvar * _scaleFactor : null;
     const riskEnv = `
       <div class="qpr-grid4">
         <div class="qpr-tile"><div class="qpr-tile-k">Stop $</div><div class="qpr-tile-v qov-rd">${effStop == null ? '—' : '$' + effStop.toFixed(2)}</div><div class="qpr-tile-sub">close-based · ${atrPct == null ? '—' : (atrPct * stopATRmult).toFixed(2) + '% ≈ ' + stopATRmult.toFixed(2) + '× ATR'}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">$ / share</div><div class="qpr-tile-v qov-rd">${riskPerShare == null ? '—' : '$' + riskPerShare.toFixed(2)}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">Total $ risk</div><div class="qpr-tile-v qov-rd">${totalRisk == null ? '—' : '−$' + Math.abs(totalRisk).toFixed(0)}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">% equity</div><div class="qpr-tile-v ${totalRisk == null ? 'qov-dim' : Math.abs(totalRisk)/refEq*100 <= 1 ? 'qov-gn' : 'qov-am'}">${totalRisk == null ? '—' : (Math.abs(totalRisk)/refEq*100).toFixed(2) + '%'}</div><div class="qpr-tile-sub">of $${refEq} ref</div></div>
-        <div class="qpr-tile"><div class="qpr-tile-k">VaR-95</div><div class="qpr-tile-v qov-am">${fwdVar == null ? '—' : (fwdVar >= 0 ? '+' : '') + fwdVar.toFixed(1) + '%'}</div><div class="qpr-tile-sub ${riskMismatch ? 'qov-am' : ''}">${fwdHorizon ? fwdHorizon + 'd empirical' : '—'}${riskMismatch ? ` · ${_stratPlan.riskHorizon}d not computed` : ''}</div></div>
-        <div class="qpr-tile"><div class="qpr-tile-k">CVaR-97.5</div><div class="qpr-tile-v qov-rd">${fwdCvar == null ? '—' : (fwdCvar >= 0 ? '+' : '') + fwdCvar.toFixed(1) + '%'}</div><div class="qpr-tile-sub ${riskMismatch ? 'qov-am' : ''}">tail loss · ${fwdHorizon || 10}d${riskMismatch ? ` (not ${_stratPlan.riskHorizon}d)` : ''}</div></div>
+        <div class="qpr-tile">
+          <div class="qpr-tile-k">VaR-95 <span style="font-size:9px;color:var(--ink-3);font-weight:600">empirical</span></div>
+          <div class="qpr-tile-v qov-am">${fwdVar == null ? '—' : (fwdVar >= 0 ? '+' : '') + fwdVar.toFixed(1) + '%'}</div>
+          <div class="qpr-tile-sub">${fwdHorizon ? fwdHorizon + 'd empirical' : '—'} (system)</div>
+        </div>
+        <div class="qpr-tile" style="${riskMismatch ? 'border-left:2px solid var(--amb)' : ''}">
+          <div class="qpr-tile-k">VaR-95 <span style="font-size:9px;color:var(--amb);font-weight:600">${riskMismatch ? '√t-scaled' : 'native'}</span></div>
+          <div class="qpr-tile-v qov-rd">${scaledVaR == null ? (fwdVar == null ? '—' : (fwdVar >= 0 ? '+' : '') + fwdVar.toFixed(1) + '%') : (scaledVaR >= 0 ? '+' : '') + scaledVaR.toFixed(1) + '%'}</div>
+          <div class="qpr-tile-sub">${riskMismatch ? `${_stratPlan.riskHorizon}d (× √${_scaleFactor.toFixed(2)}) — Gaussian approx, understates fat tails` : `${fwdHorizon || 10}d native`}</div>
+        </div>
+        <div class="qpr-tile" style="${riskMismatch ? 'border-left:2px solid var(--amb)' : ''}">
+          <div class="qpr-tile-k">CVaR-97.5 <span style="font-size:9px;color:var(--amb);font-weight:600">${riskMismatch ? '√t-scaled' : 'native'}</span></div>
+          <div class="qpr-tile-v qov-rd">${scaledCVaR == null ? (fwdCvar == null ? '—' : (fwdCvar >= 0 ? '+' : '') + fwdCvar.toFixed(1) + '%') : (scaledCVaR >= 0 ? '+' : '') + scaledCVaR.toFixed(1) + '%'}</div>
+          <div class="qpr-tile-sub">${riskMismatch ? `${_stratPlan.riskHorizon}d tail · approx (true ${_stratPlan.riskHorizon}d needs resample)` : 'tail loss native'}</div>
+        </div>
         <div class="qpr-tile"><div class="qpr-tile-k">P(stop) MC</div><div class="qpr-tile-v ${mcPS != null && mcPS > 40 ? 'qov-rd' : ''}">${mcPS == null ? '—' : mcPS.toFixed(0) + '%'}</div></div>
-        <div class="qpr-tile"><div class="qpr-tile-k">β exposure</div><div class="qpr-tile-v ${beta != null && beta > 1.5 ? 'qov-am' : ''}">${betaExposure == null ? '—' : '$' + betaExposure.toFixed(0)}</div><div class="qpr-tile-sub">${beta == null ? '' : '×' + beta.toFixed(2) + ' SPY'}</div></div>
       </div>
-      ${riskMismatch ? `<div class="qpr-note-line" style="color:var(--amb)">${_stratPlan.riskHorizonNote}</div>` : ''}`;
+      ${riskMismatch ? `<div class="qpr-note-line" style="color:var(--amb)">${_stratPlan.riskHorizonNote} · Scaled tile uses σ_T ≈ σ_t × √(T/t) — textbook Gaussian approximation under iid log-returns. Understates fat-tail risk at long horizons (no autocorrelation modeled).</div>` : ''}`;
 
     // ──────────────────── SECTION ⑤ · REWARD MAP ────────────────────
     const rewardMap = `
