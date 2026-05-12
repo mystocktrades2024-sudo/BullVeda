@@ -15837,31 +15837,63 @@ window.QuantDetail = (function() {
     // tickers and auditable over time. 14 required fields, lens-alignment
     // scoring for conviction, hard data-completeness gate.
 
-    // Time-horizon detection: max_hold_days from canonical plan + setup family
+    // Time-horizon detection: max_hold_days from canonical plan + setup family.
+    // User can OVERRIDE via URL ?strategy=SWING|POSITION|INVESTMENT
     const maxHoldD = _num('canonical_trade_plan.hold_period_max', 'max_hold_days', 'trade_plan.max_hold_days', 'hold_period_max');
+    const _stratOverride = (() => {
+      try {
+        const p = new URLSearchParams(location.search).get('strategy');
+        if (!p) return null;
+        const u = p.toUpperCase();
+        return ['SWING','POSITION','INVESTMENT'].includes(u) ? u : null;
+      } catch { return null; }
+    })();
     const horizon = (() => {
       const erImminent = earnDays != null && earnDays >= 0 && earnDays <= 14;
+      const erInPosWindow = earnDays != null && earnDays >= 0 && earnDays <= 90;
       const h = maxHoldD;
-      let cat;
-      if (h != null) {
-        if (h <= 21) cat = 'SWING';
-        else if (h <= 90) cat = 'TACTICAL';
-        else if (h <= 365) cat = 'INVESTMENT';
-        else cat = 'STRATEGIC';
-      } else {
-        const sl = setup.toLowerCase();
-        cat = (sl.includes('impulse') || sl.includes('breakout') || sl.includes('continuation')) ? 'SWING'
-            : sl.includes('special') ? 'TACTICAL'
-            : 'SWING';
+      const isDividendPayer = _num('fund_real.dividend_yield', 'fund_details.dividend_yield') > 1.0;
+      const isLargeCap = mcap != null && mcap >= 50e9;  // ≥$50B
+      const sectorL = (t.sector || '').toLowerCase();
+      const positionFriendlySector = /energy|utilit|financial|consumer staple|health/.test(sectorL);
+      const setupL = setup.toLowerCase();
+      const swingSetup = /impulse|breakout|continuation|squeeze/.test(setupL);
+      // Auto-detect: smarter than just max_hold_days
+      let auto;
+      if (h != null && h > 365) auto = 'INVESTMENT';
+      else if (h != null && h >= 60) auto = 'POSITION';
+      else if (h != null && h <= 21) {
+        // SwingTrade default · but POSITION-promote when dividend + large-cap + position-friendly sector
+        if (isDividendPayer && isLargeCap && positionFriendlySector) auto = 'POSITION';
+        else if (!swingSetup && positionFriendlySector) auto = 'POSITION';
+        else auto = 'SWING';
+      } else if (h != null) auto = 'POSITION';  // 22-59 days = POSITION
+      else {
+        auto = swingSetup ? 'SWING' : (positionFriendlySector ? 'POSITION' : 'SWING');
       }
-      const swingLead = erImminent ? 'QUANT EARNINGS' : 'SWING TRADING';
-      const swingCross = erImminent
-        ? ['SWING TRADING', 'HEDGE FUND', 'GRAHAM-BUFFETT', 'CFP']
-        : ['HEDGE FUND', 'QUANT EARNINGS', 'GRAHAM-BUFFETT', 'CFP'];
-      if (cat === 'SWING')      return { name: 'SWING',      range: 'days–weeks',  lead: swingLead, cross: swingCross };
-      if (cat === 'TACTICAL')   return { name: 'TACTICAL',   range: '1–6 months',  lead: erImminent ? 'QUANT EARNINGS' : 'HEDGE FUND', cross: ['QUANT EARNINGS', 'SWING TRADING', 'GRAHAM-BUFFETT', 'CFP'] };
-      if (cat === 'INVESTMENT') return { name: 'INVESTMENT', range: '1–5 years',   lead: 'GRAHAM-BUFFETT VALUE', cross: ['HEDGE FUND', 'QUANT EARNINGS', 'SWING TRADING', 'CFP'] };
-      return                          { name: 'STRATEGIC',  range: '5+ years',    lead: 'GRAHAM-BUFFETT VALUE', cross: ['CFP', 'HEDGE FUND', 'QUANT EARNINGS', 'SWING TRADING'] };
+      const cat = _stratOverride || auto;
+
+      // Lead lens per strategy (spec definitions)
+      let lead, cross;
+      if (cat === 'SWING') {
+        lead = erImminent ? 'QUANT EARNINGS' : 'SWING TRADING';
+        cross = erImminent
+          ? ['SWING TRADING', 'HEDGE FUND', 'GRAHAM-BUFFETT', 'CFP']
+          : ['HEDGE FUND', 'QUANT EARNINGS', 'GRAHAM-BUFFETT', 'CFP'];
+      } else if (cat === 'POSITION') {
+        lead = 'VALUE + TRADER';  // dual lead per spec
+        cross = ['HEDGE FUND', 'QUANT EARNINGS', 'CFP'];
+      } else { // INVESTMENT
+        lead = 'GRAHAM-BUFFETT VALUE';
+        cross = ['CFP', 'HEDGE FUND', 'QUANT EARNINGS', 'SWING TRADING'];
+      }
+      const range = cat === 'SWING' ? 'days–weeks' : cat === 'POSITION' ? '1–12 months' : '1–5+ years';
+      const catWindow = cat === 'SWING' ? 14 : cat === 'POSITION' ? 90 : 365;
+      const filterNoise = cat === 'INVESTMENT';  // de-weight Trader/HF lens votes for INVESTMENT
+      return { name: cat, range, lead, cross, catWindow, filterNoise, auto, override: _stratOverride,
+               autoReason: _stratOverride ? `auto: ${auto}, overridden via ?strategy=${_stratOverride}` :
+                          h == null ? `inferred from setup family (${setupL || 'unknown'})` :
+                          `from max_hold_days=${h}${isDividendPayer && isLargeCap ? ' + dividend large-cap promoted' : ''}` };
     })();
 
     // ── LENS DIRECTION VOTING — each lens votes bullish / bearish / neutral
@@ -16482,6 +16514,14 @@ window.QuantDetail = (function() {
 .qsr-sources { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; font-family:var(--mono); font-size:11px; color:var(--ink-2); }
 .qsr-sources span b { color:var(--ink-1); font-weight:700; }
 
+/* Strategy switcher pills (SWING · POSITION · INVESTMENT) */
+.qsr-strat-pill { display:inline-block; font-family:var(--mono); font-size:10px; padding:3px 9px; margin:0 2px;
+  border-radius:3px; letter-spacing:0.08em; font-weight:800; text-transform:uppercase;
+  border:1px solid var(--ink-4); background:var(--bg-3); color:var(--ink-2);
+  text-decoration:none; transition:all 0.1s ease; }
+.qsr-strat-pill:hover { color:var(--ink); border-color:var(--ink-3); background:var(--bg-2); }
+.qsr-strat-pill.on { color:var(--cy); background:var(--cy-bg); border-color:#387887; }
+
 /* Lens sub-models (Value · Trader · Hedge Fund) — 10 frameworks per spec */
 .qsr-sub-models { margin-top:8px; padding:8px 0 0 14px; border-left:1px dashed var(--line); display:flex; flex-direction:column; gap:5px; }
 .qsr-sub-models .qsr-sub-h { font-family:var(--mono); font-size:9.5px; letter-spacing:0.16em; text-transform:uppercase; color:var(--cy); font-weight:700; margin-bottom:4px; }
@@ -16522,7 +16562,14 @@ window.QuantDetail = (function() {
         </div>
 
         <div class="qsr-meta-row">
-          <span><span class="qsr-meta-k">Horizon</span> <span class="qsr-meta-v">${horizon.name}</span> <span style="color:var(--ink-3)">(${horizon.range})</span></span>
+          <span><span class="qsr-meta-k">Strategy</span>
+            ${['SWING','POSITION','INVESTMENT'].map(s => {
+              const url = `?t=${encodeURIComponent(t.ticker)}&strategy=${s}#overview`;
+              const on = horizon.name === s;
+              return `<a href="${url}" class="qsr-strat-pill ${on ? 'on' : ''}" title="View as ${s}">${s}</a>`;
+            }).join('')}
+            <span style="color:var(--ink-3);font-size:10px;margin-left:4px">${horizon.range} · ${horizon.override ? '<b style="color:var(--amb)">override</b>' : 'auto'}</span>
+          </span>
           <span><span class="qsr-meta-k">Lead lens</span> <span class="qsr-meta-v">${horizon.lead}</span></span>
           <span style="margin-left:auto"><span class="qsr-meta-k">Call</span> <span class="qsr-call-badge ${callC}">${analystCall}</span> <span style="color:var(--ink-3);font-size:10px">${callTypeNote}</span></span>
           <span><span class="qsr-meta-k">Conviction</span> <span class="qsr-conv-badge ${convCls}">${convLevel}</span></span>
@@ -16852,23 +16899,48 @@ window.QuantDetail = (function() {
 
     // ──────────────────── STRATEGY DETECTION ────────────────────
     // 3 strategies per spec: SWING / POSITION / INVESTMENT
+    // User can OVERRIDE via URL ?strategy=SWING|POSITION|INVESTMENT
+    const _stratOverridePlan = (() => {
+      try {
+        const p = new URLSearchParams(location.search).get('strategy');
+        if (!p) return null;
+        const u = p.toUpperCase();
+        return ['SWING','POSITION','INVESTMENT'].includes(u) ? u : null;
+      } catch { return null; }
+    })();
     const strategy = (() => {
       const h = maxHoldD;
-      if (h != null) {
-        if (h <= 21) return { name: 'SWING',      range: 'days–weeks', lead: 'TRADER',
-                              cross: ['HEDGE FUND', 'VALUE', 'CFP'],
-                              catWindow: 14 };
-        if (h <= 365) return { name: 'POSITION',  range: '1–12 months', lead: 'VALUE + TRADER',
-                              cross: ['HEDGE FUND', 'CFP'],
-                              catWindow: 90 };
-        return            { name: 'INVESTMENT',  range: '1–5+ years', lead: 'VALUE',
-                            cross: ['CFP', 'TRADER', 'HEDGE FUND'],
-                            catWindow: 365, filterNoise: true };
-      }
-      // Fallback by setup family
-      const sl = setup.toLowerCase();
-      if (sl.includes('impulse') || sl.includes('breakout') || sl.includes('continuation')) return { name: 'SWING', range: 'days–weeks', lead: 'TRADER', cross: ['HEDGE FUND', 'VALUE', 'CFP'], catWindow: 14 };
-      return { name: 'SWING', range: 'days–weeks', lead: 'TRADER', cross: ['HEDGE FUND', 'VALUE', 'CFP'], catWindow: 14 };
+      const yld = _num('fund_real.dividend_yield', 'fund_details.dividend_yield');
+      const isDividendPayer = yld != null && yld > 1.0;
+      const isLargeCap = mcap != null && mcap >= 50e9;
+      const sectorL = (t.sector || '').toLowerCase();
+      const positionFriendlySector = /energy|utilit|financial|consumer staple|health/.test(sectorL);
+      const setupL = setup.toLowerCase();
+      const swingSetup = /impulse|breakout|continuation|squeeze/.test(setupL);
+      // Auto-detect
+      let auto;
+      if (h != null && h > 365) auto = 'INVESTMENT';
+      else if (h != null && h >= 60) auto = 'POSITION';
+      else if (h != null && h <= 21) {
+        if (isDividendPayer && isLargeCap && positionFriendlySector) auto = 'POSITION';
+        else if (!swingSetup && positionFriendlySector) auto = 'POSITION';
+        else auto = 'SWING';
+      } else if (h != null) auto = 'POSITION';
+      else auto = swingSetup ? 'SWING' : (positionFriendlySector ? 'POSITION' : 'SWING');
+      const cat = _stratOverridePlan || auto;
+      // Build strategy struct
+      if (cat === 'SWING') return { name:'SWING', range:'days–weeks', lead:'TRADER',
+                                     cross:['HEDGE FUND', 'VALUE', 'CFP'], catWindow:14,
+                                     auto, override:_stratOverridePlan,
+                                     autoReason: _stratOverridePlan ? `auto: ${auto}, overridden` : `from max_hold_days=${h || 'n/a'}` };
+      if (cat === 'POSITION') return { name:'POSITION', range:'1–12 months', lead:'VALUE + TRADER',
+                                       cross:['HEDGE FUND', 'CFP'], catWindow:90,
+                                       auto, override:_stratOverridePlan,
+                                       autoReason: _stratOverridePlan ? `auto: ${auto}, overridden` : `dual-lead position trade${isDividendPayer ? ' · dividend-paying' : ''}${isLargeCap ? ' · large-cap' : ''}` };
+      return { name:'INVESTMENT', range:'1–5+ years', lead:'VALUE',
+               cross:['CFP', 'TRADER', 'HEDGE FUND'], catWindow:365, filterNoise:true,
+               auto, override:_stratOverridePlan,
+               autoReason: _stratOverridePlan ? `auto: ${auto}, overridden` : `long-horizon value lens · short-term noise filtered` };
     })();
 
     // ──────────────────── LENS DIRECTION VOTES (4 lenses) ────────────────────
@@ -17610,6 +17682,14 @@ window.QuantDetail = (function() {
 .qpr-no-disagree { padding:8px 12px; background:color-mix(in oklch, var(--gn) 6%, transparent); border-left:2px solid var(--gn); border-radius:2px; font-size:11.5px; color:var(--ink-1); }
 .qpr-empty { padding:16px; text-align:center; color:var(--ink-3); font-size:12px; font-style:italic; }
 
+/* Strategy switcher pills (SWING · POSITION · INVESTMENT) */
+.qpr-strat-pill { display:inline-block; font-family:var(--mono); font-size:10px; padding:3px 9px; margin:0 2px;
+  border-radius:3px; letter-spacing:0.08em; font-weight:800; text-transform:uppercase;
+  border:1px solid var(--ink-4); background:var(--bg-3); color:var(--ink-2);
+  text-decoration:none; transition:all 0.1s ease; }
+.qpr-strat-pill:hover { color:var(--ink); border-color:var(--ink-3); background:var(--bg-2); }
+.qpr-strat-pill.on { color:var(--cy); background:var(--cy-bg); border-color:#387887; }
+
 /* Lens sub-models (Value · Trader · Hedge Fund) */
 .qpr-sub-models { margin-top:8px; padding:8px 0 0 14px; border-left:1px dashed var(--line-2); display:flex; flex-direction:column; gap:5px; }
 .qpr-sub-models .qpr-sub-h { font-family:var(--mono); font-size:9.5px; letter-spacing:0.16em; text-transform:uppercase; color:var(--cy); font-weight:700; margin-bottom:4px; }
@@ -17653,7 +17733,14 @@ window.QuantDetail = (function() {
         </div>
 
         <div class="qpr-meta-row">
-          <span><span class="qpr-meta-k">Strategy</span> <span class="qpr-meta-v">${strategy.name}</span> <span style="color:var(--ink-3)">(${strategy.range})</span></span>
+          <span><span class="qpr-meta-k">Strategy</span>
+            ${['SWING','POSITION','INVESTMENT'].map(s => {
+              const url = `?t=${encodeURIComponent(t.ticker)}&strategy=${s}#plan`;
+              const on = strategy.name === s;
+              return `<a href="${url}" class="qpr-strat-pill ${on ? 'on' : ''}" title="Re-render as ${s}">${s}</a>`;
+            }).join('')}
+            <span style="color:var(--ink-3);font-size:10px;margin-left:4px">${strategy.range} · ${strategy.override ? '<b style="color:var(--amb)">override</b>' : 'auto'}</span>
+          </span>
           <span><span class="qpr-meta-k">Lead lens</span> <span class="qpr-meta-v">${strategy.lead}</span></span>
           <span style="margin-left:auto"><span class="qpr-meta-k">Plan call</span> <span class="qpr-call-badge ${callC}">${planCall}</span> <span style="color:var(--ink-3);font-size:10px">${callTypeNote}</span></span>
           <span><span class="qpr-meta-k">Execution</span> <span class="qpr-conv-badge ${execCls}">${execVerdict}</span></span>
