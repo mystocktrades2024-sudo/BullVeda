@@ -14924,6 +14924,7 @@ window.QuantDetail = (function() {
     const verdict = (t.decision?.verdict || t.verdict || '').toUpperCase();
     const setup = (t.setup_family || t.setup || '').replace(/_/g, ' ');
     const eqRaw = (t.entry_quality || '').toUpperCase();
+    const eqBad = ['EXTENDED', 'MISSED'].includes(eqRaw);
     const regime = (t.regime || t.regime4 || '').toLowerCase();
     const regimeF = ({'risk_on_trending':65,'risk_on_choppy':72,'risk_off_trending':78,'risk_off':78,'panic':999})[regime] || 65;
     const scoreGap = regimeF - score;
@@ -15045,7 +15046,9 @@ window.QuantDetail = (function() {
     const analystConsensus = _g('analyst_full.consensus', 'analyst_consensus') || '—';
 
     // earnings
-    const earnDays = _num('earn_days', 'kelly_size.earnings_days');
+    // earnDays: raw _g lookup first so null is preserved (_num collapses null → 0 via +null)
+    const _earnDaysRaw = _g('earn_days', 'kelly_size.earnings_days');
+    const earnDays = (_earnDaysRaw != null && isFinite(+_earnDaysRaw)) ? +_earnDaysRaw : null;
     const earnHist = _g('earnings_history', 'eodhd_earnings_history') || [];
     const recentEarn = Array.isArray(earnHist) ? earnHist.slice(0, 4) : [];
     const beatCount = recentEarn.filter(e => (e.surprise_pct ?? e.surprise ?? 0) > 0).length;
@@ -15828,12 +15831,351 @@ window.QuantDetail = (function() {
         </div>
       </div>` : '';
 
-    // ── ASSEMBLE: scoped CSS · decision strip · 12 sections · thesis ──
+    // ────────────────────────────────────────────────────────────────
+    // SENIOR BUY-SIDE ANALYST BRIEF · 6-section narrative
+    // ────────────────────────────────────────────────────────────────
+    // Time-horizon detection: max_hold_days from canonical plan + setup family
+    const maxHoldD = _num('canonical_trade_plan.hold_period_max', 'max_hold_days', 'trade_plan.max_hold_days', 'hold_period_max');
+    const horizon = (() => {
+      // Earnings proximity overrides — if ER in window, lens flips to QUANT EARNINGS
+      const erImminent = earnDays != null && earnDays >= 0 && earnDays <= 14;
+      const h = maxHoldD;
+      // Categorize by max hold
+      let cat;
+      if (h != null) {
+        if (h <= 21) cat = 'SWING';
+        else if (h <= 90) cat = 'TACTICAL';
+        else if (h <= 365) cat = 'INVESTMENT';
+        else cat = 'STRATEGIC';
+      } else {
+        // Fallback: infer from setup family
+        const sl = setup.toLowerCase();
+        cat = (sl.includes('impulse') || sl.includes('breakout') || sl.includes('continuation')) ? 'SWING'
+            : sl.includes('special') ? 'TACTICAL'
+            : 'SWING';
+      }
+      // Pick lead lens — earnings imminent ALWAYS wins regardless of horizon
+      const swingLead = erImminent ? 'QUANT EARNINGS' : 'SWING TRADING';
+      const swingCross = erImminent
+        ? ['SWING TRADING', 'HEDGE FUND', 'GRAHAM-BUFFETT', 'CFP']
+        : ['HEDGE FUND', 'QUANT EARNINGS', 'GRAHAM-BUFFETT', 'CFP'];
+      if (cat === 'SWING')      return { name: 'SWING',      range: 'days–weeks',  lead: swingLead, cross: swingCross };
+      if (cat === 'TACTICAL')   return { name: 'TACTICAL',   range: '1–6 months',  lead: erImminent ? 'QUANT EARNINGS' : 'HEDGE FUND', cross: ['QUANT EARNINGS', 'SWING TRADING', 'GRAHAM-BUFFETT', 'CFP'] };
+      if (cat === 'INVESTMENT') return { name: 'INVESTMENT', range: '1–5 years',   lead: 'GRAHAM-BUFFETT VALUE', cross: ['HEDGE FUND', 'QUANT EARNINGS', 'SWING TRADING', 'CFP'] };
+      return                          { name: 'STRATEGIC',  range: '5+ years',    lead: 'GRAHAM-BUFFETT VALUE', cross: ['CFP', 'HEDGE FUND', 'QUANT EARNINGS', 'SWING TRADING'] };
+    })();
+
+    // Lens-narrative builders — return short paragraph from real data
+    const _lensSwingTrading = () => {
+      const parts = [];
+      if (rsi != null) parts.push(`RSI(14) <b>${rsi.toFixed(0)}</b>${rsi > 70 ? ' (overbought edge)' : rsi < 30 ? ' (oversold)' : ''}`);
+      if (macdBull !== undefined) parts.push(`MACD ${macdBull ? '<b class="qov-gn">bullish</b>' : '<b class="qov-rd">bearish</b>'}`);
+      if (adx != null) parts.push(`ADX <b>${adx.toFixed(0)}</b>${adx >= 25 ? ' (strong trend)' : ' (weak)'}`);
+      if (rvol != null) parts.push(`RVOL <b>${rvol.toFixed(2)}×</b>${rvol >= 1.5 ? ' (expansion)' : ''}`);
+      if (sqzFired) parts.push(`<b class="qov-gn">squeeze fired</b>`);
+      else if (sqzOn) parts.push(`squeeze <b class="qov-am">coiling</b>`);
+      if (above50 != null) parts.push(`${above50 ? 'above' : 'below'} EMA50`);
+      if (rsRank != null) parts.push(`RS rank <b>${rsRank.toFixed(0)}</b>/100`);
+      const setupText = setup ? `Setup: <b>${setup}</b>` : '';
+      return `${setupText}${setupText ? '. ' : ''}${parts.join(', ')}. Entry quality <b class="${['FRESH','PULLBACK','VALID'].includes(eqRaw) ? 'qov-gn' : 'qov-rd'}">${eqRaw || '—'}</b>${pullbackZone !== '—' ? `, pullback zone <b>${pullbackZone}</b>` : ''}.`;
+    };
+    const _lensHedgeFund = () => {
+      const parts = [];
+      parts.push(`Regime <b>${regime.replace(/_/g, ' ') || '—'}</b> (BAP floor ${regimeF}, score ${score})`);
+      if (mcPT1 != null && mcPS != null) parts.push(`MC edge <b class="${edge >= 20 ? 'qov-gn' : edge >= 5 ? 'qov-am' : 'qov-rd'}">${edge >= 0 ? '+' : ''}${edge.toFixed(0)}pp</b> (P(T1) ${mcPT1.toFixed(0)}%, P(stop) ${mcPS.toFixed(0)}%)`);
+      if (insiderBuys || insiderSells) parts.push(`insider 30d <b class="${insiderBuys > insiderSells ? 'qov-gn' : 'qov-rd'}">${insiderBuys}B/${insiderSells}S</b>`);
+      else parts.push(`no insider activity`);
+      if (uoaCalls != null && uoaCalls > 0) parts.push(`UOA <b class="qov-gn">${uoaCalls} call(s)</b>`);
+      if (shortFloat != null) parts.push(`short ${shortFloat.toFixed(1)}%${shortFloat > 20 ? ' (squeeze risk)' : ''}`);
+      if (newsAvg !== 0) parts.push(`news bias <b class="${newsCls}">${newsBias}</b>`);
+      return parts.join(', ') + '.';
+    };
+    const _lensGrahamBuffett = () => {
+      const parts = [];
+      if (fwdPE != null) parts.push(`fwd P/E <b>${fwdPE.toFixed(1)}</b>${fwdPE > 35 ? ' (rich)' : fwdPE < 15 ? ' (cheap)' : ''}`);
+      if (peg != null) parts.push(`PEG <b class="${peg < 1 ? 'qov-gn' : peg > 2 ? 'qov-rd' : ''}">${peg.toFixed(2)}</b>${peg < 1 ? ' (growth at reasonable price)' : peg > 2 ? ' (paying for growth)' : ''}`);
+      if (revGr != null) parts.push(`rev growth <b class="${revGr > 15 ? 'qov-gn' : revGr < 0 ? 'qov-rd' : ''}">${revGr >= 0 ? '+' : ''}${revGr.toFixed(1)}%</b>`);
+      if (fcfMgn != null) parts.push(`FCF margin <b class="${fcfMgn > 15 ? 'qov-gn' : fcfMgn < 0 ? 'qov-rd' : ''}">${fcfMgn >= 0 ? '+' : ''}${fcfMgn.toFixed(1)}%</b>`);
+      if (roe != null) parts.push(`ROE <b class="${roe > 15 ? 'qov-gn' : roe < 5 ? 'qov-rd' : ''}">${roe.toFixed(1)}%</b>`);
+      if (debtEq != null) parts.push(`D/E <b class="${debtEq < 1 ? 'qov-gn' : debtEq > 4 ? 'qov-rd' : ''}">${debtEq.toFixed(1)}</b>`);
+      if (upside != null) parts.push(`analyst PT upside <b class="${upside > 10 ? 'qov-gn' : upside < 0 ? 'qov-rd' : 'qov-am'}">${upside >= 0 ? '+' : ''}${upside.toFixed(0)}%</b>`);
+      if (parts.length === 0) return 'No fundamentals wired — value lens unable to opine.';
+      return parts.join(', ') + '.';
+    };
+    const _lensQuantEarnings = () => {
+      const parts = [];
+      if (earnDays != null && earnDays < 999) {
+        parts.push(`ER in <b class="${earnDays <= 7 ? 'qov-rd' : earnDays <= 14 ? 'qov-am' : 'qov-gn'}">${earnDays}d</b>`);
+        if (impMove != null) parts.push(`implied move <b>±${impMove.toFixed(1)}%</b>`);
+        if (medianSurp != null) parts.push(`prior median surprise <b class="${medianSurp > 0 ? 'qov-gn' : 'qov-rd'}">${medianSurp >= 0 ? '+' : ''}${medianSurp.toFixed(1)}%</b>`);
+        if (recentEarn.length) parts.push(`<b>${beatCount}/${recentEarn.length}</b> recent beats`);
+        if (revUp30 != null && revDown30 != null) {
+          const dir = revUp30 > revDown30 ? 'bullish' : revUp30 < revDown30 ? 'bearish' : 'mixed';
+          const cls7 = revUp30 > revDown30 ? 'qov-gn' : revUp30 < revDown30 ? 'qov-rd' : 'qov-am';
+          parts.push(`revisions 30d <b class="${cls7}">${dir}</b> (↑${revUp30}/↓${revDown30})`);
+        }
+      } else {
+        parts.push('no earnings in window');
+        if (revUp30 != null && revDown30 != null) parts.push(`revisions 30d ↑${revUp30}/↓${revDown30}`);
+      }
+      if (parts.length === 0) return 'No earnings data wired.';
+      return parts.join(', ') + '.';
+    };
+    const _lensCFP = () => {
+      const parts = [];
+      if (finalAllocPct != null) parts.push(`Kelly final alloc <b class="${finalAllocPct > 0 ? 'qov-gn' : 'qov-dim'}">${finalAllocPct.toFixed(1)}%</b>`);
+      if (beta != null) parts.push(`β <b class="${beta > 1.5 ? 'qov-am' : ''}">${beta.toFixed(2)} SPY</b>${beta > 1.5 ? ' (amplifies portfolio)' : ''}`);
+      if (mcap != null) parts.push(`mcap <b>${_money(mcap)}</b>`);
+      if (advDol != null) parts.push(`ADV <b class="${advDol > 10e6 ? 'qov-gn' : advDol > 1e6 ? 'qov-am' : 'qov-rd'}">${_money(advDol)}</b>`);
+      if (ddMult != null && ddMult < 1) parts.push(`drawdown haircut <b class="qov-am">${ddMult.toFixed(2)}×</b>`);
+      if (erMult != null && erMult < 1) parts.push(`earnings haircut <b class="qov-am">${erMult.toFixed(2)}×</b>`);
+      return parts.join(', ') + '.';
+    };
+    const lensNarratives = {
+      'SWING TRADING':     _lensSwingTrading(),
+      'HEDGE FUND':        _lensHedgeFund(),
+      'GRAHAM-BUFFETT VALUE': _lensGrahamBuffett(),
+      'GRAHAM-BUFFETT':    _lensGrahamBuffett(),
+      'QUANT EARNINGS':    _lensQuantEarnings(),
+      'CFP':               _lensCFP(),
+    };
+
+    // Determine the analyst call (BUY / WATCH / SHORT — never hedge)
+    // BUY:   verdict=BUY and not demoted and pre-flight not failing core gates
+    // SHORT: verdict in [AVOID, SHORT, SELL] OR regime=panic OR critical gate fails (BAP<<floor, P(stop)>P(T1))
+    // WATCH: everything else (lens valid, not actionable yet) — must surface a trigger
+    const analystCall = (() => {
+      if (verdict === 'SHORT' || verdict === 'SELL') return 'SHORT';
+      if (verdict === 'BUY' && !isDemoted && !critFail) return 'BUY';
+      if (verdict === 'AVOID' && (regime === 'panic' || (mcPT1 != null && mcPS != null && mcPS > mcPT1 + 10))) return 'SHORT';
+      return 'WATCH';
+    })();
+    const callC = analystCall === 'BUY' ? 'gn' : analystCall === 'SHORT' ? 'rd' : 'am';
+    const callColor = callC === 'gn' ? 'var(--gn)' : callC === 'am' ? 'var(--amb)' : 'var(--rd)';
+
+    // CALL body — type-specific. BUY needs entry/size/target. WATCH needs trigger. SHORT needs catalyst/expression.
+    let callBody;
+    if (analystCall === 'BUY') {
+      const sizeStr = finalAllocPct != null && finalAllocPct > 0 ? `${finalAllocPct.toFixed(1)}% Kelly-lite` : `5–8% (regime-capped)`;
+      callBody = `<b class="qov-gn">ENTER LONG</b> at <b>$${eLo.toFixed(2)}–$${eHi.toFixed(2)}</b> (entry quality ${eqRaw || 'FRESH'}). Size <b>${sizeStr}</b>. Stop <b class="qov-rd">$${stop.toFixed(2)}</b> (${stopPct ? (Math.abs(stopPct*100)).toFixed(1) : '—'}%). T1 <b class="qov-gn">$${t1.toFixed(2)}</b> (+${t1PctSigned ? t1PctSigned.toFixed(1) : '—'}%, ${rT1 == null ? '—' : rT1.toFixed(1)}R), T2 <b class="qov-gn">${t2 ? '$' + t2.toFixed(2) : 'optional'}</b>${t2 && t2PctSigned ? ' (+' + t2PctSigned.toFixed(1) + '%)' : ''}. R:R <b>${rr.toFixed(1)}:1</b>.`;
+    } else if (analystCall === 'SHORT') {
+      const failures = failedGates.slice(0, 3).map(g => g.name || g.gate).join(', ');
+      const downsideCat = regime === 'panic' ? 'regime PANIC (no longs survive)' :
+                         critFail && !gates_dec[2].pass ? `MC says P(stop) ${mcPS != null ? mcPS.toFixed(0)+'%' : '—'} > P(T1) ${mcPT1 != null ? mcPT1.toFixed(0)+'%' : '—'}` :
+                         failures ? `gate failures: ${failures}` :
+                         `valuation + technical break`;
+      const shortEntry = ema50 != null ? `$${ema50.toFixed(2)} (EMA50, expect rejection)` : `current level $${px.toFixed(2)}`;
+      const shortStop = wkHi != null ? `$${(wkHi * 1.02).toFixed(2)} (above 52w high)` : `${(px * 1.08).toFixed(2)} (+8% invalidation)`;
+      const expression = ivRank != null && ivRank > 60 ? `puts (rich IV — sell premium via put-credit if directional, otherwise long puts)` : shortFloat > 15 ? `pair-trade vs sector ETF (avoid squeeze on outright short)` : `outright short or long puts`;
+      callBody = `<b class="qov-rd">SHORT</b> · catalyst: <b>${downsideCat}</b>. Entry near <b>${shortEntry}</b>, invalidation <b>${shortStop}</b>. Expression: <b>${expression}</b>. Borrow/squeeze risk: ${shortFloat == null ? 'unknown' : shortFloat < 10 ? '<b class="qov-gn">low</b>' : shortFloat > 25 ? '<b class="qov-rd">HIGH — be careful</b>' : '<b class="qov-am">moderate</b>'}.`;
+    } else { // WATCH — must surface a specific trigger
+      const triggers = [];
+      if (eqBad && pullbackZone !== '—') triggers.push(`<b>price trigger:</b> pullback to <b class="qov-am">${pullbackZone}</b>`);
+      if (scoreGap > 0 && scoreGap < 15) triggers.push(`<b>score trigger:</b> BAP rises ≥${scoreGap} pt to clear ${regimeF} floor (closest deficit: ${techS < techMax * 0.6 ? 'TECH' : catS < 14 ? 'CAT' : rsS < 14 ? 'RS' : smS < 10 ? 'SM' : 'QUAL'})`);
+      if (earnDays != null && earnDays >= 0 && earnDays <= 14) triggers.push(`<b>event trigger:</b> earnings in <b>${earnDays}d</b> — wait for print to remove binary risk`);
+      if (regime === 'panic') triggers.push(`<b>regime trigger:</b> regime exits panic (VIX &lt; 35, breadth &gt; 25%)`);
+      if (setupLBPct != null && setupLBPct < 30) triggers.push(`<b>statistical trigger:</b> setup Wilson LB rises ≥30% (currently ${setupLBPct.toFixed(0)}%)`);
+      if (wkHi != null && px < wkHi * 0.98 && techS / techMax > 0.7) triggers.push(`<b>breakout trigger:</b> close above <b>$${wkHi.toFixed(2)}</b> (52w high) on RVOL ≥ 1.5×`);
+      if (triggers.length === 0) triggers.push(`<b>structural:</b> no clear trigger — full re-score needed; re-check at next scan`);
+      callBody = `<b class="qov-am">WATCH</b> · thesis valid, not actionable yet. <b>Converts to BUY when:</b> ${triggers.slice(0, 3).join(' &nbsp;·&nbsp; ')}. <b>Converts to SHORT when:</b> close below stop <b class="qov-rd">$${stop.toFixed(2)}</b> on volume, OR regime flips to panic, OR catalyst miss (earnings disappointment).`;
+    }
+
+    // CONVICTION: composed from Wilson LB + n + lens agreement + entry quality
+    const convScore = (() => {
+      let s = 0, max = 0;
+      // Wilson LB ≥ floor: +2
+      if (setupLBPct != null) { max += 2; if (setupLBPct >= 30) s += 2; else if (setupLBPct >= 15) s += 1; }
+      // n ≥ 30: +1
+      if (setupN != null) { max += 1; if (setupN >= 30) s += 1; }
+      // MC edge ≥ +20pp: +2
+      if (edge != null) { max += 2; if (edge >= 20) s += 2; else if (edge >= 5) s += 1; }
+      // Entry quality FRESH/PULLBACK: +1
+      max += 1; if (['FRESH', 'PULLBACK', 'VALID'].includes(eqRaw)) s += 1;
+      // BAP ≥ floor: +1
+      max += 1; if (score >= regimeF) s += 1;
+      // R:R ≥ 3: +1
+      max += 1; if (rr >= 3) s += 1;
+      // Regime not panic: +1
+      max += 1; if (regime !== 'panic') s += 1;
+      // Earnings ≥ 14d: +1
+      max += 1; if (earnDays == null || earnDays >= 14 || earnDays < 0) s += 1;
+      return { score: s, max: max, pct: max > 0 ? s / max : 0 };
+    })();
+    const convLevel = convScore.pct >= 0.75 ? 'HIGH' : convScore.pct >= 0.50 ? 'MEDIUM' : 'LOW';
+    const convCls = convLevel === 'HIGH' ? 'gn' : convLevel === 'MEDIUM' ? 'am' : 'rd';
+    const convReason = (() => {
+      const ok = [], bad = [];
+      if (setupLBPct != null && setupLBPct >= 30) ok.push(`Wilson LB ${setupLBPct.toFixed(0)}% ≥ 30%`);
+      else if (setupLBPct != null) bad.push(`Wilson LB ${setupLBPct.toFixed(0)}% < 30%`);
+      else bad.push('no Wilson LB');
+      if (setupN != null && setupN >= 30) ok.push(`n=${setupN} (above noise floor)`);
+      else if (setupN != null) bad.push(`n=${setupN} (thin sample)`);
+      if (edge != null && edge >= 20) ok.push(`MC edge +${edge.toFixed(0)}pp`);
+      else if (edge != null && edge < 0) bad.push(`MC edge ${edge.toFixed(0)}pp (negative)`);
+      if (rr >= 3) ok.push(`R:R ${rr.toFixed(1)}:1`);
+      else if (rr) bad.push(`R:R ${rr.toFixed(1)} below 3.0`);
+      if (eqBad) bad.push(`entry ${eqRaw}`);
+      if (regime === 'panic') bad.push('regime PANIC');
+      const positives = ok.length ? `<b class="qov-gn">+</b> ${ok.join(', ')}` : '';
+      const negatives = bad.length ? `<b class="qov-rd">−</b> ${bad.join(', ')}` : '';
+      return [positives, negatives].filter(Boolean).join('. ');
+    })();
+
+    // RISKS & INVALIDATION
+    const risksBody = (() => {
+      const items = [];
+      if (stop && px) items.push(`<b>Hard stop:</b> close below <b class="qov-rd">$${stop.toFixed(2)}</b> (${stopPctSigned ? Math.abs(stopPctSigned).toFixed(1) : '—'}% adverse) — thesis broken, exit no questions.`);
+      const failChecklist = (_g('reaction_checklist') || []).filter(r => !r.checked);
+      if (failChecklist.length) items.push(`<b>Reaction-checklist failures:</b> ${failChecklist.slice(0, 3).map(r => r.item).join(' · ')}.`);
+      if (earnDays != null && earnDays >= 0 && earnDays <= 14) items.push(`<b>Earnings risk:</b> print in <b class="qov-am">${earnDays}d</b> with implied ±${impMove == null ? '—' : impMove.toFixed(1) + '%'} — binary event, size accordingly.`);
+      if (regime !== 'panic') items.push(`<b>Regime shift:</b> if regime flips to <b class="qov-rd">panic</b> (VIX &gt; 35 or breadth &lt; 20%), close all longs.`);
+      if (cohortTag === 'COLD') items.push(`<b>Cohort risk:</b> sector cohort tag <b class="qov-rd">COLD</b> (avg ${cohortAvgScore == null ? '—' : cohortAvgScore.toFixed(1)}) — single-name picks underperform in cold cohorts.`);
+      if (fwdCvar != null && fwdCvar < -10) items.push(`<b>Tail risk:</b> CVaR-97.5% <b class="qov-rd">${fwdCvar.toFixed(1)}%</b> (10d) — tail loss exceeds normal stop.`);
+      if (advDol != null && advDol < 5e6) items.push(`<b>Liquidity risk:</b> ADV <b class="qov-rd">${_money(advDol)}</b> &lt; $5M floor — slippage at exit elevated.`);
+      if (shortFloat != null && shortFloat > 25) items.push(`<b>Squeeze risk:</b> short float <b class="qov-am">${shortFloat.toFixed(1)}%</b> — gamma/squeeze risk on adverse moves.`);
+      if (items.length === 0) items.push(`<b>No specific risk surfaced</b> — re-check next scan; absence of risk evidence is not evidence of safety.`);
+      return items.map(i => `<li style="margin-bottom:4px">${i}</li>`).join('');
+    })();
+
+    // PRIMARY THESIS — composed from lead lens with specific evidence
+    const primaryThesis = (() => {
+      const lead = horizon.lead;
+      const leadNarr = lensNarratives[lead];
+      const setupLine = setup ? `<b>${t.ticker} · ${setup}</b>` : `<b>${t.ticker}</b>`;
+      // Specific evidence call-out by lead lens
+      const evid = lead === 'SWING TRADING'
+        ? `Entry zone <b class="qov-am">$${eLo.toFixed(2)}–$${eHi.toFixed(2)}</b> · stop <b class="qov-rd">$${stop.toFixed(2)}</b> · T1 <b class="qov-gn">$${t1.toFixed(2)}</b> (R:R <b>${rr.toFixed(1)}:1</b>) · current <b>$${px.toFixed(2)}</b> (${chg >= 0 ? '+' : ''}${chg.toFixed(2)}% today)`
+        : lead === 'GRAHAM-BUFFETT VALUE'
+        ? `Fwd P/E <b>${fwdPE == null ? '—' : fwdPE.toFixed(1)}</b> · PEG <b>${peg == null ? '—' : peg.toFixed(2)}</b> · FCF margin <b>${fcfMgn == null ? '—' : fcfMgn.toFixed(1) + '%'}</b> · analyst PT <b>${tgtMean == null ? '—' : '$' + tgtMean.toFixed(0) + (upside == null ? '' : ' (' + (upside >= 0 ? '+' : '') + upside.toFixed(0) + '%)')}</b>`
+        : lead === 'QUANT EARNINGS'
+        ? `ER <b>${earnDays == null ? '—' : 'in ' + earnDays + 'd'}</b> · implied <b>±${impMove == null ? '—' : impMove.toFixed(1) + '%'}</b> · last ${recentEarn.length} prints <b>${beatCount}/${recentEarn.length} beats</b> · revisions ↑${revUp30 == null ? '—' : revUp30}/↓${revDown30 == null ? '—' : revDown30}`
+        : lead === 'HEDGE FUND'
+        ? `MC P(T1) <b>${mcPT1 == null ? '—' : mcPT1.toFixed(0) + '%'}</b> · P(stop) <b>${mcPS == null ? '—' : mcPS.toFixed(0) + '%'}</b> · edge <b>${edge == null ? '—' : (edge >= 0 ? '+' : '') + edge.toFixed(0) + 'pp'}</b> · regime <b>${regime.replace(/_/g, ' ') || '—'}</b>`
+        : `Beta <b>${beta == null ? '—' : beta.toFixed(2)}</b> · Kelly size <b>${finalAllocPct == null ? '—' : finalAllocPct.toFixed(1) + '%'}</b> · ADV <b>${advDol == null ? '—' : _money(advDol)}</b>`;
+      return `${setupLine}. ${leadNarr}<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-family:var(--mono);font-size:11px;color:var(--ink-2)">${evid}</div>`;
+    })();
+
+    // CROSS-CHECKS — 4 short paragraphs, disagreements flagged
+    const crossChecksBody = (() => {
+      const rows = horizon.cross.map(lensName => {
+        const narr = lensNarratives[lensName] || '—';
+        return `<div style="padding:8px 0;border-bottom:1px dashed var(--line);font-size:11.5px;line-height:1.55">
+          <span style="display:inline-block;min-width:160px;font-family:var(--mono);font-size:9.5px;letter-spacing:0.14em;color:var(--ink-3);font-weight:700;text-transform:uppercase">${lensName}</span>
+          <span style="color:var(--ink-1)">${narr}</span>
+        </div>`;
+      }).join('');
+      // Disagreement detection
+      const disagreements = [];
+      const techBullish = (rsi != null && rsi > 50) && macdBull && above50;
+      const techBearish = (rsi != null && rsi < 50) && !macdBull && !above50;
+      const valueRich = fwdPE != null && fwdPE > 35;
+      const valueCheap = fwdPE != null && fwdPE < 15 && peg != null && peg < 1;
+      const flowBullish = (uoaCalls > 0 || insiderBuys > 0 || newsAvg > 0.05);
+      const flowBearish = (uoaPuts > 0 || insiderSells > 0 || newsAvg < -0.05);
+      if (techBullish && valueRich) disagreements.push('<b class="qov-am">Tech bullish vs Value rich</b> — momentum is real but you\'re paying up. Trim/scale-out discipline matters.');
+      if (techBearish && valueCheap) disagreements.push('<b class="qov-am">Tech bearish vs Value cheap</b> — cheap can stay cheap (value trap risk). Wait for technical confirmation.');
+      if (techBullish && !flowBullish) disagreements.push('<b class="qov-am">Tech bullish but flow neutral</b> — no smart-money confirmation. Retail-driven move?');
+      if (techBearish && flowBullish) disagreements.push('<b class="qov-am">Tech bearish but flow bullish</b> — institutions accumulating into weakness (positive divergence).');
+      const disagreementHTML = disagreements.length
+        ? `<div style="margin-top:10px;padding:10px 12px;background:color-mix(in oklch, var(--amb) 8%, transparent);border-left:2px solid var(--amb);border-radius:2px;font-size:11.5px;line-height:1.55"><b class="qov-am" style="font-family:var(--mono);font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase">⊕ LENS DISAGREEMENTS</b><ul style="margin:6px 0 0 0;padding-left:18px">${disagreements.map(d => `<li style="margin-bottom:3px">${d}</li>`).join('')}</ul></div>`
+        : `<div style="margin-top:10px;padding:8px 12px;font-size:11px;color:var(--ink-3);font-style:italic">No material lens disagreement detected.</div>`;
+      return rows + disagreementHTML;
+    })();
+
+    // BRIEF · SCOPED CSS
+    const BRIEF_CSS = `<style id="qov-brief-style">
+.qov-brief { display:grid; grid-template-columns:1fr; gap:10px; margin-bottom:18px; padding:14px;
+  background:linear-gradient(135deg, color-mix(in oklch, var(--cy) 4%, var(--bg-1)) 0%, var(--bg-1) 50%);
+  border:1px solid var(--line); border-left:3px solid var(--cy); border-radius:3px; }
+.qov-brief-h { display:flex; align-items:center; gap:14px; padding-bottom:10px; border-bottom:1px solid var(--line); font-family:var(--mono); }
+.qov-brief-h-t { font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:var(--cy); font-weight:800; }
+.qov-brief-h-m { font-size:10.5px; color:var(--ink-2); }
+.qov-brief-h-m b { color:var(--ink); font-weight:700; }
+.qov-brief-sec { padding:10px 0; border-bottom:1px solid var(--line); }
+.qov-brief-sec:last-child { border-bottom:none; padding-bottom:0; }
+.qov-brief-k { font-family:var(--mono); font-size:9.5px; letter-spacing:0.18em; text-transform:uppercase; font-weight:800; color:var(--ink-3); margin-bottom:6px; display:flex; align-items:center; gap:8px; }
+.qov-brief-k .pill { font-family:var(--mono); font-size:9px; padding:1px 7px; border-radius:2px; background:var(--bg-2); border:1px solid var(--ink-4); color:var(--ink-2); letter-spacing:0.08em; text-transform:uppercase; font-weight:700; }
+.qov-brief-v { font-size:12.5px; line-height:1.65; color:var(--ink-1); }
+.qov-brief-v b { color:var(--ink); font-weight:700; }
+.qov-brief-call { padding:12px 14px; border-radius:3px; font-size:13px; line-height:1.65; }
+.qov-brief-call.gn { background:color-mix(in oklch, var(--gn) 8%, transparent); border-left:3px solid var(--gn); }
+.qov-brief-call.am { background:color-mix(in oklch, var(--amb) 8%, transparent); border-left:3px solid var(--amb); }
+.qov-brief-call.rd { background:color-mix(in oklch, var(--rd) 8%, transparent); border-left:3px solid var(--rd); }
+.qov-brief-call-h { display:flex; align-items:baseline; gap:14px; margin-bottom:8px; }
+.qov-brief-call-h .badge { font-family:var(--mono); font-size:18px; font-weight:800; letter-spacing:0.08em; }
+.qov-brief-call-h .badge.gn { color:var(--gn); }
+.qov-brief-call-h .badge.am { color:var(--amb); }
+.qov-brief-call-h .badge.rd { color:var(--rd); }
+.qov-brief-conv { display:flex; align-items:center; gap:14px; padding:10px 14px; background:var(--bg-2); border-radius:3px; }
+.qov-brief-conv .lvl { font-family:var(--mono); font-size:16px; font-weight:800; letter-spacing:0.08em; }
+.qov-brief-conv .lvl.gn { color:var(--gn); }
+.qov-brief-conv .lvl.am { color:var(--amb); }
+.qov-brief-conv .lvl.rd { color:var(--rd); }
+.qov-brief-conv .meter { display:flex; height:6px; background:var(--bg-3); border-radius:2px; overflow:hidden; flex:1; min-width:120px; max-width:240px; }
+.qov-brief-conv .meter .fill { background:var(--cy); height:100%; }
+.qov-brief ul { margin:0; padding-left:18px; }
+.qov-brief li { font-size:11.5px; line-height:1.6; color:var(--ink-1); }
+</style>`;
+
+    const analystBrief = `${BRIEF_CSS}
+      <div class="qov-brief">
+        <div class="qov-brief-h">
+          <span class="qov-brief-h-t">◈ Senior Buy-Side Analyst Brief</span>
+          <span class="qov-brief-h-m">5 integrated lenses · 1 of 3 calls — no hedging</span>
+        </div>
+
+        <div class="qov-brief-sec">
+          <div class="qov-brief-k">① SETUP <span class="pill">${horizon.name}</span> <span class="pill">${horizon.range}</span> <span class="pill">lead: ${horizon.lead}</span></div>
+          <div class="qov-brief-v">Question: <b>${t.ticker} — should I act now, wait, or fade?</b> &nbsp;·&nbsp; Natural horizon: <b>${horizon.name.toLowerCase()}</b> (${horizon.range}; max hold ${maxHoldD == null ? '—' : maxHoldD + 'd'}). &nbsp;·&nbsp; Lead lens: <b>${horizon.lead}</b>. Other 4 lenses used as cross-checks.</div>
+        </div>
+
+        <div class="qov-brief-sec">
+          <div class="qov-brief-k">② PRIMARY THESIS <span class="pill">${horizon.lead}</span></div>
+          <div class="qov-brief-v">${primaryThesis}</div>
+        </div>
+
+        <div class="qov-brief-sec">
+          <div class="qov-brief-k">③ CROSS-CHECKS · 4 lenses · disagreements flagged</div>
+          <div class="qov-brief-v">${crossChecksBody}</div>
+        </div>
+
+        <div class="qov-brief-sec">
+          <div class="qov-brief-k">④ CALL</div>
+          <div class="qov-brief-call ${callC}">
+            <div class="qov-brief-call-h">
+              <span class="badge ${callC}">${analystCall}</span>
+              <span style="font-family:var(--mono);font-size:10px;letter-spacing:0.14em;color:var(--ink-3);text-transform:uppercase;font-weight:700">${analystCall === 'BUY' ? '· active now' : analystCall === 'WATCH' ? '· trigger required' : '· asymmetric downside'}</span>
+            </div>
+            <div style="font-size:12.5px;line-height:1.7;color:var(--ink-1)">${callBody}</div>
+          </div>
+        </div>
+
+        <div class="qov-brief-sec">
+          <div class="qov-brief-k">⑤ RISKS &amp; INVALIDATION</div>
+          <div class="qov-brief-v"><ul>${risksBody}</ul></div>
+        </div>
+
+        <div class="qov-brief-sec">
+          <div class="qov-brief-k">⑥ CONVICTION</div>
+          <div class="qov-brief-conv">
+            <span class="lvl ${convCls}">${convLevel}</span>
+            <span class="meter"><span class="fill" style="width:${(convScore.pct * 100).toFixed(0)}%"></span></span>
+            <span style="font-family:var(--mono);font-size:10.5px;color:var(--ink-3)">${convScore.score}/${convScore.max} factors</span>
+          </div>
+          <div class="qov-brief-v" style="margin-top:6px;font-size:11.5px;color:var(--ink-2);line-height:1.6">${convReason}</div>
+        </div>
+      </div>`;
+
+    // ── ASSEMBLE: scoped CSS · analyst brief · decision strip · 12 sections · thesis ──
     return `
       ${QOV_CSS}
       <div class="qov-root">
         ${demoteBanner}
+        ${analystBrief}
         ${decisionStrip}
+        <div class="qov-note" style="border-left-color:var(--cy);background:color-mix(in oklch, var(--cy) 4%, var(--bg-2));margin-top:14px;margin-bottom:6px">
+          <span class="why" style="color:var(--cy)">⌬ EVIDENCE PACK</span> &nbsp; the data backing the brief above. Triage · 3-lens · trade window · historical · regime · earnings · peer · cross-asset · calibration · risk · pre-flight.
+        </div>
         ${triageBand}
         ${edgeBar}
         ${lens3}
