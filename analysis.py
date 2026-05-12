@@ -4385,28 +4385,52 @@ def classify_setup_family(setup_type: str, catalyst_tags: list, indicators: dict
     """
     Classify setup into one of 4 families with hold period guidance.
     Returns (family_name, hold_period_guide)
+
+    Order matters — setup_type (the SPECIFIC entry mechanic) takes precedence
+    over indicator-based classification. Previously CF would land in
+    "Breakout Expansion" family because its catalyst_tags contained "breakout"
+    even though plan.setup_type was "EMA21 Pullback" (a pullback, not a
+    breakout). 2026-05-12 reordering: check setup_type for unambiguous
+    pullback/bounce patterns FIRST, then fall through to indicator-based.
     """
     setup_type_lower = (setup_type or "").lower()
     catalyst_str = " ".join([str(t).lower() for t in catalyst_tags]) if catalyst_tags else ""
 
-    # Impulse Catalyst: PEAD, UOA, gap-and-go, Pocket Pivot
+    # PRECEDENCE 1: Specific setup_type patterns — these are unambiguous
+    # entry mechanics that should classify the family regardless of what
+    # else might be in catalyst_tags.
+    if "ema21 pullback" in setup_type_lower or "ema50 pullback" in setup_type_lower:
+        return "Trend Continuation", "7-21d"
+    if "bounce off support" in setup_type_lower or "bounce" in setup_type_lower:
+        return "Trend Continuation", "7-21d"
+    if "10-week pullback" in setup_type_lower or "10w pullback" in setup_type_lower:
+        return "Trend Continuation", "10-30d"
+
+    # PRECEDENCE 2: catalyst-driven Impulse families (PEAD/UOA are catalyst-led)
     if "pead" in catalyst_str or "uoa" in catalyst_str or "gap" in setup_type_lower:
         return "Impulse Catalyst", "5-8d"
     if "pocket_pivot" in catalyst_str or "pocket pivot" in setup_type_lower:
         return "Impulse Catalyst", "5-10d"
 
-    # Breakout Expansion: VCP, near-VCP, 52wk breakout, squeeze
+    # PRECEDENCE 3: Specific breakout setup_types
+    if "vcp breakout" in setup_type_lower or "near-vcp" in setup_type_lower or "near vcp" in setup_type_lower:
+        return "Breakout Expansion", "7-21d"
+    if "52wk breakout" in setup_type_lower or "52-week breakout" in setup_type_lower:
+        return "Breakout Expansion", "7-21d"
+    if "squeeze expansion" in setup_type_lower or "tight_range" in setup_type_lower:
+        return "Breakout Expansion", "7-21d"
+
+    # PRECEDENCE 4: indicator/catalyst tag heuristics (broader patterns,
+    # used only when setup_type didn't match anything specific above).
     if ("vcp" in catalyst_str or "near_vcp" in catalyst_str or "breakout" in catalyst_str or
         indicators.get("at_52w_breakout", False) or indicators.get("squeeze_on", False)):
         return "Breakout Expansion", "7-21d"
 
-    # Trend Continuation: EMA21/50 pullbacks, bounce, rebreak
-    if ("bounce" in setup_type_lower or "pullback" in catalyst_str or
-        "ema21" in catalyst_str or "ema50" in catalyst_str or
-        "tight_range" in setup_type_lower):
+    # PRECEDENCE 5: trend-continuation catalysts (pullback/ema-touch tags)
+    if ("pullback" in catalyst_str or "ema21" in catalyst_str or "ema50" in catalyst_str):
         return "Trend Continuation", "7-21d"
 
-    # Special Situation: insider, float rotation, short squeeze
+    # PRECEDENCE 6: Special Situation: insider, float rotation, short squeeze
     if ("insider" in catalyst_str or "float_rotation" in catalyst_str or
         "short_squeeze" in catalyst_str or indicators.get("sec_catalyst", False)):
         return "Special Situation", "5-15d"
@@ -9789,18 +9813,32 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     star_rating = compute_star_rating(_star_result_partial)
 
     # ── Tail-Loss Filter (P0-B follow-up · 2026-05-03) ──────────────────────
-    # Backtest of 210 closed trades showed 12 tail losses (≤-2R). Filtering by
-    # score≥60 AND stars≥4 eliminates 9 of 12 → Basel GREEN, WR 84.7%, avgR +2.20.
-    # Roll back: set tail_loss_filter._enabled = false in config.json.
+    # Originally: demote BUY → WATCH if score<60 OR stars<4. Validated 2026-05
+    # against 210 closed trades: dropped tail losses 12→3, WR 77.6→84.7%.
+    #
+    # 2026-05-12 refinement: tail_loss_kill_stars (new config option) lets us
+    # specify EXACT stars values to kill instead of `stars < N`. signal_log
+    # n=733 analysis shows:
+    #   stars=2 (n=81):  PF 1.87, WR 49.4%, WLB 38.8%, avg +2.10%  ← winner
+    #   stars=3 (n=258): PF 0.96, WR 34.1%, WLB 28.6%, avg -0.13%  ← real bad band
+    #   stars=4 (n=389): PF 1.89, WR 48.1%, WLB 43.2%, avg +2.31%
+    # The old `stars<4` cut killed stars=2 (a winner) along with stars=3
+    # (the actual loser). Surgical fix: kill stars=3 only.
+    # Roll back: remove kill_stars or set _enabled=false in config.json.
     _tlf = (config.get("tail_loss_filter") or {})
     if _tlf.get("_enabled", False) and conviction.get("tier", -1) > 0:
         _min_score = _tlf.get("min_score_for_buy", 60)
-        _min_stars = _tlf.get("min_stars_for_buy", 4)
-        if normalized < _min_score or star_rating < _min_stars:
+        _kill_stars = _tlf.get("kill_stars")  # new (set of bad bands)
+        _min_stars = _tlf.get("min_stars_for_buy", 4)  # legacy fallback
+        _stars_demote = (star_rating in _kill_stars) if _kill_stars else (star_rating < _min_stars)
+        if normalized < _min_score or _stars_demote:
             _orig_label = conviction.get("label", "")
+            _why = (f"score={normalized:.0f}<{_min_score}" if normalized < _min_score
+                    else f"stars={star_rating} in kill set {sorted(_kill_stars)}" if _kill_stars
+                    else f"stars={star_rating}<{_min_stars}")
             conviction = {
                 "tier": 0, "label": "WATCH", "size_mult": 0.0,
-                "description": f"Demoted by tail-loss filter (score={normalized:.0f}<{_min_score} or stars={star_rating}<{_min_stars}); was {_orig_label}",
+                "description": f"Demoted by tail-loss filter ({_why}); was {_orig_label}",
                 "tail_filter_demoted": True,
                 "demoted_from_tier": _orig_label,
             }

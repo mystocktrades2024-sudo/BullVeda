@@ -12441,6 +12441,7 @@ const QuantScanner = (function() {
     { key: 'score',         label: 'Score',    r: true,  sort: 'score', tip: 'Overall composite score 0-100 (BAP — Bayesian Action Probability). Sum of all 5 pillars normalized.' },
     { key: '_pillars',      label: 'T·F·S·N',  r: false, sort: null,    tip: 'Pillars (bar height = score/max). T = Tech (price/momentum) · F = Fund (revenue/margins) · S = Structure (SMC) · N = News/Sentiment' },
     { key: 'price',         label: 'Px',       r: true,  sort: 'price', tip: 'Current price' },
+    { key: '_zone',         label: 'Zone',     r: false, sort: null,    tip: 'Entry zone status. ⚡ price IN zone (act now) · ◇ near zone · ↓ below (→ Δ% to entry) · ↑ extended above (+ Δ% above zone)' },
     { key: 'perf_1d',       label: 'Δ%',       r: true,  sort: 'perf_1d', tip: '1-day % change vs prior close' },
     { key: 'rs_rank',       label: 'RS',       r: true,  sort: 'rs_rank', tip: 'Relative Strength rank vs the universe (0-100)' },
     { key: 'rvol',          label: 'RVOL',     r: true,  sort: 'rvol', tip: 'Volume relative to 20-day average. ≥1.3× = breakout expansion' },
@@ -12486,6 +12487,29 @@ const QuantScanner = (function() {
       ? `${_fmt(t.stop, 0)} / ${_fmt(t.target1 || t.t1, 0)}`
       : '—';
 
+    // ZONE CELL (2026-05-12) — show entry-zone status inline.
+    // ⚡ green = IN zone NOW (act); ◇ amber = near (limit-order target);
+    // ↓ amber = below zone (wait for entry); ↑ red = extended above.
+    const _px = +t.price, _zLo = +t.entry_low, _zHi = +t.entry_high;
+    let zoneCell = '<td class="qd-dim" style="font-size:11px">—</td>';
+    if (_px && _zLo && _zHi) {
+      const zoneTip = `Entry zone $${_zLo.toFixed(2)}-$${_zHi.toFixed(2)}`;
+      const band = _zHi - _zLo;
+      if (_px >= _zLo && _px <= _zHi) {
+        // IN ZONE — act now
+        zoneCell = `<td title="${zoneTip}" style="font-family:var(--mono);font-size:11px;color:var(--gn);font-weight:700;letter-spacing:0.04em">⚡ IN ZONE</td>`;
+      } else if (_px < _zLo) {
+        // Below zone — wait for entry
+        const pct = ((_zLo - _px) / _px) * 100;
+        const near = pct <= 2.0;
+        zoneCell = `<td title="${zoneTip}" style="font-family:var(--mono);font-size:11px;color:${near?'var(--amb)':'var(--ink-2)'}">↓ -${pct.toFixed(1)}% to entry</td>`;
+      } else {
+        // Above zone — extended
+        const pct = ((_px - _zHi) / _zHi) * 100;
+        const wayAbove = pct > 5;
+        zoneCell = `<td title="${zoneTip}" style="font-family:var(--mono);font-size:11px;color:${wayAbove?'var(--rd)':'var(--amb)'}">↑ +${pct.toFixed(1)}% above</td>`;
+      }
+    }
     return `<tr class="${trCls} ${isSel ? 'sel' : ''}" data-qs-tk="${_esc(t.ticker)}" data-qs-idx="${i}">
       <td class="idx">${String(i + 1).padStart(2, '0')}</td>
       <td>${_chgTag(t)}</td>
@@ -12496,6 +12520,7 @@ const QuantScanner = (function() {
       <td class="r"><span class="qs-bap ${bapCls}">${bap}<span class="qs-bap-bar"><span style="width:${Math.min(100, bap)}%"></span></span></span></td>
       <td><span class="qs-pillars">${pillars}</span></td>
       <td class="r">${_fmt(t.price, 2)}</td>
+      ${zoneCell}
       <td class="r ${chgCls}">${_pct(chgPct, 2)}</td>
       <td class="r">${t.rs_rank != null ? Math.round(t.rs_rank) : '—'}</td>
       <td class="r">${t.rvol ? _fmt(t.rvol, 2) + '×' : '—'}</td>
