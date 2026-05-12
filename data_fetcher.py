@@ -2870,6 +2870,125 @@ def get_market_regime(breadth: dict | None = None) -> dict:
         return {"regime": "unknown", "spy_price": 0}
 
 
+def compute_sector_dispersion(sector_etf_data: dict) -> dict:
+    """
+    Quant-researcher signal: how broad is the rally?
+
+    Narrow leadership (1-2 sectors carrying the index) is a textbook
+    fragile-bull / late-cycle marker. Today's scan: SPY +8.6%/1M with
+    XLK as the lone leader → regime says risk_on_choppy, but the
+    underlying dispersion suggests treating this with more caution.
+
+    Inputs: sector_etf_data from get_sector_etf_data() — 11 sector ETFs
+    with vs_spy_pct (63-day) already computed.
+
+    Returns dict with:
+      - sectors_outperforming_spy: count of sectors with vs_spy_pct > 0
+      - sectors_positive_absolute:  count with perf_pct > 0
+      - leadership_breadth:         "broad" / "moderate" / "narrow"
+      - top_3_leaders:              [(etf, vs_spy_pct), ...]
+      - dispersion_stdev:           stdev of vs_spy_pct across 11 sectors
+      - leadership_concentration:   top-3 share of total positive vs_spy_pct
+      - rotation_signal:            "offensive" / "defensive" / "mixed"
+      - is_tech_only:               XLK or XLC leads with >5pp gap over #3
+      - downgrade_regime:           bool — should regime classifier downgrade?
+
+    Thresholds (V1 — to be validated via picks_history per principle 1):
+      - "broad":    >=6 sectors outperforming SPY
+      - "moderate": 3-5 outperforming
+      - "narrow":   <=2 outperforming  ← regime downgrade signal
+
+    Reference: Lowry's NYSE 1996-2008 study — narrow leadership preceded
+    every major correction by 4-12 weeks. Sector dispersion has
+    significant predictive power above and beyond raw breadth indicators.
+    """
+    if not sector_etf_data:
+        return {
+            "leadership_breadth": "unknown",
+            "downgrade_regime": False,
+            "_error": "no sector data",
+        }
+    # Filter to actual sector ETFs (skip SPY + sub-dicts like _indices)
+    sectors = {
+        etf: d for etf, d in sector_etf_data.items()
+        if etf not in ("SPY",) and not etf.startswith("_")
+        and isinstance(d, dict) and "vs_spy_pct" in d
+    }
+    if not sectors:
+        return {
+            "leadership_breadth": "unknown",
+            "downgrade_regime": False,
+            "_error": "no sector rows with vs_spy_pct",
+        }
+
+    vs_spy_vals = [(etf, d.get("vs_spy_pct", 0) or 0) for etf, d in sectors.items()]
+    vs_spy_vals.sort(key=lambda x: x[1], reverse=True)
+
+    out_spy = sum(1 for _, v in vs_spy_vals if v > 0)
+    pos_abs = sum(1 for _, d in sectors.items() if (d.get("perf_pct", 0) or 0) > 0)
+
+    if out_spy >= 6:
+        leadership = "broad"
+    elif out_spy >= 3:
+        leadership = "moderate"
+    else:
+        leadership = "narrow"
+
+    # Stdev of vs_spy_pct — wider spread = more dispersion (rotation),
+    # tight cluster around zero = consensus / efficient market.
+    _vals = [v for _, v in vs_spy_vals]
+    _mean = sum(_vals) / len(_vals) if _vals else 0
+    _var  = sum((v - _mean) ** 2 for v in _vals) / len(_vals) if _vals else 0
+    _stdev = _var ** 0.5
+
+    # Concentration: top-3 vs total
+    _top3_sum = sum(v for _, v in vs_spy_vals[:3] if v > 0)
+    _total_pos = sum(v for _, v in vs_spy_vals if v > 0) or 1.0
+    _concentration = _top3_sum / _total_pos
+
+    # Offensive vs defensive rotation
+    _offensive = {"XLK", "XLC", "XLY", "XLF", "XLI", "XLB"}
+    _defensive = {"XLP", "XLU", "XLV", "XLRE"}
+    _off_leading = sum(1 for etf, v in vs_spy_vals if etf in _offensive and v > 0)
+    _def_leading = sum(1 for etf, v in vs_spy_vals if etf in _defensive and v > 0)
+    if _off_leading >= 4 and _def_leading <= 1:
+        rotation = "offensive"
+    elif _def_leading >= 3 and _off_leading <= 2:
+        rotation = "defensive"  # late-cycle warning
+    else:
+        rotation = "mixed"
+
+    # Tech-only leadership detection (XLK/XLC dominant, big gap to #3)
+    _top = vs_spy_vals[0] if vs_spy_vals else (None, 0)
+    _third = vs_spy_vals[2][1] if len(vs_spy_vals) >= 3 else 0
+    is_tech_only = (
+        _top[0] in ("XLK", "XLC")
+        and _top[1] > 0
+        and (_top[1] - _third) > 5.0
+        and out_spy <= 3
+    )
+
+    # Regime downgrade trigger — narrow leadership OR defensive rotation
+    # is sufficient to refuse a risk_on_trending classification.
+    downgrade = (leadership == "narrow") or is_tech_only or (rotation == "defensive")
+
+    return {
+        "sectors_outperforming_spy":  out_spy,
+        "sectors_positive_absolute":  pos_abs,
+        "sectors_total":              len(sectors),
+        "leadership_breadth":         leadership,
+        "top_3_leaders":              [(e, round(v, 2)) for e, v in vs_spy_vals[:3]],
+        "bottom_3_laggards":          [(e, round(v, 2)) for e, v in vs_spy_vals[-3:]],
+        "dispersion_stdev":           round(_stdev, 2),
+        "leadership_concentration":   round(_concentration, 3),
+        "rotation_signal":            rotation,
+        "offensive_count":            _off_leading,
+        "defensive_count":            _def_leading,
+        "is_tech_only":               is_tech_only,
+        "downgrade_regime":           downgrade,
+    }
+
+
 # Process-wide earnings calendar cache. Built once on first call within a
 # ~2-hour window — subsequent get_earnings_date calls hit memory, not EODHD.
 # Eliminates the per-ticker earnings_calendar call (was 300 calls/scan).
@@ -6130,3 +6249,177 @@ def get_news_articles_legacy(ticker: str, limit: int = 10) -> list[dict]:
 # get_polygon_news        → get_news_articles (Polygon decommissioned, body uses EODHD)
 get_schwab_fundamentals = get_fundamentals
 get_polygon_news        = get_news_articles
+
+
+def get_earnings_implied_move(ticker: str, report_date: str) -> dict:
+    """
+    Compute implied move ±% from the Schwab ATM straddle on the first
+    expiry strictly after `report_date`. Earnings-event-specific — answers
+    "what % move is the market pricing in for THIS print."
+
+    Logic:
+      1. Pull chain (CALL+PUT, 20 strikes each side, include underlying).
+      2. Find first expiry date that is > report_date.
+      3. Find strike closest to spot (ATM).
+      4. Compute straddle = ATM_call_mid + ATM_put_mid.
+      5. Implied move % = straddle / spot * 100.
+
+    Returns:
+      {
+        "implied_move_pct": float | None,   # ±% market-priced move
+        "straddle_cost":    float | None,   # $ premium of ATM straddle
+        "atm_strike":       float | None,
+        "expiry_date":      str | None,     # 'YYYY-MM-DD'
+        "spot":             float | None,
+        "source":           "schwab" | "unavailable",
+        "error":            str | None,
+      }
+
+    Cached 2h. Bails cleanly on missing Schwab credentials. No exceptions
+    propagate to callers — failure modes return None fields + error string.
+    """
+    out = {"implied_move_pct": None, "straddle_cost": None,
+           "atm_strike": None, "expiry_date": None, "spot": None,
+           "source": "unavailable", "error": None}
+
+    # Lazy-load .env for parity with get_options_iv_data
+    if not os.environ.get("SCHWAB_APP_KEY"):
+        try:
+            from pathlib import Path as _Path
+            _env_path = _Path(__file__).resolve().parent / ".env"
+            if _env_path.exists():
+                for _line in _env_path.read_text().splitlines():
+                    _line = _line.strip()
+                    if _line and not _line.startswith("#") and "=" in _line:
+                        _k, _v = _line.split("=", 1)
+                        os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+        except Exception:
+            pass
+
+    if not (os.environ.get("SCHWAB_APP_KEY") and os.environ.get("SCHWAB_REFRESH_TOKEN")):
+        return out
+
+    cache_key = f"impl_move_{ticker}_{report_date}_{int(time.time()//7200)}"
+    cached = _cache_read(cache_key, 7200)
+    if cached is not None:
+        return cached
+
+    out["source"] = "schwab"
+
+    try:
+        import schwab_client as sc
+        ch = sc.get_chains(ticker, contract_type="ALL", strike_count=20,
+                           include_underlying=True)
+        if not isinstance(ch, dict) or ch.get("status") != "SUCCESS":
+            out["error"] = f"chain status={ch.get('status') if isinstance(ch, dict) else 'no-data'}"
+            _cache_write(cache_key, out); return out
+
+        underlying = ch.get("underlying", {}) or {}
+        spot = underlying.get("last") or underlying.get("mark") or underlying.get("close")
+        if not spot:
+            out["error"] = "no spot price"
+            _cache_write(cache_key, out); return out
+        try: spot = float(spot)
+        except (TypeError, ValueError):
+            out["error"] = "spot not numeric"
+            _cache_write(cache_key, out); return out
+
+        call_map = ch.get("callExpDateMap", {}) or {}
+        put_map  = ch.get("putExpDateMap", {}) or {}
+
+        # Find first expiry strictly after report_date.
+        # Schwab keys look like "2026-05-16:5" (date:days-to-expiry).
+        from datetime import date as _date
+        try:
+            rd = _date.fromisoformat(report_date)
+        except (TypeError, ValueError):
+            out["error"] = f"bad report_date={report_date}"
+            _cache_write(cache_key, out); return out
+
+        def _parse_exp(k: str):
+            try: return _date.fromisoformat(k.split(":")[0])
+            except Exception: return None
+
+        candidate_exps = sorted(
+            [k for k in call_map.keys()
+             if _parse_exp(k) is not None and _parse_exp(k) > rd],
+            key=lambda k: _parse_exp(k)
+        )
+        if not candidate_exps:
+            out["error"] = "no expiry after report_date"
+            _cache_write(cache_key, out); return out
+
+        chosen_exp_key = candidate_exps[0]
+        exp_date = _parse_exp(chosen_exp_key)
+
+        call_strikes = call_map.get(chosen_exp_key, {}) or {}
+        put_strikes  = put_map.get(chosen_exp_key,  {}) or {}
+
+        if not call_strikes or not put_strikes:
+            out["error"] = f"missing strikes for {chosen_exp_key}"
+            _cache_write(cache_key, out); return out
+
+        # Find ATM — closest strike to spot in both maps
+        def _closest_strike(strikes_dict, target):
+            best = None; best_diff = None
+            for k_str in strikes_dict.keys():
+                try: k = float(k_str)
+                except (TypeError, ValueError): continue
+                diff = abs(k - target)
+                if best_diff is None or diff < best_diff:
+                    best, best_diff = k, diff
+            return best
+
+        atm = _closest_strike(call_strikes, spot)
+        if atm is None or _closest_strike(put_strikes, spot) != atm:
+            atm = _closest_strike(call_strikes, spot)
+        if atm is None:
+            out["error"] = "no ATM strike"
+            _cache_write(cache_key, out); return out
+
+        atm_str_c = f"{atm:.1f}" if f"{atm:.1f}" in call_strikes else f"{atm:.2f}" if f"{atm:.2f}" in call_strikes else str(atm)
+        atm_str_p = f"{atm:.1f}" if f"{atm:.1f}" in put_strikes else f"{atm:.2f}" if f"{atm:.2f}" in put_strikes else str(atm)
+        # Schwab keys can be either "150.0" or "150.00" — try common formats
+        for fmt in ("{:.1f}", "{:.2f}", "{:g}", "{:.0f}"):
+            kc = fmt.format(atm)
+            if kc in call_strikes: atm_str_c = kc; break
+        for fmt in ("{:.1f}", "{:.2f}", "{:g}", "{:.0f}"):
+            kp = fmt.format(atm)
+            if kp in put_strikes: atm_str_p = kp; break
+
+        call_contracts = call_strikes.get(atm_str_c) or []
+        put_contracts  = put_strikes.get(atm_str_p)  or []
+        if not call_contracts or not put_contracts:
+            out["error"] = f"no contracts at ATM {atm}"
+            _cache_write(cache_key, out); return out
+
+        cc = call_contracts[0]; pc = put_contracts[0]
+        def _mid(c):
+            bid = c.get("bid"); ask = c.get("ask")
+            mark = c.get("mark") or c.get("last")
+            if bid is not None and ask is not None and bid > 0 and ask > 0:
+                return (float(bid) + float(ask)) / 2.0
+            if mark is not None:
+                try: return float(mark)
+                except (TypeError, ValueError): return None
+            return None
+
+        c_mid = _mid(cc); p_mid = _mid(pc)
+        if c_mid is None or p_mid is None or c_mid <= 0 or p_mid <= 0:
+            out["error"] = "no mid prices"
+            _cache_write(cache_key, out); return out
+
+        straddle = c_mid + p_mid
+        impl_pct = (straddle / spot) * 100.0
+
+        out["implied_move_pct"] = round(impl_pct, 2)
+        out["straddle_cost"]    = round(straddle, 2)
+        out["atm_strike"]       = atm
+        out["expiry_date"]      = exp_date.isoformat()
+        out["spot"]             = round(spot, 2)
+
+    except Exception as ex:
+        out["error"] = f"{type(ex).__name__}: {ex}"
+
+    _cache_write(cache_key, out)
+    return out

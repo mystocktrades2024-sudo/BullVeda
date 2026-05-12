@@ -44,7 +44,7 @@ from social_signals import get_social_signals
 from data_fetcher import (
     load_config, get_sp500, get_russell1000, fetch_all_zacks_data,
     fetch_market_data, get_stock_info, get_stock_info_batch,
-    get_market_regime, get_earnings_date, get_news_sentiment,
+    get_market_regime, compute_sector_dispersion, get_earnings_date, get_news_sentiment,
     get_insider_activity, get_analyst_data, get_tv_ratings_batch,
     get_stocktwits_data, get_sector_etf_data, get_weekly_data,
     get_options_iv_data, get_earnings_beat_rate,
@@ -1089,6 +1089,32 @@ def run_daily_scan(force_fresh: bool = False):
                    if e != "SPY" and d.get("vs_spy_pct", 0) > 0]
         leaders.sort(key=lambda x: x[1], reverse=True)
         log.info(f"  Sector leaders: {', '.join(e for e, _ in leaders[:3])}")
+
+    # Sector dispersion regime enhancement (2026-05-11) — narrow leadership
+    # is a fragile-bull signal that breadth/VIX/EMA gates miss. Merge the
+    # dispersion stats into the regime dict and downgrade risk_on_trending
+    # to risk_on_choppy when leadership is narrow OR rotation is defensive.
+    _disp = compute_sector_dispersion(sector_etf_data) if sector_etf_data else {}
+    if _disp and not _disp.get("_error"):
+        regime["sector_dispersion"] = _disp
+        if _disp.get("downgrade_regime") and regime.get("regime4") == "risk_on_trending":
+            _orig = regime["regime4"]
+            regime["regime4_pre_dispersion"] = _orig
+            regime["regime4"] = "risk_on_choppy"
+            regime["max_size_pct"] = 70  # match risk_on_choppy sizing
+            log.info(
+                f"  Regime DOWNGRADED: {_orig} → risk_on_choppy "
+                f"(leadership={_disp.get('leadership_breadth')}, "
+                f"rotation={_disp.get('rotation_signal')}, "
+                f"tech_only={_disp.get('is_tech_only')})"
+            )
+        log.info(
+            f"  Sector dispersion: leadership={_disp.get('leadership_breadth')} "
+            f"({_disp.get('sectors_outperforming_spy')}/{_disp.get('sectors_total')} "
+            f"out-SPY) · rotation={_disp.get('rotation_signal')} · "
+            f"stdev={_disp.get('dispersion_stdev')}pp"
+        )
+
     log.info(f"  Macro risk: {macro_signals.get('risk_signal', '?')} | "
              f"HYG {macro_signals.get('hyg', {}).get('trend', '?')} | "
              f"DXY {macro_signals.get('dxy', {}).get('trend', '?')}")
@@ -3762,6 +3788,30 @@ def run_daily_scan(force_fresh: bool = False):
             log.warning(f"supabase analysis sync skipped: {_res.get('reason')}")
     except Exception as _se:
         log.warning(f"supabase analysis sync failed (non-fatal): {_se}")
+
+    # Options flow refresh — always pull fresh UOA data from the standalone
+    # scanner (200-ticker universe) before build_data.py reads it (2026-05-11).
+    # The in-scan options-flow only sees the ~75 enriched tickers; the
+    # standalone scanner covers 200 by liquidity. Running it on every
+    # /Swing-Trade fire keeps options_flow.json fresh + uses --force to
+    # bypass the market-hours gate (user directive: always pull both).
+    try:
+        import subprocess
+        _of_refresh = BASE_DIR / "refresh_options_flow.py"
+        if _of_refresh.exists():
+            log.info("Step 8b: Refreshing standalone options-flow scanner (--force)...")
+            _r = subprocess.run(["python3", str(_of_refresh), "--force"],
+                                check=False, capture_output=True, timeout=300)
+            if _r.returncode == 0:
+                _tail = (_r.stdout or b"").decode("utf-8", errors="replace").strip().split("\n")[-1][:200]
+                log.info(f"  Options flow refreshed: {_tail}")
+            else:
+                _err = (_r.stderr or b"").decode("utf-8", errors="replace").strip()[-300:]
+                log.warning(f"  Options flow refresh exit {_r.returncode}; using cached. {_err}")
+    except subprocess.TimeoutExpired:
+        log.warning("  Options flow refresh timed out after 300s; using cached.")
+    except Exception as _of_e:
+        log.warning(f"  Options flow refresh error (non-fatal): {_of_e}")
 
     # Rebuild prototype data.json + tickers.json so the new-design dashboard
     # at /v2/ stays in sync with the production scan.
