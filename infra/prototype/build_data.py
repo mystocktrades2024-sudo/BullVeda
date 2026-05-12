@@ -3501,34 +3501,52 @@ def main():
     _sf_fals  = data.get("setup_falsifications") or {}
     _sf_drift = {(d.get("setup") if isinstance(d, dict) else None) for d in (data.get("setup_drift_alerts") or [])}
     _sf_drift.discard(None)
-    # Build a unified ticker→rich-source lookup covering ALL four list types
-    # (short / medium / long / screener) so the detail-view fast-path at
-    # server.py:/api/elite/<TICKER> hits for every ticker shown anywhere on
+    # Build a unified ticker→rich-source lookup covering ALL five list types
+    # (short / medium / long / screener / killed) so the detail-view fast-path
+    # at server.py:/api/elite/<TICKER> hits for every ticker shown anywhere on
     # the dashboard. Previously this loop iterated only st_rows + mt_rows,
-    # leaving long_term + screener tickers absent from tickers.json — clicks
-    # on those fell through to a slow on-demand run_quick_dive and the page
-    # rendered with empty options_kpis, which made the Options sub-tab show
-    # the misleading "Schwab refresh token may have expired" fallback.
+    # leaving long_term + screener + killed tickers absent from tickers.json
+    # — clicks on those fell through to slow on-demand run_quick_dive and the
+    # page rendered with empty options_kpis (misleading "Schwab token expired"
+    # fallback). killed coverage added 2026-05-11 so the user can investigate
+    # "why was X rejected" without a 15-25s re-scan.
     _all_scored_by_t = {r.get("ticker"): r for r in (b.get("all_scored") or []) if r.get("ticker")}
-    _st_by_t = {r.get("ticker"): r for r in st_rows if r.get("ticker")}
-    _mt_by_t = {r.get("ticker"): r for r in mt_rows if r.get("ticker")}
+    _st_by_t      = {r.get("ticker"): r for r in st_rows if r.get("ticker")}
+    _mt_by_t      = {r.get("ticker"): r for r in mt_rows if r.get("ticker")}
+    _killed_by_t  = {r.get("ticker"): r for r in (b.get("killed") or []) if isinstance(r, dict) and r.get("ticker")}
+    killed_set    = set(_killed_by_t.keys())
 
     # Preserve original iteration order so existing short_term-first dedupe
-    # semantics still hold; then layer on long_term + screener tickers.
+    # semantics still hold; layer long_term + screener next; killed last (so
+    # actionable tickers always take precedence on the dedupe seen-set).
     _ordered_targets: list[str] = []
     _seen: set = set()
     for r in (st_rows + mt_rows + long_term + screener_rows):
         t = r.get("ticker")
         if t and t not in _seen:
             _seen.add(t); _ordered_targets.append(t)
+    for t in _killed_by_t:
+        if t and t not in _seen:
+            _seen.add(t); _ordered_targets.append(t)
 
     all_rich = {}
+    _rich_failures: list[tuple[str, str]] = []
     for t in _ordered_targets:
-        src = _st_by_t.get(t) or _mt_by_t.get(t) or _all_scored_by_t.get(t)
+        src = (_st_by_t.get(t) or _mt_by_t.get(t)
+               or _all_scored_by_t.get(t) or _killed_by_t.get(t))
         if not src: continue
         if src.get("earn_days") in (None, 0) and t in _ew_lookup:
             src["earn_days"] = _ew_lookup[t]
-        all_rich[t] = rich_row(src, b)
+        # Per-ticker try/except — without this, one malformed row (missing
+        # nested key in _compute_mode_verdicts, type mismatch in fund_real,
+        # div-by-zero on a no-fundamentals stock) would halt the whole build.
+        # Failures logged below and reported on stdout so they're visible
+        # without burying the rest of the run.
+        try:
+            all_rich[t] = rich_row(src, b)
+        except Exception as _e:
+            _rich_failures.append((t, type(_e).__name__ + ": " + str(_e)[:120]))
+            continue
         all_rich[t]["_mode"] = _mode_lookup.get(t, 'swing')
         # Stamp setup-family stats + mechanism + falsification per ticker so
         # the Scanner UI can render Wilson LB / n / mechanism without
@@ -3549,6 +3567,22 @@ def main():
         if t in short_set:
             all_rich[t]["stage"] = "SELL"
             all_rich[t]["verdict"] = "SELL"
+        elif t in killed_set:
+            # Stamp killed tickers with explicit stage so the detail view
+            # renders an honest "AVOID" badge instead of pretending it's a
+            # WATCH candidate. reject_reason already lives on the source row
+            # (set by decision_engine path) — surface it under both names so
+            # downstream UI code can reference either.
+            all_rich[t]["stage"] = "KILLED"
+            all_rich[t]["verdict"] = "AVOID"
+            kr = src.get("reject_reason") or src.get("kill_reason") or ""
+            if kr:
+                all_rich[t]["kill_reason"]   = kr
+                all_rich[t]["reject_reason"] = kr
+    if _rich_failures:
+        print(f"rich_row failures: {len(_rich_failures)} tickers skipped")
+        for _t, _err in _rich_failures[:10]:
+            print(f"  {_t}: {_err}")
 
     # Per-ticker earnings prediction join — surfaces 4Q pattern + revision
     # trend + implied move + Kelly-lite + PEAD + macro overlap + sector cohort
