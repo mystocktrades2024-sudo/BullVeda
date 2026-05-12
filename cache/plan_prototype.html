@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Plan · structured execution prototype</title>
+<style>
+  :root {
+    --bg:#000; --bg-1:#0a0d0c; --bg-2:#0f1311; --bg-3:#141816;
+    --line:#1d2520; --line-2:#2a352e;
+    --ink:#d8d6cc; --ink-1:#b0aea3; --ink-2:#80847a;
+    --ink-3:#545851; --ink-4:#2e312c;
+    --gn:#5be57c; --gn-dim:#2f6b41; --gn-bg:rgba(91,229,124,0.08);
+    --am:#ffb95c; --am-dim:#8c5d20; --am-bg:rgba(255,185,92,0.06);
+    --rd:#ff6b5b; --rd-dim:#7a2a22; --rd-bg:rgba(255,107,91,0.06);
+    --cy:#5ec8d8; --cy-dim:#2c6a74; --cy-bg:rgba(94,200,216,0.07);
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --sans:Inter,-apple-system,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink-1);
+    font-family:var(--sans);font-size:12px;font-variant-numeric:tabular-nums}
+  body{padding:24px}
+  .page{max-width:1500px;margin:0 auto;display:flex;flex-direction:column;gap:24px}
+  .mono{font-family:var(--mono)}
+
+  /* variant selector — view 3 call types side by side or stacked */
+  .variant-h{display:flex;align-items:baseline;gap:14px;padding:0 0 8px 0;border-bottom:1px solid var(--line)}
+  .variant-h .lbl{font-family:var(--mono);font-size:10px;letter-spacing:0.18em;color:var(--cy);font-weight:800;text-transform:uppercase}
+  .variant-h .sub{font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+
+  /* ─────────── QPR · structured execution plan ─────────── */
+  .qpr { display:flex; flex-direction:column; gap:10px; padding:0;
+    background:var(--bg-1); border:1px solid var(--line); border-radius:4px; overflow:hidden;
+    color:var(--ink-1); font-size:12px; font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .qpr * { box-sizing:border-box; }
+  .qpr-h { display:flex; align-items:center; gap:14px; padding:12px 16px;
+    background:linear-gradient(135deg, color-mix(in oklch, var(--cy) 8%, var(--bg-2)) 0%, var(--bg-2) 70%);
+    border-bottom:1px solid var(--line); }
+  .qpr-h-t { font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:var(--cy); font-weight:800; }
+  .qpr-tk { font-size:18px; font-weight:800; color:var(--ink); letter-spacing:0.02em; }
+  .qpr-name { font-size:11.5px; color:var(--ink-2); }
+  .qpr-asof { margin-left:auto; font-size:10px; color:var(--ink-3); }
+  .qpr-asof b { color:var(--ink-1); font-weight:600; }
+
+  .qpr-meta-row { display:flex; align-items:center; gap:14px; padding:10px 16px;
+    background:var(--bg-2); border-bottom:1px solid var(--line); font-size:10.5px; flex-wrap:wrap; }
+  .qpr-meta-k { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-3); font-weight:700; }
+  .qpr-meta-v { color:var(--ink-1); font-weight:700; }
+  .qpr-call-badge { font-size:18px; font-weight:800; letter-spacing:0.08em; padding:3px 12px; border-radius:3px; }
+  .qpr-call-badge.gn { color:var(--gn); background:color-mix(in oklch, var(--gn) 14%, transparent); border:1px solid color-mix(in oklch, var(--gn) 40%, transparent); }
+  .qpr-call-badge.am { color:var(--am); background:color-mix(in oklch, var(--am) 14%, transparent); border:1px solid color-mix(in oklch, var(--am) 40%, transparent); }
+  .qpr-call-badge.rd { color:var(--rd); background:color-mix(in oklch, var(--rd) 14%, transparent); border:1px solid color-mix(in oklch, var(--rd) 40%, transparent); }
+  .qpr-call-badge.dim { color:var(--ink-2); background:var(--bg-3); border:1px solid var(--ink-4); }
+  .qpr-conv-badge { font-size:11.5px; font-weight:800; padding:2px 10px; border-radius:3px; letter-spacing:0.08em; }
+  .qpr-conv-badge.gn { color:var(--gn); background:var(--gn-bg); border:1px solid var(--gn-dim); }
+  .qpr-conv-badge.am { color:var(--am); background:var(--am-bg); border:1px solid var(--am-dim); }
+  .qpr-conv-badge.rd { color:var(--rd); background:var(--rd-bg); border:1px solid var(--rd-dim); }
+
+  .qpr-sec { padding:11px 16px; border-bottom:1px solid var(--line); }
+  .qpr-sec:last-child { border-bottom:none; }
+  .qpr-sec-k { font-size:9.5px; letter-spacing:0.18em; text-transform:uppercase;
+    font-weight:800; color:var(--ink-3); margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+  .qpr-sec-k .num { color:var(--cy); font-size:10px; }
+  .qpr-sec-k .desc { color:var(--ink-4); font-weight:500; letter-spacing:0.08em; text-transform:none; font-size:9.5px; }
+  .qpr-sec-v { font-size:12.5px; line-height:1.65; color:var(--ink-1); }
+  .qpr-sec-v b { color:var(--ink); font-weight:700; }
+
+  .qpr-call-row { display:grid; grid-template-columns:200px 1fr; gap:14px; padding:5px 0;
+    font-size:11.5px; align-items:baseline; border-bottom:1px dashed var(--line); }
+  .qpr-call-row:last-child { border-bottom:none; }
+  .qpr-call-k { font-size:9.5px; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-3); font-weight:700; }
+  .qpr-call-v { color:var(--ink-1); }
+  .qpr-call-v b { color:var(--ink); font-weight:700; }
+
+  .qpr-grid4 { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-bottom:8px; }
+  .qpr-tile { background:var(--bg-2); border:1px solid var(--line); border-radius:2px; padding:8px 10px; }
+  .qpr-tile-k { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-3); font-weight:700; margin-bottom:3px; }
+  .qpr-tile-v { font-size:13px; font-weight:800; color:var(--ink); line-height:1.2; }
+  .qpr-tile-v.gn { color:var(--gn); }
+  .qpr-tile-v.am { color:var(--am); }
+  .qpr-tile-v.rd { color:var(--rd); }
+  .qpr-tile-v.dim { color:var(--ink-3); }
+  .qpr-tile-sub { font-size:9.5px; color:var(--ink-3); margin-top:2px; }
+
+  .qpr-mults { display:flex; gap:14px; padding:8px 10px; margin-bottom:8px; background:var(--bg-2); border-radius:2px; flex-wrap:wrap; }
+  .qpr-mults span { font-size:10.5px; }
+  .qpr-mults .k { color:var(--ink-3); letter-spacing:0.10em; text-transform:uppercase; font-size:9px; font-weight:700; }
+  .qpr-mults .v { color:var(--ink); font-weight:700; margin-left:4px; }
+  .qpr-mults .v.am { color:var(--am); }
+  .qpr-mults .v.rd { color:var(--rd); }
+
+  .qpr-lens-list { display:flex; flex-direction:column; gap:0; }
+  .qpr-lens-row { display:grid; grid-template-columns:120px 1fr; gap:14px; padding:6px 0; border-bottom:1px dashed var(--line); font-size:11.5px; align-items:baseline; }
+  .qpr-lens-row:last-child { border-bottom:none; }
+  .qpr-lens-l { font-size:9.5px; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-2); font-weight:800; }
+  .qpr-lens-v { color:var(--ink-1); }
+  .qpr-lens-v b { color:var(--ink); font-weight:700; }
+  .qpr-lens-v .gn { color:var(--gn); }
+  .qpr-lens-v .am { color:var(--am); }
+  .qpr-lens-v .rd { color:var(--rd); }
+
+  .qpr-tbl { width:100%; border-collapse:collapse; font-size:11px; }
+  .qpr-tbl thead th { font-size:8.5px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--ink-3); font-weight:700; text-align:left; padding:6px 8px; border-bottom:1px solid var(--ink-4); }
+  .qpr-tbl thead th.r, .qpr-tbl td.r { text-align:right; }
+  .qpr-tbl tbody td { padding:7px 8px; color:var(--ink-1); border-bottom:1px solid var(--line); }
+  .qpr-tbl tr:last-child td { border-bottom:none; }
+  .qpr-tbl b.gn { color:var(--gn); }
+  .qpr-tbl b.am { color:var(--am); }
+  .qpr-tbl b.rd { color:var(--rd); }
+  .qpr-tbl b.cy { color:var(--cy); }
+  .qpr-tbl b.dim { color:var(--ink-3); }
+  .qpr-tbl .dim { color:var(--ink-3); }
+  .qpr-tbl .gn { color:var(--gn); }
+  .qpr-tbl .am { color:var(--am); }
+  .qpr-tbl .rd { color:var(--rd); }
+
+  .qpr-note-line { font-size:10.5px; color:var(--ink-3); margin-top:6px; line-height:1.5; padding:4px 8px; }
+  .qpr-disagree-list { margin:4px 0 0 0; padding:0; list-style:none; }
+  .qpr-disagree-list li { padding:6px 10px; margin-bottom:4px; background:color-mix(in oklch, var(--am) 6%, transparent); border-left:2px solid var(--am); border-radius:2px; font-size:11.5px; line-height:1.6; }
+  .qpr-disagree-list li b.gn { color:var(--gn); }
+  .qpr-disagree-list li b.am { color:var(--am); }
+  .qpr-disagree-list li b.rd { color:var(--rd); }
+  .qpr-no-disagree { padding:8px 12px; background:color-mix(in oklch, var(--gn) 6%, transparent); border-left:2px solid var(--gn); border-radius:2px; font-size:11.5px; color:var(--ink-1); }
+  .qpr-empty { padding:16px; text-align:center; color:var(--ink-3); font-size:12px; font-style:italic; }
+
+  .qpr-subhead { font-size:9.5px; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-3); font-weight:700; margin:10px 0 4px; }
+  .qpr-rationale { font-size:11.5px; line-height:1.6; color:var(--ink-2); padding:6px 12px;
+    background:var(--bg-2); border-radius:2px; margin-top:4px; }
+  .qpr-rationale b { color:var(--ink); font-weight:700; }
+  .qpr-rationale .gn { color:var(--gn); }
+  .qpr-rationale .am { color:var(--am); }
+  .qpr-rationale .rd { color:var(--rd); }
+  .qpr-sources { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; font-size:11px; color:var(--ink-2); }
+  .qpr-sources span b { color:var(--ink-1); font-weight:700; }
+
+  @media (max-width: 900px) {
+    .qpr-call-row, .qpr-lens-row { grid-template-columns:1fr; gap:4px; }
+    .qpr-grid4 { grid-template-columns:repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ────── HEADER NOTE ────── -->
+  <div class="variant-h">
+    <span class="lbl">◈ Plan tab prototype</span>
+    <span class="sub">3 variants stacked · BUY · READY · MEDIUM    →    WATCH · STAGED · LOW    →    NO_CALL · SUSPENDED · LOW</span>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════════ -->
+  <!-- VARIANT A · BUY · READY · MEDIUM CONVICTION                              -->
+  <!-- ════════════════════════════════════════════════════════════════════════ -->
+  <div class="qpr">
+    <div class="qpr-h">
+      <span class="qpr-h-t">◈ Structured Execution Plan</span>
+      <span class="qpr-tk">AVGO</span>
+      <span class="qpr-name">· Broadcom Inc · NASDAQ Technology</span>
+      <span class="qpr-asof">As of <b>2026-05-12 09:45 EST</b> · Price <b>$428.43</b> · Ref equity <b>$25,000</b></span>
+    </div>
+
+    <div class="qpr-meta-row">
+      <span><span class="qpr-meta-k">Strategy</span> <span class="qpr-meta-v">SWING</span> <span style="color:var(--ink-3)">(days–weeks · 14d catalyst)</span></span>
+      <span><span class="qpr-meta-k">Lead lens</span> <span class="qpr-meta-v">TRADER</span></span>
+      <span style="margin-left:auto"><span class="qpr-meta-k">Plan call</span> <span class="qpr-call-badge gn">BUY</span> <span style="color:var(--ink-3);font-size:10px">execute now · orders to fire</span></span>
+      <span><span class="qpr-meta-k">Execution</span> <span class="qpr-conv-badge gn">READY</span></span>
+      <span><span class="qpr-meta-k">Conviction</span> <span class="qpr-conv-badge am">MEDIUM</span></span>
+      <span><span class="qpr-meta-k">Data</span> <span class="qpr-conv-badge gn">COMPLETE</span></span>
+    </div>
+
+    <!-- ① EXECUTION THESIS -->
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">①</span> EXECUTION THESIS <span class="desc">— what we do, at what size, why</span></div>
+      <div class="qpr-sec-v">
+        <b>AVGO · Broadcom Inc</b>. SWING strategy, lead TRADER. Execute long: <b>14</b> shares @ <b>$424.26–$431.21</b> · risk <b class="rd">$340</b> (1.36% of $25,000 ref) · target <b class="gn">+2.9R</b> / <b class="gn">+4.8R</b>. Catalyst: AI-infra UOA cluster + earnings <b>+12d</b>. MC edge <b class="gn">+38pp</b> supports sizing; squeeze fired bullish, RS rank 93.
+      </div>
+    </div>
+
+    <!-- ② CALL BUY -->
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">②</span> CALL · BUY <span class="desc">— execution-specific required fields</span></div>
+      <div class="qpr-sec-v">
+        <div class="qpr-call-row"><span class="qpr-call-k">Action</span><span class="qpr-call-v"><b class="gn">ENTER LONG</b> · limit order in entry zone</span></div>
+        <div class="qpr-call-row"><span class="qpr-call-k">Entry zone (limit)</span><span class="qpr-call-v"><b>$424.26–$431.21</b> · entry quality FRESH</span></div>
+        <div class="qpr-call-row"><span class="qpr-call-k">Size</span><span class="qpr-call-v"><b>14</b> shares · <b>$5,978</b> deployed · <b>23.91%</b> of $25,000 ref equity</span></div>
+        <div class="qpr-call-row"><span class="qpr-call-k">Stop (close-based)</span><span class="qpr-call-v"><b class="rd">$404.91</b> · risk $24.27/share · total <b class="rd">$340</b></span></div>
+        <div class="qpr-call-row"><span class="qpr-call-k">T1 / T2 (limits)</span><span class="qpr-call-v"><b class="gn">$496.21</b> (+2.9R) · <b class="gn">$542.16 (+4.8R)</b></span></div>
+        <div class="qpr-call-row"><span class="qpr-call-k">Time stop</span><span class="qpr-call-v">flat after <b>14d</b> regardless of price</span></div>
+        <div class="qpr-call-row"><span class="qpr-call-k">Trail activation</span><span class="qpr-call-v">at <b>$437.00</b> (+2%) · trail 1.25× ATR (~2.6% gap)</span></div>
+        <div class="qpr-call-row"><span class="qpr-call-k">EV (sized)</span><span class="qpr-call-v gn">+$378</span></div>
+      </div>
+    </div>
+
+    <!-- ③ SIZING MATH -->
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">③</span> SIZING MATH <span class="desc">— Kelly-lite + 4-lens cross-check on $25,000 ref equity</span></div>
+      <div class="qpr-sec-v">
+        <div class="qpr-grid4">
+          <div class="qpr-tile"><div class="qpr-tile-k">f* (Kelly)</div><div class="qpr-tile-v">42.5%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">½ Kelly cap</div><div class="qpr-tile-v">21.2%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Final alloc</div><div class="qpr-tile-v gn">23.91%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Win prob</div><div class="qpr-tile-v">66%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Live WR</div><div class="qpr-tile-v gn">59%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Shares</div><div class="qpr-tile-v"><b>14</b></div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">$ deployed</div><div class="qpr-tile-v">$5,978</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Cap reason</div><div class="qpr-tile-v" style="font-size:11.5px">max_25pct · MC edge</div></div>
+        </div>
+        <div class="qpr-mults">
+          <span><span class="k">regime ×</span> <span class="v">1.00</span></span>
+          <span><span class="k">VIX ×</span> <span class="v">0.95</span></span>
+          <span><span class="k">drawdown ×</span> <span class="v">1.00</span></span>
+          <span><span class="k">earnings ×</span> <span class="v am">0.60</span></span>
+          <span><span class="k">VaR floor ×</span> <span class="v">1.00</span></span>
+        </div>
+        <div class="qpr-lens-list">
+          <div class="qpr-lens-row">
+            <span class="qpr-lens-l">VALUE</span>
+            <span class="qpr-lens-v">R:R 3.0:1 <b class="gn">supports size</b> · PT upside +15.4% (PT $494) · PEG 1.20 · FCF margin +38.2%</span>
+          </div>
+          <div class="qpr-lens-row">
+            <span class="qpr-lens-l">TRADER</span>
+            <span class="qpr-lens-v">Entry quality <b class="gn">FRESH</b> · MACD bullish · squeeze fired · RVOL 1.4× · ADX 28 strong trend · size at full allocation given quality</span>
+          </div>
+          <div class="qpr-lens-row">
+            <span class="qpr-lens-l">HEDGE FUND</span>
+            <span class="qpr-lens-v">MC edge <b class="gn">+38pp</b> supports sized position · regime risk-on-choppy (BAP 76/72) · UOA 5 calls · insider 3B/0S +$2.4M</span>
+          </div>
+          <div class="qpr-lens-row">
+            <span class="qpr-lens-l">CFP</span>
+            <span class="qpr-lens-v">β <b>1.45</b> · ADV <b class="gn">$4.2B</b> · β-weighted exposure $8,668 · mcap $2.03T · suitability: SWING ✓</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ④ RISK ENVELOPE -->
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">④</span> RISK ENVELOPE</div>
+      <div class="qpr-sec-v">
+        <div class="qpr-grid4">
+          <div class="qpr-tile"><div class="qpr-tile-k">Stop $</div><div class="qpr-tile-v rd">$404.91</div><div class="qpr-tile-sub">close-based · 2.65% ≈ 1.25× ATR</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">$ / share</div><div class="qpr-tile-v rd">$24.27</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Total $ risk</div><div class="qpr-tile-v rd">−$340</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">% equity</div><div class="qpr-tile-v gn">1.36%</div><div class="qpr-tile-sub">of $25,000 ref</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">VaR-95</div><div class="qpr-tile-v am">−6.32%</div><div class="qpr-tile-sub">10d empirical</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">CVaR-97.5</div><div class="qpr-tile-v rd">−14.86%</div><div class="qpr-tile-sub">tail loss</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">P(stop) MC</div><div class="qpr-tile-v">28%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">β exposure</div><div class="qpr-tile-v am">$8,668</div><div class="qpr-tile-sub">×1.45 SPY</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑤ REWARD MAP -->
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">⑤</span> REWARD MAP</div>
+      <div class="qpr-sec-v">
+        <div class="qpr-grid4">
+          <div class="qpr-tile"><div class="qpr-tile-k">T1 $</div><div class="qpr-tile-v gn">$496.21</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">T1 gain</div><div class="qpr-tile-v gn">+$949</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">R-mult T1</div><div class="qpr-tile-v gn">+2.79R</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">P(T1) MC</div><div class="qpr-tile-v gn">66%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">T2 $</div><div class="qpr-tile-v gn">$542.16</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">T2 gain</div><div class="qpr-tile-v gn">+$1,592</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">R-mult T2</div><div class="qpr-tile-v gn">+4.68R</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">EV (sized)</div><div class="qpr-tile-v gn">+$378</div></div>
+        </div>
+        <div class="qpr-note-line">EV = P(T1)×T1_gain − P(stop)×stop_loss using MC probabilities · 0.66 × $949 − 0.28 × $340 = +$626 − $95 = +$378.</div>
+      </div>
+    </div>
+
+    <!-- ⑥ TIMING & TRIGGERS -->
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">⑥</span> TIMING &amp; TRIGGERS</div>
+      <div class="qpr-sec-v">
+        <div class="qpr-grid4">
+          <div class="qpr-tile"><div class="qpr-tile-k">Hold window</div><div class="qpr-tile-v">14d max</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Expected hold</div><div class="qpr-tile-v dim">8d median</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Trail trigger</div><div class="qpr-tile-v">$437.00</div><div class="qpr-tile-sub">+2% activation</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Trail rule</div><div class="qpr-tile-v">1.25× ATR</div><div class="qpr-tile-sub">~2.6% gap</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">ER days</div><div class="qpr-tile-v am">+12d</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Pre-ER flat</div><div class="qpr-tile-v am">ER −1d</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Catalyst window</div><div class="qpr-tile-v gn">14d SWING</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Cat in horizon?</div><div class="qpr-tile-v gn">YES</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑦ ORDER LADDER -->
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">⑦</span> ORDER LADDER <span class="desc">— step-by-step Schwab orders</span></div>
+      <div class="qpr-sec-v">
+        <table class="qpr-tbl">
+          <thead><tr><th>#</th><th>Order</th><th>Side</th><th class="r">Shares</th><th class="r">Price</th><th>Instruction</th><th class="r">TIF</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td><b class="am">Pre-entry alert</b></td><td class="dim">—</td><td class="r dim">—</td><td class="r">$424.26</td><td class="dim">alert on re-entry to zone</td><td class="r dim">GTC</td></tr>
+            <tr><td>2</td><td><b class="gn">Limit Buy</b></td><td class="gn">BUY</td><td class="r"><b>14</b></td><td class="r"><b>$424.26–$431.21</b></td><td class="dim">in entry zone</td><td class="r">DAY</td></tr>
+            <tr><td>3</td><td><b class="rd">Stop Loss</b></td><td class="rd">SELL</td><td class="r"><b>14</b></td><td class="r"><b>$404.91</b></td><td class="dim">close-based · daily TF · no wick stops</td><td class="r">GTC</td></tr>
+            <tr><td>4</td><td><b class="gn">Scale-out T1</b></td><td class="gn">SELL</td><td class="r"><b>9</b></td><td class="r"><b>$496.21</b></td><td class="dim">trim ⅔ · lock +2.79R</td><td class="r">GTC</td></tr>
+            <tr><td>5</td><td><b class="cy">Trail runner</b></td><td class="dim">—</td><td class="r"><b>5</b></td><td class="r">trail</td><td class="dim">activate at +2% ($437.00) · trail 1.25× ATR</td><td class="r">GTC</td></tr>
+            <tr><td>6</td><td><b class="cy">T2 target</b></td><td class="gn">SELL</td><td class="r"><b>5</b></td><td class="r"><b>$542.16</b></td><td class="dim">final exit · +4.68R</td><td class="r">GTC</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ⑧ POSITION MANAGEMENT -->
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">⑧</span> POSITION MANAGEMENT <span class="desc">— pre-decided exit triggers, priority order</span></div>
+      <div class="qpr-sec-v">
+        <table class="qpr-tbl">
+          <tr><td><b class="gn">+2% gain</b></td><td>Activate trailing stop · 1.25× ATR</td></tr>
+          <tr><td><b class="gn">T1 hit</b></td><td>Trim ⅔ (9 sh) · move stop to entry (breakeven)</td></tr>
+          <tr><td><b class="gn">T2 hit</b></td><td>Close runner ⅓ (5 sh) · flat</td></tr>
+          <tr><td><b class="am">EMA21 break</b></td><td>Tighten stop to that level · monitor</td></tr>
+          <tr><td><b class="am">Volume dry-up &gt; 3d</b></td><td>Reduce position 50%</td></tr>
+          <tr><td><b class="rd">Close below stop</b></td><td>EXIT immediately · no averaging down</td></tr>
+          <tr><td><b class="rd">Time stop 14d</b></td><td>Flat regardless of price</td></tr>
+          <tr><td><b class="rd">Pre-ER (ER −1d)</b></td><td>Flat before announcement unless ESP+ intact</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- ⑨ DISAGREEMENTS · CONVICTION · DATA · SOURCES -->
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">⑨</span> DISAGREEMENTS · CONVICTION · DATA · SOURCES</div>
+      <div class="qpr-sec-v">
+        <div class="qpr-subhead">Disagreements (5-condition check)</div>
+        <ul class="qpr-disagree-list">
+          <li><b>Earnings risk overlaps trail:</b> ER in <b class="am">+12d</b> — within 14d SWING horizon, but pre-ER flat rule fires on day +11. Practical hold = 11d, not 14d.</li>
+          <li><b>β-exposure note:</b> β <b>1.45</b> with $5,978 deployed creates $8,668 SPY-equivalent. Acceptable but flag for portfolio aggregation.</li>
+        </ul>
+
+        <div class="qpr-subhead">Conviction <span class="qpr-conv-badge am">MEDIUM</span></div>
+        <div class="qpr-rationale">4/4 lenses aligned <span class="gn">BULLISH</span>. Tech+Value agree. MC edge <b class="gn">+38pp</b>. R:R 3.0:1 supports. Caveats: <b>ER catalyst inside horizon but truncates effective hold to 11d</b>; setup sample n=49 (above n≥30 noise floor). Conviction does not reach HIGH because earnings binary inside the catalyst window introduces an irreducible gap-risk floor.</div>
+
+        <div class="qpr-subhead">Data <span class="qpr-conv-badge gn">COMPLETE</span></div>
+        <div class="qpr-rationale">All required fields present and fresh. Scan run 2026-05-12 09:45 EST (0.2d old).</div>
+
+        <div class="qpr-subhead">Sources &amp; freshness</div>
+        <div class="qpr-sources">
+          <span><b>Price:</b> 2026-05-12 09:45 EST (Schwab quote, &lt;5 min)</span>
+          <span><b>Sizing:</b> kelly_size from analysis.py (live WR 59%)</span>
+          <span><b>Risk signals:</b> monte_carlo + forward_dist (EODHD)</span>
+          <span><b>Plan inputs:</b> canonical_trade_plan (K6 source of truth)</span>
+          <span><b>Fundamentals:</b> Q1 2026 (latest EODHD pull)</span>
+          <span><b>Scan run:</b> 2026-05-12 09:45 EST</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════════ -->
+  <!-- VARIANT B · WATCH · STAGED · LOW CONVICTION                              -->
+  <!-- ════════════════════════════════════════════════════════════════════════ -->
+  <div class="qpr">
+    <div class="qpr-h">
+      <span class="qpr-h-t">◈ Structured Execution Plan</span>
+      <span class="qpr-tk">COHR</span>
+      <span class="qpr-name">· Coherent Inc · NASDAQ Scientific Instruments</span>
+      <span class="qpr-asof">As of <b>2026-05-12 09:45 EST</b> · Price <b>$379.69</b> · Ref equity <b>$25,000</b></span>
+    </div>
+
+    <div class="qpr-meta-row">
+      <span><span class="qpr-meta-k">Strategy</span> <span class="qpr-meta-v">SWING</span> <span style="color:var(--ink-3)">(days–weeks · 14d catalyst)</span></span>
+      <span><span class="qpr-meta-k">Lead lens</span> <span class="qpr-meta-v">TRADER</span></span>
+      <span style="margin-left:auto"><span class="qpr-meta-k">Plan call</span> <span class="qpr-call-badge am">WATCH</span> <span style="color:var(--ink-3);font-size:10px">staged · trigger required</span></span>
+      <span><span class="qpr-meta-k">Execution</span> <span class="qpr-conv-badge am">STAGED</span></span>
+      <span><span class="qpr-meta-k">Conviction</span> <span class="qpr-conv-badge rd">LOW</span></span>
+      <span><span class="qpr-meta-k">Data</span> <span class="qpr-conv-badge gn">COMPLETE</span></span>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">①</span> EXECUTION THESIS <span class="desc">— what we do, at what size, why</span></div>
+      <div class="qpr-sec-v"><b>COHR · Coherent Inc</b>. SWING strategy, lead TRADER. Plan <b class="am">STAGED</b> — limits pre-positioned but not active. Capital at risk only on trigger fire. (Downgraded from Overview BUY: entry quality MISSED — price extended &gt;2 ATR above entry zone.)</div>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">②</span> CALL · WATCH <span class="desc">— execution-specific fields · downgraded from Overview BUY</span></div>
+      <div class="qpr-sec-v">
+        <div class="qpr-call-row"><span class="qpr-call-k">Action</span><span class="qpr-call-v"><b class="am">STAGE LIMITS</b> · do not execute</span></div>
+        <div class="qpr-call-row"><span class="qpr-call-k">Trigger (one)</span><span class="qpr-call-v">Price re-enters <b class="am">$320.32–$334.59</b> (FRESH/PULLBACK quality)</span></div>
+        <div class="qpr-call-row"><span class="qpr-call-k">Pre-staged limit</span><span class="qpr-call-v">BUY LIMIT @ <b>$320.32</b> · 19 shares · GTC · DO NOT activate until trigger</span></div>
+        <div class="qpr-call-row"><span class="qpr-call-k">Capital deployed</span><span class="qpr-call-v"><b>$0</b> until trigger fires</span></div>
+        <div class="qpr-call-row"><span class="qpr-call-k">If trigger doesn't fire</span><span class="qpr-call-v">Re-evaluate on next scan; cancel limit if conditions deteriorate</span></div>
+        <div class="qpr-call-row"><span class="qpr-call-k">Converts to SHORT if</span><span class="qpr-call-v">Daily close below <b class="rd">$305.53</b> on RVOL ≥ 1.5×</span></div>
+      </div>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">③</span> SIZING MATH <span class="desc">— sizing computed at trigger price, not current</span></div>
+      <div class="qpr-sec-v">
+        <div class="qpr-grid4">
+          <div class="qpr-tile"><div class="qpr-tile-k">f* (Kelly)</div><div class="qpr-tile-v">28.0%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">½ Kelly cap</div><div class="qpr-tile-v">14.0%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Final alloc</div><div class="qpr-tile-v am">24.32%</div><div class="qpr-tile-sub">at trigger only</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Win prob</div><div class="qpr-tile-v">58%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Live WR</div><div class="qpr-tile-v">52%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Shares @ trigger</div><div class="qpr-tile-v"><b>19</b></div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">$ at trigger</div><div class="qpr-tile-v">$6,086</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Cap reason</div><div class="qpr-tile-v" style="font-size:11.5px">entry_quality gate</div></div>
+        </div>
+        <div class="qpr-lens-list">
+          <div class="qpr-lens-row"><span class="qpr-lens-l">VALUE</span><span class="qpr-lens-v">R:R 3.0:1 supports size at trigger price · rev growth +20% YoY · PEG 0.92</span></div>
+          <div class="qpr-lens-row"><span class="qpr-lens-l">TRADER</span><span class="qpr-lens-v">Entry quality <b class="rd">MISSED</b> at $379.69 · waiting for retrace to value zone $320–$334 · squeeze ON · RVOL 1.37×</span></div>
+          <div class="qpr-lens-row"><span class="qpr-lens-l">HEDGE FUND</span><span class="qpr-lens-v">MC edge <b class="gn">+19pp</b> at trigger · regime risk-on-choppy · no UOA · no insider activity</span></div>
+          <div class="qpr-lens-row"><span class="qpr-lens-l">CFP</span><span class="qpr-lens-v">β <b>2.05</b> <b class="am">amplifies portfolio</b> · ADV $1.8B ample · suitability: SWING ✓ at right entry</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">④</span> RISK ENVELOPE <span class="desc">— assumes trigger fires</span></div>
+      <div class="qpr-sec-v">
+        <div class="qpr-grid4">
+          <div class="qpr-tile"><div class="qpr-tile-k">Stop $</div><div class="qpr-tile-v rd">$305.53</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">$ / share</div><div class="qpr-tile-v rd">$14.79</div><div class="qpr-tile-sub">at trigger</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Total $ risk</div><div class="qpr-tile-v rd">−$281</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">% equity</div><div class="qpr-tile-v gn">1.12%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">P(stop) MC</div><div class="qpr-tile-v am">34%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">CVaR-97.5</div><div class="qpr-tile-v rd">−18.42%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">β exposure</div><div class="qpr-tile-v am">$12,476</div><div class="qpr-tile-sub">×2.05 SPY</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">VaR-95</div><div class="qpr-tile-v am">−9.86%</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">⑤</span> REWARD MAP <span class="desc">— at trigger entry</span></div>
+      <div class="qpr-sec-v">
+        <div class="qpr-grid4">
+          <div class="qpr-tile"><div class="qpr-tile-k">T1 $</div><div class="qpr-tile-v gn">$596.91</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">T1 gain (@ trig)</div><div class="qpr-tile-v gn">+$5,257</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">R-mult T1</div><div class="qpr-tile-v gn">+18.7R</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">P(T1) MC</div><div class="qpr-tile-v gn">53%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">T2 $</div><div class="qpr-tile-v gn">$742.60</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">T2 gain (@ trig)</div><div class="qpr-tile-v gn">+$8,028</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">R-mult T2</div><div class="qpr-tile-v gn">+28.6R</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">EV (sized)</div><div class="qpr-tile-v gn">+$2,690</div></div>
+        </div>
+        <div class="qpr-note-line">Reward calculated at trigger price $320.32, not current $379.69. Probabilities apply only after entry fires.</div>
+      </div>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">⑥</span> TIMING &amp; TRIGGERS</div>
+      <div class="qpr-sec-v">
+        <div class="qpr-grid4">
+          <div class="qpr-tile"><div class="qpr-tile-k">Hold window</div><div class="qpr-tile-v">14d (post-trigger)</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">ER days</div><div class="qpr-tile-v">none scheduled</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Cat in horizon?</div><div class="qpr-tile-v am">PARTIAL</div><div class="qpr-tile-sub">squeeze + UOA</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Trigger urgency</div><div class="qpr-tile-v">retrace needed</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Current distance</div><div class="qpr-tile-v rd">−13.5%</div><div class="qpr-tile-sub">to trigger</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Limit TIF</div><div class="qpr-tile-v">GTC</div><div class="qpr-tile-sub">awaiting trigger</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Re-evaluate</div><div class="qpr-tile-v dim">next scan</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Cancel if</div><div class="qpr-tile-v am">setup breaks</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">⑦</span> ORDER LADDER <span class="desc">— staged only, do not fire</span></div>
+      <div class="qpr-sec-v">
+        <table class="qpr-tbl">
+          <thead><tr><th>#</th><th>Order</th><th>State</th><th class="r">Shares</th><th class="r">Price</th><th>Instruction</th><th class="r">TIF</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td><b class="am">Price alert</b></td><td class="am">ARMED</td><td class="r dim">—</td><td class="r">$320.32</td><td class="dim">alert on re-entry to zone</td><td class="r dim">GTC</td></tr>
+            <tr><td>2</td><td><b class="am">Limit Buy (staged)</b></td><td class="am">DO NOT FIRE</td><td class="r"><b>19</b></td><td class="r">$320.32–$334.59</td><td class="dim">activate only when trigger met</td><td class="r">DAY (on activation)</td></tr>
+          </tbody>
+        </table>
+        <div class="qpr-note-line">No capital deployed. Conversion to BUY ladder (stop, T1, T2, trail) fires on trigger only.</div>
+      </div>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">⑧</span> POSITION MANAGEMENT <span class="desc">— rules apply post-trigger</span></div>
+      <div class="qpr-sec-v">
+        <table class="qpr-tbl">
+          <tr><td><b class="am">Trigger fires</b></td><td>Convert staged limit → BUY ladder · install stop $305.53 · stage T1/T2 limits</td></tr>
+          <tr><td><b class="gn">+2% gain post-trigger</b></td><td>Activate trail · 1.25× ATR</td></tr>
+          <tr><td><b class="gn">T1 $596.91</b></td><td>Trim ⅔ · move stop to entry (breakeven)</td></tr>
+          <tr><td><b class="rd">Close below $305.53</b></td><td>EXIT · no averaging down</td></tr>
+          <tr><td><b class="rd">Setup invalidates pre-trigger</b></td><td>Cancel staged limit · move on</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">⑨</span> DISAGREEMENTS · CONVICTION · DATA · SOURCES</div>
+      <div class="qpr-sec-v">
+        <div class="qpr-subhead">Disagreements (5-condition check)</div>
+        <ul class="qpr-disagree-list">
+          <li><b>Catalyst out of SWING horizon:</b> no scheduled earnings · catalyst is structural (squeeze + RS) which extends beyond 14d. SWING strategy nominally requires &lt;14d catalyst — this stretches the rule.</li>
+          <li><b>Practicality:</b> β <b>2.05</b> with $6,086 deployed creates $12,476 SPY-equivalent — 49.9% of $25K ref equity. Concentrated β-exposure at small account size.</li>
+        </ul>
+
+        <div class="qpr-subhead">Conviction <span class="qpr-conv-badge rd">LOW</span></div>
+        <div class="qpr-rationale">3/4 lenses aligned BULLISH (Value · Hedge Fund · CFP) but <b class="rd">Trader lens disagrees on timing</b> — entry MISSED, no FRESH entry available at current price. Trigger may not fire within reasonable window. Setup n=23 (below n≥30 noise floor) caps conviction at MEDIUM; entry-timing risk drops to LOW. Spec guidance: low-conviction WATCH should remain WATCH (not weak BUY).</div>
+
+        <div class="qpr-subhead">Data <span class="qpr-conv-badge gn">COMPLETE</span></div>
+        <div class="qpr-rationale">All required fields present and fresh.</div>
+
+        <div class="qpr-subhead">Sources &amp; freshness</div>
+        <div class="qpr-sources">
+          <span><b>Price:</b> 2026-05-12 09:45 EST</span>
+          <span><b>Sizing:</b> kelly_size (live WR 52%)</span>
+          <span><b>Risk signals:</b> monte_carlo + forward_dist</span>
+          <span><b>Plan inputs:</b> canonical_trade_plan</span>
+          <span><b>Fundamentals:</b> Q1 2026</span>
+          <span><b>Scan run:</b> 2026-05-12 09:45 EST</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════════ -->
+  <!-- VARIANT C · NO_CALL · SUSPENDED                                          -->
+  <!-- ════════════════════════════════════════════════════════════════════════ -->
+  <div class="qpr">
+    <div class="qpr-h">
+      <span class="qpr-h-t">◈ Structured Execution Plan</span>
+      <span class="qpr-tk">XYZ</span>
+      <span class="qpr-name">· Block Inc · NYSE Financial Services</span>
+      <span class="qpr-asof">As of <b>2026-05-12 09:45 EST</b> · Price <b>$58.21</b> · Ref equity <b>$25,000</b></span>
+    </div>
+
+    <div class="qpr-meta-row">
+      <span><span class="qpr-meta-k">Strategy</span> <span class="qpr-meta-v">SWING</span> <span style="color:var(--ink-3)">(days–weeks · 14d catalyst)</span></span>
+      <span><span class="qpr-meta-k">Lead lens</span> <span class="qpr-meta-v">TRADER</span></span>
+      <span style="margin-left:auto"><span class="qpr-meta-k">Plan call</span> <span class="qpr-call-badge dim">NO_CALL</span> <span style="color:var(--ink-3);font-size:10px">suspended · execution blocked</span></span>
+      <span><span class="qpr-meta-k">Execution</span> <span class="qpr-conv-badge rd">SUSPENDED</span></span>
+      <span><span class="qpr-meta-k">Conviction</span> <span class="qpr-conv-badge rd">LOW</span></span>
+      <span><span class="qpr-meta-k">Data</span> <span class="qpr-conv-badge am">PARTIAL</span></span>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">①</span> EXECUTION THESIS <span class="desc">— what's blocking</span></div>
+      <div class="qpr-sec-v">
+        <b>XYZ · Block Inc</b>. Plan <b class="rd">SUSPENDED</b>. Two execution blockers: Kelly sizing returned 0% (drawdown_mult triggered after live-WR slipped to 44% over rolling 30d); ADV $3.2M is below the $5M liquidity floor for institutional slippage. Resume when: live WR recovers to ≥50% (raises Kelly), OR account size drops below $5K (sub-$5M ADV becomes acceptable).
+      </div>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">②</span> CALL · NO_CALL <span class="desc">— what's blocking, what would change it</span></div>
+      <div class="qpr-sec-v">
+        <div class="qpr-call-row"><span class="qpr-call-k">What's blocking</span><span class="qpr-call-v"><b class="rd">Kelly final alloc 0%</b> (live WR 44% &lt; 50% floor → drawdown mult 0.5×) · <b class="rd">ADV $3.2M &lt; $5M</b> liquidity floor · plausibility check: β=0.62 reasonable for fintech</span></div>
+          <div class="qpr-call-row"><span class="qpr-call-k">What would change it</span><span class="qpr-call-v">(a) Live WR recovers to ≥50% over next 10 closed trades (raises Kelly mult); (b) ADV improves above $5M (typically on earnings or sector inflows); (c) Overview re-issues actionable call after data refresh</span></div>
+          <div class="qpr-call-row"><span class="qpr-call-k">Execution verdict</span><span class="qpr-call-v"><b class="rd">SUSPENDED</b> — no orders staged · no capital at risk · no alerts armed</span></div>
+          <div class="qpr-call-row"><span class="qpr-call-k">Overview status</span><span class="qpr-call-v">Overview returned <b class="gn">BUY</b> (BAP 78, conviction MEDIUM) — but Plan downgrades to NO_CALL because execution is blocked. Plan inherits Overview's call as ceiling; here, ceiling = BUY but actual = NO_CALL.</span></div>
+          <div class="qpr-call-row"><span class="qpr-call-k">Reproducibility</span><span class="qpr-call-v">Same data + same $25K reference = same NO_CALL tomorrow. A $250K reference might give different sizing (Kelly $ floor cleared), changing call to BUY.</span></div>
+      </div>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">③</span> SIZING MATH <span class="desc">— shows why Plan can't execute</span></div>
+      <div class="qpr-sec-v">
+        <div class="qpr-grid4">
+          <div class="qpr-tile"><div class="qpr-tile-k">f* (Kelly)</div><div class="qpr-tile-v">18.0%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">½ Kelly cap</div><div class="qpr-tile-v">9.0%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Final alloc</div><div class="qpr-tile-v rd">0.00%</div><div class="qpr-tile-sub rd">DD mult zeroed</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Win prob</div><div class="qpr-tile-v">52%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Live WR (30d)</div><div class="qpr-tile-v rd">44%</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Shares</div><div class="qpr-tile-v rd">0</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">$ deployed</div><div class="qpr-tile-v rd">$0</div></div>
+          <div class="qpr-tile"><div class="qpr-tile-k">Cap reason</div><div class="qpr-tile-v rd" style="font-size:11.5px">drawdown_mult</div></div>
+        </div>
+        <div class="qpr-mults">
+          <span><span class="k">regime ×</span> <span class="v">1.00</span></span>
+          <span><span class="k">VIX ×</span> <span class="v">0.95</span></span>
+          <span><span class="k">drawdown ×</span> <span class="v rd">0.00</span></span>
+          <span><span class="k">earnings ×</span> <span class="v">1.00</span></span>
+          <span><span class="k">VaR floor ×</span> <span class="v">1.00</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">④–⑧</span> RISK · REWARD · TIMING · ORDERS · MANAGEMENT</div>
+      <div class="qpr-sec-v">
+        <div class="qpr-empty">Sections suppressed — no execution path. Plan SUSPENDED until blockers resolve.</div>
+      </div>
+    </div>
+
+    <div class="qpr-sec">
+      <div class="qpr-sec-k"><span class="num">⑨</span> DISAGREEMENTS · CONVICTION · DATA · SOURCES</div>
+      <div class="qpr-sec-v">
+        <div class="qpr-subhead">Disagreements (5-condition check)</div>
+        <ul class="qpr-disagree-list">
+          <li><b>Plan disagrees with Overview:</b> Overview = <b class="gn">BUY</b> · Plan = <b class="rd">NO_CALL</b>. Execution-blocker downgrade.</li>
+          <li><b>Liquidity impractical:</b> ADV <b class="rd">$3.2M</b> &lt; $5M floor — slippage at exit material at our reference size.</li>
+          <li><b>Sizing impractical:</b> Kelly drawdown mult zeroed sizing to 0%. Trade is mathematically un-takeable on this account.</li>
+        </ul>
+
+        <div class="qpr-subhead">Conviction <span class="qpr-conv-badge rd">LOW</span></div>
+        <div class="qpr-rationale">NO_CALL · cannot have conviction in absence of a call. Blockers: Kelly final alloc 0% (drawdown mult); ADV $3.2M below $5M floor.</div>
+
+        <div class="qpr-subhead">Data <span class="qpr-conv-badge am">PARTIAL</span></div>
+        <div class="qpr-rationale">Missing quality: options_iv (Schwab chain empty for this name), analyst_pt (no consensus published in 90d).</div>
+
+        <div class="qpr-subhead">Sources &amp; freshness</div>
+        <div class="qpr-sources">
+          <span><b>Price:</b> 2026-05-12 09:45 EST</span>
+          <span><b>Sizing:</b> kelly_size (live WR 44% triggered DD haircut)</span>
+          <span><b>Risk signals:</b> monte_carlo + forward_dist</span>
+          <span><b>Plan inputs:</b> canonical_trade_plan</span>
+          <span><b>Fundamentals:</b> Q1 2026</span>
+          <span><b>Scan run:</b> 2026-05-12 09:45 EST</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
