@@ -17029,6 +17029,83 @@ window.QuantDetail = (function() {
                autoReason: _stratOverridePlan ? `auto: ${auto}, overridden` : `long-horizon value lens · short-term noise filtered` };
     })();
 
+    // ──────────────────── STRATEGY-ADJUSTED TRADE PLAN ────────────────────
+    // The SwingTrade scan produces a SWING-horizon plan (1.25× ATR stop, 14d
+    // max hold, +2% trail). When the user overrides to POSITION / INVESTMENT,
+    // we recompute stop / targets / hold / trail using strategy-appropriate
+    // methodology rather than just relabeling. This is the institutional
+    // "rebuild the trade for the horizon" approach.
+    //
+    // Sources:
+    //   SWING       — use canonical_trade_plan as-is (system source of truth)
+    //   POSITION    — wider stop (2× ATR), longer hold (90d), wider trail (+5%),
+    //                 T2 scaled to 1.5× swing range for multi-quarter cycle
+    //   INVESTMENT  — value-based stop (analyst PT × 0.78 = 22% MoS) when PT
+    //                 present, otherwise 3× ATR; targets = analyst PT mean / high;
+    //                 365d hold; +15% trail
+    const _sysStop = stop, _sysT1 = t1, _sysT2 = t2, _sysHold = maxHoldD;
+    const _stratPlan = (() => {
+      const atrDol = (atrPct != null ? atrPct : 2.0) / 100 * px;
+      const swingHold = _sysHold || 14;
+      const range = _sysT1 != null && _sysT1 > px ? (_sysT1 - px) : px * 0.08;
+      if (strategy.name === 'SWING') {
+        return {
+          stop: _sysStop, t1: _sysT1, t2: _sysT2, hold: swingHold,
+          trailPct: 0.02,
+          source: 'system',
+          stopBasis: '1.25× ATR · close-based · system canonical_trade_plan',
+          t1Basis: 'prior swing high (system)', t2Basis: '52w-high zone (system)',
+          holdBasis: `${swingHold}d max (system)`,
+          sizeMult: 1.0,
+        };
+      }
+      if (strategy.name === 'POSITION') {
+        // Wider stop: 2× ATR but never wider than 5% below system stop
+        const posStop = _sysStop != null ? Math.max(_sysStop * 0.95, px - 2.0 * atrDol) : (px - 2.0 * atrDol);
+        // Keep system T1 (often == quarterly resistance), bump T2 to 1.5× swing range
+        const posT2 = _sysT2 != null ? Math.max(_sysT2, px + 1.5 * range) : (px + 1.5 * range);
+        return {
+          stop: posStop, t1: _sysT1, t2: posT2, hold: 90,
+          trailPct: 0.05,
+          source: 'POSITION-adjusted',
+          stopBasis: `2× ATR ($${atrDol.toFixed(2)}/share) · wider for multi-quarter hold`,
+          t1Basis: 'quarterly cycle resistance · same as SWING T1', t2Basis: '1.5× swing range from entry',
+          holdBasis: '90d POSITION horizon',
+          sizeMult: 1.3,
+        };
+      }
+      // INVESTMENT
+      const ptMean = tgtMean, ptHigh = _num('analyst_full.target_high');
+      let invStop, invT1, invT2, stopBasis, t1Basis, t2Basis;
+      if (ptMean != null && ptMean > px) {
+        invStop = Math.max(ptMean * 0.78, px * 0.75);  // 22% MoS from PT, floor at 25% below current
+        invT1 = ptMean;
+        invT2 = ptHigh != null && ptHigh > ptMean ? ptHigh : ptMean * 1.20;
+        stopBasis = `analyst PT mean × 0.78 = $${invStop.toFixed(2)} (22% margin of safety)`;
+        t1Basis = `analyst PT mean $${ptMean.toFixed(2)}`;
+        t2Basis = ptHigh ? `analyst PT high $${ptHigh.toFixed(2)}` : `PT mean × 1.20 = $${invT2.toFixed(2)}`;
+      } else {
+        // Fallback: no analyst PT available
+        invStop = px - 3.0 * atrDol;
+        invT1 = px * 1.25;
+        invT2 = px * 1.50;
+        stopBasis = `3× ATR ($${(3 * atrDol).toFixed(2)}) — no analyst PT available`;
+        t1Basis = `price × 1.25 = $${invT1.toFixed(2)} (no PT fallback)`;
+        t2Basis = `price × 1.50 = $${invT2.toFixed(2)} (no PT fallback)`;
+      }
+      return {
+        stop: invStop, t1: invT1, t2: invT2, hold: 365,
+        trailPct: 0.15,
+        source: 'INVESTMENT-adjusted',
+        stopBasis, t1Basis, t2Basis,
+        holdBasis: '365d (1Y minimum) — long-horizon value compounding',
+        sizeMult: 1.0,
+      };
+    })();
+    // Effective trade plan values (used in all downstream sections)
+    const effStop = _stratPlan.stop, effT1 = _stratPlan.t1, effT2 = _stratPlan.t2;
+    const effHold = _stratPlan.hold, effTrailPct = _stratPlan.trailPct;
+
     // ──────────────────── LENS DIRECTION VOTES (4 lenses) ────────────────────
     const lensVote = {};
     {
@@ -17317,19 +17394,23 @@ window.QuantDetail = (function() {
     const convCls = convLevel === 'HIGH' ? 'gn' : convLevel === 'MEDIUM' ? 'am' : 'rd';
 
     // ──────────────────── SIZING MATH ($25K REFERENCE) ────────────────────
+    // Uses STRATEGY-ADJUSTED stop/t1/t2 (effStop/effT1/effT2) so risk and reward
+    // tiles reflect the strategy the user is viewing. POSITION/INVESTMENT also
+    // bump Kelly sizing via _stratPlan.sizeMult (1.3× for POSITION).
     const refEq = 25000;
-    const sizedPct = (finalAllocPct != null && finalAllocPct > 0) ? finalAllocPct : 0;
+    const _baseAlloc = (finalAllocPct != null && finalAllocPct > 0) ? finalAllocPct : 0;
+    const sizedPct = Math.min(_baseAlloc * (_stratPlan.sizeMult || 1.0), 25.0);  // cap 25%
     const sizedDollars = refEq * (sizedPct / 100);
     const sizedShares = (px != null && px > 0 && sizedPct > 0) ? Math.floor(sizedDollars / px) : 0;
-    const riskPerShare = (px != null && stop != null && px > stop) ? (px - stop) : null;
+    const riskPerShare = (px != null && effStop != null && px > effStop) ? (px - effStop) : null;
     const totalRisk = (sizedShares > 0 && riskPerShare != null) ? sizedShares * riskPerShare : null;
-    const t1RewardSh = (t1 != null && px != null) ? (t1 - px) : null;
-    const t2RewardSh = (t2 != null && px != null) ? (t2 - px) : null;
+    const t1RewardSh = (effT1 != null && px != null) ? (effT1 - px) : null;
+    const t2RewardSh = (effT2 != null && px != null) ? (effT2 - px) : null;
     const totalT1Reward = (sizedShares > 0 && t1RewardSh != null) ? sizedShares * t1RewardSh : null;
     const totalT2Reward = (sizedShares > 0 && t2RewardSh != null) ? sizedShares * t2RewardSh : null;
     const rT1 = (riskPerShare != null && riskPerShare > 0 && t1RewardSh != null) ? t1RewardSh / riskPerShare : null;
     const rT2 = (riskPerShare != null && riskPerShare > 0 && t2RewardSh != null) ? t2RewardSh / riskPerShare : null;
-    const trailActivatePx = px != null ? px * 1.02 : null;
+    const trailActivatePx = px != null ? px * (1 + effTrailPct) : null;
     const betaExposure = (beta != null && sizedDollars > 0) ? sizedDollars * beta : null;
     // Expected value (sized) — use MC probabilities if present, else setup WR
     const evDollar = (() => {
@@ -17369,10 +17450,11 @@ window.QuantDetail = (function() {
           <div class="qpr-call-row"><span class="qpr-call-k">Action</span><span class="qpr-call-v"><b class="qov-gn">ENTER LONG</b> · limit order in entry zone</span></div>
           <div class="qpr-call-row"><span class="qpr-call-k">Entry zone (limit)</span><span class="qpr-call-v"><b>$${eLo.toFixed(2)}–$${eHi.toFixed(2)}</b> · entry quality ${eqRaw || '—'}</span></div>
           <div class="qpr-call-row"><span class="qpr-call-k">Size</span><span class="qpr-call-v"><b>${sizedShares}</b> shares · <b>$${sizedDollars.toFixed(0)}</b> deployed · <b>${sizedPct.toFixed(2)}%</b> of $${refEq} ref equity</span></div>
-          <div class="qpr-call-row"><span class="qpr-call-k">Stop (close-based)</span><span class="qpr-call-v"><b class="qov-rd">$${stop.toFixed(2)}</b> · risk $${riskPerShare == null ? '—' : riskPerShare.toFixed(2)}/share · total <b class="qov-rd">$${totalRisk == null ? '—' : Math.abs(totalRisk).toFixed(0)}</b></span></div>
-          <div class="qpr-call-row"><span class="qpr-call-k">T1 / T2 (limits)</span><span class="qpr-call-v"><b class="qov-gn">$${t1.toFixed(2)}</b> (+${rT1 == null ? '—' : rT1.toFixed(1)}R) · <b class="qov-gn">${t2 ? '$' + t2.toFixed(2) + ' (+' + (rT2 == null ? '—' : rT2.toFixed(1)) + 'R)' : 'optional'}</b></span></div>
-          <div class="qpr-call-row"><span class="qpr-call-k">Time stop</span><span class="qpr-call-v">flat after <b>${maxHoldD || strategy.catWindow}d</b> regardless of price</span></div>
-          <div class="qpr-call-row"><span class="qpr-call-k">Trail activation</span><span class="qpr-call-v">at <b>$${trailActivatePx == null ? '—' : trailActivatePx.toFixed(2)}</b> (+2%) · trail 1.25× ATR</span></div>
+          <div class="qpr-call-row"><span class="qpr-call-k">Stop (close-based)</span><span class="qpr-call-v"><b class="qov-rd">$${effStop.toFixed(2)}</b> · risk $${riskPerShare == null ? '—' : riskPerShare.toFixed(2)}/share · total <b class="qov-rd">$${totalRisk == null ? '—' : Math.abs(totalRisk).toFixed(0)}</b></span></div>
+          <div class="qpr-call-row"><span class="qpr-call-k">T1 / T2 (limits)</span><span class="qpr-call-v"><b class="qov-gn">$${effT1.toFixed(2)}</b> (+${rT1 == null ? '—' : rT1.toFixed(1)}R) · <b class="qov-gn">${effT2 ? '$' + effT2.toFixed(2) + ' (+' + (rT2 == null ? '—' : rT2.toFixed(1)) + 'R)' : 'optional'}</b></span></div>
+          <div class="qpr-call-row"><span class="qpr-call-k">Plan basis</span><span class="qpr-call-v" style="font-size:11px;color:var(--ink-2)"><b style="color:${_stratPlan.source === 'system' ? 'var(--gn)' : 'var(--amb)'}">${_stratPlan.source}</b> · stop = ${_stratPlan.stopBasis} · T1 = ${_stratPlan.t1Basis} · T2 = ${_stratPlan.t2Basis} · hold = ${_stratPlan.holdBasis}${_stratPlan.source !== 'system' ? ` · sized ${(_stratPlan.sizeMult).toFixed(1)}× base Kelly` : ''}</span></div>
+          <div class="qpr-call-row"><span class="qpr-call-k">Time stop</span><span class="qpr-call-v">flat after <b>${effHold}d</b> regardless of price</span></div>
+          <div class="qpr-call-row"><span class="qpr-call-k">Trail activation</span><span class="qpr-call-v">at <b>$${trailActivatePx == null ? '—' : trailActivatePx.toFixed(2)}</b> (+${(effTrailPct * 100).toFixed(0)}%) · trail ${strategy.name === 'SWING' ? '1.25× ATR' : strategy.name === 'POSITION' ? '2× ATR' : '3× ATR (value-anchored)'}</span></div>
           <div class="qpr-call-row"><span class="qpr-call-k">EV (sized)</span><span class="qpr-call-v ${evDollar == null ? 'qov-dim' : evDollar > 0 ? 'qov-gn' : 'qov-rd'}">${evDollar == null ? '—' : (evDollar >= 0 ? '+$' : '−$') + Math.abs(evDollar).toFixed(0)}</span></div>`;
       }
       if (planCall === 'WATCH') {
@@ -17616,7 +17698,7 @@ window.QuantDetail = (function() {
     // ──────────────────── SECTION ④ · RISK ENVELOPE ────────────────────
     const riskEnv = `
       <div class="qpr-grid4">
-        <div class="qpr-tile"><div class="qpr-tile-k">Stop $</div><div class="qpr-tile-v qov-rd">${stop == null ? '—' : '$' + stop.toFixed(2)}</div><div class="qpr-tile-sub">close-based · ${atrPct == null ? '—' : (atrPct * 1.25).toFixed(2) + '% ≈ 1.25× ATR'}</div></div>
+        <div class="qpr-tile"><div class="qpr-tile-k">Stop $</div><div class="qpr-tile-v qov-rd">${stop == null ? '—' : '$' + effStop.toFixed(2)}</div><div class="qpr-tile-sub">close-based · ${atrPct == null ? '—' : (atrPct * 1.25).toFixed(2) + '% ≈ 1.25× ATR'}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">$ / share</div><div class="qpr-tile-v qov-rd">${riskPerShare == null ? '—' : '$' + riskPerShare.toFixed(2)}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">Total $ risk</div><div class="qpr-tile-v qov-rd">${totalRisk == null ? '—' : '−$' + Math.abs(totalRisk).toFixed(0)}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">% equity</div><div class="qpr-tile-v ${totalRisk == null ? 'qov-dim' : Math.abs(totalRisk)/refEq*100 <= 1 ? 'qov-gn' : 'qov-am'}">${totalRisk == null ? '—' : (Math.abs(totalRisk)/refEq*100).toFixed(2) + '%'}</div><div class="qpr-tile-sub">of $${refEq} ref</div></div>
@@ -17629,11 +17711,11 @@ window.QuantDetail = (function() {
     // ──────────────────── SECTION ⑤ · REWARD MAP ────────────────────
     const rewardMap = `
       <div class="qpr-grid4">
-        <div class="qpr-tile"><div class="qpr-tile-k">T1 $</div><div class="qpr-tile-v qov-gn">${t1 == null ? '—' : '$' + t1.toFixed(2)}</div></div>
+        <div class="qpr-tile"><div class="qpr-tile-k">T1 $</div><div class="qpr-tile-v qov-gn">${t1 == null ? '—' : '$' + effT1.toFixed(2)}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">T1 gain</div><div class="qpr-tile-v qov-gn">${totalT1Reward == null ? '—' : '+$' + Math.abs(totalT1Reward).toFixed(0)}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">R-mult T1</div><div class="qpr-tile-v qov-gn">${rT1 == null ? '—' : '+' + rT1.toFixed(2) + 'R'}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">P(T1) MC</div><div class="qpr-tile-v ${mcPT1 != null && mcPT1 >= 55 ? 'qov-gn' : ''}">${mcPT1 == null ? '—' : mcPT1.toFixed(0) + '%'}</div></div>
-        <div class="qpr-tile"><div class="qpr-tile-k">T2 $</div><div class="qpr-tile-v qov-gn">${t2 == null ? '—' : '$' + t2.toFixed(2)}</div></div>
+        <div class="qpr-tile"><div class="qpr-tile-k">T2 $</div><div class="qpr-tile-v qov-gn">${t2 == null ? '—' : '$' + effT2.toFixed(2)}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">T2 gain</div><div class="qpr-tile-v qov-gn">${totalT2Reward == null ? '—' : '+$' + Math.abs(totalT2Reward).toFixed(0)}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">R-mult T2</div><div class="qpr-tile-v qov-gn">${rT2 == null ? '—' : '+' + rT2.toFixed(2) + 'R'}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">EV (sized)</div><div class="qpr-tile-v ${evDollar == null ? 'qov-dim' : evDollar > 0 ? 'qov-gn' : 'qov-rd'}">${evDollar == null ? '—' : (evDollar >= 0 ? '+$' : '−$') + Math.abs(evDollar).toFixed(0)}</div></div>
@@ -17643,7 +17725,7 @@ window.QuantDetail = (function() {
     // ──────────────────── SECTION ⑥ · TIMING & TRIGGERS ────────────────────
     const timing = `
       <div class="qpr-grid4">
-        <div class="qpr-tile"><div class="qpr-tile-k">Hold window</div><div class="qpr-tile-v">${maxHoldD == null ? strategy.catWindow + 'd (strategy)' : maxHoldD + 'd max'}</div></div>
+        <div class="qpr-tile"><div class="qpr-tile-k">Hold window</div><div class="qpr-tile-v">${effHold}d max</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">Expected hold</div><div class="qpr-tile-v qov-dim">${maxHoldD == null ? '—' : Math.round(maxHoldD * 0.6) + 'd median'}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">Trail trigger</div><div class="qpr-tile-v">${trailActivatePx == null ? '—' : '$' + trailActivatePx.toFixed(2)}</div><div class="qpr-tile-sub">+2% activation</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">Trail rule</div><div class="qpr-tile-v">1.25× ATR</div><div class="qpr-tile-sub">${atrPct == null ? '—' : (atrPct * 1.25).toFixed(2) + '% gap'}</div></div>
@@ -17684,10 +17766,10 @@ window.QuantDetail = (function() {
         <tbody>
           <tr><td>1</td><td><b class="qov-am">Pre-entry alert</b></td><td class="qov-dim">—</td><td class="r qov-dim">—</td><td class="r">${eLo == null ? '—' : '$' + eLo.toFixed(2)}</td><td class="qov-dim">alert on re-entry to zone</td><td class="r qov-dim">GTC</td></tr>
           <tr><td>2</td><td><b class="qov-gn">Limit Buy</b></td><td class="qov-gn">BUY</td><td class="r"><b>${sizedShares}</b></td><td class="r"><b>${eLo == null ? '—' : '$' + eLo.toFixed(2) + '–$' + eHi.toFixed(2)}</b></td><td class="qov-dim">in entry zone</td><td class="r">DAY</td></tr>
-          <tr><td>3</td><td><b class="qov-rd">Stop Loss</b></td><td class="qov-rd">SELL</td><td class="r"><b>${sizedShares}</b></td><td class="r"><b>${stop == null ? '—' : '$' + stop.toFixed(2)}</b></td><td class="qov-dim">close-based · daily TF · no wick stops</td><td class="r">GTC</td></tr>
-          <tr><td>4</td><td><b class="qov-gn">Scale-out T1</b></td><td class="qov-gn">SELL</td><td class="r"><b>${Math.floor(sizedShares * 0.67)}</b></td><td class="r"><b>${t1 == null ? '—' : '$' + t1.toFixed(2)}</b></td><td class="qov-dim">trim ⅔ · lock +${rT1 == null ? '—' : rT1.toFixed(1)}R</td><td class="r">GTC</td></tr>
+          <tr><td>3</td><td><b class="qov-rd">Stop Loss</b></td><td class="qov-rd">SELL</td><td class="r"><b>${sizedShares}</b></td><td class="r"><b>${stop == null ? '—' : '$' + effStop.toFixed(2)}</b></td><td class="qov-dim">close-based · daily TF · no wick stops</td><td class="r">GTC</td></tr>
+          <tr><td>4</td><td><b class="qov-gn">Scale-out T1</b></td><td class="qov-gn">SELL</td><td class="r"><b>${Math.floor(sizedShares * 0.67)}</b></td><td class="r"><b>${t1 == null ? '—' : '$' + effT1.toFixed(2)}</b></td><td class="qov-dim">trim ⅔ · lock +${rT1 == null ? '—' : rT1.toFixed(1)}R</td><td class="r">GTC</td></tr>
           <tr><td>5</td><td><b class="qov-cy">Trail runner</b></td><td class="qov-dim">—</td><td class="r"><b>${Math.ceil(sizedShares * 0.33)}</b></td><td class="r">trail</td><td class="qov-dim">activate at +2% (${trailActivatePx == null ? '—' : '$' + trailActivatePx.toFixed(2)}) · trail 1.25× ATR</td><td class="r">GTC</td></tr>
-          <tr><td>6</td><td><b class="qov-cy">T2 target</b></td><td class="qov-gn">SELL</td><td class="r"><b>${Math.ceil(sizedShares * 0.33)}</b></td><td class="r"><b>${t2 == null ? '—' : '$' + t2.toFixed(2)}</b></td><td class="qov-dim">final exit · +${rT2 == null ? '—' : rT2.toFixed(1)}R</td><td class="r">GTC</td></tr>
+          <tr><td>6</td><td><b class="qov-cy">T2 target</b></td><td class="qov-gn">SELL</td><td class="r"><b>${Math.ceil(sizedShares * 0.33)}</b></td><td class="r"><b>${t2 == null ? '—' : '$' + effT2.toFixed(2)}</b></td><td class="qov-dim">final exit · +${rT2 == null ? '—' : rT2.toFixed(1)}R</td><td class="r">GTC</td></tr>
         </tbody>
       </table>`;
     })();
@@ -17701,7 +17783,7 @@ window.QuantDetail = (function() {
         <tr><td><b class="qov-am">EMA21 break</b></td><td>Tighten stop to that level · monitor</td></tr>
         <tr><td><b class="qov-am">Volume dry-up &gt; 3d</b></td><td>Reduce position 50%</td></tr>
         <tr><td><b class="qov-rd">Close below stop</b></td><td>EXIT immediately · no averaging down</td></tr>
-        <tr><td><b class="qov-rd">Time stop ${maxHoldD || strategy.catWindow}d</b></td><td>Flat regardless of price</td></tr>
+        <tr><td><b class="qov-rd">Time stop ${effHold}d</b></td><td>Flat regardless of price</td></tr>
         ${earnDays != null && earnDays <= 14 ? `<tr><td><b class="qov-rd">Pre-ER (ER −1d)</b></td><td>Flat before announcement unless ESP+ intact</td></tr>` : ''}
       </table>`;
 
