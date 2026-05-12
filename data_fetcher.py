@@ -2754,6 +2754,42 @@ def get_market_regime(breadth: dict | None = None) -> dict:
                 if c[i] < c[i - 1] and vol[i] > vol[i - 1]:
                     dist_days += 1
 
+        # Distribution state — IBD/CAN-SLIM convention for institutional
+        # selling pressure. We already track dist_days for per-stock gates
+        # (config.gates.distribution_days_no_new=7); regime classifier
+        # ignored it until now. Per quant audit: gap #4 closed.
+        # Thresholds (IBD canonical):
+        #   0-2: confirmed uptrend (healthy)
+        #   3-4: confirmed uptrend with caution
+        #   5-6: uptrend under pressure  ← regime downgrade signal
+        #   7+:  market in correction    ← strong downgrade signal
+        if dist_days >= 7:
+            dist_state = "correction"
+            dist_downgrade = True
+        elif dist_days >= 5:
+            dist_state = "under_pressure"
+            dist_downgrade = True
+        elif dist_days >= 3:
+            dist_state = "caution"
+            dist_downgrade = False
+        else:
+            dist_state = "healthy"
+            dist_downgrade = False
+
+        # Distribution-days regime downgrade (audit gap #4, 2026-05-11).
+        # IBD rule: 5+ distribution days = market under institutional pressure.
+        # Downgrade risk_on_trending → risk_on_choppy (matches CAN-SLIM
+        # "uptrend under pressure" state). Risk_on_choppy stays as-is —
+        # the dist_state label surfaces the warning to operators.
+        # Don't touch risk_off_trending or panic — those are already defensive.
+        if dist_downgrade and regime4 == "risk_on_trending":
+            _orig_regime4 = regime4
+            regime4 = "risk_on_choppy"
+            log.info(
+                f"  Regime DOWNGRADED by distribution days: {_orig_regime4} → {regime4} "
+                f"(dist_days={dist_days}, state={dist_state})"
+            )
+
         # Market cycle: four-phase model
         # Early bull: recovering from below 200d, breadth expanding
         # Mid bull: above all MAs, VIX low, cyclicals leading
@@ -2861,6 +2897,7 @@ def get_market_regime(breadth: dict | None = None) -> dict:
             "spy_1m_ret":           round(spy_1m_ret, 1),
             "spy_daily_chg":        round(float(spy_daily_chg), 2),
             "distribution_days":    dist_days,
+            "distribution_state":   dist_state,
             "market_cycle":         market_cycle,
             "vix":                  vix_data,
             "vix_current":          vix_cur,
