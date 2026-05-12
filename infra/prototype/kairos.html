@@ -12332,6 +12332,27 @@ const QuantScanner = (function() {
     if (_state.filter === 'avoid') return (t.verdict === 'AVOID' || t.stage === 'AVOID') && !t.killed;
     if (_state.filter === 'earnings_safe') return (!t.earn_days || t.earn_days >= 14) && !t.killed;
     if (_state.filter === 'fresh') return ['FRESH','PULLBACK','VALID'].includes(t.entry_quality) && !t.killed;
+    // ENTRY-ZONE-FILTER (2026-05-12) — "in zone NOW": price is currently
+    // inside the system's defined entry_low → entry_high band. This is the
+    // moment to act on WATCH-list names per the disciplined trader workflow
+    // (pre-placed limit orders fire here). Skip if killed/AVOID — even if
+    // a rejected ticker is in its old zone, the system told you not to take it.
+    if (_state.filter === 'in_zone') {
+      if (t.killed || t.verdict === 'AVOID' || t.stage === 'AVOID') return false;
+      const px = +t.price; const lo = +t.entry_low; const hi = +t.entry_high;
+      if (!px || !lo || !hi) return false;
+      return px >= lo && px <= hi;
+    }
+    // "Near zone" — within 2% above or below the entry band. Wider net for
+    // pre-emptive bracket orders. Useful when you want to set limits on
+    // setups not quite at entry yet.
+    if (_state.filter === 'near_zone') {
+      if (t.killed || t.verdict === 'AVOID' || t.stage === 'AVOID') return false;
+      const px = +t.price; const lo = +t.entry_low; const hi = +t.entry_high;
+      if (!px || !lo || !hi) return false;
+      const bandWidth = hi - lo;
+      return px >= (lo - bandWidth * 0.5) && px <= (hi + Math.max(hi * 0.02, bandWidth * 0.5));
+    }
     return true;
   }
   function _sortFn(a, b) {
@@ -12399,6 +12420,8 @@ const QuantScanner = (function() {
           ${chip('short', 'short')}
           ${chip('earnings_safe', '≥14d')}
           ${chip('fresh', 'fresh entry')}
+          ${chip('in_zone', '⚡ in zone NOW', 'pass')}
+          ${chip('near_zone', '◇ near zone')}
           ${chip('killed', 'killed')}
         </div>
         <div class="qs-kbd">
