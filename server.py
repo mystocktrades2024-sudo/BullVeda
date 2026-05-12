@@ -1,5 +1,6 @@
 """FastAPI-based SwingTrade server. Port 7432. Auto-reload in dev."""
 from fastapi import FastAPI, HTTPException, Request, Depends
+from typing import Optional  # Python 3.9 compat — Pydantic needs Optional[X] not `X | None`
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -177,7 +178,7 @@ async def _v2_module_version(auth: HTTPBasicCredentials = Depends(_check_auth)):
     if isinstance(auth, Response):
         return auth
     latest = 0
-    for root in (_PROTOTYPE_DIR / "core", _PROTOTYPE_DIR / "tabs"):
+    for root in (_PROTOTYPE_DIR / "core", _PROTOTYPE_DIR / "tabs", _PROTOTYPE_DIR / "subtabs"):
         if not root.exists():
             continue
         for p in root.rglob("*"):
@@ -259,6 +260,975 @@ from fastapi.responses import RedirectResponse
 @app.get("/")
 async def root(auth: HTTPBasicCredentials = Depends(_check_auth)):
     return RedirectResponse(url="/v2/dashboard.html", status_code=302)
+
+# -- /kairos.html — V3 next-gen surface served at the root.
+# V2 dashboard.html remains the canonical landing (the / redirect above).
+# /kairos.html is the upgrade path — currently incomplete; once parity is
+# reached the / redirect flips to /kairos.html.
+@app.api_route("/kairos.html", methods=["GET","HEAD"])
+async def _kairos_page(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    if isinstance(auth, Response):
+        return auth
+    p = (_PROTOTYPE_DIR / "kairos.html").resolve()
+    if not p.exists() or not p.is_file():
+        raise HTTPException(404, "kairos.html not built")
+    return Response(content=p.read_bytes(), media_type="text/html",
+                    headers={"Cache-Control": "no-store"})
+
+@app.api_route("/kairos", methods=["GET","HEAD"])
+async def _kairos_redirect(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    if isinstance(auth, Response):
+        return auth
+    return RedirectResponse(url="/kairos.html", status_code=302)
+
+# -- /home.html — polished landing distinct from the dense dashboard.
+# Hero, today's top conviction, blotter, wire, quick-workspace grid.
+@app.api_route("/home.html", methods=["GET","HEAD"])
+async def _home_page(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    if isinstance(auth, Response):
+        return auth
+    p = (_PROTOTYPE_DIR / "home.html").resolve()
+    if not p.exists() or not p.is_file():
+        raise HTTPException(404, "home.html not built")
+    return Response(content=p.read_bytes(), media_type="text/html",
+                    headers={"Cache-Control": "no-store"})
+
+# -- /position_review_mockup.html — Position Analysis 360° review surface.
+# Mounted inside the kairos Position Analysis workspace via iframe with
+# ?t=TICKER&embed=1 URL params. Reads cells from /api/position/{ticker}.
+@app.api_route("/position_review_mockup.html", methods=["GET","HEAD"])
+async def _position_review_page(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    if isinstance(auth, Response):
+        return auth
+    p = (_PROTOTYPE_DIR / "position_review_mockup.html").resolve()
+    if not p.exists() or not p.is_file():
+        raise HTTPException(404, "position_review_mockup.html not built")
+    return Response(content=p.read_bytes(), media_type="text/html",
+                    headers={"Cache-Control": "no-store"})
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# /api/position/{ticker} — real-data endpoint that feeds the Position
+# Analysis mockup. Pulls live quote + fundamentals + OHLCV-derived
+# technicals; if a cost basis / entry-date is provided as query params it
+# also computes P&L, R-multiple, and days-held off live price.
+# ─────────────────────────────────────────────────────────────────────────
+@app.get("/api/position/{ticker}")
+async def position_analysis(
+    ticker: str,
+    entry: Optional[float] = None,
+    shares: Optional[float] = None,
+    entry_date: Optional[str] = None,
+    stop: Optional[float] = None,
+    t1: Optional[float] = None,
+    t2: Optional[float] = None,
+    auth: HTTPBasicCredentials = Depends(_check_auth),
+):
+    if isinstance(auth, Response):
+        return auth
+    import datetime as _dt
+    import math as _math
+    import pandas as _pd
+    import numpy as _np
+    tk = (ticker or "").upper().strip()
+    if not tk:
+        raise HTTPException(400, "ticker required")
+
+    # ── 1. live quote ──────────────────────────────────────────────────
+    quote = {}
+    try:
+        from eodhd_client import real_time as _eod_rt
+        q = _eod_rt(tk)
+        if isinstance(q, dict):
+            quote = q
+    except Exception:
+        pass
+
+    cur_px = float(quote.get("close") or quote.get("previousClose") or 0) or None
+    chg_pct_1d = quote.get("change_p")
+    try:
+        chg_pct_1d = float(chg_pct_1d) if chg_pct_1d is not None else None
+    except Exception:
+        chg_pct_1d = None
+
+    # ── 2. fundamentals (sector, mcap, beta) ────────────────────────────
+    fund = {}
+    try:
+        from eodhd_client import fundamentals as _eod_f
+        f = _eod_f(tk)
+        if isinstance(f, dict):
+            fund = f
+    except Exception:
+        pass
+
+    gen = (fund.get("General") or {}) if isinstance(fund, dict) else {}
+    high = (fund.get("Highlights") or {}) if isinstance(fund, dict) else {}
+    tech = (fund.get("Technicals") or {}) if isinstance(fund, dict) else {}
+    sector = gen.get("Sector") or "—"
+    industry = gen.get("Industry") or "—"
+    mkt_cap = high.get("MarketCapitalization") or gen.get("MarketCapitalization")
+    beta = tech.get("Beta") or high.get("Beta")
+    try:
+        beta = float(beta) if beta is not None else None
+    except Exception:
+        beta = None
+
+    # 52w high / low
+    w52_high = tech.get("52WeekHigh")
+    w52_low = tech.get("52WeekLow")
+    try:
+        w52_high = float(w52_high) if w52_high is not None else None
+        w52_low = float(w52_low) if w52_low is not None else None
+    except Exception:
+        pass
+
+    # earnings date (next) — read Earnings.History and find the CLOSEST
+    # future reportDate. EODHD's Earnings.Trend is FUTURE QUARTER FORECASTS
+    # (analyst estimates keyed by quarter-end), not report dates — wrong source.
+    # We only return upcoming dates here; past dates get cleared.
+    er_date = None
+    er_date_last_past = None  # informational only
+    try:
+        today_d = _dt.date.today()
+        hist = (fund.get("Earnings") or {}).get("History") or {}
+        if isinstance(hist, dict):
+            future_dates = []
+            past_dates = []
+            for k, row in hist.items():
+                rd = (row or {}).get("reportDate")
+                if not rd: continue
+                try:
+                    rd_d = _dt.datetime.strptime(rd, "%Y-%m-%d").date()
+                    if rd_d >= today_d:
+                        future_dates.append(rd_d)
+                    else:
+                        past_dates.append(rd_d)
+                except Exception:
+                    pass
+            if future_dates:
+                er_date = min(future_dates).strftime("%Y-%m-%d")
+            elif past_dates:
+                # No upcoming filing on the books yet — surface most-recent
+                # past print as a hint (UI shows it as "last report" not "next")
+                er_date_last_past = max(past_dates).strftime("%Y-%m-%d")
+    except Exception:
+        pass
+
+    # insider transactions (top 8 most recent)
+    insider_rows = []
+    try:
+        ins_obj = fund.get("InsiderTransactions") or {}
+        rows = list(ins_obj.values()) if isinstance(ins_obj, dict) else (ins_obj if isinstance(ins_obj, list) else [])
+        rows = sorted(rows, key=lambda r: (r or {}).get("transactionDate") or "", reverse=True)[:8]
+        for r in rows:
+            if not isinstance(r, dict): continue
+            insider_rows.append({
+                "date": r.get("transactionDate") or r.get("date"),
+                "name": r.get("ownerName"),
+                "code": r.get("transactionCode"),  # S=sale, P=purchase, A=award
+                "shares": r.get("transactionAmount"),
+                "price": r.get("transactionPrice"),
+                "value": (r.get("transactionAmount") or 0) * (r.get("transactionPrice") or 0) if r.get("transactionAmount") and r.get("transactionPrice") else None,
+                "post_amount": r.get("postTransactionAmount"),
+            })
+    except Exception:
+        pass
+
+    # ── 3. OHLCV → technicals (ATR, EMAs, RSI, RVOL, realised vol) ─────
+    atr14 = ema21 = ema50 = ema200 = rsi14 = rvol = None
+    vol_20d = None
+    perf_5d = perf_20d = perf_63d = None
+    df = None
+    try:
+        from data_fetcher import fetch_ohlcv_with_failover
+        df, _src = fetch_ohlcv_with_failover(tk, days=300)
+    except Exception:
+        df = None
+
+    if isinstance(df, _pd.DataFrame) and len(df) > 30:
+        df = df.sort_index() if df.index.is_monotonic_increasing is False else df
+        # close
+        c = df["close"] if "close" in df.columns else (df["Close"] if "Close" in df.columns else None)
+        h = df["high"] if "high" in df.columns else (df["High"] if "High" in df.columns else None)
+        l = df["low"] if "low" in df.columns else (df["Low"] if "Low" in df.columns else None)
+        v = df["volume"] if "volume" in df.columns else (df["Volume"] if "Volume" in df.columns else None)
+        if c is not None and len(c) > 30:
+            # ATR(14)
+            try:
+                pc = c.shift(1)
+                tr = _pd.concat([(h - l), (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
+                atr14 = float(tr.rolling(14).mean().iloc[-1])
+            except Exception: pass
+            # EMAs
+            try: ema21 = float(c.ewm(span=21, adjust=False).mean().iloc[-1])
+            except Exception: pass
+            try: ema50 = float(c.ewm(span=50, adjust=False).mean().iloc[-1])
+            except Exception: pass
+            try:
+                if len(c) >= 200:
+                    ema200 = float(c.ewm(span=200, adjust=False).mean().iloc[-1])
+            except Exception: pass
+            # RSI(14)
+            try:
+                delta = c.diff()
+                up = delta.clip(lower=0).rolling(14).mean()
+                dn = (-delta.clip(upper=0)).rolling(14).mean()
+                rs = up / dn.replace(0, _np.nan)
+                rsi14 = float(100 - 100 / (1 + rs.iloc[-1])) if rs.iloc[-1] == rs.iloc[-1] else None
+            except Exception: pass
+            # RVOL today
+            try:
+                if v is not None and len(v) > 20:
+                    avg20 = v.rolling(20).mean().iloc[-2]
+                    rvol = float(v.iloc[-1] / avg20) if avg20 and avg20 > 0 else None
+            except Exception: pass
+            # Realised vol (20d, annualised)
+            try:
+                ret = _np.log(c / c.shift(1))
+                vol_20d = float(ret.rolling(20).std().iloc[-1] * _math.sqrt(252) * 100)
+            except Exception: pass
+            # Trailing perf
+            try:
+                if len(c) > 5:   perf_5d  = float((c.iloc[-1] / c.iloc[-6]  - 1) * 100)
+                if len(c) > 20:  perf_20d = float((c.iloc[-1] / c.iloc[-21] - 1) * 100)
+                if len(c) > 63:  perf_63d = float((c.iloc[-1] / c.iloc[-64] - 1) * 100)
+            except Exception: pass
+            # fallback current price if quote was empty
+            if cur_px is None:
+                try: cur_px = float(c.iloc[-1])
+                except Exception: pass
+
+    # ── 4. existing scan signal (cache/last_bundle.json) ────────────────
+    # Bundle uses `all_scored` for every ticker scanned (398 entries today),
+    # not `signals`. Also pulls bundle-level regime as fallback.
+    scan = {}
+    bundle_regime = "—"
+    avg_volume_bundle = None
+    try:
+        from pathlib import Path
+        import json as _json
+        bp = Path("cache/last_bundle.json")
+        if bp.exists():
+            bundle = _json.loads(bp.read_text())
+            # bundle-level regime
+            reg_obj = bundle.get("regime") or {}
+            bundle_regime = (reg_obj.get("regime4") or reg_obj.get("regime") or "—")
+            for sig in (bundle.get("all_scored") or []):
+                if (sig.get("ticker") or "").upper() == tk:
+                    scan = sig
+                    break
+    except Exception:
+        pass
+
+    score = scan.get("score") or scan.get("bap") or scan.get("composite_score")
+    setup_family = scan.get("setup_family") or scan.get("setup") or "—"
+    verdict = scan.get("verdict") or scan.get("decision") or "WATCH"
+    # per-ticker regime is often None in the bundle; use bundle's regime4
+    regime = scan.get("regime4") or scan.get("regime") or bundle_regime or "—"
+    catalyst_tier = scan.get("catalyst_tier") or scan.get("cat_tier") or "—"
+    rs_rank = scan.get("rs_rank") or scan.get("rs")
+    scan_rvol = scan.get("rvol")
+    scan_beta = scan.get("beta")
+    scan_avg_vol = scan.get("avg_volume")
+
+    # Technical proxy score for tickers NOT in scan — computed UP HERE so
+    # everything downstream (opp_cost ranking, verdict derivation) sees a
+    # consistent value. Was previously computed too late, causing opp_cost
+    # to filter against my_score=0 and overcount alternatives.
+    if score is None and cur_px and ema21 and ema50:
+        proxy = 50
+        if cur_px > ema21: proxy += 10
+        if cur_px > ema50: proxy += 10
+        if ema200 and cur_px > ema200: proxy += 5
+        if rsi14 and 40 <= rsi14 <= 70: proxy += 5
+        if rsi14 and rsi14 > 75: proxy -= 10
+        if perf_20d and perf_20d > 5: proxy += 5
+        score = max(0, min(100, proxy))
+
+    # ── 5. derived (entry-aware) ────────────────────────────────────────
+    days_held = None
+    if entry_date:
+        try:
+            ed = _dt.datetime.strptime(entry_date, "%Y-%m-%d").date()
+            days_held = (_dt.date.today() - ed).days
+        except Exception: pass
+
+    unrealized = unrealized_pct = r_mult = None
+    pct_to_t1 = pct_to_stop = None
+    pos_mv = beta_adj_mv = None
+    derived_stop = stop
+    derived_t1 = t1
+    derived_t2 = t2
+    if cur_px is not None and entry is not None:
+        if shares is not None:
+            unrealized = round((cur_px - entry) * shares, 2)
+            pos_mv = round(cur_px * shares, 2)
+            if beta is not None:
+                beta_adj_mv = round(pos_mv * beta, 2)
+        unrealized_pct = round((cur_px / entry - 1) * 100, 2)
+        # auto-derive stop/T1/T2 from ATR if not provided
+        if derived_stop is None and atr14 is not None:
+            derived_stop = round(entry - 1.25 * atr14, 2)
+        if derived_t1 is None and atr14 is not None:
+            derived_t1 = round(entry + 2.0 * atr14, 2)
+        if derived_t2 is None and atr14 is not None:
+            derived_t2 = round(entry + 4.0 * atr14, 2)
+        if derived_stop is not None and entry > derived_stop:
+            risk_per_share = entry - derived_stop
+            if risk_per_share > 0:
+                r_mult = round((cur_px - entry) / risk_per_share, 2)
+        if derived_t1 is not None and derived_t1 > entry:
+            travelled = cur_px - entry
+            distance = derived_t1 - entry
+            pct_to_t1 = round((travelled / distance) * 100, 1) if distance > 0 else None
+        if derived_stop is not None:
+            pct_to_stop = round((cur_px / derived_stop - 1) * 100, 2)
+
+    # 52w-position percentile
+    pos_in_52w = None
+    if cur_px is not None and w52_high is not None and w52_low is not None and w52_high > w52_low:
+        pos_in_52w = round((cur_px - w52_low) / (w52_high - w52_low) * 100, 1)
+
+    # ── Edge audit · Wilson LB on the sliced slice ──────────────────────
+    # Principle 1 (CLAUDE.md): statistical rigor over backtest theatre.
+    # Compute the historical edge for THIS exact setup × regime × score-
+    # band × catalyst-tier intersection, not the aggregate WR. Wilson 95%
+    # lower bound is the conservative read of true win-rate.
+    edge_audit = {}
+    try:
+        from pathlib import Path as _P3
+        import json as _j3
+        ph_path = _P3("cache/picks_history.json")
+        if ph_path.exists():
+            ph = _j3.loads(ph_path.read_text())
+            trades = ph.get("trades") or []
+
+            # Determine the slice for this ticker
+            # setup_family: from scan if available, else infer from EMA stack
+            sf = (scan.get("setup_family") if scan else None) or setup_family
+            if not sf or sf == "—":
+                # Infer from technicals
+                if cur_px and ema21 and ema50 and cur_px > ema21 > ema50:
+                    sf = "Trend Continuation"   # rising stack, mid-trend
+                elif cur_px and ema21 and cur_px > ema21 * 1.05:
+                    sf = "Breakout Expansion"   # extended above 21EMA
+                elif rsi14 and rsi14 < 40:
+                    sf = "Impulse Catalyst"     # oversold reversal candidate
+                else:
+                    sf = None
+            # score band
+            sb = score if score is not None else 0
+            if sb >= 90: band = "90+"
+            elif sb >= 80: band = "80-90"
+            elif sb >= 70: band = "70-80"
+            elif sb >= 60: band = "60-70"
+            else: band = "<60"
+            band_low, band_high = {
+                "90+": (90, 1000), "80-90": (80, 90), "70-80": (70, 80),
+                "60-70": (60, 70), "<60": (0, 60),
+            }[band]
+
+            ct = catalyst_tier if catalyst_tier not in (None, "—") else None
+            rg = regime if regime not in (None, "—") else None
+
+            # Build the FULL slice (all four dims). Fall back to broader
+            # slices if the tight one has n < 20 (not enough evidence).
+            def _slice(trades, sf_match=None, rg_match=None, ct_match=None, band=None):
+                out = []
+                for t in trades:
+                    if sf_match and (t.get("setup_family") or "") != sf_match: continue
+                    if rg_match and (t.get("regime4") or "") != rg_match: continue
+                    if ct_match is not None:
+                        try: tct = int(t.get("catalyst_tier") or 0)
+                        except: tct = 0
+                        if tct != int(ct_match): continue
+                    if band is not None:
+                        sc = t.get("score") or 0
+                        if sc < band[0] or sc >= band[1]: continue
+                    if t.get("win") is None: continue   # need closed trade
+                    out.append(t)
+                return out
+
+            # Try slices in priority order: most specific → most general.
+            slice_levels = [
+                ("setup × regime × catalyst × band",      lambda: _slice(trades, sf, rg, ct, (band_low, band_high))),
+                ("setup × regime × catalyst",             lambda: _slice(trades, sf, rg, ct, None)),
+                ("setup × regime",                        lambda: _slice(trades, sf, rg, None, None)),
+                ("setup × catalyst × band",               lambda: _slice(trades, sf, None, ct, (band_low, band_high))),
+                ("setup",                                 lambda: _slice(trades, sf, None, None, None)),
+                ("aggregate",                             lambda: _slice(trades, None, None, None, None)),
+            ]
+            chosen = None
+            chosen_label = None
+            for label, fn in slice_levels:
+                bucket = fn()
+                if len(bucket) >= 20:
+                    chosen = bucket
+                    chosen_label = label
+                    break
+            if chosen is None and trades:
+                chosen = _slice(trades, None, None, None, None)
+                chosen_label = "aggregate (no slice met n≥20)"
+
+            if chosen:
+                n_tot = len(chosen)
+                wins = sum(1 for t in chosen if t.get("win") is True)
+                losses = n_tot - wins
+                wr = wins / n_tot if n_tot else 0.0
+                # Wilson 95% CI
+                z = 1.96
+                if n_tot > 0:
+                    centre = (wr + z*z/(2*n_tot)) / (1 + z*z/n_tot)
+                    margin = (z * _math.sqrt((wr*(1-wr)/n_tot) + (z*z/(4*n_tot*n_tot)))) / (1 + z*z/n_tot)
+                    wilson_lb = max(0.0, centre - margin)
+                    wilson_ub = min(1.0, centre + margin)
+                else:
+                    wilson_lb = wilson_ub = 0.0
+                # PnL stats
+                win_returns = [t.get("pct_chg") or 0 for t in chosen if t.get("win") is True]
+                loss_returns = [t.get("pct_chg") or 0 for t in chosen if t.get("win") is False]
+                avg_win_pct  = sum(win_returns) / len(win_returns)   if win_returns else 0.0
+                avg_loss_pct = sum(loss_returns) / len(loss_returns) if loss_returns else 0.0
+                pf = (sum(win_returns) / abs(sum(loss_returns))) if loss_returns and sum(loss_returns) < 0 else None
+                # Expectancy in pct terms
+                expectancy_pct = wr * avg_win_pct + (1 - wr) * avg_loss_pct
+                # MFE / MAE distribution
+                mfes = [t.get("mfe") or 0 for t in chosen if t.get("mfe") is not None]
+                maes = [t.get("mae") or 0 for t in chosen if t.get("mae") is not None]
+                def _pctl(arr, q):
+                    if not arr: return None
+                    a = sorted(arr)
+                    k = (len(a) - 1) * q / 100
+                    f = int(k); c = min(f + 1, len(a) - 1)
+                    return round(a[f] + (a[c] - a[f]) * (k - f), 2)
+                edge_audit = {
+                    "slice_label":     chosen_label,
+                    "slice_setup_family": sf,
+                    "slice_regime":    rg,
+                    "slice_catalyst_tier": ct,
+                    "slice_score_band": band,
+                    "n":               n_tot,
+                    "wins":            wins,
+                    "losses":          losses,
+                    "win_rate":        round(wr, 4),
+                    "wilson_lb_95":    round(wilson_lb, 4),
+                    "wilson_ub_95":    round(wilson_ub, 4),
+                    "profit_factor":   round(pf, 2) if pf else None,
+                    "avg_win_pct":     round(avg_win_pct, 2),
+                    "avg_loss_pct":    round(avg_loss_pct, 2),
+                    "expectancy_pct":  round(expectancy_pct, 2),
+                    "passes_wilson_55": wilson_lb >= 0.55,
+                    "passes_wilson_50": wilson_lb >= 0.50,
+                    "passes_n_30":     n_tot >= 30,
+                    "passes_pf_15":    pf is not None and pf >= 1.5,
+                    "mfe_p25":         _pctl(mfes, 25),
+                    "mfe_p50":         _pctl(mfes, 50),
+                    "mfe_p75":         _pctl(mfes, 75),
+                    "mae_p25":         _pctl(maes, 25),
+                    "mae_p50":         _pctl(maes, 50),
+                    "mae_p75":         _pctl(maes, 75),
+                }
+            else:
+                edge_audit = {"slice_label": "no closed trades in history", "n": 0}
+    except Exception as _e:
+        edge_audit = {"error": str(_e)}
+
+    # ── Opportunity cost ────────────────────────────────────────────────
+    # Real comparison vs everything in today's scan. Answers: "where does
+    # this candidate rank?", "what's available that scores higher?",
+    # "what's the best alternative in the same sector?", and the
+    # diversification cut: "what's the best alternative in a DIFFERENT
+    # sector?" (matters for principle 10 — correlation under stress).
+    opp_cost = {}
+    try:
+        from pathlib import Path as _P
+        import json as _j
+        bp = _P("cache/last_bundle.json")
+        if bp.exists():
+            bundle = _j.loads(bp.read_text())
+            scored = bundle.get("all_scored") or []
+            scored_sorted = sorted(scored, key=lambda x: (x.get("score") or 0), reverse=True)
+            total = len(scored_sorted)
+            my_rank = None
+            my_score = score if score is not None else 0
+            for i, x in enumerate(scored_sorted):
+                if (x.get("ticker") or "").upper() == tk:
+                    my_rank = i + 1
+                    break
+            my_sector = sector if sector and sector != "—" else (scan.get("sector") if scan else None)
+            def _slim(x):
+                return {
+                    "ticker": x.get("ticker"),
+                    "name": x.get("name"),
+                    "score": x.get("score"),
+                    "verdict": x.get("verdict"),
+                    "setup_family": x.get("setup_family") or "—",
+                    "sector": x.get("sector") or "—",
+                    "industry": x.get("industry") or "—",
+                    "rs_rank": x.get("rs_rank"),
+                    "catalyst_tier": x.get("catalyst_tier"),
+                    "conviction": x.get("conviction"),
+                    "price": x.get("price"),
+                }
+            top_higher = [
+                _slim(x) for x in scored_sorted
+                if (x.get("score") or 0) > my_score
+                and (x.get("ticker") or "").upper() != tk
+            ][:5]
+            same_sector = [
+                _slim(x) for x in scored_sorted
+                if (x.get("sector") or "") == my_sector
+                and (x.get("ticker") or "").upper() != tk
+            ][:5]
+            diff_sector_alt = [
+                _slim(x) for x in scored_sorted
+                if (x.get("sector") or "") and (x.get("sector") or "") != my_sector
+                and (x.get("score") or 0) >= max(70, my_score)
+            ][:5]
+            scores_list = [(x.get("score") or 0) for x in scored_sorted]
+            median_score = scores_list[total // 2] if total else None
+            opp_cost = {
+                "in_scan": bool(scan),
+                "my_rank": my_rank,
+                "total_scanned": total,
+                "my_percentile": round((my_rank / total) * 100, 1) if my_rank and total else None,
+                "my_score": my_score,
+                "my_sector": my_sector,
+                "top_score": scored_sorted[0].get("score") if scored_sorted else None,
+                "top_ticker": scored_sorted[0].get("ticker") if scored_sorted else None,
+                "median_score": median_score,
+                "n_higher": len(top_higher),
+                "top_higher": top_higher,
+                "same_sector_top": same_sector,
+                "diff_sector_alt": diff_sector_alt,
+            }
+    except Exception as _e:
+        opp_cost = {"error": str(_e)}
+
+    # ── Portfolio cross-reference for sector/factor concentration risk ─
+    # If user is already holding tickers in this same sector, adding more
+    # exposure breaches the "correlation under stress" principle (#10).
+    # Canonical source is data/portfolio_state.json (live Alpaca sync).
+    # Sectors aren't stored on positions; enrich via all_scored lookup.
+    portfolio_xref = {}
+    try:
+        from pathlib import Path as _P2
+        import json as _j2
+        pp = _P2("data/portfolio_state.json")
+        if not pp.exists():
+            pp = _P2("cache/portfolio.json")
+        if pp.exists():
+            pdata = _j2.loads(pp.read_text())
+            open_pos = (pdata or {}).get("open_positions") or pdata.get("positions") or []
+            held_tickers = [(p.get("ticker") or "").upper() for p in open_pos]
+            # Build sector lookup once from the scan
+            sector_by_tk = {}
+            try:
+                bp2 = _P2("cache/last_bundle.json")
+                if bp2.exists():
+                    b2 = _j2.loads(bp2.read_text())
+                    for x in (b2.get("all_scored") or []):
+                        t2 = (x.get("ticker") or "").upper()
+                        if t2: sector_by_tk[t2] = x.get("sector")
+            except Exception: pass
+
+            same_sector_held = []
+            total_invested = 0.0
+            held_with_sector = []
+            for p in open_pos:
+                pos_size = (p.get("position_size") or (p.get("entry") or p.get("entry_price") or 0) * (p.get("shares") or 0)) or 0
+                total_invested += pos_size
+                held_tk = (p.get("ticker") or "").upper()
+                held_sector = p.get("sector") or sector_by_tk.get(held_tk) or "—"
+                held_with_sector.append({
+                    "ticker": held_tk,
+                    "sector": held_sector,
+                    "size": round(pos_size, 2),
+                })
+                if held_sector and my_sector and held_sector == my_sector:
+                    same_sector_held.append({
+                        "ticker": held_tk,
+                        "sector": held_sector,
+                        "entry": p.get("entry") or p.get("entry_price"),
+                        "shares": p.get("shares"),
+                        "size": round(pos_size, 2),
+                    })
+            portfolio_xref = {
+                "already_held": tk in held_tickers,
+                "held_count": len(open_pos),
+                "held_tickers": held_tickers,
+                "held_with_sector": held_with_sector,
+                "same_sector_held": same_sector_held,
+                "same_sector_count": len(same_sector_held),
+                "total_invested": round(total_invested, 2),
+            }
+    except Exception as _e:
+        portfolio_xref = {"error": str(_e)}
+
+    # ── Forward outcome distribution (Monte Carlo, GBM) ─────────────────
+    # Real probabilities from a 10K-path geometric Brownian motion sim
+    # parameterised by THIS ticker's realised vol + 60d drift, NOT the
+    # hardcoded NVDA placeholders that were here previously.
+    fwd_outcome = {}
+
+    # ── Hypothetical trade plan ─────────────────────────────────────────
+    # If the user didn't provide a cost basis we still want to surface a
+    # "what would this trade look like NOW" suggestion: ATR-based stop/T1/T2,
+    # R:R ratio, and a suggested share count under $5K paper sizing rules.
+    # Surfaced even when a real position EXISTS (for comparison vs. live cost
+    # basis).
+    trade_plan = {}
+    if cur_px is not None and atr14 is not None and atr14 > 0:
+        hyp_entry = cur_px
+        hyp_stop  = round(hyp_entry - 1.25 * atr14, 2)
+        hyp_t1    = round(hyp_entry + 2.0 * atr14, 2)
+        hyp_t2    = round(hyp_entry + 4.0 * atr14, 2)
+        risk_ps   = round(hyp_entry - hyp_stop, 2)
+        reward_t1 = round(hyp_t1 - hyp_entry, 2)
+        reward_t2 = round(hyp_t2 - hyp_entry, 2)
+        rr_t1     = round(reward_t1 / risk_ps, 2) if risk_ps > 0 else None
+        rr_t2     = round(reward_t2 / risk_ps, 2) if risk_ps > 0 else None
+        # Sizing for a $5K paper account with the system's defaults:
+        # max_loss_pct = 0.75% per trade, regime-haircut applied externally.
+        default_acct = 5000.0
+        default_risk_pct = 0.0075
+        max_risk_dollars = round(default_acct * default_risk_pct, 2)
+        sugg_shares_5k = int(max_risk_dollars / risk_ps) if risk_ps > 0 else 0
+        sugg_size_5k = round(sugg_shares_5k * hyp_entry, 2)
+        # Also at $50K / $250K scales (10% per position cap)
+        size_50k  = round(min(0.10 * 50000.0,  (max_risk_dollars * 10) * hyp_entry / max(risk_ps, 1e-6)), 0) if risk_ps > 0 else 0
+        size_250k = round(min(0.10 * 250000.0, (max_risk_dollars * 50) * hyp_entry / max(risk_ps, 1e-6)), 0) if risk_ps > 0 else 0
+        # Verdict-aware sizing haircut by regime
+        regime_haircut = {
+            "risk_on_trending": 1.0,
+            "risk_on_choppy":   0.70,
+            "risk_off_trending":0.35,
+            "panic":            0.0,
+        }.get(regime, 0.70)
+        sugg_shares_adj = int(sugg_shares_5k * regime_haircut)
+        trade_plan = {
+            "hypothetical_entry": hyp_entry,
+            "stop":               hyp_stop,
+            "t1":                 hyp_t1,
+            "t2":                 hyp_t2,
+            "risk_per_share":     risk_ps,
+            "reward_to_T1":       reward_t1,
+            "reward_to_T2":       reward_t2,
+            "rr_T1":              rr_t1,
+            "rr_T2":              rr_t2,
+            "atr_used":           round(atr14, 2),
+            "max_risk_dollars_5k":     max_risk_dollars,
+            "suggested_shares_5k":     sugg_shares_5k,
+            "suggested_shares_5k_regime_adj": sugg_shares_adj,
+            "suggested_size_5k":       sugg_size_5k,
+            "approx_size_50k":         size_50k,
+            "approx_size_250k":        size_250k,
+            "regime_haircut":          regime_haircut,
+            "rr_passes_3to1":          rr_t1 is not None and rr_t1 >= 3.0,
+        }
+
+        # ─── Monte Carlo: 10K GBM paths over remaining hold window ───
+        # σ = realised vol (annualised), μ = annualised 20d drift.
+        # Risk-neutral if drift unavailable. Targets and stop come from
+        # trade_plan above. This is REAL probability math — no placeholders.
+        if vol_20d is not None and vol_20d > 0:
+            try:
+                sigma_ann = float(vol_20d) / 100.0   # vol_20d is %
+                # Drift from 20d trailing return → annualise
+                if perf_20d is not None:
+                    mu_ann = (float(perf_20d) / 20.0) * 252.0 / 100.0
+                else:
+                    mu_ann = 0.0
+                # Cap drift at ±60% annualised (sanity)
+                mu_ann = max(-0.6, min(0.6, mu_ann))
+
+                T_days = 15
+                n_paths = 10000
+                dt = 1.0 / 252.0
+                sigma_d = sigma_ann * _math.sqrt(dt)
+                drift_d = (mu_ann - 0.5 * sigma_ann**2) * dt
+
+                rng = _np.random.default_rng(seed=hash(tk) & 0xFFFFFFFF)
+                Z = rng.standard_normal((n_paths, T_days))
+                log_returns = drift_d + sigma_d * Z
+                log_prices = _np.cumsum(log_returns, axis=1)
+                prices = cur_px * _np.exp(log_prices)  # (n_paths, T_days)
+
+                INF = T_days + 1
+                stop_first = _np.where((prices <= hyp_stop).any(axis=1),
+                                       (prices <= hyp_stop).argmax(axis=1), INF)
+                t1_first   = _np.where((prices >= hyp_t1).any(axis=1),
+                                       (prices >= hyp_t1).argmax(axis=1), INF)
+                t2_first   = _np.where((prices >= hyp_t2).any(axis=1),
+                                       (prices >= hyp_t2).argmax(axis=1), INF)
+
+                is_stop_first = (stop_first < t1_first) & (stop_first < t2_first) & (stop_first < INF)
+                # T1 / T2 only count if stop wasn't hit first
+                t1_alive = (t1_first < INF) & ~is_stop_first
+                t2_alive = (t2_first < INF) & ~is_stop_first
+
+                p_stop    = float(is_stop_first.sum()) / n_paths
+                p_t1      = float(t1_alive.sum())     / n_paths   # incl. paths that go on to T2
+                p_t2      = float(t2_alive.sum())     / n_paths
+                p_timeout = 1.0 - p_t1 - p_stop
+
+                # E[R]
+                R = _np.zeros(n_paths)
+                R[is_stop_first] = -1.0
+                R[t2_alive]      = (hyp_t2 - cur_px) / risk_ps
+                t1_only = t1_alive & ~t2_alive
+                R[t1_only]       = (hyp_t1 - cur_px) / risk_ps
+                timeout_mask = ~is_stop_first & ~t1_alive
+                if timeout_mask.any():
+                    R[timeout_mask] = (prices[timeout_mask, -1] - cur_px) / risk_ps
+
+                expected_r = float(R.mean())
+                expected_dollar_per_share = expected_r * risk_ps
+                # Forward Sharpe (15d) ≈ E[R] / std(R) annualised
+                sharpe_15d = float(R.mean() / R.std()) if R.std() > 0 else None
+                fwd_sharpe_ann = sharpe_15d * _math.sqrt(252 / T_days) if sharpe_15d else None
+
+                # Path percentiles for the fan chart (D5, D10, D15)
+                pct = lambda d, q: float(_np.percentile(prices[:, d], q))
+                fan = []
+                for d in (4, 9, 14):  # 0-indexed day 5, 10, 15
+                    fan.append({
+                        "day": d + 1,
+                        "p10": pct(d, 10), "p25": pct(d, 25),
+                        "p50": pct(d, 50),
+                        "p75": pct(d, 75), "p90": pct(d, 90),
+                    })
+
+                fwd_outcome = {
+                    "horizon_days": T_days,
+                    "n_paths":      n_paths,
+                    "sigma_annualised":  round(sigma_ann, 4),
+                    "drift_annualised":  round(mu_ann, 4),
+                    "p_t1":              round(p_t1, 4),
+                    "p_t2":              round(p_t2, 4),
+                    "p_stop":            round(p_stop, 4),
+                    "p_timeout":         round(p_timeout, 4),
+                    "expected_r":        round(expected_r, 3),
+                    "expected_dollar_per_share": round(expected_dollar_per_share, 2),
+                    "fwd_sharpe_ann":    round(fwd_sharpe_ann, 2) if fwd_sharpe_ann else None,
+                    "fan":               fan,
+                    "stop_price":        hyp_stop,
+                    "t1_price":          hyp_t1,
+                    "t2_price":          hyp_t2,
+                    "current_price":     cur_px,
+                }
+            except Exception as _e:
+                fwd_outcome = {"error": str(_e)}
+
+    # Days to earnings
+    days_to_er = None
+    if er_date:
+        try:
+            ed = _dt.datetime.strptime(er_date[:10], "%Y-%m-%d").date()
+            d = (ed - _dt.date.today()).days
+            days_to_er = d if d >= 0 else None
+        except Exception: pass
+
+    # Simple verdict + conviction (real heuristic when no scan match)
+    if not verdict or verdict == "WATCH":
+        if score is not None:
+            if score >= 80: verdict = "ADD"
+            elif score >= 60: verdict = "HOLD"
+            elif score >= 45: verdict = "TRIM"
+            else: verdict = "EXIT"
+
+    # ── Decision Verdict · synthesises every live signal into TAKE/SKIP/WAIT ──
+    # Pure quant decision-tree logic. Each branch is principle-cited and the
+    # narrative bullets surface the evidence so the user sees WHY, not just
+    # WHAT. CLAUDE.md principle 20: process > outcome.
+    decision = {}
+    try:
+        my_rank_d = opp_cost.get("my_rank")
+        total_scanned_d = opp_cost.get("total_scanned") or 0
+        n_higher_d = opp_cost.get("n_higher") or 0
+        in_scan_d = bool(scan)
+        my_score_eff = score if score is not None else 0
+        rr_t1 = (trade_plan or {}).get("rr_T1") or 0
+        sector_held_count = len((portfolio_xref or {}).get("same_sector_held") or [])
+        already_held = (portfolio_xref or {}).get("already_held", False)
+        wlb = (edge_audit or {}).get("wilson_lb_95") or 0
+        n_edge = (edge_audit or {}).get("n") or 0
+        edge_passes = wlb >= 0.55 and n_edge >= 20
+        days_er = days_to_er
+        mc_er = (fwd_outcome or {}).get("expected_r") or 0
+        mc_pstop = (fwd_outcome or {}).get("p_stop") or 0
+        percentile_d = opp_cost.get("my_percentile")
+
+        action = "WAIT"
+        conviction = "low"
+        reasons = []
+        warnings = []
+
+        if already_held:
+            action = "HOLD"; conviction = "medium"
+            reasons.append("Already in portfolio — this is an ADD/TRIM/HOLD decision, not entry")
+        elif days_er is not None and days_er <= 3:
+            action = "WAIT"; conviction = "low"
+            reasons.append(f"Earnings binary risk — only {days_er}d to ER. Wait through print.")
+        elif rsi14 and rsi14 > 75:
+            action = "WAIT"; conviction = "low"
+            reasons.append(f"RSI {rsi14:.0f} extension — wait for pullback to 21EMA")
+        elif n_higher_d >= 5 and my_score_eff < 75:
+            action = "SKIP"; conviction = "medium"
+            reasons.append(f"{n_higher_d} scan picks score higher than this candidate ({my_score_eff:.0f})")
+        elif wlb > 0 and wlb < 0.50 and n_edge >= 20:
+            action = "SKIP"; conviction = "medium"
+            reasons.append(f"Historical edge insufficient — Wilson LB {wlb*100:.0f}% on {n_edge} similar trades")
+        elif rr_t1 > 0 and rr_t1 < 3.0:
+            action = "WAIT"; conviction = "low"
+            reasons.append(f"R:R T1 = {rr_t1} fails 3:1 minimum (principle 3) — wait for better entry")
+        elif in_scan_d and percentile_d and percentile_d <= 10 and edge_passes:
+            action = "TAKE"; conviction = "high"
+            reasons.append(f"Top {percentile_d}% in scan ({my_score_eff:.0f}) + edge slice clears Wilson 55% (LB {wlb*100:.0f}% on n={n_edge})")
+        elif in_scan_d and percentile_d and percentile_d <= 25 and wlb >= 0.50:
+            action = "TAKE"; conviction = "medium"
+            reasons.append(f"Top {percentile_d}% in scan + acceptable edge slice (Wilson LB {wlb*100:.0f}%)")
+        else:
+            action = "WAIT"; conviction = "low"
+            reasons.append("No strong signal — wait for better setup or higher-conviction candidate")
+
+        if mc_er > 0.5 and len(reasons) < 3 and fwd_outcome:
+            reasons.append(f"Monte Carlo E[R] = +{mc_er:.2f}R · σ {(fwd_outcome.get('sigma_annualised') or 0)*100:.0f}% · drift {(fwd_outcome.get('drift_annualised') or 0)*100:+.0f}%")
+        if days_er and days_er > 7 and days_er <= 30 and len(reasons) < 3:
+            reasons.append(f"Catalyst window open — earnings in {days_er}d")
+        if scan.get("catalyst_tier") == 1 and len(reasons) < 3:
+            reasons.append("T1 catalyst — system's top-priority signal type")
+        if my_rank_d and total_scanned_d and my_rank_d <= 10 and len(reasons) < 3:
+            reasons.append(f"Rank {my_rank_d} of {total_scanned_d} — top of scan today")
+
+        if sector_held_count >= 2:
+            warnings.append(f"Sector concentration: {sector_held_count} positions in {my_sector or 'this sector'} — violates principle 10")
+        if rr_t1 > 0 and rr_t1 < 3.0:
+            warnings.append(f"R:R T1 = {rr_t1} below 3:1 floor — tighten stop or skip")
+        if mc_pstop > 0.45:
+            warnings.append(f"P(stop) = {mc_pstop*100:.0f}% — MC says nearly half of paths hit stop")
+        if not in_scan_d:
+            warnings.append("NOT in today's scan — score is technical proxy, not vetted 5-pillar")
+        if wlb > 0 and n_edge < 30:
+            warnings.append(f"Edge slice n={n_edge} below n≥30 floor (principle 1) — treat as suggestive")
+
+        if action == "TAKE":
+            shrs = (trade_plan or {}).get("suggested_shares_5k_regime_adj") or 0
+            specific = f"Buy {shrs} shrs @ market (~${(trade_plan or {}).get('hypothetical_entry')}) · stop ${(trade_plan or {}).get('stop')} · T1 ${(trade_plan or {}).get('t1')} · trim 30% at T1"
+        elif action == "SKIP":
+            higher = opp_cost.get('top_higher') or []
+            if higher:
+                top_alt = higher[0] or {}
+                specific = f"Skip this. Higher-conviction alt today: {top_alt.get('ticker','—')} (score {top_alt.get('score','—')}, {top_alt.get('setup_family','—')})"
+            else:
+                specific = "Skip this. No higher-conviction alts either — sit in cash today; principle 8 (mechanical execution) says no trade is a trade."
+        elif action == "WAIT":
+            specific = f"Set alert for 21EMA tag at ${ema21:.2f}" if ema21 else "Wait for better entry quality"
+        elif action == "HOLD":
+            specific = "Maintain current position. Re-review on exit-trigger fire."
+        else:
+            specific = "—"
+
+        decision = {
+            "action": action,
+            "conviction": conviction,
+            "reasons": reasons[:3],
+            "warnings": warnings[:4],
+            "specific_action": specific,
+        }
+    except Exception as _e:
+        decision = {"error": str(_e), "action": "UNKNOWN"}
+
+    out = {
+        "ticker": tk,
+        "as_of": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "data_quality": {
+            "has_quote": bool(quote),
+            "has_fundamentals": bool(fund),
+            "has_ohlcv": isinstance(df, _pd.DataFrame),
+            "has_scan": bool(scan),
+        },
+        "quote": {
+            "current_price": cur_px,
+            "change_pct_1d": chg_pct_1d,
+            "open": quote.get("open"),
+            "high": quote.get("high"),
+            "low": quote.get("low"),
+            "previous_close": quote.get("previousClose"),
+            "volume": quote.get("volume"),
+        },
+        "company": {
+            "name": gen.get("Name") or tk,
+            "sector": sector,
+            "industry": industry,
+            "market_cap": mkt_cap,
+            "beta": beta,
+            "shares_outstanding": gen.get("SharesOutstanding"),
+        },
+        "technicals": {
+            "atr_14d": atr14,
+            "ema_21": ema21,
+            "ema_50": ema50,
+            "ema_200": ema200,
+            "rsi_14": rsi14,
+            "rvol_today": rvol,
+            "realised_vol_20d_ann": vol_20d,
+            "perf_5d": perf_5d,
+            "perf_20d": perf_20d,
+            "perf_63d": perf_63d,
+            "week52_high": w52_high,
+            "week52_low": w52_low,
+            "pct_of_52w_range": pos_in_52w,
+        },
+        "scan": {
+            "in_scan": bool(scan),
+            "score": score,
+            "verdict": verdict,
+            "setup_family": setup_family,
+            "regime": regime,
+            "catalyst_tier": catalyst_tier,
+            "rs_rank": rs_rank,
+            "rvol": scan_rvol,
+            "avg_volume": scan_avg_vol,
+        },
+        "earnings": {
+            "next_date": er_date,
+            "days_to_er": days_to_er,
+            "last_report_date": er_date_last_past,
+        },
+        "trade_plan": trade_plan,
+        "forward_outcome": fwd_outcome,
+        "opportunity_cost": opp_cost,
+        "portfolio_xref": portfolio_xref,
+        "edge_audit": edge_audit,
+        "decision": decision,
+        "insiders": insider_rows,
+        "position": {
+            "entry": entry,
+            "shares": shares,
+            "entry_date": entry_date,
+            "days_held": days_held,
+            "stop": derived_stop,
+            "t1": derived_t1,
+            "t2": derived_t2,
+            "stop_source": "user" if stop is not None else ("derived_atr_1_25x" if derived_stop else None),
+            "target_source": "user" if t1 is not None else ("derived_atr_2x_4x" if derived_t1 else None),
+            "unrealized_pnl": unrealized,
+            "unrealized_pct": unrealized_pct,
+            "r_multiple": r_mult,
+            "pct_to_t1": pct_to_t1,
+            "pct_to_stop": pct_to_stop,
+            "position_mv": pos_mv,
+            "beta_adjusted_mv": beta_adj_mv,
+        },
+    }
+    return out
+
+@app.api_route("/home", methods=["GET","HEAD"])
+async def _home_redirect(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    if isinstance(auth, Response):
+        return auth
+    return RedirectResponse(url="/home.html", status_code=302)
 
 # -- /api/me — surface current user's role + tab_profile to the client.
 # Lets V2 dashboard + elite-detail apply the right tab visibility profile
@@ -382,7 +1352,7 @@ async def capability_registry_patch(
 @app.get("/api/audit-log")
 async def audit_log_view(
     limit: int = 100, offset: int = 0,
-    actor: str | None = None, action: str | None = None,
+    actor: Optional[str] = None, action: Optional[str] = None,
     auth: HTTPBasicCredentials = Depends(_check_auth),
 ):
     """Paginated audit log read. Filters by actor / action substring."""
@@ -456,7 +1426,7 @@ async def v2_bootstrap(auth: HTTPBasicCredentials = Depends(_check_auth)):
         return auth
     # version: max mtime under core/ + tabs/ — same as /v2/_v
     latest = 0
-    for root in (_PROTOTYPE_DIR / "core", _PROTOTYPE_DIR / "tabs"):
+    for root in (_PROTOTYPE_DIR / "core", _PROTOTYPE_DIR / "tabs", _PROTOTYPE_DIR / "subtabs"):
         if not root.exists():
             continue
         for p in root.rglob("*"):

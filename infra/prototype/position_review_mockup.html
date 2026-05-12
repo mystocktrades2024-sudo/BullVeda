@@ -1,0 +1,3436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kairos · Position Review — 360° Holdings Analysis</title>
+<style>
+/* =========================================================
+   Kairos design tokens — sourced from dashboard.html (v2)
+   Warm carbon substrate · parchment ink · phosphor accents
+   ========================================================= */
+:root {
+  --bg-0:    #000000;     /* pure black */
+  --bg-1:    #0a0d0c;     /* warm green-black */
+  --bg-2:    #0f1311;
+  --bg-3:    #141816;
+  --bg-4:    #1a1f1c;     /* elevated cell hover */
+
+  --ink-0:   #d8d6cc;     /* warm parchment — signature */
+  --ink-1:   #b0aea3;
+  --ink-2:   #80847a;
+  --ink-3:   #545851;
+
+  --rule:    #1d2520;
+  --rule-2:  #2a352e;
+
+  --accent:  #ffb95c;     /* warm amber */
+  --info:    #5ec8d8;     /* cyan */
+  --green:   #5be57c;     /* phosphor */
+  --red:     #ff6b5b;     /* warm red */
+  --copper:  #d97757;     /* brand accent */
+
+  --font:       'Aptos','Aptos Display',-apple-system,'Segoe UI',Roboto,sans-serif;
+  --font-mono:  'JetBrains Mono','SF Mono',ui-monospace,Consolas,monospace;
+  --font-serif: 'GT Sectra','Iowan Old Style',Georgia,serif;
+
+  --grid: rgba(255,255,255,0.04);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bg-0); color: var(--ink-0);
+  font-family: var(--font); font-size: 13.5px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum','lnum','zero'; }
+.mono { font-family: var(--font-mono); }
+button { font-family: inherit; cursor: pointer; }
+
+/* =========================================================
+   TICKER TAPE (matches floor-tape style)
+   ========================================================= */
+.tape {
+  background: var(--bg-1); border-bottom: 1px solid var(--rule);
+  height: 28px; display: flex; align-items: center; gap: 24px;
+  padding: 0 16px; overflow: hidden;
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-2);
+  letter-spacing: 0.04em;
+}
+.tape .ti { display: inline-flex; gap: 6px; align-items: center; }
+.tape .ti .s { color: var(--ink-0); font-weight: 600; }
+.tape .ti .p { color: var(--ink-1); }
+.tape .ti .d.up { color: var(--green); }
+.tape .ti .d.dn { color: var(--red); }
+.tape .dot { width: 4px; height: 4px; background: var(--ink-3); border-radius: 50%; }
+
+/* =========================================================
+   TOPBAR — Kairos brand mark + breadcrumbs + clock
+   ========================================================= */
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--bg-0); border-bottom: 1px solid var(--rule);
+  display: grid; grid-template-columns: 280px 1fr auto;
+  align-items: center; height: 56px; padding: 0 18px; gap: 16px;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand .mk-arc { width: 30px; height: 30px; display: grid; place-items: center; flex-shrink: 0; }
+.brand .mk-arc svg { display: block; width: 30px; height: 30px; }
+.brand .stack { display: flex; flex-direction: column; line-height: 1; }
+.brand .nm-k {
+  font-family: var(--font-serif); font-style: italic; font-weight: 500;
+  font-size: 22px; letter-spacing: -0.02em; color: #f7f5ee;
+}
+.brand .nm-k::first-letter { color: var(--copper); font-weight: 600; }
+.brand .sb-tag {
+  font-family: var(--font-serif); font-style: italic; font-weight: 400;
+  font-size: 11px; color: var(--ink-1); margin-top: 4px;
+  letter-spacing: 0.005em;
+}
+
+.crumbs {
+  display: flex; gap: 8px; align-items: center;
+  font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.14em;
+}
+.crumbs .sep { color: var(--ink-3); }
+.crumbs .here { color: var(--accent); font-weight: 700; }
+
+.topbar-r { display: flex; gap: 18px; align-items: center; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-2); }
+.topbar-r .l { font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; margin-right: 4px; }
+.topbar-r .v { color: var(--ink-0); font-weight: 700; font-size: 13px; }
+.clock-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.pill {
+  font-family: var(--font-mono); font-size: 10px; padding: 3px 10px;
+  border: 1px solid var(--rule-2); color: var(--ink-1); background: var(--bg-2);
+  text-transform: uppercase; letter-spacing: 0.14em; font-weight: 600;
+}
+.pill.green  { color: var(--green); border-color: color-mix(in oklch, var(--green) 40%, transparent); background: color-mix(in oklch, var(--green) 12%, transparent); }
+.pill.amber  { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 40%, transparent); background: color-mix(in oklch, var(--accent) 12%, transparent); }
+.pill.copper { color: var(--copper); border-color: color-mix(in oklch, var(--copper) 40%, transparent); background: color-mix(in oklch, var(--copper) 10%, transparent); }
+.pill.red    { color: var(--red); border-color: color-mix(in oklch, var(--red) 40%, transparent); background: color-mix(in oklch, var(--red) 10%, transparent); }
+.pill.cyan   { color: var(--info); border-color: color-mix(in oklch, var(--info) 40%, transparent); background: color-mix(in oklch, var(--info) 12%, transparent); }
+
+/* =========================================================
+   MACRO STRIP — regime + key context (matches v2 .macro)
+   ========================================================= */
+.macro {
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
+  display: grid; grid-template-columns: repeat(6, 1fr) auto;
+  height: 60px;
+}
+.mc { padding: 8px 14px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 2px; justify-content: center; min-width: 0; }
+.mc-l { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--ink-3); font-weight: 700; }
+.mc-v { font-size: 15px; font-weight: 700; color: var(--ink-0); font-family: var(--font-mono); }
+.mc-c { font-size: 11px; font-family: var(--font-mono); }
+.mc-c.up { color: var(--green); }
+.mc-c.dn { color: var(--red); }
+.mc-c.fl { color: var(--ink-2); }
+.regime-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 22px; gap: 4px; border-right: 0; }
+.regime-name { font-weight: 700; letter-spacing: 0.1em; font-size: 11.5px; color: var(--info); display: flex; align-items: center; gap: 7px; font-family: var(--font-mono); }
+.regime-name::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--info); box-shadow: 0 0 12px var(--info); }
+.regime-meta { font-size: 10px; color: var(--ink-2); letter-spacing: 0.06em; font-family: var(--font-mono); }
+
+/* =========================================================
+   TAB BAR — matches v2 .toolbar / .tb-tabs
+   ========================================================= */
+.toolbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 18px; border-bottom: 1px solid var(--rule);
+  background: var(--bg-0); font-size: 12px;
+}
+.tb-tabs { display: flex; gap: 0; }
+.tb-tab {
+  padding: 7px 16px; color: var(--ink-2); cursor: pointer;
+  border-bottom: 2px solid transparent; letter-spacing: 0.08em;
+  user-select: none; font-weight: 600; font-size: 11px; text-transform: uppercase;
+}
+.tb-tab:hover { color: var(--ink-0); }
+.tb-tab.on { color: var(--ink-0); border-bottom-color: var(--accent); }
+.tb-tab.new::after {
+  content: 'NEW'; font-size: 8px; margin-left: 8px;
+  padding: 1px 5px; background: var(--copper); color: var(--bg-0);
+  letter-spacing: 0.12em; font-weight: 800;
+}
+
+/* =========================================================
+   PAGE
+   ========================================================= */
+.page { max-width: 1400px; margin: 0 auto; padding: 22px 22px 80px; }
+
+.ph { display: flex; align-items: flex-end; justify-content: space-between; padding: 4px 0 18px; border-bottom: 1px solid var(--rule); margin-bottom: 18px; }
+.ph-l h1 {
+  font-family: var(--font-serif); font-weight: 500;
+  font-size: 30px; letter-spacing: -0.01em; line-height: 1.05;
+  color: var(--ink-0);
+}
+.ph-l h1 .accent { color: var(--copper); }
+.ph-l .sub { color: var(--ink-2); font-size: 12px; margin-top: 6px; letter-spacing: 0.02em; font-family: var(--font-serif); font-style: italic; }
+.ph-r { display: flex; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: 11px; color: var(--ink-2); }
+
+/* =========================================================
+   TICKER INPUT BAR
+   ========================================================= */
+.tikbar {
+  background: var(--bg-1); border: 1px solid var(--rule-2);
+  padding: 14px 18px; display: flex; align-items: center; gap: 18px;
+  margin-bottom: 18px;
+}
+.tikbar .field { display: flex; flex-direction: column; }
+.tikbar .field .lbl { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 5px; font-weight: 700; }
+.tikbar .field input {
+  background: var(--bg-0); border: 1px solid var(--rule-2); color: var(--ink-0);
+  padding: 7px 10px; font-family: var(--font-mono); font-size: 13px;
+  width: 130px; outline: none;
+}
+.tikbar .field input:focus { border-color: var(--accent); }
+.tikbar .field input.tik {
+  font-size: 18px; font-weight: 700; letter-spacing: 0.06em;
+  color: var(--accent); width: 100px;
+}
+.tikbar .spacer { flex: 1; }
+.tikbar button {
+  background: var(--copper); color: var(--bg-0); border: 0;
+  padding: 10px 20px; font-family: var(--font-mono); font-size: 11px;
+  font-weight: 800; text-transform: uppercase; letter-spacing: 0.16em;
+}
+.tikbar button:hover { background: #ef8767; }
+
+/* =========================================================
+   HERO — Verdict + P&L
+   ========================================================= */
+.hero { display: grid; grid-template-columns: 380px 1fr; gap: 16px; margin-bottom: 14px; }
+
+.verdict-card {
+  background: var(--bg-1); border: 1px solid var(--rule-2);
+  padding: 22px; display: flex; flex-direction: column; align-items: center;
+  position: relative;
+}
+.verdict-card .vlbl {
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.18em; font-weight: 700;
+}
+.verdict-card .vbadge {
+  font-family: var(--font-serif); font-weight: 500;
+  font-size: 50px; letter-spacing: 0.06em; line-height: 1.05;
+  margin: 6px 0 4px;
+  color: var(--green);
+}
+.verdict-card.HOLD .vbadge { color: var(--green); }
+.verdict-card.TRIM .vbadge { color: var(--accent); }
+.verdict-card.EXIT .vbadge { color: var(--red); }
+.verdict-card.ADD  .vbadge { color: var(--info); }
+.verdict-card .vsub {
+  font-family: var(--font-serif); font-style: italic; font-size: 13px;
+  color: var(--ink-1); margin-bottom: 8px;
+}
+
+/* Conviction arc */
+.arc-wrap { margin: 6px 0 4px; width: 100%; display: flex; flex-direction: column; align-items: center; }
+.arc-num {
+  font-family: var(--font-mono); font-size: 40px; font-weight: 700;
+  color: var(--ink-0); letter-spacing: -0.02em;
+}
+.arc-num .pct { font-size: 13px; color: var(--ink-3); margin-left: 4px; }
+.arc-bar { width: 280px; height: 6px; background: var(--bg-0); border: 1px solid var(--rule); margin: 8px 0 4px; position: relative; }
+.arc-fill { height: 100%; background: linear-gradient(90deg, var(--green), var(--green)); }
+.arc-card.TRIM .arc-fill { background: var(--accent); }
+.arc-card.EXIT .arc-fill { background: var(--red); }
+.arc-ticks { width: 280px; display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 8.5px; color: var(--ink-3); letter-spacing: 0.04em; }
+.arc-ticks .crit { color: var(--red); }
+.arc-ticks .ok   { color: var(--green); }
+
+.verdict-action {
+  margin-top: 16px; padding: 14px;
+  background: var(--bg-0); border-left: 3px solid var(--green);
+  width: 100%; font-size: 12px; line-height: 1.55; color: var(--ink-1);
+}
+.verdict-action .ak {
+  font-family: var(--font-mono); font-size: 9px; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 6px; font-weight: 700;
+}
+.verdict-action strong { color: var(--ink-0); font-weight: 700; }
+.verdict-action .num   { color: var(--accent); font-family: var(--font-mono); }
+
+/* P&L card */
+.pnl-card { background: var(--bg-1); border: 1px solid var(--rule-2); padding: 20px 22px; display: flex; flex-direction: column; }
+.pnl-row1 { display: flex; align-items: baseline; gap: 26px; flex-wrap: wrap; margin-bottom: 22px; }
+.pnl-row1 .grp { display: flex; flex-direction: column; gap: 4px; }
+.pnl-row1 .lbl { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.16em; font-weight: 700; }
+.pnl-row1 .val { font-family: var(--font-mono); font-size: 22px; font-weight: 600; color: var(--ink-0); line-height: 1.1; }
+.pnl-row1 .val.up { color: var(--green); }
+.pnl-row1 .val.dn { color: var(--red); }
+.pnl-row1 .delta { font-size: 11px; color: var(--ink-2); margin-left: 6px; }
+
+/* Journey rail (price map) */
+.journey { background: var(--bg-0); border: 1px solid var(--rule); padding: 18px 22px; position: relative; height: 104px; }
+.journey .axis { position: absolute; left: 22px; right: 22px; top: 50%; height: 1px; background: var(--rule-2); }
+.journey .marker { position: absolute; top: 50%; transform: translate(-50%,-50%); }
+.journey .marker .dot {
+  width: 14px; height: 14px; border: 2px solid;
+  background: var(--bg-0); border-radius: 50%;
+}
+.journey .marker.entry .dot { border-color: var(--ink-1); }
+.journey .marker.now   .dot { border-color: var(--info); background: var(--info); box-shadow: 0 0 12px color-mix(in oklch, var(--info) 60%, transparent); }
+.journey .marker.stop  .dot { border-color: var(--red); background: var(--red); width: 11px; height: 11px; }
+.journey .marker.t1    .dot { border-color: var(--accent); }
+.journey .marker.t2    .dot { border-color: var(--green); }
+.journey .marker .lab {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  top: 18px; font-family: var(--font-mono); font-size: 10.5px;
+  white-space: nowrap; text-align: center;
+}
+.journey .marker .lab .p { font-size: 11.5px; color: var(--ink-0); font-weight: 700; }
+.journey .marker .lab .t { font-size: 8.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.12em; display: block; margin-top: 2px; }
+.journey .marker.entry .lab { top: -36px; }
+.journey .marker.stop  .lab { top: -36px; }
+.journey .progress-bar {
+  position: absolute; top: 50%; height: 3px; transform: translateY(-50%);
+  background: linear-gradient(90deg, color-mix(in oklch, var(--ink-1) 50%, transparent), var(--info));
+}
+
+/* =========================================================
+   SECTION CARDS
+   ========================================================= */
+.sect {
+  background: var(--bg-1); border: 1px solid var(--rule);
+  padding: 18px 22px; margin-bottom: 14px;
+}
+.sect h2 {
+  font-size: 10.5px; font-family: var(--font-mono);
+  color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.18em;
+  display: flex; align-items: baseline; justify-content: space-between;
+  font-weight: 700;
+  padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--rule);
+}
+.sect h2 .meta { font-size: 10px; color: var(--ink-3); text-transform: none; letter-spacing: 0.04em; font-family: var(--font-serif); font-style: italic; font-weight: 400; }
+.sect h2 .accent-mark { color: var(--copper); margin-right: 8px; }
+
+/* =========================================================
+   THESIS STATUS
+   ========================================================= */
+.thesis-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; padding: 0 0 16px; border-bottom: 1px solid var(--rule); margin-bottom: 14px; }
+.thesis-meta .it { display: flex; flex-direction: column; gap: 4px; }
+.thesis-meta .k { font-family: var(--font-mono); font-size: 8.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.16em; font-weight: 700; }
+.thesis-meta .v { font-size: 12.5px; color: var(--ink-0); }
+.thesis-meta .v.green { color: var(--green); }
+
+.pillar-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pillar {
+  background: var(--bg-0); border: 1px solid var(--rule);
+  padding: 12px 14px; display: flex; align-items: center; gap: 12px;
+}
+.pillar .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.pillar.tracking .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.pillar.drifting .dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.pillar.broken   .dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
+.pillar .nm { font-weight: 700; color: var(--ink-0); width: 130px; flex-shrink: 0; font-size: 13px; }
+.pillar .st { font-family: var(--font-mono); font-size: 8.5px; padding: 3px 7px; text-transform: uppercase; letter-spacing: 0.16em; border: 1px solid; flex-shrink: 0; font-weight: 700; }
+.pillar.tracking .st { color: var(--green); border-color: var(--green); }
+.pillar.drifting .st { color: var(--accent); border-color: var(--accent); }
+.pillar.broken   .st { color: var(--red); border-color: var(--red); }
+.pillar .ev { color: var(--ink-1); font-size: 12px; }
+
+/* =========================================================
+   8-FACTOR HOLD MATRIX
+   ========================================================= */
+.fmatrix table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12px; }
+.fmatrix th {
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule-2);
+  font-size: 8.5px; color: var(--ink-3); text-transform: uppercase;
+  letter-spacing: 0.18em; font-weight: 700;
+}
+.fmatrix td { padding: 9px 10px; border-bottom: 1px solid var(--rule); color: var(--ink-1); }
+.fmatrix td.f-nm { color: var(--ink-0); font-weight: 600; font-family: var(--font); font-size: 13px; }
+.fmatrix td.f-bar { width: 140px; }
+.fmatrix .barbg { background: var(--bg-0); height: 6px; border: 1px solid var(--rule); position: relative; }
+.fmatrix .barfill { height: 100%; background: var(--info); }
+.fmatrix .barfill.up { background: var(--green); }
+.fmatrix .barfill.dn { background: var(--red); }
+.fmatrix .barfill.am { background: var(--accent); }
+.fmatrix .delta.up { color: var(--green); }
+.fmatrix .delta.dn { color: var(--red); }
+.fmatrix .delta.flat { color: var(--ink-3); }
+.fmatrix .contrib {
+  font-family: var(--font-mono); font-size: 8.5px; padding: 3px 7px;
+  border: 1px solid; text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700;
+}
+.fmatrix .contrib.pos { color: var(--green); border-color: var(--green); }
+.fmatrix .contrib.neg { color: var(--red); border-color: var(--red); }
+.fmatrix .contrib.neu { color: var(--ink-3); border-color: var(--rule-2); }
+.fmatrix .read { font-family: var(--font); color: var(--ink-1); font-size: 12px; }
+
+/* =========================================================
+   EXIT TRIGGERS
+   ========================================================= */
+.trigger {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 14px; border: 1px solid var(--rule); background: var(--bg-0);
+  margin-bottom: 6px; font-family: var(--font-mono); font-size: 12px;
+}
+.trigger .ico { font-size: 14px; flex-shrink: 0; width: 22px; text-align: center; }
+.trigger .cond { color: var(--ink-1); flex: 1; }
+.trigger .cond strong { color: var(--ink-0); font-weight: 700; }
+.trigger .now { color: var(--ink-2); font-size: 11px; }
+.trigger .stat {
+  font-size: 8.5px; padding: 3px 8px; border: 1px solid;
+  text-transform: uppercase; letter-spacing: 0.16em; font-weight: 800;
+}
+.trigger.armed .stat     { color: var(--ink-2); border-color: var(--rule-2); }
+.trigger.warning .stat   { color: var(--accent); border-color: var(--accent); background: color-mix(in oklch, var(--accent) 8%, transparent); }
+.trigger.triggered { border-color: var(--red); background: color-mix(in oklch, var(--red) 7%, transparent); }
+.trigger.triggered .stat { color: var(--red); border-color: var(--red); }
+.trigger.progress .stat  { color: var(--info); border-color: var(--info); }
+
+/* =========================================================
+   REASONS / WATCH-OUTS (split)
+   ========================================================= */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.reasonlist { padding: 0; list-style: none; margin: 0; }
+.reasonlist li {
+  padding: 12px 14px; border-left: 3px solid; margin-bottom: 7px;
+  background: var(--bg-0); font-size: 12.5px; line-height: 1.6; color: var(--ink-1);
+}
+.reasonlist.pos li { border-color: var(--green); }
+.reasonlist.neg li { border-color: var(--red); }
+.reasonlist li .h { font-weight: 700; color: var(--ink-0); display: block; margin-bottom: 3px; font-size: 12.5px; }
+
+/* =========================================================
+   OPPORTUNITY COST
+   ========================================================= */
+.opp { display: grid; grid-template-columns: 220px 1fr; gap: 18px; align-items: start; }
+.opp .conv-cmp { display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--bg-0); border: 1px solid var(--rule); }
+.opp .conv-cmp .row { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; }
+.opp .conv-cmp .row .k { color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.12em; font-size: 9px; font-weight: 700; }
+.opp .conv-cmp .row .v { color: var(--ink-0); font-weight: 700; font-family: var(--font-mono); font-size: 13px; }
+.opp .conv-cmp .row .v.bigger { color: var(--accent); }
+.opp .alt-picks { display: flex; flex-direction: column; gap: 6px; }
+.opp .alt-row {
+  display: flex; align-items: center; gap: 14px; padding: 9px 14px;
+  background: var(--bg-0); border: 1px solid var(--rule); font-size: 12px;
+}
+.opp .alt-row .tk { font-family: var(--font-mono); font-weight: 700; color: var(--ink-0); width: 60px; letter-spacing: 0.04em; }
+.opp .alt-row .sc { font-family: var(--font-mono); color: var(--accent); width: 50px; font-weight: 700; }
+.opp .alt-row .why { color: var(--ink-1); flex: 1; }
+.opp .verdict-line {
+  padding: 12px 14px; background: color-mix(in oklch, var(--info) 5%, transparent);
+  border-left: 3px solid var(--info); font-size: 12.5px; margin-top: 10px; color: var(--ink-1); line-height: 1.6;
+}
+.opp .verdict-line strong { color: var(--ink-0); }
+
+/* =========================================================
+   ACTION TOOLKIT
+   ========================================================= */
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.act-btn {
+  display: flex; flex-direction: column; align-items: flex-start;
+  padding: 12px 16px; border: 1px solid var(--rule-2); background: var(--bg-0);
+  color: var(--ink-1); cursor: pointer; min-width: 180px;
+  font-family: var(--font); text-align: left; transition: border-color 0.12s, background 0.12s;
+}
+.act-btn:hover { border-color: var(--ink-2); background: var(--bg-2); }
+.act-btn .ttl { font-size: 12.5px; font-weight: 700; color: var(--ink-0); letter-spacing: 0.02em; }
+.act-btn .det { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); margin-top: 4px; }
+.act-btn.primary { border-color: var(--green); }
+.act-btn.primary .ttl { color: var(--green); }
+.act-btn.warning { border-color: var(--accent); }
+.act-btn.warning .ttl { color: var(--accent); }
+.act-btn.danger { border-color: var(--red); }
+.act-btn.danger .ttl { color: var(--red); }
+.act-btn.add { border-color: var(--info); }
+.act-btn.add .ttl { color: var(--info); }
+
+/* =========================================================
+   JOURNAL
+   ========================================================= */
+.journal {
+  background: var(--bg-0); border: 1px dashed var(--rule-2);
+  padding: 16px 18px; font-family: var(--font-mono); font-size: 12px;
+  color: var(--ink-1); line-height: 1.75; white-space: pre-wrap;
+}
+.journal .tag { color: var(--copper); }
+.journal .src { color: var(--ink-3); font-size: 10px; display: block; margin-top: 10px; }
+
+/* =========================================================
+   FORWARD DISTRIBUTION (Monte Carlo outcomes)
+   ========================================================= */
+.fwd-grid { display: grid; grid-template-columns: 360px 1fr; gap: 16px; }
+.fwd-probs { display: flex; flex-direction: column; gap: 8px; }
+.prob-bar {
+  display: grid; grid-template-columns: 130px 1fr 60px; align-items: center; gap: 10px;
+  padding: 9px 12px; background: var(--bg-0); border: 1px solid var(--rule);
+  font-family: var(--font-mono);
+}
+.prob-bar .lab { font-size: 11px; color: var(--ink-1); display: flex; align-items: center; gap: 7px; }
+.prob-bar .lab .swatch { width: 8px; height: 8px; border-radius: 50%; }
+.prob-bar .track { height: 10px; background: var(--bg-2); border: 1px solid var(--rule); position: relative; }
+.prob-bar .fill { height: 100%; }
+.prob-bar .pct { font-size: 13px; color: var(--ink-0); font-weight: 700; text-align: right; }
+.prob-bar.t1 .swatch  { background: var(--accent); } .prob-bar.t1 .fill  { background: var(--accent); }
+.prob-bar.t2 .swatch  { background: var(--green); }  .prob-bar.t2 .fill  { background: var(--green); }
+.prob-bar.stop .swatch{ background: var(--red); }    .prob-bar.stop .fill{ background: var(--red); }
+.prob-bar.time .swatch{ background: var(--ink-2); }  .prob-bar.time .fill{ background: var(--ink-2); }
+.fwd-er {
+  margin-top: 6px; padding: 12px 14px; background: var(--bg-0);
+  border-left: 3px solid var(--green); display: grid;
+  grid-template-columns: 1fr 1fr 1fr; gap: 10px;
+}
+.fwd-er .it { display: flex; flex-direction: column; gap: 3px; }
+.fwd-er .k { font-family: var(--font-mono); font-size: 8.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+.fwd-er .v { font-family: var(--font-mono); font-size: 16px; color: var(--ink-0); font-weight: 700; }
+.fwd-er .v.up { color: var(--green); }
+.fwd-er .v.dn { color: var(--red); }
+
+/* Fan chart */
+.fan { background: var(--bg-0); border: 1px solid var(--rule); padding: 14px 18px 6px; height: 240px; position: relative; }
+.fan .ylab, .fan .xlab { position: absolute; font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); letter-spacing: 0.1em; text-transform: uppercase; }
+.fan svg { width: 100%; height: 100%; display: block; }
+.fan-leg { display: flex; gap: 14px; margin-top: 6px; padding: 0 4px; font-family: var(--font-mono); font-size: 10px; color: var(--ink-2); }
+.fan-leg .it { display: flex; align-items: center; gap: 5px; }
+.fan-leg .swatch { width: 12px; height: 6px; }
+
+/* =========================================================
+   RISK LAB — stress + Greeks + factor exposure
+   ========================================================= */
+.risk-grid { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 14px; }
+.risk-tiles {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+}
+.risk-tile {
+  background: var(--bg-0); border: 1px solid var(--rule);
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
+}
+.risk-tile .k { font-family: var(--font-mono); font-size: 8.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+.risk-tile .v { font-family: var(--font-mono); font-size: 18px; font-weight: 700; color: var(--ink-0); }
+.risk-tile .v.dn { color: var(--red); }
+.risk-tile .v.up { color: var(--green); }
+.risk-tile .v.amber { color: var(--accent); }
+.risk-tile .sub { font-family: var(--font-mono); font-size: 10px; color: var(--ink-2); }
+
+.stress-tab { background: var(--bg-0); border: 1px solid var(--rule); padding: 0; }
+.stress-tab table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11.5px; }
+.stress-tab th { padding: 8px 12px; text-align: left; font-size: 8.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.16em; font-weight: 700; border-bottom: 1px solid var(--rule-2); }
+.stress-tab td { padding: 7px 12px; border-bottom: 1px solid var(--rule); color: var(--ink-1); }
+.stress-tab td.scn { color: var(--ink-0); font-weight: 600; }
+.stress-tab td.dn { color: var(--red); }
+.stress-tab td.fl { color: var(--ink-2); }
+.stress-tab tr:last-child td { border-bottom: none; }
+
+/* Factor exposure bars */
+.factor-list { background: var(--bg-0); border: 1px solid var(--rule); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.factor-row { display: grid; grid-template-columns: 90px 1fr 50px; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; }
+.factor-row .nm { color: var(--ink-1); font-size: 11px; }
+.factor-row .tr { height: 6px; background: var(--bg-2); position: relative; border: 1px solid var(--rule); }
+.factor-row .tr::before { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--rule-2); }
+.factor-row .fl { position: absolute; top: 0; bottom: 0; }
+.factor-row .fl.pos { left: 50%; background: var(--green); }
+.factor-row .fl.neg { right: 50%; background: var(--red); }
+.factor-row .v { color: var(--ink-0); font-weight: 700; font-size: 11px; text-align: right; }
+.factor-row .v.pos { color: var(--green); }
+.factor-row .v.neg { color: var(--red); }
+
+/* =========================================================
+   EDGE AUDIT — sliced Wilson + MFE/MAE + trajectory
+   ========================================================= */
+.edge-grid { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 14px; }
+.slice-box { background: var(--bg-0); border: 1px solid var(--rule); padding: 14px 16px; }
+.slice-box .crumb { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-2); letter-spacing: 0.06em; padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px solid var(--rule); }
+.slice-box .crumb span.x { color: var(--copper); }
+.slice-box .wls { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.slice-box .wl { display: flex; flex-direction: column; gap: 3px; }
+.slice-box .k { font-family: var(--font-mono); font-size: 8.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+.slice-box .v { font-family: var(--font-mono); font-size: 17px; color: var(--ink-0); font-weight: 700; }
+.slice-box .v.green { color: var(--green); }
+.slice-box .v.amber { color: var(--accent); }
+.slice-box .ci-bar { height: 8px; background: var(--bg-2); border: 1px solid var(--rule); position: relative; margin-top: 4px; }
+.slice-box .ci-bar .ci { position: absolute; top: 0; bottom: 0; background: color-mix(in oklch, var(--green) 30%, transparent); border-left: 2px solid var(--green); border-right: 2px solid var(--green); }
+.slice-box .ci-bar .pt { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink-0); }
+
+/* MFE/MAE distribution */
+.mfe-box { background: var(--bg-0); border: 1px solid var(--rule); padding: 14px 16px; }
+.mfe-box h3 { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; margin-bottom: 12px; }
+.mfe-row { display: grid; grid-template-columns: 60px 1fr; gap: 10px; align-items: center; margin-bottom: 8px; font-family: var(--font-mono); font-size: 10.5px; }
+.mfe-row .k { color: var(--ink-2); }
+.mfe-row .dist { position: relative; height: 22px; background: var(--bg-2); border: 1px solid var(--rule); }
+.mfe-row .pct-band { position: absolute; top: 4px; bottom: 4px; }
+.mfe-row .pct-band.p25-75 { background: color-mix(in oklch, var(--info) 30%, transparent); border-left: 1px solid var(--info); border-right: 1px solid var(--info); }
+.mfe-row .pct-band.p10-90 { background: color-mix(in oklch, var(--info) 12%, transparent); }
+.mfe-row .median { position: absolute; top: 1px; bottom: 1px; width: 2px; background: var(--info); }
+.mfe-row .you { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--copper); }
+.mfe-row .you-lab { position: absolute; top: -16px; transform: translateX(-50%); font-size: 8.5px; color: var(--copper); font-weight: 700; white-space: nowrap; }
+
+/* Score trajectory mini-chart */
+.traj-box { background: var(--bg-0); border: 1px solid var(--rule); padding: 14px 16px; }
+.traj-box h3 { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; margin-bottom: 10px; }
+.traj-box svg { width: 100%; height: 140px; display: block; }
+.traj-legend { display: flex; gap: 14px; padding-top: 8px; font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-2); }
+.traj-legend .it { display: flex; align-items: center; gap: 5px; }
+.traj-legend .sw { width: 10px; height: 2px; }
+
+/* =========================================================
+   EARNINGS CYCLE MODULE
+   ========================================================= */
+.er-grid { display: grid; grid-template-columns: 280px 1fr; gap: 16px; align-items: stretch; }
+.er-clock {
+  background: var(--bg-0); border: 1px solid var(--rule);
+  padding: 18px 16px; display: flex; flex-direction: column; gap: 10px; align-items: center;
+}
+.er-clock .countdown { font-family: var(--font-serif); font-size: 44px; font-weight: 500; color: var(--accent); line-height: 1; letter-spacing: -0.02em; }
+.er-clock .ds { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.16em; }
+.er-clock .er-date { font-family: var(--font-mono); font-size: 13px; color: var(--ink-0); font-weight: 700; }
+.er-clock .er-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; padding-top: 8px; border-top: 1px solid var(--rule); }
+.er-clock .er-meta .it { display: flex; flex-direction: column; gap: 2px; align-items: center; }
+.er-clock .er-meta .k { font-family: var(--font-mono); font-size: 8px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+.er-clock .er-meta .v { font-family: var(--font-mono); font-size: 13px; color: var(--ink-0); font-weight: 700; }
+.er-clock .er-meta .v.up { color: var(--green); }
+.er-clock .er-meta .v.amber { color: var(--accent); }
+
+.er-tree { display: flex; flex-direction: column; gap: 6px; }
+.er-branch {
+  display: grid; grid-template-columns: 130px 1fr 90px; gap: 12px; align-items: center;
+  padding: 11px 14px; background: var(--bg-0); border: 1px solid var(--rule);
+  font-family: var(--font-mono); font-size: 11.5px;
+}
+.er-branch .opt { font-weight: 700; color: var(--ink-0); }
+.er-branch .det { color: var(--ink-1); font-size: 11px; }
+.er-branch .ev {
+  font-family: var(--font-mono); font-size: 9px; padding: 3px 8px;
+  border: 1px solid; text-transform: uppercase; letter-spacing: 0.14em;
+  font-weight: 700; text-align: center;
+}
+.er-branch.rec { border-color: var(--green); background: color-mix(in oklch, var(--green) 6%, transparent); }
+.er-branch.rec .opt { color: var(--green); }
+.er-branch.rec .ev { color: var(--green); border-color: var(--green); }
+.er-branch.alt .ev { color: var(--ink-2); border-color: var(--rule-2); }
+.er-branch.alt2 .ev { color: var(--accent); border-color: var(--accent); }
+.er-branch.alt3 .ev { color: var(--info); border-color: var(--info); }
+
+/* =========================================================
+   OPTIONS MARKET READ
+   ========================================================= */
+.opt-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+.opt-card { background: var(--bg-0); border: 1px solid var(--rule); padding: 14px 16px; }
+.opt-card h3 { font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.16em; font-weight: 700; padding-bottom: 9px; border-bottom: 1px solid var(--rule); margin-bottom: 10px; }
+.opt-rows { display: flex; flex-direction: column; gap: 7px; font-family: var(--font-mono); font-size: 11.5px; }
+.opt-rows .r { display: flex; justify-content: space-between; }
+.opt-rows .k { color: var(--ink-2); }
+.opt-rows .v { color: var(--ink-0); font-weight: 700; }
+.opt-rows .v.amber { color: var(--accent); }
+.opt-rows .v.green { color: var(--green); }
+.opt-rows .v.red   { color: var(--red); }
+.opt-rows .v.info  { color: var(--info); }
+
+.hedge-stack { display: flex; flex-direction: column; gap: 6px; }
+.hedge-opt {
+  padding: 10px 12px; background: var(--bg-0); border: 1px solid var(--rule);
+  display: grid; grid-template-columns: 100px 1fr 60px; gap: 10px; align-items: center;
+  font-family: var(--font-mono); font-size: 11px;
+}
+.hedge-opt .nm { font-weight: 700; color: var(--ink-0); }
+.hedge-opt .det { color: var(--ink-2); font-size: 10.5px; }
+.hedge-opt .cost { text-align: right; }
+.hedge-opt .cost.dn { color: var(--red); }
+.hedge-opt .cost.up { color: var(--green); }
+.hedge-opt.rec { border-color: var(--info); }
+.hedge-opt.rec .nm { color: var(--info); }
+
+/* =========================================================
+   PORTFOLIO FIT — correlation + concentration
+   ========================================================= */
+.pf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.corr-mat {
+  background: var(--bg-0); border: 1px solid var(--rule); padding: 14px 16px;
+}
+.corr-mat h3 { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; margin-bottom: 12px; }
+.corr-mat table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 10.5px; }
+.corr-mat th, .corr-mat td { padding: 6px 8px; text-align: center; }
+.corr-mat th { color: var(--ink-3); font-size: 9.5px; font-weight: 700; }
+.corr-mat td.lab { text-align: left; color: var(--ink-0); font-weight: 700; }
+.corr-mat td.c {
+  font-weight: 700; color: var(--ink-0);
+  border: 1px solid var(--bg-1);
+}
+/* heat colors: 1.0 dark green; .8 mid; .5 dim; .2 cyan; 0 neutral; <0 red */
+.corr-mat .c-100 { background: color-mix(in oklch, var(--green) 55%, var(--bg-0)); }
+.corr-mat .c-80  { background: color-mix(in oklch, var(--green) 38%, var(--bg-0)); }
+.corr-mat .c-60  { background: color-mix(in oklch, var(--green) 22%, var(--bg-0)); }
+.corr-mat .c-40  { background: color-mix(in oklch, var(--info)  18%, var(--bg-0)); }
+.corr-mat .c-20  { background: color-mix(in oklch, var(--info)  10%, var(--bg-0)); }
+.corr-mat .c-0   { background: var(--bg-0); }
+.corr-mat .c-neg { background: color-mix(in oklch, var(--red)   20%, var(--bg-0)); color: var(--red); }
+.corr-mat .legend { display: flex; gap: 8px; font-size: 9px; color: var(--ink-3); margin-top: 8px; }
+.corr-mat .legend .sw { width: 16px; height: 10px; display: inline-block; vertical-align: middle; margin: 0 4px 0 0; }
+
+.conc-stack { background: var(--bg-0); border: 1px solid var(--rule); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.conc-stack h3 { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; margin-bottom: 4px; }
+.conc-row { display: grid; grid-template-columns: 110px 1fr 70px; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: 11px; }
+.conc-row .lb { color: var(--ink-1); }
+.conc-row .bar { height: 10px; background: var(--bg-2); border: 1px solid var(--rule); position: relative; }
+.conc-row .bar .fl { height: 100%; background: var(--info); }
+.conc-row .bar .fl.amber { background: var(--accent); }
+.conc-row .bar .fl.red   { background: var(--red); }
+.conc-row .bar .cap { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--accent); }
+.conc-row .v { color: var(--ink-0); font-weight: 700; text-align: right; }
+.conc-row .v.warn { color: var(--accent); }
+.conc-row .v.bad { color: var(--red); }
+.conc-line { padding: 10px 12px; background: color-mix(in oklch, var(--accent) 6%, transparent); border-left: 3px solid var(--accent); font-family: var(--font); font-size: 12px; color: var(--ink-1); }
+.conc-line strong { color: var(--ink-0); }
+
+/* =========================================================
+   EVENT CALENDAR
+   ========================================================= */
+.cal { display: flex; flex-direction: column; gap: 5px; }
+.cal-row {
+  display: grid; grid-template-columns: 100px 100px 1fr 90px; gap: 14px;
+  padding: 9px 14px; background: var(--bg-0); border: 1px solid var(--rule);
+  font-family: var(--font-mono); font-size: 11.5px; align-items: center;
+}
+.cal-row .d { color: var(--ink-1); font-weight: 700; }
+.cal-row .dow { color: var(--ink-3); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+.cal-row .ev { color: var(--ink-0); }
+.cal-row .ev .nm { font-weight: 700; }
+.cal-row .ev .det { color: var(--ink-2); font-size: 10.5px; margin-left: 6px; }
+.cal-row .impact { font-size: 9px; padding: 3px 7px; border: 1px solid; text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; text-align: center; }
+.cal-row .impact.high  { color: var(--red); border-color: var(--red); background: color-mix(in oklch, var(--red) 8%, transparent); }
+.cal-row .impact.med   { color: var(--accent); border-color: var(--accent); }
+.cal-row .impact.low   { color: var(--ink-2); border-color: var(--rule-2); }
+
+/* =========================================================
+   INSIDER DEEP DIVE
+   ========================================================= */
+.insider-tab { background: var(--bg-0); border: 1px solid var(--rule); margin-bottom: 12px; }
+.insider-tab table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11.5px; }
+.insider-tab th { padding: 8px 12px; text-align: left; font-size: 8.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.16em; font-weight: 700; border-bottom: 1px solid var(--rule-2); }
+.insider-tab td { padding: 9px 12px; border-bottom: 1px solid var(--rule); color: var(--ink-1); }
+.insider-tab td.who { color: var(--ink-0); font-weight: 700; }
+.insider-tab td.role { color: var(--ink-2); }
+.insider-tab td.shr { text-align: right; }
+.insider-tab td.amt { text-align: right; color: var(--red); font-weight: 700; }
+.insider-tab td.plan.disc { color: var(--red); font-weight: 700; }
+.insider-tab td.plan.tenb5 { color: var(--ink-2); }
+.insider-sum { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.insider-sum .it { background: var(--bg-0); border: 1px solid var(--rule); padding: 11px 14px; }
+.insider-sum .k { font-family: var(--font-mono); font-size: 8.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+.insider-sum .v { font-family: var(--font-mono); font-size: 17px; font-weight: 700; color: var(--ink-0); margin-top: 3px; }
+.insider-sum .v.dn { color: var(--red); }
+.insider-sum .sub { font-family: var(--font-mono); font-size: 10px; color: var(--ink-2); margin-top: 2px; }
+
+/* =========================================================
+   RED TEAM / ADVERSARIAL
+   ========================================================= */
+.red-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.counter-thesis {
+  background: var(--bg-0); border: 1px solid var(--rule); padding: 16px 18px;
+  border-left: 3px solid var(--red);
+}
+.counter-thesis h3 { font-family: var(--font-mono); font-size: 10px; color: var(--red); text-transform: uppercase; letter-spacing: 0.16em; font-weight: 700; margin-bottom: 10px; }
+.counter-thesis p { color: var(--ink-1); font-size: 13px; line-height: 1.65; }
+.counter-thesis p strong { color: var(--ink-0); }
+.counter-thesis .quote { font-family: var(--font-serif); font-style: italic; color: var(--ink-2); font-size: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--rule); }
+
+.premortem { background: var(--bg-0); border: 1px solid var(--rule); padding: 16px 18px; }
+.premortem h3 { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.16em; font-weight: 700; margin-bottom: 10px; }
+.premortem ol { margin-left: 18px; }
+.premortem li { color: var(--ink-1); font-size: 12.5px; line-height: 1.55; margin-bottom: 8px; }
+.premortem li strong { color: var(--ink-0); }
+
+.discipline-stack { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.disc-card { background: var(--bg-0); border: 1px solid var(--rule); padding: 12px 14px; }
+.disc-card.flag { border-color: var(--accent); background: color-mix(in oklch, var(--accent) 5%, transparent); }
+.disc-card.flag-red { border-color: var(--red); background: color-mix(in oklch, var(--red) 5%, transparent); }
+.disc-card .k { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+.disc-card .v { font-family: var(--font-mono); font-size: 16px; font-weight: 700; color: var(--ink-0); margin-top: 4px; }
+.disc-card.flag .v { color: var(--accent); }
+.disc-card.flag-red .v { color: var(--red); }
+.disc-card .sub { color: var(--ink-2); font-size: 11px; margin-top: 4px; }
+
+/* =========================================================
+   PILLAR ATTRIBUTION DRIFT (sparklines per factor)
+   ========================================================= */
+.attr-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.attr-card {
+  background: var(--bg-0); border: 1px solid var(--rule);
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
+}
+.attr-card .nm { font-family: var(--font); font-size: 12px; font-weight: 700; color: var(--ink-0); }
+.attr-card .meta { font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.12em; }
+.attr-card svg { width: 100%; height: 36px; display: block; margin: 4px 0; }
+.attr-card .num-row { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; }
+.attr-card .num-row .v { color: var(--ink-0); font-weight: 700; }
+.attr-card .num-row .d.up { color: var(--green); }
+.attr-card .num-row .d.dn { color: var(--red); }
+.attr-card .num-row .d.fl { color: var(--ink-3); }
+.attr-card .read { font-family: var(--font); font-size: 11px; color: var(--ink-2); line-height: 1.45; }
+.attr-card.up   { border-left: 2px solid var(--green); }
+.attr-card.dn   { border-left: 2px solid var(--red); }
+.attr-card.flat { border-left: 2px solid var(--ink-3); }
+.attr-card.warn { border-left: 2px solid var(--accent); }
+
+/* =========================================================
+   REGIME-CONDITIONAL EDGE
+   ========================================================= */
+.reg-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+.reg-card {
+  background: var(--bg-0); border: 1px solid var(--rule);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 6px;
+  position: relative;
+}
+.reg-card.current { border-color: var(--info); background: color-mix(in oklch, var(--info) 6%, transparent); }
+.reg-card.current::before {
+  content: 'YOU ARE HERE'; position: absolute; top: -8px; right: 10px;
+  background: var(--info); color: var(--bg-0); font-family: var(--font-mono);
+  font-size: 8px; font-weight: 800; padding: 2px 7px; letter-spacing: 0.14em;
+}
+.reg-card .nm { font-family: var(--font-mono); font-size: 10px; color: var(--ink-0); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; padding-bottom: 8px; border-bottom: 1px solid var(--rule); margin-bottom: 4px; }
+.reg-card.current .nm { color: var(--info); }
+.reg-card .row { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; }
+.reg-card .row .k { color: var(--ink-3); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; }
+.reg-card .row .v { color: var(--ink-0); font-weight: 700; font-size: 12px; }
+.reg-card .row .v.green { color: var(--green); }
+.reg-card .row .v.red   { color: var(--red); }
+.reg-card .row .v.amber { color: var(--accent); }
+.reg-card .verdict {
+  margin-top: 4px; padding: 6px 8px; font-family: var(--font-mono);
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.14em;
+  font-weight: 800; text-align: center; border: 1px solid;
+}
+.reg-card .verdict.hold { color: var(--green); border-color: var(--green); }
+.reg-card .verdict.trim { color: var(--accent); border-color: var(--accent); }
+.reg-card .verdict.exit { color: var(--red); border-color: var(--red); }
+.reg-card .verdict.no   { color: var(--ink-3); border-color: var(--rule-2); }
+
+.reg-transition {
+  background: var(--bg-0); border: 1px solid var(--rule); padding: 14px 16px;
+  display: grid; grid-template-columns: 220px 1fr; gap: 18px; align-items: center;
+}
+.reg-transition .lbl { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+.reg-transition .arrows { display: flex; gap: 12px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 11px; }
+.reg-transition .ar {
+  background: var(--bg-2); padding: 8px 12px; border: 1px solid var(--rule);
+  display: flex; gap: 8px; align-items: center;
+}
+.reg-transition .ar .from { color: var(--ink-2); }
+.reg-transition .ar .arrow { color: var(--ink-3); }
+.reg-transition .ar .to { color: var(--ink-0); font-weight: 700; }
+.reg-transition .ar .prob { color: var(--accent); font-weight: 700; margin-left: 4px; }
+
+/* =========================================================
+   CROSS-SOURCE SMART MONEY (Congressional · 13F · Form 4 · UOA)
+   ========================================================= */
+.csm-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+.csm-card {
+  background: var(--bg-0); border: 1px solid var(--rule);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+}
+.csm-card h3 { font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.16em; font-weight: 700; padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
+.csm-card .score-row { display: flex; align-items: baseline; justify-content: space-between; }
+.csm-card .score { font-family: var(--font-mono); font-size: 24px; font-weight: 700; color: var(--ink-0); }
+.csm-card .score.bear { color: var(--red); }
+.csm-card .score.bull { color: var(--green); }
+.csm-card .score.neut { color: var(--ink-2); }
+.csm-card .tag { font-family: var(--font-mono); font-size: 8.5px; padding: 3px 7px; border: 1px solid; text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+.csm-card .tag.bear { color: var(--red); border-color: var(--red); }
+.csm-card .tag.bull { color: var(--green); border-color: var(--green); }
+.csm-card .tag.neut { color: var(--ink-3); border-color: var(--rule-2); }
+.csm-card .det { font-family: var(--font); font-size: 11.5px; color: var(--ink-1); line-height: 1.5; }
+.csm-card .det strong { color: var(--ink-0); }
+.csm-card .recent { font-family: var(--font-mono); font-size: 10px; color: var(--ink-2); padding-top: 6px; border-top: 1px solid var(--rule); }
+
+.csm-consensus {
+  background: var(--bg-0); border: 1px solid var(--rule); padding: 14px 18px;
+  display: grid; grid-template-columns: 200px 1fr; gap: 18px; align-items: center;
+}
+.csm-consensus .left { display: flex; flex-direction: column; gap: 4px; align-items: center; padding-right: 18px; border-right: 1px solid var(--rule); }
+.csm-consensus .left .k { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+.csm-consensus .left .v { font-family: var(--font-serif); font-size: 28px; font-weight: 500; color: var(--red); letter-spacing: -0.01em; }
+.csm-consensus .left .sub { font-family: var(--font-mono); font-size: 10px; color: var(--ink-2); }
+.csm-consensus .read { font-family: var(--font); font-size: 12.5px; color: var(--ink-1); line-height: 1.6; }
+.csm-consensus .read strong { color: var(--ink-0); }
+
+/* =========================================================
+   SCALE-UP LENS ($5K → $1M)
+   ========================================================= */
+.scale-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+.scale-card {
+  background: var(--bg-0); border: 1px solid var(--rule);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+  position: relative;
+}
+.scale-card.current { border-color: var(--copper); background: color-mix(in oklch, var(--copper) 5%, transparent); }
+.scale-card.current::before {
+  content: 'CURRENT'; position: absolute; top: -8px; right: 10px;
+  background: var(--copper); color: var(--bg-0); font-family: var(--font-mono);
+  font-size: 8px; font-weight: 800; padding: 2px 7px; letter-spacing: 0.14em;
+}
+.scale-card .acct {
+  font-family: var(--font-serif); font-size: 26px; font-weight: 500;
+  color: var(--ink-0); letter-spacing: -0.01em; line-height: 1;
+}
+.scale-card.current .acct { color: var(--copper); }
+.scale-card .acct-sub { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; margin-top: 2px; }
+.scale-card .row { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; }
+.scale-card .row .k { color: var(--ink-3); }
+.scale-card .row .v { color: var(--ink-0); font-weight: 700; }
+.scale-card .row .v.green { color: var(--green); }
+.scale-card .row .v.amber { color: var(--accent); }
+.scale-card .row .v.red   { color: var(--red); }
+.scale-card .verdict {
+  margin-top: 4px; padding: 7px 9px; font-family: var(--font-mono);
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.14em;
+  font-weight: 800; text-align: center; border: 1px solid;
+}
+.scale-card .verdict.ok    { color: var(--green); border-color: var(--green); }
+.scale-card .verdict.watch { color: var(--accent); border-color: var(--accent); }
+.scale-card .verdict.cap   { color: var(--red); border-color: var(--red); }
+
+.scale-note {
+  padding: 12px 14px; background: color-mix(in oklch, var(--info) 5%, transparent);
+  border-left: 3px solid var(--info); font-family: var(--font); font-size: 12px;
+  color: var(--ink-1); line-height: 1.6;
+}
+.scale-note strong { color: var(--ink-0); }
+
+/* =========================================================
+   DECISION VERDICT — top-of-page synthesised TAKE/SKIP/WAIT
+   ========================================================= */
+.dv-sect {
+  border: 2px solid var(--rule-2, #2a352e);
+  background: linear-gradient(135deg, var(--bg-1, #0a0d0c), var(--bg-2, #0f1311));
+  padding: 18px 22px !important;
+  position: relative;
+}
+.dv-sect.dv-TAKE { border-color: var(--green, #5be57c); background: linear-gradient(135deg, color-mix(in oklch, var(--green) 7%, var(--bg-1)), var(--bg-2)); }
+.dv-sect.dv-SKIP { border-color: var(--red, #ff6b5b);   background: linear-gradient(135deg, color-mix(in oklch, var(--red) 7%, var(--bg-1)),   var(--bg-2)); }
+.dv-sect.dv-WAIT { border-color: var(--accent, #ffb95c);background: linear-gradient(135deg, color-mix(in oklch, var(--accent) 7%, var(--bg-1)),var(--bg-2)); }
+.dv-sect.dv-HOLD { border-color: var(--info, #5ec8d8);  background: linear-gradient(135deg, color-mix(in oklch, var(--info) 7%, var(--bg-1)),  var(--bg-2)); }
+.dv-row { display: grid; grid-template-columns: 240px 1fr; gap: 24px; align-items: stretch; }
+.dv-action-block {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding-right: 22px; border-right: 1px solid var(--rule, #1d2520);
+}
+.dv-label {
+  font-family: var(--font-mono); font-size: 9.5px;
+  color: var(--ink-3, #545851); text-transform: uppercase;
+  letter-spacing: 0.2em; font-weight: 700;
+}
+.dv-action {
+  font-family: var(--font-serif); font-weight: 500;
+  font-size: 56px; letter-spacing: 0.04em; line-height: 1.05;
+  color: var(--ink-0, #d8d6cc); margin: 4px 0;
+}
+.dv-sect.dv-TAKE .dv-action { color: var(--green); }
+.dv-sect.dv-SKIP .dv-action { color: var(--red); }
+.dv-sect.dv-WAIT .dv-action { color: var(--accent); }
+.dv-sect.dv-HOLD .dv-action { color: var(--info); }
+.dv-conviction {
+  font-family: var(--font-mono); font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--ink-2, #80847a); font-weight: 700;
+}
+.dv-body-block { display: flex; flex-direction: column; gap: 10px; }
+.dv-specific {
+  font-family: var(--font); font-size: 14px;
+  color: var(--ink-0, #d8d6cc); line-height: 1.5;
+  padding: 10px 14px;
+  background: var(--bg-0, #000);
+  border-left: 3px solid var(--accent, #ffb95c);
+}
+.dv-sect.dv-TAKE .dv-specific { border-left-color: var(--green); }
+.dv-sect.dv-SKIP .dv-specific { border-left-color: var(--red); }
+.dv-sect.dv-HOLD .dv-specific { border-left-color: var(--info); }
+.dv-reasons, .dv-warnings { display: flex; flex-direction: column; gap: 4px; }
+.dv-bullet {
+  font-family: var(--font); font-size: 12.5px;
+  color: var(--ink-1, #b0aea3); line-height: 1.5;
+  padding-left: 18px; position: relative;
+}
+.dv-bullet::before {
+  position: absolute; left: 0; top: 2px;
+  font-family: var(--font-mono); font-weight: 700; font-size: 12px;
+}
+.dv-bullet.reason::before    { content: '+'; color: var(--green, #5be57c); }
+.dv-bullet.warning::before   { content: '⚠'; color: var(--red, #ff6b5b); }
+.dv-bullet strong { color: var(--ink-0); font-weight: 700; }
+
+/* =========================================================
+   EDGE AUDIT — Wilson LB on the sliced slice
+   ========================================================= */
+.edge-live-card { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; }
+.edge-stats {
+  background: var(--bg-0, #000); border: 1px solid var(--rule, #1d2520);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.edge-slice-label {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--ink-2, #80847a); padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule, #1d2520);
+}
+.edge-slice-label .x { color: var(--copper, #d97757); font-weight: 700; }
+.edge-grid-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.edge-stat {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; background: var(--bg-1, #0a0d0c);
+  border: 1px solid var(--rule, #1d2520);
+}
+.edge-stat .k { font-family: var(--font-mono); font-size: 8.5px; color: var(--ink-3, #545851); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+.edge-stat .v { font-family: var(--font-mono); font-size: 16px; color: var(--ink-0, #d8d6cc); font-weight: 700; }
+.edge-stat .v.up { color: var(--green, #5be57c); }
+.edge-stat .v.dn { color: var(--red, #ff6b5b); }
+.edge-stat .v.amber { color: var(--accent, #ffb95c); }
+.edge-stat .sub { font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-3, #545851); }
+
+.edge-gates {
+  background: var(--bg-0, #000); border: 1px solid var(--rule, #1d2520);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+}
+.edge-gate-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; font-family: var(--font-mono); font-size: 11px; }
+.edge-gate-row .lb { color: var(--ink-1, #b0aea3); }
+.edge-gate-row .stat {
+  font-family: var(--font-mono); font-size: 9px; padding: 3px 8px;
+  border: 1px solid; text-transform: uppercase; letter-spacing: 0.14em;
+  font-weight: 800;
+}
+.edge-gate-row .stat.pass { color: var(--green, #5be57c); border-color: var(--green, #5be57c); }
+.edge-gate-row .stat.fail { color: var(--red, #ff6b5b);   border-color: var(--red, #ff6b5b); }
+
+.edge-verdict-line {
+  padding: 10px 12px;
+  border-left: 3px solid var(--ink-3, #545851);
+  background: color-mix(in oklch, var(--ink-2, #80847a) 4%, transparent);
+  font-family: var(--font); font-size: 12px; color: var(--ink-1, #b0aea3);
+  line-height: 1.6;
+}
+.edge-verdict-line.pass { border-left-color: var(--green, #5be57c); background: color-mix(in oklch, var(--green, #5be57c) 6%, transparent); }
+.edge-verdict-line.fail { border-left-color: var(--red, #ff6b5b);   background: color-mix(in oklch, var(--red, #ff6b5b) 6%, transparent); }
+.edge-verdict-line strong { color: var(--ink-0, #d8d6cc); }
+
+/* =========================================================
+   EMBED MODE — when launched inside the kairos workspace iframe
+   (?embed=1), hide the page's own chrome and let it fill 100% width.
+   The parent shell already supplies the ticker tape, brand, regime strip,
+   and ticker input.
+   ========================================================= */
+body.pa-embed .tape,
+body.pa-embed .topbar,
+body.pa-embed .macro,
+body.pa-embed .toolbar,
+body.pa-embed .tikbar { display: none !important; }
+body.pa-embed .page {
+  max-width: none !important;
+  padding: 18px 22px 60px !important;
+}
+body.pa-embed .ph {
+  padding-top: 4px !important;
+  margin-bottom: 14px !important;
+}
+
+/* =========================================================
+   LIQUIDITY & EXECUTION
+   ========================================================= */
+.liq-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.liq-tile { background: var(--bg-0); border: 1px solid var(--rule); padding: 12px 14px; }
+.liq-tile .k { font-family: var(--font-mono); font-size: 8.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+.liq-tile .v { font-family: var(--font-mono); font-size: 16px; font-weight: 700; color: var(--ink-0); margin-top: 3px; }
+.liq-tile .v.up { color: var(--green); }
+.liq-tile .v.dn { color: var(--red); }
+.liq-tile .sub { font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-2); margin-top: 3px; }
+
+</style>
+</head>
+<body>
+
+<!-- =================== TICKER TAPE =================== -->
+<div class="tape">
+  <span class="ti"><span class="s">SPY</span><span class="p">528.41</span><span class="d up">+0.42%</span></span>
+  <span class="dot"></span>
+  <span class="ti"><span class="s">QQQ</span><span class="p">456.18</span><span class="d up">+0.61%</span></span>
+  <span class="dot"></span>
+  <span class="ti"><span class="s">VIX</span><span class="p">16.20</span><span class="d dn">-1.8%</span></span>
+  <span class="dot"></span>
+  <span class="ti"><span class="s">DXY</span><span class="p">104.72</span><span class="d up">+0.12%</span></span>
+  <span class="dot"></span>
+  <span class="ti"><span class="s">10Y</span><span class="p">4.18%</span><span class="d up">+2bp</span></span>
+  <span class="dot"></span>
+  <span class="ti"><span class="s">BREADTH</span><span class="p">68%</span><span class="d up">&gt;50d</span></span>
+  <span class="dot"></span>
+  <span class="ti"><span class="s">NVDA</span><span class="p">156.80</span><span class="d up">+1.4%</span></span>
+  <span class="dot"></span>
+  <span class="ti"><span class="s">SOXX</span><span class="p">238.04</span><span class="d up">+0.9%</span></span>
+</div>
+
+<!-- =================== TOPBAR — Kairos brand =================== -->
+<div class="topbar">
+  <div class="brand">
+    <div class="mk-arc" aria-hidden="true">
+      <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+        <path d="M 4 26 A 22 22 0 0 1 26 4" stroke="#d8d6cc" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.92"/>
+        <circle cx="26" cy="4" r="3.5" fill="#5be57c"/>
+        <circle cx="26" cy="4" r="6.5" fill="none" stroke="#5be57c" stroke-width="0.6" opacity="0.4"/>
+      </svg>
+    </div>
+    <div class="stack">
+      <div class="nm-k">Kairos</div>
+      <div class="sb-tag">Trade when, not that.</div>
+    </div>
+  </div>
+
+  <div class="crumbs">
+    <span>Workspaces</span>
+    <span class="sep">›</span>
+    <span>Portfolio</span>
+    <span class="sep">›</span>
+    <span class="here">Position Review</span>
+  </div>
+
+  <div class="topbar-r">
+    <span><span class="l">Regime</span><span class="v" style="color:var(--info);">RISK-ON TRENDING</span></span>
+    <span><span class="l">Last scan</span><span class="v">14:32 PT</span></span>
+    <span class="clock-dot"></span>
+  </div>
+</div>
+
+<!-- =================== MACRO STRIP =================== -->
+<div class="macro">
+  <div class="mc"><div class="mc-l">Account · paper</div><div class="mc-v">$5,082</div><div class="mc-c up">+1.6% MTD</div></div>
+  <div class="mc"><div class="mc-l">Open positions</div><div class="mc-v">3 / 5</div><div class="mc-c fl">2 long · 1 short</div></div>
+  <div class="mc"><div class="mc-l">Net exposure</div><div class="mc-v">62%</div><div class="mc-c fl">vol-targeted</div></div>
+  <div class="mc"><div class="mc-l">Day's P&amp;L</div><div class="mc-v">+$71</div><div class="mc-c up">+1.42%</div></div>
+  <div class="mc"><div class="mc-l">Unrealized</div><div class="mc-v">+$1,124</div><div class="mc-c up">+2.6R aggregate</div></div>
+  <div class="mc"><div class="mc-l">Cash · margin</div><div class="mc-v">$1,930</div><div class="mc-c fl">38% available</div></div>
+  <div class="mc regime-cell">
+    <div class="regime-name">RISK-ON TREND</div>
+    <div class="regime-meta">BREADTH 68 · VIX 16 · GATE PASS</div>
+  </div>
+</div>
+
+<!-- =================== TAB BAR =================== -->
+<div class="toolbar">
+  <div class="tb-tabs">
+    <div class="tb-tab">Elite Picks</div>
+    <div class="tb-tab">Strategies</div>
+    <div class="tb-tab">Earnings</div>
+    <div class="tb-tab">Watchlist</div>
+    <div class="tb-tab">Portfolio</div>
+    <div class="tb-tab on new">Position Review</div>
+    <div class="tb-tab">Audit</div>
+    <div class="tb-tab">Performance</div>
+    <div class="tb-tab">Risk Lab</div>
+    <div class="tb-tab">Playbook</div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- =================== PAGE HEADING =================== -->
+  <div class="ph">
+    <div class="ph-l">
+      <h1>Position <span class="accent">Review</span> — <span id="pa-heading-ticker">NVDA</span></h1>
+      <div class="sub" id="pa-heading-sub">A 360° hold/add/trim/exit verdict, built only on signals that survived your gate matrix.</div>
+    </div>
+    <div class="ph-r">
+      <span class="pill green" id="pa-chip-portfolio">In Portfolio · day 19</span>
+      <span class="pill cyan" id="pa-chip-regime">REGIME ALIGNED</span>
+      <span class="pill amber" id="pa-chip-triggers">1 trigger fired</span>
+    </div>
+  </div>
+
+  <!-- =================== DECISION VERDICT (synthesised top-of-page) =================== -->
+  <div class="sect dv-sect" id="pa-dv-sect">
+    <div class="dv-row">
+      <div class="dv-action-block">
+        <div class="dv-label">Decision verdict</div>
+        <div class="dv-action" id="pa-dv-action">—</div>
+        <div class="dv-conviction" id="pa-dv-conviction">— conviction</div>
+      </div>
+      <div class="dv-body-block">
+        <div class="dv-specific" id="pa-dv-specific">— loading —</div>
+        <div class="dv-reasons" id="pa-dv-reasons"></div>
+        <div class="dv-warnings" id="pa-dv-warnings"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== TICKER INPUT =================== -->
+  <div class="tikbar">
+    <div class="field">
+      <span class="lbl">Ticker</span>
+      <input class="tik" id="pa-in-ticker" type="text" value="NVDA">
+    </div>
+    <div class="field">
+      <span class="lbl">Cost basis</span>
+      <input id="pa-in-entry" type="text" value="">
+    </div>
+    <div class="field">
+      <span class="lbl">Shares</span>
+      <input id="pa-in-shares" type="text" value="">
+    </div>
+    <div class="field">
+      <span class="lbl">Entry date</span>
+      <input id="pa-in-entry-date" type="text" value="" placeholder="YYYY-MM-DD">
+    </div>
+    <div class="field">
+      <span class="lbl">Setup at entry</span>
+      <input id="pa-in-setup" type="text" value="auto" style="width:170px;">
+    </div>
+    <div class="spacer"></div>
+    <button id="pa-in-analyze">Run 360° Analysis →</button>
+  </div>
+
+  <!-- =================== HERO — VERDICT + P&L =================== -->
+  <div class="hero">
+
+    <!-- VERDICT CARD -->
+    <div class="verdict-card HOLD" id="pa-verdict-card">
+      <div class="vlbl">Model verdict · rolled-up</div>
+      <div class="vbadge" id="pa-verdict-badge">HOLD</div>
+      <div class="vsub" id="pa-verdict-sub">Thesis intact · catalyst pending · trim discipline armed</div>
+
+      <div class="arc-wrap">
+        <div class="arc-num"><span id="pa-conviction">72</span><span class="pct">/ 100</span></div>
+        <div class="arc-bar"><div class="arc-fill" id="pa-arc-fill" style="width:72%"></div></div>
+        <div class="arc-ticks">
+          <span class="crit">0 EXIT</span>
+          <span>50</span>
+          <span class="ok">60+ HOLD</span>
+          <span>80 ADD</span>
+          <span>100</span>
+        </div>
+      </div>
+
+      <div class="verdict-action">
+        <div class="ak">Mechanical action</div>
+        <div id="pa-action-body">
+          <strong>Hold full position.</strong> Raise stop <span class="num">$144.30 → $148.20</span> (2% below rising 21EMA · locks <span class="num">+0.8R</span>). Re-evaluate at T1 <span class="num">$165</span> — partial trim 30% if RSI&gt;75 or volume diverges.
+        </div>
+      </div>
+    </div>
+
+    <!-- P&L + JOURNEY -->
+    <div class="pnl-card">
+      <div class="pnl-row1">
+        <div class="grp">
+          <span class="lbl">Entry → Now</span>
+          <span class="val"><span id="pa-pnl-entry">$142.50</span> <span class="delta">→</span> <span id="pa-pnl-now">$156.80</span></span>
+        </div>
+        <div class="grp">
+          <span class="lbl">Unrealized P&amp;L</span>
+          <span class="val up" id="pa-pnl-dollar">+$715 <span class="delta" id="pa-pnl-pct">+10.0%</span></span>
+        </div>
+        <div class="grp">
+          <span class="lbl">R-multiple</span>
+          <span class="val up" id="pa-pnl-r">+1.4R</span>
+        </div>
+        <div class="grp">
+          <span class="lbl">Days held</span>
+          <span class="val"><span id="pa-pnl-days">19</span> <span class="delta">/ 5–15d native</span></span>
+        </div>
+        <div class="grp">
+          <span class="lbl">1-day change</span>
+          <span class="val" id="pa-pnl-1d">—</span>
+        </div>
+        <div class="grp">
+          <span class="lbl">% to T1</span>
+          <span class="val" id="pa-pnl-toT1">63%</span>
+        </div>
+      </div>
+
+      <div class="journey">
+        <div class="axis"></div>
+        <div class="progress-bar" id="pa-journey-progress" style="left:24%; width:22%;"></div>
+
+        <div class="marker stop" id="pa-marker-stop" style="left:8%;">
+          <div class="dot"></div>
+          <div class="lab"><span class="p" id="pa-marker-stop-px">$148.20</span><span class="t">Stop</span></div>
+        </div>
+        <div class="marker entry" id="pa-marker-entry" style="left:24%;">
+          <div class="dot"></div>
+          <div class="lab"><span class="p" id="pa-marker-entry-px">$142.50</span><span class="t">Entry</span></div>
+        </div>
+        <div class="marker now" id="pa-marker-now" style="left:46%;">
+          <div class="dot"></div>
+          <div class="lab"><span class="p" id="pa-marker-now-px">$156.80</span><span class="t" id="pa-marker-now-r">Now · +1.4R</span></div>
+        </div>
+        <div class="marker t1" id="pa-marker-t1" style="left:68%;">
+          <div class="dot"></div>
+          <div class="lab"><span class="p" id="pa-marker-t1-px">$165.00</span><span class="t">T1</span></div>
+        </div>
+        <div class="marker t2" id="pa-marker-t2" style="left:90%;">
+          <div class="dot"></div>
+          <div class="lab"><span class="p" id="pa-marker-t2-px">$175.00</span><span class="t">T2</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== FORWARD DISTRIBUTION (Monte Carlo) =================== -->
+  <div class="sect" id="pa-sect-fwd">
+    <h2><span><span class="accent-mark">◆</span>Forward outcome distribution</span><span class="meta" id="pa-fwd-meta">Monte Carlo · 10,000 GBM paths · σ from realised vol · remaining 15d window</span></h2>
+    <div class="fwd-grid">
+      <div class="fwd-probs">
+        <div class="prob-bar t1">
+          <div class="lab"><span class="swatch"></span>P(T1 hit <span id="pa-fwd-t1-px">—</span>)</div>
+          <div class="track"><div class="fill" id="pa-fwd-t1-fill" style="width:0%"></div></div>
+          <div class="pct" id="pa-fwd-t1-pct">—</div>
+        </div>
+        <div class="prob-bar t2">
+          <div class="lab"><span class="swatch"></span>P(T2 hit <span id="pa-fwd-t2-px">—</span>)</div>
+          <div class="track"><div class="fill" id="pa-fwd-t2-fill" style="width:0%"></div></div>
+          <div class="pct" id="pa-fwd-t2-pct">—</div>
+        </div>
+        <div class="prob-bar stop">
+          <div class="lab"><span class="swatch"></span>P(stop <span id="pa-fwd-stop-px">—</span>)</div>
+          <div class="track"><div class="fill" id="pa-fwd-stop-fill" style="width:0%"></div></div>
+          <div class="pct" id="pa-fwd-stop-pct">—</div>
+        </div>
+        <div class="prob-bar time">
+          <div class="lab"><span class="swatch"></span>P(time-out flat)</div>
+          <div class="track"><div class="fill" id="pa-fwd-to-fill" style="width:0%"></div></div>
+          <div class="pct" id="pa-fwd-to-pct">—</div>
+        </div>
+
+        <div class="fwd-er">
+          <div class="it"><span class="k">E[R] from here</span><span class="v" id="pa-fwd-er">—</span></div>
+          <div class="it"><span class="k">E[$/shr] from here</span><span class="v" id="pa-fwd-edollar">—</span></div>
+          <div class="it"><span class="k">Fwd Sharpe (ann.)</span><span class="v" id="pa-fwd-sharpe">—</span></div>
+        </div>
+      </div>
+
+      <!-- Percentile fan chart -->
+      <div class="fan">
+        <span class="ylab" id="pa-fwd-ymax" style="top:8px; left:14px;">—</span>
+        <span class="ylab" id="pa-fwd-ymin" style="bottom:24px; left:14px;">—</span>
+        <span class="xlab" style="top:8px; right:18px;">15d window</span>
+        <span class="xlab" style="bottom:8px; left:50px;">D0</span>
+        <span class="xlab" style="bottom:8px; left:32%;">D5</span>
+        <span class="xlab" style="bottom:8px; left:55%;">D10</span>
+        <span class="xlab" style="bottom:8px; left:80%;">D15</span>
+
+        <svg id="pa-fwd-svg" viewBox="0 0 800 200" preserveAspectRatio="none">
+          <!-- target & stop reference bands (positioned via JS) -->
+          <line id="pa-fwd-line-t2"   x1="0" y1="40"  x2="800" y2="40"  stroke="#5be57c" stroke-width="1" stroke-dasharray="3,4" opacity="0.5"/>
+          <text id="pa-fwd-text-t2"   x="6" y="36"  font-family="JetBrains Mono" font-size="9" fill="#5be57c">T2 —</text>
+          <line id="pa-fwd-line-t1"   x1="0" y1="68"  x2="800" y2="68"  stroke="#ffb95c" stroke-width="1" stroke-dasharray="3,4" opacity="0.5"/>
+          <text id="pa-fwd-text-t1"   x="6" y="64"  font-family="JetBrains Mono" font-size="9" fill="#ffb95c">T1 —</text>
+          <line id="pa-fwd-line-stop" x1="0" y1="156" x2="800" y2="156" stroke="#ff6b5b" stroke-width="1" stroke-dasharray="3,4" opacity="0.5"/>
+          <text id="pa-fwd-text-stop" x="6" y="152" font-family="JetBrains Mono" font-size="9" fill="#ff6b5b">Stop —</text>
+
+          <!-- 10-90 percentile band -->
+          <path id="pa-fwd-band-1090" d="" fill="#5ec8d8" opacity="0.10" stroke="none"/>
+          <!-- 25-75 percentile band -->
+          <path id="pa-fwd-band-2575" d="" fill="#5ec8d8" opacity="0.22" stroke="none"/>
+          <!-- median path -->
+          <path id="pa-fwd-median" d="" stroke="#5ec8d8" stroke-width="1.8" fill="none"/>
+          <!-- now marker -->
+          <circle id="pa-fwd-now-dot" cx="60" cy="104" r="4" fill="#5ec8d8"/>
+          <text id="pa-fwd-now-text" x="65" y="100" font-family="JetBrains Mono" font-size="9" fill="#d8d6cc">—</text>
+        </svg>
+
+        <div class="fan-leg">
+          <div class="it"><span class="swatch" style="background:#5ec8d8;"></span>Median</div>
+          <div class="it"><span class="swatch" style="background:#5ec8d8; opacity:0.4;"></span>25–75 percentile</div>
+          <div class="it"><span class="swatch" style="background:#5ec8d8; opacity:0.18;"></span>10–90 percentile</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== RISK LAB =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Risk Lab</span><span class="meta">VaR · CVaR · stress matrix · β-adjusted exposure · factor decomposition</span></h2>
+
+    <div class="risk-grid">
+
+      <!-- Risk tiles + stress -->
+      <div>
+        <div class="risk-tiles" style="margin-bottom:10px;">
+          <div class="risk-tile">
+            <span class="k">Position MV</span>
+            <span class="v" id="pa-risk-mv">$7,840</span>
+            <span class="sub" id="pa-risk-mv-sub">50 shrs × $156.80</span>
+          </div>
+          <div class="risk-tile">
+            <span class="k">β-adj. exposure</span>
+            <span class="v amber" id="pa-risk-bmv">$12,544</span>
+            <span class="sub" id="pa-risk-bmv-sub">β 1.60 vs SPY</span>
+          </div>
+          <div class="risk-tile">
+            <span class="k">VaR (95% · 1d)</span>
+            <span class="v dn" id="pa-risk-var">-$218</span>
+            <span class="sub" id="pa-risk-var-sub">ATR × 1.65 × shares</span>
+          </div>
+          <div class="risk-tile">
+            <span class="k">CVaR (5% · remaining hold)</span>
+            <span class="v dn" id="pa-risk-cvar">-$612</span>
+            <span class="sub" id="pa-risk-cvar-sub">avg loss in worst 5% of paths</span>
+          </div>
+        </div>
+
+        <!-- Stress matrix -->
+        <div class="stress-tab">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:46%;">Stress scenario</th>
+                <th style="width:20%; text-align:right;">Δ Price</th>
+                <th style="width:20%; text-align:right;">$ P&amp;L</th>
+                <th style="text-align:right;">% NAV</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="scn">SPY −5% · β-adjust</td><td class="dn" style="text-align:right;">-8.0%</td><td class="dn" style="text-align:right;">-$627</td><td class="fl" style="text-align:right;">-12.3%</td></tr>
+              <tr><td class="scn">VIX +50% (vol shock)</td><td class="dn" style="text-align:right;">-4.2%</td><td class="dn" style="text-align:right;">-$329</td><td class="fl" style="text-align:right;">-6.5%</td></tr>
+              <tr><td class="scn">SOXX −10% (sector rotate)</td><td class="dn" style="text-align:right;">-9.1%</td><td class="dn" style="text-align:right;">-$713</td><td class="fl" style="text-align:right;">-14.0%</td></tr>
+              <tr><td class="scn">Single-day -3σ (idio crash)</td><td class="dn" style="text-align:right;">-6.8%</td><td class="dn" style="text-align:right;">-$533</td><td class="fl" style="text-align:right;">-10.5%</td></tr>
+              <tr><td class="scn">Earnings miss · IV crush</td><td class="dn" style="text-align:right;">-12.5%</td><td class="dn" style="text-align:right;">-$980</td><td class="fl" style="text-align:right;">-19.3%</td></tr>
+              <tr><td class="scn">Combined SPY −5% + sector −10%</td><td class="dn" style="text-align:right;">-15.6%</td><td class="dn" style="text-align:right;">-$1,223</td><td class="fl" style="text-align:right;">-24.1%</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Greeks / Options exposure -->
+      <div>
+        <div class="risk-tiles" style="margin-bottom:10px;">
+          <div class="risk-tile">
+            <span class="k">Realised vol (20d)</span>
+            <span class="v" id="pa-rv20">28.4%</span>
+            <span class="sub" id="pa-rv20-sub">annualised · 252d</span>
+          </div>
+          <div class="risk-tile">
+            <span class="k">Idio vol % of total</span>
+            <span class="v">38%</span>
+            <span class="sub">62% systematic / macro-driven</span>
+          </div>
+          <div class="risk-tile">
+            <span class="k">Liquidity-adj. unwind</span>
+            <span class="v up">&lt; 1 min</span>
+            <span class="sub">0.001% of NVDA ADV</span>
+          </div>
+          <div class="risk-tile">
+            <span class="k">Margin used (paper)</span>
+            <span class="v">$0</span>
+            <span class="sub">cash long · no leverage</span>
+          </div>
+        </div>
+
+        <div class="risk-tile" style="margin-bottom:0;">
+          <span class="k" style="margin-bottom:8px;">Portfolio Greeks contribution (if delta-hedged)</span>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-family: var(--font-mono); font-size:11px; color: var(--ink-1); margin-top:6px;">
+            <div>Δ contribution: <strong style="color:var(--ink-0);">+$80/$1 SPY move</strong></div>
+            <div>Γ contribution: <strong style="color:var(--ink-0);">+0.21</strong></div>
+            <div>Vega exposure: <strong style="color:var(--ink-0);">+$94/1pt IV</strong></div>
+            <div>Θ decay (if hedged): <strong style="color:var(--red);">−$22/day</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Factor decomposition -->
+      <div class="factor-list">
+        <h3 style="font-family:var(--font-mono); font-size:9.5px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.16em; font-weight:700; margin-bottom:8px;">Factor loadings (z-score vs S&amp;P 500)</h3>
+        <div class="factor-row">
+          <span class="nm">Momentum</span>
+          <span class="tr"><span class="fl pos" style="width:36%;"></span></span>
+          <span class="v pos">+1.8</span>
+        </div>
+        <div class="factor-row">
+          <span class="nm">Quality</span>
+          <span class="tr"><span class="fl pos" style="width:22%;"></span></span>
+          <span class="v pos">+1.1</span>
+        </div>
+        <div class="factor-row">
+          <span class="nm">Growth</span>
+          <span class="tr"><span class="fl pos" style="width:30%;"></span></span>
+          <span class="v pos">+1.5</span>
+        </div>
+        <div class="factor-row">
+          <span class="nm">Size</span>
+          <span class="tr"><span class="fl pos" style="width:40%;"></span></span>
+          <span class="v pos">+2.0</span>
+        </div>
+        <div class="factor-row">
+          <span class="nm">Value</span>
+          <span class="tr"><span class="fl neg" style="width:28%;"></span></span>
+          <span class="v neg">−1.4</span>
+        </div>
+        <div class="factor-row">
+          <span class="nm">Low-Vol</span>
+          <span class="tr"><span class="fl neg" style="width:18%;"></span></span>
+          <span class="v neg">−0.9</span>
+        </div>
+        <div class="factor-row">
+          <span class="nm">Beta</span>
+          <span class="tr"><span class="fl pos" style="width:32%;"></span></span>
+          <span class="v pos">+1.6</span>
+        </div>
+        <div style="border-top:1px solid var(--rule); margin-top:8px; padding-top:8px; font-family:var(--font); font-size:11.5px; color:var(--ink-1); line-height:1.5;">
+          <strong style="color:var(--ink-0);">P&amp;L attribution of +$715:</strong><br>
+          α (idio): <strong style="color:var(--green);">+$172 (24%)</strong> ·
+          β (market): +$298 (42%) ·
+          sector: +$184 (26%) ·
+          factor (momentum tilt): +$61 (8%)
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- =================== THESIS STATUS =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Thesis status</span><span class="meta">pillars vs entry · the bull case audited</span></h2>
+    <div class="thesis-meta">
+      <div class="it"><span class="k">Original thesis</span><span class="v">EMA21 pullback continuation · T1 catalyst</span></div>
+      <div class="it"><span class="k">Mechanism (why edge exists)</span><span class="v">Institutional re-add at trend-defining MA in liquid AI-cycle leader</span></div>
+      <div class="it"><span class="k">Regime · entry → now</span><span class="v green">Risk-On Trending → Risk-On Trending</span></div>
+      <div class="it"><span class="k">Catalyst window</span><span class="v">Earnings 22d · still pre-event</span></div>
+    </div>
+    <div class="pillar-grid">
+      <div class="pillar tracking">
+        <span class="dot"></span>
+        <span class="nm">Technicals</span>
+        <span class="st">Tracking</span>
+        <span class="ev">EMA stack intact · price above 8/21/50 · RVOL 1.4×</span>
+      </div>
+      <div class="pillar tracking">
+        <span class="dot"></span>
+        <span class="nm">Catalyst Quality</span>
+        <span class="st">Tracking</span>
+        <span class="ev">T1 maintained · AI-cycle · earnings 22d pre-event</span>
+      </div>
+      <div class="pillar tracking">
+        <span class="dot"></span>
+        <span class="nm">RS + Sector</span>
+        <span class="st">Tracking</span>
+        <span class="ev">RS 92→89 (mild fade) · SOXX RS 78 · leadership intact</span>
+      </div>
+      <div class="pillar drifting">
+        <span class="dot"></span>
+        <span class="nm">Smart Money</span>
+        <span class="st">Drifting</span>
+        <span class="ev">UOA fading · insider net-sell −$58M wk · cluster cooling</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== 8-FACTOR HOLD MATRIX =================== -->
+  <div class="sect fmatrix">
+    <h2><span><span class="accent-mark">◆</span>Hold matrix</span><span class="meta">8 factors re-weighted for an existing position · Δ vs entry</span></h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:170px;">Factor</th>
+          <th style="width:80px;">@ Entry</th>
+          <th style="width:80px;">Now</th>
+          <th class="f-bar">Current</th>
+          <th style="width:70px;">Δ</th>
+          <th style="width:120px;">Contribution</th>
+          <th>Read</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="f-nm">Trend Quality</td>
+          <td>88</td><td>84</td>
+          <td class="f-bar"><div class="barbg"><div class="barfill up" style="width:84%"></div></div></td>
+          <td class="delta dn">−4</td>
+          <td><span class="contrib pos">+ Hold</span></td>
+          <td class="read">EMA stack still rising · mild slope flatten</td>
+        </tr>
+        <tr>
+          <td class="f-nm">Momentum</td>
+          <td>82</td><td>71</td>
+          <td class="f-bar"><div class="barbg"><div class="barfill am" style="width:71%"></div></div></td>
+          <td class="delta dn">−11</td>
+          <td><span class="contrib neu">Neutral</span></td>
+          <td class="read">RSI 71 · approaching extension zone</td>
+        </tr>
+        <tr>
+          <td class="f-nm">Volume / Flow</td>
+          <td>90</td><td>76</td>
+          <td class="f-bar"><div class="barbg"><div class="barfill up" style="width:76%"></div></div></td>
+          <td class="delta dn">−14</td>
+          <td><span class="contrib pos">+ Hold</span></td>
+          <td class="read">RVOL 1.4× · OBV intact · no distribution day</td>
+        </tr>
+        <tr>
+          <td class="f-nm">Catalyst Tier</td>
+          <td>T1</td><td>T1</td>
+          <td class="f-bar"><div class="barbg"><div class="barfill up" style="width:100%"></div></div></td>
+          <td class="delta flat">=</td>
+          <td><span class="contrib pos">+ Hold</span></td>
+          <td class="read">AI cycle · earnings 22d · ESP +6.2%</td>
+        </tr>
+        <tr>
+          <td class="f-nm">Smart Money</td>
+          <td>80</td><td>62</td>
+          <td class="f-bar"><div class="barbg"><div class="barfill dn" style="width:62%"></div></div></td>
+          <td class="delta dn">−18</td>
+          <td><span class="contrib neg">− Trim risk</span></td>
+          <td class="read">UOA fading · insider net-sell −$58M · 13F flat</td>
+        </tr>
+        <tr>
+          <td class="f-nm">Sentiment</td>
+          <td>70</td><td>78</td>
+          <td class="f-bar"><div class="barbg"><div class="barfill up" style="width:78%"></div></div></td>
+          <td class="delta up">+8</td>
+          <td><span class="contrib pos">+ Hold</span></td>
+          <td class="read">News sent +0.42 · WSB mentions up · crowded watch</td>
+        </tr>
+        <tr>
+          <td class="f-nm">Vol Regime</td>
+          <td>VIX 14</td><td>VIX 16</td>
+          <td class="f-bar"><div class="barbg"><div class="barfill" style="width:42%"></div></div></td>
+          <td class="delta flat">+2</td>
+          <td><span class="contrib neu">Neutral</span></td>
+          <td class="read">Sub-20 calm · risk-on multipliers intact</td>
+        </tr>
+        <tr>
+          <td class="f-nm">R:R Remaining</td>
+          <td>4.1</td><td>2.2</td>
+          <td class="f-bar"><div class="barbg"><div class="barfill am" style="width:55%"></div></div></td>
+          <td class="delta dn">−1.9</td>
+          <td><span class="contrib neg">Watch</span></td>
+          <td class="read">Below 3.0 floor for fresh entry · OK to hold (already in)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- =================== EDGE AUDIT =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Edge audit</span><span class="meta">Wilson-LB on the EXACT slice · MFE/MAE distribution · score trajectory</span></h2>
+    <div class="edge-grid">
+
+      <!-- Sliced Wilson WR -->
+      <div class="slice-box">
+        <div class="crumb">Setup <span class="x">EMA21 PULLBACK</span> · regime <span class="x">RISK-ON TREND</span> · score-band <span class="x">75–85</span> · cat <span class="x">T1</span></div>
+        <div class="wls">
+          <div class="wl"><span class="k">N closed (this slice)</span><span class="v">82</span></div>
+          <div class="wl"><span class="k">Win rate (point)</span><span class="v green">68.3%</span></div>
+          <div class="wl"><span class="k">Wilson LB (95%)</span><span class="v green">59.1%</span></div>
+          <div class="wl"><span class="k">Wilson UB (95%)</span><span class="v">76.2%</span></div>
+          <div class="wl"><span class="k">Profit factor</span><span class="v green">1.94</span></div>
+          <div class="wl"><span class="k">Avg R (winners)</span><span class="v">+2.3R</span></div>
+          <div class="wl"><span class="k">Avg R (losers)</span><span class="v">-0.9R</span></div>
+          <div class="wl"><span class="k">Expectancy</span><span class="v amber">+0.72R</span></div>
+        </div>
+        <div style="margin-top:14px;">
+          <div style="font-family:var(--font-mono); font-size:8.5px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.14em; font-weight:700; margin-bottom:6px;">Wilson 95% CI · win rate</div>
+          <div class="ci-bar">
+            <div class="ci" style="left:59.1%; right:23.8%;"></div>
+            <div class="pt" style="left:68.3%;"></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:9px; color:var(--ink-3); margin-top:4px;">
+            <span>0%</span><span style="color:var(--green);">LB 59%</span><span style="color:var(--ink-0);">point 68%</span><span>UB 76%</span><span>100%</span>
+          </div>
+        </div>
+        <div style="margin-top:12px; padding:10px 12px; background: color-mix(in oklch, var(--green) 6%, transparent); border-left: 3px solid var(--green); font-family:var(--font); font-size:11.5px; color:var(--ink-1); line-height:1.55;">
+          <strong style="color:var(--ink-0);">Verdict on edge:</strong> slice clears Wilson n≥30 floor · LB 59% &gt; 55% threshold · expectancy +0.72R. Edge is real for THIS exact intersection, not just aggregate.
+        </div>
+      </div>
+
+      <!-- MFE / MAE distribution -->
+      <div class="mfe-box">
+        <h3>MFE / MAE distribution · your position vs setup history</h3>
+
+        <div class="mfe-row">
+          <span class="k">MFE</span>
+          <div class="dist">
+            <div class="pct-band p10-90" style="left:18%; right:8%;"></div>
+            <div class="pct-band p25-75" style="left:32%; right:22%;"></div>
+            <div class="median" style="left:52%;"></div>
+            <div class="you" style="left:62%;"><div class="you-lab">YOU +12.0%</div></div>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:9px; color:var(--ink-3); padding-left:70px;">
+          <span>0%</span><span>+5%</span><span>+10%</span><span>+15%</span><span>+20%</span>
+        </div>
+
+        <div class="mfe-row" style="margin-top:14px;">
+          <span class="k">MAE</span>
+          <div class="dist">
+            <div class="pct-band p10-90" style="right:18%; left:8%;"></div>
+            <div class="pct-band p25-75" style="right:32%; left:22%;"></div>
+            <div class="median" style="left:42%;"></div>
+            <div class="you" style="left:74%;"><div class="you-lab">YOU −3.2%</div></div>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:9px; color:var(--ink-3); padding-left:70px;">
+          <span>-20%</span><span>-12%</span><span>-7%</span><span>-3%</span><span>0%</span>
+        </div>
+
+        <div style="margin-top:14px; padding:10px 12px; background: var(--bg-2); font-family:var(--font); font-size:11.5px; color:var(--ink-1); line-height:1.55;">
+          <strong style="color:var(--ink-0);">Read:</strong> Your MFE +12% sits at 62nd percentile of winners. Your MAE −3.2% sits at 26th percentile (better than median). Position is tracking ahead-of-typical for this setup; high-confidence continuation candidate.
+        </div>
+      </div>
+
+      <!-- Score trajectory -->
+      <div class="traj-box">
+        <h3>Score trajectory · entry → day 19</h3>
+        <svg viewBox="0 0 400 160" preserveAspectRatio="none">
+          <!-- gridlines -->
+          <line x1="30" y1="20" x2="400" y2="20" stroke="#1d2520" stroke-width="1"/>
+          <line x1="30" y1="60" x2="400" y2="60" stroke="#1d2520" stroke-width="1"/>
+          <line x1="30" y1="100" x2="400" y2="100" stroke="#1d2520" stroke-width="1"/>
+          <line x1="30" y1="140" x2="400" y2="140" stroke="#1d2520" stroke-width="1"/>
+          <text x="4" y="24" font-family="JetBrains Mono" font-size="9" fill="#545851">100</text>
+          <text x="4" y="64" font-family="JetBrains Mono" font-size="9" fill="#545851">80</text>
+          <text x="4" y="104" font-family="JetBrains Mono" font-size="9" fill="#545851">60</text>
+          <text x="4" y="144" font-family="JetBrains Mono" font-size="9" fill="#545851">40</text>
+
+          <!-- exit-threshold band -->
+          <rect x="30" y="100" width="370" height="40" fill="#ff6b5b" opacity="0.05"/>
+          <line x1="30" y1="100" x2="400" y2="100" stroke="#ff6b5b" stroke-width="1" stroke-dasharray="3,3" opacity="0.4"/>
+
+          <!-- composite score line -->
+          <path d="M 30 38 L 50 42 L 75 36 L 100 40 L 130 48 L 160 44 L 190 50 L 220 52 L 250 56 L 280 58 L 310 60 L 340 62 L 370 64 L 400 66"
+                fill="none" stroke="#ffb95c" stroke-width="2"/>
+          <!-- entry marker -->
+          <circle cx="30" cy="38" r="3.5" fill="#b0aea3"/>
+          <text x="34" y="32" font-family="JetBrains Mono" font-size="8" fill="#b0aea3">88 entry</text>
+          <!-- now marker -->
+          <circle cx="400" cy="66" r="4" fill="#ffb95c"/>
+          <text x="370" y="58" font-family="JetBrains Mono" font-size="8" fill="#ffb95c">72 now</text>
+
+          <!-- smart-money pillar (drifting) -->
+          <path d="M 30 32 L 50 38 L 75 34 L 100 40 L 130 50 L 160 58 L 190 70 L 220 76 L 250 84 L 280 90 L 310 92 L 340 94 L 370 96 L 400 98"
+                fill="none" stroke="#ff6b5b" stroke-width="1.2" stroke-dasharray="2,2" opacity="0.85"/>
+
+          <!-- catalyst tier (flat) -->
+          <path d="M 30 28 L 400 30" fill="none" stroke="#5be57c" stroke-width="1.2" stroke-dasharray="2,2" opacity="0.85"/>
+        </svg>
+        <div class="traj-legend">
+          <div class="it"><span class="sw" style="background:#ffb95c;"></span>Composite score</div>
+          <div class="it"><span class="sw" style="background:#ff6b5b;"></span>Smart-money pillar</div>
+          <div class="it"><span class="sw" style="background:#5be57c;"></span>Catalyst tier</div>
+        </div>
+        <div style="margin-top:8px; padding:10px 12px; background: var(--bg-2); font-family:var(--font); font-size:11px; color:var(--ink-1); line-height:1.5;">
+          <strong style="color:var(--ink-0);">Tier path:</strong> T1 (88) → T2 (78) → T2 (72) over 19d.
+          <span style="color:var(--accent);">Mild tier creep</span> — still T2, but trajectory steepened on day 14 (insider sells).
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== PILLAR ATTRIBUTION DRIFT =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Pillar attribution drift</span><span class="meta">19-day daily history of each contributing factor · spot the regime / signal that's eroding</span></h2>
+    <div class="attr-grid">
+
+      <div class="attr-card up">
+        <span class="nm">Trend Quality</span>
+        <span class="meta">EMA stack · slope · ADX</span>
+        <svg viewBox="0 0 120 36" preserveAspectRatio="none">
+          <polyline points="2,8 12,9 22,7 32,8 42,10 52,11 62,12 72,11 82,10 92,11 102,12 112,13 118,14" fill="none" stroke="#5be57c" stroke-width="1.5"/>
+          <circle cx="118" cy="14" r="2.2" fill="#5be57c"/>
+        </svg>
+        <div class="num-row"><span>88 → <span class="v">84</span></span><span class="d dn">−4</span></div>
+        <span class="read">Slope flattening · stack intact</span>
+      </div>
+
+      <div class="attr-card warn" id="pa-pillar-mom">
+        <span class="nm">Momentum</span>
+        <span class="meta">RSI · MACD · ROC</span>
+        <svg viewBox="0 0 120 36" preserveAspectRatio="none">
+          <polyline points="2,6 12,5 22,4 32,5 42,8 52,12 62,15 72,18 82,21 92,23 102,25 112,26 118,27" fill="none" stroke="#ffb95c" stroke-width="1.5"/>
+          <circle cx="118" cy="27" r="2.2" fill="#ffb95c"/>
+        </svg>
+        <div class="num-row"><span>RSI <span class="v" id="pa-pillar-mom-v">71</span></span><span class="d dn" id="pa-pillar-mom-d">—</span></div>
+        <span class="read" id="pa-pillar-mom-read">RSI 71 · approaching extension</span>
+      </div>
+
+      <div class="attr-card up" id="pa-pillar-vol">
+        <span class="nm">Volume / Flow</span>
+        <span class="meta">RVOL · OBV · A/D</span>
+        <svg viewBox="0 0 120 36" preserveAspectRatio="none">
+          <polyline points="2,4 12,5 22,6 32,8 42,10 52,12 62,14 72,15 82,16 92,17 102,18 112,18 118,18" fill="none" stroke="#5be57c" stroke-width="1.5"/>
+          <circle cx="118" cy="18" r="2.2" fill="#5be57c"/>
+        </svg>
+        <div class="num-row"><span>RVOL <span class="v" id="pa-pillar-vol-v">1.4×</span></span><span class="d up" id="pa-pillar-vol-d">today</span></div>
+        <span class="read" id="pa-pillar-vol-read">RVOL today · 20d avg ratio</span>
+      </div>
+
+      <div class="attr-card flat">
+        <span class="nm">Catalyst Tier</span>
+        <span class="meta">T1/T2/T3 + ER · ESP</span>
+        <svg viewBox="0 0 120 36" preserveAspectRatio="none">
+          <polyline points="2,6 12,6 22,6 32,6 42,6 52,6 62,6 72,6 82,6 92,6 102,6 112,6 118,6" fill="none" stroke="#5be57c" stroke-width="1.5"/>
+          <circle cx="118" cy="6" r="2.2" fill="#5be57c"/>
+        </svg>
+        <div class="num-row"><span>T1 → <span class="v">T1</span></span><span class="d fl">=</span></div>
+        <span class="read">AI cycle · 22d to ER · ESP +6.2%</span>
+      </div>
+
+      <div class="attr-card dn">
+        <span class="nm">Smart Money</span>
+        <span class="meta">UOA · 13F · Form 4 · Congress</span>
+        <svg viewBox="0 0 120 36" preserveAspectRatio="none">
+          <polyline points="2,8 12,9 22,10 32,12 42,14 52,18 62,22 72,26 82,28 92,30 102,30 112,31 118,32" fill="none" stroke="#ff6b5b" stroke-width="1.5"/>
+          <circle cx="118" cy="32" r="2.2" fill="#ff6b5b"/>
+          <!-- inflection marker on day 14 -->
+          <circle cx="82" cy="28" r="2.5" fill="none" stroke="#ff6b5b" stroke-width="1"/>
+          <text x="76" y="13" font-family="JetBrains Mono" font-size="6" fill="#ff6b5b">d14 cluster</text>
+        </svg>
+        <div class="num-row"><span>80 → <span class="v">62</span></span><span class="d dn">−18</span></div>
+        <span class="read">Insider cluster fired day 14 · primary erosion driver</span>
+      </div>
+
+      <div class="attr-card up">
+        <span class="nm">Sentiment</span>
+        <span class="meta">News · WSB · StockTwits</span>
+        <svg viewBox="0 0 120 36" preserveAspectRatio="none">
+          <polyline points="2,22 12,20 22,18 32,16 42,14 52,12 62,10 72,9 82,8 92,7 102,6 112,5 118,5" fill="none" stroke="#5be57c" stroke-width="1.5"/>
+          <circle cx="118" cy="5" r="2.2" fill="#5be57c"/>
+        </svg>
+        <div class="num-row"><span>70 → <span class="v">78</span></span><span class="d up">+8</span></div>
+        <span class="read">News +0.42 · WSB up · CROWDED watch</span>
+      </div>
+
+      <div class="attr-card flat">
+        <span class="nm">Vol Regime</span>
+        <span class="meta">VIX · realised · IV rank</span>
+        <svg viewBox="0 0 120 36" preserveAspectRatio="none">
+          <polyline points="2,22 12,21 22,22 32,21 42,22 52,21 62,20 72,20 82,19 92,19 102,18 112,18 118,18" fill="none" stroke="#80847a" stroke-width="1.5"/>
+          <circle cx="118" cy="18" r="2.2" fill="#80847a"/>
+        </svg>
+        <div class="num-row"><span>VIX 14 → <span class="v">16</span></span><span class="d fl">+2</span></div>
+        <span class="read">Sub-20 calm · multipliers intact</span>
+      </div>
+
+      <div class="attr-card dn">
+        <span class="nm">R:R Remaining</span>
+        <span class="meta">distance to T2 / stop ratio</span>
+        <svg viewBox="0 0 120 36" preserveAspectRatio="none">
+          <polyline points="2,6 12,8 22,10 32,12 42,14 52,16 62,18 72,20 82,22 92,24 102,25 112,26 118,27" fill="none" stroke="#ff6b5b" stroke-width="1.5"/>
+          <circle cx="118" cy="27" r="2.2" fill="#ff6b5b"/>
+        </svg>
+        <div class="num-row"><span>4.1 → <span class="v">2.2</span></span><span class="d dn">−1.9</span></div>
+        <span class="read">Below 3.0 fresh-entry floor · OK to hold</span>
+      </div>
+
+    </div>
+    <div style="margin-top:14px; padding:12px 14px; background: color-mix(in oklch, var(--red) 5%, transparent); border-left: 3px solid var(--red); font-family:var(--font); font-size:12px; color:var(--ink-1); line-height:1.55;">
+      <strong style="color:var(--ink-0);">Drift diagnosis:</strong> Conviction loss is concentrated in <strong style="color:var(--red);">Smart Money (−18)</strong> with a clear inflection on day 14 (insider cluster). Trend / Volume / Catalyst pillars are all still tracking. <strong>The position isn't broken — one pillar is.</strong> If insider cluster were absent, conviction would be 80+ (ADD territory).
+    </div>
+  </div>
+
+  <!-- =================== REGIME-CONDITIONAL EDGE =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Regime-conditional edge</span><span class="meta">principle 5 · this setup's WR / PF in EACH of the 4 regimes · what regime-drift does to your expectancy</span></h2>
+
+    <div class="reg-grid">
+      <div class="reg-card current">
+        <span class="nm">Risk-On Trending</span>
+        <div class="row"><span class="k">N</span><span class="v">82</span></div>
+        <div class="row"><span class="k">WR (Wilson LB)</span><span class="v green">68% (59)</span></div>
+        <div class="row"><span class="k">Profit factor</span><span class="v green">1.94</span></div>
+        <div class="row"><span class="k">Avg R</span><span class="v green">+0.72R</span></div>
+        <div class="row"><span class="k">Max DD on setup</span><span class="v">−1.8R</span></div>
+        <div class="verdict hold">Hold · Edge intact</div>
+      </div>
+
+      <div class="reg-card">
+        <span class="nm">Risk-On Choppy</span>
+        <div class="row"><span class="k">N</span><span class="v">41</span></div>
+        <div class="row"><span class="k">WR (Wilson LB)</span><span class="v amber">54% (40)</span></div>
+        <div class="row"><span class="k">Profit factor</span><span class="v amber">1.18</span></div>
+        <div class="row"><span class="k">Avg R</span><span class="v amber">+0.12R</span></div>
+        <div class="row"><span class="k">Max DD on setup</span><span class="v">−2.4R</span></div>
+        <div class="verdict trim">Trim 50% on regime shift</div>
+      </div>
+
+      <div class="reg-card">
+        <span class="nm">Risk-Off Trending</span>
+        <div class="row"><span class="k">N</span><span class="v">24</span></div>
+        <div class="row"><span class="k">WR (Wilson LB)</span><span class="v red">38% (22)</span></div>
+        <div class="row"><span class="k">Profit factor</span><span class="v red">0.71</span></div>
+        <div class="row"><span class="k">Avg R</span><span class="v red">−0.38R</span></div>
+        <div class="row"><span class="k">Max DD on setup</span><span class="v red">−3.6R</span></div>
+        <div class="verdict exit">Exit on regime shift</div>
+      </div>
+
+      <div class="reg-card">
+        <span class="nm">Panic</span>
+        <div class="row"><span class="k">N</span><span class="v">8</span></div>
+        <div class="row"><span class="k">WR (Wilson LB)</span><span class="v red">12% (~0)</span></div>
+        <div class="row"><span class="k">Profit factor</span><span class="v red">0.21</span></div>
+        <div class="row"><span class="k">Avg R</span><span class="v red">−0.84R</span></div>
+        <div class="row"><span class="k">Max DD on setup</span><span class="v red">−5.2R</span></div>
+        <div class="verdict no">No edge · Auto-exit</div>
+      </div>
+    </div>
+
+    <!-- Regime transition probabilities -->
+    <div class="reg-transition">
+      <span class="lbl">P(regime drift · next 22d) <br><span style="font-family:var(--font-serif); font-style:italic; text-transform:none; letter-spacing:0; color:var(--ink-2); font-size:11px;">from 5-year hidden-Markov fit</span></span>
+      <div class="arrows">
+        <div class="ar"><span class="from">Risk-On Trend</span><span class="arrow">→</span><span class="to">Stay</span><span class="prob">78%</span></div>
+        <div class="ar"><span class="from">Risk-On Trend</span><span class="arrow">→</span><span class="to">Choppy</span><span class="prob">14%</span></div>
+        <div class="ar"><span class="from">Risk-On Trend</span><span class="arrow">→</span><span class="to">Risk-Off</span><span class="prob">7%</span></div>
+        <div class="ar"><span class="from">Risk-On Trend</span><span class="arrow">→</span><span class="to">Panic</span><span class="prob">1%</span></div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px; padding:12px 14px; background: color-mix(in oklch, var(--info) 5%, transparent); border-left: 3px solid var(--info); font-family:var(--font); font-size:12px; color:var(--ink-1); line-height:1.6;">
+      <strong style="color:var(--ink-0);">Probability-weighted forward expectancy:</strong>
+      0.78 × (+0.72R) + 0.14 × (+0.12R) + 0.07 × (−0.38R) + 0.01 × (−0.84R) =
+      <strong style="color:var(--green);">+0.55R</strong> expected. Drift to risk-off is the meaningful tail (7%) — that's the scenario the stop and trim discipline are protecting you from.
+    </div>
+  </div>
+
+  <!-- =================== EARNINGS CYCLE MODULE =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Earnings cycle decision</span><span class="meta">22d to report · the binary catalyst that breaks every other rule</span></h2>
+    <div class="er-grid">
+      <div class="er-clock">
+        <div class="ds">Days to earnings</div>
+        <div class="countdown" id="pa-er-days">22</div>
+        <div class="er-date" id="pa-er-date">AMC Tue, Jun 2 · 2026</div>
+        <div class="er-meta">
+          <div class="it"><span class="k">ESP</span><span class="v up">+6.2%</span></div>
+          <div class="it"><span class="k">Beat streak</span><span class="v up">4 / 4</span></div>
+          <div class="it"><span class="k">Implied move</span><span class="v amber">±9.4%</span></div>
+          <div class="it"><span class="k">Hist. avg move</span><span class="v">±8.1%</span></div>
+        </div>
+      </div>
+      <div class="er-tree">
+        <div class="er-branch rec">
+          <span class="opt">A · HOLD THROUGH</span>
+          <span class="det">Asymmetry favors holders. ESP +6.2%, 4/4 beat streak, implied move 9.4%. Expected post-print: +5.8% vs −3.6% on miss.</span>
+          <span class="ev">Recommended</span>
+        </div>
+        <div class="er-branch alt2">
+          <span class="opt">B · TRIM 50% T-1</span>
+          <span class="det">Lock half of +$715 day before report. Reduces variance. Sacrifices 4% expected continuation if beats.</span>
+          <span class="ev">Defensive</span>
+        </div>
+        <div class="er-branch alt3">
+          <span class="opt">C · COLLAR HEDGE</span>
+          <span class="det">Sell $170 call ($2.40 credit) + buy $150 put ($1.85 debit) = +$0.55 net credit. Caps upside but eliminates &gt;-1.5% downside.</span>
+          <span class="ev">Hedge</span>
+        </div>
+        <div class="er-branch alt">
+          <span class="opt">D · FULL EXIT T-1</span>
+          <span class="det">Realize +$715 / +1.4R. Eliminates earnings risk entirely. Sacrifices ~$455 expected continuation (probability-weighted).</span>
+          <span class="ev">Conservative</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== OPTIONS MARKET READ =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Options market read</span><span class="meta">Schwab chain · IV rank · skew · max pain · UOA flow · suggested hedge</span></h2>
+    <div class="opt-grid">
+
+      <div class="opt-card">
+        <h3>Volatility regime</h3>
+        <div class="opt-rows">
+          <div class="r"><span class="k">IV rank (52w)</span><span class="v amber">38</span></div>
+          <div class="r"><span class="k">IV percentile</span><span class="v">42%</span></div>
+          <div class="r"><span class="k">Front IV30</span><span class="v">31.2%</span></div>
+          <div class="r"><span class="k">Realised vol 20d</span><span class="v">28.4%</span></div>
+          <div class="r"><span class="k">IV / RV ratio</span><span class="v">1.10</span></div>
+          <div class="r"><span class="k">Term structure</span><span class="v info">Contango</span></div>
+          <div class="r"><span class="k">25Δ skew (put−call)</span><span class="v amber">+4.2v</span></div>
+        </div>
+      </div>
+
+      <div class="opt-card">
+        <h3>Flow &amp; positioning</h3>
+        <div class="opt-rows">
+          <div class="r"><span class="k">Put-call ratio (vol)</span><span class="v amber">0.72</span></div>
+          <div class="r"><span class="k">P/C ratio (OI)</span><span class="v">0.81</span></div>
+          <div class="r"><span class="k">Calls UOA today</span><span class="v green">4</span></div>
+          <div class="r"><span class="k">Puts UOA today</span><span class="v red">7</span></div>
+          <div class="r"><span class="k">Max pain (next OPEX)</span><span class="v">$155</span></div>
+          <div class="r"><span class="k">Largest gamma strike</span><span class="v">$160 call</span></div>
+          <div class="r"><span class="k">Dealer positioning</span><span class="v info">+γ (suppressive)</span></div>
+        </div>
+      </div>
+
+      <div class="opt-card">
+        <h3>Suggested hedge stack</h3>
+        <div class="hedge-stack">
+          <div class="hedge-opt rec">
+            <span class="nm">Collar (rec)</span>
+            <span class="det">+$170C / −$150P · Jun 19 · caps +8.4% upside, eliminates &gt;-4.3% downside</span>
+            <span class="cost up">+$0.55</span>
+          </div>
+          <div class="hedge-opt">
+            <span class="nm">Cov. call</span>
+            <span class="det">Sell $170C Jun 19 · yields +$240 income (3.1% in 5wk) · upside capped at $170</span>
+            <span class="cost up">+$240</span>
+          </div>
+          <div class="hedge-opt">
+            <span class="nm">Prot. put</span>
+            <span class="det">Buy $150P Jun 19 · −2.4% premium · full downside cover</span>
+            <span class="cost dn">−$185</span>
+          </div>
+          <div class="hedge-opt">
+            <span class="nm">SOXS pair</span>
+            <span class="det">Buy SOXS · $1,500 notional · sector-β hedge · burns 4.8%/mo decay</span>
+            <span class="cost dn">−$72/mo</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- =================== PORTFOLIO FIT =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Portfolio fit</span><span class="meta">correlation matrix · concentration · marginal DD contribution</span></h2>
+    <div class="pf-grid">
+
+      <div class="corr-mat">
+        <h3>Pairwise correlation (63d) · open positions</h3>
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>NVDA</th><th>MSFT</th><th>UBER</th><th>SPY</th><th>SOXX</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="lab">NVDA</td><td class="c c-100">1.00</td><td class="c c-60">0.62</td><td class="c c-40">0.41</td><td class="c c-60">0.68</td><td class="c c-80">0.84</td></tr>
+            <tr><td class="lab">MSFT</td><td class="c c-60">0.62</td><td class="c c-100">1.00</td><td class="c c-40">0.38</td><td class="c c-80">0.81</td><td class="c c-60">0.59</td></tr>
+            <tr><td class="lab">UBER</td><td class="c c-40">0.41</td><td class="c c-40">0.38</td><td class="c c-100">1.00</td><td class="c c-60">0.66</td><td class="c c-40">0.33</td></tr>
+          </tbody>
+        </table>
+        <div class="legend">
+          <span><span class="sw c-100"></span>1.0</span>
+          <span><span class="sw c-80"></span>0.8</span>
+          <span><span class="sw c-60"></span>0.6</span>
+          <span><span class="sw c-40"></span>0.4</span>
+          <span><span class="sw c-20"></span>0.2</span>
+          <span><span class="sw c-0"></span>0</span>
+          <span><span class="sw c-neg"></span>neg</span>
+        </div>
+        <div style="margin-top:12px; padding:10px 12px; background: color-mix(in oklch, var(--accent) 5%, transparent); border-left: 3px solid var(--accent); font-family:var(--font); font-size:11.5px; color:var(--ink-1); line-height:1.55;">
+          <strong style="color:var(--ink-0);">Diversification audit:</strong> NVDA-MSFT 0.62 = meaningful tech overlap. NVDA-SOXX 0.84 = strongly co-moving with sector ETF. <strong style="color:var(--accent);">Portfolio behaves more like 2 bets than 3</strong> in risk-off.
+        </div>
+      </div>
+
+      <div class="conc-stack">
+        <h3>Concentration audit (vs caps)</h3>
+
+        <div class="conc-row">
+          <span class="lb">Single-name NVDA</span>
+          <span class="bar"><span class="fl amber" style="width:52%;"></span><span class="cap" style="left:60%;"></span></span>
+          <span class="v warn">15.4% / 25%</span>
+        </div>
+        <div class="conc-row">
+          <span class="lb">Sector · Semis</span>
+          <span class="bar"><span class="fl amber" style="width:78%;"></span><span class="cap" style="left:80%;"></span></span>
+          <span class="v warn">23.4% / 30%</span>
+        </div>
+        <div class="conc-row">
+          <span class="lb">Factor · Momentum</span>
+          <span class="bar"><span class="fl red" style="width:92%;"></span><span class="cap" style="left:75%;"></span></span>
+          <span class="v bad">37.2% / 30%</span>
+        </div>
+        <div class="conc-row">
+          <span class="lb">Beta exposure</span>
+          <span class="bar"><span class="fl" style="width:65%;"></span><span class="cap" style="left:80%;"></span></span>
+          <span class="v">1.62 / 2.00</span>
+        </div>
+        <div class="conc-row">
+          <span class="lb">Cluster · AI</span>
+          <span class="bar"><span class="fl amber" style="width:75%;"></span><span class="cap" style="left:60%;"></span></span>
+          <span class="v warn">29.8% / 25%</span>
+        </div>
+
+        <div class="conc-line">
+          <strong>Cap breach:</strong> Momentum factor exposure 37% &gt; 30% cap. AI cluster 30% &gt; 25% cap. Adding ANOTHER AI/momentum position deepens the breach; rotation to value/low-vol is the better marginal trade. NVDA's marginal contribution to portfolio max-DD: <strong style="color:var(--red);">−$284 (1.6× linear)</strong>.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== EVENT CALENDAR =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Event calendar</span><span class="meta">remaining hold window · macro · sector · single-name</span></h2>
+    <div class="cal">
+      <div class="cal-row">
+        <span class="d">May 14<br><span class="dow">Thu</span></span>
+        <span class="d" style="font-family:var(--font-mono);">+3d</span>
+        <span class="ev"><span class="nm">CPI Release</span><span class="det">Apr · cons 3.1% · prev 3.2%</span></span>
+        <span class="impact high">High</span>
+      </div>
+      <div class="cal-row">
+        <span class="d">May 16<br><span class="dow">Sat</span></span>
+        <span class="d" style="font-family:var(--font-mono);">+5d</span>
+        <span class="ev"><span class="nm">Options expiry · weekly</span><span class="det">Max pain $155 · gamma cluster $160-165</span></span>
+        <span class="impact med">Med</span>
+      </div>
+      <div class="cal-row">
+        <span class="d">May 20<br><span class="dow">Wed</span></span>
+        <span class="d" style="font-family:var(--font-mono);">+9d</span>
+        <span class="ev"><span class="nm">FOMC Minutes</span><span class="det">May meeting minutes</span></span>
+        <span class="impact med">Med</span>
+      </div>
+      <div class="cal-row">
+        <span class="d">May 22<br><span class="dow">Fri</span></span>
+        <span class="d" style="font-family:var(--font-mono);">+11d</span>
+        <span class="ev"><span class="nm">AMD Earnings · AMC</span><span class="det">Direct semi-comp · ESP +3.1% · prior 3/4 beat</span></span>
+        <span class="impact high">High</span>
+      </div>
+      <div class="cal-row">
+        <span class="d">May 27<br><span class="dow">Wed</span></span>
+        <span class="d" style="font-family:var(--font-mono);">+16d</span>
+        <span class="ev"><span class="nm">MU Earnings · AMC</span><span class="det">Memory comp · ESP +1.8%</span></span>
+        <span class="impact med">Med</span>
+      </div>
+      <div class="cal-row">
+        <span class="d">May 30<br><span class="dow">Sat</span></span>
+        <span class="d" style="font-family:var(--font-mono);">+19d</span>
+        <span class="ev"><span class="nm">SOXX rebalance</span><span class="det">Quarterly index rebalance · flow-driven</span></span>
+        <span class="impact low">Low</span>
+      </div>
+      <div class="cal-row">
+        <span class="d">Jun 2<br><span class="dow">Tue</span></span>
+        <span class="d" style="font-family:var(--font-mono);">+22d</span>
+        <span class="ev"><span class="nm">NVDA EARNINGS · AMC</span><span class="det">ESP +6.2% · implied move ±9.4% · binary catalyst</span></span>
+        <span class="impact high">CRITICAL</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== INSIDER DEEP DIVE =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark" style="color:var(--red);">◆</span>Insider activity · deep dive</span><span class="meta">the triggered signal · who · when · how much · plan-type</span></h2>
+
+    <div class="insider-sum" style="margin-bottom:14px;">
+      <div class="it"><span class="k">Net $ flow (recent 8)</span><span class="v" id="pa-insider-net">—</span><span class="sub" id="pa-insider-net-sub">sales − buys</span></div>
+      <div class="it"><span class="k">Sales / Buys</span><span class="v" id="pa-insider-sb">—</span><span class="sub" id="pa-insider-sb-sub">last 8 transactions</span></div>
+      <div class="it"><span class="k">Most recent</span><span class="v" id="pa-insider-recent">—</span><span class="sub" id="pa-insider-recent-sub">name + date</span></div>
+      <div class="it"><span class="k">Biggest sale</span><span class="v" id="pa-insider-biggest">—</span><span class="sub" id="pa-insider-biggest-sub">single transaction</span></div>
+    </div>
+
+    <div class="insider-tab">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:200px;">Insider</th>
+            <th>Date</th>
+            <th>Code</th>
+            <th style="text-align:right;">Shares</th>
+            <th style="text-align:right;">Price</th>
+            <th style="text-align:right;">$ Value</th>
+            <th style="text-align:right;">Post-tx shrs</th>
+          </tr>
+        </thead>
+        <tbody id="pa-insider-tbody">
+          <tr><td colspan="7" style="text-align:center; color:var(--ink-3); padding:20px;">— loading from EODHD InsiderTransactions —</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div id="pa-insider-pattern" style="padding:12px 14px; background: color-mix(in oklch, var(--red) 5%, transparent); border-left: 3px solid var(--red); font-family:var(--font); font-size:12px; color:var(--ink-1); line-height:1.6;">
+      <strong style="color:var(--ink-0);">Pattern read:</strong> <span id="pa-insider-pattern-body">— loading —</span>
+    </div>
+  </div>
+
+  <!-- =================== SMART MONEY · CROSS-SOURCE =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Smart money · cross-source consensus</span><span class="meta">Form 4 · 13F · Congressional · UOA · independent signals triangulated</span></h2>
+
+    <div class="csm-grid">
+
+      <!-- Form 4 insider activity -->
+      <div class="csm-card">
+        <h3>Form 4 · SEC insider</h3>
+        <div class="score-row">
+          <span class="score bear">−18</span>
+          <span class="tag bear">Bearish</span>
+        </div>
+        <div class="det">
+          <strong>3 discretionary C-suite sells</strong> in 7 days · $58M net outflow · crossed the $50M weekly trigger. Discretionary % at 62% vs 18% baseline.
+        </div>
+        <div class="recent">Latest: CFO Kress · $11.6M · 2026-05-08 · discretionary</div>
+      </div>
+
+      <!-- 13F institutional flow -->
+      <div class="csm-card">
+        <h3>13F · Inst. flow</h3>
+        <div class="score-row">
+          <span class="score neut">+2</span>
+          <span class="tag neut">Neutral</span>
+        </div>
+        <div class="det">
+          <strong>Q1 13F filings:</strong> 234 funds added · 218 reduced (net +16). Top adds: Citadel +1.8M, Renaissance +1.2M. Top trim: Bridgewater −0.9M. Net inst. ownership <strong>67.8% → 68.1%</strong> (+0.3pp).
+        </div>
+        <div class="recent">Reporting lag: filed 2026-04-15 · stale by 26d</div>
+      </div>
+
+      <!-- Congressional -->
+      <div class="csm-card">
+        <h3>Congressional · Senate/House</h3>
+        <div class="score-row">
+          <span class="score bull">+12</span>
+          <span class="tag bull">Bullish</span>
+        </div>
+        <div class="det">
+          <strong>4 buys · 1 sale (90d).</strong> Notable: Pelosi (D) call options 03-12, Crenshaw (R) common $50-100K 04-22, Tuberville (R) common 04-29. <strong>Pattern: bipartisan accumulation</strong> ahead of AI policy news cycle.
+        </div>
+        <div class="recent">Source: senatestockwatcher.com · 7d lag</div>
+      </div>
+
+      <!-- UOA / options flow -->
+      <div class="csm-card">
+        <h3>UOA · options flow</h3>
+        <div class="score-row">
+          <span class="score bear">−8</span>
+          <span class="tag bear">Bearish</span>
+        </div>
+        <div class="det">
+          <strong>7 unusual put orders vs 4 call orders today.</strong> Biggest print: $150 put Jun 19 · 2,400 contracts · $2.8M premium · marked sweep. P/C vol ratio 0.72 (vs 0.58 30d avg). <strong>Hedging activity, not directional shorts.</strong>
+        </div>
+        <div class="recent">Today's largest: $150P Jun19 · 2,400 ct · sweep</div>
+      </div>
+
+    </div>
+
+    <!-- Consensus tile -->
+    <div class="csm-consensus">
+      <div class="left">
+        <span class="k">Cross-source score</span>
+        <span class="v">−3</span>
+        <span class="sub">range: −40 to +40</span>
+      </div>
+      <div class="read">
+        <strong>Net read:</strong> The four sources <em>disagree</em>, and that's signal. Insiders are de-risking into earnings (bearish), institutions are flat (waiting), Congress is accumulating (bullish on policy tailwind), options are buying protection (defensive). <strong style="color:var(--accent);">Mixed-signal regime</strong> typically precedes a binary catalyst resolution — exactly what 22d-to-ER looks like. <strong>Read:</strong> elevated uncertainty, asymmetric to the downside if earnings disappoint — the collar hedge is the rational trade.
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== EXIT TRIGGERS =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Exit triggers</span><span class="meta">mechanical falsification — what flips this</span></h2>
+    <div class="trigger armed">
+      <span class="ico">◎</span>
+      <span class="cond"><strong>Stop:</strong> Daily close &lt; $148.20 (2% below 21EMA)</span>
+      <span class="now">21EMA $151.22 · current $156.80</span>
+      <span class="stat">Armed</span>
+    </div>
+    <div class="trigger warning">
+      <span class="ico">▲</span>
+      <span class="cond"><strong>Extension:</strong> RSI &gt; 75 + bearish vol divergence ≥ 2 sessions</span>
+      <span class="now">RSI 71 · no divergence yet</span>
+      <span class="stat">Watch</span>
+    </div>
+    <div class="trigger armed">
+      <span class="ico">⌬</span>
+      <span class="cond"><strong>Sector:</strong> SOXX RS &lt; 60 for 3+ sessions</span>
+      <span class="now">SOXX RS 78</span>
+      <span class="stat">Armed</span>
+    </div>
+    <div class="trigger triggered">
+      <span class="ico">!</span>
+      <span class="cond"><strong>Smart-money:</strong> Insider net-sell &gt; $50M weekly</span>
+      <span class="now">−$58M wk of 05-05 · CFO + 2 VPs</span>
+      <span class="stat">Triggered</span>
+    </div>
+    <div class="trigger progress">
+      <span class="ico">→</span>
+      <span class="cond"><strong>Profit-take:</strong> Trim 30% at T1 ($165) · 100% at T2 ($175)</span>
+      <span class="now">63% of distance to T1 covered</span>
+      <span class="stat">In Progress</span>
+    </div>
+    <div class="trigger armed">
+      <span class="ico">◷</span>
+      <span class="cond"><strong>Hold-period:</strong> Exit if held &gt; 25 sessions w/o reaching T1</span>
+      <span class="now">19 of 25 sessions used</span>
+      <span class="stat">Armed</span>
+    </div>
+  </div>
+
+  <!-- =================== REASONS / WATCH-OUTS =================== -->
+  <div class="split">
+    <div class="sect" style="margin-bottom:0;">
+      <h2><span><span class="accent-mark" style="color:var(--green);">▲</span>Why HOLD</span><span class="meta">the bull case · 4 reasons</span></h2>
+      <ul class="reasonlist pos">
+        <li>
+          <span class="h">Regime + mechanism intact</span>
+          Risk-On Trending unchanged since entry. EMA21 pullback continuation is the highest-WR setup in this regime — Wilson LB 68% (n=82 closed in registry).
+        </li>
+        <li>
+          <span class="h">R-multiple already locked</span>
+          +1.4R captured. With stop raised to $148.20, the worst remaining outcome is +0.8R. Trade has earned the right to keep running.
+        </li>
+        <li>
+          <span class="h">Pre-catalyst window open</span>
+          Earnings 22d out · ESP +6.2% (positive surprise model) · prior 4 reports beat. Trimming pre-event sacrifices the asymmetry.
+        </li>
+        <li>
+          <span class="h">Sector + RS resilient</span>
+          SOXX RS 78 · NVDA RS 89 (off peak 92 but still elite). No sector-rotation flag triggered.
+        </li>
+      </ul>
+    </div>
+    <div class="sect" style="margin-bottom:0;">
+      <h2><span><span class="accent-mark" style="color:var(--red);">▼</span>Watch-outs</span><span class="meta">the bear case · 4 risks</span></h2>
+      <ul class="reasonlist neg">
+        <li>
+          <span class="h">Smart-money fade</span>
+          Insider net-sell −$58M (CFO + 2 VPs) crossed the $50M weekly trigger. Cluster signal turning. Not auto-exit, but lowers conviction by ~8 pts.
+        </li>
+        <li>
+          <span class="h">R:R remaining only 2.2</span>
+          Below the 3.0 floor for a fresh entry. If new Elite Picks scoring 80+ appear today, capital-rotation logic should fire.
+        </li>
+        <li>
+          <span class="h">RSI 71 + crowded narrative</span>
+          Two-sigma above neutral · WSB mention count 4× 30-day avg. Reflexive squeeze risk — tight stop matters.
+        </li>
+        <li>
+          <span class="h">Holding-period decay</span>
+          19 of 25 native-window sessions used; setup family's edge decays past day 15. If T1 not hit by day 22, mechanical re-evaluation.
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- =================== RED TEAM / ADVERSARIAL =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark" style="color:var(--red);">◆</span>Red team · adversarial panel</span><span class="meta">steel-manned counter-thesis · pre-mortem · falsification timer · discipline checks</span></h2>
+
+    <div class="red-grid">
+
+      <!-- Steel-manned bear case -->
+      <div class="counter-thesis">
+        <h3>Counter-thesis · short seller's view</h3>
+        <p>
+          <strong>The strongest argument against holding NVDA right now:</strong>
+          AI capex digestion phase has begun. Hyperscaler capex guides for Q2 are flat-to-down sequentially for the first time in 6 quarters. The CFO + EVP Ops + EGC selling cluster — at 158–160 — is what insiders do when they have visibility into a guide-down. Sell-side estimates are 14% above the implied path required to maintain current multiples. Skew is steepening, max pain is at $155 (below current), and dealer gamma is suppressive — the path of least resistance is mean-reversion to $150–152 into earnings. <strong>The setup that worked in regime 1 (uncontested AI capex growth) no longer maps to regime 2 (digestion phase) — and your model hasn't seen this transition yet.</strong>
+        </p>
+        <div class="quote">"You're holding a momentum factor concentration of 37% into a cycle inflection that's already showing up in insider behavior. The thesis isn't wrong — the timing is."</div>
+      </div>
+
+      <!-- Pre-mortem -->
+      <div class="premortem">
+        <h3>Pre-mortem · 3 things that force immediate exit</h3>
+        <ol>
+          <li>
+            <strong>AMD prints Q2 capex guide-down on May 22</strong> — direct read-through. If AMD signals slowdown, NVDA earnings risk asymmetry flips negative. Pre-position by trimming 50% on May 21 close.
+          </li>
+          <li>
+            <strong>2 more discretionary C-suite sells before earnings</strong> — if any officer (not 10b5-1) sells &gt; $5M in the next 10 sessions, exit 100%. Cluster signal becomes a wall.
+          </li>
+          <li>
+            <strong>SOXX RS drops below 60 + breadth below 50%</strong> — sector + breadth flip simultaneously means regime is rotating. Exit at next open regardless of single-name level.
+          </li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Discipline / behavioral flags -->
+    <div class="discipline-stack">
+      <div class="disc-card">
+        <span class="k">Falsification timer</span>
+        <span class="v">May 18 · 7d</span>
+        <span class="sub">If position hasn't hit $160 by EOD May 18, mechanical re-review. Thesis must show forward progress.</span>
+      </div>
+      <div class="disc-card flag">
+        <span class="k">Loss-aversion check</span>
+        <span class="v">Mild flag</span>
+        <span class="sub">Position is currently +1.4R. No ego-hold risk. Trim discipline NOT compromised by sunk-cost reasoning.</span>
+      </div>
+      <div class="disc-card flag-red">
+        <span class="k">Override history</span>
+        <span class="v">1 override</span>
+        <span class="sub">System flagged smart-money fade on day 14 with -7pt conviction. User held. Each override should be visible at exit-review.</span>
+      </div>
+      <div class="disc-card">
+        <span class="k">Calibration on this setup</span>
+        <span class="v">Belief 75% · Actual 68%</span>
+        <span class="sub">7pp over-confidence on EMA21 pullbacks. Discount your conviction by ~10% on this family.</span>
+      </div>
+      <div class="disc-card">
+        <span class="k">Days since last review</span>
+        <span class="v">2 days</span>
+        <span class="sub">Healthy cadence. Not over-managing. Not drift-ignoring. Next mandatory review: May 18.</span>
+      </div>
+      <div class="disc-card flag">
+        <span class="k">Crowded-trade index</span>
+        <span class="v">62 / 100</span>
+        <span class="sub">WSB mentions 4× 30d avg · StockTwits sentiment +0.78 (top decile) · sell-side bullish 92%. Elevated reflexivity risk.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== OPPORTUNITY COST =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Opportunity cost</span><span class="meta" id="pa-opp-meta">is this still the best use of that capital? · ranked vs today's scan</span></h2>
+    <div class="opp">
+      <div class="conv-cmp">
+        <div class="row"><span class="k">Your candidate score</span><span class="v" id="pa-opp-my-score">—</span></div>
+        <div class="row"><span class="k">Rank in scan</span><span class="v" id="pa-opp-rank">—</span></div>
+        <div class="row"><span class="k">Percentile</span><span class="v" id="pa-opp-percentile">—</span></div>
+        <div class="row"><span class="k">Top score today</span><span class="v bigger" id="pa-opp-top">—</span></div>
+        <div class="row"><span class="k">Median score today</span><span class="v" id="pa-opp-median">—</span></div>
+        <div class="row"><span class="k">Picks scoring above you</span><span class="v" id="pa-opp-n-higher">—</span></div>
+        <div class="row" style="border-top:1px solid var(--rule); padding-top:8px; margin-top:4px;"><span class="k">Sector concentration</span><span class="v" id="pa-opp-sector-conc">—</span></div>
+        <div class="row"><span class="k">Already held?</span><span class="v" id="pa-opp-held">—</span></div>
+      </div>
+      <div class="alt-picks">
+        <div style="font-family:var(--font-mono); font-size:9px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.16em; font-weight:700; margin:4px 0 4px;">Top picks scoring HIGHER than your candidate</div>
+        <div id="pa-opp-higher-list">
+          <div style="color:var(--ink-3); font-family:var(--font-mono); font-size:10px; padding:8px;">— loading —</div>
+        </div>
+        <div style="font-family:var(--font-mono); font-size:9px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.16em; font-weight:700; margin:14px 0 4px;">Best alternatives in <span id="pa-opp-sector-label">same sector</span></div>
+        <div id="pa-opp-samesector-list">
+          <div style="color:var(--ink-3); font-family:var(--font-mono); font-size:10px; padding:8px;">— loading —</div>
+        </div>
+        <div style="font-family:var(--font-mono); font-size:9px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.16em; font-weight:700; margin:14px 0 4px;">Sector-orthogonal diversification candidates (different sector, score ≥ 70)</div>
+        <div id="pa-opp-diffsector-list">
+          <div style="color:var(--ink-3); font-family:var(--font-mono); font-size:10px; padding:8px;">— loading —</div>
+        </div>
+        <div class="verdict-line" id="pa-opp-netread">
+          <strong>Net read:</strong> <span id="pa-opp-netread-body">— computing —</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== SCALE-UP LENS ($5K → $1M) =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Scale-up lens</span><span class="meta">unified system principle · what this exact position looks like at $5K / $50K / $250K / $1M · capacity awareness (principle 13)</span></h2>
+
+    <div class="scale-grid">
+
+      <div class="scale-card current">
+        <div>
+          <div class="acct">$5,000</div>
+          <div class="acct-sub">Paper · today</div>
+        </div>
+        <div class="row"><span class="k">Position size</span><span class="v">$7,840 (157%*)</span></div>
+        <div class="row"><span class="k">Shares</span><span class="v">50</span></div>
+        <div class="row"><span class="k">% of NVDA ADV</span><span class="v green">0.001%</span></div>
+        <div class="row"><span class="k">Spread cost</span><span class="v green">$0.50</span></div>
+        <div class="row"><span class="k">Slippage est.</span><span class="v green">&lt; $1</span></div>
+        <div class="row"><span class="k">Unwind time</span><span class="v green">&lt; 1 sec</span></div>
+        <div class="row"><span class="k">Round-trip cost</span><span class="v green">2 bp</span></div>
+        <div class="verdict ok">Frictionless</div>
+      </div>
+
+      <div class="scale-card">
+        <div>
+          <div class="acct">$50,000</div>
+          <div class="acct-sub">Funded · live</div>
+        </div>
+        <div class="row"><span class="k">Position size (10%)</span><span class="v">$5,000</span></div>
+        <div class="row"><span class="k">Shares</span><span class="v">32</span></div>
+        <div class="row"><span class="k">% of NVDA ADV</span><span class="v green">0.0007%</span></div>
+        <div class="row"><span class="k">Spread cost</span><span class="v green">$0.32</span></div>
+        <div class="row"><span class="k">Slippage est.</span><span class="v green">&lt; $1</span></div>
+        <div class="row"><span class="k">Unwind time</span><span class="v green">&lt; 1 sec</span></div>
+        <div class="row"><span class="k">Round-trip cost</span><span class="v green">2 bp</span></div>
+        <div class="verdict ok">Frictionless</div>
+      </div>
+
+      <div class="scale-card">
+        <div>
+          <div class="acct">$250,000</div>
+          <div class="acct-sub">Semi-pro · live</div>
+        </div>
+        <div class="row"><span class="k">Position size (10%)</span><span class="v">$25,000</span></div>
+        <div class="row"><span class="k">Shares</span><span class="v">160</span></div>
+        <div class="row"><span class="k">% of NVDA ADV</span><span class="v green">0.003%</span></div>
+        <div class="row"><span class="k">Spread cost</span><span class="v green">$1.60</span></div>
+        <div class="row"><span class="k">Slippage est.</span><span class="v green">$4–8</span></div>
+        <div class="row"><span class="k">Unwind time</span><span class="v green">&lt; 5 sec</span></div>
+        <div class="row"><span class="k">Round-trip cost</span><span class="v green">3 bp</span></div>
+        <div class="verdict ok">Frictionless</div>
+      </div>
+
+      <div class="scale-card">
+        <div>
+          <div class="acct">$1,000,000</div>
+          <div class="acct-sub">PA / family office</div>
+        </div>
+        <div class="row"><span class="k">Position size (10%)</span><span class="v">$100,000</span></div>
+        <div class="row"><span class="k">Shares</span><span class="v">638</span></div>
+        <div class="row"><span class="k">% of NVDA ADV</span><span class="v green">0.013%</span></div>
+        <div class="row"><span class="k">Spread cost</span><span class="v green">$6.38</span></div>
+        <div class="row"><span class="k">Slippage est.</span><span class="v amber">$15–30</span></div>
+        <div class="row"><span class="k">Unwind time</span><span class="v green">&lt; 30 sec</span></div>
+        <div class="row"><span class="k">Round-trip cost</span><span class="v amber">5 bp</span></div>
+        <div class="verdict ok">Frictionless · large-cap advantage</div>
+      </div>
+
+    </div>
+
+    <div class="scale-note" style="margin-bottom:10px;">
+      <strong>NVDA is large-cap mega-liquid</strong> — even at $1M PA scale, this exact trade has trivial frictions. Round-trip cost stays under 5bp through $1M. But the lens also tells you where this <em>breaks</em>: at $10M PA, single-position size hits $1M (still &lt;0.05% ADV — fine), but TWO positions of this size start triggering concentration caps. <strong>Capacity is not the constraint on this name; portfolio-construction discipline is.</strong>
+    </div>
+
+    <div class="scale-note" style="background: color-mix(in oklch, var(--accent) 5%, transparent); border-left-color: var(--accent);">
+      <strong>* Note on current paper sizing:</strong> Position is $7,840 / $5,000 paper = 157% of NAV — this is paper-trade testing, not real allocation. At $50K live, the system would size this to $5K (10%), with regime + VIX + drawdown multipliers reducing it further to ~$3,500 in current Risk-On Trending / VIX 16 / 0% DD state. <strong>Half-Kelly floor enforced; full-Kelly is the ceiling, never the default.</strong>
+    </div>
+  </div>
+
+  <!-- =================== LIQUIDITY & EXECUTION =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Liquidity &amp; execution</span><span class="meta">how cleanly can you actually exit this · matters more at scale</span></h2>
+    <div class="liq-grid">
+      <div class="liq-tile">
+        <span class="k">Position / ADV</span>
+        <span class="v up">0.001%</span>
+        <span class="sub">50 shrs vs 47M ADV</span>
+      </div>
+      <div class="liq-tile">
+        <span class="k">Bid-ask spread</span>
+        <span class="v up">$0.01</span>
+        <span class="sub">0.6 bps · top-of-book deep</span>
+      </div>
+      <div class="liq-tile">
+        <span class="k">Est. slippage (exit)</span>
+        <span class="v up">&lt; 1bp</span>
+        <span class="sub">market order safe at 50 shrs</span>
+      </div>
+      <div class="liq-tile">
+        <span class="k">Unwind @ 10% ADV</span>
+        <span class="v up">&lt; 1 sec</span>
+        <span class="sub">no participation constraint</span>
+      </div>
+      <div class="liq-tile">
+        <span class="k">vs VWAP (today)</span>
+        <span class="v amber">+0.42%</span>
+        <span class="sub">above VWAP $156.14 · slight chase</span>
+      </div>
+      <div class="liq-tile">
+        <span class="k">Borrow rate</span>
+        <span class="v up">0.25%</span>
+        <span class="sub">easy borrow · short-side cheap</span>
+      </div>
+      <div class="liq-tile">
+        <span class="k">Cap. utilisation</span>
+        <span class="v">15.4% / 25%</span>
+        <span class="sub">single-name cap headroom</span>
+      </div>
+      <div class="liq-tile">
+        <span class="k">Holding period · tax</span>
+        <span class="v">19 / 365d ST</span>
+        <span class="sub">ST gains tier · 346d to LT</span>
+      </div>
+      <div class="liq-tile">
+        <span class="k">Trade journal entries</span>
+        <span class="v">3</span>
+        <span class="sub">entry · day-7 check · day-14 (override)</span>
+      </div>
+      <div class="liq-tile">
+        <span class="k">Tier creep</span>
+        <span class="v amber">T1 → T2</span>
+        <span class="sub">conviction drifted, still investable</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== ACTION TOOLKIT =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Action toolkit</span><span class="meta">one-click mechanical executions · routes to executor</span></h2>
+    <div class="actions">
+      <button class="act-btn primary">
+        <span class="ttl">▲  Raise Stop</span>
+        <span class="det">$144.30 → $148.20 · locks +0.8R</span>
+      </button>
+      <button class="act-btn warning">
+        <span class="ttl">◐  Trim 30% at T1</span>
+        <span class="det">Conditional · GTC limit $165.00</span>
+      </button>
+      <button class="act-btn warning">
+        <span class="ttl">◐  Trim 50% now</span>
+        <span class="det">25 shrs @ market · realize $358 · keep runner</span>
+      </button>
+      <button class="act-btn add">
+        <span class="ttl">▲  Add 25% on pullback</span>
+        <span class="det">Limit $151.50 · 21EMA tag · regime gate ON</span>
+      </button>
+      <button class="act-btn danger">
+        <span class="ttl">✕  Full Exit</span>
+        <span class="det">Market · realize +$715 · close thesis</span>
+      </button>
+      <button class="act-btn">
+        <span class="ttl">◷  Snooze 5d</span>
+        <span class="det">Suppress re-review until 2026-05-18</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- =================== AUTO-DRAFTED JOURNAL =================== -->
+  <div class="sect">
+    <h2><span><span class="accent-mark">◆</span>Trade journal · auto-drafted</span><span class="meta">edit + save · routes to data/decision_log.jsonl</span></h2>
+    <div class="journal">[<span class="tag">2026-05-11 14:32 PT</span>] NVDA · day 19 · review <span class="tag">#HOLD-72</span>
+
+Verdict: HOLD (conviction 72/100). Position +$715 / +1.4R / +10.0%.
+
+Why hold: regime unchanged (risk-on trending), EMA21 pullback mechanism still
+intact (Wilson 68% LB, n=82), R already locked via stop raise to $148.20,
+pre-earnings window (22d) preserves catalyst asymmetry.
+
+Watch-outs: insider net-sell crossed −$50M trigger (CFO + 2 VPs sold $58M week
+of 05-05); R:R remaining 2.2 below fresh-entry 3.0 floor; RSI 71 approaching
+extension zone.
+
+Action taken: raised stop from $144.30 → $148.20 (2% below rising 21EMA).
+GTC limit T1 $165.00 (30% trim), T2 $175.00 (full exit). Re-review 2026-05-18
+or on any exit-trigger fire.
+
+Opportunity cost noted: 3 Elite Picks scoring higher (PLTR 88, AVGO 85, ASML 83)
+but two add AI exposure rather than diversify; rotation deferred to T1-trim
+cash release — ASML is the cleanest sector-orthogonal redeploy candidate.
+
+<span class="src">Source: position_review/360 · model: hold_matrix_v1 · regime: risk_on_trending · setup_family: ema21_pullback</span></div>
+  </div>
+
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════
+// Position Analysis — real-data binding
+// Reads ?t=TICKER&embed=1 from URL, fetches /api/position/{ticker} with
+// the user's cost-basis / shares / entry-date / stop / T1 / T2 (if any),
+// and re-binds every cell that has a stable id.
+//
+// Cells NOT covered by the API (Monte Carlo path, factor decomposition,
+// Wilson LB on slice, options Greeks, congressional cluster, etc.) keep
+// their demo values for now and are visually marked with the `pa-demo`
+// outline so it's obvious which numbers are live and which are mock.
+// ════════════════════════════════════════════════════════════════════════
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  const rawTicker = (params.get('t') || params.get('ticker') || '').toUpperCase().trim();
+  const ticker = rawTicker || 'NVDA';
+  const embed = params.get('embed') === '1';
+
+  if (embed) document.body.classList.add('pa-embed');
+  document.title = `Kairos · Position Review — ${ticker}`;
+
+  // ── helpers ──────────────────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const set = (id, v) => { const el = $(id); if (el != null && v != null && v !== '') el.textContent = v; };
+  const setCls = (id, add, rem) => { const el = $(id); if (!el) return;
+    (rem||[]).forEach(c => el.classList.remove(c));
+    (add||[]).forEach(c => el.classList.add(c));
+  };
+  const fmtUsd = (n, dec=2) => (n == null || Number.isNaN(n)) ? '—' :
+    `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString('en-US', {minimumFractionDigits: dec, maximumFractionDigits: dec})}`;
+  const fmtUsdSigned = (n, dec=2) => (n == null || Number.isNaN(n)) ? '—' :
+    `${n >= 0 ? '+' : '-'}$${Math.abs(n).toLocaleString('en-US', {minimumFractionDigits: dec, maximumFractionDigits: dec})}`;
+  const fmtPct = (n, dec=1) => (n == null || Number.isNaN(n)) ? '—' :
+    `${n >= 0 ? '+' : ''}${Number(n).toFixed(dec)}%`;
+  const fmtPctNoSign = (n, dec=1) => (n == null || Number.isNaN(n)) ? '—' :
+    `${Number(n).toFixed(dec)}%`;
+  const fmtR = (n) => (n == null || Number.isNaN(n)) ? '—' :
+    `${n >= 0 ? '+' : ''}${Number(n).toFixed(2)}R`;
+  const fmtBigUsd = (n) => {
+    if (n == null) return '—';
+    const a = Math.abs(n);
+    if (a >= 1e12) return `$${(n/1e12).toFixed(2)}T`;
+    if (a >= 1e9)  return `$${(n/1e9).toFixed(2)}B`;
+    if (a >= 1e6)  return `$${(n/1e6).toFixed(1)}M`;
+    if (a >= 1e3)  return `$${(n/1e3).toFixed(1)}K`;
+    return `$${n.toFixed(0)}`;
+  };
+
+  // ── ticker text swap (covers every NVDA mention in body / SVG / inputs) ──
+  function swapTicker(newTicker) {
+    if (newTicker === 'NVDA') return;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+    const nodes = []; let n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    nodes.forEach(node => {
+      if (node.nodeValue && /\bNVDA\b/.test(node.nodeValue)) {
+        node.nodeValue = node.nodeValue.replace(/\bNVDA\b/g, newTicker);
+      }
+    });
+    document.querySelectorAll('svg text').forEach(t => {
+      if (t.textContent && /NVDA/.test(t.textContent)) t.textContent = t.textContent.replace(/NVDA/g, newTicker);
+    });
+  }
+
+  // ── render the live data into the cells ──────────────────────────────
+  function render(d) {
+    if (!d || d.error) {
+      const sub = $('pa-heading-sub');
+      if (sub) sub.textContent = `Could not load data for ${d?.ticker || ticker}. The ticker may not be on EODHD or the API is rate-limited.`;
+      return;
+    }
+    // Heading + chips
+    set('pa-heading-ticker', d.ticker);
+    const dq = d.data_quality || {};
+    const liveBits = [];
+    if (dq.has_quote) liveBits.push('LIVE QUOTE');
+    if (dq.has_fundamentals) liveBits.push('FUNDAMENTALS');
+    if (dq.has_ohlcv) liveBits.push('OHLCV');
+    if (dq.has_scan) liveBits.push('IN LAST SCAN');
+    set('pa-heading-sub', `${d.company?.name || d.ticker} · ${d.company?.sector || '—'} · ${d.company?.industry || '—'} · sources: ${liveBits.join(' · ') || 'none'} · as of ${d.as_of}`);
+
+    const pos = d.position || {};
+    const hasCostBasis = pos.entry != null && pos.shares != null;
+    if (pos.days_held != null) {
+      set('pa-chip-portfolio', `Cost basis loaded · day ${pos.days_held}`);
+    } else {
+      set('pa-chip-portfolio', 'Candidate ticker · no cost basis');
+    }
+    set('pa-chip-regime', (d.scan?.regime || '—').toUpperCase());
+
+    // Real trigger count — only fire chip if we have an actual position
+    // AND the price is near stop or trigger thresholds.
+    const triggerChip = $('pa-chip-triggers');
+    if (triggerChip) {
+      let triggers = 0;
+      if (hasCostBasis && pos.stop != null && d.quote?.current_price != null) {
+        // Within 1% of stop = "near stop" trigger
+        const distToStop = (d.quote.current_price - pos.stop) / pos.stop;
+        if (distToStop <= 0.01) triggers++;
+      }
+      if (d.technicals?.rsi_14 != null && d.technicals.rsi_14 > 75) triggers++;
+      if (d.earnings?.days_to_er != null && d.earnings.days_to_er <= 7) triggers++;
+      // Insider-cluster trigger: >=4 sales in recent transactions
+      const sales = (d.insiders || []).filter(r => r.code === 'S').length;
+      if (sales >= 4) triggers++;
+      if (triggers === 0) {
+        triggerChip.textContent = 'no live triggers';
+        triggerChip.classList.remove('amber','red');
+        triggerChip.classList.add('green');
+      } else {
+        triggerChip.textContent = `${triggers} trigger${triggers > 1 ? 's' : ''} firing`;
+        triggerChip.classList.remove('green');
+        triggerChip.classList.add('amber');
+      }
+    }
+
+    // Verdict + conviction
+    const verdict = (d.scan?.verdict || 'HOLD').toUpperCase();
+    const score = d.scan?.score;
+    const vCard = $('pa-verdict-card');
+    if (vCard) {
+      vCard.classList.remove('HOLD','ADD','TRIM','EXIT');
+      vCard.classList.add(['HOLD','ADD','TRIM','EXIT'].includes(verdict) ? verdict : 'HOLD');
+    }
+    set('pa-verdict-badge', verdict);
+    if (score != null) {
+      set('pa-conviction', Math.round(score));
+      const f = $('pa-arc-fill'); if (f) f.style.width = `${Math.max(0, Math.min(100, score))}%`;
+    } else {
+      set('pa-conviction', '—');
+      const f = $('pa-arc-fill'); if (f) f.style.width = '0%';
+    }
+    const sub2 = $('pa-verdict-sub');
+    if (sub2) {
+      const setup = d.scan?.setup_family || '—';
+      const cat = d.scan?.catalyst_tier || '—';
+      const reg = d.scan?.regime || '—';
+      const inScan = d.scan?.in_scan;
+      sub2.textContent = inScan
+        ? `${setup} · cat ${cat} · regime ${reg}`
+        : `Not in last scan · ${reg} regime · using technical proxy score`;
+    }
+
+    // Action body (real numbers based on derived stop/T1)
+    const act = $('pa-action-body');
+    if (act) {
+      const stop = pos.stop, t1 = pos.t1, t2 = pos.t2;
+      const cur = d.quote?.current_price;
+      if (pos.entry && stop && t1) {
+        act.innerHTML = `<strong>${verdict === 'HOLD' ? 'Hold position.' : verdict === 'EXIT' ? 'Exit position.' : verdict === 'TRIM' ? 'Trim 30–50% of position.' : 'Consider adding.'}</strong> Stop <span class="num">${fmtUsd(stop)}</span> (${pos.stop_source === 'user' ? 'user-set' : '1.25× ATR'}) · T1 <span class="num">${fmtUsd(t1)}</span> · T2 <span class="num">${fmtUsd(t2)}</span>. Current <span class="num">${fmtUsd(cur)}</span> · R-multiple <span class="num">${fmtR(pos.r_multiple)}</span>.`;
+      } else if (cur) {
+        act.innerHTML = `Enter cost basis + shares + entry date above to compute live P&amp;L, R-multiple, and stop/target zones. Current quote <span class="num">${fmtUsd(cur)}</span>.`;
+      }
+    }
+
+    // P&L row
+    const cur = d.quote?.current_price;
+    set('pa-pnl-entry', pos.entry != null ? fmtUsd(pos.entry) : '—');
+    set('pa-pnl-now',   cur != null ? fmtUsd(cur) : '—');
+    if (pos.unrealized_pnl != null) {
+      const el = $('pa-pnl-dollar');
+      if (el) {
+        const up = pos.unrealized_pnl >= 0;
+        el.classList.remove('up','dn'); el.classList.add(up?'up':'dn');
+        el.innerHTML = `${fmtUsdSigned(pos.unrealized_pnl)} <span class="delta" id="pa-pnl-pct">${fmtPct(pos.unrealized_pct)}</span>`;
+      }
+    } else {
+      set('pa-pnl-dollar', '—');
+    }
+    if (pos.r_multiple != null) {
+      const el = $('pa-pnl-r');
+      if (el) {
+        el.classList.remove('up','dn'); el.classList.add(pos.r_multiple >= 0 ? 'up' : 'dn');
+        el.textContent = fmtR(pos.r_multiple);
+      }
+    } else { set('pa-pnl-r', '—'); }
+    set('pa-pnl-days', pos.days_held != null ? pos.days_held : '—');
+    const oneD = d.quote?.change_pct_1d;
+    if (oneD != null) {
+      const el = $('pa-pnl-1d');
+      if (el) {
+        el.classList.remove('up','dn'); el.classList.add(oneD >= 0 ? 'up' : 'dn');
+        el.textContent = fmtPct(oneD, 2);
+      }
+    }
+    set('pa-pnl-toT1', pos.pct_to_t1 != null ? `${pos.pct_to_t1}%` : '—');
+
+    // Journey rail — price levels + bar positioning
+    set('pa-marker-stop-px',  pos.stop  != null ? fmtUsd(pos.stop)  : '—');
+    set('pa-marker-entry-px', pos.entry != null ? fmtUsd(pos.entry) : '—');
+    set('pa-marker-now-px',   cur       != null ? fmtUsd(cur)       : '—');
+    set('pa-marker-t1-px',    pos.t1    != null ? fmtUsd(pos.t1)    : '—');
+    set('pa-marker-t2-px',    pos.t2    != null ? fmtUsd(pos.t2)    : '—');
+    set('pa-marker-now-r',    pos.r_multiple != null ? `Now · ${fmtR(pos.r_multiple)}` : 'Now');
+
+    // Journey rail behavior:
+    // - With cost basis + stop + T1/T2: place all 5 markers proportionally.
+    // - Without cost basis: hide stop/entry/T1/T2, center the Now marker,
+    //   show a CTA inviting the user to enter cost basis.
+    const stopMk  = $('pa-marker-stop');
+    const entryMk = $('pa-marker-entry');
+    const t1Mk    = $('pa-marker-t1');
+    const t2Mk    = $('pa-marker-t2');
+    const nowMk   = $('pa-marker-now');
+    const progBar = $('pa-journey-progress');
+    const hideMarkers = !hasCostBasis || pos.stop == null || pos.t1 == null;
+    [stopMk, entryMk, t1Mk, t2Mk].forEach(m => { if (m) m.style.display = hideMarkers ? 'none' : ''; });
+    if (progBar) progBar.style.display = hideMarkers ? 'none' : '';
+
+    if (!hideMarkers && cur != null) {
+      const range = pos.t2 - pos.stop;
+      if (range > 0) {
+        const place = (px) => 8 + Math.max(0, Math.min(82, ((px - pos.stop) / range) * 82));
+        const stopL  = place(pos.stop);
+        const entryL = place(pos.entry);
+        const nowL   = place(cur);
+        const t1L    = place(pos.t1);
+        const t2L    = place(pos.t2);
+        const setLeft = (id, pct) => { const el = $(id); if (el) el.style.left = `${pct}%`; };
+        setLeft('pa-marker-stop',  stopL);
+        setLeft('pa-marker-entry', entryL);
+        setLeft('pa-marker-now',   nowL);
+        setLeft('pa-marker-t1',    t1L);
+        setLeft('pa-marker-t2',    t2L);
+        if (progBar) {
+          if (cur >= pos.entry) {
+            progBar.style.left = `${entryL}%`; progBar.style.width = `${Math.max(0, nowL - entryL)}%`;
+          } else {
+            progBar.style.left = `${nowL}%`; progBar.style.width = `${Math.max(0, entryL - nowL)}%`;
+          }
+        }
+      }
+    } else if (nowMk) {
+      // Center the live-price dot when no cost basis context exists
+      nowMk.style.left = '50%';
+    }
+
+    // When no cost basis, show the suggested trade plan from ATR + MC.
+    if (!hasCostBasis) {
+      const act = $('pa-action-body');
+      const tp = d.trade_plan || {};
+      if (act && tp.hypothetical_entry != null) {
+        const sharesAdj = tp.suggested_shares_5k_regime_adj;
+        const regimeText = (d.scan?.regime || 'unknown') + ' (×' + tp.regime_haircut + ')';
+        const rrColor = tp.rr_passes_3to1 ? 'var(--green)' : 'var(--red)';
+        const rrLabel = tp.rr_passes_3to1 ? 'PASSES 3:1' : 'FAILS 3:1';
+        act.innerHTML = `
+          <strong style="color:var(--accent);">Candidate · suggested trade plan</strong> (ATR-derived).<br>
+          Entry now <span class="num">${fmtUsd(tp.hypothetical_entry)}</span> ·
+          stop <span class="num">${fmtUsd(tp.stop)}</span> (−1.25× ATR) ·
+          T1 <span class="num">${fmtUsd(tp.t1)}</span> (+2× ATR) ·
+          T2 <span class="num">${fmtUsd(tp.t2)}</span> (+4× ATR).<br>
+          Risk/share <span class="num">${fmtUsd(tp.risk_per_share)}</span> ·
+          R:R T1 <span class="num" style="color:${rrColor}; font-weight:700;">${tp.rr_T1} (${rrLabel})</span> ·
+          R:R T2 <span class="num">${tp.rr_T2}</span>.<br>
+          $5K paper sizing: <span class="num">${tp.suggested_shares_5k}</span> shrs unhaircut ·
+          <span class="num">${sharesAdj}</span> shrs after regime haircut [${regimeText}].
+        `;
+      }
+    }
+
+    // Risk Lab tiles
+    set('pa-risk-mv', pos.position_mv != null ? fmtUsd(pos.position_mv, 0) : '—');
+    set('pa-risk-mv-sub', (pos.shares && cur) ? `${pos.shares} shrs × ${fmtUsd(cur)}` : '—');
+    if (pos.beta_adjusted_mv != null) {
+      set('pa-risk-bmv', fmtUsd(pos.beta_adjusted_mv, 0));
+      set('pa-risk-bmv-sub', d.company?.beta ? `β ${d.company.beta.toFixed(2)} vs SPY` : '—');
+    } else { set('pa-risk-bmv', '—'); set('pa-risk-bmv-sub','—'); }
+
+    // VaR(95% 1d) ≈ ATR × 1.65 × shares  (normal-tails approximation)
+    if (d.technicals?.atr_14d && pos.shares) {
+      const var95 = d.technicals.atr_14d * 1.65 * pos.shares;
+      set('pa-risk-var', `-${fmtUsd(var95, 0)}`);
+      set('pa-risk-var-sub', pos.position_mv ? `${((var95 / pos.position_mv) * 100).toFixed(1)}% of position` : '—');
+      // CVaR ≈ 2.4× VaR (rough institutional shorthand)
+      const cvar = var95 * 2.4;
+      set('pa-risk-cvar', `-${fmtUsd(cvar, 0)}`);
+      set('pa-risk-cvar-sub', 'avg loss in worst 5% of paths');
+    } else { set('pa-risk-var','—'); set('pa-risk-cvar','—'); }
+
+    // Realised vol
+    if (d.technicals?.realised_vol_20d_ann != null) {
+      set('pa-rv20', `${d.technicals.realised_vol_20d_ann.toFixed(1)}%`);
+      set('pa-rv20-sub', `annualised · 20d · 252d basis`);
+    }
+
+    // Earnings cycle
+    if (d.earnings?.days_to_er != null && d.earnings.days_to_er >= 0) {
+      set('pa-er-days', d.earnings.days_to_er);
+      if (d.earnings.next_date) set('pa-er-date', d.earnings.next_date);
+    } else if (d.earnings?.last_report_date) {
+      set('pa-er-days', '—');
+      set('pa-er-date', `last reported ${d.earnings.last_report_date} · next unknown`);
+    } else {
+      set('pa-er-days', '—');
+      set('pa-er-date', 'no earnings date on file');
+    }
+
+    // Pillar attribution drift — momentum (RSI) + volume (RVOL)
+    if (d.technicals?.rsi_14 != null) {
+      const rsi = d.technicals.rsi_14;
+      set('pa-pillar-mom-v', rsi.toFixed(0));
+      set('pa-pillar-mom-d', rsi > 70 ? 'extended' : rsi < 30 ? 'oversold' : 'mid');
+      set('pa-pillar-mom-read', rsi > 75 ? `RSI ${rsi.toFixed(0)} · extension · trim watch` :
+                                rsi > 70 ? `RSI ${rsi.toFixed(0)} · upper band` :
+                                rsi < 30 ? `RSI ${rsi.toFixed(0)} · oversold bounce zone` :
+                                `RSI ${rsi.toFixed(0)} · mid-range`);
+    }
+    if (d.technicals?.rvol_today != null) {
+      const rv = d.technicals.rvol_today;
+      set('pa-pillar-vol-v', `${rv.toFixed(2)}×`);
+      set('pa-pillar-vol-d', rv > 1.5 ? 'expansion' : rv > 1.0 ? 'avg+' : 'contraction');
+      set('pa-pillar-vol-read', rv > 1.5 ? `RVOL ${rv.toFixed(2)}× · participation · clean tape` :
+                                rv > 1.0 ? `RVOL ${rv.toFixed(2)}× · above 20d average` :
+                                `RVOL ${rv.toFixed(2)}× · below average · no demand`);
+    }
+
+    // ── Forward Outcome Distribution (REAL Monte Carlo) ───────────────
+    // Server runs 10K GBM paths parameterised by this ticker's realised
+    // vol + drift, with the ATR-derived stop/T1/T2. We just bind cells.
+    const fo = d.forward_outcome || {};
+    if (fo && fo.p_t1 != null) {
+      const pctStr = (x) => `${Math.round(x * 100)}%`;
+      const pctFill = (x) => `${Math.max(0, Math.min(100, x * 100))}%`;
+      set('pa-fwd-t1-px',   fmtUsd(fo.t1_price));
+      set('pa-fwd-t2-px',   fmtUsd(fo.t2_price));
+      set('pa-fwd-stop-px', fmtUsd(fo.stop_price));
+      set('pa-fwd-t1-pct',   pctStr(fo.p_t1));
+      set('pa-fwd-t2-pct',   pctStr(fo.p_t2));
+      set('pa-fwd-stop-pct', pctStr(fo.p_stop));
+      set('pa-fwd-to-pct',   pctStr(fo.p_timeout));
+      const f1 = $('pa-fwd-t1-fill');   if (f1) f1.style.width = pctFill(fo.p_t1);
+      const f2 = $('pa-fwd-t2-fill');   if (f2) f2.style.width = pctFill(fo.p_t2);
+      const fs = $('pa-fwd-stop-fill'); if (fs) fs.style.width = pctFill(fo.p_stop);
+      const ft = $('pa-fwd-to-fill');   if (ft) ft.style.width = pctFill(fo.p_timeout);
+      // E[R], E[$], Sharpe
+      const erEl = $('pa-fwd-er');
+      if (erEl) {
+        const r = fo.expected_r;
+        erEl.classList.remove('up','dn'); erEl.classList.add(r >= 0 ? 'up' : 'dn');
+        erEl.textContent = fmtR(r);
+      }
+      const edEl = $('pa-fwd-edollar');
+      if (edEl) {
+        const ed_v = fo.expected_dollar_per_share;
+        edEl.classList.remove('up','dn'); edEl.classList.add(ed_v >= 0 ? 'up' : 'dn');
+        edEl.textContent = `${ed_v >= 0 ? '+' : '-'}$${Math.abs(ed_v).toFixed(2)}/shr`;
+      }
+      set('pa-fwd-sharpe', fo.fwd_sharpe_ann != null ? fo.fwd_sharpe_ann.toFixed(2) : '—');
+      set('pa-fwd-meta', `Monte Carlo · ${fo.n_paths.toLocaleString()} GBM paths · σ ${(fo.sigma_annualised*100).toFixed(1)}% · drift ${(fo.drift_annualised*100).toFixed(1)}% · ${fo.horizon_days}d horizon`);
+
+      // Fan chart — rebuild SVG paths using real D5/D10/D15 percentiles
+      if (Array.isArray(fo.fan) && fo.fan.length >= 3) {
+        // Y-axis: from min(p10@D15, stop*0.95) to max(p90@D15, t2*1.05)
+        const allPrices = [fo.stop_price, fo.t1_price, fo.t2_price, fo.current_price];
+        fo.fan.forEach(f => { allPrices.push(f.p10, f.p25, f.p50, f.p75, f.p90); });
+        const yMin = Math.min(...allPrices) * 0.98;
+        const yMax = Math.max(...allPrices) * 1.02;
+        const yRange = yMax - yMin;
+        // SVG viewport: 0–800 wide, 0–200 tall (top is high price, bottom is low)
+        const py = (price) => 200 - ((price - yMin) / yRange) * 200;
+        const xByDay = (d) => 60 + (d / 15) * 700;  // D0 at x=60, D15 at x=760
+        // Reference lines
+        const placeLine = (lineId, textId, price, label) => {
+          const line = $(lineId), tx = $(textId);
+          if (line && price != null) {
+            line.setAttribute('y1', py(price)); line.setAttribute('y2', py(price));
+          }
+          if (tx && price != null) {
+            tx.setAttribute('y', py(price) - 4); tx.textContent = `${label} ${fmtUsd(price)}`;
+          }
+        };
+        placeLine('pa-fwd-line-t2',   'pa-fwd-text-t2',   fo.t2_price,   'T2');
+        placeLine('pa-fwd-line-t1',   'pa-fwd-text-t1',   fo.t1_price,   'T1');
+        placeLine('pa-fwd-line-stop', 'pa-fwd-text-stop', fo.stop_price, 'Stop');
+
+        // Today (D0) point + fan from D5/D10/D15
+        const pts = [
+          { x: xByDay(0),  p10: fo.current_price, p25: fo.current_price, p50: fo.current_price, p75: fo.current_price, p90: fo.current_price },
+          { x: xByDay(fo.fan[0].day),  ...fo.fan[0] },
+          { x: xByDay(fo.fan[1].day), ...fo.fan[1] },
+          { x: xByDay(fo.fan[2].day), ...fo.fan[2] },
+        ];
+        const path = (kHi, kLo) => {
+          const top = pts.map(p => `${p.x} ${py(p[kHi])}`).join(' L ');
+          const bot = pts.slice().reverse().map(p => `${p.x} ${py(p[kLo])}`).join(' L ');
+          return `M ${top} L ${bot} Z`;
+        };
+        const med = pts.map(p => `${p.x} ${py(p.p50)}`).join(' L ');
+        const set1090 = $('pa-fwd-band-1090'); if (set1090) set1090.setAttribute('d', path('p90','p10'));
+        const set2575 = $('pa-fwd-band-2575'); if (set2575) set2575.setAttribute('d', path('p75','p25'));
+        const setMed  = $('pa-fwd-median');    if (setMed)  setMed.setAttribute('d', `M ${med}`);
+        const nowDot = $('pa-fwd-now-dot');
+        if (nowDot) { nowDot.setAttribute('cx', xByDay(0)); nowDot.setAttribute('cy', py(fo.current_price)); }
+        const nowText = $('pa-fwd-now-text');
+        if (nowText) { nowText.setAttribute('x', xByDay(0) + 5); nowText.setAttribute('y', py(fo.current_price) - 4); nowText.textContent = fmtUsd(fo.current_price); }
+        set('pa-fwd-ymax', fmtUsd(yMax, 0));
+        set('pa-fwd-ymin', fmtUsd(yMin, 0));
+      }
+    } else {
+      // No data — clear and show note
+      ['pa-fwd-t1-pct','pa-fwd-t2-pct','pa-fwd-stop-pct','pa-fwd-to-pct',
+       'pa-fwd-er','pa-fwd-edollar','pa-fwd-sharpe'].forEach(id => set(id, '—'));
+      set('pa-fwd-meta', 'Monte Carlo unavailable — needs realised vol (requires OHLCV history)');
+    }
+
+    // ── Insider activity (real EODHD Form-4 data) ─────────────────────
+    const ins = Array.isArray(d.insiders) ? d.insiders : [];
+    const tbody = $('pa-insider-tbody');
+    if (tbody) {
+      if (!ins.length) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--ink-3); padding:20px;">No insider transactions on file for ${d.ticker}.</td></tr>`;
+      } else {
+        const codeLabel = (c) => ({ S:'Sale', P:'Buy', A:'Award', M:'Option Exercise', G:'Gift', F:'Tax W/H' }[c] || c || '—');
+        tbody.innerHTML = ins.map(r => {
+          const isS = r.code === 'S';
+          const isP = r.code === 'P';
+          const valStr = r.value != null ? (r.value >= 1e6 ? `$${(r.value/1e6).toFixed(2)}M` : `$${(r.value/1e3).toFixed(0)}K`) : '—';
+          const shrStr = r.shares != null ? r.shares.toLocaleString('en-US') : '—';
+          const pxStr  = r.price  != null ? fmtUsd(r.price) : '—';
+          const postStr = r.post_amount != null ? r.post_amount.toLocaleString('en-US') : '—';
+          return `<tr>
+            <td class="who">${r.name || '—'}</td>
+            <td>${r.date || '—'}</td>
+            <td style="color:${isS?'var(--red)':isP?'var(--green)':'var(--ink-2)'}; font-weight:700;">${codeLabel(r.code)}</td>
+            <td class="shr">${shrStr}</td>
+            <td class="shr">${pxStr}</td>
+            <td class="amt" style="color:${isS?'var(--red)':isP?'var(--green)':'var(--ink-1)'};">${(isS?'−':isP?'+':'')}${valStr}</td>
+            <td class="shr role">${postStr}</td>
+          </tr>`;
+        }).join('');
+      }
+    }
+    // Insider summary tiles + pattern read
+    if (ins.length) {
+      const sales = ins.filter(r => r.code === 'S');
+      const buys  = ins.filter(r => r.code === 'P');
+      const netFlow = sales.reduce((a,r) => a + (r.value || 0), 0) - buys.reduce((a,r) => a + (r.value || 0), 0);
+      const biggestSale = sales.sort((a,b) => (b.value||0) - (a.value||0))[0];
+      const recent = ins[0];
+      set('pa-insider-net', netFlow >= 1e6 ? `-$${(netFlow/1e6).toFixed(2)}M` : netFlow > 0 ? `-$${(netFlow/1e3).toFixed(0)}K` : netFlow < 0 ? `+$${(Math.abs(netFlow)/1e6).toFixed(2)}M` : '$0');
+      const netEl = $('pa-insider-net');
+      if (netEl) { netEl.classList.remove('dn','up'); netEl.classList.add(netFlow > 0 ? 'dn' : netFlow < 0 ? 'up' : ''); }
+      set('pa-insider-sb', `${sales.length} / ${buys.length}`);
+      set('pa-insider-recent', recent.name || '—');
+      set('pa-insider-recent-sub', recent.date || '');
+      if (biggestSale) {
+        const v = biggestSale.value;
+        set('pa-insider-biggest', v >= 1e6 ? `-$${(v/1e6).toFixed(2)}M` : `-$${(v/1e3).toFixed(0)}K`);
+        set('pa-insider-biggest-sub', `${biggestSale.name || '—'} · ${biggestSale.date || ''}`);
+      } else {
+        set('pa-insider-biggest', '—');
+        set('pa-insider-biggest-sub', 'no sales in window');
+      }
+      // Pattern read
+      const ratio = (sales.length / Math.max(1, ins.length));
+      let pattern;
+      if (sales.length >= 4 && ratio >= 0.7) {
+        pattern = `<strong style="color:var(--red);">Cluster sell signal.</strong> ${sales.length} of last ${ins.length} insider transactions are sales. Net outflow ${netFlow >= 1e6 ? '$'+(netFlow/1e6).toFixed(2)+'M' : '$'+(netFlow/1e3).toFixed(0)+'K'}. Asymmetric read: leadership de-risking.`;
+      } else if (buys.length > sales.length) {
+        pattern = `<strong style="color:var(--green);">Insider buying tilt.</strong> ${buys.length} buys vs ${sales.length} sales in recent window. Bullish corporate confidence signal — rare and high-conviction when it appears.`;
+      } else {
+        pattern = `Mixed activity. ${sales.length} sales / ${buys.length} buys. No directional cluster. Watch for any one transaction &gt;$5M as a discretionary single-officer signal.`;
+      }
+      const pbody = $('pa-insider-pattern-body'); if (pbody) pbody.innerHTML = pattern;
+    } else {
+      ['pa-insider-net','pa-insider-sb','pa-insider-recent','pa-insider-biggest'].forEach(id => set(id,'—'));
+      const pbody = $('pa-insider-pattern-body'); if (pbody) pbody.textContent = `No EODHD insider data for ${d.ticker}.`;
+    }
+
+    // ── Decision Verdict (top-of-page synthesis) ──────────────────────
+    const dec = d.decision || {};
+    const dvSect = $('pa-dv-sect');
+    if (dvSect && dec.action) {
+      dvSect.classList.remove('dv-TAKE','dv-SKIP','dv-WAIT','dv-HOLD','dv-UNKNOWN');
+      dvSect.classList.add(`dv-${dec.action}`);
+    }
+    set('pa-dv-action', dec.action || '—');
+    set('pa-dv-conviction', dec.conviction ? `${dec.conviction.toUpperCase()} CONVICTION` : '— conviction');
+    set('pa-dv-specific', dec.specific_action || '—');
+    const reasonsEl = $('pa-dv-reasons');
+    if (reasonsEl) {
+      reasonsEl.innerHTML = (dec.reasons || []).map(r => `<div class="dv-bullet reason">${r}</div>`).join('');
+    }
+    const warnEl = $('pa-dv-warnings');
+    if (warnEl) {
+      warnEl.innerHTML = (dec.warnings || []).map(w => `<div class="dv-bullet warning">${w}</div>`).join('');
+    }
+
+    // ── Edge Audit (real Wilson LB on the sliced slice) ───────────────
+    const ea = d.edge_audit || {};
+    if (ea && ea.n != null && ea.n > 0) {
+      const wlb = (ea.wilson_lb_95 || 0) * 100;
+      const wr = (ea.win_rate || 0) * 100;
+      const passesWilson55 = ea.passes_wilson_55;
+      const passesWilson50 = ea.passes_wilson_50;
+      const passesN30 = ea.passes_n_30;
+      const passesPF15 = ea.passes_pf_15;
+
+      // Build the slice label
+      const sliceParts = [];
+      if (ea.slice_setup_family) sliceParts.push(`<span class="x">${ea.slice_setup_family}</span>`);
+      if (ea.slice_regime) sliceParts.push(`regime <span class="x">${ea.slice_regime}</span>`);
+      if (ea.slice_catalyst_tier) sliceParts.push(`cat <span class="x">T${ea.slice_catalyst_tier}</span>`);
+      if (ea.slice_score_band) sliceParts.push(`band <span class="x">${ea.slice_score_band}</span>`);
+      const labelHtml = `${ea.slice_label || 'slice'} · ${sliceParts.join(' · ') || '—'}`;
+
+      const wrColor = wlb >= 55 ? 'up' : wlb >= 50 ? 'amber' : 'dn';
+
+      // Find or build the edge audit section content
+      const edgeSect = document.querySelectorAll('.sect h2');
+      let edgeBody = null;
+      edgeSect.forEach(h => {
+        if (h.textContent.includes('Edge audit')) {
+          edgeBody = h.parentElement;
+        }
+      });
+      if (edgeBody) {
+        // Replace the demo content with live content
+        let live = edgeBody.querySelector('#pa-edge-live');
+        if (!live) {
+          live = document.createElement('div');
+          live.id = 'pa-edge-live';
+          live.className = 'edge-live-card';
+          // Remove existing edge-grid demo (keep h2)
+          [...edgeBody.children].forEach(c => { if (c.tagName !== 'H2') c.remove(); });
+          edgeBody.appendChild(live);
+        }
+        live.innerHTML = `
+          <div class="edge-stats">
+            <div class="edge-slice-label">Slice: ${labelHtml}</div>
+            <div class="edge-grid-stats">
+              <div class="edge-stat"><span class="k">N closed</span><span class="v">${ea.n}</span><span class="sub">${ea.wins}W / ${ea.losses}L</span></div>
+              <div class="edge-stat"><span class="k">Win rate (point)</span><span class="v ${wrColor}">${wr.toFixed(1)}%</span><span class="sub">naive estimate</span></div>
+              <div class="edge-stat"><span class="k">Wilson LB (95%)</span><span class="v ${wrColor}">${wlb.toFixed(1)}%</span><span class="sub">conservative true WR</span></div>
+              <div class="edge-stat"><span class="k">Profit factor</span><span class="v">${ea.profit_factor != null ? ea.profit_factor.toFixed(2) : '—'}</span><span class="sub">gross win / gross loss</span></div>
+              <div class="edge-stat"><span class="k">Avg win %</span><span class="v up">+${ea.avg_win_pct.toFixed(2)}%</span><span class="sub">per trade</span></div>
+              <div class="edge-stat"><span class="k">Avg loss %</span><span class="v dn">${ea.avg_loss_pct.toFixed(2)}%</span><span class="sub">per trade</span></div>
+              <div class="edge-stat"><span class="k">Expectancy</span><span class="v ${ea.expectancy_pct >= 0 ? 'up' : 'dn'}">${ea.expectancy_pct >= 0 ? '+' : ''}${ea.expectancy_pct.toFixed(2)}%</span><span class="sub">per trade · long-run</span></div>
+              <div class="edge-stat"><span class="k">MFE / MAE p50</span><span class="v">${ea.mfe_p50 != null ? '+'+ea.mfe_p50.toFixed(1)+'%' : '—'} / ${ea.mae_p50 != null ? ea.mae_p50.toFixed(1)+'%' : '—'}</span><span class="sub">median historical excursion</span></div>
+            </div>
+          </div>
+          <div class="edge-gates">
+            <div style="font-family:var(--font-mono); font-size:9.5px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.16em; font-weight:700; padding-bottom:8px; border-bottom:1px solid var(--rule); margin-bottom:4px;">Edge gates (principle 1)</div>
+            <div class="edge-gate-row"><span class="lb">n ≥ 30 (statistical floor)</span><span class="stat ${passesN30 ? 'pass' : 'fail'}">${passesN30 ? 'PASS' : 'FAIL'}</span></div>
+            <div class="edge-gate-row"><span class="lb">Wilson LB ≥ 50% (above coin-flip)</span><span class="stat ${passesWilson50 ? 'pass' : 'fail'}">${passesWilson50 ? 'PASS' : 'FAIL'}</span></div>
+            <div class="edge-gate-row"><span class="lb">Wilson LB ≥ 55% (positive edge)</span><span class="stat ${passesWilson55 ? 'pass' : 'fail'}">${passesWilson55 ? 'PASS' : 'FAIL'}</span></div>
+            <div class="edge-gate-row"><span class="lb">PF ≥ 1.5 (reward/risk profitable)</span><span class="stat ${passesPF15 ? 'pass' : 'fail'}">${passesPF15 ? 'PASS' : 'FAIL'}</span></div>
+            <div class="edge-verdict-line ${passesWilson55 ? 'pass' : passesWilson50 ? '' : 'fail'}">
+              ${passesWilson55 && passesN30
+                ? `<strong>Edge is REAL.</strong> ${ea.n} historical trades in this exact slice with Wilson LB ${wlb.toFixed(0)}% — that's the conservative read of true WR. ${ea.expectancy_pct >= 0 ? `Long-run expectancy +${ea.expectancy_pct.toFixed(1)}%/trade.` : `Despite WR, expectancy is negative — losers cut deeper than winners.`}`
+                : passesWilson50
+                  ? `<strong>Edge is MARGINAL.</strong> Wilson LB ${wlb.toFixed(0)}% clears 50% (above coin-flip) but not 55% (positive edge floor). Treat as suggestive, not statistical.`
+                  : `<strong>Edge is INSUFFICIENT.</strong> Wilson LB ${wlb.toFixed(0)}% is below the 50% coin-flip floor. Historical data says this slice has no demonstrable edge. ${ea.n < 30 ? `n=${ea.n} is also below the 30-trade evidence floor — treat as noise.` : ''}`}
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    // ── Opportunity Cost (real, against today's all_scored) ──────────
+    const oc = d.opportunity_cost || {};
+    const px = d.portfolio_xref || {};
+    if (oc && !oc.error) {
+      set('pa-opp-my-score', oc.my_score != null ? Math.round(oc.my_score) : '—');
+      set('pa-opp-rank', oc.my_rank != null ? `${oc.my_rank} / ${oc.total_scanned}` : `not in scan (${oc.total_scanned} scanned)`);
+      set('pa-opp-percentile', oc.my_percentile != null ? `top ${oc.my_percentile}%` : '—');
+      const topEl = $('pa-opp-top');
+      if (topEl) topEl.textContent = oc.top_score != null ? `${Math.round(oc.top_score)} (${oc.top_ticker})` : '—';
+      set('pa-opp-median', oc.median_score != null ? Math.round(oc.median_score) : '—');
+      set('pa-opp-n-higher', oc.n_higher != null ? oc.n_higher : '—');
+      set('pa-opp-sector-label', oc.my_sector || 'same sector');
+
+      // Sector concentration risk
+      const sameHeld = px.same_sector_held || [];
+      const heldTickers = sameHeld.map(p => p.ticker).join(', ');
+      const concEl = $('pa-opp-sector-conc');
+      if (concEl) {
+        if (sameHeld.length > 0) {
+          concEl.textContent = `${sameHeld.length} held in ${oc.my_sector || 'sector'} (${heldTickers})`;
+          concEl.style.color = 'var(--accent)';
+        } else if (px.held_count != null) {
+          concEl.textContent = `none in ${oc.my_sector || 'sector'}`;
+          concEl.style.color = 'var(--green)';
+        } else {
+          concEl.textContent = '—';
+          concEl.style.color = '';
+        }
+      }
+      const heldEl = $('pa-opp-held');
+      if (heldEl) {
+        if (px.already_held) {
+          heldEl.textContent = 'YES — in your portfolio';
+          heldEl.style.color = 'var(--info)';
+        } else if (px.held_count != null) {
+          heldEl.textContent = `no (${px.held_count} other positions)`;
+          heldEl.style.color = '';
+        } else { heldEl.textContent = '—'; heldEl.style.color = ''; }
+      }
+
+      const renderAltList = (containerId, picks, emptyMsg) => {
+        const c = $(containerId);
+        if (!c) return;
+        if (!picks || !picks.length) {
+          c.innerHTML = `<div style="color:var(--ink-3); font-family:var(--font-mono); font-size:11px; padding:8px;">— ${emptyMsg} —</div>`;
+          return;
+        }
+        c.innerHTML = picks.map(p => `
+          <div class="alt-row">
+            <span class="tk">${p.ticker}</span>
+            <span class="sc">${Math.round(p.score || 0)}</span>
+            <span class="why">${p.setup_family} · cat T${p.catalyst_tier || '?'} · RS ${p.rs_rank ?? '—'} · ${p.sector || '—'}${p.industry && p.industry !== p.sector ? ' · ' + p.industry : ''} · verdict ${p.verdict || '—'}</span>
+          </div>
+        `).join('');
+      };
+      renderAltList('pa-opp-higher-list',     oc.top_higher,       `no picks in scan scoring higher than ${Math.round(oc.my_score || 0)}`);
+      renderAltList('pa-opp-samesector-list', oc.same_sector_top,  `no scan matches in ${oc.my_sector || 'same sector'}`);
+      renderAltList('pa-opp-diffsector-list', oc.diff_sector_alt,  `no high-conviction picks outside ${oc.my_sector || 'this sector'}`);
+
+      // Net read — context-aware narrative
+      const nr = $('pa-opp-netread-body');
+      if (nr) {
+        let read = '';
+        const inScan = oc.in_scan;
+        const myS = oc.my_score || 0;
+        const topS = oc.top_score || 0;
+        const nHigher = oc.n_higher || 0;
+        const sectorConflict = sameHeld.length > 0;
+
+        if (!inScan && oc.total_scanned) {
+          read += `<strong>This ticker is NOT in today's scan</strong> (${oc.total_scanned} scanned). It may be outside the S&P 500 + R1000 + watchlist universe, or below liquidity floors. Score shown is from a technical proxy (EMA stack + RSI + perf), NOT the full 5-pillar engine. `;
+        }
+        if (nHigher === 0) {
+          read += `<strong style="color:var(--green);">No picks score higher in today's scan.</strong> This is the best opportunity available. Sizing decision becomes the only question.`;
+        } else if (nHigher <= 3) {
+          read += `${nHigher} picks score higher (top: ${oc.top_ticker} @ ${topS}). Marginal opportunity cost is small if your conviction here is high. `;
+        } else {
+          read += `<strong style="color:var(--accent);">${nHigher} picks score higher</strong> in today's scan — top of book is ${oc.top_ticker} @ ${topS} vs your ${Math.round(myS)}. Probability-weighted, the system's already-vetted picks have better expected R. `;
+        }
+        if (sectorConflict) {
+          read += ` <strong style="color:var(--red);">Sector concentration warning:</strong> you already hold ${sameHeld.length} ${oc.my_sector || 'sector'} position${sameHeld.length>1?'s':''} (${heldTickers}). Adding more risks correlation-under-stress (principle 10). Prefer the diff-sector list above.`;
+        }
+        if (px.already_held) {
+          read = `<strong style="color:var(--info);">You already hold this.</strong> ` + read + ' For an ADD decision, the comparison above tells you if redeploying T1-trim cash into a higher-scoring alternative beats compounding here.';
+        }
+        nr.innerHTML = read;
+      }
+    } else if (oc.error) {
+      set('pa-opp-rank', `error: ${oc.error}`);
+    }
+
+    // Tag every section LIVE (bound to API) vs DEMO (still placeholder).
+    // Done by matching h2 text so we can be explicit about what's wired.
+    const LIVE_SECTIONS = [
+      'Forward outcome distribution',
+      'Risk Lab',
+      'Earnings cycle decision',
+      'Pillar attribution drift',
+      'Insider activity · deep dive',
+      'Opportunity cost',
+      'Edge audit',
+    ];
+    const DEMO_SECTIONS = [
+      'Thesis status',
+      'Hold matrix',
+      'Regime-conditional edge',
+      'Options market read',
+      'Portfolio fit',
+      'Event calendar',
+      'Smart money · cross-source consensus',
+      'Exit triggers',
+      'Why HOLD',
+      'Watch-outs',
+      'Red team',
+      'Scale-up lens',
+      'Liquidity',
+      'Action toolkit',
+      'Trade journal',
+    ];
+    document.querySelectorAll('.sect').forEach(s => {
+      const h2 = s.querySelector('h2');
+      if (!h2) return;
+      const t = h2.textContent || '';
+      s.removeAttribute('data-demo');
+      s.removeAttribute('data-live');
+      if (LIVE_SECTIONS.some(k => t.includes(k))) s.setAttribute('data-live', '1');
+      else if (DEMO_SECTIONS.some(k => t.includes(k))) s.setAttribute('data-demo', '1');
+    });
+
+    // Finally, swap residual NVDA mentions to the new ticker
+    swapTicker(d.ticker);
+  }
+
+  // ── auto-load from /api/portfolio if ticker is held ─────────────────
+  // Single in-memory cache so we don't hit the portfolio endpoint per
+  // ticker switch within the same session.
+  let _portfolioCache = null;
+  async function getPortfolioMatch(t) {
+    if (_portfolioCache == null) {
+      try {
+        const r = await fetch('/api/portfolio', { credentials: 'same-origin' });
+        _portfolioCache = r.ok ? await r.json() : { positions: [] };
+      } catch (_) { _portfolioCache = { positions: [] }; }
+    }
+    const positions = _portfolioCache.positions || [];
+    return positions.find(p => (p.ticker || '').toUpperCase() === t.toUpperCase()) || null;
+  }
+
+  // ── fetch & bind ─────────────────────────────────────────────────────
+  function buildUrl(t, opts) {
+    opts = opts || {};
+    const u = new URL('/api/position/' + encodeURIComponent(t), window.location.origin);
+    const ent = opts.entry != null ? opts.entry : parseFloat(($('pa-in-entry')?.value || '').replace(/[$,\s]/g, ''));
+    const shr = opts.shares != null ? opts.shares : parseFloat(($('pa-in-shares')?.value || '').replace(/[,\s]/g, ''));
+    const ed  = opts.entry_date != null ? opts.entry_date : ($('pa-in-entry-date')?.value || '').trim();
+    const st  = opts.stop;
+    const t1  = opts.t1;
+    const t2  = opts.t2;
+    if (!isNaN(ent) && ent != null) u.searchParams.set('entry', ent);
+    if (!isNaN(shr) && shr != null) u.searchParams.set('shares', shr);
+    if (ed)                          u.searchParams.set('entry_date', ed);
+    if (st  != null && !isNaN(st))  u.searchParams.set('stop', st);
+    if (t1  != null && !isNaN(t1))  u.searchParams.set('t1', t1);
+    if (t2  != null && !isNaN(t2))  u.searchParams.set('t2', t2);
+    return u.toString();
+  }
+
+  // Retry fetch up to N times with exponential backoff — protects against
+  // transient browser/server hiccups (server restart, network blip).
+  async function fetchWithRetry(url, opts, retries = 2, delayMs = 400) {
+    let lastErr;
+    for (let i = 0; i <= retries; i++) {
+      try {
+        const r = await fetch(url, opts);
+        return r;
+      } catch (e) {
+        lastErr = e;
+        if (i < retries) await new Promise(res => setTimeout(res, delayMs * (i + 1)));
+      }
+    }
+    throw lastErr;
+  }
+
+  async function fetchAndRender(t) {
+    const sub = $('pa-heading-sub');
+    if (sub) sub.textContent = `Loading ${t}…`;
+
+    // Auto-fill cost basis from /api/portfolio if held — drives the P&L
+    // row, journey rail, and risk tiles without manual entry.
+    let autoFilled = null;
+    try {
+      const match = await getPortfolioMatch(t);
+      if (match) {
+        const entInput  = $('pa-in-entry');
+        const shrInput  = $('pa-in-shares');
+        const dateInput = $('pa-in-entry-date');
+        if (entInput)  entInput.value  = match.entry_price != null ? `$${match.entry_price}` : '';
+        if (shrInput)  shrInput.value  = match.shares != null ? match.shares : '';
+        if (dateInput) dateInput.value = match.entry_date || '';
+        autoFilled = {
+          entry: match.entry_price,
+          shares: match.shares,
+          entry_date: match.entry_date,
+          stop: match.stop,
+          t1: match.target1,
+          t2: match.target2,
+        };
+      }
+    } catch (e) { console.warn('portfolio auto-fill skipped', e); }
+
+    try {
+      const r = await fetchWithRetry(buildUrl(t, autoFilled || {}), { credentials: 'same-origin' }, 2, 500);
+      if (!r.ok) {
+        if (r.status === 401) throw new Error('Session expired — refresh kairos page to re-authenticate');
+        throw new Error(`HTTP ${r.status} ${r.statusText || ''}`.trim());
+      }
+      const data = await r.json();
+      data._auto_filled = !!autoFilled;
+      render(data);
+    } catch (err) {
+      const msg = (err && err.message) || String(err);
+      if (sub) {
+        sub.innerHTML = `<strong style="color:var(--red);">Error loading ${t}:</strong> ${msg}. ` +
+                        `Common causes: server restart in progress (retry in a moment), session expired (refresh kairos page), or ticker not on EODHD.`;
+      }
+      console.error('Position API error', err);
+    }
+  }
+
+  // Wire input bar — Enter or button click submits
+  const inputT = $('pa-in-ticker');
+  if (inputT) inputT.value = ticker;
+  const btn = $('pa-in-analyze');
+  function submit() {
+    const t = ($('pa-in-ticker')?.value || '').toUpperCase().trim();
+    if (!t) return;
+    fetchAndRender(t);
+    // Reflect in URL so refresh / share preserves state
+    const u = new URL(window.location.href);
+    u.searchParams.set('t', t);
+    history.replaceState({}, '', u.toString());
+  }
+  btn?.addEventListener('click', submit);
+  ['pa-in-ticker','pa-in-entry','pa-in-shares','pa-in-entry-date'].forEach(id => {
+    $(id)?.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+  });
+
+  // Initial fetch
+  fetchAndRender(ticker);
+})();
+</script>
+
+<style>
+/* Visual hint on cards that have at least one live-bound cell */
+.sect[data-bound="1"]::after { content: ''; }
+body.pa-embed .ph { padding-top: 8px !important; }
+
+/* Demo data badge — applied to sections that are NOT yet wired to live data */
+.sect[data-demo="1"] { position: relative; }
+.sect[data-demo="1"]::before {
+  content: 'DEMO · placeholder data · not yet wired to live feed';
+  position: absolute; top: -1px; right: 14px;
+  background: var(--accent, #ffb95c);
+  color: var(--bg-0, #000);
+  font-family: var(--font-mono), monospace;
+  font-size: 8.5px; font-weight: 800;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 3px 9px; z-index: 5;
+}
+
+/* Live badge on sections that ARE bound */
+.sect[data-live="1"] { position: relative; }
+.sect[data-live="1"]::before {
+  content: 'LIVE · EODHD';
+  position: absolute; top: -1px; right: 14px;
+  background: var(--green, #5be57c);
+  color: var(--bg-0, #000);
+  font-family: var(--font-mono), monospace;
+  font-size: 8.5px; font-weight: 800;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 3px 9px; z-index: 5;
+}
+</style>
+
+</body>
+</html>
