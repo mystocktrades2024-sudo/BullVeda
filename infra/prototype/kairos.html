@@ -12332,26 +12332,23 @@ const QuantScanner = (function() {
     if (_state.filter === 'avoid') return (t.verdict === 'AVOID' || t.stage === 'AVOID') && !t.killed;
     if (_state.filter === 'earnings_safe') return (!t.earn_days || t.earn_days >= 14) && !t.killed;
     if (_state.filter === 'fresh') return ['FRESH','PULLBACK','VALID'].includes(t.entry_quality) && !t.killed;
-    // ENTRY-ZONE-FILTER (2026-05-12) — "in zone NOW": price is currently
-    // inside the system's defined entry_low → entry_high band. This is the
-    // moment to act on WATCH-list names per the disciplined trader workflow
-    // (pre-placed limit orders fire here). Skip if killed/AVOID — even if
-    // a rejected ticker is in its old zone, the system told you not to take it.
+    // ENTRY-QUALITY-FILTER (2026-05-12 v2) — original v1 filtered on the
+    // entry_low/entry_high band, but that band is computed as price ±
+    // ATR_offset and always brackets current price by construction (100%
+    // of tickers "in zone" — useless filter). v2 uses the entry_quality
+    // classifier which is the meaningful signal:
+    //   FRESH / PULLBACK = textbook entry → ⚡ in zone NOW
+    //   VALID            = acceptable entry → ◇ near zone
+    //   EXTENDED / MISSED = too late → don't take
     if (_state.filter === 'in_zone') {
       if (t.killed || t.verdict === 'AVOID' || t.stage === 'AVOID') return false;
-      const px = +t.price; const lo = +t.entry_low; const hi = +t.entry_high;
-      if (!px || !lo || !hi) return false;
-      return px >= lo && px <= hi;
+      const eq = (t.entry_quality || '').toUpperCase();
+      return eq === 'FRESH' || eq === 'PULLBACK';
     }
-    // "Near zone" — within 2% above or below the entry band. Wider net for
-    // pre-emptive bracket orders. Useful when you want to set limits on
-    // setups not quite at entry yet.
     if (_state.filter === 'near_zone') {
       if (t.killed || t.verdict === 'AVOID' || t.stage === 'AVOID') return false;
-      const px = +t.price; const lo = +t.entry_low; const hi = +t.entry_high;
-      if (!px || !lo || !hi) return false;
-      const bandWidth = hi - lo;
-      return px >= (lo - bandWidth * 0.5) && px <= (hi + Math.max(hi * 0.02, bandWidth * 0.5));
+      const eq = (t.entry_quality || '').toUpperCase();
+      return eq === 'VALID';
     }
     return true;
   }
@@ -12441,7 +12438,7 @@ const QuantScanner = (function() {
     { key: 'score',         label: 'Score',    r: true,  sort: 'score', tip: 'Overall composite score 0-100 (BAP — Bayesian Action Probability). Sum of all 5 pillars normalized.' },
     { key: '_pillars',      label: 'T·F·S·N',  r: false, sort: null,    tip: 'Pillars (bar height = score/max). T = Tech (price/momentum) · F = Fund (revenue/margins) · S = Structure (SMC) · N = News/Sentiment' },
     { key: 'price',         label: 'Px',       r: true,  sort: 'price', tip: 'Current price' },
-    { key: '_zone',         label: 'Zone',     r: false, sort: null,    tip: 'Entry zone status. ⚡ price IN zone (act now) · ◇ near zone · ↓ below (→ Δ% to entry) · ↑ extended above (+ Δ% above zone)' },
+    { key: '_zone',         label: 'Entry',    r: false, sort: 'entry_quality', tip: 'Entry quality — when to take this setup. ⚡ FRESH (≤0.5 ATR from EMA21+support) · ⚡ PULLBACK (≤1 ATR from EMA21) · ◇ VALID (acceptable fallback) · ↑ EXTENDED (>1 ATR above EMA21, wait pullback) · ✕ MISSED (>2 ATR above, too late)' },
     { key: 'star_rating',   label: '★',        r: true,  sort: 'star_rating', tip: 'Star rating 1-5. signal_log n=733: stars=2 PF 1.87 (winner band) · stars=3 PF 0.96 (kill band) · stars=4 PF 1.89 (winner) · stars=5 too small to trust' },
     { key: 'perf_1d',       label: 'Δ%',       r: true,  sort: 'perf_1d', tip: '1-day % change vs prior close' },
     { key: 'rs_rank',       label: 'RS',       r: true,  sort: 'rs_rank', tip: 'Relative Strength rank vs the universe (0-100)' },
@@ -12488,28 +12485,31 @@ const QuantScanner = (function() {
       ? `${_fmt(t.stop, 0)} / ${_fmt(t.target1 || t.t1, 0)}`
       : '—';
 
-    // ZONE CELL (2026-05-12) — show entry-zone status inline.
-    // ⚡ green = IN zone NOW (act); ◇ amber = near (limit-order target);
-    // ↓ amber = below zone (wait for entry); ↑ red = extended above.
-    const _px = +t.price, _zLo = +t.entry_low, _zHi = +t.entry_high;
-    let zoneCell = '<td class="qd-dim" style="font-size:11px">—</td>';
-    if (_px && _zLo && _zHi) {
-      const zoneTip = `Entry zone $${_zLo.toFixed(2)}-$${_zHi.toFixed(2)}`;
-      const band = _zHi - _zLo;
-      if (_px >= _zLo && _px <= _zHi) {
-        // IN ZONE — act now
-        zoneCell = `<td title="${zoneTip}" style="font-family:var(--mono);font-size:11px;color:var(--gn);font-weight:700;letter-spacing:0.04em">⚡ IN ZONE</td>`;
-      } else if (_px < _zLo) {
-        // Below zone — wait for entry
-        const pct = ((_zLo - _px) / _px) * 100;
-        const near = pct <= 2.0;
-        zoneCell = `<td title="${zoneTip}" style="font-family:var(--mono);font-size:11px;color:${near?'var(--amb)':'var(--ink-2)'}">↓ -${pct.toFixed(1)}% to entry</td>`;
-      } else {
-        // Above zone — extended
-        const pct = ((_px - _zHi) / _zHi) * 100;
-        const wayAbove = pct > 5;
-        zoneCell = `<td title="${zoneTip}" style="font-family:var(--mono);font-size:11px;color:${wayAbove?'var(--rd)':'var(--amb)'}">↑ +${pct.toFixed(1)}% above</td>`;
-      }
+    // ZONE CELL (2026-05-12 v2) — show entry_quality, not the meaningless
+    // entry_low/entry_high band check. The band is computed as price ± ATR
+    // so it always brackets price — useless for filtering. The entry_quality
+    // field is what actually tells you if the entry is good or stale.
+    //   FRESH (≤0.5 ATR from EMA21 + support) → ⚡ green "FRESH"
+    //   PULLBACK (≤1.0 ATR from EMA21)         → 🟢 green "PULLBACK"
+    //   VALID (acceptable fallback)            → ◇ amber "VALID"
+    //   EXTENDED (>1.0 ATR above EMA21)        → ↑ amber "EXTENDED"
+    //   MISSED (>2.0 ATR above EMA21)          → ✕ red "MISSED"
+    const _eq = (t.entry_quality || '').toUpperCase();
+    const _zLo = +t.entry_low, _zHi = +t.entry_high;
+    const _zoneTip = (_zLo && _zHi) ? `Entry zone $${_zLo.toFixed(2)}-$${_zHi.toFixed(2)}` : '';
+    let zoneCell;
+    if (_eq === 'FRESH') {
+      zoneCell = `<td title="${_zoneTip} — at textbook entry" style="font-family:var(--mono);font-size:11px;color:var(--gn);font-weight:700;letter-spacing:0.04em">⚡ FRESH</td>`;
+    } else if (_eq === 'PULLBACK') {
+      zoneCell = `<td title="${_zoneTip} — minor pullback to value" style="font-family:var(--mono);font-size:11px;color:var(--gn);font-weight:700;letter-spacing:0.04em">⚡ PULLBACK</td>`;
+    } else if (_eq === 'VALID') {
+      zoneCell = `<td title="${_zoneTip} — acceptable but not textbook" style="font-family:var(--mono);font-size:11px;color:var(--amb);font-weight:600">◇ VALID</td>`;
+    } else if (_eq === 'EXTENDED') {
+      zoneCell = `<td title="${_zoneTip} — >1 ATR above EMA21, wait pullback" style="font-family:var(--mono);font-size:11px;color:var(--amb)">↑ EXTENDED</td>`;
+    } else if (_eq === 'MISSED') {
+      zoneCell = `<td title="${_zoneTip} — >2 ATR above EMA21, too late" style="font-family:var(--mono);font-size:11px;color:var(--rd)">✕ MISSED</td>`;
+    } else {
+      zoneCell = '<td class="qd-dim" style="font-size:11px">—</td>';
     }
     return `<tr class="${trCls} ${isSel ? 'sel' : ''}" data-qs-tk="${_esc(t.ticker)}" data-qs-idx="${i}">
       <td class="idx">${String(i + 1).padStart(2, '0')}</td>
