@@ -16288,13 +16288,112 @@ window.QuantDetail = (function() {
       if (vote === 'NEUTRAL') return `<span class="qov-mpill" style="opacity:.8">${vote}</span>`;
       return `<span class="qov-mpill rd">${vote} · disagrees</span>`;
     };
+    // ── LENS SUB-MODELS · 10 frameworks (Value · Trader · Hedge Fund)
+    // Compute what's derivable from existing T data. Mark the rest NOT_WIRED.
+    const _ovWilsonLB = (p, n) => {
+      if (!n || p == null || !isFinite(p)) return null;
+      const z = 1.96, z2 = z * z;
+      const ctr = p + z2 / (2 * n);
+      const margin = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
+      return Math.max(0, (ctr - margin) / (1 + z2 / n));
+    };
+    const _ovDCF = (() => {
+      const fcf = fcfTtm, rev = revTtm, growth = revGr;
+      const sharesOut = _num('eodhd_fund_extras.shares_outstanding');
+      if (fcf == null || rev == null || rev <= 0) return { available:false, note:'FCF or revenue not in T' };
+      if (sharesOut == null || sharesOut <= 0) return { available:false, note:'shares_outstanding missing' };
+      const WACC = 0.090, termG = 0.025;
+      const g5 = growth != null ? Math.max(0, Math.min(0.20, growth/100)) : 0.04;
+      let pv = 0, fcfN = fcf;
+      for (let i = 1; i <= 5; i++) { fcfN *= (1 + g5); pv += fcfN / Math.pow(1 + WACC, i); }
+      const tv = (fcfN * (1 + termG)) / (WACC - termG);
+      const iv = (pv + tv / Math.pow(1 + WACC, 5)) / sharesOut;
+      if (!isFinite(iv) || iv <= 0) return { available:false, note:'DCF non-positive' };
+      const mos = px != null && px > 0 ? ((iv - px) / px * 100) : null;
+      const verdict = mos == null ? 'NEUTRAL' : mos >= 15 ? 'BULLISH' : mos <= -10 ? 'BEARISH' : 'NEUTRAL';
+      return { available:true, verdict, summary: `<b>IV $${iv.toFixed(2)}</b> ${mos != null ? `<span class="qsr-pill ${mos >= 15 ? 'gn' : mos >= 0 ? 'am' : 'rd'}">${mos >= 0 ? '+' : ''}${mos.toFixed(1)}% MoS</span>` : ''} · 2-stage at WACC ${(WACC*100).toFixed(1)}% · 5yr g ${(g5*100).toFixed(1)}% → terminal ${(termG*100).toFixed(1)}%` };
+    })();
+    const _ovDDM = (() => {
+      const yld = _num('fund_real.dividend_yield', 'fund_details.dividend_yield');
+      const annDiv = (yld != null && px != null) ? (yld/100 * px) : _num('fund_real.annual_dividend');
+      if (annDiv == null || annDiv <= 0) return { available:false, note:'no dividend yield reported' };
+      const ddmG = 0.04, disc = 0.090;
+      const lower = annDiv * (1 + ddmG) / (disc - ddmG);
+      return { available:true, verdict:'NEUTRAL', summary: `<b>$${lower.toFixed(2)} lower bound</b> · div $${annDiv.toFixed(2)} × ${(1+ddmG).toFixed(2)} / (${disc.toFixed(2)}−${ddmG.toFixed(2)}) · downside cushion, not primary return driver` };
+    })();
+    const _ovDow = (() => {
+      const a8 = !!_g('above_8ema'), a21 = !!_g('above_21ema');
+      const a50 = above50, a200 = above200;
+      const primary = a50 && a200 ? 'UP' : (!a50 && !a200) ? 'DOWN' : 'TRANSITIONAL';
+      const secondary = a50 && !a21 ? 'correction' : a21 && a50 ? 'rally' : !a50 && a21 ? 'failed rally' : 'down';
+      const minor = a8 ? 'micro-up' : 'micro-down';
+      const perfMo = _num('perf_month');
+      const verdict = primary === 'UP' ? 'BULLISH' : primary === 'DOWN' ? 'BEARISH' : 'NEUTRAL';
+      return { available:true, verdict, summary: `<b>Primary ${primary}</b>${primary === 'UP' ? ' <span class="qsr-pill gn">intact</span>' : primary === 'DOWN' ? ' <span class="qsr-pill rd">down</span>' : ''} · secondary ${secondary} · minor ${minor}${perfMo != null ? ` · 1mo ${perfMo >= 0 ? '+' : ''}${perfMo.toFixed(1)}%` : ''}` };
+    })();
+    const _ovIchi = (() => {
+      const a8 = !!_g('above_8ema'), a21 = !!_g('above_21ema'), a50 = above50;
+      const above = [a8, a21, a50].filter(Boolean).length;
+      const verdict = above === 3 ? 'BULLISH' : above === 0 ? 'BEARISH' : 'NEUTRAL';
+      const stance = above === 3 ? '<b>Above all EMAs (proxy: above kumo)</b> <span class="qsr-pill gn">strong bullish</span>' : above === 0 ? '<b>Below all EMAs</b> <span class="qsr-pill rd">strong bearish</span>' : `<b>Mixed EMA stack</b> (${above}/3 above) · TK-cross-proxy ${a8 && a21 ? 'bullish' : 'bearish'}`;
+      return { available:true, verdict, summary: `${stance} · <span class="qsr-pill am">EMA-stack proxy</span> · true Ichimoku not yet computed` };
+    })();
+    const _ovBayes = (() => {
+      if (mcPT1 == null) return { available:false, note:'no MC frequentist prior' };
+      const prior = mcPT1 / 100;
+      const priorOdds = prior / Math.max(0.001, 1 - prior);
+      const lrs = [];
+      const slb = sWilson != null ? sWilson : (setupWR != null && setupN ? _ovWilsonLB(setupWR, setupN) : null);
+      if (slb != null) lrs.push({ name:'Wilson LB', lr: slb >= 0.5 ? 1.40 : slb >= 0.3 ? 1.20 : 0.85 });
+      if (rsRank != null) lrs.push({ name:'RS rank', lr: rsRank >= 75 ? 1.30 : rsRank >= 50 ? 1.05 : 0.80 });
+      lrs.push({ name:'MACD', lr: macdBull ? 1.15 : 0.85 });
+      if (insiderBuys != null && insiderSells != null) {
+        if (insiderBuys > insiderSells) lrs.push({ name:'Insider net', lr: 1.20 });
+        else if (insiderSells > insiderBuys) lrs.push({ name:'Insider net', lr: 0.85 });
+      }
+      if (eqRaw === 'FRESH') lrs.push({ name:'Entry FRESH', lr: 1.15 });
+      else if (eqBad) lrs.push({ name:`Entry ${eqRaw}`, lr: 0.70 });
+      const combinedLR = lrs.reduce((a, x) => a * x.lr, 1);
+      const postOdds = priorOdds * combinedLR;
+      const post = postOdds / (1 + postOdds);
+      const postPct = post * 100;
+      const postEdge = mcPS != null ? (postPct - mcPS) : null;
+      const lrTxt = lrs.map(x => `${x.name} ${x.lr.toFixed(2)}`).join(' × ');
+      const verdict = post >= 0.65 ? 'BULLISH' : post <= 0.40 ? 'BEARISH' : 'NEUTRAL';
+      return { available:true, verdict, summary: `<b>Posterior P(T1) ${postPct.toFixed(0)}%</b> ${postEdge != null ? `<span class="qsr-pill ${postEdge >= 20 ? 'gn' : postEdge >= 5 ? 'am' : 'rd'}">adjusted edge ${postEdge >= 0 ? '+' : ''}${postEdge.toFixed(0)}pp</span>` : ''} · prior ${(prior*100).toFixed(0)}% × LR ${combinedLR.toFixed(2)} · LR chain: ${lrTxt}` };
+    })();
+    const _ovSMC = (() => {
+      const smc = _g('smc_data', 'smc');
+      if (!smc) return { available:false, note:'smc_data not on T — see SMC sub-tab' };
+      const ob = smc.bullish_ob || smc.order_block;
+      const fvg = smc.fvg || smc.fair_value_gap;
+      return { available:true, verdict: ob ? 'BULLISH' : 'NEUTRAL', summary: `${ob ? '<b>Bullish order block detected</b>' : 'No active OB'}${fvg ? ' · FVG present' : ''} <span class="qsr-pill am">surface from SMC sub-tab</span>` };
+    })();
+    const _ovNotWired = (reason) => ({ available:false, verdict:'NOT_WIRED', summary: `<span class="qsr-pill" style="background:var(--bg-3);color:var(--ink-3);border:1px solid var(--ink-4)">NOT_WIRED</span> · ${reason}` });
+    const _ovWyck    = _ovNotWired('Requires volume-cluster + price-range analysis over 60+ session OHLCV');
+    const _ovEW      = _ovNotWired('Requires ZigZag pivot detection + Fibonacci ratio computation');
+    const _ovVProf   = _ovNotWired('Requires intraday volume aggregation (VPVR / value-area / POC)');
+    const _ovAVWAP   = _ovNotWired('Requires multi-pivot anchored VWAP series (52w-low, last-ER, etc.)');
+    const _ovOrder   = _ovNotWired('Requires Schwab L1 cumulative-delta aggregation');
+    const _ovRenderSub = (key, model) => {
+      const cls = !model.available ? 'dim' : model.verdict === 'BULLISH' ? 'gn' : model.verdict === 'BEARISH' ? 'rd' : 'am';
+      const body = model.summary || (model.note ? `<span class="qsr-pill" style="background:var(--bg-3);color:var(--ink-3);border:1px solid var(--ink-4)">NO DATA</span> · ${model.note}` : 'NO DATA');
+      return `<div class="qsr-sub"><span class="k">${key}</span><span class="v"><span class="qsr-vote ${cls}">${model.verdict || 'NO_DATA'}</span></span><span class="v">${body}</span></div>`;
+    };
+    const _ovSubPanels = {
+      'GRAHAM-BUFFETT VALUE': `<div class="qsr-sub-models"><div class="qsr-sub-h">⟡ Value sub-models · DCF / DDM</div>${_ovRenderSub('DCF (FCF)', _ovDCF)}${_ovRenderSub('DDM', _ovDDM)}</div>`,
+      'SWING TRADING':        `<div class="qsr-sub-models"><div class="qsr-sub-h">⟡ Trader sub-models · 7 frameworks</div>${_ovRenderSub('Wyckoff', _ovWyck)}${_ovRenderSub('Elliott Wave', _ovEW)}${_ovRenderSub('Dow Theory', _ovDow)}${_ovRenderSub('SMC', _ovSMC)}${_ovRenderSub('Volume profile', _ovVProf)}${_ovRenderSub('Anchored VWAP', _ovAVWAP)}${_ovRenderSub('Ichimoku', _ovIchi)}</div>`,
+      'HEDGE FUND':           `<div class="qsr-sub-models"><div class="qsr-sub-h">⟡ Hedge-fund sub-models · Bayesian + Order Flow</div>${_ovRenderSub('Bayesian P(T1)', _ovBayes)}${_ovRenderSub('Order flow · delta', _ovOrder)}</div>`,
+    };
+
     const crossCheckRows = distinctLenses.map(L => {
       const vote = lensVote[L];
       const isLead = L === horizon.lead || (L === 'GRAHAM-BUFFETT VALUE' && horizon.lead === 'GRAHAM-BUFFETT VALUE');
+      const subPanel = _ovSubPanels[L] || '';
       return `<div class="qsr-cc-row">
         <span class="qsr-cc-l">${L}${isLead ? ' <span class="qov-cy" style="font-size:9px;font-weight:700;letter-spacing:0.1em">★ LEAD</span>' : ''}</span>
         <span class="qsr-cc-vote">${_alignPill(vote)}</span>
-        <span class="qsr-cc-summary">${lensSummaries[L] || '—'}</span>
+        <span class="qsr-cc-summary">${lensSummaries[L] || '—'}${subPanel}</span>
       </div>`;
     }).join('');
     const disagreements = distinctVotes.filter(v => callDir && v.vote === (callDir === 'BULLISH' ? 'BEARISH' : 'BULLISH'));
@@ -16383,8 +16482,26 @@ window.QuantDetail = (function() {
 .qsr-sources { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; font-family:var(--mono); font-size:11px; color:var(--ink-2); }
 .qsr-sources span b { color:var(--ink-1); font-weight:700; }
 
+/* Lens sub-models (Value · Trader · Hedge Fund) — 10 frameworks per spec */
+.qsr-sub-models { margin-top:8px; padding:8px 0 0 14px; border-left:1px dashed var(--line); display:flex; flex-direction:column; gap:5px; }
+.qsr-sub-models .qsr-sub-h { font-family:var(--mono); font-size:9.5px; letter-spacing:0.16em; text-transform:uppercase; color:var(--cy); font-weight:700; margin-bottom:4px; }
+.qsr-sub { display:grid; grid-template-columns:135px 90px 1fr; gap:10px; font-size:11.5px; padding:3px 0; align-items:baseline; line-height:1.55; }
+.qsr-sub .k { font-family:var(--mono); font-size:10px; letter-spacing:0.10em; text-transform:uppercase; color:var(--ink-2); font-weight:700; }
+.qsr-sub .v { color:var(--ink-1); }
+.qsr-sub .v b { color:var(--ink); font-weight:700; }
+.qsr-vote { font-family:var(--mono); font-size:9.5px; letter-spacing:0.06em; font-weight:800; padding:1px 6px; border-radius:2px; text-transform:uppercase; display:inline-block; }
+.qsr-vote.gn { color:var(--gn); background:var(--gn-bg); border:1px solid #2f6b41; }
+.qsr-vote.am { color:var(--amb); background:var(--amb-bg); border:1px solid #8c5d20; }
+.qsr-vote.rd { color:var(--rd); background:var(--rd-bg); border:1px solid #7a2a22; }
+.qsr-vote.dim { color:var(--ink-3); background:var(--bg-3); border:1px solid var(--ink-4); }
+.qsr-pill { display:inline-block; font-family:var(--mono); font-size:9.5px; padding:1px 6px; border-radius:2px; letter-spacing:0.05em; font-weight:700; text-transform:uppercase; margin-left:2px; }
+.qsr-pill.gn { color:var(--gn); background:var(--gn-bg); border:1px solid #2f6b41; }
+.qsr-pill.am { color:var(--amb); background:var(--amb-bg); border:1px solid #8c5d20; }
+.qsr-pill.rd { color:var(--rd); background:var(--rd-bg); border:1px solid #7a2a22; }
+
 @media (max-width: 900px) {
   .qsr-call-row, .qsr-cc-row { grid-template-columns:1fr; gap:4px; }
+  .qsr-sub { grid-template-columns:1fr; gap:2px; }
 }
 </style>`;
 
