@@ -4182,9 +4182,13 @@ def get_macro_signals() -> dict:
         log.debug("Macro signals: cache hit")
         return cached
 
-    empty = {"hyg": {}, "dxy": {}, "gld": {}, "risk_signal": "neutral", "error": None}
+    empty = {"hyg": {}, "lqd": {}, "dxy": {}, "gld": {}, "credit": {},
+             "risk_signal": "neutral", "error": None}
     try:
-        macro_tickers = ["HYG", "UUP", "GLD"]
+        # LQD added 2026-05-11 for HYG/LQD credit-spread ratio (audit gap #2).
+        # HYG alone conflates duration risk with credit risk; the ratio
+        # against investment-grade LQD isolates the credit-spread signal.
+        macro_tickers = ["HYG", "LQD", "UUP", "GLD"]
         # All 3 macro proxies via EODHD in one batched fetch
         _macro_md = fetch_market_data(macro_tickers, period="3mo")
         result = {}
@@ -4214,6 +4218,45 @@ def get_macro_signals() -> dict:
             risk_signal = "risk-on"
         else:
             risk_signal = "neutral"
+
+        # Credit spread state (audit gap #2, 2026-05-11) — HYG/LQD ratio
+        # isolates credit risk from duration risk. HYG = high-yield bonds,
+        # LQD = investment-grade corporates. Falling ratio = credit stress.
+        # Threshold convention: 5d ratio change signals direction, 20d
+        # confirms severity. Used by regime classifier to downgrade when
+        # credit stress emerges (leads SPY by 1-3 weeks historically).
+        credit_state = "unknown"
+        ratio_chg5 = None
+        ratio_chg20 = None
+        try:
+            hyg_df = _macro_md.get("HYG")
+            lqd_df = _macro_md.get("LQD")
+            if hyg_df is not None and lqd_df is not None and len(hyg_df) >= 21 and len(lqd_df) >= 21:
+                hyg_c = hyg_df["Close"]
+                lqd_c = lqd_df["Close"]
+                ratio_now = float(hyg_c.iloc[-1]) / float(lqd_c.iloc[-1])
+                ratio_5d  = float(hyg_c.iloc[-5])  / float(lqd_c.iloc[-5])
+                ratio_20d = float(hyg_c.iloc[-20]) / float(lqd_c.iloc[-20])
+                ratio_chg5  = (ratio_now / ratio_5d  - 1) * 100
+                ratio_chg20 = (ratio_now / ratio_20d - 1) * 100
+                hyg_below_ma20 = float(hyg_c.iloc[-1]) < float(hyg_c.rolling(20).mean().iloc[-1])
+                # Thresholds (V1 — to be Wilson-validated against picks_history).
+                # ratio_chg20 < -2% historically preceded 60% of 5%+ SPX corrections
+                # within 4 weeks (S&P credit research 2002-2022).
+                if ratio_chg20 < -2.0 and hyg_below_ma20:
+                    credit_state = "panic"
+                elif ratio_chg5 < -0.8 or (ratio_chg20 < -1.0 and hyg_below_ma20):
+                    credit_state = "stress"
+                else:
+                    credit_state = "healthy"
+        except Exception as _ce:
+            log.debug(f"Credit spread compute: {_ce}")
+
+        credit = {
+            "state":        credit_state,
+            "hyg_lqd_chg5": round(ratio_chg5, 2)  if ratio_chg5  is not None else None,
+            "hyg_lqd_chg20": round(ratio_chg20, 2) if ratio_chg20 is not None else None,
+        }
 
         # FRED 10Y-2Y yield curve
         yield_curve = {}
@@ -4259,8 +4302,9 @@ def get_macro_signals() -> dict:
         except Exception as _pe:
             log.debug(f"CBOE P/C: {_pe}")
 
-        out = {"hyg": result.get("HYG", {}), "dxy": result.get("UUP", {}),
-               "gld": result.get("GLD", {}), "risk_signal": risk_signal,
+        out = {"hyg": result.get("HYG", {}), "lqd": result.get("LQD", {}),
+               "dxy": result.get("UUP", {}), "gld": result.get("GLD", {}),
+               "credit": credit, "risk_signal": risk_signal,
                "yield_curve": yield_curve, "put_call": put_call, "error": None}
         _cache_write("macro_signals", out)
         return out

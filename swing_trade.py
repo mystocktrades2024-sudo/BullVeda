@@ -1119,6 +1119,43 @@ def run_daily_scan(force_fresh: bool = False):
              f"HYG {macro_signals.get('hyg', {}).get('trend', '?')} | "
              f"DXY {macro_signals.get('dxy', {}).get('trend', '?')}")
 
+    # Credit-spread regime gate (audit gap #2, 2026-05-11) — HYG/LQD ratio
+    # captures credit stress separate from duration risk. State levels:
+    #   healthy: no action
+    #   stress:  risk_on_trending → risk_on_choppy
+    #   panic:   risk_on_choppy → risk_off_trending
+    # Reference: S&P credit research 2002-2022 — HYG/LQD chg20 < -2%
+    # preceded 60% of 5%+ SPX corrections within 4 weeks.
+    _credit = (macro_signals or {}).get("credit") or {}
+    _credit_state = _credit.get("state", "unknown")
+    if _credit_state and _credit_state not in ("unknown", "healthy"):
+        regime["credit_state"] = _credit_state
+        regime["credit_chg20"] = _credit.get("hyg_lqd_chg20")
+        _orig_regime4 = regime.get("regime4")
+        if _credit_state == "panic" and _orig_regime4 in ("risk_on_trending", "risk_on_choppy"):
+            regime["regime4_pre_credit"] = _orig_regime4
+            regime["regime4"] = "risk_off_trending"
+            regime["max_size_pct"] = 35
+            log.info(
+                f"  Regime DOWNGRADED by credit panic: {_orig_regime4} → risk_off_trending "
+                f"(HYG/LQD chg20={_credit.get('hyg_lqd_chg20')}%, "
+                f"chg5={_credit.get('hyg_lqd_chg5')}%)"
+            )
+        elif _credit_state == "stress" and _orig_regime4 == "risk_on_trending":
+            regime["regime4_pre_credit"] = _orig_regime4
+            regime["regime4"] = "risk_on_choppy"
+            regime["max_size_pct"] = 70
+            log.info(
+                f"  Regime DOWNGRADED by credit stress: {_orig_regime4} → risk_on_choppy "
+                f"(HYG/LQD chg5={_credit.get('hyg_lqd_chg5')}%, "
+                f"chg20={_credit.get('hyg_lqd_chg20')}%)"
+            )
+    else:
+        regime["credit_state"] = _credit_state
+        regime["credit_chg20"] = _credit.get("hyg_lqd_chg20")
+    log.info(f"  Credit state: {regime.get('credit_state')} | "
+             f"HYG/LQD chg5={_credit.get('hyg_lqd_chg5')}% chg20={_credit.get('hyg_lqd_chg20')}%")
+
     # Step 3: Price/Volume filter
     log.info("Step 3: Applying price/volume filters...")
     min_price = cfg.get("filters", {}).get("min_price", 5)
