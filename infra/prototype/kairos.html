@@ -16912,6 +16912,47 @@ window.QuantDetail = (function() {
       </div>` : ''}
     </div>`;
 
+    // ──────── BLACK-SCHOLES HELPERS (analytic Greeks for strategy matrix) ────────
+    // Abramowitz-Stegun cumulative-normal approximation (max abs err ~7.5e-8)
+    const normCdf = (x) => {
+      const a1=0.254829592, a2=-0.284496736, a3=1.421413741, a4=-1.453152027, a5=1.061405429, p=0.3275911;
+      const sign = x < 0 ? -1 : 1;
+      const ax = Math.abs(x) / Math.SQRT2;
+      const t = 1 / (1 + p * ax);
+      const y = 1 - (((((a5*t + a4)*t + a3)*t + a2)*t + a1) * t * Math.exp(-ax*ax));
+      return 0.5 * (1 + sign * y);
+    };
+    const normPdf = (x) => Math.exp(-x*x/2) / Math.sqrt(2*Math.PI);
+    // Greeks: returns {delta, theta_day, vega, gamma, d1, d2} for a single option
+    // S=spot, K=strike, T=years, sigma=annualized vol (decimal), r=rf, isCall
+    const bsGreeks = (S, K, T, sigma, r, isCall) => {
+      if (!S || !K || !T || !sigma || sigma <= 0) return null;
+      const d1 = (Math.log(S/K) + (r + sigma*sigma/2) * T) / (sigma * Math.sqrt(T));
+      const d2 = d1 - sigma * Math.sqrt(T);
+      const Nd1 = normCdf(d1), Nd2 = normCdf(d2);
+      const npd1 = normPdf(d1);
+      const delta = isCall ? Nd1 : Nd1 - 1;
+      const gamma = npd1 / (S * sigma * Math.sqrt(T));
+      const vega  = S * Math.sqrt(T) * npd1 / 100;          // per 1 vol-point
+      const thetaY = isCall
+        ? (-S * sigma * npd1 / (2 * Math.sqrt(T)) - r * K * Math.exp(-r*T) * Nd2)
+        : (-S * sigma * npd1 / (2 * Math.sqrt(T)) + r * K * Math.exp(-r*T) * normCdf(-d2));
+      return { delta, gamma, vega, theta_day: thetaY / 365, d1, d2, Nd1, Nd2 };
+    };
+    // Probability spot finishes above strike at expiration (lognormal under risk-neutral)
+    const probAbove = (S, K, T, sigma, r) => {
+      if (!S || !K || !T || !sigma || sigma <= 0) return null;
+      const d2 = (Math.log(S/K) + (r - sigma*sigma/2) * T) / (sigma * Math.sqrt(T));
+      return normCdf(d2);
+    };
+    // Round strike to sensible increment
+    const roundStrike = (k) => {
+      if (k >= 200) return Math.round(k / 5) * 5;
+      if (k >= 50)  return Math.round(k / 2.5) * 2.5;
+      if (k >= 10)  return Math.round(k * 2) / 2;
+      return Math.round(k * 4) / 4;
+    };
+
     // ──────── BLOCK 1: VOL REGIME ────────
     const ivPct = k.iv_percentile;
     const ivCur = k.iv_current;
@@ -16954,6 +16995,80 @@ window.QuantDetail = (function() {
         <div style="font-size:22px;font-weight:800;color:${skewColor};font-family:var(--mono);line-height:1;margin-bottom:6px">${skew != null ? (skew > 0 ? '+' : '') + (+skew).toFixed(1) : '—'}</div>
         <div style="font-size:11px;color:${skewColor};font-weight:700;letter-spacing:0.06em">${skewLabel.toUpperCase()}</div>
         <div style="font-size:10.5px;color:var(--ink-3);margin-top:3px">put-call IV diff at 25Δ</div>
+      </div>
+    </div>`;
+
+    // ──────── BLOCK 1b: IV/HV RICHNESS + EXPECTED MOVE ────────
+    // The "is premium expensive" question answered properly: IV vs realized vol,
+    // not just IV-rank. IV/HV > 1.3 = rich (sell premium), < 0.8 = cheap (buy directional).
+    // Expected-move table = 1σ horizon-projections derived from ATM IV.
+    const _spot = t.price || 0;
+    const px_ = _spot;  // hoisted: referenced in EVENT VOL block (line ~17155) before BS-pricer section
+    const _ivDec = ivCur != null ? (+ivCur > 1 ? +ivCur / 100 : +ivCur) : null;  // normalize to decimal
+    const _atrPct = (t.atr_pct != null ? +t.atr_pct : (t.technicals?.indicators?.atr_pct != null ? +t.technicals.indicators.atr_pct : null));
+    const _hvDec = _atrPct != null ? (_atrPct / 100) * Math.sqrt(252) : null;
+    const _hvPct = _hvDec != null ? _hvDec * 100 : null;
+    const _ivPctNum = _ivDec != null ? _ivDec * 100 : null;
+    const _ivHvRatio = (_ivPctNum != null && _hvPct != null && _hvPct > 0) ? (_ivPctNum / _hvPct) : null;
+    const ivHvLabel = _ivHvRatio == null ? '—' : _ivHvRatio >= 1.30 ? 'PREMIUM RICH' : _ivHvRatio <= 0.80 ? 'PREMIUM CHEAP' : 'FAIR';
+    const ivHvColor = _ivHvRatio == null ? 'var(--ink-3)' : _ivHvRatio >= 1.30 ? 'var(--rd)' : _ivHvRatio <= 0.80 ? 'var(--gn)' : 'var(--ink-1)';
+
+    // Expected-move grid — 1σ for 1d, 5d, 30d, 60d horizons
+    const horizons = [
+      { lbl: '1d',  t: 1/252,  desc: 'overnight' },
+      { lbl: '5d',  t: 5/252,  desc: 'swing window' },
+      { lbl: '30d', t: 30/252, desc: 'monthly' },
+      { lbl: '60d', t: 60/252, desc: 'quarterly' },
+    ];
+    const emRows = horizons.map(h => {
+      const sigmaH = _ivDec != null ? _ivDec * Math.sqrt(h.t) : null;
+      const mvPct = sigmaH != null ? sigmaH * 100 : null;
+      const dollarMv = sigmaH != null ? _spot * sigmaH : null;
+      const lo = sigmaH != null ? _spot * (1 - sigmaH) : null;
+      const hi = sigmaH != null ? _spot * (1 + sigmaH) : null;
+      return `<tr>
+        <td style="padding:9px 10px"><b style="color:var(--ink-0);font-family:var(--mono);font-size:14px">${h.lbl}</b></td>
+        <td style="font-size:12.5px;color:var(--ink-2);padding:9px 10px">${h.desc}</td>
+        <td class="r" style="font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:700;font-size:14px;color:var(--ink);padding:9px 10px">${mvPct != null ? '±' + mvPct.toFixed(2) + '%' : '—'}</td>
+        <td class="r" style="font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13.5px;color:var(--ink-1);padding:9px 10px">${dollarMv != null ? '±$' + dollarMv.toFixed(2) : '—'}</td>
+        <td class="r" style="font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px;color:var(--ink-1);padding:9px 10px">${lo != null ? '$' + lo.toFixed(2) + ' – $' + hi.toFixed(2) : '—'}</td>
+        <td class="r" style="font-family:var(--mono);font-size:12px;color:var(--ink-2);padding:9px 10px">68% prob</td>
+      </tr>`;
+    }).join('');
+
+    const ivHvHTML = `<div style="display:grid;grid-template-columns:1.1fr 2fr;gap:16px;padding:16px">
+      <div style="border:1px solid color-mix(in oklch, ${ivHvColor} 30%, var(--rule));border-radius:6px;padding:18px;background:color-mix(in oklch, ${ivHvColor} 4%, var(--bg-1))">
+        <div style="font-family:var(--mono);font-size:11px;letter-spacing:0.14em;color:var(--ink-2);text-transform:uppercase;font-weight:700;margin-bottom:10px">IV / HV Ratio · richness</div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+          <div style="font-size:40px;font-weight:800;color:${ivHvColor};font-family:var(--mono);line-height:1">${_ivHvRatio != null ? _ivHvRatio.toFixed(2) : '—'}</div>
+          <div style="font-size:14px;color:var(--ink-2);font-family:var(--mono);font-weight:600">×</div>
+        </div>
+        <div style="font-size:14px;color:${ivHvColor};font-weight:800;letter-spacing:0.06em;margin-bottom:12px">${ivHvLabel}</div>
+        <table style="width:100%;font-family:var(--mono);font-size:13px;color:var(--ink-1);border-collapse:collapse;line-height:1.7">
+          <tr><td>Implied (ATM)</td><td style="text-align:right;font-weight:700;color:var(--ink)">${_ivPctNum != null ? _ivPctNum.toFixed(0) + '%' : '—'}</td></tr>
+          <tr><td>Realized (ATR · 252d)</td><td style="text-align:right;font-weight:700;color:var(--ink)">${_hvPct != null ? _hvPct.toFixed(0) + '%' : '—'}</td></tr>
+          <tr><td style="color:var(--ink-2)">Gap (pp)</td><td style="text-align:right;color:${(_ivPctNum != null && _hvPct != null && _ivPctNum > _hvPct) ? 'var(--rd)' : 'var(--gn)'};font-weight:700">${(_ivPctNum != null && _hvPct != null) ? (_ivPctNum - _hvPct >= 0 ? '+' : '') + (_ivPctNum - _hvPct).toFixed(0) + 'pp' : '—'}</td></tr>
+        </table>
+        <div style="font-size:13px;color:var(--ink-1);margin-top:12px;line-height:1.6">${
+          _ivHvRatio == null ? 'awaiting both signals' :
+          _ivHvRatio >= 1.30 ? '→ <b style="color:var(--rd)">sell premium</b>: spreads, condors, CSP' :
+          _ivHvRatio <= 0.80 ? '→ <b style="color:var(--gn)">buy directional</b>: long calls/puts, straddles' :
+          '→ <b style="color:var(--ink)">mixed</b>: verticals, calendars, defined-risk'
+        }</div>
+      </div>
+      <div style="border:1px solid var(--rule);border-radius:6px;padding:16px">
+        <div style="font-family:var(--mono);font-size:11px;letter-spacing:0.14em;color:var(--ink-2);text-transform:uppercase;font-weight:700;margin-bottom:10px">Expected Move · 1σ horizons (lognormal · ATM IV)</div>
+        <table class="qd-tbl" style="font-size:13px;width:100%">
+          <thead><tr style="font-size:11px">
+            <th>Horizon</th><th></th>
+            <th class="r">±%</th>
+            <th class="r">$ move</th>
+            <th class="r">68% band (spot $${_spot ? _spot.toFixed(2) : '—'})</th>
+            <th class="r">Prob</th>
+          </tr></thead>
+          <tbody>${emRows}</tbody>
+        </table>
+        <div style="font-size:12px;color:var(--ink-2);margin-top:10px;line-height:1.5">1σ ≈ 68% of returns, 2σ ≈ 95%. Multiply ±% × 2 for outer band. Move is risk-neutral, not directional.</div>
       </div>
     </div>`;
 
@@ -17015,7 +17130,7 @@ window.QuantDetail = (function() {
       </div>
     </div>`;
 
-    // ──────── BLOCK 3: EVENT VOL (only if earnings imminent) ────────
+    // ──────── BLOCK 3: EVENT VOL (only if earnings imminent) — with IV-crush quantification ────────
     let eventVolHTML = '';
     if (erFlag && im.implied_move_pct != null) {
       const h = ebp?.breakdown?.historical || {};
@@ -17023,75 +17138,633 @@ window.QuantDetail = (function() {
       let eVerdict = 'FAIR', eC = 'var(--ink-1)';
       if (ms != null && Math.abs(ms) > im.implied_move_pct) { eVerdict = 'CHEAP'; eC = 'var(--gn)'; }
       else if (ms != null && Math.abs(ms) < im.implied_move_pct * 0.5) { eVerdict = 'RICH'; eC = 'var(--rd)'; }
-      eventVolHTML = _section('EVENT VOL · earnings premium', `RICH/CHEAP vs realized surprise · ER+${erDays}d`, `<div style="padding:14px;font-family:var(--mono);font-variant-numeric:tabular-nums">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
-          <span style="font-size:11px;color:var(--ink-2);letter-spacing:0.06em">Implied move vs prior surprise · long-straddle hedge / IV-crush trade</span>
-          <span style="font-size:13px;font-weight:700;color:${eC};letter-spacing:0.14em;padding:3px 14px;border-radius:3px;background:color-mix(in oklch, ${eC} 14%, transparent);border:1px solid color-mix(in oklch, ${eC} 35%, transparent)">${eVerdict}</span>
+      // IV-crush quantification: post-ER IV typically drops 30-50% from pre-ER level.
+      // Translate the IV drop into $-per-share captured by short premium positions.
+      const ivPreER = _ivPctNum;       // current IV in % terms
+      const crushPctLow  = 0.30;        // 30% drop (conservative)
+      const crushPctHigh = 0.50;        // 50% drop (aggressive)
+      const crushPctMid  = 0.40;
+      const ivPostLow  = ivPreER != null ? ivPreER * (1 - crushPctHigh) : null;  // most crushed
+      const ivPostHigh = ivPreER != null ? ivPreER * (1 - crushPctLow)  : null;  // least crushed
+      const ivPostMid  = ivPreER != null ? ivPreER * (1 - crushPctMid)  : null;
+      // Vega-based crush capture estimate (per share, short straddle):
+      // vega_straddle ≈ 2 × S × √T × φ(0) / 100, T = DTE/365 (short-tenor post-ER)
+      const postDte = Math.max(7, erDays + 7);
+      const Tpost = postDte / 365;
+      const phi0 = 0.3989;
+      const sigmaPost = ivPostMid != null ? ivPostMid / 100 : sigma;
+      const vegaStraddle = px_ * Math.sqrt(Tpost) * phi0 / 100 * 2;  // ATM, both legs
+      const crushLow  = vegaStraddle != null && ivPreER != null ? vegaStraddle * (ivPreER * crushPctLow)  : null;
+      const crushHigh = vegaStraddle != null && ivPreER != null ? vegaStraddle * (ivPreER * crushPctHigh) : null;
+      const crushMid  = vegaStraddle != null && ivPreER != null ? vegaStraddle * (ivPreER * crushPctMid)  : null;
+      // Move-vs-implied breakeven for long straddle
+      const straddleCost = +im.straddle_cost || 0;
+      const moveRequiredPct = px_ ? (straddleCost / px_) * 100 : null;
+
+      eventVolHTML = _section('EVENT VOL · earnings premium + IV-crush math', `RICH/CHEAP vs realized surprise · ER+${erDays}d`,
+`<div style="padding:16px;font-family:var(--mono);font-variant-numeric:tabular-nums">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px">
+          <span style="font-size:13px;color:var(--ink-1);letter-spacing:0.04em;font-weight:600">Implied move vs prior surprise · long-straddle hedge / IV-crush trade</span>
+          <span style="font-size:14px;font-weight:800;color:${eC};letter-spacing:0.14em;padding:4px 16px;border-radius:3px;background:color-mix(in oklch, ${eC} 14%, transparent);border:1px solid color-mix(in oklch, ${eC} 35%, transparent)">${eVerdict}</span>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
-          <div><div style="font-size:8.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-3);font-weight:700">Implied ±</div><div style="font-size:15px;color:${im.implied_move_pct >= 10 ? 'var(--amb)' : 'var(--ink)'};font-weight:700">±${im.implied_move_pct.toFixed(2)}%</div></div>
-          <div><div style="font-size:8.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-3);font-weight:700">Straddle</div><div style="font-size:15px;color:var(--ink);font-weight:700">$${(+im.straddle_cost || 0).toFixed(2)}</div></div>
-          <div><div style="font-size:8.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-3);font-weight:700">ATM K</div><div style="font-size:15px;color:var(--ink);font-weight:700">$${(+im.atm_strike || 0).toFixed(2)}</div></div>
-          <div><div style="font-size:8.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-3);font-weight:700">Expiry</div><div style="font-size:15px;color:var(--ink);font-weight:700">${(im.expiry_date || '').slice(5)}</div></div>
-          <div><div style="font-size:8.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-3);font-weight:700">Prior surp</div><div style="font-size:15px;color:${ms != null ? (ms > 0 ? 'var(--gn)' : 'var(--rd)') : 'var(--ink-3)'};font-weight:700">${ms != null ? (ms > 0 ? '+' : '') + ms.toFixed(1) + '%' : '—'}</div></div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:18px">
+          <div><div style="font-size:10.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-2);font-weight:700;margin-bottom:4px">Implied ±</div><div style="font-size:18px;color:${im.implied_move_pct >= 10 ? 'var(--amb)' : 'var(--ink)'};font-weight:800">±${im.implied_move_pct.toFixed(2)}%</div></div>
+          <div><div style="font-size:10.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-2);font-weight:700;margin-bottom:4px">Straddle</div><div style="font-size:18px;color:var(--ink);font-weight:800">$${straddleCost.toFixed(2)}</div></div>
+          <div><div style="font-size:10.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-2);font-weight:700;margin-bottom:4px">ATM K</div><div style="font-size:18px;color:var(--ink);font-weight:800">$${(+im.atm_strike || 0).toFixed(2)}</div></div>
+          <div><div style="font-size:10.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-2);font-weight:700;margin-bottom:4px">Expiry</div><div style="font-size:18px;color:var(--ink);font-weight:800">${(im.expiry_date || '').slice(5)}</div></div>
+          <div><div style="font-size:10.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-2);font-weight:700;margin-bottom:4px">Prior surp</div><div style="font-size:18px;color:${ms != null ? (ms > 0 ? 'var(--gn)' : 'var(--rd)') : 'var(--ink-3)'};font-weight:800">${ms != null ? (ms > 0 ? '+' : '') + ms.toFixed(1) + '%' : '—'}</div></div>
+        </div>
+
+        <div style="border-top:1px dashed var(--rule);padding-top:14px;display:grid;grid-template-columns:1.2fr 1fr;gap:18px">
+          <div>
+            <div style="font-size:11.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-2);font-weight:800;margin-bottom:10px">IV-Crush Math · post-print premium decay</div>
+            <table class="qd-tbl" style="font-size:13px;width:100%">
+              <thead><tr style="font-size:11px">
+                <th>Scenario</th>
+                <th class="r">Post-ER IV</th>
+                <th class="r">Crush (pp)</th>
+                <th class="r">Short straddle $/sh</th>
+                <th class="r">$/contract</th>
+              </tr></thead>
+              <tbody>
+                <tr>
+                  <td style="padding:10px 8px"><b style="color:var(--ink-0)">Conservative</b><br><span style="font-size:11px;color:var(--ink-2)">30% IV drop</span></td>
+                  <td class="r" style="padding:10px 8px;font-size:13.5px;color:var(--ink-1);font-weight:700">${ivPostHigh != null ? ivPostHigh.toFixed(0) + '%' : '—'}</td>
+                  <td class="r" style="padding:10px 8px;color:var(--ink-1)">−${ivPreER != null ? (ivPreER * 0.30).toFixed(0) : '—'}pp</td>
+                  <td class="r" style="padding:10px 8px;font-size:13.5px;color:var(--gn);font-weight:700">+$${crushLow != null ? crushLow.toFixed(2) : '—'}</td>
+                  <td class="r" style="padding:10px 8px;color:var(--gn);font-weight:700">+$${crushLow != null ? (crushLow*100).toFixed(0) : '—'}</td>
+                </tr>
+                <tr style="background:color-mix(in oklch, var(--gn) 5%, transparent)">
+                  <td style="padding:10px 8px"><b style="color:var(--ink-0)">Midpoint</b><br><span style="font-size:11px;color:var(--ink-2)">40% IV drop · typical</span></td>
+                  <td class="r" style="padding:10px 8px;font-size:13.5px;color:var(--ink-0);font-weight:800">${ivPostMid != null ? ivPostMid.toFixed(0) + '%' : '—'}</td>
+                  <td class="r" style="padding:10px 8px;color:var(--ink-0);font-weight:700">−${ivPreER != null ? (ivPreER * 0.40).toFixed(0) : '—'}pp</td>
+                  <td class="r" style="padding:10px 8px;font-size:14px;color:var(--gn);font-weight:800">+$${crushMid != null ? crushMid.toFixed(2) : '—'}</td>
+                  <td class="r" style="padding:10px 8px;font-size:14px;color:var(--gn);font-weight:800">+$${crushMid != null ? (crushMid*100).toFixed(0) : '—'}</td>
+                </tr>
+                <tr>
+                  <td style="padding:10px 8px"><b style="color:var(--ink-0)">Aggressive</b><br><span style="font-size:11px;color:var(--ink-2)">50% IV drop</span></td>
+                  <td class="r" style="padding:10px 8px;font-size:13.5px;color:var(--ink-1);font-weight:700">${ivPostLow != null ? ivPostLow.toFixed(0) + '%' : '—'}</td>
+                  <td class="r" style="padding:10px 8px;color:var(--ink-1)">−${ivPreER != null ? (ivPreER * 0.50).toFixed(0) : '—'}pp</td>
+                  <td class="r" style="padding:10px 8px;font-size:13.5px;color:var(--gn);font-weight:700">+$${crushHigh != null ? crushHigh.toFixed(2) : '—'}</td>
+                  <td class="r" style="padding:10px 8px;color:var(--gn);font-weight:700">+$${crushHigh != null ? (crushHigh*100).toFixed(0) : '—'}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div style="margin-top:10px;font-size:12px;color:var(--ink-2);line-height:1.5">Vega × IV-drop math at ATM (φ(0)≈0.40), tenor ${postDte}d. Captured by short straddle / strangle / IC if spot stays inside breakevens after print. <b style="color:var(--ink-1)">Risk:</b> directional move > implied wipes the crush gain.</div>
+          </div>
+
+          <div>
+            <div style="font-size:11.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-2);font-weight:800;margin-bottom:10px">Long-Straddle Breakeven</div>
+            <table style="width:100%;font-family:var(--mono);font-size:13px;color:var(--ink-1);border-collapse:collapse;line-height:1.9">
+              <tr><td>Required ±% to break even</td><td style="text-align:right;font-weight:800;color:${moveRequiredPct != null && im.implied_move_pct != null && moveRequiredPct > im.implied_move_pct ? 'var(--rd)' : 'var(--ink-0)'}">${moveRequiredPct != null ? '±' + moveRequiredPct.toFixed(2) + '%' : '—'}</td></tr>
+              <tr><td>Market implies</td><td style="text-align:right;font-weight:800;color:var(--amb)">±${im.implied_move_pct.toFixed(2)}%</td></tr>
+              <tr><td>Historical realized</td><td style="text-align:right;font-weight:800;color:${ms != null ? (Math.abs(ms) > im.implied_move_pct ? 'var(--gn)' : 'var(--rd)') : 'var(--ink-3)'}">${ms != null ? '±' + Math.abs(ms).toFixed(2) + '%' : '—'}</td></tr>
+              <tr><td style="color:var(--ink-2);padding-top:6px">Upper BE</td><td style="text-align:right;font-weight:700;color:var(--gn);padding-top:6px">$${(px_ + straddleCost).toFixed(2)}</td></tr>
+              <tr><td style="color:var(--ink-2)">Lower BE</td><td style="text-align:right;font-weight:700;color:var(--gn)">$${(px_ - straddleCost).toFixed(2)}</td></tr>
+            </table>
+            <div style="margin-top:12px;padding:10px 12px;border-radius:4px;background:color-mix(in oklch, ${eC} 8%, transparent);border-left:2px solid ${eC};font-size:12.5px;line-height:1.55">
+              <b style="color:${eC}">${eVerdict}:</b> ${eVerdict === 'CHEAP' ? 'historical realized exceeds market-implied — long straddle has positive expectancy' : eVerdict === 'RICH' ? 'historical realized < half of implied — short premium has edge, but pin/directional risk remains' : 'realized ≈ implied — premium fairly priced; structural edge only via skew or term'}.
+            </div>
+          </div>
         </div>
       </div>`);
     }
 
-    // ──────── BLOCK 4: STRATEGY MATRIX (per IV regime + verdict) ────────
-    // Hedge-fund strategy lookup: matched to IV regime AND directional bias.
-    // Each row: strategy / why / max risk / max reward / breakeven hint.
-    const strategyMatrix = [];
+    // ──────── BLOCK 4: STRATEGY MATRIX (per IV regime × verdict — Greeks + POP + breakeven priced) ────────
+    // Hedge-fund-grade strategy spec: every row priced with Black-Scholes Δ/Θ/ν, POP %, breakeven $, margin.
+    // Strikes auto-selected from spot + technical T1/T2 (Plan tab data) where available; DTE picked to match
+    // strategy + hold-window. Premium estimated via BS at chosen IV; this is a model price, not a live quote.
     const isBull = verdict === 'BULLISH';
     const isBear = verdict === 'BEARISH';
     const ivHigh = ivPct != null && ivPct >= 60;
     const ivLow  = ivPct != null && ivPct <= 30;
     const ivMid  = !ivHigh && !ivLow && ivPct != null;
+    const RFR = 0.045;  // proxy short-rate; tweak per regime if needed
+    const sigma = _ivDec || 0.30;
+    const t1Px = +t.target1 || +t.t1 || null;
+    const t2Px = +t.target2 || +t.t2 || null;
+    const stopPx = +t.stop || null;
+    // px_ hoisted earlier (next to _spot) — TDZ-safe for EVENT VOL block above
+    const maxHold = +t.max_hold_days || +(t.trade_plan?.max_hold_days) || 14;
 
-    // Long calls / puts — cheap IV + directional
-    if (ivLow && isBull) strategyMatrix.push({s:'Long Call', why:'cheap IV + bullish flow → buy directional premium', risk:'limited (premium paid)', rew:'unlimited above K + premium', be:'spot + premium'});
-    if (ivLow && isBear) strategyMatrix.push({s:'Long Put',  why:'cheap IV + bearish flow → buy directional premium', risk:'limited (premium paid)', rew:'large to zero',                be:'spot − premium'});
+    // Black-Scholes call/put price (analytic, European)
+    const bsPrice = (S, K, T, sig, r, isCall) => {
+      if (!S || !K || !T || !sig) return null;
+      const d1 = (Math.log(S/K) + (r + sig*sig/2)*T) / (sig*Math.sqrt(T));
+      const d2 = d1 - sig*Math.sqrt(T);
+      if (isCall) return S * normCdf(d1) - K * Math.exp(-r*T) * normCdf(d2);
+      return K * Math.exp(-r*T) * normCdf(-d2) - S * normCdf(-d1);
+    };
 
-    // Verticals — mid IV + directional
-    if (ivMid && isBull) strategyMatrix.push({s:'Bull Call Spread', why:'mid IV + bullish flow → directional with capped cost', risk:'net debit', rew:'spread width − debit', be:'lower K + debit'});
-    if (ivMid && isBear) strategyMatrix.push({s:'Bear Put Spread',  why:'mid IV + bearish flow → directional with capped cost', risk:'net debit', rew:'spread width − debit', be:'upper K − debit'});
-    if (ivMid && !isBull && !isBear) strategyMatrix.push({s:'Vertical Spread', why:'mid IV — defined-risk directional, pick side from technicals', risk:'net debit', rew:'spread width − debit', be:'depends on side'});
+    // Build a strategy spec: name, why, DTE, strikes, legs, net debit/credit, max profit, max loss, BE, POP, Δ, Θ/day, ν
+    const buildSpec = (name, why, type, args) => {
+      const { dte, longCallK, shortCallK, longPutK, shortPutK, sigOverride } = args;
+      const T = dte / 365;
+      const sg = sigOverride || sigma;
+      const g = (K, isCall) => bsGreeks(px_, K, T, sg, RFR, isCall);
+      const p = (K, isCall) => bsPrice(px_, K, T, sg, RFR, isCall);
+      let netDb = 0, maxP = 0, maxL = 0, be = '', pop = null, dlt = 0, tht = 0, veg = 0, margin = '';
+      let payoffAt = () => 0;
+      const strikes = [];
 
-    // Credit spreads — high IV + directional bias OR high IV + range-bound
-    if (ivHigh && isBull) strategyMatrix.push({s:'Put Credit Spread', why:'high IV + bullish → sell premium at support', risk:'spread width − credit', rew:'net credit', be:'short K − credit'});
-    if (ivHigh && isBear) strategyMatrix.push({s:'Call Credit Spread', why:'high IV + bearish → sell premium at resistance', risk:'spread width − credit', rew:'net credit', be:'short K + credit'});
-    if (ivHigh && !isBull && !isBear) strategyMatrix.push({s:'Iron Condor', why:'high IV + range-bound → sell both sides, dual decay', risk:'wider spread − credit', rew:'net credit (both sides)', be:'between strikes ± credit'});
+      if (type === 'long_call') {
+        const prem = p(longCallK, true);
+        const gr = g(longCallK, true);
+        netDb = prem;
+        maxP = Infinity;
+        maxL = prem;
+        be = (longCallK + prem).toFixed(2);
+        pop = (1 - normCdf((Math.log((longCallK + prem)/px_) + (RFR - sg*sg/2)*T) / (sg*Math.sqrt(T)))) * 100;
+        dlt = gr.delta; tht = gr.theta_day; veg = gr.vega;
+        strikes.push(`+${longCallK}C`);
+        margin = '$' + (prem * 100).toFixed(0) + ' per contract';
+        payoffAt = _payoffLongCall(longCallK, prem);
+      } else if (type === 'long_put') {
+        const prem = p(longPutK, false);
+        const gr = g(longPutK, false);
+        netDb = prem;
+        maxP = longPutK - prem;
+        maxL = prem;
+        be = (longPutK - prem).toFixed(2);
+        pop = normCdf((Math.log((longPutK - prem)/px_) + (RFR - sg*sg/2)*T) / (sg*Math.sqrt(T))) * 100;
+        dlt = gr.delta; tht = gr.theta_day; veg = gr.vega;
+        strikes.push(`+${longPutK}P`);
+        margin = '$' + (prem * 100).toFixed(0) + ' per contract';
+        payoffAt = _payoffLongPut(longPutK, prem);
+      } else if (type === 'bull_call_spread') {
+        const pLong = p(longCallK, true), pShort = p(shortCallK, true);
+        const gL = g(longCallK, true), gS = g(shortCallK, true);
+        netDb = pLong - pShort;
+        const width = shortCallK - longCallK;
+        maxP = width - netDb;
+        maxL = netDb;
+        be = (longCallK + netDb).toFixed(2);
+        pop = (1 - normCdf((Math.log((longCallK + netDb)/px_) + (RFR - sg*sg/2)*T) / (sg*Math.sqrt(T)))) * 100;
+        dlt = gL.delta - gS.delta; tht = gL.theta_day - gS.theta_day; veg = gL.vega - gS.vega;
+        strikes.push(`+${longCallK}C/-${shortCallK}C`);
+        margin = '$' + (netDb * 100).toFixed(0) + ' debit';
+        payoffAt = _payoffBullCall(longCallK, shortCallK, netDb);
+      } else if (type === 'bear_put_spread') {
+        const pLong = p(longPutK, false), pShort = p(shortPutK, false);
+        const gL = g(longPutK, false), gS = g(shortPutK, false);
+        netDb = pLong - pShort;
+        const width = longPutK - shortPutK;
+        maxP = width - netDb;
+        maxL = netDb;
+        be = (longPutK - netDb).toFixed(2);
+        pop = normCdf((Math.log((longPutK - netDb)/px_) + (RFR - sg*sg/2)*T) / (sg*Math.sqrt(T))) * 100;
+        dlt = gL.delta - gS.delta; tht = gL.theta_day - gS.theta_day; veg = gL.vega - gS.vega;
+        strikes.push(`+${longPutK}P/-${shortPutK}P`);
+        margin = '$' + (netDb * 100).toFixed(0) + ' debit';
+        payoffAt = _payoffBearPut(longPutK, shortPutK, netDb);
+      } else if (type === 'put_credit_spread') {
+        const pShort = p(shortPutK, false), pLong = p(longPutK, false);
+        const gS = g(shortPutK, false), gL = g(longPutK, false);
+        const credit = pShort - pLong;
+        const width = shortPutK - longPutK;
+        netDb = -credit;
+        maxP = credit;
+        maxL = width - credit;
+        be = (shortPutK - credit).toFixed(2);
+        pop = (1 - Math.abs(gS.delta)) * 100;
+        dlt = gL.delta - gS.delta; tht = gL.theta_day - gS.theta_day; veg = gL.vega - gS.vega;
+        strikes.push(`-${shortPutK}P/+${longPutK}P`);
+        margin = '$' + ((width - credit) * 100).toFixed(0) + ' BPR';
+        payoffAt = _payoffPutCredit(shortPutK, longPutK, credit);
+      } else if (type === 'call_credit_spread') {
+        const pShort = p(shortCallK, true), pLong = p(longCallK, true);
+        const gS = g(shortCallK, true), gL = g(longCallK, true);
+        const credit = pShort - pLong;
+        const width = longCallK - shortCallK;
+        netDb = -credit;
+        maxP = credit;
+        maxL = width - credit;
+        be = (shortCallK + credit).toFixed(2);
+        pop = (1 - gS.delta) * 100;
+        dlt = gL.delta - gS.delta; tht = gL.theta_day - gS.theta_day; veg = gL.vega - gS.vega;
+        strikes.push(`-${shortCallK}C/+${longCallK}C`);
+        margin = '$' + ((width - credit) * 100).toFixed(0) + ' BPR';
+        payoffAt = _payoffCallCredit(shortCallK, longCallK, credit);
+      } else if (type === 'iron_condor') {
+        const pSc = p(shortCallK, true), pLc = p(longCallK, true);
+        const pSp = p(shortPutK, false), pLp = p(longPutK, false);
+        const gSc = g(shortCallK, true), gSp = g(shortPutK, false);
+        const credit = (pSc - pLc) + (pSp - pLp);
+        const callWidth = longCallK - shortCallK;
+        const putWidth = shortPutK - longPutK;
+        const width = Math.max(callWidth, putWidth);
+        netDb = -credit;
+        maxP = credit;
+        maxL = width - credit;
+        be = `${(shortPutK - credit).toFixed(2)} / ${(shortCallK + credit).toFixed(2)}`;
+        pop = ((1 - gSc.delta) - Math.abs(gSp.delta)) * 100;
+        dlt = 0; tht = -gSc.theta_day - gSp.theta_day; veg = -gSc.vega - gSp.vega;
+        strikes.push(`-${shortPutK}P/+${longPutK}P / -${shortCallK}C/+${longCallK}C`);
+        margin = '$' + ((width - credit) * 100).toFixed(0) + ' BPR';
+        payoffAt = _payoffIronCondor(shortPutK, longPutK, shortCallK, longCallK, credit);
+      } else if (type === 'csp') {
+        const prem = p(shortPutK, false);
+        const gr = g(shortPutK, false);
+        netDb = -prem;
+        maxP = prem;
+        maxL = shortPutK - prem;
+        be = (shortPutK - prem).toFixed(2);
+        pop = (1 - Math.abs(gr.delta)) * 100;
+        dlt = -gr.delta; tht = -gr.theta_day; veg = -gr.vega;
+        strikes.push(`-${shortPutK}P (cash-secured)`);
+        margin = '$' + (shortPutK * 100).toFixed(0) + ' cash';
+        payoffAt = _payoffCSP(shortPutK, prem);
+      } else if (type === 'long_straddle') {
+        const pc = p(longCallK, true), pp = p(longPutK, false);
+        const gC = g(longCallK, true), gP = g(longPutK, false);
+        netDb = pc + pp;
+        maxP = Infinity;
+        maxL = netDb;
+        be = `${(longCallK - netDb).toFixed(2)} / ${(longCallK + netDb).toFixed(2)}`;
+        const popUp = 1 - normCdf((Math.log((longCallK + netDb)/px_) + (RFR - sg*sg/2)*T) / (sg*Math.sqrt(T)));
+        const popDn = normCdf((Math.log((longCallK - netDb)/px_) + (RFR - sg*sg/2)*T) / (sg*Math.sqrt(T)));
+        pop = (popUp + popDn) * 100;
+        dlt = gC.delta + gP.delta; tht = gC.theta_day + gP.theta_day; veg = gC.vega + gP.vega;
+        strikes.push(`+${longCallK}C/+${longPutK}P`);
+        margin = '$' + (netDb * 100).toFixed(0) + ' debit';
+        payoffAt = _payoffLongStraddle(longCallK, netDb);
+      } else if (type === 'short_strangle') {
+        const pc = p(shortCallK, true), pp = p(shortPutK, false);
+        const gC = g(shortCallK, true), gP = g(shortPutK, false);
+        const credit = pc + pp;
+        netDb = -credit;
+        maxP = credit;
+        maxL = Infinity;
+        be = `${(shortPutK - credit).toFixed(2)} / ${(shortCallK + credit).toFixed(2)}`;
+        pop = ((1 - gC.delta) - Math.abs(gP.delta)) * 100;
+        dlt = -gC.delta - gP.delta; tht = -gC.theta_day - gP.theta_day; veg = -gC.vega - gP.vega;
+        strikes.push(`-${shortPutK}P/-${shortCallK}C (uncovered)`);
+        margin = '~$' + (px_ * 0.20 * 100).toFixed(0) + ' (20% rule)';
+        payoffAt = _payoffShortStrangle(shortCallK, shortPutK, credit);
+      }
+      return { name, why, dte, strikes: strikes.join(' '), netDb, maxP, maxL, be, pop, dlt, tht, veg, margin, payoffAt };
+    };
 
-    // Cash-secured put — high IV + want stock at lower price
-    if (ivHigh && isBull) strategyMatrix.push({s:'Cash-Secured Put', why:'high IV + bullish → get paid to wait for entry', risk:'assignment at K (have cash)', rew:'net premium', be:'K − premium'});
+    // Build the matrix — each spec carries its own at-expiry payoff function so we
+    // can render a stock-vs-options scenario P&L table below the matrix.
+    // payoffAt(St) returns dollars per share at expiration given spot = St.
+    const _payoffLongCall = (lc, db) => (St) => Math.max(0, St - lc) - db;
+    const _payoffLongPut  = (lp, db) => (St) => Math.max(0, lp - St) - db;
+    const _payoffBullCall = (lc, sc, db) => (St) => Math.max(0, St - lc) - Math.max(0, St - sc) - db;
+    const _payoffBearPut  = (lp, sp, db) => (St) => Math.max(0, lp - St) - Math.max(0, sp - St) - db;
+    const _payoffPutCredit  = (sp, lp, cr) => (St) => cr - Math.max(0, sp - St) + Math.max(0, lp - St);
+    const _payoffCallCredit = (sc, lc, cr) => (St) => cr - Math.max(0, St - sc) + Math.max(0, St - lc);
+    const _payoffIronCondor = (sp, lp, sc, lc, cr) => (St) => cr - Math.max(0, sp - St) + Math.max(0, lp - St) - Math.max(0, St - sc) + Math.max(0, St - lc);
+    const _payoffCSP        = (sp, cr) => (St) => cr - Math.max(0, sp - St);
+    const _payoffLongStraddle = (k, db) => (St) => Math.max(0, St - k) + Math.max(0, k - St) - db;
+    const _payoffShortStrangle = (sc, sp, cr) => (St) => cr - Math.max(0, St - sc) - Math.max(0, sp - St);
 
-    // Long straddle — earnings event with cheap IV
-    if (erFlag && ivLow) strategyMatrix.push({s:'Long Straddle', why:'cheap IV pre-earnings → expecting big binary move', risk:'2× premium (both legs)', rew:'unlimited if move > implied', be:'ATM K ± total premium'});
+    const strategyMatrix = [];
+    const atm = roundStrike(px_);
+    const itm5  = roundStrike(px_ * 0.95);
+    const otm5  = roundStrike(px_ * 1.05);
+    const otm10 = roundStrike(px_ * 1.10);
+    const itm10 = roundStrike(px_ * 0.90);
+    const otm15 = roundStrike(px_ * 1.15);
+    const itm15 = roundStrike(px_ * 0.85);
+    const swingDte = Math.max(30, Math.min(60, maxHold * 2.5 || 45));   // 1.5–2× hold window
+    const incomeDte = 35;  // 30–45 sweet spot for premium selling
+    const erDte = erFlag ? Math.max(7, (erDays || 0) + 7) : null;
 
-    // Short straddle — high IV pre-earnings expecting crush
-    if (erFlag && ivHigh) strategyMatrix.push({s:'Short Strangle / Iron Condor', why:'high pre-ER IV → IV-crush trade after announcement', risk:'large if move > strikes', rew:'net credit + IV crush', be:'between strikes ± credit'});
-
-    // Fallback if matrix is empty (no clean signal)
-    if (strategyMatrix.length === 0) {
-      strategyMatrix.push({s:'Wait for IV regime resolution', why:'IV in middle band + no directional bias → no edge for premium plays', risk:'opportunity cost only', rew:'preserve capital', be:'—'});
+    if (ivLow && isBull) {
+      const sk = t1Px ? roundStrike(t1Px) : atm;
+      strategyMatrix.push(buildSpec('Long Call', 'cheap IV + bullish — buy directional premium; strike near T1 for leverage', 'long_call', { dte: swingDte, longCallK: sk }));
+    }
+    if (ivLow && isBear) {
+      const sk = stopPx ? roundStrike(stopPx) : atm;
+      strategyMatrix.push(buildSpec('Long Put', 'cheap IV + bearish — buy directional premium; strike near support break', 'long_put', { dte: swingDte, longPutK: sk }));
+    }
+    if (ivMid && isBull) {
+      const longK = atm;
+      const shortK = t1Px ? roundStrike(Math.max(t1Px, atm * 1.05)) : otm5;
+      strategyMatrix.push(buildSpec('Bull Call Spread', 'mid IV + bullish — defined risk, short leg at T1', 'bull_call_spread', { dte: swingDte, longCallK: longK, shortCallK: shortK }));
+    }
+    if (ivMid && isBear) {
+      const longK = atm;
+      const shortK = stopPx ? roundStrike(Math.min(stopPx, atm * 0.95)) : itm5;
+      strategyMatrix.push(buildSpec('Bear Put Spread', 'mid IV + bearish — defined risk, short leg at support', 'bear_put_spread', { dte: swingDte, longPutK: longK, shortPutK: shortK }));
+    }
+    if (ivMid && !isBull && !isBear) {
+      strategyMatrix.push(buildSpec('Vertical (pick side)', 'mid IV + neutral — defined-risk, pick side from technicals', 'bull_call_spread', { dte: swingDte, longCallK: atm, shortCallK: otm5 }));
+    }
+    if (ivHigh && isBull) {
+      strategyMatrix.push(buildSpec('Put Credit Spread', 'high IV + bullish — sell premium at support, collect theta', 'put_credit_spread', { dte: incomeDte, shortPutK: itm5, longPutK: itm10 }));
+      strategyMatrix.push(buildSpec('Cash-Secured Put', 'high IV + bullish — get paid to wait for entry at lower price', 'csp', { dte: incomeDte, shortPutK: itm10 }));
+    }
+    if (ivHigh && isBear) {
+      strategyMatrix.push(buildSpec('Call Credit Spread', 'high IV + bearish — sell premium at resistance, collect theta', 'call_credit_spread', { dte: incomeDte, shortCallK: otm5, longCallK: otm10 }));
+    }
+    if (ivHigh && !isBull && !isBear) {
+      strategyMatrix.push(buildSpec('Iron Condor', 'high IV + range-bound — sell both sides, dual decay capture', 'iron_condor', { dte: incomeDte, shortPutK: itm10, longPutK: itm15, shortCallK: otm10, longCallK: otm15 }));
+    }
+    if (erFlag && ivLow) {
+      strategyMatrix.push(buildSpec('Long Straddle (ER)', 'cheap pre-ER IV — expecting big binary move; long both legs', 'long_straddle', { dte: erDte, longCallK: atm, longPutK: atm }));
+    }
+    if (erFlag && ivHigh) {
+      strategyMatrix.push(buildSpec('Short Strangle (ER)', 'rich pre-ER IV — IV-crush trade after announcement', 'short_strangle', { dte: erDte, shortCallK: otm10, shortPutK: itm10 }));
     }
 
-    const strategyHTML = `<table class="qd-tbl">
-      <thead><tr>
-        <th style="width:22%">Strategy</th>
-        <th style="width:36%">Why</th>
-        <th style="width:18%">Max Risk</th>
-        <th style="width:14%">Max Reward</th>
-        <th style="width:10%">Breakeven</th>
+    // Fallback if nothing fit
+    if (strategyMatrix.length === 0) {
+      strategyMatrix.push({ name: 'Wait for IV regime resolution', why: 'IV in middle band + no directional bias → no edge for premium plays', dte: '—', strikes: '—', netDb: 0, maxP: 0, maxL: 0, be: '—', pop: null, dlt: 0, tht: 0, veg: 0, margin: '—' });
+    }
+
+    const _fmtAmt = (n) => {
+      if (n == null || !isFinite(n)) return '—';
+      if (!isFinite(n) || Math.abs(n) > 1e6) return n > 0 ? '∞' : '−∞';
+      return '$' + (n * 100).toFixed(0);
+    };
+    const _fmtCD = (n) => n == null ? '—' : (n >= 0 ? '+$' : '−$') + Math.abs(n * 100).toFixed(0);
+
+    // ──────── DTE RECOMMENDATION PROSE ────────
+    // Translate the auto-picked DTEs into a narrative so the reader knows WHY 30–45d is right.
+    const _swingDteRange = (() => {
+      const hi = Math.max(45, maxHold * 3);
+      const lo = Math.max(30, maxHold * 2);
+      return `${lo}–${hi}d`;
+    })();
+    const dteRecHTML = `<div style="padding:14px 18px;background:color-mix(in oklch, var(--copper) 5%, var(--bg-2));border-left:3px solid var(--copper);border-radius:0 4px 4px 0;margin-bottom:14px;font-size:13.5px;color:var(--ink-1);line-height:1.6">
+      <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+        <span style="font-family:var(--mono);font-size:11px;letter-spacing:0.14em;color:var(--copper);font-weight:800;text-transform:uppercase">⌗ DTE Strategy</span>
+        <span style="font-size:13.5px"><b>Hold window:</b> ${maxHold}d (from Plan tab) · <b>recommended DTE:</b> <b style="color:var(--copper)">${_swingDteRange}</b> for swing legs, <b style="color:var(--copper)">~35d</b> for income legs${erFlag ? `, <b style="color:var(--amb)">${erDte}d</b> for ER plays` : ''}.</span>
+      </div>
+      <div style="margin-top:8px;color:var(--ink-2);font-size:12.5px">
+        <b style="color:var(--ink-1)">Why:</b> Rule of thumb DTE = 2× hold window. <b style="color:var(--rd)">Under 21 DTE</b> theta accelerates non-linearly and gamma whips P&amp;L (gamma curse).
+        <b style="color:var(--rd)">Above 60 DTE</b> capital is tied up in slow-decaying premium — inefficient for ${maxHold}-day holds. <b style="color:var(--gn)">Sweet spot 30–45 DTE</b> for long premium swing; <b style="color:var(--gn)">close at 21 DTE</b> on short premium positions to harvest theta without gamma risk.
+      </div>
+    </div>
+    <table class="qd-tbl" style="font-size:13px">
+      <thead><tr style="font-size:11.5px">
+        <th style="width:18%;padding:10px 8px">Strategy · DTE</th>
+        <th style="width:14%;padding:10px 8px">Strike(s)</th>
+        <th class="r" style="width:9%;padding:10px 8px">Cost / Credit</th>
+        <th class="r" style="width:8%;padding:10px 8px">Max P</th>
+        <th class="r" style="width:8%;padding:10px 8px">Max L</th>
+        <th class="r" style="width:10%;padding:10px 8px">Breakeven</th>
+        <th class="r" style="width:7%;padding:10px 8px">POP</th>
+        <th class="r" style="width:6%;padding:10px 8px">Δ</th>
+        <th class="r" style="width:7%;padding:10px 8px">Θ/day</th>
+        <th class="r" style="width:5%;padding:10px 8px">ν</th>
+        <th style="width:8%;padding:10px 8px">Margin</th>
       </tr></thead>
-      <tbody>${strategyMatrix.map(r => `<tr>
-        <td><b style="color:var(--ink-0)">${r.s}</b></td>
-        <td class="qd-dim" style="font-size:11.5px">${r.why}</td>
-        <td class="qd-dim" style="font-family:var(--mono);font-size:11px">${r.risk}</td>
-        <td class="qd-dim" style="font-family:var(--mono);font-size:11px;color:var(--gn)">${r.rew}</td>
-        <td class="qd-dim" style="font-family:var(--mono);font-size:11px">${r.be}</td>
-      </tr>`).join('')}</tbody>
-    </table>`;
+      <tbody>${strategyMatrix.map(r => {
+        const cdColor = r.netDb < 0 ? 'var(--gn)' : 'var(--rd)';
+        const popColor = r.pop == null ? 'var(--ink-3)' : r.pop >= 65 ? 'var(--gn)' : r.pop >= 45 ? 'var(--amb)' : 'var(--rd)';
+        return `<tr>
+          <td style="padding:12px 8px">
+            <b style="color:var(--ink-0);font-size:14px">${r.name}</b>
+            <span style="font-family:var(--mono);font-size:11.5px;color:var(--amb);margin-left:8px;font-weight:700">${r.dte != null && r.dte !== '—' ? r.dte + ' DTE' : '—'}</span>
+            <div style="font-size:12px;color:var(--ink-1);margin-top:6px;line-height:1.5">${r.why}</div>
+          </td>
+          <td style="padding:12px 8px;font-family:var(--mono);font-size:12px;color:var(--ink-1);font-weight:600">${r.strikes}</td>
+          <td class="r" style="padding:12px 8px;font-family:var(--mono);font-size:13.5px;color:${cdColor};font-weight:700">${_fmtCD(r.netDb)}<br><span style="font-size:11px;color:var(--ink-2);font-weight:500">${r.netDb < 0 ? 'credit' : r.netDb > 0 ? 'debit' : '—'}</span></td>
+          <td class="r" style="padding:12px 8px;font-family:var(--mono);font-size:13.5px;color:var(--gn);font-weight:700">${r.maxP === Infinity ? '∞' : _fmtAmt(r.maxP)}</td>
+          <td class="r" style="padding:12px 8px;font-family:var(--mono);font-size:13.5px;color:var(--rd);font-weight:700">${r.maxL === Infinity ? '∞' : _fmtAmt(r.maxL)}</td>
+          <td class="r" style="padding:12px 8px;font-family:var(--mono);font-size:12.5px;color:var(--ink-1)">${r.be ? '$' + r.be : '—'}</td>
+          <td class="r" style="padding:12px 8px;font-family:var(--mono);font-size:14px;color:${popColor};font-weight:700">${r.pop != null && isFinite(r.pop) ? Math.round(r.pop) + '%' : '—'}</td>
+          <td class="r" style="padding:12px 8px;font-family:var(--mono);font-size:12.5px;color:var(--ink-1)">${r.dlt != null ? (r.dlt >= 0 ? '+' : '') + r.dlt.toFixed(2) : '—'}</td>
+          <td class="r" style="padding:12px 8px;font-family:var(--mono);font-size:12.5px;color:${r.tht > 0 ? 'var(--gn)' : 'var(--rd)'}">${r.tht != null ? (r.tht >= 0 ? '+$' : '−$') + Math.abs(r.tht * 100).toFixed(1) : '—'}</td>
+          <td class="r" style="padding:12px 8px;font-family:var(--mono);font-size:12.5px;color:var(--ink-1)">${r.veg != null ? (r.veg >= 0 ? '+' : '') + (r.veg * 100).toFixed(1) : '—'}</td>
+          <td style="padding:12px 8px;font-family:var(--mono);font-size:11.5px;color:var(--ink-2)">${r.margin || '—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    <div style="margin-top:10px;font-family:var(--mono);font-size:12px;color:var(--ink-2);letter-spacing:0.02em;line-height:1.5">Greeks · POP · breakevens priced via Black-Scholes at ATM IV (σ=${(sigma*100).toFixed(1)}%), rf=${(RFR*100).toFixed(1)}%. Per-share prices × 100 = per-contract. Live quotes may differ from model.</div>`;
+
+    // ──────── SCENARIO P&L · stock-vs-options comparison (the swing-vs-options decision) ────────
+    // For each strategy, compute payoff at expiry at the 4 plan-tab scenarios:
+    // stop, current, T1, T2. Also show underlying P&L per share for direct comparison.
+    const _scStop = stopPx;
+    const _scEntry = px_;
+    const _scT1 = t1Px;
+    const _scT2 = t2Px;
+    const _underlyingPnL = (St) => St - px_;
+    const _fmt$ = (n) => n == null || !isFinite(n) ? '—' : (n >= 0 ? '+$' : '−$') + Math.abs(n).toFixed(2);
+    const _fmt$Contract = (n) => n == null || !isFinite(n) ? '—' : (n >= 0 ? '+$' : '−$') + Math.abs(n * 100).toFixed(0);
+    const _pnlCellColor = (n) => n == null ? 'var(--ink-3)' : n > 0 ? 'var(--gn)' : n < 0 ? 'var(--rd)' : 'var(--ink-2)';
+
+    const scenarios = [];
+    if (_scStop != null && _scStop > 0) scenarios.push({ lbl: 'Stop hit', St: _scStop, c: 'var(--rd)' });
+    scenarios.push({ lbl: 'Entry (flat)', St: _scEntry, c: 'var(--ink-2)' });
+    if (_scT1 != null && _scT1 > 0) scenarios.push({ lbl: 'T1 hit', St: _scT1, c: 'var(--gn)' });
+    if (_scT2 != null && _scT2 > 0) scenarios.push({ lbl: 'T2 hit', St: _scT2, c: 'var(--gn)' });
+
+    // Build "Long 100 shares" reference row + a row per strategy
+    const underlyingRow = `<tr style="border-top:2px solid var(--rule);background:color-mix(in oklch, var(--ink-3) 4%, transparent)">
+      <td style="padding:11px 8px"><b style="color:var(--ink-0)">LONG 100 SHARES</b><br><span style="font-size:11px;color:var(--ink-2)">underlying reference</span></td>
+      <td style="padding:11px 8px;font-family:var(--mono);font-size:11px;color:var(--ink-2)">100 sh @ $${px_.toFixed(2)}</td>
+      ${scenarios.map(sc => {
+        const stockPnL = (sc.St - px_) * 100;
+        return `<td class="r" style="padding:11px 8px;font-family:var(--mono);font-size:13.5px;color:${_pnlCellColor(stockPnL)};font-weight:700">${stockPnL > 0 ? '+$' : stockPnL < 0 ? '−$' : '$'}${Math.abs(stockPnL).toFixed(0)}<br><span style="font-size:10.5px;color:var(--ink-2);font-weight:500">${stockPnL >= 0 ? '+' : ''}${(stockPnL/px_).toFixed(2)}% on $${(px_*100).toFixed(0)}</span></td>`;
+      }).join('')}
+    </tr>`;
+
+    const stratRows = strategyMatrix.map(r => {
+      if (!r.payoffAt) return '';
+      const cells = scenarios.map(sc => {
+        const pp = r.payoffAt(sc.St);
+        return `<td class="r" style="padding:11px 8px;font-family:var(--mono);font-size:13.5px;color:${_pnlCellColor(pp)};font-weight:700">${_fmt$Contract(pp)}<br><span style="font-size:10.5px;color:var(--ink-2);font-weight:500">${_fmt$(pp)}/sh</span></td>`;
+      }).join('');
+      return `<tr>
+        <td style="padding:11px 8px"><b style="color:var(--ink-0)">${r.name}</b><br><span style="font-size:11px;color:var(--ink-2)">${r.dte}d · ${r.strikes}</span></td>
+        <td style="padding:11px 8px;font-family:var(--mono);font-size:11.5px;color:var(--ink-1)">${r.netDb < 0 ? 'credit ' : 'debit '}<b>${_fmtCD(r.netDb)}</b><br><span style="font-size:10.5px;color:var(--ink-2)">per contract</span></td>
+        ${cells}
+      </tr>`;
+    }).join('');
+
+    const scenarioHTML = `<div style="padding:6px 0">
+      <div style="margin-bottom:8px;font-size:12.5px;color:var(--ink-1);line-height:1.55">
+        <b style="color:var(--ink-0)">Same scenarios, different vehicles.</b> If the stock moves to each price, what does each strategy pay vs just owning shares? <b style="color:var(--ink-2)">All P&amp;L at expiration</b> (closing early at target captures less; closing short premium at 50% profit beats holding to expiry).
+      </div>
+      <table class="qd-tbl" style="font-size:13px;width:100%">
+        <thead><tr style="font-size:11.5px">
+          <th style="padding:10px 8px">Vehicle</th>
+          <th style="padding:10px 8px">Position</th>
+          ${scenarios.map(sc => `<th class="r" style="padding:10px 8px"><b style="color:${sc.c}">${sc.lbl}</b><br><span style="font-size:10.5px;color:var(--ink-2);font-weight:500">$${sc.St.toFixed(2)} · ${sc.St > px_ ? '+' : ''}${((sc.St-px_)/px_*100).toFixed(1)}%</span></th>`).join('')}
+        </tr></thead>
+        <tbody>
+          ${stratRows}
+          ${underlyingRow}
+        </tbody>
+      </table>
+      <div style="margin-top:10px;font-size:12px;color:var(--ink-2);line-height:1.55">
+        <b style="color:var(--ink-1)">How to read:</b> long premium (debit) needs price + IV to move FAST to beat the underlying. Short premium (credit) wins when price stays inside breakevens regardless of direction. Stock wins when it moves slowly and steadily.
+      </div>
+    </div>`;
+
+    // ──────── MANAGEMENT TRIGGERS · what to do post-entry ────────
+    const mgmtRows = strategyMatrix.map(r => {
+      const isCredit = r.netDb < 0;
+      const isLongPrem = (r.dlt != null && Math.abs(r.dlt) > 0.2 && !isCredit) || r.maxL === r.netDb;
+      const triggers = isCredit ? [
+        '<b style="color:var(--gn)">Take profit:</b> close at 50% of max profit (e.g. $' + (Math.abs(r.netDb) * 0.5 * 100).toFixed(0) + ' on $' + Math.abs(r.netDb * 100).toFixed(0) + ' credit)',
+        '<b style="color:var(--amb)">Defend:</b> at 21 DTE, roll out + up (calls) / down (puts) if untested; close if tested',
+        '<b style="color:var(--rd)">Stop:</b> 2× credit received (e.g. exit at −$' + (Math.abs(r.netDb) * 2 * 100).toFixed(0) + ' loss)',
+      ] : [
+        '<b style="color:var(--gn)">Take profit:</b> sell ½ at +100% gain, trail balance to expiration',
+        '<b style="color:var(--amb)">Time stop:</b> close at 21 DTE if no thesis confirmation (avoid gamma curse)',
+        '<b style="color:var(--rd)">Stop:</b> cut at −50% of debit paid (e.g. exit at −$' + (r.netDb * 0.5 * 100).toFixed(0) + ' loss)',
+      ];
+      return `<tr>
+        <td style="padding:11px 8px;width:22%"><b style="color:var(--ink-0)">${r.name}</b><br><span style="font-size:11px;color:var(--ink-2)">${isCredit ? 'short premium' : 'long premium'}</span></td>
+        <td style="padding:11px 8px;font-size:12.5px;color:var(--ink-1);line-height:1.7">
+          ${triggers.map(t => '<div>' + t + '</div>').join('')}
+        </td>
+      </tr>`;
+    }).join('');
+    const mgmtHTML = `<div style="padding:6px 0">
+      <div style="margin-bottom:10px;font-size:12.5px;color:var(--ink-1);line-height:1.55">
+        <b style="color:var(--ink-0)">Mechanical rules — the system is the discipline.</b> No emotional override. <b style="color:var(--ink-2)">Short premium</b> harvests theta — exit before gamma whips it back. <b style="color:var(--ink-2)">Long premium</b> needs the move — cut losses fast.
+      </div>
+      <table class="qd-tbl" style="font-size:13px;width:100%">
+        <thead><tr style="font-size:11.5px"><th style="padding:10px 8px">Strategy</th><th style="padding:10px 8px">Management triggers</th></tr></thead>
+        <tbody>${mgmtRows}</tbody>
+      </table>
+    </div>`;
+
+    // ──────── PAYOFF DIAGRAMS · mini-SVG per strategy ────────
+    // Visualize each strategy's P&L curve across spot range [0.7×px, 1.3×px].
+    const _payoffSvg = (spec) => {
+      if (!spec.payoffAt) return '';
+      const W = 240, H = 100, padX = 8, padY = 6;
+      const stLo = px_ * 0.70, stHi = px_ * 1.30;
+      const NPTS = 80;
+      const pts = [];
+      let pMin = Infinity, pMax = -Infinity;
+      for (let i = 0; i <= NPTS; i++) {
+        const St = stLo + (stHi - stLo) * (i / NPTS);
+        const pp = spec.payoffAt(St);
+        if (isFinite(pp)) {
+          pts.push([St, pp]);
+          if (pp < pMin) pMin = pp;
+          if (pp > pMax) pMax = pp;
+        }
+      }
+      if (pts.length === 0) return '';
+      const range = Math.max(Math.abs(pMin), Math.abs(pMax)) * 1.15 || 1;
+      const xOf = (St) => padX + (W - 2*padX) * (St - stLo) / (stHi - stLo);
+      const yOf = (pp) => H/2 - (pp / range) * (H/2 - padY);
+      // P&L curve path
+      const curve = pts.map((pt, i) => (i === 0 ? 'M' : 'L') + xOf(pt[0]).toFixed(1) + ' ' + yOf(pt[1]).toFixed(1)).join(' ');
+      // Zero line
+      const zeroY = H/2;
+      // Spot vertical line
+      const spotX = xOf(px_);
+      // Stop / T1 / T2 markers
+      const markers = [];
+      if (_scStop) markers.push({ x: xOf(_scStop), c: 'var(--rd)', lbl: 'S' });
+      if (_scT1) markers.push({ x: xOf(_scT1), c: 'var(--gn)', lbl: '1' });
+      if (_scT2) markers.push({ x: xOf(_scT2), c: 'var(--gn)', lbl: '2' });
+      // Profit/loss shading: fill above zero green, below zero red
+      const fillTopY = yOf(range);
+      const fillBotY = yOf(-range);
+      const closedCurve = curve + ` L ${xOf(pts[pts.length-1][0]).toFixed(1)} ${zeroY} L ${xOf(pts[0][0]).toFixed(1)} ${zeroY} Z`;
+      return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:80px;display:block">
+        <defs>
+          <linearGradient id="pnlGrad${Math.random().toString(36).slice(2,9)}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--gn)" stop-opacity="0.22"/>
+            <stop offset="50%" stop-color="var(--gn)" stop-opacity="0.05"/>
+            <stop offset="50%" stop-color="var(--rd)" stop-opacity="0.05"/>
+            <stop offset="100%" stop-color="var(--rd)" stop-opacity="0.22"/>
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width="${W}" height="${H}" fill="var(--bg-1)"/>
+        <line x1="${padX}" y1="${zeroY}" x2="${W - padX}" y2="${zeroY}" stroke="var(--rule)" stroke-width="0.6" stroke-dasharray="2 3"/>
+        <line x1="${spotX.toFixed(1)}" y1="${padY}" x2="${spotX.toFixed(1)}" y2="${H - padY}" stroke="var(--copper)" stroke-width="0.8" stroke-dasharray="3 2" opacity="0.7"/>
+        <path d="${closedCurve}" fill="color-mix(in oklch, ${pMax > 0 ? 'var(--gn)' : 'var(--rd)'} 14%, transparent)" stroke="none"/>
+        <path d="${curve}" fill="none" stroke="${pMax > Math.abs(pMin) ? 'var(--gn)' : 'var(--rd)'}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        ${markers.map(m => `<circle cx="${m.x.toFixed(1)}" cy="${zeroY}" r="2.2" fill="${m.c}"/>`).join('')}
+        <text x="${padX + 2}" y="${padY + 9}" font-family="JetBrains Mono" font-size="8.5" fill="var(--ink-2)" font-weight="700">P&L</text>
+        <text x="${W - padX - 2}" y="${H - padY - 2}" font-family="JetBrains Mono" font-size="8.5" fill="var(--ink-2)" text-anchor="end">spot</text>
+        <text x="${spotX.toFixed(1)}" y="${H - padY - 2}" font-family="JetBrains Mono" font-size="8" fill="var(--copper)" text-anchor="middle" font-weight="700">$${px_.toFixed(0)}</text>
+      </svg>`;
+    };
+    const payoffRows = strategyMatrix.map(r => {
+      if (!r.payoffAt) return '';
+      const rr = (r.maxL && r.maxL !== Infinity && r.maxL > 0) ? (r.maxP === Infinity ? '∞' : (r.maxP / r.maxL).toFixed(2)) : '—';
+      return `<tr>
+        <td style="padding:11px 8px;width:24%;vertical-align:top">
+          <b style="color:var(--ink-0);font-size:13.5px">${r.name}</b>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--amb);margin-left:6px;font-weight:700">${r.dte}d</span>
+          <div style="font-size:11.5px;color:var(--ink-2);margin-top:4px;font-family:var(--mono)">${r.strikes}</div>
+          <div style="margin-top:6px;display:flex;gap:10px;font-family:var(--mono);font-size:11px">
+            <span><span style="color:var(--ink-3)">R/R</span> <b style="color:${rr === '∞' || +rr >= 2 ? 'var(--gn)' : +rr >= 1 ? 'var(--amb)' : 'var(--rd)'}">${rr}</b></span>
+            <span><span style="color:var(--ink-3)">POP</span> <b style="color:${r.pop >= 65 ? 'var(--gn)' : r.pop >= 45 ? 'var(--amb)' : 'var(--rd)'}">${r.pop != null && isFinite(r.pop) ? Math.round(r.pop) + '%' : '—'}</b></span>
+          </div>
+        </td>
+        <td style="padding:6px 8px;width:46%">${_payoffSvg(r)}</td>
+        <td style="padding:11px 8px;width:30%;vertical-align:top;font-family:var(--mono);font-size:11.5px;line-height:1.7">
+          <div><span style="color:var(--ink-3);width:75px;display:inline-block">Max P</span> <b style="color:var(--gn)">${r.maxP === Infinity ? '∞' : _fmtAmt(r.maxP)}</b></div>
+          <div><span style="color:var(--ink-3);width:75px;display:inline-block">Max L</span> <b style="color:var(--rd)">${r.maxL === Infinity ? '∞' : _fmtAmt(r.maxL)}</b></div>
+          <div><span style="color:var(--ink-3);width:75px;display:inline-block">Breakeven</span> <b style="color:var(--ink-1)">$${r.be || '—'}</b></div>
+          <div><span style="color:var(--ink-3);width:75px;display:inline-block">Δ · Θ · ν</span> <b style="color:var(--ink-1)">${r.dlt != null ? r.dlt.toFixed(2) : '—'} · ${r.tht != null ? '$' + (r.tht*100).toFixed(1) : '—'} · ${r.veg != null ? (r.veg*100).toFixed(1) : '—'}</b></div>
+        </td>
+      </tr>`;
+    }).join('');
+    const payoffHTML = `<div style="padding:6px 0">
+      <div style="margin-bottom:10px;font-size:12.5px;color:var(--ink-1);line-height:1.55">
+        <b style="color:var(--ink-0)">Visual P&amp;L curves at expiry.</b> Copper line = current spot. Red dot = stop, green dots = T1/T2. Shaded area shows profit/loss zone. <b style="color:var(--ink-2)">R/R</b> = max profit / max loss.
+      </div>
+      <table class="qd-tbl" style="font-size:13px;width:100%">
+        <thead><tr style="font-size:11.5px"><th style="padding:10px 8px">Strategy</th><th style="padding:10px 8px">P&amp;L curve (spot range ±30%)</th><th style="padding:10px 8px">Key levels</th></tr></thead>
+        <tbody>${payoffRows}</tbody>
+      </table>
+    </div>`;
+
+    // ──────── REALIZED vs IMPLIED 4Q EARNINGS TABLE ────────
+    // For the last 4 prints: show implied move (from option market pre-print) vs realized move.
+    // Surfaces the systematic mispricing of vol around earnings for this name.
+    let realizedVsImpliedHTML = '';
+    const erHist = ebp?.breakdown?.historical || {};
+    const recentPrints = erHist.recent_prints || erHist.history || [];
+    if (Array.isArray(recentPrints) && recentPrints.length > 0) {
+      const rviRows = recentPrints.slice(0, 4).map(prn => {
+        const dt = prn.date || prn.report_date || '—';
+        const impl = prn.implied_move_pct != null ? +prn.implied_move_pct : null;
+        const real = prn.post_1d_pct != null ? +prn.post_1d_pct : (prn.realized_move_pct != null ? +prn.realized_move_pct : null);
+        const surp = prn.surprise_pct != null ? +prn.surprise_pct : null;
+        const beat = prn.is_beat != null ? prn.is_beat : (surp != null ? surp > 0 : null);
+        const mispriced = (impl != null && real != null) ? Math.abs(real) - Math.abs(impl) : null;
+        return `<tr>
+          <td style="padding:11px 8px;font-family:var(--mono);font-size:12.5px;color:var(--ink-1)"><b>${dt}</b></td>
+          <td class="r" style="padding:11px 8px;font-family:var(--mono);font-size:13px;color:var(--amb);font-weight:700">${impl != null ? '±' + impl.toFixed(2) + '%' : '—'}</td>
+          <td class="r" style="padding:11px 8px;font-family:var(--mono);font-size:13px;color:${real != null ? (Math.abs(real) > Math.abs(impl || 0) ? 'var(--gn)' : 'var(--rd)') : 'var(--ink-3)'};font-weight:700">${real != null ? (real >= 0 ? '+' : '') + real.toFixed(2) + '%' : '—'}</td>
+          <td class="r" style="padding:11px 8px;font-family:var(--mono);font-size:12.5px;color:${mispriced != null ? (mispriced > 0 ? 'var(--gn)' : 'var(--rd)') : 'var(--ink-3)'};font-weight:700">${mispriced != null ? (mispriced >= 0 ? '+' : '') + mispriced.toFixed(2) + 'pp' : '—'}</td>
+          <td class="r" style="padding:11px 8px;font-family:var(--mono);font-size:12.5px;color:${surp != null ? (surp > 0 ? 'var(--gn)' : 'var(--rd)') : 'var(--ink-3)'};font-weight:700">${surp != null ? (surp >= 0 ? '+' : '') + surp.toFixed(1) + '%' : '—'}</td>
+          <td class="r" style="padding:11px 8px"><span style="display:inline-block;padding:3px 10px;border-radius:3px;font-family:var(--mono);font-size:11px;background:${beat ? 'color-mix(in oklch, var(--gn) 20%, transparent)' : 'color-mix(in oklch, var(--rd) 20%, transparent)'};color:${beat ? 'var(--gn)' : 'var(--rd)'};font-weight:800">${beat ? 'BEAT' : 'MISS'}</span></td>
+        </tr>`;
+      }).join('');
+      const exceeds = recentPrints.slice(0, 4).filter(p => {
+        const i = +p.implied_move_pct;
+        const r = +(p.post_1d_pct ?? p.realized_move_pct);
+        return isFinite(i) && isFinite(r) && Math.abs(r) > Math.abs(i);
+      }).length;
+      const summaryVerdict = exceeds >= 3 ? 'LONG-VOL EDGE' : exceeds <= 1 ? 'SHORT-VOL EDGE' : 'COIN FLIP';
+      const summaryColor = exceeds >= 3 ? 'var(--gn)' : exceeds <= 1 ? 'var(--rd)' : 'var(--amb)';
+      realizedVsImpliedHTML = `<div style="padding:6px 0">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+          <span style="font-size:12.5px;color:var(--ink-1);line-height:1.55"><b style="color:var(--ink-0)">Mispricing signal:</b> last 4 prints — did the market under-price or over-price vol?</span>
+          <span style="font-size:13px;font-weight:800;color:${summaryColor};letter-spacing:0.10em;padding:4px 14px;border-radius:3px;background:color-mix(in oklch, ${summaryColor} 14%, transparent);border:1px solid color-mix(in oklch, ${summaryColor} 35%, transparent)">${exceeds}/4 · ${summaryVerdict}</span>
+        </div>
+        <table class="qd-tbl" style="font-size:13px;width:100%">
+          <thead><tr style="font-size:11.5px">
+            <th style="padding:10px 8px">Report date</th>
+            <th class="r" style="padding:10px 8px">Implied</th>
+            <th class="r" style="padding:10px 8px">Realized (1d)</th>
+            <th class="r" style="padding:10px 8px">Mispriced</th>
+            <th class="r" style="padding:10px 8px">EPS surprise</th>
+            <th class="r" style="padding:10px 8px">Outcome</th>
+          </tr></thead>
+          <tbody>${rviRows}</tbody>
+        </table>
+        <div style="margin-top:10px;font-size:12px;color:var(--ink-2);line-height:1.5"><b style="color:var(--ink-1)">Read:</b> "Mispriced &gt; 0" means realized move EXCEEDED what options priced in (long straddle would have profited). "&lt; 0" means options were overpriced (short premium would have profited). <b>3/4 in one direction = repeatable edge.</b></div>
+      </div>`;
+    }
 
     // ──────── BLOCK 5: PER-MODE DELTAS ────────
     const pm = k.per_mode || {};
@@ -17125,9 +17798,14 @@ window.QuantDetail = (function() {
     return `
       ${heroHTML}
       ${_section('VOL REGIME · is premium cheap or expensive?', 'IV rank + level + term structure + skew', volRegimeHTML)}
+      ${_section('VOL RICHNESS · IV vs realized + expected move', 'is the option market over-pricing volatility? + 1σ projections', ivHvHTML)}
       ${_section('FLOW · POSITIONING · where is the money + who fights us?', 'P/C · UOA · dealer net gamma · max pain pin', flowHTML)}
       ${eventVolHTML}
-      ${_section('STRATEGY MATRIX · IV regime × directional bias', 'select by your conviction + premium budget', strategyHTML)}
+      ${_section('STRATEGY MATRIX · priced with Greeks, POP, breakeven, margin', 'strikes auto-selected from spot + plan T1/T2 · DTE matched to hold window', dteRecHTML)}
+      ${_section('PAYOFF DIAGRAMS · visual P&amp;L curves at expiry', 'shape · breakeven zones · R/R · POP — read the strategy in one glance', payoffHTML)}
+      ${_section('SCENARIO P&amp;L · same scenarios, different vehicles', 'stock-vs-options comparison at stop / entry / T1 / T2 (at expiry)', scenarioHTML)}
+      ${realizedVsImpliedHTML ? _section('REALIZED vs IMPLIED · last 4 earnings prints', 'did options market over-price or under-price ER vol?', realizedVsImpliedHTML) : ''}
+      ${_section('MANAGEMENT TRIGGERS · pre-decided exits', 'take-profit · time-stop · loss-stop · the rules that prevent emotional overrides', mgmtHTML)}
       ${perModeHTML}
     `;
   }
