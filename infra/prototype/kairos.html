@@ -17099,11 +17099,14 @@ window.QuantDetail = (function() {
       if (strategy.name === 'SWING') {
         return {
           stop: _sysStop, t1: _sysT1, t2: _sysT2, hold: swingHold,
+          eLo: eLo, eHi: eHi,
           trailPct: 0.02,
           source: 'system',
           stopBasis: '1.25× ATR · close-based · system canonical_trade_plan',
           t1Basis: 'prior swing high (system)', t2Basis: '52w-high zone (system)',
           holdBasis: `${swingHold}d max (system)`,
+          entryBasis: 'tight value zone (system canonical_trade_plan)',
+          riskHorizon: 10, riskHorizonNote: 'forward_dist 10d empirical · matches SWING hold',
           sizeMult: 1.0,
         };
       }
@@ -17112,13 +17115,20 @@ window.QuantDetail = (function() {
         const posStop = _sysStop != null ? Math.max(_sysStop * 0.95, px - 2.0 * atrDol) : (px - 2.0 * atrDol);
         // Keep system T1 (often == quarterly resistance), bump T2 to 1.5× swing range
         const posT2 = _sysT2 != null ? Math.max(_sysT2, px + 1.5 * range) : (px + 1.5 * range);
+        // Entry zone widened: accept any pullback in 90d window — from system value zone
+        // up to current price (so user can scale in on retraces during the hold period).
+        const posELo = eLo != null ? eLo : (px * 0.95);
+        const posEHi = Math.max(eHi != null ? eHi : px, px);
         return {
           stop: posStop, t1: _sysT1, t2: posT2, hold: 90,
+          eLo: posELo, eHi: posEHi,
           trailPct: 0.05,
           source: 'POSITION-adjusted',
           stopBasis: `2× ATR ($${atrDol.toFixed(2)}/share) · wider for multi-quarter hold`,
           t1Basis: 'quarterly cycle resistance · same as SWING T1', t2Basis: '1.5× swing range from entry',
           holdBasis: '90d POSITION horizon',
+          entryBasis: `widened to [$${posELo.toFixed(2)}–$${posEHi.toFixed(2)}] · accept any pullback in 90d window`,
+          riskHorizon: 90, riskHorizonNote: '⚠ forward_dist is 10d-empirical · true POSITION 90d VaR not computed by system (would need 90d-resample of returns)',
           sizeMult: 1.3,
         };
       }
@@ -17141,18 +17151,27 @@ window.QuantDetail = (function() {
         t1Basis = `price × 1.25 = $${invT1.toFixed(2)} (no PT fallback)`;
         t2Basis = `price × 1.50 = $${invT2.toFixed(2)} (no PT fallback)`;
       }
+      // Entry zone for INVESTMENT: accumulation zone from stop+5% up to current price.
+      // Investment-grade entries don't need a tight value zone — averaging in over weeks
+      // is the standard discipline. Any price above stop is acceptable to start.
+      const invELo = Math.max(invStop * 1.02, px * 0.90);  // floor: 2% above stop
+      const invEHi = px;
       return {
         stop: invStop, t1: invT1, t2: invT2, hold: 365,
+        eLo: invELo, eHi: invEHi,
         trailPct: 0.15,
         source: 'INVESTMENT-adjusted',
         stopBasis, t1Basis, t2Basis,
         holdBasis: '365d (1Y minimum) — long-horizon value compounding',
+        entryBasis: `accumulation zone [$${invELo.toFixed(2)}–$${invEHi.toFixed(2)}] · scale in over weeks · any price above stop acceptable`,
+        riskHorizon: 365, riskHorizonNote: '⚠ forward_dist is 10d-empirical · 365d INVESTMENT VaR would require multi-year sample. 10d figures shown for context only.',
         sizeMult: 1.0,
       };
     })();
     // Effective trade plan values (used in all downstream sections)
     const effStop = _stratPlan.stop, effT1 = _stratPlan.t1, effT2 = _stratPlan.t2;
     const effHold = _stratPlan.hold, effTrailPct = _stratPlan.trailPct;
+    const effELo = _stratPlan.eLo, effEHi = _stratPlan.eHi;
 
     // ──────────────────── LENS DIRECTION VOTES (4 lenses) ────────────────────
     const lensVote = {};
@@ -17496,7 +17515,7 @@ window.QuantDetail = (function() {
       if (planCall === 'BUY') {
         return `
           <div class="qpr-call-row"><span class="qpr-call-k">Action</span><span class="qpr-call-v"><b class="qov-gn">ENTER LONG</b> · limit order in entry zone</span></div>
-          <div class="qpr-call-row"><span class="qpr-call-k">Entry zone (limit)</span><span class="qpr-call-v"><b>$${eLo.toFixed(2)}–$${eHi.toFixed(2)}</b> · entry quality ${eqRaw || '—'}</span></div>
+          <div class="qpr-call-row"><span class="qpr-call-k">Entry zone (limit)</span><span class="qpr-call-v"><b>$${effELo.toFixed(2)}–$${effEHi.toFixed(2)}</b> · entry quality ${eqRaw || '—'}${_stratPlan.source !== 'system' ? ` <span style="color:var(--ink-3);font-size:11px">· ${_stratPlan.entryBasis}</span>` : ''}</span></div>
           <div class="qpr-call-row"><span class="qpr-call-k">Size</span><span class="qpr-call-v"><b>${sizedShares}</b> shares · <b>$${sizedDollars.toFixed(0)}</b> deployed · <b>${sizedPct.toFixed(2)}%</b> of $${refEq} ref equity</span></div>
           <div class="qpr-call-row"><span class="qpr-call-k">Stop (close-based)</span><span class="qpr-call-v"><b class="qov-rd">$${effStop.toFixed(2)}</b> · risk $${riskPerShare == null ? '—' : riskPerShare.toFixed(2)}/share · total <b class="qov-rd">$${totalRisk == null ? '—' : Math.abs(totalRisk).toFixed(0)}</b></span></div>
           <div class="qpr-call-row"><span class="qpr-call-k">T1 / T2 (limits)</span><span class="qpr-call-v"><b class="qov-gn">$${effT1.toFixed(2)}</b> (+${rT1 == null ? '—' : rT1.toFixed(1)}R) · <b class="qov-gn">${effT2 ? '$' + effT2.toFixed(2) + ' (+' + (rT2 == null ? '—' : rT2.toFixed(1)) + 'R)' : 'optional'}</b></span></div>
@@ -17744,17 +17763,25 @@ window.QuantDetail = (function() {
       </div>`;
 
     // ──────────────────── SECTION ④ · RISK ENVELOPE ────────────────────
+    // Strategy-aware stop ATR multiple shown in subtext. VaR/CVaR horizon
+    // disclosed honestly — system only computes 10d empirical, so for
+    // POSITION/INVESTMENT we label "10d empirical · POSITION 90d not computed"
+    // rather than fabricating Gaussian-scaled values (which would hide fat-tail
+    // risk per spec data discipline).
+    const stopATRmult = strategy.name === 'SWING' ? 1.25 : strategy.name === 'POSITION' ? 2.0 : 3.0;
+    const riskMismatch = _stratPlan.riskHorizon !== (fwdHorizon || 10);
     const riskEnv = `
       <div class="qpr-grid4">
-        <div class="qpr-tile"><div class="qpr-tile-k">Stop $</div><div class="qpr-tile-v qov-rd">${stop == null ? '—' : '$' + effStop.toFixed(2)}</div><div class="qpr-tile-sub">close-based · ${atrPct == null ? '—' : (atrPct * 1.25).toFixed(2) + '% ≈ 1.25× ATR'}</div></div>
+        <div class="qpr-tile"><div class="qpr-tile-k">Stop $</div><div class="qpr-tile-v qov-rd">${effStop == null ? '—' : '$' + effStop.toFixed(2)}</div><div class="qpr-tile-sub">close-based · ${atrPct == null ? '—' : (atrPct * stopATRmult).toFixed(2) + '% ≈ ' + stopATRmult.toFixed(2) + '× ATR'}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">$ / share</div><div class="qpr-tile-v qov-rd">${riskPerShare == null ? '—' : '$' + riskPerShare.toFixed(2)}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">Total $ risk</div><div class="qpr-tile-v qov-rd">${totalRisk == null ? '—' : '−$' + Math.abs(totalRisk).toFixed(0)}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">% equity</div><div class="qpr-tile-v ${totalRisk == null ? 'qov-dim' : Math.abs(totalRisk)/refEq*100 <= 1 ? 'qov-gn' : 'qov-am'}">${totalRisk == null ? '—' : (Math.abs(totalRisk)/refEq*100).toFixed(2) + '%'}</div><div class="qpr-tile-sub">of $${refEq} ref</div></div>
-        <div class="qpr-tile"><div class="qpr-tile-k">VaR-95</div><div class="qpr-tile-v qov-am">${fwdVar == null ? '—' : (fwdVar >= 0 ? '+' : '') + fwdVar.toFixed(1) + '%'}</div><div class="qpr-tile-sub">${fwdHorizon ? fwdHorizon + 'd empirical' : '—'}</div></div>
-        <div class="qpr-tile"><div class="qpr-tile-k">CVaR-97.5</div><div class="qpr-tile-v qov-rd">${fwdCvar == null ? '—' : (fwdCvar >= 0 ? '+' : '') + fwdCvar.toFixed(1) + '%'}</div><div class="qpr-tile-sub">tail loss</div></div>
+        <div class="qpr-tile"><div class="qpr-tile-k">VaR-95</div><div class="qpr-tile-v qov-am">${fwdVar == null ? '—' : (fwdVar >= 0 ? '+' : '') + fwdVar.toFixed(1) + '%'}</div><div class="qpr-tile-sub ${riskMismatch ? 'qov-am' : ''}">${fwdHorizon ? fwdHorizon + 'd empirical' : '—'}${riskMismatch ? ` · ${_stratPlan.riskHorizon}d not computed` : ''}</div></div>
+        <div class="qpr-tile"><div class="qpr-tile-k">CVaR-97.5</div><div class="qpr-tile-v qov-rd">${fwdCvar == null ? '—' : (fwdCvar >= 0 ? '+' : '') + fwdCvar.toFixed(1) + '%'}</div><div class="qpr-tile-sub ${riskMismatch ? 'qov-am' : ''}">tail loss · ${fwdHorizon || 10}d${riskMismatch ? ` (not ${_stratPlan.riskHorizon}d)` : ''}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">P(stop) MC</div><div class="qpr-tile-v ${mcPS != null && mcPS > 40 ? 'qov-rd' : ''}">${mcPS == null ? '—' : mcPS.toFixed(0) + '%'}</div></div>
         <div class="qpr-tile"><div class="qpr-tile-k">β exposure</div><div class="qpr-tile-v ${beta != null && beta > 1.5 ? 'qov-am' : ''}">${betaExposure == null ? '—' : '$' + betaExposure.toFixed(0)}</div><div class="qpr-tile-sub">${beta == null ? '' : '×' + beta.toFixed(2) + ' SPY'}</div></div>
-      </div>`;
+      </div>
+      ${riskMismatch ? `<div class="qpr-note-line" style="color:var(--amb)">${_stratPlan.riskHorizonNote}</div>` : ''}`;
 
     // ──────────────────── SECTION ⑤ · REWARD MAP ────────────────────
     const rewardMap = `
