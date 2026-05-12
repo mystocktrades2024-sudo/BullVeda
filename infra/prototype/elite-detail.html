@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>FLOOR — Stock Detail</title>
+<title>Kairos — Stock Detail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=GT+Sectra:ital,wght@1,500&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- 2026-05-10: when this page is loaded inside an iframe (e.g., the iPad
      shell embeds it via /v2/elite-detail.html?t=X), hide the FLOOR sidebar +
      ticker tape + header so the detail content fills the iframe. The host
@@ -1836,10 +1839,17 @@
 <!-- FLOOR sidebar (same as dashboard) -->
 <aside class="floor-side">
   <div class="fs-brand">
-    <div class="mk">F.</div>
+    <div class="mk-arc" aria-hidden="true">
+      <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+        <path d="M 4 26 A 22 22 0 0 1 26 4" stroke="#d8d6cc" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.92"/>
+        <circle cx="26" cy="4" r="3.5" fill="#5be57c"/>
+        <circle cx="26" cy="4" r="6.5" fill="none" stroke="#5be57c" stroke-width="0.6" opacity="0.4"/>
+      </svg>
+    </div>
     <div>
-      <div class="nm">FLOOR</div>
-      <div class="sb">TRADER'S TERMINAL</div>
+      <div class="nm-k">Kairos</div>
+      <div class="sb-tag">Trade when, not that.</div>
+      <div class="sb" id="runTs" title="Time of the most recent /Swing-Trade scan.">DETAIL · —</div>
     </div>
   </div>
   <div class="fs-section">
@@ -2226,6 +2236,42 @@ async function init() {
     document.body.insertAdjacentHTML('afterbegin', `<div style="padding:18px 28px;background:#5b1c1c;color:#ffd;font-size:12px">DATA FETCH FAILED: ${e.message}</div>`);
     throw e;
   }
+
+  // Options KPI hydration (2026-05-12) — Schwab options KPIs land in
+  // T.options_kpis as the single source of truth, but this detail page
+  // reads from legacy top-level paths (T.iv_rank, T.put_call_ratio,
+  // T.max_pain, T.options_data.*, etc.) at 30+ call sites. Mirror the
+  // hydration we do in kairos.html so the Options tab renders real data.
+  try {
+    if (T && typeof T === 'object' && T.options_kpis && typeof T.options_kpis === 'object') {
+      const k = T.options_kpis;
+      const _isEmpty = v => v == null || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
+      if (_isEmpty(T.iv_rank)        && k.iv_percentile != null) T.iv_rank = k.iv_percentile;
+      if (_isEmpty(T.iv_rank_est)    && k.iv_percentile != null) T.iv_rank_est = k.iv_percentile;
+      if (_isEmpty(T.iv30)           && k.iv_current != null)    T.iv30 = k.iv_current;
+      if (_isEmpty(T.put_call_ratio) && k.put_call_ratio != null) T.put_call_ratio = k.put_call_ratio;
+      if (_isEmpty(T.max_pain)       && k.max_pain != null)      T.max_pain = k.max_pain;
+      if (_isEmpty(T.gamma_net)      && k.gamma_net != null)     T.gamma_net = k.gamma_net;
+      if (_isEmpty(T.options_bias)   && k.verdict?.verdict)      T.options_bias = String(k.verdict.verdict).toLowerCase();
+      if (_isEmpty(T.options_data)) {
+        T.options_data = {
+          iv: k.iv_current, iv_rank: k.iv_percentile,
+          put_call_ratio: k.put_call_ratio, max_pain: k.max_pain,
+          gamma_net: k.gamma_net,
+          total_call_oi: k.total_call_oi, total_put_oi: k.total_put_oi,
+          total_call_vol: k.total_call_vol, total_put_vol: k.total_put_vol,
+          term_structure: k.term_structure, verdict: k.verdict, per_mode: k.per_mode,
+          uoa: !!(k.uoa_calls || k.uoa_puts),
+        };
+      }
+      if (_isEmpty(T.uoa) && (k.uoa_calls || k.uoa_puts)) {
+        T.uoa = { calls: k.uoa_calls, puts: k.uoa_puts,
+                  call_detail: k.uoa_call_detail, put_detail: k.uoa_put_detail };
+      }
+      if (_isEmpty(T.gamma) && k.gamma_net != null) T.gamma = { net: k.gamma_net };
+      console.log(`[options] hydrated legacy paths from options_kpis for ${T.ticker || 'ticker'}`);
+    }
+  } catch (_e) { console.warn('[options] hydration failed:', _e); }
   // Load global scan-level data (accuracy framework + regime) for per-ticker slicing.
   // Fails silently — renderPlan falls back gracefully if window.GLOBAL_ACCURACY is null.
   // PERF-2b: fetch was kicked off in parallel at top of init(); this just awaits the result.
