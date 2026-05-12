@@ -327,6 +327,18 @@ def log_signals(picks: list[dict], run_date: str | None = None) -> int:
             "fund_score_raw": c.get("fund_score_raw"),
             "fund_max":       c.get("fund_max"),
             "catalyst_tier":  c.get("catalyst_tier"),
+            # TV rating capture (2026-05-11) — required for prospective Wilson-CI
+            # validation of the (currently disabled) TV bonus. Captures the TV
+            # technical-analysis recommendation that was on this signal at scan
+            # time. After n≥30 closed trades have these populated, run
+            # Wilson-LB(BUY|TV STRONG_BUY) vs Wilson-LB(BUY) to decide whether
+            # to re-enable the score bonus and at what magnitude. See
+            # analysis.py:8627 comment + open-items TV-RATING-CROSS-CHECK.
+            "tv_recommendation": (c.get("tv_rating") or {}).get("recommendation"),
+            "tv_rec_value":      (c.get("tv_rating") or {}).get("rec_value"),
+            "tv_buy_count":      (c.get("tv_rating") or {}).get("buy_count"),
+            "tv_sell_count":     (c.get("tv_rating") or {}).get("sell_count"),
+            "tv_neutral_count":  (c.get("tv_rating") or {}).get("neutral_count"),
             # Profile attribution (2026-04-15): tag every signal with the
             # active config profile so we can compute per-profile win rate / P&L.
             "profile":       _active_profile_name(),

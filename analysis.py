@@ -425,8 +425,63 @@ def _ttm_squeeze(df, bb_len=20, kc_len=20, kc_mult=1.5):
                     squeeze_direction = "bearish"
                 # If momentum is not expanding, squeeze released but NOT confirmed
 
+    # ── LazyBear histogram (val) — used by Plan-tab SQZMOM tile ──
+    # val = linreg( source − avg(avg(highest, lowest), sma), length )
+    # Returns last-20 bar series + per-bar state/color for sparkline render.
+    sqz_series_20 = None
+    try:
+        kc_len_v = kc_len
+        hh = high.rolling(kc_len_v).max()
+        ll = low.rolling(kc_len_v).min()
+        mid_hl = (hh + ll) / 2.0
+        sma_c = close.rolling(kc_len_v).mean()
+        mid = (mid_hl + sma_c) / 2.0
+        src = close - mid
+        # Linreg endpoint: best-fit-line value at the last bar of a rolling
+        # `kc_len`-window. Implemented via slope+intercept on x=[0..n-1].
+        n = kc_len_v
+        import numpy as _np
+        x = _np.arange(n, dtype=float)
+        x_mean = x.mean()
+        x_sq_sum = ((x - x_mean) ** 2).sum()
+        val = pd.Series(index=src.index, dtype=float)
+        src_vals = src.values
+        for i in range(n - 1, len(src_vals)):
+            y = src_vals[i - n + 1: i + 1]
+            if _np.isnan(y).any(): continue
+            slope = ((x - x_mean) * (y - y.mean())).sum() / x_sq_sum
+            intercept = y.mean() - slope * x_mean
+            val.iloc[i] = slope * (n - 1) + intercept
+        # Per-bar series for last 20 bars
+        v20 = val.tail(20).tolist()
+        sq20 = squeeze.tail(20).tolist()
+        # Color per bar (lime/green/maroon/red per LazyBear rules)
+        bars = []
+        for i, vcur in enumerate(v20):
+            vprev = v20[i-1] if i > 0 else vcur
+            try:
+                vc = float(vcur); vp = float(vprev)
+            except (TypeError, ValueError):
+                bars.append({"v": None, "color": "none", "dot": "none"}); continue
+            if vc != vc:  # NaN
+                bars.append({"v": None, "color": "none", "dot": "none"}); continue
+            color = ("lime"   if (vc > 0 and vc > vp) else
+                     "green"  if (vc > 0) else
+                     "maroon" if (vc < vp) else
+                     "red")
+            # State dot per bar — squeeze-on, fired (off but was on recently), or none
+            is_on  = bool(sq20[i])
+            window_start = max(0, i - 5)
+            was_on = any(sq20[window_start:i])
+            dot = "on" if is_on else ("fired" if was_on else "none")
+            bars.append({"v": round(vc, 4), "color": color, "dot": dot})
+        sqz_series_20 = bars
+    except Exception:
+        sqz_series_20 = None
+
     return {"squeeze_on": in_squeeze, "bars_in_squeeze": bars_in,
-            "squeeze_fired": squeeze_fired, "squeeze_direction": squeeze_direction}
+            "squeeze_fired": squeeze_fired, "squeeze_direction": squeeze_direction,
+            "sqz_series_20": sqz_series_20}
 
 
 def _relative_strength_vs_spy(ticker_close, spy_close, period=63):
@@ -3581,6 +3636,7 @@ def score_technicals(df: pd.DataFrame, regime: dict,
     indicators["bars_in_squeeze"] = squeeze["bars_in_squeeze"]
     indicators["squeeze_fired"]   = squeeze["squeeze_fired"]
     indicators["squeeze_direction"] = squeeze.get("squeeze_direction", "neutral")
+    indicators["sqz_series_20"]   = squeeze.get("sqz_series_20")  # for Plan SQZMOM tile
 
     # Phase 2F: Location-aware volume — institutional accumulation/distribution signal
     _lav = _location_aware_volume(df, indicators)
@@ -8568,19 +8624,35 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         except Exception:
             pass
 
-    # TV Rating bonus (applied before normalization, ±3 pts)
-    tv_bonus = 0
+    # TV Rating bonus — DISABLED 2026-05-11 pending Wilson-CI validation.
+    #
+    # The ±3 magnitude was being applied to tech["score"] for every signal
+    # with NO statistical backing — no _validations entry, no walk-forward,
+    # no Wilson lower-bound. Worse: tv_rating was never captured on the 689
+    # closed trades in picks_history or 1,301 signal_log entries, so the
+    # ±3 cannot even be retroactively validated. n=0 evidence.
+    #
+    # Violates CLAUDE.md Principle 1 (statistical rigor — refuse n<30) and
+    # Principle 7 (no knob-tweaking without evidence — config changes must
+    # reference a backtest run or walk-forward fold).
+    #
+    # Mitigation:
+    #   1. tv_bonus locked to 0 — TV rating no longer mutates score.
+    #   2. signal_tracker.log_signals() now logs tv_rating per entry so
+    #      prospective evidence accumulates from this commit forward.
+    #   3. After n≥30 closed BUY trades have tv_rating logged, compute
+    #      Wilson-LB(BUY|TV STRONG_BUY) vs Wilson-LB(BUY). Re-enable only
+    #      with a justified magnitude (might be ±1, ±5, or zero — the data
+    #      decides, not intuition).
+    #   4. tv_rating still surfaced in tech["details"] as INFORMATIONAL
+    #      ONLY — visible in dashboard, zero score impact.
+    #
+    # Tracked: open-items TV-RATING-CROSS-CHECK. Do not re-enable without
+    # adding a _validations entry citing the Wilson-CI evidence.
+    tv_bonus = 0  # locked to 0 — see comment above
     if tv_rating:
         rec = tv_rating.get("recommendation", "NEUTRAL")
-        if   rec == "STRONG_BUY":  tv_bonus = 3
-        elif rec == "BUY":         tv_bonus = 1
-        elif rec == "SELL":        tv_bonus = -1
-        elif rec == "STRONG_SELL": tv_bonus = -3
-        tech["score"] = max(0, min(30, tech["score"] + tv_bonus))
-        if tv_bonus > 0:
-            tech["details"]["tv_rating"] = f"TV {rec} (+{tv_bonus})"
-        elif tv_bonus < 0:
-            tech["details"]["tv_rating"] = f"TV {rec} ({tv_bonus})"
+        tech["details"]["tv_rating"] = f"TV {rec} (informational — bonus disabled pending validation)"
 
     # ── 5-Pillar Scoring (Phase 6) ─────────────────────────────────────────────
     # Tech Structure(35) + Catalyst(20) + RS+Sector(20) + Smart Money(15) + Quality Gate(10) = 100
