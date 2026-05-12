@@ -14898,7 +14898,8 @@ window.QuantDetail = (function() {
       }
       return null;
     };
-    const _num = (...paths) => { const v = _g(...paths); const n = +v; return isFinite(n) ? n : null; };
+    // null-preserving: do not silently collapse missing data to 0 (+null = 0 trap)
+    const _num = (...paths) => { const v = _g(...paths); if (v == null) return null; const n = +v; return isFinite(n) ? n : null; };
     const _money = (v) => {
       if (v == null) return '—';
       const a = Math.abs(v);
@@ -15046,9 +15047,7 @@ window.QuantDetail = (function() {
     const analystConsensus = _g('analyst_full.consensus', 'analyst_consensus') || '—';
 
     // earnings
-    // earnDays: raw _g lookup first so null is preserved (_num collapses null → 0 via +null)
-    const _earnDaysRaw = _g('earn_days', 'kelly_size.earnings_days');
-    const earnDays = (_earnDaysRaw != null && isFinite(+_earnDaysRaw)) ? +_earnDaysRaw : null;
+    const earnDays = _num('earn_days', 'kelly_size.earnings_days');
     const earnHist = _g('earnings_history', 'eodhd_earnings_history') || [];
     const recentEarn = Array.isArray(earnHist) ? earnHist.slice(0, 4) : [];
     const beatCount = recentEarn.filter(e => (e.surprise_pct ?? e.surprise ?? 0) > 0).length;
@@ -15832,15 +15831,17 @@ window.QuantDetail = (function() {
       </div>` : '';
 
     // ────────────────────────────────────────────────────────────────
-    // SENIOR BUY-SIDE ANALYST BRIEF · 6-section narrative
+    // STRUCTURED EQUITY ANALYSIS · senior buy-side analytical engine
     // ────────────────────────────────────────────────────────────────
+    // Conforms to application's standard so outputs are comparable across
+    // tickers and auditable over time. 14 required fields, lens-alignment
+    // scoring for conviction, hard data-completeness gate.
+
     // Time-horizon detection: max_hold_days from canonical plan + setup family
     const maxHoldD = _num('canonical_trade_plan.hold_period_max', 'max_hold_days', 'trade_plan.max_hold_days', 'hold_period_max');
     const horizon = (() => {
-      // Earnings proximity overrides — if ER in window, lens flips to QUANT EARNINGS
       const erImminent = earnDays != null && earnDays >= 0 && earnDays <= 14;
       const h = maxHoldD;
-      // Categorize by max hold
       let cat;
       if (h != null) {
         if (h <= 21) cat = 'SWING';
@@ -15848,13 +15849,11 @@ window.QuantDetail = (function() {
         else if (h <= 365) cat = 'INVESTMENT';
         else cat = 'STRATEGIC';
       } else {
-        // Fallback: infer from setup family
         const sl = setup.toLowerCase();
         cat = (sl.includes('impulse') || sl.includes('breakout') || sl.includes('continuation')) ? 'SWING'
             : sl.includes('special') ? 'TACTICAL'
             : 'SWING';
       }
-      // Pick lead lens — earnings imminent ALWAYS wins regardless of horizon
       const swingLead = erImminent ? 'QUANT EARNINGS' : 'SWING TRADING';
       const swingCross = erImminent
         ? ['SWING TRADING', 'HEDGE FUND', 'GRAHAM-BUFFETT', 'CFP']
@@ -15865,86 +15864,119 @@ window.QuantDetail = (function() {
       return                          { name: 'STRATEGIC',  range: '5+ years',    lead: 'GRAHAM-BUFFETT VALUE', cross: ['CFP', 'HEDGE FUND', 'QUANT EARNINGS', 'SWING TRADING'] };
     })();
 
-    // Lens-narrative builders — return short paragraph from real data
-    const _lensSwingTrading = () => {
-      const parts = [];
-      if (rsi != null) parts.push(`RSI(14) <b>${rsi.toFixed(0)}</b>${rsi > 70 ? ' (overbought edge)' : rsi < 30 ? ' (oversold)' : ''}`);
-      if (macdBull !== undefined) parts.push(`MACD ${macdBull ? '<b class="qov-gn">bullish</b>' : '<b class="qov-rd">bearish</b>'}`);
-      if (adx != null) parts.push(`ADX <b>${adx.toFixed(0)}</b>${adx >= 25 ? ' (strong trend)' : ' (weak)'}`);
-      if (rvol != null) parts.push(`RVOL <b>${rvol.toFixed(2)}×</b>${rvol >= 1.5 ? ' (expansion)' : ''}`);
-      if (sqzFired) parts.push(`<b class="qov-gn">squeeze fired</b>`);
-      else if (sqzOn) parts.push(`squeeze <b class="qov-am">coiling</b>`);
-      if (above50 != null) parts.push(`${above50 ? 'above' : 'below'} EMA50`);
-      if (rsRank != null) parts.push(`RS rank <b>${rsRank.toFixed(0)}</b>/100`);
-      const setupText = setup ? `Setup: <b>${setup}</b>` : '';
-      return `${setupText}${setupText ? '. ' : ''}${parts.join(', ')}. Entry quality <b class="${['FRESH','PULLBACK','VALID'].includes(eqRaw) ? 'qov-gn' : 'qov-rd'}">${eqRaw || '—'}</b>${pullbackZone !== '—' ? `, pullback zone <b>${pullbackZone}</b>` : ''}.`;
-    };
-    const _lensHedgeFund = () => {
-      const parts = [];
-      parts.push(`Regime <b>${regime.replace(/_/g, ' ') || '—'}</b> (BAP floor ${regimeF}, score ${score})`);
-      if (mcPT1 != null && mcPS != null) parts.push(`MC edge <b class="${edge >= 20 ? 'qov-gn' : edge >= 5 ? 'qov-am' : 'qov-rd'}">${edge >= 0 ? '+' : ''}${edge.toFixed(0)}pp</b> (P(T1) ${mcPT1.toFixed(0)}%, P(stop) ${mcPS.toFixed(0)}%)`);
-      if (insiderBuys || insiderSells) parts.push(`insider 30d <b class="${insiderBuys > insiderSells ? 'qov-gn' : 'qov-rd'}">${insiderBuys}B/${insiderSells}S</b>`);
-      else parts.push(`no insider activity`);
-      if (uoaCalls != null && uoaCalls > 0) parts.push(`UOA <b class="qov-gn">${uoaCalls} call(s)</b>`);
-      if (shortFloat != null) parts.push(`short ${shortFloat.toFixed(1)}%${shortFloat > 20 ? ' (squeeze risk)' : ''}`);
-      if (newsAvg !== 0) parts.push(`news bias <b class="${newsCls}">${newsBias}</b>`);
-      return parts.join(', ') + '.';
-    };
-    const _lensGrahamBuffett = () => {
-      const parts = [];
-      if (fwdPE != null) parts.push(`fwd P/E <b>${fwdPE.toFixed(1)}</b>${fwdPE > 35 ? ' (rich)' : fwdPE < 15 ? ' (cheap)' : ''}`);
-      if (peg != null) parts.push(`PEG <b class="${peg < 1 ? 'qov-gn' : peg > 2 ? 'qov-rd' : ''}">${peg.toFixed(2)}</b>${peg < 1 ? ' (growth at reasonable price)' : peg > 2 ? ' (paying for growth)' : ''}`);
-      if (revGr != null) parts.push(`rev growth <b class="${revGr > 15 ? 'qov-gn' : revGr < 0 ? 'qov-rd' : ''}">${revGr >= 0 ? '+' : ''}${revGr.toFixed(1)}%</b>`);
-      if (fcfMgn != null) parts.push(`FCF margin <b class="${fcfMgn > 15 ? 'qov-gn' : fcfMgn < 0 ? 'qov-rd' : ''}">${fcfMgn >= 0 ? '+' : ''}${fcfMgn.toFixed(1)}%</b>`);
-      if (roe != null) parts.push(`ROE <b class="${roe > 15 ? 'qov-gn' : roe < 5 ? 'qov-rd' : ''}">${roe.toFixed(1)}%</b>`);
-      if (debtEq != null) parts.push(`D/E <b class="${debtEq < 1 ? 'qov-gn' : debtEq > 4 ? 'qov-rd' : ''}">${debtEq.toFixed(1)}</b>`);
-      if (upside != null) parts.push(`analyst PT upside <b class="${upside > 10 ? 'qov-gn' : upside < 0 ? 'qov-rd' : 'qov-am'}">${upside >= 0 ? '+' : ''}${upside.toFixed(0)}%</b>`);
-      if (parts.length === 0) return 'No fundamentals wired — value lens unable to opine.';
-      return parts.join(', ') + '.';
-    };
-    const _lensQuantEarnings = () => {
-      const parts = [];
-      if (earnDays != null && earnDays < 999) {
-        parts.push(`ER in <b class="${earnDays <= 7 ? 'qov-rd' : earnDays <= 14 ? 'qov-am' : 'qov-gn'}">${earnDays}d</b>`);
-        if (impMove != null) parts.push(`implied move <b>±${impMove.toFixed(1)}%</b>`);
-        if (medianSurp != null) parts.push(`prior median surprise <b class="${medianSurp > 0 ? 'qov-gn' : 'qov-rd'}">${medianSurp >= 0 ? '+' : ''}${medianSurp.toFixed(1)}%</b>`);
-        if (recentEarn.length) parts.push(`<b>${beatCount}/${recentEarn.length}</b> recent beats`);
-        if (revUp30 != null && revDown30 != null) {
-          const dir = revUp30 > revDown30 ? 'bullish' : revUp30 < revDown30 ? 'bearish' : 'mixed';
-          const cls7 = revUp30 > revDown30 ? 'qov-gn' : revUp30 < revDown30 ? 'qov-rd' : 'qov-am';
-          parts.push(`revisions 30d <b class="${cls7}">${dir}</b> (↑${revUp30}/↓${revDown30})`);
-        }
-      } else {
-        parts.push('no earnings in window');
-        if (revUp30 != null && revDown30 != null) parts.push(`revisions 30d ↑${revUp30}/↓${revDown30}`);
-      }
-      if (parts.length === 0) return 'No earnings data wired.';
-      return parts.join(', ') + '.';
-    };
-    const _lensCFP = () => {
-      const parts = [];
-      if (finalAllocPct != null) parts.push(`Kelly final alloc <b class="${finalAllocPct > 0 ? 'qov-gn' : 'qov-dim'}">${finalAllocPct.toFixed(1)}%</b>`);
-      if (beta != null) parts.push(`β <b class="${beta > 1.5 ? 'qov-am' : ''}">${beta.toFixed(2)} SPY</b>${beta > 1.5 ? ' (amplifies portfolio)' : ''}`);
-      if (mcap != null) parts.push(`mcap <b>${_money(mcap)}</b>`);
-      if (advDol != null) parts.push(`ADV <b class="${advDol > 10e6 ? 'qov-gn' : advDol > 1e6 ? 'qov-am' : 'qov-rd'}">${_money(advDol)}</b>`);
-      if (ddMult != null && ddMult < 1) parts.push(`drawdown haircut <b class="qov-am">${ddMult.toFixed(2)}×</b>`);
-      if (erMult != null && erMult < 1) parts.push(`earnings haircut <b class="qov-am">${erMult.toFixed(2)}×</b>`);
-      return parts.join(', ') + '.';
-    };
-    const lensNarratives = {
-      'SWING TRADING':     _lensSwingTrading(),
-      'HEDGE FUND':        _lensHedgeFund(),
-      'GRAHAM-BUFFETT VALUE': _lensGrahamBuffett(),
-      'GRAHAM-BUFFETT':    _lensGrahamBuffett(),
-      'QUANT EARNINGS':    _lensQuantEarnings(),
-      'CFP':               _lensCFP(),
-    };
+    // ── LENS DIRECTION VOTING — each lens votes bullish / bearish / neutral
+    // Used both for cross-checks rendering and for conviction calibration.
+    const lensVote = {};
+    {
+      // SWING TRADING vote
+      let s = 0, n = 0;
+      if (rsi != null) { n++; if (rsi >= 50 && rsi <= 70) s++; else if (rsi < 40 || rsi > 75) s--; }
+      if (macdBull !== undefined) { n++; s += macdBull ? 1 : -1; }
+      if (above50 !== null) { n++; s += above50 ? 1 : -1; }
+      if (rvol != null) { n++; if (rvol >= 1.3) s++; }
+      if (rsRank != null) { n++; if (rsRank >= 70) s++; else if (rsRank < 30) s--; }
+      if (sqzFired) { n++; s++; }
+      if (eqRaw === 'FRESH' || eqRaw === 'PULLBACK') { n++; s++; }
+      else if (eqRaw === 'EXTENDED' || eqRaw === 'MISSED') { n++; s--; }
+      lensVote['SWING TRADING'] = n === 0 ? 'NEUTRAL' : s >= 2 ? 'BULLISH' : s <= -2 ? 'BEARISH' : 'NEUTRAL';
 
-    // Determine the analyst call (BUY / WATCH / SHORT — never hedge)
-    // BUY:   verdict=BUY and not demoted and pre-flight not failing core gates
-    // SHORT: verdict in [AVOID, SHORT, SELL] OR regime=panic OR critical gate fails (BAP<<floor, P(stop)>P(T1))
-    // WATCH: everything else (lens valid, not actionable yet) — must surface a trigger
+      // HEDGE FUND vote
+      s = 0; n = 0;
+      if (edge != null) { n++; if (edge >= 15) s++; else if (edge <= -5) s--; }
+      if (mcPProfit != null) { n++; if (mcPProfit >= 60) s++; else if (mcPProfit <= 40) s--; }
+      if (insiderBuys > 0 || insiderSells > 0) { n++; s += (insiderBuys > insiderSells) ? 1 : -1; }
+      if (uoaCalls > 0) { n++; s++; }
+      if (uoaPuts > 0) { n++; s--; }
+      if (newsAvg !== 0) { n++; if (newsAvg > 0.05) s++; else if (newsAvg < -0.05) s--; }
+      if (regime === 'panic') { n++; s -= 2; }
+      else if (regime === 'risk_on_trending') { n++; s++; }
+      lensVote['HEDGE FUND'] = n === 0 ? 'NEUTRAL' : s >= 2 ? 'BULLISH' : s <= -2 ? 'BEARISH' : 'NEUTRAL';
+
+      // GRAHAM-BUFFETT VALUE vote
+      s = 0; n = 0;
+      if (peg != null) { n++; if (peg < 1.0) s++; else if (peg > 2.5) s--; }
+      if (fwdPE != null) { n++; if (fwdPE < 20) s++; else if (fwdPE > 40) s--; }
+      if (revGr != null) { n++; if (revGr > 15) s++; else if (revGr < 0) s--; }
+      if (fcfMgn != null) { n++; if (fcfMgn > 12) s++; else if (fcfMgn < 0) s--; }
+      if (roe != null) { n++; if (roe > 15) s++; else if (roe < 5) s--; }
+      if (debtEq != null) { n++; if (debtEq < 1) s++; else if (debtEq > 4) s--; }
+      if (upside != null) { n++; if (upside > 15) s++; else if (upside < 0) s--; }
+      lensVote['GRAHAM-BUFFETT VALUE'] = n === 0 ? 'NEUTRAL' : s >= 2 ? 'BULLISH' : s <= -2 ? 'BEARISH' : 'NEUTRAL';
+      lensVote['GRAHAM-BUFFETT'] = lensVote['GRAHAM-BUFFETT VALUE'];
+
+      // QUANT EARNINGS vote
+      s = 0; n = 0;
+      if (recentEarn.length >= 2) { n++; const r = beatCount / recentEarn.length; if (r >= 0.75) s++; else if (r <= 0.25) s--; }
+      if (revUp30 != null && revDown30 != null) { n++; if (revUp30 > revDown30) s++; else if (revUp30 < revDown30) s--; }
+      if (medianSurp != null) { n++; if (medianSurp > 5) s++; else if (medianSurp < -5) s--; }
+      if (earnDays != null && earnDays >= 0 && earnDays <= 7) { n++; s--; } // binary risk is bearish for swing
+      if (ivRank != null) { n++; if (ivRank < 30) s++; else if (ivRank > 70) s--; }
+      if (earnHist.length === 0 && (revUp30 == null || revDown30 == null)) { /* no signal */ }
+      lensVote['QUANT EARNINGS'] = n === 0 ? 'NEUTRAL' : s >= 1 ? 'BULLISH' : s <= -1 ? 'BEARISH' : 'NEUTRAL';
+
+      // CFP vote (portfolio fit)
+      s = 0; n = 0;
+      if (finalAllocPct != null) { n++; if (finalAllocPct > 0) s++; else s--; }
+      if (advDol != null) { n++; if (advDol >= 10e6) s++; else if (advDol < 1e6) s--; }
+      if (beta != null) { n++; if (beta > 0 && beta <= 1.5) s++; else if (beta > 2.5) s--; }
+      if (ddMult != null) { n++; if (ddMult >= 1.0) s++; else s--; }
+      if (mcap != null) { n++; if (mcap >= 10e9) s++; else if (mcap < 300e6) s--; }
+      lensVote['CFP'] = n === 0 ? 'NEUTRAL' : s >= 2 ? 'BULLISH' : s <= -2 ? 'BEARISH' : 'NEUTRAL';
+    }
+
+    // ── DATA COMPLETENESS GATE
+    // Required core fields. If any missing → block BUY/SHORT, force WATCH.
+    const _dataCheck = (() => {
+      const required = {
+        'price': px > 0,
+        'score': score > 0,
+        'stop': stop > 0,
+        'target1': t1 > 0,
+        'setup_family': !!setup,
+        'regime': !!regime,
+        'rsi': rsi != null,
+        'rvol': rvol != null,
+        'tech_score': techS > 0,
+        'fund_or_quant': (fwdPE != null || peg != null || revGr != null || earnDays != null),
+      };
+      const quality = {
+        'adv_dollar': advDol != null,
+        'beta': beta != null,
+        'monte_carlo': mcPT1 != null,
+        'forward_dist': fwdVar != null,
+        'analyst_estimates': tgtMean != null || ana.consensus,
+        'options_iv': ivRank != null || ivCur != null,
+        'insider_data': (insiderBuys != null || insiderSells != null),
+        'kelly_size': finalAllocPct != null,
+      };
+      const missCore = Object.entries(required).filter(([k, v]) => !v).map(([k]) => k);
+      const missQuality = Object.entries(quality).filter(([k, v]) => !v).map(([k]) => k);
+      // freshness
+      const runTs = (DATA.run_timestamp || DATA.run_date || '').toString();
+      const runAge = (() => {
+        if (!runTs) return null;
+        try {
+          const rd = new Date(runTs);
+          if (!isFinite(rd)) return null;
+          return (Date.now() - rd.getTime()) / 86400000; // days
+        } catch { return null; }
+      })();
+      const stale = runAge != null && runAge > 1.5; // >36h
+      let flag;
+      if (missCore.length >= 2 || (missCore.length >= 1 && stale)) flag = 'STALE';
+      else if (missCore.length >= 1 || missQuality.length >= 3) flag = 'PARTIAL';
+      else flag = 'COMPLETE';
+      return {
+        flag, missCore, missQuality, runTs, runAge, stale,
+      };
+    })();
+
+    // ── CALL: BUY / WATCH / SHORT — never hedge
+    // Data-completeness override: if STALE or core missing, force WATCH
+    // with trigger=obtain missing data
+    const dataInsufficient = _dataCheck.flag === 'STALE' || _dataCheck.missCore.length >= 1;
     const analystCall = (() => {
+      if (dataInsufficient) return 'WATCH';
       if (verdict === 'SHORT' || verdict === 'SELL') return 'SHORT';
       if (verdict === 'BUY' && !isDemoted && !critFail) return 'BUY';
       if (verdict === 'AVOID' && (regime === 'panic' || (mcPT1 != null && mcPS != null && mcPS > mcPT1 + 10))) return 'SHORT';
@@ -15953,216 +15985,476 @@ window.QuantDetail = (function() {
     const callC = analystCall === 'BUY' ? 'gn' : analystCall === 'SHORT' ? 'rd' : 'am';
     const callColor = callC === 'gn' ? 'var(--gn)' : callC === 'am' ? 'var(--amb)' : 'var(--rd)';
 
-    // CALL body — type-specific. BUY needs entry/size/target. WATCH needs trigger. SHORT needs catalyst/expression.
-    let callBody;
-    if (analystCall === 'BUY') {
-      const sizeStr = finalAllocPct != null && finalAllocPct > 0 ? `${finalAllocPct.toFixed(1)}% Kelly-lite` : `5–8% (regime-capped)`;
-      callBody = `<b class="qov-gn">ENTER LONG</b> at <b>$${eLo.toFixed(2)}–$${eHi.toFixed(2)}</b> (entry quality ${eqRaw || 'FRESH'}). Size <b>${sizeStr}</b>. Stop <b class="qov-rd">$${stop.toFixed(2)}</b> (${stopPct ? (Math.abs(stopPct*100)).toFixed(1) : '—'}%). T1 <b class="qov-gn">$${t1.toFixed(2)}</b> (+${t1PctSigned ? t1PctSigned.toFixed(1) : '—'}%, ${rT1 == null ? '—' : rT1.toFixed(1)}R), T2 <b class="qov-gn">${t2 ? '$' + t2.toFixed(2) : 'optional'}</b>${t2 && t2PctSigned ? ' (+' + t2PctSigned.toFixed(1) + '%)' : ''}. R:R <b>${rr.toFixed(1)}:1</b>.`;
-    } else if (analystCall === 'SHORT') {
-      const failures = failedGates.slice(0, 3).map(g => g.name || g.gate).join(', ');
-      const downsideCat = regime === 'panic' ? 'regime PANIC (no longs survive)' :
-                         critFail && !gates_dec[2].pass ? `MC says P(stop) ${mcPS != null ? mcPS.toFixed(0)+'%' : '—'} > P(T1) ${mcPT1 != null ? mcPT1.toFixed(0)+'%' : '—'}` :
-                         failures ? `gate failures: ${failures}` :
-                         `valuation + technical break`;
-      const shortEntry = ema50 != null ? `$${ema50.toFixed(2)} (EMA50, expect rejection)` : `current level $${px.toFixed(2)}`;
-      const shortStop = wkHi != null ? `$${(wkHi * 1.02).toFixed(2)} (above 52w high)` : `${(px * 1.08).toFixed(2)} (+8% invalidation)`;
-      const expression = ivRank != null && ivRank > 60 ? `puts (rich IV — sell premium via put-credit if directional, otherwise long puts)` : shortFloat > 15 ? `pair-trade vs sector ETF (avoid squeeze on outright short)` : `outright short or long puts`;
-      callBody = `<b class="qov-rd">SHORT</b> · catalyst: <b>${downsideCat}</b>. Entry near <b>${shortEntry}</b>, invalidation <b>${shortStop}</b>. Expression: <b>${expression}</b>. Borrow/squeeze risk: ${shortFloat == null ? 'unknown' : shortFloat < 10 ? '<b class="qov-gn">low</b>' : shortFloat > 25 ? '<b class="qov-rd">HIGH — be careful</b>' : '<b class="qov-am">moderate</b>'}.`;
-    } else { // WATCH — must surface a specific trigger
-      const triggers = [];
-      if (eqBad && pullbackZone !== '—') triggers.push(`<b>price trigger:</b> pullback to <b class="qov-am">${pullbackZone}</b>`);
-      if (scoreGap > 0 && scoreGap < 15) triggers.push(`<b>score trigger:</b> BAP rises ≥${scoreGap} pt to clear ${regimeF} floor (closest deficit: ${techS < techMax * 0.6 ? 'TECH' : catS < 14 ? 'CAT' : rsS < 14 ? 'RS' : smS < 10 ? 'SM' : 'QUAL'})`);
-      if (earnDays != null && earnDays >= 0 && earnDays <= 14) triggers.push(`<b>event trigger:</b> earnings in <b>${earnDays}d</b> — wait for print to remove binary risk`);
-      if (regime === 'panic') triggers.push(`<b>regime trigger:</b> regime exits panic (VIX &lt; 35, breadth &gt; 25%)`);
-      if (setupLBPct != null && setupLBPct < 30) triggers.push(`<b>statistical trigger:</b> setup Wilson LB rises ≥30% (currently ${setupLBPct.toFixed(0)}%)`);
-      if (wkHi != null && px < wkHi * 0.98 && techS / techMax > 0.7) triggers.push(`<b>breakout trigger:</b> close above <b>$${wkHi.toFixed(2)}</b> (52w high) on RVOL ≥ 1.5×`);
-      if (triggers.length === 0) triggers.push(`<b>structural:</b> no clear trigger — full re-score needed; re-check at next scan`);
-      callBody = `<b class="qov-am">WATCH</b> · thesis valid, not actionable yet. <b>Converts to BUY when:</b> ${triggers.slice(0, 3).join(' &nbsp;·&nbsp; ')}. <b>Converts to SHORT when:</b> close below stop <b class="qov-rd">$${stop.toFixed(2)}</b> on volume, OR regime flips to panic, OR catalyst miss (earnings disappointment).`;
+    // ── LENS ALIGNMENT vs the call direction
+    const callDir = analystCall === 'BUY' ? 'BULLISH' : analystCall === 'SHORT' ? 'BEARISH' : null;
+    const lensAlignmentCount = callDir
+      ? Object.values(lensVote).filter((v, i, a) => a.indexOf(v) === i || true).length // placeholder
+      : 0;
+    // Recompute distinctly across the 5 distinct lenses (avoid duplicate GRAHAM key)
+    const distinctLenses = ['SWING TRADING', 'HEDGE FUND', 'GRAHAM-BUFFETT VALUE', 'QUANT EARNINGS', 'CFP'];
+    const distinctVotes = distinctLenses.map(L => ({ lens: L, vote: lensVote[L] || 'NEUTRAL' }));
+    const alignedCount = callDir ? distinctVotes.filter(v => v.vote === callDir).length : 0;
+    const opposedCount = callDir ? distinctVotes.filter(v => v.vote === (callDir === 'BULLISH' ? 'BEARISH' : 'BULLISH')).length : 0;
+    const neutralCount = distinctVotes.filter(v => v.vote === 'NEUTRAL').length;
+
+    // ── CONVICTION calibration — per strict rules
+    //   HIGH:   4+ aligned, data COMPLETE, catalyst-in-horizon, tech+fund agree
+    //   MEDIUM: 3 aligned, OR minor data gaps, OR 1 lens disagrees but reasoned through
+    //   LOW:    unresolved disagreement, material data gaps, single-thread thesis
+    const techVote = lensVote['SWING TRADING'];
+    const fundVote = lensVote['GRAHAM-BUFFETT VALUE'];
+    const techFundAgree = techVote === fundVote && techVote !== 'NEUTRAL';
+    const catalystInHorizon = (earnDays != null && earnDays >= 0 && earnDays <= (maxHoldD || 21)) ||
+                              (catalystTags && catalystTags.length > 0);
+    let convLevel, convRationale;
+    if (analystCall === 'WATCH' && dataInsufficient) {
+      convLevel = 'LOW';
+      convRationale = `Insufficient data — Call defaults to WATCH per data discipline. Missing core: ${_dataCheck.missCore.join(', ') || 'none'}. Conviction cannot exceed LOW until data obtained.`;
+    } else if (analystCall === 'WATCH') {
+      // WATCH conviction: based on how close to actionable
+      const reasons = [];
+      if (alignedCount >= 3) reasons.push(`${alignedCount}/5 lenses point ${callDir || 'directional'} but no actionable trigger met`);
+      if (eqBad) reasons.push('entry quality bad');
+      if (scoreGap > 0 && scoreGap < 10) reasons.push(`score within ${scoreGap}pt of floor`);
+      convLevel = (alignedCount >= 4 || (alignedCount >= 3 && _dataCheck.flag === 'COMPLETE')) ? 'MEDIUM' : 'LOW';
+      convRationale = reasons.length ? reasons.join('; ') + '. ' : '';
+      convRationale += `Tech ${techVote} · Fund ${fundVote} · Earnings ${lensVote['QUANT EARNINGS']} · Flow ${lensVote['HEDGE FUND']} · CFP ${lensVote['CFP']}.`;
+    } else {
+      // BUY or SHORT
+      if (alignedCount >= 4 && _dataCheck.flag === 'COMPLETE' && catalystInHorizon && techFundAgree) {
+        convLevel = 'HIGH';
+        convRationale = `${alignedCount}/5 lenses aligned ${callDir}. Tech+Fund agree (${techVote}). Catalyst in horizon. Data COMPLETE.`;
+      } else if (alignedCount >= 3 && opposedCount <= 1) {
+        convLevel = 'MEDIUM';
+        const opposers = distinctVotes.filter(v => v.vote === (callDir === 'BULLISH' ? 'BEARISH' : 'BULLISH')).map(v => v.lens);
+        convRationale = `${alignedCount}/5 lenses aligned ${callDir}` +
+          (opposers.length ? `; ${opposers.join(' + ')} opposed (reasoned through)` : '') +
+          (_dataCheck.flag === 'PARTIAL' ? `; data PARTIAL (${_dataCheck.missQuality.slice(0, 2).join(', ')})` : '') +
+          `.`;
+      } else {
+        convLevel = 'LOW';
+        convRationale = `Only ${alignedCount}/5 lenses aligned ${callDir} with ${opposedCount} opposed. ` +
+          `Unresolved disagreement or single-thread thesis. Reconsider if low-conviction ${analystCall} should be WATCH instead.`;
+      }
     }
-
-    // CONVICTION: composed from Wilson LB + n + lens agreement + entry quality
-    const convScore = (() => {
-      let s = 0, max = 0;
-      // Wilson LB ≥ floor: +2
-      if (setupLBPct != null) { max += 2; if (setupLBPct >= 30) s += 2; else if (setupLBPct >= 15) s += 1; }
-      // n ≥ 30: +1
-      if (setupN != null) { max += 1; if (setupN >= 30) s += 1; }
-      // MC edge ≥ +20pp: +2
-      if (edge != null) { max += 2; if (edge >= 20) s += 2; else if (edge >= 5) s += 1; }
-      // Entry quality FRESH/PULLBACK: +1
-      max += 1; if (['FRESH', 'PULLBACK', 'VALID'].includes(eqRaw)) s += 1;
-      // BAP ≥ floor: +1
-      max += 1; if (score >= regimeF) s += 1;
-      // R:R ≥ 3: +1
-      max += 1; if (rr >= 3) s += 1;
-      // Regime not panic: +1
-      max += 1; if (regime !== 'panic') s += 1;
-      // Earnings ≥ 14d: +1
-      max += 1; if (earnDays == null || earnDays >= 14 || earnDays < 0) s += 1;
-      return { score: s, max: max, pct: max > 0 ? s / max : 0 };
-    })();
-    const convLevel = convScore.pct >= 0.75 ? 'HIGH' : convScore.pct >= 0.50 ? 'MEDIUM' : 'LOW';
     const convCls = convLevel === 'HIGH' ? 'gn' : convLevel === 'MEDIUM' ? 'am' : 'rd';
-    const convReason = (() => {
-      const ok = [], bad = [];
-      if (setupLBPct != null && setupLBPct >= 30) ok.push(`Wilson LB ${setupLBPct.toFixed(0)}% ≥ 30%`);
-      else if (setupLBPct != null) bad.push(`Wilson LB ${setupLBPct.toFixed(0)}% < 30%`);
-      else bad.push('no Wilson LB');
-      if (setupN != null && setupN >= 30) ok.push(`n=${setupN} (above noise floor)`);
-      else if (setupN != null) bad.push(`n=${setupN} (thin sample)`);
-      if (edge != null && edge >= 20) ok.push(`MC edge +${edge.toFixed(0)}pp`);
-      else if (edge != null && edge < 0) bad.push(`MC edge ${edge.toFixed(0)}pp (negative)`);
-      if (rr >= 3) ok.push(`R:R ${rr.toFixed(1)}:1`);
-      else if (rr) bad.push(`R:R ${rr.toFixed(1)} below 3.0`);
-      if (eqBad) bad.push(`entry ${eqRaw}`);
-      if (regime === 'panic') bad.push('regime PANIC');
-      const positives = ok.length ? `<b class="qov-gn">+</b> ${ok.join(', ')}` : '';
-      const negatives = bad.length ? `<b class="qov-rd">−</b> ${bad.join(', ')}` : '';
-      return [positives, negatives].filter(Boolean).join('. ');
-    })();
 
-    // RISKS & INVALIDATION
-    const risksBody = (() => {
-      const items = [];
-      if (stop && px) items.push(`<b>Hard stop:</b> close below <b class="qov-rd">$${stop.toFixed(2)}</b> (${stopPctSigned ? Math.abs(stopPctSigned).toFixed(1) : '—'}% adverse) — thesis broken, exit no questions.`);
-      const failChecklist = (_g('reaction_checklist') || []).filter(r => !r.checked);
-      if (failChecklist.length) items.push(`<b>Reaction-checklist failures:</b> ${failChecklist.slice(0, 3).map(r => r.item).join(' · ')}.`);
-      if (earnDays != null && earnDays >= 0 && earnDays <= 14) items.push(`<b>Earnings risk:</b> print in <b class="qov-am">${earnDays}d</b> with implied ±${impMove == null ? '—' : impMove.toFixed(1) + '%'} — binary event, size accordingly.`);
-      if (regime !== 'panic') items.push(`<b>Regime shift:</b> if regime flips to <b class="qov-rd">panic</b> (VIX &gt; 35 or breadth &lt; 20%), close all longs.`);
-      if (cohortTag === 'COLD') items.push(`<b>Cohort risk:</b> sector cohort tag <b class="qov-rd">COLD</b> (avg ${cohortAvgScore == null ? '—' : cohortAvgScore.toFixed(1)}) — single-name picks underperform in cold cohorts.`);
-      if (fwdCvar != null && fwdCvar < -10) items.push(`<b>Tail risk:</b> CVaR-97.5% <b class="qov-rd">${fwdCvar.toFixed(1)}%</b> (10d) — tail loss exceeds normal stop.`);
-      if (advDol != null && advDol < 5e6) items.push(`<b>Liquidity risk:</b> ADV <b class="qov-rd">${_money(advDol)}</b> &lt; $5M floor — slippage at exit elevated.`);
-      if (shortFloat != null && shortFloat > 25) items.push(`<b>Squeeze risk:</b> short float <b class="qov-am">${shortFloat.toFixed(1)}%</b> — gamma/squeeze risk on adverse moves.`);
-      if (items.length === 0) items.push(`<b>No specific risk surfaced</b> — re-check next scan; absence of risk evidence is not evidence of safety.`);
-      return items.map(i => `<li style="margin-bottom:4px">${i}</li>`).join('');
-    })();
-
-    // PRIMARY THESIS — composed from lead lens with specific evidence
-    const primaryThesis = (() => {
+    // ── PRIMARY THESIS — narrative from lead lens
+    const _leadEvidence = (() => {
       const lead = horizon.lead;
-      const leadNarr = lensNarratives[lead];
-      const setupLine = setup ? `<b>${t.ticker} · ${setup}</b>` : `<b>${t.ticker}</b>`;
-      // Specific evidence call-out by lead lens
-      const evid = lead === 'SWING TRADING'
-        ? `Entry zone <b class="qov-am">$${eLo.toFixed(2)}–$${eHi.toFixed(2)}</b> · stop <b class="qov-rd">$${stop.toFixed(2)}</b> · T1 <b class="qov-gn">$${t1.toFixed(2)}</b> (R:R <b>${rr.toFixed(1)}:1</b>) · current <b>$${px.toFixed(2)}</b> (${chg >= 0 ? '+' : ''}${chg.toFixed(2)}% today)`
-        : lead === 'GRAHAM-BUFFETT VALUE'
-        ? `Fwd P/E <b>${fwdPE == null ? '—' : fwdPE.toFixed(1)}</b> · PEG <b>${peg == null ? '—' : peg.toFixed(2)}</b> · FCF margin <b>${fcfMgn == null ? '—' : fcfMgn.toFixed(1) + '%'}</b> · analyst PT <b>${tgtMean == null ? '—' : '$' + tgtMean.toFixed(0) + (upside == null ? '' : ' (' + (upside >= 0 ? '+' : '') + upside.toFixed(0) + '%)')}</b>`
-        : lead === 'QUANT EARNINGS'
-        ? `ER <b>${earnDays == null ? '—' : 'in ' + earnDays + 'd'}</b> · implied <b>±${impMove == null ? '—' : impMove.toFixed(1) + '%'}</b> · last ${recentEarn.length} prints <b>${beatCount}/${recentEarn.length} beats</b> · revisions ↑${revUp30 == null ? '—' : revUp30}/↓${revDown30 == null ? '—' : revDown30}`
-        : lead === 'HEDGE FUND'
-        ? `MC P(T1) <b>${mcPT1 == null ? '—' : mcPT1.toFixed(0) + '%'}</b> · P(stop) <b>${mcPS == null ? '—' : mcPS.toFixed(0) + '%'}</b> · edge <b>${edge == null ? '—' : (edge >= 0 ? '+' : '') + edge.toFixed(0) + 'pp'}</b> · regime <b>${regime.replace(/_/g, ' ') || '—'}</b>`
-        : `Beta <b>${beta == null ? '—' : beta.toFixed(2)}</b> · Kelly size <b>${finalAllocPct == null ? '—' : finalAllocPct.toFixed(1) + '%'}</b> · ADV <b>${advDol == null ? '—' : _money(advDol)}</b>`;
-      return `${setupLine}. ${leadNarr}<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-family:var(--mono);font-size:11px;color:var(--ink-2)">${evid}</div>`;
+      if (lead === 'SWING TRADING') {
+        return `Entry zone <b class="qov-am">$${eLo.toFixed(2)}–$${eHi.toFixed(2)}</b> · stop <b class="qov-rd">$${stop.toFixed(2)}</b> · T1 <b class="qov-gn">$${t1.toFixed(2)}</b> (R:R <b>${rr.toFixed(1)}:1</b>) · current <b>$${px.toFixed(2)}</b> · setup ${setup || 'unclassified'} · entry quality ${eqRaw || 'unknown'} · MACD ${macdBull ? 'bullish' : 'bearish'} · RSI ${rsi == null ? '—' : rsi.toFixed(0)} · RVOL ${rvol == null ? '—' : rvol.toFixed(2) + '×'}`;
+      }
+      if (lead === 'GRAHAM-BUFFETT VALUE') {
+        return `Fwd P/E <b>${fwdPE == null ? '—' : fwdPE.toFixed(1)}</b> · PEG <b>${peg == null ? '—' : peg.toFixed(2)}</b> · FCF margin <b>${fcfMgn == null ? '—' : fcfMgn.toFixed(1) + '%'}</b> · rev growth <b>${revGr == null ? '—' : (revGr >= 0 ? '+' : '') + revGr.toFixed(1) + '%'}</b> · ROE <b>${roe == null ? '—' : roe.toFixed(1) + '%'}</b> · analyst PT <b>${tgtMean == null ? '—' : '$' + tgtMean.toFixed(0)}</b>${upside == null ? '' : ' (' + (upside >= 0 ? '+' : '') + upside.toFixed(0) + '% upside)'}`;
+      }
+      if (lead === 'QUANT EARNINGS') {
+        return `ER ${earnDays == null ? 'unscheduled' : 'in <b>' + earnDays + 'd</b>'} · implied move <b>${impMove == null ? '—' : '±' + impMove.toFixed(1) + '%'}</b> · prior ${recentEarn.length} prints <b>${beatCount}/${recentEarn.length} beats</b> · revisions 30d ↑${revUp30 == null ? '—' : revUp30}/↓${revDown30 == null ? '—' : revDown30} · IV rank <b>${ivRank == null ? '—' : ivRank.toFixed(0) + '%'}</b>`;
+      }
+      if (lead === 'HEDGE FUND') {
+        return `MC P(T1) <b>${mcPT1 == null ? '—' : mcPT1.toFixed(0) + '%'}</b> · P(stop) <b>${mcPS == null ? '—' : mcPS.toFixed(0) + '%'}</b> · edge <b>${edge == null ? '—' : (edge >= 0 ? '+' : '') + edge.toFixed(0) + 'pp'}</b> · regime <b>${regime.replace(/_/g, ' ')}</b> (BAP ${score}, floor ${regimeF}) · insider 30d ${insiderBuys || 0}B/${insiderSells || 0}S · UOA ${uoaCalls || 0}C/${uoaPuts || 0}P`;
+      }
+      return `Beta <b>${beta == null ? '—' : beta.toFixed(2)}</b> · Kelly alloc <b>${finalAllocPct == null ? '—' : finalAllocPct.toFixed(1) + '%'}</b> · mcap <b>${_money(mcap)}</b> · ADV <b>${advDol == null ? '—' : _money(advDol)}</b> · drawdown mult <b>${ddMult == null ? '—' : ddMult.toFixed(2) + '×'}</b>`;
     })();
 
-    // CROSS-CHECKS — 4 short paragraphs, disagreements flagged
-    const crossChecksBody = (() => {
-      const rows = horizon.cross.map(lensName => {
-        const narr = lensNarratives[lensName] || '—';
-        return `<div style="padding:8px 0;border-bottom:1px dashed var(--line);font-size:11.5px;line-height:1.55">
-          <span style="display:inline-block;min-width:160px;font-family:var(--mono);font-size:9.5px;letter-spacing:0.14em;color:var(--ink-3);font-weight:700;text-transform:uppercase">${lensName}</span>
-          <span style="color:var(--ink-1)">${narr}</span>
-        </div>`;
-      }).join('');
-      // Disagreement detection
-      const disagreements = [];
-      const techBullish = (rsi != null && rsi > 50) && macdBull && above50;
-      const techBearish = (rsi != null && rsi < 50) && !macdBull && !above50;
-      const valueRich = fwdPE != null && fwdPE > 35;
-      const valueCheap = fwdPE != null && fwdPE < 15 && peg != null && peg < 1;
-      const flowBullish = (uoaCalls > 0 || insiderBuys > 0 || newsAvg > 0.05);
-      const flowBearish = (uoaPuts > 0 || insiderSells > 0 || newsAvg < -0.05);
-      if (techBullish && valueRich) disagreements.push('<b class="qov-am">Tech bullish vs Value rich</b> — momentum is real but you\'re paying up. Trim/scale-out discipline matters.');
-      if (techBearish && valueCheap) disagreements.push('<b class="qov-am">Tech bearish vs Value cheap</b> — cheap can stay cheap (value trap risk). Wait for technical confirmation.');
-      if (techBullish && !flowBullish) disagreements.push('<b class="qov-am">Tech bullish but flow neutral</b> — no smart-money confirmation. Retail-driven move?');
-      if (techBearish && flowBullish) disagreements.push('<b class="qov-am">Tech bearish but flow bullish</b> — institutions accumulating into weakness (positive divergence).');
-      const disagreementHTML = disagreements.length
-        ? `<div style="margin-top:10px;padding:10px 12px;background:color-mix(in oklch, var(--amb) 8%, transparent);border-left:2px solid var(--amb);border-radius:2px;font-size:11.5px;line-height:1.55"><b class="qov-am" style="font-family:var(--mono);font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase">⊕ LENS DISAGREEMENTS</b><ul style="margin:6px 0 0 0;padding-left:18px">${disagreements.map(d => `<li style="margin-bottom:3px">${d}</li>`).join('')}</ul></div>`
-        : `<div style="margin-top:10px;padding:8px 12px;font-size:11px;color:var(--ink-3);font-style:italic">No material lens disagreement detected.</div>`;
-      return rows + disagreementHTML;
+    const primaryThesisNarrative = (() => {
+      const lead = horizon.lead;
+      // Direction-aware thesis statement
+      const dir = lensVote[lead] || 'NEUTRAL';
+      let stance;
+      if (lead === 'SWING TRADING') {
+        stance = dir === 'BULLISH' ? `Technical setup is constructive on a ${horizon.name.toLowerCase()} basis.` :
+                 dir === 'BEARISH' ? `Technical setup is deteriorating on a ${horizon.name.toLowerCase()} basis.` :
+                 `Technical setup is mixed — no clear directional edge.`;
+      } else if (lead === 'GRAHAM-BUFFETT VALUE') {
+        stance = dir === 'BULLISH' ? `Quality + reasonable valuation profile — long-term compounder candidate.` :
+                 dir === 'BEARISH' ? `Quality concerns or stretched valuation — value lens dim view.` :
+                 `Valuation in fair-value zone; no obvious mispricing.`;
+      } else if (lead === 'QUANT EARNINGS') {
+        stance = dir === 'BULLISH' ? `Earnings setup tilts positive — prior beats + revisions + reasonable IV.` :
+                 dir === 'BEARISH' ? `Earnings setup is fragile — miss history or negative revisions.` :
+                 `Earnings backdrop is neutral; pre-print binary risk dominates near-term action.`;
+      } else if (lead === 'HEDGE FUND') {
+        stance = dir === 'BULLISH' ? `Asymmetric upside via Monte Carlo edge + smart-money flow.` :
+                 dir === 'BEARISH' ? `Negative-edge MC path + flow positioning is unfavorable.` :
+                 `No identified flow edge; positioning is neutral.`;
+      } else {
+        stance = `Portfolio-fit analysis: position-sizing and risk constraints.`;
+      }
+      return `<b>${t.ticker} · ${t.name || ''}</b>. ${stance} ${_leadEvidence}.`;
     })();
 
-    // BRIEF · SCOPED CSS
-    const BRIEF_CSS = `<style id="qov-brief-style">
-.qov-brief { display:grid; grid-template-columns:1fr; gap:10px; margin-bottom:18px; padding:14px;
-  background:linear-gradient(135deg, color-mix(in oklch, var(--cy) 4%, var(--bg-1)) 0%, var(--bg-1) 50%);
-  border:1px solid var(--line); border-left:3px solid var(--cy); border-radius:3px; }
-.qov-brief-h { display:flex; align-items:center; gap:14px; padding-bottom:10px; border-bottom:1px solid var(--line); font-family:var(--mono); }
-.qov-brief-h-t { font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:var(--cy); font-weight:800; }
-.qov-brief-h-m { font-size:10.5px; color:var(--ink-2); }
-.qov-brief-h-m b { color:var(--ink); font-weight:700; }
-.qov-brief-sec { padding:10px 0; border-bottom:1px solid var(--line); }
-.qov-brief-sec:last-child { border-bottom:none; padding-bottom:0; }
-.qov-brief-k { font-family:var(--mono); font-size:9.5px; letter-spacing:0.18em; text-transform:uppercase; font-weight:800; color:var(--ink-3); margin-bottom:6px; display:flex; align-items:center; gap:8px; }
-.qov-brief-k .pill { font-family:var(--mono); font-size:9px; padding:1px 7px; border-radius:2px; background:var(--bg-2); border:1px solid var(--ink-4); color:var(--ink-2); letter-spacing:0.08em; text-transform:uppercase; font-weight:700; }
-.qov-brief-v { font-size:12.5px; line-height:1.65; color:var(--ink-1); }
-.qov-brief-v b { color:var(--ink); font-weight:700; }
-.qov-brief-call { padding:12px 14px; border-radius:3px; font-size:13px; line-height:1.65; }
-.qov-brief-call.gn { background:color-mix(in oklch, var(--gn) 8%, transparent); border-left:3px solid var(--gn); }
-.qov-brief-call.am { background:color-mix(in oklch, var(--amb) 8%, transparent); border-left:3px solid var(--amb); }
-.qov-brief-call.rd { background:color-mix(in oklch, var(--rd) 8%, transparent); border-left:3px solid var(--rd); }
-.qov-brief-call-h { display:flex; align-items:baseline; gap:14px; margin-bottom:8px; }
-.qov-brief-call-h .badge { font-family:var(--mono); font-size:18px; font-weight:800; letter-spacing:0.08em; }
-.qov-brief-call-h .badge.gn { color:var(--gn); }
-.qov-brief-call-h .badge.am { color:var(--amb); }
-.qov-brief-call-h .badge.rd { color:var(--rd); }
-.qov-brief-conv { display:flex; align-items:center; gap:14px; padding:10px 14px; background:var(--bg-2); border-radius:3px; }
-.qov-brief-conv .lvl { font-family:var(--mono); font-size:16px; font-weight:800; letter-spacing:0.08em; }
-.qov-brief-conv .lvl.gn { color:var(--gn); }
-.qov-brief-conv .lvl.am { color:var(--amb); }
-.qov-brief-conv .lvl.rd { color:var(--rd); }
-.qov-brief-conv .meter { display:flex; height:6px; background:var(--bg-3); border-radius:2px; overflow:hidden; flex:1; min-width:120px; max-width:240px; }
-.qov-brief-conv .meter .fill { background:var(--cy); height:100%; }
-.qov-brief ul { margin:0; padding-left:18px; }
-.qov-brief li { font-size:11.5px; line-height:1.6; color:var(--ink-1); }
+    // ── CALL-SPECIFIC required fields
+    const callBody = (() => {
+      if (analystCall === 'BUY') {
+        const sizeStr = finalAllocPct != null && finalAllocPct > 0 ? `${finalAllocPct.toFixed(1)}% (Kelly-lite)` : `5–8% (regime-capped suggested)`;
+        const catList = (catalystTags || []).slice(0, 3).join(' · ') || (earnDays != null && earnDays <= (maxHoldD || 21) ? `earnings in ${earnDays}d` : 'setup catalyst');
+        return `
+          <div class="qsr-call-row"><span class="qsr-call-k">Entry zone</span><span class="qsr-call-v"><b>$${eLo.toFixed(2)}–$${eHi.toFixed(2)}</b> · ${eqRaw || '—'}</span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Price target (T1)</span><span class="qsr-call-v"><b class="qov-gn">$${t1.toFixed(2)}</b> (+${t1PctSigned ? t1PctSigned.toFixed(1) : '—'}%, R-mult ${rT1 == null ? '—' : rT1.toFixed(1)}R)</span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">T2 / runner</span><span class="qsr-call-v">${t2 ? '<b class="qov-gn">$' + t2.toFixed(2) + '</b> (+' + (t2PctSigned ? t2PctSigned.toFixed(1) : '—') + '%, ' + (rT2 == null ? '—' : rT2.toFixed(1) + 'R') + ')' : 'optional · scale at T1'}</span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Time horizon</span><span class="qsr-call-v"><b>${horizon.name.toLowerCase()}</b> · max hold ${maxHoldD == null ? '—' : maxHoldD + 'd'}</span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Position size</span><span class="qsr-call-v"><b>${sizeStr}</b>${sugShares ? ' · ' + sugShares + ' shares' : ''}</span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Identified catalyst</span><span class="qsr-call-v">${catList}</span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Technical confirmation</span><span class="qsr-call-v">${[macdBull && 'MACD bullish', above50 && 'above EMA50', rvol >= 1.3 && 'RVOL ≥ 1.3×', sqzFired && 'squeeze fired', eqRaw === 'FRESH' && 'fresh pivot'].filter(Boolean).join(' · ') || 'mixed signals — review tech tab'}</span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Risk/reward</span><span class="qsr-call-v"><b>${rr.toFixed(1)}:1</b>${rr < 3 ? ' <span class="qov-am">(below 3:1 floor — size accordingly)</span>' : ''}</span></div>`;
+      }
+      if (analystCall === 'SHORT') {
+        const downsideCat = regime === 'panic' ? 'regime PANIC (no longs survive)' :
+                           critFail && !gates_dec[2].pass ? `MC: P(stop) ${mcPS == null ? '—' : mcPS.toFixed(0) + '%'} > P(T1) ${mcPT1 == null ? '—' : mcPT1.toFixed(0) + '%'}` :
+                           failedGates.length ? `failed core gates: ${failedGates.slice(0, 2).map(g => g.name || g.gate).join(', ')}` :
+                           `valuation + technical breakdown`;
+        const shortEntry = ema50 != null ? `$${ema50.toFixed(2)} (rejection at EMA50)` : `current $${px.toFixed(2)}`;
+        const shortStop = wkHi != null ? `$${(wkHi * 1.02).toFixed(2)} (close above 52w high)` : `+8% above current ($${(px * 1.08).toFixed(2)})`;
+        const expression = ivRank != null && ivRank > 60 ? `long puts (rich IV — also consider put-credit spread if directional with timing)` :
+                          shortFloat > 15 ? `pair-trade vs sector ETF (squeeze risk on outright short)` :
+                          `outright short or 30–60 DTE puts`;
+        const timingWindow = earnDays != null && earnDays >= 0 && earnDays <= 30 ? `earnings in ${earnDays}d (binary catalyst)` :
+                            `${(maxHoldD || 21)}d hold window`;
+        return `
+          <div class="qsr-call-row"><span class="qsr-call-k">Downside catalyst</span><span class="qsr-call-v"><b>${downsideCat}</b></span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Expected timing</span><span class="qsr-call-v">${timingWindow}</span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Entry zone</span><span class="qsr-call-v">near <b>${shortEntry}</b></span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Invalidation</span><span class="qsr-call-v"><b class="qov-rd">${shortStop}</b></span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Expression</span><span class="qsr-call-v"><b>${expression}</b></span></div>
+          <div class="qsr-call-row"><span class="qsr-call-k">Borrow / squeeze risk</span><span class="qsr-call-v">${shortFloat == null ? 'unknown short float — verify before sizing' : shortFloat < 10 ? '<b class="qov-gn">LOW</b> (short float ' + shortFloat.toFixed(1) + '%)' : shortFloat > 25 ? '<b class="qov-rd">HIGH</b> · short float ' + shortFloat.toFixed(1) + '%, days-to-cover ' + (daysToCover == null ? '—' : daysToCover.toFixed(1) + 'd') + ' — squeeze risk material' : '<b class="qov-am">MODERATE</b> · short float ' + shortFloat.toFixed(1) + '%'}</span></div>`;
+      }
+      // WATCH — must surface a SPECIFIC, FALSIFIABLE trigger
+      const triggers = [];
+      if (dataInsufficient) {
+        triggers.push({ k: 'Data trigger', v: `Obtain missing data: <b>${_dataCheck.missCore.join(', ')}</b>${_dataCheck.stale ? ' · scan data ' + (_dataCheck.runAge == null ? '' : _dataCheck.runAge.toFixed(1) + 'd old (refresh required)') : ''}` });
+      }
+      if (eqBad && pullbackZone !== '—') triggers.push({ k: 'Price trigger', v: `Pullback to <b class="qov-am">${pullbackZone}</b> (FRESH/PULLBACK quality)` });
+      if (scoreGap > 0 && scoreGap < 15) {
+        const closestFactor = techS / techMax < 0.6 ? 'TECH' : catS < 14 ? 'CAT' : rsS < 14 ? 'RS' : smS < 10 ? 'SM' : 'QUAL';
+        triggers.push({ k: 'Score trigger', v: `BAP rises ≥<b>${scoreGap}</b> pt to clear ${regimeF} regime floor — closest deficit: <b>${closestFactor}</b>` });
+      }
+      if (earnDays != null && earnDays >= 0 && earnDays <= 14) {
+        triggers.push({ k: 'Earnings trigger', v: `Print on <b>+${earnDays}d</b> — beat with constructive guidance converts to BUY; miss or weak guide converts to SHORT` });
+      }
+      if (regime === 'panic') triggers.push({ k: 'Regime trigger', v: `Regime exits panic (VIX &lt; 35 + breadth &gt; 25%)` });
+      if (setupLBPct != null && setupLBPct < 30) triggers.push({ k: 'Statistical trigger', v: `Setup Wilson LB rises ≥<b>30%</b> (currently <b>${setupLBPct.toFixed(0)}%</b>) — needs more sample` });
+      if (wkHi != null && px < wkHi * 0.98 && techS / techMax > 0.7) {
+        triggers.push({ k: 'Breakout trigger', v: `Daily close above <b>$${wkHi.toFixed(2)}</b> (52w high) on RVOL ≥ 1.5×` });
+      }
+      if (cohortTag === 'COLD') triggers.push({ k: 'Cohort trigger', v: `Sector cohort tag shifts to WARM/HOT (currently <b class="qov-rd">COLD</b>, avg ${cohortAvgScore == null ? '—' : cohortAvgScore.toFixed(1)})` });
+      if (triggers.length === 0) {
+        // Manufacture a structural trigger so WATCH is never empty
+        triggers.push({ k: 'Structural trigger', v: `No single trigger identified — re-evaluate at next scan when 4-of-5 lenses align in the same direction` });
+      }
+      const triggersHTML = triggers.slice(0, 4).map(t => `<div class="qsr-call-row"><span class="qsr-call-k">${t.k}</span><span class="qsr-call-v">${t.v}</span></div>`).join('');
+      const shortTrigger = `<div class="qsr-call-row"><span class="qsr-call-k">↓ Converts to SHORT</span><span class="qsr-call-v">Close below stop <b class="qov-rd">$${stop.toFixed(2)}</b> on RVOL ≥ 1.5×, OR regime flips to panic, OR earnings miss with negative guidance.</span></div>`;
+      return triggersHTML + shortTrigger;
+    })();
+
+    // ── TOP 3 SUPPORTING FACTS — pick strongest signals in the call's direction
+    const supportingFacts = (() => {
+      const candidates = [];
+      // Bullish facts
+      if (callDir === 'BULLISH' || analystCall === 'WATCH') {
+        if (rsRank != null && rsRank >= 75) candidates.push({ score: rsRank, text: `RS rank <b class="qov-gn">${rsRank.toFixed(0)}/100</b> — top-quartile relative strength vs SPY (252d)` });
+        if (edge != null && edge >= 15) candidates.push({ score: edge, text: `Monte Carlo edge <b class="qov-gn">+${edge.toFixed(0)}pp</b> — P(T1)=${mcPT1.toFixed(0)}% vs P(stop)=${mcPS.toFixed(0)}%` });
+        if (rr >= 3) candidates.push({ score: rr * 20, text: `Risk/reward <b class="qov-gn">${rr.toFixed(1)}:1</b> at entry zone — above 3:1 institutional floor` });
+        if (sqzFired) candidates.push({ score: 70, text: `TTM squeeze <b class="qov-gn">FIRED</b> bullish — historically high follow-through on momentum expansion` });
+        if (insiderBuys > 0 && insiderBuys > insiderSells) candidates.push({ score: 60 + insiderBuys, text: `Insider activity: <b class="qov-gn">${insiderBuys} buys</b> vs ${insiderSells} sells (30d)` });
+        if (uoaCalls > 0) candidates.push({ score: 60 + uoaCalls * 5, text: `Unusual options activity: <b class="qov-gn">${uoaCalls} call(s)</b> with volume &gt; 3× OI` });
+        if (revGr != null && revGr > 15) candidates.push({ score: 60 + revGr, text: `Revenue growth <b class="qov-gn">+${revGr.toFixed(1)}% YoY</b> — above 15% threshold` });
+        if (fcfMgn != null && fcfMgn > 15) candidates.push({ score: 60 + fcfMgn, text: `FCF margin <b class="qov-gn">+${fcfMgn.toFixed(1)}%</b> — strong cash generation` });
+        if (peg != null && peg < 1.0) candidates.push({ score: 60 + (1 - peg) * 40, text: `PEG <b class="qov-gn">${peg.toFixed(2)}</b> — growth at reasonable price` });
+        if (recentEarn.length >= 2 && beatCount / recentEarn.length >= 0.75) candidates.push({ score: 70, text: `Earnings track record: <b class="qov-gn">${beatCount}/${recentEarn.length} recent prints beat</b> consensus` });
+        if (revUp30 != null && revDown30 != null && revUp30 > revDown30) candidates.push({ score: 50 + revUp30 * 5, text: `Analyst revisions 30d: <b class="qov-gn">↑${revUp30} / ↓${revDown30}</b> — net bullish` });
+        if (above50 && above200) candidates.push({ score: 50, text: `Price above both EMA50 and SMA200 — bullish technical stack` });
+        if (newsAvg > 0.05) candidates.push({ score: 50 + Math.abs(newsAvg) * 100, text: `News sentiment <b class="qov-gn">improving</b> (${newsCount == null ? '' : newsCount + ' articles, '}avg sentiment ${(newsAvg).toFixed(2)})` });
+      }
+      // Bearish facts (for SHORT or for risk side of WATCH)
+      if (callDir === 'BEARISH') {
+        if (regime === 'panic') candidates.push({ score: 100, text: `Market regime <b class="qov-rd">PANIC</b> — no long setups historically work; defensive only` });
+        if (edge != null && edge < -5) candidates.push({ score: -edge, text: `Negative MC edge: P(stop) ${mcPS.toFixed(0)}% &gt; P(T1) ${mcPT1.toFixed(0)}%` });
+        if (mcPS != null && mcPS > 50) candidates.push({ score: mcPS, text: `Monte Carlo: P(stop hit first) <b class="qov-rd">${mcPS.toFixed(0)}%</b>` });
+        if (insiderSells > insiderBuys && insiderSells > 0) candidates.push({ score: 60 + insiderSells, text: `Insider distribution: <b class="qov-rd">${insiderSells} sells</b> vs ${insiderBuys || 0} buys (30d)` });
+        if (fwdPE != null && fwdPE > 40) candidates.push({ score: fwdPE, text: `Forward P/E <b class="qov-rd">${fwdPE.toFixed(1)}</b> — significantly above sector` });
+        if (revGr != null && revGr < 0) candidates.push({ score: 60 - revGr, text: `Revenue contracting <b class="qov-rd">${revGr.toFixed(1)}%</b> YoY` });
+        if (revUp30 != null && revDown30 != null && revDown30 > revUp30) candidates.push({ score: 50 + revDown30 * 5, text: `Analyst revisions 30d: <b class="qov-rd">↑${revUp30} / ↓${revDown30}</b> — net bearish` });
+        if (cohortTag === 'COLD') candidates.push({ score: 60, text: `Sector cohort tag <b class="qov-rd">COLD</b> (avg ${cohortAvgScore == null ? '—' : cohortAvgScore.toFixed(1)}) — peer weakness` });
+      }
+      candidates.sort((a, b) => b.score - a.score);
+      const top = candidates.slice(0, 3);
+      if (top.length === 0) {
+        return `<li class="qov-dim">No standout supporting facts in current dataset — see EVIDENCE PACK below.</li>`;
+      }
+      return top.map(c => `<li>${c.text}</li>`).join('');
+    })();
+
+    // ── TOP 3 RISKS — specific, observable, ranked by severity
+    const risksList = (() => {
+      const candidates = [];
+      if (stop && px) candidates.push({ score: 100, text: `<b>Hard stop hit:</b> close below <b class="qov-rd">$${stop.toFixed(2)}</b> (${stopPctSigned == null ? '—' : Math.abs(stopPctSigned).toFixed(1)}% adverse) — thesis broken, exit no questions.` });
+      if (earnDays != null && earnDays >= 0 && earnDays <= 14) candidates.push({ score: 90, text: `<b>Earnings binary:</b> print in <b class="qov-am">${earnDays}d</b> with implied move <b>${impMove == null ? '—' : '±' + impMove.toFixed(1) + '%'}</b> — overnight gap risk dwarfs intraday stop discipline.` });
+      if (regime !== 'panic') candidates.push({ score: 60, text: `<b>Regime shift:</b> if regime flips to <b class="qov-rd">panic</b> (VIX &gt; 35 OR breadth &lt; 20%), all longs go to cash regardless of single-name technicals.` });
+      if (fwdCvar != null && fwdCvar < -10) candidates.push({ score: 80, text: `<b>Tail risk:</b> CVaR-97.5% <b class="qov-rd">${fwdCvar.toFixed(1)}%</b> (${fwdHorizon || 10}d) — tail loss exceeds nominal stop; check options hedge.` });
+      if (advDol != null && advDol < 5e6) candidates.push({ score: 75, text: `<b>Liquidity:</b> ADV <b class="qov-rd">${_money(advDol)}</b> &lt; $5M floor — slippage at exit may exceed 0.5%.` });
+      if (shortFloat != null && shortFloat > 25) candidates.push({ score: 70, text: `<b>Squeeze risk:</b> short float <b class="qov-am">${shortFloat.toFixed(1)}%</b>, days-to-cover ${daysToCover == null ? '—' : daysToCover.toFixed(1)}d — gamma squeeze on adverse moves.` });
+      if (cohortTag === 'COLD') candidates.push({ score: 65, text: `<b>Cohort weakness:</b> sector cohort tag <b class="qov-rd">COLD</b> — single-name picks underperform when peer breadth deteriorates.` });
+      if (eqBad) candidates.push({ score: 85, text: `<b>Entry extension:</b> entry quality <b class="qov-rd">${eqRaw}</b> — chase territory; risk/reward at current price likely below 3:1.` });
+      if (_dataCheck.flag !== 'COMPLETE') candidates.push({ score: 50, text: `<b>Data risk:</b> completeness flag <b class="qov-am">${_dataCheck.flag}</b> — ${_dataCheck.missCore.length ? 'missing core: ' + _dataCheck.missCore.join(', ') : 'missing quality: ' + _dataCheck.missQuality.slice(0, 3).join(', ')}.` });
+      const failChecklist = (_g('reaction_checklist') || []).filter(r => !r.checked);
+      if (failChecklist.length >= 2) candidates.push({ score: 55, text: `<b>Reaction-checklist gaps:</b> ${failChecklist.slice(0, 2).map(r => r.item).join(' · ')}.` });
+      candidates.sort((a, b) => b.score - a.score);
+      const top = candidates.slice(0, 3);
+      if (top.length === 0) return `<li class="qov-dim">No specific risks surfaced — absence of risk evidence is not evidence of safety.</li>`;
+      return top.map(c => `<li>${c.text}</li>`).join('');
+    })();
+
+    // ── INVALIDATION CONDITION — what proves this call wrong
+    const invalidation = (() => {
+      if (analystCall === 'BUY') {
+        return `Close below <b class="qov-rd">$${stop.toFixed(2)}</b> on volume (${stopPctSigned == null ? '—' : Math.abs(stopPctSigned).toFixed(1)}% adverse). Also invalidated if: regime flips to <b>panic</b>; ${eqRaw === 'FRESH' ? 'price extends &gt; 2 ATR above entry zone before action' : 'pullback violates the value zone'}; earnings miss with negative guidance (if in window).`;
+      }
+      if (analystCall === 'SHORT') {
+        const upStop = wkHi != null ? `$${(wkHi * 1.02).toFixed(2)}` : `$${(px * 1.08).toFixed(2)}`;
+        return `Daily close above <b class="qov-gn">${upStop}</b> on RVOL ≥ 1.5×. Also invalidated if: regime flips to <b>risk_on_trending</b>; positive surprise + guide-raise on next earnings print; institutional buying ramps (insider buys spike, UOA call-heavy).`;
+      }
+      // WATCH
+      return `Watch is invalidated when: (a) any trigger above fires → call upgrades to BUY/SHORT, OR (b) thesis breaks structurally — close below <b class="qov-rd">$${stop.toFixed(2)}</b> on volume invalidates the long thesis entirely (not WATCH); regime flips to panic or earnings miss with negative guidance.`;
+    })();
+
+    // ── CROSS-CHECK rendering with disagreement detection
+    const _lensSwingTrading = () => {
+      const parts = [];
+      if (rsi != null) parts.push(`RSI ${rsi.toFixed(0)}${rsi > 70 ? ' (OB)' : rsi < 30 ? ' (OS)' : ''}`);
+      parts.push(`MACD ${macdBull ? 'bull' : 'bear'}`);
+      if (adx != null) parts.push(`ADX ${adx.toFixed(0)}`);
+      if (rvol != null) parts.push(`RVOL ${rvol.toFixed(2)}×`);
+      if (sqzFired) parts.push('squeeze fired');
+      else if (sqzOn) parts.push('squeeze coiling');
+      if (rsRank != null) parts.push(`RS ${rsRank.toFixed(0)}/100`);
+      parts.push(`entry ${eqRaw || '—'}`);
+      return parts.join(', ');
+    };
+    const _lensHedgeFund = () => {
+      const parts = [];
+      parts.push(`regime ${regime.replace(/_/g, ' ')} (BAP ${score}/${regimeF})`);
+      if (mcPT1 != null && mcPS != null) parts.push(`MC edge ${edge >= 0 ? '+' : ''}${edge.toFixed(0)}pp`);
+      if (insiderBuys || insiderSells) parts.push(`insider ${insiderBuys}B/${insiderSells}S`);
+      if (uoaCalls > 0) parts.push(`UOA ${uoaCalls}C`);
+      if (uoaPuts > 0) parts.push(`UOA ${uoaPuts}P`);
+      if (shortFloat != null) parts.push(`short ${shortFloat.toFixed(1)}%`);
+      if (newsMom) parts.push(`news ${newsMom}`);
+      return parts.join(', ');
+    };
+    const _lensValue = () => {
+      const parts = [];
+      if (fwdPE != null) parts.push(`fwd P/E ${fwdPE.toFixed(1)}`);
+      if (peg != null) parts.push(`PEG ${peg.toFixed(2)}`);
+      if (revGr != null) parts.push(`rev ${revGr >= 0 ? '+' : ''}${revGr.toFixed(1)}%`);
+      if (fcfMgn != null) parts.push(`FCF ${fcfMgn >= 0 ? '+' : ''}${fcfMgn.toFixed(1)}%`);
+      if (roe != null) parts.push(`ROE ${roe.toFixed(1)}%`);
+      if (debtEq != null) parts.push(`D/E ${debtEq.toFixed(1)}`);
+      if (upside != null) parts.push(`PT upside ${upside >= 0 ? '+' : ''}${upside.toFixed(0)}%`);
+      return parts.length ? parts.join(', ') : 'fundamentals not wired';
+    };
+    const _lensEarnings = () => {
+      const parts = [];
+      if (earnDays != null && earnDays >= 0) parts.push(`ER +${earnDays}d`);
+      else parts.push(earnHist.length ? 'no upcoming ER' : 'no earnings data');
+      if (impMove != null) parts.push(`implied ±${impMove.toFixed(1)}%`);
+      if (recentEarn.length) parts.push(`${beatCount}/${recentEarn.length} beats`);
+      if (medianSurp != null) parts.push(`median surprise ${medianSurp >= 0 ? '+' : ''}${medianSurp.toFixed(1)}%`);
+      if (revUp30 != null && revDown30 != null) parts.push(`revs ↑${revUp30}/↓${revDown30}`);
+      if (ivRank != null) parts.push(`IV rank ${ivRank.toFixed(0)}`);
+      return parts.join(', ');
+    };
+    const _lensCFP = () => {
+      const parts = [];
+      if (finalAllocPct != null) parts.push(`Kelly ${finalAllocPct.toFixed(1)}%`);
+      if (beta != null) parts.push(`β ${beta.toFixed(2)}`);
+      if (mcap != null) parts.push(`mcap ${_money(mcap)}`);
+      if (advDol != null) parts.push(`ADV ${_money(advDol)}`);
+      if (ddMult != null && ddMult < 1) parts.push(`DD haircut ${ddMult.toFixed(2)}×`);
+      if (erMult != null && erMult < 1) parts.push(`ER haircut ${erMult.toFixed(2)}×`);
+      return parts.join(', ');
+    };
+    const lensSummaries = {
+      'SWING TRADING':        _lensSwingTrading(),
+      'HEDGE FUND':           _lensHedgeFund(),
+      'GRAHAM-BUFFETT VALUE': _lensValue(),
+      'GRAHAM-BUFFETT':       _lensValue(),
+      'QUANT EARNINGS':       _lensEarnings(),
+      'CFP':                  _lensCFP(),
+    };
+    const _alignPill = (vote) => {
+      if (callDir == null) return `<span class="qov-mpill" style="opacity:.7">${vote}</span>`;
+      if (vote === callDir) return `<span class="qov-mpill gn">${vote} · aligned</span>`;
+      if (vote === 'NEUTRAL') return `<span class="qov-mpill" style="opacity:.8">${vote}</span>`;
+      return `<span class="qov-mpill rd">${vote} · disagrees</span>`;
+    };
+    const crossCheckRows = distinctLenses.map(L => {
+      const vote = lensVote[L];
+      const isLead = L === horizon.lead || (L === 'GRAHAM-BUFFETT VALUE' && horizon.lead === 'GRAHAM-BUFFETT VALUE');
+      return `<div class="qsr-cc-row">
+        <span class="qsr-cc-l">${L}${isLead ? ' <span class="qov-cy" style="font-size:9px;font-weight:700;letter-spacing:0.1em">★ LEAD</span>' : ''}</span>
+        <span class="qsr-cc-vote">${_alignPill(vote)}</span>
+        <span class="qsr-cc-summary">${lensSummaries[L] || '—'}</span>
+      </div>`;
+    }).join('');
+    const disagreements = distinctVotes.filter(v => callDir && v.vote === (callDir === 'BULLISH' ? 'BEARISH' : 'BULLISH'));
+    const disagreementNote = disagreements.length === 0 ? '' :
+      `<div class="qsr-cc-disagree">
+        <span class="qov-am" style="font-family:var(--mono);font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;font-weight:800">⊕ DISAGREEMENT</span>
+        <span style="font-size:11.5px;color:var(--ink-1);margin-left:8px">${disagreements.length} lens${disagreements.length>1?'es':''} disagree with call (${disagreements.map(d => d.lens).join(', ')}). ${disagreements.length === 1 ? 'Reasoned through above.' : 'Reduces conviction.'}</span>
+      </div>`;
+
+    // ── DATA COMPLETENESS / FRESHNESS rendering
+    const dataCFlag = _dataCheck.flag;
+    const dataCCls = dataCFlag === 'COMPLETE' ? 'gn' : dataCFlag === 'PARTIAL' ? 'am' : 'rd';
+    const dataCNote = (() => {
+      const notes = [];
+      if (_dataCheck.missCore.length) notes.push(`missing core: ${_dataCheck.missCore.join(', ')}`);
+      if (_dataCheck.missQuality.length) notes.push(`missing quality: ${_dataCheck.missQuality.slice(0, 5).join(', ')}${_dataCheck.missQuality.length > 5 ? '…' : ''}`);
+      if (_dataCheck.stale) notes.push(`scan data ${_dataCheck.runAge == null ? 'unknown age' : _dataCheck.runAge.toFixed(1) + 'd old'}`);
+      return notes.length ? notes.join(' · ') : 'all required fields present and fresh';
+    })();
+
+    // ── AS-OF TIMESTAMP + sources
+    const asOfTs = (DATA.run_timestamp || DATA.run_date || '').toString() || 'unavailable';
+    const sourcesList = [
+      `Price: ${asOfTs}`,
+      `Fundamentals: ${fr.period || fd.period || ana.last_update || 'most recent EODHD pull'}`,
+      `Earnings est: ${(ana.earnings_estimate?.['0q']?.last_update) || 'EODHD analyst feed'}`,
+      `Options: ${(oi.last_update || 'Schwab chain, 2h cache')}`,
+      `Insider: ${ins.last_update || 'EODHD + SEC EDGAR cross-check'}`,
+      `Scan run: ${asOfTs}`,
+    ];
+
+    // ── SCOPED CSS for the new structured report
+    const QSR_CSS = `<style id="qsr-style">
+.qsr { display:flex; flex-direction:column; gap:10px; margin-bottom:18px; padding:0;
+  background:var(--bg-1); border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+.qsr-h { display:flex; align-items:center; gap:14px; padding:12px 16px;
+  background:linear-gradient(135deg, color-mix(in oklch, var(--cy) 8%, var(--bg-2)) 0%, var(--bg-2) 70%);
+  border-bottom:1px solid var(--line); font-family:var(--mono); }
+.qsr-h-t { font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:var(--cy); font-weight:800; }
+.qsr-tk { font-size:18px; font-weight:800; color:var(--ink); letter-spacing:0.02em; }
+.qsr-name { font-size:11.5px; color:var(--ink-2); }
+.qsr-asof { margin-left:auto; font-size:10px; color:var(--ink-3); }
+.qsr-asof b { color:var(--ink-1); font-weight:600; }
+.qsr-meta-row { display:flex; align-items:center; gap:14px; padding:10px 16px;
+  background:var(--bg-2); border-bottom:1px solid var(--line); font-family:var(--mono); font-size:10.5px; flex-wrap:wrap; }
+.qsr-meta-k { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-3); font-weight:700; }
+.qsr-meta-v { color:var(--ink-1); font-weight:700; }
+.qsr-meta-v.gn { color:var(--gn); } .qsr-meta-v.am { color:var(--amb); } .qsr-meta-v.rd { color:var(--rd); }
+.qsr-call-badge { font-size:18px; font-weight:800; letter-spacing:0.08em; padding:3px 12px; border-radius:3px; }
+.qsr-call-badge.gn { color:var(--gn); background:color-mix(in oklch, var(--gn) 14%, transparent); border:1px solid color-mix(in oklch, var(--gn) 40%, transparent); }
+.qsr-call-badge.am { color:var(--amb); background:color-mix(in oklch, var(--amb) 14%, transparent); border:1px solid color-mix(in oklch, var(--amb) 40%, transparent); }
+.qsr-call-badge.rd { color:var(--rd); background:color-mix(in oklch, var(--rd) 14%, transparent); border:1px solid color-mix(in oklch, var(--rd) 40%, transparent); }
+.qsr-conv-badge { font-size:11.5px; font-weight:800; padding:2px 10px; border-radius:3px; letter-spacing:0.08em; }
+.qsr-conv-badge.gn { color:var(--gn); background:var(--gn-bg); border:1px solid #2f6b41; }
+.qsr-conv-badge.am { color:var(--amb); background:var(--amb-bg); border:1px solid #8c5d20; }
+.qsr-conv-badge.rd { color:var(--rd); background:var(--rd-bg); border:1px solid #7a2a22; }
+
+.qsr-sec { padding:11px 16px; border-bottom:1px solid var(--line); }
+.qsr-sec:last-child { border-bottom:none; }
+.qsr-sec-k { font-family:var(--mono); font-size:9.5px; letter-spacing:0.18em; text-transform:uppercase;
+  font-weight:800; color:var(--ink-3); margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+.qsr-sec-k .num { color:var(--cy); font-size:10px; }
+.qsr-sec-v { font-size:12.5px; line-height:1.65; color:var(--ink-1); }
+.qsr-sec-v b { color:var(--ink); font-weight:700; }
+.qsr-sec-v ol, .qsr-sec-v ul { margin:0; padding-left:22px; }
+.qsr-sec-v li { font-size:12px; line-height:1.6; margin-bottom:4px; }
+
+.qsr-call-row { display:grid; grid-template-columns:200px 1fr; gap:14px; padding:5px 0;
+  font-family:var(--mono); font-size:11.5px; align-items:baseline; border-bottom:1px dashed var(--line); }
+.qsr-call-row:last-child { border-bottom:none; }
+.qsr-call-k { font-size:9.5px; letter-spacing:0.14em; text-transform:uppercase;
+  color:var(--ink-3); font-weight:700; }
+.qsr-call-v { color:var(--ink-1); }
+.qsr-call-v b { color:var(--ink); font-weight:700; }
+
+.qsr-cc-row { display:grid; grid-template-columns:200px auto 1fr; gap:14px; padding:7px 0;
+  font-family:var(--mono); font-size:11.5px; align-items:baseline; border-bottom:1px dashed var(--line); }
+.qsr-cc-row:last-child { border-bottom:none; }
+.qsr-cc-l { font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-2); font-weight:800; }
+.qsr-cc-summary { color:var(--ink-1); font-size:11.5px; }
+.qsr-cc-disagree { margin-top:8px; padding:8px 12px; background:color-mix(in oklch, var(--amb) 8%, transparent);
+  border-left:2px solid var(--amb); border-radius:2px; }
+
+.qsr-rationale { font-size:11.5px; line-height:1.6; color:var(--ink-2); padding:6px 12px;
+  background:var(--bg-2); border-radius:2px; margin-top:4px; }
+.qsr-sources { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; font-family:var(--mono); font-size:11px; color:var(--ink-2); }
+.qsr-sources span b { color:var(--ink-1); font-weight:700; }
+
+@media (max-width: 900px) {
+  .qsr-call-row, .qsr-cc-row { grid-template-columns:1fr; gap:4px; }
+}
 </style>`;
 
-    const analystBrief = `${BRIEF_CSS}
-      <div class="qov-brief">
-        <div class="qov-brief-h">
-          <span class="qov-brief-h-t">◈ Senior Buy-Side Analyst Brief</span>
-          <span class="qov-brief-h-m">5 integrated lenses · 1 of 3 calls — no hedging</span>
+    // Aliases used in the template
+    const tkName = t.name || t.company_name || '';
+    const callTypeNote = analystCall === 'BUY' ? 'active · actionable now'
+                       : analystCall === 'WATCH' ? 'valid but not actionable · trigger required'
+                       : 'asymmetric downside · acknowledged squeeze/borrow risk';
+
+    // ── ASSEMBLE the structured analysis report
+    const analystBrief = `${QSR_CSS}
+      <div class="qsr">
+        <div class="qsr-h">
+          <span class="qsr-h-t">◈ Structured Equity Analysis</span>
+          <span class="qsr-tk">${t.ticker}</span>
+          <span class="qsr-name">${tkName ? '· ' + tkName : ''}</span>
+          <span class="qsr-asof">As of <b>${asOfTs}</b> · Price <b>$${px.toFixed(2)}</b>${chg ? ' (' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%)' : ''}</span>
         </div>
 
-        <div class="qov-brief-sec">
-          <div class="qov-brief-k">① SETUP <span class="pill">${horizon.name}</span> <span class="pill">${horizon.range}</span> <span class="pill">lead: ${horizon.lead}</span></div>
-          <div class="qov-brief-v">Question: <b>${t.ticker} — should I act now, wait, or fade?</b> &nbsp;·&nbsp; Natural horizon: <b>${horizon.name.toLowerCase()}</b> (${horizon.range}; max hold ${maxHoldD == null ? '—' : maxHoldD + 'd'}). &nbsp;·&nbsp; Lead lens: <b>${horizon.lead}</b>. Other 4 lenses used as cross-checks.</div>
+        <div class="qsr-meta-row">
+          <span><span class="qsr-meta-k">Horizon</span> <span class="qsr-meta-v">${horizon.name}</span> <span style="color:var(--ink-3)">(${horizon.range})</span></span>
+          <span><span class="qsr-meta-k">Lead lens</span> <span class="qsr-meta-v">${horizon.lead}</span></span>
+          <span style="margin-left:auto"><span class="qsr-meta-k">Call</span> <span class="qsr-call-badge ${callC}">${analystCall}</span> <span style="color:var(--ink-3);font-size:10px">${callTypeNote}</span></span>
+          <span><span class="qsr-meta-k">Conviction</span> <span class="qsr-conv-badge ${convCls}">${convLevel}</span></span>
+          <span><span class="qsr-meta-k">Data</span> <span class="qsr-conv-badge ${dataCCls}">${dataCFlag}</span></span>
         </div>
 
-        <div class="qov-brief-sec">
-          <div class="qov-brief-k">② PRIMARY THESIS <span class="pill">${horizon.lead}</span></div>
-          <div class="qov-brief-v">${primaryThesis}</div>
+        <div class="qsr-sec">
+          <div class="qsr-sec-k"><span class="num">①</span> PRIMARY THESIS <span style="color:var(--ink-4);font-weight:500;letter-spacing:0.08em;text-transform:none">— ${horizon.lead} lens</span></div>
+          <div class="qsr-sec-v">${primaryThesisNarrative}</div>
         </div>
 
-        <div class="qov-brief-sec">
-          <div class="qov-brief-k">③ CROSS-CHECKS · 4 lenses · disagreements flagged</div>
-          <div class="qov-brief-v">${crossChecksBody}</div>
+        <div class="qsr-sec">
+          <div class="qsr-sec-k"><span class="num">②</span> CALL · ${analystCall} <span style="color:var(--ink-4);font-weight:500;letter-spacing:0.08em;text-transform:none">— required fields</span></div>
+          <div class="qsr-sec-v">${callBody}</div>
         </div>
 
-        <div class="qov-brief-sec">
-          <div class="qov-brief-k">④ CALL</div>
-          <div class="qov-brief-call ${callC}">
-            <div class="qov-brief-call-h">
-              <span class="badge ${callC}">${analystCall}</span>
-              <span style="font-family:var(--mono);font-size:10px;letter-spacing:0.14em;color:var(--ink-3);text-transform:uppercase;font-weight:700">${analystCall === 'BUY' ? '· active now' : analystCall === 'WATCH' ? '· trigger required' : '· asymmetric downside'}</span>
-            </div>
-            <div style="font-size:12.5px;line-height:1.7;color:var(--ink-1)">${callBody}</div>
-          </div>
+        <div class="qsr-sec">
+          <div class="qsr-sec-k"><span class="num">③</span> CROSS-CHECK SUMMARY <span style="color:var(--ink-4);font-weight:500;letter-spacing:0.08em;text-transform:none">— ${callDir ? alignedCount + ' of 5 lenses aligned ' + callDir : 'lens votes (call=WATCH, no alignment direction)'}</span></div>
+          <div class="qsr-sec-v">${crossCheckRows}${disagreementNote}</div>
         </div>
 
-        <div class="qov-brief-sec">
-          <div class="qov-brief-k">⑤ RISKS &amp; INVALIDATION</div>
-          <div class="qov-brief-v"><ul>${risksBody}</ul></div>
+        <div class="qsr-sec">
+          <div class="qsr-sec-k"><span class="num">④</span> TOP 3 SUPPORTING FACTS</div>
+          <div class="qsr-sec-v"><ol>${supportingFacts}</ol></div>
         </div>
 
-        <div class="qov-brief-sec">
-          <div class="qov-brief-k">⑥ CONVICTION</div>
-          <div class="qov-brief-conv">
-            <span class="lvl ${convCls}">${convLevel}</span>
-            <span class="meter"><span class="fill" style="width:${(convScore.pct * 100).toFixed(0)}%"></span></span>
-            <span style="font-family:var(--mono);font-size:10.5px;color:var(--ink-3)">${convScore.score}/${convScore.max} factors</span>
-          </div>
-          <div class="qov-brief-v" style="margin-top:6px;font-size:11.5px;color:var(--ink-2);line-height:1.6">${convReason}</div>
+        <div class="qsr-sec">
+          <div class="qsr-sec-k"><span class="num">⑤</span> TOP 3 RISKS</div>
+          <div class="qsr-sec-v"><ol>${risksList}</ol></div>
+        </div>
+
+        <div class="qsr-sec">
+          <div class="qsr-sec-k"><span class="num">⑥</span> INVALIDATION CONDITION</div>
+          <div class="qsr-sec-v">${invalidation}</div>
+        </div>
+
+        <div class="qsr-sec">
+          <div class="qsr-sec-k"><span class="num">⑦</span> CONVICTION · <span class="qsr-conv-badge ${convCls}">${convLevel}</span></div>
+          <div class="qsr-sec-v"><div class="qsr-rationale">${convRationale}</div></div>
+        </div>
+
+        <div class="qsr-sec">
+          <div class="qsr-sec-k"><span class="num">⑧</span> DATA COMPLETENESS · <span class="qsr-conv-badge ${dataCCls}">${dataCFlag}</span></div>
+          <div class="qsr-sec-v"><div class="qsr-rationale">${dataCNote}</div></div>
+        </div>
+
+        <div class="qsr-sec">
+          <div class="qsr-sec-k"><span class="num">⑨</span> SOURCES &amp; FRESHNESS</div>
+          <div class="qsr-sec-v"><div class="qsr-sources">${sourcesList.map(s => `<span>${s.replace(/^([^:]+):/, '<b>$1:</b>')}</span>`).join('')}</div></div>
         </div>
       </div>`;
 
