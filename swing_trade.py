@@ -3811,6 +3811,37 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _be:
         log.warning(f"last_bundle.json write failed: {_be}")
 
+    # Audit-trail meta write — records "what did the last successful scan
+    # find" in Supabase public.meta. Cheap (single upsert), never raises
+    # (safe_upsert returns False on failure), gives a queryable cross-session
+    # audit trail without scraping log files. Added 2026-05-11 alongside the
+    # 0022_meta migration that created the table.
+    try:
+        import subprocess
+        from supabase_client import safe_upsert as _sb_upsert
+        try:
+            _git_sha = subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=str(BASE_DIR), stderr=subprocess.DEVNULL,
+                timeout=2
+            ).decode().strip()
+        except Exception:
+            _git_sha = None
+        _meta_payload = {
+            "scan_at":       run_timestamp,
+            "run_date":      run_date,
+            "regime":        (regime.get("regime4") if isinstance(regime, dict) else regime) or "unknown",
+            "buy_count":     len(buy_candidates or []),
+            "watch_count":   len(watch_list or []),
+            "short_count":   len(sell_candidates or []),
+            "killed_count":  len(killed or []),
+            "scan_count":    len(all_results or []),
+            "git_sha":       _git_sha,
+        }
+        _sb_upsert("meta", {"key": "last_scan", "value": _meta_payload}, on_conflict="key")
+    except Exception as _me:
+        log.debug(f"meta upsert skipped (non-fatal): {_me}")
+
     # Mirror the full scan into Supabase (analysis-domain tables).
     # Non-fatal: errors logged but never break the scan.
     try:
