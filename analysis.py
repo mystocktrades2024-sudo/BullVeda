@@ -9523,8 +9523,37 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             # value), so EMA21 Pullback / 52wk Breakout / Variant F TC×bull
             # kills never fired despite being in config with evidence backing.
             # Root cause of 12.7% live BUY WR over 2 weeks (n=63).
+            _pre_mult_score = float(normalized)
             normalized = float(normalized) * _setup_mult
+            # SCORE-MULT-AUDIT-TRAIL (2026-05-12) — when the multiplier zeros or
+            # demotes the score, stamp WHY on the result row. Without this trail,
+            # CF-class confusion happens: top-level setup_family says "Breakout
+            # Expansion" while plan.setup_type says "EMA21 Pullback" (in kill list).
+            # User sees score=0 with no visible reason.
+            if _setup_mult == 0.0:
+                _setup_mult_audit = {
+                    "killed": True,
+                    "raw_setup": _setup_for_mult,
+                    "pre_mult_score": round(_pre_mult_score, 1),
+                    "multiplier": 0.0,
+                    "reason": f"setup_score_multiplier kill: '{_setup_for_mult}' = 0.0",
+                    "source": (_validations.get(_setup_for_mult) or {}).get("note", ""),
+                }
+            elif _setup_mult < 1.0:
+                _setup_mult_audit = {
+                    "killed": False,
+                    "raw_setup": _setup_for_mult,
+                    "pre_mult_score": round(_pre_mult_score, 1),
+                    "multiplier": _setup_mult,
+                    "reason": f"setup_score_multiplier demote: '{_setup_for_mult}' × {_setup_mult}",
+                    "source": (_validations.get(_setup_for_mult) or {}).get("note", ""),
+                }
+            else:
+                _setup_mult_audit = None
+        else:
+            _setup_mult_audit = None
     except Exception:
+        _setup_mult_audit = None
         pass
 
     # Ranking flaw #13: collapse 0.1pp float noise. Keep the full-precision value
@@ -9800,6 +9829,11 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         "name": info.get("name", ticker),
         "price": price,
         "sizing_multiplier": _sizing_multiplier,  # checklist 7.3 — sizing-only
+        # SCORE-MULT-AUDIT-TRAIL (2026-05-12) — surface why score was killed/demoted
+        # by the setup_score_multiplier path. Without this, score=0 is opaque to
+        # the user (CF case: setup_family=Breakout Expansion + plan.setup_type=
+        # EMA21 Pullback → mult=0.0 → score=0 with no visible reason).
+        "score_mult_audit": _setup_mult_audit if '_setup_mult_audit' in dir() else None,
 
         "star_rating": star_rating,
         "sector": info.get("sector", "Unknown"),
