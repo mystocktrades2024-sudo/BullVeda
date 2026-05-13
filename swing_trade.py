@@ -1094,10 +1094,12 @@ def run_daily_scan(force_fresh: bool = False):
     # is a fragile-bull signal that breadth/VIX/EMA gates miss. Merge the
     # dispersion stats into the regime dict and downgrade risk_on_trending
     # to risk_on_choppy when leadership is narrow OR rotation is defensive.
+    # 2026-05-13 KILLSWITCH: gated by regime_classifier.gate_sector_dispersion_enabled
+    _gate_sd_on = bool((cfg.get("regime_classifier") or {}).get("gate_sector_dispersion_enabled", True))
     _disp = compute_sector_dispersion(sector_etf_data) if sector_etf_data else {}
     if _disp and not _disp.get("_error"):
         regime["sector_dispersion"] = _disp
-        if _disp.get("downgrade_regime") and regime.get("regime4") == "risk_on_trending":
+        if _gate_sd_on and _disp.get("downgrade_regime") and regime.get("regime4") == "risk_on_trending":
             _orig = regime["regime4"]
             regime["regime4_pre_dispersion"] = _orig
             regime["regime4"] = "risk_on_choppy"
@@ -1126,9 +1128,11 @@ def run_daily_scan(force_fresh: bool = False):
     #   panic:   risk_on_choppy → risk_off_trending
     # Reference: S&P credit research 2002-2022 — HYG/LQD chg20 < -2%
     # preceded 60% of 5%+ SPX corrections within 4 weeks.
+    # 2026-05-13 KILLSWITCH: gated by regime_classifier.gate_credit_spreads_enabled
+    _gate_credit_on = bool((cfg.get("regime_classifier") or {}).get("gate_credit_spreads_enabled", True))
     _credit = (macro_signals or {}).get("credit") or {}
     _credit_state = _credit.get("state", "unknown")
-    if _credit_state and _credit_state not in ("unknown", "healthy"):
+    if _gate_credit_on and _credit_state and _credit_state not in ("unknown", "healthy"):
         regime["credit_state"] = _credit_state
         regime["credit_chg20"] = _credit.get("hyg_lqd_chg20")
         _orig_regime4 = regime.get("regime4")

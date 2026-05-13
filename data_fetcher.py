@@ -2686,6 +2686,10 @@ def get_market_regime(breadth: dict | None = None) -> dict:
         _trending_vix       = _thr_cfg.get("trending_vix", 20.0)         # was 18 pre-V4
         _trending_breadth   = _thr_cfg.get("trending_breadth", 60.0)     # was 65 pre-V4
         _risk_off_n_closes  = int(_thr_cfg.get("risk_off_consecutive_closes", 2))  # was 1 pre-V4
+        # 2026-05-13 KILLSWITCH flags for the 3 in-classifier regime gates
+        _gate_vix_dyn_on    = bool(_thr_cfg.get("gate_vix_dynamics_enabled", True))
+        _gate_dist_on       = bool(_thr_cfg.get("gate_distribution_days_enabled", True))
+        _gate_hmm_on        = bool(_thr_cfg.get("gate_hmm_blend_enabled", True))
 
         # Apply hysteresis: use buffered thresholds based on current regime direction
         _is_currently_risk_off = _prev_regime4 in ("risk_off_trending", "panic")
@@ -2785,7 +2789,7 @@ def get_market_regime(breadth: dict | None = None) -> dict:
         #     of absolute level (vol-regime velocity gate)
         # Don't touch panic — already at max defensive.
         _vol_state = (vix_data or {}).get("vol_state", "unknown")
-        if _vol_state == "spike_imminent" and regime4 in ("risk_on_trending", "risk_on_choppy"):
+        if _gate_vix_dyn_on and _vol_state == "spike_imminent" and regime4 in ("risk_on_trending", "risk_on_choppy"):
             _orig_regime4 = regime4
             regime4 = "risk_off_trending"
             log.info(
@@ -2793,7 +2797,7 @@ def get_market_regime(breadth: dict | None = None) -> dict:
                 f"(vol_state={_vol_state}, vix={(vix_data or {}).get('vix_current')}, "
                 f"ts_ratio={(vix_data or {}).get('term_structure_ratio')})"
             )
-        elif _vol_state == "rising_fast" and regime4 == "risk_on_trending":
+        elif _gate_vix_dyn_on and _vol_state == "rising_fast" and regime4 == "risk_on_trending":
             _orig_regime4 = regime4
             regime4 = "risk_on_choppy"
             log.info(
@@ -2807,7 +2811,7 @@ def get_market_regime(breadth: dict | None = None) -> dict:
         # "uptrend under pressure" state). Risk_on_choppy stays as-is —
         # the dist_state label surfaces the warning to operators.
         # Don't touch risk_off_trending or panic — those are already defensive.
-        if dist_downgrade and regime4 == "risk_on_trending":
+        if _gate_dist_on and dist_downgrade and regime4 == "risk_on_trending":
             _orig_regime4 = regime4
             regime4 = "risk_on_choppy"
             log.info(
@@ -2840,7 +2844,7 @@ def get_market_regime(breadth: dict | None = None) -> dict:
         #   discrete=risk_off_trending + p_bull >= 0.70 + confidence >= 0.6 → upgrade to choppy
         #     (HMM detects recovery before SPY reclaims EMA50)
         hmm_action = None
-        if hmm and not hmm.get("error"):
+        if _gate_hmm_on and hmm and not hmm.get("error"):
             _p_bull = float(hmm.get("p_bull") or 0)
             _p_bear = float(hmm.get("p_bear") or 0)
             _conf   = float(hmm.get("confidence") or 0)
