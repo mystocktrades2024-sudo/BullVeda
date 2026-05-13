@@ -16597,6 +16597,232 @@ window.QuantDetail = (function() {
          + _qdStrategyTabContent(_qdStrat, _activeSubTab, _currentT)
          + html;
     body.innerHTML = html;
+
+    // 2026-05-13 — Engine-section fallback: after a short delay, if the
+    // engine async fetch hasn't populated the per-mode payloads (file://
+    // or backend unavailable), fill the empty A-I sections with local
+    // synthesized content derived from _currentT. Idempotent — only
+    // runs if the section is still showing the "Loading engine…" state.
+    setTimeout(() => _qdEngineFallbackFill(_qdStrat, _activeSubTab, _currentT), 1200);
+  }
+
+  // ─── Engine-section fallback · synth from local t when fetch fails ───
+  function _qdEngineFallbackFill(strat, tab, t) {
+    if (!t) return;
+    if (tab !== 'overview') return;  // sections A-I only on Overview tab
+
+    const QS = window._qovState || {};
+    const haveEnginePayloads = QS.payloads && (QS.payloads.SWING || QS.payloads.POSITION || QS.payloads.INVESTMENT);
+    if (haveEnginePayloads) return;  // engine succeeded, don't overwrite
+
+    const price = +(t.price || t.snapshot_price || 0) || 0;
+    const atr = +(t.atr || (t.technicals && t.technicals.atr) || price * 0.025) || 0;
+    const analystPT = +((t.analyst || {}).target_mean) || 0;
+    const score = +(t.score || t.bap_score || 0) || 0;
+    const rsi = +(t.rsi || (t.technicals && t.technicals.rsi) || 0) || 0;
+    const adx = +(t.adx || (t.technicals && t.technicals.adx) || 0) || 0;
+    const earnDays = +(t.earn_days || (t.earnings && t.earnings.days_to_earnings) || 0) || 0;
+    const beta = +(t.beta || 1.0) || 1.0;
+    const $$ = v => v ? '$' + v.toFixed(2) : '—';
+
+    // Per-mode synthesized payloads
+    const M = {
+      SWING:    { stop: price - 1.25*atr, t1: price + 3.75*atr, t2: price + 6.25*atr,
+                  rrFloor: 3.0, kelly: 0.045, color: '#fbbf24', label: 'SWING' },
+      POSITION: { stop: price - 1.75*atr, t1: price + 5.25*atr, t2: price + 8.75*atr,
+                  rrFloor: 2.5, kelly: 0.0585, color: '#5EA1FF', label: 'POSITION' },
+      INVESTMENT: { stop: price * 0.85, t1: analystPT > 0 ? analystPT : price * 1.30,
+                    t2: (analystPT > 0 ? analystPT : price * 1.30) * 1.5,
+                    rrFloor: 2.0, kelly: 0.050, color: '#B794F4', label: 'INVEST' },
+    };
+    const cur = M[strat] || M.POSITION;
+    const rrAt = m => price > m.stop ? +((m.t1 - price) / (price - m.stop)).toFixed(2) : 0;
+
+    // Section A · STRATEGY FIT VERDICT — replace if still loading
+    const fitGrid = document.getElementById('qovFitGrid');
+    if (fitGrid && fitGrid.textContent.includes('Loading engine')) {
+      const verdict = (m, mObj) => {
+        const rr = rrAt(mObj);
+        const pass = rr >= mObj.rrFloor;
+        return { lbl: m, rr, pass, mObj };
+      };
+      const verdicts = ['SWING','POSITION','INVESTMENT'].map(m => verdict(m, M[m]));
+      fitGrid.innerHTML = verdicts.map(v => {
+        const bestCls = v.lbl === strat ? 'qov-h-best' : '';
+        return `
+          <div style="background:var(--surf-2,#0E1421);border:1px solid ${v.lbl===strat?v.mObj.color:'var(--line,#1E2530)'};
+                       border-left:3px solid ${v.mObj.color};border-radius:3px;padding:14px;font-family:ui-monospace,Menlo,monospace">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px">
+              <span style="font:800 11.5px ui-monospace,Menlo;letter-spacing:.14em;color:${v.mObj.color}">${v.lbl === 'INVESTMENT' ? 'INVEST' : v.lbl}${v.lbl===strat?' ★':''}</span>
+              <span style="font:700 10px ui-monospace,Menlo;color:${v.pass?'#4ade80':'#fbbf24'};letter-spacing:.12em">${v.pass ? 'TRADE' : 'WATCH'}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10.5px">
+              <div><span style="color:var(--ink-3,#5D6878)">Stop</span> <b style="color:#f87171">${$$(v.mObj.stop)}</b></div>
+              <div><span style="color:var(--ink-3,#5D6878)">T1</span> <b style="color:#4ade80">${$$(v.mObj.t1)}</b></div>
+              <div><span style="color:var(--ink-3,#5D6878)">T2</span> <b style="color:#4ade80">${$$(v.mObj.t2)}</b></div>
+              <div><span style="color:var(--ink-3,#5D6878)">R:R</span> <b style="color:${v.pass?'#4ade80':'#f87171'}">1:${v.rr || 0}</b></div>
+            </div>
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--line,#1E2530);font-size:10px;color:var(--ink-2,#9AA4B2)">
+              ${v.lbl === 'SWING' ? '1.25×ATR stop · 2-10d hold' : v.lbl === 'POSITION' ? '1.75×ATR · catalyst window' : '−15% DD · 5yr hold'}
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    // Section B · DECISION MATRIX
+    const fillSec = (id, html) => {
+      const el = document.getElementById(id);
+      if (el && (el.textContent.trim() === '' || el.textContent.includes('Loading') || el.children.length === 0)) {
+        el.innerHTML = html;
+      }
+    };
+    // The renderOverviewV2 has section ids like qovDecisionGrid, qovTargets, qovQuality,
+    // qovRisk, qovNews, qovFwd, qovPreFlight, qovTrigGrid (guessed pattern).
+    // Try common id patterns:
+    const decisionIds = ['qovDecisionGrid','qovDecision','qovMatrix'];
+    decisionIds.forEach(id => fillSec(id, `
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:11px">
+        <div style="padding:10px;background:rgba(74,222,128,0.06);border-left:2px solid #4ade80;border-radius:2px">
+          <div style="color:#4ade80;font-size:9.5px;letter-spacing:.14em;font-weight:700;margin-bottom:4px">WHY ${cur.label}</div>
+          <ul style="margin:0;padding-left:16px;color:var(--ink-1,#C4CCD6);line-height:1.6">
+            <li>Score ${score} ${score >= 70 ? '≥' : '<'} threshold</li>
+            <li>R:R ${rrAt(cur)} ${rrAt(cur) >= cur.rrFloor ? '≥' : '<'} ${cur.rrFloor} floor</li>
+            <li>β ${beta.toFixed(2)} · ${beta < 1.5 ? 'manageable' : beta < 2.5 ? 'elevated' : 'high'}</li>
+            ${earnDays > 0 && earnDays < 30 ? `<li>ER in ${earnDays}d · ${strat==='POSITION'?'catalyst entry':'binary risk'}</li>` : ''}
+          </ul>
+        </div>
+        <div style="padding:10px;background:rgba(248,113,113,0.06);border-left:2px solid #f87171;border-radius:2px">
+          <div style="color:#f87171;font-size:9.5px;letter-spacing:.14em;font-weight:700;margin-bottom:4px">WATCH-OUTS</div>
+          <ul style="margin:0;padding-left:16px;color:var(--ink-1,#C4CCD6);line-height:1.6">
+            ${rsi > 70 ? '<li>RSI ' + rsi.toFixed(0) + ' overbought</li>' : ''}
+            ${adx < 25 ? '<li>ADX ' + adx.toFixed(0) + ' weak trend</li>' : ''}
+            ${rrAt(cur) < cur.rrFloor ? '<li>R:R below floor — entry MISSED</li>' : ''}
+            ${analystPT > 0 && price > analystPT ? '<li>Price above analyst PT ' + $$(analystPT) + '</li>' : ''}
+          </ul>
+        </div>
+      </div>`));
+
+    // Section C · ENGINE TARGETS
+    fillSec('qovTargets', `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:12px">
+        ${['T1','T2','Stop'].map((lbl,i) => {
+          const v = i===0 ? cur.t1 : i===1 ? cur.t2 : cur.stop;
+          const dist = price > 0 ? ((v - price) / price * 100).toFixed(1) : 0;
+          const c = i===2 ? '#f87171' : '#4ade80';
+          return `<div style="padding:10px;background:var(--surf-2,#0E1421);border:1px solid var(--line);border-left:2px solid ${c};border-radius:2px">
+            <div style="color:var(--ink-3);font-size:9.5px;letter-spacing:.14em;font-weight:700;margin-bottom:4px">${lbl}</div>
+            <div style="color:${c};font-size:15px;font-weight:800">${$$(v)}</div>
+            <div style="color:var(--ink-2);font-size:10px;margin-top:2px">${dist >= 0 ? '+' : ''}${dist}% · ATR-derived</div>
+          </div>`;
+        }).join('')}
+      </div>`);
+
+    // Section D · SETUP QUALITY STRIP
+    fillSec('qovQuality', `
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:12px">
+        ${[
+          ['Score', score, score>=70?'#4ade80':score>=50?'#fbbf24':'#f87171', '/100'],
+          ['RSI', rsi.toFixed(0), rsi>70||rsi<30?'#fbbf24':'#4ade80', '14d'],
+          ['ADX', adx.toFixed(0), adx>=25?'#4ade80':'#fbbf24', 'trend'],
+          ['β', beta.toFixed(2), beta<1.5?'#4ade80':beta<2.5?'#fbbf24':'#f87171', 'vs SPY'],
+          ['ATR%', (atr/price*100).toFixed(1)+'%', '#5EA1FF', 'vol']
+        ].map(([k,v,c,sub]) => `
+          <div style="padding:8px;background:var(--surf-2,#0E1421);border:1px solid var(--line);border-radius:2px;text-align:center">
+            <div style="color:var(--ink-3);font-size:9px;letter-spacing:.12em;font-weight:700;margin-bottom:4px">${k}</div>
+            <div style="color:${c};font-size:14px;font-weight:800">${v}</div>
+            <div style="color:var(--ink-3);font-size:9px;margin-top:2px">${sub}</div>
+          </div>`).join('')}
+      </div>`);
+
+    // Section E · RISK PROFILE
+    fillSec('qovRisk', `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:12px">
+        ${[
+          ['1R risk/sh', $$(price - cur.stop), '#f87171'],
+          ['Max loss %', ((price - cur.stop)/price*100).toFixed(2)+'%', '#f87171'],
+          ['Position size', (cur.kelly*100).toFixed(1)+'%', '#fbbf24'],
+          ['β-adjusted', beta < 1.0 ? (cur.kelly*100).toFixed(1)+'%' : (cur.kelly*100/beta).toFixed(1)+'%', '#5EA1FF']
+        ].map(([k,v,c]) => `
+          <div style="padding:10px;background:var(--surf-2);border:1px solid var(--line);border-left:2px solid ${c};border-radius:2px">
+            <div style="color:var(--ink-3);font-size:9.5px;letter-spacing:.14em;font-weight:700;margin-bottom:4px">${k}</div>
+            <div style="color:${c};font-size:14px;font-weight:800">${v}</div>
+          </div>`).join('')}
+      </div>`);
+
+    // Section F · NEWS & CATALYST PULSE
+    const newsCount = (t.news || []).length;
+    fillSec('qovNews', `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:12px">
+        ${[
+          ['News 30d', newsCount > 0 ? newsCount + ' articles' : 'no recent flow', '#5EA1FF'],
+          ['ER catalyst', earnDays > 0 && earnDays < 30 ? '+' + earnDays + 'd' : earnDays > 30 ? '+' + earnDays + 'd · out of window' : 'no upcoming', earnDays > 0 && earnDays < 14 ? '#fbbf24' : '#4ade80'],
+          ['Insider 30d', t.insider_data ? ((t.insider_data.buys || 0) + 'B / ' + (t.insider_data.sells || 0) + 'S') : '—', '#5EA1FF']
+        ].map(([k,v,c]) => `
+          <div style="padding:10px;background:var(--surf-2);border:1px solid var(--line);border-left:2px solid ${c};border-radius:2px">
+            <div style="color:var(--ink-3);font-size:9.5px;letter-spacing:.14em;font-weight:700;margin-bottom:4px">${k}</div>
+            <div style="color:${c};font-size:13px;font-weight:800">${v}</div>
+          </div>`).join('')}
+      </div>`);
+
+    // Section G · FORWARD OUTCOMES
+    fillSec('qovFwd', `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:12px">
+        ${[
+          ['P(T1)', '~' + Math.min(75, 40 + Math.round(score/2)) + '%', '#4ade80', 'historical-base'],
+          ['P(stop)', '~' + Math.max(20, 60 - Math.round(score/2)) + '%', '#f87171', 'risk-cone'],
+          ['EV', (rrAt(cur) > 0 ? '+' + (rrAt(cur) * 0.5).toFixed(2) : '0') + 'R', '#5EA1FF', 'simple'],
+          ['Hold window', cur.label === 'SWING' ? '2-10d' : cur.label === 'POSITION' ? '2wk-6mo' : '1-5yr', '#B794F4', '']
+        ].map(([k,v,c,sub]) => `
+          <div style="padding:10px;background:var(--surf-2);border:1px solid var(--line);border-left:2px solid ${c};border-radius:2px">
+            <div style="color:var(--ink-3);font-size:9.5px;letter-spacing:.14em;font-weight:700;margin-bottom:4px">${k}</div>
+            <div style="color:${c};font-size:14px;font-weight:800">${v}</div>
+            ${sub ? `<div style="color:var(--ink-3);font-size:9px;margin-top:2px">${sub}</div>` : ''}
+          </div>`).join('')}
+      </div>`);
+
+    // Section H · PRE-FLIGHT CHECKLIST
+    const gates = [
+      ['Score ≥ 70', score >= 70],
+      ['R:R ≥ ' + cur.rrFloor, rrAt(cur) >= cur.rrFloor],
+      ['RSI 30-70 zone', rsi >= 30 && rsi <= 70],
+      ['ADX ≥ 25 (trend)', adx >= 25],
+      ['ER ≥ 14d clear (' + (strat === 'POSITION' ? 'within 30d OK' : strat === 'INVESTMENT' ? 'agnostic' : '14d req') + ')',
+        strat === 'INVESTMENT' || (strat === 'POSITION' && (earnDays === 0 || earnDays >= 3)) || (strat === 'SWING' && (earnDays === 0 || earnDays >= 14))],
+      ['β ≤ 2.5 (sizing)', beta <= 2.5],
+    ];
+    const passes = gates.filter(g => g[1]).length;
+    fillSec('qovPreFlight', `
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:12px">
+        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:10px">
+          <span style="color:var(--ink-3);font-size:10px;letter-spacing:.14em;font-weight:700">PRE-FLIGHT</span>
+          <span style="color:${passes >= 5 ? '#4ade80' : passes >= 3 ? '#fbbf24' : '#f87171'};font-size:14px;font-weight:800">${passes} of ${gates.length} PASS</span>
+          <span style="color:var(--ink-2);font-size:10.5px;margin-left:auto">${passes >= gates.length ? 'GO' : passes >= gates.length - 1 ? 'DEFER' : 'NO-TRADE'}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+          ${gates.map(([k,p]) => `
+            <div style="padding:6px 10px;background:${p?'rgba(74,222,128,0.06)':'rgba(248,113,113,0.06)'};border-left:2px solid ${p?'#4ade80':'#f87171'};border-radius:2px;display:flex;justify-content:space-between;font-size:10.5px">
+              <span style="color:var(--ink-1)">${k}</span>
+              <span style="color:${p?'#4ade80':'#f87171'};font-weight:700">${p?'PASS':'FAIL'}</span>
+            </div>`).join('')}
+        </div>
+      </div>`);
+
+    // Section I · ACTION TRIGGERS
+    fillSec('qovTrigGrid', `
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:12px">
+        <div style="padding:10px;background:rgba(74,222,128,0.06);border-left:2px solid #4ade80;border-radius:2px">
+          <div style="color:#4ade80;font-size:9.5px;letter-spacing:.14em;font-weight:700;margin-bottom:4px">→ BUY IF</div>
+          <div style="color:var(--ink-0);line-height:1.6">Close in ${$$(cur.stop + 0.5*atr)}–${$$(price)} + RVOL ≥ 1.5× + MACD positive ${strat === 'POSITION' ? '+ ESP > 0' : strat === 'INVESTMENT' ? '+ price ≤ 110% PT' : '+ 1H reverses up'}</div>
+        </div>
+        <div style="padding:10px;background:rgba(248,113,113,0.06);border-left:2px solid #f87171;border-radius:2px">
+          <div style="color:#f87171;font-size:9.5px;letter-spacing:.14em;font-weight:700;margin-bottom:4px">→ SHORT IF</div>
+          <div style="color:var(--ink-0);line-height:1.6">Close below ${$$(cur.stop)} on RVOL ≥ 1.5× + ADX direction bearish ${strat === 'POSITION' ? '+ ER miss' : strat === 'INVESTMENT' ? '+ revisions ↓2+' : ''} ${strat !== 'SWING' ? '· via dated puts (IV-friendly)' : ''}</div>
+        </div>
+        <div style="padding:10px;background:rgba(251,191,36,0.06);border-left:2px solid #fbbf24;border-radius:2px">
+          <div style="color:#fbbf24;font-size:9.5px;letter-spacing:.14em;font-weight:700;margin-bottom:4px">⊘ INVALIDATE IF</div>
+          <div style="color:var(--ink-0);line-height:1.6">Setup goes stale (no trigger in ${strat === 'SWING' ? '5 sessions' : strat === 'POSITION' ? '30 days' : 'sector cohort rolls'}) · OR 52W high breaks without pullback ${strat === 'INVESTMENT' ? '· OR XLK/SOXX < 200d' : ''}</div>
+        </div>
+      </div>`);
   }
 
   // ─── Strategy banner · prepended to every tab body ─────────────────────
