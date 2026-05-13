@@ -2087,12 +2087,16 @@ async def portfolio_update_notes(req: Request, _: HTTPBasicCredentials = Depends
         raise HTTPException(400, str(e))
 
 # ──────────────────────────────────────────────────────────────────────────
-# /v2/trade_engine · structural target engine endpoint (hybrid pre-compute + on-demand)
+# /api/trade_engine · structural target engine endpoint (hybrid pre-compute + on-demand)
 # Pre-compute writes cache files for SP500+R1000+watchlist during nightly scan.
 # On-demand falls through to live engine call (~2-5s) for tickers not in pre-compute.
 # Both paths share the same cache file → unified surface.
+#
+# Path note: lives under /api/* (not /v2/*) because line 196 declares a
+# /v2/{path:path} catch-all that serves prototype static files — it would
+# intercept /v2/trade_engine before this handler could match.
 # ──────────────────────────────────────────────────────────────────────────
-@app.get("/v2/trade_engine")
+@app.get("/api/trade_engine")
 async def trade_engine(
     t: str,
     mode: str = "position",
