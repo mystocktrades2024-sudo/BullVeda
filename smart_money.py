@@ -84,6 +84,74 @@ def _swing_highs_lows(df: pd.DataFrame, window: int = 5) -> tuple[list[int], lis
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Weekly resampling helper for higher-timeframe OB detection (2026-05-12)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _resample_weekly(df: pd.DataFrame) -> "pd.DataFrame | None":
+    """Resample daily OHLCV to weekly bars (Fri-anchored).
+
+    Returns weekly df with Open/High/Low/Close/Volume columns, or None if
+    inputs aren't suitable (no DatetimeIndex, too few bars, etc.).
+
+    Used by detect_weekly_order_blocks() to give an institutional-timeframe
+    OB read alongside the daily one. Weekly OBs carry materially more weight
+    for position/invest-horizon decisions.
+    """
+    try:
+        if df is None or len(df) < 30:
+            return None
+        # Try to ensure DatetimeIndex
+        if not isinstance(df.index, pd.DatetimeIndex):
+            for col in ("Date", "date", "Datetime", "datetime"):
+                if col in df.columns:
+                    df = df.set_index(pd.to_datetime(df[col]))
+                    break
+            else:
+                # If no date column, fabricate a synthetic daily index ending today
+                df = df.copy()
+                df.index = pd.date_range(end=pd.Timestamp.today().normalize(),
+                                         periods=len(df), freq="B")
+        # Resample to Fri-anchored weekly bars
+        agg = {"Open":"first", "High":"max", "Low":"min", "Close":"last", "Volume":"sum"}
+        cols = [c for c in agg if c in df.columns]
+        if len(cols) < 5:
+            return None
+        weekly = df[cols].resample("W-FRI").agg({c: agg[c] for c in cols}).dropna()
+        return weekly if len(weekly) >= 8 else None
+    except Exception:
+        log.debug("_resample_weekly error", exc_info=True)
+        return None
+
+
+def detect_weekly_order_blocks(df: pd.DataFrame, lookback: int = 26) -> list[dict]:
+    """Weekly-timeframe OB detection — 26-week (~6mo) lookback by default.
+
+    Pure higher-timeframe wrapper over detect_order_blocks(). Weekly OBs are
+    informational-only at this stage: they appear in T.smc.weekly_order_blocks
+    for the dashboard to render but DO NOT mutate any scoring weights or trade
+    plans (Principle 7 — knob changes require backtest validation; weekly OB
+    impact on edge has not been Wilson-tested).
+
+    Returns same shape as detect_order_blocks() with an added `timeframe: 'W'`
+    field on each OB so consumers can distinguish weekly from daily.
+    """
+    try:
+        weekly_df = _resample_weekly(df)
+        if weekly_df is None:
+            return []
+        # Reuse the same daily detection logic on weekly bars
+        weekly_obs = detect_order_blocks(weekly_df, lookback=min(lookback, len(weekly_df)))
+        for ob in weekly_obs:
+            ob["timeframe"] = "W"
+            # bars_since on weekly = weeks; convert to approximate daily age for UI
+            ob["weeks_since"] = ob.get("bars_since")
+        return weekly_obs
+    except Exception:
+        log.debug("detect_weekly_order_blocks error", exc_info=True)
+        return []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 1. Order Blocks
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -593,6 +661,7 @@ def score_smc(df: pd.DataFrame, price: float, indicators: dict) -> dict:
         "fvg_target"      : None,
         "smc_direction"   : "neutral",
         "details"         : {},
+        "weekly_order_blocks": [],
     }
 
     try:
@@ -608,6 +677,13 @@ def score_smc(df: pd.DataFrame, price: float, indicators: dict) -> dict:
         fvg_zones        = detect_fvg(df,           lookback=60)
         liquidity_sweeps = detect_liquidity_sweeps(df, lookback=60)
         bos_choch        = detect_bos_choch(df,     lookback=40)
+        # 2026-05-12 — Higher-timeframe OB layer. Informational only at this
+        # stage (does NOT enter the score below). Weekly OBs are the level
+        # institutional desks actually track; surfacing them in the data lets
+        # the dashboard show MTF confluence without changing live scoring.
+        # If Wilson backtest later proves weekly-OB-confluence boosts edge,
+        # then-and-only-then add to the score per Principle 7.
+        weekly_order_blocks = detect_weekly_order_blocks(df, lookback=26)
 
         score        = 0.0
         details: dict = {}
@@ -713,6 +789,9 @@ def score_smc(df: pd.DataFrame, price: float, indicators: dict) -> dict:
             "fvg_target"      : fvg_target,
             "smc_direction"   : smc_direction,
             "details"         : details,
+            # 2026-05-12 — weekly OBs (informational, not scored — see comment
+            # above near detect_weekly_order_blocks call)
+            "weekly_order_blocks": weekly_order_blocks,
         }
 
     except Exception:

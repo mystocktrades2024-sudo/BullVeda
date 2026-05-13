@@ -618,8 +618,15 @@ body { padding: 22px 30px 60px; max-width: 1300px; margin: 0 auto; }
   <!-- Order Blocks dedicated visual -->
   <div class="qd-card">
     <div class="qd-card-h">Order Blocks · institutional supply / demand · mitigation tracker
-      <span class="meta">last 60 bars · ranked by relevance to current decision</span></div>
-    <div class="qd-ob-grid">
+      <span class="meta">last 100 bars (daily) + 26 weeks · ranked by relevance</span></div>
+    <div id="obDataLabel" style="font-family:var(--mono);font-size:10px;color:var(--ink-3);
+                                 margin-bottom:10px;padding:6px 10px;background:var(--bg-2);
+                                 border:1px solid var(--rule);border-radius:2px;letter-spacing:0.06em">
+      ⚠ <b style="color:var(--warn)">DESIGN-TRUTH</b> · synthetic OB values for visual demonstration.
+      Open via dev server (http://localhost:7432/v2/kairos-detail-rebuild.html) to load live
+      <code>tickers.json[MRVL].smc.order_blocks</code> and switch to <b style="color:var(--pass)">DATA-TRUTH</b>.
+    </div>
+    <div class="qd-ob-grid" id="obGrid">
 
       <div class="qd-ob-row bull-unmit">
         <div class="qd-ob-icon">▲</div>
@@ -1707,6 +1714,145 @@ document.querySelectorAll('.qd-tab').forEach(t => {
 });
 // Init
 applyMode('swing');
+
+// 2026-05-12 — Live OB data binding. Tries to fetch ./tickers.json. If served
+// (dev server), replaces the hardcoded demo OBs with actual T.smc.order_blocks
+// and T.smc.weekly_order_blocks. If fetch fails (file:// protocol), keeps the
+// design-truth fallback and updates the label accordingly.
+async function loadLiveOB() {
+  try {
+    const r = await fetch('./tickers.json');
+    if (!r.ok) throw new Error('not ok');
+    const tj = await r.json();
+    const T = tj.MRVL || Object.values(tj).find(x => (x.smc && x.smc.order_blocks && x.smc.order_blocks.length));
+    if (!T || !T.smc) throw new Error('no smc data');
+    renderLiveOBs(T);
+  } catch (e) {
+    // Fetch failed — keep design-truth fallback, expected when opened via file://
+    console.info('[OB] kept design-truth fallback (fetch failed:', e.message + ')');
+  }
+}
+
+function renderLiveOBs(T) {
+  const smc = T.smc || {};
+  const price = T.price || 0;
+  const dailyOBs = smc.order_blocks || [];
+  const weeklyOBs = smc.weekly_order_blocks || [];
+  const fvgs = smc.fvg_zones || [];
+
+  // Filter to top relevance: unmitigated/tested, within ±20% of price, sorted by strength
+  const nearbyDaily = dailyOBs
+    .filter(ob => ob.status !== 'mitigated' && Math.abs(ob.price_level - price) / price <= 0.20)
+    .sort((a, b) => b.strength_score - a.strength_score)
+    .slice(0, 4);
+
+  const nearbyWeekly = weeklyOBs
+    .filter(ob => ob.status !== 'mitigated' && Math.abs(ob.price_level - price) / price <= 0.30)
+    .sort((a, b) => b.strength_score - a.strength_score)
+    .slice(0, 2);
+
+  const openFVGs = fvgs.filter(f => f.status !== 'closed').slice(0, 2);
+
+  const rows = [];
+  // Render weekly OBs first (higher priority)
+  nearbyWeekly.forEach(ob => rows.push(buildOBRow(ob, price, true)));
+  // Daily OBs
+  nearbyDaily.forEach(ob => rows.push(buildOBRow(ob, price, false)));
+  // FVGs
+  openFVGs.forEach(f => rows.push(buildFVGRow(f, price)));
+
+  if (rows.length === 0) {
+    document.getElementById('obGrid').innerHTML =
+      `<div style="padding:30px;text-align:center;color:var(--ink-3);font-family:var(--mono);font-size:12px">
+       No unmitigated OBs within ±20% of current price · ${T.ticker} @ $${price.toFixed(2)}<br>
+       (this is a real "no SMC entry zone" condition — wait for a setup or pick a different ticker)
+       </div>`;
+  } else {
+    document.getElementById('obGrid').innerHTML = rows.join('');
+  }
+
+  // Update header label to DATA-TRUTH
+  const lbl = document.getElementById('obDataLabel');
+  if (lbl) {
+    lbl.style.background = 'rgba(74,222,128,0.06)';
+    lbl.style.borderLeft = '3px solid var(--pass)';
+    lbl.innerHTML = `✓ <b style="color:var(--pass)">DATA-TRUTH</b> · live values from ` +
+                    `<code>tickers.json[${T.ticker}].smc</code> · ` +
+                    `${nearbyDaily.length} nearby daily OB${nearbyDaily.length!==1?'s':''}, ` +
+                    `${nearbyWeekly.length} weekly OB${nearbyWeekly.length!==1?'s':''}, ` +
+                    `${openFVGs.length} open FVG${openFVGs.length!==1?'s':''} · ` +
+                    `SMC score ${smc.score} · direction ${smc.smc_direction}`;
+  }
+}
+
+function buildOBRow(ob, price, isWeekly) {
+  const isBull = ob.type === 'bullish';
+  const isFresh = ob.status === 'fresh';
+  const cls = isBull ? (isFresh ? 'bull-unmit' : 'bull-mit') : (isFresh ? 'bear-unmit' : 'bear-broken');
+  const icon = isBull ? '▲' : '▼';
+  const dist = ((ob.price_level - price) / price * 100).toFixed(1);
+  const distSign = dist >= 0 ? '+' : '';
+  const tfLabel = isWeekly ? 'WEEKLY · ' : '';
+  const strength = Math.min(95, Math.round(ob.strength_score * 12));
+  const strengthLabel = ob.strength_score > 5 ? 'STRONG' : ob.strength_score > 2 ? 'MODERATE' : 'WEAK';
+  const stateLabel = ob.status.toUpperCase();
+  const ageLabel = isWeekly ? `${ob.weeks_since || ob.bars_since} weeks ago` : `${ob.bars_since} bars ago`;
+  const volMult = ob.volume ? `vol ${(ob.volume/1e6).toFixed(1)}M` : '';
+
+  return `
+    <div class="qd-ob-row ${cls}">
+      <div class="qd-ob-icon">${icon}</div>
+      <div class="qd-ob-meta">
+        <div class="lab">${tfLabel}${isBull ? 'Bullish OB · DEMAND' : 'Bearish OB · SUPPLY'}</div>
+        <div class="val">$${ob.low.toFixed(2)} – $${ob.high.toFixed(2)}</div>
+        <div style="color:var(--ink-2);font-size:10.5px;margin-top:2px">${distSign}${dist}% from spot · ${ageLabel}</div>
+      </div>
+      <div class="qd-ob-mini">
+        <div class="qd-ob-mini-axis"></div>
+        <div class="qd-ob-mini-tick" style="top:4px"></div>
+        <div class="qd-ob-mini-tick" style="bottom:4px"></div>
+        <div class="qd-ob-mini-zone ${isBull?'bull':'bear'}" style="top:${ob.price_level > price ? Math.max(4, 30 - dist*1.5) : 50}px;height:5px"></div>
+        <div class="qd-ob-mini-now" style="top:30px"><span class="lbl">NOW $${price.toFixed(2)}</span></div>
+      </div>
+      <div class="qd-ob-strength">
+        <div class="qd-ob-strength-bar ${isBull?'':'bear'}"><div style="width:${strength}%"></div></div>
+        <div class="qd-ob-strength-label">Strength · <b>${strengthLabel}</b> · ${volMult} · ${stateLabel}</div>
+      </div>
+      <div class="qd-ob-action">
+        ${isWeekly ? '<b>Weekly OB · institutional reference.</b> ' : ''}
+        ${ob.status === 'fresh' ? 'Unmitigated — high-quality reference zone.' :
+          ob.status === 'tested' ? 'Tested once but held — secondary zone.' :
+          'Mitigated — historical reference only.'}
+        Impulse size ${(ob.impulse_size * 100).toFixed(1)}% · strength score ${ob.strength_score.toFixed(2)}.
+      </div>
+    </div>`;
+}
+
+function buildFVGRow(f, price) {
+  const dist = ((f.top - price) / price * 100).toFixed(1);
+  const distSign = dist >= 0 ? '+' : '';
+  return `
+    <div class="qd-ob-row fvg">
+      <div class="qd-ob-icon">◇</div>
+      <div class="qd-ob-meta">
+        <div class="lab">${f.type === 'bullish' ? 'Bullish' : 'Bearish'} FVG (open)</div>
+        <div class="val">$${f.bottom.toFixed(2)} – $${f.top.toFixed(2)}</div>
+        <div style="color:var(--ink-2);font-size:10.5px;margin-top:2px">${distSign}${dist}% from spot</div>
+      </div>
+      <div class="qd-ob-mini">
+        <div class="qd-ob-mini-axis"></div>
+        <div class="qd-ob-mini-zone fvg" style="top:24px;height:4px"></div>
+        <div class="qd-ob-mini-now" style="top:30px"><span class="lbl">NOW $${price.toFixed(2)}</span></div>
+      </div>
+      <div class="qd-ob-strength">
+        <div class="qd-ob-strength-bar"><div style="width:60%"></div></div>
+        <div class="qd-ob-strength-label">Status · <b>${f.status.toUpperCase()}</b> · pullback magnet</div>
+      </div>
+      <div class="qd-ob-action">First-touch pullback zone. Acts as price magnet on retrace.</div>
+    </div>`;
+}
+
+loadLiveOB();
 </script>
 </body>
 </html>
