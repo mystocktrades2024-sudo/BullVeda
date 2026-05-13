@@ -490,10 +490,7 @@ body { padding: 22px 30px 60px; max-width: 1300px; margin: 0 auto; }
     </div>
   </div>
 
-  <!-- Candlestick Chart · TradingView-style · powered by OUR scan data -->
-  <!-- 2026-05-12 — Load lightweight-charts v4 BEFORE any consumer code. Pinning -->
-  <!--               to v4.1.7 (last v4) because v5+ changed the API (addSeries-style) -->
-  <script src="https://unpkg.com/lightweight-charts@4.1.7/dist/lightweight-charts.standalone.production.js"></script>
+  <!-- Candlestick Chart · TradingView-style · pure inline SVG · zero dependencies -->
   <div class="qd-card qd-tv-card">
     <div class="qd-tv-toolbar">
       <span class="label">⊕ Candlestick Chart · TradingView-style · our data</span>
@@ -504,12 +501,9 @@ body { padding: 22px 30px 60px; max-width: 1300px; margin: 0 auto; }
         <button class="qd-tv-int-btn" data-overlay="fib">Fib levels</button>
       </div>
       <span class="meta">Symbol <b style="color:var(--ink-1)" id="tvSymLabel">MRVL</b>
-        · last 90 daily bars · powered by lightweight-charts v4 (Apache 2.0)</span>
+        · last 90 daily bars · pure inline SVG · zero external dependencies</span>
     </div>
-    <div class="qd-tv-chart"><div id="lwc_chart"></div>
-      <div id="lwc_status" style="display:none;padding:24px;font-family:var(--mono);
-           font-size:11px;color:var(--fail);text-align:center"></div>
-    </div>
+    <div class="qd-tv-chart" id="svgChartHost"></div>
   </div>
 
   <!-- Price Ladder hero -->
@@ -1894,14 +1888,13 @@ function buildFVGRow(f, price) {
 
 loadLiveOB();
 
-// ── Candlestick chart · TradingView-style · powered by lightweight-charts ─
-// Uses our scan OHLCV (from tickers.json) — NOT an embedded TV iframe.
-// lightweight-charts is TV's own Apache-2.0 open-source library; visually
-// identical to TV proper. We feed it OUR data + render OUR overlays
-// (EMAs, Plan price-lines for stop/T1/T2, Order Block price-lines).
-let __lwChart = null;
-let __lwSeries = {};
-const __lwOverlays = { ema: true, plan: false, ob: false, fib: false };
+// ── Candlestick chart · pure inline SVG · zero deps ───────────────────────
+// Renders OHLCV from our scan data as TradingView-style candlesticks +
+// volume + EMA overlays + plan/OB/Fib price lines. All SVG, no library.
+const __chartState = {
+  bars: null,
+  overlays: { ema: true, plan: false, ob: false, fib: false },
+};
 
 // Demo OHLCV — last 90 daily bars matching MRVL price action shape.
 // On dev-server load, replaced by live T.ohlcv from tickers.json (fetch path).
@@ -1945,198 +1938,201 @@ function emaSeries(bars, period) {
   const out = [];
   for (const b of bars) {
     ema = b.c * k + ema * (1 - k);
-    out.push({ time: b.d, value: +ema.toFixed(4) });
+    out.push(+ema.toFixed(4));
   }
   return out;
 }
 
-function buildLWChart(bars, retries) {
-  retries = retries || 0;
-  if (typeof LightweightCharts === 'undefined') {
-    if (retries < 25) {
-      setTimeout(() => buildLWChart(bars, retries + 1), 200);
-    } else {
-      // After 5s, show a clear error message instead of leaving the panel blank
-      const status = document.getElementById('lwc_status');
-      const chart = document.getElementById('lwc_chart');
-      if (status && chart) {
-        chart.style.display = 'none';
-        status.style.display = 'block';
-        status.innerHTML = '⚠ lightweight-charts library failed to load from CDN ' +
-                           '(network/firewall blocking unpkg.com?). ' +
-                           'Chart unavailable in this session — other prototype sections still work.';
-      }
-    }
+// ── Pure SVG candlestick chart renderer ─────────────────────────────────
+function renderSvgChart() {
+  const host = document.getElementById('svgChartHost');
+  if (!host) return;
+  const bars = __chartState.bars;
+  if (!bars || !bars.length) {
+    host.innerHTML = '<div style="padding:24px;font-family:var(--mono);font-size:11px;color:var(--ink-3);text-align:center">Loading chart data...</div>';
     return;
   }
-  const host = document.getElementById('lwc_chart');
-  if (!host) return;
-  host.innerHTML = '';
 
-  __lwChart = LightweightCharts.createChart(host, {
-    layout: {
-      background: { type: 'solid', color: '#0f1318' },
-      textColor: '#8b96a3',
-      fontFamily: 'ui-monospace, SF Mono, JetBrains Mono, Menlo, monospace',
-    },
-    grid: {
-      vertLines: { color: '#1f2733' },
-      horzLines: { color: '#1f2733' },
-    },
-    rightPriceScale: {
-      borderColor: '#2a3441',
-    },
-    timeScale: {
-      borderColor: '#2a3441',
-      timeVisible: false,
-      secondsVisible: false,
-    },
-    crosshair: {
-      mode: LightweightCharts.CrosshairMode.Normal,
-      vertLine: { color: '#5d6878', labelBackgroundColor: '#1d2530' },
-      horzLine: { color: '#5d6878', labelBackgroundColor: '#1d2530' },
-    },
-    autoSize: true,
-  });
+  // Dimensions
+  const W = host.clientWidth || 1180;
+  const H = 540;
+  const padL = 8, padR = 64, padT = 16, padB = 28;
+  const volH = 100;  // bottom 100px for volume
+  const priceH = H - padT - padB - volH - 12;  // 12 = gap between panes
+  const priceTop = padT;
+  const priceBot = padT + priceH;
+  const volTop = priceBot + 12;
+  const volBot = volTop + volH;
+  const plotW = W - padL - padR;
 
-  // Candlestick series
-  __lwSeries.candle = __lwChart.addCandlestickSeries({
-    upColor: '#4ade80',
-    downColor: '#f87171',
-    borderUpColor: '#4ade80',
-    borderDownColor: '#f87171',
-    wickUpColor: '#4ade80',
-    wickDownColor: '#f87171',
-    priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
-  });
-  __lwSeries.candle.setData(bars.map(b => ({
-    time: b.d, open: b.o, high: b.h, low: b.l, close: b.c
-  })));
+  // Price scale (with EMA200 expanded range if EMA200 active)
+  const closes = bars.map(b => b.c);
+  const overlays = __chartState.overlays;
+  let priceMin = Math.min(...bars.map(b => b.l));
+  let priceMax = Math.max(...bars.map(b => b.h));
+  // Stretch by 3% so candles don't touch borders
+  const pPad = (priceMax - priceMin) * 0.05;
+  priceMin -= pPad; priceMax += pPad;
 
-  // Volume histogram (separate scale, bottom 20% of pane)
-  __lwSeries.volume = __lwChart.addHistogramSeries({
-    color: '#3a4554',
-    priceFormat: { type: 'volume' },
-    priceScaleId: 'vol',
-  });
-  __lwChart.priceScale('vol').applyOptions({
-    scaleMargins: { top: 0.82, bottom: 0 },
-  });
-  __lwSeries.volume.setData(bars.map(b => ({
-    time: b.d, value: b.v,
-    color: b.c >= b.o ? 'rgba(74,222,128,0.45)' : 'rgba(248,113,113,0.45)'
-  })));
-
-  // Initial overlay state
-  applyOverlays(bars);
-
-  // Fit to content
-  __lwChart.timeScale().fitContent();
-}
-
-function applyOverlays(bars) {
-  if (!__lwChart) return;
-
-  // Clear existing overlay series
-  for (const k of ['ema8','ema20','ema50','ema200','planEntry','planStop','planT1','planT2']) {
-    if (__lwSeries[k]) {
-      try { __lwChart.removeSeries(__lwSeries[k]); } catch(_){}
-      delete __lwSeries[k];
-    }
-  }
-  // Clear price lines on candle series
-  if (__lwSeries.candle) {
-    (__lwSeries._priceLines || []).forEach(pl => {
-      try { __lwSeries.candle.removePriceLine(pl); } catch(_){}
+  // If plan overlay on, expand range to include plan levels
+  if (overlays.plan) {
+    const plan = planLevelsForMode();
+    [plan.t1, plan.t2, plan.stop, plan.entryLo, plan.entryHi].forEach(p => {
+      if (p < priceMin) priceMin = p * 0.98;
+      if (p > priceMax) priceMax = p * 1.02;
     });
-    __lwSeries._priceLines = [];
   }
 
-  // EMAs
-  if (__lwOverlays.ema) {
+  const volMax = Math.max(...bars.map(b => b.v));
+
+  // Coordinate transforms
+  const xOf = i => padL + (plotW / bars.length) * (i + 0.5);
+  const yOfPrice = p => priceTop + (priceMax - p) / (priceMax - priceMin) * priceH;
+  const yOfVol = v => volBot - (v / volMax) * volH;
+
+  // Bar geometry
+  const barW = (plotW / bars.length);
+  const bodyW = Math.max(2, barW * 0.7);
+
+  // ── Build SVG ──────────────────────────────────────────────────────────
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" xmlns="http://www.w3.org/2000/svg" style="display:block">`;
+
+  // Background
+  svg += `<rect width="${W}" height="${H}" fill="#0f1318"/>`;
+
+  // Horizontal grid lines + price axis labels (5 ticks)
+  for (let t = 0; t <= 5; t++) {
+    const price = priceMax - (priceMax - priceMin) * (t / 5);
+    const y = priceTop + (priceH * t / 5);
+    svg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#1f2733" stroke-width="0.5"/>`;
+    svg += `<text x="${W - padR + 4}" y="${y + 4}" font-family="ui-monospace,Menlo" font-size="10" fill="#5d6878">$${price.toFixed(2)}</text>`;
+  }
+
+  // Vertical grid lines (every ~10 bars)
+  for (let i = 0; i < bars.length; i += 10) {
+    const x = xOf(i);
+    svg += `<line x1="${x}" y1="${priceTop}" x2="${x}" y2="${volBot}" stroke="#1f2733" stroke-width="0.5"/>`;
+    const lbl = (bars[i].d || '').slice(5);  // MM-DD
+    svg += `<text x="${x}" y="${H - 6}" text-anchor="middle" font-family="ui-monospace,Menlo" font-size="9" fill="#5d6878">${lbl}</text>`;
+  }
+
+  // Volume bars
+  bars.forEach((b, i) => {
+    const x = xOf(i) - bodyW / 2;
+    const y = yOfVol(b.v);
+    const h = volBot - y;
+    const color = b.c >= b.o ? 'rgba(74,222,128,0.45)' : 'rgba(248,113,113,0.45)';
+    svg += `<rect x="${x}" y="${y}" width="${bodyW}" height="${h}" fill="${color}"/>`;
+  });
+  // Volume pane border
+  svg += `<line x1="${padL}" y1="${volBot}" x2="${W - padR}" y2="${volBot}" stroke="#2a3441" stroke-width="1"/>`;
+  svg += `<line x1="${padL}" y1="${volTop}" x2="${W - padR}" y2="${volTop}" stroke="#2a3441" stroke-width="0.5" opacity="0.5"/>`;
+
+  // EMA overlays
+  if (overlays.ema) {
     const emaConfigs = [
-      { p: 8,   color: '#22d3ee', title: 'EMA 8' },
-      { p: 20,  color: '#818cf8', title: 'EMA 20' },
-      { p: 50,  color: '#fbbf24', title: 'EMA 50' },
-      { p: 200, color: '#f87171', title: 'EMA 200' },
+      { p: 8,   color: '#22d3ee' },
+      { p: 20,  color: '#818cf8' },
+      { p: 50,  color: '#fbbf24' },
+      { p: 200, color: '#f87171' },
     ];
     emaConfigs.forEach(cfg => {
-      const series = __lwChart.addLineSeries({
-        color: cfg.color, lineWidth: 1.5, priceLineVisible: false,
-        lastValueVisible: true, title: cfg.title,
-        crosshairMarkerVisible: false,
-      });
-      const data = emaSeries(bars, cfg.p);
-      // For EMA200, only show after we have 200 bars of data (otherwise it's noise)
-      series.setData(data);
-      __lwSeries['ema' + cfg.p] = series;
+      // Skip EMA if we don't have enough bars (e.g. EMA 200 with only 90 bars
+      // is mostly bootstrap noise — still draw, but lighter)
+      const series = emaSeries(bars, cfg.p);
+      const startIdx = cfg.p > bars.length ? 0 : Math.min(cfg.p - 1, bars.length - 1);
+      const opacity = (cfg.p > bars.length) ? 0.35 : 0.9;
+      const pts = bars.map((_, i) => i >= startIdx ? `${xOf(i)},${yOfPrice(series[i])}` : null).filter(Boolean);
+      svg += `<polyline points="${pts.join(' ')}" fill="none" stroke="${cfg.color}" stroke-width="1.5" opacity="${opacity}"/>`;
+      // Last-value label
+      const lastY = yOfPrice(series[series.length - 1]);
+      const lastVal = series[series.length - 1].toFixed(2);
+      svg += `<text x="${W - padR + 4}" y="${lastY + 3}" font-family="ui-monospace,Menlo" font-size="9" fill="${cfg.color}" font-weight="700">EMA${cfg.p} ${lastVal}</text>`;
     });
   }
 
-  // Plan price lines (entry, stop, T1, T2) — mode-aware
-  if (__lwOverlays.plan) {
+  // Candlesticks
+  bars.forEach((b, i) => {
+    const x = xOf(i);
+    const isUp = b.c >= b.o;
+    const color = isUp ? '#4ade80' : '#f87171';
+    // Wick (high to low)
+    svg += `<line x1="${x}" y1="${yOfPrice(b.h)}" x2="${x}" y2="${yOfPrice(b.l)}" stroke="${color}" stroke-width="1"/>`;
+    // Body (open to close)
+    const yTop = yOfPrice(Math.max(b.o, b.c));
+    const yBot = yOfPrice(Math.min(b.o, b.c));
+    const bodyH = Math.max(1, yBot - yTop);
+    svg += `<rect x="${x - bodyW/2}" y="${yTop}" width="${bodyW}" height="${bodyH}" fill="${color}"/>`;
+  });
+
+  // Plan overlay
+  if (overlays.plan) {
     const plan = planLevelsForMode();
-    const lines = [
-      { price: plan.t2, color: '#4ade80', lineStyle: 1, lineWidth: 2, axisLabelVisible: true, title: `T2 $${plan.t2}` },
-      { price: plan.t1, color: '#4ade80', lineStyle: 1, lineWidth: 2, axisLabelVisible: true, title: `T1 $${plan.t1}` },
-      { price: plan.entryHi, color: '#fbbf24', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: `Entry hi $${plan.entryHi}` },
-      { price: plan.entryLo, color: '#fbbf24', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: `Entry lo $${plan.entryLo}` },
-      { price: plan.stop, color: '#f87171', lineStyle: 0, lineWidth: 2, axisLabelVisible: true, title: `STOP $${plan.stop}` },
-    ];
-    __lwSeries._priceLines = lines.map(l => __lwSeries.candle.createPriceLine(l));
+    const drawLine = (price, color, style, label) => {
+      const y = yOfPrice(price);
+      const dash = style === 'dashed' ? 'stroke-dasharray="6,3"' : style === 'dotted' ? 'stroke-dasharray="2,3"' : '';
+      svg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="${color}" stroke-width="2" ${dash}/>`;
+      svg += `<rect x="${W - padR + 2}" y="${y - 8}" width="60" height="14" fill="${color}" rx="2"/>`;
+      svg += `<text x="${W - padR + 6}" y="${y + 3}" font-family="ui-monospace,Menlo" font-size="9" fill="#0a0c0f" font-weight="800">${label}</text>`;
+    };
+    drawLine(plan.t2, '#4ade80', 'dashed', `T2 $${plan.t2}`);
+    drawLine(plan.t1, '#4ade80', 'dashed', `T1 $${plan.t1}`);
+    drawLine(plan.entryHi, '#fbbf24', 'dotted', `EntryHi`);
+    drawLine(plan.entryLo, '#fbbf24', 'dotted', `EntryLo`);
+    drawLine(plan.stop, '#f87171', 'solid', `STOP $${plan.stop}`);
   }
 
-  // Order Blocks (from live T.smc if available, else demo)
-  if (__lwOverlays.ob) {
-    const obs = (window.__liveOBs || []).slice(0, 4);
-    // Fallback demo OBs if no live data
-    const demoOBs = [
+  // Order Block overlay
+  if (overlays.ob) {
+    const obs = window.__liveOBs && window.__liveOBs.length ? window.__liveOBs.slice(0, 4) : [
       { type: 'bullish', low: 151.20, high: 153.40, status: 'fresh' },
       { type: 'bullish', low: 144.55, high: 146.10, status: 'tested' },
       { type: 'bearish', low: 175.80, high: 176.40, status: 'fresh' },
     ];
-    const obList = obs.length ? obs : demoOBs;
-    const lines = [];
-    obList.forEach(ob => {
+    obs.forEach(ob => {
       const isBull = ob.type === 'bullish';
-      const color = isBull ? 'rgba(74,222,128,0.95)' : 'rgba(248,113,113,0.95)';
-      const tag = isBull ? '▲ OB' : '▼ OB';
-      lines.push(__lwSeries.candle.createPriceLine({
-        price: ob.high, color, lineStyle: 3, lineWidth: 1,
-        axisLabelVisible: true, title: `${tag} hi $${ob.high.toFixed(2)}`,
-      }));
-      lines.push(__lwSeries.candle.createPriceLine({
-        price: ob.low, color, lineStyle: 3, lineWidth: 1,
-        axisLabelVisible: true, title: `${tag} lo $${ob.low.toFixed(2)}`,
-      }));
+      const color = isBull ? 'rgba(74,222,128,0.30)' : 'rgba(248,113,113,0.30)';
+      const stroke = isBull ? '#4ade80' : '#f87171';
+      const yHi = yOfPrice(ob.high);
+      const yLo = yOfPrice(ob.low);
+      svg += `<rect x="${padL}" y="${yHi}" width="${plotW}" height="${yLo - yHi}" fill="${color}" stroke="${stroke}" stroke-width="0.5"/>`;
+      svg += `<text x="${padL + 6}" y="${yHi + 12}" font-family="ui-monospace,Menlo" font-size="9" fill="${stroke}" font-weight="700">${isBull ? '▲' : '▼'} OB $${ob.low.toFixed(2)}–${ob.high.toFixed(2)} (${ob.status})</text>`;
     });
-    __lwSeries._priceLines = (__lwSeries._priceLines || []).concat(lines);
   }
 
-  // Fib retracement levels (last 90 bars high-to-low)
-  if (__lwOverlays.fib) {
+  // Fib overlay
+  if (overlays.fib) {
     const hi = Math.max(...bars.map(b => b.h));
     const lo = Math.min(...bars.map(b => b.l));
-    const fibs = [0.236, 0.382, 0.5, 0.618, 0.786];
-    const lines = fibs.map(f => {
-      const price = +(hi - (hi - lo) * f).toFixed(2);
-      return __lwSeries.candle.createPriceLine({
-        price, color: 'rgba(167,139,250,0.7)', lineStyle: 2, lineWidth: 1,
-        axisLabelVisible: true, title: `Fib ${f.toFixed(3)} $${price}`,
-      });
+    [0.236, 0.382, 0.5, 0.618, 0.786].forEach(f => {
+      const price = hi - (hi - lo) * f;
+      const y = yOfPrice(price);
+      svg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="rgba(167,139,250,0.65)" stroke-width="1" stroke-dasharray="3,4"/>`;
+      svg += `<text x="${padL + 6}" y="${y - 3}" font-family="ui-monospace,Menlo" font-size="9" fill="#a78bfa" font-weight="700">Fib ${f.toFixed(3)} $${price.toFixed(2)}</text>`;
     });
-    __lwSeries._priceLines = (__lwSeries._priceLines || []).concat(lines);
   }
+
+  // Current price line (last close)
+  const lastClose = bars[bars.length - 1].c;
+  const lastY = yOfPrice(lastClose);
+  svg += `<line x1="${padL}" y1="${lastY}" x2="${W - padR}" y2="${lastY}" stroke="#e8edf3" stroke-width="1" stroke-dasharray="1,3" opacity="0.6"/>`;
+  svg += `<rect x="${W - padR + 2}" y="${lastY - 8}" width="60" height="14" fill="#e8edf3" rx="2"/>`;
+  svg += `<text x="${W - padR + 6}" y="${lastY + 3}" font-family="ui-monospace,Menlo" font-size="9" fill="#0a0c0f" font-weight="800">NOW $${lastClose.toFixed(2)}</text>`;
+
+  // Volume axis label
+  svg += `<text x="${padL + 4}" y="${volTop + 12}" font-family="ui-monospace,Menlo" font-size="9" fill="#5d6878" letter-spacing="0.12em">VOLUME</text>`;
+
+  svg += `</svg>`;
+  host.innerHTML = svg;
 }
 
 // Overlay toggle button wiring
 document.querySelectorAll('.qd-tv-int-btn[data-overlay]').forEach(b => {
   b.addEventListener('click', () => {
     const key = b.dataset.overlay;
-    __lwOverlays[key] = !__lwOverlays[key];
-    b.classList.toggle('active', __lwOverlays[key]);
-    const bars = window.__lwBars || DEMO_OHLCV;
-    applyOverlays(bars);
+    __chartState.overlays[key] = !__chartState.overlays[key];
+    b.classList.toggle('active', __chartState.overlays[key]);
+    renderSvgChart();
   });
 });
 
@@ -2144,15 +2140,20 @@ document.querySelectorAll('.qd-tv-int-btn[data-overlay]').forEach(b => {
 const _origApplyMode2 = applyMode;
 window.applyMode = function(mode) {
   _origApplyMode2(mode);
-  if (__lwOverlays.plan && __lwChart) {
-    applyOverlays(window.__lwBars || DEMO_OHLCV);
-  }
+  if (__chartState.overlays.plan) renderSvgChart();
 };
 document.querySelectorAll('.qd-mode-pill').forEach(p => {
   p.replaceWith(p.cloneNode(true));
 });
 document.querySelectorAll('.qd-mode-pill').forEach(p => {
   p.addEventListener('click', () => window.applyMode(p.dataset.mode));
+});
+
+// Re-render on window resize so SVG scales correctly
+let _resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(renderSvgChart, 150);
 });
 
 // Try to fetch live OHLCV from tickers.json; fall back to demo
@@ -2165,7 +2166,6 @@ document.querySelectorAll('.qd-mode-pill').forEach(p => {
       const T = tj.MRVL || Object.values(tj).find(x => Array.isArray(x.ohlcv) && x.ohlcv.length >= 30);
       if (T && Array.isArray(T.ohlcv) && T.ohlcv.length >= 30) {
         bars = T.ohlcv;
-        // Save live OBs for the overlay
         if (T.smc && Array.isArray(T.smc.order_blocks)) {
           window.__liveOBs = T.smc.order_blocks.filter(ob => ob.status !== 'mitigated').slice(0, 6);
         }
@@ -2174,8 +2174,9 @@ document.querySelectorAll('.qd-mode-pill').forEach(p => {
       }
     }
   } catch(_) { /* file:// — keep demo */ }
-  window.__lwBars = bars;
-  buildLWChart(bars);
+  __chartState.bars = bars;
+  // Initial render (after DOM measure-ready)
+  setTimeout(renderSvgChart, 50);
 })();
 </script>
 </body>
