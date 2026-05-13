@@ -329,10 +329,20 @@ def _normalize_decision_state(ds: Any) -> str | None:
     return ds
 
 
-def _eval_hard_gates(t: dict) -> tuple[list[dict], list[str]]:
-    """Returns (gate_evaluations, failed_gate_names)."""
+def _eval_hard_gates(t: dict, regime: str | None = None,
+                     entry_quality_relax_regimes: set | None = None) -> tuple[list[dict], list[str]]:
+    """Returns (gate_evaluations, failed_gate_names).
+
+    entry_quality_relax_regimes: set of regime4 names where EXTENDED/MISSED
+    entries are ALLOWED to pass (become BUY) instead of being blocked. Per
+    regime_sharpe_decomp evidence (2026-05-13) — these bands are profitable
+    in risk_on_choppy regime specifically (MISSED PF 2.59 n=302, EXTENDED
+    PF 1.33 n=335). Default empty (current behavior — block always).
+    """
     gates: list[dict] = []
     failures: list[str] = []
+    _eq_relax = entry_quality_relax_regimes or set()
+    _regime_lower = (regime or "").lower()
 
     # 1. Liquidity / price / drawdown gate (preserved upstream gate)
     g = t.get("gate") or {}
@@ -357,12 +367,26 @@ def _eval_hard_gates(t: dict) -> tuple[list[dict], list[str]]:
         failures.append("multi_timeframe")
 
     # 3. Entry quality (must not be MISSED or EXTENDED)
+    # ENTRY-Q-REGIME-RELAX (2026-05-13): regime_sharpe_decomp on n=897 closed
+    # trades shows MISSED (n=302, PF 2.59, Sharpe +0.33) and EXTENDED (n=335,
+    # PF 1.33, Sharpe +0.10) are BOTH profitable in aggregate — better than
+    # PULLBACK (n=72, PF 0.88) which the gate currently prefers. In
+    # risk_on_choppy regime specifically, this profitability holds. Relax
+    # the block in regimes where evidence supports it. Default behavior
+    # unchanged unless config.scoring.entry_quality_regime_relax is set.
     eq = t.get("entry_quality")
-    passed = eq not in ("MISSED", "EXTENDED")
+    _eq_bad = eq in ("MISSED", "EXTENDED")
+    _eq_relaxed_for_regime = _eq_bad and _regime_lower in _eq_relax
+    if _eq_relaxed_for_regime:
+        passed = True
+        reason = f"entry_quality={eq} allowed in {_regime_lower} (relax per regime_sharpe_decomp 2026-05-13)"
+    else:
+        passed = not _eq_bad
+        reason = "" if passed else f"entry_quality={eq} — wait for pullback to value zone"
     gates.append({
         "name": "entry_quality",
         "passed": passed,
-        "reason": "" if passed else f"entry_quality={eq} — wait for pullback to value zone",
+        "reason": reason,
     })
     if not passed:
         failures.append("entry_quality")
@@ -640,8 +664,28 @@ def compute_final_verdict(t: dict, regime: str | None = None,
             "demote_to": "watch_list",
         }
 
-    gates, failures = _eval_hard_gates(t)
+    # ENTRY-Q-REGIME-RELAX (2026-05-13): read config to determine which
+    # regimes allow EXTENDED/MISSED entries (evidence-backed per
+    # regime_sharpe_decomp). Default empty = no change to prior behavior.
+    # Config lives in regime4_thresholds.entry_quality_regime_relax — a
+    # dict of {regime_name: ["EXTENDED", "MISSED", ...]}. Any regime with
+    # a non-empty list gets the relax applied.
+    _eq_relax = set()
+    try:
+        if isinstance(thresholds, dict):
+            _eq_relax_cfg = thresholds.get("entry_quality_regime_relax") or {}
+            if isinstance(_eq_relax_cfg, dict):
+                for _reg, _allowed in _eq_relax_cfg.items():
+                    if isinstance(_allowed, (list, set, tuple)) and _allowed:
+                        _eq_relax.add(_reg.lower())
+    except Exception:
+        pass
+    gates, failures = _eval_hard_gates(t, regime=regime, entry_quality_relax_regimes=_eq_relax)
     caveats = _eval_soft_gates(t)
+    # Stamp caveat when entry_quality was relaxed (so user sees WHY a normally-
+    # blocked EXTENDED/MISSED entry made BUY — not silent override).
+    if _eq_relax and t.get("entry_quality") in ("MISSED", "EXTENDED") and (regime or "").lower() in _eq_relax:
+        caveats.append(f"entry_quality={t.get('entry_quality')} relaxed in {regime} per evidence (PF 1.33-2.59 in choppy n>=302)")
 
     if failures:
         primary = next((g for g in gates if g["name"] in failures), None)
