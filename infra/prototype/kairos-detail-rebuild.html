@@ -491,6 +491,9 @@ body { padding: 22px 30px 60px; max-width: 1300px; margin: 0 auto; }
   </div>
 
   <!-- Candlestick Chart · TradingView-style · powered by OUR scan data -->
+  <!-- 2026-05-12 — Load lightweight-charts v4 BEFORE any consumer code. Pinning -->
+  <!--               to v4.1.7 (last v4) because v5+ changed the API (addSeries-style) -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.7/dist/lightweight-charts.standalone.production.js"></script>
   <div class="qd-card qd-tv-card">
     <div class="qd-tv-toolbar">
       <span class="label">⊕ Candlestick Chart · TradingView-style · our data</span>
@@ -501,10 +504,12 @@ body { padding: 22px 30px 60px; max-width: 1300px; margin: 0 auto; }
         <button class="qd-tv-int-btn" data-overlay="fib">Fib levels</button>
       </div>
       <span class="meta">Symbol <b style="color:var(--ink-1)" id="tvSymLabel">MRVL</b>
-        · last 90 daily bars · powered by lightweight-charts (Apache 2.0)
-        · candlesticks · volume · EMA overlays · plan + OB price-line overlays</span>
+        · last 90 daily bars · powered by lightweight-charts v4 (Apache 2.0)</span>
     </div>
-    <div class="qd-tv-chart"><div id="lwc_chart"></div></div>
+    <div class="qd-tv-chart"><div id="lwc_chart"></div>
+      <div id="lwc_status" style="display:none;padding:24px;font-family:var(--mono);
+           font-size:11px;color:var(--fail);text-align:center"></div>
+    </div>
   </div>
 
   <!-- Price Ladder hero -->
@@ -1945,9 +1950,23 @@ function emaSeries(bars, period) {
   return out;
 }
 
-function buildLWChart(bars) {
+function buildLWChart(bars, retries) {
+  retries = retries || 0;
   if (typeof LightweightCharts === 'undefined') {
-    setTimeout(() => buildLWChart(bars), 200);
+    if (retries < 25) {
+      setTimeout(() => buildLWChart(bars, retries + 1), 200);
+    } else {
+      // After 5s, show a clear error message instead of leaving the panel blank
+      const status = document.getElementById('lwc_status');
+      const chart = document.getElementById('lwc_chart');
+      if (status && chart) {
+        chart.style.display = 'none';
+        status.style.display = 'block';
+        status.innerHTML = '⚠ lightweight-charts library failed to load from CDN ' +
+                           '(network/firewall blocking unpkg.com?). ' +
+                           'Chart unavailable in this session — other prototype sections still work.';
+      }
+    }
     return;
   }
   const host = document.getElementById('lwc_chart');
@@ -2159,7 +2178,5 @@ document.querySelectorAll('.qd-mode-pill').forEach(p => {
   buildLWChart(bars);
 })();
 </script>
-<!-- TradingView lightweight-charts library (Apache 2.0 · TV's own OSS lib · ~50KB) -->
-<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </body>
 </html>
