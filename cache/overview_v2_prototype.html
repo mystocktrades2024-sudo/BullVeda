@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>◆ Overview · V2 · Engine-driven · ROST</title>
+<style>
+  :root {
+    --bg:#0A0E13; --surf-1:#11161F; --surf-2:#0E1421; --line:#1E2530;
+    --ink:#E6EAF2; --ink-2:#9AA4B2; --ink-3:#6B7280;
+    --gn:#3DDC97; --rd:#E5484D; --am:#F5A524; --lead:#B794F4;
+    --src-bsl:#F472B6; --src-hvn:#FCD34D; --src-swing:#A78BFA;
+    --src-vah:#22D3EE; --src-avwap:#3DDC97; --src-fvg:#F97316;
+    --src-round:#94A3B8; --src-fib:#64748B;
+  }
+  * { box-sizing: border-box; margin:0; padding:0; }
+  html, body { background: var(--bg); color: var(--ink); font: 14px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+  body { max-width: 1480px; margin: 0 auto; padding: 14px 18px 60px; }
+
+  /* Sticky verdict strip */
+  .verdict-strip {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--surf-2); border:1px solid var(--line); border-radius:6px;
+    padding: 14px 18px; margin-bottom: 14px;
+    display:grid; grid-template-columns: 280px 1fr 320px; gap:18px; align-items:center;
+    box-shadow: 0 4px 20px rgba(0,0,0,.4);
+  }
+  .vs-ticker { font:800 28px ui-monospace,monospace; color:var(--lead); letter-spacing:.02em; line-height:1; }
+  .vs-name { font:500 11px -apple-system,sans-serif; color:var(--ink-2); margin-top:4px; letter-spacing:.04em; }
+  .vs-price { font:800 22px ui-monospace,monospace; color:var(--ink); }
+  .vs-chg { font:600 12px ui-monospace,monospace; margin-left:6px; }
+  .vs-mid { display:flex; gap:14px; align-items:center; justify-content:center; }
+  .vs-verdict { font:800 18px ui-monospace,monospace; padding:10px 22px; border-radius:4px; letter-spacing:.08em; text-align:center; }
+  .vs-verdict.buy   { background: rgba(61,220,151,.12); color: var(--gn); border:1.5px solid var(--gn); }
+  .vs-verdict.watch { background: rgba(245,165,36,.12); color: var(--am); border:1.5px solid var(--am); }
+  .vs-verdict.avoid { background: rgba(229,72,77,.12); color: var(--rd); border:1.5px solid var(--rd); }
+  .vs-conv { font:500 10.5px ui-monospace,monospace; color:var(--ink-2); margin-top:4px; letter-spacing:.10em; text-transform:uppercase; }
+  .vs-horizons { display:flex; gap:8px; }
+  .vs-h { padding:7px 11px; border-radius:3px; background:var(--surf-1); border:1px solid var(--line); text-align:center; min-width:90px; }
+  .vs-h .lbl { font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em; }
+  .vs-h .val { font:800 12px ui-monospace,monospace; margin-top:2px; }
+  .vs-h.gn .val { color:var(--gn); }
+  .vs-h.am .val { color:var(--am); }
+  .vs-h.rd .val { color:var(--rd); }
+  .vs-stamp { font:500 10px ui-monospace,monospace; color:var(--ink-3); text-align:right; }
+
+  /* Section panel */
+  .panel { background: var(--surf-1); border:1px solid var(--line); border-radius:6px; padding:18px 22px; margin-bottom: 14px; }
+  h2 { font:700 13.5px ui-monospace,monospace; color:var(--ink); letter-spacing:.10em; text-transform:uppercase; margin-bottom: 14px; display:flex; align-items:center; gap:10px; }
+  h2 .num { color: var(--lead); font:800 14px ui-monospace,monospace; min-width: 24px; }
+  h2 .sub { font:500 11.5px -apple-system,sans-serif; color:var(--ink-3); letter-spacing:.02em; text-transform:none; margin-left: auto; flex:1; }
+  h2 .tag { background: var(--surf-2); color:var(--ink-2); font:700 10px ui-monospace,monospace; padding:3px 9px; border-radius:3px; letter-spacing:.10em; }
+
+  /* Strategy Fit grid */
+  .fit-grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; }
+  .fit-card { background: var(--surf-2); border:1.5px solid var(--line); border-radius:5px; padding:14px 16px; position:relative; }
+  .fit-card.best { border-color: var(--gn); }
+  .fit-card.swing      { border-left: 3px solid var(--am); }
+  .fit-card.position   { border-left: 3px solid #5EA1FF; }
+  .fit-card.investment { border-left: 3px solid var(--lead); }
+  .best-badge { position:absolute; top:-9px; right:14px; background:#0E1421; padding:2px 8px; font:800 9.5px ui-monospace,monospace; color:var(--gn); border:1px solid var(--gn); border-radius:3px; letter-spacing:.12em; }
+  .fc-mode { font:800 11px ui-monospace,monospace; color:var(--ink-2); letter-spacing:.14em; }
+  .fc-hold { font:500 10px ui-monospace,monospace; color:var(--ink-3); margin-bottom:10px; }
+  .fc-verdict { font:800 22px ui-monospace,monospace; margin: 8px 0 6px; letter-spacing:.06em; }
+  .fc-verdict.gn { color: var(--gn); }
+  .fc-verdict.am { color: var(--am); }
+  .fc-verdict.rd { color: var(--rd); }
+  .fc-reason { font:500 12px -apple-system,sans-serif; color:var(--ink-2); line-height:1.45; margin-bottom:10px; min-height:34px; }
+  .fc-tgts { padding:8px 10px; background:var(--surf-1); border-radius:3px; font:500 11.5px ui-monospace,monospace; color:var(--ink); line-height:1.55; }
+  .fc-tgts b { color:var(--ink-2); font-weight:700; }
+
+  /* Setup Quality Strip */
+  .pq-grid { display:grid; grid-template-columns: repeat(10, 1fr); gap:6px; }
+  .pq { background: var(--surf-2); border:1px solid var(--line); border-radius:4px; padding:10px 12px; }
+  .pq-k { font:700 8.5px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.14em; }
+  .pq-v { font:800 15px ui-monospace,monospace; margin: 4px 0 2px; color:var(--ink); }
+  .pq-v.gn { color: var(--gn); }
+  .pq-v.am { color: var(--am); }
+  .pq-v.rd { color: var(--rd); }
+  .pq-v.lead { color: var(--lead); }
+  .pq-sub { font:500 9.5px ui-monospace,monospace; color:var(--ink-3); line-height:1.3; }
+
+  /* Decision matrix (Why BUY / WAIT / AVOID) */
+  .dm-grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; }
+  .dm-col { background: var(--surf-2); border-radius:5px; padding:14px 16px; border-top: 3px solid var(--line); }
+  .dm-col.buy   { border-top-color: var(--gn); }
+  .dm-col.watch { border-top-color: var(--am); }
+  .dm-col.avoid { border-top-color: var(--rd); }
+  .dm-head { font:800 11px ui-monospace,monospace; letter-spacing:.14em; margin-bottom:8px; }
+  .dm-head.gn { color: var(--gn); }
+  .dm-head.am { color: var(--am); }
+  .dm-head.rd { color: var(--rd); }
+  .dm-list { list-style: none; }
+  .dm-list li { font:500 12px -apple-system,sans-serif; color:var(--ink-2); padding:6px 0; line-height:1.45; border-bottom:1px solid var(--line); display:flex; gap:8px; }
+  .dm-list li:last-child { border-bottom: 0; }
+  .dm-list li .b { font-weight:700; color: var(--ink); }
+  .dm-falsify { margin-top:10px; padding:8px 10px; background: rgba(229,72,77,.06); border-left: 2px solid var(--rd); border-radius:3px; font:500 11.5px -apple-system,sans-serif; color:var(--ink-2); line-height:1.5; }
+
+  /* Engine targets */
+  .et-grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+  .et-card { background: var(--surf-2); border:1px solid var(--line); border-radius:5px; padding:14px 16px; }
+  .et-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+  .et-label { font:800 12px ui-monospace,monospace; letter-spacing:.14em; }
+  .et-label.t1 { color: var(--lead); }
+  .et-label.t2 { color: #22D3EE; }
+  .et-price { font:800 22px ui-monospace,monospace; color: var(--ink); }
+  .et-r { font:600 12px ui-monospace,monospace; color: var(--gn); margin-left:8px; }
+  .et-row { display:flex; gap:12px; align-items:center; padding:4px 0; }
+  .et-row-k { font:700 9.5px ui-monospace,monospace; color: var(--ink-3); letter-spacing:.12em; min-width: 96px; }
+  .et-row-v { font:500 12px ui-monospace,monospace; color: var(--ink); }
+  .et-pill { display:inline-block; padding:2px 8px; border-radius:3px; font:700 9.5px ui-monospace,monospace; letter-spacing:.10em; }
+  .et-pill.mag { background: rgba(252,211,77,.15); color: var(--src-hvn); }
+  .et-pill.rej { background: rgba(34,211,238,.15); color: var(--src-vah); }
+  .et-pill.mix { background: rgba(167,139,250,.18); color: var(--src-swing); }
+  .et-pill.struct { background: rgba(183,148,244,.18); color: var(--lead); }
+  .et-sources { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+  .et-src { font:600 10px ui-monospace,monospace; padding:3px 8px; border-radius:3px; background: var(--surf-1); border:1px solid var(--line); }
+  .et-src .dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+
+  /* Risk profile */
+  .rp-grid { display:grid; grid-template-columns: repeat(5, 1fr); gap:10px; }
+  .rp { background: var(--surf-2); border:1px solid var(--line); border-radius:5px; padding:12px 14px; border-top: 2px solid var(--rd); }
+  .rp.gn { border-top-color: var(--gn); }
+  .rp.am { border-top-color: var(--am); }
+  .rp-k { font:700 9px ui-monospace,monospace; color: var(--ink-3); letter-spacing:.12em; }
+  .rp-v { font:800 17px ui-monospace,monospace; margin:4px 0; }
+  .rp-v.gn { color: var(--gn); }
+  .rp-v.am { color: var(--am); }
+  .rp-v.rd { color: var(--rd); }
+  .rp-sub { font:500 10px ui-monospace,monospace; color: var(--ink-3); }
+
+  /* News + sentiment */
+  .ns-grid { display: grid; grid-template-columns: 280px 1fr; gap: 12px; }
+  .ns-gauge { background: var(--surf-2); padding:14px 16px; border-radius:5px; text-align:center; border:1px solid var(--line); }
+  .ns-gauge-v { font:800 32px ui-monospace,monospace; margin: 10px 0 4px; }
+  .ns-gauge-v.gn { color: var(--gn); }
+  .ns-gauge-v.rd { color: var(--rd); }
+  .ns-gauge-v.am { color: var(--am); }
+  .ns-gauge-sub { font:500 11px ui-monospace,monospace; color: var(--ink-3); }
+  .ns-feed { background: var(--surf-2); padding:8px 0; border-radius:5px; border:1px solid var(--line); max-height: 200px; overflow-y:auto; }
+  .news-row { display: grid; grid-template-columns: 64px 80px 1fr 80px; gap:10px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line); font:500 12px -apple-system,sans-serif; color: var(--ink-2); }
+  .news-row:last-child { border-bottom: 0; }
+  .news-day { font:600 10.5px ui-monospace,monospace; color: var(--ink-3); }
+  .news-src { font:700 10px ui-monospace,monospace; color: var(--ink-2); letter-spacing:.08em; text-transform:uppercase; }
+  .news-body { color: var(--ink); line-height:1.4; }
+  .news-sent { text-align:right; }
+  .pill { padding: 2px 7px; border-radius: 3px; font:700 9.5px ui-monospace,monospace; letter-spacing:.06em; }
+  .pill-gn { background: rgba(61,220,151,.15); color: var(--gn); }
+  .pill-rd { background: rgba(229,72,77,.15); color: var(--rd); }
+  .pill-am { background: rgba(245,165,36,.18); color: var(--am); }
+
+  /* Forward outcomes — probability bars */
+  .fo-grid { display:grid; grid-template-columns: 1fr 1fr; gap:18px; }
+  .fo-bar-row { display:grid; grid-template-columns: 80px 1fr 60px; gap:12px; align-items:center; padding:8px 0; }
+  .fo-bar-k { font:700 10.5px ui-monospace,monospace; color: var(--ink-3); letter-spacing:.10em; }
+  .fo-bar-track { height:14px; background: var(--surf-2); border-radius:2px; overflow:hidden; }
+  .fo-bar-fill { height:100%; }
+  .fo-bar-v { font:800 12px ui-monospace,monospace; text-align:right; }
+
+  /* Pre-flight */
+  .pf-grid { display:grid; grid-template-columns: repeat(5, 1fr); gap:8px; }
+  .pf { background: var(--surf-2); border:1px solid var(--line); border-radius:4px; padding:9px 12px; display:flex; gap:8px; align-items:center; }
+  .pf-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .pf-dot.pass { background: var(--gn); }
+  .pf-dot.fail { background: var(--rd); }
+  .pf-dot.warn { background: var(--am); }
+  .pf-k { font:600 11px ui-monospace,monospace; color: var(--ink); line-height:1.3; }
+
+  /* Banner */
+  .banner { padding: 10px 14px; border-radius:4px; font:600 11.5px ui-monospace,monospace; letter-spacing:.04em; margin-bottom: 14px; }
+  .banner.info { background: rgba(94,161,255,.10); border-left:3px solid #5EA1FF; color: #5EA1FF; }
+  .banner.warn { background: rgba(245,165,36,.10); border-left:3px solid var(--am); color: var(--am); }
+
+  /* Section A · Targets visual map */
+  .map-wrap { background: var(--surf-2); padding: 18px 22px; border-radius: 5px; border:1px solid var(--line); }
+  .map-row { display: grid; grid-template-columns: 80px 1fr 100px; gap: 12px; align-items:center; padding:10px 0; border-bottom:1px solid var(--line); }
+  .map-row:last-child { border-bottom: 0; }
+  .map-lbl { font:800 11px ui-monospace,monospace; letter-spacing:.14em; }
+  .map-lbl.t1 { color: var(--lead); }
+  .map-lbl.t2 { color: #22D3EE; }
+  .map-lbl.entry { color: var(--ink-2); }
+  .map-lbl.stop { color: var(--rd); }
+  .map-track { height: 26px; background: var(--surf-1); border-radius: 3px; position:relative; overflow: hidden; }
+  .map-fill { position:absolute; top:0; bottom:0; left:0; }
+  .map-px { font:800 14px ui-monospace,monospace; text-align: right; }
+  .map-px.t1 { color: var(--lead); }
+  .map-px.t2 { color: #22D3EE; }
+  .map-px.entry { color: var(--ink); }
+  .map-px.stop { color: var(--rd); }
+
+  /* C·b — Intrinsic Value & Quality (Buffett) */
+  .val-grid { display:grid; grid-template-columns: repeat(6, 1fr); gap:8px; }
+  .val { background: var(--surf-2); border:1px solid var(--line); border-top: 2px solid var(--lead); border-radius:4px; padding:11px 13px; }
+  .val.gn { border-top-color: var(--gn); }
+  .val.am { border-top-color: var(--am); }
+  .val.rd { border-top-color: var(--rd); }
+  .val-k { font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.14em; }
+  .val-v { font:800 17px ui-monospace,monospace; margin:4px 0 2px; }
+  .val-v.gn { color: var(--gn); }
+  .val-v.am { color: var(--am); }
+  .val-v.rd { color: var(--rd); }
+  .val-v.lead { color: var(--lead); }
+  .val-sub { font:500 10px ui-monospace,monospace; color:var(--ink-3); line-height:1.4; }
+  .val-buffett-test { margin-top:14px; padding:12px 16px; background: var(--surf-2); border-left:3px solid var(--lead); border-radius:3px; }
+  .val-buffett-test .q { font:700 11px ui-monospace,monospace; color: var(--lead); letter-spacing:.10em; text-transform:uppercase; }
+  .val-buffett-test .a { font:500 12.5px -apple-system,sans-serif; color: var(--ink-2); line-height:1.55; margin-top:6px; }
+
+  /* C·c — Earnings deep card */
+  .er-head { display:grid; grid-template-columns: repeat(7, 1fr); gap:8px; margin-bottom:14px; }
+  .er-cell { background: var(--surf-2); border:1px solid var(--line); border-radius:4px; padding:9px 12px; }
+  .er-cell .k { font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.14em; }
+  .er-cell .v { font:800 14px ui-monospace,monospace; margin-top:4px; color:var(--ink); }
+  .er-cell .v.gn { color: var(--gn); }
+  .er-cell .v.am { color: var(--am); }
+  .er-mid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-bottom:14px; }
+  .er-implied { background: var(--surf-2); padding:14px 18px; border-radius:5px; border:1px solid var(--line); }
+  .er-implied .label { font:700 10px ui-monospace,monospace; color: var(--ink-3); letter-spacing:.14em; }
+  .er-implied .move { font:800 28px ui-monospace,monospace; color: var(--am); margin: 6px 0 2px; }
+  .er-implied .sub { font:500 11px ui-monospace,monospace; color: var(--ink-3); }
+  .er-implied .bar-wrap { margin-top:10px; height:18px; background: var(--surf-1); border-radius:2px; position:relative; }
+  .er-implied .bar-fill { height:100%; background: linear-gradient(90deg, var(--am) 0%, var(--rd) 100%); border-radius:2px; opacity:.4; }
+  .er-implied .bar-cur { position:absolute; top:-4px; bottom:-4px; width:2px; background: var(--ink); }
+  .er-rev { background: var(--surf-2); padding:14px 18px; border-radius:5px; border:1px solid var(--line); }
+  .er-rev .label { font:700 10px ui-monospace,monospace; color: var(--ink-3); letter-spacing:.14em; margin-bottom:8px; }
+  .er-rev-row { display:grid; grid-template-columns: 60px 1fr 80px; gap:10px; align-items:center; padding:5px 0; }
+  .er-rev-row .k { font:700 10px ui-monospace,monospace; color: var(--ink-3); }
+  .er-rev-row .v { font:800 13px ui-monospace,monospace; text-align:right; }
+  .er-rev-row .v.gn { color: var(--gn); }
+  .er-rev-row .v.rd { color: var(--rd); }
+  .er-table { width:100%; border-collapse: collapse; }
+  .er-table th { font:700 9.5px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em; padding:8px 10px; text-align:left; border-bottom:1px solid var(--line); }
+  .er-table td { font:500 12px ui-monospace,monospace; padding:7px 10px; border-bottom: 1px solid var(--line); color: var(--ink); }
+  .er-table td.gn { color: var(--gn); }
+  .er-table td.rd { color: var(--rd); }
+  .er-table td.am { color: var(--am); }
+
+  /* C·d — My Position */
+  .pos-grid { display:grid; grid-template-columns: repeat(6, 1fr); gap:8px; }
+  .pos { background: var(--surf-2); border:1px solid var(--line); border-radius:4px; padding:11px 13px; border-top: 2px solid #5EA1FF; }
+  .pos.gn { border-top-color: var(--gn); }
+  .pos.rd { border-top-color: var(--rd); }
+  .pos.am { border-top-color: var(--am); }
+  .pos-k { font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.14em; }
+  .pos-v { font:800 17px ui-monospace,monospace; margin:4px 0 2px; }
+  .pos-v.gn { color: var(--gn); }
+  .pos-v.rd { color: var(--rd); }
+  .pos-v.am { color: var(--am); }
+  .pos-sub { font:500 10px ui-monospace,monospace; color:var(--ink-3); }
+  .pos-tax { margin-top:12px; padding:10px 14px; background: var(--surf-2); border-radius:3px; border:1px solid var(--line); font:500 11.5px -apple-system,sans-serif; color: var(--ink-2); line-height:1.55; }
+
+  /* C·e — Multi-timeframe alignment */
+  .mtf-table { width:100%; border-collapse: collapse; background: var(--surf-2); border-radius:5px; overflow:hidden; }
+  .mtf-table th { font:800 10px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.14em; padding:11px 14px; text-align:left; background: var(--surf-1); border-bottom: 1px solid var(--line); }
+  .mtf-table td { font:500 12px ui-monospace,monospace; padding:11px 14px; border-bottom: 1px solid var(--line); }
+  .mtf-table tr:last-child td { border-bottom: 0; }
+  .mtf-cell { display:inline-flex; align-items:center; gap:6px; }
+  .mtf-cell .dot { width:8px; height:8px; border-radius:50%; }
+  .mtf-cell .dot.bull { background: var(--gn); }
+  .mtf-cell .dot.bear { background: var(--rd); }
+  .mtf-cell .dot.neut { background: var(--ink-3); }
+  .mtf-tf { font:800 12px ui-monospace,monospace; color: var(--ink); }
+  .mtf-summary { margin-top:12px; padding:10px 14px; background: var(--surf-2); border-left:3px solid; border-radius:3px; font:500 12px -apple-system,sans-serif; line-height:1.55; }
+
+  /* I — Action triggers */
+  .trig-grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; }
+  .trig-card { background: var(--surf-2); border:1px solid var(--line); border-top: 3px solid var(--line); border-radius:5px; padding:14px 16px; }
+  .trig-card.swing      { border-top-color: var(--am); }
+  .trig-card.position   { border-top-color: #5EA1FF; }
+  .trig-card.investment { border-top-color: var(--lead); }
+  .trig-mode { font:800 11px ui-monospace,monospace; letter-spacing:.14em; margin-bottom:8px; }
+  .trig-mode.am { color: var(--am); }
+  .trig-mode.blue { color: #5EA1FF; }
+  .trig-mode.lead { color: var(--lead); }
+  .trig-rule { padding:9px 0; border-bottom:1px dashed var(--line); }
+  .trig-rule:last-child { border-bottom: 0; }
+  .trig-rule .label { font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.14em; margin-bottom:4px; }
+  .trig-rule .ruleBody { font:500 12px ui-monospace,monospace; color: var(--ink); line-height:1.6; }
+  .trig-rule .ruleBody .when { color: var(--ink-2); }
+  .trig-rule .ruleBody .then { color: var(--lead); font-weight:700; }
+  .trig-rule .ruleBody .and { color:var(--ink-3); }
+  .trig-rule .ruleBody .neg { color: var(--rd); font-weight:700; }
+</style>
+</head>
+<body>
+
+<!-- ─────────── PROTOTYPE BANNER ─────────── -->
+<div id="ovBanner" class="banner info">
+  ⓘ <b>OVERVIEW V2</b> — engine-driven detail-page overview pulling from <code>/api/trade_engine</code> + <code>/api/elite</code> + <code>/api/portfolio</code>.
+  Append <code>?t=AVGO</code> to swap ticker.
+</div>
+
+<!-- ─────────── 0 · STICKY VERDICT STRIP ─────────── -->
+<div class="verdict-strip">
+  <div>
+    <div class="vs-ticker" id="ovTicker">ROST</div>
+    <div class="vs-name" id="ovName">Ross Stores · Apparel Retail · Consumer Cyclical</div>
+    <div style="margin-top:8px"><span class="vs-price" id="ovPrice">$214.55</span><span class="vs-chg" id="ovChg" style="color:var(--rd)">−4.99%</span></div>
+  </div>
+  <div class="vs-mid">
+    <div style="text-align:center">
+      <div id="ovSystemVerdict" class="vs-verdict watch">WATCH</div>
+      <div id="ovSystemConv" class="vs-conv">Conviction · T2 · score 72</div>
+    </div>
+    <div class="vs-horizons" id="ovHorizons">
+      <div class="vs-h rd"><div class="lbl">SWING</div><div class="val">EXIT</div></div>
+      <div class="vs-h am"><div class="lbl">POSITION</div><div class="val">TIGHTEN</div></div>
+      <div class="vs-h gn"><div class="lbl">INVEST</div><div class="val">HOLD · ADD</div></div>
+    </div>
+  </div>
+  <div class="vs-stamp" id="ovStamp">
+    Engine: loading…<br>
+    Cache: —<br>
+    Regime: —
+  </div>
+</div>
+
+<!-- ─────────── 1 · STRATEGY FIT VERDICT ─────────── -->
+<div class="panel">
+  <h2>
+    <span class="num">A</span>Strategy Fit Verdict
+    <span class="sub">— all three horizons read the same ticker · pick the lens that fits your hold window</span>
+    <span class="tag">ENGINE</span>
+  </h2>
+  <div class="fit-grid" id="ovFitGrid">
+    <div class="fit-card swing">
+      <div class="fc-mode">SWING · 2–10 trading days</div>
+      <div class="fc-hold">min R 1.5 · T2 bent to 2R · drops AVWAP-52 + FVG</div>
+      <div class="fc-verdict rd">EXIT</div>
+      <div class="fc-reason">Engine T1 MIXED @ $218 with weak confluence (4.5). EMA stack broken, MACD bear-cross — clean technicals or out.</div>
+      <div class="fc-tgts">
+        <b>T1</b> $218 (conf 4.5 · MIXED) · <b>T2</b> $222 (conf 4.0 · REJECTION)<br>
+        <b>Stop</b> $203.82 · <b>P(reach)</b> 28%
+      </div>
+    </div>
+    <div class="fit-card position">
+      <div class="fc-mode">POSITION · 2 weeks – 6 months</div>
+      <div class="fc-hold">min R 2.0 / 3.0 · full source weights</div>
+      <div class="fc-verdict am">TIGHTEN STOP</div>
+      <div class="fc-reason">Engine T1 MIXED @ $230 (conf 8.0 from BSL+HVN+swing cluster). Squeeze on, 23 insider buys — move stop $203.82 → $209.50.</div>
+      <div class="fc-tgts">
+        <b>T1</b> $230 (conf 8.0 · MIXED) · <b>T2</b> $246 (conf 6.0 · REJECTION)<br>
+        <b>Stop</b> $209.50 · <b>P(reach)</b> 55%
+      </div>
+    </div>
+    <div class="fit-card investment best">
+      <div class="best-badge">★ BEST FIT</div>
+      <div class="fc-mode">INVESTMENT · 1 + years</div>
+      <div class="fc-hold">IV-based targets (analyst-PT interim) · long structural</div>
+      <div class="fc-verdict gn">HOLD · ADD on dip</div>
+      <div class="fc-reason">Quality compounder intact. ROE 39%, FCF mgn 10%, 30y dividend, 23 insider buys. Session noise irrelevant on 1y+ lens. Add 3 sh below $208.</div>
+      <div class="fc-tgts">
+        <b>T1</b> $232 (IV-central · STRUCTURAL) · <b>T2</b> $280 (IV-high · 5y stretch)<br>
+        <b>Stop</b> $185 (8% MoS) · <b>EV (3y)</b> +$51.45
+      </div>
+    </div>
+  </div>
+  <div class="banner warn" id="ovSysRec" style="margin: 14px 0 0">★ <b>SYSTEM RECOMMENDATION:</b> —</div>
+</div>
+
+<!-- ─────────── 2 · WHY BUY / WAIT / AVOID ─────────── -->
+<div class="panel">
+  <h2>
+    <span class="num">B</span>Decision Matrix
+    <span class="sub">— engine-derived reasons + falsification criteria · why act, why wait, why avoid</span>
+    <span class="tag">ENGINE + ELITE</span>
+  </h2>
+  <div class="dm-grid" id="ovDMGrid">
+    <div class="dm-col buy">
+      <div class="dm-head gn">✓ WHY BUY · 5 reasons</div>
+      <ul class="dm-list">
+        <li><span class="b">Conviction T2 + score 72</span> — above 70-line · normalised weights pass</li>
+        <li><span class="b">23 insider buys / 0 sells in 90d</span> — CEO + CFO both bought</li>
+        <li><span class="b">Squeeze ON · 14d compressed BB inside KC</span> — directional move imminent</li>
+        <li><span class="b">RS rank 78 · sector leader</span> — outperforming SPY by +6% in 1m</li>
+        <li><span class="b">P(reach T1) 55%</span> — Bayesian blend over similar setups</li>
+      </ul>
+    </div>
+    <div class="dm-col watch">
+      <div class="dm-head am">⚠ WHY WAIT · 3 cautions</div>
+      <ul class="dm-list">
+        <li><span class="b">EMA stack broken</span> — price below 8/21/50 today</li>
+        <li><span class="b">MACD bear-cross confirmed</span> — short-term momentum down</li>
+        <li><span class="b">Earnings in +44d</span> — binary risk in hold window</li>
+      </ul>
+      <div class="dm-falsify"><b>Best add-zone:</b> $208 (pullback to HVN center) · $204 (deep zone · stop trigger). Wait for either before scaling.</div>
+    </div>
+    <div class="dm-col avoid">
+      <div class="dm-head rd">✗ WHY AVOID · falsification</div>
+      <ul class="dm-list">
+        <li><span class="b">If close &lt; $204</span> — breaks structural stop · thesis broken</li>
+        <li><span class="b">If sector ETF (XRT) &lt; −10%</span> — sector contagion</li>
+        <li><span class="b">If next ER beats but stock drops &gt; 5%</span> — fundamentals priced-in</li>
+        <li><span class="b">If insider cluster reverses</span> — quality signal flips</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── 3 · ENGINE TARGETS (DEEP) ─────────── -->
+<div class="panel">
+  <h2>
+    <span class="num">C</span>Engine Targets · Where T1 / T2 Live Structurally
+    <span class="sub">— confluence-scored from 9 structural sources · not ATR multiples</span>
+    <span class="tag">target_engine.py</span>
+  </h2>
+  <!-- Price-line visualization -->
+  <div class="map-wrap" id="ovTargetMap" style="margin-bottom:14px">
+    <div class="map-row">
+      <div class="map-lbl t2">T2 · $246</div>
+      <div class="map-track"><div class="map-fill" style="width:100%; background:linear-gradient(90deg, rgba(34,211,238,.10) 0%, rgba(34,211,238,.35) 100%)"></div></div>
+      <div class="map-px t2">+14.7%</div>
+    </div>
+    <div class="map-row">
+      <div class="map-lbl t1">T1 · $230</div>
+      <div class="map-track"><div class="map-fill" style="width:72%; background:linear-gradient(90deg, rgba(183,148,244,.10) 0%, rgba(183,148,244,.40) 100%)"></div></div>
+      <div class="map-px t1">+7.2%</div>
+    </div>
+    <div class="map-row">
+      <div class="map-lbl entry">ENTRY · $214.55</div>
+      <div class="map-track"><div class="map-fill" style="width:48%; background:rgba(230,234,242,.18)"></div></div>
+      <div class="map-px entry">0.0%</div>
+    </div>
+    <div class="map-row">
+      <div class="map-lbl stop">STOP · $203.82</div>
+      <div class="map-track"><div class="map-fill" style="width:0%; background:rgba(229,72,77,.30)"></div></div>
+      <div class="map-px stop">−5.0%</div>
+    </div>
+  </div>
+
+  <div class="et-grid" id="ovEtGrid">
+    <div class="et-card">
+      <div class="et-head">
+        <div class="et-label t1">T1 · TARGET</div>
+        <div><span class="et-price">$230.37</span><span class="et-r">+4.16R</span></div>
+      </div>
+      <div class="et-row"><div class="et-row-k">BEHAVIOR</div><div class="et-row-v"><span class="et-pill mix">MIXED · sweep</span> liquidity above · sweep then resolve</div></div>
+      <div class="et-row"><div class="et-row-k">CONFLUENCE</div><div class="et-row-v">10.5 from 5 sources</div></div>
+      <div class="et-row"><div class="et-row-k">P(REACH)</div><div class="et-row-v">59.5% · Bayes 60% / MC 63% / analog 57% / median 60%</div></div>
+      <div class="et-row"><div class="et-row-k">ACTION</div><div class="et-row-v">trim 33% · wait one bar · trail to BE</div></div>
+      <div class="et-row" style="align-items:flex-start"><div class="et-row-k">SOURCES</div><div class="et-sources">
+        <span class="et-src"><span class="dot" style="background:var(--src-swing)"></span>SWING $229.87 (2.5)</span>
+        <span class="et-src"><span class="dot" style="background:var(--src-round)"></span>ROUND $230.00 (1.0)</span>
+        <span class="et-src"><span class="dot" style="background:var(--src-vah)"></span>VAH $230.12 (2.0)</span>
+        <span class="et-src"><span class="dot" style="background:var(--src-swing)"></span>SWING $230.44 (2.5)</span>
+        <span class="et-src"><span class="dot" style="background:var(--src-swing)"></span>SWING $231.16 (2.5)</span>
+      </div></div>
+    </div>
+    <div class="et-card">
+      <div class="et-head">
+        <div class="et-label t2">T2 · STRETCH</div>
+        <div><span class="et-price">$246.00</span><span class="et-r">+6.0R</span></div>
+      </div>
+      <div class="et-row"><div class="et-row-k">BEHAVIOR</div><div class="et-row-v"><span class="et-pill rej">REJECTION · fade</span> opposing FVG · expect strong reaction</div></div>
+      <div class="et-row"><div class="et-row-k">CONFLUENCE</div><div class="et-row-v">6.0 from 2 sources</div></div>
+      <div class="et-row"><div class="et-row-k">P(REACH)</div><div class="et-row-v">22% · Bayes 21% / MC 24% / analog 22% / median 22%</div></div>
+      <div class="et-row"><div class="et-row-k">ACTION</div><div class="et-row-v">scale 50% on touch · trail remainder with 1.25× ATR</div></div>
+      <div class="et-row" style="align-items:flex-start"><div class="et-row-k">SOURCES</div><div class="et-sources">
+        <span class="et-src"><span class="dot" style="background:var(--src-fvg)"></span>FVG $244-246 (1.5)</span>
+        <span class="et-src"><span class="dot" style="background:var(--src-swing)"></span>SWING $246.50 (2.5)</span>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── C·b · INTRINSIC VALUE & QUALITY (BUFFETT) ─────────── -->
+<div class="panel">
+  <h2>
+    <span class="num">C·b</span>Intrinsic Value &amp; Quality
+    <span class="sub">— Buffett discipline · reverse DCF · owner earnings · margin of safety · quality scores · moat</span>
+    <span class="tag">FUNDAMENTALS</span>
+  </h2>
+  <div class="val-grid" id="ovValGrid">
+    <div class="val gn"><div class="val-k">REVERSE DCF</div><div class="val-v gn">6.4% / 10%</div><div class="val-sub">growth / discount rate price implies · achievable given 5y CAGR 9.1%</div></div>
+    <div class="val gn"><div class="val-k">OWNER EARN YIELD</div><div class="val-v gn">5.2%</div><div class="val-sub">FCF + buybacks / mcap · vs 10y 4.4% · 80bps premium</div></div>
+    <div class="val gn"><div class="val-k">INTRINSIC VALUE</div><div class="val-v lead">$248</div><div class="val-sub">DCF + multiples blend · <b style="color:var(--gn)">MoS 13.5%</b> below IV</div></div>
+    <div class="val gn"><div class="val-k">QUALITY (PIO/Z/M)</div><div class="val-v gn">8 / 4.2 / −2.7</div><div class="val-sub">F-score 8/9 · Altman SAFE · Beneish no manipulation</div></div>
+    <div class="val am"><div class="val-k">EARN YIELD vs 10Y</div><div class="val-v am">+0.6%</div><div class="val-sub">5.0% earn-yield vs 4.4% 10y · thin equity-risk premium</div></div>
+    <div class="val gn"><div class="val-k">MOAT</div><div class="val-v gn">WIDE</div><div class="val-sub">scale buying · brand · ROIC 27% vs WACC 8% · 19pp spread</div></div>
+  </div>
+  <div class="val-buffett-test" id="ovBuffettTest">
+    <div class="q">★ The 10-year test: if markets closed for a decade, would you own this?</div>
+    <div class="a">—</div>
+  </div>
+</div>
+
+<!-- ─────────── C·c · EARNINGS DEEP CARD ─────────── -->
+<div class="panel">
+  <h2>
+    <span class="num">C·c</span>Earnings · Detailed Card
+    <span class="sub">— next print · implied move · revisions · 8-quarter reaction history · vol-crush risk</span>
+    <span class="tag">EODHD + OPTIONS</span>
+  </h2>
+  <div class="er-head" id="ovErHead">
+    <div class="er-cell"><div class="k">REPORT DATE</div><div class="v">2026-06-26</div></div>
+    <div class="er-cell"><div class="k">TIMING</div><div class="v">AMC</div></div>
+    <div class="er-cell"><div class="k">FISCAL Q</div><div class="v">Q1 FY27</div></div>
+    <div class="er-cell"><div class="k">EPS CONSENSUS</div><div class="v">$1.42</div></div>
+    <div class="er-cell"><div class="k">REVENUE CONS</div><div class="v">$5.32B</div></div>
+    <div class="er-cell"><div class="k">WHISPER</div><div class="v gn">$1.48</div></div>
+    <div class="er-cell"><div class="k">DAYS TO PRINT</div><div class="v am">+44d</div></div>
+  </div>
+  <div class="er-mid" id="ovErMid">
+    <div class="er-implied">
+      <div class="label">IMPLIED MOVE · option-derived</div>
+      <div class="move">±5.8%</div>
+      <div class="sub">~$12.50 either side from $214.55 · 30d ATM straddle priced · IV rank 62 (historical normal)</div>
+      <div class="bar-wrap">
+        <div class="bar-fill" style="width:100%"></div>
+        <div class="bar-cur" style="left:50%"></div>
+      </div>
+      <div class="sub" style="margin-top:6px"><b>Vol-crush risk:</b> moderate — IV rank 62 (not extreme); option premiums likely to compress 25–35% post-print.</div>
+    </div>
+    <div class="er-rev">
+      <div class="label">ANALYST EPS REVISIONS</div>
+      <div class="er-rev-row"><div class="k">7d</div><div class="v gn">+0.8%</div><div class="arrow">↑</div></div>
+      <div class="er-rev-row"><div class="k">30d</div><div class="v gn">+2.4%</div><div class="arrow">↑↑</div></div>
+      <div class="er-rev-row"><div class="k">90d</div><div class="v gn">+5.1%</div><div class="arrow">↑↑↑</div></div>
+      <div class="er-rev-row"><div class="k">1Y</div><div class="v gn">+11.8%</div><div class="arrow">↑↑↑</div></div>
+      <div style="margin-top:8px; font:500 11px ui-monospace,monospace; color:var(--ink-2); line-height:1.5"><b style="color:var(--gn)">Bullish revision tape</b> — 11/14 analysts revised up over 90d · momentum bullish</div>
+    </div>
+  </div>
+  <table class="er-table">
+    <thead><tr><th>QUARTER</th><th>EPS ACT / EST</th><th>SURPRISE</th><th>REV ACT / EST</th><th>GAP %</th><th>+5d DRIFT</th><th>NOTE</th></tr></thead>
+    <tbody id="ovErTbody">
+      <tr><td>Q4 FY26</td><td>$1.65 / $1.58</td><td class="gn">+4.4%</td><td>$5.95B / $5.84B</td><td class="gn">+3.2%</td><td class="gn">+5.8%</td><td>Beat + raise · sustained drift</td></tr>
+      <tr><td>Q3 FY26</td><td>$1.39 / $1.41</td><td class="rd">−1.4%</td><td>$5.07B / $5.10B</td><td class="rd">−2.1%</td><td class="rd">−4.5%</td><td>Inline miss · soft drift</td></tr>
+      <tr><td>Q2 FY26</td><td>$1.59 / $1.49</td><td class="gn">+6.7%</td><td>$5.29B / $5.18B</td><td class="gn">+5.4%</td><td class="gn">+3.2%</td><td>Strong beat · clean drift</td></tr>
+      <tr><td>Q1 FY26</td><td>$1.46 / $1.34</td><td class="gn">+9.0%</td><td>$4.86B / $4.71B</td><td class="gn">+8.1%</td><td class="gn">+9.4%</td><td>Massive beat + guide-up</td></tr>
+      <tr><td>Q4 FY25</td><td>$1.82 / $1.66</td><td class="gn">+9.6%</td><td>$5.99B / $5.81B</td><td class="gn">+7.7%</td><td class="gn">+6.1%</td><td>Beat + raise</td></tr>
+      <tr><td>Q3 FY25</td><td>$1.33 / $1.25</td><td class="gn">+6.4%</td><td>$5.07B / $4.96B</td><td class="gn">+5.2%</td><td class="am">+1.8%</td><td>Modest drift</td></tr>
+      <tr><td>Q2 FY25</td><td>$1.59 / $1.46</td><td class="gn">+8.9%</td><td>$5.07B / $4.94B</td><td class="gn">+6.0%</td><td class="gn">+4.7%</td><td>Strong beat</td></tr>
+      <tr><td>Q1 FY25</td><td>$1.46 / $1.35</td><td class="gn">+8.1%</td><td>$4.86B / $4.69B</td><td class="gn">+5.9%</td><td class="gn">+5.3%</td><td>Beat + raise</td></tr>
+    </tbody>
+  </table>
+  <div class="banner info" id="ovErStatsBanner" style="margin: 12px 0 0">
+    <b>8Q stats:</b> —
+  </div>
+</div>
+
+<!-- ─────────── C·d · MY POSITION ─────────── -->
+<div class="panel" id="ovMyPosPanel">
+  <h2>
+    <span class="num">C·d</span>My Position
+    <span class="sub">— if held: cost basis, P&amp;L, days held, cap usage · if not held: hidden</span>
+    <span class="tag">PORTFOLIO</span>
+  </h2>
+  <div class="pos-grid" id="ovPosGrid">
+    <div class="pos"><div class="pos-k">HELD QTY</div><div class="pos-v">85 sh</div><div class="pos-sub">long · paper account</div></div>
+    <div class="pos"><div class="pos-k">COST BASIS</div><div class="pos-v">$198.40</div><div class="pos-sub">avg fill · 2 lots</div></div>
+    <div class="pos gn"><div class="pos-k">UNREAL P&amp;L</div><div class="pos-v gn">+$1,372</div><div class="pos-sub">+8.14% · ahead of stop by 12.6%</div></div>
+    <div class="pos am"><div class="pos-k">DAYS HELD</div><div class="pos-v am">38d</div><div class="pos-sub">long-term in 327d · ST risk</div></div>
+    <div class="pos"><div class="pos-k">SINGLE-NAME CAP</div><div class="pos-v">3.6% / 5%</div><div class="pos-sub">$18,240 of $500K NAV · room +$6,760</div></div>
+    <div class="pos am"><div class="pos-k">SECTOR CAP</div><div class="pos-v am">18% / 20%</div><div class="pos-sub">Consumer Cyclical near cap · tight room for adds</div></div>
+  </div>
+  <div class="pos-tax" id="ovPosTax">—</div>
+</div>
+
+<!-- ─────────── C·e · MULTI-TIMEFRAME ALIGNMENT ─────────── -->
+<div class="panel">
+  <h2>
+    <span class="num">C·e</span>Multi-Timeframe Alignment
+    <span class="sub">— trend / momentum / volume bias across M · W · D · 4h · 1h · count the agreement</span>
+    <span class="tag">TECHNICALS</span>
+  </h2>
+  <table class="mtf-table">
+    <thead><tr><th>TIMEFRAME</th><th>TREND</th><th>MOMENTUM</th><th>VOLUME / RVOL</th><th>BIAS</th></tr></thead>
+    <tbody id="ovMtfBody">
+      <tr><td><span class="mtf-tf">MONTHLY</span></td><td><span class="mtf-cell"><span class="dot bull"></span>Above EMA50/200 · uptrend</span></td><td><span class="mtf-cell"><span class="dot bull"></span>MACD bullish · RSI 58</span></td><td><span class="mtf-cell"><span class="dot bull"></span>OBV trending up</span></td><td><span class="pill pill-gn">BULL</span></td></tr>
+      <tr><td><span class="mtf-tf">WEEKLY</span></td><td><span class="mtf-cell"><span class="dot bull"></span>Above EMA21 · higher-low</span></td><td><span class="mtf-cell"><span class="dot bull"></span>MACD bullish · RSI 54</span></td><td><span class="mtf-cell"><span class="dot neut"></span>RVOL 1.1 · normal</span></td><td><span class="pill pill-gn">BULL</span></td></tr>
+      <tr><td><span class="mtf-tf">DAILY</span></td><td><span class="mtf-cell"><span class="dot bear"></span>Below EMA8/21/50 · breakdown</span></td><td><span class="mtf-cell"><span class="dot bear"></span>MACD bear-cross · RSI 38</span></td><td><span class="mtf-cell"><span class="dot bear"></span>RVOL 2.05 · capitulation</span></td><td><span class="pill pill-rd">BEAR</span></td></tr>
+      <tr><td><span class="mtf-tf">4 HOUR</span></td><td><span class="mtf-cell"><span class="dot bear"></span>Below EMA21 · lower-high</span></td><td><span class="mtf-cell"><span class="dot neut"></span>RSI 41 · stabilising</span></td><td><span class="mtf-cell"><span class="dot bear"></span>RVOL 1.8 elevated</span></td><td><span class="pill pill-rd">BEAR</span></td></tr>
+      <tr><td><span class="mtf-tf">1 HOUR</span></td><td><span class="mtf-cell"><span class="dot neut"></span>EMA8/21 cross flat</span></td><td><span class="mtf-cell"><span class="dot bull"></span>RSI rising off 30 · divergence</span></td><td><span class="mtf-cell"><span class="dot bull"></span>RVOL 0.7 · drying</span></td><td><span class="pill pill-am">NEUTRAL</span></td></tr>
+    </tbody>
+  </table>
+  <div class="mtf-summary" id="ovMtfSummary" style="border-left-color: var(--am)">—</div>
+</div>
+
+<!-- ─────────── D · SETUP QUALITY STRIP ─────────── -->
+<div class="panel">
+  <h2>
+    <span class="num">D</span>Setup Quality Strip
+    <span class="sub">— current state · price · levels · indicators · key gates</span>
+    <span class="tag">ELITE + ENGINE</span>
+  </h2>
+  <div class="pq-grid" id="ovPqGrid">
+    <div class="pq"><div class="pq-k">CURRENT</div><div class="pq-v lead">$214.55</div><div class="pq-sub">−4.99% today</div></div>
+    <div class="pq"><div class="pq-k">→ T1</div><div class="pq-v am">$230.37</div><div class="pq-sub">conf 10.5 · MIXED</div></div>
+    <div class="pq"><div class="pq-k">→ T2</div><div class="pq-v am">$246.00</div><div class="pq-sub">conf 6.0 · REJECTION</div></div>
+    <div class="pq"><div class="pq-k">→ STOP</div><div class="pq-v rd">$203.82</div><div class="pq-sub">−5.0% · 1.0R</div></div>
+    <div class="pq"><div class="pq-k">EMA STACK</div><div class="pq-v rd">BEARISH</div><div class="pq-sub">8/✗ 21/✗ 50/✗ 200/✓</div></div>
+    <div class="pq"><div class="pq-k">MACD</div><div class="pq-v rd">BEARISH</div><div class="pq-sub">bear cross confirmed</div></div>
+    <div class="pq"><div class="pq-k">RSI(14)</div><div class="pq-v am">38</div><div class="pq-sub">oversold-ish</div></div>
+    <div class="pq"><div class="pq-k">RVOL</div><div class="pq-v am">2.05</div><div class="pq-sub">elevated</div></div>
+    <div class="pq"><div class="pq-k">BETA</div><div class="pq-v gn">0.88</div><div class="pq-sub">low-β</div></div>
+    <div class="pq"><div class="pq-k">EARN DAYS</div><div class="pq-v am">+44d</div><div class="pq-sub">beyond hold</div></div>
+  </div>
+</div>
+
+<!-- ─────────── 5 · RISK PROFILE ─────────── -->
+<div class="panel">
+  <h2>
+    <span class="num">E</span>Risk Profile
+    <span class="sub">— stop · 1R · max loss · drawdown haircut · β-adjusted sizing</span>
+    <span class="tag">ENGINE.sizing</span>
+  </h2>
+  <div class="rp-grid" id="ovRpGrid">
+    <div class="rp gn"><div class="rp-k">SIZE</div><div class="rp-v gn">35 sh</div><div class="rp-sub">half-Kelly · regime ×0.7</div></div>
+    <div class="rp rd"><div class="rp-k">1R RISK</div><div class="rp-v rd">$10.73</div><div class="rp-sub">$214.55 → $203.82</div></div>
+    <div class="rp rd"><div class="rp-k">MAX LOSS</div><div class="rp-v rd">−$376</div><div class="rp-sub">if stop hits · 0.75% of $50K</div></div>
+    <div class="rp am"><div class="rp-k">DD HAIRCUT</div><div class="rp-v am">−18%</div><div class="rp-sub">applied · 5% drawdown active</div></div>
+    <div class="rp gn"><div class="rp-k">β-ADJ</div><div class="rp-v gn">0.88×</div><div class="rp-sub">below market · defensive</div></div>
+  </div>
+</div>
+
+<!-- ─────────── 6 · NEWS + CATALYST PULSE ─────────── -->
+<div class="panel">
+  <h2>
+    <span class="num">F</span>News &amp; Catalyst Pulse
+    <span class="sub">— 30-day news flow · sentiment · earnings · insider</span>
+    <span class="tag">ELITE</span>
+  </h2>
+  <div class="ns-grid" id="ovNsGrid">
+    <div class="ns-gauge">
+      <div style="font:700 10px ui-monospace,monospace; color: var(--ink-3); letter-spacing:.14em">NEWS SENT 30D</div>
+      <div class="ns-gauge-v gn">+0.80</div>
+      <div class="ns-gauge-sub">net BULLISH · momentum bullish · 5 articles</div>
+      <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--line); font:500 11px ui-monospace,monospace; color: var(--ink-2); line-height:1.6">
+        <b>Catalyst:</b> earnings +44d<br>
+        <b>Insider 90d:</b> 23 buys / 0 sells<br>
+        <b>Zacks ESP:</b> +1.2% (positive)
+      </div>
+    </div>
+    <div class="ns-feed">
+      <div class="news-row"><span class="news-day">05-12</span><span class="news-src">EODHD</span><span class="news-body">Ross Stores raises FY guidance on strong Q1 comp sales beat</span><span class="news-sent"><span class="pill pill-gn">BULL</span></span></div>
+      <div class="news-row"><span class="news-day">05-09</span><span class="news-src">REUTERS</span><span class="news-body">Off-price retailers gain share as consumers trade down</span><span class="news-sent"><span class="pill pill-gn">BULL</span></span></div>
+      <div class="news-row"><span class="news-day">05-07</span><span class="news-src">WSJ</span><span class="news-body">CEO Barbara Rentler buys $4.2M of ROST shares (Form 4)</span><span class="news-sent"><span class="pill pill-gn">BULL</span></span></div>
+      <div class="news-row"><span class="news-day">05-04</span><span class="news-src">EODHD</span><span class="news-body">Analyst PT raised to $232 at Morgan Stanley · maintain OW</span><span class="news-sent"><span class="pill pill-gn">BULL</span></span></div>
+      <div class="news-row"><span class="news-day">05-01</span><span class="news-src">BLOOMBERG</span><span class="news-body">MACD bear cross flagged · session capitulation on −5% volume</span><span class="news-sent"><span class="pill pill-rd">BEAR</span></span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── 7 · FORWARD OUTCOMES ─────────── -->
+<div class="panel">
+  <h2>
+    <span class="num">G</span>Forward Outcomes
+    <span class="sub">— probability blend over similar setups · hold-window estimates</span>
+    <span class="tag">ENGINE.p_reach</span>
+  </h2>
+  <div class="fo-grid" id="ovFoGrid">
+    <div>
+      <div style="font:700 10px ui-monospace,monospace; color: var(--ink-3); letter-spacing:.14em; margin-bottom: 10px">PROBABILITY (POSITION lens)</div>
+      <div class="fo-bar-row">
+        <div class="fo-bar-k">P(REACH T1)</div>
+        <div class="fo-bar-track"><div class="fo-bar-fill" style="width:55%; background: var(--gn)"></div></div>
+        <div class="fo-bar-v gn" style="color:var(--gn)">55%</div>
+      </div>
+      <div class="fo-bar-row">
+        <div class="fo-bar-k">P(REACH T2)</div>
+        <div class="fo-bar-track"><div class="fo-bar-fill" style="width:22%; background: var(--am)"></div></div>
+        <div class="fo-bar-v" style="color:var(--am)">22%</div>
+      </div>
+      <div class="fo-bar-row">
+        <div class="fo-bar-k">P(STOP HIT)</div>
+        <div class="fo-bar-track"><div class="fo-bar-fill" style="width:28%; background: var(--rd)"></div></div>
+        <div class="fo-bar-v" style="color:var(--rd)">28%</div>
+      </div>
+      <div class="fo-bar-row">
+        <div class="fo-bar-k">P(FLAT)</div>
+        <div class="fo-bar-track"><div class="fo-bar-fill" style="width:17%; background: var(--ink-3)"></div></div>
+        <div class="fo-bar-v" style="color:var(--ink-3)">17%</div>
+      </div>
+    </div>
+    <div>
+      <div style="font:700 10px ui-monospace,monospace; color: var(--ink-3); letter-spacing:.14em; margin-bottom: 10px">HOLD WINDOW</div>
+      <div style="background: var(--surf-2); padding: 14px; border-radius: 4px; border:1px solid var(--line)">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px">
+          <div><div style="font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em">SETUP FAMILY</div><div style="font:800 14px ui-monospace,monospace; margin-top:4px">Squeeze Expansion</div></div>
+          <div><div style="font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em">REGIME</div><div style="font:800 14px ui-monospace,monospace; margin-top:4px; color:var(--am)">Risk-On Choppy</div></div>
+          <div><div style="font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em">MIN HOLD</div><div style="font:800 14px ui-monospace,monospace; margin-top:4px">14 days</div></div>
+          <div><div style="font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em">MAX HOLD</div><div style="font:800 14px ui-monospace,monospace; margin-top:4px">180 days</div></div>
+          <div><div style="font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em">SETUP n (90d)</div><div style="font:800 14px ui-monospace,monospace; margin-top:4px">38</div></div>
+          <div><div style="font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em">WILSON LB</div><div style="font:800 14px ui-monospace,monospace; margin-top:4px; color:var(--gn)">58%</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── 8 · PRE-FLIGHT CHECKLIST ─────────── -->
+<div class="panel">
+  <h2>
+    <span class="num">H</span>Pre-Flight Checklist
+    <span class="sub">— engine gates · warnings · final approval</span>
+    <span class="tag">ENGINE.gates_evaluated</span>
+  </h2>
+  <div class="pf-grid" id="ovPfGrid">
+    <div class="pf"><div class="pf-dot pass"></div><div class="pf-k">Liquidity gate · $48M ADV</div></div>
+    <div class="pf"><div class="pf-dot pass"></div><div class="pf-k">Earnings blackout · +44d (clear)</div></div>
+    <div class="pf"><div class="pf-dot pass"></div><div class="pf-k">Regime allow · risk_on_choppy</div></div>
+    <div class="pf"><div class="pf-dot warn"></div><div class="pf-k">Entry quality · EXTENDED</div></div>
+    <div class="pf"><div class="pf-dot pass"></div><div class="pf-k">R:R ≥ 3.0 · actual 4.16</div></div>
+    <div class="pf"><div class="pf-dot pass"></div><div class="pf-k">Score band ≥ 70 · actual 72</div></div>
+    <div class="pf"><div class="pf-dot pass"></div><div class="pf-k">Setup whitelist pass</div></div>
+    <div class="pf"><div class="pf-dot warn"></div><div class="pf-k">CHoCH against direction · 1 warning</div></div>
+    <div class="pf"><div class="pf-dot pass"></div><div class="pf-k">Wilson LB ≥ 50% · 58%</div></div>
+    <div class="pf"><div class="pf-dot pass"></div><div class="pf-k">Beta-adj size within cap</div></div>
+  </div>
+  <div class="banner warn" id="ovPfBanner" style="margin: 12px 0 0">—</div>
+</div>
+
+<!-- ─────────── I · ACTION TRIGGERS (PER LENS) ─────────── -->
+<div class="panel">
+  <h2>
+    <span class="num">I</span>Action Triggers · Conditional Rules Per Lens
+    <span class="sub">— specific IF / THEN rules · not zones · mechanical execution discipline (CLAUDE principle 8)</span>
+    <span class="tag">RULES ENGINE</span>
+  </h2>
+  <div class="trig-grid" id="ovTrigGrid">
+    <!-- SWING — EXIT verdict -->
+    <div class="trig-card swing">
+      <div class="trig-mode am">SWING · EXIT bias</div>
+      <div class="trig-rule">
+        <div class="label">EXIT TRIGGER (primary)</div>
+        <div class="ruleBody"><span class="when">IF daily close &lt; $213</span> <span class="and">AND</span> <span class="when">MACD histogram still negative</span> → <span class="neg">SELL FULL · market on open next session</span></div>
+      </div>
+      <div class="trig-rule">
+        <div class="label">EXIT TRIGGER (failsafe)</div>
+        <div class="ruleBody"><span class="when">IF intraday tick &lt; $203.82</span> → <span class="neg">SELL FULL · close-based stop · no exceptions</span></div>
+      </div>
+      <div class="trig-rule">
+        <div class="label">RESCUE TRIGGER (low probability)</div>
+        <div class="ruleBody"><span class="when">IF 1h closes &gt; $217 with RVOL ≥ 1.5</span> <span class="and">AND</span> <span class="when">MACD crosses up</span> → <span class="then">RECONSIDER · re-run engine · setup may have flipped</span></div>
+      </div>
+      <div class="trig-rule">
+        <div class="label">DO NOT</div>
+        <div class="ruleBody"><span class="neg">— add to losing swing position</span><br><span class="neg">— average down below stop</span><br><span class="neg">— hold past day-10 if T1 untouched</span></div>
+      </div>
+    </div>
+
+    <!-- POSITION — TIGHTEN bias -->
+    <div class="trig-card position">
+      <div class="trig-mode blue">POSITION · TIGHTEN bias</div>
+      <div class="trig-rule">
+        <div class="label">STOP-TIGHTEN TRIGGER</div>
+        <div class="ruleBody"><span class="when">EFFECTIVE NOW</span> → <span class="then">RAISE STOP $203.82 → $209.50</span> <span class="and">(below 1h pivot · preserves 5R upside to T1)</span></div>
+      </div>
+      <div class="trig-rule">
+        <div class="label">ADD TRIGGER</div>
+        <div class="ruleBody"><span class="when">IF price tags $208 (HVN center)</span> <span class="and">AND</span> <span class="when">1h closes green</span> <span class="and">AND</span> <span class="when">RSI &gt; 35</span> → <span class="then">ADD 1/3 size · raise stop to $206</span></div>
+      </div>
+      <div class="trig-rule">
+        <div class="label">T1 TRIGGER · trim</div>
+        <div class="ruleBody"><span class="when">IF price tags $230 (T1)</span> → <span class="then">TRIM 33% · trail remainder with 1.25× ATR</span></div>
+      </div>
+      <div class="trig-rule">
+        <div class="label">T2 TRIGGER · scale</div>
+        <div class="ruleBody"><span class="when">IF price tags $246 (T2)</span> → <span class="then">SCALE 50% (REJECTION zone) · trail balance with 0.75× ATR</span></div>
+      </div>
+      <div class="trig-rule">
+        <div class="label">INVALIDATION</div>
+        <div class="ruleBody"><span class="when">IF daily close &lt; $209.50</span> <span class="and">OR</span> <span class="when">setup_drift_score ≥ 4</span> → <span class="neg">EXIT FULL · thesis broken</span></div>
+      </div>
+    </div>
+
+    <!-- INVESTMENT — HOLD · ADD bias -->
+    <div class="trig-card investment">
+      <div class="trig-mode lead">INVESTMENT · HOLD · ADD bias</div>
+      <div class="trig-rule">
+        <div class="label">ADD TRIGGER (primary)</div>
+        <div class="ruleBody"><span class="when">IF price &lt; $208 (MoS &gt; 16%)</span> <span class="and">AND</span> <span class="when">Piotroski ≥ 7</span> → <span class="then">ADD 3 shares · IRR boost</span></div>
+      </div>
+      <div class="trig-rule">
+        <div class="label">ADD TRIGGER (deep value)</div>
+        <div class="ruleBody"><span class="when">IF price &lt; $185 (MoS &gt; 25%)</span> <span class="and">AND</span> <span class="when">fundamentals unchanged</span> → <span class="then">ADD 5 shares · max-conviction add</span></div>
+      </div>
+      <div class="trig-rule">
+        <div class="label">HOLD TO</div>
+        <div class="ruleBody"><span class="when">price ≥ $248 (intrinsic value)</span> <span class="and">OR</span> <span class="when">moat erodes (ROIC &lt; 18%)</span> <span class="and">OR</span> <span class="when">FCF yield ≤ 10y treasury</span></div>
+      </div>
+      <div class="trig-rule">
+        <div class="label">SELL TRIGGER (rare)</div>
+        <div class="ruleBody"><span class="when">IF Altman Z drops &lt; 1.8</span> <span class="and">OR</span> <span class="when">Beneish M flags manipulation</span> <span class="and">OR</span> <span class="when">capital allocation grade falls 2+ notches</span> → <span class="neg">SELL FULL · quality regime broken</span></div>
+      </div>
+      <div class="trig-rule">
+        <div class="label">COVERED-CALL OPPORTUNITY</div>
+        <div class="ruleBody"><span class="when">SELL $230 strike Jun-27 call</span> → <span class="then">collect ~$3.80 premium (1.8% yield) · capped at T1 if assigned</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="banner info" style="margin: 14px 0 0">
+    <b>Discipline note:</b> these are pre-committed rules. No discretion. The trigger fires → action follows mechanically. CLAUDE principle 8: "Mechanical execution over emotional adjustment." Pre-place limit orders where possible.
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// OVERVIEW V2 · live wiring
+// Pulls /api/trade_engine × 3 modes + /api/elite/{t} + /api/portfolio.
+// Renders all 14 sections from a single render() pass. Falls back to honest
+// "—" placeholders when a field is missing rather than fabricating data.
+// ═══════════════════════════════════════════════════════════════════════
+const MODE_MAP = { SWING:'swing', POSITION:'position', INVESTMENT:'invest' };
+const BEHAVIOR_CLS = { MAGNET:'mag', REJECTION:'rej', MIXED:'mix', STRUCTURAL:'struct' };
+const SRC_COLOR = { BSL:'var(--src-bsl)', HVN:'var(--src-hvn)', SWING:'var(--src-swing)',
+                    VAH:'var(--src-vah)', AVWAP_52:'var(--src-avwap)', AVWAP_EARN:'var(--src-avwap)',
+                    FVG:'var(--src-fvg)', ROUND:'var(--src-round)', FIB:'var(--src-fib)',
+                    ANALYST_PT:'var(--lead)' };
+
+const STATE = { ticker:'ROST', elite:null, payloads:{}, portfolio:null };
+
+// ─── helpers ────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const setHTML = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
+const setText = (id, val) => { const el = $(id); if (el) el.textContent = val; };
+const fmtPx = v => (typeof v === 'number' && !isNaN(v)) ? '$' + v.toFixed(2) : '—';
+const fmtPct = (v, d=1) => (typeof v === 'number' && !isNaN(v)) ? ((v>=0?'+':'') + v.toFixed(d) + '%') : '—';
+const fmtR = v => (typeof v === 'number' && !isNaN(v)) ? ((v>=0?'+':'') + v.toFixed(1) + 'R') : '—';
+
+function getTickerFromURL(){
+  const url = new URL(window.location);
+  const t = (url.searchParams.get('t') || url.searchParams.get('ticker') || 'ROST').toUpperCase().trim();
+  return t || 'ROST';
+}
+
+// ─── fetchers ───────────────────────────────────────────────────────────
+async function loadEngine(t, modeUi){
+  const mode = MODE_MAP[modeUi] || 'swing';
+  try {
+    const r = await fetch(`/api/trade_engine?t=${encodeURIComponent(t)}&mode=${mode}`,
+                          { credentials:'same-origin' });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (e) { return null; }
+}
+async function loadElite(t){
+  try {
+    const r = await fetch(`/api/elite/${encodeURIComponent(t)}`, { credentials:'same-origin' });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (e) { return null; }
+}
+async function loadPortfolio(t){
+  try {
+    const r = await fetch(`/api/portfolio`, { credentials:'same-origin' });
+    if (!r.ok) return null;
+    const pf = await r.json();
+    const positions = pf.positions || pf.open || [];
+    return positions.find(p => (p.ticker || '').toUpperCase() === t.toUpperCase()) || null;
+  } catch (e) { return null; }
+}
+
+// ─── §0 verdict strip ───────────────────────────────────────────────────
+function renderVerdictStrip(){
+  const { ticker, elite, payloads } = STATE;
+  setText('ovTicker', ticker);
+  const industry = elite?.industry, sector = elite?.sector;
+  setText('ovName', (industry || sector) ? `${industry || ''}${industry && sector ? ' · ' : ''}${sector || ''}` : '');
+  const price = elite?.price;
+  const chg = elite?.pct_chg ?? elite?.perf_1d ?? 0;
+  setHTML('ovPrice', price ? `$${price.toFixed(2)}` : '—');
+  const chgStr = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+  setHTML('ovChg', `<span class="vs-chg" style="color:${chg>=0?'var(--gn)':'var(--rd)'}">${chgStr}</span>`);
+
+  // System verdict from elite.decision/verdict
+  const dec = (elite?.decision?.toString().toLowerCase()) || (elite?.verdict?.toString().toLowerCase()) || '';
+  const score = elite?.score ?? 0;
+  let vLabel = 'WATCH', vCls = 'watch';
+  if (/buy/.test(dec) || score >= 75) { vLabel = 'BUY'; vCls = 'buy'; }
+  else if (/avoid|kill|reject|short/.test(dec) || score < 55) { vLabel = 'AVOID'; vCls = 'avoid'; }
+  $('ovSystemVerdict').className = 'vs-verdict ' + vCls;
+  setText('ovSystemVerdict', vLabel);
+  const conv = elite?.conviction_tier ?? elite?.conviction?.label ?? '—';
+  setText('ovSystemConv', `Conviction · ${conv} · score ${score}`);
+
+  // 3 horizon mini-verdicts derived from payloads
+  const hor = ['SWING','POSITION','INVESTMENT'].map(m => {
+    const p = payloads[m];
+    if (!p || p.decision === 'reject') return { lbl: m, val:'NO TRADE', cls:'rd' };
+    if (p.invest_stub) return { lbl: m, val:'INTERIM', cls:'am' };
+    if (p.is_etf)       return { lbl: m, val:'ETF', cls:'am' };
+    const w = p.warnings || [];
+    const t1c = p.t1?.confluence || 0;
+    const t1r = p.t1?.r_multiple || 0;
+    if (w.some(x => /choch/i.test(x))) return { lbl: m, val:'TIGHTEN', cls:'am' };
+    if (t1c >= 5 && t1r >= 2.5) return { lbl: m, val:'BUY', cls:'gn' };
+    if (t1c < 3 || t1r < 1.5)    return { lbl: m, val:'WEAK', cls:'rd' };
+    return { lbl: m, val:'WATCH', cls:'am' };
+  });
+  setHTML('ovHorizons', hor.map(h => {
+    const lbl = h.lbl === 'INVESTMENT' ? 'INVEST' : h.lbl;
+    return `<div class="vs-h ${h.cls}"><div class="lbl">${lbl}</div><div class="val">${h.val}</div></div>`;
+  }).join(''));
+
+  // Stamp
+  const anyP = payloads.SWING || payloads.POSITION || payloads.INVESTMENT;
+  const ts = anyP?.timestamp || '—';
+  const cache = anyP?._cache?.status === 'hit' ? `hit · ${anyP._cache.age_sec}s old` : 'miss';
+  const regime = elite?.regime || '—';
+  setHTML('ovStamp', `Engine: ${String(ts).slice(0,16).replace('T',' ')}Z<br>Cache: ${cache}<br>Regime: <b style="color:var(--am)">${regime}</b>`);
+}
+
+// ─── §A strategy fit verdict (3 cards) ──────────────────────────────────
+function _deriveVerdict(p){
+  if (!p || p.decision === 'reject') return { label:'NO TRADE', cls:'rd', reason: (p?.warnings || [])[0] || 'no_target' };
+  if (p.invest_stub) return { label:'INTERIM · PT', cls:'am', reason:'INVEST analyst-PT stub (IV triangulation pending)' };
+  if (p.is_etf) return { label:'ETF · WIDE', cls:'am', reason:'ETF graceful-degrade · confluence weak' };
+  const w = p.warnings || [];
+  const t1c = p.t1?.confluence || 0;
+  const t1r = p.t1?.r_multiple || 0;
+  const p1 = p.t1?.p_reach || 0;
+  if (w.some(x => /choch/i.test(x))) return { label:'TIGHTEN STOP', cls:'am' };
+  if (t1c >= 5 && p1 >= 0.45 && t1r >= 2.5) return { label:'BUY · ENTER', cls:'gn' };
+  if (t1c >= 4 && p1 >= 0.30 && t1r >= 2.0)  return { label:'HOLD · ADD DIP', cls:'gn' };
+  if (t1c < 3 || t1r < 1.5) return { label:'WEAK · SKIP', cls:'rd' };
+  if (p1 < 0.20) return { label:'LOW P(reach)', cls:'rd' };
+  return { label:'REVIEW', cls:'am' };
+}
+
+function renderStrategyFit(){
+  const { ticker, payloads } = STATE;
+  const modes = [
+    { ui:'SWING',      label:'SWING',      hold:'2–10 trading days · min R 1.5', cls:'swing' },
+    { ui:'POSITION',   label:'POSITION',   hold:'2 wks – 6 mo · min R 2.0 / 3.0', cls:'position' },
+    { ui:'INVESTMENT', label:'INVESTMENT', hold:'1+ years · IV-based targets',    cls:'investment' },
+  ];
+  let bestScore = -1, bestIdx = -1;
+  const cards = modes.map((m, i) => {
+    const p = payloads[m.ui];
+    const v = _deriveVerdict(p);
+    const t1 = p?.t1, t2 = p?.t2;
+    const score = p ? (t1?.confluence || 0) * (0.4 + (t1?.p_reach || 0)) * Math.max(t1?.r_multiple || 0, 0.5) : 0;
+    if (score > bestScore) { bestScore = score; bestIdx = i; }
+    let reason;
+    if (p?.decision === 'reject') reason = `Engine rejected ${m.label} — ${(p.warnings||[])[0]||'no target'}.`;
+    else if (p?.invest_stub) reason = 'INVEST mode using analyst-PT stub. Full IV triangulation pending.';
+    else if (t1) reason = `Engine T1 ${t1.behavior || ''} @ ${fmtPx(t1.price)} · ${t1.action || ''} · R-mult ${fmtR(t1.r_multiple)}.`;
+    else reason = `No structural T1 found.`;
+    const tgts = t1
+      ? `<b>T1</b> ${fmtPx(t1.price)} (conf ${(t1.confluence||0).toFixed(1)} · ${t1.behavior})${t2 ? ` · <b>T2</b> ${fmtPx(t2.price)} (conf ${(t2.confluence||0).toFixed(1)} · ${t2.behavior})` : ''}<br><b>Stop</b> ${fmtPx(p?.stop?.price)} · <b>P(reach)</b> ${t1.p_reach != null ? Math.round(t1.p_reach*100)+'%' : '—'}`
+      : 'no targets';
+    return { html: `
+      <div class="fit-card ${m.cls}${i === bestIdx ? ' best' : ''}">
+        ${i === bestIdx ? '<div class="best-badge">★ BEST FIT</div>' : ''}
+        <div class="fc-mode">${m.label}</div>
+        <div class="fc-hold">${m.hold}</div>
+        <div class="fc-verdict ${v.cls}">${v.label}</div>
+        <div class="fc-reason">${reason}</div>
+        <div class="fc-tgts">${tgts}</div>
+      </div>`, idx: i };
+  });
+  // Re-tag best card (set bestIdx in loop, but we built HTML before knowing best — rebuild)
+  const html = modes.map((m, i) => {
+    const isBest = i === bestIdx;
+    const p = payloads[m.ui];
+    const v = _deriveVerdict(p);
+    const t1 = p?.t1, t2 = p?.t2;
+    let reason;
+    if (p?.decision === 'reject') reason = `Engine rejected ${m.label} — ${(p.warnings||[])[0]||'no target'}.`;
+    else if (p?.invest_stub) reason = 'INVEST mode using analyst-PT stub. Full IV triangulation pending.';
+    else if (t1) reason = `Engine T1 ${t1.behavior || ''} @ ${fmtPx(t1.price)} · ${t1.action || ''} · R-mult ${fmtR(t1.r_multiple)}.`;
+    else reason = `No structural T1 found.`;
+    const tgts = t1
+      ? `<b>T1</b> ${fmtPx(t1.price)} (conf ${(t1.confluence||0).toFixed(1)} · ${t1.behavior})${t2 ? ` · <b>T2</b> ${fmtPx(t2.price)} (conf ${(t2.confluence||0).toFixed(1)} · ${t2.behavior})` : ''}<br><b>Stop</b> ${fmtPx(p?.stop?.price)} · <b>P(reach)</b> ${t1.p_reach != null ? Math.round(t1.p_reach*100)+'%' : '—'}`
+      : 'no targets';
+    return `<div class="fit-card ${m.cls}${isBest ? ' best' : ''}">${isBest ? '<div class="best-badge">★ BEST FIT</div>' : ''}<div class="fc-mode">${m.label}</div><div class="fc-hold">${m.hold}</div><div class="fc-verdict ${v.cls}">${v.label}</div><div class="fc-reason">${reason}</div><div class="fc-tgts">${tgts}</div></div>`;
+  }).join('');
+  setHTML('ovFitGrid', html);
+
+  // System recommendation banner
+  const bestMode = modes[bestIdx >= 0 ? bestIdx : 0].label;
+  setHTML('ovSysRec',
+    `★ <b>SYSTEM RECOMMENDATION:</b> For ${ticker} today, <b>${bestMode}</b> is the best-fit lens (highest confluence × P(reach) × R composite).`);
+}
+
+// ─── §B decision matrix ─────────────────────────────────────────────────
+function renderDecisionMatrix(){
+  const { elite, payloads, ticker } = STATE;
+  const e = elite || {};
+  const pPos = payloads.POSITION;
+  const t1 = pPos?.t1, t2 = pPos?.t2;
+
+  const why = [];
+  if (e.score >= 70) why.push(`<span class="b">Score ${e.score}/100</span> — above normalized threshold`);
+  if (e.insider_buys > e.insider_sells) why.push(`<span class="b">Insider net buying</span> — ${e.insider_buys||0} buys vs ${e.insider_sells||0} sells`);
+  if (e.squeeze_on) why.push(`<span class="b">Squeeze ON</span> — directional expansion imminent`);
+  if (e.rs_rank >= 70) why.push(`<span class="b">RS rank ${e.rs_rank}</span> — outperforming sector`);
+  if (t1?.p_reach >= 0.5) why.push(`<span class="b">P(reach T1) ${Math.round(t1.p_reach*100)}%</span> — Bayesian blend`);
+  if (e.analyst_upside > 0.1) why.push(`<span class="b">Analyst upside ${(e.analyst_upside*100).toFixed(0)}%</span> — consensus PT above current`);
+
+  const cautions = [];
+  for (const w of (pPos?.warnings || [])) cautions.push(`<span class="b">${w.split(' — ')[0]}</span> — engine warning`);
+  if (!e.above_50ema) cautions.push(`<span class="b">Below EMA50</span> — short-term trend broken`);
+  if (!e.macd_bullish) cautions.push(`<span class="b">MACD bearish</span> — momentum down`);
+  if (e.earn_days != null && e.earn_days <= 7) cautions.push(`<span class="b">Earnings in ${e.earn_days}d</span> — binary risk`);
+  if (e.short_pct > 15) cautions.push(`<span class="b">Short interest ${e.short_pct.toFixed(1)}%</span> — squeeze/crowded`);
+
+  const stopP = pPos?.stop?.price;
+  const avoid = [];
+  if (stopP) avoid.push(`<span class="b">Close &lt; ${fmtPx(stopP)}</span> — breaks structural stop · thesis broken`);
+  if (e.altman_z_score < 1.8) avoid.push(`<span class="b">Altman Z &lt; 1.8</span> — distress risk · quality regime broken`);
+  if (e.beta > 2) avoid.push(`<span class="b">β &gt; 2</span> — high market sensitivity · scale down`);
+  avoid.push(`<span class="b">Fundamentals shift</span> — if score drops below 60 in next scan`);
+  if (e.earn_days != null) avoid.push(`<span class="b">Earnings miss + ER-day gap &gt; 5%</span> — historical reaction reset`);
+
+  const html = `
+    <div class="dm-col buy">
+      <div class="dm-head gn">✓ WHY BUY · ${why.length} reasons</div>
+      <ul class="dm-list">${why.length ? why.map(r => `<li>${r}</li>`).join('') : '<li>No clear buy reasons from engine + elite.</li>'}</ul>
+    </div>
+    <div class="dm-col watch">
+      <div class="dm-head am">⚠ WHY WAIT · ${cautions.length} cautions</div>
+      <ul class="dm-list">${cautions.length ? cautions.map(r => `<li>${r}</li>`).join('') : '<li>No active cautions.</li>'}</ul>
+      ${t1 ? `<div class="dm-falsify"><b>Best add-zone:</b> below ${fmtPx(t1.price * 0.96)} (3-4% pullback to engine support).</div>` : ''}
+    </div>
+    <div class="dm-col avoid">
+      <div class="dm-head rd">✗ WHY AVOID · falsification</div>
+      <ul class="dm-list">${avoid.map(r => `<li>${r}</li>`).join('')}</ul>
+    </div>`;
+  setHTML('ovDMGrid', html);
+}
+
+// ─── §C engine targets ──────────────────────────────────────────────────
+function renderEngineTargets(){
+  const { elite, payloads } = STATE;
+  const p = payloads.POSITION || payloads.SWING || payloads.INVESTMENT;
+  const price = elite?.price ?? p?.price_at_analysis ?? 0;
+  const t1 = p?.t1, t2 = p?.t2, stopP = p?.stop?.price;
+
+  // Price-line map. Compute pct from price.
+  const rows = [];
+  if (t2) {
+    const pct = ((t2.price - price) / price) * 100;
+    rows.push({ lbl:'t2', name:`T2 · ${fmtPx(t2.price)}`, fill:100, color:'rgba(34,211,238,', pct });
+  }
+  if (t1) {
+    const pct = ((t1.price - price) / price) * 100;
+    const t1Pct = t2 ? Math.max(20, Math.min(95, (pct / (((t2.price - price) / price) * 100)) * 100)) : 70;
+    rows.push({ lbl:'t1', name:`T1 · ${fmtPx(t1.price)}`, fill:t1Pct, color:'rgba(183,148,244,', pct });
+  }
+  rows.push({ lbl:'entry', name:`ENTRY · ${fmtPx(price)}`, fill:48, color:'rgba(230,234,242,', pct:0 });
+  if (stopP) {
+    const pct = ((stopP - price) / price) * 100;
+    rows.push({ lbl:'stop', name:`STOP · ${fmtPx(stopP)}`, fill:0, color:'rgba(229,72,77,', pct });
+  }
+  const mapHtml = rows.map(r => `
+    <div class="map-row">
+      <div class="map-lbl ${r.lbl}">${r.name}</div>
+      <div class="map-track"><div class="map-fill" style="width:${r.fill}%; background:${r.lbl==='entry'?'rgba(230,234,242,.18)':r.lbl==='stop'?'rgba(229,72,77,.30)':`linear-gradient(90deg, ${r.color}.10) 0%, ${r.color}.40) 100%)`}"></div></div>
+      <div class="map-px ${r.lbl}">${fmtPct(r.pct, 1)}</div>
+    </div>`).join('');
+  setHTML('ovTargetMap', mapHtml);
+
+  // T1/T2 cards
+  function srcChips(srcs){
+    return (srcs || []).map(s => `<span class="et-src"><span class="dot" style="background:${SRC_COLOR[s.type]||'var(--ink-3)'}"></span>${s.type} ${fmtPx(s.price)} (${s.weight})</span>`).join('');
+  }
+  function tCard(t, label, cls){
+    if (!t) return `<div class="et-card"><div class="et-head"><div class="et-label ${cls}">${label}</div><div>—</div></div><div style="color:var(--ink-3);font:500 12px ui-monospace,monospace;padding:8px 0">engine produced no ${label.toLowerCase()}</div></div>`;
+    const bh = BEHAVIOR_CLS[t.behavior] || 'mix';
+    const ps = t.p_reach_source || {};
+    return `
+      <div class="et-card">
+        <div class="et-head"><div class="et-label ${cls}">${label}</div><div><span class="et-price">${fmtPx(t.price)}</span><span class="et-r">${fmtR(t.r_multiple)}</span></div></div>
+        <div class="et-row"><div class="et-row-k">BEHAVIOR</div><div class="et-row-v"><span class="et-pill ${bh}">${t.behavior || '—'}</span></div></div>
+        <div class="et-row"><div class="et-row-k">CONFLUENCE</div><div class="et-row-v">${(t.confluence||0).toFixed(1)} from ${(t.sources||[]).length} sources</div></div>
+        <div class="et-row"><div class="et-row-k">P(REACH)</div><div class="et-row-v">${t.p_reach != null ? Math.round(t.p_reach*100)+'%' : '—'} · Bayes ${ps.bayes != null ? Math.round(ps.bayes*100)+'%' : '—'} / MC ${ps.mc != null ? Math.round(ps.mc*100)+'%' : '—'} / analog ${ps.analog != null ? Math.round(ps.analog*100)+'%' : '—'}</div></div>
+        <div class="et-row"><div class="et-row-k">ACTION</div><div class="et-row-v">${t.action || '—'}</div></div>
+        <div class="et-row" style="align-items:flex-start"><div class="et-row-k">SOURCES</div><div class="et-sources">${srcChips(t.sources) || '<span style="color:var(--ink-3)">none</span>'}</div></div>
+      </div>`;
+  }
+  setHTML('ovEtGrid', tCard(t1, 'T1 · TARGET', 't1') + tCard(t2, 'T2 · STRETCH', 't2'));
+}
+
+// ─── §C·b intrinsic value & quality (Buffett) ───────────────────────────
+function renderIntrinsicValue(){
+  const e = STATE.elite || {};
+  const price = e.price ?? 0;
+  const pt = e.analyst_target ?? 0;
+  const mos = pt && price ? ((pt - price) / pt) * 100 : null;
+  const fcfY = e.fcf_yield_pct ?? null;            // optional · usually null in current elite
+  const roe = e.fv_roe_pct ?? e.fv_roa_pct ?? null;
+  const earnYield = e.score ? (1 / Math.max(e.peg || 20, 1)) * 5 : null; // crude proxy when no E/P
+  const treasury10y = 4.4;
+
+  // Cells — show "—" for fields we can't compute yet (no fabrication)
+  const cells = [
+    { k:'REVERSE DCF', v:'—', sub:'requires DCF model · pending Phase 2', cls:'' },
+    { k:'OWNER EARN YIELD', v: fcfY != null ? fcfY.toFixed(1)+'%' : '—', sub: fcfY != null ? 'FCF + buybacks / mcap' : 'requires FCF + buybacks · pending', cls: fcfY != null && fcfY > treasury10y ? 'gn' : '' },
+    { k:'INTRINSIC VALUE', v: pt ? fmtPx(pt) : '—', sub: pt ? `analyst PT consensus · <b style="color:${mos > 0 ? 'var(--gn)' : 'var(--rd)'}">MoS ${mos.toFixed(1)}%</b>` : 'no analyst consensus', cls: mos > 10 ? 'gn' : mos > 0 ? 'am' : '' },
+    { k:'QUALITY (PIO / Z / M)', v:'—', sub:'Piotroski F / Altman Z / Beneish M · pending', cls:'' },
+    { k:'EARN YIELD vs 10Y', v:'—', sub:'requires forward earnings · pending', cls:'' },
+    { k:'MOAT', v:'—', sub:'qualitative · pending peer benchmarking', cls:'' },
+  ];
+  setHTML('ovValGrid', cells.map(c => `<div class="val ${c.cls}"><div class="val-k">${c.k}</div><div class="val-v ${c.cls}">${c.v}</div><div class="val-sub">${c.sub}</div></div>`).join(''));
+
+  // Buffett 10-year test — honest placeholder pending fundamentals analysis
+  setHTML('ovBuffettTest',
+    `<div class="q">★ The 10-year test: if markets closed for a decade, would you own this?</div>
+     <div class="a"><b style="color:var(--am)">Requires fundamental judgment</b> — moat assessment, capital allocation history, reinvestment ROIIC, and management quality not yet automated. Currently engine has: sector ${e.sector || '—'}, industry ${e.industry || '—'}, ROIC proxy via score (${e.score || '—'}). Full Buffett-test computation arrives in Phase 2 (intrinsic value module).</div>`);
+}
+
+// ─── §C·c earnings deep card ────────────────────────────────────────────
+function renderEarningsCard(){
+  const e = STATE.elite || {};
+  const earnDays = e.earn_days;
+  const hist = e.zacks_eps_surprise_history || [];
+
+  // Top strip — honest "—" where engine doesn't have data
+  const cells = [
+    { k:'REPORT DATE', v: earnDays != null ? `+${earnDays}d` : '—' },
+    { k:'TIMING', v: '—' },
+    { k:'FISCAL Q', v: '—' },
+    { k:'EPS CONSENSUS', v: '—' },
+    { k:'REVENUE CONS', v: '—' },
+    { k:'WHISPER', v: '—' },
+    { k:'DAYS TO PRINT', v: earnDays != null ? `+${earnDays}d` : '—' },
+  ];
+  setHTML('ovErHead', cells.map(c => `<div class="er-cell"><div class="k">${c.k}</div><div class="v">${c.v}</div></div>`).join(''));
+
+  // Implied move + revisions — show available data only
+  const iv = (e.options_data || {}).iv_rank;
+  const ivStr = iv != null ? Math.round(iv*100)+'%' : '—';
+  const espScore = e.zacks_earnings_esp;
+  const earningsBeat = e.earnings_beat;
+  setHTML('ovErMid', `
+    <div class="er-implied">
+      <div class="label">IMPLIED MOVE · option-derived</div>
+      <div class="move">—</div>
+      <div class="sub">Requires ATM straddle · pending Schwab options chain wiring · IV rank ${ivStr}</div>
+      <div class="bar-wrap"><div class="bar-fill" style="width:100%"></div><div class="bar-cur" style="left:50%"></div></div>
+      <div class="sub" style="margin-top:6px"><b>Vol-crush risk:</b> IV rank ${ivStr} · premiums likely compress post-print.</div>
+    </div>
+    <div class="er-rev">
+      <div class="label">EARNINGS PERFORMANCE</div>
+      <div class="er-rev-row"><div class="k">ESP</div><div class="v ${espScore > 0 ? 'gn' : espScore < 0 ? 'rd' : ''}">${espScore != null ? (espScore > 0 ? '+' : '') + espScore.toFixed(2) + '%' : '—'}</div><div class="arrow">${espScore > 0 ? '↑' : espScore < 0 ? '↓' : '—'}</div></div>
+      <div class="er-rev-row"><div class="k">BEAT RATE</div><div class="v ${earningsBeat > 60 ? 'gn' : ''}">${earningsBeat != null ? earningsBeat + '%' : '—'}</div><div class="arrow"></div></div>
+      <div class="er-rev-row"><div class="k">DAYS</div><div class="v">${earnDays != null ? earnDays + 'd' : '—'}</div><div class="arrow"></div></div>
+      <div style="margin-top:8px; font:500 11px ui-monospace,monospace; color:var(--ink-2); line-height:1.5">${e.esp_play ? '<b style="color:var(--gn)">ESP PLAY signal</b> — Zacks ESP positive + Rank ≤3 + ER ≤7d · ~70% beat-rate playbook fires' : 'ESP-play signal not active'}</div>
+    </div>`);
+
+  // 8Q reaction table from zacks_eps_surprise_history
+  if (hist && hist.length) {
+    setHTML('ovErTbody', hist.slice(0, 8).map(q => `
+      <tr><td>${q.quarter || '—'}</td>
+          <td>${q.eps_actual != null ? '$' + q.eps_actual.toFixed(2) : '—'} / ${q.eps_estimate != null ? '$' + q.eps_estimate.toFixed(2) : '—'}</td>
+          <td class="${q.surprise_pct > 0 ? 'gn' : 'rd'}">${q.surprise_pct != null ? (q.surprise_pct > 0 ? '+' : '') + q.surprise_pct.toFixed(1) + '%' : '—'}</td>
+          <td>—</td>
+          <td>—</td>
+          <td>—</td>
+          <td>${q.surprise_pct > 0 ? 'beat' : 'miss'}</td>
+      </tr>`).join(''));
+    const beats = hist.filter(q => q.surprise_pct > 0).length;
+    const avgSurp = hist.reduce((s, q) => s + (q.surprise_pct || 0), 0) / hist.length;
+    setHTML('ovErStatsBanner', `<b>${beats} / ${hist.length} beats</b> · avg EPS surprise ${(avgSurp > 0 ? '+' : '') + avgSurp.toFixed(1)}% · ${e.esp_play ? '<b style="color:var(--gn)">ESP-play fires</b>' : 'ESP-play not active'}`);
+  } else {
+    setHTML('ovErTbody', `<tr><td colspan="7" style="color:var(--ink-3); padding:14px"><b>No earnings history available</b> — zacks_eps_surprise_history empty for this ticker. Gap %, post-print drift, and same-day peer correlations pending Phase 2 wiring.</td></tr>`);
+    setHTML('ovErStatsBanner', `<b>8Q stats:</b> data not available for ${STATE.ticker}.`);
+  }
+}
+
+// ─── §C·d my position ───────────────────────────────────────────────────
+function renderMyPosition(){
+  const pf = STATE.portfolio;
+  const panel = $('ovMyPosPanel');
+  if (!pf) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  const e = STATE.elite || {};
+  const price = e.price ?? pf.current_price ?? 0;
+  const qty = pf.shares ?? pf.quantity ?? 0;
+  const cost = pf.entry_price ?? pf.cost_basis ?? 0;
+  const pnl = qty * (price - cost);
+  const pnlPct = cost ? ((price - cost) / cost) * 100 : 0;
+  const entryDate = pf.entry_date || pf.opened_at;
+  const days = entryDate ? Math.floor((Date.now() - new Date(entryDate).getTime()) / (1000*60*60*24)) : null;
+  const cells = [
+    { k:'HELD QTY', v: qty + ' sh', sub: (pf.direction || 'long'), cls:'' },
+    { k:'COST BASIS', v: fmtPx(cost), sub: entryDate ? entryDate.slice(0,10) : '—', cls:'' },
+    { k:'UNREAL P&L', v: (pnl >= 0 ? '+' : '') + '$' + Math.abs(pnl).toFixed(0), sub: fmtPct(pnlPct), cls: pnl >= 0 ? 'gn' : 'rd' },
+    { k:'DAYS HELD', v: days != null ? days + 'd' : '—', sub: days != null && days < 365 ? `LT in ${365-days}d · ST gain` : 'LT eligible', cls: days != null && days < 365 ? 'am' : 'gn' },
+    { k:'STOP', v: fmtPx(pf.stop), sub: pf.stop && price ? fmtPct(((pf.stop - price) / price) * 100) : '—', cls:'' },
+    { k:'TARGET', v: fmtPx(pf.target1 || pf.target), sub: pf.target1 && price ? fmtPct(((pf.target1 - price) / price) * 100) : '—', cls:'' },
+  ];
+  setHTML('ovPosGrid', cells.map(c => `<div class="pos ${c.cls}"><div class="pos-k">${c.k}</div><div class="pos-v ${c.cls}">${c.v}</div><div class="pos-sub">${c.sub}</div></div>`).join(''));
+  const taxNote = days != null && days < 365
+    ? `Cost basis ${fmtPx(cost)} · entered ${entryDate?.slice(0,10) || '—'} (${days}d ago). Long-term rate eligible in ${365-days}d. Selling now would realize <b style="color:var(--am)">short-term gain</b>.`
+    : `Cost basis ${fmtPx(cost)} · long-term eligible.`;
+  setHTML('ovPosTax', `<b style="color:var(--ink)">Tax / lot status:</b> ${taxNote} Cap usage and wash-sale window require portfolio-level computation (pending).`);
+}
+
+// ─── §C·e multi-timeframe alignment ─────────────────────────────────────
+function renderMTF(){
+  const e = STATE.elite || {};
+  // Engine returns daily-frame indicators only. Other timeframes shown as honest placeholders.
+  const daily = {
+    trend: e.above_50ema ? 'bull' : 'bear',
+    trendNote: e.above_8ema && e.above_21ema && e.above_50ema ? 'Above EMA 8/21/50 · uptrend' : (!e.above_50ema ? 'Below EMA 50 · breakdown' : 'Mixed EMA stack'),
+    mom: e.macd_bullish ? 'bull' : 'bear',
+    momNote: `MACD ${e.macd_signal || '—'} · RSI ${e.rsi != null ? Math.round(e.rsi) : '—'}`,
+    vol: e.rvol > 1.5 ? (e.pct_chg < 0 ? 'bear' : 'bull') : 'neut',
+    volNote: e.rvol != null ? `RVOL ${e.rvol.toFixed(2)} · ${e.rvol > 1.5 ? 'elevated' : 'normal'}` : 'RVOL —',
+    bias: e.above_50ema && e.macd_bullish ? 'BULL' : (!e.above_50ema && !e.macd_bullish ? 'BEAR' : 'NEUTRAL'),
+  };
+  const weekly = { trend: e.weekly_bull ? 'bull' : 'neut', trendNote: e.weekly_bull ? 'Weekly trend bullish' : 'Weekly trend not confirmed' };
+  const rows = [
+    { tf:'MONTHLY', trend:'neut', trendNote:'monthly bars not yet plumbed', mom:'neut', momNote:'—', vol:'neut', volNote:'—', bias:'—', biasCls:'pill-am' },
+    { tf:'WEEKLY', trend: weekly.trend, trendNote: weekly.trendNote, mom:'neut', momNote:'—', vol:'neut', volNote:'—', bias: weekly.trend === 'bull' ? 'BULL' : 'NEUT', biasCls: weekly.trend === 'bull' ? 'pill-gn' : 'pill-am' },
+    { tf:'DAILY', ...daily, biasCls: daily.bias === 'BULL' ? 'pill-gn' : daily.bias === 'BEAR' ? 'pill-rd' : 'pill-am' },
+    { tf:'4 HOUR', trend:'neut', trendNote:'4h bars not yet plumbed', mom:'neut', momNote:'—', vol:'neut', volNote:'—', bias:'—', biasCls:'pill-am' },
+    { tf:'1 HOUR', trend:'neut', trendNote:'1h bars not yet plumbed', mom:'neut', momNote:'—', vol:'neut', volNote:'—', bias:'—', biasCls:'pill-am' },
+  ];
+  setHTML('ovMtfBody', rows.map(r => `
+    <tr><td><span class="mtf-tf">${r.tf}</span></td>
+        <td><span class="mtf-cell"><span class="dot ${r.trend}"></span>${r.trendNote}</span></td>
+        <td><span class="mtf-cell"><span class="dot ${r.mom}"></span>${r.momNote}</span></td>
+        <td><span class="mtf-cell"><span class="dot ${r.vol}"></span>${r.volNote}</span></td>
+        <td><span class="pill ${r.biasCls}">${r.bias}</span></td>
+    </tr>`).join(''));
+
+  const bulls = rows.filter(r => r.bias === 'BULL').length;
+  const bears = rows.filter(r => r.bias === 'BEAR').length;
+  const col = bulls > bears ? 'var(--gn)' : bears > bulls ? 'var(--rd)' : 'var(--am)';
+  const sumText = `${bulls} bullish · ${bears} bearish · ${rows.length-bulls-bears} neutral. <b style="color:var(--am)">Only daily timeframe is plumbed today</b> — weekly/4h/1h require OHLCV multi-resolution wiring (Phase 2). Treat daily bias as primary signal until others come online.`;
+  $('ovMtfSummary').style.borderLeftColor = col;
+  setHTML('ovMtfSummary', `<b style="color:${col}">Bias:</b> ${sumText}`);
+}
+
+// ─── §D setup quality strip ─────────────────────────────────────────────
+function renderSetupStrip(){
+  const e = STATE.elite || {};
+  const p = STATE.payloads.POSITION || STATE.payloads.SWING || STATE.payloads.INVESTMENT;
+  const price = e.price ?? p?.price_at_analysis ?? 0;
+  const t1 = p?.t1, t2 = p?.t2, stopP = p?.stop?.price;
+  const cells = [
+    { k:'CURRENT', v: fmtPx(price), sub: fmtPct(e.pct_chg ?? e.perf_1d ?? 0, 2) + ' today', cls: (e.pct_chg ?? 0) >= 0 ? 'gn' : 'rd' },
+    { k:'→ T1',    v: fmtPx(t1?.price), sub: t1 ? `conf ${(t1.confluence||0).toFixed(1)} · ${t1.behavior}` : '—', cls: t1 ? 'am' : '' },
+    { k:'→ T2',    v: fmtPx(t2?.price), sub: t2 ? `conf ${(t2.confluence||0).toFixed(1)} · ${t2.behavior}` : '—', cls: t2 ? 'am' : '' },
+    { k:'→ STOP',  v: fmtPx(stopP), sub: stopP && price ? fmtPct(((stopP-price)/price)*100, 1) + ' · 1.0R' : '—', cls: 'rd' },
+    { k:'EMA STACK', v: e.above_8ema && e.above_21ema && e.above_50ema ? 'BULLISH' : (!e.above_50ema ? 'BEARISH' : 'MIXED'), sub: `8/${e.above_8ema?'✓':'✗'} 21/${e.above_21ema?'✓':'✗'} 50/${e.above_50ema?'✓':'✗'} 200/${e.above_200sma?'✓':'✗'}`, cls: e.above_50ema && e.above_200sma ? 'gn' : 'rd' },
+    { k:'MACD', v: e.macd_bullish ? 'BULLISH' : 'BEARISH', sub: e.macd_signal || '—', cls: e.macd_bullish ? 'gn' : 'rd' },
+    { k:'RSI(14)', v: e.rsi != null ? Math.round(e.rsi) : '—', sub: e.rsi == null ? '—' : (e.rsi >= 70 ? 'overbought' : e.rsi >= 50 ? 'bullish' : e.rsi >= 30 ? 'bearish' : 'oversold'), cls: e.rsi == null ? '' : (e.rsi >= 70 || e.rsi <= 30 ? 'am' : '') },
+    { k:'RVOL', v: e.rvol != null ? e.rvol.toFixed(2) : '—', sub: e.rvol == null ? '—' : (e.rvol >= 1.5 ? 'elevated' : 'normal'), cls: e.rvol == null ? '' : (e.rvol >= 1.5 ? 'am' : '') },
+    { k:'BETA', v: e.beta != null ? e.beta.toFixed(2) : '—', sub: e.beta == null ? '—' : (e.beta < 0.8 ? 'low-β' : e.beta > 1.5 ? 'high-β' : 'mid-β'), cls: e.beta == null ? '' : (Math.abs(e.beta - 1) < 0.2 ? 'gn' : 'am') },
+    { k:'EARN DAYS', v: e.earn_days != null ? `+${e.earn_days}d` : '—', sub: e.earn_days == null ? 'no scheduled' : (e.earn_days <= 7 ? 'imminent' : e.earn_days <= 30 ? 'this month' : 'beyond hold'), cls: e.earn_days == null ? '' : (e.earn_days <= 7 ? 'rd' : 'am') },
+  ];
+  setHTML('ovPqGrid', cells.map(c => `<div class="pq"><div class="pq-k">${c.k}</div><div class="pq-v ${c.cls}">${c.v}</div><div class="pq-sub">${c.sub}</div></div>`).join(''));
+}
+
+// ─── §E risk profile ────────────────────────────────────────────────────
+function renderRiskProfile(){
+  const e = STATE.elite || {};
+  const p = STATE.payloads.POSITION || STATE.payloads.SWING || STATE.payloads.INVESTMENT;
+  const price = e.price ?? p?.price_at_analysis ?? 0;
+  const stopP = p?.stop?.price;
+  const sizing = p?.sizing || {};
+  const oneR = price && stopP ? Math.abs(price - stopP) : null;
+  const sizeSh = sizing.shares ?? sizing.size ?? null;
+  const equity = sizing.equity ?? 25000;
+  const riskPct = sizing.risk_pct != null ? sizing.risk_pct * 100 : 0.5;
+  const maxLoss = sizeSh && oneR ? sizeSh * oneR : null;
+  const cells = [
+    { k:'SIZE', v: sizeSh != null ? sizeSh + ' sh' : '—', sub: sizing.basis || 'half-Kelly + regime mult', cls:'gn' },
+    { k:'1R RISK', v: oneR != null ? '$' + oneR.toFixed(2) : '—', sub: oneR && price ? `${price.toFixed(2)} → ${stopP.toFixed(2)}` : '—', cls:'rd' },
+    { k:'MAX LOSS', v: maxLoss != null ? '−$' + maxLoss.toFixed(0) : '—', sub: maxLoss && equity ? `${(maxLoss/equity*100).toFixed(2)}% of $${(equity/1000).toFixed(0)}K` : '—', cls:'rd' },
+    { k:'DD HAIRCUT', v: sizing.drawdown_mult != null ? (sizing.drawdown_mult * 100).toFixed(0) + '%' : '100%', sub: 'applied · drawdown scaler', cls: sizing.drawdown_mult < 1 ? 'am' : 'gn' },
+    { k:'β-ADJ', v: e.beta != null ? e.beta.toFixed(2) + '×' : '—', sub: e.beta == null ? '—' : (e.beta < 1 ? 'below market · defensive' : 'above market · aggressive'), cls: e.beta != null && Math.abs(e.beta - 1) < 0.3 ? 'gn' : 'am' },
+  ];
+  setHTML('ovRpGrid', cells.map(c => `<div class="rp ${c.cls}"><div class="rp-k">${c.k}</div><div class="rp-v ${c.cls}">${c.v}</div><div class="rp-sub">${c.sub}</div></div>`).join(''));
+}
+
+// ─── §F news + catalyst pulse ───────────────────────────────────────────
+function renderNewsPulse(){
+  const e = STATE.elite || {};
+  const articles = (e.news_articles || []).slice(0, 5);
+  const nsRaw = e.news_sentiment_score;
+  const ns = (typeof nsRaw === 'object' && nsRaw) ? (nsRaw.score || 0) : (typeof nsRaw === 'number' ? nsRaw : null);
+  const momentum = (typeof nsRaw === 'object' && nsRaw) ? (nsRaw.momentum || '') : '';
+  const cnt = (typeof nsRaw === 'object' && nsRaw) ? (nsRaw.article_count || articles.length) : articles.length;
+  const nsCls = ns == null ? 'am' : ns >= 2 ? 'gn' : ns <= -2 ? 'rd' : 'am';
+  const nsLabel = ns == null ? 'no signal' : ns >= 2 ? 'net BULLISH' : ns <= -2 ? 'net BEARISH' : 'mixed';
+  const newsRows = articles.length
+    ? articles.map(a => {
+        const sent = (a.sentiment || a.sentiment_label || 'neutral').toLowerCase();
+        const cls = sent.includes('pos')||sent.includes('bull') ? 'pill-gn' : sent.includes('neg')||sent.includes('bear') ? 'pill-rd' : 'pill-am';
+        const day = (a.date || a.published_at || '').slice(5,10);
+        return `<div class="news-row"><span class="news-day">${day || '—'}</span><span class="news-src">${a.source || a.publisher || '—'}</span><span class="news-body">${a.title || a.headline || '(no title)'}</span><span class="news-sent"><span class="pill ${cls}">${sent.slice(0,4).toUpperCase()}</span></span></div>`;
+      }).join('')
+    : `<div style="padding:14px; color:var(--ink-3); font:500 12px ui-monospace,monospace">no recent news articles</div>`;
+  setHTML('ovNsGrid', `
+    <div class="ns-gauge">
+      <div style="font:700 10px ui-monospace,monospace; color: var(--ink-3); letter-spacing:.14em">NEWS SENT 30D</div>
+      <div class="ns-gauge-v ${nsCls}">${ns != null ? (ns>=0?'+':'') + ns.toFixed(2) : '—'}</div>
+      <div class="ns-gauge-sub">${nsLabel}${momentum ? ' · '+momentum : ''} · ${cnt} articles</div>
+      <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--line); font:500 11px ui-monospace,monospace; color: var(--ink-2); line-height:1.6">
+        <b>Catalyst:</b> earnings ${e.earn_days != null ? '+' + e.earn_days + 'd' : '—'}<br>
+        <b>Insider 90d:</b> ${e.insider_buys || 0} buys / ${e.insider_sells || 0} sells<br>
+        <b>Zacks ESP:</b> ${e.zacks_earnings_esp != null ? (e.zacks_earnings_esp > 0 ? '+' : '') + e.zacks_earnings_esp.toFixed(2) + '%' : '—'}
+      </div>
+    </div>
+    <div class="ns-feed">${newsRows}</div>`);
+}
+
+// ─── §G forward outcomes ────────────────────────────────────────────────
+function renderForwardOutcomes(){
+  const e = STATE.elite || {};
+  const p = STATE.payloads.POSITION || STATE.payloads.SWING || STATE.payloads.INVESTMENT;
+  const t1 = p?.t1 || {}, t2 = p?.t2 || {};
+  const pT1 = t1.p_reach ?? 0;
+  const pT2 = t2.p_reach ?? 0;
+  const pStop = Math.max(0, Math.min(1, 1 - pT1 - 0.15));  // proxy
+  const pFlat = Math.max(0, 1 - pT1 - pT2 - pStop);
+  function bar(label, v, color){
+    return `<div class="fo-bar-row"><div class="fo-bar-k">${label}</div><div class="fo-bar-track"><div class="fo-bar-fill" style="width:${Math.round(v*100)}%; background: ${color}"></div></div><div class="fo-bar-v" style="color:${color}">${Math.round(v*100)}%</div></div>`;
+  }
+  setHTML('ovFoGrid', `
+    <div>
+      <div style="font:700 10px ui-monospace,monospace; color: var(--ink-3); letter-spacing:.14em; margin-bottom: 10px">PROBABILITY · POSITION lens</div>
+      ${bar('P(REACH T1)', pT1, 'var(--gn)')}
+      ${bar('P(REACH T2)', pT2, 'var(--am)')}
+      ${bar('P(STOP HIT)', pStop, 'var(--rd)')}
+      ${bar('P(FLAT)',     pFlat, 'var(--ink-3)')}
+    </div>
+    <div>
+      <div style="font:700 10px ui-monospace,monospace; color: var(--ink-3); letter-spacing:.14em; margin-bottom: 10px">HOLD WINDOW</div>
+      <div style="background: var(--surf-2); padding: 14px; border-radius: 4px; border:1px solid var(--line)">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px">
+          <div><div style="font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em">SETUP FAMILY</div><div style="font:800 14px ui-monospace,monospace; margin-top:4px">${e.setup_family || e.setup || '—'}</div></div>
+          <div><div style="font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em">REGIME</div><div style="font:800 14px ui-monospace,monospace; margin-top:4px; color:var(--am)">${e.regime || '—'}</div></div>
+          <div><div style="font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em">MIN HOLD</div><div style="font:800 14px ui-monospace,monospace; margin-top:4px">${e.hold_period_min ? e.hold_period_min + ' d' : '—'}</div></div>
+          <div><div style="font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em">MAX HOLD</div><div style="font:800 14px ui-monospace,monospace; margin-top:4px">${e.max_hold_days || e.hold_period_max ? (e.max_hold_days || e.hold_period_max) + ' d' : '—'}</div></div>
+          <div><div style="font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em">SETUP n</div><div style="font:800 14px ui-monospace,monospace; margin-top:4px">${e._setup_n || '—'}</div></div>
+          <div><div style="font:700 9px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.12em">WILSON LB</div><div style="font:800 14px ui-monospace,monospace; margin-top:4px; color:var(--gn)">${e._setup_wilson_lb != null ? (e._setup_wilson_lb*100).toFixed(0)+'%' : '—'}</div></div>
+        </div>
+      </div>
+    </div>`);
+}
+
+// ─── §H pre-flight ──────────────────────────────────────────────────────
+function renderPreFlight(){
+  const e = STATE.elite || {};
+  const p = STATE.payloads.POSITION || STATE.payloads.SWING || STATE.payloads.INVESTMENT;
+  const gates = e.gates_evaluated || [];
+  const warns = p?.warnings || [];
+  // Compose gates from engine + elite
+  const items = [];
+  items.push({ pass: e.market_cap >= 1e9, k:'Liquidity gate · ' + (e.market_cap ? '$'+(e.market_cap/1e9).toFixed(1)+'B mcap' : '—') });
+  items.push({ pass: e.earn_days == null || e.earn_days > 7, warn: e.earn_days != null && e.earn_days <= 7, k:'Earnings blackout · ' + (e.earn_days != null ? '+'+e.earn_days+'d' : 'no schedule') });
+  items.push({ pass: e.regime && !/panic|risk_off/i.test(e.regime), k:'Regime allow · ' + (e.regime || '—') });
+  items.push({ pass: e.entry_quality && /FRESH|PULLBACK|VALID/.test(e.entry_quality), warn: e.entry_quality === 'EXTENDED', k:'Entry quality · ' + (e.entry_quality || '—') });
+  items.push({ pass: (p?.t1?.r_multiple || 0) >= 3, warn: (p?.t1?.r_multiple || 0) >= 2 && (p?.t1?.r_multiple || 0) < 3, k:'R:R ≥ 3.0 · actual ' + ((p?.t1?.r_multiple || 0).toFixed(2)) });
+  items.push({ pass: e.score >= 70, warn: e.score >= 55 && e.score < 70, k:'Score band ≥ 70 · actual ' + (e.score || '—') });
+  items.push({ pass: !warns.some(w=>/choch/i.test(w)), warn: warns.some(w=>/choch/i.test(w)), k:'CHoCH check · ' + (warns.some(w=>/choch/i.test(w)) ? 'warning' : 'clear') });
+  items.push({ pass: e._setup_wilson_lb >= 0.5, warn: e._setup_wilson_lb >= 0.35 && e._setup_wilson_lb < 0.5, k:'Wilson LB ≥ 50% · ' + (e._setup_wilson_lb != null ? (e._setup_wilson_lb*100).toFixed(0)+'%' : '—') });
+  items.push({ pass: (p?.t1?.confluence || 0) >= 4, warn: (p?.t1?.confluence || 0) >= 2, k:'Confluence ≥ 4 · actual ' + ((p?.t1?.confluence || 0).toFixed(1)) });
+  items.push({ pass: (p?.t1?.p_reach || 0) >= 0.4, warn: (p?.t1?.p_reach || 0) >= 0.25, k:'P(reach T1) ≥ 40% · ' + (p?.t1?.p_reach != null ? Math.round(p.t1.p_reach*100)+'%' : '—') });
+  setHTML('ovPfGrid', items.map(it => {
+    const dot = it.pass ? 'pass' : (it.warn ? 'warn' : 'fail');
+    return `<div class="pf"><div class="pf-dot ${dot}"></div><div class="pf-k">${it.k}</div></div>`;
+  }).join(''));
+  const fails = items.filter(it => !it.pass && !it.warn).length;
+  const wn = items.filter(it => it.warn).length;
+  const col = fails > 0 ? 'var(--rd)' : wn > 0 ? 'var(--am)' : 'var(--gn)';
+  const banner = fails > 0
+    ? `<b style="color:var(--rd)">${fails} gate(s) FAIL</b> — engine does not allow new entry.`
+    : wn > 0
+      ? `<b style="color:var(--am)">${wn} warning(s)</b> — engine allows but recommends caution: ${warns.slice(0,3).join(' · ')}`
+      : `<b style="color:var(--gn)">All gates clear</b> — engine fully approves new entry.`;
+  $('ovPfBanner').className = 'banner ' + (fails > 0 ? 'warn' : wn > 0 ? 'warn' : 'info');
+  setHTML('ovPfBanner', banner);
+}
+
+// ─── §I action triggers ─────────────────────────────────────────────────
+function renderActionTriggers(){
+  const e = STATE.elite || {};
+  const ticker = STATE.ticker;
+  const pSwing = STATE.payloads.SWING, pPos = STATE.payloads.POSITION, pInv = STATE.payloads.INVESTMENT;
+
+  function buildCard(modeUi, cls, modeCls, p){
+    if (!p || p.decision === 'reject') {
+      return `<div class="trig-card ${cls}"><div class="trig-mode ${modeCls}">${modeUi} · NO TRADE</div><div style="padding:8px 0; color:var(--ink-3); font:500 12px ui-monospace,monospace">Engine cannot generate ${modeUi} targets. Triggers unavailable.</div></div>`;
+    }
+    const t1 = p.t1 || {}, t2 = p.t2 || {}, stopP = p.stop?.price;
+    const rules = [];
+    rules.push({ lbl:'EXIT TRIGGER (failsafe)', body:`<span class="when">IF intraday tick &lt; ${fmtPx(stopP)}</span> → <span class="neg">SELL FULL · close-based stop · no exceptions</span>` });
+    if (t1.price) rules.push({ lbl:'T1 TRIGGER · trim', body:`<span class="when">IF price tags ${fmtPx(t1.price)} (T1)</span> → <span class="then">${t1.action || 'trim 33%'} · ${t1.behavior === 'REJECTION' ? 'scale 50% on touch' : 'trail remainder with 1.25× ATR'}</span>` });
+    if (t2.price) rules.push({ lbl:'T2 TRIGGER · scale', body:`<span class="when">IF price tags ${fmtPx(t2.price)} (T2)</span> → <span class="then">${t2.action || 'scale 50%'} · trail balance</span>` });
+    if (modeUi === 'POSITION' && e.entry_quality && e.above_50ema === false) {
+      rules.push({ lbl:'ADD TRIGGER', body:`<span class="when">IF price tags primary zone</span> <span class="and">AND</span> <span class="when">1h closes green</span> <span class="and">AND</span> <span class="when">RSI &gt; 35</span> → <span class="then">ADD 1/3 size · raise stop</span>` });
+    }
+    if (modeUi === 'INVESTMENT' && e.analyst_target) {
+      rules.push({ lbl:'ADD TRIGGER (value)', body:`<span class="when">IF price &lt; ${fmtPx(e.analyst_target * 0.85)} (MoS &gt; 15%)</span> → <span class="then">ADD on weakness · long-term hold to IV ${fmtPx(e.analyst_target)}</span>` });
+    }
+    rules.push({ lbl:'INVALIDATION', body:`<span class="when">IF daily close &lt; ${fmtPx(stopP)}</span> <span class="and">OR</span> <span class="when">score drops &lt; 60</span> → <span class="neg">EXIT FULL · thesis broken</span>` });
+    return `<div class="trig-card ${cls}"><div class="trig-mode ${modeCls}">${modeUi} · ${(p.decision || 'TRADE').toUpperCase()}</div>${rules.map(r => `<div class="trig-rule"><div class="label">${r.lbl}</div><div class="ruleBody">${r.body}</div></div>`).join('')}</div>`;
+  }
+  setHTML('ovTrigGrid',
+    buildCard('SWING', 'swing', 'am', pSwing) +
+    buildCard('POSITION', 'position', 'blue', pPos) +
+    buildCard('INVESTMENT', 'investment', 'lead', pInv));
+}
+
+// ─── orchestrator ───────────────────────────────────────────────────────
+async function init(){
+  STATE.ticker = getTickerFromURL();
+  setText('ovTicker', STATE.ticker);
+  setHTML('ovBanner', `ⓘ <b>OVERVIEW V2</b> · loading <b>${STATE.ticker}</b> from <code>/api/trade_engine</code> + <code>/api/elite</code>…`);
+
+  const [elite, sw, ps, iv, pf] = await Promise.all([
+    loadElite(STATE.ticker),
+    loadEngine(STATE.ticker, 'SWING'),
+    loadEngine(STATE.ticker, 'POSITION'),
+    loadEngine(STATE.ticker, 'INVESTMENT'),
+    loadPortfolio(STATE.ticker),
+  ]);
+  STATE.elite = elite;
+  STATE.payloads = { SWING:sw, POSITION:ps, INVESTMENT:iv };
+  STATE.portfolio = pf;
+
+  renderVerdictStrip();
+  renderStrategyFit();
+  renderDecisionMatrix();
+  renderEngineTargets();
+  renderIntrinsicValue();
+  renderEarningsCard();
+  renderMyPosition();
+  renderMTF();
+  renderSetupStrip();
+  renderRiskProfile();
+  renderNewsPulse();
+  renderForwardOutcomes();
+  renderPreFlight();
+  renderActionTriggers();
+
+  const ok = !!elite || !!sw || !!ps || !!iv;
+  if (ok) {
+    setHTML('ovBanner',
+      `<b style="color:var(--gn)">✓ LOADED</b> · <b>${STATE.ticker}</b> · elite ${elite ? '✓' : '—'} · engine SWG ${sw ? '✓' : '—'} POS ${ps ? '✓' : '—'} INV ${iv ? '✓' : '—'} · portfolio ${pf ? '✓ held' : '— not held'}. Append <code>?t=XYZ</code> to switch ticker.`);
+    $('ovBanner').className = 'banner info';
+  } else {
+    setHTML('ovBanner', `<b style="color:var(--rd)">⚠ LOAD FAILED</b> · could not reach engine/elite for <b>${STATE.ticker}</b>. Page is empty.`);
+    $('ovBanner').className = 'banner warn';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+
+</body>
+</html>
