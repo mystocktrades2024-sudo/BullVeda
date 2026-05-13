@@ -2452,8 +2452,36 @@ def run_daily_scan(force_fresh: bool = False):
                 log.info(f"  Sector rotation: +3 pts to {_sector_boosted} tickers in leading sectors ({', '.join(_leading_sectors)})")
 
     # ── Step 5f: WATCH-to-BUY auto-promote on entry zone touch ─────────
+    # 2026-05-13 fix: this path was bypassing system circuit breakers
+    # (macro blackout, drawdown kill, forced cash). It would promote
+    # WATCH→BUY and send a Slack alert, then the downstream decision
+    # engine cascade would reroute back to WATCH due to circuit breaker.
+    # Result: Slack said "BUY" while the bundle showed 0 BUYs. Fix: check
+    # the same blockers BEFORE promotion.
     _zone_promoted = 0
-    for r in all_results:
+    _zone_block_reason = None
+    try:
+        import macro_calendar as _mc_check
+        _mb_active, _mb_reason = _mc_check.is_macro_blackout()
+        if _mb_active:
+            _zone_block_reason = f"macro blackout: {_mb_reason}"
+    except Exception:
+        pass
+    if not _zone_block_reason:
+        try:
+            from portfolio_tracker import check_circuit_breaker as _cb_check
+            _cb_state = _cb_check() or {}
+            if _cb_state.get("active"):
+                _zone_block_reason = f"circuit breaker active: {_cb_state.get('level', 'tripped')}"
+        except Exception:
+            pass
+    if _zone_block_reason:
+        log.info(f"  Entry-zone promotions SKIPPED — {_zone_block_reason}")
+        # Skip the loop AND the Slack alert
+        all_results_iter = iter(())
+    else:
+        all_results_iter = all_results
+    for r in all_results_iter:
         if r.get("decision", {}).get("verdict") != "WATCH":
             continue
         _tp = r.get("trade_plan") or {}
