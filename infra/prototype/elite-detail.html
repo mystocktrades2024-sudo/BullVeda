@@ -1924,27 +1924,6 @@
     </div>
   </div>
 
-  <!-- Mode toggle: SWING / POSITION / INVEST. Genuinely rebinds Plan Ladder
-       + Pre-Flight Checklist to mode-specific stop/T1/T2/R:R/ER-window/
-       entry-quality rules sourced from T.modes (build_data.py:_MODE_RULES).
-       Before 2026-05-12 this toggle was cosmetic — Principle 18 violation
-       documented in TV-BONUS-DISABLED commit message. -->
-  <div class="qd-mode-bar" style="display:flex; align-items:center; gap:14px; padding:8px 14px; background:var(--bg-2); border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:11px;">
-    <span style="color:var(--ink-3); letter-spacing:0.14em; text-transform:uppercase; font-weight:700;">Decision lens</span>
-    <div class="qd-mode-pills" role="tablist" style="display:flex; gap:6px;">
-      <button class="qd-mode-pill active" data-qdmode="swing" title="2-21d hold · 1.25×ATR stop · 3:1 R:R · ER≥14d clear">SWING</button>
-      <button class="qd-mode-pill" data-qdmode="position" title="10-90d hold · 1.75×ATR stop · 2.5:1 R:R · ER within 30d welcome (catalyst)">POSITION</button>
-      <button class="qd-mode-pill" data-qdmode="invest" title="1-5yr hold · -15% drawdown stop · 2:1 R:R · ER agnostic">INVEST</button>
-    </div>
-    <span id="qdModeRules" style="color:var(--ink-2); font-size:10.5px; letter-spacing:0.06em;">1.25×ATR stop · 3:1 R:R · ER≥14d clear · FRESH/PULLBACK only</span>
-    <span style="margin-left:auto; color:var(--ink-3); font-size:10px;">Sections marked <b style="color:var(--ink-1)">*</b> recompute on mode change · others are mode-agnostic readings</span>
-  </div>
-  <style>
-    .qd-mode-pill { background: var(--bg-1); border: 1px solid var(--rule); color: var(--ink-2); padding: 5px 14px; font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; border-radius: 2px; transition: all 0.12s; }
-    .qd-mode-pill:hover { color: var(--ink-0); border-color: var(--rule-2); }
-    .qd-mode-pill.active { background: var(--ink-0); color: var(--bg-1); border-color: var(--ink-0); }
-  </style>
-
   <!-- Trade Ticket Modal — opened by Quick Buy / Quick Short -->
   <div id="ttkModalOverlay" onclick="if(event.target===this)ttkCloseModal()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:100; align-items:flex-start; justify-content:center; padding-top:60px; backdrop-filter:blur(4px);">
     <div id="ttkModal" style="background:var(--bg-1); border:1px solid var(--rule-2); border-radius:10px; width:600px; max-width:92vw; max-height:80vh; overflow-y:auto; box-shadow:0 12px 40px rgba(0,0,0,0.6);">
@@ -6485,63 +6464,10 @@ async function fdPopulateFloorHeader() {
   } catch (_) {}
 }
 
-// ── Mode toggle (SWING / POSITION / INVEST) ───────────────────────────────
-// Genuinely rebinds Plan Ladder + Pre-Flight Checklist to T.modes[currentMode]
-// values when overview/plan sub-tabs re-render. Other sections remain mode-
-// agnostic (3-lens readings are static company-level data) and are explicitly
-// labeled as such in the UI.
-window.__qdMode = window.__qdMode || 'swing';
-window.qdMode = function() {
-  return window.__qdMode || (window.T && window.T.modes && window.T.modes._baseline) || 'swing';
-};
-window.qdModeBlock = function() {
-  const T = window.T || {};
-  const modes = T.modes || {};
-  return modes[window.qdMode()] || modes.swing || null;
-};
-window.__qdReRenderActiveTab = function() {
-  // Re-fire the render function for whichever fd-tab is active. Lets the
-  // mode toggle pick up the new __qdMode without a full page reload.
-  const active = document.querySelector('.fd-tab.active');
-  const id = active && active.dataset && active.dataset.fdtab;
-  if (!id) return;
-  // Map of fdtab id → window render function name (mirrors elite-detail-shell FILE_TO_WINDOW_FN
-  // for the tabs that matter for mode-awareness).
-  const fnMap = {
-    overview:      'renderEliteOverview',
-    plan:          'renderPlan',
-    technicals:    'renderChart',
-    fundamentals:  'renderFund',
-    options:       'renderOptionsTab',
-    thesis:        'renderThesisDetail',
-  };
-  const fn = fnMap[id];
-  if (fn && typeof window[fn] === 'function') {
-    try { window[fn](); } catch (_e) { console.warn('mode re-render failed:', _e); }
-  }
-};
-
 // Wire tab clicks + initial state
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.fd-tab').forEach(el => {
     el.addEventListener('click', () => fdSwitchTab(el.dataset.fdtab));
-  });
-
-  // Mode toggle pills
-  document.querySelectorAll('.qd-mode-pill').forEach(pill => {
-    pill.addEventListener('click', () => {
-      const m = pill.dataset.qdmode;
-      if (!m) return;
-      window.__qdMode = m;
-      document.querySelectorAll('.qd-mode-pill').forEach(p => p.classList.toggle('active', p === pill));
-      // Update the rules-note caption
-      const blk = window.qdModeBlock();
-      const note = document.getElementById('qdModeRules');
-      if (note && blk && blk.rules_note) note.textContent = blk.rules_note;
-      // Re-fire the active tab's render — mode-aware sections (Plan Ladder,
-      // Pre-Flight Checklist, mode badge in Primary Thesis) will rebind.
-      window.__qdReRenderActiveTab();
-    });
   });
 
   // ── Floor header search (port from dashboard.html) ─────────────────────
