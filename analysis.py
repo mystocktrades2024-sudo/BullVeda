@@ -9580,6 +9580,42 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         _setup_mult_audit = None
         pass
 
+    # FAMILY-LEVEL REGIME KILL (2026-05-13) — complements per-setup_type kills.
+    # Evidence base: scripts/regime_sharpe_decomp.py output. Operates on the
+    # CLASSIFIED setup_family (Breakout Expansion / Trend Continuation / etc.),
+    # not the raw plan.setup_type. This catches sub-setups that aren't
+    # individually killed but whose family is structurally bad in a regime.
+    # Example: Breakout Expansion in bull (n=105, PF 0.71, Sharpe -0.13).
+    try:
+        _family_kill_cfg = (config or {}).get("setup_family_kill_by_regime") or {}
+        if _family_kill_cfg:
+            _fam_overrides = _family_kill_cfg.get(setup_family) or {}
+            _fam_regime_key = (regime_name or "neutral").lower()
+            if _fam_regime_key in _fam_overrides:
+                _fam_mult = float(_fam_overrides[_fam_regime_key])
+                if 0.0 <= _fam_mult < 1.0:
+                    _fam_pre = float(normalized)
+                    normalized = float(normalized) * _fam_mult
+                    if _fam_mult == 0.0:
+                        # Stamp family-level kill on the audit trail
+                        _fam_validations = (_family_kill_cfg.get("_validations") or {}).get(setup_family, {}).get(_fam_regime_key, {})
+                        _setup_mult_audit = {
+                            "killed": True,
+                            "raw_setup": _setup_for_mult if '_setup_for_mult' in dir() else None,
+                            "family_killed": setup_family,
+                            "regime": _fam_regime_key,
+                            "pre_mult_score": round(_fam_pre, 1),
+                            "multiplier": 0.0,
+                            "reason": f"setup_family_kill_by_regime: '{setup_family}' in '{_fam_regime_key}' = 0.0",
+                            "source": _fam_validations.get("source", ""),
+                            "mechanism": _fam_validations.get("mechanism", ""),
+                            "evidence_n": _fam_validations.get("n"),
+                            "evidence_pf": _fam_validations.get("pf"),
+                            "evidence_sharpe": _fam_validations.get("sharpe_per_trade"),
+                        }
+    except Exception:
+        pass
+
     # Ranking flaw #13: collapse 0.1pp float noise. Keep the full-precision value
     # in `normalized_raw` for debugging; use integer 0-100 for ranking, thresholds,
     # and the public `score` field. Two picks at 68.9 and 69.1 now both display 69.
