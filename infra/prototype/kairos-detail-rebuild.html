@@ -324,6 +324,24 @@ body { padding: 22px 30px 60px; max-width: 1300px; margin: 0 auto; }
 .qd-spark .sdesc { color: var(--ink-3); font-size: 10px; font-family: var(--mono); margin-top: 2px; }
 .qd-spark svg { display: block; margin-top: 6px; }
 
+/* ── TradingView live chart card ──────────────────────────────────── */
+.qd-tv-card { padding: 0; overflow: hidden; }
+.qd-tv-toolbar { display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+                 background: var(--bg-2); border-bottom: 1px solid var(--rule); }
+.qd-tv-toolbar .label { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.2em;
+                         text-transform: uppercase; color: var(--ink-3); font-weight: 700; }
+.qd-tv-toolbar .meta { margin-left: auto; color: var(--ink-3); font-family: var(--mono);
+                        font-size: 10px; letter-spacing: 0.06em; }
+.qd-tv-interval { display: flex; gap: 2px; }
+.qd-tv-int-btn { background: var(--bg-1); border: 1px solid var(--rule-2); color: var(--ink-2);
+                  padding: 4px 12px; font-family: var(--mono); font-size: 10px;
+                  font-weight: 700; letter-spacing: 0.12em; cursor: pointer; border-radius: 2px;
+                  transition: all 0.12s; }
+.qd-tv-int-btn:hover { color: var(--ink-0); border-color: var(--rule-3); }
+.qd-tv-int-btn.active { background: var(--ink-0); color: var(--bg-1); border-color: var(--ink-0); }
+.qd-tv-chart { height: 540px; background: var(--bg-2); }
+#tradingview_widget { width: 100%; height: 100%; }
+
 /* ── Order Blocks dedicated card ──────────────────────────────────── */
 .qd-ob-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .qd-ob-row { display: grid; grid-template-columns: 26px 200px 1fr 200px 1fr;
@@ -472,11 +490,31 @@ body { padding: 22px 30px 60px; max-width: 1300px; margin: 0 auto; }
     </div>
   </div>
 
+  <!-- TradingView Live Chart -->
+  <div class="qd-card qd-tv-card">
+    <div class="qd-tv-toolbar">
+      <span class="label">⊕ Live Chart · TradingView</span>
+      <div class="qd-tv-interval" id="tvIntervalRow">
+        <button class="qd-tv-int-btn" data-tv-int="1">1m</button>
+        <button class="qd-tv-int-btn" data-tv-int="5">5m</button>
+        <button class="qd-tv-int-btn" data-tv-int="15">15m</button>
+        <button class="qd-tv-int-btn" data-tv-int="60">1H</button>
+        <button class="qd-tv-int-btn" data-tv-int="240">4H</button>
+        <button class="qd-tv-int-btn active" data-tv-int="D">1D</button>
+        <button class="qd-tv-int-btn" data-tv-int="W">1W</button>
+        <button class="qd-tv-int-btn" data-tv-int="M">1M</button>
+      </div>
+      <span class="meta">Symbol <b style="color:var(--ink-1)" id="tvSymLabel">NASDAQ:MRVL</b>
+        · default studies: EMA 21 · EMA 50 · EMA 200 · RSI · MACD · Volume</span>
+    </div>
+    <div class="qd-tv-chart"><div id="tradingview_widget"></div></div>
+  </div>
+
   <!-- Price Ladder hero -->
   <div class="qd-card">
     <div class="qd-card-h">Price ladder · EMAs · SMC · VWAP · Pivots · Fib
       <span class="ma">MODE-AWARE</span>
-      <span class="meta">plan overlay rebinds on mode toggle</span></div>
+      <span class="meta">our annotated decision levels — complements the live chart above</span></div>
     <div class="qd-ladder-wrap">
       <div class="qd-ladder">
         <svg viewBox="0 0 700 700" preserveAspectRatio="xMidYMid meet" width="100%" height="100%">
@@ -1853,6 +1891,97 @@ function buildFVGRow(f, price) {
 }
 
 loadLiveOB();
+
+// ── TradingView live chart widget ──────────────────────────────────────────
+// Embeds the official TV Advanced Chart via tv.js. Free widget, no API key.
+// The widget object is stored globally so the mode toggle and interval buttons
+// can call setSymbol() / setResolution() without re-creating the iframe.
+let __tvWidget = null;
+const TV_DEFAULT_SYMBOL = 'NASDAQ:MRVL';
+// Mode → default chart interval (per CLAUDE.md: swing reads 1H/1D, position
+// reads 1D/1W, invest reads 1W/1M). Drives both the active button and the
+// widget resolution when the mode pill changes.
+const MODE_TO_TV_INTERVAL = { swing: 'D', position: 'D', invest: 'W' };
+
+function tvLoadWidget(symbol, interval) {
+  if (typeof TradingView === 'undefined') { return; }
+  // Clear and re-create the container; the widget doesn't expose a clean
+  // setSymbol API on the free tier, so re-init on change is the pragmatic path.
+  const host = document.getElementById('tradingview_widget');
+  if (!host) return;
+  host.innerHTML = '';
+  __tvWidget = new TradingView.widget({
+    autosize: true,
+    symbol: symbol || TV_DEFAULT_SYMBOL,
+    interval: interval || 'D',
+    timezone: 'America/New_York',
+    theme: 'dark',
+    style: '1',
+    locale: 'en',
+    toolbar_bg: '#161b23',
+    enable_publishing: false,
+    hide_side_toolbar: false,
+    allow_symbol_change: true,
+    details: false,
+    studies: [
+      'MAExp@tv-basicstudies',
+      'RSI@tv-basicstudies',
+      'MACD@tv-basicstudies',
+      'Volume@tv-basicstudies'
+    ],
+    container_id: 'tradingview_widget',
+    overrides: {
+      'paneProperties.background': '#0f1318',
+      'paneProperties.backgroundType': 'solid',
+      'paneProperties.vertGridProperties.color': '#1f2733',
+      'paneProperties.horzGridProperties.color': '#1f2733',
+      'scalesProperties.textColor': '#8b96a3',
+    }
+  });
+  const lbl = document.getElementById('tvSymLabel');
+  if (lbl) lbl.textContent = symbol || TV_DEFAULT_SYMBOL;
+}
+
+// Interval button wiring
+document.querySelectorAll('.qd-tv-int-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.qd-tv-int-btn').forEach(x => x.classList.toggle('active', x === b));
+    tvLoadWidget(TV_DEFAULT_SYMBOL, b.dataset.tvInt);
+  });
+});
+
+// Hook into mode toggle — when user switches mode, change the TV chart interval
+// to the timeframe that matters most for that mode. Preserves the user's
+// override if they clicked an interval manually after the mode change.
+const _origApplyMode = applyMode;
+window.applyMode = function(mode) {
+  _origApplyMode(mode);
+  const interval = MODE_TO_TV_INTERVAL[mode] || 'D';
+  document.querySelectorAll('.qd-tv-int-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.tvInt === interval));
+  if (typeof TradingView !== 'undefined' && document.getElementById('tradingview_widget')) {
+    tvLoadWidget(TV_DEFAULT_SYMBOL, interval);
+  }
+};
+// Re-wire pill click handlers to use the new applyMode
+document.querySelectorAll('.qd-mode-pill').forEach(p => {
+  p.replaceWith(p.cloneNode(true));  // clear old listener
+});
+document.querySelectorAll('.qd-mode-pill').forEach(p => {
+  p.addEventListener('click', () => window.applyMode(p.dataset.mode));
+});
+
+// Initial TV widget load — fires once tv.js is ready
+function tvInit() {
+  if (typeof TradingView !== 'undefined') {
+    tvLoadWidget(TV_DEFAULT_SYMBOL, 'D');
+  } else {
+    setTimeout(tvInit, 200);  // wait for tv.js
+  }
+}
+tvInit();
 </script>
+<!-- TradingView Advanced Chart widget loader (free, no API key) -->
+<script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 </body>
 </html>
