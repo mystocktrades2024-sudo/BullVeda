@@ -16598,22 +16598,27 @@ window.QuantDetail = (function() {
          + html;
     body.innerHTML = html;
 
-    // 2026-05-13 — Engine-section fallback: after a short delay, if the
-    // engine async fetch hasn't populated the per-mode payloads (file://
-    // or backend unavailable), fill the empty A-I sections with local
-    // synthesized content derived from _currentT. Idempotent — only
-    // runs if the section is still showing the "Loading engine…" state.
-    setTimeout(() => _qdEngineFallbackFill(_qdStrat, _activeSubTab, _currentT), 1200);
+    // 2026-05-13 — Engine sections populated SYNCHRONOUSLY from local t.
+    // Architectural correction: the ticker payload already carries every
+    // input we need (price · ATR · RSI · ADX · score · analyst PT · earn_days
+    // · beta). No need for per-click /api/trade_engine roundtrips × 3 modes
+    // × every ticker — that's wasted bandwidth when we have ~395 pre-
+    // computed payloads in tickers.json already. The async engine fetch
+    // is now an OPTIONAL enhancement; the synthesized render is primary
+    // and runs immediately after renderSubBody.
+    requestAnimationFrame(() => _qdEngineFallbackFill(_qdStrat, _activeSubTab, _currentT));
   }
 
-  // ─── Engine-section fallback · synth from local t when fetch fails ───
+  // ─── Engine-section fill · synth from local t · PRIMARY render path ───
+  // 2026-05-13 — Architectural correction per user: not running a 2K-ticker
+  // live screener; ticker payload is pre-computed in tickers.json at scan
+  // time and already carries every input. Synth is the authoritative
+  // render. Re-runs on every renderSubBody so strategy toggle rebinds
+  // the per-mode numbers everywhere. Engine async fetch (if it ever
+  // returns) becomes optional enhancement — not relied upon.
   function _qdEngineFallbackFill(strat, tab, t) {
     if (!t) return;
     if (tab !== 'overview') return;  // sections A-I only on Overview tab
-
-    const QS = window._qovState || {};
-    const haveEnginePayloads = QS.payloads && (QS.payloads.SWING || QS.payloads.POSITION || QS.payloads.INVESTMENT);
-    if (haveEnginePayloads) return;  // engine succeeded, don't overwrite
 
     const price = +(t.price || t.snapshot_price || 0) || 0;
     const atr = +(t.atr || (t.technicals && t.technicals.atr) || price * 0.025) || 0;
@@ -16638,9 +16643,9 @@ window.QuantDetail = (function() {
     const cur = M[strat] || M.POSITION;
     const rrAt = m => price > m.stop ? +((m.t1 - price) / (price - m.stop)).toFixed(2) : 0;
 
-    // Section A · STRATEGY FIT VERDICT — replace if still loading
+    // Section A · STRATEGY FIT VERDICT — always write
     const fitGrid = document.getElementById('qovFitGrid');
-    if (fitGrid && fitGrid.textContent.includes('Loading engine')) {
+    if (fitGrid) {
       const verdict = (m, mObj) => {
         const rr = rrAt(mObj);
         const pass = rr >= mObj.rrFloor;
@@ -16670,11 +16675,11 @@ window.QuantDetail = (function() {
     }
 
     // Section B · DECISION MATRIX
+    // Always write — strategy toggle requires re-fill per mode. Local
+    // synth is authoritative; tickers.json already has the inputs.
     const fillSec = (id, html) => {
       const el = document.getElementById(id);
-      if (el && (el.textContent.trim() === '' || el.textContent.includes('Loading') || el.children.length === 0)) {
-        el.innerHTML = html;
-      }
+      if (el) el.innerHTML = html;
     };
     // The renderOverviewV2 has section ids like qovDecisionGrid, qovTargets, qovQuality,
     // qovRisk, qovNews, qovFwd, qovPreFlight, qovTrigGrid (guessed pattern).
