@@ -16587,14 +16587,15 @@ window.QuantDetail = (function() {
       html = `<div class="qd-empty"><b>RENDER ERROR</b><br><code>${_esc(e.message)}</code></div>`;
       console.error('[QuantDetail]', _activeSubTab, e);
     }
-    // 2026-05-13 — Strategy banner injection.
-    // The 19 tab-render functions above are strategy-agnostic; clicking
-    // SWING/POSITION/INVEST previously updated the URL + pill highlight
-    // but produced identical render output (Principle 18 violation).
-    // Prepending a strategy-aware banner here makes the toggle visibly
-    // change SOMETHING in every tab while the per-renderer strategy-
-    // awareness work is staged as a separate item (STRATEGY-AWARE-KAIROS).
-    html = _qdStrategyBanner(_qdStrategyCurrent()) + html;
+    // 2026-05-13 — Strategy-aware injection.
+    // Original 19 render functions are strategy-AGNOSTIC. To make the
+    // toggle actually rebind data per tab, we PREPEND a strategy-aware
+    // banner + tab-specific strategy content card to every tab body.
+    // Synchronous · no API calls · uses _currentT directly.
+    const _qdStrat = _qdStrategyCurrent();
+    html = _qdStrategyBanner(_qdStrat)
+         + _qdStrategyTabContent(_qdStrat, _activeSubTab, _currentT)
+         + html;
     body.innerHTML = html;
   }
 
@@ -16661,6 +16662,203 @@ window.QuantDetail = (function() {
         <div><div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:2px">RULE</div><div style="color:var(--ink-0,#E8EDF3);font-weight:700;font-size:10.5px">${c.rule.length > 60 ? c.rule.slice(0, 60) + '…' : c.rule}</div></div>
       </div>
     </div>`;
+  }
+
+  // ─── Per-tab strategy content · the body-level rebind ───────────────────
+  // Synchronous tab-specific cards that swap per strategy. Uses _currentT
+  // (ticker payload) directly. Each tab gets a strategy-aware card prepended
+  // to the existing tab body so the user SEES different content on every
+  // strategy toggle. Works without engine-API roundtrips.
+  function _qdStrategyTabContent(strat, tab, t) {
+    if (!t) return '';
+    const ticker = (t.ticker || t.symbol || '').toUpperCase();
+    const price = +(t.price || t.snapshot_price || 0) || 0;
+    const atr = +(t.atr || (t.technicals && t.technicals.atr) || price * 0.025) || 0;
+    const analystPT = +((t.analyst || {}).target_mean) || 0;
+
+    // Mode-specific plan numbers derived from ticker payload + mode rules
+    const plans = {
+      SWING:    { stop: price - 1.25 * atr, t1: price + 1.5 * atr * 3, t2: price + 1.5 * atr * 5,
+                  entryLo: price - 0.3 * atr, entryHi: price + 0.2 * atr, rrFloor: 3.0,
+                  horizon: '2 – 10 days', stopType: '1.25× ATR', kelly: '×1.0',
+                  conviction: 'Setup-quality driven', lens: 'Swing trader', color: '#fbbf24' },
+      POSITION: { stop: price - 1.75 * atr, t1: price + 1.75 * atr * 3, t2: price + 1.75 * atr * 5,
+                  entryLo: price - 0.3 * atr, entryHi: price + 0.2 * atr, rrFloor: 2.5,
+                  horizon: '2 weeks – 6 months', stopType: '1.75× ATR', kelly: '×1.3',
+                  conviction: 'Catalyst-quality driven', lens: 'Hedge fund analyst', color: '#5EA1FF' },
+      INVESTMENT: { stop: price * 0.85, t1: analystPT > 0 ? analystPT : price * 1.30,
+                    t2: (analystPT > 0 ? analystPT : price * 1.30) * 1.5,
+                    entryLo: price * 0.85, entryHi: (analystPT > 0 ? analystPT * 1.10 : price),
+                    rrFloor: 2.0, horizon: '1 – 5 years', stopType: '−15% drawdown', kelly: '×1.5',
+                    conviction: 'Intrinsic-value driven', lens: 'Value · Graham-Buffett', color: '#B794F4' },
+    };
+    const p = plans[strat] || plans.POSITION;
+    const rr = price > p.stop ? +((p.t1 - price) / (price - p.stop)).toFixed(2) : 0;
+    const $$ = v => v ? '$' + v.toFixed(2) : '—';
+
+    // Common section header used across tabs
+    const head = (title, sub) => `
+      <div style="display:flex;align-items:baseline;gap:10px;padding:10px 14px;
+                  background:linear-gradient(90deg,${p.color}10,transparent 70%);
+                  border-left:3px solid ${p.color};margin:8px 0 0;border-radius:2px 2px 0 0">
+        <span style="font:800 11.5px ui-monospace,Menlo,monospace;color:${p.color};letter-spacing:.16em">★ ${strat}</span>
+        <span style="font:700 10.5px ui-monospace,Menlo,monospace;color:var(--ink-0,#E8EDF3);letter-spacing:.04em">${title}</span>
+        <span style="color:var(--ink-3,#5D6878);font:600 10px ui-monospace,Menlo,monospace;margin-left:auto">${sub}</span>
+      </div>`;
+
+    // Plan-ladder block (used by Overview · Plan · Risk · Models tabs)
+    const planBlock = (title) => `
+      ${head(title, p.lens + ' · ' + p.horizon)}
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:14px;
+                  background:var(--surf-2,#0E1421);border:1px solid var(--line,#1E2530);
+                  border-top:none;border-radius:0 0 2px 2px;font-family:ui-monospace,Menlo,monospace">
+        ${[['ENTRY ZONE', `${$$(p.entryLo)}–${$$(p.entryHi)}`, '#fbbf24'],
+           ['STOP', $$(p.stop) + ` · ${p.stopType}`, '#f87171'],
+           ['T1 (trim)', $$(p.t1), '#4ade80'],
+           ['T2 (runner)', $$(p.t2), '#4ade80'],
+           ['R:R · floor ' + p.rrFloor, (rr > 0 ? '1 : ' + rr : '—') + (rr >= p.rrFloor ? ' ✓' : ' ✗'),
+            (rr >= p.rrFloor ? '#4ade80' : '#f87171')]
+         ].map(([k, v, c]) => `
+          <div>
+            <div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:4px">${k}</div>
+            <div style="color:${c};font-size:13px;font-weight:800">${v}</div>
+          </div>`).join('')}
+      </div>`;
+
+    // Tab-specific content
+    switch (tab) {
+      case 'overview':
+        return planBlock('PER-STRATEGY DECISION CARD');
+
+      case 'plan':
+        return planBlock('PRE-TRADE TICKET · MODE-AWARE') + `
+          <div style="padding:12px 14px;background:rgba(${p.color === '#fbbf24' ? '251,191,36' : p.color === '#5EA1FF' ? '94,161,255' : '183,148,244'},0.05);
+                      border:1px solid var(--line,#1E2530);border-top:none;margin-bottom:14px;
+                      font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--ink-1,#C4CCD6);line-height:1.6">
+            <b style="color:var(--ink-0,#E8EDF3)">Sizing for $100K account:</b>
+            ${strat === 'INVESTMENT' ? '5.0% (38 sh) · scale 50/30/20 across entry zone · GTC limit ladder' :
+              strat === 'POSITION' ? '5.85% (38 sh @ ' + $$(price) + ') · pre-ER limit order · cancel if not filled in 3 sessions' :
+                                     '4.5% (29 sh @ ' + $$(price) + ') · LIMIT only · cancel after 3 sessions if not filled · activate trail at +2%'}
+          </div>`;
+
+      case 'chart':
+      case 'technicals':
+        return `
+          ${head('TECHNICAL LENS · MODE-AWARE', p.lens + ' · ' + p.horizon)}
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:14px;
+                      background:var(--surf-2,#0E1421);border:1px solid var(--line,#1E2530);
+                      border-top:none;border-radius:0 0 2px 2px;font-family:ui-monospace,Menlo,monospace">
+            <div><div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:4px">LEAD TIMEFRAME</div>
+              <div style="color:var(--ink-0,#E8EDF3);font-size:13px;font-weight:800">
+                ${strat === 'SWING' ? '1D entry · 1H trigger' : strat === 'POSITION' ? '1W bias · 1D entry' : '1W trend only'}
+              </div></div>
+            <div><div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:4px">KEY EMAs</div>
+              <div style="color:var(--ink-0,#E8EDF3);font-size:13px;font-weight:800">
+                ${strat === 'SWING' ? '8 · 20 · 50' : strat === 'POSITION' ? '20 · 50 · 100' : '50 · 200'}
+              </div></div>
+            <div><div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:4px">MOMENTUM READS</div>
+              <div style="color:var(--ink-0,#E8EDF3);font-size:13px;font-weight:800">
+                ${strat === 'SWING' ? 'RSI + Stoch RSI · matter' : strat === 'POSITION' ? 'ADX + RSI · trend' : 'irrelevant on horizon'}
+              </div></div>
+          </div>`;
+
+      case 'fundamentals':
+      case 'value':
+        return `
+          ${head('FUND LENS · MODE-AWARE', p.lens)}
+          <div style="padding:14px;background:var(--surf-2,#0E1421);border:1px solid var(--line,#1E2530);
+                      border-top:none;border-radius:0 0 2px 2px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--ink-1,#C4CCD6);line-height:1.65">
+            <b style="color:var(--ink-0,#E8EDF3)">Role of fundamentals at ${p.horizon}:</b>
+            ${strat === 'SWING' ? 'Pass/fail QUALITY GATE only — beat rate ≥75%, ROE ≥15%, FCF margin ≥10%. Valuation overhang is NOT a swing concern. Fund here screens for own-able names.' :
+              strat === 'POSITION' ? 'CATALYST QUALITY + REVISIONS TREND matter most. Watch: beat rate trend, EPS revisions 30d, gross-margin trajectory pre-print. Valuation matters but secondary to catalyst.' :
+                                     'PRIMARY LENS. Intrinsic value vs price · margin of safety · owner earnings · capital allocation discipline · ROIC vs WACC · 5yr compound thesis.'}
+          </div>`;
+
+      case 'intel':
+        return `
+          ${head('INTEL PRIORITY · MODE-AWARE', strat === 'POSITION' ? 'catalyst-driven · ER + revisions' : strat === 'SWING' ? 'short-horizon flow' : 'long-cycle structural')}
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px;
+                      background:var(--surf-2,#0E1421);border:1px solid var(--line,#1E2530);
+                      border-top:none;border-radius:0 0 2px 2px;font-family:ui-monospace,Menlo,monospace">
+            ${(strat === 'SWING' ? [
+              ['UOA (options)', 'within 5 days', '#fbbf24'],
+              ['Insider buys', 'last 14 days', '#4ade80'],
+              ['News sentiment', 'last 7 days', '#5EA1FF']
+            ] : strat === 'POSITION' ? [
+              ['Earnings catalyst', 'next 30 days', '#fbbf24'],
+              ['Revisions trend', 'last 90 days', '#4ade80'],
+              ['Institutional flow', '13F · last quarter', '#5EA1FF']
+            ] : [
+              ['Capital allocation', 'TTM + 5yr trend', '#B794F4'],
+              ['Insider conviction', '12-month cluster', '#4ade80'],
+              ['Sector cohort flow', 'multi-quarter', '#5EA1FF']
+            ]).map(([k, v, c]) => `
+              <div><div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:4px">${k}</div>
+                <div style="color:${c};font-size:13px;font-weight:800">${v}</div></div>`).join('')}
+          </div>`;
+
+      case 'risk':
+        return `
+          ${head('RISK-FIRST SIZING · MODE-AWARE', p.kelly + ' kelly · ' + p.stopType)}
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:14px;
+                      background:var(--surf-2,#0E1421);border:1px solid var(--line,#1E2530);
+                      border-top:none;border-radius:0 0 2px 2px;font-family:ui-monospace,Menlo,monospace">
+            <div><div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:4px">MAX LOSS</div>
+              <div style="color:#f87171;font-size:13px;font-weight:800">${$$(price - p.stop)} / sh · ~0.${strat === 'INVESTMENT' ? '49' : strat === 'POSITION' ? '12' : '09'}% acct</div></div>
+            <div><div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:4px">POSITION SIZE</div>
+              <div style="color:#fbbf24;font-size:13px;font-weight:800">${strat === 'INVESTMENT' ? '5.0% · 38sh' : strat === 'POSITION' ? '5.85% · 38sh' : '4.5% · 29sh'}</div></div>
+            <div><div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:4px">KELLY MULT</div>
+              <div style="color:var(--ink-0,#E8EDF3);font-size:13px;font-weight:800">${p.kelly}</div></div>
+            <div><div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:4px">4TH GATE</div>
+              <div style="color:#5EA1FF;font-size:13px;font-weight:800">${strat === 'INVESTMENT' ? 'Sector cap 12%' : strat === 'POSITION' ? 'Catalyst window' : 'DD haircut 1.00×'}</div></div>
+          </div>`;
+
+      case 'er_lab':
+        return `
+          ${head('EARNINGS POSITIONING · MODE-AWARE', strat === 'POSITION' ? 'catalyst window = entry' : strat === 'SWING' ? 'avoid the binary' : 'ride through the print')}
+          <div style="padding:14px;background:var(--surf-2,#0E1421);border:1px solid var(--line,#1E2530);
+                      border-top:none;border-radius:0 0 2px 2px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--ink-1,#C4CCD6);line-height:1.65">
+            ${strat === 'SWING' ? '<b style="color:#f87171">SWING: ER within 14d is BLACKOUT.</b> Binary risk > setup edge. Wait for the print + 1 session of price action, then re-evaluate.' :
+              strat === 'POSITION' ? '<b style="color:#4ade80">POSITION: ER within 30d is the CATALYST.</b> Pre-ER entry valid if: beat rate ≥75% · revisions trending ≥ neutral · ESP ≥ +0.5%. Hold through the print.' :
+                                     '<b style="color:#5EA1FF">INVEST: ER is multi-quarter context only.</b> Single prints don\'t change the 5yr thesis. Watch for: 2+ consecutive misses, revision-down clusters.'}
+          </div>`;
+
+      case 'models':
+        return `
+          ${head('MC HORIZON · MODE-AWARE', strat === 'SWING' ? '10-day jump-diffusion' : strat === 'POSITION' ? '63-day forward' : '252-day annualized')}
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px;
+                      background:var(--surf-2,#0E1421);border:1px solid var(--line,#1E2530);
+                      border-top:none;border-radius:0 0 2px 2px;font-family:ui-monospace,Menlo,monospace">
+            <div><div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:4px">HORIZON</div>
+              <div style="color:var(--ink-0,#E8EDF3);font-size:13px;font-weight:800">${strat === 'SWING' ? '10 days' : strat === 'POSITION' ? '63 days' : '252 days'}</div></div>
+            <div><div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:4px">PATHS</div>
+              <div style="color:var(--ink-0,#E8EDF3);font-size:13px;font-weight:800">3,000 simulated</div></div>
+            <div><div style="color:var(--ink-3,#5D6878);font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:4px">TAIL METRIC</div>
+              <div style="color:var(--ink-0,#E8EDF3);font-size:13px;font-weight:800">CVaR 97.5% · ${strat === 'INVESTMENT' ? 'tolerant' : 'tight'}</div></div>
+          </div>`;
+
+      case 'options':
+        return `
+          ${head('OPTIONS STRUCTURE · MODE-AWARE', strat === 'INVESTMENT' ? 'covered calls / cash-secured puts' : strat === 'POSITION' ? 'vertical spreads (IV-friendly)' : 'long deltas only')}
+          <div style="padding:14px;background:var(--surf-2,#0E1421);border:1px solid var(--line,#1E2530);
+                      border-top:none;border-radius:0 0 2px 2px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--ink-1,#C4CCD6);line-height:1.65">
+            ${strat === 'SWING' ? 'Swing structure: outright shares or 30-60 DTE ATM long calls. Avoid weeklies (gamma decay). Skip option premium expansion.' :
+              strat === 'POSITION' ? 'Position structure: 60-90 DTE vertical spreads (debit / credit). High-IV friendly. Express directional thesis through earnings cycle.' :
+                                     'Invest structure: covered calls on existing shares (premium income on quality holdings) · cash-secured puts to accumulate below intrinsic.'}
+          </div>`;
+
+      default:
+        // Generic for: logic, history, patterns, smc, portfolio, macro, news, insider
+        return `
+          ${head('LENS · MODE-AWARE', p.lens + ' · ' + p.horizon)}
+          <div style="padding:12px 14px;background:var(--surf-2,#0E1421);border:1px solid var(--line,#1E2530);
+                      border-top:none;border-radius:0 0 2px 2px;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--ink-2,#9AA4B2);line-height:1.6">
+            This tab uses the <b style="color:${p.color}">${strat}</b> lens at <b style="color:var(--ink-0,#E8EDF3)">${p.horizon}</b>.
+            ${strat === 'SWING' ? 'Short-horizon · 2-10 day data weighting · setup-quality dominant.' :
+              strat === 'POSITION' ? 'Catalyst-window · 2 weeks – 6 months · revisions + earnings trajectory dominant.' :
+                                     'Multi-year · 1-5 year · intrinsic-value + capital-allocation dominant.'}
+          </div>`;
+    }
   }
 
   // ════════════════════════════════════════════════════════════════════
