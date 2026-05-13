@@ -204,15 +204,35 @@ Use `ls` / `find` to discover files. Key entry points:
 - `canonical_trade_plan.py` — K6 single source of truth for every dashboard tab
 - `decision_engine.py` — Wilson-gated kill list / score-band kills / regime gate
 - `signal_filter.py` — A2 declarative whitelist gate (OFF by default)
+- `target_engine.py` — **Project 2** structural target engine (confluence-scored T1/T2 — fractals + HVN/VAH/AVWAP/BSL/round/Fib; gated by `use_structural_targets` flag, OFF by default)
+- `scripts/precompute_targets.py` — nightly batch (06:00 only) writing `cache/target_engine/{TICKER}_{MODE}.json`
+- `scripts/te_regression.py` — 20-ticker structural-target regression suite + diff vs legacy ATR
 - `data_fetcher.py` + `eodhd_client.py` — EODHD primary, yfinance news fallback
-- `server.py` — FastAPI server on port 7432
+- `server.py` — FastAPI server on port 7432; `GET /v2/trade_engine?t=ROST&mode=swing` returns structural-target payload (hybrid pre-compute + on-demand)
 - `infra/prototype/` — v2 dashboard (canonical; replaces legacy `html_generator.py`)
 - `backtest.py` + `backtest/walk_forward_v2.py` — single-window + walk-forward
 - `config/config.json` — main config; variants in `config/variants/`
 - `data/swingtrade.db` — SQLite PRIMARY (18 tables); `data/signal_log.json` — trade journal
 - `cache/` — regenerable (gitignored); `cache/last_bundle.json` = latest scan output
+- `cache/target_engine/` — structural-target JSON cache, 12h TTL, one file per `{TICKER}_{MODE}` (regenerable)
 - `_legacy/` — quarantined Polygon/Schwab/Finviz-Elite stubs
 - `.env` — secrets (EODHD, Alpaca, Slack, Gmail)
+
+### Structural target engine (Project 2 · M2.1–2.4 shipped 2026-05-13)
+
+Confluence-scored T1/T2 from structural levels — replaces ATR-multiple targets when feature flag is on. **Flag stays OFF until M2.5 cutover.**
+
+| Milestone | What | Where |
+|---|---|---|
+| M2.1 | Engine infra (cache layer, FastAPI endpoint, batch precompute, hook into nightly scan, feature flag) | `target_engine.py`, `server.py`, `scripts/precompute_targets.py`, `run_daily_scan.sh`, `config/config.json` |
+| M2.2 | Parallel fields in `data.json` — `t1_structural`, `t2_structural`, `t1_confluence`, `t1_sources`, `t1_behavior`, `t1_p_reach`, `t1_action`, `t1_r_multiple` (+ `t2_*`) + `structural_modes` summary. Legacy `t1`/`t2` untouched. | `infra/prototype/build_data.py:_attach_structural_targets` |
+| M2.3 | Mode completeness: short-direction reject, ETF graceful-degrade (`_KNOWN_ETF_TICKERS`), `earnings_imminent` flag (≤7d), INVEST analyst-PT stub | `target_engine.py:analyze_trade` |
+| M2.4 | 20-ticker regression suite + diff vs legacy ATR targets (writes `cache/logs/te_regression_*.{json,md}`) | `scripts/te_regression.py` |
+| M2.5 | **OPEN** — production cutover: flip `use_structural_targets=true` after one week of clean precompute + clean regression run + v2 dashboard frontend reads `t1_structural` | `config/config.json` |
+
+Source weights (confluence scoring): BSL 3.0 · HVN 2.5 · SWING 2.5 · VAH 2.0 · AVWAP_52 2.0 · AVWAP_EARN 1.5 · FVG 1.5 · ROUND 1.0 · FIB 0.5.
+
+Behavior classifier: MAGNET (HVN/POC) · REJECTION (VAH/FVG/AVWAP) · MIXED (BSL/SWING) · STRUCTURAL (invest stub).
 
 ## Data Architecture (post-2026-04-25 migration)
 
@@ -404,7 +424,7 @@ All 10 addressed in "Audit Batch" commit. Tier 1 mitigations shipped; Tier 2 req
 
 **Live at https://trade.mystockholding.com** via Cloudflare named tunnel pointing at `localhost:7432`.
 
-Login: gari / swing2026 (FastAPI Basic auth).
+Login: gari / Swing2026 (FastAPI Basic auth — capital `S`, password is case-sensitive). Session has a 30-min idle timeout; re-auth resets the timer. To reset the password: `python3 -c "import auth; auth.set_password('gari', 'NEWPW')"`.
 
 - cloudflared runs as a launchd daemon (`/Library/LaunchDaemons/com.cloudflare.cloudflared.plist`).
 - Daemon reads `/etc/cloudflared/config.yml` (root-readable copy of `~/.cloudflared/config.yml`).

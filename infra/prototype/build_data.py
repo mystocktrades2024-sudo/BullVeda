@@ -994,6 +994,123 @@ def _real_news(r: dict) -> dict:
     }
 
 
+# ────────────────────────────────────────────────────────────────────────
+# Project 2 · Milestone 2.2 — Structural-target parallel fields
+# ────────────────────────────────────────────────────────────────────────
+# These fields are NEW and live ALONGSIDE the legacy ATR-based t1/t2 (NOT
+# replacing them). Gated by config.use_structural_targets — off by default.
+# When on, compact_row reads cache/target_engine/{TICKER}_{MODE}.json
+# (populated by scripts/precompute_targets.py + /v2/trade_engine endpoint)
+# and attaches the confluence-scored targets as parallel fields.
+
+_STRUCTURAL_FLAG = None   # tri-state: None=unloaded, True/False=cached
+
+def _structural_flag_enabled() -> bool:
+    """Read config.use_structural_targets once · memoised at module scope."""
+    global _STRUCTURAL_FLAG
+    if _STRUCTURAL_FLAG is not None:
+        return _STRUCTURAL_FLAG
+    try:
+        cfg_path = ROOT / "config" / "config.json"
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+        _STRUCTURAL_FLAG = bool(cfg.get("use_structural_targets", False))
+    except Exception:
+        _STRUCTURAL_FLAG = False
+    return _STRUCTURAL_FLAG
+
+
+def _structural_target_payload(ticker: str, mode: str):
+    """Read cache/target_engine/{TICKER}_{MODE}.json · None on miss/corrupt."""
+    if not ticker:
+        return None
+    try:
+        path = ROOT / "cache" / "target_engine" / f"{ticker.upper()}_{mode}.json"
+        if not path.exists():
+            return None
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _attach_structural_targets(row: dict, ticker: str) -> dict:
+    """Add t1_structural / t2_structural / *_confluence / *_sources / *_behavior /
+    *_p_reach as parallel fields. Reads all 3 modes' caches when present —
+    swing is primary (matches dashboard Trade tab default).
+
+    Non-destructive: never mutates row['t1'] or row['t2'] (the legacy ATR fields).
+    Silent no-op when feature flag is off OR no cache file exists.
+    """
+    if not _structural_flag_enabled():
+        return row
+
+    all_modes: dict = {}
+    for mode in ("swing", "position", "invest"):
+        p = _structural_target_payload(ticker, mode)
+        if p and p.get("decision") != "reject":
+            all_modes[mode] = p
+
+    if not all_modes:
+        return row
+
+    # Primary = swing (matches dashboard's Trade tab); fall back if absent
+    primary_mode = "swing" if "swing" in all_modes else next(iter(all_modes))
+    primary = all_modes[primary_mode]
+
+    # target_engine §8 schema: t1 and t2 live at top-level as dicts
+    # {price, confluence, sources, behavior, p_reach, r_multiple, distance_pct, action}
+    t1 = primary.get("t1") if isinstance(primary.get("t1"), dict) else None
+    t2 = primary.get("t2") if isinstance(primary.get("t2"), dict) else None
+
+    def _src_types(src_list):
+        """Compact list of {type, price, weight} from a t1/t2 source list."""
+        out = []
+        for s in (src_list or []):
+            if isinstance(s, dict):
+                out.append({"type": s.get("type"), "price": s.get("price"),
+                            "weight": s.get("weight")})
+        return out
+
+    if t1:
+        row["t1_structural"] = t1.get("price")
+        row["t1_confluence"] = t1.get("confluence")
+        row["t1_sources"]    = _src_types(t1.get("sources"))
+        row["t1_behavior"]   = t1.get("behavior")
+        # p_reach may be a scalar (target_engine §8) or a nested dict
+        _pr = t1.get("p_reach")
+        row["t1_p_reach"] = _pr.get("p") if isinstance(_pr, dict) else _pr
+        row["t1_action"]     = t1.get("action")
+        row["t1_r_multiple"] = t1.get("r_multiple")
+    if t2:
+        row["t2_structural"] = t2.get("price")
+        row["t2_confluence"] = t2.get("confluence")
+        row["t2_sources"]    = _src_types(t2.get("sources"))
+        row["t2_behavior"]   = t2.get("behavior")
+        _pr = t2.get("p_reach")
+        row["t2_p_reach"] = _pr.get("p") if isinstance(_pr, dict) else _pr
+        row["t2_action"]     = t2.get("action")
+        row["t2_r_multiple"] = t2.get("r_multiple")
+
+    # Per-mode summary for consumers that want to switch lens (Swing/Position/Invest)
+    def _mode_summary(p):
+        _t1 = p.get("t1") if isinstance(p.get("t1"), dict) else None
+        _t2 = p.get("t2") if isinstance(p.get("t2"), dict) else None
+        return {
+            "t1": (_t1 or {}).get("price"),
+            "t2": (_t2 or {}).get("price"),
+            "decision": p.get("decision"),
+        }
+
+    row["structural_modes"] = {m: _mode_summary(p) for m, p in all_modes.items()}
+
+    row["_te_mode_primary"] = primary_mode
+    row["_te_decision"]     = primary.get("decision")
+    row["_te_warnings"]     = primary.get("warnings") or []
+    row["_te_cache_status"] = (primary.get("_cache") or {}).get("status")
+    return row
+
+
 def compact_row(r: dict) -> dict:
     """Flatten a rich bundle row into the dashboard's compact 22-col schema."""
     tp     = r.get("trade_plan") or {}
@@ -1009,7 +1126,7 @@ def compact_row(r: dict) -> dict:
     raw_name = r.get("name") or r.get("company_name") or ""
     if not raw_name or raw_name == sym:
         raw_name = fe.get("name") or (r.get("info") or {}).get("longName") or sym
-    return {
+    _row = {
         "ticker":     sym,
         "name":       raw_name,
         "sector":     r.get("sector") or fe.get("sector") or "",
@@ -1165,6 +1282,9 @@ def compact_row(r: dict) -> dict:
         # Scan-over-scan diff (audit log panel)
         "change_log":              _compute_change_log(r, _PREV_BUNDLE_INDEX.get(r.get("ticker"), {}), _PREV_BUNDLE_DATE),
     }
+    # Project 2 · M2.2 — overlay structural targets when feature flag is on.
+    # Silent no-op when off; legacy t1/t2 fields above remain untouched.
+    return _attach_structural_targets(_row, sym)
 
 
 def _trim_ohlcv(ohlcv, n=90, ticker=None):

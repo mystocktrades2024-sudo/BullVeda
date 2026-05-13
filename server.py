@@ -2086,6 +2086,49 @@ async def portfolio_update_notes(req: Request, _: HTTPBasicCredentials = Depends
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+# ──────────────────────────────────────────────────────────────────────────
+# /v2/trade_engine · structural target engine endpoint (hybrid pre-compute + on-demand)
+# Pre-compute writes cache files for SP500+R1000+watchlist during nightly scan.
+# On-demand falls through to live engine call (~2-5s) for tickers not in pre-compute.
+# Both paths share the same cache file → unified surface.
+# ──────────────────────────────────────────────────────────────────────────
+@app.get("/v2/trade_engine")
+async def trade_engine(
+    t: str,
+    mode: str = "position",
+    direction: str = "long",
+    equity: float = 25000.0,
+    refresh: int = 0,
+    auth: HTTPBasicCredentials = Depends(_check_auth),
+):
+    """Returns §8 TradeAnalysis JSON for a ticker × mode.
+
+    Hybrid:
+    - First hit checks 12h-TTL cache file (populated by nightly pre-compute for scan universe)
+    - On cache miss, computes live (~2-5s) and writes to same cache path
+    - refresh=1 bypasses cache (force recompute)
+    """
+    if isinstance(auth, Response):
+        return auth
+    tk = (t or "").upper().strip()
+    if not tk:
+        raise HTTPException(400, "ticker required")
+    if mode not in ("swing", "position", "invest"):
+        raise HTTPException(400, "mode must be swing|position|invest")
+    if direction not in ("long", "short"):
+        raise HTTPException(400, "direction must be long|short")
+    try:
+        import target_engine as _te
+        payload = _te.analyze_trade_cached(
+            tk, direction=direction, mode=mode, equity=float(equity),
+            force_refresh=bool(int(refresh)),
+        )
+        return JSONResponse(payload)
+    except Exception as e:
+        # Surface error so caller knows engine failed (vs returning bad data silently)
+        raise HTTPException(500, f"engine_failure: {type(e).__name__}: {e}")
+
+
 # -- Position tracker (actual trades) --
 @app.post("/api/positions/open")
 async def positions_open(req: Request, _: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
