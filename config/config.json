@@ -364,6 +364,22 @@
     "demote_to_watch_below_threshold": true,
     "min_candidates_per_sector_for_ranking": 3
   },
+  "rolling_sharpe_kill": {
+    "_enabled": true,
+    "_note": "ROLLING-SHARPE KILL (2026-05-13, Direction 2). Capital preservation gate. When the last N closed BUYs show rolling Sharpe < min_sharpe, pause new BUYs until edge returns. Truncates left-tail bad periods — the mechanism per the article's 'consistent Sharpe across regimes' bar. Roll back: set _enabled=false.",
+    "_mechanism": "Computes Sharpe-per-trade on the last lookback_n closed BUYs (filtering |pnl|<=100% outliers and requiring min_sample_n samples to fire). When Sharpe falls below threshold, the gate fires PRE-cascade and routes all candidates to WATCH. Self-clears when next closed BUY pushes rolling Sharpe back above threshold.",
+    "min_sharpe": -0.5,
+    "lookback_n": 20,
+    "min_sample_n": 10,
+    "applies_to": ["BUY"],
+    "_validations": {
+      "current_state_2026-05-13": {
+        "see": "decision_engine.compute_rolling_sharpe_kill_state for the live computation",
+        "expected_range": "well-functioning system: Sharpe +0.1 to +0.5 per trade. Sharpe < -0.5 indicates ~5 consecutive losses or ~10 mixed with significant negative skew.",
+        "reference_aggregate": "scripts/regime_sharpe_decomp.py 2026-05-13: aggregate Sharpe/trade on n=897 = +0.11. risk_on_choppy Sharpe = +0.21. Far above the -0.5 kill threshold."
+      }
+    }
+  },
   "tail_loss_filter": {
     "_enabled": true,
     "_note": "2026-05-12 surgical refinement: kill_stars=[3] only (was stars<4). signal_log n=733 shows stars=2 PF 1.87 (n=81, WLB 38.8%) vs stars=3 PF 0.96 (n=258, WLB 28.6%) \u2014 clean 10pp Wilson LB separation. Old cut killed both bands; new cut kills only the bad one. Set _enabled=false to roll back. Remove kill_stars to fall back to legacy min_stars_for_buy behavior.",

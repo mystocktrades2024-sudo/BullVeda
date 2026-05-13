@@ -3595,7 +3595,8 @@ def run_daily_scan(force_fresh: bool = False):
                 _r = compute_final_verdict(_row, regime=_bundle_regime, thresholds=_cfg_thr,
                                            setup_kill_list=_setup_kills,
                                            setup_band_kill_list=_setup_band_kills,
-                                           system_status=_sys_status)
+                                           system_status=_sys_status,
+                                           config=cfg)
                 # Task #3: write per-ticker setup size multiplier (dashboard reads this)
                 _setup_name = _row.get("setup_family") or _row.get("setup") or _row.get("setup_type")
                 _mult = _setup_mults.get(_setup_name) if _setup_name else None

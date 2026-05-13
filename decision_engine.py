@@ -25,6 +25,9 @@ Soft gates (BUY allowed; emit caveat in caveats list):
 """
 from __future__ import annotations
 from typing import Any
+import math
+import statistics
+from pathlib import Path
 
 DEFAULT_FUND_ADEQUACY = 0.50  # fund_score/fund_max ratio required to pass gate
 DEFAULT_BUY_THRESHOLD = 60    # fallback if regime/threshold lookup fails
@@ -329,6 +332,126 @@ def _normalize_decision_state(ds: Any) -> str | None:
     return ds
 
 
+# ── ROLLING-SHARPE KILL SWITCH (Direction 2, 2026-05-13) ───────────────────
+# Capital preservation gate: if the last N closed BUY signals have a negative
+# rolling Sharpe (recent losses), block NEW BUYs until edge returns. The
+# truncate-left-tail mechanism that smooths aggregate Sharpe per the article's
+# "consistent across regimes" bar. Sized at the FULL gate cascade level — not
+# a multiplier on individual scores — because the bad-period signal is
+# system-wide, not setup-specific.
+_ROLLING_SHARPE_CACHE: dict = {"_signal_log_mtime": 0, "_state": None}
+
+
+def _signal_log_path() -> Path:
+    return Path(__file__).resolve().parent / "data" / "signal_log.json"
+
+
+def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
+    """Compute the rolling-Sharpe kill switch state from data/signal_log.json.
+
+    Cached by signal_log.json mtime — recomputes only when the log changes.
+    Returns:
+      {
+        active: bool,           # True if new BUYs should be blocked
+        reason: str,            # human-readable explanation
+        sharpe: float|None,     # rolling sharpe over last N closed BUYs
+        n: int,                 # actual samples used
+        avg_pnl: float|None,
+        threshold: float,       # config min_sharpe
+        lookback_n: int,        # config lookback
+        min_sample_n: int,      # config minimum sample required
+      }
+    """
+    cfg = (config or {}).get("rolling_sharpe_kill") or {}
+    enabled = bool(cfg.get("_enabled", False))
+    threshold = float(cfg.get("min_sharpe", -0.5))
+    lookback_n = int(cfg.get("lookback_n", 20))
+    min_sample_n = int(cfg.get("min_sample_n", 10))
+    out_default = {
+        "active": False, "reason": "disabled" if not enabled else "no data",
+        "sharpe": None, "n": 0, "avg_pnl": None,
+        "threshold": threshold, "lookback_n": lookback_n,
+        "min_sample_n": min_sample_n,
+    }
+    if not enabled:
+        return out_default
+
+    p = _signal_log_path()
+    if not p.exists():
+        return {**out_default, "reason": "signal_log.json missing"}
+
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        return {**out_default, "reason": "signal_log.json stat failed"}
+
+    # Cache hit if log hasn't changed
+    if mtime == _ROLLING_SHARPE_CACHE["_signal_log_mtime"] and _ROLLING_SHARPE_CACHE["_state"]:
+        return _ROLLING_SHARPE_CACHE["_state"]
+
+    try:
+        import json as _json
+        signals = _json.loads(p.read_text())
+    except Exception:
+        return {**out_default, "reason": "signal_log.json parse failed"}
+    if not isinstance(signals, list):
+        return {**out_default, "reason": "signal_log.json not a list"}
+
+    # Filter to CLOSED BUYs with valid pnl. Sort by exit date (or fall back
+    # to entry date), take last N. Skip outliers >100% (CTRA-class).
+    closed_buys: list[dict] = []
+    for s in signals:
+        if not isinstance(s, dict):
+            continue
+        if s.get("status") != "CLOSED":
+            continue
+        if (s.get("verdict") or "").upper() != "BUY":
+            continue
+        pnl = s.get("actual_pnl_pct")
+        if pnl is None:
+            continue
+        try:
+            pnl = float(pnl)
+        except (TypeError, ValueError):
+            continue
+        if abs(pnl) > 100:  # outlier defensive
+            continue
+        closed_buys.append({"pnl": pnl, "date": s.get("date") or ""})
+    closed_buys.sort(key=lambda r: r["date"])  # ascending
+    recent = closed_buys[-lookback_n:]
+    n = len(recent)
+
+    if n < min_sample_n:
+        state = {**out_default, "n": n,
+                 "reason": f"only {n} closed BUYs (< {min_sample_n} min sample) — no kill"}
+        _ROLLING_SHARPE_CACHE.update({"_signal_log_mtime": mtime, "_state": state})
+        return state
+
+    pnls = [r["pnl"] for r in recent]
+    avg = statistics.mean(pnls)
+    std = statistics.stdev(pnls) if len(pnls) >= 2 else 0
+    sharpe = (avg / std) if std > 0 else 0.0
+
+    active = sharpe < threshold
+    state = {
+        "active": active,
+        "reason": (
+            f"rolling sharpe {sharpe:+.3f} < {threshold:+.2f} on last {n} BUYs "
+            f"(avg pnl {avg:+.2f}%); pausing new BUYs"
+            if active else
+            f"rolling sharpe {sharpe:+.3f} >= {threshold:+.2f} on last {n} BUYs — gate inactive"
+        ),
+        "sharpe": round(sharpe, 4),
+        "n": n,
+        "avg_pnl": round(avg, 3),
+        "threshold": threshold,
+        "lookback_n": lookback_n,
+        "min_sample_n": min_sample_n,
+    }
+    _ROLLING_SHARPE_CACHE.update({"_signal_log_mtime": mtime, "_state": state})
+    return state
+
+
 def _eval_hard_gates(t: dict, regime: str | None = None,
                      entry_quality_relax_regimes: set | None = None) -> tuple[list[dict], list[str]]:
     """Returns (gate_evaluations, failed_gate_names).
@@ -585,7 +708,8 @@ def compute_final_verdict(t: dict, regime: str | None = None,
                           thresholds: dict | None = None,
                           setup_kill_list: dict | None = None,
                           system_status: dict | None = None,
-                          setup_band_kill_list: dict | None = None) -> dict:
+                          setup_band_kill_list: dict | None = None,
+                          config: dict | None = None) -> dict:
     """
     Single source of truth for ticker verdict. Aggregates all decision-engine
     outputs into one verdict + reason + caveats + audit-grade gate trail.
@@ -660,6 +784,29 @@ def compute_final_verdict(t: dict, regime: str | None = None,
                 "passed": False,
                 "reason": f"regime is {regime} — strategy bull-only per 750d backtest evidence",
                 "severity": "high",
+            }],
+            "demote_to": "watch_list",
+        }
+
+    # ROLLING-SHARPE KILL (2026-05-13, Direction 2): capital preservation gate.
+    # If recent N closed BUYs show rolling Sharpe < threshold, pause new BUYs.
+    # Truncates left-tail bad periods. Block-not-relax — silently waits for
+    # rolling Sharpe to recover before resuming.
+    _rs_state = compute_rolling_sharpe_kill_state(config) if config else {"active": False}
+    if _rs_state.get("active"):
+        return {
+            "verdict": "WATCH",
+            "reason": f"rolling-Sharpe kill: {_rs_state.get('reason')}",
+            "caveats": [
+                f"recent {_rs_state.get('n')} BUYs Sharpe {_rs_state.get('sharpe'):+.3f} "
+                f"(threshold {_rs_state.get('threshold'):+.2f})"
+            ],
+            "gates_evaluated": [{
+                "name": "rolling_sharpe_kill",
+                "passed": False,
+                "reason": _rs_state.get("reason"),
+                "severity": "high",
+                "stats": _rs_state,
             }],
             "demote_to": "watch_list",
         }
