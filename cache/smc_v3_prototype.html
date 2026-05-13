@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>◆ SMC V3 · TV-charts · Complete · ROST</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    --bg:#0A0E13; --surf-1:#11161F; --surf-2:#0E1421; --line:#1E2530;
+    --ink:#E6EAF2; --ink-2:#9AA4B2; --ink-3:#6B7280; --ink-4:#3a3f47;
+    --gn:#5be57c; --rd:#ff6b5b; --am:#ffb95c; --cy:#5ec8d8; --lead:#B794F4;
+    --bull-ob:rgba(91,229,124,0.18); --bull-ob-bd:#5be57c;
+    --bear-ob:rgba(255,107,91,0.18); --bear-ob-bd:#ff6b5b;
+    --bsl:#F472B6; --ssl:#22D3EE; --premium:rgba(255,107,91,0.10); --discount:rgba(91,229,124,0.10);
+    --ote:rgba(183,148,244,0.15); --ote-bd:#B794F4;
+  }
+  * { box-sizing: border-box; margin:0; padding:0; }
+  html, body { background: var(--bg); color: var(--ink); font: 13px -apple-system, BlinkMacSystemFont, sans-serif; font-variant-numeric: tabular-nums; }
+  body { max-width: 1480px; margin: 0 auto; padding: 14px 18px 60px; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+  .th-banner { padding:9px 14px; background: rgba(94,161,255,.10); border-left:3px solid #5EA1FF; border-radius:3px; font:600 11px ui-monospace,monospace; letter-spacing:.04em; color:#5EA1FF; margin-bottom:12px; }
+  .th-banner b { color:#9bc4ff; font-weight:800; }
+
+  .vs-strip{position:sticky;top:0;z-index:50;background:var(--surf-2);border:1px solid var(--line);border-radius:6px;padding:14px 18px;margin-bottom:14px;display:grid;grid-template-columns:280px 1fr 320px;gap:18px;align-items:center;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+  .vs-tk{font:800 28px ui-monospace,monospace;color:var(--lead);letter-spacing:.02em;line-height:1}
+  .vs-nm{font:500 11px sans-serif;color:var(--ink-2);margin-top:4px;letter-spacing:.04em}
+  .vs-px{font:800 22px ui-monospace,monospace;color:var(--ink)}
+  .vs-chg{font:600 12px ui-monospace,monospace;margin-left:6px}
+  .vs-mid{display:flex;gap:18px;align-items:center;justify-content:center}
+  .vs-call{font:800 22px ui-monospace,monospace;padding:14px 28px;border-radius:5px;letter-spacing:.10em;text-align:center}
+  .vs-call.buy{background:rgba(91,229,124,.14);color:var(--gn);border:2px solid var(--gn)}
+  .vs-call.watch{background:rgba(255,185,92,.14);color:var(--am);border:2px solid var(--am)}
+  .vs-call.short{background:rgba(255,107,91,.14);color:var(--rd);border:2px solid var(--rd)}
+  .vs-conv{font:500 10.5px ui-monospace,monospace;color:var(--ink-2);margin-top:4px;letter-spacing:.10em;text-transform:uppercase}
+  .vs-bias{display:flex;flex-direction:column;gap:4px}
+  .vs-bias-row{display:flex;align-items:center;gap:8px;font:600 11px ui-monospace,monospace}
+  .vs-bias-row .lbl{color:var(--ink-3);min-width:70px;letter-spacing:.1em;font-size:9.5px}
+  .vs-bias-row .val{font-weight:800}
+  .vs-bias-row .val.bull{color:var(--gn)} .vs-bias-row .val.bear{color:var(--rd)} .vs-bias-row .val.neut{color:var(--am)}
+
+  .panel{background:var(--surf-1);border:1px solid var(--line);border-radius:5px;padding:16px 20px;margin-bottom:12px}
+  h2{font:700 13px ui-monospace,monospace;color:var(--ink);letter-spacing:.10em;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:10px}
+  h2 .num{color:var(--lead);font:800 14px ui-monospace,monospace;min-width:32px}
+  h2 .sub{font:500 11px sans-serif;color:var(--ink-3);letter-spacing:.02em;text-transform:none;margin-left:auto;flex:1}
+  h2 .tag{background:var(--surf-2);color:var(--ink-2);font:700 9.5px ui-monospace,monospace;padding:3px 9px;border-radius:3px;letter-spacing:.10em}
+  .pill{padding:2px 7px;border-radius:3px;font:700 9.5px ui-monospace,monospace;letter-spacing:.06em}
+  .pill.gn{background:rgba(91,229,124,.15);color:var(--gn)}
+  .pill.rd{background:rgba(255,107,91,.15);color:var(--rd)}
+  .pill.am{background:rgba(255,185,92,.18);color:var(--am)}
+  .pill.cy{background:rgba(94,200,216,.15);color:var(--cy)}
+
+  /* TV chart */
+  #tvChart { position:relative; height:520px; width:100%; background:var(--surf-2); border:1px solid var(--line); border-radius:5px; }
+  .tv-overlay { position:absolute; top:0; left:0; right:0; bottom:0; pointer-events:none; z-index:10; }
+  .tv-zone-lbl { position:absolute; font:700 9.5px ui-monospace,monospace; padding:2px 7px; border-radius:3px; background:var(--surf-1); border:1px solid currentColor; letter-spacing:.06em; pointer-events:auto; }
+  .tv-legend { display:flex; flex-wrap:wrap; gap:14px; margin-top:10px; font:600 10px ui-monospace,monospace; color:var(--ink-2); letter-spacing:.06em; }
+  .tv-legend .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+
+  /* HTF cascade */
+  .cas-row{display:grid;grid-template-columns:90px 60px 1fr 100px 100px 80px;gap:12px;align-items:center;background:var(--surf-2);padding:11px 14px;border-radius:4px;border-left:3px solid var(--line);margin-bottom:6px}
+  .cas-row.bull{border-left-color:var(--gn)} .cas-row.bear{border-left-color:var(--rd)} .cas-row.neut{border-left-color:var(--am)}
+  .cas-tf{font:800 12px ui-monospace,monospace;color:var(--ink)}
+  .cas-arrow{font:800 18px ui-monospace,monospace;text-align:center}
+  .cas-arrow.bull{color:var(--gn)} .cas-arrow.bear{color:var(--rd)} .cas-arrow.neut{color:var(--am)}
+  .cas-struct{font:500 11.5px ui-monospace,monospace;color:var(--ink-1)}
+  .cas-struct b{color:var(--ink);font-weight:700}
+  .cas-last{font:500 10.5px ui-monospace,monospace;color:var(--ink-3)}
+  .cas-bias{font:800 10px ui-monospace,monospace;letter-spacing:.10em;padding:4px 10px;border-radius:3px;text-align:center}
+  .cas-bias.bull{background:rgba(91,229,124,.15);color:var(--gn)} .cas-bias.bear{background:rgba(255,107,91,.15);color:var(--rd)} .cas-bias.neut{background:rgba(255,185,92,.18);color:var(--am)}
+  .cas-summary{margin-top:11px;padding:10px 14px;background:var(--surf-2);border-radius:3px;border-left:3px solid var(--am);font:500 12px sans-serif;color:var(--ink-2);line-height:1.55}
+
+  /* inducement / breaker / OTE panel */
+  .smc3-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+  .smc3-card{background:var(--surf-2);border:1px solid var(--line);border-top:3px solid var(--ink-4);border-radius:4px;padding:14px 16px}
+  .smc3-card.idm{border-top-color:var(--am)}
+  .smc3-card.breaker{border-top-color:var(--cy)}
+  .smc3-card.ote{border-top-color:var(--lead)}
+  .smc3-title{font:800 11px ui-monospace,monospace;letter-spacing:.13em}
+  .smc3-title.idm{color:var(--am)} .smc3-title.breaker{color:var(--cy)} .smc3-title.ote{color:var(--lead)}
+  .smc3-big{font:800 24px ui-monospace,monospace;margin:6px 0 4px;color:var(--ink)}
+  .smc3-big.am{color:var(--am)} .smc3-big.cy{color:var(--cy)} .smc3-big.lead{color:var(--lead)}
+  .smc3-desc{font:500 11.5px sans-serif;color:var(--ink-2);line-height:1.5}
+  .smc3-detail{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font:500 11px ui-monospace,monospace;color:var(--ink-3);line-height:1.55}
+
+  /* DOL synthesis arrow */
+  .dol-wrap{display:grid;grid-template-columns:1fr 60px 1fr;gap:14px;align-items:center;padding:18px 20px;background:var(--surf-2);border:1px solid var(--line);border-radius:5px;margin-bottom:12px}
+  .dol-side{padding:12px 16px;border-radius:4px}
+  .dol-side.bsl{background:rgba(244,114,182,.06);border:1px solid var(--bsl)}
+  .dol-side.ssl{background:rgba(34,211,238,.06);border:1px solid var(--ssl)}
+  .dol-side .lbl{font:800 10px ui-monospace,monospace;letter-spacing:.13em;margin-bottom:4px}
+  .dol-side.bsl .lbl{color:var(--bsl)} .dol-side.ssl .lbl{color:var(--ssl)}
+  .dol-side .v{font:800 17px ui-monospace,monospace;color:var(--ink);margin-bottom:4px}
+  .dol-side .sub{font:500 10.5px ui-monospace,monospace;color:var(--ink-3);line-height:1.5}
+  .dol-arrow{font:800 36px ui-monospace,monospace;text-align:center}
+  .dol-arrow.down{color:var(--ssl)} .dol-arrow.up{color:var(--bsl)}
+  .dol-verdict{padding:12px 16px;background:var(--surf-2);border-left:3px solid var(--ssl);border-radius:3px;font:500 12px sans-serif;color:var(--ink-1);line-height:1.55}
+
+  /* internal vs external */
+  .seq-wrap{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--surf-2);padding:12px 14px;border-radius:4px;border:1px solid var(--line);margin-bottom:8px}
+  .seq-step{padding:6px 12px;border-radius:3px;font:700 11px ui-monospace,monospace;letter-spacing:.06em}
+  .seq-step.done{background:rgba(91,229,124,.10);color:var(--gn);border:1px solid var(--gn)}
+  .seq-step.active{background:rgba(255,185,92,.15);color:var(--am);border:1px solid var(--am);font-weight:800}
+  .seq-step.pending{background:rgba(107,114,128,.08);color:var(--ink-3);border:1px solid var(--ink-4)}
+  .seq-arrow{font:800 14px ui-monospace,monospace;color:var(--ink-3)}
+
+  /* sessions / heatmap */
+  .kz-heatmap{display:grid;grid-template-columns:80px repeat(24,1fr);gap:2px;background:var(--surf-2);padding:14px;border-radius:4px;border:1px solid var(--line)}
+  .kz-heatmap .lbl{font:700 9.5px ui-monospace,monospace;color:var(--ink-3);letter-spacing:.1em;display:flex;align-items:center}
+  .kz-cell{aspect-ratio:1;border-radius:1px;display:flex;align-items:center;justify-content:center;font:700 8px ui-monospace,monospace;color:var(--bg)}
+  .kz-cell[data-int="0"]{background:#1a2120}.kz-cell[data-int="1"]{background:#2d3b35}.kz-cell[data-int="2"]{background:#4d6b4f}.kz-cell[data-int="3"]{background:#75a86b}.kz-cell[data-int="4"]{background:#9dd887}.kz-cell[data-int="5"]{background:var(--gn)}
+  .kz-cell.now{outline:2px solid var(--ink);outline-offset:1px}
+
+  /* multi-instrument */
+  .mi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .mi-card{background:var(--surf-2);border:1px solid var(--line);border-top:3px solid;border-radius:4px;padding:12px 14px;text-align:left}
+  .mi-card.bull{border-top-color:var(--gn)} .mi-card.bear{border-top-color:var(--rd)} .mi-card.neut{border-top-color:var(--am)}
+  .mi-tk{font:800 13px ui-monospace,monospace;color:var(--ink);letter-spacing:.05em}
+  .mi-px{font:600 10px ui-monospace,monospace;color:var(--ink-2);margin-top:2px}
+  .mi-bias{font:800 12px ui-monospace,monospace;margin:8px 0 3px;letter-spacing:.08em}
+  .mi-bias.bull{color:var(--gn)} .mi-bias.bear{color:var(--rd)} .mi-bias.neut{color:var(--am)}
+  .mi-note{font:500 10px ui-monospace,monospace;color:var(--ink-3);line-height:1.4}
+
+  /* base rate */
+  .br-wrap{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  .br-cell{background:var(--surf-2);border:1px solid var(--line);border-top:2px solid var(--lead);border-radius:4px;padding:11px 13px}
+  .br-cell.gn{border-top-color:var(--gn)} .br-cell.am{border-top-color:var(--am)} .br-cell.rd{border-top-color:var(--rd)}
+  .br-k{font:700 8.5px ui-monospace,monospace;color:var(--ink-3);letter-spacing:.13em}
+  .br-v{font:800 18px ui-monospace,monospace;margin:4px 0 2px;color:var(--ink)}
+  .br-v.gn{color:var(--gn)} .br-v.am{color:var(--am)} .br-v.rd{color:var(--rd)}
+  .br-sub{font:500 9.5px ui-monospace,monospace;color:var(--ink-3);line-height:1.4}
+
+  /* news calendar */
+  .cal-row{display:grid;grid-template-columns:50px 80px 1fr 90px 70px;gap:10px;align-items:center;padding:8px 12px;background:var(--surf-2);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:3px;margin-bottom:5px;font:500 11.5px ui-monospace,monospace;color:var(--ink-1)}
+  .cal-row.high{border-left-color:var(--rd)}
+  .cal-row.med{border-left-color:var(--am)}
+  .cal-row.low{border-left-color:var(--ink-3)}
+  .cal-day{font:800 11px ui-monospace,monospace;color:var(--ink)}
+  .cal-type{font:700 9.5px ui-monospace,monospace;letter-spacing:.08em;color:var(--ink-2)}
+  .cal-impact{text-align:right;font:700 9.5px ui-monospace,monospace;letter-spacing:.08em}
+  .cal-impact.high{color:var(--rd)} .cal-impact.med{color:var(--am)} .cal-impact.low{color:var(--ink-3)}
+
+  /* stop cluster heatmap */
+  .stops-wrap{background:var(--surf-2);border:1px solid var(--line);border-radius:4px;padding:14px 16px}
+  .stops-bar{display:grid;grid-template-columns:80px 1fr 80px;gap:10px;align-items:center;padding:5px 0}
+  .stops-px{font:800 11px ui-monospace,monospace;color:var(--ink);text-align:right}
+  .stops-track{height:18px;background:var(--surf-1);border-radius:2px;position:relative;overflow:hidden;border:1px solid var(--line)}
+  .stops-fill{height:100%;background:var(--rd);opacity:.6}
+  .stops-cnt{font:800 10px ui-monospace,monospace;color:var(--ink-2);letter-spacing:.08em}
+
+  /* limit order checklist */
+  .order-row{display:grid;grid-template-columns:50px 100px 100px 100px 100px 1fr;gap:10px;align-items:center;padding:8px 12px;background:var(--surf-2);border:1px solid var(--line);border-radius:3px;margin-bottom:5px;font:500 11.5px ui-monospace,monospace;color:var(--ink-1)}
+  .order-type{font:800 10px ui-monospace,monospace;letter-spacing:.08em;padding:3px 8px;border-radius:3px;text-align:center}
+  .order-type.buy{background:rgba(91,229,124,.15);color:var(--gn);border:1px solid var(--gn)}
+  .order-type.sell{background:rgba(255,107,91,.15);color:var(--rd);border:1px solid var(--rd)}
+  .order-type.stop{background:rgba(255,185,92,.15);color:var(--am);border:1px solid var(--am)}
+
+  /* what-if explorer */
+  .wi-wrap{background:var(--surf-2);border:1px solid var(--line);border-radius:5px;padding:18px 22px}
+  .wi-slider-row{display:grid;grid-template-columns:140px 1fr 100px;gap:14px;align-items:center;margin-bottom:14px}
+  .wi-slider-row label{font:700 11px ui-monospace,monospace;color:var(--ink-2);letter-spacing:.08em}
+  .wi-slider-row input[type=range]{width:100%;height:6px;border-radius:3px;background:linear-gradient(90deg,var(--rd) 0%,var(--am) 50%,var(--gn) 100%);outline:none;appearance:none}
+  .wi-slider-row input[type=range]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:var(--ink);box-shadow:0 0 6px var(--ink);cursor:pointer}
+  .wi-px-display{font:800 18px ui-monospace,monospace;color:var(--lead);text-align:right}
+  .wi-state-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .wi-state-cell{background:var(--surf-1);border:1px solid var(--line);border-radius:3px;padding:10px 12px}
+  .wi-state-cell .k{font:700 8.5px ui-monospace,monospace;color:var(--ink-3);letter-spacing:.13em}
+  .wi-state-cell .v{font:800 13px ui-monospace,monospace;margin-top:4px;color:var(--ink)}
+  .wi-state-cell .v.gn{color:var(--gn)} .wi-state-cell .v.rd{color:var(--rd)} .wi-state-cell .v.am{color:var(--am)}
+
+  /* setup transition */
+  .flow-wrap{background:var(--surf-2);border:1px solid var(--line);border-radius:5px;padding:18px 22px}
+  .flow-now{padding:12px 18px;background:rgba(255,185,92,.10);border:2px solid var(--am);border-radius:5px;text-align:center;font:800 13px ui-monospace,monospace;color:var(--am);letter-spacing:.10em;margin-bottom:14px}
+  .flow-branches{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .flow-branch{background:var(--surf-1);border:1px solid var(--line);border-top:3px solid;border-radius:4px;padding:14px}
+  .flow-branch.up{border-top-color:var(--gn)} .flow-branch.down{border-top-color:var(--rd)}
+  .flow-arrow{font:800 24px ui-monospace,monospace;text-align:center;margin-bottom:6px}
+  .flow-arrow.up{color:var(--gn)} .flow-arrow.down{color:var(--rd)}
+  .flow-trigger{font:600 11px ui-monospace,monospace;color:var(--ink-2);text-align:center;margin-bottom:10px}
+  .flow-state{font:800 12px ui-monospace,monospace;text-align:center;margin-bottom:8px;letter-spacing:.08em}
+  .flow-state.up{color:var(--gn)} .flow-state.down{color:var(--rd)}
+  .flow-targets{font:500 11px ui-monospace,monospace;color:var(--ink-1);text-align:center;line-height:1.6}
+
+  /* call */
+  .call-wrap{background:linear-gradient(135deg,var(--surf-1) 0%,var(--surf-2) 100%);border:2px solid var(--am);border-radius:6px;padding:22px 26px}
+  .call-wrap.buy{border-color:var(--gn)} .call-wrap.short{border-color:var(--rd)}
+  .call-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+  .call-title{font:800 13px ui-monospace,monospace;color:var(--ink-2);letter-spacing:.16em;text-transform:uppercase}
+  .call-badge{font:800 22px ui-monospace,monospace;padding:8px 22px;border-radius:5px;letter-spacing:.10em;color:var(--am);background:rgba(255,185,92,.12);border:1.5px solid var(--am)}
+  .call-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+  .call-cell{background:var(--surf-2);border:1px solid var(--line);border-radius:4px;padding:11px 13px}
+  .call-cell .k{font:700 8.5px ui-monospace,monospace;color:var(--ink-3);letter-spacing:.13em}
+  .call-cell .v{font:800 14px ui-monospace,monospace;margin-top:5px;color:var(--ink);line-height:1.4}
+  .call-cell .v.gn{color:var(--gn)} .call-cell .v.am{color:var(--am)} .call-cell .v.rd{color:var(--rd)}
+  .call-trigger{margin-top:14px;padding:14px 16px;background:rgba(255,185,92,.10);border-left:3px solid var(--am);border-radius:3px;font:500 13px sans-serif;color:var(--ink-1);line-height:1.6}
+  .call-trigger.buy{background:rgba(91,229,124,.10);border-left-color:var(--gn)}
+  .call-trigger.short{background:rgba(255,107,91,.10);border-left-color:var(--rd)}
+  .call-trigger b{color:var(--ink);font-weight:700}
+  .call-falsify{margin-top:10px;padding:12px 16px;background:rgba(255,107,91,.06);border-left:3px solid var(--rd);border-radius:3px;font:500 12.5px sans-serif;color:var(--ink-1);line-height:1.55}
+
+  /* held position branch */
+  .held-tabs{display:flex;gap:0;margin-bottom:12px;border-bottom:1px solid var(--line)}
+  .held-tab{padding:10px 18px;font:700 11px ui-monospace,monospace;color:var(--ink-3);letter-spacing:.10em;cursor:pointer;border-bottom:3px solid transparent}
+  .held-tab.active{color:var(--lead);border-bottom-color:var(--lead)}
+
+  /* radar */
+  .radar-wrap{display:grid;grid-template-columns:360px 1fr;gap:14px;align-items:center}
+  .radar-svg{width:100%;max-height:280px}
+
+  /* generic helpers */
+  .conf-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+  .conf-cell{background:var(--surf-2);border:1px solid var(--line);border-top:3px solid var(--ink-4);border-radius:4px;padding:11px 13px}
+  .conf-cell.gn{border-top-color:var(--gn)} .conf-cell.am{border-top-color:var(--am)} .conf-cell.rd{border-top-color:var(--rd)}
+  .conf-k{font:700 8.5px ui-monospace,monospace;color:var(--ink-3);letter-spacing:.13em}
+  .conf-v{font:800 16px ui-monospace,monospace;margin:4px 0 2px;color:var(--ink)}
+  .conf-v.gn{color:var(--gn)} .conf-v.am{color:var(--am)} .conf-v.rd{color:var(--rd)}
+  .conf-sub{font:500 9.5px ui-monospace,monospace;color:var(--ink-3);line-height:1.3}
+  .summary{padding:10px 14px;background:var(--surf-2);border-radius:3px;border-left:3px solid var(--am);font:500 12px sans-serif;color:var(--ink-1);line-height:1.55;margin-top:11px}
+</style>
+</head>
+<body>
+
+<!-- TIME HORIZON -->
+<div class="th-banner">
+  ⏱ <b>TIME HORIZON · SWING (days–weeks)</b> — SMC framework most predictive at intraday→daily timeframes. Cross-checks: Value (1–5y) · Earnings (1–6mo) · Technical (1d–4w) · Macro (3–12mo). Investment lens validates direction; SMC sizes the entry.
+</div>
+
+<!-- VERDICT STRIP -->
+<div class="vs-strip">
+  <div>
+    <div class="vs-tk">ROST</div>
+    <div class="vs-nm">Ross Stores · Apparel Retail · Consumer Cyclical</div>
+    <div style="margin-top:7px"><span class="vs-px">$214.55</span><span class="vs-chg" style="color:var(--rd)">−4.99%</span></div>
+  </div>
+  <div class="vs-mid">
+    <div style="text-align:center">
+      <div class="vs-call watch">WATCH</div>
+      <div class="vs-conv">SMC confluence · 58 / 100 · IDM detected · DOL → SSL $198</div>
+    </div>
+  </div>
+  <div class="vs-bias">
+    <div class="vs-bias-row"><span class="lbl">HTF (W)</span><span class="val bull">BULL</span><span style="color:var(--ink-3);font-size:10px">BOS $225 · 11d ago</span></div>
+    <div class="vs-bias-row"><span class="lbl">MTF (D)</span><span class="val bear">BEAR</span><span style="color:var(--ink-3);font-size:10px">CHoCH $224 · 4d ago</span></div>
+    <div class="vs-bias-row"><span class="lbl">LTF (1h)</span><span class="val neut">RANGE</span><span style="color:var(--ink-3);font-size:10px">$211–218 · 17h</span></div>
+  </div>
+</div>
+
+<!-- ─────────── A · HTF BIAS CASCADE ─────────── -->
+<div class="panel">
+  <h2><span class="num">A</span>HTF Bias Cascade<span class="sub">— monthly → 1h · trend bias + last BOS/CHoCH per frame</span><span class="tag">SMC CORE</span></h2>
+  <div class="cas-row bull"><div class="cas-tf">MONTHLY</div><div class="cas-arrow bull">↑</div><div class="cas-struct">Series of <b>HH/HL</b> since 2024-09 · clean uptrend · no CHoCH</div><div class="cas-last">last BOS</div><div class="cas-last">2026-02 @ $208</div><div class="cas-bias bull">BULL</div></div>
+  <div class="cas-row bull"><div class="cas-tf">WEEKLY</div><div class="cas-arrow bull">↑</div><div class="cas-struct">Above weekly OB <b>$199–203</b> · last BOS broke <b>$225</b> on 2026-05-02</div><div class="cas-last">last BOS</div><div class="cas-last">11d ago @ $225</div><div class="cas-bias bull">BULL</div></div>
+  <div class="cas-row bear"><div class="cas-tf">DAILY</div><div class="cas-arrow bear">↓</div><div class="cas-struct"><b>CHoCH bearish</b> @ $224 (broke prior 4d-low) · today: −5% session capitulation</div><div class="cas-last">last CHoCH</div><div class="cas-last">4d ago @ $224</div><div class="cas-bias bear">BEAR</div></div>
+  <div class="cas-row bear"><div class="cas-tf">4 HOUR</div><div class="cas-arrow bear">↓</div><div class="cas-struct">Lower-highs since $228 high · price below 4h EMA21 · MSS broken</div><div class="cas-last">last CHoCH</div><div class="cas-last">2d ago @ $220</div><div class="cas-bias bear">BEAR</div></div>
+  <div class="cas-row neut"><div class="cas-tf">1 HOUR</div><div class="cas-arrow neut">→</div><div class="cas-struct">Consolidating <b>$211–218</b> · IDM candle at $213 · waiting</div><div class="cas-last">last BOS</div><div class="cas-last">17h ago @ $213</div><div class="cas-bias neut">RANGE</div></div>
+</div>
+
+<!-- ─────────── B · TRADINGVIEW CHART ─────────── -->
+<div class="panel">
+  <h2><span class="num">B</span>Daily Structure · TV Chart<span class="sub">— OHLC + OB rectangles + FVG zones + BSL/SSL lines + BOS/CHoCH markers + ER vertical + premium/discount shading</span><span class="tag">DAILY · 90d</span></h2>
+  <div id="tvChart"></div>
+  <div class="tv-legend">
+    <span><span class="dot" style="background:var(--gn)"></span>HH / HL · bull swings</span>
+    <span><span class="dot" style="background:var(--rd)"></span>LL / LH · bear swings</span>
+    <span><span class="dot" style="background:var(--bull-ob-bd)"></span>+OB · demand zone</span>
+    <span><span class="dot" style="background:var(--bear-ob-bd)"></span>−OB · supply zone</span>
+    <span><span class="dot" style="background:var(--gn);opacity:.5"></span>+FVG · imbalance up</span>
+    <span><span class="dot" style="background:var(--bsl)"></span>BSL · equal highs</span>
+    <span><span class="dot" style="background:var(--ssl)"></span>SSL · equal lows</span>
+    <span><span class="dot" style="background:var(--lead);opacity:.5"></span>OTE 62–79%</span>
+    <span><span class="dot" style="background:var(--am)"></span>EQ · 50% mid</span>
+  </div>
+</div>
+
+<!-- ─────────── B·b · INDUCEMENT · BREAKER · OTE ─────────── -->
+<div class="panel">
+  <h2><span class="num">B·b</span>Inducement · Breaker · OTE<span class="sub">— three SMC concepts that drive entry precision: the trap candle, the polarity flip, and the optimal Fib zone</span><span class="tag">SMC ADVANCED</span></h2>
+  <div class="smc3-grid">
+    <div class="smc3-card idm">
+      <div class="smc3-title idm">⚠ INDUCEMENT (IDM) · DETECTED</div>
+      <div class="smc3-big am">$213.10</div>
+      <div class="smc3-desc"><b>Today's −5% session on 2× RVOL is a high-confidence IDM candidate.</b> The candle swept the prior 4-session low ($214.20) but failed to close below the daily OB <b>$216–220</b>. Classic stop-hunt before reversal.</div>
+      <div class="smc3-detail">Type: <b style="color:var(--am)">bearish IDM · sellside trap</b><br>Liquidity swept: $214.20 (4d low)<br>Reaction: closed +$1.45 above sweep low<br>Hist hit-rate (ROST, n=14): <b style="color:var(--gn)">71% reversal in 3 sessions</b></div>
+    </div>
+    <div class="smc3-card breaker">
+      <div class="smc3-title breaker">🔀 BREAKER BLOCKS · 1 ACTIVE</div>
+      <div class="smc3-big cy">$220.50</div>
+      <div class="smc3-desc"><b>Former bull-OB at $218–222 broken Apr-29.</b> Flipped to bear breaker. Price re-tested 2× (May 4, May 7) — held. Currently <b>2.8% above</b> · acts as resistance lid.</div>
+      <div class="smc3-detail">Type: <b style="color:var(--cy)">bear breaker (flipped +OB → −OB)</b><br>Mitigation status: 2× tested, 0× violated<br>Strength: <b>HIGH</b> · institutional commit zone<br>Action: short into rejection · long ONLY if reclaimed</div>
+    </div>
+    <div class="smc3-card ote">
+      <div class="smc3-title ote">⌗ OPTIMAL TRADE ENTRY · OTE 62–79%</div>
+      <div class="smc3-big lead">$209.32–$210.86</div>
+      <div class="smc3-desc">62-79% Fib retracement of the latest bullish impulse <b>$199 → $230</b>. Aligns with daily +OB ($216–220 violated, now seeking discount fill) and weekly demand at $208.</div>
+      <div class="smc3-detail">Impulse: $199.04 (Mar 12) → $230.40 (May 2) · 31.4 pts<br>62% Fib: <b>$210.86</b> · 70% Fib: $209.92 · 79% Fib: <b>$209.32</b><br>Confluence: weekly demand $199–203 (below OTE) · daily IDM $213 (above OTE)<br>Action: <b style="color:var(--lead)">place limit bids $209.50–$210.50 with stop $206</b></div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── C · ORDER BLOCKS + FVG (same as v2) ─────────── -->
+<div class="panel">
+  <h2><span class="num">C</span>Order Blocks &amp; Fair Value Gaps<span class="sub">— supply/demand zones + price-imbalance magnets · status FRESH / TESTED / BROKEN</span><span class="tag">SMC</span></h2>
+  <div class="smc3-grid" style="grid-template-columns:1fr 1fr">
+    <div class="smc3-card" style="border-top-color:var(--gn)">
+      <div class="smc3-title" style="color:var(--gn)">⌗ ORDER BLOCKS · 4 ACTIVE</div>
+      <div style="margin-top:10px">
+        <div style="display:grid;grid-template-columns:60px 90px 60px 1fr 60px;gap:8px;padding:6px 0;border-bottom:1px dashed var(--ink-4);font:500 11px ui-monospace,monospace;color:var(--ink-1)"><span class="pill rd">−OB</span><b class="mono">$224–228</b><span style="color:var(--am)">+4.4%</span><span>Daily supply · tested 1×</span><span class="pill am">TESTED</span></div>
+        <div style="display:grid;grid-template-columns:60px 90px 60px 1fr 60px;gap:8px;padding:6px 0;border-bottom:1px dashed var(--ink-4);font:500 11px ui-monospace,monospace;color:var(--ink-1)"><span class="pill gn">+OB</span><b class="mono">$216–220</b><span style="color:var(--am)">+0.7%</span><span>4h demand · fresh · price testing</span><span class="pill gn">FRESH</span></div>
+        <div style="display:grid;grid-template-columns:60px 90px 60px 1fr 60px;gap:8px;padding:6px 0;border-bottom:1px dashed var(--ink-4);font:500 11px ui-monospace,monospace;color:var(--ink-1)"><span class="pill gn">+OB</span><b class="mono">$199–203</b><span style="color:var(--ink-3)">−6.5%</span><span>Weekly demand · untested · key</span><span class="pill gn">FRESH</span></div>
+        <div style="display:grid;grid-template-columns:60px 90px 60px 1fr 60px;gap:8px;padding:6px 0;font:500 11px ui-monospace,monospace;color:var(--ink-1)"><span class="pill rd">−OB</span><b class="mono">$186–190</b><span style="color:var(--ink-3)">−12.4%</span><span>Old monthly supply · broken Jan</span><span class="pill rd">BROKEN</span></div>
+      </div>
+    </div>
+    <div class="smc3-card" style="border-top-color:var(--lead)">
+      <div class="smc3-title" style="color:var(--lead)">⊠ FVGs · 3 ACTIVE</div>
+      <div style="margin-top:10px">
+        <div style="display:grid;grid-template-columns:60px 90px 60px 1fr 60px;gap:8px;padding:6px 0;border-bottom:1px dashed var(--ink-4);font:500 11px ui-monospace,monospace;color:var(--ink-1)"><span class="pill gn">+FVG</span><b class="mono">$217–221</b><span style="color:var(--am)">+1.1%</span><span>Daily bull gap · May 2-3 · magnet ↑</span><span class="pill gn">UNFILLED</span></div>
+        <div style="display:grid;grid-template-columns:60px 90px 60px 1fr 60px;gap:8px;padding:6px 0;border-bottom:1px dashed var(--ink-4);font:500 11px ui-monospace,monospace;color:var(--ink-1)"><span class="pill rd">−FVG</span><b class="mono">$208–210</b><span style="color:var(--ink-3)">−2.1%</span><span>Daily bear gap · today · fill on bounce</span><span class="pill gn">UNFILLED</span></div>
+        <div style="display:grid;grid-template-columns:60px 90px 60px 1fr 60px;gap:8px;padding:6px 0;font:500 11px ui-monospace,monospace;color:var(--ink-1)"><span class="pill gn">+FVG</span><b class="mono">$226–229</b><span style="color:var(--ink-3)">+5.8%</span><span>Bull gap Apr 29 · filled May 4</span><span class="pill rd">FILLED</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── D · DRAW ON LIQUIDITY (DOL) ─────────── -->
+<div class="panel">
+  <h2><span class="num">D</span>Draw on Liquidity · Synthesized Direction<span class="sub">— internal/external liquidity sequence + magnet thesis · single arrow synthesis</span><span class="tag">DOL · SMC</span></h2>
+  <div class="dol-wrap">
+    <div class="dol-side bsl">
+      <div class="lbl">BSL ABOVE (2 pools)</div>
+      <div class="v">$231 · $227</div>
+      <div class="sub">3-touch + 2-touch · BOS would target $231 first · weak draw given daily CHoCH</div>
+    </div>
+    <div class="dol-arrow down">↓</div>
+    <div class="dol-side ssl">
+      <div class="lbl">SSL BELOW (2 pools) · ★ MAGNET</div>
+      <div class="v">$204 · $198</div>
+      <div class="sub">2-touch + <b style="color:var(--ssl)">4-touch</b> · $198 is 4-touch cluster · strongest pool in 6mo</div>
+    </div>
+  </div>
+  <div class="dol-verdict">
+    <b style="color:var(--ssl)">DOL = DOWN to SSL.</b> Synthesis: daily CHoCH + 4h LL + 4-touch SSL at $198 + today's IDM all point to a planned sweep of $198 SSL before any meaningful upside continuation. Bull case requires <b>$218 reclaim WITHOUT</b> tagging $204 first; bear case is the path of least resistance.
+  </div>
+  <h2 style="margin-top:14px;margin-bottom:8px"><span class="num">D·b</span>Internal → External Liquidity Sequence<span class="sub">— stops engaged in order · internal first, external after BOS</span></h2>
+  <div class="seq-wrap">
+    <span class="seq-step done">$214.20 · 4d low · swept ✓</span>
+    <span class="seq-arrow">→</span>
+    <span class="seq-step active">$211 · 1h range low · TESTING</span>
+    <span class="seq-arrow">→</span>
+    <span class="seq-step pending">$208 · daily IDM zone · next</span>
+    <span class="seq-arrow">→</span>
+    <span class="seq-step pending">$204 · SSL 2-touch</span>
+    <span class="seq-arrow">→</span>
+    <span class="seq-step pending">$198 · SSL 4-touch · EXTERNAL</span>
+  </div>
+</div>
+
+<!-- ─────────── E · PREMIUM / DISCOUNT + KEY OPENS ─────────── -->
+<div class="panel">
+  <h2><span class="num">E</span>Premium / Discount + Key Opens<span class="sub">— current vs dealing range · daily / weekly / monthly opens · Asian range</span><span class="tag">PD + OPENS</span></h2>
+  <div class="conf-grid">
+    <div class="conf-cell am"><div class="conf-k">RANGE %</div><div class="conf-v am">50.4%</div><div class="conf-sub">$198–231 · EQ zone</div></div>
+    <div class="conf-cell rd"><div class="conf-k">MONTHLY OPEN</div><div class="conf-v rd">$226.30</div><div class="conf-sub">below open · M-bear</div></div>
+    <div class="conf-cell rd"><div class="conf-k">WEEKLY OPEN</div><div class="conf-v rd">$220.10</div><div class="conf-sub">below open · W-bear</div></div>
+    <div class="conf-cell rd"><div class="conf-k">DAILY OPEN</div><div class="conf-v rd">$225.42</div><div class="conf-sub">below open · D-bear</div></div>
+    <div class="conf-cell am"><div class="conf-k">ASIA HIGH</div><div class="conf-v am">$217.50</div><div class="conf-sub">not breached today</div></div>
+    <div class="conf-cell"><div class="conf-k">ASIA LOW</div><div class="conf-v">$212.80</div><div class="conf-sub">broken in NY · IDM</div></div>
+  </div>
+  <div class="summary" style="border-left-color:var(--rd)">
+    <b style="color:var(--rd)">Bear reference cascade:</b> price is below M-open ($226), W-open ($220), AND D-open ($225) — algorithmic bias is selling. Recovery requires reclaim of D-open ($225) for short-term flip. Asia range broken on the downside (low $212.80 violated in NY) confirms IDM read; bounce target = Asia high $217.50.
+  </div>
+</div>
+
+<!-- ─────────── F · KILLZONE + TIME-OF-DAY HEATMAP ─────────── -->
+<div class="panel">
+  <h2><span class="num">F</span>Sessions · Killzones &amp; Time-of-Day Heatmap<span class="sub">— hourly directional bias · last 60d · darker = larger avg move</span><span class="tag">INTRADAY</span></h2>
+  <div class="kz-heatmap">
+    <div class="lbl">MON</div>
+    <div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="1"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="5"></div><div class="kz-cell" data-int="4"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="1"></div><div class="kz-cell" data-int="1"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="3"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div>
+    <div class="lbl">TUE</div>
+    <div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="1"></div><div class="kz-cell" data-int="3"></div><div class="kz-cell" data-int="4"></div><div class="kz-cell" data-int="3"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="1"></div><div class="kz-cell" data-int="1"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="3"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div>
+    <div class="lbl">WED</div>
+    <div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="3"></div><div class="kz-cell" data-int="5"></div><div class="kz-cell" data-int="4"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="1"></div><div class="kz-cell" data-int="3"></div><div class="kz-cell" data-int="4"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div>
+    <div class="lbl">THU</div>
+    <div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="4"></div><div class="kz-cell" data-int="4"></div><div class="kz-cell" data-int="3"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="1"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="3"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div>
+    <div class="lbl">FRI</div>
+    <div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="1"></div><div class="kz-cell now" data-int="5">★</div><div class="kz-cell" data-int="3"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="1"></div><div class="kz-cell" data-int="1"></div><div class="kz-cell" data-int="2"></div><div class="kz-cell" data-int="3"></div><div class="kz-cell" data-int="4"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div><div class="kz-cell" data-int="0"></div>
+    <div class="lbl mono" style="font-size:8px;color:var(--ink-4)">00:00 ET → 24h</div>
+  </div>
+  <div class="summary" style="border-left-color:var(--am)">
+    <b style="color:var(--am)">Time-of-day read:</b> Heatmap shows NY Open (09:30 ET, col 9) and NY Close (15:00 ET, col 15) are the highest-volatility windows. ★ marks current hour (Fri 09:30 ET) — top-decile move bucket. <b>Power of 3:</b> Accumulation (Asia + pre-mkt) → Manipulation (today's −5% NY-open sweep) → Distribution expected (NY-close hour). Watch the 14:30–16:00 window for reversal confirmation.
+  </div>
+</div>
+
+<!-- ─────────── G · CONFLUENCE RADAR + SCORE ─────────── -->
+<div class="panel">
+  <h2><span class="num">G</span>Confluence Score · Radar &amp; Composite<span class="sub">— 8 weighted dimensions · BUY ≥ 70 · SHORT ≤ 30 · WATCH 31–69</span><span class="tag">COMPOSITE</span></h2>
+  <div class="radar-wrap">
+    <svg class="radar-svg" viewBox="0 0 280 240">
+      <!-- 4 rings -->
+      <g stroke="var(--line)" stroke-width="0.5" fill="none">
+        <circle cx="140" cy="120" r="25"/>
+        <circle cx="140" cy="120" r="50"/>
+        <circle cx="140" cy="120" r="75"/>
+        <circle cx="140" cy="120" r="100"/>
+      </g>
+      <!-- axis lines (8 dimensions) -->
+      <g stroke="var(--ink-4)" stroke-width="0.5">
+        <line x1="140" y1="20"  x2="140" y2="220"/>
+        <line x1="40"  y1="120" x2="240" y2="120"/>
+        <line x1="69"  y1="49"  x2="211" y2="191"/>
+        <line x1="69"  y1="191" x2="211" y2="49"/>
+      </g>
+      <!-- data polygon (vals 0-100 mapped to 0-100 radius) -->
+      <!-- HTF align 70, OB strength 65, FVG 55, Liq draw 35, P/D 50, KZ 55, Multi-instr 45, Base rate 60 -->
+      <polygon
+        points="140,50 211,98 195,170 99,194 76,166 60,71 116,69 140,50"
+        fill="rgba(255,185,92,0.20)" stroke="var(--am)" stroke-width="1.5"/>
+      <!-- labels at axis ends -->
+      <g font-family="ui-monospace" font-size="9" font-weight="700" fill="var(--ink-2)" letter-spacing="0.05em">
+        <text x="140" y="14" text-anchor="middle">HTF · 70</text>
+        <text x="244" y="123" text-anchor="start">OB · 65</text>
+        <text x="218" y="200" text-anchor="start">FVG · 55</text>
+        <text x="140" y="234" text-anchor="middle">LIQ · 35</text>
+        <text x="34" y="200" text-anchor="end">P/D · 50</text>
+        <text x="34" y="123" text-anchor="end">KZ · 55</text>
+        <text x="62" y="44" text-anchor="end">MI · 45</text>
+        <text x="218" y="44" text-anchor="start">N=BR · 60</text>
+      </g>
+      <!-- center value -->
+      <text x="140" y="125" text-anchor="middle" font-family="ui-monospace" font-size="22" font-weight="800" fill="var(--am)">58</text>
+      <text x="140" y="140" text-anchor="middle" font-family="ui-monospace" font-size="8" fill="var(--ink-3)" letter-spacing="0.10em">WATCH</text>
+    </svg>
+    <div>
+      <div class="conf-grid" style="grid-template-columns:repeat(4,1fr);gap:6px">
+        <div class="conf-cell gn"><div class="conf-k">HTF ALIGN</div><div class="conf-v gn">70</div><div class="conf-sub">M+W bull · D+4h bear</div></div>
+        <div class="conf-cell am"><div class="conf-k">OB STRENGTH</div><div class="conf-v am">65</div><div class="conf-sub">+OB $216–220 fresh</div></div>
+        <div class="conf-cell am"><div class="conf-k">FVG STATE</div><div class="conf-v am">55</div><div class="conf-sub">+FVG $217–221 unfilled</div></div>
+        <div class="conf-cell rd"><div class="conf-k">LIQUIDITY DRAW</div><div class="conf-v rd">35</div><div class="conf-sub">SSL $198 magnet · DOL ↓</div></div>
+        <div class="conf-cell am"><div class="conf-k">P/D POS</div><div class="conf-v am">50</div><div class="conf-sub">equilibrium · no edge</div></div>
+        <div class="conf-cell am"><div class="conf-k">KILLZONE</div><div class="conf-v am">55</div><div class="conf-sub">NY-close revert 65%</div></div>
+        <div class="conf-cell am"><div class="conf-k">MULTI-INSTR</div><div class="conf-v am">45</div><div class="conf-sub">SPY bull, XRT bear (split)</div></div>
+        <div class="conf-cell am"><div class="conf-k">BASE RATE</div><div class="conf-v am">60</div><div class="conf-sub">n=14 · 71% reversal in 3d</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── G·b · MULTI-INSTRUMENT ALIGNMENT ─────────── -->
+<div class="panel">
+  <h2><span class="num">G·b</span>Multi-Instrument SMC Alignment<span class="sub">— stock SMC works best when index + sector + risk gauge agree</span><span class="tag">CROSS-ASSET</span></h2>
+  <div class="mi-grid">
+    <div class="mi-card bull"><div class="mi-tk">SPY</div><div class="mi-px mono">$580.20 · +0.4%</div><div class="mi-bias bull">↑ BULL</div><div class="mi-note">HTF BOS · D pullback · weekly +OB held</div></div>
+    <div class="mi-card neut"><div class="mi-tk">QQQ</div><div class="mi-px mono">$502.85 · −0.2%</div><div class="mi-bias neut">→ NEUT</div><div class="mi-note">D-CHoCH at $510 · 4h range · waiting</div></div>
+    <div class="mi-card bear"><div class="mi-tk">XRT · retail ETF</div><div class="mi-px mono">$68.40 · −1.8%</div><div class="mi-bias bear">↓ BEAR</div><div class="mi-note">D-CHoCH last week · SSL draw to $66</div></div>
+    <div class="mi-card bear"><div class="mi-tk">VIX</div><div class="mi-px mono">22.4 · +12%</div><div class="mi-bias bear">↓ RISK-OFF</div><div class="mi-note">Above 20 · stress regime · SMC less reliable</div></div>
+  </div>
+  <div class="summary" style="border-left-color:var(--rd)">
+    <b style="color:var(--rd)">Cross-asset read:</b> Index (SPY) is bull, but sector (XRT) is bear, and VIX flipped risk-off. <b>For ROST short bias to hold</b>, XRT must continue lower (sector contagion confirms). <b>For ROST long bias to fire</b>, requires SPY breakout AND XRT reclaim — currently neither happening. Mixed signal = wait for asset alignment.
+  </div>
+</div>
+
+<!-- ─────────── G·c · BASE RATE + FAILED AUCTION ─────────── -->
+<div class="panel">
+  <h2><span class="num">G·c</span>Setup Base Rate &amp; Failed-Auction History<span class="sub">— historical outcomes for this exact pattern · Wilson LB ≥ 50% for actionability</span><span class="tag">FORENSIC</span></h2>
+  <div class="br-wrap">
+    <div class="br-cell gn"><div class="br-k">PATTERN n</div><div class="br-v">14</div><div class="br-sub">CHoCH→pullback to +OB (5y)</div></div>
+    <div class="br-cell gn"><div class="br-k">WIN RATE</div><div class="br-v gn">71%</div><div class="br-sub">10 reversed · 4 broke</div></div>
+    <div class="br-cell gn"><div class="br-k">WILSON LB</div><div class="br-v gn">52%</div><div class="br-sub">≥ 50% actionable floor met</div></div>
+    <div class="br-cell am"><div class="br-k">AVG R</div><div class="br-v am">+1.4R</div><div class="br-sub">winner +2.6R · loser −1.0R</div></div>
+    <div class="br-cell"><div class="br-k">LAST FAIL</div><div class="br-v">2024-08</div><div class="br-sub">broke $194 on earnings miss</div></div>
+  </div>
+  <div class="summary" style="border-left-color:var(--gn)">
+    <b style="color:var(--gn)">Base-rate check passes.</b> 14 prior CHoCH-then-pullback-to-+OB setups in ROST since 2021. Wilson 95% LB at 52% — above the 50% actionable floor. Last failure (2024-08) was driven by an unanticipated earnings miss; current setup is +44 days from earnings, so binary catalyst risk is low. <b style="color:var(--am)">Conclusion: pattern is statistically valid IF trigger fires.</b>
+  </div>
+</div>
+
+<!-- ─────────── K · NEWS / CATALYST WINDOW ─────────── -->
+<div class="panel">
+  <h2><span class="num">K</span>News &amp; Catalyst Window · next 8 days<span class="sub">— events that could invalidate the SMC setup before resolution</span><span class="tag">CALENDAR</span></h2>
+  <div class="cal-row med"><div class="cal-day">+1d</div><div class="cal-type">SECTOR</div><div>XRT · weekly retail sales print (US Census)</div><div class="cal-impact med">MED</div><div class="mono">08:30 ET</div></div>
+  <div class="cal-row high"><div class="cal-day">+2d</div><div class="cal-type">MACRO</div><div>CPI · monthly inflation · core YoY</div><div class="cal-impact high">HIGH</div><div class="mono">08:30 ET</div></div>
+  <div class="cal-row high"><div class="cal-day">+4d</div><div class="cal-type">PEER ER</div><div>TJX · Q1 FY26 earnings (sector read-through)</div><div class="cal-impact high">HIGH</div><div class="mono">AMC</div></div>
+  <div class="cal-row med"><div class="cal-day">+5d</div><div class="cal-type">FED</div><div>FOMC minutes · Apr-30 meeting</div><div class="cal-impact med">MED</div><div class="mono">14:00 ET</div></div>
+  <div class="cal-row low"><div class="cal-day">+6d</div><div class="cal-type">DATA</div><div>Retail sales advance · Apr</div><div class="cal-impact low">LOW</div><div class="mono">08:30 ET</div></div>
+  <div class="summary" style="border-left-color:var(--rd)">
+    <b style="color:var(--rd)">High-impact events in trigger window:</b> CPI (+2d) and TJX earnings (+4d) sit INSIDE the 5–8d trigger horizon. Either can override SMC structure. <b>Plan:</b> if BUY trigger fires before CPI, half-size only (1R instead of 1.5R) to absorb event risk. After TJX ER, re-assess sector read-through before adding.
+  </div>
+</div>
+
+<!-- ─────────── L · STOP-CLUSTER HEATMAP ─────────── -->
+<div class="panel">
+  <h2><span class="num">L</span>Algorithmic Stop-Cluster Map<span class="sub">— where retail stops likely sit · institutional sweep targets · longer bar = more stops</span><span class="tag">CROWD</span></h2>
+  <div class="stops-wrap">
+    <div class="stops-bar"><span class="stops-px">$220</span><div class="stops-track"><div class="stops-fill" style="width:35%"></div></div><span class="stops-cnt">SHORT stops · 35%</span></div>
+    <div class="stops-bar"><span class="stops-px">$215</span><div class="stops-track"><div class="stops-fill" style="width:15%;background:var(--ink-3)"></div></div><span class="stops-cnt">light</span></div>
+    <div class="stops-bar"><span class="stops-px" style="color:var(--ink);font-size:13px">$214 · NOW</span><div class="stops-track"><div class="stops-fill" style="width:0%"></div></div><span class="stops-cnt">—</span></div>
+    <div class="stops-bar"><span class="stops-px">$210</span><div class="stops-track"><div class="stops-fill" style="width:75%"></div></div><span class="stops-cnt" style="color:var(--am)">LONG stops · 75% HEAVY</span></div>
+    <div class="stops-bar"><span class="stops-px">$205</span><div class="stops-track"><div class="stops-fill" style="width:55%"></div></div><span class="stops-cnt">LONG stops · 55%</span></div>
+    <div class="stops-bar"><span class="stops-px">$200</span><div class="stops-track"><div class="stops-fill" style="width:90%"></div></div><span class="stops-cnt" style="color:var(--rd)">LONG stops · 90% MASSIVE</span></div>
+    <div class="stops-bar"><span class="stops-px">$198</span><div class="stops-track"><div class="stops-fill" style="width:88%"></div></div><span class="stops-cnt" style="color:var(--rd)">LONG stops · 88%</span></div>
+  </div>
+  <div class="summary" style="border-left-color:var(--rd)">
+    <b style="color:var(--rd)">Stop-cluster read:</b> Heaviest retail long stops sit at <b>$200 (round number, 90%)</b> and <b>$198 (4-touch SSL, 88%)</b>. These are the institutional sweep targets — DOL points there for a reason. Light cluster at $215 (today's high) means upside stops are thin; bounces have less fuel than dumps.
+  </div>
+</div>
+
+<!-- ─────────── M · REACTION CANDLE HISTORY ─────────── -->
+<div class="panel">
+  <h2><span class="num">M</span>Reaction-Candle History · prior tests at $216–220 +OB<span class="sub">— each prior touch of the active +OB · candle type · subsequent move · sample n</span><span class="tag">PRIOR PRINTS</span></h2>
+  <div class="conf-grid" style="grid-template-columns:repeat(5,1fr)">
+    <div class="conf-cell gn"><div class="conf-k">2026-05-08</div><div class="conf-v gn">HAMMER</div><div class="conf-sub">touched $216.50, closed +1.8% next 2 sessions</div></div>
+    <div class="conf-cell gn"><div class="conf-k">2026-04-22</div><div class="conf-v gn">BULL ENGULF</div><div class="conf-sub">touched $218.10, +2.4% next 3 sessions</div></div>
+    <div class="conf-cell rd"><div class="conf-k">2026-04-12</div><div class="conf-v rd">BEAR PIN</div><div class="conf-sub">touched $217.30, −1.1% next 2 sessions</div></div>
+    <div class="conf-cell gn"><div class="conf-k">2026-03-28</div><div class="conf-v gn">BULL ENGULF</div><div class="conf-sub">touched $216.80, +3.2% next 4 sessions</div></div>
+    <div class="conf-cell am"><div class="conf-k">2026-03-15</div><div class="conf-v am">DOJI</div><div class="conf-sub">touched $219.50, range 5 sessions</div></div>
+  </div>
+  <div class="summary" style="border-left-color:var(--gn)">
+    <b style="color:var(--gn)">Reaction history positive:</b> 4 of 5 prior touches of $216–220 +OB produced bullish reactions (3 strong, 1 weak). 1 bear-pin in April was followed by a quick recovery — this is a high-quality zone. <b>Pattern to look for tomorrow:</b> hammer or bull-engulf close above $216 on 1.5×+ RVOL.
+  </div>
+</div>
+
+<!-- ─────────── H · CROSS-LENS ─────────── -->
+<div class="panel">
+  <h2><span class="num">H</span>Cross-Lens Read<span class="sub">— how do the other 4 disciplines see this · reported, not smoothed</span><span class="tag">CROSS-CHECK</span></h2>
+  <div class="mi-grid" style="grid-template-columns:repeat(5,1fr)">
+    <div class="mi-card neut"><div class="mi-tk">SMC (LEAD)</div><div class="mi-bias neut">WATCH</div><div class="mi-note">HTF bull · D/4h bear · equilibrium</div></div>
+    <div class="mi-card bull"><div class="mi-tk">VALUE · 1–5y</div><div class="mi-bias bull">CONSTRUCTIVE</div><div class="mi-note">PT $232 · MoS +8% · ROIC 27%</div></div>
+    <div class="mi-card neut"><div class="mi-tk">EARNINGS</div><div class="mi-bias neut">NEUTRAL</div><div class="mi-note">+44d · ESP+1.2% · mild beat odds</div></div>
+    <div class="mi-card bear"><div class="mi-tk">TECH · 1d–4w</div><div class="mi-bias bear">BEARISH</div><div class="mi-note">EMA broken · MACD bear · −5% capit</div></div>
+    <div class="mi-card neut"><div class="mi-tk">MACRO</div><div class="mi-bias neut">MIXED</div><div class="mi-note">Consumer cyclical · rate-cut tail</div></div>
+  </div>
+  <div class="summary" style="border-left-color:var(--am)">
+    <b style="color:var(--am)">⚠ Time-horizon disagreement:</b> SMC + Tech (swing) say <b style="color:var(--rd)">bearish near-term</b>; Value (1–5y) says <b style="color:var(--gn)">constructive long-term</b>. The disagreement IS the trade — long-term holders ADD on weakness; swing traders WAIT for the bullish reclaim. Both correct at different horizons.
+  </div>
+</div>
+
+<!-- ─────────── I · THE CALL + HELD POSITION ─────────── -->
+<div class="call-wrap">
+  <div class="call-header">
+    <div class="call-title">◆ THE CALL · SMC · SWING HORIZON</div>
+    <div class="call-badge">WATCH</div>
+  </div>
+
+  <div class="held-tabs">
+    <div class="held-tab active" data-tab="not-held">If NOT held</div>
+    <div class="held-tab" data-tab="held">If ALREADY held</div>
+  </div>
+
+  <div id="tab-not-held">
+    <div style="font:600 14px sans-serif;color:var(--ink);line-height:1.6;margin-bottom:14px">
+      <b style="color:var(--am)">WATCH — not actionable.</b> HTF bull / MTF bear split + price at equilibrium gives no asymmetric edge. <b>Resolution required before entry.</b>
+    </div>
+    <div class="call-grid">
+      <div class="call-cell"><div class="k">BUY TRIGGER</div><div class="v gn">Close ≥ $218</div><div style="font:500 10.5px ui-monospace,monospace;color:var(--ink-3);margin-top:4px;line-height:1.4">+ RVOL ≥ 1.5<br>+ 1h CHoCH up</div></div>
+      <div class="call-cell"><div class="k">SHORT TRIGGER</div><div class="v rd">Close &lt; $204</div><div style="font:500 10.5px ui-monospace,monospace;color:var(--ink-3);margin-top:4px;line-height:1.4">SSL swept<br>+ no reclaim 2d</div></div>
+      <div class="call-cell"><div class="k">TIME WINDOW</div><div class="v am">5–8 d</div><div style="font:500 10.5px ui-monospace,monospace;color:var(--ink-3);margin-top:4px;line-height:1.4">Equilibrium decays</div></div>
+      <div class="call-cell"><div class="k">SIZE GUIDE</div><div class="v">0% now</div><div style="font:500 10.5px ui-monospace,monospace;color:var(--ink-3);margin-top:4px;line-height:1.4">If triggers: 1.5R</div></div>
+    </div>
+    <div class="call-trigger buy"><b>📌 BUY conversion path:</b> Daily close ≥ $218 AND NY RVOL ≥ 1.5 AND bullish 1h CHoCH. Entry $218–220 (inside +OB). Stop $211. T1 $228 (+1.7R). T2 $231 (BSL sweep, +2.2R). R:R 2.2 minimum.</div>
+    <div class="call-trigger short" style="margin-top:8px"><b>📌 SHORT conversion path:</b> Close &lt; $204 + failure to reclaim $208 within 2d (SSL sweep without reversal). Entry $202–204. Stop $211. T1 $198 (+1.5R). T2 $190. <b>Borrow LOW</b> (S&P large-cap), <b>squeeze MODERATE</b> (short interest 4.8%). Express outright.</div>
+  </div>
+
+  <div id="tab-held" style="display:none">
+    <div style="font:600 14px sans-serif;color:var(--ink);line-height:1.6;margin-bottom:14px">
+      <b style="color:var(--am)">You hold ROST.</b> Position state determines action — trim/hold/exit/add — based on cost basis and structure interaction.
+    </div>
+    <div class="call-grid">
+      <div class="call-cell"><div class="k">IF UNDERWATER</div><div class="v rd">EXIT FULL</div><div style="font:500 10.5px ui-monospace,monospace;color:var(--ink-3);margin-top:4px;line-height:1.4">cost basis &gt; $215 → SMC breakdown · cut to preserve capital · re-enter on BUY trigger</div></div>
+      <div class="call-cell"><div class="k">IF BREAKEVEN</div><div class="v am">TRIM 50%</div><div style="font:500 10.5px ui-monospace,monospace;color:var(--ink-3);margin-top:4px;line-height:1.4">cost basis $210–215 → harvest tax-free · ride 50% to T1 reclaim</div></div>
+      <div class="call-cell"><div class="k">IF PROFIT</div><div class="v gn">HOLD + RAISE STOP</div><div style="font:500 10.5px ui-monospace,monospace;color:var(--ink-3);margin-top:4px;line-height:1.4">cost basis &lt; $208 → quality compounder · raise stop to $209 (B/E + 1R) · hold runner</div></div>
+      <div class="call-cell"><div class="k">ADD ZONE</div><div class="v gn">$208 / $204</div><div style="font:500 10.5px ui-monospace,monospace;color:var(--ink-3);margin-top:4px;line-height:1.4">if cost basis allows: add 1/3 at $208 (discount), 1/3 at $204 (SSL sweep)</div></div>
+    </div>
+    <div class="call-trigger"><b>📌 Held-position playbook:</b> Today's price ($214.55) is in <b>limbo zone</b> for most holders. If cost basis is well below ($198–$208), this is just noise — hold and add on weakness. If cost basis is above ($215+), you bought into the trap and SMC says cut. Tax window: 60sh ST until 2026-09 if entered 2026-04. Long-term lots: no urgency.</div>
+  </div>
+
+  <div class="call-falsify">
+    <b>✗ INVALIDATES:</b> (a) Chops in $208–218 &gt; 8 trading days → setup decays. (b) Earnings revision &gt; +5% in 14d → fundamentals overtake. (c) Macro shock (VIX &gt; 25, XRT &lt; −5%) → SMC doesn't apply. (d) Daily breaks $211 then immediately reclaims same session → bear-trap inducement; re-eval bullish.
+  </div>
+</div>
+
+<!-- ─────────── I·b · PAIR TRADE ─────────── -->
+<div class="panel">
+  <h2><span class="num">I·b</span>Pair Trade Construction · For SHORT scenario<span class="sub">— removes beta · structural-only exposure · clean alpha bet</span><span class="tag">PAIR</span></h2>
+  <div class="conf-grid" style="grid-template-columns:repeat(4,1fr)">
+    <div class="conf-cell"><div class="conf-k">SHORT LEG</div><div class="conf-v rd">ROST</div><div class="conf-sub">−$214.55 · 100 sh = −$21,455 notional</div></div>
+    <div class="conf-cell"><div class="conf-k">LONG LEG</div><div class="conf-v gn">TJX</div><div class="conf-sub">+$132.40 · 162 sh = +$21,449 notional</div></div>
+    <div class="conf-cell"><div class="conf-k">PAIR β</div><div class="conf-v gn">0.04</div><div class="conf-sub">β-neutral within ±0.05 · market neutral</div></div>
+    <div class="conf-cell"><div class="conf-k">EXPECTED SPREAD</div><div class="conf-v am">+4.5%</div><div class="conf-sub">ROST −5% / TJX +0.5% over 5d</div></div>
+  </div>
+  <div class="summary" style="border-left-color:var(--cy)">
+    <b style="color:var(--cy)">Pair construction:</b> Long TJX, short ROST in dollar-neutral amounts. <b>Removes market beta</b> (pair β = 0.04 ≈ 0). The trade isolates the structural divergence: TJX is in clean uptrend with bull SMC, ROST has CHoCH bearish. Catalyst: TJX earnings +4d could amplify divergence. <b>Borrow check:</b> ROST borrow rate 0.40% (S&P 500, fully available). <b>Stop:</b> close pair if relative spread tightens by 1.5%.
+  </div>
+</div>
+
+<!-- ─────────── J · POSITION CONSTRUCTION ─────────── -->
+<div class="panel">
+  <h2><span class="num">J</span>Position Construction · If Trigger Fires<span class="sub">— size · expression · EV · risk budget consumption</span><span class="tag">CFP LENS</span></h2>
+  <div class="conf-grid">
+    <div class="conf-cell gn"><div class="conf-k">ENTRY SIZE</div><div class="conf-v">1.5R</div><div class="conf-sub">½-Kelly × regime 0.7 × DD 0.85</div></div>
+    <div class="conf-cell"><div class="conf-k">MAX LOSS</div><div class="conf-v rd">−$525</div><div class="conf-sub">1.05% of $50K NAV</div></div>
+    <div class="conf-cell"><div class="conf-k">EXPECTED R</div><div class="conf-v gn">+2.0R</div><div class="conf-sub">trim 50% T1 · trail balance</div></div>
+    <div class="conf-cell"><div class="conf-k">EV (BUY)</div><div class="conf-v gn">+$847</div><div class="conf-sub">0.55·T1 + 0.20·T2 − 0.25·stop</div></div>
+    <div class="conf-cell"><div class="conf-k">RISK BUDGET</div><div class="conf-v am">15.6%</div><div class="conf-sub">monthly: $525 of $3,375 used</div></div>
+    <div class="conf-cell"><div class="conf-k">EXPRESSION</div><div class="conf-v">Outright</div><div class="conf-sub">IV rank 62 · options rich · stock cleaner</div></div>
+  </div>
+</div>
+
+<!-- ─────────── J·b · PRE-PLACED LIMIT ORDER CHECKLIST ─────────── -->
+<div class="panel">
+  <h2><span class="num">J·b</span>Pre-Placed Limit Order Checklist · Mechanical Execution<span class="sub">— paste into broker · CLAUDE principle 8: discretion-free</span><span class="tag">ORDERS</span></h2>
+  <div class="order-row"><span class="order-type buy">BUY STOP</span><b class="mono">$218.20</b><span style="color:var(--ink-3)">limit $219.50</span><span class="mono">25 sh</span><span class="mono">$5,488</span><span style="color:var(--ink-3)">BUY trigger · only fires above $218</span></div>
+  <div class="order-row"><span class="order-type stop">STOP-LOSS</span><b class="mono">$211.00</b><span style="color:var(--ink-3)">market</span><span class="mono">25 sh</span><span class="mono">−$180 risk</span><span style="color:var(--ink-3)">close-based · 1h pivot low</span></div>
+  <div class="order-row"><span class="order-type sell">SELL LIMIT</span><b class="mono">$227.50</b><span style="color:var(--ink-3)">T1 trim 50%</span><span class="mono">12 sh</span><span class="mono">$2,730</span><span style="color:var(--ink-3)">+1.7R · −OB resistance</span></div>
+  <div class="order-row"><span class="order-type sell">SELL LIMIT</span><b class="mono">$231.00</b><span style="color:var(--ink-3)">T2 final</span><span class="mono">13 sh</span><span class="mono">$3,003</span><span style="color:var(--ink-3)">+2.2R · BSL sweep target</span></div>
+  <div class="summary" style="border-left-color:var(--gn)">
+    <b style="color:var(--gn)">All 4 orders pre-placed.</b> No discretion required when triggers fire. Stop-loss is hard close-based with no exception. R:R = 2.2 on full position; harvested EV ≈ $400 expected. Place orders OUTSIDE current price range so they only fire on confirmation.
+  </div>
+</div>
+
+<!-- ─────────── O · WHAT-IF LEVEL EXPLORER ─────────── -->
+<div class="panel">
+  <h2><span class="num">O</span>What-If · Interactive Level Explorer<span class="sub">— drag the slider · see how SMC state changes at any price</span><span class="tag">INTERACTIVE</span></h2>
+  <div class="wi-wrap">
+    <div class="wi-slider-row">
+      <label>HYPOTHETICAL PRICE</label>
+      <input type="range" id="wiSlider" min="195" max="235" value="215" step="0.5">
+      <div class="wi-px-display" id="wiPrice">$215.00</div>
+    </div>
+    <div class="wi-state-grid" id="wiState">
+      <div class="wi-state-cell"><div class="k">RANGE POSITION</div><div class="v am" id="wiRange">51.5%</div></div>
+      <div class="wi-state-cell"><div class="k">SMC VERDICT</div><div class="v am" id="wiVerdict">WATCH</div></div>
+      <div class="wi-state-cell"><div class="k">+OB STATE</div><div class="v am" id="wiOB">testing</div></div>
+      <div class="wi-state-cell"><div class="k">NEXT LEVEL</div><div class="v" id="wiNext">$211 (1h low)</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── P · SETUP TRANSITION FLOW ─────────── -->
+<div class="panel">
+  <h2><span class="num">P</span>Setup Transition Flow<span class="sub">— current state · two branches · each branch's next state and action</span><span class="tag">DECISION TREE</span></h2>
+  <div class="flow-wrap">
+    <div class="flow-now">◆ NOW · WATCH · EQUILIBRIUM · 1h RANGE $211–$218 · 17h in setup</div>
+    <div class="flow-branches">
+      <div class="flow-branch up">
+        <div class="flow-arrow up">↑</div>
+        <div class="flow-trigger">IF daily close ≥ $218 + RVOL ≥ 1.5 + 1h CHoCH up</div>
+        <div class="flow-state up">→ BUY · LONG · 1.5R</div>
+        <div class="flow-targets">Entry $218–220 · Stop $211<br>T1 $227.50 (+1.7R · trim 50%)<br>T2 $231 (+2.2R · BSL sweep)<br>EV +$847 · time 5–8 d</div>
+      </div>
+      <div class="flow-branch down">
+        <div class="flow-arrow down">↓</div>
+        <div class="flow-trigger">IF daily close &lt; $204 + no reclaim $208 / 2d</div>
+        <div class="flow-state down">→ SHORT · OUTRIGHT · 1.5R</div>
+        <div class="flow-targets">Entry $202–204 · Stop $211<br>T1 $198 (+1.5R · SSL 4-touch)<br>T2 $190 (weekly demand fail)<br>EV +$612 · borrow 0.4%</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── F·b · TIME-IN-SETUP + POWER OF 3 ─────────── -->
+<div class="panel">
+  <h2><span class="num">F·b</span>Time-in-Setup + Power of 3<span class="sub">— how long has current consolidation persisted? · institutional accumulation cycle</span><span class="tag">DURATION</span></h2>
+  <div class="conf-grid" style="grid-template-columns:repeat(4,1fr)">
+    <div class="conf-cell am"><div class="conf-k">TIME IN SETUP</div><div class="conf-v am">17h</div><div class="conf-sub">since 1h range start · still healthy</div></div>
+    <div class="conf-cell"><div class="conf-k">HIST AVG RESOL</div><div class="conf-v">21h</div><div class="conf-sub">ROST 1h consolidations 90d</div></div>
+    <div class="conf-cell am"><div class="conf-k">DECAY PROXIMITY</div><div class="conf-v am">81%</div><div class="conf-sub">past avg by 19% · resolution due</div></div>
+    <div class="conf-cell"><div class="conf-k">P3 PHASE</div><div class="conf-v" style="color:var(--cy)">MANIPULATION</div><div class="conf-sub">accumulation done · awaiting distribution</div></div>
+  </div>
+  <div class="summary" style="border-left-color:var(--cy)">
+    <b style="color:var(--cy)">Power of 3 read:</b> Asian + pre-market = <b>accumulation</b> phase (lows printed). NY-open = <b>manipulation</b> phase (today's −5% IDM). Awaiting NY-close <b>distribution</b> phase (the reveal — bull bounce or bear continuation). Time-in-setup at 81% of historical avg signals resolution within the next 4 hours.
+  </div>
+</div>
+
+<script>
+// ─── TradingView Lightweight Chart with all SMC overlays ────────────────
+(function() {
+  const container = document.getElementById('tvChart');
+  if (!container || typeof LightweightCharts === 'undefined') return;
+
+  const chart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 520,
+    layout: { background: { color: '#0E1421' }, textColor: '#9AA4B2', fontFamily: 'JetBrains Mono, monospace' },
+    grid: { vertLines: { color: '#1E2530' }, horzLines: { color: '#1E2530' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#1E2530' },
+    timeScale: { borderColor: '#1E2530', timeVisible: false }
+  });
+  const series = chart.addCandlestickSeries({
+    upColor: '#5be57c', downColor: '#ff6b5b',
+    borderUpColor: '#5be57c', borderDownColor: '#ff6b5b',
+    wickUpColor: '#5be57c', wickDownColor: '#ff6b5b'
+  });
+
+  // Synthetic 90 sessions of ROST that walks $193 → $230 → $214 ending today.
+  function gen() {
+    const out = [];
+    let p = 193, t = new Date('2026-01-08').getTime() / 1000;
+    const trend = [0.4,0.3,0.5,0.2,0.6,0.4,-0.2,0.3,0.5,0.7,0.3,-0.4,0.5,0.4,0.6,-0.3,0.5,0.4,0.6,0.5,
+                   0.3,0.4,-0.5,0.5,0.6,0.3,0.4,-0.4,0.6,0.5,-0.3,0.4,0.5,0.7,0.3,-0.5,0.4,0.6,0.4,0.5,
+                   0.3,-0.6,0.4,0.5,0.7,0.4,-0.5,0.5,0.6,0.3,0.4,0.5,-0.4,0.7,0.6,0.4,-0.5,0.5,0.7,0.4,
+                   0.5,-0.3,0.4,0.6,0.7,0.3,0.5,0.6,-0.4,0.7,0.4,-0.5,0.6,0.5,0.7,0.3,-0.4,0.5,0.6,0.4,
+                   -0.6,0.5,-0.3,-0.4,0.5,-1.2,-2.5,-1.5,-1.0,-4.0];
+    for (let i = 0; i < 90; i++) {
+      const ch = trend[i] + (Math.random() - 0.5) * 0.8;
+      const o = p;
+      const c = p + ch;
+      const h = Math.max(o, c) + Math.random() * 0.6;
+      const l = Math.min(o, c) - Math.random() * 0.6;
+      out.push({ time: t, open: +o.toFixed(2), high: +h.toFixed(2), low: +l.toFixed(2), close: +c.toFixed(2) });
+      p = c;
+      // advance one weekday (skip Sat/Sun)
+      let d = new Date(t * 1000); d.setDate(d.getDate() + 1);
+      while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+      t = d.getTime() / 1000;
+    }
+    // Force last bar to be the dramatic −5% session
+    const last = out[out.length - 1];
+    last.open = 225.42; last.high = 226.10; last.low = 213.10; last.close = 214.55;
+    out[out.length - 2].close = 225.30;
+    return out;
+  }
+  const data = gen();
+  series.setData(data);
+
+  // ── Horizontal price lines (BSL/SSL/Stop/OB edges/Daily-Weekly-Monthly opens) ──
+  const lines = [
+    { price: 231.16, color: '#F472B6', title: 'BSL $231 · 3-touch', lineStyle: 2 },
+    { price: 227.10, color: '#F472B6', title: 'BSL $227 · 2-touch', lineStyle: 3 },
+    { price: 228.00, color: '#ff6b5b', title: '−OB top $228', lineStyle: 0 },
+    { price: 224.00, color: '#ff6b5b', title: '−OB bot $224', lineStyle: 0 },
+    { price: 226.30, color: '#80847a', title: 'Monthly open $226.30', lineStyle: 3 },
+    { price: 225.42, color: '#80847a', title: 'Daily open $225.42', lineStyle: 3 },
+    { price: 220.10, color: '#80847a', title: 'Weekly open $220.10', lineStyle: 3 },
+    { price: 220.00, color: '#5be57c', title: '+OB top $220', lineStyle: 0 },
+    { price: 216.00, color: '#5be57c', title: '+OB bot $216', lineStyle: 0 },
+    { price: 214.55, color: '#E6EAF2', title: 'CURRENT $214.55', lineStyle: 0, lineWidth: 2 },
+    { price: 210.86, color: '#B794F4', title: 'OTE 62% $210.86', lineStyle: 2 },
+    { price: 209.32, color: '#B794F4', title: 'OTE 79% $209.32', lineStyle: 2 },
+    { price: 203.91, color: '#22D3EE', title: 'SSL $204 · 2-touch', lineStyle: 3 },
+    { price: 198.40, color: '#22D3EE', title: 'SSL $198 · 4-touch ★', lineStyle: 2, lineWidth: 2 },
+  ];
+  lines.forEach(opts => series.createPriceLine(opts));
+
+  // ── Markers (BOS / CHoCH / IDM / earnings) ──
+  const markers = [
+    { time: data[Math.floor(data.length * 0.20)].time, position: 'belowBar', color: '#5be57c', shape: 'arrowUp', text: 'BOS' },
+    { time: data[Math.floor(data.length * 0.42)].time, position: 'aboveBar', color: '#5be57c', shape: 'arrowUp', text: 'BOS $208' },
+    { time: data[Math.floor(data.length * 0.65)].time, position: 'belowBar', color: '#5be57c', shape: 'arrowUp', text: 'BOS $225' },
+    { time: data[data.length - 5].time, position: 'aboveBar', color: '#ff6b5b', shape: 'arrowDown', text: 'CHoCH ↓' },
+    { time: data[data.length - 1].time, position: 'belowBar', color: '#ffb95c', shape: 'circle', text: 'IDM ★' },
+  ];
+  series.setMarkers(markers);
+
+  chart.timeScale().fitContent();
+
+  // Resize on window resize
+  window.addEventListener('resize', () => chart.applyOptions({ width: container.clientWidth }));
+})();
+
+// ─── Held-position tabs ─────────────────────────────────────────────────
+document.querySelectorAll('.held-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.held-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const key = tab.dataset.tab;
+    document.getElementById('tab-not-held').style.display = (key === 'not-held' ? '' : 'none');
+    document.getElementById('tab-held').style.display    = (key === 'held'     ? '' : 'none');
+  });
+});
+
+// ─── What-if explorer ───────────────────────────────────────────────────
+const wiSlider = document.getElementById('wiSlider');
+if (wiSlider) {
+  wiSlider.addEventListener('input', () => {
+    const p = +wiSlider.value;
+    document.getElementById('wiPrice').textContent = '$' + p.toFixed(2);
+    const rangePct = ((p - 198) / (231 - 198)) * 100;
+    const rangeEl = document.getElementById('wiRange');
+    rangeEl.textContent = rangePct.toFixed(1) + '%';
+    rangeEl.className = 'v ' + (rangePct >= 70 ? 'rd' : rangePct <= 30 ? 'gn' : 'am');
+    let verdict, vCls, obState, oCls, nextLvl;
+    if (p >= 218) { verdict = 'BUY · ENTER'; vCls = 'gn'; obState = 'broken above'; oCls = 'gn'; nextLvl = '$227.50 (T1)'; }
+    else if (p <= 204) { verdict = 'SHORT · ENTER'; vCls = 'rd'; obState = 'failed below'; oCls = 'rd'; nextLvl = '$198 (SSL)'; }
+    else if (p >= 216 && p < 218) { verdict = 'WATCH · NEAR BUY'; vCls = 'am'; obState = 'inside +OB'; oCls = 'am'; nextLvl = '$218 (trigger)'; }
+    else if (p >= 211 && p < 216) { verdict = 'WATCH · LIMBO'; vCls = 'am'; obState = 'below +OB'; oCls = 'am'; nextLvl = '$211 (1h low)'; }
+    else if (p >= 204 && p < 211) { verdict = 'WATCH · WEAK'; vCls = 'am'; obState = 'between'; oCls = 'am'; nextLvl = '$204 (SSL)'; }
+    else { verdict = '—'; vCls = ''; obState = '—'; oCls = ''; nextLvl = '—'; }
+    document.getElementById('wiVerdict').textContent = verdict;
+    document.getElementById('wiVerdict').className = 'v ' + vCls;
+    document.getElementById('wiOB').textContent = obState;
+    document.getElementById('wiOB').className = 'v ' + oCls;
+    document.getElementById('wiNext').textContent = nextLvl;
+  });
+}
+</script>
+
+</body>
+</html>
