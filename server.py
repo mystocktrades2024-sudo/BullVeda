@@ -307,6 +307,23 @@ async def _position_review_page(auth: HTTPBasicCredentials = Depends(_check_auth
                     headers={"Cache-Control": "no-store"})
 
 
+# -- /position_analysis_v2.html — Project 1 engine-driven Position Analysis.
+# Mounted in the kairos Position Analysis workspace via iframe. Reads
+# structural targets from /api/trade_engine. Top-level route mirrors
+# /position_review_mockup.html so kairos works whether served at /kairos.html
+# OR /v2/kairos.html — the iframe's relative ./position_analysis_v2.html
+# resolves to the right place either way.
+@app.api_route("/position_analysis_v2.html", methods=["GET","HEAD"])
+async def _position_analysis_v2_page(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    if isinstance(auth, Response):
+        return auth
+    p = (_PROTOTYPE_DIR / "position_analysis_v2.html").resolve()
+    if not p.exists() or not p.is_file():
+        raise HTTPException(404, "position_analysis_v2.html not built")
+    return Response(content=p.read_bytes(), media_type="text/html",
+                    headers={"Cache-Control": "no-store"})
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # /api/position/{ticker} — real-data endpoint that feeds the Position
 # Analysis mockup. Pulls live quote + fundamentals + OHLCV-derived
