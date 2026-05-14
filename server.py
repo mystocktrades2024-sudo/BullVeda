@@ -281,6 +281,18 @@ async def _kairos_redirect(auth: HTTPBasicCredentials = Depends(_check_auth)):
         return auth
     return RedirectResponse(url="/kairos.html", status_code=302)
 
+# -- /sharpe_screen.html — Sharpe ratio screener (2026-05-13)
+# Standalone tool; regenerate via python3 scripts/sharpe_screener.py + scripts/sharpe_screener_html.py
+@app.api_route("/sharpe_screen.html", methods=["GET","HEAD"])
+async def _sharpe_screen_page(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    if isinstance(auth, Response):
+        return auth
+    p = (BASE_DIR / "cache" / "sharpe_screen.html").resolve()
+    if not p.exists() or not p.is_file():
+        raise HTTPException(404, "sharpe_screen.html not built — run scripts/sharpe_screener_html.py")
+    return Response(content=p.read_bytes(), media_type="text/html",
+                    headers={"Cache-Control": "no-store"})
+
 # -- /home.html — polished landing distinct from the dense dashboard.
 # Hero, today's top conviction, blotter, wire, quick-workspace grid.
 @app.api_route("/home.html", methods=["GET","HEAD"])
@@ -322,6 +334,37 @@ async def _position_analysis_v2_page(auth: HTTPBasicCredentials = Depends(_check
         raise HTTPException(404, "position_analysis_v2.html not built")
     return Response(content=p.read_bytes(), media_type="text/html",
                     headers={"Cache-Control": "no-store"})
+
+
+# -- Lens-specific tab prototypes · iframe-mounted in kairos detail tabs.
+# These serve the same files at top-level paths so iframes work whether
+# the parent is at /kairos.html or /v2/kairos.html.
+def _make_proto_route(filename):
+    """Factory to serve a prototype HTML file under top-level path."""
+    @app.api_route("/" + filename, methods=["GET","HEAD"])
+    async def _proto(auth: HTTPBasicCredentials = Depends(_check_auth), _fn=filename):
+        if isinstance(auth, Response):
+            return auth
+        p = (_PROTOTYPE_DIR / _fn).resolve()
+        if not p.exists() or not p.is_file():
+            raise HTTPException(404, f"{_fn} not built")
+        return Response(content=p.read_bytes(), media_type="text/html",
+                        headers={"Cache-Control": "no-store"})
+    _proto.__name__ = f"_proto_{filename.replace('.','_').replace('-','_')}"
+    return _proto
+
+for _proto_file in [
+    "value_lab_v2_prototype.html",
+    "risk_lab_prototype.html",
+    "earnings_lab_prototype.html",
+    "portfolio_impact_prototype.html",
+    "macro_context_prototype.html",
+    "news_stream_prototype.html",
+    "insider_crowding_prototype.html",
+    "overview_v2_prototype.html",
+    "smc_v3_prototype.html",
+]:
+    _make_proto_route(_proto_file)
 
 
 # ─────────────────────────────────────────────────────────────────────────
