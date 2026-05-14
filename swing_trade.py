@@ -1333,6 +1333,27 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _ew_err:
         log.debug(f"earnings_watchlist load skipped: {_ew_err}")
 
+    # PEAD-window guarantee (2026-05-14): tickers that REPORTED in the last 7 days
+    # must reach the enrichment universe so the PEAD sleeve has signals to fire on.
+    # Without this, FOXA / CEG / ZBRA (textbook PEAD setups) were filtered out by
+    # the OHLCV pre-screen score because their recent gap-down→bounce gave them
+    # weak short-term momentum scores.
+    _pead_guaranteed: set = set()
+    try:
+        from data_fetcher import _load_recent_earnings_surprises_global as _lp
+        _pead_idx = _lp()
+        if _pead_idx:
+            # Filter to high-quality post-report names (≥ +3% EPS surprise AND ≥ +2% gap)
+            for t, d in _pead_idx.items():
+                eps = d.get("eps_surprise_pct") or 0
+                gap = d.get("post_report_gap_pct") or 0
+                days = d.get("days_since_earnings", 99)
+                if eps >= 3 and gap >= 2 and days <= 5:
+                    _pead_guaranteed.add(t)
+            log.info(f"  PEAD watchlist loaded: {len(_pead_guaranteed)} tickers reported in last 5d with EPS+3% gap+2%")
+    except Exception as _pe_err:
+        log.debug(f"pead_guaranteed load skipped: {_pe_err}")
+
     if len(qualified) > _max_enrich:
         _prescores      = {t: _fast_prescreen_score(df) for t, df in qualified.items()}
         _zr1_qualified  = [t for t in qualified if t in zacks_r1_set]
@@ -1343,7 +1364,10 @@ def run_daily_scan(force_fresh: bool = False):
         _sp500_in_qualified = [t for t in qualified if t in sp500_set and t not in zacks_r1_set]
         # Earnings-window guarantee — overlap with qualified universe
         _earnings_in_qualified = [t for t in qualified if t in _earnings_guaranteed]
-        _guaranteed = set(_zr1_qualified) | set(_sp500_in_qualified) | set(_earnings_in_qualified)
+        # PEAD-window guarantee — post-report PEAD candidates
+        _pead_in_qualified = [t for t in qualified if t in _pead_guaranteed]
+        _guaranteed = (set(_zr1_qualified) | set(_sp500_in_qualified)
+                       | set(_earnings_in_qualified) | set(_pead_in_qualified))
         _non_guaranteed_sorted = sorted(
             [(t, s) for t, s in _prescores.items() if t not in _guaranteed],
             key=lambda x: x[1], reverse=True
@@ -1352,9 +1376,10 @@ def run_daily_scan(force_fresh: bool = False):
         _selected       = _guaranteed | {t for t, _ in _non_guaranteed_sorted[:_slots]}
         qualified       = {t: df for t, df in qualified.items() if t in _selected}
         log.info(f"  Pre-screen: {len(_prescores)} → {len(qualified)} tickers "
-                 f"({len(_zr1_qualified)} Zacks #1 guaranteed + "
-                 f"{len(_earnings_in_qualified)} earnings-window guaranteed + "
-                 f"{len(_selected) - len(_zr1_qualified) - len(_earnings_in_qualified)} top-ranked by OHLCV score)")
+                 f"({len(_zr1_qualified)} Zacks #1 + "
+                 f"{len(_earnings_in_qualified)} pre-earnings + "
+                 f"{len(_pead_in_qualified)} PEAD post-report + "
+                 f"{len(_selected) - len(_zr1_qualified) - len(_earnings_in_qualified) - len(_pead_in_qualified)} top-ranked OHLCV)")
     else:
         log.info(f"  Pre-screen: {len(qualified)} tickers (under {_max_enrich} threshold, no cut)")
 
