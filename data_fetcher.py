@@ -3200,10 +3200,126 @@ def _load_earnings_calendar_global(ttl_seconds: int = 7200) -> dict:
 
 
 def get_earnings_date(ticker: str) -> dict:
-    """Earnings proximity via EODHD calendar — batched globally."""
+    """Earnings proximity via EODHD calendar — batched globally.
+
+    Returns POST-EARNINGS data (PEAD-relevant) when the ticker reported within
+    the last 7 days, otherwise upcoming-earnings data.
+
+    Post-earnings dict includes: eps_actual, eps_estimate, eps_surprise_pct,
+    post_report_gap_pct (computed from data_archive OHLCV).
+    """
     _empty = {"earnings_date": None, "days_to_earnings": None, "earnings_risk": False}
+    # Check recent-past first (PEAD window) — 7 days back
+    past_idx = _load_recent_earnings_surprises_global()
+    past = past_idx.get(ticker.upper())
+    if past:
+        return past
+    # Otherwise check upcoming earnings
     idx = _load_earnings_calendar_global()
     return idx.get(ticker.upper(), _empty)
+
+
+# Cache for post-earnings surprises (PEAD window, 2h TTL)
+_RECENT_EARNINGS_CACHE: dict = {"ts": 0, "by_ticker": None}
+
+def _load_recent_earnings_surprises_global(lookback_days: int = 7,
+                                            ttl_seconds: int = 7200) -> dict:
+    """Fetch last N days of REPORTED earnings with surprise data + post-report gap.
+
+    Pulls EODHD earnings_calendar for [-lookback_days, today], filters to
+    entries with actual EPS populated (= already reported), computes the
+    post-report gap-up % from data_archive OHLCV.
+
+    Returns dict keyed by ticker → enriched earnings dict:
+      {
+        earnings_date, days_to_earnings (negative=past),
+        days_since_earnings (positive),
+        earnings_risk (False — past report),
+        eps_actual, eps_estimate, eps_surprise_pct,
+        post_report_gap_pct
+      }
+    """
+    import time
+    if (time.time() - _RECENT_EARNINGS_CACHE["ts"]) < ttl_seconds and _RECENT_EARNINGS_CACHE["by_ticker"] is not None:
+        return _RECENT_EARNINGS_CACHE["by_ticker"]
+    try:
+        import eodhd_client as _eod
+        from datetime import date as _d, timedelta as _td
+        today = _d.today()
+        ec = _eod.earnings_calendar(
+            from_date=(today - _td(days=lookback_days)).isoformat(),
+            to_date=today.isoformat(),
+        )
+        rows = ec.get("earnings") if isinstance(ec, dict) else []
+        idx: dict[str, dict] = {}
+        for r in rows or []:
+            code = (r.get("code") or "").upper().split(".")[0]
+            if not code:
+                continue
+            actual = r.get("actual")
+            estimate = r.get("estimate")
+            if actual is None or estimate is None:
+                continue  # not yet reported
+            ed_str = r.get("report_date") or r.get("date")
+            if not ed_str:
+                continue
+            try:
+                ed_ts = pd.to_datetime(ed_str, utc=True)
+                days_since = (pd.Timestamp.now(tz="UTC") - ed_ts).days
+                if days_since < 0 or days_since > lookback_days:
+                    continue
+                # Surprise pct — EODHD provides as 'percent', fallback to computed
+                eps_surprise_pct = r.get("percent")
+                if eps_surprise_pct is None and estimate and float(estimate) != 0:
+                    eps_surprise_pct = ((float(actual) - float(estimate)) / abs(float(estimate))) * 100
+                # Compute post-report gap from data_archive OHLCV
+                gap_pct = _compute_post_report_gap_pct(code, ed_ts.date())
+                idx[code] = {
+                    "earnings_date": str(ed_ts.date()),
+                    "days_to_earnings": -days_since,   # negative = post-report (PEAD)
+                    "days_since_earnings": days_since,
+                    "earnings_risk": False,             # past report — no binary event ahead
+                    "eps_actual": float(actual),
+                    "eps_estimate": float(estimate),
+                    "eps_surprise_pct": float(eps_surprise_pct) if eps_surprise_pct is not None else None,
+                    "post_report_gap_pct": gap_pct,
+                    "is_post_report": True,
+                }
+            except Exception:
+                pass
+        _RECENT_EARNINGS_CACHE["ts"] = time.time()
+        _RECENT_EARNINGS_CACHE["by_ticker"] = idx
+        log.info(f"EODHD recent earnings: {len(idx)} reported tickers (last {lookback_days}d)")
+        return idx
+    except Exception as e:
+        log.debug(f"EODHD recent earnings fetch failed: {e}")
+        return {}
+
+
+def _compute_post_report_gap_pct(ticker: str, report_date) -> float | None:
+    """Compute (next_day_open - report_day_close) / report_day_close * 100
+    from data_archive parquet. Returns None if data unavailable."""
+    try:
+        from data_archive import load_ticker
+        df = load_ticker(ticker)
+        if df is None or len(df) < 2:
+            return None
+        # Find report_date in index (or next nearest trading day)
+        rd_str = str(report_date)
+        # Build a date-indexed list
+        idx = df.index
+        # Find rows at or after report_date
+        post = df[df.index.date >= report_date]
+        pre = df[df.index.date < report_date]
+        if len(post) < 1 or len(pre) < 1:
+            return None
+        report_close = float(pre.iloc[-1]["Close"]) if "Close" in pre.columns else float(pre.iloc[-1]["close"])
+        next_open = float(post.iloc[0]["Open"]) if "Open" in post.columns else float(post.iloc[0]["open"])
+        if report_close <= 0:
+            return None
+        return round(((next_open - report_close) / report_close) * 100, 3)
+    except Exception:
+        return None
 
 
 @_mem_cached(ttl_seconds=1800)

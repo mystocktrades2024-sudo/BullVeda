@@ -4530,12 +4530,19 @@ def _detect_pead(
         return False, audit
     checks["eps_surprise"] = f"EPS surprise {eps_surprise_pct:+.2f}% ≥ {min_eps}% ✓"
 
-    # Revenue surprise
-    min_rev = float(cfg.get("min_revenue_surprise_pct", 2.0))
-    if revenue_surprise_pct is None or revenue_surprise_pct < min_rev:
-        checks["revenue_surprise"] = f"Revenue surprise {revenue_surprise_pct}% < {min_rev}%"
-        return False, audit
-    checks["revenue_surprise"] = f"Revenue surprise {revenue_surprise_pct:+.2f}% ≥ {min_rev}% ✓"
+    # Revenue surprise (optional — EODHD calendar doesn't expose revenue surprise;
+    # gate only if min_revenue_surprise_pct > 0 AND data is available)
+    min_rev = float(cfg.get("min_revenue_surprise_pct", 0.0))
+    if min_rev > 0:
+        if revenue_surprise_pct is None:
+            checks["revenue_surprise"] = "data N/A — gate skipped"
+        elif revenue_surprise_pct < min_rev:
+            checks["revenue_surprise"] = f"Revenue surprise {revenue_surprise_pct}% < {min_rev}%"
+            return False, audit
+        else:
+            checks["revenue_surprise"] = f"Revenue surprise {revenue_surprise_pct:+.2f}% ≥ {min_rev}% ✓"
+    else:
+        checks["revenue_surprise"] = "gate disabled (min=0)"
 
     # Gap up on report day
     min_gap = float(cfg.get("min_gap_up_pct", 3.0))
@@ -4544,12 +4551,19 @@ def _detect_pead(
         return False, audit
     checks["gap_up"] = f"Gap-up {gap_up_pct:+.2f}% ≥ {min_gap}% ✓"
 
-    # Analyst revisions confirmation
-    min_rev_count = int(cfg.get("min_analyst_revisions", 2))
-    if analyst_revisions_up is None or analyst_revisions_up < min_rev_count:
-        checks["analyst_revisions"] = f"upward revisions {analyst_revisions_up} < {min_rev_count}"
-        return False, audit
-    checks["analyst_revisions"] = f"{analyst_revisions_up} upward revisions ≥ {min_rev_count} ✓"
+    # Analyst revisions confirmation (optional — data plumbing not yet wired,
+    # gate only if min_analyst_revisions > 0 AND data is available)
+    min_rev_count = int(cfg.get("min_analyst_revisions", 0))
+    if min_rev_count > 0:
+        if analyst_revisions_up is None:
+            checks["analyst_revisions"] = "data N/A — gate skipped"
+        elif analyst_revisions_up < min_rev_count:
+            checks["analyst_revisions"] = f"upward revisions {analyst_revisions_up} < {min_rev_count}"
+            return False, audit
+        else:
+            checks["analyst_revisions"] = f"{analyst_revisions_up} upward revisions ≥ {min_rev_count} ✓"
+    else:
+        checks["analyst_revisions"] = "gate disabled (min=0)"
 
     # Liquidity
     min_adv = float(cfg.get("min_daily_dollar_volume", 10000000))
