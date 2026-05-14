@@ -3533,6 +3533,54 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception:
         bundle["system_status"]["macro_calendar"] = {"blackout_today": False}
 
+    # ── PRE-FOMC DRIFT overlay (2026-05-14, docs/strategy_prefomc_drift.md) ──
+    # Lucca-Moench 2015: SPY drifts up 24h pre-FOMC. Multiply BUY sizing by
+    # size_boost_mult on the trading day immediately before scheduled FOMC.
+    try:
+        _prefomc_cfg = (cfg.get("prefomc_drift_overlay") or {})
+        _prefomc_active = False
+        _prefomc_status = {"active": False, "fomc_date": None, "applied_to_n_buys": 0}
+        if _prefomc_cfg.get("_enabled", True):
+            import macro_calendar as _mc_pf
+            from datetime import date as _date, timedelta as _td
+            today_d = _date.today()
+            # Check if tomorrow (or next trading day) is FOMC
+            for _delta in (1, 2, 3):  # skip weekends — check up to 3 days
+                _check_d = today_d + _td(days=_delta)
+                _blocked, _reason = _mc_pf.is_macro_blackout(date=_check_d, morning_after=False)
+                if _blocked and "FOMC" in (_reason or ""):
+                    # Find which FOMC date
+                    for _ev in _mc_pf._MACRO_EVENTS_2026:
+                        if _ev.get("type") == "FOMC" and _ev.get("date") == _check_d.isoformat():
+                            _prefomc_active = True
+                            _prefomc_status["fomc_date"] = _ev["date"]
+                            _prefomc_status["trading_days_until"] = _delta
+                            break
+                    break
+            if _prefomc_active:
+                _boost = float(_prefomc_cfg.get("size_boost_mult", 1.25))
+                _apply_long = bool(_prefomc_cfg.get("apply_to_long_only", True))
+                _n_applied = 0
+                for _r in bundle.get("buy_candidates") or []:
+                    if not isinstance(_r, dict):
+                        continue
+                    if _apply_long and _r.get("direction") == "short":
+                        continue
+                    _sm = float(_r.get("sizing_multiplier") or 1.0)
+                    _r["sizing_multiplier"] = round(_sm * _boost, 3)
+                    _r["_prefomc_boost_applied"] = _boost
+                    _n_applied += 1
+                _prefomc_status["active"] = True
+                _prefomc_status["size_boost_mult"] = _boost
+                _prefomc_status["applied_to_n_buys"] = _n_applied
+                _prefomc_status["mechanism_note"] = "Lucca-Moench 2015 — pre-FOMC drift"
+                log.info(f"  PRE-FOMC DRIFT ACTIVE: boosted {_n_applied} BUYs by {_boost}× "
+                         f"(FOMC {_prefomc_status['fomc_date']})")
+        bundle["system_status"]["prefomc_drift"] = _prefomc_status
+    except Exception as _pf_err:
+        log.debug(f"prefomc_drift overlay skipped: {_pf_err}")
+        bundle["system_status"]["prefomc_drift"] = {"active": False, "error": str(_pf_err)}
+
     # ── Phase 3: Cross-sectional sector ranking ──────────────────────────
     # For each sector with enough candidates, compute percentile rank by score
     # within sector. Optionally demote BUY → WATCH for candidates below the
