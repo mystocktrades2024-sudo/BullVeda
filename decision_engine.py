@@ -507,6 +507,7 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     _is_meanrev_eq = (t.get("setup_family") == "Mean Reversion")
     _is_pead_eq = (t.get("setup_family") == "PEAD")
     _is_insider_eq = (t.get("setup_family") == "Insider Cluster")
+    _is_esp_eq = (t.get("setup_family") == "ESP Play")
     if _is_momentum and _eq_bad:
         passed = True
         reason = f"entry_quality={eq} allowed for Momentum Continuation sleeve (bypass)"
@@ -522,6 +523,9 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     elif _is_insider_eq and _eq_bad:
         passed = True
         reason = f"entry_quality={eq} allowed for Insider Cluster sleeve (info edge) (bypass)"
+    elif _is_esp_eq and _eq_bad:
+        passed = True
+        reason = f"entry_quality={eq} allowed for ESP Play sleeve (pre-earnings drift) (bypass)"
     elif _eq_relaxed_for_regime:
         passed = True
         reason = f"entry_quality={eq} allowed in {_regime_lower} (relax per regime_sharpe_decomp 2026-05-13)"
@@ -550,6 +554,9 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     elif _is_insider_ds and not passed:
         passed = True
         ds_reason = f"decision_state={ds} allowed for Insider Cluster sleeve (info edge) (bypass)"
+    elif (t.get("setup_family") == "ESP Play") and not passed:
+        passed = True
+        ds_reason = f"decision_state={ds} allowed for ESP Play sleeve (catalyst) (bypass)"
     else:
         ds_reason = "" if passed else f"decision_state={ds}"
     gates.append({
@@ -574,7 +581,7 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     _sleeve_fam = t.get("setup_family")
     _catalyst_sleeve = _sleeve_fam in ("PEAD", "Momentum Continuation",
                                          "Defensive Rotation", "Mean Reversion",
-                                         "Insider Cluster")
+                                         "Insider Cluster", "ESP Play")
     # Only bypass tier_zero (not actual tail_loss demotion — that's a star-rating call)
     if _catalyst_sleeve and tier_zero and not tail_demoted:
         demoted = False
@@ -665,6 +672,7 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
         _is_def_family = (t.get("setup_family") == "Defensive Rotation")
         _is_pead_family = (t.get("setup_family") == "PEAD")
         _is_insider_family = (t.get("setup_family") == "Insider Cluster")
+        _is_esp_family = (t.get("setup_family") == "ESP Play")
         # Bypass conditions are gated by a score floor — pure cat_tier=1
         # without a composite floor would let noise tickers (score=3 with
         # a PEAD tag) slip through. Score 60 = WATCH-eligible composite floor.
@@ -672,7 +680,7 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
         # bypass fund_adequacy entirely — momentum doesn't depend on quality.
         # DEFENSIVE-ROTATION BYPASS (2026-05-14): defensive ETFs don't have
         # classical fundamentals; large-cap defensives are quality by definition.
-        _bypass = (_is_mom_family or _is_def_family or _is_pead_family or _is_insider_family
+        _bypass = (_is_mom_family or _is_def_family or _is_pead_family or _is_insider_family or _is_esp_family
                    or (_score >= 75) or (_cat_tier == 1 and _score >= 60))
         if ratio < DEFAULT_FUND_ADEQUACY and _bypass:
             passed = True
@@ -680,6 +688,7 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
                               else "Defensive Rotation sleeve" if _is_def_family
                               else "PEAD sleeve" if _is_pead_family
                               else "Insider Cluster sleeve" if _is_insider_family
+                              else "ESP Play sleeve" if _is_esp_family
                               else f"score={_score:.0f}, cat_tier={_cat_tier}")
             reason = (f"fundamentals {fs}/{fm} = {ratio*100:.0f}% < {DEFAULT_FUND_ADEQUACY*100:.0f}% — "
                       f"bypassed ({_bypass_reason})")
@@ -840,7 +849,8 @@ def compute_final_verdict(t: dict, regime: str | None = None,
     _is_defensive = (t.get("setup_family") == "Defensive Rotation")
     _is_pead = (t.get("setup_family") == "PEAD")
     _is_insider = (t.get("setup_family") == "Insider Cluster")
-    if _regime_lower in ("panic", "risk_off_trending") and not (_is_defensive or _is_pead or _is_insider):
+    _is_esp = (t.get("setup_family") == "ESP Play")
+    if _regime_lower in ("panic", "risk_off_trending") and not (_is_defensive or _is_pead or _is_insider or _is_esp):
         return {
             "verdict": "WATCH",
             "reason": f"regime gate: no new longs in {regime} (bull-only strategy)",

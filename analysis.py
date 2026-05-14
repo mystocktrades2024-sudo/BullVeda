@@ -4477,6 +4477,90 @@ def _detect_momentum_continuation(
     return True, audit
 
 
+def _detect_esp_play(
+    ticker: str, indicators: dict, regime4: str, score: float,
+    earn_days, esp_pct, zacks_rank,
+    daily_dollar_volume, config: dict | None,
+) -> tuple[bool, dict]:
+    """ESP-PLAY sleeve detector (2026-05-14, P0 roadmap item).
+
+    Fires when ALL of:
+      - Zacks ESP > min_esp_pct (most recent estimate above consensus)
+      - Zacks Rank <= max_rank (analyst-aligned)
+      - earn_days in [min_earn_days, max_earn_days] (pre-earnings window)
+      - composite score >= min_score
+      - liquidity OK
+
+    Mechanism: ~70% beat rate per Zacks (25y, 100K reports).
+    Default mode A: exit day before earnings (avoid binary risk).
+    """
+    cfg = (config or {}).get("esp_play_sleeve") or {}
+    audit = {"enabled": False, "fired": False, "checks": {}}
+    if not cfg.get("_enabled", False):
+        return False, audit
+    audit["enabled"] = True
+    checks = audit["checks"]
+
+    # Regime filter
+    regimes_active = set(cfg.get("regimes_active",
+                                  ["risk_on_trending", "risk_on_choppy",
+                                   "risk_off_trending", "panic", "bull"]))
+    regime4_l = (regime4 or "").lower()
+    if regime4_l not in regimes_active:
+        checks["regime"] = f"{regime4_l} not in {sorted(regimes_active)}"
+        return False, audit
+    checks["regime"] = f"{regime4_l} ✓"
+
+    # Score floor
+    min_score = float(cfg.get("min_score", 50))
+    if (score or 0) < min_score:
+        checks["score"] = f"{score:.0f} < {min_score:.0f}"
+        return False, audit
+    checks["score"] = f"{score:.0f} ≥ {min_score:.0f} ✓"
+
+    # ESP > threshold (most recent estimate skew positive)
+    min_esp = float(cfg.get("min_esp_pct", 0.0))
+    if esp_pct is None or esp_pct <= min_esp:
+        checks["esp"] = f"ESP {esp_pct} <= {min_esp}"
+        return False, audit
+    checks["esp"] = f"ESP +{esp_pct:.2f}% > {min_esp}% ✓"
+
+    # Zacks Rank
+    max_rank = int(cfg.get("max_rank", 3))
+    if zacks_rank is None:
+        checks["rank"] = "rank N/A — required"
+        return False, audit
+    try:
+        rn = int(zacks_rank)
+    except (TypeError, ValueError):
+        # Maybe text rank
+        _map = {"strong buy": 1, "buy": 2, "hold": 3, "sell": 4, "strong sell": 5}
+        rn = _map.get(str(zacks_rank).lower().strip()) if zacks_rank else None
+    if rn is None or rn > max_rank:
+        checks["rank"] = f"Rank {zacks_rank} > {max_rank}"
+        return False, audit
+    checks["rank"] = f"Rank {rn} ≤ {max_rank} ✓"
+
+    # Earnings window (pre-earnings, not in blackout)
+    min_d = int(cfg.get("min_earn_days", 4))
+    max_d = int(cfg.get("max_earn_days", 14))
+    if earn_days is None or not (min_d <= earn_days <= max_d):
+        checks["earnings_window"] = f"earn_days={earn_days} not in [{min_d},{max_d}]"
+        return False, audit
+    checks["earnings_window"] = f"earn_days={earn_days} in [{min_d},{max_d}] ✓"
+
+    # Liquidity
+    min_adv = float(cfg.get("min_daily_dollar_volume", 10000000))
+    if daily_dollar_volume is not None and daily_dollar_volume < min_adv:
+        checks["adv"] = f"${daily_dollar_volume/1e6:.1f}M < ${min_adv/1e6:.1f}M"
+        return False, audit
+    checks["adv"] = "OK"
+
+    audit["fired"] = True
+    audit["mode"] = "B (ride-through)" if cfg.get("ride_through_earnings", False) else "A (pre-earnings drift)"
+    return True, audit
+
+
 def _detect_insider_cluster(
     ticker: str, indicators: dict, regime4: str, score: float,
     price: float, insider_data: dict, daily_dollar_volume,
@@ -9860,6 +9944,66 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     except Exception:
         pass
 
+    # ESP-PLAY sleeve detection (2026-05-14, docs/strategy_esp_play.md).
+    # P0 roadmap item — Zacks ESP > 0 + Rank <= 3 + earn_days 4-14.
+    # Mode A: exit day before earnings (default, safer for binary risk).
+    _esp_play_audit = None
+    try:
+        _esp_earn_days = (earnings or {}).get("days_to_earnings") if isinstance(earnings, dict) else None
+        _esp_pct = (info.get("zacks_earnings_esp") if isinstance(info, dict) else None) \
+                   or (info.get("earnings_esp_pct") if isinstance(info, dict) else None)
+        _esp_rank = (info.get("zacks_rank") if isinstance(info, dict) else None) \
+                    or (info.get("zacks_rank_text") if isinstance(info, dict) else None)
+        _adv_esp = info.get("daily_dollar_volume") if info else None
+        _esp_fired, _esp_play_audit = _detect_esp_play(
+            ticker=ticker,
+            indicators=tech["indicators"],
+            regime4=regime4,
+            score=normalized,
+            earn_days=_esp_earn_days,
+            esp_pct=_esp_pct,
+            zacks_rank=_esp_rank,
+            daily_dollar_volume=_adv_esp,
+            config=config,
+        )
+        if _esp_fired:
+            setup_family = "ESP Play"
+            _esp_cfg = (config or {}).get("esp_play_sleeve") or {}
+            _ride_through = bool(_esp_cfg.get("ride_through_earnings", False))
+            hold_period_guide = ("5-21d (ride-through)" if _ride_through
+                                 else f"exit day before earnings (~{_esp_earn_days - 1 if _esp_earn_days else 7}d max)")
+            try:
+                _esp_atr_mult = float(_esp_cfg.get("stop_atr_multiple", 1.0))
+                _atr_esp = float(tech["indicators"].get("atr", price * 0.02))
+                if price > 0 and _atr_esp > 0:
+                    _esp_stop = round(price - _esp_atr_mult * _atr_esp, 2)
+                    _esp_t1 = round(price * (1 + float(_esp_cfg.get("target_t1_pct", 3.0)) / 100), 2)
+                    _esp_t2 = round(price * (1 + float(_esp_cfg.get("target_t2_pct", 5.0)) / 100), 2)
+                    plan["stop"] = _esp_stop
+                    plan["target1"] = _esp_t1
+                    plan["target2"] = _esp_t2
+                    plan["target3"] = None if not _ride_through else round(price * 1.15, 2)
+                    plan["trail_activate_pct"] = float(_esp_cfg.get("trail_activate_pct", 2.0))
+                    plan["trail_atr_mult"] = float(_esp_cfg.get("trail_atr_multiple", 0.5))
+                    plan["max_hold_days"] = int(_esp_cfg.get("max_hold_days", 13))
+                    plan["min_hold_days"] = int(_esp_cfg.get("min_hold_days", 1))
+                    plan["_esp_play_override"] = True
+                    plan["exit_day_before_earnings"] = (
+                        bool(_esp_cfg.get("exit_day_before_earnings", True))
+                        and not _ride_through
+                    )
+                    plan["catalyst_exit"] = (
+                        "Exit day-before-earnings (Mode A — avoid binary risk)"
+                        if not _ride_through else "Ride-through (Mode B — capture full edge)"
+                    )
+                    _esp_risk = price - _esp_stop
+                    if _esp_risk > 0:
+                        plan["rr_ratio"] = round((_esp_t1 - price) / _esp_risk, 2)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     # INSIDER-CLUSTER sleeve detection (2026-05-14, docs/strategy_insider_cluster.md).
     # Fires when 3+ insider buys in 30d (no sell skew), price > EMA50.
     # Regime-independent like PEAD — information asymmetry mechanism.
@@ -10284,6 +10428,9 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             _setup_mult = 1.0
         elif setup_family == "Insider Cluster":
             # INSIDER-CLUSTER BYPASS (2026-05-14): information edge dominates.
+            _setup_mult = 1.0
+        elif setup_family == "ESP Play":
+            # ESP-PLAY BYPASS (2026-05-14): Zacks ESP catalyst dominates raw kills.
             _setup_mult = 1.0
         else:
             _setup_mult = float(_setup_mults.get(_setup_for_mult, 1.0))
@@ -10760,6 +10907,14 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             _sizing_multiplier = _sizing_multiplier * _ic_size_mult
         except Exception:
             pass
+    elif setup_family == "ESP Play":
+        # ESP-PLAY SIZE: half-Kelly × 30% regime cap (lower — pre-earnings risk).
+        try:
+            _esp_size_cfg = (config or {}).get("esp_play_sleeve") or {}
+            _esp_size_mult = float(_esp_size_cfg.get("size_mult", 0.5))
+            _sizing_multiplier = _sizing_multiplier * _esp_size_mult
+        except Exception:
+            pass
 
     result = {
         "ticker": ticker,
@@ -10800,6 +10955,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         "meanrev_audit":      _meanrev_audit if '_meanrev_audit' in dir() else None,
         "pead_audit":         _pead_audit if '_pead_audit' in dir() else None,
         "insider_cluster_audit": _insider_cluster_audit if '_insider_cluster_audit' in dir() else None,
+        "esp_play_audit":     _esp_play_audit if '_esp_play_audit' in dir() else None,
         "regime4":            regime4,
         "conviction":         conviction,
         "trade_thesis":   trade_thesis,
