@@ -4709,12 +4709,16 @@ def _detect_pead(
     else:
         checks["revenue_surprise"] = "gate disabled (min=0)"
 
-    # Gap up on report day
+    # Gap up on report day — min AND max (above-max = extended already)
     min_gap = float(cfg.get("min_gap_up_pct", 3.0))
+    max_gap = float(cfg.get("max_gap_up_pct", 999.0))
     if gap_up_pct is None or gap_up_pct < min_gap:
         checks["gap_up"] = f"Gap-up {gap_up_pct}% < {min_gap}%"
         return False, audit
-    checks["gap_up"] = f"Gap-up {gap_up_pct:+.2f}% ≥ {min_gap}% ✓"
+    if gap_up_pct > max_gap:
+        checks["gap_up"] = f"Gap-up {gap_up_pct:+.2f}% > {max_gap}% (extended-already, PF degrades)"
+        return False, audit
+    checks["gap_up"] = f"Gap-up {gap_up_pct:+.2f}% in [{min_gap},{max_gap}]% ✓"
 
     # Analyst revisions confirmation (optional — data plumbing not yet wired,
     # gate only if min_analyst_revisions > 0 AND data is available)
