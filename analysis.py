@@ -4475,6 +4475,191 @@ def _detect_momentum_continuation(
     return True, audit
 
 
+def _detect_pead(
+    ticker: str, indicators: dict, regime4: str, score: float,
+    earn_days, eps_surprise_pct, revenue_surprise_pct,
+    gap_up_pct, analyst_revisions_up,
+    daily_dollar_volume, config: dict | None,
+) -> tuple[bool, dict]:
+    """PEAD (Post-Earnings Announcement Drift) sleeve detector (2026-05-14).
+
+    Fires when ALL of:
+      - 1-3 trading days post-earnings (fresh PEAD)
+      - EPS surprise ≥ +5% beat
+      - Revenue surprise ≥ +2% beat
+      - Gap-up ≥ +3% on report day
+      - ≥ 2 upward analyst revisions
+      - Score ≥ 55, liquidity floor met
+
+    No regime gate — PEAD is regime-independent catalyst alpha.
+    Designed in docs/strategy_pead.md. Most-documented anomaly in
+    academic finance (Bernard-Thomas 1989).
+    """
+    cfg = (config or {}).get("pead_sleeve") or {}
+    audit = {"enabled": False, "fired": False, "checks": {}}
+    if not cfg.get("_enabled", False):
+        return False, audit
+    audit["enabled"] = True
+    checks = audit["checks"]
+
+    # Days since earnings — fresh PEAD only
+    min_d = int(cfg.get("min_days_since_earnings", 1))
+    max_d = int(cfg.get("max_days_since_earnings", 3))
+    if earn_days is None:
+        checks["earnings_days"] = "earn_days N/A — required for PEAD"
+        return False, audit
+    # earn_days is days_TO earnings (positive = future). We want POST-earnings:
+    # days_since = -earn_days when earnings just passed (negative earn_days)
+    days_since = -earn_days if earn_days < 0 else None
+    if days_since is None or not (min_d <= days_since <= max_d):
+        checks["earnings_days"] = f"days_since_earnings={days_since} not in [{min_d},{max_d}]"
+        return False, audit
+    checks["earnings_days"] = f"days_since={days_since} in [{min_d},{max_d}] ✓"
+
+    # Score floor
+    min_score = float(cfg.get("min_score", 55))
+    if (score or 0) < min_score:
+        checks["score"] = f"{score:.0f} < {min_score:.0f}"
+        return False, audit
+    checks["score"] = f"{score:.0f} ≥ {min_score:.0f} ✓"
+
+    # EPS surprise
+    min_eps = float(cfg.get("min_eps_surprise_pct", 5.0))
+    if eps_surprise_pct is None or eps_surprise_pct < min_eps:
+        checks["eps_surprise"] = f"EPS surprise {eps_surprise_pct}% < {min_eps}%"
+        return False, audit
+    checks["eps_surprise"] = f"EPS surprise {eps_surprise_pct:+.2f}% ≥ {min_eps}% ✓"
+
+    # Revenue surprise
+    min_rev = float(cfg.get("min_revenue_surprise_pct", 2.0))
+    if revenue_surprise_pct is None or revenue_surprise_pct < min_rev:
+        checks["revenue_surprise"] = f"Revenue surprise {revenue_surprise_pct}% < {min_rev}%"
+        return False, audit
+    checks["revenue_surprise"] = f"Revenue surprise {revenue_surprise_pct:+.2f}% ≥ {min_rev}% ✓"
+
+    # Gap up on report day
+    min_gap = float(cfg.get("min_gap_up_pct", 3.0))
+    if gap_up_pct is None or gap_up_pct < min_gap:
+        checks["gap_up"] = f"Gap-up {gap_up_pct}% < {min_gap}%"
+        return False, audit
+    checks["gap_up"] = f"Gap-up {gap_up_pct:+.2f}% ≥ {min_gap}% ✓"
+
+    # Analyst revisions confirmation
+    min_rev_count = int(cfg.get("min_analyst_revisions", 2))
+    if analyst_revisions_up is None or analyst_revisions_up < min_rev_count:
+        checks["analyst_revisions"] = f"upward revisions {analyst_revisions_up} < {min_rev_count}"
+        return False, audit
+    checks["analyst_revisions"] = f"{analyst_revisions_up} upward revisions ≥ {min_rev_count} ✓"
+
+    # Liquidity
+    min_adv = float(cfg.get("min_daily_dollar_volume", 10000000))
+    if daily_dollar_volume is not None and daily_dollar_volume < min_adv:
+        checks["adv"] = f"${daily_dollar_volume/1e6:.1f}M < ${min_adv/1e6:.1f}M"
+        return False, audit
+    checks["adv"] = "OK"
+
+    audit["fired"] = True
+    return True, audit
+
+
+def _detect_mean_reversion(
+    indicators: dict, regime4: str, score: float, earn_days, price: float,
+    daily_dollar_volume, df, config: dict | None,
+) -> tuple[bool, dict]:
+    """MEAN-REVERSION sleeve detector (2026-05-14).
+
+    Fires when ALL of:
+      - regime is risk_on_choppy OR bull (NOT trending — too strong)
+      - RSI(14) < 30 (oversold trigger)
+      - price > EMA200 (long-term uptrend intact, no falling-knife)
+      - recent low within max_days_since_low (fresh oversold)
+      - RVOL >= 1.0 (selling-exhaustion check)
+      - daily $ volume >= floor (liquidity)
+      - earnings buffer (don't catch knife into earnings)
+
+    Designed in docs/strategy_mean_reversion.md. Diversifies choppy regime
+    alongside Pullback to Value — mechanism-orthogonal (Jegadeesh 1990).
+    """
+    cfg = (config or {}).get("mean_reversion_sleeve") or {}
+    audit = {"enabled": False, "fired": False, "checks": {}}
+    if not cfg.get("_enabled", False):
+        return False, audit
+    audit["enabled"] = True
+    checks = audit["checks"]
+
+    # Regime filter
+    regimes_active = set(cfg.get("regimes_active", ["risk_on_choppy", "bull"]))
+    regime4_l = (regime4 or "").lower()
+    if regime4_l not in regimes_active:
+        checks["regime"] = f"{regime4_l} not in {sorted(regimes_active)}"
+        return False, audit
+    checks["regime"] = f"{regime4_l} in {sorted(regimes_active)} ✓"
+
+    # Score floor
+    min_score = float(cfg.get("min_score", 50))
+    if (score or 0) < min_score:
+        checks["score"] = f"{score:.0f} < {min_score:.0f}"
+        return False, audit
+    checks["score"] = f"{score:.0f} ≥ {min_score:.0f} ✓"
+
+    # RSI < 30 (oversold)
+    rsi = indicators.get("rsi") or indicators.get("rsi_14")
+    max_rsi = float(cfg.get("max_rsi", 30))
+    if rsi is None or rsi >= max_rsi:
+        checks["rsi"] = f"RSI {rsi if rsi is not None else 'N/A'} not < {max_rsi}"
+        return False, audit
+    checks["rsi"] = f"RSI {rsi:.1f} < {max_rsi} ✓"
+
+    # Price > EMA200 (long-term uptrend intact)
+    if cfg.get("require_above_ema200", True):
+        ema200 = indicators.get("ema200") or indicators.get("sma200")
+        if not (ema200 and price and price > ema200):
+            _ema_str = f"${ema200:.2f}" if ema200 else "N/A"
+            checks["ema200"] = f"price ${price:.2f} ≤ EMA200 {_ema_str} — uptrend broken (falling knife risk)"
+            return False, audit
+        checks["ema200"] = f"price ${price:.2f} > EMA200 ${ema200:.2f} ✓"
+
+    # Recent low within N days
+    max_days = int(cfg.get("max_days_since_low", 5))
+    if df is not None and len(df) >= max_days + 1:
+        try:
+            recent = df.tail(max_days + 1)
+            lows = recent["Low"].astype(float).tolist() if "Low" in recent.columns else recent["low"].astype(float).tolist()
+            min_idx = lows.index(min(lows))
+            days_since = (len(lows) - 1) - min_idx
+            if days_since > max_days:
+                checks["recent_low"] = f"last low was {days_since}d ago > {max_days}d — stale signal"
+                return False, audit
+            checks["recent_low"] = f"low {days_since}d ago ≤ {max_days}d ✓"
+        except Exception:
+            checks["recent_low"] = "recent low check skipped (data error)"
+
+    # RVOL >= 1.0 (selling-exhaustion check)
+    rvol = indicators.get("rvol_5d") or indicators.get("rvol_20d") or indicators.get("rvol") or 1.0
+    min_rvol = float(cfg.get("min_rvol", 1.0))
+    if rvol < min_rvol:
+        checks["rvol"] = f"RVOL {rvol:.2f} < {min_rvol} — no exhaustion signal"
+        return False, audit
+    checks["rvol"] = f"RVOL {rvol:.2f} ≥ {min_rvol} ✓"
+
+    # Daily $ volume
+    min_adv = float(cfg.get("min_daily_dollar_volume", 10000000))
+    if daily_dollar_volume is not None and daily_dollar_volume < min_adv:
+        checks["adv"] = f"${daily_dollar_volume/1e6:.1f}M < ${min_adv/1e6:.1f}M"
+        return False, audit
+    checks["adv"] = "OK"
+
+    # Earnings buffer
+    min_earn = int(cfg.get("min_earnings_days", 7))
+    if earn_days is not None and 0 <= earn_days < min_earn:
+        checks["earnings"] = f"earn_days={earn_days} < {min_earn}"
+        return False, audit
+    checks["earnings"] = "OK"
+
+    audit["fired"] = True
+    return True, audit
+
+
 def _detect_defensive_rotation(
     ticker: str, indicators: dict, regime4: str, regime: dict,
     info: dict | None, price: float, atr: float,
@@ -9578,6 +9763,111 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     except Exception:
         pass
 
+    # PEAD sleeve detection (2026-05-14, docs/strategy_pead.md).
+    # Fires 1-3d post-earnings on beats with revisions. Regime-independent.
+    _pead_audit = None
+    try:
+        _earn_dict = info.get("earnings") if info else None
+        _pead_earn_days = (_earn_dict or {}).get("days_to_earnings") if _earn_dict else None
+        _eps_surp = (_earn_dict or {}).get("eps_surprise_pct") if _earn_dict else None
+        _rev_surp = (_earn_dict or {}).get("revenue_surprise_pct") if _earn_dict else None
+        _gap_up = (_earn_dict or {}).get("post_report_gap_pct") if _earn_dict else None
+        _rev_count = (info.get("analyst") or {}).get("recent_revisions_up") if info else None
+        if _rev_count is None:
+            _rev_count = (info.get("analyst") or {}).get("revisions_up_30d") if info else None
+        _adv_pead = info.get("daily_dollar_volume") if info else None
+        _pead_fired, _pead_audit = _detect_pead(
+            ticker=ticker,
+            indicators=tech["indicators"],
+            regime4=regime4,
+            score=normalized,
+            earn_days=_pead_earn_days,
+            eps_surprise_pct=_eps_surp,
+            revenue_surprise_pct=_rev_surp,
+            gap_up_pct=_gap_up,
+            analyst_revisions_up=_rev_count,
+            daily_dollar_volume=_adv_pead,
+            config=config,
+        )
+        if _pead_fired:
+            setup_family = "PEAD"
+            hold_period_guide = "10-30d (drift window)"
+            try:
+                _pe_cfg = (config or {}).get("pead_sleeve") or {}
+                _pe_atr_mult = float(_pe_cfg.get("stop_atr_multiple", 1.0))
+                _atr_pe = float(tech["indicators"].get("atr", price * 0.02))
+                if price > 0 and _atr_pe > 0:
+                    _pe_stop = round(price - _pe_atr_mult * _atr_pe, 2)
+                    _pe_t1 = round(price * (1 + float(_pe_cfg.get("target_t1_pct", 5.0)) / 100), 2)
+                    _pe_t2 = round(price * (1 + float(_pe_cfg.get("target_t2_pct", 10.0)) / 100), 2)
+                    _pe_t3 = round(price * (1 + float(_pe_cfg.get("target_t3_pct", 15.0)) / 100), 2)
+                    plan["stop"] = _pe_stop
+                    plan["target1"] = _pe_t1
+                    plan["target2"] = _pe_t2
+                    plan["target3"] = _pe_t3
+                    plan["trail_activate_pct"] = float(_pe_cfg.get("trail_activate_pct", 5.0))
+                    plan["trail_atr_mult"] = float(_pe_cfg.get("trail_atr_multiple", 0.5))
+                    plan["max_hold_days"] = int(_pe_cfg.get("max_hold_days", 30))
+                    plan["min_hold_days"] = int(_pe_cfg.get("min_hold_days", 5))
+                    plan["_pead_override"] = True
+                    plan["catalyst_exit"] = "Below post-report gap level = thesis broken"
+                    _pe_risk = price - _pe_stop
+                    if _pe_risk > 0:
+                        plan["rr_ratio"] = round((_pe_t1 - price) / _pe_risk, 2)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # MEAN-REVERSION sleeve detection (2026-05-14, docs/strategy_mean_reversion.md).
+    # Fires in choppy regime when RSI<30 + price>EMA200 + recent low.
+    # Mechanism-orthogonal to Pullback to Value — both can fire in choppy
+    # but target different ticker subsets (pullback=to support, mr=oversold spike).
+    _meanrev_audit = None
+    try:
+        _earn_for_mr = (info.get("earnings") or {}).get("days_to_earnings") if info else None
+        if _earn_for_mr is None:
+            _earn_for_mr = info.get("earn_days") if info else None
+        _adv_for_mr = info.get("daily_dollar_volume") if info else None
+        _mr_fired, _meanrev_audit = _detect_mean_reversion(
+            indicators=tech["indicators"],
+            regime4=regime4,
+            score=normalized,
+            earn_days=_earn_for_mr,
+            price=price,
+            daily_dollar_volume=_adv_for_mr,
+            df=df,
+            config=config,
+        )
+        if _mr_fired:
+            setup_family = "Mean Reversion"
+            hold_period_guide = "3-5d (bounce, not trend follow)"
+            try:
+                _mr_cfg = (config or {}).get("mean_reversion_sleeve") or {}
+                _mr_atr_mult = float(_mr_cfg.get("stop_atr_multiple", 1.0))
+                _atr_mr = float(tech["indicators"].get("atr", price * 0.02))
+                if price > 0 and _atr_mr > 0:
+                    _mr_stop = round(price - _mr_atr_mult * _atr_mr, 2)
+                    _mr_t1 = round(price * (1 + float(_mr_cfg.get("target_t1_pct", 3.0)) / 100), 2)
+                    _mr_t2 = round(price * (1 + float(_mr_cfg.get("target_t2_pct", 5.0)) / 100), 2)
+                    plan["stop"] = _mr_stop
+                    plan["target1"] = _mr_t1
+                    plan["target2"] = _mr_t2
+                    plan["target3"] = None  # bounces don't run
+                    plan["trail_activate_pct"] = float(_mr_cfg.get("trail_activate_pct", 1.5))
+                    plan["trail_atr_mult"] = float(_mr_cfg.get("trail_atr_multiple", 0.5))
+                    plan["max_hold_days"] = int(_mr_cfg.get("max_hold_days", 5))
+                    plan["min_hold_days"] = int(_mr_cfg.get("min_hold_days", 1))
+                    plan["_mean_reversion_override"] = True
+                    plan["time_stop_note"] = "Hard time-stop at max_hold_days — bounce setups fail fast"
+                    _mr_risk = price - _mr_stop
+                    if _mr_risk > 0:
+                        plan["rr_ratio"] = round((_mr_t1 - price) / _mr_risk, 2)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     # DEFENSIVE-ROTATION sleeve detection (2026-05-14, docs/strategy_defensive_rotation.md).
     # Fires AFTER momentum check so that any conflict prefers momentum (active alpha)
     # over defensive (passive flow). In practice these are disjoint regimes
@@ -9830,6 +10120,13 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             # DEFENSIVE-ROTATION BYPASS (2026-05-14): sleeve uses curated
             # whitelist + regime-driven mechanism — raw setup_type kills
             # (e.g. "EMA21 Pullback") are irrelevant.
+            _setup_mult = 1.0
+        elif setup_family == "Mean Reversion":
+            # MEAN-REVERSION BYPASS (2026-05-14): RSI<30 trigger IS the mechanism;
+            # raw setup_type kills don't apply.
+            _setup_mult = 1.0
+        elif setup_family == "PEAD":
+            # PEAD BYPASS (2026-05-14): catalyst dominates raw technical kills.
             _setup_mult = 1.0
         else:
             _setup_mult = float(_setup_mults.get(_setup_for_mult, 1.0))
@@ -10279,6 +10576,25 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             # comparable to other sleeves (0.20 cap × 5 = 1.0, 0.50 cap × 5 = 2.5)
         except Exception:
             pass
+    elif setup_family == "Mean Reversion":
+        # MEAN-REVERSION SIZE: half-Kelly × 25% regime cap (moderate-confidence bounce)
+        try:
+            _mr_cfg = (config or {}).get("mean_reversion_sleeve") or {}
+            _mr_size_mult = float(_mr_cfg.get("size_mult", 0.5))
+            _sizing_multiplier = _sizing_multiplier * _mr_size_mult
+        except Exception:
+            pass
+    elif setup_family == "PEAD":
+        # PEAD SIZE: full Kelly × regime cap. Highest sizing in the roster — strongest
+        # academic edge of any sleeve.
+        try:
+            _pe_cfg = (config or {}).get("pead_sleeve") or {}
+            _pe_size_mult = float(_pe_cfg.get("size_mult", 1.0))
+            _regime_caps = _pe_cfg.get("size_cap_by_regime") or {}
+            _regime_cap_mult = float(_regime_caps.get(regime4, 0.50))
+            _sizing_multiplier = _sizing_multiplier * _pe_size_mult * _regime_cap_mult
+        except Exception:
+            pass
 
     result = {
         "ticker": ticker,
@@ -10316,6 +10632,8 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         "hold_period_guide":  hold_period_guide,
         "momentum_audit":     _momentum_audit if '_momentum_audit' in dir() else None,
         "defrot_audit":       _defrot_audit if '_defrot_audit' in dir() else None,
+        "meanrev_audit":      _meanrev_audit if '_meanrev_audit' in dir() else None,
+        "pead_audit":         _pead_audit if '_pead_audit' in dir() else None,
         "regime4":            regime4,
         "conviction":         conviction,
         "trade_thesis":   trade_thesis,

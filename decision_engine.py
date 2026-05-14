@@ -504,12 +504,20 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     # Continuation family, EXTENDED/MISSED is the EXPECTED entry — bypass.
     _is_momentum = (t.get("setup_family") == "Momentum Continuation")
     _is_defensive_eq = (t.get("setup_family") == "Defensive Rotation")
+    _is_meanrev_eq = (t.get("setup_family") == "Mean Reversion")
+    _is_pead_eq = (t.get("setup_family") == "PEAD")
     if _is_momentum and _eq_bad:
         passed = True
         reason = f"entry_quality={eq} allowed for Momentum Continuation sleeve (bypass)"
     elif _is_defensive_eq and _eq_bad:
         passed = True
         reason = f"entry_quality={eq} allowed for Defensive Rotation sleeve (sector flow, not pullback) (bypass)"
+    elif _is_meanrev_eq and _eq_bad:
+        passed = True
+        reason = f"entry_quality={eq} allowed for Mean Reversion sleeve (EXTENDED-down IS the trigger) (bypass)"
+    elif _is_pead_eq and _eq_bad:
+        passed = True
+        reason = f"entry_quality={eq} allowed for PEAD sleeve (gap-up entry IS the trigger) (bypass)"
     elif _eq_relaxed_for_regime:
         passed = True
         reason = f"entry_quality={eq} allowed in {_regime_lower} (relax per regime_sharpe_decomp 2026-05-13)"
@@ -794,7 +802,8 @@ def compute_final_verdict(t: dict, regime: str | None = None,
     # stops adding to losing exposure. Vinod-style risk discipline.
     _regime_lower = (regime or "").lower()
     _is_defensive = (t.get("setup_family") == "Defensive Rotation")
-    if _regime_lower in ("panic", "risk_off_trending") and not _is_defensive:
+    _is_pead = (t.get("setup_family") == "PEAD")
+    if _regime_lower in ("panic", "risk_off_trending") and not (_is_defensive or _is_pead):
         return {
             "verdict": "WATCH",
             "reason": f"regime gate: no new longs in {regime} (bull-only strategy)",
