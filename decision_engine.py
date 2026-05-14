@@ -503,9 +503,13 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     # MOMENTUM-SLEEVE BYPASS (2026-05-13): when ticker classified as Momentum
     # Continuation family, EXTENDED/MISSED is the EXPECTED entry — bypass.
     _is_momentum = (t.get("setup_family") == "Momentum Continuation")
+    _is_defensive_eq = (t.get("setup_family") == "Defensive Rotation")
     if _is_momentum and _eq_bad:
         passed = True
         reason = f"entry_quality={eq} allowed for Momentum Continuation sleeve (bypass)"
+    elif _is_defensive_eq and _eq_bad:
+        passed = True
+        reason = f"entry_quality={eq} allowed for Defensive Rotation sleeve (sector flow, not pullback) (bypass)"
     elif _eq_relaxed_for_regime:
         passed = True
         reason = f"entry_quality={eq} allowed in {_regime_lower} (relax per regime_sharpe_decomp 2026-05-13)"
@@ -619,15 +623,19 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
         _score = t.get("score") or 0
         _cat_tier = t.get("catalyst_tier")
         _is_mom_family = (t.get("setup_family") == "Momentum Continuation")
+        _is_def_family = (t.get("setup_family") == "Defensive Rotation")
         # Bypass conditions are gated by a score floor — pure cat_tier=1
         # without a composite floor would let noise tickers (score=3 with
         # a PEAD tag) slip through. Score 60 = WATCH-eligible composite floor.
         # MOMENTUM-SLEEVE BYPASS (2026-05-13): momentum-classified tickers
         # bypass fund_adequacy entirely — momentum doesn't depend on quality.
-        _bypass = _is_mom_family or (_score >= 75) or (_cat_tier == 1 and _score >= 60)
+        # DEFENSIVE-ROTATION BYPASS (2026-05-14): defensive ETFs don't have
+        # classical fundamentals; large-cap defensives are quality by definition.
+        _bypass = _is_mom_family or _is_def_family or (_score >= 75) or (_cat_tier == 1 and _score >= 60)
         if ratio < DEFAULT_FUND_ADEQUACY and _bypass:
             passed = True
             _bypass_reason = ("Momentum Continuation sleeve" if _is_mom_family
+                              else "Defensive Rotation sleeve" if _is_def_family
                               else f"score={_score:.0f}, cat_tier={_cat_tier}")
             reason = (f"fundamentals {fs}/{fm} = {ratio*100:.0f}% < {DEFAULT_FUND_ADEQUACY*100:.0f}% — "
                       f"bypassed ({_bypass_reason})")
@@ -785,7 +793,8 @@ def compute_final_verdict(t: dict, regime: str | None = None,
     # in those regimes — leaves existing positions to their exit rules but
     # stops adding to losing exposure. Vinod-style risk discipline.
     _regime_lower = (regime or "").lower()
-    if _regime_lower in ("panic", "risk_off_trending"):
+    _is_defensive = (t.get("setup_family") == "Defensive Rotation")
+    if _regime_lower in ("panic", "risk_off_trending") and not _is_defensive:
         return {
             "verdict": "WATCH",
             "reason": f"regime gate: no new longs in {regime} (bull-only strategy)",
@@ -798,6 +807,9 @@ def compute_final_verdict(t: dict, regime: str | None = None,
             }],
             "demote_to": "watch_list",
         }
+    # DEFENSIVE-ROTATION BYPASS (2026-05-14): sleeve is BUILT for these
+    # regimes — institutional flight-to-safety flow into low-beta defensives.
+    # Audit logged but gate intentionally passes.
 
     # ROLLING-SHARPE KILL (2026-05-13, Direction 2): capital preservation gate.
     # If recent N closed BUYs show rolling Sharpe < threshold, pause new BUYs.

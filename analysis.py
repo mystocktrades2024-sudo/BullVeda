@@ -4475,6 +4475,87 @@ def _detect_momentum_continuation(
     return True, audit
 
 
+def _detect_defensive_rotation(
+    ticker: str, indicators: dict, regime4: str, regime: dict,
+    info: dict | None, price: float, atr: float,
+    config: dict | None,
+) -> tuple[bool, dict]:
+    """DEFENSIVE-ROTATION sleeve detector (2026-05-14).
+
+    Fires when ALL of:
+      - ticker is in curated defensive universe (Tier-1 ETFs + Tier-2 names)
+      - regime is risk_off_trending OR panic OR (risk_on_choppy AND SPY < 50EMA)
+      - SPY trading below its 50EMA (institutional flight-to-safety active)
+      - ticker outperforming SPY over 21d
+      - beta < 1.0 (informational)
+      - ATR/price < 4% (defensive shouldn't be choppy at entry)
+
+    Designed in docs/strategy_defensive_rotation.md. Addresses the bear-
+    regime gap in Choice C (risk_off / panic = currently cash-only).
+    """
+    cfg = (config or {}).get("defensive_rotation_sleeve") or {}
+    audit = {"enabled": False, "fired": False, "checks": {}}
+    if not cfg.get("_enabled", False):
+        return False, audit
+    audit["enabled"] = True
+    checks = audit["checks"]
+
+    # Universe whitelist — sleeve is sector-based, not stock-picking
+    tier1 = set(cfg.get("universe_tier1_etfs", []))
+    tier2 = set(cfg.get("universe_tier2_names", []))
+    whitelist = tier1 | tier2
+    if ticker not in whitelist:
+        checks["universe"] = f"{ticker} not in defensive whitelist (Tier-1 ETFs + Tier-2 large-caps)"
+        return False, audit
+    tier_label = "Tier-1 ETF" if ticker in tier1 else "Tier-2 large-cap"
+    checks["universe"] = f"{ticker} in defensive whitelist ({tier_label}) ✓"
+
+    # Regime filter — must be in regime where defensive rotation is institutionally active
+    regimes_active = set(cfg.get("regimes_active", ["risk_off_trending", "panic"]))
+    regime4_l = (regime4 or "").lower()
+    if regime4_l not in regimes_active:
+        checks["regime"] = f"{regime4_l} not in {sorted(regimes_active)}"
+        return False, audit
+    checks["regime"] = f"{regime4_l} in {sorted(regimes_active)} ✓"
+
+    # SPY < 50EMA — the institutional flight-to-safety trigger
+    require_spy_break = cfg.get("require_spy_below_50ema", True)
+    spy_above_50ema = bool(regime.get("above_50ema") if regime else True)
+    if require_spy_break and spy_above_50ema:
+        checks["spy_50ema"] = "SPY > 50EMA — defensive flow not active yet"
+        return False, audit
+    checks["spy_50ema"] = "SPY < 50EMA — defensive flow active ✓"
+
+    # RS vs SPY (defensive must be outperforming — don't fight the trend)
+    rs_21d = (indicators.get("rs_vs_spy_21d") or indicators.get("rs_vs_spy_1m")
+              or indicators.get("rs_vs_spy") or 0)
+    min_rs = float(cfg.get("min_rs_outperform_pct", 0.0))
+    if rs_21d < min_rs:
+        checks["rs_vs_spy"] = f"{rs_21d:.2f}% < {min_rs:.1f}% — defensive underperforming SPY"
+        return False, audit
+    checks["rs_vs_spy"] = f"{rs_21d:.2f}% ≥ {min_rs:.1f}% ✓"
+
+    # Beta (informational, not gating unless config sets max_beta strict)
+    beta = (info or {}).get("beta") if info else None
+    max_beta = float(cfg.get("max_beta", 1.0))
+    if beta is not None and beta > max_beta:
+        checks["beta"] = f"beta {beta:.2f} > {max_beta:.2f} — not defensive enough"
+        return False, audit
+    checks["beta"] = f"beta {beta if beta is not None else 'N/A'} ✓"
+
+    # Volatility — defensive shouldn't be whippy at entry
+    max_atr_pct = float(cfg.get("max_atr_pct_of_price", 4.0))
+    if price > 0 and atr > 0:
+        atr_pct = (atr / price) * 100
+        if atr_pct > max_atr_pct:
+            checks["atr_vol"] = f"ATR/price {atr_pct:.2f}% > {max_atr_pct:.1f}% — too volatile"
+            return False, audit
+        checks["atr_vol"] = f"ATR/price {atr_pct:.2f}% ≤ {max_atr_pct:.1f}% ✓"
+
+    audit["fired"] = True
+    return True, audit
+
+
 def classify_setup_family(setup_type: str, catalyst_tags: list, indicators: dict) -> tuple[str, str]:
     """
     Classify setup into one of 4 families with hold period guidance.
@@ -9497,6 +9578,52 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     except Exception:
         pass
 
+    # DEFENSIVE-ROTATION sleeve detection (2026-05-14, docs/strategy_defensive_rotation.md).
+    # Fires AFTER momentum check so that any conflict prefers momentum (active alpha)
+    # over defensive (passive flow). In practice these are disjoint regimes
+    # (momentum=trending, defensive=risk_off/panic) — collision impossible.
+    _defrot_audit = None
+    try:
+        _atr_for_def = float(tech["indicators"].get("atr", price * 0.02)) if tech.get("indicators") else 0.0
+        _def_fired, _defrot_audit = _detect_defensive_rotation(
+            ticker=ticker,
+            indicators=tech["indicators"],
+            regime4=regime4,
+            regime=regime,
+            info=info,
+            price=price,
+            atr=_atr_for_def,
+            config=config,
+        )
+        if _def_fired:
+            setup_family = "Defensive Rotation"
+            hold_period_guide = "10-30d (sector rotation)"
+            try:
+                _def_cfg = (config or {}).get("defensive_rotation_sleeve") or {}
+                _def_atr_mult = float(_def_cfg.get("stop_atr_multiple", 1.0))
+                if price > 0 and _atr_for_def > 0:
+                    _def_stop = round(price - _def_atr_mult * _atr_for_def, 2)
+                    _def_t1 = round(price * (1 + float(_def_cfg.get("target_t1_pct", 3.0)) / 100), 2)
+                    _def_t2 = round(price * (1 + float(_def_cfg.get("target_t2_pct", 6.0)) / 100), 2)
+                    _def_t3 = round(price * (1 + float(_def_cfg.get("target_t3_pct", 10.0)) / 100), 2)
+                    plan["stop"] = _def_stop
+                    plan["target1"] = _def_t1
+                    plan["target2"] = _def_t2
+                    plan["target3"] = _def_t3
+                    plan["trail_activate_pct"] = float(_def_cfg.get("trail_activate_pct", 1.5))
+                    plan["trail_atr_mult"] = float(_def_cfg.get("trail_atr_multiple", 0.5))
+                    plan["max_hold_days"] = int(_def_cfg.get("max_hold_days", 30))
+                    plan["min_hold_days"] = int(_def_cfg.get("min_hold_days", 10))
+                    plan["_defensive_override"] = True
+                    plan["regime_exit_trigger"] = "SPY reclaims 50EMA"
+                    _def_risk = price - _def_stop
+                    if _def_risk > 0:
+                        plan["rr_ratio"] = round((_def_t1 - price) / _def_risk, 2)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     # Conviction tier assignment (includes win-rate sizing feedback for tradeable tiers)
     conviction = assign_conviction_tier(
         score=normalized,
@@ -9698,6 +9825,11 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         # Momentum Continuation, the raw setup_type kill (e.g., "52wk Breakout")
         # doesn't apply — momentum is a different mechanism.
         if setup_family == "Momentum Continuation":
+            _setup_mult = 1.0
+        elif setup_family == "Defensive Rotation":
+            # DEFENSIVE-ROTATION BYPASS (2026-05-14): sleeve uses curated
+            # whitelist + regime-driven mechanism — raw setup_type kills
+            # (e.g. "EMA21 Pullback") are irrelevant.
             _setup_mult = 1.0
         else:
             _setup_mult = float(_setup_mults.get(_setup_for_mult, 1.0))
@@ -10133,6 +10265,20 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             _sizing_multiplier = _sizing_multiplier * _mom_size_mult
         except Exception:
             pass
+    elif setup_family == "Defensive Rotation":
+        # DEFENSIVE-ROTATION SIZE: regime-aware cap (panic > risk_off > choppy)
+        # × base sleeve size_mult. Different sizing logic from momentum.
+        try:
+            _def_cfg = (config or {}).get("defensive_rotation_sleeve") or {}
+            _def_size_mult = float(_def_cfg.get("size_mult", 0.5))
+            # Regime-aware cap multiplier
+            _regime_caps = _def_cfg.get("size_cap_by_regime") or {}
+            _regime_cap_mult = float(_regime_caps.get(regime4, 0.20))  # default 20% if regime unknown
+            _sizing_multiplier = _sizing_multiplier * _def_size_mult * _regime_cap_mult * 5
+            # × 5 normalizes the 0.20-0.50 fraction back to a multiplier scale
+            # comparable to other sleeves (0.20 cap × 5 = 1.0, 0.50 cap × 5 = 2.5)
+        except Exception:
+            pass
 
     result = {
         "ticker": ticker,
@@ -10169,6 +10315,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         "setup_family":       setup_family,
         "hold_period_guide":  hold_period_guide,
         "momentum_audit":     _momentum_audit if '_momentum_audit' in dir() else None,
+        "defrot_audit":       _defrot_audit if '_defrot_audit' in dir() else None,
         "regime4":            regime4,
         "conviction":         conviction,
         "trade_thesis":   trade_thesis,
