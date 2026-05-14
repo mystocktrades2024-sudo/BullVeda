@@ -43,17 +43,25 @@ def _load_config() -> dict:
 
 
 def _check_launchd_agents() -> dict:
-    """Check which launchd agents are loaded + their last exit codes."""
+    """Check which launchd agents are loaded + their last exit codes + last-run time.
+
+    Tries to read the stdout log mtime to determine when the agent last ran,
+    so a stale `exit=78` from days ago doesn't look like a today-failure.
+    """
+    import os, re
+    from datetime import datetime as _dt
     out: dict = {}
-    agents = [
-        "com.swingtrade.morning-briefing",
-        "com.swingtrade.weekly-diagnostics",
-        "com.swingtrade.tunnel-healthcheck",
-        "com.swingtrade.server",
-        "com.swingtrade.ticker-snapshots",
-        "com.swingtrade.enrich-nightly",
-        "com.swingtrade.prewarm",
-    ]
+    # Map agent name → expected log paths (from the plists)
+    log_paths = {
+        "com.swingtrade.morning-briefing": "/tmp/swingtrade-morning-briefing.log",
+        "com.swingtrade.weekly-diagnostics": "/tmp/weekly-diagnostics.log",
+        "com.swingtrade.tunnel-healthcheck": "/tmp/tunnel-healthcheck.log",
+        "com.swingtrade.server": "/tmp/swingtrade-server.stdout.log",
+        "com.swingtrade.ticker-snapshots": "/tmp/swingtrade-ticker-snapshots.log",
+        "com.swingtrade.enrich-nightly": "/tmp/swingtrade-enrich-nightly.log",
+        "com.swingtrade.prewarm": "/tmp/swingtrade-prewarm.log",
+    }
+    agents = list(log_paths.keys())
     try:
         proc = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=10)
         loaded = proc.stdout
@@ -61,18 +69,33 @@ def _check_launchd_agents() -> dict:
             if ag not in loaded:
                 out[ag] = {"loaded": False}
                 continue
-            # parse line "PID Status Label"
             for line in loaded.split("\n"):
                 if ag in line:
                     parts = line.split()
                     if len(parts) >= 2:
                         pid = parts[0]
                         status = parts[1]
-                        out[ag] = {
+                        info = {
                             "loaded": True,
                             "pid": pid if pid != "-" else None,
                             "last_exit_status": int(status) if status.lstrip("-").isdigit() else status,
                         }
+                        # Augment with log mtime → "ran X days ago"
+                        lp = log_paths.get(ag)
+                        if lp and os.path.exists(lp):
+                            try:
+                                mtime = os.path.getmtime(lp)
+                                age_h = (datetime.now().timestamp() - mtime) / 3600
+                                info["log_mtime"] = _dt.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+                                if age_h < 24:
+                                    info["last_run_age"] = f"{age_h:.0f}h ago"
+                                elif age_h < 168:
+                                    info["last_run_age"] = f"{age_h/24:.0f}d ago"
+                                else:
+                                    info["last_run_age"] = f"{age_h/168:.0f}w ago"
+                            except Exception:
+                                pass
+                        out[ag] = info
                     break
     except Exception as e:
         out["_error"] = str(e)
@@ -216,7 +239,8 @@ def _format_slack(report: dict) -> tuple[str, list]:
             ec = info.get("last_exit_status", 0)
             emo = "🟢" if ec == 0 else "🟡" if isinstance(ec, int) and ec != 0 else "🔴"
             short = ag.replace("com.swingtrade.", "")
-            agents_text_lines.append(f"{emo} `{short}` (last_exit={ec})")
+            age = info.get("last_run_age", "never run")
+            agents_text_lines.append(f"{emo} `{short}` exit={ec} · ran {age}")
         else:
             short = ag.replace("com.swingtrade.", "")
             agents_text_lines.append(f"⚪ `{short}` not loaded")
@@ -315,9 +339,10 @@ def main():
             if info.get("loaded"):
                 ec = info.get("last_exit_status", 0)
                 emo = "🟢" if ec == 0 else "🟡"
-                print(f"  {emo} {short:30s} last_exit={ec}")
+                age = info.get("last_run_age", "never run")
+                print(f"  {emo} {short:22s} exit={ec:<3} ran {age}")
             else:
-                print(f"  ⚪ {short:30s} not loaded")
+                print(f"  ⚪ {short:22s} not loaded")
         if report["recent_errors"]:
             print()
             print("⚠️ RECENT ERRORS (last 5 from current day's scan)")
