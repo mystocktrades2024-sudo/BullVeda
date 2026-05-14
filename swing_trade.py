@@ -2462,7 +2462,8 @@ def run_daily_scan(force_fresh: bool = False):
     _zone_block_reason = None
     try:
         import macro_calendar as _mc_check
-        _mb_active, _mb_reason = _mc_check.is_macro_blackout()
+        _ma_zone = bool((cfg.get("gates") or {}).get("macro_blackout_morning_after", False))
+        _mb_active, _mb_reason = _mc_check.is_macro_blackout(morning_after=_ma_zone)
         if _mb_active:
             _zone_block_reason = f"macro blackout: {_mb_reason}"
     except Exception:
@@ -3491,14 +3492,18 @@ def run_daily_scan(force_fresh: bool = False):
         bundle["system_status"]["circuit_breaker"] = _cb()
     except Exception:
         bundle["system_status"]["circuit_breaker"] = {"active": False, "level": "normal"}
-    # Macro calendar
+    # Macro calendar — respect config flag macro_blackout_morning_after (default False).
+    # Previously hardcoded morning_after=True which silently blocked all BUYs the day
+    # after every CPI/FOMC/NFP/PCE print (config flag was being ignored). 2026-05-14 fix.
     try:
         import macro_calendar as _mc
-        _macro_blocked, _macro_reason = _mc.is_macro_blackout()
+        _morning_after = bool((cfg.get("gates") or {}).get("macro_blackout_morning_after", False))
+        _macro_blocked, _macro_reason = _mc.is_macro_blackout(morning_after=_morning_after)
         bundle["system_status"]["macro_calendar"] = {
             "blackout_today": _macro_blocked,
             "blackout_reason": _macro_reason,
             "next_event": _mc.next_macro_event(),
+            "_morning_after_enabled": _morning_after,
         }
     except Exception:
         bundle["system_status"]["macro_calendar"] = {"blackout_today": False}
