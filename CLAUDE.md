@@ -90,8 +90,10 @@ discipline they don't always have.
 
 11. **Edge erosion.** Alpha decays. What worked 6 months ago may be priced-in
     now. Continuous re-validation is mandatory. Wilson CI must be re-computed
-    monthly. Drift detection (`model_drift_alert.py` + `infra/LaunchAgents/com.swingtrade.driftalert.plist` + `scripts/sharpe_setup_trend.py` for per-setup edge-erosion radar)
-    is infrastructure, not optional.
+    monthly. Drift detection is infrastructure, not optional:
+    `model_drift_alert.py` (drift alerts), `scripts/sharpe_setup_trend.py`
+    (per-setup edge-erosion radar), `scripts/weekly_diagnostics.sh`
+    (auto-runs Sunday 5pm PT via `infra/launchd/com.swingtrade.weekly-diagnostics.plist`).
 
 12. **Crowded trade detection.** When every retail screen shows the same setup,
     it stops working. If a setup hits StockTwits + WSB + mainstream news flow,
@@ -116,8 +118,11 @@ discipline they don't always have.
 
 16. **Performance attribution by sub-strategy.** Aggregate metrics are
     meaningless. Per-(setup × regime × score-band × entry-quality × catalyst)
-    breakdown is the only honest decomposition. The A5 catalyst-conditional
-    analysis (`decompose_catalyst_trades.py`) must run continuously, not once.
+    breakdown is the only honest decomposition. Live attribution via:
+    `scripts/regime_sharpe_decomp.py` (per-regime × per-setup stats),
+    `scripts/sharpe_kpi.py` (per-trade contribution to portfolio Sharpe),
+    `tracker.compute_stats_by_setup` (per-setup WR feedback into multiplier).
+    These must run continuously, not once.
 
 ### Behavioral discipline
 
@@ -162,7 +167,7 @@ Function names preferred over line numbers — line numbers drift as the codebas
 | Regime gate | `decision_engine.compute_final_verdict` (A3 — no longs in risk_off/panic, bypass for Defensive + PEAD + Insider) |
 | Canonical trade plan | `canonical_trade_plan.py` |
 | Signal filter | `signal_filter.py` (whitelist gate) |
-| Drift detection | `model_drift_alert.py` + `LaunchAgents/com.swingtrade.driftalert.plist` |
+| Drift detection | `model_drift_alert.py` + `scripts/sharpe_setup_trend.py` + `scripts/weekly_diagnostics.sh` (run by `infra/launchd/com.swingtrade.weekly-diagnostics.plist`) |
 | Mechanism hypotheses | `canonical_trade_plan.py:MECHANISM_HYPOTHESES` |
 | Sleeve detectors | `analysis._detect_momentum_continuation`, `_detect_defensive_rotation`, `_detect_mean_reversion`, `_detect_pead`, `_detect_insider_cluster`, `_detect_esp_play` |
 | Sharpe metrics | `lib/sharpe_utils.py` — single source of truth |
@@ -256,7 +261,7 @@ Use `ls` / `find` to discover files. Key entry points:
 - `infra/launchd/com.swingtrade.morning-briefing.plist` — daily 6:30am PT scan + Slack post
 - `infra/launchd/com.swingtrade.weekly-diagnostics.plist` — Sunday 5pm PT regression check
 - `scripts/weekly_diagnostics.sh` — runs all diagnostic scripts in sequence
-- `infra/prototype/` — v2 dashboard (canonical; replaces legacy `html_generator.py`)
+- `infra/prototype/` — v2 dashboard (canonical; legacy `_legacy/html_generator.py` retained for reference only)
 - `config/config.json` — main config; variants in `config/variants/`
 - `data/swingtrade.db` — SQLite PRIMARY (18 tables); `data/signal_log.json` — trade journal
 - `cache/` — regenerable (gitignored); `cache/last_bundle.json` = latest scan output
@@ -359,7 +364,22 @@ When investigating WR drift, query BOTH logs and triangulate against `portfolio_
 
 ## Strategy Enhancements
 
-Shipped feature blocks (regime weight shifts, vol/drawdown sizing, sector relative ranking, Tier-1 signals, Zacks v2) live in `docs/changelog.md`. All are config-flagged in `config/config.json` — set `_enabled: false` on any block to roll back.
+All enhancement blocks below are config-flagged in `config/config.json` — set `_enabled: false` on any block to roll back. Full timeline in `docs/changelog.md`.
+
+| Block | What | Default |
+|---|---|---|
+| `regime4_thresholds` | Per-regime BUY score floors + size caps | ON |
+| `regime_hysteresis` | 2-bar confirmation before regime flip | ON |
+| `portfolio_vol_targeting` | Drawdown-band sizing multiplier | ON |
+| `sector_relative_ranking` | Cross-sectional sector RS percentile (informational) | ON |
+| `tier1_signals` | 8 informational signals (insider cluster, NR7, OBV div, vol dryup, B&R, mean rev, cup-handle, failed-breakdown-spring) | ON |
+| `tier1_signals.apply_to_score` | Whether tier1 mutates canonical score | OFF (informational only) |
+| `setup_score_multiplier` | Per-setup sizing tilt + kill list (Wilson-validated) | ON |
+| `rolling_sharpe_kill` | Halt new BUYs when rolling Sharpe < threshold | ON |
+| `portfolio.sharpe_size_tilt` | Tilt position size by 126d Sharpe | ON (activated 2026-05-14) |
+| `portfolio.sharpe_stop_tilt` | Tilt ATR-stop by 126d Sharpe | OFF (pending validation) |
+| `portfolio.sharpe_kpi_target` | Portfolio Sharpe target tracking | ON |
+| Sleeve sizing (7 sleeves) | Per-sleeve `_enabled` + size_mult + regime caps | All ON (paper-validation) |
 
 ## Environment Flags
 
@@ -480,8 +500,8 @@ bash scripts/weekly_diagnostics.sh
 - **Commits reference files as `SwingTrade/<filename>`** — git repo root is `/Volumes/MyMacDisk/Claude Skills/`.
 - **Never commit `config/gmail_token.json`, `.env`, or `cache/`** — all gitignored.
 - **Server must be restarted for `server.py` changes** (Python doesn't hot-reload without `--reload`).
-- **Dashboard hard-refresh** (Cmd+Shift+R) to pick up `html_generator.py` (legacy) or `infra/prototype/elite-detail.html` (v2) changes.
-- **v2 dashboard is canonical** as of 2026-05-01. Legacy `html_generator.py` stays for transition but new features land in v2 only.
+- **Dashboard hard-refresh** (Cmd+Shift+R) to pick up `infra/prototype/elite-detail.html` (v2) changes.
+- **v2 dashboard is canonical** as of 2026-05-01. Legacy `_legacy/html_generator.py` retained for reference; new features land in v2 only.
 - **Python 3.9 union syntax** — files using `str | None` type hints must have `from __future__ import annotations` at top, otherwise use `Optional[str]` or untyped args.
 - **Open-items registry is the source of truth** — `data/open_items.json` tracks every OPEN/IN_PROGRESS/DONE/DEFERRED/REJECTED item with what+how+status+date+commit. After shipping ANY fix that maps to a registry ID, run `python3 scripts/update_open_items.py done <ID>` BEFORE the commit. The pre-commit hook auto-rebuilds `cache/open_items_<DATE>.xlsx` and ships it in the same commit. If the fix is a brand-new item, `add` it first: `python3 scripts/update_open_items.py add NEW-ID P1 "Section" "Item" "What" "How"`. CLI: `list` / `list --open` / `done` / `status` / `add` / `xlsx`.
 - **Install git hooks on every fresh clone** — `bash scripts/install_hooks.sh` (idempotent). Hooks live at `infra/hooks/*` (tracked) and get copied to `.git/hooks/*` (local-only, never tracked by git). The two hooks are pre-commit's open-items rebuild + F11 schema-drift check. See `infra/hooks/README.md`.
