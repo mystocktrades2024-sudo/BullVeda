@@ -4477,6 +4477,85 @@ def _detect_momentum_continuation(
     return True, audit
 
 
+def _detect_insider_cluster(
+    ticker: str, indicators: dict, regime4: str, score: float,
+    price: float, insider_data: dict, daily_dollar_volume,
+    config: dict | None,
+) -> tuple[bool, dict]:
+    """INSIDER-CLUSTER sleeve detector (2026-05-14).
+
+    Promotes existing tier1_signals.insider_cluster from informational to
+    setup_family. Fires when:
+      - tier1 insider_cluster signal detected (>= 3 buys, $200K+)
+      - regime allowed
+      - composite score >= min_score
+      - price > EMA50 (insider thesis line)
+      - liquidity OK
+
+    Mechanism: information asymmetry (Bettis-Coles-Lemmon 2000).
+    Regime-independent — fires in all regimes like PEAD.
+    """
+    cfg = (config or {}).get("insider_cluster_sleeve") or {}
+    audit = {"enabled": False, "fired": False, "checks": {}}
+    if not cfg.get("_enabled", False):
+        return False, audit
+    audit["enabled"] = True
+    checks = audit["checks"]
+
+    # Regime filter
+    regimes_active = set(cfg.get("regimes_active",
+                                  ["risk_on_trending", "risk_on_choppy",
+                                   "risk_off_trending", "panic", "bull"]))
+    regime4_l = (regime4 or "").lower()
+    if regime4_l not in regimes_active:
+        checks["regime"] = f"{regime4_l} not in {sorted(regimes_active)}"
+        return False, audit
+    checks["regime"] = f"{regime4_l} ✓"
+
+    # Score floor
+    min_score = float(cfg.get("min_score", 40))
+    if (score or 0) < min_score:
+        checks["score"] = f"{score:.0f} < {min_score:.0f}"
+        return False, audit
+    checks["score"] = f"{score:.0f} ≥ {min_score:.0f} ✓"
+
+    # Insider buys check — read directly from insider_data
+    ins = insider_data or {}
+    buys = ins.get("buys") or 0
+    sells = ins.get("sells") or 0
+    min_buys = int(cfg.get("min_insider_buys", 3))
+    if buys < min_buys:
+        checks["insider_signal"] = f"only {buys} insider buys (need ≥ {min_buys})"
+        return False, audit
+    # Sells outweighing buys = bearish signal even with clustering
+    if sells > buys:
+        checks["insider_signal"] = f"{sells} sells > {buys} buys — bearish skew"
+        return False, audit
+    sentiment = ins.get("sentiment") or "unknown"
+    checks["insider_signal"] = f"{buys} buys / {sells} sells (sentiment: {sentiment}) ✓"
+    if ins.get("ceo_buy") or ins.get("cfo_buy"):
+        checks["c_suite"] = f"CEO_buy={ins.get('ceo_buy')} CFO_buy={ins.get('cfo_buy')} (boost signal)"
+
+    # EMA50 floor
+    if cfg.get("require_above_ema50", True):
+        ema50 = indicators.get("ema50") or indicators.get("sma50")
+        if not (ema50 and price and price > ema50):
+            _ema_str = f"${ema50:.2f}" if ema50 else "N/A"
+            checks["ema50"] = f"price ${price:.2f} ≤ EMA50 {_ema_str} — falling knife risk"
+            return False, audit
+        checks["ema50"] = f"price ${price:.2f} > EMA50 ${ema50:.2f} ✓"
+
+    # Liquidity
+    min_adv = float(cfg.get("min_daily_dollar_volume", 5000000))
+    if daily_dollar_volume is not None and daily_dollar_volume < min_adv:
+        checks["adv"] = f"${daily_dollar_volume/1e6:.1f}M < ${min_adv/1e6:.1f}M"
+        return False, audit
+    checks["adv"] = "OK"
+
+    audit["fired"] = True
+    return True, audit
+
+
 def _detect_pead(
     ticker: str, indicators: dict, regime4: str, score: float,
     earn_days, eps_surprise_pct, revenue_surprise_pct,
@@ -9781,6 +9860,59 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     except Exception:
         pass
 
+    # INSIDER-CLUSTER sleeve detection (2026-05-14, docs/strategy_insider_cluster.md).
+    # Fires when 3+ insider buys in 30d (no sell skew), price > EMA50.
+    # Regime-independent like PEAD — information asymmetry mechanism.
+    _insider_cluster_audit = None
+    try:
+        _ins_for_detect = insider if isinstance(insider, dict) else (
+            info.get("insider_data") if isinstance(info, dict) else {}
+        )
+        _adv_for_ins = info.get("daily_dollar_volume") if info else None
+        _ic_fired, _insider_cluster_audit = _detect_insider_cluster(
+            ticker=ticker,
+            indicators=tech["indicators"],
+            regime4=regime4,
+            score=normalized,
+            price=price,
+            insider_data=_ins_for_detect or {},
+            daily_dollar_volume=_adv_for_ins,
+            config=config,
+        )
+        if _ic_fired:
+            setup_family = "Insider Cluster"
+            hold_period_guide = "30-60d (information decay)"
+            try:
+                _ic_cfg = (config or {}).get("insider_cluster_sleeve") or {}
+                _ic_atr_mult = float(_ic_cfg.get("stop_atr_multiple", 1.0))
+                _atr_ic = float(tech["indicators"].get("atr", price * 0.02))
+                if price > 0 and _atr_ic > 0:
+                    # Stop = MAX(price - 1.0 ATR, EMA50 * 0.98) — EMA50 is thesis line
+                    _ema50 = tech["indicators"].get("ema50") or (price * 0.95)
+                    _atr_stop = round(price - _ic_atr_mult * _atr_ic, 2)
+                    _ema50_stop = round(_ema50 * 0.98, 2)
+                    _ic_stop = max(_atr_stop, _ema50_stop)
+                    _ic_t1 = round(price * (1 + float(_ic_cfg.get("target_t1_pct", 5.0)) / 100), 2)
+                    _ic_t2 = round(price * (1 + float(_ic_cfg.get("target_t2_pct", 10.0)) / 100), 2)
+                    _ic_t3 = round(price * (1 + float(_ic_cfg.get("target_t3_pct", 15.0)) / 100), 2)
+                    plan["stop"] = _ic_stop
+                    plan["target1"] = _ic_t1
+                    plan["target2"] = _ic_t2
+                    plan["target3"] = _ic_t3
+                    plan["trail_activate_pct"] = float(_ic_cfg.get("trail_activate_pct", 3.0))
+                    plan["trail_atr_mult"] = float(_ic_cfg.get("trail_atr_multiple", 0.5))
+                    plan["max_hold_days"] = int(_ic_cfg.get("max_hold_days", 60))
+                    plan["min_hold_days"] = int(_ic_cfg.get("min_hold_days", 5))
+                    plan["_insider_cluster_override"] = True
+                    plan["thesis_exit"] = "Below EMA50 = insider thesis invalidated"
+                    _ic_risk = price - _ic_stop
+                    if _ic_risk > 0:
+                        plan["rr_ratio"] = round((_ic_t1 - price) / _ic_risk, 2)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     # PEAD sleeve detection (2026-05-14, docs/strategy_pead.md).
     # Fires 1-3d post-earnings on beats with revisions. Regime-independent.
     _pead_audit = None
@@ -10149,6 +10281,9 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             _setup_mult = 1.0
         elif setup_family == "PEAD":
             # PEAD BYPASS (2026-05-14): catalyst dominates raw technical kills.
+            _setup_mult = 1.0
+        elif setup_family == "Insider Cluster":
+            # INSIDER-CLUSTER BYPASS (2026-05-14): information edge dominates.
             _setup_mult = 1.0
         else:
             _setup_mult = float(_setup_mults.get(_setup_for_mult, 1.0))
@@ -10617,6 +10752,14 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             _sizing_multiplier = _sizing_multiplier * _pe_size_mult * _regime_cap_mult
         except Exception:
             pass
+    elif setup_family == "Insider Cluster":
+        # INSIDER-CLUSTER SIZE: half-Kelly. Conservative — information value decays.
+        try:
+            _ic_cfg = (config or {}).get("insider_cluster_sleeve") or {}
+            _ic_size_mult = float(_ic_cfg.get("size_mult", 0.5))
+            _sizing_multiplier = _sizing_multiplier * _ic_size_mult
+        except Exception:
+            pass
 
     result = {
         "ticker": ticker,
@@ -10656,6 +10799,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         "defrot_audit":       _defrot_audit if '_defrot_audit' in dir() else None,
         "meanrev_audit":      _meanrev_audit if '_meanrev_audit' in dir() else None,
         "pead_audit":         _pead_audit if '_pead_audit' in dir() else None,
+        "insider_cluster_audit": _insider_cluster_audit if '_insider_cluster_audit' in dir() else None,
         "regime4":            regime4,
         "conviction":         conviction,
         "trade_thesis":   trade_thesis,
