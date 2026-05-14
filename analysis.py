@@ -9717,7 +9717,9 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     _sortino_126d_value = None
     _sharpe_consistency = None
     try:
-        _earn_for_mom = (info.get("earnings") or {}).get("days_to_earnings") if info else None
+        _earn_for_mom = (earnings or {}).get("days_to_earnings") if isinstance(earnings, dict) else None
+        if _earn_for_mom is None:
+            _earn_for_mom = (info.get("earnings") or {}).get("days_to_earnings") if info else None
         if _earn_for_mom is None:
             _earn_for_mom = info.get("earn_days") if info else None
         _adv_for_mom = info.get("daily_dollar_volume") if info else None
@@ -9781,7 +9783,9 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     # Fires 1-3d post-earnings on beats with revisions. Regime-independent.
     _pead_audit = None
     try:
-        _earn_dict = info.get("earnings") if info else None
+        # earnings is a SEPARATE parameter to analyze_ticker, not nested in info
+        # (was the bug — FOXA/CEG/ZBRA had perfect PEAD data but detector saw None)
+        _earn_dict = earnings if isinstance(earnings, dict) else (info.get("earnings") if info else None)
         _pead_earn_days = (_earn_dict or {}).get("days_to_earnings") if _earn_dict else None
         _eps_surp = (_earn_dict or {}).get("eps_surprise_pct") if _earn_dict else None
         _rev_surp = (_earn_dict or {}).get("revenue_surprise_pct") if _earn_dict else None
@@ -9839,7 +9843,9 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     # but target different ticker subsets (pullback=to support, mr=oversold spike).
     _meanrev_audit = None
     try:
-        _earn_for_mr = (info.get("earnings") or {}).get("days_to_earnings") if info else None
+        _earn_for_mr = (earnings or {}).get("days_to_earnings") if isinstance(earnings, dict) else None
+        if _earn_for_mr is None:
+            _earn_for_mr = (info.get("earnings") or {}).get("days_to_earnings") if info else None
         if _earn_for_mr is None:
             _earn_for_mr = info.get("earn_days") if info else None
         _adv_for_mr = info.get("daily_dollar_volume") if info else None
