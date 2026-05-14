@@ -533,12 +533,21 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
         failures.append("entry_quality")
 
     # 4. Decision state (state machine)
+    # PEAD bypass (2026-05-14): PEAD setups have already gapped — decision_state=MISSED
+    # is the EXPECTED state for catalyst-driven entries. The whole mechanism is buying
+    # the post-report move, not pulling back to a primary zone.
     ds = _normalize_decision_state(t.get("decision_state"))
+    _is_pead_ds = (t.get("setup_family") == "PEAD")
     passed = ds not in ("MISSED", "NO_EDGE")
+    if _is_pead_ds and not passed:
+        passed = True
+        ds_reason = f"decision_state={ds} allowed for PEAD sleeve (gap-up IS the entry) (bypass)"
+    else:
+        ds_reason = "" if passed else f"decision_state={ds}"
     gates.append({
         "name": "decision_state",
         "passed": passed,
-        "reason": "" if passed else f"decision_state={ds}",
+        "reason": ds_reason,
     })
     if not passed:
         failures.append("decision_state")
@@ -632,6 +641,7 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
         _cat_tier = t.get("catalyst_tier")
         _is_mom_family = (t.get("setup_family") == "Momentum Continuation")
         _is_def_family = (t.get("setup_family") == "Defensive Rotation")
+        _is_pead_family = (t.get("setup_family") == "PEAD")
         # Bypass conditions are gated by a score floor — pure cat_tier=1
         # without a composite floor would let noise tickers (score=3 with
         # a PEAD tag) slip through. Score 60 = WATCH-eligible composite floor.
@@ -639,11 +649,13 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
         # bypass fund_adequacy entirely — momentum doesn't depend on quality.
         # DEFENSIVE-ROTATION BYPASS (2026-05-14): defensive ETFs don't have
         # classical fundamentals; large-cap defensives are quality by definition.
-        _bypass = _is_mom_family or _is_def_family or (_score >= 75) or (_cat_tier == 1 and _score >= 60)
+        _bypass = (_is_mom_family or _is_def_family or _is_pead_family
+                   or (_score >= 75) or (_cat_tier == 1 and _score >= 60))
         if ratio < DEFAULT_FUND_ADEQUACY and _bypass:
             passed = True
             _bypass_reason = ("Momentum Continuation sleeve" if _is_mom_family
                               else "Defensive Rotation sleeve" if _is_def_family
+                              else "PEAD sleeve" if _is_pead_family
                               else f"score={_score:.0f}, cat_tier={_cat_tier}")
             reason = (f"fundamentals {fs}/{fm} = {ratio*100:.0f}% < {DEFAULT_FUND_ADEQUACY*100:.0f}% — "
                       f"bypassed ({_bypass_reason})")
