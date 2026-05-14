@@ -4381,6 +4381,90 @@ def tag_catalysts(indicators: dict, pead_data: dict,
     return tags, tier, catalyst_meta
 
 
+def _detect_momentum_continuation(
+    indicators: dict, regime4: str, score: float, earn_days, price: float,
+    daily_dollar_volume, config: dict | None,
+) -> tuple[bool, dict]:
+    """MOMENTUM-CONTINUATION sleeve detector (2026-05-13).
+
+    Fires when ALL of the configured trigger conditions are met. Returns
+    (fired, audit_dict) where audit_dict has the per-criterion pass/fail
+    so the dashboard can show why it did/didn't fire.
+
+    Designed in docs/strategy_momentum_continuation.md. Addresses the
+    PF 1.00 break-even in trending regime.
+    """
+    cfg = (config or {}).get("momentum_sleeve") or {}
+    audit = {"enabled": False, "fired": False, "checks": {}}
+    if not cfg.get("_enabled", False):
+        return False, audit
+    audit["enabled"] = True
+
+    regimes_active = set(cfg.get("regimes_active", ["risk_on_trending", "bull"]))
+    if (regime4 or "").lower() not in regimes_active:
+        audit["checks"]["regime"] = f"{regime4} not in {sorted(regimes_active)}"
+        return False, audit
+
+    checks = audit["checks"]
+    # Score floor
+    min_score = float(cfg.get("min_score", 70))
+    if (score or 0) < min_score:
+        checks["score"] = f"{score:.0f} < {min_score:.0f}"
+        return False, audit
+    checks["score"] = f"{score:.0f} ≥ {min_score:.0f} ✓"
+    # ADX
+    adx = indicators.get("adx")
+    min_adx = float(cfg.get("min_adx", 25))
+    if adx is None or adx < min_adx:
+        checks["adx"] = f"{adx} < {min_adx}" if adx is not None else "adx N/A"
+        return False, audit
+    checks["adx"] = f"{adx:.1f} ≥ {min_adx} ✓"
+    # RVOL
+    rvol = indicators.get("rvol_5d") or indicators.get("rvol_20d") or indicators.get("rvol")
+    min_rvol = float(cfg.get("min_rvol", 1.3))
+    if rvol is None or rvol < min_rvol:
+        checks["rvol"] = f"{rvol} < {min_rvol}" if rvol is not None else "rvol N/A"
+        return False, audit
+    checks["rvol"] = f"{rvol:.2f} ≥ {min_rvol} ✓"
+    # EMA stack — price > ema8 > ema21 > ema50
+    if cfg.get("require_ema_stack", True):
+        ema8 = indicators.get("ema8")
+        ema21 = indicators.get("ema21")
+        ema50 = indicators.get("ema50")
+        if not (ema8 and ema21 and ema50 and price):
+            checks["ema_stack"] = "EMA data N/A"
+            return False, audit
+        if not (price > ema8 > ema21 > ema50):
+            checks["ema_stack"] = f"price ${price:.2f} > ${ema8:.2f}(8) > ${ema21:.2f}(21) > ${ema50:.2f}(50) FAIL"
+            return False, audit
+        checks["ema_stack"] = "price > 8 > 21 > 50 ✓"
+    # 5-day return
+    perf_5d = indicators.get("perf_5d") or indicators.get("perf_week")
+    if perf_5d is not None:
+        min_5d = float(cfg.get("min_5d_return_pct", 3.0))
+        if perf_5d < min_5d:
+            checks["perf_5d"] = f"{perf_5d:.2f}% < {min_5d:.1f}%"
+            return False, audit
+        checks["perf_5d"] = f"{perf_5d:.2f}% ≥ {min_5d:.1f}% ✓"
+    else:
+        checks["perf_5d"] = "perf_5d N/A — skipped"
+    # Daily $ volume
+    min_adv = float(cfg.get("min_daily_dollar_volume", 20000000))
+    if daily_dollar_volume is not None and daily_dollar_volume < min_adv:
+        checks["adv"] = f"${daily_dollar_volume/1e6:.1f}M < ${min_adv/1e6:.1f}M"
+        return False, audit
+    checks["adv"] = "OK"
+    # Earnings buffer
+    min_earn = int(cfg.get("min_earnings_days", 7))
+    if earn_days is not None and 0 <= earn_days < min_earn:
+        checks["earnings"] = f"earn_days={earn_days} < {min_earn}"
+        return False, audit
+    checks["earnings"] = "OK"
+    # All criteria met
+    audit["fired"] = True
+    return True, audit
+
+
 def classify_setup_family(setup_type: str, catalyst_tags: list, indicators: dict) -> tuple[str, str]:
     """
     Classify setup into one of 4 families with hold period guidance.
@@ -9277,6 +9361,55 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     # Regime4 from regime dict (may not be present in older runs)
     regime4 = str(regime.get("regime4", regime_name)).lower()
 
+    # MOMENTUM-CONTINUATION sleeve detection (2026-05-13).
+    # Phase 1: paper-only — when criteria fire, override setup_family but
+    # downstream verdict logic will keep BUY OFF (the sleeve is _enabled:false).
+    # When promoted to live, the override will route through bypass logic
+    # in decision_engine (fund_adequacy + setup-mult kills bypassed).
+    _momentum_audit = None
+    try:
+        _earn_for_mom = (info.get("earnings") or {}).get("days_to_earnings") if info else None
+        if _earn_for_mom is None:
+            _earn_for_mom = info.get("earn_days") if info else None
+        _adv_for_mom = info.get("daily_dollar_volume") if info else None
+        _mom_fired, _momentum_audit = _detect_momentum_continuation(
+            indicators=tech["indicators"],
+            regime4=regime4,
+            score=normalized,
+            earn_days=_earn_for_mom,
+            price=price,
+            daily_dollar_volume=_adv_for_mom,
+            config=config,
+        )
+        if _mom_fired:
+            setup_family = "Momentum Continuation"
+            hold_period_guide = "≤5d (chase risk discount)"
+            # Override trade plan with momentum-specific stops/targets/trail
+            try:
+                _mom_cfg = (config or {}).get("momentum_sleeve") or {}
+                _mom_atr_mult = float(_mom_cfg.get("stop_atr_multiple", 0.75))
+                _atr_val = float(tech["indicators"].get("atr", price * 0.02))
+                if price > 0 and _atr_val > 0:
+                    _new_stop = round(price - _mom_atr_mult * _atr_val, 2)
+                    _new_t1 = round(price * (1 + float(_mom_cfg.get("target_t1_pct", 3.0)) / 100), 2)
+                    _new_t2 = round(price * (1 + float(_mom_cfg.get("target_t2_pct", 6.0)) / 100), 2)
+                    _new_t3 = round(price * (1 + float(_mom_cfg.get("target_t3_pct", 10.0)) / 100), 2)
+                    plan["stop"] = _new_stop
+                    plan["target1"] = _new_t1
+                    plan["target2"] = _new_t2
+                    plan["target3"] = _new_t3
+                    plan["trail_activate_pct"] = float(_mom_cfg.get("trail_activate_pct", 1.5))
+                    plan["trail_atr_mult"] = float(_mom_cfg.get("trail_atr_multiple", 0.5))
+                    plan["max_hold_days"] = int(_mom_cfg.get("max_hold_days", 5))
+                    plan["_momentum_override"] = True
+                    _risk = price - _new_stop
+                    if _risk > 0:
+                        plan["rr_ratio"] = round((_new_t1 - price) / _risk, 2)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     # Conviction tier assignment (includes win-rate sizing feedback for tradeable tiers)
     conviction = assign_conviction_tier(
         score=normalized,
@@ -9473,7 +9606,13 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         _setup_mults = (config or {}).get("setup_score_multiplier") or {}
         _validations = _setup_mults.get("_validations") or {}
         _setup_for_mult = (plan.get("setup_type") or setup_family or "").strip()
-        _setup_mult = float(_setup_mults.get(_setup_for_mult, 1.0))
+        # MOMENTUM-SLEEVE BYPASS (2026-05-13): if family was overridden to
+        # Momentum Continuation, the raw setup_type kill (e.g., "52wk Breakout")
+        # doesn't apply — momentum is a different mechanism.
+        if setup_family == "Momentum Continuation":
+            _setup_mult = 1.0
+        else:
+            _setup_mult = float(_setup_mults.get(_setup_for_mult, 1.0))
         # Demotion gate: require validation entry with n>=30 AND wr_lb<0.30
         if _setup_mult < 1.0:
             _v = _validations.get(_setup_for_mult) or {}
@@ -9897,6 +10036,15 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     # This is the ONLY channel by which the setup-weight multiplier influences
     # trading decisions now — it no longer touches the score.
     _sizing_multiplier = float(_wr_mult_used)
+    # MOMENTUM-SLEEVE SIZE DISCOUNT (2026-05-13): chase risk discount applied
+    # at the position-sizing stage. Configured via momentum_sleeve.size_mult
+    # (default 0.5 = quarter-Kelly when half-Kelly is the base).
+    if setup_family == "Momentum Continuation":
+        try:
+            _mom_size_mult = float(((config or {}).get("momentum_sleeve") or {}).get("size_mult", 0.5))
+            _sizing_multiplier = _sizing_multiplier * _mom_size_mult
+        except Exception:
+            pass
 
     result = {
         "ticker": ticker,
@@ -9927,6 +10075,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         "entry_timing":       entry_timing,
         "setup_family":       setup_family,
         "hold_period_guide":  hold_period_guide,
+        "momentum_audit":     _momentum_audit if '_momentum_audit' in dir() else None,
         "regime4":            regime4,
         "conviction":         conviction,
         "trade_thesis":   trade_thesis,

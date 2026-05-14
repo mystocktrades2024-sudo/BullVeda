@@ -500,7 +500,13 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     eq = t.get("entry_quality")
     _eq_bad = eq in ("MISSED", "EXTENDED")
     _eq_relaxed_for_regime = _eq_bad and _regime_lower in _eq_relax
-    if _eq_relaxed_for_regime:
+    # MOMENTUM-SLEEVE BYPASS (2026-05-13): when ticker classified as Momentum
+    # Continuation family, EXTENDED/MISSED is the EXPECTED entry — bypass.
+    _is_momentum = (t.get("setup_family") == "Momentum Continuation")
+    if _is_momentum and _eq_bad:
+        passed = True
+        reason = f"entry_quality={eq} allowed for Momentum Continuation sleeve (bypass)"
+    elif _eq_relaxed_for_regime:
         passed = True
         reason = f"entry_quality={eq} allowed in {_regime_lower} (relax per regime_sharpe_decomp 2026-05-13)"
     else:
@@ -612,14 +618,19 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
         #   2. catalyst_tier == 1 → PEAD/UOA/VCP/52wk-breakout — catalyst-driven
         _score = t.get("score") or 0
         _cat_tier = t.get("catalyst_tier")
+        _is_mom_family = (t.get("setup_family") == "Momentum Continuation")
         # Bypass conditions are gated by a score floor — pure cat_tier=1
         # without a composite floor would let noise tickers (score=3 with
         # a PEAD tag) slip through. Score 60 = WATCH-eligible composite floor.
-        _bypass = (_score >= 75) or (_cat_tier == 1 and _score >= 60)
+        # MOMENTUM-SLEEVE BYPASS (2026-05-13): momentum-classified tickers
+        # bypass fund_adequacy entirely — momentum doesn't depend on quality.
+        _bypass = _is_mom_family or (_score >= 75) or (_cat_tier == 1 and _score >= 60)
         if ratio < DEFAULT_FUND_ADEQUACY and _bypass:
             passed = True
+            _bypass_reason = ("Momentum Continuation sleeve" if _is_mom_family
+                              else f"score={_score:.0f}, cat_tier={_cat_tier}")
             reason = (f"fundamentals {fs}/{fm} = {ratio*100:.0f}% < {DEFAULT_FUND_ADEQUACY*100:.0f}% — "
-                      f"bypassed (score={_score:.0f}, cat_tier={_cat_tier})")
+                      f"bypassed ({_bypass_reason})")
         else:
             passed = ratio >= DEFAULT_FUND_ADEQUACY
             reason = "" if passed else f"fundamentals {fs}/{fm} = {ratio*100:.0f}% < {DEFAULT_FUND_ADEQUACY*100:.0f}% adequacy"
