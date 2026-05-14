@@ -69,10 +69,11 @@ def main():
     ap.add_argument("--days", type=int, default=60, help="Lookback window (default 60d)")
     ap.add_argument("--min-eps", type=float, default=5.0, help="Min EPS surprise %")
     ap.add_argument("--min-gap", type=float, default=3.0, help="Min post-report gap %")
+    ap.add_argument("--max-gap", type=float, default=999.0, help="Max post-report gap %")
     args = ap.parse_args()
 
     print(f"PEAD historical replay — last {args.days} days")
-    print(f"Trigger: EPS surprise ≥ {args.min_eps}% AND post-report gap ≥ {args.min_gap}%")
+    print(f"Trigger: EPS surprise ≥ {args.min_eps}% AND gap in [{args.min_gap}%, {args.max_gap}%]")
     print()
 
     import eodhd_client as e
@@ -146,7 +147,7 @@ def main():
             gap_pct = ((next_open - report_close) / report_close) * 100
         except Exception:
             continue
-        if gap_pct < args.min_gap:
+        if gap_pct < args.min_gap or gap_pct > args.max_gap:
             skipped_no_gap += 1
             continue
         # Compute forward returns at multiple horizons

@@ -118,10 +118,10 @@ def _print_stats(s: dict):
           f"avg={s['avg']:>+6.2f}% PF={s['pf']:>5.2f} (haircut {s['haircut_pf']:>5.2f}){flag}{pass_flag}")
 
 
-def backtest_mean_reversion(tickers: list[str], days: int) -> dict:
-    """Mean Reversion: RSI<30 + price>EMA200 + recent low w/in 5d."""
+def backtest_mean_reversion(tickers: list[str], days: int, min_rvol: float = 0) -> dict:
+    """Mean Reversion: RSI<30 + price>EMA200 (+ optional RVOL filter)."""
     print(f"\n=== MEAN REVERSION ({days}d lookback) ===")
-    print("Trigger: RSI(14)<30 AND price>EMA200")
+    print(f"Trigger: RSI(14)<30 AND price>EMA200{' AND RVOL>=%.1f' % min_rvol if min_rvol > 0 else ''}")
     from data_archive import load_ticker
     today = date.today()
     cutoff = today - timedelta(days=days)
@@ -132,31 +132,37 @@ def backtest_mean_reversion(tickers: list[str], days: int) -> dict:
             if df is None or len(df) < 250:
                 continue
             closes = df["Close"].astype(float).tolist() if "Close" in df.columns else df["close"].astype(float).tolist()
-            # Iterate every bar in the lookback window
-            for i in range(200, len(df) - 6):  # need 200 bars history + 5d forward
+            volumes = df["Volume"].astype(float).tolist() if "Volume" in df.columns else df["volume"].astype(float).tolist()
+            for i in range(200, len(df) - 6):
                 bar_date = df.index[i].date() if hasattr(df.index[i], "date") else None
                 if bar_date is None or bar_date < cutoff:
                     continue
-                # RSI on closes[i-13:i+1]
                 rsi = _rsi(closes[max(0, i - 14):i + 1])
                 if rsi is None or rsi >= 30:
                     continue
-                # EMA200 floor
                 ema200 = _ema(closes[max(0, i - 199):i + 1], 200)
                 if ema200 is None or closes[i] <= ema200:
                     continue
-                # 5d forward return
+                # RVOL filter (capitulation volume confirmation)
+                if min_rvol > 0 and i >= 20:
+                    avg_vol_20d = sum(volumes[i - 20:i]) / 20
+                    if avg_vol_20d <= 0:
+                        continue
+                    rvol = volumes[i] / avg_vol_20d
+                    if rvol < min_rvol:
+                        continue
+                else:
+                    rvol = None
                 ret = _forward_return_pct(df, i, 5)
                 if ret is None:
                     continue
                 all_trades.append({"ticker": sym, "date": bar_date.isoformat(),
-                                    "rsi": round(rsi, 1), "ret_5d": ret})
+                                    "rsi": round(rsi, 1), "rvol": round(rvol, 2) if rvol else None, "ret_5d": ret})
         except Exception:
             continue
     rets = [t["ret_5d"] for t in all_trades]
     s = _stats_block(rets, "Mean Reversion (aggregate)")
     _print_stats(s)
-    # Stratify by RSI band
     print("  Stratified by RSI band (5d return):")
     for label, lo, hi in [("RSI 20-30", 20, 30), ("RSI 15-20", 15, 20), ("RSI <15", 0, 15)]:
         bucket = [t["ret_5d"] for t in all_trades if lo <= t["rsi"] < hi]
@@ -211,10 +217,23 @@ def backtest_momentum_continuation(tickers: list[str], days: int) -> dict:
     return {"strategy": "Momentum Continuation", "aggregate": s, "trades": all_trades}
 
 
-def backtest_defensive_rotation(days: int) -> dict:
-    """Defensive: long XLU/XLP/XLV/IEF/TLT/GLD when SPY < 50EMA."""
+def backtest_defensive_rotation(days: int, require_vix_above: float = 0,
+                                 min_consecutive_below_days: int = 1,
+                                 universe: list = None) -> dict:
+    """Defensive: long defensive ETFs when SPY in true risk-off.
+
+    require_vix_above: 0 = any SPY < 50EMA day
+                        22 = require VIX > 22 (true risk-off, not transient dip)
+    min_consecutive_below_days: 1 = any day, 3 = sustained risk-off only
+    universe: which defensive ETFs to test (default all 6)
+    """
+    if universe is None:
+        universe = ["XLU", "XLP", "XLV", "IEF", "TLT", "GLD"]
     print(f"\n=== DEFENSIVE ROTATION ({days}d lookback) ===")
-    print("Trigger: SPY < 50EMA (today) — defensive ETF flow window")
+    print(f"Trigger: SPY < 50EMA"
+          + (f" AND VIX > {require_vix_above}" if require_vix_above > 0 else "")
+          + (f" AND ≥{min_consecutive_below_days}d consecutive" if min_consecutive_below_days > 1 else "")
+          + f" — universe: {universe}")
     from data_archive import load_ticker
     today = date.today()
     cutoff = today - timedelta(days=days)
@@ -234,15 +253,40 @@ def backtest_defensive_rotation(days: int) -> dict:
             ema50 = _ema(spy_closes[max(0, i - 49):i + 1], 50)
             spy_below_50.append(closes_below := (spy_closes[i] < ema50) if ema50 else False)
 
-    spy_dates_below = [d for d, b in zip(spy_dates, spy_below_50) if b and d and d >= cutoff]
-    print(f"  SPY below 50EMA on {len(spy_dates_below)} days in lookback window")
+    # Add consecutive-day filter
+    if min_consecutive_below_days > 1:
+        consec_below = [False] * len(spy_below_50)
+        for i in range(min_consecutive_below_days - 1, len(spy_below_50)):
+            consec_below[i] = all(spy_below_50[i - j] for j in range(min_consecutive_below_days))
+        spy_below_50 = consec_below
+
+    # VIX filter
+    vix_above_required = {}
+    if require_vix_above > 0:
+        vix = load_ticker("VIX")
+        if vix is None or len(vix) == 0:
+            vix = load_ticker("^VIX")
+        if vix is not None and len(vix) > 0:
+            vix_closes = vix["Close"].astype(float).tolist() if "Close" in vix.columns else vix["close"].astype(float).tolist()
+            vix_dates = [d.date() if hasattr(d, "date") else None for d in vix.index]
+            vix_above_required = {d: c > require_vix_above for d, c in zip(vix_dates, vix_closes) if d}
+
+    spy_dates_below = []
+    for d, b in zip(spy_dates, spy_below_50):
+        if not (b and d and d >= cutoff):
+            continue
+        if require_vix_above > 0 and not vix_above_required.get(d, False):
+            continue
+        spy_dates_below.append(d)
+    spy_dates_below = set(spy_dates_below)  # speed up lookups
+    print(f"  Qualifying days in lookback window: {len(spy_dates_below)}")
 
     if not spy_dates_below:
         print("  No qualifying defensive-rotation days in lookback (SPY healthy)")
         return {"strategy": "Defensive Rotation", "aggregate": None, "spy_below_days": 0}
 
     all_trades = []
-    for sym in ["XLU", "XLP", "XLV", "IEF", "TLT", "GLD"]:
+    for sym in universe:
         try:
             df = load_ticker(sym)
             if df is None:
@@ -297,9 +341,31 @@ def main():
     print(f"Universe: {len(tickers)} tickers, last {args.days} days, 5d forward, 5bp slippage")
 
     results = {}
-    results["mean_reversion"] = backtest_mean_reversion(tickers, args.days)
+    # BASELINE — current production triggers
+    results["mean_reversion_baseline"] = backtest_mean_reversion(tickers, args.days)
+    # FIX-1: add RVOL >= 1.2 (capitulation volume confirmation)
+    print("\n--- FIX-1: Mean Reversion + RVOL >= 1.2 filter ---")
+    results["mean_reversion_rvol12"] = backtest_mean_reversion(tickers, args.days, min_rvol=1.2)
+    # FIX-1b: try stricter RVOL >= 1.5
+    print("\n--- FIX-1b: Mean Reversion + RVOL >= 1.5 filter ---")
+    results["mean_reversion_rvol15"] = backtest_mean_reversion(tickers, args.days, min_rvol=1.5)
+
     results["momentum"] = backtest_momentum_continuation(tickers, args.days)
-    results["defensive"] = backtest_defensive_rotation(args.days)
+
+    # BASELINE Defensive
+    results["defensive_baseline"] = backtest_defensive_rotation(args.days)
+    # FIX-2a: VIX > 22 filter
+    print("\n--- FIX-2a: Defensive + VIX > 22 (true risk-off) ---")
+    results["defensive_vix22"] = backtest_defensive_rotation(args.days, require_vix_above=22)
+    # FIX-2b: 3-day consecutive SPY-below-50EMA
+    print("\n--- FIX-2b: Defensive + 3-day consecutive SPY < 50EMA ---")
+    results["defensive_3day"] = backtest_defensive_rotation(args.days, min_consecutive_below_days=3)
+    # FIX-2c: XLU + GLD only (narrowed universe)
+    print("\n--- FIX-2c: Defensive — XLU+GLD only ---")
+    results["defensive_xlu_gld"] = backtest_defensive_rotation(args.days, universe=["XLU", "GLD"])
+    # FIX-2d: stacked — VIX>22 AND 3d AND XLU+GLD
+    print("\n--- FIX-2d: Defensive — STACKED (VIX>22 + 3d + XLU+GLD) ---")
+    results["defensive_stacked"] = backtest_defensive_rotation(args.days, require_vix_above=22, min_consecutive_below_days=3, universe=["XLU", "GLD"])
 
     print()
     print("=" * 80)
