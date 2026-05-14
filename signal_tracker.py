@@ -574,7 +574,95 @@ def update_outcomes() -> int:
 
         updated += 1
 
-    if updated or mae_updates:
+    # ── DATA-HYGIENE BACKFILL (2026-05-13) ────────────────────────────────
+    # The OPEN-only loop above means already-CLOSED entries never get back-
+    # filled if they were closed in a prior run. Recent loss-streak audit
+    # showed 101/101 closed BUYs had alpha_vs_spy=null and 75/101 had
+    # exit_reason=null. This block fixes that on every update_outcomes run
+    # (cheap — only touches entries with missing fields).
+    backfilled = {"alpha": 0, "exit": 0, "regime": 0}
+    try:
+        import pandas as _pd_bf
+        from pathlib import Path as _P_bf
+        spy_df_bf = None
+        spy_p_bf = _P_bf(__file__).parent / "data/ohlcv/SPY.parquet"
+        if spy_p_bf.exists():
+            spy_df_bf = _pd_bf.read_parquet(spy_p_bf).sort_index()
+
+        # Load regime_history once (built by data_fetcher on each scan)
+        regime_hist = {}
+        rh_p = _P_bf(__file__).parent / "cache/regime_history.json"
+        if rh_p.exists():
+            try:
+                rh_data = json.loads(rh_p.read_text())
+                # regime_history.json may be a single dict or {date: {regime4: ...}}
+                # Most builds store the LATEST regime; not history. So this lookup
+                # only helps when entry was today's regime — limited utility but try.
+                if isinstance(rh_data, dict) and rh_data.get("confirmed_regime4"):
+                    regime_hist["_today"] = rh_data["confirmed_regime4"]
+            except Exception:
+                pass
+
+        # Result → exit_reason mapping for backfill (heuristic)
+        _result_to_exit = {
+            "STOPPED": "stop_hit",
+            "TARGET_HIT": "target_hit",
+            "WIN_EXPIRED": "time_stop_win",
+            "LOSS_EXPIRED": "time_stop_loss",
+        }
+
+        for e in entries:
+            if e.get("status") != "CLOSED":
+                continue
+            # Backfill exit_reason from result label
+            if e.get("exit_reason") is None:
+                rs = e.get("result")
+                if rs and rs in _result_to_exit:
+                    e["exit_reason"] = _result_to_exit[rs]
+                    backfilled["exit"] += 1
+            # Backfill alpha_vs_spy + spy_return_over_hold
+            # 2026-05-13 fix: was using calendar-days age as INDEX into trading-day
+            # SPY parquet — failed when entry was N calendar days ago but SPY had
+            # fewer trading days available (weekends/holidays). Now: clamp index to
+            # last available SPY bar OR a sensible hold cap (15 trading days).
+            if e.get("alpha_vs_spy") is None and e.get("actual_pnl_pct") is not None and spy_df_bf is not None:
+                try:
+                    sig_date_bf = datetime.strptime(e["date"], "%Y-%m-%d").date()
+                    age_bf = (today - sig_date_bf).days
+                    if age_bf <= 0:
+                        continue
+                    sig_ts_bf = _pd_bf.to_datetime(e["date"])
+                    spy_after_bf = spy_df_bf[spy_df_bf.index >= sig_ts_bf]
+                    if len(spy_after_bf) >= 2:
+                        spy_entry_bf = float(spy_after_bf["Close"].iloc[0])
+                        # Use min of: (a) requested hold age in trading days,
+                        # (b) max trading-day cap (15), (c) last available bar.
+                        # This works when SPY data is freshest as well as when
+                        # the trade window has closed and SPY data is complete.
+                        idx = min(15, len(spy_after_bf) - 1)
+                        spy_now_bf = float(spy_after_bf["Close"].iloc[idx])
+                        spy_ret_bf = round((spy_now_bf / spy_entry_bf - 1) * 100, 2)
+                        e["spy_return_over_hold"] = spy_ret_bf
+                        e["alpha_vs_spy"] = round(float(e["actual_pnl_pct"]) - spy_ret_bf, 2)
+                        backfilled["alpha"] += 1
+                except Exception as _ex_alpha:
+                    pass
+            # Backfill regime4 — only "_today" lookup is reliable (limited utility)
+            if (e.get("regime4") is None or e.get("regime4") == "unknown") and regime_hist.get("_today"):
+                # Only backfill if entry was today (otherwise we don't know)
+                if e.get("date", "").startswith(str(today)):
+                    e["regime4"] = regime_hist["_today"]
+                    backfilled["regime"] += 1
+
+        if backfilled["alpha"] or backfilled["exit"] or backfilled["regime"]:
+            log.info(
+                f"Signal tracker BACKFILL: +{backfilled['alpha']} alpha · "
+                f"+{backfilled['exit']} exit_reason · +{backfilled['regime']} regime"
+            )
+    except Exception as _ex_bf:
+        log.debug(f"backfill block failed (non-fatal): {_ex_bf}")
+
+    if updated or mae_updates or any(backfilled.values()):
         _save_log(entries)
         log.info(
             f"Signal tracker: updated {updated} signal outcomes, "
