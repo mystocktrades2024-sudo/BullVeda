@@ -555,17 +555,30 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     # 5. Tail-loss filter — broadened to catch all conviction-engine demotions
     # (2026-05-07: ATEN had conviction.tier=0 / label=WATCH but tail_filter_demoted=None.
     # Original narrow check missed this — engine still allowed BUY despite zero conviction.)
+    # CATALYST-SLEEVE BYPASS (2026-05-14): conviction tier is composite-score-band only
+    # (60-69 = tier 0/WATCH). Catalyst-driven sleeves (PEAD/Momentum/Defensive/MeanRev)
+    # explicitly accept moderate composite scores because their mechanism comes from
+    # outside the composite score (catalyst / regime flow / oversold mechanic).
+    # Bypass only when the sleeve detector itself fired (audit-verifiable trail).
     conv = t.get("conviction") or {}
     tail_demoted = bool(conv.get("tail_filter_demoted"))
     tier_zero = (conv.get("tier") == 0 and (conv.get("label") or "").upper() in ("WATCH", "AVOID", "WAIT"))
-    demoted = tail_demoted or tier_zero
+    _sleeve_fam = t.get("setup_family")
+    _catalyst_sleeve = _sleeve_fam in ("PEAD", "Momentum Continuation",
+                                         "Defensive Rotation", "Mean Reversion")
+    # Only bypass tier_zero (not actual tail_loss demotion — that's a star-rating call)
+    if _catalyst_sleeve and tier_zero and not tail_demoted:
+        demoted = False
+        reason = f"conviction tier=0 bypassed for {_sleeve_fam} sleeve (catalyst-driven)"
+    else:
+        demoted = tail_demoted or tier_zero
+        reason = ""
+        if demoted:
+            if tier_zero and not tail_demoted:
+                reason = f"conviction tier=0 / label={conv.get('label')} — engine demoted"
+            else:
+                reason = (conv.get("description") or "tail-loss filter demoted")[:140]
     passed = not demoted
-    reason = ""
-    if demoted:
-        if tier_zero and not tail_demoted:
-            reason = f"conviction tier=0 / label={conv.get('label')} — engine demoted"
-        else:
-            reason = (conv.get("description") or "tail-loss filter demoted")[:140]
     gates.append({"name": "tail_loss_filter", "passed": passed, "reason": reason})
     if not passed:
         failures.append("tail_loss_filter")
