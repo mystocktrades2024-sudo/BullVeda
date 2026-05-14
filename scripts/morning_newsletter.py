@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""morning_newsletter.py — daily SwingTrade morning brief.
+"""morning_newsletter.py — Bloomberg/TradingView-style daily morning brief.
 
-Reads last_bundle.json + signal_log + portfolio_state + macro calendar,
-renders a scan-friendly HTML newsletter, saves to DB as 'morning-newsletter'
-snapshot, posts summary + link to Slack.
+Renders a professional financial-grade HTML newsletter with:
+  - Market snapshot hero (SPY/QQQ/IWM/VIX as big numbers with sparklines)
+  - Top conviction picks with 20-day sparklines + key levels
+  - Sector heatmap (color-coded grid)
+  - Strategy sleeve activity panel
+  - This-week macro calendar
+  - Risk dashboard
+  - Today's actionable insight
+  - Earnings on deck
 
-Run schedule:
-  Mon-Fri 7:30am PT (after morning-briefing at 6:30am, after pre-market scan)
-  Via infra/launchd/com.swingtrade.morning-newsletter.plist
+Output:
+  cache/morning_newsletter_<DATE>.html
+  DB html_snapshots kind='morning-newsletter'
+  https://trade.mystockholding.com/reports/latest/morning-newsletter
+  Slack summary post with deep-link
 
-Usage:
-  python3 scripts/morning_newsletter.py              # Generate + save + Slack
-  python3 scripts/morning_newsletter.py --no-slack   # HTML only
-  python3 scripts/morning_newsletter.py --preview    # Print HTML to stdout
+Schedule: Mon-Fri 7:45am PT via launchd
 """
 from __future__ import annotations
 
@@ -62,6 +67,44 @@ def _upcoming_macro(days: int = 14) -> list[dict]:
         return []
 
 
+def _sparkline_data(ticker: str, n_bars: int = 20) -> tuple[list[float], float]:
+    """Return (closes, pct_change_period) for a ticker."""
+    try:
+        from data_archive import load_ticker
+        df = load_ticker(ticker)
+        if df is None or len(df) < n_bars:
+            return [], 0
+        closes = df["Close"].tail(n_bars).tolist() if "Close" in df.columns else df["close"].tail(n_bars).tolist()
+        closes = [float(c) for c in closes]
+        if len(closes) < 2 or closes[0] == 0:
+            return closes, 0
+        pct = (closes[-1] - closes[0]) / closes[0] * 100
+        return closes, round(pct, 2)
+    except Exception:
+        return [], 0
+
+
+def _make_sparkline_svg(closes: list[float], width: int = 80, height: int = 24,
+                         color: str = None) -> str:
+    """Render a minimal SVG sparkline."""
+    if len(closes) < 2:
+        return ""
+    lo, hi = min(closes), max(closes)
+    rng = hi - lo if hi > lo else 1
+    pts = []
+    for i, c in enumerate(closes):
+        x = (i / (len(closes) - 1)) * width
+        y = height - ((c - lo) / rng) * height
+        pts.append(f"{x:.1f},{y:.1f}")
+    if color is None:
+        color = "#00d68f" if closes[-1] >= closes[0] else "#ff4d4f"
+    return (f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+            f'style="vertical-align:middle">'
+            f'<polyline fill="none" stroke="{color}" stroke-width="1.5" points="{" ".join(pts)}"/>'
+            f'<circle cx="{pts[-1].split(",")[0]}" cy="{pts[-1].split(",")[1]}" '
+            f'r="1.8" fill="{color}"/></svg>')
+
+
 def _sleeve_fires(bundle: dict) -> dict[str, list[dict]]:
     all_rows = (bundle.get("all_scored") or []) + \
                (bundle.get("buy_candidates") or []) + \
@@ -81,8 +124,35 @@ def _sleeve_fires(bundle: dict) -> dict[str, list[dict]]:
     return fires
 
 
+def _sector_heatmap(bundle: dict) -> list[dict]:
+    """Build sector heatmap data from bundle.sector_etf or all_scored grouped."""
+    se = bundle.get("sector_etf") or bundle.get("sector_etf_data") or {}
+    out = []
+    sectors = [
+        ("XLK", "Technology"), ("XLF", "Financials"), ("XLV", "Healthcare"),
+        ("XLY", "Consumer Disc"), ("XLP", "Cons Staples"), ("XLI", "Industrials"),
+        ("XLE", "Energy"), ("XLU", "Utilities"), ("XLB", "Materials"),
+        ("XLRE", "Real Estate"), ("XLC", "Comm Svcs"),
+    ]
+    for etf, name in sectors:
+        d = se.get(etf) if isinstance(se, dict) else {}
+        if isinstance(d, dict):
+            chg = d.get("pct_change_1d") or d.get("daily_change_pct") or d.get("perf_1d") or 0
+            try:
+                chg = float(chg)
+            except (TypeError, ValueError):
+                chg = 0
+        else:
+            chg = 0
+        # If bundle doesn't have it, try from data_archive
+        if chg == 0:
+            closes, pct = _sparkline_data(etf, n_bars=2)
+            chg = pct
+        out.append({"etf": etf, "name": name, "pct_1d": chg})
+    return out
+
+
 def _yesterday_recap() -> dict:
-    """Stub for now — would read closed_trades from DB."""
     try:
         import db
         conn = db.get_conn()
@@ -97,12 +167,49 @@ def _yesterday_recap() -> dict:
         return {"closed_today": 0, "total_pnl_pct": 0}
 
 
-# ─── rendering ──────────────────────────────────────────────────────────────
+def _upcoming_earnings(bundle: dict, days: int = 7) -> list[dict]:
+    """Tickers reporting earnings in next N days, sourced from earnings_watchlist."""
+    try:
+        ew = json.loads((REPO / "data" / "earnings_watchlist.json").read_text())
+        watchlist = ew.get("watchlist") or []
+        today = date.today()
+        out = []
+        for w in watchlist:
+            ed_str = w.get("earnings_date")
+            if not ed_str:
+                continue
+            try:
+                ed = datetime.fromisoformat(ed_str).date()
+                delta = (ed - today).days
+                if 0 <= delta <= days:
+                    out.append({**w, "days_until": delta})
+            except Exception:
+                continue
+        out.sort(key=lambda x: x["days_until"])
+        return out[:8]
+    except Exception:
+        return []
 
-def _emoji_regime(regime4: str) -> str:
-    return {"risk_on_trending": "🟢", "risk_on_choppy": "🟡",
-            "risk_off_trending": "🟠", "panic": "🔴",
-            "bull": "🟢", "bear": "🔴", "neutral": "🟡"}.get(regime4, "⚪")
+
+# ─── HTML rendering ─────────────────────────────────────────────────────────
+
+def _pct_color(p: float) -> str:
+    if p > 0.5: return "#00d68f"
+    if p < -0.5: return "#ff4d4f"
+    if p > 0: return "#7cd3a8"
+    if p < 0: return "#e89195"
+    return "#888"
+
+
+def _pct_bg_color(p: float) -> str:
+    """Background tint for heatmap cells based on % change."""
+    if p > 2: return "rgba(0, 214, 143, 0.35)"
+    if p > 1: return "rgba(0, 214, 143, 0.20)"
+    if p > 0.3: return "rgba(0, 214, 143, 0.10)"
+    if p < -2: return "rgba(255, 77, 79, 0.35)"
+    if p < -1: return "rgba(255, 77, 79, 0.20)"
+    if p < -0.3: return "rgba(255, 77, 79, 0.10)"
+    return "rgba(255, 255, 255, 0.04)"
 
 
 def _render_html(report: dict) -> str:
@@ -115,29 +222,39 @@ def _render_html(report: dict) -> str:
     pf = report["portfolio"]
     macro = report["macro"]
     recap = report["recap"]
+    earnings = report["earnings"]
+    sector_map = report["sector_heatmap"]
 
-    today_str = date.today().strftime("%A, %B %d, %Y")
+    today_str = date.today().strftime("%A · %B %-d, %Y").upper()
     time_str = datetime.now().strftime("%-I:%M %p PT")
     regime4 = regime.get("regime4", "unknown")
-    regime_emoji = _emoji_regime(regime4)
-    spy = regime.get("spy_price", "?")
-    vix = regime.get("vix_current", "?")
-    breadth = regime.get("breadth_pct_50d", "?")
+    spy_price = regime.get("spy_price") or 0
+    vix = regime.get("vix_current") or 0
+    breadth = regime.get("breadth_pct_50d") or 50
 
-    # Top picks (up to 5)
+    # Hero indices (SPY, QQQ, IWM, VIX) with sparklines
+    indices = []
+    for etf, label in [("SPY", "S&P 500"), ("QQQ", "NASDAQ"), ("IWM", "Russell 2K"), ("VIX", "VIX")]:
+        closes, pct = _sparkline_data(etf, n_bars=20)
+        if closes:
+            spark = _make_sparkline_svg(closes, width=100, height=28)
+            last = closes[-1]
+            color = _pct_color(pct)
+            indices.append(f"""
+            <div class="hero-cell">
+              <div class="hero-label">{label}</div>
+              <div class="hero-num">{last:,.2f}</div>
+              <div class="hero-spark">{spark}</div>
+              <div class="hero-pct" style="color:{color}">{'▲' if pct >= 0 else '▼'} {abs(pct):.2f}%</div>
+            </div>""")
+
+    # Top picks with 20-day sparklines
     pick_cards = []
-    for r in buys[:5]:
+    for r in buys[:6]:
         ticker = r.get("ticker", "?")
         score = r.get("score", 0)
-        sector = (r.get("sector") or "—")[:18]
-        setup = (r.get("setup_family") or "—")[:25]
-        sf_emo = "🚀" if setup == "Momentum Continuation" else \
-                 "🎯" if setup == "PEAD" else \
-                 "🔄" if setup == "Mean Reversion" else \
-                 "🛡️" if setup == "Defensive Rotation" else \
-                 "👥" if setup == "Insider Cluster" else \
-                 "📊" if setup == "ESP Play" else \
-                 "📈"
+        sector_name = (r.get("sector") or "—")[:14]
+        setup = (r.get("setup_family") or "—")
         tp = r.get("trade_plan") or {}
         price = r.get("price", 0)
         entry_lo = tp.get("entry_low") or tp.get("primary_zone_low") or price
@@ -147,206 +264,368 @@ def _render_html(report: dict) -> str:
         t2 = tp.get("target2", 0)
         rr = tp.get("rr_ratio") or 0
         sharpe = r.get("sharpe_126d") or 0
-        in_zone = (entry_lo <= price <= entry_hi) if price and entry_lo and entry_hi else False
-        zone_status = '<span style="color:#3fb950">● in zone</span>' if in_zone \
-                      else '<span style="color:#7d8590">● near zone</span>'
-        # Quick mechanism hint
-        why = {
-            "Trend Continuation": "EMA pullback / continuation",
-            "Momentum Continuation": "Strength + ADX",
-            "Breakout Expansion": "Range breakout",
-            "Impulse Catalyst": "PEAD / catalyst",
-            "Defensive Rotation": "Flight-to-safety",
-            "Mean Reversion": "RSI<30 bounce",
-            "PEAD": "Post-earnings drift",
-            "Insider Cluster": "Insider asymmetry",
-            "ESP Play": "Pre-earnings drift",
-            "Special Situation": "Idiosyncratic edge",
-        }.get(setup, "Score-driven")
+        pct_1d = r.get("pct_chg") or 0
+        sparkline_closes, sparkline_pct = _sparkline_data(ticker, n_bars=20)
+        spark = _make_sparkline_svg(sparkline_closes, width=90, height=22) if sparkline_closes else ""
+        in_zone = (entry_lo <= price <= entry_hi) if (price and entry_lo and entry_hi) else False
+        zone_dot = '<span class="zone-on">●</span>' if in_zone else '<span class="zone-off">○</span>'
+        pct_color = _pct_color(pct_1d)
+        pct_arrow = '▲' if pct_1d >= 0 else '▼'
 
         pick_cards.append(f"""
-        <div class="pick-card">
-          <div class="pick-head">
-            <span class="ticker">{ticker}</span>
-            <span class="score">Score <b>{score}</b></span>
-            <span class="rr">R:R <b>{rr:.1f}</b></span>
-            <span class="setup">{sf_emo} {setup}</span>
-          </div>
-          <div class="pick-row">
-            <span class="sector">{sector}</span>
-            <span class="sharpe">Sharpe 126d <b>{sharpe:.2f}</b></span>
-            {zone_status}
-          </div>
-          <div class="pick-plan">
-            Price <b>${price:.2f}</b> &nbsp;·&nbsp;
-            Entry <b>${entry_lo:.2f}–${entry_hi:.2f}</b> &nbsp;·&nbsp;
-            Stop <b>${stop:.2f}</b> &nbsp;·&nbsp;
-            T1 <b>${t1:.2f}</b> &nbsp;·&nbsp;
-            T2 <b>${t2:.2f}</b>
-          </div>
-          <div class="pick-why">→ {why}</div>
+        <tr class="pick-row">
+          <td class="cell-ticker">
+            <div class="ticker-big">{ticker}</div>
+            <div class="ticker-sub">{sector_name}</div>
+          </td>
+          <td class="cell-spark">{spark}<div class="spark-pct" style="color:{pct_color}">{pct_arrow} {abs(pct_1d):.2f}%</div></td>
+          <td class="cell-price"><div class="price-big">${price:.2f}</div><div class="price-sub">126d Sharpe {sharpe:.2f}</div></td>
+          <td class="cell-score"><div class="score-big">{score}</div><div class="score-sub">R:R {rr:.1f}</div></td>
+          <td class="cell-setup"><div class="setup-tag">{setup}</div></td>
+          <td class="cell-plan">
+            <div>Entry <b>${entry_lo:.0f}–${entry_hi:.0f}</b> {zone_dot}</div>
+            <div class="stop-target">Stop <b style="color:#ff8896">${stop:.0f}</b> · T1 <b style="color:#7cd3a8">${t1:.0f}</b> · T2 <b style="color:#00d68f">${t2:.0f}</b></div>
+          </td>
+        </tr>""")
+
+    pick_table = "".join(pick_cards) if pick_cards else \
+        f'<tr><td colspan="6" style="padding:24px;text-align:center;color:#888">No BUY-tier picks today · {len(watch)} on WATCH list</td></tr>'
+
+    # Sector heatmap
+    heatmap_cells = []
+    for sec in sector_map:
+        pct = sec["pct_1d"]
+        bg = _pct_bg_color(pct)
+        color = _pct_color(pct)
+        sign = '▲' if pct >= 0 else '▼'
+        heatmap_cells.append(f"""
+        <div class="heat-cell" style="background:{bg}">
+          <div class="heat-etf">{sec['etf']}</div>
+          <div class="heat-name">{sec['name']}</div>
+          <div class="heat-pct" style="color:{color}">{sign} {abs(pct):.2f}%</div>
         </div>""")
 
-    if not pick_cards:
-        pick_cards.append('<div class="pick-card" style="color:#7d8590">No BUY-tier picks today. WATCH list has {} candidates.</div>'.format(len(watch)))
-
-    # Sleeve fires summary
-    sleeve_rows = []
-    for sleeve_name in ["Momentum Continuation", "Defensive Rotation", "Mean Reversion",
-                         "PEAD", "Insider Cluster", "ESP Play"]:
-        hits = sleeves.get(sleeve_name) or []
-        sample = ", ".join((h.get("ticker") or "?") for h in hits[:3])
-        more = f" (+{len(hits)-3} more)" if len(hits) > 3 else ""
+    # Strategy sleeve panel
+    sleeve_blocks = []
+    sleeve_icons = {
+        "Momentum Continuation": "🚀", "Defensive Rotation": "🛡️",
+        "Mean Reversion": "🔄", "PEAD": "🎯",
+        "Insider Cluster": "👥", "ESP Play": "📊",
+    }
+    for name in ["Momentum Continuation", "Mean Reversion", "PEAD",
+                  "Defensive Rotation", "Insider Cluster", "ESP Play"]:
+        hits = sleeves.get(name) or []
+        icon = sleeve_icons.get(name, "•")
         if hits:
-            sleeve_rows.append(f'<div class="sleeve-row sleeve-on">🔥 <b>{sleeve_name}</b>: {len(hits)} fires — <code>{sample}{more}</code></div>')
+            tickers = " ".join(f'<code class="ticker-chip">{h.get("ticker", "?")}</code>' for h in hits[:5])
+            more = f' <span class="more">+{len(hits)-5}</span>' if len(hits) > 5 else ''
+            sleeve_blocks.append(f"""
+            <div class="sleeve-block sleeve-active">
+              <div class="sleeve-head"><span class="sleeve-icon">{icon}</span><b>{name}</b> <span class="fire-count">{len(hits)} fires</span></div>
+              <div class="sleeve-body">{tickers}{more}</div>
+            </div>""")
         else:
-            sleeve_rows.append(f'<div class="sleeve-row sleeve-off">— {sleeve_name}: <span style="color:#7d8590">no fires</span></div>')
+            sleeve_blocks.append(f"""
+            <div class="sleeve-block sleeve-dormant">
+              <div class="sleeve-head"><span class="sleeve-icon">{icon}</span><b>{name}</b> <span class="fire-count" style="color:#555">dormant</span></div>
+            </div>""")
 
     # Macro events
     macro_rows = []
     for ev in macro:
-        when = "Today" if ev["days_until"] == 0 else f"in {ev['days_until']}d" if ev["days_until"] > 0 else f"{abs(ev['days_until'])}d ago"
-        emo = "🔴" if ev["days_until"] <= 1 else "🟡" if ev["days_until"] <= 5 else "⚪"
-        macro_rows.append(f'<div class="macro-row">{emo} <b>{ev["date"]}</b> · {ev["type"]} · {ev["label"]} <span style="color:#7d8590">({when})</span></div>')
+        when = "TODAY" if ev["days_until"] == 0 else (f"+{ev['days_until']}d" if ev["days_until"] > 0 else f"{ev['days_until']}d")
+        urgency = "high" if ev["days_until"] <= 1 else "med" if ev["days_until"] <= 5 else "low"
+        macro_rows.append(f"""
+        <div class="macro-row macro-{urgency}">
+          <span class="macro-when">{when}</span>
+          <span class="macro-type">{ev['type']}</span>
+          <span class="macro-label">{ev['label']}</span>
+        </div>""")
     if not macro_rows:
-        macro_rows.append('<div class="macro-row" style="color:#7d8590">No major macro events in next 14 days.</div>')
+        macro_rows.append('<div class="macro-row" style="color:#888">No major macro events in next 14 days.</div>')
 
-    # Risk watch
+    # Earnings on deck
+    earn_rows = []
+    for e in earnings:
+        when = "TODAY" if e["days_until"] == 0 else f"+{e['days_until']}d"
+        earn_rows.append(f'<div class="earn-row"><b>{e.get("ticker","?")}</b><span class="earn-when">{when}</span></div>')
+    if not earn_rows:
+        earn_rows.append('<div class="earn-row" style="color:#888">No earnings tracked next 7 days.</div>')
+
+    # Risk dashboard
     rs_active = rs.get("active", False)
-    rs_sharpe = rs.get("sharpe", "n/a")
-    rs_threshold = rs.get("threshold", "n/a")
+    rs_sharpe = rs.get("sharpe", 0)
+    rs_thresh = rs.get("threshold", -0.5)
     rs_n = rs.get("n", 0)
-    rs_color = "#f85149" if rs_active else "#3fb950" if (isinstance(rs_sharpe, (int, float)) and rs_sharpe > rs_threshold + 0.10) else "#d29922"
-    rs_status = "🔴 ACTIVE — BUYs HALTED" if rs_active else \
-                "🟡 At edge" if isinstance(rs_sharpe, (int, float)) and rs_sharpe < rs_threshold + 0.10 else \
-                "🟢 Healthy"
+    rs_color = "#ff4d4f" if rs_active else ("#ffb800" if isinstance(rs_sharpe, (int, float)) and rs_sharpe < rs_thresh + 0.10 else "#00d68f")
+    rs_label = "KILL ACTIVE" if rs_active else ("AT EDGE" if isinstance(rs_sharpe, (int, float)) and rs_sharpe < rs_thresh + 0.10 else "HEALTHY")
     open_n = len(pf.get("positions") or [])
     equity = pf.get("equity") or pf.get("cash") or 0
 
-    # Today's insight (synthesize from data)
+    # Today's insight
     insight_parts = []
-    if sleeves.get("PEAD"):
-        ticker_list = ", ".join((h.get("ticker") or "?") for h in sleeves["PEAD"][:3])
-        insight_parts.append(f"🎯 PEAD sleeve fires on <b>{ticker_list}</b> — post-earnings drift candidates")
-    if sleeves.get("Mean Reversion"):
-        ticker_list = ", ".join((h.get("ticker") or "?") for h in sleeves["Mean Reversion"][:3])
-        insight_parts.append(f"🔄 Mean Reversion active on <b>{ticker_list}</b> — oversold bounce setups")
-    if regime4 == "risk_on_choppy":
-        insight_parts.append("Regime is choppy — Pullback + Mean Reversion are the alpha sleeves today. Momentum + Defensive are correctly dormant.")
     if rs_active:
-        insight_parts.insert(0, "⚠️ <b>Rolling Sharpe kill ACTIVE</b> — all new BUYs halted by capital preservation gate. Wait for recovery.")
-    elif isinstance(rs_sharpe, (int, float)) and rs_sharpe < rs_threshold + 0.05:
-        insight_parts.insert(0, f"⚠️ Rolling Sharpe at edge ({rs_sharpe:+.3f} vs {rs_threshold:+.2f}) — one more losing trade triggers kill switch.")
+        insight_parts.append('<span class="urgent">⚠️ Rolling Sharpe kill ACTIVE — all new BUYs HALTED.</span>')
+    elif isinstance(rs_sharpe, (int, float)) and rs_sharpe < rs_thresh + 0.05:
+        insight_parts.append(f'<span class="warn">⚠️ Rolling Sharpe at edge ({rs_sharpe:+.3f} vs {rs_thresh:+.2f}) — one losing trade triggers kill.</span>')
+    pead_fires = sleeves.get("PEAD") or []
+    mr_fires = sleeves.get("Mean Reversion") or []
+    if pead_fires:
+        names = ", ".join(h.get("ticker", "?") for h in pead_fires[:3])
+        insight_parts.append(f'🎯 <b>PEAD active</b>: {names} — post-earnings drift candidates.')
+    if mr_fires:
+        names = ", ".join(h.get("ticker", "?") for h in mr_fires[:3])
+        insight_parts.append(f'🔄 <b>Mean Reversion firing</b>: {names} — oversold-with-EMA200-floor bounces.')
+    if regime4 == "risk_on_choppy":
+        insight_parts.append('Regime is choppy — Pullback + Mean Reversion are the alpha sleeves. Momentum + Defensive correctly dormant.')
     if not insight_parts:
-        insight_parts.append("Quiet day. Watch the WATCH list for entry triggers.")
+        insight_parts.append('Quiet morning. Watch entry triggers on the WATCH list.')
     insight_text = "<br><br>".join(insight_parts)
 
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
-<title>SwingTrade Morning Brief — {date.today().isoformat()}</title>
+<title>SwingTrade · Morning Brief · {date.today().isoformat()}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  body {{ background:#0d1117; color:#c9d1d9;
-         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro',Helvetica,sans-serif;
-         margin:0; padding:32px 16px; line-height:1.45; }}
-  .container {{ max-width:680px; margin:0 auto; background:#0d1117; }}
-  header {{ text-align:left; padding-bottom:24px; border-bottom:2px solid #30363d; margin-bottom:24px; }}
-  h1 {{ margin:0 0 4px 0; font-size:26px; font-weight:700; color:#f0f6fc; letter-spacing:-0.5px; }}
-  .date {{ color:#7d8590; font-size:14px; }}
-  section {{ background:#161b22; border:1px solid #30363d; border-radius:10px; padding:20px;
-            margin-bottom:18px; }}
-  h2 {{ margin:0 0 12px 0; font-size:14px; font-weight:600; color:#7d8590; letter-spacing:0.7px;
-       text-transform:uppercase; }}
-  .market-row {{ display:flex; flex-wrap:wrap; gap:18px; font-size:14px; color:#c9d1d9; }}
-  .market-row b {{ color:#f0f6fc; font-weight:600; }}
-  .pick-card {{ background:#0d1117; border:1px solid #30363d; border-radius:8px;
-               padding:14px; margin-bottom:10px; }}
-  .pick-head {{ display:flex; flex-wrap:wrap; gap:14px; align-items:baseline;
-               margin-bottom:6px; }}
-  .ticker {{ font-size:18px; font-weight:700; color:#f0f6fc; letter-spacing:-0.3px; }}
-  .score, .rr {{ font-size:12px; color:#7d8590; }}
-  .score b, .rr b {{ color:#79c0ff; font-weight:600; }}
-  .setup {{ font-size:12px; color:#c9d1d9; margin-left:auto; }}
-  .pick-row {{ display:flex; gap:14px; font-size:12px; color:#7d8590; margin-bottom:8px; }}
-  .pick-row b {{ color:#c9d1d9; font-weight:600; }}
-  .pick-plan {{ font-size:13px; color:#c9d1d9; padding:8px 10px; background:#161b22;
-               border-radius:6px; }}
-  .pick-plan b {{ color:#f0f6fc; font-weight:600; }}
-  .pick-why {{ font-size:12px; color:#7d8590; font-style:italic; margin-top:6px; }}
-  .sleeve-row {{ font-size:13px; padding:6px 0; }}
-  .sleeve-on b {{ color:#f0f6fc; }}
-  .sleeve-on code {{ background:#161b22; padding:2px 6px; border-radius:4px;
-                    color:#79c0ff; font-size:12px; }}
-  .sleeve-off {{ color:#7d8590; }}
-  .macro-row {{ font-size:13px; padding:4px 0; color:#c9d1d9; }}
-  .macro-row b {{ font-family:'SF Mono',Menlo,monospace; color:#f0f6fc; }}
-  .risk-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }}
-  .risk-cell {{ background:#0d1117; border:1px solid #30363d; border-radius:6px;
-               padding:10px; font-size:12px; color:#7d8590; }}
-  .risk-cell .v {{ font-size:18px; color:#f0f6fc; font-weight:600; }}
-  .insight {{ font-size:14px; color:#c9d1d9; line-height:1.6; }}
-  .insight b {{ color:#f0f6fc; }}
-  footer {{ margin-top:24px; padding-top:16px; border-top:1px solid #30363d;
-           text-align:center; font-size:13px; }}
-  footer a {{ color:#3fb950; text-decoration:none; margin:0 12px; }}
-  footer a:hover {{ text-decoration:underline; }}
+  * {{ box-sizing:border-box; }}
+  body {{ background:#000; color:#e8e8e8; margin:0;
+         font-family:'Inter',-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+         font-feature-settings:'tnum' 1, 'ss01' 1; }}
+  .frame {{ max-width:880px; margin:0 auto; padding:0 16px 40px; }}
+
+  /* Masthead */
+  .masthead {{ padding:24px 0 16px; border-bottom:2px solid #ff7a00; margin-bottom:0; }}
+  .masthead-row {{ display:flex; align-items:baseline; gap:16px; }}
+  .brand {{ font-size:28px; font-weight:800; letter-spacing:-0.5px;
+           color:#fff; line-height:1; }}
+  .brand-bar {{ display:inline-block; width:4px; height:24px;
+               background:#ff7a00; margin-right:10px; vertical-align:middle; }}
+  .edition {{ font-size:11px; color:#888; letter-spacing:2px; text-transform:uppercase;
+             font-weight:600; margin-top:6px; }}
+  .date-bar {{ font-size:11px; color:#888; font-weight:500; letter-spacing:1px;
+              margin-left:auto; text-align:right; }}
+  .date-day {{ color:#ff7a00; font-weight:700; }}
+
+  /* Hero strip */
+  .hero {{ display:grid; grid-template-columns:repeat(4, 1fr); gap:1px;
+          background:#222; padding:1px; margin:0 0 24px;
+          border:1px solid #222; }}
+  .hero-cell {{ background:#0a0a0a; padding:14px 16px; }}
+  .hero-label {{ font-size:10px; color:#888; letter-spacing:1.5px;
+                text-transform:uppercase; font-weight:600; }}
+  .hero-num {{ font-family:'JetBrains Mono','SF Mono',monospace;
+              font-size:22px; font-weight:600; color:#fff; margin-top:4px;
+              letter-spacing:-0.5px; }}
+  .hero-spark {{ margin-top:4px; }}
+  .hero-pct {{ font-size:13px; font-weight:600; margin-top:2px;
+              font-family:'JetBrains Mono','SF Mono',monospace; }}
+
+  /* Sections */
+  section {{ margin-bottom:28px; }}
+  h2 {{ font-size:12px; color:#ff7a00; letter-spacing:2px; text-transform:uppercase;
+       font-weight:700; margin:0 0 12px; padding-bottom:6px;
+       border-bottom:1px solid #222; }}
+
+  /* Top picks table */
+  .picks-table {{ width:100%; border-collapse:collapse;
+                 font-family:'Inter',sans-serif; }}
+  .picks-table td {{ padding:14px 8px; border-bottom:1px solid #1a1a1a;
+                    vertical-align:middle; font-size:13px; }}
+  .pick-row:hover {{ background:#0a0a0a; }}
+  .cell-ticker {{ width:90px; }}
+  .ticker-big {{ font-size:18px; font-weight:700; color:#fff;
+                font-family:'JetBrains Mono',monospace; }}
+  .ticker-sub {{ font-size:10px; color:#888; margin-top:2px;
+                text-transform:uppercase; letter-spacing:0.5px; }}
+  .cell-spark {{ width:100px; }}
+  .spark-pct {{ font-size:11px; margin-top:2px;
+               font-family:'JetBrains Mono',monospace; font-weight:600; }}
+  .cell-price {{ width:90px; }}
+  .price-big {{ font-size:15px; font-weight:600; color:#fff;
+               font-family:'JetBrains Mono',monospace; }}
+  .price-sub {{ font-size:10px; color:#888; margin-top:2px; }}
+  .cell-score {{ width:70px; }}
+  .score-big {{ font-size:20px; font-weight:700; color:#00d4ff;
+               font-family:'JetBrains Mono',monospace; }}
+  .score-sub {{ font-size:10px; color:#888; margin-top:2px; }}
+  .cell-setup {{ width:140px; }}
+  .setup-tag {{ display:inline-block; padding:3px 8px; background:#1a1a1a;
+               border:1px solid #2a2a2a; border-radius:3px;
+               font-size:11px; color:#ddd; }}
+  .cell-plan {{ font-size:12px; color:#ccc; font-family:'JetBrains Mono',monospace; }}
+  .cell-plan b {{ color:#fff; }}
+  .stop-target {{ margin-top:3px; font-size:11px; }}
+  .zone-on {{ color:#00d68f; font-size:14px; }}
+  .zone-off {{ color:#555; font-size:14px; }}
+
+  /* Sector heatmap */
+  .heatmap {{ display:grid; grid-template-columns:repeat(6, 1fr);
+             gap:2px; background:#222; padding:1px; border:1px solid #222; }}
+  .heat-cell {{ background:#0a0a0a; padding:10px;
+               border:1px solid transparent; min-height:62px; }}
+  .heat-etf {{ font-size:10px; color:#888; font-weight:600;
+              font-family:'JetBrains Mono',monospace; }}
+  .heat-name {{ font-size:9px; color:#999; margin-top:1px;
+               text-transform:uppercase; letter-spacing:0.3px; }}
+  .heat-pct {{ font-size:14px; font-weight:700; margin-top:4px;
+              font-family:'JetBrains Mono',monospace; }}
+
+  /* Sleeve panel */
+  .sleeves-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }}
+  .sleeve-block {{ background:#0a0a0a; border:1px solid #222;
+                  border-radius:4px; padding:12px 14px; }}
+  .sleeve-active {{ border-left:3px solid #ff7a00; }}
+  .sleeve-dormant {{ opacity:0.6; }}
+  .sleeve-head {{ font-size:13px; color:#fff; margin-bottom:6px;
+                 display:flex; align-items:center; gap:6px; }}
+  .sleeve-head b {{ font-weight:600; flex:1; }}
+  .sleeve-icon {{ font-size:14px; }}
+  .fire-count {{ font-size:11px; color:#ff7a00; font-weight:600;
+                font-family:'JetBrains Mono',monospace; }}
+  .sleeve-body {{ font-size:12px; color:#aaa; }}
+  .ticker-chip {{ display:inline-block; padding:1px 6px;
+                 background:#1a1a1a; border-radius:2px; color:#00d4ff;
+                 font-family:'JetBrains Mono',monospace; font-size:11px;
+                 margin:1px 2px; }}
+  .more {{ color:#666; font-size:11px; }}
+
+  /* Macro + Earnings panels (side by side) */
+  .two-col {{ display:grid; grid-template-columns:1.4fr 1fr; gap:18px; }}
+  .macro-row {{ display:flex; gap:10px; padding:6px 0;
+               border-bottom:1px solid #1a1a1a; font-size:12px; align-items:center; }}
+  .macro-row:last-child {{ border-bottom:none; }}
+  .macro-when {{ font-family:'JetBrains Mono',monospace; font-weight:700;
+                color:#888; width:48px; font-size:11px; }}
+  .macro-type {{ background:#1a1a1a; padding:1px 6px; border-radius:2px;
+                font-size:10px; font-weight:600; color:#ff7a00; }}
+  .macro-label {{ color:#ccc; flex:1; }}
+  .macro-high .macro-when {{ color:#ff4d4f; }}
+  .macro-med .macro-when {{ color:#ffb800; }}
+
+  .earn-row {{ display:flex; align-items:center; gap:10px;
+              padding:5px 0; border-bottom:1px solid #1a1a1a; font-size:12px; }}
+  .earn-row:last-child {{ border-bottom:none; }}
+  .earn-row b {{ color:#fff; font-family:'JetBrains Mono',monospace; flex:1; }}
+  .earn-when {{ color:#888; font-size:11px; font-family:'JetBrains Mono',monospace; }}
+
+  /* Risk dashboard */
+  .risk-grid {{ display:grid; grid-template-columns:repeat(4, 1fr);
+               gap:1px; background:#222; padding:1px; border:1px solid #222; }}
+  .risk-cell {{ background:#0a0a0a; padding:12px 14px; }}
+  .risk-label {{ font-size:10px; color:#888; letter-spacing:1px;
+                text-transform:uppercase; font-weight:600; }}
+  .risk-val {{ font-size:20px; font-weight:700; margin-top:6px;
+              font-family:'JetBrains Mono',monospace; color:#fff; }}
+  .risk-sub {{ font-size:10px; color:#888; margin-top:3px; }}
+
+  /* Insight */
+  .insight-box {{ background:linear-gradient(135deg, #1a1410, #0a0a0a);
+                 border-left:3px solid #ff7a00; border-radius:4px;
+                 padding:18px 22px; }}
+  .insight-text {{ font-size:14px; line-height:1.6; color:#ddd; }}
+  .insight-text b {{ color:#fff; font-weight:600; }}
+  .urgent {{ color:#ff4d4f; font-weight:600; }}
+  .warn {{ color:#ffb800; font-weight:500; }}
+
+  /* Footer */
+  footer {{ margin-top:32px; padding-top:18px; border-top:1px solid #222;
+           text-align:center; font-size:11px; color:#666; }}
+  footer a {{ color:#ff7a00; text-decoration:none; margin:0 14px;
+             font-weight:500; letter-spacing:0.5px; }}
+  footer a:hover {{ color:#fff; }}
+  .disclaimer {{ margin-top:14px; color:#444; font-size:10px;
+                line-height:1.5; }}
 </style></head>
 <body>
-<div class="container">
+<div class="frame">
 
-<header>
-  <h1>🌅 SwingTrade Morning Brief</h1>
-  <div class="date">{today_str} · {time_str}</div>
-</header>
-
-<section>
-  <h2>📊 Market Context</h2>
-  <div class="market-row">
-    <div>Regime: {regime_emoji} <b>{regime4}</b></div>
-    <div>SPY: <b>${spy}</b></div>
-    <div>VIX: <b>{vix}</b></div>
-    <div>Breadth: <b>{breadth}%</b> &gt;50dma</div>
+<div class="masthead">
+  <div class="masthead-row">
+    <div>
+      <div class="brand"><span class="brand-bar"></span>SwingTrade</div>
+      <div class="edition">Morning Brief · Pre-Market Edition</div>
+    </div>
+    <div class="date-bar">
+      <div class="date-day">{today_str}</div>
+      <div style="margin-top:4px">{time_str}</div>
+    </div>
   </div>
+</div>
+
+<div class="hero">
+  {"".join(indices)}
+</div>
+
+<section>
+  <h2>Top Conviction · {len(buys)} BUY · {len(watch)} WATCH</h2>
+  <table class="picks-table">
+    <tbody>{pick_table}</tbody>
+  </table>
 </section>
 
 <section>
-  <h2>⭐ Top Conviction · {len(buys)} BUY · {len(watch)} WATCH</h2>
-  {"".join(pick_cards)}
+  <h2>Sector Heatmap · 1-Day % Change</h2>
+  <div class="heatmap">{"".join(heatmap_cells)}</div>
 </section>
 
 <section>
-  <h2>🔥 Strategy Sleeve Activity</h2>
-  {"".join(sleeve_rows)}
+  <h2>Strategy Sleeve Activity · Regime: {regime4}</h2>
+  <div class="sleeves-grid">{"".join(sleeve_blocks)}</div>
 </section>
 
-<section>
-  <h2>📅 Macro Calendar · Next 14 Days</h2>
-  {"".join(macro_rows)}
-</section>
+<div class="two-col">
+  <section>
+    <h2>Macro Calendar · Next 14 Days</h2>
+    {"".join(macro_rows)}
+  </section>
+  <section>
+    <h2>Earnings on Deck · 7d</h2>
+    {"".join(earn_rows)}
+  </section>
+</div>
 
 <section>
-  <h2>⚠️ Risk Watch</h2>
+  <h2>Risk Dashboard</h2>
   <div class="risk-grid">
-    <div class="risk-cell">Rolling Sharpe<br><span class="v" style="color:{rs_color}">{rs_sharpe if isinstance(rs_sharpe, str) else f'{rs_sharpe:+.3f}'}</span><br>{rs_status}<br><span style="color:#7d8590">vs threshold {rs_threshold} on n={rs_n}</span></div>
-    <div class="risk-cell">Open Positions<br><span class="v">{open_n}</span><br>Equity: <b>${equity:,.0f}</b></div>
-    <div class="risk-cell">Closed Today<br><span class="v">{recap['closed_today']}</span><br>P&amp;L: <b>{recap['total_pnl_pct']:+.2f}%</b></div>
-    <div class="risk-cell">Sleeves Enabled<br><span class="v">{report.get('sleeves_enabled_count', 7)}/7</span><br>+ Pre-FOMC overlay</div>
+    <div class="risk-cell">
+      <div class="risk-label">Rolling Sharpe</div>
+      <div class="risk-val" style="color:{rs_color}">{rs_sharpe if isinstance(rs_sharpe, str) else f'{rs_sharpe:+.3f}'}</div>
+      <div class="risk-sub" style="color:{rs_color}">{rs_label} · n={rs_n} · thresh {rs_thresh}</div>
+    </div>
+    <div class="risk-cell">
+      <div class="risk-label">Open Positions</div>
+      <div class="risk-val">{open_n}</div>
+      <div class="risk-sub">Equity ${equity:,.0f}</div>
+    </div>
+    <div class="risk-cell">
+      <div class="risk-label">VIX</div>
+      <div class="risk-val">{vix:.1f}</div>
+      <div class="risk-sub">{'panic >35' if vix > 35 else 'elevated' if vix > 22 else 'normal'}</div>
+    </div>
+    <div class="risk-cell">
+      <div class="risk-label">Breadth ›50dma</div>
+      <div class="risk-val">{breadth:.0f}%</div>
+      <div class="risk-sub">{'risk-on' if breadth > 60 else 'mixed' if breadth > 40 else 'risk-off'}</div>
+    </div>
   </div>
 </section>
 
 <section>
-  <h2>💡 Today's Insight</h2>
-  <div class="insight">{insight_text}</div>
+  <h2>Today's Insight</h2>
+  <div class="insight-box"><div class="insight-text">{insight_text}</div></div>
 </section>
 
 <footer>
-  <a href="https://trade.mystockholding.com/v2/dashboard.html">🔗 Live Dashboard</a>
-  <a href="https://trade.mystockholding.com/reports">📚 Report Archive</a>
-  <a href="https://trade.mystockholding.com/reports/latest/dashboard">🗂️ Latest Snapshot</a>
-  <br><br>
-  <span style="color:#7d8590; font-size:11px">
-    SwingTrade · Built with quant-discipline · Paper observation phase ·
-    Calibration overlay applies (docs/claude_md_calibration.md)
-  </span>
+  <a href="https://trade.mystockholding.com/v2/dashboard.html">Live Dashboard</a>
+  <a href="https://trade.mystockholding.com/reports">Report Archive</a>
+  <a href="https://trade.mystockholding.com/reports/latest/dashboard">Latest Snapshot</a>
+  <div class="disclaimer">
+    SwingTrade · Quant-disciplined systematic trading · Paper observation phase ·
+    Calibration overlay (docs/claude_md_calibration.md) ·
+    Educational use only — not investment advice
+  </div>
 </footer>
 
 </div></body></html>"""
@@ -355,34 +634,19 @@ def _render_html(report: dict) -> str:
 
 def _build_report() -> dict:
     bundle = _load_bundle()
-    sleeves = _sleeve_fires(bundle)
-    rs = _rolling_sharpe()
-    pf = _load_portfolio()
-    macro = _upcoming_macro()
-    recap = _yesterday_recap()
-    # Count sleeves enabled
-    try:
-        cfg = json.loads((REPO / "config" / "config.json").read_text())
-        sleeves_enabled = sum(1 for k in [
-            "momentum_sleeve", "defensive_rotation_sleeve", "mean_reversion_sleeve",
-            "pead_sleeve", "insider_cluster_sleeve", "esp_play_sleeve"
-        ] if cfg.get(k, {}).get("_enabled"))
-    except Exception:
-        sleeves_enabled = 0
-
     return {
         "bundle": bundle,
-        "sleeves": sleeves,
-        "rolling_sharpe": rs,
-        "portfolio": pf,
-        "macro": macro,
-        "recap": recap,
-        "sleeves_enabled_count": sleeves_enabled,
+        "sleeves": _sleeve_fires(bundle),
+        "rolling_sharpe": _rolling_sharpe(),
+        "portfolio": _load_portfolio(),
+        "macro": _upcoming_macro(),
+        "recap": _yesterday_recap(),
+        "earnings": _upcoming_earnings(bundle),
+        "sector_heatmap": _sector_heatmap(bundle),
     }
 
 
 def _slack_summary(report: dict) -> tuple[str, list]:
-    """Build Slack summary that links to the full newsletter."""
     bundle = report["bundle"]
     regime = bundle.get("regime", {})
     buys = bundle.get("buy_candidates") or []
@@ -390,17 +654,15 @@ def _slack_summary(report: dict) -> tuple[str, list]:
     sleeves = report["sleeves"]
     rs = report["rolling_sharpe"]
 
-    today = date.today().strftime("%A, %b %d")
+    today = date.today().strftime("%A, %b %-d")
     regime4 = regime.get("regime4", "unknown")
-    sleeve_count = sum(len(v) for v in sleeves.values())
 
     text = f"🌅 *Morning Brief — {today}* · regime `{regime4}` · {len(buys)} BUY · {len(watch)} WATCH"
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": "🌅 SwingTrade Morning Brief"}},
         {"type": "section", "text": {"type": "mrkdwn",
-         "text": f"*{today}* · Regime: `{regime4}` · SPY `${regime.get('spy_price','?')}` · VIX `{regime.get('vix_current','?')}`"}},
+         "text": f"*{today}* · Regime: `{regime4}` · SPY `${regime.get('spy_price','?')}` · VIX `{regime.get('vix_current','?')}` · Breadth `{regime.get('breadth_pct_50d','?')}%`"}},
     ]
-    # Top 3 picks
     if buys:
         top_lines = []
         for r in buys[:3]:
@@ -411,10 +673,6 @@ def _slack_summary(report: dict) -> tuple[str, list]:
             top_lines.append(f"• `{t}` score *{s}* · R:R *{rr:.1f}* · _{sf}_")
         blocks.append({"type": "section", "text": {"type": "mrkdwn",
             "text": "*Top picks:*\n" + "\n".join(top_lines)}})
-    else:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn",
-            "text": f"_No BUY picks today. {len(watch)} on WATCH._"}})
-    # Sleeve summary
     sleeve_summary = []
     for name, hits in sleeves.items():
         if hits:
@@ -422,26 +680,23 @@ def _slack_summary(report: dict) -> tuple[str, list]:
     if sleeve_summary:
         blocks.append({"type": "section", "text": {"type": "mrkdwn",
             "text": "*Sleeves firing:* " + " · ".join(sleeve_summary)}})
-    # Risk
     rs_status = "🔴 KILL ACTIVE" if rs.get("active") else "🟢 healthy"
     blocks.append({"type": "context", "elements": [{"type": "mrkdwn",
-        "text": f"Rolling Sharpe: {rs_status} · Sharpe `{rs.get('sharpe','n/a')}` vs threshold `{rs.get('threshold','n/a')}`"}]})
-    # Link
+        "text": f"Rolling Sharpe: {rs_status} · sharpe `{rs.get('sharpe','n/a')}` vs `{rs.get('threshold','n/a')}`"}]})
     blocks.append({"type": "section", "text": {"type": "mrkdwn",
-        "text": "<https://trade.mystockholding.com/reports/latest/morning-newsletter|🌅 Read the full Morning Brief →>"}})
+        "text": "<https://trade.mystockholding.com/reports/latest/morning-newsletter|🌅 Open Full Morning Brief →>"}})
     return text, blocks
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-slack", action="store_true")
-    ap.add_argument("--preview", action="store_true", help="Print HTML to stdout")
+    ap.add_argument("--preview", action="store_true")
     args = ap.parse_args()
 
     report = _build_report()
     html = _render_html(report)
 
-    # Save to disk + DB
     out_p = REPO / "cache" / f"morning_newsletter_{date.today().isoformat()}.html"
     out_p.write_text(html)
     print(f"Wrote {out_p}")
@@ -449,8 +704,7 @@ def main():
     try:
         import db
         snap_id = db.save_html_snapshot(
-            kind="morning-newsletter",
-            html_content=html,
+            kind="morning-newsletter", html_content=html,
             label=f"Morning Brief {date.today().isoformat()}",
             meta={
                 "regime": (report["bundle"].get("regime") or {}).get("regime4"),
@@ -460,16 +714,11 @@ def main():
             }
         )
         print(f"Saved to DB: snapshot id={snap_id}")
-        print(f"Access at: https://trade.mystockholding.com/reports/latest/morning-newsletter")
     except Exception as e:
         print(f"DB save failed: {e}")
 
     if args.preview:
-        print("\n" + "=" * 60)
-        print("HTML PREVIEW")
-        print("=" * 60)
         print(html[:2000])
-        print("...")
 
     if not args.no_slack:
         text, blocks = _slack_summary(report)
@@ -481,9 +730,7 @@ def main():
         if webhook:
             from alerts import _slack_post
             ok = _slack_post(webhook, text, blocks)
-            print(f"\nSlack: {'✓ sent' if ok else '✗ failed'}")
-        else:
-            print("\nNo SLACK_WEBHOOK_URL — skipped Slack post")
+            print(f"Slack: {'✓ sent' if ok else '✗ failed'}")
 
 
 if __name__ == "__main__":
