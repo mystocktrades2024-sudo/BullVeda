@@ -2030,13 +2030,15 @@ def pre_trade_gate(ticker: str, df: pd.DataFrame, info: dict,
         except Exception:
             pass
 
-    # Phase 5C: Hard earnings blackout — block within 3 days, soft gate within blackout
+    # Phase 5C: Hard earnings blackout — block within 3 days BEFORE earnings only.
+    # Negative days_to_earnings = post-report (PEAD window) — don't block.
+    # (was bug: `days_to_earn <= 3` matched -3 = 3 days AFTER earnings, killing PEAD)
     blackout = gates_cfg.get("earnings_blackout_days", 5)
     days_to_earn = earnings.get("days_to_earnings")
     if days_to_earn is not None and isinstance(days_to_earn, (int, float)):
-        if days_to_earn <= 3:
+        if 0 <= days_to_earn <= 3:
             reasons.append(f"HARD BLOCK: Earnings in {days_to_earn} days — no new positions within 3 days of earnings")
-        elif days_to_earn <= blackout:
+        elif 0 <= days_to_earn <= blackout:
             reasons.append(f"Earnings in {days_to_earn} days (blackout {blackout}d)")
     elif earnings.get("earnings_risk"):
         days = earnings.get("days_to_earnings", "?")
