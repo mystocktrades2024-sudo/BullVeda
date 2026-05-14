@@ -3712,6 +3712,26 @@ def run_daily_scan(force_fresh: bool = False):
                 if _r.get("ticker") not in _seen:
                     _wl.append(_r); _seen.add(_r.get("ticker"))
             bundle["watch_list"] = _wl
+        # WATCH → BUY promotion (2026-05-14): scan watch_list for items the
+        # decision engine just upgraded to BUY (e.g. PEAD signals that gained
+        # bypasses for entry_quality, decision_state, fund_adequacy). Without
+        # this sweep, a BUY-verdicted ticker stuck in watch_list never reaches
+        # the dashboard's BUY tab.
+        _wl_now = list(bundle.get("watch_list") or [])
+        _bc_tickers = {r.get("ticker") for r in _new_buy if isinstance(r, dict)}
+        _promoted = []
+        _kept_wl = []
+        for _r in _wl_now:
+            if isinstance(_r, dict) and _r.get("verdict") == "BUY" and _r.get("ticker") not in _bc_tickers:
+                _promoted.append(_r)
+                _bc_tickers.add(_r.get("ticker"))
+            else:
+                _kept_wl.append(_r)
+        if _promoted:
+            _new_buy.extend(_promoted)
+            bundle["watch_list"] = _kept_wl
+            log.info(f"  Decision engine: PROMOTED {len(_promoted)} WATCH → BUY "
+                     f"({', '.join(r.get('ticker') for r in _promoted)})")
         bundle["buy_candidates"] = _new_buy
         bundle["decision_engine_version"] = "1.0"
         log.info(f"  Decision engine: scored {_de_count} tickers, "
