@@ -2991,10 +2991,45 @@ def get_market_regime(breadth: dict | None = None) -> dict:
             "market_cycle":         market_cycle,
             "vix":                  vix_data,
             "vix_current":          vix_cur,
+            # Item #9 — SPY rolling Sharpe as cross-validation regime signal.
+            # Independent of the 4-regime classifier; flags late-stage bull /
+            # regime instability when SPY Sharpe < 0.5. Informational only.
+            "spy_sharpe": _spy_sharpe_payload(close) if len(close) >= 30 else None,
         }
     except Exception as e:
         log.error(f"Market regime check failed: {e}")
         return {"regime": "unknown", "spy_price": 0}
+
+
+def _spy_sharpe_payload(spy_closes) -> dict:
+    """Cross-validation SPY-Sharpe signal across 20/60/126/252 windows."""
+    try:
+        from lib.sharpe_utils import sharpe_annualized, rolling_sharpe, consistency_score
+        closes = list(map(float, spy_closes))
+        sh_126, ret_a, vol_a = sharpe_annualized(closes, lookback=126)
+        rolling = rolling_sharpe(closes, windows=(20, 60, 126, 252))
+        consistency = consistency_score(rolling)
+        # Signal: SPY Sharpe < 0.5 = late-stage / weak market — independent caution flag
+        signal = "neutral"
+        if sh_126 is not None:
+            if sh_126 < 0:
+                signal = "RISK_OFF — SPY Sharpe negative"
+            elif sh_126 < 0.5:
+                signal = "CAUTION — SPY Sharpe weak (<0.5)"
+            elif sh_126 > 1.5:
+                signal = "STRONG — SPY Sharpe robust (>1.5)"
+            else:
+                signal = "OK"
+        return {
+            "sharpe_126d_ann": sh_126,
+            "ret_ann_pct": ret_a,
+            "vol_ann_pct": vol_a,
+            "rolling": {str(k): v for k, v in rolling.items()},
+            "consistency": consistency,
+            "signal": signal,
+        }
+    except Exception:
+        return {}
 
 
 def compute_sector_dispersion(sector_etf_data: dict) -> dict:

@@ -4384,6 +4384,7 @@ def tag_catalysts(indicators: dict, pead_data: dict,
 def _detect_momentum_continuation(
     indicators: dict, regime4: str, score: float, earn_days, price: float,
     daily_dollar_volume, config: dict | None,
+    sharpe_126d: float | None = None,
 ) -> tuple[bool, dict]:
     """MOMENTUM-CONTINUATION sleeve detector (2026-05-13).
 
@@ -4460,6 +4461,15 @@ def _detect_momentum_continuation(
         checks["earnings"] = f"earn_days={earn_days} < {min_earn}"
         return False, audit
     checks["earnings"] = "OK"
+    # 126d Sharpe gate (per design spec — confirms genuine trend, not noise)
+    min_sharpe = float(cfg.get("min_sharpe_126d", 1.5))
+    if sharpe_126d is None:
+        checks["sharpe_126d"] = "sharpe N/A — skipped (computed downstream)"
+    elif sharpe_126d < min_sharpe:
+        checks["sharpe_126d"] = f"{sharpe_126d:.2f} < {min_sharpe:.2f}"
+        return False, audit
+    else:
+        checks["sharpe_126d"] = f"{sharpe_126d:.2f} ≥ {min_sharpe:.2f} ✓"
     # All criteria met
     audit["fired"] = True
     return True, audit
@@ -5220,7 +5230,8 @@ def kelly_position_size(stats: dict, regime_name: str, vix: float,
                          conviction_tier: int, portfolio_size: float,
                          risk_per_share: float, price: float,
                          config: dict | None = None,
-                         adv_20d: float = 0.0) -> dict:
+                         adv_20d: float = 0.0,
+                         sharpe_126d: float | None = None) -> dict:
     """
     Risk-first position sizing model (Fix #5):
       risk_dollars = account_equity * risk_per_trade_pct
@@ -5333,7 +5344,27 @@ def kelly_position_size(stats: dict, regime_name: str, vix: float,
         if cur_pos_pct > max_pos_pct_by_cvar:
             _var_floor_mult = max_pos_pct_by_cvar / cur_pos_pct if cur_pos_pct > 0 else 1.0
 
-    effective_regime_cap = effective_regime_cap * _earn_mult * _var_floor_mult
+    # ── Sharpe-tilt multiplier (item #5 — Sharpe-weighted position sizing) ──
+    # Tilt size toward higher-Sharpe candidates within a basket. Per-trade Sharpe
+    # ≥ 2.0 = full tilt up; < 0.5 = halve. Capped to [0.5, 1.5] to prevent runaway
+    # concentration. Config-flagged via portfolio.sharpe_size_tilt._enabled.
+    _sharpe_cfg = (config or {}).get("portfolio", {}).get("sharpe_size_tilt") or {}
+    _sharpe_mult = 1.0
+    if _sharpe_cfg.get("_enabled", False) and sharpe_126d is not None:
+        _lo = float(_sharpe_cfg.get("low_threshold", 0.5))
+        _hi = float(_sharpe_cfg.get("high_threshold", 2.0))
+        _min_mult = float(_sharpe_cfg.get("min_mult", 0.5))
+        _max_mult = float(_sharpe_cfg.get("max_mult", 1.5))
+        if sharpe_126d <= _lo:
+            _sharpe_mult = _min_mult
+        elif sharpe_126d >= _hi:
+            _sharpe_mult = _max_mult
+        else:
+            # Linear interpolation between low and high
+            _t = (sharpe_126d - _lo) / (_hi - _lo)
+            _sharpe_mult = round(_min_mult + _t * (_max_mult - _min_mult), 3)
+
+    effective_regime_cap = effective_regime_cap * _earn_mult * _var_floor_mult * _sharpe_mult
     shares_from_risk = math.floor(shares_from_risk * effective_regime_cap)
     position_value = shares_from_risk * price
 
@@ -5362,6 +5393,8 @@ def kelly_position_size(stats: dict, regime_name: str, vix: float,
         "earnings_days":    _earn_days if '_earn_days' in dir() else None,
         "var_floor_mult":   _var_floor_mult if '_var_floor_mult' in dir() else 1.0,
         "cvar_975_pct":     _cvar_pct if '_cvar_pct' in dir() else None,
+        "sharpe_mult":      _sharpe_mult if '_sharpe_mult' in dir() else 1.0,
+        "sharpe_126d":      sharpe_126d,
         "effective_regime_cap": round(effective_regime_cap, 3),
         "risk_per_trade_pct": risk_per_trade_pct,
         "live_win_rate":    round(win_rate * 100, 1),
@@ -5959,6 +5992,27 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
         stop_mult = max(1.0, _base_stop_mult - 0.25)  # tighter in downtrends
     else:
         stop_mult = _base_stop_mult
+
+    # Item #7 — Sharpe-based stop tilt
+    # High Sharpe (low return-relative-vol) → tighter stop; low Sharpe → wider.
+    # Sharpe value injected by analyze_ticker via config["scoring"]["_runtime_sharpe_126d"].
+    _sharpe_stop_cfg = (_cfg.get("portfolio", {}) or {}).get("sharpe_stop_tilt") or {}
+    if _sharpe_stop_cfg.get("_enabled", False):
+        _sh = (_cfg.get("scoring", {}) or {}).get("_runtime_sharpe_126d")
+        if _sh is not None:
+            _slo = float(_sharpe_stop_cfg.get("low_threshold", 0.5))
+            _shi = float(_sharpe_stop_cfg.get("high_threshold", 2.0))
+            _smin = float(_sharpe_stop_cfg.get("min_mult", 0.85))
+            _smax = float(_sharpe_stop_cfg.get("max_mult", 1.25))
+            # Inverted: high Sharpe → tighter (use min_mult); low Sharpe → wider (max_mult)
+            if _sh >= _shi:
+                _sharpe_stop_factor = _smin
+            elif _sh <= _slo:
+                _sharpe_stop_factor = _smax
+            else:
+                _t = (_sh - _slo) / (_shi - _slo)
+                _sharpe_stop_factor = round(_smax - _t * (_smax - _smin), 3)
+            stop_mult = stop_mult * _sharpe_stop_factor
 
     support = sr.get("support", price * 0.95)
     resistance = sr.get("resistance", price * 1.10)
@@ -8672,6 +8726,18 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     # Phase 3B: pass regime name to trade plan for adaptive stops
     _plan_cfg = dict(config)
     _plan_cfg["_regime_name"] = str(regime.get("regime", "neutral")).lower()
+    # Item #7 — pre-compute 126d Sharpe and inject into config so compute_trade_plan
+    # can apply Sharpe-based stop tilt. Cheap (~2ms per ticker).
+    try:
+        from lib.sharpe_utils import sharpe_annualized as _sa_pre
+        if df is not None and len(df) >= 127:
+            _closes_pre = df["close"].astype(float).tolist() if "close" in df else df["Close"].astype(float).tolist()
+            _sh_pre, _, _ = _sa_pre(_closes_pre, lookback=126)
+            _plan_cfg.setdefault("scoring", {})
+            _plan_cfg["scoring"] = dict(_plan_cfg.get("scoring") or {})
+            _plan_cfg["scoring"]["_runtime_sharpe_126d"] = _sh_pre
+    except Exception:
+        pass
     _prelim_plan = compute_trade_plan(ticker, df, sr, tech["indicators"], _direction_early,
                                      beta=info.get("beta") if info else None,
                                      config=_plan_cfg)
@@ -9367,11 +9433,31 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     # When promoted to live, the override will route through bypass logic
     # in decision_engine (fund_adequacy + setup-mult kills bypassed).
     _momentum_audit = None
+    _sharpe_126d_value = None
+    _sortino_126d_value = None
+    _sharpe_consistency = None
     try:
         _earn_for_mom = (info.get("earnings") or {}).get("days_to_earnings") if info else None
         if _earn_for_mom is None:
             _earn_for_mom = info.get("earn_days") if info else None
         _adv_for_mom = info.get("daily_dollar_volume") if info else None
+        # Compute 126d Sharpe inline from df closes for momentum gate (item #1)
+        # Plus Sortino (item #8) and rolling-window consistency (item #12)
+        try:
+            from lib.sharpe_utils import (
+                sharpe_annualized as _sa, sortino_annualized as _so,
+                rolling_sharpe as _rs, consistency_score as _cs,
+            )
+            if df is not None and len(df) >= 127:
+                _closes = df["close"].astype(float).tolist() if "close" in df else df["Close"].astype(float).tolist()
+                _sharpe_126d_value, _, _ = _sa(_closes, lookback=126)
+                _sortino_126d_value, _ = _so(_closes, lookback=126)
+                if len(_closes) >= 253:
+                    _rsh = _rs(_closes, windows=(20, 60, 126, 252))
+                    _sharpe_consistency = _cs(_rsh)
+                    _sharpe_consistency["rolling"] = {str(k): v for k, v in _rsh.items()}
+        except Exception:
+            _sharpe_126d_value = None
         _mom_fired, _momentum_audit = _detect_momentum_continuation(
             indicators=tech["indicators"],
             regime4=regime4,
@@ -9380,6 +9466,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             price=price,
             daily_dollar_volume=_adv_for_mom,
             config=config,
+            sharpe_126d=_sharpe_126d_value,
         )
         if _mom_fired:
             setup_family = "Momentum Continuation"
@@ -9471,6 +9558,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             price=price,
             config=config,
             adv_20d=float(avg_vol * price) if avg_vol and price else 0.0,
+            sharpe_126d=_sharpe_126d_value,  # item #5 — Sharpe-tilt sizing
         )
     except Exception:
         pass
@@ -10056,6 +10144,11 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         # the user (CF case: setup_family=Breakout Expansion + plan.setup_type=
         # EMA21 Pullback → mult=0.0 → score=0 with no visible reason).
         "score_mult_audit": _setup_mult_audit if '_setup_mult_audit' in dir() else None,
+        # Sharpe metrics (item #1, #8, #12) — surface for v2 dashboard column,
+        # momentum gate (already used above), and downstream attribution.
+        "sharpe_126d":        _sharpe_126d_value if '_sharpe_126d_value' in dir() else None,
+        "sortino_126d":       _sortino_126d_value if '_sortino_126d_value' in dir() else None,
+        "sharpe_consistency": _sharpe_consistency if '_sharpe_consistency' in dir() else None,
 
         "star_rating": star_rating,
         "sector": info.get("sector", "Unknown"),

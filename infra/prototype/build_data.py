@@ -587,6 +587,221 @@ def _compute_monte_carlo_safe(r: dict) -> dict:
         return {"error": str(e)}
 
 
+def _compute_p0_metrics_safe(r: dict) -> dict:
+    """2026-05-13 · P0 metrics for Exec Brief (Sharpe / F-score / Altman Z / ROIC / WACC).
+
+    Reads from r['ohlcv'] (price history) + r['fundamentals'] (EODHD).
+    Returns dict with each metric, None where data missing. Never raises.
+
+    Frontend reads these as t.sharpe_1y, t.f_score, t.altman_z, t.roic, t.wacc.
+    Missing fields render as "—" in Exec Brief per framework principle 1 (no fabrication).
+    """
+    out = {
+        'sharpe_1y': None, 'sharpe_3y': None, 'volatility_1y': None,
+        'max_dd_3y': None, 'calmar': None, 'sortino_1y': None,
+        'f_score': None, 'altman_z': None, 'roic': None, 'wacc': None,
+        'p0_data_quality': 'PARTIAL'
+    }
+    try:
+        import math
+        # ── Price-history-based: Sharpe, volatility, drawdown ─────────
+        ohlcv = r.get('ohlcv')
+        closes = []
+        if isinstance(ohlcv, list) and ohlcv and isinstance(ohlcv[0], dict):
+            closes = [float(b.get('Close') or b.get('close') or 0) for b in ohlcv if (b.get('Close') or b.get('close'))]
+        elif isinstance(ohlcv, dict):
+            c = ohlcv.get('close') or ohlcv.get('Close') or []
+            closes = [float(x) for x in c if x]
+
+        if len(closes) >= 60:
+            # Daily log returns
+            rets = []
+            for i in range(1, len(closes)):
+                if closes[i-1] > 0:
+                    rets.append(math.log(closes[i] / closes[i-1]))
+            if rets:
+                # 1y window = last 252 returns (or what we have)
+                rets_1y = rets[-252:]
+                mu_d = sum(rets_1y) / len(rets_1y)
+                var_d = sum((x - mu_d) ** 2 for x in rets_1y) / max(1, len(rets_1y) - 1)
+                sigma_d = math.sqrt(var_d)
+                # Annualize · risk-free ~ 4.4% (current 10Y), so daily Rf = 0.044/252
+                rf_d = 0.044 / 252.0
+                if sigma_d > 0:
+                    sharpe_d = (mu_d - rf_d) / sigma_d
+                    out['sharpe_1y'] = round(sharpe_d * math.sqrt(252), 3)
+                out['volatility_1y'] = round(sigma_d * math.sqrt(252), 4)
+                # Sortino: downside-only volatility
+                dn = [r for r in rets_1y if r < 0]
+                if dn:
+                    sigma_dn = math.sqrt(sum(r ** 2 for r in dn) / len(dn))
+                    if sigma_dn > 0:
+                        out['sortino_1y'] = round((mu_d * math.sqrt(252) - 0.044) / (sigma_dn * math.sqrt(252)), 3)
+                # 3y Sharpe if we have ≥756 days
+                if len(rets) >= 600:
+                    rets_3y = rets[-756:]
+                    mu_3y = sum(rets_3y) / len(rets_3y)
+                    var_3y = sum((x - mu_3y) ** 2 for x in rets_3y) / max(1, len(rets_3y) - 1)
+                    sigma_3y = math.sqrt(var_3y)
+                    if sigma_3y > 0:
+                        out['sharpe_3y'] = round((mu_3y - rf_d) / sigma_3y * math.sqrt(252), 3)
+
+            # Max drawdown (3y window)
+            window = closes[-756:] if len(closes) >= 756 else closes
+            peak = window[0]
+            max_dd = 0.0
+            for px in window:
+                if px > peak: peak = px
+                dd = (px - peak) / peak
+                if dd < max_dd: max_dd = dd
+            out['max_dd_3y'] = round(max_dd, 4)
+            # Calmar: annual return / |max DD|
+            if out['sharpe_3y'] is not None and out['volatility_1y'] is not None and max_dd < 0:
+                ann_ret_3y = out['sharpe_3y'] * out['volatility_1y'] + 0.044
+                out['calmar'] = round(ann_ret_3y / abs(max_dd), 3)
+
+        # ── Fundamentals-based: F-score, Altman Z, ROIC, WACC ──────────
+        f = r.get('fundamentals') or {}
+        # EODHD enrichment may have stored this as compact dict — try both shapes
+        details = f.get('details') if isinstance(f, dict) else None
+        # Direct access to EODHD raw structure (when full fundamentals fetched)
+        bs_q = (((f.get('Financials') or {}).get('Balance_Sheet') or {}).get('quarterly') or {}) if isinstance(f, dict) else {}
+        inc_q = (((f.get('Financials') or {}).get('Income_Statement') or {}).get('quarterly') or {}) if isinstance(f, dict) else {}
+        cf_q = (((f.get('Financials') or {}).get('Cash_Flow') or {}).get('quarterly') or {}) if isinstance(f, dict) else {}
+        hi = f.get('Highlights') or {} if isinstance(f, dict) else {}
+
+        # F-score (9 tests · need current + prior year)
+        try:
+            bs_keys = sorted(bs_q.keys(), reverse=True) if bs_q else []
+            inc_keys = sorted(inc_q.keys(), reverse=True) if inc_q else []
+            cf_keys = sorted(cf_q.keys(), reverse=True) if cf_q else []
+            if len(bs_keys) >= 5 and len(inc_keys) >= 5:
+                cur_bs = bs_q[bs_keys[0]]
+                pri_bs = bs_q[bs_keys[4]]  # 4 quarters back ≈ 1 year
+                cur_inc = inc_q[inc_keys[0]]
+                pri_inc = inc_q[inc_keys[4]]
+                cur_cf = cf_q[cf_keys[0]] if cf_keys else {}
+
+                ni_cur = float(cur_inc.get('netIncome') or 0)
+                ocf_cur = float(cur_cf.get('totalCashFromOperatingActivities') or 0)
+                ta_cur = float(cur_bs.get('totalAssets') or 0)
+                ta_pri = float(pri_bs.get('totalAssets') or 0)
+                ltd_cur = float(cur_bs.get('longTermDebt') or 0)
+                ltd_pri = float(pri_bs.get('longTermDebt') or 0)
+                ca_cur = float(cur_bs.get('totalCurrentAssets') or 0)
+                cl_cur = float(cur_bs.get('totalCurrentLiabilities') or 0)
+                ca_pri = float(pri_bs.get('totalCurrentAssets') or 0)
+                cl_pri = float(pri_bs.get('totalCurrentLiabilities') or 0)
+                shares_cur = float(cur_bs.get('commonStockSharesOutstanding') or 0)
+                shares_pri = float(pri_bs.get('commonStockSharesOutstanding') or 0)
+                rev_cur = float(cur_inc.get('totalRevenue') or 0)
+                rev_pri = float(pri_inc.get('totalRevenue') or 0)
+                gp_cur = float(cur_inc.get('grossProfit') or 0)
+                gp_pri = float(pri_inc.get('grossProfit') or 0)
+                ni_pri = float(pri_inc.get('netIncome') or 0)
+
+                roa_cur = ni_cur / ta_cur if ta_cur else 0
+                roa_pri = ni_pri / ta_pri if ta_pri else 0
+                cr_cur = ca_cur / cl_cur if cl_cur else 0
+                cr_pri = ca_pri / cl_pri if cl_pri else 0
+                gm_cur = gp_cur / rev_cur if rev_cur else 0
+                gm_pri = gp_pri / rev_pri if rev_pri else 0
+                at_cur = rev_cur / ta_cur if ta_cur else 0
+                at_pri = rev_pri / ta_pri if ta_pri else 0
+                ltd_ta_cur = ltd_cur / ta_cur if ta_cur else 0
+                ltd_ta_pri = ltd_pri / ta_pri if ta_pri else 0
+
+                score = 0
+                if ni_cur > 0: score += 1            # 1. Positive NI
+                if ocf_cur > 0: score += 1           # 2. Positive OCF
+                if roa_cur > roa_pri: score += 1     # 3. ROA increasing
+                if ocf_cur > ni_cur: score += 1      # 4. OCF > NI (quality)
+                if ltd_ta_cur < ltd_ta_pri: score += 1  # 5. LT debt ratio down
+                if cr_cur > cr_pri: score += 1       # 6. Current ratio up
+                if shares_cur <= shares_pri * 1.001: score += 1  # 7. No share issuance
+                if gm_cur > gm_pri: score += 1       # 8. Gross margin up
+                if at_cur > at_pri: score += 1       # 9. Asset turnover up
+                out['f_score'] = score
+        except Exception:
+            pass
+
+        # Altman Z (manufacturing 5-factor)
+        try:
+            if bs_q and inc_q:
+                cur_bs = bs_q[sorted(bs_q.keys(), reverse=True)[0]]
+                cur_inc = inc_q[sorted(inc_q.keys(), reverse=True)[0]]
+                wc = float(cur_bs.get('totalCurrentAssets') or 0) - float(cur_bs.get('totalCurrentLiabilities') or 0)
+                ta = float(cur_bs.get('totalAssets') or 0)
+                re = float(cur_bs.get('retainedEarnings') or 0)
+                ebit = float(cur_inc.get('ebit') or cur_inc.get('operatingIncome') or 0)
+                mcap = float(hi.get('MarketCapitalization') or r.get('market_cap') or 0)
+                tl = float(cur_bs.get('totalLiab') or 0)
+                rev = float(cur_inc.get('totalRevenue') or 0)
+                if ta > 0 and tl > 0:
+                    A = wc / ta
+                    B = re / ta
+                    C = ebit / ta
+                    D = mcap / tl
+                    E = rev / ta
+                    z = 1.2 * A + 1.4 * B + 3.3 * C + 0.6 * D + 1.0 * E
+                    out['altman_z'] = round(z, 2)
+        except Exception:
+            pass
+
+        # ROIC: NOPAT / invested capital
+        try:
+            if inc_q and bs_q:
+                cur_bs = bs_q[sorted(bs_q.keys(), reverse=True)[0]]
+                # NOPAT = EBIT × (1 - tax_rate)
+                cur_inc = inc_q[sorted(inc_q.keys(), reverse=True)[0]]
+                ebit = float(cur_inc.get('ebit') or cur_inc.get('operatingIncome') or 0)
+                tax = float(cur_inc.get('incomeTaxExpense') or 0)
+                pretax = float(cur_inc.get('incomeBeforeTax') or 0)
+                tax_rate = (tax / pretax) if pretax > 0 else 0.21
+                nopat = ebit * (1 - tax_rate)
+                # Invested capital = total debt + equity − cash
+                total_debt = float(cur_bs.get('shortLongTermDebtTotal') or 0) + float(cur_bs.get('longTermDebt') or 0)
+                equity = float(cur_bs.get('totalStockholderEquity') or 0)
+                cash = float(cur_bs.get('cashAndShortTermInvestments') or cur_bs.get('cash') or 0)
+                invested = total_debt + equity - cash
+                if invested > 0 and ebit > 0:
+                    out['roic'] = round(nopat / invested, 4)
+        except Exception:
+            pass
+
+        # WACC: weight_e * Re + weight_d * Rd * (1 - tax_rate)
+        try:
+            beta = float(r.get('beta') or hi.get('Beta') or 1.0)
+            mcap = float(hi.get('MarketCapitalization') or r.get('market_cap') or 0)
+            if bs_q:
+                cur_bs = bs_q[sorted(bs_q.keys(), reverse=True)[0]]
+                total_debt = float(cur_bs.get('shortLongTermDebtTotal') or 0) + float(cur_bs.get('longTermDebt') or 0)
+            else:
+                total_debt = 0
+            if mcap > 0:
+                # CAPM: Re = Rf + β × ERP
+                Rf = 0.044   # current 10Y
+                ERP = 0.055  # equity risk premium · long-run avg
+                Re = Rf + beta * ERP
+                # Cost of debt: estimate ~5% (or interest_expense / debt if available)
+                Rd = 0.05
+                V = mcap + total_debt
+                We = mcap / V
+                Wd = total_debt / V
+                tax_rate = 0.21
+                wacc = We * Re + Wd * Rd * (1 - tax_rate)
+                out['wacc'] = round(wacc, 4)
+        except Exception:
+            pass
+
+        # Data quality flag
+        wired = sum(1 for k in ['sharpe_1y','f_score','altman_z','roic','wacc'] if out.get(k) is not None)
+        out['p0_data_quality'] = 'FULL' if wired == 5 else ('PARTIAL' if wired >= 3 else 'THIN')
+    except Exception:
+        pass
+    return out
+
+
 def _compute_forward_dist_safe(ohlcv) -> dict:
     """V-3: Empirical forward-distribution metrics from OHLCV history. Never raises."""
     try:
@@ -1229,6 +1444,11 @@ def compact_row(r: dict) -> dict:
         "adx":            (r.get("technicals") or {}).get("adx"),
         "alloc_pct":      ((r.get("trade_plan") or {}).get("allocation_pct")
                           or r.get("allocation_pct") or 0),
+        # Sharpe / Sortino / consistency surfaced for v2 dashboard column (item #2, #8, #12)
+        "sharpe_126d":    r.get("sharpe_126d"),
+        "sortino_126d":   r.get("sortino_126d"),
+        "sharpe_consistency_verdict": (r.get("sharpe_consistency") or {}).get("verdict"),
+        "sharpe_consistency_spread":  (r.get("sharpe_consistency") or {}).get("spread"),
         "primary_zone_low": (r.get("trade_plan") or {}).get("primary_zone_low") or (r.get("trade_plan") or {}).get("entry_low"),
         "primary_zone_high": (r.get("trade_plan") or {}).get("primary_zone_high") or (r.get("trade_plan") or {}).get("entry_high"),
         "deep_zone_low":  (r.get("trade_plan") or {}).get("deep_zone_low"),
@@ -1544,6 +1764,13 @@ def rich_row(r: dict, b: dict = None) -> dict:
         "theory_confluence": r.get("theory_confluence") or {},
         # P4.39 — Audit trail per BUY: structured record of why this verdict
         "audit_trail": _build_audit_trail(r),
+
+        # 2026-05-13 · P0 metrics for Exec Brief (round 5).
+        # Sharpe / Sortino / Calmar / max-DD from ohlcv history.
+        # F-score / Altman Z / ROIC / WACC from EODHD fundamentals.
+        # Each field defaults to None when source data is missing; frontend
+        # renders "—" per framework principle 1 (no fabrication).
+        **_compute_p0_metrics_safe(r),
         # Options intelligence — IV rank, P/C, UOA, skew, term, gamma, verdict + thesis + per-mode overlay
         "options_kpis": r.get("options_kpis") or {},
         # Per-mode verdicts — use the SAME re-weighted scoring that builds the
@@ -3234,19 +3461,41 @@ def main():
     # options-flow scanner runs every 30m in market hours and writes to
     # infra/prototype/options_flow.json independently. Read that file
     # directly so fresh UOA shows up between scans.
+    # 2026-05-13: previous len-greater-than check failed when the bundle
+    # was empty (0 == 0 stays 0). Now we prefer disk whenever:
+    #   (a) bundle is empty, OR
+    #   (b) disk has more candidates than bundle, OR
+    #   (c) disk has a newer refreshed_at than the bundle's run_timestamp.
+    # The QuantOptions dashboard tab ALSO fetches options_flow.json directly
+    # client-side, so the dashboard is robust even if this step misfires.
     _of_bundle = b.get("options_flow_top30") or []
+    _of_top50_bundle = b.get("options_flow_top50") or []
+    _of_refreshed_at = None
     try:
         _of_path = OUT / "options_flow.json"
         if _of_path.exists():
             _of_disk = json.loads(_of_path.read_text())
             _of_top30 = _of_disk.get("top30") or _of_disk.get("candidates") or []
-            if isinstance(_of_top30, list) and len(_of_top30) > len(_of_bundle):
-                _of_bundle = _of_top30  # prefer the fresher standalone file
-                print(f"[options_flow] using standalone file ({len(_of_top30)} candidates, refreshed {_of_disk.get('refreshed_at','—')})")
+            _of_top50 = _of_disk.get("top50") or _of_top30
+            _of_refreshed_at = _of_disk.get("refreshed_at")
+            if isinstance(_of_top30, list):
+                # Compare disk freshness vs bundle scan timestamp.
+                _bundle_ts = (b.get("run_timestamp") or "").strip()
+                _disk_newer = bool(_of_refreshed_at and _bundle_ts and _of_refreshed_at > _bundle_ts)
+                if len(_of_bundle) == 0 or len(_of_top30) > len(_of_bundle) or _disk_newer:
+                    _of_bundle = _of_top30
+                    _of_top50_bundle = _of_top50 if isinstance(_of_top50, list) else _of_top30
+                    print(f"[options_flow] using standalone file ({len(_of_top30)} candidates, refreshed {_of_refreshed_at or '—'})")
+                else:
+                    print(f"[options_flow] keeping bundle ({len(_of_bundle)} candidates · disk has {len(_of_top30)})")
     except Exception as _of_err:
         print(f"[options_flow] standalone fallback skipped: {_of_err}")
     data["options_flow_top30"] = _of_bundle
-    data["options_flow_top50"] = b.get("options_flow_top50") or _of_bundle or []
+    data["options_flow_top50"] = _of_top50_bundle or _of_bundle or []
+    # Propagate the actual refresh timestamp so the dashboard freshness pill
+    # reflects the truth (not just the broader scan time).
+    if _of_refreshed_at:
+        data["options_flow_refreshed_at"] = _of_refreshed_at
 
     # Crypto scan — bundle.crypto contains BTC/ETH/SOL/etc scored through
     # the same gate cascade. Surface to V2 Crypto tab.

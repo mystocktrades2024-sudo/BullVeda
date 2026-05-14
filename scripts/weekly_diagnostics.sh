@@ -34,7 +34,19 @@ python3 scripts/loss_streak_investigation.py 2>&1 | tail -50 >> "$LOG"
 python3 scripts/sharpe_screener.py 2>&1 | tail -10 >> "$LOG"
 python3 scripts/sharpe_screener_html.py 2>&1 | tail -3 >> "$LOG"
 
-# 5. Compare to prior week — alert if Sharpe regressed
+# 5. Per-stock Sharpe by regime (item #3)
+python3 scripts/sharpe_per_regime.py 2>&1 | tail -30 >> "$LOG"
+
+# 6. Per-setup Sharpe trend (edge-erosion radar, item #4)
+python3 scripts/sharpe_setup_trend.py 2>&1 | tail -40 >> "$LOG"
+
+# 7. Portfolio Sharpe KPI vs target + per-trade attribution (items #6, #11)
+python3 scripts/sharpe_kpi.py 2>&1 | tail -40 >> "$LOG"
+
+# 8. Sharpe alerts (Slack push for watchlist threshold crossings, item #10)
+python3 scripts/sharpe_alert.py 2>&1 | tail -10 >> "$LOG"
+
+# 9. Compare to prior week — alert if Sharpe regressed
 python3 scripts/_weekly_diag_compare.py 2>&1 >> "$LOG"
 
 echo "==== done $DATE ====" >> "$LOG"
