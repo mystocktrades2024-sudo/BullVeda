@@ -4,7 +4,15 @@
 
 **Last updated:** 2026-05-14 · **Schema:** v2 · **Audit history:** see `docs/changelog.md`
 
-> ⚠️ **CALIBRATION**: Institutional thresholds in this file are calibrated for retail-scale deployment in `docs/claude_md_calibration.md`. Apply the calibration overlay when making practical pass/fail decisions.
+> ⚠️ **CALIBRATION**: Institutional thresholds in this file are calibrated for retail-scale deployment in `docs/claude_md_calibration.md`. Quick reference:
+> | Threshold | Institutional | Retail ($1K-$100K) |
+> |---|---|---|
+> | Sample size floor | n≥30 | n≥10 preliminary (50% size) / n≥30 standard / n≥100 high |
+> | PF floor (haircut) | 1.30 (-0.20) | 1.20 (-0.10) retail / 1.15 (-0.05) small retail |
+> | Wilson LB floor | flat 45% | max(35%, breakeven_wr × 1.4) |
+> | Validation pipeline | backtest-first | paper-first (ship → observe → live-half → live-full) |
+>
+> Apply the calibration overlay when making practical pass/fail decisions. All 20 principles remain unchanged — only the thresholds adjust.
 
 ---
 
@@ -26,7 +34,7 @@ discipline they don't always have.
 1. **Statistical rigor over backtest theatre.** Wilson 95% lower-bound, walk-forward,
    train/test/holdout, regime-conditional analysis. Refuse to act on n<30 evidence.
    Point estimates lie; confidence intervals tell the truth.
-   *Enforced at:* `decision_engine.py:240` (Wilson gate), `analysis.py:8508` (_validations gate).
+   *Enforced at:* `decision_engine.compute_setup_kill_list` (Wilson gate), `analysis.py` `_validations` block (search "RECENCY-FLOOR").
 
 2. **Mechanism over correlation.** Every setup must have a one-sentence hypothesis
    for WHY it has edge (PEAD = analyst-revisions front-run; VCP = supply absorption
@@ -50,7 +58,7 @@ discipline they don't always have.
    / panic) is the most important code in the system. Surface "this setup in
    THIS regime" not generic averages. Misclassifying regime = every other rule
    wrong half the time.
-   *Enforced at:* `decision_engine.py` regime gate (A3), `RegimeContext` in canonical plan.
+   *Enforced at:* `decision_engine.compute_final_verdict` regime gate (A3 — bypassed for Defensive Rotation, PEAD, Insider Cluster sleeves), `RegimeContext` in canonical plan.
 
 6. **Survivorship haircut on every backtest claim.** Today's S&P 500 ≠ historical
    S&P 500. Apply −3pp WR and −0.20 PF until point-in-time membership is fully
@@ -73,7 +81,7 @@ discipline they don't always have.
    non-negotiable. Position sizing prioritizes NOT blowing up over maximizing
    return. Half-Kelly with regime + VIX + drawdown multipliers is the floor,
    not the ceiling.
-   *Enforced at:* `kelly_size.drawdown_mult`, `regime_multipliers`, `vix_multipliers`.
+   *Enforced at:* `analysis.kelly_position_size` (returns `drawdown_mult`, `regime_mult`, `vix_mult`, `earnings_mult`, `var_floor_mult`, `sharpe_mult` — all composed multiplicatively).
 
 10. **Correlation under stress.** Positions feel diversified until risk-off, then
     they all move together. Sector caps, single-name caps, beta-adjusted sizing
@@ -82,7 +90,7 @@ discipline they don't always have.
 
 11. **Edge erosion.** Alpha decays. What worked 6 months ago may be priced-in
     now. Continuous re-validation is mandatory. Wilson CI must be re-computed
-    monthly. Drift detection (`drift_check.py` + `LaunchAgents/com.swingtrade.driftalert.plist`)
+    monthly. Drift detection (`model_drift_alert.py` + `infra/LaunchAgents/com.swingtrade.driftalert.plist` + `scripts/sharpe_setup_trend.py` for per-setup edge-erosion radar)
     is infrastructure, not optional.
 
 12. **Crowded trade detection.** When every retail screen shows the same setup,
@@ -91,8 +99,8 @@ discipline they don't always have.
 
 13. **Capacity awareness.** A strategy profitable at $5K may break at $5M.
     Track `position_size / ADV` ratio. Setups with size > 1% of ADV face
-    nonlinear slippage. Currently irrelevant at paper-trade scale; matters at
-    live capital.
+    nonlinear slippage. Largely irrelevant for the $1K-$100K retail range
+    (per-position sizes are << 1% of any reasonable ADV); matters at $1M+ AUM.
 
 ### Information edge
 
@@ -128,8 +136,9 @@ discipline they don't always have.
 
 19. **Slippage realism.** Paper PF 1.5 ≈ real PF 1.2 after frictions. The
     ATR/ADV-scaled slippage model (audit #5 fix) is the floor of realism.
-    Always discount paper performance. Combine with the survivorship haircut
-    — backtest result × (1 − 3pp WR) × (PF − 0.20) is the conservative mark.
+    Always discount paper performance. Combine with the survivorship haircut —
+    institutional: `backtest × (1 − 3pp WR) × (PF − 0.20)`;
+    retail: `backtest × (1 − 3pp WR) × (PF − 0.10)` per `docs/claude_md_calibration.md`.
 
 20. **Process > outcome.** A good trade can lose; a bad trade can win. Judge
     process discipline, not P&L of any one trade. Don't change rules because
@@ -201,7 +210,7 @@ Examples of correct push-back:
 - **Port:** 7432 (FastAPI server)
 - **Data store:** SQLite primary (`data/swingtrade.db`), JSON fallback
 - **Python:** 3.9
-- **Target user range:** $1K — $100K+ personal accounts (multi-user, not single-account). Build informational signals; let users self-select sizing. See `~/.claude/projects/.../memory/project_unified_system_1k_to_1m.md`.
+- **Target user range:** $1K — $100K+ personal accounts (multi-user, not single-account). Build informational signals; let users self-select sizing. See `~/.claude/projects/-Volumes-MyMacDisk-Claude-Skills-SwingTrade/memory/project_unified_system_1k_to_1m.md`.
 - **Account size (owner's reference):** $5K paper (Alpaca paper account for owner's own validation)
 - **Stage:** **LIVE OBSERVATION** — daily scans automated via launchd (morning briefing 6:30am PT, weekly diagnostics Sunday 5pm PT). 7 strategy sleeves + 1 overlay active. Phase 1 paper validation ongoing per `docs/strategy_*.md`.
 - **Calibration overlay:** `docs/claude_md_calibration.md` — apply retail-context thresholds before pass/fail decisions.
@@ -407,24 +416,25 @@ python3 -m pytest tests/ -v
 
 # Log rotation (runs auto on scan startup)
 python3 log_rotation.py --dry-run
+
+# Sleeve / strategy backtests (added 2026-05-14)
+python3 scripts/backtest_pead_quick.py --days 90 --min-eps 10 --max-gap 8   # PEAD only
+python3 scripts/backtest_sleeves_quick.py --days 180 --top-universe 200     # Multi-sleeve
+
+# Sharpe roadmap diagnostics (added 2026-05-13)
+python3 scripts/sharpe_kpi.py                # Portfolio Sharpe vs target + attribution
+python3 scripts/sharpe_screener.py           # Per-stock 126d Sharpe ranking
+python3 scripts/sharpe_per_regime.py         # Per-stock Sharpe by regime
+python3 scripts/sharpe_setup_trend.py        # Per-setup Sharpe over time (edge-erosion radar)
+python3 scripts/sharpe_alert.py --dry-run    # Watchlist Sharpe threshold crossings
+
+# Weekly diagnostics (auto-runs Sundays via launchd)
+bash scripts/weekly_diagnostics.sh
 ```
 
 ## Known Audit Flaws (tracked)
 
-Original 10 institutional-grade flaws addressed in "Audit Batch" commit. Tier 1 mitigations shipped; Tier 2 requires paid data.
-
-**Lesson from 2026-05-14 PEAD audit**: 9 additional silent bugs in the PEAD signal flow were discovered when a strategy that should have fired produced 0 signals. Each bug rejected valid signals at a different layer:
-1. macro_blackout morning-after (config flag ignored)
-2. PEAD universe pre-screen (post-earnings tickers not whitelisted)
-3. Wrong param read (`info["earnings"]` vs `earnings` kwarg)
-4. earnings_blackout fired on POST-earnings (-3 days matched `<=3` rule)
-5. PEAD min_score too strict
-6. fund_adequacy missing PEAD bypass
-7. decision_state=MISSED blocked catalyst entries
-8. WATCH→BUY promotion missing (asymmetric routing)
-9. tail_loss_filter tier_zero blocked catalyst sleeves
-
-**Takeaway**: principle 4 (adversarial mindset / audit trail on every claim) is not just for production trades — it applies to BUILD-time signal flow too. When a new sleeve produces 0 signals, audit every gate it passed through. The system can fail silently by rejecting valid signals at multiple layers in succession.
+### Audit Batch 1 — Institutional-grade flaws (2026-04, shipped)
 
 | # | Flaw | Tier 1 (shipped) | Tier 2 (roadmap) |
 |---|------|------------------|------------------|
@@ -438,6 +448,24 @@ Original 10 institutional-grade flaws addressed in "Audit Batch" commit. Tier 1 
 | 8 | Small per-setup n | Wilson CI surfaced | 5-year backtest for larger N |
 | 9 | Backtest ≠ live scoring | `apply_setup_wr_multiplier` unified | — (done) |
 | 10 | entry_quality unused | FRESH/PULLBACK/VALID → stop/target/hold | — (done) |
+
+### Audit Batch 2 — PEAD signal-flow silent rejections (2026-05-14, shipped)
+
+9 additional silent bugs in the PEAD signal flow were discovered when a strategy that should have fired produced 0 signals. Each bug rejected valid signals at a different layer:
+
+| # | Bug | Fix commit |
+|---|---|---|
+| 11 | macro_blackout morning-after (config flag ignored) | `6eab3f60f` |
+| 12 | PEAD universe pre-screen (post-earnings tickers not whitelisted) | `94b8249bb` |
+| 13 | Wrong param read (`info["earnings"]` vs `earnings` kwarg) | `b99b7b824` |
+| 14 | earnings_blackout fired on POST-earnings (-3 days matched `<=3` rule) | `f87762eb7` |
+| 15 | PEAD min_score too strict | `f87762eb7` |
+| 16 | fund_adequacy missing PEAD bypass | `fa7b7bd8a` |
+| 17 | decision_state=MISSED blocked catalyst entries | `fa7b7bd8a` |
+| 18 | WATCH→BUY promotion missing (asymmetric routing) | `9b8f92df6` |
+| 19 | tail_loss_filter tier_zero blocked catalyst sleeves | `d1147ed5c` |
+
+**Takeaway**: principle 4 (adversarial mindset / audit trail on every claim) is not just for production trades — it applies to BUILD-time signal flow too. When a new sleeve produces 0 signals, audit every gate it passed through. The system can fail silently by rejecting valid signals at multiple layers in succession.
 
 ## Lessons Learned & Backtest Variants
 
