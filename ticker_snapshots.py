@@ -283,11 +283,28 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     if args.cmd == "capture":
-        tj = json.loads((BASE_DIR / "infra" / "prototype" / "tickers.json").read_text())
-        d = json.loads((BASE_DIR / "infra" / "prototype" / "data.json").read_text())
-        run_id = args.run_id or d.get("run_timestamp", "").replace(" ", "_")[:16] or None
-        n = capture_scan(tj, run_id=run_id)
-        print(f"Captured {n} ticker snapshots (run_id={run_id})")
+        import time as _time
+        _t0 = _time.time()
+        try:
+            tj = json.loads((BASE_DIR / "infra" / "prototype" / "tickers.json").read_text())
+            d = json.loads((BASE_DIR / "infra" / "prototype" / "data.json").read_text())
+            run_id = args.run_id or d.get("run_timestamp", "").replace(" ", "_")[:16] or None
+            n = capture_scan(tj, run_id=run_id)
+            print(f"Captured {n} ticker snapshots (run_id={run_id})")
+            try:
+                from lib.autorun_reporter import report
+                report("ticker-snapshots", "success",
+                       summary=f"Captured {n} ticker snapshots for run {run_id}",
+                       duration_sec=_time.time() - _t0)
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                from lib.autorun_reporter import report_failed
+                report_failed("ticker-snapshots", str(e), duration_sec=_time.time() - _t0)
+            except Exception:
+                pass
+            raise
 
     elif args.cmd == "history":
         rows = history_for(args.ticker, limit=args.limit)

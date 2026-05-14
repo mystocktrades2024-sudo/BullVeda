@@ -226,9 +226,21 @@ def main():
         log.info("Per-ticker: insider transactions (top 200) ...")
         _warm_insider_summary(tickers, limit=200)
 
+    _duration = time.time() - overall_t0
     log.info("=" * 60)
-    log.info(f"Done in {time.time() - overall_t0:.0f}s. Cache is warm for the next scan.")
+    log.info(f"Done in {_duration:.0f}s. Cache is warm for the next scan.")
     log.info("=" * 60)
+
+    try:
+        from lib.autorun_reporter import report
+        report("enrich-nightly", "success",
+               summary=f"Warmed {len(tickers)} tickers across bulk_eod + trends + earnings"
+                       + ("" if args.skip_fundamentals else " + fundamentals")
+                       + ("" if args.skip_insider else " + insider"),
+               duration_sec=_duration,
+               details={"universe": args.universe, "tickers": len(tickers)})
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

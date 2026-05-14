@@ -4055,6 +4055,30 @@ def run_daily_scan(force_fresh: bool = False):
     log.info(f"=== Done! Dashboard: http://localhost:7432/v2/dashboard.html ===")
     log.info(f"  BUY: {len(buy_candidates)} | WATCH: {len(watch_list)} | SHORT: {len(sell_candidates)} | Near-Short Blocked: {len(near_short_blocked)} | Killed: {len(killed)}")
 
+    # HTML snapshot to DB (2026-05-14) — store dashboard.html for retrieval
+    try:
+        import db
+        dash_path = BASE_DIR / "cache" / "dashboard.html"
+        if dash_path.exists():
+            html_content = dash_path.read_text()
+            snap_id = db.save_html_snapshot(
+                kind="dashboard",
+                html_content=html_content,
+                label=f"dashboard {bundle.get('run_timestamp', '')}",
+                meta={
+                    "buy_count": len(buy_candidates),
+                    "watch_count": len(watch_list),
+                    "short_count": len(sell_candidates),
+                    "regime": (bundle.get("regime") or {}).get("regime4"),
+                    "scan_run_date": bundle.get("run_date"),
+                },
+            )
+            log.info(f"  HTML snapshot saved to DB: id={snap_id}")
+            # Prune to keep last 200 (~6 months of daily scans)
+            db.prune_html_snapshots(keep_last_n=200)
+    except Exception as _html_err:
+        log.warning(f"HTML snapshot save failed: {_html_err}")
+
     # P2.21/22/23 — log warnings for any active system_status flags
     ss = bundle.get("system_status", {})
     if ss.get("forced_cash", {}).get("active"):

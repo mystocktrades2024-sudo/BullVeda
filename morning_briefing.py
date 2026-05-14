@@ -398,33 +398,63 @@ def render_html(bt: dict, wf: dict, pt: dict, actions: list[dict], commits: list
 
 
 def main() -> int:
+    import time as _time
+    _t0 = _time.time()
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-open", action="store_true", help="Generate only, don't open in browser")
     args = parser.parse_args()
 
-    bt = assess_750d_backtest()
-    wf = assess_walk_forward()
-    pt = assess_paper_trading()
-    actions = build_action_plan(bt, wf, pt)
-    commits = get_recent_commits(12)
+    try:
+        bt = assess_750d_backtest()
+        wf = assess_walk_forward()
+        pt = assess_paper_trading()
+        actions = build_action_plan(bt, wf, pt)
+        commits = get_recent_commits(12)
 
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    html = render_html(bt, wf, pt, actions, commits)
-    OUT_PATH.write_text(html, encoding="utf-8")
+        OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        html = render_html(bt, wf, pt, actions, commits)
+        OUT_PATH.write_text(html, encoding="utf-8")
 
-    print(f"Wrote {OUT_PATH}")
-    print(f"  Backtest: {'running' if bt['still_running'] else ('done' if bt['completed'] else 'pending')}")
-    print(f"  Walk-fwd: {'running' if wf['still_running'] else ('done' if wf['completed'] else 'pending')} ({len((wf['proposals'].get('shipped_multipliers') or {}))} mults)")
-    pt_day_str = f"(day {pt['day']}/{pt['duration']})" if pt.get('day') is not None else ""
-    print(f"  Paper:    {pt['state']} {pt_day_str}")
-    print(f"  Actions:  {len(actions)} suggested")
-
-    if not args.no_open:
+        # Save HTML snapshot to DB
         try:
-            subprocess.Popen(["open", str(OUT_PATH)])
+            import db
+            db.save_html_snapshot(
+                kind="morning-briefing", html_content=html,
+                meta={"backtest": bt.get("state"), "walk_fwd": wf.get("state"),
+                      "paper": pt.get("state"), "actions": len(actions)}
+            )
         except Exception:
             pass
-    return 0
+
+        print(f"Wrote {OUT_PATH}")
+        print(f"  Backtest: {'running' if bt['still_running'] else ('done' if bt['completed'] else 'pending')}")
+        print(f"  Walk-fwd: {'running' if wf['still_running'] else ('done' if wf['completed'] else 'pending')} ({len((wf['proposals'].get('shipped_multipliers') or {}))} mults)")
+        pt_day_str = f"(day {pt['day']}/{pt['duration']})" if pt.get('day') is not None else ""
+        print(f"  Paper:    {pt['state']} {pt_day_str}")
+        print(f"  Actions:  {len(actions)} suggested")
+
+        # Slack status
+        try:
+            from lib.autorun_reporter import report
+            report("morning-briefing", "success",
+                   summary=f"Backtest: {bt.get('state','?')} · Walk-fwd: {wf.get('state','?')} · Paper: {pt.get('state','?')} · {len(actions)} actions",
+                   duration_sec=_time.time() - _t0)
+        except Exception:
+            pass
+
+        if not args.no_open:
+            try:
+                subprocess.Popen(["open", str(OUT_PATH)])
+            except Exception:
+                pass
+        return 0
+    except Exception as e:
+        try:
+            from lib.autorun_reporter import report_failed
+            report_failed("morning-briefing", str(e), duration_sec=_time.time() - _t0)
+        except Exception:
+            pass
+        raise
 
 
 if __name__ == "__main__":

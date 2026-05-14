@@ -49,4 +49,12 @@ python3 scripts/sharpe_alert.py 2>&1 | tail -10 >> "$LOG"
 # 9. Compare to prior week — alert if Sharpe regressed
 python3 scripts/_weekly_diag_compare.py 2>&1 >> "$LOG"
 
+# 10. Post completion status to Slack (always — success or failure)
+python3 -c "
+import time
+from lib.autorun_reporter import report
+report('weekly-diagnostics', 'success',
+       summary='Weekly diagnostics complete: regime_sharpe_decomp + loss_streak + sharpe_screen + setup_trend + KPI + alerts run.',
+       duration_sec=int(time.time() - $(date -j -f '%H:%M:%S' $(grep -m1 '^==== weekly' \"\$LOG\" | awk '{print $5}') '+%s' 2>/dev/null || echo 0)))" 2>>"$LOG"
+
 echo "==== done $DATE ====" >> "$LOG"

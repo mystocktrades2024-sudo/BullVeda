@@ -267,6 +267,21 @@ CREATE TABLE IF NOT EXISTS paper_trading_config (
     direction_filter TEXT DEFAULT 'buy_only',
     max_daily_trades INTEGER DEFAULT 4
 );
+
+-- HTML snapshot archive (2026-05-14): store dashboard.html and other
+-- key HTML outputs per scan for easy retrieval.
+-- Compressed via zlib when content > 100KB; gzipped flag in `meta`.
+CREATE TABLE IF NOT EXISTS html_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,                 -- ISO timestamp at save
+    kind TEXT NOT NULL,                -- 'dashboard' | 'pead' | 'sleeve_radar' | other
+    label TEXT,                        -- 'dashboard 2026-05-14' or similar
+    size_bytes INTEGER,                -- pre-compression size
+    compressed INTEGER DEFAULT 0,      -- 1 = zlib-compressed
+    html_blob BLOB NOT NULL,           -- HTML content (compressed if compressed=1)
+    meta_json TEXT                     -- optional JSON metadata
+);
+CREATE INDEX IF NOT EXISTS idx_html_snapshots_kind_ts ON html_snapshots(kind, ts);
 """
 
 
@@ -402,3 +417,99 @@ def row_to_dict_with_extras(row: sqlite3.Row) -> dict:
     # Drop internal auto-id for the "dict like the old JSON" callers.
     d.pop("id", None)
     return d
+
+
+# ── HTML snapshot helpers (2026-05-14) ──────────────────────────────────────
+
+def save_html_snapshot(kind: str, html_content: str, label: str | None = None,
+                       meta: dict | None = None) -> int:
+    """Save an HTML snapshot to the html_snapshots table.
+
+    kind:    'dashboard' | 'pead' | 'sleeve_radar' | other
+    label:   optional display name; defaults to '<kind> <timestamp>'
+    meta:    optional JSON metadata (any dict)
+
+    Returns the inserted row's id. Compresses with zlib if content > 100KB.
+    """
+    import zlib
+    from datetime import datetime
+
+    if not html_content:
+        return -1
+
+    size_bytes = len(html_content.encode("utf-8"))
+    compressed = 0
+    blob = html_content.encode("utf-8")
+    if size_bytes > 100_000:
+        blob = zlib.compress(blob, level=6)
+        compressed = 1
+
+    ts = datetime.now().isoformat(timespec="seconds")
+    if not label:
+        label = f"{kind} {ts}"
+
+    conn = get_conn()
+    cur = conn.execute(
+        """INSERT INTO html_snapshots (ts, kind, label, size_bytes, compressed, html_blob, meta_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (ts, kind, label, size_bytes, compressed, blob,
+         json.dumps(meta) if meta else None)
+    )
+    return cur.lastrowid or -1
+
+
+def load_html_snapshot(snapshot_id: int) -> str | None:
+    """Load HTML by snapshot id. Returns the decompressed HTML string or None."""
+    import zlib
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT html_blob, compressed FROM html_snapshots WHERE id = ?",
+        (snapshot_id,)
+    ).fetchone()
+    if not row:
+        return None
+    blob = row["html_blob"]
+    compressed = bool(row["compressed"])
+    if compressed:
+        blob = zlib.decompress(blob)
+    return blob.decode("utf-8")
+
+
+def list_html_snapshots(kind: str | None = None, limit: int = 50) -> list[dict]:
+    """List snapshots (most recent first). Returns metadata only, not the blob."""
+    conn = get_conn()
+    q = """SELECT id, ts, kind, label, size_bytes, compressed, meta_json
+           FROM html_snapshots"""
+    params: tuple = ()
+    if kind:
+        q += " WHERE kind = ?"
+        params = (kind,)
+    q += " ORDER BY id DESC LIMIT ?"
+    params = params + (limit,)
+    rows = conn.execute(q, params).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        if d.get("meta_json"):
+            try:
+                d["meta"] = json.loads(d["meta_json"])
+            except Exception:
+                pass
+            d.pop("meta_json", None)
+        out.append(d)
+    return out
+
+
+def prune_html_snapshots(keep_last_n: int = 200) -> int:
+    """Keep only the most recent N snapshots. Returns count deleted."""
+    conn = get_conn()
+    n_rows = conn.execute("SELECT COUNT(*) AS n FROM html_snapshots").fetchone()["n"]
+    if n_rows <= keep_last_n:
+        return 0
+    to_delete = n_rows - keep_last_n
+    conn.execute(
+        """DELETE FROM html_snapshots WHERE id IN (
+           SELECT id FROM html_snapshots ORDER BY id ASC LIMIT ?
+        )""", (to_delete,)
+    )
+    return to_delete
