@@ -4604,10 +4604,21 @@ def _detect_insider_cluster(
     checks["score"] = f"{score:.0f} ≥ {min_score:.0f} ✓"
 
     # Insider buys check — read directly from insider_data
+    # Audit Batch 3 (2026-05-14): tightened to require dollar-value evidence
+    # OR CEO/CFO confirmation. The raw `buys` field counts Form 4 filings
+    # including RSU vests + option exercises (165/498 tickers showed 3+ "buys"
+    # with $0 total_buy_value — clearly not open-market purchases per Bettis-
+    # Coles-Lemmon 2000 mechanism).
     ins = insider_data or {}
     buys = ins.get("buys") or 0
     sells = ins.get("sells") or 0
+    total_buy_value = ins.get("total_buy_value") or 0
+    ceo_buy = bool(ins.get("ceo_buy"))
+    cfo_buy = bool(ins.get("cfo_buy"))
     min_buys = int(cfg.get("min_insider_buys", 3))
+    min_buy_value = float(cfg.get("min_total_buy_value_usd", 200000))
+    require_dollar_evidence = bool(cfg.get("require_dollar_evidence", True))
+
     if buys < min_buys:
         checks["insider_signal"] = f"only {buys} insider buys (need ≥ {min_buys})"
         return False, audit
@@ -4615,10 +4626,19 @@ def _detect_insider_cluster(
     if sells > buys:
         checks["insider_signal"] = f"{sells} sells > {buys} buys — bearish skew"
         return False, audit
+    # Dollar-evidence gate: require $200K+ aggregate OR C-suite involvement
+    # Without this, RSU vests / option exercises produce false-positive clusters.
+    if require_dollar_evidence and total_buy_value < min_buy_value and not (ceo_buy or cfo_buy):
+        checks["insider_signal"] = (
+            f"{buys} buys recorded but total_buy_value=${total_buy_value:,.0f} < ${min_buy_value:,.0f} "
+            f"and no CEO/CFO buy — likely RSU/option filings, not open-market purchases"
+        )
+        return False, audit
     sentiment = ins.get("sentiment") or "unknown"
-    checks["insider_signal"] = f"{buys} buys / {sells} sells (sentiment: {sentiment}) ✓"
-    if ins.get("ceo_buy") or ins.get("cfo_buy"):
-        checks["c_suite"] = f"CEO_buy={ins.get('ceo_buy')} CFO_buy={ins.get('cfo_buy')} (boost signal)"
+    if ceo_buy or cfo_buy:
+        checks["insider_signal"] = f"{buys} buys ${total_buy_value:,.0f} (CEO_buy={ceo_buy} CFO_buy={cfo_buy}) ✓"
+    else:
+        checks["insider_signal"] = f"{buys} buys ${total_buy_value:,.0f} (≥ ${min_buy_value:,.0f} threshold) ✓"
 
     # EMA50 floor
     if cfg.get("require_above_ema50", True):
