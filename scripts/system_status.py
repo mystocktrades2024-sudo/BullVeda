@@ -235,12 +235,17 @@ def _format_slack(report: dict) -> tuple[str, list]:
             "type": "section",
             "text": {"type": "mrkdwn", "text": f"⚠️ *Recent scan errors:*\n{err_text}"}
         })
-    # Footer / Dashboard link
+    # Footer / clickable links
     blocks.append({
         "type": "section",
         "text": {
             "type": "mrkdwn",
-            "text": "<https://trade.mystockholding.com|🔗 Open Dashboard>"
+            "text": (
+                "<https://trade.mystockholding.com/v2/dashboard.html|🔗 Live Dashboard> · "
+                "<https://trade.mystockholding.com/reports|📚 Report Archive> · "
+                "<https://trade.mystockholding.com/reports/latest/dashboard|🗂️ Latest Dashboard Snapshot> · "
+                "<https://trade.mystockholding.com/reports/latest/morning-briefing|🌅 Morning Briefing>"
+            )
         }
     })
     return plain, blocks

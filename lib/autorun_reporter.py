@@ -50,6 +50,16 @@ def _get_webhook() -> str:
         return os.environ.get("SLACK_WEBHOOK_URL", "")
 
 
+_REPORT_KIND_MAP = {
+    # autorun name → report kind (for "latest" link)
+    "morning-briefing": "morning-briefing",
+    "weekly-diagnostics": "dashboard",  # weekly produces dashboard snapshot
+    "prewarm-cache": None,  # no HTML output
+    "enrich-nightly": None,
+    "ticker-snapshots": None,
+}
+
+
 def report(autorun_name: str, status: str,
            summary: str = "", duration_sec: float | None = None,
            details: dict | None = None) -> bool:
@@ -63,6 +73,9 @@ def report(autorun_name: str, status: str,
 
     Returns True if Slack post succeeded, False otherwise.
     Never raises — designed to be call-and-forget.
+
+    Automatically appends report-archive links if there's an HTML output
+    associated with this autorun.
     """
     try:
         webhook = _get_webhook()
@@ -98,6 +111,20 @@ def report(autorun_name: str, status: str,
                     "type": "context",
                     "elements": [{"type": "mrkdwn", "text": "\n".join(field_lines)}],
                 })
+
+        # Add report archive links — always include, special-case latest if available
+        report_kind = _REPORT_KIND_MAP.get(autorun_name)
+        link_text = "<https://trade.mystockholding.com/reports|📚 Report Archive>"
+        if report_kind:
+            link_text = (
+                f"<https://trade.mystockholding.com/reports/latest/{report_kind}|🗂️ Latest {autorun_name}> · "
+                + link_text
+            )
+        link_text += " · <https://trade.mystockholding.com/v2/dashboard.html|🔗 Live Dashboard>"
+        blocks.append({
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": link_text}],
+        })
 
         from alerts import _slack_post
         return _slack_post(webhook, text, blocks)

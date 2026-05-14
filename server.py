@@ -281,6 +281,152 @@ async def _kairos_redirect(auth: HTTPBasicCredentials = Depends(_check_auth)):
         return auth
     return RedirectResponse(url="/kairos.html", status_code=302)
 
+# -- /reports — HTML snapshot archive (2026-05-14)
+# Lists all stored html_snapshots (dashboard, morning-briefing, etc.) with
+# clickable links to view each one. Backs the Slack status links.
+@app.api_route("/reports", methods=["GET", "HEAD"])
+async def _reports_index(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    if isinstance(auth, Response):
+        return auth
+    try:
+        import db
+        snapshots = db.list_html_snapshots(limit=200)
+    except Exception as e:
+        raise HTTPException(500, f"DB error: {e}")
+
+    # Group by kind
+    from collections import defaultdict
+    by_kind = defaultdict(list)
+    for s in snapshots:
+        by_kind[s.get("kind") or "unknown"].append(s)
+
+    rows_html = []
+    for kind in sorted(by_kind.keys()):
+        items = by_kind[kind]
+        rows_html.append(f'<h3 style="margin-top:24px;color:#79c0ff">{kind} <span style="color:#7d8590;font-size:13px;font-weight:normal">({len(items)} snapshots, newest first)</span></h3>')
+        rows_html.append('<table style="width:100%;border-collapse:collapse;font-size:13px">')
+        rows_html.append('<tr style="background:#161b22;color:#7d8590"><th style="text-align:left;padding:6px 12px">ID</th><th style="text-align:left;padding:6px 12px">When</th><th style="text-align:left;padding:6px 12px">Label</th><th style="text-align:right;padding:6px 12px">Size</th><th style="padding:6px 12px"></th></tr>')
+        for s in items[:50]:
+            size_kb = (s.get("size_bytes") or 0) / 1024
+            compressed = "🗜" if s.get("compressed") else ""
+            rows_html.append(
+                f'<tr style="border-bottom:1px solid #30363d">'
+                f'<td style="padding:6px 12px;color:#7d8590">#{s["id"]}</td>'
+                f'<td style="padding:6px 12px;color:#c9d1d9;font-family:monospace">{s.get("ts", "")[:19]}</td>'
+                f'<td style="padding:6px 12px;color:#c9d1d9">{s.get("label", "")}</td>'
+                f'<td style="padding:6px 12px;text-align:right;color:#7d8590">{size_kb:.0f}KB {compressed}</td>'
+                f'<td style="padding:6px 12px;text-align:right"><a href="/reports/{s["id"]}" style="color:#3fb950;text-decoration:none">→ View</a></td>'
+                f'</tr>'
+            )
+        rows_html.append('</table>')
+
+    if not snapshots:
+        rows_html.append('<p style="color:#7d8590">No snapshots yet. Run a scan to populate.</p>')
+
+    page = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>SwingTrade · Report Archive</title>
+<style>
+  body {{ background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'SF Pro',sans-serif;
+         margin:0;padding:24px;max-width:1200px;margin:0 auto; }}
+  h1 {{ margin:0 0 8px 0;font-size:24px;color:#f0f6fc;font-weight:600; }}
+  .subtitle {{ color:#7d8590;margin-bottom:24px; }}
+  .quick-links {{ background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:24px; }}
+  .quick-links a {{ color:#3fb950;text-decoration:none;margin-right:16px;display:inline-block;padding:4px 0; }}
+  .quick-links a:hover {{ text-decoration:underline; }}
+  table {{ background:#0d1117; }}
+  tr:hover {{ background:#161b22; }}
+</style>
+</head><body>
+<h1>📊 SwingTrade · Report Archive</h1>
+<div class="subtitle">Stored HTML snapshots from scans and autoruns. Auto-pruned to last 200 entries.</div>
+
+<div class="quick-links">
+  <strong style="color:#f0f6fc">Quick links:</strong><br>
+  <a href="/reports/latest/dashboard">→ Latest Dashboard</a>
+  <a href="/reports/latest/morning-briefing">→ Latest Morning Briefing</a>
+  <a href="/v2/dashboard.html">→ Live V2 Dashboard</a>
+  <a href="/api/system-status">→ Live System Status (JSON)</a>
+</div>
+
+{"".join(rows_html)}
+</body></html>"""
+    return Response(content=page, media_type="text/html", headers={"Cache-Control": "no-store"})
+
+
+@app.api_route("/reports/latest/{kind}", methods=["GET", "HEAD"])
+async def _reports_latest(kind: str, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Serve the most recent snapshot of a given kind."""
+    if isinstance(auth, Response):
+        return auth
+    try:
+        import db
+        snapshots = db.list_html_snapshots(kind=kind, limit=1)
+        if not snapshots:
+            raise HTTPException(404, f"No snapshots of kind '{kind}' found")
+        latest_id = snapshots[0]["id"]
+        content = db.load_html_snapshot(latest_id)
+        if not content:
+            raise HTTPException(404, f"Snapshot #{latest_id} returned empty content")
+        return Response(content=content, media_type="text/html",
+                        headers={"Cache-Control": "no-store", "X-Snapshot-Id": str(latest_id)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Error loading latest {kind}: {e}")
+
+
+@app.api_route("/reports/{snapshot_id}", methods=["GET", "HEAD"])
+async def _reports_view(snapshot_id: int, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Serve a specific snapshot by id."""
+    if isinstance(auth, Response):
+        return auth
+    try:
+        import db
+        content = db.load_html_snapshot(snapshot_id)
+        if not content:
+            raise HTTPException(404, f"Snapshot #{snapshot_id} not found")
+        return Response(content=content, media_type="text/html",
+                        headers={"Cache-Control": "no-store", "X-Snapshot-Id": str(snapshot_id)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Error loading snapshot {snapshot_id}: {e}")
+
+
+@app.get("/api/reports")
+async def _api_reports_list(auth: HTTPBasicCredentials = Depends(_check_auth),
+                              kind: str | None = None, limit: int = 50):
+    """JSON listing of snapshots (metadata only — no html content)."""
+    if isinstance(auth, Response):
+        return auth
+    try:
+        import db
+        return {"snapshots": db.list_html_snapshots(kind=kind, limit=limit)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/system-status")
+async def _api_system_status(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """JSON system-status report (same data as scripts/system_status.py --json)."""
+    if isinstance(auth, Response):
+        return auth
+    try:
+        import subprocess, json as _json
+        from pathlib import Path as _P
+        proc = subprocess.run(
+            ["python3", str(BASE_DIR / "scripts" / "system_status.py"), "--json", "--no-slack"],
+            capture_output=True, text=True, timeout=30, cwd=str(BASE_DIR),
+        )
+        if proc.returncode != 0:
+            raise HTTPException(500, f"system_status.py failed: {proc.stderr[:200]}")
+        return _json.loads(proc.stdout)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 # -- /sharpe_screen.html — Sharpe ratio screener (2026-05-13)
 # Standalone tool; regenerate via python3 scripts/sharpe_screener.py + scripts/sharpe_screener_html.py
 @app.api_route("/sharpe_screen.html", methods=["GET","HEAD"])
