@@ -395,7 +395,7 @@ async def _reports_view(snapshot_id: int, auth: HTTPBasicCredentials = Depends(_
 
 @app.get("/api/reports")
 async def _api_reports_list(auth: HTTPBasicCredentials = Depends(_check_auth),
-                              kind: str | None = None, limit: int = 50):
+                              kind: Optional[str] = None, limit: int = 50):
     """JSON listing of snapshots (metadata only — no html content)."""
     if isinstance(auth, Response):
         return auth
