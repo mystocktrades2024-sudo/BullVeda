@@ -2,6 +2,10 @@
 
 **Primary codebase** · User works in this folder for all swing-trading system work.
 
+**Last updated:** 2026-05-14 · **Schema:** v2 · **Audit history:** see `docs/changelog.md`
+
+> ⚠️ **CALIBRATION**: Institutional thresholds in this file are calibrated for retail-scale deployment in `docs/claude_md_calibration.md`. Apply the calibration overlay when making practical pass/fail decisions.
+
 ---
 
 ## OPERATING MINDSET — non-negotiable defaults for ALL work in this directory
@@ -135,19 +139,24 @@ discipline they don't always have.
 
 ### Enforcement summary (where these principles live in code)
 
+Function names preferred over line numbers — line numbers drift as the codebase evolves.
+
 | Principle | Where enforced |
 |---|---|
-| Wilson CI on kills | `decision_engine.py:240` (compute_setup_kill_list) |
-| Wilson CI on band kills | `decision_engine.py:204` (compute_setup_score_band_kills) |
-| Multiplier validation | `analysis.py:8508` (`_validations` gate) |
-| Static-kill discipline | `decision_engine.py:289` (n≥10 + override flag) |
+| Wilson CI on kills | `decision_engine.compute_setup_kill_list` |
+| Wilson CI on band kills | `decision_engine.compute_setup_score_band_kills` |
+| Multiplier validation | `analysis.py` `_validations` gate (search for "RECENCY-FLOOR") |
+| Static-kill discipline | `decision_engine.compute_setup_kill_list` (n≥10 + override flag) |
+| Tail-loss filter + tier_zero | `decision_engine._eval_hard_gates` (catalyst-sleeve bypass) |
 | Survivorship haircut | `backtest.py` `SURVIVORSHIP_WR_ADJUSTMENT` |
 | Slippage model | `backtest.py` ATR/ADV-scaled (audit #5) |
-| Regime gate | `decision_engine.py` (A3 — no longs in risk_off/panic) |
+| Regime gate | `decision_engine.compute_final_verdict` (A3 — no longs in risk_off/panic, bypass for Defensive + PEAD + Insider) |
 | Canonical trade plan | `canonical_trade_plan.py` |
 | Signal filter | `signal_filter.py` (whitelist gate) |
 | Drift detection | `model_drift_alert.py` + `LaunchAgents/com.swingtrade.driftalert.plist` |
 | Mechanism hypotheses | `canonical_trade_plan.py:MECHANISM_HYPOTHESES` |
+| Sleeve detectors | `analysis._detect_momentum_continuation`, `_detect_defensive_rotation`, `_detect_mean_reversion`, `_detect_pead`, `_detect_insider_cluster`, `_detect_esp_play` |
+| Sharpe metrics | `lib/sharpe_utils.py` — single source of truth |
 
 ### Hard constraint — no new data licenses
 
@@ -192,31 +201,74 @@ Examples of correct push-back:
 - **Port:** 7432 (FastAPI server)
 - **Data store:** SQLite primary (`data/swingtrade.db`), JSON fallback
 - **Python:** 3.9
-- **Account size:** $5K paper (Alpaca)
-- **Stage:** Pre-live. Paper trading framework built but user hasn't activated yet (`python3 executor.py --activate` enables 60-day paper window).
+- **Target user range:** $1K — $100K+ personal accounts (multi-user, not single-account). Build informational signals; let users self-select sizing. See `~/.claude/projects/.../memory/project_unified_system_1k_to_1m.md`.
+- **Account size (owner's reference):** $5K paper (Alpaca paper account for owner's own validation)
+- **Stage:** **LIVE OBSERVATION** — daily scans automated via launchd (morning briefing 6:30am PT, weekly diagnostics Sunday 5pm PT). 7 strategy sleeves + 1 overlay active. Phase 1 paper validation ongoing per `docs/strategy_*.md`.
+- **Calibration overlay:** `docs/claude_md_calibration.md` — apply retail-context thresholds before pass/fail decisions.
 
 ## Path Layout
 
 Use `ls` / `find` to discover files. Key entry points:
 
+### Engine core
 - `swing_trade.py` — main scan entrypoint
-- `analysis.py` — scoring engine (~6000+ lines, K1–K6 trade-plan rules)
+- `analysis.py` — scoring engine (~10K+ lines, K1–K6 trade-plan rules, 6 sleeve detectors)
 - `canonical_trade_plan.py` — K6 single source of truth for every dashboard tab
-- `decision_engine.py` — Wilson-gated kill list / score-band kills / regime gate
+- `decision_engine.py` — Wilson-gated kill list / score-band kills / regime gate / sleeve bypasses
 - `signal_filter.py` — A2 declarative whitelist gate (OFF by default)
+- `data_fetcher.py` + `eodhd_client.py` — EODHD primary, yfinance news fallback
+- `server.py` — FastAPI server on port 7432; `GET /v2/trade_engine?t=ROST&mode=swing` returns structural-target payload
+
+### Strategy sleeves (shipped 2026-05-13 / 2026-05-14)
+- `lib/sharpe_utils.py` — Sharpe / Sortino / consistency utilities (single source of truth)
+- `docs/strategy_momentum_continuation.md` — Momentum sleeve (regime: trending/bull)
+- `docs/strategy_defensive_rotation.md` — Defensive ETF sleeve (regime: risk_off/panic)
+- `docs/strategy_mean_reversion.md` — Mean Reversion sleeve (regime: choppy/bull)
+- `docs/strategy_pead.md` — PEAD sleeve (all regimes, catalyst)
+- `docs/strategy_insider_cluster.md` — Insider Cluster sleeve (all regimes, info edge)
+- `docs/strategy_esp_play.md` — Earnings ESP Play sleeve (P0 roadmap, pre-earnings drift)
+- `docs/strategy_prefomc_drift.md` — Pre-FOMC overlay (Lucca-Moench 2015)
+- `docs/choice_c_decision.md` — multi-sleeve roadmap
+- `docs/runbook_loss_streak.md` — when to investigate regression
+- `docs/claude_md_calibration.md` — **retail-context threshold calibration of this file**
+
+### Backtest infrastructure
+- `backtest.py` + `backtest/walk_forward_v2.py` — single-window + walk-forward
+- `scripts/backtest_pead_quick.py` — historical PEAD replay (last N days)
+- `scripts/backtest_sleeves_quick.py` — multi-sleeve historical replay
+- `scripts/sharpe_screener.py` / `sharpe_per_regime.py` / `sharpe_kpi.py` / `sharpe_setup_trend.py` / `sharpe_alert.py` — Sharpe roadmap
+
+### Structural target engine
 - `target_engine.py` — **Project 2** structural target engine (confluence-scored T1/T2 — fractals + HVN/VAH/AVWAP/BSL/round/Fib; gated by `use_structural_targets` flag, OFF by default)
 - `scripts/precompute_targets.py` — nightly batch (06:00 only) writing `cache/target_engine/{TICKER}_{MODE}.json`
 - `scripts/te_regression.py` — 20-ticker structural-target regression suite + diff vs legacy ATR
-- `data_fetcher.py` + `eodhd_client.py` — EODHD primary, yfinance news fallback
-- `server.py` — FastAPI server on port 7432; `GET /v2/trade_engine?t=ROST&mode=swing` returns structural-target payload (hybrid pre-compute + on-demand)
+
+### Operations
+- `infra/launchd/com.swingtrade.morning-briefing.plist` — daily 6:30am PT scan + Slack post
+- `infra/launchd/com.swingtrade.weekly-diagnostics.plist` — Sunday 5pm PT regression check
+- `scripts/weekly_diagnostics.sh` — runs all diagnostic scripts in sequence
 - `infra/prototype/` — v2 dashboard (canonical; replaces legacy `html_generator.py`)
-- `backtest.py` + `backtest/walk_forward_v2.py` — single-window + walk-forward
 - `config/config.json` — main config; variants in `config/variants/`
 - `data/swingtrade.db` — SQLite PRIMARY (18 tables); `data/signal_log.json` — trade journal
 - `cache/` — regenerable (gitignored); `cache/last_bundle.json` = latest scan output
 - `cache/target_engine/` — structural-target JSON cache, 12h TTL, one file per `{TICKER}_{MODE}` (regenerable)
 - `_legacy/` — quarantined Polygon/Schwab/Finviz-Elite stubs
 - `.env` — secrets (EODHD, Alpaca, Slack, Gmail)
+
+## Strategy Roster — 7 sleeves + 1 overlay
+
+| # | Sleeve | Active in regime | Mechanism | Status |
+|---|---|---|---|---|
+| 1 | **Pullback to Value** (core engine) | risk_on_choppy primary, all | Buy retracement to EMA/support; 3:1 R:R | LIVE — backtested PF 1.41 |
+| 2 | **Momentum Continuation** | risk_on_trending / bull | Buy strength (ADX≥25, Sharpe≥1.5, EMA stack) | Activated 2026-05-14; backtested PF 1.53 (n=2553) ✓ |
+| 3 | **Defensive Rotation** | risk_off / panic (SPY<50EMA) | Long XLU + GLD (narrowed from 6 ETFs per backtest) | Activated 2026-05-14; marginal PF 1.03 |
+| 4 | **Mean Reversion** | risk_on_choppy / bull | RSI<30 + price>EMA200; 3-5d bounce | Activated 2026-05-14; backtested PF 1.21 |
+| 5 | **PEAD** | All regimes (catalyst-driven) | 1-3d post-earnings beat + gap (Bernard-Thomas) | Activated 2026-05-14; tightened EPS≥10/gap 3-8% PF 2.04 ✓ |
+| 6 | **Insider Cluster** | All regimes | ≥3 insiders buying $200K+ in 30d (Bettis-Coles) | Activated 2026-05-14; untested historical |
+| 7 | **ESP Play** | All regimes | Zacks ESP>0 + Rank≤3 + earn 4-14d (Mode A: exit day-before) | Activated 2026-05-14; untested historical |
+| Ovl | **Pre-FOMC Drift** | T-1 FOMC eve (calendar) | Multiply long sizing 1.25× (Lucca-Moench 2015) | Activated 2026-05-14; armed for next FOMC |
+
+**Architectural pattern**: catalyst-driven sleeves (Momentum/Defensive/MeanRev/PEAD/Insider/ESP) bypass the pullback-mechanic gates (entry_quality, regime_gate where applicable, fund_adequacy, decision_state, tail_loss_filter tier_zero) because their alpha comes from outside the composite-score-band system. Bypass eligibility is enumerated in `decision_engine._eval_hard_gates`.
 
 ### Structural target engine (Project 2 · M2.1–2.4 shipped 2026-05-13)
 
@@ -281,10 +333,12 @@ If `apply_to_score: false` on `tier1_signals`, signals compute but don't mutate 
 
 Two PARALLEL trade-outcome logs track different realities. Knowing which one is canonical for a given consumer is critical when diagnosing performance.
 
-| Log | Written by | Read by | What it records | Today's WR snapshot |
-|---|---|---|---|---|
-| **`cache/picks_history.json`** | `tracker._save_run()` on every scan | `tracker.compute_stats_by_setup()` → `apply_setup_wr_multiplier` (live + backtest) | Each scan's "picks" + matured trade outcomes | 627 closed, **61.2%** WR |
-| **`data/signal_log.json`** | `signal_tracker.log_signals()` on every scan emit | `model_drift_alert`, `elite_research_note`, diagnostics | Every emitted signal (BUY + WATCH + SHORT, Phase 2 2026-04-30) with paper 5d/10d outcomes | 621 closed, mixed (recent BUY-only crashed to 12.7% during 04-28 CAR bug) |
+| Log | Written by | Read by | What it records |
+|---|---|---|---|
+| **`cache/picks_history.json`** | `tracker._save_run()` on every scan | `tracker.compute_stats_by_setup()` → `apply_setup_wr_multiplier` (live + backtest) | Each scan's "picks" + matured trade outcomes |
+| **`data/signal_log.json`** | `signal_tracker.log_signals()` on every scan emit | `model_drift_alert`, `elite_research_note`, diagnostics | Every emitted signal (BUY + WATCH + SHORT, Phase 2 2026-04-30) with paper 5d/10d outcomes |
+
+For current WR snapshots run: `python3 scripts/sharpe_kpi.py` (live aggregate + per-setup attribution).
 
 Key implications:
 - **Tracker feedback loop (`apply_setup_wr_multiplier`) reads `picks_history.json`** — that's the authoritative "what would we have done" log.
@@ -357,7 +411,20 @@ python3 log_rotation.py --dry-run
 
 ## Known Audit Flaws (tracked)
 
-All 10 addressed in "Audit Batch" commit. Tier 1 mitigations shipped; Tier 2 requires paid data.
+Original 10 institutional-grade flaws addressed in "Audit Batch" commit. Tier 1 mitigations shipped; Tier 2 requires paid data.
+
+**Lesson from 2026-05-14 PEAD audit**: 9 additional silent bugs in the PEAD signal flow were discovered when a strategy that should have fired produced 0 signals. Each bug rejected valid signals at a different layer:
+1. macro_blackout morning-after (config flag ignored)
+2. PEAD universe pre-screen (post-earnings tickers not whitelisted)
+3. Wrong param read (`info["earnings"]` vs `earnings` kwarg)
+4. earnings_blackout fired on POST-earnings (-3 days matched `<=3` rule)
+5. PEAD min_score too strict
+6. fund_adequacy missing PEAD bypass
+7. decision_state=MISSED blocked catalyst entries
+8. WATCH→BUY promotion missing (asymmetric routing)
+9. tail_loss_filter tier_zero blocked catalyst sleeves
+
+**Takeaway**: principle 4 (adversarial mindset / audit trail on every claim) is not just for production trades — it applies to BUILD-time signal flow too. When a new sleeve produces 0 signals, audit every gate it passed through. The system can fail silently by rejecting valid signals at multiple layers in succession.
 
 | # | Flaw | Tier 1 (shipped) | Tier 2 (roadmap) |
 |---|------|------------------|------------------|
@@ -406,12 +473,18 @@ All 10 addressed in "Audit Batch" commit. Tier 1 mitigations shipped; Tier 2 req
 
 ## Known Gaps / Roadmap
 
-**Full tracker**: `docs/ROADMAP.md` — categorized + prioritized · 30+ items across strategies, infrastructure, data, UI polish.
+**Full tracker**: `data/open_items.json` (canonical) + `docs/ROADMAP.md` — categorized + prioritized · 30+ items across strategies, infrastructure, data, UI polish.
 
 **P0 priorities** (highest ROI):
 1. Wire equity history → Phase 2 drawdown multiplier (1 day)
-2. Earnings ESP Play scanner (4 hours — ESP data already arriving)
+2. ~~Earnings ESP Play scanner~~ — **SHIPPED 2026-05-14** (`docs/strategy_esp_play.md`)
 3. Reconnect StockTwits / WSB / Congressional scrapers (1 day)
+4. STRUCT-TARGETS-M25-CUTOVER — flip `use_structural_targets=true` after M2.4 regression confirms
+
+**Active Phase 1 paper validation** (observe-only window):
+- All 7 sleeves shipped 2026-05-13/14 are in Phase 1 paper-observation
+- Promote to Phase 2 (half-size live) per `docs/strategy_*.md` Phase 1 pass criteria
+- See `docs/claude_md_calibration.md` for retail-context Phase 1 thresholds (different from institutional defaults)
 
 **Pre-existing gaps** (noted before roadmap):
 - `walk_forward_v2.py` stdout parser expects "Total trades:" / "Max drawdown:" / "Sharpe:" — `backtest.py` single-mode summary uses "Total signals:" and doesn't print Sharpe/MaxDD. Minor fix needed for WF aggregate.
@@ -439,9 +512,23 @@ If `trade.mystockholding.com` is down (HTTP 1033 / 530), see `docs/tunnel-recove
 
 ## Memory References
 
-Linked entries in `~/.claude/projects/-Users-phanirajgarimella/memory/`:
-- `project_swingtrade_phase4.md` — Phase 4 backtest 85.7% config (superseded 2026-04-15: target now industry-standard 50% WR, 2.5 R:R, 10–20 trades/mo)
+Linked entries in `~/.claude/projects/-Volumes-MyMacDisk-Claude-Skills-SwingTrade/memory/`:
+- `feedback_hedge_fund_mindset.md` — quant-analyst rigor; mirrors trade-call thinking
+- `project_unified_system_1k_to_1m.md` — system supports $1K-$100K+ user range; do not gate by assumed size
+- `feedback_active_api_stack.md` — Schwab + Finviz Elite ARE active alongside EODHD + Zacks
+- `feedback_setup_kill_two_sources.md` — kill list merges live signal_log + static config
+- `feedback_kill_list_mult_zero_silent_noop.md` — kill mult=0 was silently passing through (fixed 2026-05-10)
+- `feedback_target_must_cap_vs_entry.md` — recent_high.max() without cap poisons targets
+- `feedback_signal_log_includes_watch.md` — tracker stats are biased by WATCH entries
+- `feedback_breadth_must_match_validation_universe.md` — live breadth must match backtest universe
 - `feedback_timezone.md` — always PST
 - `reference_project_path.md` — this folder path
-- `feedback_data_source_priority.md` — Schwab → Polygon → archive → yfinance (last resort only)
-- `feedback_localhost_not_file_path.md` — cite http://localhost:7432 (or https://trade.mystockholding.com), never the cache/dashboard.html path
+- `feedback_localhost_not_file_path.md` — cite http://localhost:7432 (or https://trade.mystockholding.com), never cache/dashboard.html
+- `project_a5_followup_2026_05_10.md` — A5 followup work
+- `project_inflection_2026_04_28.md` — 04-28 inflection root cause + fixes
+- `project_detail_tabs_redesign_2026_05_11.md` — QuantDetail redesign
+- `project_regime_gates_ab_2026_05_13.md` — 5 regime gates A/B result (no effect in choppy backtest)
+
+**Removed (stale memory references previously listed)**:
+- ~~`project_swingtrade_phase4.md`~~ — Phase 4 target superseded by 50% WR / 2.5 R:R industry-standard
+- ~~`feedback_data_source_priority.md`~~ — referenced Polygon priority; Polygon decommissioned 2026-04-25, refer to "Data Architecture" section instead
