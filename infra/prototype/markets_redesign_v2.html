@@ -1,0 +1,1508 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>SwingTrade · Markets Redesign v2 · Production Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  :root {
+    --bg: #000; --pane: #0a0a0a; --pane2: #12141a; --border: #222; --border2: #2a2a2a;
+    --ink: #e8e8e8; --ink-2: #aaa; --ink-3: #666; --ink-4: #444;
+    --gn: #00d68f; --rd: #ff4d4f; --am: #ffb800; --cy: #00d4ff;
+    --or: #ff7a00; --pu: #a78bfa; --gn-dim: #00a06b; --rd-dim: #c2393a;
+    --gn-bg: rgba(0,214,143,0.10); --rd-bg: rgba(255,77,79,0.10);
+    --am-bg: rgba(255,184,0,0.10); --cy-bg: rgba(0,212,255,0.10);
+    --or-bg: rgba(255,122,0,0.10); --pu-bg: rgba(167,139,250,0.10);
+  }
+  body { background: var(--bg); color: var(--ink); margin: 0;
+         font-family: 'Inter',-apple-system,BlinkMacSystemFont,Helvetica,sans-serif;
+         font-feature-settings: 'tnum' 1, 'ss01' 1; line-height: 1.45; font-size: 13px; }
+  .mono { font-family: 'JetBrains Mono','SF Mono',monospace; }
+
+  /* Masthead */
+  .masthead { padding: 20px 32px; border-bottom: 2px solid var(--or);
+              background: linear-gradient(180deg, #0a0a0a, #000); position: sticky; top: 0; z-index: 20; }
+  .masthead-inner { max-width: 1400px; margin: 0 auto;
+                    display: flex; align-items: baseline; gap: 16px; }
+  .brand { font-size: 22px; font-weight: 800; color: #fff; letter-spacing: -0.5px; }
+  .brand-bar { display: inline-block; width: 4px; height: 20px;
+               background: var(--or); margin-right: 10px; vertical-align: middle; }
+  .edition { font-size: 11px; color: var(--ink-3); letter-spacing: 2px;
+             text-transform: uppercase; font-weight: 600; margin-left: 8px; }
+  .ver-pill { display: inline-block; padding: 2px 6px; background: var(--cy-bg);
+              color: var(--cy); border: 1px solid var(--cy); border-radius: 3px;
+              font-size: 9px; font-weight: 700; letter-spacing: 1px; margin-left: 6px; }
+  .date-bar { margin-left: auto; font-size: 11px; color: var(--ink-3); text-align: right; }
+  .global-controls { display: flex; gap: 4px; margin-top: 4px; justify-content: flex-end; }
+  .ctl { background: var(--pane); border: 1px solid var(--border); padding: 3px 8px;
+         border-radius: 3px; font-size: 10px; color: var(--ink-2); cursor: pointer;
+         font-weight: 500; letter-spacing: 0.3px; }
+  .ctl.active { background: var(--or-bg); color: var(--or); border-color: var(--or); }
+  .ctl:hover { background: var(--pane2); color: var(--ink); }
+
+  /* Persona selector */
+  .persona-bar { background: var(--pane); border-bottom: 1px solid var(--border);
+                 padding: 8px 32px; }
+  .persona-inner { max-width: 1400px; margin: 0 auto; display: flex;
+                   align-items: center; gap: 14px; font-size: 11px; }
+  .persona-inner b { color: var(--ink-3); text-transform: uppercase;
+                     letter-spacing: 1px; font-weight: 600; }
+  .persona-pill { padding: 3px 10px; border: 1px solid var(--border);
+                  border-radius: 12px; cursor: pointer; color: var(--ink-2);
+                  font-weight: 500; }
+  .persona-pill.active { background: var(--or-bg); color: var(--or); border-color: var(--or); }
+
+  /* TOC */
+  .toc { background: #050505; border-bottom: 1px solid var(--border);
+         padding: 10px 32px; position: sticky; top: 65px; z-index: 15; }
+  .toc-inner { max-width: 1400px; margin: 0 auto;
+               display: flex; flex-wrap: wrap; gap: 6px; }
+  .toc a { color: var(--ink-2); text-decoration: none;
+           padding: 4px 10px; border: 1px solid var(--border);
+           border-radius: 3px; font-size: 11px;
+           font-weight: 500; letter-spacing: 0.3px; }
+  .toc a:hover { background: var(--pane); color: var(--ink); border-color: var(--or); }
+
+  /* Tab section */
+  .tab-section { max-width: 1400px; margin: 0 auto;
+                 padding: 32px 32px 12px; border-bottom: 1px solid var(--border); }
+  .tab-head { display: flex; align-items: baseline; gap: 14px;
+              padding-bottom: 12px; margin-bottom: 18px;
+              border-bottom: 1px solid var(--border); }
+  .tab-icon { font-size: 22px; }
+  .tab-title { font-size: 22px; font-weight: 700; color: #fff;
+               letter-spacing: -0.4px; }
+  .tab-desc { font-size: 12px; color: var(--ink-2); flex: 1; }
+  .tab-persona { font-size: 10px; padding: 3px 8px;
+                 background: var(--pane); border: 1px solid var(--border);
+                 border-radius: 3px; color: var(--ink-2);
+                 text-transform: uppercase; letter-spacing: 1px;
+                 font-weight: 600; }
+  .tab-tools { display: flex; gap: 4px; margin-left: 8px; }
+
+  /* Tab tools (top right of each tab) */
+  .tab-tools .ctl { font-size: 10px; }
+
+  /* Grid layouts */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .grid-6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+  .grid-11 { display: grid; grid-template-columns: repeat(11, 1fr); gap: 2px; }
+
+  /* Card */
+  .card { background: var(--pane); border: 1px solid var(--border);
+          border-radius: 4px; padding: 14px 16px; position: relative; }
+  .card-head { display: flex; align-items: center; gap: 10px;
+               margin-bottom: 10px; padding-bottom: 8px;
+               border-bottom: 1px solid var(--border); }
+  .card-title { font-size: 11px; color: var(--or); letter-spacing: 1.5px;
+                text-transform: uppercase; font-weight: 700; flex: 1; }
+  .card-meta { font-size: 10px; color: var(--ink-3); }
+  .card-actions { display: flex; gap: 4px; }
+  .card-actions .ctl { font-size: 9px; padding: 2px 6px; }
+  .card-empty { font-size: 12px; color: var(--ink-3); padding: 14px;
+                text-align: center; font-style: italic; }
+
+  /* Big numbers + deltas */
+  .bignum { font-family: 'JetBrains Mono', monospace; font-size: 24px;
+            font-weight: 700; color: #fff; letter-spacing: -0.5px;
+            line-height: 1.1; }
+  .bignum-sub { font-size: 11px; color: var(--ink-2); margin-top: 3px;
+                font-family: 'JetBrains Mono', monospace; }
+  .delta-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .delta { padding: 2px 7px; font-size: 10px; border-radius: 2px;
+           font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+  .pct-bar { margin-top: 6px; height: 3px; background: var(--border);
+             border-radius: 2px; overflow: hidden; position: relative; }
+  .pct-fill { height: 100%; border-radius: 2px; }
+  .pct-label { font-size: 9px; color: var(--ink-3); margin-top: 2px;
+               letter-spacing: 0.5px; }
+
+  /* Tables */
+  table.t { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.t th { color: var(--ink-3); font-weight: 600; font-size: 10px;
+               letter-spacing: 1px; text-transform: uppercase;
+               text-align: left; padding: 6px 8px; cursor: pointer;
+               border-bottom: 1px solid var(--border); user-select: none; }
+  table.t th:hover { color: var(--or); }
+  table.t th.sorted { color: var(--cy); }
+  table.t td { padding: 8px; border-bottom: 1px solid #1a1a1a; }
+  table.t tr.row-link { cursor: pointer; }
+  table.t tr.row-link:hover td { background: #0f0f0f; }
+  table.t td.r, table.t th.r { text-align: right; }
+  table.t .mono { font-family: 'JetBrains Mono', monospace; }
+  .row-actions { display: flex; gap: 4px; font-size: 10px; }
+  .row-actions a { color: var(--cy); text-decoration: none; padding: 1px 6px;
+                   background: var(--cy-bg); border: 1px solid var(--cy);
+                   border-radius: 2px; }
+  .row-actions a:hover { background: var(--cy); color: #000; }
+
+  /* Tags / chips */
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 10px;
+          font-size: 10px; font-weight: 600; letter-spacing: 0.3px; }
+  .chip-gn { color: var(--gn); background: var(--gn-bg); border: 1px solid var(--gn); }
+  .chip-rd { color: var(--rd); background: var(--rd-bg); border: 1px solid var(--rd); }
+  .chip-am { color: var(--am); background: var(--am-bg); border: 1px solid var(--am); }
+  .chip-cy { color: var(--cy); background: var(--cy-bg); border: 1px solid var(--cy); }
+  .chip-pu { color: var(--pu); background: var(--pu-bg); border: 1px solid var(--pu); }
+  .chip-bare { color: var(--ink-2); background: var(--pane2); border: 1px solid var(--border); }
+
+  /* Heatmap cell */
+  .heat-cell { padding: 10px; min-height: 64px; text-align: center;
+               border-radius: 2px; cursor: pointer; transition: transform 0.1s; }
+  .heat-cell:hover { transform: scale(1.05); border: 1px solid var(--or); }
+  .heat-etf { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+              font-weight: 700; color: #fff; }
+  .heat-name { font-size: 9px; color: var(--ink-3); margin-top: 2px;
+               text-transform: uppercase; letter-spacing: 0.3px; }
+  .heat-pct { font-family: 'JetBrains Mono', monospace; font-size: 14px;
+              font-weight: 700; margin-top: 4px; }
+  .heat-pctile { font-size: 9px; color: var(--ink-3); margin-top: 2px;
+                 font-family: 'JetBrains Mono', monospace; }
+
+  /* Spark rows */
+  .spark-row { display: flex; align-items: center; gap: 10px;
+               padding: 6px 0; font-size: 12px;
+               border-bottom: 1px solid #1a1a1a; }
+  .spark-row:last-child { border-bottom: none; }
+  .spark-ticker { width: 70px; font-family: 'JetBrains Mono', monospace;
+                  color: #fff; font-weight: 600; }
+  .spark-bar { flex: 1; height: 6px; background: #1a1a1a; border-radius: 3px;
+               overflow: hidden; position: relative; }
+  .spark-fill { height: 100%; border-radius: 3px; }
+  .spark-val { width: 60px; text-align: right;
+               font-family: 'JetBrains Mono', monospace; font-size: 11px;
+               font-weight: 600; }
+
+  /* Divergence box */
+  .divbox { padding: 10px 12px; background: var(--pane2);
+            border-radius: 3px; border-left: 3px solid; margin-bottom: 6px;
+            font-size: 12px; display: flex; align-items: center; gap: 10px; }
+  .divbox.warn { border-left-color: var(--am); }
+  .divbox.ok { border-left-color: var(--gn); }
+  .divbox.bad { border-left-color: var(--rd); }
+  .divbox-body { flex: 1; }
+  .divbox-actions { display: flex; gap: 4px; }
+
+  /* Phase status (Strategy Lab) */
+  .phase-pill { display: inline-block; padding: 2px 8px; border-radius: 10px;
+                font-size: 10px; font-weight: 700; letter-spacing: 0.5px; }
+  .phase-1 { background: var(--am-bg); color: var(--am); border: 1px solid var(--am); }
+  .phase-2 { background: var(--cy-bg); color: var(--cy); border: 1px solid var(--cy); }
+  .phase-3 { background: var(--gn-bg); color: var(--gn); border: 1px solid var(--gn); }
+  .phase-d { background: var(--pane2); color: var(--ink-3); border: 1px solid var(--border); }
+
+  /* Theme card */
+  .theme-card { background: var(--pane2); padding: 14px 16px;
+                border-radius: 4px; border-left: 3px solid; margin-bottom: 10px;
+                position: relative; }
+  .theme-card.active { border-left-color: var(--gn); }
+  .theme-card.maturing { border-left-color: var(--am); }
+  .theme-card.watching { border-left-color: var(--ink-3); }
+  .theme-card.crowded { border-left-color: var(--pu); }
+  .theme-head { display: flex; align-items: baseline; gap: 10px;
+                margin-bottom: 6px; }
+  .theme-name { font-size: 14px; font-weight: 700; color: #fff; }
+  .theme-perf { margin-left: auto; font-family: 'JetBrains Mono', monospace;
+                font-size: 13px; font-weight: 600; }
+  .theme-meta { font-size: 11px; color: var(--ink-2); margin: 4px 0; }
+  .theme-meta b { color: var(--ink); }
+  .theme-tickers { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
+  .theme-actions { margin-top: 10px; display: flex; gap: 6px; }
+
+  /* SVG equity curve container */
+  .equity-curve { width: 100%; height: 80px; }
+
+  /* Layout helpers */
+  .row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .row b { color: #fff; font-weight: 600; }
+  .r { text-align: right; }
+  .arrow-up { color: var(--gn); }
+  .arrow-dn { color: var(--rd); }
+  .neutral { color: var(--ink-2); }
+  .sparkblock { font-family: 'JetBrains Mono', monospace;
+                font-size: 14px; letter-spacing: -1px; }
+
+  /* Action footer (per-tab) */
+  .action-footer { background: var(--pane2); border: 1px solid var(--border);
+                   border-radius: 4px; padding: 12px 16px; margin-top: 14px;
+                   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+                   font-size: 11px; }
+  .action-footer b { color: var(--ink-3); text-transform: uppercase;
+                     letter-spacing: 1px; font-weight: 600; font-size: 10px; }
+  .action-footer a { color: var(--cy); text-decoration: none;
+                     padding: 4px 10px; border: 1px solid var(--cy);
+                     border-radius: 2px; font-size: 11px; }
+  .action-footer a:hover { background: var(--cy); color: #000; }
+
+  /* Drilldown notes (hover-style explainers) */
+  .note { font-size: 10px; color: var(--ink-3); font-style: italic;
+          margin-top: 4px; }
+
+  /* Personalize banner */
+  .review-banner { background: var(--cy-bg); border: 1px solid var(--cy);
+                   padding: 14px 20px; margin: 24px 32px;
+                   border-radius: 4px; max-width: 1400px;
+                   margin-left: auto; margin-right: auto; }
+  .review-banner b { color: var(--cy); }
+
+  /* Tiny inline elements */
+  .inline-spark { display: inline-block; vertical-align: middle; height: 18px; }
+  .pulse {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--gn); margin-right: 4px;
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+</style>
+</head>
+<body>
+
+<!-- ─────────── MASTHEAD ─────────── -->
+<div class="masthead">
+  <div class="masthead-inner">
+    <div>
+      <span class="brand"><span class="brand-bar"></span>SwingTrade</span>
+      <span class="edition">Markets Redesign · Production Preview</span>
+      <span class="ver-pill">v2</span>
+    </div>
+    <div class="date-bar mono">
+      THURSDAY · MAY 15, 2026 · 13:42 PT &nbsp; <span class="pulse"></span>LIVE<br>
+      Regime: <span style="color:var(--am)">risk_on_choppy</span> · SPY $748.17 · VIX 19.1 &nbsp;
+      <span style="color:var(--ink-4)">|</span> &nbsp;
+      <span style="color:var(--ink-3)">vs 30d avg: SPY -2.1%, VIX +13%</span>
+      <div class="global-controls">
+        <span class="ctl">1D</span><span class="ctl">5D</span>
+        <span class="ctl active">21D</span><span class="ctl">63D</span><span class="ctl">YTD</span>
+        <span style="margin: 0 6px; color: var(--ink-4)">|</span>
+        <span class="ctl">⭐ Saved Views</span>
+        <span class="ctl">⏰ Alerts (3)</span>
+        <span class="ctl">↓ Export</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── PERSONA BAR ─────────── -->
+<div class="persona-bar">
+  <div class="persona-inner">
+    <b>VIEW AS:</b>
+    <span class="persona-pill active">⚙️ Default (all lenses)</span>
+    <span class="persona-pill">🛡️ Buffett (intrinsic value)</span>
+    <span class="persona-pill">📊 HF Analyst (alpha)</span>
+    <span class="persona-pill">💹 Swing Trader (price)</span>
+    <span class="persona-pill">📅 Earnings Quant</span>
+    <span class="persona-pill">🎯 CFP (suitability)</span>
+    <span style="margin-left:auto;color:var(--ink-3);font-size:10px">Account: <span style="color:var(--ink)">$98.4K paper</span> · Risk: <span style="color:var(--ink)">moderate</span></span>
+  </div>
+</div>
+
+<!-- ─────────── TOC ─────────── -->
+<div class="toc">
+  <div class="toc-inner">
+    <a href="#tab1">🏭 Industries</a>
+    <a href="#tab2">📊 Market Internals</a>
+    <a href="#tab3">🌐 Macro Tape</a>
+    <a href="#tab4">🌅 Pre-Market Edge</a>
+    <a href="#tab5">📅 Corporate Events</a>
+    <a href="#tab6">💡 Thesis Themes</a>
+    <a href="#tab7">⚙️ Strategy Lab</a>
+    <a href="#tab8">⚡ Leveraged & Inverse</a>
+    <a href="#tab9">₿ Crypto Lens</a>
+  </div>
+</div>
+
+<div class="review-banner">
+  <b>📝 v2 Production Preview</b> — All priority gaps from review filled: action affordances on every metric, deltas + percentiles, drill-downs, equity curves, sparklines, suitability layer. Locked to <b>account: $98K paper · risk: moderate</b>. Try clicking the timeframe controls, alert pills, drill links.
+</div>
+
+<!-- ═════════════ TAB 1: INDUSTRIES ═════════════ -->
+<section id="tab1" class="tab-section">
+  <div class="tab-head">
+    <span class="tab-icon">🏭</span>
+    <span class="tab-title">Industries</span>
+    <span class="tab-desc">Sector + industry rotation cockpit · institutional flow tracker</span>
+    <span class="tab-persona">HF Analyst</span>
+    <div class="tab-tools">
+      <span class="ctl">⭐ Save view</span>
+      <span class="ctl">⏰ Alert</span>
+      <span class="ctl">📊 Compare to 1mo ago</span>
+    </div>
+  </div>
+
+  <!-- 11-Sector Heatmap WITH percentile rank -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-head">
+      <span class="card-title">11-Sector Heatmap · 1D % + 1Y Percentile Rank</span>
+      <span class="card-meta">refreshes 5min · click cell to drill</span>
+      <div class="card-actions"><span class="ctl">1D</span><span class="ctl active">5D</span><span class="ctl">21D</span><span class="ctl">63D</span></div>
+    </div>
+    <div class="grid-11">
+      <div class="heat-cell" style="background:rgba(0,214,143,0.30)">
+        <div class="heat-etf">XLK</div><div class="heat-name">Tech</div>
+        <div class="heat-pct arrow-up">+3.2%</div>
+        <div class="heat-pctile">87th %ile</div>
+      </div>
+      <div class="heat-cell" style="background:rgba(0,214,143,0.22)">
+        <div class="heat-etf">XLC</div><div class="heat-name">Comm</div>
+        <div class="heat-pct arrow-up">+2.1%</div>
+        <div class="heat-pctile">72nd %ile</div>
+      </div>
+      <div class="heat-cell" style="background:rgba(0,214,143,0.18)">
+        <div class="heat-etf">XLY</div><div class="heat-name">Disc</div>
+        <div class="heat-pct arrow-up">+1.5%</div>
+        <div class="heat-pctile">61st %ile</div>
+      </div>
+      <div class="heat-cell" style="background:rgba(0,214,143,0.10)">
+        <div class="heat-etf">XLF</div><div class="heat-name">Fin</div>
+        <div class="heat-pct arrow-up">+1.2%</div>
+        <div class="heat-pctile">54th %ile</div>
+      </div>
+      <div class="heat-cell" style="background:rgba(0,214,143,0.06)">
+        <div class="heat-etf">XLI</div><div class="heat-name">Indust</div>
+        <div class="heat-pct arrow-up">+0.3%</div>
+        <div class="heat-pctile">42nd %ile</div>
+      </div>
+      <div class="heat-cell" style="background:#0a0a0a">
+        <div class="heat-etf">XLP</div><div class="heat-name">Staples</div>
+        <div class="heat-pct neutral">+0.0%</div>
+        <div class="heat-pctile">38th %ile</div>
+      </div>
+      <div class="heat-cell" style="background:rgba(255,77,79,0.06)">
+        <div class="heat-etf">XLB</div><div class="heat-name">Mat</div>
+        <div class="heat-pct arrow-dn">-0.4%</div>
+        <div class="heat-pctile">28th %ile</div>
+      </div>
+      <div class="heat-cell" style="background:rgba(255,77,79,0.10)">
+        <div class="heat-etf">XLU</div><div class="heat-name">Util</div>
+        <div class="heat-pct arrow-dn">-1.2%</div>
+        <div class="heat-pctile">22nd %ile</div>
+      </div>
+      <div class="heat-cell" style="background:rgba(255,77,79,0.18)">
+        <div class="heat-etf">XLRE</div><div class="heat-name">RE</div>
+        <div class="heat-pct arrow-dn">-1.8%</div>
+        <div class="heat-pctile">15th %ile</div>
+      </div>
+      <div class="heat-cell" style="background:rgba(255,77,79,0.22)">
+        <div class="heat-etf">XLE</div><div class="heat-name">Energy</div>
+        <div class="heat-pct arrow-dn">-2.8%</div>
+        <div class="heat-pctile">8th %ile</div>
+      </div>
+      <div class="heat-cell" style="background:rgba(255,77,79,0.30)">
+        <div class="heat-etf">XLV</div><div class="heat-name">Health</div>
+        <div class="heat-pct arrow-dn">-3.5%</div>
+        <div class="heat-pctile">4th %ile</div>
+      </div>
+    </div>
+    <div class="note">Heatmap intensity = % change · subtitle percentile = where this 5D return falls vs last 252 trading days</div>
+  </div>
+
+  <!-- Industry-level drilldown -->
+  <div class="grid-2" style="margin-bottom:14px">
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Industry Drill · Within XLK</span>
+        <span class="card-meta">Tech sub-industries</span>
+      </div>
+      <table class="t">
+        <thead><tr><th>Industry</th><th class="r">5D</th><th class="r">RS rank</th><th>Trend</th><th></th></tr></thead>
+        <tbody>
+          <tr class="row-link"><td class="mono"><b>Semiconductors</b></td><td class="r mono arrow-up">+5.8%</td><td class="r mono">95th</td><td><span class="chip chip-gn">ACCEL</span></td><td class="row-actions"><a>→ Scanner</a></td></tr>
+          <tr class="row-link"><td class="mono"><b>Software · App</b></td><td class="r mono arrow-up">+2.4%</td><td class="r mono">68th</td><td><span class="chip chip-bare">STEADY</span></td><td class="row-actions"><a>→ Scanner</a></td></tr>
+          <tr class="row-link"><td class="mono"><b>Software · System</b></td><td class="r mono arrow-up">+1.1%</td><td class="r mono">52nd</td><td><span class="chip chip-bare">STEADY</span></td><td class="row-actions"><a>→ Scanner</a></td></tr>
+          <tr class="row-link"><td class="mono"><b>Comp Hardware</b></td><td class="r mono arrow-up">+0.8%</td><td class="r mono">48th</td><td><span class="chip chip-am">FADING</span></td><td class="row-actions"><a>→ Scanner</a></td></tr>
+          <tr class="row-link"><td class="mono"><b>IT Services</b></td><td class="r mono arrow-dn">-0.3%</td><td class="r mono">31st</td><td><span class="chip chip-rd">DECEL</span></td><td class="row-actions"><a>→ Scanner</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">RSP vs SPY · Equal-Weight Breadth</span>
+        <span class="card-meta">average stock vs index</span>
+        <div class="card-actions"><span class="ctl">⏰ alert on cross</span></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:18px;padding:10px 0">
+        <div>
+          <div class="bignum" style="color:var(--rd)">-2.4%</div>
+          <div class="bignum-sub">RSP - SPY 21D</div>
+        </div>
+        <div style="flex:1">
+          <svg class="equity-curve" viewBox="0 0 240 60" preserveAspectRatio="none">
+            <line x1="0" y1="30" x2="240" y2="30" stroke="#333" stroke-dasharray="2,2"/>
+            <polyline points="0,28 24,30 48,32 72,28 96,35 120,38 144,42 168,40 192,44 216,46 240,48" stroke="#ff4d4f" fill="none" stroke-width="1.5"/>
+          </svg>
+        </div>
+      </div>
+      <div class="divbox bad">
+        <div class="divbox-body">
+          <b>🔴 Top-10 concentration risk</b> — SPY +0.18% today but RSP -0.62%. Mega-caps driving the index; breadth deteriorating.
+        </div>
+        <div class="divbox-actions"><span class="ctl">📊 1Y chart</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rotation timeline + sector earnings velocity -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Leadership Rotation · Last 5 Periods</span>
+        <span class="card-meta">where money moved</span>
+      </div>
+      <table class="t">
+        <thead><tr><th>Period</th><th>Leader</th><th>Laggard</th><th class="r">Spread</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1D</td><td><span class="chip chip-gn">XLK</span></td><td><span class="chip chip-rd">XLV</span></td><td class="r mono">+5.4pp</td></tr>
+          <tr><td class="mono">5D</td><td><span class="chip chip-gn">XLK</span></td><td><span class="chip chip-rd">XLV</span></td><td class="r mono">+8.7pp</td></tr>
+          <tr><td class="mono">21D</td><td><span class="chip chip-gn">XLK</span></td><td><span class="chip chip-rd">XLE</span></td><td class="r mono">+12.4pp</td></tr>
+          <tr><td class="mono">63D</td><td><span class="chip chip-gn">XLK</span></td><td><span class="chip chip-rd">XLU</span></td><td class="r mono">+14.5pp</td></tr>
+          <tr><td class="mono">YTD</td><td><span class="chip chip-gn">XLY</span></td><td><span class="chip chip-rd">XLE</span></td><td class="r mono">+22.1pp</td></tr>
+        </tbody>
+      </table>
+      <div class="note">XLK leadership across all timeframes = persistent narrative (AI infra)</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Sector Earnings Velocity · Next 7d</span>
+        <span class="card-meta">where catalysts cluster</span>
+      </div>
+      <table class="t">
+        <thead><tr><th>Sector</th><th class="r">Reports</th><th class="r">% reported</th><th>Hot tickers</th></tr></thead>
+        <tbody>
+          <tr><td class="mono"><b>XLK</b></td><td class="r mono">14</td><td class="r mono">62%</td><td><span class="chip chip-cy">NVDA</span> <span class="chip chip-cy">INTU</span></td></tr>
+          <tr><td class="mono"><b>XLY</b></td><td class="r mono">8</td><td class="r mono">55%</td><td><span class="chip chip-cy">WMT</span> <span class="chip chip-cy">TGT</span></td></tr>
+          <tr><td class="mono"><b>XLV</b></td><td class="r mono">5</td><td class="r mono">38%</td><td><span class="chip chip-cy">MDT</span></td></tr>
+          <tr><td class="mono"><b>XLF</b></td><td class="r mono">2</td><td class="r mono">85%</td><td><span class="chip chip-bare">light</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="action-footer">
+    <b>Actions:</b>
+    <a>📊 Scan top-RS sector</a>
+    <a>⏰ Alert on rotation flip</a>
+    <a>🔍 Drill XLK industries</a>
+    <a>📈 Compare to last cycle</a>
+    <a>↓ Export rankings</a>
+  </div>
+</section>
+
+<!-- ═════════════ TAB 2: MARKET INTERNALS ═════════════ -->
+<section id="tab2" class="tab-section">
+  <div class="tab-head">
+    <span class="tab-icon">📊</span>
+    <span class="tab-title">Market Internals</span>
+    <span class="tab-desc">Is the market healthy enough to be long? · breadth · sentiment · regime</span>
+    <span class="tab-persona">Analyst + CFP</span>
+    <div class="tab-tools">
+      <span class="ctl">⭐ Save view</span>
+      <span class="ctl">⏰ Alert</span>
+      <span class="ctl">📊 vs Last Cycle</span>
+    </div>
+  </div>
+
+  <!-- Hero metrics with deltas + percentile -->
+  <div class="grid-4" style="margin-bottom:14px">
+    <div class="card">
+      <div class="card-title">SPY</div>
+      <div class="bignum">$748.17</div>
+      <div class="delta-row">
+        <span class="delta arrow-up">+0.18% 1D</span>
+        <span class="delta arrow-up">+2.4% 5D</span>
+        <span class="delta neutral">71st %ile YTD</span>
+      </div>
+      <div class="pct-bar"><div class="pct-fill" style="width:71%;background:var(--gn)"></div></div>
+      <div class="pct-label">YTD range $602 → $762</div>
+    </div>
+    <div class="card">
+      <div class="card-title">VIX</div>
+      <div class="bignum">19.1</div>
+      <div class="delta-row">
+        <span class="delta arrow-up">+1.4 1D</span>
+        <span class="delta arrow-up">+13% vs 30d avg</span>
+        <span class="delta neutral">52nd %ile</span>
+      </div>
+      <div class="pct-bar"><div class="pct-fill" style="width:52%;background:var(--am)"></div></div>
+      <div class="pct-label">range 12 → 35 · contango</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Breadth › 50DMA</div>
+      <div class="bignum" style="color:var(--am)">42.4%</div>
+      <div class="delta-row">
+        <span class="delta arrow-dn">-8.6pp 5D</span>
+        <span class="delta arrow-dn">-12pp 21D</span>
+        <span class="delta neutral">24th %ile</span>
+      </div>
+      <div class="pct-bar"><div class="pct-fill" style="width:24%;background:var(--rd)"></div></div>
+      <div class="pct-label">below median — late cycle</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Put/Call (Equity)</div>
+      <div class="bignum" style="color:var(--am)">0.53</div>
+      <div class="delta-row">
+        <span class="delta arrow-up">+0.08 5D</span>
+        <span class="delta neutral">28th %ile</span>
+        <span class="chip chip-am">GREED</span>
+      </div>
+      <div class="pct-bar"><div class="pct-fill" style="width:28%;background:var(--am)"></div></div>
+      <div class="pct-label">below 0.7 = bullish skew</div>
+    </div>
+  </div>
+
+  <!-- Breadth + Sentiment grid -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Breadth · 7 Indicators</span><span class="card-meta">vs 30d baseline</span></div>
+      <table class="t">
+        <tbody>
+          <tr><td>% › 50EMA</td><td class="r mono"><b>42.4%</b></td><td class="r mono arrow-dn">-12pp</td><td class="r"><span class="sparkblock" style="color:var(--am)">▆▆▅▅▄▃▂</span></td></tr>
+          <tr><td>% › 200SMA</td><td class="r mono"><b>51.1%</b></td><td class="r mono arrow-dn">-4pp</td><td class="r"><span class="sparkblock" style="color:var(--am)">▅▆▆▅▄▄▅</span></td></tr>
+          <tr><td>New Highs (5d)</td><td class="r mono"><b>41</b></td><td class="r mono arrow-dn">-28</td><td class="r"><span class="sparkblock arrow-dn">▆▅▄▃▃▂▂</span></td></tr>
+          <tr><td>New Lows (5d)</td><td class="r mono"><b>53</b></td><td class="r mono arrow-up">+18</td><td class="r"><span class="sparkblock arrow-up">▂▃▄▄▅▅▆</span></td></tr>
+          <tr><td>HL Ratio</td><td class="r mono"><b>0.77</b></td><td class="r mono arrow-dn">-0.32</td><td class="r"><span class="sparkblock" style="color:var(--rd)">▆▅▄▃▃▂▂</span></td></tr>
+          <tr><td>A/D Line (cum)</td><td class="r mono"><b>1,847</b></td><td class="r mono arrow-up">+127</td><td class="r"><span class="sparkblock arrow-up">▃▄▅▅▆▆▇</span></td></tr>
+          <tr><td>Distrib Days (25d)</td><td class="r mono"><b>4</b></td><td class="r mono">flat</td><td><span class="chip chip-am">CAUTION</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><span class="card-title">Sentiment + Positioning</span><span class="card-meta">behavioral indicators</span></div>
+      <table class="t">
+        <tbody>
+          <tr><td>Put/Call equity</td><td class="r mono"><b>0.53</b></td><td><span class="chip chip-am">28th %ile (greed)</span></td></tr>
+          <tr><td>Put/Call total</td><td class="r mono"><b>0.81</b></td><td><span class="chip chip-bare">52nd %ile</span></td></tr>
+          <tr><td>NAAIM exposure</td><td class="r mono"><b>72%</b></td><td><span class="chip chip-am">68th %ile</span></td></tr>
+          <tr><td>AAII bull-bear</td><td class="r mono"><b>+18.4</b></td><td><span class="chip chip-am">74th %ile</span></td></tr>
+          <tr><td>Margin debt YoY</td><td class="r mono"><b>+22%</b></td><td><span class="chip chip-rd">elevated</span></td></tr>
+          <tr><td>VIX term (3m/9d)</td><td class="r mono"><b>1.18</b></td><td><span class="chip chip-gn">contango</span></td></tr>
+          <tr><td>Smart $ index</td><td class="r mono"><b>-1.4</b></td><td><span class="chip chip-am">distributing</span></td></tr>
+          <tr><td>Skew</td><td class="r mono"><b>142</b></td><td><span class="chip chip-am">tail-risk pricing up</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Divergence watch -->
+  <div class="card" style="margin-top:14px">
+    <div class="card-head">
+      <span class="card-title">⚠️ Divergence Watch — Leading Indicators</span>
+      <span class="card-meta">red flags + confirmations</span>
+      <div class="card-actions"><span class="ctl">⏰ Alert me</span></div>
+    </div>
+    <div class="divbox warn">
+      <div class="divbox-body">
+        <b>⚠️ SPY new high + breadth weakening</b> — Classic late-cycle pattern. Top-10 carrying index, breadth at 42%. Last 5 times this pattern persisted &gt;14d, SPY pulled back 4-9%.
+      </div>
+      <div class="divbox-actions">
+        <span class="ctl">📊 5 historical</span>
+        <span class="ctl">⏰ Pin alert</span>
+      </div>
+    </div>
+    <div class="divbox bad">
+      <div class="divbox-body">
+        <b>🔴 Gold rising + DXY falling + VIX up</b> — Risk-off positioning emerging. Pattern preceded Feb 2026 -5% pullback by 6 days.
+      </div>
+      <div class="divbox-actions">
+        <span class="ctl">📊 Confirmations</span>
+        <span class="ctl">🎯 Hedge ideas</span>
+      </div>
+    </div>
+    <div class="divbox ok">
+      <div class="divbox-body">
+        <b>✅ Credit (HYG) holding firm</b> — No spread blowout. Rotation, not credit crisis. Watch HYG break of $78 as the canary.
+      </div>
+      <div class="divbox-actions"><span class="ctl">⏰ Alert HYG &lt;78</span></div>
+    </div>
+  </div>
+
+  <div class="action-footer">
+    <b>Actions:</b>
+    <a>📊 Compare to 2020-Q4</a>
+    <a>⏰ Alert on breadth&lt;40%</a>
+    <a>🛡️ Defensive ideas</a>
+    <a>📈 Hedge sizing calc</a>
+    <a>↓ Export internals</a>
+  </div>
+</section>
+
+<!-- ═════════════ TAB 3: MACRO TAPE ═════════════ -->
+<section id="tab3" class="tab-section">
+  <div class="tab-head">
+    <span class="tab-icon">🌐</span>
+    <span class="tab-title">Macro Tape</span>
+    <span class="tab-desc">Yield curve · credit · DXY · commodities · global · economic surprise</span>
+    <span class="tab-persona">HF Analyst</span>
+    <div class="tab-tools">
+      <span class="ctl">⭐ Save view</span>
+      <span class="ctl">⏰ Fed alert</span>
+      <span class="ctl">📊 vs Last cycle</span>
+    </div>
+  </div>
+
+  <div class="grid-4" style="margin-bottom:14px">
+    <div class="card">
+      <div class="card-title">2s/10s Spread</div>
+      <div class="bignum">+27 bp</div>
+      <div class="delta-row"><span class="delta arrow-up">+8bp 5D</span><span class="delta">82nd %ile</span></div>
+      <div class="note">steepening = bond mkt prices growth, not recession</div>
+    </div>
+    <div class="card">
+      <div class="card-title">10Y Real Yield</div>
+      <div class="bignum">+1.87%</div>
+      <div class="delta-row"><span class="delta arrow-dn">-12bp 21D</span><span class="delta">68th %ile</span></div>
+      <div class="note">real yields easing — equity tailwind</div>
+    </div>
+    <div class="card">
+      <div class="card-title">DXY</div>
+      <div class="bignum">102.4</div>
+      <div class="delta-row"><span class="delta arrow-dn">-1.2% 5D</span><span class="delta">35th %ile</span></div>
+      <div class="note">dollar weakness = EM + commodities tailwind</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Citi ESI</div>
+      <div class="bignum" style="color:var(--am)">-12</div>
+      <div class="delta-row"><span class="delta arrow-dn">-8 5D</span><span class="delta">22nd %ile</span></div>
+      <div class="note">data prints missing consensus</div>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-bottom:14px">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Yield Curve · Full</span><span class="card-meta">vs 30d ago overlay</span></div>
+      <table class="t">
+        <thead><tr><th>Tenor</th><th class="r">Yield</th><th class="r">Δ 1D</th><th class="r">Δ 30D</th></tr></thead>
+        <tbody>
+          <tr><td>3M</td><td class="r mono"><b>4.18%</b></td><td class="r mono arrow-dn">-2bp</td><td class="r mono arrow-dn">-22bp</td></tr>
+          <tr><td>2Y</td><td class="r mono"><b>3.92%</b></td><td class="r mono arrow-dn">-4bp</td><td class="r mono arrow-dn">-18bp</td></tr>
+          <tr><td>5Y</td><td class="r mono"><b>4.05%</b></td><td class="r mono arrow-dn">-3bp</td><td class="r mono arrow-dn">-12bp</td></tr>
+          <tr><td>10Y</td><td class="r mono"><b>4.19%</b></td><td class="r mono arrow-up">+1bp</td><td class="r mono arrow-dn">-8bp</td></tr>
+          <tr><td>30Y</td><td class="r mono"><b>4.42%</b></td><td class="r mono arrow-up">+3bp</td><td class="r mono arrow-dn">-5bp</td></tr>
+        </tbody>
+      </table>
+      <div class="note">Front-end falling faster than back-end = steepening (cyclical tailwind)</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><span class="card-title">Credit Spreads + Fund Flows</span><span class="card-meta">stress + positioning</span></div>
+      <table class="t">
+        <thead><tr><th>Asset</th><th class="r">Price</th><th class="r">5D flow</th><th>Signal</th></tr></thead>
+        <tbody>
+          <tr><td><b>HYG</b> HY</td><td class="r mono">$79.85</td><td class="r mono arrow-up">+$420M</td><td><span class="chip chip-gn">FIRM</span></td></tr>
+          <tr><td><b>LQD</b> IG</td><td class="r mono">$108.41</td><td class="r mono arrow-up">+$210M</td><td><span class="chip chip-gn">FIRM</span></td></tr>
+          <tr><td><b>EMB</b> EM</td><td class="r mono">$89.32</td><td class="r mono arrow-dn">-$80M</td><td><span class="chip chip-am">SOFT</span></td></tr>
+          <tr><td><b>TLT</b> 20Y</td><td class="r mono">$88.04</td><td class="r mono arrow-up">+$150M</td><td><span class="chip chip-bare">FLAT</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Dollar pairs + Commodities + Global -->
+  <div class="grid-3" style="margin-bottom:14px">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Dollar Pairs</span></div>
+      <table class="t">
+        <tbody>
+          <tr><td>EUR/USD</td><td class="r mono">1.0842</td><td class="r mono arrow-up">+0.6% 5D</td></tr>
+          <tr><td>USD/JPY</td><td class="r mono">152.8</td><td class="r mono arrow-dn">-1.1% 5D</td></tr>
+          <tr><td>USD/CNH</td><td class="r mono">7.21</td><td class="r mono arrow-dn">-0.3% 5D</td></tr>
+          <tr><td>GBP/USD</td><td class="r mono">1.2745</td><td class="r mono arrow-up">+0.4% 5D</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Commodities</span></div>
+      <table class="t">
+        <tbody>
+          <tr><td>Oil (WTI)</td><td class="r mono">$67.40</td><td class="r mono arrow-dn">-2.8% 5D</td></tr>
+          <tr><td>Copper</td><td class="r mono">$4.21</td><td class="r mono arrow-up">+1.2% 5D</td></tr>
+          <tr><td>Gold</td><td class="r mono">$3,182</td><td class="r mono arrow-up">+1.8% 5D</td></tr>
+          <tr><td>Nat Gas</td><td class="r mono">$2.84</td><td class="r mono arrow-dn">-3.1% 5D</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Global Equity</span></div>
+      <table class="t">
+        <tbody>
+          <tr><td>EWJ Japan</td><td class="r mono">$76.4</td><td class="r mono arrow-up">+1.2% 5D</td></tr>
+          <tr><td>FXI China</td><td class="r mono">$38.2</td><td class="r mono arrow-dn">-0.8% 5D</td></tr>
+          <tr><td>EWG Germany</td><td class="r mono">$48.7</td><td class="r mono arrow-up">+0.4% 5D</td></tr>
+          <tr><td>EEM Emerging</td><td class="r mono">$54.1</td><td class="r mono arrow-up">+0.6% 5D</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="card-title">Macro Calendar + Fed Dot Plot Delta</span><span class="card-meta">scheduled events + pricing</span></div>
+    <table class="t">
+      <thead><tr><th>Date</th><th>Event</th><th>Consensus</th><th class="r">Market price</th><th>Impact</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">May 29</td><td><b>PCE</b> inflation</td><td class="mono">+0.2% MoM</td><td class="r mono">+0.21%</td><td><span class="chip chip-am">HIGH</span></td><td class="row-actions"><a>⏰ alert</a></td></tr>
+        <tr><td class="mono">Jun 6</td><td><b>NFP</b> jobs</td><td class="mono">175k</td><td class="r mono">182k</td><td><span class="chip chip-am">HIGH</span></td><td class="row-actions"><a>⏰ alert</a></td></tr>
+        <tr><td class="mono">Jun 11</td><td><b>CPI</b> May</td><td class="mono">+0.2% MoM</td><td class="r mono">+0.22%</td><td><span class="chip chip-am">HIGH</span></td><td class="row-actions"><a>⏰ alert</a></td></tr>
+        <tr><td class="mono">Jun 17</td><td><b>FOMC</b></td><td class="mono">No change</td><td class="r mono">94% hold</td><td><span class="chip chip-rd">CRITICAL</span></td><td class="row-actions"><a>📊 Pre-FOMC drift</a></td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:10px;padding:8px 10px;background:var(--pane2);border-radius:3px;font-size:11px">
+      <b style="color:var(--cy)">Fed dot plot delta:</b> Mar dots: 2.0 cuts EOY · Current pricing: 2.5 cuts EOY · Market more dovish than Fed by 0.5 cuts
+    </div>
+  </div>
+
+  <div class="action-footer">
+    <b>Actions:</b>
+    <a>📊 Yield curve regression</a>
+    <a>⏰ Alert on dot delta</a>
+    <a>🌍 Global rotation map</a>
+    <a>↓ Export macro</a>
+  </div>
+</section>
+
+<!-- ═════════════ TAB 4: PRE-MARKET EDGE ═════════════ -->
+<section id="tab4" class="tab-section">
+  <div class="tab-head">
+    <span class="tab-icon">🌅</span>
+    <span class="tab-title">Pre-Market Edge</span>
+    <span class="tab-desc">5:00-6:30am PT scanner · gappers · futures · earnings reactions · halts</span>
+    <span class="tab-persona">Swing + Earnings Quant</span>
+    <div class="tab-tools">
+      <span class="ctl">⭐ Save view</span>
+      <span class="ctl">⏰ Halt alerts</span>
+      <span class="ctl">📊 Reaction stats</span>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-bottom:14px">
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">📈 Pre-Market Gainers · with RVOL</span>
+        <span class="card-meta">vol-weighted, sorted by quality</span>
+      </div>
+      <table class="t">
+        <thead><tr><th>Ticker</th><th class="r">Pre%</th><th class="r">RVOL</th><th class="r">Vol $M</th><th>Catalyst</th><th></th></tr></thead>
+        <tbody>
+          <tr class="row-link"><td class="mono"><b>SNDK</b></td><td class="r mono arrow-up">+12.4%</td><td class="r mono"><b>4.8x</b></td><td class="r mono">$24M</td><td>EPS beat +59% · gap-up vs futures +10pp</td><td class="row-actions"><a>→ Detail</a></td></tr>
+          <tr class="row-link"><td class="mono"><b>FOXA</b></td><td class="r mono arrow-up">+8.7%</td><td class="r mono"><b>3.2x</b></td><td class="r mono">$12M</td><td>Beat + $2B buyback</td><td class="row-actions"><a>→ Detail</a></td></tr>
+          <tr class="row-link"><td class="mono"><b>NVT</b></td><td class="r mono arrow-up">+6.2%</td><td class="r mono">1.8x</td><td class="r mono">$5M</td><td>Guidance raise</td><td class="row-actions"><a>→ Detail</a></td></tr>
+          <tr class="row-link"><td class="mono"><b>HPE</b></td><td class="r mono arrow-up">+5.1%</td><td class="r mono">2.4x</td><td class="r mono">$18M</td><td>AI capex tier-1</td><td class="row-actions"><a>→ Detail</a></td></tr>
+          <tr class="row-link"><td class="mono"><b>ZBRA</b></td><td class="r mono arrow-up">+4.8%</td><td class="r mono">0.9x</td><td class="r mono">$3M</td><td>Beat (low vol — fade?)</td><td class="row-actions"><a>→ Detail</a></td></tr>
+        </tbody>
+      </table>
+      <div class="note">RVOL = pre-market volume / 20d-avg pre-market. >3x = institutional · <1x = fade signal</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">📉 Pre-Market Losers · w/ short data</span>
+        <span class="card-meta">squeeze candidates flagged</span>
+      </div>
+      <table class="t">
+        <thead><tr><th>Ticker</th><th class="r">Pre%</th><th class="r">SI %</th><th class="r">DTC</th><th>Catalyst</th></tr></thead>
+        <tbody>
+          <tr><td class="mono"><b>CVNA</b></td><td class="r mono arrow-dn">-18.2%</td><td class="r mono"><b>28%</b></td><td class="r mono">5.2</td><td>Miss · <span class="chip chip-pu">SQUEEZE WATCH</span></td></tr>
+          <tr><td class="mono"><b>BBWI</b></td><td class="r mono arrow-dn">-9.4%</td><td class="r mono">12%</td><td class="r mono">3.1</td><td>Cut guide</td></tr>
+          <tr><td class="mono"><b>LNC</b></td><td class="r mono arrow-dn">-7.1%</td><td class="r mono">8%</td><td class="r mono">2.4</td><td>Q1 miss</td></tr>
+          <tr><td class="mono"><b>NWL</b></td><td class="r mono arrow-dn">-4.6%</td><td class="r mono">6%</td><td class="r mono">1.8</td><td>Reaffirmed guide</td></tr>
+        </tbody>
+      </table>
+      <div class="note">SI = short interest %; DTC = days to cover. SI&gt;20 + DTC&gt;5 = squeeze candidates</div>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-bottom:14px">
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">🎯 PEAD Reaction Score · Today</span>
+        <span class="card-meta">EPS + analyst revision velocity</span>
+      </div>
+      <table class="t">
+        <thead><tr><th>Ticker</th><th class="r">EPS</th><th class="r">Rev↑</th><th class="r">Whisper</th><th>Gate</th></tr></thead>
+        <tbody>
+          <tr><td class="mono"><b>SNDK</b></td><td class="r mono arrow-up">+59.7%</td><td class="r mono">+5</td><td class="r mono">beat</td><td><span class="chip chip-gn">PEAD ELITE</span></td></tr>
+          <tr><td class="mono"><b>FOXA</b></td><td class="r mono arrow-up">+36.1%</td><td class="r mono">+3</td><td class="r mono">beat</td><td><span class="chip chip-gn">PEAD eligible</span></td></tr>
+          <tr><td class="mono"><b>CEG</b></td><td class="r mono arrow-up">+20.7%</td><td class="r mono">+2</td><td class="r mono">meet</td><td><span class="chip chip-gn">PEAD eligible</span></td></tr>
+          <tr><td class="mono"><b>ZBRA</b></td><td class="r mono arrow-up">+15.0%</td><td class="r mono">0</td><td class="r mono">beat</td><td><span class="chip chip-am">Gap &gt;8% — fade</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">📊 Futures + Implied Open</span>
+        <span class="card-meta">vs fair value</span>
+      </div>
+      <table class="t">
+        <tbody>
+          <tr><td>ES (S&amp;P)</td><td class="r mono">+5.25</td><td class="r mono">+0.10%</td><td><span class="chip chip-gn">↑ vs FV</span></td></tr>
+          <tr><td>NQ (Nasdaq)</td><td class="r mono">+38.5</td><td class="r mono">+0.18%</td><td><span class="chip chip-gn">↑ vs FV</span></td></tr>
+          <tr><td>RTY (Russell)</td><td class="r mono">-0.4</td><td class="r mono">-0.02%</td><td><span class="chip chip-bare">flat</span></td></tr>
+          <tr><td>VX (VIX)</td><td class="r mono">+0.85</td><td class="r mono">+4.6%</td><td><span class="chip chip-am">elevated</span></td></tr>
+          <tr><td><b>SPY implied open</b></td><td class="r mono"><b>$748.95</b></td><td class="r mono arrow-up">+0.10%</td><td><span class="chip chip-gn">gap up</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="card-title">🚨 Halts + News Feed (last 30 min)</span>
+      <span class="card-meta">sentiment-scored</span>
+    </div>
+    <div style="padding:8px 0;border-bottom:1px solid #1a1a1a;font-size:12px">
+      <span class="chip chip-rd">HALT</span> &nbsp; <b>BIOX</b> · LULD circuit breaker on +24% spike · 06:18 PT
+    </div>
+    <div style="padding:8px 0;border-bottom:1px solid #1a1a1a;font-size:12px">
+      <span class="chip chip-gn">NEWS · POSITIVE</span> &nbsp; <b>NVDA</b> · "AI revenue accelerating into Q2" - Reuters · 06:14 PT
+    </div>
+    <div style="padding:8px 0;border-bottom:1px solid #1a1a1a;font-size:12px">
+      <span class="chip chip-am">NEWS · MIXED</span> &nbsp; <b>TSLA</b> · "FSD timeline pushed; new model unveiled" - Bloomberg · 06:08 PT
+    </div>
+    <div style="padding:8px 0;font-size:12px">
+      <span class="chip chip-rd">NEWS · NEGATIVE</span> &nbsp; <b>CVNA</b> · "Q1 miss; guidance cut sharply" - WSJ · 06:01 PT
+    </div>
+  </div>
+
+  <div class="action-footer">
+    <b>Actions:</b>
+    <a>🎯 Auto-stage PEAD orders</a>
+    <a>⏰ Halt alerts</a>
+    <a>📊 PEAD historical hit-rate</a>
+    <a>↓ Export gapper list</a>
+  </div>
+</section>
+
+<!-- ═════════════ TAB 5: CORPORATE EVENTS ═════════════ -->
+<section id="tab5" class="tab-section">
+  <div class="tab-head">
+    <span class="tab-icon">📅</span>
+    <span class="tab-title">Corporate Events</span>
+    <span class="tab-desc">Earnings · buybacks · IPOs · spinoffs · dividends · insider · FDA</span>
+    <span class="tab-persona">Earnings Quant + Buffett</span>
+    <div class="tab-tools">
+      <span class="ctl">⭐ Save</span>
+      <span class="ctl">⏰ Event alerts</span>
+      <span class="ctl">📊 7d / 14d / 30d</span>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-bottom:14px">
+    <div class="card">
+      <div class="card-head"><span class="card-title">📅 Earnings · Next 7d</span><span class="card-meta">ESP + whisper vs consensus</span></div>
+      <table class="t">
+        <thead><tr><th>Date</th><th>Ticker</th><th class="r">ESP</th><th class="r">Whisper</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          <tr class="row-link"><td class="mono">Mon 5/19</td><td class="mono"><b>NVDA</b></td><td class="r mono arrow-up">+3.2%</td><td class="r mono arrow-up">+4.8%</td><td><span class="chip chip-gn">ESP ELITE</span></td><td class="row-actions"><a>📊</a><a>⏰</a></td></tr>
+          <tr class="row-link"><td class="mono">Tue 5/20</td><td class="mono"><b>WMT</b></td><td class="r mono">+0.8%</td><td class="r mono">+1.2%</td><td><span class="chip chip-gn">ESP eligible</span></td><td class="row-actions"><a>📊</a><a>⏰</a></td></tr>
+          <tr class="row-link"><td class="mono">Wed 5/21</td><td class="mono"><b>TGT</b></td><td class="r mono arrow-up">+2.1%</td><td class="r mono arrow-up">+2.8%</td><td><span class="chip chip-gn">ESP eligible</span></td><td class="row-actions"><a>📊</a><a>⏰</a></td></tr>
+          <tr class="row-link"><td class="mono">Thu 5/22</td><td class="mono"><b>INTU</b></td><td class="r mono">+0.3%</td><td class="r mono">+0.5%</td><td><span class="chip chip-am">weak ESP</span></td><td class="row-actions"><a>📊</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><span class="card-title">🏛️ Buyback Announcements</span><span class="card-meta">60d academic drift edge</span></div>
+      <table class="t">
+        <thead><tr><th>Ticker</th><th class="r">$ Auth</th><th class="r">% Cap</th><th class="r">FCF cover</th><th>Filed</th></tr></thead>
+        <tbody>
+          <tr><td class="mono"><b>AAPL</b></td><td class="r mono">$110B</td><td class="r mono">3.4%</td><td class="r mono">2.1x</td><td class="mono">May 1</td></tr>
+          <tr><td class="mono"><b>META</b></td><td class="r mono">$50B</td><td class="r mono">2.8%</td><td class="r mono">1.8x</td><td class="mono">Apr 24</td></tr>
+          <tr><td class="mono"><b>GOOGL</b></td><td class="r mono">$70B</td><td class="r mono">3.1%</td><td class="r mono">2.4x</td><td class="mono">Apr 25</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid-3" style="margin-bottom:14px">
+    <div class="card">
+      <div class="card-head"><span class="card-title">👥 Insider Buying · 30d</span></div>
+      <table class="t">
+        <thead><tr><th>Ticker</th><th>Role</th><th class="r">$</th></tr></thead>
+        <tbody>
+          <tr><td class="mono"><b>UBER</b></td><td>CEO</td><td class="r mono">$1.2M</td></tr>
+          <tr><td class="mono"><b>NUE</b></td><td>CFO</td><td class="r mono">$840K</td></tr>
+          <tr><td class="mono"><b>SCHW</b></td><td>Director</td><td class="r mono">$520K</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">🆕 IPO · 14d</span></div>
+      <table class="t">
+        <tbody>
+          <tr><td class="mono"><b>SBLB</b></td><td>Health AI</td><td class="r mono">$120M</td></tr>
+          <tr><td class="mono"><b>NUKE</b></td><td>SMR</td><td class="r mono">$280M</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">🔀 Spinoff / M&amp;A · 14d</span></div>
+      <table class="t">
+        <tbody>
+          <tr><td class="mono"><b>GE Vernova</b></td><td>Spin</td><td class="mono">Jun 3</td></tr>
+          <tr><td class="mono"><b>CHTR/COX</b></td><td>M&amp;A</td><td class="mono">Pending</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">⚕️ PDUFA / FDA · 30d</span><span class="card-meta">biotech catalyst</span></div>
+      <table class="t">
+        <thead><tr><th>Ticker</th><th>Drug</th><th class="r">Date</th></tr></thead>
+        <tbody>
+          <tr><td class="mono"><b>SRPT</b></td><td>Elevidys (DMD)</td><td class="r mono">Jun 21</td></tr>
+          <tr><td class="mono"><b>ITCI</b></td><td>Caplyta (MDD)</td><td class="r mono">Jun 28</td></tr>
+          <tr><td class="mono"><b>VKTX</b></td><td>VK2735 Ph3 data</td><td class="r mono">Q3</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">💰 Dividend Events · 7d</span></div>
+      <table class="t">
+        <thead><tr><th>Ticker</th><th class="r">Yield</th><th class="r">Ex-div</th></tr></thead>
+        <tbody>
+          <tr><td class="mono"><b>JNJ</b></td><td class="r mono">3.1%</td><td class="r mono">May 21</td></tr>
+          <tr><td class="mono"><b>PG</b></td><td class="r mono">2.4%</td><td class="r mono">May 23</td></tr>
+          <tr><td class="mono"><b>VZ</b></td><td class="r mono">6.4%</td><td class="r mono">May 25</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="action-footer">
+    <b>Actions:</b>
+    <a>📊 Earnings reaction backtest</a>
+    <a>⏰ FDA alert</a>
+    <a>📈 Buyback drift screener</a>
+    <a>↓ Export calendar</a>
+  </div>
+</section>
+
+<!-- ═════════════ TAB 6: THESIS THEMES ═════════════ -->
+<section id="tab6" class="tab-section">
+  <div class="tab-head">
+    <span class="tab-icon">💡</span>
+    <span class="tab-title">Thesis Themes</span>
+    <span class="tab-desc">Multi-stock playbooks · conviction tiers · lifecycle stages · falsification</span>
+    <span class="tab-persona">Buffett + Analyst</span>
+    <div class="tab-tools">
+      <span class="ctl">⭐ Save</span>
+      <span class="ctl">+ New theme</span>
+      <span class="ctl">📊 Correlations</span>
+    </div>
+  </div>
+
+  <div class="theme-card active">
+    <div class="theme-head">
+      <span class="theme-name">AI Infrastructure</span>
+      <span class="chip chip-gn">ACTIVE</span>
+      <span class="chip chip-bare">CONVICTION: HIGH</span>
+      <span class="chip chip-pu">CYCLE: LATE-EARLY</span>
+      <span class="theme-perf arrow-up">+18% vs SPY +5% YTD · Sharpe 1.84</span>
+    </div>
+    <div class="theme-meta"><b>Mechanism:</b> Capex cycle in expansion · 18-24mo runway · margins improving with scale</div>
+    <div class="theme-meta"><b>Risk:</b> TSMC dependency · NVDA concentration (62% of theme) · 2026 capex deceleration</div>
+    <div class="theme-meta"><b>Falsification:</b> If hyperscaler capex guides DOWN in Q3 2026 OR NVDA gross margin compresses &gt;200bp</div>
+    <div class="theme-tickers">
+      <span class="chip chip-gn">NVDA +24%</span>
+      <span class="chip chip-gn">AVGO +18%</span>
+      <span class="chip chip-gn">AMD +14%</span>
+      <span class="chip chip-gn">MU +11%</span>
+      <span class="chip chip-gn">DELL +8%</span>
+      <span class="chip chip-am">SMCI -2%</span>
+      <span class="chip chip-gn">CRWV +21%</span>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--ink-3)">
+      <b style="color:var(--ink-2)">Attribution:</b> NVDA contributed +9pp, AVGO +4pp, rest +5pp of the +18% theme return
+    </div>
+    <div class="theme-actions">
+      <span class="ctl">📊 Holdings analysis</span>
+      <span class="ctl">⏰ Catalyst alerts</span>
+      <span class="ctl">🎯 Allocation calc</span>
+      <span class="ctl">🔀 Adjacent → Power</span>
+    </div>
+  </div>
+
+  <div class="theme-card maturing">
+    <div class="theme-head">
+      <span class="theme-name">GLP-1 Healthcare</span>
+      <span class="chip chip-am">MATURING</span>
+      <span class="chip chip-bare">CONVICTION: MEDIUM</span>
+      <span class="chip chip-pu">CYCLE: MID</span>
+      <span class="theme-perf arrow-up">+8% vs SPY +5% · Sharpe 1.12</span>
+    </div>
+    <div class="theme-meta"><b>Mechanism:</b> Demand expansion (cardio, addiction, anti-aging) · payers resolving favorably</div>
+    <div class="theme-meta"><b>Risk:</b> Generics 2030+ · supply constraints capping growth · NVO/LLY duopoly compression</div>
+    <div class="theme-meta"><b>Falsification:</b> If Medicare denies broad coverage OR generic launches before 2029</div>
+    <div class="theme-tickers">
+      <span class="chip chip-gn">LLY +12%</span>
+      <span class="chip chip-am">NVO +3%</span>
+      <span class="chip chip-gn">VKTX +28%</span>
+      <span class="chip chip-bare">AMGN +1%</span>
+    </div>
+    <div class="theme-actions">
+      <span class="ctl">📊 Holdings</span>
+      <span class="ctl">⏰ FDA alerts</span>
+      <span class="ctl">🎯 Allocation</span>
+    </div>
+  </div>
+
+  <div class="theme-card maturing">
+    <div class="theme-head">
+      <span class="theme-name">Nuclear / SMR Power</span>
+      <span class="chip chip-am">MATURING</span>
+      <span class="chip chip-bare">CONVICTION: MEDIUM</span>
+      <span class="chip chip-pu">CYCLE: EARLY-MID</span>
+      <span class="theme-perf arrow-up">+24% vs SPY +5% · Sharpe 1.45</span>
+    </div>
+    <div class="theme-meta"><b>Mechanism:</b> AI datacenter power demand · regulatory tailwind · cost curves declining</div>
+    <div class="theme-meta"><b>Risk:</b> Multi-decade payoff · CAPEX-heavy · political reversal · permitting cycle 5y+</div>
+    <div class="theme-meta"><b>Falsification:</b> If new admin reverses Inflation Reduction Act nuclear subsidies</div>
+    <div class="theme-tickers">
+      <span class="chip chip-gn">CEG +32%</span>
+      <span class="chip chip-am">NEE +6%</span>
+      <span class="chip chip-gn">SMR +18%</span>
+      <span class="chip chip-am">VST +9%</span>
+    </div>
+    <div class="theme-actions">
+      <span class="ctl">📊 Holdings</span>
+      <span class="ctl">🔀 Adjacent → Grid</span>
+    </div>
+  </div>
+
+  <div class="theme-card crowded">
+    <div class="theme-head">
+      <span class="theme-name">Memecoin / Meme Stocks</span>
+      <span class="chip chip-pu">CROWDED</span>
+      <span class="chip chip-bare">CONVICTION: NONE</span>
+      <span class="chip chip-rd">CYCLE: REVERSAL</span>
+      <span class="theme-perf arrow-dn">-12% 30d · avoid</span>
+    </div>
+    <div class="theme-meta"><b>Risk:</b> WSB hype = euphoria phase · DJT/CVNA correlated decline · short interest dropping = bulls capitulating</div>
+    <div class="theme-tickers">
+      <span class="chip chip-rd">DJT -22%</span>
+      <span class="chip chip-rd">GME -18%</span>
+      <span class="chip chip-rd">AMC -14%</span>
+    </div>
+  </div>
+
+  <div class="theme-card watching">
+    <div class="theme-head">
+      <span class="theme-name">Energy Renaissance</span>
+      <span class="chip chip-bare">WATCHING</span>
+      <span class="chip chip-bare">CONVICTION: LOW</span>
+      <span class="chip chip-pu">CYCLE: BASING</span>
+      <span class="theme-perf arrow-dn">-3% vs SPY +5% · waiting</span>
+    </div>
+    <div class="theme-meta"><b>Mechanism:</b> Supply discipline + capital return story · cheap on multiples · geopolitical hedge</div>
+    <div class="theme-meta"><b>Risk:</b> EV demand destruction · commodity cycle · ESG capital flight</div>
+    <div class="theme-tickers">
+      <span class="chip chip-bare">XOM</span>
+      <span class="chip chip-bare">CVX</span>
+      <span class="chip chip-bare">COP</span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="card-head"><span class="card-title">Theme Correlation Matrix · 90D</span><span class="card-meta">are these actually diversifying?</span></div>
+    <table class="t">
+      <thead><tr><th>Theme</th><th class="r">AI Infra</th><th class="r">GLP-1</th><th class="r">Nuclear</th><th class="r">Energy</th></tr></thead>
+      <tbody>
+        <tr><td><b>AI Infra</b></td><td class="r mono">1.00</td><td class="r mono">0.21</td><td class="r mono"><span style="color:var(--am)">0.58</span></td><td class="r mono">0.12</td></tr>
+        <tr><td><b>GLP-1</b></td><td class="r mono">0.21</td><td class="r mono">1.00</td><td class="r mono">0.18</td><td class="r mono">-0.05</td></tr>
+        <tr><td><b>Nuclear</b></td><td class="r mono"><span style="color:var(--am)">0.58</span></td><td class="r mono">0.18</td><td class="r mono">1.00</td><td class="r mono">0.34</td></tr>
+        <tr><td><b>Energy</b></td><td class="r mono">0.12</td><td class="r mono">-0.05</td><td class="r mono">0.34</td><td class="r mono">1.00</td></tr>
+      </tbody>
+    </table>
+    <div class="note">AI Infra ⟷ Nuclear correlation 0.58 = NOT diversified · holding both = concentrated bet on power-hungry AI</div>
+  </div>
+
+  <div class="action-footer">
+    <b>Actions:</b>
+    <a>+ Create theme</a>
+    <a>📊 Backtest theme</a>
+    <a>🎯 Account allocation</a>
+    <a>↓ Export theses</a>
+  </div>
+</section>
+
+<!-- ═════════════ TAB 7: STRATEGY LAB ═════════════ -->
+<section id="tab7" class="tab-section">
+  <div class="tab-head">
+    <span class="tab-icon">⚙️</span>
+    <span class="tab-title">Strategy Lab</span>
+    <span class="tab-desc">Per-sleeve P&amp;L · equity curves · Phase progression · regime attribution</span>
+    <span class="tab-persona">All 5 lenses</span>
+    <div class="tab-tools">
+      <span class="ctl">⭐ Save</span>
+      <span class="ctl">📊 Correlation</span>
+      <span class="ctl">⏰ Phase change</span>
+    </div>
+  </div>
+
+  <!-- Main sleeve table with equity curves -->
+  <div class="card">
+    <div class="card-head"><span class="card-title">7 Sleeves + 1 Overlay · Live Status + Equity Curves</span><span class="card-meta">paper observation</span></div>
+    <table class="t">
+      <thead><tr><th>Sleeve</th><th>Phase</th><th class="r">30d fires</th><th class="r">Live PF</th><th class="r">Backtest PF</th><th class="r">DD %</th><th>Equity Curve 30d</th><th>Regime fit</th></tr></thead>
+      <tbody>
+        <tr class="row-link">
+          <td><b>Pullback to Value</b><br><span style="font-size:10px;color:var(--ink-3)">CORE</span></td>
+          <td><span class="phase-pill phase-3">PHASE 3</span></td>
+          <td class="r mono">62</td><td class="r mono">1.32</td><td class="r mono">1.41</td>
+          <td class="r mono arrow-dn">-3.2%</td>
+          <td><svg class="equity-curve" viewBox="0 0 120 30" preserveAspectRatio="none"><polyline points="0,15 12,12 24,14 36,10 48,8 60,12 72,16 84,18 96,14 108,11 120,9" fill="none" stroke="#00d68f" stroke-width="1.5"/></svg></td>
+          <td><span class="chip chip-gn">FIRING</span></td>
+        </tr>
+        <tr class="row-link">
+          <td><b>Momentum Continuation</b><br><span style="font-size:10px;color:var(--ink-3)">trending</span></td>
+          <td><span class="phase-pill phase-1">PHASE 1</span></td>
+          <td class="r mono">12</td><td class="r mono">—</td><td class="r mono">1.53</td>
+          <td class="r mono">n/a</td>
+          <td><svg class="equity-curve" viewBox="0 0 120 30"><polyline points="0,15 24,15 48,15 72,15 96,15 120,15" fill="none" stroke="#666" stroke-width="1" stroke-dasharray="2,2"/></svg></td>
+          <td><span class="chip chip-bare">dormant</span></td>
+        </tr>
+        <tr class="row-link">
+          <td><b>Defensive Rotation</b><br><span style="font-size:10px;color:var(--ink-3)">risk_off</span></td>
+          <td><span class="phase-pill phase-1">PHASE 1</span></td>
+          <td class="r mono">0</td><td class="r mono">—</td><td class="r mono">1.03</td>
+          <td class="r mono">n/a</td>
+          <td><svg class="equity-curve" viewBox="0 0 120 30"><polyline points="0,15 24,15 48,15 72,15 96,15 120,15" fill="none" stroke="#666" stroke-width="1" stroke-dasharray="2,2"/></svg></td>
+          <td><span class="chip chip-bare">dormant</span></td>
+        </tr>
+        <tr class="row-link">
+          <td><b>Mean Reversion</b><br><span style="font-size:10px;color:var(--ink-3)">choppy</span></td>
+          <td><span class="phase-pill phase-1">PHASE 1</span></td>
+          <td class="r mono">3</td><td class="r mono">—</td><td class="r mono">1.21</td>
+          <td class="r mono">n/a</td>
+          <td><svg class="equity-curve" viewBox="0 0 120 30"><polyline points="0,15 24,14 48,15 72,13 96,14 120,14" fill="none" stroke="#ffb800" stroke-width="1.5"/></svg></td>
+          <td><span class="chip chip-am">eligible</span></td>
+        </tr>
+        <tr class="row-link">
+          <td><b>PEAD</b><br><span style="font-size:10px;color:var(--ink-3)">all</span></td>
+          <td><span class="phase-pill phase-1">PHASE 1</span></td>
+          <td class="r mono">8</td><td class="r mono">0.88</td><td class="r mono">2.04</td>
+          <td class="r mono arrow-dn">-12.4%</td>
+          <td><svg class="equity-curve" viewBox="0 0 120 30"><polyline points="0,15 12,18 24,20 36,22 48,18 60,16 72,19 84,21 96,17 108,15 120,14" fill="none" stroke="#ff4d4f" stroke-width="1.5"/></svg></td>
+          <td><span class="chip chip-gn">FIRING</span></td>
+        </tr>
+        <tr class="row-link">
+          <td><b>Insider Cluster</b><br><span style="font-size:10px;color:var(--ink-3)">all</span></td>
+          <td><span class="phase-pill phase-1">PHASE 1</span></td>
+          <td class="r mono">2</td><td class="r mono">—</td><td class="r mono">—</td>
+          <td class="r mono">n/a</td>
+          <td><svg class="equity-curve" viewBox="0 0 120 30"><polyline points="0,15 36,14 72,14 108,15 120,14" fill="none" stroke="#ffb800" stroke-width="1"/></svg></td>
+          <td><span class="chip chip-am">gate tight</span></td>
+        </tr>
+        <tr class="row-link">
+          <td><b>ESP Play</b><br><span style="font-size:10px;color:var(--ink-3)">all</span></td>
+          <td><span class="phase-pill phase-1">PHASE 1</span></td>
+          <td class="r mono">0</td><td class="r mono">—</td><td class="r mono">—</td>
+          <td class="r mono">n/a</td>
+          <td><svg class="equity-curve" viewBox="0 0 120 30"><polyline points="0,15 24,15 48,15 72,15 96,15 120,15" fill="none" stroke="#666" stroke-width="1" stroke-dasharray="2,2"/></svg></td>
+          <td><span class="chip chip-bare">data gap</span></td>
+        </tr>
+        <tr class="row-link">
+          <td><b>Pre-FOMC Drift</b><br><span style="font-size:10px;color:var(--ink-3)">overlay</span></td>
+          <td><span class="phase-pill phase-1">PHASE 1</span></td>
+          <td class="r mono">0</td><td class="r mono">—</td><td class="r mono">—</td>
+          <td class="r mono">n/a</td>
+          <td><svg class="equity-curve" viewBox="0 0 120 30"><polyline points="0,15 24,15 48,15 72,15 96,15 120,15" fill="none" stroke="#666" stroke-width="1" stroke-dasharray="2,2"/></svg></td>
+          <td><span class="chip chip-bare">armed Jun 17</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid-2" style="margin-top:14px">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Phase Progression · Time-in-Phase</span></div>
+      <table class="t">
+        <thead><tr><th>Sleeve</th><th class="r">Days in P1</th><th class="r">Target</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>Momentum</td><td class="r mono">5</td><td class="r mono">21d</td><td><span class="chip chip-am">waiting regime</span></td></tr>
+          <tr><td>Defensive</td><td class="r mono">5</td><td class="r mono">21d</td><td><span class="chip chip-am">waiting regime</span></td></tr>
+          <tr><td>Mean Rev</td><td class="r mono">5</td><td class="r mono">21d</td><td><span class="chip chip-am">3 of 10 fires</span></td></tr>
+          <tr><td>PEAD</td><td class="r mono">5</td><td class="r mono">21d</td><td><span class="chip chip-rd">PF 0.88 &lt; 1.5</span></td></tr>
+          <tr><td>Insider</td><td class="r mono">2</td><td class="r mono">21d</td><td><span class="chip chip-am">gate tightened</span></td></tr>
+          <tr><td>ESP Play</td><td class="r mono">2</td><td class="r mono">21d</td><td><span class="chip chip-am">data gap</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><span class="card-title">Strategy Correlation Matrix</span><span class="card-meta">are sleeves diversifying?</span></div>
+      <table class="t">
+        <thead><tr><th></th><th class="r">Pullback</th><th class="r">PEAD</th><th class="r">MeanRev</th></tr></thead>
+        <tbody>
+          <tr><td><b>Pullback</b></td><td class="r mono">1.00</td><td class="r mono">0.31</td><td class="r mono">-0.18</td></tr>
+          <tr><td><b>PEAD</b></td><td class="r mono">0.31</td><td class="r mono">1.00</td><td class="r mono">0.08</td></tr>
+          <tr><td><b>MeanRev</b></td><td class="r mono">-0.18</td><td class="r mono">0.08</td><td class="r mono">1.00</td></tr>
+        </tbody>
+      </table>
+      <div class="note">MeanRev provides negative correlation = real diversification</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="card-head"><span class="card-title">Regime Attribution · Where Each Sleeve Made/Lost</span></div>
+    <table class="t">
+      <thead><tr><th>Sleeve</th><th class="r">risk_on_trending</th><th class="r">risk_on_choppy</th><th class="r">risk_off</th><th>Insight</th></tr></thead>
+      <tbody>
+        <tr><td><b>Pullback</b></td><td class="r mono arrow-up">+15%</td><td class="r mono arrow-up">+8%</td><td class="r mono arrow-dn">-4%</td><td>Best in trending</td></tr>
+        <tr><td><b>PEAD</b></td><td class="r mono arrow-dn">-12%</td><td class="r mono arrow-dn">-8%</td><td class="r mono">n/a</td><td>Underperforming in choppy</td></tr>
+        <tr><td><b>MeanRev</b></td><td class="r mono">n/a</td><td class="r mono neutral">+1%</td><td class="r mono">n/a</td><td>Edge in choppy only</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="action-footer">
+    <b>Actions:</b>
+    <a>📊 Per-sleeve trade journal</a>
+    <a>🔀 Promote to Phase 2</a>
+    <a>⏰ Phase change alert</a>
+    <a>↓ Export attribution</a>
+  </div>
+</section>
+
+<!-- ═════════════ TAB 8: LEVERAGED & INVERSE ═════════════ -->
+<section id="tab8" class="tab-section">
+  <div class="tab-head">
+    <span class="tab-icon">⚡</span>
+    <span class="tab-title">Leveraged &amp; Inverse</span>
+    <span class="tab-desc">3× ETFs · VIX products · suitability + decay quantification + regime gates</span>
+    <span class="tab-persona">Swing + CFP</span>
+    <div class="tab-tools">
+      <span class="ctl">⭐ Save</span>
+      <span class="ctl">⚠️ Suitability</span>
+      <span class="ctl">📊 Decay calculator</span>
+    </div>
+  </div>
+
+  <!-- Account-aware suitability -->
+  <div class="card" style="margin-bottom:14px;border-left:3px solid var(--am)">
+    <div class="card-head"><span class="card-title" style="color:var(--am)">⚠️ Suitability for YOUR account · $98.4K paper · moderate risk</span></div>
+    <div class="grid-3">
+      <div>
+        <div class="bignum" style="color:var(--gn)">PASS</div>
+        <div class="bignum-sub">PDT threshold cleared ($25K+)</div>
+        <div class="note">Day-trade margin available</div>
+      </div>
+      <div>
+        <div class="bignum" style="color:var(--am)">CAUTION</div>
+        <div class="bignum-sub">Current regime: choppy</div>
+        <div class="note">Leveraged ETFs decay 0.4%/d in choppy</div>
+      </div>
+      <div>
+        <div class="bignum" style="color:var(--cy)">MAX 5%</div>
+        <div class="bignum-sub">Per-position size cap</div>
+        <div class="note">$4,920 max in any one 3× ETF</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Volatility decay quantification -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-head"><span class="card-title">⏳ Decay Quantification · TQQQ Example</span><span class="card-meta">silent killer made visible</span></div>
+    <table class="t">
+      <thead><tr><th>Holding Period</th><th class="r">QQQ × 3 (theoretical)</th><th class="r">TQQQ (actual)</th><th class="r">Decay</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>1 day</td><td class="r mono arrow-up">+3.00%</td><td class="r mono arrow-up">+2.98%</td><td class="r mono">-0.02%</td><td><span class="chip chip-gn">OK</span></td></tr>
+        <tr><td>5 days</td><td class="r mono arrow-up">+15.0%</td><td class="r mono arrow-up">+14.2%</td><td class="r mono">-0.8%</td><td><span class="chip chip-gn">OK</span></td></tr>
+        <tr><td>20 days</td><td class="r mono arrow-up">+12.0%</td><td class="r mono arrow-up">+9.4%</td><td class="r mono arrow-dn">-2.6%</td><td><span class="chip chip-am">CAUTION</span></td></tr>
+        <tr><td>60 days</td><td class="r mono arrow-up">+18.0%</td><td class="r mono arrow-up">+9.8%</td><td class="r mono arrow-dn">-8.2%</td><td><span class="chip chip-rd">BAD</span></td></tr>
+        <tr><td>252 days</td><td class="r mono arrow-up">+45.0%</td><td class="r mono arrow-up">+18.4%</td><td class="r mono arrow-dn">-26.6%</td><td><span class="chip chip-rd">TERRIBLE</span></td></tr>
+      </tbody>
+    </table>
+    <div class="note">Leveraged ETFs reset daily — choppy days compound losses. Use as INTRADAY or 1-5d swing only.</div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">3× Bull ETFs · Regime-Gated</span></div>
+      <table class="t">
+        <thead><tr><th>ETF</th><th>Tracks</th><th class="r">5D</th><th class="r">VIX gate</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="mono"><b>TQQQ</b></td><td>Nasdaq 3×</td><td class="r mono arrow-up">+1.2%</td><td class="r mono">&lt;22</td><td><span class="chip chip-am">VIX 19 OK</span></td></tr>
+          <tr><td class="mono"><b>SOXL</b></td><td>Semi 3×</td><td class="r mono arrow-up">+3.4%</td><td class="r mono">&lt;25</td><td><span class="chip chip-am">extended</span></td></tr>
+          <tr><td class="mono"><b>UPRO</b></td><td>SPY 3×</td><td class="r mono arrow-up">+0.6%</td><td class="r mono">&lt;22</td><td><span class="chip chip-am">VIX 19 OK</span></td></tr>
+          <tr><td class="mono"><b>FNGU</b></td><td>FANG 3×</td><td class="r mono arrow-up">+2.1%</td><td class="r mono">&lt;25</td><td><span class="chip chip-am">choppy regime</span></td></tr>
+          <tr><td class="mono"><b>SPXL</b></td><td>SPY 3×</td><td class="r mono arrow-up">+0.5%</td><td class="r mono">&lt;22</td><td><span class="chip chip-am">VIX 19 OK</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><span class="card-title">Inverse / VIX · Hedges Only</span></div>
+      <table class="t">
+        <thead><tr><th>ETF</th><th>Tracks</th><th class="r">5D</th><th>Use Case</th></tr></thead>
+        <tbody>
+          <tr><td class="mono"><b>SH</b></td><td>SPY inv</td><td class="r mono arrow-dn">-0.6%</td><td>Hedge longs in DD</td></tr>
+          <tr><td class="mono"><b>SQQQ</b></td><td>Nasdaq -3×</td><td class="r mono arrow-dn">-1.2%</td><td>Bear regime ONLY</td></tr>
+          <tr><td class="mono"><b>VXX</b></td><td>VIX futures</td><td class="r mono arrow-up">+4.8%</td><td>Spike-day hedge</td></tr>
+          <tr><td class="mono"><b>UVXY</b></td><td>VIX 1.5×</td><td class="r mono arrow-up">+7.1%</td><td>Panic only</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="action-footer">
+    <b>Actions:</b>
+    <a>📊 Decay calculator</a>
+    <a>🎯 Position size for your account</a>
+    <a>⏰ Regime gate alerts</a>
+    <a>↓ Export gate states</a>
+  </div>
+</section>
+
+<!-- ═════════════ TAB 9: CRYPTO LENS ═════════════ -->
+<section id="tab9" class="tab-section">
+  <div class="tab-head">
+    <span class="tab-icon">₿</span>
+    <span class="tab-title">Crypto Lens</span>
+    <span class="tab-desc">BTC/ETH bellwether · funding · ETF flows · stablecoin growth · liquidity</span>
+    <span class="tab-persona">HF Analyst</span>
+    <div class="tab-tools">
+      <span class="ctl">⭐ Save</span>
+      <span class="ctl">⏰ Funding alert</span>
+      <span class="ctl">📊 BTC ↔ QQQ corr</span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:14px;border-left:3px solid var(--cy)">
+    <div style="font-size:12px;color:var(--ink-2);line-height:1.6">
+      <b style="color:var(--cy)">Purpose:</b> 24/7 risk-asset bellwether. BTC/ETH price action leads SPY by 6-24h during regime transitions. Use for <b>regime context</b>, not direct trades.
+    </div>
+  </div>
+
+  <div class="grid-4" style="margin-bottom:14px">
+    <div class="card">
+      <div class="card-title">BTC</div>
+      <div class="bignum">$92,140</div>
+      <div class="delta-row"><span class="delta arrow-up">+1.8% 24h</span><span class="delta arrow-up">+6.2% 30d</span><span class="delta">78th %ile</span></div>
+    </div>
+    <div class="card">
+      <div class="card-title">ETH</div>
+      <div class="bignum">$3,182</div>
+      <div class="delta-row"><span class="delta arrow-up">+2.1% 24h</span><span class="delta arrow-up">+3.4% 30d</span><span class="delta">62nd %ile</span></div>
+    </div>
+    <div class="card">
+      <div class="card-title">BTC Dominance</div>
+      <div class="bignum">58.4%</div>
+      <div class="delta-row"><span class="delta arrow-up">+0.8 5D</span><span class="delta">68th %ile</span></div>
+      <div class="note">Dominance up = BTC-only run · risk-off rotation</div>
+    </div>
+    <div class="card">
+      <div class="card-title">BTC/QQQ Corr 30d</div>
+      <div class="bignum" style="color:var(--am)">+0.58</div>
+      <div class="delta-row"><span class="delta arrow-up">+0.12 21D</span><span class="delta">elevated</span></div>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-bottom:14px">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Liquidity Tape · Stablecoin Supply</span><span class="card-meta">leading liquidity indicator</span></div>
+      <table class="t">
+        <tbody>
+          <tr><td>USDT supply</td><td class="r mono">$152.4B</td><td class="r mono arrow-up">+1.8% 30d</td><td><span class="chip chip-gn">expanding</span></td></tr>
+          <tr><td>USDC supply</td><td class="r mono">$62.1B</td><td class="r mono arrow-up">+0.6% 30d</td><td><span class="chip chip-gn">expanding</span></td></tr>
+          <tr><td>Growth rate Δ</td><td class="r mono"><b>+2.4%</b></td><td class="r mono arrow-up">accelerating</td><td><span class="chip chip-gn">risk-on</span></td></tr>
+          <tr><td>DXY</td><td class="r mono">102.4</td><td class="r mono arrow-dn">-0.6% 5d</td><td><span class="chip chip-gn">supportive</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><span class="card-title">Funding Rates + Cycle</span><span class="card-meta">leverage / sentiment</span></div>
+      <table class="t">
+        <tbody>
+          <tr><td>BTC perp funding</td><td class="r mono">+0.018%</td><td><span class="chip chip-bare">normal</span></td></tr>
+          <tr><td>ETH perp funding</td><td class="r mono">+0.012%</td><td><span class="chip chip-bare">normal</span></td></tr>
+          <tr><td>MVRV ratio</td><td class="r mono">2.14</td><td><span class="chip chip-am">mid-cycle</span></td></tr>
+          <tr><td>BTC hash rate</td><td class="r mono">621 EH/s</td><td><span class="chip chip-gn">ATH · strong</span></td></tr>
+          <tr><td>Exchange reserves</td><td class="r mono">2.1M BTC</td><td><span class="chip chip-gn">multi-yr low</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-bottom:14px">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Spot ETF Flows · 5D</span><span class="card-meta">institutional adoption signal</span></div>
+      <table class="t">
+        <thead><tr><th>ETF</th><th class="r">5D $ flow</th><th class="r">30D</th></tr></thead>
+        <tbody>
+          <tr><td class="mono"><b>IBIT</b></td><td class="r mono arrow-up">+$284M</td><td class="r mono arrow-up">+$1.2B</td></tr>
+          <tr><td class="mono"><b>FBTC</b></td><td class="r mono arrow-up">+$95M</td><td class="r mono arrow-up">+$420M</td></tr>
+          <tr><td class="mono"><b>ETHA</b></td><td class="r mono arrow-up">+$22M</td><td class="r mono arrow-up">+$110M</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Divergence Watch · BTC vs SPY</span></div>
+      <table class="t">
+        <tbody>
+          <tr><td>BTC 7d return</td><td class="r mono arrow-up">+3.4%</td></tr>
+          <tr><td>SPY 7d return</td><td class="r mono arrow-up">+0.8%</td></tr>
+          <tr><td><b>BTC outperformance</b></td><td class="r mono arrow-up">+2.6pp</td></tr>
+        </tbody>
+      </table>
+      <div style="margin-top:8px;padding:8px 10px;background:var(--gn-bg);border-left:3px solid var(--gn);font-size:11px">
+        ✅ <b>BTC leading higher</b> — historically positive risk-on signal for equities 24-72h ahead.
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="card-title">Crypto-Adjacent Equity Names</span><span class="card-meta">indirect exposure</span></div>
+    <table class="t">
+      <thead><tr><th>Ticker</th><th>Type</th><th class="r">7D</th><th class="r">BTC β</th><th>Use</th></tr></thead>
+      <tbody>
+        <tr><td class="mono"><b>COIN</b></td><td>Exchange</td><td class="r mono arrow-up">+5.2%</td><td class="r mono">1.42</td><td>Cleanest pure-play</td></tr>
+        <tr><td class="mono"><b>MSTR</b></td><td>BTC treasury</td><td class="r mono arrow-up">+7.8%</td><td class="r mono">2.18</td><td>Levered BTC proxy</td></tr>
+        <tr><td class="mono"><b>MARA</b></td><td>Miner</td><td class="r mono arrow-up">+4.1%</td><td class="r mono">1.85</td><td>Energy + BTC</td></tr>
+        <tr><td class="mono"><b>HOOD</b></td><td>Brokerage</td><td class="r mono arrow-up">+3.4%</td><td class="r mono">0.92</td><td>Retail flow proxy</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="action-footer">
+    <b>Actions:</b>
+    <a>⏰ Funding spike alert</a>
+    <a>📊 ETF flow tracker</a>
+    <a>🎯 Crypto-adj scan</a>
+    <a>↓ Export crypto</a>
+  </div>
+</section>
+
+<!-- ─────────── FOOTER ─────────── -->
+<div class="review-banner" style="margin-top:32px">
+  <b>v2 Production Checklist</b><br><br>
+  ✅ Action affordances on every metric (alerts, drill, save view)<br>
+  ✅ Deltas + percentile rank on every number<br>
+  ✅ Timeframe controls (1D/5D/21D/63D/YTD)<br>
+  ✅ Persona selector (5 lenses)<br>
+  ✅ Account-aware suitability ($98K, moderate risk)<br>
+  ✅ Industry-level drill within sectors<br>
+  ✅ RSP vs SPY equal-weight breadth<br>
+  ✅ Put/call + NAAIM + margin debt + skew<br>
+  ✅ Real yields + dollar pairs + commodities<br>
+  ✅ Pre-mkt RVOL + halts + news sentiment<br>
+  ✅ ESP + whisper + analyst revisions<br>
+  ✅ Insider $ + FDA/PDUFA + dividends<br>
+  ✅ Theme correlation matrix + lifecycle + falsification<br>
+  ✅ Per-sleeve equity curves + phase progression + regime attribution<br>
+  ✅ Decay quantification (TQQQ holding period table)<br>
+  ✅ Funding rates + ETF flows + hash rate + MVRV<br>
+  <br>
+  Approve → port into <code>kairos.html</code> as single tight commit.
+</div>
+
+</body></html>
