@@ -571,21 +571,40 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     # (2026-05-07: ATEN had conviction.tier=0 / label=WATCH but tail_filter_demoted=None.
     # Original narrow check missed this — engine still allowed BUY despite zero conviction.)
     # CATALYST-SLEEVE BYPASS (2026-05-14): conviction tier is composite-score-band only
-    # (60-69 = tier 0/WATCH). Catalyst-driven sleeves (PEAD/Momentum/Defensive/MeanRev)
-    # explicitly accept moderate composite scores because their mechanism comes from
-    # outside the composite score (catalyst / regime flow / oversold mechanic).
-    # Bypass only when the sleeve detector itself fired (audit-verifiable trail).
+    # (60-69 = tier 0/WATCH). Catalyst-driven sleeves accept moderate composite scores
+    # because mechanism comes from outside the score (catalyst / regime flow / oversold).
+    #
+    # AUDIT BATCH 3 TIGHTENING (2026-05-15): loss-streak investigation showed 75% of
+    # recent losing BUYs came from WATCH/AVOID conviction tiers — bypass was too loose.
+    # Restrictions added:
+    #   1. Never bypass tier=-1 (AVOID label = composite score < 60) — hard floor
+    #   2. tier=0 (WATCH) bypass requires score >= 60 floor
+    #   3. tail_filter_demoted (real star-rating demotion) NEVER bypassed
     conv = t.get("conviction") or {}
     tail_demoted = bool(conv.get("tail_filter_demoted"))
-    tier_zero = (conv.get("tier") == 0 and (conv.get("label") or "").upper() in ("WATCH", "AVOID", "WAIT"))
+    tier_val = conv.get("tier")
+    label_up = (conv.get("label") or "").upper()
+    tier_zero = (tier_val == 0 and label_up in ("WATCH", "AVOID", "WAIT"))
+    tier_avoid = (tier_val == -1) or (label_up == "AVOID")
     _sleeve_fam = t.get("setup_family")
     _catalyst_sleeve = _sleeve_fam in ("PEAD", "Momentum Continuation",
                                          "Defensive Rotation", "Mean Reversion",
                                          "Insider Cluster", "ESP Play")
-    # Only bypass tier_zero (not actual tail_loss demotion — that's a star-rating call)
-    if _catalyst_sleeve and tier_zero and not tail_demoted:
+    # Score floor for bypass (Audit Batch 3): require composite score >= 60
+    _score_for_bypass = t.get("score") or 0
+    _bypass_score_ok = _score_for_bypass >= 60
+
+    if _catalyst_sleeve and tier_zero and _bypass_score_ok and not tail_demoted and not tier_avoid:
         demoted = False
-        reason = f"conviction tier=0 bypassed for {_sleeve_fam} sleeve (catalyst-driven)"
+        reason = f"conviction tier=0 bypassed for {_sleeve_fam} sleeve (catalyst + score>={_score_for_bypass:.0f}>=60)"
+    elif _catalyst_sleeve and tier_avoid:
+        # Explicitly block — AVOID is hard floor, no bypass
+        demoted = True
+        reason = f"conviction tier=AVOID NOT bypassed for {_sleeve_fam} (Audit Batch 3 hard floor — composite score < 60)"
+    elif _catalyst_sleeve and tier_zero and not _bypass_score_ok:
+        # Bypass intended but score floor failed
+        demoted = True
+        reason = f"conviction tier=0 bypass DENIED for {_sleeve_fam} — score {_score_for_bypass:.0f} < 60 floor"
     else:
         demoted = tail_demoted or tier_zero
         reason = ""
@@ -840,6 +859,60 @@ def compute_final_verdict(t: dict, regime: str | None = None,
             "gates_evaluated": [],
             "demote_to": None,
         }
+
+    # AUDIT BATCH 3 (2026-05-15): Same-ticker repeat-entry cooldown.
+    # Loss-streak diagnostic: ALB had 3 stop-outs in 5 days (-12%, -10%, -10%),
+    # CAVA 2 stops, DUK 2 stops, NEE 2 stops. After a stop-out, the same ticker
+    # was re-bought immediately — chasing losses per CLAUDE.md principle 8
+    # ("no chasing breakouts; either had a limit order placed or wait for retest").
+    # Block re-entry for `cooldown_days` after most recent stop-out on same ticker.
+    _ticker = t.get("ticker")
+    _cooldown_cfg = (config or {}).get("scoring", {}).get("repeat_entry_cooldown") or {}
+    _cooldown_enabled = bool(_cooldown_cfg.get("_enabled", True))
+    _cooldown_days = int(_cooldown_cfg.get("cooldown_days_after_stop", 5))
+    if _cooldown_enabled and _ticker:
+        try:
+            import json as _json
+            from pathlib import Path as _P
+            from datetime import datetime as _dt, timedelta as _td
+            _sl_path = _P(__file__).resolve().parent / "data" / "signal_log.json"
+            if _sl_path.exists():
+                _sl = _json.loads(_sl_path.read_text())
+                _now = _dt.now()
+                # Find most recent CLOSED stop-out on this ticker
+                _recent_stops = [
+                    s for s in _sl
+                    if isinstance(s, dict)
+                    and s.get("ticker") == _ticker
+                    and s.get("exit_reason") == "stop_hit"
+                    and s.get("status") == "CLOSED"
+                    and s.get("date")
+                ]
+                if _recent_stops:
+                    # Get latest by date
+                    _latest = max(_recent_stops, key=lambda x: x.get("date", ""))
+                    try:
+                        _exit_date = _dt.fromisoformat(_latest["date"][:10])
+                        _days_since = (_now - _exit_date).days
+                        if _days_since < _cooldown_days:
+                            return {
+                                "verdict": "WATCH",
+                                "reason": f"repeat-entry cooldown: {_ticker} stopped out {_days_since}d ago (need {_cooldown_days}d) — last loss {_latest.get('actual_pnl_pct', '?')}%",
+                                "caveats": [
+                                    f"CLAUDE.md principle 8: no chasing; wait for retest mechanism",
+                                    f"Re-entry eligible after {(_exit_date + _td(days=_cooldown_days)).date().isoformat()}",
+                                ],
+                                "gates_evaluated": [{
+                                    "name": "repeat_entry_cooldown",
+                                    "passed": False,
+                                    "reason": f"{_ticker} stop-out {_days_since}d ago, cooldown {_cooldown_days}d",
+                                }],
+                                "demote_to": "watch_list",
+                            }
+                    except Exception:
+                        pass
+        except Exception:
+            pass  # never break verdict-pipeline due to cooldown check
 
     # A3 (2026-05-09): Regime gate. Per 750d backtest: strategy is bull-only;
     # losses concentrate in risk_off and panic regimes. Refuse new BUY entries

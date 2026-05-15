@@ -10940,6 +10940,19 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         except Exception:
             pass
 
+    # AUDIT BATCH 3 (2026-05-15): Entry-quality size haircut for catalyst sleeves.
+    # Loss-streak diagnostic showed 65% of recent losing BUYs entered EXTENDED
+    # or MISSED. Even when bypassed at the gate level, these entries have lower
+    # expected return — reduce size proportionally.
+    _catalyst_families = ("PEAD", "Momentum Continuation", "Defensive Rotation",
+                          "Mean Reversion", "Insider Cluster", "ESP Play")
+    if setup_family in _catalyst_families:
+        _eq = (entry_quality or "").upper()
+        if _eq == "EXTENDED":
+            _sizing_multiplier = _sizing_multiplier * 0.5
+        elif _eq == "MISSED":
+            _sizing_multiplier = _sizing_multiplier * 0.4
+
     result = {
         "ticker": ticker,
         "name": info.get("name", ticker),
