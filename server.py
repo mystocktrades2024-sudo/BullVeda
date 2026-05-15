@@ -4428,6 +4428,26 @@ async def earnings_drift_api():
     except Exception as e:
         return {"error": str(e), "results": []}
 
+# -- Earnings prediction history (joined log with realized outcomes) --
+@app.get("/api/earnings/prediction-log")
+async def earnings_prediction_log_api(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    import json
+    from pathlib import Path
+    log_path = Path(__file__).resolve().parent / "data" / "earnings_prediction_log.jsonl"
+    if not log_path.exists():
+        return {"total": 0, "rows": []}
+    rows = []
+    for line in log_path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            continue
+    rows.sort(key=lambda r: (r.get("report_date") or ""), reverse=True)
+    return {"total": len(rows), "rows": rows}
+
 # -- Options Flow Scanner — REMOVED 2026-04-25 (no options data in EODHD plan) --
 @app.get("/api/options-flow")
 async def options_flow_api():
