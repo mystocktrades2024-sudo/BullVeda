@@ -266,23 +266,51 @@ def build_order_plan(picks: list[dict], equity: float, cash: float, cfg: dict,
 
 
 def submit_bracket(client, order: dict) -> tuple[bool, str]:
-    """Submit a BUY bracket order. Returns (ok, order_id_or_error)."""
+    """Submit a BUY bracket order. Returns (ok, order_id_or_error).
+
+    Audit Batch 4 (2026-05-15): posts Slack notification on every submitted
+    order (success or failure). Adds observability into the live paper
+    execution pipeline so the user sees every order without having to
+    check the dashboard.
+    """
+    ticker = order.get("ticker", "?")
+    qty = order.get("qty", 0)
+    entry = order.get("entry_limit", 0)
+    stop = order.get("stop", 0)
+    target = order.get("target", 0)
+    score = order.get("score", "?")
+    setup = order.get("setup_family") or order.get("setup", "?")
+    notional = float(qty) * float(entry) if qty and entry else 0
     try:
         from alpaca.trading.requests import LimitOrderRequest, TakeProfitRequest, StopLossRequest
         from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
         req = LimitOrderRequest(
-            symbol=order["ticker"],
-            qty=order["qty"],
-            side=OrderSide.BUY,
-            time_in_force=TimeInForce.DAY,
-            limit_price=order["entry_limit"],
+            symbol=ticker, qty=qty, side=OrderSide.BUY,
+            time_in_force=TimeInForce.DAY, limit_price=entry,
             order_class=OrderClass.BRACKET,
-            take_profit=TakeProfitRequest(limit_price=order["target"]),
-            stop_loss=StopLossRequest(stop_price=order["stop"]),
+            take_profit=TakeProfitRequest(limit_price=target),
+            stop_loss=StopLossRequest(stop_price=stop),
         )
         resp = client.submit_order(req)
-        return True, str(getattr(resp, "id", "submitted"))
+        order_id = str(getattr(resp, "id", "submitted"))
+        # Slack notification on successful submission
+        try:
+            from lib.autorun_reporter import report
+            report("paper-order", "success",
+                   summary=f"📥 BUY {qty} {ticker} @ ${entry:.2f} (limit) · target ${target:.2f} · stop ${stop:.2f} · ~${notional:,.0f} notional",
+                   details={"score": score, "setup": setup, "order_id": order_id[:12],
+                             "rr": f"{(target-entry)/max(entry-stop, 0.01):.1f}:1"})
+        except Exception:
+            pass
+        return True, order_id
     except Exception as e:
+        # Slack notification on failure
+        try:
+            from lib.autorun_reporter import report
+            report("paper-order", "failed",
+                   summary=f"❌ FAILED to submit BUY {qty} {ticker} @ ${entry:.2f}: {str(e)[:200]}")
+        except Exception:
+            pass
         return False, str(e)
 
 
