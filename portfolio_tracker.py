@@ -559,12 +559,19 @@ def add_position(ticker: str, entry_price: float, shares: int,
     if entry_date is None:
         entry_date = entry_datetime[:10] if entry_datetime else date.today().isoformat()
 
+    # Signed quantity: long = +abs(shares), short = -abs(shares)
+    # (added 2026-05-15 — disambiguates direction at the qty level so any
+    # consumer can sum signed_qty across a portfolio for net exposure)
+    _abs_shares = abs(int(shares))
+    _signed_qty = _abs_shares if direction == "long" else -_abs_shares
+
     pos = {
         "ticker": ticker.upper(),
         "entry_date": entry_date,
         "entry_datetime": entry_datetime,
         "entry_price": round(entry_price, 2),
-        "shares": int(shares),
+        "shares": _abs_shares,            # legacy: always positive (magnitude only)
+        "signed_qty": _signed_qty,        # signed: + for long, − for short
         "position_size": position_value,
         "stop": round(stop, 2),
         "trail_stop": round(stop, 2),
