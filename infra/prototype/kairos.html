@@ -12357,8 +12357,9 @@ const QuantPortfolio = (function() {
       <thead><tr>
         <th class="sortable" data-sort="ticker">Ticker</th>
         <th class="sortable" data-sort="setup_type">Setup</th>
-        <th class="r sortable" data-sort="shares">Sh</th>
+        <th class="r sortable" data-sort="signed_qty" title="Signed quantity: + for long, − for short">Qty</th>
         <th class="r sortable" data-sort="entry_price">Entry</th>
+        <th class="sortable" data-sort="entry_datetime" title="Date & time the position was opened">When</th>
         <th class="r sortable" data-sort="current_price">Now</th>
         <th class="r sortable" data-sort="stop">Stop</th>
         <th class="r sortable" data-sort="target1">T1</th>
@@ -12370,6 +12371,33 @@ const QuantPortfolio = (function() {
       </tr></thead>
       <tbody>${renderPositionsRows(positions, data)}</tbody>
     </table>`;
+  }
+
+  // Format entry timestamp as "MM-DD HH:MM PT" or just date if no time component
+  function _fmtEntryWhen(p) {
+    const dt = p.entry_datetime || p.entry_date;
+    if (!dt) return '—';
+    if (dt.length <= 10) return dt; // date-only
+    try {
+      const d = new Date(dt);
+      if (isNaN(d.getTime())) return dt.slice(0, 16);
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const dd = String(d.getDate()).padStart(2,'0');
+      const hh = String(d.getHours()).padStart(2,'0');
+      const mi = String(d.getMinutes()).padStart(2,'0');
+      return `${mm}-${dd} ${hh}:${mi}`;
+    } catch (e) {
+      return dt.slice(0, 16);
+    }
+  }
+
+  function _fmtSignedQty(p) {
+    const sq = (p.signed_qty != null) ? p.signed_qty
+             : ((p.direction === 'short' ? -1 : 1) * Math.abs(p.shares || 0));
+    if (sq === 0 || sq == null) return '—';
+    const sign = sq > 0 ? '+' : '';
+    const cls = sq > 0 ? 'gn' : 'rd';
+    return `<span class="${cls}">${sign}${sq}</span>`;
   }
 
   function renderPositionsRows(positions, data) {
@@ -12391,8 +12419,9 @@ const QuantPortfolio = (function() {
       return `<tr>
         <td class="tkr" data-tkr="${p.ticker}" style="cursor:pointer;">${p.ticker}</td>
         <td style="font-size:11px;color:var(--ink-2);">${(p.setup_type || '—').slice(0, 16)}</td>
-        <td class="r">${_fmtInt(p.shares)}</td>
+        <td class="r" style="font-weight:600;">${_fmtSignedQty(p)}</td>
         <td class="r">$${_fmt(p.entry_price, 2)}</td>
+        <td style="font-size:11px;color:var(--ink-2);font-family:var(--font-mono, 'JetBrains Mono', monospace);">${_fmtEntryWhen(p)}</td>
         <td class="r qport-px-cell" data-qport-tk="${p.ticker}" style="font-weight:700;">$${_fmt(p.current_price, 2)}</td>
         <td class="r" style="color:var(--rd);">$${_fmt(p.stop, 2)}</td>
         <td class="r" style="color:var(--gn);">$${_fmt(p.target1, 2)}</td>
