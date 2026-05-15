@@ -525,7 +525,8 @@ def add_position(ticker: str, entry_price: float, shares: int,
                  direction: str = "long",
                  allocation_pct: float = 7.5,
                  notes: str = "",
-                 entry_date: str | None = None) -> dict:
+                 entry_date: str | None = None,
+                 entry_datetime: str | None = None) -> dict:
     """
     Open a new position.  Deducts cost from cash (treated as collateral
     for shorts in this paper-trading model — no separate margin handling).
@@ -549,9 +550,19 @@ def add_position(ticker: str, entry_price: float, shares: int,
 
     position_value = round(entry_price * shares, 2)
 
+    # entry_datetime — full ISO timestamp (YYYY-MM-DDTHH:MM:SS PT)
+    # added 2026-05-15 so dashboards can show fill time, not just date.
+    # entry_date kept for backwards compat with picks_history/closed_trades.
+    from datetime import datetime as _dt
+    if entry_datetime is None:
+        entry_datetime = _dt.now().isoformat(timespec="seconds")
+    if entry_date is None:
+        entry_date = entry_datetime[:10] if entry_datetime else date.today().isoformat()
+
     pos = {
         "ticker": ticker.upper(),
-        "entry_date": entry_date if entry_date else date.today().isoformat(),
+        "entry_date": entry_date,
+        "entry_datetime": entry_datetime,
         "entry_price": round(entry_price, 2),
         "shares": int(shares),
         "position_size": position_value,

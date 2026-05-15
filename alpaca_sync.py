@@ -159,6 +159,12 @@ def _reconcile_positions(state: dict, alpaca_positions: list[dict],
             stop = round(avg * (0.97 if side == "long" else 1.03), 2)
             target = round(avg * (1.05 if side == "long" else 0.95), 2)
             alloc = round(qty * avg / max(1.0, account_equity) * 100, 1)
+            # Pull fill timestamp from most recent matching BUY order (added 2026-05-15)
+            entry_dt = None
+            for o in sorted(filled, key=lambda x: x.get("filled_at") or x.get("created_at") or "", reverse=True):
+                if (o.get("symbol") or "").upper() == sym and (o.get("side") or "").lower() == "buy":
+                    entry_dt = o.get("filled_at") or o.get("created_at")
+                    break
             try:
                 pt.add_position(
                     ticker=sym, entry_price=avg, shares=qty,
@@ -166,6 +172,7 @@ def _reconcile_positions(state: dict, alpaca_positions: list[dict],
                     setup_type="alpaca_sync", direction=side,
                     allocation_pct=alloc,
                     notes="Synced from Alpaca paper account (v1 — pick attribution pending v2)",
+                    entry_datetime=entry_dt,
                 )
                 inserted.append(sym)
             except Exception as e:
