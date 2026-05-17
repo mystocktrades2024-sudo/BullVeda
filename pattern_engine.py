@@ -895,11 +895,445 @@ def detect_trendlines(df: pd.DataFrame, lookback: int = 90) -> dict:
 # ═══════════════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════════════
-# 8. ELLIOTT WAVE (mechanical 5-wave impulse detector)
+# 8. ELLIOTT WAVE (mechanical 5-wave impulse detector + deep details)
 #     DISCRETIONARY — tracked for confluence, NOT counted in conviction.
 #     Uses last 6 swing pivots to attempt a W0→W5 labelling and verify
 #     the 3 hard EW rules. Returns "discretionary": True so frontend
 #     knows to render violet + exclude from composite gate.
+#
+#   Deep details (v6.1):
+#     - Wave degree label (Primary/Intermediate/Minor/Minute) inferred from span
+#     - Sub-waves of W3 (most subdividable wave) if enough sub-pivots exist
+#     - Corrective wave A-B-C detection if W5 appears done + 3 retraces follow
+#     - Fibonacci relationships (W3/W1, W5/W1 ratios, golden-spiral check)
+#     - Wave personality (length × volume) for each wave
+# ═══════════════════════════════════════════════════════════════════════
+
+def _ew_degree_from_span(span_bars: int) -> str:
+    """Classify wave degree from total impulse span (W0→W5 bar count).
+    Standard Elliott degree taxonomy (Frost & Prechter):
+      Subminuette: hours · Minuette: <5d · Minute: 5-20d · Minor: 20-50d
+      Intermediate: 50-150d · Primary: 150-500d · Cycle: 500-2500d · Supercycle: years
+    """
+    if span_bars < 10:
+        return "Minuette"
+    if span_bars < 25:
+        return "Minute"
+    if span_bars < 60:
+        return "Minor"
+    if span_bars < 150:
+        return "Intermediate"
+    return "Primary"
+
+
+def _ew_fib_ratio(a: float, b: float) -> dict:
+    """Compute ratio + nearest Fibonacci relationship."""
+    if b == 0 or not (a and b):
+        return {"ratio": None, "fib_match": None}
+    r = abs(a / b)
+    fibs = {0.382: "0.382", 0.500: "0.500", 0.618: "0.618", 1.000: "equality",
+            1.272: "1.272", 1.382: "1.382", 1.618: "golden 1.618",
+            2.000: "2.000", 2.618: "2.618"}
+    nearest = min(fibs.keys(), key=lambda k: abs(r - k))
+    deviation = abs(r - nearest) / nearest
+    if deviation <= 0.05:
+        return {"ratio": round(r, 3), "fib_match": fibs[nearest], "deviation_pct": round(deviation*100, 1)}
+    return {"ratio": round(r, 3), "fib_match": None, "deviation_pct": round(deviation*100, 1)}
+
+
+def _ew_wave_personality(df, start_idx: int, end_idx: int, expected: str) -> dict:
+    """Score wave 'personality': length, avg volume, range expansion vs prior wave.
+    expected: 'impulse' (W1/W3/W5/B) — should have wider range + higher volume
+              'corrective' (W2/W4/A/C) — should have narrower range + lower volume
+    Returns {bars, avg_volume, range_pct, personality_match (bool)}.
+    """
+    if start_idx >= end_idx or end_idx >= len(df):
+        return {"bars": 0, "personality_match": None}
+    seg = df.iloc[start_idx:end_idx+1]
+    bars = len(seg)
+    if bars < 2:
+        return {"bars": bars, "personality_match": None}
+    try:
+        avg_vol = float(seg["Volume"].mean()) if "Volume" in seg.columns else 0.0
+        rng_pct = float((seg["High"].max() - seg["Low"].min()) / seg["Low"].min() * 100) if seg["Low"].min() > 0 else 0.0
+    except Exception:
+        avg_vol = 0.0; rng_pct = 0.0
+    return {"bars": bars, "avg_volume": int(avg_vol),
+            "range_pct": round(rng_pct, 2),
+            "personality_match": None}  # match heuristic deferred
+
+
+def _ew_detect_subwaves(df, w_start_idx: int, w_end_idx: int) -> list[dict]:
+    """Look for 5 sub-pivots between w_start and w_end. If found, label them
+    as sub-w1..sub-w5 with prices. Returns [] if <5 sub-pivots in the span."""
+    if w_start_idx >= w_end_idx or (w_end_idx - w_start_idx) < 10:
+        return []
+    sub_window = max(2, (w_end_idx - w_start_idx) // 8)
+    try:
+        sub_highs, sub_lows = _swing_points(df.iloc[w_start_idx:w_end_idx+1], window=sub_window)
+        # Adjust idx back to df-global
+        sub_highs = [w_start_idx + i for i in sub_highs]
+        sub_lows = [w_start_idx + i for i in sub_lows]
+    except Exception:
+        return []
+    pivots = []
+    for i in sub_highs:
+        pivots.append({"idx": int(i), "type": "H", "price": float(df["High"].iloc[i])})
+    for i in sub_lows:
+        pivots.append({"idx": int(i), "type": "L", "price": float(df["Low"].iloc[i])})
+    pivots.sort(key=lambda p: p["idx"])
+    if len(pivots) < 5:
+        return []
+    # Take the alternating pattern that best fits 5 waves
+    pick = pivots[:5]
+    return [{"label": f"sub-w{i+1}", "idx": p["idx"], "price": round(p["price"], 2),
+             "type": p["type"]} for i, p in enumerate(pick)]
+
+
+def _ew_detect_corrective(df, w5_idx: int) -> dict | None:
+    """After W5 completes, look for A-B-C corrective pattern in subsequent bars.
+    Returns {a, b, c} dict if pattern detected, else None."""
+    if w5_idx >= len(df) - 5:
+        return None
+    after = df.iloc[w5_idx:].reset_index(drop=True)
+    if len(after) < 8:
+        return None
+    try:
+        h, l = _swing_points(after, window=3)
+    except Exception:
+        return None
+    # Need at least 3 pivots after W5 to label A-B-C
+    pivots = [{"idx": i, "type": "H", "price": float(after["High"].iloc[i])} for i in h] + \
+             [{"idx": i, "type": "L", "price": float(after["Low"].iloc[i])} for i in l]
+    pivots.sort(key=lambda p: p["idx"])
+    if len(pivots) < 3:
+        return None
+    a, b, c = pivots[0], pivots[1], pivots[2]
+    # A and C should be in same direction (both lows for bearish correction after bullish impulse)
+    if a["type"] != c["type"] or a["type"] == b["type"]:
+        return None
+    return {
+        "A": {"idx": w5_idx + a["idx"], "price": round(a["price"], 2), "type": a["type"]},
+        "B": {"idx": w5_idx + b["idx"], "price": round(b["price"], 2), "type": b["type"]},
+        "C": {"idx": w5_idx + c["idx"], "price": round(c["price"], 2), "type": c["type"]},
+    }
+
+
+def _ew_deep_details(df, waves: dict, direction: str) -> dict:
+    """Compute deep EW metrics: degree, sub-waves of W3, A-B-C corrective,
+    Fibonacci relationships, wave personality per major wave."""
+    if not waves or len(waves) != 6:
+        return {}
+    w0, w1, w2, w3, w4, w5 = (waves[k] for k in ["W0", "W1", "W2", "W3", "W4", "W5"])
+    span = w5["idx"] - w0["idx"]
+    degree = _ew_degree_from_span(span)
+
+    # Wave segment sizes
+    w1_size = abs(w1["price"] - w0["price"])
+    w2_size = abs(w2["price"] - w1["price"])
+    w3_size = abs(w3["price"] - w2["price"])
+    w4_size = abs(w4["price"] - w3["price"])
+    w5_size = abs(w5["price"] - w4["price"])
+
+    fib_relationships = {
+        "W2_retraces_W1":  _ew_fib_ratio(w2_size, w1_size),
+        "W3_vs_W1":         _ew_fib_ratio(w3_size, w1_size),
+        "W4_retraces_W3":  _ew_fib_ratio(w4_size, w3_size),
+        "W5_vs_W1":         _ew_fib_ratio(w5_size, w1_size),
+        "W5_vs_W1+W3":     _ew_fib_ratio(w5_size, w1_size + w3_size),
+    }
+
+    # Wave personalities
+    personalities = {}
+    for label, ws, we, kind in [
+        ("W1", w0, w1, "impulse"), ("W2", w1, w2, "corrective"),
+        ("W3", w2, w3, "impulse"), ("W4", w3, w4, "corrective"),
+        ("W5", w4, w5, "impulse"),
+    ]:
+        personalities[label] = _ew_wave_personality(df, ws["idx"], we["idx"], kind)
+        personalities[label]["kind"] = kind  # impulse or corrective
+
+    # Sub-waves of W3 (typically the most subdividable)
+    sub_w3 = _ew_detect_subwaves(df, w2["idx"], w3["idx"])
+
+    # Corrective wave A-B-C (if any) after W5
+    abc = _ew_detect_corrective(df, w5["idx"])
+
+    return {
+        "degree": degree,
+        "span_bars": span,
+        "wave_sizes": {
+            "W1_size": round(w1_size, 2), "W2_size": round(w2_size, 2),
+            "W3_size": round(w3_size, 2), "W4_size": round(w4_size, 2),
+            "W5_size": round(w5_size, 2),
+        },
+        "fib_relationships": fib_relationships,
+        "wave_personalities": personalities,
+        "sub_waves_w3": sub_w3,
+        "corrective_abc": abc,
+        "wave_3_is_extended": w3_size > max(w1_size, w5_size) * 1.5,
+        "wave_3_classification": "extended" if w3_size > max(w1_size, w5_size) * 1.5 else "standard",
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 8b. WYCKOFF SUB-EVENTS (PS / SC / AR / ST / SOS / Spring / UTAD / LPSY)
+#     Identifies signature Wyckoff events from recent swing pivots within
+#     the dominant phase. Each event is a labeled price+date+status entry.
+# ═══════════════════════════════════════════════════════════════════════
+
+# Wyckoff event taxonomy by phase
+WYCKOFF_EVENTS = {
+    "accumulation": [
+        ("PS",  "Preliminary Support",       "First sign of buying after downtrend"),
+        ("SC",  "Selling Climax",            "Panic low + huge volume"),
+        ("AR",  "Automatic Rally",            "Sharp rally off SC low"),
+        ("ST",  "Secondary Test",             "Retest of SC area on lower volume"),
+        ("Spring", "Spring / Shakeout",       "False break below support → reversal"),
+        ("SOS", "Sign of Strength",           "Strong rally on volume above resistance"),
+        ("LPS", "Last Point of Support",      "Pullback to former resistance now support"),
+        ("BU",  "Backup to Edge of Creek",    "Final test before markup"),
+    ],
+    "markup": [
+        ("SOS", "Sign of Strength",           "Continuation breakouts on rising volume"),
+        ("LPS", "Last Point of Support",      "Pullback that holds prior breakout level"),
+        ("NS",  "Normal Reaction",            "Healthy pullback within trend"),
+    ],
+    "distribution": [
+        ("PSY", "Preliminary Supply",         "First sign of selling after uptrend"),
+        ("BC",  "Buying Climax",              "Euphoric high + huge volume"),
+        ("AR",  "Automatic Reaction",          "Sharp decline off BC"),
+        ("ST",  "Secondary Test",             "Retest of BC high on lower volume"),
+        ("UT",  "Upthrust",                   "False break above resistance"),
+        ("UTAD","Upthrust After Distribution","Final terminal upthrust"),
+        ("SOW", "Sign of Weakness",            "Breakdown on volume below support"),
+        ("LPSY","Last Point of Supply",        "Pullback that fails at resistance"),
+    ],
+    "markdown": [
+        ("SOW", "Sign of Weakness",            "Continuation breakdowns on rising volume"),
+        ("LPSY","Last Point of Supply",        "Pullback that fails at prior support now resistance"),
+        ("NS",  "Normal Reaction",             "Healthy bounce within downtrend"),
+    ],
+}
+
+
+def detect_wyckoff_subevents(df: pd.DataFrame, phase: str, range_hi: float, range_lo: float) -> list[dict]:
+    """Identify the most recent signature Wyckoff events visible in the chart.
+    For each event in the phase's taxonomy, scan recent swing pivots for a
+    match. Returns up to 5 most-recent events as a list of dicts."""
+    if df is None or len(df) < 30 or not phase or phase == "unclear":
+        return []
+    phase = phase.lower()
+    if phase not in WYCKOFF_EVENTS:
+        return []
+
+    events_template = WYCKOFF_EVENTS[phase]
+    out: list[dict] = []
+
+    try:
+        highs, lows = _swing_points(df.tail(60), window=3)
+        # Convert to df-global indices
+        offset = len(df) - 60
+        highs = [offset + i for i in highs]
+        lows = [offset + i for i in lows]
+    except Exception:
+        return []
+
+    if not (highs or lows):
+        return []
+
+    closes = df["Close"].values
+    vols = df["Volume"].values if "Volume" in df.columns else np.ones(len(df))
+    avg_vol_60 = float(vols[-60:].mean()) if len(vols) >= 60 else float(vols.mean())
+
+    # Phase-specific detection logic
+    if phase == "markup":
+        # SOS: recent swing high on volume > 1.5× avg
+        for hi_idx in highs[-5:]:
+            v = float(vols[hi_idx]) if hi_idx < len(vols) else 0
+            if v > avg_vol_60 * 1.5:
+                out.append({
+                    "code": "SOS", "name": "Sign of Strength",
+                    "date_idx": int(hi_idx),
+                    "price": round(float(df["High"].iloc[hi_idx]), 2),
+                    "volume_ratio": round(v / max(avg_vol_60, 1), 2),
+                    "description": "Strong rally on volume above prior resistance",
+                    "status": "confirmed",
+                })
+        # LPS: recent swing low that held above prior breakout level
+        for lo_idx in lows[-3:]:
+            lo_px = float(df["Low"].iloc[lo_idx])
+            # Heuristic: low held above midpoint of recent range
+            if lo_px > (range_hi + range_lo) / 2:
+                out.append({
+                    "code": "LPS", "name": "Last Point of Support",
+                    "date_idx": int(lo_idx), "price": round(lo_px, 2),
+                    "description": "Pullback held above prior breakout level",
+                    "status": "confirmed",
+                })
+
+    elif phase == "accumulation":
+        # SC: lowest low of last 60 bars on high volume
+        if lows:
+            sc_idx = min(lows, key=lambda i: float(df["Low"].iloc[i]))
+            sc_vol = float(vols[sc_idx]) if sc_idx < len(vols) else 0
+            if sc_vol > avg_vol_60 * 1.5:
+                out.append({
+                    "code": "SC", "name": "Selling Climax",
+                    "date_idx": int(sc_idx),
+                    "price": round(float(df["Low"].iloc[sc_idx]), 2),
+                    "volume_ratio": round(sc_vol / max(avg_vol_60, 1), 2),
+                    "description": "Panic low with capitulation volume",
+                    "status": "confirmed",
+                })
+        # Spring: recent low briefly below range_lo then closed back inside
+        for lo_idx in lows[-3:]:
+            lo_px = float(df["Low"].iloc[lo_idx])
+            close_px = float(closes[lo_idx])
+            if lo_px < range_lo * 1.005 and close_px > range_lo:
+                out.append({
+                    "code": "Spring", "name": "Spring / Shakeout",
+                    "date_idx": int(lo_idx),
+                    "price": round(lo_px, 2),
+                    "description": "False break below support, reversed intraday",
+                    "status": "confirmed",
+                })
+
+    elif phase == "distribution":
+        # BC: highest high of last 60 on high volume
+        if highs:
+            bc_idx = max(highs, key=lambda i: float(df["High"].iloc[i]))
+            bc_vol = float(vols[bc_idx]) if bc_idx < len(vols) else 0
+            if bc_vol > avg_vol_60 * 1.5:
+                out.append({
+                    "code": "BC", "name": "Buying Climax",
+                    "date_idx": int(bc_idx),
+                    "price": round(float(df["High"].iloc[bc_idx]), 2),
+                    "volume_ratio": round(bc_vol / max(avg_vol_60, 1), 2),
+                    "description": "Euphoric high with climactic volume",
+                    "status": "confirmed",
+                })
+        # UTAD: recent swing high above range_hi, closed below
+        for hi_idx in highs[-3:]:
+            hi_px = float(df["High"].iloc[hi_idx])
+            close_px = float(closes[hi_idx])
+            if hi_px > range_hi * 0.995 and close_px < range_hi:
+                out.append({
+                    "code": "UTAD", "name": "Upthrust After Distribution",
+                    "date_idx": int(hi_idx), "price": round(hi_px, 2),
+                    "description": "False break above resistance, rejected",
+                    "status": "confirmed",
+                })
+
+    elif phase == "markdown":
+        # SOW: recent swing low on high volume
+        for lo_idx in lows[-5:]:
+            v = float(vols[lo_idx]) if lo_idx < len(vols) else 0
+            if v > avg_vol_60 * 1.5:
+                out.append({
+                    "code": "SOW", "name": "Sign of Weakness",
+                    "date_idx": int(lo_idx),
+                    "price": round(float(df["Low"].iloc[lo_idx]), 2),
+                    "volume_ratio": round(v / max(avg_vol_60, 1), 2),
+                    "description": "Breakdown on volume below prior support",
+                    "status": "confirmed",
+                })
+
+    # Add "still possible" events from the template that weren't detected
+    detected_codes = {e["code"] for e in out}
+    for code, name, desc in events_template:
+        if code not in detected_codes:
+            out.append({
+                "code": code, "name": name, "description": desc,
+                "status": "not_detected", "price": None, "date_idx": None,
+            })
+
+    # Sort by status (confirmed first) then by recency
+    out.sort(key=lambda e: (0 if e["status"] == "confirmed" else 1,
+                            -(e.get("date_idx") or 0)))
+    return out[:10]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 8c. MONTE CARLO BLOCK (paths · distribution · P(target/stop))
+# ═══════════════════════════════════════════════════════════════════════
+
+def compute_monte_carlo_block(df: pd.DataFrame, target: float | None, stop: float | None,
+                               T: int = 10, n_paths: int = 500) -> dict:
+    """Run a Merton jump-diffusion sim from current spot, computing:
+    - terminal distribution (percentiles)
+    - P(target hit first) / P(stop hit first)
+    - compressed path samples (50 random paths) for visualization
+    - histogram of terminal returns (20 bins)
+    """
+    base = {"available": False, "rationale": "insufficient OHLCV data"}
+    if df is None or len(df) < 40:
+        return base
+    try:
+        import monte_carlo as mc_mod
+        import numpy as np
+        closes = df["Close"].values
+        S0 = float(closes[-1])
+        # Annualized drift + vol from last 60 daily log-returns
+        rets = np.diff(np.log(closes[-60:]))
+        if len(rets) < 20:
+            return base
+        mu_annual = float(rets.mean() * 252)
+        sigma_annual = float(rets.std(ddof=1) * np.sqrt(252))
+        # Jump params — light defaults (small jumps)
+        lambda_jump = 4.0  # 4 jumps per year
+        mu_jump = -0.02
+        sigma_jump = 0.05
+
+        if target and stop and target > S0 > stop:
+            result = mc_mod.simulate_with_target_stop(
+                S0=S0, mu_annual=mu_annual, sigma_annual=sigma_annual,
+                target=float(target), stop=float(stop),
+                T=T, n_paths=n_paths,
+                lambda_jump=lambda_jump, mu_jump=mu_jump, sigma_jump=sigma_jump,
+                seed=42,
+            )
+        else:
+            result = mc_mod.simulate(
+                S0=S0, mu_annual=mu_annual, sigma_annual=sigma_annual,
+                T=T, n_paths=n_paths,
+                lambda_jump=lambda_jump, mu_jump=mu_jump, sigma_jump=sigma_jump,
+                seed=42,
+            )
+
+        # Re-run simulate to get raw paths for path-viz (compressed)
+        from monte_carlo import _simulate_paths_jit
+        paths_array = _simulate_paths_jit(S0, mu_annual, sigma_annual, T, n_paths,
+                                            lambda_jump, mu_jump, sigma_jump, 42)
+        # Sample 50 paths for transmission
+        sample_indices = np.linspace(0, n_paths - 1, 50, dtype=int)
+        sample_paths = [
+            [round(float(paths_array[i][j]), 2) for j in range(T + 1)]
+            for i in sample_indices
+        ]
+        # Histogram of terminal returns
+        terminal = paths_array[:, -1]
+        terminal_returns = ((terminal - S0) / S0 * 100).tolist()
+        # 20 bins
+        hist, bin_edges = np.histogram(terminal_returns, bins=20)
+        histogram = [
+            {"bin_low_pct": round(float(bin_edges[i]), 2),
+             "bin_high_pct": round(float(bin_edges[i+1]), 2),
+             "count": int(hist[i])}
+            for i in range(len(hist))
+        ]
+
+        result["available"] = True
+        result["paths_sample"] = sample_paths  # 50 paths × (T+1) prices
+        result["histogram"] = histogram
+        result["spot"] = round(S0, 2)
+        return result
+    except Exception as e:
+        return {"available": False, "rationale": f"MC failure: {type(e).__name__}: {str(e)[:80]}"}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Original Elliott Wave (extended with deep details below)
 # ═══════════════════════════════════════════════════════════════════════
 
 def detect_elliott_wave(df: pd.DataFrame, pivot_window: int = 5) -> dict:
@@ -1030,6 +1464,9 @@ def detect_elliott_wave(df: pd.DataFrame, pivot_window: int = 5) -> dict:
         f"Re-count required if violation; do not trade off Elliott alone."
     )
 
+    # Deep details: degree + sub-waves + corrective A-B-C + Fib relationships + personality
+    deep = _ew_deep_details(df, waves, direction)
+
     return {
         "vote": vote,
         "discretionary": True,
@@ -1046,6 +1483,16 @@ def detect_elliott_wave(df: pd.DataFrame, pivot_window: int = 5) -> dict:
         "rationale": rationale,
         "falsification": falsification,
         "confidence": confidence,
+        # Deep details (v6.1)
+        "degree": deep.get("degree"),
+        "span_bars": deep.get("span_bars"),
+        "wave_sizes": deep.get("wave_sizes", {}),
+        "fib_relationships": deep.get("fib_relationships", {}),
+        "wave_personalities": deep.get("wave_personalities", {}),
+        "sub_waves_w3": deep.get("sub_waves_w3", []),
+        "corrective_abc": deep.get("corrective_abc"),
+        "wave_3_classification": deep.get("wave_3_classification"),
+        "wave_3_is_extended": deep.get("wave_3_is_extended", False),
     }
 
 
@@ -1419,6 +1866,28 @@ def detect_all_patterns(df: pd.DataFrame) -> dict:
     pd_dict["action_ladder"] = build_action_ladder(pd_dict, spot)
     pd_dict["scenarios"] = compute_scenarios(pd_dict, spot, df)
     pd_dict["execution_ticket"] = build_entry_zone_and_narrative(pd_dict, spot, df)
+
+    # v6.1 — Wyckoff sub-events + Monte Carlo block
+    try:
+        pd_dict["wyckoff"]["subevents"] = detect_wyckoff_subevents(
+            df, (wy.get("phase") or ""),
+            float(wy.get("range_high") or 0),
+            float(wy.get("range_low") or 0),
+        )
+    except Exception:
+        pd_dict["wyckoff"]["subevents"] = []
+
+    ticket = pd_dict.get("execution_ticket") or {}
+    try:
+        pd_dict["monte_carlo"] = compute_monte_carlo_block(
+            df,
+            target=ticket.get("t1"),
+            stop=ticket.get("stop"),
+            T=10, n_paths=500,
+        )
+    except Exception as e:
+        pd_dict["monte_carlo"] = {"available": False, "rationale": f"{type(e).__name__}: {e}"}
+
     return pd_dict
 
 
