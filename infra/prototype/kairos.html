@@ -38064,7 +38064,7 @@ body.light .qp6-root details.qp6-drawer > summary:hover { background: rgba(0,0,0
     const wyckoffPanel = _renderWyckoffPanel(wy, tk);
     const ewPanel = _renderElliottPanel(ew, spot, tk);
     const monteCarloPanel = _renderMonteCarloPanel(mc, spot, ticket, tk);
-    const drilldown = _renderDrilldownShell(METHODS);
+    const drilldown = _renderDrilldownShell(METHODS, pd);
     const scenariosBlk = _renderScenarios(scenarios, spot);
     const actionLadderBlk = _renderActionLadder(actionLadder, spot);
     const executionTicket = _renderExecutionTicket(ticket, composite);
@@ -38527,6 +38527,24 @@ body.light .qp6-root details.qp6-drawer > summary:hover { background: rgba(0,0,0
         <path d="${pathStr}" fill="none" stroke="#b481f5" stroke-width="2.5" opacity="0.7"/>
         ${markers}
       </svg>`;
+    } else if (ew.best_effort_pivots && ew.best_effort_pivots.length >= 3) {
+      // Render best-effort pivots (sequence didn't match clean impulse but we have data)
+      const bePts = ew.best_effort_pivots;
+      const pricesB = bePts.map(p => p.price);
+      const indicesB = bePts.map(p => p.idx);
+      const pMinB = Math.min(...pricesB) * 0.98, pMaxB = Math.max(...pricesB) * 1.02;
+      const iMinB = Math.min(...indicesB), iMaxB = Math.max(...indicesB);
+      const Wb = 800, Hb = 240, PADb = 32;
+      const toXb = (i) => PADb + (i - iMinB) / Math.max(iMaxB - iMinB, 1) * (Wb - 2*PADb);
+      const toYb = (p) => PADb + (pMaxB - p) / Math.max(pMaxB - pMinB, 1e-9) * (Hb - 2*PADb);
+      const pathStrB = bePts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${toXb(p.idx).toFixed(1)},${toYb(p.price).toFixed(1)}`).join(' ');
+      const markersB = bePts.map((p, i) => `<circle cx="${toXb(p.idx).toFixed(1)}" cy="${toYb(p.price).toFixed(1)}" r="4" fill="${p.type === 'H' ? '#d97757' : '#5cd1c5'}" stroke="#fff" stroke-width="1"/>
+        <text x="${toXb(p.idx).toFixed(1)}" y="${(toYb(p.price) - 8).toFixed(1)}" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#b481f5" font-weight="700">${_qp6Esc(p.label)}</text>`).join('');
+      waveSVG = `<svg viewBox="0 0 ${Wb} ${Hb}" style="width:100%;height:auto;display:block;background:rgba(180,129,245,0.04);border-radius:6px">
+        <path d="${pathStrB}" fill="none" stroke="#b481f5" stroke-width="1.8" opacity="0.5" stroke-dasharray="4,3"/>
+        ${markersB}
+        <text x="${Wb/2}" y="20" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#b481f5">BEST-EFFORT PIVOTS · sequence ${_qp6Esc(ew.pivot_sequence || '?')} · doesn't match clean 5-wave</text>
+      </svg>`;
     } else {
       waveSVG = `<div style="padding:40px;text-align:center;color:var(--ink-3);font-family:var(--mono);font-size:11px">No valid 5-wave impulse detected (${_qp6Esc(ew.rationale || 'pattern unclear')})</div>`;
     }
@@ -38610,6 +38628,9 @@ body.light .qp6-root details.qp6-drawer > summary:hover { background: rgba(0,0,0
           <div class="ew-card" style="border-left-color:#b481f5">
             <div class="ew-card-h" style="color:#b481f5">▼ DISCRETIONARY WARNING</div>
             <div style="font-size:12px;color:var(--ink-1);line-height:1.55">${_qp6Esc(ew.rationale || '')}</div>
+            ${ew.best_effort_interpretation ? `<div style="margin-top:8px;padding:8px 10px;background:rgba(180,129,245,0.08);border-left:2px solid #b481f5;border-radius:0 4px 4px 0;font-size:11.5px;color:var(--ink-1);line-height:1.5">
+              <b style="color:#b481f5;font-family:var(--mono);font-size:10.5px;letter-spacing:0.12em">BEST-EFFORT INTERPRETATION:</b><br>${_qp6Esc(ew.best_effort_interpretation)}
+            </div>` : ''}
             <div style="margin-top:8px;padding:6px 8px;background:rgba(255,107,91,0.06);border-left:2px solid rgba(255,107,91,0.45);border-radius:0 3px 3px 0;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
               <b style="color:var(--rd)">INVALIDATES IF:</b> ${_qp6Esc(ew.falsification || '')}
             </div>
@@ -38822,22 +38843,31 @@ body.light .qp6-root details.qp6-drawer > summary:hover { background: rgba(0,0,0
   }
 
   // ─── Drilldown shell ──────────────────────────────────────────────────
-  function _renderDrilldownShell(METHODS) {
+  function _renderDrilldownShell(METHODS, pd) {
+    // Initial state = method 0 (Wyckoff). Populate data cards inline so the
+    // drilldown shows real content before the user clicks anything.
+    const initial = METHODS[0];
+    const initialData = _drillData(pd || {}, 0);
+    const initialCards = initialData.map(d => `<div class="dd-card">
+      <div class="dd-lbl">${_qp6Esc(d[0])}</div>
+      <div class="dd-val ${d[2] || ''}">${_qp6Esc(d[1])}</div>
+      <div class="dd-sub">${_qp6Esc(d[3] || '')}</div>
+    </div>`).join('');
     return `<div class="section-h" style="margin-top:32px">
       <div class="title">▸ DRILLDOWN · selected method</div>
       <div class="meta">CLICK A MATRIX ROW ↑ TO SWITCH</div>
     </div>
     <div class="drill" id="qp6-drill">
       <div class="drill-h">
-        <div class="title" id="qp6-dd-title">${_qp6Esc(METHODS[0].num + ' · ' + METHODS[0].title)}</div>
-        <span class="vote-pill ${_qp6VoteCls(METHODS[0].vote)}" id="qp6-dd-vote">${_qp6Esc(METHODS[0].vote || '—')}</span>
-        <span class="meta" id="qp6-dd-meta">confidence ${((METHODS[0].conf || 0)*100).toFixed(0)}%</span>
+        <div class="title" id="qp6-dd-title">${_qp6Esc(initial.num + ' · ' + initial.title)}</div>
+        <span class="vote-pill ${_qp6VoteCls(initial.vote)}" id="qp6-dd-vote">${_qp6Esc(initial.vote || '—')}</span>
+        <span class="meta" id="qp6-dd-meta">confidence ${((initial.conf || 0)*100).toFixed(0)}%</span>
       </div>
       <div class="drill-body">
-        <div class="drill-claim" id="qp6-dd-claim">${_qp6Esc(METHODS[0].rationale)}</div>
-        <div class="drill-data" id="qp6-dd-data"></div>
+        <div class="drill-claim" id="qp6-dd-claim">${_qp6Esc(initial.rationale)}</div>
+        <div class="drill-data" id="qp6-dd-data">${initialCards}</div>
         <div id="qp6-drill-chart" style="margin-top:14px;padding:10px;background:rgba(0,0,0,0.12);border-radius:6px;min-height:340px"></div>
-        <div class="drill-falsify" id="qp6-dd-falsify"><div class="lbl">▼ FALSIFICATION</div>${_qp6Esc(METHODS[0].fals)}</div>
+        <div class="drill-falsify" id="qp6-dd-falsify"><div class="lbl">▼ FALSIFICATION</div>${_qp6Esc(initial.fals)}</div>
       </div>
     </div>`;
   }

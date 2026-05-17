@@ -1375,6 +1375,11 @@ def detect_elliott_wave(df: pd.DataFrame, pivot_window: int = 5) -> dict:
 
     if len(pivots) < 6:
         base["rationale"] = f"only {len(pivots)} pivots — need 6 for W0-W5"
+        base["pivot_count"] = len(pivots)
+        base["best_effort_pivots"] = [
+            {"label": f"p{i}", "idx": p["idx"], "type": p["type"], "price": round(p["price"], 2)}
+            for i, p in enumerate(pivots)
+        ]
         return base
 
     # Take the last 6 pivots; assume W0-W5 if they alternate L-H-L-H-L-H
@@ -1384,7 +1389,45 @@ def detect_elliott_wave(df: pd.DataFrame, pivot_window: int = 5) -> dict:
     is_impulse_dn = types == "HLHLHL"  # 5-wave down
 
     if not (is_impulse_up or is_impulse_dn):
-        base["rationale"] = f"pivot sequence {types} doesn't match impulse pattern (LHLHLH or HLHLHL)"
+        # Best-effort interpretation: even when rules fail, show the pivots so user can see
+        best_effort = {
+            "pivot_count": len(pivots),
+            "pivot_sequence": types,
+            "best_effort_pivots": [
+                {"label": f"p{i}", "idx": p["idx"], "type": p["type"], "price": round(p["price"], 2)}
+                for i, p in enumerate(last6)
+            ],
+        }
+        # Heuristic interpretation
+        if types in ("HLHLH", "LHLHL"):
+            interp = "Possible WXY complex correction or zigzag — not a clean 5-wave impulse"
+        elif "HH" in types or "LL" in types:
+            interp = "Pivot doubling detected (HH or LL adjacent) — suggests overlapping waves, possibly Wave 4 triangle or terminal diagonal"
+        else:
+            interp = "Non-impulsive structure — likely corrective phase or sideways consolidation"
+        best_effort["interpretation"] = interp
+
+        # Compute Fibonacci ratios on raw wave sizes even if labels are unconventional
+        sizes = []
+        for i in range(1, len(last6)):
+            sizes.append(abs(last6[i]["price"] - last6[i-1]["price"]))
+        fib_rel_partial = {}
+        if len(sizes) >= 3:
+            fib_rel_partial["leg_2_vs_leg_1"] = _ew_fib_ratio(sizes[1], sizes[0])
+            fib_rel_partial["leg_3_vs_leg_1"] = _ew_fib_ratio(sizes[2], sizes[0])
+        if len(sizes) >= 5:
+            fib_rel_partial["leg_4_vs_leg_3"] = _ew_fib_ratio(sizes[3], sizes[2])
+            fib_rel_partial["leg_5_vs_leg_1"] = _ew_fib_ratio(sizes[4], sizes[0])
+
+        base["rationale"] = f"Pivot sequence {types} doesn't match clean impulse (LHLHLH or HLHLHL). {interp}"
+        base["pivot_count"] = len(pivots)
+        base["pivot_sequence"] = types
+        base["best_effort_pivots"] = best_effort["best_effort_pivots"]
+        base["best_effort_interpretation"] = interp
+        base["fib_relationships"] = fib_rel_partial
+        # Best-effort wave sizes
+        if len(sizes) >= 5:
+            base["wave_sizes"] = {f"leg_{i+1}_size": round(s, 2) for i, s in enumerate(sizes)}
         return base
 
     direction = "up" if is_impulse_up else "down"
