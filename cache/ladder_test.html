@@ -1,0 +1,164 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Ladder Test</title>
+<style>
+  body { background:#0a0d0c; color:#ecefe9; font:14px ui-monospace,monospace; padding:20px; }
+  .ptv2 { --ptbg:#0a0d0c; --pt1:#11151a; --pt2:#161a1e; --pt3:#1c2125;
+          --ptline:#262b2d; --ptline2:#353a3c;
+          --ptink:#ecefe9; --ptink1:#d4d8d1; --ptink2:#9a9e98; --ptink3:#686c68; --ptink4:#444947;
+          --ptgn:#4ade80; --ptrd:#f87171; --ptam:#fbbf24; --ptcp:#d97757; }
+  .pt-ticket svg { width:100%; height:220px; display:block; }
+  h3 { color:#d97757; letter-spacing:.18em; text-transform:uppercase; font:700 11px ui-monospace,monospace; }
+  .panel { background:#11151a; border:1px solid #262b2d; padding:14px; margin-bottom:18px; border-radius:2px; }
+</style></head>
+<body class="ptv2">
+<h2 style="color:#d97757">Price Ladder render test</h2>
+<div id="out"></div>
+<script>
+const tickers = [
+  { sym: 'AMAT', px: 436.62, stop: 414.69, eLo: 431.01, eHi: 440.36, t1Lv: 498.67, t2Lv: 540.66, pZoneLo: 425, pZoneHi: 430, wk52H: 470 },
+  { sym: 'AVGO', px: 425.19, stop: 362.88, eLo: 420.07, eHi: 428.60, t1Lv: 577.97, t2Lv: 700.88, pZoneLo: 380, pZoneHi: 415, wk52H: 450 },
+  { sym: 'Q',    px: 157.23, stop: 141.74, eLo: 154.93, eHi: 158.76, t1Lv: 202.16, t2Lv: 232.37, pZoneLo: 145.12, pZoneHi: 149.97, wk52H: 171.52 },
+  // Sparse-data simulations to test how layout breaks
+  { sym: 'SPARSE-1 (only eHi+t1)', px: 0, stop: 0, eLo: 0, eHi: 150, t1Lv: 200, t2Lv: 0, pZoneLo: 0, pZoneHi: 0, wk52H: 0 },
+];
+
+function render(t) {
+  const { sym, px, stop, eLo, eHi, t1Lv, t2Lv, pZoneLo, pZoneHi, wk52H } = t;
+  const limitPx = eHi || px || 100;
+  const riskPerShare = limitPx && stop ? Math.abs(limitPx - stop) : null;
+  const t1Reward = t1Lv && limitPx ? Math.abs(t1Lv - limitPx) : null;
+  const t2Reward = t2Lv && limitPx ? Math.abs(t2Lv - limitPx) : null;
+  const t1R = riskPerShare && t1Reward ? (t1Reward / riskPerShare) : null;
+  const t2R = riskPerShare && t2Reward ? (t2Reward / riskPerShare) : null;
+
+  const ladderLo = Math.min(stop || px*0.9 || 90, pZoneLo || px*0.92 || 92, px || 100) * 0.99;
+  const ladderHi = Math.max(t2Lv || px*1.4 || 140, t1Lv || px*1.2 || 120) * 1.01;
+  const lScale = (p) => 20 + (1160 * (p - ladderLo) / (ladderHi - ladderLo));
+
+  const popT1Fb = 40, popStopFb = 22, popT2 = 12;
+
+  const BAR_TOP = 66, BAR_BOTTOM = 104, BAR_MID = 85;
+  const LBL_BASE_Y = 142, LBL_STAGGER_Y = 162;
+  const PRICE_BASE_Y = 162, PRICE_STAGGER_Y = 178;
+  const POP_Y = 122;
+
+  // R-axis
+  let rAxis = '<line x1="20" y1="14" x2="1180" y2="14" stroke="var(--ptink4)" stroke-width="0.5"/>';
+  if (riskPerShare && limitPx) {
+    const minR = (ladderLo - limitPx) / riskPerShare;
+    const maxR = (ladderHi - limitPx) / riskPerShare;
+    for (let r = Math.ceil(minR); r <= Math.floor(maxR) && r <= 8; r++) {
+      const px_ = limitPx + r * riskPerShare;
+      const x = lScale(px_);
+      if (x < 16 || x > 1184) continue;
+      const isMajor = r === 0 || Math.abs(r) === 1;
+      const tickColor = r < 0 ? '#f87171' : r > 0 ? '#22c55e' : '#d97757';
+      rAxis += '<line x1="' + x.toFixed(0) + '" y1="14" x2="' + x.toFixed(0) + '" y2="' + (isMajor ? '4' : '8') + '" stroke="' + tickColor + '" stroke-width="' + (isMajor ? '1.2' : '0.7') + '"/>';
+      rAxis += '<text x="' + x.toFixed(0) + '" y="3" text-anchor="middle" font-family="ui-monospace,monospace" font-size="8.5" fill="' + tickColor + '" font-weight="' + (isMajor ? '700' : '500') + '">' + (r > 0 ? '+' : '') + r + 'R</text>';
+    }
+  }
+
+  // Zone bands
+  let zones = '';
+  const zoneList = [];
+  if (stop && (eLo || limitPx)) zoneList.push({ from: stop, to: (eLo || limitPx), color: 'rgba(248,113,113,0.18)', stroke: 'rgba(248,113,113,0.40)', label: 'RISK', fill: '#f87171' });
+  if (eLo && eHi)               zoneList.push({ from: eLo, to: eHi, color: 'rgba(251,191,36,0.28)', stroke: 'rgba(251,191,36,0.55)', label: 'ENTRY', fill: '#fbbf24' });
+  if (eHi && t1Lv)              zoneList.push({ from: eHi, to: t1Lv, color: 'rgba(96,165,250,0.14)', stroke: 'rgba(96,165,250,0.35)', label: 'RUN-UP', fill: '#60a5fa' });
+  if (t1Lv && t2Lv)             zoneList.push({ from: t1Lv, to: t2Lv, color: 'rgba(74,222,128,0.18)', stroke: 'rgba(74,222,128,0.40)', label: 'REWARD-1', fill: '#22c55e' });
+  if (t2Lv)                      zoneList.push({ from: t2Lv, to: ladderHi, color: 'rgba(74,222,128,0.28)', stroke: 'rgba(74,222,128,0.50)', label: 'REWARD-2', fill: '#15803d' });
+  zoneList.forEach(z => {
+    const x1 = lScale(z.from), x2 = lScale(z.to);
+    if (x2 - x1 < 1) return;
+    zones += '<rect x="' + x1.toFixed(0) + '" y="30" width="' + (x2 - x1).toFixed(0) + '" height="28" fill="' + z.color + '" stroke="' + z.stroke + '" stroke-width="0.5"/>';
+    if (x2 - x1 >= 60) {
+      zones += '<text x="' + ((x1 + x2) / 2).toFixed(0) + '" y="48" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9.5" fill="' + z.fill + '" font-weight="800" letter-spacing="1.2px">' + z.label + '</text>';
+    }
+  });
+
+  // Markers
+  const markerSpecs = [];
+  if (stop) markerSpecs.push({ kind: 'point', label: 'STOP', price: stop, color: '#f87171', pop: popStopFb });
+  if (pZoneLo && pZoneHi) markerSpecs.push({ kind: 'range', label: 'ALERT', from: pZoneLo, to: pZoneHi, color: '#22c55e' });
+  if (eLo && eHi) markerSpecs.push({ kind: 'range', label: 'ENTRY', from: eLo, to: eHi, color: '#fbbf24' });
+  if (px) markerSpecs.push({ kind: 'spot', label: 'SPOT', price: px, color: '#d97757' });
+  if (wk52H && wk52H > px && wk52H < ladderHi) markerSpecs.push({ kind: 'tick', label: '52w HI', price: wk52H, color: '#9a9e98' });
+  if (t1Lv) markerSpecs.push({ kind: 'point', label: 'T1' + (t1R ? ' · ' + t1R.toFixed(1) + 'R' : ''), price: t1Lv, color: '#22c55e', pop: popT1Fb });
+  if (t2Lv) markerSpecs.push({ kind: 'point', label: 'T2' + (t2R ? ' · ' + t2R.toFixed(1) + 'R' : ''), price: t2Lv, color: '#22c55e', pop: popT2 });
+
+  markerSpecs.forEach(m => {
+    if (m.kind === 'range') { m.x1 = lScale(m.from); m.x2 = lScale(m.to); m.x = (m.x1+m.x2)/2; }
+    else m.x = lScale(m.price);
+  });
+
+  const sortedByX = [...markerSpecs].sort((a, b) => a.x - b.x);
+  const MIN_GAP = 70;
+  sortedByX.forEach((m, i) => {
+    if (i === 0) { m.stagger = 0; return; }
+    const prev = sortedByX[i - 1];
+    m.stagger = Math.abs(m.x - prev.x) < MIN_GAP ? (prev.stagger === 0 ? 1 : 0) : 0;
+  });
+
+  let markerStems = '', markerCircles = '', markerLabels = '', markerPrices = '', popPills = '';
+  markerSpecs.forEach(m => {
+    const lblY = LBL_BASE_Y + m.stagger * (LBL_STAGGER_Y - LBL_BASE_Y);
+    const priceY = PRICE_BASE_Y + m.stagger * (PRICE_STAGGER_Y - PRICE_BASE_Y);
+    const stemY1 = BAR_BOTTOM + 1, stemY2 = lblY - 11;
+    if (m.kind === 'range') {
+      markerStems += '<rect x="' + m.x1.toFixed(0) + '" y="' + (BAR_TOP+2) + '" width="' + (m.x2-m.x1).toFixed(0) + '" height="' + (BAR_BOTTOM-BAR_TOP-4) + '" fill="' + m.color + '" fill-opacity="0.25" stroke="' + m.color + '" stroke-width="1" stroke-dasharray="' + (m.label === 'ALERT' ? '3 2' : '0') + '"/>';
+      if (m.x2 - m.x1 >= 50) markerStems += '<text x="' + m.x.toFixed(0) + '" y="' + (BAR_MID+4) + '" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" font-weight="800" fill="' + m.color + '">' + (m.label === 'ALERT' ? '⏰ ' : '⇣ ') + m.label + '</text>';
+      markerStems += '<line x1="' + m.x.toFixed(0) + '" y1="' + stemY1 + '" x2="' + m.x.toFixed(0) + '" y2="' + stemY2 + '" stroke="' + m.color + '" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.55"/>';
+      markerLabels += '<text x="' + m.x.toFixed(0) + '" y="' + lblY + '" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="' + m.color + '" font-weight="800">' + m.label + '</text>';
+      markerPrices += '<text x="' + m.x.toFixed(0) + '" y="' + priceY + '" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="' + m.color + '" font-weight="600">$' + m.from.toFixed(2) + ' – $' + m.to.toFixed(2) + '</text>';
+    } else if (m.kind === 'tick') {
+      markerStems += '<line x1="' + m.x.toFixed(0) + '" y1="' + (BAR_TOP+4) + '" x2="' + m.x.toFixed(0) + '" y2="' + (BAR_BOTTOM-4) + '" stroke="' + m.color + '" stroke-width="0.9" stroke-dasharray="2 1"/>';
+      markerStems += '<text x="' + (m.x+8).toFixed(0) + '" y="' + (BAR_TOP-1) + '" font-family="ui-monospace,monospace" font-size="8" fill="' + m.color + '" font-weight="600">' + m.label.toLowerCase() + '</text>';
+    } else if (m.kind === 'spot') {
+      markerStems += '<line x1="' + m.x.toFixed(0) + '" y1="' + (BAR_TOP-4) + '" x2="' + m.x.toFixed(0) + '" y2="' + (BAR_BOTTOM+4) + '" stroke="' + m.color + '" stroke-width="2.5"/>';
+      markerCircles += '<circle cx="' + m.x.toFixed(0) + '" cy="' + BAR_MID + '" r="11" fill="none" stroke="' + m.color + '" stroke-width="1.2" opacity="0.45"/>';
+      markerCircles += '<circle cx="' + m.x.toFixed(0) + '" cy="' + BAR_MID + '" r="7" fill="' + m.color + '"/>';
+      markerStems += '<line x1="' + m.x.toFixed(0) + '" y1="' + stemY1 + '" x2="' + m.x.toFixed(0) + '" y2="' + stemY2 + '" stroke="' + m.color + '" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.6"/>';
+      markerLabels += '<text x="' + m.x.toFixed(0) + '" y="' + lblY + '" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="' + m.color + '" font-weight="800">▶ ' + m.label + '</text>';
+      markerPrices += '<text x="' + m.x.toFixed(0) + '" y="' + priceY + '" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="' + m.color + '" font-weight="800">$' + m.price.toFixed(2) + '</text>';
+    } else {
+      markerStems += '<line x1="' + m.x.toFixed(0) + '" y1="' + (BAR_TOP-2) + '" x2="' + m.x.toFixed(0) + '" y2="' + (BAR_BOTTOM+2) + '" stroke="' + m.color + '" stroke-width="2.2"/>';
+      markerCircles += '<circle cx="' + m.x.toFixed(0) + '" cy="' + BAR_MID + '" r="7" fill="' + m.color + '"/>';
+      markerStems += '<line x1="' + m.x.toFixed(0) + '" y1="' + stemY1 + '" x2="' + m.x.toFixed(0) + '" y2="' + stemY2 + '" stroke="' + m.color + '" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.6"/>';
+      markerLabels += '<text x="' + m.x.toFixed(0) + '" y="' + lblY + '" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="' + m.color + '" font-weight="800">' + m.label + '</text>';
+      markerPrices += '<text x="' + m.x.toFixed(0) + '" y="' + priceY + '" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10.5" fill="' + m.color + '" font-weight="700">$' + m.price.toFixed(2) + '</text>';
+      if (m.pop != null && m.pop > 0) {
+        const popLabel = m.label.startsWith('STOP') ? 'P(stop)' : m.label.startsWith('T1') ? 'P(T1)' : 'P(T2)';
+        const popColor = m.label.startsWith('STOP') ? '#f87171' : (m.pop >= 60 ? '#22c55e' : m.pop >= 40 ? '#fbbf24' : '#9a9e98');
+        const popW = 64;
+        popPills += '<rect x="' + (m.x-popW/2).toFixed(0) + '" y="' + (POP_Y-9) + '" width="' + popW + '" height="18" rx="2" fill="rgba(0,0,0,0.45)" stroke="' + popColor + '" stroke-width="0.8"/>';
+        popPills += '<text x="' + m.x.toFixed(0) + '" y="' + (POP_Y+4) + '" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="' + popColor + '" font-weight="700">' + popLabel + ' ' + m.pop.toFixed(0) + '%</text>';
+      }
+    }
+  });
+
+  const mapMarks = rAxis + zones + markerStems + markerCircles + popPills + markerLabels + markerPrices;
+  return `
+    <div class="panel">
+      <h3>${sym} — px=$${px} stop=$${stop} t1=$${t1Lv} t2=$${t2Lv}</h3>
+      <div class="pt-ticket">
+        <svg viewBox="0 0 1200 220" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="g_${sym.replace(/\W/g,'')}" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#f87171" stop-opacity="0.28"/>
+              <stop offset="30%" stop-color="#fbbf24" stop-opacity="0.16"/>
+              <stop offset="55%" stop-color="#22c55e" stop-opacity="0.08"/>
+              <stop offset="100%" stop-color="#22c55e" stop-opacity="0.32"/>
+            </linearGradient>
+          </defs>
+          <rect x="0" y="66" width="1200" height="38" fill="url(#g_${sym.replace(/\W/g,'')})"/>
+          <line x1="20" y1="85" x2="1180" y2="85" stroke="#686c68" stroke-width="0.4" opacity="0.45"/>
+          <text x="20" y="218" font-family="ui-monospace,monospace" font-size="9" fill="#686c68">$${ladderLo.toFixed(0)}</text>
+          <text x="1180" y="218" text-anchor="end" font-family="ui-monospace,monospace" font-size="9" fill="#686c68">$${ladderHi.toFixed(0)}</text>
+          ${mapMarks}
+        </svg>
+      </div>
+    </div>`;
+}
+
+document.getElementById('out').innerHTML = tickers.map(render).join('');
+</script>
+</body></html>

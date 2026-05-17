@@ -49,6 +49,7 @@ const FILE_TO_WINDOW_FN = {
   'subtabs/insider/insider.js':                'renderInsider',
   'subtabs/institutional/institutional.js':    'renderInstitutional',
   'subtabs/ruleengine/rule_engine.js':         'renderRuleEngine',
+  'subtabs/ml_edge/ml_edge.js':                'renderMlEdgeTab',
 };
 
 async function _loadAndOverride(modulePath) {
@@ -155,7 +156,31 @@ async function _loadAndOverride(modulePath) {
   }
 
   // Render-once cache so re-activating a sub-tab is free.
+  // Keyed by ticker so navigation to a new ticker re-renders all modules.
   const _rendered = new Set();
+  let _lastRenderedTicker = null;
+
+  function _clearRenderedForTicker(newTicker) {
+    if (newTicker && _lastRenderedTicker !== newTicker) {
+      // Call dispose() on any module that exports it, to flush module-level state
+      // (e.g. overview.js STATE.payloads, STATE.mounted).
+      for (const path of Object.keys(FILE_TO_WINDOW_FN)) {
+        const cached = _moduleCache[path];
+        // _moduleCache values are Promises; resolve synchronously if settled
+        if (cached && typeof cached.then === 'function') {
+          cached.then(mod => {
+            if (mod && typeof mod.dispose === 'function') {
+              try { mod.dispose(); } catch (_) {}
+            }
+          });
+        }
+      }
+      _rendered.clear();
+      _lastRenderedTicker = newTicker;
+      console.log(`[detail-shell] ticker changed to '${newTicker}' — _rendered cache cleared`);
+    }
+  }
+
   function _renderFn(name) {
     if (_rendered.has(name)) return;
     if (typeof window[name] !== 'function') return;
@@ -166,6 +191,14 @@ async function _loadAndOverride(modulePath) {
     window.__detailMetrics.renderMs[name] = +(performance.now() - t0).toFixed(1);
   }
   function _renderSubtab(id) {
+    // Check for ticker change before every render — handles SPA-style navigation
+    // where the page does not reload but window.T is replaced with a new ticker.
+    // If the page always does a full reload on ticker change (current behaviour
+    // as of 2026-05-14), this is a no-op but keeps the shell correct if
+    // SPA navigation is added later.
+    const T = window.__getDetailTicker ? window.__getDetailTicker() : window.T;
+    const tk = T && (T.ticker || T.symbol || '');
+    if (tk) _clearRenderedForTicker(tk);
     const fns = SUBTAB_RENDERERS[id] || [];
     for (const f of fns) _renderFn(f);
   }

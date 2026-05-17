@@ -1,0 +1,925 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Kairos · Trade when, not that.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=GT+Sectra:wght@400;500;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400;1,8..60,500&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/*
+ * Kairos Shell — vision prototype (2026-05-11)
+ * Two-zone vertical layout: north-star strip always-on, work surface below.
+ * Sidebar: 27 tabs grouped into 4 collapsible sections + search/cmd-K.
+ * Visual rhythm: hero → pull quote → detail → pull quote.
+ * Phosphor color lockdown · serif masthead · mono everywhere else.
+ */
+
+:root {
+  /* Carbon dark register — terminal */
+  --bg-0:        #0a0d0c;   /* page background */
+  --bg-1:        #0f1311;   /* panel background */
+  --bg-2:        #141916;   /* hover / selected */
+  --bg-3:        #1a201d;   /* lifted card */
+  --rule:        #1d2520;   /* hairline */
+  --rule-2:      #2a352e;   /* stronger rule */
+  --rule-3:      #3a4a40;   /* visible divider */
+
+  /* Phosphor palette — locked semantic system */
+  --phos:        #5be57c;   /* up / bullish / score-high */
+  --phos-dim:    #2f6b41;   /* dimmed phos for subtitles */
+  --phos-bg:     #0d1f14;   /* phos accent background */
+  --amber:       #ffb95c;   /* caution / earnings risk */
+  --amber-dim:   #8c5d20;
+  --amber-bg:    #1f1810;
+  --cyan:        #5ec8d8;   /* informational / links */
+  --cyan-dim:    #2c6a74;
+  --red:         #ff6b5b;   /* stop / loss / killed */
+  --red-dim:     #7a2a22;
+
+  /* Editorial register — bone on carbon */
+  --bone:        #e8e6e0;   /* primary editorial text */
+  --bone-1:      #bcbcb6;   /* secondary editorial */
+  --bone-2:      #7d8088;   /* tertiary */
+  --bone-3:      #5a5d65;   /* quaternary */
+  --copper:      #d97757;   /* editorial accent — warm copper */
+
+  /* Type system */
+  --serif:       'GT Sectra', 'Source Serif 4', Georgia, serif;
+  --serif-i:     'Source Serif 4', Georgia, serif;
+  --sans:        'Inter', system-ui, sans-serif;
+  --mono:        'JetBrains Mono', ui-monospace, monospace;
+
+  /* Spacing rhythm */
+  --row-h:       28px;
+  --zone-a-h:    72px;
+  --sb-w:        236px;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg-0); color: var(--phos);
+  font-family: var(--mono); font-size: 12.5px;
+  -webkit-font-smoothing: antialiased;
+  height: 100%;
+}
+body { display: flex; flex-direction: column; }
+
+a { color: inherit; text-decoration: none; }
+button { font: inherit; border: none; background: none; color: inherit; cursor: pointer; }
+.num { font-variant-numeric: tabular-nums; }
+.serif { font-family: var(--serif); }
+.serif-i { font-family: var(--serif-i); font-style: italic; }
+.sans { font-family: var(--sans); }
+.up   { color: var(--phos); }
+.down { color: var(--red); }
+.amb  { color: var(--amber); }
+.cy   { color: var(--cyan); }
+.dim  { color: var(--bone-2); }
+.dim2 { color: var(--bone-3); }
+.mute { color: var(--rule-3); }
+
+/* ═══════ ZONE A — NORTH STAR STRIP ════════════════════════════════════ */
+.zone-a {
+  position: sticky; top: 0; z-index: 100;
+  height: var(--zone-a-h);
+  background: linear-gradient(180deg, #0f1311 0%, #0a0d0c 100%);
+  border-bottom: 1px solid var(--rule-2);
+  display: grid;
+  grid-template-columns: 200px 1fr 280px 160px 110px;
+  align-items: center;
+  padding: 0 18px;
+  gap: 18px;
+}
+
+/* Brand block */
+.za-brand { display: flex; align-items: baseline; gap: 10px; }
+.za-brand-wm {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 30px;
+  letter-spacing: -0.025em;
+  color: var(--bone);
+  line-height: 1;
+}
+.za-brand-wm::first-letter { color: var(--copper); }
+.za-brand-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--bone-3);
+  align-self: flex-end;
+  padding-bottom: 4px;
+}
+
+/* Today's read — the lead voice */
+.za-read {
+  font-family: var(--serif-i);
+  font-style: italic;
+  font-size: 14.5px;
+  line-height: 1.35;
+  color: var(--bone-1);
+  letter-spacing: -0.005em;
+  border-left: 2px solid var(--copper);
+  padding: 4px 0 4px 14px;
+}
+.za-read b { color: var(--bone); font-style: normal; font-weight: 600; font-family: var(--mono); font-size: 12.5px; letter-spacing: 0; }
+.za-read .alert { color: var(--amber); font-style: normal; font-weight: 600; font-family: var(--mono); font-size: 12.5px; }
+
+/* System dots */
+.za-dots { display: flex; gap: 4px; align-items: center; }
+.za-dots-grp { display: flex; gap: 3px; padding: 0 8px; border-right: 1px solid var(--rule); }
+.za-dots-grp:last-child { border-right: none; }
+.za-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--rule-3);
+  position: relative;
+}
+.za-dot.on { background: var(--phos); box-shadow: 0 0 6px var(--phos); }
+.za-dot.warn { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+.za-dot.off { background: var(--red-dim); }
+.za-dot::after {
+  content: attr(data-label);
+  position: absolute;
+  bottom: -16px; left: 50%; transform: translateX(-50%);
+  font-size: 8px; letter-spacing: 0.06em;
+  color: var(--bone-3);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 100ms;
+  pointer-events: none;
+}
+.za-dot:hover::after { opacity: 1; }
+
+/* P&L */
+.za-pnl {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+  border-left: 1px solid var(--rule); padding-left: 16px;
+}
+.za-pnl-big {
+  font-family: var(--mono); font-weight: 700; font-size: 18px;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+}
+.za-pnl-sub {
+  font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--bone-3);
+}
+
+/* Clock */
+.za-clock {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+  border-left: 1px solid var(--rule); padding-left: 16px;
+}
+.za-clock-time {
+  font-family: var(--mono); font-weight: 700; font-size: 17px;
+  letter-spacing: 0.02em;
+  color: var(--bone);
+  font-variant-numeric: tabular-nums;
+}
+.za-clock-sub {
+  font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--phos-dim);
+}
+
+/* ═══════ ZONE B — WORK SURFACE ════════════════════════════════════════ */
+.zone-b {
+  flex: 1;
+  display: grid;
+  grid-template-columns: var(--sb-w) 1fr;
+  min-height: 0;
+}
+
+/* ── Sidebar ────────────────────────────────────────────────────────── */
+.sb {
+  background: var(--bg-0);
+  border-right: 1px solid var(--rule);
+  overflow-y: auto;
+  font-family: var(--mono); font-size: 11.5px;
+  padding: 14px 0;
+}
+.sb-cmdk {
+  margin: 0 12px 14px 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--rule-2);
+  background: var(--bg-1);
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: var(--bone-2);
+  cursor: pointer;
+  transition: all 80ms;
+}
+.sb-cmdk:hover { border-color: var(--phos-dim); color: var(--phos); }
+.sb-cmdk .gt { color: var(--phos); }
+.sb-cmdk .kbd {
+  margin-left: auto;
+  font-family: var(--mono); font-size: 9.5px;
+  padding: 1px 5px;
+  border: 1px solid var(--rule-2);
+  border-radius: 2px;
+  color: var(--bone-3);
+}
+
+.sb-grp { margin: 0 0 4px 0; }
+.sb-grp-h {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 16px 4px 16px;
+  font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--bone-3); font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+}
+.sb-grp-h:hover { color: var(--bone-1); }
+.sb-grp-h .caret {
+  font-size: 8px; color: var(--bone-3); margin-left: auto;
+  transition: transform 120ms;
+}
+.sb-grp.collapsed .caret { transform: rotate(-90deg); }
+.sb-grp.collapsed .sb-items { display: none; }
+.sb-grp-h .grp-ct { color: var(--bone-3); font-size: 9px; margin-left: 6px; }
+
+.sb-items { padding: 2px 8px; }
+.sb-link {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px;
+  color: var(--bone-1);
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  border-left: 2px solid transparent;
+  transition: all 60ms;
+  margin: 1px 0;
+}
+.sb-link:hover { background: var(--bg-1); color: var(--bone); }
+.sb-link.on {
+  background: var(--phos-bg); color: var(--phos);
+  border-left-color: var(--phos);
+  font-weight: 600;
+}
+.sb-link.on::before { content: '›'; color: var(--phos); font-weight: 700; }
+.sb-link .ct {
+  margin-left: auto;
+  font-size: 9.5px; padding: 1px 6px;
+  background: var(--bg-2); color: var(--bone-3);
+  border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.sb-link.on .ct { background: var(--phos-dim); color: var(--bg-0); }
+.sb-link.killed-link .ct { background: var(--red-dim); color: var(--bone); }
+
+/* ── Work area ──────────────────────────────────────────────────────── */
+.work {
+  overflow-y: auto;
+  padding: 24px 32px 80px 32px;
+  max-width: 1320px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Tab head — minimal, no card chrome */
+.tab-h {
+  display: flex; align-items: baseline; gap: 18px;
+  margin-bottom: 22px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--rule);
+}
+.tab-h-title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 28px;
+  letter-spacing: -0.022em;
+  color: var(--bone);
+  line-height: 1;
+}
+.tab-h-code {
+  font-family: var(--mono);
+  font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--phos-dim);
+  padding: 3px 9px;
+  border: 1px solid var(--phos-dim);
+  border-radius: 2px;
+  align-self: center;
+}
+.tab-h-ts {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--bone-3);
+}
+.tab-h-ts b { color: var(--phos); font-weight: 600; }
+
+/* Hero card */
+.hero {
+  display: grid;
+  grid-template-columns: auto 1fr 320px;
+  gap: 28px;
+  padding: 22px 24px;
+  background: var(--bg-1);
+  border: 1px solid var(--rule-2);
+  border-top: 2px solid var(--phos);
+  margin-bottom: 28px;
+}
+.hero-arc {
+  width: 110px; height: 110px;
+  display: grid; place-items: center;
+  position: relative;
+}
+.hero-arc svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.hero-arc .score {
+  position: absolute;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 32px; letter-spacing: -0.02em;
+  color: var(--phos);
+}
+.hero-arc .score-sub {
+  position: absolute; bottom: -2px;
+  font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--bone-3); margin-top: 24px;
+  transform: translateY(38px);
+}
+
+.hero-mid { min-width: 0; }
+.hero-row {
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.hero-ticker {
+  font-family: var(--mono);
+  font-weight: 700; font-size: 28px;
+  color: var(--bone); letter-spacing: -0.01em;
+}
+.hero-meta {
+  font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--bone-2);
+}
+.hero-meta .pill {
+  padding: 2px 8px; border: 1px solid currentColor; border-radius: 2px;
+  margin-right: 4px;
+}
+.hero-thesis {
+  font-family: var(--serif-i);
+  font-style: italic;
+  font-size: 14px; line-height: 1.5;
+  color: var(--bone-1);
+  margin: 10px 0 14px 0;
+  letter-spacing: -0.003em;
+}
+.hero-tags {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.hero-tags .tag {
+  padding: 2px 8px; border: 1px solid var(--phos-dim); color: var(--phos);
+  border-radius: 2px; font-weight: 600;
+}
+.hero-tags .tag.amb { border-color: var(--amber-dim); color: var(--amber); }
+.hero-tags .tag.cy { border-color: var(--cyan-dim); color: var(--cyan); }
+.hero-tags .tag.red { border-color: var(--red-dim); color: var(--red); }
+
+/* Ladder (right side of hero) */
+.hero-ladder {
+  border-left: 1px solid var(--rule-2);
+  padding-left: 20px;
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 6px;
+  font-family: var(--mono); font-size: 11.5px;
+}
+.hl-row {
+  display: grid; grid-template-columns: 24px 56px 1fr 70px;
+  gap: 8px; align-items: center;
+  padding: 4px 0;
+}
+.hl-row.curr { background: var(--phos-bg); }
+.hl-row .marker { font-size: 10px; }
+.hl-row .lbl { font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bone-2); }
+.hl-row .bar { background: var(--rule-2); height: 4px; position: relative; }
+.hl-row .bar .fill { background: var(--phos); height: 100%; }
+.hl-row .px { text-align: right; font-variant-numeric: tabular-nums; color: var(--bone); }
+.hl-row.t1 .lbl, .hl-row.t1 .marker, .hl-row.t1 .px { color: var(--phos); }
+.hl-row.t2 .lbl, .hl-row.t2 .marker, .hl-row.t2 .px { color: var(--phos-dim); }
+.hl-row.curr .lbl, .hl-row.curr .marker, .hl-row.curr .px { color: var(--bone); font-weight: 600; }
+.hl-row.stop .lbl, .hl-row.stop .marker, .hl-row.stop .px { color: var(--red); }
+
+/* Pull quote breather */
+.quote {
+  margin: 28px 0;
+  padding: 28px 32px;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(217, 119, 87, 0.04), transparent 60%);
+}
+.quote-text {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 19px; line-height: 1.4;
+  letter-spacing: -0.01em;
+  color: var(--bone);
+  max-width: 760px; margin: 0 auto 10px;
+}
+.quote-text::before { content: '❝ '; color: var(--copper); margin-right: 4px; }
+.quote-text::after { content: ' ❞'; color: var(--copper); margin-left: 4px; }
+.quote-attr {
+  font-family: var(--mono);
+  font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--bone-3);
+}
+.quote-attr b { color: var(--phos); font-weight: 600; }
+
+/* Detail rows — dense, terminal */
+.detail-h {
+  display: flex; align-items: center; gap: 14px;
+  margin: 6px 0 10px 0;
+}
+.detail-h-title {
+  font-family: var(--mono);
+  font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--bone-2);
+}
+.detail-h-line {
+  flex: 1; height: 1px; background: var(--rule);
+}
+.detail-h-ct {
+  font-family: var(--mono);
+  font-size: 10.5px; letter-spacing: 0.1em;
+  color: var(--bone-3);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 64px 90px 70px 80px 1fr 80px 80px 80px 60px;
+  gap: 0;
+  font-family: var(--mono); font-size: 11.5px;
+  background: var(--bg-1);
+  border: 1px solid var(--rule-2);
+}
+.dg-h {
+  padding: 9px 12px;
+  background: var(--bg-0);
+  font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--bone-3); font-weight: 600;
+  border-bottom: 1px solid var(--rule-2);
+}
+.dg-h.right { text-align: right; }
+.dg-cell {
+  padding: 9px 12px;
+  border-bottom: 1px dashed var(--rule);
+  color: var(--bone-1);
+  font-variant-numeric: tabular-nums;
+}
+.dg-cell.right { text-align: right; }
+.dg-cell.ticker { color: var(--phos); font-weight: 700; cursor: pointer; }
+.dg-cell.ticker:hover { color: var(--bone); }
+.dg-row:nth-of-type(even) .dg-cell { background: rgba(15, 19, 17, 0.4); }
+.dg-mini-bar {
+  display: inline-block; height: 4px; width: 100%; max-width: 60px;
+  background: var(--rule-2); position: relative; vertical-align: middle;
+  margin-right: 6px;
+}
+.dg-mini-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--phos); }
+.dg-pill {
+  font-size: 9.5px; padding: 1px 6px;
+  border: 1px solid; border-radius: 2px;
+  letter-spacing: 0.06em; font-weight: 600;
+  text-transform: uppercase;
+}
+.dg-pill.fresh { color: var(--phos); border-color: var(--phos-dim); }
+.dg-pill.pullback { color: var(--cyan); border-color: var(--cyan-dim); }
+.dg-pill.extended { color: var(--amber); border-color: var(--amber-dim); }
+.dg-pill.missed { color: var(--red); border-color: var(--red-dim); }
+.dg-pill.t1 { color: var(--phos); border-color: var(--phos-dim); }
+.dg-pill.t2 { color: var(--cyan); border-color: var(--cyan-dim); }
+.dg-pill.t3 { color: var(--bone-3); border-color: var(--rule-3); }
+
+/* Footer */
+.tab-foot {
+  margin-top: 48px;
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--bone-3);
+}
+.tab-foot b { color: var(--bone-1); font-weight: 600; }
+.tab-foot .copper { color: var(--copper); }
+
+/* ═══════ COMMAND PALETTE (Cmd+K) ═══════════════════════════════════════ */
+.cmdk-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: none;
+  align-items: flex-start; justify-content: center;
+  padding-top: 12vh;
+}
+.cmdk-overlay.on { display: flex; }
+.cmdk {
+  width: min(620px, 92vw);
+  background: var(--bg-1);
+  border: 1px solid var(--phos-dim);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(91, 229, 124, 0.08);
+}
+.cmdk-input {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--rule-2);
+}
+.cmdk-input .gt { color: var(--phos); font-size: 14px; }
+.cmdk-input input {
+  flex: 1;
+  background: transparent; border: none; outline: none;
+  font: inherit; font-family: var(--mono); font-size: 14px;
+  color: var(--bone);
+}
+.cmdk-input .esc {
+  font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--bone-3); padding: 2px 6px;
+  border: 1px solid var(--rule-2); border-radius: 2px;
+}
+.cmdk-results { max-height: 50vh; overflow-y: auto; }
+.cmdk-result {
+  padding: 10px 20px;
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--mono); font-size: 11.5px;
+  color: var(--bone-1); cursor: pointer;
+  border-bottom: 1px dashed var(--rule);
+}
+.cmdk-result:hover, .cmdk-result.sel {
+  background: var(--phos-bg); color: var(--phos);
+}
+.cmdk-result .mnemonic {
+  font-size: 9.5px; letter-spacing: 0.14em; color: var(--phos-dim);
+  padding: 2px 6px; border: 1px solid var(--phos-dim); border-radius: 2px;
+  min-width: 38px; text-align: center;
+}
+.cmdk-result .grp {
+  margin-left: auto;
+  font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--bone-3);
+}
+
+/* Misc */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-0); }
+::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--rule-3); }
+</style>
+</head>
+
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- ZONE A — NORTH STAR STRIP                                           -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="zone-a">
+  <div class="za-brand">
+    <span class="za-brand-wm">Kairos</span>
+    <span class="za-brand-tag">Trade when, not that.</span>
+  </div>
+
+  <div class="za-read">
+    Risk-on choppy <b>(V4 pending trending confirmation)</b>. <span class="alert">Variant F active</span> — no longs in bull regime. Top setup: <b>10W Pullback FRESH × 3</b>. Kill list firing on <b>EMA21 PB · 52wk BO</b>.
+  </div>
+
+  <div class="za-dots" title="System status">
+    <div class="za-dots-grp">
+      <span class="za-dot on"   data-label="Scan fresh"></span>
+      <span class="za-dot on"   data-label="EODHD"></span>
+      <span class="za-dot on"   data-label="Schwab"></span>
+    </div>
+    <div class="za-dots-grp">
+      <span class="za-dot warn" data-label="Regime pending"></span>
+      <span class="za-dot on"   data-label="Alpaca"></span>
+      <span class="za-dot on"   data-label="Snapshot"></span>
+    </div>
+  </div>
+
+  <div class="za-pnl">
+    <div class="za-pnl-big up">+$2,312.47</div>
+    <div class="za-pnl-sub">realized · 13 round-trips · DD -15.6%</div>
+  </div>
+
+  <div class="za-clock">
+    <div class="za-clock-time" id="clockTime">14:32:08</div>
+    <div class="za-clock-sub" id="clockSub">PT · MKT OPEN · close in 1h 28m</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- ZONE B — WORK SURFACE                                                -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="zone-b">
+
+  <!-- ── Sidebar (27 → 4 groups + Cmd+K) ─────────────────────────────── -->
+  <aside class="sb">
+    <div class="sb-cmdk" onclick="openCmdK()">
+      <span class="gt">›</span>
+      <span>Find anything…</span>
+      <span class="kbd">⌘K</span>
+    </div>
+
+    <div class="sb-grp" data-grp="decide">
+      <div class="sb-grp-h" onclick="toggleGrp('decide')">
+        <span>Decide</span>
+        <span class="grp-ct">4</span>
+        <span class="caret">▾</span>
+      </div>
+      <div class="sb-items">
+        <div class="sb-link on">⌬ Elite Picks <span class="ct">5</span></div>
+        <div class="sb-link">◐ Watchlist <span class="ct">12</span></div>
+        <div class="sb-link">▣ Portfolio <span class="ct">0</span></div>
+        <div class="sb-link">⚡ Alerts <span class="ct">4</span></div>
+      </div>
+    </div>
+
+    <div class="sb-grp collapsed" data-grp="evaluate">
+      <div class="sb-grp-h" onclick="toggleGrp('evaluate')">
+        <span>Evaluate</span>
+        <span class="grp-ct">5</span>
+        <span class="caret">▾</span>
+      </div>
+      <div class="sb-items">
+        <div class="sb-link">∿ Performance <span class="ct">—</span></div>
+        <div class="sb-link">▦ Audit Trail <span class="ct">29</span></div>
+        <div class="sb-link killed-link">× Killed <span class="ct">253</span></div>
+        <div class="sb-link">⊞ Accuracy</div>
+        <div class="sb-link">📊 Fields · Schema</div>
+      </div>
+    </div>
+
+    <div class="sb-grp collapsed" data-grp="learn">
+      <div class="sb-grp-h" onclick="toggleGrp('learn')">
+        <span>Learn</span>
+        <span class="grp-ct">4</span>
+        <span class="caret">▾</span>
+      </div>
+      <div class="sb-items">
+        <div class="sb-link">▦ Playbook</div>
+        <div class="sb-link">⚙ Strategies</div>
+        <div class="sb-link">≡ Reference</div>
+        <div class="sb-link">○ Themes</div>
+      </div>
+    </div>
+
+    <div class="sb-grp collapsed" data-grp="data">
+      <div class="sb-grp-h" onclick="toggleGrp('data')">
+        <span>Data</span>
+        <span class="grp-ct">12</span>
+        <span class="caret">▾</span>
+      </div>
+      <div class="sb-items">
+        <div class="sb-link">📅 Earnings <span class="ct">28</span></div>
+        <div class="sb-link">⚡ Options Flow</div>
+        <div class="sb-link">🌐 Macro · Events</div>
+        <div class="sb-link">📈 Market</div>
+        <div class="sb-link">🌅 Pre-Market</div>
+        <div class="sb-link">🆕 IPO · Splits</div>
+        <div class="sb-link">🏭 Industries</div>
+        <div class="sb-link">⚖ Pairs</div>
+        <div class="sb-link">📡 Screener</div>
+        <div class="sb-link">₿ Crypto</div>
+        <div class="sb-link">⚙ Leveraged</div>
+        <div class="sb-link">● Status</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Work area: Elite Picks example ─────────────────────────────── -->
+  <main class="work">
+    <div class="tab-h">
+      <div class="tab-h-title">Elite Picks</div>
+      <div class="tab-h-code">EP01 · 9-cell grid</div>
+      <div class="tab-h-ts">last scan <b>14:32 PT</b> · <span class="cy">▼ run breakdown</span></div>
+    </div>
+
+    <!-- ─ Hero card ───────────────────────────────────────────────── -->
+    <div class="hero">
+      <div class="hero-arc">
+        <svg viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--rule-2)" stroke-width="7"/>
+          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--phos)" stroke-width="7"
+                  stroke-dasharray="264" stroke-dashoffset="22"
+                  stroke-linecap="round"/>
+        </svg>
+        <div class="score">103</div>
+        <div class="score-sub">BAP score</div>
+      </div>
+
+      <div class="hero-mid">
+        <div class="hero-row">
+          <span class="hero-ticker">GLW</span>
+          <span class="hero-meta"><span class="pill" style="color:var(--cyan);border-color:var(--cyan-dim)">Technology · Electronic Components</span></span>
+          <span class="hero-meta dim">Corning Inc · $186.94</span>
+        </div>
+        <div class="hero-thesis">
+          Corning sits on a wedge breakout above the 200-day with rising volume — analyst PT $190 versus market $187, IV rank 7.5% suggests options buyers haven't priced it in yet. Sector inflows positive 4 of 5 sessions. Top BAP in the 9-cell grid this run.
+        </div>
+        <div class="hero-tags">
+          <span class="tag">VCP BREAKOUT</span>
+          <span class="tag amb">ENTRY EXTENDED</span>
+          <span class="tag cy">CAT TIER 1</span>
+          <span class="tag">RS 100</span>
+          <span class="tag">SECTOR LEADER</span>
+        </div>
+      </div>
+
+      <div class="hero-ladder">
+        <div class="hl-row t2"><span class="marker">○</span><span class="lbl">T2</span><div class="bar"><div class="fill" style="width:100%"></div></div><span class="px">$234</span></div>
+        <div class="hl-row t1"><span class="marker">◉</span><span class="lbl">T1</span><div class="bar"><div class="fill" style="width:70%"></div></div><span class="px">$215</span></div>
+        <div class="hl-row curr"><span class="marker">◆</span><span class="lbl">NOW</span><div class="bar"><div class="fill" style="width:54%;background:var(--bone)"></div></div><span class="px">$187</span></div>
+        <div class="hl-row"><span class="marker dim2">┄</span><span class="lbl">ENTRY</span><div class="bar"><div class="fill" style="width:50%;background:var(--cyan-dim)"></div></div><span class="px dim">$183</span></div>
+        <div class="hl-row stop"><span class="marker">×</span><span class="lbl">STOP</span><div class="bar"><div class="fill" style="width:48%;background:var(--red-dim)"></div></div><span class="px">$177</span></div>
+      </div>
+    </div>
+
+    <!-- ─ Morning Scan note ─────────────────────────────────────── -->
+    <div class="quote">
+      <div class="quote-text">
+        The cleanest setup we've scored this month — leadership group, leadership name, leadership volume.
+      </div>
+      <div class="quote-attr">Morning scan · 9:45 ET · GLW score 103</div>
+    </div>
+
+    <!-- ─ Detail rows ──────────────────────────────────────────────── -->
+    <div class="detail-h">
+      <div class="detail-h-title">Other picks in the grid</div>
+      <div class="detail-h-line"></div>
+      <div class="detail-h-ct">4 of 5 visible</div>
+    </div>
+
+    <div class="detail-grid">
+      <div class="dg-h">Ticker</div>
+      <div class="dg-h">Setup</div>
+      <div class="dg-h">Entry Q</div>
+      <div class="dg-h">Tier</div>
+      <div class="dg-h">Thesis</div>
+      <div class="dg-h right">Score</div>
+      <div class="dg-h right">RR</div>
+      <div class="dg-h right">RS</div>
+      <div class="dg-h right">Action</div>
+
+      <div class="dg-cell ticker">ALB →</div>
+      <div class="dg-cell">VCP Breakout</div>
+      <div class="dg-cell"><span class="dg-pill extended">EXTENDED</span></div>
+      <div class="dg-cell"><span class="dg-pill t1">T1</span></div>
+      <div class="dg-cell">Lithium recovery; analyst PT $221 vs $203</div>
+      <div class="dg-cell right">86 <span class="dg-mini-bar"><span class="fill" style="width:86%"></span></span></div>
+      <div class="dg-cell right">3.0</div>
+      <div class="dg-cell right">89</div>
+      <div class="dg-cell right amb">WAIT</div>
+
+      <div class="dg-cell ticker">ABNB →</div>
+      <div class="dg-cell">Trend Continuation</div>
+      <div class="dg-cell"><span class="dg-pill pullback">PULLBACK</span></div>
+      <div class="dg-cell"><span class="dg-pill t1">T1</span></div>
+      <div class="dg-cell">Bouncing EMA21 in choppy; rev growth +14% YoY</div>
+      <div class="dg-cell right">82 <span class="dg-mini-bar"><span class="fill" style="width:82%"></span></span></div>
+      <div class="dg-cell right">3.0</div>
+      <div class="dg-cell right">74</div>
+      <div class="dg-cell right up">BUY</div>
+
+      <div class="dg-cell ticker">ORCL →</div>
+      <div class="dg-cell">Trend Continuation</div>
+      <div class="dg-cell"><span class="dg-pill missed">MISSED</span></div>
+      <div class="dg-cell"><span class="dg-pill t2">T2</span></div>
+      <div class="dg-cell">AI datacenter rerate; 30d ago entry zone</div>
+      <div class="dg-cell right">78 <span class="dg-mini-bar"><span class="fill" style="width:78%"></span></span></div>
+      <div class="dg-cell right">3.0</div>
+      <div class="dg-cell right">95</div>
+      <div class="dg-cell right dim">WATCH</div>
+
+      <div class="dg-cell ticker">ON →</div>
+      <div class="dg-cell">Trend Continuation</div>
+      <div class="dg-cell"><span class="dg-pill missed">MISSED</span></div>
+      <div class="dg-cell"><span class="dg-pill t2">T2</span></div>
+      <div class="dg-cell">Semi cycle bottom hint; weekly bull stack</div>
+      <div class="dg-cell right">77 <span class="dg-mini-bar"><span class="fill" style="width:77%"></span></span></div>
+      <div class="dg-cell right">3.0</div>
+      <div class="dg-cell right">100</div>
+      <div class="dg-cell right dim">WATCH</div>
+
+      <div class="dg-cell ticker" style="color:var(--red)">CAR ×</div>
+      <div class="dg-cell">10-Week Pullback</div>
+      <div class="dg-cell"><span class="dg-pill missed">KILLED</span></div>
+      <div class="dg-cell"><span class="dg-pill t3">—</span></div>
+      <div class="dg-cell">Anomalous $847 spike poisoned target (fixed today)</div>
+      <div class="dg-cell right">90 <span class="dg-mini-bar"><span class="fill" style="width:90%;background:var(--red-dim)"></span></span></div>
+      <div class="dg-cell right">10.0</div>
+      <div class="dg-cell right">99</div>
+      <div class="dg-cell right down">AVOID</div>
+    </div>
+
+    <!-- ─ Editor's note ─────────────────────────────────────────── -->
+    <div class="quote">
+      <div class="quote-text">
+        Five setups graded today. One earned the trade. Discipline is mostly the names you didn't take.
+      </div>
+      <div class="quote-attr">Editor's note · regime gates active · Variant F kill on TC × bull</div>
+    </div>
+
+    <!-- ─ Bottom strip: regime context ──────────────────────────── -->
+    <div class="detail-h">
+      <div class="detail-h-title">Regime context</div>
+      <div class="detail-h-line"></div>
+      <div class="detail-h-ct">RGM4 · V4 classifier active</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;font-family:var(--mono);font-size:11.5px;background:var(--bg-1);border:1px solid var(--rule-2);padding:14px 18px">
+      <div><div class="dim" style="font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px">SPY</div><b>$737.62</b> <span class="up">+0.83%</span></div>
+      <div><div class="dim" style="font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px">VIX</div><b>17.2</b> <span class="up">below 18 ✓</span></div>
+      <div><div class="dim" style="font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px">BREADTH</div><b>50.9</b> <span class="amb">need 60</span></div>
+      <div><div class="dim" style="font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px">REGIME</div><b class="up">RISK-ON CHOPPY</b></div>
+    </div>
+
+    <div class="tab-foot">
+      <b>Kairos</b> · est. 2026 · trade when, not that. · by <b>Gari</b> · <span class="copper">KRS &lt;GO&gt;</span>
+    </div>
+  </main>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- COMMAND PALETTE (Cmd+K)                                              -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="cmdk-overlay" id="cmdkOverlay" onclick="if(event.target.id==='cmdkOverlay')closeCmdK()">
+  <div class="cmdk">
+    <div class="cmdk-input">
+      <span class="gt">›</span>
+      <input type="text" id="cmdkInput" placeholder="ticker, tab, or command — try 'EP', 'NVDA', 'kill list', 'F2'…" autocomplete="off" spellcheck="false" />
+      <span class="esc">ESC</span>
+    </div>
+    <div class="cmdk-results" id="cmdkResults"></div>
+  </div>
+</div>
+
+<script>
+// Clock
+function updateClock() {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  const ss = String(d.getSeconds()).padStart(2,'0');
+  document.getElementById('clockTime').textContent = `${hh}:${mm}:${ss}`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// Sidebar group collapse
+function toggleGrp(id) {
+  const el = document.querySelector(`.sb-grp[data-grp="${id}"]`);
+  if (el) el.classList.toggle('collapsed');
+}
+
+// Cmd+K
+const CMD_K_ITEMS = [
+  { kbd: 'F1',  label: 'Elite Picks', grp: 'Decide' },
+  { kbd: 'F2',  label: 'Watchlist',   grp: 'Decide' },
+  { kbd: 'F3',  label: 'Portfolio',   grp: 'Decide' },
+  { kbd: 'F4',  label: 'Alerts',      grp: 'Decide' },
+  { kbd: 'F5',  label: 'Performance', grp: 'Evaluate' },
+  { kbd: 'F6',  label: 'Audit Trail', grp: 'Evaluate' },
+  { kbd: 'F7',  label: 'Killed / AVOID', grp: 'Evaluate' },
+  { kbd: 'F8',  label: 'Playbook',    grp: 'Learn' },
+  { kbd: 'F9',  label: 'Earnings',    grp: 'Data' },
+  { kbd: 'F10', label: 'Macro · Events', grp: 'Data' },
+  { kbd: 'F11', label: 'Pre-Market',  grp: 'Data' },
+  { kbd: 'F12', label: 'Fields · Schema', grp: 'Evaluate' },
+  { kbd: '⌘B',  label: 'Toggle sidebar',   grp: 'View' },
+  { kbd: '⌘.',  label: 'Toggle scanlines', grp: 'View' },
+];
+function openCmdK() {
+  document.getElementById('cmdkOverlay').classList.add('on');
+  setTimeout(() => document.getElementById('cmdkInput').focus(), 0);
+  renderCmdKResults('');
+}
+function closeCmdK() {
+  document.getElementById('cmdkOverlay').classList.remove('on');
+  document.getElementById('cmdkInput').value = '';
+}
+function renderCmdKResults(q) {
+  q = (q||'').toLowerCase();
+  const items = CMD_K_ITEMS.filter(i =>
+    !q || i.label.toLowerCase().includes(q) || i.kbd.toLowerCase().includes(q) || i.grp.toLowerCase().includes(q)
+  );
+  document.getElementById('cmdkResults').innerHTML = items.map((i, idx) => `
+    <div class="cmdk-result ${idx===0?'sel':''}">
+      <span class="mnemonic">${i.kbd}</span>
+      <span>${i.label}</span>
+      <span class="grp">${i.grp}</span>
+    </div>
+  `).join('') || '<div class="cmdk-result" style="cursor:default">No match.</div>';
+}
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault(); openCmdK();
+  }
+  if (e.key === 'Escape') closeCmdK();
+});
+document.getElementById('cmdkInput').addEventListener('input', e => renderCmdKResults(e.target.value));
+</script>
+
+</body>
+</html>

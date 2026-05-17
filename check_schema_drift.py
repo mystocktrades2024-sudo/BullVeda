@@ -64,6 +64,9 @@ KNOWN_JSON_ONLY = {
     "max_daily_trades",
     # signal entries
     "_meta",
+    # 2026-05-17 · computed/derived attributes on signal closes
+    # (kept in JSON for tracker analytics; not first-class Postgres columns)
+    "alpha_vs_spy", "exit_reason", "is_new_buy", "spy_return_over_hold",
 }
 
 

@@ -43,7 +43,7 @@ export function render() {
 
   // Tags row
   const tags = [];
-  if (T.setup_family)      tags.push(`<span class="pill">${T.setup_family}</span>`);
+  if (T.setup)             tags.push(`<span class="pill">${T.setup}</span>`);
   if (T.rs_rank != null)   tags.push(`<span class="pill ${T.rs_rank >= 80 ? 'pass' : T.rs_rank >= 50 ? 'warn' : ''}">RS ${T.rs_rank}</span>`);
   if (T.earn_days != null && T.earn_days <= 14) {
     tags.push(`<span class="pill ${T.earn_days <= 7 ? 'fail' : 'warn'}">EARN +${T.earn_days}d</span>`);
@@ -60,17 +60,15 @@ export function render() {
   const ctp = T?.canonical_trade_plan;
   const tp = T.trade_plan || {};
   const stop = ctp?.stop ?? T.stop ?? tp.stop;
-  const t1 = ctp?.target1 ?? T.target1 ?? tp.target1;
-  const t2 = ctp?.target2 ?? T.target2 ?? tp.target2;
-  const eLo = ctp?.entry?.low ?? T.entry_low ?? tp.entry_low;
-  const eHi = ctp?.entry?.high ?? T.entry_high ?? tp.entry_high;
+  const t1 = ctp?.target1 ?? T.t1 ?? tp.t1;
+  const t2 = ctp?.target2 ?? T.t2 ?? tp.t2;
+  const eLo = ctp?.entry?.low ?? T.entry_lo ?? tp.entry_lo;
+  const eHi = ctp?.entry?.high ?? T.entry_hi ?? tp.entry_hi;
   const rrT1 = (t1 && eLo && stop) ? ((t1 - eLo) / Math.max(0.01, eLo - stop)) : null;
   const stopPct = (stop && eLo) ? (((stop - eLo) / eLo) * 100) : null;
   const t1Pct   = (t1 && eLo)   ? (((t1   - eLo) / eLo) * 100) : null;
   const t2Pct   = (t2 && eLo)   ? (((t2   - eLo) / eLo) * 100) : null;
   const fr = T.fund_real || {};
-  const ana = T.analyst || {};
-  const ins = T.insider || {};
   const inZone = T.price && eLo && eHi && T.price >= eLo && T.price <= eHi;
   const fmt = (v, d=2) => v == null ? '—' : Number(v).toFixed(d);
   const fmtP = (v, d=1) => v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(d) + '%';
@@ -86,8 +84,8 @@ export function render() {
     <div class="strip-item"><span class="lbl">ATR</span><span class="v">${T.atr_pct ? T.atr_pct.toFixed(1) + '%' : '—'}</span><span class="sub">daily range</span></div>
     <div class="strip-item"><span class="lbl">Rev</span><span class="v ${fr.rev_growth_pct == null ? 'dim' : fr.rev_growth_pct >= 8 ? 'up' : 'warn'}">${fmtP(fr.rev_growth_pct)}</span><span class="sub">YoY</span></div>
     <div class="strip-item"><span class="lbl">Margin</span><span class="v ${fr.net_margin_pct == null ? 'dim' : fr.net_margin_pct >= 10 ? 'up' : 'warn'}">${fmtP(fr.net_margin_pct)}</span><span class="sub">net</span></div>
-    <div class="strip-item"><span class="lbl">PT</span><span class="v">${ana.target_mean ? '$'+ana.target_mean.toFixed(2) : '—'}</span><span class="sub ${ana.upside_pct >= 0 ? 'up' : 'dn'}">${fmtP(ana.upside_pct)}</span></div>
-    <div class="strip-item"><span class="lbl">Insider</span><span class="v ${(ins.buys||0) > (ins.sells||0) ? 'up' : (ins.sells||0) > (ins.buys||0) ? 'dn' : 'dim'}">${ins.buys || 0}↑ ${ins.sells || 0}↓</span><span class="sub">${ins.sentiment || 'neutral'}</span></div>
+    <div class="strip-item"><span class="lbl">PT</span><span class="v">${T.analyst_target ? '$'+Number(T.analyst_target).toFixed(2) : '—'}</span><span class="sub ${T.analyst_upside >= 0 ? 'up' : 'dn'}">${fmtP(T.analyst_upside)}</span></div>
+    <div class="strip-item"><span class="lbl">Insider</span><span class="v ${(T.insider_buys||0) > (T.insider_sells||0) ? 'up' : (T.insider_sells||0) > (T.insider_buys||0) ? 'dn' : 'dim'}">${T.insider_buys || 0}↑ ${T.insider_sells || 0}↓</span><span class="sub">${(T.insider_buys||0) > (T.insider_sells||0) ? 'bullish' : (T.insider_sells||0) > (T.insider_buys||0) ? 'bearish' : 'neutral'}</span></div>
     <div class="strip-item"><span class="lbl">Tech</span><span class="v warn">${T.tech_score != null ? T.tech_score : '—'}</span><span class="sub">/${T.tech_max || 38}</span></div>
     <div class="strip-item"><span class="lbl">Fund</span><span class="v warn">${T.fund_score != null ? T.fund_score : '—'}</span><span class="sub">/${T.fund_max || 30}</span></div>
     ${T.beta != null ? `<div class="strip-item"><span class="lbl">Beta</span><span class="v ${T.beta > 1.5 ? 'warn' : 'dim'}">${T.beta.toFixed(2)}</span><span class="sub">vs SPX</span></div>` : ''}

@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>◆ Section-Gating Architecture · POC · Options Tab</title>
+<style>
+  :root {
+    --bg:#0A0E13; --surf-1:#11161F; --surf-2:#0E1421; --surf-3:#161B26; --line:#1E2530;
+    --ink:#E6EAF2; --ink-2:#9AA4B2; --ink-3:#6B7280; --ink-4:#3a3f47;
+    --gn:#5be57c; --rd:#ff6b5b; --am:#ffb95c; --cy:#5ec8d8; --lead:#B794F4;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { background:var(--bg); color:var(--ink); font:13px -apple-system,sans-serif; font-variant-numeric:tabular-nums; }
+  body { max-width:1480px; margin:0 auto; padding:14px 18px 60px; }
+  .mono { font-family:'JetBrains Mono',ui-monospace,monospace; }
+
+  /* Page header */
+  .pg-header { padding:16px 20px; background:linear-gradient(135deg,rgba(183,148,244,0.10) 0%,var(--surf-1) 100%); border:1px solid var(--lead); border-radius:6px; margin-bottom:14px; }
+  .pg-h1 { font:800 22px ui-monospace,monospace; color:var(--lead); letter-spacing:.04em; }
+  .pg-sub { font:500 13px sans-serif; color:var(--ink-2); margin-top:6px; line-height:1.55; }
+  .pg-sub b { color:var(--ink); font-weight:700; }
+
+  /* Role switcher (the demo control) */
+  .role-bar { background:var(--surf-2); border:1.5px solid var(--lead); border-radius:6px; padding:14px 18px; margin-bottom:14px; display:flex; align-items:center; gap:14px; }
+  .role-label { font:800 11px ui-monospace,monospace; color:var(--lead); letter-spacing:.10em; }
+  .role-pills { display:flex; gap:6px; flex-wrap:wrap; }
+  .role-pill { padding:8px 14px; font:700 11.5px ui-monospace,monospace; letter-spacing:.06em; background:var(--surf-1); color:var(--ink-2); border:1.5px solid var(--line); border-radius:3px; cursor:pointer; outline:none; }
+  .role-pill.active { background:rgba(183,148,244,0.18); color:var(--lead); border-color:var(--lead); font-weight:800; }
+  .role-pill:hover:not(.active) { background:var(--surf-3); color:var(--ink); }
+  .role-stats { flex:1; text-align:right; font:600 11px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.04em; }
+  .role-stats b { color:var(--ink); font-weight:800; }
+
+  /* Page split: simulated tab + config panel */
+  .split { display:grid; grid-template-columns: 1fr 480px; gap:14px; }
+
+  /* Simulated Options tab */
+  .tab-pane { background:var(--surf-1); border:1px solid var(--line); border-radius:6px; padding:14px 18px; }
+  .tab-pane-header { display:flex; justify-content:space-between; align-items:baseline; padding-bottom:12px; margin-bottom:14px; border-bottom:1px solid var(--line); }
+  .tab-pane-title { font:800 14px ui-monospace,monospace; color:var(--ink); letter-spacing:.08em; }
+  .tab-pane-meta { font:600 10.5px ui-monospace,monospace; color:var(--ink-3); }
+  .tab-pane-meta b { color:var(--gn); font-weight:800; }
+
+  /* Section card */
+  .section { background:var(--surf-2); border:1px solid var(--line); border-radius:5px; padding:14px 16px; margin-bottom:10px; transition: opacity 0.25s; }
+  .section.hidden-by-role { display:none; }
+  .section-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+  .section-title { font:800 12px ui-monospace,monospace; color:var(--ink); letter-spacing:.08em; }
+  .section-id { font:600 9.5px ui-monospace,monospace; color:var(--ink-4); letter-spacing:.10em; }
+  .section-tags { display:flex; gap:4px; }
+  .tag-chip { font:700 8.5px ui-monospace,monospace; padding:2px 7px; border-radius:3px; letter-spacing:.10em; text-transform:uppercase; }
+  .tag-chip.role { background:rgba(91,229,124,0.12); color:var(--gn); border:1px solid var(--gn); }
+  .tag-chip.role-restricted { background:rgba(183,148,244,0.15); color:var(--lead); border:1px solid var(--lead); }
+  .tag-chip.premium { background:rgba(255,185,92,0.15); color:var(--am); border:1px solid var(--am); }
+  .tag-chip.experimental { background:rgba(94,200,216,0.12); color:var(--cy); border:1px solid var(--cy); }
+
+  .section-body { font:500 12px sans-serif; color:var(--ink-1); line-height:1.55; }
+  .section-body .placeholder { padding:14px 18px; background:var(--surf-1); border:1px dashed var(--line); border-radius:4px; text-align:center; font:600 11px ui-monospace,monospace; color:var(--ink-3); letter-spacing:.06em; }
+
+  /* Empty state when role sees nothing */
+  .empty-state { padding:30px 20px; text-align:center; background:var(--surf-2); border:1px dashed var(--rd); border-radius:5px; }
+  .empty-state .big { font:800 16px ui-monospace,monospace; color:var(--rd); margin-bottom:8px; letter-spacing:.06em; }
+  .empty-state .sub { font:500 12px sans-serif; color:var(--ink-2); line-height:1.5; }
+
+  /* Config panel · shows the JSON registry */
+  .config-pane { background:var(--surf-1); border:1px solid var(--line); border-radius:6px; padding:14px 18px; }
+  .config-header { display:flex; justify-content:space-between; align-items:baseline; padding-bottom:12px; margin-bottom:14px; border-bottom:1px solid var(--line); }
+  .config-title { font:800 12.5px ui-monospace,monospace; color:var(--lead); letter-spacing:.10em; }
+  .config-sub { font:500 10px ui-monospace,monospace; color:var(--ink-3); }
+
+  /* JSON viewer */
+  pre.json { background:var(--surf-2); border:1px solid var(--line); border-radius:4px; padding:12px 14px; overflow:auto; font:500 11px ui-monospace,monospace; line-height:1.6; color:var(--ink-1); max-height:480px; }
+  pre.json .k { color:var(--cy); }
+  pre.json .s { color:var(--gn); }
+  pre.json .n { color:var(--am); }
+  pre.json .b { color:var(--lead); }
+  pre.json .c { color:var(--ink-4); }
+  pre.json .hi { background:rgba(183,148,244,0.10); }
+
+  /* Layer flowchart */
+  .layers { background:var(--surf-2); border:1px solid var(--line); border-radius:4px; padding:14px; margin-top:14px; }
+  .layer { background:var(--surf-1); border:1px solid var(--line); border-left:3px solid; border-radius:3px; padding:9px 12px; margin-bottom:6px; }
+  .layer.l1 { border-left-color:var(--lead); }
+  .layer.l2 { border-left-color:var(--cy); }
+  .layer.l3 { border-left-color:var(--gn); }
+  .layer-name { font:800 10px ui-monospace,monospace; letter-spacing:.10em; }
+  .layer-name.l1 { color:var(--lead); }
+  .layer-name.l2 { color:var(--cy); }
+  .layer-name.l3 { color:var(--gn); }
+  .layer-body { font:500 11px sans-serif; color:var(--ink-2); line-height:1.5; margin-top:4px; }
+
+  /* Section toggles per user (the "personal hide" feature) */
+  .user-prefs { margin-top:14px; padding:12px 14px; background:rgba(94,200,216,0.06); border-left:3px solid var(--cy); border-radius:3px; }
+  .user-prefs-title { font:800 10px ui-monospace,monospace; color:var(--cy); letter-spacing:.10em; margin-bottom:6px; }
+  .user-prefs-body { font:500 11.5px sans-serif; color:var(--ink-1); line-height:1.55; }
+  .user-prefs-body b { color:var(--ink); font-weight:700; }
+  .pref-toggle { display:inline-block; padding:3px 9px; margin:3px 4px 0 0; font:700 9.5px ui-monospace,monospace; background:var(--surf-2); color:var(--ink-2); border:1px solid var(--line); border-radius:3px; cursor:pointer; }
+  .pref-toggle.hidden-by-user { background:rgba(94,200,216,0.18); color:var(--cy); border-color:var(--cy); }
+
+  /* Server enforcement note */
+  .server-note { margin-top:14px; padding:12px 14px; background:rgba(91,229,124,0.06); border-left:3px solid var(--gn); border-radius:3px; }
+  .server-note-title { font:800 10px ui-monospace,monospace; color:var(--gn); letter-spacing:.10em; margin-bottom:6px; }
+  .server-note-body { font:500 11px sans-serif; color:var(--ink-2); line-height:1.55; }
+  .server-note-body code { font-family:ui-monospace,monospace; background:var(--surf-2); padding:1px 5px; border-radius:2px; color:var(--gn); }
+</style>
+</head>
+<body>
+
+<div class="pg-header">
+  <div class="pg-h1">◆ SECTION-LEVEL ROLE GATING · proof-of-concept</div>
+  <div class="pg-sub">
+    Demonstrates how the <b>same Options tab</b> renders different sections for <b>different user roles</b> — driven by the
+    <code style="background:var(--surf-2);padding:1px 5px;border-radius:2px;color:var(--cy)">capability_registry.json</code>
+    schema (right panel). Click a role pill above to see what each user sees. <b>The unselected sections aren't just hidden — they're never sent to the browser when the backend enforces it.</b>
+  </div>
+</div>
+
+<div class="role-bar">
+  <div class="role-label">★ ROLE · simulate as</div>
+  <div class="role-pills" id="rolePills">
+    <button class="role-pill" data-role="free">FREE</button>
+    <button class="role-pill" data-role="trader">TRADER</button>
+    <button class="role-pill" data-role="trader_pro">TRADER · PRO</button>
+    <button class="role-pill active" data-role="quant">QUANT</button>
+    <button class="role-pill" data-role="admin">ADMIN</button>
+  </div>
+  <div class="role-stats" id="roleStats">visible: <b>5</b> of 7 sections</div>
+</div>
+
+<div class="split">
+
+  <div class="tab-pane">
+    <div class="tab-pane-header">
+      <div class="tab-pane-title">🅄 OPTIONS TAB · simulated render output</div>
+      <div class="tab-pane-meta">Sections you see depend on your role · <b id="roleEcho">QUANT</b></div>
+    </div>
+    <div id="sectionList"></div>
+  </div>
+
+  <div class="config-pane">
+    <div class="config-header">
+      <div class="config-title">⛁ capability_registry.json · live</div>
+      <div class="config-sub">single source of truth</div>
+    </div>
+
+    <pre class="json" id="registryJson"></pre>
+
+    <div class="layers">
+      <div class="layer l1">
+        <div class="layer-name l1">★ LAYER 1 · REGISTRY (declarative)</div>
+        <div class="layer-body">JSON defines which roles can see which sections. Admin edits via CapStudio UI. Source of truth for both frontend + backend.</div>
+      </div>
+      <div class="layer l2">
+        <div class="layer-name l2">⌬ LAYER 2 · FRONTEND (render-time filter)</div>
+        <div class="layer-body">When tab renders · loops sections · checks <code class="mono">section.roles.includes(userRole)</code> · skips disallowed ones. Hidden sections never appear in DOM.</div>
+      </div>
+      <div class="layer l3">
+        <div class="layer-name l3">⚿ LAYER 3 · BACKEND (defense in depth)</div>
+        <div class="layer-body">Section data endpoints (e.g. <code class="mono">/api/options/strategy_matrix/{ticker}</code>) check role server-side · return 403 if denied. Cannot be bypassed by editing frontend JS.</div>
+      </div>
+    </div>
+
+    <div class="user-prefs">
+      <div class="user-prefs-title">⚙ LAYER 2·b · USER OVERRIDES</div>
+      <div class="user-prefs-body">
+        On top of role-default, users can <b>opt OUT</b> of sections they don't care about.
+        Stored in <b>data/users/{username}_preferences.json</b>. Try toggling:
+        <div style="margin-top:8px">
+          <span class="pref-toggle" data-pref="iv_smile">IV Smile</span>
+          <span class="pref-toggle" data-pref="max_pain">Max Pain</span>
+          <span class="pref-toggle" data-pref="uoa_flow">UOA Flow</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="server-note">
+      <div class="server-note-title">🔒 SERVER ENFORCEMENT (Layer 3)</div>
+      <div class="server-note-body">
+        Backend endpoints like <code>/api/options/strategy_matrix/{ticker}</code> check
+        <code>can_see_section(role, "options.strategy_matrix")</code> before computing.
+        Returns <code>403</code> if role isn't allowed. Free user editing JS to remove the
+        frontend filter still can't get the data — server refuses.
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════
+// SIMULATED capability_registry.json (subset · for the Options tab)
+// In production this would be loaded from /api/capability-registry
+// ════════════════════════════════════════════════════════════════════════
+const REGISTRY = {
+  roles: ["free", "trader", "trader_pro", "quant", "admin"],
+  tabs: {
+    options: {
+      default_roles: ["free", "trader", "trader_pro", "quant", "admin"],
+      sections: {
+        iv_smile: {
+          label: "IV Smile · vol surface",
+          roles: ["all"],
+          default_visible: true
+        },
+        max_pain: {
+          label: "Max Pain · OI concentration",
+          roles: ["all"],
+          default_visible: true
+        },
+        uoa_flow: {
+          label: "Unusual Options Activity",
+          roles: ["trader", "trader_pro", "quant", "admin"],
+          default_visible: true
+        },
+        strategy_matrix: {
+          label: "Strategy Matrix · Greeks · POP · BE · margin",
+          roles: ["trader_pro", "quant", "admin"],
+          default_visible: true,
+          premium: true
+        },
+        payoff_diagrams: {
+          label: "Payoff Diagrams · visual P&L curves",
+          roles: ["admin"],
+          default_visible: true,
+          premium: true
+        },
+        term_structure: {
+          label: "Vol Term Structure",
+          roles: ["quant", "admin"],
+          default_visible: true
+        },
+        skew_3d: {
+          label: "3D Volatility Surface",
+          roles: ["admin"],
+          default_visible: true,
+          premium: true,
+          experimental: true
+        }
+      }
+    }
+  }
+};
+
+// User preferences (per-user override layer) — simulated
+const USER_PREFS = {
+  hidden_sections: {}  // populated by clicks on pref-toggles
+};
+
+let currentRole = 'quant';
+
+// ────────────────────────────────────────────────────────────────────────
+// Render logic
+// ────────────────────────────────────────────────────────────────────────
+function renderTab() {
+  const cfg = REGISTRY.tabs.options;
+  const sections = Object.entries(cfg.sections);
+  const list = document.getElementById('sectionList');
+  list.innerHTML = '';
+
+  let visibleCount = 0;
+  let hiddenByRole = 0;
+  let hiddenByUser = 0;
+
+  for (const [id, sCfg] of sections) {
+    // Layer 1 filter: role check
+    const roleAllowed = sCfg.roles.includes('all') || sCfg.roles.includes(currentRole);
+    // Layer 2 filter: user override
+    const userHidden = !!USER_PREFS.hidden_sections[`options.${id}`];
+
+    if (!roleAllowed) { hiddenByRole++; continue; }
+    if (userHidden)   { hiddenByUser++; continue; }
+
+    visibleCount++;
+    list.appendChild(buildSectionCard(id, sCfg));
+  }
+
+  if (visibleCount === 0) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="big">⚠ NO SECTIONS VISIBLE</div>
+        <div class="sub">Role <b>${currentRole.toUpperCase()}</b> + user preferences = empty tab.<br>
+        This is the system saying "the tab loaded but you're not entitled to see anything in it."</div>
+      </div>`;
+  }
+
+  document.getElementById('roleStats').innerHTML =
+    `visible: <b>${visibleCount}</b> of ${sections.length} · role-gated: <b>${hiddenByRole}</b> · user-hidden: <b>${hiddenByUser}</b>`;
+  document.getElementById('roleEcho').textContent = currentRole.toUpperCase();
+}
+
+function buildSectionCard(id, cfg) {
+  const tags = [];
+  if (cfg.roles.includes('all')) tags.push('<span class="tag-chip role">ALL ROLES</span>');
+  else tags.push(`<span class="tag-chip role-restricted">${cfg.roles.join(' · ')}</span>`);
+  if (cfg.premium) tags.push('<span class="tag-chip premium">PREMIUM</span>');
+  if (cfg.experimental) tags.push('<span class="tag-chip experimental">EXPERIMENTAL</span>');
+
+  const div = document.createElement('div');
+  div.className = 'section';
+  div.innerHTML = `
+    <div class="section-head">
+      <div>
+        <div class="section-title">${escapeHTML(cfg.label)}</div>
+        <div class="section-id mono">options.${id}</div>
+      </div>
+      <div class="section-tags">${tags.join('')}</div>
+    </div>
+    <div class="section-body">
+      <div class="placeholder">${describeContent(id)}</div>
+    </div>`;
+  return div;
+}
+
+function describeContent(id) {
+  const desc = {
+    iv_smile: '◐ IV smile chart · 25-Δ skew · vol surface viz · ATM straddle pricing',
+    max_pain: '◑ Max pain strike · open interest concentration heatmap · pinning probability',
+    uoa_flow: '⤴ UOA call/put flow · large prints · time-of-day flow distribution',
+    strategy_matrix: '◆ Strategy Matrix · 15 options strategies × Greeks · POP · BE · margin requirement',
+    payoff_diagrams: '⧨ Interactive P&L curves at expiry · for each strategy · break-even visualization',
+    term_structure: '⌇ Vol term structure · VIX1M / VIX3M / VIX6M · backwardation vs contango',
+    skew_3d: '◈ 3D vol surface · strike × expiry × IV · admin-only experimental view'
+  };
+  return desc[id] || '(content placeholder)';
+}
+
+function escapeHTML(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// JSON viewer with syntax highlighting
+// ────────────────────────────────────────────────────────────────────────
+function renderRegistryJson() {
+  const json = JSON.stringify(REGISTRY, null, 2);
+  // Highlight the current role's allowed sections
+  let highlighted = json
+    .replace(/"([^"]+)":/g, '<span class="k">"$1"</span>:')
+    .replace(/: "([^"]+)"/g, ': <span class="s">"$1"</span>')
+    .replace(/: (true|false)/g, ': <span class="b">$1</span>')
+    .replace(/: (\d+)/g, ': <span class="n">$1</span>');
+  // Highlight role lines matching current role
+  highlighted = highlighted.replace(
+    new RegExp(`"${currentRole}"`, 'g'),
+    `<span class="hi" style="background:rgba(183,148,244,0.30);padding:0 2px;border-radius:2px">"${currentRole}"</span>`
+  );
+  document.getElementById('registryJson').innerHTML = highlighted;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Wire up role pills
+// ────────────────────────────────────────────────────────────────────────
+document.getElementById('rolePills').addEventListener('click', (e) => {
+  const btn = e.target.closest('.role-pill');
+  if (!btn) return;
+  document.querySelectorAll('.role-pill').forEach(b => b.classList.toggle('active', b === btn));
+  currentRole = btn.dataset.role;
+  renderTab();
+  renderRegistryJson();
+});
+
+// Wire up user-pref toggles
+document.querySelectorAll('.pref-toggle').forEach(t => {
+  t.addEventListener('click', () => {
+    const id = t.dataset.pref;
+    const key = `options.${id}`;
+    if (USER_PREFS.hidden_sections[key]) {
+      delete USER_PREFS.hidden_sections[key];
+      t.classList.remove('hidden-by-user');
+    } else {
+      USER_PREFS.hidden_sections[key] = true;
+      t.classList.add('hidden-by-user');
+    }
+    renderTab();
+  });
+});
+
+// Initial render
+renderTab();
+renderRegistryJson();
+</script>
+
+</body>
+</html>

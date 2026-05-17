@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Kairos · Briefing · v6.142</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=Inter:wght@200;300;400;500;600&display=swap" rel="stylesheet">
+<style>
+/*
+ * Kairos · HUD — complete redesign (2026-05-11)
+ *
+ * Mental model: mission briefing console, not newspaper, not Bloomberg.
+ * Asymmetric grid. Cinematic. Glow + depth. Pure cyan / amber / red on
+ * pure black. Mono everywhere — no serif except one editorial moment.
+ *
+ * The system speaks. The user reads top to bottom and acts.
+ */
+
+:root {
+  --bg:        #000000;
+  --bg-1:      rgba(255,255,255,0.018);
+  --bg-2:      rgba(255,255,255,0.04);
+  --line:      rgba(255,255,255,0.07);
+  --line-2:    rgba(255,255,255,0.12);
+  --line-hot:  rgba(94,200,216,0.35);
+
+  --ink:       rgba(255,255,255,0.94);
+  --ink-1:     rgba(255,255,255,0.7);
+  --ink-2:     rgba(255,255,255,0.42);
+  --ink-3:     rgba(255,255,255,0.22);
+  --ink-4:     rgba(255,255,255,0.10);
+
+  --cy:        #5ec8d8;
+  --cy-2:      #8ee0ee;
+  --cy-glow:   rgba(94,200,216,0.45);
+  --cy-bg:     rgba(94,200,216,0.06);
+
+  --amb:       #ffb95c;
+  --amb-2:     #ffd28a;
+  --amb-glow:  rgba(255,185,92,0.4);
+  --amb-bg:    rgba(255,185,92,0.05);
+
+  --gn:        #5be57c;
+  --gn-glow:   rgba(91,229,124,0.45);
+
+  --rd:        #ff6b5b;
+  --rd-glow:   rgba(255,107,91,0.4);
+
+  --mono:      'JetBrains Mono', ui-monospace, monospace;
+  --sans:      'Inter', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono); font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: 0.005em;
+  overflow-x: hidden;
+}
+
+/* Subtle scan-line / vignette for cinematic depth */
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+  background:
+    radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(0,0,0,0.4) 100%),
+    repeating-linear-gradient(180deg, transparent 0px, transparent 3px, rgba(255,255,255,0.012) 3px, rgba(255,255,255,0.012) 4px);
+}
+
+.num  { font-variant-numeric: tabular-nums; }
+.cy   { color: var(--cy); }
+.amb  { color: var(--amb); }
+.gn   { color: var(--gn); }
+.rd   { color: var(--rd); }
+.dim  { color: var(--ink-2); }
+.dim2 { color: var(--ink-3); }
+.up   { color: var(--gn); }
+.down { color: var(--rd); }
+
+/* ═══════════ TOP STATUS RIBBON ═══════════════════════════════ */
+.bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  height: 32px;
+  display: flex; align-items: center;
+  padding: 0 18px;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-2);
+  gap: 22px;
+}
+.bar-id { color: var(--cy); font-weight: 600; letter-spacing: 0.18em; }
+.bar-id b { color: var(--ink); }
+.bar-vol { color: var(--ink-3); }
+.bar-clock { color: var(--ink); font-weight: 500; letter-spacing: 0.08em; }
+.bar-state { display: flex; gap: 6px; align-items: center; }
+.bar-state .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-4); }
+.bar-state .dot.on { background: var(--gn); box-shadow: 0 0 6px var(--gn-glow); }
+.bar-state .dot.warn { background: var(--amb); box-shadow: 0 0 6px var(--amb-glow); }
+.bar-pnl { margin-left: auto; color: var(--gn); font-weight: 600; }
+.bar-pnl .dn { color: var(--ink-3); }
+.bar-actions { display: flex; gap: 3px; }
+.bar-actions span {
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.bar-actions span:hover { border-color: var(--cy); color: var(--cy); }
+
+/* ═══════════ PAGE FRAME ════════════════════════════════════════ */
+.page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 80px 56px 120px;
+  position: relative;
+  z-index: 2;
+}
+
+/* Section eyebrow */
+.eye {
+  display: flex; align-items: center; gap: 12px;
+  font-size: 10px; letter-spacing: 0.32em; text-transform: uppercase;
+  color: var(--ink-2);
+  margin-bottom: 18px;
+}
+.eye::before {
+  content: ''; display: inline-block; width: 18px; height: 1px; background: var(--cy);
+}
+.eye.amber::before { background: var(--amb); }
+.eye.red::before { background: var(--rd); }
+.eye b { color: var(--ink); font-weight: 500; }
+
+/* ═══════════ MISSION BRIEFING HERO ═════════════════════════════ */
+.hero {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 80px;
+  margin-bottom: 96px;
+  min-height: 360px;
+  align-items: center;
+  position: relative;
+}
+.hero::after {
+  content: ''; position: absolute;
+  right: 38%; top: 10%; bottom: 10%; width: 1px;
+  background: linear-gradient(180deg, transparent, var(--line), transparent);
+}
+
+.hero-l { position: relative; }
+.hero-eye {
+  font-size: 10px; letter-spacing: 0.36em; text-transform: uppercase;
+  color: var(--amb); margin-bottom: 22px;
+  display: flex; align-items: center; gap: 14px;
+}
+.hero-eye::before { content: ''; width: 8px; height: 8px; background: var(--amb); border-radius: 50%; box-shadow: 0 0 12px var(--amb-glow); animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; transform: scale(0.85); } }
+
+.verdict-word {
+  font-size: 184px; line-height: 0.88; letter-spacing: -0.06em;
+  font-weight: 700; color: var(--ink);
+  font-family: var(--mono);
+}
+.verdict-word .accent { color: var(--amb); }
+
+.verdict-prose {
+  font-family: var(--sans); font-weight: 300;
+  font-size: 19px; line-height: 1.55; letter-spacing: -0.005em;
+  color: var(--ink-1);
+  margin-top: 28px; max-width: 52ch;
+}
+.verdict-prose b { color: var(--ink); font-weight: 500; font-family: var(--mono); font-size: 17px; }
+
+.verdict-meta {
+  display: flex; gap: 28px;
+  margin-top: 32px;
+  font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-2);
+}
+.verdict-meta b { color: var(--ink); font-weight: 600; display: block; font-size: 15px; letter-spacing: 0.04em; margin-top: 2px; }
+.verdict-meta .amb { color: var(--amb); }
+
+/* The Number — radial-style indicator */
+.number {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.number-svg { width: 320px; height: 320px; transform: rotate(-90deg); }
+.number-svg .track { fill: none; stroke: var(--line); stroke-width: 1.5; }
+.number-svg .arc {
+  fill: none; stroke: var(--amb); stroke-width: 3;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 8px var(--amb-glow));
+}
+.number-svg .tick {
+  fill: none; stroke: var(--ink-3); stroke-width: 1;
+}
+.number-svg .tick.on { stroke: var(--cy); stroke-width: 1.5; }
+.number-svg .thresh { fill: none; stroke: var(--cy); stroke-width: 2; opacity: 0.6; }
+
+.number-inner {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.number-label {
+  font-size: 9.5px; letter-spacing: 0.4em; text-transform: uppercase;
+  color: var(--ink-3); margin-bottom: 6px;
+}
+.number-big {
+  font-size: 110px; line-height: 1; font-weight: 700;
+  color: var(--ink);
+  font-feature-settings: 'tnum';
+  letter-spacing: -0.04em;
+}
+.number-frac { font-size: 18px; color: var(--ink-3); margin-top: 6px; letter-spacing: 0.08em; }
+.number-zone {
+  font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase;
+  color: var(--amb); margin-top: 18px;
+}
+.number-zone::before, .number-zone::after { content: '— '; color: var(--ink-3); margin: 0 4px; }
+
+.number-spark {
+  position: absolute; bottom: -38px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 2px; align-items: end; height: 26px;
+}
+.number-spark .b {
+  width: 3px; background: var(--cy); opacity: 0.4;
+}
+.number-spark .b.today { background: var(--amb); box-shadow: 0 0 6px var(--amb-glow); opacity: 1; }
+
+/* ═══════════ PRIMARY TARGET ═══════════════════════════════════ */
+.target {
+  margin-bottom: 80px;
+  position: relative;
+}
+.target::before {
+  content: ''; position: absolute; left: -56px; top: -8px; bottom: -8px; width: 2px;
+  background: linear-gradient(180deg, var(--cy), transparent);
+}
+
+.target-h {
+  display: grid; grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 24px;
+  margin-bottom: 28px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.target-tk {
+  font-size: 88px; line-height: 0.85; font-weight: 700;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+}
+.target-tk b { color: var(--cy); text-shadow: 0 0 18px var(--cy-glow); }
+.target-name {
+  font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-2);
+  align-self: center;
+}
+.target-name b { display: block; font-size: 22px; letter-spacing: -0.005em; color: var(--ink); font-weight: 500; font-family: var(--sans); text-transform: none; margin-top: 6px; }
+.target-score {
+  text-align: right;
+  font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-2);
+  align-self: end;
+}
+.target-score b { display: block; font-size: 64px; letter-spacing: -0.04em; line-height: 1; color: var(--ink); font-weight: 700; }
+
+.target-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 56px;
+}
+
+/* Plan rail (left) */
+.plan { position: relative; padding-left: 36px; }
+.plan::before {
+  content: ''; position: absolute;
+  left: 9px; top: 8px; bottom: 8px; width: 1px;
+  background: linear-gradient(180deg, var(--rd) 0%, var(--rd) 13%, var(--ink-4) 13%, var(--ink-4) 38%, var(--amb) 38%, var(--amb) 48%, var(--cy) 48%, var(--cy) 62%, var(--gn) 62%, var(--gn) 100%);
+}
+.plan-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  gap: 18px;
+  padding: 12px 0;
+  border-bottom: 1px dashed var(--ink-4);
+}
+.plan-row::before {
+  content: ''; position: absolute; left: -32px; top: 17px;
+  width: 18px; height: 1px; background: var(--ink-3);
+}
+.plan-row .pin {
+  position: absolute; left: -38px; top: 13px;
+  width: 10px; height: 10px; border: 2px solid;
+  background: var(--bg);
+}
+.plan-row.stop  .pin { border-color: var(--rd); }
+.plan-row.entry .pin { border-color: var(--amb); }
+.plan-row.now   .pin { border-color: var(--cy); background: var(--cy); box-shadow: 0 0 12px var(--cy-glow); }
+.plan-row.t1    .pin { border-color: var(--gn); }
+.plan-row.t2    .pin { border-color: var(--gn); }
+.plan-row .lbl {
+  font-size: 11.5px; letter-spacing: 0.16em; text-transform: uppercase;
+  font-weight: 500;
+}
+.plan-row.stop .lbl { color: var(--rd); }
+.plan-row.entry .lbl { color: var(--amb); }
+.plan-row.now .lbl { color: var(--cy); font-weight: 600; }
+.plan-row.t1 .lbl, .plan-row.t2 .lbl { color: var(--gn); }
+.plan-row .px {
+  font-size: 22px; font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.plan-row .delta {
+  font-size: 11px; letter-spacing: 0.04em;
+  color: var(--ink-2);
+  text-align: right; min-width: 52px;
+}
+
+/* Setup detail (right) */
+.setup-block {
+  border: 1px solid var(--line);
+  padding: 24px 26px;
+  background: linear-gradient(180deg, var(--cy-bg) 0%, transparent 50%);
+}
+.setup-row {
+  display: grid; grid-template-columns: 1fr auto;
+  align-items: baseline; gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--line);
+  font-size: 11.5px;
+  color: var(--ink-1);
+}
+.setup-row:last-child { border-bottom: none; }
+.setup-row .l {
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-2);
+}
+.setup-row .v { font-weight: 600; color: var(--ink); letter-spacing: -0.005em; }
+.setup-row .v.amb { color: var(--amb); }
+.setup-row .v.cy { color: var(--cy); }
+.setup-row .v.rd { color: var(--rd); }
+.setup-foot {
+  margin-top: 18px; padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-family: var(--sans); font-weight: 300;
+  font-size: 13.5px; line-height: 1.55; color: var(--ink-1);
+}
+.setup-foot b { color: var(--amb); font-weight: 500; font-family: var(--mono); font-size: 12.5px; }
+.setup-foot .cta {
+  margin-top: 14px;
+  font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--cy);
+}
+.setup-foot .cta::before { content: '› '; color: var(--cy); }
+
+/* ═══════════ WATCH ROW ═══════════════════════════════════════ */
+.watch {
+  margin-bottom: 72px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+.watch-card {
+  border: 1px solid var(--line);
+  padding: 20px 22px;
+  position: relative;
+  background: var(--bg-1);
+  transition: all 120ms;
+  cursor: pointer;
+}
+.watch-card:hover { border-color: var(--cy); background: var(--cy-bg); }
+.watch-card .tk {
+  display: flex; align-items: baseline; gap: 12px;
+  margin-bottom: 8px;
+}
+.watch-card .tk b { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); }
+.watch-card .tk .meta { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-2); }
+.watch-card .desc { font-family: var(--sans); font-weight: 300; font-size: 13px; color: var(--ink-1); line-height: 1.5; }
+.watch-card .stat {
+  margin-top: 12px; display: flex; gap: 14px;
+  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink-2);
+}
+.watch-card .stat b { color: var(--ink); font-weight: 600; }
+
+/* ═══════════ KILLED / NOT TODAY ═══════════════════════════════ */
+.kill {
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--rd);
+  padding: 22px 28px;
+  margin-bottom: 72px;
+  display: grid; grid-template-columns: 1fr auto; gap: 24px;
+  align-items: center;
+}
+.kill-l { font-family: var(--mono); }
+.kill-l .h { font-size: 10px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--rd); margin-bottom: 8px; }
+.kill-l .body { font-family: var(--sans); font-weight: 300; font-size: 14.5px; color: var(--ink-1); line-height: 1.55; }
+.kill-l .body b { font-family: var(--mono); color: var(--ink); font-weight: 600; font-size: 13px; }
+.kill-r {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+}
+.kill-r .big {
+  font-size: 48px; font-weight: 700; line-height: 1; color: var(--rd);
+  letter-spacing: -0.03em;
+}
+.kill-r .sub {
+  font-size: 9.5px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+/* ═══════════ COUNTDOWN ═══════════════════════════════════════ */
+.cd {
+  margin-bottom: 72px;
+}
+.cd-list {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+.cd-card {
+  border: 1px solid var(--line);
+  padding: 22px 24px;
+  position: relative;
+  overflow: hidden;
+}
+.cd-card::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0;
+  height: 2px; background: var(--cy);
+  box-shadow: 0 0 12px var(--cy-glow);
+}
+.cd-card.warn::after { background: var(--amb); box-shadow: 0 0 12px var(--amb-glow); }
+.cd-card .h {
+  font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-2); margin-bottom: 14px;
+}
+.cd-card .time {
+  font-size: 42px; font-weight: 700; line-height: 1;
+  letter-spacing: -0.03em; color: var(--ink);
+}
+.cd-card .time .unit { color: var(--ink-3); font-size: 16px; font-weight: 400; margin-left: 2px; }
+.cd-card .sub {
+  margin-top: 12px;
+  font-size: 11px; letter-spacing: 0.1em;
+  color: var(--ink-2);
+}
+.cd-card.warn .sub { color: var(--amb); }
+
+/* ═══════════ YESTERDAY READOUT ════════════════════════════════ */
+.read {
+  margin-bottom: 72px;
+  border-top: 1px solid var(--line);
+  padding-top: 32px;
+}
+.read-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+.read-row {
+  display: grid; grid-template-columns: 28px 1fr auto;
+  gap: 14px; align-items: baseline;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.read-row .glyph {
+  font-size: 18px; line-height: 1;
+}
+.read-row.ok .glyph { color: var(--gn); }
+.read-row.no .glyph { color: var(--rd); }
+.read-row.skip .glyph { color: var(--ink-3); }
+.read-row .said {
+  font-family: var(--sans); font-weight: 300; font-size: 14px; color: var(--ink-1); line-height: 1.5;
+}
+.read-row .said b { font-family: var(--mono); font-weight: 600; color: var(--ink); font-size: 12.5px; }
+.read-row .outcome {
+  font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-2);
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ═══════════ ASK PROMPT ═══════════════════════════════════════ */
+.ask {
+  border-top: 1px solid var(--line);
+  padding-top: 36px;
+  margin-bottom: 48px;
+}
+.ask-h {
+  font-size: 10px; letter-spacing: 0.36em; text-transform: uppercase;
+  color: var(--cy); margin-bottom: 22px;
+  display: flex; align-items: center; gap: 12px;
+}
+.ask-h::before, .ask-h::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.ask-input {
+  display: flex; align-items: center; gap: 14px;
+  padding: 18px 22px;
+  background: var(--cy-bg);
+  border: 1px solid var(--line-hot);
+  font-family: var(--mono);
+}
+.ask-input .caret { color: var(--cy); font-size: 18px; font-weight: 600; }
+.ask-input input {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: var(--ink); font-family: var(--mono); font-size: 15px;
+  letter-spacing: -0.005em;
+}
+.ask-input input::placeholder { color: var(--ink-3); }
+.ask-input .blink { display: inline-block; width: 8px; height: 16px; background: var(--cy); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.ask-sug {
+  margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap;
+}
+.ask-sug span {
+  padding: 6px 12px;
+  font-size: 10.5px; letter-spacing: 0.06em;
+  border: 1px solid var(--line); color: var(--ink-2);
+  cursor: pointer; transition: all 100ms;
+}
+.ask-sug span:hover { border-color: var(--cy); color: var(--cy); }
+
+/* ═══════════ FOOTER ═══════════════════════════════════════════ */
+.foot {
+  text-align: center; padding: 28px 0;
+  border-top: 1px solid var(--line);
+  font-size: 9.5px; letter-spacing: 0.32em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.foot b { color: var(--ink-1); font-weight: 500; }
+.foot .cy { color: var(--cy); }
+
+/* Mobile fallback */
+@media (max-width: 880px) {
+  .page { padding: 60px 22px 80px; }
+  .hero { grid-template-columns: 1fr; gap: 60px; }
+  .hero::after { display: none; }
+  .verdict-word { font-size: 110px; }
+  .target-h { grid-template-columns: 1fr; }
+  .target-tk { font-size: 56px; }
+  .target-grid { grid-template-columns: 1fr; gap: 32px; }
+  .watch { grid-template-columns: 1fr; }
+  .cd-list { grid-template-columns: 1fr; }
+  .read-list { grid-template-columns: 1fr; }
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--ink-4); }
+</style>
+</head>
+
+<body>
+
+<!-- ════════════ TOP STATUS RIBBON ════════════════════════════════ -->
+<div class="bar">
+  <span class="bar-id">KAIROS <b>·</b> v<b>6.142</b></span>
+  <span class="bar-vol">briefing · published 06:30 PT</span>
+  <span class="bar-clock" id="clk">14:32:08 PT</span>
+  <span class="bar-state">
+    <span class="dot on" title="scan fresh"></span>
+    <span class="dot on" title="EODHD"></span>
+    <span class="dot on" title="Schwab"></span>
+    <span class="dot warn" title="regime pending"></span>
+    <span class="dot on" title="Alpaca"></span>
+    <span class="dot on" title="snapshot"></span>
+  </span>
+  <span class="bar-pnl">+$2,312 <span class="dn">· DD −15.6%</span></span>
+  <span class="bar-actions"><span title="bench mode" onclick="location.href='kairos-landing.html'">⊞</span><span title="export">▭</span><span title="close">✕</span></span>
+</div>
+
+<div class="page">
+
+  <!-- ═══════ MISSION BRIEFING HERO ═══════════════════════════════ -->
+  <section class="hero">
+
+    <div class="hero-l">
+      <div class="hero-eye">Today's mission · 06:30 PT brief</div>
+
+      <div class="verdict-word">WAIT<span class="accent">.</span></div>
+
+      <div class="verdict-prose">
+        No <b>FRESH</b>-quality setups in risk-on choppy regime. The system holds at <b>half-Kelly</b>. One name (<b>GLW</b>) is within <b>24h</b> of re-qualifying if SPY confirms above <b>$740</b>. FOMC minutes Wednesday — sized for vol-risk.
+      </div>
+
+      <div class="verdict-meta">
+        <span>regime<br><b class="amb">CHOPPY</b></span>
+        <span>open<br><b>0</b></span>
+        <span>candidates<br><b>1</b></span>
+        <span>next event<br><b class="amb">FOMC +1d</b></span>
+      </div>
+    </div>
+
+    <!-- The Kairos Number — radial -->
+    <div class="number">
+      <svg class="number-svg" viewBox="0 0 320 320">
+        <!-- threshold ticks (0, 50, 80, 100) -->
+        <circle class="track" cx="160" cy="160" r="130"/>
+        <!-- amber arc, 72% -->
+        <circle class="arc" cx="160" cy="160" r="130" stroke-dasharray="817 1133" pathLength="1133"/>
+        <!-- 80% threshold tick (inner notch) -->
+        <line class="thresh" x1="160" y1="14" x2="160" y2="30" transform="rotate(288 160 160)"/>
+        <line class="thresh" x1="160" y1="14" x2="160" y2="30" transform="rotate(180 160 160)"/>
+      </svg>
+      <div class="number-inner">
+        <div class="number-label">— The Kairos Number —</div>
+        <div class="number-big">72</div>
+        <div class="number-frac">/ 100</div>
+        <div class="number-zone">amber zone</div>
+      </div>
+      <div class="number-spark" id="knSpark"></div>
+    </div>
+
+  </section>
+
+  <!-- ═══════ PRIMARY TARGET ════════════════════════════════════ -->
+  <div class="eye amber"><b>Primary target</b> · within 24h of qualifying</div>
+
+  <section class="target">
+    <div class="target-h">
+      <div class="target-tk"><b>GLW</b></div>
+      <div class="target-name">
+        Corning Inc<br>
+        <b>Technology · Electronic Components</b>
+      </div>
+      <div class="target-score">
+        BAP composite<br>
+        <b>103</b>
+      </div>
+    </div>
+
+    <div class="target-grid">
+
+      <!-- Plan rail -->
+      <div class="plan">
+        <div class="plan-row stop">
+          <span class="pin"></span>
+          <span class="lbl">Stop</span>
+          <span class="px num">$177.50</span>
+          <span class="delta">−5.0%</span>
+        </div>
+        <div class="plan-row entry">
+          <span class="pin"></span>
+          <span class="lbl">Entry zone</span>
+          <span class="px num">$183 – 189</span>
+          <span class="delta">−1.6%</span>
+        </div>
+        <div class="plan-row now">
+          <span class="pin"></span>
+          <span class="lbl">Now</span>
+          <span class="px num">$186.94</span>
+          <span class="delta">+0.0%</span>
+        </div>
+        <div class="plan-row t1">
+          <span class="pin"></span>
+          <span class="lbl">Target 1 · ⅔</span>
+          <span class="px num">$215.13</span>
+          <span class="delta up">+15.1%</span>
+        </div>
+        <div class="plan-row t2">
+          <span class="pin"></span>
+          <span class="lbl">Target 2 · ⅓</span>
+          <span class="px num">$234.32</span>
+          <span class="delta up">+25.3%</span>
+        </div>
+      </div>
+
+      <!-- Setup detail -->
+      <div class="setup-block">
+        <div class="setup-row"><span class="l">Setup</span><span class="v cy">VCP Breakout</span></div>
+        <div class="setup-row"><span class="l">Catalyst tier</span><span class="v cy">T1</span></div>
+        <div class="setup-row"><span class="l">Relative strength</span><span class="v">100 / 100</span></div>
+        <div class="setup-row"><span class="l">Sector</span><span class="v">XLK · +17% vs SPY</span></div>
+        <div class="setup-row"><span class="l">Entry quality</span><span class="v amb">EXTENDED · 1.18 ATR</span></div>
+        <div class="setup-row"><span class="l">Risk : reward</span><span class="v">1 : 3.0</span></div>
+        <div class="setup-row"><span class="l">Position size</span><span class="v">6.7% of equity</span></div>
+
+        <div class="setup-foot">
+          The setup is verified — only entry quality is in the way. Watch for a pullback to <b>$179.50</b> (EMA21). That re-qualifies as FRESH and clears the gate. Estimated <b>1–3 sessions</b>.
+          <div class="cta">set alert at $179.50</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══════ WATCH ROW ═══════════════════════════════════════ -->
+  <div class="eye"><b>Secondary watch</b> · score above 80 but blocked</div>
+  <section class="watch">
+    <div class="watch-card">
+      <div class="tk"><b>ALB</b><span class="meta">86 · EXTENDED</span></div>
+      <div class="desc">Lithium recovery; analyst PT $221 vs market $203. Same gate as GLW.</div>
+      <div class="stat"><span>VCP <b>·</b> T1</span><span>RS <b>89</b></span></div>
+    </div>
+    <div class="watch-card">
+      <div class="tk"><b>ABNB</b><span class="meta">82 · PULLBACK</span></div>
+      <div class="desc">Trend continuation, bouncing EMA21 in choppy. Score below 90 cap.</div>
+      <div class="stat"><span>TC <b>·</b> T1</span><span>RS <b>74</b></span></div>
+    </div>
+    <div class="watch-card">
+      <div class="tk"><b>ORCL</b><span class="meta">78 · MISSED</span></div>
+      <div class="desc">AI datacenter rerate priced 30 days ago. Wait for next consolidation.</div>
+      <div class="stat"><span>TC <b>·</b> T2</span><span>RS <b>95</b></span></div>
+    </div>
+  </section>
+
+  <!-- ═══════ KILLED / NOT TODAY ═══════════════════════════════ -->
+  <section class="kill">
+    <div class="kill-l">
+      <div class="h">Not today · 24 names eliminated</div>
+      <div class="body">
+        Three setups silently killed by evidence: <b>EMA21 Pullback</b> (WR 11.9% LB 5.9%), <b>52wk Breakout</b> (WR 31.6% LB 23.8%), <b>TC × bull</b> (Variant F, n=85). Plus 9 names blocked by entry-quality or sector-rank gates. The trades you didn't take are part of the edge.
+      </div>
+    </div>
+    <div class="kill-r">
+      <div class="big">24</div>
+      <div class="sub">candidates · killed</div>
+    </div>
+  </section>
+
+  <!-- ═══════ COUNTDOWN ═══════════════════════════════════════ -->
+  <div class="eye"><b>Countdown</b> · time-sensitive events</div>
+  <section class="cd">
+    <div class="cd-list">
+      <div class="cd-card">
+        <div class="h">Market close</div>
+        <div class="time"><span id="cdMkt">1h 28m</span></div>
+        <div class="sub">prepare end-of-day exits</div>
+      </div>
+      <div class="cd-card warn">
+        <div class="h">FOMC minutes</div>
+        <div class="time"><span id="cdFomc">24h 32m</span></div>
+        <div class="sub">vol-risk · size for surprise</div>
+      </div>
+      <div class="cd-card">
+        <div class="h">NVDA earnings</div>
+        <div class="time">2<span class="unit">d</span></div>
+        <div class="sub">earnings blackout for NVDA names</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════ YESTERDAY'S READOUT ═════════════════════════════ -->
+  <div class="eye"><b>Yesterday's readout</b> · what we said · what happened</div>
+  <section class="read">
+    <div class="read-list">
+      <div class="read-row ok">
+        <span class="glyph">✓</span>
+        <div class="said">Said <b>WAIT</b>. Regime held risk-on choppy.</div>
+        <div class="outcome">regime held</div>
+      </div>
+      <div class="read-row ok">
+        <span class="glyph">✓</span>
+        <div class="said">Blocked <b>EMA21 PB</b> and <b>52wk BO</b> entries. 6 names auto-killed.</div>
+        <div class="outcome">6 trades saved</div>
+      </div>
+      <div class="read-row skip">
+        <span class="glyph">◷</span>
+        <div class="said">Said watch <b>ALB</b> for pullback to EMA21 ($186).</div>
+        <div class="outcome">no fill</div>
+      </div>
+      <div class="read-row ok">
+        <span class="glyph">✓</span>
+        <div class="said"><b>GLW</b> demoted EXTENDED · watched for pullback.</div>
+        <div class="outcome">+0.0% · still extended</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════ ASK ═══════════════════════════════════════════ -->
+  <section class="ask">
+    <div class="ask-h">— Ask Kairos —</div>
+    <div class="ask-input">
+      <span class="caret">›</span>
+      <input type="text" placeholder="when does GLW re-qualify?" autocomplete="off" spellcheck="false"/>
+      <span class="blink"></span>
+    </div>
+    <div class="ask-sug">
+      <span>why is 10W Pullback boosted to 1.5×?</span>
+      <span>show TC bull losses by entry_quality</span>
+      <span>what's my drawdown limit?</span>
+      <span>regime since 04-28</span>
+      <span>setup WR rank</span>
+    </div>
+  </section>
+
+  <div class="foot">
+    <b>Kairos</b> · briefing v<b>6.142</b> · by <b>Gari</b> · <span class="cy">KRS &lt;GO&gt;</span> · published <b>06:30 PT</b> · expires at close
+  </div>
+
+</div>
+
+<script>
+// Live clock
+function tick() {
+  const d = new Date();
+  const t = [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,'0')).join(':');
+  document.getElementById('clk').textContent = t + ' PT';
+}
+setInterval(tick, 1000); tick();
+
+// Kairos Number 30-day sparkline below the dial
+const kn = [38, 42, 45, 48, 41, 51, 55, 58, 62, 60, 56, 50, 44, 48, 52, 61, 65, 68, 72, 75, 78, 72, 68, 60, 55, 58, 62, 65, 70, 72];
+const el = document.getElementById('knSpark');
+const mx = Math.max(...kn);
+kn.forEach((v, i) => {
+  const b = document.createElement('span');
+  b.className = 'b' + (i === kn.length - 1 ? ' today' : '');
+  b.style.height = Math.max(2, v / mx * 22) + 'px';
+  el.appendChild(b);
+});
+
+// Countdown timers (mock — would compute from real schedule)
+function cd() {
+  // 1h 28m to market close
+  const close = new Date(); close.setHours(16, 0, 0, 0);
+  let dt = close - new Date();
+  if (dt < 0) dt += 24 * 3600 * 1000;
+  const h = Math.floor(dt / 3600000), m = Math.floor((dt % 3600000) / 60000);
+  document.getElementById('cdMkt').textContent = `${h}h ${m}m`;
+
+  // FOMC minutes Wed 14:00 ET — assume ~24h
+  const fomc = new Date(); fomc.setDate(fomc.getDate() + 1); fomc.setHours(11, 0, 0, 0);
+  let dt2 = fomc - new Date();
+  const h2 = Math.floor(dt2 / 3600000), m2 = Math.floor((dt2 % 3600000) / 60000);
+  document.getElementById('cdFomc').textContent = `${h2}h ${m2}m`;
+}
+setInterval(cd, 30000); cd();
+</script>
+
+</body>
+</html>

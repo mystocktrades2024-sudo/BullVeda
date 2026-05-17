@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Analytical Engine v2 · NVDA POSITION analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#000; --bg-1:#0a0d0c; --bg-2:#0f1311; --bg-3:#141816;
+    --line:#1d2520; --line-2:#2a352e;
+    --ink:#ebe9de; --ink-1:#c8c6bb; --ink-2:#9a9d92; --ink-3:#6c706a; --ink-4:#3a3e38;
+    --gn:#7ef097; --gn-dim:#3a8456; --gn-bg:rgba(126,240,151,0.10);
+    --am:#ffc77a; --am-dim:#a0712a; --am-bg:rgba(255,199,122,0.09);
+    --rd:#ff8475; --rd-dim:#8e3a30; --rd-bg:rgba(255,132,117,0.08);
+    --cy:#7ad8e6; --cy-dim:#387887; --cy-bg:rgba(122,216,230,0.09);
+    --mono:'Inter','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Inter','Aptos','Aptos Display',-apple-system,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink-1);
+    font-family:var(--sans);font-size:13px;font-variant-numeric:tabular-nums;
+    font-feature-settings:'tnum' on,'lnum' on;
+    -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;line-height:1.55}
+  body{padding:24px}
+  .page{max-width:1600px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+
+  .doc-header{display:flex;align-items:baseline;gap:14px;padding:0 0 10px;border-bottom:1px solid var(--line)}
+  .doc-h-t{font-size:10.5px;letter-spacing:0.2em;color:var(--cy);font-weight:800;text-transform:uppercase}
+  .doc-h-sub{font-size:11px;color:var(--ink-3)}
+
+  /* ─── Engine container ─── */
+  .ae{display:flex;flex-direction:column;background:var(--bg-1);border:1px solid var(--line);border-radius:4px;overflow:hidden}
+
+  /* Header strip */
+  .ae-h{display:flex;align-items:center;gap:14px;padding:14px 18px;
+    background:linear-gradient(135deg,color-mix(in oklch,var(--cy) 8%,var(--bg-2)) 0%,var(--bg-2) 70%);
+    border-bottom:1px solid var(--line)}
+  .ae-h-t{font-size:11px;letter-spacing:0.2em;color:var(--cy);font-weight:800;text-transform:uppercase}
+  .ae-tk{font-size:22px;font-weight:800;color:var(--ink);letter-spacing:0.02em}
+  .ae-name{font-size:12.5px;color:var(--ink-2)}
+  .ae-asof{margin-left:auto;font-size:10.5px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+  .ae-asof b{color:var(--ink);font-weight:600}
+
+  /* Strategy switcher row */
+  .ae-strat-row{display:flex;align-items:center;gap:14px;padding:10px 18px;
+    background:var(--bg-2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .ae-strat-k{font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-2);font-weight:700}
+  .ae-strat-pill{font-size:11px;padding:5px 14px;border-radius:3px;letter-spacing:0.10em;font-weight:800;
+    text-transform:uppercase;border:1px solid var(--ink-4);background:var(--bg-3);color:var(--ink-2);
+    cursor:pointer;text-decoration:none;display:inline-block}
+  .ae-strat-pill.on{color:var(--cy);background:var(--cy-bg);border-color:var(--cy-dim)}
+  .ae-strat-info{margin-left:auto;font-size:10.5px;color:var(--ink-3)}
+  .ae-strat-info b{color:var(--ink-1)}
+
+  /* Meta strip · 6 fields */
+  .ae-meta{display:grid;grid-template-columns:repeat(6,1fr);gap:0;padding:0;background:var(--bg-2);border-bottom:1px solid var(--line)}
+  .ae-meta-cell{padding:10px 14px;border-right:1px solid var(--line)}
+  .ae-meta-cell:last-child{border-right:none}
+  .ae-meta-k{font-size:8.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-3);font-weight:700;margin-bottom:4px}
+  .ae-meta-v{font-size:13px;color:var(--ink);font-weight:700}
+  .ae-meta-v.lg{font-size:18px;letter-spacing:0.04em}
+  .ae-meta-v.gn{color:var(--gn)} .ae-meta-v.am{color:var(--am)} .ae-meta-v.rd{color:var(--rd)} .ae-meta-v.cy{color:var(--cy)}
+  .ae-meta-sub{font-size:10px;color:var(--ink-3);margin-top:2px}
+
+  /* Sections */
+  .ae-sec{padding:14px 18px;border-bottom:1px solid var(--line)}
+  .ae-sec:last-child{border-bottom:none}
+  .ae-sec-k{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+  .ae-sec-num{font-size:11px;color:var(--cy);font-weight:800;letter-spacing:0.16em}
+  .ae-sec-t{font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink);font-weight:800}
+  .ae-sec-meta{font-size:10.5px;color:var(--ink-3);font-weight:500;letter-spacing:0.04em}
+  .ae-sec-v{font-size:13.5px;color:var(--ink-1);line-height:1.65}
+  .ae-sec-v b{color:var(--ink);font-weight:700}
+  .ae-sec-v .gn{color:var(--gn)} .ae-sec-v .am{color:var(--am)} .ae-sec-v .rd{color:var(--rd)} .ae-sec-v .cy{color:var(--cy)}
+
+  /* Field rows · per call specifics */
+  .ae-field-row{display:grid;grid-template-columns:220px 1fr;gap:14px;padding:6px 0;
+    font-size:12.5px;align-items:baseline;border-bottom:1px dashed var(--line)}
+  .ae-field-row:last-child{border-bottom:none}
+  .ae-field-k{font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-2);font-weight:700}
+  .ae-field-v{color:var(--ink-1)}
+  .ae-field-v b{color:var(--ink);font-weight:700}
+
+  /* Cross-check rows */
+  .ae-cc-row{display:grid;grid-template-columns:130px 120px 1fr;gap:14px;padding:9px 0;
+    font-size:12px;align-items:baseline;border-bottom:1px dashed var(--line);line-height:1.55}
+  .ae-cc-row:last-child{border-bottom:none}
+  .ae-cc-l{font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink);font-weight:800}
+  .ae-cc-l .role{display:block;font-size:9px;color:var(--ink-3);font-weight:600;letter-spacing:0.10em;margin-top:2px}
+  .ae-cc-summary{color:var(--ink-1)}
+
+  /* Pills */
+  .pill{display:inline-block;font-size:9.5px;padding:2px 8px;border-radius:3px;letter-spacing:0.06em;
+    font-weight:700;text-transform:uppercase}
+  .pill.gn{color:var(--gn);background:var(--gn-bg);border:1px solid var(--gn-dim)}
+  .pill.am{color:var(--am);background:var(--am-bg);border:1px solid var(--am-dim)}
+  .pill.rd{color:var(--rd);background:var(--rd-bg);border:1px solid var(--rd-dim)}
+  .pill.cy{color:var(--cy);background:var(--cy-bg);border:1px solid var(--cy-dim)}
+  .pill.dim{color:var(--ink-3);background:var(--bg-3);border:1px solid var(--ink-4)}
+
+  /* Big badges */
+  .badge-call{font-size:20px;font-weight:800;letter-spacing:0.10em;padding:4px 16px;border-radius:3px}
+  .badge-call.gn{color:var(--gn);background:color-mix(in oklch,var(--gn) 14%,transparent);border:1px solid color-mix(in oklch,var(--gn) 40%,transparent)}
+  .badge-call.am{color:var(--am);background:color-mix(in oklch,var(--am) 14%,transparent);border:1px solid color-mix(in oklch,var(--am) 40%,transparent)}
+  .badge-call.rd{color:var(--rd);background:color-mix(in oklch,var(--rd) 14%,transparent);border:1px solid color-mix(in oklch,var(--rd) 40%,transparent)}
+  .badge-conv{font-size:12.5px;font-weight:800;letter-spacing:0.10em;padding:3px 10px;border-radius:3px}
+  .badge-conv.gn{color:var(--gn);background:var(--gn-bg);border:1px solid var(--gn-dim)}
+  .badge-conv.am{color:var(--am);background:var(--am-bg);border:1px solid var(--am-dim)}
+  .badge-conv.rd{color:var(--rd);background:var(--rd-bg);border:1px solid var(--rd-dim)}
+
+  /* Lists */
+  ol{margin:0;padding-left:24px}
+  ol li{font-size:13px;line-height:1.7;margin-bottom:8px;padding-left:4px}
+  ol li b{color:var(--ink);font-weight:700}
+
+  /* Disagreement / no-disagreement blocks */
+  .ae-disagree{margin:8px 0 0;padding:0;list-style:none}
+  .ae-disagree li{padding:8px 14px;margin-bottom:5px;background:color-mix(in oklch,var(--am) 6%,transparent);
+    border-left:2px solid var(--am);border-radius:2px;font-size:12.5px;line-height:1.6}
+  .ae-no-disagree{padding:10px 14px;background:color-mix(in oklch,var(--gn) 6%,transparent);
+    border-left:2px solid var(--gn);border-radius:2px;font-size:12.5px;color:var(--ink-1);line-height:1.6}
+
+  /* Rationale block */
+  .ae-rationale{font-size:12.5px;line-height:1.65;color:var(--ink-1);padding:10px 14px;
+    background:var(--bg-2);border-radius:3px;margin-top:6px}
+  .ae-rationale b{color:var(--ink);font-weight:700}
+
+  /* Sources grid */
+  .ae-sources{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;font-size:11.5px;color:var(--ink-1)}
+  .ae-sources span b{color:var(--ink);font-weight:700}
+
+  /* Alt strategy call card */
+  .ae-alt-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
+  .ae-alt-card{padding:12px 14px;background:var(--bg-2);border:1px solid var(--line);border-left:3px solid var(--cy);border-radius:3px}
+  .ae-alt-card h4{margin:0 0 6px;font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:var(--cy);font-weight:800}
+  .ae-alt-card-call{font-size:14px;font-weight:800;margin-bottom:4px}
+  .ae-alt-card-call.gn{color:var(--gn)} .ae-alt-card-call.am{color:var(--am)} .ae-alt-card-call.rd{color:var(--rd)}
+  .ae-alt-card-body{font-size:12px;color:var(--ink-1);line-height:1.6}
+
+  /* JSON struct dump */
+  .ae-struct{padding:10px 14px;background:#0a0d0c;border-radius:3px;border:1px solid var(--line-2);
+    font-size:11px;line-height:1.55;color:var(--ink-2);font-family:'Inter','SF Mono',ui-monospace,monospace;
+    overflow-x:auto;white-space:pre}
+  .ae-struct .key{color:var(--cy);font-weight:600}
+  .ae-struct .str{color:var(--gn)}
+  .ae-struct .num{color:var(--am);font-weight:600}
+  .ae-struct .nul{color:var(--ink-3)}
+  .ae-struct .ctx{color:var(--ink-3);font-style:italic}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="doc-header">
+    <span class="doc-h-t">◈ Analytical Engine v2 prototype</span>
+    <span class="doc-h-sub">single engine · 18-field structured output · 3 strategies · 4 call types · NVDA POSITION example</span>
+  </div>
+
+  <div class="ae">
+
+    <!-- Header strip -->
+    <div class="ae-h">
+      <span class="ae-h-t">◈ Structured Equity Analysis</span>
+      <span class="ae-tk">NVDA</span>
+      <span class="ae-name">· NVIDIA Corporation · NASDAQ Semiconductors</span>
+      <span class="ae-asof">As of <b>2026-05-12 14:30 EST</b> · Price <b>$142.65</b> (+1.84% · +$2.58)</span>
+    </div>
+
+    <!-- Strategy switcher -->
+    <div class="ae-strat-row">
+      <span class="ae-strat-k">Strategy</span>
+      <a class="ae-strat-pill" href="?strategy=SWING">SWING</a>
+      <a class="ae-strat-pill on" href="?strategy=POSITION">POSITION</a>
+      <a class="ae-strat-pill" href="?strategy=INVESTMENT">INVESTMENT</a>
+      <span class="ae-strat-info">override · catalyst-driven, ER in <b>5 weeks</b> within 8w POSITION window</span>
+    </div>
+
+    <!-- Meta strip · 6 required fields -->
+    <div class="ae-meta">
+      <div class="ae-meta-cell">
+        <div class="ae-meta-k">Strategy</div>
+        <div class="ae-meta-v cy lg">POSITION</div>
+        <div class="ae-meta-sub">catalyst-driven · 3d–8w window</div>
+      </div>
+      <div class="ae-meta-cell">
+        <div class="ae-meta-k">Horizon</div>
+        <div class="ae-meta-v">4–6 weeks</div>
+        <div class="ae-meta-sub">to Q4 FY26 earnings + product launch</div>
+      </div>
+      <div class="ae-meta-cell">
+        <div class="ae-meta-k">Lead lens</div>
+        <div class="ae-meta-v">QUANT EARNINGS</div>
+        <div class="ae-meta-sub">near-term catalyst + tech entry</div>
+      </div>
+      <div class="ae-meta-cell">
+        <div class="ae-meta-k">Call</div>
+        <div class="ae-meta-v"><span class="badge-call gn">BUY</span></div>
+        <div class="ae-meta-sub">actionable now</div>
+      </div>
+      <div class="ae-meta-cell">
+        <div class="ae-meta-k">Conviction</div>
+        <div class="ae-meta-v"><span class="badge-conv gn">HIGH</span></div>
+        <div class="ae-meta-sub">4/5 lenses aligned</div>
+      </div>
+      <div class="ae-meta-cell">
+        <div class="ae-meta-k">Data</div>
+        <div class="ae-meta-v"><span class="badge-conv gn">COMPLETE</span></div>
+        <div class="ae-meta-sub">0 missing · fresh</div>
+      </div>
+    </div>
+
+    <!-- ① PRIMARY THESIS -->
+    <div class="ae-sec">
+      <div class="ae-sec-k"><span class="ae-sec-num">①</span><span class="ae-sec-t">PRIMARY THESIS</span><span class="ae-sec-meta">— QUANT EARNINGS lead · catalyst-anchored</span></div>
+      <div class="ae-sec-v">
+        <b>NVDA · POSITION BUY</b> on AI-capex earnings cycle. Q4 FY26 print scheduled in <b>~5 weeks</b> falls within the 8-week POSITION catalyst window. Prior <b class="gn">4/4 prints beat</b> with median surprise <b class="gn">+12.4%</b>; sell-side revisions 30d <b class="gn">↑5 / ↓0</b>; analyst PT mean <b>$165</b> (+15.7% upside). Hyperscaler capex commitments (MSFT, META, GOOGL, AMZN) for FY27 already pre-printed and increased mid-cycle — the demand stack stays intact through earnings. Technical entry is <b>FRESH</b> (rising EMA21 pullback, $142 cleared on 1.32× RVOL, MACD bullish cross 4 days ago). Implied move <b>±6.2%</b> for the print is the cleanest in-window catalyst risk to manage; pre-ER flat is the discipline if ESP+ thesis weakens by day −3.
+      </div>
+    </div>
+
+    <!-- ② CALL · POSITION BUY required fields -->
+    <div class="ae-sec">
+      <div class="ae-sec-k"><span class="ae-sec-num">②</span><span class="ae-sec-t">CALL · POSITION BUY</span><span class="ae-sec-meta">— required fields per spec</span></div>
+      <div class="ae-sec-v">
+        <div class="ae-field-row"><span class="ae-field-k">Entry zone</span><span class="ae-field-v"><b>$140.50–$143.20</b> · scale-in on retraces to EMA21 ($138.40) acceptable within 90d window</span></div>
+        <div class="ae-field-row"><span class="ae-field-k">Price target</span><span class="ae-field-v">T1 <b class="gn">$158</b> (+10.8%) pre-earnings · T2 <b class="gn">$172</b> (+20.6%) post-earnings if beat + raise · ceiling <b>$185</b> on a 20%+ surprise</span></div>
+        <div class="ae-field-row"><span class="ae-field-k">Expected hold</span><span class="ae-field-v"><b>4–6 weeks</b> — through Q4 print + 1-week post-print drift window</span></div>
+        <div class="ae-field-row"><span class="ae-field-k">Catalyst</span><span class="ae-field-v"><b>Q4 FY26 earnings · 2026-06-17 AMC</b> · specific trigger: revenue beat ≥+5% + raised forward DC-segment guide</span></div>
+        <div class="ae-field-row"><span class="ae-field-k">Key fundamental to track</span><span class="ae-field-v"><b>Data-Center segment growth YoY</b> — last 4 quarters: +88% / +73% / +52% / +44% · deceleration is the watch · sub-30% YoY would invalidate</span></div>
+        <div class="ae-field-row"><span class="ae-field-k">Downside support</span><span class="ae-field-v">EMA50 <b>$135.20</b> · 200-DMA <b>$128.50</b> · stop = <b class="rd">$135</b> (close-based · 2× ATR · POSITION-adjusted)</span></div>
+        <div class="ae-field-row"><span class="ae-field-k">Position size</span><span class="ae-field-v"><b>5.5% of equity</b> Kelly-lite × 1.3 POSITION boost · $25K ref → <b>9 shares · $1,284 deployed</b> · risk $69 (0.28% of ref)</span></div>
+        <div class="ae-field-row"><span class="ae-field-k">Technical setup</span><span class="ae-field-v"><b>Trend Continuation</b> · rising EMA21 pullback · FRESH entry · MACD bull cross 4d ago · RVOL 1.32×</span></div>
+      </div>
+    </div>
+
+    <!-- ③ CROSS-CHECKS · 4 non-lead lenses -->
+    <div class="ae-sec">
+      <div class="ae-sec-k"><span class="ae-sec-num">③</span><span class="ae-sec-t">CROSS-CHECKS</span><span class="ae-sec-meta">— 4 non-lead lenses · 4/4 aligned BULLISH or NEUTRAL (none contradict)</span></div>
+      <div class="ae-sec-v">
+
+        <div class="ae-cc-row">
+          <span class="ae-cc-l">HEDGE FUND<span class="role">regime + edge</span></span>
+          <span><span class="pill gn">BULLISH · aligned</span></span>
+          <span class="ae-cc-summary">MC edge <b class="gn">+24pp</b> (P(T1) 58% · P(stop) 34%, 63d sim) · regime <b>risk_on_choppy</b> (BAP 82/floor 72) · UOA <b>3 calls</b> @ Jun strikes · insider hold (no buys/sells last 30d) · short float 2.1% (no squeeze pressure) · news momentum bullish</span>
+        </div>
+        <div class="ae-cc-row">
+          <span class="ae-cc-l">VALUE<span class="role">Graham-Buffett</span></span>
+          <span><span class="pill am">NEUTRAL · reasoned</span></span>
+          <span class="ae-cc-summary">Fwd P/E <b class="am">32.4</b> (vs sector 22.0 = premium 47%) · PEG <b>1.10</b> (in-line with high-growth peers) · ROE <b class="gn">92.4%</b> · ROIC <b class="gn">68%</b> · FCF margin <b class="gn">+48.2%</b> · D/E <b>0.14</b> (low). Premium valuation justified by AI capex cycle but caps Value lens at NEUTRAL — not a margin-of-safety setup.</span>
+        </div>
+        <div class="ae-cc-row">
+          <span class="ae-cc-l">SWING TRADING<span class="role">price action</span></span>
+          <span><span class="pill gn">BULLISH · aligned</span></span>
+          <span class="ae-cc-summary">RSI <b>58</b> (constructive, not overbought) · MACD bullish cross 4d ago · ADX <b>28</b> (strong trend) · RVOL <b>1.32×</b> on entry · entry quality <b class="gn">FRESH</b> · RS rank <b>91/100</b> · above all 4 EMAs (8/21/50/200) · TTM squeeze coiling, not yet fired</span>
+        </div>
+        <div class="ae-cc-row">
+          <span class="ae-cc-l">CFP<span class="role">portfolio fit</span></span>
+          <span><span class="pill gn">BULLISH · aligned</span></span>
+          <span class="ae-cc-summary">β <b>1.65</b> (high-beta semi exposure) · ADV <b class="gn">$25.8B</b> (massive liquidity) · mcap <b>$3.49T</b> · Kelly final alloc <b>5.5%</b> (after × 1.3 POSITION boost) · suitability POSITION ✓ · drawdown mult 1.0 (no recent DD penalty)</span>
+        </div>
+
+        <div class="ae-no-disagree">✓ <b>No material disagreement.</b> All 5 conditions checked: (1) quant edge positive +24pp; (2) no single cross-check lens would issue a different call than QUANT EARNINGS lead; (3) regime risk_on_choppy supports the directional thesis; (4) catalyst (Q4 print +35d) inside 8w POSITION window; (5) liquidity/β/sizing all practical at $25K reference. Value lens NEUTRAL is reasoned through (premium justified by AI capex cycle), not a contradiction.</div>
+      </div>
+    </div>
+
+    <!-- ④ SUPPORTING FACTS — top 3 (POSITION-weighted) -->
+    <div class="ae-sec">
+      <div class="ae-sec-k"><span class="ae-sec-num">④</span><span class="ae-sec-t">SUPPORTING FACTS</span><span class="ae-sec-meta">— top 3 · POSITION weights (EARN 1.2× · VALUE 1.3× · TECH 1.0×)</span></div>
+      <div class="ae-sec-v">
+        <ol>
+          <li><b>Earnings cycle track record:</b> 4 of last 4 prints beat consensus, median surprise <b class="gn">+12.4%</b>; revisions 30d <b class="gn">↑5 / ↓0</b>; analyst PT mean $165 = <b>+15.7% upside</b>. <span class="pill dim" style="margin-left:6px">EARN · w=1.2× → 84</span></li>
+          <li><b>Quality compounder fundamentals:</b> ROE <b class="gn">92.4%</b>, ROIC <b class="gn">68%</b>, FCF margin <b class="gn">+48.2%</b>, D/E <b class="gn">0.14</b>. Capital-light, dominant-share, durable economics — the Value lens disagrees only on multiple, not on quality. <span class="pill dim" style="margin-left:6px">VALUE · w=1.3× → 78</span></li>
+          <li><b>Monte Carlo edge:</b> <b class="gn">+24pp</b> (P(T1) 58% over 3,000 paths vs P(stop) 34%, 63d sim) · adjusted edge would be +30pp+ after Bayesian update on the bullish technical + revision stack. <span class="pill dim" style="margin-left:6px">QUANT · w=1.0× → 24</span></li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- ⑤ RISKS — top 3 (POSITION-weighted) -->
+    <div class="ae-sec">
+      <div class="ae-sec-k"><span class="ae-sec-num">⑤</span><span class="ae-sec-t">RISKS</span><span class="ae-sec-meta">— top 3 · POSITION strategy-specific risks injected</span></div>
+      <div class="ae-sec-v">
+        <ol>
+          <li><b>Earnings binary in window:</b> Q4 print at +35d with implied move <b class="am">±6.2%</b> · overnight gap risk dwarfs intraday stop · pre-ER flat rule fires at day −1 unless ESP+ thesis intact. <span class="pill dim" style="margin-left:6px">EARN · w=1.2× → 108</span></li>
+          <li><b>Multiple compression risk:</b> fwd P/E <b class="am">32.4</b> elevated · POSITION hold exposed to multi-quarter de-rating if hyperscaler capex commitments soften or competitive threats emerge (AMD MI400, ASIC ramps). <span class="pill dim" style="margin-left:6px">VALUE · w=1.3× → 91</span></li>
+          <li><b>Quarterly-cycle deceleration:</b> DC-segment YoY rate has stepped down: +88% → +73% → +52% → +44% · sub-30% YoY would invalidate POSITION thesis (AI capex cycle entering plateau). <span class="pill dim" style="margin-left:6px">EARN · w=1.2× → 90</span></li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- ⑥ INVALIDATION -->
+    <div class="ae-sec">
+      <div class="ae-sec-k"><span class="ae-sec-num">⑥</span><span class="ae-sec-t">INVALIDATION CONDITION</span><span class="ae-sec-meta">— what proves this call wrong (POSITION-specific)</span></div>
+      <div class="ae-sec-v">
+        Close below <b class="rd">$135.00</b> on volume (2× ATR stop · POSITION-adjusted wider than SWING 1.25× ATR). Also invalidated if: (a) <b>Q4 print disappoints</b> — revenue miss OR DC-segment YoY &lt;30% OR fwd guidance lowered; (b) <b>regime flips to risk_off_trending</b> for &gt;30 days (multi-quarter compounding requires sustained risk-on); (c) <b>hyperscaler capex commitments revise lower</b> in the next 2 print cycles (MSFT/META/GOOGL/AMZN guidance is the leading indicator); (d) <b>SOX (semi index) breaks SMA200 on volume</b> (cohort weakness undermines single-name thesis); (e) <b>competitive announcement</b> — AMD MI400 chip launch with credible perf data, or major hyperscaler announces in-house ASIC migration timeline.
+      </div>
+    </div>
+
+    <!-- ⑦ CONVICTION -->
+    <div class="ae-sec">
+      <div class="ae-sec-k"><span class="ae-sec-num">⑦</span><span class="ae-sec-t">CONVICTION · <span class="badge-conv gn">HIGH</span></span></div>
+      <div class="ae-sec-v">
+        <div class="ae-rationale">
+          <b>4/5 lenses aligned BULLISH</b> (Quant Earnings lead · Hedge Fund · Swing Trading · CFP); 1 NEUTRAL (Value, reasoned through — premium justified by cycle). <b>Quant edge positive</b>: MC +24pp, satisfies non-negative-edge rule for HIGH. <b>Catalyst in horizon</b>: Q4 print at +35d, within 8w POSITION window. <b>Tech + Fund-quality agree</b>: setup is FRESH, ROIC 68% / FCF margin 48% is institutional-grade. <b>Setup sample</b>: Trend Continuation n=157, Wilson LB 57% — above 30% noise floor. <b>Data COMPLETE</b>, no missing fields. Self-consistency check passes: same ticker + same strategy + same data tomorrow → same call.
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑧ DATA COMPLETENESS -->
+    <div class="ae-sec">
+      <div class="ae-sec-k"><span class="ae-sec-num">⑧</span><span class="ae-sec-t">DATA COMPLETENESS · <span class="badge-conv gn">COMPLETE</span></span></div>
+      <div class="ae-sec-v">
+        <div class="ae-rationale">
+          All 10 required input fields present and within freshness windows. Price intraday (last quote &lt;15 min). Fundamentals from Q3 FY26 10-Q (most recent reported). Consensus estimates last updated 2026-05-10 (within 30d). Earnings date confirmed via primary source (company IR page). Options chain via Schwab 2h cache. Zero implausibility flags: β 1.65 plausible for semi · fwd P/E 32.4 plausible for high-growth AI · ADV $25.8B plausible for $3.5T mcap.
+        </div>
+        <div style="margin-top:8px;font-size:10.5px;color:var(--ink-3);font-family:var(--mono)"><b style="color:var(--ink-2)">Missing fields:</b> none</div>
+      </div>
+    </div>
+
+    <!-- ⑨ SOURCES & FRESHNESS -->
+    <div class="ae-sec">
+      <div class="ae-sec-k"><span class="ae-sec-num">⑨</span><span class="ae-sec-t">SOURCES &amp; FRESHNESS</span></div>
+      <div class="ae-sec-v">
+        <div class="ae-sources">
+          <span><b>Price:</b> 2026-05-12 14:30 EST · Schwab quote (5-min delayed) · fresh</span>
+          <span><b>Fundamentals:</b> Q3 FY26 10-Q · EODHD pull 2026-05-02 · fresh</span>
+          <span><b>Consensus estimates:</b> 2026-05-10 · last revision 2d ago · fresh</span>
+          <span><b>Earnings date:</b> 2026-06-17 AMC · confirmed company IR · fresh</span>
+          <span><b>Options chain:</b> Schwab feed · 2h cache · fresh</span>
+          <span><b>Insider:</b> SEC EDGAR Form 4 + EODHD cross-check · 2026-05-11 · fresh</span>
+          <span><b>Setup history:</b> n=157 closed trades · 2024-08 to 2026-05 · live signal_log</span>
+          <span><b>Scan run:</b> 2026-05-12 09:45 EST · build hash da25addc4</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑩ ALT_STRATEGY_CALL — cross-strategy sanity check -->
+    <div class="ae-sec">
+      <div class="ae-sec-k"><span class="ae-sec-num">⑩</span><span class="ae-sec-t">ALT_STRATEGY_CALL</span><span class="ae-sec-meta">— cross-strategy sanity check · what the call would be under different horizons</span></div>
+      <div class="ae-sec-v">
+        <div class="ae-alt-grid">
+          <div class="ae-alt-card">
+            <h4>SWING (3–12 days) — alt</h4>
+            <div class="ae-alt-card-call am">WATCH</div>
+            <div class="ae-alt-card-body">
+              <b>Trigger:</b> daily close <b>&gt; $145</b> on RVOL ≥ 1.5× — converts to SWING BUY. <br><br>
+              <b>Why WATCH not BUY here:</b> Earnings at +35d is <b>outside the 12d SWING horizon</b> (catalyst-not-in-window). Setup is high-quality (FRESH, MACD bull, ADX 28) which on its own COULD support a SWING BUY since SWING permits setup-driven without catalyst — but RSI 58 + RVOL 1.32× is constructive, not breakout, so the conservative call is wait for confirmation above $145.
+            </div>
+          </div>
+          <div class="ae-alt-card">
+            <h4>INVESTMENT (1Y+) — alt</h4>
+            <div class="ae-alt-card-call am">WATCH</div>
+            <div class="ae-alt-card-body">
+              <b>Trigger:</b> price retraces to <b>&lt; $115</b> (analyst PT × 0.70 = 30% margin of safety) — converts to INVESTMENT BUY. <br><br>
+              <b>Why WATCH not BUY here:</b> Quality is institutional-grade (ROE 92%, ROIC 68%, FCF margin +48%) — passes Buffett quality test. BUT fwd P/E 32.4 fails the margin-of-safety test for INVESTMENT entry. Need a 25–30% retracement to a $110–$115 zone OR multiple compression from 32× → 22× via earnings growth without price appreciation. Setup is wait-for-better-entry, not avoid.
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:var(--ink-3);line-height:1.6">
+          <b style="color:var(--ink-2)">Discriminator triggered (3–12d overlap zone):</b> POSITION wins over SWING here because the trade is <b style="color:var(--ink-1)">catalyst-driven</b> (Q4 print + AI cycle), not purely setup-driven. The technical setup supports the entry but isn't the reason to act — the catalyst is. <b style="color:var(--ink-2)">Material differences:</b> SWING and INVESTMENT both downgrade to WATCH, demonstrating that the POSITION call is uniquely actionable in this horizon · all three valid simultaneously.
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑪ STRUCT (the 18-field engine output) -->
+    <div class="ae-sec">
+      <div class="ae-sec-k"><span class="ae-sec-num">⑪</span><span class="ae-sec-t">ENGINE STRUCT</span><span class="ae-sec-meta">— the 18-field output the engine returns · consumed by all 3 surfaces (Overview / Plan / Position Review)</span></div>
+      <div class="ae-sec-v">
+<div class="ae-struct">{
+  <span class="key">ticker</span>:                 <span class="str">"NVDA"</span>,
+  <span class="key">company_name</span>:           <span class="str">"NVIDIA Corporation"</span>,
+  <span class="key">as_of_timestamp</span>:        <span class="str">"2026-05-12T14:30:00-04:00"</span>,
+  <span class="key">price_at_analysis</span>:      <span class="num">142.65</span>,
+  <span class="key">strategy</span>:               <span class="str">"POSITION"</span>,
+  <span class="key">horizon</span>:                <span class="str">"4–6 weeks"</span>,
+  <span class="key">lead_lens</span>:              <span class="str">"QUANT EARNINGS"</span>,
+  <span class="key">call</span>:                   <span class="str">"BUY"</span>,
+  <span class="key">call_specifics</span>: {
+    <span class="key">entry_zone</span>:           [<span class="num">140.50</span>, <span class="num">143.20</span>],
+    <span class="key">price_target_T1</span>:      <span class="num">158.00</span>,
+    <span class="key">price_target_T2</span>:      <span class="num">172.00</span>,
+    <span class="key">expected_hold_weeks</span>:  <span class="str">"4–6"</span>,
+    <span class="key">catalyst</span>:             <span class="str">"Q4 FY26 earnings 2026-06-17 AMC"</span>,
+    <span class="key">catalyst_trigger</span>:     <span class="str">"revenue beat ≥+5% + raised DC-segment guide"</span>,
+    <span class="key">key_metric_to_track</span>:  <span class="str">"Data-Center segment YoY growth"</span>,
+    <span class="key">downside_support</span>:     <span class="num">135.00</span>,
+    <span class="key">stop</span>:                 <span class="num">135.00</span>,
+    <span class="key">position_size_pct</span>:    <span class="num">5.5</span>,
+    <span class="key">technical_setup</span>:      <span class="str">"Trend Continuation · EMA21 pullback · FRESH"</span>
+  },
+  <span class="key">primary_thesis</span>:         <span class="str">"NVDA POSITION BUY on AI-capex earnings cycle. Q4 print +35d ..."</span>,
+  <span class="key">cross_checks</span>: [
+    { <span class="key">lens</span>: <span class="str">"HEDGE FUND"</span>,     <span class="key">vote</span>: <span class="str">"BULLISH"</span>, <span class="key">summary</span>: <span class="str">"MC edge +24pp, regime risk-on-choppy ..."</span> },
+    { <span class="key">lens</span>: <span class="str">"VALUE"</span>,           <span class="key">vote</span>: <span class="str">"NEUTRAL"</span>, <span class="key">summary</span>: <span class="str">"fwd P/E 32.4 premium, ROE 92.4% durable ..."</span> },
+    { <span class="key">lens</span>: <span class="str">"SWING TRADING"</span>,   <span class="key">vote</span>: <span class="str">"BULLISH"</span>, <span class="key">summary</span>: <span class="str">"RSI 58, MACD bull, FRESH, RS 91/100 ..."</span> },
+    { <span class="key">lens</span>: <span class="str">"CFP"</span>,             <span class="key">vote</span>: <span class="str">"BULLISH"</span>, <span class="key">summary</span>: <span class="str">"β 1.65, ADV $25.8B, Kelly 5.5% × 1.3 boost ..."</span> }
+  ],
+  <span class="key">disagreements</span>:          [],   <span class="ctx">// no material disagreement; Value NEUTRAL reasoned through</span>
+  <span class="key">supporting_facts</span>: [
+    { <span class="key">cat</span>: <span class="str">"EARN"</span>,  <span class="key">w</span>: <span class="num">1.2</span>, <span class="key">score</span>: <span class="num">84</span>, <span class="key">text</span>: <span class="str">"4/4 prints beat · median surprise +12.4% ..."</span> },
+    { <span class="key">cat</span>: <span class="str">"VALUE"</span>, <span class="key">w</span>: <span class="num">1.3</span>, <span class="key">score</span>: <span class="num">78</span>, <span class="key">text</span>: <span class="str">"ROE 92.4%, ROIC 68%, FCF margin +48.2% ..."</span> },
+    { <span class="key">cat</span>: <span class="str">"QUANT"</span>, <span class="key">w</span>: <span class="num">1.0</span>, <span class="key">score</span>: <span class="num">24</span>, <span class="key">text</span>: <span class="str">"Monte Carlo edge +24pp · adjusted +30pp ..."</span> }
+  ],
+  <span class="key">risks</span>: [
+    { <span class="key">cat</span>: <span class="str">"EARN"</span>,  <span class="key">w</span>: <span class="num">1.2</span>, <span class="key">score</span>: <span class="num">108</span>, <span class="key">text</span>: <span class="str">"Earnings binary at +35d · implied ±6.2% ..."</span> },
+    { <span class="key">cat</span>: <span class="str">"VALUE"</span>, <span class="key">w</span>: <span class="num">1.3</span>, <span class="key">score</span>: <span class="num">91</span>,  <span class="key">text</span>: <span class="str">"Multiple compression risk · fwd P/E 32.4 ..."</span> },
+    { <span class="key">cat</span>: <span class="str">"EARN"</span>,  <span class="key">w</span>: <span class="num">1.2</span>, <span class="key">score</span>: <span class="num">90</span>,  <span class="key">text</span>: <span class="str">"DC-segment YoY decel · sub-30% invalidates ..."</span> }
+  ],
+  <span class="key">invalidation</span>:           <span class="str">"Close &lt; $135 on volume · Q4 print disappoints · regime flips ..."</span>,
+  <span class="key">conviction</span>:             <span class="str">"HIGH"</span>,
+  <span class="key">conviction_reason</span>:      <span class="str">"4/5 aligned BULLISH · quant edge +24pp positive · catalyst in horizon ..."</span>,
+  <span class="key">data_completeness</span>:      <span class="str">"COMPLETE"</span>,
+  <span class="key">missing_fields</span>:         [],
+  <span class="key">sources_and_freshness</span>: {
+    <span class="key">price</span>:        { <span class="key">ts</span>: <span class="str">"2026-05-12T14:30:00-04:00"</span>, <span class="key">source</span>: <span class="str">"Schwab"</span>,  <span class="key">freshness</span>: <span class="str">"fresh"</span> },
+    <span class="key">fundamentals</span>: { <span class="key">period</span>: <span class="str">"Q3 FY26"</span>,            <span class="key">source</span>: <span class="str">"EODHD"</span>,  <span class="key">freshness</span>: <span class="str">"fresh"</span> },
+    <span class="key">estimates</span>:    { <span class="key">ts</span>: <span class="str">"2026-05-10"</span>,             <span class="key">source</span>: <span class="str">"EODHD"</span>,  <span class="key">freshness</span>: <span class="str">"fresh"</span> },
+    <span class="key">earnings_date</span>: { <span class="key">date</span>: <span class="str">"2026-06-17"</span>,           <span class="key">source</span>: <span class="str">"IR primary"</span>, <span class="key">freshness</span>: <span class="str">"fresh"</span> },
+    <span class="key">options</span>:      { <span class="key">cache_age</span>: <span class="str">"2h"</span>,              <span class="key">source</span>: <span class="str">"Schwab"</span>,  <span class="key">freshness</span>: <span class="str">"fresh"</span> },
+    <span class="key">insider</span>:      { <span class="key">ts</span>: <span class="str">"2026-05-11"</span>,             <span class="key">source</span>: <span class="str">"SEC EDGAR + EODHD"</span>, <span class="key">freshness</span>: <span class="str">"fresh"</span> },
+    <span class="key">setup_history</span>: { <span class="key">n</span>: <span class="num">157</span>,                     <span class="key">source</span>: <span class="str">"live signal_log"</span>,  <span class="key">freshness</span>: <span class="str">"current"</span> }
+  },
+  <span class="key">alt_strategy_call</span>: {
+    <span class="key">SWING</span>: {
+      <span class="key">call</span>:    <span class="str">"WATCH"</span>,
+      <span class="key">trigger</span>: <span class="str">"daily close &gt; $145 on RVOL ≥ 1.5× — converts to SWING BUY"</span>,
+      <span class="key">reason</span>:  <span class="str">"catalyst not in 12d SWING window; setup constructive but not breakout"</span>
+    },
+    <span class="key">INVESTMENT</span>: {
+      <span class="key">call</span>:    <span class="str">"WATCH"</span>,
+      <span class="key">trigger</span>: <span class="str">"price retraces &lt; $115 (PT × 0.70 = 30% MoS) — converts to INVESTMENT BUY"</span>,
+      <span class="key">reason</span>:  <span class="str">"quality passes Buffett test (ROE 92%, ROIC 68%) but fwd P/E 32.4 fails MoS requirement"</span>
+    },
+    <span class="key">discriminator_note</span>: <span class="str">"POSITION wins SWING/POSITION overlap because trade is catalyst-driven, not setup-driven"</span>
+  }
+}</div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

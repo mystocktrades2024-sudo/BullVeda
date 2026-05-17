@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Home v5 — Visual Rich</title>
+<style>
+  :root{
+    --bg-1: #0a0d0c; --bg-2: #0f1311; --bg-3: #141816;
+    --line: #1d2520; --line-2: #2a352e;
+    --ink: #d8d6cc; --ink-1: #b0aea3; --ink-2: #80847a; --ink-3: #545851;
+    --gn: #5be57c; --gn-bg: rgba(91,229,124,0.08); --gn-dim: rgba(91,229,124,0.30);
+    --rd: #ff6b5b; --rd-bg: rgba(255,107,91,0.08); --rd-dim: rgba(255,107,91,0.30);
+    --amb: #ffb95c; --amb-bg: rgba(255,185,92,0.08); --amb-dim: rgba(255,185,92,0.30);
+    --cy: #5ec8d8; --cy-bg: rgba(94,200,216,0.08);
+    --copper: #d97757; --copper-bg: rgba(217,119,87,0.08);
+    --vio: #a78bfa; --vio-bg: rgba(167,139,250,0.08);
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg-1);color:var(--ink);font:13px var(--sans)}
+  .wrap{max-width:1620px;margin:0 auto;padding:0 24px 32px}
+  a{color:inherit;text-decoration:none;cursor:pointer}
+  a.tk{color:var(--ink);font-weight:800;letter-spacing:.04em;border-bottom:1px solid transparent;transition:all 80ms}
+  a.tk:hover{color:var(--copper);border-bottom-color:var(--copper)}
+  a.ext::after{content:'↗';font-size:.85em;color:var(--ink-3);margin-left:3px}
+  .src{color:var(--ink-3);font-size:9.5px;font-weight:500;margin-left:6px;letter-spacing:.02em}
+  .star{color:var(--ink-3);font-size:13px;cursor:pointer;opacity:0;transition:all 80ms;padding:0 4px}
+  .row:hover .star, .mv-row:hover .star, .esp-row:hover .star, .disc-row:hover .star{opacity:.7}
+  .star:hover{opacity:1 !important;color:var(--amb)}
+  .star.on{opacity:.9 !important;color:var(--amb)}
+
+  /* ───── LIVE TICKER TAPE (new · scrolls horizontally at top) ───── */
+  .tape-strip{
+    background:#000;border-bottom:1px solid var(--line);
+    overflow:hidden;height:36px;position:sticky;top:0;z-index:60;
+  }
+  .tape-strip-inner{display:flex;gap:24px;padding:0 24px;align-items:center;height:100%;animation:tape 60s linear infinite;white-space:nowrap}
+  @keyframes tape{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .tape-item{display:inline-flex;align-items:center;gap:5px;font:600 11.5px var(--mono);color:var(--ink-1);letter-spacing:.04em}
+  .tape-item .sym{font-weight:800;color:var(--ink)}
+  .tape-item .px{color:var(--ink-1)}
+  .tape-item .chg{font-weight:700}
+  .tape-item .chg.gn{color:var(--gn)} .tape-item .chg.rd{color:var(--rd)}
+
+  /* ───── TOP BAR ───── */
+  .topbar{
+    position:sticky;top:36px;z-index:50;
+    background:rgba(10,13,12,0.92);backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--line);
+    display:grid;grid-template-columns:auto 1fr auto auto auto auto auto auto;gap:14px;
+    padding:11px 24px;align-items:center;
+  }
+  .tb-brand{font:800 14px 'Times New Roman',serif;color:var(--copper);letter-spacing:.02em;font-style:italic}
+  .tb-brand small{font-style:normal;font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--ink-3);font-weight:600;margin-left:6px;text-transform:uppercase}
+  .tb-toggle{display:flex;background:var(--bg-2);border:1px solid var(--line);border-radius:3px;padding:2px}
+  .tb-toggle button{background:transparent;border:0;color:var(--ink-3);font:700 9.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:4px 9px;border-radius:2px;cursor:pointer;transition:all 80ms}
+  .tb-toggle button.on{background:var(--copper);color:var(--bg-1)}
+  .tb-toggle button:hover:not(.on){color:var(--ink-1)}
+  .tb-icon{display:flex;align-items:center;gap:5px;padding:6px 10px;background:var(--bg-2);border:1px solid var(--line);border-radius:3px;font:600 11px var(--mono);color:var(--ink-2);letter-spacing:.04em;cursor:pointer;transition:all 80ms;position:relative}
+  .tb-icon:hover{color:var(--ink);border-color:var(--ink-3)}
+  .tb-icon b{color:var(--copper);font-weight:800}
+  .tb-icon .dot{position:absolute;top:6px;right:6px;width:6px;height:6px;border-radius:50%;background:var(--rd);animation:pulse 1.4s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .tb-mkt{display:flex;align-items:center;gap:14px;padding:6px 14px;background:var(--bg-2);border:1px solid var(--line);border-radius:3px;font-family:var(--mono)}
+  .tb-mkt .item{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
+  .tb-mkt .item .k{font:600 9px var(--mono);color:var(--ink-3);letter-spacing:.10em;text-transform:uppercase}
+  .tb-mkt .item .v{font:700 12px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink-1)}
+  .tb-mkt .v.gn{color:var(--gn)} .tb-mkt .v.rd{color:var(--rd)} .tb-mkt .v.am{color:var(--amb)}
+  .tb-clock{display:flex;flex-direction:column;align-items:flex-end;gap:1px;font-family:var(--mono)}
+  .tb-clock .status{font:800 10px var(--mono);color:var(--gn);letter-spacing:.10em;text-transform:uppercase;display:flex;align-items:center;gap:6px}
+  .tb-clock .status::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--gn);animation:pulse 1.8s infinite}
+  .tb-clock .time{font:600 11px var(--mono);color:var(--ink-2);letter-spacing:.04em}
+
+  /* ───── SECTION HEADERS ───── */
+  .qc-h{display:flex;justify-content:space-between;align-items:baseline;margin:28px 4px 12px;padding:0 4px}
+  .qc-h .q{font:700 17px var(--sans);color:var(--ink);letter-spacing:-0.005em;display:flex;align-items:center;gap:10px}
+  .qc-h .q .ico{font-size:18px}
+  .qc-h .r{font:600 10.5px var(--mono);color:var(--ink-3);letter-spacing:.06em;display:flex;align-items:center;gap:10px}
+  .qc-h .r a{color:var(--copper)}
+
+  /* ═══════════════ §0 · SYSTEM PULSE — top strip showing system health at a glance ═══════════════ */
+  .pulse-bar{background:var(--bg-2);border:1px solid var(--line);border-left:3px solid var(--copper);border-radius:3px;padding:10px 16px;display:grid;grid-template-columns:auto auto auto auto auto auto auto auto auto auto;gap:18px;align-items:center;margin-top:14px;font-family:var(--mono)}
+  .pb-section{display:flex;align-items:center;gap:8px}
+  .pb-k{font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:.10em;text-transform:uppercase}
+  .pb-v{font:800 14px var(--mono);font-variant-numeric:tabular-nums}
+  .pb-v.gn{color:var(--gn)} .pb-v.am{color:var(--amb)} .pb-v.rd{color:var(--rd)} .pb-v.cy{color:var(--cy)}
+  .pb-divider{width:1px;height:24px;background:var(--line)}
+  .pb-dots{display:inline-flex;gap:3px;align-items:center}
+  .pb-dots span{font-size:13px;line-height:1}
+  .pb-pulse-dot{width:8px;height:8px;border-radius:50%;background:var(--gn);box-shadow:0 0 6px var(--gn);animation:pulse 1.4s infinite}
+  .pb-context{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;background:var(--bg-3);border-radius:2px;border-left:2px solid var(--copper);font:700 10px var(--mono);color:var(--ink-1);letter-spacing:.04em}
+
+  /* ═══════════════ §1 · TODAY'S READ — visually rich hero with charts ═══════════════ */
+  .read{
+    background:linear-gradient(135deg,rgba(91,229,124,0.04) 0%,var(--bg-2) 50%,rgba(94,200,216,0.04) 100%);
+    border:1px solid var(--line);border-radius:4px;
+    padding:0;overflow:hidden;position:relative;
+  }
+  .read::before{
+    content:'';position:absolute;top:0;left:0;right:0;height:3px;
+    background:linear-gradient(90deg,var(--gn),var(--cy),var(--amb),var(--copper));
+    opacity:0.6;
+  }
+  .read-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr 1fr;gap:0}
+  .read-cell{padding:20px 22px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:8px;justify-content:space-between;min-height:200px}
+  .read-cell:last-child{border-right:0}
+  .read-verdict .head{font:800 24px var(--sans);color:var(--ink);letter-spacing:-0.01em;line-height:1.2;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .read-verdict .verb{color:var(--amb)}
+  .read-sub{font:500 12px var(--mono);color:var(--ink-2);letter-spacing:.02em;line-height:1.6}
+  .read-sub b{color:var(--ink-1);font-weight:700}
+  .read-tag{display:inline-flex;gap:5px;padding:3px 9px;border-radius:2px;font:700 10px var(--mono);letter-spacing:.06em;background:var(--amb-bg);color:var(--amb);width:fit-content}
+  .read-stat-k{font:600 9.5px var(--mono);color:var(--ink-3);letter-spacing:.12em;text-transform:uppercase}
+  .read-stat-v{font:800 28px var(--mono);font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-0.01em}
+  .read-stat-v.gn{color:var(--gn)} .read-stat-v.rd{color:var(--rd)} .read-stat-v.am{color:var(--amb)} .read-stat-v.cy{color:var(--cy)}
+  .read-stat-sub{font:500 11px var(--mono);color:var(--ink-2);letter-spacing:.02em;line-height:1.5}
+  /* Radial gauge (replaces sparkline for breadth + VIX) */
+  .gauge{position:relative;width:100px;height:60px;margin:auto 0 0}
+  .gauge-num{position:absolute;top:48%;left:50%;transform:translate(-50%,-50%);font:800 18px var(--mono);font-variant-numeric:tabular-nums}
+  /* Intraday SPX chart */
+  .read-chart{height:50px;display:block;margin-top:5px}
+
+  /* What changed strip with mini ticker chips */
+  .changed{background:var(--bg-2);border:1px solid var(--line);border-left:3px solid var(--copper);border-radius:3px;padding:10px 16px;margin-top:10px;display:flex;align-items:center;gap:14px;font:600 11.5px var(--mono);color:var(--ink-1);letter-spacing:.04em;flex-wrap:wrap}
+  .changed .pre{color:var(--copper);font-weight:800;letter-spacing:.10em;text-transform:uppercase;font-size:10px}
+  .changed .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:2px;font:700 10.5px var(--mono);letter-spacing:.06em}
+  .changed .pill.new{background:var(--gn-bg);color:var(--gn)}
+  .changed .pill.up{background:var(--cy-bg);color:var(--cy)}
+  .changed .pill.down{background:var(--rd-bg);color:var(--rd)}
+  .changed .since{margin-left:auto;color:var(--ink-3);font-weight:500}
+
+  /* ═══════════════ §2 · SLEEVE ATTRIBUTION — richer cards with equity curves ═══════════════ */
+  .sleeves{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .sleeve{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;padding:12px 14px;display:flex;flex-direction:column;gap:7px;cursor:pointer;transition:all 100ms;position:relative;overflow:hidden}
+  .sleeve:hover{border-color:var(--ink-3);transform:translateY(-1px)}
+  .sleeve.hot{border-top:3px solid var(--gn)}
+  .sleeve.warm{border-top:3px solid var(--amb)}
+  .sleeve.cold{border-top:3px solid var(--ink-3);opacity:.7}
+  .sleeve-head{display:flex;justify-content:space-between;align-items:flex-start}
+  .sleeve-name{font:800 11.5px var(--mono);color:var(--ink);letter-spacing:.10em;text-transform:uppercase;display:flex;align-items:center;gap:5px}
+  .sleeve-name .ico{font-size:13px}
+  .sleeve-count{font:800 24px var(--sans);font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-0.02em}
+  .sleeve-count.gn{color:var(--gn)} .sleeve-count.am{color:var(--amb)} .sleeve-count.rd{color:var(--rd)}
+  .sleeve-meta{font:500 10px var(--mono);color:var(--ink-2);letter-spacing:.02em;line-height:1.5}
+  .sleeve-meta b{color:var(--ink-1);font-weight:700}
+  .sleeve-curve{display:block;width:100%;height:30px;margin-top:3px}
+  /* Hot-streak dots row · last 10 W/L outcomes */
+  .sleeve-streak{display:flex;align-items:center;gap:5px;font:600 9px var(--mono);color:var(--ink-3);letter-spacing:.06em;padding-top:5px;margin-top:2px;border-top:1px dashed var(--line)}
+  .sleeve-streak .lbl{text-transform:uppercase;font-weight:700}
+  .sleeve-streak .dots{display:inline-flex;gap:2px;flex:1;justify-content:center}
+  .sleeve-streak .dots span{font-size:10px;line-height:1}
+  .sleeve-streak .ratio{font-weight:800;color:var(--ink-1)}
+  /* Status pulse dot */
+  .sleeve-pulse{position:absolute;top:8px;right:8px;width:8px;height:8px;border-radius:50%}
+  .sleeve.hot .sleeve-pulse{background:var(--gn);animation:pulse 1.4s infinite;box-shadow:0 0 8px var(--gn)}
+  .sleeve.warm .sleeve-pulse{background:var(--amb);box-shadow:0 0 6px var(--amb)}
+  .sleeve.cold .sleeve-pulse{background:var(--ink-3)}
+
+  /* ═══════════════ §3 · DISCOVERY — richer cards ═══════════════ */
+  .discovery{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .disc-card{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;display:flex;flex-direction:column;overflow:hidden;min-height:280px}
+  .disc-card.highs{border-top:2px solid var(--gn)}
+  .disc-card.sqz{border-top:2px solid var(--vio)}
+  .disc-card.insider{border-top:2px solid var(--copper)}
+  .disc-card.uoa{border-top:2px solid var(--rd)}
+  .disc-head{padding:11px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline}
+  .disc-head .t{font:800 11px var(--mono);letter-spacing:.10em;text-transform:uppercase}
+  .disc-card.highs .disc-head .t{color:var(--gn)}
+  .disc-card.sqz .disc-head .t{color:var(--vio)}
+  .disc-card.insider .disc-head .t{color:var(--copper)}
+  .disc-card.uoa .disc-head .t{color:var(--rd)}
+  .disc-head .c{font:800 14px var(--mono);color:var(--ink)}
+  .disc-row{display:grid;grid-template-columns:auto 22px 56px 1fr 50px;gap:6px;align-items:center;padding:8px 14px;border-bottom:1px dashed var(--line);font:600 11.5px var(--mono);transition:background 80ms}
+  .disc-row:hover{background:var(--bg-3)}
+  .disc-row:last-child{border-bottom:0}
+  .disc-row .logo{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:800 9px var(--sans);color:#fff}
+  .disc-row .meta{font:500 10px var(--mono);color:var(--ink-3);letter-spacing:.02em}
+  .disc-row .px{text-align:right;color:var(--ink);font-weight:700;font-size:11px}
+  .disc-row .px.gn{color:var(--gn)} .disc-row .px.rd{color:var(--rd)} .disc-row .px.vio{color:var(--vio)} .disc-row .px.copper{color:var(--copper)}
+
+  /* Logo brand colors (small set for prototype) */
+  .lg-nvda{background:#76b900;color:#000} .lg-aapl{background:#fff;color:#000} .lg-msft{background:#fff;color:#00a4ef}
+  .lg-googl{background:#fff;color:#4285f4} .lg-amzn{background:#ff9900;color:#000} .lg-tsla{background:#cc0000;color:#fff}
+  .lg-meta{background:#0866ff;color:#fff} .lg-pltr{background:#000;color:#fff} .lg-dxcm{background:#0066b3;color:#fff}
+  .lg-amd{background:#000;color:#fff} .lg-cost{background:#005daa;color:#fff} .lg-default{background:#2a3540;color:#d8d6cc}
+
+  /* ═══════════════ §4 · BUY · WATCH · AVOID — CLEANER layout v2 ═══════════════ */
+  .cockpit{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .deck{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;display:flex;flex-direction:column;overflow:hidden;min-height:420px;position:relative}
+  .deck.buy{border-top:3px solid var(--gn)}
+  .deck.watch{border-top:3px solid var(--amb)}
+  .deck.avoid{border-top:3px solid var(--rd)}
+  .deck-head{padding:14px 18px;border-bottom:1px solid var(--line);position:relative;z-index:1;display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+  .deck-head-l{display:flex;flex-direction:column;gap:4px}
+  .deck-head .t{font:800 11px var(--mono);letter-spacing:.16em;text-transform:uppercase;display:flex;align-items:center;gap:7px}
+  .deck-head .t .ico{font-size:14px;line-height:1}
+  .deck.buy .deck-head .t{color:var(--gn)}
+  .deck.watch .deck-head .t{color:var(--amb)}
+  .deck.avoid .deck-head .t{color:var(--rd)}
+  .deck-head .sub{font:500 10.5px var(--mono);color:var(--ink-3);letter-spacing:.04em}
+  .deck-head .count{font:800 30px var(--sans);font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-0.03em}
+  .deck.buy .deck-head .count{color:var(--gn)} .deck.watch .deck-head .count{color:var(--amb)} .deck.avoid .deck-head .count{color:var(--rd)}
+  .deck-body{flex:1;display:flex;flex-direction:column;position:relative;z-index:1}
+
+  /* Row with cleaner grid: logo · ticker+meta · spark · price · action */
+  .row{
+    display:grid;
+    grid-template-columns: 14px 36px 1fr 84px auto auto;
+    gap:10px;align-items:center;
+    padding:14px 16px;
+    border-bottom:1px solid var(--line);
+    transition:background 80ms;
+    position:relative;cursor:pointer;
+  }
+  .row:hover{background:var(--bg-3)}
+  .row:last-child{border-bottom:0}
+  .row .star{position:relative;justify-self:center;padding:0;font-size:14px}
+  .row .logo{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:800 13px var(--sans);flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.06)}
+  .row .ticker-block{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .row .ticker-block a.tk{font:800 14px var(--sans);color:var(--ink);letter-spacing:.04em;line-height:1.1}
+  .row .ticker-block .meta{font:500 10.5px var(--mono);color:var(--ink-3);letter-spacing:.02em;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .ticker-block .meta b{color:var(--ink-1);font-weight:700}
+  .row .spark{width:84px;height:32px;display:block}
+  .row .px-block{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-family:var(--mono);text-align:right;min-width:80px}
+  .row .px-block .px{font:800 14px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink);line-height:1}
+  .row .px-block .px.gn{color:var(--gn)} .row .px-block .px.rd{color:var(--rd)}
+  .row .px-block .quality{font:600 9.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+  .row .px-block .quality.gn{color:var(--gn)} .row .px-block .quality.am{color:var(--amb)} .row .px-block .quality.rd{color:var(--rd)}
+  .row .action{
+    text-align:center;font:800 10px var(--mono);letter-spacing:.10em;text-transform:uppercase;
+    padding:6px 11px;border-radius:3px;
+    min-width:64px;
+  }
+  .row .action.gn{background:var(--gn-bg);color:var(--gn);border:1px solid var(--gn-dim)}
+  .row .action.am{background:var(--amb-bg);color:var(--amb);border:1px solid var(--amb-dim)}
+  .row .action.rd{background:var(--rd-bg);color:var(--rd);border:1px solid var(--rd-dim)}
+
+  /* Cleaner NEW/UP/DOWN badge — small pill in upper right */
+  .badge{position:absolute;top:6px;right:8px;font:800 8.5px var(--mono);letter-spacing:.12em;padding:2px 6px;border-radius:2px;text-transform:uppercase;z-index:3}
+  .badge.new{background:var(--gn);color:var(--bg-1)}
+  .badge.up{background:var(--cy);color:var(--bg-1)}
+  .badge.down{background:var(--rd);color:var(--bg-1)}
+  .deck-foot{padding:11px 16px;border-top:1px solid var(--line);font:600 10.5px var(--mono);color:var(--ink-2);letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center;position:relative;z-index:1;background:rgba(0,0,0,0.15)}
+  .deck-foot b{color:var(--ink);font-weight:800}
+  .deck-foot a{color:var(--copper);font-weight:700;text-decoration:none}
+  .deck-foot a:hover{text-decoration:underline}
+
+  /* ═══════════════ §5 · ESP LEADERBOARD — PODIUM v2 ═══════════════ */
+  .esp{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;border-top:2px solid var(--amb);overflow:hidden}
+  .esp-head{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline}
+  .esp-head .t{font:800 11px var(--mono);color:var(--amb);letter-spacing:.10em;text-transform:uppercase}
+  .esp-head .sub{font:500 10.5px var(--mono);color:var(--ink-3);letter-spacing:.04em}
+  /* Podium row · top 5 stocks side-by-side with sized cards */
+  .esp-podium{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:16px}
+  .esp-card{
+    background:linear-gradient(180deg,var(--amb-bg) 0%,var(--bg-3) 50%,var(--bg-3) 100%);
+    border:1px solid var(--line);border-radius:4px;
+    padding:14px 12px;text-align:center;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:6px;
+    transition:all 100ms;position:relative;overflow:hidden;
+  }
+  .esp-card:hover{transform:translateY(-2px);border-color:var(--amb)}
+  .esp-card.rank-1{border:2px solid var(--amb);box-shadow:0 4px 20px rgba(255,185,92,0.20)}
+  .esp-card .rank{position:absolute;top:6px;left:8px;font:800 11px var(--mono);color:var(--amb);letter-spacing:.10em}
+  .esp-card .rank.gold{color:#ffd700}
+  .esp-card .when-chip{position:absolute;top:6px;right:8px;font:800 8.5px var(--mono);padding:2px 6px;background:var(--bg-1);color:var(--ink-1);border-radius:2px;letter-spacing:.06em;border:1px solid var(--line-2)}
+  .esp-card .logo{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:800 16px var(--sans);box-shadow:0 3px 10px rgba(0,0,0,0.3);margin-top:14px}
+  .esp-card .sym{font:800 16px var(--sans);color:var(--ink);letter-spacing:.04em;margin-top:2px}
+  /* Radial confidence gauge */
+  .esp-gauge{position:relative;width:80px;height:80px;margin-top:4px}
+  .esp-gauge svg{width:100%;height:100%}
+  .esp-gauge-v{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font:800 18px var(--mono);color:var(--gn);font-variant-numeric:tabular-nums}
+  .esp-card .esp-label{font:600 9.5px var(--mono);color:var(--ink-3);letter-spacing:.08em;text-transform:uppercase}
+  .esp-card .esp-price{font:700 11px var(--mono);color:var(--ink-1);font-variant-numeric:tabular-nums;padding-top:5px;border-top:1px dashed var(--line);width:100%;text-align:center;margin-top:4px}
+  .esp-card .esp-price small{display:block;color:var(--ink-3);font-size:9px;font-weight:500;margin-top:1px}
+
+  /* ═══════════════ §6 · MOVERS + CALENDAR (with calendar timeline) ═══════════════ */
+  .movers-row{display:grid;grid-template-columns:1.3fr 1.3fr 1.4fr;gap:12px}
+  .mv-card{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;display:flex;flex-direction:column}
+  .mv-card.gainers{border-left:2px solid var(--gn)}
+  .mv-card.losers{border-left:2px solid var(--rd)}
+  .mv-card.cal{border-left:2px solid var(--amb)}
+  .mv-card-head{padding:11px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;font:700 11px var(--mono);letter-spacing:.10em;text-transform:uppercase;color:var(--ink-1)}
+  .mv-card.gainers .mv-card-head{color:var(--gn)}
+  .mv-card.losers .mv-card-head{color:var(--rd)}
+  .mv-card.cal .mv-card-head{color:var(--amb)}
+  .mv-row{display:grid;grid-template-columns:30px 60px 1fr 80px 60px;gap:8px;align-items:center;padding:9px 14px;border-bottom:1px dashed var(--line);font:600 11.5px var(--mono);transition:background 80ms;cursor:pointer}
+  .mv-row:hover{background:var(--bg-3)}
+  .mv-row:last-child{border-bottom:0}
+  .mv-row .logo{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:800 10px var(--sans);color:#fff}
+  .mv-row .sym{font:800 12px var(--sans);color:var(--ink)}
+  .mv-row .name{font-size:9.5px;color:var(--ink-3);font-weight:500;letter-spacing:.02em;margin-top:1px;display:block}
+  .mv-spark{width:80px;height:22px;display:block}
+  .mv-px{text-align:right;color:var(--ink);font-weight:700;font-size:11px}
+  .mv-px.gn{color:var(--gn)} .mv-px.rd{color:var(--rd)}
+  .mv-tail{text-align:right;font:600 9.5px var(--mono);color:var(--ink-3);letter-spacing:.04em}
+  /* Calendar v2 — vertical day list (each day = one row with events) */
+  .cal-list{display:flex;flex-direction:column}
+  .cal-day-row{display:grid;grid-template-columns:46px 1fr;gap:12px;padding:10px 14px;border-bottom:1px dashed var(--line);align-items:center;cursor:pointer;transition:background 80ms}
+  .cal-day-row:hover{background:var(--bg-3)}
+  .cal-day-row:last-child{border-bottom:0}
+  .cal-day-row.today{background:rgba(217,119,87,0.06);border-left:2px solid var(--copper);padding-left:12px}
+  .cal-d{text-align:center;font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:.08em;text-transform:uppercase;border-right:1px dashed var(--line);padding-right:8px}
+  .cal-d b{display:block;color:var(--ink);font-weight:800;font-size:16px;letter-spacing:0;margin-top:1px}
+  .cal-day-row.today .cal-d b{color:var(--copper)}
+  .cal-events-list{display:flex;flex-wrap:wrap;gap:4px}
+  .cal-event{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:3px;font:700 10.5px var(--mono);letter-spacing:.04em;background:var(--bg-3);border:1px solid var(--line)}
+  .cal-event .ico{font-size:12px;line-height:1}
+  .cal-event .tk{color:var(--ink);font-weight:800;font-family:var(--sans);font-size:11px;letter-spacing:.04em}
+  .cal-event .desc{color:var(--ink-2);font-weight:500;font-size:10px}
+  .cal-event .tg{padding:1px 5px;border-radius:2px;font:800 8.5px var(--mono);letter-spacing:.06em}
+  .cal-event.macro{background:var(--gn-bg);border-color:var(--gn-dim);color:var(--gn)}
+  .cal-event.macro .tg{background:var(--gn);color:var(--bg-1)}
+  .cal-event.er{background:var(--amb-bg);border-color:var(--amb-dim);color:var(--amb)}
+  .cal-event.er .tg{background:var(--amb);color:var(--bg-1)}
+  .cal-event.div{background:var(--cy-bg);border-color:rgba(94,200,216,0.30);color:var(--cy)}
+  .cal-event.div .tg{background:var(--cy);color:var(--bg-1)}
+  .cal-event.high-impact{box-shadow:0 0 0 1px currentColor inset}
+  .cal-empty{color:var(--ink-3);font:500 11px var(--mono);font-style:italic;letter-spacing:.02em}
+
+  /* ═══════════════ §7 · CROSS-REFERENCES with overlay charts ═══════════════ */
+  .similar{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;display:grid;grid-template-columns:repeat(3,1fr);gap:0}
+  .sim-card{padding:14px 16px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+  .sim-card:last-child{border-right:0}
+  .sim-head{font:700 10.5px var(--mono);color:var(--ink-2);letter-spacing:.06em;line-height:1.5}
+  .sim-head b{color:var(--ink)}
+  .sim-chart-wrap{background:var(--bg-3);border-radius:2px;padding:8px;position:relative;height:110px}
+  .sim-chart-wrap svg{width:100%;height:100%;display:block}
+  .sim-legend{display:flex;gap:10px;font:600 9.5px var(--mono);color:var(--ink-2);letter-spacing:.04em;justify-content:center;padding-top:4px}
+  .sim-legend i{display:inline-block;width:10px;height:2px;margin-right:4px;vertical-align:middle}
+  .sim-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+  .sim-stat{text-align:center;background:var(--bg-3);padding:6px 4px;border-radius:2px;font:600 10px var(--mono);color:var(--ink-3);letter-spacing:.04em}
+  .sim-stat b{display:block;color:var(--ink);font-weight:800;font-size:14px;margin-top:1px;font-variant-numeric:tabular-nums}
+  .sim-stat b.gn{color:var(--gn)} .sim-stat b.rd{color:var(--rd)} .sim-stat b.am{color:var(--amb)}
+
+  /* ═══════════════ §8 · INFO TAPE with brand logos ═══════════════ */
+  .pulse{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;padding:0;overflow:hidden}
+  .pulse-head{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+  .tape-filters{display:flex;gap:4px;flex-wrap:wrap}
+  .tape-filter{padding:3px 9px;background:var(--bg-3);border:1px solid var(--line);border-radius:2px;font:700 9.5px var(--mono);color:var(--ink-2);letter-spacing:.06em;cursor:pointer}
+  .tape-filter.on{background:var(--copper-bg);border-color:var(--copper);color:var(--copper)}
+  .pulse-row{display:grid;grid-template-columns:60px 60px 24px 60px 1fr auto;gap:11px;align-items:center;padding:10px 16px;border-bottom:1px dashed var(--line);font:500 11.5px var(--mono);color:var(--ink-1);transition:background 80ms}
+  .pulse-row:hover{background:var(--bg-3)}
+  .pulse-row:last-child{border-bottom:0}
+  .pulse-row .time{color:var(--ink-3);font:600 10px var(--mono);letter-spacing:.04em}
+  .pulse-row .type{padding:2px 6px;border-radius:2px;font:700 9px var(--mono);letter-spacing:.08em;text-align:center;cursor:pointer}
+  .pulse-row .type.news{background:var(--cy-bg);color:var(--cy)}
+  .pulse-row .type.er{background:var(--amb-bg);color:var(--amb)}
+  .pulse-row .type.insider{background:var(--copper-bg);color:var(--copper)}
+  .pulse-row .type.macro{background:var(--gn-bg);color:var(--gn)}
+  .pulse-row .type.uoa{background:var(--rd-bg);color:var(--rd)}
+  .pulse-row .logo{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:800 9.5px var(--sans);color:#fff}
+  .pulse-row .sym{font:800 11.5px var(--sans);color:var(--ink);letter-spacing:.02em}
+  .pulse-row .msg b{color:var(--ink);font-weight:700}
+  .pulse-row .impact{padding:2px 7px;border-radius:2px;font:700 9.5px var(--mono);letter-spacing:.08em;flex-shrink:0}
+  .pulse-row .impact.gn{background:var(--gn-bg);color:var(--gn)}
+  .pulse-row .impact.rd{background:var(--rd-bg);color:var(--rd)}
+  .pulse-row .impact.am{background:var(--amb-bg);color:var(--amb)}
+
+  /* ═══════════════ §9 · TV-STYLE SECTOR HEATMAP ═══════════════ */
+  .treemap-wrap{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;overflow:hidden}
+  .treemap{display:grid;grid-template-columns:repeat(24,1fr);grid-template-rows:repeat(10,40px);gap:2px;padding:6px;background:#000;height:420px}
+  .tm-sec{position:relative;background:#000;padding:14px 1px 1px 1px;overflow:hidden;display:grid;grid-template-columns:repeat(6,1fr);grid-auto-rows:1fr;gap:1px}
+  .tm-label{position:absolute;top:2px;left:8px;font:600 10px var(--sans);color:var(--ink-2);letter-spacing:.02em;z-index:5}
+  .tm-cell{border-radius:1px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3px;cursor:pointer;text-decoration:none;color:inherit;text-align:center;transition:opacity 80ms;font-family:var(--sans)}
+  .tm-cell:hover{opacity:.85}
+  .tm-cell-sym{font:800 11px;letter-spacing:.02em;line-height:1}
+  .tm-cell-chg{font:600 9.5px;font-variant-numeric:tabular-nums;line-height:1;margin-top:2px}
+  .tm-cell.lg .tm-cell-sym{font-size:16px} .tm-cell.lg .tm-cell-chg{font-size:11px;margin-top:3px}
+  .tm-cell.md .tm-cell-sym{font-size:12px} .tm-cell.md .tm-cell-chg{font-size:10px}
+  .tm-cell.sm .tm-cell-sym{font-size:9px} .tm-cell.sm .tm-cell-chg{font-size:8.5px}
+  .tm-c-rd3{background:#7a1f1f;color:#fff} .tm-c-rd2{background:#b82929;color:#fff} .tm-c-rd1{background:#9c2c2c;color:#fff}
+  .tm-c-neut{background:#1a1f1c;color:var(--ink-1)}
+  .tm-c-gn1{background:#1e7a3c;color:#fff} .tm-c-gn2{background:#1c7a3a;color:#fff} .tm-c-gn3{background:#13501f;color:#fff}
+
+  /* ═══════════════ §10 · RISK WARNINGS — radial gauge dials ═══════════════ */
+  .risk-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+  .risk-cell{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;padding:14px;display:flex;align-items:center;gap:14px;border-left:3px solid var(--ink-3)}
+  .risk-cell.warn{border-left-color:var(--amb)}
+  .risk-cell.bad{border-left-color:var(--rd)}
+  .risk-cell.ok{border-left-color:var(--gn)}
+  .risk-dial{width:70px;height:70px;flex-shrink:0;position:relative}
+  .risk-dial svg{width:100%;height:100%}
+  .risk-dial .v{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font:800 16px var(--mono);font-variant-numeric:tabular-nums}
+  .risk-dial .v.gn{color:var(--gn)} .risk-dial .v.am{color:var(--amb)} .risk-dial .v.rd{color:var(--rd)}
+  .risk-info{flex:1;display:flex;flex-direction:column;gap:3px}
+  .risk-info .k{font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:.10em;text-transform:uppercase}
+  .risk-info .label{font:700 13px var(--sans);color:var(--ink);letter-spacing:.02em}
+  .risk-info .s{font:500 10.5px var(--mono);color:var(--ink-2);letter-spacing:.02em;line-height:1.5}
+
+  /* ═══════════════ §11 · ACTIVITY LOG — timeline ═══════════════ */
+  .activity{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;padding:14px 18px;position:relative}
+  .activity::before{content:'';position:absolute;left:36px;top:14px;bottom:14px;width:2px;background:var(--line)}
+  .act-row{display:grid;grid-template-columns:30px 80px 1fr auto;gap:14px;align-items:center;padding:8px 0;font:500 11.5px var(--mono);color:var(--ink-1);position:relative;z-index:1}
+  .act-row .ts{color:var(--ink-3);font:600 10px var(--mono);letter-spacing:.04em}
+  .act-dot{width:18px;height:18px;border-radius:50%;border:2px solid var(--bg-2);display:flex;align-items:center;justify-content:center;font-size:10px;background:var(--bg-3);position:relative;z-index:2}
+  .act-dot.gn{border-color:var(--gn);color:var(--gn)}
+  .act-dot.am{border-color:var(--amb);color:var(--amb)}
+  .act-dot.rd{border-color:var(--rd);color:var(--rd)}
+  .act-dot.cy{border-color:var(--cy);color:var(--cy)}
+  .act-msg b{color:var(--ink)}
+  .act-tag{font:700 9px var(--mono);padding:2px 7px;border-radius:2px;letter-spacing:.08em;background:var(--bg-3);color:var(--ink-2)}
+
+  /* ═══════════════ §12 · SYSTEM TRUST + bigger equity curve + radial gauges ═══════════════ */
+  .trust-wrap{display:grid;grid-template-columns:1.4fr 1fr;gap:12px}
+  .trust-eq{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+  .trust-eq-head{display:flex;justify-content:space-between;align-items:baseline}
+  .trust-eq-t{font:700 11px var(--mono);color:var(--ink-1);letter-spacing:.10em;text-transform:uppercase}
+  .trust-eq-v{font:800 26px var(--mono);color:var(--gn);font-variant-numeric:tabular-nums;letter-spacing:-0.01em}
+  .trust-eq-sub{font:500 11px var(--mono);color:var(--ink-2);letter-spacing:.02em}
+  .trust-eq svg{width:100%;height:140px;display:block}
+  .trust-eq-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding-top:10px;border-top:1px solid var(--line)}
+  .trust-eq-stat{text-align:center;padding:4px 0}
+  .trust-eq-stat .k{font:600 9px var(--mono);color:var(--ink-3);letter-spacing:.10em;text-transform:uppercase}
+  .trust-eq-stat .v{font:800 14px var(--mono);font-variant-numeric:tabular-nums;margin-top:2px}
+  .trust-eq-stat .v.gn{color:var(--gn)} .trust-eq-stat .v.am{color:var(--amb)} .trust-eq-stat .v.cy{color:var(--cy)}
+  /* Radial gauges grid for trust */
+  .trust-gauges{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .trust-g{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;padding:12px 8px;text-align:center;display:flex;flex-direction:column;gap:4px;align-items:center}
+  .trust-g-svg{width:80px;height:80px;position:relative}
+  .trust-g-svg svg{width:100%;height:100%}
+  .trust-g-v{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font:800 15px var(--mono);font-variant-numeric:tabular-nums}
+  .trust-g-v.gn{color:var(--gn)} .trust-g-v.am{color:var(--amb)} .trust-g-v.cy{color:var(--cy)}
+  .trust-g-k{font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:.10em;text-transform:uppercase}
+  .trust-g-s{font:600 10px var(--mono);color:var(--ink-2);letter-spacing:.02em}
+
+  .info{position:fixed;bottom:14px;left:14px;background:rgba(15,19,17,0.96);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:3px;padding:10px 16px;z-index:998;font:500 11px var(--mono);color:var(--ink-2);max-width:540px;line-height:1.55}
+  .info b{color:var(--copper);letter-spacing:.06em}
+</style>
+</head>
+<body>
+
+<!-- ═════════════ LIVE TICKER TAPE (scrolling) ═════════════ -->
+<div class="tape-strip">
+  <div class="tape-strip-inner">
+    <span class="tape-item"><span class="sym">SPX</span><span class="px">5,840.12</span><span class="chg gn">+0.42%</span></span>
+    <span class="tape-item"><span class="sym">QQQ</span><span class="px">495.30</span><span class="chg gn">+0.68%</span></span>
+    <span class="tape-item"><span class="sym">DJI</span><span class="px">42,180</span><span class="chg gn">+0.18%</span></span>
+    <span class="tape-item"><span class="sym">IWM</span><span class="px">218.45</span><span class="chg rd">−0.22%</span></span>
+    <span class="tape-item"><span class="sym">VIX</span><span class="px">16.4</span><span class="chg am">+0.8%</span></span>
+    <span class="tape-item"><span class="sym">DXY</span><span class="px">102.40</span><span class="chg rd">−0.18%</span></span>
+    <span class="tape-item"><span class="sym">10Y</span><span class="px">4.32%</span><span class="chg am">+2bp</span></span>
+    <span class="tape-item"><span class="sym">NVDA</span><span class="px">$132.85</span><span class="chg gn">+3.8%</span></span>
+    <span class="tape-item"><span class="sym">TSLA</span><span class="px">$214.50</span><span class="chg rd">−5.8%</span></span>
+    <span class="tape-item"><span class="sym">SMCI</span><span class="px">$684</span><span class="chg gn">+8.4%</span></span>
+    <span class="tape-item"><span class="sym">BTC</span><span class="px">$72,180</span><span class="chg gn">+1.4%</span></span>
+    <span class="tape-item"><span class="sym">ETH</span><span class="px">$3,420</span><span class="chg gn">+2.1%</span></span>
+    <!-- duplicate for seamless scroll -->
+    <span class="tape-item"><span class="sym">SPX</span><span class="px">5,840.12</span><span class="chg gn">+0.42%</span></span>
+    <span class="tape-item"><span class="sym">QQQ</span><span class="px">495.30</span><span class="chg gn">+0.68%</span></span>
+    <span class="tape-item"><span class="sym">DJI</span><span class="px">42,180</span><span class="chg gn">+0.18%</span></span>
+    <span class="tape-item"><span class="sym">IWM</span><span class="px">218.45</span><span class="chg rd">−0.22%</span></span>
+    <span class="tape-item"><span class="sym">VIX</span><span class="px">16.4</span><span class="chg am">+0.8%</span></span>
+    <span class="tape-item"><span class="sym">DXY</span><span class="px">102.40</span><span class="chg rd">−0.18%</span></span>
+    <span class="tape-item"><span class="sym">10Y</span><span class="px">4.32%</span><span class="chg am">+2bp</span></span>
+    <span class="tape-item"><span class="sym">NVDA</span><span class="px">$132.85</span><span class="chg gn">+3.8%</span></span>
+  </div>
+</div>
+
+<!-- ═════════════ TOP BAR ═════════════ -->
+<div class="topbar">
+  <div class="tb-brand">Kairos<small>v2</small></div>
+  <div></div>
+  <div class="tb-toggle"><button class="on">Cmft</button><button>Comp</button><button>Dense</button></div>
+  <div class="tb-toggle"><button>Pre</button><button class="on">RTH</button><button>AH</button></div>
+  <button class="tb-icon"><span>★</span> <b>12</b></button>
+  <button class="tb-icon"><span>🔔</span> <b>3</b><span class="dot"></span></button>
+  <div class="tb-mkt"><div class="item"><span class="k">SPX</span><span class="v gn">+0.42%</span></div><div class="item"><span class="k">VIX</span><span class="v am">16.4</span></div><div class="item"><span class="k">10Y</span><span class="v">4.32%</span></div></div>
+  <div class="tb-clock"><span class="status">Market open</span><span class="time">Closes 2h 14m</span></div>
+</div>
+
+<div class="wrap">
+
+  <!-- ═════════════ §0 · SYSTEM PULSE — health strip across the top ═════════════ -->
+  <div class="pulse-bar">
+    <span class="pb-context"><span class="pb-pulse-dot"></span>SYSTEM LIVE</span>
+    <span class="pb-section"><span class="pb-k">Last 10 scans</span>
+      <span class="pb-dots">
+        <span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--amb)">◆</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span>
+        <span style="color:var(--gn)">▲</span><span style="color:var(--amb)">◆</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span>
+      </span>
+      <span class="pb-v gn">B #4 in row</span>
+    </span>
+    <span class="pb-divider"></span>
+    <span class="pb-section"><span class="pb-k">Sleeve Edge</span><span class="pb-v gn">WR 62%</span><span class="pb-v cy">PF 1.84</span></span>
+    <span class="pb-divider"></span>
+    <span class="pb-section"><span class="pb-k">DD Phase</span><span class="pb-v gn">P1 · normal</span></span>
+    <span class="pb-divider"></span>
+    <span class="pb-section"><span class="pb-k">Execution</span><span class="pb-v gn">liq A</span><span class="pb-v gn">2.1bp</span><span style="color:var(--gn);font-size:11px">⚡ ≤5s</span></span>
+    <span class="pb-divider"></span>
+    <span class="pb-section" style="margin-left:auto"><span class="pb-k">Scan</span><span class="pb-v cy">9m ago</span></span>
+    <span class="pb-section"><span class="pb-k">Data Feeds</span><span class="pb-v gn">5/6</span></span>
+    <span class="pb-section"><span class="pb-k">Calibration</span><span class="pb-v gn">in 1σ</span></span>
+  </div>
+
+  <!-- ═════════════ §1 · TODAY'S READ (rich hero with intraday charts + gauges) ═════════════ -->
+  <div class="qc-h">
+    <span class="q"><span class="ico">⌃</span>Today's read</span>
+    <span class="r">scan <b style="color:var(--ink-1)">09:42</b> · 9m ago</span>
+  </div>
+  <div class="read">
+    <div class="read-grid">
+      <div class="read-cell read-verdict">
+        <div>
+          <div class="head"><span class="verb">SELECTIVE</span> · choppy regime</div>
+          <div class="read-sub" style="margin-top:8px"><b>3</b> BUY · <b>12</b> WATCH · <b>56</b> AVOID. Score floor <b>72</b>, size cap <b>70%</b>. <b>FOMC in 3 days</b>.</div>
+        </div>
+        <span class="read-tag">RISK-ON · CHOPPY · cap 70%</span>
+      </div>
+      <div class="read-cell">
+        <div>
+          <span class="read-stat-k">SPX today</span>
+          <div style="display:flex;align-items:baseline;gap:6px;margin-top:5px"><span class="read-stat-v gn">+0.42%</span></div>
+          <span class="read-stat-sub" style="margin-top:3px">5,840 · 52w <b style="color:var(--gn)">+18.7%</b></span>
+        </div>
+        <svg class="read-chart" viewBox="0 0 200 50" preserveAspectRatio="none">
+          <defs><linearGradient id="spxg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(91,229,124,0.4)"/><stop offset="100%" stop-color="rgba(91,229,124,0)"/></linearGradient></defs>
+          <path d="M 0 38 L 20 35 L 40 32 L 60 28 L 80 22 L 100 24 L 120 18 L 140 20 L 160 12 L 180 14 L 200 8 L 200 50 L 0 50 Z" fill="url(#spxg)"/>
+          <path d="M 0 38 L 20 35 L 40 32 L 60 28 L 80 22 L 100 24 L 120 18 L 140 20 L 160 12 L 180 14 L 200 8" fill="none" stroke="var(--gn)" stroke-width="1.6"/>
+        </svg>
+      </div>
+      <div class="read-cell">
+        <div>
+          <span class="read-stat-k">Breadth · %&gt;50EMA</span>
+        </div>
+        <div class="gauge">
+          <svg viewBox="0 0 100 60" preserveAspectRatio="xMidYMid meet">
+            <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="var(--bg-3)" stroke-width="8" stroke-linecap="round"/>
+            <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="var(--am)" stroke-width="8" stroke-linecap="round" stroke-dasharray="125" stroke-dashoffset="60"/>
+            <line x1="50" y1="50" x2="50" y2="20" stroke="var(--ink-3)" stroke-width="1" stroke-dasharray="2 2"/>
+          </svg>
+          <span class="gauge-num" style="color:var(--am)">52%</span>
+        </div>
+        <span class="read-stat-sub">below <b>65</b> floor · narrow</span>
+      </div>
+      <div class="read-cell">
+        <div>
+          <span class="read-stat-k">VIX</span>
+        </div>
+        <div class="gauge">
+          <svg viewBox="0 0 100 60" preserveAspectRatio="xMidYMid meet">
+            <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="var(--bg-3)" stroke-width="8" stroke-linecap="round"/>
+            <path d="M 10 50 A 40 40 0 0 1 50 10" fill="none" stroke="var(--gn)" stroke-width="8" stroke-linecap="round"/>
+            <path d="M 50 10 A 40 40 0 0 1 70 16" fill="none" stroke="var(--am)" stroke-width="8" stroke-linecap="round"/>
+          </svg>
+          <span class="gauge-num" style="color:var(--am)">16.4</span>
+        </div>
+        <span class="read-stat-sub">+8% · choppy gate</span>
+      </div>
+      <div class="read-cell">
+        <div>
+          <span class="read-stat-k">Funnel · today</span>
+          <div style="display:flex;align-items:baseline;gap:6px;margin-top:5px"><span class="read-stat-v cy">8</span><span class="read-stat-sub">BUY ready</span></div>
+        </div>
+        <svg viewBox="0 0 200 50" preserveAspectRatio="none" style="height:50px">
+          <g>
+            <rect x="0" y="2" width="40" height="46" fill="var(--cy)" opacity="0.30"/>
+            <rect x="42" y="6" width="38" height="42" fill="var(--cy)" opacity="0.45"/>
+            <rect x="82" y="12" width="38" height="36" fill="var(--cy)" opacity="0.55"/>
+            <rect x="122" y="22" width="38" height="26" fill="var(--am)" opacity="0.7"/>
+            <rect x="162" y="36" width="38" height="12" fill="var(--gn)" opacity="0.9"/>
+          </g>
+          <text x="6" y="44" font-family="JetBrains Mono" font-size="6" fill="rgba(255,255,255,0.7)">1500</text>
+          <text x="186" y="44" text-anchor="end" font-family="JetBrains Mono" font-size="6" fill="rgba(255,255,255,0.95)" font-weight="700">8</text>
+        </svg>
+      </div>
+    </div>
+  </div>
+  <div class="changed">
+    <span class="pre">★ What changed</span>
+    <span class="pill new">+2 NEW</span><span>BUY · <a href="?t=NVDA" class="tk">NVDA</a> from WATCH · <a href="?t=DXCM" class="tk">DXCM</a> first today</span>
+    <span class="pill up">1 UP</span><span>WATCH · <a href="?t=ROST" class="tk">ROST</a> promoted</span>
+    <span class="pill down">1 DOWN</span><span>AVOID · <a href="?t=SHOP" class="tk">SHOP</a> Wilson kill</span>
+    <span class="since">since <b>09:42</b> · <a href="#" style="color:var(--copper)">full diff →</a></span>
+  </div>
+
+  <!-- ═════════════ §2 · SLEEVE ATTRIBUTION — bigger curves + pulse dots ═════════════ -->
+  <div class="qc-h">
+    <span class="q"><span class="ico">⚙</span>Which strategies are firing today</span>
+    <span class="r">8 sleeves · <a href="?tab=strategies">all →</a></span>
+  </div>
+  <div class="sleeves">
+    <div class="sleeve hot"><span class="sleeve-pulse"></span>
+      <div class="sleeve-head"><span class="sleeve-name"><span class="ico">📐</span>VCP</span><span class="sleeve-count gn">4</span></div>
+      <div class="sleeve-meta">WR <b>64%</b> · PF <b>1.92</b> · 7d Σ <b>+12</b></div>
+      <svg class="sleeve-curve" viewBox="0 0 120 30" preserveAspectRatio="none"><defs><linearGradient id="vcpg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(91,229,124,0.35)"/><stop offset="100%" stop-color="rgba(91,229,124,0)"/></linearGradient></defs><path d="M 0 22 L 15 20 L 30 22 L 45 18 L 60 14 L 75 16 L 90 10 L 105 8 L 120 5 L 120 30 L 0 30 Z" fill="url(#vcpg)"/><path d="M 0 22 L 15 20 L 30 22 L 45 18 L 60 14 L 75 16 L 90 10 L 105 8 L 120 5" fill="none" stroke="var(--gn)" stroke-width="1.5"/></svg>
+      <div class="sleeve-streak">
+        <span class="lbl">L10</span>
+        <span class="dots"><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span></span>
+        <span class="ratio">8/10</span>
+      </div>
+    </div>
+    <div class="sleeve hot"><span class="sleeve-pulse"></span>
+      <div class="sleeve-head"><span class="sleeve-name"><span class="ico">📊</span>PEAD</span><span class="sleeve-count gn">2</span></div>
+      <div class="sleeve-meta">WR <b>58%</b> · PF <b>1.84</b> · 7d Σ <b>+8</b></div>
+      <svg class="sleeve-curve" viewBox="0 0 120 30" preserveAspectRatio="none"><path d="M 0 18 L 15 20 L 30 16 L 45 22 L 60 13 L 75 17 L 90 11 L 105 14 L 120 9 L 120 30 L 0 30 Z" fill="url(#vcpg)"/><path d="M 0 18 L 15 20 L 30 16 L 45 22 L 60 13 L 75 17 L 90 11 L 105 14 L 120 9" fill="none" stroke="var(--gn)" stroke-width="1.5"/></svg>
+      <div class="sleeve-streak">
+        <span class="lbl">L10</span>
+        <span class="dots"><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span></span>
+        <span class="ratio">8/10</span>
+      </div>
+    </div>
+    <div class="sleeve hot"><span class="sleeve-pulse"></span>
+      <div class="sleeve-head"><span class="sleeve-name"><span class="ico">⌬</span>INSIDER</span><span class="sleeve-count gn">1</span></div>
+      <div class="sleeve-meta">WR <b>71%</b> · PF <b>2.21</b> · 7d Σ <b>+4</b></div>
+      <svg class="sleeve-curve" viewBox="0 0 120 30" preserveAspectRatio="none"><path d="M 0 20 L 15 22 L 30 17 L 45 19 L 60 14 L 75 11 L 90 8 L 105 10 L 120 6 L 120 30 L 0 30 Z" fill="url(#vcpg)"/><path d="M 0 20 L 15 22 L 30 17 L 45 19 L 60 14 L 75 11 L 90 8 L 105 10 L 120 6" fill="none" stroke="var(--gn)" stroke-width="1.5"/></svg>
+      <div class="sleeve-streak">
+        <span class="lbl">L10</span>
+        <span class="dots"><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span></span>
+        <span class="ratio">8/10</span>
+      </div>
+    </div>
+    <div class="sleeve warm"><span class="sleeve-pulse"></span>
+      <div class="sleeve-head"><span class="sleeve-name"><span class="ico">⌛</span>SQUEEZE</span><span class="sleeve-count am">3</span></div>
+      <div class="sleeve-meta">WR <b>52%</b> · PF <b>1.41</b> · 7d Σ <b>+1</b></div>
+      <svg class="sleeve-curve" viewBox="0 0 120 30" preserveAspectRatio="none"><defs><linearGradient id="amg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(255,185,92,0.35)"/><stop offset="100%" stop-color="rgba(255,185,92,0)"/></linearGradient></defs><path d="M 0 14 L 15 16 L 30 13 L 45 18 L 60 15 L 75 19 L 90 16 L 105 18 L 120 15 L 120 30 L 0 30 Z" fill="url(#amg)"/><path d="M 0 14 L 15 16 L 30 13 L 45 18 L 60 15 L 75 19 L 90 16 L 105 18 L 120 15" fill="none" stroke="var(--am)" stroke-width="1.5"/></svg>
+      <div class="sleeve-streak">
+        <span class="lbl">L10</span>
+        <span class="dots"><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span></span>
+        <span class="ratio">5/10</span>
+      </div>
+    </div>
+    <div class="sleeve hot"><span class="sleeve-pulse"></span>
+      <div class="sleeve-head"><span class="sleeve-name"><span class="ico">↘</span>EMA21 PB</span><span class="sleeve-count gn">2</span></div>
+      <div class="sleeve-meta">WR <b>61%</b> · PF <b>1.78</b> · 7d Σ <b>+6</b></div>
+      <svg class="sleeve-curve" viewBox="0 0 120 30" preserveAspectRatio="none"><path d="M 0 16 L 15 14 L 30 17 L 45 12 L 60 14 L 75 9 L 90 12 L 105 7 L 120 9 L 120 30 L 0 30 Z" fill="url(#vcpg)"/><path d="M 0 16 L 15 14 L 30 17 L 45 12 L 60 14 L 75 9 L 90 12 L 105 7 L 120 9" fill="none" stroke="var(--gn)" stroke-width="1.5"/></svg>
+      <div class="sleeve-streak">
+        <span class="lbl">L10</span>
+        <span class="dots"><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span></span>
+        <span class="ratio">7/10</span>
+      </div>
+    </div>
+    <div class="sleeve warm"><span class="sleeve-pulse"></span>
+      <div class="sleeve-head"><span class="sleeve-name"><span class="ico">▲</span>52W BO</span><span class="sleeve-count am">1</span></div>
+      <div class="sleeve-meta">WR <b>60%</b> · PF <b>1.64</b> · 7d Σ <b>+2</b></div>
+      <svg class="sleeve-curve" viewBox="0 0 120 30" preserveAspectRatio="none"><path d="M 0 16 L 15 15 L 30 14 L 45 12 L 60 13 L 75 11 L 90 12 L 105 9 L 120 8 L 120 30 L 0 30 Z" fill="url(#amg)"/><path d="M 0 16 L 15 15 L 30 14 L 45 12 L 60 13 L 75 11 L 90 12 L 105 9 L 120 8" fill="none" stroke="var(--am)" stroke-width="1.5"/></svg>
+      <div class="sleeve-streak">
+        <span class="lbl">L10</span>
+        <span class="dots"><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span><span style="color:var(--gn)">▲</span><span style="color:var(--rd)">▼</span><span style="color:var(--gn)">▲</span></span>
+        <span class="ratio">6/10</span>
+      </div>
+    </div>
+    <div class="sleeve cold"><span class="sleeve-pulse"></span>
+      <div class="sleeve-head"><span class="sleeve-name"><span class="ico">⚡</span>ESP</span><span class="sleeve-count">0</span></div>
+      <div class="sleeve-meta">untested · awaiting ER trigger</div>
+      <svg class="sleeve-curve" viewBox="0 0 120 30" preserveAspectRatio="none"><line x1="0" y1="15" x2="120" y2="15" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="3 3"/></svg>
+      <div class="sleeve-streak">
+        <span class="lbl">L10</span>
+        <span class="dots"><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span></span>
+        <span class="ratio">—</span>
+      </div>
+    </div>
+    <div class="sleeve cold"><span class="sleeve-pulse"></span>
+      <div class="sleeve-head"><span class="sleeve-name"><span class="ico">🛡</span>DEFENSE</span><span class="sleeve-count">0</span></div>
+      <div class="sleeve-meta">dormant · risk-off only</div>
+      <svg class="sleeve-curve" viewBox="0 0 120 30" preserveAspectRatio="none"><line x1="0" y1="15" x2="120" y2="15" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="3 3"/></svg>
+      <div class="sleeve-streak">
+        <span class="lbl">L10</span>
+        <span class="dots"><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span><span style="color:var(--ink-3);opacity:.5">·</span></span>
+        <span class="ratio">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════ §3 · DISCOVERY — brand logos in rows ═════════════ -->
+  <div class="qc-h">
+    <span class="q"><span class="ico">🔍</span>Discovery · what's emerging</span>
+    <span class="r">52w highs · squeezes · insider clusters · UOA</span>
+  </div>
+  <div class="discovery">
+    <div class="disc-card highs">
+      <div class="disc-head"><span class="t">▲ 52W HIGHS</span><span class="c">12</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-nvda">●</span><a class="tk" href="?t=NVDA">NVDA</a><span class="meta">+3.8% · semis</span><span class="px gn">$133</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-default">SM</span><a class="tk" href="?t=SMCI">SMCI</a><span class="meta">+8.4% · server</span><span class="px gn">$684</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-default">CR</span><a class="tk" href="?t=CRWD">CRWD</a><span class="meta">+2.7% · cyber</span><span class="px gn">$312</span></div>
+      <div class="disc-row"><span class="star on">★</span><span class="logo lg-pltr">P</span><a class="tk" href="?t=PLTR">PLTR</a><span class="meta">+5.2% · software</span><span class="px gn">$54</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-default">MS</span><a class="tk" href="?t=MSTR">MSTR</a><span class="meta">+4.1% · crypto</span><span class="px gn">$1,420</span></div>
+    </div>
+    <div class="disc-card sqz">
+      <div class="disc-head"><span class="t">⌛ SQUEEZE OUT</span><span class="c">6</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-amd">A</span><a class="tk" href="?t=AMD">AMD</a><span class="meta">BBw 6mo low</span><span class="px vio">SQZ d3</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-default">BA</span><a class="tk" href="?t=BABA">BABA</a><span class="meta">BBw 4mo low</span><span class="px vio">SQZ d5</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-default">NI</span><a class="tk" href="?t=NIO">NIO</a><span class="meta">TTM compress</span><span class="px vio">SQZ d2</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-default">BY</span><a class="tk" href="?t=BYND">BYND</a><span class="meta">ATR 30d min</span><span class="px vio">SQZ d8</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-default">XO</span><a class="tk" href="?t=XOM">XOM</a><span class="meta">Keltner ⊂ BB</span><span class="px vio">SQZ d4</span></div>
+    </div>
+    <div class="disc-card insider">
+      <div class="disc-head"><span class="t">⌬ INSIDER CLUSTER</span><span class="c">4</span></div>
+      <div class="disc-row"><span class="star on">★</span><span class="logo lg-pltr">P</span><a class="tk" href="?t=PLTR">PLTR</a><span class="meta">3 buys · 14d</span><span class="px copper">$1.54M</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-default">NE</span><a class="tk" href="?t=NET">NET</a><span class="meta">5 buys · 21d</span><span class="px copper">$3.2M</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-default">EL</span><a class="tk" href="?t=ELF">ELF</a><span class="meta">2 CEO/CFO</span><span class="px copper">$890K</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-default">GT</span><a class="tk" href="?t=GTLB">GTLB</a><span class="meta">4 directors</span><span class="px copper">$1.12M</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-default">NU</span><a class="tk" href="?t=NU">NU</a><span class="meta">3 buys · 7d</span><span class="px copper">$680K</span></div>
+    </div>
+    <div class="disc-card uoa">
+      <div class="disc-head"><span class="t">⚡ UOA LEADERS</span><span class="c">8</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-msft">⊞</span><a class="tk" href="?t=MSFT">MSFT</a><span class="meta">540C +312%</span><span class="px rd">+18 IV</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-aapl">⌘</span><a class="tk" href="?t=AAPL">AAPL</a><span class="meta">240C +248%</span><span class="px rd">+12 IV</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-amzn">a</span><a class="tk" href="?t=AMZN">AMZN</a><span class="meta">220C +189%</span><span class="px rd">+9 IV</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-googl">G</span><a class="tk" href="?t=GOOGL">GOOGL</a><span class="meta">200C +145%</span><span class="px rd">+7 IV</span></div>
+      <div class="disc-row"><span class="star">☆</span><span class="logo lg-default">CO</span><a class="tk" href="?t=COIN">COIN</a><span class="meta">260P +298%</span><span class="px rd">put flow</span></div>
+    </div>
+  </div>
+
+  <!-- ═════════════ §4 · BUY · WATCH · AVOID — brand logos + heat gradient cards ═════════════ -->
+  <div class="qc-h">
+    <span class="q"><span class="ico">▣</span>What the system says today</span>
+    <span class="r">3 BUY · 12 WATCH · 56 AVOID · <a href="?tab=elite">view all →</a></span>
+  </div>
+  <div class="cockpit">
+    <!-- BUY -->
+    <div class="deck buy">
+      <div class="deck-head">
+        <div class="deck-head-l">
+          <span class="t"><span class="ico">▲</span>BUY</span>
+          <span class="sub">cleared all 14 gates · score ≥ 72 · R:R ≥ 3:1</span>
+        </div>
+        <span class="count">3</span>
+      </div>
+      <div class="deck-body">
+        <div class="row" onclick="window.location='?t=NVDA'">
+          <span class="badge new">NEW</span>
+          <span class="star">☆</span>
+          <span class="logo lg-nvda">●</span>
+          <span class="ticker-block"><a class="tk" href="?t=NVDA">NVDA</a><span class="meta">VCP · score <b>78</b> · R:R 3.2</span></span>
+          <svg class="spark" viewBox="0 0 84 32" preserveAspectRatio="none"><defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(91,229,124,0.5)"/><stop offset="100%" stop-color="rgba(91,229,124,0)"/></linearGradient></defs><path d="M 0 26 L 11 23 L 22 20 L 33 17 L 44 13 L 55 10 L 66 6 L 75 5 L 84 3 L 84 32 L 0 32 Z" fill="url(#g1)"/><path d="M 0 26 L 11 23 L 22 20 L 33 17 L 44 13 L 55 10 L 66 6 L 75 5 L 84 3" fill="none" stroke="var(--gn)" stroke-width="1.8"/></svg>
+          <span class="px-block"><span class="px gn">$132.85</span><span class="quality gn">FRESH</span></span>
+          <span class="action gn">BUY</span>
+        </div>
+        <div class="row" onclick="window.location='?t=DXCM'">
+          <span class="badge new">NEW</span>
+          <span class="star">☆</span>
+          <span class="logo lg-dxcm">D</span>
+          <span class="ticker-block"><a class="tk" href="?t=DXCM">DXCM</a><span class="meta">PEAD · score <b>74</b> · R:R 2.8</span></span>
+          <svg class="spark" viewBox="0 0 84 32" preserveAspectRatio="none"><path d="M 0 20 L 11 18 L 22 16 L 33 19 L 44 12 L 55 14 L 66 10 L 75 11 L 84 7 L 84 32 L 0 32 Z" fill="url(#g1)"/><path d="M 0 20 L 11 18 L 22 16 L 33 19 L 44 12 L 55 14 L 66 10 L 75 11 L 84 7" fill="none" stroke="var(--gn)" stroke-width="1.8"/></svg>
+          <span class="px-block"><span class="px gn">$87.42</span><span class="quality gn">PULLBACK</span></span>
+          <span class="action gn">BUY</span>
+        </div>
+        <div class="row" onclick="window.location='?t=PLTR'">
+          <span class="star on">★</span>
+          <span class="logo lg-pltr">P</span>
+          <span class="ticker-block"><a class="tk" href="?t=PLTR">PLTR</a><span class="meta">Insider · score <b>72</b> · R:R 2.5</span></span>
+          <svg class="spark" viewBox="0 0 84 32" preserveAspectRatio="none"><path d="M 0 17 L 11 20 L 22 14 L 33 17 L 44 13 L 55 10 L 66 7 L 75 9 L 84 5 L 84 32 L 0 32 Z" fill="url(#g1)"/><path d="M 0 17 L 11 20 L 22 14 L 33 17 L 44 13 L 55 10 L 66 7 L 75 9 L 84 5" fill="none" stroke="var(--gn)" stroke-width="1.8"/></svg>
+          <span class="px-block"><span class="px gn">$54.20</span><span class="quality gn">FRESH</span></span>
+          <span class="action gn">BUY</span>
+        </div>
+      </div>
+      <div class="deck-foot"><span>avg WR <b>62%</b> · PF <b>1.94</b></span><a href="?tab=elite">Conviction Grid →</a></div>
+    </div>
+
+    <!-- WATCH -->
+    <div class="deck watch">
+      <div class="deck-head">
+        <div class="deck-head-l">
+          <span class="t"><span class="ico">◆</span>WATCH</span>
+          <span class="sub">close · score 65–71 · one gate from BUY</span>
+        </div>
+        <span class="count">12</span>
+      </div>
+      <div class="deck-body">
+        <div class="row" onclick="window.location='?t=CRWD'">
+          <span class="star">☆</span>
+          <span class="logo lg-default">CR</span>
+          <span class="ticker-block"><a class="tk" href="?t=CRWD">CRWD</a><span class="meta">VCP · score <b>69</b> · ER +2d</span></span>
+          <svg class="spark" viewBox="0 0 84 32" preserveAspectRatio="none"><defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(255,185,92,0.45)"/><stop offset="100%" stop-color="rgba(255,185,92,0)"/></linearGradient></defs><path d="M 0 19 L 11 18 L 22 17 L 33 15 L 44 14 L 55 11 L 66 13 L 75 11 L 84 10 L 84 32 L 0 32 Z" fill="url(#g2)"/><path d="M 0 19 L 11 18 L 22 17 L 33 15 L 44 14 L 55 11 L 66 13 L 75 11 L 84 10" fill="none" stroke="var(--am)" stroke-width="1.8"/></svg>
+          <span class="px-block"><span class="px">$312</span><span class="quality am">ER BLACKOUT</span></span>
+          <span class="action am">WAIT</span>
+        </div>
+        <div class="row" onclick="window.location='?t=SMCI'">
+          <span class="star">☆</span>
+          <span class="logo lg-default">SM</span>
+          <span class="ticker-block"><a class="tk" href="?t=SMCI">SMCI</a><span class="meta">Squeeze · score <b>67</b> · ext.</span></span>
+          <svg class="spark" viewBox="0 0 84 32" preserveAspectRatio="none"><path d="M 0 21 L 11 17 L 22 15 L 33 11 L 44 8 L 55 5 L 66 4 L 75 6 L 84 5 L 84 32 L 0 32 Z" fill="url(#g2)"/><path d="M 0 21 L 11 17 L 22 15 L 33 11 L 44 8 L 55 5 L 66 4 L 75 6 L 84 5" fill="none" stroke="var(--am)" stroke-width="1.8"/></svg>
+          <span class="px-block"><span class="px">$684</span><span class="quality am">EXTENDED</span></span>
+          <span class="action am">PULLBACK</span>
+        </div>
+        <div class="row" onclick="window.location='?t=ROST'">
+          <span class="badge up">UP</span>
+          <span class="star">☆</span>
+          <span class="logo lg-default">RO</span>
+          <span class="ticker-block"><a class="tk" href="?t=ROST">ROST</a><span class="meta">EMA21 · score <b>67</b> · R:R 2.6</span></span>
+          <svg class="spark" viewBox="0 0 84 32" preserveAspectRatio="none"><path d="M 0 18 L 11 17 L 22 18 L 33 15 L 44 14 L 55 12 L 66 14 L 75 11 L 84 12 L 84 32 L 0 32 Z" fill="url(#g2)"/><path d="M 0 18 L 11 17 L 22 18 L 33 15 L 44 14 L 55 12 L 66 14 L 75 11 L 84 12" fill="none" stroke="var(--am)" stroke-width="1.8"/></svg>
+          <span class="px-block"><span class="px">$148</span><span class="quality gn">FRESH</span></span>
+          <span class="action am">WAIT</span>
+        </div>
+      </div>
+      <div class="deck-foot"><span>5 ER blackouts · 4 extended</span><a href="?tab=watchlist">Watchlist →</a></div>
+    </div>
+
+    <!-- AVOID -->
+    <div class="deck avoid">
+      <div class="deck-head">
+        <div class="deck-head-l">
+          <span class="t"><span class="ico">✕</span>AVOID</span>
+          <span class="sub">killed · extended · failed gate</span>
+        </div>
+        <span class="count">56</span>
+      </div>
+      <div class="deck-body">
+        <div class="row" onclick="window.location='?t=TSLA'">
+          <span class="star">☆</span>
+          <span class="logo lg-tsla">T</span>
+          <span class="ticker-block"><a class="tk" href="?t=TSLA">TSLA</a><span class="meta">RSI 84 · extended · +3.2 ATR</span></span>
+          <svg class="spark" viewBox="0 0 84 32" preserveAspectRatio="none"><defs><linearGradient id="g3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(255,107,91,0.45)"/><stop offset="100%" stop-color="rgba(255,107,91,0)"/></linearGradient></defs><path d="M 0 26 L 11 24 L 22 19 L 33 12 L 44 7 L 55 5 L 66 4 L 75 5 L 84 6 L 84 32 L 0 32 Z" fill="url(#g3)"/><path d="M 0 26 L 11 24 L 22 19 L 33 12 L 44 7 L 55 5 L 66 4 L 75 5 L 84 6" fill="none" stroke="var(--rd)" stroke-width="1.8"/></svg>
+          <span class="px-block"><span class="px rd">$214.50</span><span class="quality rd">−5.8%</span></span>
+          <span class="action rd">WAIT</span>
+        </div>
+        <div class="row" onclick="window.location='?t=META'">
+          <span class="star">☆</span>
+          <span class="logo lg-meta">f</span>
+          <span class="ticker-block"><a class="tk" href="?t=META">META</a><span class="meta">MISSED · +2.5 ATR from pivot</span></span>
+          <svg class="spark" viewBox="0 0 84 32" preserveAspectRatio="none"><path d="M 0 19 L 11 16 L 22 13 L 33 9 L 44 7 L 55 8 L 66 7 L 75 8 L 84 7 L 84 32 L 0 32 Z" fill="url(#g3)"/><path d="M 0 19 L 11 16 L 22 13 L 33 9 L 44 7 L 55 8 L 66 7 L 75 8 L 84 7" fill="none" stroke="var(--rd)" stroke-width="1.8"/></svg>
+          <span class="px-block"><span class="px rd">$498</span><span class="quality am">MISSED</span></span>
+          <span class="action am">PULLBACK</span>
+        </div>
+        <div class="row" onclick="window.location='?t=SHOP'">
+          <span class="badge down">DOWN</span>
+          <span class="star">☆</span>
+          <span class="logo lg-default">SH</span>
+          <span class="ticker-block"><a class="tk" href="?t=SHOP">SHOP</a><span class="meta">Wilson kill · setup dead</span></span>
+          <svg class="spark" viewBox="0 0 84 32" preserveAspectRatio="none"><path d="M 0 10 L 11 12 L 22 15 L 33 17 L 44 20 L 55 19 L 66 21 L 75 23 L 84 25 L 84 32 L 0 32 Z" fill="url(#g3)"/><path d="M 0 10 L 11 12 L 22 15 L 33 17 L 44 20 L 55 19 L 66 21 L 75 23 L 84 25" fill="none" stroke="var(--rd)" stroke-width="1.8"/></svg>
+          <span class="px-block"><span class="px rd">$72.40</span><span class="quality rd">DEAD</span></span>
+          <span class="action rd">DEAD</span>
+        </div>
+      </div>
+      <div class="deck-foot"><span><b>14</b> ext · <b>23</b> missed · <b>19</b> killed</span><a href="?tab=killed">Killed →</a></div>
+    </div>
+  </div>
+
+  <!-- ═════════════ §5 · ESP — horizontal competition bar ═════════════ -->
+  <div class="qc-h"><span class="q"><span class="ico">⚡</span>Earnings Surprise Predictor · top 5 this week</span><span class="r">Zacks ESP · positive surprise prob</span></div>
+  <div class="esp">
+    <div class="esp-head"><span class="t">⚡ ESP LEADERS · TOP 5</span><span class="sub">Zacks ESP · positive surprise probability · radial gauge = confidence</span></div>
+    <div class="esp-podium">
+      <a class="esp-card rank-1" href="?t=NVDA">
+        <span class="rank gold">★ #1</span>
+        <span class="when-chip">WED AMC</span>
+        <span class="logo lg-nvda">●</span>
+        <span class="sym">NVDA</span>
+        <div class="esp-gauge">
+          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="var(--bg-1)" stroke-width="8"/><circle cx="50" cy="50" r="42" fill="none" stroke="var(--gn)" stroke-width="8" stroke-dasharray="264" stroke-dashoffset="42" stroke-linecap="round" transform="rotate(-90 50 50)"/></svg>
+          <span class="esp-gauge-v">+.84</span>
+        </div>
+        <span class="esp-label">ESP score · rank 7</span>
+        <span class="esp-price">$132.85<small>3.8% today</small></span>
+      </a>
+      <a class="esp-card" href="?t=CRWD">
+        <span class="rank">#2</span>
+        <span class="when-chip">TUE AMC</span>
+        <span class="logo lg-default" style="background:#2a3540;color:#fff">CR</span>
+        <span class="sym">CRWD</span>
+        <div class="esp-gauge">
+          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="var(--bg-1)" stroke-width="8"/><circle cx="50" cy="50" r="42" fill="none" stroke="var(--gn)" stroke-width="8" stroke-dasharray="264" stroke-dashoffset="100" stroke-linecap="round" transform="rotate(-90 50 50)"/></svg>
+          <span class="esp-gauge-v">+.62</span>
+        </div>
+        <span class="esp-label">ESP score · rank 6</span>
+        <span class="esp-price">$312.40<small>2.7% today</small></span>
+      </a>
+      <a class="esp-card" href="?t=ZS">
+        <span class="rank">#3</span>
+        <span class="when-chip">THU AMC</span>
+        <span class="logo lg-default" style="background:#1a472a;color:#5be57c">ZS</span>
+        <span class="sym">ZS</span>
+        <div class="esp-gauge">
+          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="var(--bg-1)" stroke-width="8"/><circle cx="50" cy="50" r="42" fill="none" stroke="var(--gn)" stroke-width="8" stroke-dasharray="264" stroke-dashoffset="111" stroke-linecap="round" transform="rotate(-90 50 50)"/></svg>
+          <span class="esp-gauge-v">+.58</span>
+        </div>
+        <span class="esp-label">ESP score · rank 5</span>
+        <span class="esp-price">$208.20<small>+1.2% today</small></span>
+      </a>
+      <a class="esp-card" href="?t=PSTG">
+        <span class="rank">#4</span>
+        <span class="when-chip">WED AMC</span>
+        <span class="logo lg-default" style="background:#3a2540;color:#a78bfa">PS</span>
+        <span class="sym">PSTG</span>
+        <div class="esp-gauge">
+          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="var(--bg-1)" stroke-width="8"/><circle cx="50" cy="50" r="42" fill="none" stroke="var(--am)" stroke-width="8" stroke-dasharray="264" stroke-dashoffset="121" stroke-linecap="round" transform="rotate(-90 50 50)"/></svg>
+          <span class="esp-gauge-v" style="color:var(--am)">+.54</span>
+        </div>
+        <span class="esp-label">ESP score · rank 5</span>
+        <span class="esp-price">$67.10<small>−0.4% today</small></span>
+      </a>
+      <a class="esp-card" href="?t=NTNX">
+        <span class="rank">#5</span>
+        <span class="when-chip">THU AMC</span>
+        <span class="logo lg-default" style="background:#152540;color:#5ec8d8">NT</span>
+        <span class="sym">NTNX</span>
+        <div class="esp-gauge">
+          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="var(--bg-1)" stroke-width="8"/><circle cx="50" cy="50" r="42" fill="none" stroke="var(--am)" stroke-width="8" stroke-dasharray="264" stroke-dashoffset="129" stroke-linecap="round" transform="rotate(-90 50 50)"/></svg>
+          <span class="esp-gauge-v" style="color:var(--am)">+.51</span>
+        </div>
+        <span class="esp-label">ESP score · rank 4</span>
+        <span class="esp-price">$71.20<small>+0.8% today</small></span>
+      </a>
+    </div>
+  </div>
+
+  <!-- ═════════════ §6 · MOVERS + CALENDAR (with bar timeline) ═════════════ -->
+  <div class="qc-h"><span class="q"><span class="ico">⇄</span>Movers · this week's catalysts</span><span class="r">universe scan · 5-day calendar</span></div>
+  <div class="movers-row">
+    <div class="mv-card gainers">
+      <div class="mv-card-head"><span>▲ TOP GAINERS</span></div>
+      <div class="mv-row" onclick="window.location='?t=SMCI'"><span class="logo lg-default">SM</span><div><div class="sym">SMCI</div><span class="name">Server</span></div><svg class="mv-spark" viewBox="0 0 80 22" preserveAspectRatio="none"><path d="M 0 18 L 14 15 L 28 11 L 42 8 L 56 5 L 70 3 L 80 2" fill="none" stroke="var(--gn)" stroke-width="1.6"/></svg><div class="mv-px gn">+8.4%</div><div class="mv-tail">$684</div></div>
+      <div class="mv-row" onclick="window.location='?t=PLTR'"><span class="logo lg-pltr">P</span><div><div class="sym">PLTR</div><span class="name">Software</span></div><svg class="mv-spark" viewBox="0 0 80 22" preserveAspectRatio="none"><path d="M 0 17 L 14 14 L 28 13 L 42 9 L 56 6 L 70 5 L 80 3" fill="none" stroke="var(--gn)" stroke-width="1.6"/></svg><div class="mv-px gn">+5.2%</div><div class="mv-tail">$54</div></div>
+      <div class="mv-row" onclick="window.location='?t=NVDA'"><span class="logo lg-nvda">●</span><div><div class="sym">NVDA</div><span class="name">Semi</span></div><svg class="mv-spark" viewBox="0 0 80 22" preserveAspectRatio="none"><path d="M 0 14 L 14 12 L 28 10 L 42 8 L 56 6 L 70 5 L 80 4" fill="none" stroke="var(--gn)" stroke-width="1.6"/></svg><div class="mv-px gn">+3.8%</div><div class="mv-tail">$133</div></div>
+      <div class="mv-row" onclick="window.location='?t=DXCM'"><span class="logo lg-dxcm">D</span><div><div class="sym">DXCM</div><span class="name">Med dev</span></div><svg class="mv-spark" viewBox="0 0 80 22" preserveAspectRatio="none"><path d="M 0 13 L 14 14 L 28 11 L 42 10 L 56 8 L 70 7 L 80 6" fill="none" stroke="var(--gn)" stroke-width="1.6"/></svg><div class="mv-px gn">+3.2%</div><div class="mv-tail">$87</div></div>
+    </div>
+    <div class="mv-card losers">
+      <div class="mv-card-head"><span>▼ TOP LOSERS</span></div>
+      <div class="mv-row" onclick="window.location='?t=TSLA'"><span class="logo lg-tsla">T</span><div><div class="sym">TSLA</div><span class="name">Auto</span></div><svg class="mv-spark" viewBox="0 0 80 22" preserveAspectRatio="none"><path d="M 0 3 L 14 7 L 28 10 L 42 14 L 56 16 L 70 18 L 80 19" fill="none" stroke="var(--rd)" stroke-width="1.6"/></svg><div class="mv-px rd">−5.8%</div><div class="mv-tail">$214</div></div>
+      <div class="mv-row" onclick="window.location='?t=META'"><span class="logo lg-meta">f</span><div><div class="sym">META</div><span class="name">Tech</span></div><svg class="mv-spark" viewBox="0 0 80 22" preserveAspectRatio="none"><path d="M 0 5 L 14 8 L 28 11 L 42 13 L 56 15 L 70 17 L 80 18" fill="none" stroke="var(--rd)" stroke-width="1.6"/></svg><div class="mv-px rd">−4.2%</div><div class="mv-tail">$498</div></div>
+      <div class="mv-row" onclick="window.location='?t=COIN'"><span class="logo lg-default">CO</span><div><div class="sym">COIN</div><span class="name">Fintech</span></div><svg class="mv-spark" viewBox="0 0 80 22" preserveAspectRatio="none"><path d="M 0 6 L 14 9 L 28 11 L 42 13 L 56 15 L 70 16 L 80 17" fill="none" stroke="var(--rd)" stroke-width="1.6"/></svg><div class="mv-px rd">−3.7%</div><div class="mv-tail">$243</div></div>
+      <div class="mv-row" onclick="window.location='?t=SHOP'"><span class="logo lg-default">SH</span><div><div class="sym">SHOP</div><span class="name">E-com</span></div><svg class="mv-spark" viewBox="0 0 80 22" preserveAspectRatio="none"><path d="M 0 8 L 14 10 L 28 11 L 42 12 L 56 14 L 70 16 L 80 17" fill="none" stroke="var(--rd)" stroke-width="1.6"/></svg><div class="mv-px rd">−2.9%</div><div class="mv-tail">$72</div></div>
+    </div>
+    <div class="mv-card cal">
+      <div class="mv-card-head"><span>⌖ THIS WEEK</span><span style="font-weight:500;color:var(--ink-3);font-size:9px">macro · ER · ex-div</span></div>
+      <div class="cal-list">
+        <div class="cal-day-row today">
+          <div class="cal-d">MON<b>18</b></div>
+          <div class="cal-events-list">
+            <span class="cal-event macro high-impact"><span class="ico">●</span><span class="desc">FOMC rate decision 2pm</span><span class="tg">MACRO</span></span>
+          </div>
+        </div>
+        <div class="cal-day-row">
+          <div class="cal-d">TUE<b>19</b></div>
+          <div class="cal-events-list">
+            <span class="cal-event div"><a class="tk" href="?t=ABBV">ABBV</a><span class="desc">ex-div $1.55</span><span class="tg">DIV</span></span>
+          </div>
+        </div>
+        <div class="cal-day-row">
+          <div class="cal-d">WED<b>20</b></div>
+          <div class="cal-events-list">
+            <span class="cal-event er high-impact"><a class="tk" href="?t=NVDA">NVDA</a><span class="desc">ER AMC · ESP +0.84</span><span class="tg">ER</span></span>
+          </div>
+        </div>
+        <div class="cal-day-row">
+          <div class="cal-d">THU<b>21</b></div>
+          <div class="cal-events-list">
+            <span class="cal-event er"><a class="tk" href="?t=AAPL">AAPL</a><span class="desc">ER AMC</span><span class="tg">ER</span></span>
+            <span class="cal-event macro high-impact"><span class="desc">CPI 8:30am</span><span class="tg">CPI</span></span>
+          </div>
+        </div>
+        <div class="cal-day-row">
+          <div class="cal-d">FRI<b>22</b></div>
+          <div class="cal-events-list">
+            <span class="cal-event macro"><span class="desc">PMI Flash 9:45am</span><span class="tg">PMI</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════ §7 · CROSS-REFERENCES with overlay charts ═════════════ -->
+  <div class="qc-h"><span class="q"><span class="ico">≈</span>Looks like · pattern matcher</span><span class="r">today's setups vs historical analogues</span></div>
+  <div class="similar">
+    <div class="sim-card">
+      <div class="sim-head"><b>DXCM today</b> ≈ <b>META 2024-05</b> · 87% match</div>
+      <div class="sim-chart-wrap">
+        <svg viewBox="0 0 200 90" preserveAspectRatio="none">
+          <path d="M 0 70 L 20 65 L 40 60 L 60 55 L 80 50 L 100 48 L 120 45 L 140 40 L 160 35 L 180 30 L 200 25" fill="none" stroke="var(--copper)" stroke-width="1.8"/>
+          <path d="M 0 72 L 20 68 L 40 62 L 60 56 L 80 52 L 100 50 L 120 46 L 140 42 L 160 36 L 180 30 L 200 22" fill="none" stroke="var(--ink-3)" stroke-width="1.5" stroke-dasharray="3 3"/>
+        </svg>
+      </div>
+      <div class="sim-legend"><span><i style="background:var(--copper)"></i>DXCM</span><span><i style="background:var(--ink-3)"></i>META 2024-05</span></div>
+      <div class="sim-stats"><div class="sim-stat">10d after<b class="gn">+8.2%</b></div><div class="sim-stat">21d after<b class="gn">+14.6%</b></div><div class="sim-stat">match<b>87%</b></div></div>
+    </div>
+    <div class="sim-card">
+      <div class="sim-head"><b>NVDA today</b> ≈ <b>AVGO 2024-02</b> · 91% match</div>
+      <div class="sim-chart-wrap">
+        <svg viewBox="0 0 200 90" preserveAspectRatio="none">
+          <path d="M 0 60 L 20 55 L 40 48 L 60 42 L 80 36 L 100 32 L 120 25 L 140 20 L 160 16 L 180 12 L 200 8" fill="none" stroke="var(--copper)" stroke-width="1.8"/>
+          <path d="M 0 62 L 20 56 L 40 50 L 60 44 L 80 38 L 100 30 L 120 24 L 140 18 L 160 12 L 180 6 L 200 3" fill="none" stroke="var(--ink-3)" stroke-width="1.5" stroke-dasharray="3 3"/>
+        </svg>
+      </div>
+      <div class="sim-legend"><span><i style="background:var(--copper)"></i>NVDA</span><span><i style="background:var(--ink-3)"></i>AVGO 2024-02</span></div>
+      <div class="sim-stats"><div class="sim-stat">10d after<b class="gn">+6.4%</b></div><div class="sim-stat">21d after<b class="gn">+22.1%</b></div><div class="sim-stat">match<b>91%</b></div></div>
+    </div>
+    <div class="sim-card">
+      <div class="sim-head"><b>TSLA today</b> ≈ <b>NFLX 2022-04</b> · 82% match</div>
+      <div class="sim-chart-wrap">
+        <svg viewBox="0 0 200 90" preserveAspectRatio="none">
+          <path d="M 0 35 L 20 32 L 40 38 L 60 45 L 80 55 L 100 65 L 120 72 L 140 78 L 160 82 L 180 84 L 200 86" fill="none" stroke="var(--copper)" stroke-width="1.8"/>
+          <path d="M 0 30 L 20 35 L 40 45 L 60 55 L 80 65 L 100 72 L 120 80 L 140 84 L 160 86 L 180 87 L 200 88" fill="none" stroke="var(--ink-3)" stroke-width="1.5" stroke-dasharray="3 3"/>
+        </svg>
+      </div>
+      <div class="sim-legend"><span><i style="background:var(--copper)"></i>TSLA</span><span><i style="background:var(--ink-3)"></i>NFLX 2022-04</span></div>
+      <div class="sim-stats"><div class="sim-stat">10d after<b class="rd">−18.7%</b></div><div class="sim-stat">21d after<b class="rd">−24.3%</b></div><div class="sim-stat">match<b>82%</b></div></div>
+    </div>
+  </div>
+
+  <!-- ═════════════ §8 · INFORMATION TAPE with brand logos ═════════════ -->
+  <div class="qc-h"><span class="q"><span class="ico">📡</span>What just happened</span><span class="r">last 4h · 37 events · auto 60s</span></div>
+  <div class="pulse">
+    <div class="pulse-head"><div class="tape-filters"><span class="tape-filter on">ALL · 37</span><span class="tape-filter">NEWS · 18</span><span class="tape-filter">ER · 6</span><span class="tape-filter">INSIDER · 4</span><span class="tape-filter">MACRO · 3</span><span class="tape-filter">UOA · 6</span></div></div>
+    <div class="pulse-row"><span class="time">14:32</span><a class="type uoa">UOA</a><span class="logo lg-msft">⊞</span><a class="tk" href="?t=MSFT">MSFT</a><span class="msg"><a href="?t=MSFT"><b>UOA spike</b> · $540 call +312% vol · IV +18</a><span class="src">kairos.flow</span></span><span class="impact gn">BULL</span></div>
+    <div class="pulse-row"><span class="time">14:18</span><a class="type macro">MACRO</a><span class="logo lg-default">SP</span><a class="tk" href="?t=SPY">SPY</a><span class="msg"><a class="ext" href="https://federalreserve.gov" target="_blank">Powell 3pm · <b>"data dependent"</b> unchanged</a><span class="src">federalreserve.gov</span></span><span class="impact am">NEUT</span></div>
+    <div class="pulse-row"><span class="time">13:55</span><a class="type news">NEWS</a><span class="logo lg-nvda">●</span><a class="tk" href="?t=NVDA">NVDA</a><span class="msg"><a class="ext" href="https://reuters.com" target="_blank"><b>Blackwell shipments</b> beat · MS upgrades to $1,400</a><span class="src">reuters.com</span></span><span class="impact gn">BULL</span></div>
+    <div class="pulse-row"><span class="time">13:42</span><a class="type insider">INSIDER</a><span class="logo lg-pltr">P</span><a class="tk" href="?t=PLTR">PLTR</a><span class="msg"><a class="ext" href="https://sec.gov" target="_blank">CTO <b>buy</b> 28,500 sh @ $54.10 · $1.54M</a><span class="src">sec.gov · Form 4</span></span><span class="impact gn">BULL</span></div>
+    <div class="pulse-row"><span class="time">13:21</span><a class="type er">ER</a><span class="logo lg-default">CR</span><a class="tk" href="?t=CRWD">CRWD</a><span class="msg"><a>Beat EPS +12% · raised guidance · <b>+8.2%</b> AH</a><span class="src">kairos.er</span></span><span class="impact gn">BULL</span></div>
+    <div class="pulse-row"><span class="time">12:48</span><a class="type news">NEWS</a><span class="logo lg-tsla">T</span><a class="tk" href="?t=TSLA">TSLA</a><span class="msg"><a class="ext" href="https://bloomberg.com" target="_blank">Berlin recall +47K · GS cut to <b>sell</b></a><span class="src">bloomberg.com</span></span><span class="impact rd">BEAR</span></div>
+  </div>
+
+  <!-- ═════════════ §9 · TV-STYLE SECTOR HEATMAP ═════════════ -->
+  <div class="qc-h"><span class="q"><span class="ico">▦</span>Where is the money flowing · sector heatmap</span><span class="r">cell = market cap · color = today's change · <a href="?tab=marketmap">full map →</a></span></div>
+  <div class="treemap-wrap">
+    <div class="treemap">
+      <!-- Technology -->
+      <div class="tm-sec" style="grid-column:span 8;grid-row:span 6"><span class="tm-label">Technology</span>
+        <a class="tm-cell tm-c-gn3 lg" style="grid-column:span 4;grid-row:span 3" href="?t=NVDA"><span class="tm-cell-sym">NVDA</span><span class="tm-cell-chg">+3.8%</span></a>
+        <a class="tm-cell tm-c-gn2 md" style="grid-column:span 2;grid-row:span 3" href="?t=AAPL"><span class="tm-cell-sym">AAPL</span><span class="tm-cell-chg">+0.7%</span></a>
+        <a class="tm-cell tm-c-gn1 md" style="grid-column:span 6;grid-row:span 2" href="?t=MSFT"><span class="tm-cell-sym">MSFT</span><span class="tm-cell-chg">+3.05%</span></a>
+        <a class="tm-cell tm-c-rd2 sm" style="grid-column:span 2;grid-row:span 1" href="?t=AVGO"><span class="tm-cell-sym">AVGO</span><span class="tm-cell-chg">−3.3%</span></a>
+        <a class="tm-cell tm-c-rd1 sm" style="grid-column:span 2;grid-row:span 1" href="?t=ORCL"><span class="tm-cell-sym">ORCL</span><span class="tm-cell-chg">−1.4%</span></a>
+        <a class="tm-cell tm-c-gn1 sm" style="grid-column:span 2;grid-row:span 1" href="?t=CRWD"><span class="tm-cell-sym">CRWD</span><span class="tm-cell-chg">+2.7%</span></a>
+      </div>
+      <!-- Finance -->
+      <div class="tm-sec" style="grid-column:span 8;grid-row:span 6"><span class="tm-label">Finance</span>
+        <a class="tm-cell tm-c-rd1 md" style="grid-column:span 4;grid-row:span 3" href="?t=BRK.B"><span class="tm-cell-sym">BRK.B</span><span class="tm-cell-chg">−0.3%</span></a>
+        <a class="tm-cell tm-c-rd1 md" style="grid-column:span 2;grid-row:span 2" href="?t=JPM"><span class="tm-cell-sym">JPM</span><span class="tm-cell-chg">−0.7%</span></a>
+        <a class="tm-cell tm-c-gn1 sm" style="grid-column:span 2;grid-row:span 2" href="?t=V"><span class="tm-cell-sym">V</span><span class="tm-cell-chg">+1.0%</span></a>
+        <a class="tm-cell tm-c-rd1 sm" style="grid-column:span 2;grid-row:span 1" href="?t=MS"><span class="tm-cell-sym">MS</span><span class="tm-cell-chg">−1.0%</span></a>
+        <a class="tm-cell tm-c-rd2 sm" style="grid-column:span 2;grid-row:span 1" href="?t=GS"><span class="tm-cell-sym">GS</span><span class="tm-cell-chg">−2.1%</span></a>
+        <a class="tm-cell tm-c-gn1 sm" style="grid-column:span 4;grid-row:span 2" href="?t=MA"><span class="tm-cell-sym">MA</span><span class="tm-cell-chg">+0.87%</span></a>
+        <a class="tm-cell tm-c-neut sm" style="grid-column:span 2;grid-row:span 1" href="?t=BAC"><span class="tm-cell-sym">BAC</span><span class="tm-cell-chg">−0.2%</span></a>
+      </div>
+      <!-- Health -->
+      <div class="tm-sec" style="grid-column:span 8;grid-row:span 6"><span class="tm-label">Health</span>
+        <a class="tm-cell tm-c-rd1 md" style="grid-column:span 3;grid-row:span 3" href="?t=LLY"><span class="tm-cell-sym">LLY</span><span class="tm-cell-chg">−0.18%</span></a>
+        <a class="tm-cell tm-c-rd2 md" style="grid-column:span 3;grid-row:span 3" href="?t=JNJ"><span class="tm-cell-sym">JNJ</span><span class="tm-cell-chg">−1.77%</span></a>
+        <a class="tm-cell tm-c-rd1 sm" style="grid-column:span 3;grid-row:span 2" href="?t=ABBV"><span class="tm-cell-sym">ABBV</span><span class="tm-cell-chg">−0.18%</span></a>
+        <a class="tm-cell tm-c-rd2 sm" style="grid-column:span 3;grid-row:span 2" href="?t=MRK"><span class="tm-cell-sym">MRK</span><span class="tm-cell-chg">−1.79%</span></a>
+        <a class="tm-cell tm-c-rd1 sm" style="grid-column:span 2;grid-row:span 1" href="?t=UNH"><span class="tm-cell-sym">UNH</span><span class="tm-cell-chg">−1.31%</span></a>
+        <a class="tm-cell tm-c-gn1 sm" style="grid-column:span 2;grid-row:span 1" href="?t=PFE"><span class="tm-cell-sym">PFE</span><span class="tm-cell-chg">+0.4%</span></a>
+        <a class="tm-cell tm-c-rd1 sm" style="grid-column:span 2;grid-row:span 1" href="?t=ABT"><span class="tm-cell-sym">ABT</span><span class="tm-cell-chg">−1.07%</span></a>
+      </div>
+      <!-- Energy -->
+      <div class="tm-sec" style="grid-column:span 6;grid-row:span 4"><span class="tm-label">Energy</span>
+        <a class="tm-cell tm-c-gn2 md" style="grid-column:span 3;grid-row:span 3" href="?t=XOM"><span class="tm-cell-sym">XOM</span><span class="tm-cell-chg">+3.36%</span></a>
+        <a class="tm-cell tm-c-gn1 sm" style="grid-column:span 3;grid-row:span 2" href="?t=CVX"><span class="tm-cell-sym">CVX</span><span class="tm-cell-chg">+2.39%</span></a>
+        <a class="tm-cell tm-c-gn1 sm" style="grid-column:span 2;grid-row:span 1" href="?t=COP"><span class="tm-cell-sym">COP</span><span class="tm-cell-chg">+1.2%</span></a>
+        <a class="tm-cell tm-c-gn1 sm" style="grid-column:span 1;grid-row:span 1" href="?t=EOG"><span class="tm-cell-sym">EOG</span><span class="tm-cell-chg">+0.8%</span></a>
+      </div>
+      <!-- Cons Disc + Cons Stap + Auto -->
+      <div class="tm-sec" style="grid-column:span 6;grid-row:span 4"><span class="tm-label">Consumer Disc</span>
+        <a class="tm-cell tm-c-rd1 md" style="grid-column:span 6;grid-row:span 2" href="?t=AMZN"><span class="tm-cell-sym">AMZN</span><span class="tm-cell-chg">−1.15%</span></a>
+        <a class="tm-cell tm-c-rd3 md" style="grid-column:span 3;grid-row:span 2" href="?t=TSLA"><span class="tm-cell-sym">TSLA</span><span class="tm-cell-chg">−5.8%</span></a>
+        <a class="tm-cell tm-c-rd1 sm" style="grid-column:span 3;grid-row:span 1" href="?t=HD"><span class="tm-cell-sym">HD</span><span class="tm-cell-chg">−2.25%</span></a>
+        <a class="tm-cell tm-c-gn1 sm" style="grid-column:span 3;grid-row:span 1" href="?t=MCD"><span class="tm-cell-sym">MCD</span><span class="tm-cell-chg">+0.52%</span></a>
+      </div>
+      <!-- Comm + Utilities + Real Est -->
+      <div class="tm-sec" style="grid-column:span 6;grid-row:span 4"><span class="tm-label">Comm + Util + Real Est</span>
+        <a class="tm-cell tm-c-rd2 md" style="grid-column:span 3;grid-row:span 3" href="?t=GOOGL"><span class="tm-cell-sym">GOOGL</span><span class="tm-cell-chg">−1.07%</span></a>
+        <a class="tm-cell tm-c-rd1 md" style="grid-column:span 3;grid-row:span 2" href="?t=META"><span class="tm-cell-sym">META</span><span class="tm-cell-chg">−0.68%</span></a>
+        <a class="tm-cell tm-c-rd2 sm" style="grid-column:span 2;grid-row:span 1" href="?t=NEE"><span class="tm-cell-sym">NEE</span><span class="tm-cell-chg">−2.4%</span></a>
+        <a class="tm-cell tm-c-rd2 sm" style="grid-column:span 2;grid-row:span 1" href="?t=DUK"><span class="tm-cell-sym">DUK</span><span class="tm-cell-chg">−2.9%</span></a>
+        <a class="tm-cell tm-c-rd2 sm" style="grid-column:span 2;grid-row:span 2" href="?t=AMT"><span class="tm-cell-sym">AMT</span><span class="tm-cell-chg">−1.4%</span></a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════ §10 · RISK WARNINGS — radial dials ═════════════ -->
+  <div class="qc-h"><span class="q"><span class="ico">⚠</span>Risk surface</span><span class="r">crowding · correlation · vol · sentiment · insider flow</span></div>
+  <div class="risk-row">
+    <div class="risk-cell warn">
+      <div class="risk-dial">
+        <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--bg-3)" stroke-width="6"/><circle cx="50" cy="50" r="40" fill="none" stroke="var(--am)" stroke-width="6" stroke-dasharray="251" stroke-dashoffset="84" transform="rotate(-90 50 50)"/></svg>
+        <span class="v am">3.2×</span>
+      </div>
+      <div class="risk-info"><div class="k">Crowding</div><div class="label">TSLA fading</div><div class="s">on <b>47</b> watchlists in 24h</div></div>
+    </div>
+    <div class="risk-cell ok">
+      <div class="risk-dial">
+        <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--bg-3)" stroke-width="6"/><circle cx="50" cy="50" r="40" fill="none" stroke="var(--gn)" stroke-width="6" stroke-dasharray="251" stroke-dashoffset="146" transform="rotate(-90 50 50)"/></svg>
+        <span class="v gn">0.42</span>
+      </div>
+      <div class="risk-info"><div class="k">Avg correlation</div><div class="label">Diversified</div><div class="s">BUY list healthy</div></div>
+    </div>
+    <div class="risk-cell warn">
+      <div class="risk-dial">
+        <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--bg-3)" stroke-width="6"/><circle cx="50" cy="50" r="40" fill="none" stroke="var(--am)" stroke-width="6" stroke-dasharray="251" stroke-dashoffset="201" transform="rotate(-90 50 50)"/></svg>
+        <span class="v am">+8%</span>
+      </div>
+      <div class="risk-info"><div class="k">VIX trend</div><div class="label">Monitor</div><div class="s">+1.2 in 30min</div></div>
+    </div>
+    <div class="risk-cell ok">
+      <div class="risk-dial">
+        <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--bg-3)" stroke-width="6"/><circle cx="50" cy="50" r="40" fill="none" stroke="var(--gn)" stroke-width="6" stroke-dasharray="251" stroke-dashoffset="100" transform="rotate(-90 50 50)"/></svg>
+        <span class="v gn">+.62</span>
+      </div>
+      <div class="risk-info"><div class="k">News sentiment</div><div class="label">Net BULL</div><div class="s">37 events trending up</div></div>
+    </div>
+    <div class="risk-cell bad">
+      <div class="risk-dial">
+        <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--bg-3)" stroke-width="6"/><circle cx="50" cy="50" r="40" fill="none" stroke="var(--rd)" stroke-width="6" stroke-dasharray="251" stroke-dashoffset="63" transform="rotate(-90 50 50)"/></svg>
+        <span class="v rd">3.2×</span>
+      </div>
+      <div class="risk-info"><div class="k">Insider sells</div><div class="label">Watch</div><div class="s">TSLA · COIN · SHOP</div></div>
+    </div>
+  </div>
+
+  <!-- ═════════════ §11 · ACTIVITY TIMELINE ═════════════ -->
+  <div class="qc-h"><span class="q"><span class="ico">⌛</span>Recent activity · system events</span><span class="r">last 10 events</span></div>
+  <div class="activity">
+    <div class="act-row"><span class="ts">14:35</span><div class="act-dot gn">▲</div><span class="act-msg"><a class="tk" href="?t=NVDA">NVDA</a> · score crossed 78, <b>BUY signal fired</b> (was WATCH 69)</span><span class="act-tag">SCORE</span></div>
+    <div class="act-row"><span class="ts">14:22</span><div class="act-dot am">◆</div><span class="act-msg"><a class="tk" href="?t=ABBV">ABBV</a> · within 2.1% of stop · <b>warning flag</b></span><span class="act-tag">RISK</span></div>
+    <div class="act-row"><span class="ts">13:48</span><div class="act-dot gn">▲</div><span class="act-msg"><a class="tk" href="?t=DXCM">DXCM</a> · entry zone <b>fresh pullback</b> · pre-placed limit live</span><span class="act-tag">ENTRY</span></div>
+    <div class="act-row"><span class="ts">13:21</span><div class="act-dot cy">⌖</div><span class="act-msg"><a class="tk" href="?t=CRWD">CRWD</a> · ER beat +12% · <b>WATCH promoted</b></span><span class="act-tag">ER</span></div>
+    <div class="act-row"><span class="ts">12:55</span><div class="act-dot rd">✕</div><span class="act-msg"><a class="tk" href="?t=SHOP">SHOP</a> · Wilson kill triggered · <b>AVOID</b></span><span class="act-tag">KILL</span></div>
+    <div class="act-row"><span class="ts">12:32</span><div class="act-dot cy">⌖</div><span class="act-msg">Scan complete · 1,500 → 122 → 52 → <b>8 BUY ready</b></span><span class="act-tag">SCAN</span></div>
+  </div>
+
+  <!-- ═════════════ §12 · SYSTEM TRUST · bigger equity + radial gauges ═════════════ -->
+  <div class="qc-h"><span class="q"><span class="ico">✓</span>Can I trust the signals</span><span class="r">252-day rolling</span></div>
+  <div class="trust-wrap">
+    <div class="trust-eq">
+      <div class="trust-eq-head">
+        <div><div class="trust-eq-t">System equity · 252d</div><div class="trust-eq-sub" style="margin-top:3px">starting $100K · today $118.7K · max DD <b>−5.2%</b></div></div>
+        <span class="trust-eq-v">+18.7%</span>
+      </div>
+      <svg viewBox="0 0 800 140" preserveAspectRatio="none">
+        <defs><linearGradient id="eq" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(91,229,124,0.35)"/><stop offset="100%" stop-color="rgba(91,229,124,0)"/></linearGradient></defs>
+        <g stroke="var(--line)" stroke-width="0.5"><line x1="0" y1="35" x2="800" y2="35"/><line x1="0" y1="70" x2="800" y2="70"/><line x1="0" y1="105" x2="800" y2="105"/></g>
+        <path d="M 0 110 L 40 108 L 80 102 L 120 105 L 160 95 L 200 92 L 240 98 L 280 82 L 320 78 L 360 72 L 400 76 L 440 65 L 480 56 L 520 62 L 560 48 L 600 42 L 640 46 L 680 38 L 720 32 L 760 24 L 800 18 L 800 140 L 0 140 Z" fill="url(#eq)"/>
+        <path d="M 0 110 L 40 108 L 80 102 L 120 105 L 160 95 L 200 92 L 240 98 L 280 82 L 320 78 L 360 72 L 400 76 L 440 65 L 480 56 L 520 62 L 560 48 L 600 42 L 640 46 L 680 38 L 720 32 L 760 24 L 800 18" fill="none" stroke="var(--gn)" stroke-width="2"/>
+        <text x="8" y="132" font-family="JetBrains Mono" font-size="9" fill="var(--ink-3)">252d ago</text>
+        <text x="792" y="132" text-anchor="end" font-family="JetBrains Mono" font-size="9" fill="var(--ink-3)">today</text>
+        <text x="792" y="22" text-anchor="end" font-family="JetBrains Mono" font-size="10" fill="var(--gn)" font-weight="700">$118.7K ↗</text>
+      </svg>
+      <div class="trust-eq-stats">
+        <div class="trust-eq-stat"><div class="k">Sharpe</div><div class="v gn">1.42</div></div>
+        <div class="trust-eq-stat"><div class="k">Sortino</div><div class="v gn">1.81</div></div>
+        <div class="trust-eq-stat"><div class="k">Calmar</div><div class="v cy">3.60</div></div>
+      </div>
+    </div>
+    <div class="trust-gauges">
+      <div class="trust-g"><div class="trust-g-svg"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--bg-3)" stroke-width="8"/><circle cx="50" cy="50" r="40" fill="none" stroke="var(--gn)" stroke-width="8" stroke-dasharray="251" stroke-dashoffset="105" transform="rotate(-90 50 50)" stroke-linecap="round"/></svg><span class="trust-g-v gn">58%</span></div><span class="trust-g-k">Win Rate</span><span class="trust-g-s">n=147</span></div>
+      <div class="trust-g"><div class="trust-g-svg"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--bg-3)" stroke-width="8"/><circle cx="50" cy="50" r="40" fill="none" stroke="var(--gn)" stroke-width="8" stroke-dasharray="251" stroke-dashoffset="79" transform="rotate(-90 50 50)" stroke-linecap="round"/></svg><span class="trust-g-v gn">1.84</span></div><span class="trust-g-k">Profit Factor</span><span class="trust-g-s">target 1.5</span></div>
+      <div class="trust-g"><div class="trust-g-svg"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--bg-3)" stroke-width="8"/><circle cx="50" cy="50" r="40" fill="none" stroke="var(--cy)" stroke-width="8" stroke-dasharray="251" stroke-dashoffset="125" transform="rotate(-90 50 50)" stroke-linecap="round"/></svg><span class="trust-g-v cy">1.42</span></div><span class="trust-g-k">Sharpe 252d</span><span class="trust-g-s">healthy</span></div>
+      <div class="trust-g"><div class="trust-g-svg"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--bg-3)" stroke-width="8"/><circle cx="50" cy="50" r="40" fill="none" stroke="var(--am)" stroke-width="8" stroke-dasharray="251" stroke-dashoffset="201" transform="rotate(-90 50 50)" stroke-linecap="round"/></svg><span class="trust-g-v am">−5.2%</span></div><span class="trust-g-k">Max DD</span><span class="trust-g-s">vs −10% limit</span></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="info">
+  <b>v5 · visually rich</b> — live tape · charts in hero · pulsing sleeves · brand logos in tickers · ESP bar competition · calendar bar timeline · cross-ref overlay charts · TV-style heatmap · radial risk dials · activity timeline · big equity curve + radial trust gauges
+</div>
+
+</body>
+</html>

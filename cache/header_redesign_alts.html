@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Detail-page header · 3 alternative architectures</title>
+<style>
+:root {
+  --bg-0:#0a0c0f; --bg-1:#11151a; --bg-2:#161c22; --bg-3:#1c252b; --bg-4:#232e34;
+  --ink-0:#f4f4f4; --ink:#e9eaeb; --ink-1:#c9cdd0; --ink-2:#8f969c; --ink-3:#5a6268;
+  --rule:#1f262b; --rule-2:#283038;
+  --gn:#5be57c; --rd:#ff6b5b; --amb:#ffb95c; --copper:#d49060; --vio:#a78bfa; --info:#60a5fa;
+  --mono:'JetBrains Mono','SF Mono',Menlo,Consolas,monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg-0); color: var(--ink);
+       font-family: -apple-system,"Inter",system-ui,sans-serif;
+       font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums; padding: 30px 24px 60px; }
+.wrap { max-width: 1480px; margin: 0 auto; }
+.page-title { font-size: 28px; font-weight: 800; color: var(--ink-0); margin: 0 0 6px; }
+.page-sub { color: var(--ink-2); font-size: 14px; font-family: var(--mono); letter-spacing: 0.04em; margin-bottom: 24px; }
+
+.sec-h { display: flex; align-items: baseline; gap: 14px; margin: 36px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
+.sec-h .label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 800; padding: 4px 12px; border-radius: 3px; background: rgba(212,144,96,0.10); color: var(--copper); border: 1px solid rgba(212,144,96,0.35); }
+.sec-h .title { font-size: 16px; font-weight: 700; color: var(--ink-0); }
+.sec-h .meta { color: var(--ink-3); font-family: var(--mono); font-size: 11px; margin-left: auto; letter-spacing: 0.04em; }
+.sec-h .philosophy { font-family: var(--mono); font-size: 10.5px; color: var(--info); letter-spacing: 0.10em; padding: 3px 10px; border: 1px solid rgba(96,165,250,0.30); border-radius: 3px; background: rgba(96,165,250,0.08); }
+
+.sample { background: var(--bg-1); border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
+
+.measure { display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin-top: 12px;
+           background: var(--bg-2); border: 1px solid var(--rule); border-radius: 3px;
+           font-family: var(--mono); font-size: 11px; color: var(--ink-2); flex-wrap: wrap; }
+.measure b { color: var(--ink-0); }
+.measure .gn { color: var(--gn); font-weight: 700; }
+.measure .rd { color: var(--rd); font-weight: 700; }
+.measure .amb { color: var(--amb); font-weight: 700; }
+.measure .div { color: var(--ink-3); margin: 0 6px; }
+
+.tradeoffs { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 14px; }
+.tradeoff-card { padding: 14px 16px; border: 1px solid var(--rule); border-radius: 3px; background: var(--bg-2); }
+.tradeoff-card h4 { margin: 0 0 8px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 800; }
+.tradeoff-card.pros h4 { color: var(--gn); }
+.tradeoff-card.cons h4 { color: var(--rd); }
+.tradeoff-card ul { margin: 0; padding-left: 22px; color: var(--ink-1); font-size: 12.5px; line-height: 1.65; }
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   ALT 1 · TRADING DESK · ultra-dense single-row + sub-row
+   Philosophy: Bloomberg terminal · max info per pixel · power users only
+   ════════════════════════════════════════════════════════════════════════ */
+.td-bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%); border-bottom: 1px solid var(--rule); font-family: var(--mono); font-size: 12px; }
+.td-tk { font-size: 22px; font-weight: 800; color: var(--ink-0); letter-spacing: 0.04em; }
+.td-px { font-size: 16px; font-weight: 800; color: var(--ink-0); }
+.td-chg { font-size: 11px; color: var(--gn); font-weight: 700; }
+.td-div { color: var(--ink-3); }
+.td-verdict { padding: 3px 10px; background: var(--gn); color: var(--bg-0); border-radius: 3px; font-size: 11px; font-weight: 800; letter-spacing: 0.10em; }
+.td-tier { padding: 3px 8px; background: color-mix(in oklch, var(--gn) 18%, var(--bg-1)); color: var(--gn); border: 1px solid color-mix(in oklch, var(--gn) 40%, transparent); border-radius: 3px; font-size: 11px; font-weight: 800; }
+.td-chip { padding: 3px 9px; background: var(--bg-2); border: 1px solid var(--rule-2); border-radius: 2px; font-size: 11px; color: var(--ink-1); font-weight: 700; letter-spacing: 0.04em; }
+.td-chip .k { color: var(--ink-3); font-size: 9.5px; letter-spacing: 0.10em; margin-right: 4px; }
+.td-chip .v { color: var(--ink-0); }
+.td-chip.cop { border-color: var(--copper); }
+.td-chip.cop .v { color: var(--copper); }
+.td-chip.amb .v { color: var(--amb); }
+.td-chip.rd .v { color: var(--rd); }
+.td-chip.gn .v { color: var(--gn); }
+.td-sub { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--bg-1); border-bottom: 1px solid var(--rule); font-family: var(--mono); font-size: 11px; flex-wrap: wrap; }
+.td-mode { padding: 4px 12px; border: 1px solid var(--rule); border-radius: 2px; font-size: 10px; color: var(--ink-2); font-weight: 700; letter-spacing: 0.12em; cursor: pointer; }
+.td-mode.on { background: var(--copper); color: var(--bg-0); border-color: var(--copper); }
+.td-lens { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; padding: 2px 7px; border-radius: 10px; font-weight: 700; }
+.td-lens.gn { background: rgba(91,229,124,0.10); color: var(--gn); border: 1px solid rgba(91,229,124,0.25); }
+.td-lens.rd { background: rgba(255,107,91,0.10); color: var(--rd); border: 1px solid rgba(255,107,91,0.25); }
+.td-lens.amb { background: rgba(255,185,92,0.10); color: var(--amb); border: 1px solid rgba(255,185,92,0.25); }
+.td-conflict { padding: 3px 9px; background: rgba(255,185,92,0.10); border: 1px solid rgba(255,185,92,0.35); border-radius: 2px; color: var(--amb); font-size: 10px; font-weight: 800; letter-spacing: 0.08em; cursor: pointer; margin-left: auto; }
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   ALT 2 · COCKPIT · big visual verdict + radial KPIs
+   Philosophy: cockpit aesthetic · arc verdict + tile cluster · scannable
+   ════════════════════════════════════════════════════════════════════════ */
+.ck-host { display: grid; grid-template-columns: 220px 1fr 220px; align-items: center; padding: 18px 22px; background: linear-gradient(135deg, color-mix(in oklch, var(--gn) 5%, var(--bg-2)) 0%, var(--bg-1) 60%); border-bottom: 1px solid var(--rule); gap: 18px; }
+.ck-left { display: flex; flex-direction: column; gap: 4px; }
+.ck-tk { font-family: var(--mono); font-size: 26px; font-weight: 800; color: var(--ink-0); letter-spacing: 0.04em; }
+.ck-meta { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; }
+.ck-price { font-family: var(--mono); font-size: 20px; font-weight: 800; color: var(--ink-0); margin-top: 6px; }
+.ck-chg { font-family: var(--mono); font-size: 11.5px; color: var(--gn); font-weight: 700; }
+
+.ck-center { display: flex; align-items: center; justify-content: center; }
+.ck-arc-wrap { position: relative; width: 130px; height: 130px; }
+.ck-arc { width: 130px; height: 130px; }
+.ck-arc-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.ck-arc-call { font-family: var(--mono); font-size: 18px; font-weight: 800; color: var(--gn); letter-spacing: 0.04em; line-height: 1; }
+.ck-arc-tier { font-family: var(--mono); font-size: 10px; color: var(--gn); letter-spacing: 0.14em; font-weight: 700; margin-top: 4px; }
+.ck-arc-score { font-family: var(--mono); font-size: 24px; font-weight: 800; color: var(--ink-0); margin-top: 4px; letter-spacing: 0.02em; }
+.ck-arc-label { font-family: var(--mono); font-size: 9px; color: var(--ink-3); letter-spacing: 0.16em; font-weight: 700; }
+
+.ck-right { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ck-mini { padding: 8px 10px; background: var(--bg-2); border: 1px solid var(--rule); border-radius: 3px; }
+.ck-mini .k { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.14em; color: var(--ink-3); text-transform: uppercase; font-weight: 700; margin-bottom: 2px; }
+.ck-mini .v { font-family: var(--mono); font-size: 13px; color: var(--ink-0); font-weight: 800; letter-spacing: 0.02em; }
+.ck-mini .v.cop { color: var(--copper); font-size: 11px; }
+.ck-mini .v.gn { color: var(--gn); }
+.ck-mini .v.rd { color: var(--rd); }
+.ck-mini .v.amb { color: var(--amb); }
+.ck-mini .sub { font-family: var(--mono); font-size: 9px; color: var(--ink-3); }
+
+.ck-bottom { padding: 10px 22px; background: var(--bg-2); border-bottom: 1px solid var(--rule); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ck-modes { display: flex; gap: 4px; margin-right: 8px; }
+.ck-mode { padding: 5px 12px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; color: var(--ink-3); background: var(--bg-1); border: 1px solid var(--rule); border-radius: 3px; cursor: pointer; }
+.ck-mode.on { color: var(--bg-0); background: var(--copper); border-color: var(--copper); }
+.ck-lens-strip { display: flex; gap: 5px; flex-wrap: wrap; }
+.ck-lens { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; font-family: var(--mono); font-size: 10px; font-weight: 700; border-radius: 10px; border: 1px solid var(--rule-2); }
+.ck-lens.gn { color: var(--gn); border-color: rgba(91,229,124,0.30); background: rgba(91,229,124,0.06); }
+.ck-lens.rd { color: var(--rd); border-color: rgba(255,107,91,0.30); background: rgba(255,107,91,0.06); }
+.ck-lens.amb { color: var(--amb); border-color: rgba(255,185,92,0.30); background: rgba(255,185,92,0.06); }
+.ck-lens.vio { color: var(--vio); border-color: rgba(167,139,250,0.30); background: rgba(167,139,250,0.06); }
+.ck-conflict { margin-left: auto; padding: 4px 10px; background: rgba(255,185,92,0.10); color: var(--amb); border: 1px solid rgba(255,185,92,0.35); border-radius: 3px; font-family: var(--mono); font-size: 10.5px; font-weight: 700; cursor: pointer; }
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   ALT 3 · LEFT-RAIL · sticky vertical identity column + content right
+   Philosophy: identity persists during scroll · content expands · trader-view
+   ════════════════════════════════════════════════════════════════════════ */
+.lr-grid { display: grid; grid-template-columns: 260px 1fr; min-height: 200px; }
+.lr-left { background: linear-gradient(180deg, color-mix(in oklch, var(--gn) 5%, var(--bg-2)) 0%, var(--bg-1) 80%); padding: 18px 20px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 10px; }
+.lr-tk { font-family: var(--mono); font-size: 28px; font-weight: 800; color: var(--ink-0); letter-spacing: 0.04em; line-height: 1; }
+.lr-sector { font-family: var(--mono); font-size: 10px; color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; }
+.lr-price-block { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.lr-price { font-family: var(--mono); font-size: 22px; font-weight: 800; color: var(--ink-0); }
+.lr-chg { font-family: var(--mono); font-size: 11.5px; color: var(--gn); font-weight: 700; }
+.lr-verdict { padding: 10px 12px; background: var(--gn); color: var(--bg-0); border-radius: 4px; text-align: center; }
+.lr-verdict .call { font-family: var(--mono); font-size: 24px; font-weight: 800; letter-spacing: 0.04em; }
+.lr-verdict .tier { font-family: var(--mono); font-size: 11px; font-weight: 800; letter-spacing: 0.18em; opacity: 0.85; margin-top: 2px; }
+.lr-verdict .score { font-family: var(--mono); font-size: 10px; font-weight: 700; opacity: 0.75; margin-top: 4px; }
+.lr-mini-stack { display: flex; flex-direction: column; gap: 8px; }
+.lr-mini-row { display: flex; justify-content: space-between; padding: 4px 0; font-family: var(--mono); font-size: 11px; }
+.lr-mini-row .k { color: var(--ink-3); letter-spacing: 0.10em; font-weight: 700; text-transform: uppercase; font-size: 9.5px; }
+.lr-mini-row .v { color: var(--ink-0); font-weight: 700; }
+.lr-mini-row .v.cop { color: var(--copper); }
+.lr-mini-row .v.amb { color: var(--amb); }
+
+.lr-right { padding: 14px 20px; display: flex; flex-direction: column; gap: 12px; }
+.lr-top { display: flex; align-items: center; gap: 12px; }
+.lr-modes { display: flex; gap: 4px; }
+.lr-mode { padding: 6px 14px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; color: var(--ink-3); background: var(--bg-2); border: 1px solid var(--rule); border-radius: 3px; cursor: pointer; }
+.lr-mode.on { color: var(--bg-0); background: var(--copper); border-color: var(--copper); }
+.lr-context { font-family: var(--mono); font-size: 11.5px; color: var(--ink-1); }
+.lr-context b { color: var(--ink-0); font-weight: 700; }
+.lr-context .sep { color: var(--ink-3); margin: 0 6px; }
+
+.lr-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.lr-tile { padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--rule); border-radius: 3px; }
+.lr-tile .k { font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em; color: var(--ink-3); text-transform: uppercase; font-weight: 700; }
+.lr-tile .v { font-family: var(--mono); font-size: 14px; color: var(--ink-0); font-weight: 800; margin-top: 3px; }
+.lr-tile .v.cop { color: var(--copper); font-size: 12px; }
+.lr-tile .v.gn { color: var(--gn); }
+.lr-tile .v.rd { color: var(--rd); }
+.lr-tile .v.amb { color: var(--amb); }
+.lr-tile .sub { font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); margin-top: 2px; }
+
+.lr-lenses { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--rule); margin-top: auto; }
+.lr-lens-label { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.18em; color: var(--ink-3); font-weight: 700; text-transform: uppercase; margin-right: 8px; align-self: center; }
+.lr-lens { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; font-family: var(--mono); font-size: 10.5px; font-weight: 700; border-radius: 12px; border: 1px solid var(--rule-2); }
+.lr-lens.gn { color: var(--gn); border-color: rgba(91,229,124,0.30); background: rgba(91,229,124,0.06); }
+.lr-lens.rd { color: var(--rd); border-color: rgba(255,107,91,0.30); background: rgba(255,107,91,0.06); }
+.lr-lens.amb { color: var(--amb); border-color: rgba(255,185,92,0.30); background: rgba(255,185,92,0.06); }
+.lr-lens.vio { color: var(--vio); border-color: rgba(167,139,250,0.30); background: rgba(167,139,250,0.06); }
+.lr-conflict { margin-left: auto; padding: 4px 10px; background: rgba(255,185,92,0.10); color: var(--amb); border: 1px solid rgba(255,185,92,0.35); border-radius: 3px; font-family: var(--mono); font-size: 10.5px; font-weight: 700; cursor: pointer; align-self: center; }
+
+
+/* Comparison summary */
+.compare { background: var(--bg-1); border: 1px solid var(--rule); border-radius: 5px; padding: 22px 26px; margin-top: 30px; }
+.compare h3 { margin: 0 0 14px; font-size: 16px; font-weight: 800; color: var(--ink-0); }
+.compare-tbl { width: 100%; border-collapse: collapse; }
+.compare-tbl th { padding: 10px 8px; text-align: left; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; color: var(--ink-3); border-bottom: 2px solid var(--rule-2); text-transform: uppercase; font-weight: 700; }
+.compare-tbl td { padding: 12px 8px; border-bottom: 1px solid var(--rule); font-size: 12.5px; vertical-align: top; }
+.compare-tbl td b { color: var(--ink-0); font-weight: 700; }
+.compare-tbl .gn { color: var(--gn); font-weight: 700; font-family: var(--mono); }
+.compare-tbl .amb { color: var(--amb); font-weight: 700; font-family: var(--mono); }
+.compare-tbl .rd { color: var(--rd); font-weight: 700; font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1 class="page-title">Detail-page header · 3 alternative architectures</h1>
+  <div class="page-sub">DELL · same data · three structurally different layouts · pick the philosophy that fits the workflow</div>
+
+
+  <!-- ════════════════ ALT 1 · TRADING DESK ════════════════ -->
+  <div class="sec-h">
+    <span class="label">ALT 1</span>
+    <span class="title">Trading Desk · ultra-dense single-row</span>
+    <span class="philosophy">PHILOSOPHY · Bloomberg terminal</span>
+    <span class="meta">~76px tall · max info per pixel</span>
+  </div>
+
+  <div class="sample">
+    <!-- Top row: everything on one line -->
+    <div class="td-bar">
+      <span class="td-tk">DELL</span>
+      <span class="td-px">$247.89</span>
+      <span class="td-chg">▲ 0.00%</span>
+      <span class="td-div">·</span>
+      <span class="td-verdict">BUY</span>
+      <span class="td-tier">T1</span>
+      <span class="td-chip cop"><span class="k">SETUP</span><span class="v">IMPULSE</span></span>
+      <span class="td-chip"><span class="k">BAP</span><span class="v">78</span></span>
+      <span class="td-chip amb"><span class="k">R:R</span><span class="v">1.3</span></span>
+      <span class="td-chip rd"><span class="k">STOP</span><span class="v">$241</span></span>
+      <span class="td-chip gn"><span class="k">T1</span><span class="v">$260</span></span>
+      <span class="td-chip gn"><span class="k">T2</span><span class="v">$278</span></span>
+      <span class="td-chip"><span class="k">KELLY</span><span class="v">5.5%</span></span>
+      <span class="td-chip"><span class="k">HOLD</span><span class="v">14d</span></span>
+    </div>
+    <!-- Sub row: modes + lenses -->
+    <div class="td-sub">
+      <span class="td-mode">⚡ SWING</span>
+      <span class="td-mode on">📅 POSITION</span>
+      <span class="td-mode">💼 INVEST</span>
+      <span class="td-div">·</span>
+      <span class="td-lens rd">V↓ −26%</span>
+      <span class="td-lens gn">S↑ RS100</span>
+      <span class="td-lens amb">ER ◧</span>
+      <span class="td-lens amb">M ◧ chop</span>
+      <span class="td-lens gn">I↑ +39</span>
+      <span class="td-lens gn">R ✓ 13%</span>
+      <span class="td-lens gn">N↑ +2.0</span>
+      <span class="td-lens amb">C ◇</span>
+      <span class="td-conflict">⚠ 1 conflict</span>
+    </div>
+  </div>
+
+  <div class="measure">
+    <b>Height</b> <span class="gn">~76px</span>
+    <span class="div">·</span>
+    <b>Rows</b> 2 (top dense · sub thin)
+    <span class="div">·</span>
+    <b>Density</b> <span class="amb">very high</span>
+    <span class="div">·</span>
+    <b>Scan time</b> <span class="amb">~1.2s</span> (requires familiarity)
+    <span class="div">·</span>
+    <b>Best for</b> power users · trading-desk workflow · wide screens
+  </div>
+
+  <div class="tradeoffs">
+    <div class="tradeoff-card pros">
+      <h4>✓ Pros</h4>
+      <ul>
+        <li><b>Most compact</b> — only 76px of vertical real estate</li>
+        <li><b>All info one glance</b> — no scrolling, no expanding</li>
+        <li><b>Familiar to pros</b> — Bloomberg/CapIQ desk users adapt instantly</li>
+        <li><b>Best on ultrawide monitors</b> — 1920px+ fits naturally</li>
+        <li><b>Conflict badge inline</b> — never lost</li>
+      </ul>
+    </div>
+    <div class="tradeoff-card cons">
+      <h4>✗ Cons</h4>
+      <ul>
+        <li><b>Hostile to newcomers</b> — requires memorizing tile codes (V, S, ER, etc.)</li>
+        <li><b>Breaks on narrow screens</b> — &lt; 1400px will wrap awkwardly</li>
+        <li><b>No visual hierarchy</b> — all chips look equal weight</li>
+        <li><b>Mobile-unfriendly</b> — fundamentally a desktop-only design</li>
+      </ul>
+    </div>
+  </div>
+
+
+  <!-- ════════════════ ALT 2 · COCKPIT ════════════════ -->
+  <div class="sec-h">
+    <span class="label">ALT 2</span>
+    <span class="title">Cockpit · big visual verdict + radial KPIs</span>
+    <span class="philosophy">PHILOSOPHY · pilot's instrument panel</span>
+    <span class="meta">~180px tall · scannable in 0.5s</span>
+  </div>
+
+  <div class="sample">
+    <div class="ck-host">
+      <!-- Left column: identity -->
+      <div class="ck-left">
+        <span class="ck-tk">DELL</span>
+        <span class="ck-meta">Technology · Mid-cap</span>
+        <span class="ck-price">$247.89</span>
+        <span class="ck-chg">▲ +$0.00 · 0.00%</span>
+      </div>
+
+      <!-- Center: arc verdict -->
+      <div class="ck-center">
+        <div class="ck-arc-wrap">
+          <svg class="ck-arc" viewBox="0 0 130 130">
+            <circle cx="65" cy="65" r="52" fill="none" stroke="#1f262b" stroke-width="8"/>
+            <circle cx="65" cy="65" r="52" fill="none" stroke="#5be57c" stroke-width="8"
+                    stroke-dasharray="255 327" stroke-linecap="round"
+                    transform="rotate(-90 65 65)"/>
+          </svg>
+          <div class="ck-arc-text">
+            <span class="ck-arc-call">BUY</span>
+            <span class="ck-arc-tier">T1 · IMPULSE</span>
+            <span class="ck-arc-score">78</span>
+            <span class="ck-arc-label">BAP / 100</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right column: 4 mini tiles in 2x2 -->
+      <div class="ck-right">
+        <div class="ck-mini"><div class="k">R · R</div><div class="v amb">1 : 1.3</div><div class="sub">below 3R floor</div></div>
+        <div class="ck-mini"><div class="k">KELLY</div><div class="v gn">5.5%</div><div class="sub">×1.3 catalyst</div></div>
+        <div class="ck-mini"><div class="k">STOP / T1</div><div class="v">$241 → $260</div><div class="sub">−2.8% / +4.9%</div></div>
+        <div class="ck-mini"><div class="k">HOLD · ER</div><div class="v amb">14d · 30d</div><div class="sub">catalyst window</div></div>
+      </div>
+    </div>
+
+    <!-- Bottom: mode pills + lens strip -->
+    <div class="ck-bottom">
+      <div class="ck-modes">
+        <button class="ck-mode">⚡ SWING</button>
+        <button class="ck-mode on">📅 POSITION</button>
+        <button class="ck-mode">💼 INVEST</button>
+      </div>
+      <div class="ck-lens-strip">
+        <span class="ck-lens rd">V↓ −26%</span>
+        <span class="ck-lens gn">S↑ RS100</span>
+        <span class="ck-lens amb">ER ◧</span>
+        <span class="ck-lens amb">M chop</span>
+        <span class="ck-lens gn">I↑ +39</span>
+        <span class="ck-lens gn">R ✓</span>
+        <span class="ck-lens gn">N↑ +2.0</span>
+        <span class="ck-lens vio">CFP</span>
+      </div>
+      <span class="ck-conflict">⚠ 1 conflict</span>
+    </div>
+  </div>
+
+  <div class="measure">
+    <b>Height</b> <span class="amb">~180px</span>
+    <span class="div">·</span>
+    <b>Rows</b> 2 (hero / bottom)
+    <span class="div">·</span>
+    <b>Density</b> <span class="gn">balanced · visual</span>
+    <span class="div">·</span>
+    <b>Scan time</b> <span class="gn">~0.5s</span> (eye locks on arc)
+    <span class="div">·</span>
+    <b>Best for</b> mixed audience · sales demos · executive review
+  </div>
+
+  <div class="tradeoffs">
+    <div class="tradeoff-card pros">
+      <h4>✓ Pros</h4>
+      <ul>
+        <li><b>Strongest visual identity</b> — arc is unmistakable</li>
+        <li><b>Score visible from across the room</b> — demo-friendly</li>
+        <li><b>Balanced hierarchy</b> — primary (arc) → secondary (4 tiles) → tertiary (lenses)</li>
+        <li><b>No information loss vs current</b> — all 8 lenses + 4 KPIs preserved</li>
+        <li><b>Works on narrow screens</b> — grid collapses gracefully</li>
+      </ul>
+    </div>
+    <div class="tradeoff-card cons">
+      <h4>✗ Cons</h4>
+      <ul>
+        <li><b>Tallest of the three</b> at 180px</li>
+        <li><b>Arc takes "premium" center space</b> — power users may want that for data</li>
+        <li><b>SVG arc adds render cost</b> (negligible but real)</li>
+        <li><b>Aesthetics-forward</b> — some quants find it gimmicky</li>
+      </ul>
+    </div>
+  </div>
+
+
+  <!-- ════════════════ ALT 3 · LEFT RAIL ════════════════ -->
+  <div class="sec-h">
+    <span class="label">ALT 3</span>
+    <span class="title">Left Rail · sticky identity column + flexible content</span>
+    <span class="philosophy">PHILOSOPHY · Bloomberg sidecar · persists on scroll</span>
+    <span class="meta">~160px tall · 260px sticky-width column</span>
+  </div>
+
+  <div class="sample">
+    <div class="lr-grid">
+      <!-- Left rail: sticky identity -->
+      <div class="lr-left">
+        <span class="lr-tk">DELL</span>
+        <span class="lr-sector">Technology · Mid-cap</span>
+        <div class="lr-price-block">
+          <span class="lr-price">$247.89</span>
+          <span class="lr-chg">▲ +$0.00 · 0.00%</span>
+        </div>
+        <div class="lr-verdict">
+          <div class="call">BUY</div>
+          <div class="tier">T1 · IMPULSE CATALYST</div>
+          <div class="score">BAP 78 · POSITION mode</div>
+        </div>
+        <div class="lr-mini-stack">
+          <div class="lr-mini-row"><span class="k">R · R</span><span class="v amb">1 : 1.3</span></div>
+          <div class="lr-mini-row"><span class="k">Stop</span><span class="v">$241.20</span></div>
+          <div class="lr-mini-row"><span class="k">T1</span><span class="v">$260.00</span></div>
+          <div class="lr-mini-row"><span class="k">Kelly</span><span class="v cop">5.5%</span></div>
+          <div class="lr-mini-row"><span class="k">Hold</span><span class="v">14 days</span></div>
+        </div>
+      </div>
+
+      <!-- Right: content grid -->
+      <div class="lr-right">
+        <div class="lr-top">
+          <div class="lr-modes">
+            <button class="lr-mode">⚡ SWING</button>
+            <button class="lr-mode on">📅 POSITION</button>
+            <button class="lr-mode">💼 INVEST</button>
+          </div>
+          <div class="lr-context">
+            <span>Lead lens</span> <b>Hedge-fund analyst</b><span class="sep">·</span>
+            <span>Horizon</span> <b>2 wk – 6 mo</b><span class="sep">·</span>
+            <span>Rule</span> <b>catalyst-driven</b>
+          </div>
+        </div>
+
+        <div class="lr-tiles">
+          <div class="lr-tile"><div class="k">Setup</div><div class="v cop">IMPULSE CATALYST</div><div class="sub">PEAD-eligible</div></div>
+          <div class="lr-tile"><div class="k">Entry quality</div><div class="v amb">EXTENDED</div><div class="sub">wait pullback</div></div>
+          <div class="lr-tile"><div class="k">Earnings</div><div class="v">+30d</div><div class="sub">catalyst window</div></div>
+          <div class="lr-tile"><div class="k">Regime</div><div class="v">RISK-ON</div><div class="sub">trending</div></div>
+        </div>
+
+        <div class="lr-lenses">
+          <span class="lr-lens-label">Lenses · 8</span>
+          <span class="lr-lens rd">V↓ −26%</span>
+          <span class="lr-lens gn">S↑ RS100</span>
+          <span class="lr-lens amb">ER ◧</span>
+          <span class="lr-lens amb">M chop</span>
+          <span class="lr-lens gn">I↑ +39</span>
+          <span class="lr-lens gn">R ✓ 13%</span>
+          <span class="lr-lens gn">N↑ +2.0</span>
+          <span class="lr-lens vio">CFP ◇</span>
+          <span class="lr-conflict">⚠ 1 conflict</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="measure">
+    <b>Height</b> <span class="gn">~160px</span>
+    <span class="div">·</span>
+    <b>Layout</b> 260px sticky-rail + content
+    <span class="div">·</span>
+    <b>Density</b> <span class="gn">balanced</span>
+    <span class="div">·</span>
+    <b>Scan time</b> <span class="gn">~0.7s</span>
+    <span class="div">·</span>
+    <b>Best for</b> users who scroll-and-reference · keeps verdict in view always
+  </div>
+
+  <div class="tradeoffs">
+    <div class="tradeoff-card pros">
+      <h4>✓ Pros</h4>
+      <ul>
+        <li><b>Sticky verdict</b> — DELL · BUY · T1 stays visible as you scroll sub-tabs</li>
+        <li><b>Verdict is huge and unmissable</b> — full-width column block</li>
+        <li><b>Right column is flexible</b> — could swap in any drill-down content per sub-tab</li>
+        <li><b>Strong visual anchor</b> — left rail = "ticker identity" forever</li>
+        <li><b>Mode pills + lens row sit comfortably</b> — no cramming</li>
+      </ul>
+    </div>
+    <div class="tradeoff-card cons">
+      <h4>✗ Cons</h4>
+      <ul>
+        <li><b>Loses 260px horizontal</b> — content area shrinks</li>
+        <li><b>Requires sticky scroll behavior</b> — extra implementation</li>
+        <li><b>Tall on small screens</b> — wraps awkwardly &lt; 1100px</li>
+        <li><b>Eye-tracking pattern is left-right-down</b> — less natural than top-down</li>
+        <li><b>Existing kairos tabs may need realignment</b> — pixel-cost to refactor</li>
+      </ul>
+    </div>
+  </div>
+
+
+  <!-- ════════════════ COMPARISON ════════════════ -->
+  <div class="compare">
+    <h3>Side-by-side comparison · including the 3-zone original (Option A)</h3>
+    <table class="compare-tbl">
+      <thead>
+        <tr>
+          <th></th>
+          <th>A · 3-zone stacked<br><span style="color:var(--ink-3);font-weight:500;letter-spacing:0;text-transform:none">earlier mockup</span></th>
+          <th>B · Trading Desk<br><span style="color:var(--ink-3);font-weight:500;letter-spacing:0;text-transform:none">ultra-dense</span></th>
+          <th>C · Cockpit<br><span style="color:var(--ink-3);font-weight:500;letter-spacing:0;text-transform:none">visual hero</span></th>
+          <th>D · Left Rail<br><span style="color:var(--ink-3);font-weight:500;letter-spacing:0;text-transform:none">sticky sidecar</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>Height</b></td>
+          <td class="gn">~120px</td>
+          <td class="gn">~76px</td>
+          <td class="amb">~180px</td>
+          <td class="amb">~160px</td>
+        </tr>
+        <tr>
+          <td><b>Layout type</b></td>
+          <td>Horizontal stacked</td>
+          <td>Horizontal stacked (compressed)</td>
+          <td>3-column hero</td>
+          <td>2-column rail + grid</td>
+        </tr>
+        <tr>
+          <td><b>Primary verdict</b></td>
+          <td>3-segment chip (top right)</td>
+          <td>Solid pill (inline)</td>
+          <td>Circular arc (center)</td>
+          <td>Full-width block (left rail)</td>
+        </tr>
+        <tr>
+          <td><b>Scan time</b></td>
+          <td class="gn">~0.8s</td>
+          <td class="amb">~1.2s (familiarity req'd)</td>
+          <td class="gn">~0.5s (best)</td>
+          <td class="gn">~0.7s</td>
+        </tr>
+        <tr>
+          <td><b>Best audience</b></td>
+          <td>Generalist · daily user</td>
+          <td>Power user · pro trader</td>
+          <td>Demo / executive / mixed</td>
+          <td>Long sub-tab sessions</td>
+        </tr>
+        <tr>
+          <td><b>Narrow-screen friendly</b></td>
+          <td class="gn">Yes (stacks)</td>
+          <td class="rd">No (breaks &lt; 1400px)</td>
+          <td class="amb">Mostly (grid wraps)</td>
+          <td class="rd">No (rail too wide)</td>
+        </tr>
+        <tr>
+          <td><b>Verdict persists on scroll</b></td>
+          <td class="rd">No</td>
+          <td class="rd">No</td>
+          <td class="rd">No</td>
+          <td class="gn">Yes (sticky)</td>
+        </tr>
+        <tr>
+          <td><b>Implementation effort</b></td>
+          <td class="gn">Low · CSS-only</td>
+          <td class="gn">Low · CSS-only</td>
+          <td class="amb">Medium · SVG arc</td>
+          <td class="amb">Medium · sticky behavior</td>
+        </tr>
+        <tr>
+          <td><b>Visual hierarchy</b></td>
+          <td class="gn">Strong</td>
+          <td class="rd">Flat (all chips equal)</td>
+          <td class="gn">Strongest (arc anchors)</td>
+          <td class="gn">Strong (left/right split)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div style="margin-top:18px;padding:14px 18px;background:var(--bg-2);border:1px solid var(--rule);border-radius:3px;font-size:13px;color:var(--ink-1);line-height:1.7">
+      <b style="color:var(--ink-0)">My recommendation:</b>
+      Different layouts win for different workflows.
+      <ul style="margin:8px 0 0;padding-left:22px;color:var(--ink-1)">
+        <li><b style="color:var(--gn)">Choose A (3-zone)</b> if your priority is a clean, balanced, familiar layout. Safe choice. Easy to ship.</li>
+        <li><b style="color:var(--amb)">Choose B (Trading Desk)</b> if you/your users live on the page and want minimal scroll. Best on a 27"+ monitor.</li>
+        <li><b style="color:var(--info)">Choose C (Cockpit)</b> if visual identity matters — sales demos, screenshots, executive walkthroughs.</li>
+        <li><b style="color:var(--vio)">Choose D (Left Rail)</b> if users spend long sessions in sub-tabs and you want the verdict always visible.</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

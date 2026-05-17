@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Patterns Sub-tab · TradingView-style · NVDA</title>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root {
+  --bg-0: #0c0f10;
+  --bg-1: #11161a;
+  --bg-2: #161c21;
+  --bg-3: #1c252b;
+  --bg-4: #232e34;
+  --ink-0: #f4f4f4;
+  --ink:   #e9eaeb;
+  --ink-1: #c9cdd0;
+  --ink-2: #8f969c;
+  --ink-3: #5a6268;
+  --line: #1f262b;
+  --line-2: #283038;
+  --rule: #1f262b;
+  --gn: #5be57c;
+  --rd: #ff6b5b;
+  --amb: #ffb95c;
+  --copper: #d49060;
+  --mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg-0); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.wrap { max-width: 1480px; margin: 0 auto; padding: 32px 28px; }
+.topbar { display: flex; align-items: center; gap: 22px; padding: 18px 22px; margin-bottom: 24px; background: linear-gradient(135deg, var(--bg-2) 0%, var(--bg-1) 60%); border: 1px solid var(--line-2); border-radius: 6px; }
+.ticker { font-family: var(--mono); font-size: 28px; font-weight: 800; color: var(--ink-0); letter-spacing: 0.04em; }
+.price { font-family: var(--mono); font-size: 22px; font-weight: 700; color: var(--ink); }
+.chg { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--gn); }
+.tag { display: inline-flex; padding: 4px 10px; border-radius: 3px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; font-weight: 800; text-transform: uppercase; }
+.tag.copper { background: color-mix(in oklch, var(--copper) 18%, transparent); color: var(--copper); border: 1px solid color-mix(in oklch, var(--copper) 38%, transparent); }
+.tag.gn { background: color-mix(in oklch, var(--gn) 18%, transparent); color: var(--gn); border: 1px solid color-mix(in oklch, var(--gn) 38%, transparent); }
+
+.nav { display: flex; gap: 4px; padding: 8px 4px; margin-bottom: 22px; border-bottom: 1px solid var(--rule); overflow-x: auto; }
+.nav-tab { padding: 8px 16px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.10em; text-transform: uppercase; font-weight: 700; color: var(--ink-3); border-bottom: 2px solid transparent; cursor: pointer; }
+.nav-tab.on { color: var(--gn); border-bottom-color: var(--gn); }
+.nav-tab .kbd { margin-left: 8px; font-size: 9.5px; color: var(--ink-3); }
+
+.hero { display: flex; gap: 24px; align-items: center; padding: 22px 26px; margin-bottom: 20px; background: linear-gradient(135deg, color-mix(in oklch, var(--gn) 5%, var(--bg-2)) 0%, var(--bg-2) 60%); border: 1px solid var(--line-2); border-left: 3px solid var(--gn); border-radius: 4px; }
+.hero-verdict { min-width: 220px; }
+.hero-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; margin-bottom: 6px; }
+.hero-call { font-size: 38px; font-weight: 800; color: var(--gn); letter-spacing: -0.01em; line-height: 1.05; }
+.hero-tally { margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--ink-2); letter-spacing: 0.08em; }
+.hero-body { flex: 1; }
+.conv-row { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+.conv-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; }
+.conv-val { font-size: 18px; font-weight: 800; color: var(--gn); letter-spacing: 0.08em; }
+.conv-meta { font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
+.hero-trigger { font-size: 13px; color: var(--ink-1); line-height: 1.65; }
+
+.votes { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 22px; }
+.vote { padding: 12px 14px; border-radius: 4px; border: 1px solid var(--rule); background: var(--bg-1); }
+.vote.gn { border-color: color-mix(in oklch, var(--gn) 30%, var(--rule)); background: color-mix(in oklch, var(--gn) 4%, var(--bg-1)); }
+.vote.am { border-color: color-mix(in oklch, var(--amb) 30%, var(--rule)); background: color-mix(in oklch, var(--amb) 4%, var(--bg-1)); }
+.vote-head { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--ink-3); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+.vote-call { font-size: 17px; font-weight: 800; margin-bottom: 4px; letter-spacing: 0.02em; }
+.vote-call.gn { color: var(--gn); }
+.vote-call.am { color: var(--amb); }
+.vote-h { font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.06em; margin-bottom: 6px; }
+.vote-reason { font-size: 11.5px; color: var(--ink-2); line-height: 1.5; }
+
+.sec { margin-bottom: 22px; background: var(--bg-1); border: 1px solid var(--line-2); border-radius: 5px; overflow: hidden; }
+.sec-h { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 18px; background: var(--bg-2); border-bottom: 1px solid var(--line-2); }
+.sec-h-l { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink); font-weight: 800; }
+.sec-h-r { font-family: var(--mono); font-size: 11px; color: var(--ink-2); letter-spacing: 0.06em; }
+.sec-body { padding: 16px 18px; }
+
+.chart-host { position: relative; width: 100%; height: 380px; background: var(--bg-1); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+.chart-overlay-legend { position: absolute; top: 8px; left: 10px; z-index: 5; pointer-events: none; display: flex; gap: 14px; flex-wrap: wrap; background: rgba(17,22,26,0.85); padding: 6px 10px; border-radius: 3px; font-family: var(--mono); font-size: 10.5px; }
+.chart-overlay-legend .lg-item { color: var(--ink-2); display: flex; align-items: center; gap: 5px; }
+.chart-overlay-legend .lg-swatch { width: 14px; height: 2px; border-radius: 1px; display: inline-block; }
+.viz-cap { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); margin-top: 8px; text-align: center; letter-spacing: 0.06em; }
+
+.tbl { width: 100%; border-collapse: collapse; }
+.tbl th { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; color: var(--ink-3); text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--rule); }
+.tbl td { padding: 11px 8px; border-bottom: 1px solid var(--rule); font-size: 13px; color: var(--ink-1); vertical-align: top; }
+.tbl tr:last-child td { border-bottom: none; }
+.tbl .r { text-align: right; }
+.tbl b { color: var(--ink-0); font-weight: 700; }
+.tbl .gn { color: var(--gn); }
+.tbl .rd { color: var(--rd); }
+.tbl .am { color: var(--amb); }
+.tbl .cop { color: var(--copper); }
+.tbl .dim { color: var(--ink-2); }
+
+.verdict { margin-top: 14px; padding: 11px 14px; border-left: 3px solid; border-radius: 0 4px 4px 0; font-size: 12.5px; color: var(--ink-1); line-height: 1.6; }
+.verdict.gn { background: color-mix(in oklch, var(--gn) 7%, transparent); border-left-color: var(--gn); }
+.verdict.am { background: color-mix(in oklch, var(--amb) 7%, transparent); border-left-color: var(--amb); }
+.verdict-call { display: inline-block; padding: 3px 12px; border-radius: 3px; font-family: var(--mono); font-size: 11.5px; font-weight: 800; letter-spacing: 0.14em; margin-right: 10px; }
+.verdict.gn .verdict-call { background: color-mix(in oklch, var(--gn) 22%, transparent); color: var(--gn); }
+.verdict.am .verdict-call { background: color-mix(in oklch, var(--amb) 22%, transparent); color: var(--amb); }
+.fals { display: block; margin-top: 6px; font-size: 11.5px; color: var(--ink-2); font-family: var(--mono); }
+.fals b { color: var(--ink-1); }
+
+.grid-2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.tile { padding: 12px 14px; border: 1px solid var(--rule); border-radius: 4px; background: var(--bg-2); }
+.tile-k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--ink-3); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+.tile-v { font-family: var(--mono); font-size: 20px; font-weight: 800; color: var(--ink); line-height: 1.1; }
+.tile-v.gn { color: var(--gn); }
+.tile-v.rd { color: var(--rd); }
+.tile-v.am { color: var(--amb); }
+.tile-v.cop { color: var(--copper); }
+.tile-sub { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); margin-top: 3px; }
+
+.ew-banner { padding: 12px 14px; margin-bottom: 14px; background: color-mix(in oklch, var(--rd) 6%, var(--bg-2)); border-left: 3px solid var(--rd); border-radius: 0 4px 4px 0; font-size: 12.5px; color: var(--ink-1); line-height: 1.55; }
+.ew-banner b { color: var(--rd); font-family: var(--mono); letter-spacing: 0.14em; font-size: 11px; }
+
+.foot { text-align: center; padding: 20px; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.10em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="ticker">NVDA</div>
+    <div class="price">$487.21</div>
+    <div class="chg">+$8.43 · +1.76%</div>
+    <div style="flex:1"></div>
+    <span class="tag copper">DETAIL VIEW</span>
+    <span class="tag gn">PATTERNS · TRADINGVIEW STYLE</span>
+  </div>
+
+  <!-- SUB-TAB NAV -->
+  <div class="nav">
+    <div class="nav-tab">Overview<span class="kbd">1</span></div>
+    <div class="nav-tab">Plan<span class="kbd">2</span></div>
+    <div class="nav-tab">Technicals<span class="kbd">3</span></div>
+    <div class="nav-tab">Fundamentals<span class="kbd">4</span></div>
+    <div class="nav-tab">Intel<span class="kbd">5</span></div>
+    <div class="nav-tab">Logic<span class="kbd">6</span></div>
+    <div class="nav-tab">History<span class="kbd">7</span></div>
+    <div class="nav-tab">Options<span class="kbd">8</span></div>
+    <div class="nav-tab">Models<span class="kbd">9</span></div>
+    <div class="nav-tab on">Patterns<span class="kbd">0</span></div>
+  </div>
+
+  <!-- HERO COMPOSITE -->
+  <div class="hero">
+    <div class="hero-verdict">
+      <div class="hero-label">Pattern Composite</div>
+      <div class="hero-call">BUY</div>
+      <div class="hero-tally">5B · 1W · 0S of 6 methods</div>
+    </div>
+    <div class="hero-body">
+      <div class="conv-row">
+        <span class="conv-label">Conviction</span>
+        <span class="conv-val">HIGH</span>
+        <span class="conv-meta">Charts rendered with TradingView Lightweight Charts · interactive crosshair, zoom, pan</span>
+      </div>
+      <div class="hero-trigger">
+        <b style="color:var(--gn)">Thesis active now.</b> Entry $487–$492 · Stop $474 · T1 $511 · T2 $533.
+      </div>
+    </div>
+  </div>
+
+  <!-- METHOD VOTES -->
+  <div class="votes">
+    <div class="vote gn"><div class="vote-head">Wyckoff</div><div class="vote-call gn">BUY</div><div class="vote-h">supply / demand</div><div class="vote-reason">Phase D markup confirmed · SOS holds</div></div>
+    <div class="vote gn"><div class="vote-head">Classical</div><div class="vote-call gn">BUY</div><div class="vote-h">VCP · Bulkowski</div><div class="vote-reason">Mature 7-week VCP · 65% WR</div></div>
+    <div class="vote gn"><div class="vote-head">Vol Profile</div><div class="vote-call gn">BUY</div><div class="vote-h">POC · VAH · VAL</div><div class="vote-reason">Accepted above VAH · POC $474</div></div>
+    <div class="vote gn"><div class="vote-head">Fibonacci</div><div class="vote-call gn">BUY</div><div class="vote-h">retrace + ext</div><div class="vote-reason">0.618 held · target $511 / $539</div></div>
+    <div class="vote gn"><div class="vote-head">Ichimoku</div><div class="vote-call gn">BUY</div><div class="vote-h">cloud + TK</div><div class="vote-reason">Triple bull · 5/5 signals</div></div>
+    <div class="vote am"><div class="vote-head">Elliott Wave</div><div class="vote-call am">WATCH</div><div class="vote-h">discretionary</div><div class="vote-reason">Wave 5 of 5 · invalidate &lt;$462</div></div>
+  </div>
+
+  <!-- ========== 1. VOLUME PROFILE (with REAL candles + volume) ========== -->
+  <div class="sec">
+    <div class="sec-h">
+      <span class="sec-h-l">Volume Profile · candles + horizontal price profile</span>
+      <span class="sec-h-r">POC $474 · VAH $492 · VAL $455 · LightweightCharts™ engine</span>
+    </div>
+    <div class="sec-body">
+      <div class="chart-host" id="chart-vp">
+        <div class="chart-overlay-legend">
+          <div class="lg-item"><span class="lg-swatch" style="background:#5be57c"></span>Bull candle</div>
+          <div class="lg-item"><span class="lg-swatch" style="background:#ff6b5b"></span>Bear candle</div>
+          <div class="lg-item"><span class="lg-swatch" style="background:#d49060"></span>POC $474</div>
+          <div class="lg-item"><span class="lg-swatch" style="background:#8f969c"></span>VAH / VAL</div>
+        </div>
+      </div>
+      <div class="viz-cap">Daily candles · 90 sessions · POC and Value Area drawn as horizontal price-lines · scroll to zoom / drag to pan</div>
+      <div class="grid-4" style="margin-top:14px">
+        <div class="tile"><div class="tile-k">POC</div><div class="tile-v cop">$474</div><div class="tile-sub">point of control</div></div>
+        <div class="tile"><div class="tile-k">VAH</div><div class="tile-v">$492</div><div class="tile-sub">value-area high</div></div>
+        <div class="tile"><div class="tile-k">VAL</div><div class="tile-v">$455</div><div class="tile-sub">value-area low</div></div>
+        <div class="tile"><div class="tile-k">Status</div><div class="tile-v gn">ACCEPT</div><div class="tile-sub">3 days above VAH</div></div>
+      </div>
+      <div class="verdict gn">
+        <span class="verdict-call">BUY</span> Accepted above VAH on RVOL 1.6× · POC $474 = institutional support · LVN $500–$510 above means clean run on VAH break.
+        <span class="fals"><b>Falsification:</b> 2 daily closes back inside value area below $466 (HVN floor).</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 2. FIBONACCI (REAL CHART with horizontal Fib lines) ========== -->
+  <div class="sec">
+    <div class="sec-h">
+      <span class="sec-h-l">Fibonacci · retracements + extensions from $432 → $498 swing</span>
+      <span class="sec-h-r">9 levels as priceLines · interactive · scroll/pan supported</span>
+    </div>
+    <div class="sec-body">
+      <div class="chart-host" id="chart-fib">
+        <div class="chart-overlay-legend">
+          <div class="lg-item"><span class="lg-swatch" style="background:#5be57c"></span>1.272 / 1.618 ext · targets</div>
+          <div class="lg-item"><span class="lg-swatch" style="background:#d49060"></span>0.382 / 0.5 / 0.618 retrace</div>
+          <div class="lg-item"><span class="lg-swatch" style="background:#ff6b5b"></span>swing low $432</div>
+        </div>
+      </div>
+      <div class="viz-cap">All 9 Fibonacci levels rendered as TradingView price-lines · 0.618 golden ratio held the pullback at $457</div>
+      <div class="verdict gn">
+        <span class="verdict-call">BUY</span> Pullback bounced cleanly off 0.618 golden ratio · targeting 1.272 ($511) and 1.618 ($539) extensions.
+        <span class="fals"><b>Falsification:</b> close below 0.618 ($457) on volume.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 3. ICHIMOKU (REAL CHART with Tenkan/Kijun/Senkou/Chikou) ========== -->
+  <div class="sec">
+    <div class="sec-h">
+      <span class="sec-h-l">Ichimoku Kinko Hyo · candles + five lines + projected cloud</span>
+      <span class="sec-h-r">Tenkan · Kijun · Senkou A / B · Chikou · all computed from OHLC</span>
+    </div>
+    <div class="sec-body">
+      <div class="chart-host" id="chart-ichi" style="height:440px">
+        <div class="chart-overlay-legend">
+          <div class="lg-item"><span class="lg-swatch" style="background:#d49060"></span>Tenkan (9)</div>
+          <div class="lg-item"><span class="lg-swatch" style="background:#c9cdd0"></span>Kijun (26)</div>
+          <div class="lg-item"><span class="lg-swatch" style="background:#5be57c"></span>Senkou A · cloud top</div>
+          <div class="lg-item"><span class="lg-swatch" style="background:#ff6b5b"></span>Senkou B · cloud bottom</div>
+          <div class="lg-item"><span class="lg-swatch" style="background:#ffb95c"></span>Chikou (lag 26)</div>
+        </div>
+      </div>
+      <div class="viz-cap">All 5 Ichimoku lines computed from OHLC · Senkou A / B projected 26d forward (note the time-axis extends past last candle)</div>
+      <div class="grid-4" style="margin-top:14px">
+        <div class="tile"><div class="tile-k">Price vs Cloud</div><div class="tile-v gn">ABOVE</div><div class="tile-sub">bullish trend confirmed</div></div>
+        <div class="tile"><div class="tile-k">Tenkan / Kijun</div><div class="tile-v gn">BULL CROSS</div><div class="tile-sub">9d &gt; 26d</div></div>
+        <div class="tile"><div class="tile-k">Chikou Span</div><div class="tile-v gn">CLEAR</div><div class="tile-sub">above past price</div></div>
+        <div class="tile"><div class="tile-k">Future Cloud</div><div class="tile-v gn">BULLISH</div><div class="tile-sub">Senkou A &gt; B forward</div></div>
+      </div>
+      <div class="verdict gn">
+        <span class="verdict-call">BUY</span> Triple-bull alignment: above cloud · TK bull cross · Chikou clear · future cloud green. Kijun ($472) = dynamic-support stop reference.
+        <span class="fals"><b>Falsification:</b> daily close below Kijun $472 flips system to caution.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 4. ELLIOTT WAVE (REAL CHART with wave-point markers) ========== -->
+  <div class="sec">
+    <div class="sec-h">
+      <span class="sec-h-l">Elliott Wave · 5-wave impulse structure</span>
+      <span class="sec-h-r">discretionary methodology · markers via series.setMarkers()</span>
+    </div>
+    <div class="sec-body">
+      <div class="ew-banner">
+        <b>DISCRETIONARY · USE AS CONFLUENCE</b> &nbsp; Elliott Wave is a discretionary pattern framework with low quantitative edge in isolation. Useful for projection + invalidation levels — never as stand-alone signal.
+      </div>
+      <div class="chart-host" id="chart-ew">
+        <div class="chart-overlay-legend">
+          <div class="lg-item"><span class="lg-swatch" style="background:#5be57c"></span>Impulse waves (1·3·5)</div>
+          <div class="lg-item"><span class="lg-swatch" style="background:#d49060"></span>Corrective waves (2·4)</div>
+          <div class="lg-item"><span class="lg-swatch" style="background:#ff6b5b"></span>Invalidation $462</div>
+        </div>
+      </div>
+      <div class="viz-cap">Best-fit wave count · daily timeframe · markers placed at wave pivot bars · invalidation drawn as priceLine</div>
+      <div class="grid-4" style="margin-top:14px">
+        <div class="tile"><div class="tile-k">Current wave</div><div class="tile-v cop">WAVE 5</div><div class="tile-sub">in progress</div></div>
+        <div class="tile"><div class="tile-k">W5 target</div><div class="tile-v gn">$511 – $528</div><div class="tile-sub">0.618 × (W1+W3)</div></div>
+        <div class="tile"><div class="tile-k">Invalidation</div><div class="tile-v rd">&lt; $462</div><div class="tile-sub">W4 cannot overlap W1 top</div></div>
+        <div class="tile"><div class="tile-k">Rules check</div><div class="tile-v gn">3 / 3</div><div class="tile-sub">all EW rules hold</div></div>
+      </div>
+      <div class="verdict am">
+        <span class="verdict-call">WATCH</span> Best-fit count places price in early Wave 5. Three EW rules hold. This is confluence, not signal.
+        <span class="fals"><b>Falsification:</b> daily close &lt; $462 (W1 top) invalidates count entirely.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    PROTOTYPE · TRADINGVIEW LIGHTWEIGHT-CHARTS v4.2 · NVDA SYNTHETIC OHLC · GENERATED 2026-05-12
+  </div>
+
+</div>
+
+<script>
+'use strict';
+
+// ──────── Diagnostic helper: surface errors visibly in the chart container
+function showChartError(containerId, err) {
+  const c = document.getElementById(containerId);
+  if (!c) return;
+  const msg = document.createElement('div');
+  msg.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:rgba(255,107,91,0.06);color:#ff6b5b;font-family:JetBrains Mono,monospace;font-size:11.5px;text-align:center;line-height:1.6;z-index:10';
+  msg.innerHTML = `<div style="font-weight:800;letter-spacing:0.14em;margin-bottom:6px">CHART FAILED · ${containerId}</div><div style="color:#c9cdd0;max-width:60ch">${(err && err.message) ? err.message : String(err)}</div>`;
+  c.appendChild(msg);
+}
+
+// Wait for both the DOM AND the lightweight-charts library to be ready.
+function whenReady(cb) {
+  const ready = () => {
+    if (typeof LightweightCharts === 'undefined') {
+      const hosts = ['chart-vp', 'chart-fib', 'chart-ichi', 'chart-ew'];
+      hosts.forEach(h => showChartError(h, new Error('LightweightCharts library failed to load from CDN. Check network / try refreshing.')));
+      return;
+    }
+    cb();
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready);
+  else ready();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SYNTHETIC OHLC DATA · 90 days · NVDA path: $432 → $498 → pullback to $457 → $487
+// ════════════════════════════════════════════════════════════════════════════
+function generateOHLC() {
+  const data = [];
+  // Use deterministic-ish noise so chart looks the same on reload
+  let seed = 7919;
+  const rng = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+
+  const todayTs = Math.floor(new Date('2026-05-12T16:00:00Z').getTime() / 1000);
+  const day = 86400;
+  let last = 432;
+
+  for (let i = 89; i >= 0; i--) {
+    const t = todayTs - i * day;
+    let target;
+    if (i > 41) {
+      const p = (89 - i) / (89 - 42);
+      target = 432 + (498 - 432) * p;
+    } else if (i > 17) {
+      const p = (41 - i) / (41 - 18);
+      target = 498 - (498 - 457) * p;
+    } else {
+      const p = (17 - i) / 17;
+      target = 457 + (487 - 457) * p;
+    }
+    const noise = (rng() - 0.5) * 5.5;
+    const close = +(target + noise).toFixed(2);
+    const open = +(last + (rng() - 0.5) * 2).toFixed(2);
+    const high = +(Math.max(open, close) + rng() * 4 + 0.5).toFixed(2);
+    const low  = +(Math.min(open, close) - rng() * 4 - 0.5).toFixed(2);
+    const vol = Math.round(30000000 + rng() * 60000000 + (Math.abs(close - open) > 3 ? 25000000 : 0));
+    data.push({ time: t, open, high, low, close, volume: vol });
+    last = close;
+  }
+  return data;
+}
+
+const ohlc = generateOHLC();
+const closes = ohlc.map(d => d.close);
+const highs  = ohlc.map(d => d.high);
+const lows   = ohlc.map(d => d.low);
+const times  = ohlc.map(d => d.time);
+const LAST_T = times[times.length - 1];
+const DAY = 86400;
+
+// Common dark-theme chart options
+function baseOpts(extra) {
+  return Object.assign({
+    layout: { background: { color: '#11161a' }, textColor: '#c9cdd0', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
+    grid:   { vertLines: { color: '#1a2127' }, horzLines: { color: '#1a2127' } },
+    rightPriceScale: { borderColor: '#283038', textColor: '#8f969c' },
+    timeScale:       { borderColor: '#283038', timeVisible: true, secondsVisible: false },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal,
+                 vertLine: { color: '#d49060', width: 1, style: 0, labelBackgroundColor: '#d49060' },
+                 horzLine: { color: '#d49060', width: 1, style: 0, labelBackgroundColor: '#d49060' } },
+  }, extra || {});
+}
+
+const candleStyle = {
+  upColor: '#5be57c', downColor: '#ff6b5b',
+  borderUpColor: '#5be57c', borderDownColor: '#ff6b5b',
+  wickUpColor: '#5be57c', wickDownColor: '#ff6b5b',
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// All four charts run inside whenReady() so the library + DOM are guaranteed
+// available. Each is wrapped in try/catch so one failure can't blank others.
+// ════════════════════════════════════════════════════════════════════════════
+whenReady(() => {
+
+  // ──── 1. VOLUME PROFILE — candles + volume histogram + POC/VAH/VAL priceLines ────
+  try {
+    const container = document.getElementById('chart-vp');
+    const chart = LightweightCharts.createChart(container, baseOpts({ width: container.clientWidth, height: 380 }));
+    const cs = chart.addCandlestickSeries(candleStyle);
+    cs.setData(ohlc);
+    const vs = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '', color: '#5be57c' });
+    chart.priceScale('').applyOptions({ scaleMargins: { top: 0.80, bottom: 0 } });
+    vs.setData(ohlc.map(d => ({ time: d.time, value: d.volume, color: d.close >= d.open ? 'rgba(91,229,124,0.55)' : 'rgba(255,107,91,0.55)' })));
+    cs.createPriceLine({ price: 474, color: '#d49060', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'POC $474' });
+    cs.createPriceLine({ price: 492, color: '#8f969c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'VAH $492' });
+    cs.createPriceLine({ price: 455, color: '#8f969c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'VAL $455' });
+    cs.createPriceLine({ price: 466, color: '#8f969c', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: 'HVN $466' });
+    cs.createPriceLine({ price: 470, color: '#8f969c', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: 'HVN $470' });
+    chart.timeScale().fitContent();
+    window.addEventListener('resize', () => chart.applyOptions({ width: container.clientWidth }));
+  } catch (err) {
+    console.error('[chart-vp]', err);
+    showChartError('chart-vp', err);
+  }
+
+  // ──── 2. FIBONACCI — candles + 9 horizontal Fib priceLines + ordered markers ────
+  try {
+    const container = document.getElementById('chart-fib');
+    const chart = LightweightCharts.createChart(container, baseOpts({ width: container.clientWidth, height: 380 }));
+    const cs = chart.addCandlestickSeries(candleStyle);
+    cs.setData(ohlc);
+    const fibs = [
+      { price: 539, color: '#5be57c', style: 0, title: '1.618 ext · $539 · T2',   width: 2 },
+      { price: 525, color: '#5be57c', style: 2, title: '1.414 ext · $525',        width: 1 },
+      { price: 511, color: '#5be57c', style: 0, title: '1.272 ext · $511 · T1',   width: 2 },
+      { price: 498, color: '#5be57c', style: 0, title: '1.000 · $498 · swing hi', width: 2 },
+      { price: 482, color: '#8f969c', style: 2, title: '0.236 · $482',            width: 1 },
+      { price: 473, color: '#d49060', style: 2, title: '0.382 · $473',            width: 1 },
+      { price: 465, color: '#d49060', style: 2, title: '0.500 · $465',            width: 1 },
+      { price: 457, color: '#d49060', style: 0, title: '0.618 · $457 · GOLDEN OK',width: 3 },
+      { price: 446, color: '#8f969c', style: 2, title: '0.786 · $446',            width: 1 },
+      { price: 432, color: '#ff6b5b', style: 0, title: '0.000 · $432 · swing lo', width: 2 },
+    ];
+    fibs.forEach(f => cs.createPriceLine({ price: f.price, color: f.color, lineWidth: f.width, lineStyle: f.style, axisLabelVisible: true, title: f.title }));
+    // Markers MUST be sorted by time ascending (lightweight-charts hard requirement)
+    cs.setMarkers([
+      { time: times[48], position: 'aboveBar', color: '#5be57c', shape: 'arrowDown', text: 'swing high $498' },
+      { time: times[72], position: 'belowBar', color: '#d49060', shape: 'arrowUp',   text: '0.618 bounce $457' },
+      { time: LAST_T,    position: 'aboveBar', color: '#5be57c', shape: 'circle',    text: 'NOW $487' },
+    ]);
+    chart.timeScale().fitContent();
+    window.addEventListener('resize', () => chart.applyOptions({ width: container.clientWidth }));
+  } catch (err) {
+    console.error('[chart-fib]', err);
+    showChartError('chart-fib', err);
+  }
+
+  // ──── 3. ICHIMOKU — candles + Tenkan + Kijun + Senkou A/B + Chikou + future projection ────
+  try {
+    const container = document.getElementById('chart-ichi');
+    const chart = LightweightCharts.createChart(container, baseOpts({ width: container.clientWidth, height: 440 }));
+    const cs = chart.addCandlestickSeries(candleStyle);
+    cs.setData(ohlc);
+
+    const rollMid = (period) => {
+      const out = [];
+      for (let i = 0; i < ohlc.length; i++) {
+        if (i < period - 1) continue;
+        let hi = -Infinity, lo = Infinity;
+        for (let j = i - period + 1; j <= i; j++) {
+          if (highs[j] > hi) hi = highs[j];
+          if (lows[j]  < lo) lo = lows[j];
+        }
+        out.push({ time: times[i], value: +((hi + lo) / 2).toFixed(2) });
+      }
+      return out;
+    };
+    const tenkan = rollMid(9);
+    const kijun  = rollMid(26);
+
+    // Senkou A & B shifted 26 bars forward (into the future zone)
+    const senkouA = [];
+    const senkouB = [];
+    for (let i = 0; i < ohlc.length; i++) {
+      const tIdx = i - 8;
+      const kIdx = i - 25;
+      if (tIdx >= 0 && kIdx >= 0) {
+        const val = (tenkan[tIdx].value + kijun[kIdx].value) / 2;
+        senkouA.push({ time: times[i] + 26 * DAY, value: +val.toFixed(2) });
+      }
+      if (i >= 51) {
+        let hi = -Infinity, lo = Infinity;
+        for (let j = i - 51; j <= i; j++) {
+          if (highs[j] > hi) hi = highs[j];
+          if (lows[j]  < lo) lo = lows[j];
+        }
+        senkouB.push({ time: times[i] + 26 * DAY, value: +((hi + lo) / 2).toFixed(2) });
+      }
+    }
+    const chikou = [];
+    for (let i = 25; i < ohlc.length; i++) chikou.push({ time: times[i - 26], value: closes[i] });
+
+    const tenkanSer = chart.addLineSeries({ color: '#d49060', lineWidth: 2, priceLineVisible: false, lastValueVisible: false }); tenkanSer.setData(tenkan);
+    const kijunSer  = chart.addLineSeries({ color: '#c9cdd0', lineWidth: 2, priceLineVisible: false, lastValueVisible: false }); kijunSer.setData(kijun);
+    const sAser     = chart.addLineSeries({ color: '#5be57c', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }); sAser.setData(senkouA);
+    const sBser     = chart.addLineSeries({ color: '#ff6b5b', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }); sBser.setData(senkouB);
+    const chikouSer = chart.addLineSeries({ color: '#ffb95c', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }); chikouSer.setData(chikou);
+
+    // Detect TK cross (sorted ascending automatically because we scan ascending)
+    let tkCrossTime = null;
+    for (let i = 30; i < tenkan.length - 2; i++) {
+      const tNow = tenkan[i].value, tPrev = tenkan[i - 1].value;
+      const k  = kijun.find(x => x.time === tenkan[i].time);
+      const kP = kijun.find(x => x.time === tenkan[i - 1].time);
+      if (k && kP && tNow > k.value && tPrev <= kP.value) { tkCrossTime = tenkan[i].time; break; }
+    }
+    const markers = [];
+    if (tkCrossTime) markers.push({ time: tkCrossTime, position: 'belowBar', color: '#5be57c', shape: 'arrowUp', text: 'TK cross up' });
+    markers.push({ time: LAST_T, position: 'aboveBar', color: '#5be57c', shape: 'circle', text: 'NOW $487' });
+    cs.setMarkers(markers);
+    cs.createPriceLine({ price: 472, color: '#c9cdd0', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: 'Kijun $472 · stop ref' });
+    chart.timeScale().fitContent();
+    window.addEventListener('resize', () => chart.applyOptions({ width: container.clientWidth }));
+  } catch (err) {
+    console.error('[chart-ichi]', err);
+    showChartError('chart-ichi', err);
+  }
+
+  // ──── 4. ELLIOTT WAVE — candles + 6 wave-point markers + invalidation + target priceLines ────
+  try {
+    const container = document.getElementById('chart-ew');
+    const chart = LightweightCharts.createChart(container, baseOpts({ width: container.clientWidth, height: 380 }));
+    const cs = chart.addCandlestickSeries(candleStyle);
+    cs.setData(ohlc);
+
+    // Markers in strict ascending time order
+    const wp = (idx, label, color, pos) => ({ time: times[idx], position: pos, color: color, shape: 'circle', text: label });
+    cs.setMarkers([
+      wp(0,  'W0 · $432', '#ff6b5b', 'belowBar'),
+      wp(20, 'W1 · $462', '#5be57c', 'aboveBar'),
+      wp(30, 'W2 · $453', '#d49060', 'belowBar'),
+      wp(48, 'W3 · $498', '#5be57c', 'aboveBar'),
+      wp(60, 'W4 · $478', '#d49060', 'belowBar'),
+      wp(89, 'W5 · target $511-$528', '#5be57c', 'aboveBar'),
+    ]);
+    cs.createPriceLine({ price: 462, color: '#ff6b5b', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'INVALIDATE $462 · W1 top' });
+    cs.createPriceLine({ price: 511, color: '#5be57c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'W5 target $511' });
+    cs.createPriceLine({ price: 528, color: '#5be57c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'W5 target $528' });
+    chart.timeScale().fitContent();
+    window.addEventListener('resize', () => chart.applyOptions({ width: container.clientWidth }));
+  } catch (err) {
+    console.error('[chart-ew]', err);
+    showChartError('chart-ew', err);
+  }
+
+});  // end whenReady
+</script>
+</body>
+</html>

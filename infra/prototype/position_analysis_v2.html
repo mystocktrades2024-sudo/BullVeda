@@ -396,7 +396,7 @@
 
   <!-- ━━━ ④·b CANDIDATE LADDER · this ticker, this strategy ━━━ -->
   <div class="panel">
-    <h2><span class="num">④·b</span>Candidate Ladder · ROST <span class="sub">— every level above entry · R-filter + confluence selection</span><span class="strat-tag" id="clTag">INVESTMENT</span></h2>
+    <h2><span class="num">④·b</span>Candidate Ladder · <span id="clTicker">ROST</span> <span class="sub">— every level above entry · R-filter + confluence selection</span><span class="strat-tag" id="clTag">INVESTMENT</span></h2>
     <div class="cand-row head">
       <span>PRICE</span><span id="clRHead">EXP RETURN</span><span>STRUCTURAL SOURCES</span><span>CONFLUENCE</span><span style="text-align:right">SELECTION</span>
     </div>
@@ -489,7 +489,7 @@
   <!-- ━━━ ⑧ STRESS TEST ━━━ -->
   <div class="panel">
     <h2><span class="num">⑧</span>Stress Test · Scenario Impact <span class="sub">— β-adjusted price impact under common shocks</span><span class="strat-tag" id="stTag">INVESTMENT</span></h2>
-    <div class="vgrid-4">
+    <div class="vgrid-4" id="stressGrid">
       <div class="ctx-tile" style="border-left:3px solid var(--rd)"><h4>VIX SPIKE +5pts</h4><div class="v rd">−$2.10</div><div class="sub">−0.98% · β 0.88 × −1.12% market</div></div>
       <div class="ctx-tile" style="border-left:3px solid var(--am)"><h4>XRT (RETAIL ETF) −5%</h4><div class="v rd">−$8.60</div><div class="sub">−4.01% · sector beta 1.10</div></div>
       <div class="ctx-tile" style="border-left:3px solid var(--rd)"><h4>SPY −3% SESSION</h4><div class="v rd">−$5.65</div><div class="sub">−2.63% · β-adjusted</div></div>
@@ -572,17 +572,19 @@
 
   <!-- ━━━ ⑬ PEER COMPARISON ━━━ -->
   <div class="panel">
-    <h2><span class="num">⑬</span>Peer Comparison · Apparel Retail <span class="sub">— is ROST the cleanest play in cohort?</span><span class="strat-tag" id="prTag">INVESTMENT</span></h2>
+    <h2><span class="num">⑬</span>Peer Comparison · <span id="peerIndustry">Apparel Retail</span> <span class="sub">— is <span id="peerSubjectTicker">ROST</span> the cleanest play in cohort?</span><span class="strat-tag" id="prTag">INVESTMENT</span></h2>
     <div class="peer-row head">
       <span>TKR</span><span>PRICE</span><span>RSI(14)</span><span>RS</span><span>1m PERF</span><span>SETUP</span><span>NOTE</span>
     </div>
-    <div class="peer-row us">
+    <div id="peerSubjectRow" class="peer-row us">
       <span class="tk" style="color:var(--lead)">ROST</span><span class="v">$214.55</span><span class="v am">38</span><span class="v">61</span><span class="v rd">−5.0%</span><span class="v">EMA50 cont · sqz</span><span class="v" style="color:var(--ink)">oversold · squeeze + insider</span>
     </div>
-    <div class="peer-row"><span class="tk">TJX</span><span class="v">$132.40</span><span class="v">58</span><span class="v">78</span><span class="v gn">+4.2%</span><span class="v">trending</span><span class="v">cleaner setup but extended</span></div>
-    <div class="peer-row"><span class="tk">BURL</span><span class="v">$284.10</span><span class="v gn">52</span><span class="v">69</span><span class="v gn">+2.8%</span><span class="v">consolidation</span><span class="v">decent · no entry trigger</span></div>
-    <div class="peer-row"><span class="tk">M</span><span class="v">$18.20</span><span class="v rd">28</span><span class="v rd">22</span><span class="v rd">−12.1%</span><span class="v">breakdown</span><span class="v">structural weakness · ignore</span></div>
-    <div style="margin-top:10px;padding:8px 12px;background:var(--surf-2);border-radius:3px;font:500 11.5px -apple-system,sans-serif;color:var(--ink-2);line-height:1.55">
+    <div id="peerCohortRows">
+      <div class="peer-row"><span class="tk">TJX</span><span class="v">$132.40</span><span class="v">58</span><span class="v">78</span><span class="v gn">+4.2%</span><span class="v">trending</span><span class="v">cleaner setup but extended</span></div>
+      <div class="peer-row"><span class="tk">BURL</span><span class="v">$284.10</span><span class="v gn">52</span><span class="v">69</span><span class="v gn">+2.8%</span><span class="v">consolidation</span><span class="v">decent · no entry trigger</span></div>
+      <div class="peer-row"><span class="tk">M</span><span class="v">$18.20</span><span class="v rd">28</span><span class="v rd">22</span><span class="v rd">−12.1%</span><span class="v">breakdown</span><span class="v">structural weakness · ignore</span></div>
+    </div>
+    <div id="peerCohortRead" style="margin-top:10px;padding:8px 12px;background:var(--surf-2);border-radius:3px;font:500 11.5px -apple-system,sans-serif;color:var(--ink-2);line-height:1.55">
       <b style="color:var(--ink)">Cohort read:</b> TJX cleanest technical · BURL consolidating · M weak · ROST has the strongest insider + quality + dividend mix.
     </div>
   </div>
@@ -1454,6 +1456,42 @@ function applyHeaderOverlay(ticker, payload){
   }
 }
 
+// Derive a verdict label + color class from engine output. Returns
+// { label, cls, score } where score is used to elect BEST-FIT across modes.
+function _deriveVerdict(payload, modeUi){
+  if (!payload || payload.decision === 'reject') {
+    const reason = ((payload && payload.warnings) || [])[0] || 'no_target_meets_minimum_r';
+    return { label:'NO TRADE', cls:'verdict rd', score:0, reason };
+  }
+  const t1 = payload.t1 || {};
+  const conf = Number(t1.confluence || 0);
+  const p = (typeof t1.p_reach === 'number') ? t1.p_reach : 0;
+  const r  = Number(t1.r_multiple || 0);
+  const warns = payload.warnings || [];
+  const hasCaution = warns.some(w => /choch|stop_distance|degraded|imminent/i.test(w));
+
+  // Special-mode short-circuits
+  if (payload.invest_stub) {
+    return { label:'INTERIM · PT', cls:'verdict am', score: 10 + r*2 + p*10 };
+  }
+  if (payload.is_etf) {
+    return { label:'ETF · WIDE', cls:'verdict am', score: 8 + r*1.5 };
+  }
+
+  // Composite quality score: confluence × P(reach) × R-multiple
+  const quality = conf * (0.4 + p) * Math.max(r, 0.5);
+
+  let label, cls;
+  if (conf >= 5 && p >= 0.45 && r >= 2.5 && !hasCaution) { label='BUY · ENTER';   cls='verdict gn'; }
+  else if (conf >= 4 && p >= 0.30 && r >= 2.0)           { label='HOLD · ADD DIP'; cls='verdict gn'; }
+  else if (hasCaution && r >= 2.0)                       { label='TIGHTEN STOP';  cls='verdict am'; }
+  else if (conf < 3 || r < 1.5)                          { label='WEAK · SKIP';   cls='verdict rd'; }
+  else if (p < 0.20)                                     { label='LOW P(reach)';  cls='verdict rd'; }
+  else                                                   { label='REVIEW';        cls='verdict am'; }
+
+  return { label, cls, score: quality };
+}
+
 function applyFitCardOverlay(modeUi, payload, ticker){
   // Maps engine output to the SWING / POSITION / INVESTMENT verdict card.
   const idMap = {
@@ -1469,11 +1507,14 @@ function applyFitCardOverlay(modeUi, payload, ticker){
     setHTML(ids.tgt, `<b>Targets:</b> <span style="color:var(--ink-3)">engine unreachable — showing demo data</span>`);
     return;
   }
+
+  // Engine-derived verdict — overwrites the hardcoded EXIT/TIGHTEN STOP/HOLD·ADD
+  const v = _deriveVerdict(payload, modeUi);
+  setHTML(ids.vd, v.label);
+  setClassName(ids.vd, v.cls);
+
   if (payload.decision === 'reject') {
-    const reason = (payload.warnings || [])[0] || 'no_target_meets_minimum_r';
-    setHTML(ids.vd, 'NO TRADE');
-    setClassName(ids.vd, 'verdict rd');
-    setHTML(ids.rs, `<b>Engine rejected ${modeUi} for ${ticker}.</b> Reason: ${reason}.`);
+    setHTML(ids.rs, `<b>Engine rejected ${modeUi} for ${ticker}.</b> Reason: ${v.reason}.`);
     setHTML(ids.tgt, `<b>Targets:</b> <span style="color:var(--ink-3)">none — engine cannot generate structural targets</span>`);
     setHTML(ids.mt, '');
     return;
@@ -1488,53 +1529,319 @@ function applyFitCardOverlay(modeUi, payload, ticker){
   if (!tparts.length) tparts.push('engine produced no targets · check warnings');
   setHTML(ids.tgt, `<b>Targets:</b> ${tparts.join(' · ')}`);
 
-  // Override ROST-narrative reason when ticker is anything else
-  if (ticker !== 'ROST') {
-    let line = '';
-    if (payload.is_etf) line = `<b>ETF graceful-degrade.</b> Confluence may be weak.`;
-    else if (payload.invest_stub) line = `<b>INVEST interim stub.</b> T1 = analyst PT, T2 = PT × 1.3 (IV triangulation pending).`;
-    else if (t1) line = `<b>Engine T1 ${t1.behavior || ''} @ $${t1.price.toFixed(2)}</b> · ${t1.action || ''} · R-mult ${_fmtR(t1.r_multiple)}`;
-    else line = `<b>Engine returned no T1.</b>`;
-    setHTML(ids.rs, line);
-    // Replace ROST-only metrics with engine summary
-    const warns = (payload.warnings || []).slice(0,2).join(' · ') || '<span style="color:var(--gn)">none</span>';
-    const stopStr = stop ? `$${stop.toFixed(2)}` : '—';
-    setHTML(ids.mt,
-      `<span>Decision</span><b>${(payload.decision || '—').toUpperCase()}</b>` +
-      `<span>Stop</span><b>${stopStr}</b>` +
-      `<span>P(reach T1)</span><b>${t1 && t1.p_reach != null ? Math.round(t1.p_reach*100)+'%' : '—'}</b>` +
-      `<span>Warnings</span><b>${warns}</b>`);
+  // Engine-driven reason (replaces hardcoded ROST narrative for every ticker)
+  let line = '';
+  if (payload.is_etf) line = `<b>ETF graceful-degrade.</b> Structural pivots scarce; confluence may be weak.`;
+  else if (payload.invest_stub) line = `<b>INVEST interim stub.</b> T1 = analyst PT · T2 = PT × 1.3 (IV triangulation pending).`;
+  else if (t1) line = `<b>Engine T1 ${t1.behavior || ''} @ $${t1.price.toFixed(2)}</b> · ${t1.action || ''} · R-mult ${_fmtR(t1.r_multiple)}`;
+  else line = `<b>Engine returned no T1.</b>`;
+  setHTML(ids.rs, line);
+
+  // Engine-driven metrics (replaces hardcoded ROST EV/exit-rules/conviction)
+  const warns = (payload.warnings || []).slice(0,2).join(' · ') || '<span style="color:var(--gn)">none</span>';
+  const stopStr = stop ? `$${stop.toFixed(2)}` : '—';
+  setHTML(ids.mt,
+    `<span>Decision</span><b>${(payload.decision || '—').toUpperCase()}</b>` +
+    `<span>Stop</span><b>${stopStr}</b>` +
+    `<span>P(reach T1)</span><b>${t1 && t1.p_reach != null ? Math.round(t1.p_reach*100)+'%' : '—'}</b>` +
+    `<span>Warnings</span><b>${warns}</b>`);
+
+  return v.score;
+}
+
+function applyBestFitBadge(scores){
+  // Move the ★ BEST FIT badge to the highest-scoring mode card. Removes it
+  // from all cards first, then adds it to the winner. If no card scored,
+  // leaves whatever the page rendered with.
+  const wraps = {
+    SWING:      document.querySelector('.fit-card.swing'),
+    POSITION:   document.querySelector('.fit-card.position'),
+    INVESTMENT: document.querySelector('.fit-card.investment'),
+  };
+  Object.values(wraps).forEach(el => { if (el) el.classList.remove('best'); });
+  // Strip any stray badge child added by prior renders
+  document.querySelectorAll('.fit-card .best-badge').forEach(b => b.remove());
+
+  let bestMode = null, bestScore = -Infinity;
+  for (const m of ['SWING','POSITION','INVESTMENT']) {
+    const s = scores[m];
+    if (typeof s === 'number' && s > bestScore) { bestScore = s; bestMode = m; }
   }
+  if (bestMode && wraps[bestMode] && bestScore > 0) {
+    wraps[bestMode].classList.add('best');
+    // Inject a fresh badge node (the original HTML has none in HTML; .best is CSS-only)
+    if (!wraps[bestMode].querySelector('.best-badge')) {
+      const badge = document.createElement('div');
+      badge.className = 'best-badge';
+      badge.style.cssText = 'position:absolute;top:-8px;right:14px;background:#0E1421;padding:2px 8px;font:800 9.5px ui-monospace,monospace;color:var(--gn);border:1px solid var(--gn);border-radius:3px;letter-spacing:.12em';
+      badge.textContent = '★ BEST FIT';
+      wraps[bestMode].style.position = 'relative';
+      wraps[bestMode].appendChild(badge);
+    }
+  }
+}
+
+// ─── /api/elite/{ticker} client + overlay for the demo sections ────────
+const ELITE_CACHE = {};  // {ticker: payload} · cached for the page lifetime
+
+async function loadElite(ticker){
+  if (ELITE_CACHE[ticker]) return ELITE_CACHE[ticker];
+  try {
+    const r = await fetch(`/api/elite/${encodeURIComponent(ticker)}`,
+                         { credentials: 'same-origin' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const payload = await r.json();
+    ELITE_CACHE[ticker] = payload;
+    return payload;
+  } catch (e) {
+    ELITE_CACHE[ticker] = null;
+    return null;
+  }
+}
+
+function _flagCls(good){ return good ? 'gn' : 'rd'; }
+function _fmtPct(v, digits=1){ return (v == null || isNaN(v)) ? '—' : `${v.toFixed(digits)}%`; }
+function _stalePlaceholder(label, ticker){
+  return `<div style="padding:14px;color:var(--ink-3);font:500 12.5px -apple-system,sans-serif;line-height:1.5">` +
+         `<b style="color:var(--am)">⚠ No data for ${ticker}</b> · ${label} not yet populated by the engine. ` +
+         `Hardcoded ROST sample data has been removed to avoid showing stale information.</div>`;
+}
+
+function applyEliteOverlay(elite, ticker, payload){
+  const setHTML = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+  const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  if (!elite) {
+    // No elite data → wipe all demo sections to honest placeholders
+    setHTML('pqsGrid',        _stalePlaceholder('Setup Quality Strip', ticker));
+    setHTML('newsFeed',       _stalePlaceholder('News & Catalyst Feed', ticker));
+    setHTML('newsSummary',    '');
+    setHTML('optSummary',     _stalePlaceholder('Options Activity', ticker));
+    setHTML('driftRows',      _stalePlaceholder('Setup Coherence Matrix', ticker));
+    setHTML('driftSummary',   '');
+    setHTML('exitRules',      _stalePlaceholder('Exit-Rule Checklist', ticker));
+    setHTML('exSummary',      '');
+    setHTML('haAnalogsRows',  _stalePlaceholder('Historical Analog rows', ticker));
+    setHTML('stressGrid',     _stalePlaceholder('Stress Test scenarios', ticker));
+    setHTML('ltTiles',        '');
+    setHTML('mmSummary',      _stalePlaceholder('Multi-Model 11 Frameworks', ticker));
+    setHTML('mmTable',        '');
+    setHTML('evRows',         _stalePlaceholder('EV Waterfall', ticker));
+    setHTML('triggerGrid',    _stalePlaceholder('Trigger Matrix', ticker));
+    setHTML('peerSubjectRow', '');
+    setHTML('peerCohortRows', _stalePlaceholder('Peer Comparison cohort', ticker));
+    setHTML('peerCohortRead', '');
+    setHTML('calRows',        _stalePlaceholder('Forward Calendar', ticker));
+    setHTML('selfCheck',      _stalePlaceholder('Self-Check', ticker));
+    return;
+  }
+
+  // Update headings + company-name strip. elite.name is usually the ticker
+  // (no friendly longName surfaced); show industry/sector instead.
+  const friendly = (elite.name && elite.name !== ticker) ? elite.name : '';
+  const indSec = [elite.industry, elite.sector].filter(x => x && x !== '—').join(' · ');
+  setText('paName', indSec ? `· ${friendly ? friendly + ' · ' : ''}${indSec}` : '');
+  setText('peerIndustry',     elite.industry || elite.sector || '—');
+  setText('peerSubjectTicker', ticker);
+  setText('clTicker',         ticker);
+
+  // ── ① Setup Quality Strip — real values now ───────────────────────────
+  const price = elite.price;
+  const pct = elite.pct_chg || elite.perf_1d || 0;
+  const t1Eng = (payload && payload.t1 && typeof payload.t1.price === 'number') ? payload.t1 : null;
+  const t2Eng = (payload && payload.t2 && typeof payload.t2.price === 'number') ? payload.t2 : null;
+  const stopEng = payload && payload.stop ? payload.stop.price : null;
+  const cells = [
+    ['CURRENT',     price ? `$${price.toFixed(2)}` : '—', (pct>=0?'+':'')+pct.toFixed(2)+'% today', (pct>=0?'gn':'rd')],
+    ['→ T1',        t1Eng ? `$${t1Eng.price.toFixed(2)}` : '—',  t1Eng ? `conf ${Number(t1Eng.confluence||0).toFixed(1)} · ${t1Eng.behavior}` : 'engine no T1', t1Eng ? 'am' : 'rd'],
+    ['→ T2',        t2Eng ? `$${t2Eng.price.toFixed(2)}` : '—',  t2Eng ? `conf ${Number(t2Eng.confluence||0).toFixed(1)} · ${t2Eng.behavior}` : '—', t2Eng ? 'am' : 'rd'],
+    ['→ STOP',      stopEng ? `$${stopEng.toFixed(2)}` : '—',    price && stopEng ? `${((stopEng-price)/price*100).toFixed(1)}%` : '—', 'rd'],
+    ['EMA STACK',   elite.above_8ema && elite.above_21ema && elite.above_50ema ? 'BULLISH' : (!elite.above_50ema ? 'BEARISH' : 'MIXED'), `8/${elite.above_8ema?'✓':'✗'} 21/${elite.above_21ema?'✓':'✗'} 50/${elite.above_50ema?'✓':'✗'} 200/${elite.above_200sma?'✓':'✗'}`, _flagCls(elite.above_50ema && elite.above_200sma)],
+    ['MACD',        elite.macd_bullish ? 'BULLISH' : 'BEARISH', String(elite.macd_signal || ''), _flagCls(elite.macd_bullish)],
+    ['RSI(14)',     elite.rsi != null ? Math.round(elite.rsi) : '—', elite.rsi == null ? '—' : (elite.rsi >= 70 ? 'overbought' : elite.rsi >= 50 ? 'bullish' : elite.rsi >= 30 ? 'bearish' : 'oversold'), elite.rsi == null ? '' : (elite.rsi >= 70 || elite.rsi <= 30 ? 'am' : '')],
+    ['RVOL',        elite.rvol != null ? elite.rvol.toFixed(2) : '—', elite.rvol == null ? '—' : (elite.rvol >= 1.5 ? 'elevated' : 'normal'), elite.rvol == null ? '' : (elite.rvol >= 1.5 ? 'am' : '')],
+    ['BETA',        elite.beta != null ? elite.beta.toFixed(2) : '—', elite.beta == null ? '—' : (elite.beta < 0.8 ? 'low-β' : elite.beta > 1.5 ? 'high-β' : 'mid-β'), elite.beta == null ? '' : (Math.abs(elite.beta - 1) < 0.2 ? 'gn' : 'am')],
+    ['EARN DAYS',   elite.earn_days != null ? `${elite.earn_days}d` : '—', elite.earn_days == null ? 'no scheduled' : (elite.earn_days <= 7 ? 'imminent' : elite.earn_days <= 30 ? 'this month' : 'beyond hold'), elite.earn_days == null ? '' : (elite.earn_days <= 7 ? 'rd' : 'am')],
+  ];
+  setHTML('pqsGrid', cells.map(([k,v,sub,cls]) =>
+    `<div><div class="pq-k">${k}</div><div class="pq-v ${cls||''}">${v}</div><div class="pq-sub">${sub}</div></div>`
+  ).join(''));
+
+  // ── ② News & Catalyst Feed — from elite.news_articles ─────────────────
+  const newsArts = (elite.news_articles || []).slice(0, 10);
+  if (newsArts.length === 0) {
+    setHTML('newsFeed', _stalePlaceholder('News articles', ticker));
+    setHTML('newsSummary', '');
+  } else {
+    const sentCls = { positive:'pill-gn', bullish:'pill-gn', negative:'pill-rd', bearish:'pill-rd', neutral:'pill-am' };
+    setHTML('newsFeed', newsArts.map(n => {
+      const sent = (n.sentiment || n.sentiment_label || 'neutral').toLowerCase();
+      const sentP = sentCls[sent] || 'pill-am';
+      const day = n.date || n.published_at || '—';
+      const dayShort = String(day).slice(5, 10);
+      const src = n.source || n.publisher || 'news';
+      const title = n.title || n.headline || '(no title)';
+      return `<div class="news-row"><span class="news-day">${dayShort}</span><span class="news-src">${src}</span><span class="news-body">${title}</span><span class="news-sent"><span class="pill ${sentP}">${sent.toUpperCase().slice(0,4)}</span></span><span class="news-mat">—</span></div>`;
+    }).join(''));
+    const nsRaw = elite.news_sentiment_score;
+    // EODHD returns {score, max, momentum, ...} dict; some older paths return scalar
+    const ns = (typeof nsRaw === 'object' && nsRaw !== null) ? Number(nsRaw.score || 0) : (typeof nsRaw === 'number' ? nsRaw : null);
+    const momentum = (typeof nsRaw === 'object' && nsRaw !== null) ? (nsRaw.momentum || '') : '';
+    const nsLabel = ns == null ? 'no signal' : ns >= 2 ? `<b style="color:var(--gn)">net BULLISH (${ns.toFixed(1)})</b>` : ns <= -2 ? `<b style="color:var(--rd)">net BEARISH (${ns.toFixed(1)})</b>` : `mixed (${ns.toFixed(1)})`;
+    const momStr = momentum ? ` · momentum ${momentum}` : '';
+    setHTML('newsSummary', `<b>News sentiment 30d:</b> ${nsLabel}${momStr} · ${newsArts.length} articles surfaced.`);
+  }
+
+  // ── ③ Options Activity — from elite.options_data + uoa ────────────────
+  const opt = elite.options_data || {};
+  const uoa = elite.uoa || elite.options_data?.uoa || {};
+  const iv = opt.iv_rank;
+  const pc = opt.put_call_ratio;
+  if (iv == null && pc == null) {
+    setHTML('optSummary', _stalePlaceholder('Options chain', ticker));
+  } else {
+    const pcStr = pc != null ? pc.toFixed(2) : '—';
+    const ivStr = iv != null ? `${(iv*100).toFixed(0)}` : '—';
+    setHTML('optSummary',
+      `<b>Options snapshot:</b> IV rank ${ivStr}${iv != null ? ' (' + (iv > 0.7 ? 'rich' : iv > 0.3 ? 'normal' : 'cheap') + ')' : ''} · ` +
+      `Put/Call ${pcStr} ${pc != null ? (pc > 1 ? '(bearish skew)' : '(bullish skew)') : ''}${uoa.uoa_calls ? ' · UOA calls ' + uoa.uoa_calls : ''}${uoa.uoa_puts ? ' · UOA puts ' + uoa.uoa_puts : ''}.`);
+  }
+
+  // ── ⑤ Setup Coherence Matrix — derived from real technicals ───────────
+  const coherence = [
+    ['EMA STACK', 'aligned bullish 8>21>50>200', elite.above_8ema && elite.above_21ema && elite.above_50ema && elite.above_200sma ? '<b>aligned ✓</b>' : `<b>${[elite.above_8ema?'8':'·', elite.above_21ema?'21':'·', elite.above_50ema?'50':'·', elite.above_200sma?'200':'·'].join('/')} broken</b>`, elite.above_50ema && elite.above_200sma ? 'PASS' : 'FAIL', _flagCls(elite.above_50ema && elite.above_200sma)],
+    ['MACD',      'bullish cross',  elite.macd_bullish ? '<b>bullish ✓</b>' : `<b>${elite.macd_signal || 'bearish'}</b>`, elite.macd_bullish ? 'PASS' : 'FAIL', _flagCls(elite.macd_bullish)],
+    ['RSI(14)',   '50–70 ideal',    elite.rsi != null ? `<b>${Math.round(elite.rsi)}</b>` : '—', elite.rsi != null && elite.rsi >= 50 && elite.rsi <= 70 ? 'PASS' : 'TIGHT', elite.rsi != null && elite.rsi >= 50 && elite.rsi <= 70 ? 'gn' : 'am'],
+    ['RVOL',      '> 1.5 fuel',     elite.rvol != null ? `<b>${elite.rvol.toFixed(2)}</b>` : '—', elite.rvol != null && elite.rvol >= 1.5 ? 'PASS' : 'TIGHT', elite.rvol != null && elite.rvol >= 1.5 ? 'gn' : 'am'],
+    ['SCORE',     'high conviction', `<b>${elite.score || '—'}</b>`, elite.score >= 70 ? 'PASS' : elite.score >= 55 ? 'TIGHT' : 'FAIL', elite.score >= 70 ? 'gn' : elite.score >= 55 ? 'am' : 'rd'],
+  ];
+  setHTML('driftRows', coherence.map(d =>
+    `<div class="drift-row"><span class="drift-k">${d[0]}</span><span class="drift-ideal"><b>${d[1]}</b></span><span class="drift-now">${d[2]}</span><span class="drift-status pill pill-${d[4]}">${d[3]}</span></div>`).join(''));
+  const passes = coherence.filter(r => r[3] === 'PASS').length;
+  setHTML('driftSummary', `<b>${passes} of ${coherence.length} dimensions aligned.</b> Engine score: ${elite.score || '—'}/100 · setup: ${elite.setup_family || elite.setup || '—'} · regime: ${elite.regime || '—'}.`);
+
+  // ── ⑥ Exit-Rule Checklist — derived from engine warnings + technicals ─
+  const exRows = [
+    [stopEng != null && price > stopEng, 'Above engine stop',        price && stopEng ? `$${price.toFixed(2)} vs $${stopEng.toFixed(2)} · ${((price-stopEng)/price*100).toFixed(1)}% cushion` : '—'],
+    [!!(elite.above_50ema),               'EMA50 holding',             elite.above_50ema ? 'above EMA50' : 'below EMA50'],
+    [!!(elite.macd_bullish),              'MACD bullish',              elite.macd_signal || (elite.macd_bullish ? 'bullish' : 'bearish')],
+    [elite.rsi != null && elite.rsi >= 40 && elite.rsi <= 75, 'RSI healthy band (40–75)', elite.rsi != null ? `RSI ${Math.round(elite.rsi)}` : '—'],
+    [(payload?.warnings || []).length === 0, 'No engine warnings',    (payload?.warnings || []).join(' · ') || 'none'],
+  ];
+  setHTML('exitRules', exRows.map(r =>
+    `<div class="rule-row${r[0]?'':' fail'}"><span class="dot" style="background:${r[0]?'var(--gn)':'var(--rd)'}"></span><span class="rule"><b>${r[1]}</b></span><span class="ex">${r[2]}</span></div>`).join(''));
+  const passed = exRows.filter(r => r[0]).length;
+  setHTML('exSummary', `<b>${passed} of ${exRows.length} rules pass.</b> ${passed >= 4 ? '<span style="color:var(--gn)">HOLD</span>' : passed >= 2 ? '<span style="color:var(--am)">TIGHTEN</span>' : '<span style="color:var(--rd)">EXIT</span>'} bias.`);
+
+  // ── ⑧ Stress Test — β-adjusted scenarios (real β + real price) ───────
+  const beta = elite.beta || 1.0;
+  if (price) {
+    const scenarios = [
+      ['VIX SPIKE +5pts', -1.2*beta,  'risk-off regime · β-adjusted'],
+      ['SPY −3% SESSION', -3*beta,    'broad-market down-day'],
+      ['SPY −10% (correction)', -10*beta, 'larger market sell-off'],
+      ['Earnings miss',   -8,          'historical avg gap-down'],
+    ];
+    setHTML('stressGrid', scenarios.map(s => {
+      const dollarMove = price * (s[1] / 100);
+      const newP = price + dollarMove;
+      const stopHit = stopEng && newP < stopEng;
+      const col = stopHit ? 'var(--rd)' : 'var(--am)';
+      return `<div class="ctx-tile" style="border-left:3px solid ${col}"><h4>${s[0]}</h4><div class="v rd">$${dollarMove.toFixed(2)}</div><div class="sub">${s[1].toFixed(1)}% → $${newP.toFixed(2)} ${stopHit ? '· <b style="color:var(--rd)">stops out</b>' : ''} · ${s[2]}</div></div>`;
+    }).join(''));
+  } else {
+    setHTML('stressGrid', _stalePlaceholder('Stress Test (no live price)', ticker));
+  }
+
+  // ── ⑨ Watchlist tiles — derived from elite ────────────────────────────
+  const tiles = [
+    ['SCORE',  String(elite.score || '—'),         elite.score >= 70 ? '✓ high conviction' : elite.score >= 55 ? '⚠ watch' : '✗ low', elite.score >= 70 ? '#3DDC97' : elite.score >= 55 ? '#FCD34D' : '#E5484D'],
+    ['RS RANK', elite.rs_rank != null ? String(elite.rs_rank) : '—', elite.rs_rank >= 70 ? '✓ leader' : elite.rs_rank >= 50 ? '⚠ middle' : '✗ laggard', elite.rs_rank >= 70 ? '#3DDC97' : elite.rs_rank >= 50 ? '#FCD34D' : '#E5484D'],
+    ['INSIDER', `${elite.insider_buys || 0} / ${elite.insider_sells || 0}`, elite.insider_buys > elite.insider_sells ? '✓ net buying' : elite.insider_buys === elite.insider_sells ? '⚠ neutral' : '✗ net selling', elite.insider_buys > elite.insider_sells ? '#3DDC97' : '#FCD34D'],
+    ['ANALYST PT', elite.analyst_target ? `$${elite.analyst_target.toFixed(2)}` : '—', elite.analyst_upside != null ? `${(elite.analyst_upside*100).toFixed(0)}% upside` : '—', elite.analyst_upside > 0 ? '#3DDC97' : '#E5484D'],
+    ['SHORT %', elite.short_pct != null ? `${elite.short_pct.toFixed(1)}%` : '—', elite.short_pct > 15 ? '⚠ squeeze risk' : '✓ low', elite.short_pct > 15 ? '#FCD34D' : '#3DDC97'],
+  ];
+  setHTML('ltTiles', tiles.map((t,i) => {
+    const tx = 20 + i * 220;
+    const w = i === 4 ? 180 : 200;
+    return `<g transform="translate(${tx},20)"><rect width="${w}" height="180" rx="4" fill="rgba(22,27,36,0.4)" stroke="#1E2530"/><text x="14" y="20" font-size="9" fill="#9AA4B2" font-weight="700" letter-spacing="0.10em">${t[0]}</text><text x="14" y="80" font-size="14" fill="${t[3]}" font-weight="800">${t[1]}</text><text x="14" y="156" font-size="11" fill="${t[3]}" font-weight="700">${t[2]}</text></g>`;
+  }).join(''));
+
+  // ── ⑬ Peer Comparison — show only the subject row (no cohort lookup yet)
+  if (price) {
+    const rsiCls = elite.rsi != null ? (elite.rsi >= 70 ? 'am' : elite.rsi <= 30 ? 'am' : '') : '';
+    setHTML('peerSubjectRow',
+      `<span class="tk" style="color:var(--lead)">${ticker}</span>` +
+      `<span class="v">$${price.toFixed(2)}</span>` +
+      `<span class="v ${rsiCls}">${elite.rsi != null ? Math.round(elite.rsi) : '—'}</span>` +
+      `<span class="v">${elite.rs_rank != null ? elite.rs_rank : '—'}</span>` +
+      `<span class="v ${(elite.perf_month||0) >= 0 ? 'gn':'rd'}">${(elite.perf_month != null ? ((elite.perf_month>=0?'+':'')+(elite.perf_month*100).toFixed(1)+'%') : '—')}</span>` +
+      `<span class="v">${elite.setup_family || elite.setup || '—'}</span>` +
+      `<span class="v" style="color:var(--ink)">${elite.thesis || elite.trade_thesis || '—'}</span>`);
+  }
+  setHTML('peerCohortRows', _stalePlaceholder('Industry peer cohort (lookup pending Phase 2)', ticker));
+  setHTML('peerCohortRead', '');
+
+  // ── ⑭ Forward Calendar — real earnings + macro ────────────────────────
+  const calRows = [];
+  if (elite.earn_days != null) {
+    const day = elite.earn_days === 0 ? 'today' : elite.earn_days > 0 ? `+${elite.earn_days}d` : `${elite.earn_days}d`;
+    const rel = elite.earn_days <= 7 ? 'HIGH' : elite.earn_days <= 30 ? 'MEDIUM' : 'LOW';
+    calRows.push(`<div class="cal-row"><span class="d">${day}</span><span class="lbl">EARNINGS</span><span class="body">${ticker} report</span><span class="rel" style="color:${rel==='HIGH'?'#3DDC97':rel==='MEDIUM'?'#F5A524':'#6B7280'}">${rel}</span></div>`);
+  }
+  if (elite.esp_play) {
+    calRows.push(`<div class="cal-row"><span class="d">—</span><span class="lbl">ESP PLAY</span><span class="body">Zacks ESP positive · ~70% beat rate</span><span class="rel" style="color:#3DDC97">HIGH</span></div>`);
+  }
+  if (calRows.length === 0) {
+    setHTML('calRows', `<div style="padding:14px;color:var(--ink-3);font:500 12px -apple-system,sans-serif">No scheduled binary events for ${ticker} in the hold window.</div>`);
+  } else {
+    setHTML('calRows', calRows.join(''));
+  }
+
+  // ── ⑮ Self-check — strategy-agnostic discipline (kept generic) ───────
+  // Generic discipline questions work for any ticker — keep as-is
+
+  // ── Sections we genuinely cannot populate yet — show honest placeholders
+  // Historical Analog (⑦) has 5 ctx-tile cells + a rows table — wipe all
+  ['haMatch','haMatchSub','haN','haNSub','haWR','haWRSub','haDD','haDDSub','haTime','haTimeSub','haSummary'].forEach(id => setHTML(id, ''));
+  setHTML('haAnalogsRows', _stalePlaceholder('Historical Analog matcher (k-NN over picks_history pending)', ticker));
+  setHTML('mmSummary',     _stalePlaceholder('Multi-Model 11 Frameworks (Wyckoff/Elliott/Ichimoku/DCF/DDM)', ticker));
+  setHTML('mmTable',       '');
+  setHTML('evRows',        _stalePlaceholder('EV Waterfall (probability blend pending)', ticker));
+  setHTML('triggerGrid',   _stalePlaceholder('Trigger Matrix (behavior-driven rules pending)', ticker));
 }
 
 async function loadEngineAndRender(modeUi){
   ENGINE_STATE.ticker = getTickerFromURL();
   const ticker = ENGINE_STATE.ticker;
 
-  // Fire 3 parallel calls so all 3 verdict cards get refreshed at once.
-  // Engine cache makes repeat calls cheap (~ms); cold-call is 2-5s per mode.
+  // Fire 3 parallel engine calls + 1 elite call so all panels refresh together
   const modes = ['SWING','POSITION','INVESTMENT'];
-  const payloads = await Promise.all(
-    modes.map(m => loadEngine(ticker, m).catch(_ => null))
-  );
+  const [eliteData, ...payloads] = await Promise.all([
+    loadElite(ticker),
+    ...modes.map(m => loadEngine(ticker, m).catch(_ => null))
+  ]);
 
-  // 1. Update top-of-page chrome from the active-mode payload (or any non-null)
   const activeIdx = modes.indexOf(modeUi);
   const headerPayload = payloads[activeIdx] || payloads.find(p => p) || null;
   applyHeaderOverlay(ticker, headerPayload);
 
-  // 2. Update each of the 3 fit-cards
-  modes.forEach((m, i) => applyFitCardOverlay(m, payloads[i], ticker));
+  // Verdict + score per card; collect for BEST FIT election
+  const scores = {};
+  modes.forEach((m, i) => { scores[m] = applyFitCardOverlay(m, payloads[i], ticker); });
+  applyBestFitBadge(scores);
 
-  // 3. Hide the ROST-only system recommendation banner on non-ROST tickers
+  // Hide ROST-only system recommendation banner on non-ROST tickers
   const sysRec = document.getElementById('systemRecommendation');
   if (sysRec) sysRec.style.display = (ticker === 'ROST') ? '' : 'none';
 
-  // 4. Overlay the active-mode payload onto STRAT and render the deep-dive sections
+  // Overlay engine into STRAT + render deep-dive sections
   applyEngineOverlay(payloads[activeIdx], modeUi);
   render(modeUi);
 
-  // 5. Patch page title with real ticker
+  // Wipe ROST chrome from the 14 demo sections + populate from /api/elite
+  applyEliteOverlay(eliteData, ticker, payloads[activeIdx]);
+
+  // Patch page title
   const titleEl = document.getElementById('pageTitle');
   if (titleEl) {
     titleEl.textContent =

@@ -1564,15 +1564,17 @@ def run_daily_scan(force_fresh: bool = False):
             cong_futures        = {pool.submit(get_congressional_trades, t): t for t in _t1}
             gamma_futures       = {pool.submit(get_gamma_squeeze_data,   t): t for t in _t1}
 
-        # Options chain — decommissioned in EODHD migration; gated for safety
+        # Options chain — Schwab is the canonical provider (post-2026-04-25
+        # Polygon decommissioning). Variable renamed 2026-05-15 from the
+        # legacy `poly_opts_futures` to clarify provider in code reads.
         if skip_options:
-            poly_opts_futures = {}
+            schwab_opts_futures = {}
         else:
             from datetime import date as _date, timedelta as _td
             _today = _date.today()
             _days_ahead = (4 - _today.weekday()) % 7 or 7
             _nearest_expiry = (_today + _td(days=_days_ahead)).isoformat()
-            poly_opts_futures   = {pool.submit(get_schwab_options, t, _nearest_expiry): t for t in tickers_to_analyze}
+            schwab_opts_futures = {pool.submit(get_schwab_options, t, _nearest_expiry): t for t in tickers_to_analyze}
 
         for fut in as_completed(earn_futures):
             t = earn_futures[fut]
@@ -1687,8 +1689,8 @@ def run_daily_scan(force_fresh: bool = False):
             _n_news += 1
             _heartbeat("news_articles", _n_news)
 
-        for fut in as_completed(poly_opts_futures):
-            t = poly_opts_futures[fut]
+        for fut in as_completed(schwab_opts_futures):
+            t = schwab_opts_futures[fut]
             try:    options_chain_data[t] = fut.result()
             except: options_chain_data[t] = {}
 
@@ -2001,40 +2003,47 @@ def run_daily_scan(force_fresh: bool = False):
     tv_ratings = get_tv_ratings_batch(tickers_to_analyze, exchange_map)
     log.info(f"  TV ratings: {len(tv_ratings)} tickers")
 
-    # Step 4h: Fetch 4H bars via EODHD intraday 1h, resampled to 4H
+    # Step 4h: Fetch 1H bars via EODHD intraday, also resample to 4H.
+    # 2026-05-17 · Now keeps BOTH the raw 1H and the 4H resample so the SMC
+    # chart can show real intraday bars on 1H + 4H tabs.
     _4h_data: dict = {}
+    _1h_data: dict = {}
     try:
         import eodhd_client as _eod_4h
-        _4h_tickers = list(qualified.keys())[:100]  # cap to keep request volume reasonable
-        log.info(f"  Fetching 4H bars (EODHD intraday) for {len(_4h_tickers)} qualified tickers...")
+        _intraday_tickers = list(qualified.keys())[:100]  # cap to keep request volume reasonable
+        log.info(f"  Fetching 1H + 4H bars (EODHD intraday) for {len(_intraday_tickers)} qualified tickers...")
 
-        def _fetch_4h(t):
+        def _fetch_intraday(t):
             try:
                 rows = _eod_4h.intraday(t, interval="1h")
                 if not rows:
-                    return t, None
+                    return t, None, None
                 df = pd.DataFrame(rows)
                 ts_col = "datetime" if "datetime" in df.columns else "timestamp"
                 if ts_col not in df.columns:
-                    return t, None
+                    return t, None, None
                 df[ts_col] = pd.to_datetime(df[ts_col])
                 df = df.set_index(ts_col).sort_index()
                 df = df.rename(columns={"open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"})
                 df = df[[c for c in ["Open","High","Low","Close","Volume"] if c in df.columns]]
+                df_1h = df if not df.empty else None
                 df_4h = df.resample("4h").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
-                return t, (df_4h if not df_4h.empty else None)
+                df_4h = df_4h if not df_4h.empty else None
+                return t, df_1h, df_4h
             except Exception:
-                return t, None
+                return t, None, None
 
         with ThreadPoolExecutor(max_workers=4) as _4h_pool:
-            _4h_futs = {_4h_pool.submit(_fetch_4h, t): t for t in _4h_tickers}
+            _4h_futs = {_4h_pool.submit(_fetch_intraday, t): t for t in _intraday_tickers}
             for fut in as_completed(_4h_futs):
-                t, df = fut.result()
-                if df is not None:
-                    _4h_data[t] = df
-        log.info(f"  4H data: {len(_4h_data)}/{len(_4h_tickers)} tickers (true intraday-derived)")
+                t, d1, d4 = fut.result()
+                if d1 is not None:
+                    _1h_data[t] = d1
+                if d4 is not None:
+                    _4h_data[t] = d4
+        log.info(f"  Intraday: 1H={len(_1h_data)} · 4H={len(_4h_data)} / {len(_intraday_tickers)} tickers")
     except Exception as _4h_err:
-        log.warning(f"  4H fetch failed: {_4h_err}")
+        log.warning(f"  Intraday fetch failed: {_4h_err}")
 
     # Step 5: Analyze all qualified tickers (parallel — 8 workers)
     log.info("Step 5: Running full analysis (parallel)...")
@@ -2078,6 +2087,7 @@ def run_daily_scan(force_fresh: bool = False):
             news_articles=news_articles_data.get(ticker),
             options_chain=options_chain_data.get(ticker),
             df_4h=_4h_data.get(ticker),
+            df_1h=_1h_data.get(ticker),
         )
         result["zacks_rank1"]    = ticker in zacks_r1_set
         result["zacks_vgm"]      = zacks_r1_scores.get(ticker, {})

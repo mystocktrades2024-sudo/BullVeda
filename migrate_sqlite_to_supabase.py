@@ -357,9 +357,11 @@ TABLES = [
 
 def _migrate_one(sb, table: str, payloads: list[dict], on_conflict: str | None,
                  dry_run: bool) -> dict:
-    out = {"table": table, "n_source": len(payloads), "n_pushed": 0, "n_failed": 0, "errors": []}
+    out = {"table": table, "n_source": len(payloads), "n_pushed": 0, "n_failed": 0,
+           "errors": [], "duration_ms": 0}
     if not payloads or dry_run:
         return out
+    t0 = time.time()
     for batch_start in range(0, len(payloads), BATCH_SIZE):
         batch = payloads[batch_start:batch_start + BATCH_SIZE]
         try:
@@ -373,7 +375,57 @@ def _migrate_one(sb, table: str, payloads: list[dict], on_conflict: str | None,
             err = f"batch {batch_start}-{batch_start+len(batch)}: {type(e).__name__}: {str(e)[:300]}"
             out["errors"].append(err)
             break
+    out["duration_ms"] = int((time.time() - t0) * 1000)
     return out
+
+
+def _write_sync_state(sb, results: list[dict], total_elapsed: float, mode: str) -> None:
+    """Write per-table sync state to both data/supabase_sync_state.json AND
+    Supabase's supabase_sync_state table. Drives the kairos.html Supabase tab.
+    """
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    state = {
+        "_last_full_sync": now_iso,
+        "_mode": mode,
+        "_total_elapsed_s": round(total_elapsed, 2),
+        "_total_source": sum(r["n_source"] for r in results),
+        "_total_pushed": sum(r["n_pushed"] for r in results),
+        "_total_failed": sum(r["n_failed"] for r in results),
+        "tables": {},
+    }
+    ledger_rows = []
+    for r in results:
+        ok = (r["n_failed"] == 0)
+        error_msg = (r["errors"][0] if r["errors"] else None)
+        state["tables"][r["table"]] = {
+            "last_sync_at": now_iso,
+            "source_rows": r["n_source"],
+            "pushed": r["n_pushed"],
+            "failed": r["n_failed"],
+            "duration_ms": r.get("duration_ms", 0),
+            "ok": ok,
+            "error": error_msg,
+        }
+        ledger_rows.append({
+            "table_name": r["table"],
+            "last_sync_at": now_iso,
+            "source_rows": r["n_source"],
+            "pushed": r["n_pushed"],
+            "failed": r["n_failed"],
+            "error_msg": error_msg,
+            "duration_ms": r.get("duration_ms", 0),
+        })
+
+    out_path = DATA_DIR / "supabase_sync_state.json"
+    out_path.write_text(json.dumps(state, indent=2))
+
+    # Best-effort push to Supabase ledger (don't fail the migration over this)
+    if mode == "APPLY" and sb is not None:
+        try:
+            sb.table("supabase_sync_state").upsert(ledger_rows, on_conflict="table_name").execute()
+        except Exception:
+            pass
 
 
 def main() -> int:
@@ -425,6 +477,10 @@ def main() -> int:
         print(f"Total pushed:      {total_pushed}")
         print(f"Total failed:      {total_failed}")
     print(f"Elapsed: {elapsed:.1f}s")
+
+    # Always write sync-state ledger (even on dry-run, so the dashboard tab
+    # can show the "would have pushed" preview).
+    _write_sync_state(sb, results, elapsed, "APPLY" if args.apply else "DRY_RUN")
 
     if not args.apply:
         print("\nDry-run only. Re-run with --apply to actually migrate.")

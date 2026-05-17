@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Detail Real-Estate Recovery Prototype · DXCM</title>
+<style>
+  :root {
+    --bg: #0a0d0c; --bg-1: #11151a; --bg-2: #161a1e; --bg-3: #1c2125;
+    --line: #262b2d; --line-2: #353a3c;
+    --ink: #ecefe9; --ink-1: #d4d8d1; --ink-2: #9a9e98; --ink-3: #686c68; --ink-4: #444947;
+    --gn: #4ade80; --gn-dim: #166534; --gn-bg: rgba(74,222,128,0.10);
+    --rd: #f87171; --rd-dim: #991b1b; --rd-bg: rgba(248,113,113,0.10);
+    --amb: #fbbf24; --amb-dim: #92400e; --amb-bg: rgba(251,191,36,0.10);
+    --copper: #d97757;
+    --purple: #b794f4;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --sidebar-w: 240px;
+    --sidebar-collapsed-w: 56px;
+    --top-full-h: 250px;
+    --top-collapsed-h: 50px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     CONTROL BAR — only in prototype to demo the toggles
+     ════════════════════════════════════════════════════════════════════ */
+  .demo-bar {
+    position: fixed; top: 8px; right: 8px; z-index: 1000;
+    background: var(--bg-2); border: 1px solid var(--copper); border-radius: 4px;
+    padding: 8px 12px; font: 700 11px var(--mono); color: var(--ink-2);
+    display: flex; gap: 12px; align-items: center;
+  }
+  .demo-bar b { color: var(--copper); }
+  .demo-bar button {
+    background: var(--bg-3); border: 1px solid var(--line-2); color: var(--ink);
+    font: 700 10.5px var(--mono); padding: 4px 10px; border-radius: 3px; cursor: pointer;
+    letter-spacing: 0.06em;
+  }
+  .demo-bar button:hover { border-color: var(--copper); color: var(--copper); }
+  .demo-bar button.on { background: var(--copper); color: #0a0d0c; border-color: var(--copper); }
+
+  /* ════════════════════════════════════════════════════════════════════
+     MAIN LAYOUT — sidebar + main column
+     ════════════════════════════════════════════════════════════════════ */
+  .app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; height: 100vh; transition: grid-template-columns .25s ease; }
+  body.sb-collapsed .app { grid-template-columns: var(--sidebar-collapsed-w) 1fr; }
+  body.fullscreen .app { grid-template-columns: 0 1fr; }
+
+  /* SIDEBAR */
+  .sb {
+    background: var(--bg-1); border-right: 1px solid var(--line);
+    overflow-y: auto; overflow-x: hidden;
+    font-family: var(--mono); font-size: 11.5px;
+  }
+  body.fullscreen .sb { display: none; }
+  .sb-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border-bottom: 1px solid var(--line);
+    font: 700 10px var(--mono); color: var(--copper); letter-spacing: 0.14em;
+  }
+  .sb-head-tk { color: var(--copper); }
+  .sb-toggle {
+    background: none; border: 1px solid var(--line-2); color: var(--ink-3);
+    font: 700 11px var(--mono); width: 24px; height: 24px; border-radius: 3px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .sb-toggle:hover { color: var(--copper); border-color: var(--copper); }
+  body.sb-collapsed .sb-head-tk { display: none; }
+
+  .sb-link {
+    display: grid; grid-template-columns: 28px 1fr 24px;
+    align-items: center; gap: 8px;
+    padding: 9px 14px; cursor: pointer;
+    color: var(--ink-2); border-left: 2px solid transparent;
+    transition: background .15s ease;
+  }
+  .sb-link:hover { background: var(--bg-2); color: var(--ink); }
+  .sb-link.on { color: var(--ink); background: var(--bg-2); border-left-color: var(--copper); }
+  .sb-link .ico { font-size: 14px; text-align: center; }
+  .sb-link .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sb-link .ct {
+    font: 700 9.5px var(--mono); color: var(--ink-3);
+    background: var(--bg-3); border-radius: 2px; padding: 1px 6px; text-align: center; min-width: 22px;
+  }
+  .sb-link.on .ct { color: var(--copper); background: rgba(217,119,87,0.12); }
+
+  /* Collapsed sidebar — icons only, hide label + count */
+  body.sb-collapsed .sb-link { grid-template-columns: 1fr; padding: 11px 0; justify-items: center; }
+  body.sb-collapsed .sb-link .lbl,
+  body.sb-collapsed .sb-link .ct { display: none; }
+  body.sb-collapsed .sb-link { position: relative; }
+  body.sb-collapsed .sb-link:hover::after {
+    content: attr(data-label);
+    position: absolute; left: 100%; top: 50%; transform: translateY(-50%);
+    background: var(--bg-3); color: var(--ink); border: 1px solid var(--line-2);
+    padding: 4px 10px; border-radius: 3px; font: 700 10px var(--mono); letter-spacing: 0.10em;
+    white-space: nowrap; margin-left: 4px; z-index: 100;
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     MAIN COLUMN — top bar + content
+     ════════════════════════════════════════════════════════════════════ */
+  .main { overflow-y: auto; position: relative; }
+
+  /* TOP BAR — 3 lines, sticky-collapse on scroll */
+  .top-bar {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--bg-1); border-bottom: 1px solid var(--line);
+    transition: max-height .25s ease, padding .25s ease;
+    max-height: var(--top-full-h);
+    overflow: hidden;
+  }
+  body.fullscreen .top-bar { display: none; }
+  /* When user has scrolled (set by JS) OR enabled `bar-collapsed` toggle */
+  body.bar-collapsed .top-bar { max-height: var(--top-collapsed-h); }
+  body.bar-collapsed .top-bar .top-line2,
+  body.bar-collapsed .top-bar .top-line3 { display: none; }
+
+  .top-line {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 18px; font-family: var(--mono); font-size: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .top-line:last-child { border-bottom: none; }
+  .top-line1 .tk { font-size: 18px; font-weight: 800; color: var(--ink); letter-spacing: 0.04em; }
+  .top-line1 .sector { font-size: 10px; color: var(--ink-3); font-weight: 600; }
+  .top-line1 .px { font-size: 18px; font-weight: 800; color: var(--ink); }
+  .top-line1 .chg { font: 700 12px var(--mono); padding: 3px 8px; border-radius: 2px; }
+  .top-line1 .chg.up { color: var(--gn); background: var(--gn-bg); }
+  .top-line1 .verdict { font: 800 13px var(--mono); padding: 4px 11px; border-radius: 2px; letter-spacing: 0.10em; }
+  .top-line1 .verdict.am { color: var(--amb); background: var(--amb-bg); border: 1px solid var(--amb-dim); }
+  .top-line1 .ghost { font: 700 11px var(--mono); color: var(--ink-3); letter-spacing: 0.10em; padding: 4px 10px; border-radius: 2px; border: 1px solid var(--line); }
+  .top-line1 .bap { color: var(--copper); font: 800 11.5px var(--mono); letter-spacing: 0.10em; }
+  .top-line1 .plan { font: 700 11.5px var(--mono); color: var(--ink-2); letter-spacing: 0.08em; }
+  .top-line1 .plan b { color: var(--ink); }
+  .top-line1 .plan .stop { color: var(--rd); font-weight: 800; }
+  .top-line1 .plan .t1 { color: var(--gn); font-weight: 800; }
+  .top-line1 .plan .t2 { color: #5ac2ec; font-weight: 800; }
+  .top-line1 .rr { margin-left: auto; font: 700 11px var(--mono); color: var(--ink-2); letter-spacing: 0.08em; }
+  .top-line1 .rr b { color: var(--gn); }
+  .top-line1 .mode-pills { display: flex; gap: 4px; }
+  .top-line1 .mode {
+    font: 800 10.5px var(--mono); letter-spacing: 0.10em;
+    padding: 5px 12px; border-radius: 2px; cursor: pointer; user-select: none;
+    background: var(--bg-2); color: var(--ink-3); border: 1px solid var(--line);
+  }
+  .top-line1 .mode.on { background: rgba(183,148,244,0.15); color: var(--purple); border-color: var(--purple); }
+
+  .top-line2 {
+    font-size: 11px; color: var(--ink-3); flex-wrap: wrap;
+  }
+  .top-line2 .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 9px; border-radius: 3px;
+    background: var(--bg-2); border: 1px solid var(--line);
+    color: var(--ink-2); font: 700 10px var(--mono); letter-spacing: 0.08em;
+  }
+  .top-line2 .pill.rd { background: var(--rd-bg); color: var(--rd); border-color: var(--rd-dim); }
+  .top-line2 .pill.am { background: var(--amb-bg); color: var(--amb); border-color: var(--amb-dim); }
+  .top-line2 .pill.gn { background: var(--gn-bg); color: var(--gn); border-color: var(--gn-dim); }
+  .top-line2 .meta-right { margin-left: auto; font: 600 10.5px var(--mono); color: var(--ink-3); letter-spacing: 0.06em; }
+  .top-line2 .meta-right b { color: var(--ink-1); }
+
+  .top-line3 { padding: 12px 18px 14px; }
+  .top-line3 svg { width: 100%; height: 80px; display: block; }
+
+  /* PRE-MORTEM BANNER */
+  .pre-mortem {
+    background: var(--rd-bg); border: 1px solid var(--rd-dim); border-left: 4px solid var(--rd);
+    margin: 10px 12px; padding: 10px 16px; border-radius: 3px;
+    font-family: var(--mono);
+    transition: max-height .3s ease, padding .3s ease, margin .3s ease;
+    max-height: 200px;
+    overflow: hidden;
+  }
+  body.fullscreen .pre-mortem { display: none; }
+  body.pm-collapsed .pre-mortem {
+    max-height: 32px; padding: 6px 14px;
+  }
+  .pre-mortem-h {
+    display: flex; align-items: center; gap: 12px;
+    font: 800 10.5px var(--mono); color: var(--rd); letter-spacing: 0.14em;
+  }
+  .pre-mortem-h .auto { color: var(--ink-3); font-weight: 600; letter-spacing: 0.10em; }
+  .pre-mortem-h .toggle {
+    margin-left: auto; cursor: pointer; color: var(--ink-3);
+    padding: 2px 8px; border: 1px solid var(--line-2); border-radius: 2px;
+    font: 700 9.5px var(--mono); letter-spacing: 0.10em;
+  }
+  .pre-mortem-h .toggle:hover { color: var(--copper); border-color: var(--copper); }
+  .pre-mortem-body {
+    margin-top: 8px; font: 600 12px var(--mono); color: var(--ink-1); line-height: 1.6;
+  }
+  .pre-mortem-body span { color: var(--rd); font-weight: 700; }
+  body.pm-collapsed .pre-mortem-body { display: none; }
+  body.pm-collapsed .pre-mortem-h .summary { color: var(--ink-2); font-weight: 600; letter-spacing: 0.04em; text-transform: none; font-size: 11px; }
+  .pre-mortem-h .summary { display: none; }
+  body.pm-collapsed .pre-mortem-h .summary { display: inline; }
+  body.pm-collapsed .pre-mortem-h .toggle::after { content: '▾'; margin-left: 6px; }
+
+  /* SUB-TAB CONTENT — this is what we want to maximize */
+  .content {
+    padding: 14px 16px 60px;
+  }
+  .content h2 {
+    font: 800 18px var(--mono); color: var(--ink); letter-spacing: 0.02em;
+    margin: 0 0 10px;
+  }
+  .content .placeholder {
+    background: var(--bg-1); border: 1px solid var(--line); border-radius: 4px;
+    padding: 24px; text-align: center; color: var(--ink-3);
+    font: 600 13px var(--mono); letter-spacing: 0.10em;
+    margin-bottom: 16px;
+  }
+  .content .ph-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
+  .content .ph-card {
+    background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
+    padding: 14px; height: 120px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-3); font: 700 11px var(--mono); letter-spacing: 0.10em;
+  }
+  .content .ph-card.tall { height: 320px; }
+  .content .ph-card.wide { grid-column: span 2; }
+  .content .badge {
+    display: inline-block; padding: 3px 9px; font: 800 10px var(--mono); letter-spacing: 0.14em;
+    background: var(--gn-bg); color: var(--gn); border: 1px solid var(--gn-dim); border-radius: 2px;
+    margin-left: 8px;
+  }
+
+  /* SAVINGS INDICATOR — shows in real time how much space was recovered */
+  .savings {
+    position: fixed; bottom: 16px; right: 16px; z-index: 100;
+    background: var(--bg-2); border: 1px solid var(--gn-dim); border-left: 4px solid var(--gn);
+    border-radius: 3px; padding: 10px 14px;
+    font: 700 11px var(--mono); color: var(--ink); letter-spacing: 0.06em;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    pointer-events: none;
+  }
+  .savings .k { color: var(--gn); font-weight: 800; font-size: 14px; }
+  .savings .sub { color: var(--ink-3); font-weight: 500; font-size: 10px; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<!-- Demo control bar — only in prototype -->
+<div class="demo-bar">
+  <span><b>PROTO</b> · DXCM real-estate recovery</span>
+  <button id="toggleBar">Top bar: <b id="barState">FULL</b></button>
+  <button id="togglePM">Pre-mortem: <b id="pmState">FULL</b></button>
+  <button id="toggleSB">Sidebar: <b id="sbState">FULL</b></button>
+  <button id="toggleFS">Fullscreen [F]: <b id="fsState">OFF</b></button>
+  <button id="toggleAll">All recovery: <b id="allState">OFF</b></button>
+</div>
+
+<div class="app">
+  <!-- ════════════════════════════════════════════════════════════════════
+       SIDEBAR
+       ════════════════════════════════════════════════════════════════════ -->
+  <aside class="sb">
+    <div class="sb-head">
+      <span class="sb-head-tk">▣ DXCM DETAIL</span>
+      <button class="sb-toggle" id="sbToggleBtn" title="Collapse sidebar">⟨</button>
+    </div>
+    <div class="sb-link on" data-label="Overview"><span class="ico">⓪</span><span class="lbl">Overview</span><span class="ct">1</span></div>
+    <div class="sb-link" data-label="Plan · Ticket"><span class="ico">⌖</span><span class="lbl">Plan · Ticket</span><span class="ct">2</span></div>
+    <div class="sb-link" data-label="Technicals"><span class="ico">📈</span><span class="lbl">Technicals</span><span class="ct">3</span></div>
+    <div class="sb-link" data-label="Investment · Value"><span class="ico">💎</span><span class="lbl">Investment · Value</span><span class="ct">V</span></div>
+    <div class="sb-link" data-label="Risk"><span class="ico">⚠</span><span class="lbl">Risk</span><span class="ct">R</span></div>
+    <div class="sb-link" data-label="Earnings"><span class="ico">📅</span><span class="lbl">Earnings</span><span class="ct">E</span></div>
+    <div class="sb-link" data-label="Options"><span class="ico">⚡</span><span class="lbl">Options</span><span class="ct">O</span></div>
+    <div class="sb-link" data-label="Portfolio"><span class="ico">▦</span><span class="lbl">Portfolio</span><span class="ct">P</span></div>
+    <div class="sb-link" data-label="Edge · History"><span class="ico">⌬</span><span class="lbl">Edge · History</span><span class="ct">8</span></div>
+    <div class="sb-link" data-label="News · Intel"><span class="ico">📰</span><span class="lbl">News · Intel</span><span class="ct">9</span></div>
+  </aside>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       MAIN — top bar + pre-mortem + content
+       ════════════════════════════════════════════════════════════════════ -->
+  <main class="main" id="main">
+    <!-- TOP BAR · 3 lines · collapses to line 1 on scroll -->
+    <div class="top-bar" id="topBar">
+      <!-- Line 1 — ticker · verdict · plan · mode (always visible) -->
+      <div class="top-line top-line1">
+        <span class="tk">DXCM</span>
+        <span class="sector">HEALTHCARE</span>
+        <span class="px">$61.50</span>
+        <span class="chg up">▲ 6.59%</span>
+        <span class="verdict am">WATCH</span>
+        <span class="ghost">AVOID</span>
+        <span class="bap">BAP 33</span>
+        <span class="plan">PLAN $61–62 → <span class="stop">$59</span> / <span class="t1">$73</span> / <span class="t2">$78</span></span>
+        <span class="rr">R:R <b>1:4.0 ✓</b></span>
+        <span class="mode-pills">
+          <span class="mode">⚡ SWING</span>
+          <span class="mode on">📅 POS</span>
+          <span class="mode">🏛 INV</span>
+        </span>
+      </div>
+
+      <!-- Line 2 — confluence pills + meta (hidden when collapsed) -->
+      <div class="top-line top-line2">
+        <span class="pill">Impulse Catalyst · fresh</span>
+        <span class="pill am">MIXED 0B · 2W · 3S</span>
+        <span class="pill rd">V ↓ 16</span>
+        <span class="pill rd">S ↓ RS 2</span>
+        <span class="pill">ER ▫</span>
+        <span class="pill am">M choppy</span>
+        <span class="pill rd">I ▫</span>
+        <span class="pill gn">R ✓</span>
+        <span class="pill gn">N ↑ +2.0</span>
+        <span class="pill">CFP ▫ book</span>
+        <span class="meta-right">ER <b>unknown</b> · Kelly <b>×—</b> · ATR <b>4.06%</b></span>
+      </div>
+
+      <!-- Line 3 — trade-ticket visualizer (hidden when collapsed) -->
+      <div class="top-line top-line3">
+        <svg viewBox="0 0 1200 80" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="tg" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#f87171" stop-opacity="0.20"/>
+              <stop offset="30%" stop-color="#fbbf24" stop-opacity="0.10"/>
+              <stop offset="100%" stop-color="#22c55e" stop-opacity="0.20"/>
+            </linearGradient>
+          </defs>
+          <rect x="0" y="20" width="1200" height="30" fill="url(#tg)"/>
+          <line x1="10" y1="35" x2="1190" y2="35" stroke="var(--ink-3)" stroke-width="0.6"/>
+
+          <!-- STOP -->
+          <text x="80" y="14" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" fill="var(--ink-3)" font-weight="700" letter-spacing="0.10em">STOP</text>
+          <line x1="80" y1="20" x2="80" y2="55" stroke="#f87171" stroke-width="2"/>
+          <circle cx="80" cy="35" r="6" fill="#f87171"/>
+          <text x="80" y="68" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" fill="#f87171" font-weight="800">$59 · -4.8%</text>
+          <rect x="62" y="72" width="36" height="14" fill="none" stroke="#f87171" stroke-width="0.8" rx="2"/>
+          <text x="80" y="83" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#f87171" font-weight="700">-1R</text>
+
+          <!-- ENTRY -->
+          <text x="290" y="14" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" fill="var(--gn)" font-weight="700" letter-spacing="0.10em">ENTRY ZONE</text>
+          <text x="290" y="26" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" fill="var(--gn)" font-weight="800">$61–62 · -1.2%~+0.8%</text>
+          <rect x="265" y="30" width="50" height="14" fill="rgba(74,222,128,0.20)" stroke="var(--gn)" stroke-width="1.5"/>
+          <circle cx="290" cy="37" r="6" fill="#ecefe9" stroke="#0a0d0c" stroke-width="1.5"/>
+          <text x="290" y="58" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="var(--gn)" font-weight="700">0R</text>
+          <text x="290" y="74" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="var(--ink-3)" letter-spacing="0.10em">NOW</text>
+          <text x="290" y="84" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" fill="var(--ink)" font-weight="800">$61.63</text>
+
+          <!-- T1 -->
+          <text x="800" y="14" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" fill="var(--ink-3)" font-weight="700" letter-spacing="0.10em">T1 · TRIM 50%</text>
+          <line x1="800" y1="20" x2="800" y2="55" stroke="#fbbf24" stroke-width="2"/>
+          <circle cx="800" cy="35" r="6" fill="#fbbf24"/>
+          <text x="800" y="68" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" fill="#fbbf24" font-weight="800">$73 · +18.0%</text>
+          <rect x="780" y="72" width="40" height="14" fill="none" stroke="#fbbf24" stroke-width="0.8" rx="2"/>
+          <text x="800" y="83" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#fbbf24" font-weight="700">+4.0R</text>
+
+          <!-- T2 -->
+          <text x="1100" y="14" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" fill="var(--ink-3)" font-weight="700" letter-spacing="0.10em">T2 · CLOSE</text>
+          <line x1="1100" y1="20" x2="1100" y2="55" stroke="#5ac2ec" stroke-width="2"/>
+          <circle cx="1100" cy="35" r="6" fill="#5ac2ec"/>
+          <text x="1100" y="68" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" fill="#5ac2ec" font-weight="800">$78 · +27.1%</text>
+          <rect x="1080" y="72" width="40" height="14" fill="none" stroke="#5ac2ec" stroke-width="0.8" rx="2"/>
+          <text x="1100" y="83" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#5ac2ec" font-weight="700">+6.0R</text>
+        </svg>
+      </div>
+    </div>
+
+    <!-- PRE-MORTEM BANNER · auto-collapses after 5s -->
+    <div class="pre-mortem" id="preMortem">
+      <div class="pre-mortem-h">
+        <span>⚠ PRE-MORTEM</span>
+        <span class="auto">AUTO</span>
+        <span class="summary">2 issues flagged · click expand</span>
+        <span class="toggle" id="pmToggle">collapse ▴</span>
+      </div>
+      <div class="pre-mortem-body">
+        <span>1.</span> Sentiment lens deeply bearish (13/100 · 2 bears total). technical structure broken — momentum exhaustion likely.
+        &nbsp;&nbsp;<span>2.</span> Regime CHOPPY · trend conviction weak. SPY break of 50EMA or breadth &lt;40% → risk-off rotation kills healthcare beta.
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         SUB-TAB CONTENT — this is what we want to MAXIMIZE
+         ════════════════════════════════════════════════════════════════════ -->
+    <div class="content" id="content">
+      <h2>Overview <span class="badge">SUB-TAB CONTENT AREA</span></h2>
+      <div class="placeholder">▼ This is where the §1-§10 sections render · this area grows when you collapse chrome ▼</div>
+
+      <div class="ph-grid">
+        <div class="ph-card wide">§1 · MULTI-TIMEFRAME ALIGNMENT</div>
+        <div class="ph-card">§2 · MECHANISM</div>
+      </div>
+      <div class="ph-grid">
+        <div class="ph-card tall wide">§3 · RISK PROFILE · STRESS SCENARIOS HEATMAP</div>
+        <div class="ph-card tall">§4 · 5-PILLAR RADAR</div>
+      </div>
+      <div class="ph-grid">
+        <div class="ph-card">§5 · WILSON CI</div>
+        <div class="ph-card">§6 · CROSS-TAB CONFLUENCE</div>
+        <div class="ph-card">§7 · CATALYST GANTT</div>
+      </div>
+      <div class="ph-grid">
+        <div class="ph-card wide">§8 · 14-GATE PIPELINE</div>
+        <div class="ph-card">§9 · FORWARD DENSITY</div>
+      </div>
+      <div class="placeholder">▲ Scroll back up · the top bar will stay collapsed showing only Line 1 ▲</div>
+    </div>
+  </main>
+</div>
+
+<!-- LIVE SAVINGS INDICATOR -->
+<div class="savings" id="savings">
+  <div>Recovered: <span class="k" id="savedVal">0px</span></div>
+  <div class="sub" id="savedSub">click recovery options above</div>
+</div>
+
+<script>
+  const body = document.body;
+  const main = document.getElementById('main');
+  const topBar = document.getElementById('topBar');
+  const preMortem = document.getElementById('preMortem');
+  const sb = document.querySelector('.sb');
+
+  // State buttons
+  const btnBar = document.getElementById('toggleBar');
+  const btnPM  = document.getElementById('togglePM');
+  const btnSB  = document.getElementById('toggleSB');
+  const btnFS  = document.getElementById('toggleFS');
+  const btnAll = document.getElementById('toggleAll');
+  const sbBtn  = document.getElementById('sbToggleBtn');
+  const pmBtn  = document.getElementById('pmToggle');
+  const savedVal = document.getElementById('savedVal');
+  const savedSub = document.getElementById('savedSub');
+
+  function updateSavings() {
+    let vSaved = 0, hSaved = 0;
+    if (body.classList.contains('bar-collapsed') || body.classList.contains('fullscreen')) vSaved += 200;
+    if (body.classList.contains('pm-collapsed')  || body.classList.contains('fullscreen')) vSaved += 50;
+    if (body.classList.contains('sb-collapsed')  || body.classList.contains('fullscreen')) hSaved += 184;
+    if (body.classList.contains('fullscreen')) hSaved += 56; // collapsed sidebar still there in non-FS
+    const total = vSaved + hSaved;
+    savedVal.textContent = total + 'px';
+    if (total > 0) {
+      savedSub.textContent = vSaved + 'px vertical · ' + hSaved + 'px horizontal';
+    } else {
+      savedSub.textContent = 'click recovery options above';
+    }
+  }
+
+  function syncStates() {
+    document.getElementById('barState').textContent = body.classList.contains('bar-collapsed') ? 'COLLAPSED' : 'FULL';
+    document.getElementById('pmState').textContent  = body.classList.contains('pm-collapsed')  ? 'COLLAPSED' : 'FULL';
+    document.getElementById('sbState').textContent  = body.classList.contains('sb-collapsed')  ? 'ICONS' : 'FULL';
+    document.getElementById('fsState').textContent  = body.classList.contains('fullscreen')    ? 'ON' : 'OFF';
+    document.getElementById('allState').textContent = (body.classList.contains('bar-collapsed') && body.classList.contains('pm-collapsed') && body.classList.contains('sb-collapsed')) ? 'ON' : 'OFF';
+    [btnBar, btnPM, btnSB, btnFS, btnAll].forEach(b => {
+      const cls = b.id === 'toggleBar' ? 'bar-collapsed'
+                : b.id === 'togglePM'  ? 'pm-collapsed'
+                : b.id === 'toggleSB'  ? 'sb-collapsed'
+                : b.id === 'toggleFS'  ? 'fullscreen'
+                : null;
+      if (cls) b.classList.toggle('on', body.classList.contains(cls));
+    });
+    btnAll.classList.toggle('on', body.classList.contains('bar-collapsed') && body.classList.contains('pm-collapsed') && body.classList.contains('sb-collapsed'));
+    updateSavings();
+  }
+
+  btnBar.onclick = () => { body.classList.toggle('bar-collapsed'); syncStates(); };
+  btnPM.onclick  = () => { body.classList.toggle('pm-collapsed');  syncStates(); };
+  btnSB.onclick  = () => { body.classList.toggle('sb-collapsed');  syncStates(); };
+  btnFS.onclick  = () => { body.classList.toggle('fullscreen');    syncStates(); };
+  btnAll.onclick = () => {
+    const on = body.classList.contains('bar-collapsed') && body.classList.contains('pm-collapsed') && body.classList.contains('sb-collapsed');
+    body.classList.toggle('bar-collapsed', !on);
+    body.classList.toggle('pm-collapsed',  !on);
+    body.classList.toggle('sb-collapsed',  !on);
+    syncStates();
+  };
+  sbBtn.onclick = () => { body.classList.toggle('sb-collapsed'); sbBtn.textContent = body.classList.contains('sb-collapsed') ? '⟩' : '⟨'; syncStates(); };
+  pmBtn.onclick = () => { body.classList.toggle('pm-collapsed'); syncStates(); };
+
+  // OPTION 1: Auto-collapse top bar on scroll
+  let lastScroll = 0;
+  main.addEventListener('scroll', () => {
+    const y = main.scrollTop;
+    if (y > 80 && !body.classList.contains('bar-collapsed')) {
+      body.classList.add('bar-collapsed'); syncStates();
+    } else if (y < 20 && body.classList.contains('bar-collapsed')) {
+      body.classList.remove('bar-collapsed'); syncStates();
+    }
+    lastScroll = y;
+  });
+
+  // OPTION 2: Auto-collapse pre-mortem after 5s
+  setTimeout(() => {
+    if (!body.classList.contains('pm-collapsed')) {
+      body.classList.add('pm-collapsed'); syncStates();
+    }
+  }, 5000);
+
+  // OPTION 5: Fullscreen toggle with F key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'f' || e.key === 'F') {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      body.classList.toggle('fullscreen'); syncStates();
+    }
+  });
+
+  syncStates();
+</script>
+
+</body>
+</html>

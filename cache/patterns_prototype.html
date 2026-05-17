@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Patterns Sub-tab · Prototype · NVDA</title>
+<style>
+:root {
+  --bg-0: #0c0f10;
+  --bg-1: #11161a;
+  --bg-2: #161c21;
+  --bg-3: #1c252b;
+  --bg-4: #232e34;
+  --ink-0: #f4f4f4;
+  --ink:   #e9eaeb;
+  --ink-1: #c9cdd0;
+  --ink-2: #8f969c;
+  --ink-3: #5a6268;
+  --line: #1f262b;
+  --line-2: #283038;
+  --rule: #1f262b;
+  --gn: #5be57c;
+  --rd: #ff6b5b;
+  --amb: #ffb95c;
+  --copper: #d49060;
+  --pass: #5be57c;
+  --fail: #ff6b5b;
+  --warn: #ffb95c;
+  --mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg-0);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.wrap { max-width: 1480px; margin: 0 auto; padding: 32px 28px; }
+
+/* ─── Top bar ─── */
+.topbar {
+  display: flex; align-items: center; gap: 22px;
+  padding: 18px 22px; margin-bottom: 24px;
+  background: linear-gradient(135deg, var(--bg-2) 0%, var(--bg-1) 60%);
+  border: 1px solid var(--line-2); border-radius: 6px;
+}
+.ticker { font-family: var(--mono); font-size: 28px; font-weight: 800; color: var(--ink-0); letter-spacing: 0.04em; }
+.price { font-family: var(--mono); font-size: 22px; font-weight: 700; color: var(--ink); }
+.chg { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--gn); }
+.tag { display: inline-flex; padding: 4px 10px; border-radius: 3px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; font-weight: 800; text-transform: uppercase; }
+.tag.copper { background: color-mix(in oklch, var(--copper) 18%, transparent); color: var(--copper); border: 1px solid color-mix(in oklch, var(--copper) 38%, transparent); }
+.tag.gn { background: color-mix(in oklch, var(--gn) 18%, transparent); color: var(--gn); border: 1px solid color-mix(in oklch, var(--gn) 38%, transparent); }
+
+/* ─── Sub-tab nav (visual reference only) ─── */
+.nav {
+  display: flex; gap: 4px; padding: 8px 4px;
+  margin-bottom: 22px; border-bottom: 1px solid var(--rule);
+  overflow-x: auto;
+}
+.nav-tab {
+  padding: 8px 16px; font-family: var(--mono); font-size: 11.5px;
+  letter-spacing: 0.10em; text-transform: uppercase; font-weight: 700;
+  color: var(--ink-3); border-bottom: 2px solid transparent;
+  cursor: pointer; transition: 120ms;
+}
+.nav-tab.on { color: var(--copper); border-bottom-color: var(--copper); }
+.nav-tab .kbd { margin-left: 8px; font-size: 9.5px; color: var(--ink-3); }
+
+/* ─── Hero ─── */
+.hero {
+  display: flex; gap: 24px; align-items: center;
+  padding: 22px 26px; margin-bottom: 20px;
+  background: linear-gradient(135deg, color-mix(in oklch, var(--gn) 5%, var(--bg-2)) 0%, var(--bg-2) 60%);
+  border: 1px solid var(--line-2); border-left: 3px solid var(--gn);
+  border-radius: 4px;
+}
+.hero-verdict { min-width: 220px; }
+.hero-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; margin-bottom: 6px; }
+.hero-call { font-size: 38px; font-weight: 800; color: var(--gn); letter-spacing: -0.01em; line-height: 1.05; }
+.hero-tally { margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--ink-2); letter-spacing: 0.08em; }
+.hero-body { flex: 1; }
+.conv-row { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+.conv-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; }
+.conv-val { font-size: 18px; font-weight: 800; color: var(--gn); letter-spacing: 0.08em; }
+.conv-meta { font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
+.hero-trigger { font-size: 13px; color: var(--ink-1); line-height: 1.65; }
+
+/* ─── Method vote row (top of tab) ─── */
+.votes {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px;
+  margin-bottom: 22px;
+}
+.vote {
+  padding: 12px 14px; border-radius: 4px;
+  border: 1px solid var(--rule);
+  background: var(--bg-1);
+}
+.vote.gn  { border-color: color-mix(in oklch, var(--gn) 30%, var(--rule)); background: color-mix(in oklch, var(--gn) 4%, var(--bg-1)); }
+.vote.am  { border-color: color-mix(in oklch, var(--amb) 30%, var(--rule)); background: color-mix(in oklch, var(--amb) 4%, var(--bg-1)); }
+.vote.rd  { border-color: color-mix(in oklch, var(--rd) 30%, var(--rule)); background: color-mix(in oklch, var(--rd) 4%, var(--bg-1)); }
+.vote-head { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--ink-3); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+.vote-call { font-size: 17px; font-weight: 800; margin-bottom: 4px; letter-spacing: 0.02em; }
+.vote-call.gn { color: var(--gn); }
+.vote-call.am { color: var(--amb); }
+.vote-call.rd { color: var(--rd); }
+.vote-h { font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.06em; margin-bottom: 6px; }
+.vote-reason { font-size: 11.5px; color: var(--ink-2); line-height: 1.5; }
+
+/* ─── Section wrapper ─── */
+.sec {
+  margin-bottom: 20px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.sec-h {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 14px 18px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line-2);
+}
+.sec-h-l { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink); font-weight: 800; }
+.sec-h-r { font-family: var(--mono); font-size: 11px; color: var(--ink-2); letter-spacing: 0.06em; }
+.sec-body { padding: 16px 18px; }
+
+/* ─── Grid + tiles ─── */
+.grid-2 { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.tile {
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg-1);
+}
+.tile-k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--ink-3); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+.tile-v { font-family: var(--mono); font-size: 22px; font-weight: 800; color: var(--ink); line-height: 1.1; }
+.tile-v.gn { color: var(--gn); }
+.tile-v.rd { color: var(--rd); }
+.tile-v.am { color: var(--amb); }
+.tile-v.cop { color: var(--copper); }
+.tile-sub { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); margin-top: 3px; }
+
+/* ─── Table ─── */
+.tbl { width: 100%; border-collapse: collapse; }
+.tbl th { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; color: var(--ink-3); text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--rule); }
+.tbl td { padding: 11px 8px; border-bottom: 1px solid var(--rule); font-size: 13px; color: var(--ink-1); vertical-align: top; }
+.tbl tr:last-child td { border-bottom: none; }
+.tbl .r { text-align: right; }
+.tbl b { color: var(--ink-0); font-weight: 700; }
+.tbl .gn { color: var(--gn); }
+.tbl .rd { color: var(--rd); }
+.tbl .am { color: var(--amb); }
+.tbl .cop { color: var(--copper); }
+.tbl .dim { color: var(--ink-2); }
+
+/* ─── Verdict pill (per section) ─── */
+.verdict {
+  margin-top: 14px;
+  padding: 11px 14px;
+  border-left: 3px solid;
+  border-radius: 0 4px 4px 0;
+  font-size: 12.5px; color: var(--ink-1); line-height: 1.6;
+}
+.verdict.gn { background: color-mix(in oklch, var(--gn) 7%, transparent); border-left-color: var(--gn); }
+.verdict.am { background: color-mix(in oklch, var(--amb) 7%, transparent); border-left-color: var(--amb); }
+.verdict.rd { background: color-mix(in oklch, var(--rd) 7%, transparent); border-left-color: var(--rd); }
+.verdict-call { display: inline-block; padding: 3px 12px; border-radius: 3px; font-family: var(--mono); font-size: 11.5px; font-weight: 800; letter-spacing: 0.14em; margin-right: 10px; }
+.verdict.gn .verdict-call { background: color-mix(in oklch, var(--gn) 22%, transparent); color: var(--gn); }
+.verdict.am .verdict-call { background: color-mix(in oklch, var(--amb) 22%, transparent); color: var(--amb); }
+.verdict.rd .verdict-call { background: color-mix(in oklch, var(--rd) 22%, transparent); color: var(--rd); }
+.fals { display: block; margin-top: 6px; font-size: 11.5px; color: var(--ink-2); font-family: var(--mono); }
+.fals b { color: var(--ink-1); }
+
+/* ─── Wyckoff phase bar ─── */
+.wy-bar {
+  display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+  gap: 3px; padding: 4px 0;
+}
+.wy-cell {
+  padding: 14px 10px; text-align: center;
+  background: var(--bg-3); border-radius: 3px;
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  color: var(--ink-3); position: relative;
+  letter-spacing: 0.04em; line-height: 1.4;
+}
+.wy-cell.on {
+  background: color-mix(in oklch, var(--gn) 18%, var(--bg-3));
+  color: var(--gn);
+  border: 1px solid color-mix(in oklch, var(--gn) 50%, transparent);
+}
+.wy-cell.past {
+  background: color-mix(in oklch, var(--copper) 10%, var(--bg-3));
+  color: color-mix(in oklch, var(--copper) 70%, var(--ink-2));
+}
+.wy-cell-lbl { display: block; font-size: 9.5px; color: var(--ink-3); margin-top: 3px; letter-spacing: 0.10em; }
+.wy-cell.on .wy-cell-lbl { color: var(--gn); }
+
+/* ─── Caveat banner ─── */
+.caveat {
+  padding: 11px 14px; margin-bottom: 14px;
+  background: color-mix(in oklch, var(--amb) 6%, var(--bg-2));
+  border-left: 3px solid var(--amb);
+  border-radius: 0 4px 4px 0;
+  font-size: 12.5px; color: var(--ink-1); line-height: 1.55;
+}
+.caveat b { color: var(--amb); font-family: var(--mono); letter-spacing: 0.14em; font-size: 11px; }
+
+/* ─── SVG containers ─── */
+.viz { width: 100%; height: 260px; background: var(--bg-2); border-radius: 3px; border: 1px solid var(--rule); display: block; }
+.viz-mini { width: 100%; height: 120px; background: var(--bg-2); border-radius: 3px; border: 1px solid var(--rule); display: block; }
+.viz-cap { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); margin-top: 6px; text-align: center; letter-spacing: 0.06em; }
+
+/* ─── Pattern cards ─── */
+.pat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.pat-card {
+  padding: 14px;
+  background: var(--bg-2); border: 1px solid var(--rule); border-radius: 4px;
+}
+.pat-card-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.pat-name { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--ink-0); letter-spacing: 0.04em; }
+.pat-stats { display: flex; gap: 14px; font-family: var(--mono); font-size: 11px; margin-top: 8px; }
+.pat-stat-k { color: var(--ink-3); letter-spacing: 0.06em; text-transform: uppercase; font-size: 9.5px; }
+.pat-stat-v { color: var(--ink); font-weight: 700; }
+
+/* ─── Fib level table ─── */
+.fib-list { font-family: var(--mono); }
+.fib-row { display: grid; grid-template-columns: 70px 1fr 90px 80px; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 3px; }
+.fib-row:nth-child(even) { background: color-mix(in oklch, var(--bg-3) 35%, transparent); }
+.fib-ratio { font-size: 12px; color: var(--copper); font-weight: 700; letter-spacing: 0.06em; }
+.fib-bar { height: 4px; background: var(--bg-3); border-radius: 2px; position: relative; overflow: hidden; }
+.fib-bar > span { display: block; height: 100%; background: var(--copper); }
+.fib-px { font-size: 12.5px; color: var(--ink); font-weight: 700; text-align: right; }
+.fib-role { font-size: 11px; color: var(--ink-2); text-align: right; letter-spacing: 0.04em; }
+
+/* ─── Ichimoku ─── */
+.ichi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.ichi-tile { padding: 11px 12px; border: 1px solid var(--rule); border-radius: 4px; background: var(--bg-2); }
+.ichi-k { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em; color: var(--ink-3); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+.ichi-v { font-family: var(--mono); font-size: 14px; font-weight: 800; color: var(--ink); }
+.ichi-v.gn { color: var(--gn); }
+.ichi-v.rd { color: var(--rd); }
+.ichi-v.am { color: var(--amb); }
+.ichi-sub { font-size: 10.5px; color: var(--ink-2); margin-top: 3px; }
+
+/* ─── EW wave label SVG support ─── */
+.ew-banner {
+  padding: 12px 14px; margin-bottom: 12px;
+  background: color-mix(in oklch, var(--rd) 6%, var(--bg-2));
+  border-left: 3px solid var(--rd); border-radius: 0 4px 4px 0;
+  font-size: 12.5px; color: var(--ink-1); line-height: 1.55;
+}
+.ew-banner b { color: var(--rd); font-family: var(--mono); letter-spacing: 0.14em; font-size: 11px; }
+
+/* ─── Footer note ─── */
+.foot {
+  text-align: center; padding: 20px;
+  font-family: var(--mono); font-size: 10.5px;
+  color: var(--ink-3); letter-spacing: 0.10em;
+}
+
+/* ─── Selected nav tab pulse for Patterns ─── */
+.nav-tab.patterns-active {
+  color: var(--gn);
+  border-bottom-color: var(--gn);
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="ticker">NVDA</div>
+    <div class="price">$487.21</div>
+    <div class="chg">+$8.43 · +1.76%</div>
+    <div style="flex:1"></div>
+    <span class="tag copper">DETAIL VIEW</span>
+    <span class="tag gn">PATTERNS · KBD 0</span>
+  </div>
+
+  <!-- SUB-TAB NAV (visual mock) -->
+  <div class="nav">
+    <div class="nav-tab">Overview<span class="kbd">1</span></div>
+    <div class="nav-tab">Plan<span class="kbd">2</span></div>
+    <div class="nav-tab">Technicals<span class="kbd">3</span></div>
+    <div class="nav-tab">Fundamentals<span class="kbd">4</span></div>
+    <div class="nav-tab">Intel<span class="kbd">5</span></div>
+    <div class="nav-tab">Logic<span class="kbd">6</span></div>
+    <div class="nav-tab">History<span class="kbd">7</span></div>
+    <div class="nav-tab">Options<span class="kbd">8</span></div>
+    <div class="nav-tab">Models<span class="kbd">9</span></div>
+    <div class="nav-tab patterns-active">Patterns<span class="kbd">0</span></div>
+  </div>
+
+  <!-- HERO COMPOSITE -->
+  <div class="hero">
+    <div class="hero-verdict">
+      <div class="hero-label">Pattern Composite</div>
+      <div class="hero-call">BUY</div>
+      <div class="hero-tally">5B · 1W · 0S of 6 methods</div>
+    </div>
+    <div class="hero-body">
+      <div class="conv-row">
+        <span class="conv-label">Conviction</span>
+        <span class="conv-val">HIGH</span>
+        <span class="conv-meta">5/6 methods agree on direction; only Elliott Wave on WATCH (discretionary, lower weight)</span>
+      </div>
+      <div class="hero-trigger">
+        <b style="color:var(--gn)">Thesis active now.</b> Wyckoff Phase D markup confirmed · VCP breakout pivot $492 · Volume Profile POC support at $474 · 0.618 Fib retrace held at $478 · Ichimoku triple-bull alignment.
+        <b>Entry zone $487–$492</b> on VCP pivot break · <b>Stop $474</b> below POC + Kijun · <b>T1 $511</b> (measured-move + 1.272 Fib extension) · <b>T2 $533</b> (1.618 Fib + cup-handle target).
+      </div>
+    </div>
+  </div>
+
+  <!-- METHOD VOTES -->
+  <div class="votes">
+    <div class="vote gn">
+      <div class="vote-head">Wyckoff</div>
+      <div class="vote-call gn">BUY</div>
+      <div class="vote-h">supply / demand</div>
+      <div class="vote-reason">Phase D markup · sign-of-strength confirmed on volume expansion</div>
+    </div>
+    <div class="vote gn">
+      <div class="vote-head">Classical</div>
+      <div class="vote-call gn">BUY</div>
+      <div class="vote-h">VCP · Bulkowski</div>
+      <div class="vote-reason">Mature 7-week VCP · 65% historical breakout WR · pivot $492</div>
+    </div>
+    <div class="vote gn">
+      <div class="vote-head">Vol Profile</div>
+      <div class="vote-call gn">BUY</div>
+      <div class="vote-h">POC · VAH · VAL</div>
+      <div class="vote-reason">POC $474 supports · price above VAH on RVOL 1.6× · accept zone</div>
+    </div>
+    <div class="vote gn">
+      <div class="vote-head">Fibonacci</div>
+      <div class="vote-call gn">BUY</div>
+      <div class="vote-h">retrace + ext</div>
+      <div class="vote-reason">0.618 retrace held at $478 · 1.272 ext = $511 target</div>
+    </div>
+    <div class="vote gn">
+      <div class="vote-head">Ichimoku</div>
+      <div class="vote-call gn">BUY</div>
+      <div class="vote-h">cloud + TK</div>
+      <div class="vote-reason">Above cloud · TK cross bullish · Chikou clear · future cloud green</div>
+    </div>
+    <div class="vote am">
+      <div class="vote-head">Elliott Wave</div>
+      <div class="vote-call am">WATCH</div>
+      <div class="vote-h">discretionary</div>
+      <div class="vote-reason">Best-fit count places price in Wave 3 of 5 · invalidates &lt; $462</div>
+    </div>
+  </div>
+
+  <!-- ========== 1. WYCKOFF ========== -->
+  <div class="sec">
+    <div class="sec-h">
+      <span class="sec-h-l">1 · Wyckoff Phase · supply / demand mechanics</span>
+      <span class="sec-h-r">tape behavior · volume regime · cause-effect</span>
+    </div>
+    <div class="sec-body">
+
+      <!-- Phase bar -->
+      <div class="wy-bar">
+        <div class="wy-cell past">ACC<span class="wy-cell-lbl">Phase A · selling climax</span></div>
+        <div class="wy-cell past">ACC<span class="wy-cell-lbl">Phase B · cause building</span></div>
+        <div class="wy-cell past">ACC<span class="wy-cell-lbl">Phase C · spring / test</span></div>
+        <div class="wy-cell on">ACC<span class="wy-cell-lbl">Phase D · markup ✓</span></div>
+        <div class="wy-cell">ACC<span class="wy-cell-lbl">Phase E · run / exit</span></div>
+      </div>
+
+      <div class="grid-2" style="margin-top:18px">
+
+        <!-- Wyckoff price chart -->
+        <div>
+          <svg class="viz" viewBox="0 0 720 260" preserveAspectRatio="none" style="height:260px">
+            <defs>
+              <linearGradient id="wyGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#5be57c" stop-opacity="0.20"/>
+                <stop offset="100%" stop-color="#5be57c" stop-opacity="0.03"/>
+              </linearGradient>
+              <pattern id="wyVol" patternUnits="userSpaceOnUse" width="6" height="6">
+                <rect x="0" y="0" width="6" height="6" fill="#1f262b"/>
+              </pattern>
+            </defs>
+            <!-- Background gridlines -->
+            <line x1="0" y1="60" x2="720" y2="60" stroke="#1f262b" stroke-width="0.4"/>
+            <line x1="0" y1="120" x2="720" y2="120" stroke="#1f262b" stroke-width="0.4"/>
+            <line x1="0" y1="180" x2="720" y2="180" stroke="#1f262b" stroke-width="0.4"/>
+            <!-- Trading range box (accumulation Phase A-C) -->
+            <rect x="20" y="135" width="380" height="60" fill="#283038" fill-opacity="0.35" stroke="#283038" stroke-width="1" stroke-dasharray="3 3"/>
+            <text x="210" y="125" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#8f969c" letter-spacing="0.06em">TRADING RANGE · CAUSE-BUILDING</text>
+            <!-- Resistance + Support lines -->
+            <line x1="20" y1="135" x2="400" y2="135" stroke="#ff6b5b" stroke-width="1" stroke-dasharray="2 2" opacity="0.6"/>
+            <text x="20" y="131" font-family="JetBrains Mono" font-size="9" fill="#ff6b5b">RES</text>
+            <line x1="20" y1="195" x2="400" y2="195" stroke="#5be57c" stroke-width="1" stroke-dasharray="2 2" opacity="0.6"/>
+            <text x="20" y="208" font-family="JetBrains Mono" font-size="9" fill="#5be57c">SUP</text>
+            <!-- Selling climax (Phase A) marker -->
+            <circle cx="55" cy="190" r="4" fill="#ff6b5b"/>
+            <text x="55" y="222" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#ff6b5b" font-weight="700">SC</text>
+            <!-- Spring (Phase C) marker -->
+            <circle cx="290" cy="205" r="4" fill="#ffb95c"/>
+            <text x="290" y="225" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#ffb95c" font-weight="700">SPRING</text>
+            <!-- Sign of strength (SOS) breakout -->
+            <circle cx="400" cy="130" r="5" fill="#5be57c"/>
+            <text x="400" y="118" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#5be57c" font-weight="800">SOS</text>
+            <!-- Markup wave (current) -->
+            <path d="M 20 192 L 50 188 L 70 184 L 90 192 L 110 178 L 130 175 L 150 188 L 170 165 L 190 170 L 210 152 L 230 168 L 250 145 L 270 158 L 290 205 L 310 175 L 330 160 L 350 150 L 370 138 L 400 130 L 430 122 L 460 118 L 490 110 L 520 100 L 555 92 L 590 88 L 620 80 L 650 75 L 680 70 L 700 60" fill="none" stroke="#e9eaeb" stroke-width="1.4" stroke-linejoin="round"/>
+            <!-- Current price marker -->
+            <circle cx="700" cy="60" r="4.5" fill="#5be57c"/>
+            <text x="700" y="50" text-anchor="end" font-family="JetBrains Mono" font-size="11" fill="#5be57c" font-weight="800">$487 · NOW</text>
+            <!-- Volume bars at bottom -->
+            <g transform="translate(0, 240)">
+              ${[30,40,28,55,45,38,42,52,75,48,55,80,65,72,68,95,110,85,92,105,120,135,140].map((v,i) => `<rect x="${20 + i*30}" y="-${v*0.18}" width="20" height="${v*0.18}" fill="${i > 12 ? '#5be57c' : i > 8 ? '#ffb95c' : '#8f969c'}" opacity="${i > 12 ? 0.85 : 0.5}"/>`).join('')}
+            </g>
+            <!-- Phase D arrow indicator -->
+            <line x1="400" y1="232" x2="700" y2="232" stroke="#5be57c" stroke-width="1.6" marker-end="url(#wyArrowHead)"/>
+            <defs>
+              <marker id="wyArrowHead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L9,3 z" fill="#5be57c"/>
+              </marker>
+            </defs>
+            <text x="550" y="246" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#5be57c" font-weight="700" letter-spacing="0.14em">PHASE D MARKUP · CURRENT</text>
+          </svg>
+          <div class="viz-cap">Wyckoff schematic · daily bars · 90-day window · volume confirming markup</div>
+        </div>
+
+        <!-- KPIs -->
+        <div>
+          <div class="grid-2" style="gap:10px;margin-bottom:10px">
+            <div class="tile"><div class="tile-k">Phase</div><div class="tile-v gn">D · MARKUP</div><div class="tile-sub">accumulation complete</div></div>
+            <div class="tile"><div class="tile-k">Confidence</div><div class="tile-v">87%</div><div class="tile-sub">SOS + volume confirm</div></div>
+          </div>
+          <table class="tbl" style="font-size:12.5px">
+            <tr><td>Selling climax (SC)</td><td class="r"><b>$432</b> · day 4</td></tr>
+            <tr><td>Spring / shakeout</td><td class="r"><b>$453</b> · day 38</td></tr>
+            <tr><td>Sign of strength (SOS)</td><td class="r gn"><b>$471</b> · day 64</td></tr>
+            <tr><td>Last point of support (LPS)</td><td class="r gn"><b>$474</b> · day 78</td></tr>
+            <tr><td>Range high (resistance)</td><td class="r"><b>$471</b></td></tr>
+            <tr><td>Range low (support)</td><td class="r"><b>$432</b></td></tr>
+            <tr><td>Cause built (range)</td><td class="r"><b>$39</b> · 9.0%</td></tr>
+            <tr><td>Effect target (P&amp;F)</td><td class="r gn"><b>$510 – $533</b></td></tr>
+            <tr><td>Volume regime (markup)</td><td class="r gn"><b>1.6× avg</b> · expanding</td></tr>
+            <tr><td>Effort vs result</td><td class="r gn"><b>aligned</b></td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="verdict gn">
+        <span class="verdict-call">BUY</span>
+        Phase D markup confirmed by sign-of-strength breakout at $471 on expanding volume (1.6× avg). Cause-effect math: 9% accumulation range = $510–$533 P&amp;F target. Buy on any pullback to LPS $474; trim into the effect target zone.
+        <span class="fals"><b>Falsification:</b> daily close below $462 (below the LPS) on RVOL &gt; 1.2× — implies failed accumulation / re-entry into trading range.</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========== 2. CLASSICAL PATTERNS ========== -->
+  <div class="sec">
+    <div class="sec-h">
+      <span class="sec-h-l">2 · Classical Pattern Detector</span>
+      <span class="sec-h-r">Bulkowski statistics · measured-move targets · breakout pivots</span>
+    </div>
+    <div class="sec-body">
+
+      <div class="pat-grid">
+
+        <!-- VCP -->
+        <div class="pat-card">
+          <div class="pat-card-h">
+            <span class="pat-name">VOLATILITY CONTRACTION (VCP)</span>
+            <span class="verdict-call" style="background:color-mix(in oklch, var(--gn) 22%, transparent);color:var(--gn);font-size:10.5px">BUY · setup mature</span>
+          </div>
+          <svg class="viz-mini" viewBox="0 0 360 120">
+            <!-- Reference line -->
+            <line x1="20" y1="40" x2="340" y2="40" stroke="#ff6b5b" stroke-width="0.8" stroke-dasharray="3 2" opacity="0.5"/>
+            <text x="345" y="42" text-anchor="end" font-family="JetBrains Mono" font-size="8.5" fill="#ff6b5b">pivot $492</text>
+            <!-- Price path: descending contractions -->
+            <path d="M 20 50 L 50 30 L 65 60 L 90 38 L 110 55 L 135 42 L 152 52 L 175 45 L 192 50 L 215 46 L 230 49 L 250 47 L 268 48 L 285 47 L 305 46 L 325 42 L 340 38" fill="none" stroke="#e9eaeb" stroke-width="1.4"/>
+            <!-- Volume tightening -->
+            <g transform="translate(0,110)">
+              ${[50,40,55,38,42,30,32,28,25,22,20,18,16,14,12,10,8].map((v,i) => `<rect x="${20 + i*19}" y="-${v*0.4}" width="14" height="${v*0.4}" fill="#5be57c" opacity="0.45"/>`).join('')}
+            </g>
+            <!-- Now arrow -->
+            <circle cx="340" cy="38" r="3" fill="#5be57c"/>
+            <text x="340" y="28" text-anchor="end" font-family="JetBrains Mono" font-size="8.5" fill="#5be57c" font-weight="700">NOW</text>
+          </svg>
+          <div class="pat-stats">
+            <div><div class="pat-stat-k">Hist WR</div><div class="pat-stat-v gn">65%</div></div>
+            <div><div class="pat-stat-k">Bulkowski n</div><div class="pat-stat-v">n=4,562</div></div>
+            <div><div class="pat-stat-k">Pivot</div><div class="pat-stat-v">$492</div></div>
+            <div><div class="pat-stat-k">Target</div><div class="pat-stat-v gn">$528</div></div>
+            <div><div class="pat-stat-k">Stop</div><div class="pat-stat-v rd">$474</div></div>
+          </div>
+          <div class="verdict gn" style="margin-top:10px;padding:8px 11px;font-size:11.5px">
+            <span class="verdict-call" style="font-size:10px">BUY</span>
+            3 contractions · 7 weeks · vol dry-up confirms.
+            <span class="fals"><b>Inval:</b> close &lt; $474 (last pivot low).</span>
+          </div>
+        </div>
+
+        <!-- Cup-and-handle -->
+        <div class="pat-card">
+          <div class="pat-card-h">
+            <span class="pat-name">CUP &amp; HANDLE</span>
+            <span class="verdict-call" style="background:color-mix(in oklch, var(--gn) 22%, transparent);color:var(--gn);font-size:10.5px">BUY · handle complete</span>
+          </div>
+          <svg class="viz-mini" viewBox="0 0 360 120">
+            <line x1="20" y1="35" x2="340" y2="35" stroke="#ff6b5b" stroke-width="0.8" stroke-dasharray="3 2" opacity="0.5"/>
+            <text x="345" y="37" text-anchor="end" font-family="JetBrains Mono" font-size="8.5" fill="#ff6b5b">rim $492</text>
+            <!-- Cup shape -->
+            <path d="M 20 35 Q 50 80 100 90 Q 180 100 250 80 Q 280 65 295 45 L 310 50 L 320 55 L 330 48 L 340 42" fill="none" stroke="#e9eaeb" stroke-width="1.4"/>
+            <text x="170" y="115" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#8f969c">cup · 14 weeks</text>
+            <text x="320" y="35" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#8f969c">handle</text>
+            <circle cx="340" cy="42" r="3" fill="#5be57c"/>
+            <text x="340" y="32" text-anchor="end" font-family="JetBrains Mono" font-size="8.5" fill="#5be57c" font-weight="700">NOW</text>
+          </svg>
+          <div class="pat-stats">
+            <div><div class="pat-stat-k">Hist WR</div><div class="pat-stat-v gn">61%</div></div>
+            <div><div class="pat-stat-k">Bulkowski n</div><div class="pat-stat-v">n=2,851</div></div>
+            <div><div class="pat-stat-k">Rim</div><div class="pat-stat-v">$492</div></div>
+            <div><div class="pat-stat-k">M-move</div><div class="pat-stat-v gn">$533</div></div>
+            <div><div class="pat-stat-k">Stop</div><div class="pat-stat-v rd">$471</div></div>
+          </div>
+          <div class="verdict gn" style="margin-top:10px;padding:8px 11px;font-size:11.5px">
+            <span class="verdict-call" style="font-size:10px">BUY</span>
+            14w cup · 3w handle · vol surge expected on rim break.
+            <span class="fals"><b>Inval:</b> close &lt; $471 (cup mid).</span>
+          </div>
+        </div>
+
+        <!-- Bull flag -->
+        <div class="pat-card">
+          <div class="pat-card-h">
+            <span class="pat-name">BULL FLAG</span>
+            <span class="verdict-call" style="background:color-mix(in oklch, var(--gn) 22%, transparent);color:var(--gn);font-size:10.5px">BUY · breakout pending</span>
+          </div>
+          <svg class="viz-mini" viewBox="0 0 360 120">
+            <!-- Pole -->
+            <line x1="40" y1="90" x2="180" y2="35" stroke="#e9eaeb" stroke-width="1.6"/>
+            <!-- Flag (parallel down-sloping) -->
+            <path d="M 180 35 L 200 45 L 220 40 L 240 50 L 260 45 L 280 55 L 300 50 L 320 60 L 340 55" fill="none" stroke="#e9eaeb" stroke-width="1.4"/>
+            <line x1="180" y1="35" x2="340" y2="55" stroke="#ffb95c" stroke-width="0.7" stroke-dasharray="2 2"/>
+            <line x1="200" y1="45" x2="340" y2="65" stroke="#ffb95c" stroke-width="0.7" stroke-dasharray="2 2"/>
+            <text x="180" y="105" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#8f969c">pole · 3d · +12%</text>
+            <text x="260" y="78" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#8f969c">flag · 5d consolidation</text>
+            <circle cx="340" cy="55" r="3" fill="#ffb95c"/>
+            <text x="345" y="52" font-family="JetBrains Mono" font-size="8.5" fill="#ffb95c" font-weight="700">NOW</text>
+          </svg>
+          <div class="pat-stats">
+            <div><div class="pat-stat-k">Hist WR</div><div class="pat-stat-v gn">68%</div></div>
+            <div><div class="pat-stat-k">Bulkowski n</div><div class="pat-stat-v">n=8,143</div></div>
+            <div><div class="pat-stat-k">Trigger</div><div class="pat-stat-v">$489</div></div>
+            <div><div class="pat-stat-k">M-move</div><div class="pat-stat-v gn">$520</div></div>
+            <div><div class="pat-stat-k">Stop</div><div class="pat-stat-v rd">$478</div></div>
+          </div>
+          <div class="verdict gn" style="margin-top:10px;padding:8px 11px;font-size:11.5px">
+            <span class="verdict-call" style="font-size:10px">BUY</span>
+            12% pole · 5d down-channel · classical bull-flag continuation.
+            <span class="fals"><b>Inval:</b> close &lt; $478 (flag low).</span>
+          </div>
+        </div>
+
+        <!-- Ascending triangle -->
+        <div class="pat-card">
+          <div class="pat-card-h">
+            <span class="pat-name">ASCENDING TRIANGLE</span>
+            <span class="verdict-call" style="background:color-mix(in oklch, var(--gn) 22%, transparent);color:var(--gn);font-size:10.5px">BUY · apex tested 4×</span>
+          </div>
+          <svg class="viz-mini" viewBox="0 0 360 120">
+            <!-- Horizontal resistance -->
+            <line x1="20" y1="30" x2="340" y2="30" stroke="#ff6b5b" stroke-width="1" stroke-dasharray="3 2"/>
+            <!-- Rising support trendline -->
+            <line x1="20" y1="100" x2="340" y2="35" stroke="#5be57c" stroke-width="1" stroke-dasharray="3 2"/>
+            <!-- Price action: 4 touches of resistance -->
+            <path d="M 20 100 L 60 35 L 90 70 L 130 32 L 160 60 L 200 33 L 230 50 L 270 32 L 300 42 L 325 33 L 340 30" fill="none" stroke="#e9eaeb" stroke-width="1.4"/>
+            <!-- Touch markers -->
+            <circle cx="60" cy="35" r="2.5" fill="#ff6b5b"/>
+            <circle cx="130" cy="32" r="2.5" fill="#ff6b5b"/>
+            <circle cx="200" cy="33" r="2.5" fill="#ff6b5b"/>
+            <circle cx="270" cy="32" r="2.5" fill="#ff6b5b"/>
+            <text x="345" y="32" text-anchor="end" font-family="JetBrains Mono" font-size="8.5" fill="#ff6b5b">$492</text>
+          </svg>
+          <div class="pat-stats">
+            <div><div class="pat-stat-k">Hist WR</div><div class="pat-stat-v gn">63%</div></div>
+            <div><div class="pat-stat-k">Bulkowski n</div><div class="pat-stat-v">n=3,221</div></div>
+            <div><div class="pat-stat-k">Apex</div><div class="pat-stat-v">$492</div></div>
+            <div><div class="pat-stat-k">M-move</div><div class="pat-stat-v gn">$524</div></div>
+            <div><div class="pat-stat-k">Stop</div><div class="pat-stat-v rd">$476</div></div>
+          </div>
+          <div class="verdict gn" style="margin-top:10px;padding:8px 11px;font-size:11.5px">
+            <span class="verdict-call" style="font-size:10px">BUY</span>
+            4× resistance test · rising support · vol cluster on most recent test.
+            <span class="fals"><b>Inval:</b> rising-support trendline break (~$476).</span>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="verdict gn" style="margin-top:18px">
+        <span class="verdict-call">BUY</span>
+        4 confirmed bullish patterns at converging breakout pivot $489–$492. Bulkowski composite WR weighted by sample size = <b>64.1%</b> (n=18,777). Target range $520–$533 covers all measured-moves.
+        <span class="fals"><b>Falsification:</b> daily close &lt; $471 invalidates VCP, cup-handle, AND ascending triangle simultaneously — confirms failed setup, exit all longs.</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========== 3. VOLUME PROFILE ========== -->
+  <div class="sec">
+    <div class="sec-h">
+      <span class="sec-h-l">3 · Volume Profile · where the auctions live</span>
+      <span class="sec-h-r">POC · VAH · VAL · HVN · LVN · institutional auction theory</span>
+    </div>
+    <div class="sec-body">
+
+      <div class="grid-2">
+
+        <!-- Price + Volume Profile chart -->
+        <div>
+          <svg class="viz" viewBox="0 0 720 260" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="vpGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#5be57c" stop-opacity="0.10"/>
+                <stop offset="100%" stop-color="#5be57c" stop-opacity="0.01"/>
+              </linearGradient>
+            </defs>
+            <!-- Y-axis price ticks -->
+            <text x="6" y="25" font-family="JetBrains Mono" font-size="9" fill="#5a6268">$510</text>
+            <text x="6" y="80" font-family="JetBrains Mono" font-size="9" fill="#5a6268">$492 VAH</text>
+            <text x="6" y="125" font-family="JetBrains Mono" font-size="9.5" fill="#d49060" font-weight="700">$474 POC</text>
+            <text x="6" y="180" font-family="JetBrains Mono" font-size="9" fill="#5a6268">$455 VAL</text>
+            <text x="6" y="240" font-family="JetBrains Mono" font-size="9" fill="#5a6268">$430</text>
+            <!-- POC line -->
+            <line x1="55" y1="122" x2="550" y2="122" stroke="#d49060" stroke-width="1" stroke-dasharray="4 3" opacity="0.8"/>
+            <!-- Value area (VAH-VAL) shaded -->
+            <rect x="55" y="75" width="495" height="110" fill="#283038" fill-opacity="0.18"/>
+            <line x1="55" y1="75" x2="550" y2="75" stroke="#8f969c" stroke-width="0.6" stroke-dasharray="2 2" opacity="0.5"/>
+            <line x1="55" y1="185" x2="550" y2="185" stroke="#8f969c" stroke-width="0.6" stroke-dasharray="2 2" opacity="0.5"/>
+            <!-- Candles (mock) -->
+            ${(()=>{ const cs=[]; let y=180; for(let i=0;i<60;i++){ const dy=(Math.sin(i*0.4)+Math.random()*0.6-0.3)*8; y=Math.max(60,Math.min(220,y-dy*1.1)); const x=55+i*8; const up=Math.random()>0.42; const wickT=y-Math.random()*8; const wickB=y+Math.random()*8; cs.push(`<line x1="${x+3}" y1="${wickT}" x2="${x+3}" y2="${wickB}" stroke="${up?'#5be57c':'#ff6b5b'}" stroke-width="0.6"/><rect x="${x+1}" y="${y-3}" width="5" height="6" fill="${up?'#5be57c':'#ff6b5b'}" opacity="0.85"/>`);} return cs.join(''); })()}
+            <!-- Right-side Volume Profile (horizontal bars) -->
+            <g transform="translate(560, 0)">
+              <text x="80" y="14" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#8f969c" font-weight="700" letter-spacing="0.10em">VOLUME PROFILE</text>
+              ${(()=>{const bars=[];const heights=[12,18,25,42,68,95,140,150,135,115,80,52,32,20,14];const labels=['$510','$502','$494','$486','$478','$474','$470','$466','$462','$458','$454','$450','$444','$438','$432']; const colors=heights.map(h=>h>120?'#d49060':h>70?'#5be57c':h>30?'#8f969c':'#5a6268'); heights.forEach((h,i)=>{const y=24+i*14;const cls=h>120?'POC':h>90?'HVN':h<25?'LVN':''; bars.push(`<rect x="0" y="${y-5}" width="${h}" height="10" fill="${colors[i]}" opacity="${h>120?0.95:0.6}"/>`); if(cls) bars.push(`<text x="${h+4}" y="${y+3}" font-family="JetBrains Mono" font-size="8" fill="${colors[i]}" font-weight="700">${cls}</text>`); }); return bars.join('');})()}
+            </g>
+            <!-- Current price marker -->
+            <circle cx="535" cy="92" r="4.5" fill="#5be57c"/>
+            <text x="540" y="95" font-family="JetBrains Mono" font-size="11" fill="#5be57c" font-weight="800">NOW $487</text>
+            <line x1="535" y1="92" x2="555" y2="92" stroke="#5be57c" stroke-width="0.8"/>
+          </svg>
+          <div class="viz-cap">90-day session volume profile · horizontal histogram = volume at price · POC = highest-volume node</div>
+        </div>
+
+        <!-- KPIs + table -->
+        <div>
+          <div class="grid-2" style="gap:10px;margin-bottom:10px">
+            <div class="tile"><div class="tile-k">POC</div><div class="tile-v cop">$474</div><div class="tile-sub">point of control</div></div>
+            <div class="tile"><div class="tile-k">Value Area</div><div class="tile-v">$455–$492</div><div class="tile-sub">70% of volume</div></div>
+          </div>
+          <table class="tbl" style="font-size:12.5px">
+            <tr><td>Current price</td><td class="r"><b>$487.21</b></td><td class="r dim">above POC</td></tr>
+            <tr><td>VAH (Value Area High)</td><td class="r"><b>$492</b></td><td class="r dim">overhead supply ahead</td></tr>
+            <tr><td>POC</td><td class="r cop"><b>$474</b></td><td class="r dim">strongest auction</td></tr>
+            <tr><td>VAL (Value Area Low)</td><td class="r"><b>$455</b></td><td class="r dim">value-area floor</td></tr>
+            <tr><td>HVN cluster</td><td class="r"><b>$466 / $470</b></td><td class="r dim">support reinforcement</td></tr>
+            <tr><td>LVN gap (above)</td><td class="r am"><b>$500 – $510</b></td><td class="r dim">fast-move zone</td></tr>
+            <tr><td>LVN gap (below)</td><td class="r am"><b>$444 – $448</b></td><td class="r dim">break-fast zone</td></tr>
+            <tr><td>Acceptance status</td><td class="r gn"><b>ACCEPT</b></td><td class="r dim">3 days above VAH</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="verdict gn">
+        <span class="verdict-call">BUY</span>
+        Price has accepted above VAH ($492 → now $487 — pullback inside value top). POC $474 is the institutional support; below $466 we re-enter prior auction. LVN $500–$510 above means a clean run if VAH breaks decisively.
+        <span class="fals"><b>Falsification:</b> 2 daily closes back inside value area below $466 (HVN floor) → price rejected from breakout, reverts to mean of $474 POC.</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========== 4. FIBONACCI ========== -->
+  <div class="sec">
+    <div class="sec-h">
+      <span class="sec-h-l">4 · Fibonacci · retracements + extensions</span>
+      <span class="sec-h-r">most recent 52w swing low $432 → swing high $498</span>
+    </div>
+    <div class="sec-body">
+
+      <div class="grid-2">
+
+        <!-- Fib visualization · clean rebuild with all retracement lines visible -->
+        <div>
+          <svg class="viz" viewBox="0 0 720 280" preserveAspectRatio="xMidYMid meet" style="height:280px">
+            <!-- ──────── Coordinate system ────────
+                 Chart area: x[100, 660], y[20, 240]
+                 Y-axis maps price (top of chart=high, bottom=low) over expanded range $430-$545
+                 Left margin (0-100): ratio labels
+                 Right margin (660-720): price labels
+                 Bottom (240-260): time axis
+            -->
+            <!-- Background chart panel -->
+            <rect x="100" y="20" width="560" height="220" fill="#11161a" stroke="#1f262b" stroke-width="0.6"/>
+
+            <!-- Extension lines (above swing high) - GREEN -->
+            <g>
+              <line x1="100" y1="32" x2="660" y2="32" stroke="#5be57c" stroke-width="1" stroke-dasharray="4 3" opacity="0.55"/>
+              <text x="92" y="36" text-anchor="end" font-family="JetBrains Mono" font-size="10.5" fill="#5be57c" font-weight="700">1.618</text>
+              <text x="668" y="36" font-family="JetBrains Mono" font-size="10.5" fill="#5be57c" font-weight="700">$539 <tspan fill="#8f969c" font-weight="500">· T2</tspan></text>
+            </g>
+            <g>
+              <line x1="100" y1="58" x2="660" y2="58" stroke="#5be57c" stroke-width="1" stroke-dasharray="4 3" opacity="0.55"/>
+              <text x="92" y="62" text-anchor="end" font-family="JetBrains Mono" font-size="10.5" fill="#5be57c" font-weight="700">1.272</text>
+              <text x="668" y="62" font-family="JetBrains Mono" font-size="10.5" fill="#5be57c" font-weight="700">$511 <tspan fill="#8f969c" font-weight="500">· T1</tspan></text>
+            </g>
+
+            <!-- Swing high (1.0) -->
+            <line x1="100" y1="80" x2="660" y2="80" stroke="#5be57c" stroke-width="1.4" opacity="0.95"/>
+            <text x="92" y="84" text-anchor="end" font-family="JetBrains Mono" font-size="10.5" fill="#5be57c" font-weight="700">1.000</text>
+            <text x="668" y="84" font-family="JetBrains Mono" font-size="10.5" fill="#5be57c" font-weight="700">$498 <tspan fill="#8f969c" font-weight="500">· swing high</tspan></text>
+
+            <!-- Retracement lines (0.236, 0.382, 0.500, 0.618, 0.786) -->
+            <g>
+              <line x1="100" y1="108" x2="660" y2="108" stroke="#8f969c" stroke-width="0.8" stroke-dasharray="3 3" opacity="0.55"/>
+              <text x="92" y="112" text-anchor="end" font-family="JetBrains Mono" font-size="10.5" fill="#8f969c" font-weight="600">0.236</text>
+              <text x="668" y="112" font-family="JetBrains Mono" font-size="10.5" fill="#8f969c" font-weight="600">$482 <tspan font-weight="500">· shallow</tspan></text>
+            </g>
+            <g>
+              <line x1="100" y1="132" x2="660" y2="132" stroke="#d49060" stroke-width="0.8" stroke-dasharray="3 3" opacity="0.65"/>
+              <text x="92" y="136" text-anchor="end" font-family="JetBrains Mono" font-size="10.5" fill="#d49060" font-weight="600">0.382</text>
+              <text x="668" y="136" font-family="JetBrains Mono" font-size="10.5" fill="#d49060" font-weight="600">$473 <tspan fill="#8f969c" font-weight="500">· common</tspan></text>
+            </g>
+            <g>
+              <line x1="100" y1="152" x2="660" y2="152" stroke="#d49060" stroke-width="0.8" stroke-dasharray="3 3" opacity="0.65"/>
+              <text x="92" y="156" text-anchor="end" font-family="JetBrains Mono" font-size="10.5" fill="#d49060" font-weight="600">0.500</text>
+              <text x="668" y="156" font-family="JetBrains Mono" font-size="10.5" fill="#d49060" font-weight="600">$465 <tspan fill="#8f969c" font-weight="500">· mid</tspan></text>
+            </g>
+            <!-- 0.618 GOLDEN — highlighted band -->
+            <rect x="100" y="172" width="560" height="14" fill="#d49060" fill-opacity="0.10"/>
+            <line x1="100" y1="178" x2="660" y2="178" stroke="#d49060" stroke-width="1.6" opacity="0.95"/>
+            <text x="92" y="182" text-anchor="end" font-family="JetBrains Mono" font-size="11" fill="#d49060" font-weight="800">0.618</text>
+            <text x="668" y="182" font-family="JetBrains Mono" font-size="11" fill="#d49060" font-weight="800">$457 <tspan font-weight="600">· golden ✓ held</tspan></text>
+            <g>
+              <line x1="100" y1="200" x2="660" y2="200" stroke="#8f969c" stroke-width="0.8" stroke-dasharray="3 3" opacity="0.55"/>
+              <text x="92" y="204" text-anchor="end" font-family="JetBrains Mono" font-size="10.5" fill="#8f969c" font-weight="600">0.786</text>
+              <text x="668" y="204" font-family="JetBrains Mono" font-size="10.5" fill="#8f969c" font-weight="600">$446 <tspan font-weight="500">· deep</tspan></text>
+            </g>
+
+            <!-- Swing low (0.0) -->
+            <line x1="100" y1="226" x2="660" y2="226" stroke="#ff6b5b" stroke-width="1.4" opacity="0.95"/>
+            <text x="92" y="230" text-anchor="end" font-family="JetBrains Mono" font-size="10.5" fill="#ff6b5b" font-weight="700">0.000</text>
+            <text x="668" y="230" font-family="JetBrains Mono" font-size="10.5" fill="#ff6b5b" font-weight="700">$432 <tspan fill="#8f969c" font-weight="500">· swing low</tspan></text>
+
+            <!-- Price action path: swing low → swing high → pullback to 0.618 → bounce → now -->
+            <path d="M 110 226 L 165 195 L 215 170 L 255 145 L 300 115 L 345 80 L 380 105 L 405 130 L 425 160 L 450 178 L 470 175 L 495 158 L 525 138 L 555 120 L 585 100 L 615 88 L 645 76"
+                  fill="none" stroke="#f4f4f4" stroke-width="1.8" stroke-linejoin="round"/>
+
+            <!-- Annotation 1: swing high pivot -->
+            <circle cx="345" cy="80" r="3.5" fill="#5be57c"/>
+
+            <!-- Annotation 2: 0.618 bounce -->
+            <circle cx="450" cy="178" r="5.5" fill="#d49060" stroke="#11161a" stroke-width="1.5"/>
+            <text x="450" y="206" text-anchor="middle" font-family="JetBrains Mono" font-size="10.5" fill="#d49060" font-weight="800">↑ BOUNCE</text>
+
+            <!-- Annotation 3: Current price marker -->
+            <circle cx="645" cy="76" r="6" fill="#5be57c" stroke="#11161a" stroke-width="2"/>
+            <text x="645" y="61" text-anchor="middle" font-family="JetBrains Mono" font-size="11.5" fill="#5be57c" font-weight="800">$487 · NOW</text>
+
+            <!-- Time axis tick labels -->
+            <g font-family="JetBrains Mono" font-size="9" fill="#5a6268">
+              <text x="110" y="256" text-anchor="middle">day 1</text>
+              <text x="345" y="256" text-anchor="middle">day 48 · swing high</text>
+              <text x="450" y="256" text-anchor="middle">day 72 · pullback</text>
+              <text x="645" y="256" text-anchor="middle">day 90 · today</text>
+            </g>
+
+            <!-- Top label -->
+            <text x="380" y="13" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#8f969c" letter-spacing="0.12em" font-weight="700">FIB RATIOS · LEFT · &nbsp;&nbsp;&nbsp; PRICE LEVELS · RIGHT</text>
+          </svg>
+          <div class="viz-cap">Fibonacci retracements from $432→$498 swing · 0.618 golden ratio held the pullback at $457 · 1.272/1.618 extensions = T1/T2</div>
+        </div>
+
+        <!-- Fib table -->
+        <div>
+          <table class="tbl" style="font-size:12.5px">
+            <thead><tr><th>Ratio</th><th>Type</th><th class="r">Price</th><th>Role</th></tr></thead>
+            <tr><td><b class="gn">1.618</b></td><td class="dim">extension</td><td class="r gn"><b>$539</b></td><td class="dim">T2 target · golden ext</td></tr>
+            <tr><td><b class="gn">1.414</b></td><td class="dim">extension</td><td class="r gn"><b>$525</b></td><td class="dim">interim target</td></tr>
+            <tr><td><b class="gn">1.272</b></td><td class="dim">extension</td><td class="r gn"><b>$516</b></td><td class="dim">T1 target · sqrt(1.618)</td></tr>
+            <tr><td><b>1.000</b></td><td class="dim">swing high</td><td class="r"><b>$498</b></td><td class="dim">previous high</td></tr>
+            <tr style="background:color-mix(in oklch, var(--gn) 5%, transparent)"><td><b class="gn">PRICE</b></td><td class="gn"><b>NOW</b></td><td class="r gn"><b>$487</b></td><td class="dim">above 0.236 retrace</td></tr>
+            <tr><td><b class="cop">0.236</b></td><td class="dim">shallow</td><td class="r"><b>$482</b></td><td class="dim">light resistance now flipped</td></tr>
+            <tr><td><b class="cop">0.382</b></td><td class="dim">common</td><td class="r"><b>$473</b></td><td class="dim">+ POC confluence</td></tr>
+            <tr><td><b class="cop">0.500</b></td><td class="dim">mid</td><td class="r"><b>$465</b></td><td class="dim">psychological</td></tr>
+            <tr style="background:color-mix(in oklch, var(--cop) 5%, transparent)"><td><b class="cop">0.618</b></td><td class="cop"><b>GOLDEN</b></td><td class="r cop"><b>$457</b></td><td class="cop">held · stop reference</td></tr>
+            <tr><td><b class="cop">0.786</b></td><td class="dim">deep</td><td class="r"><b>$446</b></td><td class="dim">deep retrace</td></tr>
+            <tr><td><b class="rd">0.000</b></td><td class="dim">swing low</td><td class="r rd"><b>$432</b></td><td class="dim">prior absolute</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="verdict gn">
+        <span class="verdict-call">BUY</span>
+        Pullback bounced cleanly off the 0.618 golden ratio at $457 — textbook bullish retrace. Price now above all retracement levels, targeting the 1.272 extension at $516 (T1) and 1.618 at $539 (T2). POC $474 + 0.382 fib $473 = double-confluence support.
+        <span class="fals"><b>Falsification:</b> close below 0.618 ($457) on volume → deep retrace failure, thesis broken, reset on next swing.</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========== 5. ICHIMOKU ========== -->
+  <div class="sec">
+    <div class="sec-h">
+      <span class="sec-h-l">5 · Ichimoku Kinko Hyo · five-line systems read</span>
+      <span class="sec-h-r">Tenkan · Kijun · Senkou A/B (cloud) · Chikou · future cloud</span>
+    </div>
+    <div class="sec-body">
+
+      <!-- Ichimoku chart · clean rebuild with proper cloud geometry and zoned x-axis -->
+      <svg class="viz" viewBox="0 0 720 300" preserveAspectRatio="xMidYMid meet" style="height:300px;margin-bottom:14px">
+        <defs>
+          <linearGradient id="ichiCloudFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#5be57c" stop-opacity="0.32"/>
+            <stop offset="100%" stop-color="#5be57c" stop-opacity="0.10"/>
+          </linearGradient>
+          <linearGradient id="ichiFutureCloudFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#5be57c" stop-opacity="0.28"/>
+            <stop offset="100%" stop-color="#5be57c" stop-opacity="0.08"/>
+          </linearGradient>
+        </defs>
+
+        <!-- ──────── Coordinate plan ────────
+             Chart area: x[60, 700], y[40, 240]
+             Past zone:   x[60, 540]  (real candles · indicators)
+             Future zone: x[540, 700] (only Senkou A/B projection — "future cloud")
+             Vertical divider at x=540 separates past from future
+        -->
+
+        <!-- Background panels -->
+        <rect x="60" y="40" width="480" height="200" fill="#11161a" stroke="#1f262b" stroke-width="0.6"/>
+        <rect x="540" y="40" width="160" height="200" fill="#0d1316" stroke="#1f262b" stroke-width="0.6"/>
+
+        <!-- Faint horizontal price gridlines -->
+        <line x1="60" y1="80"  x2="700" y2="80"  stroke="#1f262b" stroke-width="0.4"/>
+        <line x1="60" y1="120" x2="700" y2="120" stroke="#1f262b" stroke-width="0.4"/>
+        <line x1="60" y1="160" x2="700" y2="160" stroke="#1f262b" stroke-width="0.4"/>
+        <line x1="60" y1="200" x2="700" y2="200" stroke="#1f262b" stroke-width="0.4"/>
+
+        <!-- Y-axis price labels (left margin) -->
+        <g font-family="JetBrains Mono" font-size="9" fill="#5a6268">
+          <text x="55" y="44"  text-anchor="end">$510</text>
+          <text x="55" y="84"  text-anchor="end">$495</text>
+          <text x="55" y="124" text-anchor="end">$480</text>
+          <text x="55" y="164" text-anchor="end">$465</text>
+          <text x="55" y="204" text-anchor="end">$450</text>
+          <text x="55" y="240" text-anchor="end">$435</text>
+        </g>
+
+        <!-- ── CLOUD (past, x=60..540) ──
+             Senkou A path = TOP of cloud (bullish-side, green line)
+             Senkou B path = BOTTOM of cloud (bearish-side, red line)
+             Filled polygon connects them
+        -->
+        <path d="M 60 195 L 100 188 L 140 180 L 180 170 L 220 160 L 260 152 L 300 145 L 340 138 L 380 130 L 420 124 L 460 118 L 500 112 L 540 108
+                 L 540 175 L 500 178 L 460 182 L 420 186 L 380 188 L 340 190 L 300 193 L 260 196 L 220 198 L 180 202 L 140 205 L 100 208 L 60 210 Z"
+              fill="url(#ichiCloudFill)" stroke="none"/>
+        <!-- Senkou A line (top of cloud) - thin green solid -->
+        <path d="M 60 195 L 100 188 L 140 180 L 180 170 L 220 160 L 260 152 L 300 145 L 340 138 L 380 130 L 420 124 L 460 118 L 500 112 L 540 108"
+              fill="none" stroke="#5be57c" stroke-width="1" opacity="0.85"/>
+        <!-- Senkou B line (bottom of cloud) - thin red dashed -->
+        <path d="M 60 210 L 100 208 L 140 205 L 180 202 L 220 198 L 260 196 L 300 193 L 340 190 L 380 188 L 420 186 L 460 182 L 500 178 L 540 175"
+              fill="none" stroke="#ff6b5b" stroke-width="1" opacity="0.65" stroke-dasharray="3 2"/>
+
+        <!-- ── FUTURE CLOUD (x=540..700) ──
+             This is the cloud projected 26 bars ahead.
+             Senkou A and B values are plotted on the right side from values computed 26 bars ago.
+        -->
+        <path d="M 540 108 L 580 102 L 620 96 L 660 92 L 700 88
+                 L 700 145 L 660 152 L 620 158 L 580 164 L 540 175 Z"
+              fill="url(#ichiFutureCloudFill)" stroke="#5be57c" stroke-opacity="0.45" stroke-width="0.8" stroke-dasharray="3 2"/>
+        <text x="620" y="128" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#5be57c" font-weight="800" letter-spacing="0.10em">FUTURE CLOUD · BULL</text>
+        <text x="620" y="142" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#8f969c">Senkou A &gt; B · 26d ahead</text>
+
+        <!-- Future/Past divider line -->
+        <line x1="540" y1="40" x2="540" y2="240" stroke="#d49060" stroke-width="0.7" stroke-dasharray="3 3" opacity="0.55"/>
+        <text x="540" y="32" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#d49060" letter-spacing="0.06em">┃ today ┃ ─── future ───</text>
+
+        <!-- ── PRICE LINE (past only, x=60..540) ── -->
+        <path d="M 60 150 L 90 148 L 120 145 L 150 138 L 180 130 L 210 122 L 240 118 L 270 112 L 300 108 L 330 104 L 360 100 L 390 98 L 420 92 L 450 90 L 480 86 L 510 84 L 540 82"
+              fill="none" stroke="#f4f4f4" stroke-width="2.2" stroke-linejoin="round"/>
+
+        <!-- ── TENKAN-SEN (9-period midpoint) · COPPER thick ── -->
+        <path d="M 60 158 L 90 154 L 120 148 L 150 143 L 180 136 L 210 128 L 240 122 L 270 116 L 300 110 L 330 106 L 360 102 L 390 99 L 420 95 L 450 92 L 480 89 L 510 86 L 540 84"
+              fill="none" stroke="#d49060" stroke-width="1.6" opacity="0.95"/>
+
+        <!-- ── KIJUN-SEN (26-period midpoint) · GREY mid-weight ── -->
+        <path d="M 60 172 L 90 170 L 120 166 L 150 162 L 180 156 L 210 150 L 240 144 L 270 138 L 300 132 L 330 126 L 360 120 L 390 114 L 420 108 L 450 102 L 480 96 L 510 92 L 540 88"
+              fill="none" stroke="#c9cdd0" stroke-width="1.4" opacity="0.9"/>
+
+        <!-- TK cross marker — Tenkan crossed above Kijun -->
+        <circle cx="215" cy="129" r="5" fill="#5be57c" stroke="#11161a" stroke-width="1.5"/>
+        <text x="215" y="220" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#5be57c" font-weight="700">↑ TK CROSS</text>
+        <line x1="215" y1="129" x2="215" y2="212" stroke="#5be57c" stroke-width="0.6" stroke-dasharray="2 2" opacity="0.7"/>
+
+        <!-- ── CHIKOU SPAN (price lagged 26 bars · drawn on the LEFT/past portion) · AMBER dashed ── -->
+        <path d="M 60 75 L 90 73 L 120 70 L 150 65 L 180 62 L 210 58 L 240 55 L 270 52 L 300 50 L 330 48 L 360 47 L 380 46"
+              fill="none" stroke="#ffb95c" stroke-width="1.4" stroke-dasharray="4 2" opacity="0.85"/>
+        <text x="220" y="65" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#ffb95c" font-weight="700" letter-spacing="0.06em">CHIKOU · clear of past price (bullish)</text>
+
+        <!-- ── CURRENT PRICE marker · spot on at the today-divider ── -->
+        <circle cx="540" cy="82" r="6.5" fill="#5be57c" stroke="#11161a" stroke-width="2"/>
+        <text x="540" y="68" text-anchor="middle" font-family="JetBrains Mono" font-size="12" fill="#5be57c" font-weight="800">$487 · NOW</text>
+
+        <!-- ── TIME AXIS labels ── -->
+        <g font-family="JetBrains Mono" font-size="9" fill="#5a6268">
+          <text x="60"  y="256" text-anchor="middle">−90d</text>
+          <text x="200" y="256" text-anchor="middle">−60d</text>
+          <text x="340" y="256" text-anchor="middle">−30d</text>
+          <text x="540" y="256" text-anchor="middle" fill="#d49060" font-weight="700">today</text>
+          <text x="620" y="256" text-anchor="middle">+13d</text>
+          <text x="700" y="256" text-anchor="middle">+26d</text>
+        </g>
+
+        <!-- ── Bottom LEGEND ── -->
+        <g transform="translate(60, 282)" font-family="JetBrains Mono" font-size="10">
+          <g><line x1="0"   y1="0" x2="18" y2="0" stroke="#f4f4f4" stroke-width="2"/><text x="22"  y="3.5" fill="#c9cdd0">Price</text></g>
+          <g><line x1="80"  y1="0" x2="98" y2="0" stroke="#d49060" stroke-width="1.6"/><text x="102" y="3.5" fill="#d49060">Tenkan (9)</text></g>
+          <g><line x1="180" y1="0" x2="198" y2="0" stroke="#c9cdd0" stroke-width="1.4"/><text x="202" y="3.5" fill="#c9cdd0">Kijun (26)</text></g>
+          <g><line x1="280" y1="0" x2="298" y2="0" stroke="#5be57c" stroke-width="1"/><text x="302" y="3.5" fill="#5be57c">Senkou A</text></g>
+          <g><line x1="370" y1="0" x2="388" y2="0" stroke="#ff6b5b" stroke-width="1" stroke-dasharray="3 2"/><text x="392" y="3.5" fill="#ff6b5b">Senkou B</text></g>
+          <g><line x1="460" y1="0" x2="478" y2="0" stroke="#ffb95c" stroke-width="1.4" stroke-dasharray="4 2"/><text x="482" y="3.5" fill="#ffb95c">Chikou (lag 26)</text></g>
+        </g>
+      </svg>
+
+      <div class="ichi-grid">
+        <div class="ichi-tile"><div class="ichi-k">Price vs Cloud</div><div class="ichi-v gn">ABOVE</div><div class="ichi-sub">bullish trend confirmed</div></div>
+        <div class="ichi-tile"><div class="ichi-k">Tenkan / Kijun</div><div class="ichi-v gn">BULL CROSS</div><div class="ichi-sub">9d &gt; 26d · 42 days ago</div></div>
+        <div class="ichi-tile"><div class="ichi-k">Chikou Span</div><div class="ichi-v gn">CLEAR</div><div class="ichi-sub">above past price · no resistance</div></div>
+        <div class="ichi-tile"><div class="ichi-k">Future Cloud</div><div class="ichi-v gn">BULLISH</div><div class="ichi-sub">Senkou A &gt; B · 26d forward</div></div>
+        <div class="ichi-tile"><div class="ichi-k">Cloud Thickness</div><div class="ichi-v am">THIN</div><div class="ichi-sub">break would be fast</div></div>
+      </div>
+
+      <table class="tbl" style="margin-top:14px;font-size:12.5px">
+        <tr><td>Tenkan-sen (9)</td><td class="r"><b>$483</b></td><td class="dim">conversion line · fast pivot</td></tr>
+        <tr><td>Kijun-sen (26)</td><td class="r"><b>$472</b></td><td class="dim">base line · trend-support</td></tr>
+        <tr><td>Senkou Span A (cloud top)</td><td class="r gn"><b>$462</b></td><td class="dim">leading 26 forward</td></tr>
+        <tr><td>Senkou Span B (cloud bottom)</td><td class="r"><b>$448</b></td><td class="dim">26-period high/low avg</td></tr>
+        <tr><td>Chikou Span</td><td class="r gn"><b>$487</b></td><td class="dim">price lagged 26 — vs past price</td></tr>
+        <tr><td>5 bullish signals?</td><td class="r gn"><b>5 / 5</b></td><td class="dim">triple bull alignment</td></tr>
+      </table>
+
+      <div class="verdict gn">
+        <span class="verdict-call">BUY</span>
+        Triple-bull alignment: above cloud · TK bull cross · Chikou clear · future cloud green. Strongest possible Ichimoku reading. Kijun ($472) is the dynamic support — primary stop reference for swing.
+        <span class="fals"><b>Falsification:</b> daily close below Kijun ($472) flips the system to caution. Close into the cloud breaks the trend.</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========== 6. ELLIOTT WAVE (with caveat) ========== -->
+  <div class="sec">
+    <div class="sec-h">
+      <span class="sec-h-l">6 · Elliott Wave · five-wave impulse structure</span>
+      <span class="sec-h-r">discretionary methodology · use as confluence</span>
+    </div>
+    <div class="sec-body">
+
+      <div class="ew-banner">
+        <b>DISCRETIONARY · USE AS CONFLUENCE</b> &nbsp; Elliott Wave is a discretionary pattern-recognition framework with low quantitative edge in isolation (sample-size Wilson LB &lt; 50%). Useful for projection and invalidation levels — never as a stand-alone signal. Two analysts can produce different valid wave counts on the same chart.
+      </div>
+
+      <!-- EW chart -->
+      <svg class="viz" viewBox="0 0 720 260" preserveAspectRatio="none">
+        <!-- Wave path: 1-2-3-4-5 impulse -->
+        <path d="M 30 220 L 130 145 L 210 175 L 360 75 L 460 115 L 555 50" fill="none" stroke="#e9eaeb" stroke-width="1.8" stroke-linejoin="round"/>
+        <!-- Wave point markers + labels -->
+        <circle cx="30"  cy="220" r="5" fill="#ff6b5b"/><text x="30"  y="240" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#ff6b5b" font-weight="800">0</text><text x="30"  y="250" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#8f969c">$432</text>
+        <circle cx="130" cy="145" r="5" fill="#5be57c"/><text x="130" y="135" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#5be57c" font-weight="800">1</text><text x="130" y="125" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#8f969c">$462</text>
+        <circle cx="210" cy="175" r="5" fill="#d49060"/><text x="210" y="195" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#d49060" font-weight="800">2</text><text x="210" y="206" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#8f969c">$453 · 0.618 retrace</text>
+        <circle cx="360" cy="75"  r="6.5" fill="#5be57c"/><text x="360" y="60" text-anchor="middle" font-family="JetBrains Mono" font-size="13" fill="#5be57c" font-weight="800">3</text><text x="360" y="48" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#5be57c" font-weight="700">$498 (extended)</text>
+        <circle cx="460" cy="115" r="5" fill="#d49060"/><text x="460" y="135" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#d49060" font-weight="800">4</text><text x="460" y="146" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#8f969c">$478 · 0.236 retrace</text>
+        <circle cx="555" cy="50"  r="6.5" fill="#5be57c"/><text x="555" y="35" text-anchor="middle" font-family="JetBrains Mono" font-size="13" fill="#5be57c" font-weight="800">5?</text><text x="555" y="22" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#5be57c" font-weight="700">projected $511–$528</text>
+        <!-- Current price marker -->
+        <line x1="555" y1="0" x2="555" y2="260" stroke="#d49060" stroke-width="0.6" stroke-dasharray="3 2" opacity="0.5"/>
+        <text x="555" y="252" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#5be57c" font-weight="700">$487 · NOW</text>
+        <!-- Invalidation line -->
+        <line x1="30" y1="180" x2="700" y2="180" stroke="#ff6b5b" stroke-width="0.6" stroke-dasharray="4 2" opacity="0.6"/>
+        <text x="710" y="183" text-anchor="end" font-family="JetBrains Mono" font-size="9" fill="#ff6b5b">invalidation $462 (below W1 top)</text>
+        <!-- W3 extension target line -->
+        <line x1="30" y1="55" x2="700" y2="55" stroke="#5be57c" stroke-width="0.6" stroke-dasharray="4 2" opacity="0.5"/>
+        <text x="710" y="48" text-anchor="end" font-family="JetBrains Mono" font-size="9" fill="#5be57c">W5 1.272 W1 = $526 target</text>
+      </svg>
+      <div class="viz-cap">Best-fit wave count · daily timeframe · primary degree · 0.618 W2 + extended W3 + 0.236 W4 favors Wave 5 in progress</div>
+
+      <div class="grid-4" style="margin-top:14px">
+        <div class="tile"><div class="tile-k">Current wave</div><div class="tile-v cop">WAVE 5</div><div class="tile-sub">in progress · final impulse</div></div>
+        <div class="tile"><div class="tile-k">W3 length</div><div class="tile-v gn">$36 · extended</div><div class="tile-sub">2.50× W1 · strong impulse</div></div>
+        <div class="tile"><div class="tile-k">W5 target</div><div class="tile-v gn">$511 – $528</div><div class="tile-sub">0.618 × W1+W3 → 1.0 × W1</div></div>
+        <div class="tile"><div class="tile-k">Invalidation</div><div class="tile-v rd">&lt; $462</div><div class="tile-sub">W4 cannot overlap W1 top</div></div>
+      </div>
+
+      <table class="tbl" style="margin-top:14px;font-size:12.5px">
+        <thead><tr><th>Wave</th><th>From → To</th><th class="r">Length</th><th>Fib relationship</th><th>EW rule check</th></tr></thead>
+        <tr><td><b>Wave 1</b></td><td>$432 → $462</td><td class="r">$30</td><td class="dim">impulsive 5-sub</td><td class="gn"><b>OK</b></td></tr>
+        <tr><td><b>Wave 2</b></td><td>$462 → $453</td><td class="r">−$9</td><td class="dim">0.618 retrace of W1</td><td class="gn"><b>OK</b> · doesn't overlap W1 start</td></tr>
+        <tr><td><b>Wave 3</b></td><td>$453 → $498</td><td class="r">$45</td><td class="dim">extended · 1.50× W1</td><td class="gn"><b>OK</b> · longest wave, not shortest</td></tr>
+        <tr><td><b>Wave 4</b></td><td>$498 → $478</td><td class="r">−$20</td><td class="dim">0.236 retrace of W3 · shallow</td><td class="gn"><b>OK</b> · doesn't overlap W1 high $462</td></tr>
+        <tr style="background:color-mix(in oklch, var(--gn) 5%, transparent)"><td><b class="gn">Wave 5?</b></td><td>$478 → ?</td><td class="r gn">in progress · $9 so far</td><td class="dim">target 0.618×(W1+W3) → 1.0×W1</td><td class="gn"><b>OK</b> · price &gt; W4 high, &gt; W1 top</td></tr>
+      </table>
+
+      <div class="verdict am">
+        <span class="verdict-call">WATCH</span>
+        Best-fit wave count places price in early Wave 5 of primary-degree impulse. Three EW rules all hold (W2 doesn't break W1 start, W3 longest, W4 doesn't overlap W1 top). Projected target $511–$528 aligns with Fib 1.272/1.618 and cup-handle measured-move. <b>This is confluence, not signal.</b>
+        <span class="fals"><b>Falsification:</b> daily close &lt; $462 (W1 top) violates the W4-overlap rule and invalidates this wave count entirely. Many alternate counts possible; the one shown is the highest-probability fit only.</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========== AGREEMENT MATRIX ========== -->
+  <div class="sec">
+    <div class="sec-h">
+      <span class="sec-h-l">Pattern Agreement Matrix · multi-method decision</span>
+      <span class="sec-h-r">where methods agree = high conviction · disagreement = the most informative tension</span>
+    </div>
+    <div class="sec-body">
+
+      <table class="tbl">
+        <thead><tr>
+          <th>Method</th>
+          <th>Discipline</th>
+          <th class="r">Vote</th>
+          <th class="r">Evidence weight</th>
+          <th>Reasoning</th>
+        </tr></thead>
+        <tr>
+          <td><b>1 · Wyckoff</b></td>
+          <td class="dim">supply / demand · auction</td>
+          <td class="r"><span class="verdict-call" style="background:color-mix(in oklch, var(--gn) 22%, transparent);color:var(--gn);font-size:10.5px">BUY</span></td>
+          <td class="r gn"><b>HIGH</b></td>
+          <td class="dim">Phase D markup confirmed · SOS + LPS holding · cause-effect target $510–$533</td>
+        </tr>
+        <tr>
+          <td><b>2 · Classical (4 patterns)</b></td>
+          <td class="dim">Bulkowski statistics</td>
+          <td class="r"><span class="verdict-call" style="background:color-mix(in oklch, var(--gn) 22%, transparent);color:var(--gn);font-size:10.5px">BUY</span></td>
+          <td class="r gn"><b>HIGH</b></td>
+          <td class="dim">VCP + cup-handle + bull flag + ascending triangle all converge at $489–$492 pivot</td>
+        </tr>
+        <tr>
+          <td><b>3 · Volume Profile</b></td>
+          <td class="dim">institutional auction</td>
+          <td class="r"><span class="verdict-call" style="background:color-mix(in oklch, var(--gn) 22%, transparent);color:var(--gn);font-size:10.5px">BUY</span></td>
+          <td class="r gn"><b>HIGH</b></td>
+          <td class="dim">Accepted above VAH · POC $474 reinforces support · LVN $500–$510 = clean run zone</td>
+        </tr>
+        <tr>
+          <td><b>4 · Fibonacci</b></td>
+          <td class="dim">retracement + extension</td>
+          <td class="r"><span class="verdict-call" style="background:color-mix(in oklch, var(--gn) 22%, transparent);color:var(--gn);font-size:10.5px">BUY</span></td>
+          <td class="r am"><b>MEDIUM</b></td>
+          <td class="dim">0.618 golden ratio held at $457 · targets $511 (1.272) and $539 (1.618)</td>
+        </tr>
+        <tr>
+          <td><b>5 · Ichimoku</b></td>
+          <td class="dim">five-line systems read</td>
+          <td class="r"><span class="verdict-call" style="background:color-mix(in oklch, var(--gn) 22%, transparent);color:var(--gn);font-size:10.5px">BUY</span></td>
+          <td class="r gn"><b>HIGH</b></td>
+          <td class="dim">5/5 bullish signals · triple-bull alignment · Kijun $472 = dynamic support</td>
+        </tr>
+        <tr>
+          <td><b>6 · Elliott Wave</b></td>
+          <td class="dim">discretionary · pattern</td>
+          <td class="r"><span class="verdict-call" style="background:color-mix(in oklch, var(--amb) 22%, transparent);color:var(--amb);font-size:10.5px">WATCH</span></td>
+          <td class="r rd"><b>LOW</b></td>
+          <td class="dim">Wave 5 of 5 in progress · target $511–$528 · invalidates &lt; $462</td>
+        </tr>
+      </table>
+
+      <div class="verdict gn" style="margin-top:18px">
+        <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:8px">
+          <span class="conv-label">Pattern composite</span>
+          <span class="hero-call" style="font-size:24px">BUY</span>
+          <span class="conv-meta">5B · 1W · 0S of 6 · <b style="color:var(--gn)">HIGH</b> conviction</span>
+        </div>
+        <div style="margin-top:8px">
+          <b>Trade expression:</b> Long NVDA on VCP pivot break $492 (or on pullback to $480–$483) · Stop $474 (POC + Kijun confluence) · T1 $511 (1.272 Fib + cup-handle measured-move) · T2 $533 (Wyckoff cause-effect target + 1.618 Fib).
+          <br><br>
+          <b>Position sizing reference:</b> Risk-per-share $13 (entry $487 → stop $474). At 1% account risk on $50K account = 38 shares = $18,500 notional (37% allocation). Cross-check against Models tab Kelly-Lite output.
+        </div>
+        <span class="fals"><b>System-wide falsification:</b> daily close &lt; $462 simultaneously breaks Wyckoff LPS, ascending-triangle support, EW Wave 4 rule, AND cup-handle invalidation. That level is the master stop for ALL pattern theses.</span>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="foot">
+    PROTOTYPE · PATTERNS SUB-TAB · DETAIL PAGE KBD <b>0</b> · NVDA SAMPLE DATA · GENERATED 2026-05-12
+  </div>
+
+</div>
+</body>
+</html>

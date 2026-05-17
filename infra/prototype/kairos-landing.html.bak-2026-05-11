@@ -1,0 +1,2124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Kairos · v12.04 · trader's dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/*
+ * Kairos · pure terminal dashboard — matches the user's reference (Image 3 / 4).
+ * No editorial register. Mono everywhere. Phosphor / amber / cyan / red on black.
+ * Dense tables, 4-letter section codes, F-key strip, tab toggle.
+ */
+
+:root {
+  --bg:        #000000;
+  --bg-1:      #0a0d0c;
+  --bg-2:      #0f1311;
+  --bg-3:      #141816;
+  --bg-hover:  #181f1c;
+  --line:      #1d2520;
+  --line-2:    #2a352e;
+
+  --ink:       #d8d6cc;
+  --ink-1:     #b0aea3;
+  --ink-2:     #80847a;
+  --ink-3:     #545851;
+  --ink-4:     #2e312c;
+
+  --gn:        #5be57c;
+  --gn-dim:    #2f6b41;
+  --gn-bg:     rgba(91,229,124,0.08);
+
+  --amb:       #ffb95c;
+  --amb-dim:   #8c5d20;
+  --amb-bg:    rgba(255,185,92,0.06);
+
+  --cy:        #5ec8d8;
+  --cy-dim:    #2c6a74;
+  --cy-bg:     rgba(94,200,216,0.07);
+
+  --rd:        #ff6b5b;
+  --rd-dim:    #7a2a22;
+  --rd-bg:     rgba(255,107,91,0.06);
+
+  --mono:      'JetBrains Mono', ui-monospace, monospace;
+  --copper:    #d97757;
+}
+
+/* Big Kairos brand bar — top of page, always visible */
+@import url('https://fonts.googleapis.com/css2?family=GT+Sectra:wght@500&display=swap');
+.brandbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 28px 12px;
+  background: linear-gradient(180deg, #0e1311 0%, #000 100%);
+  border-bottom: 1px solid var(--line);
+}
+.brandbar-l { display: flex; align-items: baseline; gap: 16px; }
+.brandbar-wm {
+  font-family: 'GT Sectra', Georgia, serif;
+  font-style: italic; font-weight: 500;
+  font-size: 36px; line-height: 1; letter-spacing: -0.025em;
+  color: var(--ink);
+}
+.brandbar-wm::first-letter { color: var(--copper); }
+.brandbar-tag {
+  font-family: var(--mono);
+  font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--ink-3); padding-bottom: 4px;
+}
+.brandbar-r {
+  display: flex; align-items: center; gap: 22px;
+  font-family: var(--mono); font-size: 10.5px;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-2);
+}
+.brandbar-r b { color: var(--ink); }
+.brandbar-r .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--gn); box-shadow: 0 0 6px var(--gn); margin-right: 6px; vertical-align: 1px; }
+
+/* ════════ LEFT SIDEBAR — workspaces + stats + quick tickers ═════════ */
+.layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: calc(100vh - 64px);
+}
+.sidebar {
+  background: var(--bg-1);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 8px 0 20px;
+}
+.sb-section {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0 8px;
+}
+.sb-section:last-child { border-bottom: none; }
+.sb-h {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 16px 4px;
+  font-size: 9.5px; letter-spacing: 0.22em; text-transform: uppercase;
+  font-weight: 700;
+  color: var(--ink-3);
+  user-select: none;
+}
+.sb-link {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 16px;
+  color: var(--ink-1);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  transition: all 80ms;
+  letter-spacing: 0.04em;
+  font-size: 11.5px;
+}
+.sb-link:hover { background: var(--bg-2); color: var(--ink); }
+.sb-link.on {
+  background: var(--gn-bg); color: var(--gn);
+  border-left-color: var(--gn);
+  font-weight: 600;
+}
+.sb-link .ico { color: var(--amb); font-size: 12px; min-width: 16px; display: inline-block; }
+.sb-link .ct {
+  margin-left: auto;
+  font-size: 9.5px; letter-spacing: 0;
+  padding: 1px 6px;
+  background: var(--bg-3);
+  color: var(--ink-3);
+  border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.sb-link.on .ct { background: var(--gn-dim); color: #061008; }
+.sb-link.warn .ct { background: var(--rd-bg); color: var(--rd); }
+.sb-link .kbd {
+  margin-left: auto;
+  font-size: 9.5px; color: var(--ink-3);
+  border: 1px solid var(--ink-4);
+  padding: 0 5px; border-radius: 2px;
+}
+.sb-link a, .sb-link a:visited { color: inherit; text-decoration: none; }
+
+.sb-stats {
+  padding: 10px 16px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.sb-stat-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 0;
+  font-size: 11px;
+}
+.sb-stat-row .l { color: var(--ink-2); letter-spacing: 0.04em; }
+.sb-stat-row .v { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sb-stat-row .v.up { color: var(--gn); }
+.sb-stat-row .v.down { color: var(--rd); }
+.sb-stat-row .v.amb { color: var(--amb); }
+
+.sb-quick {
+  padding: 8px 14px;
+}
+.sb-quick-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+  margin-top: 4px;
+}
+.sb-quick-chip {
+  padding: 5px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  font-size: 10.5px;
+  display: flex; justify-content: space-between; align-items: center; gap: 4px;
+  cursor: pointer;
+  transition: all 60ms;
+}
+.sb-quick-chip:hover { border-color: var(--cy); }
+.sb-quick-chip b { color: var(--cy); font-weight: 700; font-size: 11px; }
+.sb-quick-chip .pct { color: var(--ink-3); font-size: 10px; font-variant-numeric: tabular-nums; }
+.sb-quick-chip .pct.up { color: var(--gn); }
+.sb-quick-chip .pct.down { color: var(--rd); }
+
+.main { overflow-y: auto; }
+
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: 200px 1fr; }
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12.5px; line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+button { font: inherit; border: none; background: none; color: inherit; cursor: pointer; }
+
+.num { font-variant-numeric: tabular-nums; }
+.up   { color: var(--gn); }
+.down { color: var(--rd); }
+.amb  { color: var(--amb); }
+.cy   { color: var(--cy); }
+.dim  { color: var(--ink-2); }
+.dim2 { color: var(--ink-3); }
+
+/* ════════ Top tab bar (DASHBOARD / DETAIL) ═══════════════════════ */
+.tabs {
+  display: flex; align-items: center; gap: 28px;
+  padding: 14px 24px 0 24px;
+  border-bottom: 1px solid var(--line);
+}
+.tab {
+  font-family: var(--mono);
+  font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase;
+  font-weight: 600;
+  color: var(--ink-3); padding: 6px 4px 14px; cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 100ms, border-color 100ms;
+}
+.tab:hover { color: var(--ink-1); }
+.tab.on { color: var(--ink); border-bottom-color: var(--amb); }
+
+.page { padding: 14px 16px 0; }
+.panel { display: none; }
+.panel.on { display: block; }
+
+/* ════════ Header strip ═══════════════════════════════════════════ */
+.head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center; gap: 24px;
+  padding: 10px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  font-size: 11.5px; letter-spacing: 0.02em;
+}
+.head-l { display: flex; align-items: center; gap: 16px; }
+.head-l .brand {
+  color: var(--amb); font-weight: 700; letter-spacing: 0.12em;
+}
+.head-l .brand b { color: var(--ink); }
+.head-l .nav { color: var(--ink-1); letter-spacing: 0.08em; }
+.head-l .feeds { display: flex; gap: 12px; color: var(--ink-2); }
+.head-l .feeds span { display: inline-flex; align-items: center; gap: 5px; }
+.head-l .feeds .d {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--gn);
+  box-shadow: 0 0 6px var(--gn);
+}
+.head-r {
+  display: flex; align-items: center; gap: 22px;
+  color: var(--ink-2);
+}
+.head-r b { color: var(--ink); margin-left: 6px; }
+.head-r .clock { color: var(--ink); font-weight: 600; letter-spacing: 0.04em; }
+
+/* TAPE row */
+.tape {
+  display: grid; grid-template-columns: 60px 1fr;
+  align-items: center;
+  padding: 9px 14px;
+  background: var(--bg-1);
+  border: 1px solid var(--line); border-top: 1px solid var(--line);
+  font-size: 11.5px;
+}
+.tape .lbl {
+  color: var(--ink-3); font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase;
+  font-weight: 700;
+}
+.tape .items { display: flex; gap: 22px; flex-wrap: wrap; }
+.tape .items span { color: var(--ink-2); }
+.tape .items b { color: var(--ink); font-weight: 600; }
+.tape .items .pct.up { color: var(--gn); }
+.tape .items .pct.down { color: var(--rd); }
+.tape .items .sep { color: var(--ink-4); margin-right: -10px; }
+
+/* ════════ Dashboard grid ═════════════════════════════════════════ */
+.grid {
+  display: grid;
+  grid-template-columns: 1.45fr 1fr 1.05fr;
+  gap: 0;
+  border: 1px solid var(--line); border-top: none;
+}
+.col { border-right: 1px solid var(--line); }
+.col:last-child { border-right: none; }
+
+/* Panel head — 4-letter code + title + right meta */
+.p-head {
+  display: grid; grid-template-columns: 1fr auto;
+  align-items: center; gap: 14px;
+  padding: 10px 14px 10px 14px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
+}
+.p-head .l { color: var(--ink-1); font-weight: 600; }
+.p-head .l b { color: var(--ink); }
+.p-head .r { color: var(--ink-3); letter-spacing: 0.14em; font-weight: 500; }
+.p-head .r b.gn { color: var(--gn); }
+
+/* Tables */
+table.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+table.tbl th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 600;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+table.tbl th.r { text-align: right; }
+table.tbl td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--ink-4);
+  font-variant-numeric: tabular-nums;
+}
+table.tbl td.r { text-align: right; }
+table.tbl tr:hover td { background: var(--bg-hover); }
+table.tbl td.idx { color: var(--ink-3); font-size: 10.5px; }
+table.tbl td.sym { color: var(--cy); font-weight: 700; cursor: pointer; }
+table.tbl td.sym:hover { color: var(--ink); text-shadow: 0 0 8px var(--cy-dim); }
+table.tbl td.setup { color: var(--ink-1); font-size: 11px; letter-spacing: 0.04em; }
+table.tbl td.bap {
+  font-weight: 700;
+  position: relative;
+  text-align: center;
+  background: rgba(91,229,124,0.06);
+  color: var(--gn);
+}
+table.tbl td.bap.lo { color: var(--amb); background: rgba(255,185,92,0.05); }
+table.tbl td.bap.bad { color: var(--rd); background: rgba(255,107,91,0.05); }
+table.tbl td.px { color: var(--ink); font-weight: 600; }
+
+/* Bottom row: PROS / CONS / BEST IF — removed in production */
+
+/* SECT rows (compact) */
+.sect-row {
+  display: grid; grid-template-columns: 56px 60px 60px 1fr auto;
+  align-items: center; gap: 8px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--ink-4);
+  font-size: 11.5px;
+}
+.sect-row .lbl { color: var(--ink); font-weight: 700; letter-spacing: 0.04em; }
+.sect-row .w { color: var(--gn); font-size: 10.5px; }
+.sect-row .l { color: var(--rd); font-size: 10.5px; }
+.sect-row .bar {
+  height: 4px; background: var(--ink-4);
+  position: relative; overflow: hidden;
+}
+.sect-row .bar .f { position: absolute; left: 50%; top: 0; bottom: 0; }
+.sect-row .bar .f.pos { background: var(--gn); transform: translateX(0); }
+.sect-row .bar .f.neg { background: var(--rd); transform: translateX(-100%); }
+.sect-row .pct { font-weight: 700; min-width: 50px; text-align: right; }
+
+/* ACCT · BLOTTER */
+.blot {
+  background: var(--bg-1);
+}
+.blot-row {
+  display: grid; grid-template-columns: 60px 1fr auto auto;
+  align-items: center; gap: 14px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--ink-4);
+  font-size: 11.5px;
+}
+.blot-row .sym { color: var(--cy); font-weight: 700; }
+.blot-row .pos { color: var(--ink-2); font-size: 11px; }
+.blot-row .pos b { color: var(--ink-1); font-weight: 500; }
+.blot-row .pct { font-weight: 600; min-width: 50px; text-align: right; }
+.blot-row .pnl { font-weight: 700; min-width: 60px; text-align: right; }
+
+/* INTEL · WIRE */
+.wire-row {
+  display: grid; grid-template-columns: 56px 56px 1fr auto auto;
+  align-items: center; gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--ink-4);
+  font-size: 11.5px;
+}
+.wire-row .ts { color: var(--ink-2); font-size: 11px; letter-spacing: 0.02em; }
+.wire-row .sym { color: var(--cy); font-weight: 700; }
+.wire-row .txt { color: var(--ink-1); line-height: 1.4; font-size: 11.5px; }
+.wire-row .badge {
+  padding: 2px 7px; font-size: 9.5px; letter-spacing: 0.14em; font-weight: 700;
+  text-align: center; min-width: 38px;
+}
+.wire-row .badge.bull { background: var(--gn-bg); color: var(--gn); border: 1px solid var(--gn-dim); }
+.wire-row .badge.bear { background: var(--rd-bg); color: var(--rd); border: 1px solid var(--rd-dim); }
+.wire-row .badge.mac  { background: var(--cy-bg); color: var(--cy); border: 1px solid var(--cy-dim); }
+.wire-row .badge.neut { background: var(--amb-bg); color: var(--amb); border: 1px solid var(--amb-dim); }
+.wire-row .src { color: var(--ink-3); font-size: 10px; letter-spacing: 0.12em; min-width: 38px; text-align: right; }
+
+/* F-keys */
+.fkeys {
+  display: grid; grid-template-columns: repeat(8, 1fr);
+  background: var(--bg-2);
+  border: 1px solid var(--line); border-bottom: none;
+}
+.fk {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 7px 12px;
+  border-right: 1px solid var(--line);
+  font-size: 10.5px; letter-spacing: 0.06em;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: color 80ms, background 80ms;
+}
+.fk:last-child { border-right: none; }
+.fk b { color: var(--amb); font-weight: 700; letter-spacing: 0.06em; }
+.fk:hover { color: var(--ink); background: var(--bg-3); }
+.fk.on { background: var(--gn-bg); color: var(--gn); }
+.fk.on b { color: var(--gn); }
+
+/* ════════ NEWS · LATEST (Yahoo-style cards) ═══════════════════════ */
+.news {
+  margin-top: 0;
+  border: 1px solid var(--line);
+  border-top: none;
+  background: var(--bg-1);
+}
+.news-grid {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr;
+  gap: 0;
+}
+.news-col { border-right: 1px solid var(--line); padding: 14px 16px; min-height: 300px; }
+.news-col:last-child { border-right: none; }
+
+/* Featured story (left big) */
+.news-feat {
+  display: flex; flex-direction: column;
+  gap: 12px;
+}
+.news-feat-img {
+  width: 100%; aspect-ratio: 16/9;
+  background: linear-gradient(135deg, var(--cy-bg) 0%, var(--gn-bg) 40%, #14181a 100%);
+  border: 1px solid var(--line-2);
+  position: relative;
+  overflow: hidden;
+}
+.news-feat-img::after {
+  content: '';
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at 30% 40%, rgba(94,200,216,0.12), transparent 50%),
+    radial-gradient(ellipse at 70% 70%, rgba(91,229,124,0.10), transparent 60%);
+}
+.news-feat-img .ph {
+  position: absolute; left: 16px; bottom: 14px; right: 16px;
+  display: flex; gap: 8px; align-items: center;
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--ink-1);
+}
+.news-feat-img .ph .live {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--rd);
+  box-shadow: 0 0 6px var(--rd);
+}
+
+.news-tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 9.5px; letter-spacing: 0.22em; text-transform: uppercase;
+  font-weight: 700;
+  padding: 3px 8px;
+  border: 1px solid;
+  color: var(--cy); border-color: var(--cy-dim); background: var(--cy-bg);
+}
+.news-tag.markets   { color: var(--cy); border-color: var(--cy-dim); background: var(--cy-bg); }
+.news-tag.earnings  { color: var(--gn); border-color: var(--gn-dim); background: var(--gn-bg); }
+.news-tag.macro     { color: var(--amb); border-color: var(--amb-dim); background: var(--amb-bg); }
+.news-tag.crypto    { color: #c084fc; border-color: #6b1f9a; background: rgba(192,132,252,0.06); }
+.news-tag.companies { color: var(--ink-1); border-color: var(--line-2); background: var(--bg-3); }
+.news-tag.breaking  { color: var(--rd); border-color: var(--rd-dim); background: var(--rd-bg); }
+
+.news-feat .meta-row {
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+  color: var(--ink-3); text-transform: uppercase;
+}
+.news-feat .meta-row b { color: var(--ink-1); }
+.news-feat .head {
+  font-family: var(--mono); font-weight: 600;
+  font-size: 19px; line-height: 1.3;
+  color: var(--ink); letter-spacing: -0.005em;
+  margin-top: 2px; cursor: pointer;
+  background: none; border: none; padding: 0;
+}
+.news-feat .head:hover { color: var(--cy); }
+.news-feat .summ {
+  font-family: var(--mono); font-weight: 400;
+  font-size: 12px; line-height: 1.55;
+  color: var(--ink-1);
+  margin-top: 0;
+}
+.news-feat .src-row {
+  display: flex; gap: 12px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+  color: var(--ink-3); text-transform: uppercase;
+  margin-top: 6px;
+  padding-top: 10px; border-top: 1px dashed var(--ink-4);
+}
+.news-feat .src-row b { color: var(--cy); }
+
+/* Sub-cards in right columns */
+.news-card {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ink-4);
+  cursor: pointer;
+  transition: background 80ms;
+}
+.news-card:first-child { padding-top: 0; }
+.news-card:last-child { border-bottom: none; }
+.news-card .row1 {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 6px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+  color: var(--ink-3); text-transform: uppercase;
+}
+.news-card .row1 b { color: var(--ink-1); font-weight: 500; }
+.news-card .h {
+  font-family: var(--mono); font-weight: 500;
+  font-size: 13.5px; line-height: 1.35;
+  color: var(--ink); letter-spacing: -0.002em;
+}
+.news-card:hover .h { color: var(--cy); }
+.news-card .s {
+  font-family: var(--mono); font-weight: 400;
+  font-size: 11px; line-height: 1.5;
+  color: var(--ink-2);
+  margin-top: 5px;
+}
+.news-card .src-line {
+  display: flex; gap: 10px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em;
+  color: var(--ink-3); text-transform: uppercase;
+  margin-top: 8px;
+}
+.news-card .src-line b { color: var(--ink-2); }
+
+/* News column head */
+.news-col-h {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.news-col-h .t {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.22em;
+  text-transform: uppercase; font-weight: 700;
+  color: var(--amb);
+}
+.news-col-h .r {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.news-col-h .r b { color: var(--ink-1); }
+
+/* Trending tickers (rightmost column variation) */
+.trend-row {
+  display: grid; grid-template-columns: 30px 1fr auto auto;
+  gap: 10px; align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--ink-4);
+  font-size: 11.5px; cursor: pointer;
+}
+.trend-row:hover { background: var(--bg-3); }
+.trend-row .idx { color: var(--ink-3); font-size: 10.5px; }
+.trend-row .sym { color: var(--cy); font-weight: 700; }
+.trend-row .mini-bar {
+  width: 50px; height: 14px;
+  background: var(--ink-4);
+  position: relative; overflow: hidden;
+}
+.trend-row .mini-bar .b {
+  position: absolute; bottom: 0; width: 4px;
+  background: var(--gn);
+}
+.trend-row .pct { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 50px; text-align: right; }
+.trend-row .pct.up { color: var(--gn); }
+.trend-row .pct.down { color: var(--rd); }
+
+/* News footer */
+.news-foot {
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-2);
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: var(--mono);
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.news-foot a { color: var(--cy); cursor: pointer; }
+.news-foot a:hover { color: var(--ink); }
+
+/* ════════ DETAIL panel (Image 4) ════════════════════════════════ */
+.det-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center; gap: 24px;
+  padding: 18px 22px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+}
+.det-head .tk-big {
+  font-size: 40px; font-weight: 700; letter-spacing: -0.025em;
+  color: var(--amb); line-height: 1;
+}
+.det-head .name {
+  color: var(--ink-2); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+  margin-left: 14px;
+  align-self: center;
+}
+.det-head .px {
+  font-size: 38px; font-weight: 700;
+  color: var(--gn);
+  letter-spacing: -0.02em;
+  margin-left: auto; align-self: center;
+}
+.det-head .pct {
+  color: var(--gn); font-size: 14px; letter-spacing: 0.04em;
+  align-self: center;
+}
+.det-head .right { text-align: right; display: flex; flex-direction: column; gap: 6px; }
+.det-head .verdict {
+  display: inline-block;
+  padding: 8px 18px;
+  border: 1.5px solid var(--gn);
+  color: var(--gn);
+  font-size: 12px; letter-spacing: 0.14em; font-weight: 700;
+  cursor: pointer;
+}
+.det-head .verdict:hover { background: var(--gn-bg); }
+.det-head .meta { font-size: 10.5px; letter-spacing: 0.14em; color: var(--ink-2); text-transform: uppercase; }
+.det-head .meta b { color: var(--ink); }
+
+.det-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.1fr 1.1fr 0.9fr;
+  border: 1px solid var(--line); border-top: none;
+}
+
+/* Mock chart panel */
+.chart-mock {
+  padding: 18px;
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  gap: 12px;
+  background: var(--bg-1);
+  min-height: 360px;
+}
+.chart-svg { width: 100%; height: 220px; }
+.chart-foot {
+  display: flex; gap: 16px;
+  font-size: 11px; color: var(--ink-2);
+  letter-spacing: 0.08em;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* PILLARS sub-table inside chart column */
+.pillars { margin-top: auto; }
+.pillar-row {
+  display: grid; grid-template-columns: 40px 1fr auto;
+  gap: 12px; padding: 6px 0;
+  border-bottom: 1px solid var(--ink-4);
+  font-size: 11px;
+}
+.pillar-row .l { color: var(--ink-2); font-size: 10px; letter-spacing: 0.14em; }
+.pillar-row .d { color: var(--ink-1); font-size: 10.5px; }
+.pillar-row .v { color: var(--ink); font-weight: 700; font-size: 13px; text-align: right; }
+.pillar-row .v.amb { color: var(--amb); }
+.pillar-row .v.cy { color: var(--cy); }
+
+/* MTF table */
+.mtf-tbl, .ev-tbl {
+  width: 100%; border-collapse: collapse; font-size: 11.5px;
+}
+.mtf-tbl th, .ev-tbl th {
+  text-align: left; padding: 7px 10px;
+  font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 600;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.mtf-tbl td, .ev-tbl td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--ink-4);
+}
+.mtf-tbl td.tf { color: var(--ink); font-weight: 700; }
+.mtf-tbl td.stg { color: var(--gn); }
+.mtf-tbl td.ok { color: var(--gn); text-align: right; }
+.mtf-tbl td.ok.warn { color: var(--amb); }
+
+/* PLAN · LADDER */
+.ladd {
+  display: grid; grid-template-columns: 70px 1fr auto auto;
+  gap: 14px; align-items: center;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--ink-4);
+  font-size: 11.5px;
+}
+.ladd .lbl { color: var(--ink-2); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; }
+.ladd .px { color: var(--ink); font-weight: 700; }
+.ladd .note { color: var(--ink-2); text-align: right; font-size: 10.5px; letter-spacing: 0.06em; }
+.ladd .delta { color: var(--gn); font-weight: 600; text-align: right; min-width: 50px; }
+.ladd.now { background: var(--gn-bg); }
+.ladd.now .lbl, .ladd.now .px { color: var(--gn); }
+.ladd.stop .px, .ladd.stop .delta { color: var(--rd); }
+.ladd.stop .lbl { color: var(--rd); }
+
+/* INTEL panel (right) */
+.det-intel { font-size: 11.5px; }
+
+/* HIST trades */
+.hist-row {
+  display: grid; grid-template-columns: 36px 60px 1fr auto auto;
+  gap: 10px; align-items: center;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--ink-4);
+  font-size: 11.5px;
+}
+.hist-row .mo { color: var(--ink-2); font-size: 10.5px; letter-spacing: 0.1em; }
+.hist-row .tag { color: var(--ink); font-weight: 600; }
+.hist-row .res { font-size: 10px; letter-spacing: 0.06em; }
+.hist-row .badge {
+  padding: 1px 8px;
+  font-size: 9.5px; letter-spacing: 0.14em; font-weight: 700;
+  min-width: 24px; text-align: center;
+}
+.hist-row .badge.w { color: var(--gn); border: 1px solid var(--gn-dim); background: var(--gn-bg); }
+.hist-row .badge.l { color: var(--rd); border: 1px solid var(--rd-dim); background: var(--rd-bg); }
+.hist-row .pnl { color: var(--gn); font-weight: 600; text-align: right; min-width: 60px; }
+.hist-row.loss .pnl { color: var(--rd); }
+
+/* Spacing utility */
+.gap-12 { height: 12px; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--ink-4); }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-3); }
+</style>
+</head>
+
+<body>
+
+<!-- ════════════ BRAND BAR ════════════ -->
+<div class="brandbar">
+  <div class="brandbar-l">
+    <span class="brandbar-wm">Kairos</span>
+    <span class="brandbar-tag">Trade when, not that.</span>
+  </div>
+  <div class="brandbar-r">
+    <span><span class="dot"></span>LIVE · <span id="bb-regime">RISK-ON CHOPPY</span></span>
+    <span>P&amp;L <b id="bb-pnl">—</b></span>
+    <span>DD <b id="bb-dd">—</b></span>
+    <span id="bb-clock">—</span>
+  </div>
+</div>
+
+<div class="layout">
+
+<!-- ════════════ LEFT SIDEBAR ════════════ -->
+<aside class="sidebar">
+
+  <div class="sb-section">
+    <div class="sb-h">Workspaces</div>
+    <div class="sb-link"><span class="ico">⌬</span>Elite Picks<span class="ct" id="sb-elite">0</span></div>
+    <div class="sb-link"><span class="ico">📋</span>Thesis<span class="ct" id="sb-thesis">0</span></div>
+    <div class="sb-link"><span class="ico">⚡</span>Options Flow<span class="ct" id="sb-uoa">0</span></div>
+    <div class="sb-link"><span class="ico">📅</span>Earnings<span class="ct" id="sb-earn">0</span></div>
+    <div class="sb-link on"><span class="ico">▣</span>Signal Scanner<span class="kbd">G</span></div>
+    <div class="sb-link"><span class="ico">◐</span>Watchlist<span class="ct" id="sb-wl">0</span></div>
+    <div class="sb-link"><span class="ico">▣</span>Portfolio · Positions<span class="ct" id="sb-pos">0</span></div>
+    <div class="sb-link"><span class="ico">⚡</span>Alerts<span class="ct" id="sb-alerts">0</span></div>
+    <div class="sb-link warn"><span class="ico">×</span>Killed / AVOID<span class="ct" id="sb-killed">0</span></div>
+    <div class="sb-link"><span class="ico">∿</span>Performance<span class="ct" id="sb-perf">0</span></div>
+    <div class="sb-link"><span class="ico">▦</span>Audit Trail<span class="ct" id="sb-audit">0</span></div>
+    <div class="sb-link"><span class="ico">⊞</span>Screener<span class="ct" id="sb-screener">0</span></div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-h">Markets</div>
+    <div class="sb-link"><span class="ico">🏭</span>Industries<span class="ct" id="sb-ind">0</span></div>
+    <div class="sb-link"><span class="ico">📈</span>Market</div>
+    <div class="sb-link"><span class="ico">🌐</span>Macro · Events<span class="ct" id="sb-macro">0</span></div>
+    <div class="sb-link"><span class="ico">🌅</span>Pre-Market<span class="ct" id="sb-pm">0</span></div>
+    <div class="sb-link"><span class="ico">🆕</span>IPO · Splits<span class="ct" id="sb-ipo">0</span></div>
+    <div class="sb-link"><span class="ico">○</span>Themes</div>
+    <div class="sb-link"><span class="ico">⚙</span>Strategies</div>
+    <div class="sb-link"><span class="ico">⚙</span>Leveraged</div>
+    <div class="sb-link"><span class="ico">₿</span>Crypto</div>
+  </div>
+
+  <div class="sb-stats">
+    <div class="sb-h" style="padding:0 0 6px;color:var(--ink-3)">Signal Mix</div>
+    <div class="sb-stat-row"><span class="l">Long</span><span class="v up" id="sm-long">0</span></div>
+    <div class="sb-stat-row"><span class="l">Short</span><span class="v down" id="sm-short">5</span></div>
+    <div class="sb-stat-row"><span class="l">Watch</span><span class="v amb" id="sm-watch">60</span></div>
+    <div class="sb-stat-row"><span class="l">Killed</span><span class="v" id="sm-killed">—</span></div>
+    <div class="sb-stat-row"><span class="l">Universe</span><span class="v" id="sm-univ">395</span></div>
+  </div>
+
+  <div class="sb-stats">
+    <div class="sb-h" style="padding:0 0 6px;color:var(--ink-3)">Open P/L</div>
+    <div class="sb-stat-row"><span class="l">Unrealized</span><span class="v up" id="pl-unreal">+$0</span></div>
+    <div class="sb-stat-row"><span class="l">Positions</span><span class="v" id="pl-pos">0</span></div>
+  </div>
+
+  <div class="sb-quick">
+    <div class="sb-h" style="padding:0 0 6px;color:var(--ink-3)">Quick Tickers</div>
+    <div class="sb-quick-grid" id="quick-tickers">
+      <div class="sb-quick-chip"><b>JBL</b><span class="pct dim">—</span></div>
+      <div class="sb-quick-chip"><b>HPQ</b><span class="pct dim">—</span></div>
+      <div class="sb-quick-chip"><b>ORCL</b><span class="pct dim">—</span></div>
+      <div class="sb-quick-chip"><b>MCHP</b><span class="pct dim">—</span></div>
+      <div class="sb-quick-chip"><b>GDDY</b><span class="pct dim">—</span></div>
+      <div class="sb-quick-chip"><b>NTAP</b><span class="pct dim">—</span></div>
+    </div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-h">Reference</div>
+    <div class="sb-link"><span class="ico">▦</span>Playbook</div>
+    <div class="sb-link"><span class="ico">∿</span>Accuracy</div>
+    <div class="sb-link"><span class="ico">≣</span>Fields · Schema</div>
+    <div class="sb-link"><span class="ico">≡</span>Reference</div>
+    <div class="sb-link"><span class="ico">●</span>Status</div>
+    <div class="sb-link"><span class="ico">⚒</span>Settings</div>
+    <div class="sb-link"><span class="ico">⚕</span><a href="/audit_360.html">Audit 360</a><span class="ct" id="sb-a360">88</span></div>
+    <div class="sb-link"><span class="ico">📋</span><a href="cheatsheet.html">Cheat Sheet</a></div>
+  </div>
+
+</aside>
+
+<!-- ════════════ MAIN CONTENT ════════════ -->
+<main class="main">
+
+<!-- ════════════ TOP TAB BAR ════════════ -->
+<div class="tabs">
+  <div class="tab on" data-pan="dash">Dashboard</div>
+  <div class="tab" data-pan="detail">Detail</div>
+</div>
+
+<div class="page">
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- DASHBOARD PANEL                                                  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="panel on" id="pan-dash">
+
+    <!-- Header strip -->
+    <div class="head">
+      <div class="head-l">
+        <span class="brand">KAIROS <b>v12.04</b></span>
+        <span class="nav dim">HOME</span>
+        <span class="feeds">
+          <span><span class="d"></span>NSDQ</span>
+          <span><span class="d"></span>NYSE</span>
+          <span><span class="d"></span>OPRA</span>
+        </span>
+      </div>
+      <div class="head-l">
+        <!-- center spacer -->
+      </div>
+      <div class="head-r">
+        <span class="clock" id="clk">14:32:08 ET</span>
+        <span>SPX <b class="up num">5,847.21 +0.42</b></span>
+        <span>VIX <b class="amb num">14.20 −3.10</b></span>
+        <span>US10Y <b class="cy num">4.21</b></span>
+      </div>
+    </div>
+
+    <!-- TAPE -->
+    <div class="tape">
+      <div class="lbl">TAPE:</div>
+      <div class="items num">
+        <span><b>NVDA</b> 192.40 <span class="pct up">+1.84%</span></span>
+        <span class="sep">·</span>
+        <span><b>AVGO</b> 1742.10 <span class="pct up">+0.92%</span></span>
+        <span class="sep">·</span>
+        <span><b>META</b> 612.30 <span class="pct up">+0.41%</span></span>
+        <span class="sep">·</span>
+        <span><b>MSFT</b> 432.18 <span class="pct up">+0.55%</span></span>
+        <span class="sep">·</span>
+        <span><b>TSLA</b> 248.10 <span class="pct down">−2.14%</span></span>
+        <span class="sep">·</span>
+        <span><b>AMD</b> 164.20 <span class="pct up">+2.01%</span></span>
+        <span class="sep">·</span>
+        <span><b>COIN</b> 218.40 <span class="pct up">+3.12%</span></span>
+      </div>
+    </div>
+
+    <!-- F-keys -->
+    <div class="fkeys">
+      <div class="fk on"><b>F1</b>FRONT</div>
+      <div class="fk"><b>F2</b>WATCH</div>
+      <div class="fk"><b>F3</b>PLAN</div>
+      <div class="fk"><b>F4</b>INTEL</div>
+      <div class="fk"><b>F5</b>SECT</div>
+      <div class="fk"><b>F6</b>JRNL</div>
+      <div class="fk"><b>F7</b>SCAN</div>
+      <div class="fk"><b>F12</b>HELP</div>
+    </div>
+
+    <!-- 3-column grid -->
+    <div class="grid">
+
+      <!-- ─── COL 1: WATCHLIST · BAP RANK ──────────────────────── -->
+      <div class="col">
+        <div class="p-head">
+          <div class="l"><span class="amb">WATCHLIST</span> <b>·</b> BAP RANK</div>
+          <div class="r">13 NAMES <b>·</b> ≥80 HOT</div>
+        </div>
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>#</th><th>SYM</th><th>SETUP</th>
+              <th class="r">BAP</th><th class="r">PX</th><th class="r">%D</th>
+              <th class="r">RVOL</th><th class="r">R:R</th><th class="r">EARN</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="idx">01</td><td class="sym">NVDA</td><td class="setup">BFLG·D</td><td class="bap">88</td><td class="r px">192.40</td><td class="r up">+1.84</td><td class="r dim">1.4×</td><td class="r dim">1:3.2</td><td class="r amb">+12d</td></tr>
+            <tr><td class="idx">02</td><td class="sym">AVGO</td><td class="setup">BFLG·D</td><td class="bap">82</td><td class="r px">1742.1</td><td class="r up">+0.92</td><td class="r dim">1.2×</td><td class="r dim">1:3.0</td><td class="r dim">—</td></tr>
+            <tr><td class="idx">03</td><td class="sym">META</td><td class="setup">PB50</td><td class="bap">79</td><td class="r px">612.30</td><td class="r up">+0.41</td><td class="r dim">0.9×</td><td class="r dim">1:2.8</td><td class="r amb">+18d</td></tr>
+            <tr><td class="idx">04</td><td class="sym">PANW</td><td class="setup">C&H·D</td><td class="bap">76</td><td class="r px">382.41</td><td class="r down">−0.22</td><td class="r dim">1.1×</td><td class="r dim">1:2.6</td><td class="r dim">—</td></tr>
+            <tr><td class="idx">05</td><td class="sym">SHOP</td><td class="setup">RTST</td><td class="bap">74</td><td class="r px">98.10</td><td class="r up">+1.10</td><td class="r dim">1.5×</td><td class="r dim">1:3.5</td><td class="r amb">+6d</td></tr>
+            <tr><td class="idx">06</td><td class="sym">MSFT</td><td class="setup">TRL</td><td class="bap lo">72</td><td class="r px">432.18</td><td class="r up">+0.55</td><td class="r dim">0.8×</td><td class="r dim">1:2.4</td><td class="r dim">—</td></tr>
+            <tr><td class="idx">07</td><td class="sym">GOOGL</td><td class="setup">S2·T</td><td class="bap lo">70</td><td class="r px">182.44</td><td class="r up">+1.12</td><td class="r dim">1.0×</td><td class="r dim">1:2.5</td><td class="r amb">+22d</td></tr>
+            <tr><td class="idx">08</td><td class="sym">CRWD</td><td class="setup">BASE</td><td class="bap lo">68</td><td class="r px">342.50</td><td class="r up">+0.66</td><td class="r dim">0.9×</td><td class="r dim">1:2.2</td><td class="r dim">—</td></tr>
+            <tr><td class="idx">09</td><td class="sym">NOW</td><td class="setup">WAIT</td><td class="bap bad">66</td><td class="r px">912.40</td><td class="r up">+0.34</td><td class="r dim">0.7×</td><td class="r dim">1:2.1</td><td class="r dim">—</td></tr>
+            <tr><td class="idx">10</td><td class="sym">ADBE</td><td class="setup">WAIT</td><td class="bap bad">64</td><td class="r px">468.20</td><td class="r down">−0.51</td><td class="r dim">0.9×</td><td class="r dim">1:2.0</td><td class="r amb">+19d</td></tr>
+            <tr><td class="idx">11</td><td class="sym">SQ</td><td class="setup">PB21</td><td class="bap bad">62</td><td class="r px">78.40</td><td class="r up">+0.84</td><td class="r dim">1.2×</td><td class="r dim">1:1.9</td><td class="r dim">—</td></tr>
+            <tr><td class="idx">12</td><td class="sym">DDOG</td><td class="setup">WAIT</td><td class="bap bad">60</td><td class="r px">128.90</td><td class="r down">−1.04</td><td class="r dim">0.8×</td><td class="r dim">1:1.8</td><td class="r dim">—</td></tr>
+            <tr><td class="idx">13</td><td class="sym">SNOW</td><td class="setup">WAIT</td><td class="bap bad">58</td><td class="r px">155.20</td><td class="r down">−0.68</td><td class="r dim">0.8×</td><td class="r dim">1:1.6</td><td class="r amb">+4d</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ─── COL 2: SECTORS + BLOTTER ────────────────────────────── -->
+      <div class="col">
+        <div class="p-head">
+          <div class="l"><span class="amb">SECTORS</span> <b>·</b> TODAY</div>
+          <div class="r">9 GICS</div>
+        </div>
+        <div>
+          <div class="sect-row">
+            <span class="lbl">SEMI</span>
+            <span class="w">12W</span>
+            <span class="l">2L</span>
+            <span class="bar"><span class="f pos" style="width:68%"></span></span>
+            <span class="pct up num">+1.84</span>
+          </div>
+          <div class="sect-row">
+            <span class="lbl">SOFT</span>
+            <span class="w">18W</span>
+            <span class="l">6L</span>
+            <span class="bar"><span class="f pos" style="width:36%"></span></span>
+            <span class="pct up num">+0.91</span>
+          </div>
+          <div class="sect-row">
+            <span class="lbl">CONS</span>
+            <span class="w">14W</span>
+            <span class="l">8L</span>
+            <span class="bar"><span class="f pos" style="width:16%"></span></span>
+            <span class="pct up num">+0.42</span>
+          </div>
+          <div class="sect-row">
+            <span class="lbl">FINX</span>
+            <span class="w">22W</span>
+            <span class="l">22L</span>
+            <span class="bar"><span class="f pos" style="width:2%"></span></span>
+            <span class="pct up num">+0.04</span>
+          </div>
+          <div class="sect-row">
+            <span class="lbl">HLTH</span>
+            <span class="w">12W</span>
+            <span class="l">16L</span>
+            <span class="bar"><span class="f neg" style="width:8%"></span></span>
+            <span class="pct down num">−0.18</span>
+          </div>
+          <div class="sect-row">
+            <span class="lbl">STPL</span>
+            <span class="w">10W</span>
+            <span class="l">9L</span>
+            <span class="bar"><span class="f pos" style="width:4%"></span></span>
+            <span class="pct up num">+0.10</span>
+          </div>
+          <div class="sect-row">
+            <span class="lbl">UTIL</span>
+            <span class="w">4W</span>
+            <span class="l">14L</span>
+            <span class="bar"><span class="f neg" style="width:24%"></span></span>
+            <span class="pct down num">−0.62</span>
+          </div>
+          <div class="sect-row">
+            <span class="lbl">ENRG</span>
+            <span class="w">3W</span>
+            <span class="l">18L</span>
+            <span class="bar"><span class="f neg" style="width:56%"></span></span>
+            <span class="pct down num">−1.42</span>
+          </div>
+          <div class="sect-row">
+            <span class="lbl">MATR</span>
+            <span class="w">6W</span>
+            <span class="l">11L</span>
+            <span class="bar"><span class="f neg" style="width:13%"></span></span>
+            <span class="pct down num">−0.34</span>
+          </div>
+        </div>
+
+        <!-- BLOTTER -->
+        <div class="p-head" style="margin-top:0;border-top:1px solid var(--line)">
+          <div class="l"><span class="amb">ACCT</span> <b>·</b> BLOTTER</div>
+          <div class="r">3 OPEN</div>
+        </div>
+        <div class="blot">
+          <div class="blot-row">
+            <span class="sym">NVDA</span>
+            <span class="pos">142 @ <b>191.00</b></span>
+            <span class="pct up num">+1.84</span>
+            <span class="pnl up num">+$199</span>
+          </div>
+          <div class="blot-row">
+            <span class="sym">AVGO</span>
+            <span class="pos">8 @ <b>1720.5</b></span>
+            <span class="pct up num">+0.92</span>
+            <span class="pnl up num">+$172</span>
+          </div>
+          <div class="blot-row">
+            <span class="sym">META</span>
+            <span class="pos">20 @ <b>605.4</b></span>
+            <span class="pct up num">+1.14</span>
+            <span class="pnl up num">+$138</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── COL 3: INTEL · WIRE (terminal one-liners) ──────────── -->
+      <div class="col">
+        <div class="p-head">
+          <div class="l"><span class="amb">INTEL</span> <b>·</b> WIRE</div>
+          <div class="r">ONE-LINERS · TODAY</div>
+        </div>
+        <div>
+          <div class="wire-row">
+            <span class="ts num">13:42</span>
+            <span class="sym">NVDA</span>
+            <span class="txt">Citi PT $215, datacenter capex</span>
+            <span class="badge bull">BULL</span>
+            <span class="src">RTRS</span>
+          </div>
+          <div class="wire-row">
+            <span class="ts num">12:55</span>
+            <span class="sym">AVGO</span>
+            <span class="txt">VMware integration on plan</span>
+            <span class="badge bull">BULL</span>
+            <span class="src">BLM</span>
+          </div>
+          <div class="wire-row">
+            <span class="ts num">11:30</span>
+            <span class="sym">MKT</span>
+            <span class="txt">CPI +2.4% YoY in line</span>
+            <span class="badge mac">MAC</span>
+            <span class="src">BLS</span>
+          </div>
+          <div class="wire-row">
+            <span class="ts num">11:02</span>
+            <span class="sym">TSLA</span>
+            <span class="txt">Q1 deliveries miss by 4%</span>
+            <span class="badge bear">BEAR</span>
+            <span class="src">CO</span>
+          </div>
+          <div class="wire-row">
+            <span class="ts num">10:14</span>
+            <span class="sym">PANW</span>
+            <span class="txt">$1.2B DoD IDIQ award</span>
+            <span class="badge bull">BULL</span>
+            <span class="src">DoD</span>
+          </div>
+          <div class="wire-row">
+            <span class="ts num">09:55</span>
+            <span class="sym">NVDA</span>
+            <span class="txt">CES keynote whisper · SKU</span>
+            <span class="badge neut">NEUT</span>
+            <span class="src">WIRE</span>
+          </div>
+          <div class="wire-row">
+            <span class="ts num">09:22</span>
+            <span class="sym">XOM</span>
+            <span class="txt">Refining margins compressed</span>
+            <span class="badge bear">BEAR</span>
+            <span class="src">JPM</span>
+          </div>
+          <div class="wire-row">
+            <span class="ts num">08:47</span>
+            <span class="sym">MSFT</span>
+            <span class="txt">Azure usage tracks +28% QoQ</span>
+            <span class="badge bull">BULL</span>
+            <span class="src">MSFT</span>
+          </div>
+          <div class="wire-row">
+            <span class="ts num">08:30</span>
+            <span class="sym">MKT</span>
+            <span class="txt">Initial claims 218K, in line</span>
+            <span class="badge mac">MAC</span>
+            <span class="src">DOL</span>
+          </div>
+          <div class="wire-row">
+            <span class="ts num">07:54</span>
+            <span class="sym">CRWD</span>
+            <span class="txt">Falcon win at major bank</span>
+            <span class="badge bull">BULL</span>
+            <span class="src">CO</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- NEWS · LATEST (Yahoo Finance–style cards)                       -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="p-head" style="border-top:1px solid var(--line)">
+      <div class="l"><span class="amb">NEWS</span> <b>·</b> LATEST</div>
+      <div class="r">UPDATED <b style="color:var(--gn)">3M AGO</b> · 24 stories today</div>
+    </div>
+
+    <section class="news">
+      <div class="news-grid">
+
+        <!-- ─── FEATURED (left, big) ─────────────────────────────── -->
+        <div class="news-col">
+          <div class="news-feat">
+            <div class="news-feat-img">
+              <div class="ph">
+                <span class="live"></span>
+                <span>LIVE · GETTY IMAGES · NYSE FLOOR</span>
+              </div>
+            </div>
+
+            <div class="meta-row">
+              <span class="news-tag markets">MARKETS</span>
+              <span><b>3m ago</b></span>
+              <span>4 min read</span>
+            </div>
+
+            <button class="head">
+              Nvidia hits fresh record as AI capex talk extends rally; Citi raises target to $215
+            </button>
+
+            <p class="summ">
+              Shares of Nvidia (<b style="color:var(--cy)">NVDA</b>) crossed $192 in afternoon trade after Citi raised its price target citing accelerating hyperscaler capex commentary from META and MSFT. AVGO and AMD followed higher; the semiconductor index added 1.6% as breadth widened to 38 new 52-week highs.
+            </p>
+
+            <div class="src-row">
+              <span><b>REUTERS</b></span>
+              <span>by Sarah Chen</span>
+              <span>· 14:29 ET</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─── MIDDLE COLUMN: top stories ───────────────────────── -->
+        <div class="news-col">
+          <div class="news-col-h">
+            <span class="t">Top stories</span>
+            <span class="r"><b>12</b> new</span>
+          </div>
+
+          <div class="news-card">
+            <div class="row1">
+              <span class="news-tag macro">MACRO</span>
+              <span><b>11m ago</b></span>
+            </div>
+            <div class="h">FOMC minutes Wednesday: traders price 65% odds of one more cut by July</div>
+            <div class="s">Fed-funds futures shifted overnight after PPI came in cooler than expected. Curve flattened by 4bps with 10-year at 4.21%.</div>
+            <div class="src-line"><b>BLOOMBERG</b> <span>by Adam Hicks</span></div>
+          </div>
+
+          <div class="news-card">
+            <div class="row1">
+              <span class="news-tag earnings">EARNINGS</span>
+              <span><b>27m ago</b></span>
+            </div>
+            <div class="h">Tesla Q1 deliveries miss by 4% — first sequential drop in 8 quarters</div>
+            <div class="s">Tesla (<b style="color:var(--cy)">TSLA</b>) shares fell 2.1% after Q1 deliveries of 386K missed the 402K consensus. China softness cited; Cybertruck production ramping.</div>
+            <div class="src-line"><b>CO RELEASE</b> <span>· prelim</span></div>
+          </div>
+
+          <div class="news-card">
+            <div class="row1">
+              <span class="news-tag companies">COMPANIES</span>
+              <span><b>42m ago</b></span>
+            </div>
+            <div class="h">PANW lands $1.2B Department of Defense IDIQ award — five-year ceiling</div>
+            <div class="s">Palo Alto (<b style="color:var(--cy)">PANW</b>) jumped 4.8% premarket on the news. Cyber resilience theme remains intact — CRWD, ZS, NET all green.</div>
+            <div class="src-line"><b>DoD RELEASE</b> <span>· classified ceiling</span></div>
+          </div>
+
+          <div class="news-card">
+            <div class="row1">
+              <span class="news-tag breaking">BREAKING</span>
+              <span><b>1h ago</b></span>
+            </div>
+            <div class="h">CPI prints +2.4% YoY, in line — core unchanged at 3.2%</div>
+            <div class="s">May CPI MoM came in at 0.2% versus 0.2% expected. Bond market reaction muted; equities held gains.</div>
+            <div class="src-line"><b>BLS</b> <span>· source data</span></div>
+          </div>
+
+          <div class="news-card">
+            <div class="row1">
+              <span class="news-tag earnings">EARNINGS</span>
+              <span><b>2h ago</b></span>
+            </div>
+            <div class="h">Salesforce on deck Tuesday AMC — 7-of-8 quarter beat streak, ESP +4.2%</div>
+            <div class="s">CRM expected to print $0.92 EPS / $9.4B revenue. IV-rank 62 suggests options markets pricing material move.</div>
+            <div class="src-line"><b>CONSENSUS</b> <span>· Zacks ESP</span></div>
+          </div>
+        </div>
+
+        <!-- ─── RIGHT COLUMN: trending tickers + crypto ─────────── -->
+        <div class="news-col">
+          <div class="news-col-h">
+            <span class="t">Trending</span>
+            <span class="r">most read</span>
+          </div>
+
+          <div class="trend-row">
+            <span class="idx">01</span>
+            <span class="sym">NVDA</span>
+            <span class="mini-bar">
+              <span class="b" style="height:30%;left:0"></span>
+              <span class="b" style="height:50%;left:6px"></span>
+              <span class="b" style="height:45%;left:12px"></span>
+              <span class="b" style="height:65%;left:18px"></span>
+              <span class="b" style="height:60%;left:24px"></span>
+              <span class="b" style="height:80%;left:30px"></span>
+              <span class="b" style="height:75%;left:36px"></span>
+              <span class="b" style="height:100%;left:42px"></span>
+            </span>
+            <span class="pct up">+1.84%</span>
+          </div>
+          <div class="trend-row">
+            <span class="idx">02</span>
+            <span class="sym">TSLA</span>
+            <span class="mini-bar">
+              <span class="b" style="height:80%;left:0;background:var(--rd)"></span>
+              <span class="b" style="height:75%;left:6px;background:var(--rd)"></span>
+              <span class="b" style="height:60%;left:12px;background:var(--rd)"></span>
+              <span class="b" style="height:55%;left:18px;background:var(--rd)"></span>
+              <span class="b" style="height:50%;left:24px;background:var(--rd)"></span>
+              <span class="b" style="height:42%;left:30px;background:var(--rd)"></span>
+              <span class="b" style="height:38%;left:36px;background:var(--rd)"></span>
+              <span class="b" style="height:30%;left:42px;background:var(--rd)"></span>
+            </span>
+            <span class="pct down">−2.14%</span>
+          </div>
+          <div class="trend-row">
+            <span class="idx">03</span>
+            <span class="sym">COIN</span>
+            <span class="mini-bar">
+              <span class="b" style="height:40%;left:0"></span>
+              <span class="b" style="height:48%;left:6px"></span>
+              <span class="b" style="height:55%;left:12px"></span>
+              <span class="b" style="height:60%;left:18px"></span>
+              <span class="b" style="height:70%;left:24px"></span>
+              <span class="b" style="height:75%;left:30px"></span>
+              <span class="b" style="height:85%;left:36px"></span>
+              <span class="b" style="height:95%;left:42px"></span>
+            </span>
+            <span class="pct up">+3.12%</span>
+          </div>
+          <div class="trend-row">
+            <span class="idx">04</span>
+            <span class="sym">PLTR</span>
+            <span class="mini-bar">
+              <span class="b" style="height:35%;left:0"></span>
+              <span class="b" style="height:45%;left:6px"></span>
+              <span class="b" style="height:55%;left:12px"></span>
+              <span class="b" style="height:60%;left:18px"></span>
+              <span class="b" style="height:72%;left:24px"></span>
+              <span class="b" style="height:80%;left:30px"></span>
+              <span class="b" style="height:90%;left:36px"></span>
+              <span class="b" style="height:100%;left:42px"></span>
+            </span>
+            <span class="pct up">+8.42%</span>
+          </div>
+          <div class="trend-row">
+            <span class="idx">05</span>
+            <span class="sym">LULU</span>
+            <span class="mini-bar">
+              <span class="b" style="height:90%;left:0;background:var(--rd)"></span>
+              <span class="b" style="height:80%;left:6px;background:var(--rd)"></span>
+              <span class="b" style="height:70%;left:12px;background:var(--rd)"></span>
+              <span class="b" style="height:55%;left:18px;background:var(--rd)"></span>
+              <span class="b" style="height:45%;left:24px;background:var(--rd)"></span>
+              <span class="b" style="height:35%;left:30px;background:var(--rd)"></span>
+              <span class="b" style="height:22%;left:36px;background:var(--rd)"></span>
+              <span class="b" style="height:10%;left:42px;background:var(--rd)"></span>
+            </span>
+            <span class="pct down">−9.74%</span>
+          </div>
+          <div class="trend-row">
+            <span class="idx">06</span>
+            <span class="sym">AVGO</span>
+            <span class="mini-bar">
+              <span class="b" style="height:50%;left:0"></span>
+              <span class="b" style="height:55%;left:6px"></span>
+              <span class="b" style="height:60%;left:12px"></span>
+              <span class="b" style="height:62%;left:18px"></span>
+              <span class="b" style="height:65%;left:24px"></span>
+              <span class="b" style="height:70%;left:30px"></span>
+              <span class="b" style="height:72%;left:36px"></span>
+              <span class="b" style="height:78%;left:42px"></span>
+            </span>
+            <span class="pct up">+0.92%</span>
+          </div>
+
+          <!-- Crypto sub-section -->
+          <div class="news-col-h" style="margin-top:18px">
+            <span class="t" style="color:#c084fc">Crypto</span>
+            <span class="r">24h</span>
+          </div>
+
+          <div class="news-card">
+            <div class="row1">
+              <span class="news-tag crypto">CRYPTO</span>
+              <span><b>1h ago</b></span>
+            </div>
+            <div class="h">Bitcoin reclaims $98K as ETF inflows hit record $4.2B for the week</div>
+            <div class="s">Spot BTC ETFs pulled in $4.2B over the past five sessions — the highest weekly figure since launch. BlackRock IBIT alone took $1.7B.</div>
+            <div class="src-line"><b>FARSIDE</b> <span>· flow data</span></div>
+          </div>
+
+          <div class="news-card">
+            <div class="row1">
+              <span class="news-tag crypto">CRYPTO</span>
+              <span><b>3h ago</b></span>
+            </div>
+            <div class="h">Coinbase up 3.1% as exchange volume tops $8B daily for first time since March</div>
+            <div class="s"><b style="color:var(--cy)">COIN</b> retail engagement on the rebound. UOA shows 5.2× call volume on Jun $280 strike — institutions positioning.</div>
+            <div class="src-line"><b>FLOW</b> <span>· Schwab options</span></div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="news-foot">
+        <span>SOURCES: Reuters · Bloomberg · BLS · DoD · EODHD · co releases · Schwab options flow</span>
+        <a>view all news →</a>
+      </div>
+    </section>
+
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- DETAIL PANEL  — single ticker view (Image 4 reference)           -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="panel" id="pan-detail">
+
+    <!-- Header strip -->
+    <div class="head">
+      <div class="head-l">
+        <span class="brand">KAIROS <b>v12.04</b></span>
+        <span class="nav dim">NVDA US</span>
+        <span class="feeds"><span><span class="d"></span>NSDQ</span></span>
+      </div>
+      <div class="head-l"></div>
+      <div class="head-r">
+        <span class="clock" id="clk2">14:32:08 ET</span>
+        <span>OHLC <b class="num">191.20/193.10/190.80/192.40</b></span>
+        <span>VOL <b class="num">42.1M 1.4×</b></span>
+      </div>
+    </div>
+
+    <!-- Ticker hero -->
+    <div class="det-head">
+      <div style="display:flex;align-items:baseline">
+        <span class="tk-big">NVDA</span>
+        <span class="name">NVIDIA CORP · US EQUITY</span>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:14px">
+        <span class="px num">192.40</span>
+        <span class="pct">▲ +1.84% &nbsp;+3.48</span>
+      </div>
+      <div class="right">
+        <span class="verdict">BUY · IN ZONE</span>
+        <span class="meta">BAP <b>88</b> · #1 &nbsp; · &nbsp; SETUP <b>BFLG·D</b> &nbsp; · &nbsp; R:R <b>1:3.2</b></span>
+      </div>
+    </div>
+
+    <div class="det-grid">
+
+      <!-- COL 1: CHART + PILLARS -->
+      <div class="chart-mock">
+        <div class="p-head" style="margin:-18px -18px 8px -18px">
+          <div class="l"><span class="amb">CHART</span> <b>·</b> NVDA D · 80</div>
+          <div class="r">PLAN OVERLAY</div>
+        </div>
+        <svg class="chart-svg" viewBox="0 0 280 220" preserveAspectRatio="none">
+          <!-- T2, T1, ENTRY, STOP lines -->
+          <line x1="0" y1="22"  x2="280" y2="22"  stroke="#5ec8d8" stroke-width="0.5" stroke-dasharray="3,3"/>
+          <line x1="0" y1="58"  x2="280" y2="58"  stroke="#5be57c" stroke-width="0.5" stroke-dasharray="3,3"/>
+          <line x1="0" y1="118" x2="280" y2="118" stroke="#ffb95c" stroke-width="0.5" stroke-dasharray="3,3"/>
+          <line x1="0" y1="160" x2="280" y2="160" stroke="#ff6b5b" stroke-width="0.5" stroke-dasharray="3,3"/>
+          <text x="278" y="20" fill="#5ec8d8" font-size="7" text-anchor="end">T2 224</text>
+          <text x="278" y="56" fill="#5be57c" font-size="7" text-anchor="end">T1 208</text>
+          <text x="278" y="116" fill="#ffb95c" font-size="7" text-anchor="end">ENTRY 191</text>
+          <text x="278" y="158" fill="#ff6b5b" font-size="7" text-anchor="end">STOP 182</text>
+          <!-- Price line — generated trend up -->
+          <polyline points="0,180 8,178 16,175 24,170 32,168 40,172 48,165 56,158 64,160 72,150 80,148 88,142 96,140 104,138 112,130 120,128 128,125 136,120 144,118 152,114 160,110 168,108 176,105 184,98 192,95 200,90 208,92 216,85 224,82 232,78 240,75 248,72 256,68 264,64 272,62 280,58"
+                    fill="none" stroke="#5be57c" stroke-width="1.5"/>
+          <!-- now marker -->
+          <circle cx="280" cy="58" r="3" fill="#5be57c"/>
+        </svg>
+        <div class="chart-foot"><span>SR · 80 sessions</span><span class="dim">·</span><span>plan overlay live</span></div>
+
+        <!-- PILLARS -->
+        <div class="pillars" style="margin-top:8px">
+          <div class="p-head" style="margin:0 -18px 4px -18px">
+            <div class="l"><span class="amb">PILLARS</span></div>
+            <div class="r"><b class="gn">5/5</b></div>
+          </div>
+          <div class="pillar-row"><span class="l">TRD</span><span class="d">Stage 2 · ADX 28</span><span class="v">82</span></div>
+          <div class="pillar-row"><span class="l">MOM</span><span class="d">RSI 61 · MACD +.84</span><span class="v">74</span></div>
+          <div class="pillar-row"><span class="l">STR</span><span class="d">BOS 190 · FVG 185</span><span class="v amb">68</span></div>
+          <div class="pillar-row"><span class="l">QUAL</span><span class="d">Rev +88 · GM 74</span><span class="v">91</span></div>
+          <div class="pillar-row"><span class="l">SENT</span><span class="d">34/38 buy · skew flat</span><span class="v cy">71</span></div>
+        </div>
+      </div>
+
+      <!-- COL 2: MTF + EVIDENCE -->
+      <div>
+        <div class="p-head">
+          <div class="l"><span class="amb">MTF</span> <b>·</b> 4 TF</div>
+          <div class="r"><b class="gn">4/4 PASS</b></div>
+        </div>
+        <table class="mtf-tbl">
+          <thead><tr><th>TF</th><th>STAGE</th><th>RSI</th><th>MACD</th><th>STRUCT</th><th class="r">OK</th></tr></thead>
+          <tbody>
+            <tr><td class="tf">W</td><td class="stg">S2 UP</td><td>68</td><td class="up">+2.10</td><td>CONT</td><td class="ok">✓</td></tr>
+            <tr><td class="tf">D</td><td class="stg">S2 UP</td><td>61</td><td class="up">+0.84</td><td>BOS</td><td class="ok">✓</td></tr>
+            <tr><td class="tf">4H</td><td class="stg">UP</td><td>66</td><td class="up">+0.41</td><td>CHoCH</td><td class="ok">✓</td></tr>
+            <tr><td class="tf">1H</td><td class="stg">UP</td><td>72</td><td class="up">+0.14</td><td>EXT</td><td class="ok warn">⚠</td></tr>
+          </tbody>
+        </table>
+
+        <div class="p-head" style="margin-top:0">
+          <div class="l"><span class="amb">EVIDENCE</span> <b>·</b> TECH</div>
+          <div class="r"><b class="gn">11/12 P</b></div>
+        </div>
+        <table class="ev-tbl">
+          <tbody>
+            <tr><td>RSI(14)</td><td class="dim">≥55 ≤70</td><td class="r"><b class="num">61.2</b></td><td class="r up">✓</td></tr>
+            <tr><td>MACD</td><td class="dim">pos expand</td><td class="r up num">+0.84</td><td class="r up">✓</td></tr>
+            <tr><td>RVOL</td><td class="dim">≥1.3×</td><td class="r"><b class="num">1.4×</b></td><td class="r up">✓</td></tr>
+            <tr><td>ADX</td><td class="dim">≥20</td><td class="r"><b class="num">28</b></td><td class="r up">✓</td></tr>
+            <tr><td>1H STR</td><td class="dim">≤2.0 ATR</td><td class="r"><b class="amb">2.3</b></td><td class="r amb">⚠</td></tr>
+            <tr><td>RS vs SPX</td><td class="dim">52w hi</td><td class="r up">+12</td><td class="r up">✓</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- COL 3: PLAN · LADDER + OPTIONS -->
+      <div>
+        <div class="p-head">
+          <div class="l"><span class="amb">PLAN</span> <b>·</b> LADDER</div>
+          <div class="r"><b>142SH @ 191.00</b></div>
+        </div>
+        <div class="ladd">
+          <span class="lbl">T2</span>
+          <span class="px num">224.00</span>
+          <span class="note">close ⅓</span>
+          <span class="delta">+16.4</span>
+        </div>
+        <div class="ladd">
+          <span class="lbl">T1</span>
+          <span class="px num">208.00</span>
+          <span class="note">trim ⅔</span>
+          <span class="delta">+8.1</span>
+        </div>
+        <div class="ladd">
+          <span class="lbl">TRG</span>
+          <span class="px num">194.00</span>
+          <span class="note">zone top</span>
+          <span class="delta">+1.4</span>
+        </div>
+        <div class="ladd now">
+          <span class="lbl">NOW</span>
+          <span class="px num">192.40</span>
+          <span class="note">IN ZONE</span>
+          <span class="delta">▲1.84</span>
+        </div>
+        <div class="ladd">
+          <span class="lbl">AVG</span>
+          <span class="px num">191.00</span>
+          <span class="note">filled</span>
+          <span class="delta dim">−0.7</span>
+        </div>
+        <div class="ladd stop">
+          <span class="lbl">STP</span>
+          <span class="px num">182.00</span>
+          <span class="note">21EMA</span>
+          <span class="delta">−5.2</span>
+        </div>
+
+        <div class="p-head" style="margin-top:0">
+          <div class="l"><span class="amb">OPTIONS</span> <b>·</b> 30D</div>
+          <div class="r">IV 36.4 · RANK 42</div>
+        </div>
+        <table class="ev-tbl">
+          <tbody>
+            <tr><td class="num dim">14:21</td><td><b class="num">200C</b></td><td class="num">5.4k @ 3.25</td><td class="r up">▲ 1.76M</td></tr>
+            <tr><td class="num dim">13:48</td><td><b class="num">210C</b></td><td class="num">3.0k @ 1.40</td><td class="r up">▲ 420k</td></tr>
+            <tr><td class="num dim">13:14</td><td><b class="num">195C</b></td><td class="num">4.2k @ 5.10</td><td class="r up">▲ 2.14M</td></tr>
+            <tr><td class="num dim">12:35</td><td><b class="num">180P</b></td><td class="num">1.8k @ 2.30</td><td class="r down">▼ 414k</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- COL 4: INTEL · NVDA + CAL + HIST -->
+      <div>
+        <div class="p-head">
+          <div class="l"><span class="amb">INTEL</span> <b>·</b> NVDA</div>
+          <div class="r">TODAY</div>
+        </div>
+        <div class="wire-row" style="grid-template-columns:48px 1fr auto auto">
+          <span class="ts num">13:42</span>
+          <span class="txt">Citi PT raised to $215</span>
+          <span class="badge bull">BULL</span>
+          <span class="src">RTRS</span>
+        </div>
+        <div class="wire-row" style="grid-template-columns:48px 1fr auto auto">
+          <span class="ts num">11:58</span>
+          <span class="txt">Top pick · conviction</span>
+          <span class="badge bull">BULL</span>
+          <span class="src">MS</span>
+        </div>
+        <div class="wire-row" style="grid-template-columns:48px 1fr auto auto">
+          <span class="ts num">10:14</span>
+          <span class="txt">Edge-inf SKU rumor</span>
+          <span class="badge bull">BULL</span>
+          <span class="src">WIRE</span>
+        </div>
+        <div class="wire-row" style="grid-template-columns:48px 1fr auto auto">
+          <span class="ts num">09:55</span>
+          <span class="txt">Jun 200C 6k @ ask</span>
+          <span class="badge bull">BULL</span>
+          <span class="src">FLOW</span>
+        </div>
+
+        <div class="p-head" style="margin-top:0">
+          <div class="l"><span class="amb">CAL</span> <b>·</b> +30D</div>
+          <div class="r">2 EVENTS</div>
+        </div>
+        <div class="hist-row" style="grid-template-columns:36px 60px 1fr auto auto">
+          <span class="mo">+7d</span>
+          <span class="tag">CES</span>
+          <span class="dim">Jan 7 keynote · SKU</span>
+          <span class="badge w" style="color:var(--cy);border-color:var(--cy-dim);background:var(--cy-bg)">EVT</span>
+          <span class="src dim2">IR</span>
+        </div>
+        <div class="hist-row" style="grid-template-columns:36px 60px 1fr auto auto">
+          <span class="mo">+12d</span>
+          <span class="tag">ERN</span>
+          <span class="dim">May 8 AMC · $0.92e</span>
+          <span class="badge" style="color:var(--amb);border:1px solid var(--amb-dim);background:var(--amb-bg)">⚠</span>
+          <span class="src dim2">IR</span>
+        </div>
+
+        <div class="p-head" style="margin-top:0">
+          <div class="l"><span class="amb">HIST</span> <b>·</b> NVDA</div>
+          <div class="r">6 TRADES · <b class="gn">5/1</b></div>
+        </div>
+        <div class="hist-row">
+          <span class="mo">Apr</span>
+          <span class="tag">FLG</span>
+          <span class="res up">+12.1% · 2.4R</span>
+          <span class="badge w">W</span>
+          <span class="pnl">+$1142</span>
+        </div>
+        <div class="hist-row">
+          <span class="mo">Mar</span>
+          <span class="tag">CHN</span>
+          <span class="res up">+18.4% · 3.6R</span>
+          <span class="badge w">W</span>
+          <span class="pnl">+$2104</span>
+        </div>
+        <div class="hist-row">
+          <span class="mo">Jan</span>
+          <span class="tag">ERN+</span>
+          <span class="res up">+4.2% · 1.1R</span>
+          <span class="badge w">W</span>
+          <span class="pnl">+$684</span>
+        </div>
+        <div class="hist-row loss">
+          <span class="mo">Dec</span>
+          <span class="tag">FAIL</span>
+          <span class="res down">−1.0% · −1R</span>
+          <span class="badge l">L</span>
+          <span class="pnl">−$402</span>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+// ─── Live clock ────────────────────────────────────────────────────
+function tick() {
+  const d = new Date();
+  const t = [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,'0')).join(':');
+  const a = t + ' ET';
+  const c1 = document.getElementById('clk');  if (c1) c1.textContent = a;
+  const c2 = document.getElementById('clk2'); if (c2) c2.textContent = a;
+}
+setInterval(tick, 1000); tick();
+
+// ─── Tab toggle ────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(t => {
+  t.onclick = () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('on'));
+    document.querySelectorAll('.panel').forEach(x => x.classList.remove('on'));
+    t.classList.add('on');
+    document.getElementById('pan-' + t.dataset.pan).classList.add('on');
+  };
+});
+
+// ─── Real-data wiring ─────────────────────────────────────────────
+// Pulls data.json + tickers.json from the same directory and replaces
+// all hardcoded mock values with the live scan output. Idempotent — if
+// either fetch fails, the mock data stays intact.
+
+const _fmt = (v, d=2) => v == null ? '—' : (typeof v === 'number' ? v.toFixed(d) : String(v));
+const _pct = (v, d=2) => v == null ? '—' : (v > 0 ? '+' : '') + Number(v).toFixed(d);
+const _money = (v) => v == null ? '—' : '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const _ago = (iso) => {
+  if (!iso) return '—';
+  try {
+    const t = new Date(iso); const now = new Date();
+    const m = Math.floor((now - t) / 60000);
+    if (m < 1) return 'now';
+    if (m < 60) return `${m}m ago`;
+    if (m < 1440) return `${Math.floor(m/60)}h ago`;
+    return `${Math.floor(m/1440)}d ago`;
+  } catch { return '—'; }
+};
+const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'bad';
+
+(async function wire() {
+  let data = null, tickers = null;
+  try {
+    const r1 = await fetch('./data.json');
+    if (r1.ok) data = await r1.json();
+  } catch (e) { console.warn('data.json fetch failed:', e); }
+  try {
+    const r2 = await fetch('./tickers.json');
+    if (r2.ok) tickers = await r2.json();
+  } catch (e) { console.warn('tickers.json fetch failed:', e); }
+
+  // Wire the brand bar regardless of which file loaded
+  try {
+    const bbClock = document.getElementById('bb-clock');
+    function bbTick() {
+      const d = new Date();
+      bbClock.textContent = [d.getHours(), d.getMinutes(), d.getSeconds()]
+        .map(n => String(n).padStart(2,'0')).join(':') + ' ET';
+    }
+    if (bbClock) { bbTick(); setInterval(bbTick, 1000); }
+
+    if (data?.regime) {
+      const r = data.regime;
+      const regEl = document.getElementById('bb-regime');
+      if (regEl) regEl.textContent = (r.regime4 || r.regime || '—').toUpperCase().replace(/_/g, ' ');
+    }
+    if (data?.portfolio) {
+      const eq = data.portfolio.equity;
+      const start = 100000; // mock starting; real value would come from kelly_size config
+      const pnl = eq != null ? eq - start : null;
+      const pnlEl = document.getElementById('bb-pnl');
+      if (pnlEl && pnl != null) {
+        pnlEl.textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toLocaleString('en-US', { maximumFractionDigits: 0 });
+        pnlEl.style.color = pnl >= 0 ? 'var(--gn)' : 'var(--rd)';
+      }
+      // Drawdown — compute from equity_curve
+      const curve = data.portfolio.equity_curve || [];
+      if (curve.length && eq != null) {
+        const peak = Math.max(...curve.map(c => c.equity || 0), eq);
+        const dd = peak > 0 ? ((eq - peak) / peak) * 100 : 0;
+        const ddEl = document.getElementById('bb-dd');
+        if (ddEl) {
+          ddEl.textContent = (dd >= 0 ? '+' : '') + dd.toFixed(1) + '%';
+          ddEl.style.color = dd >= -3 ? 'var(--gn)' : dd >= -10 ? 'var(--amb)' : 'var(--rd)';
+        }
+      }
+    }
+  } catch (e) { console.warn('[kairos] brandbar wire failed:', e); }
+
+  if (!data && !tickers) {
+    console.warn('[kairos] no data available — keeping mock view');
+    return;
+  }
+
+  // Helper: convert tickers object → sorted array
+  const arr = tickers
+    ? Object.entries(tickers).map(([sym, p]) => ({ ticker: p?.ticker || sym, ...p }))
+        .sort((a, b) => (b.score || 0) - (a.score || 0))
+    : [];
+
+  // Each section in its own try/catch so a partial failure doesn't blank the page
+  const safe = (label, fn) => { try { fn(); } catch (e) { console.warn(`[kairos] ${label} failed:`, e); } };
+
+  // ─── HEADER — SPX / VIX / US10Y ────────────────────────────────
+  safe('header', () => {
+  if (data) {
+    const reg = data.regime || {};
+    const spy = reg.spy_price; const spyChg = reg.spy_daily_chg;
+    const vix = (reg.vix || {}).vix_current; const vixPrev = (reg.vix || {}).vix_ma20;
+    const head = document.querySelector('#pan-dash .head-r');
+    if (head && spy != null) {
+      head.innerHTML = `
+        <span class="clock" id="clk">${document.getElementById('clk')?.textContent || '—'}</span>
+        <span>SPX <b class="${spyChg >= 0 ? 'up' : 'down'} num">${spy.toFixed(2)} ${_pct(spyChg)}</b></span>
+        <span>VIX <b class="${vix < 18 ? 'up' : vix < 25 ? 'amb' : 'down'} num">${vix?.toFixed(2) || '—'}${vixPrev ? ' (' + vix?.toFixed(2) + ')' : ''}</b></span>
+        <span>BREADTH <b class="${reg.breadth_pct_50d >= 60 ? 'up' : 'amb'} num">${reg.breadth_pct_50d?.toFixed(1) || '—'}</b></span>
+      `;
+    }
+  }
+  });
+
+  // ─── TAPE — top 7 tickers by score ─────────────────────────────
+  safe('tape', () => {
+  if (arr.length) {
+    const tapeEl = document.querySelector('#pan-dash .tape .items');
+    if (tapeEl) {
+      const top = arr.slice(0, 7);
+      tapeEl.innerHTML = top.map((t, i) => {
+        const chg = t.perf_1d || t.pct_chg || 0;
+        return `
+          ${i > 0 ? '<span class="sep">·</span>' : ''}
+          <span><b>${t.ticker}</b> ${t.price?.toFixed(2) || '—'} <span class="pct ${chg >= 0 ? 'up' : 'down'}">${_pct(chg)}%</span></span>
+        `;
+      }).join('');
+    }
+  }
+  });
+
+  // ─── WATCHLIST · BAP RANK — top 13 ─────────────────────────────
+  safe('watchlist', () => {
+  if (arr.length) {
+    const wlBody = document.querySelector('#pan-dash .col:first-child table.tbl tbody');
+    const wlHead = document.querySelector('#pan-dash .col:first-child .p-head .r');
+    if (wlBody) {
+      const top = arr.slice(0, 13);
+      wlBody.innerHTML = top.map((t, i) => {
+        const setup = (t.setup_family || t.setup || '—').slice(0, 12);
+        const score = t.score || 0;
+        const chg = t.perf_1d || t.pct_chg || 0;
+        const rvol = t.rvol;
+        const rr = t.rr_ratio || t.rr;
+        const earn = t.earn_days != null ? `+${t.earn_days}d` : '—';
+        const earnCls = (t.earn_days != null && t.earn_days <= 14) ? 'amb' : 'dim';
+        return `
+          <tr>
+            <td class="idx">${String(i + 1).padStart(2, '0')}</td>
+            <td class="sym" onclick="window.location.href='elite-detail.html?t=${t.ticker}&from=kairos'">${t.ticker}</td>
+            <td class="setup">${setup}</td>
+            <td class="bap ${_bapClass(score)}">${Math.round(score)}</td>
+            <td class="r px num">${t.price?.toFixed(2) || '—'}</td>
+            <td class="r ${chg >= 0 ? 'up' : 'down'} num">${_pct(chg)}</td>
+            <td class="r dim num">${rvol ? rvol.toFixed(1) + '×' : '—'}</td>
+            <td class="r dim num">${rr ? '1:' + rr.toFixed(1) : '—'}</td>
+            <td class="r ${earnCls} num">${earn}</td>
+          </tr>
+        `;
+      }).join('');
+      if (wlHead) wlHead.innerHTML = `${arr.length} NAMES <b>·</b> ${arr.filter(t => (t.score || 0) >= 80).length} HOT`;
+    }
+  }
+  });
+
+  // ─── SECTORS · TODAY — from sector_etf ─────────────────────────
+  safe('sectors', () => {
+  if (data?.sector_etf) {
+    const sectorAbbr = { 'Technology': 'TECH', 'Financials': 'FINX', 'Healthcare': 'HLTH', 'Energy': 'ENRG', 'Industrials': 'INDU', 'Materials': 'MATR', 'Real Estate': 'REIT', 'Utilities': 'UTIL', 'Communication Svcs': 'COMM', 'Consumer Staples': 'STPL', 'Consumer Discretionary': 'DISC' };
+    const sects = Object.entries(data.sector_etf)
+      .map(([etf, s]) => ({ etf, ...s }))
+      .sort((a, b) => (b.perf_pct || 0) - (a.perf_pct || 0));
+    const sectCol = document.querySelectorAll('#pan-dash .col')[1];
+    if (sectCol) {
+      const oldRows = sectCol.querySelectorAll('.sect-row');
+      const newHtml = sects.map(s => {
+        const pct = s.perf_pct || 0;
+        const w = Math.min(80, Math.abs(pct) * 4); // map to bar width
+        return `
+          <div class="sect-row">
+            <span class="lbl">${sectorAbbr[s.sector] || s.sector?.slice(0,4).toUpperCase()}</span>
+            <span class="w">${s.rank ? '#' + s.rank : ''}</span>
+            <span class="l">${s.outperforming ? '✓' : '—'}</span>
+            <span class="bar"><span class="f ${pct >= 0 ? 'pos' : 'neg'}" style="width:${w}%"></span></span>
+            <span class="pct ${pct >= 0 ? 'up' : 'down'} num">${_pct(pct)}</span>
+          </div>
+        `;
+      }).join('');
+      if (oldRows.length) {
+        oldRows.forEach(r => r.remove());
+        const sectHead = sectCol.querySelector('.p-head');
+        if (sectHead) sectHead.insertAdjacentHTML('afterend', newHtml);
+      }
+    }
+  }
+  });
+
+  // ─── ACCT · BLOTTER — from portfolio ───────────────────────────
+  safe('blotter', () => {
+  if (data?.portfolio) {
+    const blot = document.querySelector('#pan-dash .blot');
+    const blotHead = document.querySelector('#pan-dash .col:nth-child(2) .p-head:last-of-type .r');
+    const positions = data.portfolio.positions || [];
+    if (blot) {
+      if (positions.length === 0) {
+        blot.innerHTML = `<div class="blot-row" style="grid-template-columns:1fr;color:var(--ink-3);text-align:center;padding:20px"><span>no open positions · paper trading active</span></div>`;
+        if (blotHead) blotHead.textContent = '0 OPEN';
+      } else {
+        blot.innerHTML = positions.map(p => `
+          <div class="blot-row">
+            <span class="sym">${p.ticker}</span>
+            <span class="pos">${p.shares} @ <b>${p.entry_price?.toFixed(2) || '—'}</b></span>
+            <span class="pct ${(p.unrealized_pnl_pct || 0) >= 0 ? 'up' : 'down'} num">${_pct(p.unrealized_pnl_pct || 0)}</span>
+            <span class="pnl ${(p.unrealized_pnl_dollars || 0) >= 0 ? 'up' : 'down'} num">${(p.unrealized_pnl_dollars || 0) >= 0 ? '+' : ''}$${Math.abs(p.unrealized_pnl_dollars || 0).toFixed(0)}</span>
+          </div>
+        `).join('');
+        if (blotHead) blotHead.textContent = `${positions.length} OPEN`;
+      }
+    }
+  }
+  });
+
+  // ─── INTEL · WIRE — aggregate from all tickers' news ──────────
+  safe('wire-and-news', () => {
+  if (arr.length) {
+    const allNews = [];
+    arr.forEach(t => {
+      (t.news_articles || []).forEach(a => {
+        allNews.push({
+          ticker: t.ticker,
+          time: a.published_utc,
+          title: a.title,
+          source: (a.publisher && a.publisher.name) || a.source || 'WIRE',
+          sentiment: a.insights?.[0]?.sentiment || null,
+        });
+      });
+    });
+    allNews.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+    const wireCol = document.querySelectorAll('#pan-dash .col')[2];
+    if (wireCol) {
+      const wireBody = wireCol.querySelector(':scope > div:last-child');
+      // Find the existing wire-row container
+      const oldRows = wireCol.querySelectorAll('.wire-row');
+      const newHtml = allNews.slice(0, 10).map(n => {
+        const tsStr = n.time ? new Date(n.time).toTimeString().slice(0, 5) : '—';
+        const sent = (n.sentiment || '').toLowerCase();
+        const badge = sent === 'positive' ? 'bull' : sent === 'negative' ? 'bear' : 'neut';
+        const badgeText = sent === 'positive' ? 'BULL' : sent === 'negative' ? 'BEAR' : 'NEUT';
+        return `
+          <div class="wire-row">
+            <span class="ts num">${tsStr}</span>
+            <span class="sym">${n.ticker}</span>
+            <span class="txt">${(n.title || '').slice(0, 60)}${(n.title || '').length > 60 ? '…' : ''}</span>
+            <span class="badge ${badge}">${badgeText}</span>
+            <span class="src">${(n.source || '').toString().slice(0, 6).toUpperCase()}</span>
+          </div>
+        `;
+      }).join('');
+      if (oldRows.length && newHtml) {
+        // Replace the container holding wire-rows
+        const parent = oldRows[0].parentElement;
+        if (parent) parent.innerHTML = newHtml;
+      }
+    }
+
+    // ─── NEWS · LATEST (Yahoo-style featured + cards) ────────────
+    if (allNews.length) {
+      // Featured = first (most recent)
+      const feat = allNews[0];
+      const featEl = document.querySelector('.news-feat');
+      if (featEl && feat) {
+        const featTime = _ago(feat.time);
+        featEl.querySelector('.news-tag').textContent = (feat.sentiment === 'positive' ? 'MARKETS' : 'BREAKING');
+        featEl.querySelector('.meta-row').innerHTML = `
+          <span class="news-tag ${feat.sentiment === 'positive' ? 'markets' : 'breaking'}">${feat.sentiment === 'positive' ? 'MARKETS' : 'BREAKING'}</span>
+          <span><b>${featTime}</b></span>
+          <span>${feat.ticker}</span>
+        `;
+        featEl.querySelector('.head').textContent = feat.title || '—';
+        featEl.querySelector('.summ').innerHTML = `Tracked story for <b style="color:var(--cy)">${feat.ticker}</b>. Source: <b>${feat.source}</b>. Live feed updates throughout the session.`;
+        featEl.querySelector('.src-row').innerHTML = `
+          <span><b>${(feat.source || '').toUpperCase()}</b></span>
+          <span>${feat.ticker} desk</span>
+          <span>· ${featTime}</span>
+        `;
+      }
+
+      // Top stories — next 5
+      const topNewsCol = document.querySelectorAll('.news-col')[1];
+      if (topNewsCol) {
+        const cards = topNewsCol.querySelectorAll('.news-card');
+        const head = topNewsCol.querySelector('.news-col-h .r');
+        if (head) head.innerHTML = `<b>${allNews.length}</b> total`;
+        allNews.slice(1, 6).forEach((n, i) => {
+          if (!cards[i]) return;
+          const tag = n.sentiment === 'positive' ? 'earnings' : n.sentiment === 'negative' ? 'breaking' : 'companies';
+          const tagText = n.sentiment === 'positive' ? 'POSITIVE' : n.sentiment === 'negative' ? 'NEGATIVE' : 'COMPANIES';
+          cards[i].querySelector('.row1').innerHTML = `
+            <span class="news-tag ${tag}">${tagText}</span>
+            <span><b>${_ago(n.time)}</b></span>
+            <span>${n.ticker}</span>
+          `;
+          cards[i].querySelector('.h').textContent = n.title || '—';
+          const summ = cards[i].querySelector('.s');
+          if (summ) summ.innerHTML = `<b style="color:var(--cy)">${n.ticker}</b> · ${n.source}. Story tracked from the live wire.`;
+          cards[i].querySelector('.src-line').innerHTML = `<b>${(n.source || '').toUpperCase()}</b> <span>· ${_ago(n.time)}</span>`;
+        });
+      }
+
+      // Trending = top movers from arr
+      const trendCol = document.querySelectorAll('.news-col')[2];
+      if (trendCol) {
+        const movers = arr.slice()
+          .filter(t => t.perf_1d != null || t.pct_chg != null)
+          .sort((a, b) => Math.abs(b.perf_1d || b.pct_chg || 0) - Math.abs(a.perf_1d || a.pct_chg || 0))
+          .slice(0, 6);
+        const trendRows = trendCol.querySelectorAll('.trend-row');
+        movers.forEach((m, i) => {
+          if (!trendRows[i]) return;
+          const chg = m.perf_1d || m.pct_chg || 0;
+          trendRows[i].querySelector('.idx').textContent = String(i + 1).padStart(2, '0');
+          trendRows[i].querySelector('.sym').textContent = m.ticker;
+          const pctEl = trendRows[i].querySelector('.pct');
+          pctEl.className = `pct ${chg >= 0 ? 'up' : 'down'}`;
+          pctEl.textContent = _pct(chg) + '%';
+          // Update mini-bar color based on direction
+          trendRows[i].querySelectorAll('.mini-bar .b').forEach((b, bi) => {
+            b.style.background = chg >= 0 ? 'var(--gn)' : 'var(--rd)';
+            b.style.height = (30 + bi * 8) + '%';
+          });
+        });
+      }
+    }
+  }
+  });
+
+  // ─── DETAIL panel — top-scored ticker ──────────────────────────
+  safe('detail', () => {
+  if (arr.length) {
+    const t = arr[0];
+
+    // Header price + verdict
+    const detHead = document.querySelector('.det-head');
+    if (detHead) {
+      const chg = t.perf_1d || t.pct_chg || 0;
+      const dollarChg = (chg / 100) * (t.price || 0);
+      detHead.innerHTML = `
+        <div style="display:flex;align-items:baseline">
+          <span class="tk-big">${t.ticker}</span>
+          <span class="name">${(t.name || '').toUpperCase()} · US EQUITY</span>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:14px">
+          <span class="px num" style="color:${chg >= 0 ? 'var(--gn)' : 'var(--rd)'}">${t.price?.toFixed(2) || '—'}</span>
+          <span class="pct" style="color:${chg >= 0 ? 'var(--gn)' : 'var(--rd)'}">${chg >= 0 ? '▲' : '▼'} ${_pct(chg)}% &nbsp;${dollarChg >= 0 ? '+' : ''}${dollarChg.toFixed(2)}</span>
+        </div>
+        <div class="right">
+          <span class="verdict" style="color:${t.verdict === 'BUY' ? 'var(--gn)' : 'var(--amb)'};border-color:${t.verdict === 'BUY' ? 'var(--gn)' : 'var(--amb-dim)'}">${t.verdict || '—'} · ${t.entry_quality || '—'}</span>
+          <span class="meta">BAP <b>${Math.round(t.score || 0)}</b> · #1 &nbsp; · &nbsp; SETUP <b>${t.setup_family || t.setup || '—'}</b> &nbsp; · &nbsp; R:R <b>1:${(t.rr_ratio || t.rr || 0).toFixed(1)}</b></span>
+        </div>
+      `;
+    }
+
+    // Detail header strip (top OHLC)
+    const detHead2 = document.querySelector('#pan-detail .head-l + .head-l + .head-r');
+    const detNav = document.querySelector('#pan-detail .head-l .nav');
+    if (detNav) detNav.textContent = t.ticker + ' US';
+
+    // PLAN · LADDER
+    const ladd = document.querySelectorAll('#pan-detail .ladd');
+    if (ladd.length >= 6) {
+      const stop = t.stop || 0;
+      const entry = t.entry_low || t.entry_lo || t.price || 0;
+      const t1 = t.target1 || t.t1 || 0;
+      const t2 = t.target2 || t.t2 || 0;
+      const now = t.price || 0;
+      const setLadd = (i, lbl, px, note, delta) => {
+        if (!ladd[i]) return;
+        ladd[i].querySelector('.lbl').textContent = lbl;
+        ladd[i].querySelector('.px').textContent = px?.toFixed(2) || '—';
+        ladd[i].querySelector('.note').textContent = note;
+        const d = ladd[i].querySelector('.delta');
+        d.textContent = delta == null ? '—' : (delta >= 0 ? '+' : '') + delta.toFixed(1);
+      };
+      const pct = (a, b) => b ? ((a / b) - 1) * 100 : 0;
+      setLadd(0, 'T2', t2, 'close ⅓', pct(t2, now));
+      setLadd(1, 'T1', t1, 'trim ⅔', pct(t1, now));
+      setLadd(2, 'TRG', entry * 1.005, 'zone top', pct(entry * 1.005, now));
+      setLadd(3, 'NOW', now, t.verdict || '—', 0);
+      setLadd(4, 'AVG', entry, 'plan entry', pct(entry, now));
+      setLadd(5, 'STP', stop, 'risk', pct(stop, now));
+    }
+
+    // PILLARS
+    const pillars = document.querySelectorAll('.pillar-row');
+    const pVals = [
+      ['TRD', `tech ${t.tech_score?.toFixed(1) || '—'}`, t.tech_score],
+      ['MOM', `RSI ${t.rsi?.toFixed(0) || '—'} · ADX ${t.adx?.toFixed(0) || '—'}`, t.tech_score],
+      ['STR', t.fractal_signal || '—', t.smc_score],
+      ['QUAL', `Rev ${t.rev_growth ? '+' + (t.rev_growth * 100).toFixed(0) : '—'}`, t.fund_score],
+      ['SENT', `${t.news_score || 0} · ${(t.eodhd_sentiment?.trend || '—')}`, t.sent_score],
+    ];
+    pillars.forEach((p, i) => {
+      if (!pVals[i]) return;
+      p.querySelector('.l').textContent = pVals[i][0];
+      p.querySelector('.d').textContent = pVals[i][1];
+      const v = p.querySelector('.v');
+      v.textContent = pVals[i][2] ? Math.round(pVals[i][2]) : '—';
+    });
+
+    // INTEL · NVDA → INTEL · <ticker>
+    const detIntelHead = document.querySelector('#pan-detail .det-grid > div:last-child .p-head:first-child .l');
+    if (detIntelHead) detIntelHead.innerHTML = `<span class="amb">INTEL</span> <b>·</b> ${t.ticker}`;
+
+    // Detail news rows
+    const detNewsRows = document.querySelectorAll('#pan-detail .det-grid > div:last-child .wire-row');
+    (t.news_articles || []).slice(0, 4).forEach((a, i) => {
+      if (!detNewsRows[i]) return;
+      const ts = a.published_utc ? new Date(a.published_utc).toTimeString().slice(0, 5) : '—';
+      const sent = a.insights?.[0]?.sentiment;
+      const badge = sent === 'positive' ? 'bull' : sent === 'negative' ? 'bear' : 'neut';
+      const badgeText = sent === 'positive' ? 'BULL' : sent === 'negative' ? 'BEAR' : 'NEUT';
+      detNewsRows[i].querySelector('.ts').textContent = ts;
+      detNewsRows[i].querySelector('.txt').textContent = (a.title || '').slice(0, 40) + (a.title?.length > 40 ? '…' : '');
+      const b = detNewsRows[i].querySelector('.badge');
+      b.className = `badge ${badge}`;
+      b.textContent = badgeText;
+      detNewsRows[i].querySelector('.src').textContent = ((a.publisher?.name || a.source || '').toUpperCase()).slice(0, 6);
+    });
+  }
+  });
+
+  // ─── SIDEBAR counts ────────────────────────────────────────────
+  safe('sidebar-counts', () => {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    if (data) {
+      set('sb-elite',  data.elite_picks?.meta?.n_passing_hard_gates ?? Object.values(data.elite_picks?.Swing || {}).reduce((s, a) => s + (a?.length || 0), 0));
+      set('sb-thesis', (data.short_term || []).filter(t => t.thesis_card).length);
+      set('sb-uoa',    (data.options_flow_top30 || []).length);
+      set('sb-earn',   (data.earnings_watchlist || []).length);
+      set('sb-wl',     arr.length);
+      set('sb-pos',    (data.portfolio?.positions || []).length);
+      set('sb-killed', data.killed_count || 0);
+      set('sb-perf',   data.performance?.total_signals_evaluated || 0);
+      set('sb-screener', (data.screener || []).length);
+      set('sb-ind',    (data.industries || []).length);
+      set('sb-macro',  (data.economic_events || []).length);
+
+      // Signal Mix
+      set('sm-long',   data.buy_count || 0);
+      set('sm-short',  data.short_count || 0);
+      set('sm-watch',  data.watch_count || 0);
+      set('sm-killed', data.killed_count || '—');
+      set('sm-univ',   data.scan_count || 0);
+
+      // P&L
+      const pos = data.portfolio?.positions || [];
+      const unr = pos.reduce((s, p) => s + (p.unrealized_pnl_dollars || 0), 0);
+      const unrEl = document.getElementById('pl-unreal');
+      if (unrEl) {
+        unrEl.textContent = (unr >= 0 ? '+$' : '-$') + Math.abs(unr).toLocaleString('en-US', { maximumFractionDigits: 0 });
+        unrEl.className = 'v ' + (unr >= 0 ? 'up' : 'down');
+      }
+      set('pl-pos', pos.length);
+    }
+
+    // Quick tickers — populate %change from arr
+    const wanted = ['JBL', 'HPQ', 'ORCL', 'MCHP', 'GDDY', 'NTAP'];
+    const map = Object.fromEntries(arr.map(t => [t.ticker, t]));
+    document.querySelectorAll('.sb-quick-chip').forEach((chip, i) => {
+      const sym = wanted[i];
+      const t = map[sym];
+      const pctEl = chip.querySelector('.pct');
+      if (t && pctEl) {
+        const chg = t.perf_1d || t.pct_chg || 0;
+        pctEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+        pctEl.className = 'pct ' + (chg >= 0 ? 'up' : 'down');
+      }
+    });
+  });
+
+  console.log('[kairos] wired live data', {
+    regime: data?.regime?.regime4,
+    breadth: data?.regime?.breadth_pct_50d,
+    tickers: arr.length,
+    top: arr[0]?.ticker,
+  });
+})();
+</script>
+
+</main>
+</div>
+
+</body>
+</html>

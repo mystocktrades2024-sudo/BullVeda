@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ML Edge · Workspace · Prototype</title>
+<style>
+  :root {
+    --bg: #0a0d0c; --bg-1: #11151a; --bg-2: #161a1e; --bg-3: #1c2125;
+    --line: #262b2d; --line-2: #353a3c;
+    --ink: #ecefe9; --ink-1: #d4d8d1; --ink-2: #9a9e98; --ink-3: #686c68; --ink-4: #444947;
+    --gn: #4ade80; --gn-dim: #166534; --gn-bg: rgba(74,222,128,0.10);
+    --rd: #f87171; --rd-dim: #991b1b; --rd-bg: rgba(248,113,113,0.10);
+    --amb: #fbbf24; --amb-dim: #92400e; --amb-bg: rgba(251,191,36,0.10);
+    --info: #60a5fa; --info-dim: #1e3a8a; --info-bg: rgba(96,165,250,0.10);
+    --copper: #d97757; --copper-bg: rgba(217,119,87,0.10);
+    --violet: #a78bfa;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 28px; max-width: 1500px; margin: 0 auto; font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .bc { font: 700 11px var(--mono); color: var(--ink-3); letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 14px; }
+  .bc b { color: var(--ink-1); } .bc .copper { color: var(--copper); }
+
+  /* ── HERO ── */
+  .ws-hero { background: var(--bg-1); border: 1px solid var(--line); border-left: 4px solid var(--copper); border-radius: 2px; margin-bottom: 14px; overflow: hidden; font-family: var(--mono); }
+  .ws-hero-banner { display: flex; align-items: center; gap: 14px; padding: 12px 18px; background: var(--copper-bg); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .ws-hero-badge { font: 800 14px var(--mono); letter-spacing: 0.14em; padding: 4px 12px; border-radius: 2px; color: var(--copper); border: 1px solid rgba(217,119,87,0.4); background: rgba(217,119,87,0.06); }
+  .ws-hero-q { font: 600 12px var(--mono); color: var(--ink-1); letter-spacing: 0.04em; flex: 1; }
+  .ws-hero-q b { color: var(--ink); } .ws-hero-q .copper { color: var(--copper); }
+
+  /* Mode toggle */
+  .mode-tog { display: inline-flex; border: 1px solid var(--line-2); border-radius: 2px; overflow: hidden; }
+  .mode-tog button { background: var(--bg-2); border: none; padding: 6px 14px; font: 700 11px var(--mono); letter-spacing: 0.10em; color: var(--ink-2); cursor: pointer; border-right: 1px solid var(--line-2); }
+  .mode-tog button:last-child { border-right: none; }
+  .mode-tog button.on { background: var(--copper-bg); color: var(--copper); }
+
+  /* Pills */
+  .rk-pill { display: inline-block; padding: 2px 7px; font: 700 9px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; border-radius: 2px; background: var(--bg-2); border: 1px solid var(--line-2); color: var(--ink-2); }
+  .rk-pill.gn { color: var(--gn); border-color: var(--gn-dim); background: var(--gn-bg); }
+  .rk-pill.rd { color: var(--rd); border-color: var(--rd-dim); background: var(--rd-bg); }
+  .rk-pill.am { color: var(--amb); border-color: var(--amb-dim); background: var(--amb-bg); }
+  .rk-pill.info { color: var(--info); border-color: var(--info-dim); background: var(--info-bg); }
+  .rk-pill.copper { color: var(--copper); border-color: rgba(217,119,87,0.5); background: var(--copper-bg); }
+
+  .ws-hero-body { padding: 14px 18px; display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; background: var(--bg-2); }
+  .kpi { background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; padding: 10px 12px; }
+  .kpi-k { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; }
+  .kpi-v { font: 800 20px var(--mono); color: var(--ink); }
+  .kpi-v.gn { color: var(--gn); } .kpi-v.rd { color: var(--rd); } .kpi-v.am { color: var(--amb); } .kpi-v.copper { color: var(--copper); }
+  .kpi-sub { font: 500 10px var(--mono); color: var(--ink-3); margin-top: 2px; }
+
+  /* Filter bar */
+  .ws-filters { display: flex; gap: 8px; align-items: center; padding: 10px 4px 4px; flex-wrap: wrap; font: 600 11px var(--mono); color: var(--ink-3); letter-spacing: 0.06em; }
+  .ws-filters .lbl { color: var(--ink-3); }
+  .ws-filters .chip { padding: 4px 9px; border-radius: 2px; background: var(--bg-2); border: 1px solid var(--line); color: var(--ink-2); cursor: pointer; font-size: 11px; }
+  .ws-filters .chip.on { background: var(--copper-bg); color: var(--copper); border-color: rgba(217,119,87,0.5); }
+  .ws-filters .chip.am.on { background: var(--amb-bg); color: var(--amb); border-color: var(--amb-dim); }
+  .ws-filters .chip.rd.on { background: var(--rd-bg); color: var(--rd); border-color: var(--rd-dim); }
+  .ws-filters input[type=number], .ws-filters input[type=text] { background: var(--bg-2); border: 1px solid var(--line); color: var(--ink); padding: 4px 8px; border-radius: 2px; font: 600 11px var(--mono); width: 70px; }
+
+  /* Section banners */
+  .rk-divider { font: 700 10px var(--mono); color: var(--ink-3); letter-spacing: 0.20em; text-transform: uppercase; margin: 22px 4px 12px; display: flex; align-items: center; gap: 10px; }
+  .rk-divider::before, .rk-divider::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+  .rk-divider .star { color: var(--copper); }
+
+  .rk-section { background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; margin-bottom: 12px; overflow: hidden; }
+  .rk-section.flip { border-left: 4px solid var(--amb); }
+  .rk-section.bulls { border-left: 4px solid var(--gn); }
+  .rk-section.bears { border-left: 4px solid var(--rd); }
+  .rk-section.calib { border-left: 4px solid var(--info); }
+  .rk-section-head { padding: 10px 18px 8px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .rk-section-title { font: 700 11.5px var(--mono); color: var(--ink-1); letter-spacing: 0.14em; text-transform: uppercase; }
+  .rk-section-title .num { color: var(--copper); margin-right: 6px; }
+  .rk-section-sub { font: 500 11px var(--mono); color: var(--ink-3); letter-spacing: 0.06em; }
+  .rk-section-body { padding: 14px 18px 16px; }
+
+  /* Tables */
+  table.rk-tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+  table.rk-tbl th { text-align: left; padding: 7px 8px; font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.12em; text-transform: uppercase; border-bottom: 1px solid var(--line); font-weight: 700; cursor: pointer; }
+  table.rk-tbl th.r { text-align: right; }
+  table.rk-tbl th.sort-on { color: var(--copper); }
+  table.rk-tbl th .sort-arrow { color: var(--copper); font-size: 9px; margin-left: 2px; }
+  table.rk-tbl td { padding: 7px 8px; border-bottom: 1px solid var(--line); color: var(--ink-1); font-size: 12px; }
+  table.rk-tbl td.r { text-align: right; }
+  table.rk-tbl tr { cursor: pointer; }
+  table.rk-tbl tr:hover td { background: var(--bg-2); }
+  table.rk-tbl tr:last-child td { border-bottom: none; }
+  table.rk-tbl .tk { font-weight: 800; color: var(--ink); letter-spacing: 0.02em; }
+  table.rk-tbl .gn { color: var(--gn); } table.rk-tbl .rd { color: var(--rd); } table.rk-tbl .am { color: var(--amb); }
+
+  .pbar { display: inline-flex; align-items: center; gap: 6px; }
+  .pbar-track { width: 50px; height: 5px; background: var(--bg-3); border-radius: 1px; overflow: hidden; display: inline-block; }
+  .pbar-fill { height: 100%; }
+  .pbar-fill.gn { background: linear-gradient(90deg, rgba(74,222,128,0.5), var(--gn)); }
+  .pbar-fill.rd { background: linear-gradient(90deg, rgba(248,113,113,0.5), var(--rd)); }
+
+  /* Heatmap */
+  .heat { display: grid; grid-template-columns: 130px repeat(5, 1fr); gap: 2px; font-family: var(--mono); }
+  .heat-h { padding: 8px 6px; font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.12em; text-transform: uppercase; text-align: center; }
+  .heat-row-lbl { padding: 10px 8px; background: var(--bg-2); border: 1px solid var(--line); font: 700 11px var(--mono); color: var(--ink-1); display: flex; align-items: center; }
+  .heat-cell { padding: 10px 4px; text-align: center; font: 700 11px var(--mono); border: 1px solid var(--bg); font-size: 12px; }
+  .heat-c9 { background: #15803d; color: #f5f7f5; }
+  .heat-c7 { background: #22c55e; color: #0a0d0c; }
+  .heat-c5 { background: rgba(74,222,128,0.4); color: var(--ink); }
+  .heat-c4 { background: rgba(96,165,250,0.30); color: var(--ink); }
+  .heat-c3 { background: rgba(251,191,36,0.30); color: var(--ink); }
+  .heat-c1 { background: rgba(248,113,113,0.4); color: var(--ink); }
+  .heat-c0 { background: rgba(248,113,113,0.6); color: var(--ink); }
+  .heat-cn { background: var(--bg-2); color: var(--ink-3); }
+
+  /* Cross-horizon row pills */
+  td .triplet { display: inline-flex; gap: 4px; }
+  td .triplet .rk-pill { padding: 1px 5px; font-size: 8.5px; letter-spacing: 0.04em; }
+
+  /* Performance grid */
+  .perf-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .perf-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 2px; padding: 12px 14px; }
+  .perf-card-h { font: 700 10px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 8px; }
+  .perf-card-tk { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+  .perf-card-tk b { font: 800 19px var(--mono); color: var(--ink); }
+  .perf-card-tk b.gn { color: var(--gn); } .perf-card-tk b.am { color: var(--amb); } .perf-card-tk b.rd { color: var(--rd); }
+  .perf-card-tk small { font: 600 10px var(--mono); color: var(--ink-3); letter-spacing: 0.06em; }
+  .perf-card-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 4px 0; font: 600 11px var(--mono); color: var(--ink-2); border-top: 1px dashed var(--line); margin-top: 8px; padding-top: 8px; }
+  .perf-card-row b { color: var(--ink-0); }
+
+  .rk-note { padding: 8px 12px; border-left: 2px solid var(--ink-4); background: var(--bg-2); border-radius: 0 2px 2px 0; font-size: 12px; color: var(--ink-2); line-height: 1.55; margin-top: 10px; }
+  .rk-note.am { border-left-color: var(--amb); } .rk-note.gn { border-left-color: var(--gn); } .rk-note.rd { border-left-color: var(--rd); }
+  .rk-note b { color: var(--ink); }
+
+  .ws-foot { margin-top: 20px; padding: 12px; border-top: 1px solid var(--line); font: 600 10.5px var(--mono); color: var(--ink-3); letter-spacing: 0.08em; text-align: center; }
+  .ws-foot .copper { color: var(--copper); }
+
+  /* SVG helpers */
+  .axis { stroke: var(--line-2); stroke-width: 1; }
+  .grid { stroke: var(--line); stroke-dasharray: 2,3; stroke-width: 0.5; }
+  .lbl { fill: var(--ink-3); font: 600 9px var(--mono); }
+  .vlbl { fill: var(--ink-2); font: 700 10px var(--mono); }
+</style>
+</head>
+<body>
+
+<div class="bc">Kairos · Workspaces · <b>ML Edge</b> · <span class="copper">Universe Scanner</span></div>
+
+<!-- ═══════════ HERO ═══════════ -->
+<section class="ws-hero">
+  <div class="ws-hero-banner">
+    <div class="ws-hero-badge">ML EDGE</div>
+    <div class="ws-hero-q">
+      Scan the universe — where does the model see <b>conviction</b>, <b>statistical edge</b>, or <span class="copper">horizon-dependent disagreement</span>?
+    </div>
+    <div class="mode-tog">
+      <button>⚡ SWING · 5d</button>
+      <button class="on">📈 POSITION · 21d</button>
+      <button>🏛 INVEST · 126d</button>
+    </div>
+  </div>
+  <div class="ws-hero-body">
+    <div class="kpi"><div class="kpi-k">Coverage</div><div class="kpi-v gn">442/442</div><div class="kpi-sub">100% · live extract</div></div>
+    <div class="kpi"><div class="kpi-k">Dir. Accuracy</div><div class="kpi-v gn">42.4%</div><div class="kpi-sub">base 33% · +9pp</div></div>
+    <div class="kpi"><div class="kpi-k">Hit-Net AUC</div><div class="kpi-v gn">0.78</div><div class="kpi-sub">Brier 0.116 · n=89K</div></div>
+    <div class="kpi"><div class="kpi-k">Pinball q50</div><div class="kpi-v">0.037</div><div class="kpi-sub">naive ~4.0</div></div>
+    <div class="kpi"><div class="kpi-k">Bulls ≥0.55</div><div class="kpi-v am">28</div><div class="kpi-sub">of 442 · 6.3%</div></div>
+    <div class="kpi"><div class="kpi-k">Horizon Flips</div><div class="kpi-v am">11</div><div class="kpi-sub">click ① to scan →</div></div>
+  </div>
+</section>
+
+<!-- Filter chips -->
+<div class="ws-filters">
+  <span class="lbl">Filters:</span>
+  <span class="chip on">All sectors</span>
+  <span class="chip">Tech only</span>
+  <span class="chip">Financials only</span>
+  <span class="lbl">|  Regime fit:</span>
+  <span class="chip on">All regimes</span>
+  <span class="chip">Risk-on choppy only</span>
+  <span class="lbl">|  Min R:R from plan:</span>
+  <input type="number" value="2.0" step="0.5" />
+  <span class="lbl">|  Min P(T1):</span>
+  <input type="number" value="0.55" step="0.05" />
+  <span class="lbl">|  Earnings gate:</span>
+  <span class="chip am on">Exclude ER ≤7d</span>
+</div>
+
+<!-- ═══════════ ① HORIZON-FLIP SCANNER (THE KILLER FEATURE) ═══════════ -->
+<div class="rk-divider"><span class="star">★</span> ① HORIZON-DEPENDENT EDGE · cross-mode disagreement scanner</div>
+<section class="rk-section flip">
+  <div class="rk-section-head">
+    <div>
+      <div class="rk-section-title"><span class="num">①</span>Horizon Flip · 11 of 442 tickers (2.5%)</div>
+      <div class="rk-section-sub">Tickers where Swing &amp; Invest models disagree on direction — momentum-vs-mean-revert split. No other workspace surfaces this.</div>
+    </div>
+    <span class="rk-pill am">11 FLIP · 4 NEAR-FLIP</span>
+  </div>
+  <div class="rk-section-body">
+    <table class="rk-tbl">
+      <thead>
+        <tr>
+          <th>Ticker</th>
+          <th>Cross-horizon read</th>
+          <th>Sector</th>
+          <th class="r">Swing P(up)</th>
+          <th class="r">Position P(up)</th>
+          <th class="r">Invest P(up)</th>
+          <th class="r">P(T1) · pos</th>
+          <th class="r">μ 21d</th>
+          <th>Edge type</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="tk">COHR</span></td>
+          <td><span class="triplet"><span class="rk-pill gn">S BULL</span><span class="rk-pill am">P MIX</span><span class="rk-pill rd">I BEAR</span></span></td>
+          <td>Tech · Hardware</td>
+          <td class="r gn">0.58</td><td class="r">0.41</td><td class="r rd">0.24</td>
+          <td class="r am">0.42</td><td class="r">+1.2%</td>
+          <td><span class="rk-pill am">Short-term momentum · long-term mean revert</span></td>
+        </tr>
+        <tr>
+          <td><span class="tk">WDC</span></td>
+          <td><span class="triplet"><span class="rk-pill gn">S BULL</span><span class="rk-pill am">P MIX</span><span class="rk-pill rd">I BEAR</span></span></td>
+          <td>Tech · Storage</td>
+          <td class="r gn">0.56</td><td class="r">0.39</td><td class="r rd">0.21</td>
+          <td class="r am">0.38</td><td class="r">+0.8%</td>
+          <td><span class="rk-pill am">Short-term momentum · long-term mean revert</span></td>
+        </tr>
+        <tr>
+          <td><span class="tk">LRCX</span></td>
+          <td><span class="triplet"><span class="rk-pill gn">S BULL</span><span class="rk-pill am">P MIX</span><span class="rk-pill rd">I BEAR</span></span></td>
+          <td>Tech · Semi-equip</td>
+          <td class="r gn">0.55</td><td class="r">0.40</td><td class="r rd">0.25</td>
+          <td class="r am">0.41</td><td class="r">+0.9%</td>
+          <td><span class="rk-pill am">Short-term momentum · long-term mean revert</span></td>
+        </tr>
+        <tr>
+          <td><span class="tk">ALB</span></td>
+          <td><span class="triplet"><span class="rk-pill rd">S BEAR</span><span class="rk-pill rd">P BEAR</span><span class="rk-pill gn">I BULL</span></span></td>
+          <td>Materials · Lithium</td>
+          <td class="r rd">0.18</td><td class="r rd">0.22</td><td class="r gn">0.61</td>
+          <td class="r am">0.36</td><td class="r rd">−2.1%</td>
+          <td><span class="rk-pill gn">Beat-down · mean-revert candidate</span></td>
+        </tr>
+        <tr>
+          <td><span class="tk">GNRC</span></td>
+          <td><span class="triplet"><span class="rk-pill am">S MIX</span><span class="rk-pill gn">P BULL</span><span class="rk-pill rd">I BEAR</span></span></td>
+          <td>Industrials</td>
+          <td class="r am">0.45</td><td class="r gn">0.60</td><td class="r rd">0.22</td>
+          <td class="r gn">0.62</td><td class="r gn">+3.4%</td>
+          <td><span class="rk-pill copper">Position-only edge · 21d sweet spot</span></td>
+        </tr>
+        <tr>
+          <td><span class="tk">SMCI</span></td>
+          <td><span class="triplet"><span class="rk-pill gn">S BULL</span><span class="rk-pill rd">P BEAR</span><span class="rk-pill rd">I BEAR</span></span></td>
+          <td>Tech · Hardware</td>
+          <td class="r gn">0.59</td><td class="r rd">0.28</td><td class="r rd">0.19</td>
+          <td class="r am">0.31</td><td class="r">−0.4%</td>
+          <td><span class="rk-pill am">Short squeeze setup · fades fast</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="rk-note am">
+      <b>11 horizon-flip tickers detected today.</b> When Swing &amp; Invest disagree on direction, edge is HORIZON-SPECIFIC — sizing should match the winning horizon. Click any row → opens detail page with the per-ticker ML Edge tab to see the cross-mode reconciliation banner + Hit-Net conditional on the actual trade plan.
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ ② TOP BULLS — POSITION MODE ═══════════ -->
+<div class="rk-divider">② TOP BULLISH · ranked by P(up) · position mode (21d)</div>
+<section class="rk-section bulls">
+  <div class="rk-section-head">
+    <div>
+      <div class="rk-section-title"><span class="num">②</span>Top 20 Bulls · Position</div>
+      <div class="rk-section-sub">Click column header to sort · click row to drill into ticker detail</div>
+    </div>
+    <span class="rk-pill gn">28 ABOVE P(up)≥0.55 · 6.3% of universe</span>
+  </div>
+  <div class="rk-section-body">
+    <table class="rk-tbl">
+      <thead>
+        <tr>
+          <th class="sort-on">Ticker <span class="sort-arrow">▼</span></th>
+          <th class="r sort-on">P(up) <span class="sort-arrow">▼</span></th>
+          <th class="r">μ 21d</th>
+          <th class="r">q90</th>
+          <th class="r">q10</th>
+          <th class="r">Skew</th>
+          <th class="r">P(T1)</th>
+          <th class="r">target $</th>
+          <th>Sector</th>
+          <th>Setup family</th>
+          <th>Cross</th>
+          <th class="r">R:R</th>
+          <th>System</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="tk">STEP</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill gn" style="width:65%"></span></span>65%</span></td><td class="r gn">+3.5%</td><td class="r gn">+16.0%</td><td class="r rd">−5.2%</td><td class="r am">+0.42</td><td class="r am">0.03</td><td class="r">$45.20</td><td>Industrials</td><td>VCP Breakout</td><td><span class="triplet"><span class="rk-pill gn">S</span><span class="rk-pill gn">P</span><span class="rk-pill gn">I</span></span></td><td class="r gn">3.4</td><td><span class="rk-pill gn">BUY T2</span></td></tr>
+        <tr><td><span class="tk">AMCR</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill gn" style="width:61%"></span></span>61%</span></td><td class="r gn">+4.2%</td><td class="r gn">+23.6%</td><td class="r rd">−4.8%</td><td class="r gn">+0.51</td><td class="r gn">0.58</td><td class="r">$11.80</td><td>Materials</td><td>52wk Breakout</td><td><span class="triplet"><span class="rk-pill gn">S</span><span class="rk-pill gn">P</span><span class="rk-pill gn">I</span></span></td><td class="r gn">3.8</td><td><span class="rk-pill gn">BUY T1</span></td></tr>
+        <tr><td><span class="tk">EL</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill gn" style="width:60%"></span></span>60%</span></td><td class="r gn">+3.5%</td><td class="r gn">+17.2%</td><td class="r rd">−7.1%</td><td class="r am">+0.28</td><td class="r gn">0.52</td><td class="r">$78.30</td><td>Consumer Stap.</td><td>Trend Continuation</td><td><span class="triplet"><span class="rk-pill gn">S</span><span class="rk-pill gn">P</span><span class="rk-pill am">I</span></span></td><td class="r gn">3.1</td><td><span class="rk-pill am">WATCH</span></td></tr>
+        <tr><td><span class="tk">HOOD</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill gn" style="width:56%"></span></span>56%</span></td><td class="r gn">+1.9%</td><td class="r gn">+27.8%</td><td class="r rd">−9.4%</td><td class="r gn">+0.39</td><td class="r gn">0.53</td><td class="r">$32.15</td><td>Financials</td><td>EMA21 Pullback</td><td><span class="triplet"><span class="rk-pill gn">S</span><span class="rk-pill gn">P</span><span class="rk-pill am">I</span></span></td><td class="r gn">2.8</td><td><span class="rk-pill gn">BUY T2</span></td></tr>
+        <tr><td><span class="tk">ARES</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill gn" style="width:56%"></span></span>56%</span></td><td class="r gn">+2.9%</td><td class="r gn">+15.0%</td><td class="r rd">−5.1%</td><td class="r am">+0.32</td><td class="r am">0.03</td><td class="r">$182.50</td><td>Financials</td><td>10wk Pullback</td><td><span class="triplet"><span class="rk-pill am">S</span><span class="rk-pill gn">P</span><span class="rk-pill gn">I</span></span></td><td class="r gn">3.5</td><td><span class="rk-pill am">WATCH</span></td></tr>
+        <tr><td><span class="tk">KKR</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill gn" style="width:54%"></span></span>54%</span></td><td class="r gn">+2.8%</td><td class="r gn">+17.3%</td><td class="r rd">−6.0%</td><td class="r am">+0.30</td><td class="r am">0.03</td><td class="r">$120.40</td><td>Financials</td><td>Trend Continuation</td><td><span class="triplet"><span class="rk-pill am">S</span><span class="rk-pill gn">P</span><span class="rk-pill gn">I</span></span></td><td class="r am">2.4</td><td><span class="rk-pill am">WATCH</span></td></tr>
+        <tr><td><span class="tk">MELI</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill gn" style="width:54%"></span></span>54%</span></td><td class="r gn">+2.6%</td><td class="r gn">+14.8%</td><td class="r rd">−5.8%</td><td class="r am">+0.36</td><td class="r gn">0.61</td><td class="r">$2,140</td><td>Consumer Disc.</td><td>VCP Breakout</td><td><span class="triplet"><span class="rk-pill gn">S</span><span class="rk-pill gn">P</span><span class="rk-pill gn">I</span></span></td><td class="r gn">3.6</td><td><span class="rk-pill gn">BUY T3</span></td></tr>
+        <tr><td><span class="tk">CEG</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill gn" style="width:53%"></span></span>53%</span></td><td class="r gn">+2.4%</td><td class="r gn">+13.5%</td><td class="r rd">−4.9%</td><td class="r am">+0.29</td><td class="r am">0.40</td><td class="r">$215.20</td><td>Utilities</td><td>52wk Breakout</td><td><span class="triplet"><span class="rk-pill am">S</span><span class="rk-pill gn">P</span><span class="rk-pill gn">I</span></span></td><td class="r gn">3.0</td><td><span class="rk-pill am">WATCH</span></td></tr>
+        <tr><td><span class="tk">PANW</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill gn" style="width:52%"></span></span>52%</span></td><td class="r gn">+2.1%</td><td class="r gn">+12.4%</td><td class="r rd">−4.2%</td><td class="r am">+0.25</td><td class="r gn">0.58</td><td class="r">$385.10</td><td>Tech · Cyber</td><td>Trend Continuation</td><td><span class="triplet"><span class="rk-pill gn">S</span><span class="rk-pill gn">P</span><span class="rk-pill am">I</span></span></td><td class="r gn">3.1</td><td><span class="rk-pill gn">BUY T2</span></td></tr>
+        <tr><td><span class="tk">UBER</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill gn" style="width:51%"></span></span>51%</span></td><td class="r gn">+1.8%</td><td class="r gn">+11.9%</td><td class="r rd">−4.5%</td><td class="r am">+0.26</td><td class="r gn">0.55</td><td class="r">$87.40</td><td>Industrials</td><td>EMA21 Pullback</td><td><span class="triplet"><span class="rk-pill gn">S</span><span class="rk-pill gn">P</span><span class="rk-pill am">I</span></span></td><td class="r gn">2.9</td><td><span class="rk-pill am">WATCH</span></td></tr>
+      </tbody>
+    </table>
+    <div class="rk-note gn">Showing top 10 of 28 bulls ≥ P(up) 0.55. <b>Adjust filters above</b> to drill into specific sectors / regimes / R:R thresholds.</div>
+  </div>
+</section>
+
+<!-- ═══════════ ③ TOP BEARS — POSITION MODE ═══════════ -->
+<div class="rk-divider">③ TOP BEARISH · ranked by P(down) · position mode (21d)</div>
+<section class="rk-section bears">
+  <div class="rk-section-head">
+    <div>
+      <div class="rk-section-title"><span class="num">③</span>Top 10 Bears · Position · feeds AVOID / EXIT / SHORT routing</div>
+      <div class="rk-section-sub">Same data, opposite tail · click row to drill in</div>
+    </div>
+    <span class="rk-pill rd">19 ABOVE P(dn)≥0.55</span>
+  </div>
+  <div class="rk-section-body">
+    <table class="rk-tbl">
+      <thead>
+        <tr>
+          <th>Ticker</th>
+          <th class="r sort-on">P(dn) <span class="sort-arrow">▼</span></th>
+          <th class="r">μ 21d</th>
+          <th class="r">q10</th>
+          <th class="r">P(stop)</th>
+          <th class="r">Stop $</th>
+          <th>Sector</th>
+          <th>Cross</th>
+          <th>Routing</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="tk">SMCI</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill rd" style="width:68%"></span></span>68%</span></td><td class="r rd">−4.8%</td><td class="r rd">−18.2%</td><td class="r rd">0.71</td><td class="r">$28.10</td><td>Tech · Hardware</td><td><span class="triplet"><span class="rk-pill gn">S</span><span class="rk-pill rd">P</span><span class="rk-pill rd">I</span></span></td><td><span class="rk-pill rd">EXIT</span></td></tr>
+        <tr><td><span class="tk">PLTR</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill rd" style="width:64%"></span></span>64%</span></td><td class="r rd">−3.7%</td><td class="r rd">−14.8%</td><td class="r rd">0.62</td><td class="r">$42.30</td><td>Tech · Software</td><td><span class="triplet"><span class="rk-pill rd">S</span><span class="rk-pill rd">P</span><span class="rk-pill am">I</span></span></td><td><span class="rk-pill am">AVOID</span></td></tr>
+        <tr><td><span class="tk">COIN</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill rd" style="width:59%"></span></span>59%</span></td><td class="r rd">−3.4%</td><td class="r rd">−15.2%</td><td class="r rd">0.58</td><td class="r">$285.50</td><td>Financials · Crypto</td><td><span class="triplet"><span class="rk-pill rd">S</span><span class="rk-pill rd">P</span><span class="rk-pill rd">I</span></span></td><td><span class="rk-pill rd">SHORT?</span></td></tr>
+        <tr><td><span class="tk">CRWD</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill rd" style="width:55%"></span></span>55%</span></td><td class="r rd">−2.9%</td><td class="r rd">−11.4%</td><td class="r rd">0.54</td><td class="r">$402.80</td><td>Tech · Cyber</td><td><span class="triplet"><span class="rk-pill am">S</span><span class="rk-pill rd">P</span><span class="rk-pill rd">I</span></span></td><td><span class="rk-pill am">AVOID</span></td></tr>
+        <tr><td><span class="tk">RIVN</span></td><td class="r"><span class="pbar"><span class="pbar-track"><span class="pbar-fill rd" style="width:52%"></span></span>52%</span></td><td class="r rd">−2.6%</td><td class="r rd">−12.7%</td><td class="r rd">0.51</td><td class="r">$11.20</td><td>Consumer Disc.</td><td><span class="triplet"><span class="rk-pill rd">S</span><span class="rk-pill rd">P</span><span class="rk-pill am">I</span></span></td><td><span class="rk-pill rd">EXIT</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════ ④ SECTOR × CONFIDENCE HEATMAP ═══════════ -->
+<div class="rk-divider">④ UNIVERSE HEATMAP · sector × P(up) bucket · position mode</div>
+<section class="rk-section">
+  <div class="rk-section-head">
+    <div>
+      <div class="rk-section-title"><span class="num">④</span>Sector breadth · where the model sees edge</div>
+      <div class="rk-section-sub">Count of tickers per cell · darker = more concentrated. Click cell to filter the bulls/bears tables above.</div>
+    </div>
+    <span class="rk-pill info">442 tickers · 11 sectors · 5 P(up) bins</span>
+  </div>
+  <div class="rk-section-body">
+    <div class="heat">
+      <div class="heat-h"></div>
+      <div class="heat-h">P(up) &lt; 0.30</div>
+      <div class="heat-h">0.30 – 0.45</div>
+      <div class="heat-h">0.45 – 0.55</div>
+      <div class="heat-h">0.55 – 0.65</div>
+      <div class="heat-h">P(up) ≥ 0.65</div>
+
+      <div class="heat-row-lbl">Tech</div>
+      <div class="heat-cell heat-c0">28</div>
+      <div class="heat-cell heat-c3">14</div>
+      <div class="heat-cell heat-c4">42</div>
+      <div class="heat-cell heat-c5">6</div>
+      <div class="heat-cell heat-c7">2</div>
+
+      <div class="heat-row-lbl">Financials</div>
+      <div class="heat-cell heat-c1">8</div>
+      <div class="heat-cell heat-c3">17</div>
+      <div class="heat-cell heat-c4">35</div>
+      <div class="heat-cell heat-c5">9</div>
+      <div class="heat-cell heat-c7">3</div>
+
+      <div class="heat-row-lbl">Healthcare</div>
+      <div class="heat-cell heat-c1">10</div>
+      <div class="heat-cell heat-c3">22</div>
+      <div class="heat-cell heat-c4">38</div>
+      <div class="heat-cell heat-c5">4</div>
+      <div class="heat-cell heat-cn">0</div>
+
+      <div class="heat-row-lbl">Industrials</div>
+      <div class="heat-cell heat-c1">12</div>
+      <div class="heat-cell heat-c3">19</div>
+      <div class="heat-cell heat-c4">31</div>
+      <div class="heat-cell heat-c5">5</div>
+      <div class="heat-cell heat-c7">2</div>
+
+      <div class="heat-row-lbl">Consumer Disc.</div>
+      <div class="heat-cell heat-c0">15</div>
+      <div class="heat-cell heat-c3">16</div>
+      <div class="heat-cell heat-c4">28</div>
+      <div class="heat-cell heat-c5">2</div>
+      <div class="heat-cell heat-cn">0</div>
+
+      <div class="heat-row-lbl">Materials</div>
+      <div class="heat-cell heat-c1">5</div>
+      <div class="heat-cell heat-c3">9</div>
+      <div class="heat-cell heat-c4">14</div>
+      <div class="heat-cell heat-c7">2</div>
+      <div class="heat-cell heat-c9">1</div>
+
+      <div class="heat-row-lbl">Utilities · Energy</div>
+      <div class="heat-cell heat-c1">3</div>
+      <div class="heat-cell heat-c3">7</div>
+      <div class="heat-cell heat-c4">18</div>
+      <div class="heat-cell heat-c5">2</div>
+      <div class="heat-cell heat-cn">0</div>
+    </div>
+    <div class="rk-note">Materials shows the only <b>P(up)≥0.65</b> cell today (1 ticker · AMCR). Tech is concentrated in the &lt;0.30 bucket (28 tickers) — model is broadly bearish on tech at the 21d horizon.</div>
+  </div>
+</section>
+
+<!-- ═══════════ ⑤ MODEL HEALTH ═══════════ -->
+<div class="rk-divider">⑤ MODEL PERFORMANCE · 3 modes, walk-forward holdout</div>
+<section class="rk-section calib">
+  <div class="rk-section-head">
+    <div>
+      <div class="rk-section-title"><span class="num">⑤</span>Calibration health board</div>
+      <div class="rk-section-sub">Cross-mode metrics · n=357K · trained 2026-05-16 · auto-retrains on the morning scan</div>
+    </div>
+    <span class="rk-pill gn">● ALL 3 MODES CALIBRATED</span>
+  </div>
+  <div class="rk-section-body">
+    <div class="perf-grid">
+      <div class="perf-card">
+        <div class="perf-card-h">⚡ SWING · 5d horizon</div>
+        <div class="perf-card-tk"><b class="gn">45.5%</b> <small>dir. accuracy · base 33%</small></div>
+        <div class="perf-card-row"><span>Hit-Net AUC</span><b>0.77</b></div>
+        <div class="perf-card-row"><span>Pinball q50</span><b>0.017</b></div>
+        <div class="perf-card-row"><span>Decile spread</span><b>+1.42</b></div>
+        <div class="perf-card-row"><span>Drift KS</span><b class="gn">0.03</b></div>
+      </div>
+      <div class="perf-card">
+        <div class="perf-card-h">📈 POSITION · 21d horizon</div>
+        <div class="perf-card-tk"><b class="gn">42.4%</b> <small>dir. accuracy · base 33%</small></div>
+        <div class="perf-card-row"><span>Hit-Net AUC</span><b>0.78</b></div>
+        <div class="perf-card-row"><span>Pinball q50</span><b>0.037</b></div>
+        <div class="perf-card-row"><span>Decile spread</span><b>+1.21</b></div>
+        <div class="perf-card-row"><span>Drift KS</span><b class="gn">0.04</b></div>
+      </div>
+      <div class="perf-card">
+        <div class="perf-card-h">🏛 INVEST · 126d horizon</div>
+        <div class="perf-card-tk"><b class="am">40.3%</b> <small>dir. accuracy · base 33%</small></div>
+        <div class="perf-card-row"><span>Hit-Net AUC</span><b>0.77</b></div>
+        <div class="perf-card-row"><span>Pinball q50</span><b>0.110</b></div>
+        <div class="perf-card-row"><span>Decile spread</span><b>+0.84</b></div>
+        <div class="perf-card-row"><span>Drift KS</span><b class="am">0.07</b></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="ws-foot">
+  Workspace · scanner-first surface · all 442 tickers · all 3 modes · auto-refreshed by <span class="copper">ml.run_ml_edge</span> every scan
+</div>
+
+</body>
+</html>

@@ -40,11 +40,21 @@ log = logging.getLogger(__name__)
 
 
 def _load_universe(top_n: int = 200) -> list[str]:
-    """Pull tickers from latest bundle by score rank."""
+    """Universe = top-N by screener score UNION refresh_options_flow.OPTIONS_LIQUID_SEED.
+
+    2026-05-15 · Same fix as refresh_options_flow.py — IV history must cover
+    the high-options-liquidity names (AAPL/NVDA/SPY/etc) regardless of whether
+    the screener flags them as setups. Otherwise iv_rank computation has gaps
+    for the most-traded names.
+    """
     bundle_path = BASE / "cache" / "last_bundle.json"
+    try:
+        from refresh_options_flow import OPTIONS_LIQUID_SEED as _seed
+    except Exception:
+        _seed = []
     if not bundle_path.exists():
-        log.warning("No bundle — falling back to S&P 500 top names is out of scope; bail.")
-        return []
+        log.warning("No bundle — falling back to OPTIONS_LIQUID_SEED only")
+        return list(dict.fromkeys(_seed))
     bundle = json.loads(bundle_path.read_text())
     candidates: dict[str, float] = {}
     for sec in ("buy_candidates", "watch_list", "all_scored", "medium_term_picks", "long_term_picks"):
@@ -58,7 +68,13 @@ def _load_universe(top_n: int = 200) -> list[str]:
             score = float(r.get("score") or r.get("composite_score") or 0)
             candidates[t] = max(candidates.get(t, 0), score)
     ranked = sorted(candidates.items(), key=lambda kv: -kv[1])
-    return [t for t, _ in ranked[:top_n]]
+    screener_top = [t for t, _ in ranked[:top_n]]
+    seen = set(screener_top)
+    out = list(screener_top)
+    for t in _seed:
+        if t not in seen:
+            out.append(t); seen.add(t)
+    return out
 
 
 def _already_snapshotted_today(today_str: str) -> set[str]:

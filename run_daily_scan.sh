@@ -49,6 +49,52 @@ if [ $EXIT_CODE -eq 0 ]; then
     else
         echo "Skipping precompute_targets — already done at 06:00 (12h cache still valid)" >> "$LOG_FILE"
     fi
+
+    # ── Backfill earnings prediction outcomes ────────────────────────────
+    # Joins prediction_log → outcomes on (ticker, report_date) and writes
+    # realized_outcome + realized_surprise_pct. Idempotent, <1s.
+    echo "── Backfill earnings outcomes ──" >> "$LOG_FILE"
+    set +e
+    "$PYTHON" scripts/backfill_earnings_outcomes.py >> "$LOG_FILE" 2>&1
+    set -e
+
+    # ── Run ML Edge inference (3-headed forecast: dir/mag/hit-net) ──────
+    # Cheap (~3s for 449 tickers). Writes cache/ml_edge_predictions.json +
+    # infra/prototype/ml_edge_predictions.json. Re-training runs only on the
+    # morning scan since closed-trade labels accumulate slowly.
+    echo "── Run ML Edge inference ──" >> "$LOG_FILE"
+    set +e
+    # Morning scan: refresh historical backfill + retrain all 9 models.
+    # Other intra-day scans: just re-run inference (uses prior models + cache).
+    if [ "$HOUR" -lt 7 ]; then
+        echo "Morning scan: refreshing historical_backfill.json (EODHD bulk EOD)" >> "$LOG_FILE"
+        "$PYTHON" -m ml.historical_backfill >> "$LOG_FILE" 2>&1 || echo "⚠ ml.historical_backfill failed (using prior backfill)" >> "$LOG_FILE"
+        echo "Morning scan: retraining all 9 ML Edge models (swing/position/invest × dir/mag/hit)" >> "$LOG_FILE"
+        "$PYTHON" -m ml.train_historical >> "$LOG_FILE" 2>&1 || echo "⚠ ml.train_historical failed (using prior model artifacts)" >> "$LOG_FILE"
+    fi
+    "$PYTHON" -m ml.run_ml_edge >> "$LOG_FILE" 2>&1
+    ML_EXIT=$?
+    # Build setup_stats.json — Wilson CI per (setup × regime) for Technicals §6/§8
+    "$PYTHON" scripts/build_setup_stats.py >> "$LOG_FILE" 2>&1 || \
+        echo "⚠ build_setup_stats failed (Technicals tab will show stale per-setup stats)" >> "$LOG_FILE"
+    set -e
+    if [ $ML_EXIT -ne 0 ]; then
+        echo "⚠ ml.run_ml_edge exited $ML_EXIT (ML Edge sub-tab will show stale predictions)" >> "$LOG_FILE"
+    fi
+
+    # ── Rebuild audit ledger (per-signal D1-D5/W1-W5/M1-M6 grid) ─────────
+    # Runs EVERY scan so new signals get appended and prior days' D-cells
+    # populate as time passes. Builder is idempotent and incremental — it
+    # reuses cached horizon data, so re-running on each scan is cheap.
+    # Without this, audit_ledger.json froze in time (last write 2026-05-11).
+    echo "── Rebuild audit_ledger.json ──" >> "$LOG_FILE"
+    set +e
+    "$PYTHON" infra/prototype/build_audit_ledger.py >> "$LOG_FILE" 2>&1
+    LEDGER_EXIT=$?
+    set -e
+    if [ $LEDGER_EXIT -ne 0 ]; then
+        echo "⚠ build_audit_ledger exited $LEDGER_EXIT (audit tab will show stale ledger until next run)" >> "$LOG_FILE"
+    fi
 else
     echo "Scan FAILED with exit code $EXIT_CODE." >> "$LOG_FILE"
     # Show a macOS notification on failure

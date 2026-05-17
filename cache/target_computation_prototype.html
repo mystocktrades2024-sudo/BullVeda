@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Target Computation · Structural, Not ATR · AVGO sample</title>
+<style>
+  :root{
+    --bg:#0B0E14; --surf:#11151C; --surf-2:#161B24; --line:#1E2530;
+    --ink:#E6EAF2; --ink-2:#9AA4B2; --ink-3:#6B7280;
+    --gn:#3DDC97; --rd:#E5484D; --am:#F5A524; --cy:#B084FF;
+    --lead:#5EA1FF;
+    --hvn:#FCD34D; --bsl:#F472B6; --swing:#5EA1FF; --vah:#34D399;
+    --avwap:#A78BFA; --round:#FB923C; --fvg:#22D3EE;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-variant-numeric:tabular-nums}
+  body{padding:24px}
+  .page{max-width:1500px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+  h1{font:600 13px/1.4 -apple-system,sans-serif;letter-spacing:.18em;color:var(--lead);margin:0;text-transform:uppercase}
+  h2{font:700 11px/1.4 -apple-system,sans-serif;letter-spacing:.16em;color:var(--ink-2);
+    margin:0 0 10px;text-transform:uppercase;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  h2 .num{color:var(--lead);font-weight:800}
+  h2 .sub{font-weight:500;text-transform:none;letter-spacing:.04em;color:var(--ink-3)}
+  .panel{background:var(--surf);border:1px solid var(--line);border-radius:6px;padding:16px 18px}
+
+  .vgrid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+  .legend-strip{display:flex;flex-wrap:wrap;gap:14px;padding:8px 12px;background:var(--surf-2);border-radius:3px;
+    font:500 11px ui-monospace,monospace;color:var(--ink-2);margin-bottom:12px}
+  .legend-strip span{display:flex;align-items:center;gap:6px}
+  .dot{width:10px;height:10px;border-radius:50%}
+  .line-tag{width:18px;height:2px}
+  .band-tag{width:18px;height:8px;border:1px solid currentColor}
+
+  .cand-row{display:grid;grid-template-columns:80px 90px 1fr 90px 90px;gap:10px;padding:8px 10px;
+    border-bottom:1px dashed var(--line);font-size:12px;align-items:center}
+  .cand-row.head{font:700 9.5px ui-monospace,monospace;color:var(--ink-3);letter-spacing:.10em;text-transform:uppercase;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .cand-row.t1{background:rgba(61,220,151,.10);border-left:3px solid var(--gn);border-radius:2px;padding-left:8px;margin:2px 0}
+  .cand-row.t2{background:rgba(94,161,255,.10);border-left:3px solid var(--cy);border-radius:2px;padding-left:8px;margin:2px 0}
+  .cand-row.rejected{opacity:.5}
+  .cand-row .px{font:800 13px ui-monospace,monospace;color:var(--ink)}
+  .cand-row .r{font:700 11px ui-monospace,monospace;color:var(--ink-2)}
+  .cand-row .conf{font:800 14px ui-monospace,monospace;color:var(--lead);text-align:right}
+  .cand-row .reason{color:var(--ink-2);font-size:11.5px;line-height:1.4}
+  .cand-row .label{font:700 9.5px ui-monospace,monospace;letter-spacing:.06em;color:var(--ink)}
+
+  .src-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  .src-tile{padding:10px 12px;background:var(--surf-2);border:1px solid var(--line);border-radius:4px;border-top:3px solid var(--line)}
+  .src-tile h4{margin:0 0 4px;font:800 9px ui-monospace,monospace;letter-spacing:.12em;color:var(--ink);text-transform:uppercase}
+  .src-tile .w{font:800 22px -apple-system,sans-serif;color:var(--lead);line-height:1.1}
+  .src-tile .desc{font:500 10.5px -apple-system,sans-serif;color:var(--ink-2);margin-top:4px;line-height:1.4}
+  .src-tile.equal-highs{border-top-color:var(--bsl)}
+  .src-tile.hvn{border-top-color:var(--hvn)}
+  .src-tile.swing-high{border-top-color:var(--swing)}
+  .src-tile.vah{border-top-color:var(--vah)}
+  .src-tile.avwap-52w{border-top-color:var(--avwap)}
+  .src-tile.avwap-earn{border-top-color:var(--avwap)}
+  .src-tile.fvg{border-top-color:var(--fvg)}
+  .src-tile.round{border-top-color:var(--round)}
+  .src-tile.fib{border-top-color:var(--ink-3)}
+
+  .pill{display:inline-block;font:700 9.5px ui-monospace,monospace;padding:2px 7px;border-radius:3px;letter-spacing:.06em;text-transform:uppercase}
+  .pill-gn{color:var(--gn);background:rgba(61,220,151,.10);border:1px solid rgba(61,220,151,.30)}
+  .pill-rd{color:var(--rd);background:rgba(229,72,77,.10);border:1px solid rgba(229,72,77,.30)}
+  .pill-am{color:var(--am);background:rgba(245,165,36,.10);border:1px solid rgba(245,165,36,.30)}
+  .pill-lead{color:var(--lead);background:rgba(94,161,255,.10);border:1px solid rgba(94,161,255,.30)}
+  .pill-dim{color:var(--ink-3);background:rgba(107,114,128,.08);border:1px solid rgba(107,114,128,.30)}
+
+  .verdict-box{padding:10px 14px;background:var(--surf-2);border-left:3px solid var(--lead);border-radius:3px;
+    font:500 12.5px -apple-system,sans-serif;color:var(--ink-2);line-height:1.6;margin-top:10px}
+  .verdict-box b{color:var(--ink);font-weight:700}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1>◆ TARGET COMPUTATION · Structural, not ATR · AVGO SWING (sample)</h1>
+
+  <!-- ━━━ INTRO ━━━ -->
+  <div class="panel">
+    <h2><span class="num">①</span>The Question <span class="sub">— if T1/T2 are computed by ATR alone, why do they so often miss real reaction zones?</span></h2>
+    <div style="font-size:13px;color:var(--ink-2);line-height:1.65">
+      <b style="color:var(--ink)">ATR-only targets are arbitrary.</b> "T1 = entry + 2× ATR" puts the target wherever <i>recent volatility</i> says, not where <i>actual supply</i> sits.<br>
+      <b style="color:var(--ink)">Structural targets are anchored.</b> T1/T2 are picked from <i>real levels</i> where prior orders, prior pivots, or volume actually traded. ATR becomes a sanity guardrail — not the source.
+    </div>
+  </div>
+
+  <!-- ━━━ A · ATR-ONLY vs STRUCTURAL · side-by-side mini-charts ━━━ -->
+  <div class="vgrid-2">
+    <div class="panel">
+      <h2><span class="num">A·1</span>ATR-only approach <span class="sub">— what kairos.html currently shows</span></h2>
+      <svg viewBox="0 0 600 300" style="width:100%;height:auto;display:block">
+        <!-- grid -->
+        <g stroke="#1E2530" stroke-width="0.5">
+          <line x1="40" y1="50" x2="560" y2="50"/>
+          <line x1="40" y1="100" x2="560" y2="100"/>
+          <line x1="40" y1="150" x2="560" y2="150"/>
+          <line x1="40" y1="200" x2="560" y2="200"/>
+          <line x1="40" y1="250" x2="560" y2="250"/>
+        </g>
+        <!-- Price line (AVGO sample) -->
+        <polyline fill="none" stroke="#E6EAF2" stroke-width="1.6" stroke-linejoin="round"
+          points="40,210 60,200 90,190 120,185 150,195 180,205 220,200 260,180 300,170 340,165 380,170 420,175 460,180 500,178 540,172 560,170"/>
+        <!-- Entry -->
+        <line x1="40" y1="172" x2="560" y2="172" stroke="#5EA1FF" stroke-width="1.2"/>
+        <text x="46" y="168" font-size="10" fill="#5EA1FF" font-weight="700">ENTRY $200</text>
+        <!-- Stop -->
+        <line x1="40" y1="220" x2="560" y2="220" stroke="#E5484D" stroke-width="0.9" stroke-dasharray="5 3"/>
+        <text x="46" y="216" font-size="9.5" fill="#E5484D">stop $190 (1.5× ATR)</text>
+        <!-- T1 = +2× ATR -->
+        <line x1="40" y1="105" x2="560" y2="105" stroke="#3DDC97" stroke-width="0.9" stroke-dasharray="5 3"/>
+        <text x="46" y="101" font-size="9.5" fill="#3DDC97">T1 $216 = entry + 2 ATR</text>
+        <!-- T2 = +3× ATR -->
+        <line x1="40" y1="65" x2="560" y2="65" stroke="#5ec8d8" stroke-width="0.9" stroke-dasharray="5 3"/>
+        <text x="46" y="61" font-size="9.5" fill="#5ec8d8">T2 $224 = entry + 3 ATR</text>
+        <text x="300" y="285" text-anchor="middle" font-size="10" fill="#6B7280" font-style="italic">no structural reason · just math · ignores prior highs / liquidity / volume</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <h2><span class="num">A·2</span>Structural approach <span class="sub">— what the engine should produce</span></h2>
+      <svg viewBox="0 0 600 300" style="width:100%;height:auto;display:block">
+        <g stroke="#1E2530" stroke-width="0.5">
+          <line x1="40" y1="50" x2="560" y2="50"/>
+          <line x1="40" y1="100" x2="560" y2="100"/>
+          <line x1="40" y1="150" x2="560" y2="150"/>
+          <line x1="40" y1="200" x2="560" y2="200"/>
+          <line x1="40" y1="250" x2="560" y2="250"/>
+        </g>
+        <!-- HVN band -->
+        <rect x="40" y="98" width="520" height="12" fill="rgba(252,211,77,.18)" stroke="#FCD34D" stroke-width="0.6"/>
+        <text x="556" y="106" text-anchor="end" font-size="8.5" fill="#FCD34D" font-weight="700">HVN $214–$217</text>
+        <!-- Equal highs (BSL) -->
+        <circle cx="160" cy="103" r="3" fill="#F472B6"/>
+        <circle cx="280" cy="102" r="3" fill="#F472B6"/>
+        <circle cx="420" cy="103" r="3" fill="#F472B6"/>
+        <text x="170" y="93" font-size="8" fill="#F472B6">eq-highs × 3 = BSL pool</text>
+        <!-- VAH -->
+        <line x1="40" y1="68" x2="560" y2="68" stroke="#34D399" stroke-width="1" stroke-dasharray="3 2"/>
+        <text x="556" y="64" text-anchor="end" font-size="8.5" fill="#34D399">VAH $222.50</text>
+        <!-- AVWAP from 52w-high -->
+        <line x1="40" y1="55" x2="560" y2="73" stroke="#A78BFA" stroke-width="0.9"/>
+        <text x="160" y="50" font-size="8.5" fill="#A78BFA">AVWAP 52w-high $223–$225</text>
+        <!-- Round number $225 -->
+        <line x1="40" y1="60" x2="560" y2="60" stroke="#FB923C" stroke-width="0.7" stroke-dasharray="2 2"/>
+        <text x="556" y="56" text-anchor="end" font-size="8.5" fill="#FB923C">round $225</text>
+        <!-- Price line -->
+        <polyline fill="none" stroke="#E6EAF2" stroke-width="1.6" stroke-linejoin="round"
+          points="40,210 60,200 90,190 120,185 150,195 180,205 220,200 260,180 300,170 340,165 380,170 420,175 460,180 500,178 540,172 560,170"/>
+        <!-- Entry -->
+        <line x1="40" y1="172" x2="560" y2="172" stroke="#5EA1FF" stroke-width="1.2"/>
+        <text x="46" y="168" font-size="10" fill="#5EA1FF" font-weight="700">ENTRY $200</text>
+        <!-- Stop -->
+        <line x1="40" y1="220" x2="560" y2="220" stroke="#E5484D" stroke-width="0.9" stroke-dasharray="5 3"/>
+        <text x="46" y="216" font-size="9.5" fill="#E5484D">stop $190</text>
+        <!-- T1 at $215 (in HVN, near eq-highs) -->
+        <line x1="40" y1="105" x2="560" y2="105" stroke="#3DDC97" stroke-width="1.4"/>
+        <text x="46" y="101" font-size="10" fill="#3DDC97" font-weight="800">T1 $215 · confluence 7.5</text>
+        <!-- T2 at $223 (VAH + AVWAP + round cluster) -->
+        <line x1="40" y1="68" x2="560" y2="68" stroke="#5ec8d8" stroke-width="1.4"/>
+        <text x="46" y="64" font-size="10" fill="#5ec8d8" font-weight="800">T2 $223 · confluence 6.0</text>
+        <text x="300" y="285" text-anchor="middle" font-size="10" fill="#6B7280" font-style="italic">T1 = HVN × 3 eq-highs · T2 = VAH × AVWAP-52w × $225 round · all structural · all reachable</text>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ━━━ B · CANDIDATE SOURCES ━━━ -->
+  <div class="panel">
+    <h2><span class="num">B</span>Candidate Sources <span class="sub">— 8 structural lenses · each yields candidate target levels · each carries a confluence weight</span></h2>
+    <div class="legend-strip">
+      Color-coding used throughout this page →
+      <span><span class="dot" style="background:var(--bsl)"></span>BSL equal-highs</span>
+      <span><span class="dot" style="background:var(--hvn)"></span>HVN</span>
+      <span><span class="dot" style="background:var(--swing)"></span>Swing high</span>
+      <span><span class="dot" style="background:var(--vah)"></span>VAH</span>
+      <span><span class="dot" style="background:var(--avwap)"></span>AVWAP</span>
+      <span><span class="dot" style="background:var(--fvg)"></span>FVG</span>
+      <span><span class="dot" style="background:var(--round)"></span>Round number</span>
+      <span><span class="dot" style="background:var(--ink-3)"></span>Fibonacci</span>
+    </div>
+    <div class="src-grid">
+      <div class="src-tile equal-highs"><h4>EQUAL HIGHS · BSL</h4><div class="w">3.0×</div><div class="desc">Liquidity pool · stops cluster above prior highs · price commonly sweeps</div></div>
+      <div class="src-tile hvn"><h4>HVN CENTER</h4><div class="w">2.5×</div><div class="desc">High Volume Node · institutions transacted heavily here · acts as magnet</div></div>
+      <div class="src-tile swing-high"><h4>SWING HIGH</h4><div class="w">2.5×</div><div class="desc">BOS-anchor · prior pivot that defined structure · natural resistance</div></div>
+      <div class="src-tile vah"><h4>VAH</h4><div class="w">2.0×</div><div class="desc">Value Area High · 70% volume boundary · first-touch fade common</div></div>
+      <div class="src-tile avwap-52w"><h4>AVWAP 52w-HIGH</h4><div class="w">2.0×</div><div class="desc">Avg cost of holders since 52w high · overhead supply line</div></div>
+      <div class="src-tile avwap-earn"><h4>AVWAP EARNINGS</h4><div class="w">1.5×</div><div class="desc">Avg cost since last 1–2 earnings · reaction zone</div></div>
+      <div class="src-tile fvg"><h4>OPPOSING FVG</h4><div class="w">1.5×</div><div class="desc">Bearish gap above · likely mean-reversion fade level</div></div>
+      <div class="src-tile round"><h4>ROUND NUMBER</h4><div class="w">1.0×</div><div class="desc">$X00 / $X50 — psychological order clustering</div></div>
+      <div class="src-tile fib"><h4>FIB EXTENSION</h4><div class="w">0.5×</div><div class="desc">1.618 / 2.618 of swing low→high · weak alone · useful at ATH</div></div>
+    </div>
+    <div class="verdict-box" style="border-left-color:var(--am)">
+      <b style="color:var(--am)">⚠ Catalyst-mode addition:</b> when earnings within window, add <b>CALL WALL</b> (3.0×) and <b>MAX PAIN</b> (1.5×) from options chain. These dominate near binary events.
+    </div>
+  </div>
+
+  <!-- ━━━ C · CONFLUENCE DIAGRAM ━━━ -->
+  <div class="panel">
+    <h2><span class="num">C</span>Confluence Stacking <span class="sub">— a level with 3 stacked sources &gt;&gt; a level with 1</span></h2>
+    <svg viewBox="0 0 1200 360" style="width:100%;height:auto;display:block">
+      <!-- Y axis label -->
+      <text x="20" y="30" font-size="10" fill="#9AA4B2" font-weight="700">PRICE LADDER · AVGO sample</text>
+      <text x="20" y="46" font-size="9" fill="#6B7280">above entry $200 · ranked by price ↑</text>
+
+      <!-- Entry baseline -->
+      <line x1="100" y1="320" x2="1180" y2="320" stroke="#5EA1FF" stroke-width="1.5"/>
+      <text x="100" y="338" font-size="10" fill="#5EA1FF" font-weight="700">ENTRY $200 · stop $190 · risk = $10 (1R)</text>
+
+      <!-- Candidate price rows · each row = a price level with structural sources stacking -->
+      <!-- $223 cluster (T2 zone) -->
+      <g transform="translate(100,55)">
+        <text x="-10" y="14" text-anchor="end" font-size="11" fill="#E6EAF2" font-weight="800">$223</text>
+        <circle cx="20" cy="10" r="5" fill="#34D399"/><text x="32" y="14" font-size="10" fill="#34D399">VAH 2.0×</text>
+        <circle cx="130" cy="10" r="5" fill="#A78BFA"/><text x="142" y="14" font-size="10" fill="#A78BFA">AVWAP 52w-high 2.0×</text>
+        <circle cx="295" cy="10" r="5" fill="#FB923C"/><text x="307" y="14" font-size="10" fill="#FB923C">round $225 cluster 1.0×</text>
+        <circle cx="440" cy="10" r="5" fill="#F472B6"/><text x="452" y="14" font-size="10" fill="#F472B6">eq-high (1 touch) 1.0×</text>
+        <rect x="780" y="-2" width="120" height="22" rx="3" fill="rgba(94,161,255,.20)" stroke="#5EA1FF"/>
+        <text x="840" y="14" text-anchor="middle" font-size="13" fill="#5EA1FF" font-weight="800">conf 6.0</text>
+        <text x="910" y="14" font-size="11" fill="#3DDC97" font-weight="700">→ qualifies T2 (≥3R = $230 in single-source · ours sits at $223 with conf 6.0 → SELECT)</text>
+      </g>
+
+      <!-- $215 cluster (T1 zone) -->
+      <g transform="translate(100,125)">
+        <text x="-10" y="14" text-anchor="end" font-size="11" fill="#E6EAF2" font-weight="800">$215</text>
+        <circle cx="20" cy="10" r="5" fill="#FCD34D"/><text x="32" y="14" font-size="10" fill="#FCD34D">HVN center 2.5×</text>
+        <circle cx="180" cy="10" r="5" fill="#F472B6"/><text x="192" y="14" font-size="10" fill="#F472B6">eq-highs × 3 touches 3.0×</text>
+        <circle cx="370" cy="10" r="5" fill="#5EA1FF"/><text x="382" y="14" font-size="10" fill="#5EA1FF">swing-high (BOS anchor) 2.0×</text>
+        <rect x="780" y="-2" width="120" height="22" rx="3" fill="rgba(61,220,151,.25)" stroke="#3DDC97"/>
+        <text x="840" y="14" text-anchor="middle" font-size="13" fill="#3DDC97" font-weight="800">conf 7.5</text>
+        <text x="910" y="14" font-size="11" fill="#3DDC97" font-weight="700">→ qualifies T1 (≥1.5R = $215) → SELECT</text>
+      </g>
+
+      <!-- $211 — single source only -->
+      <g transform="translate(100,180)">
+        <text x="-10" y="14" text-anchor="end" font-size="11" fill="#9AA4B2" font-weight="700">$211</text>
+        <circle cx="20" cy="10" r="5" fill="#A78BFA"/><text x="32" y="14" font-size="10" fill="#A78BFA">AVWAP earnings-Q1 1.5×</text>
+        <rect x="780" y="-2" width="120" height="22" rx="3" fill="rgba(107,114,128,.10)" stroke="#2A3340"/>
+        <text x="840" y="14" text-anchor="middle" font-size="13" fill="#6B7280" font-weight="700">conf 1.5</text>
+        <text x="910" y="14" font-size="11" fill="#6B7280">→ &lt; 1.5R required ($215) · SKIP for T1</text>
+      </g>
+
+      <!-- $217 — opposing FVG -->
+      <g transform="translate(100,235)">
+        <text x="-10" y="14" text-anchor="end" font-size="11" fill="#9AA4B2" font-weight="700">$217</text>
+        <circle cx="20" cy="10" r="5" fill="#22D3EE"/><text x="32" y="14" font-size="10" fill="#22D3EE">opposing FVG 1.5×</text>
+        <circle cx="160" cy="10" r="5" fill="#FB923C"/><text x="172" y="14" font-size="10" fill="#FB923C">round $215 cluster 1.0×</text>
+        <rect x="780" y="-2" width="120" height="22" rx="3" fill="rgba(245,165,36,.15)" stroke="#F5A524"/>
+        <text x="840" y="14" text-anchor="middle" font-size="13" fill="#F5A524" font-weight="700">conf 2.5</text>
+        <text x="910" y="14" font-size="11" fill="#F5A524">→ qualifies T1 by R · but conf 2.5 &lt; $215 conf 7.5 · LOSES</text>
+      </g>
+
+      <!-- $230 — fib extension only -->
+      <g transform="translate(100,280)">
+        <text x="-10" y="14" text-anchor="end" font-size="11" fill="#9AA4B2" font-weight="700">$230</text>
+        <circle cx="20" cy="10" r="5" fill="#6B7280"/><text x="32" y="14" font-size="10" fill="#6B7280">Fib 1.618 ext 0.5×</text>
+        <rect x="780" y="-2" width="120" height="22" rx="3" fill="rgba(107,114,128,.10)" stroke="#2A3340"/>
+        <text x="840" y="14" text-anchor="middle" font-size="13" fill="#6B7280" font-weight="700">conf 0.5</text>
+        <text x="910" y="14" font-size="11" fill="#6B7280">→ qualifies T2 by R · but conf 0.5 &lt; $223 conf 6.0 · LOSES</text>
+      </g>
+    </svg>
+    <div class="verdict-box">
+      <b>The rule:</b> for each R-multiple band (≥1.5R for T1, ≥3R for T2), pick the candidate with the <b>highest confluence score</b> — not the nearest, not the furthest. Confluence weights priorities the level that has the most structural reasons to act as resistance.
+    </div>
+  </div>
+
+  <!-- ━━━ D · CANDIDATE LADDER (table) ━━━ -->
+  <div class="panel">
+    <h2><span class="num">D</span>Candidate Ladder · AVGO SWING <span class="sub">— all candidates above entry · R-filter + confluence selection</span></h2>
+    <div class="cand-row head">
+      <span>PRICE</span><span>R-MULT</span><span>STRUCTURAL SOURCES</span><span>CONFLUENCE</span><span style="text-align:right">SELECTION</span>
+    </div>
+    <div class="cand-row rejected">
+      <span class="px">$208</span>
+      <span class="r">+0.8R</span>
+      <span class="reason"><span class="dot" style="background:var(--ink-3);display:inline-block;margin-right:4px;width:7px;height:7px;border-radius:50%"></span>Fib 0.382 of last leg (0.5)</span>
+      <span class="conf" style="color:var(--ink-3)">0.5</span>
+      <span style="text-align:right"><span class="pill pill-dim">&lt; 1.5R</span></span>
+    </div>
+    <div class="cand-row rejected">
+      <span class="px">$211</span>
+      <span class="r">+1.1R</span>
+      <span class="reason"><span class="dot" style="background:var(--avwap);display:inline-block;margin-right:4px;width:7px;height:7px;border-radius:50%"></span>AVWAP from Q1 earnings (1.5)</span>
+      <span class="conf" style="color:var(--ink-3)">1.5</span>
+      <span style="text-align:right"><span class="pill pill-dim">&lt; 1.5R</span></span>
+    </div>
+    <div class="cand-row t1">
+      <span class="px">$215</span>
+      <span class="r" style="color:var(--gn);font-weight:800">+1.5R ✓</span>
+      <span class="reason"><b style="color:var(--ink)">HVN center</b> (2.5) <b style="color:var(--ink)">+ eq-highs × 3</b> (3.0) <b style="color:var(--ink)">+ swing-high BOS anchor</b> (2.0)</span>
+      <span class="conf">7.5</span>
+      <span style="text-align:right"><span class="pill pill-gn">★ T1 SELECTED</span></span>
+    </div>
+    <div class="cand-row rejected">
+      <span class="px">$217</span>
+      <span class="r">+1.7R</span>
+      <span class="reason">opposing FVG (1.5) + round $215 cluster (1.0)</span>
+      <span class="conf">2.5</span>
+      <span style="text-align:right"><span class="pill pill-dim">conf &lt; $215</span></span>
+    </div>
+    <div class="cand-row rejected">
+      <span class="px">$219</span>
+      <span class="r">+1.9R</span>
+      <span class="reason">no structural source · skip</span>
+      <span class="conf" style="color:var(--ink-3)">—</span>
+      <span style="text-align:right"><span class="pill pill-dim">no source</span></span>
+    </div>
+    <div class="cand-row t2">
+      <span class="px">$223</span>
+      <span class="r" style="color:var(--cy);font-weight:800">+2.3R</span>
+      <span class="reason"><b style="color:var(--ink)">VAH</b> (2.0) <b style="color:var(--ink)">+ AVWAP 52w-high</b> (2.0) <b style="color:var(--ink)">+ round $225 cluster</b> (1.0) <b style="color:var(--ink)">+ eq-high 1×</b> (1.0)</span>
+      <span class="conf" style="color:var(--cy)">6.0</span>
+      <span style="text-align:right"><span class="pill pill-lead">★ T2 SELECTED (≥2R bend)</span></span>
+    </div>
+    <div class="cand-row rejected">
+      <span class="px">$230</span>
+      <span class="r">+3.0R</span>
+      <span class="reason">Fib 1.618 only (0.5)</span>
+      <span class="conf" style="color:var(--ink-3)">0.5</span>
+      <span style="text-align:right"><span class="pill pill-dim">conf &lt; $223</span></span>
+    </div>
+    <div class="verdict-box" style="border-left-color:var(--am)">
+      <b>Note on T2 R-floor for SWING:</b> standard is ≥3R, but SWING's tight window (≤10d) often can't reach 3R structurally. We bend to ≥2R when (a) confluence ≥ 5.0, AND (b) the next-higher level has dramatically lower confluence. Here $230 (Fib only, conf 0.5) loses to $223 (conf 6.0) — T2 = $223 at 2.3R is the honest target.
+    </div>
+  </div>
+
+  <!-- ━━━ E · MODE-SPECIFIC SELECTION ━━━ -->
+  <div class="panel">
+    <h2><span class="num">E</span>Mode Differences <span class="sub">— same candidate pool · different selection rules per strategy</span></h2>
+    <svg viewBox="0 0 1200 240" style="width:100%;height:auto;display:block">
+      <!-- Column headers -->
+      <g font-family="monospace" font-size="10" fill="#9AA4B2" font-weight="700" letter-spacing=".12em">
+        <text x="60" y="20" text-anchor="start">SOURCE / RULE</text>
+        <text x="370" y="20" text-anchor="start" fill="#F5A524">SWING (2–10d)</text>
+        <text x="640" y="20" text-anchor="start" fill="#5EA1FF">POSITION (2w–6mo)</text>
+        <text x="940" y="20" text-anchor="start" fill="#B084FF">INVESTMENT (1y+)</text>
+      </g>
+      <line x1="40" y1="28" x2="1180" y2="28" stroke="#1E2530"/>
+
+      <!-- Rows -->
+      <g font-family="-apple-system,sans-serif" font-size="11.5">
+        <g transform="translate(0,46)">
+          <text x="60" y="0" fill="#E6EAF2" font-weight="700">Lookback window</text>
+          <text x="370" y="0" fill="#9AA4B2">40 trading days</text>
+          <text x="640" y="0" fill="#9AA4B2">120 trading days</text>
+          <text x="940" y="0" fill="#9AA4B2">504 trading days (2y)</text>
+        </g>
+        <line x1="40" y1="56" x2="1180" y2="56" stroke="#1E2530" stroke-dasharray="2 2"/>
+        <g transform="translate(0,76)">
+          <text x="60" y="0" fill="#E6EAF2" font-weight="700">Primary candidate sources</text>
+          <text x="370" y="0" fill="#9AA4B2">eq-highs · HVN · nearest swing</text>
+          <text x="640" y="0" fill="#9AA4B2">+VAH · AVWAP · round · FVG</text>
+          <text x="940" y="0" fill="#9AA4B2">IV_central + IV_high (no R-mult)</text>
+        </g>
+        <line x1="40" y1="86" x2="1180" y2="86" stroke="#1E2530" stroke-dasharray="2 2"/>
+        <g transform="translate(0,106)">
+          <text x="60" y="0" fill="#E6EAF2" font-weight="700">Min R for T1</text>
+          <text x="370" y="0" fill="#9AA4B2">1.5R</text>
+          <text x="640" y="0" fill="#9AA4B2">2.0R</text>
+          <text x="940" y="0" fill="#9AA4B2">N/A · MoS &gt; 10%</text>
+        </g>
+        <line x1="40" y1="116" x2="1180" y2="116" stroke="#1E2530" stroke-dasharray="2 2"/>
+        <g transform="translate(0,136)">
+          <text x="60" y="0" fill="#E6EAF2" font-weight="700">Min R for T2</text>
+          <text x="370" y="0" fill="#9AA4B2">2.0R (bend OK)</text>
+          <text x="640" y="0" fill="#9AA4B2">3.0R</text>
+          <text x="940" y="0" fill="#9AA4B2">IV_high (3-method upper)</text>
+        </g>
+        <line x1="40" y1="146" x2="1180" y2="146" stroke="#1E2530" stroke-dasharray="2 2"/>
+        <g transform="translate(0,166)">
+          <text x="60" y="0" fill="#E6EAF2" font-weight="700">Action at T1</text>
+          <text x="370" y="0" fill="#3DDC97">trim 50% · trail rest</text>
+          <text x="640" y="0" fill="#3DDC97">trim 40% · trail rest</text>
+          <text x="940" y="0" fill="#3DDC97">trim 33% · keep ⅔</text>
+        </g>
+        <line x1="40" y1="176" x2="1180" y2="176" stroke="#1E2530" stroke-dasharray="2 2"/>
+        <g transform="translate(0,196)">
+          <text x="60" y="0" fill="#E6EAF2" font-weight="700">Action at T2</text>
+          <text x="370" y="0" fill="#3DDC97">close runner</text>
+          <text x="640" y="0" fill="#3DDC97">trim another 30% · trail final</text>
+          <text x="940" y="0" fill="#3DDC97">trim 33% · let 33% run on 200d-SMA stop</text>
+        </g>
+        <line x1="40" y1="206" x2="1180" y2="206" stroke="#1E2530" stroke-dasharray="2 2"/>
+        <g transform="translate(0,226)">
+          <text x="60" y="0" fill="#E6EAF2" font-weight="700">Time-decay rule</text>
+          <text x="370" y="0" fill="#F5A524">unfilled by day 6 → reduce T1</text>
+          <text x="640" y="0" fill="#F5A524">unfilled by day 18 → flag</text>
+          <text x="940" y="0" fill="#F5A524">6m mandatory review</text>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <!-- ━━━ F · MAGNET vs REJECTION ━━━ -->
+  <div class="panel">
+    <h2><span class="num">F</span>Magnet vs Rejection classification <span class="sub">— targets aren't all the same · how price behaves at each drives the scale-out plan</span></h2>
+    <div class="vgrid-2">
+      <div style="padding:14px 16px;background:var(--surf-2);border:1px solid var(--line);border-left:3px solid var(--hvn);border-radius:3px">
+        <h4 style="margin:0 0 6px;font:800 10px ui-monospace,monospace;color:var(--hvn);letter-spacing:.12em">★ MAGNET</h4>
+        <div style="font:500 12.5px -apple-system,sans-serif;color:var(--ink-2);line-height:1.6">
+          <b style="color:var(--ink)">Sources:</b> HVN center · POC · max-pain · heavily-traded round number<br>
+          <b style="color:var(--ink)">Behavior:</b> price <i>pulls</i> here · often blasts through on first touch<br>
+          <b style="color:var(--ink)">Scale-out:</b> hold <b>full size</b> to target · don't trim early
+        </div>
+      </div>
+      <div style="padding:14px 16px;background:var(--surf-2);border:1px solid var(--line);border-left:3px solid var(--vah);border-radius:3px">
+        <h4 style="margin:0 0 6px;font:800 10px ui-monospace,monospace;color:var(--vah);letter-spacing:.12em">⮜ REJECTION</h4>
+        <div style="font:500 12.5px -apple-system,sans-serif;color:var(--ink-2);line-height:1.6">
+          <b style="color:var(--ink)">Sources:</b> VAH (first touch) · opposing FVG · AVWAP 52w-high · swing-high after BOS<br>
+          <b style="color:var(--ink)">Behavior:</b> price <i>fades</i> on first touch · re-test then resolve<br>
+          <b style="color:var(--ink)">Scale-out:</b> sell <b>50%</b> on touch · save remainder for second push
+        </div>
+      </div>
+      <div style="padding:14px 16px;background:var(--surf-2);border:1px solid var(--line);border-left:3px solid var(--bsl);border-radius:3px">
+        <h4 style="margin:0 0 6px;font:800 10px ui-monospace,monospace;color:var(--bsl);letter-spacing:.12em">↑↓ MIXED · liquidity sweep</h4>
+        <div style="font:500 12.5px -apple-system,sans-serif;color:var(--ink-2);line-height:1.6">
+          <b style="color:var(--ink)">Sources:</b> equal-highs above prior pivot (BSL pool)<br>
+          <b style="color:var(--ink)">Behavior:</b> sweep above, then either continuation OR reversal<br>
+          <b style="color:var(--ink)">Scale-out:</b> trim <b>33%</b> on touch · wait one bar for resolution · close remainder on signal
+        </div>
+      </div>
+      <div style="padding:14px 16px;background:var(--surf-2);border:1px solid var(--line);border-left:3px solid var(--avwap);border-radius:3px">
+        <h4 style="margin:0 0 6px;font:800 10px ui-monospace,monospace;color:var(--avwap);letter-spacing:.12em">⟁ STRUCTURAL · invest only</h4>
+        <div style="font:500 12.5px -apple-system,sans-serif;color:var(--ink-2);line-height:1.6">
+          <b style="color:var(--ink)">Sources:</b> IV_central · IV_high · analyst PT consensus<br>
+          <b style="color:var(--ink)">Behavior:</b> long-cycle convergence · not single-touch<br>
+          <b style="color:var(--ink)">Scale-out:</b> trim <b>33% / 33%</b> at IV_central / IV_high · final 33% trails on 200d-SMA
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ━━━ G · HYBRID with KAIROS ━━━ -->
+  <div class="panel">
+    <h2><span class="num">G</span>Hybrid · marry with existing kairos.html chart <span class="sub">— keep what works · add structural attribution</span></h2>
+    <svg viewBox="0 0 1200 300" style="width:100%;height:auto;display:block">
+      <!-- Existing kairos rendering on left -->
+      <g transform="translate(0,0)">
+        <text x="20" y="18" font-size="11" fill="#9AA4B2" font-weight="700" letter-spacing=".10em">EXISTING · kairos.html line 7416–7435</text>
+        <rect x="20" y="28" width="540" height="250" fill="rgba(11,14,20,.5)" stroke="#1E2530"/>
+        <!-- Mini price chart -->
+        <polyline fill="none" stroke="#E6EAF2" stroke-width="1.3" stroke-linejoin="round"
+          points="40,210 80,200 120,195 160,205 200,200 240,190 280,180 320,175 360,180 400,178 440,182 480,180 520,180"/>
+        <line x1="40" y1="180" x2="520" y2="180" stroke="#5EA1FF" stroke-width="1"/>
+        <text x="46" y="176" font-size="9" fill="#5EA1FF">entry</text>
+        <line x1="40" y1="220" x2="520" y2="220" stroke="#E5484D" stroke-width="0.8" stroke-dasharray="4 3"/>
+        <text x="46" y="216" font-size="9" fill="#E5484D">stop</text>
+        <line x1="40" y1="120" x2="520" y2="120" stroke="#3DDC97" stroke-width="0.8" stroke-dasharray="4 3"/>
+        <text x="525" y="124" font-size="9" fill="#3DDC97" font-weight="700">T1 $215</text>
+        <line x1="40" y1="75" x2="520" y2="75" stroke="#5ec8d8" stroke-width="0.8" stroke-dasharray="4 3"/>
+        <text x="525" y="79" font-size="9" fill="#5ec8d8" font-weight="700">T2 $223</text>
+        <text x="270" y="260" text-anchor="middle" font-size="9.5" fill="#6B7280" font-style="italic">
+          horizontal lines · no explanation of why · t1/t2 from data.json
+        </text>
+      </g>
+
+      <!-- Arrow / merge symbol -->
+      <text x="585" y="155" text-anchor="middle" font-size="20" fill="#5EA1FF">→</text>
+      <text x="585" y="175" text-anchor="middle" font-size="9" fill="#6B7280" font-weight="700">HYBRID</text>
+
+      <!-- New hybrid chart on right -->
+      <g transform="translate(620,0)">
+        <text x="20" y="18" font-size="11" fill="#9AA4B2" font-weight="700" letter-spacing=".10em">HYBRID · same chart + structural attribution</text>
+        <rect x="20" y="28" width="540" height="250" fill="rgba(11,14,20,.5)" stroke="#5EA1FF"/>
+        <!-- HVN band around T1 -->
+        <rect x="40" y="116" width="480" height="14" fill="rgba(252,211,77,.18)" stroke="#FCD34D" stroke-width="0.5"/>
+        <!-- VAH/AVWAP markers around T2 -->
+        <circle cx="60" cy="73" r="3" fill="#34D399"/>
+        <circle cx="100" cy="73" r="3" fill="#A78BFA"/>
+        <circle cx="140" cy="73" r="3" fill="#FB923C"/>
+        <!-- Eq-high BSL dots above T1 -->
+        <circle cx="160" cy="120" r="2.5" fill="#F472B6"/>
+        <circle cx="280" cy="119" r="2.5" fill="#F472B6"/>
+        <circle cx="380" cy="120" r="2.5" fill="#F472B6"/>
+        <!-- Mini chart -->
+        <polyline fill="none" stroke="#E6EAF2" stroke-width="1.3" stroke-linejoin="round"
+          points="40,210 80,200 120,195 160,205 200,200 240,190 280,180 320,175 360,180 400,178 440,182 480,180 520,180"/>
+        <line x1="40" y1="180" x2="520" y2="180" stroke="#5EA1FF" stroke-width="1"/>
+        <text x="46" y="176" font-size="9" fill="#5EA1FF">entry</text>
+        <line x1="40" y1="220" x2="520" y2="220" stroke="#E5484D" stroke-width="0.8" stroke-dasharray="4 3"/>
+        <text x="46" y="216" font-size="9" fill="#E5484D">stop</text>
+        <!-- T1 thicker, label richer -->
+        <line x1="40" y1="120" x2="520" y2="120" stroke="#3DDC97" stroke-width="1.6"/>
+        <text x="525" y="124" font-size="9" fill="#3DDC97" font-weight="800">T1 $215</text>
+        <text x="525" y="135" font-size="7.5" fill="#3DDC97">conf 7.5 · MIXED</text>
+        <text x="525" y="143" font-size="7.5" fill="#FCD34D">HVN+BSL+swing</text>
+        <!-- T2 thicker, label richer -->
+        <line x1="40" y1="75" x2="520" y2="75" stroke="#5ec8d8" stroke-width="1.6"/>
+        <text x="525" y="79" font-size="9" fill="#5ec8d8" font-weight="800">T2 $223</text>
+        <text x="525" y="90" font-size="7.5" fill="#5ec8d8">conf 6.0 · REJECTION</text>
+        <text x="525" y="98" font-size="7.5" fill="#A78BFA">VAH+AVWAP+round</text>
+        <text x="270" y="260" text-anchor="middle" font-size="9.5" fill="#3DDC97" font-style="italic" font-weight="700">
+          same lines · plus markers · plus reason · plus action implication
+        </text>
+      </g>
+    </svg>
+
+    <div class="verdict-box">
+      <b style="color:var(--gn)">What changes minimally in kairos.html:</b><br>
+      <span style="font-family:ui-monospace,monospace;font-size:11.5px;color:var(--ink-3)">
+      • Keep current T1/T2 horizontal-line render (line 7434–7435) untouched in shape<br>
+      • <b style="color:var(--ink-2)">Add</b> structural-source markers at each target level (HVN band · BSL dots · VAH/AVWAP tags)<br>
+      • <b style="color:var(--ink-2)">Add</b> small "basis" sub-text under each T1/T2 label: <code>"conf 7.5 · MIXED · HVN+BSL+swing"</code><br>
+      • <b style="color:var(--ink-2)">Replace</b> the data-source for t1/t2 in <code>data.json</code> — engine output replaces ATR-fallback calculation in line 7416 fallback (<code>closes[len-1] * 1.08</code>)<br>
+      • <b style="color:var(--ink-2)">Preserve</b> the rest of the kairos detail-card (other tabs, Position Analysis, etc.) — only the chart's target rendering and the data feeding it changes
+      </span>
+    </div>
+    <div class="verdict-box" style="border-left-color:var(--am);margin-top:8px">
+      <b style="color:var(--am)">Engine-side · what's new server-side:</b><br>
+      <span style="font-family:ui-monospace,monospace;font-size:11.5px;color:var(--ink-3)">
+      • 8 sub-modules: structure · order-block · liquidity · FVG · volume-profile · AVWAP · ATR (guardrail) · fundamentals (invest)<br>
+      • Each candidate gets a confluence score · selection rule picks highest-confluence per R-band<br>
+      • Mode-specific R-floors (1.5/2.0/N-A for T1 · 2.0/3.0/IV_high for T2)<br>
+      • Magnet/rejection/mixed classification drives the scale-out plan<br>
+      • Output schema includes: <code>t1.price · t1.r · t1.confluence · t1.sources[] · t1.behavior · t1.action</code> (same for t2)<br>
+      • Runs on every daily scan · cached 12h
+      </span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

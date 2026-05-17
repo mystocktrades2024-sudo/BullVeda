@@ -377,9 +377,159 @@ export function render() {
     </div>
   </div>` : '';
 
+  // ── SQZMOM · Squeeze Momentum tile (LazyBear) ─────────────────────
+  // Quant-style single tile · histogram, dot rail, 5-col KPI tape +
+  // decision row. Compact — sits at the top of Plan tab.
+  const _sqzTile = (function() {
+    const series = T.sqz_series_20 || T.indicators?.sqz_series_20 || null;
+    const sqzOn  = !!(T.squeeze_on ?? T.indicators?.squeeze_on);
+    const barsIn = +(T.bars_in_squeeze ?? T.indicators?.bars_in_squeeze ?? 0);
+    const fired  = !!(T.squeeze_fired ?? T.indicators?.squeeze_fired);
+    const dir    = (T.squeeze_direction ?? T.indicators?.squeeze_direction ?? 'neutral');
+    if (!series && !sqzOn && !fired) return '';   // nothing to show
+    // Current mom value + delta
+    const last = (series && series.length) ? series[series.length-1] : null;
+    const prev = (series && series.length >= 2) ? series[series.length-2] : null;
+    const momV  = last ? last.v : null;
+    const momP  = prev ? prev.v : null;
+    const delta = (momV != null && momP != null) ? (momV - momP) : null;
+    // z-score over 60d not yet wired — placeholder 'n/a'
+    // Signal logic
+    let signal, sigColor;
+    if (sqzOn && momV != null && momV > 0) { signal = 'WAIT'; sigColor = '#d97706'; }
+    else if (fired && dir === 'bullish')   { signal = 'BUY';  sigColor = '#5be57c'; }
+    else if (fired && dir === 'bearish')   { signal = 'SHORT*'; sigColor = '#ff6b5b'; }
+    else if (sqzOn && momV != null && momV < 0) { signal = 'WAIT'; sigColor = '#d97706'; }
+    else                                   { signal = 'NEUTRAL'; sigColor = '#80847a'; }
+    const railColor = signal === 'BUY' ? '#5be57c' : signal === 'WAIT' ? '#d97706' : signal === 'SHORT*' ? '#ff6b5b' : '#3a3f4d';
+    // State string
+    const stateStr = sqzOn ? `ON · B+${barsIn}` : (fired ? 'OFF · D+1' : '—');
+    const arrow = (momV != null) ? (momV > 0 ? '△' : '▽') : '—';
+    // Histogram bars
+    let maxAbs = 1;
+    if (series) series.forEach(b => { if (b.v != null && Math.abs(b.v) > maxAbs) maxAbs = Math.abs(b.v); });
+    const histHTML = (series || []).map(b => {
+      if (b.v == null) return `<div style="flex:1;display:flex;flex-direction:column;justify-content:center"><span style="width:100%;height:1px;background:#3a3f4d;margin:auto"></span></div>`;
+      const pct = Math.max(2, Math.min(100, Math.abs(b.v) / maxAbs * 100));
+      const up = b.v > 0;
+      const colorMap = { lime:'#a3e635', green:'#15803d', maroon:'#7f1d1d', red:'#ef4444' };
+      const c = colorMap[b.color] || '#3a3f4d';
+      return `<div style="flex:1;display:flex;flex-direction:column;justify-content:center">
+        <span style="width:100%;height:${pct}%;background:${c};${up ? 'margin-bottom:auto' : 'margin-top:auto'};border-radius:1px"></span>
+      </div>`;
+    }).join('');
+    const dotHTML = (series || []).map(b => {
+      const dotMap = {
+        on:    'background:#000;outline:1px solid #5a5f6d',
+        fired: 'background:#8a8f9c',
+        none:  'background:#2e312c',
+      };
+      const sty = dotMap[b.dot] || dotMap.none;
+      return `<div style="flex:1;display:flex;justify-content:center"><span style="width:4px;height:4px;border-radius:50%;${sty}"></span></div>`;
+    }).join('');
+    const fmt2 = (v, d=2) => v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(d);
+    return `
+    <div style="background:#0e1015;border:1px solid #1f2330;border-left:2px solid ${railColor};padding:12px 16px;margin-bottom:14px;font-variant-numeric:tabular-nums;font-family:'JetBrains Mono',ui-monospace,monospace">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid #1f2330;margin-bottom:8px">
+        <span style="font-family:Inter,sans-serif;font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:#8a8f9c;font-weight:600">SQZMOM <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5a5f6d;margin-left:4px">· 20D · LazyBear</span></span>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.04em;color:${sigColor}">${stateStr} · ${arrow} ${fmt2(momV, 2)}</span>
+          <span style="font-size:12px;font-weight:700;padding:3px 12px;border-radius:2px;letter-spacing:0.14em;color:${sigColor};background:color-mix(in oklch, ${sigColor} 18%, transparent);border:1px solid color-mix(in oklch, ${sigColor} 50%, transparent)">${signal}</span>
+        </div>
+      </div>
+      ${series ? `
+      <div style="display:flex;align-items:stretch;gap:1px;height:48px;position:relative;background:linear-gradient(180deg,transparent 0,transparent calc(50% - 1px),#2a2f3d 50%,transparent calc(50% + 1px),transparent 100%)">${histHTML}</div>
+      <div style="display:flex;gap:1px;height:8px;margin:4px 0 8px;align-items:center">${dotHTML}</div>` : ''}
+      <div style="display:grid;grid-template-columns:1.1fr 0.7fr 0.9fr 0.9fr 0.9fr;border-top:1px solid #1f2330;padding-top:6px;font-size:11px">
+        <div style="padding-right:10px;border-right:1px solid #1f2330"><div style="font-family:Inter,sans-serif;font-size:8.5px;letter-spacing:0.16em;text-transform:uppercase;color:#5a5f6d;font-weight:600;margin-bottom:2px">State</div><div style="color:${sigColor};font-weight:700;font-size:12.5px">${stateStr}</div></div>
+        <div style="padding:0 10px;border-right:1px solid #1f2330"><div style="font-family:Inter,sans-serif;font-size:8.5px;letter-spacing:0.16em;text-transform:uppercase;color:#5a5f6d;font-weight:600;margin-bottom:2px">Coil</div><div style="color:${sqzOn ? '#d97706' : '#e7e9ee'};font-weight:700;font-size:12.5px">${barsIn}</div></div>
+        <div style="padding:0 10px;border-right:1px solid #1f2330"><div style="font-family:Inter,sans-serif;font-size:8.5px;letter-spacing:0.16em;text-transform:uppercase;color:#5a5f6d;font-weight:600;margin-bottom:2px">Mom</div><div style="color:${momV > 0 ? '#a3e635' : momV < 0 ? '#ef4444' : '#e7e9ee'};font-weight:700;font-size:12.5px">${fmt2(momV)}</div></div>
+        <div style="padding:0 10px;border-right:1px solid #1f2330"><div style="font-family:Inter,sans-serif;font-size:8.5px;letter-spacing:0.16em;text-transform:uppercase;color:#5a5f6d;font-weight:600;margin-bottom:2px">Δ 1d</div><div style="color:${delta > 0 ? '#a3e635' : delta < 0 ? '#ef4444' : '#e7e9ee'};font-weight:700;font-size:12.5px">${fmt2(delta)}</div></div>
+        <div style="padding:0 10px"><div style="font-family:Inter,sans-serif;font-size:8.5px;letter-spacing:0.16em;text-transform:uppercase;color:#5a5f6d;font-weight:600;margin-bottom:2px">Direction</div><div style="color:${dir === 'bullish' ? '#a3e635' : dir === 'bearish' ? '#ef4444' : '#80847a'};font-weight:700;font-size:12.5px">${dir.toUpperCase()}</div></div>
+      </div>
+    </div>`;
+  })();
+
+  // ─────────────────────────────────────────────────────────────────
+  // QUANT DECISION TAPE · Plan tab — top-of-page KPI strip answering
+  // "if I take this, exactly what does it cost / pay / size at?"
+  // Reuses Kelly-lite + implied-move + macro-overlap signals from the
+  // earnings cockpit when they're available, gracefully degrades.
+  // ─────────────────────────────────────────────────────────────────
+  const _planDecisionTape = (function() {
+    const im   = T.implied_move || (T.earnings_beat_prediction || {}).breakdown?.implied_move || {};
+    const ks   = (T.earnings_beat_prediction || {}).breakdown?.kelly_sizing || T.kelly_sizing || {};
+    const lv   = (T.earnings_beat_prediction || {}).breakdown?.trade_levels || {};
+    const macro = (T.earnings_beat_prediction || {}).breakdown?.macro_overlap || {};
+    const pead = (T.earnings_beat_prediction || {}).breakdown?.pead || {};
+    const cohort = (T.earnings_beat_prediction || {}).breakdown?.sector_cohort || {};
+    const erDays = T.earn_days != null ? +T.earn_days : (T.days_to_earnings || null);
+    const erFlag = erDays != null && erDays >= 0 && erDays <= 14;
+    const tiles = [];
+    // Kelly size
+    if (ks.size_pct_equity != null) {
+      const c = ks.size_pct_equity >= 0.04 ? 'var(--pass)' : ks.size_pct_equity > 0 ? 'var(--warn)' : 'var(--ink-3)';
+      tiles.push({
+        k: 'KELLY SIZE',
+        v: (ks.size_pct_equity * 100).toFixed(1) + '%',
+        sub: `win ${(ks.win_prob*100).toFixed(0)}% · ${ks.cap_reason}`,
+        c,
+      });
+    }
+    // Implied move on next print (if earnings ≤ 14d)
+    if (erFlag && im.implied_move_pct != null) {
+      const c = im.implied_move_pct >= 10 ? 'var(--warn)' : 'var(--ink-1)';
+      tiles.push({
+        k: 'IMPL ±% (next print)',
+        v: '±' + im.implied_move_pct.toFixed(1) + '%',
+        sub: `straddle $${(+im.straddle_cost||0).toFixed(2)} · exp ${(im.expiry_date||'').slice(5)} · ER +${erDays}d`,
+        c,
+      });
+    }
+    // PEAD drift expectation
+    if (pead.n_beats >= 2 && pead.post_5d_med != null) {
+      const drift = pead.post_5d_med;
+      const c = drift > 1.5 ? 'var(--pass)' : drift < -1.5 ? 'var(--fail)' : 'var(--ink-1)';
+      tiles.push({
+        k: 'PEAD 5d (prior beats)',
+        v: (drift>0?'+':'') + drift.toFixed(1) + '%',
+        sub: `n=${pead.n_beats} · ${drift > 1.5 ? 'positive drift' : drift < -1.5 ? 'fades' : 'choppy'}`,
+        c,
+      });
+    }
+    // Macro overlap on print
+    if (macro.has_overlap) {
+      tiles.push({
+        k: 'MACRO OVERLAP',
+        v: macro.tier,
+        sub: macro.events.map(e => e.name).join(' · ').slice(0, 50),
+        c: macro.tier === 'HIGH' ? 'var(--fail)' : 'var(--warn)',
+      });
+    }
+    // Sector cohort context
+    if (cohort.tag) {
+      const c = cohort.tag === 'HOT' ? 'var(--pass)' : cohort.tag === 'COLD' ? 'var(--fail)' : 'var(--ink-1)';
+      tiles.push({
+        k: 'SECTOR COHORT 45d',
+        v: cohort.tag,
+        sub: `${cohort.beats}/${cohort.n_reported} beat · median ${(cohort.median_surprise_pct||0).toFixed(0)}%`,
+        c,
+      });
+    }
+    if (!tiles.length) return '';
+    const cells = tiles.map(t => `<div style="background:var(--bg-2);border:1px solid var(--rule);border-radius:2px;padding:8px 12px;font-family:var(--mono);font-variant-numeric:tabular-nums">
+      <div style="font-size:8.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-3);font-weight:700;margin-bottom:3px">${t.k}</div>
+      <div style="font-size:15px;font-weight:700;color:${t.c}">${t.v}</div>
+      <div style="font-size:10px;color:var(--ink-3);margin-top:2px">${t.sub}</div>
+    </div>`).join('');
+    return `<div style="display:grid;grid-template-columns:repeat(${tiles.length}, 1fr);gap:8px;margin-bottom:12px">${cells}</div>`;
+  })();
+
   $('planBody').innerHTML = `
+  ${_planDecisionTape}
   ${_rrInconsistentBanner}
   ${_auditTrailHTML}
+  ${_sqzTile}
   ${_accuracyStripHTML}
   ${_forwardDistStripHTML}
   ${_structuralTargetsCard}

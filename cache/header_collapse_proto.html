@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Header collapse · before/after · strategy-aware PLAN + premortem</title>
+<style>
+:root {
+  --bg-0:#0a0c0f; --bg-1:#0e1216; --bg-2:#12171c; --bg-3:#181d23; --bg-4:#1f262d;
+  --ink-0:#f4f4f4; --ink:#dde2e8; --ink-1:#aab2bb; --ink-2:#7c848d; --ink-3:#525a64; --ink-4:#363c44;
+  --rule:#1f262b; --rule-2:#272e35;
+  --pass:#5be57c; --fail:#ff6b5b; --warn:#ffb95c; --info:#60a5fa; --copper:#d49060; --vio:#a78bfa;
+  --gold:#fbbf24;
+  --mono:'JetBrains Mono','SF Mono',Menlo,Consolas,monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg-0); color: var(--ink);
+       font-family: -apple-system,"Inter",system-ui,sans-serif;
+       font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums;
+       padding: 30px 24px 60px; }
+.wrap { max-width: 1640px; margin: 0 auto; }
+h1.title { font-size: 22px; font-weight: 700; color: var(--ink-0); margin: 0 0 4px; }
+.subtitle { color: var(--ink-2); font-size: 13px; font-family: var(--mono); letter-spacing: 0.04em; margin-bottom: 28px; }
+
+.sec-h { display: flex; align-items: baseline; gap: 12px; margin: 32px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--rule); }
+.sec-h .tag { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.20em; text-transform: uppercase; font-weight: 800; padding: 4px 14px; border-radius: 2px; }
+.sec-h .tag.before { background: rgba(255,107,91,0.10); color: var(--fail); border: 1px solid rgba(255,107,91,0.40); }
+.sec-h .tag.after  { background: rgba(91,229,124,0.10); color: var(--pass); border: 1px solid rgba(91,229,124,0.40); }
+.sec-h .name { font-size: 15px; color: var(--ink-0); font-weight: 700; }
+.sec-h .meta { color: var(--ink-3); font-family: var(--mono); font-size: 11px; margin-left: auto; letter-spacing: 0.04em; }
+
+.sample { background: var(--bg-1); border: 1px solid var(--rule); }
+
+/* ════════════════════════════════════════════════════════════════
+   3-LINE TICKER BAR (re-used from kairos.html · t-host)
+   ════════════════════════════════════════════════════════════════ */
+.t-host { background: var(--bg-1); border-bottom: 1px solid var(--rule); position: relative; }
+
+[data-tip] { cursor: pointer; position: relative; }
+[data-tip]:hover::after {
+  content: attr(data-tip); position: absolute;
+  bottom: auto; top: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  background: var(--bg-3); color: var(--ink-0);
+  border: 1px solid var(--rule-2); border-radius: 3px;
+  padding: 10px 14px; font-family: var(--mono); font-size: 11px;
+  font-weight: 400; line-height: 1.6; white-space: pre-line;
+  max-width: 360px; min-width: 240px; z-index: 2000;
+  text-align: left; letter-spacing: 0.02em;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.7); pointer-events: none;
+}
+
+/* Line 1 */
+.t1 { display: flex; align-items: center; padding: 0;
+      background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
+      border-bottom: 1px solid var(--rule);
+      font-family: var(--mono); font-size: 12px; height: 38px; }
+.t1 > * { padding: 0 12px; height: 100%; display: flex; align-items: center; border-right: 1px solid var(--rule); white-space: nowrap; }
+.t1 > *:last-child { border-right: none; }
+.t1-tk { font-size: 16px; font-weight: 800; color: var(--ink-0); letter-spacing: 0.04em; gap: 6px; }
+.t1-tk .sec { font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.10em; font-weight: 700; margin-left: 2px; text-transform: uppercase; }
+.t1-px { color: var(--ink-0); font-weight: 700; }
+.t1-chg.gn { color: var(--pass); font-weight: 700; font-size: 11px; padding-left: 6px !important; border-right: none !important; }
+.t1-vd { color: var(--pass); font-weight: 800; letter-spacing: 0.14em; background: rgba(91,229,124,0.10); }
+.t1-tier { color: var(--ink-1); font-weight: 700; font-size: 11px; padding-left: 6px !important; border-right: none !important; }
+.t1-bap { color: var(--ink-2); font-size: 11px; padding-left: 6px !important; border-right: none !important; }
+.t1-bap b { color: var(--ink-0); font-weight: 700; }
+.t1-plan { color: var(--ink-1); flex: 1; gap: 5px; }
+.t1-plan .lab { color: var(--ink-3); font-size: 10.5px; letter-spacing: 0.10em; margin-right: 4px; }
+.t1-plan .ent { color: var(--ink-0); font-weight: 700; }
+.t1-plan .stop { color: var(--fail); font-weight: 700; }
+.t1-plan .tg1 { color: var(--warn); font-weight: 700; }
+.t1-plan .tg2 { color: var(--info); font-weight: 700; }
+.t1-plan .arr { color: var(--ink-3); margin: 0 4px; }
+.t1-rr.gn { color: var(--pass); font-weight: 700; }
+.t1-rr .k { color: var(--ink-3); margin-right: 4px; font-weight: 500; }
+.t1-modes { display: flex; gap: 0; padding: 0 !important; }
+.t1-modes button { background: transparent; border: none; border-left: 1px solid var(--rule); padding: 0 11px; height: 100%; color: var(--ink-3); font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; cursor: pointer; transition: 120ms; position: relative; }
+.t1-modes button:hover { color: var(--ink-1); background: rgba(167,139,250,0.04); }
+.t1-modes button.on { background: var(--vio); color: var(--bg-0); }
+
+/* Strategy-aware PLAN highlighting · when active mode changes, the PLAN flashes */
+.t1-plan.flash { animation: planflash 600ms ease-out; }
+@keyframes planflash {
+  0%   { background: rgba(167,139,250,0.18); }
+  100% { background: transparent; }
+}
+
+/* Line 2 */
+.t2 { display: flex; align-items: center; padding: 0; background: var(--bg-1); font-family: var(--mono); font-size: 11px; height: 32px; border-bottom: 1px solid var(--rule); }
+.t2 > * { padding: 0 12px; height: 100%; display: flex; align-items: center; border-right: 1px solid var(--rule); white-space: nowrap; }
+.t2 > *:last-child { border-right: none; }
+.t2-setup { color: var(--copper); font-weight: 700; letter-spacing: 0.04em; gap: 6px; }
+.t2-setup .sub { color: var(--ink-3); font-size: 10px; letter-spacing: 0.08em; }
+.t2-align { color: var(--warn); font-weight: 800; letter-spacing: 0.08em; }
+.t2-align .ico { margin-right: 4px; }
+.t2-align .tally { color: var(--ink-3); font-weight: 500; letter-spacing: 0.10em; font-size: 10px; margin-left: 6px; }
+.t2-lens-bar { flex: 1; gap: 4px; overflow-x: auto; padding-right: 12px !important; }
+.t2-lens { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 10px; border: 1px solid var(--rule-2); font-size: 10.5px; font-weight: 700; }
+.t2-lens.gn { background: rgba(91,229,124,0.06); border-color: rgba(91,229,124,0.25); }
+.t2-lens.gn .nm { color: var(--pass); } .t2-lens.gn .arr { color: var(--pass); } .t2-lens.gn .val { color: var(--ink-0); }
+.t2-lens.am { background: rgba(255,185,92,0.06); border-color: rgba(255,185,92,0.25); }
+.t2-lens.am .nm { color: var(--warn); } .t2-lens.am .arr { color: var(--warn); } .t2-lens.am .val { color: var(--ink-0); }
+.t2-lens.rd { background: rgba(255,107,91,0.06); border-color: rgba(255,107,91,0.25); }
+.t2-lens.rd .nm { color: var(--fail); } .t2-lens.rd .arr { color: var(--fail); } .t2-lens.rd .val { color: var(--ink-0); }
+.t2-lens.vio { background: rgba(167,139,250,0.06); border-color: rgba(167,139,250,0.25); }
+.t2-lens.vio .nm { color: var(--vio); } .t2-lens.vio .val { color: var(--ink-0); }
+.t2-meta { color: var(--ink-3); font-size: 10px; letter-spacing: 0.06em; }
+.t2-meta b { color: var(--ink-1); }
+
+/* Line 3 · simplified ladder */
+.t3 { padding: 26px 100px 24px; background: var(--bg-1); position: relative; }
+.t3-lad { position: relative; height: 36px; }
+.t3-rail { position: absolute; left: 0; right: 0; top: 16px; height: 4px; background: rgba(124,132,141,0.4); border-radius: 2px; }
+.t3-stop-zone { position: absolute; top: 14px; height: 8px; background: rgba(255,107,91,0.20); border-left: 1.5px solid var(--fail); border-radius: 0 2px 2px 0; z-index: 1; }
+.t3-entry-band { position: absolute; top: 12px; height: 12px; background: rgba(91,229,124,0.25); border: 1.5px solid var(--pass); border-radius: 3px; z-index: 1; transition: left 280ms, width 280ms; }
+.t3-mk { position: absolute; top: 11px; transform: translateX(-50%); width: 14px; height: 14px; border-radius: 50%; border: 2px solid; box-sizing: border-box; z-index: 3; background: var(--bg-1); transition: left 280ms; }
+.t3-mk.stop { border-color: var(--fail); } .t3-mk.stop::after { content:''; position:absolute; inset:2px; border-radius:50%; background: var(--fail); }
+.t3-mk.now { width: 18px; height: 18px; top: 9px; background: var(--ink-0); border-color: var(--ink-0); box-shadow: 0 0 0 3px var(--bg-1), 0 0 0 4px rgba(244,244,244,0.4); }
+.t3-mk.t1 { border-color: var(--gold); } .t3-mk.t1::after { content:''; position:absolute; inset:2px; border-radius:50%; background: var(--gold); }
+.t3-mk.t2 { border-color: var(--info); } .t3-mk.t2::after { content:''; position:absolute; inset:2px; border-radius:50%; background: var(--info); }
+.t3-tlbl { position: absolute; transform: translateX(-50%); white-space: nowrap; text-align: center; top: -22px; transition: left 280ms; }
+.t3-tlbl .nm { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; margin-bottom: 2px; }
+.t3-tlbl .px { font-family: var(--mono); font-size: 12px; font-weight: 800; line-height: 1; }
+.t3-tlbl .pct { font-family: var(--mono); font-size: 10px; color: var(--ink-3); margin-left: 3px; font-weight: 600; }
+.t3-tlbl.stop .px { color: var(--fail); }
+.t3-tlbl.now .px { color: var(--ink-0); }
+.t3-tlbl.entry .px { color: var(--pass); }
+.t3-tlbl.t1 .px { color: var(--gold); }
+.t3-tlbl.t2 .px { color: var(--info); }
+.t3-rlbl { position: absolute; transform: translateX(-50%); top: 30px; white-space: nowrap; font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 2px; border: 1px solid; transition: left 280ms; }
+.t3-rlbl.stop { color: var(--fail); border-color: rgba(255,107,91,0.35); background: rgba(255,107,91,0.06); }
+.t3-rlbl.entry { color: var(--pass); border-color: rgba(91,229,124,0.35); background: rgba(91,229,124,0.06); }
+.t3-rlbl.t1 { color: var(--gold); border-color: rgba(251,191,36,0.35); background: rgba(251,191,36,0.06); }
+.t3-rlbl.t2 { color: var(--info); border-color: rgba(96,165,250,0.35); background: rgba(96,165,250,0.06); }
+
+/* ════ Pre-mortem slim banner ════ */
+.pm-bar { display: flex; align-items: center; gap: 12px;
+          padding: 8px 16px; background: rgba(255,107,91,0.06);
+          border-left: 3px solid var(--fail); font-size: 11.5px;
+          color: var(--ink-1); font-family: var(--mono); }
+.pm-bar .pm-h { color: var(--fail); font-weight: 800; letter-spacing: 0.14em; flex-shrink: 0; }
+.pm-bar .pm-b { display: flex; gap: 14px; flex: 1; overflow-x: auto; }
+.pm-bar .pm-b span { color: var(--ink); white-space: nowrap; }
+.pm-bar .pm-b span b { color: var(--fail); font-weight: 700; }
+.pm-bar.empty { background: rgba(82,90,100,0.08); border-left-color: var(--ink-3); }
+.pm-bar.empty .pm-h { color: var(--ink-3); }
+.pm-bar.empty .pm-b span { color: var(--ink-3); font-style: italic; }
+
+
+/* ════ Mock of OLD rows (to render the BEFORE state) ════ */
+.old-rule-card { background: var(--bg-2); border: 1px solid var(--rule); border-left: 3px solid var(--warn); padding: 14px 18px; margin: 12px 14px; }
+.old-rule-h { display: flex; align-items: center; gap: 16px; font-family: var(--mono); font-size: 11.5px; padding-bottom: 10px; border-bottom: 1px solid var(--rule); margin-bottom: 12px; }
+.old-rule-h .star { color: var(--warn); }
+.old-rule-h .swing { color: var(--warn); font-weight: 800; letter-spacing: 0.10em; }
+.old-rule-h .meta-lbl { color: var(--ink-3); letter-spacing: 0.10em; font-weight: 600; }
+.old-rule-h .meta-val { color: var(--ink); font-weight: 600; }
+.old-rule-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 22px; font-family: var(--mono); }
+.old-rule-grid .cell { display: flex; flex-direction: column; gap: 4px; }
+.old-rule-grid .cell .k { font-size: 10px; color: var(--ink-3); letter-spacing: 0.10em; font-weight: 700; }
+.old-rule-grid .cell .v { font-size: 12px; color: var(--ink-1); font-weight: 600; }
+
+.old-decision { background: linear-gradient(180deg, #050a14 0%, #0a1424 100%); border: 1px solid var(--rule); padding: 14px 18px; margin: 12px 14px; }
+.old-decision-h { display: flex; align-items: center; gap: 16px; font-family: var(--mono); font-size: 11.5px; padding-bottom: 10px; border-bottom: 1px solid var(--rule); margin-bottom: 14px; }
+.old-decision-h .star { color: var(--warn); }
+.old-decision-h .swing { color: var(--warn); font-weight: 800; letter-spacing: 0.10em; }
+.old-decision-h .meta { color: var(--ink-3); margin-left: auto; font-weight: 600; letter-spacing: 0.06em; }
+.old-decision-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 22px; font-family: var(--mono); }
+.old-decision-grid .cell { display: flex; flex-direction: column; gap: 6px; }
+.old-decision-grid .cell .k { font-size: 10px; color: var(--ink-3); letter-spacing: 0.10em; font-weight: 700; }
+.old-decision-grid .cell .v { font-size: 15px; font-weight: 800; }
+.old-decision-grid .cell.entry .v { color: var(--pass); }
+.old-decision-grid .cell.stop .v { color: var(--fail); }
+.old-decision-grid .cell.t1 .v { color: var(--gold); }
+.old-decision-grid .cell.t2 .v { color: var(--info); }
+.old-decision-grid .cell.rr .v { color: var(--pass); }
+
+.old-pre-mortem { background: rgba(255,107,91,0.06); border-left: 3px solid var(--fail); padding: 12px 18px; margin: 12px 14px; font-family: var(--mono); font-size: 12px; }
+.old-pre-mortem .h { color: var(--fail); font-weight: 800; letter-spacing: 0.14em; margin-right: 10px; }
+.old-pre-mortem .q { color: var(--ink); font-weight: 700; margin-right: 12px; }
+.old-pre-mortem .b { color: var(--ink-1); }
+.old-pre-mortem .b b { color: var(--ink); }
+
+/* ════ Measurement chips ════ */
+.measure { display: flex; gap: 14px; padding: 10px 14px; margin-top: 12px; background: var(--bg-2); border: 1px solid var(--rule); font-family: var(--mono); font-size: 11px; color: var(--ink-2); flex-wrap: wrap; align-items: center; }
+.measure b { color: var(--ink-0); }
+.measure .gn { color: var(--pass); font-weight: 700; }
+.measure .rd { color: var(--fail); font-weight: 700; }
+.measure .div { color: var(--ink-4); margin: 0 6px; }
+
+/* ════ Arch / explainer ════ */
+.arch { background: var(--bg-1); border: 1px solid var(--rule); padding: 20px 22px; margin-top: 30px; }
+.arch h3 { margin: 0 0 14px; font-size: 14px; color: var(--ink-0); font-weight: 700; }
+.arch-row { display: grid; grid-template-columns: 80px 1fr 1fr; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--rule); align-items: baseline; }
+.arch-row:last-child { border-bottom: none; }
+.arch-row .col-h { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.14em; font-weight: 700; text-transform: uppercase; }
+.arch-row .col-h.before { color: var(--fail); }
+.arch-row .col-h.after { color: var(--pass); }
+.arch-row .what { font-family: var(--mono); font-size: 11px; color: var(--copper); font-weight: 800; letter-spacing: 0.10em; }
+.arch-row .why { color: var(--ink-1); font-size: 12.5px; line-height: 1.6; }
+.arch-row .why b { color: var(--ink-0); font-weight: 700; }
+.arch-row .why .gn { color: var(--pass); font-weight: 700; }
+.arch-row .why .rd { color: var(--fail); font-weight: 700; }
+
+/* ════ Hint pill ════ */
+.hint { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+        background: rgba(96,165,250,0.10); border: 1px solid rgba(96,165,250,0.30);
+        color: var(--info); font-family: var(--mono); font-size: 10.5px; font-weight: 700;
+        letter-spacing: 0.08em; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1 class="title">Detail-page header collapse · before & after</h1>
+  <div class="subtitle">3 redundant rows under the ticker bar → 1 conditional row (pre-mortem) · strategy-aware PLAN binds the mode buttons to live trade math</div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       BEFORE — what kairos.html currently renders below the 3-line bar
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <div class="sec-h">
+    <span class="tag before">BEFORE</span>
+    <span class="name">3-line ticker bar + 3 legacy rows · ~280px of header</span>
+    <span class="meta">current state · the rows you flagged</span>
+  </div>
+
+  <div class="sample">
+
+    <!-- 3-line ticker bar (canonical values · static PLAN) -->
+    <div class="t-host">
+      <div class="t1">
+        <span class="t1-tk">DELL <span class="sec">Technology</span></span>
+        <span class="t1-px">$247.89</span>
+        <span class="t1-chg gn">▲1.65%</span>
+        <span class="t1-vd">BUY</span>
+        <span class="t1-tier">T3</span>
+        <span class="t1-bap"><b>BAP 78</b></span>
+        <span class="t1-plan" id="bPlan">
+          <span class="lab">PLAN</span>
+          <span class="ent">$240–246</span><span class="arr">→</span>
+          <span class="stop">$200</span><span class="arr">/</span>
+          <span class="tg1">$374</span><span class="arr">/</span>
+          <span class="tg2">$462</span>
+        </span>
+        <span class="t1-rr gn"><span class="k">R:R</span>1:3.0 ✓</span>
+        <span class="t1-modes">
+          <button class="on">⚡ SWING</button>
+          <button>📅 POS</button>
+          <button>🏛 INV</button>
+        </span>
+      </div>
+      <div class="t2">
+        <span class="t2-setup">Impulse Catalyst <span class="sub">· extended</span></span>
+        <span class="t2-align"><span class="ico">◧</span>MIXED<span class="tally">1B · 1W</span></span>
+        <span class="t2-lens-bar">
+          <span class="t2-lens rd"><span class="nm">V</span><span class="arr">↓</span><span class="val">11</span></span>
+          <span class="t2-lens gn"><span class="nm">S</span><span class="arr">↑</span><span class="val">RS 100</span></span>
+          <span class="t2-lens am"><span class="nm">ER</span><span class="arr">◧</span></span>
+          <span class="t2-lens am"><span class="nm">M</span><span class="arr">◧</span><span class="val">choppy</span></span>
+          <span class="t2-lens am"><span class="nm">I</span><span class="arr">·</span></span>
+          <span class="t2-lens am"><span class="nm">R</span><span class="arr">✓</span></span>
+          <span class="t2-lens gn"><span class="nm">N</span><span class="arr">↑</span><span class="val">+2.0</span></span>
+          <span class="t2-lens vio"><span class="nm">CFP</span><span class="val">book</span></span>
+        </span>
+        <span class="t2-meta">ER <b>unknown</b> · Kelly <b>×—</b> · ATR <b>5.35%</b></span>
+      </div>
+      <div class="t3">
+        <div class="t3-lad">
+          <div class="t3-rail"></div>
+          <div class="t3-stop-zone" style="left:0%; width:35%"></div>
+          <div class="t3-entry-band" style="left:33%; width:5%"></div>
+          <div class="t3-mk stop" style="left:35%"></div>
+          <div class="t3-mk now" style="left:42%"></div>
+          <div class="t3-mk t1" style="left:69%"></div>
+          <div class="t3-mk t2" style="left:91%"></div>
+          <div class="t3-tlbl stop" style="left:18%"><div class="nm">Stop</div><div class="px">$200<span class="pct">−18%</span></div></div>
+          <div class="t3-tlbl entry" style="left:36%"><div class="nm">Entry</div><div class="px">$240–246<span class="pct">−3%</span></div></div>
+          <div class="t3-tlbl now" style="left:54%"><div class="nm">Now</div><div class="px">$247.89</div></div>
+          <div class="t3-tlbl t1" style="left:69%"><div class="nm">T1</div><div class="px">$374<span class="pct">+51%</span></div></div>
+          <div class="t3-tlbl t2" style="left:91%"><div class="nm">T2</div><div class="px">$462<span class="pct">+86%</span></div></div>
+          <div class="t3-rlbl stop" style="left:35%">−1R</div>
+          <div class="t3-rlbl entry" style="left:36%">0R</div>
+          <div class="t3-rlbl t1" style="left:69%">+3.0R</div>
+          <div class="t3-rlbl t2" style="left:91%">+5.0R</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROW 1 · Strategy rulebook -->
+    <div class="old-rule-card">
+      <div class="old-rule-h">
+        <span class="star">★</span><span class="swing">SWING</span>
+        <span class="meta-lbl">LEAD LENS</span><span class="meta-val">Swing trader</span>
+        <span class="meta-lbl">·</span>
+        <span class="meta-lbl">HORIZON</span><span class="meta-val">2–10 days</span>
+      </div>
+      <div class="old-rule-grid">
+        <div class="cell"><div class="k">STOP</div><div class="v">1.25× ATR (close-based)</div></div>
+        <div class="cell"><div class="k">R:R FLOOR</div><div class="v">3.0 : 1</div></div>
+        <div class="cell"><div class="k">ENTRY</div><div class="v">FRESH / PULLBACK only</div></div>
+        <div class="cell"><div class="k">EARNINGS</div><div class="v">≥ 14 days clear</div></div>
+        <div class="cell"><div class="k">KELLY MULT</div><div class="v">×1.0</div></div>
+        <div class="cell"><div class="k">RULE</div><div class="v">Setup-driven · catalyst-aware…</div></div>
+      </div>
+    </div>
+
+    <!-- ROW 2 · Per-strategy decision card -->
+    <div class="old-decision">
+      <div class="old-decision-h">
+        <span class="star">★</span><span class="swing">SWING</span>
+        <span style="color:var(--ink);font-weight:700;letter-spacing:0.10em">PER-STRATEGY DECISION CARD</span>
+        <span class="meta">Swing trader · 2–10 days</span>
+      </div>
+      <div class="old-decision-grid">
+        <div class="cell entry"><div class="k">ENTRY ZONE</div><div class="v">$239.96–$246.48</div></div>
+        <div class="cell stop"><div class="k">STOP</div><div class="v">$227.57 <span style="font-size:11px;color:var(--ink-3);font-weight:600">· 1.25× ATR</span></div></div>
+        <div class="cell t1"><div class="k">T1 (TRIM)</div><div class="v">$302.55</div></div>
+        <div class="cell t2"><div class="k">T2 (RUNNER)</div><div class="v">$341.67</div></div>
+        <div class="cell rr"><div class="k">R:R · FLOOR 3</div><div class="v">1 : 3.6 ✓</div></div>
+        <div class="cell"><div class="k">HOLD</div><div class="v" style="color:var(--ink-1)">2–10 days</div></div>
+      </div>
+    </div>
+
+    <!-- ROW 3 · Pre-mortem (current oversized) -->
+    <div class="old-pre-mortem">
+      <span class="h">⚠ PRE-MORTEM</span>
+      <span class="q">what makes this go wrong?</span>
+      <span class="b"><b>No falsification criteria on this payload</b> — pre-mortem unwired. Wire t.thesis_killers from Value tab thesis_killers section.</span>
+    </div>
+
+  </div>
+
+  <div class="measure">
+    <b>Total header height</b> <span class="rd">~280px</span>
+    <span class="div">·</span>
+    <b>What's wasted</b> rulebook is constants of strategy · decision card duplicates Line 1 with different numbers · pre-mortem unwired
+    <span class="div">·</span>
+    <b>Eye fatigue</b> 3 different "★ SWING" callouts in one column
+  </div>
+
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       AFTER — collapsed
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <div class="sec-h">
+    <span class="tag after">AFTER</span>
+    <span class="name">3-line bar (strategy-aware) + slim pre-mortem · ~184px total</span>
+    <span class="meta">−34% header height · single source of truth</span>
+  </div>
+
+  <div class="sample">
+
+    <div class="t-host">
+      <div class="t1">
+        <span class="t1-tk">DELL <span class="sec">Technology</span></span>
+        <span class="t1-px">$247.89</span>
+        <span class="t1-chg gn">▲1.65%</span>
+        <span class="t1-vd">BUY</span>
+        <span class="t1-tier">T3</span>
+        <span class="t1-bap"><b>BAP 78</b></span>
+        <span class="t1-plan" id="aPlan">
+          <span class="lab">PLAN</span>
+          <span class="ent" id="aEnt">$239.96–$246.48</span><span class="arr">→</span>
+          <span class="stop" id="aStop">$227.57</span><span class="arr">/</span>
+          <span class="tg1" id="aT1">$302.55</span><span class="arr">/</span>
+          <span class="tg2" id="aT2">$341.67</span>
+        </span>
+        <span class="t1-rr gn" id="aRR"><span class="k">R:R</span>1:3.6 ✓</span>
+        <span class="t1-modes" id="aModes">
+          <button class="on" data-mode="swing"
+                  data-tip="⚡ SWING MODE · 2-10 day hold&#10;Lead lens: Swing trader&#10;&#10;RULEBOOK&#10;• Stop: 1.25× ATR · close-based&#10;• R:R floor: 3.0 : 1&#10;• Entry quality: FRESH / PULLBACK only&#10;• Earnings buffer: ≥14 days clear&#10;• Kelly mult: ×1.0&#10;• Setup-driven · catalyst-aware · pre-placed limit + close-stop&#10;&#10;Click to activate.">⚡ SWING</button>
+          <button data-mode="position"
+                  data-tip="📅 POSITION MODE · 2 weeks - 6 months&#10;Lead lens: Hedge-fund analyst · catalyst-driven&#10;&#10;RULEBOOK&#10;• Stop: 1.75× ATR (wider for catalyst vol)&#10;• R:R floor: 2.5 : 1&#10;• Entry quality: FRESH / PULLBACK / VALID&#10;• Earnings buffer: ≥7 days OR catalyst-positive ER&#10;• Kelly mult: ×0.8 (slower compound)&#10;• Thesis-driven · scaled adds OK&#10;&#10;Click to activate.">📅 POS</button>
+          <button data-mode="invest"
+                  data-tip="🏛 INVEST MODE · 1+ year hold&#10;Lead lens: Value investor (Graham-Buffett)&#10;&#10;RULEBOOK&#10;• Stop: thesis-break · no fixed %&#10;• R:R floor: 5.0 : 1 (intrinsic-value gap)&#10;• Entry quality: MoS ≥15% required&#10;• Earnings buffer: N/A&#10;• Kelly mult: ×0.5 (capital preservation)&#10;• DCA in tranches · annual review&#10;&#10;Click to activate.">🏛 INV</button>
+        </span>
+      </div>
+      <div class="t2">
+        <span class="t2-setup">Impulse Catalyst <span class="sub">· extended</span></span>
+        <span class="t2-align"><span class="ico">◧</span>MIXED<span class="tally">1B · 1W</span></span>
+        <span class="t2-lens-bar">
+          <span class="t2-lens rd"><span class="nm">V</span><span class="arr">↓</span><span class="val">11</span></span>
+          <span class="t2-lens gn"><span class="nm">S</span><span class="arr">↑</span><span class="val">RS 100</span></span>
+          <span class="t2-lens am"><span class="nm">ER</span><span class="arr">◧</span></span>
+          <span class="t2-lens am"><span class="nm">M</span><span class="arr">◧</span><span class="val">choppy</span></span>
+          <span class="t2-lens am"><span class="nm">I</span><span class="arr">·</span></span>
+          <span class="t2-lens am"><span class="nm">R</span><span class="arr">✓</span></span>
+          <span class="t2-lens gn"><span class="nm">N</span><span class="arr">↑</span><span class="val">+2.0</span></span>
+          <span class="t2-lens vio"><span class="nm">CFP</span><span class="val">book</span></span>
+        </span>
+        <span class="t2-meta">ER <b>≥14d</b> · Kelly <b id="aKelly">×1.0</b> · ATR <b>5.35%</b></span>
+      </div>
+      <div class="t3">
+        <div class="t3-lad" id="aLad">
+          <div class="t3-rail"></div>
+          <div class="t3-stop-zone" id="aStopZone" style="left:0%; width:14%"></div>
+          <div class="t3-entry-band" id="aEntryBand" style="left:14%; width:5%"></div>
+          <div class="t3-mk stop" id="aMkStop" style="left:14%"></div>
+          <div class="t3-mk now" id="aMkNow" style="left:21%"></div>
+          <div class="t3-mk t1" id="aMkT1" style="left:54%"></div>
+          <div class="t3-mk t2" id="aMkT2" style="left:81%"></div>
+          <div class="t3-tlbl stop" id="aTlStop" style="left:14%"><div class="nm">Stop</div><div class="px" id="aTlStopPx">$228<span class="pct">−8%</span></div></div>
+          <div class="t3-tlbl entry" id="aTlEntry" style="left:17%"><div class="nm">Entry</div><div class="px" id="aTlEntryPx">$240–246<span class="pct">−3%</span></div></div>
+          <div class="t3-tlbl now" style="top: 38px; left:21%"><div class="nm">Now</div><div class="px">$247.89</div></div>
+          <div class="t3-tlbl t1" id="aTlT1" style="left:54%"><div class="nm">T1</div><div class="px" id="aTlT1Px">$303<span class="pct">+22%</span></div></div>
+          <div class="t3-tlbl t2" id="aTlT2" style="left:81%"><div class="nm">T2</div><div class="px" id="aTlT2Px">$342<span class="pct">+38%</span></div></div>
+          <div class="t3-rlbl stop" id="aRlbStop" style="left:14%">−1R</div>
+          <div class="t3-rlbl entry" id="aRlbEntry" style="left:17%">0R</div>
+          <div class="t3-rlbl t1" id="aRlbT1" style="left:54%">+3.6R</div>
+          <div class="t3-rlbl t2" id="aRlbT2" style="left:81%">+5.8R</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pre-mortem · slim · only when thesis_killers wired (filled state shown here) -->
+    <div class="pm-bar">
+      <span class="pm-h">⚠ PRE-MORTEM</span>
+      <span class="pm-b">
+        <span><b>1.</b> $246 reclaim fails — daily close back below entry zone within 3 sessions</span>
+        <span><b>2.</b> RVOL drops &lt;0.8× on entry — momentum dries up, expect rejection</span>
+        <span><b>3.</b> SPY breaks 6,200 — risk-off rotation kills tech beta &gt;1.0</span>
+      </span>
+    </div>
+
+  </div>
+
+  <div class="measure">
+    <b>Total header height</b> <span class="gn">~184px</span>
+    <span class="div">·</span>
+    <b>Reduction</b> 280 → 184 = <span class="gn">−34%</span>
+    <span class="div">·</span>
+    <b>Functional gain</b> click ⚡/📅/🏛 → PLAN re-binds to active strategy's adjusted numbers
+    <span class="div">·</span>
+    <span class="hint">try clicking the mode buttons →</span>
+  </div>
+
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       Empty pre-mortem state (when thesis_killers not wired)
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <div class="sec-h">
+    <span class="tag after">AFTER · alt</span>
+    <span class="name">Pre-mortem empty state · slim hint replaces full banner</span>
+    <span class="meta">when t.thesis_killers is null</span>
+  </div>
+
+  <div class="sample">
+    <div class="pm-bar empty">
+      <span class="pm-h">⚠ PRE-MORTEM</span>
+      <span class="pm-b">
+        <span>no falsification criteria wired for this ticker — open <b>Value tab → Thesis Killers</b> to write 3 bullets that would prove the trade wrong</span>
+      </span>
+    </div>
+  </div>
+
+  <div class="measure">
+    <b>Why keep it (even when empty)</b> principle 4 (adversarial mindset) — the empty state nudges the user to wire pre-mortem before entering, rather than hiding the obligation
+  </div>
+
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       Architecture summary
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <div class="arch">
+    <h3>Row-by-row · what changed and why</h3>
+
+    <div class="arch-row">
+      <div class="col-h before">BEFORE</div>
+      <div class="col-h after">AFTER</div>
+      <div class="col-h">why</div>
+    </div>
+
+    <div class="arch-row">
+      <div class="why"><b>Row 1 · ★ SWING rulebook</b><br><span style="color:var(--ink-3)">Stop 1.25× ATR · R:R 3.0 · FRESH/PULLBACK · ER ≥14d · Kelly ×1.0 · "Setup-driven…"</span></div>
+      <div class="why"><b>Deleted</b><br><span style="color:var(--ink-3)">Content moved into <b>⚡ SWING button tooltip</b></span></div>
+      <div class="why">These are <b>constants of the strategy</b>, not ticker-specific. They never change between tickers — they only change when the user switches mode. A permanent row was always wasted real estate. Tooltip = reference info on demand.</div>
+    </div>
+
+    <div class="arch-row">
+      <div class="why"><b>Row 2 · PER-STRATEGY DECISION CARD</b><br><span style="color:var(--ink-3)">$239.96 / $227.57 / $302.55 / $341.67 · R:R 1:3.6</span></div>
+      <div class="why"><b>Folded into Line 1 PLAN</b><br><span style="color:var(--ink-3)">PLAN re-renders with strategy-adjusted values when mode is clicked</span></div>
+      <div class="why">The card showed <b>different numbers</b> than Line 1 — the canonical PLAN was one step behind the strategy. Now Line 1 IS the per-strategy plan. <span class="gn">Single source of truth.</span></div>
+    </div>
+
+    <div class="arch-row">
+      <div class="why"><b>Row 3 · ⚠ PRE-MORTEM</b><br><span style="color:var(--ink-3)">"No falsification criteria on this payload…" full paragraph</span></div>
+      <div class="why"><b>Slim banner · auto-hide friendly</b><br><span style="color:var(--ink-3)">3 falsification bullets inline · empty-state nudge when unwired</span></div>
+      <div class="why"><b>Kept</b> — principle 4 (adversarial mindset, every claim has falsification). Just compacted: 50px row → 28px slim banner.</div>
+    </div>
+
+    <div class="arch-row">
+      <div class="why"><b>Total</b></div>
+      <div class="why"><span class="gn">−34% header height</span> · 3 callouts → 1 conditional banner</div>
+      <div class="why">The ticker bar becomes an <b>interactive trade ticket</b>: click ⚡/📅/🏛 and the PLAN + ladder + R-multiples all re-bind. Mode buttons gain real responsibility.</div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       Ship plan
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <div style="margin-top: 30px; padding: 18px 22px; background: var(--bg-2); border-left: 3px solid var(--info); font-size: 13px; color: var(--ink); line-height: 1.7;">
+    <b style="color: var(--ink-0); font-size: 14px;">Ship plan · 2 file changes</b><br><br>
+    <b>1. infra/prototype/kairos.html · renderBanner(t)</b><br>
+    <span style="color:var(--ink-3)">— Read strategy-adjusted plan from t.canonical_plans[curStrategy] (or compute from t.atr × strategy.atr_mult).<br>
+    — Render tooltip on each mode button with that strategy's rulebook (currently hard-coded in the SWING-card block).<br>
+    — Wire onclick handlers on ⚡/📅/🏛 buttons to re-render PLAN values + ladder positions + R-multiples in place (no full page reload).</span><br><br>
+    <b>2. infra/prototype/kairos.html · renderPlanTab / renderOverviewTab</b><br>
+    <span style="color:var(--ink-3)">— Suppress the two top cards (SWING strategy summary + PER-STRATEGY DECISION CARD).<br>
+    — Replace the existing pre-mortem block with the slim banner. Empty-state nudge when t.thesis_killers is null.</span><br><br>
+    Say <b style="color:var(--pass)">"ship collapse"</b> to apply both edits.
+  </div>
+
+</div>
+
+<script>
+// ── Strategy-aware PLAN demo ───────────────────────────────────────
+// Real impl would read from t.canonical_plans[strategy] computed server-side.
+// This mockup computes locally from a base entry/stop and per-strategy multipliers.
+const NOW = 247.89;
+const ATR_PCT = 5.35; // %
+const STRATEGIES = {
+  swing: {
+    entryLo: 239.96, entryHi: 246.48, stop: 227.57, t1: 302.55, t2: 341.67,
+    rrText: '1:3.6 ✓', kelly: '×1.0', hold: '2-10d',
+  },
+  position: {
+    // Wider stop (1.75× ATR), further targets — POS mode tolerates noise
+    entryLo: 235.50, entryHi: 248.50, stop: 217.40, t1: 339.10, t2: 396.60,
+    rrText: '1:3.6 ✓', kelly: '×0.8', hold: '2w-6mo',
+  },
+  invest: {
+    // Thesis-break stop (much wider), 5× upside target
+    entryLo: 225.00, entryHi: 250.00, stop: 175.00, t1: 425.00, t2: 600.00,
+    rrText: '1:5.1 ✓', kelly: '×0.5', hold: '1y+',
+  },
+};
+
+// Map prices to ladder x% — axis -25% to +150% from NOW (range 175)
+function pctFromNow(px) { return ((px / NOW) - 1) * 100; }
+function xPos(pct) {
+  const axisMin = -25, axisMax = 150;
+  const span = axisMax - axisMin;
+  return Math.max(0.5, Math.min(99.5, ((pct - axisMin) / span) * 100));
+}
+
+function applyStrategy(mode) {
+  const s = STRATEGIES[mode];
+  if (!s) return;
+
+  // Line 1 PLAN values
+  const fmt = (n, d=0) => '$' + n.toFixed(d);
+  document.getElementById('aEnt').textContent = fmt(s.entryLo) + '–' + fmt(s.entryHi).replace('$','');
+  document.getElementById('aStop').textContent = fmt(s.stop);
+  document.getElementById('aT1').textContent = fmt(s.t1);
+  document.getElementById('aT2').textContent = fmt(s.t2);
+  document.getElementById('aRR').innerHTML = '<span class="k">R:R</span>' + s.rrText;
+  document.getElementById('aKelly').textContent = s.kelly;
+
+  // Trigger flash animation on PLAN row
+  const plan = document.getElementById('aPlan');
+  plan.classList.remove('flash');
+  void plan.offsetWidth;
+  plan.classList.add('flash');
+
+  // Ladder positions
+  const pctStop = pctFromNow(s.stop);
+  const pctEntryLo = pctFromNow(s.entryLo);
+  const pctEntryHi = pctFromNow(s.entryHi);
+  const pctT1 = pctFromNow(s.t1);
+  const pctT2 = pctFromNow(s.t2);
+
+  const posStop = xPos(pctStop);
+  const posNow = xPos(0);
+  const posEntryLo = xPos(pctEntryLo);
+  const posEntryHi = xPos(pctEntryHi);
+  const posEntryMid = (posEntryLo + posEntryHi) / 2;
+  const posT1 = xPos(pctT1);
+  const posT2 = xPos(pctT2);
+
+  document.getElementById('aStopZone').style.width = posStop + '%';
+  document.getElementById('aEntryBand').style.left = posEntryLo + '%';
+  document.getElementById('aEntryBand').style.width = Math.max(1, posEntryHi - posEntryLo) + '%';
+  document.getElementById('aMkStop').style.left = posStop + '%';
+  document.getElementById('aMkNow').style.left = posNow + '%';
+  document.getElementById('aMkT1').style.left = posT1 + '%';
+  document.getElementById('aMkT2').style.left = posT2 + '%';
+
+  document.getElementById('aTlStop').style.left = posStop + '%';
+  document.getElementById('aTlEntry').style.left = posEntryMid + '%';
+  document.getElementById('aTlT1').style.left = posT1 + '%';
+  document.getElementById('aTlT2').style.left = posT2 + '%';
+  document.getElementById('aTlStopPx').innerHTML = fmt(s.stop) + '<span class="pct">' + pctStop.toFixed(0) + '%</span>';
+  document.getElementById('aTlEntryPx').innerHTML = fmt(s.entryLo) + '–' + fmt(s.entryHi).replace('$','') + '<span class="pct">' + pctEntryLo.toFixed(0) + ' to ' + (pctEntryHi >= 0 ? '+' : '') + pctEntryHi.toFixed(0) + '%</span>';
+  document.getElementById('aTlT1Px').innerHTML = fmt(s.t1) + '<span class="pct">+' + pctT1.toFixed(0) + '%</span>';
+  document.getElementById('aTlT2Px').innerHTML = fmt(s.t2) + '<span class="pct">+' + pctT2.toFixed(0) + '%</span>';
+
+  document.getElementById('aRlbStop').style.left = posStop + '%';
+  document.getElementById('aRlbEntry').style.left = posEntryMid + '%';
+  document.getElementById('aRlbT1').style.left = posT1 + '%';
+  document.getElementById('aRlbT2').style.left = posT2 + '%';
+
+  const entryMid = (s.entryLo + s.entryHi) / 2;
+  const risk = entryMid - s.stop;
+  const rT1 = (s.t1 - entryMid) / risk;
+  const rT2 = (s.t2 - entryMid) / risk;
+  document.getElementById('aRlbT1').textContent = '+' + rT1.toFixed(1) + 'R';
+  document.getElementById('aRlbT2').textContent = '+' + rT2.toFixed(1) + 'R';
+
+  // Mode button active state
+  document.querySelectorAll('#aModes button').forEach(b => {
+    b.classList.toggle('on', b.dataset.mode === mode);
+  });
+}
+
+document.querySelectorAll('#aModes button').forEach(b => {
+  b.addEventListener('click', () => applyStrategy(b.dataset.mode));
+});
+
+// Init
+applyStrategy('swing');
+</script>
+
+</body>
+</html>

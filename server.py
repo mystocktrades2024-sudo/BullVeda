@@ -2052,6 +2052,204 @@ async def portfolio_get():
     summary = pt.get_portfolio_summary()
     return summary
 
+
+# ════════════════════════════════════════════════════════════════════
+# 2026-05-16 · New data exposure endpoints for v2 dashboard UI chips
+# Each reads existing log/cache files and returns shaped JSON for the
+# frontend to render directly — no schema changes required.
+# ════════════════════════════════════════════════════════════════════
+
+@app.get("/api/signal-history/{ticker}")
+async def signal_history_api(ticker: str, limit: int = 10):
+    """Return last N decisions for a ticker · for 'BUY #4 in row' chip.
+    Reads data/signal_log.json (full system log) and filters by ticker.
+    """
+    import json
+    from pathlib import Path
+    ticker = ticker.upper().strip()
+    log_path = Path("data/signal_log.json")
+    if not log_path.exists():
+        return {"ticker": ticker, "history": [], "consec": 0, "current": None}
+    try:
+        with open(log_path, "r") as f:
+            raw = json.load(f)
+        rows = raw if isinstance(raw, list) else raw.get("entries", [])
+        ticker_rows = [r for r in rows if str(r.get("ticker", "")).upper() == ticker]
+        ticker_rows.sort(key=lambda r: r.get("scan_date", r.get("timestamp", "")))
+        history = []
+        for r in ticker_rows[-limit:]:
+            verdict = (r.get("decision") or r.get("verdict") or "").upper()
+            letter = "B" if "BUY" in verdict or "BULL" in verdict else "W" if "WATCH" in verdict else "A"
+            history.append({
+                "date": r.get("scan_date") or r.get("timestamp", "")[:10],
+                "letter": letter,
+                "verdict": verdict,
+                "score": r.get("score") or r.get("bap"),
+                "setup": r.get("setup_family"),
+            })
+        consec = 0
+        if history:
+            cur = history[-1]["letter"]
+            for h in reversed(history):
+                if h["letter"] == cur:
+                    consec += 1
+                else:
+                    break
+        return {
+            "ticker": ticker,
+            "history": history,
+            "consec": consec,
+            "current": history[-1]["letter"] if history else None,
+        }
+    except Exception as e:
+        return {"ticker": ticker, "history": [], "consec": 0, "current": None, "error": str(e)}
+
+
+@app.get("/api/decision-log")
+async def decision_log_all_api(limit: int = 20):
+    """Return the most recent N decision log entries across ALL tickers (Home Activity feed)."""
+    import json
+    from pathlib import Path
+    log_path = Path("data/decision_log.jsonl")
+    if not log_path.exists():
+        return {"entries": []}
+    try:
+        entries = []
+        with open(log_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except Exception:
+                    continue
+        entries.sort(key=lambda e: e.get("timestamp", ""))
+        return {"entries": entries[-limit:]}
+    except Exception as e:
+        return {"entries": [], "error": str(e)}
+
+
+@app.get("/api/decision-log/{ticker}")
+async def decision_log_api(ticker: str, limit: int = 20):
+    """Return the audit trail of decisions for a ticker · for Audit Trail browser.
+    Reads data/decision_log.jsonl (newline-delimited JSON).
+    """
+    import json
+    from pathlib import Path
+    ticker = ticker.upper().strip()
+    log_path = Path("data/decision_log.jsonl")
+    if not log_path.exists():
+        return {"ticker": ticker, "entries": []}
+    try:
+        entries = []
+        with open(log_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                    if str(e.get("ticker", "")).upper() == ticker:
+                        entries.append(e)
+                except Exception:
+                    continue
+        entries.sort(key=lambda e: e.get("timestamp", ""))
+        return {"ticker": ticker, "entries": entries[-limit:]}
+    except Exception as e:
+        return {"ticker": ticker, "entries": [], "error": str(e)}
+
+
+@app.get("/api/sleeve-outcomes/{sleeve}")
+async def sleeve_outcomes_api(sleeve: str, limit: int = 10):
+    """Return last N outcomes (W/L) for a sleeve · for hot-streak dots.
+    Reads cache/picks_history.json and filters by setup_family.
+    """
+    import json
+    from pathlib import Path
+    sleeve = sleeve.upper().strip()
+    h_path = Path("cache/picks_history.json")
+    if not h_path.exists():
+        return {"sleeve": sleeve, "outcomes": [], "wins": 0, "losses": 0}
+    try:
+        with open(h_path, "r") as f:
+            data = json.load(f)
+        rows = data if isinstance(data, list) else data.get("picks", [])
+        matched = [r for r in rows if sleeve in str(r.get("setup_family") or r.get("sleeve") or "").upper()]
+        matched = [r for r in matched if r.get("outcome") in ("W", "L", "win", "loss", "TP", "SL")]
+        matched.sort(key=lambda r: r.get("exit_date") or r.get("entry_date") or "")
+        recent = matched[-limit:]
+        outcomes = []
+        for r in recent:
+            o = r.get("outcome", "")
+            outcomes.append("W" if o in ("W", "win", "TP") else "L")
+        wins = outcomes.count("W")
+        losses = outcomes.count("L")
+        return {"sleeve": sleeve, "outcomes": outcomes, "wins": wins, "losses": losses}
+    except Exception as e:
+        return {"sleeve": sleeve, "outcomes": [], "wins": 0, "losses": 0, "error": str(e)}
+
+
+@app.get("/api/picks-history-aggregate")
+async def picks_history_aggregate_api():
+    """Aggregate picks_history by score bucket → realized R · for calibration scatter.
+    Returns scatter points: [{score_bucket, n, avg_r, wr_pct}]
+    """
+    import json
+    from pathlib import Path
+    h_path = Path("cache/picks_history.json")
+    if not h_path.exists():
+        return {"buckets": []}
+    try:
+        with open(h_path, "r") as f:
+            data = json.load(f)
+        rows = data if isinstance(data, list) else data.get("picks", [])
+        rows = [r for r in rows if r.get("score") is not None and r.get("realized_r") is not None]
+        # Score buckets: 60-65, 65-70, 70-75, 75-80, 80-85, 85-90, 90-100
+        buckets = []
+        for lo, hi in [(60, 65), (65, 70), (70, 75), (75, 80), (80, 85), (85, 90), (90, 100)]:
+            bucket = [r for r in rows if lo <= float(r.get("score", 0)) < hi]
+            n = len(bucket)
+            if n == 0:
+                continue
+            avg_r = sum(float(r["realized_r"]) for r in bucket) / n
+            wins = sum(1 for r in bucket if float(r["realized_r"]) > 0)
+            buckets.append({
+                "score_band": f"{lo}-{hi}",
+                "score_mid": (lo + hi) / 2,
+                "n": n,
+                "avg_r": round(avg_r, 2),
+                "wr_pct": round(wins / n * 100, 1) if n > 0 else 0,
+            })
+        return {"buckets": buckets}
+    except Exception as e:
+        return {"buckets": [], "error": str(e)}
+
+
+@app.get("/api/vcp-pivots/{ticker}")
+async def vcp_pivots_api(ticker: str):
+    """Return detected VCP contraction pivots for a ticker · for hero chart overlay.
+    Reads cache/tickers.json which holds the latest scan's per-ticker analysis output.
+    """
+    import json
+    from pathlib import Path
+    ticker = ticker.upper().strip()
+    cache_path = Path("infra/prototype/tickers.json")
+    if not cache_path.exists():
+        cache_path = Path("cache/tickers.json")
+    if not cache_path.exists():
+        return {"ticker": ticker, "pivots": []}
+    try:
+        with open(cache_path, "r") as f:
+            data = json.load(f)
+        tickers = data if isinstance(data, dict) else {}
+        rec = tickers.get(ticker) or {}
+        # Look for VCP-specific fields exposed by analysis._detect_vcp
+        pivots = rec.get("vcp_pivots") or rec.get("contraction_zones") or []
+        return {"ticker": ticker, "pivots": pivots, "stage": rec.get("vcp_stage"), "valid": bool(pivots)}
+    except Exception as e:
+        return {"ticker": ticker, "pivots": [], "error": str(e)}
+
 @app.post("/api/portfolio/add")
 async def portfolio_add(req: Request, _: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
     body = await req.json()
@@ -3434,6 +3632,75 @@ async def live_status():
         return get_live_status()
     except Exception:
         return {"configured": False, "active_tickers": 0, "status": "offline"}
+
+# 2026-05-15 · Schwab auth-health probe. Used by the dashboard topbar banner
+# so users see "🔑 Re-auth Schwab" the moment options/quotes start failing,
+# rather than discovering it hours later via stale UI. Reads:
+#   1) SCHWAB_REFRESH_ISSUED_AT in .env  (token age)
+#   2) cache/logs/schwab_token_check.log (last cron probe result)
+# No network calls — purely a local-state read, safe to poll every 60s.
+@app.get("/api/schwab/health")
+async def schwab_health():
+    import os, time, re
+    from pathlib import Path as _P
+    out = {"ok": False, "token_age_days": None, "last_check_ts": None,
+           "last_check_status": "unknown", "message": "", "reauth_cmd":
+           "cd \"/Volumes/MyMacDisk/Claude Skills/SwingTrade\" && python3 schwab_auth.py oauth"}
+
+    # 1 · Refresh token age (from .env or environ)
+    issued = os.environ.get("SCHWAB_REFRESH_ISSUED_AT")
+    if not issued:
+        try:
+            env_path = _P(__file__).resolve().parent / ".env"
+            if env_path.exists():
+                for line in env_path.read_text().splitlines():
+                    if line.startswith("SCHWAB_REFRESH_ISSUED_AT="):
+                        issued = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        break
+        except Exception:
+            pass
+    if issued:
+        try:
+            out["token_age_days"] = round((time.time() - float(issued)) / 86400, 2)
+        except (TypeError, ValueError):
+            pass
+
+    # 2 · Last cron probe (tail the log for the most recent line)
+    log_path = _P(__file__).resolve().parent / "cache" / "logs" / "schwab_token_check.log"
+    if log_path.exists():
+        try:
+            text = log_path.read_text()
+            lines = [ln for ln in text.splitlines() if ln.strip()]
+            if lines:
+                last = lines[-1]
+                ts_match = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", last)
+                if ts_match:
+                    import datetime as _dt
+                    try:
+                        out["last_check_ts"] = _dt.datetime.strptime(
+                            ts_match.group(1), "%Y-%m-%d %H:%M:%S").timestamp()
+                    except Exception:
+                        pass
+                if "ERROR" in last or "CRITICAL" in last or "FAILED" in last or "rejected" in last.lower():
+                    out["last_check_status"] = "failed"
+                    # Surface the first meaningful sentence (skip the emoji)
+                    out["message"] = re.sub(r"^.*?:\s*", "", last)[:240]
+                elif "SUCCESS" in last or "OK" in last or "✓" in last:
+                    out["last_check_status"] = "ok"
+                else:
+                    out["last_check_status"] = "unknown"
+        except Exception as e:
+            out["message"] = f"log read error: {e}"
+
+    # 3 · Derive overall OK flag — green if last cron probe ok AND token age <7d
+    if out["last_check_status"] == "ok" and (out["token_age_days"] is None or out["token_age_days"] < 7):
+        out["ok"] = True
+    elif out["last_check_status"] == "failed":
+        out["ok"] = False
+    elif out["token_age_days"] is not None and out["token_age_days"] >= 7:
+        out["ok"] = False
+        out["message"] = f"Token is {out['token_age_days']:.1f} days old · Schwab rotates every 7 days"
+    return out
 
 @app.get("/api/quote")
 async def quote(ticker: str = ""):
@@ -4892,6 +5159,176 @@ async def api_delete_role(role_id: str,
 @app.get("/health")
 async def health():
     return {"status": "ok", "server": "fastapi", "version": app.version}
+
+
+# =========================================================================
+# /api/supabase/status — powers the Supabase tab in kairos.html
+# =========================================================================
+_SUPABASE_STATUS_CACHE: dict = {"ts": 0.0, "payload": None}
+_SUPABASE_STATUS_TTL_S = 30.0
+
+
+@app.get("/api/supabase/status")
+async def supabase_status():
+    """Return Supabase health + per-table local/remote row counts + last-sync ledger.
+
+    Cached 30s so the dashboard tab is fast even on refresh-spam.
+    """
+    import time as _t
+    now = _t.time()
+    if _SUPABASE_STATUS_CACHE["payload"] is not None and (now - _SUPABASE_STATUS_CACHE["ts"]) < _SUPABASE_STATUS_TTL_S:
+        return _SUPABASE_STATUS_CACHE["payload"]
+
+    from pathlib import Path as _P
+    import json as _j
+    import sqlite3 as _sq
+    import os as _o
+
+    root = _P(__file__).parent
+    state_path = root / "data" / "supabase_sync_state.json"
+    db_path = root / "data" / "swingtrade.db"
+
+    # Sync ledger (written by migrate_sqlite_to_supabase.py)
+    ledger: dict = {}
+    last_full_sync = None
+    if state_path.exists():
+        try:
+            j = _j.loads(state_path.read_text())
+            ledger = j.get("tables") or {}
+            last_full_sync = j.get("_last_full_sync")
+        except Exception:
+            pass
+
+    # Supabase healthcheck + URL
+    try:
+        from supabase_client import healthcheck as _hc, sb_client, supabase_mode
+        _t0 = _t.time()
+        hc = _hc()
+        ping_ms = int((_t.time() - _t0) * 1000)
+        sb = sb_client()
+        mode = supabase_mode()
+    except Exception as e:
+        hc = {"ok": False, "error": f"import failed: {e}", "url": None}
+        ping_ms = 0
+        sb = None
+        mode = 0
+
+    # All tables we sync
+    sync_tables = [
+        "meta", "portfolio_state", "positions", "closed_trades", "equity_audit",
+        "monthly_pnl", "equity_curve", "signal_log", "runs", "picks", "trades",
+        "watch_triggers", "custom_tickers", "alert_log", "scan_health",
+        "gap_events", "paper_trading_config",
+    ]
+
+    # Local (SQLite) counts
+    local_counts: dict[str, int] = {}
+    if db_path.exists():
+        try:
+            conn = _sq.connect(str(db_path))
+            for t in sync_tables:
+                try:
+                    n = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                    local_counts[t] = int(n)
+                except Exception:
+                    local_counts[t] = 0
+            conn.close()
+        except Exception:
+            pass
+
+    # Remote (Supabase) counts via HEAD-count
+    remote_counts: dict[str, int | None] = {}
+    if sb is not None and hc.get("ok"):
+        for t in sync_tables:
+            try:
+                resp = sb.table(t).select("*", count="exact", head=True).execute()
+                remote_counts[t] = getattr(resp, "count", None)
+            except Exception:
+                remote_counts[t] = None
+    else:
+        remote_counts = {t: None for t in sync_tables}
+
+    # Per-table assembly
+    tables = []
+    for t in sync_tables:
+        lr = local_counts.get(t, 0)
+        rr = remote_counts.get(t)
+        led = ledger.get(t) or {}
+        if rr is None:
+            status = "unknown"
+        elif lr == rr:
+            status = "in_sync"
+        elif lr > rr:
+            status = "drift_behind"  # Supabase is missing rows
+        else:
+            status = "drift_ahead"   # Supabase has extras (unlikely)
+        if led.get("failed", 0) > 0:
+            status = "error"
+        tables.append({
+            "name": t,
+            "local_rows": lr,
+            "remote_rows": rr,
+            "drift": (None if rr is None else (lr - rr)),
+            "status": status,
+            "last_sync_at": led.get("last_sync_at"),
+            "duration_ms": led.get("duration_ms"),
+            "error": led.get("error"),
+        })
+
+    # Overall sync health
+    n_in_sync = sum(1 for t in tables if t["status"] == "in_sync")
+    n_drift = sum(1 for t in tables if t["status"] in ("drift_behind", "drift_ahead"))
+    n_error = sum(1 for t in tables if t["status"] == "error")
+    n_unknown = sum(1 for t in tables if t["status"] == "unknown")
+
+    payload = {
+        "connection": {
+            "ok": bool(hc.get("ok")),
+            "mode": mode,
+            "url": hc.get("url"),
+            "error": hc.get("error"),
+            "ping_ms": ping_ms,
+        },
+        "overall": {
+            "last_full_sync": last_full_sync,
+            "total_tables": len(tables),
+            "in_sync": n_in_sync,
+            "drift": n_drift,
+            "errors": n_error,
+            "unknown": n_unknown,
+            "total_local_rows": sum(t["local_rows"] for t in tables),
+            "total_remote_rows": sum((t["remote_rows"] or 0) for t in tables),
+        },
+        "tables": tables,
+        "generated_at": _t.time(),
+    }
+    _SUPABASE_STATUS_CACHE["ts"] = now
+    _SUPABASE_STATUS_CACHE["payload"] = payload
+    return payload
+
+
+@app.post("/api/supabase/sync")
+async def supabase_sync(_=Depends(_check_auth)):
+    """Trigger a fresh sync. Runs migrate_sqlite_to_supabase.py --apply in a
+    subprocess and returns the new status payload (cache busted).
+    """
+    import subprocess as _sp
+    from pathlib import Path as _P
+    root = _P(__file__).parent
+    try:
+        proc = _sp.run(
+            ["python3", str(root / "migrate_sqlite_to_supabase.py"), "--apply"],
+            capture_output=True, text=True, timeout=180, cwd=str(root),
+        )
+        ok = (proc.returncode == 0)
+        tail = (proc.stdout or "").splitlines()[-20:] + (proc.stderr or "").splitlines()[-5:]
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "log": []}
+
+    # Bust the cache so /api/supabase/status reflects fresh sync immediately
+    _SUPABASE_STATUS_CACHE["ts"] = 0.0
+    _SUPABASE_STATUS_CACHE["payload"] = None
+    return {"ok": ok, "log": tail, "returncode": proc.returncode}
 
 
 if __name__ == "__main__":

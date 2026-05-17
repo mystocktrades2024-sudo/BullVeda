@@ -1,0 +1,1100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Leaders Board · Prototype</title>
+<meta name="viewport" content="width=1400, initial-scale=1">
+<style>
+  :root {
+    --ink:#0a0f1c; --ink-2:#0f1525; --ink-3:#141b2e; --ink-4:#1c2438;
+    --paper:#f3f7fc; --paper-2:#dde5f0; --paper-3:#b6bfd0; --paper-4:#8e98ab; --paper-5:#5c6478;
+    --line:#1f2638; --line-2:#2c344a; --line-3:#3d465f;
+    --long:#4ade80; --long-bg:rgba(74,222,128,.10); --long-dim:#14532d;
+    --short:#f87171; --short-bg:rgba(248,113,113,.10); --short-dim:#7f1d1d;
+    --watch:#fbbf24; --watch-bg:rgba(251,191,36,.10);
+    --copper:#e88860; --teal:#5eead4; --violet:#a78bfa;
+    --mono:'SF Mono','JetBrains Mono','Aptos Mono',ui-monospace,Menlo,Consolas,monospace;
+    --serif:'GT Sectra','Iowan Old Style',Georgia,serif;
+  }
+  *,*::before,*::after { box-sizing:border-box; }
+  html,body { margin:0; padding:0; background:var(--ink); color:var(--paper); font-family:'Aptos','Aptos Display',-apple-system,Segoe UI,system-ui,sans-serif; font-size:13px; line-height:1.4; }
+  body { font-variant-numeric:tabular-nums; font-feature-settings:'tnum' on,'lnum' on,'zero' on; }
+  a { color:inherit; text-decoration:none; }
+
+  /* ===== Page chrome ===== */
+  .page { max-width:1360px; margin:0 auto; padding:28px 24px 80px; }
+  .hdr { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; padding-bottom:18px; border-bottom:1px solid var(--line-2); margin-bottom:24px; }
+  .hdr h1 { font-family:var(--serif); font-style:italic; font-weight:500; font-size:34px; letter-spacing:-0.02em; line-height:1; margin:0; color:#f7f5ee; }
+  .hdr h1::first-letter { color:var(--copper); font-weight:600; }
+  .hdr .sub { color:var(--paper-3); font-size:12px; margin-top:6px; letter-spacing:0.02em; }
+  .hdr .meta { display:flex; gap:18px; align-items:center; color:var(--paper-4); font-size:11px; text-transform:uppercase; letter-spacing:0.1em; }
+  .hdr .meta .dot { width:6px; height:6px; border-radius:50%; background:var(--long); display:inline-block; margin-right:6px; box-shadow:0 0 0 3px rgba(74,222,128,.18); }
+
+  /* ===== Top KPI strip ===== */
+  .kpi-row { display:grid; grid-template-columns:repeat(6,1fr); gap:1px; background:var(--line); border:1px solid var(--line-2); margin-bottom:24px; }
+  .kpi { background:var(--ink-2); padding:14px 16px; }
+  .kpi .lbl { color:var(--paper-4); font-size:10px; text-transform:uppercase; letter-spacing:0.14em; }
+  .kpi .val { font-size:22px; font-weight:600; margin-top:6px; letter-spacing:-0.01em; }
+  .kpi .delta { font-size:11px; margin-top:2px; color:var(--paper-3); }
+  .pos { color:var(--long); }
+  .neg { color:var(--short); }
+  .neut { color:var(--watch); }
+
+  /* ===== Tab nav ===== */
+  .tabs { display:flex; gap:0; border-bottom:1px solid var(--line-2); margin-bottom:20px; }
+  .tab { padding:10px 18px; cursor:pointer; color:var(--paper-4); font-size:12px; letter-spacing:0.08em; text-transform:uppercase; border-bottom:2px solid transparent; transition:all .15s; }
+  .tab:hover { color:var(--paper-2); }
+  .tab.active { color:var(--paper); border-bottom-color:var(--copper); }
+  .tab .cnt { color:var(--paper-5); margin-left:6px; font-weight:500; }
+  .tab.active .cnt { color:var(--copper); }
+  .tab .badge-mini { display:inline-block; margin-left:8px; font-size:9px; padding:2px 6px; background:var(--ink-4); border:1px solid var(--line-3); border-radius:2px; color:var(--paper-3); letter-spacing:0.08em; }
+
+  /* ===== Sub-view 1: Podium for OPEN positions top 3 ===== */
+  .podium { display:grid; grid-template-columns:1fr 1.15fr 1fr; gap:14px; margin-bottom:24px; }
+  .podium-card { background:var(--ink-2); border:1px solid var(--line-2); padding:18px 18px 16px; position:relative; overflow:hidden; }
+  .podium-card.gold { border-color:rgba(232,136,96,.45); background:linear-gradient(180deg,rgba(232,136,96,.04) 0%,var(--ink-2) 100%); }
+  .podium-card .rank-num { position:absolute; right:14px; top:10px; font-family:var(--serif); font-style:italic; font-size:60px; color:var(--line-3); line-height:1; pointer-events:none; }
+  .podium-card.gold .rank-num { color:rgba(232,136,96,.22); }
+  .podium-card .tkr { font-family:var(--mono); font-weight:600; font-size:24px; letter-spacing:-0.01em; color:var(--paper); }
+  .podium-card .dir-pill { display:inline-block; margin-left:8px; font-size:10px; padding:2px 7px; border:1px solid var(--long-dim); color:var(--long); background:var(--long-bg); border-radius:2px; vertical-align:3px; letter-spacing:0.06em; }
+  .podium-card .dir-pill.short { color:var(--short); border-color:var(--short-dim); background:var(--short-bg); }
+  .podium-card .setup-line { font-size:11px; color:var(--paper-3); margin-top:6px; letter-spacing:0.02em; }
+  .podium-card .r-val { font-family:var(--mono); font-size:34px; font-weight:600; margin-top:14px; letter-spacing:-0.02em; }
+  .podium-card .r-lbl { font-size:10px; text-transform:uppercase; letter-spacing:0.14em; color:var(--paper-4); margin-top:-2px; }
+  .podium-card .grid-4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; margin-top:16px; padding-top:14px; border-top:1px dashed var(--line-2); }
+  .podium-card .gc .l { color:var(--paper-4); font-size:9px; text-transform:uppercase; letter-spacing:0.1em; }
+  .podium-card .gc .v { color:var(--paper); font-family:var(--mono); font-size:13px; margin-top:2px; font-weight:500; }
+  .podium-card .pl-bar { margin-top:14px; height:4px; background:var(--ink-4); position:relative; overflow:hidden; }
+  .podium-card .pl-bar .seg { position:absolute; top:0; bottom:0; }
+  .podium-card .pl-bar .lo { background:var(--short); opacity:0.55; }
+  .podium-card .pl-bar .hi { background:var(--long); opacity:0.55; }
+  .podium-card .pl-bar .cur { width:2px; background:var(--paper); top:-3px; bottom:-3px; }
+  .podium-card .pl-meta { display:flex; justify-content:space-between; margin-top:4px; font-size:9px; color:var(--paper-4); letter-spacing:0.06em; text-transform:uppercase; }
+
+  /* ===== Dense table ===== */
+  .lb-table { width:100%; border-collapse:collapse; background:var(--ink-2); border:1px solid var(--line-2); }
+  .lb-table thead th { font-size:10px; text-transform:uppercase; letter-spacing:0.12em; color:var(--paper-4); padding:11px 12px; text-align:right; border-bottom:1px solid var(--line-2); background:var(--ink-3); font-weight:600; }
+  .lb-table thead th.l { text-align:left; }
+  .lb-table tbody td { padding:12px; border-bottom:1px solid var(--line); text-align:right; font-family:var(--mono); font-size:13px; }
+  .lb-table tbody td.l { text-align:left; font-family:'Aptos',sans-serif; }
+  .lb-table tbody tr:hover { background:var(--ink-3); }
+  .lb-table tbody tr:last-child td { border-bottom:none; }
+  .lb-table .rank { font-family:var(--mono); color:var(--paper-4); font-size:11px; width:32px; text-align:center; }
+  .lb-table .rank.t3 { color:var(--copper); font-weight:600; }
+  .lb-table .tkr { font-weight:600; color:var(--paper); }
+  .lb-table .setup { color:var(--paper-3); font-size:11px; }
+  .lb-table .dir { display:inline-block; font-size:9px; padding:1px 6px; border-radius:2px; margin-left:6px; letter-spacing:0.06em; vertical-align:2px; }
+  .lb-table .dir.long { color:var(--long); background:var(--long-bg); border:1px solid var(--long-dim); }
+  .lb-table .dir.short { color:var(--short); background:var(--short-bg); border:1px solid var(--short-dim); }
+  .lb-table .regime-tag { font-size:10px; color:var(--paper-4); padding:2px 6px; border:1px solid var(--line-3); border-radius:2px; }
+  .lb-table .r-cell { font-weight:600; font-size:14px; }
+  .lb-table .conv { display:inline-block; font-size:9px; padding:1px 5px; border-radius:2px; letter-spacing:0.06em; }
+  .lb-table .conv.t1 { color:var(--copper); border:1px solid rgba(232,136,96,.4); background:rgba(232,136,96,.08); }
+  .lb-table .conv.t2 { color:var(--paper-2); border:1px solid var(--line-3); }
+  .lb-table .conv.t3 { color:var(--paper-4); border:1px solid var(--line-2); }
+  .lb-table .micro-bar { display:inline-block; width:60px; height:6px; background:var(--ink-4); position:relative; vertical-align:middle; margin-left:6px; }
+  .lb-table .micro-bar .fill { position:absolute; top:0; bottom:0; left:0; background:var(--long); }
+  .lb-table .micro-bar .fill.neg { background:var(--short); right:0; left:auto; }
+
+  /* ===== Setup×Regime grid view ===== */
+  .sr-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px; }
+  .sr-card { background:var(--ink-2); border:1px solid var(--line-2); padding:14px 16px; cursor:pointer; transition:border-color .15s; }
+  .sr-card:hover { border-color:var(--line-3); }
+  .sr-card .rank-tag { font-family:var(--mono); font-size:10px; color:var(--copper); letter-spacing:0.14em; text-transform:uppercase; }
+  .sr-card .setup-name { font-weight:600; font-size:14px; margin-top:4px; color:var(--paper); }
+  .sr-card .regime-name { color:var(--paper-3); font-size:11px; margin-top:1px; }
+  .sr-card .stats { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:14px; padding-top:12px; border-top:1px dashed var(--line-2); }
+  .sr-card .stats .l { color:var(--paper-4); font-size:9px; text-transform:uppercase; letter-spacing:0.1em; }
+  .sr-card .stats .v { color:var(--paper); font-family:var(--mono); font-size:14px; margin-top:2px; font-weight:600; }
+  .sr-card .wilson { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; font-size:10px; color:var(--paper-4); text-transform:uppercase; letter-spacing:0.08em; }
+  .sr-card .wilson .lb { color:var(--long); font-family:var(--mono); font-size:13px; font-weight:600; text-transform:none; letter-spacing:0; }
+  .sr-card .ci-bar { height:3px; background:var(--ink-4); position:relative; margin-top:8px; }
+  .sr-card .ci-bar .ci { position:absolute; top:0; bottom:0; background:var(--long); opacity:.5; }
+  .sr-card .ci-bar .pt { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--paper); }
+
+  /* ===== Filter strip ===== */
+  .filters { display:flex; gap:8px; margin-bottom:14px; align-items:center; flex-wrap:wrap; }
+  .filters .lbl { color:var(--paper-4); font-size:10px; text-transform:uppercase; letter-spacing:0.12em; margin-right:6px; }
+  .chip { padding:5px 10px; background:var(--ink-2); border:1px solid var(--line-2); font-size:11px; color:var(--paper-3); cursor:pointer; transition:all .15s; letter-spacing:0.02em; border-radius:2px; }
+  .chip:hover { border-color:var(--line-3); color:var(--paper); }
+  .chip.on { background:var(--ink-4); color:var(--paper); border-color:var(--copper); }
+  .spacer { flex:1; }
+  .search { padding:5px 10px; background:var(--ink-2); border:1px solid var(--line-2); color:var(--paper-2); font-size:11px; width:180px; border-radius:2px; outline:none; }
+  .search::placeholder { color:var(--paper-5); }
+
+  /* ===== Two-log note ===== */
+  .log-note { display:flex; gap:24px; padding:10px 14px; background:var(--ink-2); border:1px solid var(--line-2); border-left:3px solid var(--copper); margin-bottom:18px; font-size:11px; }
+  .log-note .seg { display:flex; gap:8px; align-items:center; color:var(--paper-3); }
+  .log-note .seg b { color:var(--paper); font-family:var(--mono); }
+  .log-note .seg .dot { width:6px; height:6px; border-radius:50%; }
+  .log-note .seg .dot.real { background:var(--long); }
+  .log-note .seg .dot.paper { background:var(--watch); }
+
+  .panel { display:none; }
+  .panel.active { display:block; animation:fadeIn .2s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+
+  .source-pill { font-size:9px; padding:1px 5px; border-radius:2px; letter-spacing:0.08em; text-transform:uppercase; margin-left:6px; vertical-align:2px; }
+  .source-pill.real { color:var(--long); background:var(--long-bg); border:1px solid var(--long-dim); }
+  .source-pill.paper { color:var(--watch); background:var(--watch-bg); border:1px solid var(--watch-dim); }
+
+  .footnote { margin-top:24px; color:var(--paper-4); font-size:11px; padding:14px 0; border-top:1px solid var(--line); }
+  .footnote code { font-family:var(--mono); background:var(--ink-3); padding:1px 5px; border-radius:2px; color:var(--paper-2); }
+
+  /* ===== Friends panel ===== */
+  .friends-hero { display:grid; grid-template-columns:1.4fr 1fr; gap:14px; margin-bottom:18px; }
+  .friend-card { background:var(--ink-2); border:1px solid var(--line-2); padding:16px; display:grid; grid-template-columns:48px 1fr auto; gap:14px; align-items:center; }
+  .friend-card.you { border-color:rgba(232,136,96,.45); background:linear-gradient(180deg,rgba(232,136,96,.04) 0%,var(--ink-2) 100%); }
+  .avatar { width:48px; height:48px; border-radius:50%; display:grid; place-items:center; font-family:var(--serif); font-style:italic; font-size:22px; font-weight:600; color:#fff; letter-spacing:-0.02em; }
+  .av-v { background:linear-gradient(135deg,#7c3aed 0%,#a78bfa 100%); }
+  .av-r { background:linear-gradient(135deg,#0891b2 0%,#5eead4 100%); }
+  .av-p { background:linear-gradient(135deg,#c2410c 0%,#fb923c 100%); }
+  .av-a { background:linear-gradient(135deg,#15803d 0%,#4ade80 100%); }
+  .av-k { background:linear-gradient(135deg,#be185d 0%,#f472b6 100%); }
+  .av-s { background:linear-gradient(135deg,#1d4ed8 0%,#60a5fa 100%); }
+  .av-m { background:linear-gradient(135deg,#92400e 0%,#fbbf24 100%); }
+  .av-you { background:linear-gradient(135deg,#e88860 0%,#fbbf24 100%); }
+
+  .friend-info .name { font-weight:600; font-size:15px; color:var(--paper); display:flex; align-items:center; gap:8px; }
+  .friend-info .name .you-tag { font-size:9px; padding:1px 5px; background:var(--copper); color:var(--ink); border-radius:2px; letter-spacing:0.06em; font-weight:700; }
+  .friend-info .name .followed { font-size:10px; padding:1px 6px; border:1px solid var(--long-dim); color:var(--long); border-radius:2px; letter-spacing:0.06em; }
+  .friend-info .sub { color:var(--paper-3); font-size:11px; margin-top:3px; letter-spacing:0.02em; }
+  .friend-info .sub .sep { color:var(--paper-5); margin:0 8px; }
+  .friend-info .streak { display:inline-flex; gap:2px; margin-top:6px; }
+  .friend-info .streak .day { width:11px; height:11px; border-radius:1px; }
+  .friend-info .streak .day.w { background:var(--long); }
+  .friend-info .streak .day.l { background:var(--short); }
+  .friend-info .streak .day.f { background:var(--ink-4); }
+  .friend-stats { display:flex; gap:18px; }
+  .friend-stats .s { text-align:right; }
+  .friend-stats .s .l { color:var(--paper-4); font-size:9px; text-transform:uppercase; letter-spacing:0.1em; }
+  .friend-stats .s .v { font-family:var(--mono); font-size:18px; font-weight:600; margin-top:2px; }
+  .friend-stats .actions { display:flex; flex-direction:column; gap:5px; margin-left:8px; }
+  .friend-stats .actions .btn { font-size:10px; padding:4px 9px; background:var(--ink-3); border:1px solid var(--line-3); color:var(--paper-2); cursor:pointer; border-radius:2px; letter-spacing:0.04em; }
+  .friend-stats .actions .btn:hover { border-color:var(--copper); color:var(--copper); }
+  .friend-stats .actions .btn.on { background:var(--copper); color:var(--ink); border-color:var(--copper); font-weight:600; }
+
+  /* Expanded row showing what they trade now */
+  .friend-now { margin-top:12px; padding-top:12px; border-top:1px dashed var(--line-2); display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; grid-column:1 / -1; }
+  .friend-now .pos { background:var(--ink-3); padding:8px 10px; border:1px solid var(--line); }
+  .friend-now .pos .tk { font-family:var(--mono); font-weight:600; color:var(--paper); font-size:13px; }
+  .friend-now .pos .setup { color:var(--paper-4); font-size:10px; margin-top:2px; letter-spacing:0.04em; }
+  .friend-now .pos .r { font-family:var(--mono); font-size:13px; font-weight:600; margin-top:4px; }
+
+  /* Best setup callout */
+  .best-setup-tag { display:inline-block; font-size:10px; padding:2px 7px; background:var(--ink-3); border:1px solid var(--line-3); border-radius:2px; color:var(--paper-3); margin-top:6px; letter-spacing:0.04em; }
+  .best-setup-tag b { color:var(--long); font-family:var(--mono); }
+
+  /* ===== Pinned ideas panel ===== */
+  .idea-card { background:var(--ink-2); border:1px solid var(--line-2); padding:16px 18px; margin-bottom:12px; display:grid; grid-template-columns:36px 1fr; gap:14px; }
+  .idea-card .av-sm { width:36px; height:36px; border-radius:50%; display:grid; place-items:center; font-family:var(--serif); font-style:italic; font-size:16px; font-weight:600; color:#fff; }
+  .idea-card .ih { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .idea-card .ih .by { font-size:11px; color:var(--paper-3); }
+  .idea-card .ih .by b { color:var(--paper); font-weight:600; }
+  .idea-card .ih .age { font-size:10px; color:var(--paper-5); }
+  .idea-card .ih .tk { font-family:var(--mono); font-weight:600; font-size:18px; color:var(--paper); }
+  .idea-card .ih .dir-pill { font-size:10px; padding:1px 6px; border-radius:2px; letter-spacing:0.06em; }
+  .idea-card .ih .dir-pill.long { color:var(--long); background:var(--long-bg); border:1px solid var(--long-dim); }
+  .idea-card .ih .dir-pill.short { color:var(--short); background:var(--short-bg); border:1px solid var(--short-dim); }
+  .idea-card .ih .live-r { margin-left:auto; font-family:var(--mono); font-weight:600; font-size:15px; }
+  .idea-card .thesis { color:var(--paper-2); font-size:12px; margin-top:8px; line-height:1.55; }
+  .idea-card .meta-row { display:flex; gap:14px; margin-top:10px; padding-top:10px; border-top:1px dashed var(--line-2); font-size:10px; color:var(--paper-4); text-transform:uppercase; letter-spacing:0.08em; }
+  .idea-card .meta-row b { color:var(--paper-2); font-family:var(--mono); text-transform:none; letter-spacing:0; margin-left:4px; }
+  .idea-card .meta-row .followers { margin-left:auto; }
+  .idea-card .meta-row .pill { padding:2px 7px; background:var(--ink-3); border:1px solid var(--line-3); color:var(--paper-3); }
+  .idea-card .actions-row { display:flex; gap:8px; margin-top:10px; }
+  .idea-card .actions-row .btn { font-size:11px; padding:5px 11px; background:var(--ink-3); border:1px solid var(--line-3); color:var(--paper-2); cursor:pointer; border-radius:2px; letter-spacing:0.04em; }
+  .idea-card .actions-row .btn:hover { border-color:var(--copper); color:var(--copper); }
+  .idea-card .actions-row .btn.primary { background:var(--copper); color:var(--ink); border-color:var(--copper); font-weight:600; }
+
+  /* Section header for community panels */
+  .sec-h { display:flex; align-items:baseline; justify-content:space-between; margin:18px 0 10px; }
+  .sec-h h3 { font-family:var(--serif); font-style:italic; font-size:18px; font-weight:500; margin:0; color:var(--paper); letter-spacing:-0.01em; }
+  .sec-h .h-sub { color:var(--paper-4); font-size:11px; letter-spacing:0.06em; }
+  .sec-h .h-sub b { color:var(--paper-2); font-family:var(--mono); }
+
+  /* Privacy banner */
+  .priv-banner { display:flex; gap:12px; padding:10px 14px; background:var(--ink-2); border:1px solid var(--line-2); border-left:3px solid var(--watch); margin-bottom:16px; font-size:11px; color:var(--paper-3); align-items:center; }
+  .priv-banner .icon { color:var(--watch); font-size:14px; }
+  .priv-banner .link { color:var(--copper); cursor:pointer; margin-left:auto; }
+  .priv-banner .link:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== Header ===== -->
+  <div class="hdr">
+    <div>
+      <h1>Leaders Board</h1>
+      <div class="sub">Live trade-performance leaderboard · R-multiple, P&amp;L, hold efficiency</div>
+    </div>
+    <div class="meta">
+      <span><span class="dot"></span>Live · refreshes hourly</span>
+      <span>You · <b style="color:var(--copper);font-family:var(--mono)">#3</b> of 8 friends · 30d</span>
+      <span>2026-05-11 · 11:42 PT</span>
+    </div>
+  </div>
+
+  <!-- ===== KPI strip ===== -->
+  <div class="kpi-row">
+    <div class="kpi"><div class="lbl">Your Rank · 30d</div><div class="val" style="color:var(--copper)">#3</div><div class="delta">of 8 friends · top 38%</div></div>
+    <div class="kpi"><div class="lbl">Your 30d R</div><div class="val pos">+8.6R</div><div class="delta">vs Vinod +18.4R · gap −9.8R</div></div>
+    <div class="kpi"><div class="lbl">Circle Avg R</div><div class="val pos">+6.0R</div><div class="delta">7 of 8 profitable 30d</div></div>
+    <div class="kpi"><div class="lbl">Following</div><div class="val">2</div><div class="delta">Vinod · Raj</div></div>
+    <div class="kpi"><div class="lbl">Your Followers</div><div class="val">3</div><div class="delta">Priya · Anand · Maya</div></div>
+    <div class="kpi"><div class="lbl">Ideas to Review</div><div class="val neut">12</div><div class="delta">5 live · 4 new today</div></div>
+  </div>
+
+  <!-- ===== Two-log discipline note ===== -->
+  <div class="log-note">
+    <div class="seg"><span class="dot real"></span><span><b>REAL</b> trades only — Friends ranking uses each user's <b>portfolio_state.json</b></span></div>
+    <div class="seg"><span style="width:6px;height:6px;border-radius:50%;background:var(--copper);display:inline-block"></span><span>Ranked on <b>R-multiple</b> &amp; <b>%</b> — never $ — so $1K and $1M traders compete fairly</span></div>
+    <div class="seg" style="margin-left:auto;color:var(--paper-4)">n≥10 to qualify · Wilson LB tiebreak</div>
+  </div>
+
+  <!-- ===== Tabs ===== -->
+  <div class="tabs">
+    <div class="tab active" data-tab="friends">Friends <span class="cnt">8</span><span class="badge-mini" style="border-color:var(--copper);color:var(--copper)">SOCIAL</span></div>
+    <div class="tab" data-tab="ideas">Pinned Ideas <span class="cnt">12</span><span class="badge-mini" style="border-color:var(--copper);color:var(--copper)">SOCIAL</span></div>
+    <div class="tab" data-tab="open">Your Open <span class="cnt">4</span></div>
+    <div class="tab" data-tab="closed">Your Closed <span class="cnt">18</span></div>
+    <div class="tab" data-tab="setup">Setup &times; Regime <span class="cnt">14</span></div>
+  </div>
+
+  <!-- ===========================================================
+       PANEL 1 — OPEN POSITIONS
+       =========================================================== -->
+  <div class="panel" data-panel="open">
+
+    <!-- Podium top 3 by unrealized R -->
+    <div class="podium">
+      <div class="podium-card">
+        <div class="rank-num">2</div>
+        <div><span class="tkr">PLTR</span><span class="dir-pill">LONG</span></div>
+        <div class="setup-line">VCP · Risk-On Trending · T1 · FRESH entry</div>
+        <div class="r-val pos">+1.85R</div>
+        <div class="r-lbl">unrealized · day 3 of 7-21</div>
+        <div class="pl-bar">
+          <div class="seg lo" style="left:10%;width:8%"></div>
+          <div class="seg hi" style="left:50%;width:38%"></div>
+          <div class="seg cur" style="left:78%"></div>
+        </div>
+        <div class="pl-meta"><span>MAE −0.32R</span><span>MFE +2.10R</span></div>
+        <div class="grid-4">
+          <div class="gc"><div class="l">Entry</div><div class="v">$22.40</div></div>
+          <div class="gc"><div class="l">Now</div><div class="v">$24.18</div></div>
+          <div class="gc"><div class="l">Stop</div><div class="v">$21.45</div></div>
+          <div class="gc"><div class="l">T1</div><div class="v">$26.25</div></div>
+        </div>
+      </div>
+
+      <div class="podium-card gold">
+        <div class="rank-num">1</div>
+        <div><span class="tkr">NVDA</span><span class="dir-pill">LONG</span></div>
+        <div class="setup-line">PEAD · Risk-On Trending · T1 · FRESH entry</div>
+        <div class="r-val pos">+3.10R</div>
+        <div class="r-lbl">unrealized · day 5 of 5-8 · trail active</div>
+        <div class="pl-bar">
+          <div class="seg lo" style="left:18%;width:4%"></div>
+          <div class="seg hi" style="left:50%;width:42%"></div>
+          <div class="seg cur" style="left:90%"></div>
+        </div>
+        <div class="pl-meta"><span>MAE −0.18R</span><span>MFE +3.30R</span></div>
+        <div class="grid-4">
+          <div class="gc"><div class="l">Entry</div><div class="v">$118.20</div></div>
+          <div class="gc"><div class="l">Now</div><div class="v">$132.40</div></div>
+          <div class="gc"><div class="l">Trail</div><div class="v">$126.10</div></div>
+          <div class="gc"><div class="l">T2</div><div class="v">$138.50</div></div>
+        </div>
+      </div>
+
+      <div class="podium-card">
+        <div class="rank-num">3</div>
+        <div><span class="tkr">SMCI</span><span class="dir-pill">LONG</span></div>
+        <div class="setup-line">Squeeze Expansion · Risk-On Trending · T2 · PULLBACK</div>
+        <div class="r-val pos">+0.85R</div>
+        <div class="r-lbl">unrealized · day 8 of 7-21</div>
+        <div class="pl-bar">
+          <div class="seg lo" style="left:25%;width:5%"></div>
+          <div class="seg hi" style="left:50%;width:24%"></div>
+          <div class="seg cur" style="left:68%"></div>
+        </div>
+        <div class="pl-meta"><span>MAE −0.25R</span><span>MFE +1.20R</span></div>
+        <div class="grid-4">
+          <div class="gc"><div class="l">Entry</div><div class="v">$48.90</div></div>
+          <div class="gc"><div class="l">Now</div><div class="v">$51.15</div></div>
+          <div class="gc"><div class="l">Stop</div><div class="v">$46.50</div></div>
+          <div class="gc"><div class="l">T1</div><div class="v">$55.00</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="filters">
+      <span class="lbl">Filter</span>
+      <span class="chip on">All</span>
+      <span class="chip">Long</span>
+      <span class="chip">Short</span>
+      <span class="chip">T1 Only</span>
+      <span class="chip">Profitable</span>
+      <span class="chip">Drawdown</span>
+      <span class="spacer"></span>
+      <input class="search" placeholder="ticker / setup…">
+    </div>
+
+    <!-- Full ranked table -->
+    <table class="lb-table">
+      <thead>
+        <tr>
+          <th class="l" style="width:38px"></th>
+          <th class="l">Ticker</th>
+          <th class="l">Setup</th>
+          <th class="l">Regime · Tier</th>
+          <th>Entry</th>
+          <th>Now</th>
+          <th>Δ%</th>
+          <th>Unreal R</th>
+          <th>MAE / MFE</th>
+          <th>Days</th>
+          <th>Hold Guide</th>
+          <th>Notional</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="rank t3">1</td>
+          <td class="l"><span class="tkr">NVDA</span><span class="dir long">LONG</span></td>
+          <td class="l setup">PEAD · FRESH</td>
+          <td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t1">T1</span></td>
+          <td>$118.20</td>
+          <td>$132.40</td>
+          <td class="pos">+12.0%</td>
+          <td class="r-cell pos">+3.10R</td>
+          <td>−0.18 / +3.30</td>
+          <td>5</td>
+          <td>5-8d</td>
+          <td>$1,200</td>
+        </tr>
+        <tr>
+          <td class="rank t3">2</td>
+          <td class="l"><span class="tkr">PLTR</span><span class="dir long">LONG</span></td>
+          <td class="l setup">VCP · FRESH</td>
+          <td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t1">T1</span></td>
+          <td>$22.40</td>
+          <td>$24.18</td>
+          <td class="pos">+7.9%</td>
+          <td class="r-cell pos">+1.85R</td>
+          <td>−0.32 / +2.10</td>
+          <td>3</td>
+          <td>7-21d</td>
+          <td>$1,400</td>
+        </tr>
+        <tr>
+          <td class="rank t3">3</td>
+          <td class="l"><span class="tkr">SMCI</span><span class="dir long">LONG</span></td>
+          <td class="l setup">Squeeze Exp · PULLBACK</td>
+          <td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t2">T2</span></td>
+          <td>$48.90</td>
+          <td>$51.15</td>
+          <td class="pos">+4.6%</td>
+          <td class="r-cell pos">+0.85R</td>
+          <td>−0.25 / +1.20</td>
+          <td>8</td>
+          <td>7-21d</td>
+          <td>$1,200</td>
+        </tr>
+        <tr>
+          <td class="rank">4</td>
+          <td class="l"><span class="tkr">TSLA</span><span class="dir short">SHORT</span></td>
+          <td class="l setup">Failed Breakout · EXTENDED</td>
+          <td class="l"><span class="regime-tag">Risk-On Choppy</span> <span class="conv t3">T3</span></td>
+          <td>$182.30</td>
+          <td>$186.50</td>
+          <td class="neg">−2.3%</td>
+          <td class="r-cell neg">−0.45R</td>
+          <td>−0.65 / +0.20</td>
+          <td>4</td>
+          <td>3-7d</td>
+          <td>$1,000</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ===========================================================
+       PANEL — FRIENDS (community) — default active
+       =========================================================== -->
+  <div class="panel active" data-panel="friends">
+
+    <div class="priv-banner">
+      <span class="icon">🛡</span>
+      <span><b style="color:var(--paper-2)">Trust circle · invite-only.</b> You share with 8 friends; they share with you. Real $ amounts are never exposed — only R-multiple, %, win-rate, and setup mix.</span>
+      <span class="link">Privacy &amp; sharing settings →</span>
+    </div>
+
+    <!-- Filter chips -->
+    <div class="filters">
+      <span class="lbl">Rank by</span>
+      <span class="chip on">30d R-multiple</span>
+      <span class="chip">YTD R</span>
+      <span class="chip">Win-rate</span>
+      <span class="chip">PF</span>
+      <span class="chip">Consistency</span>
+      <span class="spacer"></span>
+      <span class="lbl">Show</span>
+      <span class="chip on">All 8</span>
+      <span class="chip">Followed only</span>
+      <span class="chip">+ Invite friend</span>
+    </div>
+
+    <div class="sec-h">
+      <h3>The Circle · 30d ranking</h3>
+      <span class="h-sub">Min <b>n≥10</b> trades to qualify · Wilson LB tiebreaker</span>
+    </div>
+
+    <!-- Rank 1: Vinod -->
+    <div class="friend-card" style="grid-template-columns:48px 1fr auto;">
+      <div class="avatar av-v">V</div>
+      <div class="friend-info">
+        <div class="name">
+          <span>Vinod K.</span>
+          <span class="followed">FOLLOWED</span>
+          <span style="font-size:10px;color:var(--paper-4)">@vinod</span>
+        </div>
+        <div class="sub">
+          <span><b style="color:var(--paper-2)">+18.4R</b> · 30d</span>
+          <span class="sep">·</span>
+          <span>74% WR (n=27)</span>
+          <span class="sep">·</span>
+          <span>PF 2.85</span>
+          <span class="sep">·</span>
+          <span>Risk-On Trending edge</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+          <span class="streak">
+            <span class="day w"></span><span class="day w"></span><span class="day l"></span><span class="day w"></span><span class="day w"></span><span class="day w"></span><span class="day f"></span><span class="day w"></span><span class="day w"></span><span class="day l"></span>
+          </span>
+          <span class="best-setup-tag">Best: <b>PEAD</b> · 82% WR / 11 trades</span>
+        </div>
+      </div>
+      <div class="friend-stats">
+        <div class="s"><div class="l">Rank</div><div class="v" style="color:var(--copper)">#1</div></div>
+        <div class="s"><div class="l">30d R</div><div class="v pos">+18.4R</div></div>
+        <div class="s"><div class="l">Followers</div><div class="v">6</div></div>
+        <div class="actions">
+          <span class="btn on">✓ Following</span>
+          <span class="btn">View picks</span>
+        </div>
+      </div>
+      <div class="friend-now">
+        <div class="pos"><div class="tk">AVGO <span style="color:var(--long);font-size:9px">L</span></div><div class="setup">PEAD · day 4</div><div class="r pos">+2.4R</div></div>
+        <div class="pos"><div class="tk">NVDA <span style="color:var(--long);font-size:9px">L</span></div><div class="setup">VCP · day 6</div><div class="r pos">+1.8R</div></div>
+        <div class="pos"><div class="tk">MELI <span style="color:var(--long);font-size:9px">L</span></div><div class="setup">Squeeze Exp · day 2</div><div class="r pos">+0.5R</div></div>
+      </div>
+    </div>
+
+    <!-- Rank 2: Raj -->
+    <div class="friend-card">
+      <div class="avatar av-r">R</div>
+      <div class="friend-info">
+        <div class="name">
+          <span>Raj S.</span>
+          <span class="followed">FOLLOWED</span>
+          <span style="font-size:10px;color:var(--paper-4)">@rajs</span>
+        </div>
+        <div class="sub">
+          <span><b style="color:var(--paper-2)">+12.7R</b> · 30d</span>
+          <span class="sep">·</span>
+          <span>68% WR (n=19)</span>
+          <span class="sep">·</span>
+          <span>PF 2.10</span>
+          <span class="sep">·</span>
+          <span>EMA21 Pullback specialist</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+          <span class="streak">
+            <span class="day w"></span><span class="day w"></span><span class="day w"></span><span class="day l"></span><span class="day w"></span><span class="day l"></span><span class="day w"></span><span class="day w"></span><span class="day w"></span><span class="day w"></span>
+          </span>
+          <span class="best-setup-tag">Best: <b>EMA21 Pullback</b> · 78% WR / 9 trades</span>
+        </div>
+      </div>
+      <div class="friend-stats">
+        <div class="s"><div class="l">Rank</div><div class="v">#2</div></div>
+        <div class="s"><div class="l">30d R</div><div class="v pos">+12.7R</div></div>
+        <div class="s"><div class="l">Followers</div><div class="v">4</div></div>
+        <div class="actions">
+          <span class="btn on">✓ Following</span>
+          <span class="btn">View picks</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rank 3: YOU -->
+    <div class="friend-card you">
+      <div class="avatar av-you">P</div>
+      <div class="friend-info">
+        <div class="name">
+          <span>Phani G.</span>
+          <span class="you-tag">YOU</span>
+          <span style="font-size:10px;color:var(--paper-4)">@phani</span>
+        </div>
+        <div class="sub">
+          <span><b style="color:var(--paper-2)">+8.6R</b> · 30d</span>
+          <span class="sep">·</span>
+          <span>61% WR (n=18)</span>
+          <span class="sep">·</span>
+          <span>PF 1.85</span>
+          <span class="sep">·</span>
+          <span>VCP / Squeeze focus</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+          <span class="streak">
+            <span class="day w"></span><span class="day l"></span><span class="day w"></span><span class="day w"></span><span class="day l"></span><span class="day w"></span><span class="day w"></span><span class="day l"></span><span class="day w"></span><span class="day w"></span>
+          </span>
+          <span class="best-setup-tag">Best: <b>VCP</b> · 71% WR / 7 trades</span>
+        </div>
+      </div>
+      <div class="friend-stats">
+        <div class="s"><div class="l">Rank</div><div class="v" style="color:var(--copper)">#3</div></div>
+        <div class="s"><div class="l">30d R</div><div class="v pos">+8.6R</div></div>
+        <div class="s"><div class="l">Followers</div><div class="v">3</div></div>
+        <div class="actions">
+          <span class="btn">Share picks</span>
+          <span class="btn">Privacy</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rank 4: Priya -->
+    <div class="friend-card">
+      <div class="avatar av-p">P</div>
+      <div class="friend-info">
+        <div class="name">
+          <span>Priya M.</span>
+          <span style="font-size:10px;color:var(--paper-4)">@priya</span>
+        </div>
+        <div class="sub">
+          <span><b style="color:var(--paper-2)">+5.2R</b> · 30d</span>
+          <span class="sep">·</span>
+          <span>57% WR (n=14)</span>
+          <span class="sep">·</span>
+          <span>PF 1.50</span>
+          <span class="sep">·</span>
+          <span>UOA + earnings</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+          <span class="streak">
+            <span class="day l"></span><span class="day w"></span><span class="day w"></span><span class="day l"></span><span class="day w"></span><span class="day w"></span><span class="day l"></span><span class="day w"></span><span class="day w"></span><span class="day w"></span>
+          </span>
+          <span class="best-setup-tag">Best: <b>PEAD</b> · 67% WR / 6 trades</span>
+        </div>
+      </div>
+      <div class="friend-stats">
+        <div class="s"><div class="l">Rank</div><div class="v">#4</div></div>
+        <div class="s"><div class="l">30d R</div><div class="v pos">+5.2R</div></div>
+        <div class="s"><div class="l">Followers</div><div class="v">2</div></div>
+        <div class="actions">
+          <span class="btn">+ Follow</span>
+          <span class="btn">View picks</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rank 5: Anand -->
+    <div class="friend-card">
+      <div class="avatar av-a">A</div>
+      <div class="friend-info">
+        <div class="name"><span>Anand T.</span><span style="font-size:10px;color:var(--paper-4)">@anand</span></div>
+        <div class="sub">
+          <span><b style="color:var(--paper-2)">+3.8R</b> · 30d</span>
+          <span class="sep">·</span>
+          <span>53% WR (n=15)</span>
+          <span class="sep">·</span>
+          <span>PF 1.40</span>
+          <span class="sep">·</span>
+          <span>52wk Breakout heavy</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+          <span class="streak">
+            <span class="day w"></span><span class="day l"></span><span class="day l"></span><span class="day w"></span><span class="day w"></span><span class="day l"></span><span class="day w"></span><span class="day w"></span><span class="day l"></span><span class="day w"></span>
+          </span>
+          <span class="best-setup-tag">Best: <b>52wk Breakout</b> · 62% WR / 8 trades</span>
+        </div>
+      </div>
+      <div class="friend-stats">
+        <div class="s"><div class="l">Rank</div><div class="v">#5</div></div>
+        <div class="s"><div class="l">30d R</div><div class="v pos">+3.8R</div></div>
+        <div class="s"><div class="l">Followers</div><div class="v">1</div></div>
+        <div class="actions"><span class="btn">+ Follow</span><span class="btn">View picks</span></div>
+      </div>
+    </div>
+
+    <!-- Rank 6: Karthik -->
+    <div class="friend-card">
+      <div class="avatar av-k">K</div>
+      <div class="friend-info">
+        <div class="name"><span>Karthik R.</span><span style="font-size:10px;color:var(--paper-4)">@karthik</span></div>
+        <div class="sub">
+          <span><b style="color:var(--paper-2)">+1.4R</b> · 30d</span>
+          <span class="sep">·</span>
+          <span>50% WR (n=12)</span>
+          <span class="sep">·</span>
+          <span>PF 1.12</span>
+          <span class="sep">·</span>
+          <span>Mixed setups</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+          <span class="streak">
+            <span class="day l"></span><span class="day w"></span><span class="day l"></span><span class="day l"></span><span class="day w"></span><span class="day w"></span><span class="day l"></span><span class="day w"></span><span class="day l"></span><span class="day w"></span>
+          </span>
+          <span class="best-setup-tag">No setup clears Wilson n≥10</span>
+        </div>
+      </div>
+      <div class="friend-stats">
+        <div class="s"><div class="l">Rank</div><div class="v">#6</div></div>
+        <div class="s"><div class="l">30d R</div><div class="v neut">+1.4R</div></div>
+        <div class="s"><div class="l">Followers</div><div class="v">0</div></div>
+        <div class="actions"><span class="btn">+ Follow</span><span class="btn">View picks</span></div>
+      </div>
+    </div>
+
+    <!-- Rank 7: Maya — under-qualified -->
+    <div class="friend-card" style="opacity:0.6">
+      <div class="avatar av-m">M</div>
+      <div class="friend-info">
+        <div class="name"><span>Maya I.</span><span style="font-size:10px;color:var(--paper-4)">@maya</span><span style="font-size:9px;padding:1px 6px;background:var(--watch-bg);color:var(--watch);border:1px solid var(--watch-dim);border-radius:2px">UNRANKED · n&lt;10</span></div>
+        <div class="sub">
+          <span><b style="color:var(--paper-2)">+0.6R</b> · 30d</span>
+          <span class="sep">·</span>
+          <span>n=6 — needs ≥10 to rank</span>
+          <span class="sep">·</span>
+          <span>Newer trader</span>
+        </div>
+      </div>
+      <div class="friend-stats">
+        <div class="s"><div class="l">Rank</div><div class="v" style="color:var(--paper-4)">—</div></div>
+        <div class="s"><div class="l">30d R</div><div class="v neut">+0.6R</div></div>
+        <div class="s"><div class="l">Followers</div><div class="v">0</div></div>
+        <div class="actions"><span class="btn">+ Follow</span><span class="btn">View picks</span></div>
+      </div>
+    </div>
+
+    <!-- Rank 8: Suresh - drawdown -->
+    <div class="friend-card">
+      <div class="avatar av-s">S</div>
+      <div class="friend-info">
+        <div class="name"><span>Suresh B.</span><span style="font-size:10px;color:var(--paper-4)">@suresh</span></div>
+        <div class="sub">
+          <span><b class="neg">−2.8R</b> · 30d</span>
+          <span class="sep">·</span>
+          <span>42% WR (n=11)</span>
+          <span class="sep">·</span>
+          <span>PF 0.75</span>
+          <span class="sep">·</span>
+          <span class="neg">Risk-Off Trending mismatch</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+          <span class="streak">
+            <span class="day l"></span><span class="day l"></span><span class="day w"></span><span class="day l"></span><span class="day l"></span><span class="day w"></span><span class="day l"></span><span class="day l"></span><span class="day w"></span><span class="day l"></span>
+          </span>
+          <span class="best-setup-tag" style="color:var(--paper-4)">Trading longs in risk-off · regime mismatch</span>
+        </div>
+      </div>
+      <div class="friend-stats">
+        <div class="s"><div class="l">Rank</div><div class="v">#7</div></div>
+        <div class="s"><div class="l">30d R</div><div class="v neg">−2.8R</div></div>
+        <div class="s"><div class="l">Followers</div><div class="v">0</div></div>
+        <div class="actions"><span class="btn">Send tips</span><span class="btn">View picks</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===========================================================
+       PANEL — PINNED IDEAS (shared theses from friends)
+       =========================================================== -->
+  <div class="panel" data-panel="ideas">
+
+    <div class="priv-banner">
+      <span class="icon">💡</span>
+      <span><b style="color:var(--paper-2)">Pinned ideas</b> are picks friends chose to share with thesis. You see the reasoning, not just the ticker — so you decide for yourself, not blind-copy.</span>
+      <span class="link">+ Pin one of your picks →</span>
+    </div>
+
+    <div class="filters">
+      <span class="lbl">Sort</span>
+      <span class="chip on">Most followed</span>
+      <span class="chip">Newest</span>
+      <span class="chip">Live R</span>
+      <span class="chip">From #1-ranked friends</span>
+      <span class="spacer"></span>
+      <span class="lbl">Status</span>
+      <span class="chip on">Live (open)</span>
+      <span class="chip">Closed</span>
+      <span class="chip">All</span>
+    </div>
+
+    <!-- Idea 1: Vinod's AVGO -->
+    <div class="idea-card">
+      <div class="av-sm av-v">V</div>
+      <div>
+        <div class="ih">
+          <span class="tk">AVGO</span>
+          <span class="dir-pill long">LONG</span>
+          <span class="by">pinned by <b>Vinod K.</b> · @vinod</span>
+          <span class="age">2 days ago</span>
+          <span class="live-r pos">+2.4R live</span>
+        </div>
+        <div class="thesis">
+          PEAD play after the Q1 beat. Reaction-day high cleared on RVOL 2.3×, and the gap held on the back-test. AVGO has run +3R on every prior 4-quarter beat in this regime. Entry at $1,310 reaction-day pivot, stop at $1,265 (close-basis), T1 $1,400 / T2 $1,475. Risk-On Trending makes this T1 size.
+        </div>
+        <div class="meta-row">
+          <span>Setup:<b>PEAD</b></span>
+          <span>Tier:<b>T1</b></span>
+          <span>Entry:<b>$1,310</b></span>
+          <span>Stop:<b>$1,265</b></span>
+          <span>R:R:<b>3.5</b></span>
+          <span class="pill">Vinod's win-rate on PEAD: <b style="color:var(--long)">82%</b> (n=11)</span>
+          <span class="followers">5 followers · 2 entered</span>
+        </div>
+        <div class="actions-row">
+          <span class="btn primary">+ Add to watchlist</span>
+          <span class="btn">Open deep-dive</span>
+          <span class="btn">Comment (3)</span>
+          <span class="btn">Mute @vinod</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Idea 2: Raj's CRWD -->
+    <div class="idea-card">
+      <div class="av-sm av-r">R</div>
+      <div>
+        <div class="ih">
+          <span class="tk">CRWD</span>
+          <span class="dir-pill long">LONG</span>
+          <span class="by">pinned by <b>Raj S.</b> · @rajs</span>
+          <span class="age">4 hours ago</span>
+          <span class="live-r pos">+0.4R live</span>
+        </div>
+        <div class="thesis">
+          Textbook EMA21 pullback into prior breakout level $295. Institutional re-add point — RVOL 1.4× on the touch, no distribution. Cybersecurity sector +RS. Earnings 18 days out — clean window. I'm sized 75% of full T1 because RS is good but not blow-out.
+        </div>
+        <div class="meta-row">
+          <span>Setup:<b>EMA21 Pullback</b></span>
+          <span>Tier:<b>T2</b></span>
+          <span>Entry:<b>$295</b></span>
+          <span>Stop:<b>$284</b></span>
+          <span>R:R:<b>3.1</b></span>
+          <span class="pill">Raj's win-rate on EMA21: <b style="color:var(--long)">78%</b> (n=9)</span>
+          <span class="followers">3 followers · 1 entered</span>
+        </div>
+        <div class="actions-row">
+          <span class="btn primary">+ Add to watchlist</span>
+          <span class="btn">Open deep-dive</span>
+          <span class="btn">Comment (1)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Idea 3: Priya's MU -->
+    <div class="idea-card">
+      <div class="av-sm av-p">P</div>
+      <div>
+        <div class="ih">
+          <span class="tk">MU</span>
+          <span class="dir-pill long">LONG</span>
+          <span class="by">pinned by <b>Priya M.</b> · @priya</span>
+          <span class="age">yesterday</span>
+          <span class="live-r neg">−0.3R live</span>
+        </div>
+        <div class="thesis">
+          UOA scan flagged 4.2× normal call volume Jun-20 $130s yesterday afternoon. Combined with prior earnings beat (ESP +2.1%) and a constructive base. Earnings 12 days — getting in early. Aggressive size scale-in if it base-builds another 3 days.
+        </div>
+        <div class="meta-row">
+          <span>Setup:<b>UOA</b></span>
+          <span>Tier:<b>T2</b></span>
+          <span>Entry:<b>$118.20</b></span>
+          <span>Stop:<b>$112.50</b></span>
+          <span>R:R:<b>3.2</b></span>
+          <span class="pill">Priya's win-rate on UOA: <b style="color:var(--long)">67%</b> (n=6)</span>
+          <span class="followers">2 followers · 0 entered</span>
+        </div>
+        <div class="actions-row">
+          <span class="btn primary">+ Add to watchlist</span>
+          <span class="btn">Open deep-dive</span>
+          <span class="btn">Comment (5)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Idea 4: Suresh's losing trade (cautionary) -->
+    <div class="idea-card" style="border-color:var(--short-dim);background:linear-gradient(180deg,rgba(248,113,113,.03) 0%,var(--ink-2) 100%);">
+      <div class="av-sm av-s">S</div>
+      <div>
+        <div class="ih">
+          <span class="tk">FSLR</span>
+          <span class="dir-pill long">LONG</span>
+          <span class="by">pinned by <b>Suresh B.</b> · @suresh</span>
+          <span class="age">5 days ago</span>
+          <span class="live-r neg">−1.0R · STOPPED</span>
+        </div>
+        <div class="thesis">
+          52wk Breakout on solar momentum + China policy news. Felt high-conviction in the moment.
+        </div>
+        <div class="meta-row">
+          <span>Setup:<b>52wk Breakout</b></span>
+          <span>Tier:<b>T3</b></span>
+          <span style="color:var(--short)">Regime:<b style="color:var(--short)">Risk-Off Trending</b></span>
+          <span class="pill" style="border-color:var(--short-dim);color:var(--short)">⚠ Long entry in risk-off regime — system would have blocked this</span>
+          <span class="followers">0 followers · 0 entered</span>
+        </div>
+        <div class="actions-row">
+          <span class="btn">Read post-mortem</span>
+          <span class="btn">Open deep-dive</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===========================================================
+       PANEL 2 — CLOSED TRADES
+       =========================================================== -->
+  <div class="panel" data-panel="closed">
+    <div class="filters">
+      <span class="lbl">Sort</span>
+      <span class="chip on">Realized R</span>
+      <span class="chip">$ P&amp;L</span>
+      <span class="chip">PF Contribution</span>
+      <span class="chip">Hold Efficiency</span>
+      <span class="chip">Recent</span>
+      <span class="spacer"></span>
+      <span class="lbl">Window</span>
+      <span class="chip">7d</span>
+      <span class="chip on">30d</span>
+      <span class="chip">90d</span>
+      <span class="chip">All</span>
+    </div>
+
+    <table class="lb-table">
+      <thead>
+        <tr>
+          <th class="l" style="width:38px"></th>
+          <th class="l">Ticker</th>
+          <th class="l">Setup</th>
+          <th class="l">Regime · Tier</th>
+          <th>Realized R</th>
+          <th>$ P&amp;L</th>
+          <th>Hold</th>
+          <th>Efficiency</th>
+          <th>Exit</th>
+          <th>Closed</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="rank t3">1</td><td class="l"><span class="tkr">AVGO</span><span class="dir long">LONG</span></td><td class="l setup">PEAD · FRESH</td><td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t1">T1</span></td><td class="r-cell pos">+4.20R</td><td class="pos">+$210</td><td>6d</td><td>0.91 <span class="micro-bar"><span class="fill" style="width:91%"></span></span></td><td>Trail hit</td><td>05-08</td></tr>
+        <tr><td class="rank t3">2</td><td class="l"><span class="tkr">META</span><span class="dir long">LONG</span></td><td class="l setup">VCP · FRESH</td><td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t1">T1</span></td><td class="r-cell pos">+3.50R</td><td class="pos">+$180</td><td>12d</td><td>0.78 <span class="micro-bar"><span class="fill" style="width:78%"></span></span></td><td>T2 hit</td><td>05-05</td></tr>
+        <tr><td class="rank t3">3</td><td class="l"><span class="tkr">CRWD</span><span class="dir long">LONG</span></td><td class="l setup">EMA21 Pullback · PULLBACK</td><td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t2">T2</span></td><td class="r-cell pos">+2.80R</td><td class="pos">+$140</td><td>9d</td><td>0.85 <span class="micro-bar"><span class="fill" style="width:85%"></span></span></td><td>T1 + trail</td><td>05-02</td></tr>
+        <tr><td class="rank">4</td><td class="l"><span class="tkr">AMD</span><span class="dir long">LONG</span></td><td class="l setup">Squeeze Exp · FRESH</td><td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t2">T2</span></td><td class="r-cell pos">+2.10R</td><td class="pos">+$105</td><td>11d</td><td>0.72 <span class="micro-bar"><span class="fill" style="width:72%"></span></span></td><td>T1 hit</td><td>04-28</td></tr>
+        <tr><td class="rank">5</td><td class="l"><span class="tkr">UBER</span><span class="dir long">LONG</span></td><td class="l setup">52wk Breakout · VALID</td><td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t2">T2</span></td><td class="r-cell pos">+1.65R</td><td class="pos">+$82</td><td>8d</td><td>0.68 <span class="micro-bar"><span class="fill" style="width:68%"></span></span></td><td>T1 hit</td><td>04-24</td></tr>
+        <tr><td class="rank">6</td><td class="l"><span class="tkr">SOFI</span><span class="dir long">LONG</span></td><td class="l setup">UOA · FRESH</td><td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t2">T2</span></td><td class="r-cell pos">+0.90R</td><td class="pos">+$45</td><td>4d</td><td>0.55 <span class="micro-bar"><span class="fill" style="width:55%"></span></span></td><td>Time stop</td><td>04-22</td></tr>
+        <tr><td class="rank">7</td><td class="l"><span class="tkr">NET</span><span class="dir long">LONG</span></td><td class="l setup">VCP · PULLBACK</td><td class="l"><span class="regime-tag">Risk-On Choppy</span> <span class="conv t2">T2</span></td><td class="r-cell neg">−0.85R</td><td class="neg">−$42</td><td>5d</td><td>0.20 <span class="micro-bar"><span class="fill neg" style="width:20%"></span></span></td><td>Stop hit</td><td>04-19</td></tr>
+        <tr><td class="rank">8</td><td class="l"><span class="tkr">DDOG</span><span class="dir long">LONG</span></td><td class="l setup">Squeeze Exp · EXTENDED</td><td class="l"><span class="regime-tag">Risk-On Choppy</span> <span class="conv t3">T3</span></td><td class="r-cell neg">−1.00R</td><td class="neg">−$50</td><td>3d</td><td>0.10 <span class="micro-bar"><span class="fill neg" style="width:10%"></span></span></td><td>Stop hit</td><td>04-16</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ===========================================================
+       PANEL 3 — PAPER POOL
+       =========================================================== -->
+  <div class="panel" data-panel="paper">
+    <div class="filters">
+      <span class="lbl">Filter</span>
+      <span class="chip on">All BUY</span>
+      <span class="chip">BUY · T1</span>
+      <span class="chip">BUY · T2</span>
+      <span class="chip">SHORT</span>
+      <span class="chip">By regime</span>
+      <span class="spacer"></span>
+      <span style="font-size:11px;color:var(--paper-4)">Reads <code style="font-family:var(--mono);color:var(--paper-2);background:var(--ink-3);padding:1px 5px">picks_history.json</code> · BUY-only, WATCH excluded</span>
+    </div>
+
+    <table class="lb-table">
+      <thead>
+        <tr>
+          <th class="l" style="width:38px"></th>
+          <th class="l">Ticker</th>
+          <th class="l">Setup</th>
+          <th class="l">Regime · Tier</th>
+          <th>Realized R</th>
+          <th>Win %</th>
+          <th>Wilson LB</th>
+          <th>Trades (n)</th>
+          <th>Avg Hold</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="rank t3">1</td><td class="l"><span class="tkr">NVDA</span><span class="dir long">L</span></td><td class="l setup">PEAD aggregate</td><td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t1">T1</span></td><td class="r-cell pos">+1.85R</td><td class="pos">73%</td><td>0.61</td><td>15</td><td>6.2d</td></tr>
+        <tr><td class="rank t3">2</td><td class="l"><span class="tkr">META</span><span class="dir long">L</span></td><td class="l setup">VCP aggregate</td><td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t1">T1</span></td><td class="r-cell pos">+1.62R</td><td class="pos">68%</td><td>0.57</td><td>22</td><td>10.4d</td></tr>
+        <tr><td class="rank t3">3</td><td class="l"><span class="tkr">AVGO</span><span class="dir long">L</span></td><td class="l setup">EMA21 Pullback aggregate</td><td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t2">T2</span></td><td class="r-cell pos">+1.40R</td><td class="pos">65%</td><td>0.54</td><td>31</td><td>8.7d</td></tr>
+        <tr><td class="rank">4</td><td class="l"><span class="tkr">PLTR</span><span class="dir long">L</span></td><td class="l setup">VCP aggregate</td><td class="l"><span class="regime-tag">Risk-On Trending</span> <span class="conv t1">T1</span></td><td class="r-cell pos">+1.32R</td><td class="pos">62%</td><td>0.51</td><td>18</td><td>9.1d</td></tr>
+        <tr><td class="rank">5</td><td class="l"><span class="tkr">CRWD</span><span class="dir long">L</span></td><td class="l setup">Squeeze Exp aggregate</td><td class="l"><span class="regime-tag">Risk-On Choppy</span> <span class="conv t2">T2</span></td><td class="r-cell pos">+1.15R</td><td class="pos">58%</td><td>0.46</td><td>26</td><td>11.2d</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ===========================================================
+       PANEL 4 — SETUP × REGIME (Wilson LB ranked)
+       =========================================================== -->
+  <div class="panel" data-panel="setup">
+    <div class="filters">
+      <span class="lbl">Source</span>
+      <span class="chip on">Paper pool (picks_history)</span>
+      <span class="chip">Real trades only</span>
+      <span class="spacer"></span>
+      <span class="lbl">Min n</span>
+      <span class="chip">10</span>
+      <span class="chip on">30</span>
+      <span class="chip">100</span>
+    </div>
+
+    <div class="sr-grid">
+      <div class="sr-card" style="border-color:rgba(232,136,96,.4)">
+        <div class="rank-tag">#1 · Top of board</div>
+        <div class="setup-name">Squeeze Expansion</div>
+        <div class="regime-name">Risk-On Trending</div>
+        <div class="stats">
+          <div><div class="l">WR</div><div class="v pos">71%</div></div>
+          <div><div class="l">PF</div><div class="v pos">2.40</div></div>
+          <div><div class="l">n</div><div class="v">52</div></div>
+        </div>
+        <div class="ci-bar"><span class="ci" style="left:58%;width:24%"></span><span class="pt" style="left:71%"></span></div>
+        <div class="wilson"><span>Wilson LB</span><span class="lb">0.58</span></div>
+      </div>
+
+      <div class="sr-card">
+        <div class="rank-tag">#2</div>
+        <div class="setup-name">PEAD</div>
+        <div class="regime-name">Risk-On Trending</div>
+        <div class="stats">
+          <div><div class="l">WR</div><div class="v pos">68%</div></div>
+          <div><div class="l">PF</div><div class="v pos">2.10</div></div>
+          <div><div class="l">n</div><div class="v">45</div></div>
+        </div>
+        <div class="ci-bar"><span class="ci" style="left:55%;width:24%"></span><span class="pt" style="left:68%"></span></div>
+        <div class="wilson"><span>Wilson LB</span><span class="lb">0.55</span></div>
+      </div>
+
+      <div class="sr-card">
+        <div class="rank-tag">#3</div>
+        <div class="setup-name">EMA21 Pullback</div>
+        <div class="regime-name">Risk-On Trending</div>
+        <div class="stats">
+          <div><div class="l">WR</div><div class="v pos">65%</div></div>
+          <div><div class="l">PF</div><div class="v pos">1.95</div></div>
+          <div><div class="l">n</div><div class="v">68</div></div>
+        </div>
+        <div class="ci-bar"><span class="ci" style="left:54%;width:22%"></span><span class="pt" style="left:65%"></span></div>
+        <div class="wilson"><span>Wilson LB</span><span class="lb">0.54</span></div>
+      </div>
+
+      <div class="sr-card">
+        <div class="rank-tag">#4</div>
+        <div class="setup-name">VCP</div>
+        <div class="regime-name">Risk-On Trending</div>
+        <div class="stats">
+          <div><div class="l">WR</div><div class="v pos">62%</div></div>
+          <div><div class="l">PF</div><div class="v pos">1.85</div></div>
+          <div><div class="l">n</div><div class="v">73</div></div>
+        </div>
+        <div class="ci-bar"><span class="ci" style="left:52%;width:20%"></span><span class="pt" style="left:62%"></span></div>
+        <div class="wilson"><span>Wilson LB</span><span class="lb">0.52</span></div>
+      </div>
+
+      <div class="sr-card">
+        <div class="rank-tag">#5</div>
+        <div class="setup-name">52wk Breakout</div>
+        <div class="regime-name">Risk-On Trending</div>
+        <div class="stats">
+          <div><div class="l">WR</div><div class="v">60%</div></div>
+          <div><div class="l">PF</div><div class="v pos">1.70</div></div>
+          <div><div class="l">n</div><div class="v">41</div></div>
+        </div>
+        <div class="ci-bar"><span class="ci" style="left:48%;width:22%"></span><span class="pt" style="left:60%"></span></div>
+        <div class="wilson"><span>Wilson LB</span><span class="lb">0.48</span></div>
+      </div>
+
+      <div class="sr-card">
+        <div class="rank-tag">#6</div>
+        <div class="setup-name">PEAD</div>
+        <div class="regime-name">Risk-On Choppy</div>
+        <div class="stats">
+          <div><div class="l">WR</div><div class="v">55%</div></div>
+          <div><div class="l">PF</div><div class="v">1.55</div></div>
+          <div><div class="l">n</div><div class="v">38</div></div>
+        </div>
+        <div class="ci-bar"><span class="ci" style="left:42%;width:24%"></span><span class="pt" style="left:55%"></span></div>
+        <div class="wilson"><span>Wilson LB</span><span class="lb">0.42</span></div>
+      </div>
+
+      <div class="sr-card">
+        <div class="rank-tag">#7</div>
+        <div class="setup-name">UOA</div>
+        <div class="regime-name">Risk-On Trending</div>
+        <div class="stats">
+          <div><div class="l">WR</div><div class="v">52%</div></div>
+          <div><div class="l">PF</div><div class="v">1.45</div></div>
+          <div><div class="l">n</div><div class="v">35</div></div>
+        </div>
+        <div class="ci-bar"><span class="ci" style="left:40%;width:22%"></span><span class="pt" style="left:52%"></span></div>
+        <div class="wilson"><span>Wilson LB</span><span class="lb">0.40</span></div>
+      </div>
+
+      <div class="sr-card" style="opacity:0.55">
+        <div class="rank-tag" style="color:var(--short)">↓ Below kill threshold</div>
+        <div class="setup-name">Failed Breakout</div>
+        <div class="regime-name">Risk-On Choppy</div>
+        <div class="stats">
+          <div><div class="l">WR</div><div class="v neg">38%</div></div>
+          <div><div class="l">PF</div><div class="v neg">0.85</div></div>
+          <div><div class="l">n</div><div class="v">42</div></div>
+        </div>
+        <div class="ci-bar"><span class="ci" style="left:26%;width:24%"></span><span class="pt" style="left:38%"></span></div>
+        <div class="wilson"><span style="color:var(--short)">Killed · Wilson LB</span><span class="lb" style="color:var(--short)">0.26</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Footnote ===== -->
+  <div class="footnote">
+    <strong style="color:var(--paper-2)">Data sources:</strong>
+    OPEN / CLOSED panels read <code>data/portfolio_state.json</code> · PAPER POOL reads <code>cache/picks_history.json</code> (BUY-only filter applied — WATCH excluded per <code>feedback_signal_log_includes_watch</code>) · SETUP × REGIME uses Wilson 95% LB per <code>decision_engine.compute_setup_kill_list</code>. Two-log discipline preserved — visual separation prevents conflating "would have traded" with "did trade".
+  </div>
+
+</div>
+
+<script>
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      document.querySelector('.panel[data-panel="' + t.dataset.tab + '"]').classList.add('active');
+    });
+  });
+  document.querySelectorAll('.chip').forEach(c => {
+    c.addEventListener('click', () => {
+      const group = c.parentElement;
+      if (group.querySelector('.chip.on')) {
+        group.querySelectorAll('.chip').forEach(x => x.classList.remove('on'));
+      }
+      c.classList.add('on');
+    });
+  });
+</script>
+
+</body>
+</html>

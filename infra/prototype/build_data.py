@@ -1501,6 +1501,10 @@ def compact_row(r: dict) -> dict:
         "audit_trail":             r.get("audit_trail") or {},
         # Scan-over-scan diff (audit log panel)
         "change_log":              _compute_change_log(r, _PREV_BUNDLE_INDEX.get(r.get("ticker"), {}), _PREV_BUNDLE_DATE),
+        # 2026-05-17 · SMC engine output (zones · structure · liquidity · multi-TF bars).
+        # Wired by analysis.py:attach_smc_data → smc_engine.detect_smc_zones.
+        "smc_data":                r.get("smc_data") or {},
+        "smc_hit_rates":           r.get("smc_hit_rates") or {},
     }
     # Project 2 · M2.2 — overlay structural targets when feature flag is on.
     # Silent no-op when off; legacy t1/t2 fields above remain untouched.

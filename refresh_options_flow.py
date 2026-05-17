@@ -45,12 +45,43 @@ def _is_market_hours() -> bool:
     return (6 * 60 + 30) <= minutes <= (13 * 60 + 0)
 
 
+# 2026-05-15 · High-options-volume seed list. These tickers carry the deepest
+# options markets in US equities — UOA detection lives here regardless of
+# whether the swing-screener flags them as setups. Mega-caps + sector ETFs +
+# high-retail-vol single names. Refreshed manually when liquidity rankings
+# shift (typically once a quarter).
+OPTIONS_LIQUID_SEED = [
+    # Mag-7 + adjacents
+    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "TSLA",
+    # High-options-vol single names
+    "AMD", "NFLX", "BABA", "PLTR", "SOFI", "RIVN", "COIN", "MSTR",
+    "HOOD", "GME", "AMC", "NIO", "BA", "DIS", "AVGO", "CRM", "ORCL",
+    "INTC", "MU", "MARA", "RIOT", "F", "GM", "X", "CCL", "DAL", "UAL",
+    # Financials with deep options
+    "JPM", "BAC", "GS", "MS", "C", "WFC", "BLK",
+    # Sector ETFs
+    "SPY", "QQQ", "IWM", "DIA",
+    "XLK", "XLF", "XLE", "XLV", "XLY", "XLI", "XLP", "XLU", "XLB", "XLRE", "XLC",
+    # Volatility products
+    "VIX", "UVXY", "VXX", "SVXY",
+    # Megacap-adjacent
+    "ADBE", "PEP", "KO", "WMT", "HD", "COST", "JNJ", "PFE", "UNH",
+]
+
+
 def _load_universe(top_n: int = 200) -> list[str]:
-    """Pull top tickers from latest bundle. Prefer all_scored sorted by score."""
+    """Pull universe for UOA scan = top-N by screener score UNION high-options-volume seed.
+
+    The screener's score-ranked top-N curates for SETUP QUALITY (swing-trade signals).
+    UOA detection is a DIFFERENT lens — smart-money positioning lives in high-liquidity
+    names regardless of setup quality. Without the seed union, mega-caps like AAPL/NVDA
+    with clear PCR < 0.5 imbalances never reach the scanner because they don't surface
+    in the swing screen. Union ensures both universes get checked.
+    """
     bundle_path = BASE / "cache" / "last_bundle.json"
     if not bundle_path.exists():
-        log.warning("No bundle found — using S&P 500 fallback list (limited)")
-        return []
+        log.warning("No bundle found — falling back to OPTIONS_LIQUID_SEED only")
+        return list(dict.fromkeys(OPTIONS_LIQUID_SEED))
 
     bundle = json.loads(bundle_path.read_text())
     candidates: dict[str, float] = {}
@@ -70,7 +101,15 @@ def _load_universe(top_n: int = 200) -> list[str]:
             candidates[t] = max(candidates.get(t, 0), score)
 
     ranked = sorted(candidates.items(), key=lambda kv: -kv[1])
-    return [t for t, _ in ranked[:top_n]]
+    screener_top = [t for t, _ in ranked[:top_n]]
+    # Union: preserve screener order first, then append seeds not already covered
+    seen = set(screener_top)
+    out = list(screener_top)
+    for t in OPTIONS_LIQUID_SEED:
+        if t not in seen:
+            out.append(t)
+            seen.add(t)
+    return out
 
 
 def _fetch_options(tickers: list[str]) -> tuple[dict, dict]:

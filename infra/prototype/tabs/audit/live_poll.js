@@ -67,19 +67,12 @@ export async function pollOnce() {
         pctCell.style.color = c;
       }
 
-      // Synthesize the right DN_pct cell from live price. For a signal that
-      // entered N trading days ago, today's price IS the DN close. Without
-      // this, parquet-only enrichment leaves DN blank until the EOD archive
-      // catches up overnight.
-      const tdSince = tradingDaysSince(row.dataset.date);
-      if (tdSince != null && tdSince >= 1 && tdSince <= 5) {
-        const dCell = row.querySelector(`.audit-d${tdSince}-pct`);
-        if (dCell) {
-          dCell.textContent       = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
-          dCell.style.color       = c;
-          dCell.dataset.synthetic = '1';
-        }
-      }
+      // Intraday live price is NOT a valid D-cell value during market hours —
+      // D{k} is the CLOSE of trading-day k, which doesn't exist until after
+      // 4pm ET. Previous synthesis overwrote D1 with the live %Δ, making
+      // closed cells indistinguishable from in-progress and confusing users.
+      // Live %Δ lives in .audit-pctnow only. D-cells are filled by the
+      // EOD-rebuilt audit_ledger (run_daily_scan.sh runs build_audit_ledger.py).
     });
 
     const meta = document.getElementById('auditMeta');

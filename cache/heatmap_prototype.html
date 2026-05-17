@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Stock Heatmap · TradingView-style</title>
+<style>
+  :root{
+    --bg: #000; --bg-1: #0a0d0c; --bg-2: #0f1311; --bg-3: #1a1f1c;
+    --line: #1d2520; --line-2: #2a352e;
+    --ink: #ecefe9; --ink-1: #c4c8c1; --ink-2: #80847a; --ink-3: #545851;
+    --cy: #5ec8d8; --cy-bg: rgba(94,200,216,0.10);
+    --copper: #d97757;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:#000;color:var(--ink);font:13px var(--sans);overflow:hidden;height:100vh}
+
+  /* ───── Top toolbar ───── */
+  .toolbar{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:14px 22px 12px;
+    border-bottom:1px solid var(--line);
+    background:#000;
+  }
+  .tb-l{display:flex;gap:14px;align-items:center}
+  .tb-title{font:800 16px var(--sans);color:var(--ink);letter-spacing:-0.01em}
+  .tb-controls{display:flex;gap:8px;align-items:center;margin-left:10px}
+  .tb-ctrl{
+    background:#0f1311;border:1px solid var(--line);color:var(--ink-1);
+    padding:6px 12px;border-radius:3px;cursor:pointer;
+    font:600 11.5px var(--mono);letter-spacing:.04em;
+    display:flex;align-items:center;gap:6px;
+    transition:all 80ms;
+  }
+  .tb-ctrl:hover{border-color:var(--copper);color:var(--ink)}
+  .tb-ctrl.idx{background:#0c1419;border-color:#1a2530;color:#d8d6cc}
+  .tb-ctrl .ico{font-size:13px}
+  .tb-ctrl::after{content:'▾';font-size:9px;color:var(--ink-3);margin-left:2px}
+  .tb-ctrl.idx::after{content:none}
+  .tb-ctrl.idx::before{content:'🇺🇸 ';margin-right:3px}
+  .tb-r{display:flex;gap:6px}
+  .tb-r button{
+    background:transparent;border:1px solid var(--line);color:var(--ink-2);
+    width:32px;height:32px;border-radius:3px;cursor:pointer;font-size:14px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .tb-r button:hover{color:var(--ink);border-color:var(--ink-3)}
+
+  /* ───── Heatmap canvas ───── */
+  .heatmap{
+    height:calc(100vh - 62px);
+    display:grid;
+    grid-template-columns:repeat(24, 1fr);
+    grid-template-rows:repeat(16, 1fr);
+    gap:2px;
+    padding:8px;
+    background:#000;
+  }
+
+  /* Sector group (the big bordered containers) */
+  .sec-group{
+    display:grid;gap:1px;
+    position:relative;
+    padding:18px 1px 1px 1px;
+    background:#000;
+  }
+  .sec-label{
+    position:absolute;top:2px;left:8px;
+    font:600 10.5px var(--sans);color:var(--ink-2);letter-spacing:.02em;
+    z-index:5;
+    cursor:pointer;
+  }
+  .sec-label::after{content:' ›';color:var(--ink-3);font-weight:400}
+  .sec-group:hover .sec-label{color:var(--ink-1)}
+
+  /* Stock cell */
+  .cell{
+    border-radius:1px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:4px;
+    cursor:pointer;
+    transition:opacity 80ms;
+    overflow:hidden;
+    text-decoration:none;color:inherit;
+    text-align:center;
+    position:relative;
+  }
+  .cell:hover{opacity:.88}
+  .cell-sym{font:800 14px var(--sans);letter-spacing:.02em;line-height:1}
+  .cell-chg{font:600 11px var(--sans);font-variant-numeric:tabular-nums;line-height:1;margin-top:3px;letter-spacing:-0.01em}
+  /* Logo (circle with letter) */
+  .cell-logo{
+    width:48px;height:48px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font:800 22px var(--sans);color:#fff;
+    margin-bottom:5px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.3);
+  }
+
+  /* Size variants — based on cell size, show more or less detail */
+  .cell.lg .cell-sym{font-size:24px}
+  .cell.lg .cell-chg{font-size:16px;margin-top:5px}
+  .cell.lg .cell-logo{width:62px;height:62px;font-size:28px}
+  .cell.md .cell-sym{font-size:18px}
+  .cell.md .cell-chg{font-size:13px}
+  .cell.md .cell-logo{width:38px;height:38px;font-size:18px}
+  .cell.sm .cell-sym{font-size:11px}
+  .cell.sm .cell-chg{font-size:9.5px;margin-top:1px}
+  .cell.sm .cell-logo{width:22px;height:22px;font-size:11px;margin-bottom:2px}
+  .cell.xs .cell-sym{font-size:9px}
+  .cell.xs .cell-chg{display:none}
+  .cell.xs .cell-logo{display:none}
+  .cell.tiny .cell-sym{display:none}
+  .cell.tiny .cell-chg{display:none}
+  .cell.tiny .cell-logo{display:none}
+  .cell.tiny::after{content:'';display:block;width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,0.6)}
+
+  /* Color tiers based on % change */
+  .c-strong-rd{background:#7a1f1f;color:#fff}
+  .c-rd{background:#b82929;color:#fff}
+  .c-mid-rd{background:#c93838;color:#fff}
+  .c-light-rd{background:#9c2c2c;color:#fff}
+  .c-neutral-rd{background:#3a1414;color:#d8d6cc}
+  .c-neutral{background:#1a1f1c;color:#c4c8c1}
+  .c-neutral-gn{background:#0d2a1a;color:#d8d6cc}
+  .c-light-gn{background:#1e7a3c;color:#fff}
+  .c-mid-gn{background:#23944b;color:#fff}
+  .c-gn{background:#1c7a3a;color:#fff}
+  .c-strong-gn{background:#13501f;color:#fff}
+
+  /* Logo background colors by sector (looks like brand colors) */
+  .lg-nvda{background:#76b900;color:#000}
+  .lg-aapl{background:#000;color:#fff;border:1px solid #333}
+  .lg-googl{background:#fff;color:#4285f4;border:1px solid #ddd}
+  .lg-msft{background:#fff;color:#00a4ef;border:1px solid #ddd}
+  .lg-meta{background:#0866ff;color:#fff}
+  .lg-amzn{background:#ff9900;color:#000}
+  .lg-tsla{background:#cc0000;color:#fff}
+  .lg-xom{background:#003c7e;color:#fff}
+  .lg-cvx{background:#fff;color:#c8102e;border:1px solid #ddd}
+  .lg-lly{background:#d52b1e;color:#fff}
+  .lg-jnj{background:#cd2027;color:#fff}
+  .lg-abbv{background:#071d49;color:#fff}
+  .lg-walmart{background:#0071ce;color:#ffc220}
+  .lg-cost{background:#005daa;color:#fff}
+  .lg-hd{background:#f96302;color:#fff}
+  .lg-brk{background:#003d7a;color:#fff}
+  .lg-v{background:#1a1f71;color:#f7b600}
+  .lg-ma{background:#ff5f00;color:#fff}
+  .lg-jpm{background:#0058a3;color:#fff}
+  .lg-gs{background:#7d97ad;color:#fff}
+  .lg-ko{background:#f40009;color:#fff}
+  .lg-pg{background:#003da5;color:#fff}
+  .lg-mu{background:#0099cc;color:#fff}
+  .lg-amd{background:#000;color:#fff}
+  .lg-intc{background:#0071c5;color:#fff}
+  .lg-cisco{background:#fff;color:#1ba0d7;border:1px solid #ddd}
+  .lg-avgo{background:#cc0000;color:#fff}
+  .lg-cat{background:#ffcd11;color:#000}
+  .lg-orcl{background:#fff;color:#c74634;border:1px solid #ddd}
+  .lg-nflx{background:#000;color:#e50914;border:1px solid #333}
+  .lg-default{background:#2a3540;color:#fff}
+
+  /* Tooltip on hover */
+  .cell:hover::before{
+    content:attr(data-tt);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    background:rgba(0,0,0,0.95);color:#fff;padding:5px 10px;border-radius:3px;
+    font:600 10.5px var(--mono);letter-spacing:.02em;
+    white-space:nowrap;z-index:1000;pointer-events:none;
+    border:1px solid var(--line-2);
+    box-shadow:0 4px 20px rgba(0,0,0,0.8);
+  }
+
+  /* Footer help */
+  .info{position:fixed;bottom:10px;right:12px;background:rgba(15,19,17,0.96);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:3px;padding:8px 14px;z-index:998;font:500 10.5px var(--mono);color:var(--ink-2);max-width:400px;line-height:1.55}
+  .info b{color:var(--copper);letter-spacing:.06em}
+</style>
+</head>
+<body>
+
+<!-- ═══════ TOOLBAR ═══════ -->
+<div class="toolbar">
+  <div class="tb-l">
+    <span class="tb-title">Stock Heatmap</span>
+    <div class="tb-controls">
+      <button class="tb-ctrl idx">S&amp;P 500 Index</button>
+      <button class="tb-ctrl"><span class="ico">⊞</span>Market cap</button>
+      <button class="tb-ctrl"><span class="ico">▦</span>Change D, %</button>
+      <button class="tb-ctrl"><span class="ico">◐</span>Sector</button>
+    </div>
+  </div>
+  <div class="tb-r">
+    <button title="Screenshot">📷</button>
+    <button title="Settings">⚙</button>
+    <button title="Fullscreen">⛶</button>
+  </div>
+</div>
+
+<!-- ═══════ HEATMAP ═══════ -->
+<div class="heatmap">
+
+  <!-- ════════ ELECTRONIC TECHNOLOGY (large left) ════════ -->
+  <div class="sec-group" style="grid-column:span 7;grid-row:span 9;grid-template-columns:repeat(7,1fr);grid-template-rows:repeat(9,1fr)">
+    <span class="sec-label">Electronic technology</span>
+    <!-- NVDA huge top -->
+    <a class="cell lg c-mid-rd" style="grid-column:span 7;grid-row:span 4" href="?t=NVDA" data-tt="NVDA · $132.85 · −4.42%">
+      <div class="cell-logo lg-nvda">●</div>
+      <span class="cell-sym">NVDA</span>
+      <span class="cell-chg">−4.42%</span>
+    </a>
+    <!-- AAPL big -->
+    <a class="cell lg c-strong-gn" style="grid-column:span 4;grid-row:span 3" href="?t=AAPL" data-tt="AAPL · $228.40 · +0.68%">
+      <div class="cell-logo lg-aapl">⌘</div>
+      <span class="cell-sym">AAPL</span>
+      <span class="cell-chg">+0.68%</span>
+    </a>
+    <!-- AVGO -->
+    <a class="cell md c-mid-rd" style="grid-column:span 3;grid-row:span 3" href="?t=AVGO" data-tt="AVGO · $182.50 · −3.32%">
+      <div class="cell-logo lg-avgo">A</div>
+      <span class="cell-sym">AVGO</span>
+      <span class="cell-chg">−3.32%</span>
+    </a>
+    <!-- Small row -->
+    <a class="cell md c-mid-rd" style="grid-column:span 2;grid-row:span 2" href="?t=MU" data-tt="MU · $98.20 · −6.62%">
+      <div class="cell-logo lg-mu">M</div>
+      <span class="cell-sym">MU</span>
+      <span class="cell-chg">−6.62%</span>
+    </a>
+    <a class="cell md c-strong-gn" style="grid-column:span 1;grid-row:span 2" href="?t=CSCO" data-tt="CSCO · +2.32%">
+      <div class="cell-logo lg-cisco">C</div>
+      <span class="cell-sym">CSCO</span>
+      <span class="cell-chg">+2.32%</span>
+    </a>
+    <a class="cell sm c-rd" href="?t=RTX" data-tt="RTX · −2.56%"><div class="cell-logo lg-default">R</div><span class="cell-sym">RTX</span><span class="cell-chg">−2.56%</span></a>
+    <a class="cell sm c-light-gn" href="?t=QCOM" data-tt="QCOM · +0.70%"><div class="cell-logo lg-default">Q</div><span class="cell-sym">QCOM</span><span class="cell-chg">+0.70%</span></a>
+    <a class="cell sm c-light-gn" href="?t=SNDK" data-tt="SNDK · +1.80%"><div class="cell-logo lg-default">S</div><span class="cell-sym">SNDK</span><span class="cell-chg">+1.80%</span></a>
+    <a class="cell sm c-rd" href="?t=ADI" data-tt="ADI · −2.18%"><div class="cell-logo lg-default">A</div><span class="cell-sym">ADI</span><span class="cell-chg">−2.18%</span></a>
+    <!-- AMD row -->
+    <a class="cell md c-rd" style="grid-column:span 1;grid-row:span 2" href="?t=AMD" data-tt="AMD · −5.69%"><div class="cell-logo lg-amd">A</div><span class="cell-sym">AMD</span><span class="cell-chg">−5.69%</span></a>
+    <a class="cell sm c-rd" href="?t=GE" data-tt="GE · −3.43%"><div class="cell-logo lg-default">G</div><span class="cell-sym">GE</span><span class="cell-chg">−3.43%</span></a>
+    <a class="cell sm c-rd" href="?t=GLW" data-tt="GLW · −7.91%"><div class="cell-logo lg-default">G</div><span class="cell-sym">GLW</span><span class="cell-chg">−7.91%</span></a>
+    <a class="cell xs c-rd" href="?t=ANET" data-tt="ANET · −3.95%"><span class="cell-sym">ANET</span></a>
+    <a class="cell xs c-light-rd" href="?t=APH" data-tt="APH · −1.15%"><span class="cell-sym">APH</span></a>
+    <a class="cell xs c-rd" href="?t=NSC" data-tt="NSC · −3.80%"><span class="cell-sym">NSC</span></a>
+    <a class="cell xs c-light-rd" href="?t=PHM" data-tt="PHM · −1.46%"><span class="cell-sym">PHM</span></a>
+    <!-- Bottom row -->
+    <a class="cell sm c-rd" href="?t=INTC" data-tt="INTC · −6.18%"><div class="cell-logo lg-intc">I</div><span class="cell-sym">INTC</span><span class="cell-chg">−6.18%</span></a>
+    <a class="cell sm c-rd" href="?t=TXN" data-tt="TXN · −1.77%"><div class="cell-logo lg-default">T</div><span class="cell-sym">TXN</span><span class="cell-chg">−1.77%</span></a>
+    <a class="cell sm c-rd" href="?t=DELL" data-tt="DELL · −2.38%"><div class="cell-logo lg-default">D</div><span class="cell-sym">DELL</span><span class="cell-chg">−2.38%</span></a>
+    <a class="cell xs c-rd" href="?t=KLAC" data-tt="KLAC · −4.68%"><span class="cell-sym">KLAC</span></a>
+    <a class="cell xs c-rd" href="?t=APH" data-tt="APH · −3.24%"><span class="cell-sym">APH</span></a>
+    <a class="cell xs c-rd" href="?t=H" data-tt="H · −4.41%"><span class="cell-sym">H</span></a>
+    <a class="cell tiny c-rd"></a>
+  </div>
+
+  <!-- ════════ TECHNOLOGY SERVICES (large center) ════════ -->
+  <div class="sec-group" style="grid-column:span 7;grid-row:span 9;grid-template-columns:repeat(7,1fr);grid-template-rows:repeat(9,1fr);border:2px solid #2563eb;padding-top:20px">
+    <span class="sec-label" style="color:#5b8def">Technology services</span>
+    <!-- GOOGL big -->
+    <a class="cell lg c-strong-rd" style="grid-column:span 4;grid-row:span 5" href="?t=GOOGL" data-tt="GOOGL · $172.50 · −1.07%">
+      <div class="cell-logo lg-googl">G</div>
+      <span class="cell-sym">GOOGL</span>
+      <span class="cell-chg">−1.07%</span>
+    </a>
+    <!-- META -->
+    <a class="cell md c-strong-rd" style="grid-column:span 3;grid-row:span 3" href="?t=META" data-tt="META · $498 · −0.68%">
+      <div class="cell-logo lg-meta">f</div>
+      <span class="cell-sym">META</span>
+      <span class="cell-chg">−0.68%</span>
+    </a>
+    <!-- Small col under META -->
+    <a class="cell sm c-rd" href="?t=ORCL" data-tt="ORCL · −1.36%"><div class="cell-logo lg-orcl">O</div><span class="cell-sym">ORCL</span><span class="cell-chg">−1.36%</span></a>
+    <a class="cell sm c-light-gn" href="?t=NFLX" data-tt="NFLX · +0.09%"><div class="cell-logo lg-nflx">N</div><span class="cell-sym">NFLX</span><span class="cell-chg">+0.09%</span></a>
+    <a class="cell sm c-neutral-gn" href="?t=PLTR" data-tt="PLTR · +0.19%"><div class="cell-logo lg-default">P</div><span class="cell-sym">PLTR</span><span class="cell-chg">+0.19%</span></a>
+    <a class="cell sm c-neutral-gn" href="?t=IBM" data-tt="IBM · +0.43%"><div class="cell-logo lg-default">I</div><span class="cell-sym">IBM</span><span class="cell-chg">+0.43%</span></a>
+    <a class="cell sm c-light-gn" href="?t=PANW" data-tt="PANW · +1.94%"><div class="cell-logo lg-default">P</div><span class="cell-sym">PANW</span><span class="cell-chg">+1.94%</span></a>
+    <!-- MSFT big -->
+    <a class="cell lg c-strong-gn" style="grid-column:span 4;grid-row:span 4" href="?t=MSFT" data-tt="MSFT · $432.80 · +3.05%">
+      <div class="cell-logo lg-msft">⊞</div>
+      <span class="cell-sym">MSFT</span>
+      <span class="cell-chg">+3.05%</span>
+    </a>
+    <!-- Right column small cells under META row -->
+    <a class="cell xs c-light-gn" href="?t=APP" data-tt="APP · +3.89%"><span class="cell-sym">APP</span><span class="cell-chg">+3.89%</span></a>
+    <a class="cell xs c-light-gn" href="?t=NOW" data-tt="NOW · +2.95%"><span class="cell-sym">NOW</span><span class="cell-chg">+2.95%</span></a>
+    <a class="cell xs c-mid-gn" href="?t=ADBE" data-tt="ADBE · +4.47%"><span class="cell-sym">ADBE</span><span class="cell-chg">+4.47%</span></a>
+    <a class="cell xs c-rd" href="?t=CRWD" data-tt="CRWD · −2.4%"><span class="cell-sym">CRWD</span></a>
+    <a class="cell tiny c-rd"></a>
+    <a class="cell tiny c-rd"></a>
+    <a class="cell tiny c-light-rd"></a>
+  </div>
+
+  <!-- ════════ RETAIL TRADE ════════ -->
+  <div class="sec-group" style="grid-column:span 5;grid-row:span 5;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(5,1fr)">
+    <span class="sec-label">Retail trade</span>
+    <a class="cell lg c-mid-rd" style="grid-column:span 3;grid-row:span 5" href="?t=AMZN" data-tt="AMZN · $186.20 · −1.15%">
+      <div class="cell-logo lg-amzn">a</div>
+      <span class="cell-sym">AMZN</span>
+      <span class="cell-chg">−1.15%</span>
+    </a>
+    <a class="cell md c-light-rd" style="grid-column:span 2;grid-row:span 2" href="?t=WMT" data-tt="WMT · −0.76%"><div class="cell-logo lg-walmart">W</div><span class="cell-sym">WMT</span><span class="cell-chg">−0.76%</span></a>
+    <a class="cell sm c-light-gn" href="?t=COST" data-tt="COST · +0.74%"><div class="cell-logo lg-cost">C</div><span class="cell-sym">COST</span><span class="cell-chg">+0.74%</span></a>
+    <a class="cell sm c-rd" href="?t=HD" data-tt="HD · −2.25%"><div class="cell-logo lg-hd">H</div><span class="cell-sym">HD</span><span class="cell-chg">−2.25%</span></a>
+    <a class="cell xs c-rd" href="?t=TJX" data-tt="TJX · −1.30%"><span class="cell-sym">TJX</span></a>
+    <a class="cell xs c-rd" href="?t=LOW" data-tt="LOW · −2.3%"><span class="cell-sym">LOW</span></a>
+    <a class="cell tiny c-light-rd"></a>
+    <a class="cell tiny c-rd"></a>
+    <a class="cell tiny c-rd"></a>
+  </div>
+
+  <!-- ════════ HEALTH TECHNOLOGY ════════ -->
+  <div class="sec-group" style="grid-column:span 5;grid-row:span 5;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(5,1fr)">
+    <span class="sec-label">Health technology</span>
+    <a class="cell md c-light-rd" style="grid-column:span 2;grid-row:span 2" href="?t=LLY" data-tt="LLY · −0.18%"><div class="cell-logo lg-lly">L</div><span class="cell-sym">LLY</span><span class="cell-chg">−0.18%</span></a>
+    <a class="cell md c-rd" style="grid-column:span 3;grid-row:span 2" href="?t=JNJ" data-tt="JNJ · −1.77%"><div class="cell-logo lg-jnj">J</div><span class="cell-sym">JNJ</span><span class="cell-chg">−1.77%</span></a>
+    <a class="cell md c-light-rd" style="grid-column:span 2;grid-row:span 2" href="?t=ABBV" data-tt="ABBV · −0.18%"><div class="cell-logo lg-abbv">a</div><span class="cell-sym">ABBV</span><span class="cell-chg">−0.18%</span></a>
+    <a class="cell sm c-rd" href="?t=TMO" data-tt="TMO · −2.20%"><div class="cell-logo lg-default">T</div><span class="cell-sym">TMO</span><span class="cell-chg">−2.20%</span></a>
+    <a class="cell sm c-rd" href="?t=GILD" data-tt="GILD · −1.88%"><div class="cell-logo lg-default">G</div><span class="cell-sym">GILD</span><span class="cell-chg">−1.88%</span></a>
+    <a class="cell xs c-rd" href="?t=ISRG" data-tt="ISRG · −1.6%"><span class="cell-sym">ISRG</span></a>
+    <a class="cell sm c-rd" href="?t=MRK" data-tt="MRK · −1.79%"><div class="cell-logo lg-default">M</div><span class="cell-sym">MRK</span><span class="cell-chg">−1.79%</span></a>
+    <a class="cell xs c-light-gn" href="?t=PFE" data-tt="PFE · +0.41%"><span class="cell-sym">PFE</span></a>
+    <a class="cell xs c-rd" href="?t=BMY" data-tt="BMY · −2.95%"><span class="cell-sym">BMY</span></a>
+    <a class="cell xs c-light-gn" href="?t=AMGN" data-tt="AMGN · +0.41%"><span class="cell-sym">AMGN</span></a>
+    <a class="cell xs c-rd" href="?t=ABT" data-tt="ABT · −1.07%"><span class="cell-sym">ABT</span></a>
+  </div>
+
+  <!-- ════════ PRODUCER MANUFACTURING ════════ -->
+  <div class="sec-group" style="grid-column:span 4;grid-row:span 4;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(4,1fr)">
+    <span class="sec-label">Producer manufacturing</span>
+    <a class="cell md c-rd" style="grid-column:span 2;grid-row:span 2" href="?t=CAT" data-tt="CAT · −3.47%"><div class="cell-logo lg-cat">C</div><span class="cell-sym">CAT</span><span class="cell-chg">−3.47%</span></a>
+    <a class="cell md c-rd" style="grid-column:span 2;grid-row:span 2" href="?t=LRCX" data-tt="LRCX · −4.82%"><div class="cell-logo lg-default">L</div><span class="cell-sym">LRCX</span><span class="cell-chg">−4.82%</span></a>
+    <a class="cell sm c-light-rd" href="?t=AMAT" data-tt="AMAT · −0.89%"><div class="cell-logo lg-default">A</div><span class="cell-sym">AMAT</span><span class="cell-chg">−0.89%</span></a>
+    <a class="cell sm c-rd" href="?t=GEV" data-tt="GEV · −3.79%"><div class="cell-logo lg-default">G</div><span class="cell-sym">GEV</span><span class="cell-chg">−3.79%</span></a>
+    <a class="cell xs c-rd" href="?t=ETN" data-tt="ETN · −3.13%"><span class="cell-sym">ETN</span></a>
+    <a class="cell xs c-rd" href="?t=DE" data-tt="DE · −2.78%"><span class="cell-sym">DE</span></a>
+  </div>
+
+  <!-- ════════ CONSUMER DURABLES ════════ -->
+  <div class="sec-group" style="grid-column:span 3;grid-row:span 4;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(4,1fr)">
+    <span class="sec-label">Consumer durables</span>
+    <a class="cell lg c-mid-rd" style="grid-column:span 3;grid-row:span 4" href="?t=TSLA" data-tt="TSLA · $214.50 · −4.75%">
+      <div class="cell-logo lg-tsla">T</div>
+      <span class="cell-sym">TSLA</span>
+      <span class="cell-chg">−4.75%</span>
+    </a>
+  </div>
+
+  <!-- ════════ ENERGY MINERALS ════════ -->
+  <div class="sec-group" style="grid-column:span 4;grid-row:span 4;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(4,1fr)">
+    <span class="sec-label">Energy minerals</span>
+    <a class="cell md c-strong-gn" style="grid-column:span 2;grid-row:span 3" href="?t=XOM" data-tt="XOM · +3.36%"><div class="cell-logo lg-xom">E</div><span class="cell-sym">XOM</span><span class="cell-chg">+3.36%</span></a>
+    <a class="cell md c-light-gn" style="grid-column:span 2;grid-row:span 2" href="?t=CVX" data-tt="CVX · +2.39%"><div class="cell-logo lg-cvx">C</div><span class="cell-sym">CVX</span><span class="cell-chg">+2.39%</span></a>
+    <a class="cell sm c-light-gn" href="?t=COP" data-tt="COP · +1.2%"><span class="cell-sym">COP</span><span class="cell-chg">+1.20%</span></a>
+    <a class="cell sm c-light-gn" href="?t=EOG" data-tt="EOG · +0.8%"><span class="cell-sym">EOG</span><span class="cell-chg">+0.80%</span></a>
+    <a class="cell xs c-light-gn" href="?t=SLB" data-tt="SLB · +1.5%"><span class="cell-sym">SLB</span></a>
+    <a class="cell xs c-neutral-gn" href="?t=OXY" data-tt="OXY · +0.4%"><span class="cell-sym">OXY</span></a>
+  </div>
+
+  <!-- ════════ FINANCE ════════ -->
+  <div class="sec-group" style="grid-column:span 7;grid-row:span 7;grid-template-columns:repeat(7,1fr);grid-template-rows:repeat(7,1fr)">
+    <span class="sec-label">Finance</span>
+    <a class="cell lg c-light-rd" style="grid-column:span 3;grid-row:span 4" href="?t=BRK.B" data-tt="BRK.B · $475 · −0.28%">
+      <div class="cell-logo lg-brk">B</div>
+      <span class="cell-sym">BRK.B</span>
+      <span class="cell-chg">−0.28%</span>
+    </a>
+    <a class="cell md c-light-gn" style="grid-column:span 2;grid-row:span 2" href="?t=V" data-tt="V · +1.00%"><div class="cell-logo lg-v">V</div><span class="cell-sym">V</span><span class="cell-chg">+1.00%</span></a>
+    <a class="cell md c-rd" style="grid-column:span 2;grid-row:span 2" href="?t=MS" data-tt="MS · −1.04%"><div class="cell-logo lg-default">M</div><span class="cell-sym">MS</span><span class="cell-chg">−1.04%</span></a>
+    <a class="cell md c-light-gn" style="grid-column:span 2;grid-row:span 2" href="?t=MA" data-tt="MA · +0.87%"><div class="cell-logo lg-ma">M</div><span class="cell-sym">MA</span><span class="cell-chg">+0.87%</span></a>
+    <a class="cell md c-rd" style="grid-column:span 2;grid-row:span 2" href="?t=GS" data-tt="GS · −2.11%"><div class="cell-logo lg-gs">G</div><span class="cell-sym">GS</span><span class="cell-chg">−2.11%</span></a>
+    <a class="cell md c-rd" style="grid-column:span 3;grid-row:span 3" href="?t=JPM" data-tt="JPM · −0.70%"><div class="cell-logo lg-jpm">J</div><span class="cell-sym">JPM</span><span class="cell-chg">−0.70%</span></a>
+    <a class="cell sm c-neutral-gn" href="?t=BAC" data-tt="BAC · +0.23%"><div class="cell-logo lg-default">B</div><span class="cell-sym">BAC</span><span class="cell-chg">−0.16%</span></a>
+    <a class="cell xs c-light-rd" href="?t=WFC" data-tt="WFC · −0.50%"><span class="cell-sym">WFC</span></a>
+    <a class="cell xs c-light-rd" href="?t=C" data-tt="C · −1.12%"><span class="cell-sym">C</span></a>
+    <a class="cell xs c-rd" href="?t=KKR" data-tt="KKR · −2.6%"><span class="cell-sym">KKR</span></a>
+    <a class="cell xs c-rd" href="?t=BLK" data-tt="BLK · −0.8%"><span class="cell-sym">BLK</span></a>
+    <a class="cell tiny c-rd"></a>
+    <a class="cell tiny c-light-rd"></a>
+    <a class="cell tiny c-rd"></a>
+  </div>
+
+  <!-- ════════ CONSUMER NON-DURABLES ════════ -->
+  <div class="sec-group" style="grid-column:span 3;grid-row:span 3;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr)">
+    <span class="sec-label">Consumer non-durables</span>
+    <a class="cell sm c-light-gn" href="?t=KO" data-tt="KO · +0.46%"><div class="cell-logo lg-ko">K</div><span class="cell-sym">KO</span><span class="cell-chg">+0.46%</span></a>
+    <a class="cell sm c-light-rd" href="?t=PG" data-tt="PG · −0.80%"><div class="cell-logo lg-pg">P</div><span class="cell-sym">PG</span><span class="cell-chg">−0.80%</span></a>
+    <a class="cell sm c-light-rd" href="?t=PM" data-tt="PM · −1.17%"><div class="cell-logo lg-default">P</div><span class="cell-sym">PM</span><span class="cell-chg">−1.17%</span></a>
+    <a class="cell xs c-light-gn" href="?t=PEP" data-tt="PEP · +0.9%"><span class="cell-sym">PEP</span></a>
+    <a class="cell xs c-light-rd" href="?t=MO" data-tt="MO · −0.7%"><span class="cell-sym">MO</span></a>
+    <a class="cell xs c-light-gn" href="?t=MDLZ" data-tt="MDLZ · +0.3%"><span class="cell-sym">MDLZ</span></a>
+  </div>
+
+  <!-- ════════ UTILITIES ════════ -->
+  <div class="sec-group" style="grid-column:span 3;grid-row:span 3;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr)">
+    <span class="sec-label">Utilities</span>
+    <a class="cell sm c-rd" href="?t=NEE" data-tt="NEE · −2.42%"><span class="cell-sym">NEE</span><span class="cell-chg">−2.42%</span></a>
+    <a class="cell sm c-light-rd" href="?t=SO" data-tt="SO · −1.21%"><span class="cell-sym">SO</span><span class="cell-chg">−1.21%</span></a>
+    <a class="cell sm c-rd" href="?t=DUK" data-tt="DUK · −2.9%"><span class="cell-sym">DUK</span><span class="cell-chg">−2.90%</span></a>
+    <a class="cell xs c-rd" href="?t=AEP"><span class="cell-sym">AEP</span></a>
+    <a class="cell xs c-light-rd" href="?t=EXC"><span class="cell-sym">EXC</span></a>
+    <a class="cell xs c-rd" href="?t=SRE"><span class="cell-sym">SRE</span></a>
+  </div>
+
+  <!-- ════════ TRANSPORTATION + CONSUMER SVCS + INDUSTRIAL ════════ -->
+  <div class="sec-group" style="grid-column:span 2;grid-row:span 3;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(3,1fr)">
+    <span class="sec-label">Consumer services</span>
+    <a class="cell sm c-light-gn" href="?t=MCD" data-tt="MCD · +0.52%"><span class="cell-sym">MCD</span><span class="cell-chg">+0.52%</span></a>
+    <a class="cell sm c-rd" href="?t=SBUX" data-tt="SBUX · −2.56%"><span class="cell-sym">SBUX</span><span class="cell-chg">−2.56%</span></a>
+    <a class="cell sm c-rd" href="?t=BKNG"><span class="cell-sym">BKNG</span></a>
+    <a class="cell xs c-neutral-gn" href="?t=NKE"><span class="cell-sym">NKE</span></a>
+    <a class="cell xs c-rd" href="?t=DIS"><span class="cell-sym">DIS</span></a>
+    <a class="cell xs c-neutral-gn" href="?t=ABNB"><span class="cell-sym">ABNB</span></a>
+  </div>
+  <div class="sec-group" style="grid-column:span 2;grid-row:span 3;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(3,1fr)">
+    <span class="sec-label">Transportation</span>
+    <a class="cell sm c-light-gn" href="?t=UPS" data-tt="UPS · +0.45%"><span class="cell-sym">UPS</span><span class="cell-chg">+0.45%</span></a>
+    <a class="cell sm c-light-gn" href="?t=FDX"><span class="cell-sym">FDX</span><span class="cell-chg">+0.7%</span></a>
+    <a class="cell sm c-rd" href="?t=UNP"><span class="cell-sym">UNP</span><span class="cell-chg">−1.4%</span></a>
+    <a class="cell xs c-rd" href="?t=CSX"><span class="cell-sym">CSX</span></a>
+    <a class="cell xs c-light-gn" href="?t=UBER"><span class="cell-sym">UBER</span></a>
+    <a class="cell xs c-rd" href="?t=DAL"><span class="cell-sym">DAL</span></a>
+  </div>
+  <div class="sec-group" style="grid-column:span 2;grid-row:span 3;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(3,1fr)">
+    <span class="sec-label">Industrial services</span>
+    <a class="cell sm c-rd" href="?t=WM"><span class="cell-sym">WM</span><span class="cell-chg">−2.1%</span></a>
+    <a class="cell sm c-rd" href="?t=SLB"><span class="cell-sym">SLB</span><span class="cell-chg">−3.7%</span></a>
+    <a class="cell xs c-rd" href="?t=PWR"><span class="cell-sym">PWR</span></a>
+    <a class="cell xs c-rd" href="?t=URI"><span class="cell-sym">URI</span></a>
+    <a class="cell xs c-light-rd" href="?t=RSG"><span class="cell-sym">RSG</span></a>
+    <a class="cell xs c-light-rd" href="?t=BAH"><span class="cell-sym">BAH</span></a>
+  </div>
+
+  <!-- Smaller bottom sectors -->
+  <div class="sec-group" style="grid-column:span 2;grid-row:span 2;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)">
+    <span class="sec-label">Process industries</span>
+    <a class="cell sm c-rd" href="?t=LIN"><span class="cell-sym">LIN</span><span class="cell-chg">−1.0%</span></a>
+    <a class="cell xs c-rd" href="?t=APD"><span class="cell-sym">APD</span></a>
+    <a class="cell xs c-light-rd" href="?t=SHW"><span class="cell-sym">SHW</span></a>
+    <a class="cell xs c-rd" href="?t=ECL"><span class="cell-sym">ECL</span></a>
+  </div>
+  <div class="sec-group" style="grid-column:span 2;grid-row:span 2;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)">
+    <span class="sec-label">Communications</span>
+    <a class="cell sm c-rd" href="?t=TMUS"><span class="cell-sym">TMUS</span><span class="cell-chg">−1.58%</span></a>
+    <a class="cell xs c-rd" href="?t=VZ"><span class="cell-sym">VZ</span></a>
+    <a class="cell xs c-light-rd" href="?t=T"><span class="cell-sym">T</span></a>
+    <a class="cell xs c-rd" href="?t=CMCSA"><span class="cell-sym">CMCSA</span></a>
+  </div>
+  <div class="sec-group" style="grid-column:span 2;grid-row:span 2;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)">
+    <span class="sec-label">Commercial</span>
+    <a class="cell sm c-light-rd" href="?t=ADP"><span class="cell-sym">ADP</span><span class="cell-chg">−0.19%</span></a>
+    <a class="cell xs c-rd" href="?t=RTX"><span class="cell-sym">RTX</span></a>
+    <a class="cell xs c-light-rd" href="?t=PAYX"><span class="cell-sym">PAYX</span></a>
+    <a class="cell xs c-rd" href="?t=CTAS"><span class="cell-sym">CTAS</span></a>
+  </div>
+  <div class="sec-group" style="grid-column:span 3;grid-row:span 2;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)">
+    <span class="sec-label">Health services</span>
+    <a class="cell sm c-rd" href="?t=UNH"><span class="cell-sym">UNH</span><span class="cell-chg">−1.31%</span></a>
+    <a class="cell sm c-rd" href="?t=ELV"><span class="cell-sym">ELV</span><span class="cell-chg">−6.25%</span></a>
+    <a class="cell sm c-light-gn" href="?t=CI"><span class="cell-sym">CI</span><span class="cell-chg">+1.79%</span></a>
+    <a class="cell xs c-light-rd" href="?t=HUM"><span class="cell-sym">HUM</span></a>
+    <a class="cell xs c-rd" href="?t=CVS"><span class="cell-sym">CVS</span></a>
+    <a class="cell xs c-light-rd" href="?t=HCA"><span class="cell-sym">HCA</span></a>
+  </div>
+  <div class="sec-group" style="grid-column:span 2;grid-row:span 2;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)">
+    <span class="sec-label">Non-energy</span>
+    <a class="cell sm c-rd" href="?t=N"><span class="cell-sym">N</span><span class="cell-chg">−1.47%</span></a>
+    <a class="cell xs c-rd" href="?t=NEM"><span class="cell-sym">NEM</span></a>
+    <a class="cell xs c-rd" href="?t=FCX"><span class="cell-sym">FCX</span></a>
+    <a class="cell xs c-light-rd" href="?t=GOLD"><span class="cell-sym">GOLD</span></a>
+  </div>
+  <div class="sec-group" style="grid-column:span 2;grid-row:span 2;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)">
+    <span class="sec-label">Distribution</span>
+    <a class="cell sm c-rd" href="?t=PYPL"><span class="cell-sym">PYPL</span><span class="cell-chg">−2.52%</span></a>
+    <a class="cell xs c-light-gn" href="?t=SQ"><span class="cell-sym">SQ</span></a>
+    <a class="cell xs c-light-rd" href="?t=FIS"><span class="cell-sym">FIS</span></a>
+    <a class="cell xs c-rd" href="?t=GPN"><span class="cell-sym">GPN</span></a>
+  </div>
+
+</div>
+
+<div class="info"><b>★ TradingView-style heatmap</b> · cell size = market cap · color = today's % change · hover for details · click to open detail · sectors grouped + outlined</div>
+
+</body>
+</html>

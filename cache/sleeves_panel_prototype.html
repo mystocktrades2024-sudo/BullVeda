@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Sleeves Panel — Strategy Attribution</title>
+<style>
+  :root{
+    --bg-1: #0a0d0c; --bg-2: #0f1311; --bg-3: #141816;
+    --line: #1d2520; --line-2: #2a352e;
+    --ink: #d8d6cc; --ink-1: #b0aea3; --ink-2: #80847a; --ink-3: #545851;
+    --gn: #5be57c; --gn-bg: rgba(91,229,124,0.08); --gn-dim: rgba(91,229,124,0.30);
+    --rd: #ff6b5b; --rd-bg: rgba(255,107,91,0.08); --rd-dim: rgba(255,107,91,0.30);
+    --amb: #ffb95c; --amb-bg: rgba(255,185,92,0.08); --amb-dim: rgba(255,185,92,0.30);
+    --cy: #5ec8d8; --cy-bg: rgba(94,200,216,0.08);
+    --copper: #d97757; --copper-bg: rgba(217,119,87,0.08);
+    --vio: #a78bfa; --vio-bg: rgba(167,139,250,0.08);
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg-1);color:var(--ink);font:13px var(--sans);padding:20px}
+  .wrap{max-width:1500px;margin:0 auto}
+  a{color:inherit;text-decoration:none;cursor:pointer}
+  a.tk{color:var(--ink);font-weight:800;letter-spacing:.04em;border-bottom:1px solid transparent;transition:all 80ms}
+  a.tk:hover{color:var(--copper);border-bottom-color:var(--copper)}
+
+  /* Section header */
+  .qc-h{display:flex;justify-content:space-between;align-items:baseline;margin:0 4px 14px;padding:0 4px}
+  .qc-h .q{font:700 16px var(--sans);color:var(--ink);letter-spacing:-0.005em}
+  .qc-h .sub{font:500 11.5px var(--mono);color:var(--ink-3);letter-spacing:.04em;margin-left:14px}
+  .qc-h .r{font:600 10.5px var(--mono);color:var(--ink-3);letter-spacing:.06em;display:flex;align-items:center;gap:14px}
+
+  /* Filter / sort bar */
+  .filters{display:flex;gap:10px;align-items:center;padding:8px 12px;background:var(--bg-2);border:1px solid var(--line);border-radius:3px;margin-bottom:12px}
+  .filters .lbl{font:700 10px var(--mono);color:var(--ink-3);letter-spacing:.10em;text-transform:uppercase}
+  .chip-group{display:flex;gap:3px;background:var(--bg-3);border:1px solid var(--line);border-radius:3px;padding:2px}
+  .chip{background:transparent;border:0;color:var(--ink-2);padding:4px 9px;border-radius:2px;font:700 10.5px var(--mono);letter-spacing:.06em;cursor:pointer}
+  .chip:hover{color:var(--ink)}
+  .chip.on{background:var(--copper);color:var(--bg-1)}
+  .filters-spacer{flex:1}
+  .filters .sum{font:600 11px var(--mono);color:var(--ink-2);letter-spacing:.04em}
+  .filters .sum b{color:var(--ink);font-weight:700}
+
+  /* Hero sleeve (today's biggest mover) */
+  .hero-sleeve{
+    background:linear-gradient(135deg,rgba(91,229,124,0.06) 0%,var(--bg-2) 60%,var(--bg-2) 100%);
+    border:1px solid var(--line);border-left:4px solid var(--gn);border-radius:4px;
+    padding:18px 22px;margin-bottom:14px;
+    display:grid;grid-template-columns:1fr 240px 1fr 240px;gap:24px;align-items:center;
+  }
+  .hero-head{display:flex;flex-direction:column;gap:4px}
+  .hero-badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;background:var(--gn-bg);color:var(--gn);border:1px solid var(--gn-dim);border-radius:2px;font:800 9.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;width:fit-content;margin-bottom:4px}
+  .hero-name{font:800 24px var(--sans);color:var(--ink);letter-spacing:-0.01em;line-height:1.1}
+  .hero-name .icon{font-size:24px;margin-right:8px}
+  .hero-mech{font:500 12px var(--mono);color:var(--ink-2);letter-spacing:.02em;margin-top:5px;line-height:1.5}
+  .hero-mech b{color:var(--ink-1);font-weight:700}
+  .hero-num{text-align:center}
+  .hero-num .k{font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:.12em;text-transform:uppercase}
+  .hero-num .v{font:800 56px var(--sans);color:var(--gn);font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-0.03em;margin-top:4px}
+  .hero-num .s{font:500 11px var(--mono);color:var(--ink-2);margin-top:6px;letter-spacing:.04em}
+  .hero-tickers{display:flex;flex-wrap:wrap;gap:6px;font:600 11.5px var(--mono);color:var(--ink-2)}
+  .hero-tickers a{padding:5px 10px;background:var(--bg-3);border:1px solid var(--line);border-radius:3px;color:var(--ink-1);font-weight:800;letter-spacing:.04em;transition:all 80ms}
+  .hero-tickers a:hover{border-color:var(--gn);color:var(--gn)}
+  .hero-meta{font:600 10px var(--mono);color:var(--ink-3);letter-spacing:.10em;text-transform:uppercase;margin-bottom:4px}
+  .hero-stats{display:flex;flex-direction:column;gap:6px}
+  .hero-stat{display:flex;justify-content:space-between;padding:6px 9px;background:var(--bg-3);border-radius:2px;font:600 11px var(--mono)}
+  .hero-stat .l{color:var(--ink-3);letter-spacing:.04em}
+  .hero-stat .v{color:var(--ink);font-weight:800}
+  .hero-stat .v.gn{color:var(--gn)} .hero-stat .v.am{color:var(--amb)} .hero-stat .v.rd{color:var(--rd)}
+
+  /* Sleeve grid */
+  .sleeves{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .sleeve{
+    background:var(--bg-2);border:1px solid var(--line);border-radius:3px;
+    padding:14px;display:flex;flex-direction:column;gap:8px;
+    cursor:pointer;transition:border-color 100ms,transform 100ms;
+    position:relative;overflow:hidden;
+  }
+  .sleeve:hover{border-color:var(--ink-3);transform:translateY(-1px)}
+  .sleeve.hot{border-top:3px solid var(--gn)}
+  .sleeve.warm{border-top:3px solid var(--amb)}
+  .sleeve.cold{border-top:3px solid var(--ink-3)}
+  .sleeve.suspended{border-top:3px solid var(--rd);opacity:.7}
+  .sleeve.suspended::after{content:'SUSPENDED';position:absolute;top:8px;right:10px;font:800 9px var(--mono);letter-spacing:.10em;color:var(--rd);background:var(--rd-bg);padding:2px 6px;border-radius:2px}
+
+  /* Sleeve header */
+  .sl-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+  .sl-head-l{display:flex;align-items:center;gap:7px}
+  .sl-icon{font-size:18px;line-height:1}
+  .sl-name{font:800 13px var(--sans);color:var(--ink);letter-spacing:.02em;line-height:1.1}
+  .sl-status{padding:2px 7px;border-radius:2px;font:800 9px var(--mono);letter-spacing:.10em;text-transform:uppercase;flex-shrink:0}
+  .sl-status.hot{background:var(--gn-bg);color:var(--gn);border:1px solid var(--gn-dim)}
+  .sl-status.warm{background:var(--amb-bg);color:var(--amb);border:1px solid var(--amb-dim)}
+  .sl-status.cold{background:var(--bg-3);color:var(--ink-3);border:1px solid var(--line-2)}
+  .sl-status.suspended{background:var(--rd-bg);color:var(--rd);border:1px solid var(--rd-dim)}
+
+  /* Today's count (big number) */
+  .sl-today{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line)}
+  .sl-today-v{font:800 32px var(--sans);font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-0.02em}
+  .sl-today-v.gn{color:var(--gn)} .sl-today-v.am{color:var(--amb)} .sl-today-v.cold{color:var(--ink-3)} .sl-today-v.rd{color:var(--rd)}
+  .sl-today-l{font:600 10px var(--mono);color:var(--ink-3);letter-spacing:.08em}
+  .sl-today-spark{margin-left:auto;width:64px;height:24px}
+
+  /* Mechanism */
+  .sl-mech{font:500 11px var(--mono);color:var(--ink-2);letter-spacing:.02em;line-height:1.5;min-height:32px}
+  .sl-mech b{color:var(--ink-1);font-weight:700}
+
+  /* Stats grid */
+  .sl-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+  .sl-stat{background:var(--bg-3);padding:5px 6px;border-radius:2px;text-align:center}
+  .sl-stat .k{font:700 8.5px var(--mono);color:var(--ink-3);letter-spacing:.08em;text-transform:uppercase}
+  .sl-stat .v{font:800 13px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink);margin-top:1px}
+  .sl-stat .v.gn{color:var(--gn)} .sl-stat .v.am{color:var(--amb)} .sl-stat .v.rd{color:var(--rd)} .sl-stat .v.cy{color:var(--cy)}
+
+  /* Wilson CI bar */
+  .sl-wilson{display:flex;align-items:center;gap:7px;font:600 9.5px var(--mono);color:var(--ink-3);letter-spacing:.04em}
+  .sl-wilson .bar{flex:1;height:6px;background:var(--bg-3);border-radius:1px;position:relative;overflow:hidden}
+  .sl-wilson .bar .floor{position:absolute;top:0;bottom:0;width:2px;left:45%;background:var(--ink-3);z-index:2}
+  .sl-wilson .bar .fill{position:absolute;left:0;top:0;bottom:0;border-radius:1px}
+  .sl-wilson .bar .fill.gn{background:var(--gn)}
+  .sl-wilson .bar .fill.am{background:var(--amb)}
+  .sl-wilson .bar .fill.rd{background:var(--rd)}
+  .sl-wilson .v{color:var(--ink);font-weight:800}
+
+  /* Active tickers row */
+  .sl-tickers{display:flex;gap:4px;flex-wrap:wrap;padding-top:8px;border-top:1px dashed var(--line)}
+  .sl-tickers .lbl{font:700 8.5px var(--mono);color:var(--ink-3);letter-spacing:.10em;text-transform:uppercase;margin-right:3px;align-self:center}
+  .sl-tickers a{padding:3px 7px;background:var(--bg-3);border:1px solid var(--line);border-radius:2px;font:800 10px var(--mono);color:var(--ink);letter-spacing:.04em;text-decoration:none}
+  .sl-tickers a:hover{border-color:var(--copper);color:var(--copper)}
+  .sl-tickers .empty{color:var(--ink-3);font:500 10.5px var(--mono);font-style:italic;letter-spacing:.04em;padding:3px 0}
+
+  /* Foot: last fired + regime fit */
+  .sl-foot{display:flex;justify-content:space-between;font:500 9.5px var(--mono);color:var(--ink-3);letter-spacing:.04em;padding-top:4px;margin-top:auto}
+  .sl-foot b{color:var(--ink-2);font-weight:700}
+
+  /* Info banner */
+  .info{position:fixed;bottom:14px;right:14px;background:rgba(15,19,17,0.96);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:3px;padding:10px 16px;z-index:998;font:500 11px var(--mono);color:var(--ink-2);max-width:480px;line-height:1.55}
+  .info b{color:var(--copper);letter-spacing:.06em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="qc-h">
+    <span class="q">Sleeve Attribution · which strategies are firing today</span>
+    <span class="r">8 sleeves · 1 overlay · 252-day rolling stats</span>
+  </div>
+
+  <!-- ═══════════════ FILTERS / SORT BAR ═══════════════ -->
+  <div class="filters">
+    <span class="lbl">Sort by</span>
+    <div class="chip-group">
+      <button class="chip on">Today's count</button>
+      <button class="chip">Win rate</button>
+      <button class="chip">PF</button>
+      <button class="chip">7d trend</button>
+      <button class="chip">Sample N</button>
+    </div>
+    <span class="lbl" style="margin-left:14px">Status</span>
+    <div class="chip-group">
+      <button class="chip on">All</button>
+      <button class="chip">Hot</button>
+      <button class="chip">Warm</button>
+      <button class="chip">Cold</button>
+      <button class="chip">Suspended</button>
+    </div>
+    <span class="filters-spacer"></span>
+    <span class="sum"><b>13</b> signals today across <b>7</b> active sleeves · 1 suspended</span>
+  </div>
+
+  <!-- ═══════════════ HERO SLEEVE (today's biggest mover) ═══════════════ -->
+  <div class="hero-sleeve">
+    <div class="hero-head">
+      <span class="hero-badge">★ Top sleeve today</span>
+      <div class="hero-name"><span class="icon">📐</span>VCP · Volatility Contraction Pattern</div>
+      <div class="hero-mech">6-week contraction · supply absorption complete · institutional re-add at pivot. <b>Mechanism class:</b> Breakout Expansion · 7-21d hold.</div>
+    </div>
+    <div class="hero-num">
+      <div class="k">Fired today</div>
+      <div class="v">4</div>
+      <div class="s">↑ vs 30d avg <b style="color:var(--gn)">+33%</b></div>
+    </div>
+    <div>
+      <div class="hero-meta">Active picks</div>
+      <div class="hero-tickers">
+        <a href="?t=NVDA">NVDA</a><a href="?t=CRWD">CRWD</a><a href="?t=PANW">PANW</a><a href="?t=AVGO">AVGO</a>
+      </div>
+    </div>
+    <div>
+      <div class="hero-meta">252d edge</div>
+      <div class="hero-stats">
+        <div class="hero-stat"><span class="l">Win rate</span><span class="v gn">64%</span></div>
+        <div class="hero-stat"><span class="l">Profit factor</span><span class="v gn">1.92</span></div>
+        <div class="hero-stat"><span class="l">Sharpe</span><span class="v cy">1.48</span></div>
+        <div class="hero-stat"><span class="l">Avg R</span><span class="v gn">+1.6R</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ SLEEVE GRID (8 sleeves) ═══════════════ -->
+  <div class="sleeves">
+
+    <!-- ═════ PEAD ═════ -->
+    <div class="sleeve hot">
+      <div class="sl-head">
+        <div class="sl-head-l"><span class="sl-icon">📊</span><span class="sl-name">PEAD</span></div>
+        <span class="sl-status hot">Hot</span>
+      </div>
+      <div class="sl-today">
+        <span class="sl-today-v gn">2</span>
+        <span class="sl-today-l">fired<br>today</span>
+        <svg class="sl-today-spark" viewBox="0 0 64 24" preserveAspectRatio="none">
+          <path d="M 0 18 L 9 16 L 18 14 L 27 17 L 36 12 L 45 14 L 54 10 L 64 9" fill="none" stroke="var(--gn)" stroke-width="1.5"/>
+        </svg>
+      </div>
+      <div class="sl-mech"><b>Post-Earnings Drift</b> — 1-3d post-earnings beat + gap (Bernard-Thomas, 1989)</div>
+      <div class="sl-stats">
+        <div class="sl-stat"><div class="k">WR</div><div class="v gn">58%</div></div>
+        <div class="sl-stat"><div class="k">PF</div><div class="v gn">1.84</div></div>
+        <div class="sl-stat"><div class="k">N</div><div class="v">42</div></div>
+      </div>
+      <div class="sl-wilson">
+        <span>Wilson LB</span>
+        <div class="bar"><div class="fill gn" style="width:51%"></div><div class="floor"></div></div>
+        <span class="v">51%</span>
+      </div>
+      <div class="sl-tickers">
+        <span class="lbl">Today</span>
+        <a href="?t=DXCM">DXCM</a><a href="?t=CRWD">CRWD</a>
+      </div>
+      <div class="sl-foot"><span>fires in <b>all regimes</b></span><span>last <b>2h ago</b></span></div>
+    </div>
+
+    <!-- ═════ Insider Cluster ═════ -->
+    <div class="sleeve hot">
+      <div class="sl-head">
+        <div class="sl-head-l"><span class="sl-icon">⌬</span><span class="sl-name">Insider Cluster</span></div>
+        <span class="sl-status hot">Hot</span>
+      </div>
+      <div class="sl-today">
+        <span class="sl-today-v gn">1</span>
+        <span class="sl-today-l">fired<br>today</span>
+        <svg class="sl-today-spark" viewBox="0 0 64 24" preserveAspectRatio="none">
+          <path d="M 0 20 L 9 18 L 18 14 L 27 11 L 36 9 L 45 7 L 54 5 L 64 4" fill="none" stroke="var(--gn)" stroke-width="1.5"/>
+        </svg>
+      </div>
+      <div class="sl-mech"><b>≥3 insiders buying $200K+ in 30d</b> (Bettis-Coles · highest WR sleeve)</div>
+      <div class="sl-stats">
+        <div class="sl-stat"><div class="k">WR</div><div class="v gn">71%</div></div>
+        <div class="sl-stat"><div class="k">PF</div><div class="v gn">2.21</div></div>
+        <div class="sl-stat"><div class="k">N</div><div class="v">23</div></div>
+      </div>
+      <div class="sl-wilson">
+        <span>Wilson LB</span>
+        <div class="bar"><div class="fill gn" style="width:58%"></div><div class="floor"></div></div>
+        <span class="v">58%</span>
+      </div>
+      <div class="sl-tickers">
+        <span class="lbl">Today</span>
+        <a href="?t=PLTR">PLTR</a>
+      </div>
+      <div class="sl-foot"><span>fires in <b>all regimes</b></span><span>last <b>3h ago</b></span></div>
+    </div>
+
+    <!-- ═════ Squeeze Expansion ═════ -->
+    <div class="sleeve warm">
+      <div class="sl-head">
+        <div class="sl-head-l"><span class="sl-icon">⌛</span><span class="sl-name">Squeeze</span></div>
+        <span class="sl-status warm">Warm</span>
+      </div>
+      <div class="sl-today">
+        <span class="sl-today-v am">3</span>
+        <span class="sl-today-l">fired<br>today</span>
+        <svg class="sl-today-spark" viewBox="0 0 64 24" preserveAspectRatio="none">
+          <path d="M 0 12 L 9 14 L 18 11 L 27 15 L 36 13 L 45 16 L 54 14 L 64 13" fill="none" stroke="var(--am)" stroke-width="1.5"/>
+        </svg>
+      </div>
+      <div class="sl-mech"><b>Bollinger Band width 6mo low</b> · volatility coiling for expansion</div>
+      <div class="sl-stats">
+        <div class="sl-stat"><div class="k">WR</div><div class="v am">52%</div></div>
+        <div class="sl-stat"><div class="k">PF</div><div class="v am">1.41</div></div>
+        <div class="sl-stat"><div class="k">N</div><div class="v">67</div></div>
+      </div>
+      <div class="sl-wilson">
+        <span>Wilson LB</span>
+        <div class="bar"><div class="fill am" style="width:46%"></div><div class="floor"></div></div>
+        <span class="v">46%</span>
+      </div>
+      <div class="sl-tickers">
+        <span class="lbl">Today</span>
+        <a href="?t=AMD">AMD</a><a href="?t=BABA">BABA</a><a href="?t=NIO">NIO</a>
+      </div>
+      <div class="sl-foot"><span>fires in <b>choppy</b></span><span>last <b>1h ago</b></span></div>
+    </div>
+
+    <!-- ═════ EMA21 Pullback ═════ -->
+    <div class="sleeve hot">
+      <div class="sl-head">
+        <div class="sl-head-l"><span class="sl-icon">↘</span><span class="sl-name">EMA21 Pullback</span></div>
+        <span class="sl-status hot">Hot</span>
+      </div>
+      <div class="sl-today">
+        <span class="sl-today-v gn">2</span>
+        <span class="sl-today-l">fired<br>today</span>
+        <svg class="sl-today-spark" viewBox="0 0 64 24" preserveAspectRatio="none">
+          <path d="M 0 14 L 9 12 L 18 10 L 27 13 L 36 11 L 45 9 L 54 11 L 64 8" fill="none" stroke="var(--gn)" stroke-width="1.5"/>
+        </svg>
+      </div>
+      <div class="sl-mech"><b>Pullback to EMA21</b> in uptrend · institutional re-add point · trend continuation</div>
+      <div class="sl-stats">
+        <div class="sl-stat"><div class="k">WR</div><div class="v gn">61%</div></div>
+        <div class="sl-stat"><div class="k">PF</div><div class="v gn">1.78</div></div>
+        <div class="sl-stat"><div class="k">N</div><div class="v">89</div></div>
+      </div>
+      <div class="sl-wilson">
+        <span>Wilson LB</span>
+        <div class="bar"><div class="fill gn" style="width:55%"></div><div class="floor"></div></div>
+        <span class="v">55%</span>
+      </div>
+      <div class="sl-tickers">
+        <span class="lbl">Today</span>
+        <a href="?t=ROST">ROST</a><a href="?t=ELF">ELF</a>
+      </div>
+      <div class="sl-foot"><span>fires in <b>trending</b></span><span>last <b>4h ago</b></span></div>
+    </div>
+
+    <!-- ═════ 52W Breakout ═════ -->
+    <div class="sleeve warm">
+      <div class="sl-head">
+        <div class="sl-head-l"><span class="sl-icon">▲</span><span class="sl-name">52W Breakout</span></div>
+        <span class="sl-status warm">Warm</span>
+      </div>
+      <div class="sl-today">
+        <span class="sl-today-v am">1</span>
+        <span class="sl-today-l">fired<br>today</span>
+        <svg class="sl-today-spark" viewBox="0 0 64 24" preserveAspectRatio="none">
+          <path d="M 0 14 L 9 13 L 18 12 L 27 10 L 36 11 L 45 9 L 54 10 L 64 7" fill="none" stroke="var(--am)" stroke-width="1.5"/>
+        </svg>
+      </div>
+      <div class="sl-mech"><b>Fresh 52-week high</b> · expansion on volume · Donchian channel breakout</div>
+      <div class="sl-stats">
+        <div class="sl-stat"><div class="k">WR</div><div class="v am">60%</div></div>
+        <div class="sl-stat"><div class="k">PF</div><div class="v am">1.64</div></div>
+        <div class="sl-stat"><div class="k">N</div><div class="v">31</div></div>
+      </div>
+      <div class="sl-wilson">
+        <span>Wilson LB</span>
+        <div class="bar"><div class="fill am" style="width:48%"></div><div class="floor"></div></div>
+        <span class="v">48%</span>
+      </div>
+      <div class="sl-tickers">
+        <span class="lbl">Today</span>
+        <a href="?t=SMCI">SMCI</a>
+      </div>
+      <div class="sl-foot"><span>fires in <b>trending</b></span><span>last <b>5h ago</b></span></div>
+    </div>
+
+    <!-- ═════ Mean Reversion ═════ -->
+    <div class="sleeve cold">
+      <div class="sl-head">
+        <div class="sl-head-l"><span class="sl-icon">↔</span><span class="sl-name">Mean Reversion</span></div>
+        <span class="sl-status cold">Cold</span>
+      </div>
+      <div class="sl-today">
+        <span class="sl-today-v cold">0</span>
+        <span class="sl-today-l">fired<br>today</span>
+        <svg class="sl-today-spark" viewBox="0 0 64 24" preserveAspectRatio="none">
+          <line x1="0" y1="14" x2="64" y2="14" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="3 3"/>
+        </svg>
+      </div>
+      <div class="sl-mech"><b>RSI &lt; 30 + price &gt; EMA200</b> · 3-5d bounce in uptrend</div>
+      <div class="sl-stats">
+        <div class="sl-stat"><div class="k">WR</div><div class="v am">55%</div></div>
+        <div class="sl-stat"><div class="k">PF</div><div class="v am">1.21</div></div>
+        <div class="sl-stat"><div class="k">N</div><div class="v">28</div></div>
+      </div>
+      <div class="sl-wilson">
+        <span>Wilson LB</span>
+        <div class="bar"><div class="fill am" style="width:39%"></div><div class="floor"></div></div>
+        <span class="v">39%</span>
+      </div>
+      <div class="sl-tickers">
+        <span class="lbl">Today</span>
+        <span class="empty">— no signals (needs RSI &lt; 30)</span>
+      </div>
+      <div class="sl-foot"><span>fires in <b>choppy</b></span><span>last <b>5 days ago</b></span></div>
+    </div>
+
+    <!-- ═════ ESP Play ═════ -->
+    <div class="sleeve cold">
+      <div class="sl-head">
+        <div class="sl-head-l"><span class="sl-icon">⚡</span><span class="sl-name">ESP Play</span></div>
+        <span class="sl-status cold">Cold</span>
+      </div>
+      <div class="sl-today">
+        <span class="sl-today-v cold">0</span>
+        <span class="sl-today-l">fired<br>today</span>
+        <svg class="sl-today-spark" viewBox="0 0 64 24" preserveAspectRatio="none">
+          <line x1="0" y1="14" x2="64" y2="14" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="3 3"/>
+        </svg>
+      </div>
+      <div class="sl-mech"><b>Zacks ESP &gt; 0 + Rank ≤ 3</b> · earnings 4-14d · exit day before</div>
+      <div class="sl-stats">
+        <div class="sl-stat"><div class="k">WR</div><div class="v cold">—</div></div>
+        <div class="sl-stat"><div class="k">PF</div><div class="v cold">—</div></div>
+        <div class="sl-stat"><div class="k">N</div><div class="v">0</div></div>
+      </div>
+      <div class="sl-wilson">
+        <span>Wilson LB</span>
+        <div class="bar"></div>
+        <span class="v">—</span>
+      </div>
+      <div class="sl-tickers">
+        <span class="lbl">Today</span>
+        <span class="empty">— awaiting next ER candidate</span>
+      </div>
+      <div class="sl-foot"><span>untested · paper</span><span>activated 2026-05-14</span></div>
+    </div>
+
+    <!-- ═════ Defensive Rotation (SUSPENDED in risk-on) ═════ -->
+    <div class="sleeve suspended">
+      <div class="sl-head">
+        <div class="sl-head-l"><span class="sl-icon">🛡</span><span class="sl-name">Defensive Rotation</span></div>
+      </div>
+      <div class="sl-today">
+        <span class="sl-today-v rd">0</span>
+        <span class="sl-today-l">fired<br>today</span>
+        <svg class="sl-today-spark" viewBox="0 0 64 24" preserveAspectRatio="none">
+          <line x1="0" y1="14" x2="64" y2="14" stroke="var(--rd)" stroke-width="1.2" stroke-dasharray="3 3"/>
+        </svg>
+      </div>
+      <div class="sl-mech"><b>Long XLU + GLD</b> · only fires in risk-off or panic regime</div>
+      <div class="sl-stats">
+        <div class="sl-stat"><div class="k">WR</div><div class="v am">54%</div></div>
+        <div class="sl-stat"><div class="k">PF</div><div class="v am">1.03</div></div>
+        <div class="sl-stat"><div class="k">N</div><div class="v">17</div></div>
+      </div>
+      <div class="sl-wilson">
+        <span>Wilson LB</span>
+        <div class="bar"><div class="fill am" style="width:38%"></div><div class="floor"></div></div>
+        <span class="v">38%</span>
+      </div>
+      <div class="sl-tickers">
+        <span class="lbl">Today</span>
+        <span class="empty">— regime is <b style="color:var(--am)">CHOPPY</b>, sleeve dormant until risk-off</span>
+      </div>
+      <div class="sl-foot"><span>fires in <b>risk-off / panic</b></span><span>last <b>23 days ago</b></span></div>
+    </div>
+
+  </div>
+
+</div>
+
+<div class="info">
+  <b>Sleeves Panel</b> · attribution layer for the 8 strategies + 1 overlay · Wilson LB validates statistical edge · click any sleeve → filter to its today's signals · click ticker → Detail
+</div>
+
+</body>
+</html>

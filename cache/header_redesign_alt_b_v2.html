@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Alt B v2 · Trading Desk + Price Ladder</title>
+<style>
+:root {
+  --bg-0:#0a0c0f; --bg-1:#11151a; --bg-2:#161c22; --bg-3:#1c252b;
+  --ink-0:#f4f4f4; --ink:#e9eaeb; --ink-1:#c9cdd0; --ink-2:#8f969c; --ink-3:#5a6268;
+  --rule:#1f262b; --rule-2:#283038;
+  --gn:#5be57c; --rd:#ff6b5b; --amb:#ffb95c; --copper:#d49060; --vio:#a78bfa; --info:#60a5fa;
+  --gold:#fbbf24; --blue:#60a5fa;
+  --mono:'JetBrains Mono','SF Mono',Menlo,Consolas,monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg-0); color: var(--ink);
+       font-family: -apple-system,"Inter",system-ui,sans-serif;
+       font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums;
+       padding: 30px 24px 60px; }
+.wrap { max-width: 1640px; margin: 0 auto; }
+.page-title { font-size: 28px; font-weight: 800; color: var(--ink-0); margin: 0 0 6px; }
+.page-sub { color: var(--ink-2); font-size: 14px; font-family: var(--mono); letter-spacing: 0.04em; margin-bottom: 24px; }
+.sec-h { display: flex; align-items: baseline; gap: 14px; margin: 32px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
+.sec-h .label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 800; padding: 4px 12px; border-radius: 3px; background: rgba(91,229,124,0.10); color: var(--gn); border: 1px solid rgba(91,229,124,0.35); }
+.sec-h .title { font-size: 16px; font-weight: 700; color: var(--ink-0); }
+.sec-h .meta { color: var(--ink-3); font-family: var(--mono); font-size: 11px; margin-left: auto; letter-spacing: 0.04em; }
+.sample { background: var(--bg-1); border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   ALT B v2 — Trading Desk + Price Ladder
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* TOP ROW — identity, price, verdict, key chips */
+.b-top { display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+         background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
+         border-bottom: 1px solid var(--rule); font-family: var(--mono); }
+.b-tk { font-size: 22px; font-weight: 800; color: var(--ink-0); letter-spacing: 0.04em; }
+.b-sector { font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.16em; text-transform: uppercase; font-weight: 700; padding: 2px 8px; border: 1px solid var(--rule-2); border-radius: 2px; }
+.b-px { font-size: 18px; font-weight: 800; color: var(--ink-0); margin-left: auto; }
+.b-chg { font-size: 11px; color: var(--gn); font-weight: 700; }
+.b-verdict { padding: 5px 12px; background: var(--gn); color: var(--bg-0); border-radius: 3px; font-size: 11.5px; font-weight: 800; letter-spacing: 0.10em; margin-left: 6px; }
+.b-tier { padding: 5px 10px; background: color-mix(in oklch, var(--gn) 18%, var(--bg-1)); color: var(--gn); border: 1px solid color-mix(in oklch, var(--gn) 40%, transparent); border-radius: 3px; font-size: 11px; font-weight: 800; letter-spacing: 0.04em; }
+.b-setup { padding: 5px 12px; background: rgba(212,144,96,0.10); color: var(--copper); border: 1px solid rgba(212,144,96,0.40); border-radius: 3px; font-size: 11px; font-weight: 800; letter-spacing: 0.06em; }
+.b-bap { padding: 5px 10px; background: var(--bg-2); color: var(--ink-1); border: 1px solid var(--rule-2); border-radius: 3px; font-size: 11px; font-weight: 700; }
+.b-bap .k { color: var(--ink-3); font-size: 9.5px; letter-spacing: 0.10em; margin-right: 4px; }
+
+
+/* ──── PRICE LADDER ──── */
+.ladder-row { padding: 38px 60px 24px; background: var(--bg-1); border-bottom: 1px solid var(--rule); position: relative; }
+.ladder { position: relative; height: 4px; width: 100%; }
+
+/* Track segments — colored bars between markers */
+.ladder-seg { position: absolute; top: 0; height: 100%; border-radius: 2px; }
+.ladder-seg.red    { background: linear-gradient(90deg, var(--rd) 0%, rgba(255,107,91,0.5) 100%); }
+.ladder-seg.gap-pre   { background: rgba(31,38,43,0.6); }
+.ladder-seg.green  { background: linear-gradient(90deg, var(--gn) 0%, rgba(91,229,124,0.7) 100%); }
+.ladder-seg.amber  { background: linear-gradient(90deg, var(--gn) 0%, var(--gold) 100%); }
+.ladder-seg.blue   { background: linear-gradient(90deg, var(--gold) 0%, var(--blue) 100%); }
+.ladder-seg.post   { background: rgba(96,165,250,0.4); }
+
+/* Markers — circles for STOP, NOW, T1, T2 */
+.ladder-marker { position: absolute; top: 50%; transform: translate(-50%, -50%);
+                 width: 14px; height: 14px; border-radius: 50%;
+                 background: var(--bg-0); border: 2px solid; box-shadow: 0 0 0 1px var(--bg-1); }
+.ladder-marker.stop { border-color: var(--rd); }
+.ladder-marker.entry-lo,
+.ladder-marker.entry-hi { width: 8px; height: 8px; border-color: var(--gn); background: var(--gn); border-width: 0; }
+.ladder-marker.now  { width: 18px; height: 18px; border-color: var(--ink-0); background: var(--ink-0); box-shadow: 0 0 0 3px var(--bg-1), 0 0 12px rgba(255,255,255,0.4); }
+.ladder-marker.t1   { border-color: var(--gold); width: 16px; height: 16px; }
+.ladder-marker.t2   { border-color: var(--blue); width: 16px; height: 16px; }
+
+/* Labels above and below */
+.ladder-label { position: absolute; transform: translateX(-50%); white-space: nowrap; font-family: var(--mono); }
+.ladder-label.above { bottom: 32px; text-align: center; }
+.ladder-label.below { top: 22px; text-align: center; }
+.ladder-label .name { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 700; margin-bottom: 5px; padding-bottom: 4px; border-bottom: 1px dotted; display: inline-block; }
+.ladder-label .price { font-size: 16px; font-weight: 800; }
+.ladder-label .pct { font-size: 11px; font-weight: 700; margin-left: 4px; }
+.ladder-label .avg { font-size: 10.5px; color: var(--ink-3); font-weight: 600; margin-left: 4px; }
+.ladder-label.stop  { color: var(--rd); }
+.ladder-label.stop  .name { border-color: var(--rd); }
+.ladder-label.entry { color: var(--gn); }
+.ladder-label.entry .name { border-color: var(--gn); }
+.ladder-label.now   { color: var(--ink-0); }
+.ladder-label.now   .name { color: var(--rd); border-color: var(--rd); }
+.ladder-label.t1    { color: var(--gold); }
+.ladder-label.t1    .name { border-color: var(--gold); }
+.ladder-label.t2    { color: var(--blue); }
+.ladder-label.t2    .name { border-color: var(--blue); }
+
+/* Vertical guide-tick from marker to label */
+.ladder-tick { position: absolute; width: 1px; background: rgba(140,150,160,0.25); transform: translateX(-50%); }
+.ladder-tick.above { bottom: 50%; height: 28px; }
+.ladder-tick.below { top: 50%; height: 18px; }
+
+
+/* SUB-ROW — modes + lenses */
+.b-sub { display: flex; align-items: center; gap: 8px; padding: 9px 20px; background: var(--bg-1); font-family: var(--mono); font-size: 11px; flex-wrap: wrap; }
+.b-mode { padding: 4px 12px; border: 1px solid var(--rule); border-radius: 2px; font-size: 10px; color: var(--ink-2); font-weight: 700; letter-spacing: 0.12em; cursor: pointer; }
+.b-mode.on { background: var(--copper); color: var(--bg-0); border-color: var(--copper); }
+.b-div { color: var(--ink-3); margin: 0 4px; }
+.b-lens { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; padding: 2px 8px; border-radius: 10px; font-weight: 700; border: 1px solid var(--rule-2); }
+.b-lens.gn { background: rgba(91,229,124,0.10); color: var(--gn); border-color: rgba(91,229,124,0.30); }
+.b-lens.rd { background: rgba(255,107,91,0.10); color: var(--rd); border-color: rgba(255,107,91,0.30); }
+.b-lens.amb { background: rgba(255,185,92,0.10); color: var(--amb); border-color: rgba(255,185,92,0.30); }
+.b-lens.vio { background: rgba(167,139,250,0.10); color: var(--vio); border-color: rgba(167,139,250,0.30); }
+.b-conflict { margin-left: auto; padding: 3px 9px; background: rgba(255,185,92,0.10); border: 1px solid rgba(255,185,92,0.35); border-radius: 2px; color: var(--amb); font-size: 10px; font-weight: 800; letter-spacing: 0.08em; cursor: pointer; }
+.b-meta { font-size: 10px; color: var(--ink-3); margin-left: 8px; letter-spacing: 0.06em; }
+
+
+/* Notes */
+.notes { background: var(--bg-1); border: 1px solid var(--rule); border-radius: 5px; padding: 18px 22px; margin-top: 24px; }
+.notes h3 { margin: 0 0 12px; font-size: 14px; font-weight: 800; color: var(--ink-0); }
+.notes ul { margin: 0; padding-left: 22px; color: var(--ink-1); font-size: 13px; line-height: 1.75; }
+.notes ul b { color: var(--ink-0); }
+.measure { display: flex; gap: 12px; padding: 10px 14px; margin-top: 12px; background: var(--bg-2); border: 1px solid var(--rule); border-radius: 3px; font-family: var(--mono); font-size: 11px; color: var(--ink-2); flex-wrap: wrap; }
+.measure b { color: var(--ink-0); }
+.measure .gn { color: var(--gn); font-weight: 700; }
+
+/* Variant section header — for the second example */
+.variant-h { color: var(--ink-3); font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; padding: 14px 20px 8px; background: var(--bg-2); border-bottom: 1px solid var(--rule); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1 class="page-title">Alt B v2 · Trading Desk + Price Ladder</h1>
+  <div class="page-sub">Static STOP / T1 / T2 chips replaced with a proportional price ladder · spatial relationship visible at a glance</div>
+
+
+  <!-- ════════════════ SAMPLE 1 · DELL (current price near entry) ════════════════ -->
+  <div class="sec-h">
+    <span class="label">SAMPLE 1</span>
+    <span class="title">DELL · price just above entry zone</span>
+    <span class="meta">~140px tall · ladder = primary visual anchor</span>
+  </div>
+
+  <div class="sample">
+    <!-- Top row -->
+    <div class="b-top">
+      <span class="b-tk">DELL</span>
+      <span class="b-sector">Technology</span>
+      <span class="b-px">$295.44</span>
+      <span class="b-chg">▲ +$1.36 · +0.46%</span>
+      <span class="b-verdict">BUY</span>
+      <span class="b-tier">T1</span>
+      <span class="b-setup">⚡ IMPULSE CATALYST</span>
+      <span class="b-bap"><span class="k">BAP</span>78</span>
+      <span class="b-bap"><span class="k">KELLY</span>5.5%</span>
+      <span class="b-bap"><span class="k">HOLD</span>14d</span>
+    </div>
+
+    <!-- PRICE LADDER · STOP — ENTRY — NOW — T1 — T2 (proportional) -->
+    <!-- DELL real numbers: STOP $240.22 · ENTRY $291.29–$298.21 (avg $294.75) · NOW $295.44 · T1 $458.34 · T2 $567.40 -->
+    <!-- Range = $240.22 → $567.40 = $327.18 -->
+    <!-- Positions: STOP=0% · EntryLo=15.6% · NOW=16.9% · EntryHi=17.7% · T1=66.7% · T2=100% -->
+    <div class="ladder-row">
+      <div class="ladder">
+        <!-- Segments -->
+        <div class="ladder-seg red"      style="left: 0%;    width: 15.6%"></div>
+        <div class="ladder-seg green"    style="left: 15.6%; width: 2.1%"></div>
+        <div class="ladder-seg amber"    style="left: 17.7%; width: 49.0%"></div>
+        <div class="ladder-seg blue"     style="left: 66.7%; width: 33.3%"></div>
+
+        <!-- Markers + tick-guides -->
+        <div class="ladder-tick above" style="left: 0%; height: 12px"></div>
+        <div class="ladder-marker stop" style="left: 0%"></div>
+        <div class="ladder-tick below" style="left: 0%"></div>
+
+        <div class="ladder-marker entry-lo" style="left: 15.6%"></div>
+        <div class="ladder-marker entry-hi" style="left: 17.7%"></div>
+
+        <div class="ladder-tick above" style="left: 16.9%; height: 28px"></div>
+        <div class="ladder-marker now" style="left: 16.9%"></div>
+        <div class="ladder-tick below" style="left: 16.9%"></div>
+
+        <div class="ladder-tick above" style="left: 66.7%"></div>
+        <div class="ladder-marker t1" style="left: 66.7%"></div>
+        <div class="ladder-tick below" style="left: 66.7%"></div>
+
+        <div class="ladder-tick above" style="left: 100%"></div>
+        <div class="ladder-marker t2" style="left: 100%"></div>
+        <div class="ladder-tick below" style="left: 100%"></div>
+
+        <!-- Labels -->
+        <div class="ladder-label below stop" style="left: 0%">
+          <div class="name">STOP</div>
+          <span class="price">$240.22</span><span class="pct">−18.7%</span>
+        </div>
+
+        <div class="ladder-label above entry" style="left: 16.7%">
+          <div class="name">ENTRY</div>
+          <span class="price">$291.29–$298.21</span><span class="avg">avg $294.75</span>
+        </div>
+
+        <div class="ladder-label below now" style="left: 16.9%">
+          <div class="name">NOW</div>
+          <span class="price">$295.44</span>
+        </div>
+
+        <div class="ladder-label above t1" style="left: 66.7%">
+          <div class="name">T1 · TRIM 50%</div>
+          <span class="price">$458.34</span><span class="pct">+55.1%</span>
+        </div>
+
+        <div class="ladder-label above t2" style="left: 100%">
+          <div class="name">T2 · CLOSE</div>
+          <span class="price">$567.40</span><span class="pct">+92.0%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sub-row -->
+    <div class="b-sub">
+      <span class="b-mode">⚡ SWING</span>
+      <span class="b-mode on">📅 POSITION</span>
+      <span class="b-mode">💼 INVEST</span>
+      <span class="b-div">·</span>
+      <span class="b-lens rd">V↓ −26%</span>
+      <span class="b-lens gn">S↑ RS100</span>
+      <span class="b-lens amb">ER ◧</span>
+      <span class="b-lens amb">M chop</span>
+      <span class="b-lens gn">I↑ +39</span>
+      <span class="b-lens gn">R ✓</span>
+      <span class="b-lens gn">N↑ +2.0</span>
+      <span class="b-lens vio">CFP</span>
+      <span class="b-meta">Lead · Hedge-fund analyst · 2w–6mo</span>
+      <span class="b-conflict">⚠ 1 conflict</span>
+    </div>
+  </div>
+
+  <div class="measure">
+    <b>Height</b> <span class="gn">~140px</span>
+    <span class="b-div">·</span>
+    <b>Rows</b> 3 (identity / ladder / lenses)
+    <span class="b-div">·</span>
+    <b>Spatial info</b> price-to-stop distance · entry zone width · gap to T1 · upside-to-T2 — all visible
+  </div>
+
+
+  <!-- ════════════════ SAMPLE 2 · EXTENDED ENTRY (current price ABOVE entry zone) ════════════════ -->
+  <div class="sec-h">
+    <span class="label">SAMPLE 2</span>
+    <span class="title">NVDA · price extended above entry zone (chasing risk)</span>
+    <span class="meta">ladder shows entry quality at a glance</span>
+  </div>
+
+  <div class="sample">
+    <div class="variant-h">Note · NOW marker is past the entry zone · ladder visually flags chasing risk</div>
+    <div class="b-top">
+      <span class="b-tk">NVDA</span>
+      <span class="b-sector">Technology · Large-cap</span>
+      <span class="b-px">$172.40</span>
+      <span class="b-chg">▲ +$2.18 · +1.28%</span>
+      <span class="b-verdict" style="background:var(--amb)">WATCH</span>
+      <span class="b-tier" style="background:rgba(255,185,92,0.18);color:var(--amb);border-color:rgba(255,185,92,0.40)">T2</span>
+      <span class="b-setup">📈 VCP BREAKOUT</span>
+      <span class="b-bap"><span class="k">BAP</span>72</span>
+      <span class="b-bap" style="border-color:rgba(255,185,92,0.40);color:var(--amb)"><span class="k">ENTRY</span>EXTENDED</span>
+      <span class="b-bap"><span class="k">HOLD</span>21d</span>
+    </div>
+
+    <!-- NVDA: STOP $150 · ENTRY $158-$163 · NOW $172.40 · T1 $195 · T2 $215 -->
+    <!-- Range = $150 → $215 = $65 -->
+    <!-- Positions: STOP=0% · EntryLo=12.3% · EntryHi=20.0% · NOW=34.5% (PAST entry) · T1=69.2% · T2=100% -->
+    <div class="ladder-row">
+      <div class="ladder">
+        <div class="ladder-seg red"    style="left: 0%;    width: 12.3%"></div>
+        <div class="ladder-seg green"  style="left: 12.3%; width: 7.7%"></div>
+        <div class="ladder-seg amber"  style="left: 20.0%; width: 49.2%"></div>
+        <div class="ladder-seg blue"   style="left: 69.2%; width: 30.8%"></div>
+
+        <div class="ladder-tick above" style="left: 0%"></div>
+        <div class="ladder-marker stop" style="left: 0%"></div>
+        <div class="ladder-tick below" style="left: 0%"></div>
+
+        <div class="ladder-marker entry-lo" style="left: 12.3%"></div>
+        <div class="ladder-marker entry-hi" style="left: 20.0%"></div>
+
+        <div class="ladder-tick above" style="left: 16.15%; height: 28px"></div>
+
+        <div class="ladder-tick above" style="left: 34.5%; height: 28px"></div>
+        <div class="ladder-marker now" style="left: 34.5%"></div>
+        <div class="ladder-tick below" style="left: 34.5%"></div>
+
+        <div class="ladder-tick above" style="left: 69.2%"></div>
+        <div class="ladder-marker t1" style="left: 69.2%"></div>
+        <div class="ladder-tick below" style="left: 69.2%"></div>
+
+        <div class="ladder-tick above" style="left: 100%"></div>
+        <div class="ladder-marker t2" style="left: 100%"></div>
+        <div class="ladder-tick below" style="left: 100%"></div>
+
+        <div class="ladder-label below stop" style="left: 0%">
+          <div class="name">STOP</div>
+          <span class="price">$150.00</span><span class="pct">−13.0%</span>
+        </div>
+        <div class="ladder-label above entry" style="left: 16.15%">
+          <div class="name">ENTRY (missed)</div>
+          <span class="price">$158.00–$163.00</span>
+        </div>
+        <div class="ladder-label below now" style="left: 34.5%">
+          <div class="name" style="color:var(--amb);border-color:var(--amb)">NOW · EXTENDED</div>
+          <span class="price" style="color:var(--amb)">$172.40</span>
+        </div>
+        <div class="ladder-label above t1" style="left: 69.2%">
+          <div class="name">T1 · TRIM 50%</div>
+          <span class="price">$195.00</span><span class="pct">+13.1%</span>
+        </div>
+        <div class="ladder-label above t2" style="left: 100%">
+          <div class="name">T2 · CLOSE</div>
+          <span class="price">$215.00</span><span class="pct">+24.7%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="b-sub">
+      <span class="b-mode">⚡ SWING</span>
+      <span class="b-mode on">📅 POSITION</span>
+      <span class="b-mode">💼 INVEST</span>
+      <span class="b-div">·</span>
+      <span class="b-lens gn">V↑ MoS 8%</span>
+      <span class="b-lens gn">S↑ RS 98</span>
+      <span class="b-lens gn">ER ↑ +12d</span>
+      <span class="b-lens gn">M ✓ RoT</span>
+      <span class="b-lens amb">I ◧ neutral</span>
+      <span class="b-lens amb">R ◧ 1.2× ADV</span>
+      <span class="b-lens gn">N↑ +3.1</span>
+      <span class="b-lens gn">CFP ✓</span>
+      <span class="b-meta">7B · 1W · 0S of 8 lenses</span>
+    </div>
+  </div>
+
+
+  <!-- ════════════════ SAMPLE 3 · STOPPED OUT (NOW between stop and entry) ════════════════ -->
+  <div class="sec-h">
+    <span class="label">SAMPLE 3</span>
+    <span class="title">AMD · price below entry zone (pullback opportunity)</span>
+    <span class="meta">ladder shows reclaim distance · trade still valid</span>
+  </div>
+
+  <div class="sample">
+    <div class="variant-h">Note · NOW marker sits in the post-stop / pre-entry gap · clean visual signal for "wait for retest"</div>
+    <div class="b-top">
+      <span class="b-tk">AMD</span>
+      <span class="b-sector">Technology · Large-cap</span>
+      <span class="b-px">$155.20</span>
+      <span class="b-chg" style="color:var(--rd)">▼ −$3.40 · −2.15%</span>
+      <span class="b-verdict" style="background:var(--amb)">WATCH</span>
+      <span class="b-tier" style="background:rgba(255,185,92,0.18);color:var(--amb);border-color:rgba(255,185,92,0.40)">T3</span>
+      <span class="b-setup">📉 PULLBACK · EMA21</span>
+      <span class="b-bap"><span class="k">BAP</span>68</span>
+      <span class="b-bap" style="border-color:rgba(91,229,124,0.40);color:var(--gn)"><span class="k">RETEST</span>+1.8% to entry</span>
+    </div>
+
+    <!-- AMD: STOP $145 · ENTRY $158-$163 · NOW $155.20 (below entry) · T1 $182 · T2 $200 -->
+    <!-- Range = $145 → $200 = $55 -->
+    <!-- Positions: STOP=0% · NOW=18.5% · EntryLo=23.6% · EntryHi=32.7% · T1=67.3% · T2=100% -->
+    <div class="ladder-row">
+      <div class="ladder">
+        <div class="ladder-seg red"    style="left: 0%;    width: 18.5%"></div>
+        <div class="ladder-seg gap-pre" style="left: 18.5%; width: 5.1%"></div>
+        <div class="ladder-seg green"  style="left: 23.6%; width: 9.1%"></div>
+        <div class="ladder-seg amber"  style="left: 32.7%; width: 34.6%"></div>
+        <div class="ladder-seg blue"   style="left: 67.3%; width: 32.7%"></div>
+
+        <div class="ladder-tick above" style="left: 0%"></div>
+        <div class="ladder-marker stop" style="left: 0%"></div>
+        <div class="ladder-tick below" style="left: 0%"></div>
+
+        <div class="ladder-tick above" style="left: 18.5%; height: 28px"></div>
+        <div class="ladder-marker now" style="left: 18.5%"></div>
+        <div class="ladder-tick below" style="left: 18.5%"></div>
+
+        <div class="ladder-marker entry-lo" style="left: 23.6%"></div>
+        <div class="ladder-marker entry-hi" style="left: 32.7%"></div>
+        <div class="ladder-tick above" style="left: 28.15%; height: 28px"></div>
+
+        <div class="ladder-tick above" style="left: 67.3%"></div>
+        <div class="ladder-marker t1" style="left: 67.3%"></div>
+        <div class="ladder-tick below" style="left: 67.3%"></div>
+
+        <div class="ladder-tick above" style="left: 100%"></div>
+        <div class="ladder-marker t2" style="left: 100%"></div>
+        <div class="ladder-tick below" style="left: 100%"></div>
+
+        <div class="ladder-label below stop" style="left: 0%">
+          <div class="name">STOP</div>
+          <span class="price">$145.00</span><span class="pct">−6.6%</span>
+        </div>
+        <div class="ladder-label below now" style="left: 18.5%">
+          <div class="name">NOW</div>
+          <span class="price">$155.20</span>
+        </div>
+        <div class="ladder-label above entry" style="left: 28.15%">
+          <div class="name">ENTRY (target)</div>
+          <span class="price">$158.00–$163.00</span><span class="avg">+1.8% to mid</span>
+        </div>
+        <div class="ladder-label above t1" style="left: 67.3%">
+          <div class="name">T1 · TRIM 50%</div>
+          <span class="price">$182.00</span><span class="pct">+17.3%</span>
+        </div>
+        <div class="ladder-label above t2" style="left: 100%">
+          <div class="name">T2 · CLOSE</div>
+          <span class="price">$200.00</span><span class="pct">+28.9%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="b-sub">
+      <span class="b-mode on">⚡ SWING</span>
+      <span class="b-mode">📅 POSITION</span>
+      <span class="b-mode">💼 INVEST</span>
+      <span class="b-div">·</span>
+      <span class="b-lens gn">V ✓</span>
+      <span class="b-lens amb">S ◧ RS 65</span>
+      <span class="b-lens gn">ER ↑</span>
+      <span class="b-lens gn">M ✓ RoT</span>
+      <span class="b-lens gn">I ↑ +5</span>
+      <span class="b-lens gn">R ✓ 0.4% ADV</span>
+      <span class="b-lens amb">N ◧</span>
+      <span class="b-lens gn">CFP ✓</span>
+      <span class="b-meta">6B · 2W · 0S · waiting for retest</span>
+    </div>
+  </div>
+
+
+  <!-- ════════════════ DESIGN NOTES ════════════════ -->
+  <div class="notes">
+    <h3>Why the price ladder beats static chips</h3>
+    <ul>
+      <li><b>Spatial information for free.</b> Eye sees instantly if NOW is below stop, inside entry zone, extended past entry, near T1, or beyond T2. Static <code style="font-family:var(--mono);color:var(--copper)">STOP $241 · T1 $260</code> chips force mental math.</li>
+      <li><b>Entry-quality signal built-in.</b> NOW marker position relative to the green entry segment instantly flags FRESH / PULLBACK / EXTENDED / MISSED. No separate entry-quality tag needed.</li>
+      <li><b>Risk-reward visible as proportional width.</b> Red segment (stop distance) vs green→blue (upside to T2) — eye reads the asymmetry without computing 1:1.3 or 1:3.0 ratios.</li>
+      <li><b>Trade phase encoded in color.</b> Red = stop-out zone · green = entry zone · amber = in-trade running zone · blue = T2-zone or beyond. Same color story across every ticker.</li>
+      <li><b>Sample 1 (DELL):</b> NOW just inside entry · cleanest setup · color story green-to-amber-to-blue with NOW pegged to entry zone.</li>
+      <li><b>Sample 2 (NVDA):</b> NOW past entry into the amber zone · extended · the visual itself screams "wait for pullback".</li>
+      <li><b>Sample 3 (AMD):</b> NOW between stop and entry · ladder shows trade still valid · entry is +1.8% above current.</li>
+    </ul>
+    <div style="margin-top:14px;padding:12px 14px;background:var(--bg-2);border-left:3px solid var(--copper);border-radius:0 3px 3px 0;font-size:12.5px;color:var(--ink-1);line-height:1.6">
+      <b style="color:var(--copper);font-family:var(--mono);font-size:11px;letter-spacing:0.14em;text-transform:uppercase">UI architect note</b><br>
+      The ladder replaces 6+ static chips with a single visual that carries more information. This is the difference between <b>reading</b> a number and <b>perceiving</b> a relationship. For a trading app where every second of attention matters, the ladder wins.
+    </div>
+  </div>
+
+
+  <div class="measure">
+    <b>Total Alt B v2 header height</b> <span class="gn">~140px</span>
+    <span class="b-div">·</span>
+    <b>Beats Alt B v1</b> by replacing 6 chips with a single proportional visual
+    <span class="b-div">·</span>
+    <b>Implementation</b> CSS-only · absolute-positioned divs · 0 JS deps
+  </div>
+
+  <div style="margin-top:24px;padding:18px 22px;background:var(--bg-1);border:1px solid var(--rule);border-radius:5px;font-size:13.5px;color:var(--ink-1);line-height:1.7">
+    Ready to ship? Say:
+    <ul style="margin:10px 0 0;padding-left:22px">
+      <li><b style="color:var(--gn)">"ship it"</b> → I wire this exact layout into kairos.html as the Detail page header</li>
+      <li><b style="color:var(--amb)">"tweak X"</b> → tell me what you'd change (colors, sizing, more samples, etc.)</li>
+      <li><b style="color:var(--info)">"add to A or C or D"</b> → I integrate the price ladder into a different base layout</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>

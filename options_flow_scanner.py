@@ -125,6 +125,101 @@ def scan(options_data: dict[str, dict],
     return results
 
 
+def scan_broader(options_data: dict, prices: dict, fundamentals: dict | None = None) -> list[dict]:
+    """Relaxed UOA scan — covers BOTH bullish (P/C < 0.7) and bearish (P/C > 1.4)
+    imbalances, lower volume floors, no earnings blackout. Powers the
+    'Top 50 · Broader' table view in the Options Flow workspace.
+
+    Compared to the strict scan():
+      • Bullish: P/C < 0.7  (was < 0.5)
+      • Bearish: P/C > 1.4  (NEW — strict scan rejected put-heavy)
+      • Total vol  ≥ 500   (was ≥ 1000)
+      • Dollar vol ≥ 500K  (was ≥ 1M)
+      • Earnings ≤ 1d skipped  (was ≤ 3d)
+    """
+    fundamentals = fundamentals or {}
+    results = []
+
+    for ticker, oi in options_data.items():
+        try:
+            if not oi or not isinstance(oi, dict):
+                continue
+            pcr = oi.get("put_call_ratio")
+            if pcr is None: continue
+            bullish = pcr < 0.7
+            bearish = pcr > 1.4
+            if not (bullish or bearish):
+                continue
+
+            call_vol = oi.get("total_call_vol", 0) or 0
+            put_vol  = oi.get("total_put_vol", 0) or 0
+            call_oi  = oi.get("total_call_oi", 0) or 0
+            uoa_calls = oi.get("uoa_calls", False)
+            uoa_puts  = oi.get("uoa_puts", False)
+            iv_pct = oi.get("iv_percentile")
+            max_pain = oi.get("max_pain")
+            gamma_net = oi.get("gamma_net")
+
+            price = prices.get(ticker, 0)
+            if price <= 0: continue
+
+            total_vol = call_vol + put_vol
+            if total_vol < 500: continue
+            if total_vol * 300 < 500_000: continue
+
+            fund = fundamentals.get(ticker, {})
+            dte = fund.get("days_to_earnings") or fund.get("kpi_days_since_earnings")
+            if isinstance(dte, (int, float)) and 0 <= dte <= 1:
+                continue
+
+            # Trade plan — direction-aware
+            if bullish:
+                stop = round(price * 0.97, 2); target = round(price * 1.07, 2)
+                direction = "long"
+            else:
+                stop = round(price * 1.03, 2); target = round(price * 0.93, 2)
+                direction = "short"
+            risk = abs(price - stop); reward = abs(target - price)
+            rr = reward / risk if risk > 0 else 0
+
+            # Status: STRONG if extreme PCR + UOA, else MODERATE, else WEAK
+            extreme = (bullish and pcr < 0.25) or (bearish and pcr > 2.5)
+            has_uoa = uoa_calls if bullish else uoa_puts
+            if extreme and has_uoa:    strength = "STRONG"
+            elif extreme or has_uoa:   strength = "MODERATE"
+            else:                      strength = "WEAK"
+
+            results.append({
+                "ticker": ticker,
+                "price": round(price, 2),
+                "status": strength,
+                "direction": direction,
+                "put_call_ratio": pcr,
+                "call_volume": call_vol,
+                "put_volume": put_vol,
+                "call_oi": call_oi,
+                "total_options_vol": total_vol,
+                "uoa_calls": uoa_calls,
+                "uoa_puts": uoa_puts,
+                "iv_percentile": iv_pct,
+                "max_pain": max_pain,
+                "gamma_net": gamma_net,
+                "stop": stop,
+                "target": target,
+                "rr": round(rr, 1),
+                "sector": fund.get("sector", "Unknown"),
+                "verdict": "WATCH" if strength == "WEAK" else "BUY",
+            })
+        except Exception as e:
+            log.debug(f"options_flow_broader({ticker}): {e}")
+            continue
+
+    # Sort: STRONG first, then by max |PCR deviation from 1.0| desc (most imbalanced)
+    rank = {"STRONG": 0, "MODERATE": 1, "WEAK": 2}
+    results.sort(key=lambda x: (rank.get(x["status"], 9), -abs((x["put_call_ratio"] or 1) - 1)))
+    return results
+
+
 def scan_live(tickers: list[str] | None = None, top_n: int = 30) -> list[dict]:
     """Fetch chains from Schwab for top tickers and scan for flow."""
     try:

@@ -527,6 +527,41 @@ body { padding: 22px 30px 60px; max-width: 1300px; margin: 0 auto; }
 </style>
 </head>
 <body>
+<!-- Embed-mode CSS · activated by ?embed=tech in URL · hides global chrome -->
+<style id="embedModeCSS"></style>
+<script>
+(function(){
+  const params = new URLSearchParams(window.location.search);
+  const mode = params.get('embed');
+  if (mode === 'tech') {
+    document.getElementById('embedModeCSS').textContent = `
+      body { padding: 14px 18px 30px !important; max-width: none !important; }
+      .qd-head, .qd-subhead, .qd-mode-bar, .qd-tabs { display: none !important; }
+      #tab-fund { display: none !important; }
+      #tab-tech { display: block !important; }
+      body > .qd-card-h.section-tag,
+      body > div[style*="ROLE FOOTER"],
+      body > div:last-of-type:not(.qd-body) { display: none !important; }
+    `;
+    // Also hide the role footer at the bottom (commented marker '<!-- ROLE FOOTER -->')
+    document.addEventListener('DOMContentLoaded', () => {
+      // Find any text-only banner sections that aren't tabs (like "ROLE FOOTER", "DESIGN-TRUTH meta")
+      const footer = document.querySelector('body > .qd-card:last-of-type');
+      // Keep — too dangerous to hide blindly. The qd-tabs+qd-head/qd-mode-bar hides cover the chrome.
+    });
+  } else if (mode === 'fund') {
+    document.getElementById('embedModeCSS').textContent = `
+      body { padding: 14px 18px 30px !important; max-width: none !important; }
+      .qd-head, .qd-subhead, .qd-mode-bar, .qd-tabs { display: none !important; }
+      #tab-tech { display: none !important; }
+      #tab-fund { display: block !important; }
+    `;
+  }
+  // Accept ?ticker= for future deep-linking
+  const tk = params.get('ticker');
+  if (tk) window.__embedTicker = tk;
+})();
+</script>
 
 <!-- HEADER -->
 <div class="qd-head">
@@ -3495,19 +3530,26 @@ document.querySelectorAll('.qd-tv-int-btn[data-overlay]').forEach(b => {
   });
 });
 
-// Hook mode toggle: plan-overlay re-render + rich-ladder always re-renders
-// because the plan lines reposition per mode (entry/stop/T1/T2)
-const _origApplyMode2 = applyMode;
-window.applyMode = function(mode) {
-  _origApplyMode2(mode);
-  if (__chartState.overlays.plan) renderSvgChart();
-  renderRichLadder();  // rich ladder always shows plan — re-render on every mode change
+// Mode toggle dispatcher (v12.2 · 2026-05-13 fix · was unreliable on
+// reload because cloneNode/replaceWith stripped early listeners faster
+// than rewiring could repair on certain re-renders).
+// Now: single global applyModeAll() that calls the original applyMode +
+// chart re-renders + emits a CustomEvent so any module can hook in.
+// Event delegation on document — works no matter what re-renders the DOM.
+const _baseApplyMode = applyMode;
+window.applyModeAll = function(mode) {
+  try { _baseApplyMode(mode); } catch (e) { console.error('applyMode err:', e); }
+  try { if (__chartState && __chartState.overlays && __chartState.overlays.plan) renderSvgChart(); } catch (e) {}
+  try { renderRichLadder(); } catch (e) { console.error('renderRichLadder err:', e); }
+  document.dispatchEvent(new CustomEvent('qd:mode-change', { detail: { mode } }));
 };
-document.querySelectorAll('.qd-mode-pill').forEach(p => {
-  p.replaceWith(p.cloneNode(true));
-});
-document.querySelectorAll('.qd-mode-pill').forEach(p => {
-  p.addEventListener('click', () => window.applyMode(p.dataset.mode));
+// Single event-delegated handler — survives any later DOM mutation
+document.addEventListener('click', e => {
+  const pill = e.target.closest('.qd-mode-pill');
+  if (!pill) return;
+  const mode = pill.dataset.mode;
+  if (!mode) return;
+  window.applyModeAll(mode);
 });
 
 // Re-render BOTH charts on window resize so SVGs scale correctly

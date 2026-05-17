@@ -109,7 +109,76 @@ export function render() {
   const consUp = ana.upside_pct;
   const ptCls = consUp != null ? (consUp >= 10 ? 'pass' : consUp >= 0 ? 'warn' : 'fail') : 'warn';
 
+  // ─────────────────────────────────────────────────────────────────
+  // Earnings-context tape — when earnings are within 30d, surface the
+  // signals that matter to a Stock Analyzer: 4Q beat pattern, EPS revision
+  // trend, implied move, Forward P/E vs cohort.
+  // ─────────────────────────────────────────────────────────────────
+  const _earningsTape = (function() {
+    const ebp = T.earnings_beat_prediction;
+    if (!ebp || !ebp.breakdown) return '';
+    const b = ebp.breakdown;
+    const dte = ebp.days_to_earnings;
+    if (dte == null || dte > 30) return '';
+    const hist = b.historical || {};
+    const rev  = b.revision_trend || {};
+    const im   = b.implied_move || {};
+    const liq  = b.liquidity || {};
+    const z    = b.zacks || {};
+    const cohort = b.sector_cohort || {};
+    const tiles = [];
+    if (hist.pattern) {
+      const colored = Array.from(hist.pattern).map(c =>
+        c === 'B' ? '<span style="color:var(--pass);font-weight:700">B</span>'
+      : c === 'M' ? '<span style="color:var(--fail);font-weight:700">M</span>'
+      : '<span style="color:var(--ink-2)">·</span>').join(' ');
+      tiles.push({k: '4Q PATTERN',
+        v: `<span style="font-family:var(--mono);letter-spacing:0.1em">${colored}</span>`,
+        sub: `${hist.rate}% · n=${hist.n_quarters}q · median surp ${hist.median_surprise_pct != null ? (hist.median_surprise_pct > 0 ? '+' : '') + Math.round(hist.median_surprise_pct) + '%' : '—'}`,
+        c: 'var(--ink)'});
+    }
+    if (rev.direction) {
+      const c = rev.direction === 'BULLISH' ? 'var(--pass)' : rev.direction === 'BEARISH' ? 'var(--fail)' : 'var(--warn)';
+      tiles.push({k: 'EPS REVISIONS', v: rev.direction,
+        sub: `net 30d ${rev.net_30d > 0 ? '+' : ''}${rev.net_30d} · slope ${rev.slope_30d_pct > 0 ? '+' : ''}${rev.slope_30d_pct}%`,
+        c});
+    }
+    if (im.implied_move_pct != null) {
+      const c = im.implied_move_pct >= 10 ? 'var(--warn)' : 'var(--ink-1)';
+      tiles.push({k: 'IMPLIED ±%', v: '±' + im.implied_move_pct.toFixed(1) + '%',
+        sub: `ER +${dte}d · straddle $${(+im.straddle_cost||0).toFixed(2)}`, c});
+    }
+    if (liq.forward_pe != null) {
+      const c = liq.forward_pe > 0 && liq.forward_pe <= 25 ? 'var(--pass)' : liq.forward_pe > 25 && liq.forward_pe <= 50 ? 'var(--warn)' : 'var(--ink-2)';
+      tiles.push({k: 'FWD P/E', v: liq.forward_pe.toFixed(1),
+        sub: liq.market_cap ? 'mcap ' + (liq.market_cap >= 1e9 ? '$' + (liq.market_cap/1e9).toFixed(1) + 'B' : '$' + (liq.market_cap/1e6).toFixed(0) + 'M') : '',
+        c});
+    }
+    if (z.rank != null) {
+      const c = z.rank <= 2 ? 'var(--pass)' : z.rank === 3 ? 'var(--ink-1)' : 'var(--fail)';
+      tiles.push({k: 'ZACKS RANK', v: '#' + z.rank,
+        sub: z.rank_text || (z.esp_pct != null ? `ESP ${z.esp_pct > 0 ? '+' : ''}${z.esp_pct.toFixed(2)}%` : ''),
+        c});
+    }
+    if (cohort.tag) {
+      const c = cohort.tag === 'HOT' ? 'var(--pass)' : cohort.tag === 'COLD' ? 'var(--fail)' : 'var(--ink-1)';
+      tiles.push({k: 'SECTOR COHORT', v: cohort.tag,
+        sub: `${cohort.beats}/${cohort.n_reported} beat · 45d`, c});
+    }
+    if (!tiles.length) return '';
+    const cells = tiles.map(t => `<div style="background:var(--bg-2);border:1px solid var(--rule);border-radius:2px;padding:8px 12px;font-family:var(--mono);font-variant-numeric:tabular-nums">
+      <div style="font-size:8.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-3);font-weight:700;margin-bottom:3px">${t.k}</div>
+      <div style="font-size:14px;font-weight:700;color:${t.c}">${t.v}</div>
+      <div style="font-size:10px;color:var(--ink-3);margin-top:2px">${t.sub}</div>
+    </div>`).join('');
+    return `<div style="margin-bottom:12px">
+      <div style="font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-3);font-weight:700;margin-bottom:6px">EARNINGS CONTEXT · ER in ${dte}d</div>
+      <div style="display:grid;grid-template-columns:repeat(${tiles.length}, 1fr);gap:8px">${cells}</div>
+    </div>`;
+  })();
+
   $('fundBody').innerHTML = `
+    ${_earningsTape}
     <!-- VERDICT BANNER -->
     <div class="fnd-verdict ${tone}">
       <div class="fnd-v-grade">${letterGrade}</div>

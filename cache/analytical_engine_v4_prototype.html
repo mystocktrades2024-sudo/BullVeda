@@ -1,0 +1,1916 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Analytical Engine v4 · NVDA · strategy-aware (SWING/POSITION/INVESTMENT)</title>
+<style>
+  :root{
+    --bg:#0B0E14; --surf:#11151C; --surf-2:#161B24; --line:#1E2530;
+    --ink:#E6EAF2; --ink-2:#9AA4B2; --ink-3:#6B7280;
+    --gn:#3DDC97; --rd:#E5484D; --am:#F5A524; --neu:#6B7280; --cy:#B084FF;
+    --lead:#5EA1FF;
+  }
+  body.strat-SWING       { --lead:#F5A524 }
+  body.strat-POSITION    { --lead:#5EA1FF }
+  body.strat-INVESTMENT  { --lead:#B084FF }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-variant-numeric:tabular-nums}
+  body{padding:24px}
+  .page{max-width:1500px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+  h1{font:600 13px/1.4 -apple-system,sans-serif;letter-spacing:.18em;color:var(--lead);margin:0;text-transform:uppercase;transition:color .15s}
+  h2{font:700 11px/1.4 -apple-system,sans-serif;letter-spacing:.16em;color:var(--ink-2);
+    margin:0 0 10px;text-transform:uppercase;display:flex;align-items:baseline;gap:10px}
+  h2 .num{color:var(--lead);font-weight:800;transition:color .15s}
+  h2 .sub{font-weight:500;text-transform:none;letter-spacing:.04em;color:var(--ink-3)}
+  .panel{background:var(--surf);border:1px solid var(--line);border-radius:6px;padding:16px 18px}
+
+  .strat-line{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .strat-line .tk{color:var(--ink);font-size:22px;font-weight:800;letter-spacing:.02em}
+  .strat-line .nm{color:var(--ink-2);font-weight:500}
+  .strat-line .asof{margin-left:auto;color:var(--ink-3);font:500 11px ui-monospace,monospace}
+  .strat-line .asof b{color:var(--ink-2)}
+  .strat-pills{display:flex;gap:6px}
+  .strat-pill{font:800 10.5px ui-monospace,monospace;padding:6px 14px;border-radius:3px;letter-spacing:.10em;
+    border:1px solid var(--line);background:var(--surf-2);color:var(--ink-2);text-decoration:none;cursor:pointer;
+    transition:all .15s}
+  .strat-pill:hover{color:var(--ink);background:#1A2030}
+  .strat-pill.on{color:var(--lead);background:rgba(94,161,255,.12);border-color:var(--lead)}
+  body.strat-SWING       .strat-pill.on{background:rgba(245,165,36,.12)}
+  body.strat-INVESTMENT  .strat-pill.on{background:rgba(176,132,255,.14)}
+  .strat-info{margin-left:auto;font:500 11px ui-monospace,monospace;color:var(--ink-3)}
+  .strat-info b{color:var(--ink-2)}
+
+  .meta{display:grid;grid-template-columns:repeat(6,1fr);gap:0}
+  .meta > div{padding:10px 14px;border-right:1px solid var(--line)}
+  .meta > div:last-child{border-right:none}
+  .meta-k{font:700 9px ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin-bottom:4px}
+  .meta-v{font:800 13px -apple-system,sans-serif;color:var(--ink)}
+  .meta-v.lg{font-size:17px;letter-spacing:.04em}
+  .meta-sub{font:500 10px ui-monospace,monospace;color:var(--ink-3);margin-top:2px}
+
+  .call-badge{font:800 22px ui-monospace,monospace;letter-spacing:.10em;padding:5px 18px;border-radius:4px;
+    color:var(--gn);background:rgba(61,220,151,.12);border:1px solid rgba(61,220,151,.40)}
+  .call-badge.am{color:var(--am);background:rgba(245,165,36,.12);border-color:rgba(245,165,36,.40)}
+  .call-badge.rd{color:var(--rd);background:rgba(229,72,77,.12);border-color:rgba(229,72,77,.40)}
+  .call-badge.dim{color:var(--ink-2);background:rgba(107,114,128,.10);border-color:rgba(107,114,128,.30)}
+  .call-thesis{font:500 13px -apple-system,sans-serif;color:var(--ink-2);line-height:1.65;padding:8px 0 12px;border-bottom:1px solid var(--line);margin-bottom:10px}
+  .call-thesis b{color:var(--ink);font-weight:700}
+  .call-row{display:grid;grid-template-columns:200px 1fr;gap:14px;padding:7px 0;font-size:13px;border-bottom:1px dashed var(--line)}
+  .call-row:last-child{border-bottom:none}
+  .call-k{font:700 10px ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+  .call-v{color:var(--ink)}
+  .call-v b{color:var(--ink);font-weight:700}
+  .call-v .gn{color:var(--gn)} .call-v .rd{color:var(--rd)} .call-v .am{color:var(--am)}
+
+  .lens-row{display:grid;grid-template-columns:150px 110px 1fr;gap:14px;padding:9px 0;
+    font-size:12.5px;border-bottom:1px dashed var(--line);line-height:1.6}
+  .lens-row:last-child{border-bottom:none}
+  .lens-l{font:800 10px ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--ink)}
+  .lens-l .role{display:block;font:600 9px ui-monospace,monospace;color:var(--ink-3);margin-top:3px}
+  .lens-row.lead .lens-l{color:var(--lead)}
+
+  details.subs{margin-top:12px;padding:10px 12px;background:var(--surf-2);border:1px solid var(--line);border-radius:4px}
+  details.subs summary{cursor:pointer;font:700 10.5px ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--lead);outline:none}
+  details.subs summary .hint{color:var(--ink-3);font-weight:500;letter-spacing:.04em;text-transform:none;margin-left:8px}
+  .sub-row{display:grid;grid-template-columns:160px 100px 1fr;gap:14px;padding:6px 0;
+    font-size:12px;border-bottom:1px dashed var(--line);line-height:1.55;margin-top:8px}
+  .sub-row:first-of-type{margin-top:12px}
+  .sub-row:last-child{border-bottom:none}
+  .sub-k{font:700 9.5px ui-monospace,monospace;letter-spacing:.10em;text-transform:uppercase;color:var(--ink-2)}
+  .sub-v{color:var(--ink-2)}
+  .sub-v b{color:var(--ink);font-weight:700}
+
+  .pill{display:inline-block;font:700 10px ui-monospace,monospace;padding:2px 8px;border-radius:3px;letter-spacing:.06em;text-transform:uppercase}
+  .pill-gn{color:var(--gn);background:rgba(61,220,151,.10);border:1px solid rgba(61,220,151,.30)}
+  .pill-rd{color:var(--rd);background:rgba(229,72,77,.10);border:1px solid rgba(229,72,77,.30)}
+  .pill-am{color:var(--am);background:rgba(245,165,36,.10);border:1px solid rgba(245,165,36,.30)}
+  .pill-cy{color:var(--lead);background:rgba(94,161,255,.10);border:1px solid rgba(94,161,255,.30)}
+  .pill-dim{color:var(--ink-3);background:rgba(107,114,128,.08);border:1px solid rgba(107,114,128,.30)}
+
+  ol{margin:6px 0 0;padding-left:22px}
+  ol li{font-size:13px;line-height:1.7;margin-bottom:8px}
+  ol li b{color:var(--ink);font-weight:700}
+  ol li .gn{color:var(--gn)} ol li .rd{color:var(--rd)} ol li .am{color:var(--am)}
+
+  .alt-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .alt-card{padding:12px 14px;background:var(--surf-2);border:1px solid var(--line);border-left:3px solid var(--lead);border-radius:3px}
+  .alt-card h4{margin:0 0 4px;font:800 10.5px ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--lead)}
+  .alt-card .alt-call{font:800 14px ui-monospace,monospace;margin-bottom:6px;letter-spacing:.08em}
+  .alt-card .alt-call.gn{color:var(--gn)} .alt-card .alt-call.am{color:var(--am)} .alt-card .alt-call.rd{color:var(--rd)}
+  .alt-card .body{font:500 12px -apple-system,sans-serif;color:var(--ink-2);line-height:1.6}
+  .alt-card .body b{color:var(--ink);font-weight:700}
+
+  .src-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;font:500 11.5px -apple-system,sans-serif;color:var(--ink-2)}
+  .src-grid b{color:var(--ink);font-weight:700}
+
+  .self-check{padding:10px 14px;background:rgba(61,220,151,.06);border-left:2px solid var(--gn);
+    border-radius:3px;font:500 12px ui-monospace,monospace;color:var(--ink-2);line-height:1.75}
+  .self-check b{color:var(--gn);font-weight:700}
+
+  details.struct{background:var(--surf-2);border:1px solid var(--line);border-radius:4px;padding:10px 14px}
+  details.struct summary{cursor:pointer;font:700 10.5px ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--lead);outline:none}
+  .struct-pre{padding:12px;background:#0a0d0c;border-radius:3px;font:11px ui-monospace,monospace;
+    color:var(--ink-2);line-height:1.55;overflow-x:auto;white-space:pre;margin-top:10px}
+  .struct-pre .key{color:var(--lead);font-weight:600}
+  .struct-pre .str{color:var(--gn)}
+  .struct-pre .nm{color:var(--am);font-weight:600}
+  .struct-pre .ctx{color:var(--ink-3);font-style:italic}
+
+  .vgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+  /* Verdict card */
+  .verdict-card{position:relative}
+  .verdict-card h2{display:flex;align-items:baseline;gap:10px}
+  .vd-asof{margin-left:auto;font:500 11px ui-monospace,monospace;color:var(--ink-3);font-weight:500;text-transform:none;letter-spacing:.04em}
+  .verdict-headline{margin-top:10px;padding:12px 16px;background:var(--surf-2);border-left:3px solid var(--lead);
+    border-radius:3px;font:600 13px -apple-system,sans-serif;color:var(--ink);line-height:1.6}
+  .verdict-headline b{color:var(--lead)}
+  .vd-vote{display:inline-block;font:800 9px ui-monospace,monospace;padding:3px 7px;border-radius:2px;letter-spacing:.10em;margin-right:5px}
+  .vd-vote.gn{color:var(--gn);background:rgba(61,220,151,.18)}
+  .vd-vote.am{color:var(--am);background:rgba(245,165,36,.18)}
+  .vd-vote.rd{color:var(--rd);background:rgba(229,72,77,.18)}
+
+  .lad-step rect{transition:fill .15s,stroke .15s}
+  .lad-step.on rect{fill:rgba(94,161,255,.20);stroke:var(--lead);stroke-width:1.6}
+  body.strat-SWING       .lad-step.on rect{fill:rgba(245,165,36,.20)}
+  body.strat-INVESTMENT  .lad-step.on rect{fill:rgba(176,132,255,.20)}
+  .lad-step.on text{fill:var(--lead) !important}
+
+  /* Conviction rule checklist */
+  .conv-grid{display:grid;grid-template-columns:1fr 280px;gap:18px;align-items:start}
+  .conv-rules{display:flex;flex-direction:column;gap:6px}
+  .conv-rule{display:grid;grid-template-columns:36px 1fr auto;gap:12px;padding:10px 12px;
+    background:var(--surf-2);border:1px solid var(--line);border-radius:4px;align-items:center;font-size:12.5px}
+  .conv-rule.pass{border-left:3px solid var(--gn)}
+  .conv-rule.fail{border-left:3px solid var(--rd)}
+  .conv-rule .mark{font:800 18px ui-monospace,monospace;text-align:center}
+  .conv-rule.pass .mark{color:var(--gn)}
+  .conv-rule.fail .mark{color:var(--rd)}
+  .conv-rule .body{color:var(--ink)}
+  .conv-rule .body small{display:block;color:var(--ink-3);font:500 10.5px ui-monospace,monospace;margin-top:2px}
+  .conv-rule .body b{color:var(--ink);font-weight:700}
+  .conv-rule .ev{font:700 10.5px ui-monospace,monospace;color:var(--ink-2);text-align:right;white-space:nowrap}
+  .conv-rule.pass .ev{color:var(--gn)}
+  .conv-rule.fail .ev{color:var(--rd)}
+  .conv-tier{background:var(--surf-2);border:1px solid var(--line);border-radius:4px;padding:18px 16px;text-align:center}
+  .conv-tier-label{font:800 10px ui-monospace,monospace;color:var(--ink-3);letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px}
+  .conv-tier-val{font:900 38px -apple-system,sans-serif;color:var(--lead);letter-spacing:.04em;margin-bottom:6px}
+  .conv-tier-rule{font:600 12px ui-monospace,monospace;color:var(--ink);margin-bottom:14px}
+  .conv-tier-thresh{font:500 11px ui-monospace,monospace;color:var(--ink-2);display:flex;flex-direction:column;gap:5px;border-top:1px dashed var(--line);padding-top:12px;text-align:left}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;vertical-align:middle}
+  .dot-gn{background:var(--gn)} .dot-am{background:var(--am)} .dot-rd{background:var(--rd)}
+</style>
+</head>
+<body class="strat-POSITION">
+<div class="page">
+
+  <h1 id="pageTitle">◈ Analytical Engine v4 · NVDA · POSITION view (try the other pills →)</h1>
+
+  <!-- STRATEGY LINE -->
+  <div class="panel">
+    <div class="strat-line">
+      <span class="tk">NVDA</span>
+      <span class="nm">· NVIDIA Corporation · NASDAQ Semiconductors</span>
+      <span class="strat-pills">
+        <button class="strat-pill" data-strat="SWING">SWING</button>
+        <button class="strat-pill on" data-strat="POSITION">POSITION</button>
+        <button class="strat-pill" data-strat="INVESTMENT">INVESTMENT</button>
+      </span>
+      <span class="strat-info" id="stratInfo">horizon <b>4–6 weeks</b> · lead lens <b>Trader + near-term catalyst</b></span>
+      <span class="asof">As of <b>2026-05-12 14:30 EST</b> · Price <b>$142.65</b> (+1.84%)</span>
+    </div>
+  </div>
+
+  <!-- META STRIP -->
+  <div class="panel" style="padding:0">
+    <div class="meta">
+      <div><div class="meta-k">Strategy</div><div class="meta-v lg" id="mStrategy" style="color:var(--lead)">POSITION</div><div class="meta-sub" id="mStrategySub">catalyst-driven · 3d–8w</div></div>
+      <div><div class="meta-k">Horizon</div><div class="meta-v" id="mHorizon">4–6 weeks</div><div class="meta-sub" id="mHorizonSub">to Q4 FY26 print</div></div>
+      <div><div class="meta-k">Lead lens</div><div class="meta-v" id="mLead">TRADER + catalyst</div><div class="meta-sub" id="mLeadSub">Hedge-Fund co-pilot</div></div>
+      <div><div class="meta-k">Call</div><div class="meta-v" id="mCall" style="color:var(--gn)">BUY</div><div class="meta-sub" id="mCallSub">actionable now</div></div>
+      <div><div class="meta-k">Conviction</div><div class="meta-v" id="mConv" style="color:var(--lead)">HIGH</div><div class="meta-sub" id="mConvSub">4/4 lens · edge +24pp</div></div>
+      <div><div class="meta-k">Data</div><div class="meta-v" id="mData" style="color:var(--gn)">COMPLETE</div><div class="meta-sub" id="mDataSub">0/10 missing</div></div>
+    </div>
+  </div>
+
+  <!-- ⓥ VERDICT CARD (visual-rich one-look summary) -->
+  <div class="panel verdict-card">
+    <h2><span class="num">ⓥ</span>VERDICT <span class="sub">— one-look summary · all key tiles · strategy-aware</span><span class="vd-asof">As of 2026-05-12 14:30 EST</span></h2>
+    <svg data-visual="verdict" viewBox="0 0 1200 220" style="width:100%;height:auto;display:block">
+      <defs>
+        <linearGradient id="vdGradGN" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3DDC97" stop-opacity="0.45"/><stop offset="1" stop-color="#3DDC97" stop-opacity="0.10"/></linearGradient>
+        <linearGradient id="vdGradAM" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#F5A524" stop-opacity="0.45"/><stop offset="1" stop-color="#F5A524" stop-opacity="0.10"/></linearGradient>
+        <linearGradient id="vdGradLD" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5EA1FF" stop-opacity="0.45"/><stop offset="1" stop-color="#5EA1FF" stop-opacity="0.10"/></linearGradient>
+        <linearGradient id="vdConvArc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#E5484D"/><stop offset="0.5" stop-color="#F5A524"/><stop offset="1" stop-color="#3DDC97"/></linearGradient>
+      </defs>
+
+      <!-- LEFT · the call (clipped to box, no overflow) -->
+      <clipPath id="vdCallClip"><rect x="20" y="30" width="245" height="160" rx="6"/></clipPath>
+      <g transform="translate(20,30)">
+        <rect id="vdCallBox" x="0" y="0" width="245" height="160" rx="6" fill="url(#vdGradGN)" stroke="#3DDC97" stroke-width="1.6"/>
+        <text x="122" y="26" text-anchor="middle" font-family="monospace" font-size="10" fill="#9AA4B2" font-weight="700" letter-spacing="0.16em">VERDICT</text>
+        <text id="vdCall" x="122" y="84" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="52" font-weight="900" fill="#3DDC97" letter-spacing="0.04em">BUY</text>
+        <text id="vdCallTag" x="122" y="112" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="12.5" fill="#E6EAF2" font-weight="700">POSITION · 4–6 weeks</text>
+        <text id="vdCallSub" x="122" y="132" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="10.5" fill="#9AA4B2" clip-path="url(#vdCallClip)">actionable now · entry $140–$143</text>
+        <text id="vdCallScore" x="122" y="150" text-anchor="middle" font-family="monospace" font-size="9.5" fill="#9AA4B2">P(T1) 76% · LB 52% · n=157</text>
+      </g>
+
+      <!-- MIDDLE · 4 mini-tiles in 2x2 -->
+      <g transform="translate(285,30)" font-family="-apple-system,sans-serif">
+        <!-- tile 1 — Edge -->
+        <g transform="translate(0,0)">
+          <rect width="245" height="74" rx="5" fill="rgba(22,27,36,0.6)" stroke="#1E2530"/>
+          <text x="14" y="20" font-family="monospace" font-size="9.5" fill="#9AA4B2" font-weight="700" letter-spacing="0.14em">QUANT EDGE</text>
+          <text id="vdEdge" x="14" y="50" font-size="26" font-weight="800" fill="#3DDC97">+24pp</text>
+          <text x="14" y="66" font-size="10" fill="#9AA4B2">MC 3K paths · Bayes-adj <tspan fill="#3DDC97" font-weight="700">+42pp</tspan></text>
+          <line x1="0" y1="74" x2="245" y2="74" stroke="#0B0E14" stroke-width="0.5"/>
+          <rect id="vdEdgeBar" x="155" y="28" width="78" height="8" rx="2" fill="#3DDC97" opacity="0.9"/>
+          <line x1="155" y1="22" x2="155" y2="42" stroke="#2A3340" stroke-width="1"/>
+        </g>
+        <!-- tile 2 — R:R -->
+        <g transform="translate(260,0)">
+          <rect width="245" height="74" rx="5" fill="rgba(22,27,36,0.6)" stroke="#1E2530"/>
+          <text x="14" y="20" font-family="monospace" font-size="9.5" fill="#9AA4B2" font-weight="700" letter-spacing="0.14em">R:R RATIO</text>
+          <text id="vdRR" x="14" y="50" font-size="26" font-weight="800" fill="#3DDC97">2.01R</text>
+          <text id="vdRRSub" x="14" y="66" font-size="10" fill="#9AA4B2">+$15.35 reward vs −$7.65 risk</text>
+          <rect x="155" y="28" width="78" height="8" rx="2" fill="rgba(107,114,128,0.20)"/>
+          <rect id="vdRRBar" x="155" y="28" width="62" height="8" rx="2" fill="#3DDC97"/>
+        </g>
+        <!-- tile 3 — Sizing -->
+        <g transform="translate(0,82)">
+          <rect width="245" height="74" rx="5" fill="rgba(22,27,36,0.6)" stroke="#1E2530"/>
+          <text x="14" y="20" font-family="monospace" font-size="9.5" fill="#9AA4B2" font-weight="700" letter-spacing="0.14em">POSITION SIZE</text>
+          <text id="vdSize" x="14" y="50" font-size="26" font-weight="800" fill="#5EA1FF">5.5%</text>
+          <text id="vdSizeSub" x="14" y="66" font-size="10" fill="#9AA4B2">Kelly-lite × 1.3 boost · 9 shares @ $25K</text>
+          <rect x="155" y="28" width="78" height="8" rx="2" fill="rgba(107,114,128,0.20)"/>
+          <rect id="vdSizeBar" x="155" y="28" width="44" height="8" rx="2" fill="#5EA1FF"/>
+        </g>
+        <!-- tile 4 — Risk -->
+        <g transform="translate(260,82)">
+          <rect width="245" height="74" rx="5" fill="rgba(22,27,36,0.6)" stroke="#1E2530"/>
+          <text x="14" y="20" font-family="monospace" font-size="9.5" fill="#9AA4B2" font-weight="700" letter-spacing="0.14em">TAIL RISK · CVaR</text>
+          <text id="vdCvar" x="14" y="50" font-size="26" font-weight="800" fill="#E5484D">−8.4%</text>
+          <text id="vdCvarSub" x="14" y="66" font-size="10" fill="#9AA4B2">10d horizon · 97.5% tail · n=80</text>
+          <rect x="155" y="28" width="78" height="8" rx="2" fill="rgba(107,114,128,0.20)"/>
+          <rect id="vdCvarBar" x="155" y="28" width="34" height="8" rx="2" fill="#E5484D"/>
+        </g>
+      </g>
+
+      <!-- RIGHT · conviction arc + lens votes -->
+      <g transform="translate(820,30)" font-family="-apple-system,sans-serif">
+        <rect width="360" height="160" rx="6" fill="rgba(22,27,36,0.6)" stroke="#1E2530"/>
+        <text x="180" y="22" text-anchor="middle" font-family="monospace" font-size="10" fill="#9AA4B2" font-weight="700" letter-spacing="0.16em">CONVICTION</text>
+
+        <!-- Arc gauge (semicircle, value 0–100%) -->
+        <path d="M 60 110 A 120 120 0 0 1 300 110" fill="none" stroke="#1E2530" stroke-width="14" stroke-linecap="round"/>
+        <path id="vdConvArcFill" d="M 60 110 A 120 120 0 0 1 300 110" fill="none" stroke="url(#vdConvArc)" stroke-width="14" stroke-linecap="round" pathLength="100" stroke-dasharray="85 100"/>
+        <circle id="vdConvNeedle" cx="300" cy="110" r="6" fill="#E6EAF2" stroke="#0B0E14" stroke-width="2"/>
+        <text id="vdConvLabel" x="180" y="98" text-anchor="middle" font-size="26" font-weight="900" fill="#5EA1FF">HIGH</text>
+        <text id="vdConvScore" x="180" y="118" text-anchor="middle" font-family="monospace" font-size="11" fill="#9AA4B2" font-weight="700">85 / 100</text>
+
+        <!-- Lens votes mini-row -->
+        <g transform="translate(20,135)">
+          <text x="0" y="0" font-family="monospace" font-size="9" fill="#9AA4B2" font-weight="700" letter-spacing="0.10em">LENS VOTES</text>
+          <g id="vdLensVotes" transform="translate(85,-8)"></g>
+        </g>
+      </g>
+    </svg>
+
+    <!-- Headline bullet · always renders -->
+    <div id="vdHeadline" class="verdict-headline"></div>
+  </div>
+
+  <!-- CALL BLOCK -->
+  <div class="panel">
+    <h2><span class="num">②</span>CALL <span style="margin-left:auto;display:flex;gap:14px;align-items:center"><span class="call-badge" id="callBadge">BUY</span><span style="color:var(--ink-3);font-weight:500;text-transform:none;letter-spacing:.04em;font-size:11px;font-style:italic" id="callTagline">— actionable now under POSITION</span></span></h2>
+    <div class="call-thesis" id="callThesis"></div>
+    <div id="callRows"></div>
+  </div>
+
+  <!-- ① DATA QUALITY STRIP (with provider + freshness + gate connectors) -->
+  <div class="panel">
+    <h2><span class="num">①</span>Data Quality Strip <span class="sub">— gates all other visuals · provider + freshness · downstream-gate map</span></h2>
+    <svg data-visual="data-quality-strip" viewBox="0 0 1100 200" style="width:100%;height:auto;display:block" font-family="monospace">
+      <text x="0" y="14" font-family="sans-serif" font-size="11" fill="#9AA4B2" font-weight="700">10 required inputs · all valid · all in freshness window</text>
+
+      <!-- 10 input cells (3-row layout) -->
+      <g transform="translate(0,24)">
+        <!-- Each cell: NAME / VALUE / SOURCE · AGE -->
+        <g transform="translate(0,0)">
+          <rect width="93" height="62" rx="4" fill="rgba(61,220,151,0.12)" stroke="#3DDC97"/>
+          <text x="46.5" y="14" text-anchor="middle" fill="#3DDC97" font-size="9.5" font-weight="700">PRICE</text>
+          <text x="46.5" y="32" text-anchor="middle" fill="#E6EAF2" font-size="13" font-weight="700">$142.65</text>
+          <text x="46.5" y="47" text-anchor="middle" fill="#9AA4B2" font-size="8">Schwab</text>
+          <text x="46.5" y="57" text-anchor="middle" fill="#6B7280" font-size="7.5">&lt;15 min</text>
+        </g>
+        <g transform="translate(101,0)">
+          <rect width="93" height="62" rx="4" fill="rgba(61,220,151,0.12)" stroke="#3DDC97"/>
+          <text x="46.5" y="14" text-anchor="middle" fill="#3DDC97" font-size="9.5" font-weight="700">MCAP</text>
+          <text x="46.5" y="32" text-anchor="middle" fill="#E6EAF2" font-size="13" font-weight="700">$3.49T</text>
+          <text x="46.5" y="47" text-anchor="middle" fill="#9AA4B2" font-size="8">EODHD</text>
+          <text x="46.5" y="57" text-anchor="middle" fill="#6B7280" font-size="7.5">1d</text>
+        </g>
+        <g transform="translate(202,0)">
+          <rect width="93" height="62" rx="4" fill="rgba(61,220,151,0.12)" stroke="#3DDC97"/>
+          <text x="46.5" y="14" text-anchor="middle" fill="#3DDC97" font-size="9.5" font-weight="700">ADV</text>
+          <text x="46.5" y="32" text-anchor="middle" fill="#E6EAF2" font-size="13" font-weight="700">$25.8B</text>
+          <text x="46.5" y="47" text-anchor="middle" fill="#9AA4B2" font-size="8">EODHD</text>
+          <text x="46.5" y="57" text-anchor="middle" fill="#6B7280" font-size="7.5">12h</text>
+        </g>
+        <g transform="translate(303,0)">
+          <rect width="93" height="62" rx="4" fill="rgba(61,220,151,0.12)" stroke="#3DDC97"/>
+          <text x="46.5" y="14" text-anchor="middle" fill="#3DDC97" font-size="9.5" font-weight="700">BETA</text>
+          <text x="46.5" y="32" text-anchor="middle" fill="#E6EAF2" font-size="13" font-weight="700">1.65</text>
+          <text x="46.5" y="47" text-anchor="middle" fill="#9AA4B2" font-size="8">EODHD</text>
+          <text x="46.5" y="57" text-anchor="middle" fill="#6B7280" font-size="7.5">12h</text>
+        </g>
+        <g transform="translate(404,0)">
+          <rect width="93" height="62" rx="4" fill="rgba(61,220,151,0.12)" stroke="#3DDC97"/>
+          <text x="46.5" y="14" text-anchor="middle" fill="#3DDC97" font-size="9.5" font-weight="700">FWD P/E</text>
+          <text x="46.5" y="32" text-anchor="middle" fill="#E6EAF2" font-size="13" font-weight="700">32.4</text>
+          <text x="46.5" y="47" text-anchor="middle" fill="#9AA4B2" font-size="8">EODHD</text>
+          <text x="46.5" y="57" text-anchor="middle" fill="#6B7280" font-size="7.5">1d</text>
+        </g>
+        <g transform="translate(505,0)">
+          <rect width="93" height="62" rx="4" fill="rgba(61,220,151,0.12)" stroke="#3DDC97"/>
+          <text x="46.5" y="14" text-anchor="middle" fill="#3DDC97" font-size="9.5" font-weight="700">PEG</text>
+          <text x="46.5" y="32" text-anchor="middle" fill="#E6EAF2" font-size="13" font-weight="700">1.10</text>
+          <text x="46.5" y="47" text-anchor="middle" fill="#9AA4B2" font-size="8">EODHD</text>
+          <text x="46.5" y="57" text-anchor="middle" fill="#6B7280" font-size="7.5">1d</text>
+        </g>
+        <g transform="translate(606,0)">
+          <rect width="93" height="62" rx="4" fill="rgba(61,220,151,0.12)" stroke="#3DDC97"/>
+          <text x="46.5" y="14" text-anchor="middle" fill="#3DDC97" font-size="9.5" font-weight="700">SHORT %</text>
+          <text x="46.5" y="32" text-anchor="middle" fill="#E6EAF2" font-size="13" font-weight="700">2.1%</text>
+          <text x="46.5" y="47" text-anchor="middle" fill="#9AA4B2" font-size="8">Finviz</text>
+          <text x="46.5" y="57" text-anchor="middle" fill="#6B7280" font-size="7.5">1d</text>
+        </g>
+        <g transform="translate(707,0)">
+          <rect width="93" height="62" rx="4" fill="rgba(61,220,151,0.12)" stroke="#3DDC97"/>
+          <text x="46.5" y="14" text-anchor="middle" fill="#3DDC97" font-size="9.5" font-weight="700">IMPL ±</text>
+          <text x="46.5" y="32" text-anchor="middle" fill="#E6EAF2" font-size="13" font-weight="700">±6.2%</text>
+          <text x="46.5" y="47" text-anchor="middle" fill="#9AA4B2" font-size="8">Schwab</text>
+          <text x="46.5" y="57" text-anchor="middle" fill="#6B7280" font-size="7.5">2h</text>
+        </g>
+        <g transform="translate(808,0)">
+          <rect width="93" height="62" rx="4" fill="rgba(61,220,151,0.12)" stroke="#3DDC97"/>
+          <text x="46.5" y="14" text-anchor="middle" fill="#3DDC97" font-size="9.5" font-weight="700">FCF MGN</text>
+          <text x="46.5" y="32" text-anchor="middle" fill="#E6EAF2" font-size="13" font-weight="700">+48.2%</text>
+          <text x="46.5" y="47" text-anchor="middle" fill="#9AA4B2" font-size="8">EODHD</text>
+          <text x="46.5" y="57" text-anchor="middle" fill="#6B7280" font-size="7.5">1d</text>
+        </g>
+        <g transform="translate(909,0)">
+          <rect width="93" height="62" rx="4" fill="rgba(61,220,151,0.12)" stroke="#3DDC97"/>
+          <text x="46.5" y="14" text-anchor="middle" fill="#3DDC97" font-size="9.5" font-weight="700">ROE</text>
+          <text x="46.5" y="32" text-anchor="middle" fill="#E6EAF2" font-size="13" font-weight="700">92.4%</text>
+          <text x="46.5" y="47" text-anchor="middle" fill="#9AA4B2" font-size="8">EODHD</text>
+          <text x="46.5" y="57" text-anchor="middle" fill="#6B7280" font-size="7.5">1d</text>
+        </g>
+        <g transform="translate(1010,0)">
+          <rect width="90" height="62" rx="4" fill="rgba(61,220,151,0.06)" stroke="#1E2530"/>
+          <text x="45" y="14" text-anchor="middle" fill="#9AA4B2" font-size="9.5" font-weight="700">MISSING</text>
+          <text x="45" y="36" text-anchor="middle" fill="#3DDC97" font-size="18" font-weight="800">0/10</text>
+          <text x="45" y="52" text-anchor="middle" fill="#6B7280" font-size="7.5">no gaps</text>
+        </g>
+      </g>
+
+      <!-- Gate connectors — vertical drop from each cell to a downstream-target marker -->
+      <g transform="translate(0,95)" stroke="#2A3340" stroke-width="0.7" fill="none">
+        <!-- PRICE → Chart -->
+        <path d="M 46.5 0 V 18 H 600 V 32" stroke="#3DDC97"/>
+        <!-- MCAP → PM -->
+        <path d="M 147.5 0 V 22 H 920 V 32" stroke="#5EA1FF"/>
+        <!-- ADV → PM -->
+        <path d="M 248.5 0 V 16 H 920 V 32" stroke="#5EA1FF"/>
+        <!-- BETA → Lens Radar -->
+        <path d="M 349.5 0 V 20 H 260 V 32" stroke="#F5A524"/>
+        <!-- FWD P/E → Value lens -->
+        <path d="M 450.5 0 V 14 H 30 V 32" stroke="#F5A524"/>
+        <!-- PEG → Value lens -->
+        <path d="M 551.5 0 V 14 H 30 V 32" stroke="#F5A524"/>
+        <!-- SHORT % → HF lens -->
+        <path d="M 652.5 0 V 18 H 460 V 32" stroke="#C084FC"/>
+        <!-- IMPL ± → R:R -->
+        <path d="M 753.5 0 V 16 H 800 V 32" stroke="#E5484D"/>
+        <!-- FCF MGN → Value lens -->
+        <path d="M 854.5 0 V 20 H 30 V 32" stroke="#F5A524"/>
+        <!-- ROE → Value lens -->
+        <path d="M 955.5 0 V 22 H 30 V 32" stroke="#F5A524"/>
+      </g>
+
+      <!-- Downstream-gate target labels -->
+      <g transform="translate(0,127)" font-family="monospace" font-size="9" font-weight="700" letter-spacing="0.06em">
+        <g transform="translate(0,0)">
+          <rect width="120" height="20" rx="3" fill="rgba(245,165,36,0.10)" stroke="#F5A524"/>
+          <text x="60" y="14" text-anchor="middle" fill="#F5A524">→ VALUE LENS</text>
+        </g>
+        <g transform="translate(200,0)">
+          <rect width="120" height="20" rx="3" fill="rgba(245,165,36,0.10)" stroke="#F5A524"/>
+          <text x="60" y="14" text-anchor="middle" fill="#F5A524">→ LENS RADAR</text>
+        </g>
+        <g transform="translate(430,0)">
+          <rect width="120" height="20" rx="3" fill="rgba(192,132,252,0.10)" stroke="#C084FC"/>
+          <text x="60" y="14" text-anchor="middle" fill="#C084FC">→ HEDGE-FUND</text>
+        </g>
+        <g transform="translate(570,0)">
+          <rect width="120" height="20" rx="3" fill="rgba(61,220,151,0.10)" stroke="#3DDC97"/>
+          <text x="60" y="14" text-anchor="middle" fill="#3DDC97">→ PRICE CHART</text>
+        </g>
+        <g transform="translate(770,0)">
+          <rect width="120" height="20" rx="3" fill="rgba(229,72,77,0.10)" stroke="#E5484D"/>
+          <text x="60" y="14" text-anchor="middle" fill="#E5484D">→ R:R BAR</text>
+        </g>
+        <g transform="translate(890,0)">
+          <rect width="120" height="20" rx="3" fill="rgba(94,161,255,0.10)" stroke="#5EA1FF"/>
+          <text x="60" y="14" text-anchor="middle" fill="#5EA1FF">→ PM SIZING</text>
+        </g>
+      </g>
+
+      <text x="0" y="180" font-family="sans-serif" font-size="10" fill="#6B7280">Cells: <tspan fill="#3DDC97">valid</tspan> · <tspan fill="#F5A524">implausible</tspan> · <tspan fill="#E5484D">missing</tspan>. Plausibility: β 1.65 ✓ · fwd P/E 32.4 ✓ · ADV $25.8B ✓. Three or more missing/implausible → engine returns NO_CALL.</text>
+    </svg>
+  </div>
+
+  <!-- VISUALS ② + ③ -->
+  <div class="vgrid">
+    <div class="panel">
+      <h2><span class="num">②</span>Lens Radar <span class="sub">— score (filled) · Wilson LB (dashed inset) · sector-median (gray) · sub-model count per axis</span></h2>
+      <svg data-visual="lens-radar" viewBox="0 0 360 360" style="width:100%;height:auto;display:block">
+        <!-- Concentric reference rings -->
+        <g stroke="#1E2530" fill="none" stroke-width="0.7">
+          <polygon points="180,40 300,160 180,280 60,160"/>
+          <polygon points="180,70 270,160 180,250 90,160"/>
+          <polygon points="180,100 240,160 180,220 120,160"/>
+          <polygon points="180,130 210,160 180,190 150,160"/>
+        </g>
+        <!-- Axis lines -->
+        <g stroke="#2A3340" stroke-width="0.8">
+          <line x1="180" y1="160" x2="180" y2="40"/>
+          <line x1="180" y1="160" x2="300" y2="160"/>
+          <line x1="180" y1="160" x2="180" y2="280"/>
+          <line x1="180" y1="160" x2="60" y2="160"/>
+        </g>
+        <!-- Concentric scale labels (5, 10 at outer) -->
+        <g font-family="monospace" font-size="8" fill="#6B7280">
+          <text x="184" y="106" text-anchor="start">5</text>
+          <text x="184" y="46"  text-anchor="start">10</text>
+        </g>
+
+        <!-- Sector-median benchmark polygon (gray, behind) -->
+        <polygon id="radarSector" points="180,124 216,160 180,196 144,160" fill="rgba(107,114,128,0.10)" stroke="#6B7280" stroke-width="1" stroke-dasharray="3 2"/>
+
+        <!-- Wilson LB inset polygon (lighter, dashed, inside main) -->
+        <polygon id="radarWilson" points="180,82 252,160 180,220 108,160" fill="none" stroke="#5EA1FF" stroke-width="1" stroke-dasharray="3 2" opacity="0.65"/>
+
+        <!-- Main score polygon -->
+        <polygon id="radarPoly" points="180,64 276,160 180,232 96,160" fill="rgba(94,161,255,0.20)" stroke="#5EA1FF" stroke-width="1.8"/>
+
+        <!-- Score dots -->
+        <circle id="radarDotT" cx="180" cy="64"  r="3.5" fill="#5EA1FF"/>
+        <circle id="radarDotH" cx="276" cy="160" r="3.5" fill="#3DDC97"/>
+        <circle id="radarDotV" cx="180" cy="232" r="3.5" fill="#F5A524"/>
+        <circle id="radarDotP" cx="96"  cy="160" r="3.5" fill="#3DDC97"/>
+
+        <!-- Axis labels + score values -->
+        <g font-family="sans-serif" font-size="11" fill="#E6EAF2">
+          <text id="radarLabT" x="180" y="30" text-anchor="middle" fill="#5EA1FF" font-weight="700">TRADER (lead)</text>
+          <text id="radarValT" x="180" y="46" text-anchor="middle" font-family="monospace" font-size="16" fill="#5EA1FF" font-weight="800">8</text>
+          <text id="radarLabH" x="312" y="158" text-anchor="start">HEDGE FUND</text>
+          <text id="radarValH" x="312" y="174" text-anchor="start" font-family="monospace" font-size="16" fill="#3DDC97" font-weight="800">8</text>
+          <text id="radarLabV" x="180" y="312" text-anchor="middle">VALUE</text>
+          <text id="radarValV" x="180" y="296" text-anchor="middle" font-family="monospace" font-size="16" fill="#F5A524" font-weight="800">6</text>
+          <text id="radarLabP" x="48"  y="158" text-anchor="end">PM</text>
+          <text id="radarValP" x="48"  y="174" text-anchor="end" font-family="monospace" font-size="16" fill="#3DDC97" font-weight="800">7</text>
+        </g>
+
+        <!-- Sub-model count badges (small chips at axis tips) -->
+        <g font-family="monospace" font-size="8" font-weight="700">
+          <g transform="translate(195,30)"><rect width="28" height="12" rx="6" fill="rgba(94,161,255,0.18)" stroke="#5EA1FF" stroke-width="0.5"/><text x="14" y="9" text-anchor="middle" fill="#5EA1FF">7 sub</text></g>
+          <g transform="translate(312,140)"><rect width="28" height="12" rx="6" fill="rgba(61,220,151,0.18)" stroke="#3DDC97" stroke-width="0.5"/><text x="14" y="9" text-anchor="middle" fill="#3DDC97">3 sub</text></g>
+          <g transform="translate(195,316)"><rect width="28" height="12" rx="6" fill="rgba(245,165,36,0.18)" stroke="#F5A524" stroke-width="0.5"/><text x="14" y="9" text-anchor="middle" fill="#F5A524">4 sub</text></g>
+          <g transform="translate(20,140)"><rect width="28" height="12" rx="6" fill="rgba(61,220,151,0.18)" stroke="#3DDC97" stroke-width="0.5"/><text x="14" y="9" text-anchor="middle" fill="#3DDC97">4 sub</text></g>
+        </g>
+
+        <!-- Mini legend inside chart -->
+        <g transform="translate(10,335)" font-family="monospace" font-size="8.5" fill="#9AA4B2">
+          <rect x="0" y="-7" width="14" height="8" fill="rgba(94,161,255,0.20)" stroke="#5EA1FF" stroke-width="1"/><text x="18" y="0" fill="#5EA1FF">score</text>
+          <line x1="58" y1="-3" x2="72" y2="-3" stroke="#5EA1FF" stroke-width="1" stroke-dasharray="3 2"/><text x="76" y="0" fill="#5EA1FF">Wilson LB</text>
+          <line x1="135" y1="-3" x2="149" y2="-3" stroke="#6B7280" stroke-width="1" stroke-dasharray="3 2"/><text x="153" y="0" fill="#6B7280">sector-median</text>
+          <text x="232" y="0" fill="#6B7280">· chip = # sub-models per lens</text>
+        </g>
+      </svg>
+    </div>
+
+    <div class="panel">
+      <h2><span class="num">③</span>Catalyst Horizon <span class="sub">— window shrinks/grows per strategy</span></h2>
+      <svg data-visual="catalyst-horizon" viewBox="0 0 540 320" style="width:100%;height:auto;display:block">
+        <rect id="catBand" x="30" y="140" width="180" height="40" fill="rgba(94,161,255,0.10)" stroke="#5EA1FF" stroke-width="1" rx="3"/>
+        <text id="catBandLabel" x="120" y="135" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#5EA1FF" font-weight="700">POSITION window · 8 weeks (56d)</text>
+        <rect id="catOut" x="210" y="140" width="300" height="40" fill="rgba(107,114,128,0.06)" stroke="#1E2530" stroke-width="1" rx="3"/>
+        <text id="catOutLabel" x="360" y="135" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#6B7280">out of horizon · context only</text>
+        <line x1="30" y1="160" x2="510" y2="160" stroke="#2A3340" stroke-width="0.8"/>
+        <line x1="30" y1="120" x2="30" y2="200" stroke="#E6EAF2" stroke-width="1.5"/>
+        <text x="30" y="115" text-anchor="middle" font-family="monospace" font-size="9" fill="#E6EAF2">TODAY</text>
+        <text x="30" y="220" text-anchor="middle" font-family="monospace" font-size="9" fill="#9AA4B2">05-12</text>
+        <circle id="catER" cx="145.2" cy="160" r="6" fill="#3DDC97" stroke="#0B0E14" stroke-width="2"/>
+        <line x1="145.2" y1="100" x2="145.2" y2="154" stroke="#3DDC97" stroke-width="0.8" stroke-dasharray="2 2"/>
+        <text x="145.2" y="90"  text-anchor="middle" font-family="sans-serif" font-size="10" fill="#3DDC97" font-weight="700">Q4 FY26 ER</text>
+        <text x="145.2" y="78"  text-anchor="middle" font-family="monospace" font-size="9" fill="#3DDC97">+36d · 06-17 AMC</text>
+        <text id="catERStatus" x="145.2" y="183" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#9AA4B2">in-window · primary catalyst</text>
+        <g font-family="monospace" font-size="9" fill="#6B7280">
+          <text x="30" y="260" text-anchor="middle">d0</text>
+          <text x="126" y="260" text-anchor="middle">d30</text>
+          <text x="222" y="260" text-anchor="middle">d60</text>
+          <text x="318" y="260" text-anchor="middle">d90</text>
+          <text x="414" y="260" text-anchor="middle">d120</text>
+          <text x="510" y="260" text-anchor="middle">d150</text>
+        </g>
+        <text id="catRule" x="270" y="290" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#6B7280">POSITION rule: catalyst counts only if ≤ 56d. Out-of-horizon events = context, not catalysts.</text>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ④ DISAGREEMENT MATRIX (3-level intensity · AGREEMENT % row · weight column) -->
+  <div class="panel">
+    <h2><span class="num">④</span>Disagreement Matrix <span class="sub">— 4 lenses × 6 signals · cell-intensity = strength · agreement % per signal · weights per strategy</span></h2>
+    <svg data-visual="disagreement-matrix" viewBox="0 0 1180 260" style="width:100%;height:auto;display:block" font-family="monospace">
+      <!-- Column headers -->
+      <g font-size="9" fill="#9AA4B2" font-weight="700" letter-spacing="0.10em">
+        <text x="225" y="22" text-anchor="middle">DIRECTION</text>
+        <text x="365" y="22" text-anchor="middle">REGIME</text>
+        <text x="505" y="22" text-anchor="middle">EDGE SIGN</text>
+        <text x="645" y="22" text-anchor="middle">CAT IN HORIZON</text>
+        <text x="785" y="22" text-anchor="middle">LIQUIDITY</text>
+        <text x="925" y="22" text-anchor="middle">SIZING</text>
+        <text x="1070" y="22" text-anchor="middle" fill="#5EA1FF">WEIGHT (×)</text>
+      </g>
+      <!-- Lens rows (4 × 6 cells) — generated by id, populated by render -->
+      <g id="dmRows"></g>
+
+      <!-- AGREEMENT % row at bottom of grid -->
+      <g transform="translate(0,170)">
+        <rect x="20" y="0" width="100" height="32" rx="3" fill="rgba(11,14,20,0.7)" stroke="#1E2530"/>
+        <text x="32" y="14" font-size="9.5" fill="#9AA4B2" font-weight="700">AGREEMENT</text>
+        <text x="32" y="26" font-size="8.5" fill="#6B7280">vs lead lens</text>
+        <g id="dmAgreement"></g>
+      </g>
+
+      <text id="dmFoot" x="590" y="232" text-anchor="middle" font-family="sans-serif" font-size="10.5" fill="#9AA4B2">Total disagreements: <tspan id="dmDisagText" fill="#F5A524" font-weight="800">1 soft</tspan> · resolved through.</text>
+      <text x="590" y="250" text-anchor="middle" font-family="sans-serif" font-size="9.5" fill="#6B7280">Cell intensity = vote strength · Black = N/A · Yellow border = soft disagreement · Weights re-scale per strategy (POSITION uses 1.0× across).</text>
+    </svg>
+  </div>
+
+  <!-- ⑤ CONVICTION INDICATOR (rule-pass checklist) -->
+  <div class="panel">
+    <h2><span class="num">⑤</span>Conviction Indicator <span class="sub">— 5-rule pass checklist · failed rules show why · pass-count → conviction tier</span></h2>
+    <div class="conv-grid">
+      <div class="conv-rules" id="convRules"></div>
+      <div class="conv-tier" id="convTier">
+        <div class="conv-tier-label">CONVICTION</div>
+        <div class="conv-tier-val" id="convTierVal">HIGH</div>
+        <div class="conv-tier-rule" id="convTierRule">5 of 5 rules pass</div>
+        <div class="conv-tier-thresh">
+          <div><span class="dot dot-rd"></span>0–2 of 5 → LOW</div>
+          <div><span class="dot dot-am"></span>3–4 of 5 → MEDIUM</div>
+          <div><span class="dot dot-gn"></span>5 of 5 → HIGH</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑥ QUANT SIGNAL PANEL (5 sparkline tiles · 30-day history each) -->
+  <div class="panel">
+    <h2><span class="num">⑥</span>Quant Signal Panel <span class="sub">— 30-day rolling history per metric · sparkline + current · trend arrow</span></h2>
+    <svg data-visual="quant-panel" viewBox="0 0 1080 200" style="width:100%;height:auto;display:block" font-family="monospace">
+      <g transform="translate(20,20)" id="qsP">
+        <rect x="-6" y="-12" width="186" height="170" rx="4" fill="rgba(22,27,36,0.4)" stroke="#1E2530"/>
+        <text x="0" y="0" font-size="9" fill="#9AA4B2" font-weight="700" letter-spacing="0.10em">P(TARGET)</text>
+        <polyline id="qsPLine" fill="none" stroke="#3DDC97" stroke-width="1.6" points=""/>
+        <polygon id="qsPFill" fill="rgba(61,220,151,0.18)" points=""/>
+        <circle id="qsPDot" cx="170" cy="40" r="3" fill="#3DDC97" stroke="#0B0E14" stroke-width="1"/>
+        <text id="qsPVal" font-size="22" fill="#E6EAF2" font-weight="800" x="0" y="125">58%</text>
+        <text id="qsPArr" font-size="11" font-weight="700" x="58" y="125" fill="#3DDC97">▲ +6pp 30d</text>
+        <text font-size="8.5" fill="#9AA4B2" x="0" y="142">Wilson LB 52% (n=157)</text>
+        <text font-size="8" fill="#6B7280" x="0" y="154">30 daily MC runs · last in green</text>
+      </g>
+      <g transform="translate(220,20)" id="qsE">
+        <rect x="-6" y="-12" width="186" height="170" rx="4" fill="rgba(22,27,36,0.4)" stroke="#1E2530"/>
+        <text x="0" y="0" font-size="9" fill="#9AA4B2" font-weight="700" letter-spacing="0.10em">EDGE (signed)</text>
+        <line x1="0" y1="60" x2="170" y2="60" stroke="#2A3340" stroke-width="0.8" stroke-dasharray="2 2"/>
+        <text font-size="8" fill="#6B7280" x="0" y="58">0pp</text>
+        <polyline id="qsELine" fill="none" stroke="#3DDC97" stroke-width="1.6" points=""/>
+        <polygon id="qsEFill" fill="rgba(61,220,151,0.18)" points=""/>
+        <circle id="qsEDot" cx="170" cy="20" r="3" fill="#3DDC97" stroke="#0B0E14" stroke-width="1"/>
+        <text id="qsEVal" font-size="22" fill="#3DDC97" font-weight="800" x="0" y="125">+24pp</text>
+        <text id="qsEArr" font-size="11" font-weight="700" x="80" y="125" fill="#3DDC97">▲ +12pp</text>
+        <text font-size="8.5" fill="#9AA4B2" x="0" y="142">Bayes-adj +42pp · supports BUY</text>
+        <text font-size="8" fill="#6B7280" x="0" y="154">MC edge over 30d · uptrending</text>
+      </g>
+      <g transform="translate(420,20)" id="qsR">
+        <rect x="-6" y="-12" width="186" height="170" rx="4" fill="rgba(22,27,36,0.4)" stroke="#1E2530"/>
+        <text x="0" y="0" font-size="9" fill="#9AA4B2" font-weight="700" letter-spacing="0.10em">REGIME SCORE</text>
+        <line id="qsRFloor" x1="0" y1="40" x2="170" y2="40" stroke="#F5A524" stroke-width="0.8" stroke-dasharray="3 2"/>
+        <text id="qsRFloorL" font-size="8" fill="#F5A524" x="170" y="38" text-anchor="end">floor 72</text>
+        <polyline id="qsRLine" fill="none" stroke="#3DDC97" stroke-width="1.6" points=""/>
+        <polygon id="qsRFill" fill="rgba(61,220,151,0.18)" points=""/>
+        <circle id="qsRDot" cx="170" cy="22" r="3" fill="#3DDC97" stroke="#0B0E14" stroke-width="1"/>
+        <text id="qsRVal" font-size="22" fill="#3DDC97" font-weight="800" x="0" y="125">82</text>
+        <text id="qsRArr" font-size="11" font-weight="700" x="38" y="125" fill="#3DDC97">▲ above floor</text>
+        <text font-size="8.5" fill="#9AA4B2" x="0" y="142">risk_on_choppy · BAP-2</text>
+        <text font-size="8" fill="#6B7280" x="0" y="154">clears floor 4 weeks running</text>
+      </g>
+      <g transform="translate(620,20)" id="qsK">
+        <rect x="-6" y="-12" width="186" height="170" rx="4" fill="rgba(22,27,36,0.4)" stroke="#1E2530"/>
+        <text x="0" y="0" font-size="9" fill="#9AA4B2" font-weight="700" letter-spacing="0.10em">KELLY SIZE (% eq)</text>
+        <polyline id="qsKLine" fill="none" stroke="#5EA1FF" stroke-width="1.6" points=""/>
+        <polygon id="qsKFill" fill="rgba(94,161,255,0.18)" points=""/>
+        <circle id="qsKDot" cx="170" cy="40" r="3" fill="#5EA1FF" stroke="#0B0E14" stroke-width="1"/>
+        <text id="qsKVal" font-size="22" fill="#5EA1FF" font-weight="800" x="0" y="125">5.5%</text>
+        <text id="qsKArr" font-size="11" font-weight="700" x="60" y="125" fill="#5EA1FF">▲ +2.5pp</text>
+        <text id="qsKSub" font-size="8.5" fill="#9AA4B2" x="0" y="142">× 1.3 POSITION boost · DD 1.0</text>
+        <text font-size="8" fill="#6B7280" x="0" y="154">scaling up as edge solidifies</text>
+      </g>
+      <g transform="translate(820,20)" id="qsC">
+        <rect x="-6" y="-12" width="186" height="170" rx="4" fill="rgba(22,27,36,0.4)" stroke="#1E2530"/>
+        <text x="0" y="0" font-size="9" fill="#9AA4B2" font-weight="700" letter-spacing="0.10em">CVaR-97.5</text>
+        <polyline id="qsCLine" fill="none" stroke="#E5484D" stroke-width="1.6" points=""/>
+        <polygon id="qsCFill" fill="rgba(229,72,77,0.18)" points=""/>
+        <circle id="qsCDot" cx="170" cy="50" r="3" fill="#E5484D" stroke="#0B0E14" stroke-width="1"/>
+        <text id="qsCVal" font-size="22" fill="#E5484D" font-weight="800" x="0" y="125">−8.4%</text>
+        <text id="qsCArr" font-size="11" font-weight="700" x="64" y="125" fill="#3DDC97">▲ less tail</text>
+        <text id="qsCSub" font-size="8.5" fill="#9AA4B2" x="0" y="142">10d · 97.5% tail · n=80</text>
+        <text font-size="8" fill="#6B7280" x="0" y="154">tail compressing (good)</text>
+      </g>
+      <text x="540" y="190" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#6B7280">monte_carlo + forward_dist (3K paths / 80 sample) · setup_history n=157 · 30 daily runs · trend arrows compare current vs 30d-ago</text>
+    </svg>
+  </div>
+
+  <!-- PRICE CHART -->
+  <div class="panel">
+    <h2><span class="num">⑦</span>Price Chart · Trade Plan
+      <span class="sub">— EMA 8 / 20 / 50 / 100 · stop/T1/T2/entry re-scale per strategy</span>
+      <span id="emaStackBadge" class="pill pill-gn" style="margin-left:auto">📈 BULLISH STACK · 8 &gt; 20 &gt; 50 &gt; 100</span>
+    </h2>
+    <svg data-visual="price-chart-plan" viewBox="0 0 1100 510" style="width:100%;height:auto;display:block">
+      <defs>
+        <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#5EA1FF" stop-opacity="0.18"/>
+          <stop offset="1" stop-color="#5EA1FF" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+
+      <!-- Grid -->
+      <g stroke="#1E2530" stroke-width="0.5">
+        <line x1="60" y1="40"  x2="1020" y2="40"/>
+        <line x1="60" y1="90"  x2="1020" y2="90"/>
+        <line x1="60" y1="140" x2="1020" y2="140"/>
+        <line x1="60" y1="190" x2="1020" y2="190"/>
+        <line x1="60" y1="240" x2="1020" y2="240"/>
+      </g>
+
+      <!-- Targets / stop / entry (drawn behind price line) -->
+      <line id="cT2" x1="60" y1="59.1" x2="1020" y2="59.1" stroke="#3DDC97" stroke-width="0.9" stroke-dasharray="6 3"/>
+      <text id="cT2L" x="1024" y="62" font-family="monospace" font-size="10.5" fill="#3DDC97" font-weight="700">T2 $172</text>
+      <line id="cT1" x1="60" y1="110" x2="1020" y2="110" stroke="#3DDC97" stroke-width="0.9" stroke-dasharray="6 3"/>
+      <text id="cT1L" x="1024" y="113" font-family="monospace" font-size="10.5" fill="#3DDC97" font-weight="700">T1 $158</text>
+      <rect id="cEntry" x="60" y="165.8" width="960" height="7.7" fill="rgba(94,161,255,0.22)" stroke="#5EA1FF" stroke-width="0.6"/>
+      <text id="cEntryL" x="1024" y="172" font-family="monospace" font-size="10.5" fill="#5EA1FF" font-weight="700">entry $140.50–$143.20</text>
+      <line id="cStop" x1="60" y1="193.6" x2="1020" y2="193.6" stroke="#E5484D" stroke-width="0.9" stroke-dasharray="6 3"/>
+      <text id="cStopL" x="1024" y="196" font-family="monospace" font-size="10.5" fill="#E5484D" font-weight="700">stop $135</text>
+
+      <!-- Price area fill -->
+      <polygon id="cFill" fill="url(#priceGrad)" points=""/>
+
+      <!-- EMA polylines (slowest to fastest, so fastest sits on top) -->
+      <polyline id="cEma100" fill="none" stroke="#818CF8" stroke-width="1.2" stroke-linejoin="round" stroke-dasharray="3 2" opacity="0.85" points=""/>
+      <polyline id="cEma50"  fill="none" stroke="#C084FC" stroke-width="1.3" stroke-linejoin="round" opacity="0.9" points=""/>
+      <polyline id="cEma20"  fill="none" stroke="#F5A524" stroke-width="1.5" stroke-linejoin="round" opacity="0.95" points=""/>
+      <polyline id="cEma8"   fill="none" stroke="#FCD34D" stroke-width="1.6" stroke-linejoin="round" points=""/>
+
+      <!-- Price line (top of stack) -->
+      <polyline id="cPriceLine" fill="none" stroke="#E6EAF2" stroke-width="1.9" stroke-linejoin="round" points=""/>
+
+      <!-- Current price marker -->
+      <circle id="cNowDot" cx="1020" cy="165.8" r="5" fill="#5EA1FF" stroke="#0B0E14" stroke-width="2"/>
+      <line x1="1020" y1="20" x2="1020" y2="250" stroke="#5EA1FF" stroke-width="0.6" stroke-dasharray="2 3"/>
+      <text x="1020" y="14" text-anchor="middle" font-family="monospace" font-size="10" fill="#5EA1FF" font-weight="700">now $142.65</text>
+
+      <!-- EMA endpoint labels (right of "now" marker) -->
+      <g font-family="monospace" font-size="10" font-weight="700">
+        <text id="cEma8L"   x="1024" y="170" fill="#FCD34D">EMA8</text>
+        <text id="cEma20L"  x="1024" y="184" fill="#F5A524">EMA20</text>
+        <text id="cEma50L"  x="1024" y="198" fill="#C084FC">EMA50</text>
+        <text id="cEma100L" x="1024" y="212" fill="#818CF8">EMA100</text>
+      </g>
+
+      <!-- VOLUME SUB-PANEL (y 300–355) -->
+      <g id="volPanel">
+        <line x1="60" y1="300" x2="1020" y2="300" stroke="#2A3340" stroke-width="0.6"/>
+        <line x1="60" y1="355" x2="1020" y2="355" stroke="#1E2530" stroke-width="0.6"/>
+        <text x="50" y="310" text-anchor="end" font-family="monospace" font-size="9" fill="#9AA4B2" font-weight="700">VOLUME</text>
+        <text x="50" y="322" text-anchor="end" font-family="monospace" font-size="8" fill="#6B7280">($B daily)</text>
+        <line id="volAvgLine" x1="60" y1="334" x2="1020" y2="334" stroke="#F5A524" stroke-width="0.6" stroke-dasharray="3 2"/>
+        <text x="1024" y="337" font-family="monospace" font-size="8.5" fill="#F5A524" font-weight="700">avg $25.6B</text>
+        <g id="volBars"></g>
+        <!-- Vol scale labels -->
+        <text x="1024" y="304" font-family="monospace" font-size="8" fill="#6B7280">$32B</text>
+        <text x="1024" y="354" font-family="monospace" font-size="8" fill="#6B7280">$0</text>
+      </g>
+
+      <!-- RSI SUB-PANEL (y 370–425) -->
+      <g id="rsiPanel">
+        <line x1="60" y1="370" x2="1020" y2="370" stroke="#1E2530" stroke-width="0.6"/>
+        <line x1="60" y1="425" x2="1020" y2="425" stroke="#1E2530" stroke-width="0.6"/>
+        <text x="50" y="380" text-anchor="end" font-family="monospace" font-size="9" fill="#9AA4B2" font-weight="700">RSI 14</text>
+        <text x="50" y="392" text-anchor="end" font-family="monospace" font-size="8" fill="#6B7280">(0–100)</text>
+        <!-- 70 overbought line -->
+        <line x1="60" y1="386.5" x2="1020" y2="386.5" stroke="#E5484D" stroke-width="0.6" stroke-dasharray="3 2"/>
+        <text x="1024" y="389" font-family="monospace" font-size="8" fill="#E5484D" font-weight="700">70 OB</text>
+        <!-- 50 mid -->
+        <line x1="60" y1="397.5" x2="1020" y2="397.5" stroke="#2A3340" stroke-width="0.5" stroke-dasharray="2 2"/>
+        <text x="1024" y="400" font-family="monospace" font-size="8" fill="#6B7280">50</text>
+        <!-- 30 oversold line -->
+        <line x1="60" y1="408.5" x2="1020" y2="408.5" stroke="#3DDC97" stroke-width="0.6" stroke-dasharray="3 2"/>
+        <text x="1024" y="411" font-family="monospace" font-size="8" fill="#3DDC97" font-weight="700">30 OS</text>
+        <polyline id="rsiLine" fill="none" stroke="#FCD34D" stroke-width="1.5" stroke-linejoin="round" points=""/>
+        <circle id="rsiDot" cx="1020" cy="398" r="3" fill="#FCD34D" stroke="#0B0E14" stroke-width="1.5"/>
+        <text id="rsiCurrent" x="1024" y="423" font-family="monospace" font-size="9" fill="#FCD34D" font-weight="700">RSI 58</text>
+      </g>
+
+      <!-- X-axis at the bottom of all panels -->
+      <g font-family="monospace" font-size="9" fill="#6B7280">
+        <text x="60" y="442" text-anchor="middle">−60d</text>
+        <text x="300" y="442" text-anchor="middle">−45d</text>
+        <text x="540" y="442" text-anchor="middle">−30d</text>
+        <text x="780" y="442" text-anchor="middle">−15d</text>
+        <text x="1020" y="442" text-anchor="middle">today</text>
+      </g>
+
+      <!-- Legend (moved below x-axis) -->
+      <g transform="translate(70,462)" font-family="monospace" font-size="10">
+        <text x="0" y="0" fill="#9AA4B2" font-weight="700">LEGEND</text>
+        <line x1="70" y1="-3" x2="100" y2="-3" stroke="#E6EAF2" stroke-width="1.9"/><text x="106" y="0" fill="#E6EAF2">Price</text>
+        <line x1="155" y1="-3" x2="185" y2="-3" stroke="#FCD34D" stroke-width="1.6"/><text x="191" y="0" fill="#FCD34D">EMA 8</text>
+        <line x1="245" y1="-3" x2="275" y2="-3" stroke="#F5A524" stroke-width="1.5"/><text x="281" y="0" fill="#F5A524">EMA 20</text>
+        <line x1="340" y1="-3" x2="370" y2="-3" stroke="#C084FC" stroke-width="1.3"/><text x="376" y="0" fill="#C084FC">EMA 50</text>
+        <line x1="435" y1="-3" x2="465" y2="-3" stroke="#818CF8" stroke-width="1.2" stroke-dasharray="3 2"/><text x="471" y="0" fill="#818CF8">EMA 100</text>
+        <line x1="540" y1="-3" x2="570" y2="-3" stroke="#3DDC97" stroke-width="0.9" stroke-dasharray="6 3"/><text x="576" y="0" fill="#3DDC97">Target</text>
+        <line x1="640" y1="-3" x2="670" y2="-3" stroke="#E5484D" stroke-width="0.9" stroke-dasharray="6 3"/><text x="676" y="0" fill="#E5484D">Stop</text>
+        <rect x="730" y="-7" width="30" height="8" fill="rgba(94,161,255,0.30)" stroke="#5EA1FF" stroke-width="0.5"/><text x="766" y="0" fill="#5EA1FF">Entry zone</text>
+      </g>
+
+      <!-- EMA stack indicator box (top-left of price area) -->
+      <g id="emaStackBox" transform="translate(70,50)">
+        <rect width="190" height="46" rx="3" fill="rgba(11,14,20,0.85)" stroke="#1E2530"/>
+        <text x="10" y="15" font-family="monospace" font-size="8.5" fill="#9AA4B2" font-weight="700" letter-spacing="0.10em">EMA STACK · CURRENT</text>
+        <text id="emaStackLabel" x="10" y="32" font-family="monospace" font-size="11" fill="#3DDC97" font-weight="800">8 &gt; 20 &gt; 50 &gt; 100  ✓</text>
+        <text id="emaStackHint" x="10" y="42" font-family="monospace" font-size="8.5" fill="#9AA4B2">bullish · trend-intact</text>
+      </g>
+
+      <text id="cFoot" x="540" y="495" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#6B7280">Daily closes · 60 sessions · EMAs/volume/RSI computed from price · targets/stop from canonical_trade_plan</text>
+    </svg>
+  </div>
+
+  <!-- ⑧ R:R ASYMMETRY (bar) + EV SCENARIO WATERFALL -->
+  <div class="panel">
+    <h2><span class="num">⑧</span>R:R Asymmetry <span class="sub">— invalidation → target bar · then probability-weighted Expected Value waterfall</span></h2>
+    <svg id="rrSvg" data-visual="rr-asymmetry" viewBox="0 0 1080 150" style="width:100%;height:auto;display:block">
+      <rect id="rrLeft"  x="60" y="50" width="319.3" height="40" fill="#E5484D" opacity="0.85" rx="2"/>
+      <rect id="rrRight" x="379.3" y="50" width="640.7" height="40" fill="#3DDC97" opacity="0.85" rx="2"/>
+      <line id="rrLineStop" x1="60" y1="45" x2="60" y2="100" stroke="#E5484D" stroke-width="1.5"/>
+      <text id="rrStopLab" x="60" y="36" font-family="monospace" font-size="11" fill="#E5484D" font-weight="700" text-anchor="middle">STOP $135</text>
+      <text id="rrStopPct" x="60" y="120" font-family="monospace" font-size="10" fill="#E5484D" text-anchor="middle">−5.4% (−$7.65)</text>
+      <line id="rrLineNow" x1="379.3" y1="40" x2="379.3" y2="100" stroke="#5EA1FF" stroke-width="2"/>
+      <circle id="rrNowDot" cx="379.3" cy="70" r="6" fill="#5EA1FF" stroke="#0B0E14" stroke-width="2"/>
+      <text id="rrNowLab" x="379.3" y="32" font-family="monospace" font-size="11" fill="#5EA1FF" font-weight="700" text-anchor="middle">NOW $142.65</text>
+      <text id="rrNowSub" x="379.3" y="120" font-family="monospace" font-size="10" fill="#5EA1FF" text-anchor="middle">reference price</text>
+      <line id="rrLineT1" x1="1020" y1="45" x2="1020" y2="100" stroke="#3DDC97" stroke-width="1.5"/>
+      <text id="rrT1Lab" x="1020" y="36" font-family="monospace" font-size="11" fill="#3DDC97" font-weight="700" text-anchor="middle">T1 $158</text>
+      <text id="rrT1Pct" x="1020" y="120" font-family="monospace" font-size="10" fill="#3DDC97" text-anchor="middle">+10.8% (+$15.35)</text>
+      <g id="rrRatioG" transform="translate(540,68)" font-family="monospace">
+        <text font-size="11" fill="#9AA4B2" text-anchor="middle" y="-12">R-ratio (current → T1)</text>
+        <text id="rrRatio" font-size="22" fill="#3DDC97" font-weight="800" text-anchor="middle" y="12">2.01R</text>
+      </g>
+      <text id="rrFoot" x="540" y="142" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#6B7280">+$15.35 reward vs −$7.65 risk · clears 2:1 minimum</text>
+    </svg>
+
+    <!-- EV WATERFALL TABLE (visual) -->
+    <h2 style="margin-top:18px"><span class="num">⑧·b</span>Expected Value Waterfall <span class="sub">— scenario probability × outcome → EV contribution · sum is the trade's expected $</span></h2>
+    <svg data-visual="ev-waterfall" viewBox="0 0 1100 260" style="width:100%;height:auto;display:block" font-family="monospace">
+      <!-- Header row -->
+      <g font-size="9" fill="#9AA4B2" font-weight="700" letter-spacing="0.10em" transform="translate(0,18)">
+        <text x="20" >SCENARIO</text>
+        <text x="200">OUTCOME</text>
+        <text x="350">PROB</text>
+        <text x="430">$ MOVE</text>
+        <text x="540">PROB BAR</text>
+        <text x="830">EV $ CONTRIBUTION</text>
+      </g>
+      <line x1="20" y1="26" x2="1080" y2="26" stroke="#1E2530" stroke-width="0.6"/>
+      <!-- BEST -->
+      <g transform="translate(0,40)" id="evBest">
+        <rect x="20" y="0" width="1060" height="40" rx="3" fill="rgba(61,220,151,0.05)"/>
+        <text x="32" y="16" font-size="12" fill="#3DDC97" font-weight="700">▲ BEST</text>
+        <text x="32" y="32" font-size="9.5" fill="#9AA4B2">T2 reached</text>
+        <text x="200" y="24" id="evBestOut" font-size="13" fill="#3DDC97" font-weight="700">$172</text>
+        <text x="350" y="24" id="evBestProb" font-size="13" fill="#E6EAF2" font-weight="800">18%</text>
+        <text x="430" y="24" id="evBestMove" font-size="13" fill="#3DDC97" font-weight="700">+$29.35</text>
+        <rect x="540" y="14" width="280" height="14" fill="rgba(107,114,128,0.10)" rx="2"/>
+        <rect id="evBestBar" x="540" y="14" width="50.4" height="14" fill="#3DDC97" rx="2"/>
+        <text x="830" y="24" id="evBestEV" font-size="13" fill="#3DDC97" font-weight="800">+$5.28</text>
+      </g>
+      <!-- BASE -->
+      <g transform="translate(0,90)" id="evBase">
+        <rect x="20" y="0" width="1060" height="40" rx="3" fill="rgba(94,161,255,0.05)"/>
+        <text x="32" y="16" font-size="12" fill="#5EA1FF" font-weight="700">► BASE</text>
+        <text x="32" y="32" font-size="9.5" fill="#9AA4B2">T1 reached</text>
+        <text x="200" y="24" id="evBaseOut" font-size="13" fill="#5EA1FF" font-weight="700">$158</text>
+        <text x="350" y="24" id="evBaseProb" font-size="13" fill="#E6EAF2" font-weight="800">58%</text>
+        <text x="430" y="24" id="evBaseMove" font-size="13" fill="#3DDC97" font-weight="700">+$15.35</text>
+        <rect x="540" y="14" width="280" height="14" fill="rgba(107,114,128,0.10)" rx="2"/>
+        <rect id="evBaseBar" x="540" y="14" width="162.4" height="14" fill="#5EA1FF" rx="2"/>
+        <text x="830" y="24" id="evBaseEV" font-size="13" fill="#3DDC97" font-weight="800">+$8.90</text>
+      </g>
+      <!-- WORST -->
+      <g transform="translate(0,140)" id="evWorst">
+        <rect x="20" y="0" width="1060" height="40" rx="3" fill="rgba(229,72,77,0.05)"/>
+        <text x="32" y="16" font-size="12" fill="#E5484D" font-weight="700">▼ WORST</text>
+        <text x="32" y="32" font-size="9.5" fill="#9AA4B2">stop hit</text>
+        <text x="200" y="24" id="evWorstOut" font-size="13" fill="#E5484D" font-weight="700">$135</text>
+        <text x="350" y="24" id="evWorstProb" font-size="13" fill="#E6EAF2" font-weight="800">24%</text>
+        <text x="430" y="24" id="evWorstMove" font-size="13" fill="#E5484D" font-weight="700">−$7.65</text>
+        <rect x="540" y="14" width="280" height="14" fill="rgba(107,114,128,0.10)" rx="2"/>
+        <rect id="evWorstBar" x="540" y="14" width="67.2" height="14" fill="#E5484D" rx="2"/>
+        <text x="830" y="24" id="evWorstEV" font-size="13" fill="#E5484D" font-weight="800">−$1.84</text>
+      </g>
+      <!-- TOTAL -->
+      <line x1="20" y1="195" x2="1080" y2="195" stroke="#1E2530" stroke-width="0.8"/>
+      <g transform="translate(0,210)">
+        <text x="32" y="14" font-size="11" fill="#9AA4B2" font-weight="700" letter-spacing="0.10em">EXPECTED VALUE (per share)</text>
+        <text x="32" y="30" font-size="9" fill="#6B7280">sum of probability-weighted outcomes · this is the true ‟return‟ of the trade</text>
+        <text id="evTotal" x="830" y="22" font-size="22" fill="#3DDC97" font-weight="900">+$12.34</text>
+        <text id="evTotalPct" x="830" y="40" font-size="11" fill="#3DDC97" font-weight="700">+8.7% on $142.65 · positive EV → take the trade</text>
+      </g>
+    </svg>
+  </div>
+
+  <!-- LENS-BY-LENS -->
+  <div class="panel">
+    <h2><span class="num">⑨</span>Lens-by-lens analysis <span class="sub">— 4 lenses · lead lens highlights · expand for 11-framework decomposition</span></h2>
+
+    <div class="lens-row" id="lensTRADER">
+      <span class="lens-l">TRADER<span class="role" id="lensRoleTRADER">technical setup</span></span>
+      <span id="lensVoteTRADER"></span>
+      <span id="lensBodyTRADER"></span>
+    </div>
+    <div class="lens-row" id="lensHEDGE">
+      <span class="lens-l">HEDGE FUND<span class="role" id="lensRoleHEDGE">regime · edge · positioning</span></span>
+      <span id="lensVoteHEDGE"></span>
+      <span id="lensBodyHEDGE"></span>
+    </div>
+    <div class="lens-row" id="lensVALUE">
+      <span class="lens-l">VALUE<span class="role" id="lensRoleVALUE">Graham-Buffett</span></span>
+      <span id="lensVoteVALUE"></span>
+      <span id="lensBodyVALUE"></span>
+    </div>
+    <div class="lens-row" id="lensPM">
+      <span class="lens-l">PM (CFP)<span class="role" id="lensRolePM">sizing · suitability</span></span>
+      <span id="lensVotePM"></span>
+      <span id="lensBodyPM"></span>
+    </div>
+
+    <details class="subs">
+      <summary>⟡ Lens decomposition · 11 frameworks · click to expand <span class="hint">— Wyckoff/Elliott/Dow/SMC/VP/AVWAP/Ichimoku/DCF/DDM/Bayesian/Order Flow</span></summary>
+      <div class="sub-row"><span class="sub-k">Wyckoff phase</span><span><span class="pill pill-gn">PHASE D</span></span><span class="sub-v"><b>Phase D late</b> · spring + test cleared at $128 · sign-of-strength bounce · next: break $148 = phase E confirmation</span></div>
+      <div class="sub-row"><span class="sub-k">Elliott Wave</span><span><span class="pill pill-gn">W4 RETRACE</span></span><span class="sub-v"><b>Wave 4 retrace</b> · W3 $108→$150 · W4 38.2% Fib at $134 · W5 target <b>$172–$180</b></span></div>
+      <div class="sub-row"><span class="sub-k">Dow Theory</span><span><span class="pill pill-gn">UP INTACT</span></span><span class="sub-v"><b>Primary trend UP</b> · higher highs/lows 1Y · secondary correction completed at $128</span></div>
+      <div class="sub-row"><span class="sub-k">SMC</span><span><span class="pill pill-gn">OB HOLDING</span></span><span class="sub-v">Bullish order block <b>$135–$138</b> holding · FVG $144–$146 filled bullish</span></div>
+      <div class="sub-row"><span class="sub-k">Volume profile</span><span><span class="pill pill-cy">POC SUPPORT</span></span><span class="sub-v"><b>POC $140.20</b> ≈ current price · VAH $146 · VAL $134</span></div>
+      <div class="sub-row"><span class="sub-k">Anchored VWAP</span><span><span class="pill pill-gn">ABOVE 3/4</span></span><span class="sub-v"><b>Above 3 of 4 anchors</b> · 52w-low $116 · last-ER $138 · below 50d swing-high AVWAP $147</span></div>
+      <div class="sub-row"><span class="sub-k">Ichimoku</span><span><span class="pill pill-gn">ABOVE KUMO</span></span><span class="sub-v"><b>Price above kumo</b> · Tenkan $141 &gt; Kijun $137 · TK cross 4d ago</span></div>
+      <div class="sub-row"><span class="sub-k">DCF (FCF)</span><span><span class="pill pill-am">NEAR FAIR</span></span><span class="sub-v">2-stage DCF · IV <b>$148</b> · MoS <b>+3.7%</b> (premium-fair, not compelling)</span></div>
+      <div class="sub-row"><span class="sub-k">DDM</span><span><span class="pill pill-dim">N/A</span></span><span class="sub-v">Dividend yield 0.03% — DDM not applicable</span></div>
+      <div class="sub-row"><span class="sub-k">Bayesian P(T1)</span><span><span class="pill pill-gn">POST 76%</span></span><span class="sub-v"><b>Posterior 76%</b> · prior 58% × LRs (Wilson 1.30 · RS 1.40 · MACD 1.15 · FRESH 1.25 · revisions 1.20)</span></div>
+      <div class="sub-row"><span class="sub-k">Order flow · delta</span><span><span class="pill pill-gn">+ACCUM</span></span><span class="sub-v">Cumulative delta positive 5d · block prints at $140 · bid-ask 1.5× buy-side</span></div>
+    </details>
+  </div>
+
+  <!-- FACTS / RISKS -->
+  <div class="vgrid">
+    <div class="panel">
+      <h2><span class="num">⑩</span>Top 3 Supporting Facts <span class="sub" id="factsWeightHint">— POSITION weights · EARN 1.2× · VALUE 1.3× · TECH 1.0×</span></h2>
+      <ol id="factsList"></ol>
+    </div>
+    <div class="panel">
+      <h2><span class="num">⑪</span>Top 3 Risks <span class="sub" id="risksWeightHint">— POSITION-specific risks injected</span></h2>
+      <ol id="risksList"></ol>
+    </div>
+  </div>
+
+  <!-- INVALIDATION -->
+  <div class="panel">
+    <h2><span class="num">⑫</span>Invalidation Condition <span class="sub" id="invalSub">— POSITION-specific · what proves this call wrong</span></h2>
+    <div id="invalBody" style="font-size:13px;line-height:1.7;color:var(--ink)"></div>
+  </div>
+
+  <!-- CONVICTION -->
+  <div class="panel">
+    <h2><span class="num">⑬</span>Conviction · <span id="convLabel">HIGH</span> <span class="sub" id="convRule">— rule: negative quant edge cannot be HIGH; rule passes (edge +24pp positive)</span></h2>
+    <div id="convBody" style="font-size:13px;line-height:1.7;color:var(--ink-2);padding:8px 12px;background:var(--surf-2);border-radius:3px"></div>
+  </div>
+
+  <!-- ALT STRATEGY -->
+  <div class="panel">
+    <h2><span class="num">⑭</span>Alt Strategy Call <span class="sub">— what the call would be under the other two horizons</span></h2>
+    <div class="alt-grid" id="altGrid"></div>
+    <div style="margin-top:10px;font-size:11px;color:var(--ink-3);line-height:1.6" id="altDiscr"></div>
+  </div>
+
+  <!-- DATA + SOURCES -->
+  <div class="vgrid">
+    <div class="panel">
+      <h2><span class="num">⑮</span>Data Completeness · <span style="color:var(--gn)">COMPLETE</span> <span class="sub">— 0/10 missing · all in freshness window</span></h2>
+      <div style="font-size:12.5px;line-height:1.7;color:var(--ink-2)">
+        All 10 required inputs present and within freshness windows. Price intraday (last quote &lt;15 min). Fundamentals from Q3 FY26 10-Q. Consensus estimates updated 2026-05-10 (within 30d). Earnings date confirmed via primary source (company IR). Options chain via Schwab 2h cache. <b style="color:var(--ink)">Zero implausibility flags:</b> β 1.65 plausible · fwd P/E 32.4 plausible · ADV $25.8B plausible.
+      </div>
+      <div style="margin-top:8px;font:500 11px ui-monospace,monospace;color:var(--ink-3)"><b style="color:var(--ink-2)">Missing fields:</b> none</div>
+    </div>
+    <div class="panel">
+      <h2><span class="num">⑯</span>Sources &amp; Freshness</h2>
+      <div class="src-grid">
+        <span><b>Price:</b> 2026-05-12 14:30 EST · Schwab (5-min delayed)</span>
+        <span><b>Fundamentals:</b> Q3 FY26 10-Q · EODHD 2026-05-02</span>
+        <span><b>Consensus:</b> 2026-05-10 · last revision 2d ago</span>
+        <span><b>Earnings date:</b> 2026-06-17 AMC · company IR</span>
+        <span><b>Options chain:</b> Schwab · 2h cache</span>
+        <span><b>Insider:</b> SEC EDGAR Form 4 · 2026-05-11</span>
+        <span><b>Setup history:</b> n=157 closed · 2024-08 to 2026-05</span>
+        <span><b>Scan run:</b> 2026-05-12 09:45 EST · build da25addc4</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- SELF-CHECK -->
+  <div class="panel">
+    <h2><span class="num">⑰</span>Self-check confirmation <span class="sub">— must pass before engine returns</span></h2>
+    <div class="self-check" id="selfCheck"></div>
+  </div>
+
+  <!-- ENGINE STRUCT -->
+  <details class="struct">
+    <summary>⟡ Engine struct · 18-field JSON output · click to expand</summary>
+    <div class="struct-pre" id="structJson"></div>
+  </details>
+
+</div>
+
+<script>
+const PRICE_REF = 142.65;
+
+// 33 synthetic daily closes (60 sessions, 2-day cadence). Ends at PRICE_REF.
+const PRICES_60D = [128,125,127,124,126,128,125,129,127,131,128,132,130,133,135,131,134,136,133,137,134,138,135,139,137,140,138,141,139,142,140,141.8,142.65];
+
+function computeEMA(prices, period){
+  const k = 2 / (period + 1);
+  let ema = prices[0];
+  const out = [ema];
+  for (let i = 1; i < prices.length; i++){
+    ema = ema + k * (prices[i] - ema);
+    out.push(ema);
+  }
+  return out;
+}
+const EMA_8   = computeEMA(PRICES_60D, 8);
+const EMA_20  = computeEMA(PRICES_60D, 20);
+const EMA_50  = computeEMA(PRICES_60D, 50);
+const EMA_100 = computeEMA(PRICES_60D, 100);
+
+// Volume in $B (33 points, parallel to PRICES_60D). Daily $-volume.
+const VOL_60D = [22.1,28.5,19.4,24.3,21.7,26.2,23.8,29.4,22.0,25.5,27.8,21.1,23.4,28.1,25.6,22.9,30.2,24.7,28.3,21.5,26.8,29.5,23.2,27.1,24.9,28.7,22.4,30.8,26.3,24.1,31.5,27.9,25.8];
+const VOL_AVG = 25.6;
+// Up/down day flags
+const UP_60D = PRICES_60D.map((p,i) => i === 0 ? true : p >= PRICES_60D[i-1]);
+
+// RSI 14d series (33 points)
+function computeRSI(prices, period=14){
+  const rsi = [50];
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 1; i < prices.length; i++){
+    const ch = prices[i] - prices[i-1];
+    const g = ch > 0 ? ch : 0;
+    const l = ch < 0 ? -ch : 0;
+    if (i <= period){
+      avgGain = (avgGain*(i-1) + g)/i;
+      avgLoss = (avgLoss*(i-1) + l)/i;
+    } else {
+      avgGain = (avgGain*(period-1) + g)/period;
+      avgLoss = (avgLoss*(period-1) + l)/period;
+    }
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    rsi.push(100 - 100/(1+rs));
+  }
+  return rsi;
+}
+const RSI_60D = computeRSI(PRICES_60D, 14);
+
+// 30-day history for quant-panel sparklines (most-recent at end)
+const SPARK = {
+  pTarget:   [0.49,0.50,0.52,0.51,0.53,0.52,0.54,0.55,0.53,0.55,0.56,0.55,0.56,0.57,0.55,0.56,0.57,0.58,0.57,0.58,0.59,0.57,0.58,0.59,0.58,0.59,0.58,0.57,0.58,0.58],
+  edge:      [12,14,15,14,16,17,16,18,19,17,18,20,19,20,21,20,22,23,21,22,23,22,23,24,23,24,23,24,24,24],
+  regime:    [68,70,72,71,73,74,73,75,76,74,76,78,77,79,80,79,80,81,79,80,81,80,82,83,82,83,82,81,82,82],
+  kelly:     [3.0,3.2,3.5,3.4,3.8,4.0,3.9,4.2,4.5,4.3,4.6,4.8,4.7,5.0,5.2,5.0,5.2,5.4,5.3,5.4,5.5,5.4,5.5,5.5,5.4,5.5,5.5,5.5,5.5,5.5],
+  cvar:      [-12.5,-12.0,-11.5,-11.8,-11.2,-10.8,-11.0,-10.5,-10.0,-10.3,-9.8,-9.5,-9.7,-9.2,-8.9,-9.1,-8.8,-8.5,-8.7,-8.6,-8.4,-8.5,-8.4,-8.3,-8.4,-8.3,-8.4,-8.4,-8.4,-8.4],
+};
+
+const STRATEGIES = {
+  SWING: {
+    color:'#F5A524',
+    horizon:'3–14 days', horizonSub:'short-term technical · setup-driven',
+    horizonNote:'breakout-triggered',
+    lead:'TRADER', leadSub:'technical setup leads · catalyst irrelevant',
+    call:'WATCH', callCls:'am', callTag:'— pending breakout trigger',
+    conviction:'MEDIUM', convCls:'am',
+    convRule:'rule: WATCH cannot exceed MEDIUM until trigger fires',
+    metaConvSub:'setup A-grade · awaits trigger',
+    thesis:'Setup is high-quality: <b>FRESH</b> on rising EMA21 pullback · MACD bullish cross 4d ago · ADX 28 (strong trend) · RS rank 91/100. But <b>RSI 58 and RVOL 1.32× are constructive, not yet breakout</b>. Q4 FY26 earnings at +36d is <b>outside the 14d SWING horizon</b> — purely setup-driven swings cannot count catalyst tailwind. WATCH for daily close > $145 on RVOL ≥ 1.5×, which converts to SWING BUY.',
+    callRows:[
+      ['Entry zone',     'Trigger: <b>close &gt; $145 on RVOL ≥ 1.5×</b> · scale 50% on trigger + 50% on retest of $145'],
+      ['Target',         'T1 <span class="gn">$150</span> (+5.1%) momentum follow-through · T2 <span class="gn">$154</span> (+8.0%) extension'],
+      ['Invalidation',   '<span class="rd">$138.20</span> close-based stop (1.25× ATR · SWING-tight)'],
+      ['Expected hold',  '<b>3–8 days</b> typical · 14 days max'],
+      ['Sizing',         '<b>2.5% of equity</b> · trimmed (no catalyst) · 4 shares on $25K ref'],
+      ['Catalyst',       'Setup-driven · ER outside 14d window so does <b>NOT</b> count'],
+      ['Key metric',     '<b>Daily close + volume confirmation</b> above $145'],
+    ],
+    radar:{T:7,H:7,V:6,P:7},
+    catBandX:30, catBandW:44.8, catBandLab:'SWING window · 14 days (14d)', catERStatus:'OUT OF WINDOW · cannot help SWING',
+    catRule:'SWING rule: catalyst counts only if ≤ 14d. ER at +36d = out of horizon → setup-driven trade only.',
+    quantKelly:'2.5%', quantKellyBar:22.5, quantKellySub:'× 0.6 SWING haircut',
+    quantCvar:'-4.8%', quantCvarBar:43.2, quantCvarSub:'5d horizon · n=80',
+    chart:{ stop:138.20, t1:150, t2:154, entryHi:145.0, entryLo:144.8, foot:'Daily closes · last 60 sessions · SWING-tight 1.25× ATR stop · targets compressed to 14d horizon' },
+    rr:{ stopLab:'STOP $138.20', stopPct:'−3.1% (−$4.45)', t1Lab:'TRIG/T1 $150', t1Pct:'+5.1% (+$7.35)', ratio:'1.65R', foot:'+$7.35 reward vs −$4.45 risk · clears 1.5:1 SWING minimum' },
+    lensVotes:{ T:'BULLISH', H:'NEUTRAL', V:'NEUTRAL', P:'BULLISH' },
+    lensVoteCls:{ T:'gn', H:'am', V:'am', P:'gn' },
+    lensRole:{ T:'LEAD · technical setup', H:'edge intact but cat out-of-window', V:'price-only check', P:'sizing for short hold' },
+    lensBody:{
+      T:'<b>Setup A-grade</b> · FRESH on EMA21 pullback · MACD bullish cross 4d ago · <b>ADX 28</b> · RSI 58 constructive · RS rank 91/100. <b>BUT no breakout yet</b> · RVOL 1.32× &lt; 1.5× threshold · waiting for daily close &gt; $145.',
+      H:'Regime risk_on_choppy · BAP 82. MC edge <b>+24pp</b> (14d slice). <b>Catalyst not counted</b> (Q4 ER +36d outside 14d horizon) · UOA neutral on near-dated strikes.',
+      V:'Fwd P/E 32.4 · DCF IV $148 · informational only at SWING horizon · Value lens does not gate short-term trades.',
+      P:'β 1.65 acceptable for short-hold size · 2.5% sizing reflects no-catalyst haircut · ADV $25.8B → trivial fill.'
+    },
+    facts:[
+      {cat:'TECH', w:1.5, score:75, text:'<b>Setup quality A-grade:</b> FRESH on EMA21 pullback · MACD bullish cross 4d ago · ADX <b>28</b> · RSI 58 · RS rank <b>91/100</b>.'},
+      {cat:'TECH', w:1.5, score:60, text:'<b>Above all 4 EMAs:</b> price above EMA8/21/50/200 · rising stack · Ichimoku above kumo · AVWAP 3/4 supportive.'},
+      {cat:'QUANT',w:1.0, score:24, text:'<b>Monte Carlo edge +24pp</b> (P(T1) 58% over 14d slice) · supports the long, even without catalyst.'},
+    ],
+    risks:[
+      {cat:'TECH', w:1.5, score:90, text:'<b>No setup confirmation yet:</b> RSI 58 + RVOL 1.32× constructive but below breakout threshold · trigger must fire before commit.'},
+      {cat:'STRUCT',w:1.5, score:75, text:'<b>Resistance overhead:</b> 50d swing-high AVWAP $147 sits 3.1% above · VAH $146 · potential rejection zone.'},
+      {cat:'TIME', w:1.3, score:52, text:'<b>14d clock:</b> Q4 ER at +36d means catalyst tailwind cannot help SWING · if breakout stalls, no rescue.'},
+    ],
+    factsWeightHint:'— SWING weights · TECH 1.5× · STRUCT 1.5× · QUANT 1.0× · EARN/VALUE down-weighted',
+    risksWeightHint:'— SWING risks: trigger failure · resistance overhead · 14d clock',
+    invalSub:'— SWING-specific · tight stop · trigger-or-fade',
+    invalBody:'Trigger fails to fire within <b>7 days</b> (price stalls &lt; $145), OR pre-trigger breakdown &lt; <span class="rd">$138.20</span> close. If triggered, stop steps to $141 close (mid-zone post-entry). Setup invalidates on: (a) RVOL fade with no breakout commitment; (b) regime flip to risk_off; (c) SOX (semi index) breakdown on volume.',
+    convBody:'<b style="color:var(--ink)">MEDIUM.</b> Setup is high-quality but unconfirmed — waiting for breakout trigger. Quant edge positive (+24pp · 14d slice). Catalyst outside window so call <b>cannot earn HIGH grade</b> despite strong technicals. Will upgrade to HIGH BUY on trigger fire (close &gt; $145 on RVOL ≥ 1.5×).',
+    altCards:[
+      {label:'POSITION (3d–8w)', call:'BUY', cls:'gn', trigger:'<b>Already actionable</b> · POSITION BUY at $140.50–$143.20 NOW (no breakout trigger needed) · catalyst inside 8w window.', reason:'POSITION captures the Q4 earnings catalyst that SWING cannot count.'},
+      {label:'INVESTMENT (1y+)', call:'WATCH', cls:'am', trigger:'<b>Retrace &lt; $115</b> (PT × 0.70 = 30% MoS) — converts to INVESTMENT BUY.', reason:'Quality passes Buffett (ROE 92%, FCF +48%) but fwd P/E 32.4 fails margin-of-safety.'},
+    ],
+    altDiscr:'<b style="color:var(--ink-2)">Discriminator (3–14d overlap):</b> POSITION beats SWING here because the dominant alpha source is <b style="color:var(--ink)">the in-window earnings catalyst</b> — not the technical setup alone. SWING WATCH is correct in isolation; POSITION BUY is the better expression of the same data.',
+    selfCheck:'<b>✓</b> Field labels match contents (stop = 1.25× ATR SWING-tight · entry = breakout trigger, not zone) · <b>✓</b> Catalyst correctly excluded (ER +36d &gt; 14d window) · <b>✓</b> All 10 inputs valid · <b>✓</b> Conviction capped at MEDIUM (WATCH rule) · <b>✓</b> R-ratio 1.65 clears 1.5:1 SWING minimum · <b>✓</b> Same data tomorrow → same call · <b>✓</b> Cross-strategy: POSITION BUY · INVESTMENT WATCH.',
+  },
+
+  POSITION: {
+    color:'#5EA1FF',
+    horizon:'4–6 weeks', horizonSub:'catalyst-driven · 3d–8w',
+    horizonNote:'to Q4 FY26 print',
+    lead:'TRADER + catalyst', leadSub:'Hedge-Fund co-pilot · 4-lens cross-check',
+    call:'BUY', callCls:'gn', callTag:'— actionable now under POSITION',
+    conviction:'HIGH', convCls:'cy',
+    convRule:'rule: negative quant edge cannot be HIGH; rule passes (edge +24pp positive)',
+    metaConvSub:'4/4 lens · edge +24pp',
+    thesis:'<b>AI-capex earnings cycle.</b> POSITION-grade catalyst (Q4 FY26 print at +36d) within 8w window · prior 4/4 beats, median surprise +12.4% · revisions ↑5/↓0 · hyperscaler capex commitments pre-printed and raised. Technical entry FRESH on rising EMA21 pullback · MACD bullish cross 4d ago. Value lens caps at NEUTRAL (fwd P/E 32.4 premium) but quality is institutional-grade (ROE 92.4%, FCF margin +48.2%) — premium reasoned through, accepted.',
+    callRows:[
+      ['Entry zone',    '<b>$140.50–$143.20</b> · scale-in on retraces to EMA21 ($138.40) acceptable within hold'],
+      ['Target',        'T1 <span class="gn">$158.00</span> (+10.8%) pre-earnings drift · T2 <span class="gn">$172.00</span> (+20.6%) post-print on beat + raise'],
+      ['Invalidation',  '<span class="rd">$135.00</span> close-based stop (2× ATR · POSITION-adjusted wider)'],
+      ['Expected hold', '<b>4–6 weeks</b> · through Q4 FY26 print + 1 week post-print drift'],
+      ['Sizing',        '<b>5.5% of equity</b> (Kelly-lite × 1.3 POSITION boost · 9 shares on $25K ref · $69 risk = 0.28% of ref)'],
+      ['Catalyst',      '<b>Q4 FY26 earnings · 2026-06-17 AMC</b> (Day +36 · in window) · trigger: revenue beat ≥+5% + raised DC-segment guide'],
+      ['Key metric',    '<b>Data-Center segment YoY</b> · last 4q: +88%/+73%/+52%/+44% · sub-30% YoY invalidates'],
+    ],
+    radar:{T:8,H:8,V:6,P:7},
+    catBandX:30, catBandW:179.2, catBandLab:'POSITION window · 8 weeks (56d)', catERStatus:'IN-WINDOW · primary catalyst',
+    catRule:'POSITION rule: catalyst counts only if ≤ 56d. ER at +36d ✓ in-window · primary alpha.',
+    quantKelly:'5.5%', quantKellyBar:49.5, quantKellySub:'× 1.3 POSITION boost',
+    quantCvar:'-8.4%', quantCvarBar:75.6, quantCvarSub:'10d horizon · n=80',
+    chart:{ stop:135, t1:158, t2:172, entryHi:143.20, entryLo:140.50, foot:'Daily closes · last 60 sessions · POSITION-adjusted 2× ATR stop · targets reach to post-print drift' },
+    rr:{ stopLab:'STOP $135', stopPct:'−5.4% (−$7.65)', t1Lab:'T1 $158', t1Pct:'+10.8% (+$15.35)', ratio:'2.01R', foot:'+$15.35 reward vs −$7.65 risk · clears 2:1 minimum · R-ratio to T2 = 3.84R' },
+    lensVotes:{ T:'BULLISH', H:'BULLISH', V:'NEUTRAL ∆', P:'BULLISH' },
+    lensVoteCls:{ T:'gn', H:'gn', V:'am', P:'gn' },
+    lensRole:{ T:'LEAD · POSITION', H:'regime · edge · positioning', V:'Graham-Buffett', P:'sizing · suitability' },
+    lensBody:{
+      T:'<b>Trend-Continuation</b> on rising EMA21 pullback. <b>FRESH</b> entry (within 0.75 ATR of pivot). Daily close cleared $142 on <b>RVOL 1.32×</b> · MACD bullish cross 4d ago · <b>ADX 28</b>. RSI 58 — constructive. <b>RS rank 91/100</b>. Setup-quality supports a long; catalyst confirms timing.',
+      H:'Regime <b>risk_on_choppy</b> · BAP <b>82</b> vs floor 72. MC edge <b>+24pp</b> over 63d sim (P(T1) 58%, Wilson LB <b>52%</b> on n=157 · P(stop) 34%). 3 call UOA at Jun strikes. Insider neutral · short float 2.1% · news bullish.',
+      V:'Fwd P/E <b>32.4</b> (sector 22.0 = <b>47% premium</b>) · PEG <b>1.10</b>. Quality institutional: ROE <b>92.4%</b>, ROIC <b>68%</b>, FCF <b>+48.2%</b>, D/E <b>0.14</b>. Premium reasoned through (AI cycle) BUT caps at NEUTRAL · <b>soft disagreement</b> accepted.',
+      P:'β <b>1.65</b> (high-beta semi · acceptable POSITION at moderate size) · ADV <b>$25.8B</b>. Mcap <b>$3.49T</b>. Kelly final <b>5.5%</b> after × 1.3 POSITION boost · DD mult 1.0.'
+    },
+    facts:[
+      {cat:'EARN', w:1.2, score:84, text:'<b>Earnings track record:</b> 4/4 prints beat consensus, median surprise <span class="gn">+12.4%</span> · revisions 30d <span class="gn">↑5/↓0</span> · PT mean $165 = <b>+15.7% upside</b>.'},
+      {cat:'VALUE',w:1.3, score:78, text:'<b>Quality compounder:</b> ROE <b>92.4%</b>, ROIC <b>68%</b>, FCF margin <b>+48.2%</b>, D/E 0.14 · capital-light, dominant-share.'},
+      {cat:'QUANT',w:1.0, score:24, text:'<b>Monte Carlo edge:</b> +24pp (P(T1) 58% over 3K paths) · Bayesian-adjusted <b>+42pp</b> after technical uplift.'},
+    ],
+    risks:[
+      {cat:'EARN', w:1.2, score:108,text:'<b>Earnings binary in window:</b> Q4 print at +36d with implied ±6.2% · overnight gap risk dwarfs intraday stop.'},
+      {cat:'VALUE',w:1.3, score:91, text:'<b>Multiple compression risk:</b> fwd P/E 32.4 elevated · POSITION hold exposed to de-rating.'},
+      {cat:'EARN', w:1.2, score:90, text:'<b>Quarterly deceleration:</b> DC YoY: 88%→73%→52%→44% · sub-30% would invalidate thesis.'},
+    ],
+    factsWeightHint:'— POSITION weights · EARN 1.2× · VALUE 1.3× · TECH 1.0×',
+    risksWeightHint:'— POSITION risks: earnings binary · multiple compression · cycle deceleration',
+    invalSub:'— POSITION-specific · what proves this call wrong',
+    invalBody:'Close below <span class="rd">$135.00</span> on volume (2× ATR · POSITION-adjusted wider than SWING 1.25×). Also invalidated if: <b>(a)</b> Q4 print disappoints — revenue miss OR DC-segment YoY &lt;30% OR fwd guide lowered; <b>(b)</b> regime flips to risk_off_trending for &gt;30d; <b>(c)</b> hyperscaler capex revises lower over next 2 print cycles; <b>(d)</b> SOX breaks SMA200 on volume; <b>(e)</b> AMD MI400 credible perf data OR major hyperscaler ASIC migration announced.',
+    convBody:'<b style="color:var(--ink)">4/4 cross-checks aligned or N/A</b>, 1 soft NEUTRAL (Value) reasoned through. <b style="color:var(--ink)">Quant edge positive</b> (+24pp; Bayesian +42pp) satisfies no-HIGH-on-negative-edge rule. <b style="color:var(--ink)">Catalyst in horizon</b> (Q4 print +36d, well within 8w). <b style="color:var(--ink)">Setup sample adequate</b> (n=157, Wilson LB 52% above noise floor). <b style="color:var(--ink)">Data COMPLETE</b>, zero missing.',
+    altCards:[
+      {label:'SWING (3–14d)',     call:'WATCH', cls:'am', trigger:'Daily close <b>&gt; $145</b> on RVOL ≥ 1.5× — converts to SWING BUY.', reason:'Catalyst at +36d is outside 14d SWING horizon · wait for technical confirmation.'},
+      {label:'INVESTMENT (1y+)',  call:'WATCH', cls:'am', trigger:'<b>Retrace &lt; $115</b> (PT × 0.70 = 30% margin of safety).', reason:'Quality passes Buffett but fwd P/E 32.4 fails MoS · wait-for-better-entry.'},
+    ],
+    altDiscr:'<b style="color:var(--ink-2)">Discriminator (3–14d overlap):</b> POSITION wins over SWING because trade is <b style="color:var(--ink)">catalyst-driven</b>, not purely setup-driven. <b style="color:var(--ink-2)">Material differences:</b> SWING and INVESTMENT both downgrade to WATCH — only POSITION is uniquely actionable in this horizon.',
+    selfCheck:'<b>✓</b> Field labels match contents (price = quote · stop = 2× ATR POSITION · effStop computed) · <b>✓</b> Catalyst in horizon (Q4 ER +36d ≤ 56d) · <b>✓</b> All 10 inputs valid · <b>✓</b> R-ratio 2.01 clears 2:1 minimum · <b>✓</b> Call survives audit · <b>✓</b> Same data tomorrow → same call · <b>✓</b> Cross-strategy: SWING WATCH · INVESTMENT WATCH.',
+  },
+
+  INVESTMENT: {
+    color:'#B084FF',
+    horizon:'1–3 years', horizonSub:'secular thesis · MoS entry',
+    horizonNote:'secular cycle',
+    lead:'VALUE + quality compounder', leadSub:'Trader confirms not in downtrend · PM sizes durability',
+    call:'WATCH', callCls:'am', callTag:'— no margin of safety at current price',
+    conviction:'LOW', convCls:'am',
+    convRule:'rule: INVESTMENT BUY requires VALUE alignment AND MoS ≥ 25%; rule fails (MoS = +3.7%)',
+    metaConvSub:'quality A-grade · price premium',
+    thesis:'<b>Quality compounder, premium price.</b> NVDA passes every Buffett test: ROE <b>92.4%</b>, ROIC <b>68%</b>, FCF margin <b>+48.2%</b>, near-monopoly accelerator share, durable AI-cycle tailwind. BUT fwd P/E <b>32.4</b> at 47% sector premium provides <b>zero margin of safety</b> vs analyst PT $165 (only +15.7% upside) · DCF intrinsic value $148 implies +3.7% MoS. INVESTMENT discipline says <b>wait</b> for retrace to $115 (30% MoS to PT) OR multiple compression via growth-without-price.',
+    callRows:[
+      ['Entry zone',    '<b>Trigger: retrace &lt; $115</b> (analyst PT × 0.70 = 30% MoS) · scale in over 3–6 months in quarterly tranches'],
+      ['Target',        'T1 <span class="gn">$200</span> (3-yr · DCF + 18% CAGR base) · T2 <span class="gn">$250</span> (5-yr · cycle peak)'],
+      ['Invalidation',  'Structural: <span class="rd">$95</span> (−33%) OR quality break (ROE &lt; 25%, FCF margin &lt; 25%, market share &lt; 70%)'],
+      ['Expected hold', '<b>1+ years</b> · target 3-year hold · quarterly review only · no day-to-day management'],
+      ['Sizing',        '<b>8% of equity</b> when triggered (full Kelly · INVESTMENT compounds) · 22 shares on $25K ref'],
+      ['Catalyst',      '<b>AI capex secular cycle</b> · multi-quarter · not single event — sustained DC growth quarter after quarter'],
+      ['Key metric',    '<b>Multi-quarter Data-Center revenue growth</b> · need sustained &gt;40% YoY for thesis intact'],
+    ],
+    radar:{T:7,H:6,V:5,P:8},
+    catBandX:30, catBandW:480, catBandLab:'INVESTMENT window · 1+ year (secular)', catERStatus:'in-window · ONE of many checkpoints',
+    catRule:'INVESTMENT rule: catalyst is the secular cycle, not a single print. ER is a checkpoint, not a trigger.',
+    quantKelly:'8.0%', quantKellyBar:144, quantKellySub:'when triggered · full Kelly · 1y+ compounds',
+    quantCvar:'-22%', quantCvarBar:180, quantCvarSub:'1-year drawdown · multi-quarter horizon',
+    chart:{ stop:95, t1:200, t2:250, entryHi:115, entryLo:108, foot:'Daily closes · last 60 sessions · INVESTMENT structural stop · targets reach over 3–5 years (off-chart)' },
+    rr:{ stopLab:'STOP $95', stopPct:'−33% (−$47.65)', t1Lab:'T1 (3yr) $200', t1Pct:'+40% (+$57.35)', ratio:'1.20R', foot:'+$57.35 reward vs −$47.65 risk · structural · 3-yr horizon · longer-tail return justifies thinner R-ratio' },
+    lensVotes:{ T:'NEUTRAL', H:'BEARISH ∆', V:'BEARISH ∆', P:'BULLISH' },
+    lensVoteCls:{ T:'am', H:'rd', V:'rd', P:'gn' },
+    lensRole:{ T:'no-downtrend check', H:'positioning ≠ INVESTMENT thesis', V:'LEAD · margin of safety', P:'sizing · suitability if entry valid' },
+    lensBody:{
+      T:'<b>Not in downtrend</b> · 1Y higher highs/lows intact · Dow primary trend UP. Useful as a non-veto check: Value will not buy a falling knife. <b>Confirmation</b>, not directional vote.',
+      H:'<b>Bearish for INVESTMENT</b>: short-term positioning (P(T1) 58%, MC edge +24pp) is orthogonal to multi-year compound thesis · INVESTMENT measures business durability, not next-quarter probability.',
+      V:'<b>LEAD · fails margin of safety.</b> Fwd P/E 32.4 vs sector 22.0 = 47% premium. DCF IV $148 = <b>+3.7% MoS</b> (below 25% threshold). Analyst PT $165 = +15.7% (below 30% MoS to PT). Quality is institutional-grade BUT entry price has zero margin · <b>WATCH for retrace to $115</b>.',
+      P:'β <b>1.65</b> with 8% sizing acceptable for 1y+ hold (volatility averaged over time). $3.49T mcap · ADV $25.8B. Suitability: ✓ when entry triggered.'
+    },
+    facts:[
+      {cat:'VALUE',  w:2.0, score:120, text:'<b>Buffett-grade quality:</b> ROE <b>92.4%</b>, ROIC <b>68%</b>, FCF margin <b>+48.2%</b>, D/E 0.14, near-monopoly accelerator share · durable moat.'},
+      {cat:'GROWTH', w:1.5, score:90,  text:'<b>Multi-quarter secular tailwind:</b> AI capex cycle ≥ 5-yr runway · hyperscaler capex raised mid-cycle 4/4 cycles.'},
+      {cat:'BAL',    w:1.2, score:60,  text:'<b>Fortress balance sheet:</b> $42B cash · D/E 0.14 · no near-term refi risk · enables R&amp;D + buybacks through cycle downturns.'},
+    ],
+    risks:[
+      {cat:'VALUATION', w:2.0, score:200, text:'<b>No margin of safety at $142.65:</b> DCF IV $148 = only +3.7% MoS · analyst PT $165 = +15.7% · fwd P/E 32.4 vs sector 22.0 = 47% premium.'},
+      {cat:'COMPETE',   w:1.5, score:90,  text:'<b>Multi-year competitive risk:</b> AMD MI400 ramp · hyperscaler ASIC migration · open-source CUDA alternatives compound over 1-3y.'},
+      {cat:'CYCLE',     w:1.5, score:75,  text:'<b>AI capex cycle could plateau:</b> historical capex cycles peaked unpredictably · sub-30% DC YoY = early plateau signal.'},
+    ],
+    factsWeightHint:'— INVESTMENT weights · VALUE 2.0× · GROWTH 1.5× · BAL-SHEET 1.2× · TECH down-weighted',
+    risksWeightHint:'— INVESTMENT risks: valuation · competitive obsolescence · cycle plateau',
+    invalSub:'— INVESTMENT-specific · multi-year structural · NOT a stop-loss',
+    invalBody:'INVESTMENT thesis breaks if: <b>(a)</b> <span class="rd">structural break to $95</span> (−33% from current) on quality concerns; <b>(b)</b> <b>quality regression</b> — ROE falls &lt;25% OR FCF margin &lt;25% OR market share &lt;70% for 2 consecutive quarters; <b>(c)</b> <b>AI capex cycle peaks</b> — DC-segment YoY &lt;30% for 2 quarters; <b>(d)</b> <b>competitive landscape shifts</b> — major hyperscaler commits 50%+ to in-house ASIC over 3-year roadmap. Cycle-aware exits, not stop-loss-driven.',
+    convBody:'<b style="color:var(--ink)">LOW.</b> Quality passes every Buffett test (ROE/ROIC/FCF/moat) but fwd P/E 32.4 provides <b style="color:var(--ink)">zero margin of safety</b>. INVESTMENT discipline mandates waiting for the entry rather than overpaying. Will upgrade to HIGH BUY on retrace to $115 OR multi-quarter multiple compression via growth-without-price.',
+    altCards:[
+      {label:'SWING (3–14d)',    call:'WATCH', cls:'am', trigger:'Daily close &gt; $145 on RVOL ≥ 1.5×.', reason:'Short-term momentum may continue but does not address INVESTMENT discipline.'},
+      {label:'POSITION (3d–8w)', call:'BUY',   cls:'gn', trigger:'Catalyst-driven trade · Q4 FY26 ER +36d · entry $140.50–$143.20 active NOW.', reason:'POSITION captures the immediate earnings catalyst that INVESTMENT defers for multi-year compound.'},
+    ],
+    altDiscr:'<b style="color:var(--ink-2)">Discriminator (multi-horizon):</b> INVESTMENT and POSITION can both be right on same name: POSITION captures the <b style="color:var(--ink)">in-window catalyst alpha</b>, INVESTMENT waits for the <b style="color:var(--ink)">MoS entry</b>. A POSITION BUY today does NOT preclude an INVESTMENT WATCH on the same name — different time-horizons of the same thesis.',
+    selfCheck:'<b>✓</b> Field labels match contents (stop = structural $95 · entry trigger = MoS-based) · <b>✓</b> Catalyst correctly framed as secular cycle, not single print · <b>✓</b> All 10 inputs valid · <b>✓</b> WATCH conviction rule applied (MoS &lt; 25%) · <b>✓</b> R-ratio 1.20 acceptable for 3-yr horizon · <b>✓</b> Same data tomorrow → same call · <b>✓</b> Cross-strategy: SWING WATCH · POSITION BUY (different mandates).',
+  }
+};
+
+// Radar coords: center (180,160), max radius 120
+function radarPoints(r){
+  return {
+    tY: 160 - (r.T/10)*120,
+    hX: 180 + (r.H/10)*120,
+    vY: 160 + (r.V/10)*120,
+    pX: 180 - (r.P/10)*120,
+  };
+}
+// Price-chart y mapping: y=40 → top price · y=240 → bottom price.
+// Map a [maxPrice .. minPrice] band onto y in [40..240].
+function makePriceY(maxP, minP){
+  const span = maxP - minP;
+  return p => 40 + (maxP - p) / span * 200;
+}
+function hex2rgb(h){
+  h = h.replace('#','');
+  return parseInt(h.substr(0,2),16) + ',' + parseInt(h.substr(2,2),16) + ',' + parseInt(h.substr(4,2),16);
+}
+function setText(id, val){ const el = document.getElementById(id); if(el) el.textContent = val; }
+
+function renderVerdict(s, stratName){
+  const colHex = { gn:'#3DDC97', am:'#F5A524', rd:'#E5484D', cy:s.color };
+  const decodeHtml = (s) => s.replace(/<[^>]+>/g,'').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&nbsp;/g,' ');
+
+  // Big call box
+  document.getElementById('vdCallBox').setAttribute('fill', `url(#vdGrad${s.callCls.toUpperCase()})`);
+  document.getElementById('vdCallBox').setAttribute('stroke', colHex[s.callCls]);
+  setText('vdCall', s.call);
+  document.getElementById('vdCall').setAttribute('fill', colHex[s.callCls]);
+  setText('vdCallTag', `${stratName} · ${s.horizon}`);
+  // Strategy-specific short sub-line (max ~36 chars to fit 245px box)
+  const subByStrat = {
+    SWING:      'trigger pending · close > $145 RVOL≥1.5×',
+    POSITION:   'actionable now · entry $140.50–$143.20',
+    INVESTMENT: 'pending entry · retrace < $115 (30% MoS)',
+  };
+  setText('vdCallSub', subByStrat[stratName]);
+  // P(T1) score line (compact, fits)
+  document.getElementById('vdCallScore').innerHTML = `P(T1) <tspan font-weight="800" fill="${colHex[s.callCls]}">76%</tspan> · LB 52% · n=157 · edge +24pp`;
+
+  // Edge tile (signed)
+  const edgeHex = '#3DDC97';
+  setText('vdEdge', '+24pp');
+  document.getElementById('vdEdge').setAttribute('fill', edgeHex);
+  document.getElementById('vdEdgeBar').setAttribute('width', 78);
+  document.getElementById('vdEdgeBar').setAttribute('fill', edgeHex);
+
+  // R:R tile
+  const rrVal = parseFloat(s.rr.ratio);
+  setText('vdRR', s.rr.ratio);
+  const rrColor = rrVal >= 2 ? '#3DDC97' : rrVal >= 1.5 ? '#F5A524' : '#E5484D';
+  document.getElementById('vdRR').setAttribute('fill', rrColor);
+  document.getElementById('vdRRBar').setAttribute('width', Math.min(rrVal/3 * 78, 78));
+  document.getElementById('vdRRBar').setAttribute('fill', rrColor);
+  setText('vdRRSub', s.rr.foot.length > 60 ? s.rr.foot.slice(0,58)+'…' : s.rr.foot);
+
+  // Size tile
+  const sizeVal = parseFloat(s.quantKelly);
+  setText('vdSize', s.quantKelly);
+  document.getElementById('vdSize').setAttribute('fill', s.color);
+  document.getElementById('vdSizeBar').setAttribute('width', Math.min(sizeVal/10 * 78, 78));
+  document.getElementById('vdSizeBar').setAttribute('fill', s.color);
+  setText('vdSizeSub', s.quantKellySub);
+
+  // CVaR tile
+  const cvarVal = Math.abs(parseFloat(s.quantCvar));
+  setText('vdCvar', s.quantCvar);
+  document.getElementById('vdCvarBar').setAttribute('width', Math.min(cvarVal/30 * 78, 78));
+  setText('vdCvarSub', s.quantCvarSub);
+
+  // Conviction arc
+  const convScore = { HIGH:85, MEDIUM:55, LOW:30 }[s.conviction];
+  document.getElementById('vdConvArcFill').setAttribute('stroke-dasharray', `${convScore} 100`);
+  setText('vdConvLabel', s.conviction);
+  document.getElementById('vdConvLabel').setAttribute('fill', s.callCls === 'gn' ? '#3DDC97' : s.color);
+  setText('vdConvScore', `${convScore} / 100`);
+  // Position needle along semicircle: arc center (180,110), radius 120
+  const ang = Math.PI - (convScore/100) * Math.PI;
+  document.getElementById('vdConvNeedle').setAttribute('cx', (180 + 120*Math.cos(ang)).toFixed(1));
+  document.getElementById('vdConvNeedle').setAttribute('cy', (110 - 120*Math.sin(ang)).toFixed(1));
+
+  // Lens votes mini-row (4 small chips)
+  const lensMap = { T:'TRD', H:'HEDG', V:'VAL', P:'PM' };
+  document.getElementById('vdLensVotes').innerHTML = ['T','H','V','P'].map((k,i) => {
+    const cls = s.lensVoteCls[k] || 'am';
+    const fill = colHex[cls];
+    return `<g transform="translate(${i*68},0)"><rect width="60" height="22" rx="3" fill="rgba(${hex2rgb(fill)},0.18)" stroke="${fill}" stroke-width="0.8"/><text x="30" y="15" text-anchor="middle" font-family="monospace" font-size="9.5" fill="${fill}" font-weight="800">${lensMap[k]}</text></g>`;
+  }).join('');
+
+  // Headline bullet
+  const headlines = {
+    SWING:'<b>WATCH</b> for breakout. Setup A-grade (FRESH on EMA21, MACD bull cross, ADX 28, RS 91) but no commit yet — close &gt; $145 on RVOL ≥ 1.5× triggers SWING BUY. Catalyst (Q4 ER +36d) out of 14d window so cannot count.',
+    POSITION:'<b>BUY</b> now. 4/4 lens alignment with 1 soft NEUTRAL (Value premium reasoned through) · quant edge +24pp · Bayesian-adjusted +42pp · catalyst Q4 print in 8w window · entry $140.50–$143.20 FRESH · R-ratio 2.01R · 5.5% Kelly-sized.',
+    INVESTMENT:'<b>WATCH</b> for entry. Buffett-grade quality (ROE 92.4% · ROIC 68% · FCF +48.2% · D/E 0.14) but fwd P/E 32.4 = zero margin of safety · need retrace to $115 (30% MoS to PT $165) OR multiple compression via growth-without-price.',
+  };
+  document.getElementById('vdHeadline').innerHTML = headlines[stratName];
+}
+
+// ═══════════════════════ DISAGREEMENT MATRIX ═══════════════════════
+function renderDisagreementMatrix(s, stratName){
+  // 4 lenses × 6 signals · cell = {label, cls, intensity, weight per strategy}
+  const weights = {
+    SWING:      { TRADER:1.5, HEDGE:0.8, VALUE:0.4, PM:1.0 },
+    POSITION:   { TRADER:1.2, HEDGE:1.1, VALUE:1.0, PM:1.0 },
+    INVESTMENT: { TRADER:0.5, HEDGE:0.7, VALUE:1.8, PM:1.2 },
+  };
+  // Per-strategy cell matrix (key: lens → 6 cells of [label, cls, intensity 1-3])
+  const matrixByStrat = {
+    SWING: {
+      TRADER:    [['BULL',2], ['RISK-ON',2], ['+24pp',2], ['OUT',-2], ['AGREE',2], ['AGREE',2]],
+      HEDGE:     [['NEUTRAL',1], ['RISK-ON',2], ['+24pp',2], ['OUT',-2], ['N/A',0], ['AGREE',1]],
+      VALUE:     [['NEUTRAL',1], ['N/A',0], ['N/A',0], ['N/A',0], ['N/A',0], ['N/A',0]],
+      PM:        [['AGREE',2], ['N/A',0], ['N/A',0], ['N/A',0], ['$25.8B',2], ['2.5%',1]],
+    },
+    POSITION: {
+      TRADER:    [['BULL',2], ['RISK-ON',2], ['+24pp',2], ['IN',2], ['AGREE',2], ['AGREE',2]],
+      HEDGE:     [['BULL',2], ['RISK-ON',2], ['+24pp',2], ['AGREE',2], ['N/A',0], ['N/A',0]],
+      VALUE:     [['NEU∆',-1], ['AGREE',1], ['AGREE',1], ['N/A',0], ['AGREE',1], ['AGREE',1]],
+      PM:        [['AGREE',2], ['N/A',0], ['N/A',0], ['N/A',0], ['$25.8B',2], ['5.5%',2]],
+    },
+    INVESTMENT: {
+      TRADER:    [['NEU',1], ['N/A',0], ['N/A',0], ['N/A',0], ['N/A',0], ['N/A',0]],
+      HEDGE:     [['BEAR∆',-1], ['N/A',0], ['+24pp irrel',1], ['N/A',0], ['N/A',0], ['N/A',0]],
+      VALUE:     [['BEAR∆',-2], ['N/A',0], ['N/A',0], ['N/A',0], ['N/A',0], ['N/A',0]],
+      PM:        [['AGREE',2], ['N/A',0], ['N/A',0], ['N/A',0], ['$25.8B',2], ['8.0%',2]],
+    },
+  };
+  const matrix = matrixByStrat[stratName];
+  const w = weights[stratName];
+  const lensOrder = stratName === 'INVESTMENT' ? ['VALUE','TRADER','HEDGE','PM'] : ['TRADER','HEDGE','VALUE','PM'];
+  const lensLabels = { TRADER:'TRADER', HEDGE:'HEDGE FUND', VALUE:'VALUE', PM:'PM (CFP)' };
+  const leadByStrat = { SWING:'TRADER', POSITION:'TRADER', INVESTMENT:'VALUE' };
+  const lead = leadByStrat[stratName];
+
+  // Intensity → cell color
+  const cellStyle = (intensity) => {
+    if (intensity === 0)  return { fill:'rgba(107,114,128,0.06)', stroke:'#2A3340', text:'#6B7280' };
+    if (intensity === 1)  return { fill:'rgba(61,220,151,0.08)',  stroke:'#3DDC97', text:'#3DDC97' };
+    if (intensity === 2)  return { fill:'rgba(61,220,151,0.20)',  stroke:'#3DDC97', text:'#3DDC97' };
+    if (intensity === -1) return { fill:'rgba(245,165,36,0.18)',  stroke:'#F5A524', text:'#F5A524' };
+    if (intensity === -2) return { fill:'rgba(229,72,77,0.18)',   stroke:'#E5484D', text:'#E5484D' };
+    return { fill:'rgba(107,114,128,0.06)', stroke:'#2A3340', text:'#6B7280' };
+  };
+
+  let rowsHTML = '';
+  lensOrder.forEach((lens, rowIdx) => {
+    const y = 36 + rowIdx * 32;
+    const isLead = lens === lead;
+    // Row label
+    const lblFill = isLead ? 'rgba(94,161,255,0.10)' : 'rgba(11,14,20,0.5)';
+    const lblStroke = isLead ? '#5EA1FF' : '#1E2530';
+    const lblText = isLead ? '#5EA1FF' : '#E6EAF2';
+    rowsHTML += `<rect x="20" y="${y}" width="120" height="26" rx="3" fill="${lblFill}" stroke="${lblStroke}"/>`;
+    rowsHTML += `<text x="32" y="${y+17}" font-size="11" fill="${lblText}" font-weight="700">${lensLabels[lens]}${isLead ? ' ★' : ''}</text>`;
+    // 6 cells
+    matrix[lens].forEach((cell, colIdx) => {
+      const x = 155 + colIdx * 140;
+      const style = cellStyle(cell[1]);
+      rowsHTML += `<rect x="${x}" y="${y}" width="125" height="26" rx="3" fill="${style.fill}" stroke="${style.stroke}" stroke-width="0.8"/>`;
+      rowsHTML += `<text x="${x+62.5}" y="${y+17}" text-anchor="middle" font-size="10.5" fill="${style.text}" font-weight="700">${cell[0]}</text>`;
+    });
+    // Weight column
+    const wt = w[lens];
+    const wColor = wt >= 1.3 ? '#5EA1FF' : wt >= 0.9 ? '#9AA4B2' : '#6B7280';
+    rowsHTML += `<rect x="1000" y="${y}" width="80" height="26" rx="3" fill="rgba(94,161,255,0.06)" stroke="#1E2530"/>`;
+    rowsHTML += `<text x="1040" y="${y+17}" text-anchor="middle" font-size="12" fill="${wColor}" font-weight="800">${wt.toFixed(1)}×</text>`;
+  });
+  document.getElementById('dmRows').innerHTML = rowsHTML;
+
+  // Agreement % row — % of (non-N/A) cells agreeing with lead lens by column
+  let agreeHTML = '';
+  for (let col = 0; col < 6; col++){
+    const x = 155 + col * 140;
+    let agree = 0, total = 0;
+    lensOrder.forEach(lens => {
+      const c = matrix[lens][col];
+      if (c[1] === 0) return; // N/A
+      total++;
+      if (c[1] > 0) agree++;
+    });
+    const pct = total === 0 ? null : Math.round(agree/total*100);
+    const fill = pct === null ? 'rgba(107,114,128,0.10)' : pct >= 75 ? 'rgba(61,220,151,0.20)' : pct >= 50 ? 'rgba(245,165,36,0.18)' : 'rgba(229,72,77,0.18)';
+    const stroke = pct === null ? '#2A3340' : pct >= 75 ? '#3DDC97' : pct >= 50 ? '#F5A524' : '#E5484D';
+    const textFill = pct === null ? '#6B7280' : pct >= 75 ? '#3DDC97' : pct >= 50 ? '#F5A524' : '#E5484D';
+    agreeHTML += `<rect x="${x}" y="0" width="125" height="32" rx="3" fill="${fill}" stroke="${stroke}" stroke-width="0.8"/>`;
+    agreeHTML += `<text x="${x+62.5}" y="20" text-anchor="middle" font-size="13" fill="${textFill}" font-weight="800">${pct === null ? 'N/A' : pct + '%'}</text>`;
+  }
+  document.getElementById('dmAgreement').innerHTML = agreeHTML;
+
+  // Disagreement count summary
+  let softDis = 0, hardDis = 0;
+  lensOrder.forEach(lens => matrix[lens].forEach(c => { if (c[1] === -1) softDis++; if (c[1] === -2) hardDis++; }));
+  const summary = hardDis > 0 ? `${hardDis} hard${softDis ? ' + '+softDis+' soft' : ''}` : softDis > 0 ? `${softDis} soft` : '0 — full alignment';
+  document.getElementById('dmDisagText').textContent = summary;
+  document.getElementById('dmDisagText').setAttribute('fill', hardDis > 0 ? '#E5484D' : softDis > 0 ? '#F5A524' : '#3DDC97');
+}
+
+// ═══════════════════════ CONVICTION RULES ═══════════════════════
+function renderConvRules(s, stratName){
+  const rulesByStrat = {
+    SWING: [
+      { pass:true,  rule:'Wilson LB ≥ 30% noise floor',     ev:'LB 52% on n=157' },
+      { pass:false, rule:'Quant edge directional alignment', ev:'+24pp edge but no trigger yet' },
+      { pass:true,  rule:'Regime score above floor',         ev:'BAP 82 ≥ floor 72' },
+      { pass:false, rule:'Catalyst in horizon',              ev:'Q4 ER +36d &gt; 14d SWING' },
+      { pass:true,  rule:'Data completeness COMPLETE',       ev:'0/10 missing' },
+    ],
+    POSITION: [
+      { pass:true,  rule:'Wilson LB ≥ 30% noise floor',     ev:'LB 52% on n=157' },
+      { pass:true,  rule:'Quant edge directional alignment', ev:'+24pp ↑ + bullish call' },
+      { pass:true,  rule:'Regime score above floor',         ev:'BAP 82 ≥ floor 72' },
+      { pass:true,  rule:'Catalyst in horizon',              ev:'Q4 ER +36d ≤ 56d POSITION' },
+      { pass:true,  rule:'Data completeness COMPLETE',       ev:'0/10 missing' },
+    ],
+    INVESTMENT: [
+      { pass:true,  rule:'Quality grade passes Buffett tests', ev:'ROE 92% · FCF +48% · D/E 0.14' },
+      { pass:false, rule:'Margin of safety ≥ 25%',             ev:'MoS only +3.7% to DCF IV' },
+      { pass:true,  rule:'No structural downtrend',            ev:'Dow primary UP intact 1Y' },
+      { pass:true,  rule:'Multi-quarter catalyst durable',     ev:'AI capex cycle ≥ 5y runway' },
+      { pass:true,  rule:'Data completeness COMPLETE',         ev:'0/10 missing' },
+    ],
+  };
+  const rules = rulesByStrat[stratName];
+  const passCount = rules.filter(r => r.pass).length;
+  document.getElementById('convRules').innerHTML = rules.map(r =>
+    `<div class="conv-rule ${r.pass ? 'pass' : 'fail'}">
+       <span class="mark">${r.pass ? '✓' : '✗'}</span>
+       <span class="body"><b>${r.rule}</b><small>${r.ev}</small></span>
+       <span class="ev">${r.pass ? 'PASS' : 'FAIL'}</span>
+     </div>`).join('');
+  setText('convTierVal', s.conviction);
+  document.getElementById('convTierVal').style.color = `var(--${s.convCls})`;
+  setText('convTierRule', `${passCount} of 5 rules pass`);
+}
+
+// ═══════════════════════ SPARKLINES (quant panel) ═══════════════════════
+function makeSpark(arr, w=170, h=46, yOffset=0, padFracTop=0.15, padFracBot=0.15){
+  const lo = Math.min(...arr), hi = Math.max(...arr);
+  const span = hi - lo || 1;
+  const lowY = yOffset + h * (1 - padFracBot);
+  const hiY = yOffset + h * padFracTop;
+  const yAt = v => hiY + (hi - v)/span * (lowY - hiY);
+  const xStep = w / (arr.length - 1);
+  const pts = arr.map((v,i) => `${(i*xStep).toFixed(1)},${yAt(v).toFixed(1)}`).join(' ');
+  const lastY = yAt(arr[arr.length-1]);
+  return { pts, lastY };
+}
+function renderQuantPanel(s, stratName){
+  // P(target)
+  const sp1 = makeSpark(SPARK.pTarget.map(v => v*100), 170, 46, 14);
+  document.getElementById('qsPLine').setAttribute('points', sp1.pts);
+  document.getElementById('qsPFill').setAttribute('points', `0,60 ${sp1.pts} 170,60`);
+  document.getElementById('qsPDot').setAttribute('cy', sp1.lastY);
+
+  // Edge (signed) — y reflects positive/negative (signed scale 0pp at y=60)
+  const sp2 = makeSpark(SPARK.edge, 170, 46, 14);
+  document.getElementById('qsELine').setAttribute('points', sp2.pts);
+  document.getElementById('qsEFill').setAttribute('points', `0,60 ${sp2.pts} 170,60`);
+  document.getElementById('qsEDot').setAttribute('cy', sp2.lastY);
+
+  // Regime score (floor at 72)
+  const regLo = 65, regHi = 88;
+  const yAtReg = v => 14 + 46 * (1 - (v - regLo)/(regHi - regLo));
+  const sp3Pts = SPARK.regime.map((v,i) => `${(i*(170/(SPARK.regime.length-1))).toFixed(1)},${yAtReg(v).toFixed(1)}`).join(' ');
+  document.getElementById('qsRLine').setAttribute('points', sp3Pts);
+  document.getElementById('qsRFill').setAttribute('points', `0,60 ${sp3Pts} 170,60`);
+  document.getElementById('qsRDot').setAttribute('cy', yAtReg(SPARK.regime[SPARK.regime.length-1]));
+  // Floor line at y=yAtReg(72)
+  const floorY = yAtReg(72);
+  document.getElementById('qsRFloor').setAttribute('y1', floorY);
+  document.getElementById('qsRFloor').setAttribute('y2', floorY);
+  document.getElementById('qsRFloorL').setAttribute('y', floorY - 2);
+
+  // Kelly — use strategy-specific final value
+  const kellyCur = parseFloat(s.quantKelly);
+  const kellyArr = [...SPARK.kelly.slice(0, -1), kellyCur];
+  const sp4 = makeSpark(kellyArr, 170, 46, 14);
+  document.getElementById('qsKLine').setAttribute('points', sp4.pts);
+  document.getElementById('qsKFill').setAttribute('points', `0,60 ${sp4.pts} 170,60`);
+  document.getElementById('qsKDot').setAttribute('cy', sp4.lastY);
+  document.getElementById('qsKLine').setAttribute('stroke', s.color);
+  document.getElementById('qsKDot').setAttribute('fill', s.color);
+  document.getElementById('qsKFill').setAttribute('fill', `rgba(${hex2rgb(s.color)},0.18)`);
+
+  // CVaR — strategy-specific
+  const cvarCur = parseFloat(s.quantCvar);
+  const cvarArr = [...SPARK.cvar.slice(0, -1), cvarCur];
+  const sp5 = makeSpark(cvarArr, 170, 46, 14);
+  document.getElementById('qsCLine').setAttribute('points', sp5.pts);
+  document.getElementById('qsCFill').setAttribute('points', `0,60 ${sp5.pts} 170,60`);
+  document.getElementById('qsCDot').setAttribute('cy', sp5.lastY);
+
+  // Current value labels
+  setText('qsKVal', s.quantKelly);
+  document.getElementById('qsKVal').setAttribute('fill', s.color);
+  setText('qsKSub', s.quantKellySub);
+  setText('qsCVal', s.quantCvar);
+}
+
+// ═══════════════════════ VOLUME + RSI (price chart sub-panels) ═══════════════════════
+function renderVolumeRSI(){
+  // VOLUME bars at y=300-355, height = (vol/maxVol) * 50
+  const maxVol = Math.max(...VOL_60D) * 1.05;
+  const n = VOL_60D.length;
+  const xStep = (1020 - 60) / (n - 1);
+  const barW = xStep * 0.65;
+  let volHTML = '';
+  VOL_60D.forEach((v, i) => {
+    const cx = 60 + i * xStep;
+    const h = (v / maxVol) * 50;
+    const y = 355 - h;
+    const isRVOLAnom = v > VOL_AVG * 1.25;
+    const col = isRVOLAnom ? '#FCD34D' : (UP_60D[i] ? '#3DDC97' : '#E5484D');
+    volHTML += `<rect x="${(cx - barW/2).toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${col}" opacity="0.85"/>`;
+  });
+  document.getElementById('volBars').innerHTML = volHTML;
+  // Avg line at y based on VOL_AVG/maxVol
+  const avgY = 355 - (VOL_AVG / maxVol) * 50;
+  document.getElementById('volAvgLine').setAttribute('y1', avgY);
+  document.getElementById('volAvgLine').setAttribute('y2', avgY);
+
+  // RSI line at y=370-425, mapping RSI 0-100 → y 425-370
+  const rsiYAt = (rsi) => 425 - (rsi / 100) * 55;
+  const rsiPts = RSI_60D.map((rsi, i) => `${(60 + i*xStep).toFixed(1)},${rsiYAt(rsi).toFixed(1)}`).join(' ');
+  document.getElementById('rsiLine').setAttribute('points', rsiPts);
+  const lastRsi = RSI_60D[RSI_60D.length - 1];
+  document.getElementById('rsiDot').setAttribute('cy', rsiYAt(lastRsi));
+  setText('rsiCurrent', `RSI ${lastRsi.toFixed(0)}`);
+  // RSI color based on zone
+  const rsiCol = lastRsi >= 70 ? '#E5484D' : lastRsi <= 30 ? '#3DDC97' : '#FCD34D';
+  document.getElementById('rsiDot').setAttribute('fill', rsiCol);
+  document.getElementById('rsiCurrent').setAttribute('fill', rsiCol);
+}
+
+// ═══════════════════════ EV WATERFALL ═══════════════════════
+function renderEVWaterfall(s, stratName){
+  // Per-strategy probabilities for [worst, base, best]
+  const probsByStrat = {
+    SWING:      { worst:0.40, base:0.42, best:0.18 },  // pre-trigger uncertainty
+    POSITION:   { worst:0.24, base:0.58, best:0.18 },
+    INVESTMENT: { worst:0.22, base:0.50, best:0.28 },
+  };
+  const p = probsByStrat[stratName];
+
+  // $ moves
+  const stopMove = parseFloat(s.rr.stopPct.match(/-?\d+\.?\d*/)[0]);            // negative %
+  const t1Move   = parseFloat(s.rr.t1Pct.match(/-?\d+\.?\d*/)[0]);              // positive %
+  const t2Move   = ((s.chart.t2 - PRICE_REF) / PRICE_REF) * 100;                 // positive %
+  // $ per share
+  const stop$ = PRICE_REF * stopMove / 100;        // negative
+  const t1$   = PRICE_REF * t1Move / 100;
+  const t2$   = PRICE_REF * t2Move / 100;
+  // EV contributions
+  const evW = p.worst * stop$;
+  const evBa = p.base * t1$;
+  const evBe = p.best * t2$;
+  const evTotal = evW + evBa + evBe;
+  const evPct = (evTotal / PRICE_REF) * 100;
+
+  // Format helpers
+  const fmt$ = v => (v >= 0 ? '+' : '') + '$' + v.toFixed(2);
+  const fmtPctProb = v => Math.round(v*100) + '%';
+
+  // BEST
+  setText('evBestOut', '$' + s.chart.t2);
+  setText('evBestProb', fmtPctProb(p.best));
+  setText('evBestMove', fmt$(t2$));
+  setText('evBestEV', fmt$(evBe));
+  document.getElementById('evBestBar').setAttribute('width', p.best * 280);
+
+  // BASE
+  setText('evBaseOut', '$' + s.chart.t1);
+  setText('evBaseProb', fmtPctProb(p.base));
+  setText('evBaseMove', fmt$(t1$));
+  setText('evBaseEV', fmt$(evBa));
+  document.getElementById('evBaseBar').setAttribute('width', p.base * 280);
+
+  // WORST
+  setText('evWorstOut', '$' + s.chart.stop);
+  setText('evWorstProb', fmtPctProb(p.worst));
+  setText('evWorstMove', fmt$(stop$));
+  setText('evWorstEV', fmt$(evW));
+  document.getElementById('evWorstBar').setAttribute('width', p.worst * 280);
+
+  // TOTAL
+  const totalCol = evTotal > 0 ? '#3DDC97' : '#E5484D';
+  setText('evTotal', fmt$(evTotal));
+  document.getElementById('evTotal').setAttribute('fill', totalCol);
+  setText('evTotalPct', `${evPct >= 0 ? '+' : ''}${evPct.toFixed(1)}% on $${PRICE_REF} · ${evTotal > 0 ? 'positive EV → take the trade' : 'negative EV → skip'}`);
+  document.getElementById('evTotalPct').setAttribute('fill', totalCol);
+}
+
+function render(stratName){
+  const s = STRATEGIES[stratName];
+  document.body.className = 'strat-' + stratName;
+  document.querySelectorAll('.strat-pill').forEach(p =>
+    p.classList.toggle('on', p.dataset.strat === stratName));
+  setText('pageTitle', `◈ Analytical Engine v4 · NVDA · ${stratName} view (try the other pills →)`);
+
+  // Strategy line
+  document.getElementById('stratInfo').innerHTML =
+    `horizon <b>${s.horizon}</b> · lead lens <b>${s.lead}</b>`;
+
+  // Meta strip
+  setText('mStrategy', stratName);
+  setText('mStrategySub', s.horizonSub);
+  setText('mHorizon', s.horizon);
+  setText('mHorizonSub', s.horizonNote);
+  setText('mLead', s.lead);
+  setText('mLeadSub', s.leadSub);
+  setText('mCall', s.call);
+  document.getElementById('mCall').style.color = `var(--${s.callCls})`;
+  setText('mCallSub', s.callTag.replace(/^—\s*/, ''));
+  setText('mConv', s.conviction);
+  document.getElementById('mConv').style.color = `var(--${s.convCls})`;
+  setText('mConvSub', s.metaConvSub);
+
+  // Call block
+  const cb = document.getElementById('callBadge');
+  cb.textContent = s.call;
+  cb.className = `call-badge ${s.callCls}`;
+  setText('callTagline', s.callTag);
+  document.getElementById('callThesis').innerHTML = `<b>Thesis:</b> ${s.thesis}`;
+  document.getElementById('callRows').innerHTML = s.callRows.map(r =>
+    `<div class="call-row"><span class="call-k">${r[0]}</span><span class="call-v">${r[1]}</span></div>`
+  ).join('');
+
+  // Lens radar
+  const rp = radarPoints(s.radar);
+  const poly = document.getElementById('radarPoly');
+  poly.setAttribute('points', `180,${rp.tY} ${rp.hX},160 180,${rp.vY} ${rp.pX},160`);
+  poly.setAttribute('fill', `rgba(${hex2rgb(s.color)},0.18)`);
+  poly.setAttribute('stroke', s.color);
+  document.getElementById('radarDotT').setAttribute('cy', rp.tY);
+  document.getElementById('radarDotH').setAttribute('cx', rp.hX);
+  document.getElementById('radarDotV').setAttribute('cy', rp.vY);
+  document.getElementById('radarDotP').setAttribute('cx', rp.pX);
+  setText('radarValT', s.radar.T);
+  setText('radarValH', s.radar.H);
+  setText('radarValV', s.radar.V);
+  setText('radarValP', s.radar.P);
+  const leadAxis = { SWING:'T', POSITION:'T', INVESTMENT:'V' }[stratName];
+  const labMap = { T:['radarLabT','TRADER'], H:['radarLabH','HEDGE FUND'], V:['radarLabV','VALUE'], P:['radarLabP','PM'] };
+  const dflt = { T:'#5EA1FF', H:'#3DDC97', V:'#F5A524', P:'#3DDC97' };
+  Object.entries(labMap).forEach(([k,v]) => {
+    const el = document.getElementById(v[0]);
+    el.textContent = v[1] + (k === leadAxis ? ' (lead)' : '');
+    el.setAttribute('fill', k === leadAxis ? s.color : '#E6EAF2');
+    el.setAttribute('font-weight', k === leadAxis ? '700' : '400');
+    document.getElementById('radarVal'+k).setAttribute('fill', k === leadAxis ? s.color : dflt[k]);
+    document.getElementById('radarDot'+k).setAttribute('fill', k === leadAxis ? s.color : dflt[k]);
+  });
+
+  // Catalyst horizon
+  document.getElementById('catBand').setAttribute('x', s.catBandX);
+  document.getElementById('catBand').setAttribute('width', s.catBandW);
+  document.getElementById('catBand').setAttribute('fill', `rgba(${hex2rgb(s.color)},0.10)`);
+  document.getElementById('catBand').setAttribute('stroke', s.color);
+  setText('catBandLabel', s.catBandLab);
+  document.getElementById('catBandLabel').setAttribute('fill', s.color);
+  document.getElementById('catBandLabel').setAttribute('x', s.catBandX + s.catBandW/2);
+  const outX = s.catBandX + s.catBandW;
+  const outW = Math.max(0, 510 - outX);
+  document.getElementById('catOut').setAttribute('x', outX);
+  document.getElementById('catOut').setAttribute('width', outW);
+  document.getElementById('catOutLabel').setAttribute('x', outX + outW/2);
+  document.getElementById('catOutLabel').style.opacity = (outW > 40 ? '1' : '0');
+  setText('catERStatus', s.catERStatus);
+  const erOut = s.catERStatus.includes('OUT');
+  document.getElementById('catERStatus').setAttribute('fill', erOut ? '#F5A524' : '#9AA4B2');
+  document.getElementById('catER').setAttribute('fill', erOut ? '#F5A524' : '#3DDC97');
+  setText('catRule', s.catRule);
+
+  // ④ Disagreement matrix
+  renderDisagreementMatrix(s, stratName);
+
+  // ⑤ Conviction rules
+  renderConvRules(s, stratName);
+
+  // ⑥ Quant panel sparklines
+  renderQuantPanel(s, stratName);
+
+  // Price chart — compute y-band per strategy (include EMA range so all polylines fit)
+  const lastE8 = EMA_8.at(-1), lastE20 = EMA_20.at(-1), lastE50 = EMA_50.at(-1), lastE100 = EMA_100.at(-1);
+  const allPrices = [
+    s.chart.stop, s.chart.t1, s.chart.t2, s.chart.entryHi, s.chart.entryLo, PRICE_REF,
+    ...PRICES_60D, ...EMA_100  // include EMA bottoms so they don't clip
+  ];
+  const dataMax = Math.max(...allPrices);
+  const dataMin = Math.min(...allPrices);
+  const pad = (dataMax - dataMin) * 0.08;
+  const maxP = dataMax + pad;
+  const minP = dataMin - pad;
+  const py = makePriceY(maxP, minP);
+
+  // Targets / stop / entry
+  document.getElementById('cStop').setAttribute('y1', py(s.chart.stop));
+  document.getElementById('cStop').setAttribute('y2', py(s.chart.stop));
+  document.getElementById('cStopL').setAttribute('y', py(s.chart.stop) + 3);
+  setText('cStopL', `stop $${s.chart.stop}`);
+  document.getElementById('cT1').setAttribute('y1', py(s.chart.t1));
+  document.getElementById('cT1').setAttribute('y2', py(s.chart.t1));
+  document.getElementById('cT1L').setAttribute('y', py(s.chart.t1) + 3);
+  setText('cT1L', `T1 $${s.chart.t1}`);
+  document.getElementById('cT2').setAttribute('y1', py(s.chart.t2));
+  document.getElementById('cT2').setAttribute('y2', py(s.chart.t2));
+  document.getElementById('cT2L').setAttribute('y', py(s.chart.t2) + 3);
+  setText('cT2L', `T2 $${s.chart.t2}`);
+  const eHiY = py(s.chart.entryHi), eLoY = py(s.chart.entryLo);
+  const eY = Math.min(eHiY, eLoY);
+  const eH = Math.max(Math.abs(eHiY - eLoY), 4);
+  document.getElementById('cEntry').setAttribute('y', eY);
+  document.getElementById('cEntry').setAttribute('height', eH);
+  document.getElementById('cEntryL').setAttribute('y', (eHiY + eLoY)/2 + 3);
+  setText('cEntryL', s.chart.entryHi === s.chart.entryLo ? `entry $${s.chart.entryHi}` : `entry $${s.chart.entryLo}–$${s.chart.entryHi}`);
+  setText('cFoot', s.chart.foot);
+
+  // Price + EMA polylines (dynamic per strategy y-band)
+  const nPts = PRICES_60D.length;
+  const xStep = (1020 - 60) / (nPts - 1);
+  const lineFrom = arr => arr.map((p,i) => `${(60 + i*xStep).toFixed(1)},${py(p).toFixed(1)}`).join(' ');
+  document.getElementById('cPriceLine').setAttribute('points', lineFrom(PRICES_60D));
+  document.getElementById('cEma8').setAttribute('points', lineFrom(EMA_8));
+  document.getElementById('cEma20').setAttribute('points', lineFrom(EMA_20));
+  document.getElementById('cEma50').setAttribute('points', lineFrom(EMA_50));
+  document.getElementById('cEma100').setAttribute('points', lineFrom(EMA_100));
+  // Price area fill — polygon between price line and bottom axis (y=240)
+  const fillPts = `60,240 ${lineFrom(PRICES_60D)} 1020,240`;
+  document.getElementById('cFill').setAttribute('points', fillPts);
+
+  // Now marker on price line
+  document.getElementById('cNowDot').setAttribute('cy', py(PRICE_REF));
+
+  // EMA endpoint labels (right of chart, color-coded)
+  document.getElementById('cEma8L').setAttribute('y', py(lastE8) + 4);
+  document.getElementById('cEma8L').textContent = `EMA8 $${lastE8.toFixed(1)}`;
+  document.getElementById('cEma20L').setAttribute('y', py(lastE20) + 4);
+  document.getElementById('cEma20L').textContent = `EMA20 $${lastE20.toFixed(1)}`;
+  document.getElementById('cEma50L').setAttribute('y', py(lastE50) + 4);
+  document.getElementById('cEma50L').textContent = `EMA50 $${lastE50.toFixed(1)}`;
+  document.getElementById('cEma100L').setAttribute('y', py(lastE100) + 4);
+  document.getElementById('cEma100L').textContent = `EMA100 $${lastE100.toFixed(1)}`;
+
+  // EMA stack indicator (bullish if 8 > 20 > 50 > 100; bearish if reverse; else mixed)
+  const isBull = lastE8 > lastE20 && lastE20 > lastE50 && lastE50 > lastE100;
+  const isBear = lastE8 < lastE20 && lastE20 < lastE50 && lastE50 < lastE100;
+  const stackLab = document.getElementById('emaStackLabel');
+  const stackHint = document.getElementById('emaStackHint');
+  const stackBadge = document.getElementById('emaStackBadge');
+  if (isBull){
+    stackLab.textContent = '8 > 20 > 50 > 100  ✓';
+    stackLab.setAttribute('fill', '#3DDC97');
+    stackHint.textContent = 'bullish stack · trend-intact';
+    stackBadge.className = 'pill pill-gn';
+    stackBadge.textContent = '📈 BULLISH STACK · 8 > 20 > 50 > 100';
+  } else if (isBear){
+    stackLab.textContent = '8 < 20 < 50 < 100  ✗';
+    stackLab.setAttribute('fill', '#E5484D');
+    stackHint.textContent = 'bearish stack · downtrend';
+    stackBadge.className = 'pill pill-rd';
+    stackBadge.textContent = '📉 BEARISH STACK · 8 < 20 < 50 < 100';
+  } else {
+    stackLab.textContent = 'mixed · no full stack';
+    stackLab.setAttribute('fill', '#F5A524');
+    stackHint.textContent = 'transition zone';
+    stackBadge.className = 'pill pill-am';
+    stackBadge.textContent = '⚠ MIXED STACK · transition';
+  }
+
+  // ⑦·b Volume + RSI sub-panels (static, independent of strategy)
+  renderVolumeRSI();
+
+  // VERDICT card
+  renderVerdict(s, stratName);
+
+  // ⑧·b EV scenario waterfall
+  renderEVWaterfall(s, stratName);
+
+  // R:R bar — scale widths by % move
+  const stopPct = Math.abs(parseFloat(s.rr.stopPct.match(/-?\d+\.?\d*/)[0]));
+  const t1Pct = Math.abs(parseFloat(s.rr.t1Pct.match(/-?\d+\.?\d*/)[0]));
+  const maxPct = Math.max(stopPct, t1Pct);
+  const totalPx = 960;
+  const scalePx = totalPx / (stopPct + t1Pct);
+  const leftW = stopPct * scalePx;
+  const rightW = t1Pct * scalePx;
+  const startX = 60;
+  const nowX = startX + leftW;
+  const endX = nowX + rightW;
+  document.getElementById('rrLeft').setAttribute('x', startX);
+  document.getElementById('rrLeft').setAttribute('width', leftW);
+  document.getElementById('rrRight').setAttribute('x', nowX);
+  document.getElementById('rrRight').setAttribute('width', rightW);
+  document.getElementById('rrLineStop').setAttribute('x1', startX);
+  document.getElementById('rrLineStop').setAttribute('x2', startX);
+  document.getElementById('rrLineNow').setAttribute('x1', nowX);
+  document.getElementById('rrLineNow').setAttribute('x2', nowX);
+  document.getElementById('rrLineT1').setAttribute('x1', endX);
+  document.getElementById('rrLineT1').setAttribute('x2', endX);
+  document.getElementById('rrNowDot').setAttribute('cx', nowX);
+  setText('rrStopLab', s.rr.stopLab);
+  document.getElementById('rrStopLab').setAttribute('x', startX);
+  setText('rrStopPct', s.rr.stopPct);
+  document.getElementById('rrStopPct').setAttribute('x', startX);
+  document.getElementById('rrNowLab').setAttribute('x', nowX);
+  document.getElementById('rrNowSub').setAttribute('x', nowX);
+  setText('rrT1Lab', s.rr.t1Lab);
+  document.getElementById('rrT1Lab').setAttribute('x', endX);
+  setText('rrT1Pct', s.rr.t1Pct);
+  document.getElementById('rrT1Pct').setAttribute('x', endX);
+  setText('rrRatio', s.rr.ratio);
+  document.getElementById('rrRatioG').setAttribute('transform', `translate(${(startX + endX)/2},68)`);
+  setText('rrFoot', s.rr.foot);
+
+  // Lens written analysis
+  ['TRADER','HEDGE','VALUE','PM'].forEach(k => {
+    const key = k === 'TRADER' ? 'T' : k === 'HEDGE' ? 'H' : k === 'VALUE' ? 'V' : 'P';
+    setText('lensRole'+k, s.lensRole[key]);
+    document.getElementById('lensBody'+k).innerHTML = s.lensBody[key];
+    document.getElementById('lensVote'+k).innerHTML = `<span class="pill pill-${s.lensVoteCls[key]}">${s.lensVotes[key]}</span>`;
+  });
+  const leadKey = { SWING:'TRADER', POSITION:'TRADER', INVESTMENT:'VALUE' }[stratName];
+  ['TRADER','HEDGE','VALUE','PM'].forEach(k =>
+    document.getElementById('lens'+k).classList.toggle('lead', k === leadKey));
+
+  // Facts & risks
+  document.getElementById('factsList').innerHTML = s.facts.map(f =>
+    `<li>${f.text} <span class="pill pill-dim" style="margin-left:6px">${f.cat} · w=${f.w}× → ${f.score}</span></li>`).join('');
+  document.getElementById('risksList').innerHTML = s.risks.map(r =>
+    `<li>${r.text} <span class="pill pill-dim" style="margin-left:6px">${r.cat} · w=${r.w}× → ${r.score}</span></li>`).join('');
+  setText('factsWeightHint', s.factsWeightHint);
+  setText('risksWeightHint', s.risksWeightHint);
+
+  // Invalidation
+  setText('invalSub', s.invalSub);
+  document.getElementById('invalBody').innerHTML = s.invalBody;
+
+  // Conviction
+  setText('convLabel', s.conviction);
+  document.getElementById('convLabel').style.color = `var(--${s.convCls})`;
+  setText('convRule', '— ' + s.convRule);
+  document.getElementById('convBody').innerHTML = s.convBody;
+
+  // Alt strategy
+  document.getElementById('altGrid').innerHTML = s.altCards.map(c =>
+    `<div class="alt-card"><h4>${c.label}</h4><div class="alt-call ${c.cls}">${c.call}</div><div class="body"><b>Trigger:</b> ${c.trigger}<br><br><b>Why:</b> ${c.reason}</div></div>`).join('');
+  document.getElementById('altDiscr').innerHTML = s.altDiscr;
+
+  // Self-check
+  document.getElementById('selfCheck').innerHTML = s.selfCheck;
+
+  // Engine struct
+  document.getElementById('structJson').innerHTML = renderStruct(stratName, s);
+
+  // URL sync
+  const u = new URL(window.location);
+  u.searchParams.set('strategy', stratName);
+  history.replaceState({}, '', u);
+}
+
+function stripTags(s){ return s.replace(/<[^>]+>/g,''); }
+function renderStruct(name, s){
+  const k = x => `<span class="key">${x}</span>`;
+  const v = x => `<span class="str">"${x}"</span>`;
+  const n = x => `<span class="nm">${x}</span>`;
+  return `{
+  ${k('ticker')}:                 ${v('NVDA')},
+  ${k('as_of_timestamp')}:        ${v('2026-05-12T14:30:00-04:00')},
+  ${k('price_at_analysis')}:      ${n(PRICE_REF.toFixed(2))},
+  ${k('strategy')}:               ${v(name)},
+  ${k('horizon')}:                ${v(s.horizon)},
+  ${k('lead_lens')}:              ${v(s.lead)},
+  ${k('call')}:                   ${v(s.call)},
+  ${k('call_specifics')}: {
+    ${k('entry')}:                ${v(stripTags(s.callRows[0][1]).substring(0,72))},
+    ${k('target_T1')}:            ${v('$'+s.chart.t1)},
+    ${k('target_T2')}:            ${v('$'+s.chart.t2)},
+    ${k('invalidation')}:         ${v('$'+s.chart.stop)},
+    ${k('expected_hold')}:        ${v(s.horizon)},
+    ${k('sizing_pct')}:           ${n(parseFloat(s.quantKelly))},
+    ${k('catalyst')}:             ${v(stripTags(s.callRows[5][1]).substring(0,72))}
+  },
+  ${k('primary_thesis')}:         ${v(stripTags(s.thesis).substring(0,80)+'…')},
+  ${k('cross_checks')}: [
+    { ${k('lens')}:${v('TRADER')},    ${k('vote')}:${v(s.lensVotes.T)}, ${k('score')}:${n(s.radar.T)} },
+    { ${k('lens')}:${v('HEDGE_FUND')},${k('vote')}:${v(s.lensVotes.H)}, ${k('score')}:${n(s.radar.H)} },
+    { ${k('lens')}:${v('VALUE')},     ${k('vote')}:${v(s.lensVotes.V)}, ${k('score')}:${n(s.radar.V)} },
+    { ${k('lens')}:${v('PM')},        ${k('vote')}:${v(s.lensVotes.P)}, ${k('score')}:${n(s.radar.P)} }
+  ],
+  ${k('lens_decomposition')}:     <span class="ctx">{ 11 frameworks: Wyckoff/Elliott/Dow/SMC/VP/AVWAP/Ichimoku/DCF/DDM/Bayesian/OrderFlow }</span>,
+  ${k('top_3_facts_weights')}:    [${s.facts.map(f=>n(f.w)).join(', ')}],
+  ${k('top_3_risks_weights')}:    [${s.risks.map(r=>n(r.w)).join(', ')}],
+  ${k('invalidation')}:           ${v(stripTags(s.invalBody).substring(0,80)+'…')},
+  ${k('conviction')}:             ${v(s.conviction)},
+  ${k('conviction_reason')}:      ${v(stripTags(s.convBody).substring(0,80)+'…')},
+  ${k('data_completeness')}:      ${v('COMPLETE')},
+  ${k('missing_fields')}:         [],
+  ${k('sources_and_freshness')}:  <span class="ctx">{ 8-source table · all in freshness window }</span>,
+  ${k('alt_strategy_call')}: {
+    ${k(s.altCards[0].label.split(' ')[0])}:      { ${k('call')}:${v(s.altCards[0].call)} },
+    ${k(s.altCards[1].label.split(' ')[0])}: { ${k('call')}:${v(s.altCards[1].call)} }
+  }
+}`;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.strat-pill').forEach(p =>
+    p.addEventListener('click', () => render(p.dataset.strat)));
+  const urlStrat = new URLSearchParams(window.location.search).get('strategy');
+  render(['SWING','POSITION','INVESTMENT'].includes(urlStrat) ? urlStrat : 'POSITION');
+});
+</script>
+</body>
+</html>

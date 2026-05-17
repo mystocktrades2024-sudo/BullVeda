@@ -8898,7 +8898,8 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
                    quote_snapshot: dict | None = None,
                    news_articles: list | None = None,
                    options_chain: dict | None = None,
-                   df_4h: "pd.DataFrame | None" = None) -> dict:
+                   df_4h: "pd.DataFrame | None" = None,
+                   df_1h: "pd.DataFrame | None" = None) -> dict:
     """
     Run complete analysis pipeline for a single ticker.
     Returns full result dict with gate, scores, plan, decision.
@@ -11091,6 +11092,20 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     result["scoring_breakdown"] = scoring_breakdown
     # v1 Gap 1: surface MC P(profit) for UI consumption
     result["mc_p_profit"] = round(_mc_p_profit_val, 3)
+    # 2026-05-16 · SMC engine: detect zones + structure + bars for renderSMC.
+    # 2026-05-17 · Hit-rate compute is ~1.3 min/ticker (sliding window backtest).
+    # Disabled by default in main scan — runs in dedicated nightly backfill instead.
+    # If ticker already has cached hit rates (<30d old), they're auto-attached.
+    try:
+        from smc_engine import attach_smc_data, load_hit_rates
+        attach_smc_data(result, df, ticker, weekly_df=weekly_df, df_4h=df_4h, df_1h=df_1h,
+                         compute_hit_rates=False)
+        # Attach pre-cached hit rates if available
+        _cached = load_hit_rates().get(ticker)
+        if _cached:
+            result["smc_hit_rates"] = _cached
+    except Exception as e:
+        result["smc_data"] = {"error": f"smc_engine failure: {e}", "synth": False}
     return result
 
 

@@ -1,0 +1,1105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Kairos · Home · Quant Cockpit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=GT+Sectra:ital,wght@1,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#000; --bg-1:#0a0d0c; --bg-2:#0f1311; --bg-3:#141816; --bg-4:#1a201d;
+  --line:#1d2520; --line-2:#2a352e; --line-3:#3a4a40;
+  --ink:#d8d6cc; --ink-1:#b0aea3; --ink-2:#80847a; --ink-3:#545851; --ink-4:#2e312c;
+  --gn:#5be57c; --gn-dim:#2f6b41; --gn-bg:rgba(91,229,124,0.08);
+  --amb:#ffb95c; --amb-dim:#8c5d20; --amb-bg:rgba(255,185,92,0.07);
+  --cy:#5ec8d8; --cy-dim:#2c6a74; --cy-bg:rgba(94,200,216,0.07);
+  --rd:#ff6b5b; --rd-dim:#7a2a22; --rd-bg:rgba(255,107,91,0.07);
+  --copper:#d97757;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --serif:'GT Sectra',Georgia,serif;
+  --sans:'Inter',system-ui,sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--sans); font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── brandbar ── */
+.brandbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 28px 12px;
+  background: linear-gradient(180deg, #0e1311 0%, #000 100%);
+  border-bottom: 1px solid var(--line);
+}
+.brandbar-l { display: flex; align-items: baseline; gap: 18px; }
+.brandbar-wm { font-family: var(--serif); font-style: italic; font-weight: 500; font-size: 32px; line-height: 1; letter-spacing: -0.025em; color: var(--ink); }
+.brandbar-wm::first-letter { color: var(--copper); }
+.brandbar-tag { font-family: var(--mono); font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+.brandbar-r { display: flex; align-items: center; gap: 22px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); font-weight: 600; }
+.brandbar-r b { color: var(--ink); font-weight: 700; }
+.brandbar-r .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--gn); box-shadow: 0 0 6px var(--gn); margin-right: 6px; vertical-align: 1px; }
+.brandbar-r .neg { color: var(--rd); }
+.brandbar-r .pos { color: var(--gn); }
+
+/* ── layout ── */
+.page { max-width: 1680px; margin: 0 auto; padding: 18px 24px 60px; }
+.h-section {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 0 2px 10px;
+}
+.h-title {
+  font-family: var(--serif); font-style: italic; font-weight: 500;
+  font-size: 20px; line-height: 1; letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.h-title::first-letter { color: var(--copper); }
+.h-sub {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-3);
+  margin-left: 10px;
+}
+.h-right {
+  display: flex; gap: 8px;
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-2);
+  align-items: center;
+}
+
+.fresh {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 2px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+.fresh .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); }
+.fresh.live { color: var(--gn); border-color: var(--gn-dim); background: var(--gn-bg); }
+.fresh.live .dot { background: var(--gn); box-shadow: 0 0 6px var(--gn); }
+.fresh.scan { color: var(--cy); border-color: var(--cy-dim); background: var(--cy-bg); }
+.fresh.scan .dot { background: var(--cy); }
+.fresh.cached { color: var(--amb); border-color: var(--amb-dim); background: var(--amb-bg); }
+.fresh.cached .dot { background: var(--amb); }
+.fresh.stale { color: var(--rd); border-color: var(--rd-dim); background: var(--rd-bg); }
+.fresh.stale .dot { background: var(--rd); box-shadow: 0 0 6px var(--rd); }
+
+/* ── reusable card ── */
+.card {
+  background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px 18px 16px;
+  position: relative;
+}
+.card.trade::before, .card.manage::before, .card.avoid::before, .card.edge::before, .card.funnel::before, .card.health::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; border-radius: 6px 6px 0 0;
+}
+.card.trade::before  { background: var(--gn); }
+.card.manage::before { background: var(--copper); }
+.card.avoid::before  { background: var(--rd); }
+.card.edge::before   { background: var(--cy); }
+.card.funnel::before { background: var(--amb); }
+.card.health::before { background: var(--gn); }
+
+.card-h {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--line);
+}
+.card-h-l {
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink);
+}
+.card-h-l .icon { color: var(--copper); margin-right: 6px; }
+.card.trade .card-h-l .icon  { color: var(--gn); }
+.card.avoid .card-h-l .icon  { color: var(--rd); }
+.card.edge .card-h-l .icon   { color: var(--cy); }
+.card.funnel .card-h-l .icon { color: var(--amb); }
+.card-h-r {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* ── REGIME RIBBON (top hero) ── */
+.regime {
+  background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 20px 24px 22px;
+  margin-bottom: 18px;
+  position: relative;
+}
+.regime::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--copper);
+  border-radius: 8px 8px 0 0;
+}
+.regime-band {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1.6fr;
+  gap: 24px;
+  align-items: center;
+}
+.regime-call { display: flex; flex-direction: column; gap: 6px; }
+.regime-call .meta {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.regime-call .v {
+  font-family: var(--serif); font-style: italic; font-weight: 500;
+  font-size: 42px; line-height: 1.05;
+  color: var(--gn);
+}
+.regime-call.choppy .v { color: var(--amb); }
+.regime-call.off .v    { color: var(--rd); }
+.regime-call .v::first-letter { color: var(--ink); }
+.regime-call .nb {
+  font-family: var(--mono); font-size: 12.5px; font-weight: 500;
+  color: var(--ink);
+  line-height: 1.5;
+  margin-top: 4px;
+}
+.regime-conf { display: flex; flex-direction: column; gap: 10px; }
+.regime-conf .row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+  color: var(--ink-1);
+}
+.regime-conf .row b { color: var(--ink); font-weight: 700; }
+.regime-conf .bar { height: 5px; background: var(--bg-4); border-radius: 1px; overflow: hidden; margin-top: 3px; }
+.regime-conf .bar .fl { height: 100%; background: var(--gn); border-radius: 1px; }
+.regime-conf .lbl {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 700;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.regime-macro {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+.regime-tile {
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 9px 11px;
+}
+.regime-tile .lbl {
+  font-family: var(--mono); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 2px;
+}
+.regime-tile .v {
+  font-family: var(--mono); font-size: 17px; font-weight: 700;
+  line-height: 1;
+  color: var(--ink);
+}
+.regime-tile .sub {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  color: var(--ink-2);
+  margin-top: 3px;
+}
+.regime-tile.up .v   { color: var(--gn); }
+.regime-tile.down .v { color: var(--rd); }
+.regime-tile.up .sub   { color: var(--gn); }
+.regime-tile.down .sub { color: var(--rd); }
+
+/* ── DECISION COCKPIT (3-col) ── */
+.cockpit {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+/* TRADE column */
+.pick-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--line);
+  cursor: pointer;
+  align-items: center;
+  transition: padding 100ms;
+}
+.pick-row:last-child { border-bottom: none; }
+.pick-row:hover { padding-left: 6px; }
+.pick-row-l { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pick-row-tkr {
+  font-family: var(--mono); font-size: 16px; font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.pick-row-meta {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+  color: var(--ink-2);
+  letter-spacing: 0.04em;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.pick-row-meta b { color: var(--cy); font-weight: 700; }
+.pick-row-r { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.pick-row-score {
+  font-family: var(--mono); font-size: 22px; font-weight: 700;
+  line-height: 1;
+  color: var(--gn);
+}
+.pick-row-rr {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}
+
+/* MANAGE column */
+.mgmt-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px dashed var(--line);
+}
+.mgmt-row:last-child { border-bottom: none; }
+.mgmt-row .ico {
+  width: 24px; height: 24px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  color: var(--copper);
+}
+.mgmt-row .ico.gn { color: var(--gn); border-color: var(--gn-dim); }
+.mgmt-row .ico.rd { color: var(--rd); border-color: var(--rd-dim); }
+.mgmt-row .text {
+  flex: 1;
+  font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+  color: var(--ink);
+  line-height: 1.45;
+}
+.mgmt-row .text b { font-weight: 700; }
+.mgmt-row .when {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* AVOID column */
+.avoid-kpi {
+  text-align: center;
+  padding: 8px 0 12px;
+  border-bottom: 1px dashed var(--line);
+  margin-bottom: 10px;
+}
+.avoid-kpi .v {
+  font-family: var(--mono); font-size: 38px; font-weight: 700;
+  line-height: 1;
+  color: var(--rd);
+}
+.avoid-kpi .lbl {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-3);
+  margin-top: 6px;
+}
+.avoid-list {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.avoid-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-family: var(--mono); font-size: 11.5px; font-weight: 600;
+  padding: 4px 0;
+}
+.avoid-row .tkr { color: var(--ink); font-weight: 700; }
+.avoid-row .reason { color: var(--ink-2); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* ── SYSTEM HEALTH ── */
+.health-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.kpi {
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 10px 12px;
+}
+.kpi .lbl {
+  font-family: var(--mono); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 4px;
+}
+.kpi .v {
+  font-family: var(--mono); font-size: 22px; font-weight: 700;
+  line-height: 1;
+  color: var(--ink);
+}
+.kpi.pos .v { color: var(--gn); }
+.kpi.neg .v { color: var(--rd); }
+.kpi .sub {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600;
+  color: var(--ink-3);
+  margin-top: 4px;
+  letter-spacing: 0.06em;
+}
+
+/* funnel */
+.funnel-step {
+  display: grid;
+  grid-template-columns: 110px 1fr 50px;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 0;
+}
+.funnel-step .lbl {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-2);
+}
+.funnel-step .bar {
+  height: 8px;
+  background: var(--bg-4);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.funnel-step .bar .fl {
+  height: 100%;
+  background: var(--cy);
+  border-radius: 1px;
+}
+.funnel-step .v {
+  font-family: var(--mono); font-size: 11.5px; font-weight: 700;
+  text-align: right;
+  color: var(--ink);
+}
+.funnel-step.buy .bar .fl { background: var(--gn); }
+.funnel-step.buy .v { color: var(--gn); }
+
+/* check rows */
+.check-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--line);
+}
+.check-row:last-child { border-bottom: none; }
+.check-row .ico {
+  width: 16px; height: 16px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 13px; font-weight: 700;
+}
+.check-row .ico.ok { color: var(--gn); }
+.check-row .ico.warn { color: var(--amb); }
+.check-row .ico.fail { color: var(--rd); }
+.check-row .text {
+  flex: 1;
+  font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+  color: var(--ink);
+}
+.check-row .sub {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600;
+  color: var(--ink-3);
+  letter-spacing: 0.06em;
+}
+
+/* ── SECTOR HEAT STRIP ── */
+.sectors {
+  display: grid;
+  grid-template-columns: repeat(11, 1fr);
+  gap: 6px;
+  margin-bottom: 18px;
+}
+.sec-tile {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px 8px 12px;
+  text-align: center;
+  position: relative;
+  cursor: pointer;
+  transition: all 120ms;
+}
+.sec-tile:hover { border-color: var(--line-3); }
+.sec-tile .rank {
+  position: absolute; top: 4px; left: 6px;
+  font-family: var(--mono); font-size: 9px; font-weight: 700;
+  color: var(--ink-3);
+}
+.sec-tile .nm {
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+.sec-tile .perf {
+  font-family: var(--mono); font-size: 14px; font-weight: 700;
+  line-height: 1;
+  color: var(--gn);
+}
+.sec-tile.neg .perf { color: var(--rd); }
+.sec-tile .heat {
+  height: 4px;
+  background: var(--bg-4);
+  border-radius: 1px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.sec-tile .heat .fl {
+  height: 100%; background: var(--gn);
+}
+.sec-tile.neg .heat .fl { background: var(--rd); float: right; }
+
+/* ── CALENDAR ── */
+.cal {
+  display: flex; flex-direction: column;
+  gap: 8px;
+}
+.cal-row {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--line);
+}
+.cal-row:last-child { border-bottom: none; }
+.cal-when {
+  font-family: var(--mono); font-size: 13px; font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--copper);
+  text-align: center;
+}
+.cal-when .d {
+  font-size: 22px; line-height: 1;
+  display: block;
+}
+.cal-when .l {
+  font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+.cal-text {
+  font-family: var(--mono); font-size: 12px; font-weight: 500;
+  color: var(--ink);
+  line-height: 1.45;
+}
+.cal-text b { font-weight: 700; }
+.cal-tier {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 2px;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  color: var(--ink-2);
+}
+.cal-tier.high   { color: var(--rd); border-color: var(--rd-dim); background: var(--rd-bg); }
+.cal-tier.medium { color: var(--amb); border-color: var(--amb-dim); background: var(--amb-bg); }
+.cal-tier.earn   { color: var(--cy); border-color: var(--cy-dim); background: var(--cy-bg); }
+
+/* ── CALL TO ACTION at bottom ── */
+.cta {
+  text-align: center;
+  padding: 24px 0 8px;
+}
+.cta a {
+  display: inline-block;
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--copper);
+  margin: 0 14px;
+  text-decoration: none;
+}
+.cta a:hover { color: var(--ink); }
+
+/* ── grids ── */
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
+
+/* ── INTRO BANNER (public-facing onboarding) ── */
+.intro {
+  background: linear-gradient(135deg, rgba(217,119,87,0.08) 0%, var(--bg-2) 60%);
+  border: 1px solid rgba(217,119,87,0.25);
+  border-radius: 8px;
+  padding: 14px 18px 14px 22px;
+  margin-bottom: 18px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px;
+  position: relative;
+}
+.intro::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 3px;
+  background: var(--copper); border-radius: 8px 0 0 8px;
+}
+.intro-l { display: flex; flex-direction: column; gap: 4px; }
+.intro-tag {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 700;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--copper);
+}
+.intro-title {
+  font-family: var(--serif); font-style: italic; font-weight: 500;
+  font-size: 18px; line-height: 1.2;
+  color: var(--ink);
+}
+.intro-title::first-letter { color: var(--copper); }
+.intro-body {
+  font-family: var(--mono); font-size: 12px; font-weight: 500;
+  color: var(--ink-1); line-height: 1.55;
+  max-width: 880px;
+}
+.intro-body b { color: var(--ink); font-weight: 700; }
+.intro-dismiss {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-3);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  padding: 6px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.intro-dismiss:hover { color: var(--ink); border-color: var(--ink-3); }
+.intro.hidden { display: none; }
+
+/* ── Tooltip-on-hover for jargon terms ── */
+.t {
+  border-bottom: 1px dotted var(--ink-3);
+  cursor: help;
+  position: relative;
+}
+.t::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  padding: 7px 10px;
+  font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+  color: var(--ink);
+  letter-spacing: 0.02em; text-transform: none;
+  width: max-content; max-width: 280px;
+  white-space: normal; line-height: 1.45;
+  pointer-events: none;
+  opacity: 0; visibility: hidden;
+  transition: opacity 120ms;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+  z-index: 10;
+}
+.t::before {
+  content: ""; position: absolute;
+  bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: var(--line-2);
+  pointer-events: none;
+  opacity: 0; visibility: hidden;
+  transition: opacity 120ms;
+}
+.t:hover::after, .t:hover::before { opacity: 1; visibility: visible; }
+
+/* ── FOOTER ── */
+.foot {
+  margin-top: 36px;
+  padding: 20px 0 8px;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+  color: var(--ink-3);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 16px;
+  align-items: center;
+}
+.foot .l, .foot .r { letter-spacing: 0.16em; text-transform: uppercase; }
+.foot .r { text-align: right; }
+.foot .c {
+  text-align: center;
+  max-width: 560px;
+  margin: 0 auto;
+  font-size: 10px; line-height: 1.5;
+  color: var(--ink-3); letter-spacing: 0.04em;
+  text-transform: none;
+  font-weight: 500;
+}
+.foot a { color: var(--ink-1); text-decoration: none; border-bottom: 1px dotted var(--ink-4); }
+.foot a:hover { color: var(--ink); }
+
+/* ── responsive ── */
+@media (max-width: 1180px) {
+  .regime-band { grid-template-columns: 1fr; gap: 18px; }
+  .regime-macro { grid-template-columns: repeat(5, 1fr); }
+  .cockpit, .health-row { grid-template-columns: 1fr; }
+  .sectors { grid-template-columns: repeat(6, 1fr); }
+}
+@media (max-width: 720px) {
+  .brandbar { flex-direction: column; gap: 10px; align-items: flex-start; padding: 14px 16px; }
+  .brandbar-r { flex-wrap: wrap; gap: 12px; font-size: 9.5px; }
+  .page { padding: 14px 12px 60px; }
+  .regime-macro { grid-template-columns: repeat(2, 1fr); }
+  .sectors { grid-template-columns: repeat(3, 1fr); }
+  .intro { flex-direction: column; align-items: flex-start; }
+  .foot { grid-template-columns: 1fr; text-align: center; }
+  .foot .r, .foot .l { text-align: center; }
+}
+</style>
+</head>
+<body>
+
+<div class="brandbar">
+  <div class="brandbar-l">
+    <div class="brandbar-wm">Kairos</div>
+    <div class="brandbar-tag">Home · Quant Cockpit</div>
+  </div>
+  <div class="brandbar-r" id="brandbar-r"></div>
+</div>
+
+<div class="page">
+
+  <!-- ════════════ INTRO STRIP (dismissible) ════════════ -->
+  <div class="intro" id="intro">
+    <div class="intro-l">
+      <div class="intro-tag">★ KAIROS · TRADE WHEN, NOT THAT</div>
+      <div class="intro-title">A systematic swing-trading cockpit.</div>
+      <div class="intro-body">
+        Each morning a quant pipeline scores the S&amp;P 500 + Russell 1000 universe across 8 factors — regime, momentum, structure, catalyst, and tail risk. This page surfaces what to <b>trade</b>, what to <b>manage</b>, and what to <b>avoid</b>, with the system's own honesty log so you can judge whether to trust it.
+      </div>
+    </div>
+    <button class="intro-dismiss" onclick="document.getElementById('intro').classList.add('hidden'); localStorage.setItem('kairos_intro_dismissed','1')">Got it ✓</button>
+  </div>
+
+  <!-- ════════════ REGIME RIBBON ════════════ -->
+  <div class="h-section">
+    <div>
+      <span class="h-title">Today's Read</span>
+      <span class="h-sub">Should I trade today?</span>
+    </div>
+    <div class="h-right" id="regime-fresh"></div>
+  </div>
+  <div class="regime" id="regime"></div>
+
+  <!-- ════════════ DECISION COCKPIT ════════════ -->
+  <div class="h-section">
+    <div>
+      <span class="h-title">Decision Cockpit</span>
+      <span class="h-sub">Trade · Manage · Avoid</span>
+    </div>
+    <div class="h-right" id="cockpit-fresh"></div>
+  </div>
+  <div class="cockpit">
+    <div class="card trade" id="card-trade"></div>
+    <div class="card manage" id="card-manage"></div>
+    <div class="card avoid" id="card-avoid"></div>
+  </div>
+
+  <!-- ════════════ SYSTEM HEALTH ════════════ -->
+  <div class="h-section">
+    <div>
+      <span class="h-title">System Edge & Health</span>
+      <span class="h-sub">Can I trust the signal?</span>
+    </div>
+    <div class="h-right" id="health-fresh"></div>
+  </div>
+  <div class="health-row">
+    <div class="card edge" id="card-edge"></div>
+    <div class="card funnel" id="card-funnel"></div>
+    <div class="card health" id="card-health"></div>
+  </div>
+
+  <!-- ════════════ SECTOR LEADERBOARD ════════════ -->
+  <div class="h-section">
+    <div>
+      <span class="h-title">Sector Leaderboard</span>
+      <span class="h-sub">11 GICS · today's RS</span>
+    </div>
+    <div class="h-right" id="sectors-fresh"></div>
+  </div>
+  <div class="sectors" id="sectors"></div>
+
+  <!-- ════════════ FORTHCOMING ════════════ -->
+  <div class="h-section">
+    <div>
+      <span class="h-title">Forthcoming</span>
+      <span class="h-sub">Next 14d events that could invalidate trades</span>
+    </div>
+    <div class="h-right" id="cal-fresh"></div>
+  </div>
+  <div class="card"><div class="cal" id="cal"></div></div>
+
+  <div class="cta">
+    <a href="/v2/kairos.html">⌬ Elite Picks</a>
+    <a href="/v2/elite-detail.html">◎ Ticker Detail</a>
+    <a href="/v2/dashboard.html">▣ Legacy Dashboard</a>
+  </div>
+
+  <div class="foot">
+    <div class="l">Kairos · v12.04 · <span id="foot-ts">snapshot —</span></div>
+    <div class="c">
+      <b>Not investment advice.</b> Kairos surfaces statistical signals from a quantitative pipeline — outputs are educational and probabilistic, not recommendations. Past backtested performance does not guarantee future returns. Trade at your own risk and size positions according to your own risk tolerance. By using this site you acknowledge that the operator is not a registered investment advisor.
+    </div>
+    <div class="r">© 2026 · <a href="/v2/cheatsheet.html">help</a> · <a href="mailto:garimella.phaniraj@gmail.com">contact</a></div>
+  </div>
+
+</div>
+
+<script>
+const DATA = {"run_timestamp":"2026-05-11 08:00","run_date":"2026-05-11","regime":{"regime":"neutral","regime_raw":"bull","regime_pending_flip":null,"regime4":"risk_on_choppy","regime4_raw":"risk_on_choppy","qqq_above_ema50":true,"qqq_price":711.23,"breadth_pct_50d":50.9,"max_size_pct":70,"spy_price":737.62,"spy_ema50":694.69,"spy_sma200":670.56,"above_50ema":true,"above_200sma":true,"spy_1m_ret":8.6,"spy_daily_chg":0.83,"distribution_days":4,"market_cycle":"mid_bull","vix":{"vix_current":17.2,"vix_ma20":18.1,"peak_20d":19.5,"trend":"stable","regime":"normal","spike_recovery":false,"error":null},"vix_current":17.2},"hmm_regime":{"p_bull":0.9827,"p_neutral":0.0173,"p_bear":0.0,"regime":"bull","confidence":0.92,"n_obs":21,"avg_ret_pct":0.391,"avg_vol_pct":0.65,"method":"gaussian_soft_classifier_v1"},"market_breadth":{"total":503,"above_50d":256,"pct_above_50d":50.9,"label_50":"moderate","above_100d":243,"pct_above_100d":48.3,"label_100":"weak","above_200d":277,"pct_above_200d":55.1,"label_200":"moderate","new_highs":73,"new_lows":55,"hl_ratio":1.33},"macro_signals":{"hyg":{"price":80.14,"ma20":80.0,"chg5d":0.43,"chg20d":0.37,"trend":"flat"},"dxy":{"price":27.34,"ma20":27.42,"chg5d":-0.51,"chg20d":-0.15,"trend":"falling"},"gld":{"price":433.77,"ma20":431.18,"chg5d":4.6,"chg20d":-0.37,"trend":"rising"},"risk_signal":"neutral","yield_curve":{},"put_call":{"equity_pc":0.53,"signal":"greed"},"error":null},"sector_etf":{"XLK":{"sector":"Technology","perf_pct":24.52,"price":175.52,"vs_spy_pct":17.42,"outperforming":true,"rank":1},"XLF":{"sector":"Financials","perf_pct":-5.08,"price":51.24,"vs_spy_pct":-12.18,"outperforming":false,"rank":10},"XLV":{"sector":"Healthcare","perf_pct":-8.64,"price":143.49,"vs_spy_pct":-15.74,"outperforming":false,"rank":11},"XLE":{"sector":"Energy","perf_pct":5.28,"price":55.7,"vs_spy_pct":-1.82,"outperforming":false,"rank":3},"XLI":{"sector":"Industrials","perf_pct":0.29,"price":173.2,"vs_spy_pct":-6.81,"outperforming":false,"rank":8},"XLB":{"sector":"Materials","perf_pct":0.6,"price":51.59,"vs_spy_pct":-6.5,"outperforming":false,"rank":7},"XLRE":{"sector":"Real Estate","perf_pct":6.47,"price":44.41,"vs_spy_pct":-0.63,"outperforming":false,"rank":2},"XLU":{"sector":"Utilities","perf_pct":3.88,"price":44.72,"vs_spy_pct":-3.22,"outperforming":false,"rank":4},"XLC":{"sector":"Communication Svcs","perf_pct":1.34,"price":116.94,"vs_spy_pct":-5.76,"outperforming":false,"rank":6},"XLP":{"sector":"Consumer Staples","perf_pct":-3.74,"price":84.18,"vs_spy_pct":-10.84,"outperforming":false,"rank":9},"XLY":{"sector":"Consumer Disc.","perf_pct":2.08,"price":120.2,"vs_spy_pct":-5.02,"outperforming":false,"rank":5},"SPY":{"sector":"S&P 500","perf_pct":7.1,"vs_spy_pct":0.0,"outperforming":false,"rank":0,"price":737.62},"_indices":{"QQQ":{"label":"Nasdaq 100","perf_pct":16.81,"vs_spy_pct":9.71,"outperforming":true,"price":711.23},"DIA":{"label":"Dow Jones","perf_pct":-0.6,"vs_spy_pct":-7.7,"outperforming":false,"price":496.13},"IWM":{"label":"Russell 2000","perf_pct":7.42,"vs_spy_pct":0.32,"outperforming":true,"price":284.17},"MDY":{"label":"S&P MidCap","perf_pct":3.29,"vs_spy_pct":-3.8,"outperforming":false,"price":675.24},"TLT":{"label":"Long Treasury","perf_pct":-0.58,"vs_spy_pct":-7.68,"outperforming":false,"price":86.08},"HYG":{"label":"High Yield","perf_pct":0.66,"vs_spy_pct":-6.43,"outperforming":false,"price":80.14},"GLD":{"label":"Gold","perf_pct":-4.76,"vs_spy_pct":-11.86,"outperforming":false,"price":433.77},"UUP":{"label":"US Dollar","perf_pct":1.22,"vs_spy_pct":-5.88,"outperforming":false,"price":27.34}},"_idx_regime":{"SPY":{"price":737.62,"ema21":710.96,"ema50":694.69,"sma200":670.56,"above_ema21":true,"above_ema50":true,"above_sma200":true,"trend":"BULL","ret_1m":8.6,"ret_5d":2.7},"QQQ":{"price":711.23,"ema21":660.68,"ema50":635.51,"sma200":606.14,"above_ema21":true,"above_ema50":true,"above_sma200":true,"trend":"BULL","ret_1m":16.4,"ret_5d":5.7},"DIA":{"price":496.13,"ema21":489.73,"ema50":484.26,"sma200":470.85,"above_ema21":true,"above_ema50":true,"above_sma200":true,"trend":"BULL","ret_1m":3.6,"ret_5d":1.3},"IWM":{"price":284.17,"ema21":274.76,"ema50":266.7,"sma200":248.69,"above_ema21":true,"above_ema50":true,"above_sma200":true,"trend":"BULL","ret_1m":8.8,"ret_5d":2.3},"SMH":{"price":566.54,"ema21":494.15,"ema50":453.49,"sma200":368.37,"above_ema21":true,"above_ema50":true,"above_sma200":true,"trend":"BULL","ret_1m":29.7,"ret_5d":11.8}},"_ext_macro":{"uso":{"price":133.59,"ma20":133.6,"chg5d":-9.5,"chg20d":4.0,"trend":"falling"},"copx":{"price":85.97,"ma20":82.6,"chg5d":12.2,"chg20d":1.3,"trend":"rising"},"smh":{"price":566.54,"ma20":493.03,"chg5d":11.8,"chg20d":27.8,"trend":"rising"}},"_intermarket":{"Stock-Bond":{"t1":"SPY","t2":"TLT","corr":0.33},"Equity-Dollar":{"t1":"SPY","t2":"UUP","corr":-0.58},"Equity-Gold":{"t1":"SPY","t2":"GLD","corr":0.45},"Credit-Equity":{"t1":"HYG","t2":"SPY","corr":0.83}}},"system_status":{"forced_cash":{"active":false},"circuit_breaker":{"active":false,"level":"normal","reasons":[],"consecutive_losers":0,"drawdown_pct":0.08,"realized_drawdown_pct":0.0,"drawdown_10d_pct":0.0,"next_unlock_date":null},"macro_calendar":{"blackout_today":false,"blackout_reason":null,"next_event":{"date":"2026-05-13","type":"CPI","label":"CPI (Apr data)","days_until":2}},"sector_ranking_demotions":1},"data_health":{"checks":[{"label":"Polygon News NLP","source":"Polygon","available":404,"total":404,"pct":100.0,"status":"ok"},{"label":"Insider Activity","source":"SEC/OpenInsider","available":391,"total":404,"pct":96.8,"status":"ok"},{"label":"Short Interest","source":"Finviz/Borrow","available":393,"total":404,"pct":97.3,"status":"ok"},{"label":"IV Rank","source":"yfinance/Polygon","available":0,"total":404,"pct":0.0,"status":"fail"},{"label":"Beat Rate","source":"yfinance/Finnhub","available":399,"total":404,"pct":98.8,"status":"ok"},{"label":"Sector","source":"Polygon/Schwab","available":404,"total":404,"pct":100.0,"status":"ok"},{"label":"Beta","source":"Finviz/yfinance","available":403,"total":404,"pct":99.8,"status":"ok"},{"label":"Valuation (PEG)","source":"Finviz/yfinance","available":317,"total":404,"pct":78.5,"status":"ok"},{"label":"Analyst Revisions","source":"Finnhub/FMP","available":0,"total":404,"pct":0.0,"status":"fail"},{"label":"Estimate Revision","source":"Finviz EPS","available":341,"total":404,"pct":84.4,"status":"ok"},{"label":"Weekly OHLCV","source":"Polygon","available":395,"total":404,"pct":97.8,"status":"ok"},{"label":"Quote Snapshot","source":"EODHD","available":0,"total":404,"pct":0.0,"status":"fail"},{"label":"Finnhub Data","source":"Finnhub","available":404,"total":404,"pct":100.0,"status":"ok"},{"label":"FMP Data","source":"FMP","available":404,"total":404,"pct":100.0,"status":"ok"},{"label":"SMC Zones","source":"Polygon OHLCV","available":274,"total":404,"pct":67.8,"status":"ok"}],"ok_count":12,"warn_count":0,"fail_count":3,"total_checks":15,"timestamp":"2026-05-11 08:00"},"accuracy":{"summary":{"n":667,"win_rate":42.6,"avg_r":0.273,"avg_win":2.353,"avg_loss":-1.269,"pf":1.38,"expectancy":0.273},"kupiec_pof":{"n_trades":667,"n_exceptions":48,"actual_rate":7.2,"expected_rate":5.0,"lr_stat":5.999,"p_value":0.0143,"accepted":false,"verdict":"MODEL_REJECTED","threshold_r":-2.0},"christoffersen":{"n_trades":667,"transitions":{"00":573,"01":45,"10":45,"11":3},"pi_uncond":0.0721,"pi_after_no_exc":0.0728,"pi_after_exc":0.0625,"lr_stat":0.074,"p_value":0.786,"accepted":true,"clustering_verdict":"INDEPENDENT"},"by_strategy":{"10-Week Pullback":{"n":94,"win_rate":69.1,"avg_r":1.632,"avg_win":3.046,"avg_loss":-1.537,"pf":4.44,"expectancy":1.632},"52wk Breakout":{"n":128,"win_rate":35.2,"avg_r":-0.224,"avg_win":1.809,"avg_loss":-1.326,"pf":0.74,"expectancy":-0.224},"Bounce off Support":{"n":3,"win_rate":33.3,"avg_r":4.62,"avg_win":19.176,"avg_loss":-2.657,"pf":3.61,"expectancy":4.62},"Breakdown":{"n":19,"win_rate":50.0,"avg_r":-0.439,"avg_win":1.302,"avg_loss":-2.18,"pf":0.6,"expectancy":-0.439},"EMA21 Pullback":{"n":85,"win_rate":11.8,"avg_r":-0.523,"avg_win":0.97,"avg_loss":-0.723,"pf":0.18,"expectancy":-0.523},"EMA50 Pullback":{"n":2,"win_rate":0.0,"avg_r":-1.184,"avg_win":0,"avg_loss":-1.184,"pf":null,"expectancy":-1.184},"Insider Cluster":{"n":5,"win_rate":0.0,"avg_r":-2.694,"avg_win":0,"avg_loss":-2.694,"pf":null,"expectancy":-2.694},"Near-VCP Breakout":{"n":11,"win_rate":45.5,"avg_r":0.563,"avg_win":2.99,"avg_loss":-1.46,"pf":1.71,"expectancy":0.563},"Pocket Pivot":{"n":26,"win_rate":46.2,"avg_r":-0.146,"avg_win":1.486,"avg_loss":-1.544,"pf":0.82,"expectancy":-0.146},"RS New High":{"n":8,"win_rate":25.0,"avg_r":-0.322,"avg_win":2.849,"avg_loss":-1.379,"pf":0.69,"expectancy":-0.322},"Squeeze Expansion":{"n":13,"win_rate":23.1,"avg_r":-0.398,"avg_win":2.981,"avg_loss":-1.411,"pf":0.63,"expectancy":-0.398},"Trend Continuation":{"n":181,"win_rate":45.9,"avg_r":0.272,"avg_win":2.079,"avg_loss":-1.258,"pf":1.4,"expectancy":0.272},"VCP Breakout":{"n":92,"win_rate":53.3,"avg_r":0.689,"avg_win":2.554,"avg_loss":-1.436,"pf":2.03,"expectancy":0.689}},"by_score_band":{"90-100":{"n":45,"win_rate":80.0,"avg_r":2.461,"avg_win":3.373,"avg_loss":-1.186,"pf":11.38,"expectancy":2.461},"80-89":{"n":81,"win_rate":43.2,"avg_r":0.289,"avg_win":2.35,"avg_loss":-1.278,"pf":1.4,"expectancy":0.289},"60-69":{"n":180,"win_rate":36.7,"avg_r":0.113,"avg_win":2.203,"avg_loss":-1.097,"pf":1.16,"expectancy":0.113},"<60":{"n":49,"win_rate":42.9,"avg_r":-0.225,"avg_win":1.504,"avg_loss":-1.522,"pf":0.74,"expectancy":-0.225},"70-79":{"n":312,"win_rate":40.4,"avg_r":0.113,"avg_win":2.262,"avg_loss":-1.342,"pf":1.14,"expectancy":0.113}},"n_total":1277},"performance":{"total":1277,"open":610,"closed":0,"wins":0,"losses":0,"win_rate":null,"by_strategy":{"Trend Continuation":475,"52wk Breakout":211,"VCP Breakout":162,"EMA21 Pullback":129,"10-Week Pullback":126,"Pocket Pivot":46,"Squeeze Expansion":30,"Near-VCP Breakout":26,"EMA50 Pullback":22,"Breakdown":19,"RS New High":16,"Insider Cluster":11,"Bounce off Support":4},"by_score_bucket":{"90+":50,"80-89":126,"60-69":410,"<60":144,"70-79":547}},"portfolio":{"positions":[{"ticker":"GDDY","entry_date":"2026-05-11","entry_price":89.01,"shares":50,"position_size":4450.5,"stop":86.34,"trail_stop":86.34,"trail_active":false,"highest_price":89.01,"setup_type":"alpaca_sync","target1":93.46,"target2":null,"direction":"long","allocation_pct":4.5,"notes":"Synced from Alpaca paper account (v1 \u2014 pick attribution pending v2)","days_held":0,"current_price":87.64,"unrealized_pnl_pct":-1.54,"unrealized_pnl_dollars":-68.5,"last_updated":"2026-05-11 08:43","stop_hit":false,"t1_hit":false,"t2_hit":false},{"ticker":"ZVRA","entry_date":"2026-05-11","entry_price":11.26,"shares":50,"position_size":563.0,"stop":10.92,"trail_stop":10.92,"trail_active":false,"highest_price":11.26,"setup_type":"alpaca_sync","target1":11.82,"target2":null,"direction":"long","allocation_pct":0.6,"notes":"Synced from Alpaca paper account (v1 \u2014 pick attribution pending v2)","days_held":0,"days_to_earnings":7,"earnings_date":"2026-05-19","current_price":11.04,"unrealized_pnl_pct":-1.95,"unrealized_pnl_dollars":-11.0,"last_updated":"2026-05-11 08:43","stop_hit":false,"t1_hit":false,"t2_hit":false},{"ticker":"DT","entry_date":"2026-05-11","entry_price":40.09,"shares":50,"position_size":2004.5,"stop":38.89,"trail_stop":38.89,"trail_active":false,"highest_price":40.09,"setup_type":"alpaca_sync","target1":42.09,"target2":null,"direction":"long","allocation_pct":2.0,"notes":"Synced from Alpaca paper account (v1 \u2014 pick attribution pending v2)","days_held":0,"days_to_earnings":8,"earnings_date":"2026-05-20","current_price":40.13,"unrealized_pnl_pct":0.1,"unrealized_pnl_dollars":2.0,"last_updated":"2026-05-11 08:43","stop_hit":false,"t1_hit":false,"t2_hit":false},{"ticker":"MCHP","entry_date":"2026-05-11","entry_price":97.63,"shares":50,"position_size":4881.39,"stop":94.7,"trail_stop":94.7,"trail_active":false,"highest_price":97.63,"setup_type":"alpaca_sync","target1":102.51,"target2":null,"direction":"long","allocation_pct":5.0,"notes":"Synced from Alpaca paper account (v1 \u2014 pick attribution pending v2)","days_held":0,"current_price":97.58,"unrealized_pnl_pct":-0.05,"unrealized_pnl_dollars":-2.5,"last_updated":"2026-05-11 08:43","stop_hit":false,"t1_hit":false,"t2_hit":false}],"equity":98332.59,"cash":86488.84,"closed_count":0},"killed_count":255,"killed_recent":[{"ticker":"MGNI","name":"MGNI","sector":"Communication Services","industry":"Advertising Agencies","setup":"Breakout Expansion","stage":"WATCH","score":55,"rs_rank":69,"rsi":57.1,"rvol":0.28,"above_50ema":true,"above_200sma":false,"macd_bullish":false,"price":13.74,"pct_chg":0,"perf_week":null,"perf_month":null,"entry_lo":13.55,"entry_hi":13.87,"stop":12.88,"t1":16.2,"t2":17.86,"rr":3.0,"_rr_inconsistent":false,"sector_pct_rank":null,"sector_demoted":false,"sector_demotion_reason":null,"fractal_low":12.52,"fractal_high":13.93,"analyst_consensus":"\u2014","analyst_strong_buy":0,"analyst_buy":0,"analyst_hold":0,"analyst_sell":0,"tv_rating":"NEUTRAL","tech_pts":null,"fund_pts":null,"smc_pts":null,"earn_days":null,"esp_play":{"signal":false,"esp_pct":null,"zacks_rank":null,"earn_days":null,"esp_positive":false,"rank_qualifies":false,"earnings_imminent":false,"reason":"no ESP data"},"news":0,"rev_growth":null,"net_margin":null,"analyst_target":22.0,"analyst_upside":55.7,"insider_buys":8,"insider_sells":0,"reaction_checklist":[{"item":"Bullish candle (close in upper 40% of range)","checked":false,"detail":"Watch for hammer/engulfing"},{"item":"Volume expansion (>1.2x 20d avg)","checked":false,"detail":"RVOL 0.3x \u2014 need 1.2x+"},{"item":"MACD histogram rising 2+ bars","checked":true,"detail":"Expanding"},{"item":"Price holding above zone low","checked":true,"detail":"Above EMA21"},{"item":"RSI turning up (>40 cross or >50 rising)","checked":false,"detail":"RSI 57 (prev 57)"}],"beta":2.321,"market_cap":null,"cap_bucket":"","week52_high":null,"week52_low":null,"conviction_tier":null,"entry_quality":"PULLBACK","star_rating":2,"trade_thesis":"MGNI WATCH long \u2014 Squeeze Expansion. Catalyst: SQUEEZE. Confirmation: strong uptrend with EMA8 at $13.65. Entry: $13.55 (PULLBACK), Stop: $12.88 ($0.83/share risk), T1: $16.20 (3.0:1 R:R). Size: 0.0% \u2014 Monitor \u2014 not ready to trade. Invalidation: close below $12.88 or rises <1% in 5 days.","decision_state":"APPROACHING","decision_label":"Price pulling back toward decision zone \u2014 prepare alert","zone_quality":{"label":"Strong","points":6,"reasons":["EMA21 at zone","EMA50 at zone","Volume dry-up","VWAP at zone"]},"setup_quality":{"label":"MODERATE","groups_passed":2,"trend":2,"momentum":2,"strength":1,"details":{"trend_ok":true,"ema_bull":true,"weekly_bull":false,"rsi_ok":true,"macd_ok":true,"adx_ok":false,"rs_ok":false,"rvol_ok":false,"obv_ok":true}},"entry_subtype":"First Pullback","market_phase":"Consolidation","catalyst_tags":["SQUEEZE"],"catalyst_tier":2,"above_8ema":false,"above_21ema":true,"adx":null,"alloc_pct":0,"primary_zone_low":12.83,"primary_zone_high":13.6,"deep_zone_low":12.8,"deep_zone_high":13.43,"shallow_zone_low":13.59,"shallow_zone_high":13.71,"expected_pullback":"Deep","hold_period_min":null,"hold_period_max":null,"tech_max":38,"fund_max":30,"sent_max":15,"smc_max":15,"tech_score":null,"fund_score":16,"sent_score":0,"iv_rank":null,"put_call_ratio":0.821,"squeeze_on":true,"vwap":null,"ema_signal":"MOSTLY BULLISH","macd_signal":"BULLISH","weekly_bull":null,"perf_4h":null,"perf_1d":0.929,"perf_1w":null,"insider_recent":0,"insider_days":82,"short_pct":null,"tv_rec_str":"NEUTRAL","finviz_elite":{},"squeeze_flag":{"level":null,"score":0},"peg":null,"earnings_beat":null,"thesis":"MGNI WATCH long \u2014 Squeeze Expansion. Catalyst: SQUEEZE. Confirmation: strong uptrend with EMA8 at $13.65. Entry: $13.55 (PULLBACK), Stop: $12.88 ($0.83/share risk), T1: $16.20 (3.0:1 R:R). Size: 0.0% \u2014 Monitor \u2014 not ready to trade. Invalidation: close below $12.88 or rises <1% in 5 days.","reject_reason":"HARD BLOCK: Earnings in 1 days \u2014 no new positions within 3 days of earnings","gates_evaluated":[{"name":"liquidity_price","passed":false,"reason":"HARD BLOCK: Earnings in 1 days \u2014 no new positions within 3 days of earnings"},{"name":"multi_timeframe","passed":true,"reason":""},{"name":"entry_quality","passed":true,"reason":""},{"name":"decision_state","passed":true,"reason":""},{"name":"tail_loss_filter","passed":false,"reason":"conviction tier=0 / label=WATCH \u2014 engine demoted"},{"name":"earnings_proximity","passed":false,"reason":"earnings in 1 day(s) \u2014 institutional standard blocks BUY <5d"},{"name":"setup_performance","passed":true,"reason":""},{"name":"fundamental_adequacy","passed":true,"reason":""},{"name":"technical_alignment","passed":true,"reason":""}],"caveats":["no tier-1 high-conviction signals"],"setup_size_multiplier":null,"audit_trail":{"ticker":"MGNI","verdict":"WAIT","reason":"HARD BLOCK: Earnings in 1 days \u2014 no new positions within 3 days of earnings","hard_gates_passed":false,"gate_failures":["liquidity_price","tail_loss_filter","earnings_proximity"],"caveats":["no tier-1 high-conviction signals"],"decided_by":"decision_engine.compute_final_verdict"},"change_log":{"prior_date":"2026-05-10","changes":[{"field":"verdict","from":"WATCH","to":"WAIT"}]}},{"ticker":"MASI","name":"MASI","sector":"Healthcare","industry":"Medical Devices","setup":"Breakout Expansion","stage":"WATCH","score":0,"rs_rank":100,"rsi":62.8,"rvol":0.27,"above_50ema":true,"above_200sma":true,"macd_bullish":false,"price":178.51,"pct_chg":0,"perf_week":null,"perf_month":null,"entry_lo":178.42,"entry_hi":178.57,"stop":175.82,"t1":186.52,"t2":191.87,"rr":3.0,"_rr_inconsistent":false,"sector_pct_rank":null,"sector_demoted":false,"sector_demotion_reason":null,"fractal_low":178.17,"fractal_high":178.74,"analyst_consensus":"\u2014","analyst_strong_buy":0,"analyst_buy":0,"analyst_hold":0,"analyst_sell":0,"tv_rating":"BUY","tech_pts":null,"fund_pts":null,"smc_pts":null,"earn_days":null,"esp_play":{"signal":false,"esp_pct":null,"zacks_rank":null,"earn_days":null,"esp_positive":false,"rank_qualifies":false,"earnings_imminent":false,"reason":"no ESP data"},"news":0,"rev_growth":null,"net_margin":null,"analyst_target":180.0,"analyst_upside":0.9,"insider_buys":17,"insider_sells":0,"reaction_checklist":[{"item":"Bullish candle (close in upper 40% of range)","checked":false,"detail":"Watch for hammer/engulfing"},{"item":"Volume expansion (>1.2x 20d avg)","checked":false,"detail":"RVOL 0.3x \u2014 need 1.2x+"},{"item":"MACD histogram rising 2+ bars","checked":false,"detail":"Waiting for improvement"},{"item":"Price holding above zone low","checked":true,"detail":"Above EMA21"},{"item":"RSI turning up (>40 cross or >50 rising)","checked":false,"detail":"RSI 63 (prev 63)"}],"beta":1.128,"market_cap":null,"cap_bucket":"","week52_high":null,"week52_low":null,"conviction_tier":null,"entry_quality":"MISSED","star_rating":4,"trade_thesis":"MASI WATCH long \u2014 EMA21 Pullback. Catalyst: BREAKOUT + SQUEEZE + MOMENTUM + IV_SKEW_BULLISH + NEWS_MOMENTUM. Confirmation: strong uptrend with EMA8 at $178.46. Entry: $178.42 (MISSED), Stop: $175.82 ($2.69/share risk), T1: $186.52 (3.0:1 R:R). Size: 0.0% \u2014 Monitor \u2014 not ready to trade. Invalidation: close below $175.82 or rises <1% in 5 days.","decision_state":"APPROACHING","decision_label":"Price pulling back toward decision zone \u2014 prepare alert","zone_quality":{"label":"Strong","points":8,"reasons":["EMA21 at zone","EMA50 at zone","Support at zone","Volume dry-up","VWAP at zone"]},"setup_quality":{"label":"MODERATE","groups_passed":2,"trend":3,"momentum":2,"strength":1,"details":{"trend_ok":true,"ema_bull":true,"weekly_bull":true,"rsi_ok":true,"macd_ok":false,"adx_ok":true,"rs_ok":true,"rvol_ok":false,"obv_ok":false}},"entry_subtype":"Pivot Entry","market_phase":"Trend","catalyst_tags":["BREAKOUT","SQUEEZE","MOMENTUM","IV_SKEW_BULLISH","NEWS_MOMENTUM"],"catalyst_tier":1,"above_8ema":false,"above_21ema":true,"adx":null,"alloc_pct":0,"primary_zone_low":178.17,"primary_zone_high":178.5,"deep_zone_low":174.14,"deep_zone_high":174.2,"shallow_zone_low":178.43,"shallow_zone_high":178.49,"expected_pullback":"Normal","hold_period_min":null,"hold_period_max":null,"tech_max":38,"fund_max":30,"sent_max":15,"smc_max":15,"tech_score":null,"fund_score":11,"sent_score":0,"iv_rank":null,"put_call_ratio":null,"squeeze_on":true,"vwap":null,"ema_signal":"MOSTLY BULLISH","macd_signal":"BEARISH","weekly_bull":null,"perf_4h":null,"perf_1d":-0.106,"perf_1w":null,"insider_recent":0,"insider_days":6,"short_pct":null,"tv_rec_str":"BUY","finviz_elite":{},"squeeze_flag":{"level":null,"score":0},"peg":null,"earnings_beat":null,"thesis":"MASI WATCH long \u2014 EMA21 Pullback. Catalyst: BREAKOUT + SQUEEZE + MOMENTUM + IV_SKEW_BULLISH + NEWS_MOMENTUM. Confirmation: strong uptrend with EMA8 at $178.46. Entry: $178.42 (MISSED), Stop: $175.82 ($2.69/share risk), T1: $186.52 (3.0:1 R:R). Size: 0.0% \u2014 Monitor \u2014 not ready to trade. Invalidation: close below $175.82 or rises <1% in 5 days.","reject_reason":"HARD BLOCK: Earnings in 0 days \u2014 no new positions within 3 days of earnings","gates_evaluated":[{"name":"liquidity_price","passed":false,"reason":"HARD BLOCK: Earnings in 0 days \u2014 no new positions within 3 days of earnings"},{"name":"multi_timeframe","passed":true,"reason":""},{"name":"entry_quality","passed":false,"reason":"entry_quality=MISSED \u2014 wait for pullback to value zone"},{"name":"decision_state","passed":true,"reason":""},{"name":"tail_loss_filter","passed":false,"reason":"conviction tier=0 / label=WATCH \u2014 engine demoted"},{"name":"earnings_proximity","passed":false,"reason":"earnings in 0 day(s) \u2014 institutional standard blocks BUY <5d"},{"name":"setup_performance","passed":true,"reason":""},{"name":"fundamental_adequacy","passed":false,"reason":"fundamentals 11/30 = 37% < 50% adequacy"},{"name":"technical_alignment","passed":true,"reason":""}],"caveats":["no tier-1 high-conviction signals"],"setup_size_multiplier":null,"audit_trail":{"ticker":"MASI","verdict":"WATCH","reason":"HARD BLOCK: Earnings in 0 days \u2014 no new positions within 3 days of earnings","hard_gates_passed":false,"gate_failures":["liquidity_price","entry_quality","tail_loss_filter","earnings_proximity","fundamental_adequacy"],"caveats":["no tier-1 high-conviction signals"],"decided_by":"decision_engine.compute_final_verdict"},"change_log":{}},{"ticker":"UNH","name":"UNH","sector":"Healthcare","industry":"Healthcare Plans","setup":"Trend Continuation","stage":"WATCH","score":52,"rs_rank":100,"rsi":78.8,"rvol":0.19,"above_50ema":true,"above_200sma":true,"macd_bullish":false,"price":378.66,"pct_chg":0,"perf_week":null,"perf_month":null,"entry_lo":376.26,"entry_hi":380.26,"stop":357.45,"t1":416.24,"t2":482.31,"rr":1.8,"_rr_inconsistent":false,"sector_pct_rank":null,"sector_demoted":false,"sector_demotion_reason":null,"fractal_low":358.25,"fractal_high":null,"analyst_consensus":"\u2014","analyst_strong_buy":0,"analyst_buy":0,"analyst_hold":0,"analyst_sell":0,"tv_rating":null,"tech_pts":null,"fund_pts":null,"smc_pts":null,"earn_days":null,"esp_play":{"signal":false,"esp_pct":null,"zacks_rank":null,"earn_days":null,"esp_positive":false,"rank_qualifies":false,"earnings_imminent":false,"reason":"no ESP data"},"news":0,"rev_growth":null,"net_margin":null,"analyst_target":387.26923,"analyst_upside":5.4,"insider_buys":42,"insider_sells":0,"reaction_checklist":[{"item":"Bullish candle (close in upper 40% of range)","checked":false,"detail":"Watch for hammer/engulfing"},{"item":"Volume expansion (>1.2x 20d avg)","checked":false,"detail":"RVOL 0.2x \u2014 need 1.2x+"},{"item":"MACD histogram rising 2+ bars","checked":true,"detail":"Expanding"},{"item":"Price holding above zone low","checked":true,"detail":"Above EMA21"},{"item":"RSI turning up (>40 cross or >50 rising)","checked":false,"detail":"RSI 79 (prev 79)"}],"beta":0.646,"market_cap":null,"cap_bucket":"","week52_high":null,"week52_low":null,"conviction_tier":null,"entry_quality":"MISSED","star_rating":2,"trade_thesis":"UNH WATCH long \u2014 Trend Continuation. Catalyst: MOMENTUM. Confirmation: strong uptrend with EMA8 at $370.54. Entry: $376.26 (MISSED), Stop: $357.45 ($21.21/share risk), T1: $416.24 (1.8:1 R:R). Size: 0.0% \u2014 Monitor \u2014 not ready to trade. Invalidation: close below $357.45 or rises <1% in 5 days.","decision_state":"MISSED","decision_label":"Re-entry not available \u2014 wait for pullback to value zone","zone_quality":{"label":"Moderate","points":4,"reasons":["EMA21 at zone","Volume dry-up","VWAP at zone"]},"setup_quality":{"label":"GOOD","groups_passed":3,"trend":3,"momentum":2,"strength":2,"details":{"trend_ok":true,"ema_bull":true,"weekly_bull":true,"rsi_ok":false,"macd_ok":true,"adx_ok":true,"rs_ok":true,"rvol_ok":false,"obv_ok":true}},"entry_subtype":"Breakout Add","market_phase":"Trend","catalyst_tags":["MOMENTUM"],"catalyst_tier":2,"above_8ema":false,"above_21ema":true,"adx":null,"alloc_pct":0,"primary_zone_low":350.17,"primary_zone_high":352.9,"deep_zone_low":323.37,"deep_zone_high":331.38,"shallow_zone_low":369.74,"shallow_zone_high":371.34,"expected_pullback":"Shallow","hold_period_min":null,"hold_period_max":null,"tech_max":38,"fund_max":30,"sent_max":15,"smc_max":15,"tech_score":null,"fund_score":9,"sent_score":0,"iv_rank":null,"put_call_ratio":0.097,"squeeze_on":false,"vwap":null,"ema_signal":"BULLISH STACK","macd_signal":"BULLISH","weekly_bull":null,"perf_4h":null,"perf_1d":2.77,"perf_1w":null,"insider_recent":0,"insider_days":14,"short_pct":null,"tv_rec_str":null,"finviz_elite":{},"squeeze_flag":{"level":null,"score":0},"peg":null,"earnings_beat":null,"thesis":"UNH WATCH long \u2014 Trend Continuation. Catalyst: MOMENTUM. Confirmation: strong uptrend with EMA8 at $370.54. Entry: $376.26 (MISSED), Stop: $357.45 ($21.21/share risk), T1: $416.24 (1.8:1 R:R). Size: 0.0% \u2014 Monitor \u2014 not ready to trade. Invalidation: close below $357.45 or rises <1% in 5 days.","reject_reason":"Extended gate: price 3.4 ATR above EMA21 (>2.5 limit) \u2014 no entry","gates_evaluated":[{"name":"liquidity_price","passed":false,"reason":"Extended gate: price 3.4 ATR above EMA21 (>2.5 limit) \u2014 no entry"},{"name":"multi_timeframe","passed":true,"reason":""},{"name":"entry_quality","passed":false,"reason":"entry_quality=MISSED \u2014 wait for pullback to value zone"},{"name":"decision_state","passed":false,"reason":"decision_state=MISSED"},{"name":"tail_loss_filter","passed":false,"reason":"conviction tier=0 / label=WATCH \u2014 engine demoted"},{"name":"earnings_proximity","passed":true,"reason":""},{"name":"setup_performance","passed":true,"reason":""},{"name":"fundamental_adequacy","passed":false,"reason":"fundamentals 9/30 = 30% < 50% adequacy"},{"name":"technical_alignment","passed":true,"reason":""}],"caveats":["no tier-1 high-conviction signals"],"setup_size_multiplier":1.1,"audit_trail":{"ticker":"UNH","verdict":"WATCH","reason":"Extended gate: price 3.4 ATR above EMA21 (>2.5 limit) \u2014 no entry","hard_gates_passed":false,"gate_failures":["liquidity_price","entry_quality","decision_state","tail_loss_filter","fundamental_adequacy"],"caveats":["no tier-1 high-conviction signals"],"decided_by":"decision_engine.compute_final_verdict"},"change_log":{"prior_date":"2026-05-10","changes":[{"field":"score","from":0.0,"to":52.0,"delta":52.0}]}},{"ticker":"PHAT","name":"PHAT","sector":"Healthcare","industry":"Biotechnology","setup":"Breakout Expansion","stage":"WATCH","score":0,"rs_rank":25,"rsi":52.4,"rvol":0.46,"above_50ema":true,"above_200sma":true,"macd_bullish":false,"price":12.315,"pct_chg":0,"perf_week":null,"perf_month":null,"entry_lo":12.03,"entry_hi":12.5,"stop":10.72,"t1":16.9,"t2":19.99,"rr":3.0,"_rr_inconsistent":false,"sector_pct_rank":null,"sector_demoted":false,"sector_demotion_reason":null,"fractal_low":11.76,"fractal_high":13.0,"analyst_consensus":"\u2014","analyst_strong_buy":0,"analyst_buy":0,"analyst_hold":0,"analyst_sell":0,"tv_rating":"BUY","tech_pts":null,"fund_pts":null,"smc_pts":null,"earn_days":null,"esp_play":{"signal":false,"esp_pct":null,"zacks_rank":null,"earn_days":null,"esp_positive":false,"rank_qualifies":false,"earnings_imminent":false,"reason":"no ESP data"},"news":0,"rev_growth":null,"net_margin":null,"analyst_target":23.7,"analyst_upside":94.9,"insider_buys":4,"insider_sells":0,"reaction_checklist":[{"item":"Bullish candle (close in upper 40% of range)","checked":false,"detail":"Watch for hammer/engulfing"},{"item":"Volume expansion (>1.2x 20d avg)","checked":false,"detail":"RVOL 0.5x \u2014 need 1.2x+"},{"item":"MACD histogram rising 2+ bars","checked":false,"detail":"Waiting for improvement"},{"item":"Price holding above zone low","checked":true,"detail":"Above EMA21"},{"item":"RSI turning up (>40 cross or >50 rising)","checked":false,"detail":"RSI 52 (prev 52)"}],"beta":0.567,"market_cap":null,"cap_bucket":"","week52_high":null,"week52_low":null,"conviction_tier":null,"entry_quality":"PULLBACK","star_rating":3,"trade_thesis":"PHAT AVOID long \u2014 EMA21 Pullback. Catalyst: SQUEEZE + NEWS_MOMENTUM. Confirmation: strong uptrend with EMA8 at $12.26. Entry: $12.03 (PULLBACK), Stop: $10.72 ($1.54/share risk), T1: $16.90 (3.0:1 R:R). Size: 0.0% \u2014 Pass \u2014 weak structure. Invalidation: close below $10.72 or rises <1% in 5 days.","decision_state":"APPROACHING","decision_label":"Near EMA8 but trend not strong enough \u2014 wait for pullback to EMA21/value","zone_quality":{"label":"Strong","points":6,"reasons":["EMA21 at zone","EMA50 at zone","Volume dry-up","VWAP at zone"]},"setup_quality":{"label":"WEAK","groups_passed":1,"trend":2,"momentum":1,"strength":0,"details":{"trend_ok":true,"ema_bull":true,"weekly_bull":false,"rsi_ok":true,"macd_ok":false,"adx_ok":false,"rs_ok":false,"rvol_ok":false,"obv_ok":false}},"entry_subtype":"EMA21 Continuation","market_phase":"Consolidation","catalyst_tags":["SQUEEZE","NEWS_MOMENTUM"],"catalyst_tier":2,"above_8ema":false,"above_21ema":true,"adx":null,"alloc_pct":0,"primary_zone_low":11.53,"primary_zone_high":12.3,"deep_zone_low":11.62,"deep_zone_high":12.57,"shallow_zone_low":12.16,"shallow_zone_high":12.36,"expected_pullback":"Deep","hold_period_min":null,"hold_period_max":null,"tech_max":38,"fund_max":30,"sent_max":15,"smc_max":15,"tech_score":null,"fund_score":11,"sent_score":0,"iv_rank":null,"put_call_ratio":0.5,"squeeze_on":true,"vwap":null,"ema_signal":"BULLISH STACK","macd_signal":"DEATH CROSS","weekly_bull":null,"perf_4h":null,"perf_1d":-0.572,"perf_1w":null,"insider_recent":0,"insider_days":61,"short_pct":null,"tv_rec_str":"BUY","finviz_elite":{},"squeeze_flag":{"level":null,"score":0},"peg":null,"earnings_beat":null,"thesis":"PHAT AVOID long \u2014 EMA21 Pullback. Catalyst: SQUEEZE + NEWS_MOMENTUM. Confirmation: strong uptrend with EMA8 at $12.26. Entry: $12.03 (PULLBACK), Stop: $10.72 ($1.54/share risk), T1: $16.90 (3.0:1 R:R). Size: 0.0% \u2014 Pass \u2014 weak structure. Invalidation: close below $10.72 or rises <1% in 5 days.","reject_reason":"HARD BLOCK: Earnings in 0 days \u2014 no new positions within 3 days of earnings","gates_evaluated":[{"name":"liquidity_price","passed":false,"reason":"HARD BLOCK: Earnings in 0 days \u2014 no new positions within 3 days of earnings"},{"name":"multi_timeframe","passed":true,"reason":""},{"name":"entry_quality","passed":true,"reason":""},{"name":"decision_state","passed":true,"reason":""},{"name":"tail_loss_filter","passed":true,"reason":""},{"name":"earnings_proximity","passed":false,"reason":"earnings in 0 day(s) \u2014 institutional standard blocks BUY <5d"},{"name":"setup_performance","passed":true,"reason":""},{"name":"fundamental_adequacy","passed":false,"reason":"fundamentals 11/30 = 37% < 50% adequacy"},{"name":"technical_alignment","passed":true,"reason":""}],"caveats":["no tier-1 high-conviction signals"],"setup_size_multiplier":null,"audit_trail":{"ticker":"PHAT","verdict":"WAIT","reason":"HARD BLOCK: Earnings in 0 days \u2014 no new positions within 3 days of earnings","hard_gates_passed":false,"gate_failures":["liquidity_price","earnings_proximity","fundamental_adequacy"],"caveats":["no tier-1 high-conviction signals"],"decided_by":"decision_engine.compute_final_verdict"},"change_log":{}},{"ticker":"TTWO","name":"TTWO","sector":"Communication Services","industry":"Electronic Gaming & Multimedia","setup":"Trend Continuation","stage":"WATCH","score":54,"rs_rank":48,"rsi":61.7,"rvol":0.33,"above_50ema":true,"above_200sma":false,"macd_bullish":false,"price":223.0,"pct_chg":0,"perf_week":null,"perf_month":null,"entry_lo":221.26,"entry_hi":224.16,"stop":205.87,"t1":273.23,"t2":306.91,"rr":3.0,"_rr_inconsistent":false,"sector_pct_rank":null,"sector_demoted":false,"sector_demotion_reason":null,"fractal_low":206.45,"fractal_high":227.02,"analyst_consensus":"\u2014","analyst_strong_buy":0,"analyst_buy":0,"analyst_hold":0,"analyst_sell":0,"tv_rating":"BUY","tech_pts":null,"fund_pts":null,"smc_pts":null,"earn_days":null,"esp_play":{"signal":false,"esp_pct":null,"zacks_rank":null,"earn_days":null,"esp_positive":false,"rank_qualifies":false,"earnings_imminent":false,"reason":"no ESP data"},"news":0,"rev_growth":null,"net_margin":null,"analyst_target":276.45358,"analyst_upside":24.5,"insider_buys":13,"insider_sells":0,"reaction_checklist":[{"item":"Bullish candle (close in upper 40% of range)","checked":false,"detail":"Watch for hammer/engulfing"},{"item":"Volume expansion (>1.2x 20d avg)","checked":false,"detail":"RVOL 0.3x \u2014 need 1.2x+"},{"item":"MACD histogram rising 2+ bars","checked":true,"detail":"Expanding"},{"item":"Price holding above zone low","checked":true,"detail":"Above EMA21"},{"item":"RSI turning up (>40 cross or >50 rising)","checked":false,"detail":"RSI 62 (prev 62)"}],"beta":0.973,"market_cap":null,"cap_bucket":"","week52_high":null,"week52_low":null,"conviction_tier":null,"entry_quality":"EXTENDED","star_rating":2,"trade_thesis":"TTWO WATCH long \u2014 Trend Continuation. Catalyst: NEWS_MOMENTUM. Confirmation: strong uptrend with EMA8 at $220.64. Entry: $221.26 (EXTENDED), Stop: $205.87 ($17.13/share risk), T1: $273.23 (3.0:1 R:R). Size: 0.0% \u2014 Monitor \u2014 not ready to trade. Invalidation: close below $205.87 or rises <1% in 5 days.","decision_state":"EXTENDED","decision_label":"Above value \u2014 set alert at primary zone, do not chase","zone_quality":{"label":"Strong","points":7,"reasons":["EMA21 at zone","EMA50 at zone","Support at zone","Volume dry-up"]},"setup_quality":{"label":"MODERATE","groups_passed":2,"trend":2,"momentum":3,"strength":0,"details":{"trend_ok":true,"ema_bull":true,"weekly_bull":false,"rsi_ok":true,"macd_ok":true,"adx_ok":true,"rs_ok":false,"rvol_ok":false,"obv_ok":false}},"entry_subtype":"Breakout Add","market_phase":"Trend","catalyst_tags":["NEWS_MOMENTUM"],"catalyst_tier":2,"above_8ema":false,"above_21ema":true,"adx":null,"alloc_pct":0,"primary_zone_low":206.45,"primary_zone_high":217.09,"deep_zone_low":210.1,"deep_zone_high":215.9,"shallow_zone_low":220.06,"shallow_zone_high":221.22,"expected_pullback":"Normal","hold_period_min":null,"hold_period_max":null,"tech_max":38,"fund_max":30,"sent_max":15,"smc_max":15,"tech_score":null,"fund_score":7,"sent_score":0,"iv_rank":null,"put_call_ratio":0.14,"squeeze_on":false,"vwap":null,"ema_signal":"BULLISH STACK","macd_signal":"BULLISH","weekly_bull":null,"perf_4h":null,"perf_1d":-1.365,"perf_1w":null,"insider_recent":0,"insider_days":25,"short_pct":null,"tv_rec_str":"BUY","finviz_elite":{},"squeeze_flag":{"level":null,"score":0},"peg":null,"earnings_beat":null,"thesis":"TTWO WATCH long \u2014 Trend Continuation. Catalyst: NEWS_MOMENTUM. Confirmation: strong uptrend with EMA8 at $220.64. Entry: $221.26 (EXTENDED), Stop: $205.87 ($17.13/share risk), T1: $273.23 (3.0:1 R:R). Size: 0.0% \u2014 Monitor \u2014 not ready to trade. Invalidation: close below $205.87 or rises <1% in 5 days.","reject_reason":"HARD BLOCK: Earnings in 2 days \u2014 no new positions within 3 days of earnings","gates_evaluated":[{"name":"liquidity_price","passed":false,"reason":"HARD BLOCK: Earnings in 2 days \u2014 no new positions within 3 days of earnings"},{"name":"multi_timeframe","passed":true,"reason":""},{"name":"entry_quality","passed":false,"reason":"entry_quality=EXTENDED \u2014 wait for pullback to value zone"},{"name":"decision_state","passed":true,"reason":""},{"name":"tail_loss_filter","passed":false,"reason":"conviction tier=0 / label=WATCH \u2014 engine demoted"},{"name":"earnings_proximity","passed":false,"reason":"earnings in 2 day(s) \u2014 institutional standard blocks BUY <5d"},{"name":"setup_performance","passed":true,"reason":""},{"name":"fundamental_adequacy","passed":false,"reason":"fundamentals 7/30 = 23% < 50% adequacy"},{"name":"technical_alignment","passed":true,"reason":""}],"caveats":["no tier-1 high-conviction signals"],"setup_size_multiplier":1.1,"audit_trail":{"ticker":"TTWO","verdict":"WATCH","reason":"HARD BLOCK: Earnings in 2 days \u2014 no new positions within 3 days of earnings","hard_gates_passed":false,"gate_failures":["liquidity_price","entry_quality","tail_loss_filter","earnings_proximity","fundamental_adequacy"],"caveats":["no tier-1 high-conviction signals"],"decided_by":"decision_engine.compute_final_verdict"},"change_log":{"prior_date":"2026-05-10","changes":[{"field":"verdict","from":"WAIT","to":"WATCH"},{"field":"score","from":0.0,"to":54.0,"delta":54.0}]}}],"verdict_counts":{"WAIT":931,"AVOID":8},"scan_count":404,"elite_meta":{"computed_at":"2026-05-11T08:54:41.084700","top_n":5,"n_candidates_evaluated":804,"n_passing_hard_gates":116},"elite_top_buy":[{"ticker":"ANET","name":"Arista Networks","sector":"Technology","mode":"Invest","elite_score":62.9,"snapshot":{"price":140.12,"rr":1.67,"p_target":30.8,"p_stop":65.9,"setup":"Breakout Expansion","target1":175.15,"stop":119.1},"verdict_line":"MARGINAL \u2014 BUY signal at 63/100. Watch but don't lead with this."},{"ticker":"NDSN","name":"Nordson Corporation","sector":"Industrials","mode":"Swing","elite_score":62.2,"snapshot":{"price":282.875,"rr":3.0,"p_target":41.1,"p_stop":33.0,"setup":"Breakout Expansion","target1":336.11,"stop":264.77},"verdict_line":"MARGINAL \u2014 BUY signal at 62/100. Watch but don't lead with this."},{"ticker":"NDSN","name":"Nordson Corporation","sector":"Industrials","mode":"Invest","elite_score":60.3,"snapshot":{"price":282.875,"rr":1.67,"p_target":41.1,"p_stop":33.0,"setup":"Breakout Expansion","target1":353.59,"stop":240.44},"verdict_line":"MARGINAL \u2014 BUY signal at 60/100. Watch but don't lead with this."},{"ticker":"BKNG","name":"BKNG","sector":"Consumer Cyclical","mode":"Invest","elite_score":57.8,"snapshot":{"price":161.25,"rr":1.67,"p_target":null,"p_stop":null,"setup":"Trend Continuation","target1":201.56,"stop":137.06},"verdict_line":"MARGINAL \u2014 BUY signal at 58/100. Watch but don't lead with this."},{"ticker":"GDDY","name":"Godaddy Inc","sector":"Technology","mode":"Invest","elite_score":53.7,"snapshot":{"price":89.165,"rr":1.67,"p_target":12.1,"p_stop":85.7,"setup":"Breakout Expansion","target1":111.46,"stop":75.79},"verdict_line":"MARGINAL \u2014 BUY signal at 54/100. Watch but don't lead with this."},{"ticker":"ANET","name":"Arista Networks","sector":"Technology","mode":"Swing","elite_score":53.1,"snapshot":{"price":140.12,"rr":3.0,"p_target":30.8,"p_stop":65.9,"setup":"Breakout Expansion","target1":183.18,"stop":125.2},"verdict_line":"MARGINAL \u2014 BUY signal at 53/100. Watch but don't lead with this."}],"earnings_next7":[{"ticker":"ACEL","days":0,"when":"","beat_score":null,"tier":null},{"ticker":"ACHR","days":0,"when":"AfterMarket","beat_score":null,"tier":null},{"ticker":"ACM","days":0,"when":"AfterMarket","beat_score":null,"tier":null},{"ticker":"ADEA","days":0,"when":"","beat_score":null,"tier":null},{"ticker":"ADUS","days":0,"when":"","beat_score":null,"tier":null},{"ticker":"AGM","days":0,"when":"","beat_score":null,"tier":null},{"ticker":"AROC","days":0,"when":"","beat_score":null,"tier":null},{"ticker":"ARTNA","days":0,"when":"","beat_score":null,"tier":null},{"ticker":"ASTS","days":0,"when":"AfterMarket","beat_score":null,"tier":null},{"ticker":"ATNM","days":0,"when":"","beat_score":null,"tier":null}],"economic_events":[{"type":"S&P Global Services PMI","comparison":null,"period":"May","country":"US","date":"2026-05-21 13:45:00","actual":null,"previous":51,"estimate":null,"change":null,"change_percentage":null}],"research_setup_stats":{"Squeeze Expansion":{"n":8,"wr":37.5,"wr_lb":13.7,"avg_pnl_pct":-2.39,"verdict":"sample too small","quartiles":[{"q":"Q1","wr":50.0,"n":2},{"q":"Q2","wr":50.0,"n":2},{"q":"Q3","wr":0.0,"n":2},{"q":"Q4","wr":50.0,"n":2}]},"VCP Breakout":{"n":2,"wr":0.0,"wr_lb":0.0,"avg_pnl_pct":-7.89,"verdict":"sample too small","quartiles":[{"q":"Q1","wr":null,"n":1},{"q":"Q2","wr":null,"n":1},{"q":"Q3","wr":null,"n":0},{"q":"Q4","wr":null,"n":0}]},"Near-VCP Breakout":{"n":17,"wr":35.3,"wr_lb":17.3,"avg_pnl_pct":-0.74,"verdict":"marginal \u2014 CI low","quartiles":[{"q":"Q1","wr":0.0,"n":4},{"q":"Q2","wr":50.0,"n":4},{"q":"Q3","wr":50.0,"n":4},{"q":"Q4","wr":40.0,"n":5}]},"Trend Continuation":{"n":14,"wr":35.7,"wr_lb":16.3,"avg_pnl_pct":2.65,"verdict":"marginal \u2014 CI low","quartiles":[{"q":"Q1","wr":66.7,"n":3},{"q":"Q2","wr":33.3,"n":3},{"q":"Q3","wr":0.0,"n":3},{"q":"Q4","wr":40.0,"n":5}]},"Pocket Pivot":{"n":2,"wr":0.0,"wr_lb":0.0,"avg_pnl_pct":-3.63,"verdict":"sample too small","quartiles":[{"q":"Q1","wr":null,"n":1},{"q":"Q2","wr":null,"n":1},{"q":"Q3","wr":null,"n":0},{"q":"Q4","wr":null,"n":0}]}}};
+
+const fmt = (n,d=1) => (n==null||isNaN(n))?'—':Number(n).toFixed(d);
+const fmtInt = (n) => (n==null||isNaN(n))?'—':Math.round(n).toString();
+const fmtPct = (n,d=1) => (n==null||isNaN(n))?'—':Number(n).toFixed(d)+'%';
+const sign = (n) => n>0?'+':'';
+
+// ── brandbar ────────────────────────────────────────────────
+function renderBrandbar() {
+  const reg = DATA.regime || {};
+  const vix = (reg.vix || {}).vix_current ?? '—';
+  const port = DATA.portfolio || {};
+  const eq = port.equity || 10000;
+  const cash = port.cash || eq;
+  const dd = (DATA.system_status || {}).circuit_breaker?.drawdown_pct || 0;
+  const r4 = (reg.regime4 || 'risk_on_choppy').replace(/_/g,' ').toUpperCase();
+  document.getElementById('brandbar-r').innerHTML = `
+    <span><span class="dot"></span>LIVE</span>
+    <span>${r4}</span>
+    <span>VIX <b>${typeof vix === 'number' ? vix.toFixed(2) : vix}</b></span>
+    <span>EQUITY <b>$${Math.round(eq).toLocaleString()}</b></span>
+    <span>DD <b class="${dd<0?'neg':'pos'}">${fmtPct(dd,1)}</b></span>
+    <span id="clock">—</span>
+  `;
+  setInterval(()=>{
+    const d = new Date();
+    const t = d.toTimeString().slice(0,8) + ' ET';
+    const el = document.getElementById('clock');
+    if (el) el.textContent = t;
+  }, 1000);
+}
+
+function freshChip(kind, label) {
+  return `<span class="fresh ${kind}"><span class="dot"></span>${label}</span>`;
+}
+function scanFresh() {
+  const ts = (DATA.run_timestamp || '').slice(0,16).replace('T',' ');
+  return freshChip('scan', `SCAN ${ts || '—'}`);
+}
+
+// ── REGIME RIBBON ─────────────────────────────────────────
+function renderRegime() {
+  const reg = DATA.regime || {};
+  const hmm = DATA.hmm_regime || {};
+  const macro = DATA.macro_signals || {};
+  const ss = DATA.system_status || {};
+  const breadth = DATA.market_breadth || {};
+
+  const r4 = reg.regime4 || 'risk_on_choppy';
+  const callClass = r4.includes('choppy') ? 'choppy' : (r4.includes('off') || r4 === 'panic') ? 'off' : '';
+  const callPretty = (r4.replace(/_/g,' ').replace(/\b\w/g, c=>c.toUpperCase()));
+
+  // Narrative
+  const bapGate = r4 === 'risk_on_trending' ? 65 : r4 === 'risk_on_choppy' ? 72 : r4 === 'risk_off_trending' ? 78 : 100;
+  const maxSize = reg.max_size_pct || 70;
+  const distroDays = reg.distribution_days ?? 0;
+  const cyc = (reg.market_cycle || 'mid_bull').replace(/_/g,' ');
+  let narrative;
+  if (r4 === 'risk_on_choppy') {
+    narrative = `Trade in trend but reduce size. ${distroDays} distribution days in last 25 — bull cycle intact (<i>${cyc}</i>) but structure thin.`;
+  } else if (r4 === 'risk_on_trending') {
+    narrative = `Full risk-on. Trade aggressively in trend. Breadth and structure both confirming.`;
+  } else if (r4 === 'risk_off_trending') {
+    narrative = `Defensive only. Shorts allowed if VIX > 25. No leverage. Trim winners.`;
+  } else {
+    narrative = `Panic. Cash. No new longs. Existing positions: stop-tightened.`;
+  }
+
+  const pBull = (hmm.p_bull || 0) * 100;
+  const conf = (hmm.confidence || 0) * 100;
+
+  const vixCur = (reg.vix || {}).vix_current ?? null;
+  const vixPrev = (reg.vix || {}).vix_prev ?? null;
+  const vixChg = (vixCur != null && vixPrev != null) ? ((vixCur - vixPrev) / vixPrev) * 100 : null;
+  const breadthPct = reg.breadth_pct_50d ?? breadth.pct_above_50d;
+  const hyg = (macro.hyg || {});
+  const dxy = (macro.dxy || {});
+  const gld = (macro.gld || {});
+
+  const arrow = (trend) => trend==='rising' ? '↗' : trend==='falling' ? '↘' : '→';
+  const tcls  = (trend) => trend==='rising' ? 'up' : trend==='falling' ? 'down' : '';
+
+  document.getElementById('regime').innerHTML = `
+    <div class="regime-band">
+      <div class="regime-call ${callClass}">
+        <div class="meta">Market Regime · cycle <b>${cyc}</b></div>
+        <div class="v">${callPretty}</div>
+        <div class="nb">${narrative}</div>
+      </div>
+      <div class="regime-conf">
+        <div>
+          <div class="row"><span class="lbl"><span class="t" data-tip="Hidden Markov Model — a statistical regime classifier. P(Bull) is the model's probability the market is in a bullish state right now.">HMM</span> P(Bull)</span><b>${fmt(pBull,0)}%</b></div>
+          <div class="bar"><div class="fl" style="width:${pBull}%"></div></div>
+        </div>
+        <div>
+          <div class="row"><span class="lbl">Model confidence · <span class="t" data-tip="Number of observations the regime classifier is trained on. Higher n = more reliable signal.">n</span>=${hmm.n_obs || 21}</span><b>${fmt(conf,0)}%</b></div>
+          <div class="bar"><div class="fl" style="width:${conf}%; background: var(--cy);"></div></div>
+        </div>
+        <div>
+          <div class="row"><span class="lbl"><span class="t" data-tip="Buy-Above-Pivot composite score (0-100). Stocks must clear this threshold for the system to surface them as BUY candidates today.">BAP</span> gate · Max size</span><b>≥ ${bapGate} · ${maxSize}%</b></div>
+        </div>
+      </div>
+      <div class="regime-macro">
+        <div class="regime-tile ${vixChg != null && vixChg < 0 ? 'down' : ''}">
+          <div class="lbl">VIX</div>
+          <div class="v">${fmt(vixCur,2)}</div>
+          <div class="sub">${vixChg != null ? sign(vixChg)+fmt(vixChg,1)+'%' : ''}</div>
+        </div>
+        <div class="regime-tile">
+          <div class="lbl">Breadth %>50d</div>
+          <div class="v">${fmt(breadthPct,1)}%</div>
+          <div class="sub">${reg.label_50 || ''}</div>
+        </div>
+        <div class="regime-tile ${tcls(hyg.trend)}">
+          <div class="lbl">HYG ${arrow(hyg.trend)}</div>
+          <div class="v">${fmt(hyg.price,2)}</div>
+          <div class="sub">${sign(hyg.chg5d)}${fmt(hyg.chg5d,1)}%</div>
+        </div>
+        <div class="regime-tile ${tcls(dxy.trend)==='down'?'up':tcls(dxy.trend)==='up'?'down':''}">
+          <div class="lbl">DXY ${arrow(dxy.trend)}</div>
+          <div class="v">${fmt(dxy.price,2)}</div>
+          <div class="sub">${sign(dxy.chg5d)}${fmt(dxy.chg5d,1)}%</div>
+        </div>
+        <div class="regime-tile ${tcls(gld.trend)}">
+          <div class="lbl">GLD ${arrow(gld.trend)}</div>
+          <div class="v">${fmt(gld.price,0)}</div>
+          <div class="sub">${sign(gld.chg5d)}${fmt(gld.chg5d,1)}%</div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('regime-fresh').innerHTML = freshChip('live', 'LIVE') + scanFresh();
+}
+
+// ── DECISION COCKPIT ─────────────────────────────────────
+function renderCockpit() {
+  // TRADE
+  const top = (DATA.elite_top_buy || []).slice(0, 5);
+  const tradeRows = top.length ? top.map(p => `
+    <div class="pick-row">
+      <div class="pick-row-l">
+        <div class="pick-row-tkr">${p.ticker}</div>
+        <div class="pick-row-meta"><b>${p.mode}</b> · ${(p.snapshot||{}).setup || ''} · ${p.sector || ''}</div>
+      </div>
+      <div class="pick-row-r">
+        <div class="pick-row-score">${fmtInt(p.elite_score)}</div>
+        <div class="pick-row-rr"><span class="t" data-tip="Reward-to-Risk ratio. 3:1 means the target is 3× the risk to stop.">R:R</span> ${fmt((p.snapshot||{}).rr,1)} · <span class="t" data-tip="Monte-Carlo probability the price hits target T1 before the stop. From simulated paths over the holding window.">P(T1)</span> ${fmtInt((p.snapshot||{}).p_target)}%</div>
+      </div>
+    </div>
+  `).join('') : `<div style="padding:24px;text-align:center;color:var(--ink-3);font-family:var(--mono);font-size:11.5px;">No BUY-cleared picks.<br>Regime gate active.</div>`;
+  document.getElementById('card-trade').innerHTML = `
+    <div class="card-h">
+      <span class="card-h-l"><span class="icon">▲</span>TRADE</span>
+      <span class="card-h-r">${top.length} BUY · top 5</span>
+    </div>
+    ${tradeRows}
+  `;
+
+  // MANAGE
+  const port = DATA.portfolio || {};
+  const positions = (port.positions || []).filter(Boolean);
+  const ss = DATA.system_status || {};
+  const macroNext = (ss.macro_calendar || {}).next_event || {};
+  const earn = (DATA.earnings_next7 || []);
+  const items = [];
+  if (positions.length === 0) {
+    items.push({ico:'∅', text:`<b>0 open positions</b> · 100% cash. No active management needed.`, when:'now'});
+  } else {
+    positions.slice(0,3).forEach(pos => {
+      items.push({ico:'▣', text:`<b>${pos.ticker || '—'}</b> · ${pos.shares || 0} sh @ $${fmt(pos.entry,2)}`, when:'pos'});
+    });
+  }
+  if (macroNext.date) {
+    items.push({ico:'⚐', iconCls:'gn', text:`<b>${macroNext.event || macroNext.type || 'Macro'}</b> · ${macroNext.date}`, when:macroNext.days_until!=null?`T+${macroNext.days_until}d`:''});
+  }
+  earn.slice(0,2).forEach(e => {
+    items.push({ico:'$', iconCls:'gn', text:`<b>${e.ticker}</b> earnings ${e.when || ''} ${e.tier ? '· '+e.tier : ''}`, when:`T+${e.days}d`});
+  });
+  document.getElementById('card-manage').innerHTML = `
+    <div class="card-h">
+      <span class="card-h-l"><span class="icon">●</span>MANAGE</span>
+      <span class="card-h-r">${positions.length} open · ${earn.length} earnings ≤7d</span>
+    </div>
+    ${items.map(it => `<div class="mgmt-row"><div class="ico ${it.iconCls||''}">${it.ico}</div><div class="text">${it.text}</div><div class="when">${it.when}</div></div>`).join('')}
+  `;
+
+  // AVOID
+  const killed = DATA.killed_count || 0;
+  const recent = (DATA.killed_recent || []).slice(0, 5);
+  document.getElementById('card-avoid').innerHTML = `
+    <div class="card-h">
+      <span class="card-h-l"><span class="icon">▼</span>AVOID</span>
+      <span class="card-h-r">no entries</span>
+    </div>
+    <div class="avoid-kpi">
+      <div class="v">${killed}</div>
+      <div class="lbl">Tickers on Kill List</div>
+    </div>
+    <div class="avoid-list">
+      ${recent.map(k => `<div class="avoid-row"><span class="tkr">${k.ticker}</span><span class="reason">${(k.setup || k.stage || 'killed').slice(0,18)}</span></div>`).join('') || '<div style="text-align:center;color:var(--ink-3);font-size:11px;padding:8px;">no recent kills</div>'}
+    </div>
+  `;
+
+  document.getElementById('cockpit-fresh').innerHTML = scanFresh();
+}
+
+// ── SYSTEM EDGE & HEALTH ────────────────────────────────
+function renderHealth() {
+  // EDGE
+  const acc = (DATA.accuracy || {}).summary || {};
+  const top3 = Object.entries((DATA.research_setup_stats || {})).slice(0,3);
+  document.getElementById('card-edge').innerHTML = `
+    <div class="card-h">
+      <span class="card-h-l"><span class="icon">∿</span>EDGE</span>
+      <span class="card-h-r">last ${acc.n || '—'} trades</span>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi pos"><div class="lbl">Win Rate</div><div class="v">${fmt(acc.win_rate,1)}%</div><div class="sub">target ≥ 50%</div></div>
+      <div class="kpi pos"><div class="lbl"><span class="t" data-tip="Profit Factor = gross wins ÷ gross losses. PF > 1.5 is considered robust; PF > 2 is excellent.">Profit Factor</span></div><div class="v">${fmt(acc.pf,2)}</div><div class="sub">target ≥ 1.5</div></div>
+      <div class="kpi"><div class="lbl"><span class="t" data-tip="Average R-multiple per trade (1R = the initial risk). Positive expectancy means the system makes money on average.">Avg R / Trade</span></div><div class="v">${fmt(acc.avg_r,2)}</div><div class="sub">expectancy</div></div>
+      <div class="kpi"><div class="lbl">Win / Loss</div><div class="v">${fmt(acc.avg_win,1)} / ${fmt(acc.avg_loss,1)}</div><div class="sub">avg R-multiple</div></div>
+    </div>
+    <div style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px;">Top Setups · <span class="t" data-tip="Wilson 95% lower-bound. Honest confidence interval for win rate — accounts for sample size so a setup with 4W-0L isn't credited the same as 80W-20L.">Wilson</span></div>
+    ${top3.map(([nm,s]) => `<div class="check-row">
+      <div class="ico ok">✓</div>
+      <div class="text">${nm}</div>
+      <div class="sub">${s.n || '—'} trades · WR ${fmt(s.win_rate,0)}%</div>
+    </div>`).join('')}
+  `;
+
+  // FUNNEL
+  const em = DATA.elite_meta || {};
+  const universe = em.n_candidates_evaluated || 0;
+  const pass = em.n_passing_hard_gates || 0;
+  const surfaced = (DATA.elite_top_buy || []).length + ((DATA.verdict_counts || {}).WAIT || 0);
+  const buys = (DATA.elite_top_buy || []).length;
+  const max = Math.max(universe, 1);
+  document.getElementById('card-funnel').innerHTML = `
+    <div class="card-h">
+      <span class="card-h-l"><span class="icon">▽</span>FUNNEL</span>
+      <span class="card-h-r">discipline</span>
+    </div>
+    <div class="funnel-step"><span class="lbl">Universe</span><span class="bar"><span class="fl" style="width:100%"></span></span><span class="v">${universe}</span></div>
+    <div class="funnel-step"><span class="lbl">Hard-Gate Pass</span><span class="bar"><span class="fl" style="width:${pass/max*100}%"></span></span><span class="v">${pass}</span></div>
+    <div class="funnel-step"><span class="lbl">Surfaced</span><span class="bar"><span class="fl" style="width:${(surfaced+buys)/max*100}%"></span></span><span class="v">${surfaced+buys}</span></div>
+    <div class="funnel-step buy"><span class="lbl">BUY-Cleared</span><span class="bar"><span class="fl" style="width:${buys/max*100}%"></span></span><span class="v">${buys}</span></div>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line);font-family:var(--mono);font-size:11px;color:var(--ink-2);line-height:1.5;">
+      <b style="color:var(--ink);">${((buys/universe)*100).toFixed(2)}%</b> of universe cleared all gates today.
+    </div>
+  `;
+
+  // DATA HEALTH
+  const dh = DATA.data_health || {};
+  const ok = dh.ok_count || 0, warn = dh.warn_count || 0, fail = dh.fail_count || 0, total = dh.total_checks || 0;
+  const ss = DATA.system_status || {};
+  const cb = ss.circuit_breaker || {};
+  const fc = ss.forced_cash || {};
+  const checks = [
+    {ico: ok >= total - 2 ? 'ok' : 'warn', sym: ok >= total - 2 ? '✓' : '!', text: `Data health checks`, sub: `${ok}/${total} OK`},
+    {ico: cb.active ? 'fail' : 'ok', sym: cb.active ? '✗' : '✓', text: 'Circuit breaker', sub: cb.active ? cb.level.toUpperCase() : 'NORMAL'},
+    {ico: fc.active ? 'fail' : 'ok', sym: fc.active ? '✗' : '✓', text: 'Forced cash', sub: fc.active ? 'ACTIVE' : 'INACTIVE'},
+    {ico: 'ok', sym: '✓', text: 'Last scan', sub: (DATA.run_timestamp || '').slice(11,16) + ' ET'},
+  ];
+  document.getElementById('card-health').innerHTML = `
+    <div class="card-h">
+      <span class="card-h-l"><span class="icon">●</span>DATA</span>
+      <span class="card-h-r">all systems</span>
+    </div>
+    ${checks.map(c => `<div class="check-row">
+      <div class="ico ${c.ico}">${c.sym}</div>
+      <div class="text">${c.text}</div>
+      <div class="sub">${c.sub}</div>
+    </div>`).join('')}
+  `;
+
+  document.getElementById('health-fresh').innerHTML = scanFresh();
+}
+
+// ── SECTOR LEADERBOARD ──────────────────────────────────
+function renderSectors() {
+  const se = DATA.sector_etf || {};
+  const sectors = Object.entries(se)
+    .filter(([k,v]) => v && typeof v === 'object' && typeof v.perf_pct === 'number' && k !== '_indices' && k !== '_idx_regime' && k !== '_ext_macro' && k !== '_intermarket' && k !== 'SPY')
+    .map(([etf, v]) => ({ etf, perf: v.perf_pct, name: v.sector, rank: v.rank }))
+    .sort((a,b) => b.perf - a.perf);
+  const maxAbs = Math.max(...sectors.map(s => Math.abs(s.perf)), 1);
+  document.getElementById('sectors').innerHTML = sectors.map(s => {
+    const heat = Math.min(100, (Math.abs(s.perf) / maxAbs) * 100);
+    return `<div class="sec-tile ${s.perf < 0 ? 'neg' : ''}">
+      <div class="rank">#${s.rank ?? '—'}</div>
+      <div class="nm">${s.etf}</div>
+      <div class="perf">${sign(s.perf)}${fmt(s.perf,1)}%</div>
+      <div class="heat"><div class="fl" style="width:${heat}%"></div></div>
+    </div>`;
+  }).join('');
+  document.getElementById('sectors-fresh').innerHTML = scanFresh();
+}
+
+// ── FORTHCOMING ────────────────────────────────────────
+function renderCalendar() {
+  const events = [];
+  // economic events
+  (DATA.economic_events || []).forEach(e => {
+    events.push({when: e.date, days: 0, kind: 'macro', tier: 'high', text: `<b>${e.type || 'Macro'}</b>` + (e.period ? ' · ' + e.period : '')});
+  });
+  // earnings
+  (DATA.earnings_next7 || []).forEach(e => {
+    events.push({when: 'T+'+e.days+'d', days: e.days, kind: 'earn', tier: 'earn', text: `<b>${e.ticker}</b> earnings · ${e.when || ''}${e.tier ? ' · '+e.tier : ''}`});
+  });
+  events.sort((a,b) => a.days - b.days);
+  const top = events.slice(0, 8);
+  document.getElementById('cal').innerHTML = top.length ? top.map(e => `
+    <div class="cal-row">
+      <div class="cal-when"><span class="d">${e.days}d</span><span class="l">out</span></div>
+      <div class="cal-text">${e.text}</div>
+      <span class="cal-tier ${e.tier}">${e.kind.toUpperCase()}</span>
+    </div>
+  `).join('') : `<div style="padding:24px;text-align:center;color:var(--ink-3);font-family:var(--mono);font-size:12px;">No invalidating events in the next 14 days.</div>`;
+  document.getElementById('cal-fresh').innerHTML = scanFresh();
+}
+
+renderBrandbar();
+renderRegime();
+renderCockpit();
+renderHealth();
+renderSectors();
+renderCalendar();
+
+// Persist intro-banner dismissal
+if (localStorage.getItem('kairos_intro_dismissed')) {
+  document.getElementById('intro').classList.add('hidden');
+}
+// Footer timestamp
+const _ts = (DATA.run_timestamp || '').replace('T',' ');
+const _footTs = document.getElementById('foot-ts');
+if (_footTs) _footTs.textContent = 'snapshot ' + _ts + ' ET';
+</script>
+</body>
+</html>

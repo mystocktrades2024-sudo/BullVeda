@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>F-Tab Name Comparison</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #11151d;
+    --panel-2: #161b25;
+    --border: #1f2632;
+    --border-2: #2a3344;
+    --text: #e6ecf2;
+    --muted: #8a95a8;
+    --dim: #5b6577;
+    --accent: #5eead4;
+    --accent-2: #38bdf8;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --green: #4ade80;
+    --purple: #a78bfa;
+    --orange: #fb923c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: linear-gradient(180deg, #060810 0%, #0b0e14 100%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif;
+    font-size: 14px;
+    line-height: 1.55;
+    min-height: 100vh;
+    padding: 40px 20px 80px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  .page-title {
+    margin: 0 0 6px;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    text-align: center;
+  }
+  .page-sub {
+    text-align: center;
+    color: var(--muted);
+    margin: 0 0 12px;
+    font-size: 13px;
+  }
+  .toc {
+    text-align: center;
+    margin: 0 0 40px;
+    font-size: 12px;
+    color: var(--dim);
+  }
+  .toc a {
+    color: var(--accent-2);
+    text-decoration: none;
+    margin: 0 10px;
+    padding: 4px 10px;
+    border: 1px solid var(--border-2);
+    border-radius: 999px;
+    display: inline-block;
+  }
+  .toc a:hover { background: var(--panel-2); }
+
+  .candidate {
+    margin: 0 0 56px;
+  }
+  .candidate-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed var(--border-2);
+  }
+  .candidate-label .num {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--panel-2);
+    border: 1px solid var(--border-2);
+    color: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .candidate-label h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .candidate-label .why {
+    margin-left: auto;
+    color: var(--dim);
+    font-size: 12px;
+    font-style: italic;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 12px 50px rgba(0, 0, 0, 0.45);
+  }
+  .chrome {
+    background: #0a0d13;
+    border-bottom: 1px solid var(--border);
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .chrome .brand {
+    color: var(--text);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .chrome .tab {
+    padding: 4px 10px;
+    border-radius: 6px;
+    color: var(--dim);
+  }
+  .chrome .tab.active {
+    background: var(--panel-2);
+    color: var(--accent);
+    border: 1px solid var(--border-2);
+  }
+  .head {
+    padding: 26px 28px 22px;
+    border-bottom: 1px solid var(--border);
+  }
+  .head h2 {
+    margin: 0 0 6px;
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .head .tag {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .head .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 16px;
+    padding: 5px 12px;
+    background: rgba(74, 222, 128, 0.08);
+    border: 1px solid rgba(74, 222, 128, 0.2);
+    border-radius: 999px;
+    color: var(--green);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .head .badge::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+  }
+  .head .meta {
+    display: inline-block;
+    margin-left: 12px;
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .body { padding: 22px 28px 28px; }
+
+  /* Strikepoint table */
+  table.signals {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  table.signals th {
+    text-align: left;
+    padding: 10px 12px;
+    color: var(--dim);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+  table.signals td {
+    padding: 14px 12px;
+    border-bottom: 1px solid rgba(31, 38, 50, 0.5);
+  }
+  table.signals tr:last-child td { border-bottom: none; }
+  .ticker { font-weight: 700; letter-spacing: 0.02em; font-size: 14px; }
+  .pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .pill.t1 { background: rgba(94, 234, 212, 0.12); color: var(--accent); border: 1px solid rgba(94, 234, 212, 0.25); }
+  .pill.t2 { background: rgba(56, 189, 248, 0.1); color: var(--accent-2); border: 1px solid rgba(56, 189, 248, 0.22); }
+  .pill.armed { background: rgba(74, 222, 128, 0.08); color: var(--green); border: 1px solid rgba(74, 222, 128, 0.2); }
+  .pill.watching { background: rgba(251, 191, 36, 0.08); color: var(--warn); border: 1px solid rgba(251, 191, 36, 0.2); }
+  .dots { letter-spacing: 0.15em; font-size: 12px; margin-left: 6px; }
+
+  /* Conviction list */
+  .conv-row {
+    display: grid;
+    grid-template-columns: 130px 90px 1fr auto;
+    gap: 18px;
+    padding: 18px 0;
+    border-bottom: 1px solid rgba(31, 38, 50, 0.6);
+    align-items: center;
+  }
+  .conv-row:last-child { border-bottom: none; }
+  .conv-tier {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .conv-tier-label {
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+  }
+  .conv-tier.t1 .conv-tier-label { color: var(--accent); }
+  .conv-tier.t2 .conv-tier-label { color: var(--accent-2); }
+  .conv-name { font-weight: 700; font-size: 16px; }
+  .conv-detail { color: var(--muted); font-size: 13px; }
+  .conv-detail b { color: var(--text); font-weight: 600; }
+  .conv-stat {
+    text-align: right;
+    color: var(--dim);
+    font-size: 12px;
+    font-family: "SF Mono", Menlo, monospace;
+  }
+  .conv-stat b { color: var(--green); font-weight: 600; }
+  .audit-bar {
+    margin-top: 16px;
+    padding: 12px 14px;
+    background: var(--panel-2);
+    border: 1px solid var(--border-2);
+    border-radius: 8px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .audit-bar a { color: var(--accent-2); text-decoration: none; }
+
+  /* Confluence */
+  .conf-row {
+    padding: 16px 0;
+    border-bottom: 1px solid rgba(31, 38, 50, 0.6);
+  }
+  .conf-row:last-child { border-bottom: none; }
+  .conf-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+  .conf-ticker { font-weight: 700; font-size: 17px; }
+  .conf-verdict { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; }
+  .conf-verdict.buy { color: var(--accent); }
+  .conf-verdict.avoid { color: var(--danger); }
+  .conf-pillars {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .conf-cell {
+    padding: 8px 4px;
+    border-radius: 5px;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    background: var(--panel-2);
+    color: var(--dim);
+    border: 1px solid var(--border);
+  }
+  .conf-cell.on {
+    background: rgba(94, 234, 212, 0.1);
+    color: var(--accent);
+    border-color: rgba(94, 234, 212, 0.25);
+  }
+  .conf-cell.off {
+    background: rgba(248, 113, 113, 0.06);
+    color: var(--danger);
+    border-color: rgba(248, 113, 113, 0.18);
+  }
+  .conf-bar {
+    height: 5px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+  .conf-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    border-radius: 3px;
+  }
+  .conf-meta {
+    color: var(--muted);
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* Sightline */
+  .verdict-card {
+    padding: 16px 18px;
+    background: linear-gradient(135deg, rgba(94, 234, 212, 0.08), rgba(56, 189, 248, 0.06));
+    border: 1px solid rgba(94, 234, 212, 0.2);
+    border-radius: 10px;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .verdict-card-label { color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .verdict-card-value { color: var(--accent); font-weight: 700; font-size: 18px; letter-spacing: 0.04em; margin-top: 4px; }
+  .sl-cascade { display: flex; flex-direction: column; gap: 8px; }
+  .sl-gate {
+    display: grid;
+    grid-template-columns: 22px 130px 1fr;
+    gap: 14px;
+    padding: 10px 14px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    align-items: center;
+    font-size: 13px;
+  }
+  .sl-gate-icon {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: rgba(74, 222, 128, 0.15);
+    color: var(--green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 12px;
+  }
+  .sl-gate-name { color: var(--muted); font-weight: 500; }
+  .sl-gate-detail { color: var(--text); font-family: "SF Mono", Menlo, monospace; font-size: 12.5px; }
+
+  .footnote {
+    text-align: center;
+    color: var(--dim);
+    font-size: 12px;
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1 class="page-title">F-Tab · Name Candidates</h1>
+  <p class="page-sub">Same scan output, four identities. Each card shows what users would see when they click the F tab.</p>
+
+  <div class="toc">
+    <a href="#strikepoint">1 · Strikepoint</a>
+    <a href="#conviction">2 · Conviction</a>
+    <a href="#confluence">3 · Confluence</a>
+    <a href="#sightline">4 · Sightline</a>
+  </div>
+
+  <!-- 1. STRIKEPOINT -->
+  <section id="strikepoint" class="candidate">
+    <div class="candidate-label">
+      <span class="num">1</span>
+      <h3>Strikepoint</h3>
+      <span class="why">action-moment framing — when evidence becomes a trade</span>
+    </div>
+    <div class="card">
+      <div class="chrome">
+        <span class="brand">SwingTrade</span>
+        <span>·</span>
+        <span class="tab">Elite</span>
+        <span class="tab">Audit</span>
+        <span class="tab">Performance</span>
+        <span class="tab active">F · Strikepoint</span>
+      </div>
+      <div class="head">
+        <h2>Strikepoint</h2>
+        <p class="tag">Where regime, pillars, catalyst &amp; stats converge on a tradeable signal.</p>
+        <div>
+          <span class="badge">Live</span>
+          <span class="meta">3 setups armed · regime: risk_on_trending</span>
+        </div>
+      </div>
+      <div class="body">
+        <table class="signals">
+          <thead>
+            <tr>
+              <th>Ticker</th><th>Setup</th><th>Tier</th><th>R:R</th><th style="text-align:right">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="ticker">NVDA</td>
+              <td>VCP</td>
+              <td><span class="pill t1">T1</span><span class="dots" style="color:var(--accent)">●●●</span></td>
+              <td>4.2 : 1</td>
+              <td style="text-align:right"><span class="pill armed">Armed</span></td>
+            </tr>
+            <tr>
+              <td class="ticker">AVGO</td>
+              <td>EMA21 pullback</td>
+              <td><span class="pill t2">T2</span><span class="dots" style="color:var(--accent-2)">●●</span></td>
+              <td>3.4 : 1</td>
+              <td style="text-align:right"><span class="pill armed">Armed</span></td>
+            </tr>
+            <tr>
+              <td class="ticker">PLTR</td>
+              <td>PEAD</td>
+              <td><span class="pill t2">T2</span><span class="dots" style="color:var(--accent-2)">●●</span></td>
+              <td>3.1 : 1</td>
+              <td style="text-align:right"><span class="pill watching">Watching</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. CONVICTION -->
+  <section id="conviction" class="candidate">
+    <div class="candidate-label">
+      <span class="num">2</span>
+      <h3>Conviction</h3>
+      <span class="why">names the actual system output — Wilson-backed tier calls</span>
+    </div>
+    <div class="card">
+      <div class="chrome">
+        <span class="brand">SwingTrade</span>
+        <span>·</span>
+        <span class="tab">Elite</span>
+        <span class="tab">Audit</span>
+        <span class="tab">Performance</span>
+        <span class="tab active">F · Conviction</span>
+      </div>
+      <div class="head">
+        <h2>Conviction</h2>
+        <p class="tag">Tiered, evidence-backed calls. Every gate logged.</p>
+        <div>
+          <span class="badge">8 gates · 0 rejected</span>
+          <span class="meta">Wilson CI live · n≥30 floor enforced</span>
+        </div>
+      </div>
+      <div class="body">
+        <div class="conv-row">
+          <div class="conv-tier t1"><span class="dots" style="color:var(--accent); margin:0">●●●</span><span class="conv-tier-label">T1 HIGH</span></div>
+          <div class="conv-name">NVDA</div>
+          <div class="conv-detail">VCP · score <b>91</b> · R:R <b>4.2:1</b> · regime ✓</div>
+          <div class="conv-stat">WR <b>67%</b><br>CI [54, 78]</div>
+        </div>
+        <div class="conv-row">
+          <div class="conv-tier t2"><span class="dots" style="color:var(--accent-2); margin:0">●●</span><span class="conv-tier-label">T2 MED</span></div>
+          <div class="conv-name">AVGO</div>
+          <div class="conv-detail">EMA21 · score <b>84</b> · R:R <b>3.4:1</b> · regime ✓</div>
+          <div class="conv-stat">WR <b>58%</b><br>CI [46, 69]</div>
+        </div>
+        <div class="conv-row">
+          <div class="conv-tier t2"><span class="dots" style="color:var(--accent-2); margin:0">●●</span><span class="conv-tier-label">T2 MED</span></div>
+          <div class="conv-name">PLTR</div>
+          <div class="conv-detail">PEAD · score <b>81</b> · R:R <b>3.1:1</b> · regime ✓</div>
+          <div class="conv-stat">WR <b>61%</b><br>CI [49, 72]</div>
+        </div>
+        <div class="audit-bar">
+          Audit trail · 8 gates passed across 3 signals · <a href="#">view rejection log →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. CONFLUENCE -->
+  <section id="confluence" class="candidate">
+    <div class="candidate-label">
+      <span class="num">3</span>
+      <h3>Confluence</h3>
+      <span class="why">describes the mechanism — edge = independent signals aligning</span>
+    </div>
+    <div class="card">
+      <div class="chrome">
+        <span class="brand">SwingTrade</span>
+        <span>·</span>
+        <span class="tab">Elite</span>
+        <span class="tab">Audit</span>
+        <span class="tab">Performance</span>
+        <span class="tab active">F · Confluence</span>
+      </div>
+      <div class="head">
+        <h2>Confluence</h2>
+        <p class="tag">Where independent signals converge into edge.</p>
+        <div>
+          <span class="badge">Live · 8-pillar grid</span>
+          <span class="meta">regime · technicals · catalyst · smart-$ · RS · quality · entry · Wilson</span>
+        </div>
+      </div>
+      <div class="body">
+        <div class="conf-row">
+          <div class="conf-head">
+            <span class="conf-ticker">NVDA</span>
+            <span class="conf-verdict buy">BUY · T1</span>
+          </div>
+          <div class="conf-pillars">
+            <div class="conf-cell on">RGM</div><div class="conf-cell on">TCH</div>
+            <div class="conf-cell on">CAT</div><div class="conf-cell on">$$</div>
+            <div class="conf-cell on">RS</div><div class="conf-cell on">QLT</div>
+            <div class="conf-cell on">ENT</div><div class="conf-cell on">WIL</div>
+          </div>
+          <div class="conf-bar"><div class="conf-bar-fill" style="width:100%"></div></div>
+          <div class="conf-meta"><span>8 / 8 confluence</span><span>edge: <b style="color:var(--accent)">strong</b></span></div>
+        </div>
+
+        <div class="conf-row">
+          <div class="conf-head">
+            <span class="conf-ticker">AVGO</span>
+            <span class="conf-verdict buy">BUY · T2</span>
+          </div>
+          <div class="conf-pillars">
+            <div class="conf-cell on">RGM</div><div class="conf-cell on">TCH</div>
+            <div class="conf-cell on">CAT</div><div class="conf-cell">$$</div>
+            <div class="conf-cell on">RS</div><div class="conf-cell on">QLT</div>
+            <div class="conf-cell on">ENT</div><div class="conf-cell on">WIL</div>
+          </div>
+          <div class="conf-bar"><div class="conf-bar-fill" style="width:87.5%"></div></div>
+          <div class="conf-meta"><span>7 / 8 confluence</span><span>edge: <b style="color:var(--accent-2)">solid</b></span></div>
+        </div>
+
+        <div class="conf-row">
+          <div class="conf-head">
+            <span class="conf-ticker">TSLA</span>
+            <span class="conf-verdict avoid">AVOID</span>
+          </div>
+          <div class="conf-pillars">
+            <div class="conf-cell on">RGM</div><div class="conf-cell on">TCH</div>
+            <div class="conf-cell off">CAT</div><div class="conf-cell off">$$</div>
+            <div class="conf-cell off">RS</div><div class="conf-cell on">QLT</div>
+            <div class="conf-cell off">ENT</div><div class="conf-cell off">WIL</div>
+          </div>
+          <div class="conf-bar"><div class="conf-bar-fill" style="width:37.5%; background:linear-gradient(90deg,var(--danger),var(--orange))"></div></div>
+          <div class="conf-meta"><span>3 / 8 confluence</span><span>edge: <b style="color:var(--danger)">absent</b></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. SIGHTLINE -->
+  <section id="sightline" class="candidate">
+    <div class="candidate-label">
+      <span class="num">4</span>
+      <h3>Sightline</h3>
+      <span class="why">clarity through noise — every gate, every reason, surfaced</span>
+    </div>
+    <div class="card">
+      <div class="chrome">
+        <span class="brand">SwingTrade</span>
+        <span>·</span>
+        <span class="tab">Elite</span>
+        <span class="tab">Audit</span>
+        <span class="tab">Performance</span>
+        <span class="tab active">F · Sightline</span>
+      </div>
+      <div class="head">
+        <h2>Sightline</h2>
+        <p class="tag">See every gate. See every rejection. See the why.</p>
+        <div>
+          <span class="badge">Cascade view</span>
+          <span class="meta">drill into NVDA · 8 / 8 gates passed</span>
+        </div>
+      </div>
+      <div class="body">
+        <div class="verdict-card">
+          <div>
+            <div class="verdict-card-label">NVDA · Verdict</div>
+            <div class="verdict-card-value">BUY · T1 · score 91</div>
+          </div>
+          <div style="text-align:right">
+            <div class="verdict-card-label">Wilson LB</div>
+            <div class="verdict-card-value" style="color:var(--green)">0.54</div>
+          </div>
+        </div>
+        <div class="sl-cascade">
+          <div class="sl-gate"><div class="sl-gate-icon">✓</div><div class="sl-gate-name">liquidity</div><div class="sl-gate-detail">$42M ADV · cleared $10M floor</div></div>
+          <div class="sl-gate"><div class="sl-gate-icon">✓</div><div class="sl-gate-name">earnings</div><div class="sl-gate-detail">no blackout · next report in 28d</div></div>
+          <div class="sl-gate"><div class="sl-gate-icon">✓</div><div class="sl-gate-name">regime</div><div class="sl-gate-detail">risk_on_trending · +3 tech shift</div></div>
+          <div class="sl-gate"><div class="sl-gate-icon">✓</div><div class="sl-gate-name">entry quality</div><div class="sl-gate-detail">FRESH · 0.4 ATR from pivot</div></div>
+          <div class="sl-gate"><div class="sl-gate-icon">✓</div><div class="sl-gate-name">R:R</div><div class="sl-gate-detail">4.2 : 1 · cleared 3.0 floor</div></div>
+          <div class="sl-gate"><div class="sl-gate-icon">✓</div><div class="sl-gate-name">Wilson LB</div><div class="sl-gate-detail">0.54 · n=140 prior trades</div></div>
+          <div class="sl-gate"><div class="sl-gate-icon">✓</div><div class="sl-gate-name">sector pct</div><div class="sl-gate-detail">78th pctile in Semis · cleared 60</div></div>
+          <div class="sl-gate"><div class="sl-gate-icon">✓</div><div class="sl-gate-name">catalyst</div><div class="sl-gate-detail">T1 · VCP + UOA cluster</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <p class="footnote">All four bound to the same scan output (NVDA / AVGO / PLTR / TSLA). Identity differs; substance is identical.</p>
+
+</div>
+</body>
+</html>

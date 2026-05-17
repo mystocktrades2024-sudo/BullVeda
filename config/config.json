@@ -1,10 +1,10 @@
 {
   "_meta": {
     "schema_version": "2.0",
-    "last_backtested": "2026-05-09",
+    "last_backtested": "2026-05-16",
     "last_backtest_wr": 0.857,
     "last_backtest_config": "config_e (4x20%, 5d hold, score>=68 bull/72 choppy)",
-    "last_modified": "2026-05-09",
+    "last_modified": "2026-05-16",
     "notes": "Fix #23 \u2014 version-locked. Don't change thresholds without a fresh backtest.",
     "trading_style_defaults": "swing",
     "swing_defaults_applied": "2026-04-14",
@@ -146,7 +146,7 @@
   "scoring": {
     "repeat_entry_cooldown": {
       "_enabled": true,
-      "_note": "Audit Batch 3 (2026-05-15): block same-ticker re-buy for N days after stop-out. Prevents chasing losses (CLAUDE.md principle 8). Diagnostic showed ALB 3 stops in 5d, CAVA/DUK/NEE 2 stops each — all should have been blocked.",
+      "_note": "Audit Batch 3 (2026-05-15): block same-ticker re-buy for N days after stop-out. Prevents chasing losses (CLAUDE.md principle 8). Diagnostic showed ALB 3 stops in 5d, CAVA/DUK/NEE 2 stops each \u2014 all should have been blocked.",
       "cooldown_days_after_stop": 5
     },
     "fundamentals_max": 10,
@@ -216,17 +216,34 @@
   "regime4_thresholds": {
     "_max_size_pct_note": "max_size_pct is a multiplier on the half-Kelly position size. 100 = full size, 70 = 70% of calculated size, 0 = no new longs.",
     "entry_quality_regime_relax": {
-      "_comment": "ENTRY-Q-REGIME-RELAX (2026-05-13). Per-regime list of entry_quality bands that are normally hard-blocked from BUY but ALLOWED here. Evidence: scripts/regime_sharpe_decomp.py output on n=897 trades — MISSED PF 2.59 / Sharpe +0.33 / n=302, EXTENDED PF 1.33 / Sharpe +0.10 / n=335. PULLBACK (n=72) is only PF 0.88 — gate is currently inverted. Relax in risk_on_choppy only (where bulk of profitable trades live). Empty/missing = legacy hard-block behavior preserved.",
+      "_comment": "ENTRY-Q-REGIME-RELAX (2026-05-13). Per-regime list of entry_quality bands that are normally hard-blocked from BUY but ALLOWED here. Evidence: scripts/regime_sharpe_decomp.py output on n=897 trades \u2014 MISSED PF 2.59 / Sharpe +0.33 / n=302, EXTENDED PF 1.33 / Sharpe +0.10 / n=335. PULLBACK (n=72) is only PF 0.88 \u2014 gate is currently inverted. Relax in risk_on_choppy only (where bulk of profitable trades live). Empty/missing = legacy hard-block behavior preserved.",
       "_validations": {
         "risk_on_choppy": {
-          "EXTENDED": {"n": 335, "wr": 0.552, "wr_lb": 0.499, "pf": 1.33, "sharpe_per_trade": 0.10, "avg_pnl_pct": 0.52},
-          "MISSED":   {"n": 302, "wr": 0.623, "wr_lb": 0.567, "pf": 2.59, "sharpe_per_trade": 0.33, "avg_pnl_pct": 1.80},
+          "EXTENDED": {
+            "n": 335,
+            "wr": 0.552,
+            "wr_lb": 0.499,
+            "pf": 1.33,
+            "sharpe_per_trade": 0.1,
+            "avg_pnl_pct": 0.52
+          },
+          "MISSED": {
+            "n": 302,
+            "wr": 0.623,
+            "wr_lb": 0.567,
+            "pf": 2.59,
+            "sharpe_per_trade": 0.33,
+            "avg_pnl_pct": 1.8
+          },
           "source": "scripts/regime_sharpe_decomp.py output 2026-05-13 (cache/regime_sharpe_decomp_2026-05-13.json)",
-          "mechanism": "In choppy markets the scanner catches stocks AFTER they've already moved (EXTENDED/MISSED labels) but the trade still works — momentum continuation in mean-reverting regime where prior buyers are validated. PULLBACK (the gate's preferred state) in choppy underperforms because pullbacks in choppy often turn into continued pullbacks.",
+          "mechanism": "In choppy markets the scanner catches stocks AFTER they've already moved (EXTENDED/MISSED labels) but the trade still works \u2014 momentum continuation in mean-reverting regime where prior buyers are validated. PULLBACK (the gate's preferred state) in choppy underperforms because pullbacks in choppy often turn into continued pullbacks.",
           "stamp_caveat": true
         }
       },
-      "risk_on_choppy": ["EXTENDED", "MISSED"]
+      "risk_on_choppy": [
+        "EXTENDED",
+        "MISSED"
+      ]
     },
     "risk_on_trending": {
       "buy_min_score": 58,
@@ -374,12 +391,14 @@
   },
   "rolling_sharpe_kill": {
     "_enabled": true,
-    "_note": "ROLLING-SHARPE KILL (2026-05-13, Direction 2). Capital preservation gate. When the last N closed BUYs show rolling Sharpe < min_sharpe, pause new BUYs until edge returns. Truncates left-tail bad periods — the mechanism per the article's 'consistent Sharpe across regimes' bar. Roll back: set _enabled=false.",
+    "_note": "ROLLING-SHARPE KILL (2026-05-13, Direction 2). Capital preservation gate. When the last N closed BUYs show rolling Sharpe < min_sharpe, pause new BUYs until edge returns. Truncates left-tail bad periods \u2014 the mechanism per the article's 'consistent Sharpe across regimes' bar. Roll back: set _enabled=false.",
     "_mechanism": "Computes Sharpe-per-trade on the last lookback_n closed BUYs (filtering |pnl|<=100% outliers and requiring min_sample_n samples to fire). When Sharpe falls below threshold, the gate fires PRE-cascade and routes all candidates to WATCH. Self-clears when next closed BUY pushes rolling Sharpe back above threshold.",
     "min_sharpe": -0.5,
     "lookback_n": 20,
     "min_sample_n": 10,
-    "applies_to": ["BUY"],
+    "applies_to": [
+      "BUY"
+    ],
     "_validations": {
       "current_state_2026-05-13": {
         "see": "decision_engine.compute_rolling_sharpe_kill_state for the live computation",
@@ -390,22 +409,50 @@
   },
   "defensive_rotation_sleeve": {
     "_enabled": true,
-    "_note": "DEFENSIVE-ROTATION sleeve — closes the bear-regime gap in Choice C (docs/strategy_defensive_rotation.md). Long defensive ETFs/large-caps when SPY < 50EMA + breadth deteriorating. ENABLED 2026-05-14 dormant — double-gated (regime AND SPY-50EMA) so cannot fire until qualifying conditions emerge.",
+    "_note": "DEFENSIVE-ROTATION sleeve \u2014 closes the bear-regime gap in Choice C (docs/strategy_defensive_rotation.md). Long defensive ETFs/large-caps when SPY < 50EMA + breadth deteriorating. ENABLED 2026-05-14 dormant \u2014 double-gated (regime AND SPY-50EMA) so cannot fire until qualifying conditions emerge.",
     "_phase": "PAPER (when enabled, signals emit as setup_family='Defensive Rotation' with WATCH_DEFENSIVE verdict; no live trades unless promoted via decision_engine).",
-    "regimes_active": ["risk_off_trending", "panic", "risk_on_choppy"],
+    "regimes_active": [
+      "risk_off_trending",
+      "panic",
+      "risk_on_choppy"
+    ],
     "require_spy_below_50ema": true,
     "min_rs_outperform_pct": 0.0,
     "max_beta": 1.0,
     "max_atr_pct_of_price": 4.0,
     "min_score": 50,
-    "universe_tier1_etfs": ["XLU", "GLD"],
-    "_tier1_etfs_note": "NARROWED 2026-05-14 from backtest_sleeves_2026-05-14 (180d, n=258). XLU PF 1.15 + GLD PF 0.98 (haircut) — only working pair. IEF/TLT failed (rising-rate environment, PF 0.39-0.41). XLP/XLV failed (PF 0.38-0.51). May re-add IEF/TLT in falling-rate regime; XLP/XLV under-performed despite SPY drawdowns.",
-    "universe_tier1_etfs_deferred": ["XLP", "XLV", "IEF", "TLT"],
+    "universe_tier1_etfs": [
+      "XLU",
+      "GLD"
+    ],
+    "_tier1_etfs_note": "NARROWED 2026-05-14 from backtest_sleeves_2026-05-14 (180d, n=258). XLU PF 1.15 + GLD PF 0.98 (haircut) \u2014 only working pair. IEF/TLT failed (rising-rate environment, PF 0.39-0.41). XLP/XLV failed (PF 0.38-0.51). May re-add IEF/TLT in falling-rate regime; XLP/XLV under-performed despite SPY drawdowns.",
+    "universe_tier1_etfs_deferred": [
+      "XLP",
+      "XLV",
+      "IEF",
+      "TLT"
+    ],
     "universe_tier2_names": [
-      "JNJ", "PG", "KO", "PEP", "WMT", "COST",
-      "DUK", "SO", "NEE", "AEP", "EXC",
-      "MRK", "ABBV", "LLY", "UNH", "PFE",
-      "VZ", "T", "MO", "PM"
+      "JNJ",
+      "PG",
+      "KO",
+      "PEP",
+      "WMT",
+      "COST",
+      "DUK",
+      "SO",
+      "NEE",
+      "AEP",
+      "EXC",
+      "MRK",
+      "ABBV",
+      "LLY",
+      "UNH",
+      "PFE",
+      "VZ",
+      "T",
+      "MO",
+      "PM"
     ],
     "stop_atr_multiple": 1.0,
     "trail_activate_pct": 1.5,
@@ -420,7 +467,7 @@
     "size_cap_by_regime": {
       "risk_on_choppy": 0.15,
       "risk_off_trending": 0.35,
-      "panic": 0.50
+      "panic": 0.5
     },
     "_validations": {
       "mechanism": "Institutional flight-to-safety flow: low-beta defensive sectors outperform 5-15% over 10-30d when SPY breaks 50EMA + breadth deteriorates. Federal Reserve flow data + CRSP returns support.",
@@ -432,20 +479,29 @@
   },
   "prefomc_drift_overlay": {
     "_enabled": true,
-    "_note": "PRE-FOMC DRIFT overlay — multiplies BUY sizing 1.25× on the trading day before scheduled FOMC. Lucca-Moench 2015: ~80% of pre-2008 equity premium concentrated in 24h pre-FOMC. NOT a sleeve — applies to ALL long BUYs.",
+    "_note": "PRE-FOMC DRIFT overlay \u2014 multiplies BUY sizing 1.25\u00d7 on the trading day before scheduled FOMC. Lucca-Moench 2015: ~80% of pre-2008 equity premium concentrated in 24h pre-FOMC. NOT a sleeve \u2014 applies to ALL long BUYs.",
     "size_boost_mult": 1.25,
     "apply_to_long_only": true,
     "exclude_emergency_fomc": true,
     "_validations": {
-      "mechanism": "Lucca-Moench 2015 (Journal of Finance) — pre-FOMC drift in SPY over 24h window before scheduled FOMC announcements. Replicated post-2008 with reduced magnitude (~50%). Mechanism: informed-trader positioning + risk premium decay.",
-      "phase_1_pass_criteria": {"observe_n_fomc_events": 2, "boost_should_apply_to_existing_buys": true}
+      "mechanism": "Lucca-Moench 2015 (Journal of Finance) \u2014 pre-FOMC drift in SPY over 24h window before scheduled FOMC announcements. Replicated post-2008 with reduced magnitude (~50%). Mechanism: informed-trader positioning + risk premium decay.",
+      "phase_1_pass_criteria": {
+        "observe_n_fomc_events": 2,
+        "boost_should_apply_to_existing_buys": true
+      }
     }
   },
   "esp_play_sleeve": {
     "_enabled": true,
-    "_note": "EARNINGS ESP PLAY — closes P0 roadmap item. Zacks ESP > 0 + Rank <= 3 + earnings within 4-14d = ~70% beat rate. Mode A (default): pre-earnings drift only, exit day before report. Mode B: ride through. Default Mode A for $5K account safety.",
+    "_note": "EARNINGS ESP PLAY \u2014 closes P0 roadmap item. Zacks ESP > 0 + Rank <= 3 + earnings within 4-14d = ~70% beat rate. Mode A (default): pre-earnings drift only, exit day before report. Mode B: ride through. Default Mode A for $5K account safety.",
     "ride_through_earnings": false,
-    "regimes_active": ["risk_on_trending", "risk_on_choppy", "risk_off_trending", "panic", "bull"],
+    "regimes_active": [
+      "risk_on_trending",
+      "risk_on_choppy",
+      "risk_off_trending",
+      "panic",
+      "bull"
+    ],
     "min_score": 50,
     "min_daily_dollar_volume": 10000000,
     "min_esp_pct": 0.0,
@@ -464,21 +520,31 @@
     "size_mult": 0.5,
     "size_cap_pct": 30,
     "_validations": {
-      "mechanism": "Zacks Earnings ESP — Most recent EPS estimate vs consensus. ESP > 0 = positive recency skew = ~70% beat rate (Zacks: 25 years, 100K reports). Strongest when combined with Rank <= 3 (analyst alignment).",
-      "phase_1_pass_criteria": {"min_signals_14d": 8, "min_hypothetical_pf": 1.3, "min_win_rate_pct": 60}
+      "mechanism": "Zacks Earnings ESP \u2014 Most recent EPS estimate vs consensus. ESP > 0 = positive recency skew = ~70% beat rate (Zacks: 25 years, 100K reports). Strongest when combined with Rank <= 3 (analyst alignment).",
+      "phase_1_pass_criteria": {
+        "min_signals_14d": 8,
+        "min_hypothetical_pf": 1.3,
+        "min_win_rate_pct": 60
+      }
     }
   },
   "insider_cluster_sleeve": {
     "_enabled": true,
-    "_note": "INSIDER-CLUSTER sleeve — promotes tier1 insider-cluster signal to its own setup_family with sizing/stops/hold. Mechanism: information asymmetry (Bettis-Coles-Lemmon 2000). 3+ insider purchases $200K+ within 30d → 8-15% drift over 30-60d. Reuses existing tier1_signals.insider_cluster detector.",
-    "regimes_active": ["risk_on_trending", "risk_on_choppy", "risk_off_trending", "panic", "bull"],
+    "_note": "INSIDER-CLUSTER sleeve \u2014 promotes tier1 insider-cluster signal to its own setup_family with sizing/stops/hold. Mechanism: information asymmetry (Bettis-Coles-Lemmon 2000). 3+ insider purchases $200K+ within 30d \u2192 8-15% drift over 30-60d. Reuses existing tier1_signals.insider_cluster detector.",
+    "regimes_active": [
+      "risk_on_trending",
+      "risk_on_choppy",
+      "risk_off_trending",
+      "panic",
+      "bull"
+    ],
     "min_score": 40,
     "min_daily_dollar_volume": 5000000,
     "require_above_ema50": true,
     "min_insider_buys": 3,
     "min_total_buy_value_usd": 200000,
     "require_dollar_evidence": true,
-    "_dollar_gate_note": "Added 2026-05-14 after Audit Batch 3 found 165 false positives where 'buys' counter included RSU vests + option exercises (total_buy_value=$0). Require ≥$200K aggregate OR CEO/CFO confirmation per Bettis-Coles-Lemmon 2000 mechanism (open-market purchases only).",
+    "_dollar_gate_note": "Added 2026-05-14 after Audit Batch 3 found 165 false positives where 'buys' counter included RSU vests + option exercises (total_buy_value=$0). Require \u2265$200K aggregate OR CEO/CFO confirmation per Bettis-Coles-Lemmon 2000 mechanism (open-market purchases only).",
     "stop_atr_multiple": 1.0,
     "trail_activate_pct": 3.0,
     "trail_atr_multiple": 0.5,
@@ -492,14 +558,24 @@
     "size_cap_pct": 35,
     "_validations": {
       "mechanism": "Information asymmetry: insiders trade on material non-public info despite fiduciary duty; multi-insider clusters with size threshold filter out routine grants. 60-65% beat-market rate historically. Bettis-Coles-Lemmon 2000, Cohen-Malloy-Pomorski 2012.",
-      "phase_1_pass_criteria": {"min_signals_14d": 5, "min_hypothetical_pf": 1.4, "min_win_rate_pct": 55}
+      "phase_1_pass_criteria": {
+        "min_signals_14d": 5,
+        "min_hypothetical_pf": 1.4,
+        "min_win_rate_pct": 55
+      }
     }
   },
   "pead_sleeve": {
     "_enabled": true,
-    "_note": "PEAD sleeve — most-documented anomaly in academic finance. Buy stocks 1-3d post-earnings-beat with positive revisions; drift 5-15% over 30-60d. ENABLED 2026-05-14 — fires in ALL regimes (catalyst is regime-independent). docs/strategy_pead.md.",
+    "_note": "PEAD sleeve \u2014 most-documented anomaly in academic finance. Buy stocks 1-3d post-earnings-beat with positive revisions; drift 5-15% over 30-60d. ENABLED 2026-05-14 \u2014 fires in ALL regimes (catalyst is regime-independent). docs/strategy_pead.md.",
     "_phase": "PAPER (signals emit as setup_family='PEAD' with WATCH_PEAD verdict; promote via decision_engine).",
-    "regimes_active": ["risk_on_trending", "risk_on_choppy", "risk_off_trending", "panic", "bull"],
+    "regimes_active": [
+      "risk_on_trending",
+      "risk_on_choppy",
+      "risk_off_trending",
+      "panic",
+      "bull"
+    ],
     "min_days_since_earnings": 1,
     "max_days_since_earnings": 3,
     "min_eps_surprise_pct": 10.0,
@@ -507,9 +583,9 @@
     "min_gap_up_pct": 3.0,
     "max_gap_up_pct": 8.0,
     "min_analyst_revisions": 0,
-    "_note_thresholds": "TUNED 2026-05-14 from backtest_pead_quick_2026-05-14 (90d, n=66). Raised min_eps 5%→10% (5-10% band had PF 0.21, kills aggregate). Added max_gap 8% (gaps >5% extended-already, PF 0.30). Tuned ranges: EPS 10-20% × Gap 3-5% = PF 2.95 zone. revenue_surprise and analyst_revisions disabled (data not yet plumbed); EPS+gap cover Bernard-Thomas 1989 mechanism.",
+    "_note_thresholds": "TUNED 2026-05-14 from backtest_pead_quick_2026-05-14 (90d, n=66). Raised min_eps 5%\u219210% (5-10% band had PF 0.21, kills aggregate). Added max_gap 8% (gaps >5% extended-already, PF 0.30). Tuned ranges: EPS 10-20% \u00d7 Gap 3-5% = PF 2.95 zone. revenue_surprise and analyst_revisions disabled (data not yet plumbed); EPS+gap cover Bernard-Thomas 1989 mechanism.",
     "min_score": 40,
-    "_min_score_note": "Lowered 55→40 2026-05-14 — Bernard-Thomas mechanism is catalyst-driven, not score-driven. CEG/ZBRA had real PEAD setups (EPS +21%/+15%, gap +3.8%/+14.7%) but composite scores were 31/45 due to weak post-spike technicals. Catalyst overrides technical weakness.",
+    "_min_score_note": "Lowered 55\u219240 2026-05-14 \u2014 Bernard-Thomas mechanism is catalyst-driven, not score-driven. CEG/ZBRA had real PEAD setups (EPS +21%/+15%, gap +3.8%/+14.7%) but composite scores were 31/45 due to weak post-spike technicals. Catalyst overrides technical weakness.",
     "min_daily_dollar_volume": 10000000,
     "stop_atr_multiple": 1.0,
     "trail_activate_pct": 5.0,
@@ -525,7 +601,7 @@
       "risk_on_trending": 1.0,
       "bull": 1.0,
       "risk_on_choppy": 0.75,
-      "risk_off_trending": 0.50,
+      "risk_off_trending": 0.5,
       "panic": 0.25
     },
     "_validations": {
@@ -539,9 +615,12 @@
   },
   "mean_reversion_sleeve": {
     "_enabled": true,
-    "_note": "MEAN-REVERSION sleeve — closes the choppy-alt diversifier gap (docs/strategy_mean_reversion.md). Buy oversold (RSI<30) with EMA200 floor in choppy/bull regime. ENABLED 2026-05-14 — will fire in current regime; mechanism is short-term reversal (Jegadeesh 1990).",
+    "_note": "MEAN-REVERSION sleeve \u2014 closes the choppy-alt diversifier gap (docs/strategy_mean_reversion.md). Buy oversold (RSI<30) with EMA200 floor in choppy/bull regime. ENABLED 2026-05-14 \u2014 will fire in current regime; mechanism is short-term reversal (Jegadeesh 1990).",
     "_phase": "PAPER (signals emit as setup_family='Mean Reversion' with WATCH_MEANREV verdict; promote via decision_engine after observation).",
-    "regimes_active": ["risk_on_choppy", "bull"],
+    "regimes_active": [
+      "risk_on_choppy",
+      "bull"
+    ],
     "max_rsi": 30,
     "require_above_ema200": true,
     "max_days_since_low": 5,
@@ -560,7 +639,7 @@
     "size_mult": 0.5,
     "size_cap_pct": 25,
     "_validations": {
-      "mechanism": "Statistical short-term reversal — RSI<30 in choppy regime with EMA200 floor signals emotional/forced selling not fundamental damage. Liquidity providers earn premium. Jegadeesh 1990, Lehmann 1990, Conrad-Kaul 1989.",
+      "mechanism": "Statistical short-term reversal \u2014 RSI<30 in choppy regime with EMA200 floor signals emotional/forced selling not fundamental damage. Liquidity providers earn premium. Jegadeesh 1990, Lehmann 1990, Conrad-Kaul 1989.",
       "phase_1_pass_criteria": {
         "min_signals_in_14d": 8,
         "min_hypothetical_pf": 1.3,
@@ -570,9 +649,12 @@
   },
   "momentum_sleeve": {
     "_enabled": true,
-    "_note": "MOMENTUM-CONTINUATION sleeve — addresses trending-regime weakness (PF 1.00, n=266 in clean-data). Designed 2026-05-13 (docs/strategy_momentum_continuation.md). Default OFF — flip to true after Phase 1 paper validation passes (≥10 signals, hypothetical PF ≥1.5).",
+    "_note": "MOMENTUM-CONTINUATION sleeve \u2014 addresses trending-regime weakness (PF 1.00, n=266 in clean-data). Designed 2026-05-13 (docs/strategy_momentum_continuation.md). Default OFF \u2014 flip to true after Phase 1 paper validation passes (\u226510 signals, hypothetical PF \u22651.5).",
     "_phase": "PAPER (signals emit as setup_family='Momentum Continuation' with WATCH_MOMENTUM verdict; no live trades). Promote to LIVE_HALF (verdict=BUY at 50% of designed size) after pass criteria met. Promote to LIVE_FULL after 21-30d half-size validation.",
-    "regimes_active": ["risk_on_trending", "bull"],
+    "regimes_active": [
+      "risk_on_trending",
+      "bull"
+    ],
     "min_score": 70,
     "min_adx": 25,
     "min_rvol": 1.3,
@@ -591,9 +673,15 @@
     "size_mult": 0.5,
     "_validations": {
       "evidence_2026_05_13": {
-        "trending_regime_pf_without_sleeve": 1.00,
+        "trending_regime_pf_without_sleeve": 1.0,
         "trending_regime_n": 266,
-        "tier_c_examples": ["ADI Sharpe 3.85", "TXN 3.03", "FFIV 2.44", "VRT 2.36", "TER 2.28"],
+        "tier_c_examples": [
+          "ADI Sharpe 3.85",
+          "TXN 3.03",
+          "FFIV 2.44",
+          "VRT 2.36",
+          "TER 2.28"
+        ],
         "source": "cache/regime_sharpe_decomp_2026-05-13.json + cache/sharpe_screen_2026-05-13.json",
         "notes": "These are exactly the names the sleeve targets. They were silently killed by global setup_score_multiplier."
       },
@@ -863,7 +951,7 @@
     "beta_high_threshold": 1.5,
     "sharpe_size_tilt": {
       "_enabled": true,
-      "_note": "Item #5 — tilt position size by 126d Sharpe. Sharpe ≥ high_threshold → max_mult; ≤ low_threshold → min_mult; linear in between. Capped to prevent runaway concentration. ENABLED 2026-05-14 — paper-side only; live trading still gated by executor activation.",
+      "_note": "Item #5 \u2014 tilt position size by 126d Sharpe. Sharpe \u2265 high_threshold \u2192 max_mult; \u2264 low_threshold \u2192 min_mult; linear in between. Capped to prevent runaway concentration. ENABLED 2026-05-14 \u2014 paper-side only; live trading still gated by executor activation.",
       "low_threshold": 0.5,
       "high_threshold": 2.0,
       "min_mult": 0.5,
@@ -871,7 +959,7 @@
     },
     "sharpe_stop_tilt": {
       "_enabled": false,
-      "_note": "Item #7 — tighten/widen ATR stop based on stock's 126d Sharpe. High Sharpe (low return-relative-vol) → tighter; low Sharpe → wider. Capped to [0.85, 1.25] of base ATR multiple. Default OFF.",
+      "_note": "Item #7 \u2014 tighten/widen ATR stop based on stock's 126d Sharpe. High Sharpe (low return-relative-vol) \u2192 tighter; low Sharpe \u2192 wider. Capped to [0.85, 1.25] of base ATR multiple. Default OFF.",
       "low_threshold": 0.5,
       "high_threshold": 2.0,
       "min_mult": 0.85,
@@ -879,7 +967,7 @@
     },
     "sharpe_kpi_target": {
       "_enabled": true,
-      "_note": "Item #6 — explicit portfolio Sharpe target reported in weekly diagnostics. Annualized.",
+      "_note": "Item #6 \u2014 explicit portfolio Sharpe target reported in weekly diagnostics. Annualized.",
       "target_sharpe_annualized": 1.5,
       "min_acceptable_sharpe_annualized": 0.5
     },
@@ -1474,7 +1562,7 @@
     }
   },
   "setup_family_kill_by_regime": {
-    "_comment": "2026-05-13 — family-level regime kill, complements setup_score_multiplier_by_regime (which keys on raw plan.setup_type). Operates on classified setup_family (Breakout Expansion / Trend Continuation / Impulse Catalyst / Special Situation). Evidence base: scripts/regime_sharpe_decomp.py output, 2026-05-13 — stratification of 897 closed trades across picks_history + signal_log.",
+    "_comment": "2026-05-13 \u2014 family-level regime kill, complements setup_score_multiplier_by_regime (which keys on raw plan.setup_type). Operates on classified setup_family (Breakout Expansion / Trend Continuation / Impulse Catalyst / Special Situation). Evidence base: scripts/regime_sharpe_decomp.py output, 2026-05-13 \u2014 stratification of 897 closed trades across picks_history + signal_log.",
     "_validations": {
       "Breakout Expansion": {
         "bull": {
@@ -1482,13 +1570,13 @@
           "wins": 39,
           "wr": 0.371,
           "wr_lb": 0.285,
-          "avg_pnl_pct": -0.50,
+          "avg_pnl_pct": -0.5,
           "pf": 0.71,
           "sharpe_per_trade": -0.13,
           "stdev_pct": 3.96,
           "max_loss_pct": -10.1,
           "source": "scripts/regime_sharpe_decomp.py output (cache/regime_sharpe_decomp_2026-05-13.json)",
-          "reason_kill": "Breakout Expansion family in bull regime shows negative-expectancy (PF 0.71, Sharpe -0.13). Wilson LB 28.5% well below 50% bar. Same family in choppy is profitable (n=233, PF 1.66, Sharpe +0.17) — issue is regime-specific, NOT setup-family-specific. Family-level kill complements per-setup_type kills above (those didn't cover VCP Breakout in bull which contributes to the 105 sample).",
+          "reason_kill": "Breakout Expansion family in bull regime shows negative-expectancy (PF 0.71, Sharpe -0.13). Wilson LB 28.5% well below 50% bar. Same family in choppy is profitable (n=233, PF 1.66, Sharpe +0.17) \u2014 issue is regime-specific, NOT setup-family-specific. Family-level kill complements per-setup_type kills above (those didn't cover VCP Breakout in bull which contributes to the 105 sample).",
           "mechanism": "Breakouts in sustained trending markets tend to be already-priced-in by the time the scanner catches them. The 'breakout' has happened; we're chasing. In choppy markets, breakouts mark genuine accumulation that the scanner CAN catch early.",
           "override": false
         }

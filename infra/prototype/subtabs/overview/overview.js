@@ -22,6 +22,7 @@ const fmtR = v => (typeof v === 'number' && !isNaN(v))
 const escapeHtml = s => String(s == null ? '' : s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
   .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const safeStr = v => (v == null || typeof v === 'object') ? '' : String(v);
 
 function wilsonLB(p, n) {
   if (!n || n <= 0) return 0;
@@ -46,7 +47,7 @@ const SRC_COLOR = { BSL:'#F472B6', HVN:'#FCD34D', SWING:'#A78BFA', VAH:'#22D3EE'
                     ROUND:'#94A3B8', FIB:'#64748B', ANALYST_PT:'#B794F4' };
 
 // ─── module-level state for current ticker's async data ──────────────────
-const STATE = { ticker:null, payloads:{}, portfolio:null, mounted:false };
+const STATE = { ticker:null, payloads:{}, portfolio:null, mounted:false, activeStrategy:'SWING' };
 
 // ─── embedded scoped CSS (idempotent inject) ─────────────────────────────
 const QOV_CSS = `
@@ -297,6 +298,78 @@ const QOV_CSS = `
 .qov-trig-rule .ruleBody .then{color:var(--lead);font-weight:700}
 .qov-trig-rule .ruleBody .and{color:var(--qink-3)}
 .qov-trig-rule .ruleBody .neg{color:var(--rd);font-weight:700}
+
+/* Strategy switcher */
+.qov-strat-bar{display:flex;gap:8px;align-items:center;margin-bottom:10px;padding:10px 14px;background:var(--qbg-1);border:1px solid var(--qline);border-radius:4px}
+.qov-strat-lbl{font:700 9.5px var(--qmono);color:var(--qink-3);letter-spacing:.14em}
+.qov-strat-btn{background:transparent;border:1px solid var(--qline);color:var(--qink-3);font:700 10.5px var(--qmono);padding:7px 14px;border-radius:3px;cursor:pointer;letter-spacing:.08em;transition:all .15s}
+.qov-strat-btn.on{background:var(--qbg-2);border-color:var(--lead);color:var(--lead)}
+.qov-strat-btn:hover{border-color:var(--qink-2);color:var(--qink)}
+.qov-strat-meta{font:500 10px var(--qmono);color:var(--qink-3);margin-left:auto}
+
+/* Cross-lens votes */
+.qov-xlens{background:var(--qbg-1);border:1px solid var(--qline);border-radius:4px;padding:10px 16px;margin-bottom:10px}
+.qov-xlens-votes{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.qov-xlens-vote{display:flex;align-items:center;gap:5px}
+.qov-xlens-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.qov-xlens-dot.gn{background:var(--gn)}
+.qov-xlens-dot.am{background:var(--am)}
+.qov-xlens-dot.rd{background:var(--rd)}
+.qov-xlens-nm{font:700 9px var(--qmono);color:var(--qink-2);letter-spacing:.10em}
+.qov-xlens-lb{font:700 10px var(--qmono);color:var(--qink);margin-left:3px}
+.qov-xlens-conflict{font:500 11px sans-serif;color:var(--am);border-left:2px solid var(--am);padding-left:8px;line-height:1.5;margin-top:4px}
+
+/* Exec brief */
+.qov-exec{background:var(--qbg-2);border:1px solid var(--lead);border-radius:5px;padding:16px 20px;margin-bottom:10px}
+.qov-exec-hdr{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.qov-exec-badge{background:var(--lead);color:var(--qbg);font:800 11px var(--qmono);padding:3px 10px;border-radius:3px;letter-spacing:.10em}
+.qov-exec-title{font:800 12px var(--qmono);color:var(--qink);letter-spacing:.08em}
+.qov-exec-sub{font:500 10px sans-serif;color:var(--qink-3);margin-left:auto}
+.qov-exec-body{display:grid;grid-template-columns:180px 1fr 120px;gap:16px;align-items:start;margin-bottom:12px}
+.qov-exec-vbox{text-align:center;padding:12px;background:var(--qbg-1);border-radius:4px}
+.qov-exec-v{font:800 18px var(--qmono);letter-spacing:.05em}
+.qov-exec-v.gn{color:var(--gn)} .qov-exec-v.am{color:var(--am)} .qov-exec-v.rd{color:var(--rd)}
+.qov-exec-stars{font:500 11px var(--qmono);color:var(--am);margin-top:4px}
+.qov-exec-thesis{font:500 12.5px sans-serif;color:var(--qink-1);line-height:1.6}
+.qov-exec-dq{text-align:center}
+.qov-exec-dq .k{font:700 8px var(--qmono);color:var(--qink-3);letter-spacing:.12em}
+.qov-exec-dq .v{font:800 14px var(--qmono);color:var(--gn);margin-top:2px}
+.qov-exec-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:12px}
+.qov-exec-kpi{background:var(--qbg-1);border:1px solid var(--qline);border-radius:3px;padding:8px 10px;text-align:center}
+.qov-exec-kpi .k{font:700 8.5px var(--qmono);color:var(--qink-3);letter-spacing:.12em}
+.qov-exec-kpi .v{font:800 13px var(--qmono);margin:3px 0 2px}
+.qov-exec-kpi .v.gn{color:var(--gn)} .qov-exec-kpi .v.am{color:var(--am)} .qov-exec-kpi .v.rd{color:var(--rd)}
+.qov-exec-kpi .s{font:500 9px var(--qmono);color:var(--qink-3);line-height:1.3}
+.qov-exec-row{display:flex;gap:12px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--qline)}
+.qov-exec-row:last-child{border-bottom:0}
+.qov-exec-row-k{font:700 9px var(--qmono);color:var(--qink-3);letter-spacing:.12em;min-width:90px}
+.qov-exec-row-v{font:500 11.5px sans-serif;color:var(--qink-1);line-height:1.4;flex:1}
+.qov-exec-call{margin-top:12px;padding:10px 14px;background:var(--qbg-1);border-left:3px solid var(--lead);border-radius:3px}
+.qov-exec-call-v{font:800 11px var(--qmono);color:var(--lead);letter-spacing:.10em}
+.qov-exec-call-r{font:500 12px sans-serif;color:var(--qink-1);margin-top:4px;line-height:1.5}
+.qov-exec-call-t{font:600 10.5px var(--qmono);color:var(--am);margin-top:4px}
+
+/* Divider */
+.qov-divider{font:600 9px var(--qmono);color:var(--qink-3);letter-spacing:.08em;text-align:center;margin:14px 0}
+
+/* Detail controls */
+.qov-detail-ctrls{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.qov-detail-ctrls button{background:var(--qbg-1);border:1px solid var(--qline);color:var(--qink-2);font:700 10px var(--qmono);padding:5px 12px;border-radius:3px;cursor:pointer;letter-spacing:.06em}
+.qov-detail-ctrls button:hover{border-color:var(--qink-2);color:var(--qink)}
+.qov-open-count{font:500 10px var(--qmono);color:var(--qink-3);margin-left:auto}
+
+/* Collapsible panels */
+.qov-collapsible .qov-panel-head{cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none}
+.qov-collapsible .qov-chev{font:700 10px var(--qmono);color:var(--qink-3);transition:transform .15s;min-width:12px}
+.qov-collapsible.open .qov-chev{transform:rotate(90deg)}
+.qov-collapsible .qov-panel-body{display:none;margin-top:12px}
+.qov-collapsible.open .qov-panel-body{display:block}
+
+/* Sparkline */
+svg.qov-spark polyline{fill:none;stroke-width:1.5}
+svg.qov-spark polyline.gn{stroke:var(--gn)}
+svg.qov-spark polyline.am{stroke:var(--am)}
+svg.qov-spark polyline.rd{stroke:var(--rd)}
 `;
 
 function _ensureStyle() {
@@ -330,98 +403,200 @@ async function loadPortfolio(t) {
 
 // ─── shell HTML (built once, then sections fill in) ─────────────────────
 function _shellHTML() {
-  return `<div class="qov-root">
-    <div class="qov-banner info" id="qovBanner">ⓘ loading…</div>
-    <div class="qov-strip">
-      <div>
-        <div class="qov-tk" id="qovTicker">—</div>
-        <div class="qov-nm" id="qovName"></div>
-        <div style="margin-top:7px"><span class="qov-px" id="qovPrice">—</span><span id="qovChg"></span></div>
-      </div>
-      <div class="qov-mid">
-        <div style="text-align:center">
-          <div id="qovSysVerdict" class="qov-vd watch">—</div>
-          <div id="qovSysConv" class="qov-conv">—</div>
-        </div>
-        <div class="qov-hor" id="qovHorizons"></div>
-      </div>
-      <div class="qov-stamp" id="qovStamp">Engine: —<br>Cache: —<br>Regime: —</div>
-    </div>
+  return `<div class="qov-root" id="qovRoot">
+  <!-- Strategy switcher -->
+  <div class="qov-strat-bar">
+    <span class="qov-strat-lbl">STRATEGY ·</span>
+    <button class="qov-strat-btn on" id="qovBtnSwing" onclick="window.__qovSetStrat('SWING')">⚡ SWING <span style="color:var(--qink-3);font-weight:500">2–10d</span></button>
+    <button class="qov-strat-btn" id="qovBtnPosition" onclick="window.__qovSetStrat('POSITION')">📈 POSITION <span style="color:var(--qink-3);font-weight:500">2wk–6mo</span></button>
+    <button class="qov-strat-btn" id="qovBtnInvestment" onclick="window.__qovSetStrat('INVESTMENT')">🏛 INVEST <span style="color:var(--qink-3);font-weight:500">1–5yr</span></button>
+    <span id="qovStratMeta" class="qov-strat-meta"></span>
+  </div>
 
-    <div class="qov-panel">
-      <div class="qov-h2"><span class="num">A</span>Strategy Fit Verdict<span class="sub">— all three horizons read this ticker · pick the lens that fits your hold window</span><span class="tag">ENGINE</span></div>
+  <!-- Banner (loading state) -->
+  <div class="qov-banner info" id="qovBanner">Loading engine data…</div>
+
+  <!-- Cross-lens votes -->
+  <div class="qov-xlens" id="qovXlens"></div>
+
+  <!-- Exec brief -->
+  <div class="qov-exec" id="qovExec"></div>
+
+  <!-- Divider -->
+  <div class="qov-divider">━━━━━━━━━ DETAILED EVIDENCE BELOW · click section headers to drill ━━━━━━━━━</div>
+
+  <!-- Detail controls -->
+  <div class="qov-detail-ctrls">
+    <button onclick="window.__qovExpandAll()">▼ Expand all</button>
+    <button onclick="window.__qovCollapseAll()">▸ Collapse all</button>
+    <span class="qov-open-count" id="qovOpenCount">0 of 0 open</span>
+  </div>
+
+  <!-- Section A: Strategy Fit -->
+  <div class="qov-panel qov-collapsible open" id="qovPanelA">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelA')">
+      <span class="qov-chev">▸</span><span class="num">A</span>Strategy Fit · Engine Targets per Lens
+      <span class="sub">— structural T1/T2 + verdict from /api/trade_engine × 3 modes</span>
+      <span class="tag">STRUCTURAL ENGINE</span>
+    </div>
+    <div class="qov-panel-body">
       <div class="qov-fit" id="qovFitGrid"></div>
-      <div class="qov-banner warn" id="qovSysRec" style="margin:12px 0 0">—</div>
+      <div id="qovSysRec" style="margin-top:10px;padding:9px 12px;background:var(--qbg-2);border-radius:3px;font:500 11.5px sans-serif;color:var(--qink-1);line-height:1.5"></div>
     </div>
+  </div>
 
-    <div class="qov-panel">
-      <div class="qov-h2"><span class="num">B</span>Decision Matrix<span class="sub">— engine-derived reasons + falsification criteria</span><span class="tag">ENGINE + ELITE</span></div>
+  <!-- Section B: Decision Matrix -->
+  <div class="qov-panel qov-collapsible" id="qovPanelB">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelB')">
+      <span class="qov-chev">▸</span><span class="num">B</span>Decision Matrix · Why Buy / Wait / Avoid
+      <span class="sub">— 3-column adversarial analysis · WHY BUY · WHY WAIT · WHY AVOID</span>
+      <span class="tag">ADVERSARIAL</span>
+    </div>
+    <div class="qov-panel-body">
       <div class="qov-dm" id="qovDMGrid"></div>
     </div>
+  </div>
 
-    <div class="qov-panel">
-      <div class="qov-h2"><span class="num">C</span>Engine Targets · Where T1 / T2 Live Structurally<span class="sub">— confluence-scored from structural sources · not ATR multiples</span><span class="tag">target_engine.py</span></div>
-      <div class="qov-map" id="qovTargetMap"></div>
+  <!-- Section C: Engine Targets -->
+  <div class="qov-panel qov-collapsible" id="qovPanelC">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelC')">
+      <span class="qov-chev">▸</span><span class="num">C</span>Engine Targets · Price Map + Confluence
+      <span class="sub">— structural T1/T2 · behavior · source breakdown</span>
+      <span class="tag">TARGET ENGINE</span>
+    </div>
+    <div class="qov-panel-body">
+      <div id="qovTargetMap" style="margin-bottom:12px"></div>
       <div class="qov-et" id="qovEtGrid"></div>
     </div>
+  </div>
 
-    <div class="qov-panel">
-      <div class="qov-h2"><span class="num">C·b</span>Intrinsic Value &amp; Quality<span class="sub">— Buffett discipline · reverse DCF · owner earnings · MoS · quality scores · moat</span><span class="tag">FUNDAMENTALS</span></div>
-      <div class="qov-val" id="qovValGrid"></div>
-      <div class="qov-buffett" id="qovBuffett"></div>
+  <!-- Section C·b: Intrinsic Value -->
+  <div class="qov-panel qov-collapsible" id="qovPanelCb">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelCb')">
+      <span class="qov-chev">▸</span><span class="num">C·b</span>Intrinsic Value · Graham–Buffett Lens
+      <span class="sub">— margin of safety · owner earnings · moat · 10-year test</span>
+      <span class="tag">VALUE</span>
     </div>
+    <div class="qov-panel-body">
+      <div class="qov-val" id="qovValGrid"></div>
+      <div id="qovBuffett" class="qov-buffett" style="margin-top:12px"></div>
+    </div>
+  </div>
 
-    <div class="qov-panel">
-      <div class="qov-h2"><span class="num">C·c</span>Earnings · Detailed Card<span class="sub">— next print · implied move · revisions · 8-quarter reaction history · vol-crush risk</span><span class="tag">EODHD + OPTIONS</span></div>
+  <!-- Section C·c: Earnings -->
+  <div class="qov-panel qov-collapsible" id="qovPanelCc">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelCc')">
+      <span class="qov-chev">▸</span><span class="num">C·c</span>Earnings · PEAD Window + Beat History
+      <span class="sub">— days to ER · implied move · beat rate · revision trend</span>
+      <span class="tag">CATALYST</span>
+    </div>
+    <div class="qov-panel-body">
       <div class="qov-er-head" id="qovErHead"></div>
       <div class="qov-er-mid" id="qovErMid"></div>
       <table class="qov-er-tbl"><thead><tr><th>QUARTER</th><th>EPS ACT / EST</th><th>SURPRISE</th><th>REV ACT / EST</th><th>GAP %</th><th>+5d DRIFT</th><th>NOTE</th></tr></thead><tbody id="qovErTbody"></tbody></table>
       <div class="qov-banner info" id="qovErStatsBanner" style="margin:11px 0 0">—</div>
     </div>
+  </div>
 
-    <div class="qov-panel" id="qovMyPosPanel" style="display:none">
-      <div class="qov-h2"><span class="num">C·d</span>My Position<span class="sub">— cost basis · P&amp;L · days held · cap usage</span><span class="tag">PORTFOLIO</span></div>
-      <div class="qov-pos" id="qovPosGrid"></div>
-      <div class="qov-pos-tax" id="qovPosTax">—</div>
+  <!-- Section C·d: My Position -->
+  <div class="qov-panel qov-collapsible" id="qovPanelCd">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelCd')">
+      <span class="qov-chev">▸</span><span class="num">C·d</span>My Position · Live P&amp;L
+      <span class="sub">— current holding · unrealized P&amp;L · stop distance · add zone</span>
+      <span class="tag">PORTFOLIO</span>
     </div>
+    <div class="qov-panel-body">
+      <div class="qov-pos" id="qovPosGrid"></div>
+      <div id="qovPosTax" class="qov-pos-tax" style="margin-top:10px"></div>
+    </div>
+  </div>
 
-    <div class="qov-panel">
-      <div class="qov-h2"><span class="num">C·e</span>Multi-Timeframe Alignment<span class="sub">— trend / momentum / volume across M · W · D · 4h · 1h</span><span class="tag">TECHNICALS</span></div>
+  <!-- Section C·e: MTF -->
+  <div class="qov-panel qov-collapsible" id="qovPanelCe">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelCe')">
+      <span class="qov-chev">▸</span><span class="num">C·e</span>Multi-Timeframe · Trend Alignment
+      <span class="sub">— Monthly / Weekly / Daily / 4H · bias + momentum</span>
+      <span class="tag">TECHNICALS</span>
+    </div>
+    <div class="qov-panel-body">
       <table class="qov-mtf-tbl"><thead><tr><th>TIMEFRAME</th><th>TREND</th><th>MOMENTUM</th><th>VOLUME / RVOL</th><th>BIAS</th></tr></thead><tbody id="qovMtfBody"></tbody></table>
       <div class="qov-mtf-sum" id="qovMtfSummary">—</div>
     </div>
+  </div>
 
-    <div class="qov-panel">
-      <div class="qov-h2"><span class="num">D</span>Setup Quality Strip<span class="sub">— current state · price · levels · indicators · key gates</span><span class="tag">ELITE + ENGINE</span></div>
+  <!-- Section D: Setup Strip -->
+  <div class="qov-panel qov-collapsible" id="qovPanelD">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelD')">
+      <span class="qov-chev">▸</span><span class="num">D</span>Setup Quality Strip · 10 Signal Cells
+      <span class="sub">— entry quality · RVOL · momentum · pattern · S/R alignment</span>
+      <span class="tag">SETUP</span>
+    </div>
+    <div class="qov-panel-body">
       <div class="qov-pq" id="qovPqGrid"></div>
     </div>
+  </div>
 
-    <div class="qov-panel">
-      <div class="qov-h2"><span class="num">E</span>Risk Profile<span class="sub">— stop · 1R · max loss · DD haircut · β-adjusted</span><span class="tag">ENGINE.sizing</span></div>
+  <!-- Section E: Risk Profile -->
+  <div class="qov-panel qov-collapsible" id="qovPanelE">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelE')">
+      <span class="qov-chev">▸</span><span class="num">E</span>Risk Profile · Kelly · Position Sizing
+      <span class="sub">— max loss · stop distance · ATR · Kelly fraction · regime haircut</span>
+      <span class="tag">RISK</span>
+    </div>
+    <div class="qov-panel-body">
       <div class="qov-rp" id="qovRpGrid"></div>
     </div>
+  </div>
 
-    <div class="qov-panel">
-      <div class="qov-h2"><span class="num">F</span>News &amp; Catalyst Pulse<span class="sub">— 30-day news flow · sentiment · catalyst · insider</span><span class="tag">ELITE</span></div>
+  <!-- Section F: News Pulse -->
+  <div class="qov-panel qov-collapsible" id="qovPanelF">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelF')">
+      <span class="qov-chev">▸</span><span class="num">F</span>News Pulse · Sentiment Signal
+      <span class="sub">— headline sentiment · source quality · insider cross-check</span>
+      <span class="tag">SENTIMENT</span>
+    </div>
+    <div class="qov-panel-body">
       <div class="qov-ns" id="qovNsGrid"></div>
     </div>
+  </div>
 
-    <div class="qov-panel">
-      <div class="qov-h2"><span class="num">G</span>Forward Outcomes<span class="sub">— probability blend · hold window estimates</span><span class="tag">ENGINE.p_reach</span></div>
+  <!-- Section G: Forward Outcomes -->
+  <div class="qov-panel qov-collapsible" id="qovPanelG">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelG')">
+      <span class="qov-chev">▸</span><span class="num">G</span>Forward Outcomes · Scenario Matrix
+      <span class="sub">— bull / base / bear · P(reach) · regime-conditional distribution</span>
+      <span class="tag">SCENARIOS</span>
+    </div>
+    <div class="qov-panel-body">
       <div class="qov-fo" id="qovFoGrid"></div>
     </div>
+  </div>
 
-    <div class="qov-panel">
-      <div class="qov-h2"><span class="num">H</span>Pre-Flight Checklist<span class="sub">— engine gates · warnings · final approval</span><span class="tag">ENGINE.gates</span></div>
+  <!-- Section H: Pre-Flight Checklist -->
+  <div class="qov-panel qov-collapsible" id="qovPanelH">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelH')">
+      <span class="qov-chev">▸</span><span class="num">H</span>Pre-Flight Checklist · Entry Gates
+      <span class="sub">— 10 entry gates · PASS / FAIL / N/A · regime + liquidity + RR</span>
+      <span class="tag">GATES</span>
+    </div>
+    <div class="qov-panel-body">
       <div class="qov-pf" id="qovPfGrid"></div>
       <div class="qov-banner info" id="qovPfBanner" style="margin:11px 0 0">—</div>
     </div>
+  </div>
 
-    <div class="qov-panel">
-      <div class="qov-h2"><span class="num">I</span>Action Triggers · Conditional Rules Per Lens<span class="sub">— specific IF / THEN rules · mechanical execution (CLAUDE principle 8)</span><span class="tag">RULES ENGINE</span></div>
+  <!-- Section I: Action Triggers -->
+  <div class="qov-panel qov-collapsible" id="qovPanelI">
+    <div class="qov-panel-head qov-h2" onclick="window.__qovToggle('qovPanelI')">
+      <span class="qov-chev">▸</span><span class="num">I</span>Action Triggers · Conditional Rules Per Lens
+      <span class="sub">— specific IF/THEN rules · mechanical execution</span>
+      <span class="tag">RULES ENGINE</span>
+    </div>
+    <div class="qov-panel-body">
       <div class="qov-trig" id="qovTrigGrid"></div>
     </div>
-  </div>`;
+  </div>
+</div>`;
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────
@@ -445,6 +620,347 @@ function _deriveVerdict(p) {
   return { label:'REVIEW', cls:'am' };
 }
 
+// ─── sparkline helper ───────────────────────────────────────────────────
+function _sparkSvg(arr, cls) {
+  if (!arr || arr.length < 2) return '';
+  const W = 60, H = 16, pad = 1;
+  const mn = Math.min(...arr), mx = Math.max(...arr);
+  const rng = (mx - mn) || 1;
+  const pts = arr.map((v, i) => {
+    const x = (pad + (i / (arr.length - 1)) * (W - 2 * pad)).toFixed(1);
+    const y = (pad + (1 - (v - mn) / rng) * (H - 2 * pad)).toFixed(1);
+    return x + ',' + y;
+  }).join(' ');
+  return `<svg class="qov-spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><polyline class="${cls}" points="${pts}"/></svg>`;
+}
+
+// ─── exec brief derivation ───────────────────────────────────────────────
+function _computeExecBrief(strategy) {
+  const T = _T() || {};
+  const { payloads, portfolio } = STATE;
+  const sw = payloads.SWING, ps = payloads.POSITION, iv = payloads.INVESTMENT;
+  const score = num(T.score, 0);
+  const rr = num(T.rr, 0);
+
+  if (strategy === 'SWING') {
+    const p = sw;
+    const p1 = p?.t1?.p_reach ?? 0;
+    let verdict, vCls;
+    if (score >= 75 && p1 >= 0.45) { verdict = 'BUY'; vCls = 'gn'; }
+    else if (score < 50) { verdict = 'AVOID'; vCls = 'rd'; }
+    else { verdict = 'WATCH'; vCls = 'am'; }
+
+    const thesisParts = [];
+    if (T.above_50ema) thesisParts.push('Price is above EMA-50 (short-term trend bullish)');
+    else thesisParts.push('Price is below EMA-50 (trend headwind)');
+    if (T.macd_bullish) thesisParts.push('MACD is bullish');
+    if (T.squeeze_on) thesisParts.push('Bollinger-squeeze ON — directional expansion imminent');
+    if ((T.rvol ?? 0) >= 1.5) thesisParts.push(`RVOL ${T.rvol?.toFixed(2)} — elevated volume confirms interest`);
+    if (p?.t1?.price) thesisParts.push(`Engine T1 at ${fmtPx(p.t1.price)} (P(reach) ${p1 >= 0 ? Math.round(p1*100)+'%' : '—'})`);
+
+    const gatesPass = [
+      score >= 70,
+      T.above_50ema,
+      rr >= 3,
+      (T.earn_days == null || T.earn_days > 7),
+      T.regime && !/panic|risk_off/i.test(T.regime),
+      T.entry_quality && /FRESH|PULLBACK|VALID/.test(T.entry_quality),
+      (p?.t1?.confluence ?? 0) >= 3,
+      (p?.t1?.p_reach ?? 0) >= 0.25,
+    ].filter(Boolean).length;
+
+    const kpis = [
+      { k:'SCORE', v: score + '/100', vc: score >= 75 ? 'gn' : score >= 55 ? 'am' : 'rd', s: score >= 75 ? 'strong' : 'moderate' },
+      { k:'CONVICTION', v: safeStr(T.conviction_tier || '—'), vc: 'am', s: '' },
+      { k:'R:R', v: rr ? rr.toFixed(1) + ':1' : '—', vc: rr >= 3 ? 'gn' : rr >= 2 ? 'am' : 'rd', s: rr >= 3 ? '≥ 3 · full size' : rr >= 2 ? '2-3 · reduce' : 'below floor' },
+      { k:'REGIME', v: safeStr(T.regime || '—').replace('_',' '), vc: /trending/.test(T.regime||'') ? 'gn' : /panic/.test(T.regime||'') ? 'rd' : 'am', s: '' },
+      { k:'GATES', v: gatesPass + '/8', vc: gatesPass >= 6 ? 'gn' : gatesPass >= 4 ? 'am' : 'rd', s: gatesPass >= 6 ? 'go' : gatesPass >= 4 ? 'review' : 'fail' },
+    ];
+
+    const entryLo = T.entry_lo ?? p?.t1?.price;
+    const entryHi = T.entry_hi;
+    const triggerStr = entryLo
+      ? `Price in ${fmtPx(entryLo)}${entryHi ? '–'+fmtPx(entryHi) : ''} with RVOL > 1.2`
+      : 'Entry zone pending engine data';
+    const invalidate = `Daily close < ${fmtPx(T.stop ?? p?.stop?.price)} (CHoCH)`;
+    const sizeStr = T.alloc_pct ? T.alloc_pct + '% NAV' : (portfolio ? 'already held' : 'pending gates');
+
+    const convTier = safeStr(T.conviction_tier || '');
+    const stars = convTier.includes('T1') ? '★★★★★' : convTier.includes('T2') ? '★★★☆☆' : convTier.includes('T3') ? '★★☆☆☆' : '★☆☆☆☆';
+
+    const callV = verdict + ' · ' + (convTier || 'REVIEW');
+    const callR = thesisParts.slice(0, 2).join('. ') + '.';
+    const callT = `Hold 2–10 days · exit at T1 ${fmtPx(p?.t1?.price)} or stop ${fmtPx(T.stop ?? p?.stop?.price)}`;
+
+    return {
+      title: `EXECUTIVE BRIEF · OVERVIEW · SYNTHESIS @ SWING · 2–10d`,
+      verdict, vCls, stars,
+      thesis: thesisParts.slice(0, 3).join('. ') + '.',
+      kpis,
+      trigger: triggerStr,
+      alignment: `Score ${score} · Regime ${safeStr(T.regime || '—')} · EMA stack ${T.above_50ema ? 'OK' : 'broken'}`,
+      invalidate,
+      size: sizeStr,
+      callV, callR, callT,
+    };
+  }
+
+  if (strategy === 'POSITION') {
+    const p = ps;
+    const conf = p?.t1?.confluence ?? 0;
+    const p1 = p?.t1?.p_reach ?? 0;
+    let verdict, vCls;
+    if (conf >= 4 && p1 >= 0.3) { verdict = 'BUY'; vCls = 'gn'; }
+    else { verdict = 'WATCH'; vCls = 'am'; }
+
+    const earnDays = T.earn_days;
+    const esp = T.zacks_earnings_esp;
+    const thesisParts = [];
+    if (earnDays != null) thesisParts.push(`Earnings in ${earnDays}d — PEAD setup window`);
+    if (esp != null && esp > 0) thesisParts.push(`Zacks ESP +${esp.toFixed(2)}% — analyst beat bias`);
+    if ((T.analyst_upside ?? 0) > 0.05) thesisParts.push(`Analyst upside ${(T.analyst_upside*100).toFixed(0)}% to PT ${fmtPx(T.analyst_target)}`);
+    if (thesisParts.length === 0) thesisParts.push('Multi-week structural setup based on engine targets and fundamentals');
+
+    const rrPos = p?.t1?.r_multiple ?? rr;
+    const kpis = [
+      { k:'SCORE', v: score + '/100', vc: score >= 75 ? 'gn' : score >= 55 ? 'am' : 'rd', s: '' },
+      { k:'CATALYST', v: earnDays != null ? earnDays + 'd' : '—', vc: earnDays != null && earnDays <= 14 ? 'am' : 'rd', s: earnDays != null ? 'to earnings' : 'no schedule' },
+      { k:'ESP', v: esp != null ? (esp > 0 ? '+' : '') + esp.toFixed(2) + '%' : '—', vc: esp > 0 ? 'gn' : esp < 0 ? 'rd' : 'am', s: esp > 0 ? 'beat bias' : '—' },
+      { k:'R:R', v: rrPos ? rrPos.toFixed(1) + ':1' : '—', vc: rrPos >= 3 ? 'gn' : rrPos >= 2 ? 'am' : 'rd', s: '' },
+      { k:'CONFLUENCE', v: conf.toFixed(1), vc: conf >= 5 ? 'gn' : conf >= 3 ? 'am' : 'rd', s: conf + ' sources' },
+    ];
+
+    const stopP = p?.stop?.price ?? T.stop;
+    const regimeHaircut = /choppy/i.test(T.regime||'') ? '70% max' : /risk_off/i.test(T.regime||'') ? '35% max' : 'full size';
+    const callV = verdict + ' · POSITION';
+    const callR = thesisParts.slice(0, 2).join('. ') + '.';
+    const callT = `Hold 2wk–6mo · T1 at ${fmtPx(p?.t1?.price)} · stop ${fmtPx(stopP)}`;
+    const stars = conf >= 5 ? '★★★★★' : conf >= 4 ? '★★★☆☆' : '★★☆☆☆';
+
+    return {
+      title: 'EXECUTIVE BRIEF · OVERVIEW · SYNTHESIS @ POSITION · 2wk–6mo',
+      verdict, vCls, stars,
+      thesis: thesisParts.slice(0, 3).join('. ') + '.',
+      kpis,
+      trigger: earnDays != null ? `ER−7d conditional entry at ${fmtPx(T.entry_lo ?? p?.t1?.price)}` : `Structural entry ${fmtPx(T.entry_lo ?? p?.t1?.price)}`,
+      alignment: `Conf ${conf.toFixed(1)} · P(reach) ${Math.round(p1*100)}% · Regime ${regimeHaircut}`,
+      invalidate: `Stop ${fmtPx(stopP)} OR analyst revision turns negative`,
+      size: `${regimeHaircut} · half-Kelly`,
+      callV, callR, callT,
+    };
+  }
+
+  // INVESTMENT
+  {
+    const p = iv;
+    const upside = T.analyst_upside ?? 0;
+    let verdict, vCls;
+    if (upside >= 0.15) { verdict = 'BUY'; vCls = 'gn'; }
+    else if (upside >= 0.05) { verdict = 'WATCH'; vCls = 'am'; }
+    else { verdict = 'AVOID'; vCls = 'rd'; }
+
+    const fundScore = num(T.fund_score, 0);
+    const thesisParts = [];
+    if (upside >= 0.10) thesisParts.push(`Analyst consensus PT ${fmtPx(T.analyst_target)} — ${(upside*100).toFixed(0)}% upside`);
+    if (fundScore >= 60) thesisParts.push(`Quality score ${fundScore}/100 — solid fundamentals`);
+    thesisParts.push(`Long-term hold in sector ${escapeHtml(T.sector || '—')}`);
+
+    const tenYrPasses = [
+      fundScore >= 60,
+      upside >= 0.10,
+      (T.analyst_target ?? 0) > 0,
+      safeStr(T.sector || '').length > 0,
+    ].filter(Boolean).length;
+
+    const mosPct = T.analyst_target && T.price
+      ? ((T.analyst_target - T.price) / T.analyst_target * 100).toFixed(0) + '%'
+      : '—';
+
+    const kpis = [
+      { k:'10Y TEST', v: tenYrPasses + '/4', vc: tenYrPasses >= 3 ? 'gn' : tenYrPasses >= 2 ? 'am' : 'rd', s: 'passes' },
+      { k:'MoS', v: mosPct, vc: upside >= 0.15 ? 'gn' : upside >= 0.05 ? 'am' : 'rd', s: 'margin of safety' },
+      { k:'SCORE', v: score + '/100', vc: score >= 75 ? 'gn' : score >= 55 ? 'am' : 'rd', s: '' },
+      { k:'ANALYST PT', v: fmtPx(T.analyst_target), vc: upside >= 0.10 ? 'gn' : 'am', s: fmtPct((upside||0)*100, 0) + ' upside' },
+      { k:'QUALITY', v: fundScore ? fundScore + '/100' : '—', vc: fundScore >= 70 ? 'gn' : fundScore >= 50 ? 'am' : 'rd', s: '' },
+    ];
+
+    const stars = upside >= 0.20 ? '★★★★★' : upside >= 0.15 ? '★★★☆☆' : upside >= 0.05 ? '★★☆☆☆' : '★☆☆☆☆';
+    const callV = verdict + ' · INVEST';
+    const callR = thesisParts.slice(0, 2).join('. ') + '.';
+    const callT = `Buy at price ≤ ${T.analyst_target ? fmtPx(T.analyst_target * 0.85) : '—'} · hold to IV ${fmtPx(T.analyst_target)}`;
+
+    return {
+      title: 'EXECUTIVE BRIEF · OVERVIEW · SYNTHESIS @ INVESTMENT · 1–5yr',
+      verdict, vCls, stars,
+      thesis: thesisParts.slice(0, 3).join('. ') + '.',
+      kpis,
+      trigger: `Price ≤ ${T.analyst_target ? fmtPx(T.analyst_target * 0.85) : '—'} (MoS > 15%)`,
+      alignment: `Analyst upside ${(upside*100).toFixed(0)}% · Quality ${fundScore}/100`,
+      invalidate: `Quality breaks or analyst PT cut > 10%`,
+      size: `3–5% NAV on BUY trigger · scale over 3 tranches`,
+      callV, callR, callT,
+    };
+  }
+}
+
+// ─── exec brief renderer ─────────────────────────────────────────────────
+function renderExecBrief() {
+  const strat = STATE.activeStrategy || 'SWING';
+  const b = _computeExecBrief(strat);
+
+  // Update button classes
+  ['SWING','POSITION','INVESTMENT'].forEach(m => {
+    const btnId = 'qovBtn' + m.charAt(0) + m.slice(1).toLowerCase();
+    const btn = document.getElementById(btnId);
+    if (btn) btn.classList.toggle('on', m === strat);
+  });
+
+  const holdMap = { SWING:'2–10d', POSITION:'2wk–6mo', INVESTMENT:'1–5yr' };
+  setHTML('qovStratMeta', `hold: ${holdMap[strat]}`);
+
+  const kpiHtml = b.kpis.map(k =>
+    `<div class="qov-exec-kpi"><div class="k">${escapeHtml(k.k)}</div><div class="v ${k.vc}">${escapeHtml(String(k.v))}</div><div class="s">${escapeHtml(k.s)}</div></div>`
+  ).join('');
+
+  setHTML('qovExec', `
+    <div class="qov-exec-hdr">
+      <div class="qov-exec-badge">EXEC BRIEF</div>
+      <div class="qov-exec-title">${escapeHtml(b.title)}</div>
+    </div>
+    <div class="qov-exec-body">
+      <div class="qov-exec-vbox">
+        <div class="qov-exec-v ${b.vCls}">${b.verdict}</div>
+        <div class="qov-exec-stars">${b.stars}</div>
+      </div>
+      <div class="qov-exec-thesis">${escapeHtml(b.thesis)}</div>
+      <div class="qov-exec-dq">
+        <div class="k">REGIME</div>
+        <div class="v">${escapeHtml(safeStr((_T()||{}).regime||'—'))}</div>
+      </div>
+    </div>
+    <div class="qov-exec-kpis">${kpiHtml}</div>
+    <div class="qov-exec-row"><div class="qov-exec-row-k">TRIGGER</div><div class="qov-exec-row-v">${escapeHtml(b.trigger)}</div></div>
+    <div class="qov-exec-row"><div class="qov-exec-row-k">ALIGNMENT</div><div class="qov-exec-row-v">${escapeHtml(b.alignment)}</div></div>
+    <div class="qov-exec-row"><div class="qov-exec-row-k">INVALIDATE</div><div class="qov-exec-row-v">${escapeHtml(b.invalidate)}</div></div>
+    <div class="qov-exec-row"><div class="qov-exec-row-k">SIZE</div><div class="qov-exec-row-v">${escapeHtml(b.size)}</div></div>
+    <div class="qov-exec-call">
+      <div class="qov-exec-call-v">${escapeHtml(b.callV)}</div>
+      <div class="qov-exec-call-r">${escapeHtml(b.callR)}</div>
+      <div class="qov-exec-call-t">${escapeHtml(b.callT)}</div>
+    </div>`);
+}
+
+// ─── cross-lens renderer ──────────────────────────────────────────────────
+function renderCrossLens() {
+  const T = _T() || {};
+  const { payloads, portfolio } = STATE;
+  const upside = T.analyst_upside ?? 0;
+  const score = num(T.score, 0);
+  const rr = num(T.rr, 0);
+  const regime = safeStr(T.regime || '');
+  const ns = (() => {
+    const raw = T.news_sentiment_score;
+    if (typeof raw === 'object' && raw) return raw.score ?? 0;
+    return typeof raw === 'number' ? raw : null;
+  })();
+
+  const lenses = [
+    {
+      nm: 'VALUE',
+      cls: upside > 0.10 ? 'gn' : upside < -0.05 ? 'rd' : 'am',
+      lb: upside > 0.10 ? 'UPSIDE' : upside < -0.05 ? 'OVERVAL' : 'WATCH',
+    },
+    {
+      nm: 'SWING',
+      cls: (score >= 75 && T.above_50ema) ? 'gn' : score < 55 ? 'rd' : 'am',
+      lb: (score >= 75 && T.above_50ema) ? 'BUY' : score < 55 ? 'AVOID' : 'WATCH',
+    },
+    {
+      nm: 'EARNINGS',
+      cls: (T.earn_days != null && T.earn_days <= 7) ? 'am' : T.earn_days != null ? 'gn' : 'am',
+      lb: (T.earn_days != null && T.earn_days <= 7) ? 'BINARY' : T.earn_days != null ? '+' + T.earn_days + 'd' : 'NEUTRAL',
+    },
+    {
+      nm: 'MACRO',
+      cls: regime === 'risk_on_trending' ? 'gn' : regime === 'panic' ? 'rd' : 'am',
+      lb: regime === 'risk_on_trending' ? 'TRENDING' : regime === 'panic' ? 'PANIC' : 'CHOPPY',
+    },
+    {
+      nm: 'INSIDER',
+      cls: (T.insider_buys ?? 0) > (T.insider_sells ?? 0) ? 'gn'
+           : ((T.insider_sells ?? 0) > (T.insider_buys ?? 0) && (T.insider_sells ?? 0) > 3) ? 'rd'
+           : 'am',
+      lb: (T.insider_buys ?? 0) > (T.insider_sells ?? 0) ? 'BUYING'
+          : ((T.insider_sells ?? 0) > (T.insider_buys ?? 0) && (T.insider_sells ?? 0) > 3) ? 'SELLING'
+          : 'NEUTRAL',
+    },
+    {
+      nm: 'RISK',
+      cls: rr >= 3 ? 'gn' : (rr < 1.5 || rr === 0) ? 'rd' : 'am',
+      lb: rr >= 3 ? 'OK' : (rr < 1.5 || rr === 0) ? 'POOR RR' : 'SIZE-CAP',
+    },
+    {
+      nm: 'NEWS',
+      cls: ns != null && ns > 0.3 ? 'gn' : ns != null && ns < -0.3 ? 'rd' : 'am',
+      lb: ns != null && ns > 0.3 ? 'BULLISH' : ns != null && ns < -0.3 ? 'BEARISH' : 'NEUTRAL',
+    },
+    {
+      nm: 'PORTFOLIO',
+      cls: portfolio ? 'gn' : 'am',
+      lb: portfolio ? 'HELD' : 'NOT HELD',
+    },
+  ];
+
+  const pillsHtml = lenses.map(l =>
+    `<div class="qov-xlens-vote"><div class="qov-xlens-dot ${l.cls}"></div><span class="qov-xlens-nm">${l.nm}</span><span class="qov-xlens-lb">${l.lb}</span></div>`
+  ).join('');
+
+  const conflicts = [];
+  const swingLens = lenses.find(l => l.nm === 'SWING');
+  const valueLens = lenses.find(l => l.nm === 'VALUE');
+  if (swingLens && valueLens && swingLens.cls !== valueLens.cls && (swingLens.cls === 'gn' || valueLens.cls === 'gn')) {
+    conflicts.push(`Swing (${swingLens.lb}) vs Value (${valueLens.lb}) disagree — check lens alignment before sizing`);
+  }
+  if (regime === 'panic') {
+    conflicts.push('Macro lens shows PANIC — all long entries should be paused per regime gate');
+  }
+
+  const conflictsHtml = conflicts.map(c => `<div class="qov-xlens-conflict">${escapeHtml(c)}</div>`).join('');
+
+  setHTML('qovXlens', `<div class="qov-xlens-votes">${pillsHtml}</div>${conflictsHtml}`);
+}
+
+// ─── collapsible panel helpers ───────────────────────────────────────────
+function _updateOpenCount() {
+  const root = document.getElementById('qovRoot');
+  if (!root) return;
+  const total = root.querySelectorAll('.qov-collapsible').length;
+  const open = root.querySelectorAll('.qov-collapsible.open').length;
+  setHTML('qovOpenCount', open + ' of ' + total + ' open');
+}
+
+window.__qovToggle = (id) => {
+  const el = document.getElementById(id);
+  if (el) { el.classList.toggle('open'); _updateOpenCount(); }
+};
+
+window.__qovExpandAll = () => {
+  const root = document.getElementById('qovRoot');
+  if (root) root.querySelectorAll('.qov-collapsible').forEach(p => p.classList.add('open'));
+  _updateOpenCount();
+};
+
+window.__qovCollapseAll = () => {
+  const root = document.getElementById('qovRoot');
+  if (root) root.querySelectorAll('.qov-collapsible').forEach(p => p.classList.remove('open'));
+  _updateOpenCount();
+};
+
+window.__qovSetStrat = (s) => {
+  STATE.activeStrategy = s;
+  renderExecBrief();
+};
+
 // ─── section renderers ──────────────────────────────────────────────────
 function renderVerdictStrip() {
   const T = _T() || {};
@@ -465,7 +981,7 @@ function renderVerdictStrip() {
   else if (/avoid|kill|reject|short|exit/.test(dec) || score < 55) { vLabel = 'AVOID'; vCls = 'avoid'; }
   $('qovSysVerdict').className = 'qov-vd ' + vCls;
   setText('qovSysVerdict', vLabel);
-  const conv = T.conviction_tier ?? T.conviction?.label ?? '—';
+  const conv = safeStr(T.conviction_tier ?? T.conviction?.label) || '—';
   setText('qovSysConv', `Conviction · ${conv} · score ${score}`);
 
   const hor = ['SWING','POSITION','INVESTMENT'].map(m => {
@@ -515,10 +1031,10 @@ function renderStrategyFit() {
     if (!p) reason = 'Loading engine…';
     else if (p.decision === 'reject') reason = `Engine rejected ${m.label} — ${(p.warnings||[])[0]||'no target'}.`;
     else if (p.invest_stub) reason = 'INVEST mode using analyst-PT stub. Full IV triangulation pending.';
-    else if (t1) reason = `Engine T1 ${escapeHtml(t1.behavior || '')} @ ${fmtPx(t1.price)} · ${escapeHtml(t1.action || '')} · R-mult ${fmtR(t1.r_multiple)}.`;
+    else if (t1) reason = `Engine T1 ${escapeHtml(safeStr(t1.behavior))} @ ${fmtPx(t1.price)} · ${escapeHtml(safeStr(t1.action))} · R-mult ${fmtR(t1.r_multiple)}.`;
     else reason = 'No structural T1 found.';
     const tgts = t1
-      ? `<b>T1</b> ${fmtPx(t1.price)} (conf ${(t1.confluence||0).toFixed(1)} · ${escapeHtml(t1.behavior||'')})${t2 ? ` · <b>T2</b> ${fmtPx(t2.price)} (conf ${(t2.confluence||0).toFixed(1)} · ${escapeHtml(t2.behavior||'')})` : ''}<br><b>Stop</b> ${fmtPx(p?.stop?.price)} · <b>P(reach)</b> ${t1.p_reach != null ? Math.round(t1.p_reach*100)+'%' : '—'}`
+      ? `<b>T1</b> ${fmtPx(t1.price)} (conf ${(t1.confluence||0).toFixed(1)} · ${escapeHtml(safeStr(t1.behavior))})${t2 ? ` · <b>T2</b> ${fmtPx(t2.price)} (conf ${(t2.confluence||0).toFixed(1)} · ${escapeHtml(safeStr(t2.behavior))})` : ''}<br><b>Stop</b> ${fmtPx(p?.stop?.price)} · <b>P(reach)</b> ${t1.p_reach != null ? Math.round(t1.p_reach*100)+'%' : '—'}`
       : '<span style="color:var(--qink-3)">no targets</span>';
     return `<div class="qov-fc ${m.cls}${isBest ? ' best' : ''}">${isBest ? '<div class="qov-best-badge">★ BEST FIT</div>' : ''}<div class="qov-fc-mode">${m.label}</div><div class="qov-fc-hold">${m.hold}</div><div class="qov-fc-verdict ${v.cls}">${v.label}</div><div class="qov-fc-reason">${reason}</div><div class="qov-fc-tgts">${tgts}</div></div>`;
   }).join('');
@@ -609,10 +1125,10 @@ function renderEngineTargets() {
     const ps = t.p_reach_source || {};
     return `<div class="qov-et-card">
       <div class="qov-et-head"><div class="qov-et-label ${cls}">${label}</div><div><span class="qov-et-price">${fmtPx(t.price)}</span><span class="qov-et-r">${fmtR(t.r_multiple)}</span></div></div>
-      <div class="qov-et-row"><div class="qov-et-row-k">BEHAVIOR</div><div class="qov-et-row-v"><span class="qov-et-pill ${bh}">${escapeHtml(t.behavior || '—')}</span></div></div>
+      <div class="qov-et-row"><div class="qov-et-row-k">BEHAVIOR</div><div class="qov-et-row-v"><span class="qov-et-pill ${bh}">${escapeHtml(safeStr(t.behavior) || '—')}</span></div></div>
       <div class="qov-et-row"><div class="qov-et-row-k">CONFLUENCE</div><div class="qov-et-row-v">${(t.confluence||0).toFixed(1)} from ${(t.sources||[]).length} sources</div></div>
       <div class="qov-et-row"><div class="qov-et-row-k">P(REACH)</div><div class="qov-et-row-v">${t.p_reach != null ? Math.round(t.p_reach*100)+'%' : '—'} · Bayes ${ps.bayes != null ? Math.round(ps.bayes*100)+'%' : '—'} / MC ${ps.mc != null ? Math.round(ps.mc*100)+'%' : '—'} / analog ${ps.analog != null ? Math.round(ps.analog*100)+'%' : '—'}</div></div>
-      <div class="qov-et-row"><div class="qov-et-row-k">ACTION</div><div class="qov-et-row-v">${escapeHtml(t.action || '—')}</div></div>
+      <div class="qov-et-row"><div class="qov-et-row-k">ACTION</div><div class="qov-et-row-v">${escapeHtml(safeStr(t.action) || '—')}</div></div>
       <div class="qov-et-row" style="align-items:flex-start"><div class="qov-et-row-k">SOURCES</div><div class="qov-et-sources">${srcChips(t.sources) || '<span style="color:var(--qink-3)">none</span>'}</div></div>
     </div>`;
   }
@@ -625,15 +1141,15 @@ function renderIntrinsicValue() {
   const pt = num(T.analyst_target, 0);
   const mos = pt && price ? ((pt - price) / pt) * 100 : null;
   const cells = [
-    { k:'REVERSE DCF', v:'—', sub:'requires DCF model · pending Phase 2', cls:'' },
-    { k:'OWNER EARN YIELD', v:'—', sub:'requires FCF + buybacks · pending', cls:'' },
+    { k:'REVERSE DCF', v:'—', sub:'—', cls:'' },
+    { k:'OWNER EARN YIELD', v:'—', sub:'—', cls:'' },
     { k:'INTRINSIC VALUE', v: pt ? fmtPx(pt) : '—', sub: pt ? `analyst PT · <b style="color:${mos > 0 ? 'var(--gn)' : 'var(--rd)'}">MoS ${mos.toFixed(1)}%</b>` : 'no analyst consensus', cls: mos > 10 ? 'gn' : mos > 0 ? 'am' : '' },
-    { k:'QUALITY (PIO/Z/M)', v:'—', sub:'Piotroski/Altman/Beneish · pending', cls:'' },
-    { k:'EARN YIELD vs 10Y', v:'—', sub:'requires forward earnings', cls:'' },
-    { k:'MOAT', v:'—', sub:'qualitative · pending peer benchmarking', cls:'' },
+    { k:'QUALITY (PIO/Z/M)', v:'—', sub:'—', cls:'' },
+    { k:'EARN YIELD vs 10Y', v:'—', sub:'—', cls:'' },
+    { k:'MOAT', v:'—', sub:'—', cls:'' },
   ];
   setHTML('qovValGrid', cells.map(c => `<div class="qov-v ${c.cls}"><div class="qov-v-k">${c.k}</div><div class="qov-v-v ${c.cls}">${c.v}</div><div class="qov-v-sub">${c.sub}</div></div>`).join(''));
-  setHTML('qovBuffett', `<div class="q">★ The 10-year test · if markets closed for a decade, would you own this?</div><div class="a"><b style="color:var(--am)">Requires fundamental judgment</b> — moat, capital allocation, reinvestment ROIIC, management not yet automated. Engine has: sector ${escapeHtml(T.sector || '—')}, industry ${escapeHtml(T.industry || '—')}, score ${T.score || '—'}. Full Buffett-test computation arrives in Phase 2 (intrinsic value module).</div>`);
+  setHTML('qovBuffett', `<div class="q">★ The 10-year test · if markets closed for a decade, would you own this?</div><div class="a"><b style="color:var(--am)">Qualitative judgment required</b> — moat, capital allocation, reinvestment ROIIC, management. Engine context: sector ${escapeHtml(T.sector || '—')}, industry ${escapeHtml(T.industry || '—')}, score ${T.score || '—'}.</div>`);
 }
 
 function renderEarningsCard() {
@@ -689,9 +1205,13 @@ function renderEarningsCard() {
 
 function renderMyPosition() {
   const pf = STATE.portfolio;
-  const panel = $('qovMyPosPanel');
-  if (!pf) { if (panel) panel.style.display = 'none'; return; }
-  if (panel) panel.style.display = '';
+  // In collapsible shell, position panel is always present (qovPanelCd).
+  // Show "not held" message when no portfolio entry.
+  if (!pf) {
+    setHTML('qovPosGrid', `<div style="grid-column:1/-1;padding:14px;color:var(--qink-3);font:500 11px var(--qmono)">Not currently held in tracked portfolio.</div>`);
+    setHTML('qovPosTax', '');
+    return;
+  }
   const T = _T() || {};
   const price = num(T.price, pf.current_price ?? 0);
   const qty = num(pf.shares ?? pf.quantity, 0);
@@ -727,11 +1247,11 @@ function renderMTF() {
     bias: T.above_50ema && T.macd_bullish ? 'BULL' : (!T.above_50ema && !T.macd_bullish ? 'BEAR' : 'NEUTRAL'),
   };
   const rows = [
-    { tf:'MONTHLY', trend:'neut', trendNote:'monthly bars not yet plumbed', mom:'neut', momNote:'—', vol:'neut', volNote:'—', bias:'—', biasCls:'am' },
+    { tf:'MONTHLY', trend:'neut', trendNote:'—', mom:'neut', momNote:'—', vol:'neut', volNote:'—', bias:'—', biasCls:'am' },
     { tf:'WEEKLY',  trend: T.weekly_bull ? 'bull' : 'neut', trendNote: T.weekly_bull ? 'Weekly trend bullish' : 'Weekly trend not confirmed', mom:'neut', momNote:'—', vol:'neut', volNote:'—', bias: T.weekly_bull ? 'BULL' : 'NEUT', biasCls: T.weekly_bull ? 'gn' : 'am' },
     { tf:'DAILY',   ...daily, biasCls: daily.bias === 'BULL' ? 'gn' : daily.bias === 'BEAR' ? 'rd' : 'am' },
-    { tf:'4 HOUR',  trend:'neut', trendNote:'4h bars not yet plumbed', mom:'neut', momNote:'—', vol:'neut', volNote:'—', bias:'—', biasCls:'am' },
-    { tf:'1 HOUR',  trend:'neut', trendNote:'1h bars not yet plumbed', mom:'neut', momNote:'—', vol:'neut', volNote:'—', bias:'—', biasCls:'am' },
+    { tf:'4 HOUR',  trend:'neut', trendNote:'—', mom:'neut', momNote:'—', vol:'neut', volNote:'—', bias:'—', biasCls:'am' },
+    { tf:'1 HOUR',  trend:'neut', trendNote:'—', mom:'neut', momNote:'—', vol:'neut', volNote:'—', bias:'—', biasCls:'am' },
   ];
   setHTML('qovMtfBody', rows.map(r => `
     <tr><td><span class="qov-mtf-tf">${r.tf}</span></td>
@@ -744,7 +1264,7 @@ function renderMTF() {
   const bears = rows.filter(r => r.bias === 'BEAR').length;
   const col = bulls > bears ? 'var(--gn)' : bears > bulls ? 'var(--rd)' : 'var(--am)';
   $('qovMtfSummary').style.borderLeftColor = col;
-  setHTML('qovMtfSummary', `<b style="color:${col}">Bias:</b> ${bulls} bullish · ${bears} bearish · ${rows.length-bulls-bears} neutral. <b style="color:var(--am)">Only daily timeframe is plumbed today</b> — weekly/4h/1h require OHLCV multi-resolution wiring (Phase 2).`);
+  setHTML('qovMtfSummary', `<b style="color:${col}">Bias:</b> ${bulls} bullish · ${bears} bearish · ${rows.length-bulls-bears} neutral. Monthly / 4H / 1H data not yet available — daily and weekly derived from scan indicators.`);
 }
 
 function renderSetupStrip() {
@@ -843,8 +1363,8 @@ function renderForwardOutcomes() {
       <div style="font:700 9.5px var(--qmono); color:var(--qink-3); letter-spacing:.13em; margin-bottom:8px">HOLD WINDOW</div>
       <div class="qov-fo-grid">
         <div>
-          <div class="qov-fo-cell"><div class="k">SETUP FAMILY</div><div class="v">${escapeHtml(T.setup_family || T.setup || '—')}</div></div>
-          <div class="qov-fo-cell"><div class="k">REGIME</div><div class="v" style="color:var(--am)">${escapeHtml(T.regime || '—')}</div></div>
+          <div class="qov-fo-cell"><div class="k">SETUP FAMILY</div><div class="v">${escapeHtml(safeStr(T.setup) || '—')}</div></div>
+          <div class="qov-fo-cell"><div class="k">REGIME</div><div class="v" style="color:var(--am)">${escapeHtml(safeStr(T.regime) || '—')}</div></div>
           <div class="qov-fo-cell"><div class="k">MIN HOLD</div><div class="v">${T.hold_period_min ? T.hold_period_min + ' d' : '—'}</div></div>
           <div class="qov-fo-cell"><div class="k">MAX HOLD</div><div class="v">${(T.max_hold_days || T.hold_period_max) ? (T.max_hold_days || T.hold_period_max) + ' d' : '—'}</div></div>
           <div class="qov-fo-cell"><div class="k">SETUP n</div><div class="v">${T._setup_n || '—'}</div></div>
@@ -866,7 +1386,9 @@ function renderPreFlight() {
   items.push({ pass: (p?.t1?.r_multiple || 0) >= 3, warn: (p?.t1?.r_multiple || 0) >= 2 && (p?.t1?.r_multiple || 0) < 3, k:'R:R ≥ 3.0 · actual ' + ((p?.t1?.r_multiple || 0).toFixed(2)) });
   items.push({ pass: T.score >= 70, warn: T.score >= 55 && T.score < 70, k:'Score band ≥ 70 · actual ' + (T.score || '—') });
   items.push({ pass: !warns.some(w=>/choch/i.test(w)), warn: warns.some(w=>/choch/i.test(w)), k:'CHoCH check · ' + (warns.some(w=>/choch/i.test(w)) ? 'warning' : 'clear') });
-  items.push({ pass: T._setup_wilson_lb >= 0.5, warn: T._setup_wilson_lb >= 0.35 && T._setup_wilson_lb < 0.5, k:'Wilson LB ≥ 50% · ' + (T._setup_wilson_lb != null ? (T._setup_wilson_lb*100).toFixed(0)+'%' : '—') });
+  items.push(T._setup_wilson_lb != null
+    ? { pass: T._setup_wilson_lb >= 0.5, warn: T._setup_wilson_lb >= 0.35 && T._setup_wilson_lb < 0.5, k:'Wilson LB ≥ 50% · ' + (T._setup_wilson_lb*100).toFixed(0)+'%' }
+    : { pass: true, warn: false, k:'Wilson LB · N/A (uncomputed)' });
   items.push({ pass: (p?.t1?.confluence || 0) >= 4, warn: (p?.t1?.confluence || 0) >= 2, k:'Confluence ≥ 4 · ' + ((p?.t1?.confluence || 0).toFixed(1)) });
   items.push({ pass: (p?.t1?.p_reach || 0) >= 0.4, warn: (p?.t1?.p_reach || 0) >= 0.25, k:'P(reach T1) ≥ 40% · ' + (p?.t1?.p_reach != null ? Math.round(p.t1.p_reach*100)+'%' : '—') });
   setHTML('qovPfGrid', items.map(it => {
@@ -894,8 +1416,8 @@ function renderActionTriggers() {
     const t1 = p.t1 || {}, t2 = p.t2 || {}, stopP = p.stop?.price;
     const rules = [];
     rules.push({ lbl:'EXIT TRIGGER (failsafe)', body:`<span class="when">IF intraday tick &lt; ${fmtPx(stopP)}</span> → <span class="neg">SELL FULL · close-based stop</span>` });
-    if (t1.price) rules.push({ lbl:'T1 TRIGGER · trim', body:`<span class="when">IF price tags ${fmtPx(t1.price)} (T1)</span> → <span class="then">${escapeHtml(t1.action || 'trim 33%')} · trail remainder</span>` });
-    if (t2.price) rules.push({ lbl:'T2 TRIGGER · scale', body:`<span class="when">IF price tags ${fmtPx(t2.price)} (T2)</span> → <span class="then">${escapeHtml(t2.action || 'scale 50%')} · trail balance</span>` });
+    if (t1.price) rules.push({ lbl:'T1 TRIGGER · trim', body:`<span class="when">IF price tags ${fmtPx(t1.price)} (T1)</span> → <span class="then">${escapeHtml(safeStr(t1.action) || 'trim 33%')} · trail remainder</span>` });
+    if (t2.price) rules.push({ lbl:'T2 TRIGGER · scale', body:`<span class="when">IF price tags ${fmtPx(t2.price)} (T2)</span> → <span class="then">${escapeHtml(safeStr(t2.action) || 'scale 50%')} · trail balance</span>` });
     if (modeUi === 'POSITION' && T.above_50ema === false) {
       rules.push({ lbl:'ADD TRIGGER', body:`<span class="when">IF price tags primary zone</span> <span class="and">AND</span> <span class="when">1h closes green</span> <span class="and">AND</span> <span class="when">RSI &gt; 35</span> → <span class="then">ADD 1/3 size · raise stop</span>` });
     }
@@ -912,20 +1434,23 @@ function renderActionTriggers() {
 }
 
 function renderAll() {
-  renderVerdictStrip();
-  renderStrategyFit();
-  renderDecisionMatrix();
-  renderEngineTargets();
-  renderIntrinsicValue();
-  renderEarningsCard();
-  renderMyPosition();
-  renderMTF();
-  renderSetupStrip();
-  renderRiskProfile();
-  renderNewsPulse();
-  renderForwardOutcomes();
-  renderPreFlight();
-  renderActionTriggers();
+  const _safe = (name, fn) => { try { fn(); } catch(e) { console.warn('[overview] ' + name + ' threw:', e); } };
+  _safe('crossLens',     renderCrossLens);
+  _safe('execBrief',     renderExecBrief);
+  _safe('strategyFit',   renderStrategyFit);
+  _safe('decisionMatrix',renderDecisionMatrix);
+  _safe('engineTargets', renderEngineTargets);
+  _safe('intrinsicValue',renderIntrinsicValue);
+  _safe('earningsCard',  renderEarningsCard);
+  _safe('myPosition',    renderMyPosition);
+  _safe('mtf',           renderMTF);
+  _safe('setupStrip',    renderSetupStrip);
+  _safe('riskProfile',   renderRiskProfile);
+  _safe('newsPulse',     renderNewsPulse);
+  _safe('fwdOutcomes',   renderForwardOutcomes);
+  _safe('preFlight',     renderPreFlight);
+  _safe('actionTriggers',renderActionTriggers);
+  _updateOpenCount();
 }
 
 // ─── render entry point ─────────────────────────────────────────────────
@@ -976,4 +1501,5 @@ export function dispose() {
   STATE.payloads = {};
   STATE.portfolio = null;
   STATE.mounted = false;
+  STATE.activeStrategy = 'SWING';
 }

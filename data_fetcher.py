@@ -6547,11 +6547,18 @@ def get_news_articles(ticker: str, limit: int = 10) -> list[dict]:
     Primary: EODHD news API.
     Fallback: yfinance Ticker(ticker).news (when EODHD rate-limits or returns empty).
     Returns list of {title, source, published_utc, url, publisher, insights}.
-    Cache TTL: 4 hours (was 30min — bumped 2026-05-01 to reduce API quota burn during
-    hourly scans. News doesn't break that often per stock; 4h is plenty for a swing
-    screener and cuts news API calls by ~85%).
+    Cache TTL · conditional (2026-05-15):
+      • 4 hours during RTH  (Mon-Fri 06:30 AM – 1:00 PM PT)
+      • 12 hours outside RTH (overnight + weekends — near-zero new-article rate)
+    Saves ~1500 EODHD calls/day on the same news that wouldn't change anyway.
     """
-    NEWS_CACHE_TTL = 14400  # 4 hours
+    import zoneinfo as _zi
+    from datetime import datetime as _dtn
+    _now = _dtn.now(_zi.ZoneInfo("America/Los_Angeles"))
+    _is_weekend = _now.weekday() >= 5
+    _mins = _now.hour * 60 + _now.minute
+    _in_rth = (not _is_weekend) and (6*60+30) <= _mins <= (13*60)
+    NEWS_CACHE_TTL = 14400 if _in_rth else 43200  # 4h RTH / 12h outside
     cache_key = f"news_{ticker}_{int(time.time()//NEWS_CACHE_TTL)}"
     cached = _cache_read(cache_key, NEWS_CACHE_TTL)
     if cached is not None:

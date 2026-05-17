@@ -1,0 +1,1959 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Crypto · Structural Map v2 — Prototype</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    --bg: #0a0d12;
+    --bg-1: #0e1217;
+    --bg-2: #131922;
+    --bg-3: #1a2230;
+    --ink: #e6edf3;
+    --ink-2: #9aa6b2;
+    --ink-3: #5f6b78;
+    --line: #1f2733;
+    --line-2: #2a3340;
+    --gn: #00d68f;
+    --gn-dim: #00d68f33;
+    --rd: #ff4d4f;
+    --rd-dim: #ff4d4f33;
+    --amb: #ffb800;
+    --amb-dim: #ffb80033;
+    --cy: #4cd6ff;
+    --cy-dim: #4cd6ff33;
+    --copper: #c97a4a;
+    --orange: #ff7a00;
+    --purple: #b46bff;
+    --purple-dim: #b46bff33;
+  }
+  body.light {
+    --bg: #f7f8fa; --bg-1: #ffffff; --bg-2: #f0f2f5; --bg-3: #e6eaef;
+    --ink: #0a0d12; --ink-2: #4a5560; --ink-3: #7d8893;
+    --line: #d9dee5; --line-2: #c0c7d0;
+    --gn-dim: #00a06a22; --rd-dim: #d9434522; --amb-dim: #cc930022; --cy-dim: #2196d322; --purple-dim: #8a4dcc22;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background: var(--bg); color: var(--ink); font: 13px/1.45 "Inter", -apple-system, system-ui, sans-serif; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+  a { color: var(--cy); text-decoration: none; }
+
+  .shell { max-width: 1640px; margin: 0 auto; padding: 16px 20px 60px; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; padding: 10px 0 14px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:-0.01em; font-size: 15px; }
+  .brand .dot { width:8px; height:8px; border-radius:2px; background: var(--orange); }
+  .topbar-tools { display:flex; gap:8px; align-items:center; }
+  .pill { padding: 4px 10px; border:1px solid var(--line); border-radius: 999px; font-size: 11px; color: var(--ink-2); background: var(--bg-1); cursor:pointer; }
+  .pill:hover { color: var(--ink); border-color: var(--line-2); }
+  .pill.live { color: var(--gn); border-color: var(--gn-dim); }
+  .pill.live::before { content:""; display:inline-block; width:6px; height:6px; border-radius:50%; background: var(--gn); margin-right:6px; vertical-align:1px; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  /* MAIN LAYOUT: content + sticky inbox right-rail */
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; }
+
+  .subtabs { display:flex; gap:3px; padding: 5px; background: var(--bg-1); border:1px solid var(--line); border-radius: 10px; margin-bottom: 14px; overflow-x: auto; }
+  .subtab { padding: 8px 12px; font-size: 11.5px; font-weight:600; color: var(--ink-2); border-radius: 6px; cursor: pointer; white-space: nowrap; display:flex; align-items:center; gap:6px; }
+  .subtab:hover { color: var(--ink); background: var(--bg-2); }
+  .subtab.active { background: var(--bg-3); color: var(--ink); }
+  .subtab .ic { font-size: 13px; }
+  .subtab .bdg { font-size: 10px; padding: 2px 6px; border-radius: 999px; background: var(--bg-3); color: var(--ink-3); }
+  .subtab.active .bdg { background: var(--orange); color: #000; }
+  .subtab.new::after { content: "NEW"; font-size: 8px; padding: 1px 5px; border-radius: 3px; background: var(--purple); color: #000; font-weight: 800; }
+
+  .hero { display:grid; grid-template-columns: repeat(8, 1fr); gap: 8px; margin-bottom: 14px; }
+  .stat { background: var(--bg-1); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; }
+  .stat .k { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); margin-bottom: 4px; }
+  .stat .v { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+  .stat .v .mono { font-size: 15px; }
+  .stat .d { font-size: 10.5px; margin-top: 1px; }
+  .stat .d.up { color: var(--gn); }
+  .stat .d.dn { color: var(--rd); }
+  .stat .d.neu { color: var(--ink-2); }
+  .stat .meta { font-size: 9.5px; color: var(--ink-3); margin-top: 3px; }
+  .stat.flash { animation: flashbg 1s ease-out; }
+  @keyframes flashbg { 0% { background: var(--amb-dim); } 100% { background: var(--bg-1); } }
+
+  .panel { background: var(--bg-1); border: 1px solid var(--line); border-radius: 10px; }
+  .panel-h { padding: 11px 13px; border-bottom: 1px solid var(--line); display:flex; align-items:center; justify-content:space-between; }
+  .panel-h .t { font-weight: 700; font-size: 13px; letter-spacing: -0.01em; display:flex; align-items:center; gap:8px; }
+  .panel-h .sub { font-size: 11px; color: var(--ink-3); font-weight:500; }
+  .panel-h .tools { display:flex; gap: 6px; }
+  .panel-h .tools .pill { padding: 3px 8px; font-size: 10px; }
+  .panel-h .tools .pill.on { color: var(--cy); border-color: var(--cy-dim); background: var(--cy-dim); }
+  .panel-b { padding: 13px; }
+
+  /* TRADE CARD V2 */
+  .tradecard { background: var(--bg-2); border: 1px solid var(--line); border-left: 3px solid var(--gn); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+  .tradecard.short { border-left-color: var(--rd); }
+  .tradecard.fade  { border-left-color: var(--amb); }
+  .tradecard .head { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom: 10px; gap: 14px; }
+  .tradecard .side { display:flex; align-items:center; gap: 10px; flex-wrap: wrap; }
+  .tradecard .side .lbl { font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 700; letter-spacing: 0.06em; }
+  .tradecard.long  .side .lbl { background: var(--gn-dim); color: var(--gn); }
+  .tradecard.short .side .lbl { background: var(--rd-dim); color: var(--rd); }
+  .tradecard.fade  .side .lbl { background: var(--amb-dim); color: var(--amb); }
+  .tradecard .sym { font-weight: 800; font-size: 15px; letter-spacing: -0.01em; }
+  .tradecard .setup { color: var(--ink-2); font-size: 11px; margin-top: 1px; }
+  .tradecard .head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .tradecard .rr { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 16px; font-weight: 700; color: var(--gn); }
+  .tradecard.short .rr, .tradecard.fade .rr { color: var(--amb); }
+
+  /* Confluence fuel gauge */
+  .conflu { display:flex; align-items:center; gap:4px; }
+  .conflu .pip { width: 7px; height: 11px; background: var(--bg-3); border-radius: 2px; }
+  .conflu .pip.on { background: var(--gn); }
+  .conflu.warn .pip.on { background: var(--amb); }
+  .conflu .score { font-size: 10px; color: var(--ink-3); font-weight: 600; margin-left: 4px; }
+
+  /* Compact tradecard variant */
+  .tradecard.compact { padding: 9px 11px; margin-bottom: 0; }
+  .tradecard.compact .head { margin-bottom: 7px; }
+  .tradecard.compact .head .sym { font-size: 13px; }
+  .tradecard.compact .head .setup { font-size: 10px; }
+  .tradecard.compact .head .lbl { font-size: 10px; padding: 2px 6px; }
+  .tradecard.compact .rr { font-size: 13px; }
+  .compact-row { display: flex; align-items: center; gap: 12px; padding: 6px 0; font-size: 11px; color: var(--ink-2); font-family: "JetBrains Mono", monospace; border-top: 1px dashed var(--line); flex-wrap: wrap; }
+  .compact-row b { color: var(--ink-3); font-weight: 600; margin-right: 4px; text-transform: uppercase; font-size: 9px; letter-spacing: 0.06em; }
+  .compact-row .cy { color: var(--cy); font-weight: 700; }
+  .compact-row.sizer-inline { justify-content: space-between; }
+  .compact-row .why-inline { color: var(--ink-3); font-family: "Inter", sans-serif; font-size: 10px; flex: 1; padding: 0 8px; }
+  .tradecard.compact .btn { padding: 5px 10px; font-size: 10px; font-weight: 800; letter-spacing: 0.04em; height: 24px; align-self: center; }
+
+  .levels { display:grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 10px 0; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); }
+  .lvl { display:flex; flex-direction: column; gap: 2px; }
+  .lvl .k { font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; }
+  .lvl .v { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 13px; font-weight: 600; }
+  .lvl.entry .v { color: var(--cy); }
+  .lvl.stop .v { color: var(--rd); }
+  .lvl.t1 .v, .lvl.t2 .v { color: var(--gn); }
+
+  /* Sizer row */
+  .sizer { display:grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 8px; align-items: end; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+  .sizer .sf { display: flex; flex-direction: column; gap: 3px; }
+  .sizer .sf .k { font-size: 9px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.07em; }
+  .sizer .sf input { background: var(--bg-3); border: 1px solid var(--line); color: var(--ink); padding: 5px 8px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 12px; width: 100%; }
+  .sizer .sf .v { font-family: "JetBrains Mono", monospace; font-size: 14px; font-weight: 700; color: var(--cy); }
+  .sizer .btn { padding: 7px 14px; background: var(--orange); color: #000; border: 0; border-radius: 5px; font-weight: 800; font-size: 11px; letter-spacing: 0.05em; cursor: pointer; align-self: end; height: 28px; }
+  .sizer .btn:hover { background: #ff8c1a; }
+  .sizer .btn.paper { background: var(--cy); }
+  .sizer .btn.short { background: var(--rd); color: #fff; }
+
+  .why { display: flex; flex-wrap: wrap; gap: 5px; padding-top: 8px; }
+  .why .chip { font-size: 10px; padding: 3px 7px; border-radius: 4px; background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line); }
+  .why .chip.hi { color: var(--gn); border-color: var(--gn-dim); }
+  .why .chip.warn { color: var(--amb); border-color: var(--amb-dim); }
+  .why .chip.bear { color: var(--rd); border-color: var(--rd-dim); }
+
+  /* Ladder */
+  .ladder { display:flex; flex-direction: column; gap: 1px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; }
+  .lrow { display:grid; grid-template-columns: 80px 1fr 70px 90px; align-items: center; padding: 5px 8px; border-radius: 4px; gap: 8px; }
+  .lrow:hover { background: var(--bg-2); }
+  .lrow.now { background: var(--bg-3); border-left: 3px solid var(--orange); padding-left: 5px; }
+  .lrow .px { font-weight: 700; }
+  .lrow .bar { height: 7px; border-radius: 2px; }
+  .lrow.long .bar  { background: linear-gradient(90deg, var(--gn-dim), var(--gn)); }
+  .lrow.short .bar { background: linear-gradient(90deg, var(--rd-dim), var(--rd)); }
+  .lrow.psy .bar   { background: linear-gradient(90deg, transparent, var(--cy-dim)); border: 1px dashed var(--cy-dim); }
+  .lrow.ob   .bar  { background: linear-gradient(90deg, transparent, var(--amb-dim)); border: 1px solid var(--amb-dim); }
+  .lrow.cme  .bar  { background: linear-gradient(90deg, transparent, var(--purple-dim)); border: 1px dashed var(--purple); }
+  .lrow.vwap .bar  { background: linear-gradient(90deg, transparent, var(--copper)); border: 1px solid var(--copper); }
+  .lrow .amt { color: var(--ink-2); font-size: 11px; text-align: right; }
+  .lrow .tag { font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; text-align: right; }
+  .lrow.now .tag { color: var(--orange); }
+
+  /* OB list */
+  .oblist { display:flex; flex-direction: column; gap: 6px; }
+  .ob { padding: 8px 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; display:grid; grid-template-columns: 46px 1fr 60px 90px; align-items: center; gap: 10px; }
+  .ob .typ { font-size: 10px; padding: 3px 5px; border-radius: 3px; font-weight: 700; text-align:center; letter-spacing: 0.04em; }
+  .ob.bull .typ { background: var(--gn-dim); color: var(--gn); }
+  .ob.bear .typ { background: var(--rd-dim); color: var(--rd); }
+  .ob .range { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px; }
+  .ob .meta  { font-size: 10px; color: var(--ink-3); margin-top: 2px; }
+  .ob .dist  { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px; color: var(--ink-2); text-align: right; }
+  .ob .state { font-size: 10px; text-align: right; padding: 3px 6px; border-radius: 3px; }
+  .ob .state.fresh { color: var(--gn); background: var(--gn-dim); }
+  .ob .state.tested { color: var(--amb); background: var(--amb-dim); }
+  .ob .state.broken { color: var(--ink-3); background: var(--bg-3); }
+
+  /* Sessions */
+  .sessions { display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .sess { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 11px; }
+  .sess.active { border-color: var(--orange); background: linear-gradient(180deg, var(--bg-2), var(--bg-2)), radial-gradient(circle at 20% 0%, var(--orange) 0%, transparent 60%); }
+  .sess h4 { margin: 0 0 5px; font-size: 12px; font-weight: 700; display:flex; justify-content:space-between; align-items: center; }
+  .sess h4 .when { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10.5px; color: var(--ink-3); font-weight: 500; }
+  .sess .bias { font-size: 11px; color: var(--ink-2); margin-bottom: 5px; }
+  .sess .range { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12.5px; font-weight: 600; }
+  .sess .play { font-size: 10.5px; color: var(--ink-2); margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); line-height: 1.55; }
+  .sess .play b { color: var(--cy); }
+
+  /* Funding rows */
+  .funding-row { display:grid; grid-template-columns: 50px 1fr 70px 100px; align-items: center; padding: 7px 0; border-bottom: 1px dashed var(--line); gap: 10px; }
+  .funding-row:last-child { border-bottom: 0; }
+  .funding-row .sym { font-weight: 700; font-size: 12px; }
+  .funding-row .meter { position: relative; height: 14px; background: var(--bg-3); border-radius: 7px; overflow: hidden; }
+  .funding-row .mid { position:absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--ink-3); }
+  .funding-row .fill { position:absolute; top: 0; bottom: 0; }
+  .funding-row .fill.pos { left: 50%; background: linear-gradient(90deg, var(--amb-dim), var(--rd)); }
+  .funding-row .fill.neg { right: 50%; background: linear-gradient(270deg, var(--cy-dim), var(--gn)); }
+  .funding-row .val { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px; font-weight: 600; text-align: right; }
+  .funding-row .read { font-size: 10px; padding: 3px 6px; border-radius: 4px; text-align: center; }
+  .funding-row .read.fade { background: var(--rd-dim); color: var(--rd); }
+  .funding-row .read.squeeze { background: var(--gn-dim); color: var(--gn); }
+  .funding-row .read.neu { background: var(--bg-3); color: var(--ink-2); }
+
+  /* Beta table */
+  .beta-table, .alt-table { width: 100%; border-collapse: collapse; }
+  .beta-table th, .alt-table th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3); padding: 6px 8px; border-bottom: 1px solid var(--line); font-weight: 600; }
+  .beta-table td, .alt-table td { padding: 8px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .beta-table tr:hover td, .alt-table tr:hover td { background: var(--bg-2); }
+  .beta-table .sym, .alt-table .sym { font-weight: 700; }
+  .beta-table .beta, .alt-table .num { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .beta-table .rr { font-family: "JetBrains Mono", ui-monospace, monospace; font-weight: 700; color: var(--gn); }
+  .beta-table .verdict, .alt-table .verdict { padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
+  .beta-table .verdict.long, .alt-table .verdict.long { background: var(--gn-dim); color: var(--gn); }
+  .beta-table .verdict.watch, .alt-table .verdict.watch { background: var(--amb-dim); color: var(--amb); }
+  .beta-table .verdict.avoid, .alt-table .verdict.avoid { background: var(--bg-3); color: var(--ink-3); }
+  .beta-table .verdict.short, .alt-table .verdict.short { background: var(--rd-dim); color: var(--rd); }
+
+  /* Generic regime cards */
+  .regime-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .regime-card .label { font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 5px; }
+  .regime-card .val { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+  .regime-card .verdict { font-size: 11px; color: var(--ink-2); margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); line-height: 1.5; }
+  .regime-card .verdict b.gn { color: var(--gn); }
+  .regime-card .verdict b.amb { color: var(--amb); }
+  .regime-card .verdict b.cy { color: var(--cy); }
+  .regime-card .verdict b.rd { color: var(--rd); }
+
+  /* Rows */
+  .row { display:grid; gap: 12px; }
+  .row.r-2 { grid-template-columns: 1fr 1fr; }
+  .row.r-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .row.r-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+  .row.r-2-1 { grid-template-columns: 2fr 1fr; }
+  .row.r-1-2 { grid-template-columns: 1fr 2fr; }
+
+  .pane { display: none; }
+  .pane.active { display: block; }
+
+  /* Charts */
+  .chart-box { background: var(--bg-2); border-radius: 8px; height: 280px; position: relative; }
+  .chart-box.sm { height: 160px; }
+  .chart-box.lg { height: 380px; }
+  .chart-label { position: absolute; top: 8px; left: 10px; z-index: 2; font-size: 11px; color: var(--ink-2); font-weight: 600; }
+  .chart-label .tf { font-family: "JetBrains Mono", monospace; color: var(--orange); font-size: 10px; margin-left: 6px; padding: 1px 5px; background: var(--bg-3); border-radius: 3px; }
+
+  /* Multi-TF stack */
+  .tf-stack { display: grid; gap: 8px; }
+  .tf-row { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; display: grid; grid-template-columns: 100px 1fr 140px; align-items: stretch; }
+  .tf-row .tf-meta { padding: 12px; border-right: 1px solid var(--line); display: flex; flex-direction: column; justify-content: center; }
+  .tf-row .tf-meta .tflabel { font-size: 14px; font-weight: 800; letter-spacing: -0.01em; }
+  .tf-row .tf-meta .tfbias { font-size: 10px; padding: 3px 7px; border-radius: 3px; margin-top: 6px; display: inline-block; width: fit-content; font-weight: 700; letter-spacing: 0.05em; }
+  .tf-row .tf-meta .tfbias.bull { background: var(--gn-dim); color: var(--gn); }
+  .tf-row .tf-meta .tfbias.bear { background: var(--rd-dim); color: var(--rd); }
+  .tf-row .tf-meta .tfbias.neu { background: var(--bg-3); color: var(--ink-2); }
+  .tf-row .tf-chart { height: 110px; position: relative; }
+  .tf-row .tf-info { padding: 10px 12px; border-left: 1px solid var(--line); font-size: 10.5px; line-height: 1.6; color: var(--ink-2); }
+  .tf-row .tf-info b { color: var(--ink); }
+
+  /* On-chain grid */
+  .oc-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .oc-card .oc-label { font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 6px; display: flex; justify-content: space-between; }
+  .oc-card .oc-label .verdict { padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; }
+  .oc-card .oc-label .verdict.bull { background: var(--gn-dim); color: var(--gn); }
+  .oc-card .oc-label .verdict.bear { background: var(--rd-dim); color: var(--rd); }
+  .oc-card .oc-label .verdict.neu  { background: var(--bg-3); color: var(--ink-2); }
+  .oc-card .oc-val { font-size: 20px; font-weight: 800; letter-spacing: -0.01em; }
+  .oc-card .oc-spark { height: 30px; margin: 6px 0; }
+  .oc-card .oc-note { font-size: 10.5px; color: var(--ink-2); padding-top: 6px; border-top: 1px dashed var(--line); }
+
+  /* Trade Inbox right-rail */
+  .inbox { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
+  .inbox-section { background: var(--bg-1); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; }
+  .inbox-h { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
+  .inbox-h .t { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+  .inbox-h .count { font-size: 10px; padding: 2px 6px; border-radius: 999px; background: var(--orange); color: #000; font-weight: 800; }
+  .inbox-b { padding: 10px 12px; }
+
+  .quickplan { padding: 8px; background: var(--bg-2); border: 1px solid var(--line); border-left: 3px solid var(--gn); border-radius: 6px; margin-bottom: 8px; cursor: pointer; }
+  .quickplan.short { border-left-color: var(--rd); }
+  .quickplan.fade { border-left-color: var(--amb); }
+  .quickplan:hover { background: var(--bg-3); }
+  .quickplan .row1 { display: flex; align-items: center; justify-content: space-between; }
+  .quickplan .row1 .sym { font-weight: 800; font-size: 13px; }
+  .quickplan .row1 .rr { font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--gn); font-weight: 700; }
+  .quickplan.short .row1 .rr, .quickplan.fade .row1 .rr { color: var(--amb); }
+  .quickplan .row2 { font-size: 10px; color: var(--ink-2); margin-top: 3px; font-family: "JetBrains Mono", monospace; }
+  .quickplan .row3 { font-size: 9.5px; color: var(--ink-3); margin-top: 3px; }
+
+  .global-sizer { background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
+  .global-sizer .sf { display: grid; grid-template-columns: 80px 1fr; align-items: center; margin-bottom: 6px; }
+  .global-sizer .sf .k { font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; }
+  .global-sizer .sf input { background: var(--bg-3); border: 1px solid var(--line); color: var(--ink); padding: 4px 7px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 12px; width: 100%; }
+  .global-sizer .out { padding-top: 6px; border-top: 1px dashed var(--line); margin-top: 4px; font-size: 11px; color: var(--ink-2); display: grid; gap: 3px; }
+  .global-sizer .out b { color: var(--cy); font-family: "JetBrains Mono", monospace; }
+
+  .position-mini { padding: 7px 10px; background: var(--bg-2); border-radius: 5px; margin-bottom: 5px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px; }
+  .position-mini .pm-sym { font-weight: 700; font-size: 12px; }
+  .position-mini .pm-meta { font-size: 10px; color: var(--ink-3); }
+  .position-mini .pm-pl { font-family: "JetBrains Mono", monospace; font-size: 11.5px; font-weight: 700; }
+  .position-mini .pm-pl.up { color: var(--gn); }
+  .position-mini .pm-pl.dn { color: var(--rd); }
+
+  .alert-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; align-items: center; padding: 5px 0; font-size: 10.5px; color: var(--ink-2); border-bottom: 1px dashed var(--line); }
+  .alert-row:last-child { border-bottom: 0; }
+  .alert-row .ic { color: var(--cy); }
+  .alert-row .ic.warn { color: var(--amb); }
+  .alert-row .ic.fire { color: var(--rd); }
+  .alert-row .when { font-family: "JetBrains Mono", monospace; font-size: 9.5px; color: var(--ink-3); }
+
+  /* Confluence breakdown table */
+  .conflu-table { width: 100%; }
+  .conflu-table td { padding: 4px 8px; font-size: 11px; border-bottom: 1px dashed var(--line); }
+  .conflu-table td:first-child { color: var(--ink-2); }
+  .conflu-table td:last-child { text-align: right; font-family: "JetBrains Mono", monospace; }
+  .conflu-table .ok { color: var(--gn); }
+  .conflu-table .no { color: var(--rd); }
+
+  /* Footer / legend */
+  .legend { display:flex; gap: 12px; font-size: 10px; color: var(--ink-3); padding: 8px 13px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .legend .ld { display: inline-flex; align-items:center; gap: 5px; }
+  .legend .swatch { width: 9px; height: 9px; border-radius: 2px; display:inline-block; }
+  .footer-note { font-size: 11px; color: var(--ink-3); margin-top: 14px; padding: 10px 13px; background: var(--bg-1); border: 1px dashed var(--line); border-radius: 8px; line-height: 1.6; }
+
+  /* CME gap card */
+  .cme-card { padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; border-left: 3px solid var(--purple); margin-bottom: 8px; }
+  .cme-card .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .cme-card .head .sym { font-weight: 700; font-size: 13px; }
+  .cme-card .head .status { font-size: 9.5px; padding: 2px 6px; border-radius: 3px; background: var(--purple-dim); color: var(--purple); font-weight: 700; letter-spacing: 0.04em; }
+  .cme-card .gaprange { font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--ink-2); margin-bottom: 4px; }
+  .cme-card .fill { height: 5px; background: var(--bg-3); border-radius: 3px; overflow: hidden; margin: 4px 0; }
+  .cme-card .fill .bar { height: 100%; background: var(--purple); }
+  .cme-card .note { font-size: 10px; color: var(--ink-3); }
+
+  /* Wyckoff phase indicator */
+  .wyckoff { display: flex; gap: 0; background: var(--bg-2); border-radius: 6px; overflow: hidden; border: 1px solid var(--line); margin-bottom: 10px; }
+  .wyckoff .ph { flex: 1; padding: 8px 10px; text-align: center; font-size: 10px; font-weight: 600; color: var(--ink-3); border-right: 1px solid var(--line); cursor: pointer; }
+  .wyckoff .ph:last-child { border-right: 0; }
+  .wyckoff .ph.active { background: var(--orange); color: #000; font-weight: 800; }
+  .wyckoff .ph.passed { background: var(--bg-3); color: var(--ink-2); }
+
+  /* Premium/Discount zones */
+  .pdzone { background: linear-gradient(180deg, var(--rd-dim) 0%, transparent 50%, var(--gn-dim) 100%); border-radius: 6px; padding: 10px; position: relative; min-height: 100px; }
+  .pdzone .label { position: absolute; left: 8px; font-size: 10px; font-weight: 700; }
+  .pdzone .label.top { top: 6px; color: var(--rd); }
+  .pdzone .label.mid { top: 50%; color: var(--ink-3); transform: translateY(-50%); }
+  .pdzone .label.bot { bottom: 6px; color: var(--gn); }
+  .pdzone .now-marker { position: absolute; right: 8px; padding: 2px 6px; background: var(--orange); color: #000; border-radius: 3px; font-size: 10px; font-weight: 800; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <span>Crypto · Structural Map</span>
+      <span class="pill mono">v2 prototype</span>
+    </div>
+    <div class="topbar-tools">
+      <span class="pill live">Live · 12s</span>
+      <span class="pill mono">NY · 14:32 PT</span>
+      <span class="pill">⚙ Alerts (3)</span>
+      <span class="pill" onclick="document.body.classList.toggle('light')">◐ Theme</span>
+    </div>
+  </div>
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="stat"><div class="k">BTC</div><div class="v"><span class="mono">$94,287</span></div><div class="d up">+1.84%</div><div class="meta">7d $89.4–95.8K</div></div>
+    <div class="stat"><div class="k">ETH</div><div class="v"><span class="mono">$3,412</span></div><div class="d up">+0.92%</div><div class="meta">ETH/BTC 0.0362↓</div></div>
+    <div class="stat"><div class="k">BTC.D</div><div class="v"><span class="mono">57.4%</span></div><div class="d dn">+1.3pp 7d</div><div class="meta">no alt-season</div></div>
+    <div class="stat"><div class="k">OI · BTC</div><div class="v"><span class="mono">$38.2B</span></div><div class="d up">+$1.4B</div><div class="meta">crowded</div></div>
+    <div class="stat"><div class="k">Funding 8h</div><div class="v"><span class="mono">+0.041%</span></div><div class="d dn">87%ile</div><div class="meta">longs paying</div></div>
+    <div class="stat"><div class="k">ETF flow</div><div class="v"><span class="mono">+$312M</span></div><div class="d up">5d streak</div><div class="meta">IBIT lead</div></div>
+    <div class="stat flash"><div class="k">Stables Δ</div><div class="v"><span class="mono">+$1.8B</span></div><div class="d up">7d</div><div class="meta">dry powder ↑</div></div>
+    <div class="stat"><div class="k">Whale netflow</div><div class="v"><span class="mono">-2,840</span></div><div class="d up">BTC · 24h</div><div class="meta">accumulating</div></div>
+  </div>
+
+  <!-- LAYOUT: tabs + right-rail -->
+  <div class="layout">
+    <div>
+      <!-- SUB-TABS -->
+      <div class="subtabs">
+        <div class="subtab active" data-tab="desk"><span class="ic">◎</span> Trade Desk <span class="bdg">6</span></div>
+        <div class="subtab new" data-tab="mtf"><span class="ic">⬚</span> Multi-TF</div>
+        <div class="subtab" data-tab="liq"><span class="ic">≡</span> Liquidity Map</div>
+        <div class="subtab new" data-tab="onchain"><span class="ic">⛓</span> On-Chain</div>
+        <div class="subtab" data-tab="flow"><span class="ic">⇌</span> Flow &amp; Derivs</div>
+        <div class="subtab" data-tab="session"><span class="ic">⏱</span> Session</div>
+        <div class="subtab" data-tab="beta"><span class="ic">↗</span> Beta + Alts <span class="bdg">42</span></div>
+        <div class="subtab new" data-tab="trending"><span class="ic">🔥</span> Trending</div>
+        <div class="subtab" data-tab="regime"><span class="ic">◆</span> Regime</div>
+      </div>
+
+      <!-- ==================== TAB 1: TRADE DESK V2 ==================== -->
+      <div class="pane active" id="pane-desk">
+
+        <div class="panel" style="margin-bottom: 12px;">
+          <div class="panel-h">
+            <div class="t">◎ Active Trade Plans <span class="sub">— with confluence score, sizer, paper-fire</span></div>
+            <div class="tools">
+              <span class="pill on">All</span>
+              <span class="pill">BTC</span>
+              <span class="pill">ETH</span>
+              <span class="pill">Alts</span>
+            </div>
+          </div>
+          <div class="panel-b">
+            <div class="row r-2">
+
+              <!-- TRADE 1 (compact) -->
+              <div class="tradecard long compact">
+                <div class="head">
+                  <div class="side">
+                    <span class="lbl">LONG</span>
+                    <span class="sym">BTC</span>
+                    <span class="setup">Bull OB 4H · untested</span>
+                  </div>
+                  <div class="head-right">
+                    <div class="rr">3.2:1</div>
+                    <div class="conflu">
+                      <div class="pip on"></div><div class="pip on"></div><div class="pip on"></div><div class="pip on"></div><div class="pip on"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="compact-row">
+                  <span><b>Entry</b> 93.2–93.6K</span>
+                  <span><b>Stop</b> 92.78K</span>
+                  <span><b>T1</b> 95.10K</span>
+                  <span><b>T2</b> 96.80K</span>
+                </div>
+                <div class="compact-row sizer-inline">
+                  <span><b>Qty</b> <span class="cy">0.481 BTC</span> @ 1% risk</span>
+                  <span class="why-inline">OB · FVG · funding · ETF · stables</span>
+                  <button class="btn paper">▶ FIRE</button>
+                </div>
+              </div>
+
+              <!-- TRADE 2 (compact) -->
+              <div class="tradecard fade compact">
+                <div class="head">
+                  <div class="side">
+                    <span class="lbl">FADE</span>
+                    <span class="sym">BTC</span>
+                    <span class="setup">Funding xtr + liq cluster</span>
+                  </div>
+                  <div class="head-right">
+                    <div class="rr">2.8:1</div>
+                    <div class="conflu warn">
+                      <div class="pip on"></div><div class="pip on"></div><div class="pip on"></div><div class="pip on"></div><div class="pip"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="compact-row">
+                  <span><b>Sell</b> 95.80K</span>
+                  <span><b>Stop</b> 96.42K</span>
+                  <span><b>T1</b> 94.10K</span>
+                  <span><b>T2</b> 93.50K</span>
+                </div>
+                <div class="compact-row sizer-inline">
+                  <span><b>Qty</b> <span class="cy">0.201 BTC</span> @ 0.5% risk</span>
+                  <span class="why-inline">funding 87%ile · $312M liq · RSI 74</span>
+                  <button class="btn short">▶ FIRE</button>
+                </div>
+              </div>
+
+              <!-- TRADE 3 (compact) -->
+              <div class="tradecard long compact">
+                <div class="head">
+                  <div class="side">
+                    <span class="lbl">LONG</span>
+                    <span class="sym">ETH</span>
+                    <span class="setup">Discount + ETH/BTC reclaim</span>
+                  </div>
+                  <div class="head-right">
+                    <div class="rr">3.6:1</div>
+                    <div class="conflu">
+                      <div class="pip on"></div><div class="pip on"></div><div class="pip on"></div><div class="pip on"></div><div class="pip on"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="compact-row">
+                  <span><b>Entry</b> 3,310–3,360</span>
+                  <span><b>Stop</b> 3,265</span>
+                  <span><b>T1</b> 3,520</span>
+                  <span><b>T2</b> 3,680</span>
+                </div>
+                <div class="compact-row sizer-inline">
+                  <span><b>Qty</b> <span class="cy">2.68 ETH</span> @ 0.75% risk</span>
+                  <span class="why-inline">discount · weekly OB · aVWAP · stables</span>
+                  <button class="btn paper">▶ FIRE</button>
+                </div>
+              </div>
+
+              <!-- TRADE 4 (compact) -->
+              <div class="tradecard short compact">
+                <div class="head">
+                  <div class="side">
+                    <span class="lbl">SHORT</span>
+                    <span class="sym">SOL</span>
+                    <span class="setup">Bear OB · BTC.D up · 4H</span>
+                  </div>
+                  <div class="head-right">
+                    <div class="rr">3.1:1</div>
+                    <div class="conflu warn">
+                      <div class="pip on"></div><div class="pip on"></div><div class="pip on"></div><div class="pip on"></div><div class="pip"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="compact-row">
+                  <span><b>Sell</b> 178–181</span>
+                  <span><b>Stop</b> 184.20</span>
+                  <span><b>T1</b> 168.50</span>
+                  <span><b>T2</b> 161.20</span>
+                </div>
+                <div class="compact-row sizer-inline">
+                  <span><b>Qty</b> <span class="cy">29.8 SOL</span> @ 0.5% risk</span>
+                  <span class="why-inline">bear OB · BTC.D up · RS weak</span>
+                  <button class="btn short">▶ FIRE</button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- BTC structural chart -->
+        <div class="panel" style="margin-bottom: 12px;">
+          <div class="panel-h">
+            <div class="t">BTC · 4H structural map</div>
+            <div class="tools">
+              <span class="pill">OB</span>
+              <span class="pill on">FVG</span>
+              <span class="pill on">Liq</span>
+              <span class="pill">aVWAP</span>
+              <span class="pill">Wyckoff</span>
+            </div>
+          </div>
+          <div class="panel-b">
+            <div id="btc-4h-chart" class="chart-box lg"></div>
+          </div>
+        </div>
+
+        <!-- OB List + Pre-mortem -->
+        <div class="row r-2-1">
+          <div class="panel">
+            <div class="panel-h">
+              <div class="t">⬢ Untested Order Blocks · 90 bars</div>
+              <div class="tools">
+                <span class="pill">1H</span>
+                <span class="pill on">4H</span>
+                <span class="pill">1D</span>
+                <span class="pill">1W</span>
+              </div>
+            </div>
+            <div class="panel-b">
+              <div class="oblist">
+                <div class="ob bull"><div class="typ">BULL</div><div><div class="range">BTC · 93,200–93,640 · 4H</div><div class="meta">18h ago · 7 bars · FVG above</div></div><div class="dist">-0.73%</div><div class="state fresh">FRESH</div></div>
+                <div class="ob bear"><div class="typ">BEAR</div><div><div class="range">BTC · 95,710–96,180 · 4H</div><div class="meta">32h ago · short liq stack</div></div><div class="dist">+1.62%</div><div class="state fresh">FRESH</div></div>
+                <div class="ob bull"><div class="typ">BULL</div><div><div class="range">BTC · 91,400–92,050 · 1D</div><div class="meta">4d ago · last bull defense</div></div><div class="dist">-2.71%</div><div class="state fresh">FRESH</div></div>
+                <div class="ob bull"><div class="typ">BULL</div><div><div class="range">ETH · 3,280–3,355 · 1D</div><div class="meta">6d ago · weekly base</div></div><div class="dist">-1.94%</div><div class="state fresh">FRESH</div></div>
+                <div class="ob bear"><div class="typ">BEAR</div><div><div class="range">ETH · 3,510–3,580 · 4H</div><div class="meta">11h ago · tagged once</div></div><div class="dist">+2.86%</div><div class="state tested">TESTED</div></div>
+                <div class="ob bear"><div class="typ">BEAR</div><div><div class="range">SOL · 178–181 · 4H</div><div class="meta">22h ago · clean</div></div><div class="dist">+4.21%</div><div class="state fresh">FRESH</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h">
+              <div class="t">⚠ Pre-mortem</div>
+            </div>
+            <div class="panel-b" style="font-size: 11.5px; line-height: 1.7;">
+              <div style="margin-bottom: 7px;"><b style="color:var(--rd)">Invalidation A.</b> 4H close &lt; 92,780 → bull OB broken.</div>
+              <div style="margin-bottom: 7px;"><b style="color:var(--rd)">Invalidation B.</b> ETF outflow &gt; -$150M × 2 sessions → trend degrades.</div>
+              <div style="margin-bottom: 7px;"><b style="color:var(--rd)">Invalidation C.</b> Funding flips &lt; -0.02% → fade signal dead.</div>
+              <div style="margin-bottom: 7px;"><b style="color:var(--amb)">Macro hedge.</b> DXY &gt; 105 OR 10Y &gt; 4.6% → tighten size 50%.</div>
+              <div><b style="color:var(--cy)">Portfolio overlap.</b> SwingTrade core is 32% tech-long · BTC long adds correlated risk · size ↓ 25%.</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ==================== TAB 2: MULTI-TF CONFLUENCE ==================== -->
+      <div class="pane" id="pane-mtf">
+        <div class="panel" style="margin-bottom: 12px;">
+          <div class="panel-h">
+            <div class="t">⬚ Multi-Timeframe Confluence · BTC</div>
+            <div class="sub">Weekly bias → Daily setup → 4H confluence → 1H trigger → 5m execution</div>
+          </div>
+          <div class="panel-b">
+            <div class="tf-stack">
+              <div class="tf-row">
+                <div class="tf-meta">
+                  <div class="tflabel">1W</div>
+                  <div class="tfbias bull">BULL</div>
+                  <div style="font-size: 9.5px; color: var(--ink-3); margin-top: 4px;">since Apr</div>
+                </div>
+                <div class="tf-chart" id="tf-1w"></div>
+                <div class="tf-info">
+                  <b>Bias:</b> HH/HL since halving<br/>
+                  <b>Resist:</b> 96.8K · 99.2K<br/>
+                  <b>Support:</b> 88K · 84K
+                </div>
+              </div>
+              <div class="tf-row">
+                <div class="tf-meta">
+                  <div class="tflabel">1D</div>
+                  <div class="tfbias bull">BULL</div>
+                  <div style="font-size: 9.5px; color: var(--ink-3); margin-top: 4px;">EMA20 hold</div>
+                </div>
+                <div class="tf-chart" id="tf-1d"></div>
+                <div class="tf-info">
+                  <b>Setup:</b> daily pullback to EMA20<br/>
+                  <b>OB:</b> 91.4–92.0K untested<br/>
+                  <b>FVG:</b> 93.4–93.7K open
+                </div>
+              </div>
+              <div class="tf-row">
+                <div class="tf-meta">
+                  <div class="tflabel">4H</div>
+                  <div class="tfbias bull">BULL</div>
+                  <div style="font-size: 9.5px; color: var(--ink-3); margin-top: 4px;">primary TF</div>
+                </div>
+                <div class="tf-chart" id="tf-4h"></div>
+                <div class="tf-info">
+                  <b>Confluence:</b> bull OB + FVG + aVWAP<br/>
+                  <b>Trigger:</b> 4H close &gt; 94.5K<br/>
+                  <b>Inval:</b> close &lt; 92.78
+                </div>
+              </div>
+              <div class="tf-row">
+                <div class="tf-meta">
+                  <div class="tflabel">1H</div>
+                  <div class="tfbias neu">RANGE</div>
+                  <div style="font-size: 9.5px; color: var(--ink-3); margin-top: 4px;">consolidation</div>
+                </div>
+                <div class="tf-chart" id="tf-1h"></div>
+                <div class="tf-info">
+                  <b>Trigger:</b> reclaim 94.4 + RSI &gt; 55<br/>
+                  <b>Or:</b> sweep 93.4 + bullish 1H close<br/>
+                  <b>RSI:</b> 52 · neutral
+                </div>
+              </div>
+              <div class="tf-row">
+                <div class="tf-meta">
+                  <div class="tflabel">5m</div>
+                  <div class="tfbias bull">BULL</div>
+                  <div style="font-size: 9.5px; color: var(--ink-3); margin-top: 4px;">entry TF</div>
+                </div>
+                <div class="tf-chart" id="tf-5m"></div>
+                <div class="tf-info">
+                  <b>Entry:</b> 5m bullish FVG fill<br/>
+                  <b>Mini-stop:</b> 5m swing low<br/>
+                  <b>Confirm:</b> 5m VWAP reclaim
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row r-2">
+          <div class="panel">
+            <div class="panel-h"><div class="t">Confluence breakdown · BTC long</div></div>
+            <div class="panel-b">
+              <table class="conflu-table">
+                <tr><td>Weekly trend</td><td class="ok">BULL ✓</td></tr>
+                <tr><td>Daily structure</td><td class="ok">HH/HL ✓</td></tr>
+                <tr><td>4H bull OB unmitigated</td><td class="ok">93.2-93.6K ✓</td></tr>
+                <tr><td>4H FVG open</td><td class="ok">93.4-93.7K ✓</td></tr>
+                <tr><td>Anchored VWAP (halving)</td><td class="ok">84.2K · above ✓</td></tr>
+                <tr><td>Anchored VWAP (ETF)</td><td class="ok">61.4K · above ✓</td></tr>
+                <tr><td>Funding extreme</td><td class="ok">+0.041% (87%ile) ✓</td></tr>
+                <tr><td>ETF 5d net flow</td><td class="ok">+$312M ✓</td></tr>
+                <tr><td>Stablecoin Δ 7d</td><td class="ok">+$1.8B ✓</td></tr>
+                <tr><td>Whale netflow 24h</td><td class="ok">-2,840 BTC ✓</td></tr>
+                <tr><td>DXY direction</td><td class="ok">↓ ✓</td></tr>
+                <tr><td>Daily RSI &lt; 70</td><td class="ok">62 ✓</td></tr>
+                <tr><td>SwingTrade portfolio corr</td><td class="no">+0.41 ✗ size ↓</td></tr>
+                <tr><td><b>Score</b></td><td><b class="ok">12 / 13</b></td></tr>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h"><div class="t">Wyckoff phase · BTC daily</div></div>
+            <div class="panel-b">
+              <div class="wyckoff">
+                <div class="ph passed">PSY</div>
+                <div class="ph passed">SC</div>
+                <div class="ph passed">AR</div>
+                <div class="ph passed">ST</div>
+                <div class="ph active">SOS</div>
+                <div class="ph">LPS</div>
+                <div class="ph">BU</div>
+                <div class="ph">MARKUP</div>
+              </div>
+              <div style="font-size: 11px; color: var(--ink-2); line-height: 1.7; padding-top: 6px;">
+                <b style="color:var(--orange)">Current phase: Sign of Strength.</b> Volume on advances exceeds volume on declines for 6 sessions. Next expected: <b style="color: var(--cy)">Last Point of Support</b> (LPS) — minor pullback that holds above prior resistance becomes new support. Trade plan: buy LPS in the 91.4–92K zone with stop below 90.2K.
+              </div>
+
+              <div style="margin-top: 12px;">
+                <div style="font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 4px;">Premium / Discount zones · 1W</div>
+                <div class="pdzone">
+                  <div class="label top">PREMIUM (sell zone)<br/>96.8K – 99.2K</div>
+                  <div class="label mid">EQ · 88.0K (50%)</div>
+                  <div class="label bot">DISCOUNT (buy zone)<br/>79.0K – 84.0K</div>
+                  <div class="now-marker">NOW $94.3K · premium</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ==================== TAB 3: LIQUIDITY MAP ==================== -->
+      <div class="pane" id="pane-liq">
+        <div class="row r-1-2" style="margin-bottom: 12px;">
+          <div class="panel">
+            <div class="panel-h">
+              <div class="t">≡ BTC Liquidity Ladder</div>
+              <div class="sub">all magnets</div>
+            </div>
+            <div class="panel-b">
+              <div class="ladder">
+                <div class="lrow short"><div class="px">98,400</div><div class="bar" style="width: 75%;"></div><div class="amt">$240M</div><div class="tag">SHORT LIQ</div></div>
+                <div class="lrow short"><div class="px">96,820</div><div class="bar" style="width: 95%;"></div><div class="amt">$312M</div><div class="tag">SHORT LIQ</div></div>
+                <div class="lrow cme"><div class="px">96,200</div><div class="bar" style="width: 50%;"></div><div class="amt">unfilled</div><div class="tag">CME GAP</div></div>
+                <div class="lrow short"><div class="px">95,800</div><div class="bar" style="width: 60%;"></div><div class="amt">$184M</div><div class="tag">EQ HIGHS</div></div>
+                <div class="lrow ob"><div class="px">95,710</div><div class="bar" style="width: 45%;"></div><div class="amt">—</div><div class="tag">BEAR OB</div></div>
+                <div class="lrow psy"><div class="px">95,000</div><div class="bar" style="width: 30%;"></div><div class="amt">—</div><div class="tag">PSY ROUND</div></div>
+                <div class="lrow now"><div class="px">94,287</div><div class="bar" style="width: 100%; background: var(--orange);"></div><div class="amt">spot</div><div class="tag">NOW</div></div>
+                <div class="lrow vwap"><div class="px">93,840</div><div class="bar" style="width: 40%;"></div><div class="amt">—</div><div class="tag">aVWAP ETF</div></div>
+                <div class="lrow ob"><div class="px">93,400</div><div class="bar" style="width: 55%;"></div><div class="amt">—</div><div class="tag">BULL OB</div></div>
+                <div class="lrow long"><div class="px">92,800</div><div class="bar" style="width: 100%;"></div><div class="amt">$480M</div><div class="tag">LONG LIQ</div></div>
+                <div class="lrow long"><div class="px">91,500</div><div class="bar" style="width: 70%;"></div><div class="amt">$220M</div><div class="tag">EQ LOWS</div></div>
+                <div class="lrow psy"><div class="px">90,000</div><div class="bar" style="width: 30%;"></div><div class="amt">—</div><div class="tag">PSY ROUND</div></div>
+                <div class="lrow long"><div class="px">89,200</div><div class="bar" style="width: 85%;"></div><div class="amt">$340M</div><div class="tag">LONG LIQ</div></div>
+                <div class="lrow vwap"><div class="px">84,200</div><div class="bar" style="width: 30%;"></div><div class="amt">—</div><div class="tag">aVWAP HALVE</div></div>
+              </div>
+              <div class="legend">
+                <span class="ld"><span class="swatch" style="background: var(--gn);"></span>long liq</span>
+                <span class="ld"><span class="swatch" style="background: var(--rd);"></span>short liq</span>
+                <span class="ld"><span class="swatch" style="background: var(--amb-dim); border: 1px solid var(--amb);"></span>OB</span>
+                <span class="ld"><span class="swatch" style="background: var(--purple-dim); border: 1px dashed var(--purple);"></span>CME gap</span>
+                <span class="ld"><span class="swatch" style="background: var(--copper);"></span>aVWAP</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="row r-3" style="margin-bottom: 12px;">
+              <div class="regime-card"><div class="label">Magnet UP</div><div class="val mono">96,820</div><div class="verdict">$312M short stops · <b class="gn">+2.69%</b> path</div></div>
+              <div class="regime-card"><div class="label">Magnet DOWN</div><div class="val mono">92,800</div><div class="verdict">$480M long stops · <b class="amb">-1.58%</b> · 1.54× upside risk</div></div>
+              <div class="regime-card"><div class="label">Imbalance</div><div class="val mono">1.54×</div><div class="verdict"><b class="amb">downside cascade risk</b> · expect sweep first</div></div>
+            </div>
+
+            <div class="panel" style="margin-bottom: 12px;">
+              <div class="panel-h">
+                <div class="t">CME Futures Gap Tracker</div>
+                <div class="sub">close Fri 4pm CT · open Sun 5pm CT · 80%+ fill rate</div>
+              </div>
+              <div class="panel-b">
+                <div class="cme-card">
+                  <div class="head"><div class="sym">BTC · gap 1</div><div class="status">UNFILLED</div></div>
+                  <div class="gaprange">$96,150 ← → $96,840 · 0.73% wide · 6d old</div>
+                  <div class="fill"><div class="bar" style="width: 0%;"></div></div>
+                  <div class="note">Above spot. Magnet. Historical fill: 18d median.</div>
+                </div>
+                <div class="cme-card" style="border-left-color: var(--gn); ">
+                  <div class="head"><div class="sym">BTC · gap 2</div><div class="status" style="background: var(--gn-dim); color: var(--gn);">FILLED</div></div>
+                  <div class="gaprange">$91,200 ← → $91,460 · filled Wed</div>
+                  <div class="fill"><div class="bar" style="width: 100%; background: var(--gn);"></div></div>
+                  <div class="note">Bull thesis intact — gap filled, didn't break further.</div>
+                </div>
+                <div class="cme-card" style="border-left-color: var(--copper);">
+                  <div class="head"><div class="sym">ETH · gap 1</div><div class="status">UNFILLED</div></div>
+                  <div class="gaprange">$3,510 ← → $3,560 · 1.45% wide · 8d old</div>
+                  <div class="fill"><div class="bar" style="width: 0%;"></div></div>
+                  <div class="note">Above spot. Add to T2 target for ETH long.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row r-2" style="margin-bottom: 12px;">
+          <div class="panel">
+            <div class="panel-h">
+              <div class="t">Dealer GEX positioning · Deribit BTC options</div>
+              <div class="sub">where dealers hedge — pin / accelerate zones</div>
+            </div>
+            <div class="panel-b">
+              <div id="gex-chart" class="chart-box sm"></div>
+              <div style="font-size: 11px; color: var(--ink-2); margin-top: 10px; line-height: 1.6;">
+                <b style="color: var(--cy);">Zero gamma:</b> 93,500 · below = dealers short gamma (accelerate moves) · above = pin behavior.<br/>
+                <b style="color: var(--amb);">Max pain:</b> 92,000 (weekly expiry Fri) · price drift toward 92K possible into expiry.<br/>
+                <b style="color: var(--gn);">Largest call OI:</b> 100K strike · acts as resistance if reached.
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h"><div class="t">Anchored VWAPs · BTC</div></div>
+            <div class="panel-b">
+              <table class="beta-table">
+                <thead><tr><th>Anchor date</th><th>Event</th><th>aVWAP</th><th>Dist</th><th>Bias</th></tr></thead>
+                <tbody>
+                  <tr><td>2024-04-19</td><td>Halving</td><td class="num">$84,210</td><td class="num">+12.0%</td><td><span class="verdict long">BULL</span></td></tr>
+                  <tr><td>2024-01-11</td><td>BTC ETF approval</td><td class="num">$61,420</td><td class="num">+53.5%</td><td><span class="verdict long">BULL</span></td></tr>
+                  <tr><td>2025-12-17</td><td>2024 cycle top</td><td class="num">$91,840</td><td class="num">+2.7%</td><td><span class="verdict watch">PIVOT</span></td></tr>
+                  <tr><td>2026-04-02</td><td>'Liberation day' low</td><td class="num">$78,640</td><td class="num">+19.9%</td><td><span class="verdict long">BULL</span></td></tr>
+                  <tr><td>2026-05-08</td><td>Last swing high</td><td class="num">$95,720</td><td class="num">-1.5%</td><td><span class="verdict watch">CONTEST</span></td></tr>
+                </tbody>
+              </table>
+              <div style="font-size: 11px; color: var(--ink-2); margin-top: 10px;">
+                Spot above 4 of 5 aVWAPs · the only "below" anchor is last swing high (95,720) — that's the next major reclaim. <b style="color: var(--cy);">aVWAP confluence: strong bull</b>.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-h">
+            <div class="t">Volume Profile · BTC 90d</div>
+            <div class="sub">HVN / LVN / POC</div>
+          </div>
+          <div class="panel-b">
+            <div id="vp-chart" class="chart-box sm"></div>
+            <div style="font-size: 11px; color: var(--ink-2); margin-top: 10px; line-height: 1.7;">
+              <b style="color: var(--amb);">POC (point of control):</b> $89,400 · acceptance zone, magnet on downside.<br/>
+              <b style="color: var(--gn);">HVN above:</b> $96,800 · strong resistance if reached.<br/>
+              <b style="color: var(--cy);">LVN (vacuum zone):</b> $97,100 → $98,200 · price moves fast through here.<br/>
+              <b style="color: var(--rd);">Value Area High:</b> $95,600 · spot above = controlling above value, bullish.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== TAB 4: ON-CHAIN ==================== -->
+      <div class="pane" id="pane-onchain">
+        <div class="row r-3" style="margin-bottom: 12px;">
+          <div class="oc-card">
+            <div class="oc-label">Exchange Netflow · BTC · 24h <span class="verdict bull">BULL</span></div>
+            <div class="oc-val mono">-2,840 BTC</div>
+            <div class="oc-spark"><svg viewBox="0 0 200 30" width="100%" height="100%"><path d="M0,18 L20,16 L40,20 L60,14 L80,18 L100,12 L120,15 L140,8 L160,10 L180,6 L200,4" fill="none" stroke="var(--gn)" stroke-width="1.5"/></svg></div>
+            <div class="oc-note">BTC leaving exchanges 5 of last 7 days · accumulation regime. Net -18,400 BTC in 30d ≈ <b style="color: var(--gn);">$1.73B off-exchange</b>.</div>
+          </div>
+          <div class="oc-card">
+            <div class="oc-label">Stablecoin Supply Δ · 7d <span class="verdict bull">BULL</span></div>
+            <div class="oc-val mono">+$1.84B</div>
+            <div class="oc-spark"><svg viewBox="0 0 200 30" width="100%" height="100%"><path d="M0,22 L20,20 L40,18 L60,16 L80,14 L100,12 L120,10 L140,8 L160,7 L180,5 L200,4" fill="none" stroke="var(--cy)" stroke-width="1.5"/></svg></div>
+            <div class="oc-note">USDT +$1.2B · USDC +$640M · "dry powder" entering. <b style="color: var(--cy);">Stables Δ ↑ + price ↑ = real bid</b> (vs. leverage-driven moves).</div>
+          </div>
+          <div class="oc-card">
+            <div class="oc-label">Whale wallets (1K+ BTC) <span class="verdict bull">BULL</span></div>
+            <div class="oc-val mono">+0.42%</div>
+            <div class="oc-spark"><svg viewBox="0 0 200 30" width="100%" height="100%"><path d="M0,20 L20,19 L40,18 L60,17 L80,16 L100,14 L120,13 L140,11 L160,9 L180,8 L200,6" fill="none" stroke="var(--gn)" stroke-width="1.5"/></svg></div>
+            <div class="oc-note">2,142 wallets hold ≥1K BTC · up from 2,133 7d ago. <b style="color: var(--gn);">Net accumulation by largest cohort</b>.</div>
+          </div>
+          <div class="oc-card">
+            <div class="oc-label">Miner reserves <span class="verdict neu">NEU</span></div>
+            <div class="oc-val mono">1.81M BTC</div>
+            <div class="oc-spark"><svg viewBox="0 0 200 30" width="100%" height="100%"><path d="M0,15 L20,14 L40,15 L60,16 L80,15 L100,14 L120,15 L140,16 L160,15 L180,15 L200,16" fill="none" stroke="var(--amb)" stroke-width="1.5"/></svg></div>
+            <div class="oc-note">Flat for 4 weeks · no capitulation selling. <b style="color: var(--ink-2);">Hashrate at ATH</b> (618 EH/s) — miners healthy, not forced sellers.</div>
+          </div>
+          <div class="oc-card">
+            <div class="oc-label">Dormant supply (1y+) <span class="verdict bull">BULL</span></div>
+            <div class="oc-val mono">68.4%</div>
+            <div class="oc-spark"><svg viewBox="0 0 200 30" width="100%" height="100%"><path d="M0,18 L20,17 L40,16 L60,15 L80,14 L100,13 L120,12 L140,11 L160,10 L180,9 L200,8" fill="none" stroke="var(--gn)" stroke-width="1.5"/></svg></div>
+            <div class="oc-note">68.4% of supply hasn't moved in 1y+ · ATH. <b style="color: var(--gn);">Long-term holders not distributing</b> · supply squeeze setup intact.</div>
+          </div>
+          <div class="oc-card">
+            <div class="oc-label">MVRV Z-Score <span class="verdict neu">NEU</span></div>
+            <div class="oc-val mono">2.4</div>
+            <div class="oc-spark"><svg viewBox="0 0 200 30" width="100%" height="100%"><path d="M0,22 L20,20 L40,17 L60,15 L80,14 L100,15 L120,13 L140,12 L160,11 L180,10 L200,9" fill="none" stroke="var(--amb)" stroke-width="1.5"/></svg></div>
+            <div class="oc-note">Neutral zone (extreme: &gt;5). Plenty of room before cycle-top valuations · <b style="color: var(--cy);">no froth signal</b>.</div>
+          </div>
+        </div>
+
+        <div class="row r-2-1">
+          <div class="panel">
+            <div class="panel-h">
+              <div class="t">On-chain composite read</div>
+            </div>
+            <div class="panel-b">
+              <div style="font-size: 12px; line-height: 1.8; color: var(--ink-2);">
+                <b style="color: var(--gn);">5 of 6 on-chain signals BULL</b>, 1 NEU, 0 BEAR. This is the strongest possible underlying picture: exchanges draining, stables flooding in, whales adding, dormant supply rising, MVRV not stretched. Miners are the only "watch" item — flat, not selling, healthy hashrate.<br/><br/>
+                The on-chain layer says: <b style="color: var(--cy);">price corrections in this regime are buyable</b>. Any 5% drop is likely absorbed by spot bid (the $1.84B stablecoin Δ has to land somewhere). Disagreement signal would be: <b style="color: var(--rd);">exchange netflow flips positive for 3+ days</b> AND <b style="color: var(--rd);">stables flatten or contract</b>. Watch both.
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h"><div class="t">Top whale moves · 24h</div></div>
+            <div class="panel-b" style="font-size: 11px; line-height: 1.7;">
+              <div style="padding: 6px 0; border-bottom: 1px dashed var(--line);">
+                <div><b class="mono" style="color: var(--gn);">↗ +1,840 BTC</b> ($173M)</div>
+                <div style="color: var(--ink-3);">Coinbase → cold storage · 14:08 UTC</div>
+              </div>
+              <div style="padding: 6px 0; border-bottom: 1px dashed var(--line);">
+                <div><b class="mono" style="color: var(--gn);">↗ +840 BTC</b> ($79M)</div>
+                <div style="color: var(--ink-3);">Binance → unknown wallet · 09:22 UTC</div>
+              </div>
+              <div style="padding: 6px 0; border-bottom: 1px dashed var(--line);">
+                <div><b class="mono" style="color: var(--rd);">↘ -420 BTC</b> ($39M)</div>
+                <div style="color: var(--ink-3);">old wallet → Kraken · 02:14 UTC</div>
+              </div>
+              <div style="padding: 6px 0;">
+                <div><b class="mono" style="color: var(--gn);">↗ +320 BTC</b> ($30M)</div>
+                <div style="color: var(--ink-3);">OTC desk → cold wallet · 21:48 UTC</div>
+              </div>
+              <div style="margin-top: 8px; font-size: 10px; color: var(--ink-3); padding-top: 8px; border-top: 1px solid var(--line);">
+                Net direction: <b style="color: var(--gn);">accumulation</b> (3 of 4)
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== TAB 5: FLOW & DERIVATIVES ==================== -->
+      <div class="pane" id="pane-flow">
+        <div class="row r-2" style="margin-bottom: 12px;">
+          <div class="panel">
+            <div class="panel-h"><div class="t">Perp funding · multi-exchange · 8h</div></div>
+            <div class="panel-b">
+              <table class="beta-table">
+                <thead><tr><th>Sym</th><th>Binance</th><th>Bybit</th><th>OKX</th><th>Δ</th><th>Read</th></tr></thead>
+                <tbody>
+                  <tr><td class="sym">BTC</td><td class="num">+0.041%</td><td class="num">+0.038%</td><td class="num">+0.043%</td><td class="num" style="color: var(--ink-3);">3bp</td><td><span class="verdict short">FADE</span></td></tr>
+                  <tr><td class="sym">ETH</td><td class="num">+0.038%</td><td class="num">+0.029%</td><td class="num">+0.041%</td><td class="num" style="color: var(--amb);">12bp</td><td><span class="verdict watch">DIVERGE</span></td></tr>
+                  <tr><td class="sym">SOL</td><td class="num">+0.029%</td><td class="num">+0.031%</td><td class="num">+0.028%</td><td class="num" style="color: var(--ink-3);">3bp</td><td><span class="verdict avoid">NEU</span></td></tr>
+                  <tr><td class="sym">XRP</td><td class="num">-0.018%</td><td class="num">-0.024%</td><td class="num">-0.012%</td><td class="num" style="color: var(--amb);">12bp</td><td><span class="verdict long">SQUEEZE</span></td></tr>
+                  <tr><td class="sym">DOGE</td><td class="num">+0.084%</td><td class="num">+0.071%</td><td class="num">+0.092%</td><td class="num" style="color: var(--amb);">21bp</td><td><span class="verdict short">EXTREME</span></td></tr>
+                  <tr><td class="sym">AVAX</td><td class="num">-0.041%</td><td class="num">-0.038%</td><td class="num">-0.044%</td><td class="num" style="color: var(--ink-3);">6bp</td><td><span class="verdict long">SQUEEZE</span></td></tr>
+                </tbody>
+              </table>
+              <div style="font-size: 10.5px; color: var(--ink-2); margin-top: 8px; line-height: 1.5;">
+                <b>Multi-exch divergence read:</b> ETH and DOGE show &gt;10bp spreads — positioning imbalances. Largest spread on DOGE (Binance light vs OKX heavy long) = potential cascade catalyst.
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h"><div class="t">Deribit BTC options · IV skew</div></div>
+            <div class="panel-b">
+              <div id="iv-chart" class="chart-box sm"></div>
+              <div style="font-size: 11px; color: var(--ink-2); margin-top: 10px; line-height: 1.7;">
+                <b style="color: var(--cy);">25Δ Risk Reversal:</b> -2.1 vol pts · calls cheaper than puts · slight bearish skew.<br/>
+                <b style="color: var(--amb);">ATM IV:</b> 48.2 (annualized) · 32%ile 90d · <b>compressed</b> — vol expansion likely.<br/>
+                <b style="color: var(--cy);">Calendar spread (28DTE / 7DTE):</b> 4.6 vol pts · normal contango.<br/>
+                <b style="color: var(--gn);">Trade idea:</b> long ATM call · IV cheap + bull setup = favorable.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row r-2" style="margin-bottom: 12px;">
+          <div class="panel">
+            <div class="panel-h"><div class="t">Spot ETF flow · 5d</div></div>
+            <div class="panel-b">
+              <div id="etf-chart" class="chart-box sm"></div>
+              <div style="display:flex; justify-content:space-between; padding: 10px 0 0; font-size: 11px; color: var(--ink-2); flex-wrap: wrap; gap: 8px;">
+                <div>IBIT <b class="mono" style="color: var(--gn)">+$186M</b></div>
+                <div>FBTC <b class="mono" style="color: var(--gn)">+$84M</b></div>
+                <div>ARKB <b class="mono" style="color: var(--gn)">+$42M</b></div>
+                <div>GBTC <b class="mono" style="color: var(--rd)">-$18M</b></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h"><div class="t">Perp basis + open interest</div></div>
+            <div class="panel-b">
+              <div class="row r-3">
+                <div class="regime-card"><div class="label">BTC basis ann.</div><div class="val mono">9.4%</div><div class="verdict">87%ile · <b class="amb">elevated</b></div></div>
+                <div class="regime-card"><div class="label">ETH basis ann.</div><div class="val mono">8.1%</div><div class="verdict">71%ile</div></div>
+                <div class="regime-card"><div class="label">OI Δ 24h</div><div class="val mono">+3.9%</div><div class="verdict"><b class="gn">real bid</b> (price + OI up)</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-h"><div class="t">Max pain · weekly expiry · BTC</div></div>
+          <div class="panel-b">
+            <div class="row r-3">
+              <div class="regime-card"><div class="label">Weekly max pain (Fri)</div><div class="val mono">92,000</div><div class="verdict">price drift target into expiry · 2.4% below spot</div></div>
+              <div class="regime-card"><div class="label">Monthly max pain (end-May)</div><div class="val mono">95,000</div><div class="verdict">near spot · low pin pressure</div></div>
+              <div class="regime-card"><div class="label">Put/Call OI</div><div class="val mono">0.68</div><div class="verdict"><b class="gn">call-heavy</b> · bullish positioning</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== TAB 6: SESSION PLAYBOOK ==================== -->
+      <div class="pane" id="pane-session">
+        <div class="panel" style="margin-bottom: 12px;">
+          <div class="panel-h">
+            <div class="t">⏱ 24h Session Clock</div>
+            <div class="sub">PT timezone · NY active</div>
+          </div>
+          <div class="panel-b">
+            <div class="sessions">
+              <div class="sess"><h4>Asia <span class="when">18:00–02:00 PT</span></h4><div class="bias">Range / accumulation</div><div class="range">$93,640 – $94,180</div><div class="play"><b>Played:</b> tight range, low volume · accumulation.</div></div>
+              <div class="sess"><h4>London <span class="when">00:00–09:00 PT</span></h4><div class="bias">Judas swing → expansion ↑</div><div class="range">$93,420 → $94,650</div><div class="play"><b>Played:</b> false flush to 93.42 then expansion.</div></div>
+              <div class="sess active"><h4>NY <span class="when">06:30–13:00 PT · ACTIVE</span></h4><div class="bias">Sweep → reversal expected</div><div class="range">$94,180 → $94,287</div><div class="play"><b>Playbook now:</b> NY <b>sweeps prior high then reverses</b>. Watch 94.65 sweep → 1H short setup toward 93.4K FVG.</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row r-2" style="margin-bottom: 12px;">
+          <div class="panel">
+            <div class="panel-h"><div class="t">Cross-asset overlays · BTC 30d corr</div></div>
+            <div class="panel-b">
+              <table class="beta-table">
+                <thead><tr><th>Asset</th><th>Correlation</th><th>Direction</th><th>Read</th></tr></thead>
+                <tbody>
+                  <tr><td class="sym">DXY</td><td class="num">-0.71</td><td>↓ -1.2%</td><td><span class="verdict long">DXY ↓ = BTC tailwind</span></td></tr>
+                  <tr><td class="sym">10Y real yield</td><td class="num">-0.58</td><td>↓ 2.18%</td><td><span class="verdict long">real yields softening</span></td></tr>
+                  <tr><td class="sym">Gold (GLD)</td><td class="num">+0.42</td><td>↑ +0.8%</td><td><span class="verdict watch">co-trending hedges</span></td></tr>
+                  <tr><td class="sym">QQQ</td><td class="num">+0.38</td><td>↑ +0.4%</td><td><span class="verdict watch">risk-on alignment</span></td></tr>
+                  <tr><td class="sym">HYG (high yield)</td><td class="num">+0.34</td><td>↑ +0.2%</td><td><span class="verdict long">credit healthy</span></td></tr>
+                  <tr><td class="sym">VIX</td><td class="num">-0.61</td><td>↓ 14.8</td><td><span class="verdict long">vol comp = risk on</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h"><div class="t">Portfolio overlap · SwingTrade core</div></div>
+            <div class="panel-b">
+              <div style="font-size: 12px; line-height: 1.8; color: var(--ink-2);">
+                <b>SwingTrade exposure:</b><br/>
+                · Tech long: 32% of core (NVDA, AMAT, LRCX)<br/>
+                · Energy long: 18%<br/>
+                · Defensive (XLU, GLD): 12%<br/>
+                · Cash: 38%<br/><br/>
+                <b style="color: var(--amb);">BTC long overlap risk:</b> +0.41 corr to tech long. If you add BTC at full size, you're concentrating risk-on/risk-off beta. <b style="color: var(--cy);">Recommended sizing haircut: -25%.</b><br/><br/>
+                <b style="color: var(--gn);">Diversification opportunity:</b> XRP or AVAX (lower corr to QQQ, more idiosyncratic). HOOD has the lowest portfolio overlap of the equity beta plays.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-h"><div class="t">Daily / weekly / monthly closes · key reference levels</div></div>
+          <div class="panel-b" style="font-size: 12px; line-height: 1.9;">
+            <div><b class="mono" style="color: var(--cy);">Daily close target.</b> &gt; 94,800 reclaims Wed&apos;s rejection, opens 96.8K liq.</div>
+            <div><b class="mono" style="color: var(--rd);">Daily close kill.</b> &lt; 93,200 invalidates bull OB, exposes 91.5K eq lows.</div>
+            <div><b class="mono" style="color: var(--cy);">Weekly close pivot.</b> 94,200 — above = bull weekly · below = continuation lower next week.</div>
+            <div><b class="mono" style="color: var(--amb);">Monthly open.</b> 91,840 — major reference · spot above = bull monthly bias.</div>
+            <div><b class="mono" style="color: var(--purple);">Quarterly open.</b> 88,200 — spot 6.9% above · strong quarterly bull.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== TAB 7: EQUITY BETA + ALT SCREENER ==================== -->
+      <div class="pane" id="pane-beta">
+        <div class="panel" style="margin-bottom: 12px;">
+          <div class="panel-h">
+            <div class="t">↗ Equity beta plays · BTC-correlated stocks</div>
+            <div class="sub">crypto exposure with US market hours, IRA eligibility, options chains</div>
+          </div>
+          <div class="panel-b">
+            <table class="beta-table">
+              <thead><tr><th>Sym</th><th>Setup</th><th>BTC β</th><th>Price</th><th>Entry</th><th>Stop</th><th>T1</th><th>R/R</th><th>Conflu</th><th>Verdict</th></tr></thead>
+              <tbody>
+                <tr><td colspan="10" style="font-size:9.5px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.08em; padding:8px 8px 4px; background:transparent; border-bottom:1px solid var(--line);">ETF · proxy · exchange</td></tr>
+                <tr><td class="sym">IBIT</td><td>Daily breakout retest</td><td class="beta">1.02</td><td class="num">$53.84</td><td class="num">53.10</td><td class="num">52.40</td><td class="num">55.40</td><td class="rr">3.3:1</td><td>5/5</td><td><span class="verdict long">LONG</span></td></tr>
+                <tr><td class="sym">FBTC</td><td>1× BTC alt ETF</td><td class="beta">1.01</td><td class="num">$92.10</td><td class="num">91.20</td><td class="num">89.80</td><td class="num">94.80</td><td class="rr">2.6:1</td><td>5/5</td><td><span class="verdict long">LONG</span></td></tr>
+                <tr><td class="sym">COIN</td><td>50EMA pullback</td><td class="beta">2.14</td><td class="num">$245.10</td><td class="num">243–245</td><td class="num">238.00</td><td class="num">258.00</td><td class="rr">2.6:1</td><td>4/5</td><td><span class="verdict long">LONG</span></td></tr>
+                <tr><td class="sym">MSTR</td><td>3.5× lever · earn 12d</td><td class="beta">3.62</td><td class="num">$348.20</td><td class="num">342–346</td><td class="num">334.50</td><td class="num">368.00</td><td class="rr">2.2:1</td><td>3/5</td><td><span class="verdict watch">WATCH</span></td></tr>
+                <tr><td class="sym">HOOD</td><td>30% rev crypto · base</td><td class="beta">1.41</td><td class="num">$34.92</td><td class="num">34.20</td><td class="num">33.40</td><td class="num">37.20</td><td class="rr">3.7:1</td><td>5/5</td><td><span class="verdict long">LONG</span></td></tr>
+                <tr><td class="sym">GLXY</td><td>Galaxy Digital · diversified crypto</td><td class="beta">2.42</td><td class="num">$24.84</td><td class="num">24.10</td><td class="num">23.20</td><td class="num">27.40</td><td class="rr">3.0:1</td><td>4/5</td><td><span class="verdict long">LONG</span></td></tr>
+
+                <tr><td colspan="10" style="font-size:9.5px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.08em; padding:10px 8px 4px; background:transparent; border-bottom:1px solid var(--line);">BTC miners · ranked by RS</td></tr>
+                <tr><td class="sym">IREN</td><td>Best miner RS · AI/HPC pivot</td><td class="beta">2.18</td><td class="num">$9.84</td><td class="num">9.50–9.70</td><td class="num">9.10</td><td class="num">11.20</td><td class="rr">3.4:1</td><td>5/5</td><td><span class="verdict long">LONG</span></td></tr>
+                <tr><td class="sym">CLSK</td><td>2nd best RS · efficient hashrate</td><td class="beta">2.42</td><td class="num">$11.22</td><td class="num">10.80–11.00</td><td class="num">10.40</td><td class="num">12.60</td><td class="rr">3.2:1</td><td>4/5</td><td><span class="verdict long">LONG</span></td></tr>
+                <tr><td class="sym">CIFR</td><td>Cipher · clean balance sheet</td><td class="beta">2.34</td><td class="num">$6.18</td><td class="num">6.00–6.10</td><td class="num">5.80</td><td class="num">6.80</td><td class="rr">2.8:1</td><td>3/5</td><td><span class="verdict watch">WATCH</span></td></tr>
+                <tr><td class="sym">CORZ</td><td>Core Sci · AI/HPC datacenter pivot</td><td class="beta">2.61</td><td class="num">$13.42</td><td class="num">13.00–13.20</td><td class="num">12.60</td><td class="num">14.80</td><td class="rr">2.7:1</td><td>4/5</td><td><span class="verdict long">LONG</span></td></tr>
+                <tr><td class="sym">WULF</td><td>Terawulf · AI datacenter optionality</td><td class="beta">2.48</td><td class="num">$5.84</td><td class="num">5.65–5.75</td><td class="num">5.45</td><td class="num">6.50</td><td class="rr">2.6:1</td><td>3/5</td><td><span class="verdict watch">WATCH</span></td></tr>
+                <tr><td class="sym">HUT</td><td>Hut 8 · post-merger · steady</td><td class="beta">2.28</td><td class="num">$18.40</td><td class="num">17.90–18.10</td><td class="num">17.40</td><td class="num">20.40</td><td class="rr">2.9:1</td><td>3/5</td><td><span class="verdict watch">WATCH</span></td></tr>
+                <tr><td class="sym">BITF</td><td>Bitfarms · execution risk</td><td class="beta">2.71</td><td class="num">$1.84</td><td>—</td><td>—</td><td>—</td><td class="rr" style="color: var(--ink-3);">—</td><td>2/5</td><td><span class="verdict avoid">AVOID</span></td></tr>
+                <tr><td class="sym">MARA</td><td>Weak RS · highest beta drag</td><td class="beta">2.81</td><td class="num">$18.42</td><td>—</td><td>—</td><td>—</td><td class="rr" style="color: var(--ink-3);">—</td><td>1/5</td><td><span class="verdict avoid">AVOID</span></td></tr>
+                <tr><td class="sym">RIOT</td><td>Worst RS · operational issues</td><td class="beta">2.94</td><td class="num">$11.18</td><td>—</td><td>—</td><td>—</td><td class="rr" style="color: var(--ink-3);">—</td><td>1/5</td><td><span class="verdict avoid">AVOID</span></td></tr>
+              </tbody>
+            </table>
+            <div style="font-size: 10.5px; color: var(--ink-3); margin-top: 10px; line-height: 1.5; padding: 8px 10px; background: var(--bg-2); border-radius: 6px; border-left: 3px solid var(--cy);">
+              <b style="color: var(--cy);">Miner thesis split.</b> The miner basket has bifurcated: <b style="color: var(--gn);">IREN / CORZ / WULF</b> (AI / HPC datacenter pivots) are getting re-rated as compute plays — their charts decoupled from MARA/RIOT in the last 60d. <b style="color: var(--gn);">CLSK</b> still trades as a pure miner but with the best operational efficiency. <b style="color: var(--rd);">MARA / RIOT / BITF</b> are the laggard basket — avoid until BTC clears 100K and forces capitulation rally even in losers.
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-h">
+            <div class="t">Alt Screener · top-100 by mcap</div>
+            <div class="tools">
+              <span class="pill on">All</span>
+              <span class="pill">Bull setup</span>
+              <span class="pill">Bear setup</span>
+              <span class="pill">Funding extreme</span>
+              <span class="pill">RS vs BTC ↑</span>
+            </div>
+          </div>
+          <div class="panel-b">
+            <table class="alt-table">
+              <thead><tr>
+                <th>Sym</th><th>$Price</th><th>24h</th><th>OB dist</th><th>RSI 4H</th><th>Funding</th><th>RS vs BTC 7d</th><th>Setup</th><th>R/R</th><th>Verdict</th>
+              </tr></thead>
+              <tbody>
+                <tr><td class="sym">BTC</td><td class="num">94,287</td><td class="num" style="color: var(--gn);">+1.84%</td><td class="num">-0.73%</td><td class="num">58</td><td class="num">+0.041%</td><td class="num">—</td><td>Bull OB 4H</td><td class="rr">3.2:1</td><td><span class="verdict long">LONG</span></td></tr>
+                <tr><td class="sym">ETH</td><td class="num">3,412</td><td class="num" style="color: var(--gn);">+0.92%</td><td class="num">-1.94%</td><td class="num">54</td><td class="num">+0.038%</td><td class="num" style="color: var(--rd);">-2.4%</td><td>Discount + OB</td><td class="rr">3.6:1</td><td><span class="verdict long">LONG</span></td></tr>
+                <tr><td class="sym">SOL</td><td class="num">170.42</td><td class="num" style="color: var(--gn);">+0.48%</td><td class="num">+4.21%</td><td class="num">63</td><td class="num">+0.029%</td><td class="num" style="color: var(--rd);">-1.8%</td><td>Bear OB 4H</td><td class="rr">3.1:1</td><td><span class="verdict short">SHORT</span></td></tr>
+                <tr><td class="sym">XRP</td><td class="num">2.18</td><td class="num" style="color: var(--rd);">-0.74%</td><td class="num">-1.92%</td><td class="num">42</td><td class="num" style="color: var(--gn);">-0.018%</td><td class="num" style="color: var(--rd);">-3.1%</td><td>Squeeze setup</td><td class="rr">2.8:1</td><td><span class="verdict watch">WATCH</span></td></tr>
+                <tr><td class="sym">DOGE</td><td class="num">0.184</td><td class="num" style="color: var(--gn);">+3.42%</td><td class="num">+5.81%</td><td class="num">78</td><td class="num" style="color: var(--rd);">+0.084%</td><td class="num" style="color: var(--gn);">+2.4%</td><td>Extreme funding</td><td class="rr">2.4:1</td><td><span class="verdict short">FADE</span></td></tr>
+                <tr><td class="sym">AVAX</td><td class="num">38.42</td><td class="num" style="color: var(--rd);">-1.08%</td><td class="num">-1.42%</td><td class="num">38</td><td class="num" style="color: var(--gn);">-0.041%</td><td class="num" style="color: var(--rd);">-2.2%</td><td>Crowded short</td><td class="rr">3.2:1</td><td><span class="verdict long">SQUEEZE</span></td></tr>
+                <tr><td class="sym">LINK</td><td class="num">21.84</td><td class="num" style="color: var(--gn);">+0.32%</td><td class="num">-3.42%</td><td class="num">50</td><td class="num">+0.024%</td><td class="num">-0.8%</td><td>Range</td><td class="rr">—</td><td><span class="verdict avoid">SKIP</span></td></tr>
+                <tr><td class="sym">DOT</td><td class="num">7.42</td><td class="num" style="color: var(--rd);">-0.88%</td><td class="num">-1.08%</td><td class="num">41</td><td class="num">-0.012%</td><td class="num" style="color: var(--rd);">-1.4%</td><td>No edge</td><td class="rr">—</td><td><span class="verdict avoid">SKIP</span></td></tr>
+                <tr><td class="sym">TON</td><td class="num">5.84</td><td class="num" style="color: var(--gn);">+2.12%</td><td class="num">-0.42%</td><td class="num">61</td><td class="num">+0.034%</td><td class="num" style="color: var(--gn);">+1.8%</td><td>Bull continuation</td><td class="rr">3.1:1</td><td><span class="verdict long">LONG</span></td></tr>
+                <tr><td class="sym">MATIC</td><td class="num">0.482</td><td class="num" style="color: var(--rd);">-1.42%</td><td class="num">-2.10%</td><td class="num">36</td><td class="num">-0.018%</td><td class="num" style="color: var(--rd);">-2.8%</td><td>Falling knife</td><td class="rr">—</td><td><span class="verdict avoid">SKIP</span></td></tr>
+                <tr><td class="sym">UNI</td><td class="num">8.42</td><td class="num" style="color: var(--gn);">+0.84%</td><td class="num">-1.42%</td><td class="num">53</td><td class="num">+0.022%</td><td class="num">-0.4%</td><td>Neutral</td><td class="rr">—</td><td><span class="verdict avoid">SKIP</span></td></tr>
+                <tr><td class="sym">NEAR</td><td class="num">4.12</td><td class="num" style="color: var(--gn);">+1.84%</td><td class="num">-2.84%</td><td class="num">58</td><td class="num">+0.031%</td><td class="num" style="color: var(--gn);">+0.8%</td><td>1D OB pullback</td><td class="rr">3.4:1</td><td><span class="verdict watch">WATCH</span></td></tr>
+                <tr><td class="sym">APT</td><td class="num">8.21</td><td class="num" style="color: var(--rd);">-0.84%</td><td class="num">-1.20%</td><td class="num">47</td><td class="num">+0.018%</td><td class="num" style="color: var(--rd);">-1.2%</td><td>No setup</td><td class="rr">—</td><td><span class="verdict avoid">SKIP</span></td></tr>
+              </tbody>
+            </table>
+            <div style="font-size: 10px; color: var(--ink-3); margin-top: 8px; text-align: right;">Showing 13 of 42 with non-trivial setup signal · sort: RS rank desc</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== TAB: TRENDING / HOT ==================== -->
+      <div class="pane" id="pane-trending">
+
+        <!-- Narrative bar -->
+        <div class="panel" style="margin-bottom: 12px;">
+          <div class="panel-h">
+            <div class="t">🔥 Today's Narrative · sector baskets · 24h</div>
+            <div class="sub">where the flow is going</div>
+          </div>
+          <div class="panel-b">
+            <div class="row r-4" style="margin-bottom: 10px;">
+              <div class="regime-card" style="border-color: var(--gn); border-width: 2px;">
+                <div class="label" style="color: var(--gn);">🥇 AI / Agents</div>
+                <div class="val" style="color: var(--gn);">+12.4%</div>
+                <div class="verdict">FET +18 · TAO +15 · AGIX +14 · OCEAN +9 · RNDR +7 · <b class="gn">leading narrative</b></div>
+              </div>
+              <div class="regime-card">
+                <div class="label">🥈 DePIN</div>
+                <div class="val" style="color: var(--cy);">+4.2%</div>
+                <div class="verdict">HNT +8 · IOTX +5 · HIVE +4 · MOBILE +3</div>
+              </div>
+              <div class="regime-card">
+                <div class="label">🥉 RWA</div>
+                <div class="val" style="color: var(--cy);">+2.1%</div>
+                <div class="verdict">ONDO +5 · POLYX +3 · CFG +2</div>
+              </div>
+              <div class="regime-card">
+                <div class="label">Gaming</div>
+                <div class="val" style="color: var(--ink-2);">+0.8%</div>
+                <div class="verdict">IMX +2 · BEAM +1 · GALA flat</div>
+              </div>
+            </div>
+            <div class="row r-4">
+              <div class="regime-card">
+                <div class="label">DeFi</div>
+                <div class="val" style="color: var(--ink-2);">+0.4%</div>
+                <div class="verdict">UNI +1 · AAVE +1 · MKR -1</div>
+              </div>
+              <div class="regime-card">
+                <div class="label">L1 (ex BTC/ETH)</div>
+                <div class="val" style="color: var(--rd);">-1.2%</div>
+                <div class="verdict">SOL -2 · AVAX -1 · NEAR +2 · DOT -1</div>
+              </div>
+              <div class="regime-card">
+                <div class="label">L2</div>
+                <div class="val" style="color: var(--rd);">-2.1%</div>
+                <div class="verdict">ARB -3 · OP -2 · MATIC -1 · STRK -4</div>
+              </div>
+              <div class="regime-card">
+                <div class="label">Memes</div>
+                <div class="val" style="color: var(--rd);">-3.4%</div>
+                <div class="verdict">WIF -5 · PEPE -4 · POPCAT -3 · BONK -2</div>
+              </div>
+            </div>
+            <div style="margin-top: 14px; padding: 12px; background: var(--bg-2); border-radius: 6px; border-left: 3px solid var(--orange); font-size: 12px; line-height: 1.6; color: var(--ink-2);">
+              <b style="color: var(--orange);">Narrative read.</b> AI/agents is the dominant rotation today — basket +12.4% with depth (5 names &gt;7%). DePIN + RWA confirming risk-on appetite for "real-world utility" narrative. Memes and L2 underperforming = capital rotating <b style="color: var(--cy);">from speculative → utility</b>. Playbook: long the leaders on pullback, fade extended memes.
+            </div>
+          </div>
+        </div>
+
+        <!-- Movers leaderboards -->
+        <div class="row r-2" style="margin-bottom: 12px;">
+          <div class="panel">
+            <div class="panel-h">
+              <div class="t">📈 Top 24h Gainers · top-200 mcap</div>
+              <div class="tools">
+                <span class="pill on">24h</span>
+                <span class="pill">7d</span>
+                <span class="pill">30d</span>
+              </div>
+            </div>
+            <div class="panel-b">
+              <table class="alt-table">
+                <thead><tr><th>#</th><th>Sym</th><th>$Price</th><th>24h</th><th>Vol Δ</th><th>OI Δ</th><th>Setup</th></tr></thead>
+                <tbody>
+                  <tr><td>1</td><td class="sym">FET</td><td class="num">2.84</td><td class="num" style="color: var(--gn);">+18.4%</td><td class="num">4.2×</td><td class="num">+62%</td><td><span class="verdict watch">EXT · WAIT PB</span></td></tr>
+                  <tr><td>2</td><td class="sym">TAO</td><td class="num">582.40</td><td class="num" style="color: var(--gn);">+15.2%</td><td class="num">3.1×</td><td class="num">+48%</td><td><span class="verdict long">BULL OB</span></td></tr>
+                  <tr><td>3</td><td class="sym">AGIX</td><td class="num">0.84</td><td class="num" style="color: var(--gn);">+14.1%</td><td class="num">3.8×</td><td class="num">+54%</td><td><span class="verdict watch">EXT</span></td></tr>
+                  <tr><td>4</td><td class="sym">HNT</td><td class="num">8.42</td><td class="num" style="color: var(--gn);">+8.4%</td><td class="num">2.4×</td><td class="num">+28%</td><td><span class="verdict long">BREAKOUT</span></td></tr>
+                  <tr><td>5</td><td class="sym">OCEAN</td><td class="num">1.21</td><td class="num" style="color: var(--gn);">+9.2%</td><td class="num">2.1×</td><td class="num">+22%</td><td><span class="verdict watch">EXT</span></td></tr>
+                  <tr><td>6</td><td class="sym">RNDR</td><td class="num">9.84</td><td class="num" style="color: var(--gn);">+7.1%</td><td class="num">1.9×</td><td class="num">+18%</td><td><span class="verdict long">PB ZONE</span></td></tr>
+                  <tr><td>7</td><td class="sym">ONDO</td><td class="num">1.42</td><td class="num" style="color: var(--gn);">+5.4%</td><td class="num">2.6×</td><td class="num">+34%</td><td><span class="verdict long">BULL OB</span></td></tr>
+                  <tr><td>8</td><td class="sym">DOGE</td><td class="num">0.184</td><td class="num" style="color: var(--gn);">+3.4%</td><td class="num">1.6×</td><td class="num">+12%</td><td><span class="verdict short">FUND XTR</span></td></tr>
+                  <tr><td>9</td><td class="sym">TON</td><td class="num">5.84</td><td class="num" style="color: var(--gn);">+2.1%</td><td class="num">1.2×</td><td class="num">+8%</td><td><span class="verdict long">CONT</span></td></tr>
+                  <tr><td>10</td><td class="sym">NEAR</td><td class="num">4.12</td><td class="num" style="color: var(--gn);">+1.8%</td><td class="num">1.4×</td><td class="num">+15%</td><td><span class="verdict watch">OB PB</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h">
+              <div class="t">📉 Top 24h Losers · reversal scan</div>
+              <div class="sub">RSI &lt; 30 = squeeze candidates</div>
+            </div>
+            <div class="panel-b">
+              <table class="alt-table">
+                <thead><tr><th>#</th><th>Sym</th><th>$Price</th><th>24h</th><th>RSI 4H</th><th>Funding</th><th>Reversal?</th></tr></thead>
+                <tbody>
+                  <tr><td>1</td><td class="sym">WIF</td><td class="num">2.18</td><td class="num" style="color: var(--rd);">-8.4%</td><td class="num">22</td><td class="num" style="color: var(--gn);">-0.084%</td><td><span class="verdict long">SQUEEZE</span></td></tr>
+                  <tr><td>2</td><td class="sym">STRK</td><td class="num">0.84</td><td class="num" style="color: var(--rd);">-6.2%</td><td class="num">28</td><td class="num">-0.042%</td><td><span class="verdict watch">WATCH</span></td></tr>
+                  <tr><td>3</td><td class="sym">PEPE</td><td class="num">0.0000114</td><td class="num" style="color: var(--rd);">-4.8%</td><td class="num">34</td><td class="num">-0.018%</td><td><span class="verdict avoid">NO EDGE</span></td></tr>
+                  <tr><td>4</td><td class="sym">ARB</td><td class="num">0.82</td><td class="num" style="color: var(--rd);">-3.4%</td><td class="num">38</td><td class="num">+0.012%</td><td><span class="verdict avoid">DOWNTREND</span></td></tr>
+                  <tr><td>5</td><td class="sym">POPCAT</td><td class="num">1.42</td><td class="num" style="color: var(--rd);">-3.1%</td><td class="num">42</td><td class="num">+0.022%</td><td><span class="verdict avoid">SKIP</span></td></tr>
+                  <tr><td>6</td><td class="sym">OP</td><td class="num">1.84</td><td class="num" style="color: var(--rd);">-2.4%</td><td class="num">44</td><td class="num">+0.018%</td><td><span class="verdict avoid">SKIP</span></td></tr>
+                  <tr><td>7</td><td class="sym">SOL</td><td class="num">170.42</td><td class="num" style="color: var(--rd);">-2.1%</td><td class="num">48</td><td class="num">+0.029%</td><td><span class="verdict short">BEAR OB</span></td></tr>
+                  <tr><td>8</td><td class="sym">AVAX</td><td class="num">38.42</td><td class="num" style="color: var(--rd);">-1.4%</td><td class="num">38</td><td class="num" style="color: var(--gn);">-0.041%</td><td><span class="verdict long">SQUEEZE</span></td></tr>
+                  <tr><td>9</td><td class="sym">MATIC</td><td class="num">0.482</td><td class="num" style="color: var(--rd);">-1.4%</td><td class="num">36</td><td class="num">-0.018%</td><td><span class="verdict avoid">SKIP</span></td></tr>
+                  <tr><td>10</td><td class="sym">DOT</td><td class="num">7.42</td><td class="num" style="color: var(--rd);">-0.9%</td><td class="num">41</td><td class="num">-0.012%</td><td><span class="verdict avoid">SKIP</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Volume + OI surge -->
+        <div class="row r-2" style="margin-bottom: 12px;">
+          <div class="panel">
+            <div class="panel-h">
+              <div class="t">⚡ Volume Spikes · vs 20d avg</div>
+              <div class="sub">unusual interest = institutional attention</div>
+            </div>
+            <div class="panel-b">
+              <table class="alt-table">
+                <thead><tr><th>Sym</th><th>$Price</th><th>24h Vol</th><th>vs 20d</th><th>Reason</th></tr></thead>
+                <tbody>
+                  <tr><td class="sym">FET</td><td class="num">2.84</td><td class="num">$1.84B</td><td class="num" style="color: var(--gn);">4.2×</td><td>AI narrative + Binance listing rumor</td></tr>
+                  <tr><td class="sym">AGIX</td><td class="num">0.84</td><td class="num">$420M</td><td class="num" style="color: var(--gn);">3.8×</td><td>SingularityNET roadmap update</td></tr>
+                  <tr><td class="sym">ONDO</td><td class="num">1.42</td><td class="num">$284M</td><td class="num" style="color: var(--gn);">2.6×</td><td>BlackRock RWA fund news</td></tr>
+                  <tr><td class="sym">HNT</td><td class="num">8.42</td><td class="num">$184M</td><td class="num" style="color: var(--gn);">2.4×</td><td>Helium Mobile subscriber milestone</td></tr>
+                  <tr><td class="sym">OCEAN</td><td class="num">1.21</td><td class="num">$98M</td><td class="num" style="color: var(--gn);">2.1×</td><td>FET / AGIX / OCEAN merger continuation</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h">
+              <div class="t">📊 Open Interest surge · 24h</div>
+              <div class="sub">leverage flooding in = caution + opportunity</div>
+            </div>
+            <div class="panel-b">
+              <table class="alt-table">
+                <thead><tr><th>Sym</th><th>OI now</th><th>Δ 24h</th><th>OI/MCap</th><th>Read</th></tr></thead>
+                <tbody>
+                  <tr><td class="sym">FET</td><td class="num">$248M</td><td class="num" style="color: var(--amb);">+62%</td><td class="num">14.2%</td><td><span class="verdict watch">CROWDED · FADE</span></td></tr>
+                  <tr><td class="sym">AGIX</td><td class="num">$84M</td><td class="num" style="color: var(--amb);">+54%</td><td class="num">11.8%</td><td><span class="verdict watch">EXTREME</span></td></tr>
+                  <tr><td class="sym">TAO</td><td class="num">$320M</td><td class="num" style="color: var(--gn);">+48%</td><td class="num">8.4%</td><td><span class="verdict long">REAL · OK</span></td></tr>
+                  <tr><td class="sym">ONDO</td><td class="num">$184M</td><td class="num" style="color: var(--gn);">+34%</td><td class="num">7.2%</td><td><span class="verdict long">REAL · OK</span></td></tr>
+                  <tr><td class="sym">DOGE</td><td class="num">$1.42B</td><td class="num">+12%</td><td class="num">5.4%</td><td><span class="verdict short">FUND XTR</span></td></tr>
+                </tbody>
+              </table>
+              <div style="font-size: 10.5px; color: var(--ink-3); margin-top: 8px;">
+                Read: FET + AGIX OI surge with funding rising = late-cycle longs. TAO + ONDO OI rising with funding stable = real positioning.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Social heat -->
+        <div class="row r-3" style="margin-bottom: 12px;">
+          <div class="panel">
+            <div class="panel-h"><div class="t">🐦 CoinGecko Trending</div><div class="sub">retail search</div></div>
+            <div class="panel-b">
+              <table class="alt-table">
+                <thead><tr><th>#</th><th>Sym</th><th>Δ rank</th></tr></thead>
+                <tbody>
+                  <tr><td>1</td><td class="sym">FET</td><td class="num" style="color: var(--gn);">↑ +14</td></tr>
+                  <tr><td>2</td><td class="sym">TAO</td><td class="num" style="color: var(--gn);">↑ +8</td></tr>
+                  <tr><td>3</td><td class="sym">ONDO</td><td class="num" style="color: var(--gn);">↑ +12</td></tr>
+                  <tr><td>4</td><td class="sym">PEPE</td><td class="num" style="color: var(--rd);">↓ -3</td></tr>
+                  <tr><td>5</td><td class="sym">WIF</td><td class="num">→ 0</td></tr>
+                  <tr><td>6</td><td class="sym">HNT</td><td class="num" style="color: var(--gn);">↑ +6</td></tr>
+                  <tr><td>7</td><td class="sym">VIRTUAL</td><td class="num" style="color: var(--gn);">↑ NEW</td></tr>
+                  <tr><td>8</td><td class="sym">AI16Z</td><td class="num" style="color: var(--gn);">↑ NEW</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h"><div class="t">𝕏 Twitter mention rank</div><div class="sub">24h tweet vol</div></div>
+            <div class="panel-b">
+              <table class="alt-table">
+                <thead><tr><th>Sym</th><th>Mentions</th><th>Δ</th></tr></thead>
+                <tbody>
+                  <tr><td class="sym">BTC</td><td class="num">142K</td><td class="num">+8%</td></tr>
+                  <tr><td class="sym">ETH</td><td class="num">84K</td><td class="num">+12%</td></tr>
+                  <tr><td class="sym">FET</td><td class="num">38K</td><td class="num" style="color: var(--gn);">+340%</td></tr>
+                  <tr><td class="sym">TAO</td><td class="num">28K</td><td class="num" style="color: var(--gn);">+180%</td></tr>
+                  <tr><td class="sym">SOL</td><td class="num">22K</td><td class="num" style="color: var(--rd);">-14%</td></tr>
+                  <tr><td class="sym">DOGE</td><td class="num">18K</td><td class="num">+22%</td></tr>
+                  <tr><td class="sym">PEPE</td><td class="num">14K</td><td class="num" style="color: var(--rd);">-32%</td></tr>
+                  <tr><td class="sym">AI16Z</td><td class="num">12K</td><td class="num" style="color: var(--gn);">+820%</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h"><div class="t">📊 Google Trends 7d</div><div class="sub">search interest</div></div>
+            <div class="panel-b">
+              <table class="alt-table">
+                <thead><tr><th>Term</th><th>Score</th><th>Δ</th></tr></thead>
+                <tbody>
+                  <tr><td class="sym">Bitcoin</td><td class="num">82</td><td class="num">+4</td></tr>
+                  <tr><td class="sym">"AI crypto"</td><td class="num">74</td><td class="num" style="color: var(--gn);">+38</td></tr>
+                  <tr><td class="sym">Fetch.ai</td><td class="num">61</td><td class="num" style="color: var(--gn);">+48</td></tr>
+                  <tr><td class="sym">Bittensor</td><td class="num">52</td><td class="num" style="color: var(--gn);">+34</td></tr>
+                  <tr><td class="sym">Solana</td><td class="num">41</td><td class="num" style="color: var(--rd);">-8</td></tr>
+                  <tr><td class="sym">Ethereum ETF</td><td class="num">38</td><td class="num">+2</td></tr>
+                  <tr><td class="sym">DePIN</td><td class="num">28</td><td class="num" style="color: var(--gn);">+18</td></tr>
+                  <tr><td class="sym">"AI agent token"</td><td class="num">24</td><td class="num" style="color: var(--gn);">+22</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- New listings + narrative coins -->
+        <div class="row r-2" style="margin-bottom: 12px;">
+          <div class="panel">
+            <div class="panel-h">
+              <div class="t">🆕 New / Recent narrative tokens</div>
+              <div class="sub">launched &lt; 90d · &gt; 3× perf</div>
+            </div>
+            <div class="panel-b">
+              <table class="alt-table">
+                <thead><tr><th>Sym</th><th>Age</th><th>Launch</th><th>Now</th><th>Multi</th><th>Mcap</th><th>Narrative</th></tr></thead>
+                <tbody>
+                  <tr><td class="sym">AI16Z</td><td>42d</td><td class="num">$0.012</td><td class="num">$1.84</td><td class="num" style="color: var(--gn);">153×</td><td class="num">$1.8B</td><td>AI agent · Eliza framework</td></tr>
+                  <tr><td class="sym">VIRTUAL</td><td>120d</td><td class="num">$0.024</td><td class="num">$2.42</td><td class="num" style="color: var(--gn);">101×</td><td class="num">$2.4B</td><td>AI agent · Base ecosystem</td></tr>
+                  <tr><td class="sym">GRIFFAIN</td><td>14d</td><td class="num">$0.080</td><td class="num">$0.84</td><td class="num" style="color: var(--gn);">10.5×</td><td class="num">$640M</td><td>AI agent · Solana</td></tr>
+                  <tr><td class="sym">ARC</td><td>22d</td><td class="num">$0.084</td><td class="num">$0.62</td><td class="num" style="color: var(--gn);">7.4×</td><td class="num">$420M</td><td>AI agent framework</td></tr>
+                  <tr><td class="sym">FARTCOIN</td><td>34d</td><td class="num">$0.018</td><td class="num">$1.21</td><td class="num" style="color: var(--gn);">67×</td><td class="num">$1.2B</td><td>Meme · AI-generated</td></tr>
+                </tbody>
+              </table>
+              <div style="font-size: 10.5px; color: var(--ink-3); margin-top: 8px;">
+                <b style="color: var(--amb);">Caution:</b> these are momentum plays only · no orderblock methodology applies · size as binary lottery tickets (0.25–0.5% allocation max).
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h">
+              <div class="t">📡 Exchange listings · last 7d</div>
+              <div class="sub">listing pumps = tradeable</div>
+            </div>
+            <div class="panel-b">
+              <table class="alt-table">
+                <thead><tr><th>Sym</th><th>Exchange</th><th>Date</th><th>Listing pump</th><th>24h after</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td class="sym">VIRTUAL</td><td>Binance</td><td>5d ago</td><td class="num" style="color: var(--gn);">+128%</td><td class="num" style="color: var(--rd);">-18%</td><td><span class="verdict watch">RANGE</span></td></tr>
+                  <tr><td class="sym">SHELL</td><td>Coinbase</td><td>3d ago</td><td class="num" style="color: var(--gn);">+84%</td><td class="num" style="color: var(--rd);">-32%</td><td><span class="verdict avoid">FADING</span></td></tr>
+                  <tr><td class="sym">VVV</td><td>Coinbase</td><td>2d ago</td><td class="num" style="color: var(--gn);">+62%</td><td class="num" style="color: var(--gn);">+12%</td><td><span class="verdict long">HOLDING</span></td></tr>
+                  <tr><td class="sym">BIO</td><td>Binance</td><td>1d ago</td><td class="num" style="color: var(--gn);">+42%</td><td class="num" style="color: var(--rd);">-22%</td><td><span class="verdict watch">PB ZONE</span></td></tr>
+                </tbody>
+              </table>
+              <div style="font-size: 10.5px; color: var(--ink-3); margin-top: 8px;">
+                <b>Pattern:</b> listing pump avg +79% → -25% mean reversion within 48h. <b style="color: var(--cy);">Don&apos;t chase</b> the pump · wait for 50-61.8% retrace into base.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TRENDING → TRADEABLE -->
+        <div class="panel">
+          <div class="panel-h">
+            <div class="t">🎯 Trending → Tradeable · curated</div>
+            <div class="sub">trending coins with clean structural setup (not chasing pumps)</div>
+          </div>
+          <div class="panel-b">
+            <div class="row r-3">
+              <div class="tradecard long" style="margin-bottom: 0;">
+                <div class="head">
+                  <div>
+                    <div class="side"><span class="lbl">LONG</span><span class="sym">TAO</span></div>
+                    <div class="setup">Bull OB 4H · in trending narrative · 5/5 confluence</div>
+                  </div>
+                  <div class="head-right"><div class="rr">3.4 : 1</div></div>
+                </div>
+                <div class="levels">
+                  <div class="lvl entry"><span class="k">Entry</span><span class="v">560–572</span></div>
+                  <div class="lvl stop"><span class="k">Stop</span><span class="v">548</span></div>
+                  <div class="lvl t1"><span class="k">T1</span><span class="v">612</span></div>
+                  <div class="lvl t2"><span class="k">T2</span><span class="v">640</span></div>
+                </div>
+                <div class="why">
+                  <span class="chip hi">AI narrative #1 ✓</span>
+                  <span class="chip hi">OI +48% real ✓</span>
+                  <span class="chip hi">4H bull OB ✓</span>
+                  <span class="chip hi">Twitter +180% ✓</span>
+                </div>
+              </div>
+
+              <div class="tradecard long" style="margin-bottom: 0;">
+                <div class="head">
+                  <div>
+                    <div class="side"><span class="lbl">LONG</span><span class="sym">ONDO</span></div>
+                    <div class="setup">Daily OB · RWA narrative confirming · 4/5</div>
+                  </div>
+                  <div class="head-right"><div class="rr">3.1 : 1</div></div>
+                </div>
+                <div class="levels">
+                  <div class="lvl entry"><span class="k">Entry</span><span class="v">1.38–1.42</span></div>
+                  <div class="lvl stop"><span class="k">Stop</span><span class="v">1.34</span></div>
+                  <div class="lvl t1"><span class="k">T1</span><span class="v">1.54</span></div>
+                  <div class="lvl t2"><span class="k">T2</span><span class="v">1.68</span></div>
+                </div>
+                <div class="why">
+                  <span class="chip hi">RWA #1 ✓</span>
+                  <span class="chip hi">BlackRock catalyst ✓</span>
+                  <span class="chip hi">OI clean +34% ✓</span>
+                  <span class="chip warn">funding rising</span>
+                </div>
+              </div>
+
+              <div class="tradecard fade" style="margin-bottom: 0;">
+                <div class="head">
+                  <div>
+                    <div class="side"><span class="lbl">FADE</span><span class="sym">FET</span></div>
+                    <div class="setup">Extended · OI extreme · wait for PB · 3/5</div>
+                  </div>
+                  <div class="head-right"><div class="rr">2.4 : 1</div></div>
+                </div>
+                <div class="levels">
+                  <div class="lvl entry"><span class="k">Sell</span><span class="v">2.94–3.02</span></div>
+                  <div class="lvl stop"><span class="k">Stop</span><span class="v">3.18</span></div>
+                  <div class="lvl t1"><span class="k">T1</span><span class="v">2.62</span></div>
+                  <div class="lvl t2"><span class="k">T2</span><span class="v">2.40</span></div>
+                </div>
+                <div class="why">
+                  <span class="chip warn">+18% extended ✓</span>
+                  <span class="chip warn">OI/Mcap 14.2% ✓</span>
+                  <span class="chip warn">funding extreme</span>
+                  <span class="chip">narrative leader ✗</span>
+                </div>
+              </div>
+            </div>
+            <div style="margin-top: 12px; padding: 10px; background: var(--bg-2); border-radius: 6px; font-size: 11px; color: var(--ink-2); border-left: 3px solid var(--cy); line-height: 1.6;">
+              <b style="color: var(--cy);">Discipline note.</b> 8 names are trending today but only <b>3 are tradeable</b>. The other 5 are extended (FET, AGIX, OCEAN), no clean entry (DOGE, RNDR), or pure momentum lottery (AI16Z, VIRTUAL — size as 0.25% max). The screen separates "what's moving" from "what's tradeable" so you don't chase.
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ==================== TAB 8: REGIME ==================== -->
+      <div class="pane" id="pane-regime">
+        <div class="panel" style="margin-bottom: 12px;">
+          <div class="panel-h">
+            <div class="t">◆ 4-Regime Classifier · Crypto · with hysteresis</div>
+            <div class="sub">2-bar confirmation before regime flip</div>
+          </div>
+          <div class="panel-b">
+            <div class="row r-4">
+              <div class="regime-card" style="border-color: var(--gn); border-width: 2px;">
+                <div class="label" style="color: var(--gn);">CURRENT REGIME</div>
+                <div class="val" style="color: var(--gn);">RISK-ON TRENDING</div>
+                <div class="verdict">BTC &gt; 200D · ETF inflows · OI rising · stables ↑ · 5 of 6 on-chain bull → <b class="gn">trend continuation playbook · full size</b></div>
+              </div>
+              <div class="regime-card">
+                <div class="label">RISK-ON CHOPPY</div>
+                <div class="val" style="color: var(--ink-3);">inactive</div>
+                <div class="verdict">would trigger if breadth &lt; 50% AND vol expanding</div>
+              </div>
+              <div class="regime-card">
+                <div class="label">RISK-OFF</div>
+                <div class="val" style="color: var(--ink-3);">inactive</div>
+                <div class="verdict">would trigger if BTC &lt; 200D AND ETF outflow 3d</div>
+              </div>
+              <div class="regime-card">
+                <div class="label">CAPITULATION</div>
+                <div class="val" style="color: var(--ink-3);">inactive</div>
+                <div class="verdict">would trigger if BVOL &gt; 95%ile AND funding &lt; -0.05%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row r-2-1">
+          <div class="panel">
+            <div class="panel-h"><div class="t">Rotation map · BTC vs. assets · 30d RS</div></div>
+            <div class="panel-b">
+              <div style="width: 100%; height: 280px; background: var(--bg-2); border-radius: 8px; padding: 4px; overflow: hidden;">
+                <svg viewBox="0 0 400 240" preserveAspectRatio="xMidYMid meet" width="100%" height="100%" style="display: block;">
+                  <line x1="200" y1="0" x2="200" y2="240" stroke="var(--line)"/>
+                  <line x1="0" y1="120" x2="400" y2="120" stroke="var(--line)"/>
+                  <text x="6" y="14"  font-size="9" fill="var(--ink-3)">improving</text>
+                  <text x="394" y="14" font-size="9" fill="var(--ink-3)" text-anchor="end">leading</text>
+                  <text x="6" y="234"  font-size="9" fill="var(--ink-3)">lagging</text>
+                  <text x="394" y="234" font-size="9" fill="var(--ink-3)" text-anchor="end">weakening</text>
+                  <circle cx="304" cy="64" r="14" fill="var(--orange)"/><text x="304" y="68" font-size="11" fill="#000" text-anchor="middle" font-weight="700">BTC</text>
+                  <circle cx="160" cy="88" r="10" fill="var(--cy)"/><text x="160" y="92" font-size="9" fill="#000" text-anchor="middle" font-weight="700">ETH</text>
+                  <circle cx="124" cy="148" r="9" fill="var(--amb)"/><text x="124" y="151" font-size="9" fill="#000" text-anchor="middle" font-weight="700">SOL</text>
+                  <circle cx="252" cy="138" r="9" fill="var(--copper)"/><text x="252" y="141" font-size="8" fill="#000" text-anchor="middle" font-weight="700">GLD</text>
+                  <circle cx="232" cy="98" r="9" fill="#5b8def"/><text x="232" y="101" font-size="8" fill="#000" text-anchor="middle" font-weight="700">QQQ</text>
+                  <circle cx="92" cy="184" r="8" fill="var(--rd)"/><text x="92" y="187" font-size="8" fill="#000" text-anchor="middle" font-weight="700">ALT</text>
+                  <circle cx="328" cy="178" r="8" fill="var(--purple)"/><text x="328" y="181" font-size="8" fill="#000" text-anchor="middle" font-weight="700">DXY</text>
+                </svg>
+              </div>
+              <div style="font-size: 11px; color: var(--ink-2); margin-top: 10px; line-height: 1.6;">
+                BTC is <b style="color: var(--gn);">leading</b> · DXY in weakening quadrant (good for risk) · ETH improving but lagging · alts in lagging/weakening. <b style="color: var(--cy);">Playbook:</b> overweight BTC, neutral ETH, avoid alt basket.
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h"><div class="t">Cycle context</div></div>
+            <div class="panel-b" style="font-size: 11.5px; line-height: 1.8;">
+              <div><b class="mono" style="color: var(--ink-2);">Halving cycle:</b> ~13mo post (Apr 2024). Mid-cycle expansion.</div>
+              <div><b class="mono" style="color: var(--ink-2);">200W SMA:</b> $52.4K · spot 80% above.</div>
+              <div><b class="mono" style="color: var(--ink-2);">MVRV Z:</b> 2.4 · neutral.</div>
+              <div><b class="mono" style="color: var(--ink-2);">Realized cap:</b> $688B · +3.4% MoM.</div>
+              <div><b class="mono" style="color: var(--ink-2);">Pi Cycle:</b> not crossed (gap 18%).</div>
+              <div style="margin-top: 10px; padding: 10px; background: var(--bg-2); border-radius: 6px; font-size: 11px; color: var(--ink-2); border-left: 3px solid var(--gn);">
+                <b style="color: var(--gn);">Verdict.</b> Mid-cycle, neutral on-chain valuation, ETF flows positive, BTC.D favoring BTC. Tradeable regime — size up to full risk on T1 confluence setups.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-note">
+        <b>v2 prototype.</b> Data: EODHD (BTC-USD.CC, ETH-USD.CC, equities) · Binance + Bybit + OKX public REST (funding, OI, basis) · Deribit public (options, IV, max pain) · bitinfocharts / mempool.space (on-chain) · CME public daily settles. <b>All algorithm-only signals</b> (OBs, FVGs, eq highs/lows, sessions, P/D zones, IRL/ERL, aVWAPs, volume profile) derived from existing OHLCV — no new licenses. Liquidation magnitudes derived from OI deltas + assumed leverage ratio.
+      </div>
+    </div>
+
+    <!-- ============= PERSISTENT TRADE INBOX RIGHT-RAIL ============= -->
+    <div class="inbox">
+      <div class="inbox-section">
+        <div class="inbox-h">
+          <div class="t">◎ Trade Inbox</div>
+          <div class="count">4</div>
+        </div>
+        <div class="inbox-b">
+          <div class="quickplan long" onclick="document.querySelector('[data-tab=desk]').click()">
+            <div class="row1"><span class="sym">BTC LONG</span><span class="rr">3.2:1 · 5/5</span></div>
+            <div class="row2">93.20K · stop 92.78K · T1 95.10K</div>
+            <div class="row3">Bull OB 4H · untested</div>
+          </div>
+          <div class="quickplan long">
+            <div class="row1"><span class="sym">ETH LONG</span><span class="rr">3.6:1 · 5/5</span></div>
+            <div class="row2">3,310 · stop 3,265 · T1 3,520</div>
+            <div class="row3">Discount zone + weekly OB</div>
+          </div>
+          <div class="quickplan fade">
+            <div class="row1"><span class="sym">BTC FADE</span><span class="rr">2.8:1 · 4/5</span></div>
+            <div class="row2">95.80K · stop 96.42K · T1 94.10K</div>
+            <div class="row3">Funding extreme + short liq</div>
+          </div>
+          <div class="quickplan short">
+            <div class="row1"><span class="sym">SOL SHORT</span><span class="rr">3.1:1 · 4/5</span></div>
+            <div class="row2">178 · stop 184.20 · T1 168.50</div>
+            <div class="row3">Bear OB 4H · BTC.D up</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inbox-section">
+        <div class="inbox-h">
+          <div class="t">🔥 Hot Right Now</div>
+          <div class="count" style="background: var(--gn); color: #000;">AI</div>
+        </div>
+        <div class="inbox-b">
+          <div style="font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px;">Top narrative · 24h</div>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 0; margin-bottom: 8px;">
+            <div style="font-weight: 700; font-size: 12px;">AI / Agents</div>
+            <div class="mono" style="color: var(--gn); font-weight: 700; font-size: 13px;">+12.4%</div>
+          </div>
+
+          <div style="font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; margin: 8px 0 4px;">Movers</div>
+          <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 4px; font-size: 11px; align-items: center;">
+            <div class="sym" style="font-weight: 700;">FET</div><div class="mono" style="color: var(--gn);">+18%</div><div style="font-size: 9px; color: var(--amb); background: var(--amb-dim); padding: 1px 4px; border-radius: 3px;">EXT</div>
+            <div class="sym" style="font-weight: 700;">TAO</div><div class="mono" style="color: var(--gn);">+15%</div><div style="font-size: 9px; color: var(--gn); background: var(--gn-dim); padding: 1px 4px; border-radius: 3px;">OK</div>
+            <div class="sym" style="font-weight: 700;">AGIX</div><div class="mono" style="color: var(--gn);">+14%</div><div style="font-size: 9px; color: var(--amb); background: var(--amb-dim); padding: 1px 4px; border-radius: 3px;">EXT</div>
+            <div class="sym" style="font-weight: 700;">HNT</div><div class="mono" style="color: var(--gn);">+8%</div><div style="font-size: 9px; color: var(--gn); background: var(--gn-dim); padding: 1px 4px; border-radius: 3px;">OK</div>
+            <div class="sym" style="font-weight: 700;">ONDO</div><div class="mono" style="color: var(--gn);">+5%</div><div style="font-size: 9px; color: var(--gn); background: var(--gn-dim); padding: 1px 4px; border-radius: 3px;">OK</div>
+            <div class="sym" style="font-weight: 700;">WIF</div><div class="mono" style="color: var(--rd);">-8%</div><div style="font-size: 9px; color: var(--cy); background: var(--cy-dim); padding: 1px 4px; border-radius: 3px;">SQZ</div>
+          </div>
+
+          <div style="font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; margin: 10px 0 4px;">Twitter spikes</div>
+          <div style="display: grid; grid-template-columns: 1fr auto; gap: 4px; font-size: 11px;">
+            <div class="sym" style="font-weight: 700;">AI16Z</div><div class="mono" style="color: var(--gn);">+820%</div>
+            <div class="sym" style="font-weight: 700;">FET</div><div class="mono" style="color: var(--gn);">+340%</div>
+            <div class="sym" style="font-weight: 700;">TAO</div><div class="mono" style="color: var(--gn);">+180%</div>
+          </div>
+
+          <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 10px; color: var(--ink-3); text-align: center; cursor: pointer;" onclick="document.querySelector('[data-tab=trending]').click()">
+            → Full Trending tab
+          </div>
+        </div>
+      </div>
+
+      <div class="inbox-section">
+        <div class="inbox-h"><div class="t">📐 Global Sizer</div></div>
+        <div class="inbox-b">
+          <div class="global-sizer">
+            <div class="sf"><span class="k">Account $</span><input value="25000" id="g-acct" /></div>
+            <div class="sf"><span class="k">Risk %</span><input value="1.0" id="g-risk" /></div>
+            <div class="sf"><span class="k">Stop dist $</span><input value="520" id="g-stop" /></div>
+            <div class="sf"><span class="k">Price</span><input value="93400" id="g-price" /></div>
+            <div class="out">
+              <div>Risk: <b>$250</b></div>
+              <div>Qty: <b>0.481 BTC</b></div>
+              <div>Notional: <b>$44,925</b></div>
+              <div>Leverage: <b>1.80×</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inbox-section">
+        <div class="inbox-h">
+          <div class="t">⊕ Open Positions</div>
+          <div class="count" style="background: var(--gn); color: #000;">+2.4%</div>
+        </div>
+        <div class="inbox-b">
+          <div class="position-mini">
+            <div><div class="pm-sym">IBIT · 100 sh</div><div class="pm-meta">@ 51.20 · 4d held</div></div>
+            <div class="pm-pl up">+$264</div>
+          </div>
+          <div class="position-mini">
+            <div><div class="pm-sym">COIN · 20 sh</div><div class="pm-meta">@ 238.00 · 6d held</div></div>
+            <div class="pm-pl up">+$142</div>
+          </div>
+          <div class="position-mini">
+            <div><div class="pm-sym">HOOD · 80 sh</div><div class="pm-meta">@ 33.50 · 2d held</div></div>
+            <div class="pm-pl up">+$114</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inbox-section">
+        <div class="inbox-h"><div class="t">🔔 Alerts</div></div>
+        <div class="inbox-b">
+          <div class="alert-row">
+            <div class="ic">●</div>
+            <div>BTC tags 93,400 bull OB</div>
+            <div class="when">armed</div>
+          </div>
+          <div class="alert-row">
+            <div class="ic warn">▲</div>
+            <div>BTC funding &gt; +0.06%</div>
+            <div class="when">armed</div>
+          </div>
+          <div class="alert-row">
+            <div class="ic fire">●</div>
+            <div>ETF outflow &gt; -$150M</div>
+            <div class="when">armed</div>
+          </div>
+          <div class="alert-row">
+            <div class="ic">●</div>
+            <div>BTC daily close &lt; 92.5K</div>
+            <div class="when">armed</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inbox-section">
+        <div class="inbox-h"><div class="t">📊 Stats · 30d</div></div>
+        <div class="inbox-b" style="font-size: 11px; line-height: 1.7;">
+          <div style="display:flex; justify-content: space-between;"><span style="color: var(--ink-3);">Win rate</span><b class="mono">61%</b></div>
+          <div style="display:flex; justify-content: space-between;"><span style="color: var(--ink-3);">Profit factor</span><b class="mono" style="color: var(--gn);">1.92</b></div>
+          <div style="display:flex; justify-content: space-between;"><span style="color: var(--ink-3);">Avg R · win</span><b class="mono">+2.14</b></div>
+          <div style="display:flex; justify-content: space-between;"><span style="color: var(--ink-3);">Avg R · loss</span><b class="mono">-0.92</b></div>
+          <div style="display:flex; justify-content: space-between;"><span style="color: var(--ink-3);">Best setup</span><b>Bull OB 4H</b></div>
+          <div style="display:flex; justify-content: space-between;"><span style="color: var(--ink-3);">Worst setup</span><b>Fade · range</b></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // Track which tab has had its charts built
+  const tabsBuilt = new Set();
+
+  // Sub-tab routing — lazy-build charts when tab first activated
+  document.querySelectorAll('.subtab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.subtab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.pane').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      const tab = t.dataset.tab;
+      document.getElementById('pane-' + tab).classList.add('active');
+      // build this tab's charts on first activation (containers now have real width)
+      setTimeout(() => {
+        if (!tabsBuilt.has(tab)) {
+          buildTabCharts(tab);
+          tabsBuilt.add(tab);
+        } else {
+          resizeTabCharts(tab);
+        }
+      }, 30);
+    });
+  });
+
+  // Global sizer recompute
+  function recomputeSizer() {
+    const acct = parseFloat(document.getElementById('g-acct').value) || 0;
+    const risk = parseFloat(document.getElementById('g-risk').value) || 0;
+    const stop = parseFloat(document.getElementById('g-stop').value) || 1;
+    const price = parseFloat(document.getElementById('g-price').value) || 1;
+    const riskDollars = acct * risk / 100;
+    const qty = riskDollars / stop;
+    const notional = qty * price;
+    const leverage = notional / acct;
+    const out = document.querySelector('.global-sizer .out');
+    out.innerHTML = `<div>Risk: <b>$${riskDollars.toFixed(0)}</b></div>
+                     <div>Qty: <b>${qty.toFixed(4)} units</b></div>
+                     <div>Notional: <b>$${notional.toFixed(0)}</b></div>
+                     <div>Leverage: <b>${leverage.toFixed(2)}×</b></div>`;
+  }
+  ['g-acct','g-risk','g-stop','g-price'].forEach(id => {
+    document.getElementById(id).addEventListener('input', recomputeSizer);
+  });
+
+  // Chart helpers
+  function mockCandles(n, start, vol) {
+    const out = []; let price = start;
+    const now = Math.floor(Date.now() / 1000);
+    for (let i = 0; i < n; i++) {
+      const open = price;
+      const drift = (Math.sin(i * 0.4) + (Math.random() - 0.4)) * vol;
+      const close = open + drift;
+      const high = Math.max(open, close) + Math.random() * vol * 0.5;
+      const low  = Math.min(open, close) - Math.random() * vol * 0.5;
+      out.push({ time: now - (n - i) * 14400, open, high, low, close });
+      price = close;
+    }
+    return out;
+  }
+
+  function buildChart(id, candles, opts) {
+    opts = opts || {};
+    const el = document.getElementById(id);
+    if (!el || !window.LightweightCharts) return null;
+    const isLight = document.body.classList.contains('light');
+    const chart = LightweightCharts.createChart(el, {
+      width: el.clientWidth,
+      height: el.clientHeight,
+      layout: {
+        background: { color: 'transparent' },
+        textColor: isLight ? '#4a5560' : '#9aa6b2',
+        fontFamily: '"JetBrains Mono", monospace',
+      },
+      grid: {
+        vertLines: { color: isLight ? '#e6eaef' : '#1f2733' },
+        horzLines: { color: isLight ? '#e6eaef' : '#1f2733' },
+      },
+      timeScale: { borderColor: isLight ? '#d9dee5' : '#2a3340', timeVisible: opts.timeVisible !== false },
+      rightPriceScale: { borderColor: isLight ? '#d9dee5' : '#2a3340' },
+      crosshair: { mode: 1 },
+    });
+    const series = chart.addCandlestickSeries({
+      upColor: '#00d68f', downColor: '#ff4d4f', wickUpColor: '#00d68f', wickDownColor: '#ff4d4f', borderVisible: false,
+    });
+    series.setData(candles);
+
+    if (opts.overlays && opts.overlays.length) {
+      opts.overlays.forEach(ov => {
+        if (ov.type === 'box') {
+          const t0 = candles[0].time, t1 = candles[candles.length-1].time;
+          series.createPriceLine({ price: ov.top, color: ov.color, lineWidth: 1, lineStyle: 0, axisLabelVisible: false, title: ov.label || '' });
+          series.createPriceLine({ price: ov.bot, color: ov.color, lineWidth: 1, lineStyle: 0, axisLabelVisible: false });
+        } else if (ov.type === 'level') {
+          series.createPriceLine({ price: ov.price, color: ov.color, lineWidth: 1, lineStyle: ov.dash ? 2 : 0, axisLabelVisible: true, title: ov.label || '' });
+        }
+      });
+    }
+    chart.timeScale().fitContent();
+    return { chart, series };
+  }
+
+  function buildLine(id, points, color) {
+    const el = document.getElementById(id);
+    if (!el || !window.LightweightCharts) return null;
+    const isLight = document.body.classList.contains('light');
+    const chart = LightweightCharts.createChart(el, {
+      width: el.clientWidth, height: el.clientHeight,
+      layout: { background: { color: 'transparent' }, textColor: isLight ? '#4a5560' : '#9aa6b2' },
+      grid: { vertLines: { color: 'transparent' }, horzLines: { color: isLight ? '#e6eaef' : '#1f2733' } },
+      timeScale: { borderColor: 'transparent', visible: false },
+      rightPriceScale: { borderColor: 'transparent' },
+      crosshair: { mode: 0 },
+    });
+    const line = chart.addLineSeries({ color: color || '#ff7a00', lineWidth: 2 });
+    line.setData(points);
+    chart.timeScale().fitContent();
+    return chart;
+  }
+
+  // Registry: tab -> [chart instances] for resize
+  const chartRegistry = {};
+
+  function registerChart(tab, ch) {
+    if (!ch) return;
+    if (!chartRegistry[tab]) chartRegistry[tab] = [];
+    chartRegistry[tab].push(ch);
+  }
+
+  function resizeTabCharts(tab) {
+    (chartRegistry[tab] || []).forEach(({chart, container}) => {
+      if (container && chart && container.clientWidth > 0) {
+        chart.resize(container.clientWidth, container.clientHeight);
+      }
+    });
+  }
+
+  // Build charts for a specific tab
+  function buildTabCharts(tab) {
+    if (!window.LightweightCharts) {
+      console.warn('LightweightCharts library failed to load (CDN blocked?). Charts will not render.');
+      return;
+    }
+
+    if (tab === 'desk') {
+      const c4h = mockCandles(60, 91000, 700);
+      const ch = buildChart('btc-4h-chart', c4h, {
+        overlays: [
+          { type: 'box', top: 96180, bot: 95710, color: '#ff4d4f', label: 'BEAR OB' },
+          { type: 'box', top: 93640, bot: 93200, color: '#ffb800', label: 'BULL OB' },
+          { type: 'level', price: 94287, color: '#ff7a00', label: 'NOW' },
+          { type: 'level', price: 92800, color: '#ff4d4f', dash: true, label: 'LIQ' },
+          { type: 'level', price: 96820, color: '#ff4d4f', dash: true, label: 'LIQ' },
+          { type: 'level', price: 84210, color: '#c97a4a', dash: true, label: 'aVWAP halve' },
+        ]
+      });
+      if (ch) registerChart('desk', { chart: ch.chart, container: document.getElementById('btc-4h-chart') });
+    }
+
+    if (tab === 'mtf') {
+      const cfgs = [
+        { id: 'tf-1w', candles: mockCandles(40, 60000, 4500) },
+        { id: 'tf-1d', candles: mockCandles(60, 82000, 1800) },
+        { id: 'tf-4h', candles: mockCandles(80, 91000, 650), overlays: [
+          { type: 'box', top: 93640, bot: 93200, color: '#ffb800' },
+          { type: 'level', price: 94287, color: '#ff7a00' },
+        ]},
+        { id: 'tf-1h', candles: mockCandles(80, 93000, 250) },
+        { id: 'tf-5m', candles: mockCandles(80, 93800, 80) },
+      ];
+      cfgs.forEach(cfg => {
+        const ch = buildChart(cfg.id, cfg.candles, { timeVisible: false, overlays: cfg.overlays || [] });
+        if (ch) registerChart('mtf', { chart: ch.chart, container: document.getElementById(cfg.id) });
+      });
+    }
+
+    if (tab === 'liq') {
+      const gexPoints = [];
+      for (let i = 0; i < 100; i++) {
+        const t = Math.floor(Date.now()/1000) - (100-i) * 3600;
+        const gex = Math.sin((i - 40) * 0.15) * 500 + (i < 40 ? -800 : 200);
+        gexPoints.push({ time: t, value: gex });
+      }
+      const c1 = buildLine('gex-chart', gexPoints, '#b46bff');
+      if (c1) registerChart('liq', { chart: c1, container: document.getElementById('gex-chart') });
+
+      const vpPoints = [];
+      for (let i = 0; i < 50; i++) {
+        const t = Math.floor(Date.now()/1000) - (50-i)*3600;
+        const v = Math.exp(-Math.pow((i-30)/8, 2)) * 100 + Math.random()*8;
+        vpPoints.push({ time: t, value: v });
+      }
+      const c2 = buildLine('vp-chart', vpPoints, '#4cd6ff');
+      if (c2) registerChart('liq', { chart: c2, container: document.getElementById('vp-chart') });
+    }
+
+    if (tab === 'flow') {
+      const etfPoints = [];
+      const etfData = [42, 84, -28, 142, 186, 84, 312];
+      for (let i = 0; i < etfData.length; i++) {
+        etfPoints.push({ time: Math.floor(Date.now()/1000) - (etfData.length-i)*86400, value: etfData[i] });
+      }
+      const c1 = buildLine('etf-chart', etfPoints, '#00d68f');
+      if (c1) registerChart('flow', { chart: c1, container: document.getElementById('etf-chart') });
+
+      const ivPoints = [];
+      const ivData = [54, 51, 49, 48, 48, 50, 53];
+      for (let i = 0; i < ivData.length; i++) {
+        ivPoints.push({ time: Math.floor(Date.now()/1000) - (ivData.length-i)*86400, value: ivData[i] });
+      }
+      const c2 = buildLine('iv-chart', ivPoints, '#ffb800');
+      if (c2) registerChart('flow', { chart: c2, container: document.getElementById('iv-chart') });
+    }
+  }
+
+  // Build the initially-active tab's charts as soon as the page is ready
+  function initActiveTab() {
+    if (!window.LightweightCharts) {
+      // Library hasn't loaded yet — retry
+      setTimeout(initActiveTab, 100);
+      return;
+    }
+    const activeTab = document.querySelector('.subtab.active');
+    if (activeTab) {
+      const tab = activeTab.dataset.tab;
+      buildTabCharts(tab);
+      tabsBuilt.add(tab);
+    }
+  }
+
+  if (document.readyState === 'complete') {
+    initActiveTab();
+  } else {
+    window.addEventListener('load', initActiveTab);
+  }
+
+  // Window resize → resize all built charts on the active tab
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      const activeTab = document.querySelector('.subtab.active');
+      if (activeTab) resizeTabCharts(activeTab.dataset.tab);
+    }, 100);
+  });
+</script>
+
+</body>
+</html>

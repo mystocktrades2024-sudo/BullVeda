@@ -421,7 +421,10 @@ def bulk_fundamentals(symbols: list[str], exchange: str = "US",
     symbols = symbols[:100]
     syms_param = ",".join(to_eodhd_symbol(s) for s in symbols)
     # Deterministic cache key (sort symbols so reordered calls share cache)
-    cache_key = f"fund_bulk_{exchange}_{','.join(sorted(symbols)).upper()}"
+    # SHA1-hashed — filesystem ENAMETOOLONG when 100 tickers concatenated as filename.
+    import hashlib as _hl
+    _key_src = f"{exchange}|{','.join(sorted(symbols)).upper()}"
+    cache_key = f"fund_bulk_{exchange}_{_hl.sha1(_key_src.encode()).hexdigest()[:16]}"
     return _request(
         f"fundamentals-bulk/{exchange}",
         params={"symbols": syms_param},

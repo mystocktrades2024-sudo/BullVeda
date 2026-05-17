@@ -35,6 +35,309 @@ import traceback
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field, asdict
+KAIROS_CSS = '''
+:root {
+  --bg-0:#000000; --bg:#000; --bg-1:#0a0d0c; --bg-2:#0f1311; --bg-3:#141816;
+  --line:#1d2520; --line-2:#2a352e;
+  --ink:#d8d6cc; --ink-1:#b0aea3; --ink-2:#80847a; --ink-3:#545851; --ink-4:#2e312c;
+  --gn:#5be57c; --gn-bg:rgba(91,229,124,0.08); --gn-dim:rgba(91,229,124,0.30);
+  --amb:#ffb95c; --amb-bg:rgba(255,185,92,0.08); --amb-dim:rgba(255,185,92,0.30);
+  --rd:#ff6b5b; --rd-bg:rgba(255,107,91,0.08); --rd-dim:rgba(255,107,91,0.30);
+  --cy:#5ec8d8; --cy-bg:rgba(94,200,216,0.08);
+  --copper:#d97757; --copper-bg:rgba(217,119,87,0.08);
+  --vio:#a78bfa; --vio-bg:rgba(167,139,250,0.08);
+  --sans:'Inter','Aptos','Aptos Display',-apple-system,BlinkMacSystemFont,system-ui,'Segoe UI',sans-serif;
+  --mono:'Inter','Aptos','Aptos Display',-apple-system,BlinkMacSystemFont,system-ui,'Segoe UI',sans-serif;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html, body {
+  background: var(--bg-1); color: var(--ink);
+  font: 13px var(--sans); line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+a { color: inherit; text-decoration: none; cursor: pointer; }
+code { font: 600 11px var(--mono); background: var(--cy-bg); color: var(--cy); padding: 1px 5px; border-radius: 2px; }
+
+.refv2 { padding: 18px 22px 60px; max-width: 1500px; margin: 0 auto; }
+
+/* ── Topbar (sticky) ────────────────────────────────────────────────── */
+.rf-topbar {
+  position: sticky; top: 0; z-index: 10;
+  background: rgba(10,13,12,0.96); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  padding: 14px 0 12px; margin-bottom: 22px;
+}
+.rf-crumbs { display:flex; align-items:center; gap:14px; font:600 10.5px var(--mono); letter-spacing:.10em; color: var(--ink-3); text-transform: uppercase; }
+.rf-crumbs a { color: var(--copper); }
+.rf-crumbs a:hover { color: var(--ink); }
+.rf-crumbs .sep { color: var(--ink-4); }
+.rf-title-row { display:flex; align-items:baseline; gap:12px; margin-top: 10px; }
+.rf-title { font:800 26px var(--sans); color: var(--ink); letter-spacing:-0.015em; }
+.rf-sub  { font:500 12px var(--mono); color: var(--ink-2); letter-spacing:.04em; }
+.rf-meta { display:flex; gap: 14px; flex-wrap: wrap; font: 500 11px var(--mono); color: var(--ink-3); letter-spacing: .04em; margin-top: 6px; }
+.rf-meta b { color: var(--ink-1); font-weight: 700; }
+
+/* ── Section header (mirrors .qc-h) ─────────────────────────────────── */
+.rf-qch { display:flex; justify-content:space-between; align-items:baseline; margin:22px 4px 10px; padding:0 4px; }
+.rf-qch .q { font:700 16px var(--sans); color: var(--ink); letter-spacing:-0.005em; display:flex; align-items:center; gap:10px; }
+.rf-qch .num { display:inline-flex; width:26px; height:26px; align-items:center; justify-content:center; background: var(--copper-bg); color: var(--copper); border:1px solid color-mix(in oklch, var(--copper) 30%, transparent); border-radius:2px; font:800 11px var(--mono); letter-spacing:.04em; }
+.rf-qch .sub { font:500 11.5px var(--mono); color: var(--ink-3); letter-spacing:.04em; margin-left: 4px; }
+.rf-qch .r { font:600 10.5px var(--mono); color: var(--ink-3); letter-spacing:.06em; }
+.rf-qch .where { font:500 11px var(--mono); color: var(--ink-3); margin: -6px 4px 12px; padding: 0 4px; letter-spacing: .02em; }
+
+/* ── Hero (mirrors .rf-hero) ────────────────────────────────────────── */
+.rf-hero {
+  background: linear-gradient(135deg, var(--copper-bg) 0%, var(--bg-2) 60%, var(--bg-2) 100%);
+  border: 1px solid var(--line); border-left: 4px solid var(--copper); border-radius: 4px;
+  padding: 18px 22px; margin-bottom: 14px;
+  display: grid; grid-template-columns: 1.4fr 240px 1fr 260px; gap: 24px; align-items: center;
+}
+.rf-hero.gn  { border-left-color: var(--gn);  background: linear-gradient(135deg, var(--gn-bg)  0%, var(--bg-2) 60%, var(--bg-2) 100%); }
+.rf-hero.am  { border-left-color: var(--amb); background: linear-gradient(135deg, var(--amb-bg) 0%, var(--bg-2) 60%, var(--bg-2) 100%); }
+.rf-hero.rd  { border-left-color: var(--rd);  background: linear-gradient(135deg, var(--rd-bg)  0%, var(--bg-2) 60%, var(--bg-2) 100%); }
+.rf-hero.cy  { border-left-color: var(--cy);  background: linear-gradient(135deg, var(--cy-bg)  0%, var(--bg-2) 60%, var(--bg-2) 100%); }
+.rf-hero.vio { border-left-color: var(--vio); background: linear-gradient(135deg, var(--vio-bg) 0%, var(--bg-2) 60%, var(--bg-2) 100%); }
+.rf-hero-head { display:flex; flex-direction:column; gap: 4px; }
+.rf-hero-badge {
+  display:inline-flex; align-items:center; gap: 6px;
+  padding: 3px 10px; background: var(--copper-bg); color: var(--copper);
+  border: 1px solid color-mix(in oklch, var(--copper) 30%, transparent);
+  border-radius: 2px;
+  font: 800 9.5px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  width: fit-content; margin-bottom: 4px;
+}
+.rf-hero.gn  .rf-hero-badge { background: var(--gn-bg);  color: var(--gn);  border-color: var(--gn-dim); }
+.rf-hero.am  .rf-hero-badge { background: var(--amb-bg); color: var(--amb); border-color: var(--amb-dim); }
+.rf-hero.rd  .rf-hero-badge { background: var(--rd-bg);  color: var(--rd);  border-color: var(--rd-dim); }
+.rf-hero-name { font: 800 22px var(--sans); color: var(--ink); letter-spacing: -0.01em; line-height: 1.15; }
+.rf-hero-name .icon { font-size: 24px; margin-right: 8px; }
+.rf-hero-mech { font: 500 12px var(--mono); color: var(--ink-2); letter-spacing: .02em; margin-top: 5px; line-height: 1.55; }
+.rf-hero-mech b { color: var(--ink-1); font-weight: 700; }
+.rf-hero-num { text-align:center; }
+.rf-hero-num .k { font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: .12em; text-transform: uppercase; }
+.rf-hero-num .v { font: 800 52px var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -0.03em; margin-top: 4px; }
+.rf-hero-num .v.gn { color: var(--gn); } .rf-hero-num .v.am { color: var(--amb); }
+.rf-hero-num .v.rd { color: var(--rd); } .rf-hero-num .v.cy { color: var(--cy); }
+.rf-hero-num .s { font: 500 11px var(--mono); color: var(--ink-2); margin-top: 6px; letter-spacing: .04em; }
+.rf-hero-meta { font: 600 10px var(--mono); color: var(--ink-3); letter-spacing: .10em; text-transform: uppercase; margin-bottom: 6px; }
+.rf-hero-stats { display:flex; flex-direction:column; gap: 6px; }
+.rf-hero-stat { display:flex; justify-content:space-between; padding: 6px 9px; background: var(--bg-3); border-radius: 2px; font: 600 11px var(--mono); }
+.rf-hero-stat .l { color: var(--ink-3); letter-spacing: .04em; }
+.rf-hero-stat .v { color: var(--ink); font-weight: 800; }
+.rf-hero-stat .v.gn { color: var(--gn); } .rf-hero-stat .v.am { color: var(--amb); }
+.rf-hero-stat .v.rd { color: var(--rd); } .rf-hero-stat .v.cy { color: var(--cy); }
+.rf-hero-tickers { display: flex; flex-wrap: wrap; gap: 6px; }
+.rf-hero-tickers a {
+  padding: 5px 10px; background: var(--bg-3); border: 1px solid var(--line); border-radius: 3px;
+  color: var(--ink-1); font: 800 11.5px var(--mono); letter-spacing: .04em;
+  transition: all 80ms;
+}
+.rf-hero-tickers a:hover { border-color: var(--copper); color: var(--copper); }
+
+/* ── Cards ──────────────────────────────────────────────────────────── */
+.rf-grid    { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.rf-grid-3  { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.rf-grid-2  { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.rf-card {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 3px;
+  padding: 14px; display: flex; flex-direction: column; gap: 8px;
+  position: relative; overflow: hidden;
+  transition: border-color 100ms;
+}
+.rf-card.hot  { border-top: 3px solid var(--gn); }
+.rf-card.warm { border-top: 3px solid var(--amb); }
+.rf-card.cold { border-top: 3px solid var(--ink-3); }
+.rf-card.crit { border-top: 3px solid var(--rd); }
+.rf-card.cy   { border-top: 3px solid var(--cy); }
+.rf-card.vio  { border-top: 3px solid var(--vio); }
+.rf-card.copper { border-top: 3px solid var(--copper); }
+.rf-card-h { display:flex; justify-content:space-between; align-items:flex-start; gap: 8px; }
+.rf-card-h-l { display:flex; align-items:center; gap: 7px; }
+.rf-card-icon { font-size: 18px; line-height: 1; }
+.rf-card-n { font: 800 13px var(--sans); color: var(--ink); letter-spacing: .02em; line-height: 1.1; }
+
+/* ── Pills ──────────────────────────────────────────────────────────── */
+.rf-pill { padding: 2px 7px; border-radius: 2px; font: 800 9px var(--mono); letter-spacing: .10em; text-transform: uppercase; flex-shrink: 0; }
+.rf-pill.hot   { background: var(--gn-bg);  color: var(--gn);  border: 1px solid var(--gn-dim); }
+.rf-pill.warm  { background: var(--amb-bg); color: var(--amb); border: 1px solid var(--amb-dim); }
+.rf-pill.cold  { background: var(--bg-3);   color: var(--ink-3); border: 1px solid var(--line-2); }
+.rf-pill.crit  { background: var(--rd-bg);  color: var(--rd);  border: 1px solid var(--rd-dim); }
+.rf-pill.pass  { background: var(--gn-bg);  color: var(--gn);  border: 1px solid var(--gn-dim); }
+.rf-pill.warn  { background: var(--amb-bg); color: var(--amb); border: 1px solid var(--amb-dim); }
+.rf-pill.fail  { background: var(--rd-bg);  color: var(--rd);  border: 1px solid var(--rd-dim); }
+.rf-pill.info  { background: var(--cy-bg);  color: var(--cy);  border: 1px solid color-mix(in oklch, var(--cy) 30%, transparent); }
+.rf-pill.must  { background: var(--rd-bg);  color: var(--rd);  border: 1px solid var(--rd-dim); }
+.rf-pill.should { background: var(--amb-bg); color: var(--amb); border: 1px solid var(--amb-dim); }
+.rf-pill.good  { background: var(--gn-bg);  color: var(--gn);  border: 1px solid var(--gn-dim); }
+
+/* ── Mech / desc ────────────────────────────────────────────────────── */
+.rf-mech { font: 500 11.5px var(--mono); color: var(--ink-2); letter-spacing: .02em; line-height: 1.55; }
+.rf-mech b { color: var(--ink-1); font-weight: 700; }
+
+/* ── Table ──────────────────────────────────────────────────────────── */
+.rf-table { width: 100%; border-collapse: collapse; background: var(--bg-2); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; margin: 6px 0; }
+.rf-table th, .rf-table td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); font: 500 11.5px var(--mono); }
+.rf-table tr:last-child td { border-bottom: 0; }
+.rf-table th { font: 800 9.5px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); background: var(--bg-3); border-bottom: 1px solid var(--line-2); }
+.rf-table td.tk { color: var(--ink); font-weight: 800; letter-spacing: .04em; }
+.rf-table td .gn { color: var(--gn); font-weight: 700; }
+.rf-table td .rd { color: var(--rd); font-weight: 700; }
+.rf-table td .am { color: var(--amb); font-weight: 700; }
+.rf-table td .cy { color: var(--cy); font-weight: 700; }
+
+/* ── Tip / Warn blocks ──────────────────────────────────────────────── */
+.rf-block { padding: 12px 16px; border-radius: 3px; margin: 10px 0; font: 500 12px var(--mono); border: 1px solid var(--line); border-left: 4px solid var(--copper); background: var(--bg-2); line-height: 1.6; }
+.rf-block b { color: var(--copper); font-weight: 700; letter-spacing: .04em; }
+.rf-block.gn  { border-left-color: var(--gn);  background: linear-gradient(135deg, var(--gn-bg) 0%, var(--bg-2) 100%); }
+.rf-block.gn b { color: var(--gn); }
+.rf-block.am  { border-left-color: var(--amb); background: linear-gradient(135deg, var(--amb-bg) 0%, var(--bg-2) 100%); }
+.rf-block.am b { color: var(--amb); }
+.rf-block.rd  { border-left-color: var(--rd);  background: linear-gradient(135deg, var(--rd-bg) 0%, var(--bg-2) 100%); }
+.rf-block.rd b { color: var(--rd); }
+.rf-block.cy  { border-left-color: var(--cy);  background: linear-gradient(135deg, var(--cy-bg) 0%, var(--bg-2) 100%); }
+.rf-block.cy b { color: var(--cy); }
+
+/* ── Pre / details ──────────────────────────────────────────────────── */
+.rf-card pre, pre.rf-pre {
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
+  padding: 10px 12px; font: 500 11px var(--mono); color: var(--ink-1);
+  line-height: 1.6; overflow-x: auto; margin: 6px 0 0;
+}
+details { margin-top: 6px; }
+details summary {
+  cursor: pointer; user-select: none;
+  font: 700 10.5px var(--mono); letter-spacing: .10em; text-transform: uppercase;
+  color: var(--ink-3); padding: 4px 0;
+  border-top: 1px dashed var(--line);
+}
+details summary:hover { color: var(--ink); }
+details[open] summary { color: var(--copper); }
+
+/* ── Actions list ───────────────────────────────────────────────────── */
+.rf-actions {
+  margin-top: 10px; padding: 10px 14px;
+  background: var(--cy-bg); border: 1px solid color-mix(in oklch, var(--cy) 30%, transparent);
+  border-left: 3px solid var(--cy); border-radius: 3px;
+}
+.rf-actions-l { font: 800 9.5px var(--mono); color: var(--cy); letter-spacing: .16em; text-transform: uppercase; margin-bottom: 4px; }
+.rf-actions ul { margin: 0; padding-left: 18px; font: 500 11.5px var(--mono); color: var(--ink-1); }
+.rf-actions li { margin: 3px 0; line-height: 1.5; }
+
+/* ── Checklist (cheatsheet) ─────────────────────────────────────────── */
+.rf-check { display:flex; flex-direction:column; gap: 6px; margin: 10px 0; }
+.rf-check-item {
+  display: grid; grid-template-columns: auto 1fr auto;
+  gap: 12px; align-items: start;
+  padding: 11px 14px; background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 3px; transition: all .15s;
+  cursor: pointer;
+}
+.rf-check-item:hover { border-color: var(--line-2); background: var(--bg-3); }
+.rf-check-item input[type=checkbox] {
+  width: 16px; height: 16px; margin-top: 2px; accent-color: var(--copper); cursor: pointer;
+}
+.rf-check-l { font: 500 12.5px var(--sans); color: var(--ink-1); }
+.rf-check-l b { color: var(--ink); font-weight: 700; }
+.rf-check-l .hint { display:block; font: 500 11.5px var(--mono); color: var(--ink-3); margin-top: 4px; line-height: 1.55; letter-spacing: .02em; }
+.rf-check-item.done { opacity: .55; }
+.rf-check-item.done .rf-check-l b { text-decoration: line-through; color: var(--ink-3); }
+
+/* ── TOC (cheatsheet) ───────────────────────────────────────────────── */
+.rf-toc { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin: 14px 0 24px; }
+.rf-toc a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 3px;
+  transition: all 80ms;
+}
+.rf-toc a:hover { border-color: var(--copper); background: var(--bg-3); transform: translateY(-1px); }
+.rf-toc-num {
+  display:inline-flex; width: 24px; height: 24px; align-items:center; justify-content:center;
+  background: var(--copper-bg); color: var(--copper);
+  border: 1px solid color-mix(in oklch, var(--copper) 30%, transparent);
+  border-radius: 2px;
+  font: 800 11px var(--mono); flex-shrink: 0;
+}
+.rf-toc-t { display:flex; flex-direction:column; gap: 2px; }
+.rf-toc-t b { color: var(--ink); font: 700 12.5px var(--sans); letter-spacing: -0.005em; }
+.rf-toc-t span { color: var(--ink-3); font: 500 10.5px var(--mono); letter-spacing: .02em; }
+
+/* ── Decision boxes (cheatsheet) ────────────────────────────────────── */
+.rf-decision { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+.rf-dbox {
+  padding: 14px 16px; border-radius: 3px;
+  background: var(--bg-2); border: 1px solid var(--line);
+}
+.rf-dbox.go { border-top: 3px solid var(--gn); background: linear-gradient(135deg, var(--gn-bg) 0%, var(--bg-2) 80%); }
+.rf-dbox.no { border-top: 3px solid var(--rd); background: linear-gradient(135deg, var(--rd-bg) 0%, var(--bg-2) 80%); }
+.rf-dbox h4 { margin: 0 0 8px; font: 800 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+.rf-dbox.go h4 { color: var(--gn); }
+.rf-dbox.no h4 { color: var(--rd); }
+.rf-dbox ul { margin: 0; padding-left: 18px; font: 500 12px var(--mono); color: var(--ink-1); line-height: 1.6; }
+.rf-dbox li { margin: 3px 0; }
+.rf-dbox b { color: var(--ink); font-weight: 700; }
+
+/* ── Decision tree (cheatsheet) ─────────────────────────────────────── */
+.rf-tree {
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-left: 3px solid var(--copper); border-radius: 3px;
+  padding: 16px 20px; margin: 12px 0;
+  font: 500 12px var(--mono); line-height: 1.85;
+  color: var(--ink-1); white-space: pre-wrap; overflow-x: auto;
+}
+.rf-tree .ok { color: var(--gn); font-weight: 700; }
+.rf-tree .no { color: var(--rd); font-weight: 700; }
+.rf-tree .br { color: var(--ink-3); }
+
+/* ── Glossary (cheatsheet) ──────────────────────────────────────────── */
+.rf-glossary { display: grid; grid-template-columns: 220px 1fr; gap: 6px 18px; margin: 12px 0; }
+.rf-glossary dt {
+  font: 800 12px var(--mono); color: var(--copper);
+  letter-spacing: .06em; padding-top: 4px;
+}
+.rf-glossary dd {
+  font: 500 11.5px var(--mono); color: var(--ink-1);
+  line-height: 1.6; padding: 4px 0 4px 10px;
+  border-left: 1px solid var(--line);
+}
+.rf-glossary dd b { color: var(--ink); font-weight: 700; }
+
+/* ── Progress pill (cheatsheet) ─────────────────────────────────────── */
+.rf-progress {
+  position: fixed; bottom: 20px; right: 20px;
+  background: var(--bg-2); border: 1px solid var(--line-2);
+  border-radius: 3px; padding: 8px 14px;
+  font: 600 11px var(--mono); color: var(--ink-2);
+  box-shadow: 0 4px 18px rgba(0,0,0,0.5);
+  z-index: 50;
+}
+.rf-progress b { color: var(--copper); font: 800 12px var(--mono); letter-spacing: .04em; }
+.rf-progress .reset { margin-left: 10px; color: var(--ink-3); cursor: pointer; text-decoration: underline; }
+.rf-progress .reset:hover { color: var(--ink); }
+
+/* ── Print ──────────────────────────────────────────────────────────── */
+@media print {
+  .rf-topbar, .rf-progress { position: static; }
+  body { background: white; color: black; }
+  .rf-card, .rf-dbox, .rf-tree, .rf-table, .rf-block, .rf-check-item, .rf-glossary dd { background: white; border-color: #ccc; color: black; }
+  .rf-card-n, .rf-title, h2, h3, h4 { color: black; }
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────── */
+@media (max-width: 1280px) {
+  .rf-grid { grid-template-columns: repeat(2, 1fr); }
+  .rf-grid-3 { grid-template-columns: 1fr; }
+  .rf-hero { grid-template-columns: 1fr; gap: 14px; }
+}
+@media (max-width: 720px) {
+  .rf-decision { grid-template-columns: 1fr; }
+  .rf-glossary { grid-template-columns: 1fr; }
+  .rf-check-item { grid-template-columns: auto 1fr; }
+  .rf-check-item .rf-pill { grid-column: 2; margin-top: 4px; }
+}
+'''
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -1131,134 +1434,128 @@ def render_cli(results: list[AuditResult], overall_score: int) -> str:
 
 
 def render_html(results: list[AuditResult], overall_score: int) -> str:
-    """Render an HTML audit report."""
+    """Render an HTML audit report (kairos terminal aesthetic · 2026-05-16)."""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
     health_label = "HEALTHY" if overall_score >= 85 else "DEGRADED" if overall_score >= 60 else "UNHEALTHY"
-    health_color = "#16a34a" if overall_score >= 85 else "#eab308" if overall_score >= 60 else "#dc2626"
-
-    rows = []
-    for r in results:
-        c = {"PASS": "#16a34a", "WARN": "#eab308", "FAIL": "#dc2626"}.get(r.status, "#888")
-        actions_html = ""
-        if r.actions:
-            actions_html = "<div class='actions'><b>Recommended actions:</b><ul>" + \
-                           "".join(f"<li>{a}</li>" for a in r.actions) + "</ul></div>"
-        details_html = ""
-        if r.details:
-            details_html = "<details><summary>Details</summary><pre>" + \
-                           "\n".join(d for d in r.details) + "</pre></details>"
-        metrics_html = ""
-        if r.metrics:
-            try:
-                metrics_html = f"<details><summary>Metrics</summary><pre>{json.dumps(r.metrics, indent=2, default=str)}</pre></details>"
-            except Exception:
-                pass
-        rows.append(f"""
-        <div class="card">
-          <div class="card-head">
-            <span class="badge" style="background:{c}">{r.status}</span>
-            <h3>{r.name}</h3>
-            <span class="elapsed">{r.elapsed_s}s</span>
-          </div>
-          <p class="summary">{r.summary}</p>
-          {details_html}
-          {metrics_html}
-          {actions_html}
-        </div>
-        """)
+    health_cls   = "gn"      if overall_score >= 85 else "am"        if overall_score >= 60 else "rd"
+    health_pill  = "PASS"    if overall_score >= 85 else "DEGRADED"  if overall_score >= 60 else "FAIL"
 
     pass_n = sum(1 for r in results if r.status == "PASS")
     warn_n = sum(1 for r in results if r.status == "WARN")
     fail_n = sum(1 for r in results if r.status == "FAIL")
 
+    # Per-card rendering (top-border accent matches status)
+    cards = []
+    for r in results:
+        card_cls   = {"PASS":"hot","WARN":"warm","FAIL":"crit"}.get(r.status, "cold")
+        pill_cls   = {"PASS":"pass","WARN":"warn","FAIL":"fail"}.get(r.status, "cold")
+        details_html = ""
+        if r.details:
+            details_html = (
+                "<details><summary>Details</summary>"
+                "<pre class=\"rf-pre\">" + "\n".join(d for d in r.details) + "</pre></details>"
+            )
+        metrics_html = ""
+        if r.metrics:
+            try:
+                metrics_html = (
+                    "<details><summary>Metrics</summary>"
+                    f"<pre class=\"rf-pre\">{json.dumps(r.metrics, indent=2, default=str)}</pre>"
+                    "</details>"
+                )
+            except Exception:
+                pass
+        actions_html = ""
+        if r.actions:
+            actions_html = (
+                "<div class=\"rf-actions\"><div class=\"rf-actions-l\">Recommended actions</div>"
+                "<ul>" + "".join(f"<li>{a}</li>" for a in r.actions) + "</ul></div>"
+            )
+        cards.append(f"""
+        <div class="rf-card {card_cls}">
+          <div class="rf-card-h">
+            <div class="rf-card-h-l">
+              <span class="rf-card-icon">●</span>
+              <span class="rf-card-n">{r.name}</span>
+            </div>
+            <span class="rf-pill {pill_cls}">{r.status}</span>
+          </div>
+          <div class="rf-mech">{r.summary} <b style="color:var(--ink-3); font-weight:500">· {r.elapsed_s}s</b></div>
+          {details_html}
+          {metrics_html}
+          {actions_html}
+        </div>""")
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>SwingTrade Audit 360 — {ts}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SwingTrade · Audit 360 — {ts}</title>
 <style>
-  * {{ box-sizing: border-box; }}
-  body {{
-    margin: 0; padding: 24px;
-    font-family: 'Aptos', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #0a0e14; color: #e6edf3;
-    min-height: 100vh;
-  }}
-  .wrap {{ max-width: 1100px; margin: 0 auto; }}
-  h1 {{ font-size: 28px; margin: 0 0 4px; letter-spacing: -0.5px; }}
-  .ts {{ color: #8b949e; font-size: 13px; margin-bottom: 24px; }}
-  .health-banner {{
-    display: flex; align-items: center; gap: 24px;
-    background: linear-gradient(135deg, rgba(22,163,74,0.08), rgba(234,179,8,0.04));
-    border: 1px solid #21262d; border-radius: 12px; padding: 24px; margin-bottom: 24px;
-  }}
-  .health-score {{
-    font-size: 64px; font-weight: 700; line-height: 1;
-    color: {health_color};
-  }}
-  .health-meta {{ flex: 1; }}
-  .health-label {{ font-size: 22px; font-weight: 600; color: {health_color}; }}
-  .health-counts {{ font-size: 14px; color: #8b949e; margin-top: 8px; }}
-  .pill {{ display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-right: 8px; }}
-  .pill-pass {{ background: rgba(22,163,74,0.15); color: #16a34a; }}
-  .pill-warn {{ background: rgba(234,179,8,0.15); color: #eab308; }}
-  .pill-fail {{ background: rgba(220,38,38,0.15); color: #dc2626; }}
-  .grid {{ display: grid; grid-template-columns: 1fr; gap: 12px; }}
-  .card {{
-    background: #0d1117; border: 1px solid #21262d;
-    border-radius: 10px; padding: 18px;
-  }}
-  .card-head {{ display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }}
-  .card-head h3 {{ flex: 1; margin: 0; font-size: 16px; font-weight: 600; }}
-  .badge {{
-    color: white; font-size: 11px; font-weight: 700;
-    padding: 3px 10px; border-radius: 10px; letter-spacing: 0.5px;
-  }}
-  .elapsed {{ color: #8b949e; font-size: 12px; }}
-  .summary {{ margin: 0 0 12px; color: #c9d1d9; line-height: 1.5; }}
-  details {{ margin-top: 8px; }}
-  summary {{ cursor: pointer; color: #8b949e; font-size: 13px; user-select: none; }}
-  summary:hover {{ color: #58a6ff; }}
-  pre {{
-    background: #161b22; padding: 12px; border-radius: 6px;
-    font-size: 12px; line-height: 1.6; overflow-x: auto;
-    color: #c9d1d9; margin: 8px 0 0;
-  }}
-  .actions {{
-    margin-top: 12px; padding: 10px 14px;
-    background: rgba(88,166,255,0.06); border-left: 3px solid #58a6ff;
-    border-radius: 4px;
-  }}
-  .actions b {{ color: #58a6ff; font-size: 13px; }}
-  .actions ul {{ margin: 6px 0 0 18px; padding: 0; font-size: 13px; }}
-  .actions li {{ margin-bottom: 4px; color: #c9d1d9; }}
-  .footer {{ margin-top: 24px; color: #6e7681; font-size: 12px; text-align: center; }}
+{{KAIROS_CSS}}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>SwingTrade Audit 360</h1>
-  <div class="ts">Generated {ts}</div>
+<div class="refv2">
 
-  <div class="health-banner">
-    <div class="health-score">{overall_score}</div>
-    <div class="health-meta">
-      <div class="health-label">{health_label}</div>
-      <div class="health-counts">
-        <span class="pill pill-pass">PASS {pass_n}</span>
-        <span class="pill pill-warn">WARN {warn_n}</span>
-        <span class="pill pill-fail">FAIL {fail_n}</span>
+  <div class="rf-topbar">
+    <div class="rf-crumbs">
+      <a href="/v2/kairos.html">← Kairos</a>
+      <span class="sep">·</span>
+      <span>Reference</span>
+      <span class="sep">·</span>
+      <span style="color:var(--ink-1)">Audit 360</span>
+    </div>
+    <div class="rf-title-row">
+      <span class="rf-title">⚕ Audit 360</span>
+      <span class="rf-sub">12-check institutional system health</span>
+    </div>
+    <div class="rf-meta">
+      <span><b>Generated:</b> {ts}</span>
+      <span><b>Re-run:</b> <code>python3 audit_360.py</code></span>
+    </div>
+  </div>
+
+  <div class="rf-hero {health_cls}">
+    <div class="rf-hero-head">
+      <span class="rf-hero-badge">★ {health_pill}</span>
+      <div class="rf-hero-name"><span class="icon">⚕</span>System Health · {health_label}</div>
+      <div class="rf-hero-mech">All 12 health checks executed in sequence. PASS / WARN / FAIL on each. Overall score weighted by criticality. Recommended actions surfaced inline.</div>
+    </div>
+    <div class="rf-hero-num">
+      <div class="k">Health score</div>
+      <div class="v {health_cls}">{overall_score}</div>
+      <div class="s">out of 100</div>
+    </div>
+    <div>
+      <div class="rf-hero-meta">Breakdown</div>
+      <div class="rf-hero-stats">
+        <div class="rf-hero-stat"><span class="l">PASS</span><span class="v gn">{pass_n}</span></div>
+        <div class="rf-hero-stat"><span class="l">WARN</span><span class="v am">{warn_n}</span></div>
+        <div class="rf-hero-stat"><span class="l">FAIL</span><span class="v rd">{fail_n}</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="rf-hero-meta">Coverage</div>
+      <div class="rf-hero-stats">
+        <div class="rf-hero-stat"><span class="l">Total checks</span><span class="v">{len(results)}</span></div>
+        <div class="rf-hero-stat"><span class="l">Last run</span><span class="v cy">{ts}</span></div>
+        <div class="rf-hero-stat"><span class="l">Schedule</span><span class="v gn">on-demand</span></div>
       </div>
     </div>
   </div>
 
-  <div class="grid">
-    {''.join(rows)}
+  <div class="rf-qch"><div class="q"><span class="num">⚕</span>Per-check results</div><span class="sub">expand any card for details + metrics + recommended actions</span><span class="r">{len(results)} checks · {ts}</span></div>
+
+  <div class="rf-grid-2">
+    {''.join(cards)}
   </div>
 
-  <div class="footer">
-    Re-run via: <code>python3 audit_360.py</code>
+  <div class="rf-block cy" style="margin-top:22px">
+    <b>RE-RUN ·</b> <code>python3 audit_360.py</code> regenerates this report. <code>--quick</code> skips server-roundtrip checks for faster runs. Output writes to <code>cache/audit_360_latest.html</code> + a dated archive.
   </div>
+
 </div>
 </body>
 </html>

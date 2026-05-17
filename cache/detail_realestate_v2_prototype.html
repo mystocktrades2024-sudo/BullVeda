@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Detail Real-Estate v2 — Explicit Hide/Show Toggles</title>
+<style>
+  :root{
+    --bg:#0a0e1a; --panel:#0f1729; --panel2:#131c33; --bd:#1f2a44;
+    --tx:#e6edf7; --mu:#8b9bb3; --acc:#5b8def; --acc2:#7fb3ff;
+    --ok:#34d399; --warn:#fbbf24; --bad:#f87171; --pur:#a78bfa;
+    --r-pad:14px; --r-fs:13px; --r-h:32px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);color:var(--tx);font:13px -apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',Arial,sans-serif;overflow:hidden}
+
+  /* ================== DENSITY MODES (Option 11) ================== */
+  body.density-compact{ --r-pad:9px;  --r-fs:12px; --r-h:26px; }
+  body.density-dense  { --r-pad:6px;  --r-fs:11px; --r-h:22px; }
+
+  /* ================== APP SHELL ================== */
+  .app{display:flex;height:100vh;width:100vw}
+
+  /* SIDEBAR */
+  .sidebar{width:240px;background:var(--panel);border-right:1px solid var(--bd);padding:0;display:flex;flex-direction:column;flex-shrink:0;transition:width .25s ease, transform .25s ease;position:relative}
+  .sidebar.icons{width:60px}
+  .sidebar.icons .s-lbl, .sidebar.icons .s-hdr{display:none}
+  .sidebar.icons .s-item{justify-content:center;padding:8px 0}
+  .sidebar.hidden{width:0;border-right:0}
+  .sidebar.hidden > *{display:none}
+  .sidebar-head{display:flex;justify-content:space-between;align-items:center;padding:10px 12px 6px;font-size:10px;color:var(--mu);text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+  .sidebar.icons .sidebar-head{justify-content:center;padding:10px 0 6px}
+  .sidebar.icons .sidebar-head-lbl{display:none}
+  .sidebar-scroll{flex:1;padding:4px 10px 14px;overflow:auto}
+  .s-hdr{font-size:10px;color:var(--mu);text-transform:uppercase;letter-spacing:.06em;padding:14px 8px 4px;font-weight:600}
+  .s-item{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:6px;cursor:pointer;color:var(--mu);font-size:13px;transition:all .15s;position:relative}
+  .s-item:hover{background:var(--panel2);color:var(--tx)}
+  .s-item.active{background:var(--acc);color:#fff}
+  .s-ico{font-size:14px;width:18px;text-align:center;flex-shrink:0}
+  /* Tooltip on icons-only mode */
+  .sidebar.icons .s-item:hover::after{
+    content:attr(data-lbl);position:absolute;left:64px;top:50%;transform:translateY(-50%);
+    background:#000;color:#fff;font-size:11px;padding:4px 8px;border-radius:4px;white-space:nowrap;z-index:1000;
+    box-shadow:0 2px 10px rgba(0,0,0,.4)
+  }
+
+  /* TOGGLE BUTTONS (replaces hover-reveal) */
+  .toggle-btn{
+    background:var(--panel2);border:1px solid var(--bd);color:var(--mu);
+    width:22px;height:22px;border-radius:4px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    font-size:11px;font-family:inherit;font-weight:700;
+    transition:all .15s;
+  }
+  .toggle-btn:hover{background:var(--acc);color:#fff;border-color:var(--acc)}
+
+  /* Restore chips for fully hidden chrome */
+  .restore-chip{
+    position:fixed;background:var(--acc);color:#fff;border:0;cursor:pointer;
+    font:600 11px/1 -apple-system,sans-serif;letter-spacing:.04em;
+    padding:8px 12px;border-radius:0 6px 6px 0;z-index:200;
+    box-shadow:0 2px 12px rgba(91,141,239,.4);
+    display:flex;align-items:center;gap:6px;
+    transition:all .15s;
+  }
+  .restore-chip:hover{background:var(--acc2);padding-right:16px}
+  .restore-chip.top{
+    top:0;left:50%;transform:translateX(-50%);
+    border-radius:0 0 6px 6px;padding:6px 14px;
+  }
+  .restore-chip.top:hover{padding:8px 16px}
+  .restore-chip.left{
+    top:50%;left:0;transform:translateY(-50%);
+  }
+
+  .main{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;min-width:0}
+
+  /* ================== TOP BAR ================== */
+  .topbar{background:var(--panel);border-bottom:1px solid var(--bd);transition:max-height .25s ease, opacity .2s;flex-shrink:0;position:relative;z-index:50;overflow:hidden;max-height:300px}
+  .topbar.hidden{max-height:0;opacity:0;border-bottom:0}
+  .tb-actions{position:absolute;top:6px;right:10px;display:flex;gap:4px;z-index:5}
+  .tb-row{display:flex;align-items:center;padding:8px var(--r-pad);gap:14px;border-bottom:1px solid rgba(255,255,255,.02);min-height:var(--r-h)}
+  .tb-row:first-child{padding-right:80px}
+  .tb-row:last-child{border-bottom:0}
+  .tb-ticker{font-size:18px;font-weight:700;letter-spacing:.02em}
+  .tb-price{font-size:16px;font-weight:600;color:var(--ok)}
+  .tb-tag{padding:3px 9px;border-radius:6px;background:var(--panel2);font-size:11px;color:var(--mu);font-weight:600;letter-spacing:.04em}
+  .tb-verdict{background:var(--ok);color:#000;padding:4px 12px;border-radius:6px;font-weight:700;font-size:12px;letter-spacing:.05em}
+  .tb-spacer{flex:1}
+  .tb-plan{display:flex;gap:18px;align-items:center;font-size:12px;color:var(--mu)}
+  .tb-plan b{color:var(--tx);font-weight:600}
+  .tb-pill{display:flex;align-items:center;gap:6px;padding:3px 10px;background:var(--panel2);border-radius:14px;font-size:11px;border:1px solid var(--bd)}
+  .tb-pillars{display:flex;gap:8px;flex-wrap:wrap}
+  .tb-ticket{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--mu);flex:1;max-width:680px;font-family:'SF Mono',monospace}
+  .tb-ticket-bar{flex:1;height:8px;background:var(--panel2);border-radius:4px;position:relative;overflow:hidden}
+  .tb-ticket-fill{position:absolute;left:25%;width:18%;height:100%;background:linear-gradient(90deg,var(--bad),var(--warn),var(--ok));border-radius:4px}
+  .tb-ticket-spot{position:absolute;left:43%;top:-3px;width:14px;height:14px;border-radius:50%;background:var(--tx);border:2px solid var(--bg)}
+
+  /* Top bar collapse states (Option 1: sticky-collapse + Option 7-new: explicit hide) */
+  .topbar.collapsed .tb-row:not(:first-child){display:none}
+
+  /* ================== PRE-MORTEM ================== */
+  .premortem{background:linear-gradient(90deg,rgba(248,113,113,.08),rgba(248,113,113,.02));border-bottom:1px solid var(--bd);padding:10px var(--r-pad);display:flex;align-items:center;gap:14px;transition:all .25s ease;flex-shrink:0}
+  .premortem.collapsed{padding:6px var(--r-pad)}
+  .premortem.collapsed .pm-detail{display:none}
+  .pm-icon{color:var(--bad);font-weight:700}
+  .pm-detail{display:flex;gap:14px;flex:1;font-size:12px;color:var(--mu)}
+  .pm-detail b{color:var(--tx);font-weight:600}
+  .pm-toggle{font-size:11px;color:var(--acc);cursor:pointer;padding:3px 9px;border-radius:4px}
+  .pm-toggle:hover{background:var(--panel2)}
+
+  /* ================== CONTENT AREA ================== */
+  .content-wrap{flex:1;overflow:hidden;display:flex;position:relative}
+
+  /* OPTION 8: multi-pane split view */
+  .pane{flex:1;overflow:auto;padding:18px;transition:all .2s}
+  .pane-divider{width:5px;background:var(--bd);cursor:col-resize;flex-shrink:0;transition:background .15s}
+  .pane-divider:hover{background:var(--acc)}
+  .content-wrap.single .pane-divider, .content-wrap.single .pane-right{display:none}
+  .pane-right .ph{background:linear-gradient(180deg,var(--panel),var(--panel2))}
+
+  /* ================== PLACEHOLDER SECTIONS ================== */
+  .ph{background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:var(--r-pad);margin-bottom:10px;font-size:var(--r-fs);transition:all .2s}
+  .ph-hdr{font-size:11px;color:var(--mu);text-transform:uppercase;letter-spacing:.06em;margin-bottom:9px;font-weight:600}
+  .ph-body{color:var(--tx);line-height:1.6}
+  .ph-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:9px}
+  .ph-cell{background:var(--bg);padding:9px;border-radius:6px;border:1px solid var(--bd)}
+  .ph-cell-lbl{font-size:10px;color:var(--mu);text-transform:uppercase;letter-spacing:.04em}
+  .ph-cell-val{font-size:18px;font-weight:700;color:var(--tx);margin-top:3px}
+  .density-dense .ph-cell-val{font-size:14px}
+  .density-compact .ph-cell-val{font-size:16px}
+
+  /* ================== CONTROL PANEL ================== */
+  .ctrl{position:fixed;top:14px;right:14px;background:rgba(15,23,41,.96);backdrop-filter:blur(10px);border:1px solid var(--bd);border-radius:10px;padding:13px;z-index:999;box-shadow:0 8px 28px rgba(0,0,0,.6);min-width:300px}
+  .ctrl-hdr{font-size:10px;color:var(--mu);text-transform:uppercase;letter-spacing:.08em;margin-bottom:9px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+  .ctrl-min{cursor:pointer;color:var(--mu)}
+  .ctrl-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:5px;font-size:11px}
+  .ctrl-row span{color:var(--tx)}
+  .ctrl-btn{background:var(--panel2);color:var(--tx);border:1px solid var(--bd);padding:4px 10px;border-radius:5px;font-size:10px;cursor:pointer;font-weight:600;font-family:inherit;letter-spacing:.04em;min-width:88px;text-align:center}
+  .ctrl-btn:hover{background:var(--acc);color:#fff;border-color:var(--acc)}
+  .ctrl-btn.on{background:var(--ok);color:#000;border-color:var(--ok)}
+  .ctrl-divider{height:1px;background:var(--bd);margin:9px 0}
+  .ctrl-density{display:flex;gap:3px;background:var(--panel2);padding:2px;border-radius:5px}
+  .ctrl-density button{flex:1;background:transparent;color:var(--mu);border:0;padding:4px 6px;border-radius:3px;font-size:10px;cursor:pointer;font-weight:600;letter-spacing:.04em}
+  .ctrl-density button.on{background:var(--acc);color:#fff}
+  .savings{background:linear-gradient(135deg,rgba(52,211,153,.15),rgba(91,141,239,.15));border:1px solid var(--ok);color:var(--ok);padding:7px 10px;border-radius:6px;font-size:11px;font-weight:700;text-align:center;margin-top:8px}
+  .ctrl.minimized .ctrl-body{display:none}
+  .ctrl.minimized{min-width:auto;padding:6px 10px}
+
+  /* ================== SUB-TABS ================== */
+  .subtabs{display:flex;gap:2px;padding:0 var(--r-pad);background:var(--panel);border-bottom:1px solid var(--bd);flex-shrink:0}
+  .subtab{padding:9px 14px;font-size:12px;color:var(--mu);cursor:pointer;border-bottom:2px solid transparent;font-weight:600;letter-spacing:.02em}
+  .subtab:hover{color:var(--tx)}
+  .subtab.active{color:var(--tx);border-bottom-color:var(--acc)}
+  .subtab .sub-count{display:inline-block;background:var(--panel2);color:var(--mu);font-size:9px;padding:1px 5px;border-radius:8px;margin-left:5px}
+
+  /* OPTION 12: merged sub-tabs */
+  body.merged-tabs .subtab:not(.merged-shown){display:none}
+  body.merged-tabs .subtab.merged-shown{display:flex;align-items:center}
+
+  /* Footer banner */
+  .info{position:fixed;bottom:14px;left:14px;background:rgba(15,23,41,.95);backdrop-filter:blur(8px);border:1px solid var(--bd);border-radius:8px;padding:10px 14px;z-index:998;font-size:11px;color:var(--mu);max-width:560px;line-height:1.5}
+  .info b{color:var(--acc2)}
+  .info kbd{background:var(--bg);border:1px solid var(--bd);border-radius:3px;padding:1px 5px;font-family:'SF Mono',monospace;font-size:10px;color:var(--tx);margin:0 2px}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <span class="sidebar-head-lbl">Navigation</span>
+      <div style="display:flex;gap:4px">
+        <button class="toggle-btn" id="sbIconToggle" title="Icons only">⇄</button>
+        <button class="toggle-btn" id="sbHideToggle" title="Hide sidebar">‹</button>
+      </div>
+    </div>
+    <div class="sidebar-scroll">
+      <div class="s-hdr">Decision</div>
+      <div class="s-item active" data-tab="overview" data-merge="decide" data-lbl="Overview"><span class="s-ico">◎</span><span class="s-lbl">Overview</span></div>
+      <div class="s-item" data-tab="plan" data-merge="decide" data-lbl="Plan"><span class="s-ico">▸</span><span class="s-lbl">Plan</span></div>
+      <div class="s-item" data-tab="risk" data-merge="decide" data-lbl="Risk"><span class="s-ico">⚠</span><span class="s-lbl">Risk</span></div>
+
+      <div class="s-hdr">Analysis</div>
+      <div class="s-item" data-tab="chart" data-merge="analyze" data-lbl="Chart+"><span class="s-ico">▥</span><span class="s-lbl">Chart+</span></div>
+      <div class="s-item" data-tab="value" data-merge="analyze" data-lbl="Value"><span class="s-ico">▤</span><span class="s-lbl">Value</span></div>
+      <div class="s-item" data-tab="peer" data-merge="analyze" data-lbl="Peer"><span class="s-ico">⇄</span><span class="s-lbl">Peer</span></div>
+
+      <div class="s-hdr">Catalyst</div>
+      <div class="s-item" data-tab="er" data-merge="catalyst" data-lbl="ER Lab"><span class="s-ico">$</span><span class="s-lbl">ER Lab</span></div>
+      <div class="s-item" data-tab="options" data-merge="catalyst" data-lbl="Options"><span class="s-ico">⊕</span><span class="s-lbl">Options</span></div>
+      <div class="s-item" data-tab="intel" data-merge="catalyst" data-lbl="Intel"><span class="s-ico">⊙</span><span class="s-lbl">Intel</span></div>
+
+      <div class="s-hdr">Track</div>
+      <div class="s-item" data-tab="portfolio" data-merge="execute" data-lbl="Portfolio"><span class="s-ico">▦</span><span class="s-lbl">Portfolio</span></div>
+      <div class="s-item" data-tab="edge" data-merge="execute" data-lbl="Edge"><span class="s-ico">∿</span><span class="s-lbl">Edge</span></div>
+    </div>
+  </div>
+
+  <!-- Restore chip for hidden sidebar -->
+  <button class="restore-chip left" id="sbRestore" style="display:none">› sidebar</button>
+
+  <!-- MAIN -->
+  <div class="main">
+    <!-- TOP BAR -->
+    <div class="topbar" id="topbar">
+      <div class="tb-actions">
+        <button class="toggle-btn" id="tbCollapseToggle" title="Collapse to 1 line">▴</button>
+        <button class="toggle-btn" id="tbHideToggle" title="Hide top bar entirely">✕</button>
+      </div>
+      <!-- LINE 1 -->
+      <div class="tb-row">
+        <span class="tb-ticker">DXCM</span>
+        <span class="tb-price">$87.42</span>
+        <span class="tb-tag">SWING · 5-21d</span>
+        <span class="tb-verdict">BUY · T2</span>
+        <span class="tb-spacer"></span>
+        <span class="tb-plan">
+          <span>Entry <b>$86.80–$87.60</b></span>
+          <span>Stop <b>$82.40</b></span>
+          <span>T1 <b>$93.20</b></span>
+          <span>T2 <b>$98.40</b></span>
+          <span>R:R <b>3.2:1</b></span>
+        </span>
+      </div>
+      <!-- LINE 2 -->
+      <div class="tb-row">
+        <span class="tb-pillars">
+          <span class="tb-pill">Technical <b>72</b></span>
+          <span class="tb-pill">Catalyst <b>68</b></span>
+          <span class="tb-pill">RS+Sector <b>81</b></span>
+          <span class="tb-pill">Smart-$ <b>74</b></span>
+          <span class="tb-pill">Quality <b>66</b></span>
+        </span>
+      </div>
+      <!-- LINE 3 -->
+      <div class="tb-row">
+        <div class="tb-ticket">
+          <span>$82.40</span>
+          <div class="tb-ticket-bar"><div class="tb-ticket-fill"></div><div class="tb-ticket-spot"></div></div>
+          <span>$98.40</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Restore chip for hidden top bar -->
+    <button class="restore-chip top" id="tbRestore" style="display:none">▾ top bar</button>
+
+    <!-- PRE-MORTEM -->
+    <div class="premortem" id="premortem">
+      <span class="pm-icon">⚠</span>
+      <span class="pm-detail">
+        <span><b>2 issues</b> — Beta <b>0.92</b> vs portfolio 0.74 (over-weight)</span>
+        <span>Sector RS <b>−14d</b> deteriorating</span>
+      </span>
+      <span class="pm-toggle" id="pmToggle">collapse ▴</span>
+    </div>
+
+    <!-- SUB-TAB STRIP -->
+    <div class="subtabs" id="subtabs">
+      <div class="subtab active merged-shown" data-tab="overview" data-merge="decide">
+        Overview <span class="sub-count merged-only" style="display:none">·3</span>
+      </div>
+      <div class="subtab" data-tab="plan" data-merge="decide">Plan</div>
+      <div class="subtab" data-tab="risk" data-merge="decide">Risk</div>
+      <div class="subtab merged-shown" data-tab="chart" data-merge="analyze">
+        Chart+ <span class="sub-count merged-only" style="display:none">·3</span>
+      </div>
+      <div class="subtab" data-tab="value" data-merge="analyze">Value</div>
+      <div class="subtab" data-tab="peer" data-merge="analyze">Peer</div>
+      <div class="subtab merged-shown" data-tab="er" data-merge="catalyst">
+        Catalyst <span class="sub-count merged-only" style="display:none">·3</span>
+      </div>
+      <div class="subtab" data-tab="options" data-merge="catalyst">Options</div>
+      <div class="subtab" data-tab="intel" data-merge="catalyst">Intel</div>
+      <div class="subtab merged-shown" data-tab="portfolio" data-merge="execute">
+        Track <span class="sub-count merged-only" style="display:none">·2</span>
+      </div>
+      <div class="subtab" data-tab="edge" data-merge="execute">Edge</div>
+    </div>
+
+    <!-- CONTENT WRAP -->
+    <div class="content-wrap single" id="contentWrap">
+      <div class="pane pane-left" id="paneLeft">
+        <div class="ph">
+          <div class="ph-hdr" id="leftSubtabName">§1 — Verdict + Score (Overview)</div>
+          <div class="ph-body">Tier-S 9-cell decision grid · 5-pillar radar · catalyst window · gates audit</div>
+          <div class="ph-grid">
+            <div class="ph-cell"><div class="ph-cell-lbl">Score</div><div class="ph-cell-val">74.8</div></div>
+            <div class="ph-cell"><div class="ph-cell-lbl">RS Rank</div><div class="ph-cell-val">81</div></div>
+            <div class="ph-cell"><div class="ph-cell-lbl">R:R</div><div class="ph-cell-val">3.2:1</div></div>
+            <div class="ph-cell"><div class="ph-cell-lbl">Wilson LB</div><div class="ph-cell-val">52%</div></div>
+          </div>
+        </div>
+        <div class="ph">
+          <div class="ph-hdr">§2 — Mechanism Hypothesis</div>
+          <div class="ph-body">VCP breakout: 6-week contraction · supply absorption complete · institutional re-add at $86 pivot. Mechanism class: <b>Breakout Expansion (7-21d)</b></div>
+        </div>
+        <div class="ph">
+          <div class="ph-hdr">§3 — Stress Scenario Matrix</div>
+          <div class="ph-body">SPY −2% → DXCM −1.8% · SPY −5% → DXCM −4.6% · sector rotation → −3.2%</div>
+          <div class="ph-grid">
+            <div class="ph-cell"><div class="ph-cell-lbl">VaR 95%</div><div class="ph-cell-val">-3.8%</div></div>
+            <div class="ph-cell"><div class="ph-cell-lbl">CVaR</div><div class="ph-cell-val">-5.2%</div></div>
+            <div class="ph-cell"><div class="ph-cell-lbl">Beta</div><div class="ph-cell-val">0.92</div></div>
+            <div class="ph-cell"><div class="ph-cell-lbl">Vol</div><div class="ph-cell-val">28%</div></div>
+          </div>
+        </div>
+        <div class="ph">
+          <div class="ph-hdr">§4 — 5-Pillar Radar</div>
+          <div class="ph-body">Technical 72 · Catalyst 68 · RS+Sector 81 · Smart-Money 74 · Quality 66</div>
+        </div>
+        <div class="ph">
+          <div class="ph-hdr">§5 — Wilson CI Confidence Band</div>
+          <div class="ph-body">n=37 trades · WR 64.9% · Wilson LB 52% · PF 1.81 · meets institutional floor (45%)</div>
+        </div>
+        <div class="ph">
+          <div class="ph-hdr">§6 — Cross-Tab Confluence</div>
+          <div class="ph-body">Plan ✓ · Risk ✓ · Value ⚠ (P/E 38) · Options ✓ (P/C 0.72) · Catalyst ✓</div>
+        </div>
+        <div class="ph">
+          <div class="ph-hdr">§7 — Forward Outcomes</div>
+          <div class="ph-body">5d: 58% positive · 10d: 64% · 21d: 71% · expected return +4.8%</div>
+        </div>
+        <div class="ph">
+          <div class="ph-hdr">§8 — Portfolio Impact</div>
+          <div class="ph-body">Adds beta 0.04 · sector concentration 23%→27% (warn) · correlation to ABBV 0.31</div>
+        </div>
+      </div>
+
+      <div class="pane-divider" id="paneDivider"></div>
+
+      <div class="pane pane-right" id="paneRight">
+        <div class="ph">
+          <div class="ph-hdr" id="rightSubtabName">§1 — Plan (right pane)</div>
+          <div class="ph-body">Trade ticket · entry zone · scale-out plan · invalidation thresholds</div>
+          <div class="ph-grid">
+            <div class="ph-cell"><div class="ph-cell-lbl">Entry</div><div class="ph-cell-val">$86.80</div></div>
+            <div class="ph-cell"><div class="ph-cell-lbl">Stop</div><div class="ph-cell-val">$82.40</div></div>
+            <div class="ph-cell"><div class="ph-cell-lbl">T1</div><div class="ph-cell-val">$93.20</div></div>
+            <div class="ph-cell"><div class="ph-cell-lbl">T2</div><div class="ph-cell-val">$98.40</div></div>
+          </div>
+        </div>
+        <div class="ph">
+          <div class="ph-hdr">§2 — Position Sizing</div>
+          <div class="ph-body">Kelly 1/4 · 4.5% size · max loss $186 on $4,140 position</div>
+        </div>
+        <div class="ph">
+          <div class="ph-hdr">§3 — Invalidation Triggers</div>
+          <div class="ph-body">Close below $82.40 · sector RS −5% in 3d · VIX > 28</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== CONTROL PANEL ============== -->
+<div class="ctrl" id="ctrl">
+  <div class="ctrl-hdr">
+    <span>Real-Estate v2 — Hide/Show Toggles</span>
+    <span class="ctrl-min" onclick="document.getElementById('ctrl').classList.toggle('minimized')">−</span>
+  </div>
+  <div class="ctrl-body">
+
+    <div class="ctrl-row"><span>#11 Density</span>
+      <div class="ctrl-density">
+        <button data-density="" class="on">Comfort</button>
+        <button data-density="density-compact">Compact</button>
+        <button data-density="density-dense">Dense</button>
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-row" style="color:var(--mu);font-size:10px;font-weight:600;letter-spacing:.05em;margin-bottom:3px">
+      #7 EXPLICIT HIDE/SHOW (replaces hover)
+    </div>
+    <div class="ctrl-row" style="padding-left:0;color:var(--tx);font-size:10px;line-height:1.5">
+      Use the <b style="color:var(--acc2)">▴ ✕ ‹ ⇄</b> buttons on the top bar &amp; sidebar.<br>
+      Top bar: <kbd style="background:var(--bg);border:1px solid var(--bd);padding:1px 4px;border-radius:3px">▴</kbd> collapses to 1 line · <kbd style="background:var(--bg);border:1px solid var(--bd);padding:1px 4px;border-radius:3px">✕</kbd> hides entirely.<br>
+      Sidebar: <kbd style="background:var(--bg);border:1px solid var(--bd);padding:1px 4px;border-radius:3px">⇄</kbd> icons-only · <kbd style="background:var(--bg);border:1px solid var(--bd);padding:1px 4px;border-radius:3px">‹</kbd> hides entirely.<br>
+      Floating chips bring them back.
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-row"><span>#8 Multi-pane split</span>
+      <button class="ctrl-btn" id="b8">OFF</button>
+    </div>
+
+    <div class="ctrl-row"><span>#12 Smart-merge → 4 tabs</span>
+      <button class="ctrl-btn" id="b12">OFF</button>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-row" style="color:var(--mu);font-size:10px">Quick actions</div>
+    <div class="ctrl-row"><span>Fullscreen <kbd>F</kbd></span>
+      <button class="ctrl-btn" id="bFull">OFF</button>
+    </div>
+    <div class="ctrl-row"><span>Reset all chrome</span>
+      <button class="ctrl-btn" id="bReset">RESET</button>
+    </div>
+
+    <div class="savings" id="savings">+0px recovered</div>
+  </div>
+</div>
+
+<!-- ============== INFO BANNER ============== -->
+<div class="info">
+  <b>v2.1 — explicit hide/show, no hover magic.</b><br>
+  Click the small <b>▴ ✕</b> buttons in the top-right of the top bar to collapse or hide it. Click <b>⇄ ‹</b> in the sidebar to shrink or hide it. Hidden chrome → floating blue chip lets you bring it back. <kbd>F</kbd> = instant fullscreen.
+</div>
+
+<script>
+(function(){
+  const body = document.body;
+  const topbar = document.getElementById('topbar');
+  const sidebar = document.getElementById('sidebar');
+  const ctrl = document.getElementById('ctrl');
+  const savings = document.getElementById('savings');
+  const subtabs = document.getElementById('subtabs');
+  const contentWrap = document.getElementById('contentWrap');
+  const paneLeft = document.getElementById('paneLeft');
+  const paneRight = document.getElementById('paneRight');
+  const paneDivider = document.getElementById('paneDivider');
+  const premortem = document.getElementById('premortem');
+  const pmToggle = document.getElementById('pmToggle');
+  const tbRestore = document.getElementById('tbRestore');
+  const sbRestore = document.getElementById('sbRestore');
+
+  const state = {
+    tbCollapsed:false, tbHidden:false,
+    sbIcons:false, sbHidden:false,
+    pmCollapsed:false,
+    split:false, merged:false,
+    fullscreen:false,
+  };
+
+  function recalcSavings(){
+    let v=0, h=0;
+    if(state.tbCollapsed && !state.tbHidden) v+=70;
+    if(state.tbHidden) v+=140;
+    if(state.pmCollapsed) v+=34;
+    if(state.sbIcons && !state.sbHidden) h+=180;
+    if(state.sbHidden) h+=240;
+    if(state.fullscreen){ v=250; h=240; }
+    if(body.classList.contains('density-compact')){ v=Math.round(v*1.15); h=Math.round(h*1.05); }
+    if(body.classList.contains('density-dense')){   v=Math.round(v*1.35); h=Math.round(h*1.15); }
+    savings.textContent = `+${v+h}px recovered (${v}v + ${h}h)`;
+  }
+
+  // ============== TOP BAR TOGGLES ==============
+  document.getElementById('tbCollapseToggle').onclick = ()=>{
+    state.tbCollapsed = !state.tbCollapsed;
+    topbar.classList.toggle('collapsed', state.tbCollapsed);
+    document.getElementById('tbCollapseToggle').textContent = state.tbCollapsed ? '▾' : '▴';
+    document.getElementById('tbCollapseToggle').title = state.tbCollapsed ? 'Expand to 3 lines' : 'Collapse to 1 line';
+    recalcSavings();
+  };
+  document.getElementById('tbHideToggle').onclick = ()=>{
+    state.tbHidden = true;
+    topbar.classList.add('hidden');
+    tbRestore.style.display = 'flex';
+    recalcSavings();
+  };
+  tbRestore.onclick = ()=>{
+    state.tbHidden = false;
+    topbar.classList.remove('hidden');
+    tbRestore.style.display = 'none';
+    recalcSavings();
+  };
+
+  // ============== SIDEBAR TOGGLES ==============
+  document.getElementById('sbIconToggle').onclick = ()=>{
+    state.sbIcons = !state.sbIcons;
+    sidebar.classList.toggle('icons', state.sbIcons);
+    document.getElementById('sbIconToggle').textContent = state.sbIcons ? '⇆' : '⇄';
+    document.getElementById('sbIconToggle').title = state.sbIcons ? 'Restore full width' : 'Icons only';
+    recalcSavings();
+  };
+  document.getElementById('sbHideToggle').onclick = ()=>{
+    state.sbHidden = true;
+    sidebar.classList.add('hidden');
+    sbRestore.style.display = 'flex';
+    recalcSavings();
+  };
+  sbRestore.onclick = ()=>{
+    state.sbHidden = false;
+    sidebar.classList.remove('hidden');
+    sbRestore.style.display = 'none';
+    recalcSavings();
+  };
+
+  // ============== PRE-MORTEM ==============
+  setTimeout(()=>{
+    if(!state.pmCollapsed){
+      state.pmCollapsed = true;
+      premortem.classList.add('collapsed');
+      pmToggle.textContent = 'expand ▾';
+      recalcSavings();
+    }
+  }, 5000);
+  pmToggle.onclick = ()=>{
+    state.pmCollapsed = !state.pmCollapsed;
+    premortem.classList.toggle('collapsed', state.pmCollapsed);
+    pmToggle.textContent = state.pmCollapsed ? 'expand ▾' : 'collapse ▴';
+    recalcSavings();
+  };
+
+  // ============== DENSITY (Option 11) ==============
+  document.querySelectorAll('.ctrl-density button').forEach(btn=>{
+    btn.onclick = ()=>{
+      document.querySelectorAll('.ctrl-density button').forEach(b=>b.classList.remove('on'));
+      btn.classList.add('on');
+      body.classList.remove('density-compact','density-dense');
+      if(btn.dataset.density) body.classList.add(btn.dataset.density);
+      recalcSavings();
+    };
+  });
+
+  // ============== SPLIT VIEW (Option 8) ==============
+  document.getElementById('b8').onclick = function(){
+    state.split = !state.split;
+    this.classList.toggle('on');
+    this.textContent = state.split ? 'ON' : 'OFF';
+    contentWrap.classList.toggle('single', !state.split);
+    recalcSavings();
+  };
+  let dragging = false;
+  paneDivider.addEventListener('mousedown', ()=>{ dragging=true; document.body.style.cursor='col-resize'; });
+  document.addEventListener('mouseup', ()=>{ dragging=false; document.body.style.cursor=''; });
+  document.addEventListener('mousemove', (e)=>{
+    if(!dragging || !state.split) return;
+    const rect = contentWrap.getBoundingClientRect();
+    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    if(pct > 20 && pct < 80){
+      paneLeft.style.flex = `0 0 ${pct}%`;
+      paneRight.style.flex = `0 0 ${100-pct-1}%`;
+    }
+  });
+
+  // ============== MERGED TABS (Option 12) ==============
+  document.getElementById('b12').onclick = function(){
+    state.merged = !state.merged;
+    this.classList.toggle('on');
+    this.textContent = state.merged ? 'ON' : 'OFF';
+    body.classList.toggle('merged-tabs', state.merged);
+    document.querySelectorAll('.sub-count.merged-only').forEach(c=>{
+      c.style.display = state.merged ? 'inline-block' : 'none';
+    });
+    recalcSavings();
+  };
+
+  // ============== SUB-TAB CLICKS ==============
+  subtabs.querySelectorAll('.subtab').forEach(st=>{
+    st.addEventListener('click', (e)=>{
+      const tab = st.dataset.tab;
+      if(e.metaKey && state.split){
+        document.getElementById('rightSubtabName').textContent = `§ — ${st.textContent.trim()} (right pane)`;
+        return;
+      }
+      subtabs.querySelectorAll('.subtab').forEach(s=>s.classList.remove('active'));
+      st.classList.add('active');
+      document.getElementById('leftSubtabName').textContent = `§ — ${st.textContent.trim()}`;
+    });
+  });
+
+  // ============== SIDEBAR → SUB-TAB SYNC ==============
+  sidebar.querySelectorAll('.s-item').forEach(item=>{
+    item.addEventListener('click', ()=>{
+      sidebar.querySelectorAll('.s-item').forEach(s=>s.classList.remove('active'));
+      item.classList.add('active');
+      const t = item.dataset.tab;
+      const st = subtabs.querySelector(`.subtab[data-tab="${t}"]`);
+      if(st) st.click();
+    });
+  });
+
+  // ============== FULLSCREEN ==============
+  document.getElementById('bFull').onclick = function(){
+    state.fullscreen = !state.fullscreen;
+    this.classList.toggle('on');
+    this.textContent = state.fullscreen ? 'ON' : 'OFF';
+    if(state.fullscreen){
+      state.tbHidden = true; state.sbHidden = true;
+      topbar.classList.add('hidden'); sidebar.classList.add('hidden');
+      tbRestore.style.display='flex'; sbRestore.style.display='flex';
+    } else {
+      state.tbHidden = false; state.sbHidden = false;
+      topbar.classList.remove('hidden'); sidebar.classList.remove('hidden');
+      tbRestore.style.display='none'; sbRestore.style.display='none';
+    }
+    recalcSavings();
+  };
+
+  // ============== RESET ==============
+  document.getElementById('bReset').onclick = ()=>{
+    state.tbCollapsed=false; state.tbHidden=false;
+    state.sbIcons=false; state.sbHidden=false;
+    state.pmCollapsed=false; state.fullscreen=false;
+    topbar.classList.remove('hidden','collapsed');
+    sidebar.classList.remove('hidden','icons');
+    premortem.classList.remove('collapsed');
+    tbRestore.style.display='none';
+    sbRestore.style.display='none';
+    document.getElementById('tbCollapseToggle').textContent = '▴';
+    document.getElementById('sbIconToggle').textContent = '⇄';
+    pmToggle.textContent = 'collapse ▴';
+    document.getElementById('bFull').classList.remove('on');
+    document.getElementById('bFull').textContent = 'OFF';
+    recalcSavings();
+  };
+
+  // ============== KEYBOARD ==============
+  document.addEventListener('keydown', (e)=>{
+    if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if(e.key === 'f' || e.key === 'F') document.getElementById('bFull').click();
+    if(e.key === 'Escape' && state.fullscreen) document.getElementById('bFull').click();
+  });
+
+  recalcSavings();
+})();
+</script>
+
+</body>
+</html>

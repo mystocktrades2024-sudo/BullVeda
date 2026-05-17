@@ -1955,6 +1955,7 @@
     <div class="fd-tab" data-fdtab="insider">Insider</div>
     <div class="fd-tab" data-fdtab="institutional" title="Zacks Intelligence · Institutional Ownership · 13F Activity">Institution</div>
     <div class="fd-tab" data-fdtab="ruleengine" title="How the rule engine evaluated this ticker — gates, pillars, signals, final verdict">Rule Engine</div>
+    <div class="fd-tab" data-fdtab="ml_edge" title="ML Edge — 3-headed forecast: direction · magnitude · hit-net">ML Edge</div>
   </div>
 
   <!-- 2-column body: chart-content left + trade ticket right -->
@@ -2020,6 +2021,7 @@
   <section id="optionsTab" class="sec"><div class="sec-head"><span class="n">OP</span><h2>Options &amp; flow</h2><span class="desc">IV, IV rank, P/C ratio, unusual activity, squeeze fuel.</span></div><div id="optionsBody"></div></section>
   <section id="newsTab" class="sec"><div class="sec-head"><span class="n">NW</span><h2>News timeline</h2><span class="desc">Real news with per-ticker sentiment classification.</span></div><div id="newsBody"></div></section>
   <section id="insiderTab" class="sec"><div class="sec-head"><span class="n">IN</span><h2>Insider Activity</h2><span class="desc">Form 4 transactions with dollar values · last 90 days.</span></div><div id="insiderBody"></div></section>
+  <section id="mlEdgeTab" class="sec"><div class="sec-head"><span class="n">ML</span><h2>ML Edge</h2><span class="desc">3-headed forecast: direction (P-up/chop/down) · magnitude (quantile cone) · hit-net (P(T1 before stop)).</span></div><div id="mlEdgeBody"></div></section>
   <section id="institutionalTab" class="sec">
     <div class="sec-head"><span class="n">IN</span><h2>Institution Analysis</h2><span class="desc">Zacks intelligence · institutional ownership · smart-money flow · premium service holdings.</span></div>
     <div class="inst-subtabs">
@@ -2245,7 +2247,25 @@ async function init() {
   try {
     if (T && typeof T === 'object' && T.options_kpis && typeof T.options_kpis === 'object') {
       const k = T.options_kpis;
-      const _isEmpty = v => v == null || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
+      // 2026-05-13 — match kairos.html: treat stub objects (error field,
+      // all-null values, etc.) as empty so hydration overrides them.
+      const _isEmpty = v => {
+        if (v == null) return true;
+        if (Array.isArray(v)) return v.length === 0;
+        if (typeof v !== 'object') return false;
+        const keys = Object.keys(v);
+        if (keys.length === 0) return true;
+        if (v.error != null && v.error !== '') return true;
+        const meaningful = keys.filter(k => k !== 'source' && k !== 'error');
+        if (meaningful.length === 0) return true;
+        return meaningful.every(k => {
+          const val = v[k];
+          if (val == null || val === '') return true;
+          if (Array.isArray(val) && val.length === 0) return true;
+          if (typeof val === 'object' && Object.keys(val).length === 0) return true;
+          return false;
+        });
+      };
       if (_isEmpty(T.iv_rank)        && k.iv_percentile != null) T.iv_rank = k.iv_percentile;
       if (_isEmpty(T.iv_rank_est)    && k.iv_percentile != null) T.iv_rank_est = k.iv_percentile;
       if (_isEmpty(T.iv30)           && k.iv_current != null)    T.iv30 = k.iv_current;
@@ -2302,6 +2322,7 @@ async function init() {
     ['zacks', renderZacks],
     ['institutional', renderInstitutional],
     ['ruleengine', renderRuleEngine],
+    ['ml_edge', renderMlEdgeTab],
   ];
   for (const [name, fn] of sections) {
     try { fn(); }
@@ -2883,7 +2904,7 @@ function _ewAnchorsMM(t) {
     };
   }
   // Fallback: derive from entry/target proxies
-  const lo52 = t.entry_low ? Math.min(t.entry_low, px*0.7) : px*0.7;
+  const lo52 = t.entry_lo ? Math.min(t.entry_lo, px*0.7) : px*0.7;
   const hi52 = t.target2 ? Math.max(t.target2, px*1.3) : px*1.3;
   return { major: { w0: lo52*0.85, w1: hi52, w2: px },
            intermediate: { w0: lo52, w1: hi52*0.95, w2: px },
@@ -3076,7 +3097,7 @@ function renderScenariosMM() {
 
   // Use TICKER_CONFIG scenarios if available, else derive generic ones
   const scenarios = (cfg && cfg.scenarios) ? cfg.scenarios : [
-    { name: '🚀 Bull Case',   outcome: 'bull',        desc: `Strong setup execution — ${T ? T.setup_family || 'trend' : 'trend'} plays out fully. Volume confirms, sector rotates in.`,  inputs: `Score ${T ? T.score : '—'} · RS ${T ? T.rs_rank : '—'} · Regime Risk-On` },
+    { name: '🚀 Bull Case',   outcome: 'bull',        desc: `Strong setup execution — ${T ? T.setup || 'trend' : 'trend'} plays out fully. Volume confirms, sector rotates in.`,  inputs: `Score ${T ? T.score : '—'} · RS ${T ? T.rs_rank : '—'} · Regime Risk-On` },
     { name: '📊 Base Case',   outcome: 'neutral',     desc: 'Solid but unremarkable. T1 hit within expected hold period. Normal market conditions.', inputs: 'Score threshold met · Entry confirmed · No external shock' },
     { name: '⚠️ Bear Case',  outcome: 'bear_mild',   desc: 'Setup degrades. Sector underperforms, RVOL fades, pullback deeper than expected.', inputs: 'Below EMA21 · RVOL < 1.0× · Sector lag' },
     { name: '📉 Severe',      outcome: 'bear_severe', desc: 'Stop hit immediately. Macro shock or earnings miss. Hard stop protects capital.', inputs: 'Gap below stop · VIX spike · Regime flip' },
@@ -3102,8 +3123,8 @@ function renderScenariosMM() {
 
   const s0  = m ? m.S0 : (T ? T.price : 0);
   const stop = T ? (T.stop || s0 * 0.93) : s0 * 0.93;
-  const t1   = T ? (T.target1 || s0 * 1.10) : s0 * 1.10;
-  const t2   = T ? (T.target2 || s0 * 1.18) : s0 * 1.18;
+  const t1   = T ? (T.t1 || s0 * 1.10) : s0 * 1.10;
+  const t2   = T ? (T.t2 || s0 * 1.18) : s0 * 1.18;
   const hs30 = horizonStats(14), hs90 = horizonStats(60);
   const totalP = scenarios.reduce((s, _) => s + 0.25, 0); // equal weight if no prob given
 
@@ -3523,7 +3544,7 @@ async function renderFloorTape() {
 // ---- Pillars Strip (4 large tiles below chart on Overview) ----
 function renderPillarsStrip() {
   if (!T) return;
-  const v = T.verdict || 'WATCH';
+  const v = T.verdict || T.stage || 'WATCH';
   const isBuy = v === 'BUY';
   const verdictColor = isBuy ? 'pass' : v === 'SELL' || v === 'SHORT' ? 'fail' : 'warn';
   const score = T.score || 0;
@@ -3532,9 +3553,9 @@ function renderPillarsStrip() {
   const gateKeys = Object.keys(gates).filter(k => typeof gates[k] === 'boolean' || (gates[k] && typeof gates[k].pass === 'boolean'));
   const passed = gateKeys.filter(k => gates[k] === true || (gates[k] && gates[k].pass)).length;
   const aiConf = gateKeys.length > 0 ? +(passed / gateKeys.length * 10).toFixed(1) : +(score / 10).toFixed(1);
-  const rr = T.rr_ratio || 0;
-  const t1 = T.target1 || T.entry_high || 0;
-  const setup = T.setup_family || 'Setup';
+  const rr = T.rr || 0;
+  const t1 = T.t1 || T.entry_hi || 0;
+  const setup = T.setup || 'Setup';
   const tier = T.conviction_tier || (score >= 88 ? 'T1' : score >= 78 ? 'T2' : score >= 70 ? 'T3' : 'WATCH');
   const horizon = (T.hold_period_min && T.hold_period_max) ? `${T.hold_period_min}-${T.hold_period_max}d hold` : 'swing timeframe';
   $('pillarsStripBody').innerHTML = `
@@ -3568,14 +3589,14 @@ function renderSignalPillars() {
   const score = T.score || 0;
   // 6 pillars — each normalized 0-100
   const techPct = Math.min(100, ((T.tech_score || 0) / (T.tech_max || 35)) * 100);
-  const fundPct = Math.min(100, ((T.fund_score || 0) / (T.fund_max || 10)) * 100);
+  const fundPct = Math.min(100, ((T.fund_score || 0) / (T.fund_max || 30)) * 100);
   const sentPct = Math.min(100, ((T.sent_score || 0) / (T.sent_max || 15)) * 100);
   const rsPct = Math.min(100, T.rs_rank || 0);
   const volPct = Math.min(100, ((T.rvol || 1) / 3) * 100);
   const optPct = T.options_data?.uoa ? 80 : (T.options_data?.iv_rank ? Math.min(100, T.options_data.iv_rank) : 30);
   const items = [
     { name: 'Technicals',     pct: techPct, sub: T.above_50ema ? 'EMA stacked' : 'Below EMA50' },
-    { name: 'Fundamentals',   pct: fundPct, sub: `${T.fund_score || 0}/${T.fund_max || 10}` },
+    { name: 'Fundamentals',   pct: fundPct, sub: `${T.fund_score || 0}/${T.fund_max || 30}` },
     { name: 'Sentiment',      pct: sentPct, sub: `${T.sent_score || 0}/${T.sent_max || 15}` },
     { name: 'Rel. Strength',  pct: rsPct,   sub: `RS ${T.rs_rank || '—'}` },
     { name: 'Volume',         pct: volPct,  sub: `${(T.rvol || 0).toFixed(2)}× RVOL` },
@@ -3678,6 +3699,7 @@ function renderOptionsTab() { /* moved to subtabs/options/options.js — CapStud
 
 // ---- News-only renderer ----
 function renderNewsTab() { /* moved to subtabs/news/news.js — CapStudio sub-tab loader */ }
+function renderMlEdgeTab() { /* moved to subtabs/ml_edge/ml_edge.js — CapStudio sub-tab loader */ }
 
 // News tab filter handler
 function nwsFilter(filter, pill) {
@@ -4066,9 +4088,9 @@ function _renderPreTradeCheckInner(el) {
 
   // Pre-compute per-mode thresholds
   // R:R thresholds: swing 3.0 / position 2.5 / invest 2.0
-  const rrSwing = tp.rr_ratio >= 3.0 ? 'pass' : tp.rr_ratio >= 2.5 ? 'warn' : tp.rr_ratio ? 'fail' : 'na';
-  const rrPos   = tp.rr_ratio >= 2.5 ? 'pass' : tp.rr_ratio >= 2.0 ? 'warn' : tp.rr_ratio ? 'fail' : 'na';
-  const rrInv   = tp.rr_ratio >= 2.0 ? 'pass' : tp.rr_ratio ? 'warn' : 'na';
+  const rrSwing = tp.rr >= 3.0 ? 'pass' : tp.rr >= 2.5 ? 'warn' : tp.rr ? 'fail' : 'na';
+  const rrPos   = tp.rr >= 2.5 ? 'pass' : tp.rr >= 2.0 ? 'warn' : tp.rr ? 'fail' : 'na';
+  const rrInv   = tp.rr >= 2.0 ? 'pass' : tp.rr ? 'warn' : 'na';
   // Entry quality: swing strict, position medium, invest lenient
   const eqSwing = ['FRESH','PULLBACK'].includes(eq) ? 'pass' : eq === 'VALID' ? 'warn' : eqFail ? 'fail' : 'na';
   const eqPos   = ['FRESH','PULLBACK','VALID'].includes(eq) ? 'pass' : eq === 'EXTENDED' ? 'warn' : eq === 'MISSED' ? 'fail' : 'na';
@@ -4096,7 +4118,7 @@ function _renderPreTradeCheckInner(el) {
   const cvPos   = (md.cvar_975_pct || fd.cvar_975_pct) > -15 ? 'pass' : (md.cvar_975_pct || fd.cvar_975_pct) != null ? 'warn' : 'na';
   const cvInv   = (md.cvar_975_pct || fd.cvar_975_pct) > -25 ? 'pass' : (md.cvar_975_pct || fd.cvar_975_pct) != null ? 'warn' : 'na';
   // Setup family relevance
-  const setup = (T.setup_family || '').toLowerCase();
+  const setup = (T.setup || '').toLowerCase();
   const isSwingSetup = ['impulse catalyst','breakout expansion','trend continuation','special situation'].some(s => setup.includes(s.split(' ')[0]));
   const isInvestSetup = setup.includes('mean reversion') || setup.includes('value') || (T.score >= 75 && T.fund_total?.score / T.fund_total?.max >= 0.7);
 
@@ -4114,7 +4136,7 @@ function _renderPreTradeCheckInner(el) {
     { id: 'overview', title: '🎯 Overview Gates', desc: 'Core scoring + verdict gates', items: [
       mkM('must', same(T.score >= 70 ? 'pass' : T.score >= 60 ? 'warn' : 'fail'), 'Score ≥ 70', '5-pillar composite', T.score ?? '—', '≥ 70'),
       mkM('must', same((T.stars || 0) >= 4 ? 'pass' : T.stars ? 'fail' : 'na'), 'Stars ≥ 4', 'Tail filter', T.stars || '—', '≥ 4'),
-      mkM('must', [rrSwing, rrPos, rrInv], 'R:R thresholds', 'Swing≥3.0 · Pos≥2.5 · Inv≥2.0', tp.rr_ratio || '—', 'mode-specific'),
+      mkM('must', [rrSwing, rrPos, rrInv], 'R:R thresholds', 'Swing≥3.0 · Pos≥2.5 · Inv≥2.0', tp.rr || '—', 'mode-specific'),
       mkM('should', same(conv.label === 'T1' || conv.label === 'T2' ? 'pass' : conv.label === 'T3' ? 'warn' : 'fail'), 'Conviction T1 / T2', 'T3 = small-size only', `${conv.label || '—'} · ${Math.round((conv.size_mult||0)*100)}%`, 'T1/T2'),
       mkM('must', same(T.verdict === 'BUY' ? 'pass' : 'fail'), 'Verdict = BUY', 'Final-decision label', T.verdict || '—', 'BUY'),
       mkM('must', [eqSwing, eqPos, eqInv], 'Entry quality', 'Swing strict · Inv lenient', eq || '—', 'FRESH/PULLBACK/VALID'),
@@ -4149,10 +4171,10 @@ function _renderPreTradeCheckInner(el) {
       mkM('info', same(T.uoa ? 'pass' : 'info'), 'UOA flagged', 'Calls >> OI', T.uoa ? 'bullish' : 'none', 'prefer'),
     ]},
     { id: 'plan', title: '🗺 Trade Plan', desc: 'Levels · setup family · exit rules', items: [
-      mkM('must', same(T.setup_family ? 'pass' : 'fail'), 'Setup family identified', 'Hold-period guide', T.setup_family || '—', 'any'),
-      mkM('must', same(tp.entry_low && tp.entry_high ? 'pass' : 'fail'), 'Entry zone defined', 'For LIMIT order', tp.entry_low ? `${dol(tp.entry_low)} – ${dol(tp.entry_high)}` : '—', 'low/high'),
+      mkM('must', same(T.setup ? 'pass' : 'fail'), 'Setup family identified', 'Hold-period guide', T.setup || '—', 'any'),
+      mkM('must', same(tp.entry_lo && tp.entry_hi ? 'pass' : 'fail'), 'Entry zone defined', 'For LIMIT order', tp.entry_lo ? `${dol(tp.entry_lo)} – ${dol(tp.entry_hi)}` : '—', 'low/high'),
       mkM('must', same(tp.stop ? 'pass' : 'fail'), 'Stop loss defined', 'Hard exit rule', dol(tp.stop), 'defined'),
-      mkM('must', same(tp.target1 ? 'pass' : 'fail'), 'Target 1 defined', '50% off · move stop to entry', dol(tp.target1), 'defined'),
+      mkM('must', same(tp.t1 ? 'pass' : 'fail'), 'Target 1 defined', '50% off · move stop to entry', dol(tp.t1), 'defined'),
       mkM('should', same(tp.target2 ? 'pass' : 'warn'), 'Target 2 defined', 'Stretch target', dol(tp.target2), 'defined'),
     ]},
     { id: 'quant', title: '🎲 Quant Models', desc: 'V-series · MC · Forward dist', items: [
@@ -4830,6 +4852,7 @@ const FD_TAB_MAP = {
   insider:     ['insiderTab'],
   institutional: ['institutionalTab'],
   ruleengine: ['ruleEngineTab'],
+  ml_edge:    ['mlEdgeTab'],
 };
 
 function fdSwitchTab(tab) {
@@ -4901,11 +4924,11 @@ async function ttkOpenModal(side) {
   const body = document.getElementById('ttkModalBody');
   if (!overlay || !body) return;
   const px = (T.price || 0).toFixed(2);
-  const eLo = (T.entry_low || T.price || 0).toFixed(2);
-  const eHi = (T.entry_high || T.price || 0).toFixed(2);
+  const eLo = (T.entry_lo || T.price || 0).toFixed(2);
+  const eHi = (T.entry_hi || T.price || 0).toFixed(2);
   const stop = (T.stop || (T.price * 0.97) || 0).toFixed(2);
-  const t1 = (T.target1 || (T.price * 1.05) || 0).toFixed(2);
-  const t2 = (T.target2 || (T.price * 1.10) || 0).toFixed(2);
+  const t1 = (T.t1 || (T.price * 1.05) || 0).toFixed(2);
+  const t2 = (T.t2 || (T.price * 1.10) || 0).toFixed(2);
   const sideLabel = side === 'SHORT' ? 'SELL / SHORT' : 'BUY / LONG';
   const sideColor = side === 'SHORT' ? 'var(--fail)' : 'var(--pass)';
   if (tickerEl) tickerEl.textContent = `${T.ticker} · $${px}`;
@@ -5145,11 +5168,11 @@ window.rdSwitch = function(key) {
 const RD_HDR = (T) => `
   <div class="rd-hdr">
     <span class="ticker">${T.ticker}</span>
-    <span class="meta">${T.sector || '—'}${T.industry ? ' · ' + T.industry : ''} · ${T.setup_family || T.setup_type || 'no setup'} · score ${T.score || '—'}</span>
+    <span class="meta">${T.sector || '—'}${T.industry ? ' · ' + T.industry : ''} · ${T.setup || T.setup_type || 'no setup'} · score ${T.score || '—'}</span>
   </div>`;
 const RD_RENDERERS = {
   rigor: (T) => {
-    const setup = T.setup_family || T.setup_type || '?';
+    const setup = T.setup || T.setup_type || '?';
     const score = T.score || 0;
     // 2026-05-09: real backtest stats from cache/portfolio_backtest.json,
     // injected into DATA.research_setup_stats by build_data.py.
@@ -5227,7 +5250,7 @@ const RD_RENDERERS = {
   },
 
   decay: (T) => {
-    const setup = T.setup_family || T.setup_type || '?';
+    const setup = T.setup || T.setup_type || '?';
     // 2026-05-09: real quartile data from cache/portfolio_backtest.json,
     // computed in build_data.py and injected into DATA.research_setup_stats.
     const setupStatsAll = (typeof DATA !== 'undefined' && DATA.research_setup_stats) || {};
@@ -5270,7 +5293,7 @@ const RD_RENDERERS = {
 
   position: (T) => {
     const k = T.kelly_size || {};
-    const setup = T.setup_family || T.setup_type || '?';
+    const setup = T.setup || T.setup_type || '?';
     const sizeRec = T.alloc_pct || k.final_alloc_pct;
     const dollarRisk = k.dollar_risk;
     return RD_HDR(T) + `
@@ -5516,7 +5539,7 @@ window.RD_CHARTS = {
   decay: (T) => {
     if (!window.Plotly) return;
     // Use real quartile data from DATA.research_setup_stats
-    const setup = T.setup_family || T.setup_type || '?';
+    const setup = T.setup || T.setup_type || '?';
     const stats = (typeof DATA !== 'undefined' && DATA.research_setup_stats) || {};
     const qd = (stats[setup] && stats[setup].quartiles) || [];
     const xs = qd.filter(q => q.wr != null).map((_, i) => i + 1);
@@ -5676,7 +5699,7 @@ RD_RENDERERS.risk = (T) => {
 };
 
 RD_RENDERERS.decay = (T) => {
-  const setup = T.setup_family || T.setup_type || '?';
+  const setup = T.setup || T.setup_type || '?';
   const stats = (typeof DATA !== 'undefined' && DATA.research_setup_stats) || {};
   const qd = (stats[setup] && stats[setup].quartiles) || [];
   const wrs = qd.filter(q => q.wr != null).map(q => q.wr);
@@ -5701,7 +5724,7 @@ RD_RENDERERS.decay = (T) => {
 
 RD_RENDERERS.position = (T) => {
   const k = T.kelly_size || {};
-  const setup = T.setup_family || T.setup_type || '?';
+  const setup = T.setup || T.setup_type || '?';
   const sizeRec = T.alloc_pct || k.final_alloc_pct;
   return RD_HDR(T) + `
     <div class="rd-card" style="display:flex;align-items:center;gap:18px;padding:14px 20px;background:color-mix(in oklch, var(--pass) 12%, var(--bg-2));border-left:4px solid var(--pass);">
@@ -6298,7 +6321,7 @@ window.ftSwitchMode = (m) => {
     const sl = document.getElementById('ftStop');
     const tp = document.getElementById('ftTp');
     if (sl && (T.stop)) sl.value = T.stop.toFixed(2);
-    if (tp && T.target1) tp.value = T.target1.toFixed(2);
+    if (tp && T.t1) tp.value = T.t1.toFixed(2);
   }
   ftRecalc();
 };
@@ -6323,7 +6346,7 @@ window.ftRecalc = () => {
   const shares = parseFloat(document.getElementById('ftShares')?.value) || 50;
   const cost = (T.price || 0) * shares;
   const stop = parseFloat(document.getElementById('ftStop')?.value) || (T.stop || 0);
-  const tp = parseFloat(document.getElementById('ftTp')?.value) || (T.target1 || 0);
+  const tp = parseFloat(document.getElementById('ftTp')?.value) || (T.t1 || 0);
   const risk = Math.abs((T.price || 0) - stop) * shares;
   const reward = Math.abs(tp - (T.price || 0)) * shares;
   const rr = risk > 0 ? (reward / risk) : 0;
