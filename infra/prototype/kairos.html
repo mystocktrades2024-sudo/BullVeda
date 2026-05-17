@@ -415,6 +415,21 @@ body.tb-hidden    #pan-detail .t-host { display: none; }
   color: var(--ink-3);
   user-select: none;
 }
+/* Collapsible sidebar section — click .sb-h to toggle its sibling .sb-link/.sb-link-* */
+.sb-section.sb-collapsible > .sb-h { cursor: pointer; }
+.sb-section.sb-collapsible > .sb-h::before {
+  content: '▾';
+  font-size: 9px;
+  color: var(--ink-3);
+  transition: transform 0.15s ease;
+  display: inline-block;
+  width: 9px;
+}
+.sb-section.sb-collapsible.collapsed > .sb-h::before { transform: rotate(-90deg); }
+.sb-section.sb-collapsible.collapsed > .sb-link,
+.sb-section.sb-collapsible.collapsed > .sb-link-detail,
+.sb-section.sb-collapsible.collapsed > .sb-quick { display: none; }
+.sb-section.sb-collapsible:hover > .sb-h { color: var(--ink-1); }
 .sb-link {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 16px;
@@ -3621,6 +3636,27 @@ body.on-workspace .tabs { display: none; }
 .qaud-subtab.on {
   color: var(--copper);
   border-bottom-color: var(--copper);
+}
+
+/* LIVE badge for Performance tab (added 2026-05-17 · live polling) */
+.qperf-live {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px; border-radius: 2px;
+  background: rgba(91,229,124,0.08); color: var(--gn);
+  border: 1px solid rgba(91,229,124,0.30);
+  font: 800 10px var(--mono); letter-spacing: .10em; text-transform: uppercase;
+  margin-left: auto;
+}
+.qperf-live-loading { background: rgba(255,185,92,0.08); color: var(--amb); border-color: rgba(255,185,92,0.30); }
+.qperf-live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--gn); box-shadow: 0 0 6px var(--gn);
+  animation: qperfPulse 2s infinite ease-in-out;
+}
+.qperf-live-loading .qperf-live-dot { background: var(--amb); box-shadow: 0 0 6px var(--amb); }
+@keyframes qperfPulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1.0; transform: scale(1.3); }
 }
 
 /* Loading state */
@@ -8141,14 +8177,12 @@ body.on-detail-tab .qdchk-trigger-btn { display: inline-flex; }
     <div class="sb-link" data-tab="alerts"><span class="ico">⚡</span>Alerts<span class="ct" id="sb-alerts">0</span></div>
     <div class="sb-link warn" data-tab="killed"><span class="ico">×</span>Killed / AVOID<span class="ct" id="sb-killed">0</span></div>
     <div class="sb-link" data-tab="performance"><span class="ico">∿</span>Performance<span class="ct" id="sb-perf">0</span></div>
-    <div class="sb-link" data-tab="audit"><span class="ico">▦</span>Audit Trail<span class="ct" id="sb-audit">0</span></div>
     <div class="sb-link" data-tab="screener"><span class="ico">⊞</span>Screener<span class="ct" id="sb-screener">0</span></div>
   </div>
 
   <div class="sb-section">
     <div class="sb-h">Markets</div>
     <div class="sb-link" data-tab="marketmap"><span class="ico">▦</span>Market Map<span class="ct">SPX</span></div>
-    <div class="sb-link" data-tab="audittrail"><span class="ico">▦</span>Audit Trail<span class="ct">log</span></div>
     <div class="sb-link" data-tab="industries"><span class="ico">🏭</span>Industries<span class="ct" id="sb-ind">0</span></div>
     <div class="sb-link" data-tab="market"><span class="ico">📈</span>Market</div>
     <div class="sb-link" data-tab="macro"><span class="ico">🌐</span>Macro · Events<span class="ct" id="sb-macro">0</span></div>
@@ -8199,9 +8233,10 @@ body.on-detail-tab .qdchk-trigger-btn { display: inline-flex; }
     <div class="sb-link"><span class="ico">📋</span><a href="/v2/cheatsheet.html">Cheat Sheet</a></div>
   </div>
 
-  <div class="sb-section">
-    <div class="sb-h">Data Plane</div>
-    <div class="sb-link" data-tab="supabase"><span class="ico">◇</span>Supabase<span class="ct" id="sb-sb">56</span></div>
+  <div class="sb-section sb-collapsible collapsed" id="sb-admin">
+    <div class="sb-h" onclick="this.parentElement.classList.toggle('collapsed')">Admin Activities</div>
+    <div class="sb-link" data-tab="supabase"><span class="ico">◇</span>Supabase<span class="ct" id="sb-sb">67</span></div>
+    <div class="sb-link" data-tab="pipelines"><span class="ico">⇄</span>Pipelines<span class="ct" id="sb-pl">68</span></div>
   </div>
 
 </aside>
@@ -8730,42 +8765,95 @@ window.K_HELP_CONTENT = {
       + '</ol>',
   },
   audit: {
-    title: 'AUDIT TRAIL · how to use',
+    title: 'AUDIT TRAIL · moved to Performance',
     html: ''
-      + '<h3>What this tab shows</h3>'
-      + '<p>The full <b>audit ledger</b> of every signal scored today, with every gate evaluation visible. Sortable by any column, filterable by verdict (BUY/WATCH/AVOID/SELL) and by mode (swing/position/invest).</p>'
-      + '<h3>Why it exists</h3>'
-      + '<p>Per the system rules: <b>every claim has an audit trail</b>. If a signal got a BUY verdict, you can see exactly which gates it passed and on what evidence. If a signal got AVOID, you can see exactly which gate killed it. No black boxes.</p>'
-      + '<h3>How to use it</h3>'
-      + '<ol>'
-        + '<li><b>Sort by score descending</b> to see the strongest signals across the universe.</li>'
-        + '<li>Filter by verdict to focus on a specific routing — e.g., all WATCH tickers waiting for revert.</li>'
-        + '<li>Inspect <b>gates_evaluated</b> on any row to understand the full decision tree.</li>'
-        + '<li>Use it for <b>post-trade review</b>: a week after fill, come back to see what gates were green at scan time vs what changed.</li>'
-      + '</ol>',
+      + '<h3>This view has moved</h3>'
+      + '<p>The standalone Audit Trail surface has been consolidated into the <b>Performance</b> tab as four coordinated sub-views. Click <b>Performance</b> in the sidebar to access the same data with broader context.</p>'
+      + '<table>'
+        + '<thead><tr><th style="width:200px">You used to look here for…</th><th>Now in Performance →</th></tr></thead>'
+        + '<tbody>'
+          + '<tr><td>Today\'s per-ticker gate evaluation</td><td><b>📋 Today\'s Decisions</b></td></tr>'
+          + '<tr><td>Closed-pick forward returns</td><td><b>📚 Historical Ledger</b></td></tr>'
+          + '<tr><td>System-wide decision stream + score evolution</td><td><b>📡 Decision Stream</b></td></tr>'
+          + '<tr><td>Realized WR / PF / Wilson LB</td><td><b>📊 System Edge</b> (live · 60s poll)</td></tr>'
+        + '</tbody>'
+      + '</table>',
   },
   performance: {
-    title: 'PERFORMANCE · how to use',
+    title: 'PERFORMANCE · the engine\'s self-audit cockpit',
     html: ''
-      + '<h3>What this tab shows</h3>'
-      + '<p>Your <b>realized trade performance</b> — win rate, profit factor, R-multiple histogram, Sharpe ratio, and per-setup attribution. All stats use <b>Wilson 95% lower bound</b> for the win rate so you don\'t over-trust small samples.</p>'
-      + '<h3>Key metrics</h3>'
+      + '<h3>Why this tab exists</h3>'
+      + '<p>This is where the system <b>audits itself</b>. Every claim the engine makes — "this setup has edge", "this trade should size at 5%", "this gate exists for a reason" — gets reconciled here against realized outcomes. Per the operating mindset: <b>every claim has an audit trail</b> (principle 4). Performance is the trail.</p>'
+      + '<p>The tab has <b>four sub-views</b>, each answering a different question. Switch via the top tab strip.</p>'
+
+      + '<h3>📊 System Edge · LIVE · 60s poll</h3>'
+      + '<p><b>What it is:</b> the system\'s current realized edge — win rate, profit factor, Wilson 95% lower bound, R-multiple histogram, per-setup attribution, drift detection. The <b>LIVE</b> badge means this view re-fetches <code>/api/performance</code> every 60 seconds; numbers reflect the latest <code>signal_log.json</code> without waiting for the next daily scan.</p>'
+      + '<p><b>Why use it:</b> sizing decisions live and die on these numbers. The Wilson LB is the <b>conservative</b> estimate of true win rate — use it (not the raw WR) for any position-sizing or kill-list decision.</p>'
       + '<table>'
         + '<tbody>'
-          + '<tr><td class="k">Win rate (Wilson LB)</td><td>The <b>conservative</b> estimate of your true win rate. Use this for sizing decisions, not the raw point estimate.</td></tr>'
-          + '<tr><td class="k">Profit factor</td><td>Sum of winners / sum of losers. ≥ 1.5 = good, ≥ 2.0 = strong. With slippage haircut applied.</td></tr>'
-          + '<tr><td class="k">Sharpe (126d)</td><td>Risk-adjusted return over the 6-month window. ≥ 1.0 = decent, ≥ 1.5 = strong.</td></tr>'
-          + '<tr><td class="k">R-multiple histogram</td><td>Distribution of your trade outcomes in R units. Healthy = right-skewed (big wins, small losses).</td></tr>'
-          + '<tr><td class="k">Per-setup attribution</td><td>Which setup families are pulling weight vs dragging you down.</td></tr>'
+          + '<tr><td class="k">VERDICT pill</td><td><b class="gn">TRUST</b> (PF ≥ 1.5 · Wilson LB ≥ 40%) · <b class="am">PROCEED</b> (PF ≥ 1.2 · LB ≥ 30% · half-Kelly) · <b class="am">CAUTION</b> (PF ≥ 1.0) · <b class="rd">STOP</b> (PF &lt; 1.0 · halt new entries).</td></tr>'
+          + '<tr><td class="k">Win rate (Wilson LB)</td><td>Conservative WR · sample-size aware. Use for sizing, not the raw point estimate.</td></tr>'
+          + '<tr><td class="k">Profit factor</td><td>Gross wins / gross losses. ≥ 1.5 = good · ≥ 2.0 = strong. Slippage haircut applied per CLAUDE.md.</td></tr>'
+          + '<tr><td class="k">R-multiple histogram</td><td>Distribution of outcomes in R units. Healthy = right-skewed (big wins, small losses).</td></tr>'
+          + '<tr><td class="k">Per-setup table</td><td>Each setup with n / WR / Wilson LB / avg R. Sort by Wilson LB to see what actually has edge.</td></tr>'
+          + '<tr><td class="k">Drift alerts</td><td>Auto-flagged setups crossing −5pp WR drift over the last 30 trades.</td></tr>'
+          + '<tr><td class="k">LIVE badge</td><td>Pulsing green = polling. Number = seconds since last refresh. Amber "warming…" = first fetch in flight.</td></tr>'
         + '</tbody>'
       + '</table>'
-      + '<h3>How to use it</h3>'
+      + '<p><b>How to use:</b> check at least weekly. If a setup\'s Wilson LB drops below <code>breakeven_WR × 1.4</code> it gets auto-killed. n &lt; 30 = preliminary; n &lt; 10 = noise — don\'t change sizing on small samples (principle 1).</p>'
+
+      + '<h3>📋 Today\'s Decisions</h3>'
+      + '<p><b>What it is:</b> every ticker the engine evaluated <b>in the most recent scan</b>, with the full gate trail. Per-ticker cards show verdict pill (BUY/WATCH/AVOID/SELL), composite score, the <code>gates_evaluated</code> list (each pre-trade gate\'s pass/fail + reason), why-confident bullets, and watch-out conditions. Sortable, filterable by verdict / mode / search / score band / RS band / R:R.</p>'
+      + '<p><b>Why use it:</b> when a ticker you expected to BUY got WATCH (or vice versa), this is where you find out <b>which gate fired and why</b>. Black-box-proof. Also the source-of-truth for post-trade reviews — a week after fill, come back and see what was green at scan-time vs what changed.</p>'
+      + '<p><b>How to use:</b></p>'
       + '<ol>'
-        + '<li><b>Check at least monthly.</b> Edge erodes — what worked 6 months ago may be priced-in now.</li>'
-        + '<li>If a setup family\'s Wilson LB drops below your breakeven WR × 1.4 — it goes onto the kill list automatically.</li>'
-        + '<li>Use the R-multiple histogram to spot tail-loss events. If you have a single −3R or worse in the sample, investigate the root cause.</li>'
-        + '<li>n &lt; 30 = preliminary. n &lt; 10 = noise. Don\'t make sizing changes off small samples.</li>'
-      + '</ol>',
+        + '<li>Sort by score descending → strongest signals first.</li>'
+        + '<li>Filter by verdict to focus a routing — e.g., all WATCH tickers waiting for revert.</li>'
+        + '<li>Expand <code>gates_evaluated</code> on any row to inspect the decision tree.</li>'
+        + '<li>Use for post-trade review: was the gate evidence actually predictive?</li>'
+      + '</ol>'
+
+      + '<h3>📚 Historical Ledger</h3>'
+      + '<p><b>What it is:</b> the post-trade <b>forward-return ledger</b>. For every closed pick in the last year, the realized %Δ at D1-D7, W1-W8, M1-M12 horizons. Sortable mega-table, color-coded heatmap, win-rate per setup, per-sector breakdown, CSV export. Source: <code>cache/audit_ledger.json</code>.</p>'
+      + '<p><b>Why use it:</b> the long-horizon truth-test. A setup that looks great at D5 may grind back the gains by W2. This is where you see how each setup actually <i>plays out</i> beyond the immediate exit. Useful for picking the right hold period per setup family.</p>'
+      + '<p><b>How to use:</b></p>'
+      + '<ol>'
+        + '<li>Filter by setup family to see horizon-by-horizon WR — pick the horizon where edge peaks.</li>'
+        + '<li>Look at the heatmap: solid green rows = setups that hold gains; alternating green/red rows = mean-reverters that need tighter exits.</li>'
+        + '<li>Sort by D5 then by M1 to spot setups where the early R: R was right but you exited too soon (or too late).</li>'
+        + '<li>Export CSV for deeper analysis in spreadsheets.</li>'
+      + '</ol>'
+
+      + '<h3>📡 Decision Stream</h3>'
+      + '<p><b>What it is:</b> the live, <b>system-wide decision feed</b>. Reads <code>decision_log.jsonl</code> — every decision the engine has ever logged across all scans — with a pulsing live feed of the most recent decisions, a 6-tile KPI strip, a <b>score-evolution SVG chart</b> per ticker, a reasons donut, a setup donut, and a <b>gate heatmap</b> (ticker × gate matrix · pass / warn / fail / miss). Search any ticker to drill down into its decision history.</p>'
+      + '<p><b>Why use it:</b> when you want to see <b>how the engine\'s view of a ticker has evolved</b> over weeks/months. Did NVDA degrade from BUY → WATCH → AVOID over 6 weeks before the −10% drop? The score-evolution chart shows it. Also the place to spot system-wide patterns — which gates fail most often, which setups dominate the stream this month.</p>'
+      + '<p><b>How to use:</b></p>'
+      + '<ol>'
+        + '<li>Watch the live feed for a minute — newest decisions pulse in from the top.</li>'
+        + '<li>Type a ticker in the autocomplete → the score-evolution chart plots its 90-day history.</li>'
+        + '<li>Inspect the gate heatmap for system-wide failure patterns — a red column = a gate that\'s killing too many signals.</li>'
+        + '<li>Use the verdict-filter chips (BUY/WATCH/AVOID) + reason-search to slice by motivation.</li>'
+      + '</ol>'
+
+      + '<h3>How the four sub-views relate</h3>'
+      + '<table>'
+        + '<thead><tr><th style="width:170px">Question</th><th>Go to</th></tr></thead>'
+        + '<tbody>'
+          + '<tr><td>Is the engine making money?</td><td><b>📊 System Edge</b></td></tr>'
+          + '<tr><td>Why did the engine pick X today?</td><td><b>📋 Today\'s Decisions</b></td></tr>'
+          + '<tr><td>How do my closed trades play out at each horizon?</td><td><b>📚 Historical Ledger</b></td></tr>'
+          + '<tr><td>How has the engine\'s view of X evolved over time?</td><td><b>📡 Decision Stream</b></td></tr>'
+        + '</tbody>'
+      + '</table>'
+
+      + '<h3>Operating rules (from CLAUDE.md)</h3>'
+      + '<ul>'
+        + '<li>Wilson 95% LB &gt; raw WR — always use the conservative estimate (principle 1).</li>'
+        + '<li>n &lt; 30 = preliminary · n &lt; 10 = noise · n &lt; 5 = inadmissible (principle 1).</li>'
+        + '<li>Setups crossing −5pp drift trigger auto-kill (principle 11).</li>'
+        + '<li>PF haircut: actual = backtest × (PF − 0.10) retail / (PF − 0.20) institutional (principle 19).</li>'
+        + '<li>Per-setup × per-regime attribution is the only honest decomposition (principle 16).</li>'
+      + '</ul>',
   },
   watchlist: {
     title: 'WATCHLIST · how to use',
@@ -12772,6 +12860,11 @@ const V3_WORKSPACES = {
     title: 'Supabase',
     sub: 'data plane · table sync · drift detection · live row counts',
     custom: 'quantSupabase',
+  },
+  pipelines: {
+    title: 'Pipelines',
+    sub: 'source → script → target · status + schedule + last run · all 62 mappings',
+    custom: 'quantPipelines',
   },
   screener: {
     title: 'Screener',
@@ -18174,6 +18267,8 @@ const QuantAudit = (function() {
   let _filterMode = 'all';      // 'all' | 'swing' | 'position' | 'invest'
   let _searchQuery = '';
   let _audSubView = 'today';     // 'today' | 'history' (toggles inside Audit Trail)
+  // Allow external callers (QuantPerformance) to drive the subview without touching internals.
+  function setView(v) { if (v === 'today' || v === 'history') _audSubView = v; }
 
   function _allDecisions(data) {
     const out = [];
@@ -18597,7 +18692,7 @@ const QuantAudit = (function() {
     });
   }
 
-  return { render };
+  return { render, setView };
 })();
 
 // ──────────────────────────────────────────────────────────────────────
@@ -18990,7 +19085,159 @@ const QuantPerformance = (function() {
   let _sortKey = 'n';
   let _sortDir = 'desc';
 
+  // Sub-tab state · /api/performance live polling (added 2026-05-17)
+  let _perfSubView = 'edge';   // 'edge' | 'today' | 'history' | 'stream'
+  let _liveData    = null;     // last /api/performance payload
+  let _liveTs      = 0;        // wall-clock of last fetch
+  let _liveTimer   = null;     // setInterval handle
+  let _liveBusy    = false;
+
+  function _subtabBar(active) {
+    const liveBadge = (active === 'edge' && _liveTs > 0)
+      ? `<span class="qperf-live" title="last refresh ${new Date(_liveTs).toLocaleTimeString()}"><span class="qperf-live-dot"></span>LIVE · ${Math.max(1, Math.round((Date.now() - _liveTs)/1000))}s ago</span>`
+      : (active === 'edge' ? '<span class="qperf-live qperf-live-loading"><span class="qperf-live-dot"></span>warming…</span>' : '');
+    return `<div class="qaud-subtabs" style="margin-bottom:10px; display:flex; align-items:center; gap:4px">
+      <button class="qaud-subtab ${active==='edge'?'on':''}" data-perf-view="edge">📊 System Edge</button>
+      <button class="qaud-subtab ${active==='today'?'on':''}" data-perf-view="today">📋 Today's Decisions</button>
+      <button class="qaud-subtab ${active==='history'?'on':''}" data-perf-view="history">📚 Historical Ledger</button>
+      <button class="qaud-subtab ${active==='stream'?'on':''}" data-perf-view="stream">📡 Decision Stream</button>
+      <span style="flex:1"></span>
+      ${liveBadge}
+    </div>`;
+  }
+
+  function _wireSubtabs(wsPanel, data) {
+    wsPanel.querySelectorAll('.qaud-subtab[data-perf-view]').forEach(b => {
+      b.addEventListener('click', () => {
+        const v = b.dataset.perfView;
+        if (v === _perfSubView) return;
+        _perfSubView = v;
+        if (_liveTimer) { clearInterval(_liveTimer); _liveTimer = null; }
+        render(wsPanel, data);
+      });
+    });
+  }
+
+  async function _pollLive(wsPanel, data) {
+    if (_liveBusy || _perfSubView !== 'edge') return;
+    _liveBusy = true;
+    try {
+      const r = await fetch('/api/performance', { cache: 'no-store' });
+      if (r.ok) {
+        _liveData = await r.json();
+        _liveTs   = Date.now();
+        if (_perfSubView === 'edge') _renderEdge(wsPanel, data);
+      }
+    } catch (e) { /* swallow · keep last good payload */ }
+    finally { _liveBusy = false; }
+  }
+
+  function _mergeLive(perf) {
+    // Overlay /api/performance fields onto the build-time perf so the edge
+    // view reflects the latest signal_log.json without a full scan.
+    if (!_liveData) return perf;
+    const out = { ...perf };
+    const L = _liveData;
+    if (L.total       != null) out.total       = L.total;
+    if (L.open        != null) out.open        = L.open;
+    if (L.closed      != null) out.closed      = L.closed;
+    if (L.wins        != null) out.wins        = L.wins;
+    if (L.losses      != null) out.losses      = L.losses;
+    if (L.win_rate    != null) out.win_rate    = L.win_rate;
+    if (L.pf          != null) out.pf          = L.pf;
+    if (L.avg_r       != null) out.avg_r       = L.avg_r;
+    if (L.rr_avg      != null) out.rr_avg      = L.rr_avg;
+    if (L.mae_avg     != null) out.mae_avg     = L.mae_avg;
+    if (L.mfe_avg     != null) out.mfe_avg     = L.mfe_avg;
+    if (L.by_strategy && Object.keys(L.by_strategy).length) out.by_strategy = L.by_strategy;
+    if (L.by_score_bucket && Object.keys(L.by_score_bucket).length) out.by_score_bucket = L.by_score_bucket;
+    return out;
+  }
+
   function render(wsPanel, data) {
+    // Always stop any prior poll when re-rendering
+    if (_liveTimer) { clearInterval(_liveTimer); _liveTimer = null; }
+
+    if (_perfSubView === 'today' || _perfSubView === 'history') {
+      // Delegate to QuantAudit / QuantHistoryLedger, but inject our sub-tab nav at top
+      wsPanel.innerHTML = '';
+      const navWrap = document.createElement('div');
+      navWrap.innerHTML = _subtabBar(_perfSubView);
+      wsPanel.appendChild(navWrap.firstElementChild);
+      const inner = document.createElement('div');
+      wsPanel.appendChild(inner);
+      try {
+        if (typeof QuantAudit !== 'undefined') {
+          // Route both 'today' and 'history' through QuantAudit — its render()
+          // builds the shell (including #qaud-content) and dispatches to
+          // QuantHistoryLedger for the history subview.
+          QuantAudit.setView && QuantAudit.setView(_perfSubView);
+          QuantAudit.render(inner, data);
+          // Hide QuantAudit's own duplicate sub-tab nav (we provide ours above)
+          inner.querySelectorAll('.qaud-subtabs:not([data-perf-view])').forEach(el => el.style.display = 'none');
+        } else {
+          inner.innerHTML = '<div class="rf-empty" style="margin:18px">Audit module not loaded.</div>';
+        }
+      } catch (e) {
+        inner.innerHTML = '<div class="rf-empty" style="margin:18px">— error rendering · ' + (e.message || e) + '</div>';
+      }
+      _wireSubtabs(wsPanel, data);
+      return;
+    }
+
+    if (_perfSubView === 'stream') {
+      // Delegate to MarketsV2.renderAuditTrail · the full decision-log stream
+      // (decision_log.jsonl) with live feed · score-evolution chart · gate heatmap.
+      wsPanel.innerHTML = '';
+      const navWrap = document.createElement('div');
+      navWrap.innerHTML = _subtabBar('stream');
+      wsPanel.appendChild(navWrap.firstElementChild);
+      const inner = document.createElement('div');
+      inner.className = 'mv2-shell';
+      wsPanel.appendChild(inner);
+      try {
+        const arr = window._kairosTickersArr || [];
+        if (typeof MarketsV2 !== 'undefined' && MarketsV2.TABS && MarketsV2.TABS.has('audittrail')) {
+          const html = MarketsV2.render('audittrail', data, arr);
+          if (html) {
+            inner.innerHTML = html;
+            // MarketsV2.renderAuditTrail uses a setTimeout(_loadAuditFeed, 50)
+            // that fires after the original mount. We just re-mounted, so kick
+            // it once more to guarantee the live-feed loads inside our panel.
+            setTimeout(() => { if (window._loadAuditFeed) window._loadAuditFeed(); }, 60);
+          } else {
+            inner.innerHTML = '<div class="rf-empty" style="margin:18px">— decision stream returned no body —</div>';
+          }
+        } else {
+          inner.innerHTML = '<div class="rf-empty" style="margin:18px">MarketsV2 module not loaded.</div>';
+        }
+      } catch (e) {
+        inner.innerHTML = '<div class="rf-empty" style="margin:18px">— error rendering decision stream · ' + (e.message || e) + '</div>';
+      }
+      _wireSubtabs(wsPanel, data);
+      return;
+    }
+
+    // edge view (default) · live-polled
+    _renderEdge(wsPanel, data);
+    // Fire an immediate poll to warm the live overlay, then schedule 60s tick
+    _pollLive(wsPanel, data);
+    _liveTimer = setInterval(() => _pollLive(wsPanel, data), 60000);
+  }
+
+  function _renderEdge(wsPanel, data) {
+    // Build a virtual data with /api/performance merged so the cockpit
+    // shows live WR/PF/Wilson/expectancy even between scans.
+    const liveMerged = { ...data, performance: _mergeLive(data.performance || {}) };
+    _renderEdgeBody(wsPanel, liveMerged);
+    // Prepend the sub-tab nav (the body renderer owns the main panel).
+    const bar = document.createElement('div');
+    bar.innerHTML = _subtabBar('edge');
+    wsPanel.insertBefore(bar.firstElementChild, wsPanel.firstChild);
+    _wireSubtabs(wsPanel, data);
+  }
+
+  function _renderEdgeBody(wsPanel, data) {
     const perf = data.performance || {};
     const acc = (data.accuracy || {}).summary || {};
     const rss = data.research_setup_stats || {};
@@ -20105,6 +20352,364 @@ const QuantSupabase = (function() {
       host.dataset.rendered = '1';
     } catch (e) {
       host.innerHTML = `<div class="qsb-empty" style="color:var(--rd)">Failed to render: ${e.message}<br>See <code>docs/supabase_er_diagram.md</code> for the static version.</div>`;
+    }
+  }
+
+  function deactivate() {}
+  return { render, deactivate };
+})();
+
+
+// ──────────────────────────────────────────────────────────────────────
+// QuantPipelines · source→target mapping for every data pipeline (2026-05-17)
+// Reads /api/pipelines/mapping · table view + Mermaid flow + status filters
+// Aesthetic mirrors QuantSupabase (qpl-* classes, kairos palette)
+// ──────────────────────────────────────────────────────────────────────
+const QuantPipelines = (function() {
+  const _esc = (s) => (s == null) ? '' : String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  let _state = null;
+  let _filter = 'all';        // status filter: all | working | empty | future | broken | populated
+  let _sourceFilter = 'all';  // source_type filter: all | json | jsonl | sqlite | api | computed | future
+  let _showFlow = false;
+  let _fmt = (n) => n == null ? '—' : Number(n).toLocaleString();
+  let _rel = (iso) => {
+    if (!iso) return '—';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!isFinite(ms) || ms < 0) return '—';
+    const s = Math.floor(ms/1000);
+    if (s < 60) return s + 's';
+    const m = Math.floor(s/60);
+    if (m < 60) return m + 'm';
+    const h = Math.floor(m/60);
+    if (h < 24) return h + 'h';
+    return Math.floor(h/24) + 'd';
+  };
+
+  function _ensureStyles() {
+    if (document.getElementById('qpl-styles')) return;
+    const css = document.createElement('style');
+    css.id = 'qpl-styles';
+    css.textContent = `
+      .qpl-wrap { padding: 14px 18px 60px; max-width: 1700px; font-family: var(--sans); color: var(--ink); }
+      .qpl-hero { position: relative; padding: 18px 22px; margin-bottom: 14px;
+        background: linear-gradient(135deg, rgba(91,229,124,0.06), rgba(59,166,255,0.06));
+        border: 1px solid rgba(91,229,124,0.22); border-radius: 12px;
+        box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 24px rgba(0,0,0,0.12); }
+      .qpl-hero::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:12px 0 0 12px;
+        background: linear-gradient(180deg, #5be57c 0%, #3ba6ff 100%); }
+      .qpl-hero-row { display:flex; align-items:center; justify-content:space-between; gap:18px; flex-wrap:wrap; }
+      .qpl-brand { font-family: var(--mono); font-size: 11px; letter-spacing: 1.4px; color: var(--gn); text-transform: uppercase; }
+      .qpl-title { font-size: 28px; font-weight: 700; letter-spacing: -0.4px; margin: 4px 0 0; }
+      .qpl-sub { font-size: 12px; color: var(--ink-2); margin-top: 4px; font-family: var(--mono); letter-spacing: 0.3px; }
+
+      .qpl-kpi { display:grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 16px; }
+      .qpl-tile { padding: 12px 14px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; position: relative; }
+      .qpl-tile-l { font-family: var(--mono); font-size: 10px; letter-spacing: 1.3px; color: var(--ink-3); text-transform: uppercase; }
+      .qpl-tile-v { font-size: 26px; font-weight: 700; line-height: 1.1; margin-top: 4px; font-variant-numeric: tabular-nums; }
+      .qpl-tile-d { font-size: 11px; color: var(--ink-2); margin-top: 2px; font-family: var(--mono); }
+      .qpl-tile.ok    { color: var(--gn); }
+      .qpl-tile.warn  { color: var(--amb); }
+      .qpl-tile.danger{ color: var(--rd); }
+      .qpl-tile.info  { color: #3ba6ff; }
+      .qpl-tile.future{ color: var(--ink-3); }
+
+      .qpl-actions { display:flex; align-items:center; gap:10px; margin-bottom: 14px; flex-wrap: wrap; }
+      .qpl-btn { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: var(--ink); border-radius: 8px; cursor: pointer; font-family: var(--mono); font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase; transition: all 0.15s ease; }
+      .qpl-btn:hover { background: rgba(59,166,255,0.12); border-color: #3ba6ff; color: #3ba6ff; }
+      .qpl-btn.primary { background: linear-gradient(135deg, rgba(91,229,124,0.18), rgba(91,229,124,0.06)); border-color: rgba(91,229,124,0.4); color: var(--gn); }
+      .qpl-chip { padding: 5px 11px; border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.8px; cursor: pointer; color: var(--ink-2); text-transform: uppercase; transition: all 0.15s ease; }
+      .qpl-chip:hover { color: var(--ink); border-color: rgba(255,255,255,0.2); }
+      .qpl-chip.on { background: rgba(59,166,255,0.18); border-color: #3ba6ff; color: #3ba6ff; }
+      .qpl-chips-l { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+      .qpl-chips-l > .lbl { font-family: var(--mono); font-size: 10px; color: var(--ink-3); letter-spacing: 1.2px; text-transform: uppercase; padding-right: 4px; }
+
+      .qpl-section-h { font-family: var(--mono); font-size: 11px; letter-spacing: 1.4px; color: var(--ink-3); text-transform: uppercase;
+        margin: 18px 0 10px; display:flex; align-items:center; gap:10px; }
+      .qpl-section-h::after { content:''; flex:1; height:1px; background: linear-gradient(90deg, rgba(255,255,255,0.1), transparent); }
+
+      .qpl-tbl-wrap { overflow: auto; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; background: rgba(0,0,0,0.12); }
+      .qpl-tbl { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 12px; }
+      .qpl-tbl thead th { position: sticky; top: 0; background: rgba(15,17,15,0.95); z-index: 1; padding: 10px 12px; text-align: left; font-family: var(--mono); font-size: 10px; letter-spacing: 1.2px; color: var(--ink-3); text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.08); }
+      .qpl-tbl tbody td { padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+      .qpl-tbl tbody tr:hover { background: rgba(255,255,255,0.03); }
+      .qpl-tbl tbody tr.broken { background: rgba(255,107,91,0.03); }
+      .qpl-tbl tbody tr.future { color: var(--ink-2); }
+      .qpl-tbl .mono { font-family: var(--mono); font-size: 11px; }
+      .qpl-tbl .arrow { color: var(--ink-3); font-family: var(--mono); padding: 0 6px; }
+      .qpl-tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+      .qpl-pill { padding: 3px 8px; border-radius: 999px; font-family: var(--mono); font-size: 9.5px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; white-space: nowrap; }
+      .qpl-pill.working { background: rgba(91,229,124,0.16); color: var(--gn); border: 1px solid rgba(91,229,124,0.3); }
+      .qpl-pill.empty   { background: rgba(255,185,92,0.16); color: var(--amb); border: 1px solid rgba(255,185,92,0.3); }
+      .qpl-pill.broken  { background: rgba(255,107,91,0.16); color: var(--rd); border: 1px solid rgba(255,107,91,0.3); }
+      .qpl-pill.future  { background: rgba(255,255,255,0.04); color: var(--ink-3); border: 1px solid rgba(255,255,255,0.08); }
+
+      .qpl-src { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; }
+      .qpl-src.json     { background: rgba(91,229,124,0.10); color: var(--gn); }
+      .qpl-src.jsonl    { background: rgba(91,229,124,0.10); color: var(--gn); }
+      .qpl-src.sqlite   { background: rgba(217,119,87,0.10); color: var(--copper); }
+      .qpl-src.api      { background: rgba(59,166,255,0.10); color: #3ba6ff; }
+      .qpl-src.computed { background: rgba(173,127,255,0.10); color: #c79bff; }
+      .qpl-src.future   { background: rgba(255,255,255,0.04); color: var(--ink-3); }
+
+      .qpl-source-path, .qpl-target-tbl, .qpl-script { font-family: var(--mono); font-size: 11px; color: var(--ink-1); word-break: break-all; }
+      .qpl-target-tbl { color: var(--gn); font-weight: 600; }
+      .qpl-script { color: var(--copper); }
+      .qpl-schedule { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); }
+      .qpl-issue { font-family: var(--mono); font-size: 10px; color: var(--rd); padding: 4px 6px; background: rgba(255,107,91,0.06); border-radius: 4px; margin-top: 4px; display: inline-block; }
+      .qpl-empty { padding: 40px 20px; text-align: center; color: var(--ink-3); font-family: var(--mono); font-size: 12px; }
+
+      .qpl-flow-panel { margin-top: 18px; padding: 16px 18px; background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; }
+      .qpl-flow-host { overflow: auto; max-height: 78vh; background: rgba(0,0,0,0.12); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 14px; }
+      .qpl-flow-host svg { display:block; margin:0 auto; max-width:100%; height:auto; }
+
+      body.light .qpl-hero { background: linear-gradient(135deg, rgba(91,229,124,0.10), rgba(59,166,255,0.08)); border-color: rgba(91,229,124,0.3); }
+      body.light .qpl-tile { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.08); }
+      body.light .qpl-tbl-wrap { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.08); }
+      body.light .qpl-tbl thead th { background: rgba(245,245,240,0.95); }
+      body.light .qpl-tbl tbody tr:hover { background: rgba(0,0,0,0.03); }
+      body.light .qpl-flow-panel { background: rgba(0,0,0,0.03); }
+      body.light .qpl-flow-host { background: rgba(255,255,255,0.5); }
+    `;
+    document.head.appendChild(css);
+  }
+
+  async function _fetchState() {
+    try {
+      const r = await fetch('/api/pipelines/mapping', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      _state = await r.json();
+    } catch (e) {
+      _state = { overall: {}, pipelines: [], _err: e.message };
+    }
+  }
+
+  function _renderTile(label, value, delta, cls) {
+    return `<div class="qpl-tile ${cls||''}"><div class="qpl-tile-l">${label}</div><div class="qpl-tile-v">${value}</div><div class="qpl-tile-d">${delta||''}</div></div>`;
+  }
+
+  function _rowHTML(p) {
+    const trCls = p.status === 'broken' ? 'broken' : (p.status === 'future' ? 'future' : '');
+    return `<tr class="${trCls}">
+      <td><span class="qpl-src ${p.source_type}">${p.source_type}</span></td>
+      <td><div class="qpl-source-path">${_esc(p.source_path)}</div></td>
+      <td class="arrow">→</td>
+      <td><div class="qpl-script">${_esc(p.script)}</div></td>
+      <td class="arrow">→</td>
+      <td><div class="qpl-target-tbl">${_esc(p.target_table)}</div></td>
+      <td class="num mono">${_fmt(p.remote_rows)}</td>
+      <td><span class="qpl-pill ${p.status}">${p.status}</span></td>
+      <td><div class="qpl-schedule">${_esc(p.schedule)}</div></td>
+      <td class="mono" style="color:var(--ink-3)">${_rel(p.last_sync_at)}</td>
+    </tr>${p.issue ? `<tr class="${trCls}"><td colspan="10"><div class="qpl-issue">⚠ ${_esc(p.issue)}</div></td></tr>` : ''}`;
+  }
+
+  function render(container, data) {
+    _ensureStyles();
+    container.classList.remove('ep-active');
+    if (_state === null) {
+      container.innerHTML = `<div class="qpl-wrap"><div class="qpl-empty">Loading pipeline catalog…</div></div>`;
+      _fetchState().then(() => render(container, data));
+      return;
+    }
+    const s = _state;
+    const o = s.overall || {};
+    const all = s.pipelines || [];
+
+    let pipes = all.slice();
+    if (_filter !== 'all') {
+      if (_filter === 'populated') pipes = pipes.filter(p => (p.remote_rows||0) > 0);
+      else pipes = pipes.filter(p => p.status === _filter);
+    }
+    if (_sourceFilter !== 'all') pipes = pipes.filter(p => p.source_type === _sourceFilter);
+
+    // KPI tiles
+    const tiles = [
+      _renderTile('Pipelines', o.total_pipelines||all.length, 'mapped', 'info'),
+      _renderTile('Working', o.working||0, `${Math.round(((o.working||0)/(o.total_pipelines||1))*100)}% live`, 'ok'),
+      _renderTile('Populated', o.populated||0, 'have remote rows', 'ok'),
+      _renderTile('Empty', o.empty||0, 'schema only', o.empty ? 'warn' : ''),
+      _renderTile('Broken', o.broken||0, o.broken ? 'investigate' : 'none', o.broken ? 'danger' : 'ok'),
+      _renderTile('Future', o.future||0, 'TODO scrapers', 'future'),
+    ].join('');
+
+    // Status filter chips
+    const statusChips = [
+      { k:'all',       l:'all ('+all.length+')' },
+      { k:'working',   l:'working ('+(o.working||0)+')' },
+      { k:'populated', l:'populated ('+(o.populated||0)+')' },
+      { k:'empty',     l:'empty ('+(o.empty||0)+')' },
+      { k:'broken',    l:'broken ('+(o.broken||0)+')' },
+      { k:'future',    l:'future ('+(o.future||0)+')' },
+    ].map(c => `<div class="qpl-chip ${_filter===c.k?'on':''}" data-qpl-status="${c.k}">${c.l}</div>`).join('');
+
+    // Source type filter chips
+    const srcCounts = {};
+    all.forEach(p => { srcCounts[p.source_type] = (srcCounts[p.source_type]||0)+1; });
+    const srcChips = [
+      { k:'all',      l:'all' },
+      { k:'json',     l:'json ('+(srcCounts.json||0)+')' },
+      { k:'jsonl',    l:'jsonl ('+(srcCounts.jsonl||0)+')' },
+      { k:'sqlite',   l:'sqlite ('+(srcCounts.sqlite||0)+')' },
+      { k:'api',      l:'api ('+(srcCounts.api||0)+')' },
+      { k:'computed', l:'computed ('+(srcCounts.computed||0)+')' },
+      { k:'future',   l:'future ('+(srcCounts.future||0)+')' },
+    ].map(c => `<div class="qpl-chip ${_sourceFilter===c.k?'on':''}" data-qpl-src="${c.k}">${c.l}</div>`).join('');
+
+    // Group filtered by cluster
+    const grouped = {};
+    pipes.forEach(p => { (grouped[p.cluster||'other'] = grouped[p.cluster||'other'] || []).push(p); });
+    const clusterOrder = ['portfolio','journal','scan','backtest','risk','calibration','attribution',
+                          'execution','watchlist','health','regime','earnings','derivatives',
+                          'fundamentals','smart_money','sentiment','market_data','calendar','reference',
+                          'ml','enrichment','ops','system','other'];
+
+    const tableHTML = `<div class="qpl-tbl-wrap"><table class="qpl-tbl">
+      <thead><tr>
+        <th>type</th><th>source</th><th></th><th>script</th><th></th>
+        <th>target table</th><th class="num">remote rows</th>
+        <th>status</th><th>schedule</th><th>last sync</th>
+      </tr></thead>
+      <tbody>
+      ${clusterOrder.filter(c => grouped[c]).map(c => `
+        <tr><td colspan="10" style="background:rgba(217,119,87,0.06);font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--copper);text-transform:uppercase;padding:8px 12px;border-left:2px solid var(--copper)">${c.replace('_',' ')} — ${grouped[c].length}</td></tr>
+        ${grouped[c].map(_rowHTML).join('')}
+      `).join('')}
+      </tbody>
+    </table></div>`;
+
+    container.innerHTML = `<div class="qpl-wrap">
+      <div class="qpl-hero">
+        <div class="qpl-hero-row">
+          <div>
+            <div class="qpl-brand">⇄ Kairos · Pipelines</div>
+            <div class="qpl-title">Source → Target Catalog</div>
+            <div class="qpl-sub">${o.total_pipelines||all.length} pipelines · ${o.working||0} working · ${o.populated||0} populated · ${o.broken||0} broken · ${o.future||0} TODO</div>
+          </div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--ink-3)">live row counts from Supabase · cached 30s</div>
+        </div>
+      </div>
+
+      <div class="qpl-kpi">${tiles}</div>
+
+      <div class="qpl-actions">
+        <button class="qpl-btn primary" id="qpl-flow-btn">📊 Flow Diagram</button>
+        <button class="qpl-btn" id="qpl-refresh-btn">⤓ Refresh</button>
+        <button class="qpl-btn" id="qpl-export-btn">↓ Export CSV</button>
+        <div style="flex:1"></div>
+        <div class="qpl-chips-l"><span class="lbl">status:</span>${statusChips}</div>
+      </div>
+
+      <div class="qpl-actions" style="margin-top:-4px">
+        <div style="flex:1"></div>
+        <div class="qpl-chips-l"><span class="lbl">source type:</span>${srcChips}</div>
+      </div>
+
+      <div class="qpl-flow-panel" id="qpl-flow-panel" style="display:none">
+        <div class="qpl-section-h">Flow Diagram · source → script → target (working + broken pipelines)</div>
+        <div class="qpl-flow-host" id="qpl-flow-host"><div class="qpl-empty">Loading Mermaid renderer…</div></div>
+      </div>
+
+      <div class="qpl-section-h">${pipes.length} of ${all.length} pipelines · grouped by cluster</div>
+
+      ${pipes.length ? tableHTML : `<div class="qpl-empty">No pipelines match these filters.</div>`}
+    </div>`;
+
+    container.querySelectorAll('[data-qpl-status]').forEach(el => {
+      el.addEventListener('click', () => { _filter = el.getAttribute('data-qpl-status'); render(container, data); });
+    });
+    container.querySelectorAll('[data-qpl-src]').forEach(el => {
+      el.addEventListener('click', () => { _sourceFilter = el.getAttribute('data-qpl-src'); render(container, data); });
+    });
+    const refreshBtn = container.querySelector('#qpl-refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', async () => { _state = null; await _fetchState(); render(container, data); });
+    const flowBtn = container.querySelector('#qpl-flow-btn');
+    if (flowBtn) flowBtn.addEventListener('click', () => _toggleFlow(container));
+    const expBtn = container.querySelector('#qpl-export-btn');
+    if (expBtn) expBtn.addEventListener('click', () => _exportCSV(pipes));
+  }
+
+  function _exportCSV(rows) {
+    const headers = ['source_type','source_path','script','target_table','remote_rows','status','schedule','cluster','last_sync_at','issue'];
+    const csv = [headers.join(',')].concat(rows.map(r => headers.map(h => `"${String(r[h] ?? '').replace(/"/g,'""')}"`).join(','))).join('\n');
+    const blob = new Blob([csv], {type: 'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'kairos_pipelines_' + new Date().toISOString().slice(0,10) + '.csv';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  // Flow diagram (Mermaid)
+  function _flowSrc() {
+    if (!_state) return 'graph LR\n  A[loading]';
+    const pipes = (_state.pipelines || []).filter(p => p.status === 'working' || p.status === 'broken');
+    // Group by script — each script becomes a center node, sources fan in, targets fan out
+    const byScript = {};
+    pipes.forEach(p => { (byScript[p.script] = byScript[p.script] || []).push(p); });
+    let lines = ['graph LR'];
+    // Style classes
+    lines.push('  classDef src fill:#1a3a2a,stroke:#5be57c,color:#e0e0d8');
+    lines.push('  classDef api fill:#1a2a3a,stroke:#3ba6ff,color:#e0e0d8');
+    lines.push('  classDef script fill:#3a2a1a,stroke:#d97757,color:#e0e0d8');
+    lines.push('  classDef target fill:#0a1a0a,stroke:#5be57c,color:#5be57c');
+    lines.push('  classDef broken fill:#3a1a1a,stroke:#ff6b5b,color:#ff6b5b');
+    const nodeIds = {};
+    let i = 0;
+    const id = (k) => {
+      if (!(k in nodeIds)) nodeIds[k] = 'n' + (i++);
+      return nodeIds[k];
+    };
+    const sanitize = (s) => String(s||'').replace(/[\[\]\{\}\(\)\|]/g, '').slice(0, 40);
+    Object.entries(byScript).forEach(([script, plist]) => {
+      const scriptId = id('s::' + script);
+      lines.push(`  ${scriptId}["${sanitize(script)}"]:::script`);
+      plist.forEach(p => {
+        const sId = id('src::' + p.source_path);
+        const tId = id('tgt::' + p.target_table);
+        const srcCls = (p.source_type === 'api') ? 'api' : 'src';
+        const tgtCls = (p.status === 'broken') ? 'broken' : 'target';
+        lines.push(`  ${sId}[("${sanitize(p.source_path)}")]:::${srcCls}`);
+        lines.push(`  ${tId}[/"${sanitize(p.target_table)}"/]:::${tgtCls}`);
+        lines.push(`  ${sId} --> ${scriptId} --> ${tId}`);
+      });
+    });
+    return lines.join('\n');
+  }
+
+  async function _loadMermaid() {
+    if (window.mermaid) return window.mermaid;
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js';
+      s.onload = () => {
+        try {
+          const theme = document.body.classList.contains('light') ? 'default' : 'dark';
+          window.mermaid.initialize({ startOnLoad: false, theme, securityLevel: 'loose', flowchart: { useMaxWidth: true, htmlLabels: false } });
+          resolve(window.mermaid);
+        } catch (e) { reject(e); }
+      };
+      s.onerror = () => reject(new Error('Mermaid CDN load failed'));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function _toggleFlow(container) {
+    const panel = container.querySelector('#qpl-flow-panel');
+    const host = container.querySelector('#qpl-flow-host');
+    if (!panel || !host) return;
+    const showing = panel.style.display !== 'none';
+    if (showing) { panel.style.display = 'none'; return; }
+    panel.style.display = 'block';
+    if (host.dataset.rendered === '1') return;
+    host.innerHTML = '<div class="qpl-empty">Rendering flow diagram…</div>';
+    try {
+      const m = await _loadMermaid();
+      const { svg } = await m.render('qpl-flow-svg-' + Date.now(), _flowSrc());
+      host.innerHTML = svg;
+      host.dataset.rendered = '1';
+    } catch (e) {
+      host.innerHTML = `<div class="qpl-empty" style="color:var(--rd)">Failed: ${e.message}</div>`;
     }
   }
 
@@ -35571,18 +36176,19 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
     `;
   }
 
-  // ═══ PATTERNS sub-tab · TradingView lightweight-charts ═══════════════════
-  // Six methodologies surface here:
-  //   1. Wyckoff phase (supply/demand mechanics)
-  //   2. Classical patterns (Bulkowski statistics)
-  //   3. Volume Profile (auction levels — POC / VAH / VAL)
-  //   4. Fibonacci retracements + extensions
-  //   5. Ichimoku Kinko Hyo (5-line systems read)
-  //   6. Elliott Wave (discretionary · confluence only, never primary signal)
+  // ═══ PATTERNS sub-tab · 2026-05-17 v2 — mechanism-honest redesign ═══════
+  // Seven INDEPENDENT method classifiers (no shared composite vote):
+  //   1. Support / Resistance (swing-cluster + touch-count strength)
+  //   2. Trendlines (auto-detected upper/lower + break status)
+  //   3. Volume Profile (POC / VAH / VAL — acceptance state)
+  //   4. Fibonacci (detected swing pair, 9 levels)
+  //   5. Ichimoku Kinko Hyo (cloud + TK + Chikou + future cloud, 4-confluence)
+  //   6. Wyckoff phase (accumulation/markup/distribution/markdown)
+  //   7. Classical patterns (cup-handle, flag, triangle)
   //
-  // renderPatternsTab(t) returns the static HTML scaffold; initPatternsCharts(t)
-  // instantiates the four interactive charts AFTER the DOM is in place.
-
+  // Every empirical claim shows Wilson 95% lower-bound + sample-size flag.
+  // Backend: pattern_engine.py · Cache: data/pattern_hit_rates.json
+  // Replaced 2026-05-17. Elliott Wave dropped (discretionary, no quantifiable edge).
   function renderPatternsTab(t) {
     const _g = (...paths) => {
       for (const p of paths) {
@@ -35599,93 +36205,50 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
     const stop = _num('stop') || 0;
     const t1 = _num('target1', 't1') || 0;
     const t2 = _num('target2', 't2') || 0;
-    const wkHi = _num('week52_high', 'high_52w') || px * 1.15;
-    const wkLo = _num('week52_low',  'low_52w')  || px * 0.85;
     const tk = (t.ticker || '—').toUpperCase();
     const hasOHLC = Array.isArray(t.ohlc_90d) && t.ohlc_90d.length >= 30;
     const eLo = _num('entry_low')  || +(px * 0.99).toFixed(2);
     const eHi = _num('entry_high') || +(px * 1.01).toFixed(2);
 
-    // Derive Fibonacci levels from swing high/low
-    const fibSwingHi = wkHi;
-    const fibSwingLo = wkLo;
-    const fibRange = fibSwingHi - fibSwingLo;
-    const fib = (r) => +(fibSwingLo + fibRange * (1 - r)).toFixed(2);
-    const fibLevels = {
-      ext_1618: +(fibSwingHi + fibRange * 0.618).toFixed(2),
-      ext_1272: +(fibSwingHi + fibRange * 0.272).toFixed(2),
-      r_0000:   fibSwingHi,
-      r_0236:   fib(0.236),
-      r_0382:   fib(0.382),
-      r_0500:   fib(0.500),
-      r_0618:   fib(0.618),  // golden
-      r_0786:   fib(0.786),
-      r_1000:   fibSwingLo,
-    };
+    // Backend-driven pattern data (pattern_engine.py output).
+    const pd = (t.pattern_data && !t.pattern_data.error) ? t.pattern_data : null;
+    const phr = t.pattern_hit_rates || {};
+    const wy = (pd && pd.wyckoff) || null;
+    const cls = (pd && pd.classical) || null;
+    const vp = (pd && pd.volume_profile) || null;
+    const fi = (pd && pd.fibonacci) || null;
+    const ic = (pd && pd.ichimoku) || null;
+    const sr = (pd && pd.sr_levels) || null;
+    const tl = (pd && pd.trendlines) || null;
+    const comp = (pd && pd.composite) || null;
 
-    // Approximate VP levels from spot + 52w range (heuristic — real values come
-    // from initPatternsCharts after OHLC math runs and DOM-update the tiles)
-    const vpEst = {
-      poc: +(fibLevels.r_0382).toFixed(2),  // POC near 0.382 retrace is common
-      vah: +(fibLevels.r_0236).toFixed(2),
-      val: +(fibLevels.r_0500).toFixed(2),
-      acceptStatus: px > fibLevels.r_0236 ? 'ACCEPT' : 'INSIDE',
-    };
+    // Vote helpers
+    const voteColor = (v) => v === 'BULLISH' ? 'var(--gn)' : v === 'BEARISH' ? 'var(--rd)' : 'var(--amb)';
 
-    // Ichimoku heuristic state from existing EMAs (real values DOM-injected later)
-    const ema8  = _num('technicals.indicators.ema8',  'ema8');
-    const ema21 = _num('technicals.indicators.ema21', 'ema21');
-    const ema50 = _num('technicals.indicators.ema50', 'ema50');
-    const ichi = {
-      priceVsCloud: px > (ema50 || px) ? 'ABOVE' : 'BELOW',
-      tkCross:      (ema8 && ema21 && ema8 > ema21) ? 'BULL CROSS' : 'BEAR CROSS',
-      chikou:       'CLEAR',
-      futureCloud:  px > (ema50 || px) ? 'BULLISH' : 'BEARISH',
-    };
-
-    // Composite verdict — aggregates the 6 method calls
-    const verdict = (t.decision?.verdict || t.verdict || '').toUpperCase();
-    const compCall = verdict === 'BUY' ? 'BULLISH' : verdict === 'AVOID' || verdict === 'SHORT' ? 'BEARISH' : 'WATCH';
-    const compC = compCall === 'BULLISH' ? 'var(--gn)' : compCall === 'BEARISH' ? 'var(--rd)' : 'var(--amb)';
-
-    // Method-vote calls. Wyckoff + Classical require backend pattern detection
-    // (heuristic for now); rest derive from real fields.
-    const methodVotes = [
-      { name: 'Wyckoff',     h: 'supply / demand',      v: compCall, r: `${compCall === 'BULLISH' ? 'Phase D markup likely · price above EMA50' : 'Phase A/B accumulation possible · needs backend phase classifier'}` },
-      { name: 'Classical',   h: 'VCP · Bulkowski',      v: compCall, r: `Spot near ${px > fibLevels.r_0236 ? 'breakout pivot' : 'consolidation zone'} · pattern detection requires backend` },
-      { name: 'Vol Profile', h: 'POC · VAH · VAL',      v: compCall, r: `POC ~$${vpEst.poc.toFixed(2)} · ${vpEst.acceptStatus.toLowerCase()} above VAH` },
-      { name: 'Fibonacci',   h: 'retrace + ext',        v: compCall, r: `0.618 = $${fibLevels.r_0618.toFixed(2)} · 1.272 ext = $${fibLevels.ext_1272.toFixed(2)} (T1 ref)` },
-      { name: 'Ichimoku',    h: 'cloud + TK',           v: compCall, r: `${ichi.priceVsCloud} cloud · ${ichi.tkCross.toLowerCase()} · Chikou ${ichi.chikou.toLowerCase()}` },
-      { name: 'Elliott Wave',h: 'discretionary',        v: 'WATCH',  r: `Auto wave-fit · invalidate &lt; $${(px * 0.95).toFixed(2)}` },
-    ];
-    const buys   = methodVotes.filter(m => m.v === 'BULLISH').length;
-    const shorts = methodVotes.filter(m => m.v === 'BEARISH').length;
-    const watches= methodVotes.filter(m => m.v === 'WATCH').length;
-    const conviction = (buys >= 5 || shorts >= 5) ? 'HIGH' : (buys >= 4 || shorts >= 4) ? 'MEDIUM' : 'LOW';
+    // Composite from backend votes. Falls back if pd is missing.
+    const compCall = comp ? comp.verdict.replace('-LEAN','') : 'NEUTRAL';
+    const conviction = comp ? comp.conviction : 'LOW';
+    const compC = voteColor(compCall);
     const convC = conviction === 'HIGH' ? 'var(--gn)' : conviction === 'MEDIUM' ? 'var(--amb)' : 'var(--rd)';
 
-    // Stash for initPatternsCharts to consume
+    // Stash for chart init
     window._patternsCtx = window._patternsCtx || {};
     window._patternsCtx[tk] = {
       ticker: tk, ohlc: t.ohlc_90d || null, hasOHLC,
-      px, stop, t1, t2, wkHi, wkLo, fibLevels,
-      ema21, ema50, ema200: _num('technicals.indicators.ema200', 'ema200'),
+      px, stop, t1, t2,
+      vp, fi, ic, sr, tl, cls,
+      ema21: _num('technicals.indicators.ema21', 'ema21'),
+      ema50: _num('technicals.indicators.ema50', 'ema50'),
     };
 
-    // Helper: render a vote pill
-    const voteCls = (v) => v === 'BULLISH' ? 'gn' : v === 'BEARISH' || v === 'SHORT' ? 'rd' : 'am';
-    const voteColor = (v) => v === 'BULLISH' ? 'var(--gn)' : v === 'BEARISH' || v === 'SHORT' ? 'var(--rd)' : 'var(--amb)';
-
-    // Helper: render a KPI tile
+    // Helpers
     const tile = (k, v, sub, cls) => `<div style="padding:12px 14px;border:1px solid var(--rule);border-radius:4px;background:var(--bg-2)">
       <div style="font-family:var(--mono);font-size:10px;letter-spacing:0.14em;color:var(--ink-3);text-transform:uppercase;font-weight:700;margin-bottom:4px">${k}</div>
       <div style="font-family:var(--mono);font-size:20px;font-weight:800;line-height:1.1;color:${cls === 'gn' ? 'var(--gn)' : cls === 'rd' ? 'var(--rd)' : cls === 'am' ? 'var(--amb)' : cls === 'cop' ? 'var(--copper)' : 'var(--ink)'}">${v}</div>
       ${sub ? `<div style="font-family:var(--mono);font-size:10.5px;color:var(--ink-2);margin-top:3px">${sub}</div>` : ''}
     </div>`;
 
-    // Helper: section verdict pill
     const sectionVerdict = (call, prose, falsification) => {
-      const cls = voteCls(call);
       const c = voteColor(call);
       return `<div style="margin-top:14px;padding:11px 14px;border-left:3px solid ${c};background:color-mix(in oklch, ${c} 7%, transparent);border-radius:0 4px 4px 0;font-size:12.5px;color:var(--ink-1);line-height:1.6">
         <span style="display:inline-block;padding:3px 12px;border-radius:3px;font-family:var(--mono);font-size:11.5px;font-weight:800;letter-spacing:0.14em;margin-right:10px;background:color-mix(in oklch, ${c} 22%, transparent);color:${c}">${call}</span>
@@ -35694,51 +36257,120 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       </div>`;
     };
 
-    // Data-quality banner for synthetic OHLC fallback
-    const dataBanner = hasOHLC ? '' :
+    // Wilson-LB / sample-size badge — same convention as SMC tab.
+    const flagColor = (f) => f === 'INSTITUTIONAL_FLOOR' ? 'var(--gn)' : f === 'BELOW_FLOOR' ? 'var(--amb)' : 'var(--rd)';
+    const flagLabel = (f) => f === 'INSTITUTIONAL_FLOOR' ? 'n≥30' : f === 'BELOW_FLOOR' ? '10≤n<30' : 'n<10';
+    const wlbTile = (label, rec) => {
+      if (!rec || !rec.sample_size_flag) {
+        return tile(label, '—', 'no data', '');
+      }
+      const c = flagColor(rec.sample_size_flag);
+      const flagTxt = flagLabel(rec.sample_size_flag);
+      const lbCol = rec.wilson_lb >= 45 ? 'gn' : rec.wilson_lb >= 35 ? 'am' : 'rd';
+      return `<div style="padding:12px 14px;border:1px solid var(--rule);border-radius:4px;background:var(--bg-2);position:relative">
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:0.14em;color:var(--ink-3);text-transform:uppercase;font-weight:700;margin-bottom:4px">${label}</div>
+        <div style="font-family:var(--mono);font-size:20px;font-weight:800;line-height:1.1;color:${lbCol === 'gn' ? 'var(--gn)' : lbCol === 'am' ? 'var(--amb)' : 'var(--rd)'}">${rec.wilson_lb.toFixed(1)}%</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--ink-2);margin-top:3px">
+          WR ${rec.win_rate.toFixed(1)}% · n=${rec.total} · <span style="color:${c};font-weight:700">${flagTxt}</span>
+        </div>
+      </div>`;
+    };
+
+    // Method-vote pills — sourced INDEPENDENTLY from backend (no shared compCall).
+    const methodVotes = [
+      { name: 'S / R',         h: 'support / resistance', d: sr },
+      { name: 'Trendlines',    h: 'auto-fit channel',     d: tl },
+      { name: 'Vol Profile',   h: 'POC · VAH · VAL',      d: vp },
+      { name: 'Fibonacci',     h: 'detected swing',       d: fi },
+      { name: 'Ichimoku',      h: 'cloud + TK',           d: ic },
+      { name: 'Wyckoff',       h: 'phase classifier',     d: wy },
+      { name: 'Classical',     h: 'cup · flag · tri',     d: cls },
+    ];
+
+    // Data-quality banner — surfaces when backend pattern_data not yet flowing.
+    const dataBanner = pd ? '' :
       `<div style="padding:11px 14px;margin-bottom:14px;background:color-mix(in oklch, var(--amb) 6%, var(--bg-2));border-left:3px solid var(--amb);border-radius:0 4px 4px 0;font-size:12.5px;color:var(--ink-1);line-height:1.55">
-         <b style="color:var(--amb);font-family:var(--mono);letter-spacing:0.14em;font-size:11px">DEMO OHLC</b> &nbsp; Bundle does not include 90-day OHLC for ${tk}. Charts render synthetic data anchored to $${px ? px.toFixed(2) : '—'}. Wire <code style="font-family:var(--mono);font-size:11.5px;color:var(--copper)">ohlc_90d</code> into <code style="font-family:var(--mono);font-size:11.5px;color:var(--copper)">build_data.py</code> for real bars.
+         <b style="color:var(--amb);font-family:var(--mono);letter-spacing:0.14em;font-size:11px">BACKEND PENDING</b> &nbsp; pattern_engine.py output not yet in bundle for ${tk}. Run next scan to populate <code style="font-family:var(--mono);color:var(--copper)">pattern_data</code>. Showing placeholders only.
        </div>`;
 
     return `
-      <!-- HERO COMPOSITE -->
+      <!-- HERO COMPOSITE — driven by pattern_engine.composite -->
       <div style="display:flex;gap:24px;align-items:center;padding:22px 26px;margin-bottom:20px;background:linear-gradient(135deg, color-mix(in oklch, ${compC} 5%, var(--bg-2)) 0%, var(--bg-2) 60%);border:1px solid var(--rule);border-left:3px solid ${compC};border-radius:4px">
         <div style="min-width:220px">
           <div style="font-family:var(--mono);font-size:10.5px;letter-spacing:0.16em;color:var(--ink-3);font-weight:700;text-transform:uppercase;margin-bottom:6px">Pattern Composite</div>
           <div style="font-size:38px;font-weight:800;color:${compC};letter-spacing:-0.01em;line-height:1.05">${compCall}</div>
-          <div style="margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--ink-2);letter-spacing:0.08em">${buys}B · ${watches}W · ${shorts}S of 6 methods</div>
+          <div style="margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--ink-2);letter-spacing:0.08em">
+            ${comp ? `${comp.bull_count}B · ${comp.neutral_count}N · ${comp.bear_count}S of 7 methods` : '7 methods awaiting backend'}
+          </div>
         </div>
         <div style="flex:1">
           <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:8px">
             <span style="font-family:var(--mono);font-size:10.5px;letter-spacing:0.14em;color:var(--ink-3);font-weight:700;text-transform:uppercase">Conviction</span>
             <span style="font-size:18px;font-weight:800;color:${convC};letter-spacing:0.08em">${conviction}</span>
-            <span style="font-family:var(--mono);font-size:11px;color:var(--ink-2)">${conviction === 'HIGH' ? '5+ methods agree' : conviction === 'MEDIUM' ? '4 methods agree' : 'methods disagree — tension IS the signal'}</span>
+            <span style="font-family:var(--mono);font-size:11px;color:var(--ink-2)">${comp ? comp.tension_note : 'awaiting backend'}</span>
           </div>
           <div style="font-size:13px;color:var(--ink-1);line-height:1.65">
-            <b style="color:${compC}">${compCall === 'BUY' ? 'Thesis active now.' : compCall === 'SHORT' ? 'Asymmetric downside.' : 'Valid but not actionable yet.'}</b>
             Entry zone $${eLo.toFixed(2)}–$${eHi.toFixed(2)} · Stop $${stop.toFixed(2)} · T1 $${t1.toFixed(2)} · T2 $${t2.toFixed(2)}.
+            <span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:3px;background:color-mix(in oklch, ${compC} 12%, transparent);color:${compC};font-family:var(--mono);font-size:11px;letter-spacing:0.08em;font-weight:700">${compCall} POSTURE</span>
           </div>
         </div>
       </div>
 
-      <!-- METHOD VOTES · 6-pill row -->
-      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:22px">
+      <!-- METHOD VOTES · 7-pill row (each pill = INDEPENDENT backend vote) -->
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:22px">
         ${methodVotes.map(m => {
-          const c = voteColor(m.v);
-          return `<div style="padding:12px 14px;border-radius:4px;border:1px solid color-mix(in oklch, ${c} 30%, var(--rule));background:color-mix(in oklch, ${c} 4%, var(--bg-1))">
-            <div style="font-family:var(--mono);font-size:10px;letter-spacing:0.14em;color:var(--ink-3);text-transform:uppercase;font-weight:700;margin-bottom:4px">${m.name}</div>
-            <div style="font-size:17px;font-weight:800;margin-bottom:4px;letter-spacing:0.02em;color:${c}">${m.v}</div>
-            <div style="font-family:var(--mono);font-size:9.5px;color:var(--ink-3);letter-spacing:0.06em;margin-bottom:6px">${m.h}</div>
-            <div style="font-size:11.5px;color:var(--ink-2);line-height:1.5">${m.r}</div>
+          const v = m.d ? m.d.vote : '—';
+          const c = m.d ? voteColor(v) : 'var(--ink-3)';
+          const rationale = m.d ? (m.d.rationale || '').slice(0, 120) : 'no backend data';
+          return `<div style="padding:11px 12px;border-radius:4px;border:1px solid color-mix(in oklch, ${c} 30%, var(--rule));background:color-mix(in oklch, ${c} 4%, var(--bg-1))">
+            <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:0.12em;color:var(--ink-3);text-transform:uppercase;font-weight:700;margin-bottom:3px">${m.name}</div>
+            <div style="font-size:14.5px;font-weight:800;margin-bottom:3px;letter-spacing:0.02em;color:${c}">${v}</div>
+            <div style="font-family:var(--mono);font-size:9px;color:var(--ink-3);letter-spacing:0.04em;margin-bottom:5px">${m.h}</div>
+            <div style="font-size:10.5px;color:var(--ink-2);line-height:1.45">${rationale}${rationale.length === 120 ? '…' : ''}</div>
           </div>`;
         }).join('')}
       </div>
 
       ${dataBanner}
 
-      <!-- 1. VOLUME PROFILE -->
-      ${_section('VOLUME PROFILE · candles + auction levels',
-        `POC · VAH · VAL drawn as priceLines · interactive crosshair + zoom + pan`,
+      <!-- 1. SUPPORT / RESISTANCE — most actionable -->
+      ${_section('SUPPORT / RESISTANCE · swing-point clusters',
+        sr ? `${sr.supports.length} supports · ${sr.resistances.length} resistances · cluster band 0.6 × ATR` : 'awaiting backend',
+        `<div class="pat-chart-host" id="pat-chart-sr" style="position:relative;width:100%;height:380px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
+           <div class="pat-legend" style="position:absolute;top:8px;left:10px;z-index:5;pointer-events:none;display:flex;gap:14px;flex-wrap:wrap;background:rgba(17,22,26,0.85);padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
+             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#5be57c"></span>support · touches</span>
+             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#ff6b5b"></span>resistance · touches</span>
+           </div>
+         </div>
+         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px">
+           ${tile('Nearest support', sr && sr.nearest_support ? '$' + sr.nearest_support.price.toFixed(2) : '—', sr && sr.nearest_support ? sr.nearest_support.touches + ' touches · ' + sr.nearest_support.distance_pct + '% below' : 'none', 'gn')}
+           ${tile('Nearest resistance', sr && sr.nearest_resistance ? '$' + sr.nearest_resistance.price.toFixed(2) : '—', sr && sr.nearest_resistance ? sr.nearest_resistance.touches + ' touches · ' + sr.nearest_resistance.distance_pct + '% above' : 'none', 'rd')}
+           ${tile('ATR(14)', sr ? '$' + sr.atr.toFixed(2) : '—', 'volatility band', '')}
+           ${wlbTile('S/R level hold', phr.sr_level_hold)}
+         </div>
+         ${sectionVerdict(sr ? sr.vote : 'NEUTRAL', sr ? sr.rationale : 'awaiting backend', sr ? sr.falsification : '')}`)}
+
+      <!-- 2. TRENDLINES — auto-detected -->
+      ${_section('TRENDLINES · auto-detected channel',
+        tl && tl.upper && tl.lower ? `upper ${tl.upper.touches} pivots · lower ${tl.lower.touches} pivots` : 'awaiting backend',
+        `<div class="pat-chart-host" id="pat-chart-tl" style="position:relative;width:100%;height:380px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
+           <div class="pat-legend" style="position:absolute;top:8px;left:10px;z-index:5;pointer-events:none;display:flex;gap:14px;flex-wrap:wrap;background:rgba(17,22,26,0.85);padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
+             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#ff6b5b"></span>upper trendline</span>
+             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#5be57c"></span>lower trendline</span>
+             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#d49060"></span>break candle</span>
+           </div>
+         </div>
+         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px">
+           ${tile('Upper @ now', tl && tl.upper ? '$' + tl.upper.projected_at_last_bar.toFixed(2) : '—', tl && tl.upper ? (tl.upper.slope > 0 ? 'rising' : 'falling') : 'none', tl && tl.upper_break ? 'gn' : 'rd')}
+           ${tile('Lower @ now', tl && tl.lower ? '$' + tl.lower.projected_at_last_bar.toFixed(2) : '—', tl && tl.lower ? (tl.lower.slope > 0 ? 'rising' : 'falling') : 'none', tl && tl.lower_break ? 'rd' : 'gn')}
+           ${tile('Break status', tl ? (tl.upper_break ? 'UPPER BROKEN' : tl.lower_break ? 'LOWER BROKEN' : 'INTACT') : '—', tl ? (tl.upper_break || tl.lower_break ? 'momentum shift' : 'channel active') : '', tl && (tl.upper_break || tl.lower_break) ? 'am' : '')}
+           ${wlbTile('TL break followthrough', phr.trendline_break_followthrough)}
+         </div>
+         ${sectionVerdict(tl ? tl.vote : 'NEUTRAL', tl ? tl.rationale : 'awaiting backend', tl ? tl.falsification : '')}`)}
+
+      <!-- 3. VOLUME PROFILE -->
+      ${_section('VOLUME PROFILE · 60d auction',
+        vp ? 'POC · VAH · VAL — acceptance state: ' + vp.acceptance : 'awaiting backend',
         `<div class="pat-chart-host" id="pat-chart-vp" style="position:relative;width:100%;height:380px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
            <div class="pat-legend" style="position:absolute;top:8px;left:10px;z-index:5;pointer-events:none;display:flex;gap:14px;flex-wrap:wrap;background:rgba(17,22,26,0.85);padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
              <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#d49060"></span>POC</span>
@@ -35746,38 +36378,34 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
            </div>
          </div>
          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px" id="pat-vp-tiles">
-           ${tile('POC', '$' + vpEst.poc.toFixed(2), 'point of control', 'cop')}
-           ${tile('VAH', '$' + vpEst.vah.toFixed(2), 'value-area high', '')}
-           ${tile('VAL', '$' + vpEst.val.toFixed(2), 'value-area low', '')}
-           ${tile('Status', vpEst.acceptStatus, px > vpEst.vah ? 'above value area' : 'inside value area', vpEst.acceptStatus === 'ACCEPT' ? 'gn' : 'am')}
+           ${tile('POC', vp ? '$' + vp.poc.toFixed(2) : '—', 'point of control', 'cop')}
+           ${tile('VAH', vp ? '$' + vp.vah.toFixed(2) : '—', 'value-area high', '')}
+           ${tile('VAL', vp ? '$' + vp.val.toFixed(2) : '—', 'value-area low', '')}
+           ${wlbTile('POC bounce', phr.vp_poc_bounce)}
          </div>
-         ${sectionVerdict(compCall,
-           `Spot ${px > vpEst.vah ? 'accepted above VAH' : 'inside value area'} · POC $${vpEst.poc.toFixed(2)} = institutional support · stop $${stop.toFixed(2)} below profile.`,
-           `2 daily closes back inside value area below POC → price rejected from breakout.`)}`)}
+         ${sectionVerdict(vp ? vp.vote : 'NEUTRAL', vp ? vp.rationale : 'awaiting backend', vp ? vp.falsification : '')}`)}
 
-      <!-- 2. FIBONACCI -->
+      <!-- 4. FIBONACCI — detected swing pair -->
       ${_section('FIBONACCI · retracements + extensions',
-        `swing $${fibSwingLo.toFixed(2)} → $${fibSwingHi.toFixed(2)} · 9 levels as priceLines`,
+        fi ? `swing $${fi.swing_lo.toFixed(2)} → $${fi.swing_hi.toFixed(2)} · direction: ${fi.direction || 'up'} · zone: ${fi.current_zone}` : 'awaiting backend',
         `<div class="pat-chart-host" id="pat-chart-fib" style="position:relative;width:100%;height:380px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
            <div class="pat-legend" style="position:absolute;top:8px;left:10px;z-index:5;pointer-events:none;display:flex;gap:14px;flex-wrap:wrap;background:rgba(17,22,26,0.85);padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
              <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#5be57c"></span>extensions · targets</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#d49060"></span>retracements</span>
+             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#d49060"></span>retracements · 0.618 golden</span>
              <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#ff6b5b"></span>swing low</span>
            </div>
          </div>
          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px">
-           ${tile('Golden 0.618', '$' + fibLevels.r_0618.toFixed(2), 'bull-line · stop ref', 'cop')}
-           ${tile('1.272 ext', '$' + fibLevels.ext_1272.toFixed(2), 'T1 target · sqrt(1.618)', 'gn')}
-           ${tile('1.618 ext', '$' + fibLevels.ext_1618.toFixed(2), 'T2 target · golden ext', 'gn')}
-           ${tile('Status', px > fibLevels.r_0618 ? 'ABOVE GOLDEN' : 'BELOW GOLDEN', px > fibLevels.r_0618 ? 'bullish posture' : 'pullback active', px > fibLevels.r_0618 ? 'gn' : 'am')}
+           ${tile('Golden 0.618', fi ? '$' + fi.levels.r_0618.toFixed(2) : '—', 'bull-line · stop ref', 'cop')}
+           ${tile('1.272 ext', fi ? '$' + fi.levels.ext_1272.toFixed(2) : '—', 'T1 target', 'gn')}
+           ${tile('1.618 ext', fi ? '$' + fi.levels.ext_1618.toFixed(2) : '—', 'T2 target', 'gn')}
+           ${wlbTile('0.618 bounce → 1.272', phr.fib_0618_bounce)}
          </div>
-         ${sectionVerdict(compCall,
-           `Spot $${px.toFixed(2)} is ${px > fibLevels.r_0618 ? '<b style="color:var(--gn)">above</b> the 0.618 golden ratio' : '<b style="color:var(--rd)">below</b> the 0.618 golden ratio'} · targeting 1.272 ($${fibLevels.ext_1272.toFixed(2)}) and 1.618 ($${fibLevels.ext_1618.toFixed(2)}) extensions.`,
-           `close below 0.618 ($${fibLevels.r_0618.toFixed(2)}) on volume → deep retrace failure.`)}`)}
+         ${sectionVerdict(fi ? fi.vote : 'NEUTRAL', fi ? fi.rationale : 'awaiting backend', fi ? fi.falsification : '')}`)}
 
-      <!-- 3. ICHIMOKU -->
-      ${_section('ICHIMOKU KINKO HYO · five-line systems read',
-        'Tenkan · Kijun · Senkou A / B · Chikou · cloud projected 26d forward',
+      <!-- 5. ICHIMOKU -->
+      ${_section('ICHIMOKU KINKO HYO · 4-confluence classifier',
+        ic ? `bull ${ic.bull_score}/4 · bear ${ic.bear_score}/4` : 'awaiting backend',
         `<div class="pat-chart-host" id="pat-chart-ichi" style="position:relative;width:100%;height:440px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
            <div class="pat-legend" style="position:absolute;top:8px;left:10px;z-index:5;pointer-events:none;display:flex;gap:14px;flex-wrap:wrap;background:rgba(17,22,26,0.85);padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
              <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#d49060"></span>Tenkan (9)</span>
@@ -35788,37 +36416,41 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
            </div>
          </div>
          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px" id="pat-ichi-tiles">
-           ${tile('Price vs Cloud', ichi.priceVsCloud, ichi.priceVsCloud === 'ABOVE' ? 'bullish trend confirmed' : 'bearish trend', ichi.priceVsCloud === 'ABOVE' ? 'gn' : 'rd')}
-           ${tile('Tenkan / Kijun', ichi.tkCross, ichi.tkCross === 'BULL CROSS' ? '9d > 26d' : '9d < 26d', ichi.tkCross === 'BULL CROSS' ? 'gn' : 'rd')}
-           ${tile('Chikou Span', ichi.chikou, 'above past price', 'gn')}
-           ${tile('Future Cloud', ichi.futureCloud, ichi.futureCloud === 'BULLISH' ? 'Senkou A > B forward' : 'Senkou B > A forward', ichi.futureCloud === 'BULLISH' ? 'gn' : 'rd')}
+           ${tile('Price vs Cloud', ic ? ic.price_vs_cloud : '—', ic ? (ic.price_vs_cloud === 'ABOVE' ? 'bullish frame' : ic.price_vs_cloud === 'BELOW' ? 'bearish frame' : 'in transition') : '', ic && ic.price_vs_cloud === 'ABOVE' ? 'gn' : ic && ic.price_vs_cloud === 'BELOW' ? 'rd' : 'am')}
+           ${tile('TK cross', ic ? ic.tk_cross : '—', ic ? (ic.tk_cross === 'BULL' ? 'Tenkan > Kijun' : ic.tk_cross === 'BEAR' ? 'Tenkan < Kijun' : 'crossover pending') : '', ic && ic.tk_cross === 'BULL' ? 'gn' : ic && ic.tk_cross === 'BEAR' ? 'rd' : 'am')}
+           ${tile('Future cloud', ic ? ic.future_cloud : '—', ic ? (ic.future_cloud === 'BULLISH' ? 'Senkou A > B forward' : 'Senkou B > A forward') : '', ic && ic.future_cloud === 'BULLISH' ? 'gn' : 'rd')}
+           ${wlbTile('TK cross +2% in 10d', phr.ichi_tk_cross)}
          </div>
-         ${sectionVerdict(compCall,
-           `${ichi.priceVsCloud === 'ABOVE' && ichi.tkCross === 'BULL CROSS' ? '<b style="color:var(--gn)">Triple-bull alignment:</b> above cloud · TK bull cross · Chikou clear · future cloud green.' : 'Mixed Ichimoku signals — wait for cleaner alignment.'} Kijun (~$${ema50 ? ema50.toFixed(2) : '—'}) = dynamic-support stop reference.`,
-           `daily close below Kijun flips the system to caution. Close into the cloud breaks the trend.`)}`)}
+         ${sectionVerdict(ic ? ic.vote : 'NEUTRAL', ic ? ic.rationale : 'awaiting backend', ic ? ic.falsification : '')}`)}
 
-      <!-- 4. ELLIOTT WAVE -->
-      ${_section('ELLIOTT WAVE · 5-wave impulse structure',
-        'discretionary methodology · use as confluence only',
-        `<div style="padding:12px 14px;margin-bottom:12px;background:color-mix(in oklch, var(--rd) 6%, var(--bg-2));border-left:3px solid var(--rd);border-radius:0 4px 4px 0;font-size:12.5px;color:var(--ink-1);line-height:1.55">
-           <b style="color:var(--rd);font-family:var(--mono);letter-spacing:0.14em;font-size:11px">DISCRETIONARY · USE AS CONFLUENCE</b> &nbsp; Elliott Wave is a pattern framework with low quantitative edge in isolation. Useful for projection + invalidation levels — never as stand-alone signal. Two analysts can produce different valid wave counts on the same chart.
+      <!-- 6. WYCKOFF — text-only, no chart -->
+      ${_section('WYCKOFF · phase classifier',
+        wy ? `phase: ${wy.phase} · slope ${wy.slope_pct_per_day >= 0 ? '+' : ''}${wy.slope_pct_per_day.toFixed(2)}%/day · range pos ${(wy.pos_in_range*100).toFixed(0)}%` : 'awaiting backend',
+        `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px">
+           ${tile('Phase', wy ? wy.phase.toUpperCase() : '—', wy ? `confidence ${(wy.confidence*100).toFixed(0)}%` : '', wy && wy.vote === 'BULLISH' ? 'gn' : wy && wy.vote === 'BEARISH' ? 'rd' : 'am')}
+           ${tile('30d slope', wy ? (wy.slope_pct_per_day >= 0 ? '+' : '') + wy.slope_pct_per_day.toFixed(2) + '%/d' : '—', 'log-return regression', wy && wy.slope_pct_per_day > 0.15 ? 'gn' : wy && wy.slope_pct_per_day < -0.15 ? 'rd' : 'am')}
+           ${tile('Range position', wy ? (wy.pos_in_range * 100).toFixed(0) + '%' : '—', wy ? `[${wy.range_low.toFixed(2)} – ${wy.range_high.toFixed(2)}]` : '', '')}
+           ${tile('Volume skew', wy ? (wy.volume_skew > 0 ? '+' : '') + (wy.volume_skew * 100).toFixed(0) + '%' : '—', 'up-vol vs down-vol', wy && wy.volume_skew > 0 ? 'gn' : wy && wy.volume_skew < 0 ? 'rd' : '')}
          </div>
-         <div class="pat-chart-host" id="pat-chart-ew" style="position:relative;width:100%;height:380px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
+         ${sectionVerdict(wy ? wy.vote : 'NEUTRAL', wy ? wy.rationale : 'awaiting backend', wy ? wy.falsification : '')}`)}
+
+      <!-- 7. CLASSICAL PATTERNS -->
+      ${_section('CLASSICAL PATTERNS · cup-handle · flag · triangle',
+        cls && cls.active_pattern ? `active: ${cls.active_pattern.replace(/_/g, ' ')}` : (cls ? 'no high-conviction pattern detected' : 'awaiting backend'),
+        `<div class="pat-chart-host" id="pat-chart-cls" style="position:relative;width:100%;height:380px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
            <div class="pat-legend" style="position:absolute;top:8px;left:10px;z-index:5;pointer-events:none;display:flex;gap:14px;flex-wrap:wrap;background:rgba(17,22,26,0.85);padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#5be57c"></span>Impulse (W1·W3·W5)</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#d49060"></span>Corrective (W2·W4)</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#ff6b5b"></span>Invalidation</span>
+             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#5be57c"></span>breakout level</span>
+             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#d49060"></span>target projection</span>
+             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#ff6b5b"></span>invalidation</span>
            </div>
          </div>
          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px">
-           ${tile('Current wave', 'WAVE 5', 'in progress', 'cop')}
-           ${tile('W5 target', '$' + fibLevels.ext_1272.toFixed(2) + ' – $' + fibLevels.ext_1618.toFixed(2), '0.618 × (W1+W3)', 'gn')}
-           ${tile('Invalidation', '&lt; $' + (px * 0.95).toFixed(2), 'W4 cannot overlap W1', 'rd')}
-           ${tile('Rules check', '3 / 3', 'all EW rules hold', 'gn')}
+           ${tile('Detected', cls && cls.active_pattern ? cls.active_pattern.replace(/_/g, ' ').toUpperCase() : 'NONE', cls && cls.patterns && cls.patterns.length ? cls.patterns.length + ' patterns found' : 'no setup', cls && cls.active_pattern ? (cls.vote === 'BULLISH' ? 'gn' : 'rd') : '')}
+           ${tile('Target', cls && cls.target ? '$' + cls.target.toFixed(2) : '—', cls && cls.target ? 'measured move' : '—', 'gn')}
+           ${tile('Hit rate ≥1 mo', '—', 'tracked separately', '')}
+           ${wlbTile('Classical → target 30d', phr.classical_breakout)}
          </div>
-         ${sectionVerdict('WATCH',
-           `Best-fit wave count places price in early Wave 5 of primary-degree impulse. Three EW rules all hold. <b>This is confluence, not signal.</b>`,
-           `daily close &lt; $${(px * 0.95).toFixed(2)} violates the W4-overlap rule and invalidates this wave count entirely.`)}`)}
+         ${sectionVerdict(cls ? cls.vote : 'NEUTRAL', cls ? cls.rationale : 'awaiting backend', cls ? cls.falsification : '')}`)}
     `;
   }
 
@@ -35857,8 +36489,9 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
 
   // Instantiate the four TradingView charts after DOM is in place.
   function initPatternsCharts(t) {
+    const CHART_IDS = ['pat-chart-sr','pat-chart-tl','pat-chart-vp','pat-chart-fib','pat-chart-ichi','pat-chart-cls'];
     if (typeof LightweightCharts === 'undefined') {
-      ['pat-chart-vp','pat-chart-fib','pat-chart-ichi','pat-chart-ew'].forEach(id => {
+      CHART_IDS.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         const msg = document.createElement('div');
@@ -35872,7 +36505,12 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
     const ctx = (window._patternsCtx || {})[tk];
     if (!ctx) return;
 
-    const ohlc = ctx.hasOHLC ? ctx.ohlc : _generateSyntheticOHLC(tk, ctx.px || 100, ctx.wkHi || 115, ctx.wkLo || 85);
+    // 2026-05-17 · use backend swing endpoints + computed pattern_data when present.
+    // Synthetic OHLC fallback only fires when bundle truly has no ohlc_90d.
+    const _spotPx = ctx.px || 100;
+    const _swingHi = (ctx.fi && ctx.fi.swing_hi) ? ctx.fi.swing_hi : _spotPx * 1.15;
+    const _swingLo = (ctx.fi && ctx.fi.swing_lo) ? ctx.fi.swing_lo : _spotPx * 0.85;
+    const ohlc = ctx.hasOHLC ? ctx.ohlc : _generateSyntheticOHLC(tk, _spotPx, _swingHi, _swingLo);
     const times = ohlc.map(d => d.time);
     const highs = ohlc.map(d => d.high);
     const lows  = ohlc.map(d => d.low);
@@ -35936,135 +36574,227 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       };
     };
 
-    // ──── 1. VOLUME PROFILE ────
+    // ──── 1. SUPPORT / RESISTANCE — horizontal levels from backend ────
+    try {
+      const c = document.getElementById('pat-chart-sr');
+      if (c) {
+        const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
+        const cs = chart.addCandlestickSeries(candleStyle);
+        cs.setData(ohlc);
+        if (ctx.sr) {
+          (ctx.sr.supports || []).forEach((s, i) => {
+            cs.createPriceLine({ price: s.price, color: '#5be57c',
+              lineWidth: Math.min(3, s.touches), lineStyle: 0,
+              axisLabelVisible: true, title: `S $${s.price.toFixed(2)} · ${s.touches}T` });
+          });
+          (ctx.sr.resistances || []).forEach((r, i) => {
+            cs.createPriceLine({ price: r.price, color: '#ff6b5b',
+              lineWidth: Math.min(3, r.touches), lineStyle: 0,
+              axisLabelVisible: true, title: `R $${r.price.toFixed(2)} · ${r.touches}T` });
+          });
+        }
+        if (ctx.stop) cs.createPriceLine({ price: ctx.stop, color: '#d49060', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `Stop $${ctx.stop.toFixed(2)}` });
+        cs.setMarkers([{ time: LAST_T, position: 'aboveBar', color: '#d49060', shape: 'circle', text: `NOW $${ctx.px.toFixed(2)}` }]);
+        chart.timeScale().fitContent();
+        window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
+      }
+    } catch (err) { console.error('[pat-chart-sr]', err); showErr('pat-chart-sr', err); }
+
+    // ──── 2. TRENDLINES — diagonal lines via line-series ────
+    try {
+      const c = document.getElementById('pat-chart-tl');
+      if (c) {
+        const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
+        const cs = chart.addCandlestickSeries(candleStyle);
+        cs.setData(ohlc);
+        // Trendlines from backend (slope+intercept against bar-index). Project across ohlc.
+        const N = ohlc.length;
+        const projectLine = (tl) => {
+          // pivots are bar indices from backend lookback window (90 bars typically)
+          // we approximate over our local ohlc with same number of bars
+          const pts = [];
+          for (let i = 0; i < N; i++) {
+            pts.push({ time: times[i], value: +(tl.slope * i + tl.intercept).toFixed(2) });
+          }
+          return pts;
+        };
+        if (ctx.tl && ctx.tl.upper) {
+          chart.addLineSeries({ color: '#ff6b5b', lineWidth: 2, priceLineVisible: false, lastValueVisible: false })
+               .setData(projectLine(ctx.tl.upper));
+        }
+        if (ctx.tl && ctx.tl.lower) {
+          chart.addLineSeries({ color: '#5be57c', lineWidth: 2, priceLineVisible: false, lastValueVisible: false })
+               .setData(projectLine(ctx.tl.lower));
+        }
+        cs.setMarkers([{ time: LAST_T, position: 'aboveBar', color: '#d49060', shape: 'circle', text: `NOW $${ctx.px.toFixed(2)}` }]);
+        chart.timeScale().fitContent();
+        window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
+      }
+    } catch (err) { console.error('[pat-chart-tl]', err); showErr('pat-chart-tl', err); }
+
+    // ──── 3. VOLUME PROFILE — uses backend POC/VAH/VAL ────
     try {
       const c = document.getElementById('pat-chart-vp');
-      const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
-      const cs = chart.addCandlestickSeries(candleStyle);
-      cs.setData(ohlc);
-      const vs = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '', color: '#5be57c' });
-      chart.priceScale('').applyOptions({ scaleMargins: { top: 0.80, bottom: 0 } });
-      vs.setData(ohlc.map(d => ({ time: d.time, value: d.volume, color: d.close >= d.open ? 'rgba(91,229,124,0.55)' : 'rgba(255,107,91,0.55)' })));
-      const vp = computeVP();
-      cs.createPriceLine({ price: vp.poc, color: '#d49060', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: `POC $${vp.poc.toFixed(2)}` });
-      cs.createPriceLine({ price: vp.vah, color: '#8f969c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `VAH $${vp.vah.toFixed(2)}` });
-      cs.createPriceLine({ price: vp.val, color: '#8f969c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `VAL $${vp.val.toFixed(2)}` });
-      if (ctx.stop) cs.createPriceLine({ price: ctx.stop, color: '#ff6b5b', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `Stop $${ctx.stop.toFixed(2)}` });
-      chart.timeScale().fitContent();
-      window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
+      if (c) {
+        const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
+        const cs = chart.addCandlestickSeries(candleStyle);
+        cs.setData(ohlc);
+        const vs = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '', color: '#5be57c' });
+        chart.priceScale('').applyOptions({ scaleMargins: { top: 0.80, bottom: 0 } });
+        vs.setData(ohlc.map(d => ({ time: d.time, value: d.volume, color: d.close >= d.open ? 'rgba(91,229,124,0.55)' : 'rgba(255,107,91,0.55)' })));
+        // Prefer backend VP; fallback to computeVP() if missing
+        const vp = (ctx.vp && ctx.vp.poc) ? { poc: ctx.vp.poc, vah: ctx.vp.vah, val: ctx.vp.val } : computeVP();
+        cs.createPriceLine({ price: vp.poc, color: '#d49060', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: `POC $${vp.poc.toFixed(2)}` });
+        cs.createPriceLine({ price: vp.vah, color: '#8f969c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `VAH $${vp.vah.toFixed(2)}` });
+        cs.createPriceLine({ price: vp.val, color: '#8f969c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `VAL $${vp.val.toFixed(2)}` });
+        if (ctx.stop) cs.createPriceLine({ price: ctx.stop, color: '#ff6b5b', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `Stop $${ctx.stop.toFixed(2)}` });
+        chart.timeScale().fitContent();
+        window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
+      }
     } catch (err) { console.error('[pat-chart-vp]', err); showErr('pat-chart-vp', err); }
 
-    // ──── 2. FIBONACCI ────
+    // ──── 4. FIBONACCI — uses backend detected swing pair ────
     try {
       const c = document.getElementById('pat-chart-fib');
-      const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
-      const cs = chart.addCandlestickSeries(candleStyle);
-      cs.setData(ohlc);
-      const f = ctx.fibLevels;
-      [
-        { price: f.ext_1618, color: '#5be57c', style: 0, title: `1.618 ext $${f.ext_1618.toFixed(2)} T2`,  width: 2 },
-        { price: f.ext_1272, color: '#5be57c', style: 0, title: `1.272 ext $${f.ext_1272.toFixed(2)} T1`,  width: 2 },
-        { price: f.r_0000,   color: '#5be57c', style: 0, title: `1.000 $${f.r_0000.toFixed(2)} swing hi`,  width: 2 },
-        { price: f.r_0236,   color: '#8f969c', style: 2, title: `0.236 $${f.r_0236.toFixed(2)}`,           width: 1 },
-        { price: f.r_0382,   color: '#d49060', style: 2, title: `0.382 $${f.r_0382.toFixed(2)}`,           width: 1 },
-        { price: f.r_0500,   color: '#d49060', style: 2, title: `0.500 $${f.r_0500.toFixed(2)}`,           width: 1 },
-        { price: f.r_0618,   color: '#d49060', style: 0, title: `0.618 $${f.r_0618.toFixed(2)} GOLDEN`,    width: 3 },
-        { price: f.r_0786,   color: '#8f969c', style: 2, title: `0.786 $${f.r_0786.toFixed(2)}`,           width: 1 },
-        { price: f.r_1000,   color: '#ff6b5b', style: 0, title: `0.000 $${f.r_1000.toFixed(2)} swing lo`,  width: 2 },
-      ].forEach(L => cs.createPriceLine({ price: L.price, color: L.color, lineWidth: L.width, lineStyle: L.style, axisLabelVisible: true, title: L.title }));
-      cs.setMarkers([
-        { time: LAST_T, position: 'aboveBar', color: '#5be57c', shape: 'circle', text: `NOW $${ctx.px.toFixed(2)}` },
-      ]);
-      chart.timeScale().fitContent();
-      window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
+      if (c) {
+        const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
+        const cs = chart.addCandlestickSeries(candleStyle);
+        cs.setData(ohlc);
+        // Prefer backend fi.levels; fallback to derived from swing hi/lo
+        const f = (ctx.fi && ctx.fi.levels) ? ctx.fi.levels : (function() {
+          const hi = _swingHi, lo = _swingLo, rng = hi - lo;
+          const r = (k) => +(hi - rng * k).toFixed(2);
+          return {
+            ext_1618: +(hi + rng * 0.618).toFixed(2),
+            ext_1272: +(hi + rng * 0.272).toFixed(2),
+            r_0000: hi, r_0236: r(0.236), r_0382: r(0.382),
+            r_0500: r(0.500), r_0618: r(0.618), r_0786: r(0.786),
+            r_1000: lo,
+          };
+        })();
+        [
+          { price: f.ext_1618, color: '#5be57c', style: 0, title: `1.618 ext $${f.ext_1618.toFixed(2)} T2`,  width: 2 },
+          { price: f.ext_1272, color: '#5be57c', style: 0, title: `1.272 ext $${f.ext_1272.toFixed(2)} T1`,  width: 2 },
+          { price: f.r_0000,   color: '#5be57c', style: 0, title: `1.000 $${f.r_0000.toFixed(2)} swing hi`,  width: 2 },
+          { price: f.r_0236,   color: '#8f969c', style: 2, title: `0.236 $${f.r_0236.toFixed(2)}`,           width: 1 },
+          { price: f.r_0382,   color: '#d49060', style: 2, title: `0.382 $${f.r_0382.toFixed(2)}`,           width: 1 },
+          { price: f.r_0500,   color: '#d49060', style: 2, title: `0.500 $${f.r_0500.toFixed(2)}`,           width: 1 },
+          { price: f.r_0618,   color: '#d49060', style: 0, title: `0.618 $${f.r_0618.toFixed(2)} GOLDEN`,    width: 3 },
+          { price: f.r_0786,   color: '#8f969c', style: 2, title: `0.786 $${f.r_0786.toFixed(2)}`,           width: 1 },
+          { price: f.r_1000,   color: '#ff6b5b', style: 0, title: `0.000 $${f.r_1000.toFixed(2)} swing lo`,  width: 2 },
+        ].forEach(L => cs.createPriceLine({ price: L.price, color: L.color, lineWidth: L.width, lineStyle: L.style, axisLabelVisible: true, title: L.title }));
+        cs.setMarkers([
+          { time: LAST_T, position: 'aboveBar', color: '#5be57c', shape: 'circle', text: `NOW $${ctx.px.toFixed(2)}` },
+        ]);
+        chart.timeScale().fitContent();
+        window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
+      }
     } catch (err) { console.error('[pat-chart-fib]', err); showErr('pat-chart-fib', err); }
 
-    // ──── 3. ICHIMOKU ────
+    // ──── 5. ICHIMOKU — locally computed 5-line system ────
     try {
       const c = document.getElementById('pat-chart-ichi');
-      const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 440 }));
-      const cs = chart.addCandlestickSeries(candleStyle);
-      cs.setData(ohlc);
-      const rollMid = (period) => {
-        const out = [];
+      if (c) {
+        const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 440 }));
+        const cs = chart.addCandlestickSeries(candleStyle);
+        cs.setData(ohlc);
+        const rollMid = (period) => {
+          const out = [];
+          for (let i = 0; i < ohlc.length; i++) {
+            if (i < period - 1) continue;
+            let hi = -Infinity, lo = Infinity;
+            for (let j = i - period + 1; j <= i; j++) {
+              if (highs[j] > hi) hi = highs[j];
+              if (lows[j]  < lo) lo = lows[j];
+            }
+            out.push({ time: times[i], value: +((hi + lo) / 2).toFixed(2) });
+          }
+          return out;
+        };
+        const tenkan = rollMid(9);
+        const kijun  = rollMid(26);
+        const senkouA = [], senkouB = [];
         for (let i = 0; i < ohlc.length; i++) {
-          if (i < period - 1) continue;
-          let hi = -Infinity, lo = Infinity;
-          for (let j = i - period + 1; j <= i; j++) {
-            if (highs[j] > hi) hi = highs[j];
-            if (lows[j]  < lo) lo = lows[j];
+          const tIdx = i - 8, kIdx = i - 25;
+          if (tIdx >= 0 && kIdx >= 0) {
+            senkouA.push({ time: times[i] + 26 * DAY, value: +(((tenkan[tIdx].value + kijun[kIdx].value) / 2)).toFixed(2) });
           }
-          out.push({ time: times[i], value: +((hi + lo) / 2).toFixed(2) });
-        }
-        return out;
-      };
-      const tenkan = rollMid(9);
-      const kijun  = rollMid(26);
-      const senkouA = [], senkouB = [];
-      for (let i = 0; i < ohlc.length; i++) {
-        const tIdx = i - 8, kIdx = i - 25;
-        if (tIdx >= 0 && kIdx >= 0) {
-          senkouA.push({ time: times[i] + 26 * DAY, value: +(((tenkan[tIdx].value + kijun[kIdx].value) / 2)).toFixed(2) });
-        }
-        if (i >= 51) {
-          let hi = -Infinity, lo = Infinity;
-          for (let j = i - 51; j <= i; j++) {
-            if (highs[j] > hi) hi = highs[j];
-            if (lows[j]  < lo) lo = lows[j];
+          if (i >= 51) {
+            let hi = -Infinity, lo = Infinity;
+            for (let j = i - 51; j <= i; j++) {
+              if (highs[j] > hi) hi = highs[j];
+              if (lows[j]  < lo) lo = lows[j];
+            }
+            senkouB.push({ time: times[i] + 26 * DAY, value: +((hi + lo) / 2).toFixed(2) });
           }
-          senkouB.push({ time: times[i] + 26 * DAY, value: +((hi + lo) / 2).toFixed(2) });
         }
+        const chikou = [];
+        for (let i = 25; i < ohlc.length; i++) chikou.push({ time: times[i - 26], value: closes[i] });
+
+        chart.addLineSeries({ color: '#d49060', lineWidth: 2, priceLineVisible: false, lastValueVisible: false }).setData(tenkan);
+        chart.addLineSeries({ color: '#c9cdd0', lineWidth: 2, priceLineVisible: false, lastValueVisible: false }).setData(kijun);
+        chart.addLineSeries({ color: '#5be57c', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }).setData(senkouA);
+        chart.addLineSeries({ color: '#ff6b5b', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }).setData(senkouB);
+        chart.addLineSeries({ color: '#ffb95c', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }).setData(chikou);
+
+        const kijunLast = (ctx.ic && ctx.ic.kijun) || (kijun.length ? kijun[kijun.length - 1].value : null);
+        if (kijunLast) cs.createPriceLine({ price: kijunLast, color: '#c9cdd0', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `Kijun $${kijunLast.toFixed(2)}` });
+
+        cs.setMarkers([{ time: LAST_T, position: 'aboveBar', color: '#5be57c', shape: 'circle', text: `NOW $${ctx.px.toFixed(2)}` }]);
+        chart.timeScale().fitContent();
+        window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
       }
-      const chikou = [];
-      for (let i = 25; i < ohlc.length; i++) chikou.push({ time: times[i - 26], value: closes[i] });
-
-      chart.addLineSeries({ color: '#d49060', lineWidth: 2, priceLineVisible: false, lastValueVisible: false }).setData(tenkan);
-      chart.addLineSeries({ color: '#c9cdd0', lineWidth: 2, priceLineVisible: false, lastValueVisible: false }).setData(kijun);
-      chart.addLineSeries({ color: '#5be57c', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }).setData(senkouA);
-      chart.addLineSeries({ color: '#ff6b5b', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }).setData(senkouB);
-      chart.addLineSeries({ color: '#ffb95c', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }).setData(chikou);
-
-      // Kijun stop reference
-      const kijunLast = kijun.length ? kijun[kijun.length - 1].value : null;
-      if (kijunLast) cs.createPriceLine({ price: kijunLast, color: '#c9cdd0', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `Kijun $${kijunLast.toFixed(2)}` });
-
-      cs.setMarkers([{ time: LAST_T, position: 'aboveBar', color: '#5be57c', shape: 'circle', text: `NOW $${ctx.px.toFixed(2)}` }]);
-      chart.timeScale().fitContent();
-      window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
     } catch (err) { console.error('[pat-chart-ichi]', err); showErr('pat-chart-ichi', err); }
 
-    // ──── 4. ELLIOTT WAVE ────
+    // ──── 6. CLASSICAL PATTERNS — overlays detected pattern ────
     try {
-      const c = document.getElementById('pat-chart-ew');
-      const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
-      const cs = chart.addCandlestickSeries(candleStyle);
-      cs.setData(ohlc);
-      // Auto-detect approximate swing pivots: highest and lowest in 5 buckets
-      const N = ohlc.length;
-      const pivots = [
-        { idx: 0,                          lbl: 'W0' },
-        { idx: Math.floor(N * 0.22),       lbl: 'W1' },
-        { idx: Math.floor(N * 0.33),       lbl: 'W2' },
-        { idx: Math.floor(N * 0.55),       lbl: 'W3' },
-        { idx: Math.floor(N * 0.70),       lbl: 'W4' },
-        { idx: N - 1,                      lbl: 'W5' },
-      ];
-      const markers = pivots.map((p, i) => ({
-        time: times[p.idx],
-        position: i % 2 === 0 ? 'belowBar' : 'aboveBar',
-        color: i % 2 === 0 ? '#ff6b5b' : '#5be57c',
-        shape: 'circle',
-        text: `${p.lbl} $${closes[p.idx].toFixed(2)}`,
-      }));
-      cs.setMarkers(markers);
-      // Invalidation = W1 high (approximate)
-      const w1px = closes[pivots[1].idx];
-      cs.createPriceLine({ price: w1px, color: '#ff6b5b', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: `INVALIDATE $${w1px.toFixed(2)} · W1 top` });
-      if (ctx.t1) cs.createPriceLine({ price: ctx.t1, color: '#5be57c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `T1 $${ctx.t1.toFixed(2)}` });
-      if (ctx.t2) cs.createPriceLine({ price: ctx.t2, color: '#5be57c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `T2 $${ctx.t2.toFixed(2)}` });
-      chart.timeScale().fitContent();
-      window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
-    } catch (err) { console.error('[pat-chart-ew]', err); showErr('pat-chart-ew', err); }
+      const c = document.getElementById('pat-chart-cls');
+      if (c) {
+        const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
+        const cs = chart.addCandlestickSeries(candleStyle);
+        cs.setData(ohlc);
+        const cl = ctx.cls;
+        if (cl && cl.active_pattern && cl.patterns && cl.patterns.length) {
+          const p = cl.patterns[0];
+          // Generic overlays: breakout / target / invalidation depending on shape
+          if (p.target) {
+            cs.createPriceLine({ price: p.target, color: '#d49060', lineWidth: 2, lineStyle: 0,
+              axisLabelVisible: true, title: `Target $${p.target.toFixed(2)} · ${cl.active_pattern}` });
+          }
+          if (p.neckline) {
+            cs.createPriceLine({ price: p.neckline, color: '#5be57c', lineWidth: 2, lineStyle: 0,
+              axisLabelVisible: true, title: `Neckline $${p.neckline.toFixed(2)}` });
+          }
+          if (p.flag_top) {
+            cs.createPriceLine({ price: p.flag_top, color: '#5be57c', lineWidth: 1, lineStyle: 2,
+              axisLabelVisible: true, title: `Flag top $${p.flag_top.toFixed(2)}` });
+          }
+          if (p.flag_bottom) {
+            cs.createPriceLine({ price: p.flag_bottom, color: '#ff6b5b', lineWidth: 1, lineStyle: 2,
+              axisLabelVisible: true, title: `Flag bot $${p.flag_bottom.toFixed(2)}` });
+          }
+          if (p.resistance) {
+            cs.createPriceLine({ price: p.resistance, color: '#5be57c', lineWidth: 2, lineStyle: 0,
+              axisLabelVisible: true, title: `Triangle top $${p.resistance.toFixed(2)}` });
+          }
+          if (p.support) {
+            cs.createPriceLine({ price: p.support, color: '#ff6b5b', lineWidth: 2, lineStyle: 0,
+              axisLabelVisible: true, title: `Triangle base $${p.support.toFixed(2)}` });
+          }
+          if (p.handle_low) {
+            cs.createPriceLine({ price: p.handle_low, color: '#ff6b5b', lineWidth: 1, lineStyle: 3,
+              axisLabelVisible: true, title: `Handle low $${p.handle_low.toFixed(2)}` });
+          }
+        } else {
+          // No pattern — show neutral context line
+          cs.createPriceLine({ price: ctx.px, color: '#8f969c', lineWidth: 1, lineStyle: 3,
+            axisLabelVisible: true, title: `No active pattern · $${ctx.px.toFixed(2)}` });
+        }
+        cs.setMarkers([{ time: LAST_T, position: 'aboveBar', color: '#d49060', shape: 'circle', text: `NOW $${ctx.px.toFixed(2)}` }]);
+        chart.timeScale().fitContent();
+        window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
+      }
+    } catch (err) { console.error('[pat-chart-cls]', err); showErr('pat-chart-cls', err); }
   }
 
   return { render, switchSub, SUB_TABS };
@@ -39678,7 +40408,7 @@ const MarketsV2 = (function () {
           }
         }
       };
-      </script>
+      <\/script>
 
       ${_actionFooter(['📊 Trade journal', '🔀 Promote to P2', '⏰ Phase alert', '⛔ Quarantine', '↓ Export'])}`;
   }
@@ -40449,6 +41179,12 @@ function setupV3Workspaces(arr, data) {
       wsPanel.classList.remove('ep-active');
       EliteAB.deactivate();
       QuantSupabase.render(wsPanel, data);
+      return;
+    }
+    if (ws.custom === 'quantPipelines') {
+      wsPanel.classList.remove('ep-active');
+      EliteAB.deactivate();
+      QuantPipelines.render(wsPanel, data);
       return;
     }
     if (ws.custom === 'quantPerformance') {

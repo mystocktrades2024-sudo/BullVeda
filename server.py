@@ -5244,6 +5244,184 @@ async def health():
 
 
 # =========================================================================
+# /api/performance — live performance metrics computed from signal_log.json
+# Re-reads the trade journal on demand and re-computes WR/PF/Wilson LB.
+# 15s cache to absorb burst polls. Used by Performance tab 60s poller.
+# =========================================================================
+_PERF_LIVE_CACHE: dict = {"ts": 0.0, "mtime": 0.0, "payload": None}
+_PERF_LIVE_TTL_S = 15.0
+
+
+def _compute_perf_live() -> dict:
+    """Re-read signal_log.json and recompute performance — never cached past TTL."""
+    from collections import Counter
+    SIGNAL_LOG = BASE_DIR / "data" / "signal_log.json"
+    out = {
+        "total": 0, "open": 0, "closed": 0, "wins": 0, "losses": 0,
+        "breakeven": 0, "win_rate": None, "wilson_lb_pct": None,
+        "pf": None, "avg_r": None, "expectancy": None,
+        "avg_win_pct": None, "avg_loss_pct": None, "rr_avg": None,
+        "mae_avg": None, "mfe_avg": None,
+        "by_strategy": {}, "by_score_bucket": {},
+        "by_verdict": {}, "today_count": 0,
+        "recent_closed": [], "fresh_today": [],
+        "computed_at": None,
+        "source_mtime": None,
+    }
+    if not SIGNAL_LOG.exists():
+        return out
+    try:
+        sl = json.loads(SIGNAL_LOG.read_text())
+    except Exception:
+        return out
+    if not isinstance(sl, list) or not sl:
+        return out
+
+    out["source_mtime"] = SIGNAL_LOG.stat().st_mtime
+    out["computed_at"] = _time.time()
+    out["total"] = len(sl)
+    out["open"] = sum(1 for r in sl if r.get("status") == "OPEN")
+
+    # Closed = status CLOSED · win/loss by `result` field (canonical schema)
+    done = [r for r in sl if r.get("status") == "CLOSED"]
+    out["closed"] = len(done)
+    win_results  = ("WIN_EXPIRED", "TARGET_HIT", "WIN")
+    loss_results = ("LOSS_EXPIRED", "STOPPED", "LOSS")
+    out["wins"]   = sum(1 for r in done if r.get("result") in win_results)
+    out["losses"] = sum(1 for r in done if r.get("result") in loss_results)
+    out["breakeven"] = out["closed"] - out["wins"] - out["losses"]
+    decided = out["wins"] + out["losses"]
+    if decided > 0:
+        out["win_rate"] = round(out["wins"] / decided * 100, 1)
+        try:
+            from math import sqrt
+            z, n = 1.96, decided
+            p = out["wins"] / n
+            denom = 1 + z * z / n
+            center = p + z * z / (2 * n)
+            margin = z * sqrt((p * (1 - p) + z * z / (4 * n)) / n)
+            out["wilson_lb_pct"] = round(max(0.0, (center - margin) / denom) * 100, 1)
+        except Exception:
+            pass
+
+    # PF, avg R, MAE/MFE — use actual_pnl_pct (canonical) for realized P&L%
+    win_pcts  = [r.get("actual_pnl_pct") for r in done
+                 if r.get("result") in win_results
+                 and isinstance(r.get("actual_pnl_pct"), (int, float))]
+    loss_pcts = [r.get("actual_pnl_pct") for r in done
+                 if r.get("result") in loss_results
+                 and isinstance(r.get("actual_pnl_pct"), (int, float))]
+    if win_pcts:
+        out["avg_win_pct"] = round(sum(win_pcts) / len(win_pcts), 2)
+    if loss_pcts:
+        out["avg_loss_pct"] = round(sum(loss_pcts) / len(loss_pcts), 2)
+    if win_pcts and loss_pcts:
+        gross_w = sum(win_pcts)
+        gross_l = abs(sum(loss_pcts))
+        out["pf"] = round(gross_w / gross_l, 2) if gross_l > 0 else None
+    rr_vals = [r.get("rr") for r in sl if isinstance(r.get("rr"), (int, float))]
+    if rr_vals:
+        out["rr_avg"] = round(sum(rr_vals) / len(rr_vals), 2)
+    mae_vals = [r.get("mae_pct") for r in sl if isinstance(r.get("mae_pct"), (int, float))]
+    if mae_vals:
+        out["mae_avg"] = round(sum(mae_vals) / len(mae_vals), 2)
+    mfe_vals = [r.get("mfe_pct") for r in sl if isinstance(r.get("mfe_pct"), (int, float))]
+    if mfe_vals:
+        out["mfe_avg"] = round(sum(mfe_vals) / len(mfe_vals), 2)
+    # Avg R = mean(realized% / risk%) where risk = entry - stop
+    r_units = []
+    for r in done:
+        pnl = r.get("actual_pnl_pct")
+        ep, sp = r.get("entry_price"), r.get("stop")
+        if all(isinstance(x, (int, float)) for x in (pnl, ep, sp)) and ep and sp and ep > 0:
+            risk_pct = abs((ep - sp) / ep * 100)
+            if risk_pct > 0.0001:
+                r_units.append(pnl / risk_pct)
+    if r_units:
+        out["avg_r"] = round(sum(r_units) / len(r_units), 2)
+        out["expectancy"] = out["avg_r"]
+
+    # By strategy / score bucket / verdict
+    by_strat = Counter()
+    by_bucket = Counter()
+    by_verdict = Counter()
+    for r in sl:
+        s = r.get("strategy")
+        if s:
+            by_strat[s] += 1
+        sc = r.get("score") or 0
+        bucket = "90+" if sc >= 90 else "80-89" if sc >= 80 else "70-79" if sc >= 70 else "60-69" if sc >= 60 else "<60"
+        by_bucket[bucket] += 1
+        v = r.get("verdict") or r.get("decision_label")
+        if v:
+            by_verdict[v] += 1
+    out["by_strategy"] = dict(by_strat.most_common())
+    out["by_score_bucket"] = dict(by_bucket)
+    out["by_verdict"] = dict(by_verdict)
+
+    # Today's count
+    from datetime import datetime as _dt
+    today_str = _dt.now().strftime("%Y-%m-%d")
+    out["today_count"] = sum(1 for r in sl if str(r.get("date") or "").startswith(today_str))
+
+    # Recent 25 closed trades for the live journal
+    closed_sorted = sorted(
+        done,
+        key=lambda r: r.get("exit_date") or r.get("date") or "",
+        reverse=True,
+    )[:25]
+    out["recent_closed"] = [
+        {
+            "ticker": r.get("ticker"),
+            "strategy": r.get("strategy"),
+            "date": r.get("date"),
+            "exit_date": r.get("exit_date"),
+            "score": r.get("score"),
+            "rr": r.get("rr"),
+            "realized_pct": r.get("actual_pnl_pct"),
+            "outcome": r.get("result"),
+            "exit_reason": r.get("exit_reason"),
+            "hold_days": r.get("hold_days"),
+        }
+        for r in closed_sorted
+    ]
+
+    # Today's fresh signals (open or fresh entries)
+    today_rows = [r for r in sl if str(r.get("date") or "").startswith(today_str)]
+    out["fresh_today"] = [
+        {
+            "ticker": r.get("ticker"),
+            "strategy": r.get("strategy"),
+            "score": r.get("score"),
+            "verdict": r.get("verdict") or r.get("decision_label"),
+            "rr": r.get("rr"),
+            "entry_price": r.get("entry_price"),
+            "stop": r.get("stop"),
+            "target1": r.get("target1"),
+            "status": r.get("status"),
+        }
+        for r in today_rows[:50]
+    ]
+
+    return out
+
+
+@app.get("/api/performance")
+async def performance_live():
+    """Live performance from signal_log.json. 15s cache, file-mtime invalidates."""
+    SIGNAL_LOG = BASE_DIR / "data" / "signal_log.json"
+    mtime = SIGNAL_LOG.stat().st_mtime if SIGNAL_LOG.exists() else 0.0
+    now = _time.time()
+    if (_PERF_LIVE_CACHE["payload"] is not None
+            and _PERF_LIVE_CACHE["mtime"] == mtime
+            and (now - _PERF_LIVE_CACHE["ts"]) < _PERF_LIVE_TTL_S):
+        return JSONResponse(_PERF_LIVE_CACHE["payload"])
+    payload = _compute_perf_live()
+    _PERF_LIVE_CACHE.update({"ts": now, "mtime": mtime, "payload": payload})
+    return JSONResponse(payload)
+
+
+# =========================================================================
 # /api/supabase/status — powers the Supabase tab in kairos.html
 # =========================================================================
 _SUPABASE_STATUS_CACHE: dict = {"ts": 0.0, "payload": None}
@@ -5461,6 +5639,176 @@ async def supabase_status():
     }
     _SUPABASE_STATUS_CACHE["ts"] = now
     _SUPABASE_STATUS_CACHE["payload"] = payload
+    return payload
+
+
+# =========================================================================
+# /api/pipelines/mapping — powers the Pipelines tab in kairos.html
+# Catalog of every source → target data pipeline (json/jsonl/sqlite/api/computed)
+# =========================================================================
+_PIPELINES_CATALOG = [
+    # ── JSON canonical → Supabase (migrate_sqlite_to_supabase.py) ──
+    {"name": "Portfolio singleton",           "source_type": "json",     "source_path": "data/portfolio_state.json",                       "target_table": "portfolio_state",            "script": "migrate_sqlite_to_supabase.py", "schedule": "com.swingtrade.supabase-sync (30min)", "status": "working", "cluster": "portfolio"},
+    {"name": "Open positions",                "source_type": "json",     "source_path": "data/portfolio_state.json#positions",             "target_table": "positions",                  "script": "migrate_sqlite_to_supabase.py", "schedule": "com.swingtrade.supabase-sync (30min)", "status": "working", "cluster": "portfolio"},
+    {"name": "Closed trades",                 "source_type": "json",     "source_path": "data/portfolio_state.json#closed_trades",         "target_table": "closed_trades",              "script": "migrate_sqlite_to_supabase.py", "schedule": "com.swingtrade.supabase-sync (30min)", "status": "working", "cluster": "portfolio"},
+    {"name": "Equity audit",                  "source_type": "json",     "source_path": "data/portfolio_state.json#equity_audit",          "target_table": "equity_audit",               "script": "migrate_sqlite_to_supabase.py", "schedule": "com.swingtrade.supabase-sync (30min)", "status": "working", "cluster": "portfolio"},
+    {"name": "Equity curve",                  "source_type": "json",     "source_path": "data/portfolio_state.json#equity_curve",          "target_table": "equity_curve",               "script": "migrate_sqlite_to_supabase.py", "schedule": "com.swingtrade.supabase-sync (30min)", "status": "working", "cluster": "portfolio"},
+    {"name": "Monthly PnL",                   "source_type": "json",     "source_path": "data/portfolio_state.json#monthly_pnl",           "target_table": "monthly_pnl",                "script": "migrate_sqlite_to_supabase.py", "schedule": "com.swingtrade.supabase-sync (30min)", "status": "working", "cluster": "portfolio"},
+    {"name": "Signal log (live journal)",     "source_type": "json",     "source_path": "data/signal_log.json",                            "target_table": "signal_log",                 "script": "migrate_sqlite_to_supabase.py", "schedule": "com.swingtrade.supabase-sync (30min)", "status": "working", "cluster": "journal"},
+    {"name": "Custom tickers",                "source_type": "json",     "source_path": "data/custom_tracked.json",                        "target_table": "custom_tickers",             "script": "migrate_sqlite_to_supabase.py", "schedule": "com.swingtrade.supabase-sync (30min)", "status": "working", "cluster": "watchlist"},
+    {"name": "Alert dedup log",               "source_type": "json",     "source_path": "data/alert_sent_log.json",                        "target_table": "alert_log",                  "script": "migrate_sqlite_to_supabase.py", "schedule": "com.swingtrade.supabase-sync (30min)", "status": "working", "cluster": "watchlist"},
+    {"name": "Scan health snapshots",         "source_type": "json",     "source_path": "data/scan_health.json#history",                   "target_table": "scan_health",                "script": "migrate_sqlite_to_supabase.py", "schedule": "com.swingtrade.supabase-sync (30min)", "status": "working", "cluster": "health"},
+    {"name": "Gap events",                    "source_type": "json",     "source_path": "data/gap_events.json",                            "target_table": "gap_events",                 "script": "migrate_sqlite_to_supabase.py", "schedule": "com.swingtrade.supabase-sync (30min)", "status": "working", "cluster": "health"},
+    {"name": "Paper trading config",          "source_type": "json",     "source_path": "data/paper_trading_start.json",                   "target_table": "paper_trading_config",       "script": "migrate_sqlite_to_supabase.py", "schedule": "com.swingtrade.supabase-sync (30min)", "status": "working", "cluster": "system"},
+
+    # ── JSONL orphan → Supabase (fold_orphan_data.py) ──
+    {"name": "Decision log (current + archive)", "source_type": "jsonl", "source_path": "data/decision_log*.jsonl",                        "target_table": "decision_log",               "script": "fold_orphan_data.py",          "schedule": "manual (one-shot fold)",               "status": "working", "cluster": "journal"},
+    {"name": "Exit signals",                  "source_type": "jsonl",    "source_path": "data/exit_signals.jsonl",                         "target_table": "exit_signals",               "script": "fold_orphan_data.py",          "schedule": "manual (one-shot fold)",               "status": "working", "cluster": "journal"},
+    {"name": "Earnings outcomes (actuals)",   "source_type": "jsonl",    "source_path": "data/earnings_outcomes.jsonl",                    "target_table": "earnings_outcomes",          "script": "fold_orphan_data.py",          "schedule": "manual (one-shot fold)",               "status": "working", "cluster": "earnings"},
+    {"name": "Earnings predictions",          "source_type": "jsonl",    "source_path": "data/earnings_prediction_log.jsonl",              "target_table": "earnings_outcomes",          "script": "fold_orphan_data.py",          "schedule": "manual (one-shot fold)",               "status": "working", "cluster": "earnings"},
+    {"name": "IV rank history",               "source_type": "jsonl",    "source_path": "data/iv_history.jsonl",                           "target_table": "iv_history",                 "script": "fold_orphan_data.py",          "schedule": "manual (one-shot fold)",               "status": "working", "cluster": "derivatives"},
+    {"name": "Alpaca orders",                 "source_type": "jsonl",    "source_path": "cache/orders.jsonl",                              "target_table": "orders",                     "script": "fold_orphan_data.py",          "schedule": "manual (one-shot fold)",               "status": "working", "cluster": "execution"},
+    {"name": "EOD actions",                   "source_type": "jsonl",    "source_path": "cache/eod_actions.jsonl",                         "target_table": "eod_actions",                "script": "fold_orphan_data.py",          "schedule": "manual (one-shot fold)",               "status": "working", "cluster": "execution"},
+    {"name": "Rolling Sharpe (JSONL fold)",   "source_type": "jsonl",    "source_path": "data/rolling_sharpe_history.jsonl",               "target_table": "rolling_sharpe_history",     "script": "fold_orphan_data.py",          "schedule": "manual (one-shot fold)",               "status": "working", "cluster": "risk"},
+    {"name": "User audit log",                "source_type": "jsonl",    "source_path": "data/audit*.jsonl",                               "target_table": "user_audit_log",             "script": "fold_orphan_data.py",          "schedule": "manual (one-shot fold)",               "status": "working", "cluster": "ops"},
+
+    # ── SQLite aux → Supabase ──
+    {"name": "Fundamentals snapshot cache",   "source_type": "sqlite",   "source_path": "data/fundamentals.db.fundamentals",               "target_table": "fundamentals_pit",           "script": "fold_orphan_data.py",          "schedule": "manual (one-shot fold)",               "status": "working", "cluster": "fundamentals"},
+    {"name": "Ticker enrichment cache",       "source_type": "sqlite",   "source_path": "data/enrichment_cache.db.enrichment",             "target_table": "ticker_enrichment_snapshot", "script": "fold_orphan_data.py",          "schedule": "manual (one-shot fold)",               "status": "working", "cluster": "enrichment"},
+
+    # ── cache → scan cluster (backfill_scan_cluster.py) ──
+    {"name": "Scan runs",                     "source_type": "json",     "source_path": "cache/picks_history.json#runs",                   "target_table": "runs",                       "script": "backfill_scan_cluster.py",     "schedule": "manual",                               "status": "working", "cluster": "scan"},
+    {"name": "Scan picks per run",            "source_type": "json",     "source_path": "cache/picks_history.json#runs[].picks",           "target_table": "picks",                      "script": "backfill_scan_cluster.py",     "schedule": "manual",                               "status": "working", "cluster": "scan"},
+    {"name": "Scan trades (sim)",             "source_type": "json",     "source_path": "cache/picks_history.json#trades",                 "target_table": "trades",                     "script": "backfill_scan_cluster.py",     "schedule": "manual",                               "status": "working", "cluster": "scan"},
+
+    # ── Computed (snapshot scripts) ──
+    {"name": "Daily rolling Sharpe",          "source_type": "computed", "source_path": "closed_trades + picks_history",                   "target_table": "rolling_sharpe_history",     "script": "snapshot_rolling_sharpe.py",   "schedule": "com.swingtrade.snapshot-sharpe (Mon-Fri 4:35pm PT)", "status": "working", "cluster": "risk"},
+    {"name": "Daily portfolio risk",          "source_type": "computed", "source_path": "data/portfolio_state.json",                       "target_table": "portfolio_risk_history",     "script": "snapshot_portfolio_risk.py",   "schedule": "com.swingtrade.snapshot-risk (Mon-Fri 4:40pm PT)",   "status": "working", "cluster": "risk"},
+    {"name": "Daily per-position risk",       "source_type": "computed", "source_path": "data/portfolio_state.json#positions",             "target_table": "position_risk_snapshot",     "script": "snapshot_portfolio_risk.py",   "schedule": "com.swingtrade.snapshot-risk (Mon-Fri 4:40pm PT)",   "status": "working", "cluster": "risk"},
+
+    # ── External APIs (scrapers) ──
+    {"name": "S&P 500 / NDX membership",      "source_type": "api",      "source_path": "wikipedia.org/wiki/List_of_S&P_500_companies",    "target_table": "index_membership_pit",       "script": "scrapers/index_membership_wikipedia.py", "schedule": "manual / weekly",            "status": "working", "cluster": "reference"},
+    {"name": "Macro indicators",              "source_type": "api",      "source_path": "EODHD /eod/{VIX,SPY,QQQ,IWM,HYG,UUP,GLD,US10Y,US2Y}", "target_table": "macro_indicators",         "script": "scrapers/macro_indicators_eodhd.py",     "schedule": "manual / daily",             "status": "working", "cluster": "regime"},
+    {"name": "Corporate actions",             "source_type": "api",      "source_path": "EODHD /splits + /div per ticker",                  "target_table": "corporate_actions",          "script": "scrapers/corporate_actions_eodhd.py",    "schedule": "manual / weekly",            "status": "working", "cluster": "reference"},
+    {"name": "FOMC meeting calendar",         "source_type": "api",      "source_path": "federalreserve.gov FOMC HTML",                     "target_table": "fomc_calendar",              "script": "scrapers/fomc_ical.py",                  "schedule": "manual / monthly",           "status": "broken",  "cluster": "calendar", "issue": "HTML regex doesn't match Fed page structure"},
+    {"name": "Congressional trades",          "source_type": "api",      "source_path": "senate-stock-watcher S3 bucket",                   "target_table": "congressional_trades",       "script": "scrapers/congress_trades.py",            "schedule": "manual / weekly",            "status": "broken",  "cluster": "smart_money", "issue": "S3 endpoint returning 403 — needs efts.sec.gov alt"},
+
+    # ── Empty (schema ready, writer not wired) ──
+    {"name": "Backtest runs",                 "source_type": "future",   "source_path": "backtest.py / walk_forward_v2.py",                "target_table": "backtest_runs",              "script": "(needs sb_client write hook)",          "schedule": "ad-hoc",                    "status": "empty",   "cluster": "backtest"},
+    {"name": "Backtest trades (per-trade)",   "source_type": "future",   "source_path": "backtest.py simulated trade log",                  "target_table": "backtest_trades",            "script": "(needs sb_client write hook)",          "schedule": "ad-hoc",                    "status": "empty",   "cluster": "backtest"},
+    {"name": "Walk-forward folds",            "source_type": "future",   "source_path": "walk_forward_v2.py per-fold params",               "target_table": "walk_forward_folds",         "script": "(needs sb_client write hook)",          "schedule": "ad-hoc",                    "status": "empty",   "cluster": "backtest"},
+    {"name": "ML Edge predictions",           "source_type": "future",   "source_path": "ml_edge/predict.py 3-headed model",                "target_table": "model_predictions",          "script": "(needs sb_client write hook)",          "schedule": "daily scan",                "status": "empty",   "cluster": "ml"},
+    {"name": "Model calibration",             "source_type": "future",   "source_path": "computed: model_predictions vs realized",         "target_table": "model_calibration",          "script": "(future calibration script)",           "schedule": "weekly",                    "status": "empty",   "cluster": "ml"},
+    {"name": "Stop level history",            "source_type": "future",   "source_path": "executor.py stop adjustments",                    "target_table": "stop_levels_history",        "script": "(needs sb_client write hook)",          "schedule": "real-time",                 "status": "empty",   "cluster": "execution"},
+    {"name": "Realized slippage",             "source_type": "future",   "source_path": "executor.py order fills vs expected",             "target_table": "slippage_realized",          "script": "(needs sb_client write hook)",          "schedule": "real-time",                 "status": "empty",   "cluster": "execution"},
+    {"name": "VaR breaches",                  "source_type": "future",   "source_path": "computed: portfolio_risk vs realized loss",       "target_table": "var_breaches",               "script": "(future risk script)",                  "schedule": "daily",                     "status": "empty",   "cluster": "risk"},
+    {"name": "Signal filter decisions (A2)",  "source_type": "future",   "source_path": "signal_filter.py per-decision audit",              "target_table": "signal_filter_decisions",    "script": "(needs sb_client write hook)",          "schedule": "daily scan",                "status": "empty",   "cluster": "journal"},
+    {"name": "Strategy PnL attribution",      "source_type": "future",   "source_path": "computed: closed_trades by sleeve",                "target_table": "strategy_pnl_attribution",   "script": "(future attribution script)",           "schedule": "daily",                     "status": "empty",   "cluster": "attribution"},
+    {"name": "Wilson CI snapshot",            "source_type": "future",   "source_path": "computed: signal_log per (setup×regime×band)",     "target_table": "wilson_ci_snapshot",         "script": "(future calibration script)",           "schedule": "daily",                     "status": "empty",   "cluster": "calibration"},
+    {"name": "Kelly size history",            "source_type": "future",   "source_path": "analysis.kelly_position_size() inputs",            "target_table": "kelly_size_history",         "script": "(needs sb_client write hook)",          "schedule": "per-entry",                 "status": "empty",   "cluster": "risk"},
+    {"name": "SMC hit rates",                 "source_type": "future",   "source_path": "data/smc_hit_rates.json",                          "target_table": "smc_hit_rates",              "script": "(needs fold extractor)",                "schedule": "daily",                     "status": "empty",   "cluster": "calibration"},
+    {"name": "Regime transitions",            "source_type": "future",   "source_path": "cache/regime_hysteresis.json transitions",         "target_table": "regime_transitions",         "script": "(needs fold extractor)",                "schedule": "daily scan",                "status": "empty",   "cluster": "regime"},
+    {"name": "Watch triggers",                "source_type": "future",   "source_path": "watch alert engine output",                        "target_table": "watch_triggers",             "script": "(needs sb_client write hook)",          "schedule": "real-time",                 "status": "empty",   "cluster": "watchlist"},
+
+    # ── Future scrapers (free data, not yet implemented) ──
+    {"name": "Insider transactions (Form 4)", "source_type": "future",   "source_path": "efts.sec.gov EDGAR full-text search",              "target_table": "insider_transactions",       "script": "scrapers/insider_form4.py (TODO)",      "schedule": "daily",                     "status": "future",  "cluster": "smart_money"},
+    {"name": "13F institutional holdings",    "source_type": "future",   "source_path": "efts.sec.gov 13F filings",                         "target_table": "institutional_holdings",     "script": "scrapers/institutional_13f.py (TODO)",  "schedule": "quarterly",                 "status": "future",  "cluster": "smart_money"},
+    {"name": "Short interest history",        "source_type": "future",   "source_path": "FINRA short interest bi-monthly file",             "target_table": "short_interest_history",     "script": "scrapers/short_interest_finra.py (TODO)","schedule": "bi-monthly",                "status": "future",  "cluster": "smart_money"},
+    {"name": "Cold OHLCV storage",            "source_type": "future",   "source_path": "EODHD /eod/{TICKER} for all universe",             "target_table": "ohlcv_daily",                "script": "scrapers/ohlcv_cold_storage.py (TODO)", "schedule": "nightly batch",             "status": "future",  "cluster": "market_data"},
+    {"name": "Tickers master",                "source_type": "future",   "source_path": "EODHD /exchange-symbol-list/US",                   "target_table": "tickers_master",             "script": "scrapers/tickers_master_eodhd.py (TODO)", "schedule": "weekly",                  "status": "future",  "cluster": "reference"},
+    {"name": "News events",                   "source_type": "future",   "source_path": "EODHD /news per ticker",                           "target_table": "news_events",                "script": "(needs scrape + sb_client write)",      "schedule": "hourly",                    "status": "future",  "cluster": "sentiment"},
+    {"name": "IPO calendar",                  "source_type": "future",   "source_path": "NASDAQ ipo-calendar JSON feed",                    "target_table": "ipo_calendar",               "script": "scrapers/ipo_nasdaq.py (TODO)",         "schedule": "daily",                     "status": "future",  "cluster": "calendar"},
+    {"name": "Splits calendar",               "source_type": "future",   "source_path": "EODHD upcoming-splits / NASDAQ calendar",          "target_table": "splits_calendar",            "script": "scrapers/splits_calendar.py (TODO)",    "schedule": "daily",                     "status": "future",  "cluster": "calendar"},
+    {"name": "Economic calendar",             "source_type": "future",   "source_path": "BLS / BEA RSS / fred.stlouisfed.org",              "target_table": "economic_calendar",          "script": "scrapers/economic_calendar.py (TODO)",  "schedule": "daily",                     "status": "future",  "cluster": "calendar"},
+    {"name": "FDA PDUFA calendar",            "source_type": "future",   "source_path": "fda.gov + biotech disclosure scrape",              "target_table": "fda_calendar",               "script": "scrapers/fda_calendar.py (TODO)",       "schedule": "weekly",                    "status": "future",  "cluster": "calendar"},
+    {"name": "Earnings calendar PIT",         "source_type": "future",   "source_path": "Zacks vintage-tracked",                            "target_table": "earnings_calendar_pit",      "script": "(needs vintage tracker layer)",         "schedule": "daily",                     "status": "future",  "cluster": "calendar"},
+
+    # ── Ops telemetry (needs app-side instrumentation) ──
+    {"name": "EODHD quota usage",             "source_type": "future",   "source_path": "data_fetcher.py rate-limit counters",              "target_table": "eodhd_quota_usage",          "script": "(needs middleware hook)",               "schedule": "real-time",                 "status": "future",  "cluster": "ops"},
+    {"name": "Launchd run telemetry",         "source_type": "future",   "source_path": "wrapper around launchd plists",                    "target_table": "launchd_runs",               "script": "(needs wrapper script)",                "schedule": "every plist firing",        "status": "future",  "cluster": "ops"},
+    {"name": "Data quality checks",           "source_type": "future",   "source_path": "scripts/dq_checks.py (TODO)",                       "target_table": "data_quality_checks",        "script": "scripts/dq_checks.py (TODO)",           "schedule": "daily",                     "status": "future",  "cluster": "ops"},
+    {"name": "Config history",                "source_type": "future",   "source_path": "git diff on config/*.json",                         "target_table": "config_history",             "script": "(needs git hook)",                      "schedule": "on commit",                 "status": "future",  "cluster": "ops"},
+    {"name": "Feature flag changes",          "source_type": "future",   "source_path": "config/config.json _enabled flips",                "target_table": "feature_flag_changes",       "script": "(needs git hook)",                      "schedule": "on commit",                 "status": "future",  "cluster": "ops"},
+    {"name": "API latency metrics",           "source_type": "future",   "source_path": "FastAPI middleware",                                "target_table": "api_latency_metrics",        "script": "(needs middleware)",                    "schedule": "real-time",                 "status": "future",  "cluster": "ops"},
+
+    # ── Self-referencing ──
+    {"name": "Supabase sync ledger",          "source_type": "computed", "source_path": "migrate_sqlite_to_supabase.py per-run state",      "target_table": "supabase_sync_state",        "script": "migrate_sqlite_to_supabase.py", "schedule": "every sync run",            "status": "working", "cluster": "system"},
+    {"name": "Schema version key",            "source_type": "computed", "source_path": "migrations/*.sql INSERT INTO meta",                "target_table": "meta",                       "script": "scripts/apply_supabase_migrations.py", "schedule": "manual",             "status": "working", "cluster": "system"},
+]
+
+_PIPELINES_CACHE: dict = {"ts": 0.0, "payload": None}
+_PIPELINES_TTL_S = 30.0
+
+
+@app.get("/api/pipelines/mapping")
+async def pipelines_mapping():
+    """Return the source→target catalog merged with live state (row counts,
+    last sync timestamps from the ledger). Drives the Pipelines tab.
+    """
+    import time as _t
+    now = _t.time()
+    if _PIPELINES_CACHE["payload"] is not None and (now - _PIPELINES_CACHE["ts"]) < _PIPELINES_TTL_S:
+        return _PIPELINES_CACHE["payload"]
+
+    from pathlib import Path as _P
+    import json as _j
+    root = _P(__file__).parent
+    state_path = root / "data" / "supabase_sync_state.json"
+    ledger: dict = {}
+    if state_path.exists():
+        try:
+            ledger = (_j.loads(state_path.read_text()).get("tables") or {})
+        except Exception:
+            pass
+
+    # Pull remote row counts (one HEAD query per unique target table)
+    remote_counts: dict[str, int | None] = {}
+    try:
+        from supabase_client import sb_client
+        sb = sb_client()
+        if sb is not None:
+            target_tables = {p["target_table"] for p in _PIPELINES_CATALOG}
+            for t in target_tables:
+                try:
+                    resp = sb.table(t).select("*", count="exact", head=True).execute()
+                    remote_counts[t] = getattr(resp, "count", None)
+                except Exception:
+                    remote_counts[t] = None
+    except Exception:
+        pass
+
+    out = []
+    for p in _PIPELINES_CATALOG:
+        led = ledger.get(p["target_table"]) or {}
+        out.append({
+            **p,
+            "remote_rows": remote_counts.get(p["target_table"]),
+            "last_sync_at": led.get("last_sync_at"),
+            "last_pushed": led.get("pushed"),
+            "last_failed": led.get("failed"),
+            "last_error": led.get("error"),
+        })
+
+    n_working = sum(1 for p in out if p["status"] == "working")
+    n_empty   = sum(1 for p in out if p["status"] == "empty")
+    n_future  = sum(1 for p in out if p["status"] == "future")
+    n_broken  = sum(1 for p in out if p["status"] == "broken")
+    n_populated = sum(1 for p in out if (p.get("remote_rows") or 0) > 0)
+
+    payload = {
+        "overall": {
+            "total_pipelines": len(out),
+            "working": n_working,
+            "empty": n_empty,
+            "future": n_future,
+            "broken": n_broken,
+            "populated": n_populated,
+        },
+        "pipelines": out,
+        "generated_at": now,
+    }
+    _PIPELINES_CACHE["ts"] = now
+    _PIPELINES_CACHE["payload"] = payload
     return payload
 
 

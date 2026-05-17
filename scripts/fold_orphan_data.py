@@ -63,26 +63,70 @@ def _iter_jsonl(path: Path):
 # =========================================================================
 
 def x_decision_log():
-    """data/decision_log.jsonl → decision_log (92K rows)"""
-    src = DATA / "decision_log.jsonl"
+    """data/decision_log*.jsonl → decision_log (current + archived months)"""
+    for fname in ["decision_log.jsonl", "decision_log.202604.jsonl"]:
+        src = DATA / fname
+        for j in _iter_jsonl(src):
+            date = j.get("date") or j.get("ts")
+            if not date:
+                continue
+            ticker = j.get("ticker") or "?"
+            yield {
+                "observed_at": date,
+                "decided_at": date,
+                "ticker": ticker,
+                "verdict": j.get("verdict"),
+                "score": j.get("score"),
+                "rs_rank": j.get("rs_rank"),
+                "setup_family": j.get("setup_family") or j.get("setup_type"),
+                "regime": j.get("regime4") or j.get("regime"),
+                "gates_passed": json.dumps(j.get("gates_passed", [])) if j.get("gates_passed") else None,
+                "gates_failed": json.dumps(j.get("gates_hit", [])) if j.get("gates_hit") else None,
+                "reject_reason": j.get("reason"),
+                "sync_key": _h(date, ticker, j.get("verdict"), j.get("score"), j.get("setup_type")),
+                "raw_json": json.dumps(j),
+            }
+
+
+def x_user_audit_log():
+    """data/audit_log.jsonl + data/audit.jsonl → user_audit_log"""
+    for fname in ["audit_log.jsonl", "audit.jsonl"]:
+        src = DATA / fname
+        for j in _iter_jsonl(src):
+            ts = j.get("ts") or j.get("timestamp")
+            if not ts:
+                continue
+            yield {
+                "happened_at": ts,
+                "user_id": j.get("user") or j.get("user_id"),
+                "action": j.get("action") or j.get("type"),
+                "target_type": j.get("endpoint") or j.get("target_type"),
+                "target_id": j.get("target_id"),
+                "ip_address": j.get("ip"),
+                "user_agent": j.get("user_agent"),
+                "payload": json.dumps(j.get("payload")) if j.get("payload") else json.dumps(j),
+                "sync_key": _h(ts, j.get("user"), j.get("action") or j.get("type")),
+            }
+
+
+def x_earnings_prediction_log():
+    """data/earnings_prediction_log.jsonl → earnings_outcomes (prediction rows)"""
+    src = DATA / "earnings_prediction_log.jsonl"
     for j in _iter_jsonl(src):
-        date = j.get("date") or j.get("ts")
-        if not date:
+        rpt = j.get("report_date")
+        ticker = j.get("ticker")
+        if not (rpt and ticker):
             continue
-        ticker = j.get("ticker") or "?"
         yield {
-            "observed_at": date,
-            "decided_at": date,
+            "report_date": rpt,
             "ticker": ticker,
-            "verdict": j.get("verdict"),
-            "score": j.get("score"),
-            "rs_rank": j.get("rs_rank"),
-            "setup_family": j.get("setup_family") or j.get("setup_type"),
-            "regime": j.get("regime4") or j.get("regime"),
-            "gates_passed": json.dumps(j.get("gates_passed", [])) if j.get("gates_passed") else None,
-            "gates_failed": json.dumps(j.get("gates_hit", [])) if j.get("gates_hit") else None,
-            "reject_reason": j.get("reason"),
-            "sync_key": _h(date, ticker, j.get("verdict"), j.get("score"), j.get("setup_type")),
+            "predicted_tier": j.get("predicted_tier"),
+            "predicted_prob": j.get("beat_score"),
+            "eps_estimate": None,
+            "eps_actual": j.get("realized_surprise_pct"),
+            "eps_surprise_pct": j.get("realized_surprise_pct"),
+            "beat": (j.get("realized_outcome") == "BEAT") if j.get("realized_outcome") else None,
+            "sync_key": _h(rpt, ticker, "pred", j.get("logged_at")),
             "raw_json": json.dumps(j),
         }
 
@@ -321,15 +365,17 @@ def x_ticker_enrichment():
 # Source registry
 # =========================================================================
 SOURCES = {
-    "decision_log":               (x_decision_log,        "decision_log",               ["observed_at", "sync_key"]),
-    "exit_signals":               (x_exit_signals,        "exit_signals",               ["sync_key"]),
-    "earnings_outcomes":          (x_earnings_outcomes,   "earnings_outcomes",          ["sync_key"]),
-    "iv_history":                 (x_iv_history,          "iv_history",                 ["sync_key"]),
-    "orders":                     (x_orders,              "orders",                     ["sync_key"]),
-    "eod_actions":                (x_eod_actions,         "eod_actions",                ["sync_key"]),
-    "rolling_sharpe":             (x_rolling_sharpe,      "rolling_sharpe_history",     ["sync_key"]),
-    "fundamentals_pit":           (x_fundamentals_pit,    "fundamentals_pit",           ["sync_key"]),
-    "ticker_enrichment_snapshot": (x_ticker_enrichment,   "ticker_enrichment_snapshot", ["sync_key"]),
+    "decision_log":               (x_decision_log,            "decision_log",               ["observed_at", "sync_key"]),
+    "user_audit_log":             (x_user_audit_log,          "user_audit_log",             ["sync_key"]),
+    "earnings_prediction_log":    (x_earnings_prediction_log, "earnings_outcomes",          ["sync_key"]),
+    "exit_signals":               (x_exit_signals,            "exit_signals",               ["sync_key"]),
+    "earnings_outcomes":          (x_earnings_outcomes,       "earnings_outcomes",          ["sync_key"]),
+    "iv_history":                 (x_iv_history,              "iv_history",                 ["sync_key"]),
+    "orders":                     (x_orders,                  "orders",                     ["sync_key"]),
+    "eod_actions":                (x_eod_actions,             "eod_actions",                ["sync_key"]),
+    "rolling_sharpe":             (x_rolling_sharpe,          "rolling_sharpe_history",     ["sync_key"]),
+    "fundamentals_pit":           (x_fundamentals_pit,        "fundamentals_pit",           ["sync_key"]),
+    "ticker_enrichment_snapshot": (x_ticker_enrichment,       "ticker_enrichment_snapshot", ["sync_key"]),
 }
 
 
