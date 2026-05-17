@@ -1493,7 +1493,7 @@ def render_html(results: list[AuditResult], overall_score: int) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SwingTrade · Audit 360 — {ts}</title>
 <style>
-{{KAIROS_CSS}}
+{KAIROS_CSS}
 </style>
 </head>
 <body>

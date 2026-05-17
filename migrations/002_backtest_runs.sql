@@ -88,6 +88,6 @@ CREATE TABLE IF NOT EXISTS walk_forward_folds (
 );
 CREATE INDEX IF NOT EXISTS idx_wff_run ON walk_forward_folds(run_id);
 
--- Mark schema 002
-INSERT INTO meta (key, value) VALUES ('schema_version', '002')
+-- Mark schema 002 (meta.value is JSONB)
+INSERT INTO meta (key, value) VALUES ('schema_version', to_jsonb('002'::text))
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

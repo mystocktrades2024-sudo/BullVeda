@@ -55,6 +55,6 @@ FROM signal_filter_decisions
 WHERE decided_at >= NOW() - INTERVAL '30 days'
 GROUP BY setup_type, regime, score_band;
 
--- Mark schema 003
-INSERT INTO meta (key, value) VALUES ('schema_version', '003')
+-- Mark schema 003 (meta.value is JSONB)
+INSERT INTO meta (key, value) VALUES ('schema_version', to_jsonb('003'::text))
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
