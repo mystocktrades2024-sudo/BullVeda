@@ -20,12 +20,18 @@ Pre-reqs:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sqlite3
 import sys
 import time
 from pathlib import Path
+
+
+def _hash_key(*parts) -> str:
+    """Deterministic sha1 of row content → used as sync_key for idempotent upsert."""
+    return hashlib.sha1("|".join(str(p) for p in parts).encode()).hexdigest()[:32]
 
 # Force-enable mode 1 for the migration regardless of .env setting
 os.environ["SUPABASE_MODE"] = "1"
@@ -103,6 +109,7 @@ def _src_positions(conn) -> list[dict]:
                 "allocation_pct": p.get("allocation_pct"),
                 "notes": p.get("notes"),
                 "entry_regime": p.get("entry_regime"),
+                "sync_key": _hash_key("pos", p.get("ticker"), p.get("entry_date"), p.get("entry_price"), p.get("shares")),
                 "raw_json": p,
             })
         return rows
@@ -131,6 +138,7 @@ def _src_closed_trades(conn) -> list[dict]:
                 "mae": t.get("mae"),
                 "mfe": t.get("mfe"),
                 "regime": t.get("regime"),
+                "sync_key": _hash_key("ct", t.get("ticker"), t.get("entry_date"), t.get("exit_date")),
                 "raw_json": t,
             })
     return rows
@@ -141,7 +149,11 @@ def _src_equity_curve(conn) -> list[dict]:
     rows: list[dict] = []
     if j and isinstance(j, dict):
         for ec in (j.get("equity_curve") or []):
-            rows.append({"date": ec.get("date"), "equity": ec.get("equity")})
+            rows.append({
+                "date": ec.get("date"),
+                "equity": ec.get("equity"),
+                "sync_key": _hash_key("ec", ec.get("date")),
+            })
     return rows
 
 
@@ -158,6 +170,7 @@ def _src_equity_audit(conn) -> list[dict]:
                 "new_cash": a.get("new_cash"),
                 "invested": a.get("invested"),
                 "reason": a.get("reason"),
+                "sync_key": _hash_key("ea", a.get("timestamp"), a.get("reason")),
             })
     return rows
 
@@ -199,6 +212,15 @@ def _src_signal_log(conn) -> list[dict]:
                 "mfe_pct": s.get("mfe_pct"),
                 "outcome_5d": s.get("outcome_5d"),
                 "outcome_10d": s.get("outcome_10d"),
+                "setup_family": s.get("setup_family") or s.get("strategy"),
+                "regime_at_entry": s.get("regime_at_entry") or s.get("regime4") or s.get("regime"),
+                "entry_quality": s.get("entry_quality"),
+                "catalyst_tier": s.get("catalyst_tier"),
+                "conviction_tier": s.get("conviction_tier"),
+                "sector": s.get("sector"),
+                "industry": s.get("industry"),
+                "r_multiple": s.get("r_multiple"),
+                "sync_key": _hash_key("sl", s.get("date"), s.get("ticker"), s.get("strategy"), s.get("entry_price")),
                 "raw_json": s,
             })
     return rows
@@ -207,7 +229,12 @@ def _src_signal_log(conn) -> list[dict]:
 def _src_runs(conn) -> list[dict]:
     try:
         rows = conn.execute("SELECT run_date, run_time, regime, num_picks, evaluated FROM runs").fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["sync_key"] = _hash_key("run", d.get("run_date"), d.get("run_time"))
+            out.append(d)
+        return out
     except sqlite3.OperationalError:
         return []
 
@@ -224,6 +251,7 @@ def _src_picks(conn) -> list[dict]:
                     d["raw_json"] = json.loads(d["raw_json"])
                 except Exception:
                     pass
+            d["sync_key"] = _hash_key("pick", d.get("run_id"), d.get("ticker"), d.get("first_seen_time"))
             out.append(d)
         return out
     except sqlite3.OperationalError:
@@ -242,6 +270,7 @@ def _src_trades(conn) -> list[dict]:
                     d["raw_json"] = json.loads(d["raw_json"])
                 except Exception:
                     pass
+            d["sync_key"] = _hash_key("trade", d.get("run_id"), d.get("ticker"), d.get("entry_date"))
             out.append(d)
         return out
     except sqlite3.OperationalError:
@@ -259,6 +288,7 @@ def _src_watch_triggers(conn) -> list[dict]:
                     d["raw_json"] = json.loads(d["raw_json"])
                 except Exception:
                     pass
+            d["sync_key"] = _hash_key("wt", d.get("ticker"), d.get("triggered_at"))
             out.append(d)
         return out
     except sqlite3.OperationalError:
@@ -294,6 +324,7 @@ def _src_scan_health(conn) -> list[dict]:
                 "total": h.get("total"),
                 "killed": h.get("killed"),
                 "pct": h.get("pct"),
+                "sync_key": _hash_key("sh", h.get("ts")),
                 "raw_json": h,
             })
     return rows
@@ -314,6 +345,7 @@ def _src_gap_events(conn) -> list[dict]:
                 "severity": g.get("severity"),
                 "action": g.get("action"),
                 "new_stop": g.get("new_stop"),
+                "sync_key": _hash_key("gap", g.get("ts"), g.get("ticker")),
                 "raw_json": g,
             })
     return rows
@@ -334,23 +366,24 @@ def _src_paper_trading_config(conn) -> list[dict]:
 
 
 # (table_name, source_fn, on_conflict_column_or_None)
+# on_conflict now uses sync_key for insert-only tables → idempotent re-runs (no more dups)
 TABLES = [
     ("meta",                 _src_meta,                 "key"),
     ("portfolio_state",      _src_portfolio_state,      "id"),
-    ("positions",            _src_positions,            None),
-    ("closed_trades",        _src_closed_trades,        None),
-    ("equity_audit",         _src_equity_audit,         None),
+    ("positions",            _src_positions,            "sync_key"),
+    ("closed_trades",        _src_closed_trades,        "sync_key"),
+    ("equity_audit",         _src_equity_audit,         "sync_key"),
     ("monthly_pnl",          _src_monthly_pnl,          "year_month"),
-    ("equity_curve",         _src_equity_curve,         None),
-    ("signal_log",           _src_signal_log,           None),
-    ("runs",                 _src_runs,                 None),
-    ("picks",                _src_picks,                None),
-    ("trades",               _src_trades,               None),
-    ("watch_triggers",       _src_watch_triggers,       None),
+    ("equity_curve",         _src_equity_curve,         "sync_key"),
+    ("signal_log",           _src_signal_log,           "sync_key"),
+    ("runs",                 _src_runs,                 "sync_key"),
+    ("picks",                _src_picks,                "sync_key"),
+    ("trades",               _src_trades,               "sync_key"),
+    ("watch_triggers",       _src_watch_triggers,       "sync_key"),
     ("custom_tickers",       _src_custom_tickers,       "ticker"),
     ("alert_log",            _src_alert_log,            "alert_key"),
-    ("scan_health",          _src_scan_health,          None),
-    ("gap_events",           _src_gap_events,           None),
+    ("scan_health",          _src_scan_health,          "sync_key"),
+    ("gap_events",           _src_gap_events,           "sync_key"),
     ("paper_trading_config", _src_paper_trading_config, "id"),
 ]
 
@@ -361,6 +394,18 @@ def _migrate_one(sb, table: str, payloads: list[dict], on_conflict: str | None,
            "errors": [], "duration_ms": 0}
     if not payloads or dry_run:
         return out
+    # Dedup within source by on_conflict key (last-write-wins) to avoid
+    # PG21000 "ON CONFLICT DO UPDATE cannot affect row a second time".
+    if on_conflict:
+        keys_seen: dict = {}
+        for r in payloads:
+            k = r.get(on_conflict)
+            try:
+                hash(k)
+            except TypeError:
+                k = json.dumps(k, sort_keys=True, default=str)
+            keys_seen[k] = r
+        payloads = list(keys_seen.values())
     t0 = time.time()
     for batch_start in range(0, len(payloads), BATCH_SIZE):
         batch = payloads[batch_start:batch_start + BATCH_SIZE]

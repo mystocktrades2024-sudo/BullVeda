@@ -2537,6 +2537,88 @@ async def trade_engine(
         raise HTTPException(500, f"engine_failure: {type(e).__name__}: {e}")
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# /api/smc_bars · lazy intraday bar loader for SMC sub-tab.
+# In-memory cache with 15-min TTL — keeps EODHD quota usage minimal:
+# user only pays for tickers they actually click into.
+# ──────────────────────────────────────────────────────────────────────────
+_SMC_BARS_CACHE: dict = {}  # {(ticker, interval): (timestamp, payload)}
+_SMC_BARS_TTL_SEC = 15 * 60  # 15 min
+
+@app.get("/api/smc_bars")
+async def smc_bars(
+    t: str,
+    interval: str = "1h",
+    auth: HTTPBasicCredentials = Depends(_check_auth),
+):
+    """Return TV lightweight-charts-shaped OHLC for a ticker × interval.
+
+    interval: "1h" (raw EODHD intraday) or "4h" (resampled from 1h).
+    Cached 15 min in-memory so repeated clicks don't burn API.
+    """
+    if isinstance(auth, Response):
+        return auth
+    import time as _t
+    tk = (t or "").upper().strip()
+    if not tk:
+        raise HTTPException(400, "ticker required")
+    if interval not in ("1h", "4h"):
+        raise HTTPException(400, "interval must be 1h|4h")
+
+    cache_key = (tk, interval)
+    now = _t.time()
+    cached = _SMC_BARS_CACHE.get(cache_key)
+    if cached and (now - cached[0]) < _SMC_BARS_TTL_SEC:
+        return JSONResponse(cached[1])
+
+    try:
+        import eodhd_client as _eod
+        import pandas as _pd
+        rows = _eod.intraday(tk, interval="1h")
+        if not rows:
+            payload = {"ticker": tk, "interval": interval, "bars": [], "source": "eodhd_empty"}
+            _SMC_BARS_CACHE[cache_key] = (now, payload)
+            return JSONResponse(payload)
+        df = _pd.DataFrame(rows)
+        ts_col = "datetime" if "datetime" in df.columns else "timestamp"
+        if ts_col not in df.columns:
+            raise HTTPException(502, "eodhd response missing datetime/timestamp column")
+        df[ts_col] = _pd.to_datetime(df[ts_col])
+        df = df.set_index(ts_col).sort_index()
+        df = df.rename(columns={"open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"})
+        df = df[[c for c in ["Open","High","Low","Close","Volume"] if c in df.columns]]
+
+        if interval == "4h":
+            df = df.resample("4h").agg({
+                "Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"
+            }).dropna()
+            tail_n = 120
+        else:
+            tail_n = 200
+
+        df = df.tail(tail_n)
+        bars = []
+        for ix, row in df.iterrows():
+            try:
+                bars.append({
+                    "time": int(ix.timestamp()),
+                    "open":  round(float(row["Open"]),  2),
+                    "high":  round(float(row["High"]),  2),
+                    "low":   round(float(row["Low"]),   2),
+                    "close": round(float(row["Close"]), 2),
+                    "volume": int(row["Volume"]) if "Volume" in row.index else 0,
+                })
+            except Exception:
+                continue
+        payload = {"ticker": tk, "interval": interval, "bars": bars, "source": "eodhd_live"}
+        _SMC_BARS_CACHE[cache_key] = (now, payload)
+        return JSONResponse(payload)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"smc_bars_failure: {type(e).__name__}: {e}")
+
+
 # -- Position tracker (actual trades) --
 @app.post("/api/positions/open")
 async def positions_open(req: Request, _: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
@@ -5213,12 +5295,40 @@ async def supabase_status():
         sb = None
         mode = 0
 
-    # All tables we sync
+    # All tables we sync — grouped by cluster for the dashboard
     sync_tables = [
+        # Core trade journal + portfolio
         "meta", "portfolio_state", "positions", "closed_trades", "equity_audit",
         "monthly_pnl", "equity_curve", "signal_log", "runs", "picks", "trades",
         "watch_triggers", "custom_tickers", "alert_log", "scan_health",
         "gap_events", "paper_trading_config",
+        # Signal-filter audit (003)
+        "signal_filter_decisions",
+        # Backtest (002)
+        "backtest_runs", "backtest_trades", "walk_forward_folds",
+        # Orphan-store folds (006)
+        "decision_log", "exit_signals", "earnings_outcomes", "iv_history",
+        "orders", "eod_actions", "regime_history", "regime_transitions",
+        "rolling_sharpe_history", "smc_hit_rates", "fundamentals_pit",
+        "ticker_enrichment_snapshot",
+        # Analytical / risk (007)
+        "position_risk_snapshot", "portfolio_risk_history", "kelly_size_history",
+        "wilson_ci_snapshot", "model_predictions", "model_calibration",
+        "strategy_pnl_attribution", "stop_levels_history", "slippage_realized",
+        "var_breaches",
+        # Free-data catalysts (008)
+        "tickers_master", "index_membership_pit", "corporate_actions",
+        "ohlcv_daily", "macro_indicators", "insider_transactions",
+        "institutional_holdings", "short_interest_history", "news_events",
+        "congressional_trades", "fomc_calendar", "economic_calendar",
+        "ipo_calendar", "splits_calendar", "fda_calendar",
+        "earnings_calendar_pit",
+        # Ops telemetry (009)
+        "eodhd_quota_usage", "launchd_runs", "data_quality_checks",
+        "config_history", "feature_flag_changes", "api_latency_metrics",
+        "user_audit_log",
+        # Sync ledger (004)
+        "supabase_sync_state",
     ]
 
     # Local (SQLite) counts
@@ -5248,6 +5358,49 @@ async def supabase_status():
     else:
         remote_counts = {t: None for t in sync_tables}
 
+    # Cluster mapping for grouped display
+    _cluster_of = {
+        "meta": "system", "portfolio_state": "portfolio", "positions": "portfolio",
+        "closed_trades": "portfolio", "equity_audit": "portfolio",
+        "monthly_pnl": "portfolio", "equity_curve": "portfolio",
+        "signal_log": "journal", "runs": "scan", "picks": "scan", "trades": "scan",
+        "watch_triggers": "watchlist", "custom_tickers": "watchlist",
+        "alert_log": "watchlist",
+        "scan_health": "health", "gap_events": "health",
+        "paper_trading_config": "system",
+        "signal_filter_decisions": "journal",
+        "backtest_runs": "backtest", "backtest_trades": "backtest",
+        "walk_forward_folds": "backtest",
+        "decision_log": "journal", "exit_signals": "journal",
+        "earnings_outcomes": "earnings", "iv_history": "derivatives",
+        "orders": "execution", "eod_actions": "execution",
+        "regime_history": "regime", "regime_transitions": "regime",
+        "rolling_sharpe_history": "risk", "smc_hit_rates": "calibration",
+        "fundamentals_pit": "fundamentals",
+        "ticker_enrichment_snapshot": "enrichment",
+        "position_risk_snapshot": "risk", "portfolio_risk_history": "risk",
+        "kelly_size_history": "risk", "wilson_ci_snapshot": "calibration",
+        "model_predictions": "ml", "model_calibration": "ml",
+        "strategy_pnl_attribution": "attribution",
+        "stop_levels_history": "execution",
+        "slippage_realized": "execution", "var_breaches": "risk",
+        "tickers_master": "reference", "index_membership_pit": "reference",
+        "corporate_actions": "reference", "ohlcv_daily": "market_data",
+        "macro_indicators": "regime",
+        "insider_transactions": "smart_money",
+        "institutional_holdings": "smart_money",
+        "short_interest_history": "smart_money",
+        "news_events": "sentiment", "congressional_trades": "smart_money",
+        "fomc_calendar": "calendar", "economic_calendar": "calendar",
+        "ipo_calendar": "calendar", "splits_calendar": "calendar",
+        "fda_calendar": "calendar", "earnings_calendar_pit": "calendar",
+        "eodhd_quota_usage": "ops", "launchd_runs": "ops",
+        "data_quality_checks": "ops", "config_history": "ops",
+        "feature_flag_changes": "ops", "api_latency_metrics": "ops",
+        "user_audit_log": "ops",
+        "supabase_sync_state": "system",
+    }
+
     # Per-table assembly
     tables = []
     for t in sync_tables:
@@ -5264,8 +5417,12 @@ async def supabase_status():
             status = "drift_ahead"   # Supabase has extras (unlikely)
         if led.get("failed", 0) > 0:
             status = "error"
+        # If we have remote rows but no local source, surface as "remote_only"
+        if lr == 0 and (rr or 0) > 0:
+            status = "remote_only"
         tables.append({
             "name": t,
+            "cluster": _cluster_of.get(t, "other"),
             "local_rows": lr,
             "remote_rows": rr,
             "drift": (None if rr is None else (lr - rr)),

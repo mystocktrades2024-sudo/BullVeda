@@ -3099,21 +3099,51 @@ function setTheme(mode) {
 })();
 
 // ════════════════════════════════════════════════════════════
-// 2026-05-17 · TF selector click handler · visual + status note
-// (1H/4H/Weekly data not yet wired in scan pipeline — show advisory)
+// 2026-05-17 · TF selector click handler · lazy-fetches 1H/4H bars
+// via /api/smc_bars when not pre-populated in window.__SMC_DATA__.
+// Bars are cached on window.__SMC_DATA__ so repeated clicks reuse.
 // ════════════════════════════════════════════════════════════
+window.__SMC_BARS_INFLIGHT__ = window.__SMC_BARS_INFLIGHT__ || {};
+
+function _smcRemountChart() {
+  if (typeof window.smcCpShow === 'function') {
+    var activeTab = document.querySelector('.smc-cp-tab.on');
+    var t = activeTab ? activeTab.dataset.cp : 'price';
+    window.smcCpShow(t);
+  }
+}
+
+function _smcLazyFetchBars(tf) {
+  // tf in {'1H','4H'} only — DAILY/WEEKLY use bundled bars
+  var ticker = (window.__SMC_T__ && window.__SMC_T__.ticker) ? String(window.__SMC_T__.ticker).toUpperCase() : null;
+  if (!ticker) return;
+  var sd = window.__SMC_DATA__ = window.__SMC_DATA__ || {};
+  var field = tf === '1H' ? 'bars_1h' : 'bars_4h';
+  if (sd[field] && sd[field].length) return; // already have bars
+  var key = ticker + ':' + tf;
+  if (window.__SMC_BARS_INFLIGHT__[key]) return; // already fetching
+  window.__SMC_BARS_INFLIGHT__[key] = true;
+  var url = '/api/smc_bars?t=' + encodeURIComponent(ticker) + '&interval=' + (tf === '1H' ? '1h' : '4h');
+  fetch(url, { credentials: 'include' })
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(j) {
+      delete window.__SMC_BARS_INFLIGHT__[key];
+      if (!j || !j.bars || !j.bars.length) return;
+      sd[field] = j.bars;
+      // If user is still on this TF, re-mount the chart with real bars
+      if (window.__SMC_TF__ === tf) _smcRemountChart();
+    })
+    .catch(function() { delete window.__SMC_BARS_INFLIGHT__[key]; });
+}
+
 window.smcSetTF = function(tf) {
   document.querySelectorAll('.smc-tf-btn').forEach(function(b) {
     if (b.classList.contains('disabled') || b.disabled) return;
     b.classList.toggle('on', b.dataset.tf === tf);
   });
   try { window.__SMC_TF__ = tf; } catch (_) {}
-  // Re-mount the indicator chart for the new TF
-  if (typeof window.smcCpShow === 'function') {
-    var activeTab = document.querySelector('.smc-cp-tab.on');
-    var t = activeTab ? activeTab.dataset.cp : 'price';
-    window.smcCpShow(t);
-  }
+  if (tf === '1H' || tf === '4H') _smcLazyFetchBars(tf);
+  _smcRemountChart();
 };
 </script>
 

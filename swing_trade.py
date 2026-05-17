@@ -2010,7 +2010,7 @@ def run_daily_scan(force_fresh: bool = False):
     _1h_data: dict = {}
     try:
         import eodhd_client as _eod_4h
-        _intraday_tickers = list(qualified.keys())[:250]  # covers all short_term + watch_list interactive tickers
+        _intraday_tickers = list(qualified.keys())[:100]  # top-N pre-fetch; rest served lazily via /api/smc_bars
         log.info(f"  Fetching 1H + 4H bars (EODHD intraday) for {len(_intraday_tickers)} qualified tickers...")
 
         def _fetch_intraday(t):
