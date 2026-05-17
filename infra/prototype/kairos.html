@@ -38971,7 +38971,148 @@ body.light .qp6-root details.qp6-drawer > summary:hover { background: rgba(0,0,0
         <div class="dd-sub">${_qp6Esc(d[3] || '')}</div>
       </div>`).join('');
     }
+    // Method-specific chart with overlays
+    _qp6MountDrillChart(root, ctx, idx);
   };
+
+  // Render a 90-day price line + method-specific overlay levels into #qp6-drill-chart.
+  // Pulls OHLC from ctx.pd.wyckoff (range_high/low) + fi.swing_hi/lo as references.
+  function _qp6MountDrillChart(root, ctx, idx) {
+    const host = root.querySelector('#qp6-drill-chart');
+    if (!host) return;
+    const pd = ctx.pd || {};
+    const spot = ctx.spot || 0;
+    const wy = pd.wyckoff || {};
+    const fi = pd.fibonacci || {}; const fiLev = fi.levels || {};
+    const ic = pd.ichimoku || {};
+    const vp = pd.volume_profile || {};
+    const tl = pd.trendlines || {};
+    const sr = pd.sr_levels || {};
+    const ew = pd.elliott_wave || {};
+    const ticket = pd.execution_ticket || {};
+
+    // Build a synthetic 90-bar price walk anchored to spot + range from wyckoff
+    // (real OHLC isn't in pattern_data; this is a visual reference, not a price chart)
+    const rngHi = +wy.range_high || (fi.swing_hi || spot * 1.10);
+    const rngLo = +wy.range_low || (fi.swing_lo || spot * 0.90);
+    const N = 90;
+    let seed = (ctx.t && ctx.t.ticker || 'X').split('').reduce((s, c) => (s * 31 + c.charCodeAt(0)) % 100000, 0);
+    const rng = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+    const ohlc = [];
+    const peakIdx = 48, troughIdx = 70;
+    const peak = rngHi * 0.99;
+    const trough = rngLo + (peak - rngLo) * 0.45;
+    for (let i = 0; i < N; i++) {
+      let target;
+      if (i < peakIdx) target = rngLo + (peak - rngLo) * (i / peakIdx);
+      else if (i < troughIdx) target = peak - (peak - trough) * ((i - peakIdx) / (troughIdx - peakIdx));
+      else target = trough + (spot - trough) * ((i - troughIdx) / (N - 1 - troughIdx));
+      const noise = (rng() - 0.5) * (spot * 0.012);
+      ohlc.push(target + noise);
+    }
+    ohlc[N - 1] = spot;
+    let pMin = Math.min(...ohlc), pMax = Math.max(...ohlc);
+
+    // Pull method-specific overlay levels
+    const overlays = {
+      0: () => [  // Wyckoff
+        { px: rngHi, label: `Range hi $${rngHi.toFixed(2)}`, cls: 'bull' },
+        { px: rngLo, label: `Range lo $${rngLo.toFixed(2)}`, cls: 'bear' },
+      ],
+      1: () => [  // Fibonacci
+        fiLev.ext_1618 ? { px: +fiLev.ext_1618, label: `1.618 $${(+fiLev.ext_1618).toFixed(2)}`, cls: 'bull' } : null,
+        fiLev.ext_1272 ? { px: +fiLev.ext_1272, label: `1.272 $${(+fiLev.ext_1272).toFixed(2)} T1`, cls: 'bull' } : null,
+        fi.swing_hi   ? { px: +fi.swing_hi,    label: `1.000 $${(+fi.swing_hi).toFixed(2)}`, cls: 'bull' } : null,
+        fiLev.r_0618  ? { px: +fiLev.r_0618,   label: `0.618 $${(+fiLev.r_0618).toFixed(2)}`, cls: 'mid' } : null,
+        fi.swing_lo   ? { px: +fi.swing_lo,    label: `0.000 $${(+fi.swing_lo).toFixed(2)}`, cls: 'bear' } : null,
+      ].filter(Boolean),
+      2: () => [  // Ichimoku
+        ic.tenkan ? { px: +ic.tenkan, label: `Tenkan $${(+ic.tenkan).toFixed(2)}`, cls: 'mid' } : null,
+        ic.kijun  ? { px: +ic.kijun,  label: `Kijun $${(+ic.kijun).toFixed(2)}`, cls: 'mid' } : null,
+      ].filter(Boolean),
+      3: () => [  // Trendlines
+        tl.upper && tl.upper.now ? { px: +tl.upper.now, label: `Upper TL $${(+tl.upper.now).toFixed(2)}`, cls: 'bear' } : null,
+        tl.lower && tl.lower.now ? { px: +tl.lower.now, label: `Lower TL $${(+tl.lower.now).toFixed(2)}`, cls: 'bull' } : null,
+      ].filter(Boolean),
+      4: () => [  // Volume Profile
+        vp.vah ? { px: +vp.vah, label: `VAH $${(+vp.vah).toFixed(2)}`, cls: 'mid' } : null,
+        vp.poc ? { px: +vp.poc, label: `POC $${(+vp.poc).toFixed(2)}`, cls: 'mid' } : null,
+        vp.val ? { px: +vp.val, label: `VAL $${(+vp.val).toFixed(2)}`, cls: 'mid' } : null,
+      ].filter(Boolean),
+      5: () => {  // S/R clusters
+        const lvls = sr.levels || [];
+        return lvls.slice(0, 4).map(lv => ({
+          px: +lv.price,
+          label: `${lv.kind || 'Lvl'} $${(+lv.price).toFixed(2)}${lv.touches ? ` · ${lv.touches}T` : ''}`,
+          cls: lv.kind === 'support' ? 'bull' : 'bear',
+        }));
+      },
+      6: () => {  // Classical
+        const cl = pd.classical || {};
+        const out = [];
+        if (cl.target) out.push({ px: +cl.target, label: `Target $${(+cl.target).toFixed(2)}`, cls: 'bull' });
+        if (cl.breakout_level) out.push({ px: +cl.breakout_level, label: `Breakout $${(+cl.breakout_level).toFixed(2)}`, cls: 'mid' });
+        return out;
+      },
+      7: () => {  // Elliott Wave — render wave markers if available
+        if (ew.invalidation_level) {
+          return [
+            { px: +ew.invalidation_level, label: `Invalidate $${(+ew.invalidation_level).toFixed(2)}`, cls: 'bear' },
+            ew.w5_target_low ? { px: +ew.w5_target_low, label: `W5 lo $${(+ew.w5_target_low).toFixed(2)}`, cls: 'mid' } : null,
+            ew.w5_target_high ? { px: +ew.w5_target_high, label: `W5 hi $${(+ew.w5_target_high).toFixed(2)}`, cls: 'mid' } : null,
+          ].filter(Boolean);
+        }
+        return [];
+      },
+    };
+    let lines = (overlays[idx] || (() => []))();
+    // Always add target/stop reference lines from ticket
+    if (ticket.t1) lines.push({ px: +ticket.t1, label: `T1 $${(+ticket.t1).toFixed(2)}`, cls: 'bull', dash: true });
+    if (ticket.stop) lines.push({ px: +ticket.stop, label: `Stop $${(+ticket.stop).toFixed(2)}`, cls: 'bear', dash: true });
+
+    lines.forEach(l => { if (l.px < pMin) pMin = l.px; if (l.px > pMax) pMax = l.px; });
+    pMin = pMin * 0.98; pMax = pMax * 1.02;
+
+    const W = 800, H = 320, PAD_L = 48, PAD_R = 14, PAD_T = 14, PAD_B = 24;
+    const toX = (i) => PAD_L + i / (N - 1) * (W - PAD_L - PAD_R);
+    const toY = (p) => PAD_T + (pMax - p) / Math.max(pMax - pMin, 1e-9) * (H - PAD_T - PAD_B);
+    const pathStr = ohlc.map((p, i) => `${i === 0 ? 'M' : 'L'} ${toX(i).toFixed(1)},${toY(p).toFixed(1)}`).join(' ');
+    const areaStr = pathStr + ` L ${toX(N-1).toFixed(1)},${(H-PAD_B).toFixed(1)} L ${toX(0).toFixed(1)},${(H-PAD_B).toFixed(1)} Z`;
+    const lineSVG = lines.map(l => {
+      const y = toY(l.px);
+      if (y < PAD_T || y > H - PAD_B) return '';
+      const color = l.cls === 'bull' ? '#5be57c' : l.cls === 'bear' ? '#ff6b5b' : '#d49060';
+      const dasharray = l.dash ? 'stroke-dasharray="4,4"' : '';
+      return `<line x1="${PAD_L}" x2="${W - PAD_R}" y1="${y}" y2="${y}" stroke="${color}" stroke-width="1.3" ${dasharray}/>
+        <text x="${W - PAD_R - 4}" y="${(y - 4).toFixed(1)}" text-anchor="end" font-family="JetBrains Mono" font-size="10" fill="${color}">${_qp6Esc(l.label)}</text>`;
+    }).join('');
+    const spotX = toX(N - 1), spotY = toY(spot);
+
+    // Y-axis labels
+    const yLabels = [pMax, (pMax + pMin) / 2, pMin].map(p =>
+      `<text x="${PAD_L - 6}" y="${(toY(p) + 3).toFixed(1)}" text-anchor="end" font-family="JetBrains Mono" font-size="9" fill="#5d6469">$${p.toFixed(0)}</text>`
+    ).join('');
+
+    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
+      <defs>
+        <linearGradient id="qp6DcArea" x1="0%" x2="0%" y1="0%" y2="100%">
+          <stop offset="0%" stop-color="#5be57c" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#5be57c" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <g stroke="#1a2127" stroke-width="1" stroke-dasharray="2,3">
+        <line x1="${PAD_L}" x2="${W-PAD_R}" y1="${toY(pMax).toFixed(0)}" y2="${toY(pMax).toFixed(0)}"/>
+        <line x1="${PAD_L}" x2="${W-PAD_R}" y1="${toY((pMax+pMin)/2).toFixed(0)}" y2="${toY((pMax+pMin)/2).toFixed(0)}"/>
+        <line x1="${PAD_L}" x2="${W-PAD_R}" y1="${toY(pMin).toFixed(0)}" y2="${toY(pMin).toFixed(0)}"/>
+      </g>
+      ${yLabels}
+      <path d="${areaStr}" fill="url(#qp6DcArea)" stroke="none"/>
+      <path d="${pathStr}" fill="none" stroke="#5be57c" stroke-width="2"/>
+      ${lineSVG}
+      <circle cx="${spotX}" cy="${spotY}" r="5" fill="#d49060" stroke="#fff" stroke-width="1.5"/>
+      <text x="${spotX}" y="${(spotY - 10).toFixed(1)}" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#d49060">NOW $${spot.toFixed(2)}</text>
+    </svg>`;
+  }
 
   function _drillData(pd, idx) {
     const data = {
@@ -39058,6 +39199,13 @@ body.light .qp6-root details.qp6-drawer > summary:hover { background: rgba(0,0,0
     if (t && t.ticker) window._currentTicker = (t.ticker || '').toUpperCase();
     // Click handler is attached via onclick="window.qp6ShowDrill(this, idx)" inline
     // Initial drill already rendered in shell (idx=0 = Wyckoff)
+    // Mount the drilldown chart for Wyckoff (default) on first load
+    const tk = (t && t.ticker || '').toUpperCase();
+    const ctx = window._qp6Ctx && window._qp6Ctx[tk];
+    if (ctx) {
+      const root = document.querySelector('.qp6-root');
+      if (root) _qp6MountDrillChart(root, ctx, 0);
+    }
   }
 
   // Synthetic OHLC retained for potential future use; not currently needed

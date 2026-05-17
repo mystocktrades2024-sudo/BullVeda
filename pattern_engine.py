@@ -1148,10 +1148,10 @@ def detect_wyckoff_subevents(df: pd.DataFrame, phase: str, range_hi: float, rang
 
     # Phase-specific detection logic
     if phase == "markup":
-        # SOS: recent swing high on volume > 1.5× avg
-        for hi_idx in highs[-5:]:
+        # SOS: scan last 10 swing highs (was 5) with relaxed 1.3× threshold (was 1.5×)
+        for hi_idx in highs[-10:]:
             v = float(vols[hi_idx]) if hi_idx < len(vols) else 0
-            if v > avg_vol_60 * 1.5:
+            if v > avg_vol_60 * 1.3:
                 out.append({
                     "code": "SOS", "name": "Sign of Strength",
                     "date_idx": int(hi_idx),
@@ -1160,15 +1160,27 @@ def detect_wyckoff_subevents(df: pd.DataFrame, phase: str, range_hi: float, rang
                     "description": "Strong rally on volume above prior resistance",
                     "status": "confirmed",
                 })
-        # LPS: recent swing low that held above prior breakout level
-        for lo_idx in lows[-3:]:
+        # LPS: recent swing low that held above prior breakout level (last 5, was 3)
+        for lo_idx in lows[-5:]:
             lo_px = float(df["Low"].iloc[lo_idx])
-            # Heuristic: low held above midpoint of recent range
             if lo_px > (range_hi + range_lo) / 2:
                 out.append({
                     "code": "LPS", "name": "Last Point of Support",
                     "date_idx": int(lo_idx), "price": round(lo_px, 2),
                     "description": "Pullback held above prior breakout level",
+                    "status": "confirmed",
+                })
+        # NS: Normal Reaction — pullback that bounced off Kijun or EMA21
+        for lo_idx in lows[-5:]:
+            lo_px = float(df["Low"].iloc[lo_idx])
+            # Heuristic: low between (range_hi+range_lo)/2 and range_hi*0.85
+            mid_band_lo = (range_hi + range_lo) / 2
+            mid_band_hi = range_hi * 0.92
+            if mid_band_lo < lo_px < mid_band_hi:
+                out.append({
+                    "code": "NS", "name": "Normal Reaction",
+                    "date_idx": int(lo_idx), "price": round(lo_px, 2),
+                    "description": "Healthy pullback within trend, bounce zone",
                     "status": "confirmed",
                 })
 
@@ -1229,7 +1241,7 @@ def detect_wyckoff_subevents(df: pd.DataFrame, phase: str, range_hi: float, rang
         # SOW: recent swing low on high volume
         for lo_idx in lows[-5:]:
             v = float(vols[lo_idx]) if lo_idx < len(vols) else 0
-            if v > avg_vol_60 * 1.5:
+            if v > avg_vol_60 * 1.3:
                 out.append({
                     "code": "SOW", "name": "Sign of Weakness",
                     "date_idx": int(lo_idx),

@@ -7,11 +7,116 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import uvicorn, os, json, secrets
 from pathlib import Path
+# Load .env so SLACK_WEBHOOK_URL, EODHD keys, etc. are in os.environ
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 from typing import Optional
 
 BASE_DIR = Path(__file__).parent
 app = FastAPI(title="SwingTrade", version="2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# ─── API latency middleware (v6 ops telemetry · → api_latency_metrics) ───
+# Buckets requests into 1-minute windows per (endpoint, method).
+# Flushes to Supabase every 60s in a background task to avoid per-request blocking.
+import time as _time_mod
+import asyncio as _asyncio
+import hashlib as _hash_mod
+from collections import defaultdict as _dd
+_LAT_BUCKETS: dict = _dd(lambda: {"count": 0, "errors": 0, "samples": []})
+_LAT_LAST_FLUSH = _time_mod.time()
+
+
+def _lat_bucket_key(endpoint: str, method: str, minute_ts: int) -> tuple:
+    return (minute_ts, endpoint, method)
+
+
+@app.middleware("http")
+async def _api_latency_middleware(request, call_next):
+    t0 = _time_mod.time()
+    minute_ts = int(t0 // 60) * 60
+    endpoint = request.url.path
+    method = request.method
+    try:
+        response = await call_next(request)
+        status = getattr(response, "status_code", 200)
+    except Exception:
+        status = 500
+        raise
+    finally:
+        elapsed_ms = (_time_mod.time() - t0) * 1000.0
+        # Only track API paths (skip static assets)
+        if endpoint.startswith("/api/") or endpoint.startswith("/v2/"):
+            key = _lat_bucket_key(endpoint, method, minute_ts)
+            b = _LAT_BUCKETS[key]
+            b["count"] += 1
+            if status >= 400:
+                b["errors"] += 1
+            b["samples"].append(elapsed_ms)
+            if len(b["samples"]) > 200:
+                b["samples"] = b["samples"][-200:]
+    return response
+
+
+async def _flush_latency_buckets():
+    """Background task: every 60s flush completed minute-buckets to Supabase."""
+    global _LAT_LAST_FLUSH
+    while True:
+        try:
+            await _asyncio.sleep(60)
+            now = _time_mod.time()
+            current_min = int(now // 60) * 60
+            # Flush buckets whose minute has passed
+            to_flush = []
+            for (mts, ep, method), b in list(_LAT_BUCKETS.items()):
+                if mts < current_min:
+                    samples = sorted(b["samples"])
+                    if not samples:
+                        continue
+                    n = len(samples)
+                    p50 = samples[int(n * 0.50)] if n else 0
+                    p95 = samples[int(n * 0.95)] if n >= 2 else samples[-1]
+                    p99 = samples[int(n * 0.99)] if n >= 5 else samples[-1]
+                    avg = sum(samples) / n
+                    mx = samples[-1]
+                    sync_key = _hash_mod.sha1(f"{mts}|{ep}|{method}".encode()).hexdigest()[:32]
+                    from datetime import datetime, timezone
+                    bucket_iso = datetime.fromtimestamp(mts, tz=timezone.utc).isoformat()
+                    to_flush.append({
+                        "bucket_minute": bucket_iso,
+                        "endpoint": ep[:200],
+                        "method": method,
+                        "request_count": b["count"],
+                        "error_count": b["errors"],
+                        "p50_ms": round(p50, 2),
+                        "p95_ms": round(p95, 2),
+                        "p99_ms": round(p99, 2),
+                        "avg_ms": round(avg, 2),
+                        "max_ms": round(mx, 2),
+                    })
+                    del _LAT_BUCKETS[(mts, ep, method)]
+            if to_flush:
+                try:
+                    from supabase_client import sb_client
+                    sb = sb_client()
+                    if sb is not None:
+                        sb.table("api_latency_metrics").upsert(
+                            to_flush, on_conflict="bucket_minute,endpoint,method"
+                        ).execute()
+                except Exception:
+                    pass  # best-effort, don't crash the bg task
+            _LAT_LAST_FLUSH = now
+        except Exception:
+            # Never let the bg task die
+            await _asyncio.sleep(60)
+
+
+@app.on_event("startup")
+async def _start_latency_flusher():
+    _asyncio.create_task(_flush_latency_buckets())
 
 # PERF-4 (2026-05-09): Brotli compression first, GZip fallback.
 # Brotli typically ~15-20% smaller than gzip on JSON/HTML at similar CPU cost.
@@ -2105,6 +2210,59 @@ async def signal_history_api(ticker: str, limit: int = 10):
         return {"ticker": ticker, "history": [], "consec": 0, "current": None, "error": str(e)}
 
 
+@app.post("/api/alert/push")
+async def alert_push_api(req: Request):
+    """Push an alert to all configured channels (Slack + browser-side notification).
+
+    Body JSON: {ticker, level, title, body, url?, channels?}
+      level: "info" | "warn" | "critical"
+      channels: list — default ["slack"]; supported: "slack"
+      (browser push fires client-side from the originating page; this endpoint
+       only handles server-side channels like Slack/email/SMS)
+    """
+    try:
+        body = await req.json()
+    except Exception:
+        raise HTTPException(400, "invalid_json")
+    ticker = (body.get("ticker") or "").upper().strip()
+    level = (body.get("level") or "info").lower()
+    title = (body.get("title") or "Kairos alert").strip()
+    msg_body = (body.get("body") or "").strip()
+    url = (body.get("url") or "").strip()
+    channels = body.get("channels") or ["slack"]
+
+    icon = {"info": ":bell:", "warn": ":warning:", "critical": ":rotating_light:"}.get(level, ":bell:")
+    full = f"{icon} *[{level.upper()}]* "
+    if ticker: full += f"`{ticker}` "
+    full += f"*{title}*"
+    if msg_body: full += f"\n{msg_body}"
+    if url: full += f"\n<{url}|Open in Kairos>"
+
+    sent = {}
+    if "slack" in channels:
+        try:
+            import os
+            webhook = os.environ.get("SLACK_WEBHOOK_URL", "")
+            if not webhook:
+                # Fallback to config/config.json
+                import json
+                from pathlib import Path
+                cfg_p = Path("config/config.json")
+                if cfg_p.exists():
+                    with open(cfg_p) as f:
+                        cfg = json.load(f)
+                    webhook = (cfg.get("alerts") or {}).get("slack_webhook", "")
+            if webhook:
+                from alerts import _slack_post
+                sent["slack"] = bool(_slack_post(webhook, text=full))
+            else:
+                sent["slack"] = False
+        except Exception as e:
+            sent["slack"] = f"error: {e}"
+
+    return {"status": "sent" if any(sent.values()) else "no_channel", "channels": sent, "echo": full}
+
+
 @app.get("/api/decision-log")
 async def decision_log_all_api(limit: int = 20):
     """Return the most recent N decision log entries across ALL tickers (Home Activity feed)."""
@@ -3863,6 +4021,38 @@ async def whatif(ticker: str = "", entry_date: str = "", entry_price: float = 0,
         raise HTTPException(500, str(e))
 
 # -- Universe --
+@app.get("/api/universe/watchlist")
+async def universe_get():
+    """Return the user's custom watchlist from config.universe.custom_watchlist."""
+    cfg_path = BASE_DIR / "config" / "config.json"
+    try:
+        cfg = json.loads(cfg_path.read_text())
+        wl = cfg.get("universe", {}).get("custom_watchlist", [])
+        return {"watchlist": wl, "count": len(wl)}
+    except Exception as e:
+        return {"watchlist": [], "count": 0, "error": str(e)}
+
+
+@app.post("/api/universe/remove")
+async def universe_remove(req: Request):
+    """Remove a ticker from the custom watchlist."""
+    body = await req.json()
+    ticker = str(body.get("ticker", "")).upper()
+    if not ticker:
+        raise HTTPException(400, "Missing ticker")
+    cfg_path = BASE_DIR / "config" / "config.json"
+    try:
+        cfg = json.loads(cfg_path.read_text())
+        wl = cfg.setdefault("universe", {}).setdefault("custom_watchlist", [])
+        if ticker in wl:
+            wl.remove(ticker)
+            cfg_path.write_text(json.dumps(cfg, indent=2))
+            return {"ok": True, "message": f"{ticker} removed", "watchlist": wl}
+        return {"ok": True, "message": f"{ticker} not in watchlist"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.post("/api/universe/add")
 async def universe_add(req: Request):
     body = await req.json()
@@ -5690,46 +5880,46 @@ _PIPELINES_CATALOG = [
     {"name": "S&P 500 / NDX membership",      "source_type": "api",      "source_path": "wikipedia.org/wiki/List_of_S&P_500_companies",    "target_table": "index_membership_pit",       "script": "scrapers/index_membership_wikipedia.py", "schedule": "manual / weekly",            "status": "working", "cluster": "reference"},
     {"name": "Macro indicators",              "source_type": "api",      "source_path": "EODHD /eod/{VIX,SPY,QQQ,IWM,HYG,UUP,GLD,US10Y,US2Y}", "target_table": "macro_indicators",         "script": "scrapers/macro_indicators_eodhd.py",     "schedule": "manual / daily",             "status": "working", "cluster": "regime"},
     {"name": "Corporate actions",             "source_type": "api",      "source_path": "EODHD /splits + /div per ticker",                  "target_table": "corporate_actions",          "script": "scrapers/corporate_actions_eodhd.py",    "schedule": "manual / weekly",            "status": "working", "cluster": "reference"},
-    {"name": "FOMC meeting calendar",         "source_type": "api",      "source_path": "federalreserve.gov FOMC HTML",                     "target_table": "fomc_calendar",              "script": "scrapers/fomc_ical.py",                  "schedule": "manual / monthly",           "status": "broken",  "cluster": "calendar", "issue": "HTML regex doesn't match Fed page structure"},
-    {"name": "Congressional trades",          "source_type": "api",      "source_path": "senate-stock-watcher S3 bucket",                   "target_table": "congressional_trades",       "script": "scrapers/congress_trades.py",            "schedule": "manual / weekly",            "status": "broken",  "cluster": "smart_money", "issue": "S3 endpoint returning 403 — needs efts.sec.gov alt"},
+    {"name": "FOMC meeting calendar",         "source_type": "api",      "source_path": "federalreserve.gov FOMC HTML",                     "target_table": "fomc_calendar",              "script": "scrapers/fomc_ical.py",                  "schedule": "manual / monthly",           "status": "working", "cluster": "calendar"},
+    {"name": "Congressional trades",          "source_type": "api",      "source_path": "senate-stock-watcher GH + S3",                     "target_table": "congressional_trades",       "script": "scrapers/congress_trades.py",            "schedule": "manual / weekly",            "status": "broken",  "cluster": "smart_money", "issue": "Both jeremiak/sentate-stock-watcher GH and S3 mirror return 403/404 — Senate Stock Watcher project appears dormant; needs efts.sec.gov direct integration"},
 
     # ── Empty (schema ready, writer not wired) ──
-    {"name": "Backtest runs",                 "source_type": "future",   "source_path": "backtest.py / walk_forward_v2.py",                "target_table": "backtest_runs",              "script": "(needs sb_client write hook)",          "schedule": "ad-hoc",                    "status": "empty",   "cluster": "backtest"},
-    {"name": "Backtest trades (per-trade)",   "source_type": "future",   "source_path": "backtest.py simulated trade log",                  "target_table": "backtest_trades",            "script": "(needs sb_client write hook)",          "schedule": "ad-hoc",                    "status": "empty",   "cluster": "backtest"},
-    {"name": "Walk-forward folds",            "source_type": "future",   "source_path": "walk_forward_v2.py per-fold params",               "target_table": "walk_forward_folds",         "script": "(needs sb_client write hook)",          "schedule": "ad-hoc",                    "status": "empty",   "cluster": "backtest"},
-    {"name": "ML Edge predictions",           "source_type": "future",   "source_path": "ml_edge/predict.py 3-headed model",                "target_table": "model_predictions",          "script": "(needs sb_client write hook)",          "schedule": "daily scan",                "status": "empty",   "cluster": "ml"},
-    {"name": "Model calibration",             "source_type": "future",   "source_path": "computed: model_predictions vs realized",         "target_table": "model_calibration",          "script": "(future calibration script)",           "schedule": "weekly",                    "status": "empty",   "cluster": "ml"},
-    {"name": "Stop level history",            "source_type": "future",   "source_path": "executor.py stop adjustments",                    "target_table": "stop_levels_history",        "script": "(needs sb_client write hook)",          "schedule": "real-time",                 "status": "empty",   "cluster": "execution"},
-    {"name": "Realized slippage",             "source_type": "future",   "source_path": "executor.py order fills vs expected",             "target_table": "slippage_realized",          "script": "(needs sb_client write hook)",          "schedule": "real-time",                 "status": "empty",   "cluster": "execution"},
-    {"name": "VaR breaches",                  "source_type": "future",   "source_path": "computed: portfolio_risk vs realized loss",       "target_table": "var_breaches",               "script": "(future risk script)",                  "schedule": "daily",                     "status": "empty",   "cluster": "risk"},
-    {"name": "Signal filter decisions (A2)",  "source_type": "future",   "source_path": "signal_filter.py per-decision audit",              "target_table": "signal_filter_decisions",    "script": "(needs sb_client write hook)",          "schedule": "daily scan",                "status": "empty",   "cluster": "journal"},
-    {"name": "Strategy PnL attribution",      "source_type": "future",   "source_path": "computed: closed_trades by sleeve",                "target_table": "strategy_pnl_attribution",   "script": "(future attribution script)",           "schedule": "daily",                     "status": "empty",   "cluster": "attribution"},
-    {"name": "Wilson CI snapshot",            "source_type": "future",   "source_path": "computed: signal_log per (setup×regime×band)",     "target_table": "wilson_ci_snapshot",         "script": "(future calibration script)",           "schedule": "daily",                     "status": "empty",   "cluster": "calibration"},
-    {"name": "Kelly size history",            "source_type": "future",   "source_path": "analysis.kelly_position_size() inputs",            "target_table": "kelly_size_history",         "script": "(needs sb_client write hook)",          "schedule": "per-entry",                 "status": "empty",   "cluster": "risk"},
-    {"name": "SMC hit rates",                 "source_type": "future",   "source_path": "data/smc_hit_rates.json",                          "target_table": "smc_hit_rates",              "script": "(needs fold extractor)",                "schedule": "daily",                     "status": "empty",   "cluster": "calibration"},
-    {"name": "Regime transitions",            "source_type": "future",   "source_path": "cache/regime_hysteresis.json transitions",         "target_table": "regime_transitions",         "script": "(needs fold extractor)",                "schedule": "daily scan",                "status": "empty",   "cluster": "regime"},
-    {"name": "Watch triggers",                "source_type": "future",   "source_path": "watch alert engine output",                        "target_table": "watch_triggers",             "script": "(needs sb_client write hook)",          "schedule": "real-time",                 "status": "empty",   "cluster": "watchlist"},
+    {"name": "Backtest runs",                 "source_type": "future",   "source_path": "backtest.py / walk_forward_v2.py",                "target_table": "backtest_runs",              "script": "(needs sb_client write hook)",          "schedule": "ad-hoc",                    "status": "empty",   "cluster": "backtest", "issue": "Requires editing backtest.py to call sb_client.upsert() — production engine path, deferred"},
+    {"name": "Backtest trades (per-trade)",   "source_type": "future",   "source_path": "backtest.py simulated trade log",                  "target_table": "backtest_trades",            "script": "(needs sb_client write hook)",          "schedule": "ad-hoc",                    "status": "empty",   "cluster": "backtest", "issue": "Same as backtest_runs — same hook"},
+    {"name": "Walk-forward folds",            "source_type": "future",   "source_path": "walk_forward_v2.py per-fold params",               "target_table": "walk_forward_folds",         "script": "(needs sb_client write hook)",          "schedule": "ad-hoc",                    "status": "empty",   "cluster": "backtest", "issue": "Same as backtest_runs — same hook"},
+    {"name": "ML Edge predictions",           "source_type": "computed", "source_path": "cache/ml_edge_predictions.json",                   "target_table": "model_predictions",          "script": "snapshot_model_calibration.py --seed",  "schedule": "com.swingtrade.snapshot-model-cal (daily 11:30pm PT)", "status": "working", "cluster": "ml"},
+    {"name": "Model calibration",             "source_type": "computed", "source_path": "model_predictions vs realized",                    "target_table": "model_calibration",          "script": "snapshot_model_calibration.py",         "schedule": "com.swingtrade.snapshot-model-cal (daily 11:30pm PT)", "status": "empty",   "cluster": "ml", "issue": "Waiting on realized returns to backfill predictions; first calibration row will appear after 5-20 day horizon"},
+    {"name": "Stop level history",            "source_type": "future",   "source_path": "executor.py stop adjustments",                    "target_table": "stop_levels_history",        "script": "(needs sb_client write hook)",          "schedule": "real-time",                 "status": "empty",   "cluster": "execution", "issue": "Requires editing executor.py — production order path, deferred"},
+    {"name": "Realized slippage",             "source_type": "future",   "source_path": "executor.py order fills vs expected",             "target_table": "slippage_realized",          "script": "(needs sb_client write hook)",          "schedule": "real-time",                 "status": "empty",   "cluster": "execution", "issue": "Requires editing executor.py — production order path, deferred"},
+    {"name": "VaR breaches",                  "source_type": "computed", "source_path": "portfolio_risk_history + equity_curve",            "target_table": "var_breaches",               "script": "snapshot_var_breaches.py",              "schedule": "com.swingtrade.snapshot-var (Mon-Fri 4:55pm PT)",      "status": "empty",   "cluster": "risk", "issue": "Needs at least 2 days of portfolio_risk snapshots; first breach row appears after a real drawdown day"},
+    {"name": "Signal filter decisions (A2)",  "source_type": "future",   "source_path": "signal_filter.py per-decision audit",              "target_table": "signal_filter_decisions",    "script": "(needs sb_client write hook)",          "schedule": "daily scan",                "status": "empty",   "cluster": "journal", "issue": "Requires editing signal_filter.py — production scan path, deferred"},
+    {"name": "Strategy PnL attribution",      "source_type": "computed", "source_path": "picks_history.json#trades by setup_family",        "target_table": "strategy_pnl_attribution",   "script": "snapshot_strategy_attribution.py",      "schedule": "com.swingtrade.snapshot-attribution (Mon-Fri 4:45pm PT)", "status": "working", "cluster": "attribution"},
+    {"name": "Wilson CI snapshot",            "source_type": "computed", "source_path": "picks_history.json#trades per cell",               "target_table": "wilson_ci_snapshot",         "script": "snapshot_wilson_ci.py",                 "schedule": "com.swingtrade.snapshot-wilson (Mon-Fri 4:50pm PT)",   "status": "working", "cluster": "calibration"},
+    {"name": "Kelly size history",            "source_type": "future",   "source_path": "analysis.kelly_position_size() inputs",            "target_table": "kelly_size_history",         "script": "(needs sb_client write hook)",          "schedule": "per-entry",                 "status": "empty",   "cluster": "risk", "issue": "Requires editing analysis.py — production scan path, deferred"},
+    {"name": "SMC hit rates",                 "source_type": "json",     "source_path": "data/smc_hit_rates.json",                          "target_table": "smc_hit_rates",              "script": "fold_orphan_data.py",                   "schedule": "manual",                    "status": "working", "cluster": "calibration"},
+    {"name": "Regime transitions",            "source_type": "json",     "source_path": "cache/regime_history.json",                        "target_table": "regime_transitions",         "script": "fold_orphan_data.py",                   "schedule": "manual",                    "status": "working", "cluster": "regime"},
+    {"name": "Watch triggers",                "source_type": "future",   "source_path": "watch alert engine output",                        "target_table": "watch_triggers",             "script": "(needs sb_client write hook)",          "schedule": "real-time",                 "status": "empty",   "cluster": "watchlist", "issue": "Requires watch alert engine to emit events — engine doesn't currently fire/persist these"},
 
     # ── Future scrapers (free data, not yet implemented) ──
-    {"name": "Insider transactions (Form 4)", "source_type": "future",   "source_path": "efts.sec.gov EDGAR full-text search",              "target_table": "insider_transactions",       "script": "scrapers/insider_form4.py (TODO)",      "schedule": "daily",                     "status": "future",  "cluster": "smart_money"},
-    {"name": "13F institutional holdings",    "source_type": "future",   "source_path": "efts.sec.gov 13F filings",                         "target_table": "institutional_holdings",     "script": "scrapers/institutional_13f.py (TODO)",  "schedule": "quarterly",                 "status": "future",  "cluster": "smart_money"},
-    {"name": "Short interest history",        "source_type": "future",   "source_path": "FINRA short interest bi-monthly file",             "target_table": "short_interest_history",     "script": "scrapers/short_interest_finra.py (TODO)","schedule": "bi-monthly",                "status": "future",  "cluster": "smart_money"},
-    {"name": "Cold OHLCV storage",            "source_type": "future",   "source_path": "EODHD /eod/{TICKER} for all universe",             "target_table": "ohlcv_daily",                "script": "scrapers/ohlcv_cold_storage.py (TODO)", "schedule": "nightly batch",             "status": "future",  "cluster": "market_data"},
-    {"name": "Tickers master",                "source_type": "future",   "source_path": "EODHD /exchange-symbol-list/US",                   "target_table": "tickers_master",             "script": "scrapers/tickers_master_eodhd.py (TODO)", "schedule": "weekly",                  "status": "future",  "cluster": "reference"},
-    {"name": "News events",                   "source_type": "future",   "source_path": "EODHD /news per ticker",                           "target_table": "news_events",                "script": "(needs scrape + sb_client write)",      "schedule": "hourly",                    "status": "future",  "cluster": "sentiment"},
-    {"name": "IPO calendar",                  "source_type": "future",   "source_path": "NASDAQ ipo-calendar JSON feed",                    "target_table": "ipo_calendar",               "script": "scrapers/ipo_nasdaq.py (TODO)",         "schedule": "daily",                     "status": "future",  "cluster": "calendar"},
-    {"name": "Splits calendar",               "source_type": "future",   "source_path": "EODHD upcoming-splits / NASDAQ calendar",          "target_table": "splits_calendar",            "script": "scrapers/splits_calendar.py (TODO)",    "schedule": "daily",                     "status": "future",  "cluster": "calendar"},
-    {"name": "Economic calendar",             "source_type": "future",   "source_path": "BLS / BEA RSS / fred.stlouisfed.org",              "target_table": "economic_calendar",          "script": "scrapers/economic_calendar.py (TODO)",  "schedule": "daily",                     "status": "future",  "cluster": "calendar"},
-    {"name": "FDA PDUFA calendar",            "source_type": "future",   "source_path": "fda.gov + biotech disclosure scrape",              "target_table": "fda_calendar",               "script": "scrapers/fda_calendar.py (TODO)",       "schedule": "weekly",                    "status": "future",  "cluster": "calendar"},
-    {"name": "Earnings calendar PIT",         "source_type": "future",   "source_path": "Zacks vintage-tracked",                            "target_table": "earnings_calendar_pit",      "script": "(needs vintage tracker layer)",         "schedule": "daily",                     "status": "future",  "cluster": "calendar"},
+    {"name": "Insider transactions (Form 4)", "source_type": "future",   "source_path": "efts.sec.gov EDGAR full-text search",              "target_table": "insider_transactions",       "script": "scrapers/insider_form4.py (TODO)",      "schedule": "daily",                     "status": "future",  "cluster": "smart_money", "issue": "SEC EDGAR full-text API + Form 4 XBRL/XML parsing is non-trivial — deferred"},
+    {"name": "13F institutional holdings",    "source_type": "future",   "source_path": "efts.sec.gov 13F filings",                         "target_table": "institutional_holdings",     "script": "scrapers/institutional_13f.py (TODO)",  "schedule": "quarterly",                 "status": "future",  "cluster": "smart_money", "issue": "Same as Form 4 — SEC EDGAR XBRL parsing complexity, deferred"},
+    {"name": "Short interest history",        "source_type": "api",      "source_path": "cdn.finra.org regsho daily CNMSshvol",             "target_table": "short_interest_history",     "script": "scrapers/short_interest_finra.py",      "schedule": "daily (T+2)",               "status": "working", "cluster": "smart_money"},
+    {"name": "Cold OHLCV storage",            "source_type": "api",      "source_path": "EODHD /eod/{TICKER} for active tickers",           "target_table": "ohlcv_daily",                "script": "scrapers/ohlcv_cold_storage.py",        "schedule": "nightly batch",             "status": "working", "cluster": "market_data"},
+    {"name": "Tickers master",                "source_type": "api",      "source_path": "EODHD /exchange-symbol-list/US",                   "target_table": "tickers_master",             "script": "scrapers/tickers_master_eodhd.py",      "schedule": "weekly",                    "status": "working", "cluster": "reference"},
+    {"name": "News events",                   "source_type": "api",      "source_path": "EODHD /news per active ticker",                    "target_table": "news_events",                "script": "scrapers/news_events_eodhd.py",         "schedule": "hourly",                    "status": "working", "cluster": "sentiment"},
+    {"name": "IPO calendar",                  "source_type": "api",      "source_path": "api.nasdaq.com /api/ipo/calendar",                 "target_table": "ipo_calendar",               "script": "scrapers/ipo_calendar_nasdaq.py",       "schedule": "daily",                     "status": "broken",  "cluster": "calendar", "issue": "NASDAQ API timing out — needs proxy or different headers; intermittent"},
+    {"name": "Splits calendar",               "source_type": "computed", "source_path": "derived from corporate_actions WHERE type=split",  "target_table": "splits_calendar",            "script": "scrapers/splits_calendar_derived.py",   "schedule": "daily",                     "status": "empty",   "cluster": "calendar", "issue": "Source corporate_actions has 0 splits — need to expand corporate_actions universe beyond active 9 tickers"},
+    {"name": "Economic calendar",             "source_type": "future",   "source_path": "fred.stlouisfed.org API or BLS RSS",               "target_table": "economic_calendar",          "script": "scrapers/economic_calendar.py (TODO)",  "schedule": "daily",                     "status": "future",  "cluster": "calendar", "issue": "FRED API requires (free) API key registration — pending setup"},
+    {"name": "FDA PDUFA calendar",            "source_type": "future",   "source_path": "fda.gov + biotech disclosure scrape",              "target_table": "fda_calendar",               "script": "scrapers/fda_calendar.py (TODO)",       "schedule": "weekly",                    "status": "future",  "cluster": "calendar", "issue": "FDA + biotech catalyst aggregation is complex multi-source scrape — deferred"},
+    {"name": "Earnings calendar PIT",         "source_type": "future",   "source_path": "Zacks (existing scraper) → vintage layer",         "target_table": "earnings_calendar_pit",      "script": "(needs vintage tracker layer)",         "schedule": "daily",                     "status": "future",  "cluster": "calendar", "issue": "Requires intercepting existing Zacks scraper output + tracking changes over time (vintage layer)"},
 
     # ── Ops telemetry (needs app-side instrumentation) ──
-    {"name": "EODHD quota usage",             "source_type": "future",   "source_path": "data_fetcher.py rate-limit counters",              "target_table": "eodhd_quota_usage",          "script": "(needs middleware hook)",               "schedule": "real-time",                 "status": "future",  "cluster": "ops"},
-    {"name": "Launchd run telemetry",         "source_type": "future",   "source_path": "wrapper around launchd plists",                    "target_table": "launchd_runs",               "script": "(needs wrapper script)",                "schedule": "every plist firing",        "status": "future",  "cluster": "ops"},
-    {"name": "Data quality checks",           "source_type": "future",   "source_path": "scripts/dq_checks.py (TODO)",                       "target_table": "data_quality_checks",        "script": "scripts/dq_checks.py (TODO)",           "schedule": "daily",                     "status": "future",  "cluster": "ops"},
-    {"name": "Config history",                "source_type": "future",   "source_path": "git diff on config/*.json",                         "target_table": "config_history",             "script": "(needs git hook)",                      "schedule": "on commit",                 "status": "future",  "cluster": "ops"},
-    {"name": "Feature flag changes",          "source_type": "future",   "source_path": "config/config.json _enabled flips",                "target_table": "feature_flag_changes",       "script": "(needs git hook)",                      "schedule": "on commit",                 "status": "future",  "cluster": "ops"},
-    {"name": "API latency metrics",           "source_type": "future",   "source_path": "FastAPI middleware",                                "target_table": "api_latency_metrics",        "script": "(needs middleware)",                    "schedule": "real-time",                 "status": "future",  "cluster": "ops"},
+    {"name": "EODHD quota usage",             "source_type": "future",   "source_path": "data_fetcher.py rate-limit counters",              "target_table": "eodhd_quota_usage",          "script": "(needs middleware hook)",               "schedule": "real-time",                 "status": "future",  "cluster": "ops", "issue": "Requires patching data_fetcher.py to count requests per endpoint — production data path, deferred"},
+    {"name": "Launchd run telemetry",         "source_type": "future",   "source_path": "wrapper around launchd plists",                    "target_table": "launchd_runs",               "script": "(needs wrapper script)",                "schedule": "every plist firing",        "status": "future",  "cluster": "ops", "issue": "Requires shell wrapper around every plist's ProgramArguments — touches all 25 plists, deferred"},
+    {"name": "Data quality checks",           "source_type": "future",   "source_path": "scripts/dq_checks.py (TODO)",                       "target_table": "data_quality_checks",        "script": "scripts/dq_checks.py (TODO)",           "schedule": "daily",                     "status": "future",  "cluster": "ops", "issue": "DQ rule definition + scoring pending — needs design pass on what to check"},
+    {"name": "Config history",                "source_type": "future",   "source_path": "git diff on config/*.json",                         "target_table": "config_history",             "script": "(needs git hook)",                      "schedule": "on commit",                 "status": "future",  "cluster": "ops", "issue": "Requires post-commit git hook + jsondiffpatch — small but touches dev workflow, deferred"},
+    {"name": "Feature flag changes",          "source_type": "future",   "source_path": "config/config.json _enabled flips",                "target_table": "feature_flag_changes",       "script": "(needs git hook)",                      "schedule": "on commit",                 "status": "future",  "cluster": "ops", "issue": "Same git hook as config_history"},
+    {"name": "API latency metrics",           "source_type": "future",   "source_path": "FastAPI middleware",                                "target_table": "api_latency_metrics",        "script": "(needs middleware)",                    "schedule": "real-time",                 "status": "future",  "cluster": "ops", "issue": "Requires FastAPI middleware emitting per-request latency to Supabase — touches server.py request path, deferred for perf"},
 
     # ── Self-referencing ──
     {"name": "Supabase sync ledger",          "source_type": "computed", "source_path": "migrate_sqlite_to_supabase.py per-run state",      "target_table": "supabase_sync_state",        "script": "migrate_sqlite_to_supabase.py", "schedule": "every sync run",            "status": "working", "cluster": "system"},
@@ -5810,6 +6000,110 @@ async def pipelines_mapping():
     _PIPELINES_CACHE["ts"] = now
     _PIPELINES_CACHE["payload"] = payload
     return payload
+
+
+# =========================================================================
+# /api/pipelines/run — trigger a single pipeline's script in a subprocess
+# /api/pipelines/log — tail the stdout/stderr log of a pipeline's script
+# =========================================================================
+import re as _re
+
+# Whitelist of runnable scripts (no arbitrary paths from client)
+_RUNNABLE_SCRIPTS = {
+    "migrate_sqlite_to_supabase.py":              ["--apply"],
+    "fold_orphan_data.py":                        ["--apply"],
+    "backfill_scan_cluster.py":                   ["--apply"],
+    "snapshot_rolling_sharpe.py":                 ["--apply"],
+    "snapshot_portfolio_risk.py":                 ["--apply"],
+    "snapshot_strategy_attribution.py":           ["--apply"],
+    "snapshot_wilson_ci.py":                      ["--apply"],
+    "snapshot_model_calibration.py":              ["--apply", "--seed"],
+    "snapshot_var_breaches.py":                   ["--apply"],
+    "scrapers/index_membership_wikipedia.py":     ["--apply"],
+    "scrapers/macro_indicators_eodhd.py":         ["--apply"],
+    "scrapers/corporate_actions_eodhd.py":        ["--apply"],
+    "scrapers/fomc_ical.py":                      ["--apply"],
+    "scrapers/congress_trades.py":                ["--apply", "--limit", "500"],
+    "scrapers/tickers_master_eodhd.py":           ["--apply"],
+    "scrapers/ohlcv_cold_storage.py":             ["--apply", "--max-tickers", "30"],
+    "scrapers/splits_calendar_derived.py":        ["--apply"],
+    "scrapers/short_interest_finra.py":           ["--apply"],
+    "scrapers/ipo_calendar_nasdaq.py":            ["--apply"],
+    "scrapers/news_events_eodhd.py":              ["--apply"],
+}
+
+
+def _script_log_path(script: str) -> str:
+    """Map script name → its launchd log path (if scheduled) or a generic cache log."""
+    from pathlib import Path as _P
+    label_map = {
+        "migrate_sqlite_to_supabase.py":     "supabase-sync",
+        "snapshot_rolling_sharpe.py":        "snapshot-sharpe",
+        "snapshot_portfolio_risk.py":        "snapshot-risk",
+        "snapshot_strategy_attribution.py":  "snapshot-attribution",
+        "snapshot_wilson_ci.py":             "snapshot-wilson",
+        "snapshot_model_calibration.py":     "snapshot-model-cal",
+        "snapshot_var_breaches.py":          "snapshot-var",
+    }
+    base = _P(__file__).parent
+    label = label_map.get(script)
+    if label:
+        for ext in (".log", ".err"):
+            p = base / "cache" / "logs" / f"{label}{ext}"
+            if p.exists():
+                return str(p)
+    # generic run-log location
+    return str(base / "cache" / "logs" / f"pipeline-{script.replace('/', '_').replace('.py','')}.log")
+
+
+@app.post("/api/pipelines/run")
+async def pipelines_run(payload: dict, _=Depends(_check_auth)):
+    """Trigger one pipeline script. Body: {script: 'name.py'}."""
+    import subprocess as _sp
+    from pathlib import Path as _P
+    script = (payload or {}).get("script", "")
+    if script not in _RUNNABLE_SCRIPTS:
+        return {"ok": False, "error": f"script not in whitelist: {script}"}
+    args = _RUNNABLE_SCRIPTS[script]
+    root = _P(__file__).parent
+    log_path = _script_log_path(script)
+    try:
+        # Capture stdout+stderr to log file, return immediately
+        with open(log_path, "a") as lf:
+            lf.write(f"\n\n=== triggered via UI at {time.time()} ===\n")
+        proc = _sp.Popen(
+            ["python3", str(root / "scripts" / script), *args],
+            stdout=open(log_path, "a"),
+            stderr=_sp.STDOUT,
+            cwd=str(root),
+            start_new_session=True,
+        )
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    # Bust pipelines + supabase caches so next poll shows fresh state
+    _PIPELINES_CACHE["ts"] = 0.0
+    _PIPELINES_CACHE["payload"] = None
+    _SUPABASE_STATUS_CACHE["ts"] = 0.0
+    _SUPABASE_STATUS_CACHE["payload"] = None
+    return {"ok": True, "script": script, "pid": proc.pid, "log": log_path}
+
+
+@app.get("/api/pipelines/log")
+async def pipelines_log(script: str = "", lines: int = 60):
+    """Return last N lines of a pipeline's log."""
+    from pathlib import Path as _P
+    if script not in _RUNNABLE_SCRIPTS:
+        return {"ok": False, "error": f"script not in whitelist: {script}", "log": ""}
+    log_path = _P(_script_log_path(script))
+    if not log_path.exists():
+        return {"ok": False, "error": f"no log yet: {log_path}", "log": ""}
+    try:
+        text = log_path.read_text(errors="ignore").splitlines()
+        tail = text[-int(lines):]
+        return {"ok": True, "script": script, "log_path": str(log_path), "log": "\n".join(tail), "size": log_path.stat().st_size}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "log": ""}
 
 
 @app.post("/api/supabase/sync")
