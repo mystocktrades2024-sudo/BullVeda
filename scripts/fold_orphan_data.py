@@ -326,6 +326,65 @@ def x_fundamentals_pit():
         c.close()
 
 
+def x_smc_hit_rates():
+    """data/smc_hit_rates.json → smc_hit_rates (per-ticker, per-block-type calibration)"""
+    src = DATA / "smc_hit_rates.json"
+    if not src.exists():
+        return
+    try:
+        j = json.loads(src.read_text())
+    except Exception:
+        return
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for ticker, payload in j.items():
+        if not isinstance(payload, dict):
+            continue
+        for block_type in ("order_blocks", "fvgs", "liquidity", "bos", "choch"):
+            blk = payload.get(block_type)
+            if not isinstance(blk, dict):
+                continue
+            yield {
+                "observed_at": now_iso,
+                "block_type": f"{ticker}_{block_type}",
+                "timeframe": str(payload.get("horizon_days", "")) + "d" if payload.get("horizon_days") else None,
+                "n_observations": blk.get("total"),
+                "n_hits": blk.get("wins"),
+                "hit_rate": blk.get("win_rate"),
+                "avg_r_multiple": None,
+                "sync_key": _h("smc", ticker, block_type, blk.get("total"), blk.get("wins")),
+                "raw_json": json.dumps({"ticker": ticker, "block_type": block_type, **blk}),
+            }
+
+
+def x_regime_transitions():
+    """cache/regime_history.json + cache/regime_hysteresis.json → regime_transitions
+    For now we only have the current state snapshot. Real transition history requires
+    walking decision_log over time. This extractor emits a synthetic row for the
+    current confirmed regime."""
+    src = Path(ROOT) / "cache" / "regime_history.json"
+    if not src.exists():
+        return
+    try:
+        j = json.loads(src.read_text())
+    except Exception:
+        return
+    from datetime import datetime, timezone
+    flip_date = j.get("flip_confirmed_date")
+    if not flip_date:
+        return
+    yield {
+        "transitioned_at": flip_date + "T00:00:00Z",
+        "regime_from": "unknown",
+        "regime_to": j.get("confirmed_regime4") or j.get("confirmed_regime") or "unknown",
+        "bars_at_target": None,
+        "vix_at_flip": None,
+        "breadth_at_flip": None,
+        "sync_key": _h("rt", flip_date, j.get("confirmed_regime4")),
+        "raw_json": json.dumps(j),
+    }
+
+
 def x_ticker_enrichment():
     """data/enrichment_cache.db → ticker_enrichment_snapshot (11,907 rows)"""
     db = DATA / "enrichment_cache.db"
@@ -376,6 +435,8 @@ SOURCES = {
     "rolling_sharpe":             (x_rolling_sharpe,          "rolling_sharpe_history",     ["sync_key"]),
     "fundamentals_pit":           (x_fundamentals_pit,        "fundamentals_pit",           ["sync_key"]),
     "ticker_enrichment_snapshot": (x_ticker_enrichment,       "ticker_enrichment_snapshot", ["sync_key"]),
+    "smc_hit_rates":              (x_smc_hit_rates,           "smc_hit_rates",              ["sync_key"]),
+    "regime_transitions":         (x_regime_transitions,      "regime_transitions",         ["sync_key"]),
 }
 
 

@@ -201,7 +201,8 @@ def main():
 
     sb = sb_client()
     try:
-        sb.table("rolling_sharpe_history").upsert(rows, on_conflict="observed_at,window_days").execute()
+        # sync_key is unique per (date, window) — re-runs same day update in place
+        sb.table("rolling_sharpe_history").upsert(rows, on_conflict="sync_key").execute()
         print(f"\n✓ Wrote {len(rows)} snapshots")
     except Exception as e:
         print(f"✗ Write failed: {e}")

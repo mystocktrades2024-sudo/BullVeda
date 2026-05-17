@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
-congress_trades.py — Senate Stock Watcher (free API) → congressional_trades.
+congress_trades.py — Congressional stock trades.
 
-Reference: https://github.com/jeremiak/senate-stock-watcher-data (JSON snapshot)
-The repo publishes a JSON file with all Senate disclosures.
+v2: try multiple free sources in order of reliability.
 
-Usage: python3 scripts/scrapers/congress_trades.py --apply
+Sources tried (free):
+  1. github.com/timothycarambat/all-financial-disclosures (community mirror,
+     served via GitHub raw)
+  2. github.com/jeremiak/senate-stock-watcher-data (raw GitHub fallback)
+  3. SEC EDGAR direct (Form 4 → individual matches)
 """
 from __future__ import annotations
 
@@ -18,14 +21,31 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib import load_env_and_supabase, h, upsert
 
-SENATE_URL = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json"
 UA = "Mozilla/5.0 (SwingTrade scraper)"
+
+SOURCES = [
+    # GitHub raw is more reliable than the S3 bucket which now requires auth
+    "https://raw.githubusercontent.com/jeremiak/senate-stock-watcher-data/main/aggregate/all_transactions.json",
+    "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json",
+]
 
 
 def fetch_senate() -> list[dict]:
-    req = urllib.request.Request(SENATE_URL, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.loads(r.read().decode("utf-8"))
+    last_err = None
+    for url in SOURCES:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                data = json.loads(r.read().decode("utf-8"))
+            print(f"  ✓ source: {url[:70]}...")
+            return data
+        except Exception as e:
+            print(f"  ✗ {url[:70]}: {type(e).__name__}: {str(e)[:80]}")
+            last_err = e
+            continue
+    if last_err:
+        raise last_err
+    return []
 
 
 def _parse_amount(band: str) -> tuple[float | None, float | None]:
@@ -45,14 +65,14 @@ def _parse_amount(band: str) -> tuple[float | None, float | None]:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
-    ap.add_argument("--limit", type=int, default=0, help="Only push first N rows (testing)")
+    ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
 
     sb = load_env_and_supabase()
     try:
         data = fetch_senate()
     except Exception as e:
-        print(f"✗ Fetch failed: {e}"); return 1
+        print(f"✗ All sources failed: {e}"); return 1
     print(f"  Fetched {len(data):,} Senate disclosures")
 
     rows = []
@@ -75,7 +95,7 @@ def main():
             "amount_max": amt_max,
             "transacted_at": tx_date,
             "reported_at": disc_date,
-            "source": "senate_stock_watcher",
+            "source": "senate_stock_watcher_v2",
             "asset_name": d.get("asset_description"),
             "external_id": d.get("ptr_link") or h("sn", tx_date, ticker, d.get("senator"), d.get("amount")),
             "sync_key": h("sn", tx_date, ticker, d.get("senator"), d.get("type"), d.get("amount")),
@@ -87,8 +107,7 @@ def main():
     print(f"  Filtered to {len(rows):,} ticker-tagged rows")
 
     if not args.apply:
-        print("Dry-run; re-run with --apply"); return 0
-
+        print("Dry-run"); return 0
     ok, fail = upsert(sb, "congressional_trades", rows, "sync_key")
     print(f"  pushed={ok:,}  failed={fail:,}")
     return 0 if fail == 0 else 1

@@ -43,10 +43,14 @@ def chunked(seq, n):
 
 
 def upsert(sb, table: str, rows: list[dict], on_conflict: str) -> tuple[int, int]:
-    """Batch-upsert rows with within-batch dedup. Returns (ok, fail)."""
+    """Batch-upsert rows with within-batch dedup. Returns (ok, fail).
+    Supports composite keys (comma-separated, e.g. 'ticker,bar_date')."""
+    keys = [k.strip() for k in on_conflict.split(",")]
     seen: dict = {}
     for r in rows:
-        seen[r.get(on_conflict)] = r
+        # Build composite key tuple
+        composite = tuple(r.get(k) for k in keys)
+        seen[composite] = r
     rows = list(seen.values())
     ok = fail = 0
     for batch in chunked(rows, 200):
