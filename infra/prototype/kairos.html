@@ -8224,17 +8224,17 @@ body.on-detail-tab .qdchk-trigger-btn { display: inline-flex; }
   <div class="sb-section">
     <div class="sb-h">Reference</div>
     <div class="sb-link" data-tab="playbook"><span class="ico">▦</span>Playbook</div>
-    <div class="sb-link" data-tab="accuracy"><span class="ico">∿</span>Accuracy</div>
-    <div class="sb-link" data-tab="fields"><span class="ico">≣</span>Fields · Schema</div>
     <div class="sb-link" data-tab="reference"><span class="ico">≡</span>Reference</div>
-    <div class="sb-link" data-tab="status"><span class="ico">●</span>Status</div>
     <div class="sb-link" data-tab="settings"><span class="ico">⚒</span>Settings</div>
-    <div class="sb-link"><span class="ico">⚕</span><a href="/audit_360.html">Audit 360</a><span class="ct" id="sb-a360">88</span></div>
     <div class="sb-link"><span class="ico">📋</span><a href="/v2/cheatsheet.html">Cheat Sheet</a></div>
   </div>
 
   <div class="sb-section sb-collapsible collapsed" id="sb-admin">
     <div class="sb-h" onclick="this.parentElement.classList.toggle('collapsed')">Admin Activities</div>
+    <div class="sb-link" data-tab="status"><span class="ico">●</span>System Status</div>
+    <div class="sb-link" data-tab="accuracy"><span class="ico">∿</span>Accuracy</div>
+    <div class="sb-link" data-tab="fields"><span class="ico">≣</span>Fields · Schema</div>
+    <div class="sb-link"><span class="ico">⚕</span><a href="/audit_360.html">Audit 360</a><span class="ct" id="sb-a360">88</span></div>
     <div class="sb-link" data-tab="supabase"><span class="ico">◇</span>Supabase<span class="ct" id="sb-sb">67</span></div>
     <div class="sb-link" data-tab="pipelines"><span class="ico">⇄</span>Pipelines<span class="ct" id="sb-pl">68</span></div>
   </div>
@@ -13061,6 +13061,68 @@ const QuantHome = (function() {
   const _fmtInt = (n) => (n==null||isNaN(n))?'—':Math.round(n).toString();
   const _sign = (n) => n>0?'+':'';
 
+  // 2026-05-17 · Alert push (browser Notification API + Slack via /api/alert/push)
+  if (typeof window !== 'undefined' && !window._kairosAlertWired) {
+    window._kairosAlertWired = true;
+    window.kairosPushAlert = async function(opts) {
+      const level = opts.level || 'info';
+      const title = (opts.ticker ? '[' + opts.ticker + '] ' : '') + (opts.title || 'Kairos');
+      const body = opts.body || '';
+      const tag = (opts.ticker || 'kairos') + '_' + (opts.title || '').replace(/\s+/g, '_').slice(0, 32);
+      // 1) Native browser notification
+      if ('Notification' in window) {
+        if (Notification.permission === 'granted') {
+          try {
+            const n = new Notification(title, { body, tag, requireInteraction: level === 'critical' });
+            if (opts.url) n.onclick = () => { window.focus(); window.location = opts.url; n.close(); };
+            setTimeout(() => n.close(), level === 'critical' ? 30000 : 8000);
+          } catch (e) { console.warn('[alert] browser push failed:', e); }
+        } else if (Notification.permission !== 'denied') {
+          const p = await Notification.requestPermission();
+          if (p === 'granted') return window.kairosPushAlert(opts);
+        }
+      }
+      // 2) Server-side channels (Slack, etc.)
+      const channels = opts.channels !== undefined ? opts.channels : ['slack'];
+      if (channels && channels.length) {
+        try {
+          const r = await fetch('/api/alert/push', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...opts, channels }),
+          });
+          return await r.json();
+        } catch (e) {
+          console.warn('[alert] server push failed:', e);
+          return { status: 'error', error: e.message };
+        }
+      }
+      return { status: 'browser_only' };
+    };
+    // Lazy permission request — only after the 3rd user click
+    document.addEventListener('click', function _once() {
+      if ('Notification' in window && Notification.permission === 'default') {
+        window._kairosClickCount = (window._kairosClickCount || 0) + 1;
+        if (window._kairosClickCount >= 3) {
+          Notification.requestPermission();
+          document.removeEventListener('click', _once);
+        }
+      }
+    });
+    // Console helper for testing
+    window.kairosTestAlert = function(level) {
+      return window.kairosPushAlert({
+        ticker: 'TEST',
+        level: level || 'info',
+        title: 'Kairos test alert',
+        body: 'If you see this as a desktop notification AND in Slack, both channels are wired correctly.',
+        url: window.location.href,
+        channels: ['slack'],
+      });
+    };
+  }
+
   // 2026-05-17 · Jargon tooltip system (hover-over definitions)
   (function _injectTooltips(){
     if (typeof document === 'undefined' || document.getElementById('qh-tooltip-css')) return;
@@ -13717,7 +13779,26 @@ const QuantHome = (function() {
     earnings7.slice(0, 2).forEach(e => alerts.push({cls:'am', ico:'$', msg:`<b>${e.ticker}</b> earnings ${e.before_after_market || e.before_after || ''}`, when:`T+${e.days_to_earnings}D`}));
     if (macroNext.date && macroNext.days_until != null && macroNext.days_until <= 2) alerts.push({cls:'am', ico:'⚐', msg:`<b>${macroNext.event || macroNext.type}</b> ${macroNext.days_until === 0 ? 'TODAY' : `in ${macroNext.days_until}d`}`, when: macroNext.days_until === 0 ? 'TODAY' : `T+${macroNext.days_until}D`});
     if (vix >= 25) alerts.push({cls:'rd', ico:'!', msg:`VIX <b>${vix.toFixed(1)}</b> elevated · reduce new risk`, when:'NOW'});
-    const alertHTML = alerts.length ? alerts.slice(0, 6).map(a => `<div class="qcpa-alert"><div class="ico ${a.cls}">${a.ico}</div><span class="msg">${a.msg}</span><span class="when">${a.when}</span></div>`).join('') : `<div class="qcpa-empty">No alerts.<br><span style="color:var(--ink-2)">All quiet — review BUYs above</span></div>`;
+    // Auto-push to browser + Slack if alert is critical (rd) and we haven't pushed this exact one yet
+    if (window.kairosPushAlert) {
+      const seen = window._kairosSeenAlerts || (window._kairosSeenAlerts = new Set());
+      alerts.filter(a => a.cls === 'rd').forEach(a => {
+        const plain = a.msg.replace(/<[^>]+>/g, '');
+        const key = plain.slice(0, 80);
+        if (seen.has(key)) return;
+        seen.add(key);
+        const m = plain.match(/^([A-Z]{1,5}\b)/);
+        window.kairosPushAlert({
+          ticker: m ? m[1] : '',
+          level: 'critical',
+          title: a.when || 'Alert',
+          body: plain,
+          url: window.location.href,
+          channels: ['slack'],
+        }).catch(() => {});
+      });
+    }
+    const alertHTML = alerts.length ? alerts.slice(0, 6).map(a => `<div class="qcpa-alert" onclick="window.kairosPushAlert&&window.kairosPushAlert({ticker:'${(a.msg.match(/^<b>([A-Z]+)/)||[])[1]||''}',level:'${a.cls==='rd'?'critical':a.cls==='am'?'warn':'info'}',title:'${a.when||''}',body:'${a.msg.replace(/<[^>]+>/g,'').replace(/'/g,"\\'")}',channels:['slack']})" style="cursor:pointer" title="click to re-send to Slack + browser"><div class="ico ${a.cls}">${a.ico}</div><span class="msg">${a.msg}</span><span class="when">${a.when}</span></div>`).join('') : `<div class="qcpa-empty">No alerts.<br><span style="color:var(--ink-2)">All quiet — review BUYs above</span></div>`;
     wrap.innerHTML = `<div class="qcpa">
       <div class="qcpa-plan">
         <div class="qcpa-h"><span>▦ Today's Game Plan</span><span class="sub">plain English</span></div>
@@ -13775,21 +13856,21 @@ const QuantHome = (function() {
       `;
       document.head.appendChild(st);
     }
-    // Watchlist — pull from localStorage (user-added) → data.watchlist → else honest empty
+    // Watchlist — SINGLE source of truth: kairos.watchlist.manual.v1 (localStorage)
+    // Same key the canonical Watchlist sidebar tab reads. NOT config.universe.custom_watchlist
+    // (that's the scan universe — sector ETFs etc, not user-starred picks).
     let watch = [];
+    const tickers = Array.isArray(window._kairosTickersArr) ? window._kairosTickersArr : [];
+    const byTkr = {};
+    tickers.forEach(t => { byTkr[t.ticker] = t; });
+    const buildRows = (symbols) => symbols.slice(0, 8).map(sym => {
+      const t = byTkr[sym] || {};
+      return { ticker: sym, price: +t.price || 0, chg_pct: +t.perf_1d || 0, state: t.verdict || '' };
+    });
     try {
-      const stored = JSON.parse(localStorage.getItem('kairos_watchlist') || '[]');
-      if (Array.isArray(stored)) {
-        const tickers = Array.isArray(window._kairosTickersArr) ? window._kairosTickersArr : [];
-        const byTkr = {};
-        tickers.forEach(t => { byTkr[t.ticker] = t; });
-        watch = stored.slice(0, 8).map(sym => {
-          const t = byTkr[sym] || {};
-          return { ticker: sym, price: +t.price || 0, chg_pct: +t.perf_1d || 0, state: t.verdict || '' };
-        });
-      }
+      const stored = JSON.parse(localStorage.getItem('kairos.watchlist.manual.v1') || '[]');
+      if (Array.isArray(stored) && stored.length) watch = buildRows(stored);
     } catch(e) {}
-    if (!watch.length) watch = (data.watchlist || data.user_watchlist || []).slice(0, 6);
     const watchIsUserSet = watch.length > 0;
     const watchRows = watch.length ? watch.map(w => {
       const tkr = w.ticker;
@@ -13805,32 +13886,40 @@ const QuantHome = (function() {
         <div class="qcwl-state ${sCls}">${state}</div>
       </div>`;
     }).join('') : `<div class="qcwl-empty">No watchlist yet<br><a onclick="window._kairosAddWatchlist&&window._kairosAddWatchlist()" style="color:var(--copper);cursor:pointer;font-weight:700">+ add your first ticker</a></div>`;
-    // Global watchlist add handler (defined once)
+    // Global watchlist add/remove handlers — write to SAME localStorage key
+    // the canonical Watchlist tab reads (kairos.watchlist.manual.v1).
     if (!window._kairosAddWatchlist) {
       window._kairosAddWatchlist = function() {
         const sym = (prompt('Add ticker to watchlist (e.g. NVDA):') || '').trim().toUpperCase();
-        if (!sym || !/^[A-Z]{1,5}$/.test(sym)) { if (sym) alert('Invalid ticker · use 1–5 uppercase letters'); return; }
+        if (!sym || !/^[A-Z.\-]{1,6}$/.test(sym)) { if (sym) alert('Invalid ticker · use 1–6 uppercase letters / . / -'); return; }
         try {
-          const arr = JSON.parse(localStorage.getItem('kairos_watchlist') || '[]');
+          const arr = JSON.parse(localStorage.getItem('kairos.watchlist.manual.v1') || '[]');
           if (arr.includes(sym)) { alert(sym + ' already in watchlist'); return; }
           arr.push(sym);
-          localStorage.setItem('kairos_watchlist', JSON.stringify(arr.slice(-20)));
+          localStorage.setItem('kairos.watchlist.manual.v1', JSON.stringify(arr));
+          // Update the sidebar badge count too
+          try {
+            const badge = document.getElementById('sb-wl');
+            if (badge) badge.textContent = arr.length;
+          } catch(e) {}
           if (typeof QuantHome !== 'undefined' && window._kairosData) QuantHome.render(window._kairosData);
-        } catch(e) { alert('Could not save: ' + e.message); }
+        } catch(e) { alert('Save failed: ' + e.message); }
       };
-      // Click-to-remove on watchlist row (right-click)
+      // Right-click any watchlist row to remove
       document.addEventListener('contextmenu', function(ev) {
         const row = ev.target.closest('.qcwl-row');
         if (!row) return;
         ev.preventDefault();
-        const tkr = (row.querySelector('.qcwl-tkr') || {}).textContent;
+        const tkr = ((row.querySelector('.qcwl-tkr') || {}).textContent || '').replace(/^[★\s]+/, '').trim();
         if (!tkr) return;
         if (!confirm('Remove ' + tkr + ' from watchlist?')) return;
         try {
-          const arr = JSON.parse(localStorage.getItem('kairos_watchlist') || '[]').filter(s => s !== tkr);
-          localStorage.setItem('kairos_watchlist', JSON.stringify(arr));
+          const arr = JSON.parse(localStorage.getItem('kairos.watchlist.manual.v1') || '[]').filter(s => s !== tkr);
+          localStorage.setItem('kairos.watchlist.manual.v1', JSON.stringify(arr));
+          const badge = document.getElementById('sb-wl');
+          if (badge) badge.textContent = arr.length;
           if (typeof QuantHome !== 'undefined' && window._kairosData) QuantHome.render(window._kairosData);
-        } catch(e) {}
+        } catch(e) { alert('Remove failed: ' + e.message); }
       });
     }
     // Market Mood (Fear/Greed-style) — composite from VIX + breadth + put/call
@@ -13839,19 +13928,50 @@ const QuantHome = (function() {
     const breadth = +r.breadth_pct_50d;
     const pcRaw = r.put_call_ratio;
     const pc = (pcRaw != null && !isNaN(+pcRaw)) ? +pcRaw : null;
-    // Compute mood ONLY from available real metrics; weight rebalanced
+    // Compute mood ONLY from available real metrics — CNN F&G-calibrated brackets
+    // (median VIX ~16, so 16 maps to ~50 / neutral, not 60+)
+    const _vixToScore = (v) => {
+      if (v == null) return null;
+      if (v < 12)  return 95;  // extreme greed
+      if (v < 15)  return 85 - (v - 12) * 5;     // 85 → 70
+      if (v < 18)  return 70 - (v - 15) * 7;     // 70 → 49
+      if (v < 22)  return 49 - (v - 18) * 6;     // 49 → 25
+      if (v < 28)  return 25 - (v - 22) * 3;     // 25 → 7
+      return 5;                                    // extreme fear
+    };
+    const _breadthToScore = (b) => {
+      if (b == null) return null;
+      // breadth % is already a "greed score" — but calibrate to F&G:
+      // 70%+ → extreme greed, 30%- → extreme fear, midpoint = 50
+      if (b >= 70) return 90 + (b - 70) * 0.3;
+      if (b >= 55) return 65 + (b - 55) * 1.6;     // 65 → 89
+      if (b >= 45) return 50 + (b - 45) * 1.5;     // 50 → 65
+      if (b >= 30) return 25 + (b - 30) * 1.6;     // 25 → 49
+      return Math.max(0, b * 0.8);
+    };
+    const _pcToScore = (p) => {
+      if (p == null) return null;
+      // P/C ratio: <0.7 greed, >1 fear, 0.85 neutral
+      if (p < 0.6)  return 90;
+      if (p < 0.8)  return 80 - (p - 0.6) * 100;  // 80 → 60
+      if (p < 1.0)  return 60 - (p - 0.8) * 150;  // 60 → 30
+      if (p < 1.3)  return 30 - (p - 1.0) * 67;   // 30 → 10
+      return 5;
+    };
     let mood = null;
-    if (vix || breadth) {
-      const vixScore = vix ? Math.max(0, Math.min(100, (35 - vix) / 25 * 100)) : null;
-      const brScore = breadth || null;
-      const pcScore = pc != null ? Math.max(0, Math.min(100, (1.4 - pc) / 0.8 * 100)) : null;
-      const components = [], weights = [];
-      if (vixScore != null) { components.push(vixScore); weights.push(0.4); }
-      if (brScore  != null) { components.push(brScore);  weights.push(0.4); }
-      if (pcScore  != null) { components.push(pcScore);  weights.push(0.2); }
+    const components = [], weights = [];
+    const vS = _vixToScore(vix);
+    const brS = _breadthToScore(breadth);
+    const pS = _pcToScore(pc);
+    if (vS != null)  { components.push(vS);  weights.push(0.45); }
+    if (brS != null) { components.push(brS); weights.push(0.45); }
+    if (pS != null)  { components.push(pS);  weights.push(0.10); }
+    if (weights.length) {
       const wSum = weights.reduce((a,b)=>a+b, 0);
-      mood = wSum > 0 ? Math.round(components.reduce((s, v, i) => s + v * weights[i], 0) / wSum) : null;
+      mood = Math.round(components.reduce((s, v, i) => s + v * weights[i], 0) / wSum);
     }
+    // Component breakdown for tooltip/display
+    const moodComp = { vix: vS, breadth: brS, pc: pS };
     const hasMood = mood != null;
     const moodLbl = !hasMood ? 'NO DATA' : mood >= 75 ? 'EXTREME GREED' : mood >= 55 ? 'GREED' : mood >= 45 ? 'NEUTRAL' : mood >= 25 ? 'FEAR' : 'EXTREME FEAR';
     const moodCls = !hasMood ? '' : mood >= 70 ? 'gn' : mood >= 50 ? 'cy' : mood >= 30 ? 'am' : 'rd';
@@ -13884,7 +14004,11 @@ const QuantHome = (function() {
           <span class="qcmm-v ${moodCls}">${moodDisp}</span>
         </div>
         <div class="qcmm-lbl ${moodCls}">${moodLbl}</div>
-        <div class="qcmm-comp"><span>VIX <b>${vix ? vix.toFixed(1) : '—'}</b></span><span>Breadth <b>${breadth ? breadth.toFixed(0)+'%' : '—'}</b></span><span>P/C <b>${pc != null ? pc.toFixed(2) : '—'}</b></span></div>
+        <div class="qcmm-comp" title="component scores · weighted average produces overall mood">
+          <span title="VIX ${vix?vix.toFixed(1):'—'} → score ${moodComp.vix!=null?Math.round(moodComp.vix):'—'}">VIX <b style="color:var(--${moodComp.vix>=60?'gn':moodComp.vix>=40?'cy':moodComp.vix!=null?'rd':'ink-3'})">${vix ? vix.toFixed(1) : '—'}</b></span>
+          <span title="Breadth ${breadth?breadth.toFixed(0)+'%':'—'} → score ${moodComp.breadth!=null?Math.round(moodComp.breadth):'—'}">Breadth <b style="color:var(--${moodComp.breadth>=60?'gn':moodComp.breadth>=40?'cy':moodComp.breadth!=null?'rd':'ink-3'})">${breadth ? breadth.toFixed(0)+'%' : '—'}</b></span>
+          <span title="${pc != null ? 'P/C '+pc.toFixed(2)+' → score '+Math.round(moodComp.pc) : 'put/call data not in feed'}">P/C <b style="color:var(--${moodComp.pc>=60?'gn':moodComp.pc>=40?'cy':moodComp.pc!=null?'rd':'ink-3'})">${pc != null ? pc.toFixed(2) : '—'}</b></span>
+        </div>
       </div>
     </div>`;
   }
@@ -14449,7 +14573,7 @@ const QuantHome = (function() {
     const port = data.portfolio || {};
     const positions = (port.positions || []).filter(Boolean).map(p => (p.ticker || '').toUpperCase());
     let myWatch = [];
-    try { myWatch = JSON.parse(localStorage.getItem('kairos_watchlist') || '[]'); } catch(e) {}
+    try { myWatch = JSON.parse(localStorage.getItem('kairos.watchlist.manual.v1') || '[]'); } catch(e) {}
     const mine = new Set([...positions, ...myWatch.map(s => s.toUpperCase())]);
     // 1) Earnings — tickers with earn_days
     tickers
@@ -14878,7 +15002,7 @@ const QuantHome = (function() {
 
     // User watchlist from localStorage — surface those first if they're in the data
     let myWatch = [];
-    try { myWatch = JSON.parse(localStorage.getItem('kairos_watchlist') || '[]'); } catch(e) {}
+    try { myWatch = JSON.parse(localStorage.getItem('kairos.watchlist.manual.v1') || '[]'); } catch(e) {}
     const myWatchSet = new Set(myWatch.map(s => s.toString().toUpperCase()));
 
     if (view === 'market') {
@@ -14972,7 +15096,7 @@ const QuantHome = (function() {
     const port = data.portfolio || {};
     const positions = (port.positions || []).filter(Boolean).map(p => (p.ticker || '').toUpperCase());
     let myWatch = [];
-    try { myWatch = JSON.parse(localStorage.getItem('kairos_watchlist') || '[]'); } catch(e) {}
+    try { myWatch = JSON.parse(localStorage.getItem('kairos.watchlist.manual.v1') || '[]'); } catch(e) {}
     const mine = new Set([...positions, ...myWatch.map(s => s.toUpperCase())]);
     items.forEach(it => { it._mine = mine.has((it.ticker || '').toUpperCase()); });
     items.sort((a, b) => (b._mine - a._mine));
@@ -20459,6 +20583,26 @@ const QuantPipelines = (function() {
       .qpl-issue { font-family: var(--mono); font-size: 10px; color: var(--rd); padding: 4px 6px; background: rgba(255,107,91,0.06); border-radius: 4px; margin-top: 4px; display: inline-block; }
       .qpl-empty { padding: 40px 20px; text-align: center; color: var(--ink-3); font-family: var(--mono); font-size: 12px; }
 
+      .qpl-row-actions { display:flex; gap: 4px; justify-content: flex-end; padding-right: 8px; }
+      .qpl-row-btn { width: 24px; height: 24px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: var(--ink-2); border-radius: 4px; cursor: pointer; font-size: 11px; padding: 0; transition: all 0.12s ease; }
+      .qpl-row-btn:hover { background: rgba(59,166,255,0.18); border-color: #3ba6ff; color: #3ba6ff; }
+      .qpl-row-btn.run:hover { background: rgba(91,229,124,0.18); border-color: var(--gn); color: var(--gn); }
+      .qpl-row-btn.disabled { opacity: 0.25; cursor: not-allowed; }
+      .qpl-row-btn .spin { display:inline-block; animation: qplSpin 1s linear infinite; }
+      @keyframes qplSpin { from {transform: rotate(0)} to {transform: rotate(360deg)} }
+
+      .qpl-log-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; padding: 30px; }
+      .qpl-log-modal { background: var(--bg-1, #0f1411); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; box-shadow: 0 24px 60px rgba(0,0,0,0.4); max-width: 1200px; width: 90%; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; }
+      .qpl-log-head { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+      .qpl-log-title { font-family: var(--mono); font-size: 13px; color: var(--copper); font-weight: 600; flex-shrink: 0; }
+      .qpl-log-meta { font-family: var(--mono); font-size: 10px; color: var(--ink-3); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .qpl-log-close { background: none; border: none; color: var(--ink-2); font-size: 22px; cursor: pointer; padding: 0 8px; line-height: 1; }
+      .qpl-log-close:hover { color: var(--rd); }
+      .qpl-log-body { flex: 1; margin: 0; padding: 14px 18px; background: rgba(0,0,0,0.3); color: var(--ink-1); font-family: var(--mono); font-size: 11px; line-height: 1.55; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+
+      body.light .qpl-log-modal { background: #fafafa; }
+      body.light .qpl-log-body { background: #f0f0ec; color: var(--ink-1); }
+
       .qpl-flow-panel { margin-top: 18px; padding: 16px 18px; background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; }
       .qpl-flow-host { overflow: auto; max-height: 78vh; background: rgba(0,0,0,0.12); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 14px; }
       .qpl-flow-host svg { display:block; margin:0 auto; max-width:100%; height:auto; }
@@ -20488,8 +20632,28 @@ const QuantPipelines = (function() {
     return `<div class="qpl-tile ${cls||''}"><div class="qpl-tile-l">${label}</div><div class="qpl-tile-v">${value}</div><div class="qpl-tile-d">${delta||''}</div></div>`;
   }
 
+  // Whitelist of scripts the backend will let us trigger via /api/pipelines/run
+  const _RUNNABLE = new Set([
+    'migrate_sqlite_to_supabase.py', 'fold_orphan_data.py', 'backfill_scan_cluster.py',
+    'snapshot_rolling_sharpe.py', 'snapshot_portfolio_risk.py',
+    'snapshot_strategy_attribution.py', 'snapshot_wilson_ci.py',
+    'snapshot_model_calibration.py', 'snapshot_var_breaches.py',
+    'scrapers/index_membership_wikipedia.py', 'scrapers/macro_indicators_eodhd.py',
+    'scrapers/corporate_actions_eodhd.py', 'scrapers/fomc_ical.py', 'scrapers/congress_trades.py',
+    'scrapers/tickers_master_eodhd.py', 'scrapers/ohlcv_cold_storage.py',
+    'scrapers/splits_calendar_derived.py', 'scrapers/short_interest_finra.py',
+    'scrapers/ipo_calendar_nasdaq.py', 'scrapers/news_events_eodhd.py',
+  ]);
+
   function _rowHTML(p) {
     const trCls = p.status === 'broken' ? 'broken' : (p.status === 'future' ? 'future' : '');
+    const runnable = _RUNNABLE.has(p.script);
+    const runBtn = runnable
+      ? `<button class="qpl-row-btn run" data-qpl-run="${_esc(p.script)}" title="Trigger now">▶</button>`
+      : `<button class="qpl-row-btn disabled" disabled title="Not whitelisted to run from UI">▶</button>`;
+    const logBtn = runnable
+      ? `<button class="qpl-row-btn log" data-qpl-log="${_esc(p.script)}" title="Tail log">⌘</button>`
+      : '';
     return `<tr class="${trCls}">
       <td><span class="qpl-src ${p.source_type}">${p.source_type}</span></td>
       <td><div class="qpl-source-path">${_esc(p.source_path)}</div></td>
@@ -20501,7 +20665,67 @@ const QuantPipelines = (function() {
       <td><span class="qpl-pill ${p.status}">${p.status}</span></td>
       <td><div class="qpl-schedule">${_esc(p.schedule)}</div></td>
       <td class="mono" style="color:var(--ink-3)">${_rel(p.last_sync_at)}</td>
-    </tr>${p.issue ? `<tr class="${trCls}"><td colspan="10"><div class="qpl-issue">⚠ ${_esc(p.issue)}</div></td></tr>` : ''}`;
+      <td class="qpl-row-actions">${runBtn}${logBtn}</td>
+    </tr>${p.issue ? `<tr class="${trCls}"><td colspan="11"><div class="qpl-issue">⚠ ${_esc(p.issue)}</div></td></tr>` : ''}`;
+  }
+
+  async function _triggerRun(script, btn) {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<span class="spin">⟳</span>';
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/pipelines/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({script}),
+      });
+      const j = await r.json();
+      if (j.ok) {
+        btn.innerHTML = '✓';
+        setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2500);
+      } else {
+        btn.innerHTML = '✗';
+        btn.title = j.error || 'failed';
+        setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; btn.title = 'Trigger now'; }, 4000);
+      }
+    } catch (e) {
+      btn.innerHTML = '✗'; btn.disabled = false;
+      setTimeout(() => { btn.innerHTML = orig; }, 3000);
+    }
+  }
+
+  async function _tailLog(script) {
+    let overlay = document.getElementById('qpl-log-overlay');
+    if (overlay) overlay.remove();
+    overlay = document.createElement('div');
+    overlay.id = 'qpl-log-overlay';
+    overlay.className = 'qpl-log-overlay';
+    overlay.innerHTML = `<div class="qpl-log-modal">
+      <div class="qpl-log-head">
+        <span class="qpl-log-title">Log · ${script}</span>
+        <span class="qpl-log-meta" id="qpl-log-meta">fetching…</span>
+        <button class="qpl-log-close" id="qpl-log-close">×</button>
+      </div>
+      <pre class="qpl-log-body" id="qpl-log-body">loading…</pre>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#qpl-log-close').onclick = () => overlay.remove();
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    try {
+      const r = await fetch('/api/pipelines/log?script=' + encodeURIComponent(script) + '&lines=120');
+      const j = await r.json();
+      const body = overlay.querySelector('#qpl-log-body');
+      const meta = overlay.querySelector('#qpl-log-meta');
+      if (j.ok) {
+        body.textContent = j.log || '(empty)';
+        meta.textContent = (j.log_path || '') + ' · ' + (j.size || 0) + ' bytes';
+        body.scrollTop = body.scrollHeight;
+      } else {
+        body.textContent = '⚠ ' + (j.error || 'failed');
+      }
+    } catch (e) {
+      overlay.querySelector('#qpl-log-body').textContent = '⚠ ' + e.message;
+    }
   }
 
   function render(container, data) {
@@ -20568,11 +20792,11 @@ const QuantPipelines = (function() {
       <thead><tr>
         <th>type</th><th>source</th><th></th><th>script</th><th></th>
         <th>target table</th><th class="num">remote rows</th>
-        <th>status</th><th>schedule</th><th>last sync</th>
+        <th>status</th><th>schedule</th><th>last sync</th><th>run</th>
       </tr></thead>
       <tbody>
       ${clusterOrder.filter(c => grouped[c]).map(c => `
-        <tr><td colspan="10" style="background:rgba(217,119,87,0.06);font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--copper);text-transform:uppercase;padding:8px 12px;border-left:2px solid var(--copper)">${c.replace('_',' ')} — ${grouped[c].length}</td></tr>
+        <tr><td colspan="11" style="background:rgba(217,119,87,0.06);font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--copper);text-transform:uppercase;padding:8px 12px;border-left:2px solid var(--copper)">${c.replace('_',' ')} — ${grouped[c].length}</td></tr>
         ${grouped[c].map(_rowHTML).join('')}
       `).join('')}
       </tbody>
@@ -20627,6 +20851,13 @@ const QuantPipelines = (function() {
     if (flowBtn) flowBtn.addEventListener('click', () => _toggleFlow(container));
     const expBtn = container.querySelector('#qpl-export-btn');
     if (expBtn) expBtn.addEventListener('click', () => _exportCSV(pipes));
+    // Wire per-row trigger + tail-log buttons
+    container.querySelectorAll('[data-qpl-run]').forEach(b => b.addEventListener('click', e => {
+      e.stopPropagation(); _triggerRun(b.getAttribute('data-qpl-run'), b);
+    }));
+    container.querySelectorAll('[data-qpl-log]').forEach(b => b.addEventListener('click', e => {
+      e.stopPropagation(); _tailLog(b.getAttribute('data-qpl-log'));
+    }));
   }
 
   function _exportCSV(rows) {
@@ -36176,625 +36407,2169 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
     `;
   }
 
-  // ═══ PATTERNS sub-tab · 2026-05-17 v2 — mechanism-honest redesign ═══════
-  // Seven INDEPENDENT method classifiers (no shared composite vote):
-  //   1. Support / Resistance (swing-cluster + touch-count strength)
-  //   2. Trendlines (auto-detected upper/lower + break status)
-  //   3. Volume Profile (POC / VAH / VAL — acceptance state)
-  //   4. Fibonacci (detected swing pair, 9 levels)
-  //   5. Ichimoku Kinko Hyo (cloud + TK + Chikou + future cloud, 4-confluence)
-  //   6. Wyckoff phase (accumulation/markup/distribution/markdown)
-  //   7. Classical patterns (cup-handle, flag, triangle)
-  //
-  // Every empirical claim shows Wilson 95% lower-bound + sample-size flag.
-  // Backend: pattern_engine.py · Cache: data/pattern_hit_rates.json
-  // Replaced 2026-05-17. Elliott Wave dropped (discretionary, no quantifiable edge).
+  const QP6_CSS_TEXT = `.qp6-root * {
+ box-sizing: border-box; 
+}
+.qp6-root .wrap {
+ max-width: 1480px; margin: 0 auto; padding: 28px 32px 64px; 
+}
+  /* ──────── HEADER ──────── */
+.qp6-root .top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 28px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--rule);
+}
+.qp6-root .top h1 {
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.20em;
+    color: var(--ink);
+    margin: 0;
+    text-transform: uppercase;
+    font-weight: 800;
+}
+.qp6-root .top h1 .dim {
+ color: var(--ink-3); margin: 0 12px; 
+}
+.qp6-root .top .meta {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-3);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+  /* ──────── HERO ──────── */
+.qp6-root .hero {
+    background: linear-gradient(135deg, rgba(91,229,124,0.12) 0%, rgba(180,129,245,0.04) 100%), var(--bg-2);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 36px 40px;
+    margin-bottom: 24px;
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 48px;
+    align-items: center;
+    box-shadow: var(--shadow);
+    position: relative;
+    overflow: hidden;
+}
+.qp6-root .hero::before {
+    content: '';
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--gn), var(--violet));
+}
+.qp6-root .hero .eyebrow {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.24em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+.qp6-root .hero .verdict {
+    font-size: 84px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 0.95;
+    color: var(--gn);
+    text-shadow: 0 0 32px rgba(91,229,124,0.18);
+    margin-bottom: 12px;
+}
+.qp6-root .hero .sub-line {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    letter-spacing: 0.10em;
+    color: var(--ink-2);
+    margin-bottom: 18px;
+}
+.qp6-root .hero .sub-line .gn {
+ color: var(--gn); font-weight: 800; 
+}
+.qp6-root .hero .sub-line .am {
+ color: var(--amb); font-weight: 800; 
+}
+.qp6-root .hero .sub-line .rd {
+ color: var(--rd); font-weight: 800; 
+}
+.qp6-root .hero .narrative {
+    font-size: 14.5px;
+    color: var(--ink-1);
+    line-height: 1.65;
+    max-width: 68ch;
+    margin-bottom: 18px;
+}
+.qp6-root .hero .narrative em {
+ color: var(--gn); font-style: normal; font-weight: 700; 
+}
+.qp6-root .hero .narrative em.am {
+ color: var(--amb); 
+}
+  /* Conviction bar */
+.qp6-root .conv-bar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+.qp6-root .conv-bar span {
+    flex: 1;
+    height: 6px;
+    border-radius: 2px;
+    background: var(--bg-3);
+}
+.qp6-root .conv-bar span.fill {
+ background: var(--gn); 
+}
+.qp6-root .conv-bar span.dim {
+ background: var(--rule); 
+}
+  /* Hero right side — composite + ticket */
+.qp6-root .hero-right {
+    display: grid;
+    gap: 14px;
+}
+.qp6-root .composite-ring {
+    background: var(--bg-1);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 22px 24px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 24px;
+    align-items: center;
+}
+.qp6-root .donut {
+    width: 110px; height: 110px;
+    position: relative;
+}
+.qp6-root .donut svg {
+ width: 100%; height: 100%; transform: rotate(-90deg); 
+}
+.qp6-root .donut .num {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--gn);
+}
+.qp6-root .donut .num small {
+    font-size: 11px;
+    color: var(--ink-3);
+    letter-spacing: 0.10em;
+}
+.qp6-root .composite-stats {
+    display: grid;
+    gap: 8px;
+}
+.qp6-root .cs-line {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
+}
+.qp6-root .cs-line .dot {
+    width: 8px; height: 8px; border-radius: 1px;
+}
+.qp6-root .cs-line .dot.gn {
+ background: var(--gn); 
+}
+.qp6-root .cs-line .dot.am {
+ background: var(--amb); 
+}
+.qp6-root .cs-line .dot.rd {
+ background: var(--rd); 
+}
+.qp6-root .cs-line .lbl {
+ color: var(--ink-3); flex: 1; 
+}
+.qp6-root .cs-line .n {
+ color: var(--ink); font-weight: 800; 
+}
+.qp6-root .ticket-card {
+    background: var(--bg-1);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 16px 20px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+}
+.qp6-root .tk-cell .lbl {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+.qp6-root .tk-cell .val {
+    font-family: var(--mono);
+    font-size: 17px;
+    font-weight: 800;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+    line-height: 1.0;
+}
+.qp6-root .tk-cell .val.gn {
+ color: var(--gn); 
+}
+.qp6-root .tk-cell .val.rd {
+ color: var(--rd); 
+}
+.qp6-root .tk-cell .val.cop {
+ color: var(--copper); 
+}
+  /* ──────── SECTION HEADER ──────── */
+.qp6-root .section-h {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 12px;
+    margin: 36px 0 18px;
+    border-bottom: 1px solid var(--rule);
+}
+.qp6-root .section-h .title {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.20em;
+    color: var(--ink);
+    text-transform: uppercase;
+    font-weight: 800;
+}
+.qp6-root .section-h .meta {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-3);
+    letter-spacing: 0.10em;
+}
+  /* ──────── CONFLUENCE + LEVELS DUAL ──────── */
+.qp6-root .conf-grid {
+    display: grid;
+    grid-template-columns: 1.05fr 1fr;
+    gap: 20px;
+    margin-bottom: 24px;
+}
+.qp6-root .panel {
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+}
+.qp6-root .panel-h {
+    padding: 14px 20px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.qp6-root .panel-h .label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    color: var(--ink-2);
+    text-transform: uppercase;
+    font-weight: 700;
+}
+.qp6-root .panel-h .right {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-3);
+    letter-spacing: 0.08em;
+}
+  .panel-
+  /* Radar */
+.qp6-root .radar-wrap {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    padding: 8px;
+    align-items: center;
+}
+.qp6-root .radar-svg {
+ width: 100%; height: auto; max-width: 380px; 
+}
+.qp6-root .radar-key {
+    display: grid;
+    gap: 8px;
+}
+.qp6-root .rk-row {
+    display: grid;
+    grid-template-columns: 14px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+}
+.qp6-root .rk-row .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+}
+.qp6-root .rk-row .dot.gn {
+ background: var(--gn); box-shadow: 0 0 8px rgba(91,229,124,0.4); 
+}
+.qp6-root .rk-row .dot.am {
+ background: var(--amb); box-shadow: 0 0 8px rgba(255,185,92,0.3); 
+}
+.qp6-root .rk-row .dot.rd {
+ background: var(--rd); box-shadow: 0 0 8px rgba(255,107,91,0.3); 
+}
+.qp6-root .rk-row .name {
+ color: var(--ink-1); letter-spacing: 0.08em; 
+}
+.qp6-root .rk-row .vote {
+    font-weight: 800;
+    letter-spacing: 0.10em;
+    font-size: 10.5px;
+}
+.qp6-root .rk-row .vote.gn {
+ color: var(--gn); 
+}
+.qp6-root .rk-row .vote.am {
+ color: var(--amb); 
+}
+.qp6-root .rk-row .vote.rd {
+ color: var(--rd); 
+}
+  /* Key Levels — vertical price ladder with bars */
+.qp6-root .ladder-vis {
+    display: grid;
+    grid-template-rows: repeat(8, auto);
+    gap: 7px;
+    padding: 6px 4px;
+}
+.qp6-root .lvl {
+    display: grid;
+    grid-template-columns: 76px 1fr 100px;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 12px;
+    border-radius: 4px;
+    background: var(--bg-1);
+    border-left: 3px solid var(--rule);
+    transition: transform 120ms, background 120ms;
+}
+.qp6-root .lvl.gn {
+ border-left-color: var(--gn); 
+}
+.qp6-root .lvl.rd {
+ border-left-color: var(--rd); 
+}
+.qp6-root .lvl.cop {
+ border-left-color: var(--copper); background: rgba(212,144,96,0.06); 
+}
+.qp6-root .lvl:hover {
+ transform: translateX(2px); background: var(--bg-3); 
+}
+.qp6-root .lvl-px {
+    font-family: var(--mono);
+    font-size: 14.5px;
+    font-weight: 800;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+}
+.qp6-root .lvl.gn .lvl-px {
+ color: var(--gn); 
+}
+.qp6-root .lvl.rd .lvl-px {
+ color: var(--rd); 
+}
+.qp6-root .lvl.cop .lvl-px {
+ color: var(--copper); 
+}
+.qp6-root .lvl-desc {
+    color: var(--ink-1);
+    font-size: 12px;
+    line-height: 1.4;
+}
+.qp6-root .lvl-meta {
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+}
+.qp6-root .lvl-bar {
+    display: inline-block;
+    height: 4px;
+    background: var(--gn);
+    border-radius: 1px;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+  /* ──────── METHOD MATRIX ──────── */
+.qp6-root .matrix-panel {
+ padding: 0; overflow: visible; 
+}
+.qp6-root table.mtx {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+}
+.qp6-root table.mtx thead th {
+    text-align: left;
+    padding: 12px 16px;
+    background: var(--bg-1);
+    color: var(--ink-3);
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--mono);
+}
+.qp6-root table.mtx thead th.r {
+ text-align: right; 
+}
+.qp6-root table.mtx thead th.c {
+ text-align: center; 
+}
+.qp6-root table.mtx tbody td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--rule);
+    color: var(--ink-1);
+    vertical-align: middle;
+}
+.qp6-root table.mtx tbody td.r {
+ text-align: right; 
+}
+.qp6-root table.mtx tbody td.c {
+ text-align: center; 
+}
+.qp6-root table.mtx tbody tr:last-child td {
+ border-bottom: none; 
+}
+.qp6-root table.mtx tbody tr {
+    cursor: pointer;
+    transition: background 100ms;
+}
+.qp6-root table.mtx tbody tr:hover {
+ background: rgba(255,255,255,0.02); 
+}
+.qp6-root table.mtx tbody tr.active {
+    background: linear-gradient(90deg, var(--gn-2), transparent 80%);
+}
+.qp6-root table.mtx tbody tr.active td:first-child {
+    border-left: 3px solid var(--gn);
+}
+.qp6-root .num-cell {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-3);
+    letter-spacing: 0.10em;
+    font-weight: 700;
+}
+.qp6-root .method-cell {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.qp6-root .method-cell .name {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    color: var(--ink);
+    text-transform: uppercase;
+    font-weight: 700;
+}
+.qp6-root .method-cell .sublabel {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+    letter-spacing: 0.06em;
+    margin-top: 2px;
+}
+.qp6-root .vote-pill {
+    display: inline-block;
+    padding: 5px 14px;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+}
+.qp6-root .vote-pill.gn {
+ background: var(--gn-2); color: var(--gn); 
+}
+.qp6-root .vote-pill.rd {
+ background: var(--rd-2); color: var(--rd); 
+}
+.qp6-root .vote-pill.am {
+ background: var(--amb-2); color: var(--amb); 
+}
+.qp6-root .vote-pill.disc {
+ background: rgba(180,129,245,0.15); color: #b481f5; border: 1px dashed rgba(180,129,245,0.4); 
+}
+.qp6-root .dd-val.disc {
+ color: #b481f5; 
+}
+.qp6-root .wlb-cell {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--ink);
+    text-align: right;
+}
+.qp6-root .wlb-cell.gn {
+ color: var(--gn); 
+}
+.qp6-root .wlb-cell.am {
+ color: var(--amb); 
+}
+.qp6-root .wlb-cell.rd {
+ color: var(--rd); 
+}
+.qp6-root .wlb-cell.dim {
+ color: var(--ink-3); font-weight: 400; 
+}
+.qp6-root .flag-pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.10em;
+    font-weight: 800;
+}
+.qp6-root .flag-pill.ins {
+ background: var(--rd-2); color: var(--rd); 
+}
+.qp6-root .flag-pill.blw {
+ background: var(--amb-2); color: var(--amb); 
+}
+.qp6-root .flag-pill.inst {
+ background: var(--gn-2); color: var(--gn); 
+}
+  /* Sparkline */
+.qp6-root .sparkline-cell {
+ padding: 6px 10px; 
+}
+.qp6-root .spark {
+ width: 120px; height: 36px; display: block; 
+}
+.qp6-root .rationale-cell {
+    color: var(--ink-1);
+    font-size: 12px;
+    line-height: 1.5;
+    font-family: -apple-system, sans-serif;
+}
+.qp6-root .fals-cell {
+    display: block;
+    margin-top: 6px;
+    padding: 5px 8px;
+    background: rgba(255,107,91,0.05);
+    border-left: 2px solid rgba(255,107,91,0.45);
+    border-radius: 0 3px 3px 0;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    letter-spacing: 0.02em;
+}
+.qp6-root .fals-cell b {
+    color: var(--rd);
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    font-size: 10px;
+    margin-right: 6px;
+}
+.qp6-root .fals-cell em {
+    color: var(--ink-1);
+    font-style: normal;
+    font-weight: 600;
+}
+.qp6-root .fals-cell.disc {
+ border-left-color: rgba(180,129,245,0.45); background: rgba(180,129,245,0.05); 
+}
+.qp6-root .fals-cell.disc b {
+ color: #b481f5; 
+}
+  /* ──────── DRILL-DOWN ──────── */
+.qp6-root .drill {
+    background: linear-gradient(135deg, var(--bg-2) 0%, var(--bg-1) 100%);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 24px;
+    box-shadow: var(--shadow);
+}
+.qp6-root .drill-h {
+    padding: 18px 24px;
+    background: linear-gradient(135deg, rgba(91,229,124,0.10) 0%, transparent 100%);
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+.qp6-root .drill-h .title {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--ink);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+.qp6-root .drill-h .vote-pill {
+ font-size: 12px; padding: 6px 16px; 
+}
+.qp6-root .drill-h .meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+    letter-spacing: 0.10em;
+}
+  .drill-
+.qp6-root .drill-claim {
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--ink);
+    margin-bottom: 24px;
+}
+.qp6-root .drill-claim em {
+ color: var(--gn); font-style: normal; font-weight: 800; 
+}
+.qp6-root .drill-claim em.rd {
+ color: var(--rd); 
+}
+.qp6-root .drill-claim em.am {
+ color: var(--amb); 
+}
+.qp6-root .drill-data {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 22px;
+}
+.qp6-root .dd-card {
+    background: var(--bg-1);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 14px 16px;
+}
+.qp6-root .dd-lbl {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+.qp6-root .dd-val {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--ink);
+    line-height: 1.0;
+    letter-spacing: -0.01em;
+}
+.qp6-root .dd-val.gn {
+ color: var(--gn); 
+}
+.qp6-root .dd-val.rd {
+ color: var(--rd); 
+}
+.qp6-root .dd-val.am {
+ color: var(--amb); 
+}
+.qp6-root .dd-val.cop {
+ color: var(--copper); 
+}
+.qp6-root .dd-sub {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-2);
+    margin-top: 5px;
+}
+.qp6-root .falsify {
+    margin-top: 18px;
+    padding: 14px 18px;
+    background: var(--bg-1);
+    border-left: 3px solid var(--rd);
+    border-radius: 0 4px 4px 0;
+    font-size: 13px;
+    color: var(--ink-1);
+    line-height: 1.55;
+}
+.qp6-root .falsify .lbl {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.20em;
+    color: var(--rd);
+    font-weight: 800;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+.qp6-root #drill-chart {
+    background: var(--bg-1);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 12px 14px;
+    min-height: 320px;
+    position: relative;
+}
+.qp6-root #drill-chart svg {
+ width: 100%; height: auto; display: block; 
+}
+.qp6-root .dc-band {
+ fill: rgba(91,229,124,0.06); stroke: none; 
+}
+.qp6-root .dc-axis-y {
+ fill: #5d6469; font-family: var(--mono); font-size: 9px; 
+}
+.qp6-root .dc-axis-x {
+ fill: #5d6469; font-family: var(--mono); font-size: 9px; 
+}
+.qp6-root .dc-spot {
+ fill: var(--copper); stroke: #fff; stroke-width: 1.5; 
+}
+.qp6-root .dc-line-bull {
+ stroke: var(--gn); stroke-dasharray: 3,3; 
+}
+.qp6-root .dc-line-bear {
+ stroke: var(--rd); stroke-dasharray: 3,3; 
+}
+.qp6-root .dc-line-mid {
+ stroke: var(--copper); stroke-dasharray: 3,3; 
+}
+.qp6-root .dc-label {
+ font-family: var(--mono); font-size: 9.5px; font-weight: 700; 
+}
+  /* ──────── WYCKOFF PANEL ──────── */
+.qp6-root .wy-panel {
+    background: linear-gradient(135deg, rgba(92,209,197,0.06) 0%, var(--bg-2) 100%);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--teal);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 24px;
+    box-shadow: var(--shadow);
+}
+.qp6-root .wy-banner {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 14px 20px;
+    background: rgba(92,209,197,0.08);
+    border-bottom: 1px solid var(--rule);
+}
+.qp6-root .wy-banner-pill {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.20em;
+    color: var(--teal);
+    padding: 5px 14px;
+    border-radius: 3px;
+    background: rgba(92,209,197,0.18);
+    border: 1px solid rgba(92,209,197,0.4);
+    font-weight: 800;
+    flex-shrink: 0;
+}
+.qp6-root .wy-banner-text {
+    color: var(--ink-1);
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+.qp6-root .wy-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.1fr;
+    gap: 28px;
+    padding: 24px 28px;
+}
+.qp6-root .wy-wheel-wrap {
+    background: var(--bg-1);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 18px;
+}
+.qp6-root .wy-side {
+    display: grid;
+    gap: 14px;
+    align-content: start;
+}
+.qp6-root .wy-card {
+    background: var(--bg-1);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 14px 18px;
+}
+.qp6-root .wy-card-h {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 800;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+}
+.qp6-root .wy-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+.qp6-root .wy-metric {
+    padding: 10px 12px;
+    border-radius: 4px;
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+}
+.qp6-root .wy-m-lbl {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 3px;
+}
+.qp6-root .wy-m-val {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--ink);
+    line-height: 1.0;
+    letter-spacing: -0.01em;
+}
+.qp6-root .wy-m-val.gn {
+ color: var(--gn); 
+}
+.qp6-root .wy-m-val.rd {
+ color: var(--rd); 
+}
+.qp6-root .wy-m-val.am {
+ color: var(--amb); 
+}
+.qp6-root .wy-m-sub {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--ink-2);
+    margin-top: 3px;
+}
+.qp6-root .wy-subphase-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    margin-bottom: 12px;
+}
+.qp6-root .wy-sp {
+    padding: 10px 8px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.10em;
+    font-weight: 700;
+    border-radius: 3px;
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    color: var(--ink-3);
+    position: relative;
+}
+.qp6-root .wy-sp.early {
+ border-top: 2px solid #5cd1c5; 
+}
+.qp6-root .wy-sp.mid {
+ border-top: 2px solid var(--gn); 
+}
+.qp6-root .wy-sp.late {
+ border-top: 2px solid var(--amb); 
+}
+.qp6-root .wy-sp.exhaust {
+ border-top: 2px solid var(--rd); 
+}
+.qp6-root .wy-sp.active {
+    background: rgba(91,229,124,0.10);
+    color: var(--gn);
+    box-shadow: 0 0 12px rgba(91,229,124,0.18);
+    border-color: rgba(91,229,124,0.30);
+}
+.qp6-root .wy-sp-text {
+    font-size: 12px;
+    color: var(--ink-2);
+    line-height: 1.5;
+}
+.qp6-root .wy-trans {
+    display: grid;
+    gap: 12px;
+}
+.qp6-root .wy-trans-row {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 10px;
+    align-items: start;
+    font-size: 12.5px;
+    color: var(--ink-1);
+    line-height: 1.5;
+}
+.qp6-root .wy-trans-icon {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 800;
+    line-height: 1.0;
+    text-align: center;
+    margin-top: 1px;
+}
+.qp6-root .wy-trans-icon.gn {
+ color: var(--gn); 
+}
+.qp6-root .wy-trans-icon.am {
+ color: var(--amb); 
+}
+.qp6-root .wy-trans-icon.rd {
+ color: var(--rd); 
+}
+.qp6-root .wy-trans-status {
+    display: block;
+    margin-top: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-2);
+    letter-spacing: 0.04em;
+}
+.qp6-root .wy-vps {
+    border-top: 1px solid var(--rule);
+    padding: 18px 24px 22px;
+    background: var(--bg-1);
+}
+.qp6-root .wy-vps-h {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 800;
+    margin-bottom: 12px;
+}
+.qp6-root .wy-vps-foot {
+    font-size: 12px;
+    color: var(--ink-2);
+    line-height: 1.55;
+    margin-top: 10px;
+}
+  /* ──────── ELLIOTT WAVE PANEL ──────── */
+.qp6-root .ew-panel {
+    background: linear-gradient(135deg, rgba(180,129,245,0.06) 0%, var(--bg-2) 100%);
+    border: 1px solid var(--rule);
+    border-left: 3px solid #b481f5;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 24px;
+    box-shadow: var(--shadow);
+}
+.qp6-root .ew-banner {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 14px 20px;
+    background: rgba(180,129,245,0.08);
+    border-bottom: 1px solid var(--rule);
+}
+.qp6-root .ew-banner-pill {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.20em;
+    color: #b481f5;
+    padding: 5px 14px;
+    border-radius: 3px;
+    background: rgba(180,129,245,0.18);
+    border: 1px dashed rgba(180,129,245,0.4);
+    font-weight: 800;
+    flex-shrink: 0;
+}
+.qp6-root .ew-banner-text {
+    color: var(--ink-1);
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+.qp6-root .ew-grid {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr;
+    gap: 28px;
+    padding: 24px 28px;
+}
+.qp6-root .ew-chart-wrap {
+    background: var(--bg-1);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 18px 16px;
+}
+.qp6-root .ew-side {
+    display: grid;
+    gap: 14px;
+    align-content: start;
+}
+.qp6-root .ew-rules, .qp6-root .ew-targets, .qp6-root .ew-inval {
+    background: var(--bg-1);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 14px 18px;
+}
+.qp6-root .ew-rules-h, .qp6-root .ew-target-h, .qp6-root .ew-inval-lbl {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 800;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+}
+.qp6-root .ew-rule {
+    display: grid;
+    grid-template-columns: 24px 1fr;
+    gap: 10px;
+    padding: 9px 0;
+    font-size: 12.5px;
+    color: var(--ink-1);
+    line-height: 1.4;
+    border-bottom: 1px dashed var(--rule);
+}
+.qp6-root .ew-rule:last-child {
+ border-bottom: none; 
+}
+.qp6-root .ew-rule-check {
+    font-family: var(--mono);
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--gn);
+    text-align: center;
+}
+.qp6-root .ew-rule.fail .ew-rule-check {
+ color: var(--rd); 
+}
+.qp6-root .ew-rule-meta {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-2);
+    letter-spacing: 0.04em;
+}
+.qp6-root .ew-target-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 8px 10px;
+    margin: 0 -10px;
+    border-radius: 3px;
+}
+.qp6-root .ew-tgt-lbl {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-2);
+    letter-spacing: 0.06em;
+}
+.qp6-root .ew-tgt-px {
+    font-family: var(--mono);
+    font-size: 14px;
+}
+.qp6-root .ew-inval {
+    background: rgba(255,107,91,0.04);
+    border-left: 3px solid var(--rd);
+}
+.qp6-root .ew-inval-lbl {
+ color: var(--rd); 
+}
+.qp6-root .ew-inval-px {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--rd);
+    line-height: 1.0;
+    margin: 4px 0 8px;
+    letter-spacing: -0.02em;
+}
+.qp6-root .ew-inval-text {
+    font-size: 12px;
+    color: var(--ink-2);
+    line-height: 1.5;
+}
+  /* ──────── SCENARIOS ──────── */
+.qp6-root .scn-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+}
+.qp6-root .scn-card {
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 22px 24px;
+    box-shadow: var(--shadow);
+    position: relative;
+    overflow: hidden;
+    transition: transform 150ms;
+}
+.qp6-root .scn-card:hover {
+ transform: translateY(-3px); 
+}
+.qp6-root .scn-card.gn {
+    border-top: 4px solid var(--gn);
+    background: linear-gradient(180deg, rgba(91,229,124,0.06) 0%, var(--bg-2) 30%);
+}
+.qp6-root .scn-card.am {
+    border-top: 4px solid var(--amb);
+    background: linear-gradient(180deg, rgba(255,185,92,0.05) 0%, var(--bg-2) 30%);
+}
+.qp6-root .scn-card.rd {
+    border-top: 4px solid var(--rd);
+    background: linear-gradient(180deg, rgba(255,107,91,0.05) 0%, var(--bg-2) 30%);
+}
+.qp6-root .scn-h {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 12px;
+}
+.qp6-root .scn-lbl {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+.qp6-root .scn-lbl.gn {
+ color: var(--gn); 
+}
+.qp6-root .scn-lbl.am {
+ color: var(--amb); 
+}
+.qp6-root .scn-lbl.rd {
+ color: var(--rd); 
+}
+.qp6-root .scn-prob {
+    font-family: var(--mono);
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.0;
+}
+.qp6-root .scn-prob.gn {
+ color: var(--gn); 
+}
+.qp6-root .scn-prob.am {
+ color: var(--amb); 
+}
+.qp6-root .scn-prob.rd {
+ color: var(--rd); 
+}
+.qp6-root .scn-bar {
+    height: 4px;
+    background: var(--bg-3);
+    border-radius: 2px;
+    margin-bottom: 18px;
+    overflow: hidden;
+}
+.qp6-root .scn-fill {
+ display: block; height: 100%; border-radius: 2px; 
+}
+.qp6-root .scn-fill.gn {
+ background: var(--gn); box-shadow: 0 0 8px rgba(91,229,124,0.3); 
+}
+.qp6-root .scn-fill.am {
+ background: var(--amb); box-shadow: 0 0 8px rgba(255,185,92,0.25); 
+}
+.qp6-root .scn-fill.rd {
+ background: var(--rd); box-shadow: 0 0 8px rgba(255,107,91,0.25); 
+}
+.qp6-root .scn-target {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 6px;
+}
+.qp6-root .scn-px {
+    font-family: var(--mono);
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.0;
+}
+.qp6-root .scn-px.gn {
+ color: var(--gn); 
+}
+.qp6-root .scn-px.am {
+ color: var(--amb); 
+}
+.qp6-root .scn-px.rd {
+ color: var(--rd); 
+}
+.qp6-root .scn-pct {
+    font-family: var(--mono);
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+}
+.qp6-root .scn-pct.gn {
+ color: var(--gn); 
+}
+.qp6-root .scn-pct.am {
+ color: var(--amb); 
+}
+.qp6-root .scn-pct.rd {
+ color: var(--rd); 
+}
+.qp6-root .scn-meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-2);
+    letter-spacing: 0.06em;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px dashed var(--rule);
+}
+.qp6-root .scn-section {
+ margin-bottom: 14px; 
+}
+.qp6-root .scn-section-h {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
+    color: var(--ink-3);
+    font-weight: 800;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+}
+.qp6-root .scn-text {
+    color: var(--ink-1);
+    font-size: 12.5px;
+    line-height: 1.55;
+}
+.qp6-root .scn-methods {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+.qp6-root .m-chip {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.10em;
+    font-weight: 800;
+    border: 1px solid var(--rule);
+}
+.qp6-root .m-chip.gn {
+ background: var(--gn-2); color: var(--gn); border-color: rgba(91,229,124,0.30); 
+}
+.qp6-root .m-chip.am {
+ background: var(--amb-2); color: var(--amb); border-color: rgba(255,185,92,0.30); 
+}
+.qp6-root .m-chip.rd {
+ background: var(--rd-2); color: var(--rd); border-color: rgba(255,107,91,0.30); 
+}
+.qp6-root .m-chip.dim {
+ background: transparent; color: var(--ink-3); 
+}
+.qp6-root .scn-ev {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-2);
+    letter-spacing: 0.06em;
+}
+  /* ──────── ACTION LADDER ──────── */
+.qp6-root .action-strip {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 6px;
+    margin-bottom: 24px;
+}
+.qp6-root .action-cell {
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 16px 14px;
+    text-align: center;
+    transition: transform 120ms;
+    position: relative;
+}
+.qp6-root .action-cell:hover {
+ transform: translateY(-3px); 
+}
+.qp6-root .action-cell.gn {
+ border-color: rgba(91,229,124,0.30); background: linear-gradient(180deg, rgba(91,229,124,0.05), var(--bg-2)); 
+}
+.qp6-root .action-cell.rd {
+ border-color: rgba(255,107,91,0.30); background: linear-gradient(180deg, rgba(255,107,91,0.05), var(--bg-2)); 
+}
+.qp6-root .action-cell.am {
+ border-color: rgba(255,185,92,0.30); background: linear-gradient(180deg, rgba(255,185,92,0.05), var(--bg-2)); 
+}
+.qp6-root .action-cell.cop {
+    border-color: var(--copper);
+    background: linear-gradient(180deg, rgba(212,144,96,0.10), var(--bg-2));
+    box-shadow: 0 0 24px rgba(212,144,96,0.10);
+}
+.qp6-root .ac-px {
+    font-family: var(--mono);
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+    margin-bottom: 6px;
+}
+.qp6-root .ac-px.gn {
+ color: var(--gn); 
+}
+.qp6-root .ac-px.rd {
+ color: var(--rd); 
+}
+.qp6-root .ac-px.cop {
+ color: var(--copper); 
+}
+.qp6-root .ac-px.am {
+ color: var(--amb); 
+}
+.qp6-root .ac-act {
+    font-size: 11px;
+    color: var(--ink-1);
+    line-height: 1.4;
+    margin-bottom: 8px;
+}
+.qp6-root .ac-src {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 700;
+    padding-top: 6px;
+    border-top: 1px dashed var(--rule);
+}
+  /* ──────── EXECUTION TICKET (closing) ──────── */
+.qp6-root .exec-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 24px;
+}
+.qp6-root .exec-narrative {
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 28px 32px;
+}
+.qp6-root .exec-narrative h3 {
+    margin: 0 0 16px 0;
+    font-size: 22px;
+    color: var(--ink);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+}
+.qp6-root .exec-narrative p {
+    color: var(--ink-1);
+    line-height: 1.7;
+    margin: 0 0 14px 0;
+    font-size: 13.5px;
+}
+.qp6-root .exec-narrative .rr-chip {
+    display: inline-block;
+    padding: 6px 14px;
+    background: rgba(255,185,92,0.12);
+    color: var(--amb);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.10em;
+    font-weight: 800;
+    border-radius: 3px;
+    margin-right: 8px;
+}
+.qp6-root .exec-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+.qp6-root .ec {
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 20px 22px;
+}
+.qp6-root .ec.gn {
+ border-color: rgba(91,229,124,0.30); background: linear-gradient(180deg, rgba(91,229,124,0.06), var(--bg-2)); 
+}
+.qp6-root .ec.rd {
+ border-color: rgba(255,107,91,0.30); background: linear-gradient(180deg, rgba(255,107,91,0.06), var(--bg-2)); 
+}
+.qp6-root .ec .lbl {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.20em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+.qp6-root .ec .val {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+    line-height: 1.0;
+}
+.qp6-root .ec.gn .val {
+ color: var(--gn); 
+}
+.qp6-root .ec.rd .val {
+ color: var(--rd); 
+}
+.qp6-root .ec .sub {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-2);
+    margin-top: 6px;
+}`;
+
+  // ═══ PATTERNS sub-tab · 2026-05-17 v6 — visual-rich unified port ═══════
+  // 8 method classifiers (7 quantitative + 1 discretionary Elliott Wave)
+  // Data source: t.pattern_data (emitted by pattern_engine.py)
+  //   - composite { verdict, conviction, bull/bear/neutral_count, narrative, discretionary_count }
+  //   - wyckoff / classical / volume_profile / fibonacci / ichimoku / sr_levels / trendlines
+  //   - elliott_wave { vote, current_wave, rules_passed, wave_points, w5_target_*, invalidation_level }
+  //   - key_levels [] / action_ladder [] / scenarios { bull, base, bear } / execution_ticket
+  // Visual: hero · radar · key levels · method matrix w/ inline falsification
+  //         · Wyckoff dedicated panel · EW dedicated panel · drilldown
+  //         · 3 scenario cards + decision tree · action ladder · execution ticket
+  function _ensurePatternsV6Styles() {
+    if (document.getElementById('qp6-styles')) return;
+    const css = document.createElement('style');
+    css.id = 'qp6-styles';
+    css.textContent = QP6_CSS_TEXT;
+    document.head.appendChild(css);
+  }
+  function _qp6Money(v) { return v == null ? '—' : '$' + (+v).toFixed(2); }
+  function _qp6Pct(v, d) { if (v == null) return '—'; const n = +v; return (n >= 0 ? '+' : '') + n.toFixed(d == null ? 1 : d) + '%'; }
+  function _qp6PctRaw(v) { return v == null ? '—' : (+v).toFixed(0) + '%'; }
+  function _qp6VoteCls(vote) {
+    if (vote === 'BULLISH') return 'gn';
+    if (vote === 'BEARISH') return 'rd';
+    if (vote === 'NEUTRAL') return 'am';
+    if (vote === 'DISC' || vote === 'DISCRETIONARY') return 'disc';
+    return '';
+  }
+  function _qp6Esc(s) { return s == null ? '' : String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  // Cache per-ticker data + ohlc for chart re-render
+  window._qp6Ctx = window._qp6Ctx || {};
+
   function renderPatternsTab(t) {
-    const _g = (...paths) => {
-      for (const p of paths) {
-        const parts = p.split('.');
-        let v = t;
-        for (const k of parts) { if (v == null) break; v = v[k]; }
-        if (v != null && v !== '') return v;
-      }
-      return null;
-    };
-    const _num = (...paths) => { const v = _g(...paths); const n = +v; return isFinite(n) ? n : null; };
+    _ensurePatternsV6Styles();
+    const pd = (t && t.pattern_data) || {};
+    const composite = pd.composite || {};
+    const wy = pd.wyckoff || {};
+    const cl = pd.classical || {};
+    const vp = pd.volume_profile || {};
+    const fi = pd.fibonacci || {};
+    const ic = pd.ichimoku || {};
+    const sr = pd.sr_levels || {};
+    const tl = pd.trendlines || {};
+    const ew = pd.elliott_wave || {};
+    const keyLevels = pd.key_levels || [];
+    const actionLadder = pd.action_ladder || [];
+    const scenarios = pd.scenarios || {};
+    const ticket = pd.execution_ticket || {};
 
-    const px = _num('price') || 0;
-    const stop = _num('stop') || 0;
-    const t1 = _num('target1', 't1') || 0;
-    const t2 = _num('target2', 't2') || 0;
     const tk = (t.ticker || '—').toUpperCase();
-    const hasOHLC = Array.isArray(t.ohlc_90d) && t.ohlc_90d.length >= 30;
-    const eLo = _num('entry_low')  || +(px * 0.99).toFixed(2);
-    const eHi = _num('entry_high') || +(px * 1.01).toFixed(2);
+    const spot = +t.price || 0;
 
-    // Backend-driven pattern data (pattern_engine.py output).
-    const pd = (t.pattern_data && !t.pattern_data.error) ? t.pattern_data : null;
-    const phr = t.pattern_hit_rates || {};
-    const wy = (pd && pd.wyckoff) || null;
-    const cls = (pd && pd.classical) || null;
-    const vp = (pd && pd.volume_profile) || null;
-    const fi = (pd && pd.fibonacci) || null;
-    const ic = (pd && pd.ichimoku) || null;
-    const sr = (pd && pd.sr_levels) || null;
-    const tl = (pd && pd.trendlines) || null;
-    const comp = (pd && pd.composite) || null;
+    // Build the 8 METHODS array for the matrix + drilldown
+    const METHODS = _buildMethodsArray(pd);
 
-    // Vote helpers
-    const voteColor = (v) => v === 'BULLISH' ? 'var(--gn)' : v === 'BEARISH' ? 'var(--rd)' : 'var(--amb)';
+    // Cache for click handlers + chart re-mount
+    window._qp6Ctx[tk] = { t, pd, METHODS, spot };
 
-    // Composite from backend votes. Falls back if pd is missing.
-    const compCall = comp ? comp.verdict.replace('-LEAN','') : 'NEUTRAL';
-    const conviction = comp ? comp.conviction : 'LOW';
-    const compC = voteColor(compCall);
-    const convC = conviction === 'HIGH' ? 'var(--gn)' : conviction === 'MEDIUM' ? 'var(--amb)' : 'var(--rd)';
+    const hero = _renderHero(composite, ticket, spot, tk);
+    const radarAndLevels = _renderRadarAndLevels(METHODS, keyLevels, spot);
+    const matrix = _renderMethodMatrix(METHODS);
+    const wyckoffPanel = _renderWyckoffPanel(wy, tk);
+    const ewPanel = _renderElliottPanel(ew, spot, tk);
+    const drilldown = _renderDrilldownShell(METHODS);
+    const scenariosBlk = _renderScenarios(scenarios, spot);
+    const actionLadderBlk = _renderActionLadder(actionLadder, spot);
+    const executionTicket = _renderExecutionTicket(ticket, composite);
 
-    // Stash for chart init
-    window._patternsCtx = window._patternsCtx || {};
-    window._patternsCtx[tk] = {
-      ticker: tk, ohlc: t.ohlc_90d || null, hasOHLC,
-      px, stop, t1, t2,
-      vp, fi, ic, sr, tl, cls,
-      ema21: _num('technicals.indicators.ema21', 'ema21'),
-      ema50: _num('technicals.indicators.ema50', 'ema50'),
-    };
-
-    // Helpers
-    const tile = (k, v, sub, cls) => `<div style="padding:12px 14px;border:1px solid var(--rule);border-radius:4px;background:var(--bg-2)">
-      <div style="font-family:var(--mono);font-size:10px;letter-spacing:0.14em;color:var(--ink-3);text-transform:uppercase;font-weight:700;margin-bottom:4px">${k}</div>
-      <div style="font-family:var(--mono);font-size:20px;font-weight:800;line-height:1.1;color:${cls === 'gn' ? 'var(--gn)' : cls === 'rd' ? 'var(--rd)' : cls === 'am' ? 'var(--amb)' : cls === 'cop' ? 'var(--copper)' : 'var(--ink)'}">${v}</div>
-      ${sub ? `<div style="font-family:var(--mono);font-size:10.5px;color:var(--ink-2);margin-top:3px">${sub}</div>` : ''}
+    return `<div class="qp6-root">
+      ${hero}
+      ${radarAndLevels}
+      ${matrix}
+      ${wyckoffPanel}
+      ${ewPanel}
+      ${drilldown}
+      ${scenariosBlk}
+      ${actionLadderBlk}
+      ${executionTicket}
     </div>`;
+  }
 
-    const sectionVerdict = (call, prose, falsification) => {
-      const c = voteColor(call);
-      return `<div style="margin-top:14px;padding:11px 14px;border-left:3px solid ${c};background:color-mix(in oklch, ${c} 7%, transparent);border-radius:0 4px 4px 0;font-size:12.5px;color:var(--ink-1);line-height:1.6">
-        <span style="display:inline-block;padding:3px 12px;border-radius:3px;font-family:var(--mono);font-size:11.5px;font-weight:800;letter-spacing:0.14em;margin-right:10px;background:color-mix(in oklch, ${c} 22%, transparent);color:${c}">${call}</span>
-        ${prose}
-        ${falsification ? `<span style="display:block;margin-top:6px;font-size:11.5px;color:var(--ink-2);font-family:var(--mono)"><b style="color:var(--ink-1)">Falsification:</b> ${falsification}</span>` : ''}
-      </div>`;
-    };
-
-    // Wilson-LB / sample-size badge — same convention as SMC tab.
-    const flagColor = (f) => f === 'INSTITUTIONAL_FLOOR' ? 'var(--gn)' : f === 'BELOW_FLOOR' ? 'var(--amb)' : 'var(--rd)';
-    const flagLabel = (f) => f === 'INSTITUTIONAL_FLOOR' ? 'n≥30' : f === 'BELOW_FLOOR' ? '10≤n<30' : 'n<10';
-    const wlbTile = (label, rec) => {
-      if (!rec || !rec.sample_size_flag) {
-        return tile(label, '—', 'no data', '');
-      }
-      const c = flagColor(rec.sample_size_flag);
-      const flagTxt = flagLabel(rec.sample_size_flag);
-      const lbCol = rec.wilson_lb >= 45 ? 'gn' : rec.wilson_lb >= 35 ? 'am' : 'rd';
-      return `<div style="padding:12px 14px;border:1px solid var(--rule);border-radius:4px;background:var(--bg-2);position:relative">
-        <div style="font-family:var(--mono);font-size:10px;letter-spacing:0.14em;color:var(--ink-3);text-transform:uppercase;font-weight:700;margin-bottom:4px">${label}</div>
-        <div style="font-family:var(--mono);font-size:20px;font-weight:800;line-height:1.1;color:${lbCol === 'gn' ? 'var(--gn)' : lbCol === 'am' ? 'var(--amb)' : 'var(--rd)'}">${rec.wilson_lb.toFixed(1)}%</div>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--ink-2);margin-top:3px">
-          WR ${rec.win_rate.toFixed(1)}% · n=${rec.total} · <span style="color:${c};font-weight:700">${flagTxt}</span>
-        </div>
-      </div>`;
-    };
-
-    // Method-vote pills — sourced INDEPENDENTLY from backend (no shared compCall).
-    const methodVotes = [
-      { name: 'S / R',         h: 'support / resistance', d: sr },
-      { name: 'Trendlines',    h: 'auto-fit channel',     d: tl },
-      { name: 'Vol Profile',   h: 'POC · VAH · VAL',      d: vp },
-      { name: 'Fibonacci',     h: 'detected swing',       d: fi },
-      { name: 'Ichimoku',      h: 'cloud + TK',           d: ic },
-      { name: 'Wyckoff',       h: 'phase classifier',     d: wy },
-      { name: 'Classical',     h: 'cup · flag · tri',     d: cls },
+  function _buildMethodsArray(pd) {
+    const w = pd.wyckoff || {}, c = pd.classical || {}, v = pd.volume_profile || {},
+          f = pd.fibonacci || {}, i = pd.ichimoku || {}, s = pd.sr_levels || {},
+          t = pd.trendlines || {}, e = pd.elliott_wave || {};
+    const wlb = (k) => '—';  // TODO: wire pattern_hit_rates if present
+    return [
+      { idx: 0, num: '01', title: 'Wyckoff',        sub: 'phase classifier (4-phase cycle)',
+        vote: w.vote, conf: w.confidence, wlb: wlb('wyckoff'),
+        rationale: w.rationale || '—', fals: w.falsification || '—', disc: false },
+      { idx: 1, num: '02', title: 'Fibonacci',      sub: 'detected swing pair + 9 levels',
+        vote: f.vote, conf: f.confidence, wlb: wlb('fibonacci'),
+        rationale: f.rationale || '—', fals: f.falsification || '—', disc: false },
+      { idx: 2, num: '03', title: 'Ichimoku',       sub: '4-confluence (cloud + TK + Chikou)',
+        vote: i.vote, conf: i.confidence, wlb: wlb('ichimoku'),
+        rationale: i.rationale || '—', fals: i.falsification || '—', disc: false },
+      { idx: 3, num: '04', title: 'Trendlines',     sub: 'auto-fit upper/lower + break status',
+        vote: t.vote, conf: t.confidence, wlb: wlb('trendlines'),
+        rationale: t.rationale || '—', fals: t.falsification || '—', disc: false },
+      { idx: 4, num: '05', title: 'Volume Profile', sub: 'POC / VAH / VAL acceptance',
+        vote: v.vote, conf: v.confidence, wlb: wlb('volume_profile'),
+        rationale: v.rationale || '—', fals: v.falsification || '—', disc: false },
+      { idx: 5, num: '06', title: 'S / R',          sub: 'swing-cluster + touch-count',
+        vote: s.vote, conf: s.confidence, wlb: wlb('sr_levels'),
+        rationale: s.rationale || '—', fals: s.falsification || '—', disc: false },
+      { idx: 6, num: '07', title: 'Classical',      sub: 'Bulkowski geometric scanner',
+        vote: c.vote, conf: c.confidence, wlb: wlb('classical'),
+        rationale: c.rationale || '—', fals: c.falsification || '—', disc: false },
+      { idx: 7, num: '08', title: 'Elliott Wave',   sub: 'discretionary · 5-wave impulse',
+        vote: e.vote, conf: e.confidence, wlb: '—',
+        rationale: e.rationale || '—', fals: e.falsification || '—', disc: true },
     ];
+  }
 
-    // Data-quality banner — surfaces when backend pattern_data not yet flowing.
-    const dataBanner = pd ? '' :
-      `<div style="padding:11px 14px;margin-bottom:14px;background:color-mix(in oklch, var(--amb) 6%, var(--bg-2));border-left:3px solid var(--amb);border-radius:0 4px 4px 0;font-size:12.5px;color:var(--ink-1);line-height:1.55">
-         <b style="color:var(--amb);font-family:var(--mono);letter-spacing:0.14em;font-size:11px">BACKEND PENDING</b> &nbsp; pattern_engine.py output not yet in bundle for ${tk}. Run next scan to populate <code style="font-family:var(--mono);color:var(--copper)">pattern_data</code>. Showing placeholders only.
-       </div>`;
+  // ─── Hero ─────────────────────────────────────────────────────────────
+  function _renderHero(composite, ticket, spot, tk) {
+    const verdict = composite.verdict || 'NEUTRAL';
+    const conv = composite.conviction || 'LOW';
+    const bull = composite.bull_count || 0, bear = composite.bear_count || 0, neutral = composite.neutral_count || 0;
+    const quantTotal = bull + bear + neutral;
+    const discCnt = composite.discretionary_count || 0;
+    const discBull = composite.discretionary_bull || 0;
+    const narrative = composite.narrative || 'Pattern data loading…';
 
-    return `
-      <!-- HERO COMPOSITE — driven by pattern_engine.composite -->
-      <div style="display:flex;gap:24px;align-items:center;padding:22px 26px;margin-bottom:20px;background:linear-gradient(135deg, color-mix(in oklch, ${compC} 5%, var(--bg-2)) 0%, var(--bg-2) 60%);border:1px solid var(--rule);border-left:3px solid ${compC};border-radius:4px">
-        <div style="min-width:220px">
-          <div style="font-family:var(--mono);font-size:10.5px;letter-spacing:0.16em;color:var(--ink-3);font-weight:700;text-transform:uppercase;margin-bottom:6px">Pattern Composite</div>
-          <div style="font-size:38px;font-weight:800;color:${compC};letter-spacing:-0.01em;line-height:1.05">${compCall}</div>
-          <div style="margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--ink-2);letter-spacing:0.08em">
-            ${comp ? `${comp.bull_count}B · ${comp.neutral_count}N · ${comp.bear_count}S of 7 methods` : '7 methods awaiting backend'}
+    const vCls = _qp6VoteCls(verdict.replace('-LEAN', ''));
+    // Donut: bull_count / (quantTotal) for primary ring, plus discretionary segment if any
+    const bullPct = quantTotal > 0 ? bull / quantTotal : 0;
+    const circ = 2 * Math.PI * 42; // ≈ 263.89
+    const bullDash = (bullPct * circ).toFixed(2);
+    const discPct = quantTotal > 0 ? discBull / quantTotal * 0.20 : 0; // small wedge
+    const discDash = (discPct * circ).toFixed(2);
+
+    const convBars = Array.from({length: 7}, (_, i) => {
+      const filled = (conv === 'HIGH' && i < 6) || (conv === 'MEDIUM' && i < 4) || (conv === 'LOW' && i < 2);
+      return `<span class="${filled ? 'fill' : 'dim'}"></span>`;
+    }).join('');
+
+    return `<div class="hero">
+      <div>
+        <div class="eyebrow">PATTERN COMPOSITE · ${_qp6Esc(tk)}</div>
+        <div class="verdict ${vCls}">${_qp6Esc(verdict)}</div>
+        <div class="sub-line"><span class="gn">${bull} BULLISH</span> · <span class="am">${neutral} NEUTRAL</span> · <span class="rd">${bear} BEARISH</span> · ${conv} CONVICTION${discCnt ? ` <span style="color:var(--ink-3);font-size:10.5px;margin-left:8px">(${discCnt} discretionary)</span>` : ''}</div>
+        <div class="narrative">${_qp6Esc(narrative)}</div>
+        <div class="conv-bar">${convBars}</div>
+        <div class="sub-line"><span class="gn">${bull}/${quantTotal} METHODS ALIGNED</span> · ${conv} CONVICTION THRESHOLD</div>
+      </div>
+      <div class="hero-right">
+        <div class="composite-ring">
+          <div class="donut">
+            <svg viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#262b2d" stroke-width="9"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#5be57c" stroke-width="9"
+                      stroke-dasharray="${bullDash} ${circ.toFixed(2)}" stroke-dashoffset="0"
+                      style="filter:drop-shadow(0 0 4px rgba(91,229,124,0.6))"/>
+              ${discBull > 0 ? `<circle cx="50" cy="50" r="42" fill="none" stroke="#b481f5" stroke-width="9"
+                      stroke-dasharray="${discDash} ${circ.toFixed(2)}" stroke-dashoffset="-${bullDash}"
+                      style="filter:drop-shadow(0 0 4px rgba(180,129,245,0.5))"/>` : ''}
+            </svg>
+            <div class="num">${bull}<small>/${quantTotal}</small></div>
+          </div>
+          <div class="composite-stats">
+            <div class="cs-line"><div class="dot gn"></div><span class="lbl">BULLISH</span><span class="n">${bull}</span></div>
+            <div class="cs-line"><div class="dot am"></div><span class="lbl">NEUTRAL</span><span class="n">${neutral}</span></div>
+            <div class="cs-line"><div class="dot rd"></div><span class="lbl">BEARISH</span><span class="n">${bear}</span></div>
+            ${discCnt ? `<div class="cs-line" style="opacity:0.6;margin-top:6px;padding-top:6px;border-top:1px dashed var(--rule)">
+              <div class="dot" style="background:#b481f5"></div>
+              <span class="lbl">DISC</span><span class="n">${discCnt}</span>
+            </div>` : ''}
           </div>
         </div>
-        <div style="flex:1">
-          <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:8px">
-            <span style="font-family:var(--mono);font-size:10.5px;letter-spacing:0.14em;color:var(--ink-3);font-weight:700;text-transform:uppercase">Conviction</span>
-            <span style="font-size:18px;font-weight:800;color:${convC};letter-spacing:0.08em">${conviction}</span>
-            <span style="font-family:var(--mono);font-size:11px;color:var(--ink-2)">${comp ? comp.tension_note : 'awaiting backend'}</span>
-          </div>
-          <div style="font-size:13px;color:var(--ink-1);line-height:1.65">
-            Entry zone $${eLo.toFixed(2)}–$${eHi.toFixed(2)} · Stop $${stop.toFixed(2)} · T1 $${t1.toFixed(2)} · T2 $${t2.toFixed(2)}.
-            <span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:3px;background:color-mix(in oklch, ${compC} 12%, transparent);color:${compC};font-family:var(--mono);font-size:11px;letter-spacing:0.08em;font-weight:700">${compCall} POSTURE</span>
+        <div class="ticket-card">
+          <div class="tk-cell"><div class="lbl">Spot</div><div class="val cop">${_qp6Money(spot)}</div></div>
+          <div class="tk-cell"><div class="lbl">Stop</div><div class="val rd">${_qp6Money(ticket.stop)}</div></div>
+          <div class="tk-cell"><div class="lbl">T1 · Fib 1.272</div><div class="val gn">${_qp6Money(ticket.t1)}</div></div>
+          <div class="tk-cell"><div class="lbl">R:R</div><div class="val">${ticket.rr_ratio ? ticket.rr_ratio + ' : 1' : '—'}</div></div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ─── Confluence radar + Key levels ladder ─────────────────────────────
+  function _renderRadarAndLevels(METHODS, keyLevels, spot) {
+    // 8 axes: 7 quant + 1 EW. For 7-axis-only spacing, drop EW from polygon.
+    // We use 8 axes every 45°.
+    const AXES = [
+      { x: 200, y: 30,  lx: 200, ly: 18,  align: 'middle' },   // Wyckoff (top)
+      { x: 320, y: 80,  lx: 326, ly: 72,  align: 'middle' },   // Fib
+      { x: 370, y: 200, lx: 382, ly: 204, align: 'start'  },   // Ichi
+      { x: 320, y: 320, lx: 326, ly: 338, align: 'middle' },   // TL
+      { x: 200, y: 370, lx: 200, ly: 389, align: 'middle' },   // VP
+      { x: 80,  y: 320, lx: 74,  ly: 338, align: 'middle' },   // S/R
+      { x: 30,  y: 200, lx: 22,  ly: 204, align: 'end'    },   // CLS
+      { x: 80,  y: 80,  lx: 74,  ly: 72,  align: 'middle' },   // Elliott
+    ];
+    const LABELS = ['WYCKOFF','FIB','ICHI','TL','VP','S/R','CLS','ELLIOTT'];
+    // Use METHODS[0..7] in the radar order
+    const CENTER = { x: 200, y: 200 };
+    const pts = METHODS.map((m, i) => {
+      const conf = +m.conf || 0;
+      const r = conf * 170;
+      const ax = AXES[i];
+      const dx = ax.x - CENTER.x, dy = ax.y - CENTER.y;
+      const norm = Math.sqrt(dx*dx + dy*dy);
+      const px = CENTER.x + (dx / norm) * r;
+      const py = CENTER.y + (dy / norm) * r;
+      return { x: px, y: py, vote: m.vote, disc: m.disc };
+    });
+    const polyPoints = pts.map(p => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join(' ');
+    const dots = pts.map((p) => {
+      const color = p.disc ? '#b481f5' : (p.vote === 'BULLISH' ? '#5be57c' : p.vote === 'BEARISH' ? '#ff6b5b' : '#ffb95c');
+      const stroke = p.disc ? 'stroke="#fff" stroke-width="1.5"' : '';
+      return `<circle cx="${p.x.toFixed(0)}" cy="${p.y.toFixed(0)}" r="6" fill="${color}" ${stroke} style="filter:drop-shadow(0 0 6px ${color}99)"/>`;
+    }).join('\n');
+    const axisLines = AXES.map(a => `<line x1="200" y1="200" x2="${a.x}" y2="${a.y}"/>`).join('');
+    const axisLabels = AXES.map((a, i) => {
+      const color = i === 7 ? '#b481f5' : '#c9cdd0';
+      return `<text x="${a.lx}" y="${a.ly}" text-anchor="${a.align}" fill="${color}">${LABELS[i]}</text>`;
+    }).join('\n');
+
+    const radarKey = METHODS.map(m => {
+      const cls = _qp6VoteCls(m.vote);
+      const voteShort = m.vote === 'BULLISH' ? 'BULL' : m.vote === 'BEARISH' ? 'BEAR' : m.vote === 'NEUTRAL' ? 'NEUT' : (m.vote || '—');
+      const color = m.disc ? 'color:#b481f5' : '';
+      return `<div class="rk-row${m.disc ? ' qp6-disc-row' : ''}"><div class="dot ${m.disc ? '' : cls}" ${m.disc ? 'style="background:#b481f5"' : ''}></div><div class="name" style="${color}">${_qp6Esc(m.title)}</div><div class="vote ${m.disc ? '' : cls}" style="${color}">${m.disc ? 'DISC' : voteShort}</div></div>`;
+    }).join('');
+
+    // Key levels ladder
+    const ladderRows = keyLevels.map(lv => {
+      const dist = lv.dist_pct || 0;
+      const cls = lv.vote === 'BULLISH' ? 'gn' : lv.vote === 'BEARISH' ? 'rd' : lv.source === 'NOW' ? 'cop' : '';
+      const barColor = cls === 'gn' ? 'rgba(91,229,124,0.5)' : cls === 'rd' ? 'rgba(255,107,91,0.5)' : '#5d6469';
+      const barWidth = Math.min(80, Math.abs(dist) * 4);
+      return `<div class="lvl ${cls}">
+        <div class="lvl-px">${_qp6Money(lv.price)}</div>
+        <div class="lvl-desc">${lv.source === 'NOW' ? '<b style="color:var(--copper)">SPOT NOW</b>' : _qp6Esc(lv.label)} <span class="lvl-bar" style="width:${barWidth.toFixed(0)}px;background:${barColor}"></span></div>
+        <div class="lvl-meta">${_qp6Pct(dist, 1)} · ${lv.source}</div>
+      </div>`;
+    }).join('');
+
+    return `<div class="section-h">
+      <div class="title">▸ CONFLUENCE MAP · KEY ACTIONABLE LEVELS</div>
+      <div class="meta">CLICK A METHOD TO DRILL DOWN BELOW</div>
+    </div>
+    <div class="conf-grid">
+      <div class="panel">
+        <div class="panel-h"><span class="label">▼ 8-METHOD RADAR</span><span class="right">fill = confidence · color = vote</span></div>
+        <div class="panel-body">
+          <div class="radar-wrap">
+            <svg class="radar-svg" viewBox="0 0 400 400">
+              <defs>
+                <radialGradient id="qp6RadarG" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stop-color="#5be57c" stop-opacity="0.5"/>
+                  <stop offset="100%" stop-color="#5be57c" stop-opacity="0.05"/>
+                </radialGradient>
+                <radialGradient id="qp6RadarRing" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stop-color="#262b2d" stop-opacity="0.7"/>
+                  <stop offset="100%" stop-color="#262b2d" stop-opacity="0"/>
+                </radialGradient>
+              </defs>
+              <circle cx="200" cy="200" r="170" fill="url(#qp6RadarRing)"/>
+              <g fill="none" stroke="#262b2d" stroke-width="1" stroke-dasharray="2,2">
+                <circle cx="200" cy="200" r="170"/>
+                <circle cx="200" cy="200" r="128"/>
+                <circle cx="200" cy="200" r="85"/>
+                <circle cx="200" cy="200" r="42"/>
+              </g>
+              <g stroke="#262b2d" stroke-width="1">${axisLines}</g>
+              <polygon points="${polyPoints}" fill="url(#qp6RadarG)" stroke="#5be57c" stroke-width="2"/>
+              ${dots}
+              <g font-family="JetBrains Mono, monospace" font-size="10" fill="#c9cdd0" text-anchor="middle" font-weight="700" letter-spacing="0.10em">
+                ${axisLabels}
+              </g>
+            </svg>
+            <div class="radar-key">${radarKey}</div>
           </div>
         </div>
       </div>
-
-      <!-- METHOD VOTES · 7-pill row (each pill = INDEPENDENT backend vote) -->
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:22px">
-        ${methodVotes.map(m => {
-          const v = m.d ? m.d.vote : '—';
-          const c = m.d ? voteColor(v) : 'var(--ink-3)';
-          const rationale = m.d ? (m.d.rationale || '').slice(0, 120) : 'no backend data';
-          return `<div style="padding:11px 12px;border-radius:4px;border:1px solid color-mix(in oklch, ${c} 30%, var(--rule));background:color-mix(in oklch, ${c} 4%, var(--bg-1))">
-            <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:0.12em;color:var(--ink-3);text-transform:uppercase;font-weight:700;margin-bottom:3px">${m.name}</div>
-            <div style="font-size:14.5px;font-weight:800;margin-bottom:3px;letter-spacing:0.02em;color:${c}">${v}</div>
-            <div style="font-family:var(--mono);font-size:9px;color:var(--ink-3);letter-spacing:0.04em;margin-bottom:5px">${m.h}</div>
-            <div style="font-size:10.5px;color:var(--ink-2);line-height:1.45">${rationale}${rationale.length === 120 ? '…' : ''}</div>
-          </div>`;
-        }).join('')}
+      <div class="panel">
+        <div class="panel-h"><span class="label">▼ KEY LEVELS · price ladder</span><span class="right">distance bar = % from spot</span></div>
+        <div class="panel-body">
+          <div class="ladder-vis">${ladderRows}</div>
+        </div>
       </div>
-
-      ${dataBanner}
-
-      <!-- 1. SUPPORT / RESISTANCE — most actionable -->
-      ${_section('SUPPORT / RESISTANCE · swing-point clusters',
-        sr ? `${sr.supports.length} supports · ${sr.resistances.length} resistances · cluster band 0.6 × ATR` : 'awaiting backend',
-        `<div class="pat-chart-host" id="pat-chart-sr" style="position:relative;width:100%;height:380px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
-           <div class="pat-legend" style="position:absolute;top:8px;left:10px;z-index:5;pointer-events:none;display:flex;gap:14px;flex-wrap:wrap;background:rgba(17,22,26,0.85);padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#5be57c"></span>support · touches</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#ff6b5b"></span>resistance · touches</span>
-           </div>
-         </div>
-         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px">
-           ${tile('Nearest support', sr && sr.nearest_support ? '$' + sr.nearest_support.price.toFixed(2) : '—', sr && sr.nearest_support ? sr.nearest_support.touches + ' touches · ' + sr.nearest_support.distance_pct + '% below' : 'none', 'gn')}
-           ${tile('Nearest resistance', sr && sr.nearest_resistance ? '$' + sr.nearest_resistance.price.toFixed(2) : '—', sr && sr.nearest_resistance ? sr.nearest_resistance.touches + ' touches · ' + sr.nearest_resistance.distance_pct + '% above' : 'none', 'rd')}
-           ${tile('ATR(14)', sr ? '$' + sr.atr.toFixed(2) : '—', 'volatility band', '')}
-           ${wlbTile('S/R level hold', phr.sr_level_hold)}
-         </div>
-         ${sectionVerdict(sr ? sr.vote : 'NEUTRAL', sr ? sr.rationale : 'awaiting backend', sr ? sr.falsification : '')}`)}
-
-      <!-- 2. TRENDLINES — auto-detected -->
-      ${_section('TRENDLINES · auto-detected channel',
-        tl && tl.upper && tl.lower ? `upper ${tl.upper.touches} pivots · lower ${tl.lower.touches} pivots` : 'awaiting backend',
-        `<div class="pat-chart-host" id="pat-chart-tl" style="position:relative;width:100%;height:380px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
-           <div class="pat-legend" style="position:absolute;top:8px;left:10px;z-index:5;pointer-events:none;display:flex;gap:14px;flex-wrap:wrap;background:rgba(17,22,26,0.85);padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#ff6b5b"></span>upper trendline</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#5be57c"></span>lower trendline</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#d49060"></span>break candle</span>
-           </div>
-         </div>
-         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px">
-           ${tile('Upper @ now', tl && tl.upper ? '$' + tl.upper.projected_at_last_bar.toFixed(2) : '—', tl && tl.upper ? (tl.upper.slope > 0 ? 'rising' : 'falling') : 'none', tl && tl.upper_break ? 'gn' : 'rd')}
-           ${tile('Lower @ now', tl && tl.lower ? '$' + tl.lower.projected_at_last_bar.toFixed(2) : '—', tl && tl.lower ? (tl.lower.slope > 0 ? 'rising' : 'falling') : 'none', tl && tl.lower_break ? 'rd' : 'gn')}
-           ${tile('Break status', tl ? (tl.upper_break ? 'UPPER BROKEN' : tl.lower_break ? 'LOWER BROKEN' : 'INTACT') : '—', tl ? (tl.upper_break || tl.lower_break ? 'momentum shift' : 'channel active') : '', tl && (tl.upper_break || tl.lower_break) ? 'am' : '')}
-           ${wlbTile('TL break followthrough', phr.trendline_break_followthrough)}
-         </div>
-         ${sectionVerdict(tl ? tl.vote : 'NEUTRAL', tl ? tl.rationale : 'awaiting backend', tl ? tl.falsification : '')}`)}
-
-      <!-- 3. VOLUME PROFILE -->
-      ${_section('VOLUME PROFILE · 60d auction',
-        vp ? 'POC · VAH · VAL — acceptance state: ' + vp.acceptance : 'awaiting backend',
-        `<div class="pat-chart-host" id="pat-chart-vp" style="position:relative;width:100%;height:380px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
-           <div class="pat-legend" style="position:absolute;top:8px;left:10px;z-index:5;pointer-events:none;display:flex;gap:14px;flex-wrap:wrap;background:rgba(17,22,26,0.85);padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#d49060"></span>POC</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#8f969c"></span>VAH / VAL</span>
-           </div>
-         </div>
-         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px" id="pat-vp-tiles">
-           ${tile('POC', vp ? '$' + vp.poc.toFixed(2) : '—', 'point of control', 'cop')}
-           ${tile('VAH', vp ? '$' + vp.vah.toFixed(2) : '—', 'value-area high', '')}
-           ${tile('VAL', vp ? '$' + vp.val.toFixed(2) : '—', 'value-area low', '')}
-           ${wlbTile('POC bounce', phr.vp_poc_bounce)}
-         </div>
-         ${sectionVerdict(vp ? vp.vote : 'NEUTRAL', vp ? vp.rationale : 'awaiting backend', vp ? vp.falsification : '')}`)}
-
-      <!-- 4. FIBONACCI — detected swing pair -->
-      ${_section('FIBONACCI · retracements + extensions',
-        fi ? `swing $${fi.swing_lo.toFixed(2)} → $${fi.swing_hi.toFixed(2)} · direction: ${fi.direction || 'up'} · zone: ${fi.current_zone}` : 'awaiting backend',
-        `<div class="pat-chart-host" id="pat-chart-fib" style="position:relative;width:100%;height:380px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
-           <div class="pat-legend" style="position:absolute;top:8px;left:10px;z-index:5;pointer-events:none;display:flex;gap:14px;flex-wrap:wrap;background:rgba(17,22,26,0.85);padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#5be57c"></span>extensions · targets</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#d49060"></span>retracements · 0.618 golden</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#ff6b5b"></span>swing low</span>
-           </div>
-         </div>
-         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px">
-           ${tile('Golden 0.618', fi ? '$' + fi.levels.r_0618.toFixed(2) : '—', 'bull-line · stop ref', 'cop')}
-           ${tile('1.272 ext', fi ? '$' + fi.levels.ext_1272.toFixed(2) : '—', 'T1 target', 'gn')}
-           ${tile('1.618 ext', fi ? '$' + fi.levels.ext_1618.toFixed(2) : '—', 'T2 target', 'gn')}
-           ${wlbTile('0.618 bounce → 1.272', phr.fib_0618_bounce)}
-         </div>
-         ${sectionVerdict(fi ? fi.vote : 'NEUTRAL', fi ? fi.rationale : 'awaiting backend', fi ? fi.falsification : '')}`)}
-
-      <!-- 5. ICHIMOKU -->
-      ${_section('ICHIMOKU KINKO HYO · 4-confluence classifier',
-        ic ? `bull ${ic.bull_score}/4 · bear ${ic.bear_score}/4` : 'awaiting backend',
-        `<div class="pat-chart-host" id="pat-chart-ichi" style="position:relative;width:100%;height:440px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
-           <div class="pat-legend" style="position:absolute;top:8px;left:10px;z-index:5;pointer-events:none;display:flex;gap:14px;flex-wrap:wrap;background:rgba(17,22,26,0.85);padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#d49060"></span>Tenkan (9)</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#c9cdd0"></span>Kijun (26)</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#5be57c"></span>Senkou A</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#ff6b5b"></span>Senkou B</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#ffb95c"></span>Chikou (lag 26)</span>
-           </div>
-         </div>
-         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px" id="pat-ichi-tiles">
-           ${tile('Price vs Cloud', ic ? ic.price_vs_cloud : '—', ic ? (ic.price_vs_cloud === 'ABOVE' ? 'bullish frame' : ic.price_vs_cloud === 'BELOW' ? 'bearish frame' : 'in transition') : '', ic && ic.price_vs_cloud === 'ABOVE' ? 'gn' : ic && ic.price_vs_cloud === 'BELOW' ? 'rd' : 'am')}
-           ${tile('TK cross', ic ? ic.tk_cross : '—', ic ? (ic.tk_cross === 'BULL' ? 'Tenkan > Kijun' : ic.tk_cross === 'BEAR' ? 'Tenkan < Kijun' : 'crossover pending') : '', ic && ic.tk_cross === 'BULL' ? 'gn' : ic && ic.tk_cross === 'BEAR' ? 'rd' : 'am')}
-           ${tile('Future cloud', ic ? ic.future_cloud : '—', ic ? (ic.future_cloud === 'BULLISH' ? 'Senkou A > B forward' : 'Senkou B > A forward') : '', ic && ic.future_cloud === 'BULLISH' ? 'gn' : 'rd')}
-           ${wlbTile('TK cross +2% in 10d', phr.ichi_tk_cross)}
-         </div>
-         ${sectionVerdict(ic ? ic.vote : 'NEUTRAL', ic ? ic.rationale : 'awaiting backend', ic ? ic.falsification : '')}`)}
-
-      <!-- 6. WYCKOFF — text-only, no chart -->
-      ${_section('WYCKOFF · phase classifier',
-        wy ? `phase: ${wy.phase} · slope ${wy.slope_pct_per_day >= 0 ? '+' : ''}${wy.slope_pct_per_day.toFixed(2)}%/day · range pos ${(wy.pos_in_range*100).toFixed(0)}%` : 'awaiting backend',
-        `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px">
-           ${tile('Phase', wy ? wy.phase.toUpperCase() : '—', wy ? `confidence ${(wy.confidence*100).toFixed(0)}%` : '', wy && wy.vote === 'BULLISH' ? 'gn' : wy && wy.vote === 'BEARISH' ? 'rd' : 'am')}
-           ${tile('30d slope', wy ? (wy.slope_pct_per_day >= 0 ? '+' : '') + wy.slope_pct_per_day.toFixed(2) + '%/d' : '—', 'log-return regression', wy && wy.slope_pct_per_day > 0.15 ? 'gn' : wy && wy.slope_pct_per_day < -0.15 ? 'rd' : 'am')}
-           ${tile('Range position', wy ? (wy.pos_in_range * 100).toFixed(0) + '%' : '—', wy ? `[${wy.range_low.toFixed(2)} – ${wy.range_high.toFixed(2)}]` : '', '')}
-           ${tile('Volume skew', wy ? (wy.volume_skew > 0 ? '+' : '') + (wy.volume_skew * 100).toFixed(0) + '%' : '—', 'up-vol vs down-vol', wy && wy.volume_skew > 0 ? 'gn' : wy && wy.volume_skew < 0 ? 'rd' : '')}
-         </div>
-         ${sectionVerdict(wy ? wy.vote : 'NEUTRAL', wy ? wy.rationale : 'awaiting backend', wy ? wy.falsification : '')}`)}
-
-      <!-- 7. CLASSICAL PATTERNS -->
-      ${_section('CLASSICAL PATTERNS · cup-handle · flag · triangle',
-        cls && cls.active_pattern ? `active: ${cls.active_pattern.replace(/_/g, ' ')}` : (cls ? 'no high-conviction pattern detected' : 'awaiting backend'),
-        `<div class="pat-chart-host" id="pat-chart-cls" style="position:relative;width:100%;height:380px;background:var(--bg-1);border:1px solid var(--rule);border-radius:4px;overflow:hidden">
-           <div class="pat-legend" style="position:absolute;top:8px;left:10px;z-index:5;pointer-events:none;display:flex;gap:14px;flex-wrap:wrap;background:rgba(17,22,26,0.85);padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#5be57c"></span>breakout level</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#d49060"></span>target projection</span>
-             <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;border-radius:1px;background:#ff6b5b"></span>invalidation</span>
-           </div>
-         </div>
-         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px">
-           ${tile('Detected', cls && cls.active_pattern ? cls.active_pattern.replace(/_/g, ' ').toUpperCase() : 'NONE', cls && cls.patterns && cls.patterns.length ? cls.patterns.length + ' patterns found' : 'no setup', cls && cls.active_pattern ? (cls.vote === 'BULLISH' ? 'gn' : 'rd') : '')}
-           ${tile('Target', cls && cls.target ? '$' + cls.target.toFixed(2) : '—', cls && cls.target ? 'measured move' : '—', 'gn')}
-           ${tile('Hit rate ≥1 mo', '—', 'tracked separately', '')}
-           ${wlbTile('Classical → target 30d', phr.classical_breakout)}
-         </div>
-         ${sectionVerdict(cls ? cls.vote : 'NEUTRAL', cls ? cls.rationale : 'awaiting backend', cls ? cls.falsification : '')}`)}
-    `;
+    </div>`;
   }
 
-  // Generate synthetic 90d OHLC anchored to a target price (used when bundle
-  // doesn't ship ohlc_90d). Deterministic per ticker so visual stays stable.
-  function _generateSyntheticOHLC(ticker, px, wkHi, wkLo) {
-    let seed = 0;
-    for (let i = 0; i < (ticker || '').length; i++) seed = (seed * 31 + ticker.charCodeAt(i)) % 100000;
-    const rng = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-    const data = [];
-    const todayTs = Math.floor(Date.now() / 1000);
-    const DAY = 86400;
-    // Path: bottom ~wkLo → peak near wkHi → pullback to ~0.5 retrace → recovery to px
-    const peakIdx = 48, troughIdx = 70;
-    const peak = wkHi * 0.99;
-    const trough = wkLo + (peak - wkLo) * 0.45;
-    let last = wkLo + (rng() - 0.5) * 2;
-    for (let i = 89; i >= 0; i--) {
-      const t = todayTs - i * DAY;
-      const idx = 89 - i;
-      let target;
-      if (idx < peakIdx)       target = wkLo + (peak - wkLo) * (idx / peakIdx);
-      else if (idx < troughIdx) target = peak - (peak - trough) * ((idx - peakIdx) / (troughIdx - peakIdx));
-      else                      target = trough + (px - trough) * ((idx - troughIdx) / (89 - troughIdx));
-      const noise = (rng() - 0.5) * (px * 0.012);
-      const close = +(target + noise).toFixed(2);
-      const open  = +(last + (rng() - 0.5) * (px * 0.008)).toFixed(2);
-      const high  = +(Math.max(open, close) + rng() * (px * 0.008) + 0.2).toFixed(2);
-      const low   = +(Math.min(open, close) - rng() * (px * 0.008) - 0.2).toFixed(2);
-      const vol = Math.round(20e6 + rng() * 50e6 + (Math.abs(close - open) > px * 0.008 ? 20e6 : 0));
-      data.push({ time: t, open, high, low, close, volume: vol });
-      last = close;
-    }
-    return data;
+  // ─── Method matrix with inline falsification ──────────────────────────
+  function _renderMethodMatrix(METHODS) {
+    const rows = METHODS.map(m => {
+      const cls = _qp6VoteCls(m.vote);
+      const voteText = m.disc ? 'DISC' : m.vote;
+      const falsClass = m.disc ? 'fals-cell disc' : 'fals-cell';
+      const verb = (m.vote === 'NEUTRAL' && !m.disc) ? 'RESOLVES WHEN' : 'INVALIDATES IF';
+      const rowStyle = m.disc ? 'style="background:linear-gradient(90deg, rgba(180,129,245,0.04) 0%, transparent 50%)"' : '';
+      const numStyle = m.disc ? 'style="color:#b481f5"' : '';
+      const nameStyle = m.disc ? 'style="color:#b481f5"' : '';
+      return `<tr onclick="window.qp6ShowDrill(this, ${m.idx})" ${rowStyle}>
+        <td class="num-cell" ${numStyle}>${m.num}</td>
+        <td>
+          <div class="method-cell">
+            <div>
+              <div class="name" ${nameStyle}>${_qp6Esc(m.title)}</div>
+              <div class="sublabel" ${nameStyle}>${_qp6Esc(m.sub)}</div>
+            </div>
+          </div>
+        </td>
+        <td class="c"><span class="vote-pill ${cls}" ${m.disc ? 'style="background:rgba(180,129,245,0.15);color:#b481f5"' : ''}>${voteText}</span></td>
+        <td class="r"><span class="wlb-cell dim">${_qp6Esc(m.wlb)}</span></td>
+        <td class="r" style="color:var(--ink-2)">—</td>
+        <td class="c"><span class="flag-pill" ${m.disc ? 'style="background:rgba(180,129,245,0.15);color:#b481f5"' : ''}>${m.disc ? 'DISC' : (m.conf >= 0.7 ? 'HIGH' : m.conf >= 0.4 ? 'MED' : 'LOW')}</span></td>
+        <td><svg class="spark" viewBox="0 0 120 36"><polyline points="0,28 20,24 40,20 60,18 80,12 100,10 120,6" fill="none" stroke="${m.disc ? '#b481f5' : (cls === 'gn' ? '#5be57c' : cls === 'rd' ? '#ff6b5b' : '#ffb95c')}" stroke-width="2"/></svg></td>
+        <td class="rationale-cell">${_qp6Esc(m.rationale)}<span class="${falsClass}"><b>${verb}</b>${_qp6Esc(m.fals)}</span></td>
+      </tr>`;
+    }).join('');
+    return `<div class="section-h">
+      <div class="title">▸ METHOD MATRIX · 8 independent classifiers</div>
+      <div class="meta">7 QUANT + 1 DISCRETIONARY · INLINE FALSIFICATION</div>
+    </div>
+    <div class="panel" style="padding:0;overflow:hidden">
+      <table class="mtx">
+        <thead><tr>
+          <th class="num-cell">#</th><th>METHOD</th><th class="c">VOTE</th>
+          <th class="r">WLB</th><th class="r">N</th><th class="c">CONF</th>
+          <th>TREND</th><th>RATIONALE · INVALIDATES IF</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
   }
 
-  // Instantiate the four TradingView charts after DOM is in place.
-  function initPatternsCharts(t) {
-    const CHART_IDS = ['pat-chart-sr','pat-chart-tl','pat-chart-vp','pat-chart-fib','pat-chart-ichi','pat-chart-cls'];
-    if (typeof LightweightCharts === 'undefined') {
-      CHART_IDS.forEach(id => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        const msg = document.createElement('div');
-        msg.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;color:var(--rd);font-family:var(--mono);font-size:11.5px;text-align:center;line-height:1.6';
-        msg.innerHTML = `<div><b style="letter-spacing:0.14em">LIBRARY NOT LOADED</b><br><span style="color:var(--ink-2)">lightweight-charts failed to load from CDN</span></div>`;
-        el.appendChild(msg);
-      });
-      return;
+  // ─── Wyckoff dedicated panel ──────────────────────────────────────────
+  function _renderWyckoffPanel(wy, tk) {
+    const phase = (wy.phase || 'unclear').toUpperCase();
+    const conf = +wy.confidence || 0;
+    const slope = +wy.slope_pct_per_day || 0;
+    const vskew = (+wy.volume_skew || 0) * 100;
+    const rpos = (+wy.pos_in_range || 0) * 100;
+    const subPhase = (wy.sub_phase || '').toLowerCase();
+    const subRationale = wy.sub_phase_rationale || '';
+    const triggers = wy.transition_triggers || [];
+    const vps = wy.vps_series || [];
+
+    // Phase-wheel quadrant highlight + marker position
+    const phaseColor = wy.vote === 'BULLISH' ? '#5be57c' : wy.vote === 'BEARISH' ? '#ff6b5b' : '#ffb95c';
+
+    // Sub-phase bar
+    const subBar = ['early', 'mid', 'late', 'exhaust'].map(sp => {
+      const active = sp === subPhase ? 'active' : '';
+      return `<div class="wy-sp ${sp} ${active}">${sp.toUpperCase()}${active ? ' ★' : ''}</div>`;
+    }).join('');
+
+    // Transition triggers list
+    const trigList = triggers.map(t => {
+      const icon = t.status === 'ok' ? '⊘' : t.status === 'warn' ? '△' : '✗';
+      const iconCls = t.status === 'ok' ? 'am' : t.status === 'warn' ? 'am' : 'rd';
+      return `<div class="wy-trans-row">
+        <span class="wy-trans-icon ${iconCls}">${icon}</span>
+        <div>
+          <b>${_qp6Esc(t.name)}</b> — threshold: ${_qp6Esc(t.threshold)}.
+          <span class="wy-trans-status">Currently ${_qp6Esc(t.current)}</span>
+        </div>
+      </div>`;
+    }).join('');
+
+    // VPS strip — render up to 30 sessions as bar pairs
+    const vpsW = 1200, vpsH = 140, MID = 70;
+    const sessionsToShow = vps.slice(-30);
+    const maxVol = Math.max(1, ...sessionsToShow.flatMap(s => [s.up_vol || 0, s.down_vol || 0]));
+    const barW = 24, gap = 16;
+    const startX = 14;
+    const vpsBars = sessionsToShow.map((s, i) => {
+      const x = startX + i * (barW + gap);
+      const upH = ((s.up_vol || 0) / maxVol) * 50;
+      const dnH = ((s.down_vol || 0) / maxVol) * 30;
+      return `<rect x="${x}" y="${(MID - upH).toFixed(1)}" width="${barW}" height="${upH.toFixed(1)}" fill="url(#qp6VpsBull)"/>` +
+             `<rect x="${x}" y="${MID}" width="${barW}" height="${dnH.toFixed(1)}" fill="url(#qp6VpsBear)"/>`;
+    }).join('');
+    // Net demand smoothed line
+    const emaPts = sessionsToShow.map((s, i) => {
+      const x = startX + i * (barW + gap) + barW / 2;
+      const v = s.net_demand_ema5 || 0;
+      const y = MID - ((v / maxVol) * 40);
+      return `${x.toFixed(0)},${y.toFixed(0)}`;
+    }).join(' ');
+
+    return `<div class="section-h" style="margin-top:32px">
+      <div class="title" style="color:var(--teal)">▸ WYCKOFF · 4-phase cycle · current position ${phase}</div>
+      <div class="meta" style="color:var(--teal)">QUANTITATIVE · CONFIDENCE ${(conf*100).toFixed(0)}%</div>
+    </div>
+    <div class="wy-panel">
+      <div class="wy-banner">
+        <div class="wy-banner-pill">PHASE: ${phase}</div>
+        <div class="wy-banner-text">
+          The Wyckoff cycle has 4 phases: <b>Accumulation</b> (smart money buys weakness)
+          → <b>Markup</b> (public chases) → <b>Distribution</b> (smart money sells strength)
+          → <b>Markdown</b> (public capitulates). ${_qp6Esc(tk)} sits in <b style="color:var(--teal)">${(subPhase || phase).toUpperCase()}-${phase}</b>.
+          ${_qp6Esc(wy.rationale || '')}
+        </div>
+      </div>
+      <div class="wy-grid">
+        <div class="wy-wheel-wrap">
+          <svg viewBox="0 0 360 360" style="width:100%;height:auto;display:block">
+            <defs>
+              <linearGradient id="qp6WyAccum" x1="0%" x2="100%" y1="0%" y2="100%"><stop offset="0%" stop-color="#5cd1c5" stop-opacity="0.30"/><stop offset="100%" stop-color="#5cd1c5" stop-opacity="0.05"/></linearGradient>
+              <linearGradient id="qp6WyMarkup" x1="0%" x2="100%" y1="100%" y2="0%"><stop offset="0%" stop-color="#5be57c" stop-opacity="0.50"/><stop offset="100%" stop-color="#5be57c" stop-opacity="0.15"/></linearGradient>
+              <linearGradient id="qp6WyDist" x1="100%" x2="0%" y1="0%" y2="100%"><stop offset="0%" stop-color="#ffb95c" stop-opacity="0.30"/><stop offset="100%" stop-color="#ffb95c" stop-opacity="0.05"/></linearGradient>
+              <linearGradient id="qp6WyMark" x1="100%" x2="0%" y1="100%" y2="0%"><stop offset="0%" stop-color="#ff6b5b" stop-opacity="0.30"/><stop offset="100%" stop-color="#ff6b5b" stop-opacity="0.05"/></linearGradient>
+            </defs>
+            <path d="M 180,180 L 30,180 A 150,150 0 0,1 180,30 Z" fill="url(#qp6WyAccum)" stroke="#5cd1c5" stroke-width="${phase === 'ACCUMULATION' ? 2.5 : 1.5}"/>
+            <path d="M 180,180 L 180,30 A 150,150 0 0,1 330,180 Z" fill="url(#qp6WyMarkup)" stroke="#5be57c" stroke-width="${phase === 'MARKUP' ? 2.5 : 1.5}"/>
+            <path d="M 180,180 L 330,180 A 150,150 0 0,1 180,330 Z" fill="url(#qp6WyDist)" stroke="#ffb95c" stroke-width="${phase === 'DISTRIBUTION' ? 2.5 : 1.5}"/>
+            <path d="M 180,180 L 180,330 A 150,150 0 0,1 30,180 Z" fill="url(#qp6WyMark)" stroke="#ff6b5b" stroke-width="${phase === 'MARKDOWN' ? 2.5 : 1.5}"/>
+            <circle cx="180" cy="180" r="42" fill="#11161a" stroke="#262b2d" stroke-width="1"/>
+            <g font-family="JetBrains Mono, monospace" font-size="13" font-weight="800" letter-spacing="0.10em" text-anchor="middle">
+              <text x="105" y="103" fill="#5cd1c5">${phase === 'ACCUMULATION' ? 'ACCUMULATION ★' : 'ACCUMULATION'}</text>
+              <text x="255" y="103" fill="#5be57c">${phase === 'MARKUP' ? 'MARKUP ★' : 'MARKUP'}</text>
+              <text x="255" y="246" fill="#ffb95c">${phase === 'DISTRIBUTION' ? 'DISTRIBUTION ★' : 'DISTRIBUTION'}</text>
+              <text x="105" y="246" fill="#ff6b5b">${phase === 'MARKDOWN' ? 'MARKDOWN ★' : 'MARKDOWN'}</text>
+            </g>
+            <text x="180" y="178" font-family="JetBrains Mono" font-size="9" fill="#5d6469" text-anchor="middle" font-weight="700" letter-spacing="0.16em">CYCLE</text>
+            <text x="180" y="193" font-family="JetBrains Mono" font-size="11" fill="#c9cdd0" text-anchor="middle" font-weight="800">${_qp6Esc(tk)}</text>
+          </svg>
+        </div>
+        <div class="wy-side">
+          <div class="wy-card">
+            <div class="wy-card-h">▼ CURRENT PHASE METRICS</div>
+            <div class="wy-metrics">
+              <div class="wy-metric"><div class="wy-m-lbl">30d slope</div><div class="wy-m-val ${slope > 0 ? 'gn' : slope < 0 ? 'rd' : 'am'}">${_qp6Pct(slope, 2)}/d</div><div class="wy-m-sub">vs ±0.15% threshold</div></div>
+              <div class="wy-metric"><div class="wy-m-lbl">Volume skew</div><div class="wy-m-val ${vskew > 0 ? 'gn' : 'rd'}">${_qp6Pct(vskew, 0)}</div><div class="wy-m-sub">up-vol vs down-vol</div></div>
+              <div class="wy-metric"><div class="wy-m-lbl">Range position</div><div class="wy-m-val">${rpos.toFixed(0)}%</div><div class="wy-m-sub">of 60d range</div></div>
+              <div class="wy-metric"><div class="wy-m-lbl">Confidence</div><div class="wy-m-val gn">${(conf*100).toFixed(0)}%</div><div class="wy-m-sub">classifier score</div></div>
+            </div>
+          </div>
+          ${subPhase ? `<div class="wy-card">
+            <div class="wy-card-h">▼ ${phase} SUB-PHASE · WHERE IN THE TREND</div>
+            <div class="wy-subphase-bar">${subBar}</div>
+            <div class="wy-sp-text">${_qp6Esc(subRationale)}</div>
+          </div>` : ''}
+          ${triggers.length ? `<div class="wy-card">
+            <div class="wy-card-h">▼ TRANSITION TRIGGERS · what flips ${phase} → next</div>
+            <div class="wy-trans">${trigList}</div>
+          </div>` : ''}
+        </div>
+      </div>
+      ${vps.length ? `<div class="wy-vps">
+        <div class="wy-vps-h">▼ VOLUME-PRICE SPREAD · last ${sessionsToShow.length} sessions · supply vs demand absorption</div>
+        <svg viewBox="0 0 ${vpsW} ${vpsH}" style="width:100%;height:auto;display:block">
+          <defs>
+            <linearGradient id="qp6VpsBull" x1="0%" x2="0%" y1="0%" y2="100%"><stop offset="0%" stop-color="#5be57c" stop-opacity="0.9"/><stop offset="100%" stop-color="#5be57c" stop-opacity="0.3"/></linearGradient>
+            <linearGradient id="qp6VpsBear" x1="0%" x2="0%" y1="0%" y2="100%"><stop offset="0%" stop-color="#ff6b5b" stop-opacity="0.9"/><stop offset="100%" stop-color="#ff6b5b" stop-opacity="0.3"/></linearGradient>
+          </defs>
+          <line x1="0" y1="${MID}" x2="${vpsW}" y2="${MID}" stroke="#262b2d" stroke-width="1"/>
+          <text x="6" y="14" font-family="JetBrains Mono" font-size="9" fill="#5d6469">+volume × price-up (demand)</text>
+          <text x="6" y="135" font-family="JetBrains Mono" font-size="9" fill="#5d6469">−volume × price-down (supply)</text>
+          <g>${vpsBars}</g>
+          <polyline points="${emaPts}" fill="none" stroke="#5cd1c5" stroke-width="2" stroke-dasharray="4,3" style="filter:drop-shadow(0 0 4px rgba(92,209,197,0.5))"/>
+        </svg>
+        <div class="wy-vps-foot">${vskew > 0 ? 'Demand bars (green) outsize supply bars (red) — net demand line stays in upper half. Signature of <b style="color:var(--gn)">absorption</b>.' : 'Supply bars dominate — net demand line stays below midline. Signature of <b style="color:var(--rd)">distribution</b>.'}</div>
+      </div>` : ''}
+    </div>`;
+  }
+
+  // ─── Elliott Wave dedicated panel ─────────────────────────────────────
+  function _renderElliottPanel(ew, spot, tk) {
+    const waves = ew.wave_points || {};
+    const tgtLow = ew.w5_target_low, tgtHigh = ew.w5_target_high;
+    const invalidate = ew.invalidation_level;
+    const rulesPassed = ew.rules_passed || 0;
+    const rulesTotal = ew.rules_total || 3;
+    const currentWave = ew.current_wave || '—';
+    const direction = ew.direction || 'up';
+
+    // Build a tiny SVG of wave path if we have wave_points
+    let waveSVG = '';
+    if (Object.keys(waves).length === 6) {
+      const wPts = ['W0','W1','W2','W3','W4','W5'].map(k => waves[k]);
+      const prices = wPts.map(p => p.price);
+      const indices = wPts.map(p => p.idx);
+      const pMin = Math.min(...prices) * 0.98, pMax = Math.max(...prices) * 1.02;
+      const iMin = Math.min(...indices), iMax = Math.max(...indices);
+      const W = 800, H = 240, PAD = 32;
+      const toX = (i) => PAD + (i - iMin) / Math.max(iMax - iMin, 1) * (W - 2*PAD);
+      const toY = (p) => PAD + (pMax - p) / Math.max(pMax - pMin, 1e-9) * (H - 2*PAD);
+      const pathStr = wPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${toX(p.idx).toFixed(1)},${toY(p.price).toFixed(1)}`).join(' ');
+      const markers = wPts.map((p, i) => `<circle cx="${toX(p.idx).toFixed(1)}" cy="${toY(p.price).toFixed(1)}" r="5" fill="#b481f5" stroke="#fff" stroke-width="1.2"/>
+        <text x="${toX(p.idx).toFixed(1)}" y="${(toY(p.price) - 10).toFixed(1)}" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#b481f5" font-weight="700">W${i}</text>`).join('');
+      waveSVG = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;background:rgba(180,129,245,0.04);border-radius:6px">
+        <path d="${pathStr}" fill="none" stroke="#b481f5" stroke-width="2.5" opacity="0.7"/>
+        ${markers}
+      </svg>`;
+    } else {
+      waveSVG = `<div style="padding:40px;text-align:center;color:var(--ink-3);font-family:var(--mono);font-size:11px">No valid 5-wave impulse detected (${_qp6Esc(ew.rationale || 'pattern unclear')})</div>`;
     }
-    const tk = (t.ticker || '').toUpperCase();
-    const ctx = (window._patternsCtx || {})[tk];
+
+    return `<div class="section-h" style="margin-top:32px">
+      <div class="title" style="color:#b481f5">▸ ELLIOTT WAVE · discretionary · 5-wave impulse (${direction})</div>
+      <div class="meta" style="color:#b481f5">DISCRETIONARY · CONFLUENCE ONLY · NOT A SIGNAL</div>
+    </div>
+    <div class="ew-panel">
+      <div class="ew-grid">
+        <div class="ew-chart-area">${waveSVG}</div>
+        <div class="ew-side">
+          <div class="ew-card">
+            <div class="ew-card-h">▼ WAVE COUNT METRICS</div>
+            <div class="ew-metrics">
+              <div class="ew-metric"><div class="ew-m-lbl">Current wave</div><div class="ew-m-val">${_qp6Esc(currentWave)}</div><div class="ew-m-sub">${direction}-impulse</div></div>
+              <div class="ew-metric"><div class="ew-m-lbl">Rules check</div><div class="ew-m-val ${rulesPassed === rulesTotal ? 'gn' : 'rd'}">${rulesPassed} / ${rulesTotal}</div><div class="ew-m-sub">EW hard rules</div></div>
+              <div class="ew-metric"><div class="ew-m-lbl">W5 target lo</div><div class="ew-m-val gn">${_qp6Money(tgtLow)}</div><div class="ew-m-sub">0.618 × (W1+W3)</div></div>
+              <div class="ew-metric"><div class="ew-m-lbl">Invalidation</div><div class="ew-m-val rd">${_qp6Money(invalidate)}</div><div class="ew-m-sub">W4 overlap</div></div>
+            </div>
+          </div>
+          <div class="ew-card" style="border-left-color:#b481f5">
+            <div class="ew-card-h" style="color:#b481f5">▼ DISCRETIONARY WARNING</div>
+            <div style="font-size:12px;color:var(--ink-1);line-height:1.55">${_qp6Esc(ew.rationale || '')}</div>
+            <div style="margin-top:8px;padding:6px 8px;background:rgba(255,107,91,0.06);border-left:2px solid rgba(255,107,91,0.45);border-radius:0 3px 3px 0;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)">
+              <b style="color:var(--rd)">INVALIDATES IF:</b> ${_qp6Esc(ew.falsification || '')}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ─── Drilldown shell ──────────────────────────────────────────────────
+  function _renderDrilldownShell(METHODS) {
+    return `<div class="section-h" style="margin-top:32px">
+      <div class="title">▸ DRILLDOWN · selected method</div>
+      <div class="meta">CLICK A MATRIX ROW ↑ TO SWITCH</div>
+    </div>
+    <div class="drill" id="qp6-drill">
+      <div class="drill-h">
+        <div class="title" id="qp6-dd-title">${_qp6Esc(METHODS[0].num + ' · ' + METHODS[0].title)}</div>
+        <span class="vote-pill ${_qp6VoteCls(METHODS[0].vote)}" id="qp6-dd-vote">${_qp6Esc(METHODS[0].vote || '—')}</span>
+        <span class="meta" id="qp6-dd-meta">confidence ${((METHODS[0].conf || 0)*100).toFixed(0)}%</span>
+      </div>
+      <div class="drill-body">
+        <div class="drill-claim" id="qp6-dd-claim">${_qp6Esc(METHODS[0].rationale)}</div>
+        <div class="drill-data" id="qp6-dd-data"></div>
+        <div id="qp6-drill-chart" style="margin-top:14px;padding:10px;background:rgba(0,0,0,0.12);border-radius:6px;min-height:340px"></div>
+        <div class="drill-falsify" id="qp6-dd-falsify"><div class="lbl">▼ FALSIFICATION</div>${_qp6Esc(METHODS[0].fals)}</div>
+      </div>
+    </div>`;
+  }
+
+  // ─── Scenarios ────────────────────────────────────────────────────────
+  function _renderScenarios(scn, spot) {
+    if (!scn || !scn.bull) {
+      return `<div class="section-h"><div class="title">▸ SCENARIOS</div></div>
+      <div style="padding:24px;text-align:center;color:var(--ink-3);font-family:var(--mono);font-size:11px">Scenario data unavailable</div>`;
+    }
+    const card = (label, cls, sym, data) => `<div class="scn-card ${cls}">
+      <div class="scn-h"><div class="scn-lbl ${cls}">${sym} ${label} CASE</div><div class="scn-prob ${cls}">${(data.probability*100).toFixed(0)}%</div></div>
+      <div class="scn-bar"><span class="scn-fill ${cls}" style="width:${(data.probability*100).toFixed(0)}%"></span></div>
+      <div class="scn-target">
+        <div class="scn-px ${cls}">${_qp6Money(data.target_price)}</div>
+        <div class="scn-pct ${cls}">${_qp6Pct(data.target_pct)}</div>
+      </div>
+      <div class="scn-section"><div class="scn-section-h">▶ TRIGGER</div><div class="scn-text">${_qp6Esc(data.trigger)}</div></div>
+      <div class="scn-section"><div class="scn-section-h">▶ PATH</div><div class="scn-text">${_qp6Esc(data.path)}</div></div>
+      <div class="scn-ev">EV contrib: <b style="color:var(--${cls})">${_qp6Pct(data.ev_contrib, 2)}</b></div>
+    </div>`;
+    return `<div class="section-h">
+      <div class="title">▸ SCENARIOS · 5–15 day forward · probability-weighted</div>
+      <div class="meta">EV-WEIGHTED RETURN: <span style="color:var(--gn);font-weight:800">${_qp6Pct(scn.ev_weighted_return)}</span> · NEXT 10 SESSIONS</div>
+    </div>
+    <div class="scn-grid">
+      ${card('BULL', 'gn', '▲', scn.bull)}
+      ${card('BASE', 'am', '●', scn.base)}
+      ${card('BEAR', 'rd', '▼', scn.bear)}
+    </div>`;
+  }
+
+  // ─── Action ladder ────────────────────────────────────────────────────
+  function _renderActionLadder(ladder, spot) {
+    if (!ladder || !ladder.length) return '';
+    const cells = ladder.map(r => {
+      const cls = r.vote === 'BULLISH' ? 'gn' : r.vote === 'BEARISH' ? 'rd' : r.source === 'NOW' ? 'cop' : 'am';
+      return `<div class="action-cell ${cls}">
+        <div class="ac-px ${cls}">${_qp6Money(r.price)}</div>
+        <div class="ac-act">${_qp6Esc(r.action)}</div>
+        <div class="ac-src">${_qp6Esc(r.source)} · ${_qp6Pct(r.dist_pct)}</div>
+      </div>`;
+    }).join('');
+    return `<div class="section-h">
+      <div class="title">▸ ACTION LADDER · if price tags X, do Y</div>
+      <div class="meta">PRE-PLAN EXECUTION · no decisions in the moment</div>
+    </div>
+    <div class="action-strip">${cells}</div>`;
+  }
+
+  // ─── Execution ticket ─────────────────────────────────────────────────
+  function _renderExecutionTicket(et, composite) {
+    if (!et || !et.entry_zone_low) return '';
+    const rrChip = et.rr_ratio ? `<span class="rr-chip">R:R ${et.rr_ratio} : 1</span>` : '';
+    const convChip = `<span class="rr-chip">${composite.conviction || 'LOW'} CONVICTION</span>`;
+    return `<div class="section-h">
+      <div class="title">▸ EXECUTION TICKET · composite read</div>
+      <div class="meta">SIZING SCALES WITH CONFLUENCE</div>
+    </div>
+    <div class="exec-grid">
+      <div class="exec-narrative">
+        <h3>The execution.</h3>
+        <p>${rrChip}${convChip}${_qp6Esc(et.narrative || '')}</p>
+      </div>
+      <div class="exec-cards">
+        <div class="ec"><div class="lbl">Entry Zone</div><div class="val">${_qp6Money(et.entry_zone_low)}–${et.entry_zone_high ? (+et.entry_zone_high).toFixed(2) : '—'}</div><div class="sub">half now · full on confirm</div></div>
+        <div class="ec rd"><div class="lbl">Hard Stop</div><div class="val">${_qp6Money(et.stop)}</div><div class="sub">1.25 ATR (${_qp6Money(et.atr_used)} ATR)</div></div>
+        <div class="ec gn"><div class="lbl">T1 (Fib 1.272)</div><div class="val">${_qp6Money(et.t1)}</div><div class="sub">scale 50%</div></div>
+        <div class="ec gn"><div class="lbl">T2 (Fib 1.618)</div><div class="val">${_qp6Money(et.t2)}</div><div class="sub">trail rest</div></div>
+      </div>
+    </div>`;
+  }
+
+  // ─── JS handlers (global so onclick can find) ──────────────────────────
+  window.qp6ShowDrill = function(rowEl, idx) {
+    document.querySelectorAll('.qp6-root table.mtx tbody tr').forEach(r => r.classList.remove('active'));
+    rowEl.classList.add('active');
+    const tk = (window._currentTicker || '').toUpperCase();
+    const ctx = window._qp6Ctx[tk] || Object.values(window._qp6Ctx)[0];
     if (!ctx) return;
+    const m = ctx.METHODS[idx];
+    if (!m) return;
+    const root = rowEl.closest('.qp6-root') || document;
+    const titleEl = root.querySelector('#qp6-dd-title');
+    const voteEl = root.querySelector('#qp6-dd-vote');
+    const metaEl = root.querySelector('#qp6-dd-meta');
+    const claimEl = root.querySelector('#qp6-dd-claim');
+    const falsEl = root.querySelector('#qp6-dd-falsify');
+    if (titleEl) titleEl.textContent = (m.num + ' · ' + m.title);
+    if (voteEl) { voteEl.textContent = m.vote || '—'; voteEl.className = 'vote-pill ' + _qp6VoteCls(m.vote); }
+    if (metaEl) metaEl.textContent = 'confidence ' + ((m.conf || 0) * 100).toFixed(0) + '%';
+    if (claimEl) claimEl.textContent = m.rationale || '';
+    if (falsEl) falsEl.innerHTML = '<div class="lbl">▼ FALSIFICATION</div>' + _qp6Esc(m.fals || '');
+    // Detail data cards
+    const dataEl = root.querySelector('#qp6-dd-data');
+    if (dataEl) {
+      const detail = _drillData(ctx.pd, m.idx);
+      dataEl.innerHTML = detail.map(d => `<div class="dd-card">
+        <div class="dd-lbl">${_qp6Esc(d[0])}</div>
+        <div class="dd-val ${d[2] || ''}">${_qp6Esc(d[1])}</div>
+        <div class="dd-sub">${_qp6Esc(d[3] || '')}</div>
+      </div>`).join('');
+    }
+  };
 
-    // 2026-05-17 · use backend swing endpoints + computed pattern_data when present.
-    // Synthetic OHLC fallback only fires when bundle truly has no ohlc_90d.
-    const _spotPx = ctx.px || 100;
-    const _swingHi = (ctx.fi && ctx.fi.swing_hi) ? ctx.fi.swing_hi : _spotPx * 1.15;
-    const _swingLo = (ctx.fi && ctx.fi.swing_lo) ? ctx.fi.swing_lo : _spotPx * 0.85;
-    const ohlc = ctx.hasOHLC ? ctx.ohlc : _generateSyntheticOHLC(tk, _spotPx, _swingHi, _swingLo);
-    const times = ohlc.map(d => d.time);
-    const highs = ohlc.map(d => d.high);
-    const lows  = ohlc.map(d => d.low);
-    const closes= ohlc.map(d => d.close);
-    const LAST_T = times[times.length - 1];
-    const DAY = 86400;
-
-    const _baseIsLight = document.body.classList.contains('light');
-    const baseOpts = (extra) => Object.assign({
-      layout: { background: { color: _baseIsLight?'#f2f3f1':'#11161a' }, textColor: _baseIsLight?'#363a34':'#c9cdd0', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
-      grid:   { vertLines: { color: _baseIsLight?'#d5d8d3':'#1a2127' }, horzLines: { color: _baseIsLight?'#d5d8d3':'#1a2127' } },
-      rightPriceScale: { borderColor: _baseIsLight?'#c4c8c1':'#283038', textColor: _baseIsLight?'#787d74':'#8f969c' },
-      timeScale:       { borderColor: _baseIsLight?'#c4c8c1':'#283038', timeVisible: true, secondsVisible: false },
-      crosshair: { mode: LightweightCharts.CrosshairMode.Normal,
-                   vertLine: { color: '#d49060', width: 1, style: 0, labelBackgroundColor: '#d49060' },
-                   horzLine: { color: '#d49060', width: 1, style: 0, labelBackgroundColor: '#d49060' } },
-    }, extra || {});
-    const candleStyle = {
-      upColor: '#5be57c', downColor: '#ff6b5b',
-      borderUpColor: '#5be57c', borderDownColor: '#ff6b5b',
-      wickUpColor: '#5be57c', wickDownColor: '#ff6b5b',
+  function _drillData(pd, idx) {
+    const data = {
+      0: () => {
+        const w = pd.wyckoff || {};
+        return [
+          ['Phase', (w.phase || '—').toUpperCase(), _qp6VoteCls(w.vote), 'confidence ' + ((w.confidence||0)*100).toFixed(0) + '%'],
+          ['30d slope', _qp6Pct(w.slope_pct_per_day, 2) + '/d', w.slope_pct_per_day > 0 ? 'gn' : 'rd', 'log-return regression'],
+          ['Range position', ((w.pos_in_range||0)*100).toFixed(0) + '%', '', 'of 60d range'],
+          ['Volume skew', _qp6Pct((w.volume_skew||0)*100, 0), (w.volume_skew||0) > 0 ? 'gn' : 'rd', 'up-vol vs down-vol'],
+        ];
+      },
+      1: () => {
+        const f = pd.fibonacci || {}; const lev = f.levels || {};
+        return [
+          ['Swing low', _qp6Money(f.swing_lo), 'rd', 'detected pivot'],
+          ['Golden 0.618', _qp6Money(lev.r_0618), 'cop', 'deep retrace floor'],
+          ['1.272 ext (T1)', _qp6Money(lev.ext_1272), 'gn', 'primary target'],
+          ['1.618 ext (T2)', _qp6Money(lev.ext_1618), 'gn', 'stretch target'],
+        ];
+      },
+      2: () => {
+        const i = pd.ichimoku || {};
+        return [
+          ['Cloud state', i.price_vs_cloud || '—', _qp6VoteCls(i.vote), 'price vs cloud'],
+          ['TK Cross', i.tk_cross || '—', _qp6VoteCls(i.vote), 'tenkan vs kijun'],
+          ['Kijun', _qp6Money(i.kijun), '', 'dynamic stop ref'],
+          ['Future cloud', i.future_cloud || '—', _qp6VoteCls(i.vote), '26d forward'],
+        ];
+      },
+      3: () => {
+        const t = pd.trendlines || {};
+        return [
+          ['Upper TL @ now', _qp6Money(t.upper && t.upper.now), 'gn', 'rising · 3 pivots'],
+          ['Lower TL @ now', _qp6Money(t.lower && t.lower.now), 'gn', 'rising · 3 pivots'],
+          ['Channel width', t.upper && t.lower ? _qp6Money((+t.upper.now) - (+t.lower.now)) : '—', '', 'extreme spread'],
+          ['Break status', t.break_status || 'INTACT', '', 'no recent break'],
+        ];
+      },
+      4: () => {
+        const v = pd.volume_profile || {};
+        return [
+          ['POC', _qp6Money(v.poc), 'cop', 'institutional anchor'],
+          ['VAH', _qp6Money(v.vah), '', 'value area high'],
+          ['VAL', _qp6Money(v.val), '', 'value area low'],
+          ['Acceptance', v.acceptance || '—', 'am', 'state'],
+        ];
+      },
+      5: () => {
+        const s = pd.sr_levels || {};
+        const lv = s.levels || [];
+        return [
+          ['Top level', lv[0] ? _qp6Money(lv[0].price) : '—', 'rd', lv[0] ? (lv[0].touches + ' touches') : '—'],
+          ['ATR(14)', _qp6Money(s.atr), '', 'cluster band 0.6×'],
+          ['Active levels', String(lv.length), 'am', 'within range'],
+          ['Strength', s.strength || '—', '', 'cluster score'],
+        ];
+      },
+      6: () => {
+        const c = pd.classical || {};
+        return [
+          ['Detected', c.active_pattern || 'NONE', c.active_pattern ? _qp6VoteCls(c.vote) : 'am', '90d scan'],
+          ['Target', c.target ? _qp6Money(c.target) : '—', 'gn', 'measured move'],
+          ['Confidence', ((c.confidence||0)*100).toFixed(0) + '%', '', 'pattern score'],
+          ['Patterns found', String((c.patterns || []).length), '', 'all in 90d'],
+        ];
+      },
+      7: () => {
+        const e = pd.elliott_wave || {};
+        return [
+          ['Current wave', e.current_wave || '—', 'disc', e.direction || 'impulse'],
+          ['W5 target', e.w5_target_low ? `${_qp6Money(e.w5_target_low)}–${_qp6Money(e.w5_target_high)}` : '—', 'gn', '0.618 × (W1+W3) ext'],
+          ['Invalidation', _qp6Money(e.invalidation_level), 'rd', 'W4 cannot overlap W1'],
+          ['Rules check', (e.rules_passed || 0) + ' / ' + (e.rules_total || 3), (e.rules_passed === e.rules_total) ? 'gn' : 'rd', 'all EW rules'],
+        ];
+      },
     };
-    const showErr = (containerId, err) => {
-      const c = document.getElementById(containerId);
-      if (!c) return;
-      const msg = document.createElement('div');
-      msg.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:rgba(255,107,91,0.06);color:#ff6b5b;font-family:var(--mono);font-size:11.5px;text-align:center;line-height:1.6;z-index:10';
-      msg.innerHTML = `<div style="font-weight:800;letter-spacing:0.14em;margin-bottom:6px">CHART FAILED · ${containerId}</div><div style="color:#c9cdd0;max-width:60ch">${(err && err.message) ? err.message : String(err)}</div>`;
-      c.appendChild(msg);
-    };
+    const fn = data[idx];
+    return fn ? fn() : [];
+  }
 
-    // Approximate Volume Profile from OHLC: POC = price bin with most volume
-    // VAH/VAL bound the central 70% of volume.
-    const computeVP = () => {
-      const NBINS = 30;
-      const lo = Math.min(...lows);
-      const hi = Math.max(...highs);
-      const step = (hi - lo) / NBINS;
-      const bins = new Array(NBINS).fill(0);
-      ohlc.forEach(d => {
-        const mid = (d.high + d.low) / 2;
-        const b = Math.max(0, Math.min(NBINS - 1, Math.floor((mid - lo) / step)));
-        bins[b] += d.volume;
-      });
-      const totVol = bins.reduce((a, b) => a + b, 0);
-      const pocIdx = bins.indexOf(Math.max(...bins));
-      const pocPx = +(lo + (pocIdx + 0.5) * step).toFixed(2);
-      // VAH/VAL = central 70%
-      const sorted = bins.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v);
-      let cum = 0, vah = pocIdx, val = pocIdx;
-      for (const e of sorted) {
-        cum += e.v;
-        if (e.i > vah) vah = e.i;
-        if (e.i < val) val = e.i;
-        if (cum / totVol >= 0.70) break;
-      }
-      return {
-        poc: pocPx,
-        vah: +(lo + (vah + 1) * step).toFixed(2),
-        val: +(lo + val * step).toFixed(2),
-      };
-    };
+  // initPatternsCharts is now a no-op (charts inlined as SVG in renderPatternsTab)
+  function initPatternsCharts(t) {
+    if (t && t.ticker) window._currentTicker = (t.ticker || '').toUpperCase();
+    // Click handler is attached via onclick="window.qp6ShowDrill(this, idx)" inline
+    // Initial drill already rendered in shell (idx=0 = Wyckoff)
+  }
 
-    // ──── 1. SUPPORT / RESISTANCE — horizontal levels from backend ────
-    try {
-      const c = document.getElementById('pat-chart-sr');
-      if (c) {
-        const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
-        const cs = chart.addCandlestickSeries(candleStyle);
-        cs.setData(ohlc);
-        if (ctx.sr) {
-          (ctx.sr.supports || []).forEach((s, i) => {
-            cs.createPriceLine({ price: s.price, color: '#5be57c',
-              lineWidth: Math.min(3, s.touches), lineStyle: 0,
-              axisLabelVisible: true, title: `S $${s.price.toFixed(2)} · ${s.touches}T` });
-          });
-          (ctx.sr.resistances || []).forEach((r, i) => {
-            cs.createPriceLine({ price: r.price, color: '#ff6b5b',
-              lineWidth: Math.min(3, r.touches), lineStyle: 0,
-              axisLabelVisible: true, title: `R $${r.price.toFixed(2)} · ${r.touches}T` });
-          });
-        }
-        if (ctx.stop) cs.createPriceLine({ price: ctx.stop, color: '#d49060', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `Stop $${ctx.stop.toFixed(2)}` });
-        cs.setMarkers([{ time: LAST_T, position: 'aboveBar', color: '#d49060', shape: 'circle', text: `NOW $${ctx.px.toFixed(2)}` }]);
-        chart.timeScale().fitContent();
-        window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
-      }
-    } catch (err) { console.error('[pat-chart-sr]', err); showErr('pat-chart-sr', err); }
-
-    // ──── 2. TRENDLINES — diagonal lines via line-series ────
-    try {
-      const c = document.getElementById('pat-chart-tl');
-      if (c) {
-        const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
-        const cs = chart.addCandlestickSeries(candleStyle);
-        cs.setData(ohlc);
-        // Trendlines from backend (slope+intercept against bar-index). Project across ohlc.
-        const N = ohlc.length;
-        const projectLine = (tl) => {
-          // pivots are bar indices from backend lookback window (90 bars typically)
-          // we approximate over our local ohlc with same number of bars
-          const pts = [];
-          for (let i = 0; i < N; i++) {
-            pts.push({ time: times[i], value: +(tl.slope * i + tl.intercept).toFixed(2) });
-          }
-          return pts;
-        };
-        if (ctx.tl && ctx.tl.upper) {
-          chart.addLineSeries({ color: '#ff6b5b', lineWidth: 2, priceLineVisible: false, lastValueVisible: false })
-               .setData(projectLine(ctx.tl.upper));
-        }
-        if (ctx.tl && ctx.tl.lower) {
-          chart.addLineSeries({ color: '#5be57c', lineWidth: 2, priceLineVisible: false, lastValueVisible: false })
-               .setData(projectLine(ctx.tl.lower));
-        }
-        cs.setMarkers([{ time: LAST_T, position: 'aboveBar', color: '#d49060', shape: 'circle', text: `NOW $${ctx.px.toFixed(2)}` }]);
-        chart.timeScale().fitContent();
-        window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
-      }
-    } catch (err) { console.error('[pat-chart-tl]', err); showErr('pat-chart-tl', err); }
-
-    // ──── 3. VOLUME PROFILE — uses backend POC/VAH/VAL ────
-    try {
-      const c = document.getElementById('pat-chart-vp');
-      if (c) {
-        const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
-        const cs = chart.addCandlestickSeries(candleStyle);
-        cs.setData(ohlc);
-        const vs = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '', color: '#5be57c' });
-        chart.priceScale('').applyOptions({ scaleMargins: { top: 0.80, bottom: 0 } });
-        vs.setData(ohlc.map(d => ({ time: d.time, value: d.volume, color: d.close >= d.open ? 'rgba(91,229,124,0.55)' : 'rgba(255,107,91,0.55)' })));
-        // Prefer backend VP; fallback to computeVP() if missing
-        const vp = (ctx.vp && ctx.vp.poc) ? { poc: ctx.vp.poc, vah: ctx.vp.vah, val: ctx.vp.val } : computeVP();
-        cs.createPriceLine({ price: vp.poc, color: '#d49060', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: `POC $${vp.poc.toFixed(2)}` });
-        cs.createPriceLine({ price: vp.vah, color: '#8f969c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `VAH $${vp.vah.toFixed(2)}` });
-        cs.createPriceLine({ price: vp.val, color: '#8f969c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `VAL $${vp.val.toFixed(2)}` });
-        if (ctx.stop) cs.createPriceLine({ price: ctx.stop, color: '#ff6b5b', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `Stop $${ctx.stop.toFixed(2)}` });
-        chart.timeScale().fitContent();
-        window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
-      }
-    } catch (err) { console.error('[pat-chart-vp]', err); showErr('pat-chart-vp', err); }
-
-    // ──── 4. FIBONACCI — uses backend detected swing pair ────
-    try {
-      const c = document.getElementById('pat-chart-fib');
-      if (c) {
-        const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
-        const cs = chart.addCandlestickSeries(candleStyle);
-        cs.setData(ohlc);
-        // Prefer backend fi.levels; fallback to derived from swing hi/lo
-        const f = (ctx.fi && ctx.fi.levels) ? ctx.fi.levels : (function() {
-          const hi = _swingHi, lo = _swingLo, rng = hi - lo;
-          const r = (k) => +(hi - rng * k).toFixed(2);
-          return {
-            ext_1618: +(hi + rng * 0.618).toFixed(2),
-            ext_1272: +(hi + rng * 0.272).toFixed(2),
-            r_0000: hi, r_0236: r(0.236), r_0382: r(0.382),
-            r_0500: r(0.500), r_0618: r(0.618), r_0786: r(0.786),
-            r_1000: lo,
-          };
-        })();
-        [
-          { price: f.ext_1618, color: '#5be57c', style: 0, title: `1.618 ext $${f.ext_1618.toFixed(2)} T2`,  width: 2 },
-          { price: f.ext_1272, color: '#5be57c', style: 0, title: `1.272 ext $${f.ext_1272.toFixed(2)} T1`,  width: 2 },
-          { price: f.r_0000,   color: '#5be57c', style: 0, title: `1.000 $${f.r_0000.toFixed(2)} swing hi`,  width: 2 },
-          { price: f.r_0236,   color: '#8f969c', style: 2, title: `0.236 $${f.r_0236.toFixed(2)}`,           width: 1 },
-          { price: f.r_0382,   color: '#d49060', style: 2, title: `0.382 $${f.r_0382.toFixed(2)}`,           width: 1 },
-          { price: f.r_0500,   color: '#d49060', style: 2, title: `0.500 $${f.r_0500.toFixed(2)}`,           width: 1 },
-          { price: f.r_0618,   color: '#d49060', style: 0, title: `0.618 $${f.r_0618.toFixed(2)} GOLDEN`,    width: 3 },
-          { price: f.r_0786,   color: '#8f969c', style: 2, title: `0.786 $${f.r_0786.toFixed(2)}`,           width: 1 },
-          { price: f.r_1000,   color: '#ff6b5b', style: 0, title: `0.000 $${f.r_1000.toFixed(2)} swing lo`,  width: 2 },
-        ].forEach(L => cs.createPriceLine({ price: L.price, color: L.color, lineWidth: L.width, lineStyle: L.style, axisLabelVisible: true, title: L.title }));
-        cs.setMarkers([
-          { time: LAST_T, position: 'aboveBar', color: '#5be57c', shape: 'circle', text: `NOW $${ctx.px.toFixed(2)}` },
-        ]);
-        chart.timeScale().fitContent();
-        window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
-      }
-    } catch (err) { console.error('[pat-chart-fib]', err); showErr('pat-chart-fib', err); }
-
-    // ──── 5. ICHIMOKU — locally computed 5-line system ────
-    try {
-      const c = document.getElementById('pat-chart-ichi');
-      if (c) {
-        const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 440 }));
-        const cs = chart.addCandlestickSeries(candleStyle);
-        cs.setData(ohlc);
-        const rollMid = (period) => {
-          const out = [];
-          for (let i = 0; i < ohlc.length; i++) {
-            if (i < period - 1) continue;
-            let hi = -Infinity, lo = Infinity;
-            for (let j = i - period + 1; j <= i; j++) {
-              if (highs[j] > hi) hi = highs[j];
-              if (lows[j]  < lo) lo = lows[j];
-            }
-            out.push({ time: times[i], value: +((hi + lo) / 2).toFixed(2) });
-          }
-          return out;
-        };
-        const tenkan = rollMid(9);
-        const kijun  = rollMid(26);
-        const senkouA = [], senkouB = [];
-        for (let i = 0; i < ohlc.length; i++) {
-          const tIdx = i - 8, kIdx = i - 25;
-          if (tIdx >= 0 && kIdx >= 0) {
-            senkouA.push({ time: times[i] + 26 * DAY, value: +(((tenkan[tIdx].value + kijun[kIdx].value) / 2)).toFixed(2) });
-          }
-          if (i >= 51) {
-            let hi = -Infinity, lo = Infinity;
-            for (let j = i - 51; j <= i; j++) {
-              if (highs[j] > hi) hi = highs[j];
-              if (lows[j]  < lo) lo = lows[j];
-            }
-            senkouB.push({ time: times[i] + 26 * DAY, value: +((hi + lo) / 2).toFixed(2) });
-          }
-        }
-        const chikou = [];
-        for (let i = 25; i < ohlc.length; i++) chikou.push({ time: times[i - 26], value: closes[i] });
-
-        chart.addLineSeries({ color: '#d49060', lineWidth: 2, priceLineVisible: false, lastValueVisible: false }).setData(tenkan);
-        chart.addLineSeries({ color: '#c9cdd0', lineWidth: 2, priceLineVisible: false, lastValueVisible: false }).setData(kijun);
-        chart.addLineSeries({ color: '#5be57c', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }).setData(senkouA);
-        chart.addLineSeries({ color: '#ff6b5b', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }).setData(senkouB);
-        chart.addLineSeries({ color: '#ffb95c', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }).setData(chikou);
-
-        const kijunLast = (ctx.ic && ctx.ic.kijun) || (kijun.length ? kijun[kijun.length - 1].value : null);
-        if (kijunLast) cs.createPriceLine({ price: kijunLast, color: '#c9cdd0', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `Kijun $${kijunLast.toFixed(2)}` });
-
-        cs.setMarkers([{ time: LAST_T, position: 'aboveBar', color: '#5be57c', shape: 'circle', text: `NOW $${ctx.px.toFixed(2)}` }]);
-        chart.timeScale().fitContent();
-        window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
-      }
-    } catch (err) { console.error('[pat-chart-ichi]', err); showErr('pat-chart-ichi', err); }
-
-    // ──── 6. CLASSICAL PATTERNS — overlays detected pattern ────
-    try {
-      const c = document.getElementById('pat-chart-cls');
-      if (c) {
-        const chart = LightweightCharts.createChart(c, baseOpts({ width: c.clientWidth, height: 380 }));
-        const cs = chart.addCandlestickSeries(candleStyle);
-        cs.setData(ohlc);
-        const cl = ctx.cls;
-        if (cl && cl.active_pattern && cl.patterns && cl.patterns.length) {
-          const p = cl.patterns[0];
-          // Generic overlays: breakout / target / invalidation depending on shape
-          if (p.target) {
-            cs.createPriceLine({ price: p.target, color: '#d49060', lineWidth: 2, lineStyle: 0,
-              axisLabelVisible: true, title: `Target $${p.target.toFixed(2)} · ${cl.active_pattern}` });
-          }
-          if (p.neckline) {
-            cs.createPriceLine({ price: p.neckline, color: '#5be57c', lineWidth: 2, lineStyle: 0,
-              axisLabelVisible: true, title: `Neckline $${p.neckline.toFixed(2)}` });
-          }
-          if (p.flag_top) {
-            cs.createPriceLine({ price: p.flag_top, color: '#5be57c', lineWidth: 1, lineStyle: 2,
-              axisLabelVisible: true, title: `Flag top $${p.flag_top.toFixed(2)}` });
-          }
-          if (p.flag_bottom) {
-            cs.createPriceLine({ price: p.flag_bottom, color: '#ff6b5b', lineWidth: 1, lineStyle: 2,
-              axisLabelVisible: true, title: `Flag bot $${p.flag_bottom.toFixed(2)}` });
-          }
-          if (p.resistance) {
-            cs.createPriceLine({ price: p.resistance, color: '#5be57c', lineWidth: 2, lineStyle: 0,
-              axisLabelVisible: true, title: `Triangle top $${p.resistance.toFixed(2)}` });
-          }
-          if (p.support) {
-            cs.createPriceLine({ price: p.support, color: '#ff6b5b', lineWidth: 2, lineStyle: 0,
-              axisLabelVisible: true, title: `Triangle base $${p.support.toFixed(2)}` });
-          }
-          if (p.handle_low) {
-            cs.createPriceLine({ price: p.handle_low, color: '#ff6b5b', lineWidth: 1, lineStyle: 3,
-              axisLabelVisible: true, title: `Handle low $${p.handle_low.toFixed(2)}` });
-          }
-        } else {
-          // No pattern — show neutral context line
-          cs.createPriceLine({ price: ctx.px, color: '#8f969c', lineWidth: 1, lineStyle: 3,
-            axisLabelVisible: true, title: `No active pattern · $${ctx.px.toFixed(2)}` });
-        }
-        cs.setMarkers([{ time: LAST_T, position: 'aboveBar', color: '#d49060', shape: 'circle', text: `NOW $${ctx.px.toFixed(2)}` }]);
-        chart.timeScale().fitContent();
-        window.addEventListener('resize', () => chart.applyOptions({ width: c.clientWidth }));
-      }
-    } catch (err) { console.error('[pat-chart-cls]', err); showErr('pat-chart-cls', err); }
+  // Synthetic OHLC retained for potential future use; not currently needed
+  function _generateSyntheticOHLC(ticker, px, wkHi, wkLo) {
+    return [];
   }
 
   return { render, switchSub, SUB_TABS };
