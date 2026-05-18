@@ -350,28 +350,27 @@ def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
     """Compute the rolling-Sharpe kill switch state from data/signal_log.json.
 
     Cached by signal_log.json mtime — recomputes only when the log changes.
-    Returns:
-      {
-        active: bool,           # True if new BUYs should be blocked
-        reason: str,            # human-readable explanation
-        sharpe: float|None,     # rolling sharpe over last N closed BUYs
-        n: int,                 # actual samples used
-        avg_pnl: float|None,
-        threshold: float,       # config min_sharpe
-        lookback_n: int,        # config lookback
-        min_sample_n: int,      # config minimum sample required
-      }
+    Two modes (config: rolling_sharpe_kill.mode):
+      - "aggregate" (default): one rolling Sharpe across ALL closed BUYs.
+        Returns {active, sharpe, n, ...} same as before.
+      - "per_sleeve":        one rolling Sharpe per setup_family. Returns the
+        aggregate fields PLUS sleeve_states={sleeve: {active, sharpe, n, ...}}.
+        Aggregate `active` is the OR across sleeves (so any failing sleeve
+        flips the global flag), but per-sleeve gate-application is done by
+        the caller at the gate site.
     """
     cfg = (config or {}).get("rolling_sharpe_kill") or {}
     enabled = bool(cfg.get("_enabled", False))
     threshold = float(cfg.get("min_sharpe", -0.5))
     lookback_n = int(cfg.get("lookback_n", 20))
     min_sample_n = int(cfg.get("min_sample_n", 10))
+    mode = str(cfg.get("mode") or "aggregate").lower()
     out_default = {
         "active": False, "reason": "disabled" if not enabled else "no data",
         "sharpe": None, "n": 0, "avg_pnl": None,
         "threshold": threshold, "lookback_n": lookback_n,
         "min_sample_n": min_sample_n,
+        "mode": mode, "sleeve_states": {},
     }
     if not enabled:
         return out_default
@@ -385,8 +384,9 @@ def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
     except OSError:
         return {**out_default, "reason": "signal_log.json stat failed"}
 
-    # Cache hit if log hasn't changed
-    if mtime == _ROLLING_SHARPE_CACHE["_signal_log_mtime"] and _ROLLING_SHARPE_CACHE["_state"]:
+    # Cache hit if log hasn't changed AND mode hasn't changed
+    cache_key = (mtime, mode)
+    if cache_key == _ROLLING_SHARPE_CACHE.get("_cache_key") and _ROLLING_SHARPE_CACHE.get("_state"):
         return _ROLLING_SHARPE_CACHE["_state"]
 
     try:
@@ -399,6 +399,7 @@ def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
 
     # Filter to CLOSED BUYs with valid pnl. Sort by exit date (or fall back
     # to entry date), take last N. Skip outliers >100% (CTRA-class).
+    # Also capture setup_family for per-sleeve mode.
     closed_buys: list[dict] = []
     for s in signals:
         if not isinstance(s, dict):
@@ -416,39 +417,71 @@ def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
             continue
         if abs(pnl) > 100:  # outlier defensive
             continue
-        closed_buys.append({"pnl": pnl, "date": s.get("date") or ""})
-    closed_buys.sort(key=lambda r: r["date"])  # ascending
-    recent = closed_buys[-lookback_n:]
-    n = len(recent)
+        sleeve = (s.get("setup_family") or s.get("setup_type") or s.get("strategy")
+                  or "Unknown")
+        closed_buys.append({"pnl": pnl, "date": s.get("date") or "", "sleeve": sleeve})
+    closed_buys.sort(key=lambda r: r["date"])
 
-    if n < min_sample_n:
-        state = {**out_default, "n": n,
-                 "reason": f"only {n} closed BUYs (< {min_sample_n} min sample) — no kill"}
-        _ROLLING_SHARPE_CACHE.update({"_signal_log_mtime": mtime, "_state": state})
-        return state
+    def _stat(samples: list[dict]) -> dict:
+        """Compute Sharpe/avg/active over a list of {pnl, date} samples."""
+        n = len(samples)
+        if n < min_sample_n:
+            return {"active": False, "sharpe": None, "n": n, "avg_pnl": None,
+                    "reason": f"only {n} closed BUYs (< {min_sample_n} min sample) — no kill"}
+        pnls = [r["pnl"] for r in samples]
+        avg = statistics.mean(pnls)
+        std = statistics.stdev(pnls) if len(pnls) >= 2 else 0
+        sharpe = (avg / std) if std > 0 else 0.0
+        active = sharpe < threshold
+        return {
+            "active": active, "sharpe": round(sharpe, 4), "n": n,
+            "avg_pnl": round(avg, 3),
+            "reason": (
+                f"rolling sharpe {sharpe:+.3f} < {threshold:+.2f} on last {n} BUYs "
+                f"(avg pnl {avg:+.2f}%); pausing new BUYs"
+                if active else
+                f"rolling sharpe {sharpe:+.3f} >= {threshold:+.2f} on last {n} BUYs — gate inactive"
+            ),
+        }
 
-    pnls = [r["pnl"] for r in recent]
-    avg = statistics.mean(pnls)
-    std = statistics.stdev(pnls) if len(pnls) >= 2 else 0
-    sharpe = (avg / std) if std > 0 else 0.0
+    # Aggregate stat — always computed (used by aggregate-mode caller and as
+    # display fallback for per-sleeve mode).
+    agg = _stat(closed_buys[-lookback_n:])
 
-    active = sharpe < threshold
+    # Per-sleeve stats — only relevant when mode=per_sleeve, but cheap to compute.
+    sleeve_states: dict[str, dict] = {}
+    if mode == "per_sleeve":
+        from collections import defaultdict
+        by_sleeve = defaultdict(list)
+        for r in closed_buys:
+            by_sleeve[r["sleeve"]].append(r)
+        for sleeve, samples in by_sleeve.items():
+            sleeve_states[sleeve] = _stat(samples[-lookback_n:])
+
+    # Aggregate `active`: in per_sleeve mode, only fire when EVERY sleeve with
+    # enough samples is below floor — guards against premature global kill when
+    # only one sleeve is bleeding. Per-sleeve gating at the call site handles
+    # selective kills.
+    if mode == "per_sleeve":
+        active_sleeves = [s for s in sleeve_states.values()
+                          if s.get("active") and s.get("n", 0) >= min_sample_n]
+        ready_sleeves = [s for s in sleeve_states.values()
+                         if s.get("n", 0) >= min_sample_n]
+        active_all = bool(ready_sleeves) and len(active_sleeves) == len(ready_sleeves)
+    else:
+        active_all = agg.get("active", False)
+
     state = {
-        "active": active,
-        "reason": (
-            f"rolling sharpe {sharpe:+.3f} < {threshold:+.2f} on last {n} BUYs "
-            f"(avg pnl {avg:+.2f}%); pausing new BUYs"
-            if active else
-            f"rolling sharpe {sharpe:+.3f} >= {threshold:+.2f} on last {n} BUYs — gate inactive"
-        ),
-        "sharpe": round(sharpe, 4),
-        "n": n,
-        "avg_pnl": round(avg, 3),
+        **agg,
+        "active": active_all,
         "threshold": threshold,
         "lookback_n": lookback_n,
         "min_sample_n": min_sample_n,
+        "mode": mode,
+        "sleeve_states": sleeve_states,
     }
-    _ROLLING_SHARPE_CACHE.update({"_signal_log_mtime": mtime, "_state": state})
+    _ROLLING_SHARPE_CACHE.update({"_cache_key": cache_key, "_state": state,
+                                  "_signal_log_mtime": mtime})  # legacy key kept
     return state
 
 
@@ -942,23 +975,68 @@ def compute_final_verdict(t: dict, regime: str | None = None,
 
     # ROLLING-SHARPE KILL (2026-05-13, Direction 2): capital preservation gate.
     # If recent N closed BUYs show rolling Sharpe < threshold, pause new BUYs.
-    # Truncates left-tail bad periods. Block-not-relax — silently waits for
-    # rolling Sharpe to recover before resuming.
+    # Modes:
+    #   aggregate (default): one rolling Sharpe across ALL closed BUYs.
+    #   per_sleeve:          rolling Sharpe per setup_family; demote only when
+    #                        candidate's sleeve is below floor (principle 16 —
+    #                        per-sub-strategy attribution).
+    # Catalyst-sleeve bypass: when catalyst_sleeve_bypass=true, PEAD / Insider
+    # Cluster / Defensive Rotation / Momentum Continuation / Mean Reversion /
+    # ESP Play bypass the gate entirely — parity with existing bypasses in
+    # _eval_hard_gates (mechanism per principle 14 — catalyst alpha is
+    # independent of pullback-mechanic Sharpe).
     _rs_state = compute_rolling_sharpe_kill_state(config) if config else {"active": False}
-    if _rs_state.get("active"):
+    _rs_cfg = (config or {}).get("rolling_sharpe_kill") or {}
+    _rs_mode = str(_rs_cfg.get("mode") or "aggregate").lower()
+    _rs_catalyst_bypass = bool(_rs_cfg.get("catalyst_sleeve_bypass", False))
+    _CATALYST_SLEEVES = {"PEAD", "Insider Cluster", "Defensive Rotation",
+                         "Momentum Continuation", "Mean Reversion", "ESP Play"}
+    _t_sleeve = t.get("setup_family") or ""
+    _is_catalyst_sleeve = _t_sleeve in _CATALYST_SLEEVES
+
+    # Determine if THIS candidate is killed.
+    _kill_fired = False
+    _kill_reason = _rs_state.get("reason", "")
+    if _rs_state.get("active") or (_rs_mode == "per_sleeve" and _rs_state.get("sleeve_states")):
+        if _rs_catalyst_bypass and _is_catalyst_sleeve:
+            # Bypass — record on gate audit but don't demote.
+            _kill_fired = False
+            _kill_reason = (f"rolling-Sharpe kill bypassed for {_t_sleeve} sleeve "
+                            f"(catalyst alpha independent of pullback-mechanic Sharpe)")
+        elif _rs_mode == "per_sleeve":
+            # Per-sleeve: kill only when THIS candidate's sleeve is below floor.
+            _sleeve_state = (_rs_state.get("sleeve_states") or {}).get(_t_sleeve)
+            if _sleeve_state and _sleeve_state.get("active"):
+                _kill_fired = True
+                _kill_reason = (f"rolling-Sharpe kill (per-sleeve, {_t_sleeve}): "
+                                f"{_sleeve_state.get('reason')}")
+        else:
+            # Aggregate mode — original behavior.
+            if _rs_state.get("active"):
+                _kill_fired = True
+                _kill_reason = f"rolling-Sharpe kill: {_rs_state.get('reason')}"
+
+    if _kill_fired:
+        _stats_for_audit = _rs_state
+        if _rs_mode == "per_sleeve":
+            _stats_for_audit = {**_rs_state,
+                                "applied_sleeve": _t_sleeve,
+                                "applied_sleeve_state": (_rs_state.get("sleeve_states") or {}).get(_t_sleeve)}
         return {
             "verdict": "WATCH",
-            "reason": f"rolling-Sharpe kill: {_rs_state.get('reason')}",
+            "reason": _kill_reason,
             "caveats": [
                 f"recent {_rs_state.get('n')} BUYs Sharpe {_rs_state.get('sharpe'):+.3f} "
-                f"(threshold {_rs_state.get('threshold'):+.2f})"
+                f"(threshold {_rs_state.get('threshold'):+.2f}) mode={_rs_mode}"
+                if _rs_state.get("sharpe") is not None else
+                f"mode={_rs_mode}"
             ],
             "gates_evaluated": [{
                 "name": "rolling_sharpe_kill",
                 "passed": False,
-                "reason": _rs_state.get("reason"),
+                "reason": _kill_reason,
                 "severity": "high",
-                "stats": _rs_state,
+                "stats": _stats_for_audit,
             }],
             "demote_to": "watch_list",
         }
