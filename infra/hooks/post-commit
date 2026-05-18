@@ -1,0 +1,24 @@
+#!/bin/bash
+# post-commit hook · capture config changes + feature flag flips → Supabase
+# Fires after every commit. Reads the just-committed diff for config/*.json
+# and pushes a config_history row + any feature_flag_changes rows.
+#
+# Install: bash scripts/install_hooks.sh (copies to .git/hooks/post-commit)
+
+ROOT="/Volumes/MyMacDisk/Claude Skills/SwingTrade"
+LOG="$ROOT/cache/logs/post-commit-hook.log"
+mkdir -p "$(dirname "$LOG")"
+
+(
+  cd "$ROOT" || exit 0
+  COMMIT=$(git rev-parse HEAD 2>/dev/null)
+  AUTHOR=$(git log -1 --format='%an' HEAD 2>/dev/null)
+  CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'config/*.json' 2>/dev/null)
+  if [ -z "$CHANGED" ]; then exit 0; fi
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) commit=$COMMIT config_changed=$CHANGED" >> "$LOG"
+  python3 "$ROOT/scripts/config_history_writer.py" \
+    --commit "$COMMIT" --author "$AUTHOR" --files "$CHANGED" \
+    >> "$LOG" 2>&1 || true
+) &
+
+exit 0
