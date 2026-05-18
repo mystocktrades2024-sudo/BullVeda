@@ -2263,74 +2263,1211 @@ async def alert_push_api(req: Request):
     return {"status": "sent" if any(sent.values()) else "no_channel", "channels": sent, "echo": full}
 
 
-@app.get("/api/sector-cap-demotions")
-async def sector_cap_demotions_api(date: str = ""):
-    """Aggregate today's WATCH demotions caused by sector_cap.
-    Returns per-sector: BUY survivor(s) + runners-up sorted desc by score.
-    Surfaces the next-best alternative the user didn't get.
+@app.get("/api/premarket-catalysts")
+async def premarket_catalysts_api(lookback_hours: int = 16, mine_only: bool = False):
+    """Pull overnight news for portfolio + watchlist tickers, categorize by catalyst type.
+    Returns ranked catalysts with mine flag, magnitude, and sentiment.
     """
-    import json, re
+    import json
     from pathlib import Path
+    from datetime import datetime, timedelta
+    from collections import Counter
+    cutoff = (datetime.now() - timedelta(hours=lookback_hours))
+    mine = set()
+    try:
+        ps = json.load(open("data/portfolio_state.json"))
+        for p in ps.get("positions", []):
+            if p.get("ticker"): mine.add(p["ticker"].upper())
+    except Exception: pass
+    portfolio_tickers = list(mine)
+    try:
+        cfg = json.load(open("config/config.json"))
+        wl = cfg.get("universe", {}).get("custom_watchlist", [])
+        for sym in wl: mine.add(sym.upper())
+    except Exception: pass
+    try:
+        dj = json.load(open("infra/prototype/data.json"))
+    except Exception:
+        return {"error": "data.json missing", "catalysts": []}
+    CAT_RULES = [
+        ("FDA",        ["fda", "approval", "clearance", "phase 3", "phase 2", "clinical trial"]),
+        ("Earnings",   ["earnings", "eps", "beat", "missed", "guidance", "revenue", "outlook", "quarterly"]),
+        ("M&A",        ["merger", "acquisition", "acquires", "acquired", "buyout", "takeover", "to acquire", "tender offer"]),
+        ("Contract",   ["contract", "deal awarded", "partnership", "agreement signed", "signs deal"]),
+        ("Executive",  ["ceo", "cfo", "executive", "appoints", "appointed", "resigns", "resigned", "stepping down"]),
+        ("SEC Filing", ["10-k", "10-q", "8-k", "13f", "sec filing"]),
+        ("Guidance",   ["raises guidance", "lowers guidance", "cuts guidance", "increases outlook", "warns"]),
+        ("AI",         ["artificial intelligence", "generative ai", "llm", "chatgpt", "ai chip"]),
+        ("Activist",   ["activist", "elliott management", "carl icahn", "third point", "starboard"]),
+        ("Buyback",    ["buyback", "share repurchase", "authorized to repurchase"]),
+        ("Dividend",   ["raises dividend", "special dividend", "ex-dividend"]),
+        ("Lawsuit",    ["lawsuit", "settles", "litigation", "court ruling"]),
+        ("Analyst",    ["upgraded", "downgraded", "price target", "initiated coverage"]),
+    ]
+    def _categorize(text):
+        t = (text or "").lower()
+        for cat, keywords in CAT_RULES:
+            if any(k in t for k in keywords): return cat
+        return "Other"
+    def _magnitude(text, cat):
+        t = (text or "").lower()
+        if cat in ("FDA", "M&A", "Activist", "Lawsuit"): return "high"
+        if cat in ("Earnings", "Guidance", "Executive"): return "high"
+        if any(w in t for w in ("beats", "raises", "soars", "surges", "downgrad", "warns", "cuts")): return "high"
+        if cat in ("Contract", "Buyback", "Analyst"): return "medium"
+        return "low"
+    catalysts = []
+    seen_key = set()
+    for n in (dj.get("market_news") or []):
+        d = n.get("date") or n.get("published_at") or ""
+        try:
+            dt = datetime.fromisoformat(d.replace("Z", "")) if d else None
+            if dt and dt.tzinfo is not None: dt = dt.replace(tzinfo=None)  # strip tz for naive comparison
+        except Exception: dt = None
+        if dt and dt < cutoff: continue
+        for sym in (n.get("symbols") or []):
+            sym_clean = str(sym).split(".")[0].upper()
+            key = sym_clean + "|" + (n.get("title") or "")[:60]
+            if key in seen_key: continue
+            seen_key.add(key)
+            title = n.get("title") or ""
+            cat = _categorize(title)
+            catalysts.append({
+                "ticker": sym_clean, "headline": title,
+                "source": n.get("source") or "EODHD",
+                "category": cat, "magnitude": _magnitude(title, cat),
+                "sentiment": (n.get("sentiment") or "").lower(),
+                "when": d, "url": n.get("url") or "",
+                "mine": sym_clean in mine,
+            })
+    try:
+        tj = json.load(open("infra/prototype/tickers.json"))
+        if isinstance(tj, dict):
+            for sym, info in tj.items():
+                if not isinstance(info, dict): continue
+                news = info.get("news") or info.get("news_articles") or []
+                if not isinstance(news, list): continue
+                for n in news[:5]:
+                    if not isinstance(n, dict): continue
+                    d = n.get("published_at") or n.get("timestamp") or n.get("date") or ""
+                    try: dt = datetime.fromisoformat(d.replace("Z", "")) if d else None
+                    except Exception: dt = None
+                    if dt and dt < cutoff: continue
+                    title = n.get("title") or n.get("headline") or n.get("summary") or ""
+                    key = sym.upper() + "|" + title[:60]
+                    if key in seen_key: continue
+                    seen_key.add(key)
+                    cat = _categorize(title)
+                    catalysts.append({
+                        "ticker": sym.upper(), "headline": title,
+                        "source": n.get("source") or "EODHD",
+                        "category": cat, "magnitude": _magnitude(title, cat),
+                        "sentiment": (n.get("sentiment") or n.get("sent") or "").lower(),
+                        "when": d, "url": n.get("url") or n.get("link") or "",
+                        "mine": sym.upper() in mine,
+                    })
+    except Exception: pass
+    if mine_only:
+        catalysts = [c for c in catalysts if c["mine"]]
+    mag_order = {"high": 3, "medium": 2, "low": 1}
+    catalysts.sort(key=lambda c: (-int(c["mine"]), -mag_order.get(c["magnitude"], 0), -(c.get("when") or "")[:19].__hash__() & 0xFFFF))
+    cat_counts = Counter(c["category"] for c in catalysts)
+    tk_counts = Counter(c["ticker"] for c in catalysts)
+    return {
+        "catalysts": catalysts[:60],
+        "summary": {
+            "total": len(catalysts),
+            "mine_count": sum(1 for c in catalysts if c["mine"]),
+            "by_category": dict(cat_counts.most_common()),
+            "by_ticker_top5": dict(tk_counts.most_common(5)),
+        },
+        "portfolio_tickers": portfolio_tickers,
+        "lookback_hours": lookback_hours,
+        "cutoff": cutoff.isoformat(),
+    }
+
+
+@app.get("/api/code-history")
+async def code_history_api(limit: int = 100):
+    """Return commit history grouped by date with plain-English summaries.
+    Reads git log, parses commit messages, extracts highlights for non-developers.
+    """
+    import subprocess, re
     from collections import defaultdict
-    log_path = Path("data/decision_log.jsonl")
+    try:
+        # %H = full hash, %h = short, %ai = ISO date, %s = subject, %b = body
+        result = subprocess.run(
+            ["git", "log", f"--max-count={limit}", "--pretty=format:===COMMIT===%n%h|%ai|%s|%an%n---BODY---%n%b%n---END---", "--", "SwingTrade/"],
+            cwd="/Volumes/MyMacDisk/Claude Skills",
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode != 0:
+            return {"error": result.stderr[:200], "commits": []}
+        raw = result.stdout
+    except Exception as e:
+        return {"error": str(e), "commits": []}
+
+    # Plain-English category mapping (based on commit title prefix)
+    CATEGORY = {
+        "KAIROS": ("UI / Dashboard", "var(--copper)", "Changes to the kairos.html dashboard you see in the browser"),
+        "BUY-PIPELINE": ("Pipeline Diagnostics", "var(--cy)", "Tools to see why BUY signals get filtered/demoted"),
+        "WHATIF": ("What-If Simulator", "#a78bfa", "Counterfactual config testing"),
+        "SECTOR-CAP": ("Sector Cap Controls", "var(--amb)", "Per-sector BUY limits and demotion tracking"),
+        "KILL": ("Setup Kill List", "var(--rd)", "Removed a losing trade setup from rotation"),
+        "PAPER": ("Paper Trading", "var(--gn)", "Live paper-trading simulation"),
+        "PORTFOLIO": ("Portfolio Tracking", "var(--gn)", "Position management"),
+        "BACKTEST": ("Backtest Engine", "var(--cy)", "Historical strategy validation"),
+        "EODHD": ("Data Provider", "var(--ink-2)", "Market data feed (EODHD)"),
+        "Audit": ("Audit Trail", "var(--ink-1)", "Decision-log browsing"),
+        "Macro": ("Macro / Regime", "var(--amb)", "Market regime detection"),
+        "Sharpe": ("Risk Metrics", "var(--cy)", "Sharpe / Sortino / drawdown math"),
+        "MOM": ("Momentum Sleeve", "var(--gn)", "Momentum trade strategy"),
+        "ESP": ("Earnings ESP Sleeve", "var(--amb)", "Earnings surprise predictor"),
+        "INSIDER": ("Insider Cluster", "var(--copper)", "Insider buying signal"),
+        "DEFENSIVE": ("Defensive Rotation", "var(--ink-2)", "Risk-off ETF strategy"),
+        "PEAD": ("PEAD Sleeve", "var(--amb)", "Post-earnings drift"),
+    }
+
+    commits = []
+    blocks = raw.split("===COMMIT===\n")
+    for block in blocks[1:]:  # skip empty first
+        try:
+            header_end = block.find("\n---BODY---\n")
+            body_end = block.find("\n---END---")
+            if header_end < 0: continue
+            header = block[:header_end]
+            body = block[header_end + len("\n---BODY---\n"):body_end] if body_end > 0 else ""
+            parts = header.split("|", 3)
+            if len(parts) < 4: continue
+            sh, iso_date, subj, author = parts
+            # Extract category
+            cat_key = next((k for k in CATEGORY if subj.upper().startswith(k.upper() + ":") or subj.upper().startswith(k.upper() + "-") or subj.upper().startswith(k.upper() + " ")), "Other")
+            cat_label, cat_color, cat_desc = CATEGORY.get(cat_key, ("Other / Misc", "var(--ink-2)", "General changes"))
+            # Clean title — drop the prefix
+            clean_title = re.sub(r"^[A-Z0-9_-]+\s*[:.·]?\s*", "", subj, count=1).strip() or subj
+            # Extract first 5 body lines as bullets for the "what changed"
+            body_lines = [line.strip() for line in body.split("\n") if line.strip()]
+            # Filter out Co-Authored-By and metadata
+            meta_pat = re.compile(r"^(Co-Authored-By|Signed-off-by|Reviewed-by):", re.I)
+            body_lines = [b for b in body_lines if not meta_pat.match(b)]
+            highlights = body_lines[:6]
+            commits.append({
+                "sha": sh.strip(),
+                "date": iso_date[:10],
+                "time": iso_date[11:16],
+                "author": author.strip(),
+                "subject": subj.strip(),
+                "category": cat_label,
+                "category_color": cat_color,
+                "category_desc": cat_desc,
+                "title": clean_title,
+                "highlights": highlights,
+            })
+        except Exception:
+            continue
+    # Group by date
+    by_date = defaultdict(list)
+    for c in commits:
+        by_date[c["date"]].append(c)
+    grouped = []
+    for date in sorted(by_date.keys(), reverse=True):
+        day_commits = by_date[date]
+        # Day summary: count by category
+        cats = defaultdict(int)
+        for c in day_commits:
+            cats[c["category"]] += 1
+        grouped.append({
+            "date": date,
+            "count": len(day_commits),
+            "categories": dict(cats),
+            "commits": day_commits,
+        })
+    return {"days": grouped, "total_commits": len(commits)}
+
+
+@app.get("/api/testing-status")
+async def testing_status_api():
+    """Return live status of all background validation tests.
+    - Walk-forward backtest progress (read scan log)
+    - Paper shadow tracker days
+    - Active paper trading window
+    """
+    import subprocess, json
+    from pathlib import Path
+    from datetime import datetime
+    status = {}
+    # 1) Walk-forward backtest — check for running process + log progress
+    try:
+        ps_out = subprocess.run(["pgrep", "-fl", "walk_forward_v2"], capture_output=True, text=True, timeout=3)
+        wf_running = bool(ps_out.stdout.strip())
+        wf = {"running": wf_running}
+        if wf_running:
+            # Get elapsed time
+            elapsed = subprocess.run(
+                ["ps", "-eo", "etime,command"], capture_output=True, text=True, timeout=3
+            )
+            for line in elapsed.stdout.split("\n"):
+                if "walk_forward_v2" in line:
+                    wf["elapsed"] = line.split()[0]
+                    break
+        # Find latest walk-forward log
+        log_files = sorted(Path("cache/logs").glob("walkforward_*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if log_files:
+            latest = log_files[0]
+            wf["log_file"] = str(latest)
+            wf["log_size"] = latest.stat().st_size
+            # Parse last 50 lines for progress markers
+            with open(latest) as f:
+                tail_lines = f.readlines()[-80:]
+            folds_started = sum(1 for l in tail_lines if "Fold " in l and "(parallel)" in l)
+            folds_done = sum(1 for l in tail_lines if "results saved" in l.lower() or "completed" in l.lower())
+            wf["folds_started"] = folds_started
+            # Find latest progress line
+            for line in reversed(tail_lines):
+                if "Grid search" in line or "Test:" in line or "Train:" in line:
+                    wf["last_progress"] = line.strip()[-150:]
+                    break
+        # Check if results file exists (= test complete)
+        result_file = Path("cache/walk_forward_v2_results.json")
+        if result_file.exists():
+            try:
+                results = json.load(open(result_file))
+                wf["completed"] = True
+                wf["results_summary"] = {
+                    "folds": len(results.get("folds", [])),
+                    "verdict": results.get("verdict", "unknown"),
+                    "result_mtime": datetime.fromtimestamp(result_file.stat().st_mtime).isoformat(),
+                }
+            except Exception:
+                pass
+        else:
+            wf["completed"] = False
+        status["walk_forward"] = wf
+    except Exception as e:
+        status["walk_forward"] = {"error": str(e)}
+
+    # 2) Paper shadow tracker
+    try:
+        sl_path = Path("data/shadow_paper_log.jsonl")
+        if sl_path.exists():
+            count = sum(1 for _ in open(sl_path) if _.strip())
+            with open(sl_path) as f:
+                first_line = f.readline()
+                first_date = json.loads(first_line).get("date") if first_line.strip() else None
+            status["shadow_paper"] = {
+                "active": True,
+                "days_tracked": count,
+                "first_date": first_date,
+                "min_required": 30,
+                "auto_capture_wired": True,
+                "schedule": "Mon-Fri 6:30am PT via com.swingtrade.daily launchd job",
+            }
+        else:
+            status["shadow_paper"] = {"active": False, "days_tracked": 0, "min_required": 30}
+    except Exception as e:
+        status["shadow_paper"] = {"error": str(e)}
+
+    # 3) Paper trading window
+    try:
+        pt_path = Path("data/paper_trading_start.json")
+        if pt_path.exists():
+            pt = json.load(open(pt_path))
+            from datetime import date as _d
+            start = _d.fromisoformat(pt.get("start_date"))
+            today = _d.today()
+            day_n = (today - start).days
+            duration = pt.get("duration_days", 60)
+            status["paper_trading"] = {
+                "enabled": pt.get("enabled", False),
+                "start_date": pt.get("start_date"),
+                "day": day_n,
+                "duration_days": duration,
+                "direction": pt.get("direction_filter"),
+                "max_daily_trades": pt.get("max_daily_trades"),
+                "days_remaining": duration - day_n,
+            }
+        else:
+            status["paper_trading"] = {"enabled": False}
+    except Exception as e:
+        status["paper_trading"] = {"error": str(e)}
+
+    # 4) Setup tuner active kills
+    try:
+        cfg = json.load(open("config/config.json"))
+        ssm = cfg.get("setup_score_multiplier", {})
+        killed = [k for k, v in ssm.items() if not k.startswith("_") and isinstance(v, (int, float)) and v == 0]
+        boosted = {k: v for k, v in ssm.items() if not k.startswith("_") and isinstance(v, (int, float)) and v > 1.0}
+        status["setup_tuning"] = {
+            "killed_setups": killed,
+            "boosted_setups": boosted,
+        }
+    except Exception as e:
+        status["setup_tuning"] = {"error": str(e)}
+
+    return status
+
+
+@app.post("/api/shadow-paper/snapshot")
+async def shadow_paper_snapshot(req: Request):
+    """Capture today's shadow comparison: ACTUAL trades vs WHAT IDEAL CONFIG WOULD HAVE DONE.
+    Appends to data/shadow_paper_log.jsonl for cumulative tracking.
+    Body: {min_score, sector_cap_under, setup_mults}  (config to shadow-test)
+    """
+    import json
+    from pathlib import Path
+    from datetime import datetime
+    body = await req.json() if req else {}
+    today = datetime.now().strftime("%Y-%m-%d")
+    log_path = Path("data/shadow_paper_log.jsonl")
+    # Check if today's snapshot already exists
+    existing = []
+    if log_path.exists():
+        with open(log_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                try:
+                    e = json.loads(line)
+                    if e.get("date") == today:
+                        return {"status": "already_captured", "date": today, "entry": e}
+                    existing.append(e)
+                except Exception: continue
+    # Pull today's BUY signals from decision_log
+    dl_entries = []
+    try:
+        with open("data/decision_log.jsonl") as f:
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                try:
+                    e = json.loads(line)
+                    if str(e.get("date", "")).startswith(today): dl_entries.append(e)
+                except Exception: continue
+    except Exception: pass
+    # Build today's snapshot
+    actual_buys = [e for e in dl_entries if e.get("verdict") == "BUY"]
+    # Dedup by ticker
+    seen = {}
+    for e in actual_buys:
+        tk = e.get("ticker")
+        if tk and (tk not in seen or (e.get("score") or 0) > (seen[tk].get("score") or 0)):
+            seen[tk] = e
+    actual_buys = list(seen.values())
+    # Apply IDEAL filter
+    min_score = int(body.get("min_score", 70))
+    new_mults = body.get("setup_mults", {})
+    def shadow_passes(e):
+        s = e.get("setup_type") or e.get("setup")
+        if s and s in new_mults and new_mults[s] <= 0: return False
+        if (e.get("score") or 0) < min_score: return False
+        return True
+    shadow_buys = [e for e in actual_buys if shadow_passes(e)]
+    # Snapshot row
+    snap = {
+        "date": today,
+        "config": {"min_score": min_score, "setup_mults": new_mults},
+        "actual_buy_count": len(actual_buys),
+        "shadow_buy_count": len(shadow_buys),
+        "actual_buys": [{"ticker": e.get("ticker"), "score": e.get("score"), "setup": e.get("setup_type")} for e in actual_buys],
+        "shadow_buys": [{"ticker": e.get("ticker"), "score": e.get("score"), "setup": e.get("setup_type")} for e in shadow_buys],
+        "shadow_only": [e.get("ticker") for e in shadow_buys if e.get("ticker") not in {a.get("ticker") for a in actual_buys}],
+        "actual_only": [e.get("ticker") for e in actual_buys if e.get("ticker") not in {s.get("ticker") for s in shadow_buys}],
+        "timestamp": datetime.now().isoformat(),
+    }
+    # Append to log
+    with open(log_path, "a") as f:
+        f.write(json.dumps(snap) + "\n")
+    return {"status": "captured", "entry": snap, "total_history": len(existing) + 1}
+
+
+@app.get("/api/shadow-paper/history")
+async def shadow_paper_history():
+    """Return cumulative shadow vs actual comparison + per-day delta + outcome resolution.
+    For each historical snapshot, looks up what happened to each ticker by checking signal_log.
+    """
+    import json
+    from pathlib import Path
+    from statistics import mean
+    log_path = Path("data/shadow_paper_log.jsonl")
     if not log_path.exists():
-        return {"date": date, "sectors": {}, "total_demoted": 0}
-    if not date:
-        date = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+        return {"history": [], "summary": {"days_tracked": 0}, "note": "No shadow snapshots yet. POST /api/shadow-paper/snapshot to capture today."}
     entries = []
     try:
         with open(log_path) as f:
             for line in f:
                 line = line.strip()
-                if not line:
-                    continue
+                if line:
+                    try: entries.append(json.loads(line))
+                    except Exception: continue
+    except Exception as e:
+        return {"error": str(e)}
+    # Lookup outcomes from signal_log for each ticker
+    try:
+        sl = json.load(open("data/signal_log.json"))
+        # ticker → list of closed entries
+        sl_by_tk = {}
+        for s in sl:
+            if s.get("status") == "CLOSED" and s.get("actual_pnl_pct") is not None:
+                sl_by_tk.setdefault(s.get("ticker"), []).append(s)
+    except Exception:
+        sl_by_tk = {}
+    # Enrich each snapshot with realized outcomes
+    enriched = []
+    cumulative_actual_pnl = 0
+    cumulative_shadow_pnl = 0
+    actual_wins = actual_losses = shadow_wins = shadow_losses = 0
+    for snap in entries:
+        d = snap.get("date", "")
+        actual_pnls = []
+        shadow_pnls = []
+        for a in snap.get("actual_buys", []):
+            tk = a.get("ticker")
+            for s in sl_by_tk.get(tk, []):
+                if (s.get("date") or "")[:10] >= d:
+                    actual_pnls.append(s.get("actual_pnl_pct", 0))
+                    break
+        for sh in snap.get("shadow_buys", []):
+            tk = sh.get("ticker")
+            for s in sl_by_tk.get(tk, []):
+                if (s.get("date") or "")[:10] >= d:
+                    shadow_pnls.append(s.get("actual_pnl_pct", 0))
+                    break
+        actual_sum = round(sum(actual_pnls), 2)
+        shadow_sum = round(sum(shadow_pnls), 2)
+        actual_w = sum(1 for p in actual_pnls if p > 1)
+        actual_l = sum(1 for p in actual_pnls if p < -1)
+        shadow_w = sum(1 for p in shadow_pnls if p > 1)
+        shadow_l = sum(1 for p in shadow_pnls if p < -1)
+        cumulative_actual_pnl += actual_sum
+        cumulative_shadow_pnl += shadow_sum
+        actual_wins += actual_w
+        actual_losses += actual_l
+        shadow_wins += shadow_w
+        shadow_losses += shadow_l
+        enriched.append({
+            "date": d,
+            "actual": {
+                "n": len(snap.get("actual_buys", [])),
+                "n_resolved": len(actual_pnls),
+                "wins": actual_w, "losses": actual_l,
+                "sum_pnl": actual_sum,
+                "mean_pnl": round(mean(actual_pnls), 2) if actual_pnls else 0,
+            },
+            "shadow": {
+                "n": len(snap.get("shadow_buys", [])),
+                "n_resolved": len(shadow_pnls),
+                "wins": shadow_w, "losses": shadow_l,
+                "sum_pnl": shadow_sum,
+                "mean_pnl": round(mean(shadow_pnls), 2) if shadow_pnls else 0,
+            },
+            "delta_pnl": round(shadow_sum - actual_sum, 2),
+            "shadow_only_tickers": snap.get("shadow_only", []),
+            "actual_only_tickers": snap.get("actual_only", []),
+        })
+    total_actual_resolved = sum(e["actual"]["n_resolved"] for e in enriched)
+    total_shadow_resolved = sum(e["shadow"]["n_resolved"] for e in enriched)
+    summary = {
+        "days_tracked": len(enriched),
+        "actual": {
+            "n_taken": sum(e["actual"]["n"] for e in enriched),
+            "n_resolved": total_actual_resolved,
+            "wins": actual_wins, "losses": actual_losses,
+            "wr": round(actual_wins / total_actual_resolved * 100, 1) if total_actual_resolved else 0,
+            "cumulative_pnl": round(cumulative_actual_pnl, 2),
+        },
+        "shadow": {
+            "n_taken": sum(e["shadow"]["n"] for e in enriched),
+            "n_resolved": total_shadow_resolved,
+            "wins": shadow_wins, "losses": shadow_losses,
+            "wr": round(shadow_wins / total_shadow_resolved * 100, 1) if total_shadow_resolved else 0,
+            "cumulative_pnl": round(cumulative_shadow_pnl, 2),
+        },
+        "verdict": None,
+    }
+    if total_shadow_resolved >= 10 and total_actual_resolved >= 10:
+        pnl_gap = summary["shadow"]["cumulative_pnl"] - summary["actual"]["cumulative_pnl"]
+        wr_gap = summary["shadow"]["wr"] - summary["actual"]["wr"]
+        if pnl_gap > 5 and wr_gap > 5:
+            summary["verdict"] = "shadow_winning"
+        elif pnl_gap < -5 and wr_gap < -5:
+            summary["verdict"] = "shadow_losing"
+        else:
+            summary["verdict"] = "inconclusive"
+    return {"history": enriched, "summary": summary, "note": "Walk-forward validates the model; shadow tracks live forward."}
+
+
+@app.post("/api/whatif-backtest")
+async def whatif_backtest_api(req: Request):
+    """Simulate a config change against historical signal_log over N days.
+    Body: {days, setup_mults: {name: new_mult}, sector_cap_under, sector_cap_out, min_score}
+    Returns: counterfactual TAKEN list + PnL stats compared to actual.
+    """
+    import json
+    from pathlib import Path
+    from collections import defaultdict
+    from statistics import mean
+    from datetime import datetime, timedelta
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    days = int(body.get("days", 30))
+    new_mults = body.get("setup_mults") or {}  # {setup_name: new_mult}
+    new_cap_under = int(body.get("sector_cap_under", 2))
+    new_cap_out = int(body.get("sector_cap_out", 3))
+    min_score = int(body.get("min_score", 60))
+    # Load signal_log
+    sl_path = Path("data/signal_log.json")
+    if not sl_path.exists():
+        return {"error": "signal_log.json missing"}
+    try:
+        sl = json.load(open(sl_path))
+    except Exception as e:
+        return {"error": str(e)}
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    # Use CLOSED signals with realized PnL
+    closed = [s for s in sl if s.get("status") == "CLOSED" and s.get("actual_pnl_pct") is not None and (s.get("date") or "") >= cutoff]
+    # ── Counterfactual filter ──
+    def passes(s):
+        # Reject if setup is killed
+        strat = s.get("strategy") or "—"
+        m = new_mults.get(strat, 1.0)
+        if m <= 0: return False
+        # Reject if score below min
+        if (s.get("score") or 0) < min_score: return False
+        return True
+    eligible = [s for s in closed if passes(s)]
+    # Now apply sector cap per day per sector
+    # Group eligible by date
+    by_date = defaultdict(list)
+    for s in eligible:
+        d = (s.get("date") or "")[:10]
+        by_date[d].append(s)
+    # Sort each day's candidates by score desc, then apply cap
+    # NOTE: we don't have per-day sector outperformance data, so use new_cap_under as default
+    # (more conservative). Mark this in response.
+    simulated_taken = []
+    for d, candidates in by_date.items():
+        # Sort by score desc
+        candidates.sort(key=lambda s: -(s.get("score") or 0))
+        # Apply sector cap per day
+        sector_count = defaultdict(int)
+        for s in candidates:
+            # Sector unknown for most signal_log entries — group by "Unknown" buckets
+            # If sector exists, use it; otherwise treat as Unknown (single bucket)
+            sect = (s.get("sector") or "Unknown").strip()
+            if sector_count[sect] >= new_cap_under: continue
+            simulated_taken.append(s)
+            sector_count[sect] += 1
+    # Compute counterfactual stats
+    def _stats(arr, label):
+        if not arr: return {"label": label, "n": 0, "wr": 0, "mean_pnl": 0, "sum_pnl": 0, "median_pnl": 0}
+        pnls = sorted([s.get("actual_pnl_pct", 0) for s in arr])
+        wins = sum(1 for p in pnls if p > 1)
+        return {
+            "label": label,
+            "n": len(arr),
+            "wr": round(wins / len(arr) * 100, 1),
+            "mean_pnl": round(sum(pnls) / len(arr), 2),
+            "sum_pnl": round(sum(pnls), 2),
+            "median_pnl": round(pnls[len(pnls)//2], 2),
+        }
+    # Actual baseline: every closed signal (no filter)
+    actual_stats = _stats(closed, "ACTUAL (all closed signals)")
+    simulated_stats = _stats(simulated_taken, f"SIMULATED (mults + cap={new_cap_under})")
+    # Per-setup breakdown of simulated
+    by_setup = defaultdict(list)
+    for s in simulated_taken:
+        by_setup[s.get("strategy") or "—"].append(s)
+    setup_breakdown = []
+    for setup, arr in sorted(by_setup.items(), key=lambda kv: -len(kv[1]))[:8]:
+        setup_breakdown.append({**_stats(arr, setup), "setup": setup})
+    return {
+        "days": days,
+        "cutoff_date": cutoff,
+        "config_simulated": {
+            "setup_mults": new_mults,
+            "sector_cap_under": new_cap_under,
+            "min_score": min_score,
+        },
+        "actual": actual_stats,
+        "simulated": simulated_stats,
+        "delta": {
+            "n_diff": simulated_stats["n"] - actual_stats["n"],
+            "wr_diff": round(simulated_stats["wr"] - actual_stats["wr"], 1),
+            "mean_pnl_diff": round(simulated_stats["mean_pnl"] - actual_stats["mean_pnl"], 2),
+            "sum_pnl_diff": round(simulated_stats["sum_pnl"] - actual_stats["sum_pnl"], 2),
+        },
+        "setup_breakdown": setup_breakdown,
+        "top_taken": [{"ticker": s.get("ticker"), "date": (s.get("date") or "")[:10], "setup": s.get("strategy"), "score": s.get("score"), "pnl_pct": s.get("actual_pnl_pct")} for s in sorted(simulated_taken, key=lambda x: -(x.get("actual_pnl_pct") or 0))[:10]],
+        "worst_taken": [{"ticker": s.get("ticker"), "date": (s.get("date") or "")[:10], "setup": s.get("strategy"), "score": s.get("score"), "pnl_pct": s.get("actual_pnl_pct")} for s in sorted(simulated_taken, key=lambda x: (x.get("actual_pnl_pct") or 0))[:5]],
+    }
+
+
+@app.get("/api/setup-tuner")
+async def setup_tuner_get():
+    """Return current setup_score_multipliers + live per-setup stats for tuning UI."""
+    import json
+    from pathlib import Path
+    from collections import defaultdict
+    from statistics import mean
+    cfg = json.load(open("config/config.json"))
+    ssm = cfg.get("setup_score_multiplier", {})
+    # Per-setup stats from signal_log (last 90d)
+    sl_path = Path("data/signal_log.json")
+    stats = defaultdict(lambda: {"n": 0, "wins": 0, "losses": 0, "mean_pnl": 0, "pnls": []})
+    if sl_path.exists():
+        try:
+            sl = json.load(open(sl_path))
+            for s in sl:
+                if s.get("status") != "CLOSED" or s.get("actual_pnl_pct") is None: continue
+                strat = s.get("strategy") or "—"
+                p = s.get("actual_pnl_pct", 0)
+                stats[strat]["n"] += 1
+                if p >= 1: stats[strat]["wins"] += 1
+                elif p <= -1: stats[strat]["losses"] += 1
+                stats[strat]["pnls"].append(p)
+        except Exception: pass
+    # Wilson LB helper
+    def _wilson(s, n, z=1.96):
+        if n == 0: return 0
+        p = s/n
+        den = 1 + z*z/n
+        num = p + z*z/(2*n) - z*((p*(1-p) + z*z/(4*n))/n)**0.5
+        return max(0, num/den) * 100
+    # Build response
+    setups = []
+    for k in sorted(ssm.keys()):
+        if k.startswith("_"): continue
+        v = ssm.get(k)
+        if not isinstance(v, (int, float)): continue
+        s = stats.get(k, {"n": 0, "wins": 0, "losses": 0, "pnls": []})
+        n = s["n"]; wins = s["wins"]
+        wr = round(wins / n * 100, 1) if n else 0
+        mpnl = round(mean(s["pnls"]), 2) if s["pnls"] else 0
+        wilson = round(_wilson(wins, n), 1) if n else 0
+        # Auto-recommend bump direction
+        rec = None
+        if v == 0 and wilson >= 35: rec = {"action": "unkill", "to": 0.5, "why": f"Wilson {wilson}% above 35% floor"}
+        elif v == 0 and wilson < 25 and n >= 30: rec = {"action": "keep_killed", "to": 0, "why": f"Wilson {wilson}% well below floor · keep killed"}
+        elif v > 0 and wilson < 25 and n >= 30: rec = {"action": "kill", "to": 0, "why": f"Wilson {wilson}% below floor · candidate for kill"}
+        elif v < 1.0 and wilson >= 55 and n >= 30: rec = {"action": "boost", "to": min(1.5, round(v + 0.3, 1)), "why": f"Wilson {wilson}% strong · boost size"}
+        elif v < 1.5 and wilson >= 70 and n >= 30 and mpnl >= 4: rec = {"action": "max_boost", "to": 1.5, "why": f"Wilson {wilson}% + mean PnL +{mpnl}% · max size"}
+        setups.append({
+            "name": k, "mult": v, "n": n, "wr": wr, "wilson_lb": wilson,
+            "mean_pnl": mpnl, "wins": wins, "losses": s["losses"],
+            "recommendation": rec,
+        })
+    return {"setups": setups, "note": ssm.get("_comment", "")}
+
+
+@app.post("/api/setup-tuner")
+async def setup_tuner_set(req: Request):
+    """Update a single setup's score multiplier. Body: {name, mult}"""
+    import json
+    body = await req.json()
+    name = body.get("name")
+    mult = body.get("mult")
+    if name is None or mult is None:
+        raise HTTPException(400, "name + mult required")
+    try:
+        mult = float(mult)
+    except Exception:
+        raise HTTPException(400, "mult must be numeric")
+    if mult < 0 or mult > 2:
+        raise HTTPException(400, "mult must be in [0, 2]")
+    cfg_path = BASE_DIR / "config" / "config.json"
+    try:
+        cfg = json.loads(cfg_path.read_text())
+        ssm = cfg.setdefault("setup_score_multiplier", {})
+        old = ssm.get(name)
+        ssm[name] = mult
+        # Save with indentation preserved
+        cfg_path.write_text(json.dumps(cfg, indent=2))
+        return {"ok": True, "name": name, "old": old, "new": mult}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/selection-quality")
+async def selection_quality_api(days: int = 30):
+    """Compare TAKEN vs MISSED BUY signals across multiple features.
+    Surfaces WHY the executor's selection has been picking losers.
+
+    days: lookback window (default 30; paper start = 2026-04-30 = ~19 days)
+    """
+    import json
+    from pathlib import Path
+    from collections import defaultdict
+    from datetime import datetime, timedelta
+    sl_path = Path("data/signal_log.json")
+    if not sl_path.exists():
+        return {"error": "signal_log.json missing"}
+    try:
+        sl = json.load(open(sl_path))
+    except Exception as e:
+        return {"error": str(e)}
+    # Cutoff date
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    # Filter to CLOSED BUY signals within window
+    closed = [s for s in sl if s.get("status") == "CLOSED" and s.get("actual_pnl_pct") is not None
+              and (s.get("date") or "") >= cutoff]
+    # Determine which were TAKEN by executor
+    try:
+        port = json.load(open("data/portfolio_state.json"))
+        held = {p.get("ticker") for p in port.get("positions", []) if p}
+    except Exception:
+        held = set()
+    # A signal is "taken" if its ticker appears in held positions OR in any close-trade record
+    # For now, use a simple proxy: ticker in current/historical portfolio
+    # Look for closed_trades in picks_history
+    taken_tickers = set(held)
+    try:
+        ph = json.load(open("cache/picks_history.json"))
+        for t in ph.get("trades", []):
+            if t.get("ticker"): taken_tickers.add(t.get("ticker"))
+    except Exception: pass
+
+    # Split signals
+    def is_buy(s):
+        v = (s.get("verdict") or s.get("decision") or "").upper()
+        return "BUY" in v or s.get("strategy")  # heuristic — signal_log entries typically only logged for setups
+    buy_signals = [s for s in closed if is_buy(s)]
+    taken = [s for s in buy_signals if s.get("ticker") in taken_tickers]
+    missed = [s for s in buy_signals if s.get("ticker") not in taken_tickers]
+    # Each-bucket stats helper
+    def _stats(arr):
+        if not arr: return {"n": 0, "wr": 0, "mean_pnl": 0, "median_pnl": 0, "sum_pnl": 0}
+        pnls = sorted([s.get("actual_pnl_pct", 0) for s in arr])
+        wins = sum(1 for p in pnls if p > 1)
+        return {
+            "n": len(arr),
+            "wr": round(wins / len(arr) * 100, 1),
+            "mean_pnl": round(sum(pnls) / len(arr), 2),
+            "median_pnl": round(pnls[len(pnls)//2], 2),
+            "sum_pnl": round(sum(pnls), 2),
+            "max": round(max(pnls), 2),
+            "min": round(min(pnls), 2),
+        }
+    # Overall
+    overall = {
+        "taken": _stats(taken),
+        "missed": _stats(missed),
+        "lookback_days": days,
+        "cutoff_date": cutoff,
+    }
+    # Per-feature breakdowns
+    def _bucket_score(s):
+        sc = s.get("score") or 0
+        if sc >= 80: return "80+"
+        if sc >= 70: return "70-79"
+        if sc >= 60: return "60-69"
+        if sc >= 50: return "50-59"
+        return "<50"
+    def _bucket_rs(s):
+        rs = s.get("rs_rank") or 0
+        if rs >= 90: return "90+"
+        if rs >= 75: return "75-89"
+        if rs >= 50: return "50-74"
+        return "<50"
+    def _bucket_rr(s):
+        rr = s.get("rr") or 0
+        if rr >= 4: return "≥4"
+        if rr >= 3: return "3-4"
+        if rr >= 2: return "2-3"
+        return "<2"
+    feature_extractors = {
+        "score_band": _bucket_score,
+        "setup": lambda s: s.get("strategy") or "—",
+        "rs_band": _bucket_rs,
+        "rr_band": _bucket_rr,
+        "stars": lambda s: f"{s.get('stars') or 0}★",
+        "direction": lambda s: s.get("direction") or "long",
+    }
+    features = {}
+    for fname, extractor in feature_extractors.items():
+        buckets = defaultdict(lambda: {"taken": [], "missed": []})
+        for s in taken:
+            buckets[extractor(s)]["taken"].append(s)
+        for s in missed:
+            buckets[extractor(s)]["missed"].append(s)
+        rows = []
+        for bkt, arrs in buckets.items():
+            rows.append({
+                "value": str(bkt),
+                "taken": _stats(arrs["taken"]),
+                "missed": _stats(arrs["missed"]),
+            })
+        # Sort by total count desc
+        rows.sort(key=lambda r: -(r["taken"]["n"] + r["missed"]["n"]))
+        features[fname] = rows
+    # Top winners we missed
+    missed_sorted = sorted(missed, key=lambda s: -(s.get("actual_pnl_pct") or 0))
+    top_missed = [{
+        "ticker": s.get("ticker"),
+        "date": (s.get("date") or "")[:10],
+        "setup": s.get("strategy"),
+        "score": s.get("score"),
+        "rs_rank": s.get("rs_rank"),
+        "rr": s.get("rr"),
+        "pnl_pct": s.get("actual_pnl_pct"),
+        "result": s.get("result"),
+        "exit_reason": s.get("exit_reason"),
+    } for s in missed_sorted[:20]]
+    # Worst taken
+    taken_sorted = sorted(taken, key=lambda s: s.get("actual_pnl_pct") or 0)
+    worst_taken = [{
+        "ticker": s.get("ticker"),
+        "date": (s.get("date") or "")[:10],
+        "setup": s.get("strategy"),
+        "score": s.get("score"),
+        "rs_rank": s.get("rs_rank"),
+        "rr": s.get("rr"),
+        "pnl_pct": s.get("actual_pnl_pct"),
+        "result": s.get("result"),
+    } for s in taken_sorted[:10]]
+    # Find biggest discriminator: feature where taken and missed differ most in mean PnL
+    discriminator = None
+    max_gap = 0
+    for fname, rows in features.items():
+        for r in rows:
+            if r["taken"]["n"] >= 2 and r["missed"]["n"] >= 3:
+                gap = r["missed"]["mean_pnl"] - r["taken"]["mean_pnl"]
+                if abs(gap) > abs(max_gap):
+                    max_gap = gap
+                    discriminator = {"feature": fname, "value": r["value"], "gap_pct": round(gap, 2), "taken": r["taken"], "missed": r["missed"]}
+    return {
+        "overall": overall,
+        "features": features,
+        "top_missed_winners": top_missed,
+        "worst_taken": worst_taken,
+        "discriminator": discriminator,
+    }
+
+
+@app.get("/api/pipeline-diagnostic")
+async def pipeline_diagnostic_api(date: str = ""):
+    """Aggregate the full BUY pipeline cascade for a scan date.
+    Reconstructs each demotion stage by reading decision_log.jsonl + scan log + last_bundle.json.
+    Returns stage-by-stage counts + per-ticker migration path.
+    """
+    import json, re
+    from pathlib import Path
+    from collections import defaultdict, Counter
+    log_path = Path("data/decision_log.jsonl")
+    bundle_path = Path("cache/last_bundle.json")
+    if not date:
+        date = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+    if not log_path.exists():
+        return {"date": date, "stages": [], "error": "decision_log.jsonl missing"}
+    # Read today's decisions
+    entries = []
+    try:
+        with open(log_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line: continue
                 try:
                     e = json.loads(line)
-                    if str(e.get("date", "")).startswith(date):
+                    if str(e.get("date","")).startswith(date):
                         entries.append(e)
-                except Exception:
-                    continue
+                except Exception: continue
+    except Exception as e:
+        return {"date": date, "error": str(e)}
+    # Dedup by ticker, keep highest score (each ticker may have 4+ entries across buckets)
+    by_ticker = {}
+    for e in entries:
+        tk = e.get("ticker")
+        if not tk: continue
+        if tk not in by_ticker or (e.get("score") or 0) > (by_ticker[tk].get("score") or 0):
+            by_ticker[tk] = e
+    total_scored = len(by_ticker)
+    verds = Counter(e.get("verdict") for e in by_ticker.values())
+    # Bucket reasons (handles sector_cap, hard gates, Wilson kills, etc.)
+    def _gate(r):
+        r = (r or "").lower()
+        if "sector cap" in r:
+            m = re.search(r"limit=(\d+)", r); cap = m.group(1) if m else "?"
+            sec_m = re.search(r"sector cap: ([\w\s]+?)\s+(?:already|already has)", r)
+            sec = sec_m.group(1).strip().title() if sec_m else "?"
+            return f"sector_cap:{sec}(limit={cap})"
+        if "industry cap" in r:
+            m = re.search(r"limit=(\d+)", r); return f"industry_cap(limit={m.group(1) if m else '?'})"
+        if "sector concentration cap" in r: return "DE_sector_cap"
+        if "portfolio cap" in r or "slots available" in r: return "portfolio_cap"
+        if "wilson" in r or ("kill" in r and "list" in r): return "wilson_kill"
+        if "tail_loss" in r or "tier_zero" in r: return "tail_loss"
+        if "entry_quality" in r or "extended" in r or "missed" in r: return "entry_quality"
+        if "earnings_blackout" in r or "earnings blackout" in r: return "earnings_blackout"
+        if "regime" in r and "gate" in r: return "regime_gate"
+        if "liquidity" in r or "liq " in r: return "liquidity"
+        if "fund_adequacy" in r or "fund adequacy" in r: return "fund_adequacy"
+        if "decision_state" in r: return "decision_state"
+        if "lacks relative strength" in r or "rs " in r: return "rs_too_low"
+        if "no edge" in r: return "weak_structure"
+        if "pullback entry" in r: return "ENTRY_OK"   # the BUY message
+        return "other"
+    # Bucket demotion reasons across all WATCH+AVOID
+    watches = [e for e in by_ticker.values() if e.get("verdict") == "WATCH"]
+    avoids = [e for e in by_ticker.values() if e.get("verdict") == "AVOID"]
+    watch_reasons = Counter(_gate(e.get("reason","")) for e in watches)
+    avoid_reasons = Counter(_gate(e.get("reason","")) for e in avoids)
+    # Build stages (synthesized from the data we have)
+    # NOTE: we can't perfectly reconstruct each stage without scan-time instrumentation,
+    # but we can model the cascade from decision_log buckets.
+    final_buys = [e for e in by_ticker.values() if e.get("verdict") == "BUY"]
+    final_buys.sort(key=lambda e: -(e.get("score") or 0))
+    # Read final bundle for "what actually shipped"
+    bundle_buys = []
+    if bundle_path.exists():
+        try:
+            b = json.load(open(bundle_path))
+            for r in (b.get("buy_candidates") or []):
+                bundle_buys.append({"ticker": r.get("ticker"), "score": r.get("score"), "setup_type": r.get("setup_family") or r.get("setup") or r.get("setup_type"), "sector": r.get("sector")})
+        except Exception: pass
+    bundle_buy_tkrs = {b["ticker"] for b in bundle_buys}
+    # Tickers that LOG says BUY but bundle says NOT BUY (the silent demotions)
+    silent_demoted = [e for e in final_buys if e.get("ticker") not in bundle_buy_tkrs]
+    # Migration path per ticker (where it ended up)
+    migrations = []
+    for tk, e in by_ticker.items():
+        v = e.get("verdict")
+        in_final_bundle = tk in bundle_buy_tkrs
+        if v == "BUY" and not in_final_bundle:
+            migrations.append({"ticker": tk, "score": e.get("score"), "log_verdict": v, "final_verdict": "WATCH-silent", "reason": "silent demotion in DE-cap or portfolio-cap (no log entry)", "setup": e.get("setup_type"), "sector": e.get("sector")})
+        elif v == "BUY" and in_final_bundle:
+            migrations.append({"ticker": tk, "score": e.get("score"), "log_verdict": v, "final_verdict": "BUY", "reason": "survived all stages", "setup": e.get("setup_type"), "sector": e.get("sector")})
+        elif v == "WATCH":
+            migrations.append({"ticker": tk, "score": e.get("score"), "log_verdict": v, "final_verdict": "WATCH", "reason": (e.get("reason") or "")[:120], "gate": _gate(e.get("reason","")), "setup": e.get("setup_type"), "sector": e.get("sector")})
+        # AVOID skipped from migration view — they never got to BUY consideration
+    migrations.sort(key=lambda m: -(m.get("score") or 0))
+    # ── Per-sector funnel: scored → passed-hard → BUY-cleared → in-bundle ──
+    per_sector = defaultdict(lambda: {"scored": 0, "buy_log": 0, "watch": 0, "avoid": 0, "in_bundle": 0, "demoted_examples": []})
+    for tk, e in by_ticker.items():
+        sec = (e.get("sector") or "Unknown").strip().title() or "Unknown"
+        per_sector[sec]["scored"] += 1
+        v = e.get("verdict")
+        if v == "BUY":
+            per_sector[sec]["buy_log"] += 1
+            if tk in bundle_buy_tkrs:
+                per_sector[sec]["in_bundle"] += 1
+            else:
+                if len(per_sector[sec]["demoted_examples"]) < 3:
+                    per_sector[sec]["demoted_examples"].append({"ticker": tk, "score": e.get("score"), "setup": e.get("setup_type")})
+        elif v == "WATCH": per_sector[sec]["watch"] += 1
+        elif v == "AVOID": per_sector[sec]["avoid"] += 1
+    sector_funnel = sorted(per_sector.items(), key=lambda kv: -kv[1]["scored"])
+    # ── Per-score-band breakdown ──
+    bands = {"80+": (80,200), "70-79": (70,80), "60-69": (60,70), "50-59": (50,60), "<50": (0,50)}
+    per_band = {b: {"scored": 0, "buy_log": 0, "in_bundle": 0, "watch": 0, "avoid": 0, "silent": 0} for b in bands}
+    for tk, e in by_ticker.items():
+        sc = +e.get("score", 0) or 0
+        band = next((b for b, (lo, hi) in bands.items() if lo <= sc < hi), "<50")
+        per_band[band]["scored"] += 1
+        v = e.get("verdict")
+        if v == "BUY":
+            per_band[band]["buy_log"] += 1
+            if tk in bundle_buy_tkrs: per_band[band]["in_bundle"] += 1
+            else: per_band[band]["silent"] += 1
+        elif v == "WATCH": per_band[band]["watch"] += 1
+        elif v == "AVOID": per_band[band]["avoid"] += 1
+    # ── Per-setup-family breakdown ──
+    per_setup = defaultdict(lambda: {"scored": 0, "buy_log": 0, "in_bundle": 0, "watch": 0, "silent": 0})
+    for tk, e in by_ticker.items():
+        st = (e.get("setup_type") or "—").strip() or "—"
+        per_setup[st]["scored"] += 1
+        v = e.get("verdict")
+        if v == "BUY":
+            per_setup[st]["buy_log"] += 1
+            if tk in bundle_buy_tkrs: per_setup[st]["in_bundle"] += 1
+            else: per_setup[st]["silent"] += 1
+        elif v == "WATCH": per_setup[st]["watch"] += 1
+    setup_funnel = sorted(per_setup.items(), key=lambda kv: -kv[1]["scored"])[:12]
+    # ── Recommended actions ──
+    recommendations = []
+    # 1. Silent demote count is huge → suggest investigating DE caps
+    if len(silent_demoted) >= 5:
+        recommendations.append({
+            "severity": "critical",
+            "title": f"{len(silent_demoted)} silent BUY→WATCH demotions today",
+            "body": "compute_final_verdict says BUY but final bundle has it as WATCH. Most likely cause: decision_engine sector_cap (line 3824) or portfolio_cap (line 3858) silently rewriting verdicts. The new logging (this scan onward) will name names.",
+            "action": "Re-run scan; check log for 'Sector cap (decision_engine)' + 'Portfolio cap' lines. Bump portfolio.config_e.max_positions if portfolio_cap is binding.",
+        })
+    # 2. Top watch_reason is sector_cap → suggest bumping cap
+    top_w_reason, top_w_count = (list(watch_reasons.most_common(1)) or [(None, 0)])[0]
+    if top_w_reason and "sector_cap" in top_w_reason and top_w_count >= 20:
+        recommendations.append({
+            "severity": "high",
+            "title": f"{top_w_count} demotions hit {top_w_reason}",
+            "body": "This sector's BUY cap is the binding constraint. Tickers with valid setups + scores ≥65 are being demoted because the per-sector slot was already taken.",
+            "action": "Bump portfolio.dynamic_sector_cap.underperforming (or .outperforming) by 1 in config/config.json. Each +1 unlocks ~10-20 BUYs.",
+        })
+    # 3. Many BUYs in high score bands silently demoted
+    high_band_silent = per_band.get("80+", {}).get("silent", 0) + per_band.get("70-79", {}).get("silent", 0)
+    if high_band_silent >= 3:
+        recommendations.append({
+            "severity": "high",
+            "title": f"{high_band_silent} high-score (70+) BUYs silently demoted",
+            "body": "Your highest-conviction signals are being lost between log and bundle. These should be the LAST tickers killed.",
+            "action": "Investigate cap ordering — high-score BUYs should win slot priority, not lose it. Check sector_cap sort key in swing_trade.py:3834.",
+        })
+    return {
+        "date": date,
+        "total_scored": total_scored,
+        "final_verdicts": dict(verds),
+        "watch_reasons": dict(watch_reasons.most_common(12)),
+        "avoid_reasons": dict(avoid_reasons.most_common(10)),
+        "final_buys_in_log": [{"ticker": e.get("ticker"), "score": e.get("score"), "setup": e.get("setup_type"), "sector": e.get("sector"), "in_bundle": e.get("ticker") in bundle_buy_tkrs} for e in final_buys[:30]],
+        "bundle_buys": bundle_buys,
+        "silent_demoted": [{"ticker": e.get("ticker"), "score": e.get("score"), "setup": e.get("setup_type"), "sector": e.get("sector")} for e in silent_demoted[:50]],
+        "silent_demoted_count": len(silent_demoted),
+        "migrations": migrations[:120],
+        "per_sector": [{"sector": s, **info} for s, info in sector_funnel],
+        "per_score_band": per_band,
+        "per_setup": [{"setup": s, **info} for s, info in setup_funnel],
+        "recommendations": recommendations,
+    }
+
+
+@app.get("/api/sector-cap-demotions")
+async def sector_cap_demotions_api(date: str = ""):
+    """Rich sector-cap diagnostic: survivors + outcomes + persistent-miss + diff + setup-mix.
+    """
+    import json, re
+    from pathlib import Path
+    from collections import defaultdict, Counter
+    from datetime import datetime, timedelta
+    log_path = Path("data/decision_log.jsonl")
+    if not log_path.exists():
+        return {"date": date, "sectors": {}, "total_demoted": 0}
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+    # Ticker → sector lookup from data.json (fixes empty survivor sectors)
+    ticker_sector = {}
+    sector_etf_outperf = {}
+    try:
+        dj = json.load(open("infra/prototype/data.json"))
+        for src in ("short_term", "medium_term", "long_term", "screener"):
+            for t in dj.get(src, []) or []:
+                if t and t.get("ticker") and t.get("sector"):
+                    ticker_sector[t["ticker"]] = (t.get("sector") or "Unknown").strip().title() or "Unknown"
+        # Sector ETF outperformance flags
+        for etf, info in (dj.get("sector_etf") or {}).items():
+            if isinstance(info, dict) and info.get("outperforming") is not None:
+                sector_etf_outperf[etf] = bool(info.get("outperforming"))
+    except Exception: pass
+    # Ticker → current price (for outcomes calc — placeholder)
+    ticker_price = {}
+    try:
+        tj = json.load(open("infra/prototype/tickers.json"))
+        if isinstance(tj, dict):
+            for sym, info in tj.items():
+                if isinstance(info, dict) and info.get("price"):
+                    ticker_price[sym] = float(info["price"])
+    except Exception: pass
+    # Load all entries
+    entries = []
+    try:
+        with open(log_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                try: entries.append(json.loads(line))
+                except Exception: continue
     except Exception as e:
         return {"date": date, "sectors": {}, "error": str(e)}
-    sector_pat = re.compile(r"sector cap: (\w[\w\s]*?) already has (\d+) BUY", re.I)
-    by_sector = defaultdict(lambda: {"demoted": [], "cap": None, "survivor_count": None})
+    today_entries = [e for e in entries if str(e.get("date","")).startswith(date)]
+    # Build sets for persistent-miss tracking (last 7 days)
+    week_ago = (datetime.strptime(date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
+    yesterday = (datetime.strptime(date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+    blocked_history = defaultdict(set)  # date → set of tickers blocked that day
     for e in entries:
-        if e.get("verdict") != "WATCH":
-            continue
+        d = (e.get("date") or "")[:10]
+        if d < week_ago: continue
+        if e.get("verdict") != "WATCH": continue
+        if "sector cap" not in (e.get("reason") or "").lower(): continue
+        blocked_history[d].add(e.get("ticker"))
+    # Persistent-miss count: how many consecutive recent days each ticker was blocked
+    persistent = {}
+    today_blocked = blocked_history.get(date, set())
+    for tk in today_blocked:
+        count = 0
+        cur = datetime.strptime(date, "%Y-%m-%d")
+        for _ in range(7):
+            if tk in blocked_history.get(cur.strftime("%Y-%m-%d"), set()):
+                count += 1
+                cur -= timedelta(days=1)
+            else: break
+        persistent[tk] = count
+    # Yesterday's blocked count per sector (for diff)
+    yesterday_per_sector = defaultdict(set)
+    sector_pat = re.compile(r"sector cap: (\w[\w\s]*?) already has (\d+) BUY", re.I)
+    for e in entries:
+        if (e.get("date") or "")[:10] != yesterday: continue
+        if e.get("verdict") != "WATCH": continue
+        m = sector_pat.search(e.get("reason") or "")
+        if m:
+            sect = m.group(1).strip().title()
+            yesterday_per_sector[sect].add(e.get("ticker"))
+    # Build today's demotions
+    by_sector = defaultdict(lambda: {"demoted": [], "cap": None, "survivor_count_raw": None})
+    for e in today_entries:
+        if e.get("verdict") != "WATCH": continue
         reason = e.get("reason", "")
         m = sector_pat.search(reason)
-        if not m:
-            continue
+        if not m: continue
         sector = m.group(1).strip().title()
         cap_m = re.search(r"limit=(\d+)", reason)
         cap = int(cap_m.group(1)) if cap_m else None
         survivors = int(m.group(2))
-        info = by_sector[sector]
-        info["demoted"].append({
-            "ticker": e.get("ticker"),
+        tk = e.get("ticker")
+        by_sector[sector]["demoted"].append({
+            "ticker": tk,
             "score": e.get("score", 0),
             "setup_type": e.get("setup_type"),
             "rs_rank": e.get("rs_rank"),
             "rr_ratio": e.get("rr_ratio"),
             "entry_price": e.get("entry_price"),
+            "current_price": ticker_price.get(tk),
             "industry": e.get("industry"),
+            "persistent_days": persistent.get(tk, 1),
         })
-        info["cap"] = cap
-        info["survivor_count"] = survivors
+        by_sector[sector]["cap"] = cap
+        by_sector[sector]["survivor_count_raw"] = survivors
+    # Build survivors per sector (cross-reference from data.json ticker_sector map)
     survivors_by_sector = defaultdict(list)
-    for e in entries:
-        if e.get("verdict") != "BUY":
-            continue
-        sect = (e.get("sector") or e.get("industry") or "Unknown").strip().title()
+    today_buys = [e for e in today_entries if e.get("verdict") == "BUY"]
+    seen_buys = {}
+    for e in today_buys:
+        tk = e.get("ticker")
+        if not tk: continue
+        if tk in seen_buys and (e.get("score") or 0) <= (seen_buys[tk].get("score") or 0): continue
+        seen_buys[tk] = e
+    for tk, e in seen_buys.items():
+        sect = (e.get("sector") or ticker_sector.get(tk) or e.get("industry") or "Unknown").strip().title() or "Unknown"
         survivors_by_sector[sect].append({
-            "ticker": e.get("ticker"),
+            "ticker": tk,
             "score": e.get("score", 0),
             "setup_type": e.get("setup_type"),
+            "rs_rank": e.get("rs_rank"),
+            "entry_price": e.get("entry_price"),
+            "current_price": ticker_price.get(tk),
         })
+    # Outcomes summary across all sectors (3-day forward return for blocked tickers)
+    # Note: this is an approximation. Real outcome = forward price - block price.
+    # Without a price history snapshot per scan day, we use: blocked_entry_price → current_price
+    outcomes_global = {"n": 0, "n_up": 0, "n_down": 0, "sum_pct": 0, "avg_pct": 0, "missed_winners": 0, "correctly_avoided": 0}
+    # Compute per-sector + global
+    sector_etf_map = {
+        "Technology": "XLK", "Financial Services": "XLF", "Healthcare": "XLV",
+        "Energy": "XLE", "Industrials": "XLI", "Basic Materials": "XLB",
+        "Real Estate": "XLRE", "Utilities": "XLU", "Consumer Defensive": "XLP",
+        "Consumer Cyclical": "XLY", "Communication Services": "XLC",
+    }
     result = {}
     total = 0
     for sect, info in by_sector.items():
-        # Dedup by ticker — keep highest-score entry for each
+        # Dedup demoted by ticker — keep highest-score
         seen = {}
         for t in info["demoted"]:
             tk = t.get("ticker")
@@ -2338,21 +3475,133 @@ async def sector_cap_demotions_api(date: str = ""):
             if tk not in seen or (t.get("score") or 0) > (seen[tk].get("score") or 0):
                 seen[tk] = t
         deduped = sorted(seen.values(), key=lambda x: -(x.get("score") or 0))
+        # Add 5d-style outcome: current vs entry (approximation)
+        sector_outcomes = []
+        for t in deduped:
+            ep = t.get("entry_price"); cp = t.get("current_price")
+            if ep and cp and ep > 0:
+                pct = ((cp - ep) / ep) * 100
+                t["fwd_pct"] = round(pct, 2)
+                sector_outcomes.append(pct)
+                outcomes_global["n"] += 1
+                outcomes_global["sum_pct"] += pct
+                if pct > 1: outcomes_global["n_up"] += 1; outcomes_global["missed_winners"] += 1
+                elif pct < -1: outcomes_global["n_down"] += 1; outcomes_global["correctly_avoided"] += 1
+        # Setup-mix breakdown (for blocked)
+        setup_mix = Counter((t.get("setup_type") or "—") for t in deduped)
+        # Sort survivors desc by score
+        sv = sorted(survivors_by_sector.get(sect, []), key=lambda x: -(x.get("score") or 0))
+        # Compute "lowest survivor score" vs "highest demoted score" gap
+        lowest_surv = sv[-1].get("score", 0) if sv else None
+        highest_demoted = deduped[0].get("score", 0) if deduped else None
+        gap = (highest_demoted - lowest_surv) if (lowest_surv is not None and highest_demoted is not None) else None
+        # Yesterday diff
+        ytd_count = len(yesterday_per_sector.get(sect, set()))
+        diff = len(deduped) - ytd_count
+        # Outperformance label
+        etf = sector_etf_map.get(sect, "")
+        outperf = sector_etf_outperf.get(etf)
+        outperf_str = ("outperforming" if outperf else "underperforming") if outperf is not None else "unknown"
         total += len(deduped)
-        # Dedup survivors too
-        sv_seen = {}
-        for s in survivors_by_sector.get(sect, []):
-            tk = s.get("ticker")
-            if tk and tk not in sv_seen: sv_seen[tk] = s
         result[sect] = {
             "cap": info["cap"],
-            "survivor_count": info["survivor_count"],
             "demoted_total": len(deduped),
-            "demoted_top": deduped[:6],
-            "survivors": list(sv_seen.values()),
+            "demoted_top": deduped[:8],
+            "survivors": sv,
+            "survivor_count": len(sv),
+            "gap_to_cutoff": gap,
+            "lowest_survivor_score": lowest_surv,
+            "highest_demoted_score": highest_demoted,
+            "setup_mix": dict(setup_mix.most_common(6)),
+            "diff_yesterday": diff,
+            "etf": etf,
+            "outperforming": outperf,
+            "outperf_label": outperf_str,
+            "sector_avg_fwd_pct": round(sum(sector_outcomes) / len(sector_outcomes), 2) if sector_outcomes else None,
         }
+    if outcomes_global["n"]:
+        outcomes_global["avg_pct"] = round(outcomes_global["sum_pct"] / outcomes_global["n"], 2)
+        outcomes_global["pct_up"] = round(outcomes_global["n_up"] / outcomes_global["n"] * 100, 1)
     ordered = dict(sorted(result.items(), key=lambda kv: -kv[1]["demoted_total"]))
-    return {"date": date, "sectors": ordered, "total_demoted": total, "sector_count": len(ordered)}
+    return {
+        "date": date,
+        "sectors": ordered,
+        "total_demoted": total,
+        "sector_count": len(ordered),
+        "persistent_misses": [{"ticker": tk, "days": dys} for tk, dys in sorted(persistent.items(), key=lambda kv: -kv[1])[:15] if dys >= 3],
+        "outcomes": outcomes_global,
+    }
+
+
+@app.get("/api/sector-cap-whatif")
+async def sector_cap_whatif(sector: str = "", new_cap: int = 0):
+    """Preview tickers that would unlock if sector's cap was bumped.
+    Uses data.json ticker→sector lookup to enrich BUY entries missing sector field.
+    """
+    import json, re
+    from datetime import datetime
+    date = datetime.now().strftime("%Y-%m-%d")
+    sector = sector.strip().title()
+    if not sector:
+        return {"error": "sector required"}
+    # Build ticker → sector map from data.json
+    ticker_sector = {}
+    try:
+        dj = json.load(open("infra/prototype/data.json"))
+        for src in ("short_term", "medium_term", "long_term", "screener"):
+            for t in dj.get(src, []) or []:
+                if t and t.get("ticker") and t.get("sector"):
+                    ticker_sector[t["ticker"]] = (t.get("sector") or "").strip().title()
+    except Exception: pass
+    # Load today's decision log
+    entries = []
+    try:
+        with open("data/decision_log.jsonl") as f:
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                try:
+                    e = json.loads(line)
+                    if str(e.get("date","")).startswith(date): entries.append(e)
+                except Exception: continue
+    except Exception: pass
+    sector_pat = re.compile(r"sector cap: " + re.escape(sector) + r" already", re.I)
+    # Find all this-sector candidates
+    seen = {}
+    for e in entries:
+        tk = e.get("ticker")
+        if not tk: continue
+        v = e.get("verdict")
+        if v not in ("BUY", "WATCH"): continue
+        # Identify sector: prefer entry's sector, fall back to lookup map
+        ent_sect = (e.get("sector") or ticker_sector.get(tk) or "").strip().title()
+        # For WATCH entries: must have THIS sector's cap reason OR enriched sector matches
+        if v == "WATCH":
+            if not sector_pat.search(e.get("reason") or "") and ent_sect != sector:
+                continue
+        else:  # BUY entries: require enriched sector match
+            if ent_sect != sector:
+                continue
+        if tk not in seen or (e.get("score") or 0) > (seen[tk].get("score") or 0):
+            seen[tk] = e
+    # Sort by score desc — these are the candidates competing for slots
+    sorted_cands = sorted(seen.values(), key=lambda e: -(e.get("score") or 0))
+    new_cap = int(new_cap) if new_cap else len(sorted_cands)
+    new_buys = sorted_cands[:new_cap]
+    current_buys = [e for e in seen.values() if e.get("verdict") == "BUY"]
+    return {
+        "sector": sector,
+        "new_cap": new_cap,
+        "current_buys": len(current_buys),
+        "would_unlock": max(0, len(new_buys) - len(current_buys)),
+        "total_candidates": len(sorted_cands),
+        "new_buy_list": [{
+            "ticker": e.get("ticker"),
+            "score": e.get("score"),
+            "setup": e.get("setup_type"),
+            "was": e.get("verdict"),
+        } for e in new_buys],
+    }
 
 
 @app.get("/api/decision-log")
@@ -2490,6 +3739,295 @@ async def calibration_report_api():
         return json.loads(p.read_text())
     except Exception as e:
         return {"error": str(e), "modes": {}}
+
+
+@app.get("/api/ml-edge-diff")
+async def ml_edge_diff_api(mode: str = "swing"):
+    """Day-over-day diff from cache/ml_edge_history/ snapshots.
+    Powers the AI Prediction tab's "Δ vs yesterday" panel.
+    """
+    import json
+    from pathlib import Path
+    snap_dir = Path("cache/ml_edge_history")
+    if not snap_dir.exists():
+        return {"error": "no snapshots", "flips": [], "new_bulls": [], "new_bears": [], "dropped": []}
+    snaps = sorted(snap_dir.glob("*.json"))
+    if not snaps:
+        return {"error": "no snapshots yet", "flips": [], "new_bulls": [], "new_bears": [], "dropped": []}
+    if len(snaps) == 1:
+        return {"error": "only one snapshot yet — diff needs >=2", "today_date": snaps[0].stem,
+                "flips": [], "new_bulls": [], "new_bears": [], "dropped": []}
+    today_p, yest_p = snaps[-1], snaps[-2]
+    try:
+        today = json.loads(today_p.read_text())
+        yest  = json.loads(yest_p.read_text())
+    except Exception as e:
+        return {"error": f"snapshot read failed: {e}", "flips": [], "new_bulls": [], "new_bears": [], "dropped": []}
+    t_preds = (today.get("predictions") or {}).get(mode) or {}
+    y_preds = (yest.get("predictions") or {}).get(mode) or {}
+
+    def _side(p):
+        if not isinstance(p, dict):
+            return "NEUTRAL"
+        edge = p.get("edge", 0.0)
+        return "BULL" if edge > 0.02 else ("BEAR" if edge < -0.02 else "NEUTRAL")
+
+    flips, new_bulls, new_bears = [], [], []
+    dropped = list(set(y_preds.keys()) - set(t_preds.keys()))[:50]
+    for sym, tp in t_preds.items():
+        yp = y_preds.get(sym)
+        t_side = _side(tp); y_side = _side(yp) if yp else None
+        if y_side and y_side != t_side and (y_side != "NEUTRAL" or t_side != "NEUTRAL"):
+            flips.append({
+                "ticker": sym, "from": y_side, "to": t_side,
+                "delta_q50": round((tp.get("q50", 0) - (yp.get("q50", 0) if yp else 0)), 2),
+            })
+        if not yp and t_side == "BULL":
+            new_bulls.append({"ticker": sym, "q50": tp.get("q50", 0)})
+        if not yp and t_side == "BEAR":
+            new_bears.append({"ticker": sym, "q50": tp.get("q50", 0)})
+    flips.sort(key=lambda x: -abs(x.get("delta_q50", 0)))
+    new_bulls.sort(key=lambda x: -x["q50"])
+    new_bears.sort(key=lambda x: x["q50"])
+    return {
+        "today_date":     today_p.stem,
+        "yesterday_date": yest_p.stem,
+        "n_today":        len(t_preds),
+        "n_yesterday":    len(y_preds),
+        "flips":          flips[:25],
+        "new_bulls":      new_bulls[:15],
+        "new_bears":      new_bears[:15],
+        "dropped":        dropped[:25],
+    }
+
+
+@app.get("/api/ml-edge-drift")
+async def ml_edge_drift_api(mode: str = "swing", days: int = 30):
+    """30-day per-ticker stability scoring from cache/ml_edge_history/.
+
+    For each ticker observed in any snapshot within `days`, count how many
+    times its side (BULL/BEAR/NEUTRAL) flipped. Returns the top-25 most
+    unstable + a global stability summary.
+    """
+    import json
+    from pathlib import Path
+    snap_dir = Path("cache/ml_edge_history")
+    if not snap_dir.exists():
+        return {"error": "no history", "tickers": []}
+    snaps = sorted(snap_dir.glob("*.json"))
+    if len(snaps) < 2:
+        return {"error": "need >=2 snapshots", "tickers": [], "n_snapshots": len(snaps)}
+    snaps = snaps[-days:]
+
+    def _side(p):
+        if not isinstance(p, dict): return "N"
+        e = p.get("edge", 0.0)
+        return "B" if e > 0.02 else ("S" if e < -0.02 else "N")
+
+    series = {}  # ticker → list of side letters
+    for sp in snaps:
+        try:
+            data = json.loads(sp.read_text())
+        except Exception:
+            continue
+        preds = (data.get("predictions") or {}).get(mode) or {}
+        for sym, p in preds.items():
+            series.setdefault(sym, []).append(_side(p))
+    out = []
+    for sym, sides in series.items():
+        if len(sides) < 2:
+            continue
+        flips = sum(1 for i in range(1, len(sides)) if sides[i] != sides[i-1])
+        consistency = 1.0 - (flips / max(1, len(sides) - 1))
+        out.append({
+            "ticker": sym,
+            "n_obs": len(sides),
+            "flips": flips,
+            "consistency": round(consistency, 3),
+            "current": sides[-1],
+            "history": "".join(sides[-15:]),
+        })
+    out.sort(key=lambda x: (-x["flips"], -x["n_obs"]))
+    n_stable = sum(1 for r in out if r["consistency"] >= 0.85)
+    return {
+        "n_snapshots":  len(snaps),
+        "n_tickers":    len(out),
+        "n_stable":     n_stable,
+        "n_unstable":   len(out) - n_stable,
+        "tickers":      out[:25],
+    }
+
+
+@app.get("/api/ml-edge-track")
+async def ml_edge_track_api(mode: str = "swing", limit: int = 200):
+    """#1 · Read cache/ml_edge_picks_history.jsonl, aggregate resolved picks
+    into the format the walk-forward equity curve needs. Replaces the proxy
+    score-band aggregate with real ML-edge-attributed trades.
+    """
+    import json
+    from pathlib import Path
+    p = Path("cache/ml_edge_picks_history.jsonl")
+    if not p.exists():
+        return {"resolved": [], "pending": 0, "n_total": 0, "win_rate": None, "avg_r": None, "expectancy": None}
+    resolved, pending = [], 0
+    try:
+        for ln in p.read_text().splitlines():
+            try:
+                rec = json.loads(ln)
+            except Exception:
+                continue
+            if rec.get("mode") != mode:
+                continue
+            if rec.get("status") == "resolved":
+                resolved.append(rec)
+            else:
+                pending += 1
+    except Exception as e:
+        return {"error": str(e), "resolved": [], "pending": 0}
+    resolved = resolved[-limit:]
+    if not resolved:
+        return {"resolved": [], "pending": pending, "n_total": 0, "win_rate": None, "avg_r": None}
+    wins = sum(1 for r in resolved if (r.get("realized_r") or 0) > 0)
+    avg_r = sum((r.get("realized_r") or 0) for r in resolved) / len(resolved)
+    # Profit factor = sum(wins R) / |sum(losses R)|
+    gross_w = sum((r.get("realized_r") or 0) for r in resolved if (r.get("realized_r") or 0) > 0)
+    gross_l = abs(sum((r.get("realized_r") or 0) for r in resolved if (r.get("realized_r") or 0) < 0)) or 0.001
+    pf = gross_w / gross_l
+    return {
+        "resolved":  resolved,
+        "pending":   pending,
+        "n_total":   len(resolved),
+        "win_rate":  round(wins / len(resolved) * 100, 1),
+        "avg_r":     round(avg_r, 3),
+        "profit_factor": round(pf, 2),
+        "expectancy": round(avg_r, 3),
+    }
+
+
+@app.get("/api/calibration-history")
+async def calibration_history_api(mode: str = "swing", days: int = 30):
+    """Read last N days of calibration metrics for one mode. Powers
+    the drift sparkline in the calibration card."""
+    import json
+    from pathlib import Path
+    p = Path("cache/ml/calibration_history.jsonl")
+    if not p.exists():
+        return {"series": []}
+    series = []
+    try:
+        for line in p.read_text().splitlines():
+            try:
+                rec = json.loads(line)
+                if rec.get("mode") == mode:
+                    series.append(rec)
+            except Exception:
+                continue
+    except Exception as e:
+        return {"error": str(e), "series": []}
+    series = series[-days:]
+    return {"series": series, "n": len(series)}
+
+
+@app.get("/api/ml-edge-telemetry")
+async def ml_edge_telemetry_api(limit: int = 30):
+    """Read last N telemetry entries — wall time, EODHD calls, cache hit rate."""
+    import json
+    from pathlib import Path
+    p = Path("cache/ml/telemetry.jsonl")
+    if not p.exists():
+        return {"entries": []}
+    try:
+        lines = p.read_text().splitlines()[-limit:]
+        entries = []
+        for ln in lines:
+            try: entries.append(json.loads(ln))
+            except Exception: pass
+        return {"entries": entries, "n": len(entries)}
+    except Exception as e:
+        return {"error": str(e), "entries": []}
+
+
+@app.get("/api/membership-snapshot")
+async def membership_snapshot_api():
+    """#2 · Survivorship — return today's S&P/R1000/R2000 membership snapshot
+    so it can be written to data/membership/ as a point-in-time anchor.
+    """
+    try:
+        sys.path.insert(0, str(BASE_DIR))
+        from ml.universe_loader import _load_sp500, _load_r1000, _load_r2000
+        return {
+            "date":  datetime.now().strftime("%Y-%m-%d"),
+            "sp500": sorted(_load_sp500()),
+            "r1000": sorted(_load_r1000()),
+            "r2000": sorted(_load_r2000()),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/ml-edge-stress-buckets")
+async def stress_buckets_api():
+    """#6 · Read cache/ml/stress_buckets.json — bucketed q10/25/50/75/90
+    by scenario (base / spy_down / vix), one per mode. Powers the real
+    stress overlay in the AI Prediction tab (replaces the heuristic)."""
+    import json
+    from pathlib import Path
+    p = Path("cache/ml/stress_buckets.json")
+    if not p.exists():
+        return {"error": "stress_buckets.json not found. Run scripts/build_stress_buckets.py"}
+    try:
+        return json.loads(p.read_text())
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/membership-history")
+async def membership_history_api():
+    """#2 · Report how many months of point-in-time membership we have for
+    each index. Drives the survivorship indicator in the UI."""
+    from pathlib import Path as _P
+    mdir = _P("data/membership")
+    if not mdir.exists():
+        return {"sp500_months": 0, "r1000_months": 0, "r2000_months": 0, "haircut_pp": 3.0}
+    counts = {"sp500": 0, "r1000": 0, "r2000": 0}
+    for fp in mdir.glob("*.csv"):
+        name = fp.stem
+        if name.startswith("sp500_"):  counts["sp500"] += 1
+        elif name.startswith("r1000_"): counts["r1000"] += 1
+        elif name.startswith("r2000_"): counts["r2000"] += 1
+    # Haircut shrinks as history accumulates (3pp until R1000+R2000 each have ≥24 months)
+    months_min = min(counts["r1000"], counts["r2000"])
+    if months_min >= 24:
+        haircut = 0.5
+    elif months_min >= 12:
+        haircut = 1.5
+    elif months_min >= 6:
+        haircut = 2.5
+    else:
+        haircut = 3.0
+    return {
+        "sp500_months": counts["sp500"],
+        "r1000_months": counts["r1000"],
+        "r2000_months": counts["r2000"],
+        "haircut_pp":   haircut,
+    }
+
+
+@app.get("/api/launchd-status")
+async def launchd_status_api():
+    """#23 · Detect whether the com.swingtrade.ml-edge launchd job is loaded.
+    Returns {loaded, copy_cmd, load_cmd} for the UI install banner."""
+    import subprocess
+    try:
+        r = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=3)
+        loaded = "com.swingtrade.ml-edge" in r.stdout
+    except Exception:
+        loaded = False
+    return {
+        "loaded": loaded,
+        "copy_cmd": 'cp "/Volumes/MyMacDisk/Claude Skills/SwingTrade/infra/launchd/com.swingtrade.ml-edge.plist" ~/Library/LaunchAgents/com.swingtrade.ml-edge.plist',
+        "load_cmd": 'launchctl load ~/Library/LaunchAgents/com.swingtrade.ml-edge.plist',
+    }
 
 
 @app.get("/api/vcp-pivots/{ticker}")
@@ -6236,6 +7774,184 @@ async def supabase_sync(_=Depends(_check_auth)):
     _SUPABASE_STATUS_CACHE["ts"] = 0.0
     _SUPABASE_STATUS_CACHE["payload"] = None
     return {"ok": ok, "log": tail, "returncode": proc.returncode}
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# /api/strategy_regime_matrix — drives the Strategy × Regime tab.
+# Aggregates three diagnostic outputs into a single decision-grade payload:
+#   1. regime_sharpe_decomp_*.json  — realized per-(setup × regime) Sharpe/WR/PF
+#   2. sharpe_setup_trend_*.json    — per-setup 20-trade-window edge-erosion
+#   3. backtest_sleeves_*.json      — forward replay of catalyst sleeves
+# Cached 60s; re-reads files on cache miss.
+# ────────────────────────────────────────────────────────────────────────────
+_STRAT_MATRIX_CACHE = {"ts": 0.0, "payload": None}
+_STRAT_MATRIX_TTL_S = 60
+
+
+@app.get("/api/strategy_regime_matrix")
+async def strategy_regime_matrix():
+    import time as _t
+    now = _t.time()
+    if _STRAT_MATRIX_CACHE["payload"] is not None and (now - _STRAT_MATRIX_CACHE["ts"]) < _STRAT_MATRIX_TTL_S:
+        return _STRAT_MATRIX_CACHE["payload"]
+
+    from pathlib import Path as _P
+    import json as _j
+    root = _P(__file__).parent
+    cache_dir = root / "cache"
+
+    def _latest(prefix):
+        files = sorted(cache_dir.glob(f"{prefix}_*.json"), reverse=True)
+        for fp in files:
+            try:
+                return {"path": str(fp.relative_to(root)), "data": _j.loads(fp.read_text())}
+            except Exception:
+                continue
+        return None
+
+    decomp = _latest("regime_sharpe_decomp")
+    trend = _latest("sharpe_setup_trend")
+    sleeves = _latest("backtest_sleeves")
+
+    def _pct(x):
+        """WR is stored as fraction 0-1; renderer expects 0-100."""
+        if x is None: return None
+        try: return round(float(x) * 100, 1)
+        except Exception: return None
+
+    def _norm_decomp(raw):
+        """Flatten the decomp JSON into renderer-friendly shape."""
+        if not raw:
+            return {}
+        out = {"by_aggregate": dict(raw.get("aggregate") or {})}
+        if "wr" in out["by_aggregate"]:
+            out["by_aggregate"]["wr"] = _pct(out["by_aggregate"]["wr"])
+            out["by_aggregate"]["wilson_lb"] = _pct(out["by_aggregate"].get("wilson_lb"))
+
+        def _norm_grp(d, key_field):
+            rows = []
+            for name, stats in (d or {}).items():
+                r = dict(stats); r[key_field] = name
+                r["wr"] = _pct(r.get("wr"))
+                r["wilson_lb"] = _pct(r.get("wilson_lb"))
+                rows.append(r)
+            # Sort by n desc
+            rows.sort(key=lambda x: -(x.get("n") or 0))
+            return rows
+
+        out["by_regime"] = _norm_grp(raw.get("by_regime"), "regime")
+        out["by_setup_family"] = _norm_grp(raw.get("by_setup_family"), "setup_family")
+        out["by_entry_quality"] = _norm_grp(raw.get("by_entry_quality"), "entry_quality")
+
+        # regime_x_setup is flat keyed by "regime|setup" — unflatten to {regime: [rows]}
+        mat = {}
+        for key, stats in (raw.get("regime_x_setup") or {}).items():
+            if "|" not in key:
+                continue
+            regime, setup = key.split("|", 1)
+            r = dict(stats); r["setup_family"] = setup
+            r["wr"] = _pct(r.get("wr"))
+            r["wilson_lb"] = _pct(r.get("wilson_lb"))
+            mat.setdefault(regime, []).append(r)
+        for regime in mat:
+            mat[regime].sort(key=lambda x: -(x.get("n") or 0))
+        out["by_regime_setup"] = mat
+        return out
+
+    def _norm_trend(raw):
+        if not raw:
+            return {}
+        by_setup = {}
+        for setup, info in (raw.get("per_setup") or {}).items():
+            windows = []
+            for w in (info.get("windows") or []):
+                w2 = dict(w)
+                w2["wr"] = _pct(w2.get("wr"))
+                w2["sharpe"] = w2.get("sharpe") if w2.get("sharpe") is not None else w2.get("sharpe_per_trade")
+                windows.append(w2)
+            by_setup[setup] = {
+                "total_n": info.get("total_n") or info.get("n"),
+                "verdict": info.get("verdict", "stable"),
+                "windows": windows,
+            }
+        return {"by_setup": by_setup}
+
+    def _norm_sleeves(raw):
+        if not raw:
+            return {}
+        summary = []
+        for variant_key, payload in raw.items():
+            if not isinstance(payload, dict):
+                continue
+            agg = payload.get("aggregate") or {}
+            sleeve_name = payload.get("strategy") or variant_key
+            # Parse variant suffix from variant_key after the sleeve prefix
+            variant = ""
+            for prefix in ("mean_reversion", "momentum", "defensive"):
+                if variant_key.startswith(prefix + "_"):
+                    variant = variant_key[len(prefix)+1:]
+                    break
+            if variant_key == "momentum":
+                variant = "baseline"
+            n = agg.get("n", 0)
+            pf = agg.get("pf")
+            pf_haircut = agg.get("pf_haircut")
+            if pf_haircut is None and pf is not None:
+                pf_haircut = round(pf - 0.2, 2)
+            verdict = "PASS" if (pf_haircut and pf_haircut >= 1.0 and n >= 30) else "FAIL"
+            summary.append({
+                "sleeve": sleeve_name,
+                "variant": variant,
+                "n": n,
+                "wr": _pct(agg.get("wr")),
+                "wilson_lb": _pct(agg.get("wilson_lb")),
+                "pf": pf,
+                "pf_haircut": pf_haircut,
+                "verdict": verdict,
+            })
+        summary.sort(key=lambda x: -(x.get("n") or 0))
+        return {"summary": summary}
+
+    payload = {
+        "generated_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        "sources": {
+            "decomp": decomp.get("path") if decomp else None,
+            "trend": trend.get("path") if trend else None,
+            "sleeves": sleeves.get("path") if sleeves else None,
+        },
+        "decomp": _norm_decomp((decomp or {}).get("data")),
+        "trend": _norm_trend((trend or {}).get("data")),
+        "sleeves": _norm_sleeves((sleeves or {}).get("data")),
+        "decisions": [
+            {"id": 1, "action": "Keep aggregate rolling-Sharpe kill ON",
+             "evidence": "All 3 sleeves degrading concurrently (Trend Cont. -0.34, Breakout Exp. -0.52, Impulse Cat. -0.11 in latest 20-trade window)",
+             "confidence": "HIGH", "category": "risk"},
+            {"id": 2, "action": "Block Breakout Expansion in risk_on_trending regime",
+             "evidence": "PF 0.79, WR 37.4%, Sharpe -0.09 on n=123 (Wilson LB 29.4%)",
+             "confidence": "HIGH", "category": "regime"},
+            {"id": 3, "action": "Promote MISSED entry quality",
+             "evidence": "PF 2.06, Sharpe +0.26, Wilson LB 53.8% on n=379",
+             "confidence": "HIGH", "category": "entry"},
+            {"id": 4, "action": "Demote FRESH entry quality",
+             "evidence": "PF 0.12, Sharpe -0.35 (n=23 — caveat: below Wilson floor)",
+             "confidence": "MED", "category": "entry"},
+            {"id": 5, "action": "Activate Momentum Continuation as primary sleeve",
+             "evidence": "PF 1.67 (post-haircut), WR 57.8%, n=2718",
+             "confidence": "HIGH", "category": "sleeve"},
+            {"id": 6, "action": "Narrow Defensive Rotation to XLU + GLD only",
+             "evidence": "PF 1.01 vs 0.63 on full 6-ETF basket",
+             "confidence": "HIGH", "category": "sleeve"},
+            {"id": 7, "action": "Mean Reversion only when RSI<15 + RVOL>=1.2",
+             "evidence": "Stratified PF 5.58 vs 1.15 unfiltered (n=16 — preliminary)",
+             "confidence": "MED", "category": "sleeve"},
+            {"id": 8, "action": "Kill 10-Week Pullback sleeve",
+             "evidence": "PF 0.59, Sharpe -0.19 on n=37",
+             "confidence": "HIGH", "category": "sleeve"},
+        ],
+    }
+    _STRAT_MATRIX_CACHE["payload"] = payload
+    _STRAT_MATRIX_CACHE["ts"] = now
+    return payload
 
 
 if __name__ == "__main__":
