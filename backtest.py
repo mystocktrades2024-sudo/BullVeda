@@ -2234,6 +2234,90 @@ def main():
     json_path.write_text(json.dumps({"picks": picks, "stats": stats}, indent=2, default=str))
     print(f"Raw results JSON: {json_path}")
 
+    # Best-effort Supabase write (never breaks the backtest if it fails).
+    # Writes one row to backtest_runs + N rows to backtest_trades.
+    try:
+        _backtest_supabase_write(picks, stats, args)
+    except Exception as e:
+        print(f"  ! Supabase write skipped: {type(e).__name__}: {e}")
+
+
+def _backtest_supabase_write(picks, stats, args):
+    """Safe writer — wrapped in caller's try/except. Never raises."""
+    import hashlib
+    from datetime import datetime, timezone
+    import os
+    os.environ.setdefault("SUPABASE_MODE", "1")
+    from supabase_client import sb_client
+    sb = sb_client()
+    if sb is None:
+        return
+    now = datetime.now(timezone.utc)
+    run_id = "bt_" + now.strftime("%Y%m%d_%H%M%S") + "_" + hashlib.sha1(
+        f"{args.days}_{args.hold}".encode()).hexdigest()[:8]
+    # Single backtest_runs row
+    run_row = {
+        "run_id": run_id,
+        "started_at": now.isoformat(),
+        "finished_at": now.isoformat(),
+        "mode": "portfolio",
+        "days": int(args.days),
+        "end_date": now.date().isoformat(),
+        "min_score": int(getattr(args, "min_score", 65) or 65),
+        "min_rs":    int(getattr(args, "min_rs", 75) or 75),
+        "n_trades": len(picks),
+        "wr_raw":  stats.get("win_rate", 0) / 100.0 if stats.get("win_rate") else None,
+        "wr_adj":  None,
+        "profit_factor": stats.get("profit_factor"),
+        "sharpe": stats.get("sharpe"),
+        "max_drawdown": stats.get("max_dd_pct"),
+        "total_pnl": stats.get("total_pnl"),
+        "starting_equity": stats.get("starting_equity"),
+        "final_equity": stats.get("final_equity"),
+        "total_return": stats.get("total_return_pct"),
+        "notes": "auto-wired from backtest.py end-of-run",
+    }
+    try:
+        sb.table("backtest_runs").upsert([run_row], on_conflict="run_id").execute()
+    except Exception as e:
+        print(f"  ! backtest_runs upsert: {e}")
+        return  # if the run row failed, no point pushing trades
+
+    # Per-trade rows (capped at 2000)
+    trade_rows = []
+    for p in (picks or [])[:2000]:
+        trade_rows.append({
+            "run_id": run_id,
+            "ticker": (p.get("ticker") or "?").upper(),
+            "direction": p.get("direction") or "long",
+            "entry_date": (p.get("entry_date") or "")[:10] or None,
+            "exit_date":  (p.get("exit_date") or "")[:10] or None,
+            "entry_price": p.get("entry_price"),
+            "exit_price":  p.get("exit_price"),
+            "shares": int(p.get("shares") or 0) if p.get("shares") else None,
+            "pnl_dollars": p.get("pnl_dollars"),
+            "pnl_pct": p.get("pnl_pct") or p.get("ret_pct"),
+            "win": int(p.get("win") or 0) if p.get("win") is not None else None,
+            "setup_family": p.get("setup_family") or p.get("setup"),
+            "setup_type":   p.get("setup_type"),
+            "score": int(p.get("score") or 0) if p.get("score") else None,
+            "rs_rank": p.get("rs_rank"),
+            "regime": p.get("regime"),
+            "exit_reason": p.get("exit_reason"),
+            "hold_days": p.get("hold_days"),
+            "mae_pct": p.get("mae_pct"),
+            "mfe_pct": p.get("mfe_pct"),
+            "raw_json": json.dumps(p, default=str),
+        })
+    if not trade_rows:
+        return
+    try:
+        for i in range(0, len(trade_rows), 200):
+            sb.table("backtest_trades").insert(trade_rows[i:i+200]).execute()
+        print(f"  ✓ Supabase: backtest_runs +1 · backtest_trades +{len(trade_rows)}")
+    except Exception as e:
+        print(f"  ! backtest_trades insert: {e}")
+
 
 def _dump_cprofile_if_active():
     """Write cProfile output if --profile-cprof was passed.
