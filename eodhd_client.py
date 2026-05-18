@@ -245,16 +245,84 @@ class EODHDError(Exception):
 # Per-process EODHD call counter — for budget audit + duplicate-scan detection
 _CALL_COUNTER = {"network": 0, "cache_hit": 0, "errors": 0}
 
+# Per-endpoint call counter (v6 ops telemetry → eodhd_quota_usage table)
+# Buckets: endpoint type (eod, fundamentals, options, news, snapshot, etc.)
+_ENDPOINT_COUNTER: dict[str, dict[str, int]] = {}
+
+
+def _endpoint_class(endpoint: str) -> str:
+    """Map a raw endpoint path to a bucket class for quota tracking."""
+    e = endpoint.lower().lstrip("/")
+    if e.startswith("eod/"):                       return "eod"
+    if e.startswith("intraday/"):                  return "intraday"
+    if e.startswith("real-time/"):                 return "real_time"
+    if e.startswith("fundamentals/"):              return "fundamentals"
+    if e.startswith("options/"):                   return "options"
+    if e.startswith("news"):                       return "news"
+    if e.startswith("div/"):                       return "dividends"
+    if e.startswith("splits/"):                    return "splits"
+    if "exchange" in e:                            return "exchange_symbols"
+    if e.startswith("calendar/"):                  return "calendar"
+    if e.startswith("technical/"):                 return "technical"
+    if e.startswith("sentiments"):                 return "sentiment"
+    return "other"
+
+
+def _bump_endpoint(endpoint: str, kind: str = "network") -> None:
+    """kind: 'network' | 'cache_hit' | 'rate_limit'"""
+    cls = _endpoint_class(endpoint)
+    b = _ENDPOINT_COUNTER.setdefault(cls, {"network": 0, "cache_hit": 0, "rate_limit": 0})
+    b[kind] = b.get(kind, 0) + 1
+
 
 def get_call_stats() -> dict:
     """Return per-process EODHD call statistics. Reset at process start."""
     return dict(_CALL_COUNTER)
 
 
+def get_endpoint_stats() -> dict:
+    """Return per-endpoint counts (eod / fundamentals / options / news / ...)."""
+    return {k: dict(v) for k, v in _ENDPOINT_COUNTER.items()}
+
+
 def reset_call_stats() -> None:
     _CALL_COUNTER["network"] = 0
     _CALL_COUNTER["cache_hit"] = 0
     _CALL_COUNTER["errors"] = 0
+    _ENDPOINT_COUNTER.clear()
+
+
+def flush_quota_to_supabase() -> dict:
+    """Best-effort write of today's per-endpoint counts to eodhd_quota_usage.
+    Safe to call anytime — wraps all Supabase work in try/except.
+    Returns a summary dict {pushed, failed, endpoints_seen}."""
+    import os
+    from datetime import date
+    summary = {"pushed": 0, "failed": 0, "endpoints_seen": len(_ENDPOINT_COUNTER)}
+    try:
+        os.environ.setdefault("SUPABASE_MODE", "1")
+        from supabase_client import sb_client
+        sb = sb_client()
+        if sb is None:
+            return summary
+        today = date.today().isoformat()
+        rows = []
+        for cls, counts in _ENDPOINT_COUNTER.items():
+            rows.append({
+                "bucket_date": today,
+                "endpoint": cls,
+                "request_count": counts.get("network", 0),
+                "cost_units": counts.get("network", 0),  # 1 unit per request baseline
+                "rate_limit_hits": counts.get("rate_limit", 0),
+            })
+        if rows:
+            sb.table("eodhd_quota_usage").upsert(
+                rows, on_conflict="bucket_date,endpoint"
+            ).execute()
+            summary["pushed"] = len(rows)
+    except Exception:
+        summary["failed"] = len(_ENDPOINT_COUNTER)
+    return summary
 
 
 def _request(
@@ -280,6 +348,7 @@ def _request(
         cached = _cache_read(cache_key, cache_ttl)
         if cached is not None:
             _CALL_COUNTER["cache_hit"] += 1
+            _bump_endpoint(endpoint, "cache_hit")
             return cached
 
     full_params = dict(params or {})
@@ -293,6 +362,7 @@ def _request(
         try:
             _limiter.acquire()
             _CALL_COUNTER["network"] += 1  # tally every network call (incl. retries)
+            _bump_endpoint(endpoint, "network")
             resp = _session.get(url, params=full_params, timeout=timeout)
 
             # 200: success

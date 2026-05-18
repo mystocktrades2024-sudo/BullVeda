@@ -90,6 +90,49 @@ def extract_slippage(orders_path):
     return rows
 
 
+def extract_kelly(kelly_log_path):
+    """Fold cache/kelly_size_log.jsonl → kelly_size_history rows."""
+    rows = []
+    for j in _iter_jsonl(kelly_log_path):
+        ts = j.get("decided_at")
+        if not ts: continue
+        rows.append({
+            "decided_at": ts,
+            "ticker": j.get("ticker"),
+            "base_kelly": j.get("base_kelly"),
+            "drawdown_mult": j.get("drawdown_mult"),
+            "regime_mult": j.get("regime_mult"),
+            "vix_mult": j.get("vix_mult"),
+            "earnings_mult": j.get("earnings_mult"),
+            "var_floor_mult": j.get("var_floor_mult"),
+            "sharpe_mult": j.get("sharpe_mult"),
+            "final_kelly": j.get("effective_regime_cap"),
+            "final_size_pct": j.get("final_alloc_pct"),
+            "final_shares": j.get("final_shares"),
+            "reason": j.get("reason"),
+            "sync_key": _h("kelly", ts, j.get("ticker", "?")),
+            "raw_json": json.dumps(j),
+        })
+    return rows
+
+
+def extract_watch(watch_log_path):
+    """Fold cache/watch_triggers.jsonl → watch_triggers rows."""
+    rows = []
+    for j in _iter_jsonl(watch_log_path):
+        ts = j.get("triggered_at")
+        ticker = j.get("ticker")
+        if not (ts and ticker): continue
+        rows.append({
+            "ticker": ticker,
+            "triggered_at": ts,
+            "run_date": j.get("run_date"),
+            "sync_key": j.get("sync_key") or _h("wt", ts, ticker),
+            "raw_json": json.dumps(j),
+        })
+    return rows
+
+
 def extract_signal_filter(signal_log_path):
     rows = []
     if not signal_log_path.exists(): return rows
@@ -140,9 +183,13 @@ def main():
     stop_rows = extract_stop_levels(ROOT / "cache" / "eod_actions.jsonl")
     slip_rows = extract_slippage(ROOT / "cache" / "orders.jsonl")
     sf_rows = extract_signal_filter(ROOT / "data" / "signal_log.json")
+    kelly_rows = extract_kelly(ROOT / "cache" / "kelly_size_log.jsonl")
+    watch_rows = extract_watch(ROOT / "cache" / "watch_triggers.jsonl")
     print(f"  stop_levels_history:     {len(stop_rows)} rows")
     print(f"  slippage_realized:       {len(slip_rows)} rows")
     print(f"  signal_filter_decisions: {len(sf_rows)} rows")
+    print(f"  kelly_size_history:      {len(kelly_rows)} rows")
+    print(f"  watch_triggers:          {len(watch_rows)} rows")
 
     if not args.apply:
         print("\nDry-run."); return 0
@@ -167,6 +214,8 @@ def main():
     for table, rows, key in [
         ("stop_levels_history", stop_rows, "sync_key"),
         ("slippage_realized",   slip_rows, "sync_key"),
+        ("kelly_size_history",  kelly_rows, "sync_key"),
+        ("watch_triggers",      watch_rows, "sync_key"),
     ]:
         ok, fail = push(table, rows, key)
         print(f"  {table:30s} pushed={ok} failed={fail}")

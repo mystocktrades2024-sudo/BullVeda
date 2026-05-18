@@ -4120,6 +4120,15 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _ce:
         log.debug(f"EODHD call stats unavailable: {_ce}")
 
+    # Phase G: per-endpoint quota flush to Supabase (idempotent on bucket_date+endpoint)
+    try:
+        from eodhd_client import flush_quota_to_supabase as _flush_quota
+        _qres = _flush_quota()
+        if _qres.get("pushed", 0) > 0:
+            log.info(f"  EODHD quota: flushed {_qres['pushed']} endpoint buckets to Supabase")
+    except Exception as _qe:
+        log.debug(f"EODHD quota flush skipped: {_qe}")
+
     # #9: 90-day retention on bundle snapshots — prevents unbounded disk growth
     try:
         from datetime import timedelta as _td

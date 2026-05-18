@@ -247,6 +247,29 @@ def check_watch_triggers(current_prices: dict) -> list[dict]:
                     )
                 except Exception:
                     pass
+            # Sidecar: log every watch trigger fire to JSONL (folded to Supabase nightly)
+            try:
+                import json as _wjson, hashlib as _whash
+                from datetime import datetime as _wdt, timezone as _wtz
+                from pathlib import Path as _wpath
+                _wlog = _wpath(__file__).parent / "cache" / "watch_triggers.jsonl"
+                _wlog.parent.mkdir(parents=True, exist_ok=True)
+                _wts = _wdt.now(_wtz.utc).isoformat()
+                with _wlog.open("a") as _wf:
+                    _wf.write(_wjson.dumps({
+                        "triggered_at": _wts,
+                        "ticker": ticker,
+                        "trigger_price": trigger,
+                        "current_price": float(cur),
+                        "score": w.get("score", 0),
+                        "setup": w.get("setup", ""),
+                        "run_date": w.get("run_date", ""),
+                        "pct_from_trigger": pct,
+                        "promoted_buy": bool(hit.get("promoted_buy")),
+                        "sync_key": _whash.sha1(f"{_wts}|{ticker}".encode()).hexdigest()[:32],
+                    }, default=str) + "\n")
+            except Exception:
+                pass
     return triggered
 
 

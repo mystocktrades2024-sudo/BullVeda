@@ -5846,6 +5846,40 @@ def kelly_position_size(stats: dict, regime_name: str, vix: float,
 
     final_alloc_pct = (position_value / portfolio_size * 100) if portfolio_size > 0 else 0
 
+    # Sidecar: log kelly inputs to local JSONL (fold to Supabase periodically).
+    # Wrapped in try/except — failure here can NEVER break the scan.
+    try:
+        import json as _kjson
+        from datetime import datetime as _kdt, timezone as _ktz
+        from pathlib import Path as _kpath
+        _kelly_log = _kpath(__file__).parent / "cache" / "kelly_size_log.jsonl"
+        _kelly_log.parent.mkdir(parents=True, exist_ok=True)
+        _krow = {
+            "decided_at": _kdt.now(_ktz.utc).isoformat(),
+            "ticker": stats.get("_ticker") if isinstance(stats, dict) else None,
+            "base_kelly": round(kelly_pct, 4),
+            "half_kelly": round(half_kelly_pct, 4),
+            "drawdown_mult": _drawdown_mult if '_drawdown_mult' in dir() else 1.0,
+            "regime_mult": regime_mult,
+            "vix_mult": _vix_mult if '_vix_mult' in dir() else 1.0,
+            "earnings_mult": _earn_mult if '_earn_mult' in dir() else 1.0,
+            "var_floor_mult": _var_floor_mult if '_var_floor_mult' in dir() else 1.0,
+            "sharpe_mult": _sharpe_mult if '_sharpe_mult' in dir() else 1.0,
+            "effective_regime_cap": round(effective_regime_cap, 4),
+            "final_alloc_pct": round(final_alloc_pct, 2),
+            "final_shares": shares_from_risk,
+            "regime": regime_name,
+            "vix": vix,
+            "conviction_tier": conviction_tier,
+            "live_win_rate": round(win_rate * 100, 1),
+            "sharpe_126d": sharpe_126d,
+            "reason": "auto-logged from kelly_position_size",
+        }
+        with _kelly_log.open("a") as _kf:
+            _kf.write(_kjson.dumps(_krow, default=str) + "\n")
+    except Exception:
+        pass  # never break scan
+
     return {
         "kelly_pct":        round(kelly_pct * 100, 1),
         "half_kelly_pct":   round(half_kelly_pct * 100, 1),
@@ -11106,6 +11140,19 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             result["smc_hit_rates"] = _cached
     except Exception as e:
         result["smc_data"] = {"error": f"smc_engine failure: {e}", "synth": False}
+
+    # 2026-05-17 · pattern_engine: 7 mechanism-honest pattern detectors
+    # (Wyckoff, Classical, VP, Fib, Ichimoku, S/R, Trendlines) + Wilson LB
+    # hit-rate cache. Hit-rate compute also expensive — runs in dedicated
+    # backfill, scan only reads cache.
+    try:
+        from pattern_engine import attach_pattern_data, load_pattern_hit_rates
+        attach_pattern_data(result, df, ticker, compute_hit_rates=False)
+        _pcached = load_pattern_hit_rates().get(ticker)
+        if _pcached:
+            result["pattern_hit_rates"] = _pcached
+    except Exception as e:
+        result["pattern_data"] = {"error": f"pattern_engine failure: {e}", "synth": False}
     return result
 
 
