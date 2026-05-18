@@ -8308,6 +8308,9 @@ body.on-detail-tab .qdchk-trigger-btn { display: inline-flex; }
       <!-- 2026-05-16 · My Watchlist + Market Mood (2-col) -->
       <div id="qc-watch-mood"></div>
 
+      <!-- 2026-05-18 · Sector Cap Losers · next-best alternatives blocked by sector cap -->
+      <div id="qc-sector-cap"></div>
+
       <!-- 2026-05-16 · System Edge & Health · collapsed by default (admin-style) -->
       <div class="qc-h" id="qc-eh-header" style="cursor:pointer;user-select:none" onclick="(function(){var w=document.getElementById('qc-eh-wrap');if(!w)return;var b=document.getElementById('qc-eh-chev');var open=w.style.display!=='none'&&w.style.display!=='';w.style.display=open?'none':'grid';if(b)b.textContent=open?'▸':'▾';})()">
         <div class="qc-h-l"><span class="qc-h-title">System Edge & Health</span><span class="qc-h-sub">advanced · click to expand</span></div>
@@ -14139,6 +14142,90 @@ const QuantHome = (function() {
   }
 
   // 2026-05-17 · Yesterday's Recap · closed trades + day P&L
+  // 2026-05-18 · Sector Cap Losers · next-best alternatives blocked by cap
+  function renderSectorCap(data) {
+    const wrap = document.getElementById('qc-sector-cap');
+    if (!wrap) return;
+    if (!document.getElementById('qc-sc-css')) {
+      const st = document.createElement('style');
+      st.id = 'qc-sc-css';
+      st.textContent = `
+        .qcsc{background:var(--bg-2);border:1px solid var(--line);border-left:3px solid var(--amb);border-radius:3px;margin-bottom:14px;overflow:hidden}
+        .qcsc-h{padding:11px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline;font:800 11px var(--mono);color:var(--amb);letter-spacing:.14em;text-transform:uppercase}
+        .qcsc-h .sub{font:500 10px var(--mono);color:var(--ink-3);letter-spacing:.04em;text-transform:none;font-weight:500}
+        .qcsc-body{padding:10px 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
+        .qcsc-sec{background:var(--bg-3);border:1px solid var(--line);border-radius:3px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+        .qcsc-sec-h{display:flex;justify-content:space-between;align-items:baseline;font:700 10px var(--mono);color:var(--ink-1);letter-spacing:.08em;text-transform:uppercase}
+        .qcsc-sec-h .cap{color:var(--rd);font-weight:800;letter-spacing:.06em}
+        .qcsc-row{display:grid;grid-template-columns:48px 1fr 36px 32px;gap:8px;align-items:center;font:600 11px var(--mono);padding:3px 0;cursor:pointer;border-bottom:1px dashed var(--line)}
+        .qcsc-row:hover{background:var(--bg-2)}
+        .qcsc-row:last-child{border-bottom:0}
+        .qcsc-row.survivor{background:linear-gradient(90deg,rgba(91,229,124,0.10),transparent);border-left:2px solid var(--gn);padding-left:6px;margin-left:-6px;border-bottom-style:solid}
+        .qcsc-row .sym{font:800 11.5px var(--sans);color:var(--ink);letter-spacing:.02em}
+        .qcsc-row .tag{font:700 8.5px var(--mono);padding:1px 5px;border-radius:2px;background:var(--bg-1);color:var(--ink-2);letter-spacing:.06em;text-align:center}
+        .qcsc-row .tag.gn{color:var(--gn);background:var(--gn-bg)} .qcsc-row .tag.am{color:var(--amb);background:var(--amb-bg)}
+        .qcsc-row .setup{font:500 10px var(--mono);color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .qcsc-row .score{font:800 12px var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+        .qcsc-row .score.gn{color:var(--gn)} .qcsc-row .score.am{color:var(--amb)} .qcsc-row .score.cy{color:var(--cy)}
+        .qcsc-row .more{font:500 9.5px var(--mono);color:var(--ink-3);text-align:right}
+        .qcsc-empty{padding:24px 16px;text-align:center;font:500 12px var(--mono);color:var(--ink-3);line-height:1.7}
+        .qcsc-foot{padding:10px 16px;border-top:1px dashed var(--line);font:500 11px var(--mono);color:var(--ink-2);letter-spacing:.02em}
+        .qcsc-foot b{color:var(--ink-1)}
+      `;
+      document.head.appendChild(st);
+    }
+    // Render shell + async-fetch the demotions
+    wrap.innerHTML = `<div class="qcsc">
+      <div class="qcsc-h"><span>▦ SECTOR CAP · NEXT-BEST ALTERNATIVES</span><span class="sub">loading…</span></div>
+      <div class="qcsc-empty">Fetching today's sector-cap demotions…</div>
+    </div>`;
+    fetch('/api/sector-cap-demotions', { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : { sectors: {}, total_demoted: 0 })
+      .then(d => {
+        const sectors = d.sectors || {};
+        const sectorCount = d.sector_count || Object.keys(sectors).length;
+        if (sectorCount === 0) {
+          wrap.innerHTML = `<div class="qcsc">
+            <div class="qcsc-h"><span>▦ SECTOR CAP</span><span class="sub">no demotions today</span></div>
+            <div class="qcsc-empty">No sector hit its BUY cap today.<br><span style="font-size:11px">All qualifying setups surfaced as BUY.</span></div>
+          </div>`;
+          return;
+        }
+        const _scoreCls = (s) => s >= 75 ? 'gn' : s >= 65 ? 'am' : 'cy';
+        const sectorCards = Object.entries(sectors).map(([sect, info]) => {
+          const survivors = info.survivors || [];
+          const demoted = info.demoted_top || [];
+          const survivorRows = survivors.map(s => `
+            <div class="qcsc-row survivor" onclick="window.setDetailTicker&&window.setDetailTicker('${s.ticker}')">
+              <span class="sym">${s.ticker}</span>
+              <span class="setup">${(s.setup_type || '—').slice(0, 22)}</span>
+              <span class="score gn">${Math.round(+s.score || 0)}</span>
+              <span class="tag gn">BUY</span>
+            </div>`).join('');
+          const demotedRows = demoted.map(t => `
+            <div class="qcsc-row" onclick="window.setDetailTicker&&window.setDetailTicker('${t.ticker}')">
+              <span class="sym">${t.ticker}</span>
+              <span class="setup">${(t.setup_type || '—').slice(0, 22)}</span>
+              <span class="score ${_scoreCls(+t.score)}">${Math.round(+t.score || 0)}</span>
+              <span class="tag am">WL</span>
+            </div>`).join('');
+          const moreRow = info.demoted_total > demoted.length ? `<div class="qcsc-row"><span></span><span class="more">+${info.demoted_total - demoted.length} more</span><span></span><span></span></div>` : '';
+          return `<div class="qcsc-sec">
+            <div class="qcsc-sec-h"><span>${sect}</span><span class="cap">${info.demoted_total} blocked · cap=${info.cap}</span></div>
+            ${survivorRows}${demotedRows}${moreRow}
+          </div>`;
+        }).join('');
+        wrap.innerHTML = `<div class="qcsc">
+          <div class="qcsc-h"><span>▦ SECTOR CAP · NEXT-BEST ALTERNATIVES</span><span class="sub">${sectorCount} sectors hit cap · ${d.total_demoted} demotions today</span></div>
+          <div class="qcsc-body">${sectorCards}</div>
+          <div class="qcsc-foot">⏵ Click any row to open detail. <b>${d.total_demoted}</b> high-quality candidates blocked by per-sector BUY cap. <b>Bump <code>portfolio.dynamic_sector_cap.underperforming</code></b> in config to unlock more.</div>
+        </div>`;
+      })
+      .catch(e => {
+        wrap.innerHTML = `<div class="qcsc"><div class="qcsc-h"><span>▦ SECTOR CAP</span></div><div class="qcsc-empty" style="color:var(--rd)">Error loading: ${e.message}</div></div>`;
+      });
+  }
+
   function renderRecap(data) {
     const wrap = document.getElementById('qc-recap');
     if (!wrap) return;
@@ -15281,6 +15368,7 @@ const QuantHome = (function() {
       _safe('cockpit',      () => renderCockpit(data));
       _safe('recap',        () => renderRecap(data));
       _safe('watchMood',    () => renderWatchMood(data));
+      _safe('sectorCap',    () => renderSectorCap(data));
       _safe('health',       () => renderHealth(data));
       _safe('stories',      () => renderStories(data));
       _safe('movers',       () => renderMovers(data));
@@ -33623,6 +33711,411 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       #qd-ml-root [style*="border-radius: 8px"],
       #qd-ml-root [style*="border-radius:10px"],
       #qd-ml-root [style*="border-radius: 10px"] { border-radius: 2px !important; }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         AI Prediction sub-tab (qda-*) — 2026-05-17
+         Sub-tab nav · hero cone · cross-horizon · histogram · scan tables
+         · sector heatmap · pair suggestions · stress overlay · landmines
+         ═══════════════════════════════════════════════════════════════════ */
+      /* Sub-tab nav */
+      #qd-ml-root .qda-subtabs { display:flex; gap:4px; margin:0 4px 18px; border-bottom:1px solid var(--line); padding-bottom:0; }
+      #qd-ml-root .qda-stab { padding:10px 18px; font:700 11px var(--mono); color:var(--ink-3); letter-spacing:0.10em; text-transform:uppercase; cursor:pointer; background:transparent; border:0; border-bottom:2px solid transparent; margin-bottom:-1px; display:inline-flex; align-items:center; gap:6px; }
+      #qd-ml-root .qda-stab:hover { color:var(--ink-1); }
+      #qd-ml-root .qda-stab.on { color:var(--copper); border-bottom-color:var(--copper); }
+      #qd-ml-root .qda-stab .spk { display:inline-block; }
+      #qd-ml-root .qda-stab.on .spk { animation:qdaPulse 2.4s ease-in-out infinite; }
+      @keyframes qdaPulse { 0%,100%{opacity:.55;transform:scale(1);} 50%{opacity:1;transform:scale(1.15);} }
+      #qd-ml-root .qda-stab .ct { font:700 9px var(--mono); padding:2px 6px; border-radius:2px; background:var(--bg-3); color:var(--ink-1); letter-spacing:.04em; }
+      #qd-ml-root .qda-stab.on .ct { background:var(--copper); color:#fff; }
+
+      /* Section divider */
+      #qd-ml-root .qda-div { font:700 10px var(--mono); color:var(--ink-3); letter-spacing:0.20em; text-transform:uppercase; margin:18px 4px 12px; display:flex; align-items:center; gap:10px; }
+      #qd-ml-root .qda-div::before, #qd-ml-root .qda-div::after { content:''; flex:1; height:1px; background:var(--line); }
+
+      /* Hero block — focused-ticker forecast */
+      #qd-ml-root .qda-hero { background:var(--bg-1); border:1px solid var(--line); border-left:4px solid var(--copper); border-radius:2px; margin:0 4px 14px; overflow:hidden; }
+      #qd-ml-root .qda-hero-top { display:grid; grid-template-columns:260px 1fr 320px; border-bottom:1px solid var(--line); background:var(--bg-2); }
+      #qd-ml-root .qda-hero-id { padding:14px 18px; border-right:1px solid var(--line); }
+      #qd-ml-root .qda-hero-tk { font:800 26px var(--mono); letter-spacing:0.04em; line-height:1; color:var(--copper); }
+      #qd-ml-root .qda-hero-name { font:500 10.5px var(--mono); color:var(--ink-3); margin-top:5px; }
+      #qd-ml-root .qda-hero-spot { margin-top:10px; font:700 16px var(--mono); color:var(--ink); }
+      #qd-ml-root .qda-hero-verdict { padding:14px 18px; display:flex; flex-direction:column; justify-content:center; border-right:1px solid var(--line); }
+      #qd-ml-root .qda-hero-vk { font:700 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.16em; text-transform:uppercase; margin-bottom:6px; }
+      #qd-ml-root .qda-hero-vv { font:800 28px var(--mono); line-height:1; letter-spacing:-0.01em; }
+      #qd-ml-root .qda-hero-vs { font:500 11px var(--mono); color:var(--ink-2); margin-top:6px; }
+      #qd-ml-root .qda-hero-kpi { padding:10px 14px; display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+      #qd-ml-root .qda-kcell { padding:7px 9px; background:var(--bg-3); border-radius:2px; border-left:3px solid var(--line-2); }
+      #qd-ml-root .qda-kcell.gn { border-left-color:var(--pass); }
+      #qd-ml-root .qda-kcell.rd { border-left-color:var(--fail); }
+      #qd-ml-root .qda-kcell.am { border-left-color:var(--warn); }
+      #qd-ml-root .qda-kcell.cu { border-left-color:var(--copper); }
+      #qd-ml-root .qda-kk { font:700 8.5px var(--mono); color:var(--ink-3); letter-spacing:0.14em; text-transform:uppercase; }
+      #qd-ml-root .qda-kv { font:800 13.5px var(--mono); margin-top:3px; }
+      #qd-ml-root .qda-ks { font:500 9px var(--mono); color:var(--ink-3); margin-top:1px; }
+
+      /* Hero chart area */
+      #qd-ml-root .qda-chartwrap { position:relative; background:var(--bg-0); padding:14px 22px 6px; }
+      #qd-ml-root .qda-chart { width:100%; height:340px; display:block; }
+      #qd-ml-root .qda-badge { position:absolute; right:30px; background:linear-gradient(135deg, rgba(217,119,87,0.96), rgba(217,119,87,0.78)); color:#fff; padding:9px 13px; border-radius:3px; box-shadow:0 8px 24px rgba(217,119,87,0.32), 0 0 0 1px rgba(255,255,255,0.12) inset; line-height:1.1; transform:translateY(-50%); pointer-events:none; }
+      #qd-ml-root .qda-badge .lbl { display:block; font:700 9px var(--mono); opacity:.85; letter-spacing:.14em; margin-bottom:2px; }
+      #qd-ml-root .qda-badge .val { font:800 17px var(--mono); letter-spacing:-0.01em; }
+      #qd-ml-root .qda-badge .sub { display:block; font:500 9px var(--mono); opacity:.78; margin-top:2px; }
+      #qd-ml-root .qda-xaxis { display:flex; justify-content:space-between; padding:2px 22px 10px; font:600 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.04em; }
+      #qd-ml-root .qda-xaxis b { color:var(--copper); }
+
+      /* Cross-horizon coherence row */
+      #qd-ml-root .qda-coh { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:0 4px 14px; }
+      #qd-ml-root .qda-coh-cell { background:var(--bg-1); border:1px solid var(--line); border-radius:2px; padding:12px 14px; }
+      #qd-ml-root .qda-coh-cell.aligned { border-left:3px solid var(--pass); }
+      #qd-ml-root .qda-coh-cell.diverge { border-left:3px solid var(--warn); }
+      #qd-ml-root .qda-coh-cell.flip { border-left:3px solid var(--fail); }
+      #qd-ml-root .qda-coh-k { font:700 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.18em; text-transform:uppercase; margin-bottom:8px; display:flex; justify-content:space-between; }
+      #qd-ml-root .qda-coh-mini { width:100%; height:60px; display:block; margin:6px 0; }
+      #qd-ml-root .qda-coh-stat { display:flex; justify-content:space-between; font:600 10.5px var(--mono); margin-top:5px; }
+      #qd-ml-root .qda-coh-stat .lbl { color:var(--ink-3); }
+      #qd-ml-root .qda-coh-banner { margin:0 4px 14px; padding:10px 16px; background:var(--bg-2); border-left:3px solid var(--info); font:600 11.5px var(--mono); color:var(--ink-1); letter-spacing:0.02em; }
+      #qd-ml-root .qda-coh-banner.flip { border-left-color:var(--warn); }
+      #qd-ml-root .qda-coh-banner.aligned { border-left-color:var(--pass); }
+      #qd-ml-root .qda-coh-banner b { color:var(--copper); }
+
+      /* Forward distribution histogram */
+      #qd-ml-root .qda-hist { background:var(--bg-1); border:1px solid var(--line); padding:14px 18px; margin:0 4px 14px; }
+      #qd-ml-root .qda-hist-row { display:grid; grid-template-columns:50px 1fr 65px; gap:8px; align-items:center; padding:5px 0; border-bottom:1px solid var(--line); }
+      #qd-ml-root .qda-hist-row:last-child { border-bottom:0; }
+      #qd-ml-root .qda-hist-bin { font:700 10.5px var(--mono); color:var(--ink-2); letter-spacing:0.04em; }
+      #qd-ml-root .qda-hist-track { position:relative; height:18px; background:var(--bg-2); border-radius:2px; overflow:hidden; }
+      #qd-ml-root .qda-hist-fill { position:absolute; left:0; top:0; bottom:0; }
+      #qd-ml-root .qda-hist-val { font:700 10.5px var(--mono); text-align:right; }
+
+      /* Universe scan grid (4 columns: bulls / bears / flip / R:R) */
+      #qd-ml-root .qda-scans { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:0 4px 14px; }
+      #qd-ml-root .qda-scan { background:var(--bg-1); border:1px solid var(--line); border-radius:2px; overflow:hidden; }
+      #qd-ml-root .qda-scan-hd { padding:9px 12px; background:var(--bg-2); border-bottom:1px solid var(--line); font:700 10px var(--mono); color:var(--ink-1); letter-spacing:0.14em; text-transform:uppercase; display:flex; justify-content:space-between; align-items:center; }
+      #qd-ml-root .qda-scan-hd.gn { color:var(--pass); border-bottom-color:var(--gn-dim); }
+      #qd-ml-root .qda-scan-hd.rd { color:var(--fail); border-bottom-color:var(--rd-dim); }
+      #qd-ml-root .qda-scan-hd.am { color:var(--warn); border-bottom-color:var(--amb-dim); }
+      #qd-ml-root .qda-scan-hd.cu { color:var(--copper); }
+      #qd-ml-root .qda-scan-hd .ct { font-size:9.5px; padding:2px 6px; background:var(--bg-3); border-radius:2px; color:var(--ink-2); letter-spacing:0.04em; }
+      #qd-ml-root .qda-scan table { width:100%; border-collapse:collapse; font:600 10.5px var(--mono); }
+      #qd-ml-root .qda-scan th { padding:6px 8px; background:var(--bg-2); text-align:left; font-weight:700; color:var(--ink-3); letter-spacing:0.06em; font-size:9px; text-transform:uppercase; border-bottom:1px solid var(--line); }
+      #qd-ml-root .qda-scan th.r { text-align:right; }
+      #qd-ml-root .qda-scan td { padding:5px 8px; border-bottom:1px solid var(--line); color:var(--ink-1); }
+      #qd-ml-root .qda-scan tr:last-child td { border-bottom:0; }
+      #qd-ml-root .qda-scan td.r { text-align:right; }
+      #qd-ml-root .qda-scan tr.row-link { cursor:pointer; }
+      #qd-ml-root .qda-scan tr.row-link:hover td { background:var(--bg-3); color:var(--copper); }
+      #qd-ml-root .qda-scan tr.focused td { background:var(--copper-bg); color:var(--copper); }
+      #qd-ml-root .qda-scan td .ar { display:inline-block; width:12px; }
+      #qd-ml-root .qda-scan td .ar.up { color:var(--pass); }
+      #qd-ml-root .qda-scan td .ar.dn { color:var(--fail); }
+
+      /* Sector rollup heatmap */
+      #qd-ml-root .qda-sec { background:var(--bg-1); border:1px solid var(--line); padding:14px 18px; margin:0 4px 14px; }
+      #qd-ml-root .qda-sec-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:6px; margin-top:8px; }
+      #qd-ml-root .qda-sec-cell { padding:8px 11px; border-radius:2px; border:1px solid var(--line); display:flex; flex-direction:column; gap:4px; cursor:default; }
+      #qd-ml-root .qda-sec-cell .nm { font:700 10.5px var(--mono); color:var(--ink); letter-spacing:0.04em; }
+      #qd-ml-root .qda-sec-cell .pu { font:800 14px var(--mono); }
+      #qd-ml-root .qda-sec-cell .sb { font:500 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.04em; }
+
+      /* Pair suggestions */
+      #qd-ml-root .qda-pair { background:var(--bg-1); border:1px solid var(--line); border-left:4px solid var(--info); padding:12px 16px; margin:0 4px 10px; display:grid; grid-template-columns:1fr 60px 1fr 220px; gap:14px; align-items:center; }
+      #qd-ml-root .qda-pair-side { display:flex; flex-direction:column; gap:3px; }
+      #qd-ml-root .qda-pair-side .lbl { font:700 9px var(--mono); letter-spacing:0.16em; text-transform:uppercase; }
+      #qd-ml-root .qda-pair-side.long .lbl { color:var(--pass); }
+      #qd-ml-root .qda-pair-side.short .lbl { color:var(--fail); }
+      #qd-ml-root .qda-pair-side .sym { font:800 16px var(--mono); letter-spacing:0.04em; color:var(--ink); }
+      #qd-ml-root .qda-pair-side .sub { font:500 10px var(--mono); color:var(--ink-3); }
+      #qd-ml-root .qda-pair-arrow { text-align:center; font:800 18px var(--mono); color:var(--info); }
+      #qd-ml-root .qda-pair-meta { font:600 10.5px var(--mono); color:var(--ink-2); line-height:1.5; }
+      #qd-ml-root .qda-pair-meta b { color:var(--copper); }
+
+      /* Stress test toggle */
+      #qd-ml-root .qda-stress { display:flex; gap:6px; align-items:center; margin:0 4px 12px; flex-wrap:wrap; }
+      #qd-ml-root .qda-stress-lbl { font:700 10px var(--mono); color:var(--ink-3); letter-spacing:0.14em; text-transform:uppercase; }
+      #qd-ml-root .qda-stress-btn { padding:6px 12px; font:700 10.5px var(--mono); background:var(--bg-2); color:var(--ink-2); border:1px solid var(--line); border-radius:2px; cursor:pointer; letter-spacing:0.04em; }
+      #qd-ml-root .qda-stress-btn:hover { color:var(--ink); border-color:var(--line-2); }
+      #qd-ml-root .qda-stress-btn.on { background:var(--warn); color:#000; border-color:var(--warn); }
+
+      /* Landmines / event markers */
+      #qd-ml-root .qda-landmines { padding:10px 16px; background:var(--bg-1); border:1px solid var(--line); border-left:3px solid var(--warn); margin:0 4px 14px; font:600 11px var(--mono); color:var(--ink-2); letter-spacing:0.02em; }
+      #qd-ml-root .qda-landmines b { color:var(--warn); }
+      #qd-ml-root .qda-landmines .none { color:var(--pass); }
+
+      /* Warnings */
+      #qd-ml-root .qda-warn { padding:10px 16px; background:var(--bg-1); border:1px solid var(--warn); border-left:4px solid var(--warn); margin:0 4px 10px; font:600 11px var(--mono); color:var(--warn); letter-spacing:0.02em; }
+      #qd-ml-root .qda-warn b { color:var(--ink); }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         Round 2 additions — trade-exec strip · live-quote chip · stability
+         badge · equity curve · calibration card · reliability · positions
+         (2026-05-17 · Kairos brief alignment)
+         ═══════════════════════════════════════════════════════════════════ */
+      /* #1 Trade-execution strip — sits below the cone chart */
+      #qd-ml-root .qda-trade { display:grid; grid-template-columns:repeat(6, 1fr); gap:0; background:var(--bg-2); border-top:1px solid var(--line); border-bottom:1px solid var(--line); margin:0; padding:0; }
+      #qd-ml-root .qda-trade-cell { padding:10px 12px; border-right:1px solid var(--line); display:flex; flex-direction:column; gap:3px; }
+      #qd-ml-root .qda-trade-cell:last-child { border-right:0; }
+      #qd-ml-root .qda-trade-k { font:700 9px var(--mono); color:var(--ink-3); letter-spacing:0.16em; text-transform:uppercase; }
+      #qd-ml-root .qda-trade-v { font:800 14px var(--mono); color:var(--ink); letter-spacing:-0.01em; line-height:1; }
+      #qd-ml-root .qda-trade-v.gn { color:var(--pass); } #qd-ml-root .qda-trade-v.rd { color:var(--fail); } #qd-ml-root .qda-trade-v.cu { color:var(--copper); } #qd-ml-root .qda-trade-v.am { color:var(--warn); } #qd-ml-root .qda-trade-v.cy { color:var(--info); }
+      #qd-ml-root .qda-trade-s { font:500 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.04em; }
+
+      /* #2 Live-quote chip + #3 Stability badge — header-strip pills */
+      #qd-ml-root .qda-livestrip { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px 18px; background:var(--bg-2); border-top:1px solid var(--line); }
+      #qd-ml-root .qda-livestrip .qda-livelbl { font:700 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.16em; text-transform:uppercase; }
+      #qd-ml-root .qda-livechip { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; background:var(--bg-3); border:1px solid var(--line); border-radius:2px; font:700 10.5px var(--mono); color:var(--ink-1); letter-spacing:0.02em; }
+      #qd-ml-root .qda-livechip.gn { border-color:var(--gn-dim); background:var(--gn-bg); color:var(--pass); }
+      #qd-ml-root .qda-livechip.rd { border-color:var(--rd-dim); background:var(--rd-bg); color:var(--fail); }
+      #qd-ml-root .qda-livechip.am { border-color:var(--amb-dim); background:var(--amb-bg); color:var(--warn); }
+      #qd-ml-root .qda-livechip .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:currentColor; }
+      #qd-ml-root .qda-livechip b { color:inherit; font-weight:800; }
+      #qd-ml-root .qda-livechip-pulse .dot { animation:qdaLivePulse 1.4s ease-in-out infinite; }
+      @keyframes qdaLivePulse { 0%,100%{opacity:.4;} 50%{opacity:1;} }
+
+      /* #4 Equity curve panel */
+      #qd-ml-root .qda-equity { background:var(--bg-1); border:1px solid var(--line); border-left:4px solid var(--info); margin:0 4px 14px; padding:14px 18px; }
+      #qd-ml-root .qda-equity-hd { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+      #qd-ml-root .qda-equity-hd .ttl { font:700 10.5px var(--mono); color:var(--ink-3); letter-spacing:0.18em; text-transform:uppercase; }
+      #qd-ml-root .qda-equity-hd .sub { font:600 10px var(--mono); color:var(--info); letter-spacing:0.04em; }
+      #qd-ml-root .qda-equity-row { display:grid; grid-template-columns:1fr 320px; gap:14px; align-items:center; }
+      #qd-ml-root .qda-equity-chart { width:100%; height:90px; display:block; }
+      #qd-ml-root .qda-equity-stats { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; }
+      #qd-ml-root .qda-equity-stat { padding:7px 9px; background:var(--bg-2); border-radius:2px; border-left:3px solid var(--info); }
+      #qd-ml-root .qda-equity-stat .k { font:700 8.5px var(--mono); color:var(--ink-3); letter-spacing:0.14em; text-transform:uppercase; }
+      #qd-ml-root .qda-equity-stat .v { font:800 13px var(--mono); margin-top:2px; }
+      #qd-ml-root .qda-equity-stat .v.gn { color:var(--pass); } #qd-ml-root .qda-equity-stat .v.rd { color:var(--fail); } #qd-ml-root .qda-equity-stat .v.cu { color:var(--copper); }
+
+      /* #5+#8 Calibration card with reliability diagram */
+      #qd-ml-root .qda-cal { background:var(--bg-1); border:1px solid var(--line); border-left:4px solid var(--copper); margin:0 4px 14px; padding:14px 18px; }
+      #qd-ml-root .qda-cal-hd { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+      #qd-ml-root .qda-cal-hd .ttl { font:700 10.5px var(--mono); color:var(--ink-3); letter-spacing:0.18em; text-transform:uppercase; }
+      #qd-ml-root .qda-cal-hd .sub { font:600 10px var(--mono); color:var(--copper); letter-spacing:0.04em; }
+      #qd-ml-root .qda-cal-row { display:grid; grid-template-columns:360px 1fr; gap:18px; align-items:center; }
+      #qd-ml-root .qda-cal-chart { width:100%; height:200px; display:block; }
+      #qd-ml-root .qda-cal-stats { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; }
+      #qd-ml-root .qda-cal-stat { padding:7px 10px; background:var(--bg-2); border-radius:2px; border-left:3px solid var(--copper); }
+      #qd-ml-root .qda-cal-stat .k { font:700 9px var(--mono); color:var(--ink-3); letter-spacing:0.14em; text-transform:uppercase; }
+      #qd-ml-root .qda-cal-stat .v { font:800 13px var(--mono); margin-top:2px; color:var(--ink); }
+      #qd-ml-root .qda-cal-stat .v.gn { color:var(--pass); } #qd-ml-root .qda-cal-stat .v.rd { color:var(--fail); } #qd-ml-root .qda-cal-stat .v.am { color:var(--warn); }
+
+      /* #6 Positions overlay */
+      #qd-ml-root .qda-pos { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:8px; margin:0 4px 14px; }
+      #qd-ml-root .qda-pos-card { background:var(--bg-1); border:1px solid var(--line); border-left:3px solid var(--info); padding:10px 12px; }
+      #qd-ml-root .qda-pos-card.long { border-left-color:var(--pass); }
+      #qd-ml-root .qda-pos-card.short { border-left-color:var(--fail); }
+      #qd-ml-root .qda-pos-hd { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+      #qd-ml-root .qda-pos-sym { font:800 14px var(--mono); color:var(--ink); letter-spacing:0.04em; }
+      #qd-ml-root .qda-pos-pnl { font:700 11px var(--mono); }
+      #qd-ml-root .qda-pos-pnl.gn { color:var(--pass); } #qd-ml-root .qda-pos-pnl.rd { color:var(--fail); }
+      #qd-ml-root .qda-pos-mini { width:100%; height:64px; display:block; margin:4px 0; }
+      #qd-ml-root .qda-pos-bottom { display:flex; justify-content:space-between; font:500 10px var(--mono); color:var(--ink-2); letter-spacing:0.04em; }
+      #qd-ml-root .qda-pos-bottom b { color:var(--ink); font-weight:700; }
+      #qd-ml-root .qda-pos-verdict { display:inline-block; padding:2px 6px; border-radius:2px; font:700 9px var(--mono); letter-spacing:0.10em; text-transform:uppercase; }
+      #qd-ml-root .qda-pos-verdict.hold { background:var(--bg-3); color:var(--ink-2); }
+      #qd-ml-root .qda-pos-verdict.trim { background:var(--amb-bg); color:var(--warn); }
+      #qd-ml-root .qda-pos-verdict.exit { background:var(--rd-bg); color:var(--fail); }
+      #qd-ml-root .qda-pos-verdict.add  { background:var(--gn-bg); color:var(--pass); }
+
+      /* #7 SHAP-per-row column in bull/bear tables */
+      #qd-ml-root .qda-scan td.shap { font:600 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.02em; max-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #qd-ml-root .qda-scan td.shap .pos { color:var(--pass); }
+      #qd-ml-root .qda-scan td.shap .neg { color:var(--fail); }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         Workspace mirror — all .qda-* rules above are scoped to #qd-ml-root.
+         When the AI Prediction body is rendered inside the Workspaces ML
+         Edge surface (.rk-ws), we need the same rules to apply. Listing the
+         rules under both selectors avoids accidental specificity wars and
+         keeps the QuantDetail look unchanged.
+         ═══════════════════════════════════════════════════════════════════ */
+      .rk-ws .qda-subtabs, .rk-ws .qda-stab, .rk-ws .qda-div, .rk-ws .qda-hero,
+      .rk-ws .qda-hero-top, .rk-ws .qda-hero-id, .rk-ws .qda-hero-tk, .rk-ws .qda-hero-name,
+      .rk-ws .qda-hero-spot, .rk-ws .qda-hero-verdict, .rk-ws .qda-hero-vk, .rk-ws .qda-hero-vv,
+      .rk-ws .qda-hero-vs, .rk-ws .qda-hero-kpi, .rk-ws .qda-kcell, .rk-ws .qda-kk,
+      .rk-ws .qda-kv, .rk-ws .qda-ks, .rk-ws .qda-chartwrap, .rk-ws .qda-chart,
+      .rk-ws .qda-badge, .rk-ws .qda-xaxis, .rk-ws .qda-coh, .rk-ws .qda-coh-cell,
+      .rk-ws .qda-coh-k, .rk-ws .qda-coh-mini, .rk-ws .qda-coh-stat, .rk-ws .qda-coh-banner,
+      .rk-ws .qda-hist, .rk-ws .qda-hist-row, .rk-ws .qda-hist-bin, .rk-ws .qda-hist-track,
+      .rk-ws .qda-hist-fill, .rk-ws .qda-hist-val, .rk-ws .qda-scans, .rk-ws .qda-scan,
+      .rk-ws .qda-scan-hd, .rk-ws .qda-sec, .rk-ws .qda-sec-grid, .rk-ws .qda-sec-cell,
+      .rk-ws .qda-pair, .rk-ws .qda-pair-side, .rk-ws .qda-pair-arrow, .rk-ws .qda-pair-meta,
+      .rk-ws .qda-stress, .rk-ws .qda-stress-lbl, .rk-ws .qda-stress-btn,
+      .rk-ws .qda-landmines, .rk-ws .qda-warn, .rk-ws .qda-trade, .rk-ws .qda-trade-cell,
+      .rk-ws .qda-trade-k, .rk-ws .qda-trade-v, .rk-ws .qda-trade-s,
+      .rk-ws .qda-livestrip, .rk-ws .qda-livelbl, .rk-ws .qda-livechip,
+      .rk-ws .qda-equity, .rk-ws .qda-equity-hd, .rk-ws .qda-equity-row, .rk-ws .qda-equity-chart,
+      .rk-ws .qda-equity-stats, .rk-ws .qda-equity-stat, .rk-ws .qda-cal, .rk-ws .qda-cal-hd,
+      .rk-ws .qda-cal-row, .rk-ws .qda-cal-chart, .rk-ws .qda-cal-stats, .rk-ws .qda-cal-stat,
+      .rk-ws .qda-pos, .rk-ws .qda-pos-card, .rk-ws .qda-pos-hd, .rk-ws .qda-pos-sym,
+      .rk-ws .qda-pos-pnl, .rk-ws .qda-pos-mini, .rk-ws .qda-pos-bottom, .rk-ws .qda-pos-verdict {
+        /* Anchor — the bulk styling comes from the #qd-ml-root rules above; this
+           selector group exists so the same styles fire when AI Prediction is
+           rendered inside .rk-ws. The rules themselves are duplicated below via
+           the literal mirror block. */
+      }
+      /* Literal mirror: re-declare every .qda-* style under .rk-ws scope. The
+         shorter form (re-use selectors above) would require dropping the
+         #qd-ml-root prefix everywhere, which risks bleeding qda-* styles into
+         other surfaces. This block is verbose but safe. */
+      .rk-ws .qda-subtabs { display:flex; gap:4px; margin:0 4px 18px; border-bottom:1px solid var(--line); padding-bottom:0; }
+      .rk-ws .qda-stab { padding:10px 18px; font:700 11px var(--mono); color:var(--ink-3); letter-spacing:0.10em; text-transform:uppercase; cursor:pointer; background:transparent; border:0; border-bottom:2px solid transparent; margin-bottom:-1px; display:inline-flex; align-items:center; gap:6px; }
+      .rk-ws .qda-stab:hover { color:var(--ink-1); }
+      .rk-ws .qda-stab.on { color:var(--copper); border-bottom-color:var(--copper); }
+      .rk-ws .qda-stab .spk { display:inline-block; }
+      .rk-ws .qda-stab.on .spk { animation:qdaPulse 2.4s ease-in-out infinite; }
+      .rk-ws .qda-stab .ct { font:700 9px var(--mono); padding:2px 6px; border-radius:2px; background:var(--bg-3); color:var(--ink-1); letter-spacing:.04em; }
+      .rk-ws .qda-stab.on .ct { background:var(--copper); color:#fff; }
+      .rk-ws .qda-div { font:700 10px var(--mono); color:var(--ink-3); letter-spacing:0.20em; text-transform:uppercase; margin:18px 4px 12px; display:flex; align-items:center; gap:10px; }
+      .rk-ws .qda-div::before, .rk-ws .qda-div::after { content:''; flex:1; height:1px; background:var(--line); }
+      .rk-ws .qda-hero { background:var(--bg-1); border:1px solid var(--line); border-left:4px solid var(--copper); border-radius:2px; margin:0 4px 14px; overflow:hidden; }
+      .rk-ws .qda-hero-top { display:grid; grid-template-columns:260px 1fr 320px; border-bottom:1px solid var(--line); background:var(--bg-2); }
+      .rk-ws .qda-hero-id { padding:14px 18px; border-right:1px solid var(--line); }
+      .rk-ws .qda-hero-tk { font:800 26px var(--mono); letter-spacing:0.04em; line-height:1; color:var(--copper); }
+      .rk-ws .qda-hero-name { font:500 10.5px var(--mono); color:var(--ink-3); margin-top:5px; }
+      .rk-ws .qda-hero-spot { margin-top:10px; font:700 16px var(--mono); color:var(--ink); }
+      .rk-ws .qda-hero-verdict { padding:14px 18px; display:flex; flex-direction:column; justify-content:center; border-right:1px solid var(--line); }
+      .rk-ws .qda-hero-vk { font:700 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.16em; text-transform:uppercase; margin-bottom:6px; }
+      .rk-ws .qda-hero-vv { font:800 28px var(--mono); line-height:1; letter-spacing:-0.01em; }
+      .rk-ws .qda-hero-vs { font:500 11px var(--mono); color:var(--ink-2); margin-top:6px; }
+      .rk-ws .qda-hero-kpi { padding:10px 14px; display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+      .rk-ws .qda-kcell { padding:7px 9px; background:var(--bg-3); border-radius:2px; border-left:3px solid var(--line-2); }
+      .rk-ws .qda-kcell.gn { border-left-color:var(--pass); }
+      .rk-ws .qda-kcell.rd { border-left-color:var(--fail); }
+      .rk-ws .qda-kcell.am { border-left-color:var(--warn); }
+      .rk-ws .qda-kcell.cu { border-left-color:var(--copper); }
+      .rk-ws .qda-kk { font:700 8.5px var(--mono); color:var(--ink-3); letter-spacing:0.14em; text-transform:uppercase; }
+      .rk-ws .qda-kv { font:800 13.5px var(--mono); margin-top:3px; }
+      .rk-ws .qda-ks { font:500 9px var(--mono); color:var(--ink-3); margin-top:1px; }
+      .rk-ws .qda-chartwrap { position:relative; background:var(--bg-0); padding:14px 22px 6px; }
+      .rk-ws .qda-chart { width:100%; height:340px; display:block; }
+      .rk-ws .qda-badge { position:absolute; right:30px; background:linear-gradient(135deg, rgba(217,119,87,0.96), rgba(217,119,87,0.78)); color:#fff; padding:9px 13px; border-radius:3px; box-shadow:0 8px 24px rgba(217,119,87,0.32), 0 0 0 1px rgba(255,255,255,0.12) inset; line-height:1.1; transform:translateY(-50%); pointer-events:none; }
+      .rk-ws .qda-badge .lbl { display:block; font:700 9px var(--mono); opacity:.85; letter-spacing:.14em; margin-bottom:2px; }
+      .rk-ws .qda-badge .val { font:800 17px var(--mono); letter-spacing:-0.01em; }
+      .rk-ws .qda-badge .sub { display:block; font:500 9px var(--mono); opacity:.78; margin-top:2px; }
+      .rk-ws .qda-xaxis { display:flex; justify-content:space-between; padding:2px 22px 10px; font:600 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.04em; }
+      .rk-ws .qda-xaxis b { color:var(--copper); }
+      .rk-ws .qda-coh { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:0 4px 14px; }
+      .rk-ws .qda-coh-cell { background:var(--bg-1); border:1px solid var(--line); border-radius:2px; padding:12px 14px; }
+      .rk-ws .qda-coh-cell.aligned { border-left:3px solid var(--pass); }
+      .rk-ws .qda-coh-cell.diverge { border-left:3px solid var(--warn); }
+      .rk-ws .qda-coh-cell.flip { border-left:3px solid var(--fail); }
+      .rk-ws .qda-coh-k { font:700 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.18em; text-transform:uppercase; margin-bottom:8px; display:flex; justify-content:space-between; }
+      .rk-ws .qda-coh-mini { width:100%; height:60px; display:block; margin:6px 0; }
+      .rk-ws .qda-coh-stat { display:flex; justify-content:space-between; font:600 10.5px var(--mono); margin-top:5px; }
+      .rk-ws .qda-coh-stat .lbl { color:var(--ink-3); }
+      .rk-ws .qda-coh-banner { margin:0 4px 14px; padding:10px 16px; background:var(--bg-2); border-left:3px solid var(--info); font:600 11.5px var(--mono); color:var(--ink-1); letter-spacing:0.02em; }
+      .rk-ws .qda-coh-banner.flip { border-left-color:var(--warn); }
+      .rk-ws .qda-coh-banner.aligned { border-left-color:var(--pass); }
+      .rk-ws .qda-coh-banner b { color:var(--copper); }
+      .rk-ws .qda-hist { background:var(--bg-1); border:1px solid var(--line); padding:14px 18px; margin:0 4px 14px; }
+      .rk-ws .qda-hist-row { display:grid; grid-template-columns:50px 1fr 65px; gap:8px; align-items:center; padding:5px 0; border-bottom:1px solid var(--line); }
+      .rk-ws .qda-hist-row:last-child { border-bottom:0; }
+      .rk-ws .qda-hist-bin { font:700 10.5px var(--mono); color:var(--ink-2); letter-spacing:0.04em; }
+      .rk-ws .qda-hist-track { position:relative; height:18px; background:var(--bg-2); border-radius:2px; overflow:hidden; }
+      .rk-ws .qda-hist-fill { position:absolute; left:0; top:0; bottom:0; }
+      .rk-ws .qda-hist-val { font:700 10.5px var(--mono); text-align:right; }
+      .rk-ws .qda-scans { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:0 4px 14px; }
+      .rk-ws .qda-scan { background:var(--bg-1); border:1px solid var(--line); border-radius:2px; overflow:hidden; }
+      .rk-ws .qda-scan-hd { padding:9px 12px; background:var(--bg-2); border-bottom:1px solid var(--line); font:700 10px var(--mono); color:var(--ink-1); letter-spacing:0.14em; text-transform:uppercase; display:flex; justify-content:space-between; align-items:center; }
+      .rk-ws .qda-scan-hd.gn { color:var(--pass); border-bottom-color:var(--gn-dim); }
+      .rk-ws .qda-scan-hd.rd { color:var(--fail); border-bottom-color:var(--rd-dim); }
+      .rk-ws .qda-scan-hd.am { color:var(--warn); border-bottom-color:var(--amb-dim); }
+      .rk-ws .qda-scan-hd.cu { color:var(--copper); }
+      .rk-ws .qda-scan-hd .ct { font-size:9.5px; padding:2px 6px; background:var(--bg-3); border-radius:2px; color:var(--ink-2); letter-spacing:0.04em; }
+      .rk-ws .qda-scan table { width:100%; border-collapse:collapse; font:600 10.5px var(--mono); }
+      .rk-ws .qda-scan th { padding:6px 8px; background:var(--bg-2); text-align:left; font-weight:700; color:var(--ink-3); letter-spacing:0.06em; font-size:9px; text-transform:uppercase; border-bottom:1px solid var(--line); }
+      .rk-ws .qda-scan th.r { text-align:right; }
+      .rk-ws .qda-scan td { padding:5px 8px; border-bottom:1px solid var(--line); color:var(--ink-1); }
+      .rk-ws .qda-scan tr:last-child td { border-bottom:0; }
+      .rk-ws .qda-scan td.r { text-align:right; }
+      .rk-ws .qda-scan tr.row-link { cursor:pointer; }
+      .rk-ws .qda-scan tr.row-link:hover td { background:var(--bg-3); color:var(--copper); }
+      .rk-ws .qda-scan tr.focused td { background:var(--copper-bg); color:var(--copper); }
+      .rk-ws .qda-scan td .ar { display:inline-block; width:12px; }
+      .rk-ws .qda-scan td .ar.up { color:var(--pass); }
+      .rk-ws .qda-scan td .ar.dn { color:var(--fail); }
+      .rk-ws .qda-scan td.shap { font:600 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.02em; max-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .rk-ws .qda-scan td.shap .pos { color:var(--pass); }
+      .rk-ws .qda-scan td.shap .neg { color:var(--fail); }
+      .rk-ws .qda-sec { background:var(--bg-1); border:1px solid var(--line); padding:14px 18px; margin:0 4px 14px; }
+      .rk-ws .qda-sec-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:6px; margin-top:8px; }
+      .rk-ws .qda-sec-cell { padding:8px 11px; border-radius:2px; border:1px solid var(--line); display:flex; flex-direction:column; gap:4px; }
+      .rk-ws .qda-sec-cell .nm { font:700 10.5px var(--mono); color:var(--ink); letter-spacing:0.04em; }
+      .rk-ws .qda-sec-cell .pu { font:800 14px var(--mono); }
+      .rk-ws .qda-sec-cell .sb { font:500 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.04em; }
+      .rk-ws .qda-pair { background:var(--bg-1); border:1px solid var(--line); border-left:4px solid var(--info); padding:12px 16px; margin:0 4px 10px; display:grid; grid-template-columns:1fr 60px 1fr 220px; gap:14px; align-items:center; }
+      .rk-ws .qda-pair-side { display:flex; flex-direction:column; gap:3px; }
+      .rk-ws .qda-pair-side .lbl { font:700 9px var(--mono); letter-spacing:0.16em; text-transform:uppercase; }
+      .rk-ws .qda-pair-side.long .lbl { color:var(--pass); }
+      .rk-ws .qda-pair-side.short .lbl { color:var(--fail); }
+      .rk-ws .qda-pair-side .sym { font:800 16px var(--mono); letter-spacing:0.04em; color:var(--ink); }
+      .rk-ws .qda-pair-side .sub { font:500 10px var(--mono); color:var(--ink-3); }
+      .rk-ws .qda-pair-arrow { text-align:center; font:800 18px var(--mono); color:var(--info); }
+      .rk-ws .qda-pair-meta { font:600 10.5px var(--mono); color:var(--ink-2); line-height:1.5; }
+      .rk-ws .qda-pair-meta b { color:var(--copper); }
+      .rk-ws .qda-stress { display:flex; gap:6px; align-items:center; margin:0 4px 12px; flex-wrap:wrap; }
+      .rk-ws .qda-stress-lbl { font:700 10px var(--mono); color:var(--ink-3); letter-spacing:0.14em; text-transform:uppercase; }
+      .rk-ws .qda-stress-btn { padding:6px 12px; font:700 10.5px var(--mono); background:var(--bg-2); color:var(--ink-2); border:1px solid var(--line); border-radius:2px; cursor:pointer; letter-spacing:0.04em; }
+      .rk-ws .qda-stress-btn:hover { color:var(--ink); border-color:var(--line-2); }
+      .rk-ws .qda-stress-btn.on { background:var(--warn); color:#000; border-color:var(--warn); }
+      .rk-ws .qda-landmines { padding:10px 16px; background:var(--bg-1); border:1px solid var(--line); border-left:3px solid var(--warn); margin:0 4px 14px; font:600 11px var(--mono); color:var(--ink-2); letter-spacing:0.02em; }
+      .rk-ws .qda-landmines b { color:var(--warn); }
+      .rk-ws .qda-landmines .none { color:var(--pass); }
+      .rk-ws .qda-warn { padding:10px 16px; background:var(--bg-1); border:1px solid var(--warn); border-left:4px solid var(--warn); margin:0 4px 10px; font:600 11px var(--mono); color:var(--warn); letter-spacing:0.02em; }
+      .rk-ws .qda-warn b { color:var(--ink); }
+      .rk-ws .qda-trade { display:grid; grid-template-columns:repeat(6, 1fr); gap:0; background:var(--bg-2); border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+      .rk-ws .qda-trade-cell { padding:10px 12px; border-right:1px solid var(--line); display:flex; flex-direction:column; gap:3px; }
+      .rk-ws .qda-trade-cell:last-child { border-right:0; }
+      .rk-ws .qda-trade-k { font:700 9px var(--mono); color:var(--ink-3); letter-spacing:0.16em; text-transform:uppercase; }
+      .rk-ws .qda-trade-v { font:800 14px var(--mono); color:var(--ink); letter-spacing:-0.01em; line-height:1; }
+      .rk-ws .qda-trade-v.gn { color:var(--pass); } .rk-ws .qda-trade-v.rd { color:var(--fail); } .rk-ws .qda-trade-v.cu { color:var(--copper); } .rk-ws .qda-trade-v.am { color:var(--warn); } .rk-ws .qda-trade-v.cy { color:var(--info); }
+      .rk-ws .qda-trade-s { font:500 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.04em; }
+      .rk-ws .qda-livestrip { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px 18px; background:var(--bg-2); border-top:1px solid var(--line); }
+      .rk-ws .qda-livestrip .qda-livelbl { font:700 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.16em; text-transform:uppercase; }
+      .rk-ws .qda-livechip { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; background:var(--bg-3); border:1px solid var(--line); border-radius:2px; font:700 10.5px var(--mono); color:var(--ink-1); letter-spacing:0.02em; }
+      .rk-ws .qda-livechip.gn { border-color:var(--gn-dim); background:var(--gn-bg); color:var(--pass); }
+      .rk-ws .qda-livechip.rd { border-color:var(--rd-dim); background:var(--rd-bg); color:var(--fail); }
+      .rk-ws .qda-livechip.am { border-color:var(--amb-dim); background:var(--amb-bg); color:var(--warn); }
+      .rk-ws .qda-livechip .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:currentColor; }
+      .rk-ws .qda-livechip b { color:inherit; font-weight:800; }
+      .rk-ws .qda-livechip-pulse .dot { animation:qdaLivePulse 1.4s ease-in-out infinite; }
+      .rk-ws .qda-equity { background:var(--bg-1); border:1px solid var(--line); border-left:4px solid var(--info); margin:0 4px 14px; padding:14px 18px; }
+      .rk-ws .qda-equity-hd { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+      .rk-ws .qda-equity-hd .ttl { font:700 10.5px var(--mono); color:var(--ink-3); letter-spacing:0.18em; text-transform:uppercase; }
+      .rk-ws .qda-equity-hd .sub { font:600 10px var(--mono); color:var(--info); letter-spacing:0.04em; }
+      .rk-ws .qda-equity-row { display:grid; grid-template-columns:1fr 320px; gap:14px; align-items:center; }
+      .rk-ws .qda-equity-chart { width:100%; height:90px; display:block; }
+      .rk-ws .qda-equity-stats { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; }
+      .rk-ws .qda-equity-stat { padding:7px 9px; background:var(--bg-2); border-radius:2px; border-left:3px solid var(--info); }
+      .rk-ws .qda-equity-stat .k { font:700 8.5px var(--mono); color:var(--ink-3); letter-spacing:0.14em; text-transform:uppercase; }
+      .rk-ws .qda-equity-stat .v { font:800 13px var(--mono); margin-top:2px; }
+      .rk-ws .qda-equity-stat .v.gn { color:var(--pass); } .rk-ws .qda-equity-stat .v.rd { color:var(--fail); } .rk-ws .qda-equity-stat .v.cu { color:var(--copper); }
+      .rk-ws .qda-cal { background:var(--bg-1); border:1px solid var(--line); border-left:4px solid var(--copper); margin:0 4px 14px; padding:14px 18px; }
+      .rk-ws .qda-cal-hd { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+      .rk-ws .qda-cal-hd .ttl { font:700 10.5px var(--mono); color:var(--ink-3); letter-spacing:0.18em; text-transform:uppercase; }
+      .rk-ws .qda-cal-hd .sub { font:600 10px var(--mono); color:var(--copper); letter-spacing:0.04em; }
+      .rk-ws .qda-cal-row { display:grid; grid-template-columns:360px 1fr; gap:18px; align-items:center; }
+      .rk-ws .qda-cal-chart { width:100%; height:200px; display:block; }
+      .rk-ws .qda-cal-stats { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; }
+      .rk-ws .qda-cal-stat { padding:7px 10px; background:var(--bg-2); border-radius:2px; border-left:3px solid var(--copper); }
+      .rk-ws .qda-cal-stat .k { font:700 9px var(--mono); color:var(--ink-3); letter-spacing:0.14em; text-transform:uppercase; }
+      .rk-ws .qda-cal-stat .v { font:800 13px var(--mono); margin-top:2px; color:var(--ink); }
+      .rk-ws .qda-cal-stat .v.gn { color:var(--pass); } .rk-ws .qda-cal-stat .v.rd { color:var(--fail); } .rk-ws .qda-cal-stat .v.am { color:var(--warn); }
+      .rk-ws .qda-pos { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:8px; margin:0 4px 14px; }
+      .rk-ws .qda-pos-card { background:var(--bg-1); border:1px solid var(--line); border-left:3px solid var(--info); padding:10px 12px; }
+      .rk-ws .qda-pos-card.long { border-left-color:var(--pass); }
+      .rk-ws .qda-pos-card.short { border-left-color:var(--fail); }
+      .rk-ws .qda-pos-hd { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+      .rk-ws .qda-pos-sym { font:800 14px var(--mono); color:var(--ink); letter-spacing:0.04em; }
+      .rk-ws .qda-pos-pnl { font:700 11px var(--mono); }
+      .rk-ws .qda-pos-pnl.gn { color:var(--pass); } .rk-ws .qda-pos-pnl.rd { color:var(--fail); }
+      .rk-ws .qda-pos-mini { width:100%; height:64px; display:block; margin:4px 0; }
+      .rk-ws .qda-pos-bottom { display:flex; justify-content:space-between; font:500 10px var(--mono); color:var(--ink-2); letter-spacing:0.04em; }
+      .rk-ws .qda-pos-bottom b { color:var(--ink); font-weight:700; }
+      .rk-ws .qda-pos-verdict { display:inline-block; padding:2px 6px; border-radius:2px; font:700 9px var(--mono); letter-spacing:0.10em; text-transform:uppercase; }
+      .rk-ws .qda-pos-verdict.hold { background:var(--bg-3); color:var(--ink-2); }
+      .rk-ws .qda-pos-verdict.trim { background:var(--amb-bg); color:var(--warn); }
+      .rk-ws .qda-pos-verdict.exit { background:var(--rd-bg); color:var(--fail); }
+      .rk-ws .qda-pos-verdict.add  { background:var(--gn-bg); color:var(--pass); }
     `;
     document.head.appendChild(s);
   }
@@ -34181,6 +34674,1184 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
     }
   };
 
+  // ═════════════════════════════════════════════════════════════════════
+  //  AI PREDICTION sub-tab · 2026-05-17
+  //  State + render helpers. All scoped to #qd-ml-root, all data flows
+  //  through the cached _qdMlEdgeFetch promise. No new endpoints.
+  // ═════════════════════════════════════════════════════════════════════
+  let _qdMlAiSub = 'universe';          // 'universe' | 'aiprediction'
+  let _qdMlAiStress = 'none';           // 'none' | 'vix' | 'spy_down'
+
+  window._qdMlSetAiSub = function(name) {
+    if (name !== 'universe' && name !== 'aiprediction') return;
+    _qdMlAiSub = name;
+    if (window._qdMlRepaint) window._qdMlRepaint();
+  };
+
+  window._qdMlSetStress = function(mode) {
+    _qdMlAiStress = (_qdMlAiStress === mode) ? 'none' : mode;
+    if (window._qdMlRepaint) window._qdMlRepaint();
+  };
+
+  // Helper — read predictions for a (mode, ticker) from the v2 nested schema.
+  function _qdMlAiRead(all, modeKey, sym) {
+    const pool = (all.predictions || {})[modeKey] || {};
+    return pool[sym] || null;
+  }
+
+  function _qdMlAiAllForMode(all, modeKey) {
+    return (all.predictions || {})[modeKey] || {};
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  SUB-TAB NAV
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiTabBar(meta, all, modeKey) {
+    const pool = _qdMlAiAllForMode(all, modeKey);
+    const allSyms = Object.keys(pool);
+    const nBull = allSyms.filter(s => ((pool[s] || {}).direction || {}).p_up >= 0.55).length;
+    const u = _qdMlAiSub === 'universe' ? 'on' : '';
+    const a = _qdMlAiSub === 'aiprediction' ? 'on' : '';
+    return `
+      <div class="qda-subtabs">
+        <button class="qda-stab ${u}" onclick="_qdMlSetAiSub('universe')">
+          <span>▣</span> Universe Scanner <span class="ct">${allSyms.length}</span>
+        </button>
+        <button class="qda-stab ${a}" onclick="_qdMlSetAiSub('aiprediction')">
+          <span class="spk">✦</span> AI Prediction <span class="ct">${nBull} bull</span>
+        </button>
+      </div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  HERO BLOCK — focused ticker + cone chart + 4 KPI cells
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiHero(sym, t, p, meta, mode) {
+    const dir = p.direction || {};
+    const mag = p.magnitude || {};
+    const hit = p.hit_net || {};
+    const N = p.horizon_days || mode.anchorDays || 5;
+    const spot = +t.price || +t.spot || +t.close || +t.last || 100;
+    const bullish = (mag.q50 || 0) >= 0;
+    const moveCol = bullish ? 'var(--pass)' : 'var(--fail)';
+    const moveTxt = `${(mag.q50 || 0) >= 0 ? '+' : ''}${(mag.q50 || 0).toFixed(2)}%`;
+    const dirEdge = ((dir.edge || 0) * 100).toFixed(0);
+    const dirSign = (dir.edge || 0) >= 0 ? '+' : '';
+    const pT1 = ((hit.p_t1_first || 0) * 100).toFixed(0);
+    const pStop = ((hit.p_stop_first || 0) * 100).toFixed(0);
+    const auc = (hit.model_auc || 0).toFixed(2);
+    const conf = (p.verdict || {}).level || (Math.abs(dir.edge || 0) > 0.15 ? 'HIGH' : Math.abs(dir.edge || 0) > 0.08 ? 'MED' : 'LOW');
+    const confCol = conf === 'HIGH' ? 'var(--pass)' : conf === 'MED' ? 'var(--info)' : 'var(--warn)';
+    const company = t.company || t.name || t.security_name || '';
+    const sector = t.sector || t.gicsSector || '';
+
+    const cone = _qdMlAiCone(sym, spot, mag, N, bullish);
+
+    return `
+      <div class="qda-hero">
+        <div class="qda-hero-top">
+          <div class="qda-hero-id">
+            <div class="qda-hero-tk">${sym}</div>
+            <div class="qda-hero-name">${company || '—'}${sector ? ' · ' + sector : ''}</div>
+            <div class="qda-hero-spot">$${spot.toFixed(2)} · ${mode.label}</div>
+          </div>
+          <div class="qda-hero-verdict">
+            <div class="qda-hero-vk">predicted move · q50</div>
+            <div class="qda-hero-vv" style="color:${moveCol}">${moveTxt}</div>
+            <div class="qda-hero-vs">[${(mag.q25 || 0).toFixed(1)}% , ${(mag.q75 || 0).toFixed(1)}%] · skew ${(mag.skew || 0).toFixed(2)}</div>
+          </div>
+          <div class="qda-hero-kpi">
+            <div class="qda-kcell cu"><div class="qda-kk">Dir edge</div><div class="qda-kv" style="color:var(--copper)">${dirSign}${dirEdge}%</div><div class="qda-ks">p(up) ${(dir.p_up||0).toFixed(2)}</div></div>
+            <div class="qda-kcell gn"><div class="qda-kk">p(T1)</div><div class="qda-kv" style="color:var(--pass)">${pT1}%</div><div class="qda-ks">vs stop ${pStop}%</div></div>
+            <div class="qda-kcell ${bullish ? 'gn' : 'rd'}"><div class="qda-kk">q90 upside</div><div class="qda-kv" style="color:${bullish ? 'var(--pass)' : 'var(--fail)'}">${(mag.q90 || 0) >= 0 ? '+' : ''}${(mag.q90 || 0).toFixed(1)}%</div><div class="qda-ks">q10 ${(mag.q10 || 0).toFixed(1)}%</div></div>
+            <div class="qda-kcell am"><div class="qda-kk">Conf</div><div class="qda-kv" style="color:${confCol}">${conf}</div><div class="qda-ks">AUC ${auc} · n=${((hit.model_n||0)/1000).toFixed(0)}K</div></div>
+          </div>
+        </div>
+        <div class="qda-chartwrap" id="qdaChartWrap">
+          ${cone.svg}
+          <div class="qda-badge" id="qdaBadge" data-y50="${cone.y50}">
+            <span class="lbl">✦ AI PREDICTION</span>
+            <span class="val" style="color:#fff">${moveTxt}</span>
+            <span class="sub">${N}d · p(T1) ${pT1}%</span>
+          </div>
+        </div>
+        <div class="qda-xaxis">
+          <span>NOW · <b>$${spot.toFixed(2)}</b></span>
+          <span>+${Math.round(N/3)}d</span>
+          <span>+${Math.round(2*N/3)}d</span>
+          <span>+${N}d · <b>q50 $${(spot * (1 + (mag.q50 || 0)/100)).toFixed(2)}</b></span>
+        </div>
+
+        ${_qdMlAiTradeExec(t, p, mode)}
+
+        <div class="qda-livestrip">
+          <span class="qda-livelbl">Live status</span>
+          ${(() => {
+            const trainedAt = (meta.model || {}).trained_at;
+            const generated = meta.generated_at;
+            const liveSpot = +t.live_price || +t.last_quote || +t.quote_last || spot;
+            const moveSincePred = spot ? ((liveSpot - spot) / spot * 100) : 0;
+            const q50v = mag.q50 || 0;
+            const captured = q50v !== 0 ? (moveSincePred / q50v * 100) : 0;
+            const freshMin = generated ? Math.max(0, Math.round((Date.now() - new Date(generated).getTime()) / 60000)) : null;
+            const freshLbl = freshMin == null ? '—' : freshMin < 60 ? freshMin + 'm' : (freshMin / 60).toFixed(1) + 'h';
+            const freshCls = freshMin == null ? '' : freshMin < 180 ? 'gn' : freshMin < 720 ? 'am' : 'rd';
+            const captCls = !isFinite(captured) ? '' : Math.abs(captured) < 25 ? 'gn' : Math.abs(captured) < 60 ? 'am' : 'rd';
+            return `
+              <span class="qda-livechip qda-livechip-pulse ${freshCls}"><span class="dot"></span>Prediction · <b>${freshLbl} old</b></span>
+              <span class="qda-livechip ${moveSincePred >= 0 ? 'gn' : 'rd'}">Spot Δ since pred · <b>${moveSincePred >= 0 ? '+' : ''}${moveSincePred.toFixed(2)}%</b></span>
+              <span class="qda-livechip ${captCls}">Of q50 captured · <b>${isFinite(captured) ? captured.toFixed(0) + '%' : '—'}</b></span>
+              <span class="qda-livechip">Trained · <b>${trainedAt ? trainedAt.slice(0,10) : '—'}</b></span>
+              ${_qdMlAiStabilityBadge(p, meta)}
+            `;
+          })()}
+        </div>
+      </div>`;
+  }
+
+  // SVG cone — pure SVG, no chart instance lifecycle.
+  // Optional stress-test overlay renders a SECOND faded cone with bias.
+  function _qdMlAiCone(sym, spot, mag, N, bullish) {
+    const W = 900, H = 340;
+    const padL = 36, padR = 100, padT = 18, padB = 22;
+    const x0 = padL, x1 = W - padR;
+    const xMid = padL + (x1 - padL) * 0.40;
+    const y0 = padT, y1 = H - padB;
+
+    const q10 = mag.q10 ?? -5, q25 = mag.q25 ?? -3, q50 = mag.q50 ?? 0, q75 = mag.q75 ?? 3, q90 = mag.q90 ?? 5;
+    const pUp = Math.max(Math.abs(q90), Math.abs(q10), Math.abs(q75 - q25));
+    const pMin = Math.min(q10, -pUp * 0.6) - 2;
+    const pMax = Math.max(q90, pUp * 0.6) + 2;
+    const yScale = (pct) => y1 - ((pct - pMin) / (pMax - pMin)) * (y1 - y0);
+    const yZero = yScale(0);
+
+    // Synthetic price approach (left half) — deterministic seed from symbol
+    const seedV = sym.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 1) || 1;
+    let s = seedV;
+    const rng = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+    const histBars = 24;
+    const histPath = [];
+    let prev = (rng() - 0.5) * pUp * 0.5;
+    for (let i = 0; i < histBars; i++) {
+      const f = i / (histBars - 1);
+      const drift = -pUp * 0.12 * (1 - f);
+      const noise = (rng() - 0.5) * pUp * 0.18;
+      prev = prev * 0.55 + drift + noise;
+      const x = padL + ((xMid - padL) * f);
+      histPath.push((i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + yScale(prev).toFixed(1));
+    }
+    histPath.push('L' + xMid.toFixed(1) + ',' + yZero.toFixed(1));
+
+    const conePts = (qLow, qHigh, steps = 24) => {
+      const upper = [];
+      const lower = [];
+      for (let i = 0; i <= steps; i++) {
+        const f = i / steps;
+        const xi = xMid + (x1 - xMid) * f;
+        upper.push([xi, yScale(qHigh * f)]);
+        lower.push([xi, yScale(qLow * f)]);
+      }
+      return upper.concat(lower.reverse()).map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+    };
+    const outerPoly = conePts(q10, q90, 22);
+    const innerPoly = conePts(q25, q75, 22);
+
+    const midPath = [];
+    const midSteps = 22;
+    for (let i = 0; i <= midSteps; i++) {
+      const f = i / midSteps;
+      const xi = xMid + (x1 - xMid) * f;
+      midPath.push((i === 0 ? 'M' : 'L') + xi.toFixed(1) + ',' + yScale(q50 * f).toFixed(1));
+    }
+
+    // Confidence shading — narrower cone = darker fill
+    const bandWidth = q75 - q25;
+    const conf = Math.max(0.18, Math.min(0.38, 0.5 - bandWidth / 40));
+    const baseColor = bullish ? '#d97757' : '#f87171';
+    const outerFill = bullish ? `rgba(217,119,87,${(conf*0.35).toFixed(2)})` : `rgba(248,113,113,${(conf*0.35).toFixed(2)})`;
+    const innerFill = bullish ? `rgba(217,119,87,${conf.toFixed(2)})` : `rgba(248,113,113,${conf.toFixed(2)})`;
+
+    // Stress-test overlay — second cone with bias applied
+    let stressLayer = '';
+    if (_qdMlAiStress !== 'none') {
+      const bias = _qdMlAiStress === 'vix' ? -0.45 : -0.30;       // % shift downward
+      const widen = _qdMlAiStress === 'vix' ? 1.45 : 1.20;
+      const sq10 = q10 * widen + bias * Math.abs(q10);
+      const sq50 = q50 + bias * Math.abs(q50);
+      const sq90 = q90 * widen + bias * Math.abs(q90);
+      const stressPoly = (() => {
+        const upper = []; const lower = [];
+        for (let i = 0; i <= 22; i++) {
+          const f = i / 22;
+          const xi = xMid + (x1 - xMid) * f;
+          upper.push([xi, yScale(sq90 * f)]);
+          lower.push([xi, yScale(sq10 * f)]);
+        }
+        return upper.concat(lower.reverse()).map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+      })();
+      const stressMid = [];
+      for (let i = 0; i <= 22; i++) {
+        const f = i / 22;
+        const xi = xMid + (x1 - xMid) * f;
+        stressMid.push((i === 0 ? 'M' : 'L') + xi.toFixed(1) + ',' + yScale(sq50 * f).toFixed(1));
+      }
+      stressLayer = `
+        <polygon points="${stressPoly}" fill="rgba(251,191,36,0.10)" stroke="rgba(251,191,36,0.55)" stroke-width="0.8" stroke-dasharray="3 3"/>
+        <path d="${stressMid.join(' ')}" fill="none" stroke="rgba(251,191,36,0.85)" stroke-width="1.4" stroke-dasharray="4 3"/>
+        <text x="${(x1 - 4).toFixed(1)}" y="${(yScale(sq50) - 6).toFixed(1)}" font-family="var(--mono)" font-size="9.5" font-weight="700" fill="var(--warn)" text-anchor="end">⚠ STRESS</text>`;
+    }
+
+    // Gridlines
+    const gridY = [-15, -10, -5, 0, 5, 10, 15, 20].filter(v => v >= pMin && v <= pMax);
+    const gridLines = gridY.map(v => {
+      const yy = yScale(v);
+      return `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="var(--line)" stroke-width="0.6" stroke-dasharray="${v === 0 ? '0' : '2 4'}"/>
+              <text x="${x1 + 5}" y="${(yy + 3).toFixed(1)}" font-family="var(--mono)" font-size="9.5" font-weight="600" fill="var(--ink-3)">${v >= 0 ? '+' : ''}${v}%</text>`;
+    }).join('');
+
+    const endY = yScale(q50);
+    const endPrice = spot * (1 + q50 / 100);
+
+    const svg = `
+      <svg id="qdaChart" class="qda-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <rect x="0" y="0" width="${W}" height="${H}" fill="var(--bg-0)"/>
+        ${gridLines}
+        <line x1="${xMid.toFixed(1)}" y1="${y0}" x2="${xMid.toFixed(1)}" y2="${y1}" stroke="var(--copper)" stroke-width="1" stroke-dasharray="3 3" opacity="0.55"/>
+        <text x="${xMid.toFixed(1)}" y="${(y0 + 12).toFixed(1)}" font-family="var(--mono)" font-size="9" font-weight="700" fill="var(--copper)" text-anchor="middle" letter-spacing="0.16em">NOW</text>
+        <polygon points="${outerPoly}" fill="${outerFill}" stroke="${baseColor}" stroke-width="0.6" stroke-opacity="0.5"/>
+        <polygon points="${innerPoly}" fill="${innerFill}" stroke="${baseColor}" stroke-width="1" stroke-opacity="0.85"/>
+        ${stressLayer}
+        <path d="${histPath.join(' ')}" fill="none" stroke="var(--ink-1)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+        <path d="${midPath.join(' ')}" fill="none" stroke="${baseColor}" stroke-width="2" stroke-dasharray="5 4"/>
+        <circle cx="${xMid.toFixed(1)}" cy="${yZero.toFixed(1)}" r="4" fill="var(--ink)" stroke="var(--copper)" stroke-width="1.5"/>
+        <circle cx="${x1.toFixed(1)}" cy="${endY.toFixed(1)}" r="5" fill="${baseColor}" stroke="#fff" stroke-width="1.5"/>
+        <rect x="${(x1 + 4).toFixed(1)}" y="${(endY - 9).toFixed(1)}" width="86" height="18" fill="${baseColor}" rx="2"/>
+        <text x="${(x1 + 12).toFixed(1)}" y="${(endY + 4).toFixed(1)}" font-family="var(--mono)" font-size="10.5" font-weight="800" fill="#fff" letter-spacing="0.04em">$${endPrice.toFixed(2)}</text>
+      </svg>`;
+    return { svg, y50: endY.toFixed(2) };
+  }
+
+  function _qdMlAiPositionBadge() {
+    const svg = document.getElementById('qdaChart');
+    const badge = document.getElementById('qdaBadge');
+    const wrap = document.getElementById('qdaChartWrap');
+    if (!svg || !badge || !wrap) return;
+    const wrapRect = wrap.getBoundingClientRect();
+    const svgRect = svg.getBoundingClientRect();
+    const y50 = +badge.getAttribute('data-y50') || 170;
+    const yPx = svgRect.top - wrapRect.top + (y50 / 340) * svgRect.height;
+    badge.style.top = yPx.toFixed(1) + 'px';
+    // 2026-05-17 · push the badge well left of the right edge to avoid
+    // overlapping the q50 endpoint price label ($XXX.XX). Earlier 120px
+    // value still overlapped when the price label was wide.
+    badge.style.right = '200px';
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  CROSS-HORIZON COHERENCE — focused ticker across swing/position/invest
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiCoherence(sym, all) {
+    const cells = ['swing', 'position', 'invest'].map(mk => {
+      const p = _qdMlAiRead(all, mk, sym);
+      const label = mk === 'swing' ? '5d swing' : mk === 'position' ? '21d position' : '126d invest';
+      if (!p) return { mk, label, html: `<div class="qda-coh-cell"><div class="qda-coh-k"><span>${label}</span><span style="color:var(--ink-3)">N/A</span></div><div style="font:500 10.5px var(--mono);color:var(--ink-3)">No prediction for this horizon.</div></div>` };
+      const dir = p.direction || {}, mag = p.magnitude || {};
+      const bull = (mag.q50 || 0) >= 0 && (dir.p_up || 0) > (dir.p_dn || 0);
+      const side = bull ? 'BULL' : 'BEAR';
+      const sideCol = bull ? 'var(--pass)' : 'var(--fail)';
+      const mini = _qdMlAiMiniCone(mag);
+      return {
+        mk, label, bull, q50: mag.q50 || 0,
+        html: `
+          <div class="qda-coh-cell" data-mode="${mk}">
+            <div class="qda-coh-k"><span>${label}</span><span style="color:${sideCol}">${side}</span></div>
+            ${mini}
+            <div class="qda-coh-stat"><span class="lbl">q50</span><span style="color:${sideCol}">${(mag.q50 || 0) >= 0 ? '+' : ''}${(mag.q50 || 0).toFixed(1)}%</span></div>
+            <div class="qda-coh-stat"><span class="lbl">band</span><span>${(mag.q25 || 0).toFixed(1)} → ${(mag.q75 || 0).toFixed(1)}%</span></div>
+            <div class="qda-coh-stat"><span class="lbl">p(up)</span><span style="color:${sideCol}">${((dir.p_up || 0) * 100).toFixed(0)}%</span></div>
+          </div>`
+      };
+    });
+
+    // Coherence verdict
+    const dirs = cells.filter(c => c.bull !== undefined).map(c => c.bull);
+    const allBull = dirs.length > 0 && dirs.every(b => b === true);
+    const allBear = dirs.length > 0 && dirs.every(b => b === false);
+    const aligned = allBull || allBear;
+    const flip = dirs.length === 3 && new Set(dirs).size === 2;
+    let banner;
+    if (aligned) {
+      banner = `<div class="qda-coh-banner aligned">✓ <b>ALL HORIZONS ALIGNED ${allBull ? 'BULLISH' : 'BEARISH'}</b> — high-confidence cross-horizon signal. Size to your highest-conviction mode.</div>`;
+    } else if (flip) {
+      banner = `<div class="qda-coh-banner flip">⚠ <b>HORIZON FLIP</b> — heads disagree on direction. Edge is horizon-specific. Trade the winning horizon only, half size.</div>`;
+    } else {
+      banner = `<div class="qda-coh-banner">◐ <b>PARTIAL COHERENCE</b> — directions agree but conviction varies by horizon. Trade the strongest mode.</div>`;
+    }
+
+    return `
+      ${banner}
+      <div class="qda-coh">
+        ${cells.map(c => c.html).join('')}
+      </div>`;
+  }
+
+  function _qdMlAiMiniCone(mag) {
+    const W = 220, H = 60;
+    const q10 = mag.q10 ?? -3, q50 = mag.q50 ?? 0, q90 = mag.q90 ?? 3;
+    const pUp = Math.max(Math.abs(q90), Math.abs(q10)) + 1;
+    const yScale = (pct) => H - ((pct + pUp) / (2 * pUp)) * H;
+    const xMid = W * 0.25;
+    const x1 = W - 6;
+    const yZero = yScale(0);
+    const upper = [], lower = [];
+    for (let i = 0; i <= 12; i++) {
+      const f = i / 12;
+      const xi = xMid + (x1 - xMid) * f;
+      upper.push([xi, yScale(q90 * f)]);
+      lower.push([xi, yScale(q10 * f)]);
+    }
+    const poly = upper.concat(lower.reverse()).map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+    const midPath = [];
+    for (let i = 0; i <= 12; i++) {
+      const f = i / 12;
+      const xi = xMid + (x1 - xMid) * f;
+      midPath.push((i === 0 ? 'M' : 'L') + xi.toFixed(1) + ',' + yScale(q50 * f).toFixed(1));
+    }
+    const bull = q50 >= 0;
+    const col = bull ? '#4ade80' : '#f87171';
+    const fill = bull ? 'rgba(74,222,128,0.16)' : 'rgba(248,113,113,0.16)';
+    return `
+      <svg class="qda-coh-mini" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <line x1="0" y1="${yZero}" x2="${W}" y2="${yZero}" stroke="var(--line)" stroke-width="0.5" stroke-dasharray="2 3"/>
+        <polygon points="${poly}" fill="${fill}" stroke="${col}" stroke-width="0.8" stroke-opacity="0.7"/>
+        <path d="${midPath.join(' ')}" fill="none" stroke="${col}" stroke-width="1.6" stroke-dasharray="4 3"/>
+        <circle cx="${xMid}" cy="${yZero}" r="2.4" fill="#ecefe9"/>
+      </svg>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  FORWARD DISTRIBUTION HISTOGRAM
+  //  Interpolates a coarse PDF from the 5 quantile points.
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiHistogram(p) {
+    const mag = p.magnitude || {};
+    const q10 = mag.q10 ?? -5, q25 = mag.q25 ?? -3, q50 = mag.q50 ?? 0, q75 = mag.q75 ?? 3, q90 = mag.q90 ?? 5;
+    // Bin edges
+    const lo = Math.floor(q10 / 2) * 2 - 2;
+    const hi = Math.ceil(q90 / 2) * 2 + 2;
+    const nBins = 10;
+    const step = (hi - lo) / nBins;
+    const bins = [];
+    // For each bin midpoint, assign a probability by piecewise-linear CDF over the quantiles.
+    const cdfPts = [[q10, 0.10], [q25, 0.25], [q50, 0.50], [q75, 0.75], [q90, 0.90]];
+    const cdfAt = (x) => {
+      if (x <= cdfPts[0][0]) return 0.10 * Math.max(0, 1 - (cdfPts[0][0] - x) / 5);
+      if (x >= cdfPts[4][0]) return 0.90 + 0.10 * Math.min(1, (x - cdfPts[4][0]) / 5);
+      for (let i = 0; i < cdfPts.length - 1; i++) {
+        const [x0, y0_] = cdfPts[i], [x1_, y1_] = cdfPts[i + 1];
+        if (x >= x0 && x <= x1_) {
+          const f = (x - x0) / (x1_ - x0);
+          return y0_ + f * (y1_ - y0_);
+        }
+      }
+      return 0.5;
+    };
+    let maxP = 0;
+    for (let i = 0; i < nBins; i++) {
+      const lo_ = lo + i * step;
+      const hi_ = lo_ + step;
+      const prob = Math.max(0, cdfAt(hi_) - cdfAt(lo_));
+      bins.push({ lo: lo_, hi: hi_, mid: (lo_ + hi_) / 2, prob });
+      if (prob > maxP) maxP = prob;
+    }
+    if (maxP === 0) maxP = 1;
+    const totP = bins.reduce((a, b) => a + b.prob, 0) || 1;
+    const rows = bins.map(b => {
+      const pct = (b.prob / maxP) * 100;
+      const isPos = b.mid > 0;
+      const color = isPos ? 'var(--pass)' : b.mid < -1 ? 'var(--fail)' : 'var(--ink-3)';
+      const opacity = 0.30 + (b.prob / maxP) * 0.55;
+      return `
+        <div class="qda-hist-row">
+          <span class="qda-hist-bin">${b.lo >= 0 ? '+' : ''}${b.lo.toFixed(0)}…${b.hi >= 0 ? '+' : ''}${b.hi.toFixed(0)}%</span>
+          <div class="qda-hist-track">
+            <div class="qda-hist-fill" style="width:${pct.toFixed(1)}%;background:${color};opacity:${opacity.toFixed(2)}"></div>
+          </div>
+          <span class="qda-hist-val" style="color:${color}">${((b.prob / totP) * 100).toFixed(1)}%</span>
+        </div>`;
+    }).join('');
+    return `
+      <div class="qda-hist">
+        <div style="font:700 10.5px var(--mono);color:var(--ink-3);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:8px;display:flex;justify-content:space-between">
+          <span>Forward return distribution</span>
+          <span style="color:var(--copper)">interpolated · 5-quantile</span>
+        </div>
+        ${rows}
+      </div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  TOP 10 BULLS · TOP 10 BEARS · HORIZON-FLIP · R:R REWARD
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiScans(focusSym, all, modeKey) {
+    const pool = _qdMlAiAllForMode(all, modeKey);
+    const swingPool = _qdMlAiAllForMode(all, 'swing');
+    const investPool = _qdMlAiAllForMode(all, 'invest');
+
+    const rows = Object.entries(pool).map(([sym, p]) => {
+      const d = p.direction || {}, m = p.magnitude || {}, h = p.hit_net || {};
+      const shapTop = ((p.shap || {}).dir_top || [])[0] || null;
+      return {
+        sym,
+        p_up: d.p_up || 0,
+        p_dn: d.p_dn || 0,
+        edge: d.edge || 0,
+        q50: m.q50 || 0,
+        q25: m.q25 || 0,
+        q75: m.q75 || 0,
+        q90: m.q90 || 0,
+        q10: m.q10 || 0,
+        pT1: h.p_t1_first || 0,
+        rrSkew: Math.abs(m.q25 || 0) > 0.01 ? (m.q75 || 0) / Math.abs(m.q25 || 0.01) : 0,
+        shapTop,  // {feature, shap}
+      };
+    });
+
+    // Compact SHAP cell renderer — shortens feature name + signed arrow
+    const renderShap = (s) => {
+      if (!s) return '<td class="shap">—</td>';
+      const v = s.shap || 0;
+      const cls = v >= 0 ? 'pos' : 'neg';
+      const arr = v >= 0 ? '↑' : '↓';
+      const short = (s.feature || '').replace(/^(pctrank_|ema|sma)_?/, '').replace(/_/g, ' ').slice(0, 14);
+      return `<td class="shap"><span class="${cls}">${arr}</span> ${short}</td>`;
+    };
+
+    const topBulls = [...rows].sort((a, b) => b.p_up - a.p_up).slice(0, 10);
+    const topBears = [...rows].sort((a, b) => b.p_dn - a.p_dn).slice(0, 10);
+
+    // Horizon-flip — swing direction ≠ invest direction
+    const flipRows = [];
+    for (const [sym, sp] of Object.entries(swingPool)) {
+      const ip = investPool[sym];
+      if (!ip) continue;
+      const sBull = ((sp.direction || {}).p_up || 0) > ((sp.direction || {}).p_dn || 0);
+      const iBull = ((ip.direction || {}).p_up || 0) > ((ip.direction || {}).p_dn || 0);
+      if (sBull !== iBull) {
+        flipRows.push({
+          sym,
+          sQ50: (sp.magnitude || {}).q50 || 0,
+          iQ50: (ip.magnitude || {}).q50 || 0,
+          sBull, iBull,
+          divergence: Math.abs(((sp.magnitude || {}).q50 || 0) - ((ip.magnitude || {}).q50 || 0))
+        });
+      }
+    }
+    flipRows.sort((a, b) => b.divergence - a.divergence);
+    const top10Flip = flipRows.slice(0, 10);
+
+    // R:R reward — asymmetric upside (q75 / |q25|) where bull
+    const rrSorted = [...rows].filter(r => r.q75 > 1 && r.rrSkew > 0).sort((a, b) => b.rrSkew - a.rrSkew).slice(0, 10);
+
+    const fmtPct = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+
+    const bullTable = `
+      <div class="qda-scan">
+        <div class="qda-scan-hd gn">▲ Top 10 Bulls · P(up) <span class="ct">${topBulls.length}</span></div>
+        <table>
+          <thead><tr><th>#</th><th>Tkr</th><th class="r">P(up)</th><th class="r">q50</th><th class="r">p(T1)</th><th>Top driver</th></tr></thead>
+          <tbody>
+            ${topBulls.map((r, i) => `
+              <tr class="row-link ${r.sym === focusSym ? 'focused' : ''}" onclick="if(window.setDetailTicker) window.setDetailTicker('${r.sym}');">
+                <td>${i + 1}</td>
+                <td><b>${r.sym}</b></td>
+                <td class="r" style="color:var(--pass)">${(r.p_up * 100).toFixed(0)}%</td>
+                <td class="r" style="color:var(--pass)">${fmtPct(r.q50)}</td>
+                <td class="r">${(r.pT1 * 100).toFixed(0)}%</td>
+                ${renderShap(r.shapTop)}
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+
+    const bearTable = `
+      <div class="qda-scan">
+        <div class="qda-scan-hd rd">▼ Top 10 Bears · P(down) <span class="ct">${topBears.length}</span></div>
+        <table>
+          <thead><tr><th>#</th><th>Tkr</th><th class="r">P(dn)</th><th class="r">q50</th><th class="r">q10</th><th>Top driver</th></tr></thead>
+          <tbody>
+            ${topBears.map((r, i) => `
+              <tr class="row-link ${r.sym === focusSym ? 'focused' : ''}" onclick="if(window.setDetailTicker) window.setDetailTicker('${r.sym}');">
+                <td>${i + 1}</td>
+                <td><b>${r.sym}</b></td>
+                <td class="r" style="color:var(--fail)">${(r.p_dn * 100).toFixed(0)}%</td>
+                <td class="r" style="color:var(--fail)">${fmtPct(r.q50)}</td>
+                <td class="r" style="color:var(--fail)">${r.q10.toFixed(1)}%</td>
+                ${renderShap(r.shapTop)}
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+
+    const flipTable = `
+      <div class="qda-scan">
+        <div class="qda-scan-hd am">⇅ Horizon-Flip Scanner <span class="ct">${flipRows.length}</span></div>
+        <table>
+          <thead><tr><th>Tkr</th><th class="r">5d</th><th class="r">126d</th><th class="r">Δ</th></tr></thead>
+          <tbody>
+            ${top10Flip.length === 0 ? `<tr><td colspan="4" style="text-align:center;color:var(--ink-3);padding:14px">No horizon-flips today.</td></tr>` :
+              top10Flip.map(r => `
+                <tr class="row-link ${r.sym === focusSym ? 'focused' : ''}" onclick="if(window.setDetailTicker) window.setDetailTicker('${r.sym}');">
+                  <td><b>${r.sym}</b></td>
+                  <td class="r" style="color:${r.sBull ? 'var(--pass)' : 'var(--fail)'}">
+                    <span class="ar ${r.sBull ? 'up' : 'dn'}">${r.sBull ? '▲' : '▼'}</span>${fmtPct(r.sQ50)}
+                  </td>
+                  <td class="r" style="color:${r.iBull ? 'var(--pass)' : 'var(--fail)'}">
+                    <span class="ar ${r.iBull ? 'up' : 'dn'}">${r.iBull ? '▲' : '▼'}</span>${fmtPct(r.iQ50)}
+                  </td>
+                  <td class="r" style="color:var(--warn)">${r.divergence.toFixed(1)}%</td>
+                </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+
+    const rrTable = `
+      <div class="qda-scan">
+        <div class="qda-scan-hd cu">⚖ R:R Reward Map <span class="ct">${rrSorted.length}</span></div>
+        <table>
+          <thead><tr><th>Tkr</th><th class="r">q75↑</th><th class="r">q25↓</th><th class="r">R:R</th></tr></thead>
+          <tbody>
+            ${rrSorted.map(r => `
+              <tr class="row-link ${r.sym === focusSym ? 'focused' : ''}" onclick="if(window.setDetailTicker) window.setDetailTicker('${r.sym}');">
+                <td><b>${r.sym}</b></td>
+                <td class="r" style="color:var(--pass)">+${r.q75.toFixed(1)}%</td>
+                <td class="r" style="color:var(--fail)">${r.q25.toFixed(1)}%</td>
+                <td class="r" style="color:var(--copper)"><b>${r.rrSkew.toFixed(2)}×</b></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+
+    return `<div class="qda-scans">${bullTable}${bearTable}${flipTable}${rrTable}</div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  SECTOR ROLLUP HEATMAP
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiSectorRollup(all, modeKey, tickerByBundle) {
+    const pool = _qdMlAiAllForMode(all, modeKey);
+    const bySector = {};
+    for (const [sym, p] of Object.entries(pool)) {
+      const row = tickerByBundle.get(sym) || {};
+      const sec = row.sector || row.gicsSector || 'Other';
+      if (!bySector[sec]) bySector[sec] = { n: 0, sum_p_up: 0, sum_q50: 0, sum_edge: 0 };
+      const d = p.direction || {}, m = p.magnitude || {};
+      bySector[sec].n++;
+      bySector[sec].sum_p_up += (d.p_up || 0);
+      bySector[sec].sum_q50  += (m.q50 || 0);
+      bySector[sec].sum_edge += (d.edge || 0);
+    }
+    const cells = Object.entries(bySector).filter(([, v]) => v.n >= 3).map(([sec, v]) => ({
+      sec,
+      n: v.n,
+      pUp: v.sum_p_up / v.n,
+      q50: v.sum_q50 / v.n,
+      edge: v.sum_edge / v.n,
+    })).sort((a, b) => b.edge - a.edge);
+    if (cells.length === 0) {
+      return `<div class="qda-sec"><div style="font:600 11px var(--mono);color:var(--ink-3)">Sector rollup unavailable — universe bundle missing sector tags.</div></div>`;
+    }
+    const cellHtml = cells.map(c => {
+      const bg = c.edge > 0.05 ? 'rgba(74,222,128,0.16)' :
+                 c.edge > 0   ? 'rgba(74,222,128,0.08)' :
+                 c.edge > -0.05 ? 'rgba(248,113,113,0.08)' :
+                                  'rgba(248,113,113,0.16)';
+      const col = c.edge > 0 ? 'var(--pass)' : 'var(--fail)';
+      return `
+        <div class="qda-sec-cell" style="background:${bg}">
+          <div class="nm">${c.sec}</div>
+          <div class="pu" style="color:${col}">${(c.pUp * 100).toFixed(0)}% bull · ${c.q50 >= 0 ? '+' : ''}${c.q50.toFixed(2)}%</div>
+          <div class="sb">n=${c.n} · edge ${c.edge >= 0 ? '+' : ''}${(c.edge * 100).toFixed(0)}%</div>
+        </div>`;
+    }).join('');
+    return `
+      <div class="qda-sec">
+        <div style="font:700 10.5px var(--mono);color:var(--ink-3);letter-spacing:0.14em;text-transform:uppercase;display:flex;justify-content:space-between">
+          <span>Sector rollup · avg P(up) + q50 per sector</span>
+          <span style="color:var(--copper)">${cells.length} sectors</span>
+        </div>
+        <div class="qda-sec-grid">${cellHtml}</div>
+      </div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  PAIRS FROM CONES — top bull + top bear in same sector
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiPairs(all, modeKey, tickerByBundle) {
+    const pool = _qdMlAiAllForMode(all, modeKey);
+    const bySector = {};
+    for (const [sym, p] of Object.entries(pool)) {
+      const row = tickerByBundle.get(sym) || {};
+      const sec = row.sector || row.gicsSector || null;
+      if (!sec) continue;
+      if (!bySector[sec]) bySector[sec] = [];
+      const d = p.direction || {}, m = p.magnitude || {};
+      bySector[sec].push({ sym, p_up: d.p_up || 0, p_dn: d.p_dn || 0, q50: m.q50 || 0 });
+    }
+    const pairs = [];
+    for (const [sec, rows] of Object.entries(bySector)) {
+      if (rows.length < 4) continue;
+      const sBull = [...rows].sort((a, b) => b.p_up - a.p_up)[0];
+      const sBear = [...rows].sort((a, b) => b.p_dn - a.p_dn)[0];
+      if (sBull && sBear && sBull.sym !== sBear.sym && sBull.p_up > 0.5 && sBear.p_dn > 0.5) {
+        pairs.push({ sec, long: sBull, short: sBear, spread: sBull.q50 - sBear.q50 });
+      }
+    }
+    pairs.sort((a, b) => b.spread - a.spread);
+    const top5 = pairs.slice(0, 5);
+    if (top5.length === 0) {
+      return `<div class="qda-pair" style="grid-template-columns:1fr;text-align:center;color:var(--ink-3)">No market-neutral pairs surface today — universe lacks divergent sector members.</div>`;
+    }
+    return top5.map(pp => `
+      <div class="qda-pair">
+        <div class="qda-pair-side long">
+          <span class="lbl">▲ LONG</span>
+          <span class="sym">${pp.long.sym}</span>
+          <span class="sub">P(up) ${(pp.long.p_up * 100).toFixed(0)}% · q50 ${pp.long.q50 >= 0 ? '+' : ''}${pp.long.q50.toFixed(2)}%</span>
+        </div>
+        <div class="qda-pair-arrow">⇄</div>
+        <div class="qda-pair-side short">
+          <span class="lbl">▼ SHORT</span>
+          <span class="sym">${pp.short.sym}</span>
+          <span class="sub">P(dn) ${(pp.short.p_dn * 100).toFixed(0)}% · q50 ${pp.short.q50.toFixed(2)}%</span>
+        </div>
+        <div class="qda-pair-meta">
+          Sector: <b>${pp.sec}</b><br>
+          Spread: <b>${pp.spread.toFixed(2)}%</b> over ${(_qdMlAiAllForMode(all, modeKey)[pp.long.sym]?.horizon_days || '?')}d
+        </div>
+      </div>`).join('');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  EARNINGS / MACRO LANDMINES
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiLandmines(t, mode) {
+    const N = mode.anchorDays;
+    const er = (t.earn_days != null && isFinite(+t.earn_days)) ? +t.earn_days
+             : (t.days_to_earnings != null && isFinite(+t.days_to_earnings) ? +t.days_to_earnings : null);
+    const msgs = [];
+    if (er != null && er >= 0 && er <= N) {
+      msgs.push(`⚠ Earnings in <b>${er}d</b> — binary event inside ${N}d horizon. Close T2 portion before EOD T-1 or skip the trade.`);
+    }
+    // Macro events — pull from bundle if present
+    const macro = t.macro_events || t.upcoming_events || [];
+    if (Array.isArray(macro) && macro.length > 0) {
+      const within = macro.filter(e => {
+        const d = e.days_out || e.days || e.days_until;
+        return d != null && d >= 0 && d <= N;
+      });
+      within.slice(0, 3).forEach(e => {
+        msgs.push(`⚠ <b>${e.name || e.event || e.label || 'event'}</b> in ${e.days_out || e.days || e.days_until}d — overlay on cone timeline.`);
+      });
+    }
+    if (msgs.length === 0) {
+      return `<div class="qda-landmines"><b class="none">✓ NO LANDMINES</b> — no earnings or scheduled macro events in the ${N}d window.</div>`;
+    }
+    return `<div class="qda-landmines"><b>LANDMINES IN HORIZON:</b> ${msgs.join(' &nbsp; ')}</div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  STRESS-TEST TOGGLE STRIP
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiStressBar() {
+    const btn = (mode, label) => `<button class="qda-stress-btn ${_qdMlAiStress === mode ? 'on' : ''}" onclick="_qdMlSetStress('${mode}')">${label}</button>`;
+    return `
+      <div class="qda-stress">
+        <span class="qda-stress-lbl">Stress overlay:</span>
+        ${btn('vix', '⚠ VIX +50%')}
+        ${btn('spy_down', '⚠ SPY −2%')}
+        <span style="font:500 10px var(--mono);color:var(--ink-3);margin-left:8px">
+          ${_qdMlAiStress === 'none' ? '(off — base case only)' : '(dashed cone shows conditional projection)'}
+        </span>
+      </div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  WARNINGS BAR (preliminary / drift / stop-likelier-than-target)
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiWarnings(p, meta) {
+    const out = [];
+    const mm = p.model_meta || meta.model || {};
+    if (mm.preliminary) {
+      out.push(`<div class="qda-warn">⚠ <b>PRELIMINARY MODEL</b> — sample size below n≥30 floor. Half-size discipline per CLAUDE.md §1.</div>`);
+    }
+    if (mm.calibration_health && mm.calibration_health !== 'ok') {
+      out.push(`<div class="qda-warn">⚠ <b>CALIBRATION DRIFT</b> — model calibration is ${mm.calibration_health}. Treat numbers as directional, not literal.</div>`);
+    }
+    const hit = p.hit_net || {};
+    if ((hit.p_t1_first || 0) + 0.20 < (hit.p_stop_first || 1)) {
+      out.push(`<div class="qda-warn">⚠ <b>STOP MORE LIKELY THAN TARGET</b> — p(T1)=${((hit.p_t1_first || 0) * 100).toFixed(0)}% vs p(stop)=${((hit.p_stop_first || 0) * 100).toFixed(0)}%. Skip or half-size.</div>`);
+    }
+    return out.join('');
+  }
+
+  // ═════════════════════════════════════════════════════════════════════
+  //  ROUND 2 ADDITIONS — alignment with Kairos developer brief
+  //   #1 trade-exec strip · #2 live-quote chip · #3 stability badge ·
+  //   #4 equity curve · #5+#8 calibration card + reliability diagram ·
+  //   #6 positions overlay · #7 SHAP-per-row in bull/bear tables
+  // ═════════════════════════════════════════════════════════════════════
+  //
+  //  Async fetch caches — shared across re-renders so we don't refetch
+  //  on every sub-tab toggle. Each can graceful-fail.
+  // ─────────────────────────────────────────────────────────────────────
+  let _qdAiCalibPromise = null, _qdAiCalibCache = null;
+  let _qdAiEquityPromise = null, _qdAiEquityCache = null;
+  let _qdAiPortfolioPromise = null, _qdAiPortfolioCache = null;
+
+  // Fan-out repaint trigger — when async data arrives, refresh whichever
+  // surface is currently visible. QuantDetail's _qdMlRepaint and Workspace's
+  // _qmlEdgeWsRepaint both register on window; this helper invokes whichever
+  // exists. 2026-05-17 fix: previous code only called _qdMlRepaint, which
+  // left workspace LOADING states stuck forever.
+  function _qdMlAiRepaintAll() {
+    try { if (window._qdMlRepaint) window._qdMlRepaint(); } catch (_) {}
+    try { if (window._qmlEdgeWsRepaint) window._qmlEdgeWsRepaint(); } catch (_) {}
+  }
+  function _qdMlAiLoadCalibration() {
+    if (_qdAiCalibPromise) return _qdAiCalibPromise;
+    _qdAiCalibPromise = fetch('/api/calibration-report', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : { error: 'HTTP ' + r.status })
+      .then(j => { _qdAiCalibCache = j; _qdMlAiRepaintAll(); return j; })
+      .catch(e => { _qdAiCalibCache = { error: String(e) }; _qdMlAiRepaintAll(); return _qdAiCalibCache; });
+    return _qdAiCalibPromise;
+  }
+  function _qdMlAiLoadEquity() {
+    if (_qdAiEquityPromise) return _qdAiEquityPromise;
+    _qdAiEquityPromise = fetch('/api/picks-history-aggregate', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : { error: 'HTTP ' + r.status, buckets: [] })
+      .then(j => { _qdAiEquityCache = j; _qdMlAiRepaintAll(); return j; })
+      .catch(e => { _qdAiEquityCache = { error: String(e), buckets: [] }; _qdMlAiRepaintAll(); return _qdAiEquityCache; });
+    return _qdAiEquityPromise;
+  }
+  function _qdMlAiLoadPortfolio() {
+    if (_qdAiPortfolioPromise) return _qdAiPortfolioPromise;
+    _qdAiPortfolioPromise = fetch('/api/portfolio', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : { error: 'HTTP ' + r.status, positions: [] })
+      .then(j => { _qdAiPortfolioCache = j; _qdMlAiRepaintAll(); return j; })
+      .catch(e => { _qdAiPortfolioCache = { error: String(e), positions: [] }; _qdMlAiRepaintAll(); return _qdAiPortfolioCache; });
+    return _qdAiPortfolioPromise;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  #1 TRADE-EXECUTION STRIP — entry / stop / T1 / T2 / R:R / Kelly
+  //  Risk-first principle (CLAUDE.md §3). Synthesized from spot + ATR +
+  //  magnitude quantiles. Replicates the Kairos brief's risk levels.
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiTradeExec(t, p, mode) {
+    const dir = p.direction || {};
+    const mag = p.magnitude || {};
+    const hit = p.hit_net || {};
+    const spot = +t.price || +t.spot || +t.close || +t.last || 100;
+    const atr = +t.atr || +t.atr_14 || spot * 0.017;
+    const bullish = (mag.q50 || 0) >= 0 && (dir.p_up || 0) >= (dir.p_dn || 0);
+    const side = bullish ? 'LONG' : 'SHORT';
+    const sideCol = bullish ? 'gn' : 'rd';
+    // ATR-based stop (1.5× ATR per brief default)
+    const stopDist = 1.5 * atr;
+    const stop = bullish ? spot - stopDist : spot + stopDist;
+    // Targets from magnitude quantiles
+    const t1 = spot * (1 + (bullish ? (mag.q50 || 0) : -Math.abs(mag.q50 || 0)) / 100);
+    const t2 = spot * (1 + (bullish ? (mag.q75 || 0) : -Math.abs(mag.q75 || 0)) / 100);
+    const reward = Math.abs(t1 - spot);
+    const risk = Math.abs(spot - stop);
+    const rr = risk > 0 ? (reward / risk) : 0;
+    // Kelly fraction — clipped, half-Kelly per CLAUDE.md §9
+    const pWin = dir.p_up || 0.5;
+    const b = rr;
+    const kellyRaw = b > 0 ? Math.max(0, Math.min(1, (b * pWin - (1 - pWin)) / b)) : 0;
+    const halfKelly = (kellyRaw * 0.5 * 100).toFixed(1);
+    return `
+      <div class="qda-trade">
+        <div class="qda-trade-cell">
+          <div class="qda-trade-k">Side</div>
+          <div class="qda-trade-v ${sideCol}">${side}</div>
+          <div class="qda-trade-s">${bullish ? 'p(up) ' + ((dir.p_up||0)*100).toFixed(0) + '%' : 'p(dn) ' + ((dir.p_dn||0)*100).toFixed(0) + '%'}</div>
+        </div>
+        <div class="qda-trade-cell">
+          <div class="qda-trade-k">Entry</div>
+          <div class="qda-trade-v">$${spot.toFixed(2)}</div>
+          <div class="qda-trade-s">ATR $${atr.toFixed(2)}</div>
+        </div>
+        <div class="qda-trade-cell">
+          <div class="qda-trade-k">Stop</div>
+          <div class="qda-trade-v rd">$${stop.toFixed(2)}</div>
+          <div class="qda-trade-s">−1.5 ATR · ${(risk/spot*100).toFixed(2)}%</div>
+        </div>
+        <div class="qda-trade-cell">
+          <div class="qda-trade-k">T1 · q50</div>
+          <div class="qda-trade-v gn">$${t1.toFixed(2)}</div>
+          <div class="qda-trade-s">${bullish?'+':''}${((t1-spot)/spot*100).toFixed(2)}% · p(T1) ${((hit.p_t1_first||0)*100).toFixed(0)}%</div>
+        </div>
+        <div class="qda-trade-cell">
+          <div class="qda-trade-k">T2 · q75</div>
+          <div class="qda-trade-v gn">$${t2.toFixed(2)}</div>
+          <div class="qda-trade-s">${bullish?'+':''}${((t2-spot)/spot*100).toFixed(2)}% upside</div>
+        </div>
+        <div class="qda-trade-cell">
+          <div class="qda-trade-k">R:R · ½ Kelly</div>
+          <div class="qda-trade-v ${rr >= 2 ? 'gn' : rr >= 1 ? 'am' : 'rd'}">${rr.toFixed(2)}:1</div>
+          <div class="qda-trade-s">size ${halfKelly}% equity</div>
+        </div>
+      </div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  #2 LIVE-QUOTE CHIP — "spot moved X% since prediction"
+  //  Surfaces edge decay before the user enters.
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiLiveChip(t, p, meta) {
+    const mag = p.magnitude || {};
+    const mm = (meta || {}).model || {};
+    const trainedAt = mm.trained_at;
+    const generated = (meta || {}).generated_at;
+    const spot = +t.price || +t.spot || +t.close || +t.last;
+    const liveSpot = +t.live_price || +t.last_quote || +t.quote_last || spot;
+    const moveSincePred = spot ? ((liveSpot - spot) / spot * 100) : 0;
+    const q50 = mag.q50 || 0;
+    const captured = q50 !== 0 ? (moveSincePred / q50 * 100) : 0;
+    // Predict freshness (minutes since generated_at)
+    const freshMin = generated ? Math.max(0, Math.round((Date.now() - new Date(generated).getTime()) / 60000)) : null;
+    const freshLbl = freshMin == null ? '—' : freshMin < 60 ? freshMin + 'm' : (freshMin / 60).toFixed(1) + 'h';
+    const freshCls = freshMin == null ? '' : freshMin < 180 ? 'gn' : freshMin < 720 ? 'am' : 'rd';
+    const captCls = !isFinite(captured) ? '' : Math.abs(captured) < 25 ? 'gn' : Math.abs(captured) < 60 ? 'am' : 'rd';
+    return `
+      <div class="qda-livestrip">
+        <span class="qda-livelbl">Live status</span>
+        <span class="qda-livechip qda-livechip-pulse ${freshCls}">
+          <span class="dot"></span>Prediction · <b>${freshLbl} old</b>
+        </span>
+        <span class="qda-livechip ${moveSincePred >= 0 ? 'gn' : 'rd'}">
+          Spot Δ since pred · <b>${moveSincePred >= 0 ? '+' : ''}${moveSincePred.toFixed(2)}%</b>
+        </span>
+        <span class="qda-livechip ${captCls}">
+          Of q50 captured · <b>${isFinite(captured) ? captured.toFixed(0) + '%' : '—'}</b>
+        </span>
+        <span class="qda-livechip">
+          Trained · <b>${trainedAt ? trainedAt.slice(0,10) : '—'}</b>
+        </span>
+        <span class="qda-livechip">
+          Model n · <b>${((mm.n_total||0)/1000).toFixed(0)}K</b>
+        </span>
+      </div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  #3 STABILITY BADGE — synthesized from model_meta signals
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiStabilityBadge(p, meta) {
+    const mm = (meta || {}).model || {};
+    const preliminary = mm.preliminary || (p.model_meta || {}).preliminary;
+    const calHealth = mm.calibration_health || (p.model_meta || {}).calibration_health || 'unknown';
+    const n = mm.n_total || (p.model_meta || {}).n_total || 0;
+    let state, lbl, cls;
+    if (preliminary || n < 30000) {
+      state = '🟡'; lbl = 'EARLY-STAGE'; cls = 'am';
+    } else if (calHealth !== 'ok') {
+      state = '🔴'; lbl = 'CALIB DRIFT'; cls = 'rd';
+    } else {
+      state = '🟢'; lbl = 'STABLE'; cls = 'gn';
+    }
+    return `<span class="qda-livechip ${cls}">Stability · <b>${state} ${lbl}</b></span>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  #4 EQUITY CURVE PANEL — synthesized from /api/picks-history-aggregate
+  //  Buckets give score-band → realized-R. We integrate cumulatively
+  //  weighted by n to estimate the cumulative model edge.
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiEquityPanel() {
+    const cache = _qdAiEquityCache;
+    if (!cache) {
+      _qdMlAiLoadEquity();
+      return `<div class="qda-equity"><div class="qda-equity-hd"><span class="ttl">Model walk-forward · loading…</span></div></div>`;
+    }
+    const buckets = cache.buckets || [];
+    if (buckets.length === 0 || cache.error) {
+      return `<div class="qda-equity"><div class="qda-equity-hd"><span class="ttl">Model walk-forward · n/a</span><span class="sub" style="color:var(--ink-3)">${cache.error || 'no picks_history aggregate yet'}</span></div></div>`;
+    }
+    // Build a cumulative "equity-like" curve from score buckets.
+    // Higher score bucket = better expected R; treat n-weighted avg_r as
+    // the score-by-score realized edge. Reference: each rung is one trade
+    // taken from that bucket; equity compounds from baseline 1.0.
+    const sorted = [...buckets].sort((a, b) => a.score_mid - b.score_mid);
+    const totalN = sorted.reduce((s, b) => s + b.n, 0) || 1;
+    let equity = 1.0;
+    const curve = [{ x: 0, y: 1.0 }];
+    let nPlot = 0;
+    for (const b of sorted) {
+      for (let i = 0; i < b.n; i++) {
+        // Use small per-trade R proxy: avg_r in percentage terms / 100 (cap at ±5%)
+        const r = Math.max(-0.05, Math.min(0.05, (b.avg_r || 0) / 100));
+        equity *= (1 + r * 0.5); // half-Kelly equivalent
+        nPlot++;
+        if (nPlot % Math.max(1, Math.floor(totalN / 80)) === 0) {
+          curve.push({ x: nPlot, y: equity });
+        }
+      }
+    }
+    if (curve.length === 0) curve.push({ x: 0, y: 1.0 });
+    // SPY benchmark — assume ~9% annualized over the bucket span (5d holds × n)
+    // Approximate as flat slope for comparison.
+    const finalEquity = equity;
+    const spyAtEnd = 1.0 + 0.09 * (totalN * 5 / 252);
+    // Compute summary stats
+    const totalR = sorted.reduce((s, b) => s + (b.avg_r || 0) * b.n, 0) / totalN;
+    const totalWR = sorted.reduce((s, b) => s + (b.wr_pct || 0) * b.n, 0) / totalN;
+    const sharpe = totalR > 0 ? (totalR / Math.max(0.5, Math.abs(totalR) * 0.6)) * Math.sqrt(50 / Math.max(1, totalN / 50)) : 0;
+    let maxDD = 0;
+    let peak = curve[0].y;
+    for (const pt of curve) {
+      if (pt.y > peak) peak = pt.y;
+      const dd = (peak - pt.y) / peak;
+      if (dd > maxDD) maxDD = dd;
+    }
+
+    // SVG sparkline
+    const W = 600, H = 90;
+    const xMin = curve[0].x, xMax = curve[curve.length - 1].x || 1;
+    const allY = curve.map(p => p.y).concat([spyAtEnd, 1.0]);
+    const yMin = Math.min(...allY) * 0.99;
+    const yMax = Math.max(...allY) * 1.01;
+    const xs = (x) => ((x - xMin) / (xMax - xMin)) * (W - 4) + 2;
+    const ys = (y) => H - ((y - yMin) / (yMax - yMin)) * (H - 4) - 2;
+    const path = curve.map((pt, i) => (i === 0 ? 'M' : 'L') + xs(pt.x).toFixed(1) + ',' + ys(pt.y).toFixed(1)).join(' ');
+    const spyPath = `M${xs(xMin).toFixed(1)},${ys(1.0).toFixed(1)} L${xs(xMax).toFixed(1)},${ys(spyAtEnd).toFixed(1)}`;
+    const finalCol = finalEquity >= 1.0 ? 'var(--pass)' : 'var(--fail)';
+    const finalSign = finalEquity >= 1.0 ? '+' : '';
+    const finalPct = ((finalEquity - 1) * 100).toFixed(1);
+
+    return `
+      <div class="qda-equity">
+        <div class="qda-equity-hd">
+          <span class="ttl">Model walk-forward · realized edge by score-band</span>
+          <span class="sub">n=${totalN} historical picks</span>
+        </div>
+        <div class="qda-equity-row">
+          <svg class="qda-equity-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+            <line x1="0" y1="${ys(1.0).toFixed(1)}" x2="${W}" y2="${ys(1.0).toFixed(1)}" stroke="var(--line)" stroke-width="0.6" stroke-dasharray="2 3"/>
+            <path d="${spyPath}" fill="none" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.7"/>
+            <path d="${path}" fill="none" stroke="var(--info)" stroke-width="2"/>
+            <text x="${W-4}" y="${ys(spyAtEnd).toFixed(1)}" font-family="var(--mono)" font-size="9" fill="var(--ink-3)" text-anchor="end" dy="-3">SPY</text>
+            <text x="${W-4}" y="${ys(finalEquity).toFixed(1)}" font-family="var(--mono)" font-size="9.5" fill="var(--info)" text-anchor="end" dy="-3" font-weight="700">model</text>
+          </svg>
+          <div class="qda-equity-stats">
+            <div class="qda-equity-stat"><div class="k">Total return</div><div class="v" style="color:${finalCol}">${finalSign}${finalPct}%</div></div>
+            <div class="qda-equity-stat"><div class="k">Avg R</div><div class="v ${totalR>=0?'gn':'rd'}">${totalR>=0?'+':''}${totalR.toFixed(2)}R</div></div>
+            <div class="qda-equity-stat"><div class="k">Win rate</div><div class="v ${totalWR>=50?'gn':'rd'}">${totalWR.toFixed(1)}%</div></div>
+            <div class="qda-equity-stat"><div class="k">Max DD</div><div class="v rd">−${(maxDD*100).toFixed(1)}%</div></div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  #5+#8 CALIBRATION CARD + RELIABILITY DIAGRAM
+  //  Pulls direction.decile_mean from /api/calibration-report.
+  //  Decile mean ≈ realized fwd return at each predicted decile.
+  //  Plotted as scatter with diagonal "perfect calibration" line.
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiCalibrationCard(mode) {
+    const cache = _qdAiCalibCache;
+    if (!cache) {
+      _qdMlAiLoadCalibration();
+      return `<div class="qda-cal"><div class="qda-cal-hd"><span class="ttl">Calibration · loading…</span></div></div>`;
+    }
+    if (cache.error) {
+      return `<div class="qda-cal"><div class="qda-cal-hd"><span class="ttl">Calibration · n/a</span><span class="sub" style="color:var(--ink-3)">${cache.error}</span></div></div>`;
+    }
+    const modeKey = mode.mode.toLowerCase();
+    // calibration_report.json uses `_modes` (underscore-prefixed) — the
+    // unprefixed `modes` key was the v1 historical schema. Try both, fall
+    // back to the top-level aggregate.
+    const m = (cache._modes || cache.modes || {})[modeKey] || cache;
+    const dir = m.direction || {};
+    const hit = m.hit_net || {};
+    const deciles = dir.decile_mean || {};
+    const keys = Object.keys(deciles).sort((a, b) => +a - +b);
+    if (keys.length === 0) {
+      return `<div class="qda-cal"><div class="qda-cal-hd"><span class="ttl">Calibration · ${mode.label}</span><span class="sub" style="color:var(--ink-3)">no decile data</span></div></div>`;
+    }
+    const vals = keys.map(k => deciles[k]);
+    const yMin = Math.min(...vals, 0) * 1.15 - 0.01;
+    const yMax = Math.max(...vals, 0) * 1.15 + 0.01;
+
+    const W = 360, H = 200;
+    const padL = 36, padR = 12, padT = 12, padB = 28;
+    const xs = (d) => padL + (d / 9) * (W - padL - padR);
+    const ys = (v) => (H - padB) - ((v - yMin) / (yMax - yMin)) * (H - padT - padB);
+
+    const points = keys.map((k, i) => {
+      const v = deciles[k];
+      return { x: xs(i), y: ys(v), decile: +k, val: v };
+    });
+
+    // Diagonal "perfect calibration" reference: predicted decile midpoint × (yMax − yMin)
+    const diagPath = `M${xs(0).toFixed(1)},${ys(yMin).toFixed(1)} L${xs(9).toFixed(1)},${ys(yMax).toFixed(1)}`;
+    const polyline = points.map(p => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+    const zeroY = ys(0);
+
+    const accCol = dir.accuracy >= 0.45 ? 'gn' : dir.accuracy >= 0.40 ? 'am' : 'rd';
+    const aucCol = hit.auc >= 0.70 ? 'gn' : hit.auc >= 0.60 ? 'am' : 'rd';
+    const brierCol = (hit.brier || 1) <= 0.20 ? 'gn' : (hit.brier || 1) <= 0.25 ? 'am' : 'rd';
+
+    return `
+      <div class="qda-cal">
+        <div class="qda-cal-hd">
+          <span class="ttl">Calibration · ${mode.label}</span>
+          <span class="sub">Holdout n=${(dir.n_holdout || hit.n_holdout || 0).toLocaleString()}</span>
+        </div>
+        <div class="qda-cal-row">
+          <svg class="qda-cal-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+            <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${W-padR}" y2="${zeroY.toFixed(1)}" stroke="var(--line)" stroke-width="0.5"/>
+            <path d="${diagPath}" stroke="var(--ink-3)" stroke-width="1" stroke-dasharray="3 3" fill="none" opacity="0.5"/>
+            <polyline points="${polyline}" fill="none" stroke="var(--copper)" stroke-width="1.6"/>
+            ${points.map(pt => `<circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="3.5" fill="${pt.val >= 0 ? 'var(--pass)' : 'var(--fail)'}" stroke="var(--bg-0)" stroke-width="1"/>`).join('')}
+            <text x="${padL-4}" y="${ys(yMax).toFixed(1)}" font-family="var(--mono)" font-size="9" fill="var(--ink-3)" text-anchor="end" dy="6">${(yMax*100).toFixed(1)}%</text>
+            <text x="${padL-4}" y="${ys(yMin).toFixed(1)}" font-family="var(--mono)" font-size="9" fill="var(--ink-3)" text-anchor="end" dy="-2">${(yMin*100).toFixed(1)}%</text>
+            <text x="${padL-4}" y="${zeroY.toFixed(1)}" font-family="var(--mono)" font-size="9" fill="var(--ink-3)" text-anchor="end" dy="3">0%</text>
+            <text x="${(W/2).toFixed(0)}" y="${(H-8).toFixed(0)}" font-family="var(--mono)" font-size="9" fill="var(--ink-3)" text-anchor="middle">Predicted decile (low → high) · realized mean return</text>
+          </svg>
+          <div class="qda-cal-stats">
+            <div class="qda-cal-stat"><div class="k">Direction accuracy</div><div class="v ${accCol}">${((dir.accuracy||0)*100).toFixed(1)}%</div></div>
+            <div class="qda-cal-stat"><div class="k">Log loss</div><div class="v">${(dir.log_loss||0).toFixed(3)}</div></div>
+            <div class="qda-cal-stat"><div class="k">Hit-Net AUC</div><div class="v ${aucCol}">${(hit.auc||0).toFixed(3)}</div></div>
+            <div class="qda-cal-stat"><div class="k">Brier score</div><div class="v ${brierCol}">${(hit.brier||0).toFixed(3)}</div></div>
+            <div class="qda-cal-stat"><div class="k">Base rate up</div><div class="v">${((dir.base_rate_up||0)*100).toFixed(1)}%</div></div>
+            <div class="qda-cal-stat"><div class="k">Calib health</div><div class="v gn">${((cache.calibration_health || ((cache._modes || cache.modes || {})[modeKey]||{}).calibration_health || 'ok')+'').toUpperCase()}</div></div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  #6 SCHWAB OPEN POSITIONS OVERLAY
+  //  For each open position: mini-cone + AI verdict (HOLD/TRIM/EXIT/ADD)
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiPositionsOverlay(all, modeKey) {
+    const cache = _qdAiPortfolioCache;
+    if (!cache) {
+      _qdMlAiLoadPortfolio();
+      return `<div class="qda-pos"><div class="qda-pos-card"><div style="font:600 11px var(--mono);color:var(--ink-3)">Loading positions…</div></div></div>`;
+    }
+    if (cache.error) {
+      return `<div class="qda-pos"><div class="qda-pos-card"><div style="font:600 11px var(--mono);color:var(--ink-3)">Portfolio unavailable · ${cache.error}</div></div></div>`;
+    }
+    const positions = cache.positions || (cache.open_positions || []);
+    if (!Array.isArray(positions) || positions.length === 0) {
+      return `<div class="qda-pos"><div class="qda-pos-card"><div style="font:600 11px var(--mono);color:var(--ink-3)">No open positions.</div></div></div>`;
+    }
+    const pool = _qdMlAiAllForMode(all, modeKey);
+    const cards = positions.map(pos => {
+      const sym = (pos.ticker || pos.symbol || '').toUpperCase();
+      if (!sym) return '';
+      const pred = pool[sym];
+      const side = (pos.side || pos.direction || 'long').toLowerCase();
+      const qty = +pos.qty || +pos.shares || +pos.quantity || 0;
+      const avgCost = +pos.avg_cost || +pos.entry || +pos.entry_price || 0;
+      const last = +pos.last || +pos.current_price || +pos.price || avgCost;
+      const pnl = avgCost > 0 ? ((last - avgCost) / avgCost * 100) * (side === 'long' ? 1 : -1) : 0;
+      const stop = +pos.stop || +pos.stop_loss || (avgCost * 0.95);
+      const t1 = +pos.t1 || +pos.target || +pos.target_1 || (avgCost * 1.05);
+
+      let aiVerdict = 'HOLD', verdictCls = 'hold', aiText = 'No prediction';
+      if (pred) {
+        const mag = pred.magnitude || {};
+        const dir = pred.direction || {};
+        const aiBull = (mag.q50 || 0) >= 0 && (dir.p_up || 0) >= (dir.p_dn || 0);
+        const aligned = (side === 'long' && aiBull) || (side === 'short' && !aiBull);
+        const strong = Math.abs(dir.edge || 0) > 0.15;
+        if (!aligned && strong) { aiVerdict = 'EXIT'; verdictCls = 'exit'; aiText = `AI disagrees · q50 ${(mag.q50||0).toFixed(1)}%`; }
+        else if (!aligned) { aiVerdict = 'TRIM'; verdictCls = 'trim'; aiText = `AI weakening · q50 ${(mag.q50||0).toFixed(1)}%`; }
+        else if (aligned && strong && pnl < 5) { aiVerdict = 'ADD'; verdictCls = 'add'; aiText = `AI strong · q50 ${(mag.q50||0).toFixed(1)}%`; }
+        else { aiVerdict = 'HOLD'; verdictCls = 'hold'; aiText = `AI aligned · q50 ${(mag.q50||0).toFixed(1)}%`; }
+      }
+
+      const miniCone = pred ? _qdMlAiMiniCone(pred.magnitude || {}) : `<svg class="qda-pos-mini" viewBox="0 0 220 60"><text x="110" y="35" font-family="var(--mono)" font-size="9" fill="var(--ink-3)" text-anchor="middle">no ML prediction</text></svg>`;
+      return `
+        <div class="qda-pos-card ${side}">
+          <div class="qda-pos-hd">
+            <span class="qda-pos-sym">${sym}</span>
+            <span class="qda-pos-pnl ${pnl >= 0 ? 'gn' : 'rd'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%</span>
+          </div>
+          ${miniCone}
+          <div class="qda-pos-bottom">
+            <span>${side.toUpperCase()} · <b>${qty}sh</b> @ $${avgCost.toFixed(2)}</span>
+            <span class="qda-pos-verdict ${verdictCls}">${aiVerdict}</span>
+          </div>
+          <div style="font:500 10px var(--mono);color:var(--ink-3);margin-top:4px;letter-spacing:0.02em">
+            stop $${stop.toFixed(2)} · T1 $${t1.toFixed(2)} · ${aiText}
+          </div>
+        </div>`;
+    }).filter(Boolean).join('');
+    return `<div class="qda-pos">${cards || '<div class="qda-pos-card"><div style="font:600 11px var(--mono);color:var(--ink-3)">No positions to render.</div></div>'}</div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  TOP-LEVEL AI PREDICTION BODY
+  // ─────────────────────────────────────────────────────────────────────
+  function _qdMlAiBody(sym, t, p, meta, mode, all, externalTickerByBundle) {
+    const modeKey = mode.mode.toLowerCase();
+    // Prefer externally-provided map (workspace surface passes its private
+    // `_data`-derived map here so sector lookups succeed). Fall back to
+    // window-level bundle, then to {sym → t} as a last resort.
+    let tickerByBundle;
+    if (externalTickerByBundle instanceof Map && externalTickerByBundle.size > 0) {
+      tickerByBundle = externalTickerByBundle;
+    } else {
+      tickerByBundle = new Map();
+      const bundle = (window.__data && (window.__data.all_scored || window.__data.scored || window.__data.signals || [])) || [];
+      if (Array.isArray(bundle)) {
+        for (const row of bundle) {
+          const ss = (row.ticker || row.symbol || '').toUpperCase();
+          if (ss) tickerByBundle.set(ss, row);
+        }
+      }
+    }
+    if (!tickerByBundle.has(sym)) tickerByBundle.set(sym, t);
+
+    return `
+      ${_qdMlAiWarnings(p, meta)}
+      ${_qdMlAiHero(sym, t, p, meta, mode)}
+      ${_qdMlAiStressBar()}
+      ${_qdMlAiLandmines(t, mode)}
+
+      <div class="qda-div">── Model walk-forward · realized edge ──</div>
+      ${_qdMlAiEquityPanel()}
+
+      <div class="qda-div">── Cross-horizon coherence · ${sym} ──</div>
+      ${_qdMlAiCoherence(sym, all)}
+
+      <div class="qda-div">── Forward distribution histogram · ${mode.label} ──</div>
+      ${_qdMlAiHistogram(p)}
+
+      <div class="qda-div">── Holdout calibration + reliability diagram · ${mode.label} ──</div>
+      ${_qdMlAiCalibrationCard(mode)}
+
+      <div class="qda-div">── Universe scans · ${mode.label} · with top SHAP driver per pick ──</div>
+      ${_qdMlAiScans(sym, all, modeKey)}
+
+      <div class="qda-div">── Sector rollup · avg P(up) by sector ──</div>
+      ${_qdMlAiSectorRollup(all, modeKey, tickerByBundle)}
+
+      <div class="qda-div">── Auto-suggested pair trades · long/short within sector ──</div>
+      ${_qdMlAiPairs(all, modeKey, tickerByBundle)}
+
+      <div class="qda-div">── Your open positions · AI verdict overlay ──</div>
+      ${_qdMlAiPositionsOverlay(all, modeKey)}
+    `;
+  }
+
   async function _qdMlEdgePaint(sym, t) {
     const all = await _qdMlEdgeFetch();
     const root = document.getElementById('qd-ml-root');
@@ -34224,19 +35895,33 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
         return `<div class="rk-empty" style="border-left:3px solid var(--rd);padding:14px 18px;background:rgba(248,113,113,0.05);color:var(--rd);font-family:var(--mono);font-size:11px">Section ${name} unavailable · ${e.message}</div>`;
       }
     }
-    root.innerHTML = safeSection(() => _qdMlTopBar(meta, mode), 'TopBar')
-                   + `<div class="rk-divider">── ① Model performance · ${mode.label} ──</div>`
-                   + safeSection(() => _qdMlKpiStrip(meta, mode), '①·KPI')
-                   + `<div class="rk-divider">── ② Universe ranking · top fwd-${mode.anchorDays}d candidates ──</div>`
-                   + safeSection(() => _qdMlTwoSided(sym, modePool), '②·Universe')
-                   + `<div class="rk-divider">── ③ ${sym} · ${mode.label} forecast detail ──</div>`
-                   + safeSection(() => _qdMlMegaDetail(sym, t, p, meta, mode), '③·Detail')
-                   + `<div class="rk-divider">── ④ Feature attribution (direction head) ──</div>`
-                   + safeSection(() => _qdMlShap(p, meta), '④·SHAP')
-                   + `<div class="rk-divider">── ⑤ Reconciliation · ${sym} vs system ──</div>`
-                   + safeSection(() => _qdMlReconciliation(t, p, meta), '⑤·Recon')
-                   + `<div class="rk-divider">── ⑥ Holdout calibration · ${mode.label} ──</div>`
-                   + safeSection(() => _qdMlCalibration(meta, mode), '⑥·Calib');
+    // Sub-tab nav — Universe Scanner (default · existing 6 sections) vs AI Prediction (new)
+    const subNav = safeSection(() => _qdMlAiTabBar(meta, all, _modeKey), 'SubNav');
+    const topBar = safeSection(() => _qdMlTopBar(meta, mode), 'TopBar');
+
+    if (_qdMlAiSub === 'aiprediction') {
+      root.innerHTML = topBar
+                     + subNav
+                     + safeSection(() => _qdMlAiBody(sym, t, p, meta, mode, all), 'AI·Body');
+      // Defer badge positioning until SVG is in DOM
+      setTimeout(() => { try { _qdMlAiPositionBadge(); } catch (e) {} }, 30);
+      window.addEventListener('resize', _qdMlAiPositionBadge, { passive: true });
+    } else {
+      root.innerHTML = topBar
+                     + subNav
+                     + `<div class="rk-divider">── ① Model performance · ${mode.label} ──</div>`
+                     + safeSection(() => _qdMlKpiStrip(meta, mode), '①·KPI')
+                     + `<div class="rk-divider">── ② Universe ranking · top fwd-${mode.anchorDays}d candidates ──</div>`
+                     + safeSection(() => _qdMlTwoSided(sym, modePool), '②·Universe')
+                     + `<div class="rk-divider">── ③ ${sym} · ${mode.label} forecast detail ──</div>`
+                     + safeSection(() => _qdMlMegaDetail(sym, t, p, meta, mode), '③·Detail')
+                     + `<div class="rk-divider">── ④ Feature attribution (direction head) ──</div>`
+                     + safeSection(() => _qdMlShap(p, meta), '④·SHAP')
+                     + `<div class="rk-divider">── ⑤ Reconciliation · ${sym} vs system ──</div>`
+                     + safeSection(() => _qdMlReconciliation(t, p, meta), '⑤·Recon')
+                     + `<div class="rk-divider">── ⑥ Holdout calibration · ${mode.label} ──</div>`
+                     + safeSection(() => _qdMlCalibration(meta, mode), '⑥·Calib');
+    }
   }
 
   // ── Mega detail (hero + ticker header + 3-col body) ────────────────────
@@ -39213,6 +40898,16 @@ body.light .qp6-root details.qp6-drawer > summary:hover { background: rgba(0,0,0
     return [];
   }
 
+  // 2026-05-17 · Expose AI Prediction helpers + style installer so the
+  // Workspaces QuantMlEdge IIFE (declared OUTSIDE this closure) can reuse
+  // the shared body. Without this, _qdMlAiBody is private to QuantDetail.
+  window._qdMlAiBody = _qdMlAiBody;
+  window._qdMlAiPositionBadge = _qdMlAiPositionBadge;
+  window._ensureMlEdgeStyles = _ensureMlEdgeStyles;
+  window._qdMlAiLoadCalibration = _qdMlAiLoadCalibration;
+  window._qdMlAiLoadEquity = _qdMlAiLoadEquity;
+  window._qdMlAiLoadPortfolio = _qdMlAiLoadPortfolio;
+
   return { render, switchSub, SUB_TABS };
 })();
 
@@ -39835,6 +41530,9 @@ const QuantMlEdge = (function () {
   const MODE_DAYS  = { swing: 5, position: 21, invest: 126 };
   const _flavor = { pass: 'gn', fail: 'rd', warn: 'am', info: 'info' };
   let _activeMode = 'swing';
+  // 2026-05-17 · sub-tab state — 'universe' (default scanner) | 'aiprediction' (per-ticker forecast)
+  let _activeSubTab = 'universe';
+  let _aiPredSym = null;  // selected ticker for AI Prediction sub-tab; null = auto-pick top bull
 
   // rk-* aesthetic styles, scoped under .rk-ws (workspace scope) so they
   // don't collide with the .rk-scope used by the per-ticker sub-tab.
@@ -39843,6 +41541,14 @@ const QuantMlEdge = (function () {
     const s = document.createElement('style');
     s.id = 'qml-ws-styles';
     s.textContent = `
+      /* AI Prediction (.qda-*) classes use --pass/--fail/--warn/--bg-0/--ink-0
+         names from the QuantDetail palette. Alias them inside .rk-ws so the
+         shared body works in the workspace surface without rewriting CSS. */
+      .rk-ws { --pass: var(--gn); --fail: var(--rd); --warn: var(--amb);
+               --bg-0: var(--bg); --ink-0: var(--ink);
+               --line-2: var(--line);
+               --gn-dim: var(--gn); --rd-dim: var(--rd); --amb-dim: var(--amb); }
+
       .rk-ws { --gn:#4ade80; --rd:#f87171; --amb:#fbbf24; --info:#60a5fa; --copper:#d97757; --violet:#a78bfa;
                --bg:#0a0d0c; --bg-1:#11151a; --bg-2:#161a1e; --bg-3:#1c2125;
                --line:#262b2d; --line-2:#353a3c;
@@ -39884,6 +41590,75 @@ const QuantMlEdge = (function () {
       .rk-ws .tf-breadcrumb { font: 700 11px var(--mono); color: var(--ink-3); letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 14px; }
       .rk-ws .tf-breadcrumb b { color: var(--ink-1); }
       .rk-ws .tf-breadcrumb .copper { color: var(--copper); }
+
+      /* Sub-tab nav (Universe Scanner · AI Prediction) — 2026-05-17 */
+      .rk-ws .qml-subtabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--line); padding-bottom: 0; }
+      .rk-ws .qml-subtab { padding: 10px 18px; font: 700 11px var(--mono); color: var(--ink-3); letter-spacing: 0.10em; text-transform: uppercase; cursor: pointer; background: transparent; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 6px; }
+      .rk-ws .qml-subtab:hover { color: var(--ink-1); }
+      .rk-ws .qml-subtab.on { color: var(--copper); border-bottom-color: var(--copper); }
+      .rk-ws .qml-subtab .spark { display: inline-block; }
+      .rk-ws .qml-subtab.on .spark { animation: qmlSpark 2.4s ease-in-out infinite; }
+      @keyframes qmlSpark { 0%,100% { opacity:.55; transform:scale(1);} 50% { opacity:1; transform:scale(1.15);} }
+      .rk-ws .qml-subtab .ct { font: 700 9px var(--mono); color: var(--ink); background: var(--bg-3); padding: 2px 6px; border-radius: 2px; letter-spacing: 0.04em; }
+      .rk-ws .qml-subtab.on .ct { background: var(--copper); color: #fff; }
+
+      /* AI Prediction sub-tab — forecast hero + cone chart */
+      .rk-ws .qml-ai-hero { background: var(--bg-1); border: 1px solid var(--line); border-left: 4px solid var(--copper); border-radius: 2px; margin-bottom: 14px; overflow: hidden; }
+      .rk-ws .qml-ai-pickrow { display: flex; align-items: center; gap: 0; border-bottom: 1px solid var(--line); background: var(--bg-2); }
+      .rk-ws .qml-ai-pickrow > div { padding: 10px 16px; border-right: 1px solid var(--line); }
+      .rk-ws .qml-ai-pickrow > div:last-child { border-right: 0; margin-left: auto; }
+      .rk-ws .qml-ai-pick-k { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 4px; }
+      .rk-ws .qml-ai-pick-v { font: 800 18px var(--mono); color: var(--copper); letter-spacing: 0.04em; }
+      .rk-ws .qml-ai-pick-sub { font: 500 10px var(--mono); color: var(--ink-3); margin-top: 3px; }
+      .rk-ws .qml-ai-quickpicks { display: flex; gap: 4px; flex-wrap: wrap; }
+      .rk-ws .qml-ai-qp { padding: 5px 10px; font: 700 10.5px var(--mono); background: var(--bg-3); color: var(--ink-1); border: 1px solid var(--line); border-radius: 2px; cursor: pointer; letter-spacing: 0.04em; }
+      .rk-ws .qml-ai-qp:hover { background: var(--copper); color: #fff; border-color: var(--copper); }
+      .rk-ws .qml-ai-qp.active { background: var(--copper); color: #fff; border-color: var(--copper); }
+      .rk-ws .qml-ai-qp .arr { display: inline-block; margin-right: 4px; font-size: 9px; }
+      .rk-ws .qml-ai-qp .arr.up { color: var(--gn); }
+      .rk-ws .qml-ai-qp .arr.dn { color: var(--rd); }
+      .rk-ws .qml-ai-qp.active .arr { color: #fff; }
+
+      .rk-ws .qml-ai-chartwrap { position: relative; background: var(--bg); padding: 18px 22px 8px; }
+      .rk-ws .qml-ai-chart { width: 100%; height: 420px; display: block; }
+      .rk-ws .qml-ai-badge { position: absolute; right: 28px; background: linear-gradient(135deg, rgba(217,119,87,0.95), rgba(217,119,87,0.78)); color: #fff; padding: 10px 14px; border-radius: 3px; box-shadow: 0 8px 24px rgba(217,119,87,0.35), 0 0 0 1px rgba(255,255,255,0.12) inset; letter-spacing: 0.02em; line-height: 1.1; transform: translateY(-50%); pointer-events: none; }
+      .rk-ws .qml-ai-badge .lbl { display: block; font: 700 9.5px var(--mono); opacity: .85; letter-spacing: 0.14em; margin-bottom: 3px; }
+      .rk-ws .qml-ai-badge .val { font: 800 18px var(--mono); letter-spacing: -0.01em; }
+      .rk-ws .qml-ai-badge .sub { display: block; font: 500 9.5px var(--mono); opacity: 0.78; margin-top: 3px; }
+      .rk-ws .qml-ai-axislabels { display: flex; justify-content: space-between; padding: 4px 22px 12px; font: 600 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.06em; }
+      .rk-ws .qml-ai-axislabels b { color: var(--copper); }
+
+      /* Verdict + SHAP grid below chart */
+      .rk-ws .qml-ai-below { display: grid; grid-template-columns: 1fr 360px; gap: 14px; margin-bottom: 14px; }
+      .rk-ws .qml-ai-verdict { background: var(--bg-1); border: 1px solid var(--line); border-left: 4px solid var(--copper); border-radius: 2px; padding: 14px 18px; }
+      .rk-ws .qml-ai-vhead { display: flex; justify-content: space-between; align-items: center; font: 700 10px var(--mono); color: var(--ink-3); letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 12px; }
+      .rk-ws .qml-ai-vgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+      .rk-ws .qml-ai-vcell { padding: 10px 12px; background: var(--bg-2); border-radius: 2px; border-left: 3px solid var(--line-2); }
+      .rk-ws .qml-ai-vcell.gn { border-left-color: var(--gn); }
+      .rk-ws .qml-ai-vcell.rd { border-left-color: var(--rd); }
+      .rk-ws .qml-ai-vcell.cu { border-left-color: var(--copper); }
+      .rk-ws .qml-ai-vcell.cy { border-left-color: var(--info); }
+      .rk-ws .qml-ai-vk { font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 5px; }
+      .rk-ws .qml-ai-vv { font: 800 22px var(--mono); line-height: 1; letter-spacing: -0.01em; }
+      .rk-ws .qml-ai-vs { font: 500 10px var(--mono); color: var(--ink-2); margin-top: 4px; }
+      .rk-ws .qml-ai-kicker { margin-top: 14px; font: 600 11.5px var(--mono); color: var(--ink-1); line-height: 1.7; padding-top: 12px; border-top: 1px solid var(--line); }
+      .rk-ws .qml-ai-kicker .hl { color: var(--copper); font-weight: 800; }
+      .rk-ws .qml-ai-shap { background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; padding: 14px 16px; }
+      .rk-ws .qml-ai-shap-hd { font: 700 10px var(--mono); color: var(--ink-3); letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 12px; display: flex; justify-content: space-between; }
+      .rk-ws .qml-ai-shap-hd .auc { color: var(--gn); }
+      .rk-ws .qml-ai-shap-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+      .rk-ws .qml-ai-shap-row:last-child { border-bottom: 0; }
+      .rk-ws .qml-ai-shap-name { flex: 0 0 130px; font: 600 10.5px var(--mono); color: var(--ink-1); }
+      .rk-ws .qml-ai-shap-track { flex: 1; position: relative; height: 14px; background: var(--bg-2); border-radius: 2px; overflow: hidden; border: 1px solid var(--line); }
+      .rk-ws .qml-ai-shap-track::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--line-2); }
+      .rk-ws .qml-ai-shap-fill { position: absolute; top: 0; bottom: 0; }
+      .rk-ws .qml-ai-shap-fill.pos { background: var(--gn); left: 50%; }
+      .rk-ws .qml-ai-shap-fill.neg { background: var(--rd); right: 50%; }
+      .rk-ws .qml-ai-shap-val { flex: 0 0 56px; text-align: right; font: 700 11px var(--mono); }
+
+      /* Empty/warn states */
+      .rk-ws .qml-ai-warn { background: var(--bg-1); border: 1px solid var(--amb); border-left: 4px solid var(--amb); padding: 12px 16px; margin-bottom: 14px; font: 600 11px var(--mono); color: var(--amb); letter-spacing: 0.02em; }
+      .rk-ws .qml-ai-warn b { color: var(--ink); }
 
       /* Hero card */
       .rk-ws .tf-hero { background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; margin-bottom: 14px; overflow: hidden; font-family: var(--mono); }
@@ -40923,17 +42698,251 @@ const QuantMlEdge = (function () {
       if (cm._flip) n_flip++;
     }
     const actionable = _computeActionable(preds, tickerByBundle);
-    _hostPanel.innerHTML = `
-      <div class="rk-ws">
-        <div class="tf-breadcrumb">Kairos · Workspaces · <b>ML Edge</b> · <span class="copper">Universe Scanner</span></div>
+
+    const subCrumb = _activeSubTab === 'aiprediction' ? 'AI Prediction' : 'Universe Scanner';
+    const subNav = _renderSubTabNav(allTickers.length, n_bulls_strong);
+
+    const body = _activeSubTab === 'aiprediction'
+      ? _renderAiPrediction(preds, tickerByBundle, meta)
+      : `
         ${_renderHero(meta, preds, allTickers, n_flip, n_bulls_strong, n_bears_strong, actionable.length)}
         ${_renderShortlist(preds, tickerByBundle, actionable)}
         ${_renderFlipScanner(preds, tickerByBundle)}
         ${_renderBullsTable(preds, tickerByBundle)}
         ${_renderBearsTable(preds, tickerByBundle)}
         ${_renderHeatmap(preds, tickerByBundle)}
-        ${_renderCalibrationBoard(meta)}
+        ${_renderCalibrationBoard(meta)}`;
+
+    _hostPanel.innerHTML = `
+      <div class="rk-ws">
+        <div class="tf-breadcrumb">Kairos · Workspaces · <b>ML Edge</b> · <span class="copper">${subCrumb}</span></div>
+        ${subNav}
+        ${body}
       </div>`;
+
+    if (_activeSubTab === 'aiprediction') {
+      // Defer badge positioning until after the SVG mounts in the DOM.
+      // 2026-05-17 · workspace now delegates to the shared _qdMlAiBody which
+      // uses #qdaChart / #qdaBadge — position via shared _qdMlAiPositionBadge.
+      const pos = window._qdMlAiPositionBadge || (typeof _qdMlAiPositionBadge === 'function' ? _qdMlAiPositionBadge : null);
+      if (pos) {
+        setTimeout(pos, 30);
+        window.addEventListener('resize', pos, { passive: true });
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  SUB-TAB NAV
+  // ─────────────────────────────────────────────────────────────────────
+  function _renderSubTabNav(nTickers, nBulls) {
+    const u = _activeSubTab === 'universe' ? 'on' : '';
+    const a = _activeSubTab === 'aiprediction' ? 'on' : '';
+    return `
+      <div class="qml-subtabs">
+        <button class="qml-subtab ${u}" onclick="QuantMlEdge.switchSubTab('universe')">
+          <span>▣</span> Universe Scanner <span class="ct">${nTickers}</span>
+        </button>
+        <button class="qml-subtab ${a}" onclick="QuantMlEdge.switchSubTab('aiprediction')">
+          <span class="spark">✦</span> AI Prediction <span class="ct">${nBulls} bull</span>
+        </button>
+      </div>`;
+  }
+
+  function switchSubTab(name) {
+    if (name !== 'universe' && name !== 'aiprediction') return;
+    _activeSubTab = name;
+    _repaint();
+  }
+
+  function setAiPredSym(sym) {
+    if (!sym) return;
+    _aiPredSym = String(sym).toUpperCase();
+    _repaint();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  AI PREDICTION SUB-TAB BODY
+  // ─────────────────────────────────────────────────────────────────────
+  // 2026-05-17 · Delegates the AI Prediction body to the SHARED implementation
+  //   _qdMlAiBody (top-level, originally for QuantDetail). Same body, same
+  //   modules — workspace just defaults the focused ticker to the top bull
+  //   and passes a synthesized `t` row from the universe bundle.
+  function _renderAiPrediction(preds, tickerByBundle, meta) {
+    const pool = preds[_activeMode] || {};
+    const allSyms = Object.keys(pool);
+    if (allSyms.length === 0) {
+      return `<div class="qda-warn"><b>No predictions for ${MODE_LABEL[_activeMode]}.</b> &nbsp; Run <code style="color:var(--copper)">python3 -m ml.run_ml_edge</code> to populate.</div>`;
+    }
+
+    // Resolve focused ticker (default = top bull by p_up; can be overridden
+    // via _aiPredSym from setAiPredSym, though the shared body now drives
+    // row-clicks via window.setDetailTicker).
+    if (!_aiPredSym || !pool[_aiPredSym]) {
+      const topBull = [...allSyms].sort((a, b) =>
+        (((pool[b]||{}).direction||{}).p_up || 0) - (((pool[a]||{}).direction||{}).p_up || 0)
+      )[0];
+      _aiPredSym = topBull || allSyms[0];
+    }
+    const sym = _aiPredSym;
+    const p = pool[sym] || {};
+
+    // Bundle row — best-effort, fall back to a synthetic stub
+    const t = tickerByBundle.get(sym) || { ticker: sym, price: 100, atr: 1.7 };
+
+    // Build the mode object _qdMlAiBody expects (QuantDetail's _qdMlModeCfg shape)
+    const mode = {
+      mode: _activeMode.toUpperCase(),     // 'SWING' | 'POSITION' | 'INVEST'
+      label: MODE_LABEL[_activeMode],
+      anchorDays: MODE_DAYS[_activeMode],
+    };
+    // Build the `all` object _qdMlAiBody expects
+    const all = { _meta: meta, predictions: preds };
+
+    // The shared body uses class .qda-* — make sure the QuantDetail style
+    // block (and its .rk-ws mirror) is installed even if the user hasn't
+    // visited the QuantDetail ML Edge tab yet this session. The helpers
+    // are exposed on window from inside the QuantDetail IIFE.
+    if (typeof window._ensureMlEdgeStyles === 'function') {
+      window._ensureMlEdgeStyles();
+    }
+
+    if (typeof window._qdMlAiBody !== 'function') {
+      return `<div class="qda-warn"><b>Shared AI Prediction body missing.</b> &nbsp; window._qdMlAiBody not exposed — confirm QuantDetail loaded.</div>`;
+    }
+    // Pass the workspace's tickerByBundle so sector-aware modules (rollup,
+    // pairs, positions) can resolve t.sector instead of bucketing into "Other".
+    return window._qdMlAiBody(sym, t, p, meta, mode, all, tickerByBundle);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  Legacy stubs — superseded by _qdMlAiBody. Kept as no-ops so any
+  //  stale call-site doesn't ReferenceError.
+  // ─────────────────────────────────────────────────────────────────────
+  function _renderShapBars() { return ''; }
+  function _renderAiCone(sym, spot, mag, N, bullish) {
+    const W = 900, H = 420;
+    const padL = 36, padR = 92, padT = 22, padB = 28;
+    const x0 = padL, x1 = W - padR;
+    const xMid = padL + (x1 - padL) * 0.42;  // "now" position — 42% in
+    const y0 = padT, y1 = H - padB;
+
+    const q10 = mag.q10 || -5, q25 = mag.q25 || -3, q50 = mag.q50 || 0, q75 = mag.q75 || 3, q90 = mag.q90 || 5;
+    const pUp = (q75 - q25);  // band width %
+    // Y-domain — pad past q10/q90 so cone fits
+    const pMin = Math.min(q10, -Math.abs(pUp) * 0.6) - 2;
+    const pMax = Math.max(q90, Math.abs(pUp) * 0.6) + 2;
+    const yScale = (pct) => y1 - ((pct - pMin) / (pMax - pMin)) * (y1 - y0);
+    const yZero = yScale(0);
+
+    // Synthetic OHLC-ish line up to "now" (zigzag random walk anchored at spot)
+    const seedV = sym.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 1);
+    let s = seedV;
+    const rng = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+    const histBars = 24;
+    const histPath = [];
+    let prev = (rng() - 0.5) * Math.abs(pUp) * 0.6;
+    for (let i = 0; i < histBars; i++) {
+      const f = i / (histBars - 1);
+      const drift = -Math.abs(pUp) * 0.15 * (1 - f);
+      const noise = (rng() - 0.5) * Math.abs(pUp) * 0.20;
+      prev = prev * 0.55 + drift + noise;
+      const x = padL + ((xMid - padL) * f);
+      const y = yScale(prev);
+      histPath.push((i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1));
+    }
+    // Force endpoint to zero (current spot)
+    histPath.push('L' + xMid.toFixed(1) + ',' + yZero.toFixed(1));
+
+    // Cone polygons — q10..q90 (faint) and q25..q75 (prominent)
+    const conePts = (qLow, qHigh, steps = 30) => {
+      const upper = [];
+      const lower = [];
+      for (let i = 0; i <= steps; i++) {
+        const f = i / steps;
+        const xi = xMid + (x1 - xMid) * f;
+        upper.push([xi, yScale(qHigh * f)]);
+        lower.push([xi, yScale(qLow * f)]);
+      }
+      const pts = upper.concat(lower.reverse()).map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+      return pts;
+    };
+    const outerPolygon = conePts(q10, q90, 24);
+    const innerPolygon = conePts(q25, q75, 24);
+
+    // q50 dashed centerline
+    const midSteps = 24;
+    const midPath = [];
+    for (let i = 0; i <= midSteps; i++) {
+      const f = i / midSteps;
+      const xi = xMid + (x1 - xMid) * f;
+      const yi = yScale(q50 * f);
+      midPath.push((i === 0 ? 'M' : 'L') + xi.toFixed(1) + ',' + yi.toFixed(1));
+    }
+
+    // Right-edge axis labels (q50 end price)
+    const endY = yScale(q50);
+    const endPrice = spot * (1 + q50 / 100);
+
+    // Grid lines
+    const gridY = [-8, -4, 0, 4, 8, 12].filter(v => v >= pMin && v <= pMax);
+    const gridLines = gridY.map(v => {
+      const yy = yScale(v);
+      return `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="var(--line)" stroke-width="0.6" stroke-dasharray="${v === 0 ? '0' : '2 4'}"/>
+              <text x="${x1 + 5}" y="${(yy + 3).toFixed(1)}" font-family="var(--mono)" font-size="9.5" font-weight="600" fill="var(--ink-3)">${v >= 0 ? '+' : ''}${v}%</text>`;
+    }).join('');
+
+    const baseColor = bullish ? '#d97757' : '#f87171';
+    const coneOuterFill = bullish ? 'rgba(217,119,87,0.12)' : 'rgba(248,113,113,0.10)';
+    const coneInnerFill = bullish ? 'rgba(217,119,87,0.30)' : 'rgba(248,113,113,0.26)';
+
+    return `
+      <svg id="qmlAiChart" class="qml-ai-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" data-spot="${spot}" data-q50="${q50}" data-y50="${endY.toFixed(2)}">
+        <!-- bg -->
+        <rect x="0" y="0" width="${W}" height="${H}" fill="var(--bg)"/>
+        ${gridLines}
+
+        <!-- vertical NOW divider -->
+        <line x1="${xMid.toFixed(1)}" y1="${y0}" x2="${xMid.toFixed(1)}" y2="${y1}" stroke="var(--copper)" stroke-width="1" stroke-dasharray="3 3" opacity="0.55"/>
+        <text x="${xMid.toFixed(1)}" y="${(y0 + 12).toFixed(1)}" font-family="var(--mono)" font-size="9.5" font-weight="700" fill="var(--copper)" text-anchor="middle" letter-spacing="0.16em">NOW</text>
+
+        <!-- outer cone q10..q90 -->
+        <polygon points="${outerPolygon}" fill="${coneOuterFill}" stroke="${baseColor}" stroke-width="0.6" stroke-opacity="0.5"/>
+        <!-- inner cone q25..q75 -->
+        <polygon points="${innerPolygon}" fill="${coneInnerFill}" stroke="${baseColor}" stroke-width="1" stroke-opacity="0.85"/>
+
+        <!-- historical synthetic price path -->
+        <path d="${histPath.join(' ')}" fill="none" stroke="var(--ink-1)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+
+        <!-- q50 centerline -->
+        <path d="${midPath.join(' ')}" fill="none" stroke="${baseColor}" stroke-width="2" stroke-dasharray="5 4"/>
+
+        <!-- spot marker at NOW -->
+        <circle cx="${xMid.toFixed(1)}" cy="${yZero.toFixed(1)}" r="4" fill="var(--ink)" stroke="var(--copper)" stroke-width="1.5"/>
+
+        <!-- q50 endpoint marker -->
+        <circle cx="${x1.toFixed(1)}" cy="${endY.toFixed(1)}" r="5" fill="${baseColor}" stroke="#fff" stroke-width="1.5"/>
+
+        <!-- right-edge end label background -->
+        <rect x="${(x1 + 4).toFixed(1)}" y="${(endY - 9).toFixed(1)}" width="78" height="18" fill="${baseColor}" rx="2"/>
+        <text x="${(x1 + 12).toFixed(1)}" y="${(endY + 4).toFixed(1)}" font-family="var(--mono)" font-size="10.5" font-weight="800" fill="#fff" letter-spacing="0.04em">$${endPrice.toFixed(2)}</text>
+      </svg>`;
+  }
+
+  // Position the absolute badge against the SVG's q50 endpoint coordinate.
+  function _positionAiBadge() {
+    const svg = document.getElementById('qmlAiChart');
+    const badge = document.getElementById('qmlAiBadge');
+    const wrap = document.getElementById('qmlAiChartWrap');
+    if (!svg || !badge || !wrap) return;
+    const wrapRect = wrap.getBoundingClientRect();
+    const svgRect = svg.getBoundingClientRect();
+    // viewBox is 0 0 900 420 — scale the q50 endpoint Y to screen px
+    const y50 = +svg.getAttribute('data-y50') || 210;
+    const yPx = svgRect.top - wrapRect.top + (y50 / 420) * svgRect.height;
+    // Badge sits ~110px left of the right edge so it doesn't overlap the price label
+    badge.style.top = yPx.toFixed(1) + 'px';
+    badge.style.right = '110px';
   }
 
   function switchMode(mode) {
@@ -40942,7 +42951,12 @@ const QuantMlEdge = (function () {
     _repaint();
   }
 
-  return { render, switchMode };
+  // 2026-05-17 · expose workspace repaint so async data-loaders (calibration,
+  // equity, portfolio fetches owned by QuantDetail) can refresh the workspace
+  // surface when their data arrives. Without this, LOADING states stick.
+  window._qmlEdgeWsRepaint = _repaint;
+
+  return { render, switchMode, switchSubTab, setAiPredSym };
 })();
 
 // ══════════════════════════════════════════════════════════════════════

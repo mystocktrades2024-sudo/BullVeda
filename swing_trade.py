@@ -2556,6 +2556,11 @@ def run_daily_scan(force_fresh: bool = False):
     sector_max = cfg.get("portfolio", {}).get("sector_max_positions", 2)
     # AI-10: industry cap — tighter than sector. Finer concentration control.
     industry_max = cfg.get("portfolio", {}).get("industry_max_positions", 2)
+    # 2026-05-18: dynamic sector cap is now config-driven (was hardcoded 3/1).
+    # outperforming = sector ETF beating SPY; underperforming = lagging.
+    _dyn_cfg = cfg.get("portfolio", {}).get("dynamic_sector_cap", {})
+    _dyn_max_out = int(_dyn_cfg.get("outperforming", 3))
+    _dyn_max_und = int(_dyn_cfg.get("underperforming", 2))
 
     # Phase 5D: Dynamic sector concentration — adjust by sector performance
     # AI-10: plus industry cap (hard-block, not warn-only)
@@ -2567,11 +2572,12 @@ def run_daily_scan(force_fresh: bool = False):
             continue
         sector = r.get("sector", "Unknown")
         industry = r.get("industry", "") or sector  # fall back to sector if no industry
-        # Phase 5D: dynamic cap — outperforming sectors get 3, underperforming get 1
+        # Phase 5D: dynamic cap — outperforming sectors get _dyn_max_out,
+        # underperforming get _dyn_max_und (both config-driven as of 2026-05-18).
         _sec_etf = r.get("technicals", {}).get("indicators", {}).get("sector_etf", "")
         if _sec_etf and sector_etf_data and _sec_etf in sector_etf_data:
             _sec_outperf = sector_etf_data[_sec_etf].get("outperforming", False)
-            _dynamic_max = 3 if _sec_outperf else 1
+            _dynamic_max = _dyn_max_out if _sec_outperf else _dyn_max_und
         else:
             _dynamic_max = sector_max
 

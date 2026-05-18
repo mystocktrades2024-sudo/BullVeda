@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Patterns · Confluence Matrix (Prototype v3)</title>
+<style>
+  :root {
+    --bg: #0a0d0c;
+    --bg-1: #11161a;
+    --bg-2: #161c20;
+    --bg-3: #1d2428;
+    --ink: #e8eae6;
+    --ink-1: #c9cdd0;
+    --ink-2: #8f969c;
+    --ink-3: #5d6469;
+    --rule: #262b2d;
+    --gn: #5be57c;
+    --rd: #ff6b5b;
+    --amb: #ffb95c;
+    --copper: #d49060;
+    --teal: #5cd1c5;
+    --teal-bg: rgba(92,209,197,0.10);
+    --mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink-1);
+    font-family: var(--mono);
+    margin: 0; padding: 18px 24px;
+    font-size: 12.5px; line-height: 1.45;
+  }
+  .header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 18px;
+  }
+  .header h1 {
+    font-size: 16px;
+    letter-spacing: 0.14em;
+    color: var(--ink);
+    margin: 0;
+    text-transform: uppercase;
+    font-weight: 800;
+  }
+  .header .meta {
+    font-size: 11px;
+    color: var(--ink-3);
+    letter-spacing: 0.10em;
+  }
+
+  /* ── COMPOSITE STRIP ────────────────────────────────────── */
+  .composite-strip {
+    display: grid;
+    grid-template-columns: 0.8fr 1fr 1fr 1fr 1fr 1fr;
+    gap: 0;
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--gn);
+    margin-bottom: 16px;
+  }
+  .cs-cell {
+    padding: 14px 18px;
+    border-right: 1px solid var(--rule);
+  }
+  .cs-cell:last-child { border-right: none; }
+  .cs-lbl {
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .cs-val {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+  }
+  .cs-val.gn { color: var(--gn); }
+  .cs-val.rd { color: var(--rd); }
+  .cs-val.am { color: var(--amb); }
+  .cs-sub {
+    font-size: 10px;
+    color: var(--ink-2);
+    margin-top: 3px;
+  }
+
+  /* ── PRIMARY MATRIX ─────────────────────────────────────── */
+  .matrix {
+    border: 1px solid var(--rule);
+    margin-bottom: 16px;
+  }
+  .matrix-h {
+    padding: 8px 14px;
+    background: var(--bg-2);
+    color: var(--ink-3);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 700;
+    border-bottom: 1px solid var(--rule);
+  }
+  table.mtx {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  table.mtx th {
+    text-align: left;
+    padding: 9px 14px;
+    background: var(--bg-1);
+    color: var(--ink-3);
+    font-weight: 700;
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--rule);
+  }
+  table.mtx th.r { text-align: right; }
+  table.mtx th.c { text-align: center; }
+  table.mtx td {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--rule);
+    color: var(--ink-1);
+  }
+  table.mtx td.r { text-align: right; }
+  table.mtx td.c { text-align: center; }
+  table.mtx tr:last-child td { border-bottom: none; }
+  table.mtx tr:hover { background: rgba(255,255,255,0.02); cursor: pointer; }
+  table.mtx tr.active { background: var(--bg-2); }
+  .vote-cell {
+    font-weight: 800;
+    font-size: 11.5px;
+    letter-spacing: 0.10em;
+    text-align: center;
+  }
+  .vote-cell.gn { color: var(--gn); }
+  .vote-cell.rd { color: var(--rd); }
+  .vote-cell.am { color: var(--amb); }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 9.5px;
+    letter-spacing: 0.10em;
+    font-weight: 800;
+  }
+  .pill.flag-ins { background: rgba(255,107,91,0.15); color: var(--rd); }
+  .pill.flag-blw { background: rgba(255,185,92,0.15); color: var(--amb); }
+  .pill.flag-inst { background: rgba(91,229,124,0.15); color: var(--gn); }
+
+  /* ── KEY LEVELS TABLE ─────────────────────────────────────── */
+  .levels-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .levels-card {
+    border: 1px solid var(--rule);
+  }
+  .lv-h {
+    padding: 8px 14px;
+    background: var(--bg-2);
+    color: var(--ink-3);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 700;
+    border-bottom: 1px solid var(--rule);
+  }
+  table.lv {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  table.lv td {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--rule);
+  }
+  table.lv tr:last-child td { border-bottom: none; }
+  .px {
+    font-weight: 800;
+    color: var(--ink);
+    width: 80px;
+  }
+  .px.gn { color: var(--gn); }
+  .px.rd { color: var(--rd); }
+  .px.cop { color: var(--copper); }
+  .lbl-2 {
+    color: var(--ink-2);
+    font-size: 11px;
+  }
+  .src {
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 700;
+    text-align: right;
+  }
+
+  /* ── DRILL-DOWN PANEL ───────────────────────────────────────── */
+  .drilldown {
+    border: 1px solid var(--rule);
+    background: var(--bg-2);
+    padding: 18px 22px;
+  }
+  .dd-h {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .dd-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--ink);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .dd-vote {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    padding: 3px 10px;
+    border-radius: 3px;
+  }
+  .dd-vote.gn { background: rgba(91,229,124,0.15); color: var(--gn); }
+  .dd-vote.rd { background: rgba(255,107,91,0.15); color: var(--rd); }
+  .dd-vote.am { background: rgba(255,185,92,0.15); color: var(--amb); }
+  .dd-body {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 24px;
+  }
+  .dd-text { line-height: 1.7; color: var(--ink-1); }
+  .dd-text .label {
+    font-size: 9.5px;
+    letter-spacing: 0.14em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 700;
+    margin: 10px 0 4px;
+  }
+  .dd-text p {
+    color: var(--ink-1);
+    font-family: -apple-system, sans-serif;
+    font-size: 13px;
+    line-height: 1.55;
+    margin: 0;
+  }
+  .dd-chart {
+    background: var(--bg-1);
+    border: 1px solid var(--rule);
+    height: 280px;
+    position: relative;
+  }
+
+  /* tiny inline confluence bar */
+  .confbar {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 8px;
+  }
+  .confbar span {
+    width: 8px; height: 8px; border-radius: 1px;
+    background: var(--bg-3);
+  }
+  .confbar span.gn { background: var(--gn); }
+  .confbar span.rd { background: var(--rd); }
+  .confbar span.am { background: var(--amb); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>PATTERNS · AVGO · CONFLUENCE MATRIX</h1>
+  <div class="meta">$425.19 · 2026-05-17 · 7 methods · n=180 bars</div>
+</div>
+
+<!-- ═══ COMPOSITE STRIP ═══════════════════════════════════════ -->
+<div class="composite-strip">
+  <div class="cs-cell">
+    <div class="cs-lbl">Composite</div>
+    <div class="cs-val gn">BULLISH</div>
+    <div class="cs-sub">4B · 3N · 0S</div>
+  </div>
+  <div class="cs-cell">
+    <div class="cs-lbl">Conviction</div>
+    <div class="cs-val am">MEDIUM</div>
+    <div class="cs-sub">4/7 aligned</div>
+  </div>
+  <div class="cs-cell">
+    <div class="cs-lbl">Entry · Stop</div>
+    <div class="cs-val">$420 / $362</div>
+    <div class="cs-sub">1.25 ATR floor</div>
+  </div>
+  <div class="cs-cell">
+    <div class="cs-lbl">T1 (Fib 1.272)</div>
+    <div class="cs-val gn">$483.81</div>
+    <div class="cs-sub">+13.8%</div>
+  </div>
+  <div class="cs-cell">
+    <div class="cs-lbl">T2 (Fib 1.618)</div>
+    <div class="cs-val gn">$536.54</div>
+    <div class="cs-sub">+26.2%</div>
+  </div>
+  <div class="cs-cell">
+    <div class="cs-lbl">R : R</div>
+    <div class="cs-val">2.8 : 1</div>
+    <div class="cs-sub">vs 3:1 target</div>
+  </div>
+</div>
+
+<!-- ═══ METHOD MATRIX ═══════════════════════════════════════ -->
+<div class="matrix">
+  <div class="matrix-h">METHOD MATRIX · 7 INDEPENDENT CLASSIFIERS</div>
+  <table class="mtx">
+    <thead>
+      <tr>
+        <th>Method</th>
+        <th class="c">Vote</th>
+        <th class="r">Wilson LB</th>
+        <th class="r">N</th>
+        <th class="c">Flag</th>
+        <th>Rationale</th>
+        <th class="r">Falsification</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="active" onclick="window.showDrill(this, 0)">
+        <td><b>01 · Wyckoff</b><span class="confbar"><span class="gn"></span><span class="gn"></span><span class="gn"></span><span class="gn"></span><span class="gn"></span></span></td>
+        <td class="vote-cell gn">BULL</td>
+        <td class="r"><b>95%</b></td>
+        <td class="r">conf</td>
+        <td class="c"><span class="pill flag-inst">CONF 95%</span></td>
+        <td style="color:var(--ink-1)">MARKUP · +0.75%/day · vol skew +9% · range pos 89%</td>
+        <td class="r" style="color:var(--ink-2)">slope flips & vol reverses</td>
+      </tr>
+      <tr onclick="window.showDrill(this, 1)">
+        <td><b>02 · Fibonacci</b><span class="confbar"><span class="gn"></span><span class="gn"></span><span class="gn"></span><span class="gn"></span><span></span></span></td>
+        <td class="vote-cell gn">BULL</td>
+        <td class="r">—</td>
+        <td class="r">0</td>
+        <td class="c"><span class="pill flag-ins">INS</span></td>
+        <td style="color:var(--ink-1)">Above 0.618 $348.18 · zone 0.000–0.236 · 1.272=$484 · 1.618=$537</td>
+        <td class="r" style="color:var(--ink-2)">close &lt; 0.618 on vol</td>
+      </tr>
+      <tr onclick="window.showDrill(this, 2)">
+        <td><b>03 · Ichimoku</b><span class="confbar"><span class="gn"></span><span class="gn"></span><span class="gn"></span><span class="gn"></span><span></span></span></td>
+        <td class="vote-cell gn">BULL</td>
+        <td class="r"><b>20.7%</b></td>
+        <td class="r">1</td>
+        <td class="c"><span class="pill flag-ins">INS</span></td>
+        <td style="color:var(--ink-1)">4/4 bull · above cloud · TK bull · Chikou clear · future cloud green</td>
+        <td class="r" style="color:var(--ink-2)">close &lt; Kijun $401.59</td>
+      </tr>
+      <tr onclick="window.showDrill(this, 3)">
+        <td><b>04 · Trendlines</b><span class="confbar"><span class="gn"></span><span class="gn"></span><span class="gn"></span><span></span><span></span></span></td>
+        <td class="vote-cell gn">BULL</td>
+        <td class="r"><b>34.2%</b></td>
+        <td class="r">2</td>
+        <td class="c"><span class="pill flag-ins">INS</span></td>
+        <td style="color:var(--ink-1)">Both trendlines rising · channel intact · upper $447, lower $393</td>
+        <td class="r" style="color:var(--ink-2)">close &lt; lower TL</td>
+      </tr>
+      <tr onclick="window.showDrill(this, 4)">
+        <td><b>05 · Vol Profile</b><span class="confbar"><span class="am"></span><span class="am"></span><span class="am"></span><span></span><span></span></span></td>
+        <td class="vote-cell am">NEUT</td>
+        <td class="r"><b>40.9%</b></td>
+        <td class="r">8</td>
+        <td class="c"><span class="pill flag-ins">INS</span></td>
+        <td style="color:var(--ink-1)">Inside VA — at VAH $427.12 · POC $322.98 · VAL $310.28</td>
+        <td class="r" style="color:var(--ink-2)">acceptance outside VAH/VAL</td>
+      </tr>
+      <tr onclick="window.showDrill(this, 5)">
+        <td><b>06 · S / R</b><span class="confbar"><span class="am"></span><span class="am"></span><span></span><span></span><span></span></span></td>
+        <td class="vote-cell am">NEUT</td>
+        <td class="r">—</td>
+        <td class="r">0</td>
+        <td class="c"><span class="pill flag-ins">INS</span></td>
+        <td style="color:var(--ink-1)">No level within 3% of spot · ATR $9.10 · nearest support 11% below</td>
+        <td class="r" style="color:var(--ink-2)">price tags any level</td>
+      </tr>
+      <tr onclick="window.showDrill(this, 6)">
+        <td><b>07 · Classical</b><span class="confbar"><span class="am"></span><span class="am"></span><span></span><span></span><span></span></span></td>
+        <td class="vote-cell am">NEUT</td>
+        <td class="r">—</td>
+        <td class="r">2</td>
+        <td class="c"><span class="pill flag-ins">INS</span></td>
+        <td style="color:var(--ink-1)">No high-conviction pattern · scanner clean (no cup/flag/triangle)</td>
+        <td class="r" style="color:var(--ink-2)">—</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ═══ KEY LEVELS (DUAL TABLE) ═══════════════════════════════════════ -->
+<div class="levels-grid">
+  <div class="levels-card">
+    <div class="lv-h">▲ UPSIDE LEVELS</div>
+    <table class="lv">
+      <tr><td class="px gn">$536.54</td><td class="lbl-2">Fib 1.618 ext · T2 stretch target</td><td class="src">FIB</td></tr>
+      <tr><td class="px gn">$483.81</td><td class="lbl-2">Fib 1.272 ext · T1 primary target</td><td class="src">FIB</td></tr>
+      <tr><td class="px gn">$447.62</td><td class="lbl-2">Trendline upper · projected at now</td><td class="src">TL</td></tr>
+      <tr><td class="px gn">$442.36</td><td class="lbl-2">60d swing high · breakout pivot</td><td class="src">SWING</td></tr>
+      <tr><td class="px gn">$427.12</td><td class="lbl-2">VAH · acceptance above = confirm</td><td class="src">VP</td></tr>
+    </table>
+  </div>
+  <div class="levels-card">
+    <div class="lv-h">▼ DOWNSIDE LEVELS</div>
+    <table class="lv">
+      <tr><td class="px cop">$425.19</td><td class="lbl-2"><b>SPOT</b> · 14% above Kijun · at VAH</td><td class="src">NOW</td></tr>
+      <tr><td class="px">$406.39</td><td class="lbl-2">Fib 0.236 retrace · shallow pullback</td><td class="src">FIB</td></tr>
+      <tr><td class="px">$401.59</td><td class="lbl-2">Kijun · dynamic stop reference</td><td class="src">ICHI</td></tr>
+      <tr><td class="px">$392.81</td><td class="lbl-2">Trendline lower · channel base</td><td class="src">TL</td></tr>
+      <tr><td class="px rd">$362.68</td><td class="lbl-2"><b>HARD STOP</b> · 1.25 ATR</td><td class="src">STOP</td></tr>
+      <tr><td class="px rd">$348.18</td><td class="lbl-2">Fib 0.618 golden · invalidation</td><td class="src">FIB</td></tr>
+      <tr><td class="px rd">$322.98</td><td class="lbl-2">POC · institutional anchor</td><td class="src">VP</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ═══ DRILL-DOWN PANEL ═══════════════════════════════════════ -->
+<div class="drilldown" id="drilldown">
+  <div class="dd-h">
+    <div class="dd-title" id="dd-title">01 · WYCKOFF</div>
+    <div class="dd-vote gn" id="dd-vote">BULLISH</div>
+    <div style="color:var(--ink-3);font-size:11px;letter-spacing:0.10em">confidence 95% · phase MARKUP</div>
+    <div style="flex:1;text-align:right;font-size:11px;color:var(--ink-3);letter-spacing:0.10em">click row above to switch ↑</div>
+  </div>
+  <div class="dd-body">
+    <div class="dd-text">
+      <div class="label">Mechanism</div>
+      <p>Phase classifier: uptrend (slope > +0.15%/day) with bullish volume skew = MARKUP. Demand absorbs supply on every test of higher prices; institutions buying through retail offers.</p>
+      <div class="label">Reading</div>
+      <p>AVGO at <b>+0.75%/day slope</b> with <b>+9% volume skew</b> sits firmly in markup. Range position 89% means we're at the upper end of the 60d range — consistent with markup, not exhaustion.</p>
+      <div class="label">Falsification</div>
+      <p style="color:var(--rd)">30d slope flips negative AND volume skew reverses → markup ends; expect distribution phase to follow at a higher level.</p>
+    </div>
+    <div class="dd-chart" id="dd-chart">
+      <!-- placeholder text in lieu of dynamic chart for prototype -->
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-family:var(--mono);font-size:11px;letter-spacing:0.16em">
+        [METHOD-SPECIFIC CHART RENDERS HERE]
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const METHODS = [
+    { title: '01 · WYCKOFF', vote: 'BULLISH', voteClass: 'gn', meta: 'confidence 95% · phase MARKUP',
+      mech: 'Phase classifier: uptrend (slope > +0.15%/day) with bullish volume skew = MARKUP. Demand absorbs supply on every test of higher prices; institutions buying through retail offers.',
+      read: 'AVGO at <b>+0.75%/day slope</b> with <b>+9% volume skew</b> sits firmly in markup. Range position 89% means we\'re at the upper end of the 60d range — consistent with markup, not exhaustion.',
+      fals: '30d slope flips negative AND volume skew reverses → markup ends; expect distribution phase to follow at a higher level.' },
+    { title: '02 · FIBONACCI', vote: 'BULLISH', voteClass: 'gn', meta: 'swing $290 → $442 · zone 0.000–0.236',
+      mech: 'Detected swing pair from real pivot detection (not 52w hi/lo). Retracement levels project from the most recent significant move.',
+      read: 'Price sits in shallow retrace zone (0.000–0.236) above the 0.618 floor at $348.18. Bullish-trend continuation expected. T1 = 1.272 ext $483.81, T2 = 1.618 ext $536.54.',
+      fals: 'Close below 0.618 ($348.18) on volume → deep retrace failure; treat the entire swing as invalidated.' },
+    { title: '03 · ICHIMOKU', vote: 'BULLISH', voteClass: 'gn', meta: '4/4 confluences · Kijun stop $401.59',
+      mech: '5-line system: cloud (Senkou A/B), TK cross (Tenkan/Kijun), Chikou (lag 26), future cloud. All 4 must align for the system to read.',
+      read: '4/4 bullish: ABOVE cloud, TK BULL cross, Chikou CLEAR, future cloud BULLISH. Kijun $401.59 is the cleanest dynamic stop reference.',
+      fals: 'Daily close below Kijun ($401.59) loses the trend frame; close inside the cloud breaks the system entirely.' },
+    { title: '04 · TRENDLINES', vote: 'BULLISH', voteClass: 'gn', meta: 'channel intact · both rising',
+      mech: 'Auto-fit upper trendline from 3 most-recent swing highs; lower from 3 most-recent swing lows. Rising both = uptrend channel.',
+      read: 'Upper trendline ($447.62) and lower ($392.81) both rising. Channel slope ~+0.4%/day, converging with Wyckoff +0.75%/day.',
+      fals: 'Close below lower trendline ($392.81) ends the channel; if also paired with break of upper TL = trend exhaustion.' },
+    { title: '05 · VOLUME PROFILE', vote: 'NEUTRAL', voteClass: 'am', meta: 'inside VA · at VAH $427.12',
+      mech: '60d auction profile: POC = price bin with most volume (institutional magnet). VAH/VAL bound central 70% of volume.',
+      read: 'Price $425.19 inside VA at the high. POC $322.98 is FAR below (would not return absent reversal). NEUTRAL because auction has not migrated.',
+      fals: 'Acceptance outside VAH/VAL changes the bias. 2 closes above $427.12 = bullish confirm.' },
+    { title: '06 · S / R', vote: 'NEUTRAL', voteClass: 'am', meta: 'no clustered level within 3%',
+      mech: 'Swing-point clustering within 0.6 × ATR. Strength = number of touches at the same price band. 3+ touches = high-conviction level.',
+      read: 'No swing cluster has 3+ touches within 3% of spot. Nearest support 11% below (Fib 0.500 zone). NEUTRAL until a defendable level develops.',
+      fals: 'Pattern resolves when price tags a clustered level on volume.' },
+    { title: '07 · CLASSICAL', vote: 'NEUTRAL', voteClass: 'am', meta: 'no pattern detected · 90d scan',
+      mech: 'Bulkowski geometric scanner: cup-and-handle, bull/bear flag, ascending/descending triangle. Geometric thresholds enforced.',
+      read: 'No active pattern in last 90d. AVGO is in a clean trend phase, not a consolidation pattern — normal for markup, not a deficiency.',
+      fals: '—' },
+  ];
+  window.showDrill = function(rowEl, idx) {
+    document.querySelectorAll('table.mtx tr').forEach(r => r.classList.remove('active'));
+    rowEl.classList.add('active');
+    const m = METHODS[idx];
+    document.getElementById('dd-title').textContent = m.title;
+    const v = document.getElementById('dd-vote');
+    v.textContent = m.vote;
+    v.className = 'dd-vote ' + m.voteClass;
+    const dd = document.querySelector('.dd-body .dd-text');
+    dd.innerHTML = `
+      <div class="label">Mechanism</div><p>${m.mech}</p>
+      <div class="label">Reading</div><p>${m.read}</p>
+      <div class="label">Falsification</div><p style="color:var(--rd)">${m.fals}</p>
+    `;
+  };
+</script>
+</body>
+</html>

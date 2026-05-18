@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Patterns · Mission Control (Prototype v1)</title>
+<style>
+  :root {
+    --bg: #0a0d0c;
+    --bg-1: #11161a;
+    --bg-2: #161c20;
+    --bg-3: #1d2428;
+    --ink: #e8eae6;
+    --ink-1: #c9cdd0;
+    --ink-2: #8f969c;
+    --ink-3: #5d6469;
+    --rule: #262b2d;
+    --gn: #5be57c;
+    --rd: #ff6b5b;
+    --amb: #ffb95c;
+    --copper: #d49060;
+    --teal: #5cd1c5;
+    --teal-bg: rgba(92,209,197,0.10);
+    --mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink-1);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    margin: 0; padding: 24px 32px;
+    font-size: 13px; line-height: 1.5;
+  }
+  .header {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+    font-weight: 700;
+  }
+
+  /* ── HERO STRIP ────────────────────────────────────────── */
+  .hero {
+    background: linear-gradient(135deg, rgba(91,229,124,0.10) 0%, var(--bg-2) 60%);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--gn);
+    border-radius: 6px;
+    padding: 24px 28px;
+    margin-bottom: 24px;
+    display: grid;
+    grid-template-columns: minmax(260px, 0.9fr) 1.1fr 1fr;
+    gap: 32px;
+    align-items: center;
+  }
+  .hero-verdict {
+    font-size: 44px;
+    font-weight: 800;
+    color: var(--gn);
+    letter-spacing: -0.02em;
+    line-height: 1.0;
+  }
+  .hero-sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.10em;
+    color: var(--ink-2);
+    margin-top: 8px;
+  }
+  .hero-conv {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    color: var(--gn);
+    text-transform: uppercase;
+  }
+  .hero-tension {
+    font-size: 12.5px;
+    color: var(--ink-2);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+  .hero-ticket {
+    background: var(--bg-1);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 14px 16px;
+  }
+  .ticket-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .ticket-row .lbl { color: var(--ink-3); letter-spacing: 0.08em; font-size: 10px; text-transform: uppercase; font-weight: 700; }
+  .ticket-row .val { color: var(--ink); font-weight: 700; }
+  .ticket-row .val.gn { color: var(--gn); }
+  .ticket-row .val.rd { color: var(--rd); }
+
+  /* ── 7-METHOD HEATMAP CHIPS ────────────────────────────── */
+  .heatmap {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+    margin-bottom: 24px;
+  }
+  .chip {
+    padding: 14px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--rule);
+    background: var(--bg-2);
+    text-align: center;
+    transition: transform 120ms;
+    cursor: pointer;
+  }
+  .chip:hover { transform: translateY(-2px); }
+  .chip.gn { border-color: rgba(91,229,124,0.35); background: linear-gradient(180deg, rgba(91,229,124,0.10), var(--bg-2)); }
+  .chip.rd { border-color: rgba(255,107,91,0.35); background: linear-gradient(180deg, rgba(255,107,91,0.10), var(--bg-2)); }
+  .chip.am { border-color: rgba(255,185,92,0.30); background: linear-gradient(180deg, rgba(255,185,92,0.06), var(--bg-2)); }
+  .chip-name { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; color: var(--ink-3); font-weight: 700; text-transform: uppercase; margin-bottom: 6px; }
+  .chip-vote { font-size: 14px; font-weight: 800; letter-spacing: 0.04em; }
+  .chip-vote.gn { color: var(--gn); }
+  .chip-vote.rd { color: var(--rd); }
+  .chip-vote.am { color: var(--amb); }
+  .chip-wlb { font-family: var(--mono); font-size: 10px; color: var(--ink-2); margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--rule); }
+  .chip-wlb .lb { color: var(--ink); font-weight: 700; }
+  .chip-flag { font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; margin-top: 3px; }
+  .chip-flag.gn { color: var(--gn); }
+  .chip-flag.am { color: var(--amb); }
+  .chip-flag.rd { color: var(--rd); }
+
+  /* ── CHART PANEL ───────────────────────────────────────── */
+  .chart-wrap {
+    background: var(--bg-1);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    margin-bottom: 24px;
+    overflow: hidden;
+  }
+  .chart-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--bg-2);
+    flex-wrap: wrap;
+  }
+  .chart-toolbar .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-right: 4px;
+  }
+  .toggle {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 6px 12px;
+    border-radius: 4px;
+    border: 1px solid var(--rule);
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+    transition: all 100ms;
+  }
+  .toggle.on {
+    background: var(--teal-bg);
+    color: var(--teal);
+    border-color: var(--teal);
+  }
+  .toggle:hover:not(.on) { color: var(--ink-1); background: var(--bg-3); }
+  #patChart { height: 480px; background: var(--bg-1); position: relative; }
+
+  /* ── ACTION LADDER ─────────────────────────────────────── */
+  .ladder {
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+  .ladder-h {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--bg-1);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.16em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .ladder-row {
+    display: grid;
+    grid-template-columns: 110px 1fr 90px 110px;
+    align-items: center;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--rule);
+    font-size: 13px;
+  }
+  .ladder-row:last-child { border-bottom: none; }
+  .ladder-row:hover { background: var(--bg-1); }
+  .l-price {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--ink);
+  }
+  .l-price.gn { color: var(--gn); }
+  .l-price.rd { color: var(--rd); }
+  .l-action { color: var(--ink-1); line-height: 1.5; }
+  .l-method {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.10em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    font-weight: 700;
+    text-align: right;
+  }
+  .l-wlb {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-align: right;
+    color: var(--amb);
+    font-weight: 700;
+  }
+  .l-wlb.gn { color: var(--gn); }
+  .l-wlb.rd { color: var(--rd); }
+
+  /* ── DETAIL ACCORDIONS ─────────────────────────────────── */
+  .accordion {
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  .acc-h {
+    padding: 14px 18px;
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: 200px 1fr 80px 80px 24px;
+    gap: 18px;
+    align-items: center;
+    transition: background 120ms;
+  }
+  .acc-h:hover { background: var(--bg-3); }
+  .acc-name {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.14em;
+    color: var(--ink);
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .acc-rationale {
+    color: var(--ink-2);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .acc-vote {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.10em;
+    text-align: right;
+  }
+  .acc-vote.gn { color: var(--gn); }
+  .acc-vote.rd { color: var(--rd); }
+  .acc-vote.am { color: var(--amb); }
+  .acc-wlb {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-align: right;
+    color: var(--ink-1);
+    font-weight: 700;
+  }
+  .acc-caret {
+    color: var(--ink-3);
+    font-size: 12px;
+    transition: transform 120ms;
+  }
+  .acc.open .acc-caret { transform: rotate(90deg); }
+  .acc-body {
+    display: none;
+    padding: 0 18px 16px 18px;
+    border-top: 1px solid var(--rule);
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: var(--ink-1);
+  }
+  .acc.open .acc-body { display: block; }
+  .falsification {
+    margin-top: 10px;
+    padding: 10px 14px;
+    background: var(--bg-1);
+    border-left: 3px solid var(--rd);
+    border-radius: 0 4px 4px 0;
+    font-size: 12px;
+    color: var(--ink-2);
+    font-family: var(--mono);
+  }
+  .falsification b { color: var(--ink); }
+</style>
+</head>
+<body>
+
+<div class="header">PATTERNS · AVGO · $425.19 · MISSION CONTROL PROTOTYPE</div>
+
+<!-- HERO STRIP -->
+<div class="hero">
+  <div>
+    <div style="font-family:var(--mono);font-size:10.5px;letter-spacing:0.16em;color:var(--ink-3);font-weight:700;text-transform:uppercase;margin-bottom:6px">Pattern Composite</div>
+    <div class="hero-verdict">BULLISH</div>
+    <div class="hero-sub">4B · 0S · 3N of 7 METHODS</div>
+  </div>
+  <div>
+    <div style="margin-bottom:10px">
+      <span style="font-family:var(--mono);font-size:10.5px;letter-spacing:0.14em;color:var(--ink-3);font-weight:700;text-transform:uppercase;margin-right:12px">Conviction</span>
+      <span class="hero-conv">MEDIUM</span>
+    </div>
+    <div class="hero-tension">
+      Most methods aligned (Wyckoff, Fib, Ichimoku, Trendlines, Wyckoff bullish). VP and S/R neutral —
+      price inside value area without a clean S/R level nearby.
+    </div>
+  </div>
+  <div class="hero-ticket">
+    <div class="ticket-row"><span class="lbl">Spot</span><span class="val">$425.19</span></div>
+    <div class="ticket-row"><span class="lbl">Stop</span><span class="val rd">$362.68</span></div>
+    <div class="ticket-row"><span class="lbl">T1 · Fib 1.272</span><span class="val gn">$483.81</span></div>
+    <div class="ticket-row"><span class="lbl">T2 · Fib 1.618</span><span class="val gn">$536.54</span></div>
+    <div class="ticket-row"><span class="lbl">R:R</span><span class="val">2.8 : 1</span></div>
+  </div>
+</div>
+
+<!-- 7-METHOD HEATMAP -->
+<div class="heatmap">
+  <div class="chip am">
+    <div class="chip-name">S / R</div>
+    <div class="chip-vote am">NEUTRAL</div>
+    <div class="chip-wlb"><span class="lb">0%</span> WL · n=0</div>
+    <div class="chip-flag rd">INSUFFICIENT</div>
+  </div>
+  <div class="chip gn">
+    <div class="chip-name">Trendlines</div>
+    <div class="chip-vote gn">BULLISH</div>
+    <div class="chip-wlb"><span class="lb">34%</span> WL · n=2</div>
+    <div class="chip-flag rd">INSUFFICIENT</div>
+  </div>
+  <div class="chip am">
+    <div class="chip-name">Vol Profile</div>
+    <div class="chip-vote am">NEUTRAL</div>
+    <div class="chip-wlb"><span class="lb">41%</span> WL · n=8</div>
+    <div class="chip-flag rd">INSUFFICIENT</div>
+  </div>
+  <div class="chip gn">
+    <div class="chip-name">Fibonacci</div>
+    <div class="chip-vote gn">BULLISH</div>
+    <div class="chip-wlb"><span class="lb">—</span> · n=0</div>
+    <div class="chip-flag rd">INSUFFICIENT</div>
+  </div>
+  <div class="chip gn">
+    <div class="chip-name">Ichimoku</div>
+    <div class="chip-vote gn">BULLISH</div>
+    <div class="chip-wlb"><span class="lb">21%</span> WL · n=1</div>
+    <div class="chip-flag rd">INSUFFICIENT</div>
+  </div>
+  <div class="chip gn">
+    <div class="chip-name">Wyckoff</div>
+    <div class="chip-vote gn">BULLISH</div>
+    <div class="chip-wlb">phase: markup</div>
+    <div class="chip-flag gn">confidence 95%</div>
+  </div>
+  <div class="chip am">
+    <div class="chip-name">Classical</div>
+    <div class="chip-vote am">NEUTRAL</div>
+    <div class="chip-wlb"><span class="lb">0%</span> WL · n=2</div>
+    <div class="chip-flag rd">INSUFFICIENT</div>
+  </div>
+</div>
+
+<!-- CHART PANEL -->
+<div class="chart-wrap">
+  <div class="chart-toolbar">
+    <span class="label">OVERLAYS</span>
+    <button class="toggle on" data-overlay="sr">S/R</button>
+    <button class="toggle on" data-overlay="tl">Trendlines</button>
+    <button class="toggle" data-overlay="vp">VP (POC · VAH · VAL)</button>
+    <button class="toggle on" data-overlay="fib">Fibonacci</button>
+    <button class="toggle" data-overlay="ichi">Ichimoku</button>
+    <button class="toggle" data-overlay="cls">Classical</button>
+    <span style="flex:1"></span>
+    <button class="toggle" data-action="reset">Reset</button>
+    <button class="toggle" data-action="all">All ON</button>
+  </div>
+  <div id="patChart"></div>
+</div>
+
+<!-- ACTION LADDER -->
+<div class="ladder">
+  <div class="ladder-h">ACTION LADDER · IF PRICE TAGS, DO X</div>
+  <div class="ladder-row">
+    <div class="l-price gn">$483.81</div>
+    <div class="l-action">→ Take T1 · scale 50% · trail rest</div>
+    <div class="l-method">FIB 1.272</div>
+    <div class="l-wlb am">n=0 INS</div>
+  </div>
+  <div class="ladder-row">
+    <div class="l-price gn">$442.36</div>
+    <div class="l-action">→ Breakout above swing high · add 25%</div>
+    <div class="l-method">FIB SWING-HI</div>
+    <div class="l-wlb">—</div>
+  </div>
+  <div class="ladder-row">
+    <div class="l-price gn">$427.12</div>
+    <div class="l-action">→ Acceptance above VAH = thesis confirmation</div>
+    <div class="l-method">VP VAH</div>
+    <div class="l-wlb gn">41% n=8</div>
+  </div>
+  <div class="ladder-row" style="background:var(--bg-1)">
+    <div class="l-price" style="color:var(--copper)">$425.19</div>
+    <div class="l-action">SPOT · 14% above Kijun · 12% above POC</div>
+    <div class="l-method">NOW</div>
+    <div class="l-wlb">—</div>
+  </div>
+  <div class="ladder-row">
+    <div class="l-price am">$406.39</div>
+    <div class="l-action">→ Fib 0.236 retrace · shallow pullback OK</div>
+    <div class="l-method">FIB 0.236</div>
+    <div class="l-wlb">—</div>
+  </div>
+  <div class="ladder-row">
+    <div class="l-price am">$401.59</div>
+    <div class="l-action">→ Kijun tag · dynamic support reference</div>
+    <div class="l-method">ICHI KIJUN</div>
+    <div class="l-wlb am">21% n=1</div>
+  </div>
+  <div class="ladder-row">
+    <div class="l-price rd">$362.68</div>
+    <div class="l-action">→ HARD STOP · close below = invalidation</div>
+    <div class="l-method">ATR STOP</div>
+    <div class="l-wlb">—</div>
+  </div>
+  <div class="ladder-row">
+    <div class="l-price rd">$348.18</div>
+    <div class="l-action">→ Below Fib 0.618 → deep retrace, exit fully</div>
+    <div class="l-method">FIB 0.618</div>
+    <div class="l-wlb">—</div>
+  </div>
+</div>
+
+<!-- METHOD DRILLDOWN ACCORDIONS -->
+<div class="header" style="margin-top:32px">METHOD DRILLDOWNS · click to expand</div>
+
+<div class="accordion acc" onclick="this.classList.toggle('open')">
+  <div class="acc-h">
+    <div class="acc-name">▸ Wyckoff</div>
+    <div class="acc-rationale">Uptrend (+0.75%/day · 30d slope) with up-day volume 9% richer than down-day. Demand absorbing supply.</div>
+    <div class="acc-vote gn">BULLISH</div>
+    <div class="acc-wlb">conf 95%</div>
+    <div class="acc-caret">▸</div>
+  </div>
+  <div class="acc-body">
+    <b>Phase:</b> MARKUP &nbsp;·&nbsp; <b>30d slope:</b> +0.75%/day &nbsp;·&nbsp; <b>Range pos:</b> 89% &nbsp;·&nbsp; <b>Volume skew:</b> +9%<br><br>
+    Smart money is buying through retail offers. Demand exceeds supply on every test of higher levels.
+    The 89% range position means we're at the upper end of the 60-day range; this is consistent with markup,
+    not exhaustion (markup wants to extend until distribution sets in).
+    <div class="falsification"><b>FALSIFICATION:</b> 30d slope flips negative AND volume skew reverses → markup ends; expect distribution phase to follow at a higher level.</div>
+  </div>
+</div>
+
+<div class="accordion acc" onclick="this.classList.toggle('open')">
+  <div class="acc-h">
+    <div class="acc-name">▸ Fibonacci</div>
+    <div class="acc-rationale">Price $425.19 holding above 0.618 $348.18 after uptrend swing $289.96 → $442.36. Targets 1.272 $483.81 and 1.618 $536.54.</div>
+    <div class="acc-vote gn">BULLISH</div>
+    <div class="acc-wlb">zone: 0–0.236</div>
+    <div class="acc-caret">▸</div>
+  </div>
+  <div class="acc-body">
+    <b>Swing pair:</b> $289.96 (low) → $442.36 (high) &nbsp;·&nbsp; <b>Direction:</b> up &nbsp;·&nbsp; <b>Current zone:</b> 0.000–0.236 (shallow)<br><br>
+    The detected swing comes from actual pivot detection (not 52w hi/lo). Price sits in the shallowest
+    retrace zone — bullish-trend continuation expected. 1.272 ext at $483.81 = primary T1 target;
+    1.618 ext at $536.54 = stretch T2.
+    <div class="falsification"><b>FALSIFICATION:</b> Close below 0.618 ($348.18) on volume → deep retrace failure.</div>
+  </div>
+</div>
+
+<div class="accordion acc" onclick="this.classList.toggle('open')">
+  <div class="acc-h">
+    <div class="acc-name">▸ Ichimoku</div>
+    <div class="acc-rationale">4/4 bullish confluences: cloud=ABOVE · TK=BULL · Chikou=clear · future cloud=BULLISH. Kijun $401.59 is dynamic stop reference.</div>
+    <div class="acc-vote gn">BULLISH</div>
+    <div class="acc-wlb">bull 4/4</div>
+    <div class="acc-caret">▸</div>
+  </div>
+  <div class="acc-body">
+    <b>Cloud state:</b> ABOVE &nbsp;·&nbsp; <b>TK cross:</b> BULL &nbsp;·&nbsp; <b>Chikou:</b> clear &nbsp;·&nbsp; <b>Future cloud:</b> BULLISH<br><br>
+    All four Ichimoku confluences point bullish. Tenkan ($423.58) > Kijun ($401.59) by ~5.5% — healthy
+    momentum without being stretched. The Kijun is the cleanest dynamic stop reference.
+    <div class="falsification"><b>FALSIFICATION:</b> Daily close below Kijun $401.59 loses the trend frame; close inside cloud breaks the system entirely.</div>
+  </div>
+</div>
+
+<div class="accordion acc" onclick="this.classList.toggle('open')">
+  <div class="acc-h">
+    <div class="acc-name">▸ Trendlines</div>
+    <div class="acc-rationale">Both trendlines rising — uptrend channel active. Upper $447.62 · lower $392.81.</div>
+    <div class="acc-vote gn">BULLISH</div>
+    <div class="acc-wlb">intact</div>
+    <div class="acc-caret">▸</div>
+  </div>
+  <div class="acc-body">
+    Channel detected with 3 upper pivots and 3 lower pivots. Channel is rising at ~+0.4%/day — this is
+    the auto-trendline read; it converges with the Wyckoff +0.75%/day markup slope.
+    <div class="falsification"><b>FALSIFICATION:</b> Close below lower trendline ($392.81) ends the channel.</div>
+  </div>
+</div>
+
+<div class="accordion acc" onclick="this.classList.toggle('open')">
+  <div class="acc-h">
+    <div class="acc-name">▸ Volume Profile</div>
+    <div class="acc-rationale">Price $425.19 inside value area [310.28–427.12]. POC $322.98 is the magnet — wait for break of VAH or VAL with volume.</div>
+    <div class="acc-vote am">NEUTRAL</div>
+    <div class="acc-wlb">inside VA</div>
+    <div class="acc-caret">▸</div>
+  </div>
+  <div class="acc-body">
+    Price is at the TOP of the value area (VAH = $427.12). Acceptance ABOVE VAH = bullish; rejection back
+    inside = continued range. The POC at $322.98 is FAR below current — would not return there absent a
+    significant trend reversal. Volume Profile reads NEUTRAL because the auction hasn't migrated yet.
+    <div class="falsification"><b>FALSIFICATION:</b> Acceptance outside VAH/VAL changes the bias. 2 closes above $427.12 = bullish confirm.</div>
+  </div>
+</div>
+
+<div class="accordion acc" onclick="this.classList.toggle('open')">
+  <div class="acc-h">
+    <div class="acc-name">▸ S / R</div>
+    <div class="acc-rationale">Mid-range — no high-touch level within 3% of spot.</div>
+    <div class="acc-vote am">NEUTRAL</div>
+    <div class="acc-wlb">no level</div>
+    <div class="acc-caret">▸</div>
+  </div>
+  <div class="acc-body">
+    No swing-cluster within 3% of spot has 3+ touches. ATR = $9.10. Nearest support cluster is 11% below
+    (Fib 0.500 zone). NEUTRAL until a defendable level develops at or near spot.
+    <div class="falsification"><b>FALSIFICATION:</b> Pattern resolves when price tags a clustered level.</div>
+  </div>
+</div>
+
+<div class="accordion acc" onclick="this.classList.toggle('open')">
+  <div class="acc-h">
+    <div class="acc-name">▸ Classical Patterns</div>
+    <div class="acc-rationale">No high-conviction classical pattern detected in last 90d (cup-handle / flag / triangle scanner returns clean).</div>
+    <div class="acc-vote am">NEUTRAL</div>
+    <div class="acc-wlb">none</div>
+    <div class="acc-caret">▸</div>
+  </div>
+  <div class="acc-body">
+    Bulkowski-style scanner found no cup-and-handle, flag, pennant, ascending triangle, or descending
+    triangle that meets geometric thresholds. AVGO is currently in a clean trend phase, not a consolidation
+    pattern — that's normal for markup phase.
+  </div>
+</div>
+
+<!-- Lightweight-charts CDN -->
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+  // Synthesize 60d of bars + draw with toggleable overlays
+  const container = document.getElementById('patChart');
+  const chart = LightweightCharts.createChart(container, {
+    width: container.clientWidth, height: 480,
+    layout: { background: { color: '#0a0d0c' }, textColor: '#c9cdd0', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
+    grid: { vertLines: { color: '#1a2127' }, horzLines: { color: '#1a2127' } },
+    rightPriceScale: { borderColor: '#283038' },
+    timeScale: { borderColor: '#283038', timeVisible: true },
+    crosshair: { mode: 1 },
+  });
+  const series = chart.addCandlestickSeries({
+    upColor: '#5be57c', downColor: '#ff6b5b',
+    borderUpColor: '#5be57c', borderDownColor: '#ff6b5b',
+    wickUpColor: '#5be57c', wickDownColor: '#ff6b5b',
+  });
+  // Synth path: $290 → $442 over 60d, currently $425
+  const today = new Date();
+  const bars = [];
+  let p = 290;
+  for (let i = 89; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * 86400000);
+    const ds = d.toISOString().slice(0, 10);
+    const target = 290 + (442 - 290) * ((89 - i) / 80);
+    const noise = (Math.random() - 0.5) * 5;
+    const close = Math.max(280, target + noise);
+    const open = p + (Math.random() - 0.5) * 3;
+    bars.push({
+      time: ds,
+      open: +open.toFixed(2),
+      high: +Math.max(open, close, p).toFixed(2) + Math.random() * 2,
+      low: +Math.min(open, close, p).toFixed(2) - Math.random() * 2,
+      close: +close.toFixed(2),
+    });
+    p = close;
+  }
+  bars[bars.length - 1].close = 425.19;
+  series.setData(bars);
+
+  // Overlay registry — added/removed via toggle
+  const overlays = {};
+  function addOverlay(key, priceLines) {
+    if (overlays[key]) overlays[key].forEach(l => series.removePriceLine(l));
+    overlays[key] = priceLines.map(p => series.createPriceLine(p));
+  }
+  function removeOverlay(key) {
+    if (overlays[key]) {
+      overlays[key].forEach(l => series.removePriceLine(l));
+      delete overlays[key];
+    }
+  }
+  const OVERLAYS = {
+    sr: [
+      { price: 442.36, color: '#ff6b5b', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'R $442 · 2T' },
+      { price: 348.18, color: '#5be57c', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'S $348 · 2T' },
+    ],
+    tl: [
+      // Just simulated single endpoints for the prototype
+      { price: 447.62, color: '#ff6b5b', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TL Upper $447' },
+      { price: 392.81, color: '#5be57c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TL Lower $393' },
+    ],
+    vp: [
+      { price: 322.98, color: '#d49060', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'POC $323' },
+      { price: 427.12, color: '#8f969c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'VAH $427' },
+      { price: 310.28, color: '#8f969c', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'VAL $310' },
+    ],
+    fib: [
+      { price: 536.54, color: '#5be57c', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: '1.618 $537' },
+      { price: 483.81, color: '#5be57c', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: '1.272 $484 T1' },
+      { price: 442.36, color: '#5be57c', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: '1.000 $442' },
+      { price: 348.18, color: '#d49060', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: '0.618 $348 GOLDEN' },
+      { price: 289.96, color: '#ff6b5b', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: '0.000 $290' },
+    ],
+    ichi: [
+      { price: 423.58, color: '#d49060', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Tenkan $424' },
+      { price: 401.59, color: '#c9cdd0', lineWidth: 2, lineStyle: 3, axisLabelVisible: true, title: 'Kijun $402 STOP' },
+    ],
+    cls: [],
+  };
+  // Initial overlays on
+  addOverlay('sr', OVERLAYS.sr);
+  addOverlay('tl', OVERLAYS.tl);
+  addOverlay('fib', OVERLAYS.fib);
+
+  document.querySelectorAll('.toggle[data-overlay]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const key = btn.dataset.overlay;
+      btn.classList.toggle('on');
+      if (btn.classList.contains('on')) addOverlay(key, OVERLAYS[key]);
+      else removeOverlay(key);
+    });
+  });
+  document.querySelectorAll('.toggle[data-action]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const a = btn.dataset.action;
+      document.querySelectorAll('.toggle[data-overlay]').forEach(b => {
+        const k = b.dataset.overlay;
+        const shouldOn = (a === 'all');
+        b.classList.toggle('on', shouldOn);
+        if (shouldOn) addOverlay(k, OVERLAYS[k]);
+        else removeOverlay(k);
+      });
+    });
+  });
+  window.addEventListener('resize', () => chart.applyOptions({ width: container.clientWidth }));
+  chart.timeScale().fitContent();
+</script>
+
+</body>
+</html>

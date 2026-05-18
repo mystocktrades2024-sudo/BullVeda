@@ -327,7 +327,7 @@ def _save_state(state: dict):
 
 PAPER_TRADING_MARKER = BASE_DIR / "data" / "paper_trading_start.json"
 PAPER_TRADING_DURATION_DAYS = 60
-MAX_DAILY_TRADES = 4
+MAX_DAILY_TRADES = 8  # 2026-05-18 bumped 4→8 to capture more of 177 profitable signals/19d
 
 
 def compute_current_drawdown_pct(lookback_days: int = 90) -> dict:

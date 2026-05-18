@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Kairos · AI Prediction · Prototype</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{
+  --bg-0:#0a0d0c; --bg-1:#11151a; --bg-2:#161a1e; --bg-3:#1c2125;
+  --line:#262b2d; --line-2:#353a3c;
+  --ink:#ecefe9; --ink-1:#d4d8d1; --ink-2:#9a9e98; --ink-3:#686c68;
+  --gn:#4ade80; --gn-bg:rgba(74,222,128,0.10);
+  --rd:#f87171; --rd-bg:rgba(248,113,113,0.10);
+  --amb:#fbbf24; --amb-bg:rgba(251,191,36,0.10);
+  --cy:#60a5fa; --cy-bg:rgba(96,165,250,0.14);
+  --copper:#d97757; --copper-bg:rgba(217,119,87,0.12);
+  --mono:'JetBrains Mono', ui-monospace, monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:24px;background:var(--bg-0);color:var(--ink);font:13.5px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;font-variant-numeric:tabular-nums}
+.wrap{max-width:1480px;margin:0 auto}
+.breadcrumb{font:700 11px var(--mono);color:var(--ink-3);letter-spacing:.18em;text-transform:uppercase;margin-bottom:18px}
+.breadcrumb b{color:var(--ink-1)} .breadcrumb .cu{color:var(--copper)}
+
+/* ────── chart frame ────── */
+.frame{background:var(--bg-1);border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.frame-head{display:flex;align-items:center;gap:0;padding:0;border-bottom:1px solid var(--line);background:var(--bg-2)}
+.tk-id{padding:12px 18px;border-right:1px solid var(--line);min-width:240px}
+.tk-tk{font:800 22px var(--mono);letter-spacing:.04em;line-height:1}
+.tk-name{font:500 11px var(--mono);color:var(--ink-3);margin-top:4px}
+.tk-tabs{display:flex;flex:1;height:100%}
+.tk-tab{padding:14px 16px;font:600 12px var(--mono);color:var(--ink-2);border-right:1px solid var(--line);cursor:pointer;display:flex;align-items:center;gap:6px}
+.tk-tab.on{color:var(--ink);background:var(--bg-1);box-shadow:inset 0 -2px 0 var(--copper)}
+.tk-tab:hover{color:var(--ink-1)}
+.tk-tab.ai{color:var(--copper);font-weight:700;position:relative}
+.tk-tab.ai .sparkle{display:inline-block;animation:pulse 2.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.6;transform:scale(1)} 50%{opacity:1;transform:scale(1.15)}}
+.tk-tab.ai.on{background:var(--copper-bg);color:var(--copper)}
+
+.tk-px{padding:12px 18px;border-left:1px solid var(--line);min-width:170px;text-align:right}
+.tk-pxv{font:800 22px var(--mono);line-height:1}
+.tk-pxd{font:600 11px var(--mono);color:var(--gn);margin-top:3px}
+
+/* ────── chart body ────── */
+.chart-body{position:relative;background:var(--bg-0)}
+#chart{height:520px;background:var(--bg-0)}
+
+/* projection overlay — sits inside #chart but is drawn by JS using SVG */
+.ai-overlay{position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none}
+.ai-badge{
+  position:absolute;
+  right:78px; top:50%;
+  background:linear-gradient(135deg, rgba(217,119,87,0.95), rgba(217,119,87,0.75));
+  color:#fff; font:800 13px var(--mono); padding:10px 14px; border-radius:3px;
+  box-shadow:0 8px 24px rgba(217,119,87,0.35), 0 0 0 1px rgba(255,255,255,0.12) inset;
+  letter-spacing:.02em; line-height:1.1;
+  display:none; transform:translateY(-50%);
+  z-index:5;
+}
+.ai-badge .lbl{display:block;font:600 9.5px var(--mono);opacity:.85;letter-spacing:.14em;margin-bottom:3px}
+.ai-badge .val{font:800 18px var(--mono);letter-spacing:-.01em}
+.ai-badge .sub{display:block;font:500 9.5px var(--mono);opacity:.75;margin-top:3px}
+
+.ai-empty-state{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(180deg, rgba(10,13,12,0.25), rgba(10,13,12,0.85));
+  pointer-events:none;
+  opacity:0; transition:opacity .25s ease;
+  z-index:3;
+}
+.ai-empty-card{
+  background:var(--bg-1);border:1px solid var(--copper);border-radius:3px;padding:18px 24px;
+  text-align:center;box-shadow:0 16px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(217,119,87,0.4) inset;
+  pointer-events:auto;
+}
+.ai-empty-card h3{font:800 14px var(--mono);color:var(--copper);margin:0 0 4px;letter-spacing:.04em}
+.ai-empty-card p{font:500 11px var(--mono);color:var(--ink-2);margin:4px 0 12px;letter-spacing:.02em}
+.ai-empty-card button{
+  background:var(--copper);color:#fff;border:0;border-radius:2px;
+  padding:10px 18px;font:800 12px var(--mono);letter-spacing:.06em;cursor:pointer;text-transform:uppercase;
+}
+.ai-empty-card button:hover{background:#e2856a}
+
+/* ────── below-chart layout ────── */
+.below{display:grid;grid-template-columns:1fr 360px;gap:14px;margin-top:14px}
+
+/* verdict card */
+.verdict{background:var(--bg-1);border:1px solid var(--line);border-left:4px solid var(--copper);border-radius:3px;padding:14px 18px}
+.verdict-hd{display:flex;justify-content:space-between;align-items:center;font:700 10px var(--mono);color:var(--ink-3);letter-spacing:.18em;text-transform:uppercase;margin-bottom:10px}
+.verdict-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.v-cell{padding:10px 12px;background:var(--bg-2);border-radius:2px;border-left:3px solid var(--line-2)}
+.v-cell.gn{border-left-color:var(--gn)} .v-cell.rd{border-left-color:var(--rd)} .v-cell.cu{border-left-color:var(--copper)} .v-cell.cy{border-left-color:var(--cy)}
+.v-lbl{font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:.16em;text-transform:uppercase;margin-bottom:5px}
+.v-val{font:800 22px var(--mono);line-height:1;letter-spacing:-.01em}
+.v-sub{font:500 10px var(--mono);color:var(--ink-2);margin-top:4px;letter-spacing:.02em}
+
+.kicker{margin-top:14px;font:600 11.5px var(--mono);color:var(--ink-1);line-height:1.7;letter-spacing:.01em}
+.kicker .bg{color:var(--copper);font-weight:800}
+
+/* shap panel */
+.shap{background:var(--bg-1);border:1px solid var(--line);border-radius:3px;padding:14px 16px;height:100%}
+.shap-hd{font:700 10px var(--mono);color:var(--ink-3);letter-spacing:.18em;text-transform:uppercase;margin-bottom:14px;display:flex;justify-content:space-between}
+.shap-hd .auc{color:var(--gn)}
+.shap-bar{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
+.shap-bar:last-child{border-bottom:0}
+.shap-name{flex:0 0 130px;font:600 11px var(--mono);color:var(--ink-1);letter-spacing:.02em}
+.shap-track{flex:1;position:relative;height:14px;background:var(--bg-2);border-radius:2px;overflow:hidden;border:1px solid var(--line)}
+.shap-fill{position:absolute;top:0;bottom:0;height:100%}
+.shap-fill.pos{background:var(--gn);left:50%}
+.shap-fill.neg{background:var(--rd);right:50%}
+.shap-val{flex:0 0 50px;text-align:right;font:700 11px var(--mono);font-variant-numeric:tabular-nums}
+
+/* horizon switch */
+.hzn{display:inline-flex;gap:2px;background:var(--bg-2);border:1px solid var(--line);border-radius:3px;padding:2px;margin-left:auto}
+.hzn-btn{padding:6px 14px;font:700 11px var(--mono);color:var(--ink-2);background:transparent;border:0;cursor:pointer;border-radius:2px;letter-spacing:.04em}
+.hzn-btn.on{background:var(--copper);color:#fff}
+.hzn-btn:hover:not(.on){color:var(--ink)}
+
+/* impl guide */
+.guide{margin-top:36px;background:var(--bg-1);border:1px solid var(--line);border-radius:3px;padding:24px}
+.guide h2{font:800 16px var(--mono);color:var(--copper);margin:0 0 4px;letter-spacing:.04em}
+.guide .sub{font:500 11.5px var(--mono);color:var(--ink-3);margin-bottom:18px;letter-spacing:.02em}
+.guide h3{font:700 12px var(--mono);color:var(--ink);margin:18px 0 8px;letter-spacing:.06em;text-transform:uppercase}
+.guide ol{padding-left:22px;line-height:1.8} .guide li{margin-bottom:6px;color:var(--ink-1);font-size:13.5px}
+.guide code{font:600 11.5px var(--mono);color:var(--copper);background:var(--bg-3);padding:2px 6px;border-radius:2px}
+.guide pre{background:var(--bg-3);padding:14px 16px;border-radius:3px;font:500 11.5px var(--mono);color:var(--ink-1);overflow-x:auto;border:1px solid var(--line);line-height:1.55}
+.guide .map{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.guide .map-row{display:grid;grid-template-columns:1fr 24px 1fr;gap:8px;padding:8px 10px;background:var(--bg-2);border-radius:2px;align-items:center;font:600 11.5px var(--mono)}
+.guide .map-row .src{color:var(--copper)}
+.guide .map-row .arr{color:var(--ink-3);text-align:center}
+.guide .map-row .dst{color:var(--cy)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="breadcrumb">Kairos · <b>Prototype</b> · <span class="cu">AI Prediction Chart Overlay</span></div>
+
+<!-- ════════════════ CHART FRAME ════════════════ -->
+<div class="frame">
+  <div class="frame-head">
+    <div class="tk-id">
+      <div class="tk-tk">NVDA</div>
+      <div class="tk-name">NASDAQ · Semiconductors</div>
+    </div>
+    <div class="tk-tabs">
+      <div class="tk-tab">Financials</div>
+      <div class="tk-tab on">📈 Chart</div>
+      <div class="tk-tab">Analysts</div>
+      <div class="tk-tab">Company</div>
+      <div class="tk-tab ai" id="aiBtn" onclick="toggleAI()"><span class="sparkle">✦</span> AI Prediction</div>
+      <div class="tk-tab">⚡ Alerts</div>
+    </div>
+    <div class="tk-px">
+      <div class="tk-pxv">$225.32</div>
+      <div class="tk-pxd">+1.04 (+0.46%)</div>
+    </div>
+  </div>
+
+  <div class="chart-body">
+    <!-- horizon selector + AI badge sit on top of the chart -->
+    <div style="position:absolute;top:10px;left:14px;z-index:4;display:flex;align-items:center;gap:10px">
+      <span style="font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:.18em;text-transform:uppercase">Forecast horizon</span>
+      <div class="hzn">
+        <button class="hzn-btn on" data-h="swing"  onclick="setHorizon('swing')">5D · Swing</button>
+        <button class="hzn-btn"    data-h="position" onclick="setHorizon('position')">21D · Position</button>
+        <button class="hzn-btn"    data-h="invest"   onclick="setHorizon('invest')">63D · Invest</button>
+      </div>
+    </div>
+
+    <div id="chart"></div>
+    <div class="ai-overlay">
+      <svg id="aiCone" width="100%" height="100%" style="position:absolute;inset:0;display:none"></svg>
+      <div class="ai-badge" id="aiBadge">
+        <span class="lbl">✦ AI Prediction</span>
+        <span class="val" id="aiBadgeVal">+9.70%</span>
+        <span class="sub" id="aiBadgeSub">5d · p(target)=37%</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════ VERDICT + SHAP ════════════════ -->
+<div class="below">
+
+  <div>
+    <div class="verdict">
+      <div class="verdict-hd">
+        <span>AI Forecast · <b style="color:var(--ink-1)" id="vTicker">NVDA</b> · <span id="vHorizon">5-day swing</span></span>
+        <span style="color:var(--gn)" id="vVerdict">★ STRONG ★</span>
+      </div>
+      <div class="verdict-row">
+        <div class="v-cell gn"><div class="v-lbl">Predicted move</div><div class="v-val" style="color:var(--gn)" id="vMove">+9.70%</div><div class="v-sub" id="vMoveSub">median q50 · close→close</div></div>
+        <div class="v-cell cu"><div class="v-lbl">Direction edge</div><div class="v-val" style="color:var(--copper)" id="vEdge">+22%</div><div class="v-sub" id="vEdgeSub">p(up) 0.54 · p(dn) 0.32</div></div>
+        <div class="v-cell cy"><div class="v-lbl">p(reach T1)</div><div class="v-val" style="color:var(--cy)" id="vT1">37%</div><div class="v-sub" id="vT1Sub">vs p(stop) 63%</div></div>
+        <div class="v-cell"><div class="v-lbl">Confidence</div><div class="v-val" id="vConf">HIGH</div><div class="v-sub" id="vConfSub">AUC 0.77 · n=534K</div></div>
+      </div>
+      <div class="kicker" id="vKicker">
+        Direction model is <span class="bg">+22% edge LONG</span>. Magnitude cone is asymmetric — q75 reaches <span class="bg">+9.70%</span> while q25 floors at −3.15%. Top drivers: <b>52w-low rank ↑</b>, <b>EMA50 dist</b>, <b>RSI normalization</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="shap">
+    <div class="shap-hd"><span>Why · SHAP top features</span><span class="auc" id="shapAuc">AUC 0.77</span></div>
+    <div id="shapBars"></div>
+  </div>
+</div>
+
+<!-- ════════════════ IMPLEMENTATION GUIDE ════════════════ -->
+<div class="guide">
+  <h2>How to wire this into kairos.html</h2>
+  <div class="sub">Every visual element above maps 1:1 to data we already serve — no new license, no new model. 4 hours of front-end work.</div>
+
+  <h3>1 · Data we already have</h3>
+  <ol>
+    <li><code>cache/ml_edge_predictions.json</code> — already served at <code>/v2/ml_edge_predictions.json</code> and cached client-side as <code>window.__mlEdgeCache</code> (see kairos.html ~line 33550). Shape: <code>predictions.{swing|position|invest}.{TICKER}</code>.</li>
+    <li>Per-ticker payload contains <code>direction {p_up,p_chop,p_dn,edge}</code>, <code>magnitude {q10,q25,q50,q75,q90,skew}</code>, <code>hit_net {p_t1_first,p_stop_first,model_auc,model_n}</code>, <code>shap.dir_top[]</code> and <code>model_meta {trained_at, calibration_health}</code>.</li>
+    <li><code>cache/target_engine/{TICKER}_{MODE}.json</code> — already has the entry/stop/T1/T2 + <code>p_reach</code> blend (analog · MC · bayes). Use T1/T2 as the magnet lines if you want explicit price targets in addition to the magnitude cone.</li>
+  </ol>
+
+  <h3>2 · Data → visual mapping</h3>
+  <div class="map">
+    <div class="map-row"><span class="src">magnitude.q25 → q75</span><span class="arr">→</span><span class="dst">cone band on chart</span></div>
+    <div class="map-row"><span class="src">magnitude.q50</span><span class="arr">→</span><span class="dst">centerline + "+X.X%" badge</span></div>
+    <div class="map-row"><span class="src">magnitude.q10 / q90</span><span class="arr">→</span><span class="dst">faint outer cone (tail risk)</span></div>
+    <div class="map-row"><span class="src">direction.edge</span><span class="arr">→</span><span class="dst">cone tint (green if &gt;0)</span></div>
+    <div class="map-row"><span class="src">hit_net.p_t1_first</span><span class="arr">→</span><span class="dst">confidence pill + sub-text</span></div>
+    <div class="map-row"><span class="src">shap.dir_top[]</span><span class="arr">→</span><span class="dst">"Why" bars on right</span></div>
+    <div class="map-row"><span class="src">horizon_days</span><span class="arr">→</span><span class="dst">cone extends N bars right of "now"</span></div>
+    <div class="map-row"><span class="src">target_engine T1/T2</span><span class="arr">→</span><span class="dst">price-line markers inside cone</span></div>
+  </div>
+
+  <h3>3 · Where to mount in kairos.html</h3>
+  <ol>
+    <li><b>Button</b> — add a new tab pill next to existing chart tabs in the <code>qovHeroChart</code> header (search <code>_qovExpandChart</code> near line 26703). One <code>&lt;button onclick="_aiPredToggle()"&gt;✦ AI Prediction&lt;/button&gt;</code> styled with <code>--copper</code>.</li>
+    <li><b>Cone renderer</b> — TradingView LightweightCharts already powers <code>#qovHeroChart</code> (init at <code>_qovInitHeroChart</code> ~line 27012). Use the existing chart instance: add an <code>AreaSeries</code> for the q25→q75 band, a <code>LineSeries</code> for q50, and synthetic future timestamps spaced one bar apart for <code>horizon_days</code>.</li>
+    <li><b>Badge</b> — absolute-positioned <code>div</code> over the chart, snapped to the right edge at the q50 terminal y-coordinate. Use <code>chart.priceScale().priceToCoordinate(endPrice)</code> to position.</li>
+    <li><b>Data fetch</b> — reuse <code>_loadMlEdge()</code> at line ~33552. Already a Promise-cached fetch. Just read <code>cache.predictions[mode][ticker]</code>.</li>
+    <li><b>Verdict + SHAP cards</b> — drop below the hero chart as a new <code>tv-cell</code> in the same TV-grid (rows 4–5 of the hero). Re-uses existing <code>.tv-cell</code> CSS.</li>
+  </ol>
+
+  <h3>4 · Pseudocode for cone projection</h3>
+<pre>function renderAICone(chart, candleSeries, pred, lastBar) {
+  const { q10, q25, q50, q75, q90 } = pred.magnitude;     // %
+  const N = pred.horizon_days;                            // 5 / 21 / 63
+  const p0 = lastBar.close;
+  // Synthetic future timestamps — one bar apart
+  const future = Array.from({ length: N }, (_, i) =&gt; ({
+    time: lastBar.time + (i + 1) * 86400,
+    q25: p0 * (1 + (q25 / 100) * ((i + 1) / N)),
+    q50: p0 * (1 + (q50 / 100) * ((i + 1) / N)),
+    q75: p0 * (1 + (q75 / 100) * ((i + 1) / N)),
+  }));
+
+  // q25→q75 band (semi-transparent fill)
+  const bandUp = chart.addAreaSeries({ topColor: 'rgba(217,119,87,0.25)', bottomColor: 'rgba(217,119,87,0.05)', lineColor: 'transparent' });
+  bandUp.setData(future.map(f =&gt; ({ time: f.time, value: f.q75 })));
+  // ... q25 lower band same pattern with bottomColor as bg
+
+  // q50 centerline
+  const center = chart.addLineSeries({ color: '#d97757', lineWidth: 2, lineStyle: 2 /* dashed */ });
+  center.setData(future.map(f =&gt; ({ time: f.time, value: f.q50 })));
+
+  // T1/T2 horizontal markers (optional, from target_engine)
+  candleSeries.createPriceLine({ price: pred.t1_price, color: '#4ade80', lineStyle: 1, title: `T1 ${pred.t1_p_reach}%` });
+}</pre>
+
+  <h3>5 · Gating &amp; safety</h3>
+  <ol>
+    <li>Show <b>"PRELIMINARY"</b> watermark badge when <code>model_meta.preliminary === true</code> (training sample under 30 trades — half-size discipline per CLAUDE.md retail calibration).</li>
+    <li>Show <b>"CALIBRATION DRIFT"</b> warning when <code>calibration_health !== 'ok'</code> — pulls from <code>cache/ml/calibration_report.json</code> already on disk.</li>
+    <li>If <code>hit_net.p_t1_first &lt; p_stop_first</code> by &gt;0.2, recolor badge amber — "model says reaching T1 is less likely than the stop." Don't pretend the model is bullish when it isn't.</li>
+    <li>Gate the entire feature behind CapStudio function <code>ml_predict_overlay</code> so role &lt;quant&gt; can hide it from junior accounts.</li>
+  </ol>
+
+  <h3>6 · Ship order (4 hours)</h3>
+  <ol>
+    <li><b>30 min</b> — add the button + tab styling.</li>
+    <li><b>90 min</b> — wire the cone renderer using existing chart instance.</li>
+    <li><b>60 min</b> — verdict card + SHAP bars below the chart.</li>
+    <li><b>30 min</b> — horizon switcher (swing/position/invest) updating cone in place.</li>
+    <li><b>30 min</b> — preliminary/drift watermarks + CapStudio gate registration.</li>
+  </ol>
+</div>
+
+</div>
+
+<!-- ════════════════ DEMO DATA + JS ════════════════ -->
+<script>
+// Fake but realistically shaped predictions — mirrors cache/ml_edge_predictions.json
+const DEMO = {
+  swing: {
+    label: '5-day swing', horizon_days: 5,
+    direction:{p_up:0.54, p_chop:0.14, p_dn:0.32, edge:0.22},
+    magnitude:{q10:-6.4, q25:-3.15, q50:4.5, q75:9.70, q90:14.2, skew:0.32},
+    hit_net:{p_t1_first:0.37, p_stop_first:0.63, model_auc:0.77, model_n:534144},
+    verdict:'STRONG', confidence:'HIGH',
+    shap:[
+      {f:'pctrank_dist_52w_low',  v: 0.235},
+      {f:'pctrank_ema50_dist',    v: 0.115},
+      {f:'rsi_14',                v: 0.082},
+      {f:'pctrank_dist_52w_high', v:-0.149},
+      {f:'sma200_dist',           v:-0.082},
+    ],
+  },
+  position: {
+    label: '21-day position', horizon_days: 21,
+    direction:{p_up:0.48, p_chop:0.18, p_dn:0.34, edge:0.14},
+    magnitude:{q10:-11.3, q25:-5.4, q50:6.8, q75:15.6, q90:24.1, skew:0.41},
+    hit_net:{p_t1_first:0.44, p_stop_first:0.56, model_auc:0.74, model_n:412088},
+    verdict:'MODERATE', confidence:'MED',
+    shap:[
+      {f:'ret_63d',         v: 0.198},
+      {f:'sma50_dist',      v: 0.104},
+      {f:'rvol_20',         v: 0.061},
+      {f:'dist_52w_high',   v:-0.142},
+      {f:'macd_hist_pct',   v: 0.058},
+    ],
+  },
+  invest: {
+    label: '63-day invest', horizon_days: 63,
+    direction:{p_up:0.51, p_chop:0.16, p_dn:0.33, edge:0.18},
+    magnitude:{q10:-19.4, q25:-9.1, q50:11.4, q75:24.7, q90:38.2, skew:0.36},
+    hit_net:{p_t1_first:0.52, p_stop_first:0.48, model_auc:0.71, model_n:298641},
+    verdict:'SOLID', confidence:'MED',
+    shap:[
+      {f:'ret_252d',         v: 0.221},
+      {f:'sma200_dist',      v: 0.142},
+      {f:'fund_quality',     v: 0.094},
+      {f:'dist_52w_high',    v:-0.118},
+      {f:'pctrank_atr_pct',  v:-0.064},
+    ],
+  },
+};
+
+// ────── chart bootstrap ──────
+const SPOT = 225.32;
+const seed = (function(){ let s=42; return ()=>{s=(s*9301+49297)%233280; return s/233280;};})();
+function makeCandles(n=180){
+  const out=[]; let px=180, t=Math.floor(Date.now()/1000)-n*86400; t=t-(t%86400);
+  for(let i=0;i<n;i++){
+    const drift = (i/n)*0.0015 + (seed()-0.48)*0.012;
+    const o=px*(1+drift*0.4), c=px*(1+drift), h=Math.max(o,c)*(1+seed()*0.008), l=Math.min(o,c)*(1-seed()*0.008);
+    out.push({time:t,open:o,high:h,low:l,close:c});
+    px=c; t+=86400;
+  }
+  // force last close to SPOT
+  out[out.length-1].close = SPOT;
+  out[out.length-1].high = Math.max(out[out.length-1].high, SPOT);
+  return out;
+}
+const candles = makeCandles(180);
+const lastBar = candles[candles.length-1];
+
+const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+  layout:{ background:{type:'solid', color:'#0a0d0c'}, textColor:'#9a9e98', fontFamily:'JetBrains Mono' },
+  grid:{ vertLines:{color:'#161a1e'}, horzLines:{color:'#161a1e'} },
+  rightPriceScale:{ borderColor:'#262b2d' },
+  timeScale:{ borderColor:'#262b2d', rightOffset:18, barSpacing:5 },
+  crosshair:{ mode:1 },
+});
+const cs = chart.addCandlestickSeries({ upColor:'#4ade80', downColor:'#f87171', borderVisible:false, wickUpColor:'#4ade80', wickDownColor:'#f87171' });
+cs.setData(candles);
+// EMA21 + EMA50
+function ema(arr,p){ const k=2/(p+1); const out=[]; let prev=arr[0].close; for(const b of arr){ prev=b.close*k+prev*(1-k); out.push({time:b.time, value:prev}); } return out; }
+const ema21 = chart.addLineSeries({color:'#60a5fa', lineWidth:1});  ema21.setData(ema(candles,21));
+const ema50 = chart.addLineSeries({color:'#fbbf24', lineWidth:1});  ema50.setData(ema(candles,50));
+
+// ────── AI overlay handles ──────
+let aiOn=false, currentMode='swing';
+let bandUp=null, bandLo=null, center=null, conePriceLines=[];
+
+function clearCone(){
+  if(bandUp){ try{ chart.removeSeries(bandUp);}catch(_){} bandUp=null; }
+  if(bandLo){ try{ chart.removeSeries(bandLo);}catch(_){} bandLo=null; }
+  if(center){ try{ chart.removeSeries(center);}catch(_){} center=null; }
+  conePriceLines.forEach(pl=>{ try{ cs.removePriceLine(pl);}catch(_){} });
+  conePriceLines=[];
+}
+
+function renderCone(){
+  clearCone();
+  const pred = DEMO[currentMode];
+  const N = pred.horizon_days;
+  const {q10,q25,q50,q75,q90} = pred.magnitude;
+  const p0 = lastBar.close;
+  const future = [];
+  for(let i=0;i<=N;i++){
+    const f = i/N;
+    future.push({
+      time: lastBar.time + i*86400,
+      q10: p0*(1 + (q10/100)*f),
+      q25: p0*(1 + (q25/100)*f),
+      q50: p0*(1 + (q50/100)*f),
+      q75: p0*(1 + (q75/100)*f),
+      q90: p0*(1 + (q90/100)*f),
+    });
+  }
+
+  // upper band (q75)
+  bandUp = chart.addAreaSeries({
+    topColor:'rgba(217,119,87,0.32)', bottomColor:'rgba(217,119,87,0.04)',
+    lineColor:'rgba(217,119,87,0.85)', lineWidth:1, priceLineVisible:false, lastValueVisible:false
+  });
+  bandUp.setData(future.map(f=>({time:f.time, value:f.q75})));
+
+  // lower band (q25) — render as a separate area going DOWN from baseline
+  bandLo = chart.addAreaSeries({
+    topColor:'rgba(217,119,87,0.04)', bottomColor:'rgba(217,119,87,0.32)',
+    lineColor:'rgba(217,119,87,0.85)', lineWidth:1, priceLineVisible:false, lastValueVisible:false
+  });
+  bandLo.setData(future.map(f=>({time:f.time, value:f.q25})));
+
+  // median (q50) dashed centerline
+  center = chart.addLineSeries({
+    color:'#d97757', lineWidth:2, lineStyle:2, priceLineVisible:false, lastValueVisible:true,
+    title:'AI q50'
+  });
+  center.setData(future.map(f=>({time:f.time, value:f.q50})));
+
+  // T1/T2 magnet lines (from target_engine) — demo values
+  const t1Price = p0*(1 + q75/100*0.7);
+  const t2Price = p0*(1 + q75/100*1.0);
+  conePriceLines.push(cs.createPriceLine({price:t1Price, color:'#4ade80', lineStyle:1, lineWidth:1, axisLabelVisible:true, title:'T1'}));
+  conePriceLines.push(cs.createPriceLine({price:t2Price, color:'#60a5fa', lineStyle:1, lineWidth:1, axisLabelVisible:true, title:'T2'}));
+
+  // badge position
+  const endPrice = future[future.length-1].q50;
+  const badge = document.getElementById('aiBadge');
+  badge.style.display='block';
+  document.getElementById('aiBadgeVal').textContent = (q50>=0?'+':'') + q50.toFixed(2) + '%';
+  document.getElementById('aiBadgeSub').textContent = `${N}d · p(target)=${(pred.hit_net.p_t1_first*100).toFixed(0)}%`;
+  // y-anchor — read from chart after a tick
+  setTimeout(()=>{
+    try{
+      const y = cs.priceToCoordinate(endPrice);
+      if(y!=null){ badge.style.top = y+'px'; badge.style.transform='translateY(-50%)'; }
+    }catch(_){}
+  },80);
+}
+
+function toggleAI(){
+  aiOn=!aiOn;
+  document.getElementById('aiBtn').classList.toggle('on', aiOn);
+  document.getElementById('aiCone').style.display = aiOn?'block':'none';
+  if(aiOn){
+    renderCone();
+    renderVerdict();
+    renderShap();
+  } else {
+    clearCone();
+    document.getElementById('aiBadge').style.display='none';
+  }
+}
+
+function setHorizon(h){
+  currentMode=h;
+  document.querySelectorAll('.hzn-btn').forEach(b=>b.classList.toggle('on', b.dataset.h===h));
+  if(aiOn){ renderCone(); renderVerdict(); renderShap(); }
+}
+
+function renderVerdict(){
+  const p = DEMO[currentMode];
+  const moveCol = p.magnitude.q50 >= 0 ? '#4ade80' : '#f87171';
+  document.getElementById('vTicker').textContent = 'NVDA';
+  document.getElementById('vHorizon').textContent = p.label;
+  document.getElementById('vVerdict').textContent = `★ ${p.verdict} ★`;
+  document.getElementById('vVerdict').style.color = p.verdict==='STRONG'?'#4ade80':(p.verdict==='SOLID'?'#60a5fa':'#fbbf24');
+  document.getElementById('vMove').textContent = (p.magnitude.q50>=0?'+':'') + p.magnitude.q50.toFixed(2) + '%';
+  document.getElementById('vMove').style.color = moveCol;
+  document.getElementById('vMoveSub').textContent = `median q50 · q25/q75 band [${p.magnitude.q25.toFixed(1)}% , ${p.magnitude.q75.toFixed(1)}%]`;
+  document.getElementById('vEdge').textContent = (p.direction.edge>=0?'+':'') + (p.direction.edge*100).toFixed(0) + '%';
+  document.getElementById('vEdgeSub').textContent = `p(up) ${p.direction.p_up.toFixed(2)} · p(dn) ${p.direction.p_dn.toFixed(2)}`;
+  document.getElementById('vT1').textContent = (p.hit_net.p_t1_first*100).toFixed(0) + '%';
+  document.getElementById('vT1Sub').textContent = `vs p(stop) ${(p.hit_net.p_stop_first*100).toFixed(0)}%`;
+  document.getElementById('vConf').textContent = p.confidence;
+  document.getElementById('vConfSub').textContent = `AUC ${p.hit_net.model_auc.toFixed(2)} · n=${(p.hit_net.model_n/1000).toFixed(0)}K`;
+
+  // SHAP-driven kicker
+  const top = p.shap.slice(0,3).map(s=>{
+    const arrow = s.v>=0?'↑':'↓';
+    return `<b>${s.f.replace(/_/g,' ')} ${arrow}</b>`;
+  }).join(', ');
+  document.getElementById('vKicker').innerHTML =
+    `Direction model is <span class="bg">${p.direction.edge>=0?'+':''}${(p.direction.edge*100).toFixed(0)}% edge ${p.direction.edge>=0?'LONG':'SHORT'}</span>. ` +
+    `Magnitude cone is asymmetric — q75 reaches <span class="bg">${(p.magnitude.q75>=0?'+':'')+p.magnitude.q75.toFixed(2)}%</span> while q25 floors at ${p.magnitude.q25.toFixed(2)}%. ` +
+    `Top drivers: ${top}.`;
+}
+
+function renderShap(){
+  const p = DEMO[currentMode];
+  document.getElementById('shapAuc').textContent = `AUC ${p.hit_net.model_auc.toFixed(2)}`;
+  const max = Math.max(...p.shap.map(s=>Math.abs(s.v)));
+  const html = p.shap.map(s=>{
+    const pct = (Math.abs(s.v)/max)*45; // half-width %
+    const isPos = s.v>=0;
+    return `
+      <div class="shap-bar">
+        <span class="shap-name">${s.f}</span>
+        <div class="shap-track">
+          <div class="shap-fill ${isPos?'pos':'neg'}" style="width:${pct.toFixed(1)}%"></div>
+        </div>
+        <span class="shap-val" style="color:${isPos?'#4ade80':'#f87171'}">${s.v>=0?'+':''}${s.v.toFixed(2)}</span>
+      </div>`;
+  }).join('');
+  document.getElementById('shapBars').innerHTML = html;
+}
+
+// initial empty render of verdict (will be populated when AI toggled)
+renderVerdict();
+renderShap();
+
+// Re-position badge on chart resize
+new ResizeObserver(()=>{ if(aiOn) renderCone(); }).observe(document.getElementById('chart'));
+</script>
+
+</body>
+</html>

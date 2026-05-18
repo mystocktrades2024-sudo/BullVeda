@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kairos · TradingView Integration Prototype</title>
+<style>
+  :root {
+    --bg-0:#0a0d0c; --bg-1:#0f1310; --bg-2:#161a17; --bg-3:#1c2120; --bg-4:#252a28;
+    --ink:#e8e4dc; --ink-1:#c8c4ba; --ink-2:#9a9590; --ink-3:#6a6560;
+    --line:#252a28; --line-2:#3a3f3c;
+    --copper:#d97757; --gn:#5be57c; --rd:#ff6b5b; --amb:#ffb95c; --cy:#5ec8d8;
+    --gn-bg:rgba(91,229,124,0.10); --rd-bg:rgba(255,107,91,0.10); --amb-bg:rgba(255,185,92,0.10);
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+    --mono:'JetBrains Mono','SF Mono',Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg-0);color:var(--ink);font:14px/1.5 var(--sans);min-height:100vh}
+  .topbar{background:var(--bg-1);border-bottom:1px solid var(--line);padding:14px 24px;display:flex;align-items:center;gap:24px}
+  .topbar .brand{font:800 16px var(--sans);color:var(--copper);letter-spacing:-0.01em}
+  .topbar .brand b{color:var(--ink)}
+  .topbar .sub{font:500 11px var(--mono);color:var(--ink-3);letter-spacing:.04em}
+  .topbar .live{margin-left:auto;font:700 10px var(--mono);color:var(--gn);letter-spacing:.10em;display:inline-flex;align-items:center;gap:6px}
+  .topbar .live::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--gn);box-shadow:0 0 6px var(--gn);animation:p 1.4s infinite}
+  @keyframes p{0%,100%{opacity:1}50%{opacity:.4}}
+  .wrap{max-width:1400px;margin:0 auto;padding:18px 24px 60px}
+  .h{font:800 11px var(--mono);color:var(--copper);letter-spacing:.18em;text-transform:uppercase;margin:24px 0 8px;display:flex;align-items:baseline;gap:14px}
+  .h .sub{font:500 11px var(--mono);color:var(--ink-3);letter-spacing:.04em;text-transform:none;font-weight:500}
+  .card{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;padding:16px;margin-bottom:14px}
+  .card.gn{border-left:3px solid var(--gn)}
+  .card.cy{border-left:3px solid var(--cy)}
+  .card.am{border-left:3px solid var(--amb)}
+  .card.cu{border-left:3px solid var(--copper)}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  .grid-news{display:grid;grid-template-columns:2fr 1fr;gap:12px}
+  .note{background:var(--bg-3);border-radius:2px;padding:10px 14px;font:500 11.5px var(--mono);color:var(--ink-1);line-height:1.7;margin-top:10px;border-left:2px solid var(--cy)}
+  .note b{color:var(--ink)}
+  .note .gn{color:var(--gn);font-weight:700}
+  .note .rd{color:var(--rd);font-weight:700}
+  .note .am{color:var(--amb);font-weight:700}
+  pre{background:var(--bg-0);border:1px solid var(--line);border-radius:3px;padding:10px 14px;overflow-x:auto;font:500 11px var(--mono);color:var(--ink-1);line-height:1.6;margin-top:10px}
+  pre .com{color:var(--ink-3);font-style:italic}
+  pre .key{color:var(--cy)} pre .str{color:var(--gn)} pre .num{color:var(--amb)}
+  .chip{display:inline-block;padding:3px 8px;border-radius:2px;font:700 9.5px var(--mono);letter-spacing:.10em;text-transform:uppercase;border:1px solid var(--line-2);color:var(--ink-1);margin-right:5px}
+  .chip.gn{color:var(--gn);border-color:var(--gn)}
+  .chip.am{color:var(--amb);border-color:var(--amb)}
+  .chip.cy{color:var(--cy);border-color:var(--cy)}
+  .chip.cu{color:var(--copper);border-color:var(--copper)}
+  .chip.rd{color:var(--rd);border-color:var(--rd)}
+  .heroquote{background:linear-gradient(135deg,rgba(217,119,87,0.10),rgba(91,229,124,0.05));border:1px solid var(--line);border-left:3px solid var(--copper);border-radius:3px;padding:16px 20px;margin-bottom:18px}
+  .heroquote .eye{font:800 9.5px var(--mono);color:var(--copper);letter-spacing:.16em;text-transform:uppercase;margin-bottom:5px}
+  .heroquote .ttl{font:800 18px var(--sans);color:var(--ink);letter-spacing:-0.01em;margin-bottom:6px}
+  .heroquote .body{font:500 13px var(--sans);color:var(--ink-1);line-height:1.6}
+  .heroquote .body b{color:var(--ink)}
+
+  /* Mock TV widget styles (when real iframe can't load, show static mock) */
+  .tv-news-mock{background:var(--bg-3);border-radius:3px;padding:12px;height:520px;overflow-y:auto}
+  .tv-news-row{padding:10px 0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:50px 1fr auto;gap:10px;align-items:start}
+  .tv-news-row .src{font:700 9px var(--mono);color:var(--ink-3);letter-spacing:.08em}
+  .tv-news-row .ttl{font:600 12px var(--sans);color:var(--ink-1);line-height:1.4}
+  .tv-news-row .ttl b{color:var(--ink)}
+  .tv-news-row .when{font:600 9px var(--mono);color:var(--ink-3);white-space:nowrap}
+  .tv-news-row .tkr-row{margin-top:4px;display:flex;gap:5px;flex-wrap:wrap}
+  .tv-news-row .tkr{font:700 9.5px var(--mono);color:var(--copper);padding:1px 6px;background:rgba(217,119,87,0.10);border-radius:2px;letter-spacing:.04em}
+  .tv-news-row .sent{font:700 8.5px var(--mono);padding:2px 5px;border-radius:2px;letter-spacing:.06em}
+  .tv-news-row .sent.bull{background:var(--gn-bg);color:var(--gn)}
+  .tv-news-row .sent.bear{background:var(--rd-bg);color:var(--rd)}
+  .tv-news-row .sent.neu{background:rgba(154,149,144,0.10);color:var(--ink-2)}
+  .integration-arrow{text-align:center;font:800 14px var(--mono);color:var(--copper);padding:8px 0;letter-spacing:.04em}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>KAIROS</b> · TradingView Integration Prototype</div>
+  <div class="sub">A + B + C · news-focused</div>
+  <div class="live">DESIGN MOCK</div>
+</div>
+
+<div class="wrap">
+
+  <div class="heroquote">
+    <div class="eye">recommended path · phase order</div>
+    <div class="ttl">Ship A (news widget) first · then B (chart embed) · C (alerts) is a future async stream</div>
+    <div class="body">
+      News is the highest-value, lowest-effort TV integration. The widget aggregates from <b>1000+ sources</b> (Reuters, Bloomberg, MarketWatch, Seeking Alpha, sector-specific) — broader than EODHD. Drops into a single iframe, requires zero auth, refreshes itself. <b>Hero candidate for the Home tab + Detail tab "news" sub-panel</b>.
+    </div>
+  </div>
+
+  <!-- ═════════════════════ A · NEWS WIDGET (HERO) ═════════════════════ -->
+  <div class="h">A · TRADINGVIEW NEWS WIDGET <span class="sub">global feed + per-ticker stream · the hero integration</span></div>
+
+  <div class="grid-news">
+    <!-- LEFT: Mock of how the global feed would look on Home/News card -->
+    <div class="card cy">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+        <span style="font:800 11px var(--mono);color:var(--cy);letter-spacing:.14em">▦ TV NEWS · GLOBAL FEED</span>
+        <span style="font:500 10px var(--mono);color:var(--ink-3)">refreshes every 15s · TV widget</span>
+      </div>
+      <div class="tv-news-mock">
+        <div class="tv-news-row">
+          <span class="src">REUTERS</span>
+          <div>
+            <div class="ttl">Fed's Powell signals <b>data-dependent</b> stance ahead of CPI release</div>
+            <div class="tkr-row"><span class="tkr">SPY</span><span class="tkr">QQQ</span><span class="tkr">TLT</span><span class="sent neu">NEUTRAL</span></div>
+          </div>
+          <span class="when">2m</span>
+        </div>
+        <div class="tv-news-row">
+          <span class="src">BLOOMBERG</span>
+          <div>
+            <div class="ttl">Nvidia projects <b>Q3 data-center revenue +52% YoY</b>, exceeds estimates</div>
+            <div class="tkr-row"><span class="tkr">NVDA</span><span class="tkr">AMD</span><span class="tkr">SMCI</span><span class="sent bull">BULLISH</span></div>
+          </div>
+          <span class="when">8m</span>
+        </div>
+        <div class="tv-news-row">
+          <span class="src">WSJ</span>
+          <div>
+            <div class="ttl">Activist investor takes <b>$2.3B stake</b> in Walgreens, pushes for spin-off</div>
+            <div class="tkr-row"><span class="tkr">WBA</span><span class="sent bull">BULLISH</span></div>
+          </div>
+          <span class="when">14m</span>
+        </div>
+        <div class="tv-news-row">
+          <span class="src">MARKETW</span>
+          <div>
+            <div class="ttl">Crude inventories <b>build 4.2M bbl</b>, second weekly surplus</div>
+            <div class="tkr-row"><span class="tkr">XOM</span><span class="tkr">CVX</span><span class="tkr">USO</span><span class="sent bear">BEARISH</span></div>
+          </div>
+          <span class="when">22m</span>
+        </div>
+        <div class="tv-news-row">
+          <span class="src">SEEKING</span>
+          <div>
+            <div class="ttl">AppLovin <b>cuts FY guidance</b>, citing weak ad demand</div>
+            <div class="tkr-row"><span class="tkr">APP</span><span class="tkr">TTD</span><span class="tkr">META</span><span class="sent bear">BEARISH</span></div>
+          </div>
+          <span class="when">31m</span>
+        </div>
+        <div class="tv-news-row">
+          <span class="src">CNBC</span>
+          <div>
+            <div class="ttl">CrowdStrike beats EPS by <b>+12%</b>, raises FY24 outlook</div>
+            <div class="tkr-row"><span class="tkr">CRWD</span><span class="tkr">PANW</span><span class="tkr">ZS</span><span class="sent bull">BULLISH</span></div>
+          </div>
+          <span class="when">42m</span>
+        </div>
+        <div class="tv-news-row">
+          <span class="src">REUTERS</span>
+          <div>
+            <div class="ttl">Treasury yields edge lower as <b>10Y auction stops through</b></div>
+            <div class="tkr-row"><span class="tkr">TLT</span><span class="tkr">IEF</span><span class="sent bull">BULLISH</span></div>
+          </div>
+          <span class="when">1h</span>
+        </div>
+        <div class="tv-news-row">
+          <span class="src">BARRONS</span>
+          <div>
+            <div class="ttl">Goldman raises Tesla PT to <b>$310</b> on energy storage tailwind</div>
+            <div class="tkr-row"><span class="tkr">TSLA</span><span class="sent bull">BULLISH</span></div>
+          </div>
+          <span class="when">1h</span>
+        </div>
+      </div>
+      <div class="note">
+        <b>What it costs:</b> $0 — TV news widget is free for everyone.<br>
+        <b>What you get:</b> 1000+ source aggregator · ticker-mapped · sentiment-tagged · auto-refresh · clickable cards.<br>
+        <b>Where it lives:</b> Home tab (replaces or supplements current <span style="color:var(--cy)">qc-news</span> renderer) + Detail tab News sub-panel filtered to ticker.
+      </div>
+    </div>
+
+    <!-- RIGHT: Per-ticker news + integration plan -->
+    <div>
+      <div class="card am">
+        <div style="font:800 11px var(--mono);color:var(--amb);letter-spacing:.14em;margin-bottom:10px">▦ PER-TICKER NEWS</div>
+        <div style="font:600 13px var(--sans);color:var(--ink);margin-bottom:4px">In Detail tab → News sub-panel</div>
+        <div class="note" style="border-left-color:var(--amb);margin-top:6px">
+          The widget supports <b>per-symbol filter</b> via <span class="chip">symbol="NASDAQ:NVDA"</span> param. So when user opens NVDA detail, the embed instance only shows NVDA-tagged headlines.
+        </div>
+        <pre>
+<span class="com">// Renders into Detail tab → News sub-panel</span>
+&lt;div class="tradingview-widget-container"&gt;
+  &lt;script async
+    src="https://s3.tradingview.com/external-embedding/embed-widget-timeline.js"&gt;
+  {
+    <span class="key">"feedMode"</span>: <span class="str">"symbol"</span>,
+    <span class="key">"symbol"</span>:   <span class="str">"NASDAQ:NVDA"</span>,
+    <span class="key">"colorTheme"</span>: <span class="str">"dark"</span>,
+    <span class="key">"isTransparent"</span>: <span class="num">true</span>,
+    <span class="key">"displayMode"</span>: <span class="str">"regular"</span>,
+    <span class="key">"width"</span>:  <span class="str">"100%"</span>,
+    <span class="key">"height"</span>: <span class="num">540</span>,
+    <span class="key">"locale"</span>: <span class="str">"en"</span>
+  }
+  &lt;/script&gt;
+&lt;/div&gt;</pre>
+      </div>
+
+      <div class="card gn">
+        <div style="font:800 11px var(--mono);color:var(--gn);letter-spacing:.14em;margin-bottom:10px">▦ INTEGRATION PLAN</div>
+        <div style="font:500 12px var(--mono);color:var(--ink-1);line-height:1.8">
+          <span class="chip gn">1</span> Add TV news widget to Home → replaces existing <span style="color:var(--cy)">qc-news</span> card<br>
+          <span class="chip gn">2</span> Add per-ticker variant to Detail → News sub-panel<br>
+          <span class="chip gn">3</span> Keep our EODHD news as <b>fallback</b> if TV widget fails to load (offline / blocked)<br>
+          <span class="chip gn">4</span> Maintain our position+watchlist filter on top of TV feed (post-process via TV's <span class="chip">feedMode:"market"</span> + ticker-list filter)<br>
+          <span class="chip gn">5</span> Surface TV-source dedup (TV often republishes same Reuters wire → flag duplicates)
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════ B · ADVANCED CHART WIDGET ═════════════════════ -->
+  <div class="h">B · ADVANCED CHART WIDGET <span class="sub">replaces or supplements Lightweight Charts in Detail tab</span></div>
+
+  <div class="grid-2">
+    <div class="card cy">
+      <div style="font:800 11px var(--mono);color:var(--cy);letter-spacing:.14em;margin-bottom:10px">▦ EMBED · WHAT YOU'D SEE</div>
+      <div style="background:#000;height:340px;border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--ink-3);font:500 12px var(--mono);text-align:center;line-height:1.7">
+        <span style="font-size:40px;margin-bottom:10px">📈</span>
+        TradingView Advanced Chart<br>
+        <span style="font-size:10px">(full UI · all indicators · drawing tools)</span><br><br>
+        <span style="font-size:10px;color:var(--gn)">Auto-detects your TV Pro session</span><br>
+        <span style="font-size:10px;color:var(--gn)">Real-time data on exchanges you sub to</span>
+      </div>
+      <pre>
+<span class="com">// Replaces _qovInitHeroChart in Detail Overview tab</span>
+new TradingView.widget({
+  <span class="key">"symbol"</span>:        <span class="str">"NASDAQ:NVDA"</span>,
+  <span class="key">"interval"</span>:      <span class="str">"D"</span>,
+  <span class="key">"theme"</span>:         <span class="str">"dark"</span>,
+  <span class="key">"style"</span>:         <span class="str">"1"</span>,        <span class="com">// candles</span>
+  <span class="key">"locale"</span>:        <span class="str">"en"</span>,
+  <span class="key">"studies"</span>:       [<span class="str">"MACD@tv-basicstudies"</span>, <span class="str">"RSI@tv-basicstudies"</span>],
+  <span class="key">"container_id"</span>:  <span class="str">"tv-chart-host"</span>,
+  <span class="key">"autosize"</span>:      <span class="num">true</span>,
+  <span class="key">"hide_top_toolbar"</span>: <span class="num">false</span>
+});</pre>
+    </div>
+
+    <div>
+      <div class="card am">
+        <div style="font:800 11px var(--mono);color:var(--amb);letter-spacing:.14em;margin-bottom:10px">▦ TRADE-OFFS</div>
+        <table style="width:100%;font:500 11.5px var(--mono);border-collapse:collapse">
+          <tr style="border-bottom:1px solid var(--line)"><td style="padding:7px 4px;color:var(--ink-3);font-weight:700;font-size:10px">VS LIGHTWEIGHT CHARTS</td><td style="text-align:right;padding:7px 4px;color:var(--ink)">Result</td></tr>
+          <tr style="border-bottom:1px dashed var(--line)"><td style="padding:6px 4px">Chart UX quality</td><td style="text-align:right;color:var(--gn);font-weight:800">TV wins</td></tr>
+          <tr style="border-bottom:1px dashed var(--line)"><td style="padding:6px 4px">Indicators available</td><td style="text-align:right;color:var(--gn);font-weight:800">TV wins (100+)</td></tr>
+          <tr style="border-bottom:1px dashed var(--line)"><td style="padding:6px 4px">Drawing tools</td><td style="text-align:right;color:var(--gn);font-weight:800">TV wins</td></tr>
+          <tr style="border-bottom:1px dashed var(--line)"><td style="padding:6px 4px">Data control (our overlay)</td><td style="text-align:right;color:var(--rd);font-weight:800">LWC wins</td></tr>
+          <tr style="border-bottom:1px dashed var(--line)"><td style="padding:6px 4px">Custom annotations (VCP zones, S/R)</td><td style="text-align:right;color:var(--rd);font-weight:800">LWC wins</td></tr>
+          <tr style="border-bottom:1px dashed var(--line)"><td style="padding:6px 4px">Bundle size</td><td style="text-align:right;color:var(--rd);font-weight:800">LWC wins (40KB vs ~1MB iframe)</td></tr>
+          <tr><td style="padding:6px 4px">Offline / EODHD failure mode</td><td style="text-align:right;color:var(--rd);font-weight:800">LWC wins</td></tr>
+        </table>
+        <div class="note" style="border-left-color:var(--amb)">
+          <b>Hybrid recommendation:</b> Keep Lightweight Charts as the <span class="gn">default</span> (custom annotations, our VCP zones, EODHD data). Add a <span class="cu">"Open in TradingView"</span> button per chart that pops up a TV embed in a modal — get the best of both.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════ C · ALERTS WEBHOOK ═════════════════════ -->
+  <div class="h">C · TRADINGVIEW ALERTS → /api/tv-alert WEBHOOK <span class="sub">live signals push into kairos · the only "real-time data" path</span></div>
+
+  <div class="grid-2">
+    <div class="card cu">
+      <div style="font:800 11px var(--mono);color:var(--copper);letter-spacing:.14em;margin-bottom:10px">▦ FLOW</div>
+      <div style="font:500 12px var(--sans);color:var(--ink-1);line-height:1.85">
+        <span class="chip cu">1</span> You configure TV alerts (100/Pro) — e.g. <b>"NVDA crosses above 50EMA"</b>, <b>"SPY RSI &lt; 30"</b>, <b>"BTC volume +200%"</b><br>
+        <span class="chip cu">2</span> TV fires alert → POSTs JSON to <b>your webhook URL</b> (Pro feature, not Free)<br>
+        <span class="chip cu">3</span> Our new endpoint <span style="color:var(--gn)">/api/tv-alert</span> receives, validates HMAC, parses, stores<br>
+        <span class="chip cu">4</span> Alert lands in the Home <b>Smart Alerts</b> strip live (via SSE or polling)<br>
+        <span class="chip cu">5</span> Optionally: alert triggers an auto-pin in Audit Trail, or fires a Slack ping
+      </div>
+      <pre style="margin-top:14px">
+<span class="com"># In server.py</span>
+<span class="key">@app.post</span>(<span class="str">"/api/tv-alert"</span>)
+<span class="key">async def</span> tv_alert(req: Request):
+    body = <span class="key">await</span> req.json()
+    <span class="com"># TV sends fields you define in alert message JSON</span>
+    <span class="com"># {ticker, condition, price, time, exchange, ...}</span>
+    _persist_tv_alert(body)
+    _push_to_smart_alerts(body)
+    <span class="key">return</span> {<span class="str">"status"</span>: <span class="str">"received"</span>}</pre>
+    </div>
+
+    <div class="card gn">
+      <div style="font:800 11px var(--mono);color:var(--gn);letter-spacing:.14em;margin-bottom:10px">▦ ALERT EXAMPLES (mock UI)</div>
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <div style="background:var(--bg-3);padding:8px 12px;border-radius:3px;display:grid;grid-template-columns:18px 1fr auto;gap:9px;align-items:center;border-left:2px solid var(--gn)">
+          <div style="width:16px;height:16px;border-radius:50%;background:var(--gn-bg);border:1px solid var(--gn);color:var(--gn);display:flex;align-items:center;justify-content:center;font:800 9px var(--mono)">▲</div>
+          <span style="font:500 11.5px var(--mono);color:var(--ink-1)"><b style="color:var(--ink)">NVDA</b> crossed above EMA50 @ $132.80 · 2m ago</span>
+          <span class="chip cu">TV ALERT</span>
+        </div>
+        <div style="background:var(--bg-3);padding:8px 12px;border-radius:3px;display:grid;grid-template-columns:18px 1fr auto;gap:9px;align-items:center;border-left:2px solid var(--rd)">
+          <div style="width:16px;height:16px;border-radius:50%;background:var(--rd-bg);border:1px solid var(--rd);color:var(--rd);display:flex;align-items:center;justify-content:center;font:800 9px var(--mono)">▼</div>
+          <span style="font:500 11.5px var(--mono);color:var(--ink-1)"><b style="color:var(--ink)">TSLA</b> broke below trendline @ $241 · 14m ago</span>
+          <span class="chip cu">TV ALERT</span>
+        </div>
+        <div style="background:var(--bg-3);padding:8px 12px;border-radius:3px;display:grid;grid-template-columns:18px 1fr auto;gap:9px;align-items:center;border-left:2px solid var(--amb)">
+          <div style="width:16px;height:16px;border-radius:50%;background:var(--amb-bg);border:1px solid var(--amb);color:var(--amb);display:flex;align-items:center;justify-content:center;font:800 9px var(--mono)">!</div>
+          <span style="font:500 11.5px var(--mono);color:var(--ink-1)"><b style="color:var(--ink)">SPY</b> RSI dropped below 30 · oversold · 28m ago</span>
+          <span class="chip cu">TV ALERT</span>
+        </div>
+        <div style="background:var(--bg-3);padding:8px 12px;border-radius:3px;display:grid;grid-template-columns:18px 1fr auto;gap:9px;align-items:center;border-left:2px solid var(--cy)">
+          <div style="width:16px;height:16px;border-radius:50%;background:rgba(94,200,216,0.10);border:1px solid var(--cy);color:var(--cy);display:flex;align-items:center;justify-content:center;font:800 9px var(--mono)">⌖</div>
+          <span style="font:500 11.5px var(--mono);color:var(--ink-1)"><b style="color:var(--ink)">VIX</b> spiked +12% intraday · regime shift watch · 41m ago</span>
+          <span class="chip cu">TV ALERT</span>
+        </div>
+      </div>
+      <div class="note" style="border-left-color:var(--gn);margin-top:14px">
+        <b>Powerful because:</b> TV's alert engine evaluates conditions <b>server-side every tick</b> — way more granular than our daily scan. Catches intraday breakouts kairos would miss until next scan cycle.
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════ BONUS · ADDITIONAL FREE WIDGETS ═════════════════════ -->
+  <div class="h">BONUS · OTHER FREE TV WIDGETS WORTH EMBEDDING</div>
+
+  <div class="grid-3">
+    <div class="card">
+      <div style="font:800 10.5px var(--mono);color:var(--ink);letter-spacing:.14em;margin-bottom:8px">▦ TICKER TAPE</div>
+      <div style="background:#000;height:34px;border-radius:2px;display:flex;align-items:center;justify-content:center;font:600 11px var(--mono);color:var(--ink-3)">[ animated TV ticker tape ]</div>
+      <div style="font:500 11px var(--mono);color:var(--ink-2);margin-top:8px;line-height:1.6">
+        Replaces our existing <span style="color:var(--cy)">qc-tape-strip</span> renderer. TV's version uses real exchange ticks (Pro). Higher fidelity than our current EODHD-fed fallback.
+      </div>
+    </div>
+    <div class="card">
+      <div style="font:800 10.5px var(--mono);color:var(--ink);letter-spacing:.14em;margin-bottom:8px">▦ HEATMAP</div>
+      <div style="background:#000;height:160px;border-radius:2px;display:flex;align-items:center;justify-content:center;font:600 11px var(--mono);color:var(--ink-3);text-align:center;line-height:1.6">[ S&amp;P 500 heatmap<br>sized by market cap<br>colored by perf_1d ]</div>
+      <div style="font:500 11px var(--mono);color:var(--ink-2);margin-top:8px;line-height:1.6">
+        Supplement to our custom Market Map. TV's is more polished but less customizable.
+      </div>
+    </div>
+    <div class="card">
+      <div style="font:800 10.5px var(--mono);color:var(--ink);letter-spacing:.14em;margin-bottom:8px">▦ ECONOMIC CALENDAR</div>
+      <div style="background:#000;height:160px;border-radius:2px;display:flex;align-items:center;justify-content:center;font:600 11px var(--mono);color:var(--ink-3);text-align:center;line-height:1.6">[ FOMC · CPI · NFP · GDP<br>upcoming events<br>actual vs forecast ]</div>
+      <div style="font:500 11px var(--mono);color:var(--ink-2);margin-top:8px;line-height:1.6">
+        Drop into Catalyst Gantt area. Replaces our hardcoded macro events list with live data.
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════ MY THOUGHTS · RECOMMENDATION ═════════════════════ -->
+  <div class="h">MY THOUGHTS · WHAT TO SHIP IN WHAT ORDER</div>
+
+  <div class="card cu">
+    <div style="font:500 13px var(--sans);color:var(--ink-1);line-height:1.75">
+
+      <p style="margin-bottom:14px"><b style="color:var(--ink)">Phase 1 — News widget (1 hour, ship today).</b> The TV News timeline widget is the highest-leverage addition. It's free, broader than EODHD news, sentiment-tagged, ticker-linked, and the embed is one script tag. <b>Drop it on Home (replaces the current News card) and on Detail → News sub-panel (per-ticker)</b>. Keep our EODHD news as fallback for when the iframe blocks.</p>
+
+      <p style="margin-bottom:14px"><b style="color:var(--ink)">Phase 2 — TV Alerts webhook (3 hours, ship this week).</b> Build <code style="background:var(--bg-3);padding:1px 5px;border-radius:2px;color:var(--ink-1)">/api/tv-alert</code> endpoint. Add UI in Settings to show your webhook URL + HMAC secret. Alerts land in Smart Alerts strip on Home. Your TV Pro account = 100 alerts. Intraday signal coverage we currently lack.</p>
+
+      <p style="margin-bottom:14px"><b style="color:var(--ink)">Phase 3 — Selective widget embeds (1 day, optional).</b> Add TV Economic Calendar (replaces our hardcoded macro events). Add TV Heatmap to Market Map tab as alt-view toggle. Add Advanced Chart embed as <span class="chip cu">Open in TradingView</span> modal button per existing Lightweight Chart.</p>
+
+      <p style="margin-bottom:14px"><b style="color:var(--ink)">What I would NOT do:</b> Replace Lightweight Charts wholesale with TV embed. Our chart annotations (VCP zones, EMA stack, S/R levels, structural targets) are kairos's edge. TV embed is generic. Keep both — LWC default, TV as supplementary deep-dive modal.</p>
+
+      <p><b style="color:var(--ink)">What I would NEVER do:</b> Reverse-engineer TV's internal WebSocket (option D in the prior question). Ban risk + may break anytime + violates ToS. The webhook path (Option C) gets you 95% of what scraping would give, legitimately.</p>
+
+    </div>
+  </div>
+
+  <div class="card am" style="margin-top:18px">
+    <div style="font:800 11px var(--mono);color:var(--amb);letter-spacing:.14em;margin-bottom:8px">▦ WHAT WIDGETS LOOK LIKE LIVE</div>
+    <div style="font:500 11.5px var(--mono);color:var(--ink-1);line-height:1.7">
+      This prototype shows the LAYOUT and STYLING but not the actual TV iframes (they'd need a live network connection to TV's CDN). To preview the real widgets, visit
+      <a href="https://www.tradingview.com/widget/" style="color:var(--copper)" target="_blank">tradingview.com/widget</a> — every widget has a "Copy embed code" button. We'd take that code, restyle with kairos palette, and inject into the right kairos sections.
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

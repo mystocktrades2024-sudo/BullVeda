@@ -1505,6 +1505,10 @@ def compact_row(r: dict) -> dict:
         # Wired by analysis.py:attach_smc_data → smc_engine.detect_smc_zones.
         "smc_data":                r.get("smc_data") or {},
         "smc_hit_rates":           r.get("smc_hit_rates") or {},
+        # 2026-05-17 · pattern_engine output (Wyckoff · Classical · VP · Fib · Ichimoku · S/R · Trendlines).
+        # Wired by analysis.py:attach_pattern_data → pattern_engine.detect_all_patterns.
+        "pattern_data":            r.get("pattern_data") or {},
+        "pattern_hit_rates":       r.get("pattern_hit_rates") or {},
     }
     # Project 2 · M2.2 — overlay structural targets when feature flag is on.
     # Silent no-op when off; legacy t1/t2 fields above remain untouched.

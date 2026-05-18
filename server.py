@@ -2263,6 +2263,98 @@ async def alert_push_api(req: Request):
     return {"status": "sent" if any(sent.values()) else "no_channel", "channels": sent, "echo": full}
 
 
+@app.get("/api/sector-cap-demotions")
+async def sector_cap_demotions_api(date: str = ""):
+    """Aggregate today's WATCH demotions caused by sector_cap.
+    Returns per-sector: BUY survivor(s) + runners-up sorted desc by score.
+    Surfaces the next-best alternative the user didn't get.
+    """
+    import json, re
+    from pathlib import Path
+    from collections import defaultdict
+    log_path = Path("data/decision_log.jsonl")
+    if not log_path.exists():
+        return {"date": date, "sectors": {}, "total_demoted": 0}
+    if not date:
+        date = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+    entries = []
+    try:
+        with open(log_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                    if str(e.get("date", "")).startswith(date):
+                        entries.append(e)
+                except Exception:
+                    continue
+    except Exception as e:
+        return {"date": date, "sectors": {}, "error": str(e)}
+    sector_pat = re.compile(r"sector cap: (\w[\w\s]*?) already has (\d+) BUY", re.I)
+    by_sector = defaultdict(lambda: {"demoted": [], "cap": None, "survivor_count": None})
+    for e in entries:
+        if e.get("verdict") != "WATCH":
+            continue
+        reason = e.get("reason", "")
+        m = sector_pat.search(reason)
+        if not m:
+            continue
+        sector = m.group(1).strip().title()
+        cap_m = re.search(r"limit=(\d+)", reason)
+        cap = int(cap_m.group(1)) if cap_m else None
+        survivors = int(m.group(2))
+        info = by_sector[sector]
+        info["demoted"].append({
+            "ticker": e.get("ticker"),
+            "score": e.get("score", 0),
+            "setup_type": e.get("setup_type"),
+            "rs_rank": e.get("rs_rank"),
+            "rr_ratio": e.get("rr_ratio"),
+            "entry_price": e.get("entry_price"),
+            "industry": e.get("industry"),
+        })
+        info["cap"] = cap
+        info["survivor_count"] = survivors
+    survivors_by_sector = defaultdict(list)
+    for e in entries:
+        if e.get("verdict") != "BUY":
+            continue
+        sect = (e.get("sector") or e.get("industry") or "Unknown").strip().title()
+        survivors_by_sector[sect].append({
+            "ticker": e.get("ticker"),
+            "score": e.get("score", 0),
+            "setup_type": e.get("setup_type"),
+        })
+    result = {}
+    total = 0
+    for sect, info in by_sector.items():
+        # Dedup by ticker — keep highest-score entry for each
+        seen = {}
+        for t in info["demoted"]:
+            tk = t.get("ticker")
+            if not tk: continue
+            if tk not in seen or (t.get("score") or 0) > (seen[tk].get("score") or 0):
+                seen[tk] = t
+        deduped = sorted(seen.values(), key=lambda x: -(x.get("score") or 0))
+        total += len(deduped)
+        # Dedup survivors too
+        sv_seen = {}
+        for s in survivors_by_sector.get(sect, []):
+            tk = s.get("ticker")
+            if tk and tk not in sv_seen: sv_seen[tk] = s
+        result[sect] = {
+            "cap": info["cap"],
+            "survivor_count": info["survivor_count"],
+            "demoted_total": len(deduped),
+            "demoted_top": deduped[:6],
+            "survivors": list(sv_seen.values()),
+        }
+    ordered = dict(sorted(result.items(), key=lambda kv: -kv[1]["demoted_total"]))
+    return {"date": date, "sectors": ordered, "total_demoted": total, "sector_count": len(ordered)}
+
+
 @app.get("/api/decision-log")
 async def decision_log_all_api(limit: int = 20):
     """Return the most recent N decision log entries across ALL tickers (Home Activity feed)."""
@@ -2382,6 +2474,22 @@ async def picks_history_aggregate_api():
         return {"buckets": buckets}
     except Exception as e:
         return {"buckets": [], "error": str(e)}
+
+
+@app.get("/api/calibration-report")
+async def calibration_report_api():
+    """Return cache/ml/calibration_report.json verbatim · powers the AI Prediction
+    sub-tab's reliability diagram + calibration card. Read-only, no writes.
+    """
+    import json
+    from pathlib import Path
+    p = Path("cache/ml/calibration_report.json")
+    if not p.exists():
+        return {"error": "calibration_report.json not found", "modes": {}}
+    try:
+        return json.loads(p.read_text())
+    except Exception as e:
+        return {"error": str(e), "modes": {}}
 
 
 @app.get("/api/vcp-pivots/{ticker}")
@@ -5895,10 +6003,10 @@ _PIPELINES_CATALOG = [
     {"name": "Signal filter decisions (A2)",  "source_type": "computed", "source_path": "data/signal_log.json (post-hoc inferred)",         "target_table": "signal_filter_decisions",    "script": "sync_production_sidecars.py",           "schedule": "manual / nightly",          "status": "working", "cluster": "journal"},
     {"name": "Strategy PnL attribution",      "source_type": "computed", "source_path": "picks_history.json#trades by setup_family",        "target_table": "strategy_pnl_attribution",   "script": "snapshot_strategy_attribution.py",      "schedule": "com.swingtrade.snapshot-attribution (Mon-Fri 4:45pm PT)", "status": "working", "cluster": "attribution"},
     {"name": "Wilson CI snapshot",            "source_type": "computed", "source_path": "picks_history.json#trades per cell",               "target_table": "wilson_ci_snapshot",         "script": "snapshot_wilson_ci.py",                 "schedule": "com.swingtrade.snapshot-wilson (Mon-Fri 4:50pm PT)",   "status": "working", "cluster": "calibration"},
-    {"name": "Kelly size history",            "source_type": "future",   "source_path": "analysis.kelly_position_size() inputs",            "target_table": "kelly_size_history",         "script": "(needs sb_client write hook)",          "schedule": "per-entry",                 "status": "empty",   "cluster": "risk", "issue": "Requires editing analysis.py — production scan path, deferred"},
+    {"name": "Kelly size history",            "source_type": "computed", "source_path": "analysis.py sidecar → cache/kelly_size_log.jsonl",  "target_table": "kelly_size_history",         "script": "sync_production_sidecars.py extract_kelly", "schedule": "per scan + manual sync",  "status": "working", "cluster": "risk"},
     {"name": "SMC hit rates",                 "source_type": "json",     "source_path": "data/smc_hit_rates.json",                          "target_table": "smc_hit_rates",              "script": "fold_orphan_data.py",                   "schedule": "manual",                    "status": "working", "cluster": "calibration"},
     {"name": "Regime transitions",            "source_type": "json",     "source_path": "cache/regime_history.json",                        "target_table": "regime_transitions",         "script": "fold_orphan_data.py",                   "schedule": "manual",                    "status": "working", "cluster": "regime"},
-    {"name": "Watch triggers",                "source_type": "future",   "source_path": "watch alert engine output",                        "target_table": "watch_triggers",             "script": "(needs sb_client write hook)",          "schedule": "real-time",                 "status": "empty",   "cluster": "watchlist", "issue": "Requires watch alert engine to emit events — engine doesn't currently fire/persist these"},
+    {"name": "Watch triggers",                "source_type": "computed", "source_path": "tracker.py sidecar → cache/watch_triggers.jsonl",  "target_table": "watch_triggers",             "script": "sync_production_sidecars.py extract_watch", "schedule": "per scan + manual sync",  "status": "working", "cluster": "watchlist"},
 
     # ── Future scrapers (free data, not yet implemented) ──
     {"name": "Insider transactions (Form 4)", "source_type": "api",      "source_path": "openinsider.com latest-insider-transactions",      "target_table": "insider_transactions",       "script": "scrapers/insider_openinsider.py",       "schedule": "manual / daily",            "status": "working", "cluster": "smart_money"},
@@ -5914,11 +6022,11 @@ _PIPELINES_CATALOG = [
     {"name": "Earnings calendar PIT",         "source_type": "future",   "source_path": "Zacks (existing scraper) → vintage layer",         "target_table": "earnings_calendar_pit",      "script": "(needs vintage tracker layer)",         "schedule": "daily",                     "status": "future",  "cluster": "calendar", "issue": "Requires intercepting existing Zacks scraper output + tracking changes over time (vintage layer)"},
 
     # ── Ops telemetry (needs app-side instrumentation) ──
-    {"name": "EODHD quota usage",             "source_type": "future",   "source_path": "data_fetcher.py rate-limit counters",              "target_table": "eodhd_quota_usage",          "script": "(needs middleware hook)",               "schedule": "real-time",                 "status": "future",  "cluster": "ops", "issue": "Requires patching data_fetcher.py to count requests per endpoint — production data path, deferred"},
+    {"name": "EODHD quota usage",             "source_type": "computed", "source_path": "eodhd_client.py _ENDPOINT_COUNTER (13 buckets)",   "target_table": "eodhd_quota_usage",          "script": "flush_quota_to_supabase() (auto at scan end)", "schedule": "every scan end + manual flush", "status": "working", "cluster": "ops"},
     {"name": "Launchd run telemetry",         "source_type": "computed", "source_path": "scripts/launchd_wrapper.sh per plist firing",     "target_table": "launchd_runs",               "script": "scripts/launchd_log_to_supabase.py",    "schedule": "every plist firing",        "status": "empty",   "cluster": "ops", "issue": "Wrapper adopted by 16/19 plists — populates on next plist firing"},
     {"name": "Data quality checks",           "source_type": "computed", "source_path": "scripts/dq_checks.py 10 assertions",               "target_table": "data_quality_checks",        "script": "scripts/dq_checks.py",                  "schedule": "com.swingtrade.dq-checks (daily 6am PT)", "status": "working", "cluster": "ops"},
-    {"name": "Config history",                "source_type": "future",   "source_path": "git diff on config/*.json",                         "target_table": "config_history",             "script": "(needs git hook)",                      "schedule": "on commit",                 "status": "future",  "cluster": "ops", "issue": "Requires post-commit git hook + jsondiffpatch — small but touches dev workflow, deferred"},
-    {"name": "Feature flag changes",          "source_type": "future",   "source_path": "config/config.json _enabled flips",                "target_table": "feature_flag_changes",       "script": "(needs git hook)",                      "schedule": "on commit",                 "status": "future",  "cluster": "ops", "issue": "Same git hook as config_history"},
+    {"name": "Config history",                "source_type": "computed", "source_path": "git post-commit diff on config/*.json",              "target_table": "config_history",             "script": "scripts/config_history_writer.py",        "schedule": "every commit touching config/*",  "status": "working", "cluster": "ops"},
+    {"name": "Feature flag changes",          "source_type": "computed", "source_path": "git post-commit *_enabled flips",                   "target_table": "feature_flag_changes",       "script": "scripts/config_history_writer.py",        "schedule": "every commit touching config/*",  "status": "working", "cluster": "ops"},
     {"name": "API latency metrics",           "source_type": "computed", "source_path": "FastAPI middleware (_api_latency_middleware)",     "target_table": "api_latency_metrics",        "script": "server.py middleware",                  "schedule": "60s flush",                 "status": "empty",   "cluster": "ops", "issue": "Middleware installed — populates on next 60s flush window after server restart"},
 
     # ── Self-referencing ──
