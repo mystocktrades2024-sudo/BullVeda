@@ -472,6 +472,7 @@ def _score_as_of(ticker: str, df_full: pd.DataFrame, as_of_date: pd.Timestamp,
         adx=float(ind.get("adx", 20.0) or 20.0),
         regime_name=regime_name,
         setup_type=plan.get("setup_type", ""),
+        entry_quality=_entry_quality or "FRESH",  # BUG FIX 2026-05-18: was defaulting to "VALID" which demotes every pick to WATCH per entry_quality_rules
     )
 
     if not gate["passed"]:
