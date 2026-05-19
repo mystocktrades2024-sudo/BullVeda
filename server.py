@@ -2263,6 +2263,281 @@ async def alert_push_api(req: Request):
     return {"status": "sent" if any(sent.values()) else "no_channel", "channels": sent, "echo": full}
 
 
+@app.get("/api/test/mae-mfe")
+async def test_mae_mfe_api(days: int = 90):
+    """Analyze MAE (Max Adverse Excursion) vs MFE (Max Favorable Excursion)
+    across closed trades to identify stop/target tuning opportunities.
+    """
+    import json
+    from pathlib import Path
+    from datetime import datetime, timedelta
+    from statistics import mean, median
+    sl_path = Path("data/signal_log.json")
+    if not sl_path.exists():
+        return {"error": "signal_log.json missing"}
+    try:
+        sl = json.load(open(sl_path))
+    except Exception as e:
+        return {"error": str(e)}
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    trades = [s for s in sl if s.get("status") == "CLOSED" and s.get("mae_pct") is not None
+              and s.get("mfe_pct") is not None and (s.get("date") or "") >= cutoff]
+    if not trades:
+        return {"error": "no closed trades with mae/mfe in window", "trades_examined": 0}
+    winners = [t for t in trades if (t.get("actual_pnl_pct") or 0) > 1]
+    losers = [t for t in trades if (t.get("actual_pnl_pct") or 0) < -1]
+    stopped = [t for t in trades if t.get("result") == "STOPPED"]
+    target_hit = [t for t in trades if t.get("result") == "TARGET_HIT"]
+    stop_too_tight = [t for t in winners if (t.get("mae_pct") or 0) <= -4]
+    target_too_low = []
+    for t in target_hit:
+        mfe = t.get("mfe_pct", 0) or 0
+        pnl = t.get("actual_pnl_pct", 0) or 0
+        if mfe > pnl * 1.5 and mfe > 8:
+            target_too_low.append({"ticker": t.get("ticker"), "date": (t.get("date") or "")[:10],
+                                   "exit_pnl": round(pnl, 1), "mfe_pct": round(mfe, 1),
+                                   "left_on_table": round(mfe - pnl, 1)})
+    stop_saved = [t for t in stopped if (t.get("mfe_pct") or 0) <= 1]
+    mae_dist = [t.get("mae_pct", 0) for t in trades]
+    mfe_dist = [t.get("mfe_pct", 0) for t in trades]
+    pnl_dist = [t.get("actual_pnl_pct", 0) for t in trades]
+    def _bucket(vals, edges):
+        out = []
+        for i in range(len(edges) - 1):
+            lo, hi = edges[i], edges[i + 1]
+            count = sum(1 for v in vals if lo <= v < hi)
+            out.append({"range": f"{lo}% to {hi}%", "count": count})
+        return out
+    mae_hist = _bucket(mae_dist, [-30, -15, -10, -7, -5, -3, -1, 0, 1])
+    mfe_hist = _bucket(mfe_dist, [-1, 1, 3, 5, 8, 12, 20, 30, 100])
+    return {
+        "trades_examined": len(trades),
+        "lookback_days": days,
+        "summary": {
+            "winners": len(winners), "losers": len(losers),
+            "stopped": len(stopped), "target_hit": len(target_hit),
+            "avg_mae_pct": round(mean(mae_dist), 2),
+            "avg_mfe_pct": round(mean(mfe_dist), 2),
+            "median_mae_pct": round(median(mae_dist), 2),
+            "median_mfe_pct": round(median(mfe_dist), 2),
+            "avg_pnl_pct": round(mean(pnl_dist), 2),
+        },
+        "stop_too_tight": {
+            "count": len(stop_too_tight),
+            "pct_of_winners": round(len(stop_too_tight) / max(1, len(winners)) * 100, 1),
+            "interpretation": f"{len(stop_too_tight)} winners had MAE <= -4% (deep DD before reversing) - suggests stops at 1.0x ATR may be too tight; consider 1.5x ATR",
+        },
+        "target_too_low": {
+            "count": len(target_too_low),
+            "top_examples": target_too_low[:8],
+            "interpretation": f"{len(target_too_low)} target_hit trades had MFE >1.5x exit price - left avg {round(mean([t['left_on_table'] for t in target_too_low]) if target_too_low else 0, 1)}% on table. Consider trailing past T1 instead of selling full.",
+        },
+        "stop_saved_loss": {
+            "count": len(stop_saved),
+            "interpretation": f"{len(stop_saved)} stops triggered on trades that never went positive - these are legitimate kill-the-loser exits, not over-tight stops.",
+        },
+        "mae_distribution": mae_hist,
+        "mfe_distribution": mfe_hist,
+    }
+
+
+@app.get("/api/test/regime-conditional")
+async def test_regime_conditional_api(days: int = 180):
+    """Partition closed trades by regime and compute per-regime stats."""
+    import json
+    from pathlib import Path
+    from datetime import datetime, timedelta
+    from statistics import mean
+    from collections import defaultdict
+    sl_path = Path("data/signal_log.json")
+    if not sl_path.exists():
+        return {"error": "signal_log.json missing"}
+    sl = json.load(open(sl_path))
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    trades = [s for s in sl if s.get("status") == "CLOSED" and s.get("actual_pnl_pct") is not None
+              and (s.get("date") or "") >= cutoff]
+    regime_by_date = {}
+    dl_path = Path("data/decision_log.jsonl")
+    if dl_path.exists():
+        with open(dl_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                try:
+                    e = json.loads(line)
+                    d = e.get("date")
+                    r = e.get("regime4") or e.get("regime")
+                    if d and r and d not in regime_by_date:
+                        regime_by_date[d] = r
+                except Exception: continue
+    by_regime_setup = defaultdict(lambda: defaultdict(list))
+    by_regime = defaultdict(list)
+    for t in trades:
+        d = (t.get("date") or "")[:10]
+        r = regime_by_date.get(d, "unknown")
+        setup = t.get("strategy") or "-"
+        by_regime[r].append(t)
+        by_regime_setup[r][setup].append(t)
+    def _stats(arr):
+        if not arr: return {"n": 0, "wr": 0, "mean_pnl": 0, "sum_pnl": 0, "pf": 0}
+        pnls = [t.get("actual_pnl_pct", 0) for t in arr]
+        wins = sum(1 for p in pnls if p > 1)
+        gross_win = sum(p for p in pnls if p > 1)
+        gross_loss = -sum(p for p in pnls if p < -1)
+        pf = round(gross_win / gross_loss, 2) if gross_loss > 0 else 0
+        return {"n": len(arr), "wr": round(wins/len(arr)*100, 1),
+                "mean_pnl": round(mean(pnls), 2), "sum_pnl": round(sum(pnls), 1), "pf": pf}
+    result = {}
+    for r, ts in by_regime.items():
+        per_setup = []
+        for setup, arr in sorted(by_regime_setup[r].items(), key=lambda kv: -len(kv[1])):
+            per_setup.append({"setup": setup, **_stats(arr)})
+        result[r] = {**_stats(ts), "per_setup": per_setup[:8]}
+    sorted_regimes = sorted(result.items(), key=lambda kv: -kv[1]["mean_pnl"])
+    best_regime = sorted_regimes[0] if sorted_regimes else None
+    worst_regime = sorted_regimes[-1] if sorted_regimes else None
+    return {
+        "trades_examined": len(trades),
+        "lookback_days": days,
+        "regimes_seen": list(result.keys()),
+        "by_regime": result,
+        "best_regime": {"name": best_regime[0], "stats": best_regime[1]} if best_regime else None,
+        "worst_regime": {"name": worst_regime[0], "stats": worst_regime[1]} if worst_regime else None,
+    }
+
+
+@app.get("/api/test/monte-carlo")
+async def test_monte_carlo_api(days: int = 90, iterations: int = 5000):
+    """Bootstrap-resample closed trades to build confidence intervals on Sharpe/PF/WR/mean."""
+    import json, random
+    from pathlib import Path
+    from datetime import datetime, timedelta
+    from statistics import mean, stdev
+    sl_path = Path("data/signal_log.json")
+    if not sl_path.exists():
+        return {"error": "signal_log.json missing"}
+    sl = json.load(open(sl_path))
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    trades = [s for s in sl if s.get("status") == "CLOSED" and s.get("actual_pnl_pct") is not None
+              and (s.get("date") or "") >= cutoff]
+    if len(trades) < 10:
+        return {"error": f"insufficient trades ({len(trades)} < 10 minimum)"}
+    pnls = [t.get("actual_pnl_pct", 0) for t in trades]
+    n = len(pnls)
+    def _metrics(sample):
+        m = mean(sample)
+        sd = stdev(sample) if len(sample) > 1 else 0
+        wins = [p for p in sample if p > 1]
+        losers = [p for p in sample if p < -1]
+        gross_win = sum(wins)
+        gross_loss = -sum(losers)
+        pf = gross_win / gross_loss if gross_loss > 0 else 999
+        sharpe = m / sd if sd > 0 else 0
+        wr = len(wins) / len(sample) * 100 if sample else 0
+        return {"mean": m, "sharpe": sharpe, "pf": min(pf, 999), "wr": wr}
+    actual = _metrics(pnls)
+    metric_dists = {"mean": [], "sharpe": [], "pf": [], "wr": []}
+    random.seed(42)
+    iterations = min(iterations, 10000)
+    for _ in range(iterations):
+        sample = [random.choice(pnls) for _ in range(n)]
+        m = _metrics(sample)
+        for k, v in m.items():
+            metric_dists[k].append(v)
+    def _pct(arr, p):
+        s = sorted(arr); idx = int(p/100 * len(s))
+        return s[max(0, min(len(s)-1, idx))]
+    result_metrics = {}
+    for k, arr in metric_dists.items():
+        result_metrics[k] = {
+            "point": round(actual[k], 3),
+            "ci_low_95": round(_pct(arr, 2.5), 3),
+            "ci_high_95": round(_pct(arr, 97.5), 3),
+            "ci_low_68": round(_pct(arr, 16), 3),
+            "ci_high_68": round(_pct(arr, 84), 3),
+            "mean": round(mean(arr), 3),
+        }
+    sh = result_metrics['sharpe']
+    pf = result_metrics['pf']
+    wr = result_metrics['wr']
+    return {
+        "trades_examined": n,
+        "lookback_days": days,
+        "iterations": iterations,
+        "metrics": result_metrics,
+        "interpretation": {
+            "sharpe": f"Sharpe {sh['point']} [95% CI: {sh['ci_low_95']} to {sh['ci_high_95']}]" +
+                      (" - CI crosses 0, edge uncertain" if sh['ci_low_95'] < 0 < sh['ci_high_95']
+                       else " - CI positive, edge robust" if sh['ci_low_95'] > 0
+                       else " - CI negative, strategy losing"),
+            "pf": f"PF {pf['point']} [95% CI: {pf['ci_low_95']} to {pf['ci_high_95']}]" +
+                  (" - CI crosses 1.0, breakeven uncertain" if pf['ci_low_95'] < 1 < pf['ci_high_95']
+                   else " - CI above 1.0, profitable" if pf['ci_low_95'] > 1
+                   else " - CI below 1.0, losing"),
+            "wr": f"WR {wr['point']}% [95% CI: {wr['ci_low_95']} to {wr['ci_high_95']}%]",
+        },
+    }
+
+
+@app.get("/api/test/permutation")
+async def test_permutation_api(days: int = 90, iterations: int = 1000):
+    """Permutation / scrambled-labels test: is the strategy's return better
+    than random sampling of same n? p-value < 0.05 = significant edge.
+    """
+    import json, random
+    from pathlib import Path
+    from datetime import datetime, timedelta
+    from statistics import mean, stdev
+    sl_path = Path("data/signal_log.json")
+    if not sl_path.exists():
+        return {"error": "signal_log.json missing"}
+    sl = json.load(open(sl_path))
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    closed = [s for s in sl if s.get("status") == "CLOSED" and s.get("actual_pnl_pct") is not None
+              and (s.get("date") or "") >= cutoff]
+    if len(closed) < 30:
+        return {"error": f"insufficient trades ({len(closed)} < 30 minimum)"}
+    real_pnls = [t.get("actual_pnl_pct", 0) for t in closed]
+    real_mean = mean(real_pnls)
+    real_sum = sum(real_pnls)
+    n = len(real_pnls)
+    random.seed(42)
+    iterations = min(iterations, 10000)
+    null_means = []
+    for _ in range(iterations):
+        sample = random.choices(real_pnls, k=n)
+        null_means.append(mean(sample))
+    p_value = sum(1 for m in null_means if m >= real_mean) / iterations
+    null_mean_of_means = mean(null_means)
+    null_sd_of_means = stdev(null_means) if len(null_means) > 1 else 1
+    z_score = (real_mean - null_mean_of_means) / null_sd_of_means if null_sd_of_means > 0 else 0
+    if p_value < 0.01: verdict = "STRONG EDGE (p<0.01)"
+    elif p_value < 0.05: verdict = "SIGNIFICANT EDGE (p<0.05)"
+    elif p_value < 0.10: verdict = "MARGINAL EDGE (p<0.10)"
+    else: verdict = "NO EDGE DETECTED (p>0.10)"
+    return {
+        "trades_examined": n,
+        "lookback_days": days,
+        "iterations": iterations,
+        "actual": {"mean_pnl": round(real_mean, 3), "sum_pnl": round(real_sum, 2)},
+        "null_distribution": {
+            "mean_of_means": round(null_mean_of_means, 3),
+            "sd_of_means": round(null_sd_of_means, 3),
+            "ci_95_low": round(sorted(null_means)[int(0.025*iterations)], 3),
+            "ci_95_high": round(sorted(null_means)[int(0.975*iterations)], 3),
+        },
+        "p_value": round(p_value, 4),
+        "z_score": round(z_score, 3),
+        "verdict": verdict,
+        "interpretation": (
+            f"Strategy mean: {real_mean:+.2f}%/trade. Null distribution (random resampling, n={n}, {iterations} sims): "
+            f"mean={null_mean_of_means:+.2f}% +/- {null_sd_of_means:.2f}. Actual is {z_score:+.1f} SD above null. "
+            f"p-value={p_value:.4f}. {verdict}. "
+            f"NOTE: self-consistency test (resampling within strategy's trades), not strict permutation against rejected signals."
+        ),
+    }
+
+
 @app.get("/api/premarket-catalysts")
 async def premarket_catalysts_api(lookback_hours: int = 16, mine_only: bool = False):
     """Pull overnight news for portfolio + watchlist tickers, categorize by catalyst type.

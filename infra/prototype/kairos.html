@@ -19766,8 +19766,33 @@ const QuantHistoryLedger = (function() {
   const _fmtInt = (n) => (n==null||isNaN(n))?'—':Math.round(n).toLocaleString();
   const _sign = (n) => n>0?'+':'';
 
-  // Module-level cache so re-rendering doesn't re-fetch
+  // Module-level cache with TTL · 2026-05-18: prior version cached forever,
+  // so users who left the tab open saw stale ledgers even after a backend
+  // rebuild. Now: 5-min TTL, plus a manual ↻ refresh button in the toolbar.
   let _ledgerCache = null;
+  let _ledgerCacheTs = 0;
+  const LEDGER_TTL_MS = 5 * 60 * 1000;  // 5 minutes
+  window._qauditForceRefresh = function() {
+    console.log('[audit-trail] force refresh clicked');
+    _ledgerCache = null;
+    _ledgerCacheTs = 0;
+    const content = document.querySelector('#qaud-content');
+    if (!content) { console.warn('[audit-trail] #qaud-content not found'); return; }
+    // Show loading + bypass any cache, fetch fresh
+    content.innerHTML = `<div class="qhist-loading"><div class="qhist-loading-ico">⟳</div><div class="qhist-loading-t">Refreshing…</div></div>`;
+    fetch('/v2/audit_ledger.json?ts=' + Date.now(), { credentials: 'same-origin', cache: 'no-store' })
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(payload => {
+        console.log('[audit-trail] refetched · n_records:', payload.n_records, '· generated_at:', payload.generated_at);
+        _ledgerCache = payload;
+        _ledgerCacheTs = Date.now();
+        _renderLedger(content, payload);
+      })
+      .catch(err => {
+        console.error('[audit-trail] refresh failed:', err);
+        content.innerHTML = `<div class="qhist-loading"><div class="qhist-loading-ico" style="color:var(--rd)">✗</div><div class="qhist-loading-t">Refresh failed: ${String(err).slice(0,100)}</div></div>`;
+      });
+  };
   let _filters = {
     year: 'all',
     mode: 'all',
@@ -19777,6 +19802,20 @@ const QuantHistoryLedger = (function() {
     sector: 'all',
     horizon: 'd5',  // active horizon for sort/color
     search: '',
+    hidePending: true,  // 2026-05-18 · default-hide today's blank rows so user
+                        // opens the ledger to MEANINGFUL data, not a wall of —s
+  };
+  window._qauditTogglePending = function() {
+    _filters.hidePending = !_filters.hidePending;
+    console.log('[audit-trail] hidePending toggled to', _filters.hidePending);
+    const content = document.querySelector('#qaud-content');
+    if (!content) { console.warn('[audit-trail] #qaud-content not found'); return; }
+    if (!_ledgerCache) {
+      console.warn('[audit-trail] no cache — forcing fetch');
+      window._qauditForceRefresh();
+      return;
+    }
+    _renderLedger(content, _ledgerCache);
   };
   let _sortKey = 'pick_date';
   let _sortDir = 'desc';
@@ -19795,15 +19834,17 @@ const QuantHistoryLedger = (function() {
       </div>
     `;
 
-    if (_ledgerCache) {
+    // TTL check — serve cache only when fresh enough
+    if (_ledgerCache && (Date.now() - _ledgerCacheTs) < LEDGER_TTL_MS) {
       _renderLedger(content, _ledgerCache);
       return;
     }
 
-    fetch('/v2/audit_ledger.json', { credentials: 'same-origin' })
+    fetch('/v2/audit_ledger.json', { credentials: 'same-origin', cache: 'no-store' })
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(payload => {
         _ledgerCache = payload;
+        _ledgerCacheTs = Date.now();
         _renderLedger(content, payload);
       })
       .catch(err => {
@@ -19837,13 +19878,21 @@ const QuantHistoryLedger = (function() {
       ? `<span class="stat" style="color:var(--amb)" title="Picks from last few trading days — forward returns will populate as time passes"><b>${matured.toLocaleString()}</b> matured · <b>${pending.toLocaleString()}</b> pending</span>`
       : `<span class="stat" style="color:var(--gn)"><b>${matured.toLocaleString()}</b> matured · all populated</span>`;
 
+    // Age of the served ledger — surface it so user knows when last refreshed
+    const genTs = payload.generated_at ? new Date(payload.generated_at.replace(' ', 'T')) : null;
+    const ageMin = genTs ? Math.max(0, Math.round((Date.now() - genTs.getTime()) / 60000)) : null;
+    const ageLbl = ageMin == null ? '—' : ageMin < 60 ? ageMin + 'm ago' : ageMin < 1440 ? (ageMin / 60).toFixed(1) + 'h ago' : (ageMin / 1440).toFixed(1) + 'd ago';
+    const ageCls = ageMin == null ? '' : ageMin < 120 ? 'gn' : ageMin < 720 ? 'am' : 'rd';
+
     content.innerHTML = `
       <div class="qhist-toolbar">
         <div class="qhist-stats">
           <span class="stat"><b>${records.length.toLocaleString()}</b> records</span>
           ${maturationChip}
-          <span class="stat">generated <b>${(payload.generated_at || '').replace('T',' ').slice(0,16)}</b></span>
+          <span class="stat" style="color:var(--${ageCls === 'gn' ? 'gn' : ageCls === 'am' ? 'amb' : 'rd'})">generated <b>${ageLbl}</b></span>
           <span class="stat">D1-D7 · W1-W8 · M1-M12 <b>(${HORIZONS.length} horizons)</b></span>
+          <button onclick="_qauditTogglePending()" title="Toggle visibility of today's freshly-picked rows that haven't matured to D1 yet" style="margin-left:8px;padding:3px 10px;font:700 9.5px ui-monospace,monospace;background:${_filters.hidePending ? 'var(--bg-3)' : 'var(--amb)'};color:${_filters.hidePending ? 'var(--ink-1)' : '#000'};border:1px solid var(--line);border-radius:2px;cursor:pointer;letter-spacing:0.06em">${_filters.hidePending ? '🕓 SHOW PENDING' : '✓ HIDING PENDING'}</button>
+          <button onclick="_qauditForceRefresh()" style="margin-left:4px;padding:3px 10px;font:700 9.5px ui-monospace,monospace;background:var(--copper);color:#fff;border:0;border-radius:2px;cursor:pointer;letter-spacing:0.06em">↻ REFRESH</button>
         </div>
         <div class="qhist-filters">
           ${_filterChips('year', allYears, _filters.year, 'Year')}
@@ -19924,6 +19973,11 @@ const QuantHistoryLedger = (function() {
 
   function _filtered(records) {
     let pool = records;
+    if (_filters.hidePending) {
+      // A record is "pending" when no forward-return horizon has matured yet.
+      // Hide them from default view so the user opens to actionable history.
+      pool = pool.filter(r => r && (r.d1 != null || r.d5 != null || r.w1 != null || r.m1 != null));
+    }
     if (_filters.year !== 'all') pool = pool.filter(r => (r.pick_date || '').startsWith(_filters.year));
     if (_filters.mode !== 'all') pool = pool.filter(r => r.mode === _filters.mode);
     if (_filters.verdict !== 'all') pool = pool.filter(r => r.verdict === _filters.verdict);
@@ -46330,6 +46384,7 @@ const MarketsV2 = (function () {
         // Async-load selection quality + setup tuner after the main render
         setTimeout(() => window._loadSelectionQuality && window._loadSelectionQuality(), 100);
         setTimeout(() => window._loadSetupTuner && window._loadSetupTuner(), 200);
+        setTimeout(() => window._loadStatTests && window._loadStatTests(), 300);
       } catch(e) {
         root.innerHTML = `<div class="pp-empty" style="color:var(--rd)">Error loading: ${e.message}</div>`;
       }
@@ -46886,6 +46941,238 @@ const MarketsV2 = (function () {
         </div>`;
     };
 
+    // ──────────────────────────────────────────────────────────────────
+    // STATISTICAL TESTS · TIER 1 batch (2026-05-18)
+    // 1. MAE/MFE analyzer  2. Regime-conditional  3. Monte Carlo  4. Permutation
+    // ──────────────────────────────────────────────────────────────────
+    window._statTestsState = { mae: null, regime: null, mc: null, perm: null };
+    window._loadStatTests = async function() {
+      const wrap = document.getElementById('ppStatTests');
+      if (!wrap) return;
+      wrap.innerHTML = `
+        <div style="margin-top:18px;padding:14px 16px;background:linear-gradient(135deg,rgba(217,119,87,0.08),transparent);border:1px solid var(--copper);border-radius:3px;margin-bottom:14px">
+          <div style="font:800 14px var(--sans);color:var(--copper);letter-spacing:-0.01em;margin-bottom:4px">▦ STATISTICAL TESTS · TIER 1 hedge-fund validation suite</div>
+          <div style="font:500 11.5px var(--mono);color:var(--ink-1);line-height:1.6">
+            Four tests interrogate the strategy at different layers — MAE/MFE (stop-target tuning),
+            Regime-Conditional (where edge lives), Monte Carlo (CI on Sharpe/PF), Permutation (is edge real or random).
+            All four pull from <b>signal_log.json</b> (1,028+ closed trades). Click <b>RUN ALL</b> to execute the full battery.
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button onclick="window._runAllStatTests()" id="st-runall-btn"
+              style="padding:6px 14px;background:var(--copper);color:var(--bg-1);border:0;border-radius:3px;font:800 10px var(--mono);letter-spacing:.10em;cursor:pointer;text-transform:uppercase">▶ RUN ALL TESTS</button>
+            <span style="font:500 10px var(--mono);color:var(--ink-3);letter-spacing:.02em">~3-8s total · resamples 1000-5000× per test</span>
+          </div>
+        </div>
+        <div id="ppStatTestsBody"></div>`;
+    };
+
+    window._runAllStatTests = async function() {
+      const btn = document.getElementById('st-runall-btn');
+      const body = document.getElementById('ppStatTestsBody');
+      if (!body) return;
+      if (btn) { btn.disabled = true; btn.textContent = '⌛ RUNNING…'; }
+      body.innerHTML = '<div class="pp-empty" style="padding:32px">Running 4 tests in parallel…</div>';
+      try {
+        const [maeR, regR, mcR, permR] = await Promise.all([
+          fetch('/api/test/mae-mfe?days=90', { credentials: 'same-origin' }).then(r => r.json()),
+          fetch('/api/test/regime-conditional?days=180', { credentials: 'same-origin' }).then(r => r.json()),
+          fetch('/api/test/monte-carlo?days=90&iterations=3000', { credentials: 'same-origin' }).then(r => r.json()),
+          fetch('/api/test/permutation?days=90&iterations=1000', { credentials: 'same-origin' }).then(r => r.json()),
+        ]);
+        window._statTestsState = { mae: maeR, regime: regR, mc: mcR, perm: permR };
+        window._renderStatTestsUI();
+        if (btn) { btn.disabled = false; btn.textContent = '↻ RE-RUN ALL TESTS'; }
+      } catch (e) {
+        body.innerHTML = '<div class="pp-empty" style="padding:32px;color:var(--rd)">Test battery failed: ' + e.message + '</div>';
+        if (btn) { btn.disabled = false; btn.textContent = '▶ RUN ALL TESTS'; }
+      }
+    };
+
+    window._renderStatTestsUI = function() {
+      const body = document.getElementById('ppStatTestsBody');
+      if (!body) return;
+      const s = window._statTestsState;
+      const cards = [
+        _renderMAECard(s.mae),
+        _renderRegimeCard(s.regime),
+        _renderMonteCarloCard(s.mc),
+        _renderPermutationCard(s.perm),
+      ].join('');
+      body.innerHTML = cards;
+    };
+
+    function _renderMAECard(d) {
+      if (!d || d.error) {
+        return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--rd)">
+          <div class="pp-card-h"><span>① MAE / MFE ANALYZER</span><span class="sub">stop &amp; target tuning</span></div>
+          <div style="color:var(--rd);font:600 11.5px var(--mono);padding:8px 0">${d && d.error || 'no data'}</div>
+        </div>`;
+      }
+      const sum = d.summary || {};
+      const st = d.stop_too_tight || {};
+      const tt = d.target_too_low || {};
+      const ssl = d.stop_saved_loss || {};
+      const maeHist = (d.mae_distribution || []).map(h => {
+        const max = Math.max(...d.mae_distribution.map(x => x.count), 1);
+        const w = Math.max(2, Math.round(h.count / max * 100));
+        return `<div style="display:grid;grid-template-columns:90px 1fr 36px;gap:8px;align-items:center;padding:2px 0;font:600 10px var(--mono)">
+          <span style="color:var(--ink-2)">${h.range}</span>
+          <div style="height:6px;background:var(--bg-3);border-radius:1px;overflow:hidden"><div style="width:${w}%;height:100%;background:var(--rd);opacity:.7"></div></div>
+          <span style="color:var(--ink);font-weight:800;text-align:right">${h.count}</span>
+        </div>`;
+      }).join('');
+      const mfeHist = (d.mfe_distribution || []).map(h => {
+        const max = Math.max(...d.mfe_distribution.map(x => x.count), 1);
+        const w = Math.max(2, Math.round(h.count / max * 100));
+        return `<div style="display:grid;grid-template-columns:90px 1fr 36px;gap:8px;align-items:center;padding:2px 0;font:600 10px var(--mono)">
+          <span style="color:var(--ink-2)">${h.range}</span>
+          <div style="height:6px;background:var(--bg-3);border-radius:1px;overflow:hidden"><div style="width:${w}%;height:100%;background:var(--gn);opacity:.7"></div></div>
+          <span style="color:var(--ink);font-weight:800;text-align:right">${h.count}</span>
+        </div>`;
+      }).join('');
+      const ttExamples = (tt.top_examples || []).slice(0, 5).map(e =>
+        `<tr><td><b>${e.ticker}</b></td><td>${e.date}</td><td class="gn">+${e.exit_pnl}%</td><td class="gn">+${e.mfe_pct}%</td><td class="am">left ${e.left_on_table}%</td></tr>`
+      ).join('');
+      return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--cy)">
+        <div class="pp-card-h"><span>① MAE / MFE ANALYZER</span><span class="sub">${d.trades_examined} trades · ${d.lookback_days}d</span></div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+          <div class="pp-stat"><div class="k">Avg MAE</div><div class="v rd" style="font-size:18px">${sum.avg_mae_pct}%</div><div class="s">max drawdown intra-trade</div></div>
+          <div class="pp-stat"><div class="k">Avg MFE</div><div class="v gn" style="font-size:18px">+${sum.avg_mfe_pct}%</div><div class="s">max favorable excursion</div></div>
+          <div class="pp-stat"><div class="k">Stop Too Tight</div><div class="v am" style="font-size:18px">${st.count}</div><div class="s">${st.pct_of_winners}% of winners</div></div>
+          <div class="pp-stat"><div class="k">Target Too Low</div><div class="v am" style="font-size:18px">${tt.count}</div><div class="s">left avg on table</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px">
+          <div>
+            <div style="font:800 10px var(--mono);color:var(--rd);letter-spacing:.10em;margin-bottom:6px">▦ MAE DISTRIBUTION</div>
+            ${maeHist}
+          </div>
+          <div>
+            <div style="font:800 10px var(--mono);color:var(--gn);letter-spacing:.10em;margin-bottom:6px">▦ MFE DISTRIBUTION</div>
+            ${mfeHist}
+          </div>
+        </div>
+        <div style="padding:10px 12px;background:var(--bg-3);border-left:2px solid var(--amb);font:500 11px var(--mono);color:var(--ink-1);line-height:1.6;margin-bottom:8px">
+          <b style="color:var(--amb)">STOP-TOO-TIGHT:</b> ${st.interpretation}
+        </div>
+        <div style="padding:10px 12px;background:var(--bg-3);border-left:2px solid var(--amb);font:500 11px var(--mono);color:var(--ink-1);line-height:1.6;margin-bottom:8px">
+          <b style="color:var(--amb)">TARGET-TOO-LOW:</b> ${tt.interpretation}
+        </div>
+        <div style="padding:10px 12px;background:var(--bg-3);border-left:2px solid var(--gn);font:500 11px var(--mono);color:var(--ink-1);line-height:1.6;margin-bottom:8px">
+          <b style="color:var(--gn)">STOP-SAVED-LOSS:</b> ${ssl.interpretation}
+        </div>
+        ${ttExamples ? `<table class="pp-mat-table" style="margin-top:8px">
+          <thead><tr><th>Ticker</th><th>Date</th><th>Exit</th><th>MFE</th><th>Opportunity</th></tr></thead>
+          <tbody>${ttExamples}</tbody>
+        </table>` : ''}
+      </div>`;
+    }
+
+    function _renderRegimeCard(d) {
+      if (!d || d.error) {
+        return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--rd)">
+          <div class="pp-card-h"><span>② REGIME-CONDITIONAL PERFORMANCE</span><span class="sub">where edge lives</span></div>
+          <div style="color:var(--rd);font:600 11.5px var(--mono);padding:8px 0">${d && d.error || 'no data'}</div>
+        </div>`;
+      }
+      const regimes = d.by_regime || {};
+      const regRows = Object.entries(regimes).map(([r, s]) => {
+        const pnlCls = s.mean_pnl >= 0 ? 'gn' : 'rd';
+        const pfCls = s.pf >= 1.5 ? 'gn' : s.pf >= 1.0 ? 'am' : 'rd';
+        const setups = (s.per_setup || []).slice(0, 5).map(p =>
+          `<tr><td><b>${p.setup}</b></td><td>${p.n}</td><td>${p.wr}%</td><td class="${p.mean_pnl >= 0 ? 'gn' : 'rd'}">${p.mean_pnl >= 0 ? '+' : ''}${p.mean_pnl}%</td><td class="${p.pf >= 1.0 ? 'gn' : 'rd'}">${p.pf}</td></tr>`
+        ).join('');
+        return `<div style="background:var(--bg-3);border:1px solid var(--line);border-radius:3px;padding:12px;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+            <span style="font:800 12px var(--mono);color:var(--ink);text-transform:uppercase;letter-spacing:.06em">${r}</span>
+            <span style="font:500 10px var(--mono);color:var(--ink-3)">${s.n} trades · WR ${s.wr}% · PF <span class="${pfCls}" style="font-weight:800">${s.pf}</span> · mean <span class="${pnlCls}" style="font-weight:800">${s.mean_pnl >= 0 ? '+' : ''}${s.mean_pnl}%</span></span>
+          </div>
+          <table class="pp-mat-table" style="font-size:10.5px">
+            <thead><tr><th>Setup</th><th>n</th><th>WR</th><th>Mean</th><th>PF</th></tr></thead>
+            <tbody>${setups}</tbody>
+          </table>
+        </div>`;
+      }).join('');
+      const bestStr = d.best_regime ? `<b style="color:var(--gn)">${d.best_regime.name}</b> (mean +${d.best_regime.stats.mean_pnl}%, PF ${d.best_regime.stats.pf})` : 'n/a';
+      const worstStr = d.worst_regime ? `<b style="color:var(--rd)">${d.worst_regime.name}</b> (mean ${d.worst_regime.stats.mean_pnl >= 0 ? '+' : ''}${d.worst_regime.stats.mean_pnl}%, PF ${d.worst_regime.stats.pf})` : 'n/a';
+      return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--cy)">
+        <div class="pp-card-h"><span>② REGIME-CONDITIONAL PERFORMANCE</span><span class="sub">${d.trades_examined} trades · ${d.lookback_days}d</span></div>
+        <div style="padding:10px 12px;background:var(--bg-3);border-left:2px solid var(--cy);font:500 11.5px var(--mono);color:var(--ink-1);line-height:1.6;margin-bottom:12px">
+          <b style="color:var(--cy)">REGIME EDGE:</b> Best regime: ${bestStr}. Worst: ${worstStr}. Principle #5 (regime conditioning over averages) — if best PF differs materially from worst, the strategy is regime-dependent. Surface this in sizing/gates.
+        </div>
+        ${regRows}
+      </div>`;
+    }
+
+    function _renderMonteCarloCard(d) {
+      if (!d || d.error) {
+        return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--rd)">
+          <div class="pp-card-h"><span>③ MONTE CARLO BOOTSTRAP</span><span class="sub">confidence intervals</span></div>
+          <div style="color:var(--rd);font:600 11.5px var(--mono);padding:8px 0">${d && d.error || 'no data'}</div>
+        </div>`;
+      }
+      const m = d.metrics || {};
+      const interp = d.interpretation || {};
+      const _ci = (k, label, cls) => {
+        const v = m[k] || {};
+        return `<div class="pp-stat">
+          <div class="k">${label}</div>
+          <div class="v ${cls}" style="font-size:20px">${v.point}</div>
+          <div class="s">95% CI: ${v.ci_low_95} → ${v.ci_high_95}</div>
+        </div>`;
+      };
+      return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--cy)">
+        <div class="pp-card-h"><span>③ MONTE CARLO BOOTSTRAP</span><span class="sub">${d.trades_examined} trades · ${d.iterations} resamples</span></div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+          ${_ci('mean', 'Mean PnL', m.mean && m.mean.point >= 0 ? 'gn' : 'rd')}
+          ${_ci('sharpe', 'Sharpe', m.sharpe && m.sharpe.point >= 0.5 ? 'gn' : m.sharpe && m.sharpe.point >= 0 ? 'am' : 'rd')}
+          ${_ci('pf', 'Profit Factor', m.pf && m.pf.point >= 1.5 ? 'gn' : m.pf && m.pf.point >= 1.0 ? 'am' : 'rd')}
+          ${_ci('wr', 'Win Rate %', m.wr && m.wr.point >= 50 ? 'gn' : m.wr && m.wr.point >= 35 ? 'am' : 'rd')}
+        </div>
+        <div style="padding:10px 12px;background:var(--bg-3);border-left:2px solid var(--cy);font:500 11px var(--mono);color:var(--ink-1);line-height:1.7;margin-bottom:6px">
+          <b style="color:var(--cy)">SHARPE:</b> ${interp.sharpe}
+        </div>
+        <div style="padding:10px 12px;background:var(--bg-3);border-left:2px solid var(--cy);font:500 11px var(--mono);color:var(--ink-1);line-height:1.7;margin-bottom:6px">
+          <b style="color:var(--cy)">PROFIT FACTOR:</b> ${interp.pf}
+        </div>
+        <div style="padding:10px 12px;background:var(--bg-3);border-left:2px solid var(--cy);font:500 11px var(--mono);color:var(--ink-1);line-height:1.7">
+          <b style="color:var(--cy)">WIN RATE:</b> ${interp.wr}
+        </div>
+        <div style="margin-top:10px;font:500 10px var(--mono);color:var(--ink-3);letter-spacing:.02em;line-height:1.5">
+          Principle #1: point estimates lie, CIs tell truth. Bootstrap = resample n trades with replacement,
+          recompute metric, repeat ${d.iterations}× → distribution → percentile cuts.
+        </div>
+      </div>`;
+    }
+
+    function _renderPermutationCard(d) {
+      if (!d || d.error) {
+        return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--rd)">
+          <div class="pp-card-h"><span>④ PERMUTATION TEST</span><span class="sub">is edge real?</span></div>
+          <div style="color:var(--rd);font:600 11.5px var(--mono);padding:8px 0">${d && d.error || 'no data'}</div>
+        </div>`;
+      }
+      const verdictCls = d.verdict && d.verdict.includes('STRONG') ? 'gn'
+                       : d.verdict && d.verdict.includes('SIGNIFICANT') ? 'gn'
+                       : d.verdict && d.verdict.includes('MARGINAL') ? 'am' : 'rd';
+      const a = d.actual || {};
+      const nd = d.null_distribution || {};
+      return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--cy)">
+        <div class="pp-card-h"><span>④ PERMUTATION TEST</span><span class="sub">${d.trades_examined} trades · ${d.iterations} sims</span></div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+          <div class="pp-stat"><div class="k">Strategy Mean</div><div class="v ${a.mean_pnl >= 0 ? 'gn' : 'rd'}" style="font-size:20px">${a.mean_pnl >= 0 ? '+' : ''}${a.mean_pnl}%</div><div class="s">actual</div></div>
+          <div class="pp-stat"><div class="k">Null Mean</div><div class="v cy" style="font-size:20px">${nd.mean_of_means >= 0 ? '+' : ''}${nd.mean_of_means}%</div><div class="s">random baseline</div></div>
+          <div class="pp-stat"><div class="k">Z-Score</div><div class="v ${d.z_score >= 1.5 ? 'gn' : d.z_score >= 0 ? 'am' : 'rd'}" style="font-size:20px">${d.z_score >= 0 ? '+' : ''}${d.z_score}</div><div class="s">SDs above null</div></div>
+          <div class="pp-stat"><div class="k">p-value</div><div class="v ${d.p_value < 0.05 ? 'gn' : d.p_value < 0.10 ? 'am' : 'rd'}" style="font-size:20px">${d.p_value}</div><div class="s">prob(random ≥ actual)</div></div>
+        </div>
+        <div style="padding:12px 14px;background:var(--bg-3);border-left:2px solid var(--${verdictCls});font:800 13px var(--mono);color:var(--${verdictCls});letter-spacing:.06em;margin-bottom:10px">
+          ▦ VERDICT: ${d.verdict}
+        </div>
+        <div style="padding:10px 12px;background:var(--bg-3);border-left:2px solid var(--cy);font:500 11px var(--mono);color:var(--ink-1);line-height:1.7">
+          ${d.interpretation}
+        </div>
+      </div>`;
+    }
+
     window._exportPipelineCSV = function() {
       const d = window._pipelineData || {};
       const migs = d.migrations || [];
@@ -47121,6 +47408,7 @@ const MarketsV2 = (function () {
         <div id="ppSetupTuner"><div class="pp-empty" style="padding:28px">Loading setup tuner…</div></div>
         <div id="ppWhatIf"></div>
         <div id="ppShadowPaper"></div>
+        <div id="ppStatTests"></div>
 
         <div class="pp-table">
           <div class="pp-table-h"><span>Per-ticker migration · top 50 by score</span><span class="sub">click any row for detail</span></div>
