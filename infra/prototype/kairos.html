@@ -6735,6 +6735,45 @@ body.ep-fit-mode .page { padding: 14px 16px 0; min-height: 0; }
   color: var(--ink-3); letter-spacing: 0.06em; text-transform: uppercase; }
 .qs-banner .meta b { color: var(--ink); }
 
+/* Quick panels · 6-card glance row · 2026-05-18 */
+.qs-quick-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+  padding: 12px 22px 14px; border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(217,119,87,0.025), transparent 80%); }
+@media (max-width: 1100px) { .qs-quick-grid { grid-template-columns: 1fr; } }
+.qs-quick-panel { background: var(--bg-1); border: 1px solid var(--line);
+  border-radius: 2px; padding: 9px 12px; }
+.qs-quick-hd { display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; margin-bottom: 7px; font: 700 10px var(--mono); color: var(--copper);
+  letter-spacing: 0.14em; text-transform: uppercase; }
+.qs-quick-sub { font: 500 9px var(--mono); color: var(--ink-3);
+  letter-spacing: 0.04em; text-transform: none; }
+.qs-quick-row-wrap { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+@media (max-width: 720px) { .qs-quick-row-wrap { grid-template-columns: repeat(2, 1fr); } }
+.qs-quick-empty { grid-column: 1 / -1; padding: 14px 8px; text-align: center;
+  font: 600 10px var(--mono); color: var(--ink-3); letter-spacing: 0.04em;
+  background: var(--bg-2); border-radius: 2px; }
+.qs-quick-card { display: grid; grid-template-columns: 22px 1fr; gap: 6px;
+  padding: 7px 8px; background: var(--bg-2); border: 1px solid var(--line);
+  border-left: 2px solid var(--copper); border-radius: 2px; cursor: pointer;
+  transition: background 0.12s ease, border-left-color 0.12s ease;
+  min-width: 0; }
+.qs-quick-card:hover { background: var(--bg-3); border-left-color: #e2856a; }
+.qs-quick-rank { font: 800 11px var(--mono); color: var(--copper);
+  letter-spacing: 0.04em; align-self: start; padding-top: 1px; }
+.qs-quick-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow: hidden; }
+.qs-quick-row { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.qs-quick-sym { font: 800 12px var(--mono); color: var(--ink);
+  letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qs-quick-puv { font: 800 11px var(--mono); letter-spacing: -0.01em; white-space: nowrap; }
+.qs-quick-puv.gn { color: var(--gn); }
+.qs-quick-puv.rd { color: var(--rd); }
+.qs-quick-puv.am { color: var(--amb); }
+.qs-quick-meta { font: 500 8.5px var(--mono); color: var(--ink-2);
+  letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qs-quick-meta b { color: var(--ink); font-weight: 700; }
+.qs-quick-meta2 { font: 500 8px var(--mono); color: var(--ink-3);
+  letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .qs-stick { position: sticky; top: 0; z-index: 10;
   background: var(--bg-1); border-bottom: 1px solid var(--line);
   padding: 12px 22px;
@@ -8241,6 +8280,7 @@ body.on-detail-tab .qdchk-trigger-btn { display: inline-flex; }
     <div class="sb-link" data-tab="supabase"><span class="ico">◇</span>Supabase<span class="ct" id="sb-sb">67</span></div>
     <div class="sb-link" data-tab="pipelines"><span class="ico">⇄</span>Pipelines<span class="ct" id="sb-pl">68</span></div>
     <div class="sb-link" data-tab="strategyMatrix"><span class="ico">▦</span>Strategy × Regime<span class="ct" id="sb-srm">matrix</span></div>
+    <div class="sb-link" data-tab="researchLab"><span class="ico">🔬</span>Research Lab<span class="ct" id="sb-rl">3 P</span></div>
   </div>
 
 </aside>
@@ -12943,6 +12983,11 @@ const V3_WORKSPACES = {
     title: 'Strategy × Regime',
     sub: 'per-(setup × regime) Sharpe · Wilson CI · edge erosion · forward backtest · actionable decisions',
     custom: 'quantStrategyMatrix',
+  },
+  researchLab: {
+    title: 'Research Lab',
+    sub: 'edge-research roadmap · HMM regime · Fama-French factors · ML lib upgrade · evidence + validation gates',
+    custom: 'quantResearchLab',
   },
   screener: {
     title: 'Screener',
@@ -18584,6 +18629,7 @@ const QuantScanner = (function() {
 
     container.innerHTML = `<div class="qs-wrap">
       ${banner}
+      <div id="qsQuickPanels">${renderQuickPanels(_state.arr)}</div>
       <div id="qsHeader">${renderHeader(_state.arr)}</div>
       <div id="qsActions">${renderActionStrip()}</div>
       <div id="qsTable">${renderTable()}</div>
@@ -18592,6 +18638,280 @@ const QuantScanner = (function() {
 
     _wire(container);
     _startLivePx();
+    // If ML cache not yet loaded, kick the fetch and re-render the quick
+    // panels (Top 5 AI + Hot Sectors need ML cache) when it lands.
+    if (!window.__mlEdgeCache && typeof window.__mlEdgePromise === 'undefined') {
+      try {
+        fetch('/v2/ml_edge_predictions.json', { cache: 'no-store' })
+          .then(r => r.ok ? r.json() : null)
+          .then(j => {
+            if (j) {
+              window.__mlEdgeCache = j;
+              const slice = container.querySelector('#qsQuickPanels');
+              if (slice) slice.innerHTML = renderQuickPanels(_state.arr);
+              _wireQuickPanels(container);
+            }
+          })
+          .catch(() => {});
+      } catch (_) {}
+    } else {
+      _wireQuickPanels(container);
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════
+  //  QUICK PANELS — 6-card glance row above the watchlist (2026-05-18)
+  //  Top 5 AI · Fresh Entries · Top Momentum · Earnings This Week ·
+  //  Volume Surges · Hot Sectors. Each panel uses the same card structure
+  //  so the visual rhythm is consistent and the eye scans them fast.
+  // ═════════════════════════════════════════════════════════════════════
+  function renderQuickPanels(arr) {
+    return `
+      <div class="qs-quick-grid">
+        ${renderTopAiPicks()}
+        ${panelFreshEntries(arr)}
+        ${panelTopMomentum(arr)}
+        ${panelEarningsThisWeek(arr)}
+        ${panelVolumeSurges(arr)}
+      </div>`;
+  }
+
+  function _wireQuickPanels(container) {
+    // Single delegated click handler for any card with data-sym
+    container.querySelectorAll('.qs-quick-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const sym = card.dataset.sym;
+        if (sym && window.setDetailTicker) window.setDetailTicker(sym);
+      });
+    });
+  }
+
+  function _qpCard(rank, sym, primary, primaryCls, meta, meta2) {
+    return `
+      <div class="qs-quick-card" data-sym="${sym}">
+        <div class="qs-quick-rank">#${rank}</div>
+        <div class="qs-quick-main">
+          <div class="qs-quick-row">
+            <span class="qs-quick-sym">${sym}</span>
+            <span class="qs-quick-puv ${primaryCls || ''}">${primary}</span>
+          </div>
+          <div class="qs-quick-meta">${meta || ''}</div>
+          ${meta2 ? `<div class="qs-quick-meta2">${meta2}</div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  function _qpFrame(icon, title, sub, cards, empty) {
+    return `
+      <div class="qs-quick-panel">
+        <div class="qs-quick-hd">
+          <span>${icon} ${title}</span>
+          <span class="qs-quick-sub">${sub}</span>
+        </div>
+        <div class="qs-quick-row-wrap">
+          ${cards || `<div class="qs-quick-empty">${empty || 'no data'}</div>`}
+        </div>
+      </div>`;
+  }
+
+  // ─── ⚡ Fresh Entries ────────────────────────────────────────────────
+  function panelFreshEntries(arr) {
+    const rows = (arr || [])
+      .filter(t => t && (t.entry_quality === 'FRESH') && !t.killed)
+      .sort((a, b) => (b.score || 0) - (a.score || 0))
+      .slice(0, 5);
+    const cards = rows.map((t, i) => {
+      const sector = t.sector || '—';
+      const fam = t.setup_family || t.strategy || '—';
+      const score = Math.round(t.score || 0);
+      return _qpCard(i + 1, t.ticker,
+        `Score <b>${score}</b>`, score >= 75 ? 'gn' : score >= 65 ? 'am' : '',
+        `${fam} · ${sector}`,
+        `RVOL <b>${(t.rvol || 0).toFixed(2)}</b> · RS <b>${t.rs_rank || '—'}</b>`);
+    }).join('');
+    return _qpFrame('⚡', 'FRESH ENTRIES',
+      'within 0.75 ATR of pivot · best entry quality',
+      cards, 'no FRESH-quality entries today');
+  }
+
+  // ─── 🚀 Top 5 Momentum ──────────────────────────────────────────────
+  function panelTopMomentum(arr) {
+    const rows = (arr || [])
+      .filter(t => t && (t.raw_momentum_score || 0) > 0)
+      .sort((a, b) => (b.raw_momentum_score || 0) - (a.raw_momentum_score || 0))
+      .slice(0, 5);
+    const cards = rows.map((t, i) => {
+      const score = Math.round(t.raw_momentum_score || 0);
+      const grade = t.grade_momentum || '—';
+      const sharpe = (t.sharpe_126d || 0).toFixed(2);
+      const rs = t.rs_rank || '—';
+      return _qpCard(i + 1, t.ticker,
+        `${score}/100`, score >= 85 ? 'gn' : score >= 70 ? 'am' : '',
+        `Grade <b>${grade}</b> · Sharpe126d <b>${sharpe}</b>`,
+        `RS rank <b>${rs}</b> · ${t.sector || '—'}`);
+    }).join('');
+    return _qpFrame('🚀', 'TOP MOMENTUM',
+      'highest raw_momentum_score · grade-A leaders',
+      cards, 'no momentum data');
+  }
+
+  // ─── 📅 Earnings This Week (next 5 trading days) ─────────────────────
+  function panelEarningsThisWeek(arr) {
+    const rows = (arr || [])
+      .filter(t => {
+        if (!t) return false;
+        const e = t.earn_days != null ? t.earn_days : t.days_to_earnings;
+        return e != null && e >= 0 && e <= 7;
+      })
+      .sort((a, b) => {
+        const da = a.earn_days != null ? a.earn_days : a.days_to_earnings;
+        const db = b.earn_days != null ? b.earn_days : b.days_to_earnings;
+        return da - db;
+      })
+      .slice(0, 5);
+    const cards = rows.map((t, i) => {
+      const d = t.earn_days != null ? t.earn_days : t.days_to_earnings;
+      const dCls = d <= 1 ? 'rd' : d <= 3 ? 'am' : '';
+      const impl = t.iv_implied_move_pct || t.implied_move || null;
+      return _qpCard(i + 1, t.ticker,
+        d === 0 ? 'TODAY' : `+${d}d`, dCls,
+        `${t.sector || '—'} · ${t.setup_family || '—'}`,
+        impl ? `IV-implied gap <b>±${(impl).toFixed(1)}%</b>` : 'binary event — close T2 EOD T-1');
+    }).join('');
+    return _qpFrame('📅', 'EARNINGS THIS WEEK',
+      'binary events in next 7d · principle 17 defensive',
+      cards, '✓ no earnings inside 7d window');
+  }
+
+  // ─── 🔥 Volume Surges (highest RVOL today) ───────────────────────────
+  function panelVolumeSurges(arr) {
+    const rows = (arr || [])
+      .filter(t => t && (t.rvol || 0) >= 1.5)
+      .sort((a, b) => (b.rvol || 0) - (a.rvol || 0))
+      .slice(0, 5);
+    const cards = rows.map((t, i) => {
+      const rv = t.rvol || 0;
+      const rvCls = rv >= 3 ? 'gn' : rv >= 2 ? 'am' : '';
+      const score = Math.round(t.score || 0);
+      return _qpCard(i + 1, t.ticker,
+        `${rv.toFixed(2)}×`, rvCls,
+        `${t.sector || '—'} · ${t.setup_family || '—'}`,
+        `Score <b>${score}</b> · entry <b>${t.entry_quality || '—'}</b>`);
+    }).join('');
+    return _qpFrame('🔥', 'VOLUME SURGES',
+      'RVOL ≥ 1.5× — where institutional flow concentrates',
+      cards, 'no surge volume today');
+  }
+
+  // ─── 🌡 Hot Sectors (avg p(up) from ML cache) ────────────────────────
+  function panelHotSectors(arr) {
+    const cache = window.__mlEdgeCache;
+    const pool = cache && (cache.predictions || {}).swing || {};
+    const bySec = {};
+    // Cross-reference: ticker → sector from scan bundle, p_up from ML cache
+    const tk = {};
+    (arr || []).forEach(t => { if (t && t.ticker) tk[t.ticker.toUpperCase()] = t.sector || 'Other'; });
+    for (const [sym, p] of Object.entries(pool)) {
+      const sec = (p && p.sector) || tk[sym] || 'Other';
+      const pUp = ((p || {}).direction || {}).p_up;
+      if (typeof pUp !== 'number') continue;
+      if (!bySec[sec]) bySec[sec] = { n: 0, sum: 0, sym1: null };
+      bySec[sec].n++;
+      bySec[sec].sum += pUp;
+      if (!bySec[sec].sym1 || pUp > bySec[sec].max_pup) {
+        bySec[sec].sym1 = sym;
+        bySec[sec].max_pup = pUp;
+      }
+    }
+    const rows = Object.entries(bySec)
+      .filter(([, v]) => v.n >= 3 && v.sym1)
+      .map(([sec, v]) => ({ sec, avg: v.sum / v.n, n: v.n, sym1: v.sym1, max_pup: v.max_pup }))
+      .sort((a, b) => b.avg - a.avg)
+      .slice(0, 5);
+    const cards = rows.map((r, i) => {
+      const pUpPct = (r.avg * 100).toFixed(0);
+      const cls = r.avg >= 0.55 ? 'gn' : r.avg >= 0.50 ? 'am' : 'rd';
+      return _qpCard(i + 1, r.sec.length > 16 ? r.sec.slice(0,14)+'..' : r.sec,
+        `${pUpPct}% bull`, cls,
+        `n=${r.n} tickers · leader <b>${r.sym1}</b>`,
+        '');
+    }).join('');
+    // Override data-sym for sector cards — clicking opens the sector LEADER's detail
+    const cardsWithSym = rows.map((r, i) => {
+      const pUpPct = (r.avg * 100).toFixed(0);
+      const cls = r.avg >= 0.55 ? 'gn' : r.avg >= 0.50 ? 'am' : 'rd';
+      return `
+        <div class="qs-quick-card" data-sym="${r.sym1}">
+          <div class="qs-quick-rank">#${i + 1}</div>
+          <div class="qs-quick-main">
+            <div class="qs-quick-row">
+              <span class="qs-quick-sym" style="font-size:13px">${r.sec}</span>
+              <span class="qs-quick-puv ${cls}">${pUpPct}%</span>
+            </div>
+            <div class="qs-quick-meta">n=${r.n} tickers · leader <b>${r.sym1}</b></div>
+            <div class="qs-quick-meta2">click → open leader detail</div>
+          </div>
+        </div>`;
+    }).join('');
+    return _qpFrame('🌡', 'HOT SECTORS',
+      'avg ML p(up) per sector · today\'s rotation',
+      cardsWithSym, 'sector aggregation needs ML cache');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  Top 5 AI Predictions panel (2026-05-18)
+  //  Ranks ML Edge predictions by p_up in swing mode. Clicking a card
+  //  opens that ticker's detail page (uses setDetailTicker fallback that
+  //  synthesizes a row from ML cache for R2000-only names).
+  // ─────────────────────────────────────────────────────────────────────
+  function renderTopAiPicks() {
+    const cache = window.__mlEdgeCache;
+    if (!cache || cache._meta && cache._meta.error) {
+      return _qpFrame('✦', 'TOP 5 AI PREDICTIONS', 'loading from ML cache…', '', 'cache/ml_edge_predictions.json not loaded yet');
+    }
+    const pool = (cache.predictions || {}).swing || {};
+    const allSyms = Object.keys(pool);
+    if (!allSyms.length) {
+      return _qpFrame('✦', 'TOP 5 AI PREDICTIONS', 'no data', '', 'run <code style="color:var(--copper)">python3 -m ml.run_ml_edge</code>');
+    }
+    // Rank by p_up — top 5 with edge > 0
+    const ranked = allSyms
+      .map(s => {
+        const p = pool[s] || {};
+        const dir = p.direction || {}, mag = p.magnitude || {}, hit = p.hit_net || {};
+        return {
+          sym: s,
+          p_up: dir.p_up || 0,
+          edge: dir.edge || 0,
+          q50:  mag.q50  || 0,
+          q75:  mag.q75  || 0,
+          pT1:  hit.p_t1_first || 0,
+          sector: p.sector || '—',
+          name:   p.name || s,
+          spread: p.spread_bps,
+          source: p.spread_source,
+          in_sp500: p.in_sp500, in_r1000: p.in_r1000, in_r2000: p.in_r2000,
+          shap_top: ((p.shap || {}).dir_top || [])[0],
+        };
+      })
+      .sort((a, b) => b.p_up - a.p_up)
+      .slice(0, 5);
+    const cards = ranked.map((r, i) => {
+      const universe = r.in_sp500 ? 'S&P 500' : r.in_r1000 ? 'R1000' : r.in_r2000 ? 'R2000' : '—';
+      const shapTag = r.shap_top
+        ? `<span style="color:${(r.shap_top.shap||0)>=0?'var(--gn)':'var(--rd)'}">${(r.shap_top.shap||0)>=0?'↑':'↓'}</span> ${(r.shap_top.feature||'').replace(/_/g,' ').slice(0,16)}`
+        : '';
+      const spreadTag = r.source === 'schwab_live'
+        ? `<span style="color:var(--gn);font-weight:700">live ${(r.spread||0).toFixed(0)}bp</span>`
+        : (r.spread ? `${(r.spread||0).toFixed(0)}bp est` : '');
+      return _qpCard(i + 1, r.sym,
+        `${r.q50 >= 0 ? '+' : ''}${r.q50.toFixed(2)}%`, r.q50 >= 0 ? 'gn' : 'rd',
+        `p(up) <b>${(r.p_up * 100).toFixed(0)}%</b> · edge <b style="color:var(--copper)">${r.edge >= 0 ? '+' : ''}${(r.edge * 100).toFixed(0)}%</b> · ${universe}`,
+        `${shapTag}${shapTag && spreadTag ? ' · ' : ''}${spreadTag}`);
+    }).join('');
+    return _qpFrame('✦', 'TOP 5 AI PREDICTIONS',
+      'ML 3-headed forecast · swing 5d · ranked by p(up)',
+      cards, 'no ML predictions for today');
   }
 
   // ─── Action strip: density · saved views · search · CSV · time-of-day ──
@@ -21953,6 +22273,231 @@ const QuantStrategyMatrix = (function() {
       </div>`;
     } catch (e) {
       _renderError(panel, e);
+    }
+  }
+
+  function deactivate() {}
+  return { render, deactivate };
+})();
+
+
+// ──────────────────────────────────────────────────────────────────────
+// QuantResearchLab · edge-research roadmap (2026-05-18)
+// P1 HMM regime / P2 Fama-French factors / P3 LightGBM swap
+// Each priority surfaces: current_state, target_state, mechanism hypothesis,
+//   evidence for/against, validation gate, dependencies, rollback, next actions.
+// Reads /api/research_roadmap. Aesthetic: qrl-* prefix.
+// ──────────────────────────────────────────────────────────────────────
+const QuantResearchLab = (function() {
+  const _esc = (s) => (s == null) ? '' : String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  function _ensureStyles() {
+    if (document.getElementById('qrl-styles')) return;
+    const css = document.createElement('style');
+    css.id = 'qrl-styles';
+    css.textContent = `
+      .qrl-wrap { padding: 14px 18px 60px; max-width: 1500px; font-family: var(--sans); color: var(--ink); }
+      .qrl-hero { position: relative; padding: 18px 22px; margin-bottom: 14px;
+        background: linear-gradient(135deg, rgba(212,160,255,0.07), rgba(91,229,124,0.05));
+        border: 1px solid rgba(212,160,255,0.25); border-radius: 12px;
+        box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 24px rgba(0,0,0,0.12); }
+      .qrl-hero::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:12px 0 0 12px;
+        background: linear-gradient(180deg, #d4a0ff 0%, #5be57c 100%); }
+      .qrl-brand { font-family: var(--mono); font-size: 11px; letter-spacing: 1.4px; color: #d4a0ff; text-transform: uppercase; }
+      .qrl-title { font-size: 28px; font-weight: 700; letter-spacing: -0.4px; margin: 4px 0 0; }
+      .qrl-sub { font-size: 12px; color: var(--ink-2); margin-top: 4px; font-family: var(--mono); letter-spacing: 0.3px; }
+
+      .qrl-live { display:grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+      .qrl-live-tile { padding: 12px 14px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; }
+      .qrl-live-l { font-family: var(--mono); font-size: 10px; letter-spacing: 1.3px; color: var(--ink-3); text-transform: uppercase; }
+      .qrl-live-v { font-size: 16px; font-weight: 600; line-height: 1.2; margin-top: 4px; font-variant-numeric: tabular-nums; word-break: break-word; }
+      .qrl-live-d { font-size: 11px; color: var(--ink-2); margin-top: 2px; font-family: var(--mono); }
+
+      .qrl-card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px;
+        margin-bottom: 14px; overflow: hidden; }
+      .qrl-card-head { padding: 14px 18px; background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.06);
+        display: flex; align-items: center; gap: 14px; }
+      .qrl-pri { display: inline-block; padding: 4px 10px; border-radius: 6px; font-family: var(--mono); font-size: 11px;
+        font-weight: 700; letter-spacing: 1.0px; }
+      .qrl-pri.P1 { background: rgba(245,107,99,0.15); color: var(--rd); border: 1px solid rgba(245,107,99,0.4); }
+      .qrl-pri.P2 { background: rgba(255,189,89,0.15); color: var(--amb); border: 1px solid rgba(255,189,89,0.4); }
+      .qrl-pri.P3 { background: rgba(91,229,124,0.12); color: var(--gn); border: 1px solid rgba(91,229,124,0.3); }
+      .qrl-card-title { font-size: 17px; font-weight: 600; flex: 1; }
+      .qrl-card-meta { font-family: var(--mono); font-size: 11px; color: var(--ink-3); letter-spacing: 0.8px; text-transform: uppercase; }
+      .qrl-status { display: inline-block; padding: 3px 9px; border-radius: 10px; font-size: 10px;
+        letter-spacing: 0.8px; text-transform: uppercase; font-weight: 600; }
+      .qrl-status.researching      { background: rgba(212,160,255,0.12); color: #d4a0ff; border: 1px solid rgba(212,160,255,0.3); }
+      .qrl-status.scoping          { background: rgba(255,189,89,0.12); color: var(--amb); border: 1px solid rgba(255,189,89,0.3); }
+      .qrl-status.confirmed_gap    { background: rgba(91,229,124,0.12); color: var(--gn); border: 1px solid rgba(91,229,124,0.3); }
+      .qrl-status.shipped          { background: rgba(91,229,124,0.18); color: var(--gn); border: 1px solid rgba(91,229,124,0.5); }
+
+      .qrl-card-body { padding: 16px 18px; display: grid; gap: 14px; }
+      .qrl-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+      .qrl-block { background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 12px 14px; }
+      .qrl-block h4 { font-family: var(--mono); font-size: 10px; letter-spacing: 1.3px; color: var(--ink-3); text-transform: uppercase;
+        margin: 0 0 6px; font-weight: 600; }
+      .qrl-block p { font-size: 12px; color: var(--ink); margin: 0; line-height: 1.55; font-family: var(--mono); }
+      .qrl-current { border-color: rgba(245,107,99,0.25); }
+      .qrl-current h4 { color: var(--rd); }
+      .qrl-target  { border-color: rgba(91,229,124,0.25); }
+      .qrl-target h4  { color: var(--gn); }
+      .qrl-mech { background: rgba(212,160,255,0.05); border-color: rgba(212,160,255,0.20); }
+      .qrl-mech h4 { color: #d4a0ff; }
+
+      .qrl-evidence { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .qrl-ev-block { padding: 10px 12px; border-radius: 8px; }
+      .qrl-ev-for { background: rgba(91,229,124,0.05); border: 1px solid rgba(91,229,124,0.20); }
+      .qrl-ev-against { background: rgba(245,107,99,0.05); border: 1px solid rgba(245,107,99,0.20); }
+      .qrl-ev-block h4 { font-family: var(--mono); font-size: 10px; letter-spacing: 1.3px; text-transform: uppercase;
+        margin: 0 0 6px; font-weight: 600; }
+      .qrl-ev-for h4 { color: var(--gn); }
+      .qrl-ev-against h4 { color: var(--rd); }
+      .qrl-ev-block ul { list-style: none; padding: 0; margin: 0; }
+      .qrl-ev-block li { font-size: 11px; color: var(--ink-2); padding: 3px 0 3px 12px; position: relative; line-height: 1.5; font-family: var(--mono); }
+      .qrl-ev-block li::before { content: '•'; position: absolute; left: 0; opacity: 0.6; }
+
+      .qrl-gate { background: rgba(255,189,89,0.06); border: 1px solid rgba(255,189,89,0.20); border-radius: 8px; padding: 12px 14px; }
+      .qrl-gate h4 { font-family: var(--mono); font-size: 10px; letter-spacing: 1.3px; color: var(--amb); text-transform: uppercase;
+        margin: 0 0 6px; font-weight: 600; }
+      .qrl-gate p { font-size: 12px; color: var(--ink); margin: 0; line-height: 1.55; font-family: var(--mono); }
+
+      .qrl-actions { background: rgba(59,166,255,0.05); border: 1px solid rgba(59,166,255,0.20); border-radius: 8px; padding: 12px 14px; }
+      .qrl-actions h4 { font-family: var(--mono); font-size: 10px; letter-spacing: 1.3px; color: #3ba6ff; text-transform: uppercase;
+        margin: 0 0 6px; font-weight: 600; }
+      .qrl-actions ol { padding-left: 20px; margin: 0; }
+      .qrl-actions li { font-size: 11px; color: var(--ink-2); padding: 3px 0; line-height: 1.5; font-family: var(--mono); }
+
+      .qrl-rollback { font-size: 11px; color: var(--ink-3); font-family: var(--mono); padding: 8px 12px;
+        background: rgba(255,255,255,0.02); border-left: 2px solid rgba(255,255,255,0.10); border-radius: 4px; }
+      .qrl-deps { font-family: var(--mono); font-size: 10px; color: var(--ink-3); letter-spacing: 0.8px; }
+      .qrl-deps span { display: inline-block; margin-right: 8px; padding: 2px 6px; background: rgba(255,255,255,0.04); border-radius: 4px; }
+
+      .qrl-foot { font-family: var(--mono); font-size: 10px; color: var(--ink-3); letter-spacing: 0.6px;
+        margin-top: 14px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.06); }
+    `;
+    document.head.appendChild(css);
+  }
+
+  function _renderHero(d) {
+    const live = d.live_state || {};
+    const npri = (d.priorities || []).length;
+    return `
+      <div class="qrl-hero">
+        <div class="qrl-brand">🔬 Edge-Research Roadmap</div>
+        <div class="qrl-title">Quant System Upgrade Lab</div>
+        <div class="qrl-sub">${npri} priorities · each with mechanism hypothesis + validation gate + rollback plan</div>
+      </div>
+      <div class="qrl-live">
+        <div class="qrl-live-tile">
+          <div class="qrl-live-l">ML library</div>
+          <div class="qrl-live-v">${_esc(live.ml_lib || '—')}</div>
+          <div class="qrl-live-d">n=${(live.ml_model_n || 0).toLocaleString()} · ${live.ml_features || '?'} features · AUC ${live.ml_auc != null ? live.ml_auc.toFixed(2) : '—'}</div>
+        </div>
+        <div class="qrl-live-tile">
+          <div class="qrl-live-l">Regime classifier</div>
+          <div class="qrl-live-v">Gaussian v1</div>
+          <div class="qrl-live-d">per-bar · no transition matrix · regime now: ${_esc(live.regime_now || '?')}</div>
+        </div>
+        <div class="qrl-live-tile">
+          <div class="qrl-live-l">Factor model</div>
+          <div class="qrl-live-v" style="color:var(--rd);">${_esc(live.factor_model || '—')}</div>
+          <div class="qrl-live-d">No FF5/momentum decomposition</div>
+        </div>
+        <div class="qrl-live-tile">
+          <div class="qrl-live-l">Refreshed</div>
+          <div class="qrl-live-v" style="font-size:14px;">${_esc((d.generated_at || '').slice(11,19))}</div>
+          <div class="qrl-live-d">${_esc((d.generated_at || '').slice(0,10))}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function _renderPriority(p) {
+    const evFor = (p.evidence_for || []).map(e => `<li>${_esc(e)}</li>`).join('');
+    const evAg = (p.evidence_against || []).map(e => `<li>${_esc(e)}</li>`).join('');
+    const actions = (p.next_actions || []).map(a => `<li>${_esc(a)}</li>`).join('');
+    const deps = (p.dependencies || []).map(d => `<span>${_esc(d)}</span>`).join('');
+    return `
+      <div class="qrl-card">
+        <div class="qrl-card-head">
+          <span class="qrl-pri ${_esc(p.priority)}">${_esc(p.priority)}</span>
+          <div class="qrl-card-title">${_esc(p.title)}</div>
+          <div class="qrl-card-meta">
+            <span class="qrl-status ${_esc(p.status)}">${_esc((p.status || '').replace('_',' '))}</span>
+            <span style="margin-left:10px;">effort: ${_esc(p.effort_days || '?')} days</span>
+            <span style="margin-left:10px;">${_esc(p.category || '')}</span>
+          </div>
+        </div>
+        <div class="qrl-card-body">
+          <div class="qrl-row">
+            <div class="qrl-block qrl-current">
+              <h4>CURRENT STATE</h4>
+              <p>${_esc(p.current_state)}</p>
+            </div>
+            <div class="qrl-block qrl-target">
+              <h4>TARGET STATE</h4>
+              <p>${_esc(p.target_state)}</p>
+            </div>
+          </div>
+          <div class="qrl-block qrl-mech">
+            <h4>MECHANISM HYPOTHESIS (why this should work)</h4>
+            <p>${_esc(p.mechanism_hypothesis)}</p>
+          </div>
+          <div class="qrl-evidence">
+            <div class="qrl-ev-block qrl-ev-for">
+              <h4>Evidence FOR</h4>
+              <ul>${evFor}</ul>
+            </div>
+            <div class="qrl-ev-block qrl-ev-against">
+              <h4>Evidence AGAINST</h4>
+              <ul>${evAg}</ul>
+            </div>
+          </div>
+          <div class="qrl-gate">
+            <h4>VALIDATION GATE (Wilson 95% LB · ship rule)</h4>
+            <p>${_esc(p.validation_gate)}</p>
+          </div>
+          <div class="qrl-actions">
+            <h4>NEXT ACTIONS</h4>
+            <ol>${actions}</ol>
+          </div>
+          <div class="qrl-deps">DEPENDENCIES: ${deps}</div>
+          <div class="qrl-rollback">ROLLBACK: ${_esc(p.rollback)}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function _fetch() {
+    const r = await fetch('/api/research_roadmap', {credentials: 'same-origin'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }
+
+  async function render(panel) {
+    _ensureStyles();
+    panel.innerHTML = `<div class="qrl-wrap"><div style="padding:40px;text-align:center;font-family:var(--mono);color:var(--ink-3);">loading research roadmap…</div></div>`;
+    try {
+      const d = await _fetch();
+      const cards = (d.priorities || []).map(_renderPriority).join('');
+      panel.innerHTML = `<div class="qrl-wrap">
+        ${_renderHero(d)}
+        ${cards}
+        <div class="qrl-foot">Source: server.py /api/research_roadmap · live state pulled from cache/ml_edge_predictions.json + cache/last_bundle.json</div>
+      </div>`;
+    } catch (e) {
+      panel.innerHTML = `<div class="qrl-wrap">
+        <div class="qrl-hero">
+          <div class="qrl-brand">🔬 RESEARCH LAB</div>
+          <div class="qrl-title" style="color:var(--rd);">Failed to load</div>
+          <div class="qrl-sub">${_esc(e && e.message || String(e))}</div>
+        </div>
+        <div class="qrl-card"><div class="qrl-card-body">
+          <p style="font-family:var(--mono);font-size:12px;color:var(--ink-2);">
+            Endpoint <code>/api/research_roadmap</code> not reachable. Server restart required to pick up the new route.
+          </p>
+        </div></div>
+      </div>`;
     }
   }
 
@@ -48719,6 +49264,12 @@ function setupV3Workspaces(arr, data) {
       wsPanel.classList.remove('ep-active');
       EliteAB.deactivate();
       QuantStrategyMatrix.render(wsPanel, data);
+      return;
+    }
+    if (ws.custom === 'quantResearchLab') {
+      wsPanel.classList.remove('ep-active');
+      EliteAB.deactivate();
+      QuantResearchLab.render(wsPanel, data);
       return;
     }
     if (ws.custom === 'quantPerformance') {

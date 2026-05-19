@@ -7954,6 +7954,149 @@ async def strategy_regime_matrix():
     return payload
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# /api/research_roadmap — drives the Research Lab tab.
+# Surfaces the P1/P2/P3 edge-research priorities discovered tonight:
+#   P1 — True HMM regime classifier (currently Gaussian soft-classifier)
+#   P2 — Fama-French factor model (currently absent)
+#   P3 — Verify ML lib (CONFIRMED sklearn; LightGBM swap recommended)
+# Dynamic state pulled from cache/ml_edge_predictions.json and runtime
+# inspection. Static roadmap items defined inline (revise as new gaps emerge).
+# ────────────────────────────────────────────────────────────────────────────
+@app.get("/api/research_roadmap")
+async def research_roadmap():
+    from pathlib import Path as _P
+    import json as _j
+    root = _P(__file__).parent
+
+    # Dynamic: pull live ML metadata
+    ml_lib = "sklearn (LR + RF + GradientBoosting)"
+    ml_model_n = None; ml_auc = None; ml_features = 0; ml_trained_at = None
+    try:
+        mlp = root / "cache" / "ml_edge_predictions.json"
+        if mlp.exists():
+            d = _j.loads(mlp.read_text())
+            sample = next(iter((d.get("predictions") or {}).get("swing", {}).values()), {})
+            mm = sample.get("model_meta", {})
+            ml_model_n = mm.get("n_total")
+            ml_trained_at = mm.get("trained_at")
+            ml_features = len(mm.get("feature_cols", []))
+            hit = sample.get("hit_net", {})
+            ml_auc = hit.get("model_auc")
+    except Exception:
+        pass
+
+    # Dynamic: pull current regime + HMM state
+    regime_now = None; hmm_now = None
+    try:
+        b = _j.loads((root / "cache" / "last_bundle.json").read_text())
+        regime_now = (b.get("regime") or {}).get("regime4")
+        hmm_now = (b.get("regime") or {}).get("hmm_regime")
+    except Exception:
+        pass
+
+    return {
+        "generated_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        "live_state": {
+            "ml_lib": ml_lib,
+            "ml_model_n": ml_model_n,
+            "ml_auc": ml_auc,
+            "ml_features": ml_features,
+            "ml_trained_at": ml_trained_at,
+            "regime_classifier": "gaussian_soft_classifier_v1 (per-bar, no transition matrix)",
+            "regime_now": regime_now,
+            "hmm_now": hmm_now,
+            "factor_model": "NOT IMPLEMENTED",
+        },
+        "priorities": [
+            {
+                "id": "P1",
+                "title": "True HMM regime classifier",
+                "priority": "P1",
+                "category": "regime",
+                "status": "researching",
+                "effort_days": "2-3",
+                "current_state": "gaussian_soft_classifier_v1 — per-bar Gaussian classification with p_bull/p_neutral/p_bear + confidence, but NO state-transition matrix. Treats each bar independently.",
+                "target_state": "Hidden Markov Model with Baum-Welch trained transition probabilities. Regime flip prediction conditioned on prior regime + observation likelihood (proper temporal smoothing).",
+                "mechanism_hypothesis": "Markets exhibit regime persistence (bull regimes don't flip to bear in one day). A true HMM captures this with state-transition probabilities, so regime flips require sustained evidence — reduces false flips that cause whipsaw sizing changes.",
+                "evidence_for": [
+                    "CLAUDE.md principle 5 — regime conditioning IS the strategy",
+                    "Article (B. Regime Switching Models) recommends HMM explicitly",
+                    "Current Gaussian classifier missed +6 distribution days transition to 'under_pressure' until breadth dropped 13pp (lagging signal)",
+                ],
+                "evidence_against": [
+                    "Only 728/1148 trades happened in risk_on_choppy — we have weak data on regime transitions, so HMM may not be trainable robustly yet",
+                    "Adds 1 more layer of state to the system; debuggability cost",
+                ],
+                "validation_gate": "Out-of-sample regime-flip prediction accuracy must exceed Gaussian baseline by >5pp on 30+ historical regime flips. Wilson 95% LB must be >0.",
+                "dependencies": ["hmmlearn", "10+ years SPY OHLCV (already have)"],
+                "rollback": "Keep gaussian_soft_classifier_v1 alongside; flag-gate HMM at compute_hmm_regime_safe().",
+                "next_actions": [
+                    "Spike: train hmmlearn GaussianHMM(n=3) on SPY 10y returns + vol; compare regime labels vs current classifier",
+                    "Backtest: re-run scoring with HMM regime vs Gaussian on last 1y, measure Sharpe diff",
+                    "If positive: ship behind regime_classifier.use_hmm=false flag",
+                ],
+            },
+            {
+                "id": "P2",
+                "title": "Fama-French factor model overlay",
+                "priority": "P2",
+                "category": "attribution",
+                "status": "scoping",
+                "effort_days": "1-2",
+                "current_state": "5-pillar scoring includes RS+Sector (momentum proxy) and Quality Gate. No orthogonal factor decomposition. Cannot answer: 'is our negative Sharpe from poor stock selection OR from being long momentum during a momentum drawdown?'",
+                "target_state": "Daily FF5+momentum factor exposure tracked per trade. Each closed trade decomposed into alpha + sum(factor_loadings × factor_returns). Per-(setup × regime) factor attribution.",
+                "mechanism_hypothesis": "Returns = alpha + market_beta × market + size × SMB + value × HML + profitability × RMW + investment × CMA + momentum × MOM. Knowing the loadings tells us if we're rewarded for skill (alpha>0) or just compensated for factor exposure (alpha~0). Distinguishes true edge from beta in disguise.",
+                "evidence_for": [
+                    "Article (C. Factor Models) recommends Fama-French explicitly",
+                    "Free factor data from Ken French website (Kenneth French Data Library)",
+                    "Current −0.46 portfolio Sharpe is opaque — could be 'system is broken' OR 'momentum factor drew down 8% this month and we're long it'",
+                ],
+                "evidence_against": [
+                    "Decomposition is descriptive, not prescriptive — doesn't directly tell us what to change",
+                    "Daily factor returns lag by 1-2 days; live use requires interpolation",
+                ],
+                "validation_gate": "Factor loadings on a sample of 50 known-momentum stocks must produce MOM loadings > 0.5 (sanity check). Per-trade alpha+factor decomposition must sum to within 1% of realized return.",
+                "dependencies": ["pandas-datareader OR direct CSV download from K. French", "no new paid sources"],
+                "rollback": "Pure analytics overlay — no trading-decision impact unless we explicitly use loadings to size.",
+                "next_actions": [
+                    "Download FF5 + MOM daily factor returns from K. French (free)",
+                    "Build factor_attribution.py: for each closed trade, regress daily returns vs factors, compute loadings + alpha",
+                    "Add 'Factor Attribution' subtab to Performance tab",
+                ],
+            },
+            {
+                "id": "P3",
+                "title": "Verify + upgrade ML lib (sklearn → LightGBM)",
+                "priority": "P3",
+                "category": "ml",
+                "status": "confirmed_gap",
+                "effort_days": "0.5",
+                "current_state": f"CONFIRMED: train_mover_predictor_v2.py uses sklearn (LogisticRegression + RandomForestClassifier + GradientBoostingClassifier). Current AUC ~0.77 on {ml_model_n or '?'} samples.",
+                "target_state": "LightGBM as primary classifier with isotonic calibration. Expected AUC lift: +0.02-0.05.",
+                "mechanism_hypothesis": "Gradient boosting (sklearn GradientBoosting) and LightGBM are same algorithm family, but LightGBM has: histogram-based splits (5-10x faster), leaf-wise growth (slightly better accuracy on tabular data), categorical-feature native support. The article specifically calls out tree models including LightGBM as 'highly recommended' for finance.",
+                "evidence_for": [
+                    "Article explicitly recommends LightGBM/XGBoost/CatBoost for tabular finance data",
+                    "Industry standard for credit risk, anomaly detection, structured prediction",
+                    "LightGBM is faster — can retrain weekly instead of monthly",
+                ],
+                "evidence_against": [
+                    "Current sklearn GradientBoosting already covers same algorithmic family — gain may be marginal",
+                    "AUC 0.77 is already strong; +0.02-0.05 lift may not translate to live edge",
+                ],
+                "validation_gate": "Side-by-side training on identical features + folds. LightGBM AUC must exceed sklearn GradientBoosting AUC by ≥0.02 on out-of-fold validation. Probability calibration ECE ≤ 0.05.",
+                "dependencies": ["pip install lightgbm (free)"],
+                "rollback": "Keep both .pkl models on disk; predict_mover_predictor.py picks better per mode.",
+                "next_actions": [
+                    "Add LightGBM to train_mover_predictor_v2.py classifier dict",
+                    "Run training in parallel — compare AUC + calibration",
+                    "If LGBM wins ≥0.02 AUC: swap to LGBM, otherwise document null result",
+                ],
+            },
+        ],
+    }
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
