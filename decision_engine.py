@@ -1018,6 +1018,32 @@ def compute_final_verdict(t: dict, regime: str | None = None,
     # ESP Play bypass the gate entirely — parity with existing bypasses in
     # _eval_hard_gates (mechanism per principle 14 — catalyst alpha is
     # independent of pullback-mechanic Sharpe).
+    # MOMENTUM-CONDITION GATE (2026-05-18) — flag-gated. Demotes Trend Continuation +
+    # Breakout Expansion BUYs to WATCH when QQQ-SPY 21d momentum spread is negative.
+    # Mechanism: P2 factor attribution found TC mom_β +0.74, BE mom_β +0.78 — both
+    # statistically significant momentum exposure with ZERO alpha. When momentum factor
+    # drawdowns, these setups lose by construction. Audit: cache/factor_attribution_2026-05-18.json
+    _mom_gate_cfg = (config or {}).get("momentum_condition_gate") or {}
+    if _mom_gate_cfg.get("_enabled", False):
+        _affected = set(_mom_gate_cfg.get("affected_setups", ["Trend Continuation", "Breakout Expansion"]))
+        _t_setup = t.get("setup_family") or ""
+        if _t_setup in _affected:
+            _mom_spread = t.get("_runtime_qqq_spy_momentum_21d")  # injected by build_data
+            if _mom_spread is not None and _mom_spread < _mom_gate_cfg.get("min_spread_pct", 0.0):
+                return {
+                    "verdict": "WATCH",
+                    "reason": f"momentum_condition_gate: {_t_setup} demoted — QQQ-SPY 21d spread {_mom_spread:+.2f}% < threshold",
+                    "caveats": [f"setup is pure-momentum factor play (P2 evidence); paused during momentum drawdown"],
+                    "gates_evaluated": [{
+                        "name": "momentum_condition_gate",
+                        "passed": False,
+                        "reason": f"QQQ-SPY 21d spread {_mom_spread:+.2f}% < 0",
+                        "severity": "medium",
+                        "stats": {"setup": _t_setup, "mom_spread_pct": _mom_spread},
+                    }],
+                    "demote_to": "watch_list",
+                }
+
     _rs_state = compute_rolling_sharpe_kill_state(config) if config else {"active": False}
     _rs_cfg = (config or {}).get("rolling_sharpe_kill") or {}
     _rs_mode = str(_rs_cfg.get("mode") or "aggregate").lower()

@@ -118,6 +118,120 @@ def regime_probabilities_from_closes(closes, lookback: int = 21) -> dict:
     return soft_regime_probabilities(rets, lookback=lookback)
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# HMM v2 — hmmlearn-trained, with state-transition matrix (2026-05-18)
+# Activated via config.regime_classifier.use_hmm = true
+# ────────────────────────────────────────────────────────────────────────────
+_HMM_MODEL_CACHE: dict = {"model": None, "labels": None}
+
+
+def hmm_regime_probabilities_from_closes(closes, lookback: int = 21,
+                                          training_closes: list | None = None) -> dict:
+    """HMM-based regime classification using hmmlearn.GaussianHMM(n=3).
+
+    Args:
+      closes: recent closing prices (typically 21+ bars)
+      lookback: number of bars to use for prediction
+      training_closes: longer history (10y+ preferred) for fitting the HMM.
+                       If None, uses `closes` (may produce noisy model on small N).
+
+    Returns: same shape as soft_regime_probabilities() — {p_bull, p_neutral, p_bear,
+             regime, confidence, n_obs, avg_ret_pct, avg_vol_pct, method}
+    Falls back to gaussian_soft_classifier if hmmlearn unavailable.
+    """
+    try:
+        from hmmlearn.hmm import GaussianHMM
+        import numpy as np
+    except ImportError:
+        return regime_probabilities_from_closes(closes, lookback=lookback)
+
+    train = training_closes if training_closes and len(training_closes) >= 200 else closes
+    if not train or len(train) < 50:
+        return regime_probabilities_from_closes(closes, lookback=lookback)
+
+    try:
+        # Build features: log-return + 21d realized vol
+        train_arr = list(train)
+        log_rets = [math.log(train_arr[i] / train_arr[i - 1]) for i in range(1, len(train_arr))]
+        # 21d rolling std (skip first 21 to have valid features)
+        feats = []
+        for i in range(21, len(log_rets)):
+            window = log_rets[max(0, i - 21):i]
+            mu = sum(window) / len(window)
+            var = sum((r - mu) ** 2 for r in window) / max(1, len(window) - 1)
+            rv = math.sqrt(var) * math.sqrt(252)
+            feats.append([log_rets[i], rv])
+        if len(feats) < 100:
+            return regime_probabilities_from_closes(closes, lookback=lookback)
+
+        X = np.array(feats)
+        # Fit (or use cache if available)
+        if _HMM_MODEL_CACHE["model"] is None:
+            model = GaussianHMM(n_components=3, covariance_type="full",
+                                 n_iter=200, random_state=42)
+            model.fit(X)
+            means = model.means_[:, 0]  # mean log-return per state
+            order = np.argsort(means)[::-1]
+            labels = ["?"] * 3
+            labels[order[0]] = "bull"
+            labels[order[1]] = "neutral"
+            labels[order[2]] = "bear"
+            _HMM_MODEL_CACHE["model"] = model
+            _HMM_MODEL_CACHE["labels"] = labels
+        else:
+            model = _HMM_MODEL_CACHE["model"]
+            labels = _HMM_MODEL_CACHE["labels"]
+
+        # Predict state probabilities for the most recent window
+        # Use log_posterior on the latest `lookback` bars
+        recent_X = X[-min(lookback, len(X)):]
+        posteriors = model.predict_proba(recent_X)
+        # Avg posterior over lookback window
+        avg_post = posteriors.mean(axis=0)
+
+        p_map = {labels[i]: float(avg_post[i]) for i in range(3)}
+        regime = max(p_map, key=p_map.get)
+
+        # Confidence from entropy
+        ent = -sum(p * math.log(max(1e-12, p)) for p in p_map.values())
+        max_ent = math.log(3)
+        confidence = round(1.0 - (ent / max_ent), 3)
+
+        recent_rets = [math.exp(r) - 1 for r in log_rets[-lookback:]]
+        avg_ret = sum(recent_rets) / len(recent_rets)
+        avg_var = sum((r - avg_ret) ** 2 for r in recent_rets) / max(1, len(recent_rets) - 1)
+        avg_vol = math.sqrt(avg_var)
+
+        return {
+            "p_bull":     round(p_map.get("bull", 0), 4),
+            "p_neutral":  round(p_map.get("neutral", 0), 4),
+            "p_bear":     round(p_map.get("bear", 0), 4),
+            "regime":     regime,
+            "confidence": confidence,
+            "n_obs":      len(recent_X),
+            "avg_ret_pct": round(avg_ret * 100, 3),
+            "avg_vol_pct": round(avg_vol * 100, 3),
+            "method":     "hmm_baum_welch_v1",
+            "transition_matrix": model.transmat_.tolist(),
+        }
+    except Exception as e:
+        # Fall back on any error
+        return {**regime_probabilities_from_closes(closes, lookback=lookback),
+                "_hmm_fallback_reason": f"{type(e).__name__}: {str(e)[:120]}"}
+
+
+def regime_probabilities_dispatch(closes, lookback: int = 21,
+                                    training_closes: list | None = None,
+                                    config: dict | None = None) -> dict:
+    """Route to HMM or Gaussian based on config.regime_classifier.use_hmm flag.
+    Default: Gaussian (legacy)."""
+    cfg = (config or {}).get("regime_classifier") or {}
+    if cfg.get("use_hmm", False):
+        return hmm_regime_probabilities_from_closes(closes, lookback=lookback,
+                                                     training_closes=training_closes)
+    return regime_probabilities_from_closes(closes, lookback=lookback)
+
+
 if __name__ == "__main__":
     # Quick test
     import random

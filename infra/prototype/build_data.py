@@ -977,19 +977,39 @@ def _compute_dcc_garch_safe(short_term: list, medium_term: list, max_tickers: in
 
 
 def _compute_hmm_regime_safe() -> dict:
-    """V-2: Soft regime probabilities P(Bull/Neutral/Bear) from SPY returns. Never raises."""
+    """V-2: Soft regime probabilities P(Bull/Neutral/Bear) from SPY returns. Never raises.
+    Routes to HMM (hmmlearn) when config.regime_classifier.use_hmm=True; else Gaussian."""
     try:
-        import sys
+        import sys, json
         proj = OUT.parent.parent
         sys.path.insert(0, str(proj))
         import regime_hmm as rh
         import eodhd_client as _e
         from datetime import date, timedelta
+        # Recent window for prediction
         rows = _e.eod("SPY", from_date=(date.today() - timedelta(days=60)).isoformat())
         if not rows or len(rows) < 22:
             return {"error": "insufficient SPY history for HMM"}
         closes = [float(r.get("adjusted_close") or r.get("close") or 0) for r in rows]
-        return rh.regime_probabilities_from_closes(closes, lookback=21)
+        # Load config to decide Gaussian vs HMM dispatch
+        cfg = {}
+        try:
+            cfg_path = proj / "config" / "config.json"
+            cfg = json.loads(cfg_path.read_text())
+        except Exception:
+            pass
+        # If HMM mode, fetch longer training window
+        training_closes = None
+        if (cfg.get("regime_classifier") or {}).get("use_hmm"):
+            try:
+                long_rows = _e.eod("SPY", from_date=(date.today() - timedelta(days=2520)).isoformat())
+                if long_rows and len(long_rows) >= 200:
+                    training_closes = [float(r.get("adjusted_close") or r.get("close") or 0) for r in long_rows]
+            except Exception:
+                pass
+        return rh.regime_probabilities_dispatch(closes, lookback=21,
+                                                  training_closes=training_closes,
+                                                  config=cfg)
     except Exception as e:
         return {"error": str(e)}
 

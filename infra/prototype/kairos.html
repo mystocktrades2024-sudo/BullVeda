@@ -3865,6 +3865,10 @@ body.on-workspace .tabs { display: none; }
   transition: background 80ms;
 }
 .qhist-tbl tbody tr:hover { background: var(--bg-3); }
+/* Pending-maturation rows · fade + dashed border-left · 2026-05-18 */
+.qhist-tbl tbody tr.qhist-pending { opacity: 0.5; }
+.qhist-tbl tbody tr.qhist-pending td.dt { color: var(--amb); font-weight: 700; }
+.qhist-tbl tbody tr.qhist-pending:hover { opacity: 0.85; background: var(--bg-3); }
 .qhist-tbl tbody td {
   padding: 6px 8px;
   color: var(--ink-1);
@@ -8281,6 +8285,7 @@ body.on-detail-tab .qdchk-trigger-btn { display: inline-flex; }
     <div class="sb-link" data-tab="pipelines"><span class="ico">⇄</span>Pipelines<span class="ct" id="sb-pl">68</span></div>
     <div class="sb-link" data-tab="strategyMatrix"><span class="ico">▦</span>Strategy × Regime<span class="ct" id="sb-srm">matrix</span></div>
     <div class="sb-link" data-tab="researchLab"><span class="ico">🔬</span>Research Lab<span class="ct" id="sb-rl">3 P</span></div>
+    <div class="sb-link" data-tab="factorExposure"><span class="ico">β</span>Factor Exposure<span class="ct" id="sb-fe">α/β</span></div>
   </div>
 
 </aside>
@@ -12988,6 +12993,11 @@ const V3_WORKSPACES = {
     title: 'Research Lab',
     sub: 'edge-research roadmap · HMM regime · Fama-French factors · ML lib upgrade · evidence + validation gates',
     custom: 'quantResearchLab',
+  },
+  factorExposure: {
+    title: 'Factor Exposure',
+    sub: 'per-setup alpha + factor betas (Mkt, MOM proxy) · separates skill from beta',
+    custom: 'quantFactorExposure',
   },
   screener: {
     title: 'Screener',
@@ -19816,10 +19826,22 @@ const QuantHistoryLedger = (function() {
     const allOutcomes = [...new Set(records.map(r => r.outcome).filter(Boolean))].sort();
     const allSectors = [...new Set(records.map(r => r.sector).filter(Boolean))].sort();
 
+    // 2026-05-18 · Maturation accounting. A record is "matured" if at least
+    // D1 has a real value (its data has started populating); "pending" if
+    // every horizon is null because the pick is too recent for forward
+    // returns to exist yet. The ledger sorts newest-first, so without this
+    // chip the top of the list looks broken (rows of blanks).
+    const matured = records.filter(r => r && (r.d1 != null || r.d5 != null || r.w1 != null)).length;
+    const pending = records.length - matured;
+    const maturationChip = pending > 0
+      ? `<span class="stat" style="color:var(--amb)" title="Picks from last few trading days — forward returns will populate as time passes"><b>${matured.toLocaleString()}</b> matured · <b>${pending.toLocaleString()}</b> pending</span>`
+      : `<span class="stat" style="color:var(--gn)"><b>${matured.toLocaleString()}</b> matured · all populated</span>`;
+
     content.innerHTML = `
       <div class="qhist-toolbar">
         <div class="qhist-stats">
           <span class="stat"><b>${records.length.toLocaleString()}</b> records</span>
+          ${maturationChip}
           <span class="stat">generated <b>${(payload.generated_at || '').replace('T',' ').slice(0,16)}</b></span>
           <span class="stat">D1-D7 · W1-W8 · M1-M12 <b>(${HORIZONS.length} horizons)</b></span>
         </div>
@@ -19972,9 +19994,14 @@ const QuantHistoryLedger = (function() {
     const oCls = r.outcome && r.outcome.startsWith('WIN') ? 'gn' : r.outcome && r.outcome.startsWith('LOSS') ? 'rd' : r.outcome === 'BREAKEVEN' ? 'am' : '';
     const tierCls = r.conviction_tier === 'T1' ? 'gn' : r.conviction_tier === 'T2' ? 'am' : '';
     const eqCls = r.entry_quality === 'FRESH' ? 'gn' : r.entry_quality === 'EXTENDED' || r.entry_quality === 'MISSED' ? 'rd' : '';
+    // 2026-05-18 · A row is "pending maturation" when its forward-return
+    // window hasn't elapsed yet (today's picks have null at every horizon).
+    // Visually fade these rows + flag with 🕓 instead of letting them look
+    // broken next to the populated history.
+    const isPending = (r.d1 == null && r.d5 == null && r.w1 == null && r.m1 == null);
 
-    return `<tr>
-      <td class="dt">${(r.pick_date || '').slice(5)}</td>
+    return `<tr${isPending ? ' class="qhist-pending" title="Forward returns will populate as time passes (D1 = tomorrow, D5 = next week, M1 = 21 trading days)"' : ''}>
+      <td class="dt">${isPending ? '🕓 ' : ''}${(r.pick_date || '').slice(5)}</td>
       <td class="tkr" data-tkr="${_esc(r.ticker)}">${_esc(r.ticker)}</td>
       <td class="mode">${_esc(r.mode || '—').toUpperCase()}</td>
       <td><span class="qhist-pill ${vCls}">${_esc(r.verdict || '—')}</span></td>
@@ -22498,6 +22525,178 @@ const QuantResearchLab = (function() {
           </p>
         </div></div>
       </div>`;
+    }
+  }
+
+  function deactivate() {}
+  return { render, deactivate };
+})();
+
+
+// ──────────────────────────────────────────────────────────────────────
+// QuantFactorExposure · factor-attribution dashboard (2026-05-18)
+// Reads /api/factor_exposure (cache/factor_attribution_*.json).
+// Shows aggregate alpha + factor betas; separates skill (α) from beta exposure.
+// qfx-* prefix.
+// ──────────────────────────────────────────────────────────────────────
+const QuantFactorExposure = (function() {
+  const _esc = (s) => (s == null) ? '' : String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const _fmtNum = (n, d=3) => (n == null || !isFinite(n)) ? '—' : Number(n).toFixed(d);
+  const _signed = (n, d=3) => {
+    if (n == null || !isFinite(n)) return '—';
+    return (n >= 0 ? '+' : '') + Number(n).toFixed(d);
+  };
+
+  function _ensureStyles() {
+    if (document.getElementById('qfx-styles')) return;
+    const css = document.createElement('style');
+    css.id = 'qfx-styles';
+    css.textContent = `
+      .qfx-wrap { padding: 14px 18px 60px; max-width: 1500px; font-family: var(--sans); color: var(--ink); }
+      .qfx-hero { position: relative; padding: 18px 22px; margin-bottom: 14px;
+        background: linear-gradient(135deg, rgba(59,166,255,0.07), rgba(91,229,124,0.05));
+        border: 1px solid rgba(59,166,255,0.22); border-radius: 12px; }
+      .qfx-hero::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:12px 0 0 12px;
+        background: linear-gradient(180deg, #3ba6ff 0%, #5be57c 100%); }
+      .qfx-brand { font-family: var(--mono); font-size: 11px; letter-spacing: 1.4px; color: #3ba6ff; text-transform: uppercase; }
+      .qfx-title { font-size: 28px; font-weight: 700; letter-spacing: -0.4px; margin: 4px 0 0; }
+      .qfx-sub { font-size: 12px; color: var(--ink-2); margin-top: 4px; font-family: var(--mono); letter-spacing: 0.3px; }
+
+      .qfx-kpi { display:grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 16px; }
+      .qfx-tile { padding: 14px 16px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; }
+      .qfx-tile-l { font-family: var(--mono); font-size: 10px; letter-spacing: 1.3px; color: var(--ink-3); text-transform: uppercase; }
+      .qfx-tile-v { font-size: 28px; font-weight: 700; line-height: 1.1; margin-top: 4px; font-variant-numeric: tabular-nums; }
+      .qfx-tile-d { font-size: 11px; color: var(--ink-2); margin-top: 4px; font-family: var(--mono); }
+      .qfx-tile.alpha-pos { color: var(--gn); border-color: rgba(91,229,124,0.30); }
+      .qfx-tile.alpha-neg { color: var(--rd); border-color: rgba(245,107,99,0.30); }
+      .qfx-tile.beta-sig  { color: var(--amb); border-color: rgba(255,189,89,0.30); }
+      .qfx-tile.info      { color: #3ba6ff; border-color: rgba(59,166,255,0.30); }
+
+      .qfx-section { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin-bottom: 14px; padding: 14px 16px; }
+      .qfx-section h3 { font-family: var(--mono); font-size: 12px; letter-spacing: 1.3px; text-transform: uppercase; color: var(--ink-2); margin: 0 0 12px; font-weight: 600; }
+
+      .qfx-interp { background: rgba(212,160,255,0.04); border-left: 3px solid rgba(212,160,255,0.4); padding: 12px 14px; border-radius: 4px; }
+      .qfx-interp h4 { font-family: var(--mono); font-size: 10px; color: #d4a0ff; margin: 0 0 6px; letter-spacing: 1.2px; text-transform: uppercase; }
+      .qfx-interp p { font-size: 12px; color: var(--ink); margin: 0; font-family: var(--mono); line-height: 1.6; }
+
+      .qfx-foot { font-family: var(--mono); font-size: 10px; color: var(--ink-3); letter-spacing: 0.5px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.06); }
+    `;
+    document.head.appendChild(css);
+  }
+
+  function _renderHero(d) {
+    const a = d.aggregate || {};
+    const alpha = a.alpha_pct || a.alpha_per_trade_pct;
+    const alphaT = a.alpha_tstat;
+    const mktB = a.market_beta;
+    const momB = a.mom_beta;
+    const r2 = a.r_squared;
+    const sig = alphaT != null && Math.abs(alphaT) > 2.0;
+    const alphaCls = alpha > 0 ? 'alpha-pos' : 'alpha-neg';
+    const momCls = momB != null && Math.abs(momB) > 0.3 ? 'beta-sig' : '';
+    return `
+      <div class="qfx-hero">
+        <div class="qfx-brand">β · Factor Exposure (Mkt + MOM proxy)</div>
+        <div class="qfx-title">Alpha vs Factor — Is your edge skill or beta?</div>
+        <div class="qfx-sub">${d.n_trades || 0} trades · ${_esc(d.factor_source || '')}</div>
+      </div>
+      <div class="qfx-kpi">
+        <div class="qfx-tile ${alphaCls}">
+          <div class="qfx-tile-l">Alpha (per trade)</div>
+          <div class="qfx-tile-v">${_signed(alpha, 2)}%</div>
+          <div class="qfx-tile-d">${sig ? '✅ significant' : '⚠️ not significant'} (t=${_signed(alphaT, 2)})</div>
+        </div>
+        <div class="qfx-tile">
+          <div class="qfx-tile-l">Market β</div>
+          <div class="qfx-tile-v">${_signed(mktB, 2)}</div>
+          <div class="qfx-tile-d">SPY exposure</div>
+        </div>
+        <div class="qfx-tile ${momCls}">
+          <div class="qfx-tile-l">Momentum β</div>
+          <div class="qfx-tile-v">${_signed(momB, 2)}</div>
+          <div class="qfx-tile-d">QQQ−SPY spread exposure</div>
+        </div>
+        <div class="qfx-tile info">
+          <div class="qfx-tile-l">R²</div>
+          <div class="qfx-tile-v">${_fmtNum(r2, 3)}</div>
+          <div class="qfx-tile-d">factor explanatory power</div>
+        </div>
+        <div class="qfx-tile">
+          <div class="qfx-tile-l">Refreshed</div>
+          <div class="qfx-tile-v" style="font-size:14px;">${_esc((d.generated_at || '').slice(11,19))}</div>
+          <div class="qfx-tile-d">${_esc((d.generated_at || '').slice(0,10))}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function _renderInterpretation(d) {
+    const a = d.aggregate || {};
+    const alpha = a.alpha_pct || a.alpha_per_trade_pct || 0;
+    const momB = a.mom_beta || 0;
+    let interp = '';
+    if (Math.abs(a.alpha_tstat || 0) < 2.0 && Math.abs(momB) > 0.3) {
+      interp = `<strong style="color:var(--rd)">Edge is FACTOR-DRIVEN, not skill-driven.</strong>
+        Alpha (${alpha.toFixed(2)}%) is not statistically distinguishable from zero, but momentum β (${momB.toFixed(2)}) is significant.
+        Your trades make money when QQQ outperforms SPY — when momentum drawdowns, expect to lose.
+        Two of the highest-volume setups (Trend Continuation, Breakout Expansion) have ZERO alpha after factor adjustment.
+        Consider: (1) momentum-condition gate to pause these setups when momentum is negative,
+        (2) re-weight scoring to favor alpha-bearing setups (VCP, 52wk Breakout, 10-Week Pullback).`;
+    } else if (alpha > 0 && Math.abs(a.alpha_tstat || 0) > 2.0) {
+      interp = `<strong style="color:var(--gn)">Edge is partially SKILL-driven.</strong>
+        Alpha is statistically significant at +${alpha.toFixed(2)}%. There's real skill here, not just factor exposure.`;
+    } else {
+      interp = `Alpha is small/insignificant. Hard to distinguish skill from factor exposure with current data.`;
+    }
+    return `<div class="qfx-section">
+      <h3>Interpretation</h3>
+      <div class="qfx-interp">
+        <h4>What this means</h4>
+        <p>${interp}</p>
+      </div>
+    </div>`;
+  }
+
+  function _renderLimitation(d) {
+    if (!d.limitation) return '';
+    return `<div class="qfx-section">
+      <h3>Methodology + Limits</h3>
+      <p style="font-family:var(--mono);font-size:12px;color:var(--ink-2);line-height:1.6;">${_esc(d.limitation)}</p>
+      <p style="font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-top:8px;">Source: ${_esc(d.source_file)} · regenerate via <code>python3 scripts/p2_factor_attribution_spike.py</code></p>
+    </div>`;
+  }
+
+  async function _fetch() {
+    const r = await fetch('/api/factor_exposure', {credentials: 'same-origin'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }
+
+  async function render(panel) {
+    _ensureStyles();
+    panel.innerHTML = `<div class="qfx-wrap"><div style="padding:40px;text-align:center;font-family:var(--mono);color:var(--ink-3);">loading factor exposure…</div></div>`;
+    try {
+      const d = await _fetch();
+      if (d.error) {
+        panel.innerHTML = `<div class="qfx-wrap"><div class="qfx-hero">
+          <div class="qfx-brand">β · Factor Exposure</div>
+          <div class="qfx-title" style="color:var(--rd);">${_esc(d.error)}</div>
+          <div class="qfx-sub">${_esc(d.hint || '')}</div>
+        </div></div>`;
+        return;
+      }
+      panel.innerHTML = `<div class="qfx-wrap">
+        ${_renderHero(d)}
+        ${_renderInterpretation(d)}
+        ${_renderLimitation(d)}
+        <div class="qfx-foot">Source: ${_esc(d.source_file)} · cached 60s by /api/factor_exposure</div>
+      </div>`;
+    } catch (e) {
+      panel.innerHTML = `<div class="qfx-wrap"><div class="qfx-hero">
+        <div class="qfx-brand">β · Factor Exposure</div>
+        <div class="qfx-title" style="color:var(--rd);">Failed to load</div>
+        <div class="qfx-sub">${_esc(e && e.message || String(e))}</div>
+      </div></div>`;
     }
   }
 
@@ -49270,6 +49469,12 @@ function setupV3Workspaces(arr, data) {
       wsPanel.classList.remove('ep-active');
       EliteAB.deactivate();
       QuantResearchLab.render(wsPanel, data);
+      return;
+    }
+    if (ws.custom === 'quantFactorExposure') {
+      wsPanel.classList.remove('ep-active');
+      EliteAB.deactivate();
+      QuantFactorExposure.render(wsPanel, data);
       return;
     }
     if (ws.custom === 'quantPerformance') {

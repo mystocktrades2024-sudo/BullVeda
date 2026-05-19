@@ -1441,6 +1441,45 @@
     "Near-VCP Breakout": 1.0,
     "Squeeze Expansion": 0.7
   },
+  "factor_alpha_overlay": {
+    "_enabled": false,
+    "_note": "2026-05-18 \u2014 Factor-attribution-based score multiplier overlay. Evidence: scripts/p2_factor_attribution_spike.py / cache/factor_attribution_2026-05-18.json (n=1940 trades regressed vs SPY market + QQQ-SPY momentum proxy). Setups with significant positive alpha get boosted; setups with zero/negative alpha get demoted (they're pure factor plays, no skill component). FLAG-GATED \u2014 flip _enabled=true to activate after 30-trade paper-mode validation.",
+    "_mechanism": "Multiplicative overlay on normalized score. Applied AFTER setup_score_multiplier path. Per principle 4 (adversarial): documents alpha t-stat + p-value + mkt/mom betas inline so the decision is challengeable.",
+    "_validations": {
+      "Trend Continuation": {"n": 777, "alpha_pct": -0.116, "alpha_tstat": -0.4, "mkt_beta": 0.05, "mom_beta": 0.74, "r2": 0.02,
+                              "interpretation": "ZERO alpha + significant momentum exposure \u2192 pure-factor play. Demote 15%."},
+      "Breakout Expansion": {"n": 511, "alpha_pct": -0.108, "alpha_tstat": -0.3, "mkt_beta": -0.70, "mom_beta": 0.78, "r2": 0.01,
+                              "interpretation": "ZERO alpha + significant momentum exposure \u2192 pure-factor play. Demote 15%."},
+      "Impulse Catalyst":   {"n": 160, "alpha_pct": -0.812, "alpha_tstat": -1.1, "mkt_beta": -0.13, "mom_beta": 0.56, "r2": 0.00,
+                              "interpretation": "Slightly negative alpha. Demote 10%."},
+      "VCP Breakout":       {"n":  89, "alpha_pct": 18.067, "alpha_tstat":  3.5, "mkt_beta": -5.39, "mom_beta": -0.85, "r2": 0.18,
+                              "interpretation": "SIGNIFICANT positive alpha + ANTI-market \u03b2. Boost 15%."},
+      "52wk Breakout":      {"n": 109, "alpha_pct":  6.570, "alpha_tstat":  2.1, "mkt_beta": -0.73, "mom_beta": -1.56, "r2": 0.07,
+                              "interpretation": "Significant positive alpha. NOTE: currently killed by setup_score_multiplier due to negative raw PF (-0.62%) \u2014 factor overlay says alpha exists but realized PnL bad. HOLD demotion (don't conflict)."},
+      "10-Week Pullback":   {"n":  86, "alpha_pct":  7.214, "alpha_tstat":  2.0, "mkt_beta": -1.63, "mom_beta": -0.65, "r2": 0.05,
+                              "interpretation": "Significant positive alpha. Already at 1.5\u00d7 via setup_score_multiplier \u2014 leave unchanged."}
+    },
+    "Trend Continuation": 0.85,
+    "Breakout Expansion": 0.85,
+    "Impulse Catalyst":   0.90,
+    "VCP Breakout":       1.15
+  },
+  "momentum_condition_gate": {
+    "_enabled": false,
+    "_note": "2026-05-18 \u2014 Demote Trend Continuation + Breakout Expansion BUYs \u2192 WATCH when QQQ-SPY 21d momentum spread is negative. Mechanism: P2 factor attribution showed these 2 setups have ZERO alpha and depend on +momentum factor exposure. When momentum factor drawdowns, they lose by definition. FLAG-GATED.",
+    "_mechanism": "21d total return of QQQ minus 21d total return of SPY. When spread <0, momentum factor is in drawdown. Demote pure-factor setups.",
+    "_evidence": "scripts/p2_factor_attribution_spike.py \u2014 TC mom_beta=+0.74, BE mom_beta=+0.78 (both significant). Only TC + BE affected; alpha-bearing setups not gated.",
+    "spread_lookback_days": 21,
+    "min_spread_pct": 0.0,
+    "affected_setups": ["Trend Continuation", "Breakout Expansion"],
+    "_rollback": "Set _enabled=false. No persistent state."
+  },
+  "regime_classifier": {
+    "use_hmm": false,
+    "_note": "2026-05-18 \u2014 Switch between Gaussian (current per-bar classifier) and HMM (P1 spike: hmmlearn.GaussianHMM(n=3) with Baum-Welch transitions). HMM captures regime persistence (~96-99% stay-in-state). FLAG-GATED \u2014 flip use_hmm=true after backtest validation of regime-flip prediction accuracy.",
+    "_mechanism": "When use_hmm=true, build_data._compute_hmm_regime_safe() is replaced by hmm_state.predict() on SPY 10y trained model. State labels mapped by mean log-return: highest=bull, middle=neutral, lowest=bear.",
+    "_evidence": "scripts/p1_hmm_regime_spike.py \u2014 64% agreement with current Gaussian; HMM is more conservative (more 'neutral' labels). Cache: cache/hmm_spike_2026-05-18.json"
+  },
   "signal_filter": {
     "_enabled": false,
     "_comment": "A2 + A5-followup (2026-05-09) \u2014 declarative whitelist gate. Demotes BUY to WATCH for non-whitelisted (setup \u00d7 regime \u00d7 score_band \u00d7 entry_quality) combos. Off by default; flip _enabled=true after per-subtype attribution review of A5 finding (pullback meta-pattern WR 53% / Wilson LB 44.6% / PF 1.83 \u2014 but at meta-family granularity; need EMA21 vs EMA50 vs Bounce-off-Support breakdown before activating).",

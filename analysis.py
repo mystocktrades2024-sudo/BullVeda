@@ -10599,6 +10599,35 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         _setup_mult_audit = None
         pass
 
+    # FACTOR-ALPHA OVERLAY (2026-05-18) — multiplicative overlay on normalized score
+    # based on factor-attribution evidence. Down-weights setups with zero alpha
+    # (pure factor plays) and boosts setups with significant positive alpha.
+    # FLAG-GATED — only fires when config.factor_alpha_overlay._enabled == true.
+    # Audit: cache/factor_attribution_2026-05-18.json + scripts/p2_factor_attribution_spike.py
+    _factor_overlay_audit = None
+    try:
+        _fao = (config or {}).get("factor_alpha_overlay") or {}
+        if _fao.get("_enabled", False):
+            _fao_key = (plan.get("setup_type") or setup_family or "").strip()
+            # Match on setup_type first, fall back to setup_family
+            _fao_mult = _fao.get(_fao_key)
+            if _fao_mult is None and setup_family:
+                _fao_mult = _fao.get(setup_family)
+            if _fao_mult is not None:
+                _fao_mult = float(_fao_mult)
+                normalized = float(normalized) * _fao_mult
+                _v = (_fao.get("_validations") or {}).get(_fao_key) or (_fao.get("_validations") or {}).get(setup_family) or {}
+                _factor_overlay_audit = {
+                    "setup": _fao_key or setup_family,
+                    "multiplier": _fao_mult,
+                    "alpha_pct": _v.get("alpha_pct"),
+                    "alpha_tstat": _v.get("alpha_tstat"),
+                    "reason": f"factor_alpha_overlay: {_fao_key or setup_family} × {_fao_mult} (alpha={_v.get('alpha_pct')}%, t={_v.get('alpha_tstat')})",
+                }
+    except Exception:
+        _factor_overlay_audit = None
+        pass
+
     # FAMILY-LEVEL REGIME KILL (2026-05-13) — complements per-setup_type kills.
     # Evidence base: scripts/regime_sharpe_decomp.py output. Operates on the
     # CLASSIFIED setup_family (Breakout Expansion / Trend Continuation / etc.),
@@ -11058,6 +11087,21 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         "raw_score": raw_total,
         "score": normalized,                 # integer 0-100 (ranking flaw #13)
         "score_raw": round(normalized_raw, 2),  # pre-rounding float for debugging
+        # 2026-05-18: persist per-pillar breakdown so decision_log + dashboard
+        # show WHICH pillar(s) returned 0. Critical for diagnosing systemic
+        # score=0 outages (was 14-25 tickers/day before fix).
+        "score_breakdown": {
+            "tech": round(float(tech_score_norm or 0), 1),
+            "catalyst": round(float(cat_score_norm or 0), 1),
+            "rs": round(float(rs_score_norm or 0), 1),
+            "smart_money": round(float(sm_score_norm or 0), 1),
+            "quality_gate": round(float(qg_score_norm or 0), 1),
+            "entry_rr": round(float(entry_rr_score_norm or 0), 1),
+            "bonuses": {k: round(float(v), 2) for k, v in (_bonuses or {}).items()},
+            "bonus_total_capped": round(float(_total_bonus or 0), 2),
+            "raw_total": round(float(raw_total or 0), 1),
+            "earnings_penalty": int(earnings_penalty or 0),
+        },
         "tier1_signals": _tier1_result,      # 6 strategy enhancement detectors
         "bear_type": decision.get("bear_type", ""),
         "trade_plan": plan,
