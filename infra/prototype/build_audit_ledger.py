@@ -239,6 +239,20 @@ def _compute_returns_for_ticker(ticker, ticker_records, today):
         direction = (rec.get("direction") or "long").lower()
         sign = 1 if direction == "long" else -1
 
+        # 2026-05-18 · INTRADAY D0 — same-day return from entry price to that
+        # day's close. For TODAY's picks where price_at_pick was captured
+        # intraday (typically at open or scan time), this is the actionable
+        # "how did the pick perform today?" number. Without this, today's
+        # picks all show "—" until tomorrow's close, even though the close
+        # of the same day IS available and meaningful.
+        entry_price = rec.get("price_at_pick")
+        if entry_price and entry_price > 0 and anchor and anchor > 0:
+            d0_ret = sign * (anchor / entry_price - 1) * 100
+            # Only stamp if there's a meaningful difference (>= 0.05%) from
+            # the close. If price_at_pick == close, this is just 0 noise.
+            if abs(d0_ret) >= 0.05:
+                rec["d0"] = round(d0_ret, 2)
+
         # Forward returns at each horizon
         for label, offset in HORIZONS.items():
             tgt_i = i + offset

@@ -19872,7 +19872,9 @@ const QuantHistoryLedger = (function() {
     // every horizon is null because the pick is too recent for forward
     // returns to exist yet. The ledger sorts newest-first, so without this
     // chip the top of the list looks broken (rows of blanks).
-    const matured = records.filter(r => r && (r.d1 != null || r.d5 != null || r.w1 != null)).length;
+    // A record is "matured" when any return horizon has data — including d0
+    // (today's intraday entry→close return added 2026-05-18).
+    const matured = records.filter(r => r && (r.d0 != null || r.d1 != null || r.d5 != null || r.w1 != null)).length;
     const pending = records.length - matured;
     const maturationChip = pending > 0
       ? `<span class="stat" style="color:var(--amb)" title="Picks from last few trading days — forward returns will populate as time passes"><b>${matured.toLocaleString()}</b> matured · <b>${pending.toLocaleString()}</b> pending</span>`
@@ -19918,7 +19920,7 @@ const QuantHistoryLedger = (function() {
           <thead>
             <tr class="qhist-grp">
               <th colspan="9" class="grp-meta">META</th>
-              <th colspan="7" class="grp-d">DAILY · D1-D7</th>
+              <th colspan="8" class="grp-d">DAILY · D0-D7</th>
               <th colspan="8" class="grp-w">WEEKLY · W1-W8</th>
               <th colspan="12" class="grp-m">MONTHLY · M1-M12</th>
               <th colspan="6" class="grp-out">OUTCOME</th>
@@ -19933,6 +19935,7 @@ const QuantHistoryLedger = (function() {
               <th class="r sortable" data-sort="price_at_pick">Price</th>
               <th>Tier</th>
               <th>Entry-Q</th>
+              <th class="r ret sortable" data-sort="d0" title="D0 = same-day entry→close return (today's intraday performance). Populated when pick was made before market close and EODHD has today's close.">D0</th>
               ${HORIZONS.slice(0,7).map(h => `<th class="r ret sortable" data-sort="${h}">${h.toUpperCase()}</th>`).join('')}
               ${HORIZONS.slice(7,15).map(h => `<th class="r ret sortable" data-sort="${h}">${h.toUpperCase()}</th>`).join('')}
               ${HORIZONS.slice(15).map(h => `<th class="r ret sortable" data-sort="${h}">${h.toUpperCase()}</th>`).join('')}
@@ -19974,9 +19977,10 @@ const QuantHistoryLedger = (function() {
   function _filtered(records) {
     let pool = records;
     if (_filters.hidePending) {
-      // A record is "pending" when no forward-return horizon has matured yet.
-      // Hide them from default view so the user opens to actionable history.
-      pool = pool.filter(r => r && (r.d1 != null || r.d5 != null || r.w1 != null || r.m1 != null));
+      // A record is "pending" when no return horizon (including d0 intraday)
+      // has populated. Hide them from default view so the user opens to
+      // actionable history.
+      pool = pool.filter(r => r && (r.d0 != null || r.d1 != null || r.d5 != null || r.w1 != null || r.m1 != null));
     }
     if (_filters.year !== 'all') pool = pool.filter(r => (r.pick_date || '').startsWith(_filters.year));
     if (_filters.mode !== 'all') pool = pool.filter(r => r.mode === _filters.mode);
@@ -20052,7 +20056,8 @@ const QuantHistoryLedger = (function() {
     // window hasn't elapsed yet (today's picks have null at every horizon).
     // Visually fade these rows + flag with 🕓 instead of letting them look
     // broken next to the populated history.
-    const isPending = (r.d1 == null && r.d5 == null && r.w1 == null && r.m1 == null);
+    // Pending = NO horizon populated, including d0 (today's intraday return)
+    const isPending = (r.d0 == null && r.d1 == null && r.d5 == null && r.w1 == null && r.m1 == null);
 
     return `<tr${isPending ? ' class="qhist-pending" title="Forward returns will populate as time passes (D1 = tomorrow, D5 = next week, M1 = 21 trading days)"' : ''}>
       <td class="dt">${isPending ? '🕓 ' : ''}${(r.pick_date || '').slice(5)}</td>
@@ -20064,6 +20069,7 @@ const QuantHistoryLedger = (function() {
       <td class="r price">$${_fmt(r.price_at_pick, 2)}</td>
       <td><span class="qhist-pill ${tierCls}">${_esc(r.conviction_tier || '—')}</span></td>
       <td><span class="qhist-pill ${eqCls}">${_esc((r.entry_quality || '—').slice(0,4))}</span></td>
+      ${_retCell(r.d0)}
       ${HORIZONS.map(h => _retCell(r[h])).join('')}
       <td class="r ret-${r.mae_pct != null && r.mae_pct < -3 ? 'rd' : ''}">${r.mae_pct != null ? _sign(r.mae_pct) + _fmt(r.mae_pct, 1) : '—'}</td>
       <td class="r ret-${r.mfe_pct != null && r.mfe_pct > 3 ? 'gn' : ''}">${r.mfe_pct != null ? _sign(r.mfe_pct) + _fmt(r.mfe_pct, 1) : '—'}</td>
