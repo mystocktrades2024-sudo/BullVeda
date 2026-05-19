@@ -610,9 +610,16 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     # PEAD bypass (2026-05-14): PEAD setups have already gapped — decision_state=MISSED
     # is the EXPECTED state for catalyst-driven entries. The whole mechanism is buying
     # the post-report move, not pulling back to a primary zone.
+    # GATING-SYMMETRY FIX (2026-05-19): entry_quality gate has risk_on_choppy regime
+    # relaxation (per regime_sharpe_decomp 2026-05-13: MISSED n=302 PF 2.59, EXTENDED
+    # n=335 PF 1.33 in choppy) but decision_state gate was missing it. Both gates test
+    # essentially the same condition (price above value re-entry zone). HPE 2026-05-19
+    # would have BUY'd (score 85, 8/9 gates pass) except decision_state=MISSED blocked it
+    # despite the regime evidence. Mirror the relaxation here using the same config key.
     ds = _normalize_decision_state(t.get("decision_state"))
     _is_pead_ds = (t.get("setup_family") == "PEAD")
     _is_insider_ds = (t.get("setup_family") == "Insider Cluster")
+    _ds_relaxed_for_regime = (ds == "MISSED") and (_regime_lower in _eq_relax)
     passed = ds not in ("MISSED", "NO_EDGE")
     if _is_pead_ds and not passed:
         passed = True
@@ -623,6 +630,9 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     elif (t.get("setup_family") == "ESP Play") and not passed:
         passed = True
         ds_reason = f"decision_state={ds} allowed for ESP Play sleeve (catalyst) (bypass)"
+    elif _ds_relaxed_for_regime:
+        passed = True
+        ds_reason = f"decision_state={ds} allowed in {_regime_lower} (mirrors entry_quality regime relax per 2026-05-13 evidence)"
     else:
         ds_reason = "" if passed else f"decision_state={ds}"
     gates.append({
