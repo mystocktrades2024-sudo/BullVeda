@@ -2857,19 +2857,21 @@ async def diagnostics_apply_tune_api(payload: Dict[str, Any] = Body(...)):
                     conf["buy_min_score"] = nv
                     changes.append({"path": f"regime4_thresholds.{regime}.buy_min_score", "old": old, "new": nv})
     elif kind == "stop_multiplier":
-        # config path: trade_plan or stop config
-        for key_path in [["trade_plan", "atr_stop_mult"], ["atr_stop_mult"]]:
-            ref = cfg
-            for k in key_path[:-1]: ref = ref.get(k, {}) if isinstance(ref, dict) else {}
-            if isinstance(ref, dict) and key_path[-1] in ref:
-                old = ref[key_path[-1]]
-                ref[key_path[-1]] = float(new_value)
-                changes.append({"path": ".".join(key_path), "old": old, "new": float(new_value)})
-                break
-        if not changes:
-            # Add at top level if not found
-            cfg["atr_stop_mult"] = float(new_value)
-            changes.append({"path": "atr_stop_mult", "old": None, "new": float(new_value)})
+        # The real config path is scoring.stop_atr_multiple (default 1.25 per
+        # analysis.py _base_stop_mult). Sleeve-specific overrides live at
+        # {momentum,esp,insider_cluster,pead,mean_reversion,defensive}.stop_atr_multiple.
+        scoring = cfg.setdefault("scoring", {})
+        old = scoring.get("stop_atr_multiple")
+        try:
+            nv = float(new_value)
+        except Exception:
+            return {"error": f"new_value not a float: {new_value}"}
+        scoring["stop_atr_multiple"] = nv
+        changes.append({"path": "scoring.stop_atr_multiple", "old": old, "new": nv})
+        # Clean up the bogus top-level key from earlier no-op writes
+        if "atr_stop_mult" in cfg:
+            removed = cfg.pop("atr_stop_mult")
+            changes.append({"path": "atr_stop_mult (REMOVED — was no-op)", "old": removed, "new": None})
     elif kind == "exit_rule":
         # Toggle a flag
         exit_cfg = cfg.setdefault("exit_rules", {})

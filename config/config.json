@@ -158,7 +158,7 @@
     "smart_money_max": 15,
     "quality_gate_max": 10,
     "raw_total": 100,
-    "stop_atr_multiple": 1.25,
+    "stop_atr_multiple": 1.5,
     "entry_quality_buy_gate": [
       "FRESH",
       "PULLBACK",
@@ -246,7 +246,7 @@
       ]
     },
     "risk_on_trending": {
-      "buy_min_score": 58,
+      "buy_min_score": 80,
       "buy_max_score": 90,
       "watch_min_score": 60,
       "rs_min": 65,
@@ -257,7 +257,7 @@
       "_note": "2026-05-10 \u2014 tightened from 65 \u2192 72. Evidence: cache/filter_audit_2026-05-10.json showed score_floor_65 = -5.6pp net lift (rejects more winners than losers) over 763 trades. score_floor_72 = +2.3pp neutral. Trading-leaders profile still overrides to 82 in live; this affects baseline + backtest path. Originally was 80 (2026-05-08 recalibration), 65 (2026-05-10 CONFIG-1 restore), now 72 evidence-based."
     },
     "risk_on_choppy": {
-      "buy_min_score": 60,
+      "buy_min_score": 80,
       "buy_max_score": 90,
       "watch_min_score": 65,
       "rs_min": 60,
@@ -268,7 +268,7 @@
       "_note": "2026-05-10 \u2014 restored to documented baseline (CLAUDE.md table). Was 80; choppy regime requires 7-pt premium over trending = 72. buy_max_score:90 per Q1-step6."
     },
     "risk_off_trending": {
-      "buy_min_score": 78,
+      "buy_min_score": 80,
       "buy_max_score": 90,
       "watch_min_score": 70,
       "rs_min": 70,
@@ -402,7 +402,7 @@
     "mode": "aggregate",
     "_mode_note": "aggregate (default) = system-wide kill. per_sleeve = rolling Sharpe per setup_family; demote only candidates whose sleeve is below floor. Change only after backtest validation per principle 7.",
     "catalyst_sleeve_bypass": false,
-    "_catalyst_bypass_note": "When true, catalyst sleeves (PEAD, Insider Cluster, Defensive Rotation, Momentum Continuation, Mean Reversion, ESP Play) bypass rolling-Sharpe kill — parity with existing bypasses in _eval_hard_gates. Mechanism: catalyst alpha independent of pullback-mechanic Sharpe (principle 14).",
+    "_catalyst_bypass_note": "When true, catalyst sleeves (PEAD, Insider Cluster, Defensive Rotation, Momentum Continuation, Mean Reversion, ESP Play) bypass rolling-Sharpe kill \u2014 parity with existing bypasses in _eval_hard_gates. Mechanism: catalyst alpha independent of pullback-mechanic Sharpe (principle 14).",
     "_validations": {
       "current_state_2026-05-13": {
         "see": "decision_engine.compute_rolling_sharpe_kill_state for the live computation",
@@ -1135,55 +1135,10 @@
     "_note": "Buffer thresholds for regime switching. Require overshoot before flipping to prevent whipsaws."
   },
   "regime_classifier": {
-    "_note": "Regime classifier thresholds (what triggers panic/risk_off_trending/risk_on_trending). V4 settings from backtest 2026-05-10 \u2014 see _validations below. Separate from regime_thresholds (legacy 3-regime score gates) and regime4_thresholds (4-regime score gates).",
-    "panic_vix": 35.0,
-    "panic_breadth": 20.0,
-    "trending_vix": 20.0,
-    "trending_breadth": 60.0,
-    "risk_off_consecutive_closes": 2,
-    "_gate_kill_switch_note": "REGIME-GATES-KILLSWITCH (2026-05-13): single toggle to disable ALL 5 new regime gates shipped 2026-05-11. Set any of these to false to disable that specific gate. ALL true = current production behavior. Used to isolate which gate is starving the system in backtests.",
-    "gate_sector_dispersion_enabled": true,
-    "gate_credit_spreads_enabled": true,
-    "gate_vix_dynamics_enabled": true,
-    "gate_distribution_days_enabled": true,
-    "gate_hmm_blend_enabled": true,
-    "_validations": {
-      "source": "backtest/regime_backtest.py --variants --years 5 --breadth-source {proxy|real}",
-      "ran_at": "2026-05-10",
-      "output_artifacts": {
-        "v1_proxy_breadth": "cache/regime_backtest_latest.json",
-        "v2_real_breadth": "cache/regime_backtest_real_breadth.json",
-        "breadth_cache": "cache/breadth_history_5y.parquet"
-      },
-      "n_bars": 1297,
-      "period": "2021-03-11 to 2026-05-08",
-      "winner": "V4_2bar+loose",
-      "baseline_vs_V4_v2_real_breadth": {
-        "trending_days_fired": "205 \u2192 304 (1.5x more often)",
-        "trending_wilson_lb_10d": "57.6% \u2192 58.9% (small reliability gain)",
-        "risk_off_whipsaws_<3d": "29 \u2192 18 (-38%)",
-        "long_eligible_10d_wr_lb": "61.4% \u2192 61.1% (essentially flat \u2014 within noise)"
-      },
-      "baseline_vs_V4_v1_proxy_breadth": {
-        "trending_days_fired": "36 \u2192 196 (5.4x more often)",
-        "trending_wilson_lb_10d": "57.9% \u2192 61.3%",
-        "risk_off_whipsaws_<3d": "25 \u2192 10 (-60%)",
-        "long_eligible_10d_wr_lb": "61.2% \u2192 61.1%",
-        "note": "v1 proxy systematically under-counted breadth; v2 real numbers are more honest."
-      },
-      "interpretation": "Long-eligible 10d WR ceiling is ~61% LB across all variants and both breadth sources. Regime classifier can't move WR past this \u2014 setup-level work needed (deferred per user 2026-05-10). V4's two real wins are: 2-bar SPY/EMA50 cuts whipsaws -38% (real-breadth backtest), loose-trending raises trend-day reachability 1.5x. Both pass Wilson floor (LB \u2265 40, n past 30).",
-      "mechanism": "2-bar SPY/EMA50: single close is noise (intraday wick / news gap); two consecutive closes confirms break. VIX<20 + breadth>60 (vs 18/65): the original 'perfect bull' gate fires too rarely on real breadth in 2024-26 to estimate WR with confidence.",
-      "open_caveats": [
-        "Survivorship: real-breadth backtest uses CURRENT SP500 constituents against historical prices (principle 6). Wikipedia point-in-time membership is deferred (audit #1 Tier 2)."
-      ],
-      "resolved": [
-        {
-          "item": "Breadth definition mismatch (live R1000+custom vs backtest SP500-only)",
-          "resolved_at": "2026-05-10",
-          "fix": "swing_trade.py:869 now passes universe_filter=set(get_sp500()) to get_market_breadth() so live uses the same definition the V4 backtest validated against."
-        }
-      ]
-    }
+    "use_hmm": false,
+    "_note": "2026-05-18 \u2014 Switch between Gaussian (current per-bar classifier) and HMM (P1 spike: hmmlearn.GaussianHMM(n=3) with Baum-Welch transitions). HMM captures regime persistence (~96-99% stay-in-state). FLAG-GATED \u2014 flip use_hmm=true after backtest validation of regime-flip prediction accuracy.",
+    "_mechanism": "When use_hmm=true, build_data._compute_hmm_regime_safe() is replaced by hmm_state.predict() on SPY 10y trained model. State labels mapped by mean log-return: highest=bull, middle=neutral, lowest=bear.",
+    "_evidence": "scripts/p1_hmm_regime_spike.py \u2014 64% agreement with current Gaussian; HMM is more conservative (more 'neutral' labels). Cache: cache/hmm_spike_2026-05-18.json"
   },
   "sector_rotation": {
     "etfs": {
@@ -1433,36 +1388,79 @@
       }
     },
     "Trend Continuation": 1.0,
-    "VCP Breakout": 1.3,
-    "10-Week Pullback": 1.5,
+    "VCP Breakout": 0.0,
+    "10-Week Pullback": 0.0,
     "EMA21 Pullback": 0.0,
     "52wk Breakout": 0.0,
     "Pocket Pivot": 0.0,
     "Near-VCP Breakout": 1.0,
-    "Squeeze Expansion": 0.7
+    "Squeeze Expansion": 0.7,
+    "RS New High": 0.0
   },
   "factor_alpha_overlay": {
     "_enabled": false,
     "_note": "2026-05-18 \u2014 Factor-attribution-based score multiplier overlay. Evidence: scripts/p2_factor_attribution_spike.py / cache/factor_attribution_2026-05-18.json (n=1940 trades regressed vs SPY market + QQQ-SPY momentum proxy). Setups with significant positive alpha get boosted; setups with zero/negative alpha get demoted (they're pure factor plays, no skill component). FLAG-GATED \u2014 flip _enabled=true to activate after 30-trade paper-mode validation.",
     "_mechanism": "Multiplicative overlay on normalized score. Applied AFTER setup_score_multiplier path. Per principle 4 (adversarial): documents alpha t-stat + p-value + mkt/mom betas inline so the decision is challengeable.",
     "_validations": {
-      "Trend Continuation": {"n": 777, "alpha_pct": -0.116, "alpha_tstat": -0.4, "mkt_beta": 0.05, "mom_beta": 0.74, "r2": 0.02,
-                              "interpretation": "ZERO alpha + significant momentum exposure \u2192 pure-factor play. Demote 15%."},
-      "Breakout Expansion": {"n": 511, "alpha_pct": -0.108, "alpha_tstat": -0.3, "mkt_beta": -0.70, "mom_beta": 0.78, "r2": 0.01,
-                              "interpretation": "ZERO alpha + significant momentum exposure \u2192 pure-factor play. Demote 15%."},
-      "Impulse Catalyst":   {"n": 160, "alpha_pct": -0.812, "alpha_tstat": -1.1, "mkt_beta": -0.13, "mom_beta": 0.56, "r2": 0.00,
-                              "interpretation": "Slightly negative alpha. Demote 10%."},
-      "VCP Breakout":       {"n":  89, "alpha_pct": 18.067, "alpha_tstat":  3.5, "mkt_beta": -5.39, "mom_beta": -0.85, "r2": 0.18,
-                              "interpretation": "SIGNIFICANT positive alpha + ANTI-market \u03b2. Boost 15%."},
-      "52wk Breakout":      {"n": 109, "alpha_pct":  6.570, "alpha_tstat":  2.1, "mkt_beta": -0.73, "mom_beta": -1.56, "r2": 0.07,
-                              "interpretation": "Significant positive alpha. NOTE: currently killed by setup_score_multiplier due to negative raw PF (-0.62%) \u2014 factor overlay says alpha exists but realized PnL bad. HOLD demotion (don't conflict)."},
-      "10-Week Pullback":   {"n":  86, "alpha_pct":  7.214, "alpha_tstat":  2.0, "mkt_beta": -1.63, "mom_beta": -0.65, "r2": 0.05,
-                              "interpretation": "Significant positive alpha. Already at 1.5\u00d7 via setup_score_multiplier \u2014 leave unchanged."}
+      "Trend Continuation": {
+        "n": 777,
+        "alpha_pct": -0.116,
+        "alpha_tstat": -0.4,
+        "mkt_beta": 0.05,
+        "mom_beta": 0.74,
+        "r2": 0.02,
+        "interpretation": "ZERO alpha + significant momentum exposure \u2192 pure-factor play. Demote 15%."
+      },
+      "Breakout Expansion": {
+        "n": 511,
+        "alpha_pct": -0.108,
+        "alpha_tstat": -0.3,
+        "mkt_beta": -0.7,
+        "mom_beta": 0.78,
+        "r2": 0.01,
+        "interpretation": "ZERO alpha + significant momentum exposure \u2192 pure-factor play. Demote 15%."
+      },
+      "Impulse Catalyst": {
+        "n": 160,
+        "alpha_pct": -0.812,
+        "alpha_tstat": -1.1,
+        "mkt_beta": -0.13,
+        "mom_beta": 0.56,
+        "r2": 0.0,
+        "interpretation": "Slightly negative alpha. Demote 10%."
+      },
+      "VCP Breakout": {
+        "n": 89,
+        "alpha_pct": 18.067,
+        "alpha_tstat": 3.5,
+        "mkt_beta": -5.39,
+        "mom_beta": -0.85,
+        "r2": 0.18,
+        "interpretation": "SIGNIFICANT positive alpha + ANTI-market \u03b2. Boost 15%."
+      },
+      "52wk Breakout": {
+        "n": 109,
+        "alpha_pct": 6.57,
+        "alpha_tstat": 2.1,
+        "mkt_beta": -0.73,
+        "mom_beta": -1.56,
+        "r2": 0.07,
+        "interpretation": "Significant positive alpha. NOTE: currently killed by setup_score_multiplier due to negative raw PF (-0.62%) \u2014 factor overlay says alpha exists but realized PnL bad. HOLD demotion (don't conflict)."
+      },
+      "10-Week Pullback": {
+        "n": 86,
+        "alpha_pct": 7.214,
+        "alpha_tstat": 2.0,
+        "mkt_beta": -1.63,
+        "mom_beta": -0.65,
+        "r2": 0.05,
+        "interpretation": "Significant positive alpha. Already at 1.5\u00d7 via setup_score_multiplier \u2014 leave unchanged."
+      }
     },
     "Trend Continuation": 0.85,
     "Breakout Expansion": 0.85,
-    "Impulse Catalyst":   0.90,
-    "VCP Breakout":       1.15
+    "Impulse Catalyst": 0.9,
+    "VCP Breakout": 1.15
   },
   "momentum_condition_gate": {
     "_enabled": false,
@@ -1471,14 +1469,11 @@
     "_evidence": "scripts/p2_factor_attribution_spike.py \u2014 TC mom_beta=+0.74, BE mom_beta=+0.78 (both significant). Only TC + BE affected; alpha-bearing setups not gated.",
     "spread_lookback_days": 21,
     "min_spread_pct": 0.0,
-    "affected_setups": ["Trend Continuation", "Breakout Expansion"],
+    "affected_setups": [
+      "Trend Continuation",
+      "Breakout Expansion"
+    ],
     "_rollback": "Set _enabled=false. No persistent state."
-  },
-  "regime_classifier": {
-    "use_hmm": false,
-    "_note": "2026-05-18 \u2014 Switch between Gaussian (current per-bar classifier) and HMM (P1 spike: hmmlearn.GaussianHMM(n=3) with Baum-Welch transitions). HMM captures regime persistence (~96-99% stay-in-state). FLAG-GATED \u2014 flip use_hmm=true after backtest validation of regime-flip prediction accuracy.",
-    "_mechanism": "When use_hmm=true, build_data._compute_hmm_regime_safe() is replaced by hmm_state.predict() on SPY 10y trained model. State labels mapped by mean log-return: highest=bull, middle=neutral, lowest=bear.",
-    "_evidence": "scripts/p1_hmm_regime_spike.py \u2014 64% agreement with current Gaussian; HMM is more conservative (more 'neutral' labels). Cache: cache/hmm_spike_2026-05-18.json"
   },
   "signal_filter": {
     "_enabled": false,
@@ -1644,7 +1639,122 @@
       "old_value": 65,
       "new_value": 72,
       "date": "2026-05-10"
-    }
+    },
+    "auto_tune_log": [
+      {
+        "ts": "2026-05-19T06:25:24",
+        "kind": "setup_multiplier",
+        "target": "VCP Breakout",
+        "reason": "Wilson LB 3.7%, PF 0.14, mean -2.78% \u2014 all sub-breakeven (n=15)",
+        "changes": [
+          {
+            "path": "setup_score_multiplier.VCP Breakout",
+            "old": 1.3,
+            "new": 0.0
+          }
+        ],
+        "source": "forensics_endpoint"
+      },
+      {
+        "ts": "2026-05-19T06:25:24",
+        "kind": "setup_multiplier",
+        "target": "10-Week Pullback",
+        "reason": "Wilson LB 22.7%, PF 0.77, mean -0.9% \u2014 all sub-breakeven (n=29)",
+        "changes": [
+          {
+            "path": "setup_score_multiplier.10-Week Pullback",
+            "old": 1.5,
+            "new": 0.0
+          }
+        ],
+        "source": "forensics_endpoint"
+      },
+      {
+        "ts": "2026-05-19T06:25:24",
+        "kind": "setup_multiplier",
+        "target": "EMA21 Pullback",
+        "reason": "Wilson LB 1.5%, PF 0.11, mean -2.1% \u2014 all sub-breakeven (n=12)",
+        "changes": [
+          {
+            "path": "setup_score_multiplier.EMA21 Pullback",
+            "old": 0.0,
+            "new": 0.0
+          }
+        ],
+        "source": "forensics_endpoint"
+      },
+      {
+        "ts": "2026-05-19T06:25:24",
+        "kind": "setup_multiplier",
+        "target": "RS New High",
+        "reason": "Wilson LB 4.3%, PF 0.56, mean -1.71% \u2014 all sub-breakeven (n=13)",
+        "changes": [
+          {
+            "path": "setup_score_multiplier.RS New High",
+            "old": null,
+            "new": 0.0
+          }
+        ],
+        "source": "forensics_endpoint"
+      },
+      {
+        "ts": "2026-05-19T06:25:24",
+        "kind": "score_floor",
+        "target": "buy_min_score",
+        "reason": "score bands < 80 have mean PnL < 0 (sum -150.7pp lost)",
+        "changes": [
+          {
+            "path": "regime4_thresholds.risk_on_trending.buy_min_score",
+            "old": 58,
+            "new": 80
+          },
+          {
+            "path": "regime4_thresholds.risk_on_choppy.buy_min_score",
+            "old": 60,
+            "new": 80
+          },
+          {
+            "path": "regime4_thresholds.risk_off_trending.buy_min_score",
+            "old": 78,
+            "new": 80
+          }
+        ],
+        "source": "forensics_endpoint"
+      },
+      {
+        "ts": "2026-05-19T06:25:24",
+        "kind": "stop_multiplier",
+        "target": "atr_stop_mult",
+        "reason": "22 of 63 stopped trades had MFE > 3% (could have been winners)",
+        "changes": [
+          {
+            "path": "atr_stop_mult",
+            "old": null,
+            "new": 1.5
+          }
+        ],
+        "source": "forensics_endpoint"
+      },
+      {
+        "ts": "2026-05-19T06:27:08",
+        "kind": "stop_multiplier",
+        "target": "atr_stop_mult",
+        "reason": "22/59 stopped trades had MFE>3% \u2014 wider stop would have saved them (re-apply to correct path scoring.stop_atr_multiple)",
+        "changes": [
+          {
+            "path": "scoring.stop_atr_multiple",
+            "old": 1.25,
+            "new": 1.5
+          },
+          {
+            "path": "atr_stop_mult (REMOVED \u2014 was no-op)",
+            "old": 1.5,
+            "new": null
+          }
+        ],
+        "source": "forensics_endpoint"
+      }
+    ]
   },
   "use_structural_targets": false,
   "_structural_targets_meta": {
