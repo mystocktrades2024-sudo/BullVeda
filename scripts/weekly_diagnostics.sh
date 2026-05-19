@@ -49,6 +49,10 @@ python3 scripts/sharpe_alert.py 2>&1 | tail -10 >> "$LOG"
 # 9. Compare to prior week — alert if Sharpe regressed
 python3 scripts/_weekly_diag_compare.py 2>&1 >> "$LOG"
 
+# 9b. Auto-tune forensics — Wilson-validated kill/raise/widen recommendations
+# Pushes Slack message + persists cache/forensics_weekly_<DATE>.json
+bash scripts/run_forensics_weekly.sh 2>&1 >> "$LOG"
+
 # 10. Post completion status to Slack (always — success or failure)
 python3 -c "
 import time
