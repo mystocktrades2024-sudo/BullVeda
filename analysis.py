@@ -7832,6 +7832,303 @@ def compute_mc_p_profit(score: float, rr_ratio: float,
     return max(0.05, min(0.95, p))
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# 2026-05-19 · Option A — per-mode decisions (SWING / POSITION / INVESTMENT)
+# ────────────────────────────────────────────────────────────────────────────
+# The UI mode toggle (SWING / POS / INV pills on the detail page) used to be
+# cosmetic — the underlying t.decision / t.canonical_trade_plan were
+# strategy-agnostic so toggling did not change the verdict, stop, T1, T2,
+# or R:R. Per user direction 2026-05-19: make the toggle real. Each mode
+# applies its own rulebook (stop width, R:R floor, entry-quality gate,
+# earnings-blackout window, sizing multiplier). Same composite score is
+# reused across modes — Phase 2 will reweight pillars per mode if needed.
+#
+# Output shape (added to analyze_ticker's return dict):
+#   "decisions_by_mode": {
+#     "swing":      {verdict, reason, color, rr, stop, t1, t2, size_mult, gate_pass},
+#     "position":   {... same shape ...},
+#     "investment": {... same shape ...},
+#   }
+#
+# Rulebooks (anchored in CLAUDE.md OPERATING MINDSET + UI tooltip text):
+#   SWING       2-10d   stop 1.25× ATR   R:R 3.0  entry FRESH/PULLBACK only   ER buffer 14d   size ×1.0
+#   POSITION    2w-6mo  stop 1.75× ATR   R:R 2.5  entry FRESH/PULLBACK/VALID  ER buffer 0d    size ×1.3
+#   INVESTMENT  1-5yr   stop -15% DD     R:R 2.0  entry any (MoS-driven)      ER irrelevant   size ×1.5
+# ════════════════════════════════════════════════════════════════════════════
+# 2026-05-19 (Phase 3) · Per-mode pillar weights for the composite score.
+#
+# Each weight set sums to 1.0. Applied to the per-pillar SUB-SCORE PCT
+# (0..1) to recompute a mode-specific composite. The existing legacy
+# composite (from analyze_ticker normalize logic) is preserved as
+# t.score; mode composites land in t.decisions_by_mode[mode].score so
+# downstream BUY-threshold checks differ per mode.
+#
+# ⚠ EVIDENCE GAP (CLAUDE.md principle 7): these weights are intuition,
+# NOT walk-forward validated. The validation plan is documented in
+# docs/per_mode_decisions_roadmap.md (Phase 3 section). Until validated:
+#  • The legacy single composite (t.score) still drives the primary
+#    decision_log entry and all automated alerts.
+#  • The per-mode composite affects ONLY the UI verdict chip + the
+#    `decisions_by_mode[mode].verdict` shown on the detail page.
+#  • Config flag `per_mode_pillar_reweight._enabled` (default true)
+#    can roll this back without code change.
+#
+# Intuition behind each weight set:
+#  SWING       — catalyst + technicals dominate (5-10d holds need a
+#                fresh edge; fundamentals barely matter on 5-day holds)
+#  POSITION    — balanced (2w-6mo holds care about both setup quality
+#                and underlying business strength)
+#  INVESTMENT  — fundamentals dominate (1-5yr holds = you're buying
+#                the business; multiples + margins + capital
+#                allocation outweigh today's chart)
+_MODE_PILLAR_WEIGHTS = {
+    "swing":      {"trend": 0.30, "rs": 0.25, "catalyst": 0.25, "smart_money": 0.10, "fundamentals": 0.05, "entry_rr": 0.05},
+    "position":   {"trend": 0.25, "rs": 0.20, "catalyst": 0.20, "smart_money": 0.15, "fundamentals": 0.15, "entry_rr": 0.05},
+    "investment": {"trend": 0.15, "rs": 0.15, "catalyst": 0.10, "smart_money": 0.10, "fundamentals": 0.45, "entry_rr": 0.05},
+}
+
+
+_MODE_RULEBOOK = {
+    "swing": {
+        "stop_atr_multiple": 1.25,
+        "buy_min_rr": 3.0,
+        "entry_quality_buy_gate": ["FRESH", "PULLBACK"],
+        "earnings_blackout_days": 14,
+        "size_mult": 1.0,
+        "horizon_days": (2, 10),
+        "label": "SWING · 2–10 d",
+    },
+    "position": {
+        "stop_atr_multiple": 1.75,
+        "buy_min_rr": 2.5,
+        "entry_quality_buy_gate": ["FRESH", "PULLBACK", "VALID"],
+        "earnings_blackout_days": 0,   # POSITION holds through prints
+        "size_mult": 1.3,
+        "horizon_days": (14, 180),
+        "label": "POSITION · 2w–6mo",
+    },
+    "investment": {
+        # INVESTMENT uses a drawdown stop, not ATR — set via stop_dd_pct below
+        "stop_atr_multiple": None,
+        "stop_dd_pct": 0.15,           # -15% from entry
+        "buy_min_rr": 2.0,
+        "entry_quality_buy_gate": ["FRESH", "PULLBACK", "VALID", "EXTENDED", "MISSED"],
+        "earnings_blackout_days": 0,
+        "size_mult": 1.5,
+        "horizon_days": (365, 1825),
+        "label": "INVESTMENT · 1–5yr",
+    },
+}
+
+
+def _make_mode_config(mode: str, base_config: dict) -> dict:
+    """Build a shallow-copied config dict with mode-specific gate overrides.
+
+    Only the fields make_decision() reads are overridden — scoring weights,
+    pillar maxes, etc. are untouched. Phase 1 keeps the single composite
+    score; per-mode pillar reweighting is deferred to Phase 2.
+    """
+    if mode not in _MODE_RULEBOOK:
+        return base_config
+    rules = _MODE_RULEBOOK[mode]
+    cfg = dict(base_config)
+    cfg["decisions"] = dict(base_config.get("decisions") or {})
+    cfg["decisions"]["buy_min_rr"] = rules["buy_min_rr"]
+    cfg["scoring"] = dict(base_config.get("scoring") or {})
+    cfg["scoring"]["entry_quality_buy_gate"] = rules["entry_quality_buy_gate"]
+    if rules.get("stop_atr_multiple") is not None:
+        cfg["scoring"]["stop_atr_multiple"] = rules["stop_atr_multiple"]
+    # earnings blackout is read from config['earnings_blackout']
+    cfg["earnings_blackout"] = dict(base_config.get("earnings_blackout") or {})
+    cfg["earnings_blackout"]["days_before"] = rules["earnings_blackout_days"]
+    return cfg
+
+
+def compute_decisions_by_mode(*, price: float, atr: float,
+                              base_plan: dict, normalized_score: float,
+                              base_config: dict, regime_name: str = "neutral",
+                              regime4: str = "", weak_regime: bool = False,
+                              direction: str = "long", bear_score: int = 0,
+                              rs_rank: int = 50, vix: float = 20.0,
+                              entry_quality: str = "VALID",
+                              has_catalyst: bool = False,
+                              rsi: float = 50.0, weekly_bull: bool = False,
+                              adx: float = 20.0, breadth: dict | None = None,
+                              setup_type: str = "", ticker: str = "",
+                              catalyst_tier: int = 3,
+                              days_to_earnings: int | None = None,
+                              squeeze_on: bool = False,
+                              rvol: float = 1.0,
+                              market_cycle: str = "",
+                              short_float: float = 0.0,
+                              days_to_cover: float = 0.0,
+                              sector_outperforming: bool = False,
+                              sector_etf: str = "",
+                              sector_underperforming: bool = False,
+                              stock_vs_spy_20d: float = 0.0,
+                              todays_gap_pct: float = 0.0,
+                              seasonal_adj: dict | None = None,
+                              mc_p_profit: float | None = None,
+                              # Phase 2 (2026-05-19) — sizing inputs
+                              base_alloc_pct: float | None = None,
+                              # legacy single-decision compatibility helper:
+                              legacy_decision: dict | None = None,
+                              # Phase 3 (2026-05-19) — per-mode pillar reweighting.
+                              # Keys must match _MODE_PILLAR_WEIGHTS sub-keys:
+                              #   trend / rs / catalyst / smart_money / fundamentals / entry_rr
+                              # Each value in [0, 1]. None = skip Phase 3, use legacy composite.
+                              pillar_pcts: dict | None = None) -> dict:
+    """For each mode, recompute stop/T1/T2/R:R/verdict using mode rulebook.
+
+    T1/T2 stay structural (taken from base_plan since they're S/R + HVN
+    based, not mode-specific). Stop is mode-derived via ATR multiplier or
+    drawdown rule. R:R re-derives from the new stop. make_decision() runs
+    with a mode-mutated config so its R:R floor + entry-quality gate +
+    earnings blackout apply correctly.
+    """
+    out: dict[str, dict] = {}
+    if price <= 0 or atr <= 0:
+        # Degenerate — return blank per-mode dict so frontend gracefully
+        # falls back to the legacy single-decision rendering.
+        return out
+
+    t1_struct = float(base_plan.get("target1") or base_plan.get("t1") or 0)
+    t2_struct = float(base_plan.get("target2") or base_plan.get("t2") or 0)
+    base_entry_mid = float(base_plan.get("entry_mid") or price)
+
+    # Phase 3 (2026-05-19) — feature flag for per-mode pillar reweighting.
+    # Default ON so the mode toggle does real work. Roll back via:
+    #   config.per_mode_pillar_reweight._enabled = false
+    _phase3_cfg = (base_config.get("per_mode_pillar_reweight") or {})
+    _phase3_enabled = bool(_phase3_cfg.get("_enabled", True))
+    _use_mode_composite = _phase3_enabled and isinstance(pillar_pcts, dict) and pillar_pcts
+
+    for mode, rules in _MODE_RULEBOOK.items():
+        # Mode-specific stop
+        if rules.get("stop_atr_multiple") is not None:
+            stop = round(base_entry_mid - rules["stop_atr_multiple"] * atr, 2)
+        else:
+            # INVESTMENT: -15% drawdown from entry
+            stop = round(base_entry_mid * (1.0 - rules.get("stop_dd_pct", 0.15)), 2)
+
+        # Recompute R:R against structural T1 (if present)
+        risk = max(0.01, base_entry_mid - stop)
+        rr = round((t1_struct - base_entry_mid) / risk, 2) if t1_struct > 0 else 0.0
+
+        # Phase 3 — mode-specific composite if pillar pcts available.
+        # Falls back to the legacy single composite (normalized_score)
+        # when phase-3 is disabled or pillar_pcts is missing.
+        if _use_mode_composite:
+            mode_weights = _MODE_PILLAR_WEIGHTS.get(mode, {})
+            mode_score = 0.0
+            for pillar_key, weight in mode_weights.items():
+                pct = float(pillar_pcts.get(pillar_key, 0.0) or 0.0)
+                mode_score += min(max(pct, 0.0), 1.0) * float(weight) * 100.0
+            mode_score = round(mode_score, 1)
+        else:
+            mode_score = float(normalized_score)
+
+        # Mode config + verdict
+        mode_cfg = _make_mode_config(mode, base_config)
+        verdict_pkg = make_decision(
+            mode_score, rr, mode_cfg,
+            weak_regime=weak_regime, direction=direction, bear_score=bear_score,
+            rs_rank=rs_rank, vix=vix, sector_outperforming=sector_outperforming,
+            sector_etf=sector_etf, has_catalyst=has_catalyst, rsi=rsi,
+            weekly_bull=weekly_bull, adx=adx, regime_name=regime_name,
+            breadth=breadth, entry_quality=entry_quality, regime4=regime4,
+            setup_type=setup_type, short_float=short_float,
+            days_to_cover=days_to_cover,
+            days_to_earnings=days_to_earnings if rules["earnings_blackout_days"] > 0 else None,
+            sector_underperforming=sector_underperforming,
+            stock_vs_spy_20d=stock_vs_spy_20d, todays_gap_pct=todays_gap_pct,
+            squeeze_on=squeeze_on, rvol=rvol, market_cycle=market_cycle,
+            seasonal_adj=seasonal_adj, ticker=ticker, catalyst_tier=catalyst_tier,
+            mc_p_profit=mc_p_profit,
+        )
+
+        # Phase 2 — per-mode sizing
+        # Apply the mode size_mult to the base allocation. Caps preserved
+        # at single-name 5% NAV / sector 25% per CLAUDE.md principle 10
+        # (correlation under stress). The cap is conservative; if the
+        # haircut chain already produced something under the cap, no change.
+        mode_alloc_pct = None
+        if base_alloc_pct is not None and base_alloc_pct > 0:
+            tilted = float(base_alloc_pct) * float(rules["size_mult"])
+            mode_alloc_pct = round(min(tilted, 5.0), 2)  # 5% single-name cap
+
+        # Phase 2 — verdict-divergence explanation. If this mode's verdict
+        # differs from the legacy single-decision verdict, surface the
+        # specific rule that caused the divergence so users understand
+        # why SWING blocks but POSITION allows (or vice versa).
+        diverge_note = ""
+        if legacy_decision and verdict_pkg.get("verdict") != legacy_decision.get("verdict"):
+            v_mode = verdict_pkg.get("verdict") or "—"
+            v_legacy = legacy_decision.get("verdict") or "—"
+            if v_mode == "WATCH" and v_legacy == "BUY":
+                if rr < rules["buy_min_rr"]:
+                    diverge_note = f"R:R {rr:.1f} < {rules['buy_min_rr']:.1f} mode floor"
+                elif entry_quality not in rules["entry_quality_buy_gate"]:
+                    diverge_note = f"entry {entry_quality} not in mode gate {rules['entry_quality_buy_gate']}"
+                elif rules["earnings_blackout_days"] > 0 and days_to_earnings is not None and 0 <= days_to_earnings <= rules["earnings_blackout_days"]:
+                    diverge_note = f"ER in {days_to_earnings}d < {rules['earnings_blackout_days']}d mode blackout"
+                else:
+                    diverge_note = "mode rulebook stricter than base"
+            elif v_mode == "BUY" and v_legacy in ("WATCH", "AVOID"):
+                diverge_note = f"mode rulebook more permissive (R:R floor {rules['buy_min_rr']:.1f})"
+
+        # Phase 3 — pillar breakdown for the UI (show why this mode's
+        # composite differs from legacy). Only populated when phase-3
+        # is active; otherwise both fields are None and the UI falls
+        # back to the legacy single composite.
+        pillar_breakdown = None
+        weighted_breakdown = None
+        if _use_mode_composite:
+            mode_weights = _MODE_PILLAR_WEIGHTS.get(mode, {})
+            pillar_breakdown = {
+                k: round(float(pillar_pcts.get(k, 0.0) or 0.0) * 100, 1)
+                for k in mode_weights
+            }
+            weighted_breakdown = {
+                k: round(min(max(float(pillar_pcts.get(k, 0.0) or 0.0), 0.0), 1.0)
+                         * float(mode_weights[k]) * 100, 1)
+                for k in mode_weights
+            }
+
+        out[mode] = {
+            "verdict": verdict_pkg.get("verdict"),
+            "reason": verdict_pkg.get("reason"),
+            "color": verdict_pkg.get("color"),
+            "emoji": verdict_pkg.get("emoji"),
+            "bear_type": verdict_pkg.get("bear_type", ""),
+            "stop": stop,
+            "t1": t1_struct,
+            "t2": t2_struct,
+            "rr_ratio": rr,
+            "entry_mid": round(base_entry_mid, 2),
+            "size_mult": rules["size_mult"],
+            "final_alloc_pct": mode_alloc_pct,
+            "horizon_days": list(rules["horizon_days"]),
+            "earnings_blackout_days": rules["earnings_blackout_days"],
+            "stop_basis": (
+                f"{rules['stop_atr_multiple']}× ATR"
+                if rules.get("stop_atr_multiple") is not None
+                else f"−{int(rules.get('stop_dd_pct', 0.15) * 100)}% DD"
+            ),
+            "rulebook": rules["label"],
+            "diverge_note": diverge_note,
+            "entry_quality_gate": list(rules["entry_quality_buy_gate"]),
+            "buy_min_rr": rules["buy_min_rr"],
+            # Phase 3 fields — populated only when per-mode reweight active
+            "composite_score": round(float(mode_score), 1),
+            "phase3_active": bool(_use_mode_composite),
+            "pillar_pcts": pillar_breakdown,             # raw pillar pct (0-100)
+            "pillar_weighted": weighted_breakdown,        # pct × mode weight
+            "pillar_weights": (_MODE_PILLAR_WEIGHTS.get(mode) if _use_mode_composite else None),
+        }
+    return out
+
+
 def make_decision(total_score: float, rr_ratio: float, config: dict,
                   weak_regime: bool = False,
                   direction: str = "long",
@@ -8010,11 +8307,15 @@ def make_decision(total_score: float, rr_ratio: float, config: dict,
     _breadth_note = _ebm_full.get("breadth_note", "")
 
     # ── Phase 2C / Fix #13: EXTENDED entries are always pure WATCH — no special treatment ──
-    if direction == "long" and entry_quality == "EXTENDED":
+    # 2026-05-19: When entry_quality_rules_override._enabled, these hardcoded
+    # demotes are bypassed (data shows MISSED PF 2.06 — best segment). Falls
+    # through to _eq_rules dispatch below which respects the override.
+    _eq_override_active = (config.get("entry_quality_rules_override") or {}).get("_enabled", False)
+    if direction == "long" and entry_quality == "EXTENDED" and not _eq_override_active:
         return {"verdict": "WATCH", "emoji": "eye", "color": "#d97706",
                 "bear_type": "",
                 "reason": f"Price extended — wait for value zone (>1.25 ATR above EMA21, score {total_score:.0f})"}
-    if direction == "long" and entry_quality == "MISSED":
+    if direction == "long" and entry_quality == "MISSED" and not _eq_override_active:
         return {"verdict": "WATCH", "emoji": "eye", "color": "#d97706",
                 "bear_type": "",
                 "reason": f"Price extended — wait for value zone (broke through resistance, wait for next base)"}
@@ -8028,6 +8329,15 @@ def make_decision(total_score: float, rr_ratio: float, config: dict,
     # rules are not declared.
     _eq_rules_regime = (_rt or {}).get("entry_quality_rules") or {}
     _eq_rules_global = config.get("entry_quality_rules", {})
+    # 2026-05-19 — Evidence-based override (FLAG-GATED).
+    # When entry_quality_rules_override._enabled=true, use data-aligned rules
+    # that REVERSE the textbook ordering. Per regime_sharpe_decomp 2026-05-18:
+    # MISSED PF 2.06 (best), FRESH PF 0.12 (worst). Default rules protect FRESH;
+    # the override allows MISSED (the empirically best segment).
+    _eq_override = config.get("entry_quality_rules_override") or {}
+    if _eq_override.get("_enabled", False):
+        # Build override dict from explicit keys (strip _enabled/_note/etc.)
+        _eq_rules_global = {k: v for k, v in _eq_override.items() if k in ("FRESH","PULLBACK","VALID","EXTENDED","MISSED")}
     _eq_rules = _eq_rules_regime if _eq_rules_regime else _eq_rules_global
     if _eq_rules and direction == "long" and entry_quality:
         _eq_verdict = _eq_rules.get(entry_quality, "")
@@ -10723,6 +11033,64 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         mc_p_profit=_mc_p_profit_val,
     )
 
+    # 2026-05-19 · Option A · compute per-mode (SWING/POSITION/INVESTMENT)
+    # decisions while we still have all the inputs in scope. Runs BEFORE
+    # the gate-failure override so each mode sees the raw verdict math.
+    # Same composite score reused across modes (Phase 1).
+    try:
+        decisions_by_mode = compute_decisions_by_mode(
+            price=float(price), atr=float(tech["indicators"].get("atr") or (price * 0.02)),
+            base_plan=plan or {}, normalized_score=normalized,
+            base_config=config, regime_name=regime_name, regime4=regime4,
+            weak_regime=gate.get("weak_regime", False), direction=direction,
+            bear_score=bear_setup["score"], rs_rank=int(tech["indicators"].get("rs_rank", 50)),
+            vix=_vix_current,
+            sector_outperforming=bool(tech["indicators"].get("sector_outperforming", False)),
+            sector_etf=str(tech["indicators"].get("sector_etf", "")),
+            has_catalyst=len(opt.get("catalysts", [])) > 0 or len(catalyst_tags) > 1 or catalyst_tags[0] not in ("CONTINUATION", "MOMENTUM"),
+            rsi=float(tech["indicators"].get("rsi", 50.0) or 50.0),
+            weekly_bull=_weekly_bull, adx=_adx_val, breadth=breadth,
+            entry_quality=entry_quality, setup_type=plan.get("setup_type", ""),
+            ticker=ticker, catalyst_tier=catalyst_tier,
+            days_to_earnings=(int((earnings or {}).get("days_to_earnings")) if (earnings and (earnings or {}).get("days_to_earnings") is not None) else None),
+            squeeze_on=bool(tech["indicators"].get("squeeze_on", False)),
+            rvol=float(tech["indicators"].get("rvol", 1.0) or 1.0),
+            market_cycle=regime.get("market_cycle", ""),
+            short_float=float(info.get("shortPercentOfFloat", 0.0) or 0.0) * 100.0 if info and isinstance(info.get("shortPercentOfFloat"), (int, float)) else float(tech["indicators"].get("short_float_pct", 0.0) or 0.0),
+            days_to_cover=float((info.get("short_interest") or {}).get("days_to_cover", 0.0) or 0.0) if info else 0.0,
+            sector_underperforming=bool(tech["indicators"].get("sector_underperforming", not tech["indicators"].get("sector_outperforming", False))),
+            stock_vs_spy_20d=float(tech["indicators"].get("stock_vs_spy_20d", 0.0) or 0.0),
+            todays_gap_pct=_todays_gap_pct_val, seasonal_adj=_seasonal_adj,
+            mc_p_profit=_mc_p_profit_val,
+            # Phase 2 sizing input — base allocation before per-mode tilt
+            base_alloc_pct=(kelly_size.get("final_alloc_pct") if isinstance(kelly_size, dict) else None),
+            legacy_decision=decision,
+            # Phase 3 (2026-05-19) — pillar pct (0..1) for mode-specific
+            # composite reweighting. Computed from the same sub-scores
+            # that produced the legacy composite. Keys must match
+            # _MODE_PILLAR_WEIGHTS.
+            pillar_pcts={
+                "trend":        float(tech.get("score", 0))   / max(float(tech.get("max", 30)),  1.0),
+                "rs":           float(rs_score_norm or 0)     / max(float(_pillar_rs_max or 25), 1.0),
+                "catalyst":     float(opt.get("score", 0))    / max(float(opt.get("max", 20)),   1.0),
+                "smart_money":  float(sent.get("score", 0))   / max(float(sent.get("max", 15)),  1.0),
+                "fundamentals": float(fund.get("score", 0))   / max(float(fund.get("max", 30)),  1.0),
+                "entry_rr":     min(float(plan.get("rr_ratio", 0) or 0) / 5.0, 1.0),  # 5:1 = full marks
+            },
+        )
+        # Apply gate-failure override to ALL modes if the universal gate
+        # failed (gates are pre-trade hygiene — they apply regardless of
+        # mode rulebook).
+        if not gate["passed"]:
+            _reason = f"Gate failed: {'; '.join(gate['reasons'])}"
+            for _m in decisions_by_mode:
+                decisions_by_mode[_m]["verdict"] = "AVOID"
+                decisions_by_mode[_m]["reason"] = _reason
+                decisions_by_mode[_m]["color"] = "#dc2626"
+    except Exception as _dmexc:
+        log.warning(f"  {ticker}: per-mode decisions failed — {type(_dmexc).__name__}: {_dmexc}")
+        decisions_by_mode = {}
+
     # If gate failed, override to AVOID
     if not gate["passed"]:
         decision = {
@@ -11106,6 +11474,12 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         "bear_type": decision.get("bear_type", ""),
         "trade_plan": plan,
         "decision": decision,
+        # 2026-05-19 · Option A — per-mode decisions (SWING / POSITION / INVESTMENT)
+        # Each entry: {verdict, reason, color, stop, t1, t2, rr_ratio, size_mult,
+        #              horizon_days, earnings_blackout_days, stop_basis, rulebook}
+        # Frontend reads from t.decisions_by_mode[mode] based on the active
+        # UI pill. Legacy t.decision stays for backward compat.
+        "decisions_by_mode": decisions_by_mode,
         "direction": direction,
         # State-based classification patch (2026-04-15) — forward-looking
         # phase/location/edge/action augmenting the legacy verdict.
