@@ -43,7 +43,7 @@ function _row(e, tickerData, beatByT, beatStats, myPositions) {
   return `
     <tr style="border-bottom:1px solid var(--rule);">
       <td style="padding:8px 12px;font-family:var(--mono);font-weight:700;">
-        <a href="elite-detail.html?t=${encodeURIComponent(t)}" style="color:var(--ink-0);text-decoration:none;">${t}</a> ${ownsTag}
+        <a href="#" onclick="window.setDetailTicker && window.setDetailTicker('${t}'); return false;" style="color:var(--ink-0);text-decoration:none;">${t}</a> ${ownsTag}
       </td>
       <td style="padding:8px 12px;${daysStyle};font-family:var(--mono);">${days}d</td>
       <td style="padding:8px 12px;color:var(--ink-2);">${e.report_date}</td>

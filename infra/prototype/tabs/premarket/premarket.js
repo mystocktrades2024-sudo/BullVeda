@@ -33,7 +33,7 @@ export async function render() {
         <tbody>
           ${movers.map(m => {
             const gapCls = m.gap_pct > 0 ? 'up' : 'dn';
-            return `<tr style="border-bottom:1px solid var(--line);cursor:pointer" onclick="window.location.href='elite-detail.html?t=${m.ticker}&from=premarket'">
+            return `<tr style="border-bottom:1px solid var(--line);cursor:pointer" onclick="window.setDetailTicker && window.setDetailTicker('${m.ticker}')">
               <td style="padding:8px 12px;font-weight:700;color:var(--paper)"><span style="display:inline-flex;align-items:center;gap:8px">${_logoHtml(m.ticker, 20)}${m.ticker}</span></td>
               <td style="padding:8px 12px;color:var(--paper-3);font-size:11px">${(m.sector || '—').slice(0, 30)}</td>
               <td style="padding:8px 12px;text-align:right;font-variant-numeric:tabular-nums">${m.price ? '$' + m.price.toFixed(2) : '—'}</td>

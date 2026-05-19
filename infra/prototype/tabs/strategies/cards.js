@@ -6,7 +6,7 @@ import { REGIME_META, STRATEGY_ALIASES } from './constants.js';
 function _tickerChip(t) {
   const sc  = t.score || 0;
   const cls = sc >= 80 ? 'high' : sc >= 70 ? 'med' : '';
-  return `<span class="strat-chip ${cls}" title="${t.ticker} · score ${sc} · RS ${t.rs_rank || '—'} · entry $${t.entry_price ?? '—'} · stop $${t.stop ?? '—'} · ${t.date || ''}" onclick="window.location.href='elite-detail.html?t=${t.ticker}&from=strat'"><span class="sym">${t.ticker}</span><span class="sc">${sc}</span></span>`;
+  return `<span class="strat-chip ${cls}" title="${t.ticker} · score ${sc} · RS ${t.rs_rank || '—'} · entry $${t.entry_price ?? '—'} · stop $${t.stop ?? '—'} · ${t.date || ''}" onclick="window.setDetailTicker && window.setDetailTicker('${t.ticker}')"><span class="sym">${t.ticker}</span><span class="sc">${sc}</span></span>`;
 }
 
 export function buildCards(strategies, tbs, isStrategyActive, regKey) {

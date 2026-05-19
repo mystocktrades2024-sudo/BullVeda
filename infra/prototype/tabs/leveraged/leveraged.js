@@ -41,7 +41,7 @@ export function render() {
       const scColor = sc >= 80 ? 'var(--green)' : sc >= 70 ? 'var(--accent)' : 'var(--ink-3)';
       return `<tr style="border-bottom:1px dashed var(--rule)">
         <td style="padding:8px 12px;font-family:var(--mono);font-weight:700">
-          <a href="elite-detail.html?t=${p.ticker}" style="color:var(--ink-0);text-decoration:none">${p.ticker}</a>
+          <a href="#" onclick="window.setDetailTicker && window.setDetailTicker('${p.ticker}'); return false;" style="color:var(--ink-0);text-decoration:none">${p.ticker}</a>
         </td>
         <td style="padding:8px 12px;text-align:right;font-family:var(--mono)">$${(p.price ?? 0).toFixed(2)}</td>
         <td style="padding:8px 12px;text-align:right;color:${scColor};font-weight:700">${sc.toFixed(0)}</td>

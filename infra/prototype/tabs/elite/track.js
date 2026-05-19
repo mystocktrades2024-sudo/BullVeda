@@ -51,7 +51,7 @@ function _renderTrackRow(p, isHero) {
   const thesis  = thesisLine(p);
   const winProb = snap.p_target != null ? `${snap.p_target}%` : '—';
 
-  return `<div class="ep2-row${isHero ? ' ep2-row-hero' : ''}" onclick="window.location.href='elite-detail.html?t=${p.ticker}&from=elite'">
+  return `<div class="ep2-row${isHero ? ' ep2-row-hero' : ''}" onclick="window.setDetailTicker && window.setDetailTicker('${p.ticker}')">
     <div class="ep2-row-rank">#${p._rank}</div>
     <div class="ep2-row-arc">${arc(p.elite_score, t.color, 40, 14)}</div>
     <div class="ep2-row-id">

@@ -34,7 +34,7 @@ export function render() {
           const fired = cur && Math.abs((cur - a.price) / a.price) < 0.005;
           return `<tr style="border-bottom:1px solid var(--line);${fired ? 'background:var(--watch-bg)' : ''}">
             <td style="padding:10px 12px;font-weight:700">
-              <a href="elite-detail.html?t=${a.ticker}&from=alerts" style="color:var(--paper);text-decoration:none;display:inline-flex;align-items:center;gap:8px">${_logoHtml(a.ticker, 20)}<span>${a.ticker}</span></a>
+              <a href="#" onclick="window.setDetailTicker && window.setDetailTicker('${a.ticker}'); return false;" style="color:var(--paper);text-decoration:none;display:inline-flex;align-items:center;gap:8px">${_logoHtml(a.ticker, 20)}<span>${a.ticker}</span></a>
               ${fired ? '<span class="ev-tag warn" style="margin-left:8px">FIRED</span>' : ''}
             </td>
             <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums">$${a.price.toFixed(2)}</td>

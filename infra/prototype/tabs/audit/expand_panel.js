@@ -112,7 +112,7 @@ export function renderDetailPanel(s) {
         <span>·</span>
         <span style="color:var(--paper-2)">R:R <b style="color:var(--paper)">1:${(s.rr||0).toFixed(1)}</b></span>
         <span style="margin-left:auto;">
-          <a href="elite-detail.html?t=${s.ticker}" style="color:var(--accent); text-decoration:none; font-weight:700;">Open Full Analysis →</a>
+          <a href="#" onclick="window.setDetailTicker && window.setDetailTicker('${s.ticker}'); return false;" style="color:var(--accent); text-decoration:none; font-weight:700;">Open Full Analysis →</a>
         </span>
       </div>
     </div>

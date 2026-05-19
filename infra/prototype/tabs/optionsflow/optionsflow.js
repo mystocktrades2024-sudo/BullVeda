@@ -53,7 +53,7 @@ export function render() {
     return `
       <tr style="border-bottom:1px solid var(--rule);">
         <td style="padding:9px 12px; font-family:var(--mono); font-weight:700;">
-          <a href="elite-detail.html?t=${encodeURIComponent(tk)}" style="color:var(--ink-0); text-decoration:none;">${tk}</a>
+          <a href="#" onclick="window.setDetailTicker && window.setDetailTicker('${tk}'); return false;" style="color:var(--ink-0); text-decoration:none;">${tk}</a>
         </td>
         <td style="padding:9px 12px;">
           <span style="color:${sc}; font-weight:700; font-size:10px; letter-spacing:0.06em;">${f.status || '—'}</span>

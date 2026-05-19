@@ -36,7 +36,7 @@ export function render() {
             <th style="text-align:right;padding:8px 12px">E[R] (per asset)</th>
             <th style="text-align:left;padding:8px 12px">Allocation Bar</th>
           </tr></thead><tbody>
-          ${holdings.map((h, i) => `<tr style="border-bottom:1px solid var(--line);cursor:pointer" onclick="window.location.href='elite-detail.html?t=${h.ticker}&from=risklab'">
+          ${holdings.map((h, i) => `<tr style="border-bottom:1px solid var(--line);cursor:pointer" onclick="window.setDetailTicker && window.setDetailTicker('${h.ticker}')">
             <td style="padding:8px 12px;font-family:var(--mono);color:var(--ink-2)">${i + 1}</td>
             <td style="padding:8px 12px;font-weight:700">${h.ticker}</td>
             <td style="padding:8px 12px;color:var(--ink-2)">${h.sector || '—'}</td>

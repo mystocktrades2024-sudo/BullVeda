@@ -922,7 +922,7 @@ export async function render() {
     const tk = _esc(t.ticker);
     const cells = [
       `<td style="position:sticky;left:0;z-index:1;background:var(--bg-0);padding:0;border-right:1px solid var(--rule)">
-         <a href="elite-detail.html?t=${tk}&from=fields" title="Open ${tk} detail view"
+         <a href="#" onclick="window.setDetailTicker && window.setDetailTicker('${tk}'); return false;" title="Open ${tk} detail view"
             style="display:block;padding:6px 10px;font-family:var(--mono);font-weight:700;color:var(--accent);text-decoration:none;cursor:pointer"
             onmouseover="this.style.background='var(--bg-1)'"
             onmouseout="this.style.background='var(--bg-0)'">${tk} →</a>

@@ -44,7 +44,7 @@ export function render() {
           <th style="text-align:left;padding:8px 12px">Sector</th>
           <th style="text-align:left;padding:8px 12px">Why dropped</th>
         </tr></thead><tbody>
-        ${corrDrops.map(d => `<tr style="border-bottom:1px solid var(--line); cursor:pointer" onclick="window.location.href='elite-detail.html?t=${d.ticker}&from=killed'">
+        ${corrDrops.map(d => `<tr style="border-bottom:1px solid var(--line); cursor:pointer" onclick="window.setDetailTicker && window.setDetailTicker('${d.ticker}')">
           <td style="padding:8px 12px;font-weight:700">${d.ticker}</td>
           <td style="padding:8px 12px;color:var(--accent);font-weight:600">${d.correlated_with}</td>
           <td style="padding:8px 12px;text-align:right;font-family:var(--mono);color:${Math.abs(d.corr) > 0.9 ? 'var(--red)' : 'var(--warn)'};font-weight:700">${d.corr.toFixed(2)}</td>
@@ -83,7 +83,7 @@ export function render() {
           <th style="text-align:right;padding:8px 12px">Sector %ile</th>
           <th style="text-align:left;padding:8px 12px">Reason</th>
         </tr></thead><tbody>
-        ${demotes.sort((a,b) => (b.score||0) - (a.score||0)).map(d => `<tr style="border-bottom:1px solid var(--line); cursor:pointer" onclick="window.location.href='elite-detail.html?t=${d.ticker}&from=killed'">
+        ${demotes.sort((a,b) => (b.score||0) - (a.score||0)).map(d => `<tr style="border-bottom:1px solid var(--line); cursor:pointer" onclick="window.setDetailTicker && window.setDetailTicker('${d.ticker}')">
           <td style="padding:8px 12px;font-weight:700">${d.ticker}</td>
           <td style="padding:8px 12px;color:var(--paper-3)">${d.sector || '—'}</td>
           <td style="padding:8px 12px;text-align:right;font-family:var(--mono);font-weight:700">${d.score || '—'}</td>
@@ -130,7 +130,7 @@ export function render() {
         ${killed.slice(0, 500).map(r => {
           const c = r.pct_chg || 0;
           const upDn = c > 0 ? 'up' : c < 0 ? 'dn' : 'dim';
-          return `<tr style="border-bottom:1px solid var(--line);cursor:pointer" onclick="window.location.href='elite-detail.html?t=${r.ticker}&from=killed'">
+          return `<tr style="border-bottom:1px solid var(--line);cursor:pointer" onclick="window.setDetailTicker && window.setDetailTicker('${r.ticker}')">
             <td style="padding:8px 12px;font-weight:700;color:var(--paper)"><span style="display:inline-flex;align-items:center;gap:8px">${_logoHtml(r.ticker, 20)}${r.ticker}</span></td>
             <td style="padding:8px 12px;color:var(--paper-3)">${(r.sector || '—').slice(0, 35)}</td>
             <td style="padding:8px 12px;text-align:right;font-variant-numeric:tabular-nums">${r.price ? '$' + r.price.toFixed(2) : '—'}</td>

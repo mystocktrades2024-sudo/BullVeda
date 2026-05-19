@@ -27,7 +27,7 @@ export function render() {
         const c = r.pct_chg || 0;
         const upDn = c > 0 ? 'up' : c < 0 ? 'dn' : 'dim';
         return `
-          <div style="background:var(--ink-2);border:1px solid var(--line);border-radius:6px;padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px" onclick="window.location.href='elite-detail.html?t=${t}&from=watchlist'">
+          <div style="background:var(--ink-2);border:1px solid var(--line);border-radius:6px;padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px" onclick="window.setDetailTicker && window.setDetailTicker('${t}')">
             <div style="display:flex;align-items:center;gap:10px;min-width:0">
               ${_logoHtml(t, 28)}
               <div style="min-width:0">

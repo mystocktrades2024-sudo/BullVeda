@@ -14,7 +14,7 @@ export function renderHeroCard(p) {
   const winSub  = snap.p_stop   != null ? `${snap.p_stop}% stop first` : '';
   const rrStr   = snap.rr       != null ? `1 : ${snap.rr.toFixed(1)}` : '—';
 
-  return `<div class="ep2-hero-card" style="--tier-color:${t.color}" onclick="window.location.href='elite-detail.html?t=${p.ticker}&from=elite'">
+  return `<div class="ep2-hero-card" style="--tier-color:${t.color}" onclick="window.setDetailTicker && window.setDetailTicker('${p.ticker}')">
     <div class="ep2-hero-top">
       <div class="ep2-hero-id">
         <div class="ep2-hero-ticker">${p.ticker}</div>

@@ -13,7 +13,7 @@ export function buildBeatBanner(predictions) {
           <div style="flex:1;min-width:200px;">
             <div style="font-weight:700;color:var(--green);font-size:13px;letter-spacing:0.04em;">${strong.length} STRONG beat-prediction${strong.length>1?'s':''}</div>
             <div style="color:var(--ink-2);font-size:11.5px;margin-top:3px;">
-              ${strong.map(p => `<a href="elite-detail.html?t=${p.ticker}" style="color:var(--ink-0);text-decoration:none;font-weight:700;">${p.ticker}</a>(${p.beat_score.toFixed(0)}, ${p.days_to_earnings}d)`).join(' · ')}
+              ${strong.map(p => `<a href="#" onclick="window.setDetailTicker && window.setDetailTicker('${p.ticker}'); return false;" style="color:var(--ink-0);text-decoration:none;font-weight:700;">${p.ticker}</a>(${p.beat_score.toFixed(0)}, ${p.days_to_earnings}d)`).join(' · ')}
             </div>
           </div>
           <button onclick="_earnFilterChange('beat','STRONG')" style="padding:7px 14px;background:var(--green);border:none;border-radius:5px;color:var(--bg-0);font-weight:700;cursor:pointer;font-family:DM Sans;font-size:11px;letter-spacing:0.06em;">FILTER →</button>
