@@ -2480,9 +2480,11 @@ async def test_monte_carlo_api(days: int = 90, iterations: int = 5000):
 
 
 @app.get("/api/test/permutation")
-async def test_permutation_api(days: int = 90, iterations: int = 1000):
-    """Permutation / scrambled-labels test: is the strategy's return better
-    than random sampling of same n? p-value < 0.05 = significant edge.
+async def test_permutation_api(days: int = 90, iterations: int = 2000):
+    """Strict permutation test: BUY mean PnL vs random samples drawn from the
+    FULL pool (BUY + WATCH + SHORT). Tests whether BUY-label selection
+    outperforms what you'd get from random label assignment on the same set
+    of resolved signals. p-value < 0.05 = significant selection edge.
     """
     import json, random
     from pathlib import Path
@@ -2493,36 +2495,61 @@ async def test_permutation_api(days: int = 90, iterations: int = 1000):
         return {"error": "signal_log.json missing"}
     sl = json.load(open(sl_path))
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    closed = [s for s in sl if s.get("status") == "CLOSED" and s.get("actual_pnl_pct") is not None
-              and (s.get("date") or "") >= cutoff]
-    if len(closed) < 30:
-        return {"error": f"insufficient trades ({len(closed)} < 30 minimum)"}
-    real_pnls = [t.get("actual_pnl_pct", 0) for t in closed]
-    real_mean = mean(real_pnls)
-    real_sum = sum(real_pnls)
-    n = len(real_pnls)
+    # Pool = resolved signals WITH verdict label (so older pre-verdict-rollout
+    # entries don't contaminate the null distribution).
+    all_closed = [s for s in sl if s.get("status") == "CLOSED" and s.get("actual_pnl_pct") is not None
+                  and (s.get("date") or "") >= cutoff]
+    pool = [s for s in all_closed if (s.get("verdict") or "").upper() in ("BUY", "WATCH", "SHORT")]
+    buys = [s for s in pool if (s.get("verdict") or "").upper() == "BUY"]
+    watches = [s for s in pool if (s.get("verdict") or "").upper() == "WATCH"]
+    shorts = [s for s in pool if (s.get("verdict") or "").upper() == "SHORT"]
+    skipped_no_verdict = len(all_closed) - len(pool)
+    if len(pool) < 50 or len(buys) < 10:
+        return {"error": f"insufficient data: pool={len(pool)}, BUY={len(buys)} (need pool>=50, BUY>=10)"}
+    buy_pnls = [t.get("actual_pnl_pct", 0) for t in buys]
+    watch_pnls = [t.get("actual_pnl_pct", 0) for t in watches]
+    pool_pnls = [t.get("actual_pnl_pct", 0) for t in pool]
+    buy_mean = mean(buy_pnls)
+    n_buy = len(buy_pnls)
+    pool_mean = mean(pool_pnls)
+    watch_mean = mean(watch_pnls) if watch_pnls else 0
     random.seed(42)
     iterations = min(iterations, 10000)
+    # Permutation: draw n_buy samples from full pool WITHOUT replacement,
+    # compute mean. Repeat. This simulates "what if BUY label was assigned
+    # randomly to n_buy signals out of the same pool?"
     null_means = []
     for _ in range(iterations):
-        sample = random.choices(real_pnls, k=n)
+        sample = random.sample(pool_pnls, n_buy)
         null_means.append(mean(sample))
-    p_value = sum(1 for m in null_means if m >= real_mean) / iterations
-    null_mean_of_means = mean(null_means)
-    null_sd_of_means = stdev(null_means) if len(null_means) > 1 else 1
-    z_score = (real_mean - null_mean_of_means) / null_sd_of_means if null_sd_of_means > 0 else 0
+    # p-value: fraction of null means >= actual BUY mean (one-tailed)
+    p_value = sum(1 for m in null_means if m >= buy_mean) / iterations
+    null_mu = mean(null_means)
+    null_sd = stdev(null_means) if len(null_means) > 1 else 1
+    z_score = (buy_mean - null_mu) / null_sd if null_sd > 0 else 0
+    # BUY vs WATCH direct comparison (different population test)
+    buy_vs_watch_delta = buy_mean - watch_mean
     if p_value < 0.01: verdict = "STRONG EDGE (p<0.01)"
     elif p_value < 0.05: verdict = "SIGNIFICANT EDGE (p<0.05)"
     elif p_value < 0.10: verdict = "MARGINAL EDGE (p<0.10)"
-    else: verdict = "NO EDGE DETECTED (p>0.10)"
+    else: verdict = "NO EDGE DETECTED (p>=0.10)"
     return {
-        "trades_examined": n,
+        "trades_examined": len(pool),
         "lookback_days": days,
         "iterations": iterations,
-        "actual": {"mean_pnl": round(real_mean, 3), "sum_pnl": round(real_sum, 2)},
+        "pool_composition": {
+            "total_resolved": len(pool),
+            "buy": len(buys), "watch": len(watches), "short": len(shorts),
+            "skipped_no_verdict": skipped_no_verdict,
+            "buy_mean_pnl": round(buy_mean, 3),
+            "watch_mean_pnl": round(watch_mean, 3),
+            "pool_mean_pnl": round(pool_mean, 3),
+            "buy_vs_watch_delta": round(buy_vs_watch_delta, 3),
+        },
+        "actual": {"mean_pnl": round(buy_mean, 3), "n": n_buy},
         "null_distribution": {
-            "mean_of_means": round(null_mean_of_means, 3),
-            "sd_of_means": round(null_sd_of_means, 3),
+            "mean_of_means": round(null_mu, 3),
+            "sd_of_means": round(null_sd, 3),
             "ci_95_low": round(sorted(null_means)[int(0.025*iterations)], 3),
             "ci_95_high": round(sorted(null_means)[int(0.975*iterations)], 3),
         },
@@ -2530,10 +2557,13 @@ async def test_permutation_api(days: int = 90, iterations: int = 1000):
         "z_score": round(z_score, 3),
         "verdict": verdict,
         "interpretation": (
-            f"Strategy mean: {real_mean:+.2f}%/trade. Null distribution (random resampling, n={n}, {iterations} sims): "
-            f"mean={null_mean_of_means:+.2f}% +/- {null_sd_of_means:.2f}. Actual is {z_score:+.1f} SD above null. "
-            f"p-value={p_value:.4f}. {verdict}. "
-            f"NOTE: self-consistency test (resampling within strategy's trades), not strict permutation against rejected signals."
+            f"BUY label (n={n_buy}) mean: {buy_mean:+.2f}%/trade. "
+            f"WATCH label (n={len(watches)}) mean: {watch_mean:+.2f}%/trade. "
+            f"BUY-vs-WATCH delta: {buy_vs_watch_delta:+.2f}pp. "
+            f"Null: random {n_buy}-trade subsets from full pool of {len(pool)} (BUY+WATCH+SHORT), "
+            f"{iterations} draws -> mean={null_mu:+.2f}% +/- {null_sd:.2f}. "
+            f"BUY is {z_score:+.1f} SD above random-label baseline. p={p_value:.4f}. {verdict}. "
+            f"Interpretation: is the BUY-label selection process picking better-than-random signals from the same pool?"
         ),
     }
 
