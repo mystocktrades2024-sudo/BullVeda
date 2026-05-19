@@ -1,6 +1,6 @@
 """FastAPI-based SwingTrade server. Port 7432. Auto-reload in dev."""
-from fastapi import FastAPI, HTTPException, Request, Depends
-from typing import Optional  # Python 3.9 compat — Pydantic needs Optional[X] not `X | None`
+from fastapi import FastAPI, HTTPException, Request, Depends, Body
+from typing import Optional, Dict, Any  # Python 3.9 compat — Pydantic needs Optional[X] not `X | None`
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -2566,6 +2566,330 @@ async def test_permutation_api(days: int = 90, iterations: int = 2000):
             f"Interpretation: is the BUY-label selection process picking better-than-random signals from the same pool?"
         ),
     }
+
+
+@app.get("/api/test/time-decay")
+async def test_time_decay_api(days: int = 90, slice_days: int = 7):
+    """Slice BUY trades into rolling windows and run permutation per slice
+    to detect WHEN edge died (regime shift vs persistent bug)."""
+    import json, random
+    from pathlib import Path
+    from datetime import datetime, timedelta
+    from statistics import mean, stdev
+    sl_path = Path("data/signal_log.json")
+    if not sl_path.exists():
+        return {"error": "signal_log.json missing"}
+    sl = json.load(open(sl_path))
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    closed = [s for s in sl if s.get("status") == "CLOSED" and s.get("actual_pnl_pct") is not None
+              and (s.get("date") or "") >= cutoff
+              and (s.get("verdict") or "").upper() in ("BUY","WATCH","SHORT")]
+    if not closed:
+        return {"error": "no verdict-labeled closed trades in window"}
+    # Bucket by slice
+    from collections import defaultdict
+    by_slice = defaultdict(lambda: {"buy": [], "pool": []})
+    now = datetime.now()
+    for s in closed:
+        try:
+            d = datetime.strptime((s.get("date") or "")[:10], "%Y-%m-%d")
+        except Exception: continue
+        age_days = (now - d).days
+        slice_idx = age_days // slice_days
+        v = (s.get("verdict") or "").upper()
+        by_slice[slice_idx]["pool"].append(s.get("actual_pnl_pct", 0))
+        if v == "BUY":
+            by_slice[slice_idx]["buy"].append(s.get("actual_pnl_pct", 0))
+    random.seed(42)
+    iterations = 1000
+    slices_out = []
+    for idx in sorted(by_slice):
+        slice_label = f"d-{idx*slice_days} to d-{(idx+1)*slice_days}"
+        buys = by_slice[idx]["buy"]
+        pool = by_slice[idx]["pool"]
+        if len(buys) < 5 or len(pool) < 20:
+            slices_out.append({"slice": slice_label, "n_buy": len(buys), "n_pool": len(pool), "status": "insufficient"})
+            continue
+        buy_mean = mean(buys)
+        pool_mean = mean(pool)
+        null_means = [mean(random.sample(pool, len(buys))) for _ in range(iterations)]
+        p_val = sum(1 for m in null_means if m >= buy_mean) / iterations
+        null_mu = mean(null_means)
+        null_sd = stdev(null_means) if len(null_means) > 1 else 1
+        z = (buy_mean - null_mu) / null_sd if null_sd > 0 else 0
+        slices_out.append({
+            "slice": slice_label, "n_buy": len(buys), "n_pool": len(pool),
+            "buy_mean": round(buy_mean, 2), "pool_mean": round(pool_mean, 2),
+            "z_score": round(z, 2), "p_value": round(p_val, 4),
+            "verdict": "EDGE" if p_val < 0.10 else "NO EDGE",
+            "status": "ok",
+        })
+    # Trend detection
+    edge_slices = [s for s in slices_out if s.get("status") == "ok"]
+    if len(edge_slices) >= 2:
+        recent = edge_slices[0]; oldest = edge_slices[-1]
+        trend = "EDGE DECAY" if oldest["z_score"] > recent["z_score"] + 0.5 else "EDGE GROWING" if recent["z_score"] > oldest["z_score"] + 0.5 else "STABLE"
+    else:
+        trend = "n/a"
+    return {
+        "trades_examined": len(closed),
+        "slice_days": slice_days,
+        "n_slices": len(slices_out),
+        "slices": slices_out,
+        "trend": trend,
+    }
+
+
+@app.get("/api/diagnostics/forensics")
+async def diagnostics_forensics_api(days: int = 90):
+    """Run 7-hypothesis forensic battery on recent BUYs. Pure read-only.
+    Returns actionable recommendations ranked by Wilson-validated lift estimate.
+    """
+    import json
+    from pathlib import Path
+    from datetime import datetime, timedelta
+    from statistics import mean
+    from collections import defaultdict
+    import math
+    sl_path = Path("data/signal_log.json")
+    if not sl_path.exists():
+        return {"error": "signal_log.json missing"}
+    sl = json.load(open(sl_path))
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    closed = [s for s in sl if s.get("status")=="CLOSED" and s.get("actual_pnl_pct") is not None
+              and (s.get("date") or "") >= cutoff]
+    buys = [s for s in closed if (s.get("verdict") or "").upper() == "BUY"]
+    if not buys:
+        return {"error": "no BUY trades in window"}
+    def _stats(arr):
+        if not arr: return {"n":0,"wr":0,"mean":0,"pf":0,"sum":0}
+        pnls = [s.get("actual_pnl_pct",0) for s in arr]
+        wins = sum(1 for p in pnls if p > 1)
+        gw = sum(p for p in pnls if p > 1); gl = -sum(p for p in pnls if p < -1)
+        return {"n":len(arr),"wr":round(wins/len(arr)*100,1),
+                "mean":round(mean(pnls),2),"pf":round(gw/gl,2) if gl>0 else 0,
+                "sum":round(sum(pnls),1)}
+    def _wilson_lb(wins, n, z=1.96):
+        if n == 0: return 0.0
+        p = wins / n
+        denom = 1 + z*z/n
+        center = p + z*z/(2*n)
+        spread = z * math.sqrt(p*(1-p)/n + z*z/(4*n*n))
+        return max(0.0, (center - spread) / denom) * 100
+
+    # H1 time decay
+    by_month = defaultdict(list)
+    for s in buys: by_month[(s.get("date") or "")[:7]].append(s)
+    time_decay = [{"month":m, **_stats(by_month[m])} for m in sorted(by_month)]
+
+    # H2 per setup with Wilson LB
+    by_setup = defaultdict(list)
+    for s in buys: by_setup[s.get("strategy") or "-"].append(s)
+    setups = []
+    for setup, arr in sorted(by_setup.items(), key=lambda kv:-len(kv[1])):
+        st = _stats(arr)
+        wins = sum(1 for s in arr if s.get("actual_pnl_pct",0) > 1)
+        wlb = round(_wilson_lb(wins, st["n"]), 1)
+        # Recommendation: kill if Wilson LB < 35% AND PF < 1.0 AND mean < 0
+        # (per retail calibration · principle #1 n>=10 preliminary)
+        # PF<1.0 ensures we don't kill high-payoff/low-WR setups (Trend Continuation
+        # has 31% WR but PF 1.21 because winners are huge — that's a feature)
+        rec = None
+        if st["n"] >= 10 and wlb < 35 and st["pf"] < 1.0 and st["mean"] < 0:
+            rec = {"action": "KILL", "new_mult": 0.0, "reason": f"Wilson LB {wlb}%, PF {st['pf']}, mean {st['mean']}% — all sub-breakeven (n={st['n']})"}
+        elif st["n"] >= 10 and wlb < 45 and st["pf"] < 1.0:
+            rec = {"action": "REDUCE", "new_mult": 0.5, "reason": f"Wilson LB {wlb}%, PF {st['pf']} < 1.0 (n={st['n']})"}
+        setups.append({"setup":setup, **st, "wilson_lb":wlb, "recommendation":rec})
+
+    # H3 score bands
+    bands = [(60,70),(70,75),(75,80),(80,85),(85,90),(90,100)]
+    band_results = []
+    for lo,hi in bands:
+        arr = [s for s in buys if lo <= (s.get("score") or 0) < hi]
+        if arr:
+            st = _stats(arr)
+            wins = sum(1 for s in arr if s.get("actual_pnl_pct",0) > 1)
+            wlb = round(_wilson_lb(wins, st["n"]), 1)
+            band_results.append({"band":f"{lo}-{hi}", "lo":lo, "hi":hi, **st, "wilson_lb":wlb})
+
+    # H4 exit reasons
+    by_result = defaultdict(list)
+    for s in buys: by_result[s.get("result") or "-"].append(s)
+    exits = [{"reason":r, **_stats(arr)} for r,arr in sorted(by_result.items(), key=lambda kv:-len(kv[1]))]
+
+    # H5 stop-widening simulation
+    stopped = [s for s in buys if s.get("result") == "STOPPED"]
+    saveable = [s for s in stopped if (s.get("mfe_pct",0) > 3)]
+    stop_widen = {
+        "n_stopped": len(stopped),
+        "n_saveable": len(saveable),
+        "current_avg_loss": round(mean([s.get("actual_pnl_pct",0) for s in stopped]),2) if stopped else 0,
+        "lift_pp_if_saved": round(sum([s.get("mfe_pct",0)/2 - s.get("actual_pnl_pct",0) for s in saveable]) / max(1,len(buys)), 2),
+    }
+
+    # H6 trailing target simulation
+    target_hit = [s for s in buys if s.get("result") == "TARGET_HIT"]
+    extra = [(s.get("mfe_pct",0) - s.get("actual_pnl_pct",0)) for s in target_hit if s.get("mfe_pct",0) > s.get("actual_pnl_pct",0)]
+    trail = {
+        "n_target_hit": len(target_hit),
+        "extra_pp_total": round(sum(extra),1),
+        "extra_pp_per_buy": round(sum(extra) / max(1,len(buys)),2),
+    }
+
+    # H7 RS rank
+    rs_buckets = [(0,40),(40,60),(60,75),(75,85),(85,100)]
+    rs = []
+    for lo,hi in rs_buckets:
+        arr = [s for s in buys if lo <= (s.get("rs_rank") or 0) < hi]
+        if arr: rs.append({"band":f"{lo}-{hi}", **_stats(arr)})
+
+    # Rank recommendations by historical lift (sum_pnl of trades that'd be removed)
+    recs = []
+    for s in setups:
+        if s.get("recommendation"):
+            recs.append({
+                "kind": "setup_multiplier",
+                "target": s["setup"],
+                "action": s["recommendation"]["action"],
+                "new_value": s["recommendation"]["new_mult"],
+                "reason": s["recommendation"]["reason"],
+                "historical_lift_pp": round(-s["sum"], 1) if s["sum"] < 0 else 0,
+                "wilson_lb": s["wilson_lb"], "n": s["n"],
+            })
+    # Sort recs by absolute lift
+    recs.sort(key=lambda r:-r.get("historical_lift_pp",0))
+
+    # Score band recommendation
+    losing_bands = [b for b in band_results if b["mean"] < 0 and b["n"] >= 10]
+    winning_bands = [b for b in band_results if b["mean"] > 1 and b["n"] >= 5]
+    if losing_bands and winning_bands:
+        new_floor = min(b["lo"] for b in winning_bands)
+        lost_sum = sum(b["sum"] for b in losing_bands if b["lo"] < new_floor)
+        recs.append({
+            "kind": "score_floor",
+            "target": "buy_min_score",
+            "action": "RAISE",
+            "new_value": new_floor,
+            "reason": f"score bands < {new_floor} have mean PnL < 0 (sum {lost_sum}pp lost)",
+            "historical_lift_pp": round(-lost_sum, 1),
+            "wilson_lb": None, "n": sum(b["n"] for b in losing_bands if b["lo"] < new_floor),
+        })
+    # Stop-widen recommendation
+    if stop_widen["lift_pp_if_saved"] > 0.5:
+        recs.append({
+            "kind": "stop_multiplier",
+            "target": "atr_stop_mult",
+            "action": "WIDEN",
+            "new_value": 1.5,
+            "reason": f"{stop_widen['n_saveable']} of {stop_widen['n_stopped']} stopped trades had MFE > 3% (could have been winners)",
+            "historical_lift_pp": stop_widen["lift_pp_if_saved"],
+            "wilson_lb": None, "n": stop_widen["n_saveable"],
+        })
+    # Trail-target recommendation
+    if trail["extra_pp_per_buy"] > 0.5:
+        recs.append({
+            "kind": "exit_rule",
+            "target": "trail_past_t1",
+            "action": "ENABLE",
+            "new_value": True,
+            "reason": f"{trail['n_target_hit']} target_hit trades left avg {trail['extra_pp_per_buy']}pp per BUY on table",
+            "historical_lift_pp": trail["extra_pp_per_buy"] * len(buys) / len(buys),
+            "wilson_lb": None, "n": trail["n_target_hit"],
+        })
+
+    return {
+        "trades_examined": len(buys),
+        "lookback_days": days,
+        "summary": _stats(buys),
+        "time_decay": time_decay,
+        "setups": setups,
+        "score_bands": band_results,
+        "exits": exits,
+        "stop_widen_sim": stop_widen,
+        "trail_target_sim": trail,
+        "rs_rank": rs,
+        "recommendations": recs,
+        "total_lift_pp": round(sum(r.get("historical_lift_pp",0) for r in recs), 1),
+    }
+
+
+@app.post("/api/diagnostics/apply-tune")
+async def diagnostics_apply_tune_api(payload: Dict[str, Any] = Body(...)):
+    """Apply a single auto-tune recommendation to config/config.json.
+    Writes a tagged backup before mutating. Returns before/after diff.
+    """
+    import json, shutil
+    from pathlib import Path
+    from datetime import datetime
+    kind = (payload.get("kind") or "").lower()
+    target = payload.get("target") or ""
+    new_value = payload.get("new_value")
+    reason = payload.get("reason") or "auto-tune via forensics"
+    if not kind or not target:
+        return {"error": "missing kind or target"}
+    cfg_path = Path("config/config.json")
+    if not cfg_path.exists():
+        return {"error": "config.json not found"}
+    cfg = json.load(open(cfg_path))
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup = cfg_path.with_suffix(f".json.bak.{ts}")
+    shutil.copy(cfg_path, backup)
+
+    changes = []
+    if kind == "setup_multiplier":
+        mults = cfg.setdefault("setup_score_multiplier", {})
+        old = mults.get(target)
+        try:
+            mults[target] = float(new_value)
+        except Exception:
+            return {"error": f"new_value not a float: {new_value}"}
+        changes.append({"path": f"setup_score_multiplier.{target}", "old": old, "new": float(new_value)})
+    elif kind == "score_floor":
+        thresholds = cfg.setdefault("regime4_thresholds", {})
+        for regime, conf in thresholds.items():
+            if isinstance(conf, dict) and "buy_min_score" in conf:
+                old = conf["buy_min_score"]
+                try:
+                    nv = int(new_value)
+                except Exception:
+                    return {"error": f"new_value not an int: {new_value}"}
+                if old < nv:
+                    conf["buy_min_score"] = nv
+                    changes.append({"path": f"regime4_thresholds.{regime}.buy_min_score", "old": old, "new": nv})
+    elif kind == "stop_multiplier":
+        # config path: trade_plan or stop config
+        for key_path in [["trade_plan", "atr_stop_mult"], ["atr_stop_mult"]]:
+            ref = cfg
+            for k in key_path[:-1]: ref = ref.get(k, {}) if isinstance(ref, dict) else {}
+            if isinstance(ref, dict) and key_path[-1] in ref:
+                old = ref[key_path[-1]]
+                ref[key_path[-1]] = float(new_value)
+                changes.append({"path": ".".join(key_path), "old": old, "new": float(new_value)})
+                break
+        if not changes:
+            # Add at top level if not found
+            cfg["atr_stop_mult"] = float(new_value)
+            changes.append({"path": "atr_stop_mult", "old": None, "new": float(new_value)})
+    elif kind == "exit_rule":
+        # Toggle a flag
+        exit_cfg = cfg.setdefault("exit_rules", {})
+        old = exit_cfg.get(target)
+        exit_cfg[target] = bool(new_value) if isinstance(new_value, (bool,int)) else (str(new_value).lower() == "true")
+        changes.append({"path": f"exit_rules.{target}", "old": old, "new": exit_cfg[target]})
+    else:
+        return {"error": f"unknown kind: {kind}"}
+
+    # Add audit entry
+    audit = cfg.setdefault("_validations", {}).setdefault("auto_tune_log", [])
+    audit.append({
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "kind": kind, "target": target, "reason": reason,
+        "changes": changes, "source": "forensics_endpoint",
+    })
+
+    with open(cfg_path, "w") as f:
+        json.dump(cfg, f, indent=2)
+    return {"status": "applied", "backup": str(backup.name), "changes": changes}
 
 
 @app.get("/api/premarket-catalysts")

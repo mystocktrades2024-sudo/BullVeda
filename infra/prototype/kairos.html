@@ -46977,15 +46977,17 @@ const MarketsV2 = (function () {
       const body = document.getElementById('ppStatTestsBody');
       if (!body) return;
       if (btn) { btn.disabled = true; btn.textContent = '⌛ RUNNING…'; }
-      body.innerHTML = '<div class="pp-empty" style="padding:32px">Running 4 tests in parallel…</div>';
+      body.innerHTML = '<div class="pp-empty" style="padding:32px">Running 6 tests in parallel (4 stat + forensics + time-decay)…</div>';
       try {
-        const [maeR, regR, mcR, permR] = await Promise.all([
+        const [maeR, regR, mcR, permR, forR, tdR] = await Promise.all([
           fetch('/api/test/mae-mfe?days=90', { credentials: 'same-origin' }).then(r => r.json()),
           fetch('/api/test/regime-conditional?days=180', { credentials: 'same-origin' }).then(r => r.json()),
           fetch('/api/test/monte-carlo?days=90&iterations=3000', { credentials: 'same-origin' }).then(r => r.json()),
           fetch('/api/test/permutation?days=90&iterations=1000', { credentials: 'same-origin' }).then(r => r.json()),
+          fetch('/api/diagnostics/forensics?days=90', { credentials: 'same-origin' }).then(r => r.json()),
+          fetch('/api/test/time-decay?days=90&slice_days=7', { credentials: 'same-origin' }).then(r => r.json()),
         ]);
-        window._statTestsState = { mae: maeR, regime: regR, mc: mcR, perm: permR };
+        window._statTestsState = { mae: maeR, regime: regR, mc: mcR, perm: permR, forensics: forR, timeDecay: tdR };
         window._renderStatTestsUI();
         if (btn) { btn.disabled = false; btn.textContent = '↻ RE-RUN ALL TESTS'; }
       } catch (e) {
@@ -46999,6 +47001,8 @@ const MarketsV2 = (function () {
       if (!body) return;
       const s = window._statTestsState;
       const cards = [
+        _renderForensicsCard(s.forensics),
+        _renderTimeDecayCard(s.timeDecay),
         _renderMAECard(s.mae),
         _renderRegimeCard(s.regime),
         _renderMonteCarloCard(s.mc),
@@ -47006,6 +47010,161 @@ const MarketsV2 = (function () {
       ].join('');
       body.innerHTML = cards;
     };
+
+    window._applyTune = async function(idx) {
+      const s = window._statTestsState || {};
+      const recs = (s.forensics && s.forensics.recommendations) || [];
+      const r = recs[idx];
+      if (!r) return;
+      if (!confirm(`Apply: ${r.action} ${r.target} → ${r.new_value}?\n\nReason: ${r.reason}\n\nLift estimate: +${r.historical_lift_pp}pp over 90d sample.\n\nA backup of config.json will be written first.`)) return;
+      const btn = document.getElementById('at-btn-' + idx);
+      if (btn) { btn.disabled = true; btn.textContent = '⌛ APPLYING…'; }
+      try {
+        const resp = await fetch('/api/diagnostics/apply-tune', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind: r.kind, target: r.target, new_value: r.new_value, reason: r.reason }),
+        });
+        const d = await resp.json();
+        if (d.error) { alert('Apply failed: ' + d.error); if (btn) { btn.disabled = false; btn.textContent = 'APPLY'; } return; }
+        const summary = (d.changes || []).map(c => `${c.path}: ${c.old} → ${c.new}`).join('\n');
+        alert(`✓ Applied. Backup: ${d.backup}\n\nChanges:\n${summary}\n\nServer restart NOT required — next scan picks up the new config.`);
+        if (btn) { btn.disabled = true; btn.textContent = '✓ APPLIED'; btn.style.background = 'var(--gn)'; btn.style.color = 'var(--bg-1)'; }
+      } catch (e) {
+        alert('Apply failed: ' + e.message);
+        if (btn) { btn.disabled = false; btn.textContent = 'APPLY'; }
+      }
+    };
+
+    function _renderForensicsCard(d) {
+      if (!d || d.error) {
+        return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--rd)">
+          <div class="pp-card-h"><span>⓪ AUTO-TUNE FORENSICS</span><span class="sub">why signals are bad</span></div>
+          <div style="color:var(--rd);font:600 11.5px var(--mono);padding:8px 0">${d && d.error || 'no data'}</div>
+        </div>`;
+      }
+      const sum = d.summary || {};
+      const recs = d.recommendations || [];
+      const setups = d.setups || [];
+      const bands = d.score_bands || [];
+      const timeDecay = d.time_decay || [];
+      const recRows = recs.length ? recs.map((r, i) => {
+        const badgeCls = r.action === 'KILL' ? 'rd' : r.action === 'REDUCE' ? 'am' : r.action === 'RAISE' ? 'cy' : 'gn';
+        const liftStr = r.historical_lift_pp > 0 ? `+${r.historical_lift_pp}pp` : '0pp';
+        return `<div style="display:grid;grid-template-columns:60px 1fr 60px 80px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px dashed var(--line)">
+          <span style="font:800 10px var(--mono);padding:4px 8px;border-radius:2px;background:var(--${badgeCls}-bg);color:var(--${badgeCls});border:1px solid var(--${badgeCls}-dim);text-align:center;letter-spacing:.08em">${r.action}</span>
+          <div>
+            <div style="font:800 12px var(--sans);color:var(--ink);margin-bottom:3px">${r.target} → <span class="${badgeCls}" style="font:800 12px var(--mono)">${r.new_value}</span></div>
+            <div style="font:500 10.5px var(--mono);color:var(--ink-2);line-height:1.4">${r.reason}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font:900 13px var(--mono);color:var(--gn)">${liftStr}</div>
+            <div style="font:500 9.5px var(--mono);color:var(--ink-3);margin-top:2px">n=${r.n}${r.wilson_lb !== null ? ' · wlb '+r.wilson_lb+'%' : ''}</div>
+          </div>
+          <button id="at-btn-${i}" onclick="window._applyTune(${i})"
+            style="padding:6px 12px;background:transparent;border:1px solid var(--copper);color:var(--copper);font:800 10px var(--mono);letter-spacing:.10em;cursor:pointer;border-radius:3px;text-transform:uppercase">APPLY</button>
+        </div>`;
+      }).join('') : '<div style="padding:14px;color:var(--gn);font:600 11px var(--mono)">✓ No critical issues — strategy is performing within tolerances.</div>';
+      const setupRows = setups.map(s => {
+        const cls = s.mean >= 0 ? 'gn' : s.mean < -1 ? 'rd' : 'am';
+        return `<tr><td><b>${s.setup}</b></td><td>${s.n}</td><td>${s.wr}%</td><td>${s.wilson_lb}%</td><td class="${s.pf >= 1.0 ? 'gn' : 'rd'}">${s.pf}</td><td class="${cls}">${s.mean >= 0 ? '+' : ''}${s.mean}%</td><td class="${cls}" style="font-weight:800">${s.sum >= 0 ? '+' : ''}${s.sum}pp</td></tr>`;
+      }).join('');
+      const bandRows = bands.map(b => {
+        const cls = b.mean >= 0 ? 'gn' : 'rd';
+        return `<tr><td><b>${b.band}</b></td><td>${b.n}</td><td>${b.wr}%</td><td>${b.wilson_lb}%</td><td class="${b.pf >= 1.0 ? 'gn' : 'rd'}">${b.pf}</td><td class="${cls}" style="font-weight:800">${b.mean >= 0 ? '+' : ''}${b.mean}%</td></tr>`;
+      }).join('');
+      const tdRows = timeDecay.map(t => `<tr><td><b>${t.month}</b></td><td>${t.n}</td><td>${t.wr}%</td><td class="${t.mean >= 0 ? 'gn' : 'rd'}" style="font-weight:800">${t.mean >= 0 ? '+' : ''}${t.mean}%</td><td class="${t.pf >= 1.0 ? 'gn' : 'rd'}">${t.pf}</td></tr>`).join('');
+      const sw = d.stop_widen_sim || {};
+      const tr = d.trail_target_sim || {};
+      return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--copper)">
+        <div class="pp-card-h"><span>⓪ AUTO-TUNE FORENSICS · ACTIONABLE RECOMMENDATIONS</span><span class="sub">${d.trades_examined} BUYs · ${d.lookback_days}d · <b style="color:var(--gn)">total lift +${d.total_lift_pp}pp</b></span></div>
+
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px">
+          <div class="pp-stat"><div class="k">BUYs</div><div class="v cy" style="font-size:18px">${sum.n}</div><div class="s">analyzed</div></div>
+          <div class="pp-stat"><div class="k">WR</div><div class="v ${sum.wr >= 50 ? 'gn' : sum.wr >= 35 ? 'am' : 'rd'}" style="font-size:18px">${sum.wr}%</div></div>
+          <div class="pp-stat"><div class="k">PF</div><div class="v ${sum.pf >= 1.5 ? 'gn' : sum.pf >= 1.0 ? 'am' : 'rd'}" style="font-size:18px">${sum.pf}</div></div>
+          <div class="pp-stat"><div class="k">Mean PnL</div><div class="v ${sum.mean >= 0 ? 'gn' : 'rd'}" style="font-size:18px">${sum.mean >= 0 ? '+' : ''}${sum.mean}%</div></div>
+          <div class="pp-stat"><div class="k">Sum PnL</div><div class="v ${sum.sum >= 0 ? 'gn' : 'rd'}" style="font-size:18px">${sum.sum >= 0 ? '+' : ''}${sum.sum}pp</div></div>
+        </div>
+
+        <div style="background:var(--bg-3);border:1px solid var(--line);border-radius:3px;padding:12px 14px;margin-bottom:14px">
+          <div style="font:800 11px var(--mono);color:var(--copper);letter-spacing:.12em;margin-bottom:8px">▦ RECOMMENDATIONS · ranked by historical lift · click APPLY to write config.json</div>
+          ${recRows}
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div>
+            <div style="font:800 10px var(--mono);color:var(--ink-2);margin-bottom:6px;letter-spacing:.10em">▦ TIME DECAY (per month)</div>
+            <table class="pp-mat-table" style="font-size:10.5px">
+              <thead><tr><th>Month</th><th>n</th><th>WR</th><th>Mean</th><th>PF</th></tr></thead>
+              <tbody>${tdRows}</tbody>
+            </table>
+          </div>
+          <div>
+            <div style="font:800 10px var(--mono);color:var(--ink-2);margin-bottom:6px;letter-spacing:.10em">▦ SCORE BANDS</div>
+            <table class="pp-mat-table" style="font-size:10.5px">
+              <thead><tr><th>Band</th><th>n</th><th>WR</th><th>WLB</th><th>PF</th><th>Mean</th></tr></thead>
+              <tbody>${bandRows}</tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style="margin-bottom:10px">
+          <div style="font:800 10px var(--mono);color:var(--ink-2);margin-bottom:6px;letter-spacing:.10em">▦ PER-SETUP attribution (Wilson 95% LB)</div>
+          <table class="pp-mat-table" style="font-size:10.5px">
+            <thead><tr><th>Setup</th><th>n</th><th>WR</th><th>WLB</th><th>PF</th><th>Mean</th><th>Sum</th></tr></thead>
+            <tbody>${setupRows}</tbody>
+          </table>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div style="padding:10px 12px;background:var(--bg-3);border-left:2px solid var(--amb);font:500 11px var(--mono);color:var(--ink-1);line-height:1.5">
+            <b style="color:var(--amb)">STOP-WIDEN sim:</b> ${sw.n_saveable}/${sw.n_stopped} stops had MFE > 3% · lift if 1.5× ATR: +${sw.lift_pp_if_saved}pp/BUY
+          </div>
+          <div style="padding:10px 12px;background:var(--bg-3);border-left:2px solid var(--amb);font:500 11px var(--mono);color:var(--ink-1);line-height:1.5">
+            <b style="color:var(--amb)">TRAIL-PAST-T1 sim:</b> ${tr.n_target_hit} target-hit left ${tr.extra_pp_total}pp on table · ${tr.extra_pp_per_buy}pp/BUY avg
+          </div>
+        </div>
+      </div>`;
+    }
+
+    function _renderTimeDecayCard(d) {
+      if (!d || d.error) {
+        return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--rd)">
+          <div class="pp-card-h"><span>⑤ TIME-DECAY PERMUTATION</span><span class="sub">when did edge die?</span></div>
+          <div style="color:var(--rd);font:600 11.5px var(--mono);padding:8px 0">${d && d.error || 'no data'}</div>
+        </div>`;
+      }
+      const slices = d.slices || [];
+      const rows = slices.map(s => {
+        if (s.status !== 'ok') {
+          return `<tr><td><b>${s.slice}</b></td><td>${s.n_buy}</td><td>${s.n_pool}</td><td colspan="4" style="color:var(--ink-3);font-style:italic">${s.status}</td></tr>`;
+        }
+        const zCls = s.z_score >= 0.5 ? 'gn' : s.z_score >= -0.5 ? 'am' : 'rd';
+        const pCls = s.p_value < 0.10 ? 'gn' : 'rd';
+        return `<tr>
+          <td><b>${s.slice}</b></td>
+          <td>${s.n_buy}</td>
+          <td>${s.n_pool}</td>
+          <td class="${s.buy_mean >= 0 ? 'gn' : 'rd'}">${s.buy_mean >= 0 ? '+' : ''}${s.buy_mean}%</td>
+          <td class="${s.pool_mean >= 0 ? 'gn' : 'rd'}">${s.pool_mean >= 0 ? '+' : ''}${s.pool_mean}%</td>
+          <td class="${zCls}" style="font-weight:800">${s.z_score >= 0 ? '+' : ''}${s.z_score}</td>
+          <td class="${pCls}">${s.p_value}</td>
+          <td>${s.verdict}</td>
+        </tr>`;
+      }).join('');
+      const trendCls = d.trend === 'EDGE GROWING' ? 'gn' : d.trend === 'EDGE DECAY' ? 'rd' : 'am';
+      return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--cy)">
+        <div class="pp-card-h"><span>⑤ TIME-DECAY PERMUTATION</span><span class="sub">${d.trades_examined} trades · ${d.slice_days}d slices · trend: <b class="${trendCls}">${d.trend}</b></span></div>
+        <table class="pp-mat-table" style="font-size:10.5px;margin-bottom:8px">
+          <thead><tr><th>Slice</th><th>n_buy</th><th>n_pool</th><th>BUY μ</th><th>Pool μ</th><th>z</th><th>p</th><th>verdict</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div style="padding:10px 12px;background:var(--bg-3);border-left:2px solid var(--cy);font:500 11px var(--mono);color:var(--ink-1);line-height:1.5">
+          Splits BUYs into time slices and re-runs permutation per slice. <b>EDGE GROWING</b> = recent z > old z by 0.5+ (system improving). <b>EDGE DECAY</b> = the opposite (regime broke). <b>STABLE</b> = no shift.
+        </div>
+      </div>`;
+    }
 
     function _renderMAECard(d) {
       if (!d || d.error) {
