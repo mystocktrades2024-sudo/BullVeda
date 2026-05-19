@@ -227,11 +227,19 @@ def _compute_returns_for_ticker(ticker, ticker_records, today):
 
     for rec in ticker_records:
         pd = rec["pick_date"]
-        # Use price at the pick date (or next available trading day if it was a weekend)
+        # 2026-05-19 · Weekend pick_dates (Sat/Sun) come from manual scans
+        # run on weekends. Snap them forward to the next trading day for
+        # display + math consistency. This stops the audit ledger from
+        # showing "2026-05-17 Sun" as a pick_date when EODHD has no Sunday
+        # close — the actual entry is the Monday following.
         if pd not in date_idx:
             forward = [d for d in sorted_dates if d >= pd]
             if not forward: continue
-            pd = forward[0]
+            snapped = forward[0]
+            if snapped != pd:
+                rec["pick_date_orig"] = pd     # preserve original for audit
+                rec["pick_date"] = snapped     # display + math use trading day
+            pd = snapped
         i = date_idx[pd]
         anchor = prices[sorted_dates[i]]
         if not anchor or anchor <= 0: continue

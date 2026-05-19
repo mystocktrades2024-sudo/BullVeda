@@ -235,6 +235,17 @@ def log_signals(picks: list[dict], run_date: str | None = None) -> int:
         return 0
 
     today = run_date or date.today().isoformat()
+    # 2026-05-19 · If scan runs on a weekend (manual rerun), snap the recorded
+    # date forward to the next Monday so the audit ledger doesn't show
+    # weekend pick_dates that EODHD can't price anyway. Trade-day semantics:
+    # "this signal would have been entered on the next trading day."
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        _dow = _dt.strptime(today, "%Y-%m-%d").weekday()  # Mon=0 .. Sun=6
+        if _dow == 5:    today = (_dt.strptime(today, "%Y-%m-%d") + _td(days=2)).strftime("%Y-%m-%d")
+        elif _dow == 6:  today = (_dt.strptime(today, "%Y-%m-%d") + _td(days=1)).strftime("%Y-%m-%d")
+    except Exception:
+        pass
     entries = _load_log()
 
     # Build set of existing (ticker, date, mode) pairs for dedup.
