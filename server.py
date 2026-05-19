@@ -2840,10 +2840,36 @@ async def diagnostics_apply_tune_api(payload: Dict[str, Any] = Body(...)):
         mults = cfg.setdefault("setup_score_multiplier", {})
         old = mults.get(target)
         try:
-            mults[target] = float(new_value)
+            nv = float(new_value)
         except Exception:
             return {"error": f"new_value not a float: {new_value}"}
-        changes.append({"path": f"setup_score_multiplier.{target}", "old": old, "new": float(new_value)})
+        mults[target] = nv
+        changes.append({"path": f"setup_score_multiplier.{target}", "old": old, "new": nv})
+        # For KILL (multiplier = 0.0), ALSO add to static_setup_kill_list so
+        # decision_engine.compute_setup_kill_list picks it up (the live-computed
+        # multiplier path ignores config.setup_score_multiplier entirely — see
+        # decision_engine.compute_setup_size_multipliers).
+        if nv == 0.0:
+            # Derive n + wr_lb from payload-supplied wilson_lb + n if available
+            extras = payload.get("wilson_lb"), payload.get("n")
+            wlb_pct, n_obs = extras
+            kl = cfg.setdefault("static_setup_kill_list", [])
+            existing = next((e for e in kl if isinstance(e, dict) and e.get("setup") == target), None)
+            entry = {
+                "setup": target,
+                "n": int(n_obs) if n_obs else 10,
+                "wr_lb": round((float(wlb_pct) / 100.0), 3) if wlb_pct is not None else 0.20,
+                "reason": reason or f"auto-tune kill from forensics endpoint",
+                "source": "forensics_endpoint",
+                "added": datetime.now().isoformat(timespec="seconds"),
+                "override": True if (n_obs and int(n_obs) < 30) else False,
+            }
+            if existing:
+                existing.update(entry)
+                changes.append({"path": f"static_setup_kill_list[{target}] (UPDATED)", "old": "existing", "new": entry})
+            else:
+                kl.append(entry)
+                changes.append({"path": f"static_setup_kill_list[{target}] (APPENDED)", "old": None, "new": entry})
     elif kind == "score_floor":
         thresholds = cfg.setdefault("regime4_thresholds", {})
         for regime, conf in thresholds.items():
