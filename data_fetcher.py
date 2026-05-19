@@ -397,13 +397,40 @@ def get_universe_as_of(as_of_date: str, include_r1000: bool = True,
                 seen.add(t)
                 out.append(t)
     if include_r1000:
-        try:
-            for t in get_russell1000():
-                if t and t not in seen:
-                    seen.add(t)
-                    out.append(t)
-        except Exception:
-            pass
+        # 2026-05-18 · point-in-time R1000/R2000 from data/membership/ when
+        # available (audit #1 fix · survivorship reduction). Falls back to
+        # current EODHD if snapshot missing for that month.
+        r1_added = False
+        r1_snap = _P(__file__).parent / "data" / "membership" / f"r1000_{yyyy_mm}.csv"
+        if r1_snap.exists():
+            try:
+                for line in r1_snap.read_text().splitlines():
+                    t = line.strip()
+                    if t and t not in seen:
+                        seen.add(t); out.append(t)
+                r1_added = True
+                log.info(f"get_universe_as_of: r1000 from snapshot {yyyy_mm}")
+            except Exception as e:
+                log.warning(f"r1000 snapshot read failed: {e}")
+        if not r1_added:
+            try:
+                for t in get_russell1000():
+                    if t and t not in seen:
+                        seen.add(t)
+                        out.append(t)
+            except Exception:
+                pass
+        # R2000 — small caps (point-in-time when snapshot exists)
+        r2_snap = _P(__file__).parent / "data" / "membership" / f"r2000_{yyyy_mm}.csv"
+        if r2_snap.exists():
+            try:
+                for line in r2_snap.read_text().splitlines():
+                    t = line.strip()
+                    if t and t not in seen:
+                        seen.add(t); out.append(t)
+                log.info(f"get_universe_as_of: r2000 from snapshot {yyyy_mm}")
+            except Exception as e:
+                log.warning(f"r2000 snapshot read failed: {e}")
     if include_custom:
         try:
             import json as _json

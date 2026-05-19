@@ -9759,24 +9759,44 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
         } catch (_) {}
       });
     }
+    // 2026-05-18 · Exponential backoff on Schwab health failure.
+    // Schwab API returns 502/530 intermittently (Cloudflare upstream).
+    // Was spamming console with one failed-request log every 60s.
+    // Backoff: 60s base · ×2 per failure → max 10 min · reset on success.
+    let _sabInterval = 60000;
+    const _sabIntervalMax = 600000;
+    let _sabTimer = null;
+    let _sabFailCount = 0;
     async function _sabPoll() {
       if (!_sabEl) return;
+      let success = false;
       try {
         const r = await fetch('/api/schwab/health', { credentials: 'same-origin' });
-        if (!r.ok) return;
-        const h = await r.json();
-        if (h.ok) {
-          _sabEl.style.display = 'none';
-          return;
+        if (r.ok) {
+          const h = await r.json();
+          success = true;
+          if (h.ok) {
+            _sabEl.style.display = 'none';
+          } else {
+            if (_sabMsg && h.message) _sabMsg.textContent = h.message;
+            else if (_sabMsg && h.token_age_days != null)
+              _sabMsg.textContent = `Token age ${h.token_age_days}d · Schwab rotates every 7d`;
+            _sabEl.style.display = '';
+          }
         }
-        if (_sabMsg && h.message) _sabMsg.textContent = h.message;
-        else if (_sabMsg && h.token_age_days != null)
-          _sabMsg.textContent = `Token age ${h.token_age_days}d · Schwab rotates every 7d`;
-        _sabEl.style.display = '';
-      } catch (_) { /* offline — leave whatever state */ }
+      } catch (_) { /* offline — leave state */ }
+      // Adjust polling interval based on result
+      if (success) {
+        _sabFailCount = 0;
+        _sabInterval = 60000;
+      } else {
+        _sabFailCount++;
+        _sabInterval = Math.min(_sabIntervalMax, 60000 * Math.pow(2, Math.min(_sabFailCount, 4)));
+      }
+      clearTimeout(_sabTimer);
+      _sabTimer = setTimeout(_sabPoll, _sabInterval);
     }
-    _sabPoll();
-    setInterval(_sabPoll, 60000);  // poll every 60s
+    _sabPoll();  // initial fire; reschedules itself
   } catch (e) { console.warn('[schwab-health] poller failed:', e); }
 
   // Wire the brand bar regardless of which file loaded
@@ -12413,8 +12433,11 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
         }
       }
       if (!t) {
-        console.warn('[kairos] ticker not in scan or ML Edge cache:', symbol);
-        // Still try to open detail page — ML Edge sub-tab fetches its own data
+        // 2026-05-18 · downgraded from warn → debug (was noisy with
+        // Pre-Market Catalysts surfacing tickers like HLT/ARES not in
+        // scan). Fallback still opens detail page; ML Edge sub-tab
+        // fetches its own data on demand.
+        if (window.__DEBUG_KAIROS) console.debug('[kairos] ticker not in scan:', symbol);
         t = { ticker: symbol, symbol: symbol, name: symbol, _fromMlEdge: true };
       }
     }
@@ -16705,26 +16728,40 @@ const QuantPortfolio = (function() {
     _startPortLivePx(wsPanel, positions);
   }
 
-  // ── Portfolio live price polling (20s interval) ────────────────────
-  let _portLiveInterval = null;
+  // ── Portfolio live price polling — with exponential backoff on tunnel/upstream failure ─
+  // 2026-05-18 · Was setInterval 20s flat. On 502/530 (Cloudflare tunnel
+  // hiccups or Schwab upstream down), spammed console with 180/hr errors.
+  // Now: 20s base · ×2 per failure → max 5 min · reset on success.
+  let _portLiveTimer = null;
+  let _portLiveFailCount = 0;
   function _startPortLivePx(wsPanel, positions) {
-    if (_portLiveInterval) clearInterval(_portLiveInterval);
+    if (_portLiveTimer) clearTimeout(_portLiveTimer);
     const tickers = positions.map(p => p.ticker).filter(Boolean);
     if (!tickers.length) return;
     const _poll = async () => {
+      let success = false;
       try {
         const r = await fetch(`/api/live/quote?tickers=${encodeURIComponent(tickers.slice(0,60).join(','))}`, { credentials: 'same-origin' });
-        if (!r.ok) return;
-        const j = await r.json();
-        const prices = j.prices || {};
-        wsPanel.querySelectorAll('.qport-px-cell[data-qport-tk]').forEach(cell => {
-          const px = prices[cell.dataset.qportTk];
-          if (px != null) cell.textContent = '$' + Number(px).toFixed(2);
-        });
+        if (r.ok) {
+          const j = await r.json();
+          const prices = j.prices || {};
+          wsPanel.querySelectorAll('.qport-px-cell[data-qport-tk]').forEach(cell => {
+            const px = prices[cell.dataset.qportTk];
+            if (px != null) cell.textContent = '$' + Number(px).toFixed(2);
+          });
+          success = true;
+        }
       } catch (_) {}
+      if (success) {
+        _portLiveFailCount = 0;
+      } else {
+        _portLiveFailCount++;
+      }
+      const interval = success ? 20000 : Math.min(300000, 20000 * Math.pow(2, Math.min(_portLiveFailCount, 4)));
+      clearTimeout(_portLiveTimer);
+      _portLiveTimer = setTimeout(_poll, interval);
     };
     _poll();
-    _portLiveInterval = setInterval(_poll, 20000);
   }
 
   function wirePositionClicks(wsPanel) {
@@ -18470,23 +18507,32 @@ const QuantScanner = (function() {
   async function _fetchAndUpdatePx() {
     const tickers = _state.arr.map(t => t.ticker).filter(Boolean);
     if (!tickers.length) return;
+    let success = false;
     try {
       const r = await fetch(
         `/api/live/quote?tickers=${encodeURIComponent(tickers.slice(0, 120).join(','))}`,
         { credentials: 'same-origin' }
       );
-      if (!r.ok) return;
-      const j = await r.json();
-      _lastPrices = j.prices || {};
-      _lastQuotes = j.quotes || {};
-      _applyPxToTable();
+      if (r.ok) {
+        const j = await r.json();
+        _lastPrices = j.prices || {};
+        _lastQuotes = j.quotes || {};
+        _applyPxToTable();
+        success = true;
+      }
     } catch (_) {}
+    // 2026-05-18 · exponential backoff on tunnel/upstream failure
+    if (success) { _livePxFailCount = 0; }
+    else { _livePxFailCount = (_livePxFailCount || 0) + 1; }
+    const _ms = success ? 20000 : Math.min(300000, 20000 * Math.pow(2, Math.min(_livePxFailCount, 4)));
+    clearTimeout(_livePxInterval);
+    _livePxInterval = setTimeout(_fetchAndUpdatePx, _ms);
   }
+  let _livePxFailCount = 0;
 
   function _startLivePx() {
     if (_livePxInterval) return;
-    _fetchAndUpdatePx();
-    _livePxInterval = setInterval(_fetchAndUpdatePx, 20000);
+    _fetchAndUpdatePx();  // self-schedules
   }
 
   function _stopLivePx() {
@@ -27284,10 +27330,44 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     // Pillar contribution colors
     const _pillarCol = (pct) => pct >= 75 ? 'var(--gn)' : pct >= 60 ? 'var(--amb)' : 'var(--rd)';
     // Score zone classification
-    const _scoreTierTxt = _score >= 85 ? 'TIER T1 · TOP DECILE' : _score >= 75 ? 'TIER T2 · BUY BAND' : _score >= 65 ? 'TIER T3 · WATCH' : 'SUB-THRESHOLD';
+    // 2026-05-18 · When score = 0 (or near-zero), distinguish three cases so
+    // the user knows why: (a) portfolio safety brake — system-wide pause,
+    // not setup-specific; (b) per-ticker hard kill — earnings/regime/gate;
+    // (c) genuinely weak setup — sub-threshold composite.
+    let _scoreTierTxt, _scoreDeltaTxt;
+    if (_score >= 85) {
+      _scoreTierTxt = 'TIER T1 · TOP DECILE';
+      _scoreDeltaTxt = '';
+    } else if (_score >= 75) {
+      _scoreTierTxt = 'TIER T2 · BUY BAND';
+      _scoreDeltaTxt = '';
+    } else if (_score >= 65) {
+      _scoreTierTxt = 'TIER T3 · WATCH';
+      _scoreDeltaTxt = '';
+    } else if (_score === 0 || _score < 5) {
+      // Read the bundle's kill reason to pick a specific label
+      const _dec = t.decision || {};
+      const _reason = (typeof _dec === 'object' ? _dec.reason : null)
+                   || t.kill_reason || t.killed_reason || '';
+      if (/rolling.sharpe|paus|halt|stop new|brake|drawdown limit/i.test(_reason)) {
+        _scoreTierTxt = 'PORTFOLIO BRAKE';
+        _scoreDeltaTxt = '· system-wide pause · not setup-specific';
+      } else if (/blackout|tier_zero|regime gate|signal filter/i.test(_reason)) {
+        _scoreTierTxt = 'HARD GATE';
+        _scoreDeltaTxt = '· per-ticker kill — see Pre-Mortem';
+      } else if (_reason) {
+        _scoreTierTxt = 'SUPPRESSED';
+        _scoreDeltaTxt = `· ${_reason.slice(0, 50)}`;
+      } else {
+        _scoreTierTxt = 'SUB-THRESHOLD';
+        _scoreDeltaTxt = `· −${65 - _score} to BUY`;
+      }
+    } else {
+      _scoreTierTxt = 'SUB-THRESHOLD';
+      _scoreDeltaTxt = `· −${65 - _score} to BUY`;
+    }
     const _scoreColTV = _score >= 75 ? 'var(--gn)' : _score >= 60 ? 'var(--amb)' : 'var(--rd)';
     const _scoreDelta = _score < 65 ? (65 - _score) : 0;
-    const _scoreDeltaTxt = _scoreDelta > 0 ? `· −${_scoreDelta} to BUY` : '';
 
     // Stash chart data for the expand-modal (zoom/pan/crosshair via LightweightCharts)
     window._qovChartData = {
@@ -38169,6 +38249,26 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
 
     // Candidate killers — push only those that apply, with priority weight.
     const cands = [];
+
+    // 0 · REAL SYSTEM KILL — when the bundle put this ticker in `killed`,
+    // surface the actual kill reason FIRST instead of speculative killers.
+    // Fixes the bug where WULF showed "ER in 0d" boilerplate while the
+    // actual cause was rolling-Sharpe portfolio-wide pause. 2026-05-18.
+    (function _addRealKillReason() {
+      const dec = t.decision || {};
+      const reason = (typeof dec === 'object' ? dec.reason : null)
+                  || t.kill_reason || t.killed_reason || t.kill_why || '';
+      if (!reason) return;
+      // Match portfolio-level safety brakes vs per-ticker kills
+      const isPortfolioKill = /rolling.sharpe|paus|halt|stop new|brake|drawdown limit/i.test(reason);
+      const isHardKill      = /blackout|tier_zero|regime gate|signal filter|decision_state/i.test(reason);
+      let label = 'SYSTEM KILL';
+      if (isPortfolioKill) label = 'PORTFOLIO SAFETY BRAKE';
+      else if (isHardKill) label = 'HARD GATE FAIL';
+      // Trim to fit, escape, prepend the typed prefix
+      const text = `${label} · ${String(reason).slice(0, 220).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]))}`;
+      cands.push({ p: 200, text });
+    })();
 
     // 1 · Earnings blackout (highest impact when window is tight)
     if (earnDays != null && earnDays >= 0 && earnDays <= 14) {

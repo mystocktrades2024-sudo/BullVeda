@@ -399,14 +399,30 @@ def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
 
     # Filter to CLOSED BUYs with valid pnl. Sort by exit date (or fall back
     # to entry date), take last N. Skip outliers >100% (CTRA-class).
-    # Also capture setup_family for per-sleeve mode.
+    #
+    # 2026-05-18 · TWO CRITICAL FIXES:
+    #   (a) DEDUPE by (ticker, entry_price, pnl) — the resolver was re-logging
+    #       the same closed trade once per day, so a single -4.16% loss could
+    #       be counted 7 times in the rolling-20 window.
+    #   (b) FILTER OUT WATCH-conviction signals — verdict='BUY' was being set
+    #       on paper signals whose conviction_label was actually 'WATCH'
+    #       (never sized, never traded). These were inflating the loss count
+    #       with hypothetical paper outcomes that were never real trades.
     closed_buys: list[dict] = []
+    seen_keys: set[tuple] = set()
+    n_dropped_dupe = 0
+    n_dropped_watch = 0
     for s in signals:
         if not isinstance(s, dict):
             continue
         if s.get("status") != "CLOSED":
             continue
         if (s.get("verdict") or "").upper() != "BUY":
+            continue
+        # (b) · skip WATCH-conviction signals — these weren't real trades
+        conviction = (s.get("conviction_label") or "").upper()
+        if conviction == "WATCH":
+            n_dropped_watch += 1
             continue
         pnl = s.get("actual_pnl_pct")
         if pnl is None:
@@ -417,10 +433,27 @@ def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
             continue
         if abs(pnl) > 100:  # outlier defensive
             continue
+        # (a) · dedupe by (ticker, entry_price, rounded-pnl). Same physical
+        # trade gets one entry, not one per day-it-was-in-the-log.
+        dedupe_key = (
+            s.get("ticker"),
+            round(float(s.get("entry_price") or 0), 4),
+            round(float(pnl), 2),
+            s.get("exit_reason") or "",
+        )
+        if dedupe_key in seen_keys:
+            n_dropped_dupe += 1
+            continue
+        seen_keys.add(dedupe_key)
         sleeve = (s.get("setup_family") or s.get("setup_type") or s.get("strategy")
                   or "Unknown")
         closed_buys.append({"pnl": pnl, "date": s.get("date") or "", "sleeve": sleeve})
     closed_buys.sort(key=lambda r: r["date"])
+    if n_dropped_dupe or n_dropped_watch:
+        try:
+            log.info(f"[rolling_sharpe_kill] filtered signal_log: dropped {n_dropped_dupe} dupes, {n_dropped_watch} WATCH-conviction; kept {len(closed_buys)} real BUYs")
+        except Exception:
+            pass
 
     def _stat(samples: list[dict]) -> dict:
         """Compute Sharpe/avg/active over a list of {pnl, date} samples."""

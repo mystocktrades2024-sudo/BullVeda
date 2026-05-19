@@ -3108,10 +3108,24 @@ def run_daily_scan(force_fresh: bool = False):
                 **entry_features,
             }
         # Swing-mode signals (this scan's primary output)
+        #
+        # 2026-05-18 · UPSTREAM FIX for rolling-Sharpe poisoning. Previously,
+        # any ticker in `buy_candidates` was logged as verdict='BUY', even if
+        # the conviction engine had downgraded it to WATCH (paper-only, no
+        # sizing). Those WATCH-conviction signals then fed `rolling_sharpe_kill`
+        # as if they were real BUYs and silently inflated the loss count.
+        #
+        # Now we reconcile: if conviction_label is WATCH, log as verdict=WATCH
+        # regardless of which bucket the candidate landed in.
+        def _resolve_verdict(c, default_label):
+            conv = c.get("conviction") or {}
+            cl = (conv.get("label") if isinstance(conv, dict) else None) or c.get("conviction_label") or ""
+            return "WATCH" if str(cl).upper() == "WATCH" else default_label
+
         _signal_payload = (
-            [_flatten_for_signal_log(c, "BUY",   "Swing") for c in buy_candidates] +
-            [_flatten_for_signal_log(c, "WATCH", "Swing") for c in (watch_list or [])] +
-            [_flatten_for_signal_log(c, "SHORT", "Swing") for c in (sell_candidates or [])]
+            [_flatten_for_signal_log(c, _resolve_verdict(c, "BUY"),   "Swing") for c in buy_candidates] +
+            [_flatten_for_signal_log(c, _resolve_verdict(c, "WATCH"), "Swing") for c in (watch_list or [])] +
+            [_flatten_for_signal_log(c, _resolve_verdict(c, "SHORT"), "Swing") for c in (sell_candidates or [])]
         )
         # 2026-05-04: log Position + Invest BUYs from medium-/long-term re-scoring.
         # These come from analysis.score_medium_term and analysis.score_long_term — both
@@ -3800,7 +3814,13 @@ def run_daily_scan(force_fresh: bool = False):
         bundle["decision_engine_version"] = "1.0"
         log.info(f"  Decision engine: scored {_de_count} tickers, "
                  f"buy_candidates {len(_bc_orig)}→{len(_new_buy)} "
-                 f"(rerouted {len(_demoted)} BUY→WATCH for failed gates)")
+                 f"(rerouted {len(_demoted)} BUY→WATCH for failed gates) — survived: "
+                 f"{[r.get('ticker') for r in _new_buy[:10]]}{' ...' if len(_new_buy) > 10 else ''}")
+        # 2026-05-18: log which gate rejected each demoted ticker (visibility into decision_engine internals)
+        if _demoted:
+            from collections import Counter as _C
+            _reasons = _C(((r.get('decision', {}).get('reason') or r.get('reject_reason') or 'no_reason')[:60]) for r in _demoted)
+            log.info(f"  Decision engine demotion reasons: {dict(_reasons.most_common(5))}")
         # Silent-failure detection: engine ran but processed nothing.
         if _de_count == 0:
             log.error("❌ DECISION ENGINE: 0 tickers scored — bundle structure changed or empty?")
@@ -3849,8 +3869,14 @@ def run_daily_scan(force_fresh: bool = False):
                         if _r.get("ticker") not in _seen:
                             _wl.append(_r); _seen.add(_r.get("ticker"))
                     bundle["watch_list"] = _wl
-                    log.info(f"  Sector cap: {len(_capped)} excess BUYs demoted "
-                             f"(cap={_sec_cap} per sector)")
+                    log.info(f"  Sector cap (decision_engine): {len(_capped)} excess BUYs demoted "
+                             f"(cap={_sec_cap} per sector) — tickers: {[r.get('ticker') for r in _capped]}")
+                    # 2026-05-18: emit decision_log entries so the audit trail captures these silent demotions
+                    try:
+                        from decision_logger import log_decisions_batch
+                        log_decisions_batch(_capped, scan_date=date.today().isoformat(), profile=cfg.get('_profile_name', 'sector_cap_demote'))
+                    except Exception:
+                        pass
         except Exception as _sc_e:
             log.warning(f"Sector concentration cap step failed (skipped): {_sc_e}")
 
@@ -3892,7 +3918,14 @@ def run_daily_scan(force_fresh: bool = False):
                         _wl.append(_r); _seen.add(_r.get("ticker"))
                 bundle["watch_list"] = _wl
                 log.info(f"  Portfolio cap: {_cur_open} open, {_slots} slots → "
-                         f"{len(_kept)} BUYs kept, {len(_excess)} demoted")
+                         f"{len(_kept)} BUYs kept, {len(_excess)} demoted "
+                         f"— excess: {[r.get('ticker') for r in _excess]}")
+                # 2026-05-18: emit decision_log entries for portfolio-cap demotions too
+                try:
+                    from decision_logger import log_decisions_batch
+                    log_decisions_batch(_excess, scan_date=date.today().isoformat(), profile=cfg.get('_profile_name', 'portfolio_cap_demote'))
+                except Exception:
+                    pass
         except Exception as _pc_e:
             log.warning(f"Portfolio cap step failed (skipped): {_pc_e}")
 
@@ -4069,7 +4102,15 @@ def run_daily_scan(force_fresh: bool = False):
         log.warning(f"ticker_snapshots capture failed: {_se}")
 
     log.info(f"=== Done! Dashboard: http://localhost:7432/v2/dashboard.html ===")
-    log.info(f"  BUY: {len(buy_candidates)} | WATCH: {len(watch_list)} | SHORT: {len(sell_candidates)} | Near-Short Blocked: {len(near_short_blocked)} | Killed: {len(killed)}")
+    # 2026-05-18: read from FINAL bundle state (not stale locals) so the count
+    # reflects what's actually written to disk after all demotion passes.
+    _final_buys = bundle.get("buy_candidates", []) if isinstance(bundle, dict) else []
+    _final_watch = bundle.get("watch_list", []) if isinstance(bundle, dict) else []
+    _final_sells = bundle.get("sell_candidates", []) if isinstance(bundle, dict) else []
+    _final_killed = bundle.get("killed", []) if isinstance(bundle, dict) else []
+    _stale_diff = len(buy_candidates) - len(_final_buys)
+    _diff_note = f" (post-demotion: {_stale_diff} dropped since intermediate count)" if _stale_diff > 0 else ""
+    log.info(f"  BUY: {len(_final_buys)}{_diff_note} | WATCH: {len(_final_watch)} | SHORT: {len(_final_sells)} | Near-Short Blocked: {len(near_short_blocked)} | Killed: {len(_final_killed)}")
 
     # HTML snapshot to DB (2026-05-14) — store dashboard.html for retrieval
     try:
