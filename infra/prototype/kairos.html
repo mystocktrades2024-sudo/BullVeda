@@ -8919,7 +8919,7 @@ window.K_HELP_CONTENT = {
       + '<h3>How it works</h3>'
       + '<ul>'
         + '<li><b>Add manually</b> by entering a ticker symbol. Persists across sessions via local storage.</li>'
-        + '<li>Each row pulls live price + verdict + R:R from the latest scan if the ticker is in the analysis pool.</li>'
+        + '<li>Each row pulls a <b>live price + Δ%</b> from Schwab every 20 seconds (during market hours, EODHD fallback if Schwab is slow). Verdict + R:R come from the latest scan if the ticker is in the analysis pool.</li>'
         + '<li>Tickers NOT in the scan pool are shown with a "not scanned" badge.</li>'
         + '<li>Click any row → opens that ticker\'s detail view.</li>'
       + '</ul>'
@@ -21042,8 +21042,8 @@ const QuantWatchlist = (function() {
         <td>${tier}</td>
         <td class="r"><span class="qs-bap ${bapCls}">${bap}<span class="qs-bap-bar"><span style="width:${Math.min(100, bap)}%"></span></span></span></td>
         <td>${pillars}</td>
-        <td class="r">${_fmt(t.price, 2)}</td>
-        <td class="r ${chg >= 0 ? 'qs-chg-up' : 'qs-chg-down'}">${_pct(chg)}</td>
+        <td class="r qs-px-cell">${_fmt(t.price, 2)}</td>
+        <td class="r qs-chg-cell ${chg >= 0 ? 'qs-chg-up' : 'qs-chg-down'}">${_pct(chg)}</td>
         <td class="r">${t.rs_rank != null ? Math.round(t.rs_rank) : '—'}</td>
         <td class="r">${t.rvol ? _fmt(t.rvol, 1) + '×' : '—'}</td>
         <td class="r">${(t.rr_ratio || t.rr) ? '1:' + _fmt(t.rr_ratio || t.rr, 1) : '—'}</td>
@@ -21129,8 +21129,74 @@ const QuantWatchlist = (function() {
     };
     if (addBtn) addBtn.addEventListener('click', doAdd);
     if (addEl) addEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
+
+    // 2026-05-20 · Live Schwab price poll for watchlist rows (20s, exp backoff).
+    // Self-stops when navigating away (panel loses qs-active class).
+    _startLivePx();
   }
-  function deactivate() { const p = document.getElementById('pan-workspace'); if (p) p.classList.remove('qs-active'); }
+
+  // ── Live price polling (Schwab primary, EODHD fallback) ──────────────
+  let _livePxInterval = null;
+  let _livePxFailCount = 0;
+  function _applyPxToTable(prices, quotes) {
+    Object.entries(prices || {}).forEach(([tk, px]) => {
+      const row = document.querySelector(`tr[data-qs-tk="${tk}"]`);
+      if (!row) return;
+      const pxCell = row.querySelector('.qs-px-cell');
+      if (pxCell) pxCell.textContent = Number(px).toFixed(2);
+      const q = (quotes || {})[tk] || {};
+      const chgPct = q.change_p ?? q.change_pct ?? q.pct_chg ?? null;
+      if (chgPct != null) {
+        const chgCell = row.querySelector('.qs-chg-cell');
+        if (chgCell) {
+          chgCell.textContent = (chgPct >= 0 ? '+' : '') + Number(chgPct).toFixed(2) + '%';
+          chgCell.className = `r qs-chg-cell ${chgPct >= 0 ? 'qs-chg-up' : 'qs-chg-down'}`;
+        }
+      }
+    });
+  }
+  async function _fetchAndUpdatePx() {
+    const wsPanel = document.getElementById('pan-workspace');
+    const stillActive = wsPanel && wsPanel.classList.contains('qs-active') &&
+      document.querySelector('.sb-link.on[data-tab="watchlist"]');
+    if (!stillActive) { _stopLivePx(); return; }
+    const tickers = _loadManual();
+    if (!tickers.length) {
+      // Nothing to poll — still re-check in 20s so newly-added tickers get picked up
+      _livePxInterval = setTimeout(_fetchAndUpdatePx, 20000);
+      return;
+    }
+    let success = false;
+    try {
+      const r = await fetch(
+        `/api/live/quote?tickers=${encodeURIComponent(tickers.slice(0, 120).join(','))}`,
+        { credentials: 'same-origin' }
+      );
+      if (r.ok) {
+        const j = await r.json();
+        _applyPxToTable(j.prices || {}, j.quotes || {});
+        success = true;
+      }
+    } catch (_) {}
+    if (success) { _livePxFailCount = 0; }
+    else { _livePxFailCount = (_livePxFailCount || 0) + 1; }
+    const _ms = success ? 20000 : Math.min(300000, 20000 * Math.pow(2, Math.min(_livePxFailCount, 4)));
+    clearTimeout(_livePxInterval);
+    _livePxInterval = setTimeout(_fetchAndUpdatePx, _ms);
+  }
+  function _startLivePx() {
+    if (_livePxInterval) return;
+    _fetchAndUpdatePx();
+  }
+  function _stopLivePx() {
+    if (_livePxInterval) { clearTimeout(_livePxInterval); _livePxInterval = null; }
+  }
+
+  function deactivate() {
+    const p = document.getElementById('pan-workspace');
+    if (p) p.classList.remove('qs-active');
+    _stopLivePx();
+  }
   return { render, deactivate };
 })();
 
@@ -51406,6 +51472,7 @@ function setupV3Workspaces(arr, data) {
     }
     wsPanel.classList.remove('ep-active');
     QuantScanner.deactivate();
+    if (typeof QuantWatchlist !== 'undefined' && QuantWatchlist.deactivate) QuantWatchlist.deactivate();
     EliteAB.deactivate();
 
     // MarketsV2 ports (2026-05-15): Industries/Market/Macro/Premarket/Events/Themes/Strategies/Leveraged/Crypto
