@@ -365,6 +365,7 @@ def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
     lookback_n = int(cfg.get("lookback_n", 20))
     min_sample_n = int(cfg.get("min_sample_n", 10))
     mode = str(cfg.get("mode") or "aggregate").lower()
+    reset_at = cfg.get("reset_at") or ""  # ISO date — exclude signals before this date
     out_default = {
         "active": False, "reason": "disabled" if not enabled else "no data",
         "sharpe": None, "n": 0, "avg_pnl": None,
@@ -412,6 +413,7 @@ def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
     seen_keys: set[tuple] = set()
     n_dropped_dupe = 0
     n_dropped_watch = 0
+    n_dropped_pre_reset = 0
     for s in signals:
         if not isinstance(s, dict):
             continue
@@ -419,6 +421,15 @@ def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
             continue
         if (s.get("verdict") or "").upper() != "BUY":
             continue
+        # 2026-05-19 — reset_at filter: exclude signals dated before reset_at.
+        # Used after a system-logic finalization so the kill counts only trades
+        # made with the current set of gates/overlays — past trades from earlier
+        # logic shouldn't gate the new logic.
+        if reset_at:
+            sig_date = str(s.get("date") or "")[:10]
+            if sig_date and sig_date < reset_at:
+                n_dropped_pre_reset += 1
+                continue
         # (b) · skip WATCH-conviction signals — these weren't real trades
         conviction = (s.get("conviction_label") or "").upper()
         if conviction == "WATCH":
@@ -449,9 +460,9 @@ def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
                   or "Unknown")
         closed_buys.append({"pnl": pnl, "date": s.get("date") or "", "sleeve": sleeve})
     closed_buys.sort(key=lambda r: r["date"])
-    if n_dropped_dupe or n_dropped_watch:
+    if n_dropped_dupe or n_dropped_watch or n_dropped_pre_reset:
         try:
-            log.info(f"[rolling_sharpe_kill] filtered signal_log: dropped {n_dropped_dupe} dupes, {n_dropped_watch} WATCH-conviction; kept {len(closed_buys)} real BUYs")
+            log.info(f"[rolling_sharpe_kill] filtered signal_log: dropped {n_dropped_dupe} dupes, {n_dropped_watch} WATCH-conviction, {n_dropped_pre_reset} pre-reset (<{reset_at}); kept {len(closed_buys)} real BUYs")
         except Exception:
             pass
 
