@@ -296,12 +296,18 @@ def _src_watch_triggers(conn) -> list[dict]:
 
 
 def _src_custom_tickers(conn) -> list[dict]:
-    """custom_tracked.json: {tickers: [...]} (just a list of strings)."""
+    """custom_tracked.json: {tickers: [...]} — historically list[str], now list[dict] with entry_price/date metadata."""
     j = _load_json(DATA_DIR / "custom_tracked.json")
     rows: list[dict] = []
     if isinstance(j, dict):
-        for ticker in (j.get("tickers") or []):
-            rows.append({"ticker": ticker, "source": "CUSTOM"})
+        for item in (j.get("tickers") or []):
+            if isinstance(item, dict):
+                sym = item.get("ticker")
+                if not sym:
+                    continue
+                rows.append({"ticker": sym, "source": item.get("source") or "CUSTOM"})
+            elif isinstance(item, str) and item.strip():
+                rows.append({"ticker": item.strip(), "source": "CUSTOM"})
     return rows
 
 

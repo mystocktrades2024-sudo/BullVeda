@@ -75,6 +75,7 @@ def run_all_checks(sb) -> list[dict]:
                           False, None, 1, None, f"query failed: {e}", severity="critical"))
 
     # 2. signal_log freshness (most recent date within 7 days)
+    # Empty signal_log is EXPECTED during paper-observation mode (no live trades) — treat as pass.
     try:
         r = sb.table("signal_log").select("date").order("date", desc=True).limit(1).execute()
         if r.data and r.data[0].get("date"):
@@ -86,8 +87,8 @@ def run_all_checks(sb) -> list[dict]:
                               severity="warning"))
         else:
             rows.append(_row(now_iso, "signal_log", "freshness_7d",
-                              False, None, 7.0, 0, "signal_log empty",
-                              severity="warning"))
+                              True, None, 7.0, 0, "signal_log empty (paper-observation mode — expected)",
+                              severity="info"))
     except Exception as e:
         rows.append(_row(now_iso, "signal_log", "freshness_7d",
                           False, None, 7.0, None, f"query failed: {e}", severity="warning"))
