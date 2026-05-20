@@ -50267,64 +50267,126 @@ const MarketsV2 = (function () {
 
   // ─── TAB 5: CORPORATE EVENTS ───
   function renderEvents(data) {
-    return `${_head('📅', 'Corporate Events', 'Earnings · buybacks · IPOs · spinoffs · dividends · insider · FDA', 'Earnings Quant + Buffett',
+    // 2026-05-20 — Wired to real data.corporate_events (IPOs + splits from
+    // EODHD calendar endpoints, fetched by scripts/fetch_corporate_events.py
+    // and plumbed via build_data.py:_load_corporate_events).
+    // Earnings list comes from data.earnings_watchlist (already real).
+    const ce = data.corporate_events || {};
+    const meta = ce._meta || {};
+    const ipos = ce.ipos || [];
+    const splits = ce.splits || [];
+    const earnWl = data.earnings_watchlist || [];
+
+    // Earnings next 7d from real watchlist
+    const earnNext7 = earnWl
+      .filter(e => e.days_to_earnings != null && e.days_to_earnings >= 0 && e.days_to_earnings <= 7)
+      .sort((a, b) => a.days_to_earnings - b.days_to_earnings)
+      .slice(0, 15);
+
+    const fmtDate = (iso) => {
+      if (!iso) return '—';
+      try {
+        const d = new Date(iso); if (isNaN(d.getTime())) return iso;
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const dd = String(d.getDate()).padStart(2,'0');
+        return mm + '-' + dd;
+      } catch { return iso; }
+    };
+    const dteBadge = (n) => {
+      if (n == null) return '—';
+      const cls = n <= 1 ? 'mv2-chip-rd' : n <= 3 ? 'mv2-chip-am' : 'mv2-chip-gn';
+      return '<span class="mv2-chip ' + cls + '">T+' + n + 'd</span>';
+    };
+
+    return `${_head('📅', 'Corporate Events', 'IPOs · splits · earnings · real EODHD calendar (next 30d)', 'Earnings Quant + Buffett',
       `${_ctl('⭐ Save')}${_ctl('⏰ Event alerts')}`)}
 
+      <!-- Source banner -->
+      <div class="mv2-card" style="margin-bottom:14px;border-left:3px solid var(--gn)">
+        <div class="mv2-card-head">
+          <span class="mv2-card-title">Calendar feed · ${meta.n_ipos != null ? meta.n_ipos : 0} IPOs + ${meta.n_splits != null ? meta.n_splits : 0} splits + ${earnNext7.length} earnings (next 7d)</span>
+          <span class="mv2-card-meta">last fetched ${meta.generated_at ? meta.generated_at.replace('T', ' ').slice(0, 16) + ' UTC' : '—'}</span>
+        </div>
+      </div>
+
+      <!-- Earnings + IPOs row -->
       <div class="mv2-grid-2" style="margin-bottom:14px">
         <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">📅 Earnings · Next 7d</span></div>
-          <table class="mv2-t"><thead><tr><th>Date</th><th>Ticker</th><th class="r">ESP</th><th>Status</th></tr></thead><tbody>
-            <tr><td class="mv2-mono">Mon 5/19</td><td class="mv2-mono"><b>NVDA</b></td><td class="r mv2-mono mv2-up">+3.2%</td><td><span class="mv2-chip mv2-chip-gn">ESP ELITE</span></td></tr>
-            <tr><td class="mv2-mono">Tue 5/20</td><td class="mv2-mono"><b>WMT</b></td><td class="r mv2-mono">+0.8%</td><td><span class="mv2-chip mv2-chip-gn">eligible</span></td></tr>
-            <tr><td class="mv2-mono">Wed 5/21</td><td class="mv2-mono"><b>TGT</b></td><td class="r mv2-mono mv2-up">+2.1%</td><td><span class="mv2-chip mv2-chip-gn">eligible</span></td></tr>
-            <tr><td class="mv2-mono">Thu 5/22</td><td class="mv2-mono"><b>INTU</b></td><td class="r mv2-mono">+0.3%</td><td><span class="mv2-chip mv2-chip-am">weak ESP</span></td></tr>
-          </tbody></table>
+          <div class="mv2-card-head"><span class="mv2-card-title">📅 Earnings · Next 7d</span><span class="mv2-card-meta">${earnNext7.length} reports</span></div>
+          ${earnNext7.length ? `
+          <table class="mv2-t"><thead><tr><th>T-day</th><th>Ticker</th><th>Sector</th><th class="r">When</th></tr></thead><tbody>
+            ${earnNext7.map(e => `<tr class="mv2-rowlink" onclick="if(window.setDetailTicker) window.setDetailTicker('${e.ticker}')">
+              <td>${dteBadge(e.days_to_earnings)}</td>
+              <td class="mv2-mono"><b>${e.ticker}</b></td>
+              <td>${(e.sector || '—').slice(0, 20)}</td>
+              <td class="r mv2-mono" style="font-size:10px">${e.report_time || e.bmo_amc || '—'}</td>
+            </tr>`).join('')}
+          </tbody></table>` : '<div class="mv2-note" style="padding:14px">No earnings in next 7 days.</div>'}
         </div>
         <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">🏛️ Buyback Announcements</span></div>
-          <table class="mv2-t"><thead><tr><th>Ticker</th><th class="r">$ Auth</th><th class="r">% Cap</th><th>Filed</th></tr></thead><tbody>
-            <tr><td class="mv2-mono"><b>AAPL</b></td><td class="r mv2-mono">$110B</td><td class="r mv2-mono">3.4%</td><td class="mv2-mono">May 1</td></tr>
-            <tr><td class="mv2-mono"><b>META</b></td><td class="r mv2-mono">$50B</td><td class="r mv2-mono">2.8%</td><td class="mv2-mono">Apr 24</td></tr>
-            <tr><td class="mv2-mono"><b>GOOGL</b></td><td class="r mv2-mono">$70B</td><td class="r mv2-mono">3.1%</td><td class="mv2-mono">Apr 25</td></tr>
-          </tbody></table>
+          <div class="mv2-card-head"><span class="mv2-card-title">🆕 IPO Calendar · Next 30d</span><span class="mv2-card-meta">${ipos.length} US-listed</span></div>
+          ${ipos.length ? `
+          <table class="mv2-t"><thead><tr><th>Date</th><th>Ticker</th><th>Name</th><th class="r">Price</th><th class="r">Size</th></tr></thead><tbody>
+            ${ipos.slice(0, 12).map(i => {
+              const ticker = (i.code || '').replace(/\.US$/, '');
+              const px = i.offer_price || i.price_to;
+              const pxStr = px ? '$' + Number(px).toFixed(2) : (i.price_from && i.price_to ? '$' + i.price_from + '-$' + i.price_to : '—');
+              return `<tr>
+                <td class="mv2-mono">${fmtDate(i.start_date || i.filing_date)}</td>
+                <td class="mv2-mono"><b>${ticker}</b></td>
+                <td style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(i.name||'').replace(/"/g,'&quot;')}">${(i.name || '').slice(0, 22)}</td>
+                <td class="r mv2-mono">${pxStr}</td>
+                <td class="r mv2-mono">${i._deal_size_m != null ? '$' + i._deal_size_m + 'M' : '—'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody></table>${ipos.length > 12 ? '<div class="mv2-note">+' + (ipos.length - 12) + ' more IPOs in 30d window</div>' : ''}` : '<div class="mv2-note" style="padding:14px">No upcoming IPOs in 30d window.</div>'}
         </div>
       </div>
 
-      <div class="mv2-grid-3" style="margin-bottom:14px">
-        <div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">👥 Insider Buying · 30d</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td class="mv2-mono"><b>UBER</b></td><td>CEO</td><td class="r mv2-mono">$1.2M</td></tr>
-            <tr><td class="mv2-mono"><b>NUE</b></td><td>CFO</td><td class="r mv2-mono">$840K</td></tr>
-            <tr><td class="mv2-mono"><b>SCHW</b></td><td>Dir</td><td class="r mv2-mono">$520K</td></tr>
-          </tbody></table></div>
-        <div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">🆕 IPO · 14d</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td class="mv2-mono"><b>SBLB</b></td><td>Health AI</td><td class="r mv2-mono">$120M</td></tr>
-            <tr><td class="mv2-mono"><b>NUKE</b></td><td>SMR</td><td class="r mv2-mono">$280M</td></tr>
-          </tbody></table></div>
-        <div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">🔀 Spinoff / M&amp;A</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td class="mv2-mono"><b>GE Vernova</b></td><td>Spin</td><td class="mv2-mono">Jun 3</td></tr>
-            <tr><td class="mv2-mono"><b>CHTR/COX</b></td><td>M&amp;A</td><td class="mv2-mono">Pending</td></tr>
-          </tbody></table></div>
+      <!-- Splits + sector earnings rollup -->
+      <div class="mv2-grid-2" style="margin-bottom:14px">
+        <div class="mv2-card">
+          <div class="mv2-card-head"><span class="mv2-card-title">🔀 Stock Splits · Next 30d</span><span class="mv2-card-meta">${splits.length} US splits</span></div>
+          ${splits.length ? `
+          <table class="mv2-t"><thead><tr><th>Date</th><th>Ticker</th><th>Ratio</th><th>Type</th></tr></thead><tbody>
+            ${splits.slice(0, 15).map(s => {
+              const ticker = (s.code || '').replace(/\.US$/, '');
+              return `<tr class="mv2-rowlink" onclick="if(window.setDetailTicker) window.setDetailTicker('${ticker}')">
+                <td class="mv2-mono">${fmtDate(s.split_date)}</td>
+                <td class="mv2-mono"><b>${ticker}</b></td>
+                <td class="mv2-mono">${s._ratio || (s.new_shares + '-for-' + s.old_shares)}</td>
+                <td><span class="mv2-chip ${s._is_reverse ? 'mv2-chip-rd' : 'mv2-chip-gn'}">${s._is_reverse ? 'REVERSE' : 'FORWARD'}</span></td>
+              </tr>`;
+            }).join('')}
+          </tbody></table>${splits.length > 15 ? '<div class="mv2-note">+' + (splits.length - 15) + ' more splits in 30d window</div>' : ''}` : '<div class="mv2-note" style="padding:14px">No upcoming US splits in 30d window.</div>'}
+        </div>
+        <div class="mv2-card">
+          <div class="mv2-card-head"><span class="mv2-card-title">Earnings by sector · Next 7d</span></div>
+          ${(() => {
+            const bySector = {};
+            earnNext7.forEach(e => {
+              const s = e.sector || 'Unknown';
+              if (!bySector[s]) bySector[s] = [];
+              bySector[s].push(e.ticker);
+            });
+            const rows = Object.entries(bySector).sort((a, b) => b[1].length - a[1].length);
+            if (!rows.length) return '<div class="mv2-note" style="padding:14px">No sector earnings in next 7 days.</div>';
+            return '<table class="mv2-t"><thead><tr><th>Sector</th><th class="r">N</th><th>Tickers</th></tr></thead><tbody>' +
+              rows.map(([s, tks]) => '<tr><td class="mv2-mono"><b>' + s + '</b></td><td class="r mv2-mono">' + tks.length + '</td><td>' + tks.slice(0, 6).map(t => '<span class="mv2-chip mv2-chip-cy">' + t + '</span>').join(' ') + (tks.length > 6 ? ' <span style="color:var(--ink-3);font-size:10px">+' + (tks.length - 6) + '</span>' : '') + '</td></tr>').join('') +
+              '</tbody></table>';
+          })()}
+        </div>
       </div>
 
-      <div class="mv2-grid-2">
-        <div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">⚕️ PDUFA / FDA · 30d</span></div>
-          <table class="mv2-t"><thead><tr><th>Ticker</th><th>Drug</th><th class="r">Date</th></tr></thead><tbody>
-            <tr><td class="mv2-mono"><b>SRPT</b></td><td>Elevidys (DMD)</td><td class="r mv2-mono">Jun 21</td></tr>
-            <tr><td class="mv2-mono"><b>ITCI</b></td><td>Caplyta (MDD)</td><td class="r mv2-mono">Jun 28</td></tr>
-            <tr><td class="mv2-mono"><b>VKTX</b></td><td>VK2735 Ph3</td><td class="r mv2-mono">Q3</td></tr>
-          </tbody></table></div>
-        <div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">💰 Dividend Ex-Div · 7d</span></div>
-          <table class="mv2-t"><thead><tr><th>Ticker</th><th class="r">Yield</th><th class="r">Ex-div</th></tr></thead><tbody>
-            <tr><td class="mv2-mono"><b>JNJ</b></td><td class="r mv2-mono">3.1%</td><td class="r mv2-mono">May 21</td></tr>
-            <tr><td class="mv2-mono"><b>PG</b></td><td class="r mv2-mono">2.4%</td><td class="r mv2-mono">May 23</td></tr>
-            <tr><td class="mv2-mono"><b>VZ</b></td><td class="r mv2-mono">6.4%</td><td class="r mv2-mono">May 25</td></tr>
-          </tbody></table></div>
+      <div class="mv2-card" style="border-left:3px solid var(--ink-3)">
+        <div class="mv2-card-head"><span class="mv2-card-title">Trade discipline · corporate events</span></div>
+        <div class="mv2-note" style="padding:10px">
+          <b>Earnings T-7:</b> earnings_blackout gate fires automatically — no new BUYs unless catalyst sleeve bypass (PEAD / Insider / ESP). <b>IPO discipline:</b> first 6 weeks usually noisy; wait for 21-day base before participating. <b>Forward splits:</b> tactically bullish (signaling confidence + retail accessibility); reverse splits typically bearish (distress signal). For PDUFA / FDA / buybacks / spinoffs — separate fetchers needed (not implemented).
+        </div>
       </div>
-      ${_actionFooter(['📊 Reaction backtest', '⏰ FDA alert', '📈 Buyback drift', '↓ Export'])}`;
+      ${_actionFooter(['📊 Reaction backtest', '⏰ Event alert', '↓ Export'])}`;
   }
+
 
   // ─── TAB 6: THESIS THEMES ───
   function renderThemes(data) {

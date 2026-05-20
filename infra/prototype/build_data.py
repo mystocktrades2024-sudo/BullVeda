@@ -263,6 +263,23 @@ def _fetch_fundamentals_enrichment(tickers: list) -> dict:
         return {}
 
 
+def _load_corporate_events() -> dict:
+    """Read cache/corporate_events.json written by scripts/fetch_corporate_events.py.
+
+    Returns empty shape if file missing (graceful degrade — tab will show empty
+    state rather than break). 2026-05-20.
+    """
+    try:
+        from pathlib import Path as _P
+        p = _P(__file__).parent.parent / "cache" / "corporate_events.json"
+        if not p.exists():
+            return {"_meta": {"generated_at": None, "n_ipos": 0, "n_splits": 0}, "ipos": [], "splits": []}
+        import json as _j
+        return _j.loads(p.read_text())
+    except Exception:
+        return {"_meta": {"generated_at": None, "n_ipos": 0, "n_splits": 0}, "ipos": [], "splits": []}
+
+
 def _fetch_economic_events(days_ahead: int = 30) -> list:
     """Fetch upcoming US economic events from EODHD with impact tier tagging.
 
@@ -3451,6 +3468,9 @@ def main():
         "portfolio":     portfolio,
         "performance":   perf,
         "economic_events": economic_events,
+        # Corporate events (IPOs + splits) — populated by scripts/fetch_corporate_events.py
+        # which writes cache/corporate_events.json. Read at bundle-build time.
+        "corporate_events": _load_corporate_events(),
         # Accuracy framework (V-7 / P0-B · 2026-05-03) — Kupiec, Christoffersen, Basel
         "accuracy":      _compute_accuracy_safe(),
         # S-6: Sector RS pair candidates (market-neutral)

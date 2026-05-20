@@ -58,6 +58,17 @@ if [ $EXIT_CODE -eq 0 ]; then
     "$PYTHON" scripts/backfill_earnings_outcomes.py >> "$LOG_FILE" 2>&1
     set -e
 
+    # ── Fetch corporate events (IPOs + splits next 30d) ───────────────────
+    # Writes cache/corporate_events.json which build_data.py reads and embeds
+    # in the bundle as data.corporate_events. Powers the IPO·Splits tab.
+    # Cheap (~2 EODHD calls). Morning-scan only — calendar doesn't shift intraday.
+    if [ "$HOUR" -lt 7 ]; then
+        echo "── Fetch corporate events (IPOs + splits) ──" >> "$LOG_FILE"
+        set +e
+        "$PYTHON" scripts/fetch_corporate_events.py 30 >> "$LOG_FILE" 2>&1
+        set -e
+    fi
+
     # ── Run ML Edge inference (3-headed forecast: dir/mag/hit-net) ──────
     # Cheap (~3s for 449 tickers). Writes cache/ml_edge_predictions.json +
     # infra/prototype/ml_edge_predictions.json. Re-training runs only on the
