@@ -49957,67 +49957,124 @@ const MarketsV2 = (function () {
   }
 
   function renderMarket(data) {
+    // 2026-05-20 — Real-data-only render. Removed hardcoded "+0.18% 1D /
+    // 82nd %ile / NAAIM 72% / AAII +18.4 / Smart$ -1.4 / Skew 142" decorations
+    // and dynamic divergence-watch text that referenced fake values. Only show
+    // metrics we actually fetch.
     const r = data.regime || {};
     const mb = data.market_breadth || {};
     const macro = data.macro_signals || {};
     const spy = r.spy_price || 0;
-    const vix = r.vix_current || 0;
-    const breadth = mb.pct_above_50d ?? r.breadth_pct_50d ?? 0;
-    const pc = macro.put_call?.equity_pc ?? 0.53;
+    const spyEma50 = r.spy_ema50 || 0;
+    const spySma200 = r.spy_sma200 || 0;
+    const qqq = r.qqq_price || 0;
+    const vix = r.vix_current || (r.vix && r.vix.vix_current) || 0;
+    const vixState = r.vix && r.vix.vol_state;
+    const vix3m = r.vix && r.vix.vix3m;
+    const termRatio = r.vix && r.vix.term_structure_ratio;
+    const termState = r.vix && r.vix.term_structure_state;
+    const breadth = mb.pct_above_50d != null ? mb.pct_above_50d : (r.breadth_pct_50d || 0);
+    const above200 = mb.pct_above_200d;
+    const newHi = mb.new_highs;
+    const newLo = mb.new_lows;
+    const hlRatio = mb.hl_ratio;
+    const pcEquity = macro.put_call && macro.put_call.equity_pc;
+    const pcSignal = macro.put_call && macro.put_call.signal;
+    const r4 = r.regime4 || r.regime4_raw || 'unknown';
+    const r4Cls = r4 === 'risk_on_trending' ? 'mv2-chip-gn' : r4 === 'risk_on_choppy' ? 'mv2-chip-am' : 'mv2-chip-rd';
+    const spy1m = r.spy_1m_ret;
+    const distrib = r.distribution_days;
+    const distribState = r.distribution_state;
+    const credit = macro.credit && macro.credit.state;
+    const creditCls = credit === 'healthy' ? 'mv2-chip-gn' : credit === 'stressed' ? 'mv2-chip-rd' : 'mv2-chip-am';
+    const riskSignal = macro.risk_signal || 'unknown';
+    const riskCls = riskSignal === 'risk-on' ? 'mv2-chip-gn' : riskSignal === 'risk-off' ? 'mv2-chip-rd' : 'mv2-chip-am';
+    const hmm = r.hmm_regime || {};
+    const cycle = r.market_cycle || '—';
+    const sectorDisp = r.sector_dispersion || {};
 
-    return `${_head('📊', 'Market Internals', 'Is the market healthy enough to be long? · breadth · sentiment · regime', 'Analyst + CFP',
-      `${_ctl('⭐ Save')}${_ctl('⏰ Alert')}${_ctl('📊 vs Last Cycle')}`)}
+    const fmt = (n, d=2, sign=false) => n == null || isNaN(n) ? '—' : (sign && n>=0 ? '+' : '') + Number(n).toFixed(d);
 
-      <div class="mv2-grid-4" style="margin-bottom:14px">
-        <div class="mv2-card"><div class="mv2-card-title">SPY</div><div class="mv2-bignum">$${spy.toFixed(2)}</div>
-          <div class="mv2-delta-row"><span class="mv2-delta mv2-up">+0.18% 1D</span><span class="mv2-delta mv2-up">+2.4% 5D</span><span class="mv2-delta mv2-neu">71st %ile</span></div>
-          <div class="mv2-pct-bar"><div class="mv2-pct-fill" style="width:71%;background:var(--gn)"></div></div></div>
-        <div class="mv2-card"><div class="mv2-card-title">VIX</div><div class="mv2-bignum">${vix.toFixed(1)}</div>
-          <div class="mv2-delta-row"><span class="mv2-delta mv2-up">+1.4 1D</span><span class="mv2-delta mv2-up">+13% vs 30d</span><span class="mv2-delta mv2-neu">52nd %ile</span></div>
-          <div class="mv2-pct-bar"><div class="mv2-pct-fill" style="width:52%;background:var(--amb)"></div></div></div>
-        <div class="mv2-card"><div class="mv2-card-title">Breadth › 50DMA</div><div class="mv2-bignum" style="color:var(--amb)">${breadth}%</div>
-          <div class="mv2-delta-row"><span class="mv2-delta mv2-dn">-8.6pp 5D</span><span class="mv2-delta mv2-dn">-12pp 21D</span><span class="mv2-delta mv2-neu">24th %ile</span></div>
-          <div class="mv2-pct-bar"><div class="mv2-pct-fill" style="width:24%;background:var(--rd)"></div></div></div>
-        <div class="mv2-card"><div class="mv2-card-title">Put/Call (Equity)</div><div class="mv2-bignum" style="color:var(--amb)">${pc.toFixed(2)}</div>
-          <div class="mv2-delta-row"><span class="mv2-delta mv2-up">+0.08 5D</span><span class="mv2-delta mv2-neu">28th %ile</span><span class="mv2-chip mv2-chip-am">GREED</span></div>
-          <div class="mv2-pct-bar"><div class="mv2-pct-fill" style="width:28%;background:var(--amb)"></div></div></div>
+    return `${_head('📊', 'Market Internals', 'Regime · breadth · sentiment · credit · cross-asset (real data only)', 'Analyst + CFP',
+      `${_ctl('⭐ Save')}${_ctl('⏰ Alert')}`)}
+
+      <!-- Regime + Risk signal headline -->
+      <div class="mv2-card" style="margin-bottom:14px;border-left:4px solid var(${r4==='risk_on_trending'?'--gn':r4==='risk_on_choppy'?'--am':'--rd'})">
+        <div class="mv2-card-head">
+          <span class="mv2-card-title">REGIME · <span class="mv2-chip ${r4Cls}">${r4.toUpperCase().replace('_',' ')}</span></span>
+          <span class="mv2-card-meta">cross-asset risk signal · <span class="mv2-chip ${riskCls}">${riskSignal.toUpperCase()}</span> · credit <span class="mv2-chip ${creditCls}">${(credit||'').toUpperCase()}</span></span>
+        </div>
+        <div class="mv2-grid-4">
+          <div><div class="mv2-card-title">SPY</div><div class="mv2-bignum">$${fmt(spy, 2)}</div>
+            <div class="mv2-bignum-sub">
+              ${spy && spyEma50 ? (spy >= spyEma50 ? '↑' : '↓') + ' EMA50 $' + fmt(spyEma50, 2) : ''} ·
+              ${spy && spySma200 ? (spy >= spySma200 ? '↑' : '↓') + ' SMA200 $' + fmt(spySma200, 2) : ''}
+              ${spy1m != null ? ' · 1m ' + fmt(spy1m, 2, true) + '%' : ''}
+            </div></div>
+          <div><div class="mv2-card-title">VIX</div><div class="mv2-bignum" style="color:${vix>=25?'var(--rd)':vix>=18?'var(--am)':'var(--gn)'}">${fmt(vix, 1)}</div>
+            <div class="mv2-bignum-sub">${vixState || '—'} · 3m ${fmt(vix3m, 1)} · ${termState || ''}</div></div>
+          <div><div class="mv2-card-title">Breadth › 50DMA</div><div class="mv2-bignum" style="color:${breadth>=55?'var(--gn)':breadth>=35?'var(--am)':'var(--rd)'}">${fmt(breadth, 0)}%</div>
+            <div class="mv2-pct-bar"><div class="mv2-pct-fill" style="width:${Math.min(100,breadth).toFixed(0)}%;background:${breadth>=55?'var(--gn)':breadth>=35?'var(--am)':'var(--rd)'}"></div></div>
+            <div class="mv2-bignum-sub">› 55 = trending · &lt; 35 = chop</div></div>
+          <div><div class="mv2-card-title">Put/Call (Equity)</div><div class="mv2-bignum" style="color:${pcEquity && pcEquity > 0.7 ? 'var(--gn)' : pcEquity && pcEquity < 0.5 ? 'var(--am)' : 'var(--ink-1)'}">${fmt(pcEquity, 2)}</div>
+            <div class="mv2-bignum-sub">${pcSignal === 'greed' ? '<span class="mv2-chip mv2-chip-am">greed (low pc)</span>' : pcSignal === 'fear' ? '<span class="mv2-chip mv2-chip-gn">fear (high pc, contrarian buy)</span>' : '<span class="mv2-chip mv2-chip-bare">neutral</span>'}</div></div>
+        </div>
       </div>
 
-      <div class="mv2-grid-2">
+      <!-- Breadth + HMM/cycle context -->
+      <div class="mv2-grid-2" style="margin-bottom:14px">
         <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">Breadth · 7 Indicators</span></div>
+          <div class="mv2-card-head"><span class="mv2-card-title">Breadth · scan-universe</span><span class="mv2-card-meta">${mb.total != null ? mb.total + ' tickers' : ''}</span></div>
           <table class="mv2-t"><tbody>
-            <tr><td>% › 50EMA</td><td class="r mv2-mono"><b>${breadth}%</b></td><td class="r mv2-mono mv2-dn">-12pp</td></tr>
-            <tr><td>% › 200SMA</td><td class="r mv2-mono"><b>${mb.pct_above_200d || 51}%</b></td><td class="r mv2-mono mv2-dn">-4pp</td></tr>
-            <tr><td>New Highs</td><td class="r mv2-mono"><b>${mb.new_highs || 41}</b></td><td class="r mv2-mono mv2-dn">-28</td></tr>
-            <tr><td>New Lows</td><td class="r mv2-mono"><b>${mb.new_lows || 53}</b></td><td class="r mv2-mono mv2-up">+18</td></tr>
-            <tr><td>HL Ratio</td><td class="r mv2-mono"><b>${(mb.hl_ratio || 0.77).toFixed(2)}</b></td><td class="r mv2-mono mv2-dn">-0.32</td></tr>
-            <tr><td>A/D Line (cum)</td><td class="r mv2-mono"><b>1,847</b></td><td class="r mv2-mono mv2-up">+127</td></tr>
-            <tr><td>Distrib Days</td><td class="r mv2-mono"><b>4</b></td><td><span class="mv2-chip mv2-chip-am">CAUTION</span></td></tr>
+            <tr><td>% › 50EMA</td><td class="r mv2-mono"><b>${fmt(breadth, 1)}%</b></td><td><span class="mv2-chip ${breadth>=55?'mv2-chip-gn':breadth>=35?'mv2-chip-am':'mv2-chip-rd'}">${breadth>=55?'trending':breadth>=35?'mixed':'chop'}</span></td></tr>
+            <tr><td>% › 200SMA</td><td class="r mv2-mono"><b>${above200 != null ? fmt(above200, 1) + '%' : '—'}</b></td><td>${above200 != null ? `<span class="mv2-chip ${above200>=60?'mv2-chip-gn':above200>=40?'mv2-chip-am':'mv2-chip-rd'}">${above200>=60?'healthy':above200>=40?'mixed':'weak'}</span>` : ''}</td></tr>
+            <tr><td>New highs</td><td class="r mv2-mono"><b>${newHi != null ? newHi : '—'}</b></td><td></td></tr>
+            <tr><td>New lows</td><td class="r mv2-mono"><b>${newLo != null ? newLo : '—'}</b></td><td></td></tr>
+            <tr><td>HL ratio</td><td class="r mv2-mono"><b>${hlRatio != null ? hlRatio.toFixed(2) : '—'}</b></td><td>${hlRatio != null ? `<span class="mv2-chip ${hlRatio>=1?'mv2-chip-gn':'mv2-chip-rd'}">${hlRatio>=1?'expanding':'contracting'}</span>` : ''}</td></tr>
+            <tr><td>Distribution days</td><td class="r mv2-mono"><b>${distrib != null ? distrib : '—'}</b></td><td>${distribState ? `<span class="mv2-chip ${distribState==='healthy'?'mv2-chip-gn':distribState==='correction'?'mv2-chip-rd':'mv2-chip-am'}">${distribState}</span>` : ''}</td></tr>
           </tbody></table>
         </div>
         <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">Sentiment + Positioning</span></div>
+          <div class="mv2-card-head"><span class="mv2-card-title">Regime + HMM context</span></div>
           <table class="mv2-t"><tbody>
-            <tr><td>Put/Call equity</td><td class="r mv2-mono"><b>${pc.toFixed(2)}</b></td><td><span class="mv2-chip mv2-chip-am">greed</span></td></tr>
-            <tr><td>NAAIM exposure</td><td class="r mv2-mono"><b>72%</b></td><td><span class="mv2-chip mv2-chip-am">68th %ile</span></td></tr>
-            <tr><td>AAII bull-bear</td><td class="r mv2-mono"><b>+18.4</b></td><td><span class="mv2-chip mv2-chip-am">74th %ile</span></td></tr>
-            <tr><td>Margin debt YoY</td><td class="r mv2-mono"><b>+22%</b></td><td><span class="mv2-chip mv2-chip-rd">elevated</span></td></tr>
-            <tr><td>VIX term (3m/9d)</td><td class="r mv2-mono"><b>1.18</b></td><td><span class="mv2-chip mv2-chip-gn">contango</span></td></tr>
-            <tr><td>Smart $ index</td><td class="r mv2-mono"><b>-1.4</b></td><td><span class="mv2-chip mv2-chip-am">distributing</span></td></tr>
-            <tr><td>Skew</td><td class="r mv2-mono"><b>142</b></td><td><span class="mv2-chip mv2-chip-am">tail-risk pricing up</span></td></tr>
+            <tr><td>HMM regime (most likely)</td><td class="r mv2-mono"><b>${hmm.regime || '—'}</b></td><td class="r mv2-mono">${hmm.confidence != null ? (hmm.confidence * 100).toFixed(0) + '%' : '—'}</td></tr>
+            <tr><td>HMM probabilities</td><td colspan="2" class="r mv2-mono" style="font-size:10px">bull ${hmm.p_bull != null ? (hmm.p_bull * 100).toFixed(1) : '—'}% · neutral ${hmm.p_neutral != null ? (hmm.p_neutral * 100).toFixed(1) : '—'}% · bear ${hmm.p_bear != null ? (hmm.p_bear * 100).toFixed(1) : '—'}%</td></tr>
+            <tr><td>Market cycle</td><td class="r mv2-mono"><b>${cycle}</b></td><td></td></tr>
+            <tr><td>SPY 1-month return</td><td class="r mv2-mono ${(spy1m||0)>=0?'mv2-up':'mv2-dn'}"><b>${fmt(spy1m, 2, true)}%</b></td><td></td></tr>
+            <tr><td>SPY Sharpe (126d ann)</td><td class="r mv2-mono"><b>${r.spy_sharpe && r.spy_sharpe.sharpe_126d_ann != null ? fmt(r.spy_sharpe.sharpe_126d_ann, 2, true) : '—'}</b></td><td>${r.spy_sharpe && r.spy_sharpe.signal ? `<span class="mv2-chip mv2-chip-gn" style="font-size:10px">${r.spy_sharpe.signal}</span>` : ''}</td></tr>
+            <tr><td>Sector dispersion</td><td class="r mv2-mono"><b>${sectorDisp.leadership_breadth || '—'}</b></td><td>${sectorDisp.rotation_signal ? `<span class="mv2-chip mv2-chip-am">${sectorDisp.rotation_signal}</span>` : ''}</td></tr>
           </tbody></table>
         </div>
       </div>
 
-      <div class="mv2-card" style="margin-top:14px">
-        <div class="mv2-card-head"><span class="mv2-card-title">⚠️ Divergence Watch</span><span class="mv2-card-meta">leading indicators</span></div>
-        <div class="mv2-divbox mv2-warn"><div style="flex:1"><b>⚠️ SPY new high + breadth weakening</b> — Top-10 carrying index, breadth at 42%. Last 5 times this pattern persisted &gt;14d, SPY pulled back 4-9%.</div></div>
-        <div class="mv2-divbox mv2-bad"><div style="flex:1"><b>🔴 Gold rising + DXY falling + VIX up</b> — Risk-off positioning emerging. Pattern preceded Feb 2026 -5% pullback by 6 days.</div></div>
-        <div class="mv2-divbox mv2-ok"><div style="flex:1"><b>✅ Credit (HYG) holding firm</b> — Rotation, not credit crisis. Watch HYG break of $78 as canary.</div></div>
+      <!-- Cross-asset signals (HYG/LQD/UUP/GLD trends — same source as Macro tab) -->
+      <div class="mv2-card">
+        <div class="mv2-card-head"><span class="mv2-card-title">Cross-asset signals</span><span class="mv2-card-meta">HYG/LQD = credit · UUP = dollar · GLD = safe-haven</span></div>
+        <table class="mv2-t">
+          <thead><tr><th>Asset</th><th class="r">Price</th><th class="r">MA20</th><th class="r">Δ 5d</th><th class="r">Δ 20d</th><th>Trend</th></tr></thead>
+          <tbody>
+            ${[['hyg','HYG · High Yield'],['lqd','LQD · IG Credit'],['dxy','UUP · USD'],['gld','GLD · Gold']].map(([k, lbl]) => {
+              const s = macro[k] || {};
+              const t = s.trend || '—';
+              const tCls = t==='rising'?'mv2-chip-gn':t==='falling'?'mv2-chip-rd':'mv2-chip-bare';
+              const c5 = s.chg5d, c20 = s.chg20d;
+              const c5Cls = c5 == null ? 'neu' : c5 >= 0 ? 'mv2-up' : 'mv2-dn';
+              const c20Cls = c20 == null ? 'neu' : c20 >= 0 ? 'mv2-up' : 'mv2-dn';
+              return `<tr><td><b>${lbl}</b></td>
+                <td class="r mv2-mono">${s.price != null ? '$' + Number(s.price).toFixed(2) : '—'}</td>
+                <td class="r mv2-mono">${s.ma20 != null ? Number(s.ma20).toFixed(2) : '—'}</td>
+                <td class="r mv2-mono ${c5Cls}">${fmt(c5, 2, true)}%</td>
+                <td class="r mv2-mono ${c20Cls}">${fmt(c20, 2, true)}%</td>
+                <td><span class="mv2-chip ${tCls}">${t}</span></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+        <div class="mv2-note">For yields, dollar pairs, commodities, global equity — see the Macro · Events tab (same source).</div>
       </div>
-      ${_actionFooter(['📊 Compare to 2020-Q4', '⏰ Alert breadth&lt;40', '🛡️ Defensive ideas', '↓ Export'])}`;
+      ${_actionFooter(['⏰ Alert breadth &lt; 35', '↓ Export'])}`;
   }
+
 
   // ─── TAB 3: MACRO TAPE — 2026-05-20 wired to real data ───
   // Sources: data.macro_signals (hyg, lqd, dxy, gld, credit, put_call) +
@@ -50453,7 +50510,7 @@ const MarketsV2 = (function () {
 
         <!-- ═════════════ SLEEVES PANE (card view, default) ═════════════ -->
         <div class="strat-pane sleeves">
-          ${_renderSleevesPane(sleeves)}
+          ${_renderSleevesPane(sleeves, data)}
         </div>
 
         <!-- ═════════════ LAB PANE · 13-section HF cockpit ═════════════ -->
@@ -50908,19 +50965,63 @@ const MarketsV2 = (function () {
   }
 
   // ─── Helper: Sleeves Pane (card-based view · 8 sleeves) ───
-  function _renderSleevesPane(sleeves) {
-    // Map sleeve table data to richer card fields
-    // sleeves = [name, sub, phase, pcls, fires, livePF, btPF, dd, fit, fitCls, color, sparkPts]
+  function _renderSleevesPane(sleeves, data) {
+    // Sleeve → setup_family_stats key mapping (best-effort: not every sleeve has
+    // a single matching setup family; paper-only sleeves show "DATA GAP").
+    const sfs = (data && data.setup_family_stats) || {};
+    const arr = (window._kairosTickersArr || []);
+    // Helpers to pull real stats for a sleeve
+    const fromSetup = (key) => {
+      const s = sfs[key];
+      if (!s || !s.trades) return { wr: null, n: 0, pf: null, wlb: null };
+      return {
+        wr: Math.round((s.win_rate || 0) * 100),
+        n: s.trades,
+        pf: s.profit_factor,
+        wlb: Math.round((s.wr_low_95 || 0) * 100),
+      };
+    };
+    // Count today's BUY/WATCH fires from tickers.json by setup_family match
+    const countToday = (matchFn) => arr.filter(t => t && matchFn(t) && (t.verdict === 'BUY' || t.verdict === 'WATCH')).length;
+    const todayTickers = (matchFn) => arr.filter(t => t && matchFn(t) && (t.verdict === 'BUY' || t.verdict === 'WATCH'))
+      .sort((a,b)=>(b.score||0)-(a.score||0)).slice(0,3).map(t=>t.ticker);
+
+    // Build sleeve enrichment from real bundle. Multi-setup sleeves blend the
+    // matching keys; paper-only sleeves (Defensive Rotation, ESP, FOMC) report
+    // honest DATA GAP since no historical data exists yet.
+    const pullback = ['EMA21 Pullback','EMA50 Pullback'].map(fromSetup);
+    const blended = (rows) => {
+      const ok = rows.filter(r => r.n > 0);
+      if (!ok.length) return { wr: null, n: 0, pf: null, wlb: null };
+      const n = ok.reduce((a,b)=>a+b.n, 0);
+      const wr = Math.round(ok.reduce((a,b)=>a+(b.wr*b.n), 0) / n);
+      const wlb = Math.round(ok.reduce((a,b)=>a+(b.wlb*b.n), 0) / n);
+      const pf = ok.reduce((a,b)=>a+(b.pf*b.n), 0) / n;
+      return { wr, n, pf, wlb };
+    };
+    const trend = fromSetup('Trend Continuation');
+    const vcp   = fromSetup('VCP Breakout');
+    const stage2 = fromSetup('Stage 2 Breakout (52w high)');
     const enrich = [
-      { idx:0, icon:'📐', mech:'<b>Buy pullback to value</b> (EMA21/support) · 3:1 R:R · core engine',  wr:62, n:147, wilson:51, regime:'choppy', today:['NVDA','DXCM','PLTR'], status:'hot' },
-      { idx:1, icon:'▲',  mech:'<b>Buy strength</b> · ADX≥25, Sharpe≥1.5, EMA stack',                  wr:58, n:21,  wilson:42, regime:'trending', today:[], status:'cold' },
-      { idx:2, icon:'🛡', mech:'<b>Long XLU + GLD</b> · only fires risk-off',                          wr:54, n:17,  wilson:38, regime:'risk-off', today:[], status:'suspended' },
-      { idx:3, icon:'↔',  mech:'<b>RSI&lt;30 + price&gt;EMA200</b> · 3-5d bounce',                     wr:55, n:28,  wilson:39, regime:'choppy', today:['BABA'], status:'warm' },
-      { idx:4, icon:'📊', mech:'<b>Post-Earnings Drift</b> · 1-3d beat + gap (Bernard-Thomas)',         wr:58, n:42,  wilson:51, regime:'all', today:['DXCM','CRWD'], status:'hot' },
-      { idx:5, icon:'⌬',  mech:'<b>≥3 insiders</b> buying $200K+ in 30d (Bettis-Coles · top WR)',      wr:71, n:23,  wilson:58, regime:'all', today:['PLTR'], status:'hot' },
-      { idx:6, icon:'⚡', mech:'<b>Zacks ESP &gt; 0 + Rank ≤3</b> · earn 4-14d · exit day before',     wr:0,  n:0,   wilson:0,  regime:'all', today:[], status:'cold' },
-      { idx:7, icon:'🛡', mech:'<b>T-1 FOMC eve</b> · multiply long sizing ×1.25 (Lucca-Moench 2015)', wr:0,  n:0,   wilson:0,  regime:'overlay', today:[], status:'cold' },
+      { idx:0, icon:'📐', mech:'<b>Buy pullback to value</b> (EMA21/support) · 3:1 R:R · core engine', ...blended(pullback), today: todayTickers(t => /pullback/i.test(t.setup_family || '')) },
+      { idx:1, icon:'▲',  mech:'<b>Buy strength</b> · ADX≥25, Sharpe≥1.5, EMA stack',                 ...trend, today: todayTickers(t => t.setup_family === 'Trend Continuation') },
+      { idx:2, icon:'🛡', mech:'<b>Long XLU + GLD</b> · only fires risk-off',                          wr:null, n:0, pf:null, wlb:null, today: [] },
+      { idx:3, icon:'↔',  mech:'<b>RSI&lt;30 + price&gt;EMA200</b> · 3-5d bounce',                    wr:null, n:0, pf:null, wlb:null, today: [] },
+      { idx:4, icon:'📊', mech:'<b>Post-Earnings Drift</b> · 1-3d beat + gap (Bernard-Thomas)',        wr:null, n:0, pf:null, wlb:null, today: todayTickers(t => t.setup_family === 'Impulse Catalyst' && t.catalyst_tier === 1) },
+      { idx:5, icon:'⌬',  mech:'<b>≥3 insiders</b> buying $200K+ in 30d (Bettis-Coles · top WR)',     wr:null, n:0, pf:null, wlb:null, today: [] },
+      { idx:6, icon:'⚡', mech:'<b>Zacks ESP &gt; 0 + Rank ≤3</b> · earn 4-14d · exit day before',    wr:null, n:0, pf:null, wlb:null, today: [] },
+      { idx:7, icon:'🛡', mech:'<b>T-1 FOMC eve</b> · multiply long sizing ×1.25 (Lucca-Moench 2015)',wr:null, n:0, pf:null, wlb:null, today: [] },
     ];
+    // Derive status: hot/warm/cold/suspended from n + WR + today-fires
+    enrich.forEach(e => {
+      e.wilson = e.wlb;
+      e.status = e.n === 0 ? 'cold' :
+                 (e.today.length >= 3 || (e.wr && e.wr >= 60 && e.n >= 30)) ? 'hot' :
+                 (e.today.length >= 1 || (e.wr && e.wr >= 50)) ? 'warm' : 'cold';
+    });
+    // 'Defensive Rotation' = suspended unless regime is risk_off / panic
+    const r4 = (data && data.regime && (data.regime.regime4 || data.regime.regime4_raw)) || '';
+    if (!['risk_off_trending', 'panic'].includes(r4)) enrich[2].status = 'suspended';
     const cards = sleeves.map((row, i) => {
       const e = enrich[i] || enrich[0];
       const [name, sub, phase, pcls, fires, livePF, btPF, dd, fit, fitCls, color, pts] = row;
