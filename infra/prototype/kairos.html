@@ -12982,7 +12982,7 @@ const V3_WORKSPACES = {
   },
   momentum: {
     title: 'Momentum',
-    sub: 'tickers with strongest 5d/21d/63d returns · RS rank · 126d Sharpe · setup family · grade A/B/C',
+    sub: 'momentum-factor lens · Sharpe trend (accel/decay) · EMA stack · ADX · sector rotation · NOT a re-sorted scanner',
     custom: 'quantMomentum',
   },
   confluence: {
@@ -45871,13 +45871,23 @@ const QuantMlEdge = (function () {
 //     4. R:R + % from entry-zone surface entry timing per principle 15.
 // ══════════════════════════════════════════════════════════════════════
 const QuantMomentum = (function () {
+  // 2026-05-20 (v3 redesign) — Momentum is now a CURATED MOMENTUM-ONLY lens,
+  // not a re-sorted Scanner. Per CLAUDE.md principle 5/18 (regime conditioning)
+  // and principle 16 (sub-strategy attribution). Different question, different
+  // universe, different columns from Signal Scanner.
+  //
+  // Universe = momentum candidates only:
+  //   (rs_rank >= 60 AND above_21ema) OR (sharpe_126d >= 1.0 AND above_50ema)
+  //
+  // Columns are momentum-native: Sharpe-trend (126d vs 1y), EMA stack, ADX,
+  // RVOL, Sector RS, Stage, Max-DD. No verdict/score/R:R — Scanner has those.
+
   let _hostPanel = null;
   let _data = null;
   let _arr = null;
-  let _activeFamily = 'all';
-  let _activeQuality = 'tradeable';  // default to action-ready set
-  let _activeCatalyst = 'all';        // 'all' | '1' | '2' | '3'
-  let _activeVerdict = 'no_avoid';    // 'all' | 'buy' | 'no_avoid' | 'watch'
+  let _activeTrend = 'all';   // 'all' | 'accel' | 'flat' | 'decay'
+  let _activeStage = 'all';   // 'all' | '1' | '2' | '3' | '4'
+  let _activeSector = 'all';  // 'all' | sector name
 
   function _ensureStyles() {
     if (document.getElementById('qmom-styles')) return;
@@ -45889,7 +45899,7 @@ const QuantMomentum = (function () {
       .qmom-bc { font: 700 11px var(--mono); color: var(--ink-3); letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 14px; }
       .qmom-bc b { color: var(--ink-1); } .qmom-bc .cu { color: var(--copper); }
 
-      /* Regime banner — the gating context for the whole tab */
+      /* Regime banner */
       .qmom-regime { padding: 14px 18px; margin-bottom: 14px; border-radius: 2px; border-left: 4px solid var(--copper); background: var(--bg-1); }
       .qmom-regime.ACTIVE    { border-left-color: var(--gn);  background: rgba(74,222,128,0.06); }
       .qmom-regime.DEGRADED  { border-left-color: var(--amb); background: rgba(251,191,36,0.06); }
@@ -45905,8 +45915,8 @@ const QuantMomentum = (function () {
       .qmom-regime .qmom-rgm-body { font: 500 11.5px var(--mono); color: var(--ink-1); letter-spacing: 0.02em; margin-top: 6px; }
       .qmom-regime .qmom-rgm-body b { color: var(--ink); }
 
-      /* KPI strip — re-prioritized around TRADEABLE */
-      .qmom-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 14px; }
+      /* KPI strip */
+      .qmom-kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 14px; }
       .qmom-kpi { padding: 9px 11px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; border-left: 3px solid var(--copper); }
       .qmom-kpi.gn { border-left-color: var(--gn); } .qmom-kpi.am { border-left-color: var(--amb); } .qmom-kpi.rd { border-left-color: var(--rd); }
       .qmom-kpi .k { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; }
@@ -45926,7 +45936,7 @@ const QuantMomentum = (function () {
       .qmom-tbl-hd { padding: 9px 14px; background: var(--bg-2); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; font: 700 10px var(--mono); color: var(--copper); letter-spacing: 0.18em; text-transform: uppercase; }
       .qmom-tbl-hd .ct { font: 700 9px var(--mono); padding: 2px 6px; background: var(--bg-3); color: var(--ink-1); border-radius: 2px; letter-spacing: 0.04em; }
       .qmom-tbl table { width: 100%; border-collapse: collapse; font: 600 11px var(--mono); }
-      .qmom-tbl th { padding: 8px 10px; background: var(--bg-2); text-align: left; font-weight: 700; color: var(--ink-3); letter-spacing: 0.06em; font-size: 9.5px; text-transform: uppercase; border-bottom: 1px solid var(--line); }
+      .qmom-tbl th { padding: 8px 10px; background: var(--bg-2); text-align: left; font-weight: 700; color: var(--ink-3); letter-spacing: 0.06em; font-size: 9.5px; text-transform: uppercase; border-bottom: 1px solid var(--line); white-space: nowrap; }
       .qmom-tbl th.r { text-align: right; }
       .qmom-tbl td { padding: 7px 10px; border-bottom: 1px solid var(--line); color: var(--ink-1); }
       .qmom-tbl td.r { text-align: right; }
@@ -45935,48 +45945,49 @@ const QuantMomentum = (function () {
       .qmom-tbl .rank { color: var(--ink-3); font-weight: 700; }
       .qmom-tbl .tk { font-weight: 800; color: var(--ink); letter-spacing: 0.04em; }
 
-      .qmom-tbl .score { display: inline-block; min-width: 38px; padding: 3px 7px; text-align: center; border-radius: 2px; font: 800 11px var(--mono); }
-      .qmom-tbl .score.s90 { background: rgba(74,222,128,0.20); color: var(--gn); }
-      .qmom-tbl .score.s80 { background: rgba(74,222,128,0.12); color: var(--gn); }
-      .qmom-tbl .score.s70 { background: rgba(251,191,36,0.15); color: var(--amb); }
-      .qmom-tbl .score.s60 { background: rgba(248,113,113,0.10); color: var(--rd); }
-      .qmom-tbl .score.s0  { background: var(--bg-3); color: var(--ink-3); }
+      /* Trend pill */
+      .qmom-tbl .trend { display: inline-block; padding: 2px 8px; border-radius: 2px; font: 800 9.5px var(--mono); letter-spacing: 0.06em; min-width: 56px; text-align: center; }
+      .qmom-tbl .trend.accel { background: var(--gn); color: #000; }
+      .qmom-tbl .trend.flat  { background: rgba(251,191,36,0.18); color: var(--amb); border: 1px solid var(--amb); }
+      .qmom-tbl .trend.decay { background: rgba(248,113,113,0.18); color: var(--rd); border: 1px solid var(--rd); }
 
-      /* Entry-quality badge — green = actionable; red = stale */
-      .qmom-tbl .eq { display: inline-block; padding: 2px 7px; border-radius: 2px; font: 800 9.5px var(--mono); letter-spacing: 0.06em; min-width: 64px; text-align: center; }
-      .qmom-tbl .eq.FRESH    { background: var(--gn); color: #000; }
-      .qmom-tbl .eq.PULLBACK { background: rgba(74,222,128,0.22); color: var(--gn); border: 1px solid var(--gn); }
-      .qmom-tbl .eq.VALID    { background: rgba(251,191,36,0.18); color: var(--amb); border: 1px solid var(--amb); }
-      .qmom-tbl .eq.EXTENDED { background: rgba(248,113,113,0.18); color: var(--rd); border: 1px solid var(--rd); }
-      .qmom-tbl .eq.MISSED   { background: var(--bg-3); color: var(--ink-3); }
+      /* EMA signal pill */
+      .qmom-tbl .ema-sig { display: inline-block; padding: 2px 7px; border-radius: 2px; font: 800 9px var(--mono); letter-spacing: 0.04em; white-space: nowrap; }
+      .qmom-tbl .ema-sig.full-bull { background: var(--gn); color: #000; }
+      .qmom-tbl .ema-sig.mostly-bull { background: rgba(74,222,128,0.22); color: var(--gn); border: 1px solid var(--gn); }
+      .qmom-tbl .ema-sig.mixed { background: rgba(251,191,36,0.18); color: var(--amb); border: 1px solid var(--amb); }
+      .qmom-tbl .ema-sig.mostly-bear { background: rgba(248,113,113,0.18); color: var(--rd); border: 1px solid var(--rd); }
+      .qmom-tbl .ema-sig.full-bear { background: var(--rd); color: #fff; }
+      .qmom-tbl .ema-sig.unk { background: var(--bg-3); color: var(--ink-3); }
 
-      /* Catalyst tier pill */
-      .qmom-tbl .cat { display: inline-block; padding: 2px 6px; border-radius: 2px; font: 800 9.5px var(--mono); letter-spacing: 0.04em; }
-      .qmom-tbl .cat.T1 { background: var(--gn); color: #000; }
-      .qmom-tbl .cat.T2 { background: var(--amb); color: #000; }
-      .qmom-tbl .cat.T3 { background: var(--bg-3); color: var(--ink-2); }
-
-      /* Verdict badge */
-      .qmom-tbl .vrd { display: inline-block; padding: 2px 6px; border-radius: 2px; font: 800 9.5px var(--mono); letter-spacing: 0.04em; }
-      .qmom-tbl .vrd.BUY   { background: var(--gn); color: #000; }
-      .qmom-tbl .vrd.WATCH { background: rgba(251,191,36,0.18); color: var(--amb); border: 1px solid var(--amb); }
-      .qmom-tbl .vrd.SHORT { background: var(--rd); color: #fff; }
-      .qmom-tbl .vrd.SELL  { background: var(--rd); color: #fff; }
-      .qmom-tbl .vrd.AVOID { background: var(--bg-3); color: var(--ink-3); }
+      /* Market phase pill */
+      .qmom-tbl .phase { display: inline-block; padding: 2px 7px; border-radius: 2px; font: 800 9.5px var(--mono); letter-spacing: 0.04em; white-space: nowrap; }
+      .qmom-tbl .phase.Trend { background: var(--gn); color: #000; }
+      .qmom-tbl .phase.Pullback { background: rgba(74,222,128,0.22); color: var(--gn); border: 1px solid var(--gn); }
+      .qmom-tbl .phase.Consolidation { background: rgba(251,191,36,0.18); color: var(--amb); border: 1px solid var(--amb); }
+      .qmom-tbl .phase.Range { background: var(--bg-3); color: var(--ink-2); }
 
       .qmom-tbl .pos { color: var(--gn); font-weight: 700; }
       .qmom-tbl .neg { color: var(--rd); font-weight: 700; }
       .qmom-tbl .neu { color: var(--ink-3); }
-      .qmom-tbl .setup-fam { font-size: 10px; color: var(--ink-2); letter-spacing: 0.02em; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .qmom-tbl .arrow { display: inline-block; margin-left: 3px; font: 700 11px var(--mono); }
+      .qmom-tbl .arrow.up { color: var(--gn); }
+      .qmom-tbl .arrow.dn { color: var(--rd); }
+      .qmom-tbl .arrow.flat { color: var(--ink-3); }
 
       .qmom-empty { padding: 60px 20px; text-align: center; color: var(--ink-3); font: 600 12px var(--mono); letter-spacing: 0.04em; }
 
       .qmom-sectors-h { font: 700 10px var(--mono); color: var(--ink-3); letter-spacing: 0.18em; text-transform: uppercase; margin: 14px 0 6px; }
-      .qmom-sectors { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 6px; padding: 12px 14px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; }
-      .qmom-sec-cell { padding: 8px 10px; border-radius: 2px; border: 1px solid var(--line); }
+      .qmom-sectors { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px; padding: 12px 14px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; }
+      .qmom-sec-cell { padding: 8px 10px; border-radius: 2px; border: 1px solid var(--line); cursor: pointer; }
+      .qmom-sec-cell:hover { border-color: var(--copper); }
+      .qmom-sec-cell.on { border-color: var(--copper); background: var(--bg-2); }
       .qmom-sec-cell .nm { font: 700 10.5px var(--mono); color: var(--ink); }
       .qmom-sec-cell .v { font: 800 13px var(--mono); margin-top: 3px; color: var(--gn); }
       .qmom-sec-cell .s { font: 500 9.5px var(--mono); color: var(--ink-3); margin-top: 2px; }
+
+      .qmom-note { padding: 10px 14px; background: var(--bg-1); border: 1px solid var(--line); border-left: 3px solid var(--ink-3); border-radius: 2px; font: 500 11px var(--mono); color: var(--ink-2); margin-top: 12px; letter-spacing: 0.02em; }
+      .qmom-note b { color: var(--ink-1); }
     `;
     document.head.appendChild(s);
   }
@@ -45984,33 +45995,63 @@ const QuantMomentum = (function () {
   // ── Helpers ───────────────────────────────────────────────────────────
   function _isDict(x) { return x && typeof x === 'object' && !Array.isArray(x); }
   function _num(v, d = 2) { return (v == null || isNaN(v)) ? '—' : (+v).toFixed(d); }
-  function _scoreCls(s) { return s >= 90 ? 's90' : s >= 80 ? 's80' : s >= 70 ? 's70' : s >= 60 ? 's60' : 's0'; }
-  function _eqClass(q) {
-    return ['FRESH','PULLBACK','VALID','EXTENDED','MISSED'].includes(q) ? q : 'MISSED';
+  function _esc(s) { return s == null ? '' : String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  // Trend classification: compare Sharpe-126d to Sharpe-1y.
+  // Per principle 11 (edge erosion). Threshold +0.4 = accelerating, -0.4 = decay.
+  function _trendOf(s126, s1y) {
+    if (s126 == null || s1y == null) return 'flat';
+    const d = s126 - s1y;
+    if (d >= 0.4) return 'accel';
+    if (d <= -0.4) return 'decay';
+    return 'flat';
   }
-  function _vrdClass(v) {
-    return ['BUY','WATCH','SHORT','SELL','AVOID'].includes(v) ? v : 'AVOID';
+  function _trendArrow(s126, s1y) {
+    const t = _trendOf(s126, s1y);
+    if (t === 'accel') return '<span class="arrow up">↗</span>';
+    if (t === 'decay') return '<span class="arrow dn">↘</span>';
+    return '<span class="arrow flat">→</span>';
   }
 
-  // ── De-correlated composite (2026-05-20 redesign) ─────────────────────
-  // Drops the old `raw_momentum × Sharpe × RS` blend which triple-counted
-  // RS-rank (RS appeared in `raw_momentum_score` AND as a separate term).
-  // New formula stays on signals that exist on every row in tickers.json:
-  //   composite = 0.40 × score_norm + 0.35 × sharpe_norm + 0.25 × rs_rank
-  // - score (0-100): system's composite — already includes momentum + tech
-  //   + fund + structure + sentiment. Most informative single number.
-  // - sharpe_126d: clamp(-3, 5) → 0-100 normalized.
-  // - rs_rank (0-100): cross-sectional strength.
+  // EMA signal pill: BULLISH STACK / MOSTLY BULLISH / MIXED / MOSTLY BEARISH / BEARISH STACK
+  function _emaSigHtml(sig) {
+    if (!sig) return '<span class="ema-sig unk">—</span>';
+    const map = {
+      'BULLISH STACK': ['full-bull', 'FULL ▲▲▲'],
+      'MOSTLY BULLISH': ['mostly-bull', 'MOSTLY ▲'],
+      'MIXED': ['mixed', 'MIXED'],
+      'MOSTLY BEARISH': ['mostly-bear', 'MOSTLY ▼'],
+      'BEARISH STACK': ['full-bear', 'FULL ▼▼▼'],
+    };
+    const [cls, lbl] = map[sig] || ['unk', sig];
+    return `<span class="ema-sig ${cls}" title="${sig} (price vs EMA 21/50/200)">${lbl}</span>`;
+  }
+
+  // Market phase pill: Trend / Pullback / Consolidation / Range
+  function _phaseHtml(phase) {
+    if (!phase) return '—';
+    const safeCls = ['Trend','Pullback','Consolidation','Range'].includes(phase) ? phase : 'Range';
+    return `<span class="phase ${safeCls}" title="Market phase classification">${phase}</span>`;
+  }
+
+  // ── Pure momentum composite (no system score, no verdict, no R:R) ─────
+  // Composite = 0.40 × sharpe_norm + 0.25 × rs + 0.20 × adx_norm + 0.15 × trend_bonus
+  // - sharpe_norm: clamp(sharpe_126d, -3, 5) → 0-100
+  // - rs: rs_rank (0-100)
+  // - adx_norm: clamp(adx, 0, 60) / 60 × 100 (ADX >25 = trending)
+  // - trend_bonus: +20 if accel, 0 if flat, -20 if decay
   function _compositeScore(r) {
-    const score = Math.max(0, Math.min(100, +r.score || 0));
-    const sharpe = Math.max(-3, Math.min(5, +r.sharpe_126d || 0));
-    const sharpe_norm = ((sharpe + 3) / 8) * 100;
+    const s126 = +r.sharpe_126d || 0;
+    const sNorm = ((Math.max(-3, Math.min(5, s126)) + 3) / 8) * 100;
     const rs = Math.max(0, Math.min(100, +r.rs_rank || 0));
-    return score * 0.40 + sharpe_norm * 0.35 + rs * 0.25;
+    const adx = +r.adx || 0;
+    const adxNorm = Math.min(60, Math.max(0, adx)) / 60 * 100;
+    const trend = _trendOf(+r.sharpe_126d, +r.sharpe_1y);
+    const trendBonus = trend === 'accel' ? 20 : trend === 'decay' ? -20 : 0;
+    return Math.max(0, Math.min(100, sNorm * 0.40 + rs * 0.25 + adxNorm * 0.20 + 50 + trendBonus * 0.15));
   }
 
   // ── Regime gating (principle 5/18) ────────────────────────────────────
-  // Returns { state, label, body } where state ∈ ACTIVE/DEGRADED/INVERTED/SUPPRESSED
   function _regimeGate(data) {
     const rg = (data && data.regime) || {};
     const r4 = rg.regime4 || rg.regime4_raw || 'unknown';
@@ -46021,25 +46062,36 @@ const QuantMomentum = (function () {
     const meta = `regime · ${r4} · ${vixStr} · ${brStr}`;
     if (r4 === 'panic') {
       return { state:'SUPPRESSED', label:'MOMENTUM FACTOR · SUPPRESSED', meta,
-        body:`Panic regime · momentum factor inverts violently here. <b>No long momentum trades.</b> Consider defensive sleeves only.` };
+        body:`Panic regime · momentum factor inverts violently here. The names below were strongest going INTO the drawdown — they're now the highest-beta-on-the-way-down. <b>No long momentum trades.</b>` };
     }
     if (r4 === 'risk_off_trending') {
       return { state:'INVERTED', label:'MOMENTUM FACTOR · INVERTED', meta,
-        body:`Risk-off · momentum names lead drawdowns (crowded-trade unwind). The list below shows what was strong — <b>treat it as a short-candidate watchlist</b>, not a buy list.` };
+        body:`Risk-off trending · momentum names lead drawdowns (crowded-trade unwind). Treat this list as a <b>short-candidate watchlist</b>, not a buy list.` };
     }
     if (r4 === 'risk_on_choppy') {
       return { state:'DEGRADED', label:'MOMENTUM FACTOR · DEGRADED', meta,
-        body:`Choppy regime · top-momentum names are crowded and prone to reversal. Favor <b>PULLBACK / VALID</b> entries on Trend Continuation setups; avoid chasing FRESH breakouts.` };
+        body:`Choppy regime · momentum still works but accelerating names are most vulnerable to reversal. Favor <b>flat/decay</b> tickers showing PULLBACK in Scanner — not fresh accelerators here.` };
     }
     if (r4 === 'risk_on_trending') {
       return { state:'ACTIVE', label:'MOMENTUM FACTOR · ACTIVE', meta,
-        body:`Trending regime · momentum factor works. <b>FRESH</b> + <b>PULLBACK</b> entries on Breakout Expansion / Trend Continuation are highest probability.` };
+        body:`Trending regime · momentum factor works. <b>Accelerating</b> names with EMA stack intact and ADX >25 are highest-conviction. Cross-reference with Scanner for entry quality + R:R.` };
     }
     return { state:'ACTIVE', label:'MOMENTUM FACTOR · UNKNOWN', meta,
-      body:`Regime context unavailable. Apply standard discipline: minimum R:R 3:1, defined stop.` };
+      body:`Regime context unavailable.` };
   }
 
-  // ── Build rows from the same source the rest of kairos uses ───────────
+  // ── Universe filter: momentum candidates only ─────────────────────────
+  // (rs_rank >= 60 AND above_21ema) OR (sharpe_126d >= 1.0 AND above_50ema)
+  // Drops dead names + losers + range-bound. Subset of universe by design.
+  function _isMomentumCandidate(r) {
+    const rs = +r.rs_rank || 0;
+    const s126 = +r.sharpe_126d || 0;
+    const up21 = !!r.above_21ema;
+    const up50 = !!r.above_50ema;
+    return (rs >= 60 && up21) || (s126 >= 1.0 && up50);
+  }
+
+  // ── Build rows ────────────────────────────────────────────────────────
   function _buildRows() {
     let all;
     if (_arr && _arr.length) all = _arr;
@@ -46052,136 +46104,106 @@ const QuantMomentum = (function () {
     }
     all = (all || []).filter(_isDict);
     return all.map(r => {
-      const tp = r.trade_plan || r.plan || {};
-      const entryLo = +tp.entry_low || 0;
-      const entryHi = +tp.entry_high || 0;
-      const entryMid = (entryLo && entryHi) ? (entryLo + entryHi) / 2 : 0;
+      const s126 = +r.sharpe_126d != null ? +r.sharpe_126d : null;
+      const s1y  = +r.sharpe_1y != null ? +r.sharpe_1y : null;
+      const wk52hi = +r.week52_high || 0;
       const price = +r.price || 0;
-      const atrPct = +r.atr_pct || 0;  // % of price
-      // % distance from entry midpoint (positive = above entry zone, extended)
-      const pctFromEntry = (entryMid && price) ? ((price - entryMid) / entryMid) * 100 : null;
-      // ATRs from entry midpoint (negative = below entry, positive = above)
-      const atrsFromEntry = (entryMid && price && atrPct) ? ((price - entryMid) / (price * atrPct / 100)) : null;
+      const pctFrom52wHi = (wk52hi && price) ? ((wk52hi - price) / wk52hi) * 100 : null;
       return {
         ticker: (r.ticker || r.symbol || '').toUpperCase(),
         name:   r.name || r.company,
         sector: r.sector || 'Other',
-        score:   +r.score || 0,
-        sharpe_126d: +r.sharpe_126d || 0,
         rs_rank: +r.rs_rank || 0,
-        composite: _compositeScore(r),
-        setup_family: r.setup_family || '—',
-        entry_quality: r.entry_quality || 'MISSED',
-        catalyst_tier: r.catalyst_tier != null ? +r.catalyst_tier : null,
-        verdict: r.verdict || 'AVOID',
-        rr_ratio: +r.rr_ratio || +r.rr || 0,
+        sharpe_126d: s126,
+        sharpe_1y:   s1y,
+        sortino_126d: +r.sortino_126d || null,
+        trend: _trendOf(s126, s1y),
+        above_21ema:  !!r.above_21ema,
+        above_50ema:  !!r.above_50ema,
+        above_200sma: !!r.above_200sma,
+        ema_signal: r.ema_signal,
+        adx: +r.adx || null,
+        rvol: +r.rvol || null,
+        sector_pct_rank: r.sector_pct_rank != null ? +r.sector_pct_rank : null,
+        market_phase: r.market_phase,
+        max_dd_3y: +r.max_dd_3y || null,
+        pct_from_52w_high: pctFrom52wHi,
         price: price,
-        atr_pct: atrPct,
-        pct_from_entry: pctFromEntry,
-        atrs_from_entry: atrsFromEntry,
+        composite: _compositeScore(r),
+        _is_momentum: _isMomentumCandidate(r),
         _raw: r,
       };
     });
   }
 
-  // ── KPI strip — re-prioritized around TRADEABLE candidates ────────────
-  function _renderKpis(rows) {
-    const tradeable = rows.filter(r => ['FRESH','PULLBACK','VALID'].includes(r.entry_quality) && r.verdict !== 'AVOID');
-    const fresh = rows.filter(r => r.entry_quality === 'FRESH').length;
-    const pull  = rows.filter(r => r.entry_quality === 'PULLBACK').length;
-    const t1Cat = rows.filter(r => r.catalyst_tier === 1).length;
-    const avgSh = tradeable.length ? tradeable.reduce((a,b)=>a+(b.sharpe_126d||0),0) / tradeable.length : 0;
+  // ── KPI strip ─────────────────────────────────────────────────────────
+  function _renderKpis(rows, allCount) {
+    const accel = rows.filter(r => r.trend === 'accel').length;
+    const decay = rows.filter(r => r.trend === 'decay').length;
+    const fullBull = rows.filter(r => r.ema_signal === 'BULLISH STACK').length;
+    const inTrend = rows.filter(r => r.market_phase === 'Trend').length;
+    const sharpAvg = rows.length ? rows.reduce((a, b) => a + (b.sharpe_126d || 0), 0) / rows.length : 0;
     return `
       <div class="qmom-kpis">
-        <div class="qmom-kpi gn"><div class="k">Tradeable now</div><div class="v gn">${tradeable.length}</div><div class="s">FRESH/PULLBACK/VALID · not AVOID</div></div>
-        <div class="qmom-kpi gn"><div class="k">FRESH entries</div><div class="v">${fresh}</div><div class="s">near breakout pivot</div></div>
-        <div class="qmom-kpi"><div class="k">PULLBACK entries</div><div class="v">${pull}</div><div class="s">at EMA/support</div></div>
-        <div class="qmom-kpi ${avgSh >= 1.5 ? 'gn' : avgSh >= 0 ? '' : 'rd'}"><div class="k">Avg Sharpe (tradeable)</div><div class="v ${avgSh >= 1.5 ? 'gn' : avgSh >= 0 ? '' : 'rd'}">${avgSh >= 0 ? '+' : ''}${avgSh.toFixed(2)}</div><div class="s">126-day annualized</div></div>
-        <div class="qmom-kpi"><div class="k">T1 catalysts</div><div class="v">${t1Cat}</div><div class="s">PEAD/UOA/VCP/52w</div></div>
+        <div class="qmom-kpi"><div class="k">Momentum universe</div><div class="v">${rows.length}</div><div class="s">of ${allCount} scored · curated</div></div>
+        <div class="qmom-kpi gn"><div class="k">Accelerating</div><div class="v gn">${accel}</div><div class="s">126d Sharpe &gt; 1y by 0.4+</div></div>
+        <div class="qmom-kpi rd"><div class="k">Decaying</div><div class="v rd">${decay}</div><div class="s">126d Sharpe &lt; 1y by 0.4+ · trim</div></div>
+        <div class="qmom-kpi gn"><div class="k">Full bull EMA stack</div><div class="v gn">${fullBull}</div><div class="s">price &gt; EMA 21/50/200</div></div>
+        <div class="qmom-kpi"><div class="k">In Trend phase</div><div class="v">${inTrend}</div><div class="s">vs Range / Consolidation</div></div>
+        <div class="qmom-kpi ${sharpAvg >= 1.5 ? 'gn' : sharpAvg >= 0 ? '' : 'rd'}"><div class="k">Avg Sharpe 126d</div><div class="v ${sharpAvg >= 1.5 ? 'gn' : sharpAvg >= 0 ? '' : 'rd'}">${sharpAvg >= 0 ? '+' : ''}${sharpAvg.toFixed(2)}</div><div class="s">universe-wide</div></div>
       </div>`;
   }
 
   // ── Filters ──────────────────────────────────────────────────────────
   function _renderFilters(rows) {
-    const families = {};
-    rows.forEach(r => { families[r.setup_family || '—'] = (families[r.setup_family || '—'] || 0) + 1; });
-    const familyKeys = Object.keys(families).sort((a, b) => families[b] - families[a]).slice(0, 6);
-    const eqCounts = { FRESH:0, PULLBACK:0, VALID:0, EXTENDED:0, MISSED:0 };
-    const catCounts = { 1:0, 2:0, 3:0 };
+    const trendCt = { accel:0, flat:0, decay:0 };
+    const phaseCt = { Trend:0, Pullback:0, Consolidation:0, Range:0 };
     rows.forEach(r => {
-      if (eqCounts[r.entry_quality] != null) eqCounts[r.entry_quality]++;
-      if (r.catalyst_tier && catCounts[r.catalyst_tier] != null) catCounts[r.catalyst_tier]++;
+      trendCt[r.trend] = (trendCt[r.trend] || 0) + 1;
+      if (phaseCt[r.market_phase] != null) phaseCt[r.market_phase]++;
     });
-    const tradeableCt = rows.filter(r => ['FRESH','PULLBACK','VALID'].includes(r.entry_quality) && r.verdict !== 'AVOID').length;
-
-    const famPill = (k, lbl, ct) => {
-      const safe = String(k).replace(/'/g, "\\'");
-      return `<button class="qmom-pill ${_activeFamily === k ? 'on' : ''}" onclick="QuantMomentum.setFamily('${safe}')">${lbl}${ct != null ? ` <span class="ct">${ct}</span>` : ''}</button>`;
-    };
-    const eqPill  = (k, lbl, ct) => `<button class="qmom-pill ${_activeQuality === k ? 'on' : ''}" onclick="QuantMomentum.setQuality('${k}')">${lbl}${ct != null ? ` <span class="ct">${ct}</span>` : ''}</button>`;
-    const catPill = (k, lbl, ct) => `<button class="qmom-pill ${_activeCatalyst === k ? 'on' : ''}" onclick="QuantMomentum.setCatalyst('${k}')">${lbl}${ct != null ? ` <span class="ct">${ct}</span>` : ''}</button>`;
-    const vrdPill = (k, lbl) => `<button class="qmom-pill ${_activeVerdict === k ? 'on' : ''}" onclick="QuantMomentum.setVerdict('${k}')">${lbl}</button>`;
-
+    const trPill = (k, lbl, ct) => `<button class="qmom-pill ${_activeTrend === k ? 'on' : ''}" onclick="QuantMomentum.setTrend('${k}')">${lbl}${ct != null ? ` <span class="ct">${ct}</span>` : ''}</button>`;
+    const phPill = (k, lbl, ct) => `<button class="qmom-pill ${_activeStage === k ? 'on' : ''}" onclick="QuantMomentum.setStage('${k}')">${lbl}${ct != null ? ` <span class="ct">${ct}</span>` : ''}</button>`;
     return `
       <div class="qmom-filters">
         <div class="qmom-filter-group">
-          <span class="qmom-filter-lbl">Entry</span>
-          ${eqPill('tradeable', '✓ Tradeable', tradeableCt)}
-          ${eqPill('all', 'All')}
-          ${eqPill('FRESH', 'FRESH', eqCounts.FRESH)}
-          ${eqPill('PULLBACK', 'PULLBACK', eqCounts.PULLBACK)}
-          ${eqPill('VALID', 'VALID', eqCounts.VALID)}
-          ${eqPill('EXTENDED', 'EXTENDED', eqCounts.EXTENDED)}
-          ${eqPill('MISSED', 'MISSED', eqCounts.MISSED)}
+          <span class="qmom-filter-lbl">Trend</span>
+          ${trPill('all', 'All')}
+          ${trPill('accel', 'Accelerating ↗', trendCt.accel)}
+          ${trPill('flat', 'Flat →', trendCt.flat)}
+          ${trPill('decay', 'Decaying ↘', trendCt.decay)}
         </div>
         <div class="qmom-filter-group">
-          <span class="qmom-filter-lbl">Catalyst</span>
-          ${catPill('all', 'All')}
-          ${catPill('1', 'T1', catCounts[1])}
-          ${catPill('2', 'T2', catCounts[2])}
-          ${catPill('3', 'T3', catCounts[3])}
+          <span class="qmom-filter-lbl">Phase</span>
+          ${phPill('all', 'All')}
+          ${phPill('Trend', 'Trend', phaseCt.Trend)}
+          ${phPill('Pullback', 'Pullback', phaseCt.Pullback)}
+          ${phPill('Consolidation', 'Consolidation', phaseCt.Consolidation)}
+          ${phPill('Range', 'Range', phaseCt.Range)}
         </div>
-        <div class="qmom-filter-group">
-          <span class="qmom-filter-lbl">Family</span>
-          ${famPill('all', 'All', rows.length)}
-          ${familyKeys.map(f => famPill(f, f, families[f])).join('')}
-        </div>
-        <div class="qmom-filter-group">
-          <span class="qmom-filter-lbl">Verdict</span>
-          ${vrdPill('no_avoid', 'Hide AVOID')}
-          ${vrdPill('buy', 'BUY only')}
-          ${vrdPill('watch', 'WATCH+')}
-          ${vrdPill('all', 'All')}
-        </div>
+        ${_activeSector !== 'all' ? `<div class="qmom-filter-group"><span class="qmom-filter-lbl">Sector</span><button class="qmom-pill on" onclick="QuantMomentum.setSector('all')">${_esc(_activeSector)} ✕</button></div>` : ''}
       </div>`;
   }
 
   function _applyFilters(rows) {
     return rows.filter(r => {
-      if (_activeFamily !== 'all' && r.setup_family !== _activeFamily) return false;
-      if (_activeQuality === 'tradeable') {
-        if (!['FRESH','PULLBACK','VALID'].includes(r.entry_quality)) return false;
-        if (r.verdict === 'AVOID') return false;
-      } else if (_activeQuality !== 'all') {
-        if (r.entry_quality !== _activeQuality) return false;
-      }
-      if (_activeCatalyst !== 'all' && String(r.catalyst_tier || '') !== _activeCatalyst) return false;
-      if (_activeVerdict === 'no_avoid' && r.verdict === 'AVOID') return false;
-      if (_activeVerdict === 'buy' && r.verdict !== 'BUY') return false;
-      if (_activeVerdict === 'watch' && !['BUY','WATCH'].includes(r.verdict)) return false;
+      if (_activeTrend !== 'all' && r.trend !== _activeTrend) return false;
+      if (_activeStage !== 'all' && r.market_phase !== _activeStage) return false;  // _activeStage now holds phase name
+      if (_activeSector !== 'all' && r.sector !== _activeSector) return false;
       return true;
     });
   }
 
+  // ── Table ────────────────────────────────────────────────────────────
   function _renderTable(rows) {
     if (rows.length === 0) {
-      return `<div class="qmom-tbl"><div class="qmom-empty">No tickers match the current filters. Try widening Entry (e.g. "All") or removing the Catalyst tier filter.</div></div>`;
+      return `<div class="qmom-tbl"><div class="qmom-empty">No momentum candidates match the current filters. Try widening Trend or Stage.</div></div>`;
     }
-    const top = rows.slice(0, 50);
+    const top = rows.slice(0, 80);
     return `
       <div class="qmom-tbl">
         <div class="qmom-tbl-hd">
-          <span>🎯 Momentum candidates · sorted by Entry Quality, then Composite</span>
+          <span>🚀 Momentum candidates · sorted by 126d Sharpe (trend-arrow vs 1y)</span>
           <span class="ct">showing ${top.length} of ${rows.length}</span>
         </div>
         <table>
@@ -46189,42 +46211,43 @@ const QuantMomentum = (function () {
             <tr>
               <th class="r">#</th>
               <th>Ticker</th>
-              <th>Entry</th>
-              <th>Verdict</th>
-              <th class="r">Composite</th>
-              <th class="r">Score</th>
-              <th class="r">Sharpe 126d</th>
-              <th class="r">RS</th>
-              <th>Catalyst</th>
-              <th>Setup</th>
-              <th class="r">R:R</th>
-              <th class="r" title="ATRs from entry-zone midpoint. Negative = below entry (pullback opp). 0 = in zone. Positive = extended.">ATRs vs entry</th>
+              <th class="r" title="126d Sharpe with arrow showing trend vs 1y Sharpe">Sharpe 126d</th>
+              <th class="r" title="126d Sortino — downside-adjusted Sharpe">Sortino</th>
+              <th>Trend</th>
+              <th title="EMA signal: price vs EMA 21/50/200 — FULL ▲▲▲ = bullish stack">EMA Signal</th>
+              <th class="r" title="ADX trend strength (&gt;25 = trending, &gt;40 = strong)">ADX</th>
+              <th class="r" title="Volume confirmation (relative to 20d avg)">RVOL</th>
+              <th class="r" title="Sector percentile rank (this ticker vs sector peers)">Sec RS</th>
+              <th title="Market phase: Trend / Pullback / Consolidation / Range">Phase</th>
+              <th class="r" title="Distance below 52w high (smaller = closer to highs)">% 52wHi</th>
+              <th class="r" title="3-year max drawdown — context for volatility">3y MaxDD</th>
               <th>Sector</th>
               <th class="r">Price</th>
             </tr>
           </thead>
           <tbody>
             ${top.map((r, i) => {
-              const atrsTxt = r.atrs_from_entry != null ? (r.atrs_from_entry >= 0 ? '+' : '') + r.atrs_from_entry.toFixed(2) : '—';
-              const atrsCls = r.atrs_from_entry == null ? 'neu'
-                : (r.atrs_from_entry >= 1.25 ? 'neg'                    // extended
-                : r.atrs_from_entry <= -0.5 ? 'neu'                     // below entry — pullback wait
-                : 'pos');                                                // in zone
+              const s126Cls = r.sharpe_126d == null ? 'neu' : r.sharpe_126d >= 1.5 ? 'pos' : r.sharpe_126d >= 0 ? 'neu' : 'neg';
+              const sortCls = r.sortino_126d == null ? 'neu' : r.sortino_126d >= 1.5 ? 'pos' : r.sortino_126d >= 0 ? 'neu' : 'neg';
+              const adxCls  = r.adx == null ? 'neu' : r.adx >= 25 ? 'pos' : r.adx >= 15 ? 'neu' : 'neg';
+              const rvolCls = r.rvol == null ? 'neu' : r.rvol >= 1.5 ? 'pos' : r.rvol >= 0.8 ? 'neu' : 'neg';
+              const wk52Txt = r.pct_from_52w_high != null ? '-' + r.pct_from_52w_high.toFixed(1) + '%' : '—';
+              const wk52Cls = r.pct_from_52w_high == null ? 'neu' : r.pct_from_52w_high <= 5 ? 'pos' : r.pct_from_52w_high <= 15 ? 'neu' : 'neg';
               return `
               <tr class="row-link" onclick="if(window.setDetailTicker) window.setDetailTicker('${r.ticker}')">
                 <td class="r rank">${i + 1}</td>
                 <td><span class="tk">${r.ticker}</span></td>
-                <td><span class="eq ${_eqClass(r.entry_quality)}">${r.entry_quality}</span></td>
-                <td><span class="vrd ${_vrdClass(r.verdict)}">${r.verdict}</span></td>
-                <td class="r"><span class="score ${_scoreCls(r.composite)}">${r.composite.toFixed(1)}</span></td>
-                <td class="r">${_num(r.score, 0)}</td>
-                <td class="r ${r.sharpe_126d >= 1.5 ? 'pos' : r.sharpe_126d >= 0 ? 'neu' : 'neg'}">${_num(r.sharpe_126d)}</td>
-                <td class="r">${_num(r.rs_rank, 0)}</td>
-                <td>${r.catalyst_tier ? `<span class="cat T${r.catalyst_tier}">T${r.catalyst_tier}</span>` : '—'}</td>
-                <td class="setup-fam" title="${r.setup_family}">${r.setup_family}</td>
-                <td class="r ${r.rr_ratio >= 3 ? 'pos' : r.rr_ratio > 0 ? 'neu' : 'neg'}">${r.rr_ratio ? '1:' + r.rr_ratio.toFixed(1) : '—'}</td>
-                <td class="r ${atrsCls}">${atrsTxt}</td>
-                <td>${r.sector}</td>
+                <td class="r ${s126Cls}">${r.sharpe_126d != null ? (r.sharpe_126d >= 0 ? '+' : '') + r.sharpe_126d.toFixed(2) : '—'}${_trendArrow(r.sharpe_126d, r.sharpe_1y)}</td>
+                <td class="r ${sortCls}">${r.sortino_126d != null ? (r.sortino_126d >= 0 ? '+' : '') + r.sortino_126d.toFixed(2) : '—'}</td>
+                <td><span class="trend ${r.trend}">${r.trend === 'accel' ? 'ACCEL' : r.trend === 'decay' ? 'DECAY' : 'FLAT'}</span></td>
+                <td>${_emaSigHtml(r.ema_signal)}</td>
+                <td class="r ${adxCls}">${_num(r.adx, 0)}</td>
+                <td class="r ${rvolCls}">${r.rvol != null ? r.rvol.toFixed(2) + '×' : '—'}</td>
+                <td class="r">${r.sector_pct_rank != null ? Math.round(r.sector_pct_rank) : '—'}</td>
+                <td>${_phaseHtml(r.market_phase)}</td>
+                <td class="r ${wk52Cls}">${wk52Txt}</td>
+                <td class="r neg">${r.max_dd_3y != null ? r.max_dd_3y.toFixed(1) + '%' : '—'}</td>
+                <td>${_esc(r.sector)}</td>
                 <td class="r">$${_num(r.price)}</td>
               </tr>`;
             }).join('')}
@@ -46233,27 +46256,30 @@ const QuantMomentum = (function () {
       </div>`;
   }
 
+  // ── Sector roll-up (clickable to filter) ─────────────────────────────
   function _renderSectorRollup(rows) {
     const bySector = {};
     rows.forEach(r => {
-      if (!bySector[r.sector]) bySector[r.sector] = { n: 0, sum: 0 };
+      if (!bySector[r.sector]) bySector[r.sector] = { n: 0, sum: 0, accel: 0, decay: 0 };
       bySector[r.sector].n++;
       bySector[r.sector].sum += r.composite;
+      if (r.trend === 'accel') bySector[r.sector].accel++;
+      if (r.trend === 'decay') bySector[r.sector].decay++;
     });
     const cells = Object.entries(bySector)
-      .filter(([, v]) => v.n >= 3)
-      .map(([sec, v]) => ({ sec, n: v.n, avg: v.sum / v.n }))
+      .filter(([, v]) => v.n >= 2)
+      .map(([sec, v]) => ({ sec, n: v.n, avg: v.sum / v.n, accel: v.accel, decay: v.decay }))
       .sort((a, b) => b.avg - a.avg)
       .slice(0, 16);
     if (cells.length === 0) return '';
     return `
-      <div class="qmom-sectors-h">Sector momentum · avg composite (filtered)</div>
+      <div class="qmom-sectors-h">Sector momentum · avg composite · click to filter</div>
       <div class="qmom-sectors">
         ${cells.map(c => `
-          <div class="qmom-sec-cell">
-            <div class="nm">${c.sec}</div>
+          <div class="qmom-sec-cell ${_activeSector === c.sec ? 'on' : ''}" onclick="QuantMomentum.setSector('${_esc(c.sec).replace(/'/g, '&#39;')}')">
+            <div class="nm">${_esc(c.sec)}</div>
             <div class="v">${c.avg.toFixed(1)}</div>
-            <div class="s">avg composite · n=${c.n}</div>
+            <div class="s">n=${c.n} · ${c.accel}↗ / ${c.decay}↘</div>
           </div>`).join('')}
       </div>`;
   }
@@ -46265,65 +46291,57 @@ const QuantMomentum = (function () {
     _arr = arr;
     panel.classList.remove('ep-active');
     _repaint();
-    const allRows = _buildRows();
+    const all = _buildRows();
+    const momRows = all.filter(r => r._is_momentum);
     const ct = document.getElementById('sb-momentum');
-    if (ct) {
-      // Sidebar count = tradeable candidates (FRESH/PULLBACK/VALID + not AVOID)
-      const tradeable = allRows.filter(r => ['FRESH','PULLBACK','VALID'].includes(r.entry_quality) && r.verdict !== 'AVOID');
-      ct.textContent = tradeable.length;
-    }
-  }
-
-  // ── Sort: entry-quality priority, then composite desc ──
-  // FRESH = 0, PULLBACK = 1, VALID = 2, EXTENDED = 3, MISSED = 4
-  function _eqSortKey(q) {
-    return { FRESH:0, PULLBACK:1, VALID:2, EXTENDED:3, MISSED:4 }[q] != null
-      ? { FRESH:0, PULLBACK:1, VALID:2, EXTENDED:3, MISSED:4 }[q] : 5;
+    if (ct) ct.textContent = momRows.length;
   }
 
   function _repaint() {
     if (!_hostPanel) return;
-    const rows = _buildRows();
-    if (rows.length === 0) {
+    const all = _buildRows();
+    const momRows = all.filter(r => r._is_momentum);
+    if (all.length === 0) {
       _hostPanel.innerHTML = `
         <div class="qmom-wrap">
           <div class="qmom-bc">Kairos · Workspaces · <b>Momentum</b></div>
           <div class="qmom-empty">
             <div style="font:800 14px var(--mono);color:var(--copper);margin-bottom:10px">No scan data loaded yet</div>
-            <div>Make sure <code style="background:var(--bg-2);padding:2px 6px;color:var(--copper)">cache/last_bundle.json</code> has been generated by today's scan.</div>
+            <div>Run the daily scan or wait for the next 6/7/11/13:30/15:00 PT scheduled scan.</div>
           </div>
         </div>`;
       return;
     }
-    const filtered = _applyFilters(rows).sort((a, b) => {
-      const dq = _eqSortKey(a.entry_quality) - _eqSortKey(b.entry_quality);
-      if (dq !== 0) return dq;
-      return b.composite - a.composite;
-    });
+    const filtered = _applyFilters(momRows).sort((a, b) => (b.sharpe_126d || 0) - (a.sharpe_126d || 0));
     const gate = _regimeGate(_data);
     _hostPanel.innerHTML = `
       <div class="qmom-wrap">
-        <div class="qmom-bc">Kairos · Workspaces · <b>Momentum</b> · <span class="cu">tradeable candidates · regime-gated</span></div>
+        <div class="qmom-bc">Kairos · Workspaces · <b>Momentum</b> · <span class="cu">curated momentum-only universe (RS≥60 + EMA21 trending, or Sharpe≥1.0 + EMA50 trending)</span></div>
         <div class="qmom-regime ${gate.state}">
           <div class="qmom-rgm-h"><h2>${gate.label}</h2><span class="meta">${gate.meta}</span></div>
           <div class="qmom-rgm-body">${gate.body}</div>
         </div>
-        ${_renderKpis(rows)}
-        ${_renderFilters(rows)}
+        ${_renderKpis(momRows, all.length)}
+        ${_renderFilters(momRows)}
         ${_renderTable(filtered)}
         ${_renderSectorRollup(filtered)}
+        <div class="qmom-note">
+          <b>What this tab is:</b> a momentum-factor lens — <i>which names have working momentum, and is that momentum accelerating or decaying</i>. No score, verdict, R:R, or entry-quality columns by design — those are <b>Signal Scanner</b>'s job. Cross-reference: come here to read the momentum context, go to Scanner for the BUY/WATCH decision + entry plan.
+        </div>
       </div>`;
   }
 
-  function setFamily(f)   { _activeFamily = f; _repaint(); }
-  function setQuality(q)  { _activeQuality = q; _repaint(); }
-  function setCatalyst(c) { _activeCatalyst = c; _repaint(); }
-  function setVerdict(v)  { _activeVerdict = v; _repaint(); }
-  // Legacy alias — old Grade pill no longer exists, kept so any external
-  // call to setGrade doesn't error (it just no-ops the active filter).
-  function setGrade(_g)   { _repaint(); }
+  function setTrend(t)   { _activeTrend = t; _repaint(); }
+  function setStage(s)   { _activeStage = s; _repaint(); }
+  function setSector(s)  { _activeSector = s; _repaint(); }
+  // Legacy aliases — older callers may still reference these. No-op.
+  function setFamily(_f)   { _repaint(); }
+  function setQuality(_q)  { _repaint(); }
+  function setCatalyst(_c) { _repaint(); }
+  function setVerdict(_v)  { _repaint(); }
+  function setGrade(_g)    { _repaint(); }
 
-  return { render, setFamily, setQuality, setCatalyst, setVerdict, setGrade };
+  return { render, setTrend, setStage, setSector, setFamily, setQuality, setCatalyst, setVerdict, setGrade };
 })();
 
 
