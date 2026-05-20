@@ -12478,12 +12478,57 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
         }
       }
       if (!t) {
-        // 2026-05-18 · downgraded from warn → debug (was noisy with
-        // Pre-Market Catalysts surfacing tickers like HLT/ARES not in
-        // scan). Fallback still opens detail page; ML Edge sub-tab
-        // fetches its own data on demand.
-        if (window.__DEBUG_KAIROS) console.debug('[kairos] ticker not in scan:', symbol);
-        t = { ticker: symbol, symbol: symbol, name: symbol, _fromMlEdge: true };
+        // 2026-05-20 · On-demand snapshot for watchlist tickers not in last scan.
+        // Fires /api/ticker-snapshot which reads decision_log for last known
+        // score/verdict/gates — Vinod scenario: added AMRC to watchlist, opens
+        // detail today, AMRC wasn't scored in last bundle.
+        if (window.__DEBUG_KAIROS) console.debug('[kairos] ticker not in scan, fetching snapshot:', symbol);
+        t = { ticker: symbol, symbol: symbol, name: symbol, _fromMlEdge: true, _loadingSnapshot: true };
+        // Render immediately with loading state, then hydrate when API returns
+        _selTicker = symbol;
+        if (window.QuantDetail) window.QuantDetail.render(symbol, _activeSub, t);
+        document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.dataset.pan === 'detail'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.toggle('on', p.id === 'pan-detail'));
+        const _ws2 = document.getElementById('pan-workspace');
+        if (_ws2) { _ws2.classList.remove('on','qo-active','qs-active','ep-active','pa-active'); _ws2.style.height=''; }
+        document.body.classList.remove('on-workspace');
+        const detLink2 = document.querySelector('.sb-link-detail');
+        if (detLink2) { detLink2.classList.remove('is-hidden'); const lbl2=detLink2.querySelector('.lbl'); if(lbl2) lbl2.textContent=symbol+' Detail'; }
+        document.querySelectorAll('.sb-link').forEach(l => l.classList.toggle('on', l.dataset.tab==='detail'));
+        const _topDet2 = document.querySelector('.tabs .tab[data-pan="detail"]');
+        if (_topDet2) _topDet2.classList.remove('is-hidden');
+        document.body.classList.add('tab-detail-on');
+        if (typeof window._syncTopStratPills === 'function') window._syncTopStratPills();
+        // Async hydrate from decision_log snapshot
+        fetch('/api/ticker-snapshot?t=' + encodeURIComponent(symbol), { credentials: 'include' })
+          .then(r => r.ok ? r.json() : null)
+          .then(snap => {
+            if (!snap || symbol !== _selTicker) return;  // navigated away
+            // Merge snapshot data into the stub so sub-tabs get real data
+            const hydrated = {
+              ticker: symbol, symbol: symbol, name: snap.bundle_row?.name || symbol,
+              sector: snap.bundle_row?.sector || null,
+              score:  snap.score,
+              verdict: snap.verdict,
+              setup_family: snap.setup_family,
+              regime4: snap.regime,
+              rr_ratio: snap.rr_ratio,
+              entry_price: snap.entry_price,
+              gates_hit: snap.gates_hit,
+              score_breakdown: snap.score_breakdown,
+              price: snap.live_price || snap.bundle_row?.price || null,
+              _fromSnapshot: true,
+              _snapshotDate: snap.last_scanned,
+              _snapshotNote: snap._note,
+              ...(snap.bundle_row || {}),
+            };
+            // Update the global ticker map so sub-tabs also see the data
+            if (window._tickerMap) window._tickerMap[symbol] = hydrated;
+            console.info('[kairos] snapshot hydrated:', symbol, 'score=' + snap.score, 'verdict=' + snap.verdict);
+            if (window.QuantDetail && _selTicker === symbol) window.QuantDetail.render(symbol, _activeSub, hydrated);
+          })
+          .catch(err => console.debug('[kairos] snapshot fetch failed for', symbol, err));
+        return;  // early return — rest of setDetailTicker handled above
       }
     }
     _selTicker = symbol;
@@ -19899,6 +19944,58 @@ const QuantHistoryLedger = (function() {
     }
     _renderLedger(content, _ledgerCache);
   };
+
+  // 2026-05-19 · CSV export of the audit ledger. Exports CURRENTLY-FILTERED
+  // records (respecting Hide Pending + year/mode/verdict/setup/sector/outcome
+  // /ticker filters), so what the user sees is what they get. Excel opens
+  // .csv natively — no XLSX library / new dependency needed.
+  window._qauditExportCSV = function(scope) {
+    console.log('[audit-trail] export csv · scope:', scope || 'filtered');
+    if (!_ledgerCache || !_ledgerCache.records) {
+      console.warn('[audit-trail] no cache to export');
+      return;
+    }
+    const all = _ledgerCache.records;
+    const pool = scope === 'all' ? all : _filtered(all);
+    if (!pool.length) {
+      alert('No records to export with current filters. Try clicking 🕓 SHOW PENDING or clearing filters.');
+      return;
+    }
+    // Column order matches the on-screen table for familiarity
+    const cols = [
+      'pick_date', 'ticker', 'mode', 'verdict', 'direction',
+      'setup', 'setup_family', 'sector', 'conviction_tier', 'entry_quality',
+      'score', 'price_at_pick', 'stop', 'target1', 'target2', 'rr_ratio', 'rs_rank',
+      'rvol', 'rsi', 'weekly_bull', 'regime4', 'catalyst_tier',
+      'd0', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7',
+      'w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8',
+      'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'm12',
+      'mae_pct', 'mfe_pct', 'days_to_t1', 'days_to_stop',
+      'outcome', 'realized_r', '_source',
+    ];
+    // Escape per RFC 4180 — quote if contains comma, quote, or newline
+    const esc = (v) => {
+      if (v == null) return '';
+      const s = String(v);
+      if (s.indexOf(',') < 0 && s.indexOf('"') < 0 && s.indexOf('\n') < 0) return s;
+      return '"' + s.replace(/"/g, '""') + '"';
+    };
+    const header = cols.join(',');
+    const rows = pool.map(r => cols.map(c => esc(r[c])).join(','));
+    const csv = header + '\n' + rows.join('\n') + '\n';
+    // Trigger download via blob + invisible <a>
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const today = new Date().toISOString().slice(0, 10);
+    const fname = `kairos-audit-ledger-${today}-${pool.length}rows${scope === 'all' ? '-all' : ''}.csv`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+    console.log(`[audit-trail] exported ${pool.length} rows to ${fname}`);
+  };
   let _sortKey = 'pick_date';
   let _sortDir = 'desc';
   let _page = 0;
@@ -19977,6 +20074,8 @@ const QuantHistoryLedger = (function() {
           <span class="stat">D1-D7 · W1-W8 · M1-M12 <b>(${HORIZONS.length} horizons)</b></span>
           <button onclick="_qauditTogglePending()" title="Toggle visibility of today's freshly-picked rows that haven't matured to D1 yet" style="margin-left:8px;padding:3px 10px;font:700 9.5px ui-monospace,monospace;background:${_filters.hidePending ? 'var(--bg-3)' : 'var(--amb)'};color:${_filters.hidePending ? 'var(--ink-1)' : '#000'};border:1px solid var(--line);border-radius:2px;cursor:pointer;letter-spacing:0.06em">${_filters.hidePending ? '🕓 SHOW PENDING' : '✓ HIDING PENDING'}</button>
           <button onclick="_qauditForceRefresh()" style="margin-left:4px;padding:3px 10px;font:700 9.5px ui-monospace,monospace;background:var(--copper);color:#fff;border:0;border-radius:2px;cursor:pointer;letter-spacing:0.06em">↻ REFRESH</button>
+          <button onclick="_qauditExportCSV('filtered')" title="Export currently-filtered records to CSV (Excel-compatible). Respects all active filters." style="margin-left:4px;padding:3px 10px;font:700 9.5px ui-monospace,monospace;background:var(--gn);color:#000;border:0;border-radius:2px;cursor:pointer;letter-spacing:0.06em">↓ EXCEL · FILTERED</button>
+          <button onclick="_qauditExportCSV('all')" title="Export ALL records (ignores filters) — ~2,200 rows" style="margin-left:2px;padding:3px 10px;font:700 9.5px ui-monospace,monospace;background:transparent;color:var(--gn);border:1px solid var(--gn-dim);border-radius:2px;cursor:pointer;letter-spacing:0.06em">↓ ALL</button>
         </div>
         <div class="qhist-filters">
           ${_filterChips('year', allYears, _filters.year, 'Year')}
@@ -27061,9 +27160,62 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     // Encode ctx as JSON string for the onclick — escape single-quotes
     const ctxJson = JSON.stringify({ price: px, stop, t1, t2, setup }).replace(/'/g, "\\'");
 
+    // ── 2026-05-19 · Schwab session-context chips ──
+    // Pulled in by build_data.py from /quotes blob; surfaces:
+    //   • Halt status (red chip)         → from securityStatus
+    //   • Today's % change (gn/rd)       → today_net_pct
+    //   • After-hours % move (small)     → postmarket_pct
+    //   • Mark vs last delta             → mark_pct_change
+    //   • Spread (wide-only warning)     → spread_bp
+    //   • Historical volatility chip     → hist_volatility
+    //   • Days-to-ex-div warning chip    → days_to_ex_div (when ≤ 14d)
+    const _ss = t.session_context || {};
+    const _sStatus = _ss.security_status || t.security_status || 'Normal';
+    const _isHalted = !!(_ss.is_halted || t.is_halted) || /halt|news pending|deleted/i.test(_sStatus);
+    const _dayPct = (_ss.day_change_pct != null) ? +_ss.day_change_pct : (t.day_change_pct != null ? +t.day_change_pct : null);
+    const _ahPct  = (_ss.postmarket_pct != null) ? +_ss.postmarket_pct : null;
+    const _markPct = (_ss.mark_pct_change != null) ? +_ss.mark_pct_change : null;
+    const _spreadBp = _ss.spread_bp != null ? +_ss.spread_bp : null;
+    const _hv = _ss.hist_volatility != null ? +_ss.hist_volatility : null;
+    const _dteDiv = _ss.days_to_ex_div != null ? +_ss.days_to_ex_div : null;
+    const _imbal = _ss.bid_ask_imbalance != null ? +_ss.bid_ask_imbalance : null;
+
+    let _sessionChips = '';
+    if (_isHalted) {
+      _sessionChips += `<span class="qd-qa-chip rd" title="Exchange-flagged trading halt — broker will reject orders. Status: ${_sStatus}">🛑 HALTED · ${_sStatus}</span>`;
+    }
+    if (_dayPct != null) {
+      const _cls = _dayPct > 0 ? 'gn' : _dayPct < 0 ? 'rd' : '';
+      const _sign = _dayPct > 0 ? '+' : '';
+      _sessionChips += `<span class="qd-qa-chip ${_cls}" title="Today's net change (RTH).">${_sign}${_dayPct.toFixed(2)}% today</span>`;
+    }
+    if (_ahPct != null && Math.abs(_ahPct) > 0.05) {
+      const _cls = _ahPct > 0 ? 'gn' : 'rd';
+      const _sign = _ahPct > 0 ? '+' : '';
+      _sessionChips += `<span class="qd-qa-chip ${_cls}" style="opacity:.85" title="After-hours move (post-close).">${_sign}${_ahPct.toFixed(2)}% AH</span>`;
+    }
+    if (_spreadBp != null && _spreadBp > 50) {
+      _sessionChips += `<span class="qd-qa-chip am" title="Wide bid-ask spread (${_spreadBp.toFixed(0)}bp) — slippage risk, consider limit orders only.">spread ${_spreadBp.toFixed(0)}bp</span>`;
+    }
+    if (_imbal != null && Math.abs(_imbal) > 0.4) {
+      const _cls = _imbal > 0 ? 'gn' : 'rd';
+      const _label = _imbal > 0 ? 'BID' : 'ASK';
+      _sessionChips += `<span class="qd-qa-chip ${_cls}" style="opacity:.85" title="NBBO depth imbalance: ${(_imbal*100).toFixed(0)}% skewed toward ${_label.toLowerCase()}. Positive = demand, negative = supply.">${_label}-heavy</span>`;
+    }
+    if (_hv != null && _hv > 0) {
+      _sessionChips += `<span class="qd-qa-chip" style="color:var(--ink-2);border-color:var(--line-2)" title="Schwab historical volatility (HV30).">HV ${(_hv*100).toFixed(1)}%</span>`;
+    }
+    if (_dteDiv != null && _dteDiv >= 0 && _dteDiv <= 14) {
+      _sessionChips += `<span class="qd-qa-chip am" title="Ex-dividend date in ${_dteDiv} day(s) — price drops by div amount on ex-date.">ex-div ${_dteDiv}d</span>`;
+    }
+
     return `
       <style id="qd-quick-action-css">
         .qd-qa{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;padding:10px 16px;background:linear-gradient(180deg,var(--bg-1) 0%,var(--bg) 100%);border-bottom:1px solid var(--line);font-family:var(--mono);flex-wrap:wrap}
+        .qd-qa-chip{display:inline-flex;align-items:center;padding:3px 9px;border-radius:2px;font:700 10px var(--mono);letter-spacing:.06em;border:1px solid var(--line-2);background:var(--bg-3);color:var(--ink-1);text-transform:none}
+        .qd-qa-chip.gn{color:var(--gn);border-color:var(--gn-dim);background:var(--gn-bg)}
+        .qd-qa-chip.rd{color:var(--rd);border-color:var(--rd-dim);background:var(--rd-bg)}
+        .qd-qa-chip.am{color:var(--amb);border-color:var(--amb-dim);background:var(--amb-bg)}
         .qd-qa-tk{font:800 18px var(--mono);color:var(--ink);letter-spacing:.06em;min-width:60px}
         .qd-qa-px{font:700 13px var(--mono);color:var(--ink-1);min-width:80px}
         .qd-qa-sys{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:2px;font:700 10px var(--mono);letter-spacing:.10em;text-transform:uppercase;border:1px solid;background:var(--bg-3)}
@@ -27083,6 +27235,8 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
         .qd-qa-btn.short:hover{background:var(--rd-bg)}
         .qd-qa-btn.watch{background:var(--bg-2);color:var(--ink-1);border-color:var(--line-2)}
         .qd-qa-btn.watch:hover{background:var(--bg-3);color:var(--ink)}
+        .qd-qa-btn.halted-warn{outline:2px dashed var(--rd);outline-offset:2px;opacity:.85}
+        .qd-qa-btn.halted-warn:hover{opacity:1}
       </style>
       <div class="qd-qa">
         <div class="qd-qa-tk">${tk}</div>
@@ -27090,19 +27244,20 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
         <span class="qd-qa-sys ${sysTone}" title="${rulebook ? rulebook + ' · stop ' + stopBasis + ' · ' : ''}System read · informational only · does NOT gate the action buttons">
           ${sysLabel}${conv ? ' · ' + conv : ''}<small>${sysSub}${rulebook ? ' · ' + rulebook : ''}</small>
         </span>
+        ${_sessionChips}
         <div class="qd-qa-spacer"></div>
         ${modeAllocPct > 0 ? `<span class="qd-qa-info" title="Suggested allocation after applying ${rulebook} size mult ${modeSizeMult.toFixed(2)}× to the base half-Kelly haircut chain. You set the actual size in the modal.">size <b>${modeAllocPct.toFixed(1)}%</b> NAV <small style="opacity:.7">(${modeSizeMult.toFixed(2)}×)</small></span>` : ''}
         ${divergeNote ? `<span class="qd-qa-info" style="color:var(--amb)" title="Verdict differs from legacy single-decision">⚠ ${divergeNote}</span>` : ''}
         <span class="qd-qa-info">${rulebook ? rulebook + ' · ' : ''}system informs · <b>you decide</b></span>
-        <button class="qd-qa-btn buy"
-                title="Open BUY ticket · pre-populated · you control size/stop/targets"
-                onclick='window._openQuickAction&&window._openQuickAction("BUY","${tk}",${ctxJson})'>
-          ▲ BUY
+        <button class="qd-qa-btn buy${_isHalted ? ' halted-warn' : ''}"
+                title="${_isHalted ? '⚠ Security is HALTED (' + _sStatus + ') — broker will reject. Click to acknowledge and try anyway.' : 'Open BUY ticket · pre-populated · you control size/stop/targets'}"
+                onclick='${_isHalted ? `if(!confirm("\\u26A0 ${tk} is HALTED (${_sStatus}). Broker will reject this order. Continue anyway?"))return;` : ''}window._openQuickAction&&window._openQuickAction("BUY","${tk}",${ctxJson})'>
+          ▲ BUY${_isHalted ? ' ⚠' : ''}
         </button>
-        <button class="qd-qa-btn short"
-                title="Open SHORT ticket · pre-populated"
-                onclick='window._openQuickAction&&window._openQuickAction("SHORT","${tk}",${ctxJson})'>
-          ▼ SHORT
+        <button class="qd-qa-btn short${_isHalted ? ' halted-warn' : ''}"
+                title="${_isHalted ? '⚠ Security is HALTED (' + _sStatus + ') — broker will reject. Click to acknowledge and try anyway.' : 'Open SHORT ticket · pre-populated'}"
+                onclick='${_isHalted ? `if(!confirm("\\u26A0 ${tk} is HALTED (${_sStatus}). Broker will reject this order. Continue anyway?"))return;` : ''}window._openQuickAction&&window._openQuickAction("SHORT","${tk}",${ctxJson})'>
+          ▼ SHORT${_isHalted ? ' ⚠' : ''}
         </button>
         <button class="qd-qa-btn watch"
                 title="Add to watchlist · POST /api/custom/add → data/custom_tracked.json"
@@ -27348,8 +27503,21 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     const alignTip = `Lens alignment · ${bullCt} bullish · ${watchCt} watch · ${bearCt} short/avoid\n${alignTxt === 'ALIGNED' ? 'No conflict — proceed if other gates clear.' : alignTxt === 'BEARISH' ? '⚠ Majority bearish — avoid new longs.' : 'Mixed read — wait for confirmation.'}`;
     const cur = _qdStrategyCurrent();
 
+    // Stale-data notice for watchlist tickers loaded from decision_log snapshot
+    const _snapBanner = t._fromSnapshot ? (() => {
+      const ago = t._snapshotDate
+        ? (() => { try { const d=Math.round((Date.now()-new Date(t._snapshotDate))/864e5); return d<=0?'today':`${d}d ago`; } catch{return 'unknown date';} })()
+        : 'unknown date';
+      return `<div style="background:#1c1205;border:1px solid #92400e;border-radius:5px;padding:5px 12px;font-size:11px;color:#fcd34d;display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span>⚠</span>
+        <span><b>Stale data — last scored ${ago}</b>. ${_esc(tk)} was not in the most recent scan (filtered by price/volume or not in S&P500/R1000). Score, verdict and gates shown are from the last scan that included this ticker.</span>
+        <span style="color:#f59e0b;cursor:pointer;font-weight:600;white-space:nowrap" onclick="if(window._tickerMap)delete window._tickerMap['${_esc(tk)}'];window.setDetailTicker&&window.setDetailTicker('${_esc(tk)}')">↻ Refresh</span>
+      </div>`;
+    })() : (t._loadingSnapshot ? `<div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:5px;padding:5px 12px;font-size:11px;color:#60a5fa;margin-bottom:6px">⏳ Fetching latest data for ${_esc(tk)}…</div>` : '');
+
     return `
       <div class="t-host">
+        ${_snapBanner}
         <div class="t1">
           <span class="t1-tk" data-tip="${_esc(tkTip)}" data-tip-pos="below">${_esc(tk)}${sectorShort ? `<span class="sec">${_esc(sectorShort)}</span>` : ''}</span>
           <span class="t1-px" data-tip="${_esc(pxTip)}" data-tip-pos="below" id="qdBannerPx">${_moneyL(price)}</span>

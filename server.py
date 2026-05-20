@@ -4575,6 +4575,87 @@ async def decision_log_api(ticker: str, limit: int = 20):
         return {"ticker": ticker, "entries": [], "error": str(e)}
 
 
+@app.get("/api/ticker-snapshot")
+async def ticker_snapshot_api(t: str, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """On-demand ticker snapshot for tickers NOT in the last scan bundle.
+
+    Used by kairos.html setDetailTicker() when a watchlist ticker wasn't scored
+    in the last bundle (filtered by price/volume/EODHD data gap). Returns the
+    most recent decision_log entry for the ticker so the detail panel can show
+    last-known score/verdict/gates rather than empty placeholders.
+
+    Also attempts a live quote from EODHD for current price.
+    """
+    if isinstance(auth, Response):
+        return auth
+    ticker = (t or "").upper().strip()
+    if not ticker:
+        raise HTTPException(400, "t= required")
+
+    import json as _json
+    from pathlib import Path as _Path
+
+    # 1. Most recent decision_log entry for this ticker
+    dl_path = _Path("data/decision_log.jsonl")
+    last_decision = None
+    if dl_path.exists():
+        try:
+            with open(dl_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line: continue
+                    try:
+                        e = _json.loads(line)
+                        if str(e.get("ticker", "")).upper() == ticker:
+                            last_decision = e
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
+    # 2. Try live quote from EODHD (best-effort, timeout=5s)
+    live_price = None
+    try:
+        import eodhd_client as _eo
+        q = _eo.realtime_quote(ticker)
+        if isinstance(q, dict):
+            live_price = q.get("close") or q.get("last") or q.get("price")
+    except Exception:
+        pass
+
+    # 3. Check tickers.json (last bundle) for any partial data
+    bundle_row = None
+    try:
+        tj = _Path("infra/prototype/tickers.json")
+        if tj.exists():
+            td = _json.loads(tj.read_text())
+            if isinstance(td, dict):
+                bundle_row = td.get(ticker)
+    except Exception:
+        pass
+
+    if not last_decision and not bundle_row:
+        raise HTTPException(404, f"No data for {ticker} — not in decision_log or last bundle")
+
+    return {
+        "ticker": ticker,
+        "source": "decision_log" if last_decision else "bundle_only",
+        "last_scanned": (last_decision or {}).get("date"),
+        "score":         (last_decision or {}).get("score"),
+        "verdict":       (last_decision or {}).get("verdict"),
+        "reason":        (last_decision or {}).get("reason"),
+        "regime":        (last_decision or {}).get("regime4"),
+        "setup_family":  (last_decision or {}).get("setup_type"),
+        "rr_ratio":      (last_decision or {}).get("rr_ratio"),
+        "entry_price":   (last_decision or {}).get("entry_price"),
+        "gates_hit":     (last_decision or {}).get("gates_hit") or [],
+        "score_breakdown":(last_decision or {}).get("score_breakdown") or {},
+        "live_price":    live_price,
+        "bundle_row":    bundle_row,
+        "_note": "Stale score from last scan that included this ticker. Not today's scan.",
+    }
+
+
 @app.get("/api/sleeve-outcomes/{sleeve}")
 async def sleeve_outcomes_api(sleeve: str, limit: int = 10):
     """Return last N outcomes (W/L) for a sleeve · for hot-streak dots.
