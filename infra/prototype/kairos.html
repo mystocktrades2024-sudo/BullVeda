@@ -51015,276 +51015,229 @@ const MarketsV2 = (function () {
 
   // ─── TAB 8: LEVERAGED & INVERSE ───
   function renderLeveraged(data) {
-    // ════════════════════════════════════════════════════════════════════
-    //   LEVERAGED & INVERSE · senior HF analyst playbook (20y · multi-cycle)
-    //   Built around three disciplines fused in one surface:
-    //     ① HF cycle posture — regime gate is the ENTIRE alpha. 3× products
-    //        compound gains in trending tape, compound losses in chop.
-    //        Daily reset → path matters more than direction.
-    //     ② Graham-Buffett value lens — leveraged ETFs are "anti-Buffett"
-    //        instruments BUT regime-low entry (VIX>30 + breadth<25 +
-    //        SPY < 200wk SMA) into 3× equity has produced +400% rolling
-    //        returns since 2009. Cycle-low DCA = the only Buffett-compatible
-    //        application of leverage. Never own them in chop.
-    //     ③ Swing-trader execution — vol drag math `r ≈ 3·R − 4.5·σ²·t`
-    //        dominates. Position size via Kelly on regime-conditional WR.
-    //        Mechanical exits: time-stop · vol-stop · regime-break stop.
-    //   Drawdown-recovery math: -50% needs +100%, -80% needs +400%. Sizing
-    //   matters infinitely more than entry timing here.
-    // ════════════════════════════════════════════════════════════════════
-    return `${_head('⚡', 'Leveraged & Inverse', 'regime gate · vol drag math · suitability · cycle-low value entry · sector matrix', 'HF Analyst · 20y · CFP',
-      `${_ctl('⭐ Save')}${_ctl('⚠️ Suitability')}${_ctl('📊 Vol-drag calc')}${_ctl('🎯 Kelly size')}${_ctl('⏰ Regime alert')}`)}
+    // 2026-05-20 — Rewrite from 271 lines of hardcoded ETF tables to real-data
+    // render. Sources:
+    //   • data.leveraged.watchlist (23 ETFs the system tracks)
+    //   • data.leveraged.picks / in_scan / total (coverage stats)
+    //   • data.regime (regime4, VIX, breadth) — gates the "OK to trade" verdict
+    //   • Live prices fetched async via /api/live/quote (Schwab primary)
+    //
+    // Kept: vol-drag math table (educational, not stock-specific) but the
+    //   "realized σ today" cell uses real VIX as proxy for σ.
+    //   VIX term structure uses real data.regime.vix.term_structure data.
+    // Removed: hardcoded TQQQ/UPRO/SOXL prices and made-up "−8.2% drag/yr" cells.
+    const lev = data.leveraged || {};
+    const watchlist = lev.watchlist || [];
+    const regime = data.regime || {};
+    const r4 = regime.regime4 || regime.regime4_raw || 'unknown';
+    const vix = regime.vix_current || (regime.vix && regime.vix.vix_current) || 0;
+    const breadth = regime.breadth_pct_50d || 0;
+    const vix3m = regime.vix && regime.vix.vix3m;
+    const termRatio = regime.vix && regime.vix.term_structure_ratio;
+    const termState = regime.vix && regime.vix.term_structure_state;
+    const volState = regime.vix && regime.vix.vol_state;
 
-      <!-- ═════════ ① MASTER REGIME VERDICT · the entire alpha ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:4px solid var(--am)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--am)">MASTER VERDICT · CONDITIONAL GREEN · 3× LONG OK, NOT IDEAL · INVERSE STAND-DOWN</span><span class="mv2-card-meta">composite: regime × VIX × breadth × ADX × portfolio DD</span></div>
+    // Master regime verdict for 3× LONG / INVERSE
+    const longOk = (r4 === 'risk_on_trending' || r4 === 'risk_on_choppy') && vix < 25 && breadth > 35;
+    const inverseOk = (r4 === 'risk_off_trending' || r4 === 'panic') && vix >= 25;
+    const masterVerdict = longOk ? 'CONDITIONAL GREEN · 3× LONG OK' : inverseOk ? 'BEAR REGIME · INVERSE TACTICAL' : 'STAND DOWN · CHOP/PANIC';
+    const masterCls = longOk ? 'var(--gn)' : inverseOk ? 'var(--am)' : 'var(--rd)';
+
+    // Vol drag computation: r ≈ L·R − ½·L·(L−1)·σ²·t per year
+    // Use VIX as proxy for σ (annualized realized vol).
+    const sigma = vix / 100; // VIX 19 → σ = 0.19
+    const dragYr = (L) => -0.5 * L * (L - 1) * sigma * sigma * 100; // -% per year
+
+    return `${_head('⚡', 'Leveraged & Inverse', 'regime gate · vol-drag math · suitability · ' + watchlist.length + ' ETFs tracked · real VIX-based σ', 'HF Analyst',
+      `${_ctl('⭐ Save')}${_ctl('⚠️ Suitability')}${_ctl('📊 Vol-drag calc')}`)}
+
+      <!-- ① MASTER REGIME VERDICT -->
+      <div class="mv2-card" style="margin-bottom:14px;border-left:4px solid ${masterCls}">
+        <div class="mv2-card-head">
+          <span class="mv2-card-title" style="color:${masterCls}">MASTER VERDICT · ${masterVerdict}</span>
+          <span class="mv2-card-meta">regime × VIX × breadth (real bundle data)</span>
+        </div>
         <div class="mv2-grid-4">
-          <div><div class="mv2-bignum" style="color:var(--gn)">RISK-ON TRENDING</div><div class="mv2-bignum-sub">regime gate · 3× LONG tradeable · 3× INVERSE blocked · target hold ≤ 5d</div></div>
-          <div><div class="mv2-bignum" style="color:var(--am)">VIX 19 · CHOP</div><div class="mv2-bignum-sub">spot &gt; 25 = block 3× longs · 30+ = pivot to inverse · current = trade with discipline</div></div>
-          <div><div class="mv2-bignum" style="color:var(--am)">REALIZED σ 18%</div><div class="mv2-bignum-sub">annualized 21d HV · vol drag ≈ 0.31%/day on 3× · 7.8%/mo erosion baseline</div></div>
-          <div><div class="mv2-bignum" style="color:var(--gn)">BREADTH 62</div><div class="mv2-bignum-sub">%&gt;50d SPX · &gt;55 = trending · &lt;30 = chop · current OK for 3× LONG</div></div>
+          <div><div class="mv2-bignum" style="color:${longOk ? 'var(--gn)' : 'var(--rd)'}">${r4.toUpperCase().replace('_', ' ')}</div><div class="mv2-bignum-sub">regime gate · ${longOk ? '3× LONG tradeable · INVERSE blocked' : inverseOk ? '3× INVERSE tactical · LONG blocked' : 'all 3× STAND DOWN'}</div></div>
+          <div><div class="mv2-bignum" style="color:${vix < 20 ? 'var(--gn)' : vix < 25 ? 'var(--am)' : 'var(--rd)'}">VIX ${vix.toFixed(1)} · ${volState || '—'}</div><div class="mv2-bignum-sub">spot &gt; 25 = block 3× longs · 30+ = pivot inverse</div></div>
+          <div><div class="mv2-bignum">σ ≈ ${vix.toFixed(0)}% ann</div><div class="mv2-bignum-sub">VIX-implied · vol drag ${(dragYr(3) / 12).toFixed(2)}%/mo on 3×</div></div>
+          <div><div class="mv2-bignum" style="color:${breadth > 50 ? 'var(--gn)' : 'var(--am)'}">BREADTH ${breadth.toFixed(0)}%</div><div class="mv2-bignum-sub">% &gt; 50d · &gt;55 = trending · &lt;30 = chop</div></div>
         </div>
-        <div class="mv2-divbox" style="margin-top:10px"><div style="flex:1"><b>HF playbook (20y):</b> 3× equity ETFs are <b>regime instruments</b>, not directional bets. They compound gains in trending tape (ADX&gt;25, breadth&gt;55, VIX&lt;20) and compound LOSSES in chop. Today's tape is borderline — VIX 19 + breadth 62 = tradeable but NOT optimal. Size half-Kelly. Stop −15%. Time-stop 5 days. Never hold over earnings or FOMC.</div></div>
+        <div class="mv2-divbox" style="margin-top:10px"><div style="flex:1"><b>Read:</b> ${
+          longOk ? '3× equity OK to trade. Size half-Kelly. Stop −15%. Time-stop 5 days. Never hold over earnings or FOMC.' :
+          inverseOk ? 'Bear regime active — inverse 3× tactical only. Stop −10%. Hold ≤ 3 days. Lift hedge on regime turn.' :
+          'Chop or panic regime — vol drag dominates. Skip 3× entirely. Use 2× alternatives (QLD/SSO) or naked underlying.'
+        }</div></div>
       </div>
 
-      <!-- ═════════ ② SUITABILITY MATRIX · CFP-grade gate ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:3px solid var(--cy)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--cy)">SUITABILITY · CFP gate · account size × horizon × risk capacity</span><span class="mv2-card-meta">$98.4K paper · 60-day Alpaca window · paper-tier</span></div>
-        <table class="mv2-t"><thead><tr><th>Test</th><th>Threshold</th><th class="r">Actual</th><th>Status</th><th>Rationale</th></tr></thead><tbody>
-          <tr><td><b>PDT capital</b></td><td>≥ $25,000</td><td class="r mv2-mono">$98,388</td><td><span class="mv2-chip mv2-chip-gn">PASS</span></td><td>Pattern-Day-Trader floor cleared by 4× · day-trades unlimited</td></tr>
-          <tr><td><b>Liquidity buffer</b></td><td>6mo expenses outside</td><td class="r mv2-mono">n/a paper</td><td><span class="mv2-chip mv2-chip-am">N/A</span></td><td>Paper account · live: never use emergency fund cap as risk capital</td></tr>
-          <tr><td><b>Time horizon</b></td><td>≤ 5 trading days</td><td class="r mv2-mono">swing 1-5d</td><td><span class="mv2-chip mv2-chip-gn">PASS</span></td><td>Daily reset means &gt;5d = vol drag dominates · NEVER buy-and-hold</td></tr>
-          <tr><td><b>Single-name cap</b></td><td>5% NAV per 3×</td><td class="r mv2-mono">$4,920</td><td><span class="mv2-chip mv2-chip-gn">FLOOR</span></td><td>3× ETF = 15% effective exposure · cap at 5% NAV = 15% gross</td></tr>
-          <tr><td><b>Aggregate 3× cap</b></td><td>15% NAV all 3×</td><td class="r mv2-mono">$14,760</td><td><span class="mv2-chip mv2-chip-gn">FLOOR</span></td><td>3× products correlate &gt; 0.85 in stress · aggregate = stress concentration</td></tr>
-          <tr><td><b>VIX gate · 3× LONG</b></td><td>≤ 25</td><td class="r mv2-mono">19.2</td><td><span class="mv2-chip mv2-chip-gn">OK</span></td><td>VIX 25-30 = block new entries · 30+ = exit existing</td></tr>
-          <tr><td><b>VIX gate · 3× INVERSE</b></td><td>≥ 25</td><td class="r mv2-mono">19.2</td><td><span class="mv2-chip mv2-chip-rd">BLOCKED</span></td><td>Inverse = hedge only · regime-break trigger</td></tr>
-          <tr><td><b>Account drawdown</b></td><td>&lt; 10% from peak</td><td class="r mv2-mono">−1.6%</td><td><span class="mv2-chip mv2-chip-gn">OK</span></td><td>DD &gt; 10% = halve size · DD &gt; 15% = block new 3× entries</td></tr>
-          <tr><td><b>Tax-lot status</b></td><td>taxable LT &gt; 1y</td><td class="r mv2-mono">paper</td><td><span class="mv2-chip mv2-chip-am">N/A</span></td><td>Live: 3× = always short-term gains · use in IRA/Roth if possible</td></tr>
-        </tbody></table>
-        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1"><b>CFP rule:</b> the smaller the account, the WORSE leveraged ETFs perform — fixed costs (commissions, slippage) eat alpha. Account &lt; $25K: skip 3× entirely, use SPY options instead. Account $25K-$100K: 3× as 5% tactical only. Account &gt; $100K: max 15% across all 3× combined.</div></div>
-      </div>
-
-      <!-- ═════════ ③ VOLATILITY DRAG MATH · the killer formula ═════════ -->
+      <!-- ② VOL DRAG MATH — dynamic from real VIX -->
       <div class="mv2-card" style="margin-bottom:14px;border-left:3px solid var(--rd)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--rd)">VOL DRAG · the daily-reset killer · r ≈ L·R − ½·L·(L−1)·σ²·t</span><span class="mv2-card-meta">Cooper 2010 · Avellaneda 2011 · empirical 2010-2024</span></div>
-        <div class="mv2-grid-2">
-          <div>
-            <table class="mv2-t"><thead><tr><th>Underlying σ (annualized)</th><th class="r">2× drag /yr</th><th class="r">3× drag /yr</th><th class="r">−3× drag /yr</th></tr></thead><tbody>
-              <tr><td><b class="gn">Low · 10%</b></td><td class="r mv2-mono mv2-up">−1.0%</td><td class="r mv2-mono">−3.0%</td><td class="r mv2-mono">−6.0%</td></tr>
-              <tr><td><b class="gn">Calm · 15%</b></td><td class="r mv2-mono">−2.3%</td><td class="r mv2-mono mv2-dn">−6.8%</td><td class="r mv2-mono mv2-dn">−13.5%</td></tr>
-              <tr><td><b class="am">Normal · 20% (today)</b></td><td class="r mv2-mono">−4.0%</td><td class="r mv2-mono mv2-dn">−12.0%</td><td class="r mv2-mono mv2-dn">−24.0%</td></tr>
-              <tr><td><b class="am">Elevated · 25%</b></td><td class="r mv2-mono mv2-dn">−6.3%</td><td class="r mv2-mono mv2-dn">−18.8%</td><td class="r mv2-mono mv2-dn">−37.5%</td></tr>
-              <tr><td><b class="rd">Stress · 35%</b></td><td class="r mv2-mono mv2-dn">−12.3%</td><td class="r mv2-mono mv2-dn">−36.8%</td><td class="r mv2-mono mv2-dn">−73.5%</td></tr>
-              <tr><td><b class="rd">Panic · 50%</b></td><td class="r mv2-mono mv2-dn">−25.0%</td><td class="r mv2-mono mv2-dn">−75.0%</td><td class="r mv2-mono mv2-dn">−150%</td></tr>
-            </tbody></table>
-            <div class="mv2-note">σ = annualized realized vol of UNDERLYING (QQQ for TQQQ, SPY for UPRO). Today QQQ σ ≈ 18%.</div>
-          </div>
-          <div>
-            <table class="mv2-t"><thead><tr><th>Hold period</th><th class="r">QQQ ×3 theory</th><th class="r">TQQQ realized</th><th class="r">drag</th><th>verdict</th></tr></thead><tbody>
-              <tr><td>1 day</td><td class="r mv2-mono mv2-up">+3.00%</td><td class="r mv2-mono mv2-up">+2.98%</td><td class="r mv2-mono">−0.02%</td><td><span class="mv2-chip mv2-chip-gn">OK</span></td></tr>
-              <tr><td>5 days</td><td class="r mv2-mono mv2-up">+15.0%</td><td class="r mv2-mono mv2-up">+14.2%</td><td class="r mv2-mono">−0.8%</td><td><span class="mv2-chip mv2-chip-gn">OK</span></td></tr>
-              <tr><td>20 days</td><td class="r mv2-mono mv2-up">+12.0%</td><td class="r mv2-mono mv2-up">+9.4%</td><td class="r mv2-mono mv2-dn">−2.6%</td><td><span class="mv2-chip mv2-chip-am">CAUTION</span></td></tr>
-              <tr><td>60 days</td><td class="r mv2-mono mv2-up">+18.0%</td><td class="r mv2-mono mv2-up">+9.8%</td><td class="r mv2-mono mv2-dn">−8.2%</td><td><span class="mv2-chip mv2-chip-rd">BAD</span></td></tr>
-              <tr><td>252 days</td><td class="r mv2-mono mv2-up">+45.0%</td><td class="r mv2-mono mv2-up">+18.4%</td><td class="r mv2-mono mv2-dn">−26.6%</td><td><span class="mv2-chip mv2-chip-rd">TERRIBLE</span></td></tr>
-              <tr><td>5 yrs (2020-24)</td><td class="r mv2-mono mv2-up">+412%</td><td class="r mv2-mono mv2-up">+186%</td><td class="r mv2-mono mv2-dn">−226pp</td><td><span class="mv2-chip mv2-chip-rd">PATH KILLS</span></td></tr>
-            </tbody></table>
-            <div class="mv2-note">Compounded drag = path-dependent. In a straight trend, 3× ≈ 3× spot. In chop, 3× ≪ 3× spot. Always.</div>
-          </div>
+        <div class="mv2-card-head">
+          <span class="mv2-card-title" style="color:var(--rd)">VOL DRAG · r ≈ L·R − ½·L·(L−1)·σ²·t (annualized)</span>
+          <span class="mv2-card-meta">today's σ from VIX: ${vix.toFixed(1)}%</span>
         </div>
-        <div class="mv2-divbox mv2-warn" style="margin-top:8px"><div style="flex:1"><b>Rule of thumb:</b> if underlying σ &gt; 25% annualized, the vol drag exceeds the expected return — DO NOT use 3× longs. Use 2× (QLD/SSO) or naked underlying. Vol drag is asymmetric — works both ways but always SUBTRACTS from compounded outcome.</div></div>
+        <table class="mv2-t"><thead><tr><th>σ (annualized)</th><th class="r">2× drag /yr</th><th class="r">3× drag /yr</th><th class="r">−3× drag /yr</th><th>Verdict</th></tr></thead><tbody>
+          ${[10, 15, 20, 25, 35, 50].map(s => {
+            const σ = s / 100;
+            const d2 = -0.5 * 2 * 1 * σ * σ * 100;
+            const d3 = -0.5 * 3 * 2 * σ * σ * 100;
+            const dn3 = -0.5 * 3 * 4 * σ * σ * 100;
+            const cur = Math.abs(s - vix) < 3;
+            const verdict = s <= 15 ? 'OK' : s <= 25 ? 'CAUTION' : 'AVOID 3×';
+            const vCls = s <= 15 ? 'mv2-chip-gn' : s <= 25 ? 'mv2-chip-am' : 'mv2-chip-rd';
+            return `<tr ${cur ? 'style="background:var(--bg-2)"' : ''}>
+              <td><b>${s}%</b>${cur ? ' <span style="color:var(--copper);font-size:10px">← today</span>' : ''}</td>
+              <td class="r mv2-mono">${d2.toFixed(1)}%</td>
+              <td class="r mv2-mono ${d3 < -10 ? 'mv2-dn' : ''}">${d3.toFixed(1)}%</td>
+              <td class="r mv2-mono ${dn3 < -20 ? 'mv2-dn' : ''}">${dn3.toFixed(1)}%</td>
+              <td><span class="mv2-chip ${vCls}">${verdict}</span></td>
+            </tr>`;
+          }).join('')}
+        </tbody></table>
+        <div class="mv2-note">Vol drag is path-dependent. In a straight trend 3× ≈ 3× spot. In chop 3× &lt; 3× spot. Always.</div>
       </div>
 
-      <!-- ═════════ ④ VIX TERM STRUCTURE · the vol-product survival gate ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:3px solid var(--vio,#a78bfa)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--vio,#a78bfa)">VIX TERM STRUCTURE · the lifecycle of VXX/UVXY</span><span class="mv2-card-meta">contango = roll loss · backwardation = roll gain · only state where vol longs survive</span></div>
-        <div class="mv2-grid-2">
-          <table class="mv2-t"><thead><tr><th>Contract</th><th class="r">Level</th><th class="r">Spread vs spot</th><th>State</th></tr></thead><tbody>
-            <tr><td><b>VIX spot</b></td><td class="r mv2-mono">19.2</td><td class="r mv2-mono">—</td><td><span class="mv2-chip mv2-chip-gn">calm</span></td></tr>
-            <tr><td><b>VX1 (front)</b></td><td class="r mv2-mono">20.4</td><td class="r mv2-mono mv2-up">+1.2 (+6%)</td><td><span class="mv2-chip mv2-chip-am">contango</span></td></tr>
-            <tr><td><b>VX2</b></td><td class="r mv2-mono">21.6</td><td class="r mv2-mono mv2-up">+2.4 (+13%)</td><td><span class="mv2-chip mv2-chip-am">contango</span></td></tr>
-            <tr><td><b>VX3</b></td><td class="r mv2-mono">22.4</td><td class="r mv2-mono mv2-up">+3.2 (+17%)</td><td><span class="mv2-chip mv2-chip-am">contango</span></td></tr>
-            <tr><td><b>VX6</b></td><td class="r mv2-mono">22.8</td><td class="r mv2-mono mv2-up">+3.6 (+19%)</td><td><span class="mv2-chip mv2-chip-am">contango</span></td></tr>
-            <tr><td><b>Curve slope (VX2−VX1)</b></td><td class="r mv2-mono">+1.2</td><td class="r mv2-mono mv2-up">+5.9%/mo</td><td><span class="mv2-chip mv2-chip-rd">VXX bleed: ~6%/mo</span></td></tr>
-          </tbody></table>
-          <div>
-            <div class="mv2-bignum" style="color:var(--rd)">VXX · LONG VOL = BURNING CASH</div>
-            <div class="mv2-note">In contango (today), VXX rolls front futures to higher prices = monthly bleed of 4–8%. Historical: VXX lost 99.97% since 2009 inception (split-adjusted). UVXY (1.5×) lost 99.99%. <b>Never own these as a strategic position.</b></div>
-            <div style="margin-top:10px"><b>The only times vol longs work:</b></div>
-            <ul style="font-size:11.5px;color:var(--ink-1);margin:6px 0 0;padding-left:22px;line-height:1.7">
-              <li>VIX spot &gt; VX1 &gt; VX2 = <b class="gn">backwardation</b> (vol-spike regime · roll gain)</li>
-              <li>Tactical 1-3d hedge into a known event (FOMC eve · CPI · earnings)</li>
-              <li>Crash insurance via OTM VIX calls · NEVER outright VXX/UVXY hold</li>
-            </ul>
-          </div>
+      <!-- ③ VIX TERM STRUCTURE — real from data.regime.vix -->
+      <div class="mv2-card" style="margin-bottom:14px;border-left:3px solid #a78bfa">
+        <div class="mv2-card-head">
+          <span class="mv2-card-title" style="color:#a78bfa">VIX TERM STRUCTURE · the vol-product survival gate</span>
+          <span class="mv2-card-meta">${termState || '—'}</span>
         </div>
-      </div>
-
-      <!-- ═════════ ⑤ THE MASTER MATRIX · all leveraged ETFs by exposure ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px">
-        <div class="mv2-card-head"><span class="mv2-card-title">★ MASTER ETF MATRIX · broad market · sector · inverse · vol</span><span class="mv2-card-meta">filter by regime suitability · today: 3× LONG OK · INVERSE blocked · VIX block</span></div>
-        <table class="mv2-t"><thead><tr><th>ETF</th><th>Tracks</th><th class="r">Lev</th><th class="r">Spot</th><th class="r">5D</th><th class="r">1M</th><th class="r">σ ann</th><th class="r">drag/mo</th><th class="r">ADV $M</th><th>Verdict · today</th></tr></thead><tbody>
-          <tr><td colspan="10" style="background:var(--bg-3); padding:4px 8px; font:700 9px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3)">3× BROAD MARKET · LONG</td></tr>
-          <tr><td class="mv2-mono"><b>TQQQ</b></td><td>Nasdaq-100</td><td class="r mv2-mono">3×</td><td class="r mv2-mono">$78.40</td><td class="r mv2-mono mv2-up">+1.2%</td><td class="r mv2-mono mv2-up">+3.8%</td><td class="r mv2-mono">18%</td><td class="r mv2-mono">−2.4%</td><td class="r mv2-mono">3,420</td><td><span class="mv2-chip mv2-chip-gn">OK · prime swing</span></td></tr>
-          <tr><td class="mv2-mono"><b>UPRO</b></td><td>S&amp;P 500</td><td class="r mv2-mono">3×</td><td class="r mv2-mono">$78.20</td><td class="r mv2-mono mv2-up">+0.6%</td><td class="r mv2-mono mv2-up">+2.4%</td><td class="r mv2-mono">14%</td><td class="r mv2-mono">−1.5%</td><td class="r mv2-mono">82</td><td><span class="mv2-chip mv2-chip-gn">OK · diversified</span></td></tr>
-          <tr><td class="mv2-mono"><b>SPXL</b></td><td>S&amp;P 500</td><td class="r mv2-mono">3×</td><td class="r mv2-mono">$172</td><td class="r mv2-mono mv2-up">+0.5%</td><td class="r mv2-mono mv2-up">+2.3%</td><td class="r mv2-mono">14%</td><td class="r mv2-mono">−1.5%</td><td class="r mv2-mono">68</td><td><span class="mv2-chip mv2-chip-gn">OK · alt of UPRO</span></td></tr>
-          <tr><td class="mv2-mono"><b>UDOW</b></td><td>Dow Jones</td><td class="r mv2-mono">3×</td><td class="r mv2-mono">$104</td><td class="r mv2-mono mv2-up">+0.4%</td><td class="r mv2-mono mv2-up">+1.8%</td><td class="r mv2-mono">12%</td><td class="r mv2-mono">−1.1%</td><td class="r mv2-mono">14</td><td><span class="mv2-chip mv2-chip-am">low ADV · skip</span></td></tr>
-          <tr><td class="mv2-mono"><b>TNA</b></td><td>Russell 2000</td><td class="r mv2-mono">3×</td><td class="r mv2-mono">$32.80</td><td class="r mv2-mono mv2-dn">−0.4%</td><td class="r mv2-mono mv2-up">+0.8%</td><td class="r mv2-mono">26%</td><td class="r mv2-mono mv2-dn">−5.1%</td><td class="r mv2-mono">198</td><td><span class="mv2-chip mv2-chip-am">vol drag heavy</span></td></tr>
-          <tr><td class="mv2-mono"><b>FNGU</b></td><td>FANG+ basket</td><td class="r mv2-mono">3× ETN</td><td class="r mv2-mono">$362</td><td class="r mv2-mono mv2-up">+2.1%</td><td class="r mv2-mono mv2-up">+6.4%</td><td class="r mv2-mono">28%</td><td class="r mv2-mono mv2-dn">−5.9%</td><td class="r mv2-mono">42</td><td><span class="mv2-chip mv2-chip-am">ETN · credit risk · skip</span></td></tr>
-          <tr><td colspan="10" style="background:var(--bg-3); padding:4px 8px; font:700 9px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3)">3× SECTOR · LONG (rotation-driven)</td></tr>
-          <tr><td class="mv2-mono"><b>SOXL</b></td><td>Semis (3× SOX)</td><td class="r mv2-mono">3×</td><td class="r mv2-mono">$42.80</td><td class="r mv2-mono mv2-up">+3.4%</td><td class="r mv2-mono mv2-up">+9.2%</td><td class="r mv2-mono">38%</td><td class="r mv2-mono mv2-dn">−10.9%</td><td class="r mv2-mono">2,840</td><td><span class="mv2-chip mv2-chip-am">extended · take chips</span></td></tr>
-          <tr><td class="mv2-mono"><b>FAS</b></td><td>Financials (3×)</td><td class="r mv2-mono">3×</td><td class="r mv2-mono">$148</td><td class="r mv2-mono mv2-up">+1.8%</td><td class="r mv2-mono mv2-up">+4.6%</td><td class="r mv2-mono">22%</td><td class="r mv2-mono">−3.6%</td><td class="r mv2-mono">112</td><td><span class="mv2-chip mv2-chip-gn">OK · regional banks ↑</span></td></tr>
-          <tr><td class="mv2-mono"><b>DPST</b></td><td>Regional Banks (3×)</td><td class="r mv2-mono">3×</td><td class="r mv2-mono">$108</td><td class="r mv2-mono mv2-up">+2.4%</td><td class="r mv2-mono mv2-up">+5.8%</td><td class="r mv2-mono">32%</td><td class="r mv2-mono mv2-dn">−7.7%</td><td class="r mv2-mono">18</td><td><span class="mv2-chip mv2-chip-am">low ADV · slippage risk</span></td></tr>
-          <tr><td class="mv2-mono"><b>LABU</b></td><td>Biotech (3× XBI)</td><td class="r mv2-mono">3×</td><td class="r mv2-mono">$72.40</td><td class="r mv2-mono mv2-up">+0.8%</td><td class="r mv2-mono mv2-dn">−2.4%</td><td class="r mv2-mono">42%</td><td class="r mv2-mono mv2-dn">−13.2%</td><td class="r mv2-mono">68</td><td><span class="mv2-chip mv2-chip-rd">σ too high · skip</span></td></tr>
-          <tr><td class="mv2-mono"><b>ERX</b></td><td>Energy (3×)</td><td class="r mv2-mono">3×</td><td class="r mv2-mono">$78.80</td><td class="r mv2-mono mv2-dn">−1.2%</td><td class="r mv2-mono mv2-dn">−4.4%</td><td class="r mv2-mono">36%</td><td class="r mv2-mono mv2-dn">−9.7%</td><td class="r mv2-mono">12</td><td><span class="mv2-chip mv2-chip-rd">RS weak · skip</span></td></tr>
-          <tr><td class="mv2-mono"><b>NAIL</b></td><td>Homebuilders (3×)</td><td class="r mv2-mono">3×</td><td class="r mv2-mono">$112</td><td class="r mv2-mono mv2-up">+0.6%</td><td class="r mv2-mono mv2-dn">−1.2%</td><td class="r mv2-mono">30%</td><td class="r mv2-mono mv2-dn">−6.8%</td><td class="r mv2-mono">8</td><td><span class="mv2-chip mv2-chip-am">low ADV · rate sensitive</span></td></tr>
-          <tr><td class="mv2-mono"><b>DRN</b></td><td>REITs (3×)</td><td class="r mv2-mono">3×</td><td class="r mv2-mono">$28.40</td><td class="r mv2-mono mv2-dn">−0.4%</td><td class="r mv2-mono mv2-dn">−2.8%</td><td class="r mv2-mono">28%</td><td class="r mv2-mono mv2-dn">−5.9%</td><td class="r mv2-mono">6</td><td><span class="mv2-chip mv2-chip-rd">low ADV + rate-bear</span></td></tr>
-          <tr><td colspan="10" style="background:var(--bg-3); padding:4px 8px; font:700 9px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3)">2× ALTERNATIVES · LOWER VOL DRAG · BETTER FOR &gt; 5d HOLDS</td></tr>
-          <tr><td class="mv2-mono"><b>QLD</b></td><td>Nasdaq-100</td><td class="r mv2-mono">2×</td><td class="r mv2-mono">$110</td><td class="r mv2-mono mv2-up">+0.8%</td><td class="r mv2-mono mv2-up">+2.4%</td><td class="r mv2-mono">18%</td><td class="r mv2-mono">−1.1%</td><td class="r mv2-mono">42</td><td><span class="mv2-chip mv2-chip-gn">PREFERRED · 2× = 1/3 the drag of 3×</span></td></tr>
-          <tr><td class="mv2-mono"><b>SSO</b></td><td>S&amp;P 500</td><td class="r mv2-mono">2×</td><td class="r mv2-mono">$98.40</td><td class="r mv2-mono mv2-up">+0.4%</td><td class="r mv2-mono mv2-up">+1.6%</td><td class="r mv2-mono">14%</td><td class="r mv2-mono">−0.5%</td><td class="r mv2-mono">68</td><td><span class="mv2-chip mv2-chip-gn">PREFERRED · drag negligible</span></td></tr>
-          <tr><td class="mv2-mono"><b>USD</b></td><td>Semis</td><td class="r mv2-mono">2×</td><td class="r mv2-mono">$78.20</td><td class="r mv2-mono mv2-up">+2.3%</td><td class="r mv2-mono mv2-up">+6.1%</td><td class="r mv2-mono">38%</td><td class="r mv2-mono">−4.8%</td><td class="r mv2-mono">14</td><td><span class="mv2-chip mv2-chip-am">low ADV vs SOXL</span></td></tr>
-          <tr><td class="mv2-mono"><b>UWM</b></td><td>Russell 2000</td><td class="r mv2-mono">2×</td><td class="r mv2-mono">$48.20</td><td class="r mv2-mono mv2-dn">−0.3%</td><td class="r mv2-mono mv2-up">+0.5%</td><td class="r mv2-mono">26%</td><td class="r mv2-mono mv2-dn">−2.3%</td><td class="r mv2-mono">6</td><td><span class="mv2-chip mv2-chip-am">low ADV</span></td></tr>
-          <tr><td colspan="10" style="background:var(--bg-3); padding:4px 8px; font:700 9px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3)">3× INVERSE · HEDGE ONLY · BLOCKED IN BULL REGIME</td></tr>
-          <tr><td class="mv2-mono"><b>SQQQ</b></td><td>Nasdaq -3×</td><td class="r mv2-mono">−3×</td><td class="r mv2-mono">$12.80</td><td class="r mv2-mono mv2-dn">−1.2%</td><td class="r mv2-mono mv2-dn">−3.8%</td><td class="r mv2-mono">18%</td><td class="r mv2-mono mv2-dn">−6.0%</td><td class="r mv2-mono">2,140</td><td><span class="mv2-chip mv2-chip-rd">BLOCKED · regime gate</span></td></tr>
-          <tr><td class="mv2-mono"><b>SPXU</b></td><td>S&amp;P 500 -3×</td><td class="r mv2-mono">−3×</td><td class="r mv2-mono">$22.80</td><td class="r mv2-mono mv2-dn">−0.6%</td><td class="r mv2-mono mv2-dn">−2.4%</td><td class="r mv2-mono">14%</td><td class="r mv2-mono mv2-dn">−4.5%</td><td class="r mv2-mono">38</td><td><span class="mv2-chip mv2-chip-rd">BLOCKED</span></td></tr>
-          <tr><td class="mv2-mono"><b>SOXS</b></td><td>Semis -3×</td><td class="r mv2-mono">−3×</td><td class="r mv2-mono">$8.40</td><td class="r mv2-mono mv2-dn">−3.4%</td><td class="r mv2-mono mv2-dn">−8.8%</td><td class="r mv2-mono">38%</td><td class="r mv2-mono mv2-dn">−16.4%</td><td class="r mv2-mono">812</td><td><span class="mv2-chip mv2-chip-rd">BLOCKED · σ panic</span></td></tr>
-          <tr><td class="mv2-mono"><b>FAZ</b></td><td>Financials -3×</td><td class="r mv2-mono">−3×</td><td class="r mv2-mono">$12.40</td><td class="r mv2-mono mv2-dn">−1.8%</td><td class="r mv2-mono mv2-dn">−4.4%</td><td class="r mv2-mono">22%</td><td class="r mv2-mono mv2-dn">−6.6%</td><td class="r mv2-mono">22</td><td><span class="mv2-chip mv2-chip-rd">BLOCKED</span></td></tr>
-          <tr><td class="mv2-mono"><b>LABD</b></td><td>Biotech -3×</td><td class="r mv2-mono">−3×</td><td class="r mv2-mono">$28.40</td><td class="r mv2-mono mv2-dn">−0.8%</td><td class="r mv2-mono mv2-up">+2.4%</td><td class="r mv2-mono">42%</td><td class="r mv2-mono mv2-dn">−19.8%</td><td class="r mv2-mono">8</td><td><span class="mv2-chip mv2-chip-rd">BLOCKED · low ADV</span></td></tr>
-          <tr><td class="mv2-mono"><b>SH</b></td><td>SPY -1×</td><td class="r mv2-mono">−1×</td><td class="r mv2-mono">$48.40</td><td class="r mv2-mono mv2-dn">−0.6%</td><td class="r mv2-mono mv2-dn">−2.4%</td><td class="r mv2-mono">14%</td><td class="r mv2-mono">−0.2%</td><td class="r mv2-mono">28</td><td><span class="mv2-chip mv2-chip-am">tactical hedge OK</span></td></tr>
-          <tr><td colspan="10" style="background:var(--bg-3); padding:4px 8px; font:700 9px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3)">VOLATILITY · NEVER A LONG-TERM HOLD</td></tr>
-          <tr><td class="mv2-mono"><b>VXX</b></td><td>VIX 1mo fut</td><td class="r mv2-mono">1×</td><td class="r mv2-mono">$48.20</td><td class="r mv2-mono mv2-up">+4.8%</td><td class="r mv2-mono mv2-dn">−6.2%</td><td class="r mv2-mono">68%</td><td class="r mv2-mono mv2-dn">−5.9%</td><td class="r mv2-mono">128</td><td><span class="mv2-chip mv2-chip-rd">contango bleed · skip</span></td></tr>
-          <tr><td class="mv2-mono"><b>UVXY</b></td><td>VIX 1.5×</td><td class="r mv2-mono">1.5×</td><td class="r mv2-mono">$18.40</td><td class="r mv2-mono mv2-up">+7.1%</td><td class="r mv2-mono mv2-dn">−9.6%</td><td class="r mv2-mono">96%</td><td class="r mv2-mono mv2-dn">−8.8%</td><td class="r mv2-mono">218</td><td><span class="mv2-chip mv2-chip-rd">−99.99% all-time · BLOCKED</span></td></tr>
-          <tr><td class="mv2-mono"><b>SVXY</b></td><td>VIX −0.5× (short vol)</td><td class="r mv2-mono">−0.5×</td><td class="r mv2-mono">$62.80</td><td class="r mv2-mono mv2-up">+0.4%</td><td class="r mv2-mono mv2-up">+1.2%</td><td class="r mv2-mono">22%</td><td class="r mv2-mono mv2-up">+5.9%</td><td class="r mv2-mono">18</td><td><span class="mv2-chip mv2-chip-am">contango bid · 2018 risk</span></td></tr>
+        <table class="mv2-t"><tbody>
+          <tr><td><b>VIX spot</b></td><td class="r mv2-mono"><b>${vix.toFixed(2)}</b></td></tr>
+          <tr><td><b>VIX 3-month</b></td><td class="r mv2-mono"><b>${vix3m != null ? vix3m.toFixed(2) : '—'}</b></td></tr>
+          <tr><td><b>Term-structure ratio (VIX/VIX3M)</b></td><td class="r mv2-mono"><b>${termRatio != null ? termRatio.toFixed(3) : '—'}</b></td></tr>
+          <tr><td><b>State</b></td><td><span class="mv2-chip ${termState === 'contango' ? 'mv2-chip-am' : termState === 'backwardation' ? 'mv2-chip-rd' : 'mv2-chip-bare'}">${termState || '—'}</span></td></tr>
         </tbody></table>
-        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1"><b>HF read:</b> only <b>TQQQ + UPRO + QLD + SSO + FAS</b> pass the full gate today (regime OK · σ &lt; 22% · ADV &gt; $30M · drag &lt; 4%/mo). SOXL is the highest-RS sector play but σ 38% = take chips, not pyramid. All inverse and vol products BLOCKED by regime gate.</div></div>
+        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1">
+          ${termState === 'contango' ? '<b>In contango (today)</b>, VXX rolls front futures to higher prices = monthly bleed 4–8%. Never own VXX/UVXY as a strategic position. VIX spot ' + vix.toFixed(1) + ' &lt; 3m ' + (vix3m || 0).toFixed(1) + ' = normal vol curve.' :
+          termState === 'backwardation' ? '<b>Backwardation (rare)</b> = vol-spike regime · roll GAIN on VXX. The only state where vol longs work. Spot ' + vix.toFixed(1) + ' &gt; 3m ' + (vix3m || 0).toFixed(1) + '.' :
+          'VIX curve state unknown — vol product positioning ambiguous.'}
+        </div></div>
       </div>
 
-      <!-- ═════════ ⑥ RISK-ADJUSTED EDGE BY REGIME · Sharpe / Sortino / Calmar ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px">
-        <div class="mv2-card-head"><span class="mv2-card-title">★ RISK-ADJUSTED EDGE · stratified by regime (2010-2024)</span><span class="mv2-card-meta">Sharpe ≥ 1 = tradeable · Calmar = return / max DD · the path test</span></div>
-        <table class="mv2-t"><thead><tr><th>ETF</th><th class="r">CAGR</th><th class="r">σ ann</th><th class="r">Sharpe</th><th class="r">Sortino</th><th class="r">Max DD</th><th class="r">Calmar</th><th class="r">WR · trending</th><th class="r">WR · choppy</th><th>Verdict</th></tr></thead><tbody>
-          <tr><td class="mv2-mono"><b>TQQQ</b></td><td class="r mv2-mono mv2-up">+38%</td><td class="r mv2-mono">52%</td><td class="r mv2-mono mv2-up">0.73</td><td class="r mv2-mono mv2-up">1.04</td><td class="r mv2-mono mv2-dn">−82%</td><td class="r mv2-mono">0.46</td><td class="r mv2-mono mv2-up">71%</td><td class="r mv2-mono mv2-dn">38%</td><td><span class="mv2-chip mv2-chip-am">trade trending only</span></td></tr>
-          <tr><td class="mv2-mono"><b>UPRO</b></td><td class="r mv2-mono mv2-up">+22%</td><td class="r mv2-mono">42%</td><td class="r mv2-mono mv2-up">0.52</td><td class="r mv2-mono">0.78</td><td class="r mv2-mono mv2-dn">−76%</td><td class="r mv2-mono">0.29</td><td class="r mv2-mono mv2-up">68%</td><td class="r mv2-mono">41%</td><td><span class="mv2-chip mv2-chip-am">diversified · OK</span></td></tr>
-          <tr><td class="mv2-mono"><b>SOXL</b></td><td class="r mv2-mono mv2-up">+28%</td><td class="r mv2-mono">76%</td><td class="r mv2-mono">0.37</td><td class="r mv2-mono">0.58</td><td class="r mv2-mono mv2-dn">−89%</td><td class="r mv2-mono">0.31</td><td class="r mv2-mono mv2-up">74%</td><td class="r mv2-mono mv2-dn">32%</td><td><span class="mv2-chip mv2-chip-am">trending only · cycles brutal</span></td></tr>
-          <tr><td class="mv2-mono"><b>QLD (2×)</b></td><td class="r mv2-mono mv2-up">+24%</td><td class="r mv2-mono">36%</td><td class="r mv2-mono mv2-up">0.67</td><td class="r mv2-mono mv2-up">0.98</td><td class="r mv2-mono mv2-dn">−64%</td><td class="r mv2-mono">0.38</td><td class="r mv2-mono mv2-up">69%</td><td class="r mv2-mono">44%</td><td><span class="mv2-chip mv2-chip-gn">best risk-adj 2×</span></td></tr>
-          <tr><td class="mv2-mono"><b>SSO (2×)</b></td><td class="r mv2-mono mv2-up">+15%</td><td class="r mv2-mono">28%</td><td class="r mv2-mono mv2-up">0.54</td><td class="r mv2-mono">0.81</td><td class="r mv2-mono mv2-dn">−58%</td><td class="r mv2-mono">0.26</td><td class="r mv2-mono mv2-up">66%</td><td class="r mv2-mono">46%</td><td><span class="mv2-chip mv2-chip-gn">best vol-adj broad</span></td></tr>
-          <tr><td class="mv2-mono"><b>SQQQ</b></td><td class="r mv2-mono mv2-dn">−42%</td><td class="r mv2-mono">52%</td><td class="r mv2-mono mv2-dn">−0.81</td><td class="r mv2-mono mv2-dn">−0.46</td><td class="r mv2-mono mv2-dn">−99.7%</td><td class="r mv2-mono mv2-dn">−0.42</td><td class="r mv2-mono mv2-dn">22%</td><td class="r mv2-mono">41%</td><td><span class="mv2-chip mv2-chip-rd">long-only kills · bear-regime only</span></td></tr>
-          <tr><td class="mv2-mono"><b>VXX</b></td><td class="r mv2-mono mv2-dn">−74%</td><td class="r mv2-mono">82%</td><td class="r mv2-mono mv2-dn">−0.94</td><td class="r mv2-mono mv2-dn">−0.61</td><td class="r mv2-mono mv2-dn">−99.97%</td><td class="r mv2-mono mv2-dn">−0.74</td><td class="r mv2-mono mv2-dn">14%</td><td class="r mv2-mono">28%</td><td><span class="mv2-chip mv2-chip-rd">structural loser · NEVER</span></td></tr>
-        </tbody></table>
-        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1"><b>Read:</b> TQQQ + SOXL have the highest CAGR but TERRIBLE Calmar (return-vs-DD) — they only work for traders who can ride 80%+ drawdowns. <b>QLD (2× Nasdaq) and SSO (2× S&amp;P) have the best Sharpe / Sortino / Calmar combo</b> and are the right answer for 95% of HF clients seeking levered beta. Reserve 3× for in-regime tactical trades, never strategic holds.</div></div>
-      </div>
-
-      <!-- ═════════ ⑦ DRAWDOWN-RECOVERY MATH · the asymmetry trap ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:3px solid var(--rd)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--rd)">DRAWDOWN-RECOVERY · the asymmetry that ends accounts</span><span class="mv2-card-meta">recover-needed = drawdown / (1 − drawdown) · principle 9 of CLAUDE.md</span></div>
-        <div class="mv2-grid-2">
-          <table class="mv2-t"><thead><tr><th>Drawdown</th><th class="r">Recover needed</th><th class="r">TQQQ historical</th><th>Read</th></tr></thead><tbody>
-            <tr><td><b class="gn">−10%</b></td><td class="r mv2-mono">+11.1%</td><td class="r mv2-mono">monthly</td><td><span class="mv2-chip mv2-chip-gn">trivial · routine</span></td></tr>
-            <tr><td><b class="gn">−20%</b></td><td class="r mv2-mono">+25.0%</td><td class="r mv2-mono">~quarterly</td><td><span class="mv2-chip mv2-chip-am">painful · still OK</span></td></tr>
-            <tr><td><b class="am">−30%</b></td><td class="r mv2-mono">+42.9%</td><td class="r mv2-mono">2018, 2020</td><td><span class="mv2-chip mv2-chip-am">months to recover</span></td></tr>
-            <tr><td><b class="am">−50%</b></td><td class="r mv2-mono mv2-dn">+100%</td><td class="r mv2-mono">2022-H1</td><td><span class="mv2-chip mv2-chip-rd">need full bull leg</span></td></tr>
-            <tr><td><b class="rd">−70%</b></td><td class="r mv2-mono mv2-dn">+233%</td><td class="r mv2-mono">2022-Q4 low</td><td><span class="mv2-chip mv2-chip-rd">2+ year recovery</span></td></tr>
-            <tr><td><b class="rd">−82%</b></td><td class="r mv2-mono mv2-dn">+456%</td><td class="r mv2-mono">2022 trough</td><td><span class="mv2-chip mv2-chip-rd">survivors are rare</span></td></tr>
-            <tr><td><b class="rd">−90%</b></td><td class="r mv2-mono mv2-dn">+900%</td><td class="r mv2-mono">extreme tail</td><td><span class="mv2-chip mv2-chip-rd">account-ender</span></td></tr>
-          </tbody></table>
-          <div>
-            <div class="mv2-bignum" style="color:var(--am)">Sizing matters &gt; entry timing</div>
-            <div class="mv2-note">Two TQQQ traders entered Q4-2021. One sized at 10% of NAV, the other at 30%. By Q4-2022, the 10%-sizer was down −8.2% portfolio (recoverable in 9%). The 30%-sizer was down −24.6% (need +33% to recover). Same trade, very different outcome.</div>
-            <div style="margin-top:12px"><b>Three rules:</b></div>
-            <ul style="font-size:11.5px;color:var(--ink-1);margin:6px 0 0;padding-left:22px;line-height:1.7">
-              <li><b>Stop −15% from entry</b> · always, on close, no exceptions</li>
-              <li><b>Cap single 3× at 5% NAV</b> · the rule keeps you alive in tail</li>
-              <li><b>Halve size below VIX 22 → trim to zero at VIX 28</b></li>
-            </ul>
-          </div>
+      <!-- ④ TRACKED ETF WATCHLIST (real) — Schwab live prices fetched on mount -->
+      <div class="mv2-card">
+        <div class="mv2-card-head">
+          <span class="mv2-card-title">★ Tracked leveraged ETFs · ${watchlist.length} symbols · live Schwab prices</span>
+          <span class="mv2-card-meta">${lev.in_scan || 0} of ${lev.total || watchlist.length} scored in latest scan</span>
         </div>
+        ${_renderLeveragedTable(watchlist)}
       </div>
 
-      <!-- ═════════ ⑧ CYCLE-LOW VALUE ENTRY · Graham-Buffett lens ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:3px solid var(--gn)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--gn)">CYCLE-LOW VALUE ENTRY · the Buffett-compatible 3× use case</span><span class="mv2-card-meta">when fear is maximum and recovery probability ≥ 90%</span></div>
-        <table class="mv2-t"><thead><tr><th>Composite gate</th><th class="r">Threshold</th><th>Historical fire dates</th><th class="r">TQQQ 12mo fwd</th><th>Buffett comparison</th></tr></thead><tbody>
-          <tr><td>VIX 30d avg</td><td class="r mv2-mono">&gt; 32</td><td>2020-Mar · 2018-Q4 · 2022-Q4</td><td class="r mv2-mono mv2-up">+186% avg</td><td><span class="mv2-chip mv2-chip-gn">"Be greedy when others fearful"</span></td></tr>
-          <tr><td>SPY % &lt; 50d EMA</td><td class="r mv2-mono">&gt; 80% (capitulation breadth)</td><td>same 3 dates</td><td class="r mv2-mono mv2-up">+202% avg</td><td><span class="mv2-chip mv2-chip-gn">"Mr. Market is depressed"</span></td></tr>
-          <tr><td>SPY vs 200wk SMA</td><td class="r mv2-mono">spot &lt; 200wk × 1.05</td><td>2020-Mar · 2022-Q4 only</td><td class="r mv2-mono mv2-up">+312% avg</td><td><span class="mv2-chip mv2-chip-gn">cycle-low magnet</span></td></tr>
-          <tr><td>TQQQ vs 200wk SMA</td><td class="r mv2-mono">spot &lt; 200wk × 0.7</td><td>2020-Mar · 2022-Q4 only</td><td class="r mv2-mono mv2-up">+428% avg</td><td><span class="mv2-chip mv2-chip-gn">"Margin of safety" embodied</span></td></tr>
-          <tr><td>Shiller CAPE</td><td class="r mv2-mono">&lt; 25 (long-term med)</td><td>last fire: 2020-Mar</td><td class="r mv2-mono mv2-up">+340%</td><td><span class="mv2-chip mv2-chip-gn">Graham's intrinsic-value test</span></td></tr>
+      <!-- ⑤ SUITABILITY DISCIPLINE (educational, no fake account size) -->
+      <div class="mv2-card" style="margin-top:14px;border-left:3px solid var(--ink-3)">
+        <div class="mv2-card-head"><span class="mv2-card-title">Discipline · CFP-grade rules</span></div>
+        <table class="mv2-t"><thead><tr><th>Rule</th><th>Threshold</th><th>Why</th></tr></thead><tbody>
+          <tr><td><b>Single-name cap</b></td><td>5% NAV per 3×</td><td>3× ETF = 15% effective exposure · cap at 5% NAV = 15% gross</td></tr>
+          <tr><td><b>Aggregate 3× cap</b></td><td>15% NAV all 3×</td><td>3× products correlate &gt; 0.85 in stress · aggregate = stress concentration</td></tr>
+          <tr><td><b>Time horizon</b></td><td>≤ 5 trading days</td><td>Daily reset means &gt;5d = vol drag dominates · NEVER buy-and-hold</td></tr>
+          <tr><td><b>VIX gate · 3× LONG</b></td><td>≤ 25</td><td>VIX 25-30 = block new entries · 30+ = exit existing. Today VIX ${vix.toFixed(1)} = <b style="color:${vix <= 25 ? 'var(--gn)' : 'var(--rd)'}">${vix <= 25 ? 'OK' : 'BLOCKED'}</b></td></tr>
+          <tr><td><b>VIX gate · 3× INVERSE</b></td><td>≥ 25</td><td>Inverse = hedge only · regime-break trigger. Today = <b style="color:${vix >= 25 ? 'var(--am)' : 'var(--rd)'}">${vix >= 25 ? 'TACTICAL' : 'BLOCKED'}</b></td></tr>
+          <tr><td><b>Account drawdown</b></td><td>&lt; 10% from peak</td><td>DD &gt; 10% = halve size · DD &gt; 15% = block new 3× entries</td></tr>
         </tbody></table>
-        <div class="mv2-divbox mv2-ok" style="margin-top:8px"><div style="flex:1"><b>The cycle-low playbook (HF · Graham lens):</b> Leveraged ETFs are anti-Buffett 99% of the time — BUT when VIX &gt; 32 + breadth-capitulation + SPY near 200wk SMA, buying TQQQ in 5-tranche DCA over 4-8 weeks has produced rolling 12mo returns of 180-430% in EVERY instance since 2010. Today: <b>NOT IN VALUE ZONE</b> (VIX 19, SPY +56% vs 200wk). Wait for it.</div></div>
+        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1"><b>CFP rule:</b> the smaller the account, the WORSE leveraged ETFs perform — fixed costs eat alpha. Account &lt; $25K: skip 3× entirely, use SPY options instead. Account $25K-$100K: 3× as 5% tactical only. Account &gt; $100K: max 15% across all 3× combined.</div></div>
       </div>
 
-      <!-- ═════════ ⑨ POSITION-SIZING CALCULATOR · Kelly + vol-target ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px">
-        <div class="mv2-card-head"><span class="mv2-card-title">POSITION SIZE · Kelly × VIX × DD multipliers · for today's tape</span><span class="mv2-card-meta">composite sizing engine · half-Kelly floor</span></div>
-        <table class="mv2-t"><thead><tr><th>Step</th><th>Inputs (today)</th><th class="r">Multiplier</th><th>Output</th></tr></thead><tbody>
-          <tr><td>1 · Base Kelly · TQQQ (regime trending)</td><td>WR 71% · avg-win 14% · avg-loss 8%</td><td class="r mv2-mono">12.4%</td><td>full-Kelly · single-name</td></tr>
-          <tr><td>2 · Half-Kelly floor (CLAUDE.md principle 9)</td><td>discount 50%</td><td class="r mv2-mono">0.50×</td><td class="mv2-mono">6.2% NAV</td></tr>
-          <tr><td>3 · VIX multiplier</td><td>VIX 19 · in OK band 15-22</td><td class="r mv2-mono">0.80×</td><td class="mv2-mono">5.0% NAV</td></tr>
-          <tr><td>4 · Regime multiplier</td><td>risk_on_trending</td><td class="r mv2-mono">1.00×</td><td class="mv2-mono">5.0% NAV</td></tr>
-          <tr><td>5 · Drawdown multiplier (acct DD −1.6%)</td><td>&lt; 5% DD</td><td class="r mv2-mono">1.00×</td><td class="mv2-mono">5.0% NAV</td></tr>
-          <tr><td>6 · Single-3× cap</td><td>≤ 5% NAV per name</td><td class="r mv2-mono">cap</td><td class="mv2-mono">5.0% NAV</td></tr>
-          <tr><td><b class="gn">FINAL SIZE</b></td><td><b>TQQQ · risk_on_trending · VIX 19</b></td><td class="r mv2-mono"><b class="gn">5.0% NAV</b></td><td class="mv2-mono"><b>$4,920 · ≈ 63 shares @ $78.40</b></td></tr>
-          <tr><td><b class="am">If VIX → 24</b></td><td>vol multiplier 0.50×</td><td class="r mv2-mono">0.50×</td><td class="mv2-mono"><b>2.5% NAV · $2,460</b></td></tr>
-          <tr><td><b class="rd">If VIX → 28</b></td><td>kill switch</td><td class="r mv2-mono">0.00×</td><td class="mv2-mono"><b class="rd">EXIT ALL 3× LONG</b></td></tr>
-        </tbody></table>
-        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1"><b>Discipline:</b> half-Kelly is the FLOOR not the ceiling. The full-Kelly answer (12.4%) is the maximum-growth size, but it accepts ~50% drawdowns. Half-Kelly accepts ~25% drawdowns with 75% of the growth rate. For leveraged products that already have 80%+ drawdowns built in, anything above half-Kelly is gambling.</div></div>
-      </div>
-
-      <!-- ═════════ ⑩ CORRELATION MATRIX · the diversification illusion ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:3px solid var(--rd)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--rd)">CORRELATION MATRIX · 3× products in stress · the illusion of diversification</span><span class="mv2-card-meta">60d rolling ρ · stress periods overlaid</span></div>
-        <table class="mv2-t"><thead><tr><th>Pair</th><th class="r">Calm ρ</th><th class="r">Trending ρ</th><th class="r">Choppy ρ</th><th class="r">Panic ρ</th><th>Read</th></tr></thead><tbody>
-          <tr><td><b>TQQQ ↔ UPRO</b></td><td class="r mv2-mono">0.84</td><td class="r mv2-mono">0.88</td><td class="r mv2-mono">0.91</td><td class="r mv2-mono mv2-dn">0.96</td><td><span class="mv2-chip mv2-chip-rd">stress = same trade</span></td></tr>
-          <tr><td><b>TQQQ ↔ SOXL</b></td><td class="r mv2-mono">0.78</td><td class="r mv2-mono">0.82</td><td class="r mv2-mono">0.86</td><td class="r mv2-mono mv2-dn">0.92</td><td><span class="mv2-chip mv2-chip-rd">SOXL is TQQQ on steroids</span></td></tr>
-          <tr><td><b>UPRO ↔ FAS</b></td><td class="r mv2-mono">0.68</td><td class="r mv2-mono">0.72</td><td class="r mv2-mono">0.78</td><td class="r mv2-mono mv2-dn">0.88</td><td><span class="mv2-chip mv2-chip-am">decoupled in calm</span></td></tr>
-          <tr><td><b>TQQQ ↔ FNGU</b></td><td class="r mv2-mono">0.91</td><td class="r mv2-mono">0.94</td><td class="r mv2-mono">0.96</td><td class="r mv2-mono mv2-dn">0.98</td><td><span class="mv2-chip mv2-chip-rd">same fund · do not double</span></td></tr>
-          <tr><td><b>TQQQ ↔ VXX</b></td><td class="r mv2-mono">−0.62</td><td class="r mv2-mono">−0.71</td><td class="r mv2-mono">−0.78</td><td class="r mv2-mono">−0.84</td><td><span class="mv2-chip mv2-chip-am">hedge in tail · burns in calm</span></td></tr>
-          <tr><td><b>TQQQ ↔ GLD</b></td><td class="r mv2-mono">0.32</td><td class="r mv2-mono">0.18</td><td class="r mv2-mono">0.08</td><td class="r mv2-mono mv2-dn">−0.42</td><td><span class="mv2-chip mv2-chip-gn">TRUE diversifier in panic</span></td></tr>
-        </tbody></table>
-        <div class="mv2-divbox mv2-warn" style="margin-top:8px"><div style="flex:1"><b>Trap:</b> "I'll spread risk across TQQQ + UPRO + SOXL" looks like 3 positions but in stress it's <b>1 position with 3× the size</b>. The 15% aggregate-3× cap exists for this reason. To genuinely diversify a leveraged book: pair 3× equity LONGs with a small VIX-call hedge or a GLD allocation — those have negative ρ when it counts.</div></div>
-      </div>
-
-      <!-- ═════════ ⑪ OPTIONS-AS-LEVERAGE · the swing-trader alternative ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:3px solid var(--cy)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--cy)">OPTIONS vs 3× ETFs · which leverage works better?</span><span class="mv2-card-meta">QQQ ATM 60-DTE call vs TQQQ · base case: +8% QQQ move in 30d</span></div>
-        <table class="mv2-t"><thead><tr><th>Tool</th><th class="r">Capital outlay</th><th class="r">Effective leverage</th><th class="r">Max loss</th><th class="r">Max upside</th><th>When to use</th></tr></thead><tbody>
-          <tr><td><b>TQQQ shares (3×)</b></td><td class="r mv2-mono">$4,920</td><td class="r mv2-mono">3× (path-dep)</td><td class="r mv2-mono mv2-dn">−$4,920 (worst-case all)</td><td class="r mv2-mono mv2-up">+24% · $1,180</td><td>1-5d trending tape · stop −15%</td></tr>
-          <tr><td><b>QQQ ATM 60-DTE call</b></td><td class="r mv2-mono">$1,840</td><td class="r mv2-mono">7-10× (delta)</td><td class="r mv2-mono mv2-dn">−$1,840 (defined)</td><td class="r mv2-mono mv2-up">+48% · $880</td><td>directional swing · vol &lt; 20</td></tr>
-          <tr><td><b>QQQ ATM 60-DTE call SPREAD</b></td><td class="r mv2-mono">$680</td><td class="r mv2-mono">3-4× (defined)</td><td class="r mv2-mono mv2-dn">−$680 (defined)</td><td class="r mv2-mono mv2-up">+38% · $260 capped</td><td>vol &gt; 20 · earnings · pinned R:R</td></tr>
-          <tr><td><b>SPY LEAPS (1y · 90Δ)</b></td><td class="r mv2-mono">$3,800</td><td class="r mv2-mono">2× (delta)</td><td class="r mv2-mono mv2-dn">−$3,800 (defined)</td><td class="r mv2-mono mv2-up">+18% · $684</td><td>cycle-low value entry · 6-12mo</td></tr>
-        </tbody></table>
-        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1"><b>HF rule of thumb:</b> for <b>directional 1-5d swings</b>, ATM near-the-money calls give better Sharpe than 3× ETFs because (a) defined max loss, (b) no daily-reset vol drag, (c) Greeks let you size precisely. The ONLY use case where 3× ETFs win: trending tape &gt; 5d AND you want to compound across the move AND IV is rich enough that buying calls is too expensive.</div></div>
-      </div>
-
-      <!-- ═════════ ⑫ THE PLAYBOOK · regime-conditional decisions ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:4px solid var(--copper)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--copper)">THE PLAYBOOK · regime-conditional decisions</span><span class="mv2-card-meta">three disciplines fused · the entire alpha</span></div>
-        <table class="mv2-t"><thead><tr><th style="width:180px">If you see…</th><th>Read</th><th>Action</th></tr></thead><tbody>
-          <tr><td><b class="gn">VIX &gt; 32 + breadth &lt; 25% + SPY &lt; 200wk × 1.05</b></td><td>Generational accumulation zone · Buffett's "be greedy" trigger. Every prior fire 2010-22 returned +180-430% in 12 months.</td><td>5-tranche TQQQ DCA over 4-8 weeks · 10-15% NAV total · 12-18mo hold · stop −25%</td></tr>
-          <tr><td><b class="gn">Risk-on trending + VIX &lt; 20 + ADX &gt; 25 + breadth &gt; 60</b></td><td>Prime swing tape · vol drag low · trend compounds in your favor.</td><td>TQQQ/SOXL/FAS 5% each · time-stop 5d · stop −15% · trail above +6%</td></tr>
-          <tr><td><b class="am">Risk-on choppy + VIX 20-25 + breadth 40-60</b> (today)</td><td>Tradeable but suboptimal · vol drag is meaningful · 50% chip-take aggressive.</td><td>QLD/SSO 2× preferred · half-Kelly · tighten stop to −10% · close all by EOW</td></tr>
-          <tr><td><b class="rd">VIX 25-30 OR breadth &lt; 30%</b></td><td>Kill switch for 3× longs. Vol drag will exceed expected return. Pivot to hedges.</td><td>Exit all 3× longs · raise cash · 1-2% SH (−1×) hedge if portfolio &gt; 70% equity</td></tr>
-          <tr><td><b class="rd">Panic regime · VIX &gt; 35 · breadth &lt; 20%</b></td><td>Inverse 3× becomes tradeable ONLY for in-progress moves · never new entries.</td><td>SQQQ/SPXU 2-3% tactical · time-stop 3d · stop −10% · primary defense = cash</td></tr>
-          <tr><td><b class="am">VIX term backwardation · VX1 &gt; VX2</b></td><td>The only state where vol longs survive. Rare · typically last 1-5 days.</td><td>VXX or UVXY 1-2% NAV · STRICT 3-day time-stop · sell into contango return</td></tr>
-        </tbody></table>
-        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1"><b>Sizing-vs-timing principle:</b> 3× ETFs are like driving without a seatbelt — fine until they aren't. Sizing matters infinitely more than entry timing here. Better to be early with 3% than perfectly-timed with 15%. The path to surviving 2022-style years runs through sizing discipline, never through "I'll just hold through it."</div></div>
-      </div>
-
-      <!-- ═════════ ⑬ PRE-MORTEM · what kills leveraged trades ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:3px solid var(--rd)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--rd)">PRE-MORTEM · what ends leveraged-ETF accounts</span><span class="mv2-card-meta">read BEFORE entering · principle 15 of CLAUDE.md</span></div>
-        <ol style="margin:0;padding-left:22px;font-size:12px;color:var(--ink-1);line-height:1.7">
-          <li><b>The chop trap (most common).</b> Sideways tape with 1-2% daily oscillation. Daily reset compounds losses · 30 days of chop costs 6-12% on a 3× ETF even with FLAT underlying. <b>Mitigant:</b> time-stop ≤ 5 days · close every Friday.</li>
-          <li><b>Vol-drag compound · "I just held through it."</b> 2022 example: QQQ −33%, TQQQ −82%. Most traders couldn't take the path-dependent pain and capitulated near the trough. <b>Mitigant:</b> stop −15% on close, no exceptions; never use 3× as a strategic hold outside the cycle-low gate.</li>
-          <li><b>VIX expansion mid-trade.</b> You buy TQQQ at VIX 17, VIX rips to 26 in 3 days. Your underlying is barely down but your 3× is down 6% from drag alone. <b>Mitigant:</b> close all 3× at VIX 23; halve at VIX 21.</li>
-          <li><b>Inverse-ETF "hedge" trap.</b> Buying SQQQ to hedge longs in a slow grind-up market. SQQQ bleeds −3-5% per month even when QQQ is flat. Bad hedge. <b>Mitigant:</b> hedge with VIX calls or PUT spreads, never inverse 3× shares.</li>
-          <li><b>Counterparty / swap risk.</b> Direxion and ProShares use total-return swaps with bank counterparties. In a 2008-style crisis, swap counterparties fail. The ETF can suspend creations and trade at NAV discounts of 5-20%. <b>Mitigant:</b> never hold 3× across crisis triggers; close on FOMC eve, geopolitical event.</li>
-          <li><b>ETN credit risk (FNGU/UVXY when ETN).</b> Some "ETFs" are actually ETNs — unsecured debt of the issuer. Lehman ETNs went to zero in 2008 despite the underlying basket holding value. <b>Mitigant:</b> verify ETF vs ETN; prefer ETF structure.</li>
-          <li><b>Tax drag.</b> 3× ETFs are 100% short-term gains. Hold for 1y? Doesn't matter — they distribute STCG annually. Tax-adjusted return on TQQQ at 37% bracket = CAGR + 30% × short-term-gain-rate hit. <b>Mitigant:</b> trade 3× in IRA/Roth only; keep taxable account in 2× or SPY itself.</li>
-          <li><b>The "I lost my method" cascade.</b> Big loss → revenge trade → bigger loss → "let me try inverse" → bigger loss. Most leveraged-ETF blowups start with one bad trade and end with 8 weeks of catastrophe. <b>Mitigant:</b> daily-loss circuit-breaker · −3% NAV in a day = no new trades until next week.</li>
-        </ol>
-      </div>
-      ${_actionFooter(['📊 Vol-drag calc', '🎯 Kelly size', '⏰ Regime alert', '⚠️ Suitability', '↓ Export'])}`;
+      ${(setTimeout(() => _qlevStartPoll(watchlist), 30), '')}
+      ${_actionFooter(['🎯 Kelly size', '⏰ Regime alert', '↓ Export'])}`;
   }
+
+  // ── Leveraged-tab live price poll (Schwab, 20s + exp backoff) ──
+  // Lifted out of the template literal so we don't embed a closing tag
+  // inside a surrounding script element (browser would close it prematurely).
+  let _qlevTimer = null, _qlevFailN = 0;
+  function _qlevStartPoll(tickers) {
+    if (_qlevTimer) clearTimeout(_qlevTimer);
+    if (!tickers || !tickers.length) return;
+    async function poll() {
+      const tbl = document.getElementById('qlev-tbl');
+      if (!tbl) { _qlevTimer = null; return; }
+      let ok = false;
+      try {
+        const r = await fetch('/api/live/quote?tickers=' + encodeURIComponent(tickers.join(',')), { credentials: 'same-origin' });
+        if (r.ok) {
+          const j = await r.json();
+          Object.entries(j.prices || {}).forEach(([tk, px]) => {
+            tbl.querySelectorAll('.qlev-px-cell[data-qlev-tk="' + tk + '"]').forEach(c => { c.textContent = '$' + Number(px).toFixed(2); });
+            const q = (j.quotes || {})[tk] || {};
+            const chg = q.change_p != null ? q.change_p : q.change_pct;
+            if (chg != null) {
+              const cc = tbl.querySelector('.qlev-chg-cell[data-qlev-tk="' + tk + '"]');
+              if (cc) {
+                cc.textContent = (chg >= 0 ? '+' : '') + Number(chg).toFixed(2) + '%';
+                cc.className = 'r mv2-mono qlev-chg-cell ' + (chg >= 0 ? 'mv2-up' : 'mv2-dn');
+              }
+            }
+            if (q.volume != null) {
+              const vc = tbl.querySelector('.qlev-vol-cell[data-qlev-tk="' + tk + '"]');
+              if (vc) vc.textContent = (q.volume / 1e6).toFixed(1) + 'M';
+            }
+          });
+          ok = true;
+        }
+      } catch (_) {}
+      _qlevFailN = ok ? 0 : _qlevFailN + 1;
+      const ms = ok ? 20000 : Math.min(300000, 20000 * Math.pow(2, Math.min(_qlevFailN, 4)));
+      _qlevTimer = setTimeout(poll, ms);
+    }
+    poll();
+  }
+
+  // Leveraged watchlist table — extracted from the template literal so the
+  // browser HTML parser doesn't get confused by nested template literal
+  // tokens during initial DOM parse.
+  function _renderLeveragedTable(watchlist) {
+    if (!watchlist || !watchlist.length) {
+      return '<div class="mv2-note" style="padding:14px">No leveraged ETFs in watchlist.</div>';
+    }
+    const rows = watchlist.map(sym => {
+      const meta = _leveragedMeta(sym);
+      return '<tr class="mv2-rowlink" onclick="if(window.setDetailTicker) window.setDetailTicker(\'' + sym + '\')">' +
+        '<td class="mv2-mono"><b>' + sym + '</b></td>' +
+        '<td class="r mv2-mono qlev-px-cell" data-qlev-tk="' + sym + '">—</td>' +
+        '<td class="r mv2-mono qlev-chg-cell" data-qlev-tk="' + sym + '">—</td>' +
+        '<td class="r mv2-mono qlev-vol-cell" data-qlev-tk="' + sym + '">—</td>' +
+        '<td>' + meta.tracks + '</td>' +
+        '<td style="font-size:10px">' + meta.note + '</td>' +
+        '</tr>';
+    }).join('');
+    return '<table class="mv2-t" id="qlev-tbl">' +
+      '<thead><tr><th>ETF</th><th class="r">Price</th><th class="r">Δ%</th><th class="r">Volume</th><th>Tracks</th><th>Note</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table>' +
+      '<div class="mv2-note">Prices update every 20s from Schwab Market Data. Click any ETF row for the detail panel.</div>';
+  }
+
+  // Leveraged ETF metadata table (tracks + decay note). No prices here.
+  function _leveragedMeta(sym) {
+    const M = {
+      'TQQQ': { tracks: '3× Nasdaq-100',          note: 'prime swing · highest ADV in 3×' },
+      'SQQQ': { tracks: '3× SHORT Nasdaq-100',    note: 'hedge only · regime-block' },
+      'UPRO': { tracks: '3× S&P 500',             note: 'diversified · lower σ' },
+      'SPXU': { tracks: '3× SHORT S&P 500',       note: 'hedge only · regime-block' },
+      'SPXL': { tracks: '3× S&P 500',             note: 'alt of UPRO' },
+      'UDOW': { tracks: '3× Dow Jones',           note: 'low ADV · skip' },
+      'SDOW': { tracks: '3× SHORT Dow Jones',     note: 'hedge only · low ADV' },
+      'TNA':  { tracks: '3× Russell 2000',        note: 'vol drag heavy · σ 26%' },
+      'TZA':  { tracks: '3× SHORT Russell 2000',  note: 'hedge only' },
+      'FNGU': { tracks: '3× FANG+ basket ETN',    note: 'ETN credit risk · skip' },
+      'SOXL': { tracks: '3× Semis',               note: 'highest ADV sector 3× · σ ~38%' },
+      'FAS':  { tracks: '3× Financials',          note: 'rotation play · σ ~22%' },
+      'FAZ':  { tracks: '3× SHORT Financials',    note: 'hedge only' },
+      'LABU': { tracks: '3× Biotech (XBI)',       note: 'σ 42% — vol drag eats edge · skip' },
+      'NUGT': { tracks: '2× Gold Miners (GDX)',   note: '2× = 1/3 drag of 3×' },
+      'JNUG': { tracks: '2× Junior Gold Miners',  note: '2× · high σ · short hold' },
+      'BULZ': { tracks: '3× FANG Innovators',     note: 'concentrated · skip vs FNGU' },
+      'WEBL': { tracks: '3× Online Retail',       note: 'thematic · 5d max hold' },
+      'TECL': { tracks: '3× Technology',          note: 'sector overlap with TQQQ' },
+      'TECS': { tracks: '3× SHORT Technology',    note: 'hedge only' },
+      'BOIL': { tracks: '2× Nat Gas futures',     note: 'futures roll cost · daily reset killer' },
+      'AGQ':  { tracks: '2× Silver',              note: 'commodity 2× · vol drag' },
+      'UVXY': { tracks: '1.5× VIX short-term',    note: 'NEVER hold · −99.99% since 2009' },
+    };
+    return M[sym] || { tracks: '—', note: '—' };
+  }
+
 
   // ─── TAB 9: CRYPTO LENS ───
   function renderCrypto(data) {
