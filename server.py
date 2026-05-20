@@ -2920,6 +2920,97 @@ async def diagnostics_apply_tune_api(payload: Dict[str, Any] = Body(...)):
     return {"status": "applied", "backup": str(backup.name), "changes": changes}
 
 
+@app.get("/api/positions/active-watch")
+async def positions_active_watch_api():
+    """For each open portfolio position, return live price + explicit verdict:
+    EXIT_STOP (price <= stop) · TRAIL_ACTIVE (past T1) · HOLD · APPROACHING_STOP (within 1 ATR).
+    Closes the post-BUY gap — gives user a single source of truth for daily action.
+    """
+    import json
+    from pathlib import Path
+    # Source of truth = data/portfolio_state.json (per CLAUDE.md, this is real PnL truth).
+    # cache/portfolio.json is a legacy file. portfolio_tracker has no get_open_positions
+    # method — it manipulates positions inline.
+    pp = Path("data/portfolio_state.json")
+    positions = []
+    if pp.exists():
+        try:
+            d = json.loads(pp.read_text())
+            positions = d.get("positions") or d.get("open_positions") or []
+        except Exception: pass
+    if not positions:
+        return {"positions": [], "count": 0, "summary": {"hold": 0, "exit_stop": 0, "trail_active": 0, "approaching_stop": 0}}
+    # Get live prices via internal /api/live/quote handler (Schwab primary, EODHD fallback)
+    tickers = [p.get("ticker") for p in positions if p.get("ticker")]
+    prices = {}
+    if tickers:
+        try:
+            q = await live_quote(tickers=",".join(tickers))
+            prices = q.get("prices", {}) or {}
+        except Exception:
+            pass
+    out = []
+    summary = {"hold": 0, "exit_stop": 0, "trail_active": 0, "approaching_stop": 0, "approaching_t1": 0, "no_price": 0}
+    for p in positions:
+        tk = p.get("ticker")
+        if not tk: continue
+        entry = float(p.get("entry_price") or p.get("entry") or 0)
+        stop = float(p.get("stop") or 0)
+        t1 = float(p.get("target1") or 0)
+        t2 = float(p.get("target2") or 0)
+        direction = (p.get("direction") or "long").lower()
+        shares = int(p.get("shares") or 0)
+        opened = p.get("entry_date") or p.get("opened") or ""
+        cur_raw = prices.get(tk)
+        if isinstance(cur_raw, dict):
+            cur = float(cur_raw.get("price") or cur_raw.get("last") or 0)
+        else:
+            cur = float(cur_raw or 0)
+        # Compute verdict
+        verdict = "NO_PRICE"
+        action = "-"
+        pnl_pct = 0
+        if cur > 0 and entry > 0:
+            pnl_pct = ((cur / entry) - 1) * 100 if direction == "long" else ((entry / cur) - 1) * 100
+        if cur > 0:
+            if direction == "long":
+                if stop and cur <= stop:
+                    verdict, action = "EXIT_STOP", f"SELL NOW — stop ${stop:.2f} hit (cur ${cur:.2f})"
+                elif t2 and cur >= t2:
+                    verdict, action = "TARGET2_HIT", f"TRIM/EXIT — T2 ${t2:.2f} hit (cur ${cur:.2f})"
+                elif t1 and cur >= t1:
+                    verdict, action = "TRAIL_ACTIVE", f"PARTIAL @ T1 ${t1:.2f} → trail rest with stop at breakeven (entry ${entry:.2f})"
+                elif t1 and (t1 - cur) / max(0.01, t1 - entry) < 0.10:
+                    verdict, action = "APPROACHING_T1", f"APPROACHING T1 ${t1:.2f} (cur ${cur:.2f}) — prep partial exit"
+                elif stop and (cur - stop) / max(0.01, entry - stop) < 0.25:
+                    verdict, action = "APPROACHING_STOP", f"APPROACHING STOP ${stop:.2f} (cur ${cur:.2f}) — set price alert"
+                else:
+                    verdict, action = "HOLD", f"HOLD — ${cur:.2f} between stop ${stop:.2f} and T1 ${t1:.2f}"
+            else:  # short
+                if stop and cur >= stop:
+                    verdict, action = "EXIT_STOP", f"COVER NOW — stop ${stop:.2f} hit (cur ${cur:.2f})"
+                elif t1 and cur <= t1:
+                    verdict, action = "TARGET1_HIT", f"COVER PARTIAL @ T1 ${t1:.2f}"
+                else:
+                    verdict, action = "HOLD", f"HOLD short — ${cur:.2f}"
+        else:
+            verdict, action = "NO_PRICE", "Price feed missing — check Schwab/EODHD"
+        summary[verdict.lower()] = summary.get(verdict.lower(), 0) + 1
+        out.append({
+            "ticker": tk, "direction": direction, "shares": shares,
+            "entry": entry, "current": cur, "stop": stop, "target1": t1, "target2": t2,
+            "pnl_pct": round(pnl_pct, 2),
+            "dist_to_stop_pct": round((cur - stop) / cur * 100, 2) if cur and stop else None,
+            "dist_to_t1_pct": round((t1 - cur) / cur * 100, 2) if cur and t1 else None,
+            "verdict": verdict, "action": action,
+            "opened": opened, "setup": p.get("setup_type") or p.get("setup"),
+        })
+    # Sort: EXIT_STOP first, then APPROACHING, then HOLD
+    sort_key = {"EXIT_STOP": 0, "TARGET2_HIT": 1, "TRAIL_ACTIVE": 2, "APPROACHING_STOP": 3, "APPROACHING_T1": 4, "HOLD": 5, "NO_PRICE": 6}
+    out.sort(key=lambda r: sort_key.get(r["verdict"], 9))
+    return {"positions": out, "count": len(out), "summary": summary}
+
+
 @app.get("/api/premarket-catalysts")
 async def premarket_catalysts_api(lookback_hours: int = 16, mine_only: bool = False):
     """Pull overnight news for portfolio + watchlist tickers, categorize by catalyst type.
@@ -4711,21 +4802,90 @@ async def vcp_pivots_api(ticker: str):
     except Exception as e:
         return {"ticker": ticker, "pivots": [], "error": str(e)}
 
+# ─────────────────────────────────────────────────────────────────────
+# 2026-05-19 · Live-price refresh for the Portfolio tab.
+# Browser polls this every 5s with the list of held tickers and gets
+# back current_price per ticker. Browser does the P&L math client-side
+# (current_price * shares - cost_basis) so this endpoint stays a thin
+# proxy.
+#
+# Source: Schwab Market Data /marketdata/v1/quotes via schwab_client.
+# Market Data has its OWN rate-limit pool (~120/min) separate from
+# EODHD's 100K/day budget — no quota competition with the daily scan.
+# Trader API NOT required (which the user's Schwab dev app may not
+# have enabled yet).
+# ─────────────────────────────────────────────────────────────────────
+@app.get("/api/portfolio/live_prices")
+async def portfolio_live_prices(tickers: str = ""):
+    """Return current Schwab Market Data quote per ticker.
+
+    Query: ?tickers=NEM,AAPL,MSFT (comma-separated)
+    Returns: {
+      "ts": "2026-05-19T11:42:01Z",
+      "source": "schwab.marketdata.v1",
+      "elapsed_ms": 84,
+      "prices": { "NEM": 105.81, "AAPL": 195.42, ... },
+      "missing": []  # tickers we couldn't get quotes for
+    }
+    """
+    import time as _t
+    t0 = _t.time()
+    syms = [s.strip().upper() for s in (tickers or "").split(",") if s.strip()]
+    if not syms:
+        return {"ts": datetime.now(timezone.utc).isoformat(),
+                "source": "schwab.marketdata.v1",
+                "elapsed_ms": 0, "prices": {}, "missing": []}
+
+    try:
+        import schwab_client
+        blobs = schwab_client.get_quotes_batch(syms)
+    except Exception as e:
+        raise HTTPException(503, f"Schwab Market Data fetch failed: {e}")
+
+    prices: dict[str, float] = {}
+    missing: list[str] = []
+    for sym in syms:
+        blob = blobs.get(sym) or {}
+        q = blob.get("quote") or {}
+        px = q.get("lastPrice") or q.get("regularMarketLastPrice") or q.get("bidPrice")
+        if px is None or not isinstance(px, (int, float)):
+            missing.append(sym)
+            continue
+        prices[sym] = round(float(px), 4)
+
+    return {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "source": "schwab.marketdata.v1",
+        "elapsed_ms": int((_t.time() - t0) * 1000),
+        "prices": prices,
+        "missing": missing,
+    }
+
+
 @app.post("/api/portfolio/add")
 async def portfolio_add(req: Request, _: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
     body = await req.json()
     import portfolio_tracker as pt
-    required = ["ticker", "entry", "shares", "stop", "target1"]
+    # 2026-05-19 · target1 is OPTIONAL (user-agency principle). Users may
+    # enter at market with stop only and exit at their discretion.
+    # portfolio_tracker.add_position uses `target1 and current >= target1`
+    # so target1=0 naturally skips the auto-trim trigger.
+    required = ["ticker", "entry", "shares", "stop"]
     missing = [k for k in required if k not in body]
     if missing:
         raise HTTPException(400, f"Missing fields: {', '.join(missing)}")
     try:
+        _t1_raw = body.get("target1")
+        try:
+            _t1 = float(_t1_raw) if _t1_raw not in (None, "", 0, "0") else 0.0
+        except (TypeError, ValueError):
+            _t1 = 0.0
         pos = pt.add_position(
             ticker=str(body["ticker"]).upper(),
             entry_price=float(body["entry"]),
             shares=int(float(body["shares"])),
             stop=float(body["stop"]),
-            target1=float(body["target1"]),
+            target1=_t1,
             target2=float(body["target2"]) if body.get("target2") else None,
             setup_type=str(body.get("setup", "")),
             direction=str(body.get("direction", "long")),
@@ -5147,10 +5307,30 @@ async def custom_list():
 
 @app.post("/api/custom/add")
 async def custom_add(req: Request):
+    """Add ticker to watchlist (data/custom_tracked.json).
+
+    2026-05-19 · Made idempotent: 'already tracked' returns HTTP 200 with
+    {success: true, already_tracked: true} instead of 400. This kills the
+    Chrome 'Failed to load resource' console noise on the WATCH button
+    when a ticker is already in the list (the most common case). Other
+    errors (price fetch failed, invalid ticker) still raise 400.
+    """
     body = await req.json()
     from custom_tracker import add_custom_ticker
-    result = add_custom_ticker(str(body["ticker"]).upper(), str(body.get("note", "")))
+    ticker = str(body["ticker"]).upper()
+    result = add_custom_ticker(ticker, str(body.get("note", "")))
     if not result.get("success"):
+        err = (result.get("error") or "").lower()
+        if "already" in err or "tracked" in err:
+            # Idempotent — caller's intent ("this ticker should be on
+            # the watchlist") is satisfied. Return 200 so the browser
+            # doesn't log a console error.
+            return {
+                "success": True,
+                "ticker": ticker,
+                "already_tracked": True,
+                "note": result.get("error"),
+            }
         raise HTTPException(400, result.get("error", "Unknown"))
     return result
 
