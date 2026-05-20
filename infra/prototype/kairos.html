@@ -46100,248 +46100,236 @@ const QuantMomentum = (function () {
 
 
 // ══════════════════════════════════════════════════════════════════════
-//   QuantConfluence · 2026-05-19 · multi-lens sidebar workspace
-//   Senior hedge-fund-analyst view: Value (Graham-Buffett margin of safety) ·
-//   Quality (ROE × gross margin × stability) · Earnings window (pre-ER · ER-day ·
-//   PEAD · IV positioning) · Catalyst tier · Setup family · AI ✦ · cross-surface
-//   conflicts. Tiles → conflicts → analyst lenses → full execution matrix.
+//   QuantConfluence · 2026-05-19 · all-universe signal heatmap
+//   Senior hedge-fund-analyst view: dense 1-row-per-ticker grid showing
+//   every ticker across every confluence dimension (verdict · AI · MoS ·
+//   Quality · ER window · R:R · Entry · Setup · Catalyst · Sharpe).
+//   Treemap alternative view groups all tickers by sector with color =
+//   confluence. Collapsible drawer below holds top-picks tiles + conflicts
+//   + senior-analyst lenses (value · compounders · earnings).
 // ══════════════════════════════════════════════════════════════════════
 const QuantConfluence = (function () {
-  let _arr = []; let _ml = {}; let _held = new Set(); let _wsPanel = null;
-  let _filter = 'all'; let _search = '';
+  // ── State
+  let _arr = []; let _held = new Set(); let _wsPanel = null;
+  let _filter = 'all'; let _search = ''; let _sector = 'all';
+  let _sort = 'conflu'; let _sortDir = 'desc';
+  let _view = 'heatmap'; // heatmap | treemap
+  let _drawerOpen = false;
 
-  // ── Style block — namespaced .qcm-*
+  // ── Styles (namespaced .qcm-*)
   function _ensureStyles() {
     if (document.getElementById('qcm-styles')) return;
     const css = `
-:root{--qcm-bg-0:#070908;--qcm-bg-1:#0d1110;--qcm-bg-2:#141817;--qcm-bg-3:#1a1e1d;--qcm-bg-4:#22272a;--qcm-line:#262b2d;--qcm-line-2:#353a3c;--qcm-line-3:#454a4c;--qcm-ink:#ecefe9;--qcm-ink-1:#d4d8d1;--qcm-ink-2:#9a9e98;--qcm-ink-3:#686c68;--qcm-ink-4:#4a4e4a;--qcm-gn:#4ade80;--qcm-gn-dim:#166534;--qcm-gn-bg:rgba(74,222,128,.13);--qcm-gn-glow:rgba(74,222,128,.35);--qcm-rd:#f87171;--qcm-rd-dim:#991b1b;--qcm-rd-bg:rgba(248,113,113,.13);--qcm-rd-glow:rgba(248,113,113,.35);--qcm-amb:#fbbf24;--qcm-amb-dim:#92400e;--qcm-amb-bg:rgba(251,191,36,.14);--qcm-cy:#60a5fa;--qcm-cy-bg:rgba(96,165,250,.13);--qcm-cu:#d97757;--qcm-cu-2:#b85a3c;--qcm-cu-bg:rgba(217,119,87,.14);--qcm-pur:#a78bfa;--qcm-mono:'JetBrains Mono','SF Mono',ui-monospace,monospace}
-body.light{--qcm-bg-0:#f5f4ed;--qcm-bg-1:#fff;--qcm-bg-2:#f0eee5;--qcm-bg-3:#e5e3d8;--qcm-bg-4:#d8d5c8;--qcm-line:#d0cdc0;--qcm-line-2:#b8b5a8;--qcm-ink:#1a1d1a;--qcm-ink-1:#2a2d2a;--qcm-ink-2:#5a5d5a;--qcm-ink-3:#8a8d8a;--qcm-ink-4:#a8aba8;--qcm-gn:#16a34a;--qcm-gn-bg:rgba(22,163,74,.12);--qcm-rd:#dc2626;--qcm-rd-bg:rgba(220,38,38,.12);--qcm-amb:#d97706;--qcm-amb-bg:rgba(217,119,6,.14);--qcm-cu:#b85a3c}
+:root{--qcm-bg-0:#070908;--qcm-bg-1:#0d1110;--qcm-bg-2:#141817;--qcm-bg-3:#1a1e1d;--qcm-bg-4:#22272a;--qcm-bg-5:#2c3131;--qcm-line:#262b2d;--qcm-line-2:#353a3c;--qcm-line-3:#454a4c;--qcm-ink:#ecefe9;--qcm-ink-1:#d4d8d1;--qcm-ink-2:#9a9e98;--qcm-ink-3:#686c68;--qcm-ink-4:#4a4e4a;--qcm-gn:#4ade80;--qcm-gn-2:#22c55e;--qcm-gn-3:#16a34a;--qcm-gn-dim:#166534;--qcm-gn-bg:rgba(74,222,128,.13);--qcm-gn-glow:rgba(74,222,128,.35);--qcm-rd:#f87171;--qcm-rd-2:#ef4444;--qcm-rd-3:#dc2626;--qcm-rd-dim:#991b1b;--qcm-rd-bg:rgba(248,113,113,.13);--qcm-rd-glow:rgba(248,113,113,.35);--qcm-amb:#fbbf24;--qcm-amb-2:#f59e0b;--qcm-amb-3:#d97706;--qcm-amb-dim:#92400e;--qcm-amb-bg:rgba(251,191,36,.14);--qcm-cy:#60a5fa;--qcm-cy-2:#3b82f6;--qcm-cy-bg:rgba(96,165,250,.13);--qcm-cu:#d97757;--qcm-cu-2:#b85a3c;--qcm-cu-bg:rgba(217,119,87,.14);--qcm-pur:#a78bfa;--qcm-pur-bg:rgba(167,139,250,.13);--qcm-mono:'JetBrains Mono','SF Mono',ui-monospace,monospace}
+body.light{--qcm-bg-0:#f5f4ed;--qcm-bg-1:#fff;--qcm-bg-2:#f0eee5;--qcm-bg-3:#e5e3d8;--qcm-bg-4:#d8d5c8;--qcm-line:#d0cdc0;--qcm-line-2:#b8b5a8;--qcm-ink:#1a1d1a;--qcm-ink-1:#2a2d2a;--qcm-ink-2:#5a5d5a;--qcm-ink-3:#8a8d8a;--qcm-ink-4:#a8aba8}
 .qcm-root{background:var(--qcm-bg-0);color:var(--qcm-ink);font:13px/1.5 -apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;font-variant-numeric:tabular-nums;padding:18px 22px;min-height:100%}
-.qcm-bc{font:700 10.5px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.18em;text-transform:uppercase;margin-bottom:6px}
+
+/* Header */
+.qcm-hdr{display:grid;grid-template-columns:auto 1fr;align-items:end;gap:24px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--qcm-line)}
+.qcm-bc{font:700 10px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.2em;text-transform:uppercase;margin-bottom:5px}
 .qcm-bc b{color:var(--qcm-cu)}
-.qcm-h1{font:800 26px var(--qcm-mono);letter-spacing:.02em;color:var(--qcm-ink);margin:0;line-height:1.1}
+.qcm-h1{font:800 24px var(--qcm-mono);letter-spacing:.02em;color:var(--qcm-ink);margin:0;line-height:1.05}
 .qcm-h1 .qcm-accent{background:linear-gradient(135deg,var(--qcm-cu),var(--qcm-amb));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.qcm-tagline{font:500 11px var(--qcm-mono);color:var(--qcm-ink-2);margin-top:6px;letter-spacing:.04em}
+.qcm-tagline{font:500 10.5px var(--qcm-mono);color:var(--qcm-ink-2);margin-top:4px;letter-spacing:.04em}
 .qcm-tagline b{color:var(--qcm-cu)}
-.qcm-hdr{display:grid;grid-template-columns:auto 1fr;align-items:end;gap:24px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--qcm-line)}
-.qcm-kpi-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
-.qcm-kpi{background:linear-gradient(180deg,var(--qcm-bg-2),var(--qcm-bg-1));border:1px solid var(--qcm-line);padding:9px 12px;border-radius:2px;position:relative;overflow:hidden}
+.qcm-kpi-strip{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}
+.qcm-kpi{background:linear-gradient(180deg,var(--qcm-bg-2),var(--qcm-bg-1));border:1px solid var(--qcm-line);padding:7px 10px;border-radius:2px;position:relative;overflow:hidden}
 .qcm-kpi::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--qcm-cu)}
 .qcm-kpi.gn::before{background:var(--qcm-gn)} .qcm-kpi.rd::before{background:var(--qcm-rd)} .qcm-kpi.am::before{background:var(--qcm-amb)} .qcm-kpi.cy::before{background:var(--qcm-cy)} .qcm-kpi.pur::before{background:var(--qcm-pur)}
-.qcm-kpi .lbl{font:700 8px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.18em;text-transform:uppercase}
-.qcm-kpi .val{font:800 19px var(--qcm-mono);letter-spacing:.02em;line-height:1.1;margin-top:3px;color:var(--qcm-ink)}
+.qcm-kpi .lbl{font:700 7.5px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.18em;text-transform:uppercase}
+.qcm-kpi .val{font:800 16px var(--qcm-mono);letter-spacing:.02em;line-height:1.1;margin-top:2px;color:var(--qcm-ink)}
 .qcm-kpi.gn .val{color:var(--qcm-gn)} .qcm-kpi.rd .val{color:var(--qcm-rd)} .qcm-kpi.am .val{color:var(--qcm-amb)} .qcm-kpi.cu .val{color:var(--qcm-cu)} .qcm-kpi.cy .val{color:var(--qcm-cy)} .qcm-kpi.pur .val{color:var(--qcm-pur)}
-.qcm-kpi .sub{font:600 8.5px var(--qcm-mono);color:var(--qcm-ink-2);margin-top:2px;letter-spacing:.04em}
-.qcm-kpi .sub b{color:var(--qcm-ink-1)}
-.qcm-section-hdr{display:flex;align-items:baseline;justify-content:space-between;margin:18px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--qcm-line)}
-.qcm-section-hdr h2{font:800 12.5px var(--qcm-mono);color:var(--qcm-cu);margin:0;letter-spacing:.18em}
-.qcm-section-hdr h2 .ic{margin-right:6px}
-.qcm-section-hdr .meta{font:500 9.5px var(--qcm-mono);color:var(--qcm-ink-2);letter-spacing:.04em}
-.qcm-section-hdr .meta b{color:var(--qcm-ink-1)}
-.qcm-tile-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
-.qcm-tile{background:linear-gradient(180deg,var(--qcm-bg-2),var(--qcm-bg-1));border:1px solid var(--qcm-line);border-radius:2px;overflow:hidden;position:relative}
-.qcm-tile::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px}
-.qcm-tile.buy::before{background:linear-gradient(180deg,var(--qcm-gn),var(--qcm-gn-dim));box-shadow:0 0 10px var(--qcm-gn-glow)}
-.qcm-tile.watch::before{background:linear-gradient(180deg,var(--qcm-amb),var(--qcm-amb-dim))}
-.qcm-tile.short::before{background:linear-gradient(180deg,var(--qcm-rd),var(--qcm-rd-dim));box-shadow:0 0 10px var(--qcm-rd-glow)}
-.qcm-tile-hdr{padding:9px 14px 7px;border-bottom:1px solid var(--qcm-line);display:flex;align-items:baseline;justify-content:space-between}
-.qcm-tile-hdr h3{font:800 11px var(--qcm-mono);margin:0;letter-spacing:.12em}
-.qcm-tile.buy .qcm-tile-hdr h3{color:var(--qcm-gn)}
-.qcm-tile.watch .qcm-tile-hdr h3{color:var(--qcm-amb)}
-.qcm-tile.short .qcm-tile-hdr h3{color:var(--qcm-rd)}
-.qcm-tile-hdr .ct{font:700 8.5px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.06em}
-.qcm-trow{display:grid;grid-template-columns:1.5fr 1fr 1.2fr;gap:8px;align-items:center;padding:7px 14px;border-bottom:1px solid var(--qcm-line);cursor:pointer;transition:background 100ms}
-.qcm-trow:last-child{border-bottom:0}
-.qcm-trow:hover{background:var(--qcm-bg-3)}
-.qcm-trow .tk{font:800 13px var(--qcm-mono);color:var(--qcm-ink);letter-spacing:.04em;line-height:1.2}
-.qcm-trow .held{color:var(--qcm-cy);font-size:11px;margin-left:3px}
-.qcm-trow .sec{font:600 8px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.04em;margin-top:2px;text-transform:uppercase;display:block}
-.qcm-trow .pr{font:800 12px var(--qcm-mono);color:var(--qcm-ink);text-align:right;letter-spacing:.02em}
-.qcm-trow .stats{display:flex;justify-content:flex-end;gap:3px;margin-top:3px}
-.qcm-ts{font:800 8.5px var(--qcm-mono);padding:1px 5px;border-radius:1px;letter-spacing:.02em;border:1px solid}
-.qcm-ts.gn{background:var(--qcm-gn-bg);color:var(--qcm-gn);border-color:var(--qcm-gn-dim)}
-.qcm-ts.am{background:var(--qcm-amb-bg);color:var(--qcm-amb);border-color:var(--qcm-amb-dim)}
-.qcm-ts.rd{background:var(--qcm-rd-bg);color:var(--qcm-rd);border-color:var(--qcm-rd-dim)}
-.qcm-conflicts{background:linear-gradient(180deg,var(--qcm-bg-2),var(--qcm-bg-1));border:1px solid var(--qcm-amb-dim);border-radius:2px;margin-bottom:12px;overflow:hidden;position:relative}
-.qcm-conflicts::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--qcm-amb),var(--qcm-amb-dim));box-shadow:0 0 12px rgba(251,191,36,.4)}
-.qcm-cf-hdr{padding:10px 16px 8px;border-bottom:1px solid var(--qcm-line);display:flex;align-items:center;justify-content:space-between}
-.qcm-cf-hdr h3{font:800 11.5px var(--qcm-mono);color:var(--qcm-amb);margin:0;letter-spacing:.12em}
-.qcm-cf-hdr .sub{font:500 9.5px var(--qcm-mono);color:var(--qcm-ink-2);letter-spacing:.04em}
-.qcm-cf-row{display:grid;grid-template-columns:150px 1fr 1.3fr;gap:12px;align-items:center;padding:8px 16px;border-bottom:1px solid var(--qcm-line);cursor:pointer;transition:background 100ms;font:600 11px var(--qcm-mono)}
-.qcm-cf-row:last-child{border-bottom:0}
-.qcm-cf-row:hover{background:var(--qcm-bg-3)}
-.qcm-cf-row .tk{font:800 13px var(--qcm-mono);color:var(--qcm-ink);letter-spacing:.04em;margin-right:6px}
-.qcm-cf-row .sec{font:600 8.5px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.04em;text-transform:uppercase;display:block;margin-top:2px}
-.qcm-cf-mid{font:600 10px var(--qcm-mono);color:var(--qcm-ink-2);display:flex;align-items:center;gap:8px;letter-spacing:.04em;flex-wrap:wrap}
-.qcm-cf-mid b{color:var(--qcm-ink)}
-.qcm-cf-mid b.gn{color:var(--qcm-gn)} .qcm-cf-mid b.rd{color:var(--qcm-rd)} .qcm-cf-mid b.na{color:var(--qcm-ink-3)}
-.qcm-cf-sep{color:var(--qcm-ink-4)}
-.qcm-cf-r{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
-.qcm-sev{display:inline-block;font:800 9px var(--qcm-mono);padding:2px 7px;letter-spacing:.06em;border-radius:1px;border:1px solid}
-.qcm-sev.s1{background:var(--qcm-amb-bg);color:var(--qcm-amb);border-color:var(--qcm-amb-dim)}
-.qcm-sev.s2{background:linear-gradient(135deg,var(--qcm-amb-bg),var(--qcm-rd-bg));color:var(--qcm-amb);border-color:var(--qcm-amb)}
-.qcm-sev.s3{background:var(--qcm-rd-bg);color:var(--qcm-rd);border-color:var(--qcm-rd);box-shadow:0 0 8px var(--qcm-rd-glow)}
-.qcm-cf-reasons{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:3px}
-.qcm-cf-reason{font:700 8.5px var(--qcm-mono);padding:2px 6px;background:var(--qcm-bg-3);color:var(--qcm-ink-1);border:1px solid var(--qcm-line-2);border-radius:1px;letter-spacing:.02em}
-.qcm-lens-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
-.qcm-lens{background:linear-gradient(180deg,var(--qcm-bg-2),var(--qcm-bg-1));border:1px solid var(--qcm-line);border-radius:2px;overflow:hidden;position:relative}
-.qcm-lens::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
-.qcm-lens.val::before{background:var(--qcm-cy)}
-.qcm-lens.qual::before{background:var(--qcm-pur)}
-.qcm-lens.ern::before{background:var(--qcm-amb)}
-.qcm-lens-hdr{padding:9px 14px 7px;border-bottom:1px solid var(--qcm-line);display:flex;align-items:baseline;justify-content:space-between}
-.qcm-lens-hdr h3{font:800 11px var(--qcm-mono);margin:0;letter-spacing:.12em}
-.qcm-lens.val .qcm-lens-hdr h3{color:var(--qcm-cy)}
-.qcm-lens.qual .qcm-lens-hdr h3{color:var(--qcm-pur)}
-.qcm-lens.ern .qcm-lens-hdr h3{color:var(--qcm-amb)}
-.qcm-lens-hdr .ct{font:700 8.5px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.06em}
-.qcm-lens-row{display:grid;grid-template-columns:1.3fr 1.4fr 0.9fr;gap:8px;align-items:center;padding:7px 14px;border-bottom:1px solid var(--qcm-line);cursor:pointer;transition:background 100ms;font:600 11px var(--qcm-mono)}
-.qcm-lens-row:last-child{border-bottom:0}
-.qcm-lens-row:hover{background:var(--qcm-bg-3)}
-.qcm-lens-row .tk{font:800 12.5px var(--qcm-mono);color:var(--qcm-ink);letter-spacing:.04em}
-.qcm-lens-row .lbl{font:600 8px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.04em;margin-top:1px;text-transform:uppercase;display:block}
-.qcm-lens-row .mid{font:700 9.5px var(--qcm-mono);color:var(--qcm-ink-2);letter-spacing:.02em}
-.qcm-lens-row .mid b{color:var(--qcm-ink)}
-.qcm-lens-row .mid b.gn{color:var(--qcm-gn)} .qcm-lens-row .mid b.rd{color:var(--qcm-rd)} .qcm-lens-row .mid b.am{color:var(--qcm-amb)}
-.qcm-lens-row .r{text-align:right;font:800 11px var(--qcm-mono);letter-spacing:.02em}
-.qcm-bar-inline{display:inline-block;width:46px;height:5px;background:var(--qcm-bg-4);border-radius:1px;overflow:hidden;vertical-align:middle;border:1px solid var(--qcm-line);margin-right:4px}
-.qcm-bar-inline i{display:block;height:100%}
-.qcm-bar-inline i.gn{background:linear-gradient(90deg,var(--qcm-gn-dim),var(--qcm-gn))}
-.qcm-bar-inline i.am{background:linear-gradient(90deg,var(--qcm-amb-dim),var(--qcm-amb))}
-.qcm-bar-inline i.rd{background:linear-gradient(90deg,var(--qcm-rd-dim),var(--qcm-rd))}
-.qcm-bar-inline i.cu{background:linear-gradient(90deg,var(--qcm-cu-2),var(--qcm-cu))}
-.qcm-toggle{display:flex;align-items:center;gap:8px;background:linear-gradient(180deg,var(--qcm-bg-2),var(--qcm-bg-1));border:1px solid var(--qcm-line);padding:10px 14px;margin-bottom:10px;border-radius:2px}
-.qcm-toggle-lbl{font:700 9px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.18em;text-transform:uppercase;margin-right:4px}
-.qcm-pill{padding:5px 11px;font:700 9.5px var(--qcm-mono);background:var(--qcm-bg-3);color:var(--qcm-ink-2);border:1px solid var(--qcm-line);cursor:pointer;letter-spacing:.06em;border-radius:2px}
+.qcm-kpi .sub{font:600 8px var(--qcm-mono);color:var(--qcm-ink-2);margin-top:1px;letter-spacing:.04em}
+
+/* Filter / view toggle bar */
+.qcm-fbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:linear-gradient(180deg,var(--qcm-bg-2),var(--qcm-bg-1));border:1px solid var(--qcm-line);padding:8px 12px;margin-bottom:10px;border-radius:2px;position:sticky;top:0;z-index:50;backdrop-filter:blur(6px)}
+.qcm-flab{font:700 8.5px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.18em;text-transform:uppercase;margin:0 4px 0 0}
+.qcm-pill{padding:5px 10px;font:700 9.5px var(--qcm-mono);background:var(--qcm-bg-3);color:var(--qcm-ink-2);border:1px solid var(--qcm-line);cursor:pointer;letter-spacing:.05em;border-radius:2px;transition:all 120ms}
 .qcm-pill:hover{color:var(--qcm-ink);background:var(--qcm-bg-4)}
-.qcm-pill.on{background:var(--qcm-cu);color:#fff;border-color:var(--qcm-cu)}
-.qcm-search{font:600 11px var(--qcm-mono);background:var(--qcm-bg-1);color:var(--qcm-ink);border:1px solid var(--qcm-line-2);padding:7px 11px;width:190px;border-radius:2px;margin-left:auto}
-.qcm-search:focus{outline:none;border-color:var(--qcm-cu);box-shadow:0 0 0 3px var(--qcm-cu-bg)}
-.qcm-mwrap{background:var(--qcm-bg-1);border:1px solid var(--qcm-line);border-radius:2px;overflow-x:auto;box-shadow:0 4px 24px rgba(0,0,0,.4)}
-.qcm-mx{border-collapse:separate;border-spacing:0;font:600 11px var(--qcm-mono);width:100%;min-width:2160px}
-.qcm-mx thead th{padding:10px 9px;background:linear-gradient(180deg,var(--qcm-bg-3),var(--qcm-bg-2));text-align:left;font-weight:800;color:var(--qcm-cu);letter-spacing:.16em;font-size:8.5px;text-transform:uppercase;border-bottom:2px solid var(--qcm-line-2);position:sticky;top:0;white-space:nowrap;z-index:5}
-.qcm-mx thead th.c{text-align:center} .qcm-mx thead th.r{text-align:right}
-.qcm-mx thead th:first-child{padding-left:16px}
-.qcm-mx tbody tr{border-bottom:1px solid var(--qcm-line);cursor:pointer;transition:all 130ms;background:var(--qcm-bg-1);position:relative}
-.qcm-mx tbody tr:hover{background:var(--qcm-bg-2);box-shadow:inset 4px 0 0 var(--qcm-cu)}
-.qcm-mx tbody tr.r-buy{box-shadow:inset 4px 0 0 var(--qcm-gn-dim)}
-.qcm-mx tbody tr.r-buy:hover{box-shadow:inset 4px 0 0 var(--qcm-gn)}
-.qcm-mx tbody tr.r-avoid{box-shadow:inset 4px 0 0 var(--qcm-rd-dim)}
-.qcm-mx tbody tr.r-avoid:hover{box-shadow:inset 4px 0 0 var(--qcm-rd)}
-.qcm-mx tbody td{padding:9px 9px;color:var(--qcm-ink-1);white-space:nowrap;text-align:center;font-size:10.5px;vertical-align:middle;border-bottom:1px solid var(--qcm-line)}
-.qcm-mx tbody td.tkr{text-align:left;padding-left:16px;min-width:125px}
-.qcm-mx tbody td.r{text-align:right}
-.qcm-tkr-top{display:flex;align-items:baseline;gap:7px;margin-bottom:2px}
-.qcm-sym{font:800 15px var(--qcm-mono);color:var(--qcm-ink);letter-spacing:.04em;line-height:1}
-.qcm-pr{font:700 10px var(--qcm-mono);color:var(--qcm-ink-2)}
-.qcm-tkr-bot{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
-.qcm-tkr-bot .sec{font:600 8px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.06em;text-transform:uppercase}
-.qcm-adv{font:700 7.5px var(--qcm-mono);color:var(--qcm-cu);background:var(--qcm-cu-bg);padding:1px 4px;border-radius:2px;border:1px solid var(--qcm-cu-bg)}
-.qcm-er-chip{font:700 7.5px var(--qcm-mono);padding:1px 4px;border-radius:2px;letter-spacing:.02em}
-.qcm-er-chip.rd{background:var(--qcm-rd-bg);color:var(--qcm-rd);border:1px solid var(--qcm-rd-dim)}
-.qcm-er-chip.am{background:var(--qcm-amb-bg);color:var(--qcm-amb);border:1px solid var(--qcm-amb-dim)}
-.qcm-spark-cell{padding:5px 8px !important;min-width:80px}
-.qcm-ai-wrap{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:13px;font:800 10px var(--qcm-mono);letter-spacing:.04em;border:1px solid}
-.qcm-ai-wrap.gn{background:linear-gradient(135deg,var(--qcm-gn-bg),rgba(74,222,128,.04));color:var(--qcm-gn);border-color:var(--qcm-gn-dim);box-shadow:0 0 10px rgba(74,222,128,.16)}
-.qcm-ai-wrap.rd{background:linear-gradient(135deg,var(--qcm-rd-bg),rgba(248,113,113,.04));color:var(--qcm-rd);border-color:var(--qcm-rd-dim);box-shadow:0 0 10px rgba(248,113,113,.16)}
-.qcm-ai-wrap.na{background:var(--qcm-bg-3);color:var(--qcm-ink-3);border-color:var(--qcm-line)}
-.qcm-ai-wrap .arr{font-size:10px;line-height:1}
-.qcm-ai-wrap .conf{font:700 8.5px var(--qcm-mono);opacity:.75;padding-left:3px;border-left:1px solid currentColor}
-.qcm-vstack{display:flex;flex-direction:column;align-items:center;gap:3px}
-.qcm-v{display:inline-block;padding:3px 10px;font:800 10px var(--qcm-mono);border-radius:2px;letter-spacing:.06em;min-width:50px}
-.qcm-v.gn{background:linear-gradient(135deg,var(--qcm-gn-bg),rgba(74,222,128,.06));color:var(--qcm-gn);border:1px solid var(--qcm-gn-dim)}
-.qcm-v.am{background:linear-gradient(135deg,var(--qcm-amb-bg),rgba(251,191,36,.06));color:var(--qcm-amb);border:1px solid var(--qcm-amb-dim)}
-.qcm-v.rd{background:linear-gradient(135deg,var(--qcm-rd-bg),rgba(248,113,113,.06));color:var(--qcm-rd);border:1px solid var(--qcm-rd-dim)}
-.qcm-v.na{background:var(--qcm-bg-3);color:var(--qcm-ink-3);border:1px solid var(--qcm-line)}
-.qcm-stars{font-size:10.5px;letter-spacing:1.4px;line-height:1}
-.qcm-stars i{font-style:normal;color:var(--qcm-ink-4)}
-.qcm-stars.gn{color:var(--qcm-gn);text-shadow:0 0 5px var(--qcm-gn-glow)}
-.qcm-stars.am{color:var(--qcm-amb)}
-.qcm-setup-stack{display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.2}
-.qcm-setup-stack .ic{font-size:14px}
-.qcm-setup-stack .nm{font:800 9px var(--qcm-mono);color:var(--qcm-ink-1);letter-spacing:.08em}
-.qcm-setup-stack .hd{font:600 8px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.04em}
-.qcm-cat{display:inline-flex;align-items:center;gap:2px;padding:2px 6px;border-radius:2px;border:1px solid}
-.qcm-cat.t1{background:linear-gradient(135deg,var(--qcm-cu-bg),rgba(217,119,87,.04));border-color:var(--qcm-cu)}
-.qcm-cat.t2{background:var(--qcm-amb-bg);border-color:var(--qcm-amb-dim)}
-.qcm-cat.t3{background:var(--qcm-bg-3);border-color:var(--qcm-line)}
-.qcm-cat i.ic{font-style:normal;font-size:12px;line-height:1}
-.qcm-cat .tier{font:800 7.5px var(--qcm-mono);padding-left:3px;margin-left:2px;border-left:1px solid currentColor;letter-spacing:.04em}
-.qcm-cat.t1 .tier{color:var(--qcm-cu)}
-.qcm-cat.t2 .tier{color:var(--qcm-amb)}
-.qcm-cat.t3 .tier{color:var(--qcm-ink-3)}
-.qcm-eq{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:2px;font:800 9.5px var(--qcm-mono);letter-spacing:.06em}
-.qcm-eq.gn{background:var(--qcm-gn-bg);color:var(--qcm-gn);border:1px solid var(--qcm-gn-dim)}
-.qcm-eq.am{background:var(--qcm-amb-bg);color:var(--qcm-amb);border:1px solid var(--qcm-amb-dim)}
-.qcm-eq.rd{background:var(--qcm-rd-bg);color:var(--qcm-rd);border:1px solid var(--qcm-rd-dim)}
-.qcm-eq.na{background:var(--qcm-bg-3);color:var(--qcm-ink-3);border:1px solid var(--qcm-line)}
-.qcm-rr-stack{display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.1}
-.qcm-rr-num{font:800 16px var(--qcm-mono);letter-spacing:.02em}
-.qcm-rr-num i{font-style:normal;font-size:9px;opacity:.5;font-weight:600}
-.qcm-rr-num.gn{color:var(--qcm-gn);text-shadow:0 0 6px var(--qcm-gn-glow)}
-.qcm-rr-num.am{color:var(--qcm-amb)}
-.qcm-rr-num.rd{color:var(--qcm-rd)}
-.qcm-rr-meta{font:600 8px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.04em}
-.qcm-mos-stack{display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.1;min-width:84px}
-.qcm-mos-pct{font:800 13px var(--qcm-mono);letter-spacing:.02em}
-.qcm-mos-pct.gn{color:var(--qcm-gn);text-shadow:0 0 5px var(--qcm-gn-glow)}
-.qcm-mos-pct.am{color:var(--qcm-amb)}
-.qcm-mos-pct.rd{color:var(--qcm-rd)}
-.qcm-mos-meta{font:600 8px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.04em}
-.qcm-qual-stack{display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1.1}
-.qcm-qual-badge{display:inline-block;width:24px;height:24px;line-height:24px;border-radius:50%;text-align:center;font:800 11px var(--qcm-mono);color:#000}
-.qcm-qual-badge.A{background:var(--qcm-gn);box-shadow:0 0 6px var(--qcm-gn-glow)}
-.qcm-qual-badge.B{background:#86efac}
-.qcm-qual-badge.C{background:var(--qcm-amb)}
-.qcm-qual-badge.D{background:#fb923c;color:#fff}
-.qcm-qual-badge.F{background:var(--qcm-rd);color:#fff}
-.qcm-qual-badge.na{background:var(--qcm-bg-3);color:var(--qcm-ink-3)}
-.qcm-qual-meta{font:600 8px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.04em}
-.qcm-er-stack{display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.1;min-width:88px}
-.qcm-er-window{display:inline-block;padding:2px 7px;font:800 9.5px var(--qcm-mono);border-radius:2px;letter-spacing:.04em;border:1px solid}
-.qcm-er-window.preER{background:var(--qcm-amb-bg);color:var(--qcm-amb);border-color:var(--qcm-amb-dim)}
-.qcm-er-window.pead{background:linear-gradient(135deg,var(--qcm-cu-bg),var(--qcm-amb-bg));color:var(--qcm-cu);border-color:var(--qcm-cu);box-shadow:0 0 6px var(--qcm-cu-bg)}
-.qcm-er-window.erDay{background:var(--qcm-rd-bg);color:var(--qcm-rd);border-color:var(--qcm-rd-dim);box-shadow:0 0 6px var(--qcm-rd-glow)}
-.qcm-er-window.norm{background:var(--qcm-bg-3);color:var(--qcm-ink-3);border-color:var(--qcm-line)}
-.qcm-er-meta{font:600 8px var(--qcm-mono);color:var(--qcm-ink-2);letter-spacing:.04em}
-.qcm-er-meta b{color:var(--qcm-ink)}
-.qcm-ladder{padding:5px 9px !important;min-width:115px}
-.qcm-ladder-meta{display:flex;justify-content:space-between;font:700 8px var(--qcm-mono);letter-spacing:.02em;margin-top:1px;padding:0 3px}
-.qcm-ladder-meta .gn{color:var(--qcm-gn)} .qcm-ladder-meta .rd{color:var(--qcm-rd)} .qcm-ladder-meta .ink-3{color:var(--qcm-ink-4);font-size:7px}
-.qcm-edge-stack{display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1.1}
-.qcm-edge-wr,.qcm-edge-pf{font:800 9px var(--qcm-mono);padding:1px 5px;border-radius:1px;letter-spacing:.04em}
-.qcm-edge-wr i{font-style:normal;font-weight:600;font-size:7.5px;opacity:.7}
-.qcm-edge-wr.gn,.qcm-edge-pf.gn{background:var(--qcm-gn-bg);color:var(--qcm-gn)}
-.qcm-edge-wr.am,.qcm-edge-pf.am{background:var(--qcm-amb-bg);color:var(--qcm-amb)}
-.qcm-edge-wr.rd,.qcm-edge-pf.rd{background:var(--qcm-rd-bg);color:var(--qcm-rd)}
-.qcm-alloc-cell{min-width:100px}
-.qcm-alloc-pct{font:800 17px var(--qcm-mono);color:var(--qcm-cu);letter-spacing:.02em;line-height:1;text-shadow:0 0 6px var(--qcm-cu-bg)}
-.qcm-alloc-pct i{font-style:normal;font-size:11px;opacity:.6}
-.qcm-alloc-meta{font:600 8.5px var(--qcm-mono);color:var(--qcm-ink-2);letter-spacing:.04em;margin-top:2px}
-.qcm-alloc-risk{font:600 8px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.04em;margin-top:1px}
-.qcm-alloc-risk b{color:var(--qcm-rd)}
-.qcm-conflu-cell{min-width:74px}
-.qcm-conflu-mega{display:inline-flex;align-items:center;justify-content:center;width:54px;height:54px;border-radius:50%;background:radial-gradient(ellipse,var(--qcm-bg-4),var(--qcm-bg-2));border:2px solid var(--qcm-line-2);position:relative}
-.qcm-conflu-mega.glow-gn{border-color:var(--qcm-gn);box-shadow:0 0 16px var(--qcm-gn-glow),inset 0 0 10px rgba(74,222,128,.15)}
-.qcm-conflu-mega.glow-rd{border-color:var(--qcm-rd);box-shadow:0 0 16px var(--qcm-rd-glow),inset 0 0 10px rgba(248,113,113,.15)}
-.qcm-conflu-num{font:800 19px var(--qcm-mono);letter-spacing:0;line-height:1}
-.qcm-conflu-num.gn{color:var(--qcm-gn)}
-.qcm-conflu-num.am{color:var(--qcm-amb)}
-.qcm-conflu-num.rd{color:var(--qcm-rd)}
-.qcm-why{font:500 10px var(--qcm-mono);color:var(--qcm-ink-2);text-align:left;max-width:220px;white-space:normal;line-height:1.4;padding:7px 12px;border-left:2px solid var(--qcm-bg-4)}
-.qcm-why b{color:var(--qcm-ink)}
-.qcm-why b.gn{color:var(--qcm-gn)} .qcm-why b.cu{color:var(--qcm-cu)}
-.qcm-act{min-width:82px}
-.qcm-act-btn{padding:4px 8px;font:800 9px var(--qcm-mono);border:1px solid;cursor:pointer;letter-spacing:.06em;border-radius:2px;transition:all 120ms;margin-right:2px}
-.qcm-act-btn.buy{background:linear-gradient(135deg,var(--qcm-gn-bg),rgba(74,222,128,.04));color:var(--qcm-gn);border-color:var(--qcm-gn-dim)}
-.qcm-act-btn.buy:hover{background:var(--qcm-gn);color:#000;box-shadow:0 0 10px var(--qcm-gn-glow)}
-.qcm-act-btn.short{background:var(--qcm-rd-bg);color:var(--qcm-rd);border-color:var(--qcm-rd-dim)}
-.qcm-act-btn.short:hover{background:var(--qcm-rd);color:#fff;box-shadow:0 0 10px var(--qcm-rd-glow)}
-.qcm-act-btn.watch{background:var(--qcm-bg-3);color:var(--qcm-ink-1);border-color:var(--qcm-line-2)}
-.qcm-act-btn.watch:hover{background:var(--qcm-cu);color:#fff;border-color:var(--qcm-cu)}
-.qcm-act-btn.ghost{background:transparent;color:var(--qcm-ink-3);border-color:var(--qcm-line)}
-.qcm-act-btn.ghost:hover{color:var(--qcm-ink-1);border-color:var(--qcm-line-2)}
-.qcm-held-pill{display:inline-block;padding:4px 10px;font:800 9px var(--qcm-mono);background:var(--qcm-cy-bg);color:var(--qcm-cy);border:1px solid var(--qcm-cy);border-radius:2px;letter-spacing:.06em}
+.qcm-pill.on{background:var(--qcm-cu);color:#fff;border-color:var(--qcm-cu);box-shadow:0 0 8px var(--qcm-cu-bg)}
+.qcm-pill .ct{font-size:8px;opacity:.7;margin-left:3px}
+.qcm-view-tog{display:inline-flex;background:var(--qcm-bg-3);border:1px solid var(--qcm-line-2);border-radius:2px;overflow:hidden}
+.qcm-view-tog .qcm-pill{border:0;border-radius:0;margin:0}
+.qcm-view-tog .qcm-pill.on{background:linear-gradient(135deg,var(--qcm-cu),var(--qcm-cu-2));box-shadow:none}
+.qcm-search{font:600 11px var(--qcm-mono);background:var(--qcm-bg-1);color:var(--qcm-ink);border:1px solid var(--qcm-line-2);padding:6px 10px;width:160px;border-radius:2px;margin-left:auto}
+.qcm-search:focus{outline:none;border-color:var(--qcm-cu);box-shadow:0 0 0 2px var(--qcm-cu-bg)}
+.qcm-sector-sel{font:600 10px var(--qcm-mono);background:var(--qcm-bg-1);color:var(--qcm-ink-1);border:1px solid var(--qcm-line-2);padding:5px 8px;border-radius:2px;cursor:pointer}
+
+/* Treemap view */
+.qcm-tm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:12px}
+.qcm-tm-sector{background:linear-gradient(180deg,var(--qcm-bg-2),var(--qcm-bg-1));border:1px solid var(--qcm-line);border-radius:2px;overflow:hidden}
+.qcm-tm-shdr{padding:7px 11px;background:var(--qcm-bg-3);border-bottom:1px solid var(--qcm-line);display:flex;align-items:baseline;justify-content:space-between}
+.qcm-tm-shdr .nm{font:800 10px var(--qcm-mono);color:var(--qcm-cu);letter-spacing:.1em}
+.qcm-tm-shdr .ct{font:700 8.5px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.06em}
+.qcm-tm-cells{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:2px;padding:4px}
+.qcm-tm-cell{aspect-ratio:1.2;border-radius:1px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all 100ms;font:800 9.5px var(--qcm-mono);color:#fff;background:var(--qcm-bg-3);padding:2px;text-align:center;border:1px solid transparent;position:relative;overflow:hidden}
+.qcm-tm-cell:hover{transform:scale(1.15);z-index:5;border-color:var(--qcm-cu);box-shadow:0 0 10px var(--qcm-cu-bg)}
+.qcm-tm-cell .tk{font:800 9px var(--qcm-mono);letter-spacing:.02em;line-height:1;text-shadow:0 1px 1px rgba(0,0,0,.5)}
+.qcm-tm-cell .c{font:700 8px var(--qcm-mono);opacity:.9;margin-top:1px}
+.qcm-tm-cell.held::after{content:'★';position:absolute;top:1px;right:2px;font-size:8px;color:var(--qcm-cy)}
+/* Confluence color buckets */
+.qcm-tm-cell.c-p5{background:linear-gradient(135deg,#16a34a,#22c55e);box-shadow:inset 0 0 8px rgba(74,222,128,.3)}
+.qcm-tm-cell.c-p3{background:linear-gradient(135deg,#22c55e,#4ade80)}
+.qcm-tm-cell.c-p1{background:linear-gradient(135deg,#4ade80,#86efac);color:#000}
+.qcm-tm-cell.c-z{background:var(--qcm-bg-4);color:var(--qcm-ink-2)}
+.qcm-tm-cell.c-n1{background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#000}
+.qcm-tm-cell.c-n3{background:linear-gradient(135deg,#f59e0b,#dc2626)}
+.qcm-tm-cell.c-n5{background:linear-gradient(135deg,#dc2626,#991b1b);box-shadow:inset 0 0 8px rgba(248,113,113,.3)}
+.qcm-tm-cell.killed{background:repeating-linear-gradient(45deg,var(--qcm-bg-4),var(--qcm-bg-4) 3px,var(--qcm-rd-bg) 3px,var(--qcm-rd-bg) 6px);color:var(--qcm-rd)}
+
+/* Heatmap table */
+.qcm-hm-wrap{background:var(--qcm-bg-1);border:1px solid var(--qcm-line);border-radius:2px;overflow-x:auto;overflow-y:visible;max-height:none;box-shadow:0 4px 24px rgba(0,0,0,.3)}
+.qcm-hm{border-collapse:separate;border-spacing:0;font:600 10.5px var(--qcm-mono);width:100%;min-width:1280px;table-layout:fixed}
+.qcm-hm colgroup col.c-tkr{width:88px}
+.qcm-hm colgroup col.c-spark{width:64px}
+.qcm-hm colgroup col.c-px{width:78px}
+.qcm-hm colgroup col.c-sig{width:54px}
+.qcm-hm colgroup col.c-conflu{width:96px}
+.qcm-hm colgroup col.c-setup{width:78px}
+.qcm-hm colgroup col.c-act{width:60px}
+.qcm-hm thead th{padding:8px 6px;background:linear-gradient(180deg,var(--qcm-bg-3),var(--qcm-bg-2));text-align:left;font-weight:800;color:var(--qcm-cu);letter-spacing:.14em;font-size:8.5px;text-transform:uppercase;border-bottom:2px solid var(--qcm-line-2);position:sticky;top:0;white-space:nowrap;z-index:6;cursor:pointer;user-select:none}
+.qcm-hm thead th.c{text-align:center} .qcm-hm thead th.r{text-align:right}
+.qcm-hm thead th:first-child{padding-left:14px;position:sticky;left:0;z-index:7;background:linear-gradient(180deg,var(--qcm-bg-3),var(--qcm-bg-2))}
+.qcm-hm thead th .ar{font-size:7px;margin-left:3px;color:var(--qcm-ink-3)}
+.qcm-hm thead th.sorted{color:var(--qcm-amb)}
+.qcm-hm thead th.sorted .ar{color:var(--qcm-amb)}
+.qcm-hm thead th:hover{color:var(--qcm-amb)}
+.qcm-hm tbody tr{cursor:pointer;transition:all 100ms;background:var(--qcm-bg-1);height:28px;border-bottom:1px solid var(--qcm-line)}
+.qcm-hm tbody tr:hover{background:var(--qcm-bg-3)}
+.qcm-hm tbody tr.r-buy{box-shadow:inset 3px 0 0 var(--qcm-gn-dim)}
+.qcm-hm tbody tr.r-buy:hover{box-shadow:inset 3px 0 0 var(--qcm-gn),0 0 12px var(--qcm-gn-bg);background:linear-gradient(90deg,rgba(74,222,128,.04),transparent 30%)}
+.qcm-hm tbody tr.r-avoid{box-shadow:inset 3px 0 0 var(--qcm-rd-dim)}
+.qcm-hm tbody tr.r-avoid:hover{box-shadow:inset 3px 0 0 var(--qcm-rd),0 0 12px var(--qcm-rd-bg);background:linear-gradient(90deg,rgba(248,113,113,.04),transparent 30%)}
+.qcm-hm tbody tr.held{box-shadow:inset 3px 0 0 var(--qcm-cy)}
+.qcm-hm tbody td{padding:3px 6px;color:var(--qcm-ink-1);white-space:nowrap;text-align:center;font-size:10px;vertical-align:middle;border-bottom:1px solid var(--qcm-line);overflow:hidden;text-overflow:ellipsis}
+.qcm-hm tbody td.tkr{text-align:left;padding-left:14px;position:sticky;left:0;background:inherit;z-index:2}
+.qcm-hm tbody tr:hover td.tkr{background:var(--qcm-bg-3)}
+.qcm-hm tbody tr.r-buy:hover td.tkr{background:linear-gradient(90deg,rgba(74,222,128,.04),var(--qcm-bg-3) 30%)}
+.qcm-hm tbody td.r{text-align:right}
+
+/* Compact ticker cell */
+.qcm-tkr-mini{display:flex;align-items:center;gap:5px}
+.qcm-tkr-mini b{font:800 11.5px var(--qcm-mono);color:var(--qcm-ink);letter-spacing:.03em}
+.qcm-tkr-mini .heldmark{color:var(--qcm-cy);font-size:9px}
+.qcm-tkr-mini .sec-dot{display:inline-block;width:6px;height:6px;border-radius:50%;flex-shrink:0}
+
+/* Sector breaker row */
+.qcm-sec-break{background:linear-gradient(90deg,var(--qcm-bg-3),transparent);border-top:1px solid var(--qcm-cu-bg) !important}
+.qcm-sec-break td{font:800 9px var(--qcm-mono);color:var(--qcm-cu);letter-spacing:.2em;text-transform:uppercase;padding:6px 14px !important;text-align:left !important}
+
+/* Price + chg */
+.qcm-px-stk{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1;gap:0}
+.qcm-px-stk b{font:800 10.5px var(--qcm-mono);color:var(--qcm-ink)}
+.qcm-px-stk .ch{font:700 8.5px var(--qcm-mono)}
+.qcm-px-stk .ch.gn{color:var(--qcm-gn)}
+.qcm-px-stk .ch.rd{color:var(--qcm-rd)}
+
+/* Sparkline mini */
+.qcm-sp svg{vertical-align:middle}
+
+/* AI pill */
+.qcm-ai{display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:8px;font:800 8.5px var(--qcm-mono);border:1px solid;letter-spacing:.04em}
+.qcm-ai.gn{background:var(--qcm-gn-bg);color:var(--qcm-gn);border-color:var(--qcm-gn-dim)}
+.qcm-ai.rd{background:var(--qcm-rd-bg);color:var(--qcm-rd);border-color:var(--qcm-rd-dim)}
+.qcm-ai.na{background:var(--qcm-bg-3);color:var(--qcm-ink-3);border-color:var(--qcm-line)}
+
+/* Verdict mini */
+.qcm-vmin{display:inline-block;padding:1px 6px;font:800 9px var(--qcm-mono);border-radius:2px;letter-spacing:.06em;min-width:42px;border:1px solid}
+.qcm-vmin.gn{background:var(--qcm-gn-bg);color:var(--qcm-gn);border-color:var(--qcm-gn-dim)}
+.qcm-vmin.am{background:var(--qcm-amb-bg);color:var(--qcm-amb);border-color:var(--qcm-amb-dim)}
+.qcm-vmin.rd{background:var(--qcm-rd-bg);color:var(--qcm-rd);border-color:var(--qcm-rd-dim)}
+.qcm-vmin.na{background:var(--qcm-bg-3);color:var(--qcm-ink-3);border-color:var(--qcm-line)}
+
+/* Confluence cell - the headline */
+.qcm-conflu-cell{font:800 13px var(--qcm-mono);letter-spacing:0;display:inline-flex;align-items:center;justify-content:center;gap:5px}
+.qcm-conflu-cell .num{min-width:24px;text-align:right;line-height:1}
+.qcm-conflu-cell .num.gn{color:var(--qcm-gn)}
+.qcm-conflu-cell .num.am{color:var(--qcm-amb)}
+.qcm-conflu-cell .num.rd{color:var(--qcm-rd)}
+.qcm-conflu-cell .dots{display:flex;gap:1px}
+.qcm-conflu-cell .dots i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--qcm-bg-4)}
+.qcm-conflu-cell .dots i.on.gn{background:var(--qcm-gn);box-shadow:0 0 3px var(--qcm-gn-glow)}
+.qcm-conflu-cell .dots i.on.rd{background:var(--qcm-rd);box-shadow:0 0 3px var(--qcm-rd-glow)}
+.qcm-conflu-cell .dots i.on.am{background:var(--qcm-amb)}
+
+/* Generic signal chip */
+.qcm-chip{display:inline-block;padding:1px 5px;font:800 9px var(--qcm-mono);border-radius:1px;letter-spacing:.04em;min-width:30px;text-align:center;border:1px solid}
+.qcm-chip.gn{background:var(--qcm-gn-bg);color:var(--qcm-gn);border-color:var(--qcm-gn-dim)}
+.qcm-chip.am{background:var(--qcm-amb-bg);color:var(--qcm-amb);border-color:var(--qcm-amb-dim)}
+.qcm-chip.rd{background:var(--qcm-rd-bg);color:var(--qcm-rd);border-color:var(--qcm-rd-dim)}
+.qcm-chip.cy{background:var(--qcm-cy-bg);color:var(--qcm-cy);border-color:var(--qcm-cy)}
+.qcm-chip.cu{background:var(--qcm-cu-bg);color:var(--qcm-cu);border-color:var(--qcm-cu)}
+.qcm-chip.pur{background:var(--qcm-pur-bg);color:var(--qcm-pur);border-color:var(--qcm-pur)}
+.qcm-chip.na{background:var(--qcm-bg-3);color:var(--qcm-ink-3);border-color:var(--qcm-line)}
+
+/* Setup mini */
+.qcm-setup-mini{display:inline-flex;align-items:center;gap:3px;font:700 9px var(--qcm-mono);color:var(--qcm-ink-1);letter-spacing:.04em}
+.qcm-setup-mini .ic{font-size:11px;line-height:1}
+
+/* Action button */
+.qcm-act-mini{padding:2px 7px;font:800 8.5px var(--qcm-mono);border:1px solid;cursor:pointer;letter-spacing:.06em;border-radius:1px;transition:all 100ms;background:transparent}
+.qcm-act-mini.buy{color:var(--qcm-gn);border-color:var(--qcm-gn-dim)}
+.qcm-act-mini.buy:hover{background:var(--qcm-gn);color:#000;box-shadow:0 0 8px var(--qcm-gn-glow)}
+.qcm-act-mini.short{color:var(--qcm-rd);border-color:var(--qcm-rd-dim)}
+.qcm-act-mini.short:hover{background:var(--qcm-rd);color:#fff;box-shadow:0 0 8px var(--qcm-rd-glow)}
+.qcm-act-mini.watch{color:var(--qcm-cu);border-color:var(--qcm-cu)}
+.qcm-act-mini.watch:hover{background:var(--qcm-cu);color:#fff}
+.qcm-act-mini.held{color:var(--qcm-cy);border-color:var(--qcm-cy);cursor:default}
+
+/* Drawer */
+.qcm-drawer{margin-top:14px;border-top:1px solid var(--qcm-line);padding-top:12px}
+.qcm-drawer-tog{display:flex;align-items:center;gap:8px;cursor:pointer;font:700 10px var(--qcm-mono);color:var(--qcm-cu);letter-spacing:.18em;text-transform:uppercase;padding:6px 0;user-select:none}
+.qcm-drawer-tog:hover{color:var(--qcm-amb)}
+.qcm-drawer-tog .arr{display:inline-block;transition:transform 200ms;font-size:9px}
+.qcm-drawer-tog.open .arr{transform:rotate(90deg)}
+.qcm-drawer-body{display:none}
+.qcm-drawer-body.open{display:block;animation:qcm-fade 200ms ease-out}
+@keyframes qcm-fade{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+
+/* Inside drawer: tile grid + conflicts + lenses (compact) */
+.qcm-d-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:8px}
+.qcm-d-card{background:linear-gradient(180deg,var(--qcm-bg-2),var(--qcm-bg-1));border:1px solid var(--qcm-line);border-radius:2px;overflow:hidden;position:relative}
+.qcm-d-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.qcm-d-card.buy::before{background:linear-gradient(180deg,var(--qcm-gn),var(--qcm-gn-dim))}
+.qcm-d-card.watch::before{background:linear-gradient(180deg,var(--qcm-amb),var(--qcm-amb-dim))}
+.qcm-d-card.short::before{background:linear-gradient(180deg,var(--qcm-rd),var(--qcm-rd-dim))}
+.qcm-d-card.val::before{background:var(--qcm-cy)}
+.qcm-d-card.qual::before{background:var(--qcm-pur)}
+.qcm-d-card.ern::before{background:var(--qcm-amb)}
+.qcm-d-chdr{padding:7px 12px 5px;border-bottom:1px solid var(--qcm-line);display:flex;align-items:baseline;justify-content:space-between}
+.qcm-d-chdr h3{font:800 10px var(--qcm-mono);margin:0;letter-spacing:.12em}
+.qcm-d-card.buy .qcm-d-chdr h3{color:var(--qcm-gn)}
+.qcm-d-card.watch .qcm-d-chdr h3{color:var(--qcm-amb)}
+.qcm-d-card.short .qcm-d-chdr h3{color:var(--qcm-rd)}
+.qcm-d-card.val .qcm-d-chdr h3{color:var(--qcm-cy)}
+.qcm-d-card.qual .qcm-d-chdr h3{color:var(--qcm-pur)}
+.qcm-d-card.ern .qcm-d-chdr h3{color:var(--qcm-amb)}
+.qcm-d-chdr .ct{font:700 8px var(--qcm-mono);color:var(--qcm-ink-3);letter-spacing:.06em}
+.qcm-d-row{display:flex;align-items:center;gap:6px;padding:5px 12px;border-bottom:1px solid var(--qcm-line);cursor:pointer;font:600 10px var(--qcm-mono);transition:background 100ms}
+.qcm-d-row:last-child{border-bottom:0}
+.qcm-d-row:hover{background:var(--qcm-bg-3)}
+.qcm-d-row b{font:800 11px var(--qcm-mono);color:var(--qcm-ink);letter-spacing:.04em;flex-shrink:0;min-width:40px}
+.qcm-d-row .meta{color:var(--qcm-ink-3);font-size:8.5px;flex:1;text-align:left}
+.qcm-d-row .val{font:800 9.5px var(--qcm-mono);text-align:right}
+.qcm-d-row .val.gn{color:var(--qcm-gn)} .qcm-d-row .val.am{color:var(--qcm-amb)} .qcm-d-row .val.rd{color:var(--qcm-rd)} .qcm-d-row .val.cu{color:var(--qcm-cu)}
+
+/* Conflicts mini */
+.qcm-cflx{margin-top:8px}
+.qcm-cflx-row{display:grid;grid-template-columns:130px 1fr auto;gap:10px;align-items:center;padding:5px 12px;border-bottom:1px solid var(--qcm-line);cursor:pointer;font:600 10px var(--qcm-mono)}
+.qcm-cflx-row:hover{background:var(--qcm-bg-3)}
+.qcm-cflx-row .tk{font:800 11.5px var(--qcm-mono);color:var(--qcm-ink);letter-spacing:.04em}
+.qcm-cflx-row .reasons{display:flex;flex-wrap:wrap;gap:3px;justify-content:flex-end}
+.qcm-cflx-row .reason{font:700 8px var(--qcm-mono);padding:1px 5px;background:var(--qcm-bg-3);color:var(--qcm-ink-1);border:1px solid var(--qcm-line-2);border-radius:1px}
+.qcm-cflx-row .sev{font:800 8.5px var(--qcm-mono);padding:1px 6px;border-radius:1px;border:1px solid;letter-spacing:.06em}
+.qcm-cflx-row .sev.s1{background:var(--qcm-amb-bg);color:var(--qcm-amb);border-color:var(--qcm-amb-dim)}
+.qcm-cflx-row .sev.s2{background:var(--qcm-amb-bg);color:var(--qcm-amb);border-color:var(--qcm-amb)}
+.qcm-cflx-row .sev.s3{background:var(--qcm-rd-bg);color:var(--qcm-rd);border-color:var(--qcm-rd);box-shadow:0 0 6px var(--qcm-rd-glow)}
+
+/* Universe footer */
+.qcm-foot{margin-top:10px;padding:8px 14px;background:var(--qcm-bg-2);border:1px solid var(--qcm-line);border-radius:2px;display:flex;align-items:center;gap:14px;font:600 10px var(--qcm-mono);color:var(--qcm-ink-2);letter-spacing:.04em}
+.qcm-foot b{color:var(--qcm-ink-1)}
+.qcm-foot .legend{display:flex;gap:6px;align-items:center;margin-left:auto}
+.qcm-foot .legend i{display:inline-block;width:11px;height:11px;border-radius:2px}
 `;
     const style = document.createElement('style');
     style.id = 'qcm-styles'; style.textContent = css;
@@ -46397,9 +46385,9 @@ body.light{--qcm-bg-0:#f5f4ed;--qcm-bg-1:#fff;--qcm-bg-2:#f0eee5;--qcm-bg-3:#e5e
     };
     return m[fam] || ['•','—','—'];
   }
-  function _sparkline(ohlcv, w=72, h=22, forceKind=null) {
+  function _sparklineMini(ohlcv, w=58, h=18) {
     if (!ohlcv || ohlcv.length < 5) return '';
-    const closes = ohlcv.slice(-30).map(b => b.close || 0).filter(c => c > 0);
+    const closes = ohlcv.slice(-20).map(b => b.close || 0).filter(c => c > 0);
     if (!closes.length) return '';
     const mn = Math.min(...closes), mx = Math.max(...closes), rng = mx > mn ? mx - mn : 1;
     const pts = closes.map((c,i) => {
@@ -46409,462 +46397,487 @@ body.light{--qcm-bg-0:#f5f4ed;--qcm-bg-1:#fff;--qcm-bg-2:#f0eee5;--qcm-bg-3:#e5e
     });
     const path = 'M ' + pts.join(' L ');
     const up = closes[closes.length-1] > closes[0];
-    const color = forceKind === 'gn' ? '#4ade80' : forceKind === 'rd' ? '#f87171' : forceKind === 'am' ? '#fbbf24' : (up ? '#4ade80' : '#f87171');
+    const color = up ? '#4ade80' : '#f87171';
     const fill = path + ` L ${w},${h} L 0,${h} Z`;
-    const pct = closes[0] ? ((closes[closes.length-1]-closes[0])/closes[0]*100) : 0;
-    const last = pts[pts.length-1].split(',');
-    return `<svg viewBox="0 0 ${w} ${h+10}" width="${w}" height="${h+10}" style="vertical-align:middle"><path d="${fill}" fill="${color}" opacity="0.13"/><path d="${path}" fill="none" stroke="${color}" stroke-width="1.4"/><circle cx="${last[0]}" cy="${last[1]}" r="1.8" fill="${color}"/><text x="${w-2}" y="${h+9}" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="8.5" font-weight="700" fill="${color}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%</text></svg>`;
+    return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><path d="${fill}" fill="${color}" opacity="0.18"/><path d="${path}" fill="none" stroke="${color}" stroke-width="1.3"/></svg>`;
   }
-  function _ladder(spot, stop, t1, t2, w=110, h=20) {
-    if (!spot || !stop || !t1) return '';
-    const rng = Math.max(t2 || t1, t1, spot) - Math.min(stop, spot);
-    if (rng <= 0) return '';
-    const lo = Math.min(stop, spot) - rng*0.05;
-    const hi = Math.max(t2 || t1, t1, spot) + rng*0.05;
-    const span = hi - lo;
-    const x = v => (v-lo)/span * w;
-    const sx = x(stop), spx = x(spot), t1x = x(t1), t2x = t2 ? x(t2) : null;
-    return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="vertical-align:middle">
-      <rect x="${sx}" y="${h/2-2.5}" width="${spx-sx}" height="5" fill="#f87171" opacity="0.30" rx="1"/>
-      <rect x="${spx}" y="${h/2-2.5}" width="${(t2x || t1x)-spx}" height="5" fill="#4ade80" opacity="0.30" rx="1"/>
-      <line x1="${sx}" y1="2" x2="${sx}" y2="${h-2}" stroke="#f87171" stroke-width="1.5"/>
-      <line x1="${t1x}" y1="3" x2="${t1x}" y2="${h-3}" stroke="#fbbf24" stroke-width="1.2" stroke-dasharray="2,1"/>
-      ${t2x ? `<line x1="${t2x}" y1="2" x2="${t2x}" y2="${h-2}" stroke="#4ade80" stroke-width="1.5"/>` : ''}
-      <circle cx="${spx}" cy="${h/2}" r="3.5" fill="#ecefe9" stroke="#0a0d0c" stroke-width="1"/>
-      <text x="${sx}" y="${h-1}" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#f87171" font-weight="700">S</text>
-      <text x="${t1x}" y="${h-1}" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#fbbf24" font-weight="700">T1</text>
-      ${t2x ? `<text x="${t2x}" y="${h-1}" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#4ade80" font-weight="700">T2</text>` : ''}
-    </svg>`;
-  }
-  function _catIcons(tags, tier) {
-    if (!tags || !tags.length) return '';
-    const map = {PEAD:'📊',EARN:'📊',UOA:'⚡',VCP:'⬈',BREAKOUT:'⬈',SQUEEZE:'🔥',MOMENTUM:'🚀',INSIDER:'👤',NEWS:'📰',IV_SKEW:'📈',GAP:'⬆',PULLBACK:'↩',EMA21:'↩',EMA50:'↩',ANALYST:'📋'};
-    const seen = new Set(); const out = [];
-    for (const tag of tags.slice(0,5)) {
-      for (const [k,v] of Object.entries(map)) {
-        if (tag.toUpperCase().includes(k) && !seen.has(v)) { out.push(`<i class="ic" title="${tag}">${v}</i>`); seen.add(v); break; }
-      }
-    }
-    if (!out.length) return '';
-    const tCls = tier === 1 ? 't1' : tier === 2 ? 't2' : 't3';
-    return `<span class="qcm-cat ${tCls}">${out.join('')}<span class="tier">T${tier||3}</span></span>`;
-  }
-  function _verdictPill(v) {
-    const m = {BUY:'gn',WAIT:'am',AVOID:'rd',SHORT:'rd',SELL:'rd'};
-    return `<span class="qcm-v ${m[v]||'na'}">${v || '—'}</span>`;
-  }
-  function _stars(label) {
-    const n = {T1:3,T2:2,T3:1}[label] || 0;
-    const cls = n >= 2 ? 'gn' : n === 1 ? 'am' : 'na';
-    return `<span class="qcm-stars ${cls}">${'★'.repeat(n)}${'<i>★</i>'.repeat(3-n)}</span>`;
-  }
-  function _eqPill(eq) {
-    const m = {FRESH:['gn','⊕'],PULLBACK:['gn','↩'],VALID:['am','•'],EXTENDED:['rd','⤴'],MISSED:['rd','⊘']};
-    const e = m[eq] || ['na','•'];
-    return `<span class="qcm-eq ${e[0]}">${e[1]} ${eq || '—'}</span>`;
-  }
-
-  // ── Senior-analyst computed metrics
   function _marginOfSafety(t) {
-    const a = t.analyst || {};
-    const tgt = a.target_mean || 0;
-    const price = t.price || 0;
-    if (!tgt || !price) return null;
-    const upside = (tgt / price - 1) * 100;
-    return { upside, target: tgt, recent_up: a.recent_upgrades || 0, recent_dn: a.recent_downgrades || 0, consensus: a.consensus || '' };
+    const a = t.analyst || {}; const tgt = a.target_mean || 0; const p = t.price || 0;
+    if (!tgt || !p) return null;
+    return { upside: (tgt/p - 1)*100, target: tgt, recent_up: a.recent_upgrades || 0, recent_dn: a.recent_downgrades || 0, consensus: a.consensus || '' };
   }
   function _qualityGrade(t) {
     const ef = t.extra_fund || {};
-    const roe = ef.roe || 0;
-    const gm = ef.gross_margin || 0;
-    const evx = ef.ev_ebitda || 0;
-    const rev = ef.estimate_revision || '';
+    const roe = ef.roe || 0, gm = ef.gross_margin || 0, evx = ef.ev_ebitda || 0, rev = ef.estimate_revision || '';
     let pts = 0;
     if (roe >= 0.20) pts += 3; else if (roe >= 0.12) pts += 2; else if (roe >= 0.06) pts += 1;
     if (gm >= 0.55) pts += 3; else if (gm >= 0.35) pts += 2; else if (gm >= 0.20) pts += 1;
     if (evx > 0 && evx < 12) pts += 2; else if (evx > 0 && evx < 20) pts += 1;
     if (rev === 'up_strong') pts += 2; else if (rev === 'up') pts += 1; else if (rev === 'down' || rev === 'down_strong') pts -= 1;
-    // → A-F mapping
-    if (pts >= 8) return { grade: 'A', pts, roe, gm, rev };
-    if (pts >= 6) return { grade: 'B', pts, roe, gm, rev };
-    if (pts >= 4) return { grade: 'C', pts, roe, gm, rev };
-    if (pts >= 2) return { grade: 'D', pts, roe, gm, rev };
-    if (pts > 0) return { grade: 'F', pts, roe, gm, rev };
-    return { grade: 'na', pts: 0, roe, gm, rev };
+    let grade;
+    if (pts >= 8) grade = 'A';
+    else if (pts >= 6) grade = 'B';
+    else if (pts >= 4) grade = 'C';
+    else if (pts >= 2) grade = 'D';
+    else if (pts > 0) grade = 'F';
+    else grade = 'na';
+    return { grade, pts, roe, gm, rev };
   }
   function _earningsWindow(t) {
-    const e = t.earnings || {};
-    const days = e.days_to_earnings;
-    if (days == null) return { kind: 'norm', label: 'NO ER', days: null };
+    const e = t.earnings || {}; const days = e.days_to_earnings;
+    if (days == null) return { kind: 'norm', label: '—', days: null };
     if (days >= -3 && days <= 0) return { kind: 'pead', label: 'PEAD', days };
     if (days >= 1 && days <= 7) return { kind: 'erDay', label: `ER ${days}d`, days };
-    if (days >= 8 && days <= 21) return { kind: 'preER', label: `PRE-ER ${days}d`, days };
-    return { kind: 'norm', label: `ER ${days}d`, days };
-  }
-  function _ivPositioning(t) {
-    const opt = t.optionality || {};
-    const det = opt.details || {};
-    return {
-      rr: opt.rr_ratio || 0,
-      iv_rank: det.iv_rank || '',
-      iv_skew: det.iv_skew || '',
-      flow: det.options_flow || ''
-    };
+    if (days >= 8 && days <= 21) return { kind: 'preER', label: `PRE-ER`, days };
+    return { kind: 'norm', label: `+${days}d`, days };
   }
   function _isCompounder(t) {
-    const ef = t.extra_fund || {};
-    const fmp = t.fmp || {};
-    const roe = ef.roe || 0;
-    const gm = ef.gross_margin || 0;
-    const pe = fmp.pe || 0;
+    const ef = t.extra_fund || {}; const fmp = t.fmp || {};
+    const roe = ef.roe || 0, gm = ef.gross_margin || 0, pe = fmp.pe || 0;
     return roe >= 0.15 && gm >= 0.35 && (pe === 0 || pe < 50) && ef.estimate_revision !== 'down' && ef.estimate_revision !== 'down_strong';
   }
+  // Sector color stripe — deterministic hash
+  function _secDot(sec) {
+    const colors = {'Technology':'#60a5fa','Healthcare':'#a78bfa','Financial':'#f59e0b','Financials':'#f59e0b','Energy':'#ef4444','Consumer Cyclical':'#fbbf24','Consumer Defensive':'#86efac','Industrials':'#9ca3af','Communication Services':'#22d3ee','Real Estate':'#f97316','Basic Materials':'#d97757','Utilities':'#34d399'};
+    return colors[sec] || '#686c68';
+  }
+  function _confluCls(c) {
+    if (c <= -90) return 'killed';
+    if (c >= 5) return 'c-p5';
+    if (c >= 3) return 'c-p3';
+    if (c >= 1) return 'c-p1';
+    if (c >= -1) return 'c-z';
+    if (c >= -3) return 'c-n1';
+    if (c >= -5) return 'c-n3';
+    return 'c-n5';
+  }
 
-  function _bucketAndConflicts(rows) {
-    const enriched = rows.map(t => {
+  // ── Build enriched array
+  function _enrichAll() {
+    return _arr.map(t => {
       const c = _confluence(t);
       const rr = (t.trade_plan||{}).rr_ratio || 0;
       const [ai, aic] = _aiDir(t.ticker);
       const mos = _marginOfSafety(t);
       const qual = _qualityGrade(t);
       const erw = _earningsWindow(t);
-      const iv = _ivPositioning(t);
       const compounder = _isCompounder(t);
-      return { t, c, rr, ai, aic, mos, qual, erw, iv, compounder };
+      // 1-day chg from ohlcv
+      const oh = t.ohlcv || [];
+      let chg = 0;
+      if (oh.length >= 2) {
+        const last = oh[oh.length-1].close || 0;
+        const prev = oh[oh.length-2].close || 0;
+        if (prev) chg = (last - prev) / prev * 100;
+      }
+      return { t, c, rr, ai, aic, mos, qual, erw, compounder, chg };
     });
-    // tiles
+  }
+
+  // ── Filters & sort
+  function _applyFilter(arr) {
+    let out = arr;
+    if (_filter === 'buy') out = out.filter(e => (e.t.decision||{}).verdict === 'BUY');
+    else if (_filter === 'avoid') out = out.filter(e => ['AVOID','SELL'].includes((e.t.decision||{}).verdict));
+    else if (_filter === 'wait') out = out.filter(e => (e.t.decision||{}).verdict === 'WAIT');
+    else if (_filter === 'rr3') out = out.filter(e => e.rr >= 3);
+    else if (_filter === 'fresh') out = out.filter(e => ['FRESH','PULLBACK'].includes(e.t.entry_quality));
+    else if (_filter === 't1cat') out = out.filter(e => e.t.catalyst_tier === 1);
+    else if (_filter === 'mos') out = out.filter(e => e.mos && e.mos.upside >= 20);
+    else if (_filter === 'compound') out = out.filter(e => e.compounder);
+    else if (_filter === 'er') out = out.filter(e => e.erw.days != null && e.erw.days >= -3 && e.erw.days <= 21);
+    else if (_filter === 'qualAB') out = out.filter(e => e.qual.grade === 'A' || e.qual.grade === 'B');
+    else if (_filter === 'held') out = out.filter(e => _held.has(e.t.ticker));
+    if (_sector !== 'all') out = out.filter(e => (e.t.sector||'') === _sector);
+    if (_search) {
+      const q = _search.toUpperCase();
+      out = out.filter(e => (e.t.ticker||'').toUpperCase().includes(q));
+    }
+    return out;
+  }
+  function _applySort(arr) {
+    const dir = _sortDir === 'desc' ? -1 : 1;
+    arr.sort((a,b) => {
+      let av, bv;
+      switch (_sort) {
+        case 'tkr': return (a.t.ticker || '').localeCompare(b.t.ticker || '') * dir;
+        case 'sec': return (a.t.sector || '').localeCompare(b.t.sector || '') * dir;
+        case 'px': av = a.t.price||0; bv = b.t.price||0; break;
+        case 'chg': av = a.chg; bv = b.chg; break;
+        case 'rr': av = a.rr; bv = b.rr; break;
+        case 'mos': av = (a.mos?.upside)||-999; bv = (b.mos?.upside)||-999; break;
+        case 'qual': av = a.qual.pts; bv = b.qual.pts; break;
+        case 'sharpe': av = a.t.sharpe_126d||0; bv = b.t.sharpe_126d||0; break;
+        case 'rs': av = a.t.rs_rank||0; bv = b.t.rs_rank||0; break;
+        case 'conflu':
+        default: av = a.c; bv = b.c;
+      }
+      return (av - bv) * dir;
+    });
+    return arr;
+  }
+
+  // ── Render: heatmap row (the single most important component)
+  function _renderHeatmapRow(e) {
+    const t = e.t; const tk = t.ticker || '';
+    const price = t.price || 0;
+    const sec = t.sector || '';
+    const v = (t.decision||{}).verdict || '';
+    const vCls = v === 'BUY' ? 'gn' : ['AVOID','SELL','SHORT'].includes(v) ? 'rd' : v === 'WAIT' ? 'am' : 'na';
+    const aiCls = e.ai === 'BULL' ? 'gn' : e.ai === 'BEAR' ? 'rd' : 'na';
+    const aiArr = e.ai === 'BULL' ? '▲' : e.ai === 'BEAR' ? '▼' : '·';
+    const c = e.c;
+    const cCls = c >= 2 ? 'gn' : c >= -1 ? 'am' : 'rd';
+    // confluence dots
+    const dots = [];
+    const dotN = Math.min(Math.abs(c), 8);
+    const dotCls = c >= 0 ? 'gn' : 'rd';
+    for (let i = 0; i < 8; i++) {
+      dots.push(`<i class="${i < dotN ? 'on '+dotCls : ''}"></i>`);
+    }
+    const mosU = e.mos ? e.mos.upside : null;
+    const mosCls = mosU == null ? 'na' : mosU >= 25 ? 'gn' : mosU >= 10 ? 'am' : mosU >= 0 ? 'na' : 'rd';
+    const mosTxt = mosU == null ? '—' : `${mosU >= 0 ? '+' : ''}${mosU.toFixed(0)}%`;
+    const qg = e.qual.grade;
+    const qCls = qg === 'A' ? 'gn' : qg === 'B' ? 'gn' : qg === 'C' ? 'am' : qg === 'na' ? 'na' : 'rd';
+    const ew = e.erw;
+    const erCls = ew.kind === 'erDay' ? 'rd' : ew.kind === 'pead' ? 'cu' : ew.kind === 'preER' ? 'am' : 'na';
+    const erTxt = ew.label;
+    const rrCls = e.rr >= 2.5 ? 'gn' : e.rr >= 1.5 ? 'am' : e.rr > 0 ? 'rd' : 'na';
+    const rrTxt = e.rr ? `${e.rr.toFixed(1)}` : '—';
+    const eq = t.entry_quality || '';
+    const eqCls = eq === 'FRESH' || eq === 'PULLBACK' ? 'gn' : eq === 'VALID' ? 'am' : eq === 'EXTENDED' || eq === 'MISSED' ? 'rd' : 'na';
+    const eqShort = {'FRESH':'FRSH','PULLBACK':'PULB','VALID':'VLD','EXTENDED':'EXT','MISSED':'MISS'}[eq] || '—';
+    const fam = t.setup_family || '';
+    const [icon, short] = _setupMeta(fam);
+    const tier = t.catalyst_tier || 3;
+    const catCls = tier === 1 ? 'cu' : tier === 2 ? 'am' : 'na';
+    const sharpe = t.sharpe_126d || 0;
+    const shCls = sharpe >= 1.5 ? 'gn' : sharpe >= 0 ? 'am' : 'rd';
+    const heldNow = _held.has(tk);
+    const heldMark = heldNow ? '★' : '';
+    const chgCls = e.chg > 0 ? 'gn' : e.chg < 0 ? 'rd' : '';
+    const chgTxt = `${e.chg >= 0 ? '+' : ''}${e.chg.toFixed(1)}%`;
+    const rowCls = heldNow ? 'held' : v === 'BUY' ? 'r-buy' : ['AVOID','SELL'].includes(v) ? 'r-avoid' : '';
+    // action
+    let action;
+    if (heldNow) action = '<button class="qcm-act-mini held">★</button>';
+    else if (v === 'BUY') action = `<button class="qcm-act-mini buy" onclick="event.stopPropagation();window._openQuickAction&&window._openQuickAction('BUY','${tk}',${price})">BUY</button>`;
+    else if (['AVOID','SELL','SHORT'].includes(v)) action = `<button class="qcm-act-mini short" onclick="event.stopPropagation();window._openQuickAction&&window._openQuickAction('SHORT','${tk}',${price})">SHRT</button>`;
+    else action = `<button class="qcm-act-mini watch" onclick="event.stopPropagation();window._openQuickAction&&window._openQuickAction('WATCH','${tk}',${price})">+W</button>`;
+
+    return `<tr class="${rowCls}" data-tkr="${tk}" data-conflu="${c}" onclick="window._openDetailTicker && window._openDetailTicker('${tk}')">
+      <td class="tkr"><div class="qcm-tkr-mini"><span class="sec-dot" style="background:${_secDot(sec)}"></span><b>${tk}</b><span class="heldmark">${heldMark}</span></div></td>
+      <td class="qcm-sp">${_sparklineMini(t.ohlcv||[])}</td>
+      <td class="r"><div class="qcm-px-stk"><b>$${price.toFixed(2)}</b><span class="ch ${chgCls}">${chgTxt}</span></div></td>
+      <td class="c"><span class="qcm-vmin ${vCls}">${v || '—'}</span></td>
+      <td class="c"><span class="qcm-ai ${aiCls}">${aiArr} ${e.ai ? (e.ai === 'BULL' ? 'BL' : 'BR') : '—'}</span></td>
+      <td class="c"><span class="qcm-conflu-cell"><span class="num ${cCls}">${c >= 0 ? '+' : ''}${c}</span><span class="dots">${dots.join('')}</span></span></td>
+      <td class="c"><span class="qcm-chip ${mosCls}">${mosTxt}</span></td>
+      <td class="c"><span class="qcm-chip ${qCls}">${qg === 'na' ? '—' : qg}</span></td>
+      <td class="c"><span class="qcm-chip ${erCls}">${erTxt}</span></td>
+      <td class="c"><span class="qcm-chip ${rrCls}">${rrTxt}</span></td>
+      <td class="c"><span class="qcm-chip ${eqCls}">${eqShort}</span></td>
+      <td class="c"><span class="qcm-setup-mini"><span class="ic">${icon}</span>${short}</span></td>
+      <td class="c"><span class="qcm-chip ${catCls}">T${tier}</span></td>
+      <td class="c"><span class="qcm-chip ${shCls}">${sharpe.toFixed(1)}</span></td>
+      <td class="c">${action}</td>
+    </tr>`;
+  }
+
+  // ── Treemap view: all tickers as colored cells grouped by sector
+  function _renderTreemap(enriched) {
+    const bySec = {};
+    for (const e of enriched) {
+      const s = e.t.sector || 'Unknown';
+      if (!bySec[s]) bySec[s] = [];
+      bySec[s].push(e);
+    }
+    const sectors = Object.keys(bySec).sort();
+    const sections = sectors.map(s => {
+      const rows = bySec[s].sort((a,b) => b.c - a.c);
+      const cells = rows.map(e => {
+        const tk = e.t.ticker;
+        const heldCls = _held.has(tk) ? ' held' : '';
+        const cls = _confluCls(e.c);
+        return `<div class="qcm-tm-cell ${cls}${heldCls}" data-tkr="${tk}" onclick="window._openDetailTicker && window._openDetailTicker('${tk}')" title="${tk} · ${e.t.sector} · conflu ${e.c >= 0 ? '+' : ''}${e.c} · ${(e.t.decision||{}).verdict || '—'}"><span class="tk">${tk}</span><span class="c">${e.c >= 0 ? '+' : ''}${e.c}</span></div>`;
+      }).join('');
+      return `<div class="qcm-tm-sector"><div class="qcm-tm-shdr"><span class="nm">${s}</span><span class="ct">${rows.length}</span></div><div class="qcm-tm-cells">${cells}</div></div>`;
+    }).join('');
+    return `<div class="qcm-tm-grid">${sections}</div>`;
+  }
+
+  // ── Heatmap table
+  function _renderHeatmap(enriched) {
+    // Sort
+    const sorted = _applySort([...enriched]);
+    const rows = sorted.map(_renderHeatmapRow).join('');
+    const sortArrow = _sortDir === 'desc' ? '▼' : '▲';
+    const sortIs = k => _sort === k ? 'sorted' : '';
+    const sortAr = k => _sort === k ? `<span class="ar">${sortArrow}</span>` : '';
+    return `<div class="qcm-hm-wrap"><table class="qcm-hm">
+      <colgroup>
+        <col class="c-tkr"/><col class="c-spark"/><col class="c-px"/>
+        <col class="c-sig"/><col class="c-sig"/><col class="c-conflu"/>
+        <col class="c-sig"/><col class="c-sig"/><col class="c-sig"/>
+        <col class="c-sig"/><col class="c-sig"/><col class="c-setup"/>
+        <col class="c-sig"/><col class="c-sig"/><col class="c-act"/>
+      </colgroup>
+      <thead><tr>
+        <th class="${sortIs('tkr')}" data-sort="tkr">Ticker${sortAr('tkr')}</th>
+        <th class="c">20d</th>
+        <th class="r ${sortIs('px')}" data-sort="px">Price · Δ${sortAr('px')}</th>
+        <th class="c">Verdict</th>
+        <th class="c">AI ✦</th>
+        <th class="c ${sortIs('conflu')}" data-sort="conflu">Confluence${sortAr('conflu')}</th>
+        <th class="c ${sortIs('mos')}" data-sort="mos">MoS${sortAr('mos')}</th>
+        <th class="c ${sortIs('qual')}" data-sort="qual">Q${sortAr('qual')}</th>
+        <th class="c">ER</th>
+        <th class="c ${sortIs('rr')}" data-sort="rr">R:R${sortAr('rr')}</th>
+        <th class="c">Entry</th>
+        <th class="c">Setup</th>
+        <th class="c">Cat</th>
+        <th class="c ${sortIs('sharpe')}" data-sort="sharpe">Sh${sortAr('sharpe')}</th>
+        <th class="c">Act</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+  }
+
+  // ── Drawer (compact tile + conflicts + lenses)
+  function _renderDrawer(enriched) {
     const buys = enriched.filter(e => (e.t.decision||{}).verdict === 'BUY' && e.c >= 2)
                          .sort((a,b) => (b.c - a.c) || ((b.rr||0) - (a.rr||0))).slice(0,5);
     const watches = enriched.filter(e => (e.t.decision||{}).verdict === 'WAIT' && e.c >= 2)
                             .sort((a,b) => (b.c - a.c) || ((b.rr||0) - (a.rr||0))).slice(0,5);
     const shorts = enriched.filter(e => ['AVOID','SELL','SHORT'].includes((e.t.decision||{}).verdict))
                            .sort((a,b) => (a.c - b.c) || ((b.rr||0) - (a.rr||0))).slice(0,5);
-    // conflicts
+    const value = enriched.filter(e => e.mos && e.mos.upside >= 20 && (e.qual.grade === 'A' || e.qual.grade === 'B'))
+                          .sort((a,b) => (b.mos.upside||0) - (a.mos.upside||0)).slice(0,5);
+    const compounders = enriched.filter(e => e.compounder && (e.t.grade_momentum === 'A' || e.t.grade_momentum === 'B'))
+                                .sort((a,b) => (b.qual.pts||0) - (a.qual.pts||0)).slice(0,5);
+    const ern = enriched.filter(e => e.erw.days != null && e.erw.days >= -3 && e.erw.days <= 7)
+                        .sort((a,b) => (a.erw.days||0) - (b.erw.days||0)).slice(0,5);
+
+    // Conflicts
     const conflicts = [];
     for (const e of enriched) {
       const t = e.t; const v = (t.decision||{}).verdict; const conv = (t.conviction||{}).label || '';
       const eq = t.entry_quality||''; const reasons = []; let sev = 0;
-      if (v === 'BUY' && e.ai === 'BEAR') { reasons.push('AI ✦ BEAR vs Screener BUY'); sev += 3; }
-      else if (['AVOID','SELL'].includes(v) && e.ai === 'BULL') { reasons.push('AI ✦ BULL vs Screener AVOID'); sev += 3; }
-      if (v === 'BUY' && e.rr && e.rr < 1.5) { reasons.push(`BUY but R:R only ${e.rr.toFixed(1)}`); sev += 2; }
-      if (v === 'BUY' && (eq === 'MISSED' || eq === 'EXTENDED')) { reasons.push(`BUY but ${eq} entry`); sev += 2; }
-      if (v === 'BUY' && e.c < 2) { reasons.push(`BUY but conflu only ${e.c >= 0 ? '+' : ''}${e.c}`); sev += 2; }
-      if (v === 'WAIT' && e.c >= 5) { reasons.push(`WAIT but conflu +${e.c}`); sev += 2; }
-      if (['AVOID','SELL'].includes(v) && e.c >= 0) { reasons.push(`AVOID but conflu ${e.c >= 0 ? '+' : ''}${e.c}`); sev += 1; }
-      if (v === 'BUY' && conv === 'WATCH') { reasons.push('Engine conviction=WATCH on BUY'); sev += 2; }
-      if (e.mos && e.mos.upside > 25 && v === 'AVOID') { reasons.push(`MoS +${e.mos.upside.toFixed(0)}% but AVOID`); sev += 2; }
-      if (e.qual && e.qual.grade === 'F' && v === 'BUY') { reasons.push('Quality F on BUY'); sev += 2; }
+      if (v === 'BUY' && e.ai === 'BEAR') { reasons.push('AI BEAR vs BUY'); sev += 3; }
+      else if (['AVOID','SELL'].includes(v) && e.ai === 'BULL') { reasons.push('AI BULL vs AVOID'); sev += 3; }
+      if (v === 'BUY' && e.rr && e.rr < 1.5) { reasons.push(`R:R ${e.rr.toFixed(1)}`); sev += 2; }
+      if (v === 'BUY' && (eq === 'MISSED' || eq === 'EXTENDED')) { reasons.push(`${eq} entry`); sev += 2; }
+      if (v === 'WAIT' && e.c >= 5) { reasons.push(`WAIT but +${e.c}`); sev += 2; }
+      if (v === 'BUY' && conv === 'WATCH') { reasons.push('conv=WATCH'); sev += 2; }
+      if (e.mos && e.mos.upside > 25 && v === 'AVOID') { reasons.push(`MoS +${e.mos.upside.toFixed(0)}%`); sev += 2; }
+      if (e.qual.grade === 'F' && v === 'BUY') { reasons.push('Quality F'); sev += 2; }
       if (reasons.length) conflicts.push({...e, reasons, severity: sev, v});
     }
     conflicts.sort((a,b) => b.severity - a.severity);
-    // value bargains: MoS > 20% AND Quality A/B
-    const value = enriched.filter(e => e.mos && e.mos.upside >= 20 && (e.qual.grade === 'A' || e.qual.grade === 'B'))
-                          .sort((a,b) => (b.mos.upside||0) - (a.mos.upside||0)).slice(0,5);
-    // compounders: high quality + positive estimate revision + Mom A/B
-    const compounders = enriched.filter(e => e.compounder && (e.t.grade_momentum === 'A' || e.t.grade_momentum === 'B'))
-                                .sort((a,b) => (b.qual.pts||0) - (a.qual.pts||0)).slice(0,5);
-    // earnings this week: days_to_earnings between -3 and 7
-    const erThisWeek = enriched.filter(e => e.erw.days != null && e.erw.days >= -3 && e.erw.days <= 7)
-                               .sort((a,b) => (a.erw.days||0) - (b.erw.days||0)).slice(0,5);
-    return { enriched, buys, watches, shorts, conflicts: conflicts.slice(0,8), value, compounders, erThisWeek };
-  }
+    const conflictsTop = conflicts.slice(0,6);
 
-  // ── Renderers
-  function _renderTileRow(e, kind) {
-    const t = e.t; const tk = t.ticker;
-    const price = t.price || 0; const sec = (t.sector||'').slice(0,13);
-    const fam = t.setup_family || ''; const [icon, short] = _setupMeta(fam);
-    const sharpe = t.sharpe_126d || 0;
-    const sparkKind = kind === 'buy' ? 'gn' : kind === 'watch' ? 'am' : 'rd';
-    const spark = _sparkline(t.ohlcv||[], 80, 18, sparkKind);
-    const heldMark = _held.has(tk) ? '★' : '';
-    const tier = t.catalyst_tier || 3;
-    const rrCls = e.rr >= 2.5 ? 'gn' : e.rr >= 1.5 ? 'am' : 'rd';
-    const cCls = e.c >= 2 ? 'gn' : e.c >= 0 ? 'am' : 'rd';
-    const shCls = sharpe >= 1.5 ? 'gn' : sharpe >= 0 ? 'am' : 'rd';
-    return `<div class="qcm-trow" data-tkr="${tk}" onclick="window._openDetailTicker && window._openDetailTicker('${tk}')">
-      <div><div class="tk"><b>${tk}</b> <span class="held">${heldMark}</span></div><span class="sec">${sec} · ${icon} ${short} · T${tier}</span></div>
-      <div style="text-align:center">${spark}</div>
-      <div><div class="pr">$${price.toFixed(2)}</div><div class="stats"><span class="qcm-ts ${rrCls}">${e.rr.toFixed(1)}R</span><span class="qcm-ts ${cCls}">${e.c >= 0 ? '+' : ''}${e.c}</span><span class="qcm-ts ${shCls}">${sharpe.toFixed(1)}Sh</span></div></div>
-    </div>`;
-  }
+    const tileRow = (e, cls) => {
+      const tk = e.t.ticker;
+      const cCls = e.c >= 2 ? 'gn' : e.c >= 0 ? 'am' : 'rd';
+      return `<div class="qcm-d-row" onclick="window._openDetailTicker && window._openDetailTicker('${tk}')">
+        <b>${tk}</b><span class="meta">${(e.t.sector||'').slice(0,12)} · ${_setupMeta(e.t.setup_family)[1]}</span>
+        <span class="val ${cCls}">${e.c >= 0 ? '+' : ''}${e.c} · ${e.rr.toFixed(1)}R</span>
+      </div>`;
+    };
+    const valRow = (e) => {
+      const u = e.mos.upside;
+      return `<div class="qcm-d-row" onclick="window._openDetailTicker && window._openDetailTicker('${e.t.ticker}')">
+        <b>${e.t.ticker}</b><span class="meta">Q ${e.qual.grade} · ROE ${(e.qual.roe*100).toFixed(0)}%</span>
+        <span class="val gn">+${u.toFixed(0)}%</span></div>`;
+    };
+    const qualRow = (e) => `<div class="qcm-d-row" onclick="window._openDetailTicker && window._openDetailTicker('${e.t.ticker}')">
+      <b>${e.t.ticker}</b><span class="meta">ROE ${(e.qual.roe*100).toFixed(0)}% · GM ${(e.qual.gm*100).toFixed(0)}%</span>
+      <span class="val cu">${e.qual.grade}</span></div>`;
+    const ernRow = (e) => `<div class="qcm-d-row" onclick="window._openDetailTicker && window._openDetailTicker('${e.t.ticker}')">
+      <b>${e.t.ticker}</b><span class="meta">${e.erw.label}</span>
+      <span class="val am">${e.erw.days >= 0 ? '+' : ''}${e.erw.days}d</span></div>`;
+    const conflictRow = (e) => {
+      const sevCls = e.severity >= 4 ? 's3' : e.severity >= 2 ? 's2' : 's1';
+      return `<div class="qcm-cflx-row" onclick="window._openDetailTicker && window._openDetailTicker('${e.t.ticker}')">
+        <span class="tk">${e.t.ticker} · ${e.v}</span>
+        <span class="reasons">${e.reasons.map(r => `<span class="reason">${r}</span>`).join('')}</span>
+        <span class="sev ${sevCls}">⚠ ${e.severity}</span>
+      </div>`;
+    };
 
-  function _renderConflictRow(e) {
-    const t = e.t; const tk = t.ticker;
-    const sec = (t.sector||'').slice(0,10);
-    const fam = t.setup_family || ''; const [icon, short] = _setupMeta(fam);
-    const sevCls = e.severity >= 4 ? 's3' : e.severity >= 2 ? 's2' : 's1';
-    const aiCls = e.ai === 'BULL' ? 'gn' : e.ai === 'BEAR' ? 'rd' : 'na';
-    return `<div class="qcm-cf-row ${sevCls}" data-tkr="${tk}" onclick="window._openDetailTicker && window._openDetailTicker('${tk}')">
-      <div><span class="tk">${tk}</span><span class="sec">${sec} · ${icon} ${short}</span></div>
-      <div class="qcm-cf-mid">
-        <span>Verdict <b>${e.v}</b></span><span class="qcm-cf-sep">|</span>
-        <span>AI <b class="${aiCls}">${e.ai || '—'}</b></span><span class="qcm-cf-sep">|</span>
-        <span>RR <b>${e.rr.toFixed(1)}</b></span><span class="qcm-cf-sep">|</span>
-        <span>Conflu <b class="${e.c >= 0 ? 'gn' : 'rd'}">${e.c >= 0 ? '+' : ''}${e.c}</b></span>
+    return `<div class="qcm-drawer">
+      <div class="qcm-drawer-tog ${_drawerOpen ? 'open' : ''}" data-toggle="drawer">
+        <span class="arr">▶</span>
+        <span>🔬 Drilldown · Top picks · Conflicts · Senior-analyst lenses</span>
       </div>
-      <div class="qcm-cf-r"><span class="qcm-sev ${sevCls}">⚠ ${e.severity}</span>
-        <div class="qcm-cf-reasons">${e.reasons.map(r => `<span class="qcm-cf-reason">${r}</span>`).join('')}</div></div>
+      <div class="qcm-drawer-body ${_drawerOpen ? 'open' : ''}">
+        <div class="qcm-d-grid">
+          <div class="qcm-d-card buy"><div class="qcm-d-chdr"><h3>🟢 TOP 5 BUY</h3><span class="ct">conflu desc</span></div>${buys.map(e => tileRow(e,'buy')).join('') || '<div class="qcm-d-row"><span class="meta">no BUY signals</span></div>'}</div>
+          <div class="qcm-d-card watch"><div class="qcm-d-chdr"><h3>🟡 TOP 5 WATCH</h3><span class="ct">+2 conflu unpromoted</span></div>${watches.map(e => tileRow(e,'watch')).join('') || '<div class="qcm-d-row"><span class="meta">none</span></div>'}</div>
+          <div class="qcm-d-card short"><div class="qcm-d-chdr"><h3>🔴 TOP 5 SHORT</h3><span class="ct">most negative</span></div>${shorts.map(e => tileRow(e,'short')).join('') || '<div class="qcm-d-row"><span class="meta">none</span></div>'}</div>
+          <div class="qcm-d-card val"><div class="qcm-d-chdr"><h3>💎 VALUE BARGAINS</h3><span class="ct">MoS≥20% · Q A/B</span></div>${value.map(valRow).join('') || '<div class="qcm-d-row"><span class="meta">none</span></div>'}</div>
+          <div class="qcm-d-card qual"><div class="qcm-d-chdr"><h3>🌳 COMPOUNDERS</h3><span class="ct">ROE≥15% · GM≥35%</span></div>${compounders.map(qualRow).join('') || '<div class="qcm-d-row"><span class="meta">none</span></div>'}</div>
+          <div class="qcm-d-card ern"><div class="qcm-d-chdr"><h3>📊 EARNINGS THIS WEEK</h3><span class="ct">-3d → +7d</span></div>${ern.map(ernRow).join('') || '<div class="qcm-d-row"><span class="meta">none</span></div>'}</div>
+        </div>
+        <div class="qcm-cflx">
+          <div class="qcm-d-chdr" style="padding:8px 12px 6px;margin-top:8px;border-top:1px solid var(--qcm-line)"><h3 style="color:var(--qcm-amb)">⚠ STANDOUT DECISION CONFLICTS</h3><span class="ct">${conflicts.length} flagged</span></div>
+          ${conflictsTop.map(conflictRow).join('') || '<div class="qcm-cflx-row"><span class="reasons">no conflicts — surfaces aligned</span></div>'}
+        </div>
+      </div>
     </div>`;
   }
 
-  function _renderLensRow(e, lens) {
-    const t = e.t; const tk = t.ticker;
-    let mid = '', right = '';
-    if (lens === 'val') {
-      const u = e.mos.upside || 0;
-      const cls = u >= 25 ? 'gn' : u >= 15 ? 'am' : 'rd';
-      const barW = Math.min(100, Math.abs(u));
-      mid = `<div>PT <b>$${(e.mos.target||0).toFixed(2)}</b> · consensus <b>${e.mos.consensus || '—'}</b><br><span class="qcm-bar-inline"><i class="${cls}" style="width:${barW}%"></i></span><span class="lbl">analyst upgrades ${e.mos.recent_up||0}↑ / ${e.mos.recent_dn||0}↓</span></div>`;
-      right = `<span class="qcm-mos-pct ${cls}">+${u.toFixed(1)}%</span>`;
-    } else if (lens === 'qual') {
-      const g = e.qual.grade || 'na';
-      const revIcon = e.qual.rev === 'up_strong' ? '⬆⬆' : e.qual.rev === 'up' ? '⬆' : e.qual.rev === 'down' ? '⬇' : e.qual.rev === 'down_strong' ? '⬇⬇' : '·';
-      mid = `<div>ROE <b>${(e.qual.roe*100).toFixed(0)}%</b> · GM <b>${(e.qual.gm*100).toFixed(0)}%</b><br><span class="lbl">estimate revisions ${revIcon}</span></div>`;
-      right = `<span class="qcm-qual-badge ${g}">${g === 'na' ? '—' : g}</span>`;
-    } else if (lens === 'ern') {
-      const w = e.erw;
-      const days = w.days == null ? '—' : (w.days >= 0 ? `+${w.days}d` : `${w.days}d`);
-      const ivR = (e.iv.iv_rank||'').slice(0,28);
-      mid = `<div>${w.label} · <b>${days}</b><br><span class="lbl">${ivR || 'IV n/a'}</span></div>`;
-      right = `<span class="qcm-er-window ${w.kind}">${w.kind === 'norm' ? '—' : w.kind.toUpperCase()}</span>`;
-    }
-    return `<div class="qcm-lens-row" data-tkr="${tk}" onclick="window._openDetailTicker && window._openDetailTicker('${tk}')">
-      <div><div class="tk">${tk}</div><span class="lbl">${(t.sector||'').slice(0,16)}</span></div>
-      <div class="mid">${mid}</div>
-      <div class="r">${right}</div>
-    </div>`;
+  function _renderSectorOptions() {
+    const secs = new Set();
+    _arr.forEach(t => { if (t.sector) secs.add(t.sector); });
+    return ['<option value="all">All sectors</option>',
+            ...[...secs].sort().map(s => `<option value="${s}" ${_sector === s ? 'selected' : ''}>${s}</option>`)
+           ].join('');
   }
 
-  function _renderMatrixRow(e) {
-    const t = e.t; const tk = t.ticker;
-    const price = t.price || 0;
-    const tp = t.trade_plan || {};
-    const stop = tp.stop || 0, t1 = tp.target1 || 0, t2 = tp.target2 || 0;
-    const fam = t.setup_family || ''; const [icon, short, hold] = _setupMeta(fam);
-    const eq = t.entry_quality || '';
-    const v = (t.decision||{}).verdict || '';
-    const conv = (t.conviction||{}).label || '';
-    const k = t.kelly_size || {};
-    const alloc = k.final_alloc_pct || 0, shares = k.suggested_shares || 0;
-    const posVal = k.position_value || 0, dRisk = k.dollar_risk || 0;
-    const sharpe = t.sharpe_126d || 0;
-    const atrPct = t.atr_pct || 0;
-    const advM = ((t.avg_volume||0) * price) / 1e6;
-    const sec = (t.sector||'').slice(0,13);
-    const cstats = ((t.canonical_trade_plan||{}).stats) || {};
-    const setupWr = (cstats.wr_point||0) * 100, setupN = cstats.n_historical||0, setupPf = cstats.profit_factor||0;
-    const cl = e.c >= 2 ? 'gn' : e.c >= 0 ? 'am' : 'rd';
-    const ccGlow = e.c >= 5 ? 'glow-gn' : e.c <= -3 ? 'glow-rd' : '';
-    const spark = _sparkline(t.ohlcv||[]);
-    const ladder = _ladder(price, stop, t1, t2);
-    const cats = _catIcons(t.catalyst_tags||[], t.catalyst_tier);
-    // Earnings window chip
-    const ew = e.erw;
-    const erChip = ew.days != null && ew.days <= 7 && ew.days >= -3 ?
-      `<span class="qcm-er-chip ${ew.kind === 'erDay' || ew.kind === 'pead' ? 'rd' : 'am'}">📊 ${ew.label}</span>` : '';
-    // MoS cell
-    const mosU = e.mos ? e.mos.upside : 0;
-    const mosCls = mosU >= 25 ? 'gn' : mosU >= 15 ? 'am' : mosU >= 0 ? 'am' : 'rd';
-    const mosCell = e.mos ?
-      `<div class="qcm-mos-stack"><span class="qcm-mos-pct ${mosCls}">${mosU >= 0 ? '+' : ''}${mosU.toFixed(0)}%</span><span class="qcm-mos-meta">PT $${e.mos.target.toFixed(0)}</span></div>` :
-      `<span class="qcm-ts">—</span>`;
-    // Quality cell
-    const qg = e.qual.grade;
-    const qCell = `<div class="qcm-qual-stack"><span class="qcm-qual-badge ${qg}">${qg === 'na' ? '—' : qg}</span><span class="qcm-qual-meta">ROE ${(e.qual.roe*100).toFixed(0)}% · GM ${(e.qual.gm*100).toFixed(0)}%</span></div>`;
-    // ER cell
-    const erDays = ew.days == null ? '—' : (ew.days >= 0 ? `+${ew.days}d` : `${ew.days}d`);
-    const erCell = `<div class="qcm-er-stack"><span class="qcm-er-window ${ew.kind}">${ew.kind === 'norm' ? '—' : ew.kind.toUpperCase()}</span><span class="qcm-er-meta"><b>${erDays}</b> · ${(e.iv.iv_skew||'').slice(0,12) || 'IV—'}</span></div>`;
-    // RR
-    const rrCls = e.rr >= 2.5 ? 'gn' : e.rr >= 1.5 ? 'am' : 'rd';
-    // AI
-    const aiCls = e.ai === 'BULL' ? 'gn' : e.ai === 'BEAR' ? 'rd' : 'na';
-    const aiArr = e.ai === 'BULL' ? '▲' : e.ai === 'BEAR' ? '▼' : '•';
-    // pct
-    const pctStop = (price && stop) ? ((price-stop)/price*100) : 0;
-    const pctT1 = (price && t1) ? ((t1-price)/price*100) : 0;
-    // edge classes
-    const nCls = setupN >= 100 ? 'gn' : setupN >= 30 ? 'am' : 'rd';
-    const pfCls = setupPf >= 1.5 ? 'gn' : setupPf >= 1.2 ? 'am' : 'rd';
-    // why
-    const parts = [];
-    if (e.rr >= 2.5) parts.push(`<b class="gn">${e.rr.toFixed(1)} R:R</b>`);
-    if (eq === 'FRESH' || eq === 'PULLBACK') parts.push(`<b class="gn">${eq}</b>`);
-    if (e.mos && e.mos.upside >= 20) parts.push(`MoS <b class="cu">+${e.mos.upside.toFixed(0)}%</b>`);
-    if (e.qual.grade === 'A' || e.qual.grade === 'B') parts.push(`Quality <b class="gn">${e.qual.grade}</b>`);
-    if ((t.rs_rank||0) >= 80) parts.push(`RS <b>${(t.rs_rank||0).toFixed(0)}</b>`);
-    if (sharpe >= 1.5) parts.push(`Sh <b>${sharpe.toFixed(1)}</b>`);
-    if (e.compounder) parts.push('<b class="cu">COMPOUNDER</b>');
-    if (t.catalyst_tier === 1) parts.push('<b class="cu">T1 cat</b>');
-    const why = parts.join(' · ') || ((t.decision||{}).reason || '—').slice(0,50);
-    // action
-    let actions;
-    if (_held.has(tk)) actions = '<span class="qcm-held-pill">★ HELD</span>';
-    else if (v === 'BUY') actions = `<button class="qcm-act-btn buy" onclick="event.stopPropagation();window._openQuickAction && window._openQuickAction('BUY','${tk}',${price})">BUY</button>`;
-    else if (['AVOID','SELL','SHORT'].includes(v)) actions = `<button class="qcm-act-btn short" onclick="event.stopPropagation();window._openQuickAction && window._openQuickAction('SHORT','${tk}',${price})">SHORT</button>`;
-    else actions = `<button class="qcm-act-btn watch" onclick="event.stopPropagation();window._openQuickAction && window._openQuickAction('WATCH','${tk}',${price})">+ Watch</button>`;
-
-    return `<tr data-tkr="${tk}" data-verdict="${v}" class="r-${v.toLowerCase()||'na'}" onclick="window._openDetailTicker && window._openDetailTicker('${tk}')">
-      <td class="tkr">
-        <div class="qcm-tkr-top"><span class="qcm-sym">${tk}</span><span class="qcm-pr">$${price.toFixed(2)}</span></div>
-        <div class="qcm-tkr-bot"><span class="sec">${sec}</span><span class="qcm-adv">$${advM.toFixed(0)}M</span>${erChip}</div>
-      </td>
-      <td class="c qcm-spark-cell">${spark}</td>
-      <td class="c"><span class="qcm-ai-wrap ${aiCls}"><span class="arr">${aiArr}</span><span>${e.ai || '—'}</span><span class="conf">${((e.aic||0)*100).toFixed(0)}%</span></span></td>
-      <td class="c"><div class="qcm-vstack">${_verdictPill(v)}${_stars(conv)}</div></td>
-      <td class="c"><div class="qcm-setup-stack"><span class="ic">${icon}</span><span class="nm">${short}</span><span class="hd">${hold}</span></div></td>
-      <td class="c">${cats}</td>
-      <td class="c">${_eqPill(eq)}</td>
-      <td class="c"><div class="qcm-rr-stack"><span class="qcm-rr-num ${rrCls}">${e.rr.toFixed(1)}<i>:1</i></span><span class="qcm-rr-meta">ATR ${atrPct.toFixed(1)}%</span></div></td>
-      <td class="c">${mosCell}</td>
-      <td class="c">${qCell}</td>
-      <td class="c">${erCell}</td>
-      <td class="c qcm-ladder">${ladder}<div class="qcm-ladder-meta"><span class="rd">−${Math.abs(pctStop).toFixed(1)}%</span><span class="ink-3">·</span><span class="gn">+${pctT1.toFixed(1)}%</span></div></td>
-      <td class="c"><div class="qcm-edge-stack"><span class="qcm-edge-wr ${nCls}">${setupWr.toFixed(0)}% <i>n=${setupN}</i></span><span class="qcm-edge-pf ${pfCls}">PF ${setupPf.toFixed(2)}</span></div></td>
-      <td class="r qcm-alloc-cell"><div class="qcm-alloc-pct">${alloc.toFixed(1)}<i>%</i></div><div class="qcm-alloc-meta">${shares}sh · $${posVal.toFixed(0)}</div><div class="qcm-alloc-risk">risk <b>$${dRisk.toFixed(0)}</b></div></td>
-      <td class="c qcm-conflu-cell"><div class="qcm-conflu-mega ${ccGlow}"><span class="qcm-conflu-num ${cl}">${e.c >= 0 ? '+' : ''}${e.c}</span></div></td>
-      <td class="qcm-why">${why}</td>
-      <td class="c qcm-act">${actions}</td>
-    </tr>`;
-  }
-
-  function _matrixFilter(enriched) {
-    let arr = enriched;
-    if (_filter === 'buy') arr = arr.filter(e => (e.t.decision||{}).verdict === 'BUY');
-    else if (_filter === 'rr3') arr = arr.filter(e => e.rr >= 3);
-    else if (_filter === 'fresh') arr = arr.filter(e => ['FRESH','PULLBACK'].includes(e.t.entry_quality));
-    else if (_filter === 't1cat') arr = arr.filter(e => e.t.catalyst_tier === 1);
-    else if (_filter === 'compound') arr = arr.filter(e => e.compounder);
-    else if (_filter === 'mos') arr = arr.filter(e => e.mos && e.mos.upside >= 20);
-    if (_search) {
-      const q = _search.toUpperCase();
-      arr = arr.filter(e => (e.t.ticker||'').toUpperCase().includes(q));
-    }
-    // Sort: confluence desc, then RR desc
-    arr.sort((a,b) => (b.c - a.c) || ((b.rr||0) - (a.rr||0)));
-    return arr.slice(0, 200);
-  }
-
-  function _repaint() {
-    if (!_wsPanel) return;
-    const data = _bucketAndConflicts(_arr);
-    _wsPanel.innerHTML = _buildHTML(data);
-    _wireSearchAndFilter();
-  }
-
-  function _buildHTML(d) {
+  function _buildHTML() {
+    const enriched = _enrichAll();
+    const filtered = _applyFilter(enriched);
     const now = new Date();
     const hh = String(now.getHours()).padStart(2,'0');
     const mm = String(now.getMinutes()).padStart(2,'0');
-    const nBuy = d.enriched.filter(e => (e.t.decision||{}).verdict === 'BUY').length;
-    const nWait = d.enriched.filter(e => (e.t.decision||{}).verdict === 'WAIT').length;
-    const nAvoid = d.enriched.filter(e => ['AVOID','SELL'].includes((e.t.decision||{}).verdict)).length;
-    const bestRR = d.enriched.reduce((m,e) => (e.rr||0) > (m.rr||0) ? e : m, d.enriched[0] || {rr:0});
-    const matrixRows = _matrixFilter(d.enriched).map(_renderMatrixRow).join('');
+    const nBuy = enriched.filter(e => (e.t.decision||{}).verdict === 'BUY').length;
+    const nWait = enriched.filter(e => (e.t.decision||{}).verdict === 'WAIT').length;
+    const nAvoid = enriched.filter(e => ['AVOID','SELL'].includes((e.t.decision||{}).verdict)).length;
+    const nKill = enriched.filter(e => e.t.killed).length;
+    const nT1 = enriched.filter(e => e.t.catalyst_tier === 1).length;
+    const nMos = enriched.filter(e => e.mos && e.mos.upside >= 20).length;
+    const nComp = enriched.filter(e => e.compounder).length;
+    const nEr = enriched.filter(e => e.erw.days != null && e.erw.days >= -3 && e.erw.days <= 7).length;
+    const filteredCt = filtered.length;
+    const mainView = _view === 'treemap' ? _renderTreemap(filtered) : _renderHeatmap(filtered);
 
     return `<div class="qcm-root">
       <div class="qcm-hdr">
         <div>
-          <div class="qcm-bc">Kairos · Workspaces · <b>Confluence Matrix</b> · Senior-Analyst View</div>
+          <div class="qcm-bc">Kairos · Workspaces · <b>Confluence Matrix</b> · All-Universe Heatmap</div>
           <h1 class="qcm-h1">CONFLUENCE <span class="qcm-accent">MATRIX</span></h1>
-          <div class="qcm-tagline">${_arr.length} tickers · senior hedge-fund-analyst lens · value · quality · earnings window · ${hh}:${mm} PT</div>
+          <div class="qcm-tagline">${_arr.length} tickers · senior-analyst signal grid · ${hh}:${mm} PT</div>
         </div>
         <div class="qcm-kpi-strip">
-          <div class="qcm-kpi gn"><div class="lbl">BUY</div><div class="val">${nBuy}</div><div class="sub">verdict=BUY</div></div>
-          <div class="qcm-kpi am"><div class="lbl">WATCH</div><div class="val">${nWait}</div><div class="sub">verdict=WAIT</div></div>
-          <div class="qcm-kpi rd"><div class="lbl">AVOID</div><div class="val">${nAvoid}</div><div class="sub">verdict=AVOID</div></div>
-          <div class="qcm-kpi cu"><div class="lbl">Best R:R</div><div class="val">${(bestRR.rr||0).toFixed(1)}:1</div><div class="sub"><b>${(bestRR.t||{}).ticker||'—'}</b></div></div>
-          <div class="qcm-kpi pur"><div class="lbl">Compounders</div><div class="val">${d.compounders.length}</div><div class="sub">ROE+GM elite</div></div>
-          <div class="qcm-kpi cy"><div class="lbl">Conflicts</div><div class="val">${d.conflicts.length}</div><div class="sub">surfaces disagree</div></div>
+          <div class="qcm-kpi gn"><div class="lbl">BUY</div><div class="val">${nBuy}</div><div class="sub">verdict</div></div>
+          <div class="qcm-kpi am"><div class="lbl">WAIT</div><div class="val">${nWait}</div><div class="sub">verdict</div></div>
+          <div class="qcm-kpi rd"><div class="lbl">AVOID</div><div class="val">${nAvoid}</div><div class="sub">verdict</div></div>
+          <div class="qcm-kpi rd"><div class="lbl">Killed</div><div class="val">${nKill}</div><div class="sub">Wilson kill</div></div>
+          <div class="qcm-kpi cu"><div class="lbl">T1 Cat</div><div class="val">${nT1}</div><div class="sub">PEAD · UOA · VCP</div></div>
+          <div class="qcm-kpi cy"><div class="lbl">MoS ≥20</div><div class="val">${nMos}</div><div class="sub">analyst upside</div></div>
+          <div class="qcm-kpi pur"><div class="lbl">Compound</div><div class="val">${nComp}</div><div class="sub">ROE+GM</div></div>
+          <div class="qcm-kpi am"><div class="lbl">ER Window</div><div class="val">${nEr}</div><div class="sub">±7d</div></div>
         </div>
       </div>
 
-      <div class="qcm-section-hdr"><h2><span class="ic">🎯</span>TOP CONVICTION</h2><div class="meta">5 per bucket · sorted by confluence desc · click row → detail</div></div>
-      <div class="qcm-tile-grid">
-        <div class="qcm-tile buy"><div class="qcm-tile-hdr"><h3>🟢 TOP 5 · BUY</h3><span class="ct">highest conflu · clean</span></div><div>${d.buys.map(e => _renderTileRow(e,'buy')).join('') || '<div class="qcm-trow"><span class="sec">no BUY signals</span></div>'}</div></div>
-        <div class="qcm-tile watch"><div class="qcm-tile-hdr"><h3>🟡 TOP 5 · WATCH</h3><span class="ct">conflu ≥+2 not promoted</span></div><div>${d.watches.map(e => _renderTileRow(e,'watch')).join('') || '<div class="qcm-trow"><span class="sec">no high-conflu WATCH</span></div>'}</div></div>
-        <div class="qcm-tile short"><div class="qcm-tile-hdr"><h3>🔴 TOP 5 · SHORT</h3><span class="ct">most negative · regime check</span></div><div>${d.shorts.map(e => _renderTileRow(e,'short')).join('') || '<div class="qcm-trow"><span class="sec">no AVOID/SHORT</span></div>'}</div></div>
+      <div class="qcm-fbar">
+        <span class="qcm-flab">Filter</span>
+        <button class="qcm-pill ${_filter==='all'?'on':''}" data-filt="all">All <span class="ct">${enriched.length}</span></button>
+        <button class="qcm-pill ${_filter==='buy'?'on':''}" data-filt="buy">BUY <span class="ct">${nBuy}</span></button>
+        <button class="qcm-pill ${_filter==='wait'?'on':''}" data-filt="wait">WAIT <span class="ct">${nWait}</span></button>
+        <button class="qcm-pill ${_filter==='avoid'?'on':''}" data-filt="avoid">AVOID <span class="ct">${nAvoid}</span></button>
+        <button class="qcm-pill ${_filter==='rr3'?'on':''}" data-filt="rr3">R:R ≥3</button>
+        <button class="qcm-pill ${_filter==='fresh'?'on':''}" data-filt="fresh">FRESH/PB</button>
+        <button class="qcm-pill ${_filter==='t1cat'?'on':''}" data-filt="t1cat">T1 cat <span class="ct">${nT1}</span></button>
+        <button class="qcm-pill ${_filter==='mos'?'on':''}" data-filt="mos">MoS≥20 <span class="ct">${nMos}</span></button>
+        <button class="qcm-pill ${_filter==='qualAB'?'on':''}" data-filt="qualAB">Q A/B</button>
+        <button class="qcm-pill ${_filter==='compound'?'on':''}" data-filt="compound">Compound <span class="ct">${nComp}</span></button>
+        <button class="qcm-pill ${_filter==='er'?'on':''}" data-filt="er">ER win</button>
+        <button class="qcm-pill ${_filter==='held'?'on':''}" data-filt="held">Held <span class="ct">${_held.size}</span></button>
+        <select class="qcm-sector-sel" data-sector>${_renderSectorOptions()}</select>
+        <span class="qcm-view-tog">
+          <button class="qcm-pill ${_view==='heatmap'?'on':''}" data-view="heatmap">▦ Heatmap</button>
+          <button class="qcm-pill ${_view==='treemap'?'on':''}" data-view="treemap">⊞ Treemap</button>
+        </span>
+        <input class="qcm-search" placeholder="🔍 Ticker…" value="${_search}"/>
       </div>
 
-      <div class="qcm-section-hdr"><h2><span class="ic">⚠</span>STANDOUT DECISION CONFLICTS</h2><div class="meta">surfaces disagree on these names · <b>${d.conflicts.length}</b> flagged · review before action</div></div>
-      <div class="qcm-conflicts">
-        <div class="qcm-cf-hdr"><h3>⚠ Verdict ≠ AI ≠ R:R ≠ Confluence ≠ MoS</h3><div class="sub">severity ⚠3 = critical (AI inversion) · ⚠2 = warning · ⚠1 = note</div></div>
-        ${d.conflicts.map(_renderConflictRow).join('') || '<div class="qcm-cf-row"><div class="qcm-cf-mid">no decision conflicts today — all surfaces aligned</div></div>'}
+      ${mainView}
+
+      <div class="qcm-foot">
+        <span>Showing <b>${filteredCt}</b> of <b>${enriched.length}</b> tickers · sorted by <b>${_sort}</b> ${_sortDir}</span>
+        <span class="legend">
+          <span style="display:flex;gap:4px;align-items:center"><i style="background:#16a34a"></i> ≥+5</span>
+          <span style="display:flex;gap:4px;align-items:center"><i style="background:#4ade80"></i> +3</span>
+          <span style="display:flex;gap:4px;align-items:center"><i style="background:#86efac"></i> +1</span>
+          <span style="display:flex;gap:4px;align-items:center"><i style="background:var(--qcm-bg-4)"></i> 0</span>
+          <span style="display:flex;gap:4px;align-items:center"><i style="background:#fbbf24"></i> −1</span>
+          <span style="display:flex;gap:4px;align-items:center"><i style="background:#f59e0b"></i> −3</span>
+          <span style="display:flex;gap:4px;align-items:center"><i style="background:#dc2626"></i> ≤−5</span>
+        </span>
       </div>
 
-      <div class="qcm-section-hdr"><h2><span class="ic">🔬</span>SENIOR-ANALYST LENSES</h2><div class="meta">Buffett margin-of-safety · Graham quality · earnings-specialist window</div></div>
-      <div class="qcm-lens-grid">
-        <div class="qcm-lens val"><div class="qcm-lens-hdr"><h3>💎 VALUE BARGAINS</h3><span class="ct">MoS ≥ 20% · Quality A/B</span></div>${d.value.map(e => _renderLensRow(e,'val')).join('') || '<div class="qcm-lens-row"><div class="lbl">no bargains today</div></div>'}</div>
-        <div class="qcm-lens qual"><div class="qcm-lens-hdr"><h3>🌳 COMPOUNDERS</h3><span class="ct">ROE≥15% · GM≥35% · Mom A/B</span></div>${d.compounders.map(e => _renderLensRow(e,'qual')).join('') || '<div class="qcm-lens-row"><div class="lbl">no qualifying compounders</div></div>'}</div>
-        <div class="qcm-lens ern"><div class="qcm-lens-hdr"><h3>📊 EARNINGS THIS WEEK</h3><span class="ct">-3d → +7d window</span></div>${d.erThisWeek.map(e => _renderLensRow(e,'ern')).join('') || '<div class="qcm-lens-row"><div class="lbl">no names in ER window</div></div>'}</div>
-      </div>
-
-      <div class="qcm-section-hdr"><h2><span class="ic">▦</span>EXECUTION MATRIX</h2><div class="meta">17 columns · sparklines · trade-zone ladders · catalyst chains · MoS · Quality · ER window · ATR/ADV · action buttons</div></div>
-      <div class="qcm-toggle">
-        <span class="qcm-toggle-lbl">Filter</span>
-        <button class="qcm-pill ${_filter==='all'?'on':''}" data-filt="all">All</button>
-        <button class="qcm-pill ${_filter==='buy'?'on':''}" data-filt="buy">BUY only</button>
-        <button class="qcm-pill ${_filter==='rr3'?'on':''}" data-filt="rr3">RR ≥3</button>
-        <button class="qcm-pill ${_filter==='fresh'?'on':''}" data-filt="fresh">FRESH</button>
-        <button class="qcm-pill ${_filter==='t1cat'?'on':''}" data-filt="t1cat">T1 catalyst</button>
-        <button class="qcm-pill ${_filter==='compound'?'on':''}" data-filt="compound">Compounders</button>
-        <button class="qcm-pill ${_filter==='mos'?'on':''}" data-filt="mos">MoS ≥20%</button>
-        <input class="qcm-search" placeholder="🔍 Filter ticker…" value="${_search}"/>
-      </div>
-      <div class="qcm-mwrap"><table class="qcm-mx">
-        <thead><tr>
-          <th>Ticker · Price</th><th class="c">30-day</th><th class="c">AI ✦</th>
-          <th class="c">Verdict</th><th class="c">Setup</th><th class="c">Catalysts</th>
-          <th class="c">Entry-Q</th><th class="c">R:R</th>
-          <th class="c">Margin of Safety</th><th class="c">Quality</th><th class="c">ER Window</th>
-          <th class="c">Trade Zone</th><th class="c">Setup Edge</th>
-          <th class="r">Position Size</th><th class="c">Confluence</th>
-          <th>Why</th><th class="c">Action</th>
-        </tr></thead><tbody>${matrixRows}</tbody>
-      </table></div>
+      ${_renderDrawer(enriched)}
     </div>`;
   }
 
-  function _wireSearchAndFilter() {
+  function _wire() {
     if (!_wsPanel) return;
-    _wsPanel.querySelectorAll('.qcm-pill[data-filt]').forEach(btn => {
-      btn.onclick = () => { _filter = btn.dataset.filt; _repaint(); };
+    _wsPanel.querySelectorAll('.qcm-pill[data-filt]').forEach(b => {
+      b.onclick = () => { _filter = b.dataset.filt; _repaint(); };
     });
+    _wsPanel.querySelectorAll('.qcm-pill[data-view]').forEach(b => {
+      b.onclick = () => { _view = b.dataset.view; _repaint(); };
+    });
+    _wsPanel.querySelectorAll('.qcm-hm thead th[data-sort]').forEach(th => {
+      th.onclick = () => {
+        const k = th.dataset.sort;
+        if (_sort === k) _sortDir = _sortDir === 'desc' ? 'asc' : 'desc';
+        else { _sort = k; _sortDir = 'desc'; }
+        _repaint();
+      };
+    });
+    const sel = _wsPanel.querySelector('select[data-sector]');
+    if (sel) sel.onchange = () => { _sector = sel.value; _repaint(); };
     const search = _wsPanel.querySelector('.qcm-search');
     if (search) {
-      search.oninput = (e) => { _search = e.target.value || ''; _repaint();
-        // restore focus
+      search.oninput = (e) => {
+        _search = e.target.value || '';
+        _repaint();
         requestAnimationFrame(() => {
           const s = _wsPanel.querySelector('.qcm-search');
           if (s) { s.focus(); s.selectionStart = s.value.length; }
         });
       };
     }
+    const dt = _wsPanel.querySelector('[data-toggle="drawer"]');
+    if (dt) dt.onclick = () => {
+      _drawerOpen = !_drawerOpen;
+      dt.classList.toggle('open', _drawerOpen);
+      const body = _wsPanel.querySelector('.qcm-drawer-body');
+      if (body) body.classList.toggle('open', _drawerOpen);
+    };
+  }
+
+  function _repaint() {
+    if (!_wsPanel) return;
+    _wsPanel.innerHTML = _buildHTML();
+    _wire();
   }
 
   function render(panel, data, arr) {
     _ensureStyles();
     _wsPanel = panel;
     _arr = arr || (data && data._arr) || [];
-    // Find held set from portfolio
     _held = new Set();
     try {
       const portfolio = window._portfolioState || (data && data.portfolio) || null;
       if (portfolio && portfolio.positions) portfolio.positions.forEach(p => _held.add(p.ticker));
     } catch (e) {}
     _repaint();
-    // Update sidebar count
     const ct = document.getElementById('sb-confluence');
     if (ct) {
-      const bullCt = _arr.filter(t => {
-        const c = _confluence(t); return c >= 2;
-      }).length;
+      const bullCt = _arr.filter(t => _confluence(t) >= 2).length;
       ct.textContent = bullCt;
     }
   }
 
   return { render };
 })();
+
+
 
 
 // ══════════════════════════════════════════════════════════════════════
