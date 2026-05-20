@@ -2920,6 +2920,161 @@ async def diagnostics_apply_tune_api(payload: Dict[str, Any] = Body(...)):
     return {"status": "applied", "backup": str(backup.name), "changes": changes}
 
 
+@app.get("/api/diagnostics/ml-ab")
+async def diagnostics_ml_ab_api(min_n: int = 30, verdict: str = "BUY"):
+    """ML A/B test: does ML filtering of rules signals add Sharpe lift?
+
+    Partitions rules BUYs into buckets by ML agreement:
+      A — baseline: ALL rules BUYs (no ML filter)
+      B — ML AGREE direction (p_up >= 0.40)
+      C — ML DISAGREE direction (p_up <= 0.30 — predicts chop or down)
+      D — ML AGREE hit-net (p_t1_first >= 0.30)
+      E — ML DISAGREE hit-net (p_t1_first <= 0.10)
+
+    Computes per-bucket: n, WR, mean_pnl, Sharpe, PF.
+    Statistical test: bootstrap 5000× the mean PnL of Bucket B vs Bucket A,
+    report 95% CI on the LIFT (B_mean - A_mean). If CI excludes 0, ML adds value.
+
+    Returns verdict: ML_ADDS_VALUE / ML_NO_LIFT / ML_HURTS / INSUFFICIENT_DATA.
+    """
+    import json, random
+    from pathlib import Path
+    from statistics import mean, stdev
+    pairs_path = Path("cache/ml_ab_pairs.jsonl")
+    if not pairs_path.exists():
+        return {"error": "no pairs captured yet — run scripts/ml_ab_capture.py after a scan"}
+    pairs = []
+    with open(pairs_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line: continue
+            try: pairs.append(json.loads(line))
+            except: pass
+    # Verdict filter: BUY (strict — what we actually trade) or ALL (broader pool for early-stage diagnostics)
+    verdict_filter = (verdict or "BUY").upper()
+    if verdict_filter == "ALL":
+        closed_buys = [p for p in pairs if p.get("rules_verdict") in ("BUY","WATCH","SHORT")
+                       and p.get("realized_pct") is not None]
+        scope_label = "all_verdicts"
+    else:
+        closed_buys = [p for p in pairs if p.get("rules_verdict") == verdict_filter
+                       and p.get("realized_pct") is not None]
+        scope_label = f"verdict={verdict_filter}"
+
+    # Framework progress metrics (always returned for observability)
+    total_closed_all = sum(1 for p in pairs if p.get("realized_pct") is not None)
+    buys_total = sum(1 for p in pairs if p.get("rules_verdict") == "BUY")
+    if len(closed_buys) < 5:
+        return {
+            "verdict": "INSUFFICIENT_DATA",
+            "scope": scope_label,
+            "n_pairs_total": len(pairs),
+            "n_closed_buys": len(closed_buys),
+            "n_closed_all_verdicts": total_closed_all,
+            "n_buys_open_or_closed": buys_total,
+            "min_required": min_n,
+            "message": (
+                f"Have {len(closed_buys)} closed paired {verdict_filter} signals · need {min_n}+ for stat significance · "
+                f"framework captured {len(pairs)} total pairs ({buys_total} BUYs, {total_closed_all} resolved). "
+                f"Try ?verdict=ALL for broader-pool early diagnostics while BUYs accumulate."
+            ),
+        }
+
+    def _stats(arr):
+        if not arr: return {"n": 0, "wr": 0, "mean_pnl": 0, "sharpe_per_trade": 0, "pf": 0}
+        pnls = [p.get("realized_pct", 0) or 0 for p in arr]
+        n = len(pnls); m = mean(pnls)
+        sd = stdev(pnls) if n > 1 else 0
+        wins = sum(1 for v in pnls if v > 1)
+        gw = sum(v for v in pnls if v > 1)
+        gl = -sum(v for v in pnls if v < -1)
+        return {
+            "n": n,
+            "wr": round(wins/n*100, 1),
+            "mean_pnl": round(m, 2),
+            "sharpe_per_trade": round(m/sd, 3) if sd > 0 else 0,
+            "pf": round(gw/gl, 2) if gl > 0 else 0,
+        }
+
+    A = closed_buys
+    B = [p for p in closed_buys if (p.get("ml_p_up") or 0) >= 0.40]
+    C = [p for p in closed_buys if (p.get("ml_p_up") or 0) <= 0.30]
+    D = [p for p in closed_buys if (p.get("ml_p_t1_first") or 0) >= 0.30]
+    E = [p for p in closed_buys if (p.get("ml_p_t1_first") or 0) <= 0.10]
+
+    buckets = {
+        "A_baseline_all_rules_buys": _stats(A),
+        "B_ml_agree_p_up_gte_0.40": _stats(B),
+        "C_ml_disagree_p_up_lte_0.30": _stats(C),
+        "D_ml_agree_hit_net_gte_0.30": _stats(D),
+        "E_ml_disagree_hit_net_lte_0.10": _stats(E),
+    }
+
+    # Bootstrap lift of (B vs A) and (D vs A) for statistical significance
+    def _bootstrap_lift(treatment, baseline, iters=5000):
+        if len(treatment) < 5 or len(baseline) < 5: return None
+        random.seed(42)
+        t_pnls = [p.get("realized_pct", 0) for p in treatment]
+        b_pnls = [p.get("realized_pct", 0) for p in baseline]
+        lifts = []
+        for _ in range(iters):
+            t_sample = [random.choice(t_pnls) for _ in range(len(t_pnls))]
+            b_sample = [random.choice(b_pnls) for _ in range(len(b_pnls))]
+            lifts.append(mean(t_sample) - mean(b_sample))
+        sorted_lifts = sorted(lifts)
+        return {
+            "point_lift_pp": round(mean(t_pnls) - mean(b_pnls), 3),
+            "ci_low_95": round(sorted_lifts[int(0.025*iters)], 3),
+            "ci_high_95": round(sorted_lifts[int(0.975*iters)], 3),
+            "ci_excludes_zero": (sorted_lifts[int(0.025*iters)] > 0) or (sorted_lifts[int(0.975*iters)] < 0),
+        }
+
+    lift_BvA = _bootstrap_lift(B, A) if len(B) >= 5 else None
+    lift_DvA = _bootstrap_lift(D, A) if len(D) >= 5 else None
+
+    # Verdict
+    if len(closed_buys) < min_n:
+        verdict = "INSUFFICIENT_DATA"
+        verdict_reason = f"n={len(closed_buys)} < {min_n} threshold — keep accumulating"
+    elif lift_BvA and lift_BvA["ci_excludes_zero"] and lift_BvA["point_lift_pp"] > 0:
+        verdict = "ML_ADDS_VALUE"
+        verdict_reason = f"B (ML-agree) beats A (baseline) by {lift_BvA['point_lift_pp']}pp · 95% CI [{lift_BvA['ci_low_95']}, {lift_BvA['ci_high_95']}] excludes 0"
+    elif lift_BvA and lift_BvA["ci_excludes_zero"] and lift_BvA["point_lift_pp"] < 0:
+        verdict = "ML_HURTS"
+        verdict_reason = f"B (ML-agree) underperforms A (baseline) by {abs(lift_BvA['point_lift_pp'])}pp · CI excludes 0"
+    elif lift_BvA:
+        verdict = "ML_NO_LIFT"
+        verdict_reason = f"B vs A lift {lift_BvA['point_lift_pp']}pp · 95% CI [{lift_BvA['ci_low_95']}, {lift_BvA['ci_high_95']}] includes 0 (noise)"
+    else:
+        verdict = "INSUFFICIENT_DATA"
+        verdict_reason = "B bucket too small for bootstrap"
+
+    return {
+        "verdict": verdict,
+        "verdict_reason": verdict_reason,
+        "n_closed_buys": len(closed_buys),
+        "n_pairs_total": len(pairs),
+        "buckets": buckets,
+        "lift_BvA": lift_BvA,
+        "lift_DvA": lift_DvA,
+        "recommendation": (
+            "Use ML p_up >= 0.40 as a hard filter — drop signals where ML disagrees"
+            if verdict == "ML_ADDS_VALUE"
+            else "Skip ML — current model adds no statistical lift; keep complexity cost in check"
+            if verdict == "ML_HURTS"
+            else "ML adds no edge in current sample — keep collecting before re-running"
+            if verdict == "ML_NO_LIFT"
+            else "Keep accumulating paired data — framework is live"
+        ),
+        "thresholds_used": {
+            "ml_agree_p_up": 0.40,
+            "ml_disagree_p_up": 0.30,
+            "ml_agree_hit_net": 0.30,
+            "ml_disagree_hit_net": 0.10,
+        },
+    }
+
+
 @app.get("/api/positions/active-watch")
 async def positions_active_watch_api():
     """For each open portfolio position, return live price + explicit verdict:

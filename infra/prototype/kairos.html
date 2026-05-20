@@ -13722,9 +13722,11 @@ const QuantHome = (function() {
         .qctt-plan .kv .k{color:var(--ink-3);font:700 9.5px var(--mono);letter-spacing:.12em;text-transform:uppercase}
         .qctt-plan .kv .v{color:var(--ink);font:700 12.5px var(--mono);font-variant-numeric:tabular-nums}
         .qctt-plan .kv .v.gn{color:var(--gn)} .qctt-plan .kv .v.rd{color:var(--rd)} .qctt-plan .kv .v.cy{color:var(--cy)}
-        .qctt-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
-        .qctt-btn{padding:9px 18px;border-radius:3px;font:800 11.5px var(--mono);letter-spacing:.10em;border:none;cursor:pointer;background:var(--gn);color:var(--bg-1);transition:transform 80ms}
-        .qctt-btn:hover{transform:translateY(-1px);box-shadow:0 4px 10px rgba(91,229,124,0.30)}
+        /* 2026-05-19 · 4-button action row (was column-stack — broke layout once
+           SELL/SHORT/WATCH/DETAILS replaced the single OPEN TICKET button). */
+        .qctt-actions{display:flex;flex-direction:row;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;min-width:0}
+        .qctt-btn{padding:9px 14px;border-radius:3px;font:800 11px var(--mono);letter-spacing:.08em;border:1px solid transparent;cursor:pointer;background:var(--gn);color:var(--bg-1);transition:transform 80ms,filter 80ms;white-space:nowrap;line-height:1}
+        .qctt-btn:hover{transform:translateY(-1px);filter:brightness(1.08);box-shadow:0 4px 10px rgba(0,0,0,0.30)}
         .qctt-btn.ghost{background:transparent;color:var(--ink-1);border:1px solid var(--line-2);font-weight:700}
         .qctt-btn.ghost:hover{border-color:var(--copper);color:var(--copper);box-shadow:none}
         .qctt-empty-text{font:600 13px var(--mono);color:var(--ink-2);text-align:center;padding:8px 0}
@@ -13786,8 +13788,22 @@ const QuantHome = (function() {
         </div>
       </div>
       <div class="qctt-actions">
-        <button class="qctt-btn" onclick="window.setDetailTicker&&window.setDetailTicker('${tkr}')">OPEN TICKET →</button>
-        <button class="qctt-btn ghost" onclick="window.setDetailTicker&&window.setDetailTicker('${tkr}')">DETAILS</button>
+        <!-- 2026-05-19 · User-agency action bar · system informs, user decides.
+             Buttons are ALWAYS clickable regardless of score / R:R / plan completeness.
+             The system can flag "PLAN INCOMPLETE" but cannot block the trader. -->
+        <button class="qctt-btn" style="background:var(--gn);color:var(--bg-1);border-color:var(--gn-dim)"
+                onclick="event.stopPropagation();window._openQuickAction&&window._openQuickAction('BUY','${tkr}',{price:${px},stop:${stopReal||0},t1:${t1Real||0},t2:${t2Real||0},setup:'${(setup||'').replace(/'/g,"\\'")}'})">
+          BUY
+        </button>
+        <button class="qctt-btn" style="background:var(--rd-bg);color:var(--rd);border-color:var(--rd-dim)"
+                onclick="event.stopPropagation();window._openQuickAction&&window._openQuickAction('SHORT','${tkr}',{price:${px},stop:${stopReal||0},t1:${t1Real||0},t2:${t2Real||0},setup:'${(setup||'').replace(/'/g,"\\'")}'})">
+          SHORT
+        </button>
+        <button class="qctt-btn ghost"
+                onclick="event.stopPropagation();window._openQuickAction&&window._openQuickAction('WATCH','${tkr}')">
+          + WATCH
+        </button>
+        <button class="qctt-btn ghost" onclick="window.setDetailTicker&&window.setDetailTicker('${tkr}')">DETAILS →</button>
       </div>
     </div>`;
   }
@@ -16681,6 +16697,9 @@ const QuantPortfolio = (function() {
             <span class="stat ${maxDD < -5 ? 'am' : ''}"><b>${_fmt(maxDD, 1)}%</b> max DD</span>
             ${cb.active ? '<span class="stat am">circuit <b>BREAKER</b></span>' : ''}
             <span class="stat">scan <b>${(data.run_timestamp || '').slice(0,16).replace('T',' ')}</b></span>
+            <!-- 2026-05-19 · Live-price freshness chip + manual refresh (polls every 5s) -->
+            <span class="stat" id="qport-live-chip" title="Polls Schwab Market Data every 5s for current prices"><b>● LIVE</b> <small id="qport-live-age" style="opacity:.7">init…</small></span>
+            <button id="qport-live-refresh" class="qe-banner-btn" style="background:transparent;border:1px solid var(--line-2);color:var(--ink-2);padding:3px 9px;font:700 9px var(--mono);letter-spacing:.10em;border-radius:2px;cursor:pointer;margin-left:6px" title="Force refresh prices now">↻ REFRESH</button>
           </div>
         </div>
 
@@ -17043,7 +17062,125 @@ const QuantPortfolio = (function() {
     </table>`;
   }
 
-  return { render };
+  // ════════════════════════════════════════════════════════════════════
+  // 2026-05-19 · Live-price polling (Schwab Market Data, every 5s)
+  // Server: GET /api/portfolio/live_prices?tickers=NEM,AAPL,...
+  // Source: schwab_client.get_quotes_batch (Market Data API — no Trader
+  //   entitlement required, separate rate-limit pool from EODHD's
+  //   100K/day budget). We already know shares/entry_price from the
+  //   local portfolio_state.json, so price-only refresh is enough.
+  // The browser computes P&L client-side; the endpoint is a thin proxy.
+  // ════════════════════════════════════════════════════════════════════
+  let _livePollTimer = null;
+  let _livePollAgeTimer = null;
+  let _livePollLastTs = null;
+
+  function _stopLivePoll() {
+    if (_livePollTimer) clearInterval(_livePollTimer);
+    if (_livePollAgeTimer) clearInterval(_livePollAgeTimer);
+    _livePollTimer = null;
+    _livePollAgeTimer = null;
+  }
+
+  async function _livePollTick() {
+    // Self-deactivate if Portfolio is no longer the active workspace
+    const wsActive = document.querySelector('.sb-link.on[data-tab="portfolio"]');
+    if (!wsActive) { _stopLivePoll(); return; }
+
+    const data = window._lastData || {};
+    const positions = (data.portfolio?.positions || []).filter(p => p && p.ticker);
+    if (positions.length === 0) {
+      _updateLiveChip('idle');
+      return;
+    }
+
+    const tickers = positions.map(p => p.ticker.toUpperCase()).join(',');
+    try {
+      const r = await fetch('/api/portfolio/live_prices?tickers=' + encodeURIComponent(tickers),
+                             { cache: 'no-store' });
+      const j = await r.json();
+      if (!r.ok || !j.prices) {
+        _updateLiveChip('err', (j.detail || j.message || 'price fetch failed'));
+        return;
+      }
+      let dirty = false;
+      for (const p of positions) {
+        const newPx = j.prices[p.ticker.toUpperCase()];
+        if (newPx != null && isFinite(newPx)) {
+          if (p.current_price !== newPx) dirty = true;
+          p.current_price = newPx;
+          const cost = (p.entry_price || 0) * (p.shares || 0);
+          const mv = newPx * (p.shares || 0);
+          p.unrealized_pnl_dollars = mv - cost;
+          p.unrealized_pnl_pct = cost > 0 ? ((mv - cost) / cost) * 100 : 0;
+        }
+      }
+      _livePollLastTs = Date.now();
+      _updateLiveChip('ok');
+      if (dirty) {
+        const wsPanel = document.getElementById('pan-workspace');
+        if (wsPanel) _origRender(wsPanel, data);
+      }
+    } catch (e) {
+      _updateLiveChip('err', e.message);
+    }
+  }
+
+  function _updateLiveChip(state, errMsg) {
+    const chip  = document.getElementById('qport-live-chip');
+    const ageEl = document.getElementById('qport-live-age');
+    if (!chip || !ageEl) return;
+    const boldEl = chip.querySelector('b');
+    if (!boldEl) return;
+    const now = Date.now();
+    const age = _livePollLastTs ? Math.round((now - _livePollLastTs) / 1000) : null;
+    let label;
+    if (state === 'err') {
+      chip.style.color = 'var(--rd, #e57373)';
+      label = '● ERROR';
+      ageEl.textContent = (errMsg || 'stale').slice(0, 28);
+    } else if (state === 'idle') {
+      chip.style.color = 'var(--ink-3, #888)';
+      label = '● —';
+      ageEl.textContent = 'no positions';
+    } else if (age == null) {
+      chip.style.color = 'var(--ink-3, #888)';
+      label = '● LIVE';
+      ageEl.textContent = 'init…';
+    } else if (age < 10) {
+      chip.style.color = '#2ecc71';
+      label = '● LIVE';
+      ageEl.textContent = age + 's ago';
+    } else if (age < 30) {
+      chip.style.color = '#f6b93b';
+      label = '● SLOW';
+      ageEl.textContent = age + 's ago';
+    } else {
+      chip.style.color = '#e57373';
+      label = '● STALE';
+      ageEl.textContent = age + 's ago';
+    }
+    boldEl.textContent = label;
+  }
+
+  function _startLivePoll() {
+    _stopLivePoll();
+    _livePollTimer = setInterval(_livePollTick, 5000);
+    _livePollAgeTimer = setInterval(() => _updateLiveChip('ok'), 1000);
+    _livePollTick();  // fire immediately on render
+    const btn = document.getElementById('qport-live-refresh');
+    if (btn) btn.onclick = (e) => { e.preventDefault(); _livePollTick(); };
+  }
+
+  // Wrap render() so every render kicks off (or restarts) the poll loop.
+  const _origRender = render;
+  function _renderWithLivePoll(wsPanel, data) {
+    const result = _origRender(wsPanel, data);
+    setTimeout(_startLivePoll, 0);
+    return result;
+  }
+
+  return { render: _renderWithLivePoll };
 })();
 
 // ──────────────────────────────────────────────────────────────────────
@@ -18811,61 +18948,6 @@ const QuantScanner = (function() {
     return _qpFrame('🔥', 'VOLUME SURGES',
       'RVOL ≥ 1.5× — where institutional flow concentrates',
       cards, 'no surge volume today');
-  }
-
-  // ─── 🌡 Hot Sectors (avg p(up) from ML cache) ────────────────────────
-  function panelHotSectors(arr) {
-    const cache = window.__mlEdgeCache;
-    const pool = cache && (cache.predictions || {}).swing || {};
-    const bySec = {};
-    // Cross-reference: ticker → sector from scan bundle, p_up from ML cache
-    const tk = {};
-    (arr || []).forEach(t => { if (t && t.ticker) tk[t.ticker.toUpperCase()] = t.sector || 'Other'; });
-    for (const [sym, p] of Object.entries(pool)) {
-      const sec = (p && p.sector) || tk[sym] || 'Other';
-      const pUp = ((p || {}).direction || {}).p_up;
-      if (typeof pUp !== 'number') continue;
-      if (!bySec[sec]) bySec[sec] = { n: 0, sum: 0, sym1: null };
-      bySec[sec].n++;
-      bySec[sec].sum += pUp;
-      if (!bySec[sec].sym1 || pUp > bySec[sec].max_pup) {
-        bySec[sec].sym1 = sym;
-        bySec[sec].max_pup = pUp;
-      }
-    }
-    const rows = Object.entries(bySec)
-      .filter(([, v]) => v.n >= 3 && v.sym1)
-      .map(([sec, v]) => ({ sec, avg: v.sum / v.n, n: v.n, sym1: v.sym1, max_pup: v.max_pup }))
-      .sort((a, b) => b.avg - a.avg)
-      .slice(0, 5);
-    const cards = rows.map((r, i) => {
-      const pUpPct = (r.avg * 100).toFixed(0);
-      const cls = r.avg >= 0.55 ? 'gn' : r.avg >= 0.50 ? 'am' : 'rd';
-      return _qpCard(i + 1, r.sec.length > 16 ? r.sec.slice(0,14)+'..' : r.sec,
-        `${pUpPct}% bull`, cls,
-        `n=${r.n} tickers · leader <b>${r.sym1}</b>`,
-        '');
-    }).join('');
-    // Override data-sym for sector cards — clicking opens the sector LEADER's detail
-    const cardsWithSym = rows.map((r, i) => {
-      const pUpPct = (r.avg * 100).toFixed(0);
-      const cls = r.avg >= 0.55 ? 'gn' : r.avg >= 0.50 ? 'am' : 'rd';
-      return `
-        <div class="qs-quick-card" data-sym="${r.sym1}">
-          <div class="qs-quick-rank">#${i + 1}</div>
-          <div class="qs-quick-main">
-            <div class="qs-quick-row">
-              <span class="qs-quick-sym" style="font-size:13px">${r.sec}</span>
-              <span class="qs-quick-puv ${cls}">${pUpPct}%</span>
-            </div>
-            <div class="qs-quick-meta">n=${r.n} tickers · leader <b>${r.sym1}</b></div>
-            <div class="qs-quick-meta2">click → open leader detail</div>
-          </div>
-        </div>`;
-    }).join('');
-    return _qpFrame('🌡', 'HOT SECTORS',
-      'avg ML p(up) per sector · today\'s rotation',
-      cardsWithSym, 'sector aggregation needs ML cache');
   }
 
   // ─────────────────────────────────────────────────────────────────────
@@ -23164,6 +23246,7 @@ window.QuantDetail = (function() {
     // new 3-line t-host bar (renderBanner) absorbs strategy modes (Line 1)
     // and lens alignment summary + 8 lens chips (Line 2). Saves ~80px.
     root.innerHTML = `
+      ${renderQuickActionBar(t)}
       ${renderBanner(t)}
       ${renderSubTabNav(t)}
       <div id="qd-body"></div>
@@ -26924,6 +27007,112 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
   // Line 3: proportional price ladder (stop → entry → T1 → T2)
   // CSS scoped to #pan-detail .t-host (defined near .det-hero-banner).
   // ────────────────────────────────────────────────────────────────────
+
+  // 2026-05-19 · Quick-action bar at the top of every detail view.
+  // User-agency contract: BUY / SHORT / WATCH are ALWAYS clickable
+  // regardless of system verdict / score / R:R / plan completeness.
+  // System verdict is shown as INFO chip only — never gates the action.
+  // Per memory project_unified_system_1k_to_1m.md: build every action;
+  // let users self-select.
+  function renderQuickActionBar(t) {
+    if (!t) return '';
+    const tk    = (t.ticker || '').toUpperCase();
+    if (!tk) return '';
+    const px    = +t.price || +t.entry || 0;
+    // 2026-05-19 · Option A — read mode-specific decision when available.
+    // Falls back to legacy single t.decision if backend hasn't been re-run.
+    const _mode = (_qdStrategyCurrent() || 'POSITION').toLowerCase();
+    const _byMode = (t.decisions_by_mode && t.decisions_by_mode[_mode]) || null;
+    const stop  = _byMode ? +_byMode.stop : (+(t.canonical_trade_plan && t.canonical_trade_plan.stop) || +t.stop || 0);
+    const t1    = _byMode ? +_byMode.t1   : (+(t.canonical_trade_plan && t.canonical_trade_plan.target1) || +t.target1 || +t.t1 || 0);
+    const t2    = _byMode ? +_byMode.t2   : (+(t.canonical_trade_plan && t.canonical_trade_plan.target2) || +t.target2 || +t.t2 || 0);
+    const setup = (t.setup_family || t.setup || '').toString();
+    const verdict = ((_byMode && _byMode.verdict) || t.decision?.verdict || t.verdict || '').toString().toUpperCase();
+    // 2026-05-19 (Phase 3) — show mode-specific composite when available;
+    // fall back to single legacy composite. Both are integer-rounded for
+    // the chip display.
+    const legacyScore = Math.round(+t.score || 0);
+    const modeScore   = (_byMode && _byMode.composite_score != null) ? Math.round(+_byMode.composite_score) : legacyScore;
+    const score = modeScore;
+    const phase3Active = !!(_byMode && _byMode.phase3_active);
+    const rr    = _byMode ? +_byMode.rr_ratio : (+t.rr_ratio || 0);
+    const conv  = (t.conviction_tier || '').toString().toUpperCase();
+    const rulebook = _byMode ? (_byMode.rulebook || '') : '';
+    const stopBasis = _byMode ? (_byMode.stop_basis || '') : '';
+    const modeAllocPct = _byMode ? +_byMode.final_alloc_pct || 0 : 0;
+    const modeSizeMult = _byMode ? +_byMode.size_mult || 1.0 : 1.0;
+    const divergeNote = _byMode ? (_byMode.diverge_note || '') : '';
+
+    // System informational tone (color hint only — not a gate)
+    const sysOk = verdict.includes('BUY') && score >= 65 && rr >= 3;
+    const sysWarn = !sysOk && (verdict.includes('WATCH') || verdict === 'BUY');
+    const sysTone = sysOk ? 'gn' : sysWarn ? 'am' : verdict.includes('AVOID') ? 'rd' : 'ink-3';
+    const sysLabel = verdict || '—';
+    // Phase 3 — when mode composite diverges from legacy by ≥5pts, show
+    // both so user knows the reweighting moved the score.
+    const scoreDelta = Math.abs(modeScore - legacyScore);
+    const scoreText  = (phase3Active && scoreDelta >= 5)
+      ? `score ${modeScore} <small style="opacity:.6">(legacy ${legacyScore})</small>`
+      : (score ? 'score ' + score : '');
+    const sysSub = scoreText
+      ? scoreText + (rr ? ' · R:R ' + rr.toFixed(1) : '')
+      : 'no system read';
+
+    // Encode ctx as JSON string for the onclick — escape single-quotes
+    const ctxJson = JSON.stringify({ price: px, stop, t1, t2, setup }).replace(/'/g, "\\'");
+
+    return `
+      <style id="qd-quick-action-css">
+        .qd-qa{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;padding:10px 16px;background:linear-gradient(180deg,var(--bg-1) 0%,var(--bg) 100%);border-bottom:1px solid var(--line);font-family:var(--mono);flex-wrap:wrap}
+        .qd-qa-tk{font:800 18px var(--mono);color:var(--ink);letter-spacing:.06em;min-width:60px}
+        .qd-qa-px{font:700 13px var(--mono);color:var(--ink-1);min-width:80px}
+        .qd-qa-sys{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:2px;font:700 10px var(--mono);letter-spacing:.10em;text-transform:uppercase;border:1px solid;background:var(--bg-3)}
+        .qd-qa-sys.gn{color:var(--gn);border-color:var(--gn-dim);background:var(--gn-bg)}
+        .qd-qa-sys.am{color:var(--amb);border-color:var(--amb-dim);background:var(--amb-bg)}
+        .qd-qa-sys.rd{color:var(--rd);border-color:var(--rd-dim);background:var(--rd-bg)}
+        .qd-qa-sys.ink-3{color:var(--ink-3);border-color:var(--line-2)}
+        .qd-qa-sys small{font-weight:500;color:var(--ink-3);letter-spacing:.02em;text-transform:none;margin-left:4px}
+        .qd-qa-spacer{flex:1}
+        .qd-qa-info{font:600 10.5px var(--mono);color:var(--ink-3);letter-spacing:.06em;margin-right:8px}
+        .qd-qa-info b{color:var(--ink-2);font-weight:700}
+        .qd-qa-btn{padding:8px 18px;font:800 12px var(--mono);letter-spacing:.10em;border:1px solid;border-radius:2px;cursor:pointer;transition:transform 80ms,filter 80ms;background:var(--bg-2)}
+        .qd-qa-btn:hover{transform:translateY(-1px);filter:brightness(1.1)}
+        .qd-qa-btn:active{transform:translateY(0);filter:brightness(.95)}
+        .qd-qa-btn.buy{background:var(--gn);color:var(--bg-1);border-color:var(--gn)}
+        .qd-qa-btn.short{background:var(--bg-2);color:var(--rd);border-color:var(--rd-dim)}
+        .qd-qa-btn.short:hover{background:var(--rd-bg)}
+        .qd-qa-btn.watch{background:var(--bg-2);color:var(--ink-1);border-color:var(--line-2)}
+        .qd-qa-btn.watch:hover{background:var(--bg-3);color:var(--ink)}
+      </style>
+      <div class="qd-qa">
+        <div class="qd-qa-tk">${tk}</div>
+        <div class="qd-qa-px">$${px.toFixed(2)}</div>
+        <span class="qd-qa-sys ${sysTone}" title="${rulebook ? rulebook + ' · stop ' + stopBasis + ' · ' : ''}System read · informational only · does NOT gate the action buttons">
+          ${sysLabel}${conv ? ' · ' + conv : ''}<small>${sysSub}${rulebook ? ' · ' + rulebook : ''}</small>
+        </span>
+        <div class="qd-qa-spacer"></div>
+        ${modeAllocPct > 0 ? `<span class="qd-qa-info" title="Suggested allocation after applying ${rulebook} size mult ${modeSizeMult.toFixed(2)}× to the base half-Kelly haircut chain. You set the actual size in the modal.">size <b>${modeAllocPct.toFixed(1)}%</b> NAV <small style="opacity:.7">(${modeSizeMult.toFixed(2)}×)</small></span>` : ''}
+        ${divergeNote ? `<span class="qd-qa-info" style="color:var(--amb)" title="Verdict differs from legacy single-decision">⚠ ${divergeNote}</span>` : ''}
+        <span class="qd-qa-info">${rulebook ? rulebook + ' · ' : ''}system informs · <b>you decide</b></span>
+        <button class="qd-qa-btn buy"
+                title="Open BUY ticket · pre-populated · you control size/stop/targets"
+                onclick='window._openQuickAction&&window._openQuickAction("BUY","${tk}",${ctxJson})'>
+          ▲ BUY
+        </button>
+        <button class="qd-qa-btn short"
+                title="Open SHORT ticket · pre-populated"
+                onclick='window._openQuickAction&&window._openQuickAction("SHORT","${tk}",${ctxJson})'>
+          ▼ SHORT
+        </button>
+        <button class="qd-qa-btn watch"
+                title="Add to watchlist · POST /api/custom/add → data/custom_tracked.json"
+                onclick='window._openQuickAction&&window._openQuickAction("WATCH","${tk}")'>
+          + WATCH
+        </button>
+      </div>
+    `;
+  }
+
   function renderBanner(t) {
     const _fnum = (n, d=2) => (n == null || !isFinite(n)) ? '—' : (+n).toFixed(d);
     const _fpct = (n, d=1) => (n == null || !isFinite(n)) ? '—' : (n >= 0 ? '+' : '') + (+n).toFixed(d) + '%';
@@ -31258,12 +31447,15 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
     const chg = _num('perf_1d', 'pct_chg') || 0;
     const wkHi = _num('week52_high', 'high_52w', 'fund_details.week52_high');
     const wkLo = _num('week52_low', 'low_52w', 'fund_details.week52_low');
-    const stop = _num('canonical_trade_plan.stop', 'stop', 'trade_plan.stop') || 0;
-    const t1 = _num('canonical_trade_plan.target1', 'target1', 'trade_plan.target1', 't1') || 0;
-    const t2 = _num('canonical_trade_plan.target2', 'target2', 'trade_plan.target2', 't2') || 0;
+    // 2026-05-19 · Option A — mode-aware stop/T1/T2/R:R for Overview strip
+    const _ovMode = (typeof _qdStrategyCurrent === 'function' ? _qdStrategyCurrent() : 'POSITION').toLowerCase();
+    const _ovMD = (t.decisions_by_mode && t.decisions_by_mode[_ovMode]) || null;
+    const stop = _ovMD ? +_ovMD.stop || 0 : (_num('canonical_trade_plan.stop', 'stop', 'trade_plan.stop') || 0);
+    const t1 = _ovMD ? +_ovMD.t1 || 0 : (_num('canonical_trade_plan.target1', 'target1', 'trade_plan.target1', 't1') || 0);
+    const t2 = _ovMD ? +_ovMD.t2 || 0 : (_num('canonical_trade_plan.target2', 'target2', 'trade_plan.target2', 't2') || 0);
     const eLo = _num('canonical_trade_plan.entry.low', 'entry_low', 'entry_lo', 'trade_plan.entry_low') || 0;
     const eHi = _num('canonical_trade_plan.entry.high', 'entry_high', 'entry_hi', 'trade_plan.entry_high') || 0;
-    const rr = _num('rr_ratio', 'rr') || 0;
+    const rr = _ovMD ? +_ovMD.rr_ratio || 0 : (_num('rr_ratio', 'rr') || 0);
     const realRR = (px && stop && t1 && px > stop && t1 > px) ? (t1 - px) / (px - stop) : null;
     const pbLo = _num('trade_plan.primary_zone_low', 'trade_plan.shallow_zone_low') || 0;
     const pbHi = _num('trade_plan.primary_zone_high', 'trade_plan.shallow_zone_high') || 0;
@@ -33292,7 +33484,15 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
     const industry = t.industry || '';
     const px = _num('price') || 0;
     const chg = _num('pct_chg') || 0;
-    const verdictRaw = (t.decision && t.decision.verdict || t.verdict || '').toUpperCase();
+    // 2026-05-19 · Option A — Plan tab honors the active SWING/POS/INV mode.
+    // Verdict, stop, T1, T2, R:R come from t.decisions_by_mode[mode] when
+    // available; falls back to legacy single-decision otherwise.
+    const _planMode = (typeof _qdStrategyCurrent === 'function' ? _qdStrategyCurrent() : 'POSITION').toLowerCase();
+    const _modeDecision = (t.decisions_by_mode && t.decisions_by_mode[_planMode]) || null;
+    const verdictRaw = (
+      (_modeDecision && _modeDecision.verdict) ||
+      (t.decision && t.decision.verdict) || t.verdict || ''
+    ).toUpperCase();
     const conv = (t.conviction_tier || (t.conviction && t.conviction.label) || '').toString().toUpperCase();
     const eqRaw = (t.entry_quality || '').toUpperCase();
     const decState = (t.decision_state || '').toUpperCase();
@@ -33303,9 +33503,10 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
     const rejectReason = (t.reject_reason || '').toString();
     const sleeve = (t.sleeve || '').toString() || (/breakout|momentum|continuation|squeeze/i.test(setup) ? 'MOMENTUM' : /pullback|reversion/i.test(setup) ? 'MEAN REVERSION' : /pead|earnings/i.test(setup) ? 'PEAD' : /insider/i.test(setup) ? 'INSIDER CLUSTER' : /defensive/i.test(setup) ? 'DEFENSIVE ROTATION' : 'CORE');
 
-    const stop = _num('canonical_trade_plan.stop', 'stop') || 0;
-    const t1Lv = _num('canonical_trade_plan.target1', 'target1', 't1') || 0;
-    const t2Lv = _num('canonical_trade_plan.target2', 'target2', 't2') || 0;
+    // 2026-05-19 · Option A — use mode-specific stop/T1/T2/R:R when present
+    const stop = _modeDecision ? +_modeDecision.stop || 0 : (_num('canonical_trade_plan.stop', 'stop') || 0);
+    const t1Lv = _modeDecision ? +_modeDecision.t1   || 0 : (_num('canonical_trade_plan.target1', 'target1', 't1') || 0);
+    const t2Lv = _modeDecision ? +_modeDecision.t2   || 0 : (_num('canonical_trade_plan.target2', 'target2', 't2') || 0);
     const eLo = _num('canonical_trade_plan.entry.low', 'entry_lo') || 0;
     const eHi = _num('canonical_trade_plan.entry.high', 'entry_hi') || 0;
     const pZoneLo = _num('primary_zone_low') || 0;
@@ -33313,7 +33514,7 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
     const wk52H = _num('week52_high', 'high_52w') || 0;
     const atrPct = _num('technicals.indicators.atr_pct', 'atr_pct') || 2.0;
     const atr = _num('atr') || (atrPct ? atrPct / 100 * px : null);
-    const rr = _num('rr_ratio', 'rr') || 0;
+    const rr = _modeDecision ? +_modeDecision.rr_ratio || 0 : (_num('rr_ratio', 'rr') || 0);
 
     const ks = t.kelly_size || {};
     const finalAllocPct = _num('kelly_size.final_alloc_pct') || (ks.size_pct_equity != null ? +ks.size_pct_equity * 100 : null) || 6.7;
@@ -46977,17 +47178,18 @@ const MarketsV2 = (function () {
       const body = document.getElementById('ppStatTestsBody');
       if (!body) return;
       if (btn) { btn.disabled = true; btn.textContent = '⌛ RUNNING…'; }
-      body.innerHTML = '<div class="pp-empty" style="padding:32px">Running 6 tests in parallel (4 stat + forensics + time-decay)…</div>';
+      body.innerHTML = '<div class="pp-empty" style="padding:32px">Running 7 tests in parallel (4 stat + forensics + time-decay + ML A/B)…</div>';
       try {
-        const [maeR, regR, mcR, permR, forR, tdR] = await Promise.all([
+        const [maeR, regR, mcR, permR, forR, tdR, mlR] = await Promise.all([
           fetch('/api/test/mae-mfe?days=90', { credentials: 'same-origin' }).then(r => r.json()),
           fetch('/api/test/regime-conditional?days=180', { credentials: 'same-origin' }).then(r => r.json()),
           fetch('/api/test/monte-carlo?days=90&iterations=3000', { credentials: 'same-origin' }).then(r => r.json()),
           fetch('/api/test/permutation?days=90&iterations=1000', { credentials: 'same-origin' }).then(r => r.json()),
           fetch('/api/diagnostics/forensics?days=90', { credentials: 'same-origin' }).then(r => r.json()),
           fetch('/api/test/time-decay?days=90&slice_days=7', { credentials: 'same-origin' }).then(r => r.json()),
+          fetch('/api/diagnostics/ml-ab?min_n=30', { credentials: 'same-origin' }).then(r => r.json()),
         ]);
-        window._statTestsState = { mae: maeR, regime: regR, mc: mcR, perm: permR, forensics: forR, timeDecay: tdR };
+        window._statTestsState = { mae: maeR, regime: regR, mc: mcR, perm: permR, forensics: forR, timeDecay: tdR, mlAB: mlR };
         window._renderStatTestsUI();
         if (btn) { btn.disabled = false; btn.textContent = '↻ RE-RUN ALL TESTS'; }
       } catch (e) {
@@ -47002,6 +47204,7 @@ const MarketsV2 = (function () {
       const s = window._statTestsState;
       const cards = [
         _renderForensicsCard(s.forensics),
+        _renderMLABCard(s.mlAB),
         _renderTimeDecayCard(s.timeDecay),
         _renderMAECard(s.mae),
         _renderRegimeCard(s.regime),
@@ -47124,6 +47327,60 @@ const MarketsV2 = (function () {
           <div style="padding:10px 12px;background:var(--bg-3);border-left:2px solid var(--amb);font:500 11px var(--mono);color:var(--ink-1);line-height:1.5">
             <b style="color:var(--amb)">TRAIL-PAST-T1 sim:</b> ${tr.n_target_hit} target-hit left ${tr.extra_pp_total}pp on table · ${tr.extra_pp_per_buy}pp/BUY avg
           </div>
+        </div>
+      </div>`;
+    }
+
+    function _renderMLABCard(d) {
+      if (!d || (d.error && !d.verdict)) {
+        return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--rd)">
+          <div class="pp-card-h"><span>⑥ ML A/B TEST — does ML add Sharpe lift over rules?</span><span class="sub">value-of-complexity</span></div>
+          <div style="color:var(--rd);font:600 11.5px var(--mono);padding:8px 0">${d && d.error || 'no data'}</div>
+        </div>`;
+      }
+      const verdict = d.verdict || 'UNKNOWN';
+      const reason = d.verdict_reason || d.message || '';
+      const verdictCls = verdict === 'ML_ADDS_VALUE' ? 'gn'
+                      : verdict === 'ML_HURTS' ? 'rd'
+                      : verdict === 'ML_NO_LIFT' ? 'am'
+                      : 'cy';
+      const verdictLabel = verdict === 'ML_ADDS_VALUE' ? '▲ ML ADDS VALUE'
+                        : verdict === 'ML_HURTS' ? '▼ ML HURTS'
+                        : verdict === 'ML_NO_LIFT' ? '◆ ML NO LIFT'
+                        : '⌛ INSUFFICIENT DATA · accumulating';
+      const buckets = d.buckets || {};
+      const bucketRows = Object.entries(buckets).map(([name, st]) => {
+        const cls = st.mean_pnl >= 0 ? 'gn' : 'rd';
+        const sCls = st.sharpe_per_trade >= 0.1 ? 'gn' : st.sharpe_per_trade >= -0.1 ? 'am' : 'rd';
+        const pretty = name.replace(/_/g,' ').replace(/^[A-Z]_/,'<b style="color:var(--copper)">$&</b> ');
+        return `<tr><td>${pretty}</td><td>${st.n}</td><td>${st.wr}%</td><td class="${cls}" style="font-weight:800">${st.mean_pnl >= 0 ? '+' : ''}${st.mean_pnl}%</td><td class="${sCls}" style="font-weight:800">${st.sharpe_per_trade >= 0 ? '+' : ''}${st.sharpe_per_trade}</td><td class="${st.pf >= 1.0 ? 'gn' : 'rd'}">${st.pf}</td></tr>`;
+      }).join('');
+      const liftBvA = d.lift_BvA;
+      const liftDvA = d.lift_DvA;
+      const _liftLine = (label, lift) => {
+        if (!lift) return '';
+        const sigCls = lift.ci_excludes_zero ? 'gn' : 'am';
+        const sig = lift.ci_excludes_zero ? '✓ SIGNIFICANT' : '◇ within noise band';
+        return `<div style="padding:8px 12px;background:var(--bg-3);border-left:2px solid var(--${sigCls});font:500 11px var(--mono);color:var(--ink-1);line-height:1.5;margin-bottom:6px">
+          <b style="color:var(--${sigCls})">${label}:</b> point lift <b>${lift.point_lift_pp >= 0 ? '+' : ''}${lift.point_lift_pp}pp</b> · 95% CI [${lift.ci_low_95}, ${lift.ci_high_95}] · ${sig}
+        </div>`;
+      };
+      return `<div class="pp-card" style="margin-bottom:12px;border-left:3px solid var(--${verdictCls})">
+        <div class="pp-card-h"><span>⑥ ML A/B TEST — does ML add Sharpe lift over rules?</span><span class="sub">${d.n_closed_buys || 0} closed BUYs · ${d.n_pairs_total || 0} total pairs captured</span></div>
+        <div style="padding:12px 14px;background:var(--bg-3);border-left:2px solid var(--${verdictCls});font:800 13px var(--mono);color:var(--${verdictCls});letter-spacing:.06em;margin-bottom:10px">
+          ${verdictLabel}
+        </div>
+        <div style="padding:10px 12px;background:var(--bg-2);font:500 11.5px var(--mono);color:var(--ink-1);line-height:1.55;margin-bottom:12px">${reason}</div>
+        ${bucketRows ? `<table class="pp-mat-table" style="font-size:10.5px;margin-bottom:10px">
+          <thead><tr><th>Bucket</th><th>n</th><th>WR</th><th>Mean PnL</th><th>Sharpe/trade</th><th>PF</th></tr></thead>
+          <tbody>${bucketRows}</tbody>
+        </table>` : ''}
+        ${_liftLine('B (ML-agree p_up≥0.40) vs A (baseline)', liftBvA)}
+        ${_liftLine('D (ML-agree hit_net≥0.30) vs A (baseline)', liftDvA)}
+        <div style="margin-top:10px;font:500 10.5px var(--mono);color:var(--ink-3);letter-spacing:.02em;line-height:1.5">
+          Pairs captured by scripts/ml_ab_capture.py after every scan (called from run_daily_scan.sh).
+          When n≥30 closed BUYs accumulate, the bootstrap test gives a real Sharpe-lift verdict.
+          Today: ${d.n_pairs_total || 0} pairs · ${d.n_closed_buys || 0} closed BUYs · ${(d.n_buys_open_or_closed || 0)} BUYs total.
         </div>
       </div>`;
     }
@@ -49848,6 +50105,7 @@ function setupV3Workspaces(arr, data) {
     if (ws.custom === 'quantPortfolio') {
       wsPanel.classList.remove('ep-active');
       EliteAB.deactivate();
+      window._lastData = data;
       QuantPortfolio.render(wsPanel, data);
       _injectHelpBtn(wsPanel, 'portfolio');
       return;
@@ -50089,6 +50347,123 @@ function setupV3Workspaces(arr, data) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// 2026-05-19 · User-agency action router · BUY / SHORT / WATCH / SELL
+// ──────────────────────────────────────────────────────────────────────
+// Single entry point invoked by always-visible action buttons throughout
+// the dashboard (Today's #1 Trade hero, detail page header, conviction
+// grid rows, scanner table rows). The system shows its read; the USER
+// decides. These buttons are NEVER gated by score / R:R / plan
+// completeness — informational only.
+//
+//   _openQuickAction('BUY',   ticker, {price, stop, t1, t2, setup})
+//   _openQuickAction('SHORT', ticker, {price, stop, t1, t2, setup})
+//   _openQuickAction('SELL',  ticker)                  // close held position
+//   _openQuickAction('WATCH', ticker)                  // add to custom-tracked
+//
+// Per memory project_unified_system_1k_to_1m.md: do not gate features by
+// system-derived signals. Build every action; let users self-select.
+// ══════════════════════════════════════════════════════════════════════
+window._openQuickAction = function(action, ticker, ctx) {
+  ticker = (ticker || '').toUpperCase().trim();
+  if (!ticker) return;
+  ctx = ctx || {};
+
+  if (action === 'BUY') {
+    // Open the long-direction position modal pre-populated with whatever
+    // numbers ARE available. PLAN INCOMPLETE is allowed — user supplies
+    // missing fields manually.
+    return window._openPositionModal(ticker, ctx.price, ctx.stop, ctx.t1, ctx.t2, ctx.setup);
+  }
+
+  if (action === 'SHORT') {
+    // Same modal, direction pre-set to short. The modal exposes the
+    // direction selector so user can flip back to long if needed.
+    window._openPositionModal(ticker, ctx.price, ctx.stop, ctx.t1, ctx.t2, ctx.setup);
+    // Defer direction flip until after modal mounts (next tick).
+    setTimeout(() => {
+      const dirSel = document.getElementById('kposDir');
+      if (dirSel) dirSel.value = 'short';
+    }, 30);
+    return;
+  }
+
+  if (action === 'WATCH') {
+    // POST /api/custom/add — adds ticker to data/custom_tracked.json.
+    // 2026-05-19 (round 2): bigger / louder toast + auto-refresh watchlist
+    // UI if it's currently open. The previous tiny bottom-center toast
+    // was getting missed; user reported "watchlist not adding" even
+    // though the API succeeded. Now the feedback is unambiguous.
+    const _toast = (msg, cls) => {
+      const tone = cls === 'err' ? 'rd' : cls === 'info' ? 'amb' : 'gn';
+      const t = document.createElement('div');
+      t.style.cssText = (
+        'position:fixed;top:80px;left:50%;transform:translateX(-50%);' +
+        'background:var(--bg-1);border:2px solid var(--' + tone + ');' +
+        'color:var(--' + tone + ');padding:14px 24px;border-radius:4px;' +
+        'font:800 14px var(--mono);letter-spacing:.06em;' +
+        'z-index:10000;box-shadow:0 12px 40px rgba(0,0,0,.75);' +
+        'min-width:280px;text-align:center;' +
+        'animation:qaToastIn 180ms ease-out'
+      );
+      t.textContent = msg;
+      // Inject keyframes once
+      if (!document.getElementById('qa-toast-anim')) {
+        const sty = document.createElement('style');
+        sty.id = 'qa-toast-anim';
+        sty.textContent = '@keyframes qaToastIn { from{opacity:0;transform:translate(-50%,-12px) scale(0.92)} to{opacity:1;transform:translate(-50%,0) scale(1)} }';
+        document.head.appendChild(sty);
+      }
+      document.body.appendChild(t);
+      setTimeout(() => { t.style.transition = 'opacity 220ms'; t.style.opacity = '0'; }, 2400);
+      setTimeout(() => t.remove(), 2700);
+    };
+    console.log('[QuickAction] WATCH', ticker, '→ POST /api/custom/add');
+    fetch('/api/custom/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ ticker, note: 'added via quick-action ' + new Date().toISOString() }),
+    })
+    .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, j })))
+    .then(({ ok, status, j }) => {
+      console.log('[QuickAction] WATCH response', { ok, status, j });
+      const detail = (j.detail || j.message || j.error || j.note || '').toString();
+      // 2026-05-19 · Server now returns 200 with `already_tracked: true`
+      // for the duplicate case (idempotent). Detect that AND the legacy
+      // 400-with-"already tracked" message for older server builds.
+      const alreadyTracked = !!j.already_tracked ||
+        (!ok && /already (tracked|on watchlist|exists)/i.test(detail));
+      if (alreadyTracked) {
+        _toast('● ' + ticker + ' IS ALREADY ON WATCHLIST', 'info');
+      } else if (ok) {
+        _toast('✓ ' + ticker + ' ADDED TO WATCHLIST', 'ok');
+      } else {
+        _toast('✗ ' + (detail || 'HTTP ' + status).toUpperCase(), 'err');
+        return;
+      }
+      // Auto-refresh the Watchlist workspace surface if it's currently
+      // visible so the new row appears without a manual reload.
+      try {
+        const wsPanel = document.getElementById('pan-workspace');
+        const onWatchlist = wsPanel && wsPanel.classList.contains('on') &&
+          document.querySelector('.sb-link.on[data-tab="watchlist"]');
+        if (onWatchlist && typeof window.QuantWatchlist !== 'undefined' && window.QuantWatchlist.render) {
+          window.QuantWatchlist.render(wsPanel, window._lastData || {});
+        } else if (onWatchlist) {
+          const wl = document.querySelector('.sb-link[data-tab="watchlist"]');
+          if (wl) wl.click();
+        }
+      } catch (e) { /* best effort */ }
+    })
+    .catch(e => {
+      console.error('[QuickAction] WATCH network error', e);
+      _toast('✗ NETWORK ERROR: ' + e.message, 'err');
+    });
+    return;
+  }
+};
+
+// ══════════════════════════════════════════════════════════════════════
 // Add Position modal — triggered by BUY buttons throughout the dashboard.
 // POSTs to /api/portfolio/add then navigates to Portfolio tab.
 // ══════════════════════════════════════════════════════════════════════
@@ -50142,8 +50517,8 @@ window._openPositionModal = function(ticker, px, stop, t1, t2, setup) {
           <input id="kposStop" type="number" step="0.01" value="${stopV > 0 ? stopV.toFixed(2) : ''}">
         </div>
         <div class="kpos-field">
-          <label>Target 1</label>
-          <input id="kposT1" type="number" step="0.01" value="${t1V > 0 ? t1V.toFixed(2) : ''}">
+          <label>Target 1 <small style="color:var(--ink-3);font-weight:400">(optional)</small></label>
+          <input id="kposT1" type="number" step="0.01" value="${t1V > 0 ? t1V.toFixed(2) : ''}" placeholder="leave blank = no auto-trim">
         </div>
       </div>
       <div class="kpos-row">
@@ -50206,13 +50581,14 @@ window._openPositionModal = function(ticker, px, stop, t1, t2, setup) {
       statusEl.className = 'kpos-status err'; return;
     }
     if (isNaN(stopVal) || stopVal <= 0) {
-      statusEl.textContent = 'Stop price must be > 0.';
+      statusEl.textContent = 'Stop price must be > 0. (Required — no trade without defined risk.)';
       statusEl.className = 'kpos-status err'; return;
     }
-    if (isNaN(t1Val) || t1Val <= 0) {
-      statusEl.textContent = 'Target 1 must be > 0.';
-      statusEl.className = 'kpos-status err'; return;
-    }
+    // 2026-05-19 · T1 is OPTIONAL per user-agency principle. Users with
+    // their own intel may enter at market with stop only and exit
+    // manually at a discretionary target. Backend tracker's truthy
+    // check `target1 and current >= target1` naturally skips the
+    // auto-trim trigger when target1 = 0.
 
     submitBtn.textContent = 'Adding…';
     submitBtn.disabled = true;
@@ -50222,7 +50598,7 @@ window._openPositionModal = function(ticker, px, stop, t1, t2, setup) {
     try {
       const body = {
         ticker: tk, entry: entryVal, shares: sharesVal,
-        stop: stopVal, target1: t1Val,
+        stop: stopVal, target1: (isNaN(t1Val) || t1Val <= 0) ? 0 : t1Val,
         direction: dirVal, allocation_pct: allocVal,
         setup: setupVal, notes: notesVal,
       };
@@ -50244,10 +50620,33 @@ window._openPositionModal = function(ticker, px, stop, t1, t2, setup) {
         if (typeof window._v3SwitchTo === 'function') window._v3SwitchTo('portfolio');
       }, 1200);
     } catch (err) {
-      statusEl.textContent = 'Error: ' + (err.message || 'request failed');
-      statusEl.className = 'kpos-status err';
-      submitBtn.textContent = 'Add to Portfolio';
-      submitBtn.disabled = false;
+      const msg = (err.message || 'request failed').toString();
+      // 2026-05-19 · "already has an open position" is an idempotent
+      // success from the user's POV (the ticker IS in the portfolio).
+      // Show a friendly amber state with a "View Portfolio" CTA instead
+      // of a scary red error.
+      if (/already has an open position/i.test(msg)) {
+        statusEl.innerHTML =
+          `● <b>${tk}</b> is already in your portfolio.` +
+          ` <a href="#" id="kposGotoPortfolio" style="color:var(--copper);text-decoration:underline;margin-left:6px">View Portfolio →</a>`;
+        statusEl.className = 'kpos-status';
+        statusEl.style.cssText = (statusEl.style.cssText || '') +
+          ';color:var(--amb);background:var(--amb-bg);border:1px solid var(--amb-dim);padding:8px 12px;border-radius:3px';
+        submitBtn.textContent = 'Close';
+        submitBtn.disabled = false;
+        submitBtn.onclick = close;
+        const goto = document.getElementById('kposGotoPortfolio');
+        if (goto) goto.addEventListener('click', (e) => {
+          e.preventDefault();
+          close();
+          if (typeof window._v3SwitchTo === 'function') window._v3SwitchTo('portfolio');
+        });
+      } else {
+        statusEl.textContent = 'Error: ' + msg;
+        statusEl.className = 'kpos-status err';
+        submitBtn.textContent = 'Add to Portfolio';
+        submitBtn.disabled = false;
+      }
     }
   });
 

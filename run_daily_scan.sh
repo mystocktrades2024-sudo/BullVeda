@@ -82,6 +82,14 @@ if [ $EXIT_CODE -eq 0 ]; then
         echo "⚠ ml.run_ml_edge exited $ML_EXIT (ML Edge sub-tab will show stale predictions)" >> "$LOG_FILE"
     fi
 
+    # ── ML A/B framework: pair every rules signal with ML prediction + backfill outcomes ──
+    # Captures cache/ml_ab_pairs.jsonl — used by /api/diagnostics/ml-ab to test
+    # whether ML filtering of rules signals adds Sharpe lift. Idempotent per (ticker, date).
+    echo "── ML A/B capture ──" >> "$LOG_FILE"
+    set +e
+    "$PYTHON" scripts/ml_ab_capture.py >> "$LOG_FILE" 2>&1
+    set -e
+
     # ── Rebuild audit ledger (per-signal D1-D5/W1-W5/M1-M6 grid) ─────────
     # Runs EVERY scan so new signals get appended and prior days' D-cells
     # populate as time passes. Builder is idempotent and incremental — it
