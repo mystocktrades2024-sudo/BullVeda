@@ -14615,128 +14615,105 @@ const QuantHome = (function() {
 
   // 2026-05-18 · Pre-Market Catalysts · overnight news affecting positions/watchlist
   function renderPremarket(data) {
-    // 2026-05-20 — Wired to real data.premarket (scripts/premarket_scan.py) +
-    // falls back to data.market_movers + data.market_news + data.earnings_outcomes_30d
-    // when pre-market session is inactive (most of the trading day).
-    const pm = data.premarket || {};
-    const meta = pm._meta || {};
-    const sessionActive = !!meta.session_active;
-    const gappersUp = pm.gappers_up || [];
-    const gappersDn = pm.gappers_dn || [];
-    const catalysts = pm.catalysts || {};
-    const mm = data.market_movers || {};
-    const news = data.market_news || [];
-    const outcomes = (data.earnings_outcomes_30d || []).filter(o => o && typeof o === 'object');
-
-    // Recent earnings (last 2 days) — proxy for "this morning's reactions" when out of session
-    const recentER = (() => {
-      const today = new Date().toISOString().slice(0, 10);
-      const yest = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-      return outcomes
-        .filter(o => {
-          const rd = (o.report_date || '').slice(0, 10);
-          return rd === today || rd === yest;
-        })
-        .sort((a, b) => Math.abs(b.eps_surprise_pct || 0) - Math.abs(a.eps_surprise_pct || 0))
-        .slice(0, 10);
-    })();
-
-    const fmt = (n, d = 2, sign = false) => n == null || isNaN(n) ? '—' : (sign && n >= 0 ? '+' : '') + Number(n).toFixed(d);
-    const fmtVol = (v) => v == null ? '—' : v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(0) + 'K' : String(v);
-
-    // Pre-market session banner
-    const sessCls = sessionActive ? 'mv2-chip-gn' : 'mv2-chip-bare';
-    const sessTxt = sessionActive ? 'IN SESSION' : 'OUT OF SESSION';
-    const lastSess = meta.last_session_at || meta.generated_at;
-
-    return `${_head('🌅', 'Pre-Market', 'real EODHD pre-market scanner (session-aware) · falls back to market movers + post-ER drift', 'Swing Quant',
-      `${_ctl('⭐ Save')}${_ctl('⏰ Gap alerts')}`)}
-
-      <!-- Session banner -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:4px solid ${sessionActive ? 'var(--gn)' : 'var(--ink-3)'}">
-        <div class="mv2-card-head">
-          <span class="mv2-card-title">PRE-MARKET SESSION · <span class="mv2-chip ${sessCls}">${sessTxt}</span></span>
-          <span class="mv2-card-meta">${meta.session_status || ''} · last scan ${lastSess ? lastSess.replace('T', ' ').slice(0, 16) : '—'}</span>
-        </div>
-        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1">
-          ${sessionActive ?
-            '<b>Live pre-market gappers below.</b> Filters: |chg| ≥ 3% AND volume ≥ 1K. Catalysts auto-attributed from overnight news + earnings reactions. Scanner refreshes every 30min during 4am-9:30am ET (1am-6:30am PT).' :
-            '<b>Pre-market closed.</b> Live scanner runs Mon-Fri 4:00-9:30am ET via launchd. Showing post-open market movers + recent earnings reactions + overnight news below as substitute context.'}
-        </div></div>
-      </div>
-
-      ${sessionActive ? _renderPremarketLive(gappersUp, gappersDn, catalysts, fmt, fmtVol) :
-                        _renderPremarketFallback(mm, recentER, news, fmt, fmtVol)}
-
-      ${_actionFooter(['🎯 Auto-stage PEAD', '⏰ Halt alerts', '↓ Export'])}`;
-  }
-
-  function _renderPremarketLive(up, dn, catalysts, fmt, fmtVol) {
-    const catStr = (tk) => {
-      const c = (catalysts || {})[tk] || [];
-      if (!c.length) return '<span style="color:var(--ink-3);font-size:10px">no catalyst</span>';
-      return c.slice(0, 2).map(x => {
-        const cls = x.type === 'EARNINGS' ? 'mv2-chip-gn' : 'mv2-chip-cy';
-        return '<span class="mv2-chip ' + cls + '" title="' + (x.title || '').replace(/"/g, '&quot;') + '">' + x.type + '</span>';
-      }).join(' ');
-    };
-    const row = (g) => '<tr class="mv2-rowlink" onclick="if(window.setDetailTicker) window.setDetailTicker(\'' + g.ticker + '\')">' +
-      '<td class="mv2-mono"><b>' + g.ticker + '</b></td>' +
-      '<td class="r mv2-mono">$' + fmt(g.price, 2) + '</td>' +
-      '<td class="r mv2-mono ' + (g.change_p >= 0 ? 'mv2-up' : 'mv2-dn') + '">' + fmt(g.change_p, 2, true) + '%</td>' +
-      '<td class="r mv2-mono">' + fmtVol(g.volume) + '</td>' +
-      '<td>' + catStr(g.ticker) + '</td>' +
-      '</tr>';
-    return '<div class="mv2-grid-2" style="margin-bottom:14px">' +
-      '<div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">📈 Pre-Market Gainers</span><span class="mv2-card-meta">' + up.length + ' · |chg| ≥ 3%</span></div>' +
-      (up.length ? '<table class="mv2-t"><thead><tr><th>Ticker</th><th class="r">Price</th><th class="r">Δ%</th><th class="r">Volume</th><th>Catalyst</th></tr></thead><tbody>' + up.map(row).join('') + '</tbody></table>' : '<div class="mv2-note" style="padding:14px">No gappers up — quiet pre-market.</div>') +
-      '</div>' +
-      '<div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">📉 Pre-Market Losers</span><span class="mv2-card-meta">' + dn.length + ' · |chg| ≥ 3%</span></div>' +
-      (dn.length ? '<table class="mv2-t"><thead><tr><th>Ticker</th><th class="r">Price</th><th class="r">Δ%</th><th class="r">Volume</th><th>Catalyst</th></tr></thead><tbody>' + dn.map(row).join('') + '</tbody></table>' : '<div class="mv2-note" style="padding:14px">No gappers down — quiet pre-market.</div>') +
-      '</div></div>';
-  }
-
-  function _renderPremarketFallback(mm, recentER, news, fmt, fmtVol) {
-    const gainers = (mm.gainers || []).slice(0, 10);
-    const losers = (mm.losers || []).slice(0, 10);
-    const moverRow = (m) => '<tr class="mv2-rowlink" onclick="if(window.setDetailTicker) window.setDetailTicker(\'' + m.ticker + '\')">' +
-      '<td class="mv2-mono"><b>' + m.ticker + '</b></td>' +
-      '<td style="font-size:10px">' + (m.name || '').slice(0, 24) + '</td>' +
-      '<td class="r mv2-mono">$' + fmt(m.price, 2) + '</td>' +
-      '<td class="r mv2-mono ' + (m.perf_1d >= 0 ? 'mv2-up' : 'mv2-dn') + '">' + fmt(m.perf_1d * 100, 2, true) + '%</td>' +
-      '<td class="r mv2-mono">' + fmtVol(m.volume) + '</td>' +
-      '<td><span class="mv2-chip mv2-chip-bare">' + (m.index || '') + '</span></td>' +
-      '</tr>';
-    const erRow = (o) => {
-      const surp = o.eps_surprise_pct;
-      const surpCls = surp == null ? '' : surp >= 5 ? 'mv2-chip-gn' : surp >= 0 ? 'mv2-chip-am' : 'mv2-chip-rd';
-      return '<tr class="mv2-rowlink" onclick="if(window.setDetailTicker) window.setDetailTicker(\'' + o.ticker + '\')">' +
-        '<td class="mv2-mono"><b>' + o.ticker + '</b></td>' +
-        '<td class="mv2-mono" style="font-size:10px">' + ((o.report_date || '').slice(0, 10)) + '</td>' +
-        '<td><span class="mv2-chip ' + surpCls + '">' + (surp != null ? fmt(surp, 1, true) + '%' : '—') + '</span></td>' +
-        '<td class="r mv2-mono">' + (o.report_time || o.bmo_amc || '—') + '</td>' +
-        '</tr>';
-    };
-    const newsRow = (n) => '<div style="padding:7px 0;border-bottom:1px solid var(--line);font-size:11px">' +
-      '<span class="mv2-mono" style="color:var(--ink-3)">' + ((n.date || '').replace('T', ' ').slice(0, 16)) + '</span> · ' +
-      '<a href="' + (n.url || '#') + '" target="_blank" style="color:var(--ink-1);text-decoration:none">' + ((n.title || '').slice(0, 110)) + '</a>' +
-      '</div>';
-
-    return '<div class="mv2-grid-2" style="margin-bottom:14px">' +
-      '<div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">📈 Day Gainers</span><span class="mv2-card-meta">post-open · ' + gainers.length + ' from EODHD movers</span></div>' +
-      (gainers.length ? '<table class="mv2-t"><thead><tr><th>Ticker</th><th>Name</th><th class="r">Price</th><th class="r">Δ%</th><th class="r">Volume</th><th>Index</th></tr></thead><tbody>' + gainers.map(moverRow).join('') + '</tbody></table>' : '<div class="mv2-note" style="padding:14px">No mover data.</div>') +
-      '</div>' +
-      '<div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">📉 Day Losers</span><span class="mv2-card-meta">post-open · ' + losers.length + ' from EODHD movers</span></div>' +
-      (losers.length ? '<table class="mv2-t"><thead><tr><th>Ticker</th><th>Name</th><th class="r">Price</th><th class="r">Δ%</th><th class="r">Volume</th><th>Index</th></tr></thead><tbody>' + losers.map(moverRow).join('') + '</tbody></table>' : '<div class="mv2-note" style="padding:14px">No mover data.</div>') +
-      '</div></div>' +
-      '<div class="mv2-grid-2" style="margin-bottom:14px">' +
-      '<div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">📊 Recent Earnings Reactions</span><span class="mv2-card-meta">today + yesterday · top ' + recentER.length + '</span></div>' +
-      (recentER.length ? '<table class="mv2-t"><thead><tr><th>Ticker</th><th>Date</th><th>EPS surprise</th><th class="r">Time</th></tr></thead><tbody>' + recentER.map(erRow).join('') + '</tbody></table>' : '<div class="mv2-note" style="padding:14px">No recent earnings reactions.</div>') +
-      '</div>' +
-      '<div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">📰 Overnight News</span><span class="mv2-card-meta">' + news.length + ' headlines</span></div>' +
-      '<div style="padding:0 12px;max-height:280px;overflow-y:auto">' +
-      (news.length ? news.slice(0, 12).map(newsRow).join('') : '<div class="mv2-note" style="padding:14px">No overnight news.</div>') +
-      '</div></div></div>';
+    const wrap = document.getElementById('qc-premarket');
+    if (!wrap) return;
+    if (!document.getElementById('qc-pm-css')) {
+      const st = document.createElement('style');
+      st.id = 'qc-pm-css';
+      st.textContent = `
+        .qcpm{background:var(--bg-2);border:1px solid var(--line);border-left:3px solid var(--copper);border-radius:3px;margin-bottom:14px;overflow:hidden}
+        .qcpm-h{padding:11px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;font:800 11px var(--mono);color:var(--copper);letter-spacing:.14em;text-transform:uppercase;flex-wrap:wrap;gap:10px}
+        .qcpm-h .sub{font:500 10px var(--mono);color:var(--ink-3);letter-spacing:.04em;text-transform:none;font-weight:500}
+        .qcpm-h .toggle{display:flex;gap:0;border:1px solid var(--line-2);border-radius:2px;overflow:hidden;font:700 9.5px var(--mono);letter-spacing:.06em}
+        .qcpm-h .toggle button{background:var(--bg-3);color:var(--ink-2);padding:4px 10px;border:0;cursor:pointer;text-transform:uppercase}
+        .qcpm-h .toggle button.active{background:var(--copper);color:var(--bg-1)}
+        .qcpm-body{max-height:340px;overflow-y:auto}
+        .qcpm-row{display:grid;grid-template-columns:24px 60px 78px 1fr 60px 50px;gap:10px;padding:9px 16px;border-bottom:1px solid var(--line);align-items:center;font:500 11px var(--mono);cursor:pointer;transition:background 80ms}
+        .qcpm-row:hover{background:var(--bg-3)}
+        .qcpm-row:last-child{border-bottom:0}
+        .qcpm-row.mine{background:linear-gradient(90deg,rgba(217,119,87,0.10),transparent);border-left:2px solid var(--copper)}
+        .qcpm-row .star{color:var(--copper);font-size:14px;font-weight:800;text-align:center}
+        .qcpm-row .star.dim{color:var(--ink-3);font-weight:500;font-size:12px}
+        .qcpm-row .tkr{font:800 12px var(--sans);color:var(--ink);letter-spacing:.02em}
+        .qcpm-row .cat{font:700 8.5px var(--mono);padding:2px 6px;border-radius:2px;text-align:center;letter-spacing:.06em;color:var(--bg-1);font-weight:800}
+        .qcpm-row .head{font:500 11px var(--ink-1);color:var(--ink-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4}
+        .qcpm-row .mag{font:700 8.5px var(--mono);padding:2px 5px;border-radius:2px;text-align:center;letter-spacing:.06em;text-transform:uppercase}
+        .qcpm-row .mag.high{background:var(--rd-bg);color:var(--rd);border:1px solid var(--rd-dim)}
+        .qcpm-row .mag.medium{background:var(--amb-bg);color:var(--amb);border:1px solid var(--amb-dim)}
+        .qcpm-row .mag.low{background:var(--bg-3);color:var(--ink-3);border:1px solid var(--line)}
+        .qcpm-row .sent{font:700 8px var(--mono);text-align:center;letter-spacing:.06em}
+        .qcpm-row .sent.bull{color:var(--gn)}
+        .qcpm-row .sent.bear{color:var(--rd)}
+        .qcpm-row .sent.neu{color:var(--ink-3)}
+        .qcpm-empty{padding:24px 16px;text-align:center;font:500 12px var(--mono);color:var(--ink-3);line-height:1.7}
+      `;
+      document.head.appendChild(st);
+    }
+    if (!window._qcpmFilter) window._qcpmFilter = 'mine';
+    if (!window._qcpmToggle) {
+      window._qcpmToggle = function(mode) {
+        window._qcpmFilter = mode;
+        renderPremarket(window._kairosData || {});
+      };
+    }
+    wrap.innerHTML = `<div class="qcpm">
+      <div class="qcpm-h"><span>📰 OVERNIGHT CATALYSTS</span><span class="sub">loading…</span></div>
+      <div class="qcpm-empty">Fetching overnight news…</div>
+    </div>`;
+    const mineOnly = window._qcpmFilter === 'mine';
+    fetch('/api/premarket-catalysts?lookback_hours=16' + (mineOnly ? '&mine_only=true' : ''), { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : { catalysts: [], summary: {} })
+      .then(d => {
+        const cats = d.catalysts || [];
+        const sum = d.summary || {};
+        const CAT_COLORS = {
+          'FDA': '#fbbf24', 'Earnings': 'var(--amb)', 'M&A': 'var(--copper)',
+          'Contract': 'var(--gn)', 'Executive': 'var(--cy)', 'SEC Filing': '#94a3b8',
+          'Guidance': 'var(--amb)', 'AI': '#a78bfa', 'Activist': 'var(--rd)',
+          'Buyback': 'var(--gn)', 'Dividend': 'var(--gn)', 'Lawsuit': 'var(--rd)',
+          'Analyst': 'var(--cy)', 'Other': 'var(--ink-3)',
+        };
+        const _sentCls = (s) => (s||'').includes('pos') || (s||'').includes('bull') ? 'bull' : (s||'').includes('neg') || (s||'').includes('bear') ? 'bear' : 'neu';
+        const toggleHTML = `<div class="toggle">
+          <button class="${mineOnly?'active':''}" onclick="window._qcpmToggle('mine')">MINE (${sum.mine_count||0})</button>
+          <button class="${!mineOnly?'active':''}" onclick="window._qcpmToggle('all')">ALL (${sum.total||0})</button>
+        </div>`;
+        if (cats.length === 0) {
+          const msg = mineOnly
+            ? `No overnight catalysts on your portfolio or watchlist.<br><span style="font-size:11px;color:var(--ink-3)">Click <b>ALL</b> to see market-wide news.</span>`
+            : `No overnight news in the last 16 hours.<br><span style="font-size:11px;color:var(--ink-3)">EODHD feed quiet.</span>`;
+          wrap.innerHTML = `<div class="qcpm">
+            <div class="qcpm-h"><span>📰 OVERNIGHT CATALYSTS</span>${toggleHTML}</div>
+            <div class="qcpm-empty">${msg}</div>
+          </div>`;
+          return;
+        }
+        const rows = cats.slice(0, 12).map(c => {
+          const catColor = CAT_COLORS[c.category] || 'var(--ink-3)';
+          return `<div class="qcpm-row ${c.mine?'mine':''}" onclick="window.setDetailTicker&&window.setDetailTicker('${c.ticker}')">
+            <span class="star ${c.mine?'':'dim'}">${c.mine?'★':'☆'}</span>
+            <span class="tkr">${c.ticker}</span>
+            <span class="cat" style="background:${catColor}">${c.category.toUpperCase().slice(0,9)}</span>
+            <span class="head" title="${(c.headline||'').replace(/"/g,'&quot;')}">${(c.headline||'').slice(0,90)}</span>
+            <span class="mag ${c.magnitude}">${c.magnitude.toUpperCase()}</span>
+            <span class="sent ${_sentCls(c.sentiment)}">${(c.sentiment||'NEUT').slice(0,4).toUpperCase()}</span>
+          </div>`;
+        }).join('');
+        const subText = mineOnly
+          ? `${sum.mine_count} affecting your positions/watchlist · ${sum.total} total available`
+          : `${sum.total} catalysts · ${sum.mine_count} affecting your tickers`;
+        wrap.innerHTML = `<div class="qcpm">
+          <div class="qcpm-h">
+            <span>📰 OVERNIGHT CATALYSTS</span>
+            <span class="sub">${subText}</span>
+            ${toggleHTML}
+          </div>
+          <div class="qcpm-body">${rows}</div>
+        </div>`;
+      })
+      .catch(e => {
+        wrap.innerHTML = `<div class="qcpm"><div class="qcpm-h"><span>📰 OVERNIGHT CATALYSTS</span></div><div class="qcpm-empty" style="color:var(--rd)">Error: ${e.message}</div></div>`;
+      });
   }
 
 
@@ -50233,61 +50210,130 @@ const MarketsV2 = (function () {
   }
   // ─── TAB 4: PRE-MARKET EDGE ───
   function renderPremarket(data) {
-    return `${_head('🌅', 'Pre-Market Edge', '5:00-6:30am PT scanner · gappers · futures · earnings reactions · halts', 'Swing + Earnings Quant',
-      `${_ctl('⭐ Save')}${_ctl('⏰ Halt alerts')}`)}
+    // 2026-05-20 — Wired to real data.premarket (scripts/premarket_scan.py) +
+    // falls back to data.market_movers + data.market_news + data.earnings_outcomes_30d
+    // when pre-market session is inactive (most of the trading day).
+    const pm = data.premarket || {};
+    const meta = pm._meta || {};
+    const sessionActive = !!meta.session_active;
+    const gappersUp = pm.gappers_up || [];
+    const gappersDn = pm.gappers_dn || [];
+    const catalysts = pm.catalysts || {};
+    const mm = data.market_movers || {};
+    const news = data.market_news || [];
+    const outcomes = (data.earnings_outcomes_30d || []).filter(o => o && typeof o === 'object');
 
-      <div class="mv2-grid-2" style="margin-bottom:14px">
-        <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">📈 Pre-Market Gainers · w/ RVOL</span></div>
-          <table class="mv2-t"><thead><tr><th>Ticker</th><th class="r">Pre%</th><th class="r">RVOL</th><th>Catalyst</th></tr></thead><tbody>
-            <tr class="mv2-rowlink"><td class="mv2-mono"><b>SNDK</b></td><td class="r mv2-mono mv2-up">+12.4%</td><td class="r mv2-mono"><b>4.8x</b></td><td>EPS beat +59%</td></tr>
-            <tr class="mv2-rowlink"><td class="mv2-mono"><b>FOXA</b></td><td class="r mv2-mono mv2-up">+8.7%</td><td class="r mv2-mono"><b>3.2x</b></td><td>Beat + $2B buyback</td></tr>
-            <tr class="mv2-rowlink"><td class="mv2-mono"><b>HPE</b></td><td class="r mv2-mono mv2-up">+5.1%</td><td class="r mv2-mono">2.4x</td><td>AI capex tier-1</td></tr>
-            <tr class="mv2-rowlink"><td class="mv2-mono"><b>ZBRA</b></td><td class="r mv2-mono mv2-up">+4.8%</td><td class="r mv2-mono">0.9x</td><td>Beat (low vol — fade?)</td></tr>
-          </tbody></table>
-          <div class="mv2-note">RVOL &gt;3x = institutional · &lt;1x = fade signal</div>
+    // Recent earnings (last 2 days) — proxy for "this morning's reactions" when out of session
+    const recentER = (() => {
+      const today = new Date().toISOString().slice(0, 10);
+      const yest = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      return outcomes
+        .filter(o => {
+          const rd = (o.report_date || '').slice(0, 10);
+          return rd === today || rd === yest;
+        })
+        .sort((a, b) => Math.abs(b.eps_surprise_pct || 0) - Math.abs(a.eps_surprise_pct || 0))
+        .slice(0, 10);
+    })();
+
+    const fmt = (n, d = 2, sign = false) => n == null || isNaN(n) ? '—' : (sign && n >= 0 ? '+' : '') + Number(n).toFixed(d);
+    const fmtVol = (v) => v == null ? '—' : v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(0) + 'K' : String(v);
+
+    // Pre-market session banner
+    const sessCls = sessionActive ? 'mv2-chip-gn' : 'mv2-chip-bare';
+    const sessTxt = sessionActive ? 'IN SESSION' : 'OUT OF SESSION';
+    const lastSess = meta.last_session_at || meta.generated_at;
+
+    return `${_head('🌅', 'Pre-Market', 'real EODHD pre-market scanner (session-aware) · falls back to market movers + post-ER drift', 'Swing Quant',
+      `${_ctl('⭐ Save')}${_ctl('⏰ Gap alerts')}`)}
+
+      <!-- Session banner -->
+      <div class="mv2-card" style="margin-bottom:14px;border-left:4px solid ${sessionActive ? 'var(--gn)' : 'var(--ink-3)'}">
+        <div class="mv2-card-head">
+          <span class="mv2-card-title">PRE-MARKET SESSION · <span class="mv2-chip ${sessCls}">${sessTxt}</span></span>
+          <span class="mv2-card-meta">${meta.session_status || ''} · last scan ${lastSess ? lastSess.replace('T', ' ').slice(0, 16) : '—'}</span>
         </div>
-        <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">📉 Pre-Market Losers · w/ short data</span></div>
-          <table class="mv2-t"><thead><tr><th>Ticker</th><th class="r">Pre%</th><th class="r">SI %</th><th>Catalyst</th></tr></thead><tbody>
-            <tr><td class="mv2-mono"><b>CVNA</b></td><td class="r mv2-mono mv2-dn">-18.2%</td><td class="r mv2-mono"><b>28%</b></td><td>Miss · <span class="mv2-chip mv2-chip-pu">SQUEEZE WATCH</span></td></tr>
-            <tr><td class="mv2-mono"><b>BBWI</b></td><td class="r mv2-mono mv2-dn">-9.4%</td><td class="r mv2-mono">12%</td><td>Cut guide</td></tr>
-            <tr><td class="mv2-mono"><b>LNC</b></td><td class="r mv2-mono mv2-dn">-7.1%</td><td class="r mv2-mono">8%</td><td>Q1 miss</td></tr>
-            <tr><td class="mv2-mono"><b>NWL</b></td><td class="r mv2-mono mv2-dn">-4.6%</td><td class="r mv2-mono">6%</td><td>Reaffirmed</td></tr>
-          </tbody></table>
-        </div>
+        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1">
+          ${sessionActive ?
+            '<b>Live pre-market gappers below.</b> Filters: |chg| ≥ 3% AND volume ≥ 1K. Catalysts auto-attributed from overnight news + earnings reactions. Scanner refreshes every 30min during 4am-9:30am ET (1am-6:30am PT).' :
+            '<b>Pre-market closed.</b> Live scanner runs Mon-Fri 4:00-9:30am ET via launchd. Showing post-open market movers + recent earnings reactions + overnight news below as substitute context.'}
+        </div></div>
       </div>
 
-      <div class="mv2-grid-2" style="margin-bottom:14px">
-        <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">🎯 PEAD Reaction Score</span></div>
-          <table class="mv2-t"><thead><tr><th>Ticker</th><th class="r">EPS</th><th class="r">Rev↑</th><th>Gate</th></tr></thead><tbody>
-            <tr><td class="mv2-mono"><b>SNDK</b></td><td class="r mv2-mono mv2-up">+59.7%</td><td class="r mv2-mono">+5</td><td><span class="mv2-chip mv2-chip-gn">PEAD ELITE</span></td></tr>
-            <tr><td class="mv2-mono"><b>FOXA</b></td><td class="r mv2-mono mv2-up">+36.1%</td><td class="r mv2-mono">+3</td><td><span class="mv2-chip mv2-chip-gn">eligible</span></td></tr>
-            <tr><td class="mv2-mono"><b>CEG</b></td><td class="r mv2-mono mv2-up">+20.7%</td><td class="r mv2-mono">+2</td><td><span class="mv2-chip mv2-chip-gn">eligible</span></td></tr>
-            <tr><td class="mv2-mono"><b>ZBRA</b></td><td class="r mv2-mono mv2-up">+15.0%</td><td class="r mv2-mono">0</td><td><span class="mv2-chip mv2-chip-am">gap &gt;8% fade</span></td></tr>
-          </tbody></table>
-        </div>
-        <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">📊 Futures + Implied Open</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td>ES</td><td class="r mv2-mono">+5.25</td><td class="r mv2-mono">+0.10%</td><td><span class="mv2-chip mv2-chip-gn">↑</span></td></tr>
-            <tr><td>NQ</td><td class="r mv2-mono">+38.5</td><td class="r mv2-mono">+0.18%</td><td><span class="mv2-chip mv2-chip-gn">↑</span></td></tr>
-            <tr><td>RTY</td><td class="r mv2-mono">-0.4</td><td class="r mv2-mono">-0.02%</td><td><span class="mv2-chip mv2-chip-bare">flat</span></td></tr>
-            <tr><td>VX</td><td class="r mv2-mono">+0.85</td><td class="r mv2-mono">+4.6%</td><td><span class="mv2-chip mv2-chip-am">elevated</span></td></tr>
-          </tbody></table>
-        </div>
-      </div>
+      ${sessionActive ? _renderPremarketLive(gappersUp, gappersDn, catalysts, fmt, fmtVol) :
+                        _renderPremarketFallback(mm, recentER, news, fmt, fmtVol)}
 
-      <div class="mv2-card">
-        <div class="mv2-card-head"><span class="mv2-card-title">🚨 Halts + News Feed</span></div>
-        <div style="padding:8px 0;border-bottom:1px solid #1a1a1a;font-size:12px"><span class="mv2-chip mv2-chip-rd">HALT</span> &nbsp; <b>BIOX</b> · LULD on +24% spike · 06:18 PT</div>
-        <div style="padding:8px 0;border-bottom:1px solid #1a1a1a;font-size:12px"><span class="mv2-chip mv2-chip-gn">NEWS · POS</span> &nbsp; <b>NVDA</b> · "AI revenue accelerating Q2" - Reuters · 06:14 PT</div>
-        <div style="padding:8px 0;border-bottom:1px solid #1a1a1a;font-size:12px"><span class="mv2-chip mv2-chip-am">NEWS · MIX</span> &nbsp; <b>TSLA</b> · "FSD pushed; new model unveiled" - Bloomberg · 06:08 PT</div>
-        <div style="padding:8px 0;font-size:12px"><span class="mv2-chip mv2-chip-rd">NEWS · NEG</span> &nbsp; <b>CVNA</b> · "Q1 miss; guide cut sharply" - WSJ · 06:01 PT</div>
-      </div>
-      ${_actionFooter(['🎯 Auto-stage PEAD', '⏰ Halt alerts', '📊 PEAD hit-rate', '↓ Export'])}`;
+      ${_actionFooter(['🎯 Auto-stage PEAD', '⏰ Halt alerts', '↓ Export'])}`;
   }
+
+  function _renderPremarketLive(up, dn, catalysts, fmt, fmtVol) {
+    const catStr = (tk) => {
+      const c = (catalysts || {})[tk] || [];
+      if (!c.length) return '<span style="color:var(--ink-3);font-size:10px">no catalyst</span>';
+      return c.slice(0, 2).map(x => {
+        const cls = x.type === 'EARNINGS' ? 'mv2-chip-gn' : 'mv2-chip-cy';
+        return '<span class="mv2-chip ' + cls + '" title="' + (x.title || '').replace(/"/g, '&quot;') + '">' + x.type + '</span>';
+      }).join(' ');
+    };
+    const row = (g) => '<tr class="mv2-rowlink" onclick="if(window.setDetailTicker) window.setDetailTicker(\'' + g.ticker + '\')">' +
+      '<td class="mv2-mono"><b>' + g.ticker + '</b></td>' +
+      '<td class="r mv2-mono">$' + fmt(g.price, 2) + '</td>' +
+      '<td class="r mv2-mono ' + (g.change_p >= 0 ? 'mv2-up' : 'mv2-dn') + '">' + fmt(g.change_p, 2, true) + '%</td>' +
+      '<td class="r mv2-mono">' + fmtVol(g.volume) + '</td>' +
+      '<td>' + catStr(g.ticker) + '</td>' +
+      '</tr>';
+    return '<div class="mv2-grid-2" style="margin-bottom:14px">' +
+      '<div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">📈 Pre-Market Gainers</span><span class="mv2-card-meta">' + up.length + ' · |chg| ≥ 3%</span></div>' +
+      (up.length ? '<table class="mv2-t"><thead><tr><th>Ticker</th><th class="r">Price</th><th class="r">Δ%</th><th class="r">Volume</th><th>Catalyst</th></tr></thead><tbody>' + up.map(row).join('') + '</tbody></table>' : '<div class="mv2-note" style="padding:14px">No gappers up — quiet pre-market.</div>') +
+      '</div>' +
+      '<div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">📉 Pre-Market Losers</span><span class="mv2-card-meta">' + dn.length + ' · |chg| ≥ 3%</span></div>' +
+      (dn.length ? '<table class="mv2-t"><thead><tr><th>Ticker</th><th class="r">Price</th><th class="r">Δ%</th><th class="r">Volume</th><th>Catalyst</th></tr></thead><tbody>' + dn.map(row).join('') + '</tbody></table>' : '<div class="mv2-note" style="padding:14px">No gappers down — quiet pre-market.</div>') +
+      '</div></div>';
+  }
+
+  function _renderPremarketFallback(mm, recentER, news, fmt, fmtVol) {
+    const gainers = (mm.gainers || []).slice(0, 10);
+    const losers = (mm.losers || []).slice(0, 10);
+    const moverRow = (m) => '<tr class="mv2-rowlink" onclick="if(window.setDetailTicker) window.setDetailTicker(\'' + m.ticker + '\')">' +
+      '<td class="mv2-mono"><b>' + m.ticker + '</b></td>' +
+      '<td style="font-size:10px">' + (m.name || '').slice(0, 24) + '</td>' +
+      '<td class="r mv2-mono">$' + fmt(m.price, 2) + '</td>' +
+      '<td class="r mv2-mono ' + (m.perf_1d >= 0 ? 'mv2-up' : 'mv2-dn') + '">' + fmt(m.perf_1d * 100, 2, true) + '%</td>' +
+      '<td class="r mv2-mono">' + fmtVol(m.volume) + '</td>' +
+      '<td><span class="mv2-chip mv2-chip-bare">' + (m.index || '') + '</span></td>' +
+      '</tr>';
+    const erRow = (o) => {
+      const surp = o.eps_surprise_pct;
+      const surpCls = surp == null ? '' : surp >= 5 ? 'mv2-chip-gn' : surp >= 0 ? 'mv2-chip-am' : 'mv2-chip-rd';
+      return '<tr class="mv2-rowlink" onclick="if(window.setDetailTicker) window.setDetailTicker(\'' + o.ticker + '\')">' +
+        '<td class="mv2-mono"><b>' + o.ticker + '</b></td>' +
+        '<td class="mv2-mono" style="font-size:10px">' + ((o.report_date || '').slice(0, 10)) + '</td>' +
+        '<td><span class="mv2-chip ' + surpCls + '">' + (surp != null ? fmt(surp, 1, true) + '%' : '—') + '</span></td>' +
+        '<td class="r mv2-mono">' + (o.report_time || o.bmo_amc || '—') + '</td>' +
+        '</tr>';
+    };
+    const newsRow = (n) => '<div style="padding:7px 0;border-bottom:1px solid var(--line);font-size:11px">' +
+      '<span class="mv2-mono" style="color:var(--ink-3)">' + ((n.date || '').replace('T', ' ').slice(0, 16)) + '</span> · ' +
+      '<a href="' + (n.url || '#') + '" target="_blank" style="color:var(--ink-1);text-decoration:none">' + ((n.title || '').slice(0, 110)) + '</a>' +
+      '</div>';
+
+    return '<div class="mv2-grid-2" style="margin-bottom:14px">' +
+      '<div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">📈 Day Gainers</span><span class="mv2-card-meta">post-open · ' + gainers.length + ' from EODHD movers</span></div>' +
+      (gainers.length ? '<table class="mv2-t"><thead><tr><th>Ticker</th><th>Name</th><th class="r">Price</th><th class="r">Δ%</th><th class="r">Volume</th><th>Index</th></tr></thead><tbody>' + gainers.map(moverRow).join('') + '</tbody></table>' : '<div class="mv2-note" style="padding:14px">No mover data.</div>') +
+      '</div>' +
+      '<div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">📉 Day Losers</span><span class="mv2-card-meta">post-open · ' + losers.length + ' from EODHD movers</span></div>' +
+      (losers.length ? '<table class="mv2-t"><thead><tr><th>Ticker</th><th>Name</th><th class="r">Price</th><th class="r">Δ%</th><th class="r">Volume</th><th>Index</th></tr></thead><tbody>' + losers.map(moverRow).join('') + '</tbody></table>' : '<div class="mv2-note" style="padding:14px">No mover data.</div>') +
+      '</div></div>' +
+      '<div class="mv2-grid-2" style="margin-bottom:14px">' +
+      '<div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">📊 Recent Earnings Reactions</span><span class="mv2-card-meta">today + yesterday · top ' + recentER.length + '</span></div>' +
+      (recentER.length ? '<table class="mv2-t"><thead><tr><th>Ticker</th><th>Date</th><th>EPS surprise</th><th class="r">Time</th></tr></thead><tbody>' + recentER.map(erRow).join('') + '</tbody></table>' : '<div class="mv2-note" style="padding:14px">No recent earnings reactions.</div>') +
+      '</div>' +
+      '<div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">📰 Overnight News</span><span class="mv2-card-meta">' + news.length + ' headlines</span></div>' +
+      '<div style="padding:0 12px;max-height:280px;overflow-y:auto">' +
+      (news.length ? news.slice(0, 12).map(newsRow).join('') : '<div class="mv2-note" style="padding:14px">No overnight news.</div>') +
+      '</div></div></div>';
+  }
+
 
   // ─── TAB 5: CORPORATE EVENTS ───
   function renderEvents(data) {
