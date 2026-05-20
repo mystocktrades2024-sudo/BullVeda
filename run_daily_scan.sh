@@ -90,6 +90,14 @@ if [ $EXIT_CODE -eq 0 ]; then
     "$PYTHON" scripts/ml_ab_capture.py >> "$LOG_FILE" 2>&1
     set -e
 
+    # ── Rolling Sharpe Kill transition alert ──────────────────────────────
+    # Fires a Slack message when the gate transitions blocked↔clear. Writes
+    # state to cache/sharpe_kill_state.json for transition detection.
+    echo "── Rolling Sharpe Kill alert check ──" >> "$LOG_FILE"
+    set +e
+    "$PYTHON" scripts/sharpe_kill_alert.py >> "$LOG_FILE" 2>&1
+    set -e
+
     # ── Rebuild audit ledger (per-signal D1-D5/W1-W5/M1-M6 grid) ─────────
     # Runs EVERY scan so new signals get appended and prior days' D-cells
     # populate as time passes. Builder is idempotent and incremental — it
