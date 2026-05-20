@@ -47431,103 +47431,138 @@ const MarketsV2 = (function () {
     return `<div class="mv2-action-footer"><b>Actions:</b>${items.map(i => `<a>${i}</a>`).join('')}</div>`;
   }
 
-  // ─── TAB 1: INDUSTRIES ───
+  // ─── TAB 1: INDUSTRIES — 2026-05-20 wired to real data ───
+  // Sources: data.sector_etf (11 SPDRs · perf vs SPY · rank) +
+  //          data.industries[] (30 GICS industries · avg_score · ticker rosters) +
+  //          data.earnings_watchlist (group by sector for catalyst velocity).
+  // No hardcoded perf, RS, or earnings counts — all real.
   function renderIndustries(data) {
     const sec = data.sector_etf || {};
-    const sectors = [
+    const industries = data.industries || [];
+    const earnWl = data.earnings_watchlist || [];
+
+    // 11-sector heatmap — uses real perf_pct + vs_spy_pct from sector_etf.
+    // Drop the synth "percentile" since we don't have 252d sector return history.
+    const sectorMap = [
       ['XLK','Tech'], ['XLC','Comm'], ['XLY','Disc'], ['XLF','Fin'],
       ['XLI','Indust'], ['XLP','Staples'], ['XLB','Mat'], ['XLU','Util'],
       ['XLRE','RE'], ['XLE','Energy'], ['XLV','Health']
     ];
-    const heatCells = sectors.map(([etf, name]) => {
+    const heatCells = sectorMap.map(([etf, name]) => {
       const d = sec[etf] || {};
-      const pct = Number(d.perf_pct ?? d.pct_chg ?? d.daily_change_pct ?? 0);
-      const pctile = Math.round(Math.max(0, Math.min(100, 50 + pct * 8))); // synth
+      const pct = Number(d.perf_pct || 0);             // perf vs ? (period varies per scan)
+      const vsSpy = Number(d.vs_spy_pct || 0);
+      const rank = d.rank != null ? d.rank : '—';
       return `<div class="mv2-heat-cell ${_heatCls(pct)}">
         <div class="mv2-heat-etf">${etf}</div>
         <div class="mv2-heat-name">${name}</div>
         <div class="mv2-heat-pct ${_arrCls(pct)}">${_emojiArrow(pct)} ${Math.abs(pct).toFixed(2)}%</div>
-        <div class="mv2-heat-pctile">${pctile}th %ile</div>
+        <div class="mv2-heat-pctile">vs SPY ${vsSpy >= 0 ? '+' : ''}${vsSpy.toFixed(1)}pp · rank ${rank}</div>
       </div>`;
     }).join('');
 
-    const indDrill = [
-      ['Semiconductors', 5.8, '95th', 'ACCEL', 'mv2-chip-gn'],
-      ['Software · App', 2.4, '68th', 'STEADY', 'mv2-chip-bare'],
-      ['Software · System', 1.1, '52nd', 'STEADY', 'mv2-chip-bare'],
-      ['Comp Hardware', 0.8, '48th', 'FADING', 'mv2-chip-am'],
-      ['IT Services', -0.3, '31st', 'DECEL', 'mv2-chip-rd'],
-    ];
+    // Industry drill — real top-30 industries sorted by avg_score (no fake "%5D RS").
+    const topInd = [...industries].sort((a, b) => (b.avg_score || 0) - (a.avg_score || 0)).slice(0, 12);
+    const bottomInd = [...industries].sort((a, b) => (a.avg_score || 0) - (b.avg_score || 0)).slice(0, 8);
+    const indRow = (i) => {
+      const sc = i.avg_score || 0;
+      const scCls = sc >= 70 ? 'mv2-chip-gn' : sc >= 55 ? 'mv2-chip-am' : 'mv2-chip-rd';
+      const lbl = sc >= 70 ? 'STRONG' : sc >= 55 ? 'NEUTRAL' : 'WEAK';
+      const tickers = (i.tickers || []).slice(0, 4).join(' · ') || '—';
+      return `<tr class="mv2-rowlink">
+        <td class="mv2-mono"><b>${i.industry}</b></td>
+        <td class="r mv2-mono">${sc.toFixed(1)}</td>
+        <td class="r mv2-mono">${i.count || 0}</td>
+        <td style="font-size:10.5px;color:var(--ink-2)">${tickers}</td>
+        <td><span class="mv2-chip ${scCls}">${lbl}</span></td>
+      </tr>`;
+    };
 
-    return `${_head('🏭', 'Industries', 'Sector + industry rotation cockpit · institutional flow tracker', 'HF Analyst',
+    // Leadership rotation — real top-3 leaders + bottom-3 laggards from sector_etf rank
+    const sortedSecs = Object.entries(sec).map(([etf, d]) => ({ etf, ...d })).sort((a, b) => (b.vs_spy_pct || 0) - (a.vs_spy_pct || 0));
+    const leaders = sortedSecs.slice(0, 3);
+    const laggards = sortedSecs.slice(-3).reverse();
+
+    // Earnings velocity — group earnings_watchlist by sector, next 7d only
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const wk = 7;
+    const earnNext7 = earnWl.filter(e => {
+      const dte = e.days_to_earnings;
+      return dte != null && dte >= 0 && dte <= wk;
+    });
+    const earnBySector = {};
+    earnNext7.forEach(e => {
+      const s = e.sector || 'Unknown';
+      if (!earnBySector[s]) earnBySector[s] = [];
+      earnBySector[s].push(e.ticker);
+    });
+    const earnSectors = Object.entries(earnBySector).sort((a, b) => b[1].length - a[1].length).slice(0, 8);
+
+    return `${_head('🏭', 'Industries', 'Sector + industry rotation · real avg-score per industry · catalyst velocity', 'HF Analyst',
       `${_ctl('⭐ Save')}${_ctl('⏰ Alert')}${_ctl('📊 Compare')}`)}
 
       <div class="mv2-card" style="margin-bottom:14px">
         <div class="mv2-card-head">
-          <span class="mv2-card-title">11-Sector Heatmap · 1D % + 1Y Percentile</span>
-          <span class="mv2-card-meta">click cell to drill</span>
-          <div class="mv2-card-actions">${_ctl('1D')}${_ctl('5D', true)}${_ctl('21D')}${_ctl('63D')}</div>
+          <span class="mv2-card-title">11-Sector Heatmap · period perf + vs SPY + rank</span>
+          <span class="mv2-card-meta">${Object.keys(sec).length} sectors · click to drill</span>
         </div>
         <div class="mv2-grid-11">${heatCells}</div>
-        <div class="mv2-note">Heatmap intensity = % change · subtitle = where this return falls vs last 252d</div>
+        <div class="mv2-note">Sourced from data.sector_etf · period varies per scan. Color = perf; subtitle = relative strength vs SPY + sector rank.</div>
       </div>
 
       <div class="mv2-grid-2" style="margin-bottom:14px">
         <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">Industry Drill · Within XLK</span><span class="mv2-card-meta">Tech sub-industries</span></div>
+          <div class="mv2-card-head"><span class="mv2-card-title">⬆ Top industries · scan avg-score</span><span class="mv2-card-meta">${industries.length} industries scored</span></div>
           <table class="mv2-t">
-            <thead><tr><th>Industry</th><th class="r">5D</th><th class="r">RS</th><th>Trend</th></tr></thead>
-            <tbody>${indDrill.map(([n, p, rs, lbl, cls]) => `
-              <tr class="mv2-rowlink"><td class="mv2-mono"><b>${n}</b></td>
-                <td class="r mv2-mono ${_arrCls(p)}">${p > 0 ? '+' : ''}${p.toFixed(1)}%</td>
-                <td class="r mv2-mono">${rs}</td>
-                <td><span class="mv2-chip ${cls}">${lbl}</span></td></tr>`).join('')}
-            </tbody></table>
+            <thead><tr><th>Industry</th><th class="r">Avg Score</th><th class="r">n</th><th>Top tickers</th><th>Read</th></tr></thead>
+            <tbody>${topInd.length ? topInd.map(indRow).join('') : '<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--ink-3)">No industries scored</td></tr>'}</tbody>
+          </table>
         </div>
         <div class="mv2-card">
-          <div class="mv2-card-head">
-            <span class="mv2-card-title">RSP vs SPY · Equal-Weight Breadth</span>
-            <span class="mv2-card-meta">avg stock vs index</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:18px;padding:10px 0">
-            <div><div class="mv2-bignum" style="color:var(--rd)">-2.4%</div><div class="mv2-bignum-sub">RSP − SPY 21D</div></div>
-            <svg style="flex:1;height:60px" viewBox="0 0 240 60" preserveAspectRatio="none">
-              <line x1="0" y1="30" x2="240" y2="30" stroke="var(--line)" stroke-dasharray="2,2"/>
-              <polyline points="0,28 24,30 48,32 72,28 96,35 120,38 144,42 168,40 192,44 216,46 240,48" stroke="var(--rd)" fill="none" stroke-width="1.5"/>
-            </svg>
-          </div>
-          <div class="mv2-divbox mv2-bad">
-            <div style="flex:1"><b>🔴 Top-10 concentration risk</b> — index breadth deteriorating, mega-caps carrying. Last 5 episodes &gt;14d → 4-9% pullback.</div>
-          </div>
+          <div class="mv2-card-head"><span class="mv2-card-title">⬇ Bottom industries</span><span class="mv2-card-meta">avoid or short candidates</span></div>
+          <table class="mv2-t">
+            <thead><tr><th>Industry</th><th class="r">Avg Score</th><th class="r">n</th><th>Tickers</th><th>Read</th></tr></thead>
+            <tbody>${bottomInd.length ? bottomInd.map(indRow).join('') : '<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--ink-3)">No industries scored</td></tr>'}</tbody>
+          </table>
         </div>
       </div>
 
       <div class="mv2-grid-2">
         <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">Leadership Rotation · Last 5 Periods</span><span class="mv2-card-meta">where money moved</span></div>
+          <div class="mv2-card-head"><span class="mv2-card-title">Sector Leadership · vs SPY</span><span class="mv2-card-meta">real rank from sector_etf</span></div>
           <table class="mv2-t">
-            <thead><tr><th>Period</th><th>Leader</th><th>Laggard</th><th class="r">Spread</th></tr></thead>
+            <thead><tr><th>Sector</th><th>ETF</th><th class="r">Perf %</th><th class="r">vs SPY pp</th><th class="r">Rank</th></tr></thead>
             <tbody>
-              <tr><td class="mv2-mono">1D</td><td><span class="mv2-chip mv2-chip-gn">XLK</span></td><td><span class="mv2-chip mv2-chip-rd">XLV</span></td><td class="r mv2-mono">+5.4pp</td></tr>
-              <tr><td class="mv2-mono">5D</td><td><span class="mv2-chip mv2-chip-gn">XLK</span></td><td><span class="mv2-chip mv2-chip-rd">XLV</span></td><td class="r mv2-mono">+8.7pp</td></tr>
-              <tr><td class="mv2-mono">21D</td><td><span class="mv2-chip mv2-chip-gn">XLK</span></td><td><span class="mv2-chip mv2-chip-rd">XLE</span></td><td class="r mv2-mono">+12.4pp</td></tr>
-              <tr><td class="mv2-mono">63D</td><td><span class="mv2-chip mv2-chip-gn">XLK</span></td><td><span class="mv2-chip mv2-chip-rd">XLU</span></td><td class="r mv2-mono">+14.5pp</td></tr>
-              <tr><td class="mv2-mono">YTD</td><td><span class="mv2-chip mv2-chip-gn">XLY</span></td><td><span class="mv2-chip mv2-chip-rd">XLE</span></td><td class="r mv2-mono">+22.1pp</td></tr>
+              ${leaders.map(l => `<tr>
+                <td><span class="mv2-chip mv2-chip-gn">${l.sector || '—'}</span></td>
+                <td class="mv2-mono"><b>${l.etf}</b></td>
+                <td class="r mv2-mono ${_arrCls(l.perf_pct)}">${(l.perf_pct >= 0 ? '+' : '') + (l.perf_pct || 0).toFixed(2)}%</td>
+                <td class="r mv2-mono ${_arrCls(l.vs_spy_pct)}">${(l.vs_spy_pct >= 0 ? '+' : '') + (l.vs_spy_pct || 0).toFixed(1)}pp</td>
+                <td class="r mv2-mono">${l.rank || '—'}</td>
+              </tr>`).join('')}
+              <tr><td colspan="5" style="background:var(--bg-3);padding:3px 8px;font:700 9px var(--mono);letter-spacing:.10em;color:var(--ink-3)">↓ LAGGARDS</td></tr>
+              ${laggards.map(l => `<tr>
+                <td><span class="mv2-chip mv2-chip-rd">${l.sector || '—'}</span></td>
+                <td class="mv2-mono"><b>${l.etf}</b></td>
+                <td class="r mv2-mono ${_arrCls(l.perf_pct)}">${(l.perf_pct >= 0 ? '+' : '') + (l.perf_pct || 0).toFixed(2)}%</td>
+                <td class="r mv2-mono ${_arrCls(l.vs_spy_pct)}">${(l.vs_spy_pct >= 0 ? '+' : '') + (l.vs_spy_pct || 0).toFixed(1)}pp</td>
+                <td class="r mv2-mono">${l.rank || '—'}</td>
+              </tr>`).join('')}
             </tbody></table>
         </div>
         <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">Sector Earnings Velocity · Next 7d</span><span class="mv2-card-meta">where catalysts cluster</span></div>
+          <div class="mv2-card-head"><span class="mv2-card-title">Earnings Velocity · Next 7d by sector</span><span class="mv2-card-meta">${earnNext7.length} reports next 7d</span></div>
           <table class="mv2-t">
-            <thead><tr><th>Sector</th><th class="r">Reports</th><th>Hot tickers</th></tr></thead>
-            <tbody>
-              <tr><td class="mv2-mono"><b>XLK</b></td><td class="r mv2-mono">14</td><td><span class="mv2-chip mv2-chip-cy">NVDA</span> <span class="mv2-chip mv2-chip-cy">INTU</span></td></tr>
-              <tr><td class="mv2-mono"><b>XLY</b></td><td class="r mv2-mono">8</td><td><span class="mv2-chip mv2-chip-cy">WMT</span> <span class="mv2-chip mv2-chip-cy">TGT</span></td></tr>
-              <tr><td class="mv2-mono"><b>XLV</b></td><td class="r mv2-mono">5</td><td><span class="mv2-chip mv2-chip-cy">MDT</span></td></tr>
-              <tr><td class="mv2-mono"><b>XLF</b></td><td class="r mv2-mono">2</td><td><span class="mv2-chip mv2-chip-bare">light</span></td></tr>
+            <thead><tr><th>Sector</th><th class="r">Reports</th><th>Tickers</th></tr></thead>
+            <tbody>${earnSectors.length ? earnSectors.map(([s, tks]) => `
+              <tr><td class="mv2-mono"><b>${s}</b></td>
+                <td class="r mv2-mono">${tks.length}</td>
+                <td>${tks.slice(0, 6).map(t => `<span class="mv2-chip mv2-chip-cy">${t}</span>`).join(' ')}${tks.length > 6 ? ` <span style="color:var(--ink-3);font-size:10px">+${tks.length - 6}</span>` : ''}</td>
+              </tr>`).join('') : '<tr><td colspan="3" style="text-align:center;padding:14px;color:var(--ink-3)">No earnings in next 7 days</td></tr>'}
             </tbody></table>
         </div>
       </div>
-      ${_actionFooter(['📊 Scan top-RS', '⏰ Rotation alert', '🔍 Drill XLK', '↓ Export'])}`;
+      ${_actionFooter(['📊 Scan top-industry', '🔔 RS rotation alert', '↓ Export'])}`;
   }
 
   // ─── TAB 2: MARKET INTERNALS ───
@@ -49984,86 +50019,137 @@ const MarketsV2 = (function () {
       ${_actionFooter(['📊 Compare to 2020-Q4', '⏰ Alert breadth&lt;40', '🛡️ Defensive ideas', '↓ Export'])}`;
   }
 
-  // ─── TAB 3: MACRO TAPE ───
+  // ─── TAB 3: MACRO TAPE — 2026-05-20 wired to real data ───
+  // Sources: data.macro_signals (hyg, lqd, dxy, gld, credit, put_call) +
+  //          data.economic_events (real calendar with HIGH/MED impact tier) +
+  //          data.regime.vix for vol context.
+  // Removed hardcoded yield curve, dollar pairs, commodities, global equity
+  // (we don't fetch those today — would need new EODHD fetcher for fx + bonds).
   function renderMacro(data) {
-    return `${_head('🌐', 'Macro Tape', 'Yield curve · credit · DXY · commodities · global · economic surprise', 'HF Analyst',
+    const ms = data.macro_signals || {};
+    const events = data.economic_events || [];
+    const regime = data.regime || {};
+    const vix = regime.vix_current || (regime.vix && regime.vix.vix_current) || null;
+    const vixState = regime.vix && regime.vix.vol_state;
+    const vix3m = regime.vix && regime.vix.vix3m;
+    const termStr = regime.vix && regime.vix.term_structure_state;
+
+    // Risk-signal banner color
+    const riskSig = ms.risk_signal || 'unknown';
+    const sigCls = riskSig === 'risk-on' ? 'mv2-chip-gn' : riskSig === 'risk-off' ? 'mv2-chip-rd' : 'mv2-chip-am';
+
+    // Macro signals row builder
+    const sigRow = (key, label, lookback = '20d') => {
+      const s = ms[key] || {};
+      const px = s.price;
+      const ma20 = s.ma20;
+      const chg5 = s.chg5d;
+      const chg20 = s.chg20d;
+      const trend = s.trend || '—';
+      const tCls = trend === 'rising' ? 'mv2-chip-gn' : trend === 'falling' ? 'mv2-chip-rd' : 'mv2-chip-bare';
+      const chg5Cls = chg5 == null ? 'neu' : chg5 >= 0 ? 'mv2-up' : 'mv2-dn';
+      const chg20Cls = chg20 == null ? 'neu' : chg20 >= 0 ? 'mv2-up' : 'mv2-dn';
+      return `<tr>
+        <td><b>${label}</b></td>
+        <td class="r mv2-mono">${px != null ? '$' + Number(px).toFixed(2) : '—'}</td>
+        <td class="r mv2-mono">${ma20 != null ? Number(ma20).toFixed(2) : '—'}</td>
+        <td class="r mv2-mono ${chg5Cls}">${chg5 != null ? (chg5 >= 0 ? '+' : '') + Number(chg5).toFixed(2) + '%' : '—'}</td>
+        <td class="r mv2-mono ${chg20Cls}">${chg20 != null ? (chg20 >= 0 ? '+' : '') + Number(chg20).toFixed(2) + '%' : '—'}</td>
+        <td><span class="mv2-chip ${tCls}">${trend}</span></td>
+      </tr>`;
+    };
+
+    // Economic calendar
+    const fmtDate = (iso) => {
+      try {
+        const d = new Date(iso); if (isNaN(d.getTime())) return iso;
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const dd = String(d.getDate()).padStart(2,'0');
+        const hh = String(d.getHours()).padStart(2,'0');
+        const mi = String(d.getMinutes()).padStart(2,'0');
+        return `${mm}-${dd} ${hh}:${mi}`;
+      } catch { return iso; }
+    };
+    // Dedupe by (date, type) since EODHD sometimes returns duplicates
+    const seen = new Set();
+    const unique = events.filter(e => {
+      const k = (e.date || '') + '|' + (e.type || '');
+      if (seen.has(k)) return false;
+      seen.add(k); return true;
+    });
+
+    return `${_head('🌐', 'Macro Tape', 'Credit · dollar · gold · risk-signal · real economic calendar (next 30d)', 'HF Analyst',
       `${_ctl('⭐ Save')}${_ctl('⏰ Fed alert')}`)}
 
-      <div class="mv2-grid-4" style="margin-bottom:14px">
-        <div class="mv2-card"><div class="mv2-card-title">2s/10s</div><div class="mv2-bignum">+27 bp</div>
-          <div class="mv2-delta-row"><span class="mv2-delta mv2-up">+8bp 5D</span><span class="mv2-delta mv2-neu">82nd %ile</span></div>
-          <div class="mv2-note">steepening = growth, not recession</div></div>
-        <div class="mv2-card"><div class="mv2-card-title">10Y Real Yield</div><div class="mv2-bignum">+1.87%</div>
-          <div class="mv2-delta-row"><span class="mv2-delta mv2-dn">-12bp 21D</span><span class="mv2-delta mv2-neu">68th %ile</span></div>
-          <div class="mv2-note">real yields easing — equity tailwind</div></div>
-        <div class="mv2-card"><div class="mv2-card-title">DXY</div><div class="mv2-bignum">102.4</div>
-          <div class="mv2-delta-row"><span class="mv2-delta mv2-dn">-1.2% 5D</span><span class="mv2-delta mv2-neu">35th %ile</span></div>
-          <div class="mv2-note">dollar weakness = EM + commodity tailwind</div></div>
-        <div class="mv2-card"><div class="mv2-card-title">Citi ESI</div><div class="mv2-bignum" style="color:var(--amb)">-12</div>
-          <div class="mv2-delta-row"><span class="mv2-delta mv2-dn">-8 5D</span><span class="mv2-delta mv2-neu">22nd %ile</span></div>
-          <div class="mv2-note">data prints missing consensus</div></div>
+      <!-- Risk-signal banner -->
+      <div class="mv2-card" style="margin-bottom:14px;border-left:4px solid var(${riskSig==='risk-on'?'--gn':riskSig==='risk-off'?'--rd':'--amb'})">
+        <div class="mv2-card-head">
+          <span class="mv2-card-title">RISK SIGNAL · <span class="mv2-chip ${sigCls}">${riskSig.toUpperCase()}</span></span>
+          <span class="mv2-card-meta">credit state: ${(ms.credit && ms.credit.state) || '—'} · VIX ${vix ? vix.toFixed(1) : '—'} (${vixState || '—'})</span>
+        </div>
+        <div class="mv2-divbox"><div style="flex:1"><b>Read:</b> ${riskSig === 'risk-on' ? 'Credit firm + safe-havens behaving. Trend-following long bias remains valid.' : riskSig === 'risk-off' ? 'Credit weakening or safe-havens bidding. Tighten stops, reduce gross.' : 'Mixed signals across credit + dollar + gold. Stay nimble; no strong directional bias.'} HYG-LQD spread Δ5d: ${ms.credit ? (ms.credit.hyg_lqd_chg5 >= 0 ? '+' : '') + Number(ms.credit.hyg_lqd_chg5).toFixed(2) + 'pp' : '—'} · 20d: ${ms.credit ? (ms.credit.hyg_lqd_chg20 >= 0 ? '+' : '') + Number(ms.credit.hyg_lqd_chg20).toFixed(2) + 'pp' : '—'}.</div></div>
       </div>
 
+      <!-- Macro signals table -->
+      <div class="mv2-card" style="margin-bottom:14px">
+        <div class="mv2-card-head"><span class="mv2-card-title">Cross-asset signals</span><span class="mv2-card-meta">HYG/LQD = credit · DXY = dollar · GLD = safe-haven</span></div>
+        <table class="mv2-t">
+          <thead><tr><th>Asset</th><th class="r">Price</th><th class="r">MA20</th><th class="r">Δ 5d</th><th class="r">Δ 20d</th><th>Trend</th></tr></thead>
+          <tbody>
+            ${sigRow('hyg', 'HYG · High Yield')}
+            ${sigRow('lqd', 'LQD · IG Credit')}
+            ${sigRow('dxy', 'UUP · USD')}
+            ${sigRow('gld', 'GLD · Gold')}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- VIX term structure (already in regime data) -->
       <div class="mv2-grid-2" style="margin-bottom:14px">
         <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">Yield Curve · Full</span></div>
-          <table class="mv2-t"><thead><tr><th>Tenor</th><th class="r">Yield</th><th class="r">Δ 1D</th><th class="r">Δ 30D</th></tr></thead><tbody>
-            <tr><td>3M</td><td class="r mv2-mono"><b>4.18%</b></td><td class="r mv2-mono mv2-dn">-2bp</td><td class="r mv2-mono mv2-dn">-22bp</td></tr>
-            <tr><td>2Y</td><td class="r mv2-mono"><b>3.92%</b></td><td class="r mv2-mono mv2-dn">-4bp</td><td class="r mv2-mono mv2-dn">-18bp</td></tr>
-            <tr><td>10Y</td><td class="r mv2-mono"><b>4.19%</b></td><td class="r mv2-mono mv2-up">+1bp</td><td class="r mv2-mono mv2-dn">-8bp</td></tr>
-            <tr><td>30Y</td><td class="r mv2-mono"><b>4.42%</b></td><td class="r mv2-mono mv2-up">+3bp</td><td class="r mv2-mono mv2-dn">-5bp</td></tr>
+          <div class="mv2-card-head"><span class="mv2-card-title">VIX Term Structure</span><span class="mv2-card-meta">${termStr || '—'}</span></div>
+          <table class="mv2-t"><tbody>
+            <tr><td>VIX spot</td><td class="r mv2-mono"><b>${vix ? vix.toFixed(2) : '—'}</b></td></tr>
+            <tr><td>VIX 3-month</td><td class="r mv2-mono"><b>${vix3m ? vix3m.toFixed(2) : '—'}</b></td></tr>
+            <tr><td>Term-structure ratio</td><td class="r mv2-mono"><b>${regime.vix && regime.vix.term_structure_ratio != null ? regime.vix.term_structure_ratio.toFixed(3) : '—'}</b></td></tr>
+            <tr><td>Vol regime</td><td class="r mv2-mono"><b>${(regime.vix && regime.vix.regime) || '—'}</b></td></tr>
+            <tr><td>Vol state</td><td class="r mv2-mono"><b>${vixState || '—'}</b></td></tr>
           </tbody></table>
         </div>
         <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">Credit Spreads + Flows</span></div>
-          <table class="mv2-t"><thead><tr><th>Asset</th><th class="r">Price</th><th class="r">5D Flow</th><th>Signal</th></tr></thead><tbody>
-            <tr><td><b>HYG</b> HY</td><td class="r mv2-mono">$79.85</td><td class="r mv2-mono mv2-up">+$420M</td><td><span class="mv2-chip mv2-chip-gn">FIRM</span></td></tr>
-            <tr><td><b>LQD</b> IG</td><td class="r mv2-mono">$108.41</td><td class="r mv2-mono mv2-up">+$210M</td><td><span class="mv2-chip mv2-chip-gn">FIRM</span></td></tr>
-            <tr><td><b>EMB</b> EM</td><td class="r mv2-mono">$89.32</td><td class="r mv2-mono mv2-dn">-$80M</td><td><span class="mv2-chip mv2-chip-am">SOFT</span></td></tr>
-            <tr><td><b>TLT</b> 20Y</td><td class="r mv2-mono">$88.04</td><td class="r mv2-mono mv2-up">+$150M</td><td><span class="mv2-chip mv2-chip-bare">FLAT</span></td></tr>
+          <div class="mv2-card-head"><span class="mv2-card-title">Put/Call + Sentiment</span></div>
+          <table class="mv2-t"><tbody>
+            <tr><td>Equity put/call</td><td class="r mv2-mono"><b>${ms.put_call && ms.put_call.equity_pc != null ? ms.put_call.equity_pc.toFixed(2) : '—'}</b></td><td><span class="mv2-chip ${ms.put_call && ms.put_call.signal === 'greed' ? 'mv2-chip-am' : ms.put_call && ms.put_call.signal === 'fear' ? 'mv2-chip-rd' : 'mv2-chip-bare'}">${(ms.put_call && ms.put_call.signal) || '—'}</span></td></tr>
+            <tr><td>Distribution state</td><td class="r mv2-mono"><b>${regime.distribution_state || '—'}</b></td><td>${regime.distribution_days != null ? regime.distribution_days + ' days' : '—'}</td></tr>
+            <tr><td>SPY 1m return</td><td class="r mv2-mono ${(regime.spy_1m_ret || 0) >= 0 ? 'mv2-up' : 'mv2-dn'}"><b>${regime.spy_1m_ret != null ? (regime.spy_1m_ret >= 0 ? '+' : '') + regime.spy_1m_ret.toFixed(2) + '%' : '—'}</b></td><td></td></tr>
+            <tr><td>Market cycle</td><td class="r mv2-mono"><b>${regime.market_cycle || '—'}</b></td><td></td></tr>
           </tbody></table>
         </div>
       </div>
 
-      <div class="mv2-grid-3" style="margin-bottom:14px">
-        <div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">Dollar Pairs</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td>EUR/USD</td><td class="r mv2-mono">1.0842</td><td class="r mv2-mono mv2-up">+0.6%</td></tr>
-            <tr><td>USD/JPY</td><td class="r mv2-mono">152.8</td><td class="r mv2-mono mv2-dn">-1.1%</td></tr>
-            <tr><td>USD/CNH</td><td class="r mv2-mono">7.21</td><td class="r mv2-mono mv2-dn">-0.3%</td></tr>
-            <tr><td>GBP/USD</td><td class="r mv2-mono">1.2745</td><td class="r mv2-mono mv2-up">+0.4%</td></tr>
-          </tbody></table></div>
-        <div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">Commodities</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td>Oil (WTI)</td><td class="r mv2-mono">$67.40</td><td class="r mv2-mono mv2-dn">-2.8%</td></tr>
-            <tr><td>Copper</td><td class="r mv2-mono">$4.21</td><td class="r mv2-mono mv2-up">+1.2%</td></tr>
-            <tr><td>Gold</td><td class="r mv2-mono">$3,182</td><td class="r mv2-mono mv2-up">+1.8%</td></tr>
-            <tr><td>Nat Gas</td><td class="r mv2-mono">$2.84</td><td class="r mv2-mono mv2-dn">-3.1%</td></tr>
-          </tbody></table></div>
-        <div class="mv2-card"><div class="mv2-card-head"><span class="mv2-card-title">Global Equity</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td>EWJ Japan</td><td class="r mv2-mono">$76.4</td><td class="r mv2-mono mv2-up">+1.2%</td></tr>
-            <tr><td>FXI China</td><td class="r mv2-mono">$38.2</td><td class="r mv2-mono mv2-dn">-0.8%</td></tr>
-            <tr><td>EWG Germany</td><td class="r mv2-mono">$48.7</td><td class="r mv2-mono mv2-up">+0.4%</td></tr>
-            <tr><td>EEM Emerging</td><td class="r mv2-mono">$54.1</td><td class="r mv2-mono mv2-up">+0.6%</td></tr>
-          </tbody></table></div>
-      </div>
-
+      <!-- Real economic calendar -->
       <div class="mv2-card">
-        <div class="mv2-card-head"><span class="mv2-card-title">Macro Calendar + Fed Dot Plot Delta</span></div>
-        <table class="mv2-t"><thead><tr><th>Date</th><th>Event</th><th>Consensus</th><th class="r">Market price</th><th>Impact</th></tr></thead><tbody>
-          <tr><td class="mv2-mono">May 29</td><td><b>PCE</b></td><td class="mv2-mono">+0.2% MoM</td><td class="r mv2-mono">+0.21%</td><td><span class="mv2-chip mv2-chip-am">HIGH</span></td></tr>
-          <tr><td class="mv2-mono">Jun 6</td><td><b>NFP</b></td><td class="mv2-mono">175k</td><td class="r mv2-mono">182k</td><td><span class="mv2-chip mv2-chip-am">HIGH</span></td></tr>
-          <tr><td class="mv2-mono">Jun 11</td><td><b>CPI</b></td><td class="mv2-mono">+0.2% MoM</td><td class="r mv2-mono">+0.22%</td><td><span class="mv2-chip mv2-chip-am">HIGH</span></td></tr>
-          <tr><td class="mv2-mono">Jun 17</td><td><b>FOMC</b></td><td class="mv2-mono">No change</td><td class="r mv2-mono">94% hold</td><td><span class="mv2-chip mv2-chip-rd">CRITICAL</span></td></tr>
-        </tbody></table>
-        <div style="margin-top:10px;padding:8px 10px;background:var(--bg-2);border-radius:3px;font-size:11px">
-          <b style="color:var(--cy)">Fed dot plot delta:</b> Mar dots: 2.0 cuts EOY · Current pricing: 2.5 cuts EOY · Market more dovish than Fed by 0.5 cuts
-        </div>
+        <div class="mv2-card-head"><span class="mv2-card-title">Economic Calendar · Next 30 days</span><span class="mv2-card-meta">${unique.length} events · HIGH/MED impact only</span></div>
+        ${unique.length === 0 ? '<div class="mv2-note" style="padding:18px">No upcoming events. Run the daily scan to refresh.</div>' : `
+        <table class="mv2-t">
+          <thead><tr><th>Date</th><th>Event</th><th class="r">Previous</th><th class="r">Estimate</th><th class="r">Actual</th><th>Impact</th></tr></thead>
+          <tbody>${unique.map(e => {
+            const imp = e._impact || 'LOW';
+            const impCls = imp === 'HIGH' ? 'mv2-chip-rd' : imp === 'MED' ? 'mv2-chip-am' : 'mv2-chip-bare';
+            return `<tr>
+              <td class="mv2-mono">${fmtDate(e.date)}</td>
+              <td><b>${(e.type || '').replace(/^US /, '')}</b></td>
+              <td class="r mv2-mono">${e.previous != null ? e.previous : '—'}</td>
+              <td class="r mv2-mono">${e.estimate != null ? e.estimate : '—'}</td>
+              <td class="r mv2-mono">${e.actual != null ? e.actual : '<span style="color:var(--ink-3)">tbd</span>'}</td>
+              <td><span class="mv2-chip ${impCls}">${imp}</span></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>`}
+        <div class="mv2-note">Sourced from EODHD economic-events endpoint. HIGH = market-moving (FOMC/CPI/NFP/Retail Sales). MED = sector-moving (PMI/ISM/Housing/Jobless).</div>
       </div>
-      ${_actionFooter(['📊 Yield curve regression', '⏰ Alert on dot delta', '🌍 Global rotation', '↓ Export'])}`;
+      ${_actionFooter(['⏰ Alert on next HIGH event', '↓ Export'])}`;
   }
-
   // ─── TAB 4: PRE-MARKET EDGE ───
   function renderPremarket(data) {
     return `${_head('🌅', 'Pre-Market Edge', '5:00-6:30am PT scanner · gappers · futures · earnings reactions · halts', 'Swing + Earnings Quant',

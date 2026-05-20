@@ -263,8 +263,13 @@ def _fetch_fundamentals_enrichment(tickers: list) -> dict:
         return {}
 
 
-def _fetch_economic_events(days_ahead: int = 14) -> list:
-    """Fetch upcoming US economic events from EODHD."""
+def _fetch_economic_events(days_ahead: int = 30) -> list:
+    """Fetch upcoming US economic events from EODHD with impact tier tagging.
+
+    2026-05-20: widened from 14d→30d and added _impact tier (HIGH/MED/LOW) rather
+    than dropping non-FOMC events. The Macro tab needs the full calendar
+    context, not just rate decisions.
+    """
     try:
         import eodhd_client as ec, requests, datetime
         key = ec._load_api_key()
@@ -272,16 +277,30 @@ def _fetch_economic_events(days_ahead: int = 14) -> list:
             return []
         today = datetime.date.today().isoformat()
         end   = (datetime.date.today() + datetime.timedelta(days=days_ahead)).isoformat()
-        url   = f'https://eodhd.com/api/economic-events?api_token={key}&fmt=json&from={today}&to={end}&limit=20&country=US'
+        url   = f'https://eodhd.com/api/economic-events?api_token={key}&fmt=json&from={today}&to={end}&limit=80&country=US'
         r = requests.get(url, timeout=8)
         if not r.ok:
             return []
-        data = r.json()
-        # Filter to high-impact US events
-        important = ['Federal', 'Interest Rate', 'CPI', 'Non-Farm', 'GDP', 'PMI',
-                     'PPI', 'Unemployment', 'Retail Sales', 'Housing', 'FOMC']
-        filtered = [e for e in data if any(kw in (e.get('type', '')) for kw in important)]
-        return filtered[:12]
+        data = r.json() or []
+        high_kw = ['Federal Funds', 'Interest Rate Decision', 'FOMC', 'CPI', 'Non-Farm',
+                   'NFP', 'GDP', 'PCE', 'Unemployment Rate', 'Retail Sales']
+        med_kw  = ['PMI', 'PPI', 'ISM', 'Initial Jobless', 'Continuing Claims',
+                   'Consumer Confidence', 'Housing Starts', 'Building Permits',
+                   'Durable Goods', 'Trade Balance', 'Industrial Production',
+                   'Existing Home', 'New Home', 'Factory Orders', 'JOLTS']
+        for e in data:
+            t = e.get('type', '') or ''
+            if any(kw in t for kw in high_kw):
+                e['_impact'] = 'HIGH'
+            elif any(kw in t for kw in med_kw):
+                e['_impact'] = 'MED'
+            else:
+                e['_impact'] = 'LOW'
+        filtered = sorted(
+            [e for e in data if e.get('_impact') in ('HIGH', 'MED')],
+            key=lambda x: x.get('date', '')
+        )
+        return filtered[:40]
     except Exception:
         return []
 
