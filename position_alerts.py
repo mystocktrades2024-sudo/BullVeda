@@ -216,8 +216,42 @@ def send_eod_digest(positions: list, summary: dict) -> bool:
     return True
 
 
+def _get_schwab_batch(tickers: list) -> dict:
+    """Batch real-time quotes from Schwab. Works 24/7 (AH, overnight, premarket).
+    Returns {ticker: {price, prev_close}}; empty dict on failure.
+    """
+    if not tickers:
+        return {}
+    try:
+        import schwab_client as _sc
+        data = _sc.get_quotes_batch(tickers[:500]) or {}
+        out = {}
+        for sym, blob in data.items():
+            if not isinstance(blob, dict): continue
+            q = blob.get("quote") or {}
+            try:
+                last = q.get("lastPrice")
+                pc = q.get("closePrice")
+                if last is None: continue
+                out[sym] = {
+                    "price": round(float(last), 2),
+                    "prev_close": round(float(pc), 2) if pc is not None else None,
+                }
+            except (TypeError, ValueError):
+                continue
+        return out
+    except Exception as e:
+        log.debug(f"Schwab batch quote failed: {e}")
+        return {}
+
+
 def run_alerts_pass():
     """Main entry \u2014 called from EOD manager or scan pipeline every 60s.
+
+    Price source strategy (2026-05-19):
+     - Schwab live-quote (real-time, 24/7) is PRIMARY for current price
+     - EODHD OHLCV is fallback for current + provides ATR + prev_close
+     - ATR is always computed from EODHD (Schwab doesn't expose it directly)
 
     Hard exits (stop_hit, t2_hit, adverse_gap) fire 24/7 \u2014 they trigger on
     breached price levels and can't wait until market open (premarket gaps
@@ -238,39 +272,78 @@ def run_alerts_pass():
         return {"skipped": True, "reason": "no_positions"}
 
     in_hours = _is_market_hours()
+    # Single batch call to Schwab for ALL position tickers \u2014 efficient + 24/7
+    tickers = [p.get("ticker") for p in positions if p.get("ticker")]
+    schwab_quotes = _get_schwab_batch(tickers)
+    schwab_hit, schwab_miss = 0, 0
     alerts_sent = []
     for p in positions:
         ticker = p.get("ticker", "")
+        if not ticker: continue
         try:
-            df, _ = fetch_ohlcv_with_failover(ticker, days=30)
-            if df is None or df.empty:
+            # Get EODHD OHLCV for ATR computation (always \u2014 Schwab doesn't give ATR)
+            df = None
+            try:
+                df_result, _ = fetch_ohlcv_with_failover(ticker, days=30)
+                if df_result is not None and not df_result.empty:
+                    df = df_result
+            except Exception:
+                pass
+
+            # Resolve current price: Schwab first (real-time, 24/7), EODHD fallback
+            sq = schwab_quotes.get(ticker)
+            current = None
+            prev_close = None
+            price_source = None
+            if sq and sq.get("price", 0) > 0:
+                current = sq["price"]
+                prev_close = sq.get("prev_close")
+                price_source = "schwab"
+                schwab_hit += 1
+            if current is None and df is not None:
+                current = float(df["Close"].iloc[-1])
+                prev_close = prev_close or (float(df["Close"].iloc[-2]) if len(df) >= 2 else current)
+                price_source = "eodhd"
+                schwab_miss += 1
+            if current is None:
+                log.debug(f"No price available for {ticker} \u2014 skipping")
                 continue
-            current = float(df["Close"].iloc[-1])
-            prev_close = float(df["Close"].iloc[-2]) if len(df) >= 2 else current
-            # ATR = avg of high-low over last 14 bars
-            if "High" in df.columns and "Low" in df.columns and len(df) >= 14:
-                atr = (df["High"].tail(14) - df["Low"].tail(14)).mean()
+
+            # Backfill prev_close from EODHD if Schwab didn't have it
+            if not prev_close and df is not None and len(df) >= 2:
+                prev_close = float(df["Close"].iloc[-2])
+            prev_close = prev_close or current
+
+            # ATR from EODHD (Schwab doesn't expose intra-bar OHLC easily)
+            if df is not None and "High" in df.columns and "Low" in df.columns and len(df) >= 14:
+                atr = float((df["High"].tail(14) - df["Low"].tail(14)).mean())
             else:
-                atr = current * 0.02
+                atr = current * 0.02  # fallback 2%
 
             # HARD EXITS \u2014 fire 24/7 regardless of session
             if check_stop_hit(p, current):
-                alerts_sent.append({"ticker": ticker, "type": "stop_hit"})
+                alerts_sent.append({"ticker": ticker, "type": "stop_hit", "price_source": price_source})
             if check_t2_hit(p, current):
-                alerts_sent.append({"ticker": ticker, "type": "t2_hit"})
+                alerts_sent.append({"ticker": ticker, "type": "t2_hit", "price_source": price_source})
             if check_adverse_gap(p, current, prev_close, atr):
-                alerts_sent.append({"ticker": ticker, "type": "adverse_gap"})
+                alerts_sent.append({"ticker": ticker, "type": "adverse_gap", "price_source": price_source})
 
-            # SOFT ALERTS \u2014 regular hours only (avoid pre/post-market noise on spreads)
+            # SOFT ALERTS \u2014 regular hours only (extended-hour spreads are wide)
             if in_hours:
                 if check_stop_approach(p, current, atr):
-                    alerts_sent.append({"ticker": ticker, "type": "stop_approach"})
+                    alerts_sent.append({"ticker": ticker, "type": "stop_approach", "price_source": price_source})
                 if check_t1_hit(p, current):
-                    alerts_sent.append({"ticker": ticker, "type": "t1_hit"})
+                    alerts_sent.append({"ticker": ticker, "type": "t1_hit", "price_source": price_source})
         except Exception as e:
             log.debug(f"Alert check failed for {ticker}: {e}")
 
-    return {"alerts_sent": alerts_sent, "positions_checked": len(positions), "in_hours": in_hours}
+    return {
+        "alerts_sent": alerts_sent,
+        "positions_checked": len(positions),
+        "in_hours": in_hours,
+        "schwab_hit": schwab_hit,
+        "schwab_miss": schwab_miss,
+    }
 
 
 if __name__ == "__main__":
