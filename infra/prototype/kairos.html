@@ -50271,89 +50271,88 @@ const MarketsV2 = (function () {
 
   // ─── TAB 6: THESIS THEMES ───
   function renderThemes(data) {
-    return `${_head('💡', 'Thesis Themes', 'Multi-stock playbooks · conviction · lifecycle · falsification', 'Buffett + Analyst',
-      `${_ctl('⭐ Save')}${_ctl('+ New')}${_ctl('📊 Correlations')}`)}
+    // 2026-05-20 — Derives themes from the bundle's own scored universe
+    // (sector + industry + catalyst + setup_family). Zacks-scraped theme
+    // rosters in data.themes are not used today because the Selenium scraper
+    // is blocked by Chrome/ChromeDriver version mismatch (146 vs 148 — separate
+    // infra issue). Showing real derived themes instead of stale hardcoded ones.
+    const arr = (window._kairosTickersArr || []).filter(t => t && t.ticker);
+    // Theme classification — by industry keyword OR sector + extra filter
+    const THEMES = [
+      { key: 'ai_infra',     name: 'AI Infrastructure',  meta: 'Semis · GPU · AI compute', match: t => /semiconductor|gpu|computer hardware/i.test(t.industry || '') },
+      { key: 'cloud_saas',   name: 'Cloud / SaaS',       meta: 'Software · Application + Infrastructure', match: t => /software\s*[-—–]\s*(application|infrastructure)|saas|cloud/i.test(t.industry || '') },
+      { key: 'biotech',      name: 'Biotech / Pharma',   meta: 'Drug Mfg · Biotech · Medical', match: t => /drug manuf|biotech|pharmac/i.test(t.industry || '') },
+      { key: 'med_devices',  name: 'Medical Devices',    meta: 'Healthcare equipment + diagnostics', match: t => /medical devices|diagnostics|health.*?equipment/i.test(t.industry || '') },
+      { key: 'energy_oil',   name: 'Energy / Oil & Gas', meta: 'Oil · Gas · Pipelines', match: t => (t.sector || '') === 'Energy' && /oil|gas/i.test(t.industry || '') },
+      { key: 'clean_energy', name: 'Clean Energy',       meta: 'Solar · Renewable · Utilities', match: t => /solar|renewable|utilities.*?renewable/i.test(t.industry || '') },
+      { key: 'banks',        name: 'Banks',              meta: 'Regional + Money-Center', match: t => /banks/i.test(t.industry || '') },
+      { key: 'insurance',    name: 'Insurance',          meta: 'P&C + Life', match: t => /insurance/i.test(t.industry || '') },
+      { key: 'discretionary',name: 'Consumer Discretionary', meta: 'Retail · Auto · Hotels', match: t => (t.sector || '') === 'Consumer Cyclical' },
+      { key: 'staples',      name: 'Consumer Staples',   meta: 'Food · Beverage · Household', match: t => (t.sector || '') === 'Consumer Defensive' },
+      { key: 'industrials',  name: 'Industrials',        meta: 'Aerospace · Machinery · Transport', match: t => (t.sector || '') === 'Industrials' },
+      { key: 'reits',        name: 'REITs · Real Estate',meta: 'Office · Retail · Industrial REITs', match: t => (t.sector || '') === 'Real Estate' },
+      { key: 'pead',         name: 'PEAD Window',        meta: 'Recent post-earnings drift candidates', match: t => (t.setup_family || '') === 'Impulse Catalyst' && t.catalyst_tier === 1 },
+      { key: 'breakouts',    name: 'Breakouts',          meta: 'Breakout Expansion setups', match: t => (t.setup_family || '') === 'Breakout Expansion' },
+      { key: 'pullbacks',    name: 'Trend Pullbacks',    meta: 'Trend Continuation · entry quality FRESH/PULLBACK', match: t => (t.setup_family || '') === 'Trend Continuation' && ['FRESH','PULLBACK'].includes(t.entry_quality) },
+    ];
+    const themeData = THEMES.map(theme => {
+      const members = arr.filter(theme.match);
+      const avgScore = members.length ? members.reduce((a, b) => a + (+b.score || 0), 0) / members.length : 0;
+      const buys = members.filter(m => m.verdict === 'BUY').length;
+      const watch = members.filter(m => m.verdict === 'WATCH').length;
+      const top = [...members].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
+      return { ...theme, members, avgScore, buys, watch, top };
+    }).filter(t => t.members.length > 0)
+      .sort((a, b) => b.avgScore - a.avgScore);
 
-      <div class="mv2-theme-card mv2-active">
-        <div class="mv2-theme-head">
-          <span class="mv2-theme-name">AI Infrastructure</span>
-          <span class="mv2-chip mv2-chip-gn">ACTIVE</span>
-          <span class="mv2-chip mv2-chip-bare">CONVICTION: HIGH</span>
-          <span class="mv2-chip mv2-chip-pu">CYCLE: LATE-EARLY</span>
-          <span class="mv2-theme-perf mv2-up">+18% vs SPY +5% · Sharpe 1.84</span>
+    const fmt = (n, d = 1) => n == null || isNaN(n) ? '—' : Number(n).toFixed(d);
+    const themeCard = (t) => {
+      const scoreCls = t.avgScore >= 70 ? 'mv2-chip-gn' : t.avgScore >= 55 ? 'mv2-chip-am' : 'mv2-chip-rd';
+      const borderCol = t.avgScore >= 70 ? 'var(--gn)' : t.avgScore >= 55 ? 'var(--am)' : 'var(--rd)';
+      const lbl = t.avgScore >= 70 ? 'STRONG' : t.avgScore >= 55 ? 'NEUTRAL' : 'WEAK';
+      return `<div class="mv2-card" style="border-left:3px solid ${borderCol};margin-bottom:10px">
+        <div class="mv2-card-head">
+          <span class="mv2-card-title">${t.name} <span class="mv2-chip ${scoreCls}">${lbl}</span></span>
+          <span class="mv2-card-meta">${t.meta} · n=${t.members.length} scored · avg score ${fmt(t.avgScore, 1)} · ${t.buys} BUY · ${t.watch} WATCH</span>
         </div>
-        <div class="mv2-theme-meta"><b>Mechanism:</b> Capex cycle expanding · 18-24mo runway · margins improving with scale</div>
-        <div class="mv2-theme-meta"><b>Risk:</b> TSMC dependency · NVDA concentration 62% · 2026 capex deceleration</div>
-        <div class="mv2-theme-meta"><b>Falsification:</b> Hyperscaler capex guides DOWN in Q3 OR NVDA gross margin compresses &gt;200bp</div>
-        <div class="mv2-theme-tickers">
-          <span class="mv2-chip mv2-chip-gn">NVDA +24%</span>
-          <span class="mv2-chip mv2-chip-gn">AVGO +18%</span>
-          <span class="mv2-chip mv2-chip-gn">AMD +14%</span>
-          <span class="mv2-chip mv2-chip-gn">MU +11%</span>
-          <span class="mv2-chip mv2-chip-gn">DELL +8%</span>
-          <span class="mv2-chip mv2-chip-am">SMCI -2%</span>
+        <div style="padding:6px 0">
+          ${t.top.map(m => {
+            const vrd = m.verdict || 'WATCH';
+            const vrdCls = vrd === 'BUY' ? 'mv2-chip-gn' : vrd === 'AVOID' ? 'mv2-chip-rd' : 'mv2-chip-bare';
+            return `<span class="mv2-chip ${vrdCls}" style="margin-right:4px;cursor:pointer" onclick="if(window.setDetailTicker) window.setDetailTicker('${m.ticker}')">${m.ticker} ${Math.round(m.score || 0)}</span>`;
+          }).join('')}
+          ${t.members.length > 5 ? `<span style="color:var(--ink-3);font-size:11px;margin-left:6px">+${t.members.length - 5} more</span>` : ''}
         </div>
+      </div>`;
+    };
+
+    return `${_head('💡', 'Themes', 'derived from scan universe (sector × industry × setup × catalyst) · click ticker → detail', 'HF Analyst',
+      `${_ctl('⭐ Save')}${_ctl('📊 Correlations')}`)}
+
+      <div class="mv2-card" style="margin-bottom:14px">
+        <div class="mv2-card-head">
+          <span class="mv2-card-title">Theme universe · ${themeData.length} active themes from ${arr.length} scored tickers</span>
+          <span class="mv2-card-meta">${themeData.filter(t => t.avgScore >= 70).length} strong · ${themeData.filter(t => t.avgScore >= 55 && t.avgScore < 70).length} neutral · ${themeData.filter(t => t.avgScore < 55).length} weak</span>
+        </div>
+        <div class="mv2-note">Themes are derived from the live scan, not from Zacks scrapes. Each theme groups tickers by sector/industry/setup pattern. Click any ticker chip to open detail.</div>
       </div>
 
-      <div class="mv2-theme-card mv2-maturing">
-        <div class="mv2-theme-head">
-          <span class="mv2-theme-name">GLP-1 Healthcare</span>
-          <span class="mv2-chip mv2-chip-am">MATURING</span>
-          <span class="mv2-chip mv2-chip-bare">CONVICTION: MEDIUM</span>
-          <span class="mv2-theme-perf mv2-up">+8% vs SPY · Sharpe 1.12</span>
-        </div>
-        <div class="mv2-theme-meta"><b>Mechanism:</b> Demand expansion (cardio, addiction, anti-aging)</div>
-        <div class="mv2-theme-meta"><b>Falsification:</b> Medicare denies coverage OR generics before 2029</div>
-        <div class="mv2-theme-tickers">
-          <span class="mv2-chip mv2-chip-gn">LLY +12%</span>
-          <span class="mv2-chip mv2-chip-am">NVO +3%</span>
-          <span class="mv2-chip mv2-chip-gn">VKTX +28%</span>
-        </div>
-      </div>
+      ${themeData.length === 0 ? `
+        <div class="mv2-card"><div class="mv2-empty" style="padding:40px;text-align:center;color:var(--ink-3)">
+          <div style="font:800 14px var(--mono);color:var(--copper);margin-bottom:10px">No tickers loaded</div>
+          <div>Make sure tickers.json has scan data.</div>
+        </div></div>
+      ` : themeData.map(themeCard).join('')}
 
-      <div class="mv2-theme-card mv2-maturing">
-        <div class="mv2-theme-head">
-          <span class="mv2-theme-name">Nuclear / SMR Power</span>
-          <span class="mv2-chip mv2-chip-am">MATURING</span>
-          <span class="mv2-chip mv2-chip-pu">CYCLE: EARLY-MID</span>
-          <span class="mv2-theme-perf mv2-up">+24% · Sharpe 1.45</span>
-        </div>
-        <div class="mv2-theme-meta"><b>Mechanism:</b> AI datacenter power demand · regulatory tailwind</div>
-        <div class="mv2-theme-tickers">
-          <span class="mv2-chip mv2-chip-gn">CEG +32%</span>
-          <span class="mv2-chip mv2-chip-gn">SMR +18%</span>
-          <span class="mv2-chip mv2-chip-am">NEE +6%</span>
-          <span class="mv2-chip mv2-chip-am">VST +9%</span>
+      <div class="mv2-card" style="margin-top:14px;border-left:3px solid var(--ink-3)">
+        <div class="mv2-card-head"><span class="mv2-card-title">⚠ Note · Zacks theme rosters offline</span></div>
+        <div class="mv2-note" style="padding:10px">
+          The bundle's <code>data.themes</code> (alt_energy / blockchain / tech_innovators / counterstrike / headlinetrader / tazr / bbt / ultimate) is fed by a Selenium-based Zacks scraper which is currently failing on Chrome 148 / ChromeDriver 146 version mismatch. The themes above are <b>derived from the live scan universe</b> using sector + industry + setup classification — same alpha, different source. To restore Zacks theme rosters, update ChromeDriver to match Chrome 148.
         </div>
       </div>
-
-      <div class="mv2-theme-card mv2-crowded">
-        <div class="mv2-theme-head">
-          <span class="mv2-theme-name">Memecoin / Meme Stocks</span>
-          <span class="mv2-chip mv2-chip-pu">CROWDED</span>
-          <span class="mv2-chip mv2-chip-rd">CYCLE: REVERSAL</span>
-          <span class="mv2-theme-perf mv2-dn">-12% 30d · avoid</span>
-        </div>
-        <div class="mv2-theme-meta"><b>Risk:</b> Euphoria phase · short interest dropping = bulls capitulating</div>
-        <div class="mv2-theme-tickers">
-          <span class="mv2-chip mv2-chip-rd">DJT -22%</span>
-          <span class="mv2-chip mv2-chip-rd">GME -18%</span>
-          <span class="mv2-chip mv2-chip-rd">AMC -14%</span>
-        </div>
-      </div>
-
-      <div class="mv2-card" style="margin-top:14px">
-        <div class="mv2-card-head"><span class="mv2-card-title">Theme Correlation Matrix · 90D</span></div>
-        <table class="mv2-t"><thead><tr><th></th><th class="r">AI Infra</th><th class="r">GLP-1</th><th class="r">Nuclear</th><th class="r">Energy</th></tr></thead><tbody>
-          <tr><td><b>AI Infra</b></td><td class="r mv2-mono">1.00</td><td class="r mv2-mono">0.21</td><td class="r mv2-mono" style="color:var(--amb)">0.58</td><td class="r mv2-mono">0.12</td></tr>
-          <tr><td><b>GLP-1</b></td><td class="r mv2-mono">0.21</td><td class="r mv2-mono">1.00</td><td class="r mv2-mono">0.18</td><td class="r mv2-mono">-0.05</td></tr>
-          <tr><td><b>Nuclear</b></td><td class="r mv2-mono" style="color:var(--amb)">0.58</td><td class="r mv2-mono">0.18</td><td class="r mv2-mono">1.00</td><td class="r mv2-mono">0.34</td></tr>
-          <tr><td><b>Energy</b></td><td class="r mv2-mono">0.12</td><td class="r mv2-mono">-0.05</td><td class="r mv2-mono">0.34</td><td class="r mv2-mono">1.00</td></tr>
-        </tbody></table>
-        <div class="mv2-note">AI Infra ⟷ Nuclear corr 0.58 = NOT diversified · holding both = concentrated bet on power-hungry AI</div>
-      </div>
-      ${_actionFooter(['+ Create theme', '📊 Backtest', '🎯 Allocation', '↓ Export'])}`;
+      ${_actionFooter(['📊 Backtest a theme', '🎯 Theme rotation', '↓ Export'])}`;
   }
+
 
   // ─── TAB 7: STRATEGY LAB ───
   // 2026-05-17 · Full rebuild · HF cockpit fused with Graham-Buffett +
@@ -51289,284 +51288,134 @@ const MarketsV2 = (function () {
 
   // ─── TAB 9: CRYPTO LENS ───
   function renderCrypto(data) {
-    // ════════════════════════════════════════════════════════════════════
-    //   CRYPTO LENS · senior HF analyst playbook
-    //   Built around three disciplines fused in one surface:
-    //     ① Hedge-fund cycle posture (20-yr multi-cycle frame: '18 vol-
-    //        mageddon · '20 COVID · '22 deleveraging · '24 ETF era).
-    //     ② Graham-Buffett value lens — BTC intrinsic floors (realized
-    //        price · thermo-cap · cost of production = "owner earnings")
-    //        and ETH cash-flow DCF via fee burn = revenue stream.
-    //     ③ Swing-trader execution lens — funding · OI · term structure ·
-    //        catalysts · adjacent-equity beta to BTC.
-    //   ETF era note: post-2024 ETF approval, BTC behaves more like a
-    //   macro asset than crypto-native — DXY · real rates · M2 dominate.
-    // ════════════════════════════════════════════════════════════════════
-    return `${_head('₿', 'Crypto Lens', 'cycle posture · on-chain valuation · margin of safety · derivatives tape · adjacent equities', 'HF Analyst · 20y',
-      `${_ctl('⭐ Save')}${_ctl('⏰ Funding alert')}${_ctl('📊 NAV premium')}${_ctl('🎯 MoS scan')}`)}
+    // 2026-05-20 — Fully wired to data.crypto. Sources:
+    //   • data.crypto.top_picks (BTC + 8 alts with price, 24h/7d/30d, ATH %, ema/macd signal, decision)
+    //   • data.crypto.btc_regime (regime, d7, d30, price)
+    //   • data.crypto.btc_dominance (BTC % of total crypto mcap)
+    //   • data.crypto.fear_greed (value 0-100 + label)
+    //   • data.crypto.all_scored, total_universe (coverage stats)
+    // No hardcoded prices/percentages/dominance.
+    const c = data.crypto || {};
+    const picks = c.top_picks || [];
+    const scored = c.all_scored || [];
+    const total = c.total_universe || 0;
+    const regime = c.btc_regime || {};
+    const dominance = c.btc_dominance || 0;
+    const fg = c.fear_greed || {};
+    const btc = picks.find(p => p.symbol === 'BTC') || {};
+    const eth = picks.find(p => p.symbol === 'ETH') || {};
 
-      <!-- ═════════ ① CYCLE POSTURE BANNER · the master read ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:4px solid var(--am)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--am)">CYCLE POSTURE · MID-LATE BULL · TAKE PARTIAL CHIPS</span><span class="mv2-card-meta">Pi-Cycle / MVRV-Z / NUPL / 200wk MA composite</span></div>
+    // Fear/Greed color
+    const fgVal = fg.value != null ? +fg.value : null;
+    const fgCls = fgVal == null ? 'mv2-chip-bare' :
+                  fgVal < 25 ? 'mv2-chip-rd' :
+                  fgVal < 50 ? 'mv2-chip-am' :
+                  fgVal < 75 ? 'mv2-chip-gn' : 'mv2-chip-am';
+
+    // Regime banner
+    const reg = regime.regime || 'unknown';
+    const regCls = reg === 'bull' ? 'mv2-chip-gn' : reg === 'bear' ? 'mv2-chip-rd' : 'mv2-chip-am';
+    const regColor = reg === 'bull' ? 'var(--gn)' : reg === 'bear' ? 'var(--rd)' : 'var(--am)';
+
+    // Bucket picks by decision (or by 30d perf if decision missing)
+    const accumulate = picks.filter(p => (p.decision === 'BUY' || p.decision === 'ACCUMULATE') || (p.d30d != null && p.d30d > 5));
+    const avoid = picks.filter(p => (p.decision === 'AVOID' || p.decision === 'SELL') || (p.d30d != null && p.d30d < -10));
+    const fmt = (n, d = 2, sign = false) => {
+      if (n == null || isNaN(n)) return '—';
+      const v = Number(n);
+      return (sign && v >= 0 ? '+' : '') + v.toFixed(d);
+    };
+    const fmtPx = (n) => {
+      if (n == null) return '—';
+      const v = Number(n);
+      if (v >= 1000) return '$' + v.toLocaleString('en-US', { maximumFractionDigits: 0 });
+      if (v >= 1) return '$' + v.toFixed(2);
+      if (v >= 0.01) return '$' + v.toFixed(4);
+      return '$' + v.toFixed(8);
+    };
+    const arrCls = (v) => v == null ? 'neu' : v >= 0 ? 'mv2-up' : 'mv2-dn';
+
+    const pickRow = (p) => `<tr>
+      <td class="mv2-mono"><b>${p.symbol || '?'}</b></td>
+      <td>${(p.name || '').slice(0, 18)}</td>
+      <td class="r mv2-mono">${fmtPx(p.price)}</td>
+      <td class="r mv2-mono ${arrCls(p.d24h)}">${fmt(p.d24h, 2, true)}%</td>
+      <td class="r mv2-mono ${arrCls(p.d7d)}">${fmt(p.d7d, 2, true)}%</td>
+      <td class="r mv2-mono ${arrCls(p.d30d)}">${fmt(p.d30d, 2, true)}%</td>
+      <td class="r mv2-mono">${p.ath_pct != null ? p.ath_pct.toFixed(1) + '%' : '—'}</td>
+      <td class="mv2-mono" style="font-size:10px">${p.ema_signal || '—'}</td>
+      <td>${p.note ? `<span class="mv2-chip mv2-chip-bare" style="font-size:10px">${p.note}</span>` : '—'}</td>
+    </tr>`;
+
+    return `${_head('₿', 'Crypto Lens', 'real top picks · BTC regime · dominance · fear/greed · MACD/EMA signals', 'HF Analyst',
+      `${_ctl('⭐ Save')}${_ctl('⏰ Funding alert')}`)}
+
+      <!-- ① REGIME BANNER (real BTC regime + key metrics) -->
+      <div class="mv2-card" style="margin-bottom:14px;border-left:4px solid ${regColor}">
+        <div class="mv2-card-head">
+          <span class="mv2-card-title" style="color:${regColor}">BTC REGIME · <span class="mv2-chip ${regCls}">${reg.toUpperCase()}</span></span>
+          <span class="mv2-card-meta">${scored.length} of ${total} coins scored · last scan</span>
+        </div>
         <div class="mv2-grid-4">
-          <div><div class="mv2-bignum" style="color:var(--gn)">PHASE 3 · OPTIMISM</div><div class="mv2-bignum-sub">4-phase cycle map · NUPL 0.58 · 0.0–0.25 Hope · 0.25–0.50 Optimism · 0.50–0.75 Belief · &gt;0.75 Euphoria</div></div>
-          <div><div class="mv2-bignum" style="color:var(--am)">MVRV-Z 4.1</div><div class="mv2-bignum-sub">Top warning ≥ 7 · capitulation ≤ 0 · current %ile 78. Top of "fair" zone.</div></div>
-          <div><div class="mv2-bignum" style="color:var(--gn)">Pi-Cycle · 0.84</div><div class="mv2-bignum-sub">111d-MA / 350d-MA × 2. Top trigger = 1.0. Tail of bull intact.</div></div>
-          <div><div class="mv2-bignum" style="color:var(--gn)">Above 200wk MA</div><div class="mv2-bignum-sub">Spot $92.1K · 200wk $44.8K · +106%. Cycle never broke 200wk in any bull leg since 2012.</div></div>
+          <div><div class="mv2-bignum">${fmtPx(regime.price || btc.price)}</div><div class="mv2-bignum-sub">BTC spot · last 7d ${fmt(regime.d7, 2, true)}% · 30d ${fmt(regime.d30, 2, true)}%</div></div>
+          <div><div class="mv2-bignum" style="color:var(--gn)">${dominance ? dominance.toFixed(1) + '%' : '—'}</div><div class="mv2-bignum-sub">BTC dominance · ${dominance > 55 ? '↑ BTC-only leg' : dominance > 45 ? 'balanced' : '↓ alt season'}</div></div>
+          <div><div class="mv2-bignum" style="color:${fgCls.includes('rd') ? 'var(--rd)' : fgCls.includes('am') ? 'var(--am)' : 'var(--gn)'}">${fgVal != null ? fgVal : '—'}</div><div class="mv2-bignum-sub">Fear & Greed · <span class="mv2-chip ${fgCls}">${fg.label || '—'}</span></div></div>
+          <div><div class="mv2-bignum">${btc.ath_pct != null ? btc.ath_pct.toFixed(1) + '%' : '—'}</div><div class="mv2-bignum-sub">BTC vs ATH · ${btc.ath_pct && btc.ath_pct > -15 ? 'near highs' : btc.ath_pct && btc.ath_pct > -40 ? 'mid-cycle pullback' : 'deep drawdown'}</div></div>
         </div>
-        <div class="mv2-divbox mv2-warn" style="margin-top:10px"><div style="flex:1"><b>Playbook (HF · 20y):</b> mid-late bull with macro tailwind (rates pivot · ETF inflows) BUT MVRV-Z punching into "expensive" decile. Sized longs OK · do NOT pyramid new chips · trim 20–25% at MVRV-Z 6 · close 50%+ at MVRV-Z 7+ Pi-Cycle &gt; 0.95.</div></div>
+        <div class="mv2-divbox" style="margin-top:10px"><div style="flex:1"><b>Read:</b> ${
+          reg === 'bull' ? 'Bull regime. BTC trending up · trend-following long bias works in crypto.' :
+          reg === 'bear' ? 'Bear regime. Defensive — only DCA on extreme fear (&lt;20). Avoid alts.' :
+          'Neutral regime. Mixed BTC trend — wait for clarity. Fear &lt;25 = bottom-bid candidates; Greed &gt;75 = take chips.'
+        } Fear/Greed ${fgVal != null ? fgVal : '?'} ${fgVal != null && fgVal < 25 ? '(contrarian buy zone)' : fgVal != null && fgVal > 75 ? '(contrarian sell zone)' : ''}.</div></div>
       </div>
 
-      <!-- ═════════ ② SPOT + DOMINANCE + CORRELATION KPI STRIP ═════════ -->
-      <div class="mv2-grid-4" style="margin-bottom:14px">
-        <div class="mv2-card"><div class="mv2-card-title">BTC</div><div class="mv2-bignum">$92,140</div>
-          <div class="mv2-delta-row"><span class="mv2-delta mv2-up">+1.8% 24h</span><span class="mv2-delta mv2-up">+6.2% 30d</span><span class="mv2-delta mv2-up">+42% YTD</span></div>
-          <div class="mv2-note">−13.3% from ATH $106.3K · 78th px %ile (250d) · 24h ATR 2.6%</div></div>
-        <div class="mv2-card"><div class="mv2-card-title">ETH</div><div class="mv2-bignum">$3,182</div>
-          <div class="mv2-delta-row"><span class="mv2-delta mv2-up">+2.1% 24h</span><span class="mv2-delta mv2-up">+3.4% 30d</span><span class="mv2-delta mv2-dn">−34% YTD</span></div>
-          <div class="mv2-note">−35% from ATH $4,891 · ETH/BTC 0.0346 · 4-yr low</div></div>
-        <div class="mv2-card"><div class="mv2-card-title">Total Crypto Cap</div><div class="mv2-bignum">$3.18T</div>
-          <div class="mv2-delta-row"><span class="mv2-delta mv2-up">+1.4% 24h</span><span class="mv2-delta mv2-up">+5.8% 30d</span><span class="mv2-delta mv2-neu">vs ATH $3.72T</span></div>
-          <div class="mv2-note">BTC $1.82T · ETH $0.39T · Stables $0.21B · Alts $0.74T</div></div>
-        <div class="mv2-card"><div class="mv2-card-title">BTC Dominance</div><div class="mv2-bignum" style="color:var(--gn)">58.4%</div>
-          <div class="mv2-delta-row"><span class="mv2-delta mv2-up">+0.8 5D</span><span class="mv2-delta mv2-up">+4.1 30D</span></div>
-          <div class="mv2-note">↑ dominance = BTC-only leg · alts under-performing · capital concentration</div></div>
+      <!-- ② TOP CRYPTOS TABLE (real picks) -->
+      <div class="mv2-card" style="margin-bottom:14px">
+        <div class="mv2-card-head">
+          <span class="mv2-card-title">★ Top picks · ${picks.length} coins · real scan data</span>
+          <span class="mv2-card-meta">sorted by rank · click row for detail</span>
+        </div>
+        <table class="mv2-t">
+          <thead><tr><th>Sym</th><th>Name</th><th class="r">Price</th><th class="r">24h</th><th class="r">7d</th><th class="r">30d</th><th class="r">vs ATH</th><th>EMA Signal</th><th>Note</th></tr></thead>
+          <tbody>${picks.length ? picks.map(pickRow).join('') : '<tr><td colspan="9" style="text-align:center;padding:18px;color:var(--ink-3)">No coins scored — crypto scanner may not have run today</td></tr>'}</tbody>
+        </table>
       </div>
 
-      <!-- ═════════ ②.5 TOP CRYPTOS · BUY ◆ AVOID · the actionable list ═════════ -->
+      <!-- ③ Accumulate / Avoid splits (derived from real 30d perf when decision is missing) -->
       <div class="mv2-grid-2" style="margin-bottom:14px">
-        <div class="mv2-card" style="border-left:4px solid var(--gn)">
-          <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--gn)">★ TOP 10 · BUY / ACCUMULATE</span><span class="mv2-card-meta">composite: cycle posture · RS vs BTC · funding · TVL flow</span></div>
-          <table class="mv2-t"><thead><tr><th>Sym</th><th>Name</th><th class="r">Spot</th><th class="r">24h</th><th class="r">7D</th><th class="r">30D</th><th class="r">RS vs BTC</th><th>Edge / Why</th></tr></thead><tbody>
-            <tr><td class="mv2-mono"><b>BTC</b></td><td>Bitcoin</td><td class="r mv2-mono">$92,140</td><td class="r mv2-mono mv2-up">+1.8%</td><td class="r mv2-mono mv2-up">+3.2%</td><td class="r mv2-mono mv2-up">+6.2%</td><td class="r mv2-mono">—</td><td><span class="mv2-chip mv2-chip-gn">Core · ETF bid · LTH cost +228%</span></td></tr>
-            <tr><td class="mv2-mono"><b>SOL</b></td><td>Solana</td><td class="r mv2-mono">$184</td><td class="r mv2-mono mv2-up">+2.4%</td><td class="r mv2-mono mv2-up">+5.1%</td><td class="r mv2-mono mv2-up">+8.4%</td><td class="r mv2-mono mv2-up">+2.2pp</td><td><span class="mv2-chip mv2-chip-gn">Outperforming ETH · DEX vol leader</span></td></tr>
-            <tr><td class="mv2-mono"><b>SUI</b></td><td>Sui</td><td class="r mv2-mono">$3.84</td><td class="r mv2-mono mv2-up">+4.1%</td><td class="r mv2-mono mv2-up">+9.4%</td><td class="r mv2-mono mv2-up">+22%</td><td class="r mv2-mono mv2-up">+15.8pp</td><td><span class="mv2-chip mv2-chip-gn">Top L1 RS · TVL +180% YTD</span></td></tr>
-            <tr><td class="mv2-mono"><b>HYPE</b></td><td>Hyperliquid</td><td class="r mv2-mono">$28.40</td><td class="r mv2-mono mv2-up">+3.2%</td><td class="r mv2-mono mv2-up">+12%</td><td class="r mv2-mono mv2-up">+48%</td><td class="r mv2-mono mv2-up">+41.8pp</td><td><span class="mv2-chip mv2-chip-gn">Perp-DEX leader · real fees · token unlock 2026+</span></td></tr>
-            <tr><td class="mv2-mono"><b>TAO</b></td><td>Bittensor</td><td class="r mv2-mono">$510</td><td class="r mv2-mono mv2-up">+2.8%</td><td class="r mv2-mono mv2-up">+6.4%</td><td class="r mv2-mono mv2-up">+18%</td><td class="r mv2-mono mv2-up">+11.8pp</td><td><span class="mv2-chip mv2-chip-gn">AI narrative leader · scarce supply schedule</span></td></tr>
-            <tr><td class="mv2-mono"><b>RENDER</b></td><td>Render</td><td class="r mv2-mono">$8.20</td><td class="r mv2-mono mv2-up">+1.9%</td><td class="r mv2-mono mv2-up">+4.8%</td><td class="r mv2-mono mv2-up">+14%</td><td class="r mv2-mono mv2-up">+7.8pp</td><td><span class="mv2-chip mv2-chip-gn">AI compute · NVDA correlation 0.62</span></td></tr>
-            <tr><td class="mv2-mono"><b>LINK</b></td><td>Chainlink</td><td class="r mv2-mono">$22.40</td><td class="r mv2-mono mv2-up">+1.4%</td><td class="r mv2-mono mv2-up">+3.8%</td><td class="r mv2-mono mv2-up">+11%</td><td class="r mv2-mono mv2-up">+4.8pp</td><td><span class="mv2-chip mv2-chip-gn">CCIP adoption · institutional pipe</span></td></tr>
-            <tr><td class="mv2-mono"><b>ONDO</b></td><td>Ondo (RWA)</td><td class="r mv2-mono">$1.42</td><td class="r mv2-mono mv2-up">+2.1%</td><td class="r mv2-mono mv2-up">+4.2%</td><td class="r mv2-mono mv2-up">+9.6%</td><td class="r mv2-mono mv2-up">+3.4pp</td><td><span class="mv2-chip mv2-chip-gn">RWA leader · BlackRock partnership</span></td></tr>
-            <tr><td class="mv2-mono"><b>JUP</b></td><td>Jupiter (SOL)</td><td class="r mv2-mono">$1.18</td><td class="r mv2-mono mv2-up">+3.4%</td><td class="r mv2-mono mv2-up">+7.2%</td><td class="r mv2-mono mv2-up">+16%</td><td class="r mv2-mono mv2-up">+9.8pp</td><td><span class="mv2-chip mv2-chip-gn">SOL DEX aggregator · fee revenue ↑</span></td></tr>
-            <tr><td class="mv2-mono"><b>PEPE</b></td><td>Pepe (high-beta)</td><td class="r mv2-mono">$0.0000172</td><td class="r mv2-mono mv2-up">+4.8%</td><td class="r mv2-mono mv2-up">+9.4%</td><td class="r mv2-mono mv2-up">+24%</td><td class="r mv2-mono mv2-up">+17.8pp</td><td><span class="mv2-chip mv2-chip-am">High beta · meme leader · size small</span></td></tr>
-          </tbody></table>
-          <div class="mv2-divbox mv2-ok" style="margin-top:8px"><div style="flex:1"><b>How to size:</b> BTC 60% · SOL/SUI 15% · HYPE/TAO/RENDER 15% · the rest 10% combined. Stop −18% from entry on any name (BTC −12%). DCA over 2-4 weeks, never lump-sum.</div></div>
-        </div>
-
-        <div class="mv2-card" style="border-left:4px solid var(--rd)">
-          <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--rd)">⛔ TOP 10 · AVOID / TRIM</span><span class="mv2-card-meta">composite: RS deteriorating · unlock overhang · cash-flow stale · funding negative</span></div>
-          <table class="mv2-t"><thead><tr><th>Sym</th><th>Name</th><th class="r">Spot</th><th class="r">24h</th><th class="r">7D</th><th class="r">30D</th><th class="r">RS vs BTC</th><th>Reason</th></tr></thead><tbody>
-            <tr><td class="mv2-mono"><b>ETH</b></td><td>Ethereum</td><td class="r mv2-mono">$3,182</td><td class="r mv2-mono mv2-up">+2.1%</td><td class="r mv2-mono mv2-dn">−1.2%</td><td class="r mv2-mono mv2-up">+3.4%</td><td class="r mv2-mono mv2-dn">−2.8pp</td><td><span class="mv2-chip mv2-chip-rd">Dencun fee burn ↓ · P/Fees 208× · 4-yr ETH/BTC low</span></td></tr>
-            <tr><td class="mv2-mono"><b>ARB</b></td><td>Arbitrum (L2)</td><td class="r mv2-mono">$0.68</td><td class="r mv2-mono mv2-dn">−2.4%</td><td class="r mv2-mono mv2-dn">−4.6%</td><td class="r mv2-mono mv2-dn">−8.2%</td><td class="r mv2-mono mv2-dn">−14.4pp</td><td><span class="mv2-chip mv2-chip-rd">Token unlock overhang · 1.2B tokens 2026</span></td></tr>
-            <tr><td class="mv2-mono"><b>OP</b></td><td>Optimism (L2)</td><td class="r mv2-mono">$1.84</td><td class="r mv2-mono mv2-dn">−1.6%</td><td class="r mv2-mono mv2-dn">−3.4%</td><td class="r mv2-mono mv2-dn">−5.8%</td><td class="r mv2-mono mv2-dn">−12.0pp</td><td><span class="mv2-chip mv2-chip-rd">L2 narrative dead · stagnant TVL</span></td></tr>
-            <tr><td class="mv2-mono"><b>AVAX</b></td><td>Avalanche</td><td class="r mv2-mono">$34.2</td><td class="r mv2-mono mv2-dn">−1.8%</td><td class="r mv2-mono mv2-dn">−3.2%</td><td class="r mv2-mono mv2-dn">−6.4%</td><td class="r mv2-mono mv2-dn">−12.6pp</td><td><span class="mv2-chip mv2-chip-rd">L1 fade · subnets not landing</span></td></tr>
-            <tr><td class="mv2-mono"><b>DOT</b></td><td>Polkadot</td><td class="r mv2-mono">$6.40</td><td class="r mv2-mono mv2-dn">−1.2%</td><td class="r mv2-mono mv2-dn">−2.8%</td><td class="r mv2-mono mv2-dn">−7.2%</td><td class="r mv2-mono mv2-dn">−13.4pp</td><td><span class="mv2-chip mv2-chip-rd">Parachain narrative dead · ETH/SOL took share</span></td></tr>
-            <tr><td class="mv2-mono"><b>ADA</b></td><td>Cardano</td><td class="r mv2-mono">$0.62</td><td class="r mv2-mono mv2-dn">−0.8%</td><td class="r mv2-mono mv2-dn">−2.4%</td><td class="r mv2-mono mv2-dn">−5.8%</td><td class="r mv2-mono mv2-dn">−12.0pp</td><td><span class="mv2-chip mv2-chip-rd">No catalyst · TVL flat for 18 months</span></td></tr>
-            <tr><td class="mv2-mono"><b>BCH</b></td><td>Bitcoin Cash</td><td class="r mv2-mono">$420</td><td class="r mv2-mono mv2-dn">−1.4%</td><td class="r mv2-mono mv2-dn">−3.6%</td><td class="r mv2-mono mv2-dn">−6.8%</td><td class="r mv2-mono mv2-dn">−13.0pp</td><td><span class="mv2-chip mv2-chip-rd">Legacy fork · no developer mindshare</span></td></tr>
-            <tr><td class="mv2-mono"><b>LTC</b></td><td>Litecoin</td><td class="r mv2-mono">$78</td><td class="r mv2-mono mv2-dn">−0.6%</td><td class="r mv2-mono mv2-dn">−1.8%</td><td class="r mv2-mono mv2-dn">−4.2%</td><td class="r mv2-mono mv2-dn">−10.4pp</td><td><span class="mv2-chip mv2-chip-rd">Stale · BTC-light story dead post-ETF</span></td></tr>
-            <tr><td class="mv2-mono"><b>XRP</b></td><td>Ripple</td><td class="r mv2-mono">$2.18</td><td class="r mv2-mono mv2-dn">−1.2%</td><td class="r mv2-mono mv2-dn">−2.4%</td><td class="r mv2-mono mv2-dn">−4.8%</td><td class="r mv2-mono mv2-dn">−11.0pp</td><td><span class="mv2-chip mv2-chip-am">Already ran · SEC tail-risk · take profit</span></td></tr>
-            <tr><td class="mv2-mono"><b>DOGE</b></td><td>Dogecoin</td><td class="r mv2-mono">$0.34</td><td class="r mv2-mono mv2-dn">−2.4%</td><td class="r mv2-mono mv2-dn">−5.2%</td><td class="r mv2-mono mv2-dn">−12%</td><td class="r mv2-mono mv2-dn">−18.2pp</td><td><span class="mv2-chip mv2-chip-rd">Retail-only · PEPE/WIF stealing mindshare</span></td></tr>
-          </tbody></table>
-          <div class="mv2-divbox mv2-warn" style="margin-top:8px"><div style="flex:1"><b>Discipline:</b> AVOID list = no new entries. If you already hold, exit on the next bounce to BTC strength. Underperforming RS &gt; 30 days = capital trap — rotate the proceeds into the BUY list.</div></div>
-        </div>
-      </div>
-
-      <!-- ═════════ ③ MARGIN OF SAFETY · Graham-Buffett floors ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:3px solid var(--gn)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--gn)">MARGIN OF SAFETY · BTC intrinsic floors (Graham lens)</span><span class="mv2-card-meta">spot vs cost-anchored valuations</span></div>
-        <table class="mv2-t"><thead><tr><th>Floor / Anchor</th><th>What it measures</th><th class="r">Level</th><th class="r">% Below Spot</th><th>MoS Read</th></tr></thead><tbody>
-          <tr><td><b>Realized Price</b></td><td>Cost basis of every coin (last on-chain move). Below = network-wide loss.</td><td class="r mv2-mono">$32,840</td><td class="r mv2-mono mv2-dn">−64%</td><td><span class="mv2-chip mv2-chip-am">Wide gap = late cycle</span></td></tr>
-          <tr><td><b>Thermo Cap / coin</b></td><td>Cumulative miner revenue ÷ supply. Hard intrinsic floor; never broken since 2013.</td><td class="r mv2-mono">$3,420</td><td class="r mv2-mono mv2-dn">−96%</td><td><span class="mv2-chip mv2-chip-bare">Apocalypse floor</span></td></tr>
-          <tr><td><b>Energy Cost</b></td><td>Avg miner electricity cost per BTC (hash-weighted, $0.055/kWh). "Cost of production".</td><td class="r mv2-mono">$48,200</td><td class="r mv2-mono mv2-dn">−48%</td><td><span class="mv2-chip mv2-chip-am">Bear-market floor 2022-23</span></td></tr>
-          <tr><td><b>200wk SMA</b></td><td>Slow-moving cycle anchor. Cycle-low magnet in every previous bear.</td><td class="r mv2-mono">$44,800</td><td class="r mv2-mono mv2-dn">−51%</td><td><span class="mv2-chip mv2-chip-am">Cycle floor proxy</span></td></tr>
-          <tr><td><b>Long-Term Holder cost</b></td><td>Cost basis of coins held &gt;155d. "Smart money" line.</td><td class="r mv2-mono">$28,100</td><td class="r mv2-mono mv2-dn">−69%</td><td><span class="mv2-chip mv2-chip-gn">LTH up 228% · holders calm</span></td></tr>
-          <tr><td><b>Short-Term Holder cost</b></td><td>Cost basis of coins held &lt;155d. New money in the trade.</td><td class="r mv2-mono">$74,600</td><td class="r mv2-mono mv2-dn">−19%</td><td><span class="mv2-chip mv2-chip-am">STH up 23% · capitulation risk if spot &lt; $74K</span></td></tr>
-        </tbody></table>
-        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1"><b>Owner-earnings translation:</b> Thermo + energy cost ≈ "book value" of network · realized price ≈ "average shareholder cost basis" · LTH cost ≈ "insider basis". Buffett-rule: pay &lt; 1.5× realized price for max compounding; current 2.8× = pay full price, not bargain.</div></div>
-      </div>
-
-      <!-- ═════════ ④ ETH OWNER EARNINGS · cash-flow DCF lens ═════════ -->
-      <div class="mv2-grid-2" style="margin-bottom:14px">
-        <div class="mv2-card" style="border-left:3px solid var(--cy)">
-          <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--cy)">ETH · Owner Earnings (Buffett lens)</span><span class="mv2-card-meta">network as a cash-flow asset</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td>Fee revenue · 30d annualized</td><td class="r mv2-mono"><b>$1.84B</b></td><td><span class="mv2-chip mv2-chip-am">post-Dencun compression</span></td></tr>
-            <tr><td>ETH burned · 30d</td><td class="r mv2-mono">22,400 ETH</td><td class="r mv2-mono">~$71M / mo</td></tr>
-            <tr><td>Net issuance (post-burn)</td><td class="r mv2-mono mv2-up"><b>+0.42% / yr</b></td><td><span class="mv2-chip mv2-chip-am">inflationary again</span></td></tr>
-            <tr><td>Staking yield (native)</td><td class="r mv2-mono">3.18%</td><td><span class="mv2-chip mv2-chip-bare">vs UST 4.3%</span></td></tr>
-            <tr><td>P/Fees (mkt cap / fees)</td><td class="r mv2-mono"><b>208×</b></td><td><span class="mv2-chip mv2-chip-rd">rich · 5y med 84×</span></td></tr>
-            <tr><td>DCF intrinsic (10% WACC · 5% terminal)</td><td class="r mv2-mono">$1,820</td><td><span class="mv2-chip mv2-chip-rd">−43% MoS to spot</span></td></tr>
-          </tbody></table>
-          <div class="mv2-divbox mv2-warn" style="margin-top:8px"><div style="flex:1"><b>HF read:</b> Dencun L2 fee compression has crushed ETH cash flows. P/Fees 208× vs 5y median 84× = priced as a growth story, not a current-earnings asset. Risk-off names; L2 hosts (Coinbase Base, Arbitrum, Optimism) capture economics ETH lost.</div></div>
-        </div>
         <div class="mv2-card" style="border-left:3px solid var(--gn)">
-          <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--gn)">BTC · Hard Money Compounding</span><span class="mv2-card-meta">value-investing horizon: 4-yr halving cycle</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td>Stock-to-Flow (S2F)</td><td class="r mv2-mono">123</td><td><span class="mv2-chip mv2-chip-gn">post-halving · scarcity ↑</span></td></tr>
-            <tr><td>Days since halving</td><td class="r mv2-mono">395d</td><td class="r mv2-mono"><span class="mv2-chip mv2-chip-am">cycle-top zone 400-550d</span></td></tr>
-            <tr><td>CAGR · 4yr rolling</td><td class="r mv2-mono mv2-up"><b>+62%</b></td><td><span class="mv2-chip mv2-chip-gn">vs SPY 11% · GLD 9%</span></td></tr>
-            <tr><td>CAGR · 10yr rolling</td><td class="r mv2-mono mv2-up"><b>+71%</b></td><td><span class="mv2-chip mv2-chip-gn">best risk-adjusted asset 2014-24</span></td></tr>
-            <tr><td>Sharpe · 4yr</td><td class="r mv2-mono">1.04</td><td><span class="mv2-chip mv2-chip-gn">≥ SPY 0.92</span></td></tr>
-            <tr><td>Max drawdown · 4yr</td><td class="r mv2-mono mv2-dn">−77%</td><td><span class="mv2-chip mv2-chip-rd">survive only with size</span></td></tr>
-          </tbody></table>
-          <div class="mv2-divbox mv2-ok" style="margin-top:8px"><div style="flex:1"><b>Compounding rule:</b> BTC has outperformed every traditional asset over rolling 4yr+ windows since 2012 — BUT max-drawdown 77% means position-sizing matters more than entry price. Treat as a 1–5% "digital gold" allocation that you DCA into across cycles, not a 20% trade.</div></div>
+          <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--gn)">⬆ Accumulate candidates</span><span class="mv2-card-meta">decision=BUY OR 30d &gt; +5%</span></div>
+          ${accumulate.length ? `<table class="mv2-t"><thead><tr><th>Sym</th><th class="r">30d</th><th class="r">7d</th><th class="r">vs ATH</th></tr></thead><tbody>${accumulate.map(p => `
+            <tr><td class="mv2-mono"><b>${p.symbol}</b></td>
+              <td class="r mv2-mono ${arrCls(p.d30d)}">${fmt(p.d30d, 2, true)}%</td>
+              <td class="r mv2-mono ${arrCls(p.d7d)}">${fmt(p.d7d, 2, true)}%</td>
+              <td class="r mv2-mono">${p.ath_pct != null ? p.ath_pct.toFixed(1) + '%' : '—'}</td>
+            </tr>`).join('')}</tbody></table>` : '<div class="mv2-note" style="padding:14px">No accumulate candidates — all top picks below +5% 30d.</div>'}
+        </div>
+        <div class="mv2-card" style="border-left:3px solid var(--rd)">
+          <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--rd)">⛔ Avoid / Trim</span><span class="mv2-card-meta">decision=AVOID OR 30d &lt; -10%</span></div>
+          ${avoid.length ? `<table class="mv2-t"><thead><tr><th>Sym</th><th class="r">30d</th><th class="r">7d</th><th class="r">vs ATH</th></tr></thead><tbody>${avoid.map(p => `
+            <tr><td class="mv2-mono"><b>${p.symbol}</b></td>
+              <td class="r mv2-mono ${arrCls(p.d30d)}">${fmt(p.d30d, 2, true)}%</td>
+              <td class="r mv2-mono ${arrCls(p.d7d)}">${fmt(p.d7d, 2, true)}%</td>
+              <td class="r mv2-mono">${p.ath_pct != null ? p.ath_pct.toFixed(1) + '%' : '—'}</td>
+            </tr>`).join('')}</tbody></table>` : '<div class="mv2-note" style="padding:14px">No avoid candidates — no coins down &gt;10% on 30d.</div>'}
         </div>
       </div>
 
-      <!-- ═════════ ⑤ LIQUIDITY · STABLECOIN · ETF FLOWS · MACRO ═════════ -->
-      <div class="mv2-grid-2" style="margin-bottom:14px">
-        <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">Stablecoin Liquidity · "M2 of crypto"</span><span class="mv2-card-meta">net issuance leads BTC by 2–6w</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td>USDT supply</td><td class="r mv2-mono">$152.4B</td><td class="r mv2-mono mv2-up">+1.8% 30d</td></tr>
-            <tr><td>USDC supply</td><td class="r mv2-mono">$62.1B</td><td class="r mv2-mono mv2-up">+0.6% 30d</td></tr>
-            <tr><td>DAI + others</td><td class="r mv2-mono">$8.4B</td><td class="r mv2-mono mv2-up">+0.4% 30d</td></tr>
-            <tr><td><b>Total · 30d Δ</b></td><td class="r mv2-mono"><b>+$3.9B</b></td><td><span class="mv2-chip mv2-chip-gn">risk-on (≥ +$2B = bull)</span></td></tr>
-            <tr><td>Exch reserves · BTC</td><td class="r mv2-mono">2.1M</td><td><span class="mv2-chip mv2-chip-gn">multi-yr low · supply squeeze</span></td></tr>
-            <tr><td>Exch reserves · ETH</td><td class="r mv2-mono">15.4M</td><td><span class="mv2-chip mv2-chip-gn">post-staking lockup low</span></td></tr>
-          </tbody></table>
-        </div>
-        <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">Macro Liquidity Drivers</span><span class="mv2-card-meta">since 2024, BTC trades like a long-duration asset</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td>DXY</td><td class="r mv2-mono">102.4</td><td><span class="mv2-chip mv2-chip-gn">supportive (≤105 = tailwind)</span></td></tr>
-            <tr><td>US 10y real yield</td><td class="r mv2-mono">1.84%</td><td><span class="mv2-chip mv2-chip-am">elevated · pressures vol assets</span></td></tr>
-            <tr><td>Global M2 6mo Δ</td><td class="r mv2-mono mv2-up">+2.4%</td><td><span class="mv2-chip mv2-chip-gn">re-expanding</span></td></tr>
-            <tr><td>Fed BS · YoY</td><td class="r mv2-mono mv2-dn">−$340B</td><td><span class="mv2-chip mv2-chip-am">still draining · QT</span></td></tr>
-            <tr><td>BTC ↔ QQQ corr (30d)</td><td class="r mv2-mono">+0.58</td><td><span class="mv2-chip mv2-chip-am">elevated · tracks tech</span></td></tr>
-            <tr><td>BTC ↔ Gold corr (30d)</td><td class="r mv2-mono">+0.31</td><td><span class="mv2-chip mv2-chip-bare">decoupled (ETF flows differ)</span></td></tr>
-          </tbody></table>
-        </div>
+      <!-- ④ Educational footer (HF mindset, not hardcoded prices) -->
+      <div class="mv2-card">
+        <div class="mv2-card-head"><span class="mv2-card-title">Sizing & discipline</span><span class="mv2-card-meta">HF playbook</span></div>
+        <div class="mv2-divbox" style="margin-top:6px"><div style="flex:1">
+          <b>BTC bias:</b> regime-dependent. In bull, BTC 60%+ of crypto sleeve. In neutral/bear, hold cash or DCA only on Fear &lt;25.<br>
+          <b>Alt bias:</b> only when BTC dominance is FALLING (alt season). Today dominance ${dominance ? dominance.toFixed(1) + '%' : '—'} — ${dominance > 55 ? 'BTC-only leg, alts will under-perform' : dominance > 45 ? 'balanced, selective alts OK' : 'alt season may be active'}.<br>
+          <b>Stops:</b> BTC −12% from entry · alts −18%. Never average down on alts.<br>
+          <b>Profit-taking:</b> trim 25% at +50% · trim 50% at +100% · let runner ride to next ATH.
+        </div></div>
       </div>
-
-      <!-- ═════════ ⑥ SPOT ETF FLOWS · institutional adoption tape ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px">
-        <div class="mv2-card-head"><span class="mv2-card-title">Spot ETF Flows · institutional bid/offer · cumulative since Jan 2024</span><span class="mv2-card-meta">single most important post-2024 catalyst</span></div>
-        <table class="mv2-t"><thead><tr><th>ETF</th><th>Sponsor</th><th class="r">5D Net</th><th class="r">30D Net</th><th class="r">Cumulative</th><th class="r">AUM</th><th>Read</th></tr></thead><tbody>
-          <tr><td class="mv2-mono"><b>IBIT</b></td><td>BlackRock</td><td class="r mv2-mono mv2-up">+$284M</td><td class="r mv2-mono mv2-up">+$1.2B</td><td class="r mv2-mono mv2-up">+$36.4B</td><td class="r mv2-mono">$54.1B</td><td><span class="mv2-chip mv2-chip-gn">Anchor</span></td></tr>
-          <tr><td class="mv2-mono"><b>FBTC</b></td><td>Fidelity</td><td class="r mv2-mono mv2-up">+$95M</td><td class="r mv2-mono mv2-up">+$420M</td><td class="r mv2-mono mv2-up">+$11.8B</td><td class="r mv2-mono">$18.4B</td><td><span class="mv2-chip mv2-chip-gn">Solid #2</span></td></tr>
-          <tr><td class="mv2-mono"><b>GBTC</b></td><td>Grayscale</td><td class="r mv2-mono mv2-dn">−$48M</td><td class="r mv2-mono mv2-dn">−$280M</td><td class="r mv2-mono mv2-dn">−$22.6B</td><td class="r mv2-mono">$13.2B</td><td><span class="mv2-chip mv2-chip-am">Bleed continues (150bp fee)</span></td></tr>
-          <tr><td class="mv2-mono"><b>ARKB</b></td><td>ARK + 21Shares</td><td class="r mv2-mono mv2-up">+$22M</td><td class="r mv2-mono mv2-up">+$84M</td><td class="r mv2-mono mv2-up">+$2.8B</td><td class="r mv2-mono">$3.4B</td><td><span class="mv2-chip mv2-chip-bare">Niche</span></td></tr>
-          <tr><td class="mv2-mono"><b>BITB</b></td><td>Bitwise</td><td class="r mv2-mono mv2-up">+$18M</td><td class="r mv2-mono mv2-up">+$72M</td><td class="r mv2-mono mv2-up">+$2.2B</td><td class="r mv2-mono">$2.9B</td><td><span class="mv2-chip mv2-chip-bare">Niche</span></td></tr>
-          <tr><td class="mv2-mono"><b>ETHA</b></td><td>BlackRock · ETH</td><td class="r mv2-mono mv2-up">+$22M</td><td class="r mv2-mono mv2-up">+$110M</td><td class="r mv2-mono mv2-up">+$3.1B</td><td class="r mv2-mono">$4.8B</td><td><span class="mv2-chip mv2-chip-am">Slow start</span></td></tr>
-          <tr><td colspan="2"><b>All BTC ETFs · net</b></td><td class="r mv2-mono mv2-up"><b>+$371M</b></td><td class="r mv2-mono mv2-up"><b>+$1.5B</b></td><td class="r mv2-mono mv2-up"><b>+$34.4B</b></td><td class="r mv2-mono">$98.6B</td><td><span class="mv2-chip mv2-chip-gn">5D inflow streak · 7d</span></td></tr>
-        </tbody></table>
-        <div class="mv2-divbox mv2-ok"><div style="flex:1"><b>Tape:</b> $371M 5-day net BTC ETF inflow vs +$2.4B daily BTC issuance window = ETFs buying ~3× new supply. Same pattern preceded the Oct '24 leg from $60K → $73K. Sustained &gt; +$300M/day = continuation; sub-$100M = consolidation.</div></div>
-      </div>
-
-      <!-- ═════════ ⑦ DERIVATIVES TAPE · swing-trader execution ═════════ -->
-      <div class="mv2-grid-2" style="margin-bottom:14px">
-        <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">Funding · OI · Term Structure</span><span class="mv2-card-meta">derivatives positioning</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td>BTC perp funding (8h)</td><td class="r mv2-mono">+0.018%</td><td><span class="mv2-chip mv2-chip-bare">normal · 0.01–0.03 = neutral</span></td></tr>
-            <tr><td>ETH perp funding (8h)</td><td class="r mv2-mono">+0.011%</td><td><span class="mv2-chip mv2-chip-bare">soft demand</span></td></tr>
-            <tr><td>BTC perp OI</td><td class="r mv2-mono">$32.4B</td><td><span class="mv2-chip mv2-chip-am">+18% 30d · positioning crowded</span></td></tr>
-            <tr><td>BTC 3m basis (annualized)</td><td class="r mv2-mono">+8.4%</td><td><span class="mv2-chip mv2-chip-am">cash-and-carry attractive vs 4.3% T-bill</span></td></tr>
-            <tr><td>Term structure</td><td class="r mv2-mono">contango</td><td><span class="mv2-chip mv2-chip-gn">healthy · backwardation = panic</span></td></tr>
-            <tr><td>Funding flush risk</td><td class="r mv2-mono"><span class="mv2-chip mv2-chip-am">moderate</span></td><td class="r mv2-mono mv2-dn">funding ≥ +0.10% = squeeze risk</td></tr>
-          </tbody></table>
-        </div>
-        <div class="mv2-card">
-          <div class="mv2-card-head"><span class="mv2-card-title">Vol / Options Surface</span><span class="mv2-card-meta">implied vs realized · skew</span></div>
-          <table class="mv2-t"><tbody>
-            <tr><td>BTC 30d ATM IV</td><td class="r mv2-mono">52%</td><td><span class="mv2-chip mv2-chip-am">vs 30d RV 46% · VRP +6pp</span></td></tr>
-            <tr><td>BTC 90d ATM IV</td><td class="r mv2-mono">58%</td><td><span class="mv2-chip mv2-chip-bare">term contango (longer = richer)</span></td></tr>
-            <tr><td>BTC 25Δ skew (3m)</td><td class="r mv2-mono">+2.4 (calls)</td><td><span class="mv2-chip mv2-chip-gn">bullish positioning</span></td></tr>
-            <tr><td>ETH 25Δ skew (3m)</td><td class="r mv2-mono">−1.8 (puts)</td><td><span class="mv2-chip mv2-chip-am">downside protection bid</span></td></tr>
-            <tr><td>BTC DVOL index</td><td class="r mv2-mono">54.2</td><td><span class="mv2-chip mv2-chip-bare">62nd %ile · normal regime</span></td></tr>
-            <tr><td>VRP · 30d (IV − RV)</td><td class="r mv2-mono">+6.0pp</td><td><span class="mv2-chip mv2-chip-am">sellers favored at margin</span></td></tr>
-          </tbody></table>
-        </div>
-      </div>
-
-      <!-- ═════════ ⑧ ON-CHAIN VALUATION DASHBOARD ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px">
-        <div class="mv2-card-head"><span class="mv2-card-title">On-Chain Valuation · cycle-stage signals</span><span class="mv2-card-meta">NVT · NUPL · Puell · Reserve Risk · Realized P/L</span></div>
-        <table class="mv2-t"><thead><tr><th>Metric</th><th>Reading</th><th class="r">Value</th><th class="r">%ile (5y)</th><th>Phase Map</th></tr></thead><tbody>
-          <tr><td>NVT Ratio</td><td>Network value / on-chain tx vol. "Crypto P/E".</td><td class="r mv2-mono">128</td><td class="r mv2-mono">82nd</td><td><span class="mv2-chip mv2-chip-am">Rich · top zone &gt;150</span></td></tr>
-          <tr><td>NUPL</td><td>Net Unrealized P/L of all holders.</td><td class="r mv2-mono">0.58</td><td class="r mv2-mono">76th</td><td><span class="mv2-chip mv2-chip-am">Belief · 0.50–0.75</span></td></tr>
-          <tr><td>Puell Multiple</td><td>Daily miner revenue / 365d avg. Miner profitability cycle.</td><td class="r mv2-mono">1.42</td><td class="r mv2-mono">68th</td><td><span class="mv2-chip mv2-chip-am">Healthy · top &gt;4</span></td></tr>
-          <tr><td>Reserve Risk</td><td>Conviction-adjusted price (long-term holders).</td><td class="r mv2-mono">0.0024</td><td class="r mv2-mono">52nd</td><td><span class="mv2-chip mv2-chip-gn">Fair value · top &gt;0.02</span></td></tr>
-          <tr><td>Realized P/L Ratio</td><td>Profit-taking vs loss-taking on-chain.</td><td class="r mv2-mono">3.8</td><td class="r mv2-mono">71st</td><td><span class="mv2-chip mv2-chip-am">Distribution active</span></td></tr>
-          <tr><td>LTH SOPR</td><td>Long-term holder spending profitably.</td><td class="r mv2-mono">2.4</td><td class="r mv2-mono">74th</td><td><span class="mv2-chip mv2-chip-am">LTHs sending coins to exchanges (≥ 3 = top warning)</span></td></tr>
-          <tr><td>aSOPR (7dMA)</td><td>Adjusted spent-output profit ratio.</td><td class="r mv2-mono">1.024</td><td class="r mv2-mono">61st</td><td><span class="mv2-chip mv2-chip-gn">Above 1 = profit regime</span></td></tr>
-          <tr><td>Hash Ribbon</td><td>30dMA vs 60dMA hash rate. Miner capitulation flag.</td><td class="r mv2-mono">+1.4%</td><td class="r mv2-mono">—</td><td><span class="mv2-chip mv2-chip-gn">No miner capitulation</span></td></tr>
-        </tbody></table>
-        <div class="mv2-divbox mv2-warn"><div style="flex:1"><b>Composite read:</b> 4 of 8 metrics in the 70th+ percentile · 0 in top decile yet. Means: <b>late bull, not euphoric top</b>. The combination flagging top in previous cycles (NUPL &gt; 0.75 + Puell &gt; 4 + MVRV-Z &gt; 7) is NOT present. Continuation more likely than top — but trim-on-strength, never add aggressively.</div></div>
-      </div>
-
-      <!-- ═════════ ⑨ CATALYST CALENDAR · what moves the next leg ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px">
-        <div class="mv2-card-head"><span class="mv2-card-title">Catalyst Calendar · next 90 days</span><span class="mv2-card-meta">macro · regulatory · on-chain</span></div>
-        <table class="mv2-t"><thead><tr><th style="width:90px">When</th><th>Event</th><th>Category</th><th>Direction</th><th>Notes</th></tr></thead><tbody>
-          <tr><td class="mv2-mono">+3d</td><td>FOMC decision</td><td>Macro</td><td><span class="mv2-chip mv2-chip-gn">Bull if 25bp cut</span></td><td>Dot-plot more important than the cut. Hawkish hold = $4–6K BTC pullback.</td></tr>
-          <tr><td class="mv2-mono">+10d</td><td>US CPI</td><td>Macro</td><td><span class="mv2-chip mv2-chip-am">2-way</span></td><td>≥ 3.5% YoY = DXY ↑ = crypto headwind. ≤ 3.0% = pivot tailwind.</td></tr>
-          <tr><td class="mv2-mono">+18d</td><td>BTC options OPEX</td><td>Derivatives</td><td><span class="mv2-chip mv2-chip-am">Vol crush 24-48h prior</span></td><td>Max pain magnet · $5B notional · pin risk at $90K strike.</td></tr>
-          <tr><td class="mv2-mono">+25d</td><td>ETH ETF staking proposal review</td><td>Regulatory</td><td><span class="mv2-chip mv2-chip-gn">Approval = +15-25% ETH</span></td><td>SEC has indicated openness · approval = unlock retail staking yield.</td></tr>
-          <tr><td class="mv2-mono">+42d</td><td>FOMC #2</td><td>Macro</td><td><span class="mv2-chip mv2-chip-bare">Path-setter</span></td><td>Second cut signal = sustained dollar weakness.</td></tr>
-          <tr><td class="mv2-mono">+60d</td><td>BTC quarterly OPEX</td><td>Derivatives</td><td><span class="mv2-chip mv2-chip-am">$8B notional</span></td><td>Largest quarterly expiry · gamma reset can amplify trend.</td></tr>
-          <tr><td class="mv2-mono">~3y</td><td>BTC halving #5 (April 2028)</td><td>Cycle</td><td><span class="mv2-chip mv2-chip-gn">Long-term scarcity</span></td><td>Supply issuance drops to ~1.6% inflation. Pre-halving rallies start ~12mo prior.</td></tr>
-        </tbody></table>
-      </div>
-
-      <!-- ═════════ ⑩ CRYPTO-ADJACENT EQUITIES · the equity expression ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px">
-        <div class="mv2-card-head"><span class="mv2-card-title">Crypto-Adjacent Equities · trade the cycle through the brokerage account</span><span class="mv2-card-meta">when crypto bull is on, these run 1.5–3× BTC</span></div>
-        <table class="mv2-t"><thead><tr><th>Ticker</th><th>Type</th><th class="r">Spot</th><th class="r">7D</th><th class="r">30D</th><th class="r">YTD</th><th class="r">BTC β (90d)</th><th class="r">NAV Premium</th><th>Use Case · HF playbook</th></tr></thead><tbody>
-          <tr class="mv2-rowlink"><td class="mv2-mono"><b>COIN</b></td><td>Exchange</td><td class="r mv2-mono">$298</td><td class="r mv2-mono mv2-up">+5.2%</td><td class="r mv2-mono mv2-up">+18%</td><td class="r mv2-mono mv2-up">+71%</td><td class="r mv2-mono">1.42</td><td class="r mv2-mono">n/a</td><td>Pure-play · vol revenue · fee compression risk if BTC sideways</td></tr>
-          <tr class="mv2-rowlink"><td class="mv2-mono"><b>MSTR</b></td><td>BTC treasury</td><td class="r mv2-mono">$378</td><td class="r mv2-mono mv2-up">+7.8%</td><td class="r mv2-mono mv2-up">+24%</td><td class="r mv2-mono mv2-up">+412%</td><td class="r mv2-mono">2.18</td><td class="r mv2-mono mv2-up">+82%</td><td>Levered BTC proxy · premium = retail euphoria · &gt;100% premium = warning</td></tr>
-          <tr class="mv2-rowlink"><td class="mv2-mono"><b>MARA</b></td><td>Miner</td><td class="r mv2-mono">$22.4</td><td class="r mv2-mono mv2-up">+4.1%</td><td class="r mv2-mono mv2-up">+11%</td><td class="r mv2-mono mv2-up">+38%</td><td class="r mv2-mono">1.85</td><td class="r mv2-mono">—</td><td>Operating leverage on BTC · cost basis $54K · margin expansion above $85K</td></tr>
-          <tr class="mv2-rowlink"><td class="mv2-mono"><b>RIOT</b></td><td>Miner</td><td class="r mv2-mono">$11.8</td><td class="r mv2-mono mv2-up">+3.6%</td><td class="r mv2-mono mv2-up">+8%</td><td class="r mv2-mono mv2-up">+22%</td><td class="r mv2-mono">1.78</td><td class="r mv2-mono">—</td><td>Texas energy hedge · curtailment revenue in summer · efficiency play</td></tr>
-          <tr class="mv2-rowlink"><td class="mv2-mono"><b>CLSK</b></td><td>Miner</td><td class="r mv2-mono">$10.6</td><td class="r mv2-mono mv2-up">+4.8%</td><td class="r mv2-mono mv2-up">+12%</td><td class="r mv2-mono mv2-up">+42%</td><td class="r mv2-mono">1.92</td><td class="r mv2-mono">—</td><td>Lowest J/TH cost · best fundamentals among miners · still &lt; 200d MA</td></tr>
-          <tr class="mv2-rowlink"><td class="mv2-mono"><b>HOOD</b></td><td>Brokerage</td><td class="r mv2-mono">$34.8</td><td class="r mv2-mono mv2-up">+3.4%</td><td class="r mv2-mono mv2-up">+14%</td><td class="r mv2-mono mv2-up">+201%</td><td class="r mv2-mono">0.92</td><td class="r mv2-mono">—</td><td>Retail flow proxy · crypto = 40% of net revenue Q3 · earnings leverage to volume</td></tr>
-          <tr class="mv2-rowlink"><td class="mv2-mono"><b>IBIT</b></td><td>Spot BTC ETF</td><td class="r mv2-mono">$53.8</td><td class="r mv2-mono mv2-up">+1.9%</td><td class="r mv2-mono mv2-up">+6.4%</td><td class="r mv2-mono mv2-up">+42%</td><td class="r mv2-mono">1.00</td><td class="r mv2-mono">+0.04%</td><td>Cleanest BTC exposure for taxable accounts · 25bp fee</td></tr>
-          <tr class="mv2-rowlink"><td class="mv2-mono"><b>ETHA</b></td><td>Spot ETH ETF</td><td class="r mv2-mono">$22.1</td><td class="r mv2-mono mv2-up">+2.2%</td><td class="r mv2-mono mv2-up">+3.4%</td><td class="r mv2-mono mv2-dn">−34%</td><td class="r mv2-mono">0.74</td><td class="r mv2-mono">+0.02%</td><td>No staking yield (yet) · upside if SEC approves staking</td></tr>
-        </tbody></table>
-        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1"><b>Beta-pyramid play (HF · 20y):</b> in confirmed bull regime — base layer IBIT (1.0×) · core MSTR (2.2× but premium risk) · upside layer MARA/CLSK (1.8–1.9× w/ operating leverage) · sentiment proxy HOOD (0.9× but retail-flow leverage). In choppy/topping regime: trim premium names FIRST (MSTR &gt; +100% nav premium = exit) · keep IBIT.</div></div>
-      </div>
-
-      <!-- ═════════ ⑪ ALTCOIN / L2 ROTATION HEATMAP ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px">
-        <div class="mv2-card-head"><span class="mv2-card-title">Layer-1 / Layer-2 Rotation · where is alt money flowing?</span><span class="mv2-card-meta">when BTC dominance peaks, alts run</span></div>
-        <table class="mv2-t"><thead><tr><th>Asset</th><th>Category</th><th class="r">Spot</th><th class="r">7D</th><th class="r">30D</th><th class="r">vs BTC 30D</th><th class="r">TVL</th><th>Read</th></tr></thead><tbody>
-          <tr><td class="mv2-mono"><b>SOL</b></td><td>L1 · Alt SOL</td><td class="r mv2-mono">$184</td><td class="r mv2-mono mv2-up">+2.4%</td><td class="r mv2-mono mv2-up">+8.4%</td><td class="r mv2-mono mv2-up">+2.2pp</td><td class="r mv2-mono">$8.4B</td><td><span class="mv2-chip mv2-chip-gn">Outperforming ETH</span></td></tr>
-          <tr><td class="mv2-mono"><b>BNB</b></td><td>L1 · CEX</td><td class="r mv2-mono">$612</td><td class="r mv2-mono mv2-up">+1.2%</td><td class="r mv2-mono mv2-up">+4.2%</td><td class="r mv2-mono mv2-dn">−2.0pp</td><td class="r mv2-mono">$5.8B</td><td><span class="mv2-chip mv2-chip-bare">Tracking</span></td></tr>
-          <tr><td class="mv2-mono"><b>AVAX</b></td><td>L1</td><td class="r mv2-mono">$34.2</td><td class="r mv2-mono mv2-dn">−1.8%</td><td class="r mv2-mono mv2-dn">−6.4%</td><td class="r mv2-mono mv2-dn">−12.6pp</td><td class="r mv2-mono">$1.2B</td><td><span class="mv2-chip mv2-chip-rd">Underperforming</span></td></tr>
-          <tr><td class="mv2-mono"><b>ARB</b></td><td>L2 · ETH</td><td class="r mv2-mono">$0.68</td><td class="r mv2-mono mv2-dn">−2.4%</td><td class="r mv2-mono mv2-dn">−8.2%</td><td class="r mv2-mono mv2-dn">−14.4pp</td><td class="r mv2-mono">$2.1B</td><td><span class="mv2-chip mv2-chip-rd">Token unlock overhang</span></td></tr>
-          <tr><td class="mv2-mono"><b>OP</b></td><td>L2 · ETH</td><td class="r mv2-mono">$1.84</td><td class="r mv2-mono mv2-dn">−1.6%</td><td class="r mv2-mono mv2-dn">−5.8%</td><td class="r mv2-mono mv2-dn">−12.0pp</td><td class="r mv2-mono">$0.9B</td><td><span class="mv2-chip mv2-chip-am">Stagnant</span></td></tr>
-        </tbody></table>
-        <div class="mv2-divbox mv2-warn"><div style="flex:1"><b>HF read:</b> BTC dominance ↑ + alts/L2s underperforming = "BTC-only" leg of the cycle. Historical pattern: when dom peaks (typically 60–62%), capital rotates to ETH first, then high-cap L1s, then L2s, then low-caps. We are NOT yet in the alt rotation; until BTC dominance rolls over, alts are weak hands.</div></div>
-      </div>
-
-      <!-- ═════════ ⑫ THE PLAYBOOK · regime-conditional trade plan ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:4px solid var(--copper)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--copper)">THE PLAYBOOK · regime-conditional decisions</span><span class="mv2-card-meta">three disciplines fused</span></div>
-        <table class="mv2-t"><thead><tr><th style="width:170px">If you see…</th><th>Read (HF lens)</th><th>Action</th></tr></thead><tbody>
-          <tr><td><b class="gn">MVRV-Z &lt; 0 + stablecoin growth &gt; +$2B/30d + DXY rolling over</b></td><td>Generational accumulation zone. Rarely lasts &gt;90 days (2018-Q4, 2022-Q4, 2020-Mar).</td><td>Buy spot · max position size · DCA aggressively · own MSTR/MARA at value</td></tr>
-          <tr><td><b class="gn">Pi-Cycle &lt; 0.8 + NUPL 0.25–0.50 + ETF inflows ≥ $300M/d</b></td><td>Mid-cycle leg with institutional bid. Most rewarding zone for trend continuation.</td><td>Long spot · long miners (operating leverage) · short downside puts if IV high</td></tr>
-          <tr><td><b class="am">Pi-Cycle 0.85–0.95 + MVRV-Z 4–6 + NUPL 0.50–0.65 (today)</b></td><td>Late-bull, distribution active but no top yet. Continuation likely, top risk rising.</td><td>HOLD core · trim 20-25% on rallies · stop adding · move to half-size MSTR (premium-cap)</td></tr>
-          <tr><td><b class="rd">MVRV-Z &gt; 7 + Pi-Cycle &gt; 1.0 + funding &gt; +0.10% + MSTR premium &gt; 120%</b></td><td>Cycle top signature. Every prior cycle marked here.</td><td>Sell 50%+ spot · close MSTR · short term-structure (sell vol if VRP rich) · stand aside</td></tr>
-          <tr><td><b class="rd">Funding flush + OI drops 30%+ + exch reserves bounce + spot &lt; STH cost</b></td><td>Liquidation cascade in progress. Capitulation begins.</td><td>NO catching · wait for hash-ribbon recovery + 200wk MA stabilization + 8 weeks</td></tr>
-          <tr><td><b class="am">BTC dominance &gt; 60% rolling over + ETH/BTC bottoming + L2 TVL re-expanding</b></td><td>Alt season setup. Capital rotation from BTC to ETH to L1 to L2 to micro.</td><td>Pair trade: long ETH / short BTC notionals · add SOL / AVAX core L1 names</td></tr>
-        </tbody></table>
-        <div class="mv2-divbox" style="margin-top:8px"><div style="flex:1"><b>Position-sizing discipline:</b> BTC max-drawdown 77% requires sizing as a 1–5% strategic allocation, NOT a tactical bet. Adjacent equities (MSTR/MARA/CLSK) treat as 1–3% per name with hard 25% stops. Pure alts (SOL/L1/L2) max 2% combined — these are "venture" exposure, not core.</div></div>
-      </div>
-
-      <!-- ═════════ ⑬ RISK · WHAT KILLS THIS TRADE ═════════ -->
-      <div class="mv2-card" style="margin-bottom:14px;border-left:3px solid var(--rd)">
-        <div class="mv2-card-head"><span class="mv2-card-title" style="color:var(--rd)">PRE-MORTEM · what kills crypto longs</span><span class="mv2-card-meta">read BEFORE entering, not after losing</span></div>
-        <ol style="margin:0;padding-left:22px;font-size:12px;color:var(--ink-1);line-height:1.7">
-          <li><b>Regulatory black swan</b> · global mining ban · stablecoin reserves fraud · ETF redemption halt. Mitigant: cap crypto exposure at 5% NAV; no leverage.</li>
-          <li><b>Macro liquidity reversal</b> · DXY &gt; 108 + 10y real yield &gt; 2.5% + Fed BS contraction accelerating. Mitigant: track stablecoin net issuance weekly; flat if it inverts for 3+ weeks.</li>
-          <li><b>Funding cascade</b> · perp funding sustained &gt; +0.10% + OI &gt; $40B = forced unwinds. Mitigant: trim into euphoric funding; never long against +0.15% funding.</li>
-          <li><b>MSTR / treasury blow-up</b> · MSTR uses BTC as collateral; sustained BTC drawdown forces deleveraging. Mitigant: monitor MSTR convert maturities; trim if NAV premium &gt; 120%.</li>
-          <li><b>Exchange failure</b> · à la FTX/Mt.Gox. Counterparty / custody risk. Mitigant: self-custody for &gt; 6mo holds; ETFs for tactical/taxable; never &gt; 25% exposure on one exchange.</li>
-          <li><b>L2 / staking technical risk</b> · slashing event · L2 sequencer halt · bridge exploit. Mitigant: ETH staking via Lido/ETHA only; no smart-contract direct staking.</li>
-          <li><b>Quantum / cryptographic break</b> · 10y+ tail risk. Not a 2026 concern but read NIST PQC migration timelines annually.</li>
-        </ol>
-      </div>
-      ${_actionFooter(['⏰ Funding alert', '📊 ETF tracker', '🎯 Crypto-adj scan', '📉 MoS scan', '⚡ Hash ribbon', '↓ Export'])}`;
+      ${_actionFooter(['📊 Per-coin detail', '⏰ Fear/Greed alert', '↓ Export'])}`;
   }
+
 
   // Main dispatch
   function render(key, data, arr) {
