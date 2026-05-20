@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Live-position sync from Schwab Trader API → data/schwab_state.json
+  Fires every 60s. The script (schwab_sync.py) self-gates with
+  _in_market_hours() so off-hours runs return early without burning the
+  Schwab API budget.
+
+  Wait for Trader API entitlement on the user's Schwab developer app
+  before activating this. Until then the script returns "Client not
+  authorized" and writes nothing. Pipeline downstream (/api/portfolio/live)
+  gracefully falls back to Alpaca-synced data/portfolio_state.json.
+
+  Activate after Schwab approval:
+    ln -s "/Volumes/MyMacDisk/Claude Skills/SwingTrade/infra/launchd/com.swingtrade.schwab-sync.plist" \
+          ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.swingtrade.schwab-sync.plist
+  Deactivate:
+    launchctl unload -w ~/Library/LaunchAgents/com.swingtrade.schwab-sync.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.swingtrade.schwab-sync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>cd "/Volumes/MyMacDisk/Claude Skills/SwingTrade" &amp;&amp; /Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/bin/python3 schwab_sync.py &gt;&gt; cache/logs/schwab_sync.log 2&gt;&amp;1</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>60</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade/cache/logs/schwab_sync.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade/cache/logs/schwab_sync.stderr.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- Process-level guard rails: keep the sync skinny -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>Nice</key>
+    <integer>10</integer>
+</dict>
+</plist>

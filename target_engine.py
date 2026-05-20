@@ -850,8 +850,15 @@ def compute_sizing(entry: float, stop_price: float, equity: float,
 # TOP-LEVEL ORCHESTRATOR
 # ════════════════════════════════════════════════════════════════════════
 def analyze_trade(ticker: str, direction: str = "long", mode: str = "position",
-                  equity: float = 25000.0, current_price: Optional[float] = None) -> TradeAnalysis:
-    """Phase 1 top-level: load OHLCV, run sub-modules, select targets, classify, emit schema."""
+                  equity: float = 25000.0, current_price: Optional[float] = None,
+                  df_override: Optional["pd.DataFrame"] = None) -> TradeAnalysis:
+    """Phase 1 top-level: load OHLCV, run sub-modules, select targets, classify, emit schema.
+
+    df_override: optional point-in-time OHLCV frame. When provided, the internal
+    fetch_ohlcv_with_failover call is skipped — callers MUST pre-truncate the
+    frame to the as-of date to avoid look-ahead leakage. Backtest path uses this.
+    Live path leaves it None (engine fetches today's data).
+    """
     cfg = MODES[mode]
 
     # M2.3 · Short-direction gate. Engine math is long-bias (entry/stop/target
@@ -861,13 +868,16 @@ def analyze_trade(ticker: str, direction: str = "long", mode: str = "position",
         return _reject(ticker, mode, direction,
                        "short_not_supported_v1 — use legacy ATR engine for shorts")
 
-    # 1. Load OHLCV via existing data layer
-    sys.path.insert(0, "/Volumes/MyMacDisk/Claude Skills/SwingTrade")
-    try:
-        from data_fetcher import fetch_ohlcv_with_failover
-        df, tier = fetch_ohlcv_with_failover(ticker, days=max(cfg["lookback_days"] * 2, 400))
-    except Exception as e:
-        return _reject(ticker, mode, direction, f"data_load_failed: {e}")
+    # 1. Load OHLCV — either point-in-time override (backtest) or fresh fetch (live)
+    if df_override is not None and len(df_override) >= 30:
+        df = df_override.copy()
+    else:
+        sys.path.insert(0, "/Volumes/MyMacDisk/Claude Skills/SwingTrade")
+        try:
+            from data_fetcher import fetch_ohlcv_with_failover
+            df, tier = fetch_ohlcv_with_failover(ticker, days=max(cfg["lookback_days"] * 2, 400))
+        except Exception as e:
+            return _reject(ticker, mode, direction, f"data_load_failed: {e}")
     if df is None or len(df) < 30:
         return _reject(ticker, mode, direction, "insufficient_bars")
 
@@ -1130,25 +1140,31 @@ def _cache_write(path: Path, payload: dict) -> None:
 
 def analyze_trade_cached(ticker: str, direction: str = "long", mode: str = "position",
                          equity: float = 25000.0,
-                         force_refresh: bool = False) -> dict:
+                         force_refresh: bool = False,
+                         df_override: Optional["pd.DataFrame"] = None) -> dict:
     """Cached wrapper around analyze_trade · returns dict (JSON-ready).
 
     - Reads from cache/target_engine/{TICKER}_{MODE}.json if file is < 12h old
     - Otherwise runs the engine, writes to cache, returns
     - force_refresh=True bypasses cache entirely
+    - df_override: when set, bypasses cache (point-in-time backtest mode) — the
+      cache is keyed only by ticker/mode and would corrupt the live cache if
+      mixed with historical results.
     - Always returns a dict (never raises) · errors land in `decision='reject'`
     """
+    use_cache = df_override is None
     path = _cache_path(ticker, mode)
-    if not force_refresh and _cache_is_fresh(path):
+    if use_cache and not force_refresh and _cache_is_fresh(path):
         cached = _cache_read(path)
         if cached is not None:
             cached["_cache"] = {"status": "hit", "age_sec": int(time.time() - path.stat().st_mtime)}
             return cached
 
-    # Cache miss · run engine
+    # Cache miss (or backtest mode) · run engine
     t0 = time.time()
     try:
-        analysis = analyze_trade(ticker, direction=direction, mode=mode, equity=equity)
+        analysis = analyze_trade(ticker, direction=direction, mode=mode,
+                                 equity=equity, df_override=df_override)
         payload = to_json(analysis)
     except Exception as e:
         # Engine crashed · return rejection so caller has something coherent
@@ -1160,13 +1176,15 @@ def analyze_trade_cached(ticker: str, direction: str = "long", mode: str = "posi
             "direction": direction,
             "decision": "reject",
             "warnings": [f"engine_exception: {type(e).__name__}: {e}"],
-            "_cache": {"status": "miss", "computed_in_sec": round(time.time() - t0, 2)},
+            "_cache": {"status": "miss" if use_cache else "bypass:pit",
+                       "computed_in_sec": round(time.time() - t0, 2)},
         }
-        # Don't cache failures — let next call retry
         return payload
 
-    payload["_cache"] = {"status": "miss", "computed_in_sec": round(time.time() - t0, 2)}
-    _cache_write(path, payload)
+    payload["_cache"] = {"status": "miss" if use_cache else "bypass:pit",
+                         "computed_in_sec": round(time.time() - t0, 2)}
+    if use_cache:
+        _cache_write(path, payload)
     return payload
 
 

@@ -6521,10 +6521,14 @@ def reset_failover_counts() -> None:
 
 
 def fetch_ohlcv_with_failover(ticker: str, days: int = 400) -> tuple[pd.DataFrame | None, str]:
-    """Vendor failover chain — EODHD → archive (post-2026-04-25 EODHD-only).
+    """Vendor failover chain — EODHD → Schwab pricehistory → archive → failed.
 
-    Returns (df, tier_used). tier ∈ {"eodhd","archive","failed"}.
+    Returns (df, tier_used). tier ∈ {"eodhd","schwab","archive","failed"}.
     Updates module-level _FAILOVER_COUNTS for end-of-scan summary.
+
+    2026-05-19 · Added Schwab pricehistory as 2nd-tier (between EODHD and
+    archive). Prevents the 30% scan-fill abort when EODHD rate-limits — Schwab
+    has a separate budget (Market Data app) and gives us a 2nd live source.
     """
     import datetime as _dt
     now = _dt.datetime.utcnow()
@@ -6552,14 +6556,35 @@ def fetch_ohlcv_with_failover(ticker: str, days: int = 400) -> tuple[pd.DataFram
     else:
         log.debug(f"[failover] {ticker}: skipping eodhd (degraded mode)")
 
-    # 2) Archive (local parquet)
+    # 2) Schwab pricehistory (2nd-tier live source — separate API budget from EODHD)
+    try:
+        import schwab_client as _sc
+        # Pull ~ceil(days/365) years of daily candles
+        years = max(1, (days // 365) + (1 if days % 365 else 0))
+        ph = _sc.get_pricehistory(ticker, period_type="year", period=years,
+                                   frequency_type="daily", frequency=1)
+        if ph and ph.get("candles"):
+            df = _sc.pricehistory_to_df(ph)
+            if df is not None and len(df) >= 20:
+                # Trim to requested window
+                cutoff = pd.Timestamp.utcnow().tz_localize(None) - pd.Timedelta(days=days)
+                df_index_naive = df.index.tz_convert(None) if df.index.tz is not None else df.index
+                df = df.loc[df_index_naive >= cutoff]
+                if len(df) >= 20:
+                    _FAILOVER_COUNTS["schwab"] = _FAILOVER_COUNTS.get("schwab", 0) + 1
+                    log.info(f"  [failover] {ticker}: schwab pricehistory (eodhd failed)")
+                    return df, "schwab"
+    except Exception as e:
+        log.debug(f"[failover] {ticker}: schwab pricehistory error — {e}")
+
+    # 3) Archive (local parquet) — last-resort fallback (may be 1+ day stale)
     try:
         archive_path = BASE_DIR / "data" / "ohlcv" / f"{ticker}.parquet"
         if archive_path.exists():
             df = pd.read_parquet(archive_path)
             if df is not None and len(df) >= 20:
                 _FAILOVER_COUNTS["archive"] += 1
-                log.info(f"  [failover] {ticker}: archive fallback (eodhd empty/failed)")
+                log.info(f"  [failover] {ticker}: archive fallback (eodhd+schwab failed)")
                 return df, "archive"
     except Exception as e:
         log.debug(f"[failover] {ticker}: archive error — {e}")

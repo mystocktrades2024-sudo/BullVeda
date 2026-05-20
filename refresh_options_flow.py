@@ -2,7 +2,7 @@
 """
 refresh_options_flow.py — intraday Live Options Flow refresh.
 
-Runs every 30 min during market hours (Mon-Fri 6:30am-1pm PT). Reads the
+Runs every 5 min during extended market hours (Mon-Fri 5:30am-1:30pm PT). Reads the
 universe from cache/last_bundle.json (top liquid tickers), fetches fresh
 Schwab options chains, runs options_flow_scanner.scan(), and atomic-writes
 infra/prototype/options_flow.json. The V2 dashboard reads this file and
@@ -36,13 +36,34 @@ log = logging.getLogger(__name__)
 
 
 def _is_market_hours() -> bool:
-    """Mon-Fri 6:30am-1:00pm PT (= 9:30am-4:00pm ET regular session)."""
+    """Schwab-authoritative market-hours check with safe hardcoded fallback.
+
+    PRIMARY: Schwab /markets API via schwab_client.is_market_open_now(extended=True).
+    This handles half-days (post-Thanksgiving, MLK day, early closes) correctly
+    and uses the actual exchange calendar instead of a static window.
+
+    FALLBACK (Schwab API unreachable): Mon-Fri 5:30am-1:30pm PT — 8h window
+    covering pre-market UOA prints + 30min of post-close settlement data.
+
+    Window rationale (fallback only):
+      - 5:30am PT (= 8:30am ET) — covers pre-market UOA flow
+      - 1:30pm PT (= 4:30pm ET) — catches post-close settled-print tick
+    """
+    # Primary path: Schwab market-calendar
+    try:
+        import schwab_client
+        # include_extended=True covers pre+post (matches our 5:30-13:30 PT window)
+        return schwab_client.is_market_open_now(include_extended=True)
+    except Exception:
+        pass
+
+    # Fallback: hardcoded window
     import zoneinfo
     now = datetime.now(zoneinfo.ZoneInfo("America/Los_Angeles"))
     if now.weekday() >= 5:  # Sat=5, Sun=6
         return False
     minutes = now.hour * 60 + now.minute
-    return (6 * 60 + 30) <= minutes <= (13 * 60 + 0)
+    return (5 * 60 + 30) <= minutes <= (13 * 60 + 30)
 
 
 # 2026-05-15 · High-options-volume seed list. These tickers carry the deepest
@@ -229,7 +250,7 @@ def _send_slack_delta(top30: list[dict], prev_strong: set[str]) -> None:
 
 def main(force: bool = False) -> int:
     if not force and not _is_market_hours():
-        log.info("Skipping — outside market hours (Mon-Fri 6:30am-1pm PT). Use --force to override.")
+        log.info("Skipping — outside market hours (Mon-Fri 5:30am-1:30pm PT). Use --force to override.")
         return 0
 
     tickers = _load_universe(top_n=200)

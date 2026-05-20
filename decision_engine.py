@@ -567,6 +567,23 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
             gates.append({"name": "sector_block", "passed": True, "reason": ""})
     # (no gate appended if blocklist not configured — keeps gate list clean for older configs)
 
+    # 0.5. Halt gate (2026-05-19)
+    # Schwab securityStatus surfaced via translate_quote_to_stock_info. We block
+    # BUY on Halted / News Pending / Deleted — "Closed" (after-hours) is NOT a halt
+    # and passes through. Hard block — no sleeve bypasses; safety-of-execution
+    # invariant. The decision becomes WATCH with reason chip "halted_<status>".
+    _sec_status = t.get("security_status") or t.get("info", {}).get("security_status") or "Normal"
+    _is_halted  = bool(t.get("is_halted") or t.get("info", {}).get("is_halted"))
+    if _is_halted or (_sec_status and str(_sec_status).lower() not in ("normal", "closed", "")):
+        gates.append({
+            "name": "halt_gate",
+            "passed": False,
+            "reason": f"security_status={_sec_status} — halted/news-pending tickers cannot enter BUY",
+        })
+        failures.append("halt_gate")
+    else:
+        gates.append({"name": "halt_gate", "passed": True, "reason": ""})
+
     # 1. Liquidity / price / drawdown gate (preserved upstream gate)
     g = t.get("gate") or {}
     passed = bool(g.get("passed"))

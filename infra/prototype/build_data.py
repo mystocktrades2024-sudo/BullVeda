@@ -3859,6 +3859,88 @@ def main():
     #    All wrapped in try/except so a single API failure doesn't block the build.
     _enrich_cockpit_data(data)
 
+    # ── 2026-05-19 · Schwab session-context enrichment ─────────────────
+    # Merge live Schwab quote fields (security_status, today's OHLC, NBBO depth,
+    # mark vs last, HV, asset-type, dividend calendar) into every ticker payload
+    # so the kairos.html SESSION CONTEXT section + halt chip light up.
+    # ONE batched Schwab API call (up to 500 syms) — cheap.
+    try:
+        import schwab_client as _schwab
+        # Collect unique tickers from all signal lists + portfolio
+        _tkrs = set()
+        for _bucket in ("short_term", "medium_term", "long_term", "watchlist", "killed"):
+            for _r in (data.get(_bucket) or []):
+                if isinstance(_r, dict) and _r.get("ticker"):
+                    _tkrs.add(_r["ticker"].upper())
+        for _p in (data.get("portfolio", {}).get("positions") or []):
+            if _p.get("ticker"):
+                _tkrs.add(_p["ticker"].upper())
+        _tkrs.discard("")
+        _tkr_list = sorted(_tkrs)[:500]  # Schwab batch cap
+
+        if _tkr_list:
+            print(f"  enrich: schwab session-context for {len(_tkr_list)} tickers...")
+            _blobs = _schwab.get_quotes_batch(_tkr_list) or {}
+            _sess_by_tkr: dict = {}
+            for _sym, _blob in _blobs.items():
+                try:
+                    _info = _schwab.translate_quote_to_stock_info(_sym, _blob)
+                    _sess_by_tkr[_sym.upper()] = {
+                        # Halt status
+                        "security_status":   _info.get("security_status"),
+                        "is_halted":         _info.get("is_halted"),
+                        # Today's intraday context
+                        "today_open":        _info.get("today_open"),
+                        "today_high":        _info.get("today_high"),
+                        "today_low":         _info.get("today_low"),
+                        "day_change_pct":    _info.get("today_net_pct"),
+                        "day_change_dollar": _info.get("today_net_change"),
+                        # Post-market move (separate)
+                        "postmarket_pct":    _info.get("kpi_post_market_pct"),
+                        # NBBO depth + microstructure
+                        "bid_size":          _info.get("bid_size"),
+                        "ask_size":          _info.get("ask_size"),
+                        "bid_ask_imbalance": _info.get("bid_ask_imbalance"),
+                        "spread_bp":         _info.get("kpi_spread_bp"),
+                        "quote_age_s":       _info.get("kpi_quote_age_s"),
+                        # Mark price (cleaner for after-hours)
+                        "mark":              _info.get("mark"),
+                        "mark_pct_change":   _info.get("mark_pct_change"),
+                        # Historical volatility (when available)
+                        "hist_volatility":   _info.get("hist_volatility"),
+                        # Asset classification (replaces hardcoded ETF lists)
+                        "asset_main_type":   _info.get("asset_main_type"),
+                        "asset_sub_type":    _info.get("asset_sub_type"),
+                        "is_etf":            _info.get("is_etf"),
+                        "leverage_factor":   _info.get("kpi_leverage_factor"),
+                        # Dividend calendar (avoid ex-div surprises)
+                        "next_div_ex_date":  _info.get("next_div_ex_date"),
+                        "days_to_ex_div":    _info.get("days_to_ex_div"),
+                        # 52-week context
+                        "dist_from_52w_high_pct": _info.get("kpi_dist_from_52wk_high_pct"),
+                        "dist_from_52w_low_pct":  _info.get("kpi_dist_from_52wk_low_pct"),
+                    }
+                except Exception:
+                    continue
+
+            # Merge into every ticker payload across buckets
+            for _bucket in ("short_term", "medium_term", "long_term", "watchlist", "killed"):
+                for _r in (data.get(_bucket) or []):
+                    if isinstance(_r, dict) and _r.get("ticker"):
+                        _sess = _sess_by_tkr.get(_r["ticker"].upper())
+                        if _sess:
+                            _r.update(_sess)
+                            _r["session_context"] = _sess  # nested copy too
+            for _p in (data.get("portfolio", {}).get("positions") or []):
+                _sess = _sess_by_tkr.get((_p.get("ticker") or "").upper())
+                if _sess:
+                    _p["session_context"] = _sess
+                    if _sess.get("is_halted"):
+                        _p["is_halted"] = True
+            print(f"  enrich: schwab session-context merged into {len(_sess_by_tkr)} tickers")
+    except Exception as _se:
+        print(f"  enrich: schwab session-context FAILED ({type(_se).__name__}: {_se})")
+
     data = _clean(data)
     DATA.write_text(json.dumps(data, default=str, indent=0, allow_nan=False))
     print(f"wrote {DATA} ({DATA.stat().st_size:,} bytes)")

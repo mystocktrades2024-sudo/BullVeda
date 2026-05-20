@@ -2054,6 +2054,13 @@ def main():
     parser.add_argument("--profile-cprof", action="store_true",
                         help="Run under cProfile and write top-50 hotspots to "
                              "cache/logs/backtest_cprofile_<timestamp>.txt. Adds ~5%% overhead.")
+    # 2026-05-19 — Path C guard rail: silence the high-min-score warning for
+    # legitimate explorations (e.g., regime-conditional grid searches that
+    # intentionally probe the upper score band).
+    parser.add_argument("--accept-low-buys", action="store_true",
+                        help="Acknowledge that --min-score > 55 in backtest mode "
+                             "will likely produce 0 BUYs (historical scoring is "
+                             "structurally suppressed). Silences the safety warning.")
     args = parser.parse_args()
 
     # SMOKE-TEST mode (--smoke) — fastest possible iteration loop
@@ -2064,6 +2071,38 @@ def main():
         args.portfolio = True
         log.info("=== SMOKE-TEST MODE — 5d window, top-100 universe, portfolio mode ===")
         log.info("Use this to validate config changes; for real evidence run --days >= 60")
+
+    # 2026-05-19 — Path C guard rail (backtest scoring diagnostic 2026-05-18).
+    # Live system uses min_score=65 because it has all 4 pillars hot
+    # (tech + fund + opt + sent + catalyst + smart_money). Backtest is
+    # structurally missing the sentiment / options / catalyst pillars
+    # because EODHD news isn't retroactively scored, UOA snapshots aren't
+    # backfilled, and PEAD/UOA pattern detection needs real-time data.
+    # See docs/backtest_historical_scoring_diagnostic.md.
+    #
+    # Net: max reachable historical composite ≈ 70 for strongest names,
+    # ~37 for typical. Running --min-score 65 on a 252d backtest =
+    # guaranteed 0 BUYs. The regime-adaptive bull threshold (line 458 in
+    # backtest.py) is 55 — that's the right floor for backtest mode.
+    BACKTEST_SAFE_MAX_MIN_SCORE = 55
+    if args.min_score > BACKTEST_SAFE_MAX_MIN_SCORE and not args.smoke and not args.accept_low_buys:
+        log.warning(
+            f"⚠  --min-score={args.min_score} is ABOVE the backtest-safe floor "
+            f"({BACKTEST_SAFE_MAX_MIN_SCORE}). Historical scoring is structurally "
+            f"suppressed (sentiment + options + catalyst pillars depend on "
+            f"real-time data not in backfill). At this threshold the run will "
+            f"likely produce 0 BUYs."
+        )
+        log.warning(
+            f"   Recommendation: use --min-score 50 (CLI default) or "
+            f"--min-score 55 (regime-adaptive bull threshold). For live-parity "
+            f"score=65, see docs/backtest_historical_scoring_diagnostic.md for "
+            f"Path B (retroactive sentiment scoring) which is the proper fix."
+        )
+        log.warning(
+            f"   Override this guard: re-run with --accept-low-buys to silence "
+            f"this warning."
+        )
 
     # 2026-05-09 — propagate --as-of-membership via env var so the universe
     # loader (line ~728) picks it up without threading another arg through

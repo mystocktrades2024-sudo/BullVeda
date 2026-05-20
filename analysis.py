@@ -6944,6 +6944,51 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
         "beta_adj_multiplier": beta_adj,
     }
 
+    # ════════════════════════════════════════════════════════════════════
+    # 2026-05-19 · STRUCT-TARGETS-M25-CUTOVER — structural-target override
+    # ════════════════════════════════════════════════════════════════════
+    # When config.use_structural_targets is True, replace ATR-derived T1/T2
+    # with target_engine's confluence-scored levels. Falls back to ATR
+    # silently when the engine returns reject/wait (keeping the trade alive
+    # rather than dropping signals — that's a separate decision_engine call).
+    # Only triggers for long-direction (engine is long-bias in v1).
+    #
+    # POINT-IN-TIME SAFETY: the df passed to compute_trade_plan is already
+    # truncated by the caller (backtest truncates to the as-of date; live
+    # passes today's df). We forward that exact frame to the engine via
+    # df_override so the engine NEVER re-fetches today's data inside a
+    # historical run. df_override also bypasses the JSON cache (the cache is
+    # keyed by ticker/mode only, so it can't safely mix live + historical).
+    # Telemetry: plan["_struct_override"] = "applied"|"skip:<reason>".
+    if (config or {}).get("use_structural_targets") and direction == "long":
+        try:
+            from target_engine import analyze_trade_cached as _te_cached
+            _te_mode = str((config or {}).get("_strategy_mode", "swing")).lower()
+            if _te_mode not in ("swing", "position", "invest"):
+                _te_mode = "swing"
+            _te = _te_cached(ticker, direction="long", mode=_te_mode,
+                             df_override=df)
+            if _te.get("decision") == "trade":
+                _t1d = _te.get("t1") or {}
+                _t2d = _te.get("t2") or {}
+                _t1p = float(_t1d.get("price") or 0)
+                _t2p = float(_t2d.get("price") or 0)
+                if _t1p > price and _t2p > price and _t1p < _t2p:
+                    _risk = max(abs(price - stop), 1e-6)
+                    plan["target1"] = round(_t1p, 2)
+                    plan["target2"] = round(_t2p, 2)
+                    plan["rr_ratio"] = round((_t1p - price) / _risk, 2)
+                    plan["_struct_override"] = "applied"
+                    plan["_struct_t1_sources"] = [s.get("type") for s in _t1d.get("sources", [])]
+                    plan["_struct_t1_behavior"] = _t1d.get("behavior")
+                    plan["_struct_t1_confluence"] = _t1d.get("confluence")
+                else:
+                    plan["_struct_override"] = "skip:targets_below_or_inverted"
+            else:
+                plan["_struct_override"] = f"skip:{_te.get('decision', 'unknown')}"
+        except Exception as _e:
+            plan["_struct_override"] = f"skip:exception:{type(_e).__name__}"
+
     # Exit Rules Engine — setup-family-specific exits (Fix #19)
     exit_rules = []
     try:

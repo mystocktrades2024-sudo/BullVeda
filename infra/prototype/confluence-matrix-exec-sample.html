@@ -1,0 +1,1269 @@
+<!doctype html>
+<html><head><meta charset="utf-8"/><title>Kairos · Confluence Matrix · Execution + Diagnostic</title>
+<style>
+:root{
+  --bg-0:#0a0d0c;--bg-1:#11151a;--bg-2:#161a1e;--bg-3:#1c2125;--bg-4:#22272a;
+  --line:#262b2d;--line-2:#353a3c;
+  --ink:#ecefe9;--ink-1:#d4d8d1;--ink-2:#9a9e98;--ink-3:#686c68;
+  --gn:#4ade80;--gn-dim:#166534;--gn-bg:rgba(74,222,128,.14);
+  --rd:#f87171;--rd-dim:#991b1b;--rd-bg:rgba(248,113,113,.13);
+  --amb:#fbbf24;--amb-dim:#92400e;--amb-bg:rgba(251,191,36,.14);
+  --cy:#60a5fa;--cy-bg:rgba(96,165,250,.13);
+  --copper:#d97757;--copper-bg:rgba(217,119,87,.13);
+  --pur:#a78bfa;--pur-bg:rgba(167,139,250,.13);
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:linear-gradient(180deg,#080a09 0,#0a0d0c 200px);color:var(--ink);font:13.5px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-variant-numeric:tabular-nums;padding:18px 22px;min-height:100vh}
+.wrap{max-width:1820px;margin:0 auto}
+.bc{font:700 11px var(--mono);color:var(--ink-3);letter-spacing:.18em;text-transform:uppercase;margin-bottom:8px}
+.bc b{color:var(--ink-1)} .bc .cu{color:var(--copper)}
+.h1{font:800 22px var(--mono);letter-spacing:.04em;color:var(--ink);margin:0 0 4px}
+.h1 .accent{color:var(--copper)}
+.sub-h1{font:500 12.5px var(--mono);color:var(--ink-2);margin-bottom:18px}
+.sub-h1 b{color:var(--copper)}
+
+/* View toggle */
+.toggle-bar{display:flex;align-items:center;gap:10px;background:var(--bg-1);border:1px solid var(--line);padding:10px 14px;margin-bottom:14px;border-radius:2px}
+.toggle-lbl{font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:.18em;text-transform:uppercase;margin-right:6px}
+.view-btn{padding:8px 18px;font:800 11px var(--mono);background:var(--bg-3);color:var(--ink-1);border:1px solid var(--line);cursor:pointer;letter-spacing:.06em}
+.view-btn:hover{color:var(--ink);background:var(--bg-4)}
+.view-btn.on{background:var(--copper);color:#fff;border-color:var(--copper);box-shadow:0 0 12px rgba(217,119,87,.45)}
+.search{font:600 11px var(--mono);background:var(--bg-2);color:var(--ink);border:1px solid var(--line);padding:7px 12px;width:200px;margin-left:auto}
+.kpi-grp{display:flex;gap:14px;margin-left:16px}
+.kpi{font:700 10px var(--mono);color:var(--ink-3);letter-spacing:.06em}
+.kpi b{font:800 14px var(--mono);color:var(--ink);display:block;margin-top:2px}
+.kpi.gn b{color:var(--gn)} .kpi.am b{color:var(--amb)} .kpi.rd b{color:var(--rd)}
+
+/* Tables - shared base */
+.matrix-wrap{background:var(--bg-1);border:1px solid var(--line);border-radius:2px;overflow-x:auto;overflow-y:visible}
+.matrix{border-collapse:collapse;font:600 11px var(--mono);width:100%;min-width:1620px}
+.matrix thead th{padding:9px 8px;background:linear-gradient(180deg,var(--bg-2) 0,var(--bg-3) 100%);text-align:left;font-weight:800;color:var(--ink-2);letter-spacing:.1em;font-size:9.5px;text-transform:uppercase;border-bottom:2px solid var(--copper);position:sticky;top:0;white-space:nowrap;z-index:5}
+.matrix thead th.r{text-align:right} .matrix thead th.c{text-align:center}
+.matrix tbody tr{border-bottom:1px solid var(--line);cursor:pointer;transition:all 120ms;background:var(--bg-1)}
+.matrix tbody tr:hover{background:var(--bg-3);box-shadow:inset 3px 0 0 var(--copper)}
+.matrix tbody td{padding:8px 8px;color:var(--ink-1);white-space:nowrap;text-align:center;font-size:11px;vertical-align:middle}
+.matrix tbody td.r{text-align:right}
+.matrix tbody td.tkr{text-align:left;padding-left:14px}
+.matrix tbody tr[data-verdict="BUY"]{background:linear-gradient(90deg,rgba(74,222,128,.04) 0,transparent 30%)}
+.matrix tbody tr[data-verdict="AVOID"]{background:linear-gradient(90deg,rgba(248,113,113,.04) 0,transparent 30%)}
+
+.tkr-row{display:flex;align-items:center;gap:6px}
+.tkr-row b{font:800 14px var(--mono);color:var(--ink);letter-spacing:.04em}
+.tkr-row .held{color:var(--cy);font-size:12px}
+.sec{display:block;font:500 9px var(--mono);color:var(--ink-3);letter-spacing:.04em;margin-top:2px;text-transform:uppercase}
+
+/* AI cell */
+.ai-cell{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:14px;font:800 10.5px var(--mono);letter-spacing:.04em}
+.ai-cell.ai-gn{background:linear-gradient(135deg,var(--gn-bg),rgba(74,222,128,.05));color:var(--gn);border:1px solid var(--gn-dim);box-shadow:0 0 8px rgba(74,222,128,.15)}
+.ai-cell.ai-rd{background:linear-gradient(135deg,var(--rd-bg),rgba(248,113,113,.05));color:var(--rd);border:1px solid var(--rd-dim);box-shadow:0 0 8px rgba(248,113,113,.15)}
+.ai-cell.ai-na{background:var(--bg-3);color:var(--ink-3);border:1px solid var(--line)}
+.ai-cell .ai-conf{font:600 9px var(--mono);opacity:.7}
+.ai-mini{display:inline-block;padding:2px 7px;border-radius:2px;font:800 9.5px var(--mono)}
+.ai-mini.ai-gn{background:var(--gn-bg);color:var(--gn)}
+.ai-mini.ai-rd{background:var(--rd-bg);color:var(--rd)}
+.ai-mini.ai-na{background:var(--bg-3);color:var(--ink-3)}
+
+/* Verdict pill */
+.v{display:inline-block;padding:3px 9px;font:800 10px var(--mono);border-radius:2px;letter-spacing:.06em;min-width:50px}
+.v-gn{background:var(--gn-bg);color:var(--gn);border:1px solid var(--gn-dim)}
+.v-am{background:var(--amb-bg);color:var(--amb);border:1px solid var(--amb-dim)}
+.v-rd{background:var(--rd-bg);color:var(--rd);border:1px solid var(--rd-dim)}
+.v-na{background:var(--bg-3);color:var(--ink-3);border:1px solid var(--line)}
+
+/* Conviction stars */
+.stars{font-size:12px;letter-spacing:1px}
+.stars.gn{color:var(--gn)} .stars.am{color:var(--amb)} .stars.ink-3{color:var(--ink-3)}
+
+/* Setup pill */
+.setup{display:inline-flex;align-items:center;gap:4px;font:700 10px var(--mono);color:var(--ink-1)}
+.setup b{font-weight:800;color:var(--ink)}
+
+/* Entry Quality */
+.eq{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:2px;font:800 9.5px var(--mono);letter-spacing:.04em}
+.eq-gn{background:var(--gn-bg);color:var(--gn);border:1px solid var(--gn-dim)}
+.eq-am{background:var(--amb-bg);color:var(--amb);border:1px solid var(--amb-dim)}
+.eq-rd{background:var(--rd-bg);color:var(--rd);border:1px solid var(--rd-dim)}
+.eq-na{background:var(--bg-3);color:var(--ink-3)}
+
+/* R:R cell */
+.rr-cell{display:inline-flex;align-items:center;gap:6px}
+.rr-num{font:800 13px var(--mono);min-width:30px;text-align:right}
+.rr-num.rr-gn{color:var(--gn)}
+.rr-num.rr-am{color:var(--amb)}
+.rr-num.rr-rd{color:var(--rd)}
+.rr-bar{display:inline-block}
+
+/* Inline bar */
+.ibar{display:inline-block;height:5px;background:var(--bg-4);border-radius:1px;overflow:hidden;vertical-align:middle;border:1px solid var(--line)}
+.ibar i{display:block;height:100%}
+.ibar i.gn{background:linear-gradient(90deg,var(--gn-dim),var(--gn))}
+.ibar i.rd{background:linear-gradient(90deg,var(--rd-dim),var(--rd))}
+.ibar i.am{background:linear-gradient(90deg,var(--amb-dim),var(--amb))}
+
+/* Price + levels */
+.price{font:800 13px var(--mono);color:var(--ink)}
+.lvl{display:flex;flex-direction:column;align-items:flex-end;gap:1px;line-height:1.2}
+.lvl-row{font:700 11px var(--mono);color:var(--ink-1);display:inline-flex;align-items:center;gap:5px}
+.lvl-row i{display:inline-block;width:14px;height:14px;text-align:center;line-height:14px;font:800 8.5px var(--mono);border-radius:2px;font-style:normal}
+.lvl-st{background:var(--rd-bg);color:var(--rd);border:1px solid var(--rd-dim)}
+.lvl-t1{background:var(--amb-bg);color:var(--amb);border:1px solid var(--amb-dim)}
+.lvl-t2{background:var(--gn-bg);color:var(--gn);border:1px solid var(--gn-dim)}
+.lvl-pct{font:700 9.5px var(--mono)}
+.lvl-pct.gn{color:var(--gn)} .lvl-pct.rd{color:var(--rd)}
+
+/* Alloc */
+.alloc{font:800 13px var(--mono);color:var(--copper)}
+
+/* Confluence mega */
+.conf-mega{display:inline-flex;align-items:center;gap:6px}
+.conf-num{font:800 16px var(--mono);min-width:32px;text-align:right}
+.conf-num.conf-gn{color:var(--gn);text-shadow:0 0 10px rgba(74,222,128,.4)}
+.conf-num.conf-am{color:var(--amb)}
+.conf-num.conf-rd{color:var(--rd);text-shadow:0 0 10px rgba(248,113,113,.4)}
+.conf-bar{display:inline-block}
+
+/* Why narrative */
+.why{font:500 10.5px var(--mono);color:var(--ink-2);letter-spacing:.02em;text-align:left;max-width:280px;white-space:normal;line-height:1.4;padding-left:10px;border-left:2px solid var(--bg-4)}
+
+/* Grade pills */
+.g{display:inline-block;width:22px;height:22px;line-height:22px;border-radius:50%;text-align:center;font:800 11px var(--mono);color:#000}
+.g-a{background:var(--gn);box-shadow:0 0 6px rgba(74,222,128,.5)}
+.g-b{background:#86efac}
+.g-c{background:var(--amb)}
+.g-d{background:#fb923c;color:#fff}
+.g-f{background:var(--rd);color:#fff}
+.g-na{background:var(--bg-3);color:var(--ink-3)}
+
+/* Mini cell */
+.mini{display:inline-block;padding:2px 7px;border-radius:2px;font:800 10px var(--mono);letter-spacing:.02em;min-width:34px;text-align:center}
+.mini-gn{background:var(--gn-bg);color:var(--gn);border:1px solid var(--gn-dim)}
+.mini-am{background:var(--amb-bg);color:var(--amb);border:1px solid var(--amb-dim)}
+.mini-rd{background:var(--rd-bg);color:var(--rd);border:1px solid var(--rd-dim)}
+.mini-cy{background:var(--cy-bg);color:var(--cy);border:1px solid var(--cy)}
+.mini-na{background:var(--bg-3);color:var(--ink-3);border:1px solid var(--line)}
+.micro{font:600 9.5px var(--mono);color:var(--ink-1)}
+
+/* Section divider */
+.divider{height:1px;background:linear-gradient(90deg,transparent,var(--copper),transparent);margin:18px 0;opacity:.4}
+
+/* Hide rule */
+.hidden{display:none !important}
+
+/* Group headers in diagnostic */
+.matrix.diag thead tr.grp-row th{background:linear-gradient(180deg,var(--bg-3),var(--bg-2));text-align:center;color:var(--copper);font-size:9px;letter-spacing:.18em;padding:5px 8px;border-bottom:1px solid var(--line)}
+.matrix.diag thead tr.grp-row th.gn{color:var(--gn)}
+.matrix.diag thead tr.grp-row th.cy{color:var(--cy)}
+.matrix.diag thead tr.grp-row th.am{color:var(--amb)}
+.matrix.diag thead tr.grp-row th.rd{color:var(--rd)}
+.matrix.diag thead tr.grp-row th.pur{color:var(--pur)}
+
+/* Legend */
+.legend{display:flex;flex-wrap:wrap;gap:14px;font:600 10px var(--mono);color:var(--ink-3);letter-spacing:.04em;margin-top:14px;padding:10px 14px;background:var(--bg-1);border:1px solid var(--line)}
+.legend b{color:var(--ink-1);margin-right:6px}
+.legend span.k{display:inline-flex;align-items:center;gap:5px;margin-right:14px}
+</style></head><body>
+<div class="wrap">
+
+<div class="bc">Kairos · Workspaces · <b>Confluence Matrix</b> · <span class="cu">live data · sample preview</span></div>
+<h1 class="h1">CONFLUENCE <span class="accent">MATRIX</span></h1>
+<div class="sub-h1">20 showcase rows · <b>EXECUTION</b> view = 14 elite-trader columns · <b>DIAGNOSTIC</b> view = 20 condensed columns · all signals live from <b>cache/last_bundle.json</b> + <b>ml_edge_predictions.json</b></div>
+
+<!-- TOGGLE BAR -->
+<div class="toggle-bar">
+  <span class="toggle-lbl">View</span>
+  <button class="view-btn on" id="b-exec" onclick="setView('exec')">▎EXECUTION</button>
+  <button class="view-btn" id="b-diag" onclick="setView('diag')">▦ DIAGNOSTIC</button>
+  <div class="kpi-grp">
+    <div class="kpi gn">BUY<b>12</b></div>
+    <div class="kpi am">WATCH<b>4</b></div>
+    <div class="kpi rd">SHORT<b>4</b></div>
+    <div class="kpi">Conf ≥5<b>12</b></div>
+    <div class="kpi">RR ≥3<b>16</b></div>
+  </div>
+  <input class="search" placeholder="Filter ticker…" oninput="filterRows(this.value)"/>
+</div>
+
+<!-- EXECUTION VIEW -->
+<div id="view-exec" class="matrix-wrap">
+<table class="matrix exec">
+  <thead><tr>
+    <th>Ticker</th><th class="c">AI ✦</th><th class="c">Verdict</th><th class="c">Conv</th>
+    <th class="c">Setup</th><th class="c">Entry-Q</th><th class="c">R:R</th>
+    <th class="r">Spot</th><th class="r">Stop</th><th class="r">T1</th><th class="r">T2</th>
+    <th class="r">Alloc</th><th class="c">Confluence</th><th>Why</th>
+  </tr></thead>
+  <tbody>
+
+    <tr data-conf="7" data-verdict="BUY">
+      <td class="tkr"><span class="tkr-row"><b>LITE</b><span class="held"></span></span><span class="sec">Technology</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-gn">BUY</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">⬈ <b>Breakout Expan</b></span></td>
+      <td class="c"><span class="eq eq-gn">↩ PULLBACK</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">3.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:60%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$890.09</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $631.26</span><span class="lvl-pct rd">−29.1%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $1649.14</span><span class="lvl-pct gn">+85.3%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $2158.08</span><span class="lvl-pct gn">+142.5%</span></div></td>
+      <td class="r"><b class="alloc">0.0%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-gn">+7</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="gn" style="width:70%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">+7 confluence · R:R 3.0 · PULLBACK entry · RS 100 · Sh 3.1 · Mom A</td>
+    </tr>
+    
+    <tr data-conf="7" data-verdict="WATCH">
+      <td class="tkr"><span class="tkr-row"><b>KEYS</b><span class="held"></span></span><span class="sec">Technology</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars am">★☆☆</span></td>
+      <td class="c"><span class="setup">⚡ <b>Impulse Cataly</b></span></td>
+      <td class="c"><span class="eq eq-gn">↩ PULLBACK</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">3.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:60%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$344.11</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $275.61</span><span class="lvl-pct rd">−19.9%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $547.23</span><span class="lvl-pct gn">+59.0%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $683.04</span><span class="lvl-pct gn">+98.5%</span></div></td>
+      <td class="r"><b class="alloc">0.0%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-gn">+7</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="gn" style="width:70%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">+7 confluence · R:R 3.0 · PULLBACK entry · RS 100 · Sh 3.1 · Mom A</td>
+    </tr>
+    
+    <tr data-conf="6" data-verdict="WATCH">
+      <td class="tkr"><span class="tkr-row"><b>LYB</b><span class="held"></span></span><span class="sec">Basic Materials</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">➞ <b>Trend Continua</b></span></td>
+      <td class="c"><span class="eq eq-gn">⊕ FRESH</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">4.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:80%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$73.04</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $70.55</span><span class="lvl-pct rd">−3.4%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $82.28</span><span class="lvl-pct gn">+12.7%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $86.97</span><span class="lvl-pct gn">+19.1%</span></div></td>
+      <td class="r"><b class="alloc">6.2%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-gn">+6</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="gn" style="width:60%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">+6 confluence · R:R 4.0 · FRESH entry · RS 100 · Sh 2.5 · Mom A</td>
+    </tr>
+    
+    <tr data-conf="6" data-verdict="BUY">
+      <td class="tkr"><span class="tkr-row"><b>SDRL</b><span class="held"></span></span><span class="sec">Energy</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-gn">BUY</span></td>
+      <td class="c"><span class="stars am">★☆☆</span></td>
+      <td class="c"><span class="setup">⬈ <b>Breakout Expan</b></span></td>
+      <td class="c"><span class="eq eq-rd">⊘ MISSED</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">3.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:60%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$54.23</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $46.60</span><span class="lvl-pct rd">−14.1%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $76.76</span><span class="lvl-pct gn">+41.5%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $91.84</span><span class="lvl-pct gn">+69.4%</span></div></td>
+      <td class="r"><b class="alloc">5.4%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-gn">+6</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="gn" style="width:60%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">+6 confluence · R:R 3.0 · RS 82 · Sh 3.2 · Mom A</td>
+    </tr>
+    
+    <tr data-conf="6" data-verdict="WAIT">
+      <td class="tkr"><span class="tkr-row"><b>CF</b><span class="held"></span></span><span class="sec">Basic Materials</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-am">WAIT</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">⬈ <b>Breakout Expan</b></span></td>
+      <td class="c"><span class="eq eq-gn">↩ PULLBACK</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">3.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:60%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$127.86</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $119.53</span><span class="lvl-pct rd">−6.5%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $151.73</span><span class="lvl-pct gn">+18.7%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $167.83</span><span class="lvl-pct gn">+31.3%</span></div></td>
+      <td class="r"><b class="alloc">5.1%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-gn">+6</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="gn" style="width:60%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">+6 confluence · R:R 3.0 · PULLBACK entry · RS 100 · Sh 2.2 · Mom A</td>
+    </tr>
+    
+    <tr data-conf="6" data-verdict="WATCH">
+      <td class="tkr"><span class="tkr-row"><b>VRT</b><span class="held"></span></span><span class="sec">Industrials</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">➞ <b>Trend Continua</b></span></td>
+      <td class="c"><span class="eq eq-gn">↩ PULLBACK</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">3.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:60%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$322.63</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $244.04</span><span class="lvl-pct rd">−24.4%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $554.46</span><span class="lvl-pct gn">+71.9%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $709.67</span><span class="lvl-pct gn">+120.0%</span></div></td>
+      <td class="r"><b class="alloc">0.0%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-gn">+6</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="gn" style="width:60%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">+6 confluence · R:R 3.0 · PULLBACK entry · RS 100 · Sh 2.3 · Mom A</td>
+    </tr>
+    
+    <tr data-conf="6" data-verdict="WATCH">
+      <td class="tkr"><span class="tkr-row"><b>COHR</b><span class="held"></span></span><span class="sec">Technology</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">➞ <b>Trend Continua</b></span></td>
+      <td class="c"><span class="eq eq-gn">↩ PULLBACK</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">3.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:60%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$353.63</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $222.35</span><span class="lvl-pct rd">−37.1%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $741.59</span><span class="lvl-pct gn">+109.7%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $1001.21</span><span class="lvl-pct gn">+183.1%</span></div></td>
+      <td class="r"><b class="alloc">0.0%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-gn">+6</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="gn" style="width:60%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">+6 confluence · R:R 3.0 · PULLBACK entry · RS 100 · Sh 2.9 · Mom A</td>
+    </tr>
+    
+    <tr data-conf="6" data-verdict="WATCH">
+      <td class="tkr"><span class="tkr-row"><b>JBL</b><span class="held"></span></span><span class="sec">Technology</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">➞ <b>Trend Continua</b></span></td>
+      <td class="c"><span class="eq eq-gn">↩ PULLBACK</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">3.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:60%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$332.88</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $239.34</span><span class="lvl-pct rd">−28.1%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $610.26</span><span class="lvl-pct gn">+83.3%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $795.72</span><span class="lvl-pct gn">+139.0%</span></div></td>
+      <td class="r"><b class="alloc">0.0%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-gn">+6</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="gn" style="width:60%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">+6 confluence · R:R 3.0 · PULLBACK entry · RS 95 · Sh 2.5 · Mom A</td>
+    </tr>
+    
+    <tr data-conf="6" data-verdict="WAIT">
+      <td class="tkr"><span class="tkr-row"><b>DOW</b><span class="held"></span></span><span class="sec">Basic Materials</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-am">WAIT</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">➞ <b>Trend Continua</b></span></td>
+      <td class="c"><span class="eq eq-gn">↩ PULLBACK</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">3.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:60%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$37.74</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $36.06</span><span class="lvl-pct rd">−4.5%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $42.48</span><span class="lvl-pct gn">+12.6%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $45.69</span><span class="lvl-pct gn">+21.1%</span></div></td>
+      <td class="r"><b class="alloc">7.7%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-gn">+6</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="gn" style="width:60%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">+6 confluence · R:R 3.0 · PULLBACK entry · RS 83 · Sh 2.7 · Mom A</td>
+    </tr>
+    
+    <tr data-conf="6" data-verdict="WAIT">
+      <td class="tkr"><span class="tkr-row"><b>PWR</b><span class="held"></span></span><span class="sec">Industrials</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-am">WAIT</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">➞ <b>Trend Continua</b></span></td>
+      <td class="c"><span class="eq eq-gn">↩ PULLBACK</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">3.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:60%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$714.13</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $526.57</span><span class="lvl-pct rd">−26.3%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $1269.71</span><span class="lvl-pct gn">+77.8%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $1641.28</span><span class="lvl-pct gn">+129.8%</span></div></td>
+      <td class="r"><b class="alloc">0.0%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-gn">+6</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="gn" style="width:60%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">+6 confluence · R:R 3.0 · PULLBACK entry · RS 100 · Sh 2.6 · Mom A</td>
+    </tr>
+    
+    <tr data-conf="5" data-verdict="WATCH">
+      <td class="tkr"><span class="tkr-row"><b>EIX</b><span class="held"></span></span><span class="sec">Utilities</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">➞ <b>Trend Continua</b></span></td>
+      <td class="c"><span class="eq eq-gn">⊕ FRESH</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">4.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:80%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$70.68</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $69.02</span><span class="lvl-pct rd">−2.3%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $76.87</span><span class="lvl-pct gn">+8.8%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $80.01</span><span class="lvl-pct gn">+13.2%</span></div></td>
+      <td class="r"><b class="alloc">7.2%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-gn">+5</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="gn" style="width:50%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">+5 confluence · R:R 4.0 · FRESH entry · Sh 2.0 · Mom B</td>
+    </tr>
+    
+    <tr data-conf="5" data-verdict="WATCH">
+      <td class="tkr"><span class="tkr-row"><b>PLD</b><span class="held"></span></span><span class="sec">Real Estate</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">➞ <b>Trend Continua</b></span></td>
+      <td class="c"><span class="eq eq-gn">⊕ FRESH</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">4.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:80%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$142.44</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $140.31</span><span class="lvl-pct rd">−1.5%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $150.36</span><span class="lvl-pct gn">+5.6%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $154.38</span><span class="lvl-pct gn">+8.4%</span></div></td>
+      <td class="r"><b class="alloc">4.8%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-gn">+5</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="gn" style="width:50%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">+5 confluence · R:R 4.0 · FRESH entry · Sh 1.7 · Mom B</td>
+    </tr>
+    
+    <tr data-conf="1" data-verdict="WATCH">
+      <td class="tkr"><span class="tkr-row"><b>CRM</b><span class="held"></span></span><span class="sec">Technology</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">⬈ <b>Breakout Expan</b></span></td>
+      <td class="c"><span class="eq eq-gn">⊕ FRESH</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">4.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:80%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$179.42</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $173.71</span><span class="lvl-pct rd">−3.2%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $200.39</span><span class="lvl-pct gn">+11.7%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $211.06</span><span class="lvl-pct gn">+17.6%</span></div></td>
+      <td class="r"><b class="alloc">0.0%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-am">+1</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="am" style="width:10%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">R:R 4.0 · FRESH entry</td>
+    </tr>
+    
+    <tr data-conf="1" data-verdict="AVOID">
+      <td class="tkr"><span class="tkr-row"><b>NFLX</b><span class="held"></span></span><span class="sec">Communication Services</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">➞ <b>Trend Continua</b></span></td>
+      <td class="c"><span class="eq eq-gn">⊕ FRESH</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">4.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:80%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$89.33</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $86.27</span><span class="lvl-pct rd">−3.4%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $76.71</span><span class="lvl-pct gn">+-14.1%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $70.34</span><span class="lvl-pct gn">+-21.3%</span></div></td>
+      <td class="r"><b class="alloc">1.3%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-am">+1</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="am" style="width:10%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">R:R 4.0 · FRESH entry · Mom B</td>
+    </tr>
+    
+    <tr data-conf="1" data-verdict="AVOID">
+      <td class="tkr"><span class="tkr-row"><b>XEL</b><span class="held"></span></span><span class="sec">Utilities</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">➞ <b>Trend Continua</b></span></td>
+      <td class="c"><span class="eq eq-gn">⊕ FRESH</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">4.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:80%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$79.73</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $78.22</span><span class="lvl-pct rd">−1.9%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $73.42</span><span class="lvl-pct gn">+-7.9%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $70.22</span><span class="lvl-pct gn">+-11.9%</span></div></td>
+      <td class="r"><b class="alloc">1.4%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-am">+1</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="am" style="width:10%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">R:R 4.0 · FRESH entry · Mom B</td>
+    </tr>
+    
+    <tr data-conf="1" data-verdict="AVOID">
+      <td class="tkr"><span class="tkr-row"><b>DGX</b><span class="held"></span></span><span class="sec">Healthcare</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">⬈ <b>Breakout Expan</b></span></td>
+      <td class="c"><span class="eq eq-gn">⊕ FRESH</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">4.0</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:80%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$190.39</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $187.27</span><span class="lvl-pct rd">−1.6%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $177.29</span><span class="lvl-pct gn">+-6.9%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $170.64</span><span class="lvl-pct gn">+-10.4%</span></div></td>
+      <td class="r"><b class="alloc">0.0%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-am">+1</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="am" style="width:10%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">R:R 4.0 · FRESH entry</td>
+    </tr>
+    
+    <tr data-conf="-3" data-verdict="AVOID">
+      <td class="tkr"><span class="tkr-row"><b>MDT</b><span class="held"></span></span><span class="sec">Healthcare</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">⚡ <b>Impulse Cataly</b></span></td>
+      <td class="c"><span class="eq eq-am">• VALID</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">2.5</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:50%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$78.58</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $81.38</span><span class="lvl-pct rd">−-3.6%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $71.89</span><span class="lvl-pct gn">+-8.5%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $66.47</span><span class="lvl-pct gn">+-15.4%</span></div></td>
+      <td class="r"><b class="alloc">1.6%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-rd">-3</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="rd" style="width:30%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">R:R 2.5</td>
+    </tr>
+    
+    <tr data-conf="-3" data-verdict="AVOID">
+      <td class="tkr"><span class="tkr-row"><b>BSX</b><span class="held"></span></span><span class="sec">Healthcare</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">⚡ <b>Impulse Cataly</b></span></td>
+      <td class="c"><span class="eq eq-am">• VALID</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">2.5</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:50%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$56.81</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $60.47</span><span class="lvl-pct rd">−-6.4%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $47.96</span><span class="lvl-pct gn">+-15.6%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $40.81</span><span class="lvl-pct gn">+-28.2%</span></div></td>
+      <td class="r"><b class="alloc">2.3%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-rd">-3</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="rd" style="width:30%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">R:R 2.5</td>
+    </tr>
+    
+    <tr data-conf="-3" data-verdict="AVOID">
+      <td class="tkr"><span class="tkr-row"><b>CSGP</b><span class="held"></span></span><span class="sec">Real Estate</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">➞ <b>Trend Continua</b></span></td>
+      <td class="c"><span class="eq eq-am">• VALID</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">2.5</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:50%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$33.80</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $37.04</span><span class="lvl-pct rd">−-9.6%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $25.95</span><span class="lvl-pct gn">+-23.2%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $19.61</span><span class="lvl-pct gn">+-42.0%</span></div></td>
+      <td class="r"><b class="alloc">2.3%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-rd">-3</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="rd" style="width:30%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">R:R 2.5</td>
+    </tr>
+    
+    <tr data-conf="-3" data-verdict="AVOID">
+      <td class="tkr"><span class="tkr-row"><b>EPAM</b><span class="held"></span></span><span class="sec">Technology</span></td>
+      <td class="c"><span class="ai-cell ai-na">—<span class="ai-conf">0%</span></span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="setup">➞ <b>Trend Continua</b></span></td>
+      <td class="c"><span class="eq eq-am">• VALID</span></td>
+      <td class="c">
+        <span class="rr-cell">
+          <span class="rr-num rr-gn">2.5</span>
+          <span class="rr-bar"><span class="ibar" style="width:46px"><i class="gn" style="width:50%"></i></span></span>
+        </span>
+      </td>
+      <td class="r price"><b>$100.51</b></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-st">S</i> $115.60</span><span class="lvl-pct rd">−-15.0%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t1">T1</i> $63.75</span><span class="lvl-pct gn">+-36.6%</span></div></td>
+      <td class="r"><div class="lvl"><span class="lvl-row"><i class="lvl-t2">T2</i> $34.12</span><span class="lvl-pct gn">+-66.1%</span></div></td>
+      <td class="r"><b class="alloc">0.0%</b><br><span class="ink-3" style="font-size:9px">Kelly·½</span></td>
+      <td class="c">
+        <div class="conf-mega">
+          <span class="conf-num conf-rd">-3</span>
+          <span class="conf-bar"><span class="ibar" style="width:50px"><i class="rd" style="width:30%"></i></span></span>
+        </div>
+      </td>
+      <td class="why">R:R 2.5</td>
+    </tr>
+    
+  </tbody>
+</table>
+</div>
+
+<!-- DIAGNOSTIC VIEW -->
+<div id="view-diag" class="matrix-wrap hidden">
+<table class="matrix diag">
+  <thead>
+    <tr class="grp-row">
+      <th colspan="1">META</th>
+      <th colspan="3" class="cu">SCAN</th>
+      <th colspan="1" class="pur">AI</th>
+      <th colspan="3" class="gn">QUALITY</th>
+      <th colspan="2" class="cy">EDGE</th>
+      <th colspan="2" class="cy">SMART $</th>
+      <th colspan="2" class="am">TECH</th>
+      <th colspan="2" class="cy">CTX</th>
+      <th colspan="1">CAL</th>
+      <th colspan="1">PORT</th>
+      <th colspan="1" class="rd">SYS</th>
+      <th colspan="1" class="cu">SCORE</th>
+    </tr>
+    <tr>
+      <th>Ticker</th>
+      <th class="c">Verdict</th><th class="c">Conv</th><th class="c">Setup</th>
+      <th class="c">AI</th>
+      <th class="c">Mom</th><th class="c">Val</th><th class="c">Grw</th>
+      <th class="c">Sharpe</th><th class="c">RS</th>
+      <th class="c">News</th><th class="c">Insider</th>
+      <th class="c">Patt</th><th class="c">SMC</th>
+      <th class="c">Sec RS</th><th class="c">Macro</th>
+      <th class="c">ER</th>
+      <th class="c">Port</th>
+      <th class="c">Kill</th>
+      <th class="r">Conflu</th>
+    </tr>
+  </thead>
+  <tbody>
+
+    <tr data-conf="7">
+      <td class="tkr"><b>LITE</b><span class="sec">Technology</span></td>
+      <td class="c"><span class="v v-gn">BUY</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">⬈ Breakout E</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-d">D</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="mini mini-gn">3.1</span></td>
+      <td class="c"><span class="mini mini-gn">100</span></td>
+      <td class="c"><span class="mini mini-gn">+2.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-gn">100%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-gn" style="font-size:13px">+7</b></td>
+    </tr>
+    
+    <tr data-conf="7">
+      <td class="tkr"><b>KEYS</b><span class="sec">Technology</span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars am">★☆☆</span></td>
+      <td class="c"><span class="micro">⚡ Impulse Ca</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-f">F</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="mini mini-gn">3.1</span></td>
+      <td class="c"><span class="mini mini-gn">100</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-gn">99%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-gn" style="font-size:13px">+7</b></td>
+    </tr>
+    
+    <tr data-conf="6">
+      <td class="tkr"><b>LYB</b><span class="sec">Basic Mate</span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">➞ Trend Cont</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="g g-f">F</span></td>
+      <td class="c"><span class="mini mini-gn">2.5</span></td>
+      <td class="c"><span class="mini mini-gn">100</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-rd">21%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-gn" style="font-size:13px">+6</b></td>
+    </tr>
+    
+    <tr data-conf="6">
+      <td class="tkr"><b>SDRL</b><span class="sec">Energy</span></td>
+      <td class="c"><span class="v v-gn">BUY</span></td>
+      <td class="c"><span class="stars am">★☆☆</span></td>
+      <td class="c"><span class="micro">⬈ Breakout E</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-n/a">N/A</span></td>
+      <td class="c"><span class="g g-d">D</span></td>
+      <td class="c"><span class="mini mini-gn">3.2</span></td>
+      <td class="c"><span class="mini mini-gn">82</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-gn">95%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-gn" style="font-size:13px">+6</b></td>
+    </tr>
+    
+    <tr data-conf="6">
+      <td class="tkr"><b>CF</b><span class="sec">Basic Mate</span></td>
+      <td class="c"><span class="v v-am">WAIT</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">⬈ Breakout E</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-c">C</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="mini mini-gn">2.2</span></td>
+      <td class="c"><span class="mini mini-gn">100</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-gn">100%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-gn" style="font-size:13px">+6</b></td>
+    </tr>
+    
+    <tr data-conf="6">
+      <td class="tkr"><b>VRT</b><span class="sec">Industrial</span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">➞ Trend Cont</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-f">F</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="mini mini-gn">2.3</span></td>
+      <td class="c"><span class="mini mini-gn">100</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-gn">96%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-gn" style="font-size:13px">+6</b></td>
+    </tr>
+    
+    <tr data-conf="6">
+      <td class="tkr"><b>COHR</b><span class="sec">Technology</span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">➞ Trend Cont</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-d">D</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="mini mini-gn">2.9</span></td>
+      <td class="c"><span class="mini mini-gn">100</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-rd">4%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-gn" style="font-size:13px">+6</b></td>
+    </tr>
+    
+    <tr data-conf="6">
+      <td class="tkr"><b>JBL</b><span class="sec">Technology</span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">➞ Trend Cont</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-c">C</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="mini mini-gn">2.5</span></td>
+      <td class="c"><span class="mini mini-gn">95</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-rd">9%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-gn" style="font-size:13px">+6</b></td>
+    </tr>
+    
+    <tr data-conf="6">
+      <td class="tkr"><b>DOW</b><span class="sec">Basic Mate</span></td>
+      <td class="c"><span class="v v-am">WAIT</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">➞ Trend Cont</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-c">C</span></td>
+      <td class="c"><span class="g g-d">D</span></td>
+      <td class="c"><span class="mini mini-gn">2.7</span></td>
+      <td class="c"><span class="mini mini-gn">83</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-rd">26%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-gn" style="font-size:13px">+6</b></td>
+    </tr>
+    
+    <tr data-conf="6">
+      <td class="tkr"><b>PWR</b><span class="sec">Industrial</span></td>
+      <td class="c"><span class="v v-am">WAIT</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">➞ Trend Cont</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-f">F</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="mini mini-gn">2.6</span></td>
+      <td class="c"><span class="mini mini-gn">100</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-rd">15%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-gn" style="font-size:13px">+6</b></td>
+    </tr>
+    
+    <tr data-conf="5">
+      <td class="tkr"><b>EIX</b><span class="sec">Utilities</span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">➞ Trend Cont</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="g g-d">D</span></td>
+      <td class="c"><span class="mini mini-gn">2.0</span></td>
+      <td class="c"><span class="mini mini-rd">29</span></td>
+      <td class="c"><span class="mini mini-gn">+2.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-rd">21%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-gn" style="font-size:13px">+5</b></td>
+    </tr>
+    
+    <tr data-conf="5">
+      <td class="tkr"><b>PLD</b><span class="sec">Real Estat</span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">➞ Trend Cont</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="g g-f">F</span></td>
+      <td class="c"><span class="g g-c">C</span></td>
+      <td class="c"><span class="mini mini-gn">1.7</span></td>
+      <td class="c"><span class="mini mini-rd">40</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-rd">14%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-gn" style="font-size:13px">+5</b></td>
+    </tr>
+    
+    <tr data-conf="1">
+      <td class="tkr"><b>CRM</b><span class="sec">Technology</span></td>
+      <td class="c"><span class="v v-na">WATCH</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">⬈ Breakout E</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-d">D</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="mini mini-rd">-1.2</span></td>
+      <td class="c"><span class="mini mini-rd">26</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-am">67%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-am" style="font-size:13px">+1</b></td>
+    </tr>
+    
+    <tr data-conf="1">
+      <td class="tkr"><b>NFLX</b><span class="sec">Communicat</span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">➞ Trend Cont</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="g g-d">D</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="mini mini-rd">-0.9</span></td>
+      <td class="c"><span class="mini mini-am">70</span></td>
+      <td class="c"><span class="mini mini-gn">+2.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-gn">91%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-am" style="font-size:13px">+1</b></td>
+    </tr>
+    
+    <tr data-conf="1">
+      <td class="tkr"><b>XEL</b><span class="sec">Utilities</span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">➞ Trend Cont</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="g g-c">C</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="mini mini-am">0.1</span></td>
+      <td class="c"><span class="mini mini-rd">31</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-gn">76%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-am" style="font-size:13px">+1</b></td>
+    </tr>
+    
+    <tr data-conf="1">
+      <td class="tkr"><b>DGX</b><span class="sec">Healthcare</span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">⬈ Breakout E</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-c">C</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="g g-c">C</span></td>
+      <td class="c"><span class="mini mini-am">0.4</span></td>
+      <td class="c"><span class="mini mini-rd">20</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-gn">●</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-am">44%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-am" style="font-size:13px">+1</b></td>
+    </tr>
+    
+    <tr data-conf="-3">
+      <td class="tkr"><b>MDT</b><span class="sec">Healthcare</span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">⚡ Impulse Ca</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-d">D</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="g g-c">C</span></td>
+      <td class="c"><span class="mini mini-rd">-1.6</span></td>
+      <td class="c"><span class="mini mini-rd">0</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-gn">76%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-rd" style="font-size:13px">-3</b></td>
+    </tr>
+    
+    <tr data-conf="-3">
+      <td class="tkr"><b>BSX</b><span class="sec">Healthcare</span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">⚡ Impulse Ca</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-f">F</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-c">C</span></td>
+      <td class="c"><span class="mini mini-rd">-2.6</span></td>
+      <td class="c"><span class="mini mini-rd">0</span></td>
+      <td class="c"><span class="mini mini-gn">+2.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-am">63%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-rd" style="font-size:13px">-3</b></td>
+    </tr>
+    
+    <tr data-conf="-3">
+      <td class="tkr"><b>CSGP</b><span class="sec">Real Estat</span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">➞ Trend Cont</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-f">F</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="g g-b">B</span></td>
+      <td class="c"><span class="mini mini-rd">-2.7</span></td>
+      <td class="c"><span class="mini mini-rd">0</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-gn">72%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-rd" style="font-size:13px">-3</b></td>
+    </tr>
+    
+    <tr data-conf="-3">
+      <td class="tkr"><b>EPAM</b><span class="sec">Technology</span></td>
+      <td class="c"><span class="v v-rd">AVOID</span></td>
+      <td class="c"><span class="stars ink-3">☆☆☆</span></td>
+      <td class="c"><span class="micro">➞ Trend Cont</span></td>
+      <td class="c"><span class="ai-mini ai-na">—</span></td>
+      <td class="c"><span class="g g-f">F</span></td>
+      <td class="c"><span class="g g-a">A</span></td>
+      <td class="c"><span class="g g-d">D</span></td>
+      <td class="c"><span class="mini mini-rd">-2.0</span></td>
+      <td class="c"><span class="mini mini-rd">0</span></td>
+      <td class="c"><span class="mini mini-gn">+3.00</span></td>
+      <td class="c"><span class="mini mini-na">0</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-rd">31%</span></td>
+      <td class="c"><span class="mini mini-gn">OK</span></td>
+      <td class="c"><span class="mini mini-na">—d</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="c"><span class="mini mini-na">—</span></td>
+      <td class="r"><b class="conf-num conf-rd" style="font-size:13px">-3</b></td>
+    </tr>
+    
+  </tbody>
+</table>
+</div>
+
+<!-- LEGEND -->
+<div class="legend">
+  <b>EXEC LEGEND ·</b>
+  <span class="k"><span class="eq eq-gn">⊕ FRESH</span> = optimal pivot</span>
+  <span class="k"><span class="eq eq-gn">↩ PULLBACK</span> = retest entry</span>
+  <span class="k"><span class="eq eq-am">• VALID</span> = acceptable</span>
+  <span class="k"><span class="eq eq-rd">⤴ EXTENDED</span> = reduce size</span>
+  <span class="k"><span class="eq eq-rd">⊘ MISSED</span> = wait pullback</span>
+  <span class="k"><span class="v v-gn">BUY</span> · <span class="v v-am">WAIT</span> · <span class="v v-rd">AVOID</span></span>
+  <span class="k"><span class="stars gn">★★★</span> T1 · <span class="stars gn">★★</span> T2 · <span class="stars am">★</span> T3</span>
+  <span class="k">R:R green ≥2.5 · amber 1.5-2.5 · red &lt;1.5</span>
+</div>
+
+<script>
+function setView(v){
+  document.getElementById('view-exec').classList.toggle('hidden', v!=='exec');
+  document.getElementById('view-diag').classList.toggle('hidden', v!=='diag');
+  document.getElementById('b-exec').classList.toggle('on', v==='exec');
+  document.getElementById('b-diag').classList.toggle('on', v==='diag');
+}
+function filterRows(q){
+  q = (q||'').trim().toUpperCase();
+  document.querySelectorAll('.matrix tbody tr').forEach(tr=>{
+    const tk = (tr.querySelector('.tkr b')||{}).textContent || '';
+    tr.style.display = (!q || tk.includes(q)) ? '' : 'none';
+  });
+}
+</script>
+</div></body></html>

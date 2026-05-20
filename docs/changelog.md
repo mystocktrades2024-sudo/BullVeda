@@ -6,6 +6,59 @@ of what shipped and when, so root CLAUDE.md can stay lean.
 
 ---
 
+## 2026-05-19 — Per-mode decisions (Option A) · user-agency action bar · backtest guard rail
+
+Multiple shipments in one session. Major theme: dashboard becomes a **trader's cockpit, not a gatekeeper**. The SWING / POSITION / INVEST mode toggle does real work end-to-end, and the user can BUY / SHORT / + WATCH regardless of system verdict.
+
+### A · Per-mode decisions (Option A) — `MODE-1` `MODE-2` `MODE-3`
+
+Pre-2026-05-19, the SWING / POS / INV pills in the detail header were cosmetic — same verdict, stop, T1, T2, R:R across modes. Now each mode applies its own rulebook end-to-end.
+
+**Phase 1 (`3e812743` — `MODE-1`):**
+- New `_MODE_RULEBOOK` in `analysis.py` (SWING 1.25× ATR / R:R 3.0 / FRESH-PULLBACK only / 14d ER buffer · POSITION 1.75× ATR / R:R 2.5 / FRESH-PULLBACK-VALID / no ER buffer · INVESTMENT −15% DD / R:R 2.0 / any entry / ER irrelevant)
+- `compute_decisions_by_mode()` per ticker runs `make_decision()` 3x with mode-mutated configs
+- Output as `t.decisions_by_mode = {swing, position, investment}` with per-mode verdict / stop / T1 / T2 / R:R / size_mult / horizon
+- Frontend (`renderQuickActionBar`, `renderPlanTab`, Overview plan strip) reads `t.decisions_by_mode[mode]` via `_qdStrategyCurrent()` with legacy fallback
+
+**Phase 2 (`d5eb49c5` — `MODE-2`):**
+- Per-mode `final_alloc_pct = base × size_mult`, capped 5% NAV (CLAUDE.md principle 10 single-name cap)
+- New `diverge_note` field surfaces the exact rule that caused divergence from legacy: "R:R 2.4 < 3.0 mode floor" / "entry VALID not in mode gate ['FRESH','PULLBACK']" / "ER in 8d < 14d mode blackout"
+- Frontend chip shows "size 5.5% NAV (1.30×)" and amber "⚠ R:R..." divergence pill
+
+**Phase 3 (`6df0095d` — `MODE-3`):**
+- New `_MODE_PILLAR_WEIGHTS` (SWING catalyst+tech-heavy · POSITION balanced · INVEST fundamentals-heavy, each sums to 1.0)
+- `compute_decisions_by_mode` accepts `pillar_pcts` and computes mode-specific composite = Σ (pct × weight × 100) passed to `make_decision()`
+- **Explicit principle-7 override**: weights are intuition, not walk-forward validated. Validation deferred to `MODE-4`.
+- Three safety rails: (1) config-gated rollback (`per_mode_pillar_reweight._enabled`, default true), (2) UI-only impact — legacy `t.score` still drives `decision_log` + alerts + kill-list + Wilson LB pipelines, (3) chip shows both scores when divergence ≥5pts ("score 58 (legacy 45)")
+
+**Validation owed (`MODE-4`, OPEN):** `scripts/validate_per_mode_weights.py` (in flight) — baseline + 3 per-mode-weighted backtests, revert flag if any mode shows ≤1.0× PF or ≤−5pp WR vs baseline. Plan in `docs/per_mode_decisions_roadmap.md`.
+
+### B · User-agency action bar — `UI-AGENCY-1` (`c97db4b4`)
+
+Detail page no longer hides BUY when the system says WATCH/AVOID. New sticky `renderQuickActionBar` at top of every detail view shows: ticker + price + verdict chip (informational only) + always-clickable **▲ BUY · ▼ SHORT · + WATCH** buttons. New `window._openQuickAction()` global router handles BUY (long modal), SHORT (short modal), and WATCH (POST `/api/custom/add` with idempotent "already tracked" handling — toast amber-info instead of red-error on duplicate). Memory: `feedback_user_agency_actions.md` ("system informs, user decides").
+
+### C · Backtest min_score guard rail (Path C) — `BT-GUARD-1` (`d754830`)
+
+Users (and Claude sessions) repeatedly launched 252d backtests with `--min-score 65` (the live threshold), producing 0 BUYs across all 252 days. Historical scoring is structurally suppressed (sentiment/options/catalyst pillars depend on real-time data not in EODHD backfill). Guard rail: `backtest.py` now warns loudly when `--min-score > 55` (backtest-safe floor); new `--accept-low-buys` flag silences for legitimate grid-search; `--smoke` bypasses. Full root-cause analysis in `docs/backtest_historical_scoring_diagnostic.md`.
+
+### D · Strategy Lab rebuild — `UI-STRAT-1` (`93ec11842`)
+
+Old Strategy Lab was 4-section table with fake numbers. Rebuilt as 13-section HF cockpit: portfolio cockpit (Kelly cascade per sleeve · current vs target NAV · per-sleeve Sharpe / max-DD / R-mult histogram), setup-family performance (LIVE from `setup_stats.json` with Wilson 95% CI bars + PF haircut + USABLE/HALF-SIZE/SKIP verdict), edge erosion radar (rolling 90d/6mo/12mo decay + KS-drift), BT vs Live divergence (surfaces PEAD canary BT 2.04 vs live 0.88 = −57%), phase promotion ledger, regime×sleeve grid 8×4, correlation 8×8 + eigenvalue λ₁, sleeve interaction overlap, recent picks roster, auto-quarantine surface, mechanism + falsifier, playbook, pre-mortem. Async `_stratLabPatch()` fetches live setup_stats.json.
+
+### E · Crypto tab — 20yr HF analyst lens — `UI-CRYPTO-1` (`696731a4d`)
+
+Old Crypto tab was 4-card stub. Rebuilt as 13-section senior-HF surface fusing cycle posture + Graham-Buffett value floors + swing-trader execution: cycle posture banner (Pi-Cycle / MVRV-Z / NUPL / 200wk MA), spot KPIs, **Margin of Safety floors** (realized price · thermo-cap · cost of production · 200wk MA · LTH/STH cost), ETH owner-earnings DCF, BTC hard-money compounding, stablecoin liquidity, macro drivers, spot ETF flows, derivatives tape, on-chain valuation composite, catalyst calendar, adjacent equities (COIN/MSTR/MARA/RIOT/CLSK/HOOD/IBIT/ETHA + BTC β + NAV premium), L1/L2 rotation, regime-conditional playbook, pre-mortem.
+
+### F · ML Edge theme fix + tf-* visual port — `UI-MLEDGE-1` (`696731a4d`)
+
+ML Edge per-ticker sub-tab had hardcoded dark CSS vars *inline* on `#qd-ml-root`, blocking the `body.light` theme toggle. Moved palette into `_ensureMlEdgeStyles()` stylesheet with `body.light` overrides. Then ported workspace QuantMlEdge to the tape-flow `tf-*` design system: `tf-hero` 3-col + `tf-pulse-strip` 4 live feeds (top bulls / top bears / horizon flips / model health) + `tf-confluence` (4 KPI cells + X/4 filters-passing score) + `tf-vbar` verdict badge. All 6 sections rewritten — no data lost. New memory: `feedback_inline_css_vars_break_theming.md`.
+
+### G · Help registry 14 → 38 entries — `UI-HELP-1` (`696731a4d`)
+
+Help registry covered only workspace tabs. Added 24 new entries: 13 detail sub-tabs (overview / chart / technicals / patterns / smc / value / risk / er_lab / options / detail_portfolio / intel / edge / ml_edge) + 11 MarketsV2 ports (crypto / market / macro / premarket / events / themes / strategies / leveraged / industries / marketmap / audittrail). `kairosHelpFor` now threads `isDetail` through the dispatcher — prefers `K_HELP_CONTENT['detail_' + key]`, falls back to bare key (resolves the portfolio workspace ↔ detail-subtab collision). MarketsV2 render block now calls `_injectHelpBtn` (was previously skipped, so `?` showed the previous tab's content).
+
+---
+
 ## 2026-05-18 — AI Prediction tab · universe expansion · rolling-Sharpe bug fix
 
 Three thematically linked shipments in one session: a workspace-grade AI Prediction surface, universe expansion to ~3000 tickers, and a critical fix to the rolling-Sharpe brake that had been falsely pausing all new BUYs.

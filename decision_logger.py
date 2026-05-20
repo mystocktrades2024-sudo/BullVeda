@@ -214,10 +214,29 @@ def log_decisions_batch(
                 if "gates_hit" in r and "gates_hit" not in ctx:
                     ctx["gates_hit"] = r.get("gates_hit") or []
 
+                # 2026-05-18 · Fix C: surface "insufficient_history" + similar
+                # gate reasons from score_breakdown when score=0. Previously
+                # decision_log lost this info, leaving 14-25 tickers/day
+                # showing score=0 with no explanation.
+                _reason = decision.get("reason") or decision.get("why") or ""
+                _score_val = r.get("score") or 0
+                _breakdown = ctx.get("score_breakdown") or {}
+                if _score_val == 0 and isinstance(_breakdown, dict):
+                    _gate = _breakdown.get("gate")
+                    if _gate:
+                        # e.g. "insufficient_history", "missing_fundamentals"
+                        _reason = f"score=0 ({_gate}) — {_reason}" if _reason else f"score=0 ({_gate})"
+                    elif _breakdown:
+                        # No explicit gate — annotate which pillar(s) returned 0
+                        _zero_pillars = [k for k in ("tech","catalyst","rs","smart_money","quality_gate","entry_rr")
+                                         if (_breakdown.get(k) or 0) == 0]
+                        if _zero_pillars:
+                            _reason = f"score=0 (zero pillars: {','.join(_zero_pillars)}) — {_reason}" if _reason else f"score=0 (zero pillars: {','.join(_zero_pillars)})"
+
                 # Build a flat decision-shaped dict for _build_entry.
                 dec_flat = {
                     "verdict": decision.get("verdict"),
-                    "reason": decision.get("reason") or decision.get("why"),
+                    "reason": _reason,
                     "score": r.get("score"),
                     "direction": r.get("direction") or decision.get("direction"),
                     "setup_type": ctx.get("setup_type"),
