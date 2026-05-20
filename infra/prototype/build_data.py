@@ -263,6 +263,21 @@ def _fetch_fundamentals_enrichment(tickers: list) -> dict:
         return {}
 
 
+def _load_premarket() -> dict:
+    """Read cache/premarket.json written by scripts/premarket_scan.py.
+    Returns empty payload if missing (frontend tab falls back to market_movers).
+    """
+    try:
+        from pathlib import Path as _P
+        p = _P(__file__).parent.parent / "cache" / "premarket.json"
+        if not p.exists():
+            return {"_meta": {"session_active": False, "session_status": "not_initialized"}, "gappers_up": [], "gappers_dn": [], "catalysts": {}}
+        import json as _j
+        return _j.loads(p.read_text())
+    except Exception:
+        return {"_meta": {"session_active": False, "session_status": "load_error"}, "gappers_up": [], "gappers_dn": [], "catalysts": {}}
+
+
 def _load_corporate_events() -> dict:
     """Read cache/corporate_events.json written by scripts/fetch_corporate_events.py.
 
@@ -3471,6 +3486,10 @@ def main():
         # Corporate events (IPOs + splits) — populated by scripts/fetch_corporate_events.py
         # which writes cache/corporate_events.json. Read at bundle-build time.
         "corporate_events": _load_corporate_events(),
+        # Pre-market scanner output — populated by scripts/premarket_scan.py
+        # which runs every 30min during 4am-9:30am ET on weekdays. Out-of-session
+        # this returns the last session's data + a session_active=false flag.
+        "premarket": _load_premarket(),
         # Accuracy framework (V-7 / P0-B · 2026-05-03) — Kupiec, Christoffersen, Basel
         "accuracy":      _compute_accuracy_safe(),
         # S-6: Sector RS pair candidates (market-neutral)
