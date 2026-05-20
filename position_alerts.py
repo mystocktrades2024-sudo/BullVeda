@@ -117,6 +117,76 @@ def check_t1_hit(position: dict, current_price: float) -> bool:
     return False
 
 
+def check_stop_hit(position: dict, current_price: float) -> bool:
+    """HARD EXIT: stop level breached. Long: price <= stop. Short: price >= stop.
+    Fires 24/7 (premarket, after-hours, overnight) — never gated by market hours.
+    """
+    ticker = position["ticker"]
+    direction = position.get("direction", "long")
+    stop = position.get("stop", 0)
+    if not stop:
+        return False
+    breached = (current_price <= stop) if direction == "long" else (current_price >= stop)
+    if not breached:
+        return False
+    if _already_sent_today(ticker, "stop_hit"):
+        return False
+    entry = position.get("entry_price", 0)
+    pnl_pct = ((current_price - entry) / entry * 100) if entry and direction == "long" else 0
+    _send("CRITICAL",
+          f"\U0001f6a8 {ticker} STOP HIT — EXIT NOW",
+          f"Price ${current_price:.2f} breached stop ${stop:.2f} ({pnl_pct:+.2f}% from entry ${entry:.2f}). "
+          f"Sell at market or set tight stop-limit.")
+    _mark_sent(ticker, "stop_hit")
+    return True
+
+
+def check_t2_hit(position: dict, current_price: float) -> bool:
+    """HARD: T2 reached. Long: price >= t2. Short: price <= t2. 24/7."""
+    ticker = position["ticker"]
+    direction = position.get("direction", "long")
+    t2 = position.get("target2", 0)
+    if not t2:
+        return False
+    hit = (current_price >= t2) if direction == "long" else (current_price <= t2)
+    if not hit:
+        return False
+    if _already_sent_today(ticker, "t2_hit"):
+        return False
+    entry = position.get("entry_price", 0)
+    pnl_pct = abs((t2 - entry) / entry * 100) if entry else 0
+    _send("INFO",
+          f"\U0001f4b0 {ticker} T2 HIT",
+          f"Price ${current_price:.2f} reached T2 ${t2:.2f} (+{pnl_pct:.1f}%). "
+          f"Full exit or trail remaining runner.")
+    _mark_sent(ticker, "t2_hit")
+    return True
+
+
+def check_adverse_gap(position: dict, current_price: float, prev_close: float, atr: float) -> bool:
+    """HARD: adverse gap > 2 ATR (long: gap-down, short: gap-up). 24/7.
+    Catches premarket/overnight catalyst moves before they widen further at open.
+    """
+    if not prev_close or not atr:
+        return False
+    ticker = position["ticker"]
+    direction = position.get("direction", "long")
+    gap = current_price - prev_close
+    adverse_gap = gap if direction == "short" else -gap  # positive = adverse
+    if adverse_gap < 2 * atr:
+        return False
+    if _already_sent_today(ticker, "adverse_gap"):
+        return False
+    gap_pct = (current_price / prev_close - 1) * 100
+    direction_word = "GAP DOWN" if direction == "long" else "GAP UP"
+    _send("WARN",
+          f"⚠️ {ticker} {direction_word} {gap_pct:+.1f}%",
+          f"Price ${current_price:.2f} vs prev close ${prev_close:.2f} — {abs(adverse_gap)/atr:.1f} ATR adverse. "
+          f"Review premarket/AH news; tighten stop or exit at open.")
+    _mark_sent(ticker, "adverse_gap")
+    return True
+
+
 def send_eod_digest(positions: list, summary: dict) -> bool:
     """Send end-of-day summary with all position P&L. Once per day."""
     if _already_sent_today("_PORTFOLIO_", "eod_digest"):
@@ -147,12 +217,15 @@ def send_eod_digest(positions: list, summary: dict) -> bool:
 
 
 def run_alerts_pass():
-    """Main entry \u2014 called from EOD manager or scan pipeline.
-    Respects market hours gate. Skips all alerts when market closed."""
-    if not _is_market_hours():
-        log.debug("Outside market hours \u2014 skipping alerts")
-        return {"skipped": True, "reason": "outside_market_hours"}
+    """Main entry \u2014 called from EOD manager or scan pipeline every 60s.
 
+    Hard exits (stop_hit, t2_hit, adverse_gap) fire 24/7 \u2014 they trigger on
+    breached price levels and can't wait until market open (premarket gaps
+    can blow through stops before 9:30am).
+
+    Soft alerts (stop_approach within 1 ATR, t1_hit pre-trail) only fire
+    during 9:30am\u20134pm ET to avoid pre/post-market noise on bid-ask spread.
+    """
     try:
         from portfolio_tracker import get_portfolio_summary
         from data_fetcher import fetch_ohlcv_with_failover
@@ -164,6 +237,7 @@ def run_alerts_pass():
     if not positions:
         return {"skipped": True, "reason": "no_positions"}
 
+    in_hours = _is_market_hours()
     alerts_sent = []
     for p in positions:
         ticker = p.get("ticker", "")
@@ -172,20 +246,31 @@ def run_alerts_pass():
             if df is None or df.empty:
                 continue
             current = float(df["Close"].iloc[-1])
+            prev_close = float(df["Close"].iloc[-2]) if len(df) >= 2 else current
             # ATR = avg of high-low over last 14 bars
             if "High" in df.columns and "Low" in df.columns and len(df) >= 14:
                 atr = (df["High"].tail(14) - df["Low"].tail(14)).mean()
             else:
-                atr = current * 0.02  # fallback 2%
+                atr = current * 0.02
 
-            if check_stop_approach(p, current, atr):
-                alerts_sent.append({"ticker": ticker, "type": "stop_approach"})
-            if check_t1_hit(p, current):
-                alerts_sent.append({"ticker": ticker, "type": "t1_hit"})
+            # HARD EXITS \u2014 fire 24/7 regardless of session
+            if check_stop_hit(p, current):
+                alerts_sent.append({"ticker": ticker, "type": "stop_hit"})
+            if check_t2_hit(p, current):
+                alerts_sent.append({"ticker": ticker, "type": "t2_hit"})
+            if check_adverse_gap(p, current, prev_close, atr):
+                alerts_sent.append({"ticker": ticker, "type": "adverse_gap"})
+
+            # SOFT ALERTS \u2014 regular hours only (avoid pre/post-market noise on spreads)
+            if in_hours:
+                if check_stop_approach(p, current, atr):
+                    alerts_sent.append({"ticker": ticker, "type": "stop_approach"})
+                if check_t1_hit(p, current):
+                    alerts_sent.append({"ticker": ticker, "type": "t1_hit"})
         except Exception as e:
             log.debug(f"Alert check failed for {ticker}: {e}")
 
-    return {"alerts_sent": alerts_sent, "positions_checked": len(positions)}
+    return {"alerts_sent": alerts_sent, "positions_checked": len(positions), "in_hours": in_hours}
 
 
 if __name__ == "__main__":
