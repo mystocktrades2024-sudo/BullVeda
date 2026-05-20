@@ -3719,6 +3719,26 @@ def run_daily_scan(force_fresh: bool = False):
             _nondefault = {s: m for s, m in _setup_mults.items() if m != 1.0}
             if _nondefault:
                 log.info(f"  Decision engine: setup size multipliers (non-default) = {_nondefault}")
+
+        # 2026-05-19 — Inject QQQ-SPY 21d momentum spread for momentum_condition_gate.
+        # Required when config.momentum_condition_gate._enabled=true. Computed once
+        # globally (market-level signal); attached to every ticker dict before
+        # compute_final_verdict reads it.
+        _mom_spread_pct = None
+        try:
+            _qqq_data = _fmd(["QQQ"], period="3mo").get("QQQ")
+            if (_qqq_data is not None and "Close" in _qqq_data.columns
+                    and _spy_data is not None and "Close" in _spy_data.columns):
+                _qqq_c = _qqq_data["Close"].dropna()
+                _spy_c = _spy_data["Close"].dropna()
+                if len(_qqq_c) >= 22 and len(_spy_c) >= 22:
+                    _qqq_21 = (_qqq_c.iloc[-1] / _qqq_c.iloc[-22] - 1) * 100
+                    _spy_21 = (_spy_c.iloc[-1] / _spy_c.iloc[-22] - 1) * 100
+                    _mom_spread_pct = round(float(_qqq_21 - _spy_21), 3)
+                    log.info(f"  Decision engine: QQQ-SPY 21d momentum spread = {_mom_spread_pct:+.2f}%")
+        except Exception as _ms_e:
+            log.debug(f"QQQ-SPY momentum spread step skipped: {_ms_e}")
+
         _de_count = 0
         _de_failed = 0
         for _sec_key, _sec_val in bundle.items():
@@ -3728,6 +3748,9 @@ def run_daily_scan(force_fresh: bool = False):
             for _row in _sec_val:
                 if not isinstance(_row, dict):
                     continue
+                # Inject runtime momentum spread for momentum_condition_gate
+                if _mom_spread_pct is not None:
+                    _row["_runtime_qqq_spy_momentum_21d"] = _mom_spread_pct
                 _r = compute_final_verdict(_row, regime=_bundle_regime, thresholds=_cfg_thr,
                                            setup_kill_list=_setup_kills,
                                            setup_band_kill_list=_setup_band_kills,
@@ -4100,6 +4123,42 @@ def run_daily_scan(force_fresh: bool = False):
             log.debug("ticker_snapshots: tickers.json not present — skipping snapshot")
     except Exception as _se:
         log.warning(f"ticker_snapshots capture failed: {_se}")
+
+    # ── Data-quality alarm: too many tickers with score=0 = upstream outage ──
+    # 2026-05-18: count tickers with score=0. If >10 (out of typical 400-500),
+    # indicates EODHD partial outage or scoring bug. Slack alert so user knows
+    # BEFORE seeing empty BUY list. Includes per-pillar breakdown if available.
+    try:
+        _zero_score = [r for r in (all_results or []) if isinstance(r, dict) and (r.get("score") or 0) == 0]
+        if len(_zero_score) > 10:
+            _tk_sample = [r.get("ticker") for r in _zero_score[:15] if r.get("ticker")]
+            # Aggregate which pillar caused most zeros (from score_breakdown)
+            from collections import Counter as _C
+            _pillar_zero = _C()
+            for r in _zero_score:
+                bd = r.get("score_breakdown") or {}
+                for p in ("tech", "catalyst", "rs", "smart_money", "quality_gate", "entry_rr"):
+                    if (bd.get(p) or 0) == 0:
+                        _pillar_zero[p] += 1
+            _pillar_summary = " · ".join(f"{p}={n}" for p, n in _pillar_zero.most_common(3))
+            log.warning(f"⚠ DATA-QUALITY ALARM: {len(_zero_score)} tickers scored 0 this scan "
+                        f"(typical: 0-5). Sample: {_tk_sample}. "
+                        f"Most-failed pillars: {_pillar_summary or 'unknown (no breakdown data)'}")
+            try:
+                from alerts import send_alert
+                send_alert(
+                    level="WARNING",
+                    title=f"⚠ {len(_zero_score)} tickers scored 0",
+                    body=(f"This scan: {len(_zero_score)} tickers returned score=0 (typical: 0-5). "
+                          f"Likely EODHD partial outage or scoring pipeline gap.\n"
+                          f"Sample: {', '.join(_tk_sample[:10])}\n"
+                          f"Most-failed pillars: {_pillar_summary or 'no breakdown data yet'}\n"
+                          f"Action: check EODHD quota, review Pipeline tab → per-pillar matrix"),
+                )
+            except Exception as _ae:
+                log.warning(f"Slack alarm send failed: {_ae}")
+    except Exception as _zse:
+        log.warning(f"data-quality alarm check failed: {_zse}")
 
     log.info(f"=== Done! Dashboard: http://localhost:7432/v2/dashboard.html ===")
     # 2026-05-18: read from FINAL bundle state (not stale locals) so the count
