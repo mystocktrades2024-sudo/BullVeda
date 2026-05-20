@@ -16798,6 +16798,7 @@ const QuantPortfolio = (function() {
             <span>Open Positions <span class="meta">${positions.length} active · click ticker → Detail · click column to sort</span></span>
             <span class="qf-tbl-controls">
               <span class="stat" style="background:transparent;border:none;color:var(--ink-3);">total: <b style="color:var(--ink);">${_fmtDol(totalMarket)}</b></span>
+              <button class="qport-add-btn" onclick="window._openPositionModal && window._openPositionModal('', 0, 0, 0, 0, '')" style="background:var(--gn);color:#000;border:0;padding:5px 12px;font:700 10px var(--mono);letter-spacing:.08em;border-radius:2px;cursor:pointer;margin-left:8px" title="Open Add Position form">+ ADD POSITION</button>
             </span>
           </h2>
           ${renderPositionsTable(positions, data)}
@@ -16897,6 +16898,24 @@ const QuantPortfolio = (function() {
         e.stopPropagation();
         const tkr = el.dataset.tkr;
         if (tkr && window.setDetailTicker) window.setDetailTicker(tkr);
+      });
+    });
+    // 2026-05-20 · Close-position buttons in the Action column
+    wsPanel.querySelectorAll('[data-qport-close-tk]').forEach(btn => {
+      if (btn._wired) return;
+      btn._wired = true;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (typeof window._openClosePositionModal === 'function') {
+          window._openClosePositionModal(
+            btn.dataset.qportCloseTk,
+            parseFloat(btn.dataset.qportClosePx) || 0,
+            parseInt(btn.dataset.qportCloseShares, 10) || 0,
+            parseFloat(btn.dataset.qportCloseEntry) || 0,
+            btn.dataset.qportCloseDir || 'long'
+          );
+        }
       });
     });
   }
@@ -51923,6 +51942,126 @@ window._openPositionModal = function(ticker, px, stop, t1, t2, setup) {
     const f = document.getElementById('kposShares');
     if (f) f.focus();
   }, 50);
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// Close Position modal — triggered by ✕ CLOSE buttons in the Portfolio tab.
+// POSTs to /api/portfolio/close then refreshes the portfolio data.
+// ══════════════════════════════════════════════════════════════════════
+window._openClosePositionModal = function(ticker, currentPx, shares, entry, direction) {
+  const existing = document.getElementById('kclose-overlay');
+  if (existing) existing.remove();
+
+  const exitDefault = (currentPx > 0) ? currentPx : entry;
+  const pnlPreview = (entry > 0 && shares > 0)
+    ? (() => {
+        const dir = direction === 'short' ? -1 : 1;
+        const pnlDollars = dir * shares * (exitDefault - entry);
+        const pnlPct = ((exitDefault - entry) / entry) * 100 * dir;
+        return `Estimated P&L: <b style="color:${pnlDollars >= 0 ? 'var(--gn)' : 'var(--rd)'}">${pnlDollars >= 0 ? '+' : ''}$${pnlDollars.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)</b>`;
+      })()
+    : '';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'kclose-overlay';
+  overlay.className = 'kpos-overlay';
+  overlay.innerHTML = `
+    <div class="kpos-modal" style="max-width:440px">
+      <div class="kpos-title">
+        <span>✕ Close Position · ${ticker}</span>
+        <span class="kpos-close" id="kcloseClose">×</span>
+      </div>
+      <div style="padding:4px 0 12px;color:var(--ink-2);font-size:12px;line-height:1.5">
+        ${shares} sh ${direction === 'short' ? '(short)' : '(long)'} @ entry $${(entry||0).toFixed(2)}
+      </div>
+      <div class="kpos-row">
+        <div class="kpos-field" style="flex:1">
+          <label>Exit Price</label>
+          <input id="kcloseExit" type="number" step="0.01" value="${exitDefault > 0 ? exitDefault.toFixed(2) : ''}" placeholder="required" style="font-weight:700">
+        </div>
+        <div class="kpos-field" style="flex:1">
+          <label>Reason</label>
+          <select id="kcloseReason">
+            <option value="manual" selected>manual</option>
+            <option value="stop_hit">stop hit</option>
+            <option value="t1_hit">T1 hit</option>
+            <option value="t2_hit">T2 hit</option>
+            <option value="earnings_avoid">earnings avoid</option>
+            <option value="thesis_broken">thesis broken</option>
+            <option value="time_stop">time stop</option>
+          </select>
+        </div>
+      </div>
+      <div id="kclosePnl" style="padding:6px 0;font-size:12px;color:var(--ink-2)">${pnlPreview}</div>
+      <div class="kpos-btns">
+        <button class="kpos-cancel" id="kcloseCancel">Cancel</button>
+        <button class="kpos-submit" id="kcloseSubmit" style="background:var(--rd);color:#fff">Close Position</button>
+      </div>
+      <div class="kpos-status" id="kcloseStatus"></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  document.getElementById('kcloseClose').addEventListener('click', close);
+  document.getElementById('kcloseCancel').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  // Live P&L preview as user types
+  const exitEl = document.getElementById('kcloseExit');
+  const pnlEl = document.getElementById('kclosePnl');
+  const updatePnl = () => {
+    const exitV = parseFloat(exitEl.value);
+    if (!exitV || !entry || !shares) { pnlEl.innerHTML = ''; return; }
+    const dir = direction === 'short' ? -1 : 1;
+    const pnlDollars = dir * shares * (exitV - entry);
+    const pnlPct = ((exitV - entry) / entry) * 100 * dir;
+    pnlEl.innerHTML = `Estimated P&L: <b style="color:${pnlDollars >= 0 ? 'var(--gn)' : 'var(--rd)'}">${pnlDollars >= 0 ? '+' : ''}$${pnlDollars.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)</b>`;
+  };
+  exitEl.addEventListener('input', updatePnl);
+
+  document.getElementById('kcloseSubmit').addEventListener('click', async () => {
+    const statusEl = document.getElementById('kcloseStatus');
+    const submitBtn = document.getElementById('kcloseSubmit');
+    const exitVal = parseFloat(exitEl.value);
+    const reasonVal = document.getElementById('kcloseReason').value;
+    if (isNaN(exitVal) || exitVal <= 0) {
+      statusEl.textContent = 'Exit price must be > 0.';
+      statusEl.className = 'kpos-status err'; return;
+    }
+    submitBtn.textContent = 'Closing…';
+    submitBtn.disabled = true;
+    statusEl.textContent = '';
+    statusEl.className = 'kpos-status';
+    try {
+      const res = await fetch('/api/portfolio/close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ ticker, exit_price: exitVal, reason: reasonVal }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.detail || json.message || `HTTP ${res.status}`);
+      const realizedPct = json.pnl_pct != null ? json.pnl_pct.toFixed(2) + '%' : 'n/a';
+      statusEl.textContent = `✓ ${ticker} closed @ $${exitVal.toFixed(2)} · realized ${realizedPct}`;
+      statusEl.className = 'kpos-status ok';
+      setTimeout(() => {
+        close();
+        // Refresh portfolio tab if active
+        const wsPanel = document.getElementById('pan-workspace');
+        if (wsPanel && document.querySelector('.sb-link.on[data-tab="portfolio"]')) {
+          if (typeof window._v3SwitchTo === 'function') window._v3SwitchTo('portfolio');
+        }
+      }, 1000);
+    } catch (err) {
+      statusEl.textContent = '✗ ' + (err.message || 'close failed');
+      statusEl.className = 'kpos-status err';
+      submitBtn.textContent = 'Close Position';
+      submitBtn.disabled = false;
+    }
+  });
+
+  setTimeout(() => exitEl.focus(), 50);
 };
 
 // ── Light / Dark mode toggle ─────────────────────────────────────────
