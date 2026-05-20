@@ -449,6 +449,7 @@ async def _reports_index(auth: HTTPBasicCredentials = Depends(_check_auth)):
   <strong style="color:#f0f6fc">Quick links:</strong><br>
   <a href="/reports/latest/dashboard">→ Latest Dashboard</a>
   <a href="/reports/latest/morning-briefing">→ Latest Morning Briefing</a>
+  <a href="/reports/strategy">→ Strategy Report (Backtest + Regime + MAE/MFE)</a>
   <a href="/v2/dashboard.html">→ Live V2 Dashboard</a>
   <a href="/api/system-status">→ Live System Status (JSON)</a>
 </div>
@@ -478,6 +479,18 @@ async def _reports_latest(kind: str, auth: HTTPBasicCredentials = Depends(_check
         raise
     except Exception as e:
         raise HTTPException(500, f"Error loading latest {kind}: {e}")
+
+
+@app.api_route("/reports/strategy", methods=["GET", "HEAD"])
+async def _reports_strategy(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Serve the strategy backtest + regime + MAE/MFE HTML report from cache/strategy_report.html."""
+    if isinstance(auth, Response):
+        return auth
+    p = BASE_DIR / "cache" / "strategy_report.html"
+    if not p.exists():
+        raise HTTPException(404, "strategy_report.html not found — run: python3 scripts/generate_strategy_report.py")
+    return Response(content=p.read_text(encoding="utf-8"), media_type="text/html",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.api_route("/reports/{snapshot_id}", methods=["GET", "HEAD"])

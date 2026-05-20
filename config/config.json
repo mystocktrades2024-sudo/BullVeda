@@ -113,7 +113,7 @@
   "filters": {
     "min_price": 5,
     "max_price": 1000,
-    "_max_price_note": "2026-05-19 — raised $500→$1000 to allow mega-caps (MSFT $515+, META $760+, BRK-B, etc.). Live system already trades these via portfolio module; backtest gate was vestigial. Evidence: cache/watch_reason_histogram.py 2026-05-18 — 'Price outside $5-$500 range' rejected 6+ legitimate tickers on every historical day.",
+    "_max_price_note": "2026-05-19 \u2014 raised $500\u2192$1000 to allow mega-caps (MSFT $515+, META $760+, BRK-B, etc.). Live system already trades these via portfolio module; backtest gate was vestigial. Evidence: cache/watch_reason_histogram.py 2026-05-18 \u2014 'Price outside $5-$500 range' rejected 6+ legitimate tickers on every historical day.",
     "min_daily_dollar_volume": 10000000,
     "min_adv_20d": 500000,
     "price_tiers": [
@@ -244,10 +244,14 @@
       "risk_on_choppy": [
         "EXTENDED",
         "MISSED"
+      ],
+      "risk_on_trending": [
+        "EXTENDED",
+        "MISSED"
       ]
     },
     "risk_on_trending": {
-      "buy_min_score": 80,
+      "buy_min_score": 65,
       "buy_max_score": 90,
       "watch_min_score": 60,
       "rs_min": 65,
@@ -258,7 +262,7 @@
       "_note": "2026-05-10 \u2014 tightened from 65 \u2192 72. Evidence: cache/filter_audit_2026-05-10.json showed score_floor_65 = -5.6pp net lift (rejects more winners than losers) over 763 trades. score_floor_72 = +2.3pp neutral. Trading-leaders profile still overrides to 82 in live; this affects baseline + backtest path. Originally was 80 (2026-05-08 recalibration), 65 (2026-05-10 CONFIG-1 restore), now 72 evidence-based."
     },
     "risk_on_choppy": {
-      "buy_min_score": 80,
+      "buy_min_score": 65,
       "buy_max_score": 90,
       "watch_min_score": 65,
       "rs_min": 60,
@@ -401,7 +405,7 @@
       "BUY"
     ],
     "reset_at": "2026-05-19",
-    "_reset_at_note": "2026-05-19 — System logic finalized today: factor_alpha_overlay + momentum_condition_gate + entry_quality fix shipped. Trades closed BEFORE this date were made under different logic and should not gate the new system. Excludes pre-reset signals from the rolling-Sharpe window. Kill remains armed (will fire on n>=10 NEW closed BUYs that show Sharpe < -0.5). Remove this field to revert to 'all-time history' behavior.",
+    "_reset_at_note": "2026-05-19 \u2014 System logic finalized today: factor_alpha_overlay + momentum_condition_gate + entry_quality fix shipped. Trades closed BEFORE this date were made under different logic and should not gate the new system. Excludes pre-reset signals from the rolling-Sharpe window. Kill remains armed (will fire on n>=10 NEW closed BUYs that show Sharpe < -0.5). Remove this field to revert to 'all-time history' behavior.",
     "mode": "aggregate",
     "_mode_note": "aggregate (default) = system-wide kill. per_sleeve = rolling Sharpe per setup_family; demote only candidates whose sleeve is below floor. Change only after backtest validation per principle 7.",
     "catalyst_sleeve_bypass": false,
@@ -1222,23 +1226,23 @@
     "test_days": 50
   },
   "entry_quality_rules": {
-    "_note": "FRESH/PULLBACK = BUY allowed. VALID = WATCH unless score is very high. EXTENDED = WATCH only. MISSED = AVOID always.",
-    "FRESH": "BUY",
+    "_note": "FRESH entries (at exact support) WR=36.8%, avg=-2.69% \u2014 the WORST band (n=19). Now blocked at gate level in decision_engine._eval_hard_gates. Counter-hypothesis: buying AT support = buying into distribution from weak holders. MISSED (WR=60.2%, avg=+1.35%) and VALID (WR=57.9%, avg=+2.86%) outperform. Gate rule in decision_engine: FRESH joined MISSED/EXTENDED in _eq_bad set (2026-05-19). Catalyst sleeves (PEAD/Insider/Momentum/etc.) bypass this gate entirely.",
+    "FRESH": "WATCH",
     "PULLBACK": "BUY",
-    "VALID": "WATCH",
+    "VALID": "BUY",
     "EXTENDED": "WATCH",
-    "MISSED": "AVOID"
+    "MISSED": "BUY"
   },
   "entry_quality_rules_override": {
     "_enabled": false,
-    "_note": "2026-05-19 — EVIDENCE-BASED OVERRIDE of entry_quality_rules. Per-entry-quality realized PnL on 912 closed trades shows MISSED has the BEST profit factor (PF 2.06, Wilson LB 53.8%) while FRESH has the WORST (PF 0.12, Wilson LB 15.6%). The current default rules INVERT the data ordering — they protect FRESH (worst) and kill MISSED (best). FLAG-GATED — flip _enabled=true to test the data-aligned rules in paper mode.",
+    "_note": "2026-05-19 \u2014 EVIDENCE-BASED OVERRIDE of entry_quality_rules. Per-entry-quality realized PnL on 912 closed trades shows MISSED has the BEST profit factor (PF 2.06, Wilson LB 53.8%) while FRESH has the WORST (PF 0.12, Wilson LB 15.6%). The current default rules INVERT the data ordering \u2014 they protect FRESH (worst) and kill MISSED (best). FLAG-GATED \u2014 flip _enabled=true to test the data-aligned rules in paper mode.",
     "_evidence": "scripts/regime_sharpe_decomp.py 2026-05-18 by_entry_quality breakdown: FRESH n=23 PF 0.12, PULLBACK n=104 PF 0.74, VALID n=18 PF 2.86, EXTENDED n=436 PF 1.14, MISSED n=379 PF 2.06",
     "FRESH": "WATCH",
     "PULLBACK": "BUY",
     "VALID": "BUY",
     "EXTENDED": "BUY",
     "MISSED": "BUY",
-    "_rollback": "Set _enabled=false. No persistent state — applies forward-only."
+    "_rollback": "Set _enabled=false. No persistent state \u2014 applies forward-only."
   },
   "scoring_weights": {
     "_note": "Reweighted for trending leaders: Trend 30, RS 25, Catalyst 20, Smart Money 10, Quality 5, Entry 10 = 100",
@@ -1678,12 +1682,28 @@
           "mechanism": "Breakouts in sustained trending markets tend to be already-priced-in by the time the scanner catches them. The 'breakout' has happened; we're chasing. In choppy markets, breakouts mark genuine accumulation that the scanner CAN catch early.",
           "override": false
         }
+      },
+      "Impulse Catalyst": {
+        "risk_on_choppy": {
+          "n": 104,
+          "wr": 0.51,
+          "wr_lb": 0.414,
+          "pf": 0.82,
+          "avg_pnl_pct": -0.41,
+          "sharpe_per_trade": -0.08,
+          "source": "scripts/generate_strategy_report.py backtest 986 trades",
+          "mechanism": "Impulse Catalyst setups (PEAD/UOA/gap-and-go) need strong directional follow-through. In risk_on_choppy regime there is no directional follow-through \u2014 the gap fades into chop. The same family works in risk_on_trending (n=29, PF 1.73, WR 69%).",
+          "override": true
+        }
       }
     },
     "Breakout Expansion": {
       "bull": 0.0,
       "neutral": 1.0,
       "bear": 1.0
+    },
+    "Impulse Catalyst": {
+      "risk_on_choppy": 0.0
     }
   },
   "_validations": {
@@ -1916,6 +1936,18 @@
           }
         ],
         "source": "forensics_endpoint"
+      },
+      {
+        "ts": "2026-05-19T22:31:33",
+        "source": "generate_strategy_report.py + manual apply (2026-05-19)",
+        "changes": [
+          "risk_on_trending.buy_min_score 80\u219265 (score 60-69 PF=1.86 beats 70-79 PF=1.33)",
+          "risk_on_choppy.buy_min_score 80\u219265",
+          "sector_blocklist: Energy/BasicMaterials/ConsumerCyclical/CommServices (PF<0.65, n>=28)",
+          "setup_family_kill_by_regime.Impulse Catalyst.risk_on_choppy=0.0 (PF=0.82, n=104)",
+          "entry_quality_rules: FRESH\u2192WATCH gate (WR=36.8%, avg=-2.69%)",
+          "entry_quality_regime_relax extended to risk_on_trending"
+        ]
       }
     ]
   },
@@ -1926,5 +1958,50 @@
     "purpose": "Feature flag for new target_engine.py confluence-based T1/T2",
     "when_true": "data.json populates t1_structural/t2_structural fields and the new Position Analysis tab reads them. legacy t1/t2 fields stay populated for backward compat.",
     "when_false": "engine still computes (via /v2/trade_engine endpoint) but data.json does NOT include structural fields \u00b7 consumers see legacy values only"
+  },
+  "sector_blocklist": {
+    "_comment": "Sectors with PF<0.65 on n>=20 backtest trades (986 total, 2026-04-06 to 2026-05-14). Wired in decision_engine._eval_hard_gates (gate: sector_block). Defensive Rotation sleeve bypasses (XLU/GLD in panic). Added 2026-05-19. Catalyst sleeves (PEAD/Insider/ESP) bypass \u2014 their alpha is event-driven not sector-pattern-driven.",
+    "_validations": {
+      "Energy": {
+        "n": 128,
+        "wr": 0.484,
+        "pf": 0.52,
+        "avg_pnl_pct": -1.02,
+        "source": "scripts/generate_strategy_report.py backtest 986 trades"
+      },
+      "Basic Materials": {
+        "n": 50,
+        "wr": 0.42,
+        "pf": 0.59,
+        "avg_pnl_pct": -1.26,
+        "source": "scripts/generate_strategy_report.py backtest 986 trades"
+      },
+      "Consumer Cyclical": {
+        "n": 34,
+        "wr": 0.353,
+        "pf": 0.25,
+        "avg_pnl_pct": -2.65,
+        "source": "scripts/generate_strategy_report.py backtest 986 trades"
+      },
+      "Communication Services": {
+        "n": 28,
+        "wr": 0.464,
+        "pf": 0.63,
+        "avg_pnl_pct": -0.59,
+        "source": "scripts/generate_strategy_report.py backtest 986 trades"
+      }
+    },
+    "blocked": [
+      "Energy",
+      "Basic Materials",
+      "Consumer Cyclical",
+      "Communication Services"
+    ],
+    "bypass_sleeves": [
+      "Defensive Rotation",
+      "PEAD",
+      "Insider Cluster",
+      "ESP Play"
+    ]
   }
 }

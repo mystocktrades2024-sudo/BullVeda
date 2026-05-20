@@ -103,6 +103,15 @@ if [ $EXIT_CODE -eq 0 ]; then
     if [ $LEDGER_EXIT -ne 0 ]; then
         echo "⚠ build_audit_ledger exited $LEDGER_EXIT (audit tab will show stale ledger until next run)" >> "$LOG_FILE"
     fi
+
+    # ── Regenerate strategy report (backtest + regime + MAE/MFE HTML) ────────
+    # Morning-scan only — data doesn't change intra-day. Serves at /reports/strategy.
+    if [ "$HOUR" -lt 7 ]; then
+        echo "── Regenerate strategy_report.html ──" >> "$LOG_FILE"
+        set +e
+        "$PYTHON" scripts/generate_strategy_report.py >> "$LOG_FILE" 2>&1
+        set -e
+    fi
 else
     echo "Scan FAILED with exit code $EXIT_CODE." >> "$LOG_FILE"
     # Show a macOS notification on failure

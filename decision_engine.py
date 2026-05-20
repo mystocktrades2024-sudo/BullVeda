@@ -530,7 +530,9 @@ def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
 
 
 def _eval_hard_gates(t: dict, regime: str | None = None,
-                     entry_quality_relax_regimes: set | None = None) -> tuple[list[dict], list[str]]:
+                     entry_quality_relax_regimes: set | None = None,
+                     sector_blocklist: list | None = None,
+                     sector_bypass_sleeves: set | None = None) -> tuple[list[dict], list[str]]:
     """Returns (gate_evaluations, failed_gate_names).
 
     entry_quality_relax_regimes: set of regime4 names where EXTENDED/MISSED
@@ -543,6 +545,27 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     failures: list[str] = []
     _eq_relax = entry_quality_relax_regimes or set()
     _regime_lower = (regime or "").lower()
+
+    # 0. Sector blocklist gate (2026-05-19)
+    # Evidence: Energy PF=0.52/n=128, Basic Materials PF=0.59/n=50,
+    # Consumer Cyclical PF=0.25/n=34, Communication Services PF=0.63/n=28.
+    # Defensive Rotation sleeve bypasses (it intentionally trades sector ETFs in panic).
+    _blocked_sectors = sector_blocklist or []
+    _sb_bypass = sector_bypass_sleeves or set()
+    _ticker_sector = t.get("sector") or ""
+    _is_sector_bypass = t.get("setup_family") in _sb_bypass
+    if _blocked_sectors and _ticker_sector and not _is_sector_bypass:
+        _sector_blocked = any(_ticker_sector.lower() == s.lower() for s in _blocked_sectors)
+        if _sector_blocked:
+            gates.append({
+                "name": "sector_block",
+                "passed": False,
+                "reason": f"sector '{_ticker_sector}' in blocklist (PF<0.65 backtest 986 trades — 2026-05-19)",
+            })
+            failures.append("sector_block")
+        else:
+            gates.append({"name": "sector_block", "passed": True, "reason": ""})
+    # (no gate appended if blocklist not configured — keeps gate list clean for older configs)
 
     # 1. Liquidity / price / drawdown gate (preserved upstream gate)
     g = t.get("gate") or {}
@@ -575,8 +598,12 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     # the block in regimes where evidence supports it. Default behavior
     # unchanged unless config.scoring.entry_quality_regime_relax is set.
     eq = t.get("entry_quality")
-    _eq_bad = eq in ("MISSED", "EXTENDED")
-    _eq_relaxed_for_regime = _eq_bad and _regime_lower in _eq_relax
+    # FRESH added 2026-05-19: backtest 986 trades shows FRESH WR=36.8%, avg=-2.69% (worst band).
+    # Buying exactly at support = buying into distribution from weak holders. Block it.
+    # Catalyst sleeves (PEAD/Momentum/Insider/etc.) bypass this gate entirely below.
+    _eq_bad = eq in ("MISSED", "EXTENDED", "FRESH")
+    # MISSED/EXTENDED relaxation: only applies to MISSED/EXTENDED, not FRESH.
+    _eq_relaxed_for_regime = eq in ("MISSED", "EXTENDED") and _regime_lower in _eq_relax
     # MOMENTUM-SLEEVE BYPASS (2026-05-13): when ticker classified as Momentum
     # Continuation family, EXTENDED/MISSED is the EXPECTED entry — bypass.
     _is_momentum = (t.get("setup_family") == "Momentum Continuation")
@@ -1137,7 +1164,17 @@ def compute_final_verdict(t: dict, regime: str | None = None,
                         _eq_relax.add(_reg.lower())
     except Exception:
         pass
-    gates, failures = _eval_hard_gates(t, regime=regime, entry_quality_relax_regimes=_eq_relax)
+    # Build sector blocklist from config for gate injection
+    _sb_cfg = (config or {}).get("sector_blocklist") or {}
+    _sector_blocked_list = _sb_cfg.get("blocked") or []
+    _sector_bypass_set = set(_sb_cfg.get("bypass_sleeves") or [])
+
+    gates, failures = _eval_hard_gates(
+        t, regime=regime,
+        entry_quality_relax_regimes=_eq_relax,
+        sector_blocklist=_sector_blocked_list,
+        sector_bypass_sleeves=_sector_bypass_set,
+    )
     caveats = _eval_soft_gates(t)
     # Stamp caveat when entry_quality was relaxed (so user sees WHY a normally-
     # blocked EXTENDED/MISSED entry made BUY — not silent override).
