@@ -51889,6 +51889,9 @@ function setupV3Workspaces(arr, data) {
     } else {
       render(panKey);
       wsPanel.classList.add('on');
+      // 2026-05-20 — prepend "what this lens uniquely shows" tag per tab
+      // so users instantly know the tab's distinct value vs sibling tabs.
+      try { window._injectLensGuide && window._injectLensGuide(panKey, wsPanel); } catch (_) {}
     }
     document.querySelectorAll('.tab').forEach(t => {
       t.classList.toggle('on', t.dataset.pan === panKey || (panKey !== 'dash' && panKey !== 'detail' && t.dataset.pan === 'workspace'));
@@ -51908,6 +51911,89 @@ function setupV3Workspaces(arr, data) {
   // Top tabs Dashboard / Detail handled by existing handler above
   window._v3SwitchTo = switchTo;
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// 2026-05-20 · LENS GUIDE · per-tab "what this uniquely shows" tag
+// ──────────────────────────────────────────────────────────────────────
+// Centralized declaration of each specialist lens's distinct purpose vs
+// sibling tabs. Injected at top of every workspace tab after render.
+// Goal: self-documenting IA — users instantly know what to look for HERE
+// vs which OTHER tab answers an adjacent question. Addresses the audit
+// recommendation to add "what this uniquely shows" 1-liner per tab.
+// ══════════════════════════════════════════════════════════════════════
+const LENS_GUIDE = {
+  scanner:        { unique: 'verdict + score + R:R for every scored ticker — the universal action table',         alt: 'Confluence Matrix for the dense multi-lens heatmap of the same universe' },
+  elite:          { unique: 'curated TOP picks per (Swing/Position/Invest × BUY/WATCH/SHORT) — 9-cell grid',      alt: 'Signal Scanner for the full universe table, not just top picks' },
+  optionsflow:    { unique: 'unusual options activity (UOA imbalance, IV rank surges, P/C ratio, max pain)',      alt: 'ML Edge for direction probabilities derived from price/vol/structure' },
+  earnings:       { unique: 'beat-prediction scoring, calibration, ER calendar within 14d',                        alt: 'IPO·Splits for corporate calendars, Pre-Market for post-ER drift' },
+  watchlist:      { unique: 'YOUR starred tickers — live Schwab prices + scan-derived verdict overlay',            alt: 'Signal Scanner for the full scored universe (this is your subset)' },
+  positionAnalysis:{ unique: '360° hold/add/trim/exit review for ONE ticker (MC, VaR, stress, structural targets)', alt: 'Portfolio for all open positions at once, Detail panel for any other ticker' },
+  portfolio:      { unique: 'YOUR open positions + closed-trade P&L + sector/setup exposure',                       alt: 'Track Record for R-multiple leaderboard, Performance for realized attribution' },
+  mlEdge:         { unique: '3-headed ML forecast: P(up/dn/chop) + magnitude quantiles + P(T1-first vs stop-first)', alt: 'Signal Scanner for rules-based verdict, Confluence Matrix for cross-source agreement' },
+  momentum:       { unique: 'momentum-only universe (RS≥60+EMA21 OR Sharpe≥1.0+EMA50) · Sharpe-trend (accel/decay)', alt: 'Signal Scanner for BUY/WATCH decisions on the same names' },
+  confluence:     { unique: '39-column dense heatmap of every signal × every ticker — spot cross-source alignment',  alt: 'Signal Scanner for sortable single-row table view of the same universe' },
+  leaders:        { unique: 'R-multiple leaderboard of you + friends + benchmark traders (no $ shown by design)',   alt: 'Performance for YOUR realized $ P&L, Portfolio for current open positions' },
+  alerts:         { unique: 'time-sensitive triggers on YOUR open positions (P0 stop/T1, P1 earnings/drift, P2 regime)', alt: 'Portfolio for full position state, Action Queue inside Portfolio' },
+  killed:         { unique: 'tickers the system REJECTED + the specific gate that killed them — audit trail',       alt: 'Signal Scanner default filter hides AVOID; this lens shows them with reasons' },
+  performance:    { unique: 'system edge verdict, P&L tiles, Setup Family Podium with Wilson CI, action items',     alt: 'Track Record for peer-comparison R-multiples, Portfolio for open positions' },
+  industries:     { unique: 'sector + GICS-industry rotation cockpit with avg-score per industry + catalyst velocity', alt: 'Market for breadth + cross-asset, Themes for narrative buckets' },
+  market:         { unique: 'regime (regime4 + HMM) + breadth indicators + cross-asset risk signal',                alt: 'Macro·Events for upcoming economic calendar, Industries for sector rotation' },
+  macro:          { unique: 'real EODHD economic calendar (next 30d, HIGH/MED tier) + credit/dollar/gold/VIX-term',  alt: 'Market for breadth + regime context' },
+  premarket:      { unique: 'session-aware pre-market gappers (4am-9:30am ET) + overnight catalyst attribution',     alt: 'Macro·Events for scheduled events, market_movers shown here as fallback when out-of-session' },
+  events:         { unique: 'real IPO calendar + stock-split calendar (next 30d, EODHD) + earnings-by-sector rollup', alt: 'Earnings for beat predictions, Macro·Events for FOMC/CPI/NFP economic calendar' },
+  themes:         { unique: 'tickers grouped by sector × industry × setup classification (AI Infra, Cloud, Biotech…)',alt: 'Industries for the GICS-industry breakdown, Signal Scanner for individual verdicts' },
+  strategies:     { unique: 'per-sleeve roster + per-setup Wilson-validated WR/PF (live setup_stats.json)',          alt: 'Performance for portfolio-level attribution, Killed for what was rejected' },
+  leveraged:      { unique: '23-ETF leveraged + inverse watchlist + regime gate + VIX-dynamic vol-drag math',        alt: 'Signal Scanner for individual ETF scores, Market for regime context' },
+  crypto:         { unique: 'BTC regime + dominance + fear/greed + top 9 coins with EMA/MACD signals',                alt: 'Pre-Market for traditional equity gappers (crypto is 24/7)' },
+  positions:      { unique: 'all open positions at once — same as Portfolio (legacy alias)',                          alt: 'Portfolio is the canonical tab; use it instead' },
+  audittrail:     { unique: 'every per-action audit-log entry (admin/forensic view)',                                  alt: 'Status for system health, Pipelines for cron job state' },
+  pipeline:       { unique: 'cron + launchd job state + recent runs',                                                  alt: 'Status for live health checks, Audit Trail for action-log forensics' },
+  marketmap:      { unique: 'TradingView-style stock heatmap (sector tile sized by mcap, colored by % change)',        alt: 'Industries for tabular sector data' },
+};
+
+// Inject the lens-guide tag at the top of a workspace panel after render.
+// Idempotent — replaces any prior tag in the panel.
+window._injectLensGuide = function(key, wsPanel) {
+  if (!wsPanel) return;
+  const guide = LENS_GUIDE[key];
+  if (!guide) return;
+  // Remove any prior tag from a previous tab render
+  const prior = wsPanel.querySelector('.lens-guide-tag');
+  if (prior) prior.remove();
+  // Inject styles once
+  if (!document.getElementById('lens-guide-css')) {
+    const s = document.createElement('style');
+    s.id = 'lens-guide-css';
+    s.textContent = `
+      .lens-guide-tag {
+        margin: 0 0 12px;
+        padding: 8px 14px;
+        background: linear-gradient(90deg, rgba(217,119,87,0.10), rgba(217,119,87,0.02));
+        border-left: 3px solid var(--copper);
+        border-radius: 2px;
+        font: 500 11px var(--mono);
+        color: var(--ink-1);
+        letter-spacing: 0.02em;
+        line-height: 1.55;
+      }
+      .lens-guide-tag .label { color: var(--copper); font-weight: 800; letter-spacing: 0.10em; font-size: 9.5px; text-transform: uppercase; margin-right: 6px; }
+      .lens-guide-tag .alt { display: block; color: var(--ink-3); font-style: italic; margin-top: 3px; font-size: 10px; }
+      .lens-guide-tag .alt b { color: var(--ink-2); font-style: normal; }
+    `;
+    document.head.appendChild(s);
+  }
+  const tag = document.createElement('div');
+  tag.className = 'lens-guide-tag';
+  tag.innerHTML = `<span class="label">This lens uniquely shows:</span>${guide.unique}<span class="alt"><b>For adjacent questions:</b> ${guide.alt}</span>`;
+  // Prepend INSIDE wsPanel. Some tabs have a head div first — slot the tag
+  // right under it so the guide appears below the title but above the body.
+  const head = wsPanel.querySelector('.head, .mv2-head, .qport-head, .qmom-bc, .qs-banner');
+  if (head && head.parentElement === wsPanel) {
+    head.parentElement.insertBefore(tag, head.nextSibling);
+  } else {
+    wsPanel.insertBefore(tag, wsPanel.firstChild);
+  }
+};
 
 // ══════════════════════════════════════════════════════════════════════
 // 2026-05-19 · User-agency action router · BUY / SHORT / WATCH / SELL
