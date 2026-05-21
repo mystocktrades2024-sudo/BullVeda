@@ -19971,6 +19971,17 @@ const QuantHistoryLedger = (function() {
     // (matches the "all picks · last 1 year" banner the user opens with).
     dateFrom: (() => { const d = new Date(); d.setFullYear(d.getFullYear() - 1); return d.toISOString().slice(0, 10); })(),
     dateTo:   new Date().toISOString().slice(0, 10),
+    // 2026-05-21 · default-on intraday dedupe. When multiple scans hit the same
+    // ticker on the same day (e.g., XOM repeated 3× on 2026-05-18), collapse to
+    // ONE record per (ticker, pick_date, mode) — the highest-score entry wins.
+    // Toggle off via the 🗎 SHOW ALL chip in the toolbar.
+    dedupe: true,
+  };
+
+  window._qhistToggleDedupe = function() {
+    _filters.dedupe = !_filters.dedupe;
+    const content = document.querySelector('#qaud-content');
+    if (content && _ledgerCache) _renderLedger(content, _ledgerCache);
   };
 
   // Date-range preset helper — called from the inline preset buttons.
@@ -20078,7 +20089,9 @@ const QuantHistoryLedger = (function() {
   let _sortKey = 'pick_date';
   let _sortDir = 'desc';
   let _page = 0;
-  const PAGE_SIZE = 100;
+  // 2026-05-21 · user-selectable page size (default 100)
+  let _pageSize = 100;
+  const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500, 1000];
   const HORIZONS = ['d1','d2','d3','d4','d5','d6','d7','w1','w2','w3','w4','w5','w6','w7','w8','m1','m2','m3','m4','m5','m6','m7','m8','m9','m10','m11','m12'];
 
   function render(wsPanel, data) {
@@ -20152,6 +20165,7 @@ const QuantHistoryLedger = (function() {
           <span class="stat" style="color:var(--${ageCls === 'gn' ? 'gn' : ageCls === 'am' ? 'amb' : 'rd'})">generated <b>${ageLbl}</b></span>
           <span class="stat">D1-D7 · W1-W8 · M1-M12 <b>(${HORIZONS.length} horizons)</b></span>
           <button onclick="_qauditTogglePending()" title="Toggle visibility of today's freshly-picked rows that haven't matured to D1 yet" style="margin-left:8px;padding:3px 10px;font:700 9.5px ui-monospace,monospace;background:${_filters.hidePending ? 'var(--bg-3)' : 'var(--amb)'};color:${_filters.hidePending ? 'var(--ink-1)' : '#000'};border:1px solid var(--line);border-radius:2px;cursor:pointer;letter-spacing:0.06em">${_filters.hidePending ? '🕓 SHOW PENDING' : '✓ HIDING PENDING'}</button>
+          <button onclick="_qhistToggleDedupe()" title="One row per (ticker × date × mode). Multiple intraday scans of the same name get collapsed to the highest-score record. Toggle off to see every scan." style="margin-left:4px;padding:3px 10px;font:700 9.5px ui-monospace,monospace;background:${_filters.dedupe ? 'var(--bg-3)' : 'var(--amb)'};color:${_filters.dedupe ? 'var(--ink-1)' : '#000'};border:1px solid var(--line);border-radius:2px;cursor:pointer;letter-spacing:0.06em">${_filters.dedupe ? '✓ DEDUPED' : '🗎 SHOW ALL SCANS'}</button>
           <button onclick="_qauditForceRefresh()" style="margin-left:4px;padding:3px 10px;font:700 9.5px ui-monospace,monospace;background:var(--copper);color:#fff;border:0;border-radius:2px;cursor:pointer;letter-spacing:0.06em">↻ REFRESH</button>
           <button onclick="_qauditExportCSV('filtered')" title="Export currently-filtered records to CSV (Excel-compatible). Respects all active filters." style="margin-left:4px;padding:3px 10px;font:700 9.5px ui-monospace,monospace;background:var(--gn);color:#000;border:0;border-radius:2px;cursor:pointer;letter-spacing:0.06em">↓ EXCEL · FILTERED</button>
           <button onclick="_qauditExportCSV('all')" title="Export ALL records (ignores filters) — ~2,200 rows" style="margin-left:2px;padding:3px 10px;font:700 9.5px ui-monospace,monospace;background:transparent;color:var(--gn);border:1px solid var(--gn-dim);border-radius:2px;cursor:pointer;letter-spacing:0.06em">↓ ALL</button>
@@ -20281,6 +20295,23 @@ const QuantHistoryLedger = (function() {
       const q = _filters.search.toLowerCase();
       pool = pool.filter(r => (r.ticker || '').toLowerCase().includes(q));
     }
+    // 2026-05-21 · Intraday dedupe — collapse multiple scans of the same
+    // (ticker, pick_date, mode) to the highest-score record. Multiple scans
+    // per day (06:00 + 07:00 + 11:00 + 13:30 + 15:00) plus signal_log
+    // appends can produce 3-5 rows for the same name on the same day.
+    if (_filters.dedupe) {
+      const best = new Map();
+      for (const r of pool) {
+        const key = (r.ticker || '?') + '|' + (r.pick_date || '?') + '|' + (r.mode || '?');
+        const prev = best.get(key);
+        if (!prev) { best.set(key, r); continue; }
+        // Prefer higher score; if tie, prefer record with realized outcome
+        const ps = +prev.score || 0, rs = +r.score || 0;
+        if (rs > ps) { best.set(key, r); continue; }
+        if (rs === ps && r.outcome && !prev.outcome) { best.set(key, r); continue; }
+      }
+      pool = Array.from(best.values());
+    }
     return pool;
   }
 
@@ -20297,23 +20328,28 @@ const QuantHistoryLedger = (function() {
       return _sortDir === 'desc' ? bn - an : an - bn;
     });
     // Paginate
-    const start = _page * PAGE_SIZE;
-    const slice = pool.slice(start, start + PAGE_SIZE);
+    const start = _page * _pageSize;
+    const slice = pool.slice(start, start + _pageSize);
 
     const tbody = content.querySelector('#qhist-tbody');
     if (tbody) tbody.innerHTML = slice.map(r => _renderRow(r)).join('');
 
     const pager = content.querySelector('#qhist-pager');
     if (pager) {
-      const totalPages = Math.ceil(pool.length / PAGE_SIZE);
+      const totalPages = Math.ceil(pool.length / _pageSize);
       pager.innerHTML = `
         <span class="qhist-pager-info">
-          showing <b>${start + 1}–${Math.min(start + PAGE_SIZE, pool.length)}</b> of <b>${pool.length.toLocaleString()}</b> filtered (${records.length.toLocaleString()} total)
+          showing <b>${start + 1}–${Math.min(start + _pageSize, pool.length)}</b> of <b>${pool.length.toLocaleString()}</b> filtered (${records.length.toLocaleString()} total)
         </span>
         <div class="qhist-pager-btns">
           <button class="qhist-page-btn" data-page="prev" ${_page === 0 ? 'disabled' : ''}>◀ Prev</button>
           <span class="qhist-page-cur">page <b>${_page + 1}</b> of <b>${totalPages || 1}</b></span>
           <button class="qhist-page-btn" data-page="next" ${_page + 1 >= totalPages ? 'disabled' : ''}>Next ▶</button>
+          <label style="margin-left:14px;font:600 10px ui-monospace,monospace;color:var(--ink-3);display:inline-flex;align-items:center;gap:6px">rows
+            <select id="qhist-pagesize" style="background:var(--bg-3);border:1px solid var(--line);color:var(--ink-1);padding:3px 6px;font:600 10.5px ui-monospace,monospace;border-radius:2px;cursor:pointer">
+              ${PAGE_SIZE_OPTIONS.map(n => `<option value="${n}" ${n === _pageSize ? 'selected' : ''}>${n}</option>`).join('')}
+            </select>
+          </label>
         </div>
       `;
     }
@@ -20496,6 +20532,18 @@ const QuantHistoryLedger = (function() {
         _page = 0;
         _renderRows(content, records);
       });
+    });
+    // 2026-05-21 · page-size selector — delegation since the <select> lives
+    // inside #qhist-pager which gets re-rendered on every _renderRows call.
+    content.addEventListener('change', (e) => {
+      if (e.target && e.target.id === 'qhist-pagesize') {
+        const n = parseInt(e.target.value, 10);
+        if (n > 0) {
+          _pageSize = n;
+          _page = 0;
+          _renderRows(content, records);
+        }
+      }
     });
     // Pager
     content.addEventListener('click', (e) => {
