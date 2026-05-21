@@ -80,6 +80,16 @@ if [ $EXIT_CODE -eq 0 ]; then
         set +e
         "$PYTHON" scripts/build_universe_extras.py >> "$LOG_FILE" 2>&1
         set -e
+
+        # ── Build thematic universe (ETF holdings + crypto + screener) ─────
+        # 22 sector/thematic ETFs × ~50 holdings each + hardcoded crypto
+        # equity list + EODHD screener API momentum filter. Writes
+        # cache/universe_thematic.json. ~25 EODHD calls (cheap, ~20s).
+        # Morning-scan only — screener output is daily-stable enough.
+        echo "── Build thematic universe (ETF holdings + crypto + screener) ──" >> "$LOG_FILE"
+        set +e
+        "$PYTHON" scripts/build_universe_thematic.py >> "$LOG_FILE" 2>&1
+        set -e
     fi
 
     # ── Run ML Edge inference (3-headed forecast: dir/mag/hit-net) ──────
