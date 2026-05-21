@@ -19963,6 +19963,27 @@ const QuantHistoryLedger = (function() {
     search: '',
     hidePending: true,  // 2026-05-18 · default-hide today's blank rows so user
                         // opens the ledger to MEANINGFUL data, not a wall of —s
+    // 2026-05-21 · From/To date filter on pick_date. Defaults to last 1 year
+    // (matches the "all picks · last 1 year" banner the user opens with).
+    dateFrom: (() => { const d = new Date(); d.setFullYear(d.getFullYear() - 1); return d.toISOString().slice(0, 10); })(),
+    dateTo:   new Date().toISOString().slice(0, 10),
+  };
+
+  // Date-range preset helper — called from the inline preset buttons.
+  window._qhistSetDateRange = function(preset) {
+    const today = new Date();
+    const to = today.toISOString().slice(0, 10);
+    let from = '';
+    if (preset === '1m') { const d = new Date(); d.setMonth(d.getMonth() - 1); from = d.toISOString().slice(0, 10); }
+    else if (preset === '3m') { const d = new Date(); d.setMonth(d.getMonth() - 3); from = d.toISOString().slice(0, 10); }
+    else if (preset === '6m') { const d = new Date(); d.setMonth(d.getMonth() - 6); from = d.toISOString().slice(0, 10); }
+    else if (preset === '1y') { const d = new Date(); d.setFullYear(d.getFullYear() - 1); from = d.toISOString().slice(0, 10); }
+    else if (preset === 'ytd') { from = today.getFullYear() + '-01-01'; }
+    else if (preset === 'all') { from = ''; }
+    _filters.dateFrom = from;
+    _filters.dateTo = preset === 'all' ? '' : to;
+    const content = document.querySelector('#qaud-content');
+    if (content && _ledgerCache) _renderLedger(content, _ledgerCache);
   };
   window._qauditTogglePending = function() {
     _filters.hidePending = !_filters.hidePending;
@@ -20124,6 +20145,24 @@ const QuantHistoryLedger = (function() {
           </select>
           <input class="qhist-search" placeholder="Ticker search…" value="${_esc(_filters.search)}" />
         </div>
+
+        <!-- 2026-05-21 · Date range filter on pick_date -->
+        <div class="qhist-daterange" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:var(--bg-2);border:1px solid var(--line);border-radius:2px;margin-top:8px">
+          <span style="font:700 9.5px ui-monospace,monospace;color:var(--ink-3);letter-spacing:.12em;text-transform:uppercase">PICK DATE</span>
+          <label style="display:inline-flex;align-items:center;gap:4px;font:600 10px ui-monospace,monospace;color:var(--ink-2)">From
+            <input type="date" id="qhist-date-from" value="${_filters.dateFrom || ''}" style="background:var(--bg-3);border:1px solid var(--line);color:var(--ink-1);padding:4px 7px;font:600 10.5px ui-monospace,monospace;border-radius:2px;color-scheme:dark">
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:4px;font:600 10px ui-monospace,monospace;color:var(--ink-2)">To
+            <input type="date" id="qhist-date-to" value="${_filters.dateTo || ''}" style="background:var(--bg-3);border:1px solid var(--line);color:var(--ink-1);padding:4px 7px;font:600 10.5px ui-monospace,monospace;border-radius:2px;color-scheme:dark">
+          </label>
+          <button onclick="_qhistSetDateRange('1m')"  style="padding:3px 9px;font:700 9.5px ui-monospace,monospace;background:transparent;color:var(--ink-1);border:1px solid var(--line);border-radius:2px;cursor:pointer">1m</button>
+          <button onclick="_qhistSetDateRange('3m')"  style="padding:3px 9px;font:700 9.5px ui-monospace,monospace;background:transparent;color:var(--ink-1);border:1px solid var(--line);border-radius:2px;cursor:pointer">3m</button>
+          <button onclick="_qhistSetDateRange('6m')"  style="padding:3px 9px;font:700 9.5px ui-monospace,monospace;background:transparent;color:var(--ink-1);border:1px solid var(--line);border-radius:2px;cursor:pointer">6m</button>
+          <button onclick="_qhistSetDateRange('ytd')" style="padding:3px 9px;font:700 9.5px ui-monospace,monospace;background:transparent;color:var(--ink-1);border:1px solid var(--line);border-radius:2px;cursor:pointer">YTD</button>
+          <button onclick="_qhistSetDateRange('1y')"  style="padding:3px 9px;font:700 9.5px ui-monospace,monospace;background:transparent;color:var(--copper);border:1px solid var(--copper);border-radius:2px;cursor:pointer">1y</button>
+          <button onclick="_qhistSetDateRange('all')" style="padding:3px 9px;font:700 9.5px ui-monospace,monospace;background:transparent;color:var(--ink-1);border:1px solid var(--line);border-radius:2px;cursor:pointer">All</button>
+          <span id="qhist-date-stat" style="margin-left:auto;font:500 10px ui-monospace,monospace;color:var(--ink-3)"></span>
+        </div>
       </div>
 
       <div class="qhist-summary" id="qhist-summary"></div>
@@ -20190,10 +20229,16 @@ const QuantHistoryLedger = (function() {
   function _filtered(records) {
     let pool = records;
     if (_filters.hidePending) {
-      // A record is "pending" when no return horizon (including d0 intraday)
-      // has populated. Hide them from default view so the user opens to
-      // actionable history.
       pool = pool.filter(r => r && (r.d0 != null || r.d1 != null || r.d5 != null || r.w1 != null || r.m1 != null));
+    }
+    // 2026-05-21 · pick_date range filter (inclusive both ends)
+    if (_filters.dateFrom) {
+      const f = _filters.dateFrom;
+      pool = pool.filter(r => (r.pick_date || '') >= f);
+    }
+    if (_filters.dateTo) {
+      const t = _filters.dateTo;
+      pool = pool.filter(r => (r.pick_date || '') <= t);
     }
     if (_filters.year !== 'all') pool = pool.filter(r => (r.pick_date || '').startsWith(_filters.year));
     if (_filters.mode !== 'all') pool = pool.filter(r => r.mode === _filters.mode);
@@ -20379,6 +20424,32 @@ const QuantHistoryLedger = (function() {
         _renderSummary(content, records);
       });
     }
+    // 2026-05-21 · Date range inputs (auto-apply on change)
+    const dateFromEl = content.querySelector('#qhist-date-from');
+    const dateToEl   = content.querySelector('#qhist-date-to');
+    const dateStat   = content.querySelector('#qhist-date-stat');
+    const updateDateStat = () => {
+      if (!dateStat) return;
+      const n = _filtered(records).length;
+      const f = _filters.dateFrom || 'beginning';
+      const t = _filters.dateTo || 'today';
+      dateStat.textContent = `${n.toLocaleString()} records · ${f} → ${t}`;
+    };
+    if (dateFromEl) dateFromEl.addEventListener('change', () => {
+      _filters.dateFrom = dateFromEl.value || '';
+      _page = 0;
+      _renderRows(content, records);
+      _renderSummary(content, records);
+      updateDateStat();
+    });
+    if (dateToEl) dateToEl.addEventListener('change', () => {
+      _filters.dateTo = dateToEl.value || '';
+      _page = 0;
+      _renderRows(content, records);
+      _renderSummary(content, records);
+      updateDateStat();
+    });
+    updateDateStat();
     // Sort
     content.querySelectorAll('.qhist-tbl th.sortable').forEach(th => {
       th.addEventListener('click', () => {
