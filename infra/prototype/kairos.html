@@ -3808,6 +3808,39 @@ body.on-workspace .tabs { display: none; }
   font-size: 9px; color: var(--ink-4); letter-spacing: 0.06em;
 }
 
+/* 2026-05-21 · Active-filter chip strip — always visible above the table so
+   the user can SEE filter state at all times (sort, pagination, etc. never
+   silently change which filters are active). */
+.qhist-active-filters {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 8px 12px; margin-bottom: 10px;
+  background: var(--bg-1); border: 1px solid var(--line);
+  border-left: 3px solid var(--copper); border-radius: 2px;
+  font: 600 11px var(--mono);
+}
+.qhist-active-filters .qhist-af-lbl {
+  font: 800 9.5px var(--mono); color: var(--copper);
+  letter-spacing: 0.14em; text-transform: uppercase; margin-right: 4px;
+}
+.qhist-active-filters .qhist-af-empty {
+  color: var(--ink-3); font-style: italic; font-weight: 500; letter-spacing: 0.04em;
+}
+.qhist-active-filters .qhist-af-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px; background: rgba(217,119,87,0.14); color: var(--ink-1);
+  border: 1px solid var(--copper); border-radius: 2px; cursor: pointer;
+  font: 700 10px var(--mono); letter-spacing: 0.04em;
+}
+.qhist-active-filters .qhist-af-chip:hover { background: var(--copper); color: #fff; }
+.qhist-active-filters .qhist-af-chip .x { color: var(--ink-3); font-weight: 700; font-size: 11px; }
+.qhist-active-filters .qhist-af-chip:hover .x { color: #fff; }
+.qhist-active-filters .qhist-af-clear {
+  margin-left: auto; padding: 3px 10px;
+  background: transparent; color: var(--ink-2); border: 1px solid var(--line-2);
+  border-radius: 2px; cursor: pointer; font: 700 9.5px var(--mono); letter-spacing: 0.08em;
+}
+.qhist-active-filters .qhist-af-clear:hover { color: var(--rd); border-color: var(--rd); }
+
 /* Wide ledger table — 2026-05-21: fill the remaining viewport instead of
    capping at 70vh which left ~30% empty space below. Subtract ~360px for
    the header banner + sub-tab nav + filter chips + KPI tiles + date range
@@ -20209,6 +20242,9 @@ const QuantHistoryLedger = (function() {
 
       <div class="qhist-summary" id="qhist-summary"></div>
 
+      <!-- 2026-05-21 · Always-visible active-filter chip strip · sort never overrides this -->
+      <div id="qhist-active-filters" class="qhist-active-filters"></div>
+
       <div class="qhist-tbl-wrap">
         <table class="qhist-tbl">
           <thead>
@@ -20260,6 +20296,7 @@ const QuantHistoryLedger = (function() {
 
     _renderRows(content, records);
     _renderSummary(content, records);
+    _renderActiveFilters(content);
     _wireEvents(content, records);
   }
 
@@ -20421,6 +20458,61 @@ const QuantHistoryLedger = (function() {
     return `<td class="r ret ${cls}" style="background:${bg};color:${txtColor};">${_sign(v)}${_fmt(v, 1)}</td>`;
   }
 
+  // 2026-05-21 · Always-visible active-filter strip. Lists every active filter
+  // as a removable chip so the user can SEE filter state at all times — sort,
+  // pagination, or row clicks never silently change which filters are applied.
+  function _renderActiveFilters(content) {
+    const el = content && content.querySelector('#qhist-active-filters');
+    if (!el) return;
+    const active = [];
+    if (_filters.dateFrom || _filters.dateTo) {
+      const f = _filters.dateFrom || 'beginning';
+      const t = _filters.dateTo || 'today';
+      active.push({ label: `Date: ${f} → ${t}`, clear: "_filters.dateFrom='';_filters.dateTo='';" });
+    }
+    if (_filters.year && _filters.year !== 'all')       active.push({ label: `Year: ${_filters.year}`, clear: `_filters.year='all';` });
+    if (_filters.mode && _filters.mode !== 'all')       active.push({ label: `Mode: ${_filters.mode}`, clear: `_filters.mode='all';` });
+    if (_filters.verdict && _filters.verdict !== 'all') active.push({ label: `Verdict: ${_filters.verdict}`, clear: `_filters.verdict='all';` });
+    if (_filters.outcome && _filters.outcome !== 'all') active.push({ label: `Outcome: ${_filters.outcome}`, clear: `_filters.outcome='all';` });
+    if (_filters.setup && _filters.setup !== 'all')     active.push({ label: `Setup: ${_filters.setup}`, clear: `_filters.setup='all';` });
+    if (_filters.sector && _filters.sector !== 'all')   active.push({ label: `Sector: ${_filters.sector}`, clear: `_filters.sector='all';` });
+    if (_filters.search)                                active.push({ label: `Ticker: ${_filters.search}`, clear: `_filters.search='';` });
+    if (!_filters.dedupe)                               active.push({ label: `Showing all scans (dedupe OFF)`, clear: `_filters.dedupe=true;` });
+    if (!_filters.hidePending)                          active.push({ label: `Including pending rows`, clear: `_filters.hidePending=true;` });
+    if (_sortKey && _sortKey !== 'pick_date') {
+      active.push({ label: `Sort: ${_sortKey} ${_sortDir === 'desc' ? '↓' : '↑'}`, clear: `_sortKey='pick_date';_sortDir='desc';` });
+    }
+    if (active.length === 0) {
+      el.innerHTML = '<span class="qhist-af-empty">No filters active · showing all records</span>';
+      return;
+    }
+    el.innerHTML =
+      '<span class="qhist-af-lbl">ACTIVE FILTERS</span>' +
+      active.map(a => `<button class="qhist-af-chip" title="Click to remove this filter" onclick="${a.clear} const c=document.querySelector('#qaud-content'); if(c) _qhistRepaintFromCache(c);">${a.label} <span class="x">✕</span></button>`).join('') +
+      `<button class="qhist-af-clear" onclick="_qhistResetAllFilters()">Reset all</button>`;
+  }
+
+  // Centralized repaint that re-renders the full ledger from cache.
+  window._qhistRepaintFromCache = function(content) {
+    if (content && _ledgerCache) _renderLedger(content, _ledgerCache);
+  };
+  window._qhistResetAllFilters = function() {
+    _filters.year = 'all';
+    _filters.mode = 'all';
+    _filters.verdict = 'all';
+    _filters.outcome = 'all';
+    _filters.setup = 'all';
+    _filters.sector = 'all';
+    _filters.search = '';
+    _filters.dedupe = true;
+    _filters.hidePending = true;
+    _filters.dateFrom = (() => { const d = new Date(); d.setFullYear(d.getFullYear() - 1); return d.toISOString().slice(0, 10); })();
+    _filters.dateTo = new Date().toISOString().slice(0, 10);
+    _sortKey = 'pick_date'; _sortDir = 'desc'; _page = 0;
+    const c = document.querySelector('#qaud-content');
+    if (c && _ledgerCache) _renderLedger(c, _ledgerCache);
+  };
+
   function _renderSummary(content, records) {
     const pool = _filtered(records);
     const valid = pool.filter(r => r.outcome);
@@ -20466,6 +20558,7 @@ const QuantHistoryLedger = (function() {
         // Re-render only the toolbar group + rows
         _renderRows(content, records);
         _renderSummary(content, records);
+        _renderActiveFilters(content);
         // Update chip active state in same group
         content.querySelectorAll(`.qhist-chip[data-filter="${b.dataset.filter}"]`).forEach(x =>
           x.classList.toggle('on', x.dataset.val === _filters[b.dataset.filter])
@@ -20479,6 +20572,7 @@ const QuantHistoryLedger = (function() {
         _page = 0;
         _renderRows(content, records);
         _renderSummary(content, records);
+        _renderActiveFilters(content);
       });
     });
     // Search
@@ -20489,6 +20583,7 @@ const QuantHistoryLedger = (function() {
         _page = 0;
         _renderRows(content, records);
         _renderSummary(content, records);
+        _renderActiveFilters(content);
       });
     }
     // 2026-05-21 · Date range inputs · listen to BOTH change and input events.
@@ -20523,14 +20618,22 @@ const QuantHistoryLedger = (function() {
       dateToEl.addEventListener('input', applyDateChange);
     }
     updateDateStat();
-    // Sort
+    // Sort — also refresh summary KPIs + dateStat for defensive UI consistency.
+    // Sort itself doesn't change WHICH rows pass the filter (only their order),
+    // but re-rendering the summary keeps the visible numbers in sync with the
+    // currently-applied filter state across all repaint paths.
     content.querySelectorAll('.qhist-tbl th.sortable').forEach(th => {
       th.addEventListener('click', () => {
         const k = th.dataset.sort;
         if (_sortKey === k) _sortDir = _sortDir === 'desc' ? 'asc' : 'desc';
         else { _sortKey = k; _sortDir = 'desc'; }
         _page = 0;
+        console.log('[hist-ledger] sort by', k, _sortDir, '· filters:', JSON.stringify(_filters));
         _renderRows(content, records);
+        _renderSummary(content, records);
+        _renderActiveFilters(content);
+        _renderActiveFilters(content);
+        updateDateStat();
       });
     });
     // 2026-05-21 · page-size selector — delegation since the <select> lives
