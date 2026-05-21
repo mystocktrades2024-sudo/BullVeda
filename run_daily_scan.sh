@@ -67,6 +67,19 @@ if [ $EXIT_CODE -eq 0 ]; then
         set +e
         "$PYTHON" scripts/fetch_corporate_events.py 30 >> "$LOG_FILE" 2>&1
         set -e
+
+        # ── Build universe extras (recent IPOs + post-earnings movers) ─────
+        # Fills the structural gap of names that IPO'd after the Russell
+        # reconstitution + catches PEAD candidates not in any index.
+        # Reads cache/corporate_events.json (just refreshed above) + the
+        # local earnings_outcomes log. Writes cache/universe_extras.json
+        # which the next scan_orchestrator() reads via _load_universe_extras().
+        # 2-3 EODHD calls per IPO candidate (~100-300 calls total · ~2min).
+        # Morning-scan only — universe doesn't shift intraday.
+        echo "── Build universe extras (recent IPOs + PEAD movers) ──" >> "$LOG_FILE"
+        set +e
+        "$PYTHON" scripts/build_universe_extras.py >> "$LOG_FILE" 2>&1
+        set -e
     fi
 
     # ── Run ML Edge inference (3-headed forecast: dir/mag/hit-net) ──────

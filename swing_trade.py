@@ -650,10 +650,6 @@ def run_daily_scan(force_fresh: bool = False):
         log.debug(f"Russell 2000 fetch: {_r2e}")
 
     # 2026-05-21 · Tier-1 universe expansion · S&P MidCap 400 + S&P SmallCap 600 + NASDAQ-100
-    # Three EODHD-native index rosters that fill structural gaps in the
-    # SP500+R1000+R2000 base. MID + SML use S&P's profitability-screened
-    # committee picks (higher quality than RUT's indiscriminate inclusion).
-    # NDX catches non-S&P NASDAQ names. Each = 1 cached index_components call.
     sp_mid400, sp_small600, nasdaq100 = [], [], []
     try:
         from data_fetcher import get_sp_midcap_400, get_sp_smallcap_600, get_nasdaq_100
@@ -665,6 +661,25 @@ def run_daily_scan(force_fresh: bool = False):
         log.info(f"  NASDAQ-100: {len(nasdaq100)} tickers")
     except Exception as _t1e:
         log.debug(f"Tier-1 universe expansion fetch: {_t1e}")
+
+    # 2026-05-21 · Tier-2 universe extras · recent IPOs + post-earnings movers
+    # Read from cache/universe_extras.json populated by
+    # scripts/build_universe_extras.py (runs on morning scan). Fills the
+    # structural gap of names that IPO'd after the Russell reconstitution
+    # (WYFI-style) + catches PEAD candidates not in any index.
+    recent_ipos, pead_movers = [], []
+    try:
+        _ue_path = BASE_DIR / "cache" / "universe_extras.json"
+        if _ue_path.exists():
+            _ue = json.loads(_ue_path.read_text())
+            recent_ipos = _ue.get("recent_ipos") or []
+            pead_movers = _ue.get("post_earnings_movers") or []
+            log.info(f"  Recent IPOs (>$300M, 21d-400d): {len(recent_ipos)} tickers")
+            log.info(f"  Post-earnings movers (5d, >5% surprise): {len(pead_movers)} tickers")
+        else:
+            log.debug(f"universe_extras.json not found — run scripts/build_universe_extras.py")
+    except Exception as _t2e:
+        log.debug(f"Tier-2 universe extras read: {_t2e}")
 
     creds_path = cfg.get("zacks_credentials", "")
     full_creds = str(BASE_DIR / creds_path) if not Path(creds_path).is_absolute() else creds_path
@@ -744,31 +759,33 @@ def run_daily_scan(force_fresh: bool = False):
         log.info(f"  Universe (Zacks #1 mode): {len(universe)} "
                  f"(Zacks #1={len(zacks_r1)}, Russell 1000 R#1 included above, custom={len(custom)})")
     else:
-        # Full mode: S&P 500 + R1000 (if enabled) + R2000 + S&P MidCap 400 +
-        # S&P SmallCap 600 + NASDAQ-100 + Zacks #1 + custom
+        # Full mode: S&P 500 + R1000 + R2000 + MID400 + SML600 + NDX100 +
+        # recent IPOs + post-earnings movers + Zacks #1 + custom
         r2000_set    = set(russell2000)
         mid400_set   = set(sp_mid400)
         sml600_set   = set(sp_small600)
         ndx_set      = set(nasdaq100)
+        ipo_set      = set(t.upper() for t in recent_ipos)
+        pead_set     = set(t.upper() for t in pead_movers)
         base_set = (sp500_set | r1000_set | r2000_set | mid400_set | sml600_set
-                    | ndx_set | zacks_r1_set | set(custom))
+                    | ndx_set | ipo_set | pead_set | zacks_r1_set | set(custom))
         universe = list(base_set)
-        # Source tagging — first-source-wins for overlaps. Order matters: most
-        # selective/curated index gets the source tag (S&P > R1000 > MID > SML
-        # > R2000 > NDX > Zacks > custom). MID + SML sit between R1000 and
-        # R2000 since they're more curated than R2000 but smaller than R1000.
+        # Source tagging — first-source-wins. Order: most curated → least curated.
         for t in sp500_set:    ticker_sources[t] = "sp500"
         for t in r1000_set:    ticker_sources.setdefault(t, "russell1000")
         for t in mid400_set:   ticker_sources.setdefault(t, "sp_midcap_400")
         for t in sml600_set:   ticker_sources.setdefault(t, "sp_smallcap_600")
         for t in r2000_set:    ticker_sources.setdefault(t, "russell2000")
         for t in ndx_set:      ticker_sources.setdefault(t, "nasdaq_100")
+        for t in ipo_set:      ticker_sources.setdefault(t, "recent_ipo")
+        for t in pead_set:     ticker_sources.setdefault(t, "post_earnings_mover")
         for t in zacks_r1_set: ticker_sources.setdefault(t, "zacks_rank1")
         for t in custom:       ticker_sources.setdefault(t, "custom")
         log.info(f"  Universe: {len(universe)} "
                  f"(S&P 500={len(sp500)}, R1000={len(russell1000)}, "
                  f"R2000={len(russell2000)}, MID400={len(sp_mid400)}, "
                  f"SML600={len(sp_small600)}, NDX100={len(nasdaq100)}, "
+                 f"IPOs={len(recent_ipos)}, PEAD={len(pead_movers)}, "
                  f"Zacks #1={len(zacks_r1)}, custom={len(custom)})")
 
     # Add Zacks premium service tickers to universe
