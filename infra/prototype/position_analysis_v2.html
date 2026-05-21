@@ -1582,22 +1582,60 @@ function applyBestFitBadge(scores){
 }
 
 // ─── /api/elite/{ticker} client + overlay for the demo sections ────────
-const ELITE_CACHE = {};  // {ticker: payload} · cached for the page lifetime
+const ELITE_CACHE = {};       // {ticker: payload} · cached for the page lifetime
+const ELITE_ERR_CACHE = {};   // {ticker: errorDetailHTML} · backend's helpful 404 message
 
 async function loadElite(ticker){
-  if (ELITE_CACHE[ticker]) return ELITE_CACHE[ticker];
+  if (ELITE_CACHE[ticker] !== undefined) return ELITE_CACHE[ticker];
   try {
     const r = await fetch(`/api/elite/${encodeURIComponent(ticker)}`,
                          { credentials: 'same-origin' });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) {
+      // Try to parse the FastAPI {detail: "..."} message — it usually includes
+      // 'Did you mean X?' or 'Foreign listings exist: ...' which the user needs.
+      let detail = `HTTP ${r.status}`;
+      try {
+        const body = await r.json();
+        if (body && body.detail) detail = body.detail;
+      } catch (_) {}
+      ELITE_ERR_CACHE[ticker] = detail;
+      _showEliteErrorBanner(ticker, detail, r.status);
+      ELITE_CACHE[ticker] = null;
+      return null;
+    }
     const payload = await r.json();
     ELITE_CACHE[ticker] = payload;
+    // Clear any prior 404 banner on success
+    const prior = document.getElementById('elite-err-banner');
+    if (prior) prior.remove();
     return payload;
   } catch (e) {
+    ELITE_ERR_CACHE[ticker] = e.message || 'Network error';
+    _showEliteErrorBanner(ticker, ELITE_ERR_CACHE[ticker], 0);
     ELITE_CACHE[ticker] = null;
     return null;
   }
 }
+
+// Insert a top-of-page banner explaining WHY no data loaded. Replaces any prior
+// banner. Detail may include HTML (the backend returns clickable suggestions).
+function _showEliteErrorBanner(ticker, detail, status){
+  const id = 'elite-err-banner';
+  const prior = document.getElementById(id);
+  if (prior) prior.remove();
+  const banner = document.createElement('div');
+  banner.id = id;
+  const isNotFound = status === 404;
+  banner.style.cssText = `position:sticky;top:0;z-index:9000;padding:11px 18px;background:${isNotFound ? '#1c1205' : '#1f0e0e'};border-bottom:2px solid ${isNotFound ? '#92400e' : '#7f1d1d'};color:${isNotFound ? '#fbbf24' : '#f87171'};font:600 13px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;letter-spacing:.02em;display:flex;align-items:center;gap:12px`;
+  // detail is server-controlled (backend uses <b> tags + safe ADR ticker codes
+  // from EODHD); ticker is URL-controlled and properly escaped.
+  banner.innerHTML =
+    `<span style="font-size:18px">${isNotFound ? '⚠' : '✕'}</span>` +
+    `<div style="flex:1;line-height:1.5"><b>${_esc(ticker)}:</b> ${detail}</div>` +
+    `<span style="background:transparent;border:1px solid currentColor;padding:4px 10px;border-radius:2px;font:700 10px ui-monospace,monospace;letter-spacing:.06em;cursor:pointer" onclick="document.getElementById('${id}').remove()">DISMISS</span>`;
+  document.body.insertBefore(banner, document.body.firstChild);
+}
+function _esc(s){ return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 function _flagCls(good){ return good ? 'gn' : 'rd'; }
 function _fmtPct(v, digits=1){ return (v == null || isNaN(v)) ? '—' : `${v.toFixed(digits)}%`; }
