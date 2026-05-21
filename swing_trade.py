@@ -649,6 +649,23 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _r2e:
         log.debug(f"Russell 2000 fetch: {_r2e}")
 
+    # 2026-05-21 · Tier-1 universe expansion · S&P MidCap 400 + S&P SmallCap 600 + NASDAQ-100
+    # Three EODHD-native index rosters that fill structural gaps in the
+    # SP500+R1000+R2000 base. MID + SML use S&P's profitability-screened
+    # committee picks (higher quality than RUT's indiscriminate inclusion).
+    # NDX catches non-S&P NASDAQ names. Each = 1 cached index_components call.
+    sp_mid400, sp_small600, nasdaq100 = [], [], []
+    try:
+        from data_fetcher import get_sp_midcap_400, get_sp_smallcap_600, get_nasdaq_100
+        sp_mid400 = get_sp_midcap_400()
+        log.info(f"  S&P MidCap 400: {len(sp_mid400)} tickers")
+        sp_small600 = get_sp_smallcap_600()
+        log.info(f"  S&P SmallCap 600: {len(sp_small600)} tickers")
+        nasdaq100 = get_nasdaq_100()
+        log.info(f"  NASDAQ-100: {len(nasdaq100)} tickers")
+    except Exception as _t1e:
+        log.debug(f"Tier-1 universe expansion fetch: {_t1e}")
+
     creds_path = cfg.get("zacks_credentials", "")
     full_creds = str(BASE_DIR / creds_path) if not Path(creds_path).is_absolute() else creds_path
     zacks_data = fetch_all_zacks_data(full_creds, force_fresh=force_fresh)
@@ -727,23 +744,31 @@ def run_daily_scan(force_fresh: bool = False):
         log.info(f"  Universe (Zacks #1 mode): {len(universe)} "
                  f"(Zacks #1={len(zacks_r1)}, Russell 1000 R#1 included above, custom={len(custom)})")
     else:
-        # Full mode: S&P 500 + Russell 1000 (if enabled) + Russell 2000 + Zacks #1 + custom
-        r2000_set = set(russell2000)
-        base_set = sp500_set | r1000_set | r2000_set | zacks_r1_set | set(custom)
+        # Full mode: S&P 500 + R1000 (if enabled) + R2000 + S&P MidCap 400 +
+        # S&P SmallCap 600 + NASDAQ-100 + Zacks #1 + custom
+        r2000_set    = set(russell2000)
+        mid400_set   = set(sp_mid400)
+        sml600_set   = set(sp_small600)
+        ndx_set      = set(nasdaq100)
+        base_set = (sp500_set | r1000_set | r2000_set | mid400_set | sml600_set
+                    | ndx_set | zacks_r1_set | set(custom))
         universe = list(base_set)
-        for t in sp500_set:
-            ticker_sources[t] = "sp500"
-        for t in r1000_set:
-            ticker_sources.setdefault(t, "russell1000")
-        for t in zacks_r1_set:
-            ticker_sources.setdefault(t, "zacks_rank1")
-        for t in r2000_set:
-            ticker_sources.setdefault(t, "russell2000")
-        for t in custom:
-            ticker_sources.setdefault(t, "custom")
+        # Source tagging — first-source-wins for overlaps. Order matters: most
+        # selective/curated index gets the source tag (S&P > R1000 > MID > SML
+        # > R2000 > NDX > Zacks > custom). MID + SML sit between R1000 and
+        # R2000 since they're more curated than R2000 but smaller than R1000.
+        for t in sp500_set:    ticker_sources[t] = "sp500"
+        for t in r1000_set:    ticker_sources.setdefault(t, "russell1000")
+        for t in mid400_set:   ticker_sources.setdefault(t, "sp_midcap_400")
+        for t in sml600_set:   ticker_sources.setdefault(t, "sp_smallcap_600")
+        for t in r2000_set:    ticker_sources.setdefault(t, "russell2000")
+        for t in ndx_set:      ticker_sources.setdefault(t, "nasdaq_100")
+        for t in zacks_r1_set: ticker_sources.setdefault(t, "zacks_rank1")
+        for t in custom:       ticker_sources.setdefault(t, "custom")
         log.info(f"  Universe: {len(universe)} "
-                 f"(S&P 500={len(sp500)}, Russell 1000={len(russell1000)}, "
-                 f"Russell 2000={len(russell2000)}, "
+                 f"(S&P 500={len(sp500)}, R1000={len(russell1000)}, "
+                 f"R2000={len(russell2000)}, MID400={len(sp_mid400)}, "
+                 f"SML600={len(sp_small600)}, NDX100={len(nasdaq100)}, "
                  f"Zacks #1={len(zacks_r1)}, custom={len(custom)})")
 
     # Add Zacks premium service tickers to universe

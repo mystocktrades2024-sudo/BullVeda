@@ -358,6 +358,34 @@ def get_russell2000() -> list[str]:
     return _eodhd_universe("RUT") or []
 
 
+# 2026-05-21 · Tier-1 universe expansion · MID + SML + NDX
+# All three are EODHD-native index constituents — cheap (1 call each, cached).
+# These fill the structural gap in the existing SP500+R1000+R2000 universe:
+#   - MID (S&P MidCap 400): catches mid-caps the curated S&P committee
+#     promoted but Russell hasn't included in R1000 yet
+#   - SML (S&P SmallCap 600): higher-quality small-cap roster than RUT
+#     (which is indiscriminate 1,963 names, many micro-caps and shells)
+#   - NDX (NASDAQ-100): catches the ~5% of NDX names that aren't in S&P 500
+#     (rare biotech / Chinese ADR / non-eligible names)
+
+def get_sp_midcap_400() -> list[str]:
+    """S&P MidCap 400 (~$3-15B cap range). EODHD index code: MID."""
+    return _eodhd_universe("MID") or []
+
+
+def get_sp_smallcap_600() -> list[str]:
+    """S&P SmallCap 600 (~$1-6B cap range, curated). EODHD index code: SML.
+    Strictly higher-quality than RUT because the S&P committee applies a
+    profitability filter (4 consecutive quarters of positive earnings)."""
+    return _eodhd_universe("SML") or []
+
+
+def get_nasdaq_100() -> list[str]:
+    """NASDAQ-100 (top 100 non-financial NASDAQ). EODHD index code: NDX.
+    Largely overlaps S&P 500 but catches non-S&P names like LIN/EXC/biotech."""
+    return _eodhd_universe("NDX") or []
+
+
 def get_universe_as_of(as_of_date: str, include_r1000: bool = True,
                         include_custom: bool = True) -> list[str]:
     """Point-in-time universe = S&P 500 (historical) ∪ R1000 (current) ∪ custom.
