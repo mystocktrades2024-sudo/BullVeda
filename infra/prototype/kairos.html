@@ -35995,23 +35995,48 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
   // `python3 -m ml.run_ml_edge`. Single global fetch cached on
   // window.__mlEdgeCache · async-loaded then DOM-patched after innerHTML.
   // ═══════════════════════════════════════════════════════════════════════
+  // 2026-05-21 · ML cache TTL = 5 min. Was unbounded — pages opened in the
+  // morning kept serving stale Top 10 Bulls all day even though the scan
+  // re-runs ML 5×/day (06:00/07:00/11:00/13:30/15:00). After TTL expiry the
+  // next access re-fetches. Manual force-refresh via window._mlEdgeForceRefresh().
+  const ML_EDGE_TTL_MS = 5 * 60 * 1000;
+
   function _qdMlEdgeFetch() {
-    // Reuse cached promise ONLY if the last fetch succeeded. A failed fetch
-    // invalidates the cache so a re-render auto-retries — survives the
-    // race between an old session's 404 promise and a freshly-deployed fix
-    // without requiring the user to hard-refresh.
-    if (window.__mlEdgePromise && window.__mlEdgeCache && !(window.__mlEdgeCache._meta || {}).error) {
+    const now = Date.now();
+    const cacheTs = window.__mlEdgeCacheTs || 0;
+    const isFresh = window.__mlEdgeCache &&
+                    !(window.__mlEdgeCache._meta || {}).error &&
+                    (now - cacheTs) < ML_EDGE_TTL_MS;
+    if (window.__mlEdgePromise && isFresh) {
       return window.__mlEdgePromise;
     }
     // Absolute /v2/ path — kairos.html is served at both /v2/kairos.html and /kairos.html,
     // so a relative URL would 404 from the top-level mount. /v2/ml_edge_predictions.json
     // is the only path the static-file catch-all serves the predictions JSON at.
-    window.__mlEdgePromise = fetch('/v2/ml_edge_predictions.json', { cache: 'no-store' })
+    // Bust browser cache too with a timestamp query so we never serve a stale 304.
+    window.__mlEdgePromise = fetch('/v2/ml_edge_predictions.json?ts=' + now, { cache: 'no-store' })
       .then(r => r.ok ? r.json() : { _meta: { error: 'HTTP ' + r.status }, predictions: {} })
-      .then(j => { window.__mlEdgeCache = j; return j; })
-      .catch(e => { window.__mlEdgeCache = { _meta: { error: String(e) }, predictions: {} }; return window.__mlEdgeCache; });
+      .then(j => { window.__mlEdgeCache = j; window.__mlEdgeCacheTs = Date.now(); return j; })
+      .catch(e => { window.__mlEdgeCache = { _meta: { error: String(e) }, predictions: {} }; window.__mlEdgeCacheTs = Date.now(); return window.__mlEdgeCache; });
     return window.__mlEdgePromise;
   }
+
+  // Manual force-refresh — wipes the cache and re-fetches. Wired to a ↻ button
+  // in the ML Edge tab + Discovery view. After the new payload lands, fires
+  // a custom event so any open ML view can re-render itself.
+  window._mlEdgeForceRefresh = function() {
+    console.log('[ml-edge] force refresh — clearing cache');
+    window.__mlEdgeCache = null;
+    window.__mlEdgePromise = null;
+    window.__mlEdgeCacheTs = 0;
+    return _qdMlEdgeFetch().then(payload => {
+      const m = (payload && payload._meta) || {};
+      console.log('[ml-edge] re-fetched · generated_at:', m.generated_at, '· n_tickers:', m.n_tickers);
+      // Fire event so any open ML render can re-paint
+      window.dispatchEvent(new CustomEvent('ml-edge-refreshed', { detail: payload }));
+      return payload;
+    });
+  };
 
   // ── Install the rk-* style block ONCE in document.head ─────────────────
   // BUG FIX 2026-05-16: the previous inline <style> tag inside #qd-ml-root
@@ -45098,16 +45123,40 @@ const QuantMlEdge = (function () {
 
   // ---- predictions cache (workspace owns its own copy distinct from detail) ----
   let _wsCache = null;
-  async function _loadPredictions() {
-    if (_wsCache && !(_wsCache._meta || {}).error) return _wsCache;
+  // 2026-05-21 · 5-min TTL on ML predictions cache. Unbounded caching meant
+  // pages opened in the morning showed yesterday's Top 10 Bulls/Bears even
+  // though ML re-runs 5×/day. After TTL the next access re-fetches. Manual
+  // refresh via QuantMlEdge.forceRefresh() (wired to the ↻ button in hero).
+  const ML_PRED_TTL_MS = 5 * 60 * 1000;
+  let _wsCacheTs = 0;
+
+  async function _loadPredictions(force) {
+    const now = Date.now();
+    const isFresh = _wsCache && !(_wsCache._meta || {}).error && (now - _wsCacheTs) < ML_PRED_TTL_MS;
+    if (!force && isFresh) return _wsCache;
     try {
-      const r = await fetch(PRED_URL, { cache: 'no-store' });
+      const r = await fetch(PRED_URL + '?ts=' + now, { cache: 'no-store' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       _wsCache = await r.json();
+      _wsCacheTs = Date.now();
+      console.log('[ml-edge] predictions loaded · generated_at:', (_wsCache._meta || {}).generated_at, '· n_tickers:', (_wsCache._meta || {}).n_tickers);
     } catch (e) {
       _wsCache = { _meta: { error: String(e) }, predictions: {} };
+      _wsCacheTs = Date.now();
     }
     return _wsCache;
+  }
+
+  // Manual force-refresh — re-fetch + repaint without losing tab state.
+  async function forceRefresh() {
+    console.log('[ml-edge] force refresh clicked');
+    _wsCache = null; _wsCacheTs = 0;
+    // Also bust the parallel cache used by Discovery view / QuantDetail
+    window.__mlEdgeCache = null;
+    window.__mlEdgePromise = null;
+    window.__mlEdgeCacheTs = 0;
+    await _loadPredictions(true);
+    _repaint();
   }
 
   function _pbar(pct, side) {
@@ -45273,6 +45322,7 @@ const QuantMlEdge = (function () {
             <div class="tf-hero-stamp-v ${fresh.stale ? 'am' : ''}"><span class="tf-hero-stamp-dot ${fresh.stale ? 'am' : ''}"></span>${fresh.stale ? 'STALE' : 'STREAMING'}</div>
             <div style="font:500 9px var(--mono);color:var(--ink-3);letter-spacing:0.08em">${fresh.rel}</div>
             <div style="font:500 9px var(--mono);color:var(--ink-3);letter-spacing:0.08em">${fresh.abs} PT</div>
+            <button onclick="QuantMlEdge.forceRefresh()" title="Re-fetch ml_edge_predictions.json from the server. Use after a fresh scan to update Top Bulls/Bears." style="margin-top:6px;padding:4px 10px;font:800 9px var(--mono);background:var(--copper);color:#fff;border:0;border-radius:2px;cursor:pointer;letter-spacing:0.10em">↻ REFRESH</button>
           </div>
         </div>
         <div class="tf-pulse-strip">
@@ -46113,7 +46163,7 @@ const QuantMlEdge = (function () {
   // surface when their data arrives. Without this, LOADING states stick.
   window._qmlEdgeWsRepaint = _repaint;
 
-  return { render, switchMode, switchSubTab, setAiPredSym };
+  return { render, switchMode, switchSubTab, setAiPredSym, forceRefresh };
 })();
 
 
