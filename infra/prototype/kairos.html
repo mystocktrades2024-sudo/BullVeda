@@ -19986,6 +19986,28 @@ const QuantHistoryLedger = (function() {
     else if (preset === 'all') { from = ''; }
     _filters.dateFrom = from;
     _filters.dateTo = preset === 'all' ? '' : to;
+    console.log('[hist-ledger] preset', preset, '→ from=', from, 'to=', _filters.dateTo);
+    const content = document.querySelector('#qaud-content');
+    if (content && _ledgerCache) _renderLedger(content, _ledgerCache);
+  };
+
+  // 2026-05-21 · explicit APPLY button — reads the current values from
+  // the date inputs (in case user typed but didn't blur) and re-renders.
+  // Browsers fire 'change' only on blur for <input type=date>; typing the
+  // date without leaving the field never triggered the change listener.
+  window._qhistApplyDateInputs = function() {
+    const f = document.getElementById('qhist-date-from');
+    const t = document.getElementById('qhist-date-to');
+    _filters.dateFrom = (f && f.value) || '';
+    _filters.dateTo   = (t && t.value) || '';
+    console.log('[hist-ledger] APPLY clicked · dateFrom=', _filters.dateFrom, 'dateTo=', _filters.dateTo);
+    const content = document.querySelector('#qaud-content');
+    if (content && _ledgerCache) _renderLedger(content, _ledgerCache);
+  };
+
+  window._qhistClearDateRange = function() {
+    _filters.dateFrom = '';
+    _filters.dateTo = '';
     const content = document.querySelector('#qaud-content');
     if (content && _ledgerCache) _renderLedger(content, _ledgerCache);
   };
@@ -20165,6 +20187,8 @@ const QuantHistoryLedger = (function() {
           <button onclick="_qhistSetDateRange('ytd')" style="padding:3px 9px;font:700 9.5px ui-monospace,monospace;background:transparent;color:var(--ink-1);border:1px solid var(--line);border-radius:2px;cursor:pointer">YTD</button>
           <button onclick="_qhistSetDateRange('1y')"  style="padding:3px 9px;font:700 9.5px ui-monospace,monospace;background:transparent;color:var(--copper);border:1px solid var(--copper);border-radius:2px;cursor:pointer">1y</button>
           <button onclick="_qhistSetDateRange('all')" style="padding:3px 9px;font:700 9.5px ui-monospace,monospace;background:transparent;color:var(--ink-1);border:1px solid var(--line);border-radius:2px;cursor:pointer">All</button>
+          <button onclick="_qhistApplyDateInputs()" style="padding:4px 14px;font:800 10px ui-monospace,monospace;background:var(--copper);color:#fff;border:0;border-radius:2px;cursor:pointer;letter-spacing:.08em">APPLY</button>
+          <button onclick="_qhistClearDateRange()" style="padding:4px 10px;font:700 9.5px ui-monospace,monospace;background:transparent;color:var(--ink-2);border:1px solid var(--line);border-radius:2px;cursor:pointer" title="Clear date range = show all dates">✕ Clear</button>
           <span id="qhist-date-stat" style="margin-left:auto;font:500 10px ui-monospace,monospace;color:var(--ink-3)"></span>
         </div>
       </div>
@@ -20431,7 +20455,11 @@ const QuantHistoryLedger = (function() {
         _renderSummary(content, records);
       });
     }
-    // 2026-05-21 · Date range inputs (auto-apply on change)
+    // 2026-05-21 · Date range inputs · listen to BOTH change and input events.
+    // change fires only on blur for <input type=date>, input fires on every
+    // keystroke + on date-picker selection. Listening to both means the table
+    // updates immediately when the user picks a date in the calendar widget
+    // AND when they manually type a date. Apply button is the explicit fallback.
     const dateFromEl = content.querySelector('#qhist-date-from');
     const dateToEl   = content.querySelector('#qhist-date-to');
     const dateStat   = content.querySelector('#qhist-date-stat');
@@ -20442,20 +20470,22 @@ const QuantHistoryLedger = (function() {
       const t = _filters.dateTo || 'today';
       dateStat.textContent = `${n.toLocaleString()} records · ${f} → ${t}`;
     };
-    if (dateFromEl) dateFromEl.addEventListener('change', () => {
-      _filters.dateFrom = dateFromEl.value || '';
+    const applyDateChange = () => {
+      _filters.dateFrom = (dateFromEl && dateFromEl.value) || '';
+      _filters.dateTo   = (dateToEl && dateToEl.value) || '';
       _page = 0;
       _renderRows(content, records);
       _renderSummary(content, records);
       updateDateStat();
-    });
-    if (dateToEl) dateToEl.addEventListener('change', () => {
-      _filters.dateTo = dateToEl.value || '';
-      _page = 0;
-      _renderRows(content, records);
-      _renderSummary(content, records);
-      updateDateStat();
-    });
+    };
+    if (dateFromEl) {
+      dateFromEl.addEventListener('change', applyDateChange);
+      dateFromEl.addEventListener('input', applyDateChange);
+    }
+    if (dateToEl) {
+      dateToEl.addEventListener('change', applyDateChange);
+      dateToEl.addEventListener('input', applyDateChange);
+    }
     updateDateStat();
     // Sort
     content.querySelectorAll('.qhist-tbl th.sortable').forEach(th => {
