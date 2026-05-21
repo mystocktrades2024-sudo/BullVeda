@@ -263,6 +263,75 @@ def _fetch_fundamentals_enrichment(tickers: list) -> dict:
         return {}
 
 
+def _fetch_bonds_forex() -> dict:
+    """Fetch bond ETF + forex pair real-time quotes for the Macro tab.
+
+    2026-05-21 · uses EODHD real_time. Bond ETFs (SHY/IEF/TLT/TIP) act as
+    yield-curve proxies (inverse to yields: TLT down = long yields up).
+    Forex pairs (EURUSD/USDJPY/GBPUSD/USDCNH/USDCAD) for cross-asset risk
+    signal. TYX.INDX = 30-year US Treasury yield (the only INDX symbol
+    that returns clean data; TNX/FVX both return NA).
+
+    Returns dict shape compatible with macro_signals: {sym: {price, chg_p, name}}.
+    Failures are silently dropped (won't break bundle build).
+    """
+    try:
+        import eodhd_client as ec
+        symbols = {
+            # Yield curve proxies via Treasury ETFs (inverse to yields)
+            "SHY":  {"name": "1-3yr Treasury (short duration)", "category": "bond"},
+            "IEF":  {"name": "7-10yr Treasury (intermediate)",  "category": "bond"},
+            "TLT":  {"name": "20+yr Treasury (long duration)",  "category": "bond"},
+            "TIP":  {"name": "TIPS (inflation-protected)",      "category": "bond"},
+            # Forex pairs
+            "EURUSD.FOREX": {"name": "EUR / USD",  "category": "forex"},
+            "USDJPY.FOREX": {"name": "USD / JPY",  "category": "forex"},
+            "GBPUSD.FOREX": {"name": "GBP / USD",  "category": "forex"},
+            "USDCNH.FOREX": {"name": "USD / CNH",  "category": "forex"},
+            "USDCAD.FOREX": {"name": "USD / CAD",  "category": "forex"},
+            # 30Y Treasury yield (TYX.INDX is the only Treasury yield index
+            # endpoint that returns a usable close; TNX/FVX return NA today).
+            "TYX.INDX":     {"name": "US 30Y Treasury Yield (%)", "category": "rate"},
+        }
+        out = {}
+        for sym, meta in symbols.items():
+            try:
+                r = ec.real_time(sym)
+                d = r if isinstance(r, dict) else (r[0] if isinstance(r, list) and r else None)
+                if not d:
+                    continue
+                close = d.get("close")
+                chg_p = d.get("change_p")
+                # EODHD returns "NA" string when no data — skip
+                if close in (None, "NA") or close == "":
+                    continue
+                try:
+                    close = float(close)
+                except Exception:
+                    continue
+                try:
+                    chg_p = float(chg_p) if chg_p not in (None, "NA") else None
+                except Exception:
+                    chg_p = None
+                # Sanity guard: bond ETFs / yields / forex never move >15% in a
+                # day. EODHD INDX symbols (e.g., TYX.INDX) sometimes return
+                # absurd change_p like -90% due to a prev_close computation
+                # bug. Null those out so the UI doesn't display garbage.
+                if chg_p is not None and abs(chg_p) > 15:
+                    chg_p = None
+                out[sym] = {
+                    "price": close,
+                    "change_p": chg_p,
+                    "name": meta["name"],
+                    "category": meta["category"],
+                }
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return {}
+
+
 def _load_premarket() -> dict:
     """Read cache/premarket.json written by scripts/premarket_scan.py.
     Returns empty payload if missing (frontend tab falls back to market_movers).
@@ -3453,6 +3522,10 @@ def main():
         "sector_etf":    b.get("sector_etf_data") or {},
         "market_breadth": b.get("market_breadth") or {},
         "macro_signals": b.get("macro_signals") or {},
+        # 2026-05-21 · bonds + forex for Macro tab enhancement (yield curve
+        # proxies via SHY/IEF/TLT/TIP ETFs + EURUSD/USDJPY/GBPUSD/USDCNH/USDCAD
+        # + TYX 30Y yield). Live from EODHD real_time.
+        "bonds_forex": _fetch_bonds_forex(),
         # Phase 2 — surface system_status (macro_calendar, circuit_breaker, forced_cash)
         "system_status": b.get("system_status") or {},
         "themes":        themes,

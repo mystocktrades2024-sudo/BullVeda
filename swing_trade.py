@@ -713,6 +713,7 @@ def run_daily_scan(force_fresh: bool = False):
     #   - screener_momentum: EODHD screener API for US >$500M cap +
     #     >500K avg vol + >+3% 5d return (top 200 hits, refreshed daily)
     etf_holdings_tickers, crypto_tickers, screener_tickers = [], [], []
+    new_highs_200d, new_lows_200d = [], []
     try:
         _th_path = BASE_DIR / "cache" / "universe_thematic.json"
         if _th_path.exists():
@@ -720,9 +721,13 @@ def run_daily_scan(force_fresh: bool = False):
             etf_holdings_tickers = _th.get("etf_holdings_union") or []
             crypto_tickers = _th.get("crypto_adjacent") or []
             screener_tickers = _th.get("screener_momentum") or []
+            new_highs_200d = _th.get("new_highs_200d") or []
+            new_lows_200d  = _th.get("new_lows_200d") or []
             log.info(f"  ETF holdings union (22 ETFs): {len(etf_holdings_tickers)} tickers")
             log.info(f"  Crypto-adjacent equities: {len(crypto_tickers)} tickers")
             log.info(f"  Screener momentum (+3% 5d, $500M+ cap): {len(screener_tickers)} tickers")
+            log.info(f"  EODHD signal · 200d new highs: {len(new_highs_200d)} tickers")
+            log.info(f"  EODHD signal · 200d new lows: {len(new_lows_200d)} tickers")
     except Exception as _t4_e:
         log.debug(f"Tier-4 thematic read: {_t4_e}")
 
@@ -816,9 +821,11 @@ def run_daily_scan(force_fresh: bool = False):
         etf_set      = set(t.upper() for t in etf_holdings_tickers)
         crypto_set   = set(t.upper() for t in crypto_tickers)
         screen_set   = set(t.upper() for t in screener_tickers)
+        newhi_set    = set(t.upper() for t in new_highs_200d)
+        newlo_set    = set(t.upper() for t in new_lows_200d)
         base_set = (sp500_set | r1000_set | r2000_set | mid400_set | sml600_set
                     | ndx_set | ipo_set | pead_set | insider_set | congress_set
-                    | etf_set | crypto_set | screen_set
+                    | etf_set | crypto_set | screen_set | newhi_set | newlo_set
                     | zacks_r1_set | set(custom))
         universe = list(base_set)
         # Source tagging — first-source-wins. Most curated → least curated.
@@ -835,6 +842,8 @@ def run_daily_scan(force_fresh: bool = False):
         for t in etf_set:      ticker_sources.setdefault(t, "etf_holding")
         for t in crypto_set:   ticker_sources.setdefault(t, "crypto_adjacent")
         for t in screen_set:   ticker_sources.setdefault(t, "screener_momentum")
+        for t in newhi_set:    ticker_sources.setdefault(t, "signal_200d_new_hi")
+        for t in newlo_set:    ticker_sources.setdefault(t, "signal_200d_new_lo")
         for t in zacks_r1_set: ticker_sources.setdefault(t, "zacks_rank1")
         for t in custom:       ticker_sources.setdefault(t, "custom")
         log.info(f"  Universe: {len(universe)} "
@@ -847,6 +856,7 @@ def run_daily_scan(force_fresh: bool = False):
                  f"ETF={len(etf_holdings_tickers)}, "
                  f"crypto={len(crypto_tickers)}, "
                  f"screener={len(screener_tickers)}, "
+                 f"newHi={len(new_highs_200d)}, newLo={len(new_lows_200d)}, "
                  f"Zacks #1={len(zacks_r1)}, custom={len(custom)})")
 
     # Add Zacks premium service tickers to universe

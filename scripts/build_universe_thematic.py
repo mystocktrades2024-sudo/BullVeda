@@ -122,6 +122,16 @@ SCREENER_FILTERS = [
     ["exchange", "=", "us"],   # US-listed only
 ]
 
+# EODHD pre-built signals · 2026-05-21
+# Verified working signals (n=5 returned in probe):
+#   200d_new_hi  · 200-day NEW HIGH list (breakout/momentum)
+#   200d_new_lo  · 200-day NEW LOW list (mean-reversion / short candidate)
+#   bookvalue_neg · negative book value (distress / kill candidate)
+#   wallstreet_hi/lo · extreme analyst price target (low-value, skip)
+# We use the two 200d signals + apply a market-cap floor to skip micro-caps.
+SIGNAL_LIMIT = 150
+SIGNAL_MIN_CAP = 500_000_000  # $ · skip <$500M caps
+
 
 def _build_etf_holdings() -> dict:
     """Returns {ETF_SYMBOL: [list of US tickers in that ETF]}. Skips ETFs
@@ -154,6 +164,38 @@ def _build_etf_holdings() -> dict:
     return by_etf
 
 
+def _build_signal_list(signal: str) -> list[str]:
+    """Pull a specific EODHD pre-built signal screen, filter to US large/mid-caps.
+    Used for 200d_new_hi (breakouts) + 200d_new_lo (breakdowns / mean-rev)."""
+    import eodhd_client as ec
+    try:
+        result = ec.screener(
+            signals=signal,
+            filters=[["market_capitalization", ">=", SIGNAL_MIN_CAP], ["exchange", "=", "us"]],
+            limit=SIGNAL_LIMIT,
+        )
+        if not result:
+            return []
+        rows = result.get("data") if isinstance(result, dict) else result
+        if not isinstance(rows, list):
+            return []
+        out = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            code = (r.get("code") or "").upper().strip()
+            ex = (r.get("exchange") or "").upper().strip()
+            if not code or len(code) > 5:
+                continue
+            if ex and ex not in ("US", "NASDAQ", "NYSE", "AMEX", "BATS", "NYSE ARCA"):
+                continue
+            out.append(code)
+        return sorted(set(out))
+    except Exception as e:
+        print(f"[thematic] signal '{signal}' failed: {e}", file=sys.stderr)
+        return []
+
+
 def _build_screener_momentum() -> list[str]:
     """EODHD screener API · US momentum filter."""
     import eodhd_client as ec
@@ -183,7 +225,7 @@ def _build_screener_momentum() -> list[str]:
 
 
 def main() -> int:
-    print(f"[thematic] building ETF holdings ({len(ETF_UNIVERSE)} ETFs) + crypto + screener …", file=sys.stderr)
+    print(f"[thematic] building ETF holdings ({len(ETF_UNIVERSE)} ETFs) + crypto + screener + signals …", file=sys.stderr)
 
     etf_holdings = _build_etf_holdings()
     etf_union = sorted({t for v in etf_holdings.values() for t in v})
@@ -195,7 +237,13 @@ def main() -> int:
     screener = _build_screener_momentum()
     print(f"[thematic]   Screener momentum: {len(screener)} tickers", file=sys.stderr)
 
-    all_thematic = sorted(set(etf_union) | set(crypto) | set(screener))
+    # EODHD pre-built signals (200d_new_hi for breakouts, 200d_new_lo for mean-rev)
+    new_highs = _build_signal_list("200d_new_hi")
+    new_lows  = _build_signal_list("200d_new_lo")
+    print(f"[thematic]   200d new highs (breakouts): {len(new_highs)} tickers", file=sys.stderr)
+    print(f"[thematic]   200d new lows (mean-rev): {len(new_lows)} tickers", file=sys.stderr)
+
+    all_thematic = sorted(set(etf_union) | set(crypto) | set(screener) | set(new_highs) | set(new_lows))
 
     out = {
         "_meta": {
@@ -203,6 +251,8 @@ def main() -> int:
             "n_etf_holdings": len(etf_union),
             "n_crypto": len(crypto),
             "n_screener": len(screener),
+            "n_new_highs": len(new_highs),
+            "n_new_lows": len(new_lows),
             "total": len(all_thematic),
             "etfs_scanned": len(etf_holdings),
             "screener_filters": SCREENER_FILTERS,
@@ -211,6 +261,8 @@ def main() -> int:
         "etf_holdings_union": etf_union,
         "crypto_adjacent": crypto,
         "screener_momentum": screener,
+        "new_highs_200d": new_highs,
+        "new_lows_200d": new_lows,
         "all_thematic": all_thematic,
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)

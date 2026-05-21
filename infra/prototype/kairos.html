@@ -50588,6 +50588,48 @@ const MarketsV2 = (function () {
         </div>
       </div>
 
+      <!-- 2026-05-21 · Bonds + Forex panel · live from EODHD via data.bonds_forex -->
+      ${(() => {
+        const bf = data.bonds_forex || {};
+        const bonds = Object.entries(bf).filter(([k, v]) => v && v.category === 'bond');
+        const fx = Object.entries(bf).filter(([k, v]) => v && v.category === 'forex');
+        const rate = Object.entries(bf).filter(([k, v]) => v && v.category === 'rate');
+        if (!bonds.length && !fx.length && !rate.length) return '';
+        const fmtPx = (v) => v == null ? '—' : Number(v).toFixed(2);
+        const fmtPct = (v) => v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2) + '%';
+        const cls = (v) => v == null ? 'neu' : v >= 0 ? 'mv2-up' : 'mv2-dn';
+        const row = ([sym, v]) => `<tr>
+          <td class="mv2-mono"><b>${sym.replace('.FOREX','').replace('.INDX','').replace('.US','')}</b></td>
+          <td style="font-size:11px;color:var(--ink-2)">${v.name || sym}</td>
+          <td class="r mv2-mono">${fmtPx(v.price)}</td>
+          <td class="r mv2-mono ${cls(v.change_p)}">${fmtPct(v.change_p)}</td>
+        </tr>`;
+        return `<div class="mv2-grid-2" style="margin-bottom:14px">
+          <div class="mv2-card">
+            <div class="mv2-card-head">
+              <span class="mv2-card-title">Yield curve proxies + 30Y yield</span>
+              <span class="mv2-card-meta">bond ETFs are inverse to yields · TLT down = long-end yields up</span>
+            </div>
+            ${(bonds.length + rate.length) ? `<table class="mv2-t">
+              <thead><tr><th>Sym</th><th>Tracks</th><th class="r">Price</th><th class="r">Δ%</th></tr></thead>
+              <tbody>${bonds.map(row).join('')}${rate.map(row).join('')}</tbody>
+            </table>` : '<div class="mv2-note" style="padding:14px">No bond/yield data — run scan to refresh data.bonds_forex.</div>'}
+            <div class="mv2-note">SHY=short · IEF=intermediate · TLT=long · TIP=inflation-linked. Curve steepening = TLT down + SHY flat = growth signal. Inversion = SHY high + TLT high = recession warning.</div>
+          </div>
+          <div class="mv2-card">
+            <div class="mv2-card-head">
+              <span class="mv2-card-title">Forex pairs</span>
+              <span class="mv2-card-meta">USD strength + cross-rates</span>
+            </div>
+            ${fx.length ? `<table class="mv2-t">
+              <thead><tr><th>Pair</th><th>Quote</th><th class="r">Last</th><th class="r">Δ%</th></tr></thead>
+              <tbody>${fx.map(row).join('')}</tbody>
+            </table>` : '<div class="mv2-note" style="padding:14px">No forex data — run scan to refresh.</div>'}
+            <div class="mv2-note">Weaker USD (EURUSD up · USDJPY down · USDCNH down) is risk-on for EM + commodities. Stronger USD = pressure on multinational earnings + EM equity.</div>
+          </div>
+        </div>`;
+      })()}
+
       <!-- Real economic calendar -->
       <div class="mv2-card">
         <div class="mv2-card-head"><span class="mv2-card-title">Economic Calendar · Next 30 days</span><span class="mv2-card-meta">${unique.length} events · HIGH/MED impact only</span></div>
