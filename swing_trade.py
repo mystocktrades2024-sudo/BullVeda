@@ -663,10 +663,6 @@ def run_daily_scan(force_fresh: bool = False):
         log.debug(f"Tier-1 universe expansion fetch: {_t1e}")
 
     # 2026-05-21 · Tier-2 universe extras · recent IPOs + post-earnings movers
-    # Read from cache/universe_extras.json populated by
-    # scripts/build_universe_extras.py (runs on morning scan). Fills the
-    # structural gap of names that IPO'd after the Russell reconstitution
-    # (WYFI-style) + catches PEAD candidates not in any index.
     recent_ipos, pead_movers = [], []
     try:
         _ue_path = BASE_DIR / "cache" / "universe_extras.json"
@@ -680,6 +676,33 @@ def run_daily_scan(force_fresh: bool = False):
             log.debug(f"universe_extras.json not found — run scripts/build_universe_extras.py")
     except Exception as _t2e:
         log.debug(f"Tier-2 universe extras read: {_t2e}")
+
+    # 2026-05-21 · Tier-3a · Insider cluster (Bettis-Coles edge)
+    # Read from cache/insider_cluster.json populated by
+    # scripts/build_universe_insider_cluster.py (runs weekly via launchd).
+    # Adds names with >=3 insiders buying >=$200K each in last 30d.
+    insider_cluster_tickers = []
+    try:
+        _ic_path = BASE_DIR / "cache" / "insider_cluster.json"
+        if _ic_path.exists():
+            _ic = json.loads(_ic_path.read_text())
+            insider_cluster_tickers = _ic.get("tickers") or []
+            log.info(f"  Insider cluster (>=3 insiders, >=$200K, 30d): {len(insider_cluster_tickers)} tickers")
+    except Exception as _t3a_e:
+        log.debug(f"Tier-3a insider cluster read: {_t3a_e}")
+
+    # 2026-05-21 · Tier-3b · Congressional trading universe
+    # Read from cache/congressional_picks.json populated by
+    # scripts/build_universe_congressional.py (runs weekly via launchd).
+    congressional_tickers = []
+    try:
+        _cg_path = BASE_DIR / "cache" / "congressional_picks.json"
+        if _cg_path.exists():
+            _cg = json.loads(_cg_path.read_text())
+            congressional_tickers = _cg.get("tickers") or []
+            log.info(f"  Congressional picks (90d): {len(congressional_tickers)} tickers")
+    except Exception as _t3b_e:
+        log.debug(f"Tier-3b congressional read: {_t3b_e}")
 
     creds_path = cfg.get("zacks_credentials", "")
     full_creds = str(BASE_DIR / creds_path) if not Path(creds_path).is_absolute() else creds_path
@@ -759,18 +782,20 @@ def run_daily_scan(force_fresh: bool = False):
         log.info(f"  Universe (Zacks #1 mode): {len(universe)} "
                  f"(Zacks #1={len(zacks_r1)}, Russell 1000 R#1 included above, custom={len(custom)})")
     else:
-        # Full mode: S&P 500 + R1000 + R2000 + MID400 + SML600 + NDX100 +
-        # recent IPOs + post-earnings movers + Zacks #1 + custom
+        # Full mode union of all sources (indices + extras + info-edge feeds)
         r2000_set    = set(russell2000)
         mid400_set   = set(sp_mid400)
         sml600_set   = set(sp_small600)
         ndx_set      = set(nasdaq100)
         ipo_set      = set(t.upper() for t in recent_ipos)
         pead_set     = set(t.upper() for t in pead_movers)
+        insider_set  = set(t.upper() for t in insider_cluster_tickers)
+        congress_set = set(t.upper() for t in congressional_tickers)
         base_set = (sp500_set | r1000_set | r2000_set | mid400_set | sml600_set
-                    | ndx_set | ipo_set | pead_set | zacks_r1_set | set(custom))
+                    | ndx_set | ipo_set | pead_set | insider_set | congress_set
+                    | zacks_r1_set | set(custom))
         universe = list(base_set)
-        # Source tagging — first-source-wins. Order: most curated → least curated.
+        # Source tagging — first-source-wins. Most curated → least curated.
         for t in sp500_set:    ticker_sources[t] = "sp500"
         for t in r1000_set:    ticker_sources.setdefault(t, "russell1000")
         for t in mid400_set:   ticker_sources.setdefault(t, "sp_midcap_400")
@@ -779,6 +804,8 @@ def run_daily_scan(force_fresh: bool = False):
         for t in ndx_set:      ticker_sources.setdefault(t, "nasdaq_100")
         for t in ipo_set:      ticker_sources.setdefault(t, "recent_ipo")
         for t in pead_set:     ticker_sources.setdefault(t, "post_earnings_mover")
+        for t in insider_set:  ticker_sources.setdefault(t, "insider_cluster")
+        for t in congress_set: ticker_sources.setdefault(t, "congressional")
         for t in zacks_r1_set: ticker_sources.setdefault(t, "zacks_rank1")
         for t in custom:       ticker_sources.setdefault(t, "custom")
         log.info(f"  Universe: {len(universe)} "
@@ -786,6 +813,8 @@ def run_daily_scan(force_fresh: bool = False):
                  f"R2000={len(russell2000)}, MID400={len(sp_mid400)}, "
                  f"SML600={len(sp_small600)}, NDX100={len(nasdaq100)}, "
                  f"IPOs={len(recent_ipos)}, PEAD={len(pead_movers)}, "
+                 f"insider={len(insider_cluster_tickers)}, "
+                 f"congress={len(congressional_tickers)}, "
                  f"Zacks #1={len(zacks_r1)}, custom={len(custom)})")
 
     # Add Zacks premium service tickers to universe
