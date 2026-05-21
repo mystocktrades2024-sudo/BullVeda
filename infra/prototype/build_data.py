@@ -1901,6 +1901,13 @@ def rich_row(r: dict, b: dict = None) -> dict:
         "setup_family": r.get("setup_family"),
         "max_hold_days": (r.get("hold_period_guide") or {}).get("max_days") if isinstance(r.get("hold_period_guide"), dict) else 14,
         "regime":       r.get("regime4") or "neutral",
+        # 2026-05-21 · ticker_source from swing_trade.py universe build —
+        # which tier added this ticker (sp500 / russell1000 / russell2000 /
+        # sp_midcap_400 / sp_smallcap_600 / nasdaq_100 / recent_ipo /
+        # post_earnings_mover / insider_cluster / congressional / etf_holding /
+        # crypto_adjacent / screener_momentum / signal_200d_new_hi /
+        # signal_200d_new_lo / zacks_rank1 / zacks_premium / leveraged / custom).
+        "ticker_source": r.get("ticker_source") or "unknown",
 
         # REAL Elliott Wave + reaction checklist + trade plan
         "elliott_wave": r.get("elliott_wave") or {},
@@ -3526,6 +3533,14 @@ def main():
         # proxies via SHY/IEF/TLT/TIP ETFs + EURUSD/USDJPY/GBPUSD/USDCNH/USDCAD
         # + TYX 30Y yield). Live from EODHD real_time.
         "bonds_forex": _fetch_bonds_forex(),
+        # 2026-05-21 · universe composition breakdown by ticker_source —
+        # surfaced in System Status tab so user can see which tier added
+        # which slice of the scanned universe.
+        "universe_composition": (lambda ts: {
+            "total": len(ts),
+            "by_source": dict(__import__('collections').Counter(ts.values()).most_common()),
+            "generated_at": b.get("run_timestamp", ""),
+        })(b.get("ticker_sources") or {}),
         # Phase 2 — surface system_status (macro_calendar, circuit_breaker, forced_cash)
         "system_status": b.get("system_status") or {},
         "themes":        themes,

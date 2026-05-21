@@ -6899,6 +6899,24 @@ body.ep-fit-mode .page { padding: 14px 16px 0; min-height: 0; }
 .qs-verdict.avoid { color: var(--rd); border: 1px solid var(--rd-dim); background: var(--rd-bg); }
 .qs-verdict.kill  { color: var(--ink-3); border: 1px solid var(--line-2); background: var(--bg-2); }
 
+/* 2026-05-21 · Source badge — color-coded by tier class. Click handler attached
+   via delegation in QuantScanner._wire (filters table by clicked source). */
+.qs-src { display: inline-block; padding: 1px 6px; border-radius: 2px;
+  font: 700 9px var(--mono); letter-spacing: 0.06em; cursor: pointer;
+  white-space: nowrap; }
+.qs-src.src-idx   { color: var(--gn);     border: 1px solid var(--gn-dim);    background: var(--gn-bg); }     /* SP500 / R1000 / R2000 / MID / SML / NDX */
+.qs-src.src-ipo   { color: var(--copper); border: 1px solid rgba(217,119,87,.4); background: rgba(217,119,87,.10); }  /* IPO / PEAD */
+.qs-src.src-edge  { color: var(--vio,#a78bfa); border: 1px solid rgba(167,139,250,.4); background: rgba(167,139,250,.10); }  /* insider / congress / zacks */
+.qs-src.src-thm   { color: var(--cy,#60a5fa);  border: 1px solid rgba(96,165,250,.4);  background: rgba(96,165,250,.10);   }  /* ETF / crypto / screener / signals */
+.qs-src.src-user  { color: var(--amb);    border: 1px solid var(--amb-dim);   background: var(--amb-bg);    }  /* custom / leveraged */
+.qs-src.src-unk   { color: var(--ink-3);  border: 1px solid var(--line-2);    background: var(--bg-3);      }
+.qs-src:hover     { filter: brightness(1.2); transform: translateY(-1px); }
+.qs-src-active { display: inline-block; padding: 4px 10px; border-radius: 2px;
+  font: 800 10px var(--mono); letter-spacing: 0.08em;
+  color: var(--copper); border: 1px solid var(--copper);
+  background: rgba(217,119,87,.15); cursor: pointer; }
+.qs-src-active:hover { background: var(--copper); color: var(--bg-1); }
+
 .qs-tier { font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.06em; }
 .qs-tier.t1 { color: var(--gn); font-weight: 700; }
 .qs-tier.t2 { color: var(--cy); }
@@ -18404,6 +18422,7 @@ const QuantScanner = (function() {
         filter:  _state.filter,
         sortKey: _state.sortKey,
         sortDir: _state.sortDir,
+        source:  _state.source,
       };
       localStorage.setItem(_LS_KEY, JSON.stringify(prefs));
     } catch (_) {}
@@ -18420,6 +18439,10 @@ const QuantScanner = (function() {
     density:  _initialPrefs.density || 'comfy', // 'compact' · 'comfy' · 'spacious'
     search:   '',
     sel: 0,
+    // 2026-05-21 · source filter — 'all' or a specific ticker_source key
+    // ('sp500', 'recent_ipo', 'insider_cluster', etc.). Clicking a source
+    // badge in any row sets this; click the active source chip to clear.
+    source:   _initialPrefs.source || 'all',
   };
 
   const SAVED_VIEWS = {
@@ -18510,6 +18533,8 @@ const QuantScanner = (function() {
     }
     // Horizon filter (swing / position / invest / all)
     if (_state.mode !== 'all' && t._mode && t._mode !== _state.mode) return false;
+    // 2026-05-21 · Source filter — set by clicking a source badge in any row
+    if (_state.source !== 'all' && (t.ticker_source || 'unknown') !== _state.source) return false;
     // Verdict / state filter
     // 'all' = actionable signals only (exclude killed AND AVOID-stage).
     // Use 'killed' filter explicitly to investigate rejected tickers.
@@ -18660,11 +18685,44 @@ const QuantScanner = (function() {
     { key: 'catalyst_tier', label: 'Cat',      r: true,  sort: 'catalyst_tier', tip: 'Catalyst tier. T1 = direct alpha (PEAD/UOA/VCP/52w). T2 = squeeze/pullback. T3 = generic news' },
     { key: 'entry_quality', label: 'Entry',    r: false, sort: 'entry_quality', tip: 'Entry quality. FRESH ≤0.75 ATR from pivot · PULLBACK · VALID · EXTENDED · MISSED' },
     { key: 'sector',        label: 'Sector',   r: false, sort: 'sector', tip: 'GICS sector' },
+    { key: '_source',       label: 'Src',      r: false, sort: 'ticker_source', tip: 'Universe source — which tier put this ticker in the scan: SP500 / R1000 / R2000 / MID400 / SML600 / NDX100 / IPO / PEAD / INSIDER / CONGRESS / ETF / CRYPTO / SCRN / NewHi / NewLo / Custom' },
     { key: '_setup_wilson_lb', label: 'WR (LB·n)', r: true, sort: '_setup_wilson_lb', tip: 'Setup-family historical WR / Wilson 95% lower bound / sample size n. Don\'t trust n<30.' },
     { key: '_mechanism',    label: 'Mechanism', r: false, sort: null,   tip: 'One-sentence WHY this setup has edge (CLAUDE.md principle 2). Hover the cell for the falsification rule.' },
     { key: '_plan',         label: 'Stop/T1',  r: true,  sort: null,    tip: 'Stop price / first target' },
     { key: '_personal',     label: '☆ / TRACK',  r: false, sort: null,    tip: '☆ = add/remove from personal watchlist · BUY = open Add Position form → Portfolio' },
   ];
+
+  // 2026-05-21 · Source badge — abbreviated, color-coded by tier class.
+  // Hoisted to window._SRC_MAP so detail-panel renderBanner (different IIFE
+  // scope) can render the same labels + tooltips.
+  // Index-curated sources get green; info-edge get violet; dynamic/screener
+  // get blue; user-defined get amber; IPO/PEAD get copper.
+  const _SRC_MAP = window._SRC_MAP = {
+    sp500:                  { lbl: 'SP500',   cls: 'src-idx',  full: 'S&P 500' },
+    russell1000:            { lbl: 'R1000',   cls: 'src-idx',  full: 'Russell 1000' },
+    russell2000:            { lbl: 'R2000',   cls: 'src-idx',  full: 'Russell 2000' },
+    sp_midcap_400:          { lbl: 'MID400',  cls: 'src-idx',  full: 'S&P MidCap 400' },
+    sp_smallcap_600:        { lbl: 'SML600',  cls: 'src-idx',  full: 'S&P SmallCap 600' },
+    nasdaq_100:             { lbl: 'NDX100',  cls: 'src-idx',  full: 'NASDAQ-100' },
+    recent_ipo:             { lbl: 'IPO',     cls: 'src-ipo',  full: 'Recent IPO (≤400d)' },
+    post_earnings_mover:    { lbl: 'PEAD',    cls: 'src-ipo',  full: 'Post-earnings mover (>5% surprise)' },
+    insider_cluster:        { lbl: 'INSIDR',  cls: 'src-edge', full: 'Insider cluster (≥3 insiders, ≥$200K)' },
+    congressional:          { lbl: 'CONGRS',  cls: 'src-edge', full: 'Congressional trading (last 90d)' },
+    etf_holding:            { lbl: 'ETF',     cls: 'src-thm',  full: 'ETF holding (sector/thematic ETF constituent)' },
+    crypto_adjacent:        { lbl: 'CRYPTO',  cls: 'src-thm',  full: 'Crypto-adjacent equity' },
+    screener_momentum:      { lbl: 'SCRN',    cls: 'src-thm',  full: 'EODHD screener · momentum filter' },
+    signal_200d_new_hi:     { lbl: 'NewHi',   cls: 'src-thm',  full: 'EODHD signal · 200d new high (breakout)' },
+    signal_200d_new_lo:     { lbl: 'NewLo',   cls: 'src-thm',  full: 'EODHD signal · 200d new low (mean-rev/short candidate)' },
+    zacks_rank1:            { lbl: 'ZckR1',   cls: 'src-edge', full: 'Zacks Rank #1' },
+    zacks_premium:          { lbl: 'ZckPr',   cls: 'src-edge', full: 'Zacks premium service pick' },
+    leveraged:              { lbl: 'LEV',     cls: 'src-user', full: 'Leveraged ETF watchlist' },
+    custom:                 { lbl: 'CUST',    cls: 'src-user', full: 'Custom watchlist' },
+    unknown:                { lbl: '?',       cls: 'src-unk',  full: 'Source not recorded' },
+  };
+  function _srcBadge(src) {
+    const meta = _SRC_MAP[src] || _SRC_MAP.unknown;
+    return `<span class="qs-src ${meta.cls}" title="${meta.full}" data-src="${src || 'unknown'}">${meta.lbl}</span>`;
+  }
 
   function renderRow(t, i, isSel) {
     const vc = _verdictCls(t);
@@ -18744,6 +18802,7 @@ const QuantScanner = (function() {
       <td class="r">${t.catalyst_tier ? 'T' + t.catalyst_tier : '—'}</td>
       <td>${_esc(t.entry_quality || '—').slice(0, 8)}</td>
       <td>${_esc((t.sector || '').slice(0, 14))}</td>
+      <td>${_srcBadge(t.ticker_source)}</td>
       <td class="r">${_wrCell(t)}</td>
       <td>${_mechCell(t)}</td>
       <td class="r">${stopT1}</td>
@@ -19156,6 +19215,7 @@ const QuantScanner = (function() {
           <input class="qs-search" id="qsSearch" placeholder="search ticker or name (/ to focus)" value="${_state.search || ''}">
         </div>
         <span class="qs-csv-btn" data-qs-csv title="Export filtered rows to CSV">export csv</span>
+        ${_state.source && _state.source !== 'all' ? `<span class="qs-src-active" data-qs-clear-src title="Click to clear source filter">SRC: ${(_SRC_MAP[_state.source] || {}).lbl || _state.source} ✕</span>` : ''}
         <span class="qs-time-strip ${timeCls}">${timeLabel}</span>
       </div>
     `;
@@ -19252,6 +19312,26 @@ const QuantScanner = (function() {
         _savePrefs();
         _refresh(container);
       });
+    });
+    // 2026-05-21 · Source badge clicks → set source filter + refresh
+    container.querySelectorAll('[data-src]').forEach(badge => {
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const s = badge.getAttribute('data-src');
+        // Toggle: clicking the same source twice clears the filter
+        _state.source = (_state.source === s) ? 'all' : s;
+        _state.sel = 0;
+        _savePrefs();
+        _refresh(container);
+      });
+    });
+    // Clear-source chip in toolbar
+    const _clearSrc = container.querySelector('[data-qs-clear-src]');
+    if (_clearSrc) _clearSrc.addEventListener('click', () => {
+      _state.source = 'all';
+      _state.sel = 0;
+      _savePrefs();
+      _refresh(container);
     });
     // Watchlist / buy-list quick-action buttons
     const _wirePersonal = (root) => {
@@ -27902,6 +27982,12 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
           <span class="t2-align ${alignCls}" data-tip="${_esc(alignTip)}" data-tip-pos="below"><span class="ico">${alignIco}</span>${alignTxt}<span class="tally">${bullCt}B · ${watchCt}W · ${bearCt}S</span></span>
           <span class="t2-lens-bar">${lensesHTML}</span>
           <span class="t2-meta" data-tip="Trade-quality meta&#10;ER buffer · Kelly multiplier · ATR (avg true range)" data-tip-pos="below">ER ${erBufTxt} · Kelly <b>×${kelly ? '1.0' : '—'}</b> · ATR <b>${atrPctRaw ? atrPctRaw.toFixed(2) + '%' : '—'}</b></span>
+          ${t.ticker_source ? (() => {
+            // 2026-05-21 · Universe source — which tier put this ticker in scan
+            const M = window._SRC_MAP || {};
+            const meta = M[t.ticker_source] || { lbl: t.ticker_source, full: 'Universe source: ' + t.ticker_source };
+            return `<span class="t2-meta" data-tip="${_esc('Universe source · ' + (meta.full || t.ticker_source))}" data-tip-pos="below">SRC · <b>${_esc(meta.lbl || t.ticker_source)}</b></span>`;
+          })() : ''}
         </div>
         ${ladderHTML}
       </div>`;
@@ -53568,7 +53654,49 @@ window._toggleTheme = function() {
           '<div class="rf-foot"><span>'+j.last+'</span></div></div>';
       }).join('');
 
+      // 2026-05-21 · Universe composition panel — real data from
+      // data.universe_composition (built in build_data.py from the bundle's
+      // ticker_sources dict). Shows breakdown by tier with bar visualization.
+      var uc = (data || {}).universe_composition || {};
+      var bySource = uc.by_source || {};
+      var totalUC = uc.total || 0;
+      // Source-meta lookup matches window._SRC_MAP (set in QuantScanner).
+      // Provide a defensive fallback in case Scanner hasn't loaded yet.
+      var SRC = window._SRC_MAP || {};
+      var ucSortedKeys = Object.keys(bySource).sort(function(a, b){ return bySource[b] - bySource[a]; });
+      var ucBars = '';
+      if (totalUC > 0) {
+        ucBars = ucSortedKeys.map(function(k){
+          var meta = SRC[k] || { lbl: k, full: k, cls: 'src-unk' };
+          var n = bySource[k];
+          var pct = (n / totalUC * 100);
+          var color = meta.cls === 'src-idx' ? 'var(--gn)' :
+                      meta.cls === 'src-ipo' ? 'var(--copper)' :
+                      meta.cls === 'src-edge' ? '#a78bfa' :
+                      meta.cls === 'src-thm' ? '#60a5fa' :
+                      meta.cls === 'src-user' ? 'var(--amb)' : 'var(--ink-3)';
+          return '<div style="display:grid;grid-template-columns:120px 60px 1fr 50px;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--rf-line)">' +
+            '<span style="font:700 11px var(--mono);color:var(--ink-1);letter-spacing:.04em">' + (meta.lbl || k) + '</span>' +
+            '<span style="font:800 12px var(--mono);text-align:right;color:' + color + '">' + n + '</span>' +
+            '<span style="height:14px;background:var(--bg-3);border-radius:2px;overflow:hidden"><span style="display:block;height:100%;width:' + pct.toFixed(1) + '%;background:' + color + '"></span></span>' +
+            '<span style="font:600 10px var(--mono);color:var(--ink-3);text-align:right">' + pct.toFixed(1) + '%</span>' +
+          '</div>';
+        }).join('');
+      }
+      var ucBlock = totalUC > 0
+        ? hdr('Universe Composition', totalUC.toLocaleString() + ' tickers across ' + ucSortedKeys.length + ' sources · click a source in Signal Scanner to filter by it', 'real bundle data')
+          + '<div class="rf-card cold" style="padding:14px 18px;margin-bottom:14px">'
+          + '<div style="display:grid;grid-template-columns:120px 60px 1fr 50px;gap:10px;padding:4px 0 8px;border-bottom:1px solid var(--rf-line-2);font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:.10em;text-transform:uppercase">'
+          + '<span>Source</span><span style="text-align:right">N</span><span>Share of universe</span><span style="text-align:right">%</span>'
+          + '</div>'
+          + ucBars
+          + '<div style="margin-top:10px;font:500 11px var(--mono);color:var(--ink-3);line-height:1.5">'
+          + '<b style="color:var(--gn)">●</b> S&amp;P/Russell indices · <b style="color:var(--copper)">●</b> IPO/PEAD · <b style="color:#a78bfa">●</b> info-edge (insider/congress/Zacks) · <b style="color:#60a5fa">●</b> thematic (ETF/crypto/screener/signals) · <b style="color:var(--amb)">●</b> user (custom/leveraged)'
+          + '</div></div>'
+        : '';
+
       panel.innerHTML = '<div class="refv2">' + hero +
+        ucBlock +
         hdr('Health Checks', '12 of 12 passing · Slack alert on 2 consecutive fails', 'live') +
         '<div class="rf-grid-3">' + checkHTML + '</div>' +
         hdr('Feed Freshness', 'how stale each data source is right now', 'bar = recency') +
