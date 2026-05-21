@@ -273,7 +273,7 @@ _MIME = {".html":"text/html",".css":"text/css",".js":"application/javascript",
 @app.api_route("/v2", methods=["GET","HEAD"])
 async def _v2_root(auth: HTTPBasicCredentials = Depends(_check_auth)):
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/v2/dashboard.html")
+    return RedirectResponse(url="/kairos.html")
 
 @app.api_route("/v2/_v", methods=["GET","HEAD"])
 async def _v2_module_version(auth: HTTPBasicCredentials = Depends(_check_auth)):
@@ -302,10 +302,10 @@ async def _v2_module_version(auth: HTTPBasicCredentials = Depends(_check_auth)):
 async def _v2_file(path: str, request: Request, auth: HTTPBasicCredentials = Depends(_check_auth)):
     if isinstance(auth, Response):
         return auth
-    # Empty path (trailing slash on /v2/) → redirect to dashboard.html, same as /v2
+    # Empty path (trailing slash on /v2/) → redirect to kairos, same as /v2
     if not path:
         from fastapi.responses import RedirectResponse
-        return RedirectResponse(url="/v2/dashboard.html")
+        return RedirectResponse(url="/kairos.html")
     full = (_PROTOTYPE_DIR / path).resolve()
     # path traversal guard
     if not str(full).startswith(str(_PROTOTYPE_DIR.resolve())):
@@ -357,19 +357,14 @@ async def _v2_file(path: str, request: Request, auth: HTTPBasicCredentials = Dep
         return Response(content=body, media_type=_MIME.get(suffix, "application/json"), headers=headers)
     return FileResponse(full, media_type=_MIME.get(suffix, "application/octet-stream"), headers=headers)
 
-# -- Redirect / to V2 dashboard (Phase A: legacy cache/dashboard.html retired
-#    2026-05-08; V2 at /v2/dashboard.html is the only authoritative surface).
-#    Existing bookmarks to / keep working — they just bounce to V2. --
+# -- Redirect / to Kairos (primary dashboard as of 2026-05-20). --
 from fastapi.responses import RedirectResponse
 
 @app.get("/")
 async def root(auth: HTTPBasicCredentials = Depends(_check_auth)):
-    return RedirectResponse(url="/v2/dashboard.html", status_code=302)
+    return RedirectResponse(url="/kairos.html", status_code=302)
 
-# -- /kairos.html — V3 next-gen surface served at the root.
-# V2 dashboard.html remains the canonical landing (the / redirect above).
-# /kairos.html is the upgrade path — currently incomplete; once parity is
-# reached the / redirect flips to /kairos.html.
+# -- /kairos.html — primary dashboard surface.
 @app.api_route("/kairos.html", methods=["GET","HEAD"])
 async def _kairos_page(auth: HTTPBasicCredentials = Depends(_check_auth)):
     if isinstance(auth, Response):
@@ -450,7 +445,7 @@ async def _reports_index(auth: HTTPBasicCredentials = Depends(_check_auth)):
   <a href="/reports/latest/dashboard">→ Latest Dashboard</a>
   <a href="/reports/latest/morning-briefing">→ Latest Morning Briefing</a>
   <a href="/reports/strategy">→ Strategy Report (Backtest + Regime + MAE/MFE)</a>
-  <a href="/v2/dashboard.html">→ Live V2 Dashboard</a>
+  <a href="/kairos.html">→ Live Dashboard (Kairos)</a>
   <a href="/api/system-status">→ Live System Status (JSON)</a>
 </div>
 
@@ -4521,41 +4516,24 @@ async def sector_cap_whatif(sector: str = "", new_cap: int = 0):
 
 
 @app.get("/api/decision-log")
-async def decision_log_all_api(limit: int = 20):
-    """Return the most recent N decision log entries across ALL tickers (Home Activity feed)."""
-    import json
-    from pathlib import Path
-    log_path = Path("data/decision_log.jsonl")
-    if not log_path.exists():
-        return {"entries": []}
-    try:
-        entries = []
-        with open(log_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entries.append(json.loads(line))
-                except Exception:
-                    continue
-        entries.sort(key=lambda e: e.get("timestamp", ""))
-        return {"entries": entries[-limit:]}
-    except Exception as e:
-        return {"entries": [], "error": str(e)}
+async def decision_log_all_api(limit: int = 20, date_from: str = "", date_to: str = ""):
+    """Return decision log entries across ALL tickers.
 
-
-@app.get("/api/decision-log/{ticker}")
-async def decision_log_api(ticker: str, limit: int = 20):
-    """Return the audit trail of decisions for a ticker · for Audit Trail browser.
-    Reads data/decision_log.jsonl (newline-delimited JSON).
+    Query params (all optional):
+      limit: max entries returned (default 20). If date_from is set without
+             explicit limit, bumps to 10000 to fit a 1-year window.
+      date_from: ISO date 'YYYY-MM-DD' (inclusive). Filter entries with date >= date_from.
+      date_to:   ISO date 'YYYY-MM-DD' (inclusive). Filter entries with date <= date_to.
+    Sort: by entry 'date' field (decision_log.jsonl has no 'timestamp' field).
     """
     import json
     from pathlib import Path
-    ticker = ticker.upper().strip()
     log_path = Path("data/decision_log.jsonl")
     if not log_path.exists():
-        return {"ticker": ticker, "entries": []}
+        return {"entries": [], "limit": limit, "date_from": date_from, "date_to": date_to}
+    # When a date range is supplied without explicit limit, allow much larger windows
+    if (date_from or date_to) and limit == 20:
+        limit = 10000
     try:
         entries = []
         with open(log_path, "r") as f:
@@ -4565,12 +4543,72 @@ async def decision_log_api(ticker: str, limit: int = 20):
                     continue
                 try:
                     e = json.loads(line)
-                    if str(e.get("ticker", "")).upper() == ticker:
-                        entries.append(e)
+                    d = (e.get("date") or "")[:10]
+                    if date_from and d < date_from:
+                        continue
+                    if date_to and d > date_to:
+                        continue
+                    entries.append(e)
                 except Exception:
                     continue
-        entries.sort(key=lambda e: e.get("timestamp", ""))
-        return {"ticker": ticker, "entries": entries[-limit:]}
+        # Sort by date asc; default endpoint returns the most recent slice
+        entries.sort(key=lambda e: (e.get("date") or e.get("timestamp") or ""))
+        return {
+            "entries": entries[-limit:],
+            "total_in_range": len(entries),
+            "limit": limit,
+            "date_from": date_from,
+            "date_to": date_to,
+        }
+    except Exception as e:
+        return {"entries": [], "error": str(e)}
+
+
+@app.get("/api/decision-log/{ticker}")
+async def decision_log_api(ticker: str, limit: int = 20, date_from: str = "", date_to: str = ""):
+    """Per-ticker audit trail for the Audit Trail browser.
+
+    Query params (all optional):
+      limit: max entries (default 20). Bumps to 10000 when date_from is set.
+      date_from / date_to: ISO date 'YYYY-MM-DD' inclusive bounds.
+    Reads data/decision_log.jsonl (newline-delimited JSON).
+    """
+    import json
+    from pathlib import Path
+    ticker = ticker.upper().strip()
+    log_path = Path("data/decision_log.jsonl")
+    if not log_path.exists():
+        return {"ticker": ticker, "entries": [], "limit": limit, "date_from": date_from, "date_to": date_to}
+    if (date_from or date_to) and limit == 20:
+        limit = 10000
+    try:
+        entries = []
+        with open(log_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                    if str(e.get("ticker", "")).upper() != ticker:
+                        continue
+                    d = (e.get("date") or "")[:10]
+                    if date_from and d < date_from:
+                        continue
+                    if date_to and d > date_to:
+                        continue
+                    entries.append(e)
+                except Exception:
+                    continue
+        entries.sort(key=lambda e: (e.get("date") or e.get("timestamp") or ""))
+        return {
+            "ticker": ticker,
+            "entries": entries[-limit:],
+            "total_in_range": len(entries),
+            "limit": limit,
+            "date_from": date_from,
+            "date_to": date_to,
+        }
     except Exception as e:
         return {"ticker": ticker, "entries": [], "error": str(e)}
 

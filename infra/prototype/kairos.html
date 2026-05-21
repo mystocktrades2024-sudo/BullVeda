@@ -49462,6 +49462,28 @@ const MarketsV2 = (function () {
         <span class="at-hint">reads <code>data/decision_log.jsonl</code></span>
       </div>
 
+      <!-- Date range filter (applies to BOTH live feed + per-ticker lookup) -->
+      <div class="at-daterange">
+        <span class="at-dr-lbl">DATE RANGE</span>
+        <label class="at-dr-field">From <input type="date" id="atDateFrom" class="at-dr-input"></label>
+        <label class="at-dr-field">To <input type="date" id="atDateTo" class="at-dr-input"></label>
+        <button class="at-btn ghost" onclick="window._setAuditDateRange('1m')">1m</button>
+        <button class="at-btn ghost" onclick="window._setAuditDateRange('3m')">3m</button>
+        <button class="at-btn ghost" onclick="window._setAuditDateRange('6m')">6m</button>
+        <button class="at-btn ghost at-dr-1y" onclick="window._setAuditDateRange('1y')">1y</button>
+        <button class="at-btn ghost" onclick="window._setAuditDateRange('all')">All</button>
+        <button class="at-btn" onclick="window._applyAuditDateRange()">Apply</button>
+        <span class="at-hint" id="atDateRangeStat" style="margin-left:8px"></span>
+      </div>
+      <style id="at-dr-css">
+        .at-daterange{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;padding:8px 12px;background:var(--bg-2);border:1px solid var(--line);border-radius:3px}
+        .at-daterange .at-dr-lbl{font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:.12em;text-transform:uppercase;margin-right:4px}
+        .at-daterange .at-dr-field{display:inline-flex;align-items:center;gap:5px;font:600 10.5px var(--mono);color:var(--ink-2)}
+        .at-daterange .at-dr-input{background:var(--bg-3);border:1px solid var(--line);color:var(--ink-1);padding:5px 8px;font:600 11px var(--mono);border-radius:2px;letter-spacing:.02em;color-scheme:dark}
+        .at-daterange .at-dr-input:focus{outline:0;border-color:var(--copper)}
+        .at-daterange .at-dr-1y{border-color:var(--copper);color:var(--copper)}
+      </style>
+
       <!-- SYSTEM-WIDE LIVE FEED (top section) -->
       <div class="at-feed">
         <div class="at-feed-h"><span>▦ System Feed · last 20 decisions across ALL tickers</span><span class="live">LIVE</span></div>
@@ -49489,7 +49511,70 @@ const MarketsV2 = (function () {
   // ════════════════════════════════════════════════════════════════════
   if (typeof window !== 'undefined' && !window._auditTrailWired) {
     window._auditTrailWired = true;
-    window._auditState = { entries: [], ticker: null, filter: { verdict: null, setup: null, days: null, reason: null }, liveTail: false, pinned: new Set() };
+    window._auditState = {
+      entries: [], ticker: null, filter: { verdict: null, setup: null, days: null, reason: null },
+      liveTail: false, pinned: new Set(),
+      // 2026-05-21 · default to last 1 year
+      dateFrom: (() => { const d = new Date(); d.setFullYear(d.getFullYear() - 1); return d.toISOString().slice(0, 10); })(),
+      dateTo:   new Date().toISOString().slice(0, 10),
+    };
+
+    // ── Date-range helpers — wire date inputs + presets + apply ────────
+    // Sync state to inputs on mount, then user can change inputs / click
+    // presets / click Apply to refresh both live feed AND any loaded ticker.
+    window._syncAuditDateInputs = function() {
+      const f = document.getElementById('atDateFrom');
+      const t = document.getElementById('atDateTo');
+      if (f) f.value = window._auditState.dateFrom || '';
+      if (t) t.value = window._auditState.dateTo || '';
+    };
+    window._setAuditDateRange = function(preset) {
+      const today = new Date();
+      const to = today.toISOString().slice(0, 10);
+      let from = '';
+      if (preset === '1m') { const d = new Date(); d.setMonth(d.getMonth() - 1); from = d.toISOString().slice(0, 10); }
+      else if (preset === '3m') { const d = new Date(); d.setMonth(d.getMonth() - 3); from = d.toISOString().slice(0, 10); }
+      else if (preset === '6m') { const d = new Date(); d.setMonth(d.getMonth() - 6); from = d.toISOString().slice(0, 10); }
+      else if (preset === '1y') { const d = new Date(); d.setFullYear(d.getFullYear() - 1); from = d.toISOString().slice(0, 10); }
+      else if (preset === 'all') { from = ''; }
+      window._auditState.dateFrom = from;
+      window._auditState.dateTo = preset === 'all' ? '' : to;
+      window._syncAuditDateInputs();
+      window._applyAuditDateRange();
+    };
+    window._applyAuditDateRange = function() {
+      const f = document.getElementById('atDateFrom');
+      const t = document.getElementById('atDateTo');
+      window._auditState.dateFrom = (f && f.value) || '';
+      window._auditState.dateTo   = (t && t.value) || '';
+      // Refresh live feed + any per-ticker view
+      if (window._loadAuditFeed) window._loadAuditFeed();
+      if (window._auditState.ticker) window._renderAuditTicker(window._auditState.ticker);
+    };
+    window._auditDateQS = function() {
+      const f = window._auditState.dateFrom || '';
+      const t = window._auditState.dateTo || '';
+      const parts = [];
+      if (f) parts.push('date_from=' + f);
+      if (t) parts.push('date_to=' + t);
+      return parts.length ? '&' + parts.join('&') : '';
+    };
+    window._auditDateRangeStatus = function(total, returned) {
+      const el = document.getElementById('atDateRangeStat');
+      if (!el) return;
+      const f = window._auditState.dateFrom || 'beginning';
+      const t = window._auditState.dateTo || 'today';
+      el.textContent = `${returned} of ${total} entries · ${f} → ${t}`;
+    };
+    // Wire inputs on first DOM mount (they're injected by renderAuditTrail)
+    setTimeout(() => {
+      window._syncAuditDateInputs();
+      // Auto-apply on change so users don't always need to click Apply
+      const f = document.getElementById('atDateFrom');
+      const t = document.getElementById('atDateTo');
+      if (f) f.addEventListener('change', () => window._applyAuditDateRange());
+      if (t) t.addEventListener('change', () => window._applyAuditDateRange());
+    }, 80);
 
     // ── Helpers ────────────────────────────────────────────────────────
     const _norm = (s) => (s || '').toString().toUpperCase().trim();
@@ -49527,8 +49612,13 @@ const MarketsV2 = (function () {
       const feed = document.getElementById('atLiveFeed');
       if (!feed) return;
       try {
-        const r = await fetch('/api/decision-log?limit=20', { credentials: 'same-origin' });
+        // Larger limit when date range is set so the feed reflects the window
+        const dateQS = (window._auditDateQS && window._auditDateQS()) || '';
+        const lim = dateQS ? 50 : 20;
+        const r = await fetch('/api/decision-log?limit=' + lim + dateQS, { credentials: 'same-origin' });
         const d = r.ok ? await r.json() : { entries: [] };
+        // Surface range stats in the toolbar
+        if (window._auditDateRangeStatus) window._auditDateRangeStatus(d.total_in_range || (d.entries || []).length, (d.entries || []).length);
         const entries = (d.entries || []).slice().reverse();
         if (!entries.length) {
           feed.innerHTML = '<div class="at-empty" style="padding:24px">No decisions in log yet.</div>';
@@ -49789,11 +49879,14 @@ const MarketsV2 = (function () {
       const filterBar = document.getElementById('atFilterBar');
       if (filterBar) filterBar.innerHTML = '';
       try {
-        const r = await fetch('/api/decision-log/' + tk, { credentials: 'same-origin' });
+        const dateQS = (window._auditDateQS && window._auditDateQS()) || '';
+        const r = await fetch('/api/decision-log/' + tk + (dateQS ? '?' + dateQS.slice(1) : ''), { credentials: 'same-origin' });
         const d = r.ok ? await r.json() : { entries: [] };
         const entries = d.entries || [];
         if (entries.length === 0) {
-          out.innerHTML = '<div class="at-empty">No audit entries for <b style="color:var(--copper)">' + tk + '</b><br><span style="font-size:11px;color:var(--ink-3);font-weight:500;margin-top:8px;display:block">This ticker may not have triggered a system decision yet.</span></div>';
+          const f = window._auditState.dateFrom || 'beginning';
+          const t = window._auditState.dateTo || 'today';
+          out.innerHTML = '<div class="at-empty">No audit entries for <b style="color:var(--copper)">' + tk + '</b> in date range ' + f + ' → ' + t + '<br><span style="font-size:11px;color:var(--ink-3);font-weight:500;margin-top:8px;display:block">Try widening the date range or this ticker may not have triggered a system decision yet.</span></div>';
           return;
         }
         window._auditState.entries = entries;
@@ -49881,7 +49974,8 @@ const MarketsV2 = (function () {
       b.innerHTML = '<h4>' + tkB + ' · loading…</h4>';
       const _miniSummary = async (tk, el) => {
         try {
-          const r = await fetch('/api/decision-log/' + tk);
+          const dateQS = (window._auditDateQS && window._auditDateQS()) || '';
+          const r = await fetch('/api/decision-log/' + tk + (dateQS ? '?' + dateQS.slice(1) : ''));
           const d = r.ok ? await r.json() : { entries: [] };
           const es = d.entries || [];
           if (!es.length) { el.innerHTML = '<h4>' + tk + '</h4><div style="color:var(--ink-3);font:500 11px var(--mono);padding:8px 0">No decisions found.</div>'; return; }
