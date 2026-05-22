@@ -193,6 +193,23 @@ body.light .qs-tier.t3 { color: var(--ink-2); }
   transition: color 120ms, border-color 120ms, background 120ms;
 }
 .theme-toggle:hover { color: var(--ink); border-color: var(--ink-2); background: var(--bg-2); }
+/* 2026-05-21 · user badge + sign-out · top-right of header */
+.user-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; margin-left: 8px;
+  background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 12px;
+  font: 700 11px var(--mono); color: var(--ink-1); letter-spacing: 0.04em;
+}
+.user-badge-icon { color: var(--gn); font-size: 10px; }
+.user-badge-name { letter-spacing: 0.04em; }
+.user-signout {
+  margin-left: 6px; padding: 3px 10px;
+  background: transparent; color: var(--ink-2); border: 1px solid var(--line-2);
+  border-radius: 3px; cursor: pointer;
+  font: 800 9.5px var(--mono); letter-spacing: 0.10em;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.user-signout:hover { color: var(--rd); border-color: var(--rd); background: rgba(248,113,113,0.10); }
 
 /* ── Compliance disclaimer banner ─────────────────────────────────── */
 .compliance-bar {
@@ -8219,6 +8236,12 @@ body.on-detail-tab .qdchk-trigger-btn { display: inline-flex; }
     <span>DD <b id="bb-dd">—</b></span>
     <span id="bb-clock">—</span>
     <button class="theme-toggle" id="theme-toggle" onclick="window._toggleTheme()" title="Toggle light/dark mode">☀</button>
+    <!-- 2026-05-21 · user badge + sign-out (HTTP Basic Auth) -->
+    <span id="user-badge" class="user-badge" title="Loading user info..." style="display:none">
+      <span class="user-badge-icon">●</span>
+      <span class="user-badge-name" id="user-badge-name">—</span>
+    </span>
+    <button class="user-signout" id="user-signout" onclick="window._signOut()" title="Sign out" style="display:none">SIGN OUT</button>
   </div>
 </div>
 
@@ -52974,6 +52997,61 @@ window._toggleTheme = function() {
     }
   } catch(_) {}
 })();
+
+// ══════════════════════════════════════════════════════════════════════
+// 2026-05-21 · User badge + sign-out (HTTP Basic Auth)
+// ──────────────────────────────────────────────────────────────────────
+// Fetches /api/me on load to populate the top-right user badge with the
+// current authenticated username + display_name. The sign-out button
+// invalidates the session by hitting /api/logout (which returns 401 +
+// Clear-Site-Data so the browser drops cached Basic Auth credentials)
+// then redirects to the dashboard root which re-prompts for credentials.
+// ══════════════════════════════════════════════════════════════════════
+(function() {
+  fetch('/api/me', { credentials: 'same-origin' })
+    .then(r => r.ok ? r.json() : null)
+    .then(me => {
+      if (!me || !me.username) return;
+      const badge = document.getElementById('user-badge');
+      const name  = document.getElementById('user-badge-name');
+      const out   = document.getElementById('user-signout');
+      if (name) {
+        const lbl = me.display_name || me.username;
+        const role = me.role ? ' · ' + me.role : '';
+        name.textContent = lbl + role;
+        if (badge) {
+          badge.title = `Signed in as ${me.username} (${me.role || '—'})${me.is_owner ? ' · owner' : ''}${me.is_admin ? ' · admin' : ''}`;
+          badge.style.display = 'inline-flex';
+        }
+      }
+      if (out) out.style.display = 'inline-flex';
+    })
+    .catch(() => { /* not authenticated or endpoint down — leave hidden */ });
+})();
+
+window._signOut = async function() {
+  if (!confirm('Sign out of the dashboard? You will need to re-enter your password.')) return;
+  // 1. Hit the server-side logout (returns 401 + Clear-Site-Data).
+  //    Use a bogus Authorization header so the browser doesn't auto-replay
+  //    the cached Basic Auth that's currently active.
+  try {
+    await fetch('/api/logout', {
+      credentials: 'same-origin',
+      headers: { 'Authorization': 'Basic ' + btoa('logout:logout') },
+    });
+  } catch (_) { /* best effort */ }
+  // 2. Wipe any local UI state we control
+  try {
+    localStorage.removeItem('kairos.watchlist.manual.v1');
+    sessionStorage.clear();
+  } catch (_) {}
+  // 3. Force the browser to forget Basic Auth by navigating to a URL with
+  //    bogus credentials. Chrome/Firefox/Safari all honor this in 2025.
+  const here = window.location.origin;
+  // Navigate with invalid creds, then back to root. Browser will re-prompt.
+  window.location.replace(here.replace(/^https?:\/\//, 'https://logout:logout@') + '/?_signedout=' + Date.now());
+};
+
 </script>
 
 </main>

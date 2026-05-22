@@ -39,10 +39,12 @@ DEFAULT_TIMEOUT = 20  # seconds per HTTP call
 
 # All-In-One plan limits: 100,000 calls/day, 1,000 calls/min.
 # Plus an undocumented per-second burst cap that triggers 429s when many threads
-# fire concurrently. Keep margins: 14/sec, 800/min, 90,000/day.
-_RATE_PER_SEC = 14
-_RATE_PER_MIN = 800
-_RATE_PER_DAY = 90_000
+# fire concurrently. Margins: 17/sec, 950/min, 95,000/day (bumped 2026-05-21
+# from 14/800/90K to give the 16-worker pool more headroom — was bottlenecked
+# at 14/sec which negated worker count increases).
+_RATE_PER_SEC = 17
+_RATE_PER_MIN = 950
+_RATE_PER_DAY = 95_000
 
 BASE_DIR = Path(__file__).resolve().parent
 _CACHE_DIR = BASE_DIR / "cache" / "eodhd"

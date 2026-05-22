@@ -1553,6 +1553,26 @@ async def _home_redirect(auth: HTTPBasicCredentials = Depends(_check_auth)):
 # Lets V2 dashboard + elite-detail apply the right tab visibility profile
 # automatically based on the server-side user record, instead of falling back
 # to the localStorage default ('trader') which hides quant-only tabs like Models.
+@app.get("/api/logout")
+async def logout(request: Request):
+    """Force the browser to drop cached HTTP Basic Auth credentials.
+
+    2026-05-21 · paired with the SIGN OUT button in kairos.html. Returns
+    401 + Clear-Site-Data + WWW-Authenticate so the browser invalidates
+    cached creds and prompts on next request. Always-public — no auth gate
+    (you can't log out if you're already locked out).
+    """
+    return Response(
+        status_code=401,
+        headers={
+            "WWW-Authenticate": 'Basic realm="SwingTrade · re-authenticate"',
+            "Clear-Site-Data": '"cookies", "storage", "cache"',
+            "Cache-Control": "no-store",
+        },
+        content="Signed out. Refresh the page to sign back in.",
+    )
+
+
 @app.get("/api/me")
 async def whoami(auth: HTTPBasicCredentials = Depends(_check_auth)):
     if isinstance(auth, Response):
