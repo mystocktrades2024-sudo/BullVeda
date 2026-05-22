@@ -47921,11 +47921,14 @@ body.light{--qcm-bg-0:#f5f4ed;--qcm-bg-1:#fff;--qcm-bg-2:#f0eee5;--qcm-bg-3:#e5e
 //   is truthy (set after /api/me resolves with is_admin=true).
 // ══════════════════════════════════════════════════════════════════════
 const QuantUsers = (function () {
-  let _users = []; let _roles = []; let _wsPanel = null;
+  let _users = []; let _roles = []; let _registry = null; let _wsPanel = null;
   let _editing = null;       // username being edited (or '__new__' for create)
   let _busy = false;
   let _msg = null;           // { kind: 'ok'|'err', text: '…' }
   let _search = '';
+  // Per-form transient state for permission overrides (keyed: 'tabs', 'sub_tabs')
+  let _formOverrides = { tabs: null, sub_tabs: null };  // null = inherit, [] = empty-override-no-access, [..] = custom
+  let _permOpen = { tabs: false, sub_tabs: false };
 
   function _ensureStyles() {
     if (document.getElementById('qum-styles')) return;
@@ -47992,15 +47995,45 @@ const QuantUsers = (function () {
 .qum-badge.am{background:rgba(251,191,36,.14);color:#fbbf24;border-color:#92400e}
 .qum-act-grp{display:flex;gap:4px;justify-content:flex-end}
 .qum-edit-row{background:var(--paper-2) !important;border-top:2px solid var(--copper) !important;border-bottom:2px solid var(--copper) !important}
-.qum-form-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 18px 8px}
-.qum-form-grid label{font:700 9.5px var(--mono);color:var(--paper-3);letter-spacing:.16em;text-transform:uppercase;display:flex;flex-direction:column;gap:4px}
-.qum-form-grid label span{color:var(--ink-1);font-weight:800}
-.qum-form-grid input,.qum-form-grid select{font:600 12px var(--mono);background:var(--paper-1);color:var(--ink);border:1px solid var(--rule);padding:7px 10px;border-radius:2px}
-.qum-form-grid input:focus,.qum-form-grid select:focus{outline:none;border-color:var(--copper);box-shadow:0 0 0 2px rgba(217,119,87,.18)}
+.qum-form-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:16px 20px 10px}
+.qum-form-grid label{font:800 10.5px var(--mono);color:var(--copper);letter-spacing:.18em;text-transform:uppercase;display:flex;flex-direction:column;gap:6px}
+.qum-form-grid label .field-hint{font:600 9.5px var(--mono);color:var(--ink-2);letter-spacing:.04em;text-transform:none;margin-top:-2px}
+.qum-form-grid input,.qum-form-grid select{font:700 13px var(--mono);background:var(--paper-1);color:var(--ink);border:1px solid var(--paper-3);padding:9px 12px;border-radius:3px;width:100%;box-sizing:border-box}
+.qum-form-grid input::placeholder{color:var(--paper-3);font-weight:500}
+.qum-form-grid input:focus,.qum-form-grid select:focus{outline:none;border-color:var(--copper);box-shadow:0 0 0 3px rgba(217,119,87,.22);background:var(--paper-2)}
+.qum-form-grid input:disabled{opacity:.7;background:var(--paper-2);color:var(--ink-1);cursor:not-allowed}
 .qum-form-grid label.full{grid-column:1 / -1}
 .qum-form-grid label.span2{grid-column:span 2}
-.qum-form-grid label.cbox{flex-direction:row;align-items:center;gap:8px;text-transform:none;letter-spacing:.04em;color:var(--ink-1);font:600 11px var(--mono)}
-.qum-form-actions{padding:8px 18px 14px;display:flex;gap:8px;justify-content:flex-end;border-bottom:1px solid var(--rule)}
+.qum-form-grid label.cbox{flex-direction:row;align-items:center;gap:10px;text-transform:none;letter-spacing:.04em;color:var(--ink);font:700 12px var(--mono)}
+.qum-form-grid label.cbox input[type="checkbox"]{width:18px;height:18px;accent-color:var(--copper);cursor:pointer}
+.qum-form-actions{padding:10px 20px 16px;display:flex;gap:10px;justify-content:flex-end;border-bottom:1px solid var(--rule)}
+
+/* Tab/sub-tab picker */
+.qum-perm-section{padding:14px 20px;border-top:1px solid var(--rule);background:var(--paper-1)}
+.qum-perm-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;cursor:pointer;user-select:none}
+.qum-perm-hdr h4{font:800 11px var(--mono);color:var(--copper);letter-spacing:.18em;text-transform:uppercase;margin:0;display:flex;align-items:center;gap:8px}
+.qum-perm-hdr .arr{font-size:9px;color:var(--ink-2);transition:transform 200ms}
+.qum-perm-hdr.open .arr{transform:rotate(90deg)}
+.qum-perm-mode{display:flex;gap:6px;margin-bottom:10px;font:600 10px var(--mono)}
+.qum-perm-mode label{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:var(--paper-2);border:1px solid var(--rule);border-radius:2px;cursor:pointer;letter-spacing:.04em;color:var(--ink-1)}
+.qum-perm-mode label.active{background:linear-gradient(135deg,var(--copper),#b85a3c);color:#fff;border-color:var(--copper);font-weight:800}
+.qum-perm-mode label input{margin:0;accent-color:var(--copper)}
+.qum-perm-mode .note{margin-left:8px;font:500 10px var(--mono);color:var(--ink-2);letter-spacing:.02em}
+.qum-perm-grid{display:none}
+.qum-perm-grid.open{display:block}
+.qum-perm-group{margin-bottom:14px}
+.qum-perm-group .glbl{font:800 9.5px var(--mono);color:var(--ink-1);letter-spacing:.18em;text-transform:uppercase;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;align-items:baseline}
+.qum-perm-group .glbl .ct{font:600 9px var(--mono);color:var(--ink-2);letter-spacing:.04em}
+.qum-perm-items{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px}
+.qum-perm-item{display:flex;align-items:center;gap:7px;padding:6px 10px;background:var(--paper-2);border:1px solid var(--rule);border-radius:2px;cursor:pointer;font:600 10.5px var(--mono);color:var(--ink-1);transition:all 120ms;user-select:none}
+.qum-perm-item:hover{border-color:var(--copper);background:var(--paper-3)}
+.qum-perm-item.checked{background:rgba(217,119,87,.15);border-color:var(--copper);color:var(--ink);box-shadow:inset 0 0 8px rgba(217,119,87,.1)}
+.qum-perm-item input{margin:0;accent-color:var(--copper);width:14px;height:14px;cursor:pointer}
+.qum-perm-item .lbl{flex:1;font-size:10.5px;line-height:1.25;white-space:normal;word-break:break-word}
+.qum-perm-item .id{font:500 8.5px var(--mono);color:var(--ink-2);letter-spacing:.02em;margin-left:auto}
+.qum-perm-actions{display:flex;gap:6px;margin-top:8px}
+.qum-perm-summary{font:600 10px var(--mono);color:var(--ink-2);letter-spacing:.04em;padding:6px 10px;background:var(--paper-2);border-left:3px solid var(--copper);border-radius:2px;margin-bottom:8px}
+.qum-perm-summary b{color:var(--copper)}
 .qum-empty{padding:30px;text-align:center;font:600 12px var(--mono);color:var(--paper-3);letter-spacing:.06em}
 .qum-empty .accent{color:var(--copper)}
 .qum-pwd-row{display:flex;align-items:center;gap:6px}
@@ -48032,17 +48065,36 @@ const QuantUsers = (function () {
   async function _refresh() {
     try {
       _busy = true; _repaint();
-      const [u, r] = await Promise.all([
+      const [u, r, reg] = await Promise.all([
         _fetch('/api/users'),
-        _fetch('/api/roles')
+        _fetch('/api/roles'),
+        _registry ? Promise.resolve(_registry) : _fetch('/api/capability-registry').catch(() => null)
       ]);
       _users = u.users || [];
       _roles = r.roles || [];
+      if (reg) _registry = reg;
     } catch (e) {
       _msg = { kind: 'err', text: `Failed to load: ${e.message}` };
     } finally {
       _busy = false; _repaint();
     }
+  }
+
+  // Get list of {id, label, group, group_label} for tabs / sub_tabs from the registry
+  function _registryItems(kind) {
+    if (!_registry) return [];
+    const map = _registry[kind] || {};
+    const groups = _registry.groups || [];
+    const groupLabel = id => (groups.find(g => g.id === id) || {}).label || id;
+    return Object.entries(map).map(([id, info]) => ({
+      id, label: info.label || id, group: info.group || 'other',
+      group_label: groupLabel(info.group || 'other')
+    }));
+  }
+
+  function _rolePermsFor(roleName) {
+    const role = (_roles || []).find(r => (r.id || r.role_id || r.name) === roleName);
+    return (role && role.permissions) || { tabs: [], sub_tabs: [], actions: [] };
   }
 
   function _renderUserRow(u) {
@@ -48075,6 +48127,78 @@ const QuantUsers = (function () {
     </tr>`;
   }
 
+  // Render the override picker for tabs / sub_tabs.
+  // kind = 'tabs' | 'sub_tabs'.
+  // overrideOrNull = null (inherit) | array (custom)
+  // roleDefault    = array of ids from the role's permissions
+  function _renderPermPicker(kind, overrideOrNull, roleDefault) {
+    const items = _registryItems(kind);
+    if (!items.length) {
+      return `<div class="qum-perm-section"><div class="qum-perm-summary">Registry not loaded — cannot show ${kind} picker.</div></div>`;
+    }
+    const isInherit = overrideOrNull == null;
+    const effective = isInherit ? roleDefault : overrideOrNull;
+    const checkedSet = new Set(effective || []);
+    const isWildcard = checkedSet.has('*');
+    const title = kind === 'tabs' ? '📊 Tabs Allowed' : '🔍 Sub-Tabs Allowed (per-ticker drill-down)';
+    const sectionId = `qum-perm-${kind}`;
+    const open = _permOpen[kind];
+    // Group items by their group_label
+    const byGroup = {};
+    for (const it of items) {
+      const g = it.group_label;
+      if (!byGroup[g]) byGroup[g] = [];
+      byGroup[g].push(it);
+    }
+    const totalCount = items.length;
+    const checkedCount = isWildcard ? totalCount : Array.from(checkedSet).filter(id => items.find(i => i.id === id)).length;
+    const summary = isInherit
+      ? `<div class="qum-perm-summary">Inheriting from role — <b>${roleDefault.length}${roleDefault.includes('*') ? ' (★ wildcard = all)' : ''}</b> ${kind.replace('_',' ')} from role defaults. Switch to <b>Custom</b> to override.</div>`
+      : (isWildcard
+          ? `<div class="qum-perm-summary">Custom override · <b>★ wildcard</b> — user sees ALL ${totalCount} ${kind.replace('_',' ')}.</div>`
+          : `<div class="qum-perm-summary">Custom override · <b>${checkedCount} of ${totalCount}</b> ${kind.replace('_',' ')} selected.</div>`);
+
+    let groupsHtml = '';
+    for (const [gLabel, list] of Object.entries(byGroup)) {
+      const gChecked = list.filter(it => checkedSet.has(it.id) || isWildcard).length;
+      groupsHtml += `<div class="qum-perm-group">
+        <div class="glbl"><span>${_escapeHtml(gLabel)}</span><span class="ct">${gChecked} / ${list.length}</span></div>
+        <div class="qum-perm-items">${list.map(it => {
+          const checked = isWildcard || checkedSet.has(it.id);
+          const inRole = (roleDefault || []).includes(it.id) || (roleDefault || []).includes('*');
+          const hint = inRole ? '' : '<span class="id" title="Not in role defaults">+ custom</span>';
+          return `<label class="qum-perm-item ${checked ? 'checked' : ''}" data-id="${_escapeHtml(it.id)}" data-kind="${kind}">
+            <input type="checkbox" ${checked ? 'checked' : ''} ${isInherit ? 'disabled' : ''} data-perm-toggle="${kind}" data-id="${_escapeHtml(it.id)}">
+            <span class="lbl">${_escapeHtml(it.label)}</span>
+            ${hint}
+          </label>`;
+        }).join('')}</div>
+      </div>`;
+    }
+
+    return `<div class="qum-perm-section" id="${sectionId}">
+      <div class="qum-perm-hdr ${open ? 'open' : ''}" data-toggle-perm="${kind}">
+        <h4>${title} <span class="ct" style="color:var(--ink-2);font-weight:600;letter-spacing:.04em">${isInherit ? '· inherit' : '· custom (' + checkedCount + ')'}</span></h4>
+        <span class="arr">▶</span>
+      </div>
+      <div class="qum-perm-mode" style="${open ? '' : 'display:none'}">
+        <label class="${isInherit ? 'active' : ''}"><input type="radio" name="${sectionId}-mode" value="inherit" ${isInherit ? 'checked' : ''} data-perm-mode="${kind}"> Inherit from role</label>
+        <label class="${!isInherit ? 'active' : ''}"><input type="radio" name="${sectionId}-mode" value="custom" ${!isInherit ? 'checked' : ''} data-perm-mode="${kind}"> Custom override</label>
+        <span class="note">${isInherit ? 'Uses the role\'s ' + kind.replace('_',' ') + ' list.' : 'Overrides the role — this user sees only the checked items.'}</span>
+      </div>
+      <div class="qum-perm-grid ${open ? 'open' : ''}">
+        ${summary}
+        ${groupsHtml}
+        ${!isInherit ? `<div class="qum-perm-actions">
+          <button type="button" class="qum-btn ghost" data-perm-bulk="all" data-kind="${kind}">Select All</button>
+          <button type="button" class="qum-btn ghost" data-perm-bulk="none" data-kind="${kind}">Select None</button>
+          <button type="button" class="qum-btn ghost" data-perm-bulk="role" data-kind="${kind}">Reset to Role Defaults</button>
+          <button type="button" class="qum-btn ghost" data-perm-bulk="wildcard" data-kind="${kind}">Grant ★ Wildcard</button>
+        </div>` : ''}
+      </div>
+    </div>`;
+  }
+
   function _renderEditForm(u, isNew) {
     const username = u.username || '';
     const display = u.display_name || '';
@@ -48089,20 +48213,53 @@ const QuantUsers = (function () {
     const tabProfiles = ['beginner','trader','quant','all','custom'].map(p =>
       `<option value="${p}" ${tabProfile === p ? 'selected' : ''}>${p.toUpperCase()}</option>`
     ).join('');
+    // Determine the role's defaults for the override picker
+    const rolePerms = _rolePermsFor(role);
+    // Resolve current override state — if user has a non-empty tabs_override use it, else null (inherit)
+    const tabsOv = _formOverrides.tabs !== undefined && _formOverrides.tabs !== null
+      ? _formOverrides.tabs
+      : (Array.isArray(u.tabs_override) && u.tabs_override.length > 0 ? u.tabs_override.slice() : null);
+    const subOv = _formOverrides.sub_tabs !== undefined && _formOverrides.sub_tabs !== null
+      ? _formOverrides.sub_tabs
+      : (Array.isArray(u.sub_tabs_override) && u.sub_tabs_override.length > 0 ? u.sub_tabs_override.slice() : null);
+    // Sync local form state ONCE per render
+    if (_formOverrides.tabs === undefined) _formOverrides.tabs = tabsOv;
+    if (_formOverrides.sub_tabs === undefined) _formOverrides.sub_tabs = subOv;
+
     return `<tr class="qum-edit-row"><td colspan="7" style="padding:0">
       <div class="qum-form-grid">
-        <label>Username <span>${isNew ? '<input id="qum-f-username" type="text" placeholder="lowercase, 2-31 chars" pattern="^[a-z][a-z0-9_-]+$" required>' : `<input id="qum-f-username" type="text" value="${_escapeHtml(username)}" disabled>`}</span></label>
-        <label>Display Name <span><input id="qum-f-display" type="text" value="${_escapeHtml(display)}" placeholder="Optional"></span></label>
-        <label class="span2">Email <span><input id="qum-f-email" type="email" value="${_escapeHtml(email)}" placeholder="user@example.com"></span></label>
-        <label>Role <span><select id="qum-f-role">${roleOptions}</select></span></label>
-        <label>Tab Profile <span><select id="qum-f-tabprofile">${tabProfiles}</select></span></label>
-        ${isNew ? `<label class="span2">Initial Password <span><input id="qum-f-password" type="text" placeholder="min 8 chars" minlength="8" required></span></label>` : ''}
-        <label class="cbox"><input id="qum-f-disabled" type="checkbox" ${disabled ? 'checked' : ''}> Disabled (block login)</label>
+        <label>Username
+          <span class="field-hint">${isNew ? 'lowercase letters, digits, _, - · 2-31 chars · starts with a letter' : 'cannot be changed after creation'}</span>
+          ${isNew ? '<input id="qum-f-username" type="text" placeholder="e.g. john_doe" pattern="^[a-z][a-z0-9_-]+$" required autofocus>' : `<input id="qum-f-username" type="text" value="${_escapeHtml(username)}" disabled>`}
+        </label>
+        <label>Display Name
+          <span class="field-hint">Shown in header badge · optional</span>
+          <input id="qum-f-display" type="text" value="${_escapeHtml(display)}" placeholder="Full name (optional)">
+        </label>
+        <label class="span2">Email
+          <span class="field-hint">For password resets · optional</span>
+          <input id="qum-f-email" type="email" value="${_escapeHtml(email)}" placeholder="user@example.com">
+        </label>
+        <label>Role
+          <span class="field-hint">Baseline tab + action permissions</span>
+          <select id="qum-f-role">${roleOptions}</select>
+        </label>
+        <label>Tab Profile
+          <span class="field-hint">UI density preset (independent of role)</span>
+          <select id="qum-f-tabprofile">${tabProfiles}</select>
+        </label>
+        ${isNew ? `<label class="span2">Initial Password
+          <span class="field-hint">Minimum 8 characters · user can change after first login</span>
+          <input id="qum-f-password" type="text" placeholder="At least 8 characters" minlength="8" required>
+        </label>` : ''}
+        <label class="cbox"><input id="qum-f-disabled" type="checkbox" ${disabled ? 'checked' : ''}> Disabled · block login</label>
         ${isNew ? `<label class="cbox"><input id="qum-f-mustchange" type="checkbox" ${mustChange ? 'checked' : ''}> Require password change on first login</label>` : ''}
       </div>
+      ${_renderPermPicker('tabs', tabsOv, rolePerms.tabs || [])}
+      ${_renderPermPicker('sub_tabs', subOv, rolePerms.sub_tabs || [])}
       <div class="qum-form-actions">
         <button class="qum-btn ghost" data-act="cancel">Cancel</button>
-        <button class="qum-btn primary" data-act="save">${isNew ? 'Create User' : 'Save Changes'}</button>
+        <button class="qum-btn primary" data-act="save">${isNew ? '+ Create User' : 'Save Changes'}</button>
       </div>
     </td></tr>`;
   }
@@ -48111,9 +48268,12 @@ const QuantUsers = (function () {
     const row = (_users || []).find(u => u.username === username);
     try {
       if (act === 'edit') {
-        _editing = username; _msg = null; _repaint(); return;
+        _editing = username; _msg = null;
+        _formOverrides = { tabs: undefined, sub_tabs: undefined };
+        _permOpen = { tabs: false, sub_tabs: false };
+        _repaint(); return;
       }
-      if (act === 'cancel') { _editing = null; _msg = null; _repaint(); return; }
+      if (act === 'cancel') { _editing = null; _msg = null; _formOverrides = { tabs: undefined, sub_tabs: undefined }; _repaint(); return; }
       if (act === 'save') {
         const isNew = _editing === '__new__';
         const root = _wsPanel;
@@ -48124,19 +48284,28 @@ const QuantUsers = (function () {
           role: f('role').value,
           tab_profile: f('tabprofile').value,
           disabled: f('disabled').checked,
+          // Per-user permission overrides: null = inherit, array = custom
+          tabs_override: _formOverrides.tabs == null ? [] : _formOverrides.tabs,
+          sub_tabs_override: _formOverrides.sub_tabs == null ? [] : _formOverrides.sub_tabs,
         };
         if (isNew) {
           payload.username = f('username').value.trim().toLowerCase();
           payload.password = f('password').value;
           payload.must_change_password = f('mustchange').checked;
           if (!payload.username || !payload.password) throw new Error('username + password are required');
-          await _fetch('/api/users', { method: 'POST', body: payload });
+          // Create user first (without overrides — endpoint doesn't accept them)
+          const { tabs_override, sub_tabs_override, ...createPayload } = payload;
+          await _fetch('/api/users', { method: 'POST', body: createPayload });
+          // Then patch with overrides if any were set
+          if (tabs_override.length > 0 || sub_tabs_override.length > 0) {
+            await _fetch(`/api/users/${encodeURIComponent(payload.username)}`, { method: 'PATCH', body: { tabs_override, sub_tabs_override } });
+          }
           _msg = { kind: 'ok', text: `Created user ${payload.username}` };
         } else {
           await _fetch(`/api/users/${encodeURIComponent(username)}`, { method: 'PATCH', body: payload });
           _msg = { kind: 'ok', text: `Updated ${username}` };
         }
-        _editing = null; await _refresh(); return;
+        _editing = null; _formOverrides = { tabs: undefined, sub_tabs: undefined }; await _refresh(); return;
       }
       if (act === 'delete') {
         if (!row) return;
@@ -48155,7 +48324,10 @@ const QuantUsers = (function () {
         _repaint(); return;
       }
       if (act === 'new') {
-        _editing = '__new__'; _msg = null; _repaint(); return;
+        _editing = '__new__'; _msg = null;
+        _formOverrides = { tabs: undefined, sub_tabs: undefined };
+        _permOpen = { tabs: false, sub_tabs: false };
+        _repaint(); return;
       }
     } catch (e) {
       _msg = { kind: 'err', text: e.message };
@@ -48254,12 +48426,76 @@ const QuantUsers = (function () {
         const tr = btn.closest('tr[data-username], tr.qum-edit-row');
         let username = tr && tr.dataset && tr.dataset.username;
         if (!username && tr && tr.classList.contains('qum-edit-row')) {
-          // edit-row attached to a parent row (for in-place edit)
           const prev = tr.previousElementSibling;
           username = prev && prev.dataset && prev.dataset.username;
         }
         btn.onclick = (e) => { e.stopPropagation(); _onAction(act, username); };
       }
+    });
+
+    // Permission picker — expand/collapse the section
+    _wsPanel.querySelectorAll('[data-toggle-perm]').forEach(el => {
+      el.onclick = (e) => {
+        e.stopPropagation();
+        const kind = el.dataset.togglePerm;
+        _permOpen[kind] = !_permOpen[kind];
+        _repaint();
+      };
+    });
+
+    // Mode radios: inherit ↔ custom
+    _wsPanel.querySelectorAll('[data-perm-mode]').forEach(r => {
+      r.onchange = () => {
+        const kind = r.dataset.permMode;
+        if (r.value === 'inherit') {
+          _formOverrides[kind] = null;
+        } else {
+          // Switching to custom — seed from current effective list
+          const u = _users.find(x => x.username === _editing) || {};
+          const rolePerms = _rolePermsFor((_wsPanel.querySelector('#qum-f-role') || {}).value || u.role || 'viewer');
+          const ov = (kind === 'tabs' ? u.tabs_override : u.sub_tabs_override);
+          const seed = (Array.isArray(ov) && ov.length > 0) ? ov.slice() : (rolePerms[kind] || []).slice();
+          _formOverrides[kind] = seed;
+        }
+        _repaint();
+      };
+    });
+
+    // Checkbox toggles in custom mode
+    _wsPanel.querySelectorAll('[data-perm-toggle]').forEach(cb => {
+      cb.onchange = (e) => {
+        e.stopPropagation();
+        const kind = cb.dataset.permToggle;
+        const id = cb.dataset.id;
+        let arr = _formOverrides[kind];
+        if (!Array.isArray(arr)) arr = [];
+        if (cb.checked) {
+          if (!arr.includes(id)) arr.push(id);
+        } else {
+          arr = arr.filter(x => x !== id);
+        }
+        _formOverrides[kind] = arr;
+        _repaint();
+      };
+    });
+
+    // Bulk actions
+    _wsPanel.querySelectorAll('[data-perm-bulk]').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const kind = btn.dataset.kind;
+        const action = btn.dataset.permBulk;
+        const items = _registryItems(kind);
+        if (action === 'all') _formOverrides[kind] = items.map(i => i.id);
+        else if (action === 'none') _formOverrides[kind] = [];
+        else if (action === 'wildcard') _formOverrides[kind] = ['*'];
+        else if (action === 'role') {
+          const u = _users.find(x => x.username === _editing) || {};
+          const rolePerms = _rolePermsFor((_wsPanel.querySelector('#qum-f-role') || {}).value || u.role || 'viewer');
+          _formOverrides[kind] = (rolePerms[kind] || []).slice();
+        }
+        _repaint();
+      };
     });
   }
 

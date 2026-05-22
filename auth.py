@@ -181,7 +181,8 @@ def update_user(username: str, **fields) -> dict:
         raise ValueError(f"user '{username}' not found")
     if username == OWNER and fields.get("disabled"):
         raise ValueError("owner account cannot be disabled")
-    allowed = {"display_name", "email", "role", "disabled", "must_change_password", "tab_profile"}
+    allowed = {"display_name", "email", "role", "disabled", "must_change_password",
+               "tab_profile", "tabs_override", "sub_tabs_override", "actions_override"}
     for k, v in fields.items():
         if k not in allowed:
             continue
@@ -189,6 +190,14 @@ def update_user(username: str, **fields) -> dict:
             raise ValueError(f"role '{v}' does not exist")
         if k == "tab_profile" and v not in VALID_TAB_PROFILES:
             raise ValueError(f"tab_profile must be one of {VALID_TAB_PROFILES}")
+        if k in ("tabs_override", "sub_tabs_override", "actions_override"):
+            # Empty list / None = inherit from role. Non-empty list = custom override.
+            if v is None or v == "" or v == []:
+                u.pop(k, None)
+                continue
+            if not isinstance(v, list):
+                raise ValueError(f"{k} must be a list of strings (or empty/null to inherit)")
+            v = [str(x).strip() for x in v if str(x).strip()]
         u[k] = v
     _save_users(data)
     return _public_user(u)
@@ -316,22 +325,30 @@ def user_has_permission(username: str, perm_type: str, perm: str) -> bool:
 
 
 def get_user_permissions(username: str) -> dict:
-    """Return tabs + sub_tabs + actions arrays for the user's role.
-    (CapStudio 2026-05-09 — added sub_tabs in returned dict.)"""
+    """Return tabs + sub_tabs + actions arrays for the user.
+
+    Merge order (per key): user override (if non-empty list) > role default.
+    A user with `tabs_override: ["scanner","portfolio"]` sees ONLY those two
+    tabs regardless of their role. A missing/empty override falls back to
+    the role's permissions.
+    (CapStudio 2026-05-09 added sub_tabs · 2026-05-22 added per-user overrides.)
+    """
     data = _load_users()
     u = data.get("users", {}).get(username)
     empty = {"tabs": [], "sub_tabs": [], "actions": []}
     if not u:
         return empty
     role = get_role(u.get("role") or "viewer")
-    if not role:
-        return empty
-    perms = role.get("permissions") or {}
-    # Ensure all three keys present in returned dict (clients may iterate).
+    role_perms = (role or {}).get("permissions") or {}
+    def _pick(key, override_key):
+        ov = u.get(override_key)
+        if isinstance(ov, list) and len(ov) > 0:
+            return list(ov)
+        return list(role_perms.get(key) or [])
     return {
-        "tabs":     perms.get("tabs")     or [],
-        "sub_tabs": perms.get("sub_tabs") or [],
-        "actions":  perms.get("actions")  or [],
+        "tabs":     _pick("tabs",     "tabs_override"),
+        "sub_tabs": _pick("sub_tabs", "sub_tabs_override"),
+        "actions":  _pick("actions",  "actions_override"),
     }
 
 
