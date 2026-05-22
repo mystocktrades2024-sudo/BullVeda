@@ -183,11 +183,22 @@ def update_user(username: str, **fields) -> dict:
         raise ValueError("owner account cannot be disabled")
     allowed = {"display_name", "email", "role", "disabled", "must_change_password",
                "tab_profile", "tabs_override", "sub_tabs_override", "actions_override"}
+    confirm_demote = bool(fields.pop("__confirm_owner_demote__", False))
     for k, v in fields.items():
         if k not in allowed:
             continue
-        if k == "role" and not get_role(v):
-            raise ValueError(f"role '{v}' does not exist")
+        if k == "role":
+            if not get_role(v):
+                raise ValueError(f"role '{v}' does not exist")
+            # Block silent demotion of the owner from admin — caller must pass
+            # __confirm_owner_demote__: true to acknowledge. Prevents accidental
+            # lockout if the UI ever ships a buggy role-select default again.
+            if username == OWNER and u.get("role") == "admin" and v != "admin" and not confirm_demote:
+                raise ValueError(
+                    "Refusing to demote the OWNER account from admin without an "
+                    "explicit __confirm_owner_demote__:true flag. This prevents "
+                    "accidental lockout."
+                )
         if k == "tab_profile" and v not in VALID_TAB_PROFILES:
             raise ValueError(f"tab_profile must be one of {VALID_TAB_PROFILES}")
         if k in ("tabs_override", "sub_tabs_override", "actions_override"):

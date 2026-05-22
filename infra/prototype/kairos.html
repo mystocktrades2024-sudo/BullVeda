@@ -48275,10 +48275,18 @@ const QuantUsers = (function () {
     const disabled = !!fs.disabled;
     const mustChange = fs.must_change_password !== false;
     const passwordVal = fs.password || '';
-    const roleOptions = (_roles || []).map(r => {
-      const rid = r.id || r.role_id || r.name;
-      return `<option value="${_escapeHtml(rid)}" ${role === rid ? 'selected' : ''}>${_escapeHtml(rid.toUpperCase())}${r.description ? ' · ' + _escapeHtml(r.description) : ''}</option>`;
-    }).join('') || '<option value="viewer">VIEWER</option><option value="trader">TRADER</option><option value="admin">ADMIN</option>';
+    // Build role <option> list. If _roles failed to load, fall back to a
+    // hard-coded set BUT make sure the current role is pre-selected (otherwise
+    // the browser defaults to the first option and a subsequent _captureForm
+    // silently overwrites _form.role).
+    const knownRoles = (_roles && _roles.length > 0)
+      ? _roles.map(r => ({ id: r.id || r.role_id || r.name, desc: r.description || '' }))
+      : [{id:'viewer',desc:''},{id:'trader',desc:''},{id:'admin',desc:''}];
+    // Always include the current role even if it's not in the loaded list
+    if (role && !knownRoles.some(r => r.id === role)) knownRoles.unshift({id: role, desc: '(current)'});
+    const roleOptions = knownRoles.map(r =>
+      `<option value="${_escapeHtml(r.id)}" ${role === r.id ? 'selected' : ''}>${_escapeHtml(r.id.toUpperCase())}${r.desc ? ' · ' + _escapeHtml(r.desc) : ''}</option>`
+    ).join('');
     const tabProfiles = ['beginner','trader','quant','all','custom'].map(p =>
       `<option value="${p}" ${tabProfile === p ? 'selected' : ''}>${p.toUpperCase()}</option>`
     ).join('');
@@ -48292,7 +48300,7 @@ const QuantUsers = (function () {
         <label>Username
           <span class="field-hint">${isNew ? 'lowercase letters, digits, _, - · 2-31 chars · starts with a letter' : 'cannot be changed after creation'}</span>
           ${isNew
-            ? `<input id="qum-f-username" type="text" placeholder="e.g. john_doe" pattern="^[a-z][a-z0-9_-]+$" value="${_escapeHtml(username)}" required>`
+            ? `<input id="qum-f-username" type="text" placeholder="e.g. john_doe" pattern="^[a-z][a-z0-9_\\-]+$" value="${_escapeHtml(username)}" required>`
             : `<input id="qum-f-username" type="text" value="${_escapeHtml(username)}" disabled>`}
         </label>
         <label>Display Name
@@ -48345,6 +48353,23 @@ const QuantUsers = (function () {
         _captureForm();
         if (!_form) throw new Error('form not initialised');
         const isNew = _editing === '__new__';
+        // Guard: prevent accidentally demoting the owner or yourself from admin
+        if (!isNew) {
+          const current = _users.find(x => x.username === username);
+          if (current && current.role === 'admin' && _form.role !== 'admin') {
+            const isOwner = !!current.is_owner;
+            const isSelf = username === window.__currentUser;
+            if (isOwner || isSelf) {
+              const who = isOwner ? `the owner account "${username}"` : `your own account "${username}"`;
+              if (!confirm(`⚠ You are about to DEMOTE ${who} from admin to "${_form.role}".\n\nThis will REMOVE your admin access — you will no longer be able to manage users or restore the admin role from this UI.\n\nProceed?`)) {
+                _msg = { kind: 'err', text: 'Role change cancelled (would have demoted ' + (isOwner ? 'owner' : 'yourself') + ' from admin)' };
+                _repaint(); return;
+              }
+              // Backend also blocks silent owner demotion unless this flag is set.
+              if (isOwner) _form.__confirm_owner_demote__ = true;
+            }
+          }
+        }
         const payload = {
           display_name: (_form.display_name || '').trim(),
           email: (_form.email || '').trim(),
@@ -48355,6 +48380,7 @@ const QuantUsers = (function () {
           tabs_override:     _form.tabs_override == null ? [] : _form.tabs_override,
           sub_tabs_override: _form.sub_tabs_override == null ? [] : _form.sub_tabs_override,
         };
+        if (_form.__confirm_owner_demote__) payload.__confirm_owner_demote__ = true;
         if (isNew) {
           payload.username = (_form.username || '').trim().toLowerCase();
           payload.password = _form.password || '';
@@ -48610,7 +48636,22 @@ const QuantUsers = (function () {
     if (_editing) _captureForm();
     _wsPanel.innerHTML = _buildHTML();
     _wire();
-    if (_editing) _restoreFocus();
+    if (_editing) {
+      // Defensive: explicitly set <select> values from _form because the
+      // browser may default to the first option if the HTML `selected`
+      // attribute doesn't match (e.g. when the current role isn't in the
+      // role list yet). Without this, _captureForm on the next click
+      // would silently downgrade _form.role to "viewer".
+      const setSel = (id, v) => {
+        const el = _wsPanel.querySelector('#qum-f-' + id);
+        if (el && v != null) { try { el.value = v; } catch(_) {} }
+      };
+      if (_form) {
+        setSel('role',       _form.role);
+        setSel('tabprofile', _form.tab_profile);
+      }
+      _restoreFocus();
+    }
   }
 
   function render(panel) {
