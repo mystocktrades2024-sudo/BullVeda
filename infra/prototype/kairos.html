@@ -47926,9 +47926,13 @@ const QuantUsers = (function () {
   let _busy = false;
   let _msg = null;           // { kind: 'ok'|'err', text: '…' }
   let _search = '';
-  // Per-form transient state for permission overrides (keyed: 'tabs', 'sub_tabs')
-  let _formOverrides = { tabs: null, sub_tabs: null };  // null = inherit, [] = empty-override-no-access, [..] = custom
+  // _form is the LIVE state of the edit form — preserved across repaints so
+  // toggling a permission checkbox doesn't wipe the username/email/role fields.
+  // Fields: username, display_name, email, role, tab_profile, disabled,
+  //         must_change_password, password, tabs_override, sub_tabs_override
+  let _form = null;
   let _permOpen = { tabs: false, sub_tabs: false };
+  let _lastFocusId = null;   // restore focus after innerHTML repaint
 
   function _ensureStyles() {
     if (document.getElementById('qum-styles')) return;
@@ -48097,6 +48101,66 @@ const QuantUsers = (function () {
     return (role && role.permissions) || { tabs: [], sub_tabs: [], actions: [] };
   }
 
+  // ── Form state lifecycle ──────────────────────────────────────────────
+  // Initialise _form from the user dict (or empty for new). Called when
+  // entering edit/new mode. After this, _form is the SOLE source of truth
+  // for every field — repaints read from _form, never from the user dict.
+  function _initForm(u, isNew) {
+    _form = {
+      username:            isNew ? '' : (u.username || ''),
+      display_name:        u.display_name || '',
+      email:               u.email || '',
+      role:                u.role || 'viewer',
+      tab_profile:         u.tab_profile || 'trader',
+      disabled:            !!u.disabled,
+      must_change_password: isNew ? true : (u.must_change_password !== false),
+      password:            '',
+      // null = inherit from role; array = explicit override
+      tabs_override:       (Array.isArray(u.tabs_override) && u.tabs_override.length > 0) ? u.tabs_override.slice() : null,
+      sub_tabs_override:   (Array.isArray(u.sub_tabs_override) && u.sub_tabs_override.length > 0) ? u.sub_tabs_override.slice() : null,
+    };
+    _permOpen = { tabs: false, sub_tabs: false };
+  }
+
+  // Sync the DOM → _form. Called at the top of every repaint so live
+  // user edits aren't lost when innerHTML re-renders the form.
+  function _captureForm() {
+    if (!_wsPanel || !_editing || !_form) return;
+    const f = id => _wsPanel.querySelector('#qum-f-' + id);
+    if (!f('display')) return; // edit form not currently rendered
+    if (_editing === '__new__' && f('username')) _form.username = (f('username').value || '').toLowerCase();
+    if (f('display'))    _form.display_name = f('display').value;
+    if (f('email'))      _form.email = f('email').value;
+    if (f('role'))       _form.role = f('role').value;
+    if (f('tabprofile')) _form.tab_profile = f('tabprofile').value;
+    if (f('disabled'))   _form.disabled = f('disabled').checked;
+    if (f('mustchange')) _form.must_change_password = f('mustchange').checked;
+    if (f('password'))   _form.password = f('password').value;
+    // Remember which element had focus so we can restore it after repaint
+    const a = document.activeElement;
+    _lastFocusId = (a && a.id && a.id.startsWith('qum-f-')) ? a.id : null;
+  }
+
+  function _restoreFocus() {
+    if (!_lastFocusId || !_wsPanel) return;
+    const el = _wsPanel.querySelector('#' + CSS.escape(_lastFocusId));
+    if (el) {
+      el.focus();
+      if (typeof el.selectionStart === 'number') {
+        try {
+          const v = el.value || '';
+          el.selectionStart = el.selectionEnd = v.length;
+        } catch(_) {}
+      }
+    }
+  }
+
+  function _clearForm() {
+    _form = null;
+    _permOpen = { tabs: false, sub_tabs: false };
+    _lastFocusId = null;
+  }
+
   function _renderUserRow(u) {
     const role = u.role || 'viewer';
     const roleCls = role === 'admin' ? 'role-admin' : role === 'trader' ? 'role-trader' : role === 'viewer' ? 'role-viewer' : 'role-default';
@@ -48200,37 +48264,36 @@ const QuantUsers = (function () {
   }
 
   function _renderEditForm(u, isNew) {
-    const username = u.username || '';
-    const display = u.display_name || '';
-    const email = u.email || '';
-    const role = u.role || 'viewer';
-    const tabProfile = u.tab_profile || 'trader';
-    const disabled = !!u.disabled;
-    const mustChange = u.must_change_password !== false;
-    const roleOptions = (_roles || []).map(r =>
-      `<option value="${_escapeHtml(r.id || r.role_id || r.name)}" ${role === (r.id || r.role_id || r.name) ? 'selected' : ''}>${_escapeHtml((r.id || r.role_id || r.name).toUpperCase())} ${r.description ? '· ' + _escapeHtml(r.description) : ''}</option>`
-    ).join('') || '<option value="viewer">VIEWER</option><option value="trader">TRADER</option><option value="admin">ADMIN</option>';
+    // ALL values come from _form (live state) — never from the user dict —
+    // so repaints during permission toggles don't wipe field edits.
+    const fs = _form || {};
+    const username = fs.username || '';
+    const display = fs.display_name || '';
+    const email = fs.email || '';
+    const role = fs.role || 'viewer';
+    const tabProfile = fs.tab_profile || 'trader';
+    const disabled = !!fs.disabled;
+    const mustChange = fs.must_change_password !== false;
+    const passwordVal = fs.password || '';
+    const roleOptions = (_roles || []).map(r => {
+      const rid = r.id || r.role_id || r.name;
+      return `<option value="${_escapeHtml(rid)}" ${role === rid ? 'selected' : ''}>${_escapeHtml(rid.toUpperCase())}${r.description ? ' · ' + _escapeHtml(r.description) : ''}</option>`;
+    }).join('') || '<option value="viewer">VIEWER</option><option value="trader">TRADER</option><option value="admin">ADMIN</option>';
     const tabProfiles = ['beginner','trader','quant','all','custom'].map(p =>
       `<option value="${p}" ${tabProfile === p ? 'selected' : ''}>${p.toUpperCase()}</option>`
     ).join('');
-    // Determine the role's defaults for the override picker
+    // Role's baseline permissions for the picker comparison
     const rolePerms = _rolePermsFor(role);
-    // Resolve current override state — if user has a non-empty tabs_override use it, else null (inherit)
-    const tabsOv = _formOverrides.tabs !== undefined && _formOverrides.tabs !== null
-      ? _formOverrides.tabs
-      : (Array.isArray(u.tabs_override) && u.tabs_override.length > 0 ? u.tabs_override.slice() : null);
-    const subOv = _formOverrides.sub_tabs !== undefined && _formOverrides.sub_tabs !== null
-      ? _formOverrides.sub_tabs
-      : (Array.isArray(u.sub_tabs_override) && u.sub_tabs_override.length > 0 ? u.sub_tabs_override.slice() : null);
-    // Sync local form state ONCE per render
-    if (_formOverrides.tabs === undefined) _formOverrides.tabs = tabsOv;
-    if (_formOverrides.sub_tabs === undefined) _formOverrides.sub_tabs = subOv;
+    const tabsOv = fs.tabs_override;       // null = inherit, array = custom
+    const subOv  = fs.sub_tabs_override;
 
     return `<tr class="qum-edit-row"><td colspan="7" style="padding:0">
       <div class="qum-form-grid">
         <label>Username
           <span class="field-hint">${isNew ? 'lowercase letters, digits, _, - · 2-31 chars · starts with a letter' : 'cannot be changed after creation'}</span>
-          ${isNew ? '<input id="qum-f-username" type="text" placeholder="e.g. john_doe" pattern="^[a-z][a-z0-9_-]+$" required autofocus>' : `<input id="qum-f-username" type="text" value="${_escapeHtml(username)}" disabled>`}
+          ${isNew
+            ? `<input id="qum-f-username" type="text" placeholder="e.g. john_doe" pattern="^[a-z][a-z0-9_-]+$" value="${_escapeHtml(username)}" required>`
+            : `<input id="qum-f-username" type="text" value="${_escapeHtml(username)}" disabled>`}
         </label>
         <label>Display Name
           <span class="field-hint">Shown in header badge · optional</span>
@@ -48250,7 +48313,7 @@ const QuantUsers = (function () {
         </label>
         ${isNew ? `<label class="span2">Initial Password
           <span class="field-hint">Minimum 8 characters · user can change after first login</span>
-          <input id="qum-f-password" type="text" placeholder="At least 8 characters" minlength="8" required>
+          <input id="qum-f-password" type="text" placeholder="At least 8 characters" minlength="8" value="${_escapeHtml(passwordVal)}" required>
         </label>` : ''}
         <label class="cbox"><input id="qum-f-disabled" type="checkbox" ${disabled ? 'checked' : ''}> Disabled · block login</label>
         ${isNew ? `<label class="cbox"><input id="qum-f-mustchange" type="checkbox" ${mustChange ? 'checked' : ''}> Require password change on first login</label>` : ''}
@@ -48269,34 +48332,37 @@ const QuantUsers = (function () {
     try {
       if (act === 'edit') {
         _editing = username; _msg = null;
-        _formOverrides = { tabs: undefined, sub_tabs: undefined };
-        _permOpen = { tabs: false, sub_tabs: false };
+        const u = (_users || []).find(x => x.username === username) || {};
+        _initForm(u, false);
         _repaint(); return;
       }
-      if (act === 'cancel') { _editing = null; _msg = null; _formOverrides = { tabs: undefined, sub_tabs: undefined }; _repaint(); return; }
+      if (act === 'cancel') {
+        _editing = null; _msg = null; _clearForm();
+        _repaint(); return;
+      }
       if (act === 'save') {
+        // Capture the latest DOM state into _form one last time
+        _captureForm();
+        if (!_form) throw new Error('form not initialised');
         const isNew = _editing === '__new__';
-        const root = _wsPanel;
-        const f = id => root.querySelector('#qum-f-' + id);
         const payload = {
-          display_name: f('display').value.trim(),
-          email: f('email').value.trim(),
-          role: f('role').value,
-          tab_profile: f('tabprofile').value,
-          disabled: f('disabled').checked,
-          // Per-user permission overrides: null = inherit, array = custom
-          tabs_override: _formOverrides.tabs == null ? [] : _formOverrides.tabs,
-          sub_tabs_override: _formOverrides.sub_tabs == null ? [] : _formOverrides.sub_tabs,
+          display_name: (_form.display_name || '').trim(),
+          email: (_form.email || '').trim(),
+          role: _form.role,
+          tab_profile: _form.tab_profile,
+          disabled: !!_form.disabled,
+          // null = inherit (backend accepts empty array as inherit), array = custom
+          tabs_override:     _form.tabs_override == null ? [] : _form.tabs_override,
+          sub_tabs_override: _form.sub_tabs_override == null ? [] : _form.sub_tabs_override,
         };
         if (isNew) {
-          payload.username = f('username').value.trim().toLowerCase();
-          payload.password = f('password').value;
-          payload.must_change_password = f('mustchange').checked;
+          payload.username = (_form.username || '').trim().toLowerCase();
+          payload.password = _form.password || '';
+          payload.must_change_password = !!_form.must_change_password;
           if (!payload.username || !payload.password) throw new Error('username + password are required');
-          // Create user first (without overrides — endpoint doesn't accept them)
+          // Create endpoint doesn't accept overrides — split into 2 calls
           const { tabs_override, sub_tabs_override, ...createPayload } = payload;
           await _fetch('/api/users', { method: 'POST', body: createPayload });
-          // Then patch with overrides if any were set
           if (tabs_override.length > 0 || sub_tabs_override.length > 0) {
             await _fetch(`/api/users/${encodeURIComponent(payload.username)}`, { method: 'PATCH', body: { tabs_override, sub_tabs_override } });
           }
@@ -48305,7 +48371,7 @@ const QuantUsers = (function () {
           await _fetch(`/api/users/${encodeURIComponent(username)}`, { method: 'PATCH', body: payload });
           _msg = { kind: 'ok', text: `Updated ${username}` };
         }
-        _editing = null; _formOverrides = { tabs: undefined, sub_tabs: undefined }; await _refresh(); return;
+        _editing = null; _clearForm(); await _refresh(); return;
       }
       if (act === 'delete') {
         if (!row) return;
@@ -48325,8 +48391,7 @@ const QuantUsers = (function () {
       }
       if (act === 'new') {
         _editing = '__new__'; _msg = null;
-        _formOverrides = { tabs: undefined, sub_tabs: undefined };
-        _permOpen = { tabs: false, sub_tabs: false };
+        _initForm({}, true);
         _repaint(); return;
       }
     } catch (e) {
@@ -48433,7 +48498,29 @@ const QuantUsers = (function () {
       }
     });
 
-    // Permission picker — expand/collapse the section
+    // ── Edit-form: live capture every keystroke / change ──────────────
+    // Bare input/change listeners on the form fields so _form stays in
+    // sync without forcing a repaint on every keystroke.
+    if (_editing) {
+      ['display','email','username','password'].forEach(id => {
+        const el = _wsPanel.querySelector('#qum-f-' + id);
+        if (el) el.oninput = () => { if (_form) _form[(id==='display'?'display_name':id)] = el.value; };
+      });
+      const tp = _wsPanel.querySelector('#qum-f-tabprofile');
+      if (tp) tp.onchange = () => { if (_form) _form.tab_profile = tp.value; };
+      const d = _wsPanel.querySelector('#qum-f-disabled');
+      if (d) d.onchange = () => { if (_form) _form.disabled = d.checked; };
+      const mc = _wsPanel.querySelector('#qum-f-mustchange');
+      if (mc) mc.onchange = () => { if (_form) _form.must_change_password = mc.checked; };
+      // Role change: capture + repaint so the picker reflects new role defaults
+      const r = _wsPanel.querySelector('#qum-f-role');
+      if (r) r.onchange = () => {
+        if (_form) _form.role = r.value;
+        _repaint();
+      };
+    }
+
+    // ── Permission picker handlers ────────────────────────────────────
     _wsPanel.querySelectorAll('[data-toggle-perm]').forEach(el => {
       el.onclick = (e) => {
         e.stopPropagation();
@@ -48444,37 +48531,52 @@ const QuantUsers = (function () {
     });
 
     // Mode radios: inherit ↔ custom
-    _wsPanel.querySelectorAll('[data-perm-mode]').forEach(r => {
-      r.onchange = () => {
-        const kind = r.dataset.permMode;
-        if (r.value === 'inherit') {
-          _formOverrides[kind] = null;
+    _wsPanel.querySelectorAll('[data-perm-mode]').forEach(rd => {
+      rd.onchange = () => {
+        if (!_form) return;
+        const kind = rd.dataset.permMode;
+        const key = kind === 'tabs' ? 'tabs_override' : 'sub_tabs_override';
+        if (rd.value === 'inherit') {
+          _form[key] = null;
         } else {
-          // Switching to custom — seed from current effective list
-          const u = _users.find(x => x.username === _editing) || {};
-          const rolePerms = _rolePermsFor((_wsPanel.querySelector('#qum-f-role') || {}).value || u.role || 'viewer');
-          const ov = (kind === 'tabs' ? u.tabs_override : u.sub_tabs_override);
-          const seed = (Array.isArray(ov) && ov.length > 0) ? ov.slice() : (rolePerms[kind] || []).slice();
-          _formOverrides[kind] = seed;
+          // Switching to custom — seed from existing override OR current role's defaults
+          const rolePerms = _rolePermsFor(_form.role || 'viewer');
+          const existing = _form[key];
+          if (Array.isArray(existing) && existing.length > 0) {
+            // keep what user already had
+          } else {
+            _form[key] = (rolePerms[kind] || []).slice();
+          }
         }
+        _permOpen[kind] = true; // keep section visible after toggling
         _repaint();
       };
     });
 
-    // Checkbox toggles in custom mode
+    // Checkbox toggles in custom mode (with wildcard-expansion on uncheck)
     _wsPanel.querySelectorAll('[data-perm-toggle]').forEach(cb => {
       cb.onchange = (e) => {
         e.stopPropagation();
+        if (!_form) return;
         const kind = cb.dataset.permToggle;
+        const key = kind === 'tabs' ? 'tabs_override' : 'sub_tabs_override';
         const id = cb.dataset.id;
-        let arr = _formOverrides[kind];
-        if (!Array.isArray(arr)) arr = [];
+        let arr = Array.isArray(_form[key]) ? _form[key].slice() : [];
+        const hasWild = arr.includes('*');
         if (cb.checked) {
-          if (!arr.includes(id)) arr.push(id);
+          // Checking — just add (unless wildcard already covers everything)
+          if (!hasWild && !arr.includes(id)) arr.push(id);
         } else {
-          arr = arr.filter(x => x !== id);
+          // Unchecking — if wildcard, expand it first then remove the one item
+          if (hasWild) {
+            const allItems = _registryItems(kind).map(i => i.id);
+            arr = allItems.filter(x => x !== id);
+          } else {
+            arr = arr.filter(x => x !== id);
+          }
         }
-        _formOverrides[kind] = arr;
+        _form[key] = arr;
+        _permOpen[kind] = true;
         _repaint();
       };
     });
@@ -48483,17 +48585,19 @@ const QuantUsers = (function () {
     _wsPanel.querySelectorAll('[data-perm-bulk]').forEach(btn => {
       btn.onclick = (e) => {
         e.stopPropagation();
+        if (!_form) return;
         const kind = btn.dataset.kind;
+        const key = kind === 'tabs' ? 'tabs_override' : 'sub_tabs_override';
         const action = btn.dataset.permBulk;
         const items = _registryItems(kind);
-        if (action === 'all') _formOverrides[kind] = items.map(i => i.id);
-        else if (action === 'none') _formOverrides[kind] = [];
-        else if (action === 'wildcard') _formOverrides[kind] = ['*'];
+        if (action === 'all') _form[key] = items.map(i => i.id);
+        else if (action === 'none') _form[key] = [];
+        else if (action === 'wildcard') _form[key] = ['*'];
         else if (action === 'role') {
-          const u = _users.find(x => x.username === _editing) || {};
-          const rolePerms = _rolePermsFor((_wsPanel.querySelector('#qum-f-role') || {}).value || u.role || 'viewer');
-          _formOverrides[kind] = (rolePerms[kind] || []).slice();
+          const rolePerms = _rolePermsFor(_form.role || 'viewer');
+          _form[key] = (rolePerms[kind] || []).slice();
         }
+        _permOpen[kind] = true;
         _repaint();
       };
     });
@@ -48501,8 +48605,12 @@ const QuantUsers = (function () {
 
   function _repaint() {
     if (!_wsPanel) return;
+    // Capture live form state BEFORE blowing away the DOM, so user edits to
+    // username/display/email/role/etc survive permission-picker clicks.
+    if (_editing) _captureForm();
     _wsPanel.innerHTML = _buildHTML();
     _wire();
+    if (_editing) _restoreFocus();
   }
 
   function render(panel) {
