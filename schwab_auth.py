@@ -208,7 +208,7 @@ def oauth_interactive() -> None:
         "SCHWAB_ACCESS_TOKEN":       access,
         "SCHWAB_REFRESH_TOKEN":      refresh,
         "SCHWAB_TOKEN_EXPIRES_AT":   str(exp_at),
-        "SCHWAB_REFRESH_SAVED_AT":   str(int(time.time())),
+        "SCHWAB_REFRESH_ISSUED_AT":   str(int(time.time())),
     })
 
     print("\n✅ SUCCESS")
@@ -247,7 +247,7 @@ def _refresh_access_token() -> str:
     exp_at = int(time.time()) + exp_in - 60
 
     # Schwab may also rotate the refresh token. When they do, reset
-    # SCHWAB_REFRESH_SAVED_AT so check_token_health() tracks the freshest
+    # SCHWAB_REFRESH_ISSUED_AT so check_token_health() tracks the freshest
     # 7-day window from the actual rotation, not the original OAuth.
     updates = {
         "SCHWAB_ACCESS_TOKEN":     access,
@@ -255,7 +255,7 @@ def _refresh_access_token() -> str:
     }
     if tok.get("refresh_token"):
         updates["SCHWAB_REFRESH_TOKEN"]    = tok["refresh_token"]
-        updates["SCHWAB_REFRESH_SAVED_AT"] = str(int(time.time()))
+        updates["SCHWAB_REFRESH_ISSUED_AT"] = str(int(time.time()))
     _write_env(updates)
     return access
 
@@ -360,7 +360,7 @@ def check_token_health(warn_days: int = 5, dead_days: int = 7) -> dict:
 
     Schwab rotates the refresh token on each access-token refresh (~30min
     when the scanner is running). The 7-day expiry resets to that rotation
-    timestamp, tracked in SCHWAB_REFRESH_SAVED_AT (written by
+    timestamp, tracked in SCHWAB_REFRESH_ISSUED_AT (written by
     _refresh_access_token + oauth_interactive). If the scanner stops for >7d
     the refresh token rots and only manual re-OAuth recovers it.
 
@@ -370,7 +370,7 @@ def check_token_health(warn_days: int = 5, dead_days: int = 7) -> dict:
     """
     env = _read_env()
     refresh = env.get("SCHWAB_REFRESH_TOKEN", "").strip()
-    saved   = env.get("SCHWAB_REFRESH_SAVED_AT", "").strip()
+    saved   = env.get("SCHWAB_REFRESH_ISSUED_AT", "").strip()
     if not refresh:
         return {"status": "dead", "days_since_saved": None, "action": "reauth_now",
                 "message": "No SCHWAB_REFRESH_TOKEN in .env — run: python3 schwab_auth.py oauth"}
