@@ -779,7 +779,12 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     killed_reason = None
     if setup_name and setup_name in setup_kills:
         info = setup_kills[setup_name]
-        killed_reason = f"{setup_name}: {info['reason']}, avg_pnl {info['avg_pnl']:+.2f}%"
+        # 2026-05-23: static_setup_kill_list entries may omit avg_pnl (None).
+        # Only include the avg_pnl tail when numeric, else use reason as-is.
+        # Prior bug: f"avg_pnl {None:+.2f}" crashed entire decision engine.
+        _avg = info.get("avg_pnl")
+        _avg_tail = f", avg_pnl {_avg:+.2f}%" if isinstance(_avg, (int, float)) else ""
+        killed_reason = f"{setup_name}: {info['reason']}{_avg_tail}"
     elif setup_name and (setup_name, band) in band_kills:
         info = band_kills[(setup_name, band)]
         killed_reason = info["reason"]
