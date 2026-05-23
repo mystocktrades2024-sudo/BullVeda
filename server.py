@@ -275,6 +275,27 @@ async def _v2_root(auth: HTTPBasicCredentials = Depends(_check_auth)):
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/kairos.html")
 
+@app.api_route("/v2/ml_edge_picks_history.jsonl", methods=["GET", "HEAD"])
+async def _v2_ml_edge_picks_history(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """ML Edge picks history JSONL (2026-05-23 · History sub-tab data source).
+    Serves from cache/ml_edge_picks_history.jsonl (canonical) — registered BEFORE
+    the catch-all /v2/{path:path} so the explicit match wins."""
+    if isinstance(auth, Response):
+        return auth
+    candidates = [
+        BASE_DIR / "cache" / "ml_edge_picks_history.jsonl",
+        BASE_DIR / "infra" / "prototype" / "ml_edge_picks_history.jsonl",
+    ]
+    for p in candidates:
+        if p.exists() and p.is_file():
+            return Response(
+                content=p.read_bytes(),
+                media_type="application/x-ndjson",
+                headers={"Cache-Control": "no-store"},
+            )
+    return Response(content=b"", media_type="application/x-ndjson", status_code=404)
+
+
 @app.api_route("/v2/_v", methods=["GET","HEAD"])
 async def _v2_module_version(auth: HTTPBasicCredentials = Depends(_check_auth)):
     """Max mtime under infra/prototype/{core,tabs}/. Used as ?v= cache-buster
@@ -1557,19 +1578,46 @@ async def _home_redirect(auth: HTTPBasicCredentials = Depends(_check_auth)):
 async def logout(request: Request):
     """Force the browser to drop cached HTTP Basic Auth credentials.
 
-    2026-05-21 · paired with the SIGN OUT button in kairos.html. Returns
-    401 + Clear-Site-Data + WWW-Authenticate so the browser invalidates
-    cached creds and prompts on next request. Always-public — no auth gate
-    (you can't log out if you're already locked out).
+    2026-05-22 · top-level navigation target for the SIGN OUT button.
+    Returns 200 + Clear-Site-Data + an HTML body that auto-redirects to /
+    after 1.5s. Top-level (document) response is required for browsers to
+    honor Clear-Site-Data for Basic Auth credentials — fetch/XHR responses
+    are not honored reliably across Chrome/Safari/Firefox. After the
+    cached creds are cleared, the redirect to / triggers the browser's
+    re-auth prompt automatically. Always-public — no auth gate (you can't
+    log out if you're already locked out).
     """
+    html_body = """<!DOCTYPE html>
+<html><head>
+  <meta charset="utf-8">
+  <title>Signed out — SwingTrade</title>
+  <meta http-equiv="refresh" content="1.5; url=/?_signedout=1">
+  <style>
+    body{background:#0a0d0c;color:#d1d5db;font-family:system-ui,-apple-system,sans-serif;
+         display:grid;place-items:center;height:100vh;margin:0}
+    .box{text-align:center;padding:2rem 2.5rem;border:1px solid #1f2937;border-radius:12px;
+         background:#111418;max-width:420px;box-shadow:0 8px 32px rgba(0,0,0,0.4)}
+    h1{margin:0 0 0.75rem 0;font-size:1.25rem;color:#10b981;font-weight:600}
+    p{margin:0.5rem 0;color:#9ca3af;font-size:0.9rem;line-height:1.5}
+    a{color:#3b82f6;text-decoration:none;font-weight:500}
+    a:hover{text-decoration:underline}
+  </style>
+</head><body>
+  <div class="box">
+    <h1>✓ Signed out</h1>
+    <p>Your session has ended. Redirecting in 1.5s…</p>
+    <p><a href="/?_signedout=1">Sign back in →</a></p>
+  </div>
+</body></html>"""
     return Response(
-        status_code=401,
+        status_code=200,
+        content=html_body,
+        media_type="text/html; charset=utf-8",
         headers={
-            "WWW-Authenticate": 'Basic realm="SwingTrade · re-authenticate"',
             "Clear-Site-Data": '"cookies", "storage", "cache"',
-            "Cache-Control": "no-store",
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
         },
-        content="Signed out. Refresh the page to sign back in.",
     )
 
 
@@ -1804,6 +1852,7 @@ async def backtest_report_by_filename(filename: str, auth: HTTPBasicCredentials 
     if not p.exists():
         return HTMLResponse(f"Report not found: {filename}", status_code=404)
     return HTMLResponse(p.read_text(), headers=_NO_CACHE)
+
 
 @app.get("/api/drift-alerts")
 async def drift_alerts(limit: int = 30, auth: HTTPBasicCredentials = Depends(_check_auth)):
@@ -5784,149 +5833,9 @@ async def get_config(auth: HTTPBasicCredentials = Depends(_check_auth)):
     except Exception as e:
         raise HTTPException(500, str(e))
 
-# -- WebSocket token endpoint — serves EODHD API key securely --
-@app.post("/api/chat")
-async def ai_chat(payload: dict, auth: HTTPBasicCredentials = Depends(_check_auth)):
-    """Trading co-pilot. Streams Claude responses with SwingTrade context.
-
-    Payload: {
-      message: str,                # user input
-      history: [{role, content}],  # prior turns (last 10 max)
-      context: {                   # optional context from current page
-        ticker?: str,              # if on detail page
-        page?: 'scanner' | 'detail' | 'portfolio',
-      }
-    }
-    Streams: text/event-stream with `data: <chunk>\\n\\n` lines.
-    """
-    import os, json as _json
-    from fastapi.responses import StreamingResponse
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        async def _err():
-            yield f"data: {_json.dumps({'error': 'ANTHROPIC_API_KEY not set in .env. Add the key and restart the server.'})}\n\n"
-        return StreamingResponse(_err(), media_type="text/event-stream")
-    try:
-        import anthropic
-    except ImportError:
-        async def _err():
-            yield f"data: {_json.dumps({'error': 'anthropic SDK not installed. Run: pip3 install anthropic'})}\n\n"
-        return StreamingResponse(_err(), media_type="text/event-stream")
-
-    user_msg = (payload.get("message") or "").strip()
-    history = payload.get("history") or []
-    ctx = payload.get("context") or {}
-    if not user_msg:
-        raise HTTPException(400, "message required")
-
-    # ---- Build context-aware system prompt ----
-    sys_parts = [
-        "You are a hedge-fund-grade swing-trading co-pilot embedded inside the SwingTrade dashboard.",
-        "Help the user reason through trade setups, scoring, regime, and risk — using the data injected below.",
-        "Be concise (≤200 words unless asked). Use specific numbers from the context. No fluff.",
-        "When you cite a level (entry, stop, target), pull from the actual data — never invent.",
-        "If the user asks something the data doesn't answer, say 'not in current bundle' and suggest where to look.",
-        "",
-        "## SwingTrade Methodology",
-        "- 5-pillar score (0-100): Tech (35) + Catalyst (20) + RS+Sector (20) + Smart Money (15) + Quality Gate (10)",
-        "- Conviction tiers: T1 (≥88, full size) | T2 (≥78, 30-60%) | T3 (≥70, 15-30%) | WATCH (60-69, monitor)",
-        "- Setup families: Impulse Catalyst (5-8d) · Breakout Expansion (7-21d) · Trend Continuation (7-21d) · Special Situation (5-15d)",
-        "- Entry quality: FRESH (within 0.75 ATR) | PULLBACK (1.25 ATR EMA) | VALID | EXTENDED (1.25-2 ATR) | MISSED (>2 ATR)",
-        "- 4 regimes: Risk-On Trending (BUY≥65) | Risk-On Choppy (≥72) | Risk-Off Trending (≥78) | Panic (no longs)",
-        "- Hard gates: liquidity ≥$10M ADV, no earnings within 3d, regime ≠ panic, R:R ≥ 3:1",
-    ]
-
-    # Inject scan context (always available from data.json)
-    try:
-        import json as _json2
-        here = os.path.dirname(os.path.abspath(__file__))
-        with open(os.path.join(here, "infra", "prototype", "data.json")) as f:
-            d = _json2.load(f)
-        regime = d.get("regime") or {}
-        breadth = d.get("market_breadth") or {}
-        st = d.get("short_term") or []
-        buys = [r for r in st if r.get("stage") == "BUY"][:8]
-        watches = [r for r in st if r.get("stage") == "WATCH"][:8]
-        shorts = [r for r in st if r.get("stage") == "SELL"][:5]
-        sys_parts += [
-            "",
-            "## Today's Scan Context",
-            f"Run: {d.get('run_timestamp','—')}",
-            f"Regime: {regime.get('regime4','—')} · VIX {regime.get('vix') if not isinstance(regime.get('vix'), dict) else regime.get('vix',{}).get('vix_current','—')}",
-            f"Breadth: {breadth.get('pct_above_50d','—')}% above 50d ({breadth.get('label_50','—')})",
-            f"Universe scanned: {d.get('scan_count',0)} · Killed by gates: {d.get('killed_count',0)}",
-        ]
-        if buys:
-            sys_parts.append("\n### Top BUY signals today")
-            for r in buys:
-                sys_parts.append(f"- {r['ticker']} ({r.get('sector','—')[:25]}): score {r.get('score','—')} · RR {r.get('rr','—')} · setup {r.get('setup','—')}")
-        if watches:
-            sys_parts.append("\n### WATCH signals")
-            for r in watches[:5]:
-                sys_parts.append(f"- {r['ticker']}: score {r.get('score','—')} · setup {r.get('setup','—')}")
-        if shorts:
-            sys_parts.append("\n### SHORT signals")
-            for r in shorts:
-                sys_parts.append(f"- {r['ticker']}: score {r.get('score','—')} · setup {r.get('setup','—')}")
-        # Portfolio
-        pf = d.get("portfolio") or {}
-        if pf.get("positions"):
-            sys_parts.append(f"\n### Open Positions ({len(pf['positions'])})")
-            for p in pf["positions"][:8]:
-                sys_parts.append(f"- {p.get('ticker')}: {p.get('shares')} sh @ ${p.get('entry')} · stop ${p.get('stop')} · unreal ${p.get('unrealized_pnl_dollars',0):.0f}")
-            sys_parts.append(f"Cash: ${pf.get('cash',0):,.0f} · Equity: ${pf.get('equity',0):,.0f}")
-    except Exception as e:
-        sys_parts.append(f"\n(scan data unavailable: {e})")
-
-    # Inject ticker-specific context if on detail page
-    ticker = (ctx.get("ticker") or "").upper().strip()
-    if ticker:
-        try:
-            with open(os.path.join(here, "infra", "prototype", "tickers.json")) as f:
-                ticks = _json2.load(f)
-            T = ticks.get(ticker)
-            if T:
-                sys_parts += [
-                    "",
-                    f"## Current Ticker: {ticker}",
-                    f"Price: ${T.get('price','—')} · {T.get('pct_chg',0):+.2f}% today",
-                    f"Verdict: {T.get('verdict','—')} · Score {T.get('score',0)}/100 · R:R {T.get('rr_ratio',0):.1f}:1",
-                    f"Pillars: Tech {T.get('tech_score',0)}/{T.get('tech_max',35)} · Fund {T.get('fund_score',0)}/{T.get('fund_max',10)} · Sent {T.get('sent_score',0)}/{T.get('sent_max',15)} · SMC {T.get('smc_score',0)}/10",
-                    f"Setup: {T.get('setup_family','—')} · Entry quality: {T.get('entry_quality','—')} · Conviction: {T.get('conviction_tier','—')}",
-                    f"Trade plan: entry ${T.get('entry_low','—')}–${T.get('entry_high','—')} · stop ${T.get('stop','—')} · T1 ${T.get('target1','—')} · T2 ${T.get('target2','—')}",
-                    f"Indicators: RSI {T.get('rsi','—')} · RVOL {T.get('rvol','—')}× · ATR {T.get('atr_pct','—')}% · RS {T.get('rs_rank','—')}",
-                    f"Regime: {T.get('regime','—')} · MC P(profit): {T.get('mc_p_profit','—')}",
-                ]
-                if T.get('earn_days') is not None and T['earn_days'] <= 14:
-                    sys_parts.append(f"⚠ Earnings in {T['earn_days']} days")
-        except Exception:
-            pass
-
-    system_prompt = "\n".join(sys_parts)
-
-    # Build messages — keep last 10 turns
-    msgs = []
-    for h in (history[-10:] if isinstance(history, list) else []):
-        if h.get("role") in ("user", "assistant") and h.get("content"):
-            msgs.append({"role": h["role"], "content": h["content"][:4000]})
-    msgs.append({"role": "user", "content": user_msg[:4000]})
-
-    # Stream from Claude
-    client = anthropic.Anthropic(api_key=api_key)
-    async def stream():
-        try:
-            with client.messages.stream(
-                model="claude-sonnet-4-5",
-                max_tokens=1024,
-                system=system_prompt,
-                messages=msgs,
-            ) as s:
-                for chunk in s.text_stream:
-                    yield f"data: {_json.dumps({'text': chunk})}\n\n"
-                yield f"data: {_json.dumps({'done': True})}\n\n"
-        except Exception as e:
-            yield f"data: {_json.dumps({'error': str(e)})}\n\n"
-    return StreamingResponse(stream(), media_type="text/event-stream")
+# Legacy Anthropic-based /api/chat removed 2026-05-23 — superseded by
+# the local-Ollama /api/chat at the bottom of this file (no paid API,
+# wired to cache/last_bundle.json + kairos.html floating widget).
 
 
 @app.get("/api/forex/quote")
@@ -9273,6 +9182,380 @@ async def factor_exposure():
         "limitation": d.get("limitation", ""),
         "aggregate": d.get("aggregate") or d.get("aggregate_loadings", {}),
     }
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# /api/chat — Kairos AI chat (local Ollama proxy with dashboard context)
+# Gated by AI_CHAT_ENABLED env (default "1"). Model via OLLAMA_MODEL env
+# (default "qwen2.5:32b-instruct"). Streams server-sent events back to the
+# floating bubble in kairos.html. Pulls regime + active-ticker context from
+# cache/last_bundle.json so the model can talk about today's actual scan.
+# ────────────────────────────────────────────────────────────────────────────
+import httpx as _httpx_chat
+from fastapi.responses import StreamingResponse as _StreamingResponse
+
+
+def _chat_enabled() -> bool:
+    return os.environ.get("AI_CHAT_ENABLED", "1").lower() not in ("0", "false", "no", "off")
+
+
+def _chat_model() -> str:
+    return os.environ.get("OLLAMA_MODEL", "qwen2.5:32b-instruct")
+
+
+def _chat_ollama_url() -> str:
+    return os.environ.get("OLLAMA_URL", "http://localhost:11434")
+
+
+def _chat_collect_bundle_tickers(bundle: dict) -> dict:
+    """Build a {TICKER: (signal_dict, source_list)} index from the bundle."""
+    idx = {}
+    for key in ("buy_candidates", "watch_list", "sell_candidates", "all_scored",
+                "medium_term_picks", "long_term_picks", "killed"):
+        for s in (bundle.get(key) or []):
+            t = (s.get("ticker") or "").upper()
+            if t and t not in idx:
+                idx[t] = (s, key)
+    return idx
+
+
+def _chat_extract_tickers_from_msg(msg: str, valid_tickers: set) -> list:
+    """Pull uppercase 1-5 letter tokens from msg, keep only ones in the bundle."""
+    import re as _re
+    candidates = _re.findall(r"\b[A-Z]{1,5}\b", msg or "")
+    # Skip common false-positives even if they happen to be tickers
+    SKIP = {"BUY", "SELL", "HOLD", "RSI", "MACD", "ATR", "EMA", "SMA", "VWAP",
+            "ADV", "VIX", "SPY", "QQQ", "IWM", "USD", "ETF", "IPO", "PEAD",
+            "ESP", "WR", "PF", "AI", "OK", "TLDR", "FYI", "BTW", "ASAP",
+            "WATCH", "SHORT", "LONG", "STOP", "ENTRY", "TARGET", "RISK", "FOMC"}
+    out = []
+    seen = set()
+    for c in candidates:
+        if c in SKIP or c in seen:
+            continue
+        if c in valid_tickers:
+            out.append(c)
+            seen.add(c)
+            if len(out) >= 3:
+                break
+    return out
+
+
+def _chat_render_ticker_block(t: str, found: dict, source: str) -> str:
+    plan = found.get("canonical_trade_plan") or {}
+    return (
+        f"\n=== TICKER {t} ({source}) ===\n"
+        f"Score: {found.get('score')} | "
+        f"Decision: {found.get('decision')} | "
+        f"Conviction: {found.get('conviction') or plan.get('conviction_tier','-')}\n"
+        f"Setup: {found.get('setup_family') or '-'} | "
+        f"Catalyst tier: {found.get('catalyst_tier') or '-'} | "
+        f"Catalysts: {','.join(found.get('catalyst_tags') or []) or '-'}\n"
+        f"Direction: {found.get('direction') or 'long'} | "
+        f"Entry quality: {found.get('entry_quality') or '-'} | "
+        f"Industry: {found.get('industry') or '-'}\n"
+        f"Trade plan: entry={plan.get('entry')} stop={plan.get('stop')} "
+        f"T1={plan.get('target1')} T2={plan.get('target2')} "
+        f"hold={plan.get('hold_period_days')}d "
+        f"size={plan.get('position_size_pct')}%\n"
+        f"Risk: {plan.get('risk')}\n"
+        f"Gate result: {found.get('gate')} | "
+        f"Decision state: {found.get('decision_state')}\n"
+        f"Caveats: {found.get('caveats') or '-'}\n"
+        f"P(profit): {found.get('mc_p_profit')} | "
+        f"ATR%: {found.get('atr_pct')} | Beta: {found.get('beta')}"
+    )
+
+
+# Short docs per tab/sub-tab — injected when the user asks "how do I use this"
+# or whenever active_tab/active_subtab is provided so the model knows the surface.
+_CHAT_TAB_DOCS = {
+    # Main tabs (sb-link data-tab values)
+    "dash":             "Home — landing page with today's regime tile, top BUY candidates, P&L summary, and quick links to all workspaces.",
+    "detail":           "Ticker Detail (QuantDetail) — deep-dive on one ticker across 15 sub-tabs (Overview, Plan, Chart, Technicals, Patterns, SMC, Value, Risk, Earnings, Options, Portfolio, Intel, Track Record, ML Edge). Open by clicking any ticker card or pressing D.",
+    "confluence":       "Confluence Matrix — cross-references signals/setups/sleeves to surface tickers hit by multiple independent edges. The more cells lit, the higher conviction.",
+    "elite":            "Conviction Grid — 9-cell layout (3 modes × 3 stages) showing top-5 picks per cell with conviction arc, 8-factor breakdown, MC P(target/stop), CVaR, why-confident + watch-out narratives.",
+    "optionsflow":      "Options Flow — UOA imbalance scanner showing tickers with abnormal call/put activity. Filters by size, premium, sweep type.",
+    "earnings":         "Earnings — upcoming reports with beat-prediction tier (STRONG/SOLID/MODERATE), prior beat-rate, sector + verdict cross-ref. OWNED tag if in portfolio.",
+    "scanner":          "Signal Scanner — the raw BUY/WATCH/SHORT list with 5-pillar score, R:R, gates, setup family, conviction tier. The primary every-morning view.",
+    "watchlist":        "Watchlist — user-curated tickers tracked with live quotes + score + alerts. Add/remove from any ticker card.",
+    "portfolio":        "Portfolio · Positions — open positions with live P&L, factor + cross-mode exposure heatmaps, closed-trade journal.",
+    "positionAnalysis": "Position Analysis — per-position deep dive: stop placement vs ATR, time in trade, MAE/MFE, exit recommendation.",
+    "mlEdge":           "ML Edge — 3-headed model forecast (direction · magnitude cone · hit-net P-T1-first) for every scored ticker.",
+    "momentum":         "Momentum — pure-technical momentum leaderboard ranked by 21d return × RVOL × RS percentile.",
+    "leaders":          "Track Record — historical win rate, profit factor, attribution by setup family from picks_history.",
+    "alerts":           "Alerts — triggered price/score/regime alerts pushed via Slack + browser notifications.",
+    "killed":           "Killed / AVOID — tickers rejected by hard gates (liquidity, earnings blackout, regime, tail loss). Shows WHY each was killed.",
+    "performance":      "Performance — system edge verdict, P&L tiles, Setup Family Podium with Wilson CI, Score Calibration bars, auto-generated action items.",
+    "screener":         "Screener — custom multi-factor screener (price, volume, fundamentals, technical filters) over the full universe.",
+    "marketmap":        "Market Map — treemap visualization of SPX/NDX by sector + market cap, colored by % change.",
+    "industries":       "Industries — sector + industry RS percentile leaderboard; click any to see member tickers.",
+    "market":           "Market — index dashboards (SPY/QQQ/IWM/VIX), breadth, advance/decline, McClellan oscillator.",
+    "macro":            "Macro · Events — calendar of FOMC, CPI, NFP, earnings season; current macro regime + credit + dollar state.",
+    "premarket":        "Pre-Market — overnight gap scanner with catalysts, gap %, pre-market volume, before-bell news.",
+    "events":           "IPO · Splits — upcoming IPOs, lockup expirations, stock splits, special dividends, M&A targets.",
+    "crypto":           "Crypto — BTC/ETH/major-alt dashboard with derivatives data (funding, OI, basis).",
+    "leveraged":        "Leveraged — leveraged + inverse ETF dashboard (TQQQ, SQQQ, SOXL etc.) with decay tracking.",
+    "themes":           "Themes — long-horizon thematic baskets (AI, cybersecurity, GLP-1, nuclear, etc.) with leader rotation.",
+    "strategies":       "Strategies — 7 sleeves + 1 overlay showcase with ACTIVE/DEFERRED/PLANNED states, blended WR/PF, recent picks per scanner.",
+    "strategyMatrix":   "Strategy × Regime Matrix — cross-tab showing per-strategy performance in each of the 4 regimes (Wilson-gated).",
+    "researchLab":      "Research Lab — what-if backtest harness for parameter tuning + setup hypothesis testing.",
+    "factorExposure":   "Factor Exposure — per-setup factor loadings (MOM/VAL/SIZE/QMJ); shows alpha vs pure-factor plays.",
+    "reference":        "Reference / Cheat — glossary of every term, source, and doc; the canonical lookup for any abbreviation.",
+    "playbook":         "Playbook — the canonical rulebook (5 pillars, 4 regimes, conviction tiers, exit rules, daily workflow).",
+    "accuracy":         "Accuracy — calibration plots showing predicted-vs-realized win rates by score bucket; surfaces drift.",
+    "fields":           "Fields — every column in every table, with type, source, refresh cadence, formula.",
+    "status":           "System Status — health of every pipeline (Polygon/EODHD/Zacks/Schwab), last run, error rate, latency.",
+    "settings":         "Settings — user preferences (theme, layout, default mode, alert channels).",
+    "users":            "Admin · Users — User Management workspace for owner role (per-user tab/sub-tab authorization).",
+    "supabase":         "Admin · Supabase — Supabase sync state + table inspector.",
+    "pipelines":        "Admin · Pipelines — pipeline mapping + manual trigger for each scan/job.",
+    "pipeline":         "Admin · Pipeline Diagnostics — per-stage diagnostic for one ticker through the scoring pipeline.",
+    "codehistory":      "Admin · Code History — recent git commits + change diff summary.",
+
+    # QuantDetail sub-tabs (qd-st data-sub values)
+    "sub:overview":   "Overview — master verdict for this ticker, regime gate, Rule Engine result, and macro drill-downs. Answer: should I look closer?",
+    "sub:plan":       "Plan · Ticket — execution-ready ticket with entry/stop/T1/T2/size + pre-mortem (what would make this go wrong) + order draft.",
+    "sub:chart":      "Chart — full OHLC with EMA stack, Fib levels, SMC zones, VWAP overlays. Click any tool to toggle.",
+    "sub:technicals": "Technicals — 10-section discipline view: indicators, S/R, statistics, cross-source confirmation, pre-mortem, sizing recommendation.",
+    "sub:patterns":   "Patterns — chart patterns detected (cup-and-handle, VCP, flag, ascending triangle, breakout-base) with completion %.",
+    "sub:smc":        "SMC — Smart Money Concepts: order blocks, CHoCH, BoS, FVG, liquidity sweeps with proximity to current price.",
+    "sub:value":      "Investment · Value — intrinsic value via DCF, margin of safety, raw statements, quality flags, peer cohort comparison.",
+    "sub:risk":       "Risk — VaR, Sharpe, drawdown, Kelly sizing, liquidity tier, stress-test under panic regime.",
+    "sub:er_lab":     "Earnings — beat-rate history, implied move, EPS revision trend, sympathy plays in the same sector.",
+    "sub:options":    "Options — IV surface, max pain, UOA scan, strategy matrix (cc/csp/spread payoffs).",
+    "sub:portfolio":  "Portfolio — cap usage if this ticker is added, goal contribution, rebalance suggestion.",
+    "sub:intel":      "Tape · Flow — combined news + insider + sentiment + 13F + catalyst calendar for this ticker.",
+    "sub:edge":       "Track Record — forward expectancy for THIS setup × regime × catalyst combo from picks_history.",
+    "sub:ml_edge":    "ML Edge — 3-headed ML forecast: direction probability, magnitude cone, hit-net (P of target before stop).",
+}
+
+
+def _chat_message_asks_for_help(msg: str) -> bool:
+    m = (msg or "").lower()
+    return any(k in m for k in (
+        "how do i use", "how to use", "what is this tab", "what does this",
+        "what is this page", "explain this tab", "explain this page",
+        "explain this sub", "what does this sub", "how do i", "what can i do",
+        "what should i look", "guide me", "walk me through",
+    ))
+
+
+def _chat_build_context(ticker: Optional[str], message: str = "",
+                        active_tab: Optional[str] = None,
+                        active_subtab: Optional[str] = None) -> str:
+    """Pull regime + per-ticker snapshot(s) from last_bundle.json.
+
+    Ticker resolution order:
+      1) Explicit `ticker` arg (from UI active-ticker detection)
+      2) Tickers mentioned in `message` that match a real symbol in the bundle
+    All hits are injected so the model has full numbers, not placeholders.
+    """
+    try:
+        bundle_path = BASE_DIR / "cache" / "last_bundle.json"
+        if not bundle_path.exists():
+            return "No scan data available yet."
+        bundle = json.loads(bundle_path.read_text())
+    except Exception:
+        return "No scan data available yet."
+
+    parts = []
+    r = bundle.get("regime") or {}
+    parts.append(
+        "MARKET REGIME: "
+        f"{r.get('regime4', r.get('regime', 'unknown'))} | "
+        f"SPY={r.get('spy_price')} (50EMA={r.get('spy_ema50')}) | "
+        f"VIX={r.get('vix_current')} ({(r.get('vix') or {}).get('vol_state','?')}) | "
+        f"Breadth pct>50d={r.get('breadth_pct_50d')}% | "
+        f"Max size cap={r.get('max_size_pct')}% | "
+        f"SPY Sharpe 126d={((r.get('spy_sharpe') or {}).get('sharpe_126d_ann'))}"
+    )
+    parts.append(f"Scan run: {bundle.get('run_date')} ({bundle.get('run_timestamp')})")
+
+    buy_count = len(bundle.get("buy_candidates") or [])
+    watch_count = len(bundle.get("watch_list") or [])
+    parts.append(f"Today: {buy_count} BUY candidates, {watch_count} on watchlist")
+
+    top_buys = []
+    for s in (bundle.get("buy_candidates") or [])[:8]:
+        top_buys.append(f"{s.get('ticker')}({s.get('score')}, {s.get('setup_family') or 'n/a'})")
+    if top_buys:
+        parts.append("TOP BUY CANDIDATES: " + ", ".join(top_buys))
+
+    # Resolve which tickers to inject in full detail
+    idx = _chat_collect_bundle_tickers(bundle)
+    valid = set(idx.keys())
+    wanted = []
+    if ticker:
+        t = ticker.upper().strip()
+        if t:
+            wanted.append(t)
+    for t in _chat_extract_tickers_from_msg(message, valid):
+        if t not in wanted:
+            wanted.append(t)
+
+    for t in wanted[:3]:  # cap at 3 per turn to keep prompt small
+        if t in idx:
+            found, source = idx[t]
+            parts.append(_chat_render_ticker_block(t, found, source))
+        else:
+            parts.append(f"\n=== TICKER {t} NOT IN TODAY'S SCAN ===\n"
+                         f"No trade plan exists. Tell the user this ticker is not in "
+                         f"today's scan and you cannot provide specific entry/stop/target levels.")
+
+    # Active-tab awareness — always tell the model what the user is looking at,
+    # and inject full docs when the question is help-shaped.
+    if active_tab or active_subtab:
+        tab_doc = _CHAT_TAB_DOCS.get(active_tab or "") or ""
+        sub_doc = _CHAT_TAB_DOCS.get(f"sub:{active_subtab}" if active_subtab else "") or ""
+        line = f"\n=== USER IS CURRENTLY VIEWING ===\nMain tab: {active_tab or '-'}"
+        if active_subtab:
+            line += f" · Sub-tab: {active_subtab}"
+        if tab_doc:
+            line += f"\nTab purpose: {tab_doc}"
+        if sub_doc:
+            line += f"\nSub-tab purpose: {sub_doc}"
+        parts.append(line)
+
+    # If the question is help-shaped ("how do I", "explain this tab"), inject
+    # the full tab+subtab description AND the global tab index so the model can
+    # cross-reference ("the Plan sub-tab is where you'd get an execution-ready
+    # ticket — switch to it via keyboard '2'").
+    if _chat_message_asks_for_help(message):
+        # Brief one-liner index of every tab so the model can suggest where to go
+        idx_lines = []
+        for k, v in _CHAT_TAB_DOCS.items():
+            short = v.split(" — ", 1)
+            short_label = short[0] if len(short) == 2 else k
+            idx_lines.append(f"  {k}: {short_label}")
+        parts.append("\n=== HELP INDEX (every tab + sub-tab) ===\n" + "\n".join(idx_lines))
+
+    return "\n".join(parts)
+
+
+_CHAT_SYSTEM_PROMPT = """You are Kairos, an AI assistant embedded inside a hedge-fund-grade swing-trading dashboard. The user is a sophisticated swing trader running a rules-based system with regime detection, Wilson-gated kill lists, and multi-sleeve attribution.
+
+CRITICAL LANGUAGE RULE: Always respond in English only. Never use Chinese, Spanish, or any other language even when discussing tickers, prices, or technical terms. Every word of every response must be English.
+
+CRITICAL NUMBERS RULE: When the user asks for entry, stop, targets, or any price levels, you MUST cite the exact dollar values from the trade plan in CONTEXT. NEVER use placeholders like $X, $Y, $Z, or generic phrases like "next resistance level" or "recent support" — those are forbidden. If the ticker is in CONTEXT, quote its actual entry/stop/T1/T2/hold-period numbers verbatim. If the ticker is NOT in today's scan (you'll see "TICKER X NOT IN TODAY'S SCAN"), say so plainly in one sentence and stop — do not fabricate a trade plan from generic rules.
+
+Style:
+- Be concise. Lead with the answer, then the why.
+- Cite numbers from the provided CONTEXT. Never invent gates, scores, or sleeves not present.
+- Use the user's vocabulary: regime (risk_on_trending / risk_on_choppy / risk_off / panic), pillars (Technicals, Catalyst, RS+Sector, Smart Money, Quality), sleeves (PEAD, Insider Cluster, Momentum Continuation, Defensive Rotation, Mean Reversion, ESP Play, Pre-FOMC Drift).
+- When you give a trade-plan view, surface RISK before RETURN (stop before targets) per the system's hedge-fund discipline.
+- No emojis unless asked. Markdown OK (bullets, tables) — keep it tight."""
+
+
+@app.get("/api/chat/status")
+async def chat_status():
+    """Tells the widget whether AI chat is available + which model is loaded."""
+    if not _chat_enabled():
+        return {"enabled": False, "reason": "AI_CHAT_ENABLED=0"}
+    try:
+        async with _httpx_chat.AsyncClient(timeout=3.0) as cx:
+            r = await cx.get(f"{_chat_ollama_url()}/api/tags")
+            if r.status_code != 200:
+                return {"enabled": False, "reason": "ollama not reachable"}
+            tags = r.json().get("models", [])
+            model = _chat_model()
+            have_model = any(m.get("name", "").startswith(model.split(":")[0]) for m in tags)
+            # RAG index size (0 if not built yet)
+            try:
+                import chat_rag
+                rag_n = chat_rag.index_size()
+            except Exception:
+                rag_n = 0
+            return {
+                "enabled": True,
+                "model": model,
+                "model_ready": have_model,
+                "available_models": [m.get("name") for m in tags],
+                "rag_chunks": rag_n,
+            }
+    except Exception as e:
+        return {"enabled": False, "reason": f"ollama error: {e}"}
+
+
+@app.post("/api/chat")
+async def chat_send(payload: dict = Body(...),
+                    credentials: HTTPBasicCredentials = Depends(_check_auth)):
+    """Stream a chat response from local Ollama.
+
+    Request: {"message": str, "ticker": Optional[str], "history": [{role, content}]}
+    Response: text/event-stream (server-sent events, each `data: {...}\\n\\n`)
+    """
+    if not _chat_enabled():
+        raise HTTPException(503, "AI chat disabled (AI_CHAT_ENABLED=0)")
+    msg = (payload.get("message") or "").strip()
+    if not msg:
+        raise HTTPException(400, "message required")
+    ticker = payload.get("ticker")
+    history = payload.get("history") or []
+    active_tab = payload.get("active_tab")
+    active_subtab = payload.get("active_subtab")
+
+    context = _chat_build_context(ticker, msg, active_tab, active_subtab)
+
+    # RAG layer — pull top-K relevant chunks from indexed docs + decision log.
+    # Always-retrieve (fast: ~50ms total). Falls back to no-op if index empty.
+    try:
+        import chat_rag
+        retrieved = chat_rag.retrieve(msg, k=5)
+        if retrieved:
+            rag_lines = ["\n=== RELEVANT KNOWLEDGE (from indexed docs + decision history) ==="]
+            for r in retrieved:
+                rag_lines.append(
+                    f"\n--- {r['source']} ({r['kind']}, similarity {r['score']:.2f}) ---\n"
+                    f"{r['text']}"
+                )
+            context += "\n".join(rag_lines)
+    except Exception as _rag_err:
+        # RAG failure must never break chat
+        print(f"[chat] rag retrieval skipped: {_rag_err}")
+    system = _CHAT_SYSTEM_PROMPT + "\n\n=== DASHBOARD CONTEXT ===\n" + context
+
+    messages = [{"role": "system", "content": system}]
+    # Cap history to last 8 turns to keep prompt small
+    for h in history[-8:]:
+        if h.get("role") in ("user", "assistant") and h.get("content"):
+            messages.append({"role": h["role"], "content": h["content"]})
+    messages.append({"role": "user", "content": msg})
+
+    model = _chat_model()
+    ollama_url = _chat_ollama_url()
+
+    async def event_stream():
+        try:
+            async with _httpx_chat.AsyncClient(timeout=300.0) as cx:
+                async with cx.stream(
+                    "POST",
+                    f"{ollama_url}/api/chat",
+                    json={"model": model, "messages": messages, "stream": True,
+                          "options": {"temperature": 0.2, "num_ctx": 8192, "repeat_penalty": 1.05}},
+                ) as r:
+                    if r.status_code != 200:
+                        body = await r.aread()
+                        yield f"data: {json.dumps({'error': f'ollama {r.status_code}: {body.decode()[:200]}'})}\n\n"
+                        return
+                    async for line in r.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                        except Exception:
+                            continue
+                        token = (chunk.get("message") or {}).get("content", "")
+                        done = chunk.get("done", False)
+                        if token:
+                            yield f"data: {json.dumps({'token': token})}\n\n"
+                        if done:
+                            yield f"data: {json.dumps({'done': True})}\n\n"
+                            return
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return _StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 if __name__ == "__main__":

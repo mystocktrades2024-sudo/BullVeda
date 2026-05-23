@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Signal Scanner · Option B · Sector Heatmap-First</title>
+  <style>
+    :root {
+      --bg:#08090c; --bg-1:#0d1014; --bg-2:#11151b; --card:#12161d; --card-hi:#171c25;
+      --border:#1f2937; --border-hi:#334155; --border-soft:rgba(255,255,255,0.06);
+      --ink:#f3f4f6; --ink-2:#d1d5db; --mute:#9ca3af; --mute-2:#6b7280; --mute-3:#4b5563;
+      --copper:#c97b3a; --copper-hi:#e09850;
+      --gn:#10b981; --gn-hi:#34d399; --gn-bg:rgba(16,185,129,0.10); --gn-glow:rgba(16,185,129,0.30);
+      --rd:#f87171; --rd-hi:#fca5a5; --rd-bg:rgba(248,113,113,0.10);
+      --am:#f59e0b; --am-hi:#fbbf24; --am-bg:rgba(245,158,11,0.10);
+      --bl:#3b82f6; --pl:#a78bfa; --ti:#22d3ee;
+      --gn-1:#064e3b; --gn-2:#065f46; --gn-3:#047857; --gn-4:#059669; --gn-5:#10b981;
+      --rd-1:#7f1d1d; --rd-2:#991b1b; --rd-3:#b91c1c; --rd-4:#dc2626; --rd-5:#ef4444;
+      --neu:#374151;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(ellipse at top, #0c1115 0%, var(--bg) 60%);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;padding:18px 28px 64px;min-height:100vh;line-height:1.45}
+    .back{color:var(--mute);font-size:0.78rem;text-decoration:none;margin-bottom:14px;display:inline-block}
+    .back:hover{color:var(--copper-hi)}
+    .wrap{max-width:1640px;margin:0 auto}
+
+    /* HEADER */
+    .hd{display:flex;align-items:center;justify-content:space-between;margin:6px 0 18px;padding-bottom:16px;border-bottom:1px solid var(--border-soft);position:relative}
+    .hd::after{content:'';position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,var(--copper) 50%,transparent)}
+    .hd-l{display:flex;align-items:center;gap:14px}
+    .hd-l .dot{width:9px;height:9px;border-radius:50%;background:var(--gn);animation:pulse 2.4s infinite}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 var(--gn-glow)}70%{box-shadow:0 0 0 8px transparent}100%{box-shadow:0 0 0 0 transparent}}
+    .hd-l .brand{color:var(--copper);font-weight:700;font-size:0.74rem;letter-spacing:0.14em;text-transform:uppercase}
+    .hd-l h1{font-family:'Playfair Display',Georgia,serif;font-style:italic;font-weight:400;margin:0;font-size:2.1rem;background:linear-gradient(180deg,#fff 0%,#cbd5e1 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+    .hd-r{display:flex;align-items:center;gap:24px;font-size:0.78rem;color:var(--mute)}
+    .hd-r .kv{display:flex;flex-direction:column;align-items:flex-end;line-height:1.2}
+    .hd-r .kv-lbl{color:var(--mute-2);font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;font-weight:600}
+    .hd-r .kv-val{color:var(--ink-2);font-size:0.95rem;font-weight:700;font-family:ui-monospace,monospace}
+    .hd-r .kv-val.gn{color:var(--gn)}
+
+    /* COMPACT PULSE — single row */
+    .pulse2{display:grid;grid-template-columns:auto 1fr 1fr auto;gap:0;margin-bottom:18px;background:linear-gradient(180deg,var(--card) 0%,var(--bg-1) 100%);border:1px solid var(--border);border-radius:14px;padding:12px 18px;align-items:center;position:relative;overflow:hidden}
+    .pulse2::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--gn),var(--copper),var(--am),var(--rd));opacity:0.4}
+    .p2-cell{display:flex;align-items:center;gap:12px;padding:0 18px;border-right:1px solid var(--border-soft);height:50px}
+    .p2-cell:last-child{border-right:none}
+    .p2-cell:first-child{padding-left:0}
+    .p2-lbl{font-size:0.65rem;color:var(--mute-2);letter-spacing:0.1em;text-transform:uppercase;font-weight:700;line-height:1.2}
+    .p2-val-wrap{display:flex;flex-direction:column;line-height:1.1}
+    .p2-val{font-size:1.25rem;font-weight:700;font-family:ui-monospace,monospace;color:var(--ink)}
+    .p2-sub{font-size:0.66rem;color:var(--mute);font-family:ui-monospace,monospace}
+    .p2-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:0.72rem;font-weight:700;background:var(--am-bg);color:var(--am);border:1px solid var(--am);text-transform:uppercase}
+    .p2-pill .pd{width:6px;height:6px;border-radius:50%;background:var(--am);animation:pulse 2s infinite}
+    .p2-bar{flex-grow:1;height:6px;background:var(--bg-2);border-radius:3px;overflow:hidden;position:relative;min-width:80px}
+    .p2-fill{height:100%;background:linear-gradient(90deg,var(--rd) 0%,var(--am) 40%,var(--gn) 70%);opacity:0.55}
+    .p2-marker{position:absolute;top:-2px;width:2px;height:10px;background:var(--ink)}
+    .p2-mini-gauge{width:60px;height:32px}
+
+    /* LAYOUT — heatmap left + sidebar right */
+    .layout{display:grid;grid-template-columns:1fr 320px;gap:16px;margin-bottom:18px}
+    @media (max-width:1100px){.layout{grid-template-columns:1fr}}
+
+    /* HEATMAP */
+    .heatmap{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;position:relative}
+    .hm-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border-soft);flex-wrap:wrap;gap:10px}
+    .hm-ttl{font-family:'Playfair Display',Georgia,serif;font-style:italic;font-size:1.2rem;font-weight:400}
+    .hm-legend{display:flex;align-items:center;gap:12px;font-size:0.7rem;color:var(--mute);font-family:ui-monospace,monospace}
+    .hm-legend .lg{display:flex;align-items:center;gap:5px}
+    .hm-legend .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+    .hm-mode{display:flex;gap:3px;background:var(--bg-2);border-radius:8px;padding:3px}
+    .hm-mode button{background:transparent;border:none;color:var(--mute);font-size:0.7rem;padding:5px 9px;border-radius:5px;cursor:pointer;font-weight:600;font-family:inherit}
+    .hm-mode button.on{background:var(--copper);color:#fff}
+
+    .treemap{display:grid;grid-template-columns:repeat(12,1fr);grid-auto-rows:minmax(80px,auto);gap:5px;min-height:560px}
+    .sector{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:8px 8px 6px;display:flex;flex-direction:column;gap:5px;position:relative;overflow:hidden}
+    .sec-hd{display:flex;align-items:baseline;justify-content:space-between;font-size:0.7rem}
+    .sec-name{font-weight:700;color:var(--ink-2);letter-spacing:0.02em;text-transform:uppercase;font-size:0.66rem;font-family:ui-monospace,monospace}
+    .sec-cnt{color:var(--mute-2);font-family:ui-monospace,monospace;font-size:0.65rem}
+    .sec-tiles{display:flex;flex-wrap:wrap;gap:3px;flex-grow:1;align-content:flex-start}
+    .tile{flex-grow:1;min-width:28px;padding:4px 5px;border-radius:3px;font-family:ui-monospace,monospace;font-size:0.6rem;font-weight:700;color:#fff;cursor:pointer;transition:transform .12s,box-shadow .12s;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.1;letter-spacing:0.02em;border:1px solid rgba(255,255,255,0.05)}
+    .tile.huge{font-size:0.8rem;padding:10px 6px;min-width:55px}
+    .tile.big{font-size:0.72rem;padding:7px 5px;min-width:42px}
+    .tile.med{font-size:0.66rem;padding:6px 4px;min-width:35px}
+    .tile.sm{font-size:0.58rem;padding:4px 3px;min-width:28px}
+    .tile:hover{transform:scale(1.08);box-shadow:0 0 0 1px var(--ink),0 4px 12px rgba(0,0,0,0.5);z-index:2;position:relative}
+    /* BUY tiles get a colored top border for emphasis */
+    .tile.buy{box-shadow:inset 0 2px 0 rgba(255,255,255,0.4)}
+
+    /* SIDEBAR */
+    .sidebar{display:flex;flex-direction:column;gap:12px}
+    .sb-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+    .sb-hd{padding:11px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;border-bottom:1px solid transparent;transition:background .15s}
+    .sb-hd:hover{background:var(--bg-2)}
+    .sb-hd.open{border-bottom-color:var(--border-soft)}
+    .sb-hd-l{display:flex;align-items:center;gap:8px;font-size:0.78rem;font-weight:700;letter-spacing:0.02em}
+    .sb-hd .ico{font-size:1rem}
+    .sb-hd-r{display:flex;align-items:center;gap:8px;font-size:0.7rem;color:var(--mute);font-family:ui-monospace,monospace}
+    .sb-hd-r .cnt{background:var(--bg-2);color:var(--ink-2);padding:1px 6px;border-radius:4px;font-weight:700}
+    .sb-hd .caret{color:var(--mute-2);transition:transform .15s}
+    .sb-hd.open .caret{transform:rotate(180deg)}
+    .sb-body{padding:8px 12px 12px;display:none}
+    .sb-body.show{display:block}
+    .sb-row{display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px dashed var(--border-soft);cursor:pointer;border-radius:5px;transition:background .15s}
+    .sb-row:last-child{border-bottom:none}
+    .sb-row:hover{background:var(--bg-2)}
+    .sb-row .rk{font-family:ui-monospace,monospace;font-size:0.65rem;color:var(--mute-2);font-weight:700;flex-shrink:0;width:14px}
+    .sb-row .sym{font-family:ui-monospace,monospace;font-weight:700;font-size:0.85rem;flex-shrink:0;width:48px}
+    .sb-row .meta{font-size:0.66rem;color:var(--mute);flex-grow:1;line-height:1.3}
+    .sb-row .meta b{color:var(--ink-2)}
+    .sb-row .val{font-family:ui-monospace,monospace;font-weight:700;font-size:0.78rem;flex-shrink:0}
+    .sb-row .val.gn{color:var(--gn)}
+    .sb-row .val.am{color:var(--am)}
+    .sb-row .val.rd{color:var(--rd)}
+
+    /* CLICKED TICKER INFO BAR */
+    .selbar{background:linear-gradient(90deg,var(--card) 0%,var(--bg-1) 100%);border:1px solid var(--copper);border-radius:12px;padding:14px 18px;margin-bottom:14px;display:none;align-items:center;gap:20px;animation:slideIn .25s ease-out}
+    .selbar.show{display:flex}
+    @keyframes slideIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+    .selbar .sb-sym{font-family:ui-monospace,monospace;font-size:1.6rem;font-weight:800;color:var(--ink)}
+    .selbar .sb-meta{display:flex;flex-direction:column;gap:2px;font-size:0.78rem;color:var(--mute);font-family:ui-monospace,monospace}
+    .selbar .sb-meta b{color:var(--ink-2);font-weight:700}
+    .selbar .grow{flex-grow:1}
+    .selbar button{background:var(--copper);color:#fff;border:none;font-size:0.78rem;padding:7px 16px;border-radius:7px;cursor:pointer;font-weight:700;font-family:inherit;letter-spacing:0.04em}
+    .selbar button.gn{background:var(--gn);color:#000}
+    .selbar button:hover{filter:brightness(1.15)}
+
+    /* FILTER BAR */
+    .filterbar{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
+    .fchip{background:var(--bg-1);border:1px solid var(--border);color:var(--mute);font-size:0.74rem;padding:6px 12px;border-radius:8px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:5px}
+    .fchip:hover{color:var(--ink);border-color:var(--border-hi)}
+    .fchip.on{background:var(--copper);color:#fff;border-color:var(--copper)}
+    .fchip .cnt{background:rgba(0,0,0,0.25);padding:1px 5px;border-radius:4px;font-size:0.66rem;font-family:ui-monospace,monospace}
+    .fchip:not(.on) .cnt{background:var(--bg-2);color:var(--mute-2)}
+
+    .legend{margin-top:24px;text-align:center;color:var(--mute-2);font-size:0.74rem;padding-top:18px;border-top:1px dashed var(--border-soft)}
+
+    /* tooltip on tile */
+    .tip{position:fixed;background:#000;border:1px solid var(--copper);border-radius:6px;padding:8px 10px;font-family:ui-monospace,monospace;font-size:0.7rem;pointer-events:none;z-index:100;display:none;box-shadow:0 4px 16px rgba(0,0,0,0.6)}
+    .tip b{color:var(--copper)}
+    .tip .ln{color:var(--mute)}
+    .tip .ln b{color:var(--ink-2)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="scanner_v2_index.html">← back to options</a>
+
+    <!-- HEADER -->
+    <div class="hd">
+      <div class="hd-l">
+        <span class="dot"></span>
+        <span class="brand">KAIROS · LIVE</span>
+        <h1>Signal Scanner</h1>
+      </div>
+      <div class="hd-r">
+        <div class="kv"><span class="kv-lbl">Scored</span><span class="kv-val">228</span></div>
+        <div class="kv"><span class="kv-lbl">BUY</span><span class="kv-val gn">7</span></div>
+        <div class="kv"><span class="kv-lbl">Top</span><span class="kv-val">93 FRSH</span></div>
+        <div class="kv"><span class="kv-lbl">Scan</span><span class="kv-val" style="font-size:0.78rem;font-weight:600;color:var(--mute)">13:30 PT</span></div>
+      </div>
+    </div>
+
+    <!-- COMPACT PULSE -->
+    <div class="pulse2">
+      <div class="p2-cell">
+        <div>
+          <div class="p2-lbl">Regime</div>
+          <div class="p2-pill" style="margin-top:5px"><span class="pd"></span>RISK ON CHOPPY</div>
+        </div>
+      </div>
+      <div class="p2-cell">
+        <div class="p2-lbl">VIX</div>
+        <div class="p2-val-wrap"><span class="p2-val">16.9</span><span class="p2-sub" style="color:var(--gn)">CALM ↓0.3</span></div>
+        <svg class="p2-mini-gauge" viewBox="0 0 100 50">
+          <path d="M 10 45 A 40 40 0 0 1 90 45" fill="none" stroke="#1f2937" stroke-width="6" stroke-linecap="round"/>
+          <path d="M 10 45 A 40 40 0 0 1 42 8" fill="none" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+          <path d="M 42 8 A 40 40 0 0 1 58 8" fill="none" stroke="#f59e0b" stroke-width="6"/>
+          <path d="M 58 8 A 40 40 0 0 1 90 45" fill="none" stroke="#f87171" stroke-width="6" stroke-linecap="round"/>
+          <g transform="translate(50 45)"><line x1="0" y1="0" x2="-23" y2="-17" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="0" cy="0" r="3" fill="#c97b3a"/></g>
+        </svg>
+      </div>
+      <div class="p2-cell">
+        <div class="p2-lbl">Breadth</div>
+        <div class="p2-val-wrap"><span class="p2-val">55%</span><span class="p2-sub">10pp below 65</span></div>
+        <div class="p2-bar"><div class="p2-fill" style="width:100%"></div><div class="p2-marker" style="left:55%"></div></div>
+      </div>
+      <div class="p2-cell">
+        <div>
+          <div class="p2-lbl">Universe Mix</div>
+          <div style="display:flex;gap:11px;font-family:ui-monospace,monospace;font-size:0.78rem;margin-top:5px">
+            <span style="color:var(--gn);font-weight:700">●7</span>
+            <span style="color:var(--am);font-weight:700">●17</span>
+            <span style="color:var(--mute);font-weight:700">●140</span>
+            <span style="color:var(--rd);font-weight:700">●64</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SELECTED TICKER BAR (hidden until click) -->
+    <div class="selbar" id="selbar">
+      <span class="sb-sym" id="sel-sym">—</span>
+      <div class="sb-meta" id="sel-meta">
+        <span><b>—</b> · score <b>—</b> · verdict <b>—</b></span>
+        <span>R:R <b>—</b> · entry quality <b>—</b></span>
+      </div>
+      <div class="grow"></div>
+      <button class="gn">BUY</button>
+      <button>⭐ WATCH</button>
+      <button>📋 PLAN</button>
+    </div>
+
+    <!-- LAYOUT — heatmap + sidebar -->
+    <div class="layout">
+
+      <!-- HEATMAP -->
+      <div class="heatmap">
+        <div class="hm-hd">
+          <div class="hm-ttl">Universe Heatmap · 228 names · 11 sectors</div>
+          <div class="hm-mode">
+            <button class="on">verdict</button>
+            <button>score</button>
+            <button>RVOL</button>
+            <button>RS</button>
+          </div>
+          <div class="hm-legend">
+            <div class="lg"><span class="sw" style="background:#10b981"></span>BUY (7)</div>
+            <div class="lg"><span class="sw" style="background:#f59e0b"></span>WATCH (17)</div>
+            <div class="lg"><span class="sw" style="background:#374151"></span>NEUT (140)</div>
+            <div class="lg"><span class="sw" style="background:#dc2626"></span>KILL (64)</div>
+            <div class="lg" style="color:var(--mute-2)">· size = mkt cap</div>
+          </div>
+        </div>
+
+        <div class="treemap" id="treemap"></div>
+      </div>
+
+      <!-- SIDEBAR -->
+      <div class="sidebar">
+        <div class="sb-card">
+          <div class="sb-hd open" onclick="toggleSb(this)"><div class="sb-hd-l"><span class="ico">⚡</span>Fresh Entries</div><div class="sb-hd-r"><span class="cnt">5</span><span class="caret">▾</span></div></div>
+          <div class="sb-body show">
+            <div class="sb-row"><span class="rk">#1</span><span class="sym">APA</span><span class="meta">Trend · Energy<br/>RVOL <b>0.93</b> · RS <b>100</b></span><span class="val gn">70</span></div>
+            <div class="sb-row"><span class="rk">#2</span><span class="sym">CF</span><span class="meta">Trend · Mat<br/>RVOL <b>0.88</b> · RS <b>94</b></span><span class="val gn">70</span></div>
+            <div class="sb-row"><span class="rk">#3</span><span class="sym">APP</span><span class="meta">VCP · Tech<br/>RVOL <b>0.67</b> · RS <b>94</b></span><span class="val am">61</span></div>
+            <div class="sb-row"><span class="rk">#4</span><span class="sym">ABNB</span><span class="meta">VCP · CC<br/>RVOL <b>1.01</b> · RS <b>51</b></span><span class="val am">52</span></div>
+            <div class="sb-row"><span class="rk">#5</span><span class="sym">PLTR</span><span class="meta">VCP · Tech<br/>RVOL <b>0.57</b> · RS <b>42</b></span><span class="val">37</span></div>
+          </div>
+        </div>
+
+        <div class="sb-card">
+          <div class="sb-hd" onclick="toggleSb(this)"><div class="sb-hd-l"><span class="ico">📅</span>Earnings This Week</div><div class="sb-hd-r"><span class="cnt">5</span><span class="caret">▾</span></div></div>
+          <div class="sb-body">
+            <div class="sb-row"><span class="rk">#1</span><span class="sym">BAH</span><span class="meta">Industrials<br/>IV-implied <b>±5.2%</b></span><span class="val rd">TODAY</span></div>
+            <div class="sb-row"><span class="rk">#2</span><span class="sym">TRNS</span><span class="meta">Industrials<br/>IV-implied <b>±6.1%</b></span><span class="val am">+3d</span></div>
+            <div class="sb-row"><span class="rk">#3</span><span class="sym">NAT</span><span class="meta">Energy<br/>close T2 EOD T-1</span><span class="val am">+3d</span></div>
+            <div class="sb-row"><span class="rk">#4</span><span class="sym">URBN</span><span class="meta">Cons Cyc<br/>IV-implied <b>±8.4%</b></span><span class="val am">+4d</span></div>
+            <div class="sb-row"><span class="rk">#5</span><span class="sym">VSAT</span><span class="meta">Tech<br/>close T2 EOD T-1</span><span class="val am">+4d</span></div>
+          </div>
+        </div>
+
+        <div class="sb-card">
+          <div class="sb-hd" onclick="toggleSb(this)"><div class="sb-hd-l"><span class="ico">🔥</span>Volume Surges</div><div class="sb-hd-r"><span class="cnt">5</span><span class="caret">▾</span></div></div>
+          <div class="sb-body">
+            <div class="sb-row"><span class="rk">#1</span><span class="sym">INTU</span><span class="meta">Tech · Trend<br/>Score <b>29</b> · PULL</span><span class="val gn">6.07×</span></div>
+            <div class="sb-row"><span class="rk">#2</span><span class="sym">HYLN</span><span class="meta">CC · Trend<br/>Score <b>50</b> · MISS</span><span class="val gn">5.23×</span></div>
+            <div class="sb-row"><span class="rk">#3</span><span class="sym">EXAS</span><span class="meta">HC · Trend<br/>Score <b>56</b> · MISS</span><span class="val gn">5.10×</span></div>
+            <div class="sb-row"><span class="rk">#4</span><span class="sym">ALE</span><span class="meta">Util · Brk<br/>Score <b>64</b> · MISS</span><span class="val am">4.05×</span></div>
+            <div class="sb-row"><span class="rk">#5</span><span class="sym">IBM</span><span class="meta">Tech · Brk<br/>Score <b>59</b> · MISS</span><span class="val am">3.59×</span></div>
+          </div>
+        </div>
+
+        <div class="sb-card">
+          <div class="sb-hd" onclick="toggleSb(this)"><div class="sb-hd-l"><span class="ico">✦</span>AI Edge Top 5</div><div class="sb-hd-r"><span class="cnt">5</span><span class="caret">▾</span></div></div>
+          <div class="sb-body">
+            <div class="sb-row"><span class="rk">#1</span><span class="sym">COIN</span><span class="meta">p(up) <b>55%</b> · sma200 +4bp</span><span class="val gn">+0.83%</span></div>
+            <div class="sb-row"><span class="rk">#2</span><span class="sym">HOOD</span><span class="meta">p(up) <b>50%</b> · sma200 +4bp</span><span class="val gn">+0.56%</span></div>
+            <div class="sb-row"><span class="rk">#3</span><span class="sym">TTD</span><span class="meta">p(up) <b>50%</b> · 52w high 4bp</span><span class="val gn">+0.50%</span></div>
+            <div class="sb-row"><span class="rk">#4</span><span class="sym">AMCR</span><span class="meta">p(up) <b>50%</b> · pctrank 52w</span><span class="val gn">+1.03%</span></div>
+            <div class="sb-row"><span class="rk">#5</span><span class="sym">BBWI</span><span class="meta">p(up) <b>50%</b> · ret 63d</span><span class="val gn">+0.51%</span></div>
+          </div>
+        </div>
+
+        <div class="sb-card">
+          <div class="sb-hd" onclick="toggleSb(this)"><div class="sb-hd-l"><span class="ico">🚀</span>Top Momentum</div><div class="sb-hd-r"><span class="cnt">0</span><span class="caret">▾</span></div></div>
+          <div class="sb-body">
+            <div class="sb-row" style="padding:14px 4px;color:var(--mute-2);font-style:italic;font-size:0.74rem">No grade-A momentum names today · pipeline ETA 09:30 PT</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FILTER BAR -->
+    <div class="filterbar">
+      <div class="fchip on">All <span class="cnt">228</span></div>
+      <div class="fchip">Swing <span class="cnt">145</span></div>
+      <div class="fchip">Position <span class="cnt">7</span></div>
+      <div class="fchip">Invest <span class="cnt">76</span></div>
+      <div class="fchip">Verdict: BUY <span class="cnt">7</span></div>
+      <div class="fchip">Verdict: WATCH <span class="cnt">17</span></div>
+      <div class="fchip">In Zone <span class="cnt">22</span></div>
+      <div class="fchip">Fresh Entry <span class="cnt">5</span></div>
+      <div class="fchip">Killed <span class="cnt">64</span></div>
+    </div>
+
+    <div class="legend">↓ Signal table renders below · click any heatmap tile to filter table by ticker</div>
+  </div>
+
+  <div class="tip" id="tip"></div>
+
+  <script>
+    // 11 sectors × random tickers with verdicts, sizes for treemap
+    const SECTORS = [
+      { name:'Technology', col:5, row:2, tickers:[
+        { s:'DELL', v:'BUY', sc:78, sz:'huge' }, { s:'APP', v:'BUY', sc:61, sz:'huge' },
+        { s:'LITE', v:'BUY', sc:71, sz:'big' }, { s:'PLTR', v:'BUY', sc:37, sz:'big' },
+        { s:'INTU', v:'NEUT', sc:29, sz:'big' }, { s:'IBM', v:'NEUT', sc:59, sz:'med' },
+        { s:'VSAT', v:'WATCH', sc:73, sz:'med' }, { s:'NTAP', v:'NEUT', sc:74, sz:'med' },
+        { s:'SWKS', v:'NEUT', sc:63, sz:'med' }, { s:'AMD', v:'NEUT', sc:55, sz:'med' },
+        { s:'GOOG', v:'NEUT', sc:65, sz:'med' }, { s:'AMBA', v:'WATCH', sc:75, sz:'med' },
+        { s:'TTD', v:'WATCH', sc:60, sz:'med' }, { s:'ADSK', v:'NEUT', sc:67, sz:'sm' },
+        { s:'KEYS', v:'NEUT', sc:69, sz:'sm' }, { s:'GDDY', v:'NEUT', sc:66, sz:'sm' },
+        { s:'NDSN', v:'NEUT', sc:55, sz:'sm' }, { s:'SATS', v:'KILL', sc:47, sz:'sm' },
+        { s:'EBAY', v:'NEUT', sc:58, sz:'sm' }, { s:'EA', v:'KILL', sc:33, sz:'sm' },
+        { s:'TTWO', v:'NEUT', sc:60, sz:'sm' }, { s:'V', v:'NEUT', sc:64, sz:'sm' },
+      ]},
+      { name:'Healthcare', col:3, row:2, tickers:[
+        { s:'EXAS', v:'NEUT', sc:56, sz:'big' }, { s:'UNH', v:'NEUT', sc:57, sz:'big' },
+        { s:'CVS', v:'NEUT', sc:55, sz:'med' }, { s:'DVA', v:'NEUT', sc:57, sz:'med' },
+        { s:'CNC', v:'NEUT', sc:49, sz:'med' }, { s:'WST', v:'NEUT', sc:50, sz:'sm' },
+        { s:'VTRS', v:'KILL', sc:50, sz:'sm' }, { s:'SOLV', v:'KILL', sc:47, sz:'sm' },
+        { s:'IART', v:'NEUT', sc:57, sz:'sm' }, { s:'EW', v:'NEUT', sc:48, sz:'sm' },
+      ]},
+      { name:'Energy', col:2, row:2, tickers:[
+        { s:'APA', v:'BUY', sc:70, sz:'huge' }, { s:'OXY', v:'NEUT', sc:71, sz:'big' },
+        { s:'MPC', v:'NEUT', sc:70, sz:'big' }, { s:'PSX', v:'NEUT', sc:63, sz:'med' },
+        { s:'BKR', v:'NEUT', sc:68, sz:'med' }, { s:'NAT', v:'WATCH', sc:62, sz:'sm' },
+        { s:'OKE', v:'NEUT', sc:56, sz:'sm' }, { s:'SDRL', v:'NEUT', sc:83, sz:'med' },
+      ]},
+      { name:'Financials', col:2, row:2, tickers:[
+        { s:'NDAQ', v:'KILL', sc:62, sz:'big' }, { s:'IBKR', v:'KILL', sc:64, sz:'big' },
+        { s:'CBOE', v:'KILL', sc:62, sz:'med' }, { s:'GS', v:'NEUT', sc:55, sz:'med' },
+        { s:'ALL', v:'KILL', sc:57, sz:'med' }, { s:'TRV', v:'NEUT', sc:60, sz:'sm' },
+        { s:'AIZ', v:'KILL', sc:59, sz:'sm' }, { s:'BEN', v:'KILL', sc:62, sz:'sm' },
+        { s:'MET', v:'NEUT', sc:63, sz:'sm' },
+      ]},
+      { name:'Cons Cyclical', col:2, row:1, tickers:[
+        { s:'ABNB', v:'BUY', sc:52, sz:'big' }, { s:'CASY', v:'KILL', sc:55, sz:'big' },
+        { s:'TJX', v:'NEUT', sc:54, sz:'med' }, { s:'LEA', v:'NEUT', sc:66, sz:'med' },
+        { s:'SBUX', v:'KILL', sc:51, sz:'sm' }, { s:'URBN', v:'WATCH', sc:43, sz:'sm' },
+        { s:'YETI', v:'NEUT', sc:48, sz:'sm' }, { s:'HYLN', v:'KILL', sc:50, sz:'sm' },
+      ]},
+      { name:'Industrials', col:2, row:1, tickers:[
+        { s:'VRT', v:'KILL', sc:68, sz:'big' }, { s:'GNRC', v:'KILL', sc:45, sz:'med' },
+        { s:'CHRW', v:'NEUT', sc:49, sz:'sm' }, { s:'EXPD', v:'NEUT', sc:51, sz:'sm' },
+        { s:'NSC', v:'NEUT', sc:53, sz:'sm' }, { s:'BAH', v:'NEUT', sc:60, sz:'sm' },
+        { s:'TRNS', v:'NEUT', sc:60, sz:'sm' }, { s:'JBHT', v:'NEUT', sc:54, sz:'sm' },
+      ]},
+      { name:'Comm Services', col:2, row:1, tickers:[
+        { s:'GOOGL', v:'NEUT', sc:67, sz:'big' }, { s:'LYV', v:'NEUT', sc:55, sz:'med' },
+        { s:'NDAQ', v:'NEUT', sc:62, sz:'sm' }, { s:'TWST', v:'NEUT', sc:54, sz:'sm' },
+        { s:'LITE', v:'BUY', sc:71, sz:'med' },
+      ]},
+      { name:'Cons Defensive', col:2, row:1, tickers:[
+        { s:'ADM', v:'KILL', sc:64, sz:'med' }, { s:'KR', v:'KILL', sc:50, sz:'med' },
+        { s:'SJM', v:'KILL', sc:45, sz:'sm' }, { s:'MNST', v:'KILL', sc:51, sz:'sm' },
+        { s:'CL', v:'NEUT', sc:56, sz:'sm' }, { s:'HRB', v:'NEUT', sc:57, sz:'sm' },
+      ]},
+      { name:'Materials', col:2, row:1, tickers:[
+        { s:'CF', v:'BUY', sc:70, sz:'huge' }, { s:'NUE', v:'NEUT', sc:59, sz:'med' },
+        { s:'DOW', v:'KILL', sc:3, sz:'sm' }, { s:'LYB', v:'KILL', sc:3, sz:'sm' },
+        { s:'ALB', v:'KILL', sc:43, sz:'sm' }, { s:'CLF', v:'NEUT', sc:52, sz:'sm' },
+      ]},
+      { name:'Utilities', col:2, row:1, tickers:[
+        { s:'ALE', v:'WATCH', sc:64, sz:'big' }, { s:'ETR', v:'NEUT', sc:40, sz:'med' },
+        { s:'EVRG', v:'NEUT', sc:48, sz:'sm' }, { s:'LNT', v:'NEUT', sc:39, sz:'sm' },
+        { s:'ES', v:'NEUT', sc:35, sz:'sm' }, { s:'SO', v:'NEUT', sc:47, sz:'sm' },
+        { s:'D', v:'NEUT', sc:54, sz:'sm' },
+      ]},
+      { name:'Real Estate', col:2, row:1, tickers:[
+        { s:'CCI', v:'KILL', sc:53, sz:'med' }, { s:'DOC', v:'NEUT', sc:67, sz:'sm' },
+        { s:'IRM', v:'NEUT', sc:49, sz:'sm' }, { s:'EXR', v:'NEUT', sc:42, sz:'sm' },
+        { s:'HST', v:'WATCH', sc:74, sz:'sm' }, { s:'VTR', v:'NEUT', sc:57, sz:'sm' },
+        { s:'ESS', v:'NEUT', sc:47, sz:'sm' },
+      ]},
+    ];
+
+    function tileColor(verdict, score) {
+      if (verdict === 'BUY')   return score >= 75 ? '#10b981' : score >= 60 ? '#059669' : '#047857';
+      if (verdict === 'WATCH') return score >= 70 ? '#f59e0b' : '#b45309';
+      if (verdict === 'KILL')  return score >= 60 ? '#b91c1c' : score >= 40 ? '#991b1b' : '#7f1d1d';
+      return score >= 65 ? '#4b5563' : '#374151';
+    }
+
+    function renderTreemap() {
+      const html = SECTORS.map(sec => {
+        const tiles = sec.tickers.map(t => {
+          const color = tileColor(t.v, t.sc);
+          const buyCls = t.v === 'BUY' ? ' buy' : '';
+          return `<div class="tile ${t.sz}${buyCls}" style="background:${color}"
+                     data-sym="${t.s}" data-v="${t.v}" data-sc="${t.sc}" data-sec="${sec.name}">${t.s}</div>`;
+        }).join('');
+        return `<div class="sector" style="grid-column:span ${sec.col};grid-row:span ${sec.row}">
+          <div class="sec-hd"><span class="sec-name">${sec.name}</span><span class="sec-cnt">${sec.tickers.length}</span></div>
+          <div class="sec-tiles">${tiles}</div>
+        </div>`;
+      }).join('');
+      document.getElementById('treemap').innerHTML = html;
+    }
+    renderTreemap();
+
+    // Tooltips
+    const tip = document.getElementById('tip');
+    document.querySelectorAll('.tile').forEach(t => {
+      t.addEventListener('mouseenter', e => {
+        const sym = t.dataset.sym, v = t.dataset.v, sc = t.dataset.sc, sec = t.dataset.sec;
+        tip.innerHTML = `<b>${sym}</b><br/>
+          <span class="ln">Sector <b>${sec}</b></span><br/>
+          <span class="ln">Verdict <b style="color:${tileColor(v,sc)}">${v}</b></span><br/>
+          <span class="ln">Score <b>${sc}</b></span>`;
+        tip.style.display = 'block';
+      });
+      t.addEventListener('mousemove', e => {
+        tip.style.left = (e.clientX + 12) + 'px';
+        tip.style.top  = (e.clientY + 12) + 'px';
+      });
+      t.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+      t.addEventListener('click', () => {
+        const sym = t.dataset.sym, v = t.dataset.v, sc = t.dataset.sc, sec = t.dataset.sec;
+        document.getElementById('sel-sym').textContent = sym;
+        document.getElementById('sel-meta').innerHTML = `
+          <span>${sec} · score <b style="color:${tileColor(v,sc)}">${sc}</b> · verdict <b>${v}</b></span>
+          <span>click PLAN for full trade ticket · BUY for one-click order</span>`;
+        document.getElementById('selbar').classList.add('show');
+      });
+    });
+
+    function toggleSb(el) {
+      el.classList.toggle('open');
+      el.nextElementSibling.classList.toggle('show');
+    }
+  </script>
+</body>
+</html>
