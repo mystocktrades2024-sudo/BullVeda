@@ -10983,6 +10983,38 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         _factor_overlay_audit = None
         pass
 
+    # ENTRY-QUALITY SCORE TILT (2026-05-22) — additive tilt on normalized score
+    # based on realized PF/Sharpe per entry_quality bucket. Companion to
+    # entry_quality_rules_override (verdict gate); this controls BUY-pool
+    # RANKING. FLAG-GATED — config.entry_quality_score_tilt._enabled.
+    # Evidence: cache/picks_history.json — 1061 closed trades, inversion
+    # holds across risk_on_trending + risk_on_choppy. See config _validations
+    # block for per-quality n, PF, Sharpe, Wilson LB.
+    _eqt_audit = None
+    try:
+        _eqt = (config or {}).get("entry_quality_score_tilt") or {}
+        if _eqt.get("_enabled", False):
+            _eq_key = (entry_quality or "VALID").upper()
+            _eqt_delta = _eqt.get(_eq_key)
+            if _eqt_delta is not None:
+                _eqt_delta = float(_eqt_delta)
+                _pre_tilt_score = float(normalized)
+                normalized = max(0.0, min(100.0, float(normalized) + _eqt_delta))
+                _v = (_eqt.get("_validations") or {}).get(_eq_key) or {}
+                _eqt_audit = {
+                    "entry_quality": _eq_key,
+                    "delta": _eqt_delta,
+                    "pre_tilt_score": round(_pre_tilt_score, 1),
+                    "post_tilt_score": round(normalized, 1),
+                    "n": _v.get("n"),
+                    "pf": _v.get("pf"),
+                    "sharpe": _v.get("sharpe"),
+                    "reason": f"entry_quality_score_tilt: {_eq_key} {_eqt_delta:+.0f} (n={_v.get('n')}, PF={_v.get('pf')}, Sharpe={_v.get('sharpe')})",
+                }
+    except Exception:
+        _eqt_audit = None
+        pass
+
     # FAMILY-LEVEL REGIME KILL (2026-05-13) — complements per-setup_type kills.
     # Evidence base: scripts/regime_sharpe_decomp.py output. Operates on the
     # CLASSIFIED setup_family (Breakout Expansion / Trend Continuation / etc.),
@@ -11440,6 +11472,10 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         # the user (CF case: setup_family=Breakout Expansion + plan.setup_type=
         # EMA21 Pullback → mult=0.0 → score=0 with no visible reason).
         "score_mult_audit": _setup_mult_audit if '_setup_mult_audit' in dir() else None,
+        # ENTRY-QUALITY TILT AUDIT (2026-05-22) — surface the additive tilt
+        # applied by entry_quality_score_tilt when flag is ON. None when flag
+        # is OFF or quality has no tilt entry.
+        "entry_quality_tilt_audit": _eqt_audit if '_eqt_audit' in dir() else None,
         # Sharpe metrics (item #1, #8, #12) — surface for v2 dashboard column,
         # momentum gate (already used above), and downstream attribution.
         "sharpe_126d":        _sharpe_126d_value if '_sharpe_126d_value' in dir() else None,
