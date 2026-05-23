@@ -2057,8 +2057,30 @@ def run_daily_scan(force_fresh: bool = False):
             })
             analyst_data[t] = ad_patched
             _ad_patched += 1
-    if _ad_patched:
-        log.info(f"  Analyst data backfill from Finnhub: {_ad_patched} tickers")
+
+    # Layer 4 (2026-05-22) — Finviz scrape was already executed inside
+    # get_analyst_data() and populated consensus/target_mean/latest_actions,
+    # but never wrote `total_analysts`. The original yfinance quoteSummary
+    # path (which DID populate it) was removed 2026-04-24 due to "Invalid
+    # Crumb" 401 storms. Backfill `total_analysts` from the number of
+    # distinct firms in latest_actions — undercount (only firms with recent
+    # action are counted) but real data, and unblocks downstream consumers
+    # (analysis.py:2464 reads `total_analysts` for the analyst-coverage gate).
+    _ad_finviz_patched = 0
+    for t in tickers_to_analyze:
+        ad = analyst_data.get(t, {})
+        if ad.get("total_analysts", 0) > 0:
+            continue
+        actions = ad.get("latest_actions") or ad.get("_finviz_actions") or []
+        firms = {a.get("firm","").strip() for a in actions if isinstance(a, dict)}
+        firms.discard("")
+        if firms:
+            ad["total_analysts"] = len(firms)
+            ad.setdefault("_source", "finviz_actions")
+            analyst_data[t] = ad
+            _ad_finviz_patched += 1
+    if _ad_patched or _ad_finviz_patched:
+        log.info(f"  Analyst data backfill: Finnhub/FMP={_ad_patched} + Finviz-actions={_ad_finviz_patched} tickers")
 
     # ── IV Rank backfill — options removed 2026-04-25 ──
     # EODHD All-In-One does not include options data. Schwab options removed.
@@ -3369,7 +3391,7 @@ def run_daily_scan(force_fresh: bool = False):
     _dh("Sector", "Polygon/Schwab", sum(1 for r in all_results if r.get("sector") not in (None, "Unknown", "")), _n_res)
     _dh("Beta", "Finviz/yfinance", sum(1 for r in all_results if r.get("beta") is not None), _n_res)
     _dh("Valuation (PEG)", "Finviz/yfinance", sum(1 for r in all_results if "(0/5)" not in str(r.get("fundamentals", {}).get("details", {}).get("valuation", "(0/5)"))), _n_res)
-    _dh("Analyst Revisions", "Finnhub/FMP", sum(1 for r in all_results if (r.get("analyst") or {}).get("total_analysts", 0) > 0), _n_res)
+    _dh("Analyst Revisions", "Finviz scrape", sum(1 for r in all_results if (r.get("analyst") or {}).get("total_analysts", 0) > 0 or (r.get("analyst") or {}).get("target_mean") is not None), _n_res)
     _dh("Estimate Revision", "Finviz EPS", sum(1 for r in all_results if r.get("extra_fund", {}).get("estimate_revision")), _n_res)
     _dh("Weekly OHLCV", "Polygon", sum(1 for r in all_results if r.get("scoring_breakdown", {}).get("bonus_total", 0) != 0), _n_res, threshold_warn=30)
     _dh("Quote Snapshot", "EODHD", sum(1 for r in all_results if r.get("quote_snapshot")), _n_res)
