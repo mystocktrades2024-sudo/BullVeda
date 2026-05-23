@@ -2210,6 +2210,10 @@ def run_daily_scan(force_fresh: bool = False):
         result["finnhub"]        = finnhub_data.get(ticker, {})
         result["fmp"]            = fmp_data.get(ticker, {})
         result["sec_filings"]    = sec_data.get(ticker, {})
+        # 2026-05-22 — surface beat_rate at top level so v2 dashboard +
+        # data_health checks can read it without spelunking into fundamentals.details
+        # (where it's only written as a display string, gated on qtrs>=4).
+        result["beat_rate"]      = beat_rate_data.get(ticker, {})
         # 2026-05-08 — surface Finviz Elite fields on the ticker row so the
         # V2 dashboard can render performance strip / short pressure / quality KPIs.
         # analyze_ticker already consumes some, but we keep the raw bundle here too.
@@ -3361,7 +3365,7 @@ def run_daily_scan(force_fresh: bool = False):
     _dh("Insider Activity", "SEC/OpenInsider", sum(1 for r in all_results if (r.get("insider_data") or {}).get("buys", 0) + (r.get("insider_data") or {}).get("sells", 0) > 0), _n_res)
     _dh("Short Interest", "Finviz/Borrow", sum(1 for r in all_results if r.get("sentiment", {}).get("details", {}).get("short_interest", "N/A") != "N/A (0/2)"), _n_res)
     _dh("IV Rank", "yfinance/Polygon", sum(1 for r in all_results if (r.get("options_data") or {}).get("iv_rank") is not None), _n_res)
-    _dh("Beat Rate", "yfinance/Finnhub", sum(1 for r in all_results if "beat_rate" in str(r.get("fundamentals", {}).get("details", {}))), _n_res)
+    _dh("Beat Rate", "yfinance (tier-1)", sum(1 for r in all_results if (r.get("beat_rate") or {}).get("beat_rate") is not None), _n_res)
     _dh("Sector", "Polygon/Schwab", sum(1 for r in all_results if r.get("sector") not in (None, "Unknown", "")), _n_res)
     _dh("Beta", "Finviz/yfinance", sum(1 for r in all_results if r.get("beta") is not None), _n_res)
     _dh("Valuation (PEG)", "Finviz/yfinance", sum(1 for r in all_results if "(0/5)" not in str(r.get("fundamentals", {}).get("details", {}).get("valuation", "(0/5)"))), _n_res)
