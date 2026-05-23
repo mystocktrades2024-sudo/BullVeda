@@ -448,6 +448,24 @@ def run_daily_scan(force_fresh: bool = False):
     run_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     log.info(f"=== SwingTrade Daily Scan — {run_timestamp} ===")
 
+    # ── 2026-05-22: Schwab refresh-token health probe ──
+    # Refresh tokens have a 7-day lifetime; if the scanner stops for >7d (or
+    # the rotated token wasn't written back), Schwab calls fail with HTTP 400
+    # and IV Rank goes to 0/N silently. Surface the failure at scan start.
+    try:
+        from schwab_auth import check_token_health as _schwab_health
+        _h = _schwab_health()
+        if _h["status"] == "dead":
+            log.warning("🔴 SCHWAB TOKEN DEAD — IV Rank / Schwab options data will be empty this scan")
+            log.warning(f"   {_h['message']}")
+        elif _h["status"] == "warn":
+            log.warning(f"🟡 SCHWAB TOKEN AGING — {_h['message']}")
+        elif _h["status"] == "ok":
+            log.info(f"  Schwab refresh token OK (age {_h['days_since_saved']}d)")
+        # 'unknown' (pre-2026-05-22 install, no saved_at) is silent
+    except Exception as e:
+        log.debug(f"Schwab health probe failed (non-fatal): {e}")
+
     # ── P0-1 (2026-05-10): refresh prices THEN compute drawdown ──
     # refresh_prices() now appends/updates today's equity_curve point so
     # compute_current_drawdown_pct sees a fresh mark-to-market. Previously

@@ -205,9 +205,10 @@ def oauth_interactive() -> None:
     exp_at  = int(time.time()) + exp_in - 60  # 60s buffer
 
     _write_env({
-        "SCHWAB_ACCESS_TOKEN":      access,
-        "SCHWAB_REFRESH_TOKEN":     refresh,
-        "SCHWAB_TOKEN_EXPIRES_AT":  str(exp_at),
+        "SCHWAB_ACCESS_TOKEN":       access,
+        "SCHWAB_REFRESH_TOKEN":      refresh,
+        "SCHWAB_TOKEN_EXPIRES_AT":   str(exp_at),
+        "SCHWAB_REFRESH_SAVED_AT":   str(int(time.time())),
     })
 
     print("\n✅ SUCCESS")
@@ -245,13 +246,16 @@ def _refresh_access_token() -> str:
     exp_in = int(tok.get("expires_in", 1800))
     exp_at = int(time.time()) + exp_in - 60
 
-    # Schwab may also rotate the refresh token
+    # Schwab may also rotate the refresh token. When they do, reset
+    # SCHWAB_REFRESH_SAVED_AT so check_token_health() tracks the freshest
+    # 7-day window from the actual rotation, not the original OAuth.
     updates = {
         "SCHWAB_ACCESS_TOKEN":     access,
         "SCHWAB_TOKEN_EXPIRES_AT": str(exp_at),
     }
     if tok.get("refresh_token"):
-        updates["SCHWAB_REFRESH_TOKEN"] = tok["refresh_token"]
+        updates["SCHWAB_REFRESH_TOKEN"]    = tok["refresh_token"]
+        updates["SCHWAB_REFRESH_SAVED_AT"] = str(int(time.time()))
     _write_env(updates)
     return access
 
@@ -350,6 +354,46 @@ def test_entitlement() -> None:
         print(f"{tk}: delayed={delayed}, quote age {age_s:.0f}s ago" if age_s is not None else f"{tk}: delayed={delayed}")
 
 
+# ── Token health probe (2026-05-22) ─────────────────────────────────────
+def check_token_health(warn_days: int = 5, dead_days: int = 7) -> dict:
+    """Return refresh-token health WITHOUT making a network call.
+
+    Schwab rotates the refresh token on each access-token refresh (~30min
+    when the scanner is running). The 7-day expiry resets to that rotation
+    timestamp, tracked in SCHWAB_REFRESH_SAVED_AT (written by
+    _refresh_access_token + oauth_interactive). If the scanner stops for >7d
+    the refresh token rots and only manual re-OAuth recovers it.
+
+    Returns dict {status, days_since_saved, message, action}:
+      status   : 'ok' | 'warn' | 'dead' | 'unknown'
+      action   : None | 'reauth_soon' | 'reauth_now'
+    """
+    env = _read_env()
+    refresh = env.get("SCHWAB_REFRESH_TOKEN", "").strip()
+    saved   = env.get("SCHWAB_REFRESH_SAVED_AT", "").strip()
+    if not refresh:
+        return {"status": "dead", "days_since_saved": None, "action": "reauth_now",
+                "message": "No SCHWAB_REFRESH_TOKEN in .env — run: python3 schwab_auth.py oauth"}
+    if not saved or not saved.isdigit():
+        # Token present but no saved-at timestamp (pre-2026-05-22 install).
+        # Treat as unknown — first successful refresh will populate it.
+        return {"status": "unknown", "days_since_saved": None, "action": None,
+                "message": "Refresh token present but no save timestamp — will populate on next refresh"}
+    age_s = int(time.time()) - int(saved)
+    age_d = age_s / 86400.0
+    if age_d >= dead_days:
+        return {"status": "dead", "days_since_saved": round(age_d, 1), "action": "reauth_now",
+                "message": f"Refresh token is {age_d:.1f} days old (>{dead_days}d limit) — likely expired. "
+                           f"Schwab calls will fail with HTTP 400 'Refresh token invalid'. "
+                           f"Run: python3 schwab_auth.py oauth"}
+    if age_d >= warn_days:
+        return {"status": "warn", "days_since_saved": round(age_d, 1), "action": "reauth_soon",
+                "message": f"Refresh token is {age_d:.1f} days old — re-auth before {dead_days}d to avoid downtime. "
+                           f"Run: python3 schwab_auth.py oauth"}
+    return {"status": "ok", "days_since_saved": round(age_d, 1), "action": None,
+            "message": f"Refresh token age {age_d:.1f}d (OK)"}
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────
 def main() -> None:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "help"
@@ -364,6 +408,11 @@ def main() -> None:
         test_entitlement()
     elif cmd == "refresh":
         print(f"New access token: {_refresh_access_token()[:20]}...")
+    elif cmd == "health":
+        h = check_token_health()
+        icon = {"ok":"✅","warn":"🟡","dead":"🔴","unknown":"⚪"}.get(h["status"], "?")
+        print(f"{icon}  {h['status'].upper():<8} {h['message']}")
+        sys.exit(0 if h['status'] in ('ok','unknown') else 1)
     else:
         print(__doc__)
 
