@@ -1639,6 +1639,13 @@ def compact_row(r: dict) -> dict:
         "caveats":                 r.get("caveats") or [],
         "setup_size_multiplier":   r.get("setup_size_multiplier"),
         "audit_trail":             r.get("audit_trail") or {},
+        # 2026-05-23 · Score-modification audit trail — surfaced on detail page
+        # Rule Engine sub-tab + Plan sub-tab. Lets users see WHY a score got
+        # tilted/multiplied (e.g., entry_quality_score_tilt: MISSED +5 (n=369,
+        # PF=1.8, Sharpe=1.5)). Without these, the post-tilt score appears
+        # unexplained.
+        "score_mult_audit":         r.get("score_mult_audit"),
+        "entry_quality_tilt_audit": r.get("entry_quality_tilt_audit"),
         # Scan-over-scan diff (audit log panel)
         "change_log":              _compute_change_log(r, _PREV_BUNDLE_INDEX.get(r.get("ticker"), {}), _PREV_BUNDLE_DATE),
         # 2026-05-17 · SMC engine output (zones · structure · liquidity · multi-TF bars).
@@ -4277,9 +4284,180 @@ def main():
         if t in _ebp_by_t:
             rec["earnings_beat_prediction"] = _ebp_by_t[t]
 
+    # ─── Option B (2026-05-23): Unified ticker universe ───────────────
+    # Augment tickers.json with ML / Earnings / Options-only tickers that
+    # weren't in the main scan. Each gets OHLCV + name + sector + last price
+    # via EODHD (24h cached). The detail page works for every clicked ticker
+    # because every ticker has at least lite-quality data.
+    #
+    # Tag with _data_completeness: 'full' (main-scan) vs 'lite' (extras).
+    for t, rec in all_rich.items():
+        rec.setdefault("_data_completeness", "full")
+    try:
+        _augment_with_lite_universe(all_rich, b, data)
+    except Exception as e:
+        print(f"  ⚠ lite-universe augmentation failed: {e}")
+
     all_rich = _clean(all_rich)
     TICKS.write_text(json.dumps(all_rich, default=str, allow_nan=False))
     print(f"wrote {TICKS} (n={len(all_rich)} tickers, {TICKS.stat().st_size:,} bytes)")
+
+
+# ════ Lite-universe augmentation · Option B · 2026-05-23 ═════════════════
+def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> None:
+    """In-place augment all_rich with tickers from ML cache / earnings watchlist
+    / options flow that aren't already present. Each extra gets:
+      - OHLCV (last 90 bars, via EODHD eod() — 24h cached)
+      - name + sector + industry (via bulk_fundamentals — 24h cached)
+      - last close as price
+      - _data_completeness='lite' flag (frontend can show "limited data" banner)
+      - _lite_sources list ('ml','earnings','options')
+    The frontend _tickerMap[symbol] lookup now succeeds for every clicked
+    ticker; QuantDetail's chart sub-tab + header always have data.
+    """
+    from pathlib import Path as _P
+    import datetime as _dt, json as _json
+
+    extras: dict[str, list[str]] = {}  # ticker → list of sources
+    def _add(t, src):
+        t = (t or "").upper().strip()
+        if not t or t in all_rich: return
+        extras.setdefault(t, []).append(src)
+
+    # 1. ML Edge predictions (cache/ml_edge_predictions.json)
+    ml_p = _P("cache/ml_edge_predictions.json")
+    if ml_p.exists():
+        try:
+            ml = _json.loads(ml_p.read_text())
+            for mode in ("swing", "position", "invest"):
+                pool = ((ml.get("predictions") or {}).get(mode) or {})
+                for t in pool.keys(): _add(t, "ml")
+        except Exception as e:
+            print(f"  lite-aug: ML cache read failed — {e}")
+
+    # 2. Earnings watchlist (data/earnings_watchlist.json or bundle)
+    ew = data.get("earnings_watchlist") or bundle.get("earnings_watchlist") or []
+    for e in ew:
+        if isinstance(e, dict): _add(e.get("ticker"), "earnings")
+
+    # 3. Options flow (cache/options_flow.json if exists)
+    opt_p = _P("cache/options_flow.json")
+    if opt_p.exists():
+        try:
+            opt = _json.loads(opt_p.read_text())
+            rows = opt.get("flows") if isinstance(opt, dict) else opt
+            for o in (rows or []):
+                if isinstance(o, dict): _add(o.get("ticker"), "options")
+        except Exception:
+            pass
+
+    if not extras:
+        print("  lite-universe: no extras to add (all sources covered by main scan)")
+        return
+
+    print(f"  lite-universe: {len(extras)} extras to lite-score (ML/Earnings/Options-only tickers)")
+
+    # Bulk-fundamentals fetch (24h cached) — name + sector + industry
+    fund_cache: dict[str, dict] = {}
+    try:
+        import eodhd_client as _eod
+        syms = list(extras.keys())
+        for i in range(0, len(syms), 100):
+            batch = syms[i:i+100]
+            try:
+                bulk = _eod.bulk_fundamentals(batch) or {}
+                for sym, f in bulk.items():
+                    if isinstance(f, dict): fund_cache[sym.upper().split(".")[0]] = f
+            except Exception as e:
+                print(f"  lite-aug: bulk_fundamentals batch {i}-{i+100} failed — {e}")
+    except ImportError:
+        print("  lite-aug: eodhd_client not importable — skipping fundamentals")
+
+    # Per-ticker OHLCV (24h cached) — fetch 120 days, keep last 90 bars
+    try:
+        import eodhd_client as _eod
+        today = _dt.date.today()
+        from_d = (today - _dt.timedelta(days=120)).strftime("%Y-%m-%d")
+        to_d = today.strftime("%Y-%m-%d")
+    except ImportError:
+        print("  lite-aug: eodhd_client not importable — skipping OHLCV")
+        return
+
+    n_ok, n_skip = 0, 0
+    for t, sources in extras.items():
+        try:
+            bars = _eod.eod(t, from_date=from_d, to_date=to_d, period="d") or []
+            if not bars or len(bars) < 5:
+                n_skip += 1
+                continue
+
+            # Normalize to compact bar shape {d,o,h,l,c,v} matching main rows
+            ohlcv = []
+            for bar in bars[-90:]:
+                if not isinstance(bar, dict): continue
+                ohlcv.append({
+                    "d": bar.get("date"),
+                    "o": bar.get("open"),
+                    "h": bar.get("high"),
+                    "l": bar.get("low"),
+                    "c": bar.get("close"),
+                    "v": bar.get("volume"),
+                })
+
+            fund = fund_cache.get(t) or {}
+            general    = (fund.get("General") or {})   if isinstance(fund, dict) else {}
+            highlights = (fund.get("Highlights") or {}) if isinstance(fund, dict) else {}
+
+            last_close = (bars[-1] or {}).get("close") if bars else None
+
+            all_rich[t] = {
+                "ticker":           t,
+                "symbol":           t,
+                "name":             general.get("Name") or t,
+                "sector":           general.get("Sector"),
+                "industry":         general.get("Industry"),
+                "price":            last_close,
+                "ohlcv":            ohlcv,
+                # Lite scoring — fields exist but are null so frontend renders
+                # "not scored in today's scan" state rather than crashing.
+                "verdict":          None,
+                "score":            None,
+                "rs_rank":          None,
+                "rvol":             None,
+                "rsi":              None,
+                "atr":              None,
+                "setup_family":     None,
+                "setup_type":       None,
+                "conviction_tier":  None,
+                "rr_ratio":         None,
+                "entry_low":        None,
+                "entry_high":       None,
+                "stop":             None,
+                "target1":          None,
+                "target2":          None,
+                "earn_days":        None,
+                "catalyst_tier":    None,
+                "ticker_source":    sources[0] + "_extra",  # ml_extra / earnings_extra / options_extra
+                "market_cap":       highlights.get("MarketCapitalization"),
+                "fund_real":        {
+                    "name":     general.get("Name") or t,
+                    "sector":   general.get("Sector"),
+                    "industry": general.get("Industry"),
+                    "exchange": general.get("Exchange"),
+                    "country":  general.get("Country"),
+                    "market_cap": highlights.get("MarketCapitalization"),
+                },
+                # Provenance — frontend reads this to show banners
+                "_data_completeness": "lite",
+                "_lite_sources":      sources,
+            }
+            n_ok += 1
+        except Exception as e:
+            n_skip += 1
+            if n_skip < 5:
+                print(f"  lite-aug {t}: {type(e).__name__}: {str(e)[:80]}")
+
+    print(f"  lite-universe: scored {n_ok}/{len(extras)} extras ({n_skip} skipped)")
 
 
 if __name__ == "__main__":
