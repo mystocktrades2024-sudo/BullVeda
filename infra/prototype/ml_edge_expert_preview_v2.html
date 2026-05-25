@@ -1,0 +1,2111 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-density="power">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ML Edge v2 · Expert Preview · Kairos</title>
+<style>
+:root {
+  --bg-0:#0a0d0c; --bg-1:#10130f; --bg-2:#161a14; --bg-3:#1c2118; --bg-4:#262b1f;
+  --ink:#e8eadf; --ink-1:#c4c7b9; --ink-2:#8d9180; --ink-3:#5e6356; --ink-4:#3d4338;
+  --line:#23271e; --line-2:#2c3127; --line-3:#3a3f30;
+  --gn:#7fc36a; --gn-bg:rgba(127,195,106,0.10); --gn-dim:rgba(127,195,106,0.35);
+  --rd:#d96b6b; --rd-bg:rgba(217,107,107,0.10); --rd-dim:rgba(217,107,107,0.35);
+  --amb:#d8a843; --amb-bg:rgba(216,168,67,0.10); --amb-dim:rgba(216,168,67,0.35);
+  --copper:#b87b3f; --copper-bg:rgba(184,123,63,0.10); --copper-glow:rgba(184,123,63,0.30);
+  --teal:#5fa89a; --teal-bg:rgba(95,168,154,0.10);
+  --info:#5fa8d6; --info-bg:rgba(95,168,214,0.10);
+  --display:ui-serif,"Iowan Old Style","Cormorant Garamond","Georgia",serif;
+  --mono:ui-monospace,"SF Mono","Roboto Mono",Menlo,monospace;
+  --sans:-apple-system,"Inter","Helvetica Neue",sans-serif;
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --dur:220ms;
+  --dur-l:420ms;
+  --shadow-rail:0 -2px 32px rgba(0,0,0,0.42), 0 0 1px var(--line-2) inset;
+}
+html[data-theme="light"] {
+  --bg-0:#f3f1ea; --bg-1:#ffffff; --bg-2:#f7f5ee; --bg-3:#ebe8df; --bg-4:#dfdcd2;
+  --ink:#1d211a; --ink-1:#3a3f33; --ink-2:#6b705f; --ink-3:#92968a; --ink-4:#c0c4b8;
+  --line:#dfdcd2; --line-2:#cdcabe; --line-3:#b9b7ab;
+  --gn-bg:rgba(127,195,106,0.16); --rd-bg:rgba(217,107,107,0.14);
+  --amb-bg:rgba(216,168,67,0.16); --copper-bg:rgba(184,123,63,0.12);
+  --shadow-rail:0 -2px 32px rgba(0,0,0,0.08), 0 0 1px var(--line-2) inset;
+}
+* { box-sizing:border-box; }
+html, body { height:100%; }
+body { margin:0; background:var(--bg-0); color:var(--ink); font-family:var(--sans); font-size:13px; line-height:1.45;
+  font-feature-settings:"ss01" on, "cv11" on; }
+a { color:inherit; text-decoration:none; }
+
+/* ── DENSITY: EXEC vs POWER ─────────────────────────────────────── */
+html[data-density="exec"] .power-only { display:none !important; }
+html[data-density="power"] .exec-only { display:none !important; }
+html[data-density="exec"] .sect { margin-bottom: 44px; }
+
+/* ── TOPBAR ─────────────────────────────────────────────────────── */
+.topbar { display:flex; align-items:center; gap:16px; padding:11px 24px;
+  border-bottom:1px solid var(--line); background:var(--bg-1);
+  position:sticky; top:0; z-index:60; }
+.brand { font:800 13px var(--mono); letter-spacing:0.22em; color:var(--copper); }
+.brand::before { content:"◆ "; color:var(--copper); }
+.crumb { font:600 11px var(--mono); letter-spacing:0.10em; color:var(--ink-2); text-transform:uppercase; }
+.crumb b { color:var(--ink); }
+.topbar-r { margin-left:auto; display:flex; align-items:center; gap:8px; }
+.fresh { font:600 10px var(--mono); color:var(--ink-3); letter-spacing:0.10em; padding:0 8px; border-left:1px solid var(--line); }
+.fresh .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--gn);
+  margin-right:6px; animation:pulse 2s infinite; vertical-align:1px; }
+@keyframes pulse { 0%,100% { opacity:0.5; } 50% { opacity:1; } }
+.tb-btn { background:var(--bg-2); border:1px solid var(--line); color:var(--ink-2); padding:6px 11px;
+  border-radius:2px; font:700 10px var(--mono); letter-spacing:0.10em; cursor:pointer; text-transform:uppercase;
+  transition:border-color var(--dur) var(--ease), color var(--dur) var(--ease); }
+.tb-btn:hover { border-color:var(--copper); color:var(--copper); }
+.tb-btn .kb { font:700 8.5px var(--mono); color:var(--ink-3); margin-left:6px; padding:1px 4px; background:var(--bg-3); border-radius:1px; }
+.dens-grp { display:inline-flex; border:1px solid var(--line); border-radius:2px; overflow:hidden; }
+.dens-grp button { background:var(--bg-2); border:0; padding:6px 10px; font:700 10px var(--mono); letter-spacing:0.10em;
+  color:var(--ink-3); cursor:pointer; text-transform:uppercase; }
+.dens-grp button.on { background:var(--copper-bg); color:var(--copper); }
+
+/* ── TAB NAV ────────────────────────────────────────────────────── */
+.tabnav { display:flex; align-items:flex-end; gap:0; padding:0 24px; background:var(--bg-0); border-bottom:1px solid var(--line);
+  position:sticky; top:48px; z-index:55; }
+.tabnav button { background:transparent; border:0; color:var(--ink-3); cursor:pointer;
+  padding:14px 22px 11px; font:800 13px var(--sans); letter-spacing:0.02em;
+  display:inline-flex; align-items:center; gap:9px;
+  position:relative;
+  transition:color var(--dur) var(--ease); }
+.tabnav button .glyph { font-size:14px; }
+.tabnav button .ct { font:700 10px var(--mono); color:var(--ink-3); padding:2px 7px; background:var(--bg-2); border-radius:2px;
+  letter-spacing:0.04em; transition:all var(--dur) var(--ease); }
+.tabnav button:hover { color:var(--ink-1); }
+.tabnav button.on { color:var(--ink); }
+.tabnav button.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:var(--copper); }
+.tabnav button.on .ct { color:var(--copper); background:var(--copper-bg); }
+.tabnav .spread { margin-left:auto; padding:14px 0 11px; font:600 10.5px var(--mono); color:var(--ink-3); letter-spacing:0.06em; }
+.tabnav .spread b { color:var(--ink-1); font-weight:800; }
+
+/* ── ANCHOR STRIP ───────────────────────────────────────────────── */
+.anchorbar { display:flex; align-items:center; gap:0; padding:9px 24px; background:var(--bg-1);
+  border-bottom:1px solid var(--line); position:sticky; top:96px; z-index:50; overflow-x:auto; }
+.anchorbar a { padding:5px 11px; border-radius:2px; font:700 10px var(--mono); letter-spacing:0.13em;
+  color:var(--ink-3); text-transform:uppercase; white-space:nowrap; cursor:pointer;
+  transition:all var(--dur) var(--ease); }
+.anchorbar a:hover { color:var(--ink); background:var(--bg-2); }
+.anchorbar a.active { color:var(--copper); }
+.anchorbar a.active::before { content:""; display:inline-block; width:4px; height:4px; border-radius:50%;
+  background:var(--copper); margin-right:6px; vertical-align:2px; }
+.anchorbar .sep { color:var(--ink-4); padding:0 2px; align-self:center; user-select:none; }
+.anchorbar .focus-pill { margin-left:auto; padding:5px 12px; background:var(--bg-2); border:1px solid var(--line-2); border-radius:2px;
+  font:700 10px var(--mono); letter-spacing:0.10em; color:var(--ink-2); display:inline-flex; align-items:center; gap:6px; }
+.anchorbar .focus-pill .lbl { color:var(--ink-3); }
+.anchorbar .focus-pill b { color:var(--copper); font-size:11px; }
+
+/* ── LAYOUT ─────────────────────────────────────────────────────── */
+.shell { display:grid; grid-template-columns: 1fr 400px; gap:0; min-height:calc(100vh - 144px); }
+.main { padding:24px 28px 80px; min-width:0; }
+.rail { border-left:1px solid var(--line); background:var(--bg-1); padding:24px 22px 80px;
+  position:sticky; top:144px; align-self:start; max-height:calc(100vh - 144px); overflow-y:auto; box-shadow:var(--shadow-rail); }
+@media (max-width:1240px) {
+  .shell { grid-template-columns:1fr; }
+  .rail { position:static; max-height:none; border-left:0; border-top:1px solid var(--line); box-shadow:none; }
+}
+
+.sect { margin: 0 0 32px; scroll-margin-top:160px; }
+.sect h2 { font:800 11px var(--mono); letter-spacing:0.18em; color:var(--ink); text-transform:uppercase;
+  margin:0 0 14px; padding:0; display:flex; align-items:baseline; gap:10px; }
+.sect h2 .meta { font:500 11px var(--sans); color:var(--ink-3); letter-spacing:0; text-transform:none; }
+.sect h2 .meta b { color:var(--ink-2); font-weight:700; }
+
+/* ── HERO: dominant tile + supporting tiles ─────────────────────── */
+.hero { display:grid; grid-template-columns: 1.6fr 1fr 1fr 1fr 1fr; gap:12px; }
+@media (max-width:1080px){ .hero { grid-template-columns: 1.6fr 1fr 1fr; } .hero > .sec5 { grid-column: span 3; } }
+@media (max-width:640px){ .hero { grid-template-columns: 1fr 1fr; } .hero > .lead { grid-column: span 2; } .hero > .sec5 { grid-column: span 2; } }
+.tile { background:var(--bg-1); border:1px solid var(--line); border-left:3px solid var(--ink-4);
+  border-radius:3px; padding:14px 16px 13px; position:relative; transition:border-color var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.tile:hover { transform:translateY(-1px); border-left-color:var(--copper); }
+.tile.gn { border-left-color:var(--gn); }
+.tile.rd { border-left-color:var(--rd); }
+.tile.am { border-left-color:var(--amb); }
+.tile.cu { border-left-color:var(--copper); }
+.tile.info { border-left-color:var(--info); }
+.tile.lead { padding:24px 28px; background:linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  border-left:4px solid var(--copper); }
+.tile .lbl { font:800 9.5px var(--mono); letter-spacing:0.18em; color:var(--ink-3); text-transform:uppercase; }
+.tile.lead .lbl { color:var(--copper); }
+.tile .big { font:800 28px var(--mono); color:var(--ink); margin-top:8px; font-variant-numeric:tabular-nums;
+  line-height:1.0; transition:color var(--dur) var(--ease); }
+.tile.lead .big { font-size:64px; line-height:0.95; letter-spacing:-0.02em; color:var(--copper); font-weight:800;
+  font-family:var(--display); }
+.tile .big.gn { color:var(--gn); }
+.tile .big.rd { color:var(--rd); }
+.tile .big.am { color:var(--amb); }
+.tile .big .unit { font-size:14px; color:var(--ink-3); margin-left:5px; font-family:var(--mono); }
+.tile.lead .big .unit { font-size:22px; }
+.tile .sub { font:500 11px var(--mono); color:var(--ink-2); margin-top:6px; font-variant-numeric:tabular-nums; }
+.tile.lead .sub { font-size:13px; margin-top:10px; color:var(--ink-1); }
+.tile .sub b { color:var(--ink); font-weight:700; }
+.tile .sub .delta.gn { color:var(--gn); }
+.tile .sub .delta.rd { color:var(--rd); }
+.tile.lead .cta { margin-top:14px; display:inline-flex; gap:6px; padding:7px 12px; background:var(--copper);
+  color:var(--bg-0); border:0; border-radius:2px; font:800 10px var(--mono); letter-spacing:0.12em;
+  text-transform:uppercase; cursor:pointer; transition:opacity var(--dur) var(--ease); }
+.tile.lead .cta:hover { opacity:0.85; }
+.tile .bar { height:4px; background:var(--bg-3); border-radius:2px; margin-top:11px; overflow:hidden; }
+.tile .bar > span { display:block; height:100%; background:var(--copper); transition:width 600ms var(--ease); }
+.tile .bar > span.gn { background:var(--gn); }
+.tile .bar > span.rd { background:var(--rd); }
+.tile .bar > span.am { background:var(--amb); }
+.tile .bar.bipolar { background:linear-gradient(to right,var(--rd-bg) 0%,var(--rd-bg) 50%,var(--gn-bg) 50%,var(--gn-bg) 100%); position:relative; }
+.tile .bar.bipolar > span { position:absolute; top:0; bottom:0; background:var(--gn); left:50%; }
+
+/* ── REGIME BANNER ─────────────────────────────────────────────── */
+.regime { background:var(--bg-1); border:1px solid var(--line); border-left:4px solid var(--gn);
+  padding:14px 20px; border-radius:3px; margin: 8px 0 0; display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
+.regime .ico { font:800 24px var(--mono); color:var(--gn); }
+.regime .body { flex:1; min-width:260px; }
+.regime .body .hd { font:800 9.5px var(--mono); letter-spacing:0.16em; color:var(--ink-3); text-transform:uppercase; }
+.regime .body .nm { font:800 17px var(--display); color:var(--gn); letter-spacing:0.02em; margin-top:4px; }
+.regime .body .cap { font:500 12px var(--sans); color:var(--ink-2); margin-top:6px; line-height:1.6; }
+.regime .body .cap b { color:var(--ink); font-weight:700; }
+.regime .stats { display:flex; gap:22px; padding-left:22px; border-left:1px solid var(--line-2); }
+.regime .stats .k { font:800 9px var(--mono); letter-spacing:0.14em; color:var(--ink-3); text-transform:uppercase; }
+.regime .stats .v { font:800 15px var(--mono); color:var(--ink); font-variant-numeric:tabular-nums; margin-top:2px; }
+.regime .stats .v.gn { color:var(--gn); }
+
+/* ── SHORTLIST CARDS ───────────────────────────────────────────── */
+.cards { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+@media (max-width:980px){ .cards { grid-template-columns:repeat(2,1fr); } }
+.card { background:var(--bg-1); border:1px solid var(--line); border-left:3px solid var(--copper); border-radius:3px; padding:13px 15px; cursor:pointer;
+  transition:transform var(--dur) var(--ease), background var(--dur) var(--ease); }
+.card.gn { border-left-color:var(--gn); }
+.card.am { border-left-color:var(--amb); }
+.card:hover { background:var(--bg-2); transform:translateX(2px); }
+.card .tk { font:800 16px var(--mono); color:var(--ink); letter-spacing:0.02em; }
+.card .row { display:flex; align-items:center; justify-content:space-between; margin-top:9px; font:500 11px var(--mono); color:var(--ink-2); }
+.card .row .v { color:var(--ink); font-weight:800; }
+.card .row .v.gn { color:var(--gn); }
+.card .row .v.rd { color:var(--rd); }
+
+/* ── TABLE ─────────────────────────────────────────────────────── */
+.tbl-wrap { background:var(--bg-1); border:1px solid var(--line); border-radius:3px; overflow:hidden; }
+.tbl-head { display:flex; align-items:center; justify-content:space-between; padding:11px 16px; border-bottom:1px solid var(--line); background:var(--bg-2); }
+.tbl-head .ttl { font:800 11.5px var(--mono); letter-spacing:0.16em; text-transform:uppercase; color:var(--ink); }
+.tbl-head .ttl .ct { color:var(--copper); }
+.tbl-head .sub { font:500 11px var(--sans); color:var(--ink-3); }
+.tbl { width:100%; border-collapse:separate; border-spacing:0; font-variant-numeric:tabular-nums; }
+.tbl th { padding:8px 11px; font:800 9px var(--mono); letter-spacing:0.16em; color:var(--ink-3); text-transform:uppercase;
+  background:var(--bg-2); border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; position:sticky; top:0; }
+.tbl th.r { text-align:right; }
+.tbl td { padding:9px 11px; border-bottom:1px solid var(--line); font:500 12px var(--mono); color:var(--ink-1); }
+.tbl td.r { text-align:right; }
+.tbl tbody tr { cursor:pointer; transition:background var(--dur) var(--ease); }
+.tbl tbody tr:hover td { background:var(--bg-2); }
+.tbl tbody tr.sel td { background:var(--copper-bg); color:var(--ink); }
+.tbl tbody tr.sel td .tk { color:var(--copper); }
+.tbl .tk { font-weight:800; color:var(--ink); letter-spacing:0.02em; }
+
+.sbar { position:relative; display:inline-block; width:86px; height:15px; background:var(--bg-3); border-radius:2px;
+  overflow:hidden; vertical-align:middle; }
+.sbar > .fill { position:absolute; top:0; bottom:0; left:0; background:linear-gradient(90deg,var(--gn-dim),var(--gn));
+  transition:width var(--dur-l) var(--ease); }
+.sbar > .fill.rd { background:linear-gradient(90deg,var(--rd-dim),var(--rd)); }
+.sbar > .lbl { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font:800 10px var(--mono); color:var(--ink); text-shadow:0 0 4px rgba(0,0,0,0.6); }
+
+/* ── PILLS ─────────────────────────────────────────────────────── */
+.pill { display:inline-block; padding:2px 8px; border-radius:2px; font:800 9.5px var(--mono);
+  letter-spacing:0.10em; text-transform:uppercase; white-space:nowrap; }
+.pill.gn { background:var(--gn-bg); color:var(--gn); border:1px solid var(--gn-dim); }
+.pill.rd { background:var(--rd-bg); color:var(--rd); border:1px solid var(--rd-dim); }
+.pill.am { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb-dim); }
+.pill.info { background:var(--info-bg); color:var(--info); border:1px solid rgba(95,168,214,0.35); }
+.pill.solid.gn { background:var(--gn); color:var(--bg-0); border:0; }
+.pill.solid.rd { background:var(--rd); color:var(--bg-0); border:0; }
+.pill.solid.am { background:var(--amb); color:var(--bg-0); border:0; }
+.pill.outlined { background:transparent; }
+.sec { display:inline-block; padding:2px 7px; border-radius:2px; font:700 10px var(--mono); letter-spacing:0.04em;
+  background:var(--bg-3); color:var(--ink-2); white-space:nowrap; }
+.er { display:inline-block; padding:2px 6px; border-radius:2px; font:800 10px var(--mono); letter-spacing:0.04em; }
+.er.urgent { background:var(--rd-bg); color:var(--rd); }
+.er.soon { background:var(--amb-bg); color:var(--amb); }
+.er.safe { background:var(--gn-bg); color:var(--gn); }
+.er.far { background:var(--bg-3); color:var(--ink-3); }
+
+/* ── HISTORY-BAND HOVER TIP ────────────────────────────────────── */
+.hbadge { display:inline-block; padding:2px 6px; border-radius:2px; font:700 9.5px var(--mono);
+  background:var(--bg-3); color:var(--ink-3); margin-left:7px; cursor:help; position:relative;
+  transition:all var(--dur) var(--ease); }
+.hbadge:hover { color:var(--copper); background:var(--copper-bg); }
+.hbadge[data-tip]:hover::after {
+  content:attr(data-tip); position:absolute; top:125%; right:0; z-index:90;
+  padding:9px 11px; background:var(--bg-0); border:1px solid var(--line-2); border-radius:3px;
+  font:600 10.5px var(--mono); color:var(--ink-1); white-space:pre-line; box-shadow:0 8px 32px rgba(0,0,0,0.5);
+  width:260px; text-align:left; }
+
+/* ── HEATMAP ───────────────────────────────────────────────────── */
+.heat { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+@media (max-width:980px){ .heat { grid-template-columns:repeat(2,1fr); } }
+.heat .stile { background:var(--bg-1); border:1px solid var(--line); border-radius:3px; padding:12px 14px;
+  position:relative; overflow:hidden; cursor:pointer; transition:transform var(--dur) var(--ease); }
+.heat .stile:hover { transform:translateY(-2px); }
+.heat .stile.hot   { background:color-mix(in oklch,var(--gn-bg) 80%,transparent); border-color:var(--gn-dim); }
+.heat .stile.warm  { background:color-mix(in oklch,var(--gn-bg) 35%,transparent); border-color:var(--gn-dim); }
+.heat .stile.calm  { background:var(--bg-1); }
+.heat .stile.cold  { background:color-mix(in oklch,var(--rd-bg) 35%,transparent); border-color:var(--rd-dim); }
+.heat .stile .nm { font:800 11.5px var(--mono); color:var(--ink); letter-spacing:0.04em; text-transform:uppercase; }
+.heat .stile .pct { font:800 22px var(--display); color:var(--ink); margin-top:4px; font-variant-numeric:tabular-nums; }
+.heat .stile .pct.gn { color:var(--gn); }
+.heat .stile .pct.rd { color:var(--rd); }
+.heat .stile .sub { font:600 10px var(--mono); color:var(--ink-3); margin-top:3px; letter-spacing:0.04em; }
+.heat .stile .dots { margin-top:7px; display:flex; gap:4px; }
+.heat .stile .dots .d { width:8px; height:8px; border-radius:50%; background:var(--ink-4); }
+.heat .stile .dots .d.gn { background:var(--gn); }
+.heat .stile .dots .d.rd { background:var(--rd); }
+
+/* ── CALIBRATION ───────────────────────────────────────────────── */
+.cal { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+@media (max-width:780px){ .cal { grid-template-columns:1fr; } }
+.cal .pane { background:var(--bg-1); border:1px solid var(--line); border-radius:3px; padding:16px; }
+.cal .pane h3 { font:800 10px var(--mono); letter-spacing:0.16em; color:var(--ink-3); text-transform:uppercase; margin:0 0 10px; }
+.cal .pane .v { font:800 30px var(--display); color:var(--ink); font-variant-numeric:tabular-nums; line-height:1; }
+.cal .pane .v.gn { color:var(--gn); }
+.cal .pane .v.am { color:var(--amb); }
+.cal .pane .v.rd { color:var(--rd); }
+.cal .pane .d { font:600 11px var(--mono); color:var(--ink-2); margin-top:6px; }
+.cal .decile { display:flex; align-items:flex-end; gap:3px; height:52px; margin-top:10px; }
+.cal .decile .b { flex:1; background:var(--gn); border-radius:1px 1px 0 0; min-height:2px; transition:height 600ms var(--ease); }
+.cal .decile .b.rd { background:var(--rd); }
+
+/* ── RAIL / FOCUS PANE ─────────────────────────────────────────── */
+.rail .focus-h { font:800 11px var(--mono); letter-spacing:0.18em; color:var(--ink-3); text-transform:uppercase;
+  margin:0; display:flex; align-items:center; gap:10px; }
+.rail .focus-h .tk { font:800 22px var(--display); color:var(--copper); letter-spacing:0.02em; letter-spacing:-0.01em;
+  transition:opacity 200ms var(--ease); }
+.rail .focus-h .tk.swap { opacity:0; }
+.rail .cycle { display:flex; gap:5px; margin-left:auto; }
+.rail .cycle button { background:var(--bg-2); border:1px solid var(--line); color:var(--ink-2); width:28px; height:28px;
+  border-radius:2px; cursor:pointer; font:800 14px var(--mono); transition:all var(--dur) var(--ease); }
+.rail .cycle button:hover { color:var(--copper); border-color:var(--copper); }
+.rail .focus-sub { font:500 11.5px var(--sans); color:var(--ink-3); margin: 4px 0 18px; }
+.rail .cone { background:var(--bg-2); border:1px solid var(--line); border-radius:3px; padding:14px; margin-bottom:14px; position:relative; }
+.rail .cone .ttl { font:800 9px var(--mono); letter-spacing:0.16em; color:var(--ink-3); margin-bottom:8px; text-transform:uppercase; }
+.rail .cone svg { width:100%; height:auto; display:block; }
+.rail .cone .hover-tip { position:absolute; pointer-events:none; opacity:0; padding:5px 8px; background:var(--bg-0);
+  border:1px solid var(--line-2); border-radius:2px; font:700 10px var(--mono); color:var(--ink); transition:opacity 100ms var(--ease); }
+.rail .kpi { display:grid; grid-template-columns:repeat(2,1fr); gap:7px; margin-bottom:16px; }
+.rail .kpi .k { background:var(--bg-2); border:1px solid var(--line); padding:10px 12px; border-radius:2px; }
+.rail .kpi .k .lbl { font:800 9px var(--mono); letter-spacing:0.16em; color:var(--ink-3); text-transform:uppercase; }
+.rail .kpi .k .v { font:800 18px var(--display); color:var(--ink); margin-top:3px; font-variant-numeric:tabular-nums;
+  transition:color var(--dur) var(--ease); }
+.rail .kpi .k .v.gn { color:var(--gn); }
+.rail .kpi .k .v.rd { color:var(--rd); }
+.rail .conf { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:16px; }
+.rail .conf .c { padding:3px 8px; background:var(--bg-2); border:1px solid var(--line); border-radius:2px;
+  font:700 10px var(--mono); color:var(--ink-1); letter-spacing:0.02em; }
+.rail .conf .c.gn { color:var(--gn); border-color:var(--gn-dim); background:var(--gn-bg); }
+.rail .conf .c.am { color:var(--amb); border-color:var(--amb-dim); background:var(--amb-bg); }
+.rail .plan { background:var(--bg-2); border:1px solid var(--line); border-radius:3px; padding:14px; margin-bottom:14px; }
+.rail .plan h3 { font:800 9.5px var(--mono); letter-spacing:0.18em; color:var(--ink-3); text-transform:uppercase; margin:0 0 9px; }
+.rail .plan .row { display:flex; justify-content:space-between; align-items:center; padding:5px 0; font:500 11.5px var(--mono); color:var(--ink-2); border-bottom:1px solid var(--line); }
+.rail .plan .row:last-child { border-bottom:0; }
+.rail .plan .row .v { color:var(--ink); font-weight:800; font-family:var(--mono); }
+.rail .plan .row .v.gn { color:var(--gn); }
+.rail .plan .row .v.rd { color:var(--rd); }
+.rail .peer { background:var(--bg-2); border:1px solid var(--line); border-radius:3px; padding:14px; margin-bottom:14px; }
+.rail .peer h3 { font:800 9.5px var(--mono); letter-spacing:0.18em; color:var(--ink-3); text-transform:uppercase; margin:0 0 9px; }
+.rail .peer .row { display:flex; justify-content:space-between; align-items:center; padding:4px 0; font:500 11.5px var(--mono); color:var(--ink-2); }
+.rail .peer .row .v { font-weight:800; color:var(--ink); }
+.rail .peer .row.high .v { color:var(--gn); }
+.rail .catalyst { background:var(--bg-2); border:1px solid var(--line); border-radius:3px; padding:14px; }
+.rail .catalyst h3 { font:800 9.5px var(--mono); letter-spacing:0.18em; color:var(--ink-3); text-transform:uppercase; margin:0 0 9px; }
+.rail .catalyst .item { padding:6px 0; font:500 11.5px var(--mono); color:var(--ink-2); border-bottom:1px solid var(--line); }
+.rail .catalyst .item:last-child { border-bottom:0; }
+.rail .catalyst .item .k { color:var(--ink-3); margin-right:6px; }
+.rail .catalyst .item .v { color:var(--ink); font-weight:700; }
+
+/* ── HISTORY / VERDICT BANNER ──────────────────────────────────── */
+.verdict { background:linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  border:1px solid var(--line); border-left:4px solid var(--copper);
+  border-radius:3px; padding:24px 28px; margin: 4px 0 28px;
+  display:grid; grid-template-columns: auto 1fr auto; gap:24px; align-items:center; }
+@media (max-width:880px){ .verdict { grid-template-columns: 1fr; } }
+.verdict .ico { font:800 56px var(--display); color:var(--copper); line-height:1; opacity:0.8; }
+.verdict .body .hd { font:800 9.5px var(--mono); letter-spacing:0.20em; color:var(--ink-3); text-transform:uppercase; }
+.verdict .body .rec { font:800 28px var(--display); color:var(--ink); margin-top:6px; letter-spacing:-0.005em; line-height:1.1; }
+.verdict .body .rec b { color:var(--copper); }
+.verdict .body .cap { font:500 12.5px var(--sans); color:var(--ink-2); margin-top:10px; line-height:1.6; max-width:640px; }
+.verdict .body .cap b { color:var(--ink); font-weight:700; }
+.verdict .confbox { padding:14px 18px; background:var(--bg-2); border:1px solid var(--line); border-radius:3px;
+  min-width:180px; }
+.verdict .confbox .lbl { font:800 9px var(--mono); letter-spacing:0.16em; color:var(--ink-3); text-transform:uppercase; }
+.verdict .confbox .val { font:800 22px var(--display); color:var(--gn); margin-top:5px; }
+.verdict .confbox .det { font:600 10.5px var(--mono); color:var(--ink-2); margin-top:5px; }
+.verdict .confbox .meter { display:flex; gap:2px; margin-top:8px; }
+.verdict .confbox .meter .dot { width:7px; height:7px; border-radius:50%; background:var(--ink-4); }
+.verdict .confbox .meter .dot.on { background:var(--gn); }
+
+/* ── ML-NATIVE: MODEL HEALTH ROW ─────────────────────────────── */
+.mlhealth { display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin: 18px 0 24px; }
+@media (max-width:980px){ .mlhealth { grid-template-columns: repeat(2, 1fr); } }
+.mlhealth .mh { background:var(--bg-1); border:1px solid var(--line); border-left:3px solid var(--info); border-radius:3px; padding:14px 16px; position:relative; }
+.mlhealth .mh.gn { border-left-color:var(--gn); }
+.mlhealth .mh.am { border-left-color:var(--amb); }
+.mlhealth .mh.rd { border-left-color:var(--rd); }
+.mlhealth .mh .lbl { font:800 9px var(--mono); letter-spacing:0.18em; color:var(--ink-3); text-transform:uppercase; }
+.mlhealth .mh .big { font:800 22px var(--display); color:var(--ink); margin-top:6px; font-variant-numeric:tabular-nums; line-height:1.05; }
+.mlhealth .mh .big.gn { color:var(--gn); }
+.mlhealth .mh .big.am { color:var(--amb); }
+.mlhealth .mh .big.rd { color:var(--rd); }
+.mlhealth .mh .sub { font:500 10.5px var(--mono); color:var(--ink-2); margin-top:5px; }
+.mlhealth .mh .sub b { color:var(--ink); }
+.mlhealth .mh .spark { height:24px; margin-top:6px; }
+.mlhealth .mh .pill-status { display:inline-block; padding:2px 7px; border-radius:2px; font:800 9.5px var(--mono); letter-spacing:0.10em; text-transform:uppercase; margin-top:6px; }
+.mlhealth .mh .pill-status.gn { background:var(--gn-bg); color:var(--gn); border:1px solid var(--gn-dim); }
+.mlhealth .mh .pill-status.am { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb-dim); }
+
+/* ── CI BAR (interval bracket) ───────────────────────────────── */
+.cibar { position:relative; display:inline-block; width:100px; height:18px; vertical-align:middle; margin-left:5px; }
+.cibar::before { content:""; position:absolute; left:0; right:0; top:50%; height:1px; background:var(--line-2); }
+.cibar .range { position:absolute; top:50%; height:1px; background:var(--gn-dim); }
+.cibar .lo, .cibar .hi { position:absolute; top:50%; transform:translateY(-50%); width:1px; height:8px; background:var(--gn); }
+.cibar .dot { position:absolute; top:50%; transform:translate(-50%, -50%); width:6px; height:6px; border-radius:50%; background:var(--gn); border:1.5px solid var(--bg-1); }
+.cibar .lbl { position:absolute; top:-1px; left:50%; transform:translateX(-50%); font:700 8.5px var(--mono); color:var(--ink-3); }
+
+/* ── Z-CHIP ──────────────────────────────────────────────────── */
+.zchip { display:inline-block; padding:1px 5px; border-radius:2px; font:800 9.5px var(--mono); letter-spacing:0.06em;
+  background:var(--bg-3); color:var(--ink-2); margin-left:4px; }
+.zchip.hi { background:var(--gn-bg); color:var(--gn); }
+.zchip.lo { background:var(--rd-bg); color:var(--rd); }
+
+/* ── CORRELATION + FACTOR EXPOSURE ───────────────────────────── */
+.diag-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media (max-width:980px){ .diag-grid { grid-template-columns:1fr; } }
+.diag-pane { background:var(--bg-1); border:1px solid var(--line); border-radius:3px; padding:14px 16px; }
+.diag-pane h3 { font:800 10px var(--mono); letter-spacing:0.18em; color:var(--ink); text-transform:uppercase; margin:0 0 10px;
+  display:flex; align-items:baseline; gap:10px; }
+.diag-pane h3 .verdict-pill { padding:2px 8px; border-radius:2px; font:800 9.5px var(--mono); letter-spacing:0.10em; text-transform:uppercase; }
+.diag-pane h3 .verdict-pill.rd { background:var(--rd-bg); color:var(--rd); border:1px solid var(--rd-dim); }
+.diag-pane h3 .verdict-pill.am { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb-dim); }
+.diag-pane h3 .verdict-pill.gn { background:var(--gn-bg); color:var(--gn); border:1px solid var(--gn-dim); }
+
+.corr-pairs .row { display:grid; grid-template-columns: auto 1fr auto; gap:10px; align-items:center; padding:5px 0; font:500 11px var(--mono); color:var(--ink-2); border-bottom:1px solid var(--line); }
+.corr-pairs .row:last-child { border-bottom:0; }
+.corr-pairs .pair { font:800 11px var(--mono); color:var(--ink); letter-spacing:0.02em; }
+.corr-pairs .bar { height:6px; background:var(--bg-3); border-radius:2px; overflow:hidden; }
+.corr-pairs .bar > span { display:block; height:100%; background:var(--rd); }
+.corr-pairs .bar > span.am { background:var(--amb); }
+.corr-pairs .bar > span.gn { background:var(--gn); }
+.corr-pairs .v { font-weight:800; color:var(--ink); }
+.corr-pairs .v.hi { color:var(--rd); }
+.corr-pairs .v.med { color:var(--amb); }
+.corr-summary { margin-top:10px; padding:8px 10px; background:var(--bg-2); border-left:3px solid var(--rd); border-radius:2px;
+  font:500 11px var(--mono); color:var(--ink-1); }
+.corr-summary b { color:var(--rd); font-weight:800; }
+
+.fact-bars .row { display:grid; grid-template-columns: 90px 1fr auto; gap:10px; align-items:center; padding:6px 0; font:600 11px var(--mono); color:var(--ink-2); }
+.fact-bars .nm { font:800 10.5px var(--mono); color:var(--ink); letter-spacing:0.06em; text-transform:uppercase; }
+.fact-bars .biar { position:relative; height:10px; background:linear-gradient(to right,var(--rd-bg) 0%,var(--rd-bg) 50%,var(--gn-bg) 50%,var(--gn-bg) 100%); border-radius:2px; overflow:hidden; }
+.fact-bars .biar::before { content:""; position:absolute; top:0; bottom:0; left:50%; width:1px; background:var(--line-3); }
+.fact-bars .biar .seg { position:absolute; top:0; bottom:0; }
+.fact-bars .biar .seg.gn { background:var(--gn); left:50%; }
+.fact-bars .biar .seg.rd { background:var(--rd); right:50%; }
+.fact-bars .v { font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums; min-width:50px; text-align:right; }
+.fact-bars .v.gn { color:var(--gn); }
+.fact-bars .v.rd { color:var(--rd); }
+.fact-summary { margin-top:10px; padding:8px 10px; background:var(--bg-2); border-left:3px solid var(--amb); border-radius:2px;
+  font:500 11px var(--mono); color:var(--ink-1); }
+.fact-summary b { color:var(--amb); font-weight:800; }
+
+/* ── FOCUS PANE · SHAP + ALPHA-BETA ──────────────────────────── */
+.shap { background:var(--bg-2); border:1px solid var(--line); border-radius:3px; padding:12px 14px; margin-bottom:14px; }
+.shap h3 { font:800 9.5px var(--mono); letter-spacing:0.18em; color:var(--ink-3); text-transform:uppercase; margin:0 0 9px; }
+.shap .row { display:grid; grid-template-columns: 86px 1fr auto; gap:8px; align-items:center; padding:4px 0; font:600 10.5px var(--mono); color:var(--ink-2); }
+.shap .nm { color:var(--ink-1); font-weight:700; font-size:10.5px; }
+.shap .biar { position:relative; height:8px; background:var(--bg-3); border-radius:2px; overflow:hidden; }
+.shap .biar::before { content:""; position:absolute; top:0; bottom:0; left:50%; width:1px; background:var(--line-2); }
+.shap .biar .s { position:absolute; top:0; bottom:0; }
+.shap .biar .s.gn { background:var(--gn); left:50%; }
+.shap .biar .s.rd { background:var(--rd); right:50%; }
+.shap .v { font-weight:800; min-width:36px; text-align:right; }
+.shap .v.gn { color:var(--gn); }
+.shap .v.rd { color:var(--rd); }
+
+.alphabeta { background:var(--bg-2); border:1px solid var(--line); border-radius:3px; padding:12px 14px; margin-bottom:14px; }
+.alphabeta h3 { font:800 9.5px var(--mono); letter-spacing:0.18em; color:var(--ink-3); text-transform:uppercase; margin:0 0 9px;
+  display:flex; align-items:baseline; gap:8px; }
+.alphabeta .bar { display:flex; height:32px; border-radius:3px; overflow:hidden; border:1px solid var(--line); }
+.alphabeta .bar .seg { display:flex; align-items:center; justify-content:center; font:800 11px var(--mono); letter-spacing:0.04em; color:var(--bg-0); }
+.alphabeta .bar .seg.alpha { background:var(--copper); }
+.alphabeta .bar .seg.beta  { background:var(--info); }
+.alphabeta .legend { display:flex; justify-content:space-between; margin-top:7px; font:600 10.5px var(--mono); color:var(--ink-2); }
+.alphabeta .legend b { color:var(--ink); font-weight:800; }
+.alphabeta .verdict { margin-top:8px; padding:7px 9px; background:var(--bg-3); border-radius:2px; font:500 10.5px var(--mono); color:var(--ink-2); line-height:1.55; }
+.alphabeta .verdict b { color:var(--copper); }
+
+/* ── BUY ATTRIBUTION ─────────────────────────────────────────── */
+.buyattr { display:grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap:14px; margin-bottom:8px; }
+@media (max-width:980px){ .buyattr { grid-template-columns: 1fr 1fr; } .buyattr .lead { grid-column: span 2; } }
+.buyattr .ba-card { background:var(--bg-1); border:1px solid var(--line); border-left:3px solid var(--ink-4); border-radius:3px; padding:14px 16px; }
+.buyattr .ba-card.lead { background:linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%); border-left:4px solid var(--copper); padding:18px 22px; }
+.buyattr .ba-card.gn { border-left-color:var(--gn); }
+.buyattr .ba-card.rd { border-left-color:var(--rd); }
+.buyattr .ba-card.am { border-left-color:var(--amb); }
+.buyattr .lbl { font:800 9.5px var(--mono); letter-spacing:0.18em; color:var(--ink-3); text-transform:uppercase; }
+.buyattr .ba-card.lead .lbl { color:var(--copper); }
+.buyattr .big { font:800 30px var(--display); font-variant-numeric:tabular-nums; line-height:1; margin-top:8px; }
+.buyattr .ba-card.lead .big { font-size:46px; color:var(--copper); }
+.buyattr .big.gn { color:var(--gn); }
+.buyattr .big.rd { color:var(--rd); }
+.buyattr .big.am { color:var(--amb); }
+.buyattr .big .unit { font:600 13px var(--mono); color:var(--ink-3); margin-left:6px; }
+.buyattr .sub { font:500 11px var(--mono); color:var(--ink-2); margin-top:6px; font-variant-numeric:tabular-nums; }
+.buyattr .sub b { color:var(--ink); font-weight:800; }
+
+.buyattr-bar { background:var(--bg-1); border:1px solid var(--line); border-radius:3px; padding:18px 20px; margin-bottom:18px; }
+.buyattr-bar .head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px; }
+.buyattr-bar .head .ttl { font:800 11px var(--mono); letter-spacing:0.16em; color:var(--ink); text-transform:uppercase; }
+.buyattr-bar .head .total { font:800 14px var(--display); color:var(--ink); }
+.buyattr-bar .bar { display:flex; height:38px; border-radius:3px; overflow:hidden; border:1px solid var(--line); background:var(--bg-2); }
+.buyattr-bar .bar .seg { display:flex; align-items:center; justify-content:center; gap:8px; font:800 13px var(--mono); color:var(--bg-0);
+  letter-spacing:0.04em; transition:all var(--dur) var(--ease); position:relative; cursor:default; }
+.buyattr-bar .bar .seg .pct { font:700 10.5px var(--mono); opacity:0.85; }
+.buyattr-bar .bar .seg.win { background:var(--gn); }
+.buyattr-bar .bar .seg.loss { background:var(--rd); }
+.buyattr-bar .bar .seg.pend { background:var(--amb); }
+.buyattr-bar .bar .seg:hover { filter:brightness(1.1); }
+.buyattr-bar .legend { display:flex; gap:20px; margin-top:14px; font:600 11px var(--mono); color:var(--ink-2); flex-wrap:wrap; }
+.buyattr-bar .legend .item { display:inline-flex; align-items:center; gap:6px; }
+.buyattr-bar .legend .sw { display:inline-block; width:10px; height:10px; border-radius:2px; }
+.buyattr-bar .legend .sw.gn { background:var(--gn); }
+.buyattr-bar .legend .sw.rd { background:var(--rd); }
+.buyattr-bar .legend .sw.am { background:var(--amb); }
+.buyattr-bar .legend .item b { color:var(--ink); }
+
+.buyattr-mode { background:var(--bg-1); border:1px solid var(--line); border-radius:3px; padding:0; overflow:hidden; }
+.buyattr-mode table { width:100%; border-collapse:separate; border-spacing:0; }
+.buyattr-mode th { padding:9px 14px; font:800 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.16em; text-transform:uppercase; border-bottom:1px solid var(--line); background:var(--bg-2); text-align:left; }
+.buyattr-mode th.r { text-align:right; }
+.buyattr-mode td { padding:11px 14px; border-bottom:1px solid var(--line); font:500 12px var(--mono); color:var(--ink-1); font-variant-numeric:tabular-nums; }
+.buyattr-mode tr:last-child td { border-bottom:0; }
+.buyattr-mode td.r { text-align:right; }
+.buyattr-mode .mode-name { font:800 12px var(--mono); color:var(--ink); letter-spacing:0.04em; }
+.buyattr-mode .mini-bar { display:flex; width:140px; height:8px; border-radius:2px; overflow:hidden; background:var(--bg-3); }
+.buyattr-mode .mini-bar .s.gn { background:var(--gn); }
+.buyattr-mode .mini-bar .s.rd { background:var(--rd); }
+.buyattr-mode .mini-bar .s.am { background:var(--amb); }
+
+/* ── HISTORY / PER-BAND TABLE ──────────────────────────────────── */
+.h-band-tbl { width:100%; border-collapse:separate; border-spacing:0; font-family:var(--mono); font-size:12px; font-variant-numeric:tabular-nums; }
+.h-band-tbl th { text-align:left; padding:10px 14px; font:800 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.16em; text-transform:uppercase; border-bottom:1px solid var(--line); background:var(--bg-2); }
+.h-band-tbl th.r { text-align:right; }
+.h-band-tbl td { padding:11px 14px; border-bottom:1px solid var(--line); color:var(--ink-1); }
+.h-band-tbl td.r { text-align:right; }
+.h-band-tbl tr:last-child td { border-bottom:0; }
+.h-band-tbl tr.recommend td { background:var(--copper-bg); }
+.h-band-tbl tr.recommend td .pill { background:var(--copper); color:var(--bg-0); border:0; }
+.h-band-tbl tr:hover:not(.recommend) td { background:var(--bg-2); }
+
+/* ── PODIUM ────────────────────────────────────────────────────── */
+.podium { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+@media (max-width:900px){ .podium { grid-template-columns:1fr; } }
+.podium .col h3 { font:800 11px var(--mono); letter-spacing:0.18em; color:var(--ink-3); text-transform:uppercase; margin:0 0 12px; }
+.podium .col h3.gn { color:var(--gn); }
+.podium .col h3.rd { color:var(--rd); }
+.podium .pcard { background:var(--bg-1); border:1px solid var(--line); border-left:3px solid var(--ink-4); border-radius:3px; padding:11px 14px; margin-bottom:7px;
+  display:grid; grid-template-columns:auto 1fr auto auto; gap:14px; align-items:center; cursor:pointer;
+  transition:transform var(--dur) var(--ease), background var(--dur) var(--ease); }
+.podium .pcard:hover { transform:translateX(3px); background:var(--bg-2); }
+.podium .pcard.gn { border-left-color:var(--gn); }
+.podium .pcard.rd { border-left-color:var(--rd); }
+.podium .pcard .rank { font:800 16px var(--display); color:var(--ink-3); width:22px; }
+.podium .pcard .tk { font:800 14px var(--mono); color:var(--ink); }
+.podium .pcard .meta { font:500 10.5px var(--mono); color:var(--ink-3); margin-top:1px; }
+.podium .pcard .val { font:800 16px var(--display); font-variant-numeric:tabular-nums; }
+.podium .pcard .val.gn { color:var(--gn); }
+.podium .pcard .val.rd { color:var(--rd); }
+
+/* ── SECTOR OUTCOMES BAR ───────────────────────────────────────── */
+.sector-rank { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+@media (max-width:780px){ .sector-rank { grid-template-columns:1fr; } }
+.sector-rank .srow { background:var(--bg-1); border:1px solid var(--line); border-radius:3px; padding:10px 14px;
+  display:grid; grid-template-columns:auto 1fr auto auto; gap:12px; align-items:center; }
+.sector-rank .srow .nm { font:800 11.5px var(--mono); color:var(--ink); text-transform:uppercase; letter-spacing:0.05em; }
+.sector-rank .srow .bar { height:7px; background:var(--bg-3); border-radius:2px; overflow:hidden; min-width:80px; }
+.sector-rank .srow .bar > span { display:block; height:100%; background:var(--gn); transition:width 600ms var(--ease); }
+.sector-rank .srow .bar > span.rd { background:var(--rd); }
+.sector-rank .srow .v { font:800 13.5px var(--display); font-variant-numeric:tabular-nums; }
+.sector-rank .srow .v.gn { color:var(--gn); }
+.sector-rank .srow .v.rd { color:var(--rd); }
+.sector-rank .srow .v.am { color:var(--amb); }
+.sector-rank .srow .n { font:600 10px var(--mono); color:var(--ink-3); }
+
+/* ── TREND SPARKLINE ───────────────────────────────────────────── */
+.trend { background:var(--bg-1); border:1px solid var(--line); border-radius:3px; padding:18px 20px; position:relative; }
+.trend .hd { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px; }
+.trend .hd .ttl { font:800 10.5px var(--mono); letter-spacing:0.16em; color:var(--ink); text-transform:uppercase; }
+.trend .hd .cur { font:800 22px var(--display); color:var(--gn); font-variant-numeric:tabular-nums; }
+.trend svg { width:100%; height:80px; display:block; cursor:crosshair; }
+.trend .axis-y { font:600 9px var(--mono); fill:var(--ink-3); }
+.trend .axis-x { font:600 9px var(--mono); fill:var(--ink-3); }
+.trend .trend-tip { position:absolute; pointer-events:none; opacity:0; padding:6px 10px; background:var(--bg-0);
+  border:1px solid var(--line-2); border-radius:2px; font:700 10.5px var(--mono); color:var(--ink); transition:opacity 100ms var(--ease);
+  transform:translate(-50%, -100%); z-index:10; box-shadow:0 4px 12px rgba(0,0,0,0.4); }
+
+/* ── CHIP STRIP ────────────────────────────────────────────────── */
+.chipstrip { display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; }
+.chipstrip .ch { padding:6px 10px; background:var(--bg-1); border:1px solid var(--line); border-radius:2px;
+  font:700 11px var(--mono); color:var(--ink-1); white-space:nowrap; cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+  transition:all var(--dur) var(--ease); }
+.chipstrip .ch:hover { border-color:var(--copper); transform:translateY(-1px); }
+.chipstrip .ch .ico.gn { color:var(--gn); }
+.chipstrip .ch .ico.rd { color:var(--rd); }
+.chipstrip .ch .ico.am { color:var(--amb); }
+.chipstrip .ch .ret { font-weight:800; }
+.chipstrip .ch .ret.gn { color:var(--gn); }
+.chipstrip .ch .ret.rd { color:var(--rd); }
+
+/* ── FILTER CHIPS ──────────────────────────────────────────────── */
+.fchips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center; }
+.fchips .search { display:flex; align-items:center; gap:6px; padding:4px 10px; background:var(--bg-2); border:1px solid var(--line); border-radius:2px;
+  font:700 10.5px var(--mono); color:var(--ink-3); margin-left:auto; }
+.fchips .search input { background:transparent; border:0; outline:0; font:700 11px var(--mono); color:var(--ink); width:100px; }
+.fchips button { padding:5px 11px; background:var(--bg-2); border:1px solid var(--line); color:var(--ink-2);
+  border-radius:2px; font:700 10px var(--mono); letter-spacing:0.10em; cursor:pointer; text-transform:uppercase;
+  transition:all var(--dur) var(--ease); }
+.fchips button.on { background:var(--copper-bg); border-color:var(--copper); color:var(--copper); }
+.fchips button:hover:not(.on) { color:var(--ink-1); }
+
+/* ── BIPOLAR BAR ───────────────────────────────────────────────── */
+.bibar { position:relative; width:92px; height:16px; background:linear-gradient(to right,var(--rd-bg) 0%,var(--rd-bg) 50%,var(--gn-bg) 50%,var(--gn-bg) 100%); border-radius:2px; overflow:hidden; display:inline-block; vertical-align:middle; }
+.bibar > .fill { position:absolute; top:0; bottom:0; transition:width var(--dur-l) var(--ease); }
+.bibar > .fill.gn { background:var(--gn); left:50%; }
+.bibar > .fill.rd { background:var(--rd); right:50%; }
+.bibar > .lbl { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font:800 10px var(--mono); color:var(--ink); text-shadow:0 0 4px rgba(0,0,0,0.6); }
+
+/* ── ML-NATIVE HISTORY ADDITIONS ─────────────────────────────── */
+.ml-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media (max-width:900px){ .ml-grid-2 { grid-template-columns:1fr; } }
+.ml-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+@media (max-width:900px){ .ml-grid-3 { grid-template-columns:1fr; } }
+.ml-pane { background:var(--bg-1); border:1px solid var(--line); border-radius:3px; padding:16px 18px; }
+.ml-pane h3 { font:800 10.5px var(--mono); letter-spacing:0.16em; color:var(--ink); text-transform:uppercase;
+  margin:0 0 12px; display:flex; align-items:baseline; gap:10px; }
+.ml-pane h3 .v { font:800 16px var(--display); font-variant-numeric:tabular-nums; color:var(--gn); margin-left:auto; }
+.ml-pane h3 .v.am { color:var(--amb); }
+.ml-pane h3 .v.rd { color:var(--rd); }
+.ml-pane .cap { font:500 11px var(--mono); color:var(--ink-3); line-height:1.55; margin-top:10px; }
+.ml-pane .verdict-tag { font:800 9.5px var(--mono); letter-spacing:0.12em; padding:2px 8px; border-radius:2px; text-transform:uppercase; }
+.ml-pane .verdict-tag.gn { background:var(--gn-bg); color:var(--gn); border:1px solid var(--gn-dim); }
+.ml-pane .verdict-tag.am { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb-dim); }
+
+/* reliability diagram */
+.reldiagram svg { width:100%; height:auto; display:block; }
+.reldiagram .diag { stroke:var(--ink-4); stroke-width:0.5; stroke-dasharray:2,3; }
+.reldiagram .gridline { stroke:var(--line); stroke-width:0.4; }
+.reldiagram .axis-lbl { fill:var(--ink-3); font:600 8.5px var(--mono); }
+.reldiagram .point { stroke:var(--bg-1); stroke-width:1.5; transition:r var(--dur) var(--ease); }
+.reldiagram .point:hover { r:9; }
+.reldiagram .point.above { fill:var(--gn); }
+.reldiagram .point.below { fill:var(--rd); }
+.reldiagram .point.on { fill:var(--amb); }
+
+/* small sparkline trend */
+.spark-trend svg { width:100%; height:60px; display:block; }
+.spark-trend .axis { stroke:var(--line); stroke-width:0.4; }
+.spark-trend .baseline { stroke:var(--ink-4); stroke-width:0.4; stroke-dasharray:2,3; }
+.spark-trend text.lbl { fill:var(--ink-3); font:600 8.5px var(--mono); }
+.spark-trend .line-30 { stroke:var(--gn); stroke-width:1.8; fill:none; }
+.spark-trend .line-63 { stroke:var(--copper); stroke-width:1.5; fill:none; stroke-dasharray:4,3; }
+.spark-trend .line-126 { stroke:var(--info); stroke-width:1; fill:none; stroke-dasharray:2,2; }
+.spark-trend .legend { display:flex; gap:14px; margin-top:8px; font:600 10px var(--mono); color:var(--ink-2); }
+.spark-trend .legend .sw { display:inline-block; width:14px; height:2px; vertical-align:middle; margin-right:4px; }
+.spark-trend .legend .sw.gn { background:var(--gn); }
+.spark-trend .legend .sw.cu { background:var(--copper); }
+.spark-trend .legend .sw.in { background:var(--info); }
+
+/* CI headline bracket */
+.ci-headline { display:inline-flex; align-items:baseline; gap:8px; font-family:var(--mono); font-variant-numeric:tabular-nums; }
+.ci-headline .pt { font:800 32px var(--display); color:var(--gn); }
+.ci-headline .interval { font:800 12px var(--mono); color:var(--ink-2); padding:6px 8px; background:var(--bg-2); border-radius:2px; border:1px solid var(--line); }
+.ci-headline .interval b { color:var(--ink); font-weight:800; }
+
+/* survival curve */
+.survival svg { width:100%; height:120px; display:block; }
+.survival .area { fill:var(--gn-bg); }
+.survival .line { stroke:var(--gn); stroke-width:2; fill:none; }
+.survival .grid { stroke:var(--line); stroke-width:0.4; }
+.survival .ax { fill:var(--ink-3); font:600 9px var(--mono); }
+.survival .anno { fill:var(--copper); font:800 10px var(--mono); }
+
+/* prediction stability table */
+.stab-tbl { width:100%; border-collapse:separate; border-spacing:0; font-family:var(--mono); }
+.stab-tbl th { padding:7px 10px; font:800 9px var(--mono); color:var(--ink-3); letter-spacing:0.16em; text-transform:uppercase; border-bottom:1px solid var(--line); background:var(--bg-2); text-align:left; }
+.stab-tbl th.r { text-align:right; }
+.stab-tbl td { padding:8px 10px; border-bottom:1px solid var(--line); font:500 11.5px var(--mono); color:var(--ink-1); font-variant-numeric:tabular-nums; }
+.stab-tbl tr:last-child td { border-bottom:0; }
+.stab-tbl td.r { text-align:right; }
+.stab-tbl .tk { font-weight:800; color:var(--ink); }
+.stab-tbl .gn { color:var(--gn); }
+.stab-tbl .rd { color:var(--rd); }
+
+/* feature drift */
+.featdrift { display:flex; gap:3px; align-items:flex-end; height:80px; padding:8px 0; }
+.featdrift .col { flex:1; display:flex; flex-direction:column; gap:2px; align-items:stretch; min-width:30px; }
+.featdrift .col .seg { background:var(--gn); border-radius:1px; }
+.featdrift .col .seg.rvol  { background:var(--info); }
+.featdrift .col .seg.bo52  { background:var(--copper); }
+.featdrift .col .seg.rs    { background:var(--amb); }
+.featdrift .col .seg.other { background:var(--ink-4); }
+.featdrift .col .lbl { font:600 8.5px var(--mono); color:var(--ink-3); text-align:center; margin-top:2px; letter-spacing:0.04em; }
+.featdrift-legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:6px; font:600 10px var(--mono); color:var(--ink-2); }
+.featdrift-legend .sw { display:inline-block; width:10px; height:10px; border-radius:1px; margin-right:5px; vertical-align:middle; }
+.featdrift-legend .sw.vcp   { background:var(--gn); }
+.featdrift-legend .sw.rvol  { background:var(--info); }
+.featdrift-legend .sw.bo52  { background:var(--copper); }
+.featdrift-legend .sw.rs    { background:var(--amb); }
+.featdrift-legend .sw.other { background:var(--ink-4); }
+
+/* HL chi-square + slippage tile */
+.hl-tile, .slip-tile { padding:14px 16px; background:var(--bg-2); border-radius:3px; border:1px solid var(--line); margin-top:10px; }
+.hl-tile .hd, .slip-tile .hd { font:800 9px var(--mono); letter-spacing:0.16em; color:var(--ink-3); text-transform:uppercase; }
+.hl-tile .v, .slip-tile .v { font:800 24px var(--display); font-variant-numeric:tabular-nums; color:var(--ink); margin-top:5px; }
+.hl-tile .v.gn { color:var(--gn); }
+.hl-tile .v.rd { color:var(--rd); }
+.hl-tile .v.am { color:var(--amb); }
+.hl-tile .cap, .slip-tile .cap { font:500 10.5px var(--mono); color:var(--ink-2); margin-top:5px; line-height:1.55; }
+.slip-tile .deltabar { display:flex; align-items:center; gap:10px; margin-top:8px; font:600 11px var(--mono); }
+.slip-tile .deltabar .paper { color:var(--ink); font-weight:800; }
+.slip-tile .deltabar .arrow { color:var(--ink-3); }
+.slip-tile .deltabar .real { color:var(--gn); font-weight:800; }
+.slip-tile .deltabar .delta { margin-left:auto; color:var(--rd); font-weight:800; }
+
+/* ── METHODOLOGY ───────────────────────────────────────────────── */
+.methodology { font:500 11.5px var(--sans); color:var(--ink-3); padding:18px 22px; background:var(--bg-1); border:1px solid var(--line); border-radius:3px; margin-top:24px; line-height:1.7; }
+.methodology b { color:var(--ink-2); }
+.methodology code { background:var(--bg-3); padding:1px 5px; border-radius:2px; font:600 10.5px var(--mono); color:var(--ink-1); }
+
+/* ── DRAWER (trade story) ──────────────────────────────────────── */
+.drawer-bg { position:fixed; inset:0; background:rgba(0,0,0,0.55); opacity:0; pointer-events:none;
+  transition:opacity var(--dur) var(--ease); z-index:100; }
+.drawer-bg.on { opacity:1; pointer-events:auto; }
+.drawer { position:fixed; top:0; right:0; bottom:0; width:540px; max-width:100vw; background:var(--bg-1);
+  border-left:1px solid var(--line-2); z-index:101; transform:translateX(110%); transition:transform var(--dur-l) var(--ease);
+  overflow-y:auto; box-shadow:-12px 0 40px rgba(0,0,0,0.6); }
+.drawer.on { transform:translateX(0); }
+.drawer .hd { padding:20px 24px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px; }
+.drawer .hd .tk { font:800 24px var(--display); color:var(--copper); }
+.drawer .hd .meta { font:600 11px var(--mono); color:var(--ink-3); flex:1; }
+.drawer .hd .close { background:var(--bg-2); border:1px solid var(--line); color:var(--ink-2); width:32px; height:32px; border-radius:2px; cursor:pointer; font:700 14px var(--mono); }
+.drawer .hd .close:hover { color:var(--rd); border-color:var(--rd-dim); }
+.drawer .body { padding:24px; }
+.drawer .body section { margin-bottom:24px; }
+.drawer .body section h4 { font:800 9.5px var(--mono); letter-spacing:0.18em; color:var(--ink-3); text-transform:uppercase; margin:0 0 10px; }
+.drawer .ts { background:var(--bg-2); border:1px solid var(--line); border-radius:3px; padding:12px 14px; font:500 12px var(--mono); color:var(--ink-2); line-height:1.7; }
+.drawer .ts b { color:var(--ink); }
+.drawer .ts .row { display:flex; justify-content:space-between; padding:3px 0; }
+.drawer .lesson { padding:14px 16px; background:var(--copper-bg); border:1px solid var(--copper); border-radius:3px;
+  font:500 12.5px var(--sans); color:var(--ink-1); font-style:italic; line-height:1.6; }
+.drawer .lesson::before { content:"❝ "; color:var(--copper); font:800 16px var(--display); }
+.drawer .chart-stub { background:var(--bg-2); border:1px solid var(--line); border-radius:3px; padding:16px; height:160px;
+  display:flex; align-items:flex-end; gap:3px; }
+.drawer .chart-stub .bar { flex:1; background:var(--gn-bg); border-radius:1px 1px 0 0; min-height:8px; transition:height 300ms var(--ease); }
+.drawer .chart-stub .bar.entry { background:var(--copper); }
+.drawer .chart-stub .bar.exit { background:var(--gn); }
+.drawer .chart-stub .bar.exit.rd { background:var(--rd); }
+
+/* ── KEYBOARD MODAL ────────────────────────────────────────────── */
+.kbmodal-bg { position:fixed; inset:0; background:rgba(0,0,0,0.6); opacity:0; pointer-events:none;
+  transition:opacity var(--dur) var(--ease); z-index:200; display:flex; align-items:center; justify-content:center; }
+.kbmodal-bg.on { opacity:1; pointer-events:auto; }
+.kbmodal { background:var(--bg-1); border:1px solid var(--line-2); border-radius:4px; padding:28px 32px;
+  min-width:360px; max-width:500px; }
+.kbmodal h3 { font:800 11px var(--mono); letter-spacing:0.18em; color:var(--ink-3); margin:0 0 16px; text-transform:uppercase; }
+.kbmodal .row { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); font:500 12px var(--mono); color:var(--ink-2); }
+.kbmodal .row:last-child { border-bottom:0; }
+.kbmodal kbd { background:var(--bg-3); border:1px solid var(--line-2); padding:2px 7px; border-radius:2px; font:700 11px var(--mono); color:var(--ink); margin:0 2px; }
+
+/* ── HIDDEN ───────────────────────────────────────────────────── */
+.hidden { display:none !important; }
+.fadein { animation: fadeIn var(--dur-l) var(--ease); }
+@keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+
+::-webkit-scrollbar { width:8px; height:8px; }
+::-webkit-scrollbar-track { background:var(--bg-0); }
+::-webkit-scrollbar-thumb { background:var(--line-2); border-radius:4px; }
+::-webkit-scrollbar-thumb:hover { background:var(--ink-4); }
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <span class="brand">KAIROS</span>
+  <span class="crumb">WORKSPACES · <b>ML EDGE</b></span>
+  <div class="topbar-r">
+    <span class="fresh"><span class="dot"></span>FRESH 2026-05-22 21:08 PT</span>
+    <div class="dens-grp">
+      <button data-dens="exec" onclick="setDensity('exec')">EXEC</button>
+      <button class="on" data-dens="power" onclick="setDensity('power')">POWER</button>
+    </div>
+    <button class="tb-btn" onclick="openKbHelp()">SHORTCUTS<span class="kb">?</span></button>
+    <button class="tb-btn" onclick="toggleTheme()">LIGHT<span class="kb">T</span></button>
+  </div>
+</div>
+
+<!-- TAB NAV -->
+<div class="tabnav">
+  <button id="tab-live" class="on" onclick="switchTab('live')"><span class="glyph">▣</span> Live <span class="ct" id="ct-live">585</span></button>
+  <button id="tab-history" onclick="switchTab('history')"><span class="glyph">◷</span> History <span class="ct" id="ct-hist">62 resolved</span></button>
+  <div class="spread"><b>71%</b> hit-rate ≥0.65 · <b>+0.84R</b> mean · <b>SWING</b> best mode</div>
+</div>
+
+<!-- ═════════════════════════════════════════════════════════════════════════ -->
+<!--                              LIVE                                          -->
+<!-- ═════════════════════════════════════════════════════════════════════════ -->
+<div id="view-live">
+
+  <div class="anchorbar">
+    <a class="active" data-anchor="hero" onclick="anchor('hero')">EDGE</a><span class="sep">·</span>
+    <a data-anchor="regime" onclick="anchor('regime')">REGIME</a><span class="sep">·</span>
+    <a data-anchor="mlhealth" onclick="anchor('mlhealth')">HEALTH</a><span class="sep">·</span>
+    <a data-anchor="shortlist" onclick="anchor('shortlist')" class="power-only">SHORTLIST</a><span class="sep power-only">·</span>
+    <a data-anchor="bulls" onclick="anchor('bulls')">BULLS</a><span class="sep">·</span>
+    <a data-anchor="diag" onclick="anchor('diag')">DIAGNOSTICS</a><span class="sep">·</span>
+    <a data-anchor="bears" onclick="anchor('bears')" class="power-only">BEARS</a><span class="sep power-only">·</span>
+    <a data-anchor="heat" onclick="anchor('heat')" class="power-only">SECTORS</a><span class="sep power-only">·</span>
+    <a data-anchor="cal" onclick="anchor('cal')" class="power-only">CALIBRATION</a>
+    <span class="focus-pill"><span class="lbl">FOCUS</span><b id="rail-focus-pill">AAPL</b></span>
+  </div>
+
+  <div class="shell">
+    <div class="main">
+
+      <!-- HERO -->
+      <div class="sect" id="hero">
+        <h2>UNIVERSE EDGE <span class="meta">585 tickers · <b>12 tradeable now</b> · ranked by p_up × R:R</span></h2>
+        <div class="hero">
+          <div class="tile lead" onclick="anchor('shortlist')">
+            <div class="lbl">TRADEABLE NOW</div>
+            <div class="big" data-counter="12">0<span class="unit">passing gates</span></div>
+            <div class="sub">2.1% of universe · all gates clear (verdict + plan + regime). The decision-driver.</div>
+            <button class="cta">SEE THE 12 →</button>
+          </div>
+          <div class="tile gn">
+            <div class="lbl">BULL SIGNALS</div>
+            <div class="big gn" data-counter="47">0</div>
+            <div class="sub"><b>P(up)≥0.55</b> · 8.0%</div>
+            <div class="bar"><span class="gn" style="width:80%"></span></div>
+          </div>
+          <div class="tile rd">
+            <div class="lbl">BEAR SIGNALS</div>
+            <div class="big rd" data-counter="23">0</div>
+            <div class="sub"><b>P(dn)≥0.55</b> · 3.9%</div>
+            <div class="bar"><span class="rd" style="width:39%"></span></div>
+          </div>
+          <div class="tile am">
+            <div class="lbl">HORIZON FLIPS</div>
+            <div class="big am" data-counter="31">0</div>
+            <div class="sub">swing ≠ invest</div>
+            <div class="bar"><span class="am" style="width:53%"></span></div>
+          </div>
+          <div class="tile info sec5">
+            <div class="lbl">CALIBRATION</div>
+            <div class="big" style="font-size:20px;font-family:var(--display);color:var(--gn);">TRUSTWORTHY</div>
+            <div class="sub">calRatio <b>1.02</b> · n=148 · model is trustworthy</div>
+            <div class="bar"><span class="gn" style="width:92%"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- REGIME -->
+      <div class="sect" id="regime">
+        <div class="regime">
+          <div class="ico">◓</div>
+          <div class="body">
+            <div class="hd">CURRENT REGIME</div>
+            <div class="nm">Risk-On · Choppy</div>
+            <div class="cap">SPY above EMA50 but breadth (<b>54%</b>) below 65% threshold and VIX (<b>19.4</b>) above 18. Trade only T1 conviction; size cap <b>70%</b>; require BUY min score <b>72</b>.</div>
+          </div>
+          <div class="stats">
+            <div><div class="k">SPY</div><div class="v gn">+0.32%</div></div>
+            <div><div class="k">VIX</div><div class="v">19.4</div></div>
+            <div><div class="k">BREADTH</div><div class="v">54%</div></div>
+            <div><div class="k">HYG</div><div class="v gn">+0.18%</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ML-NATIVE: MODEL HEALTH ROW -->
+      <div class="sect" id="mlhealth">
+        <h2>MODEL HEALTH <span class="meta">is the edge alive and distinctive RIGHT NOW</span></h2>
+        <div class="mlhealth">
+          <div class="mh gn">
+            <div class="lbl">IC · 30D</div>
+            <div class="big gn" data-counter-f="+0.18">+0.00</div>
+            <div class="sub"><b>p &lt; 0.01</b> · Spearman rank corr · P(up) vs realized</div>
+            <svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline points="0,18 14,16 28,14 42,12 56,10 70,9 84,8 100,7" stroke="var(--gn)" stroke-width="1.5" fill="none"/></svg>
+          </div>
+          <div class="mh gn">
+            <div class="lbl">DECILE SPREAD</div>
+            <div class="big gn" data-counter-f="+4.6">+0.0<span class="unit">pp</span></div>
+            <div class="sub">top decile <b>+5.2%</b> · bottom <b>−2.1%</b> · 5d realized</div>
+            <svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline points="0,14 14,13 28,12 42,11 56,10 70,9 84,8 100,7" stroke="var(--gn)" stroke-width="1.5" fill="none"/></svg>
+          </div>
+          <div class="mh gn">
+            <div class="lbl">MODEL DRIFT</div>
+            <div class="big gn">STABLE</div>
+            <div class="sub">KL-div <b>0.04</b> vs 30d baseline · threshold 0.15</div>
+            <span class="pill-status gn">✓ NO RETRAIN NEEDED</span>
+          </div>
+          <div class="mh am">
+            <div class="lbl">REGIME SAMPLE</div>
+            <div class="big am" data-counter="148">0</div>
+            <div class="sub">training samples in <b>RISK-ON CHOPPY</b> · adequate</div>
+            <span class="pill-status am">⚠ THIN VS RISK-ON-TREND (n=523)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- SHORTLIST -->
+      <div class="sect power-only" id="shortlist">
+        <h2>ACTIONABLE SHORTLIST <span class="meta">passes all gates · ranked by P(up) × R:R</span></h2>
+        <div class="cards">
+          <div class="card gn" onclick="setFocus('AAPL')">
+            <div class="tk">AAPL</div>
+            <div class="row"><span>P(up)</span><span class="v gn">0.74</span></div>
+            <div class="row"><span>R:R</span><span class="v">3.8</span></div>
+            <div class="row"><span>Sector</span><span class="sec">TECH</span></div>
+          </div>
+          <div class="card gn" onclick="setFocus('NVDA')">
+            <div class="tk">NVDA</div>
+            <div class="row"><span>P(up)</span><span class="v gn">0.71</span></div>
+            <div class="row"><span>R:R</span><span class="v">4.2</span></div>
+            <div class="row"><span>Sector</span><span class="sec">TECH</span></div>
+          </div>
+          <div class="card gn" onclick="setFocus('META')">
+            <div class="tk">META</div>
+            <div class="row"><span>P(up)</span><span class="v gn">0.69</span></div>
+            <div class="row"><span>R:R</span><span class="v">3.5</span></div>
+            <div class="row"><span>Sector</span><span class="sec">COMM</span></div>
+          </div>
+          <div class="card am" onclick="setFocus('LLY')">
+            <div class="tk">LLY</div>
+            <div class="row"><span>P(up)</span><span class="v gn">0.67</span></div>
+            <div class="row"><span>R:R</span><span class="v">3.1</span></div>
+            <div class="row"><span>Sector</span><span class="sec">HEALTH</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BULLS -->
+      <div class="sect" id="bulls">
+        <div class="tbl-wrap">
+          <div class="tbl-head">
+            <div class="ttl">TOP 12 BULLS <span class="ct">· P(up) desc · history bands enabled</span></div>
+            <div class="sub">Click row → Focus pane · <kbd style="background:var(--bg-3);padding:1px 5px;border-radius:2px;font:700 10px var(--mono);color:var(--ink-2);">J</kbd> / <kbd style="background:var(--bg-3);padding:1px 5px;border-radius:2px;font:700 10px var(--mono);color:var(--ink-2);">K</kbd> to cycle</div>
+          </div>
+          <table class="tbl">
+            <thead><tr>
+              <th>TICKER</th><th class="r">P(UP) · 80% CI</th><th class="r">Z</th><th class="r">μ 5d</th><th class="r">q90</th>
+              <th class="r">P(T1)</th><th>PLAN $S·T1·T2</th><th class="r">R:R</th><th>SECTOR</th><th class="r">ER</th><th>ROUTING</th>
+            </tr></thead>
+            <tbody id="bulls-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ML-NATIVE: INTRA-LIST CORRELATION + FACTOR EXPOSURE -->
+      <div class="sect" id="diag">
+        <h2>BULL-SET DIAGNOSTICS <span class="meta">is this 12-pick list actually 12 bets — or 1 concentrated bet?</span></h2>
+        <div class="diag-grid">
+          <div class="diag-pane">
+            <h3>INTRA-LIST CORRELATION <span class="verdict-pill rd">⚠ CONCENTRATED</span></h3>
+            <div class="corr-pairs">
+              <div class="row"><span class="pair">AAPL ↔ MSFT</span><div class="bar"><span style="width:78%"></span></div><span class="v hi">0.78</span></div>
+              <div class="row"><span class="pair">AAPL ↔ NVDA</span><div class="bar"><span style="width:71%"></span></div><span class="v hi">0.71</span></div>
+              <div class="row"><span class="pair">NVDA ↔ AMD</span><div class="bar"><span style="width:68%"></span></div><span class="v hi">0.68</span></div>
+              <div class="row"><span class="pair">META ↔ GOOG</span><div class="bar"><span class="am" style="width:65%"></span></div><span class="v med">0.65</span></div>
+              <div class="row"><span class="pair">CRWD ↔ DDOG</span><div class="bar"><span class="am" style="width:61%"></span></div><span class="v med">0.61</span></div>
+              <div class="row"><span class="pair">PLTR ↔ SHOP</span><div class="bar"><span class="am" style="width:54%"></span></div><span class="v med">0.54</span></div>
+            </div>
+            <div class="corr-summary">Average pairwise correlation <b>0.52</b> · target <code>&lt; 0.35</code>. List is dominated by tech mega-cap + AI infra. This is <b>1 concentrated tech bet</b>, not 12 independent positions. Consider trimming to 4-6 lowest-correlation picks.</div>
+          </div>
+          <div class="diag-pane">
+            <h3>FACTOR EXPOSURE <span class="verdict-pill am">⚠ SINGLE-FACTOR LOAD</span></h3>
+            <div class="fact-bars">
+              <div class="row"><span class="nm">MOMENTUM</span><div class="biar"><span class="seg gn" style="width:37%"></span></div><span class="v gn">+0.74</span></div>
+              <div class="row"><span class="nm">QUALITY</span><div class="biar"><span class="seg gn" style="width:21%"></span></div><span class="v gn">+0.42</span></div>
+              <div class="row"><span class="nm">GROWTH</span><div class="biar"><span class="seg gn" style="width:19%"></span></div><span class="v gn">+0.38</span></div>
+              <div class="row"><span class="nm">SIZE</span><div class="biar"><span class="seg rd" style="width:11%"></span></div><span class="v rd">−0.21</span></div>
+              <div class="row"><span class="nm">VALUE</span><div class="biar"><span class="seg rd" style="width:33%"></span></div><span class="v rd">−0.65</span></div>
+            </div>
+            <div class="fact-summary">Bull set is <b>+0.74 momentum / −0.65 value</b>. The model is loading the momentum factor heavily — not picking idiosyncratic alpha. Returns will mostly mirror a momentum ETF (MTUM). To capture true alpha, look at MOMENTUM-neutralized rankings.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BEARS -->
+      <div class="sect power-only" id="bears">
+        <div class="tbl-wrap">
+          <div class="tbl-head">
+            <div class="ttl">TOP 10 BEARS <span class="ct">· P(dn) desc</span></div>
+            <div class="sub">Exit / short candidates</div>
+          </div>
+          <table class="tbl">
+            <thead><tr>
+              <th>TICKER</th><th class="r">P(DN)</th><th class="r">μ 5d</th><th class="r">q10</th>
+              <th class="r">P(STOP)</th><th>SECTOR</th><th class="r">ER</th><th>ROUTING</th>
+            </tr></thead>
+            <tbody id="bears-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- HEATMAP -->
+      <div class="sect power-only" id="heat">
+        <h2>SECTOR HEAT <span class="meta">bull density · color intensity = % bull tickers · dots = top names</span></h2>
+        <div class="heat" id="heat-grid"></div>
+      </div>
+
+      <!-- CALIBRATION -->
+      <div class="sect power-only" id="cal">
+        <h2>MODEL CALIBRATION <span class="meta">single source · holdout decile · per-mode dir accuracy</span></h2>
+        <div class="cal">
+          <div class="pane"><h3>SWING · 5d</h3><div class="v gn">58%</div><div class="d">dir accuracy · n=523 · Brier 0.21 · Pinball 1.4</div><div class="decile" id="dec-swing"></div></div>
+          <div class="pane"><h3>POSITION · 21d</h3><div class="v am">53%</div><div class="d">dir accuracy · n=348 · Brier 0.24 · Pinball 2.1</div><div class="decile" id="dec-pos"></div></div>
+          <div class="pane"><h3>INVEST · 63d</h3><div class="v gn">61%</div><div class="d">dir accuracy · n=192 · Brier 0.19 · Pinball 4.8</div><div class="decile" id="dec-inv"></div></div>
+        </div>
+      </div>
+
+    </div><!-- /main -->
+
+    <!-- RAIL / FOCUS -->
+    <div class="rail" id="rail">
+      <div class="focus-h">
+        <span>FOCUS ·</span>
+        <span class="tk" id="focus-tk">AAPL</span>
+        <div class="cycle">
+          <button onclick="cycleFocus(-1)" title="K · prev">‹</button>
+          <button onclick="cycleFocus(1)" title="J · next">›</button>
+        </div>
+      </div>
+      <div class="focus-sub" id="focus-sub">Tech · ER 23d · Mode SWING · click any row to swap</div>
+
+      <div class="kpi">
+        <div class="k"><div class="lbl">P(UP)</div><div class="v gn" id="kpi-pup" data-counter-f="0.74">0.00</div></div>
+        <div class="k"><div class="lbl">μ 5D</div><div class="v gn" id="kpi-q50">+3.2%</div></div>
+        <div class="k"><div class="lbl">P(T1)</div><div class="v gn" id="kpi-pt1" data-counter-f="0.62">0.00</div></div>
+        <div class="k"><div class="lbl">R:R</div><div class="v" id="kpi-rr" data-counter-f="3.8">0.0</div></div>
+      </div>
+
+      <div class="cone" id="cone-wrap">
+        <div class="ttl">FORECAST CONE · q10–q90 · 5d horizon</div>
+        <svg id="cone-svg" viewBox="0 0 320 130" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="coneGrad" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%"  stop-color="#7fc36a" stop-opacity="0.05"/>
+              <stop offset="50%" stop-color="#7fc36a" stop-opacity="0.32"/>
+              <stop offset="100%" stop-color="#7fc36a" stop-opacity="0.05"/>
+            </linearGradient>
+          </defs>
+          <!-- grid -->
+          <line x1="0" y1="30"  x2="320" y2="30"  stroke="var(--line-2)" stroke-width="0.4" stroke-dasharray="2,3"/>
+          <line x1="0" y1="65"  x2="320" y2="65"  stroke="var(--line-2)" stroke-width="0.6"/>
+          <line x1="0" y1="100" x2="320" y2="100" stroke="var(--line-2)" stroke-width="0.4" stroke-dasharray="2,3"/>
+          <!-- axis ticks -->
+          <line x1="0"   y1="115" x2="320" y2="115" stroke="var(--line)" stroke-width="0.5"/>
+          <text x="6"   y="125" font-family="var(--mono)" font-size="8" font-weight="800" fill="var(--ink-3)" letter-spacing="0.1">T+0</text>
+          <text x="155" y="125" font-family="var(--mono)" font-size="8" font-weight="800" fill="var(--ink-3)" letter-spacing="0.1">T+2</text>
+          <text x="295" y="125" font-family="var(--mono)" font-size="8" font-weight="800" fill="var(--ink-3)" letter-spacing="0.1">T+5</text>
+          <text x="6"  y="15"  font-family="var(--mono)" font-size="8" font-weight="800" fill="var(--gn)">q90 +6.8%</text>
+          <text x="6"  y="112" font-family="var(--mono)" font-size="8" font-weight="800" fill="var(--rd)">q10 −2.1%</text>
+          <!-- cone area -->
+          <polygon id="cone-area" fill="url(#coneGrad)"
+            points="0,65 50,62 105,57 160,50 215,42 270,35 320,28 320,98 270,93 215,87 160,80 105,73 50,68 0,65"/>
+          <!-- median -->
+          <polyline id="cone-med" points="0,65 50,60 105,53 160,45 215,38 270,32 320,26"
+            stroke="var(--gn)" stroke-width="2" fill="none" stroke-linecap="round"/>
+          <!-- hover dots -->
+          <g id="cone-dots">
+            <circle cx="0"   cy="65" r="2.5" fill="var(--gn)" opacity="0.55"/>
+            <circle cx="105" cy="53" r="2.5" fill="var(--gn)" opacity="0.55"/>
+            <circle cx="215" cy="38" r="2.5" fill="var(--gn)" opacity="0.55"/>
+            <circle cx="320" cy="26" r="3"   fill="var(--copper)"/>
+          </g>
+        </svg>
+        <div class="hover-tip" id="cone-tip">T+3 · μ +4.1%</div>
+      </div>
+
+      <!-- ML-NATIVE: SHAP-style feature contribution -->
+      <div class="shap">
+        <h3>FEATURE CONTRIBUTION · SHAP</h3>
+        <div class="row"><span class="nm">VCP · 6w</span><div class="biar"><span class="s gn" style="width:36%"></span></div><span class="v gn">+0.18</span></div>
+        <div class="row"><span class="nm">RVOL 1.8×</span><div class="biar"><span class="s gn" style="width:24%"></span></div><span class="v gn">+0.12</span></div>
+        <div class="row"><span class="nm">52W BO</span><div class="biar"><span class="s gn" style="width:18%"></span></div><span class="v gn">+0.09</span></div>
+        <div class="row"><span class="nm">RS 87 · sector</span><div class="biar"><span class="s gn" style="width:10%"></span></div><span class="v gn">+0.05</span></div>
+        <div class="row"><span class="nm">UOA · CALL</span><div class="biar"><span class="s gn" style="width:8%"></span></div><span class="v gn">+0.04</span></div>
+        <div class="row"><span class="nm">ER 23d</span><div class="biar"><span class="s rd" style="width:8%"></span></div><span class="v rd">−0.04</span></div>
+        <div class="row"><span class="nm">EMA stack</span><div class="biar"><span class="s gn" style="width:4%"></span></div><span class="v gn">+0.02</span></div>
+      </div>
+
+      <!-- ML-NATIVE: ALPHA-vs-BETA decomposition -->
+      <div class="alphabeta">
+        <h3>α vs β DECOMPOSITION</h3>
+        <div class="bar">
+          <div class="seg alpha" style="flex:38;">α · 38%</div>
+          <div class="seg beta"  style="flex:62;">β · 62%</div>
+        </div>
+        <div class="legend">
+          <span>Idiosyncratic <b>+1.22%</b></span>
+          <span>Market β <b>+1.98%</b></span>
+        </div>
+        <div class="verdict"><b>Mixed signal</b> — 38% idiosyncratic alpha is below the 50% threshold. Most of this pick's expected return rides Nasdaq beta. Consider hedging with QQQ short or sizing smaller. True alpha ≥ 50% would justify full size.</div>
+      </div>
+
+      <div class="plan">
+        <h3>TRADE PLAN · ENTRY · STOP · TARGETS</h3>
+        <div class="row"><span>ENTRY</span><span class="v">$182.40</span></div>
+        <div class="row"><span>STOP</span><span class="v rd">$176.85 (1.25× ATR)</span></div>
+        <div class="row"><span>T1</span><span class="v gn">$192.20 (+5.4%)</span></div>
+        <div class="row"><span>T2</span><span class="v gn">$203.50 (+11.6%)</span></div>
+        <div class="row"><span>R:R</span><span class="v">3.8</span></div>
+        <div class="row"><span>SIZE</span><span class="v">6.5% (T1 · choppy)</span></div>
+      </div>
+
+      <div class="peer">
+        <h3>SECTOR-PEER LENS · TECH</h3>
+        <div class="row high"><span>AAPL · this</span><span class="v">0.74</span></div>
+        <div class="row"><span>Sector median</span><span class="v">0.52</span></div>
+        <div class="row"><span>Top decile</span><span class="v">0.68</span></div>
+        <div class="row" style="border-top:1px solid var(--line);padding-top:7px;margin-top:3px;"><span>Δ vs median</span><span class="v" style="color:var(--gn);">+22pp</span></div>
+      </div>
+
+      <div class="catalyst">
+        <h3>CATALYST CONTEXT</h3>
+        <div class="item"><span class="k">EARNINGS</span><span class="v">23d (2026-06-14, AMC)</span></div>
+        <div class="item"><span class="k">NEWS 7d</span><span class="v" style="color:var(--gn);">+0.42 sentiment</span></div>
+        <div class="item"><span class="k">IV RANK</span><span class="v">38th pct · cheap</span></div>
+        <div class="item"><span class="k">UOA</span><span class="v" style="color:var(--gn);">CALL $185 · 3.2× avg</span></div>
+        <div class="item"><span class="k">INSIDER</span><span class="v">2 buys · 30d cluster</span></div>
+      </div>
+
+    </div><!-- /rail -->
+  </div><!-- /shell -->
+</div><!-- /view-live -->
+
+<!-- ═════════════════════════════════════════════════════════════════════════ -->
+<!--                             HISTORY                                        -->
+<!-- ═════════════════════════════════════════════════════════════════════════ -->
+<div id="view-history" class="hidden">
+  <div class="main" style="max-width:1500px;margin:0 auto;">
+
+    <!-- VERDICT BANNER (display serif, with confidence box) -->
+    <div class="verdict fadein">
+      <div class="ico">◈</div>
+      <div class="body">
+        <div class="hd">RECOMMENDATION · 62 RESOLVED PREDICTIONS · 90-DAY WINDOW</div>
+        <div class="rec">Set min threshold <b>P(up) ≥ 0.65</b> · mode <b>SWING</b></div>
+        <div class="cap">Bands ≥0.65 hit <b>71%</b> with avg <b>+4.2%</b> return. Below 0.55 the model is near-random (<b>48%</b> hit-rate). Mode SWING outperforms POSITION by <b>+1.7pp R-mult</b> and INVEST by <b>+3.1pp</b>. Hit-rate trending <b>flat</b> over last 8 weeks — no model decay detected.</div>
+      </div>
+      <div class="confbox">
+        <div class="lbl">HIT-RATE · BOOTSTRAP 95%CI</div>
+        <div class="ci-headline">
+          <span class="pt">61%</span>
+          <span class="interval">[<b>54%</b>, <b>68%</b>]</span>
+        </div>
+        <div class="det" style="margin-top:8px;">10,000 bootstrap resamples · n=62<br>Wilson LB 58% · p &lt; 0.01 vs 50%</div>
+        <div class="meter"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot"></span></div>
+      </div>
+    </div>
+
+    <!-- HERO (dominant + supporting) -->
+    <div class="sect">
+      <h2>TRACK RECORD <span class="meta">resolved predictions · all modes · last 90d</span></h2>
+      <div class="hero">
+        <div class="tile lead">
+          <div class="lbl">HIT RATE</div>
+          <div class="big" data-counter="61">0<span class="unit">% of 62</span></div>
+          <div class="sub"><b style="color:var(--gn);">+11pp vs 50% baseline</b> · breakeven hit-rate 38% (avg R 1.6) · system has REAL edge</div>
+        </div>
+        <div class="tile cu">
+          <div class="lbl">RESOLVED</div>
+          <div class="big" data-counter="62">0</div>
+          <div class="sub">of 84 · <b>22 pending</b></div>
+        </div>
+        <div class="tile gn">
+          <div class="lbl">AVG REALIZED %</div>
+          <div class="big gn" data-counter-f="+2.8">+0.0<span class="unit">%</span></div>
+          <div class="sub">median <b>+1.9%</b> · σ 4.7%</div>
+        </div>
+        <div class="tile gn">
+          <div class="lbl">MEAN R-MULT</div>
+          <div class="big gn" data-counter-f="+0.84">+0.00<span class="unit">R</span></div>
+          <div class="sub">profitable: <b>+0.84R</b> > 0 floor</div>
+        </div>
+        <div class="tile cu">
+          <div class="lbl">BEST MODE</div>
+          <div class="big" style="font-size:24px;color:var(--copper);font-family:var(--display);">SWING</div>
+          <div class="sub">+1.7pp vs POSITION</div>
+        </div>
+        <div class="tile info sec5">
+          <div class="lbl">8W TREND</div>
+          <div class="big" style="color:var(--info);font-size:22px;font-family:var(--display);">FLAT</div>
+          <div class="sub">no decay · no improvement · model stable</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- HIT-RATE TREND with proper axes + hover -->
+    <div class="sect">
+      <h2>HIT-RATE TREND <span class="meta">8-week rolling · ISO buckets · hover for week detail</span></h2>
+      <div class="trend">
+        <div class="hd">
+          <span class="ttl">8-WEEK ROLLING HIT-RATE</span>
+          <span class="cur">61%</span>
+        </div>
+        <svg viewBox="0 0 820 90" preserveAspectRatio="none" id="trend-svg">
+          <!-- y-axis ticks -->
+          <line x1="30" y1="10" x2="820" y2="10" stroke="var(--line-2)" stroke-width="0.4" stroke-dasharray="2,3"/>
+          <line x1="30" y1="45" x2="820" y2="45" stroke="var(--line-2)" stroke-width="0.6"/>
+          <line x1="30" y1="80" x2="820" y2="80" stroke="var(--line-2)" stroke-width="0.4" stroke-dasharray="2,3"/>
+          <text class="axis-y" x="3" y="14">70%</text>
+          <text class="axis-y" x="3" y="49">55%</text>
+          <text class="axis-y" x="3" y="84">40%</text>
+          <!-- baseline -->
+          <line x1="30" y1="45" x2="820" y2="45" stroke="var(--ink-4)" stroke-width="0.4"/>
+          <text class="axis-x" x="60"  y="92">W-7</text>
+          <text class="axis-x" x="200" y="92">W-5</text>
+          <text class="axis-x" x="340" y="92">W-3</text>
+          <text class="axis-x" x="480" y="92">W-1</text>
+          <text class="axis-x" x="780" y="92" fill="var(--copper)">NOW</text>
+          <!-- line -->
+          <polyline id="trend-line" points="30,46 130,42 230,48 330,38 430,28 530,35 630,30 730,28 820,28"
+            stroke="var(--gn)" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+          <!-- area under -->
+          <polygon points="30,46 130,42 230,48 330,38 430,28 530,35 630,30 730,28 820,28 820,80 30,80"
+            fill="var(--gn-bg)" opacity="0.5"/>
+          <!-- hover dots -->
+          <g id="trend-dots">
+            <circle cx="30"  cy="46" r="3.5" fill="var(--gn)" data-week="W-7" data-val="52%"/>
+            <circle cx="130" cy="42" r="3.5" fill="var(--gn)" data-week="W-6" data-val="55%"/>
+            <circle cx="230" cy="48" r="3.5" fill="var(--gn)" data-week="W-5" data-val="50%"/>
+            <circle cx="330" cy="38" r="3.5" fill="var(--gn)" data-week="W-4" data-val="58%"/>
+            <circle cx="430" cy="28" r="3.5" fill="var(--gn)" data-week="W-3" data-val="65%"/>
+            <circle cx="530" cy="35" r="3.5" fill="var(--gn)" data-week="W-2" data-val="60%"/>
+            <circle cx="630" cy="30" r="3.5" fill="var(--gn)" data-week="W-1" data-val="63%"/>
+            <circle cx="730" cy="28" r="3.5" fill="var(--gn)" data-week="W-0" data-val="65%"/>
+            <circle cx="820" cy="28" r="4.5" fill="var(--copper)" stroke="var(--bg-1)" stroke-width="1.5" data-week="NOW" data-val="61%"/>
+          </g>
+        </svg>
+        <div class="trend-tip" id="trend-tip"></div>
+      </div>
+    </div>
+
+    <!-- ML-NATIVE: PROBABILISTIC CALIBRATION -->
+    <div class="sect" id="prob-cal">
+      <h2>PROBABILISTIC CALIBRATION <span class="meta">is a 0.74 prediction really a 74% probability?</span></h2>
+      <div class="ml-grid-2">
+        <div class="ml-pane reldiagram">
+          <h3>RELIABILITY DIAGRAM <span class="v gn">CALIBRATED</span></h3>
+          <svg viewBox="0 0 320 220" preserveAspectRatio="none">
+            <!-- gridlines -->
+            <line class="gridline" x1="30" y1="20"  x2="320" y2="20"/>
+            <line class="gridline" x1="30" y1="60"  x2="320" y2="60"/>
+            <line class="gridline" x1="30" y1="100" x2="320" y2="100"/>
+            <line class="gridline" x1="30" y1="140" x2="320" y2="140"/>
+            <line class="gridline" x1="30" y1="180" x2="320" y2="180"/>
+            <line class="gridline" x1="30" y1="180" x2="30"  y2="20"/>
+            <line class="gridline" x1="88" y1="180" x2="88"  y2="20"/>
+            <line class="gridline" x1="146" y1="180" x2="146" y2="20"/>
+            <line class="gridline" x1="204" y1="180" x2="204" y2="20"/>
+            <line class="gridline" x1="262" y1="180" x2="262" y2="20"/>
+            <line class="gridline" x1="320" y1="180" x2="320" y2="20"/>
+            <!-- perfect diagonal -->
+            <line class="diag" x1="30" y1="180" x2="320" y2="20"/>
+            <!-- axis labels -->
+            <text class="axis-lbl" x="30"  y="195">0.0</text>
+            <text class="axis-lbl" x="174" y="195">0.5 — predicted P(up)</text>
+            <text class="axis-lbl" x="310" y="195">1.0</text>
+            <text class="axis-lbl" x="2"  y="184">0.0</text>
+            <text class="axis-lbl" x="2"  y="100">0.5</text>
+            <text class="axis-lbl" x="2"  y="22">1.0</text>
+            <text class="axis-lbl" x="2"  y="12" font-weight="800">realized</text>
+            <!-- decile dots: x = predicted bin midpoint, y = realized hit-rate, r = sqrt(n) -->
+            <circle class="point above" cx="46"  cy="170" r="3" data-tip="0.0-0.1 · pred 5% · real 6% · n=2"/>
+            <circle class="point above" cx="75"  cy="158" r="4" data-tip="0.1-0.2 · pred 15% · real 14% · n=3"/>
+            <circle class="point above" cx="104" cy="142" r="5" data-tip="0.2-0.3 · pred 25% · real 23% · n=5"/>
+            <circle class="point above" cx="133" cy="123" r="5" data-tip="0.3-0.4 · pred 35% · real 33% · n=6"/>
+            <circle class="point above" cx="162" cy="103" r="6" data-tip="0.4-0.5 · pred 45% · real 48% · n=8"/>
+            <circle class="point on"    cx="191" cy="85"  r="7" data-tip="0.5-0.6 · pred 55% · real 55% · n=12 · CALIBRATED"/>
+            <circle class="point above" cx="220" cy="62"  r="7" data-tip="0.6-0.7 · pred 65% · real 62% · n=10"/>
+            <circle class="point above" cx="249" cy="38"  r="8" data-tip="0.7-0.8 · pred 75% · real 72% · n=11 · STRONG"/>
+            <circle class="point above" cx="278" cy="28"  r="5" data-tip="0.8-0.9 · pred 85% · real 80% · n=4"/>
+            <circle class="point above" cx="307" cy="22"  r="3" data-tip="0.9-1.0 · pred 95% · real 95% · n=1"/>
+          </svg>
+          <div class="cap">Each dot = predicted-bin midpoint vs realized hit-rate. Dot size ∝ √n. Tracking the diagonal = the model says 0.74 and reality says ≈ 74%. <span class="verdict-tag gn">✓ NEAR DIAGONAL</span></div>
+        </div>
+        <div class="ml-pane">
+          <h3>BRIER SCORE TREND <span class="v gn">0.21</span></h3>
+          <div class="spark-trend">
+            <svg viewBox="0 0 320 70" preserveAspectRatio="none">
+              <line class="axis" x1="20" y1="60" x2="320" y2="60"/>
+              <line class="baseline" x1="20" y1="14" x2="320" y2="14"/>
+              <text class="lbl" x="2" y="18">0.15</text>
+              <text class="lbl" x="2" y="64">0.30</text>
+              <polyline points="20,32 60,30 100,33 140,29 180,28 220,26 260,24 320,22"
+                stroke="var(--gn)" stroke-width="2" fill="none"/>
+              <circle cx="320" cy="22" r="3.5" fill="var(--gn)"/>
+              <text class="lbl" x="20"  y="-2" dy="58">W-7</text>
+              <text class="lbl" x="200" y="-2" dy="58">W-3</text>
+              <text class="lbl" x="300" y="-2" dy="58">NOW</text>
+            </svg>
+            <div class="legend">
+              <span class="item"><span class="sw gn"></span>Brier · lower is better · perfect = 0</span>
+            </div>
+          </div>
+          <div class="cap">Brier penalizes overconfidence on losers and underconfidence on winners. Improving from <b>0.32 → 0.21</b> means model is sharpening, not just gaining hit-rate. <span class="verdict-tag gn">✓ SHARPENING</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ML-NATIVE: EDGE TRACKING -->
+    <div class="sect" id="edge-track">
+      <h2>EDGE TRACKING <span class="meta">is the alpha alive and growing — across time horizons</span></h2>
+      <div class="ml-grid-2">
+        <div class="ml-pane">
+          <h3>INFORMATION COEFFICIENT · ROLLING <span class="v gn">+0.18</span></h3>
+          <div class="spark-trend">
+            <svg viewBox="0 0 320 70" preserveAspectRatio="none">
+              <line class="axis" x1="20" y1="60" x2="320" y2="60"/>
+              <line class="baseline" x1="20" y1="40" x2="320" y2="40"/>
+              <text class="lbl" x="2" y="18">+0.25</text>
+              <text class="lbl" x="2" y="44">0</text>
+              <text class="lbl" x="2" y="64">−0.10</text>
+              <polyline class="line-30"  points="20,42 60,38 100,33 140,28 180,26 220,24 260,22 320,20"/>
+              <polyline class="line-63"  points="20,40 60,37 100,34 140,32 180,30 220,28 260,27 320,26"/>
+              <polyline class="line-126" points="20,38 60,37 100,36 140,35 180,34 220,33 260,32 320,30"/>
+              <text class="lbl" x="20" y="-2" dy="58">W-7</text>
+              <text class="lbl" x="300" y="-2" dy="58">NOW</text>
+            </svg>
+            <div class="legend">
+              <span><span class="sw gn"></span>IC 30d <b>+0.18</b></span>
+              <span><span class="sw cu"></span>IC 63d <b>+0.15</b></span>
+              <span><span class="sw in"></span>IC 126d <b>+0.12</b></span>
+            </div>
+          </div>
+          <div class="cap">Short-horizon IC is rising above long-horizon — model is <b>strengthening</b>, not decaying. p &lt; 0.01 across all 3 windows. <span class="verdict-tag gn">✓ ALPHA INTACT</span></div>
+        </div>
+        <div class="ml-pane">
+          <h3>DECILE SPREAD · HISTORY <span class="v gn">+4.6pp</span></h3>
+          <div class="spark-trend">
+            <svg viewBox="0 0 320 70" preserveAspectRatio="none">
+              <line class="axis" x1="20" y1="60" x2="320" y2="60"/>
+              <line class="baseline" x1="20" y1="50" x2="320" y2="50"/>
+              <text class="lbl" x="2" y="18">+6pp</text>
+              <text class="lbl" x="2" y="54">0</text>
+              <text class="lbl" x="2" y="64">−2pp</text>
+              <polyline points="20,48 60,42 100,40 140,36 180,32 220,28 260,24 320,22"
+                stroke="var(--gn)" stroke-width="2" fill="none"/>
+              <polygon points="20,48 60,42 100,40 140,36 180,32 220,28 260,24 320,22 320,60 20,60"
+                fill="var(--gn-bg)" opacity="0.6"/>
+              <circle cx="320" cy="22" r="3.5" fill="var(--gn)"/>
+              <text class="lbl" x="20"  y="-2" dy="58">W-7</text>
+              <text class="lbl" x="300" y="-2" dy="58">NOW</text>
+            </svg>
+            <div class="legend">
+              <span class="item"><span class="sw gn"></span>Top decile +5.2% &nbsp;−&nbsp; Bottom decile −2.1% &nbsp;=&nbsp; <b>+4.6pp gap</b></span>
+            </div>
+          </div>
+          <div class="cap">The spread between top-decile-predicted and bottom-decile-predicted realized return IS the alpha. Widening week-over-week. <span class="verdict-tag gn">✓ GAP WIDENING</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ML-NATIVE: ROBUSTNESS -->
+    <div class="sect" id="robust">
+      <h2>ROBUSTNESS <span class="meta">does the edge survive cohort, time, and feature shifts?</span></h2>
+      <div class="ml-grid-3">
+        <div class="ml-pane survival">
+          <h3>COHORT SURVIVAL <span class="v gn">71%</span></h3>
+          <svg viewBox="0 0 280 130" preserveAspectRatio="none">
+            <line class="grid" x1="30" y1="20"  x2="280" y2="20"/>
+            <line class="grid" x1="30" y1="60"  x2="280" y2="60"/>
+            <line class="grid" x1="30" y1="100" x2="280" y2="100"/>
+            <line class="grid" x1="30" y1="100" x2="30"  y2="20"/>
+            <polyline class="line" points="30,90 70,72 110,56 150,42 190,32 230,28 280,26"/>
+            <polygon class="area" points="30,90 70,72 110,56 150,42 190,32 230,28 280,26 280,100 30,100" opacity="0.45"/>
+            <circle cx="190" cy="32" r="4" fill="var(--copper)"/>
+            <text class="anno" x="160" y="20">T1 typical hit</text>
+            <text class="ax" x="3"  y="24">100%</text>
+            <text class="ax" x="3"  y="104">0%</text>
+            <text class="ax" x="30"  y="118">D+0</text>
+            <text class="ax" x="150" y="118">D+5</text>
+            <text class="ax" x="260" y="118">D+10</text>
+          </svg>
+          <div class="cap">Cumulative hit-rate by day-held. Edge builds non-linearly — <b>63% by D+5</b>, plateaus past D+8. Holding longer adds risk without alpha. <span class="verdict-tag gn">✓ EXIT BY D+8</span></div>
+        </div>
+        <div class="ml-pane">
+          <h3>PREDICTION STABILITY <span class="v am">σ 0.04</span></h3>
+          <table class="stab-tbl">
+            <thead><tr><th>TICKER</th><th class="r">P(up) 3d range</th><th class="r">σ</th></tr></thead>
+            <tbody>
+              <tr><td><span class="tk">AAPL</span></td><td class="r">0.71 → 0.74</td><td class="r gn">0.015</td></tr>
+              <tr><td><span class="tk">NVDA</span></td><td class="r">0.65 → 0.71</td><td class="r gn">0.030</td></tr>
+              <tr><td><span class="tk">META</span></td><td class="r">0.62 → 0.69</td><td class="r">0.035</td></tr>
+              <tr><td><span class="tk">PLTR</span></td><td class="r">0.55 → 0.61</td><td class="r">0.030</td></tr>
+              <tr><td><span class="tk">DDOG</span></td><td class="r">0.49 → 0.57</td><td class="r rd">0.040</td></tr>
+            </tbody>
+          </table>
+          <div class="cap">Same-ticker P(up) shift across consecutive scans. Low σ = stable model output. AAPL is rock-steady; DDOG drifts. <span class="verdict-tag am">⚠ DDOG NOISY</span></div>
+        </div>
+        <div class="ml-pane">
+          <h3>FEATURE IMPORTANCE DRIFT <span class="v">·</span></h3>
+          <div class="featdrift" id="featdrift-cols">
+            <div class="col"><div class="seg" style="height:28%;"></div><div class="seg rvol" style="height:18%;"></div><div class="seg bo52" style="height:12%;"></div><div class="seg rs" style="height:10%;"></div><div class="seg other" style="height:32%;"></div><div class="lbl">W-7</div></div>
+            <div class="col"><div class="seg" style="height:30%;"></div><div class="seg rvol" style="height:17%;"></div><div class="seg bo52" style="height:13%;"></div><div class="seg rs" style="height:10%;"></div><div class="seg other" style="height:30%;"></div><div class="lbl">W-6</div></div>
+            <div class="col"><div class="seg" style="height:32%;"></div><div class="seg rvol" style="height:16%;"></div><div class="seg bo52" style="height:14%;"></div><div class="seg rs" style="height:10%;"></div><div class="seg other" style="height:28%;"></div><div class="lbl">W-5</div></div>
+            <div class="col"><div class="seg" style="height:34%;"></div><div class="seg rvol" style="height:16%;"></div><div class="seg bo52" style="height:14%;"></div><div class="seg rs" style="height:10%;"></div><div class="seg other" style="height:26%;"></div><div class="lbl">W-4</div></div>
+            <div class="col"><div class="seg" style="height:36%;"></div><div class="seg rvol" style="height:15%;"></div><div class="seg bo52" style="height:14%;"></div><div class="seg rs" style="height:9%;"></div><div class="seg other" style="height:26%;"></div><div class="lbl">W-3</div></div>
+            <div class="col"><div class="seg" style="height:35%;"></div><div class="seg rvol" style="height:16%;"></div><div class="seg bo52" style="height:14%;"></div><div class="seg rs" style="height:9%;"></div><div class="seg other" style="height:26%;"></div><div class="lbl">W-2</div></div>
+            <div class="col"><div class="seg" style="height:36%;"></div><div class="seg rvol" style="height:14%;"></div><div class="seg bo52" style="height:13%;"></div><div class="seg rs" style="height:8%;"></div><div class="seg other" style="height:29%;"></div><div class="lbl">W-1</div></div>
+            <div class="col"><div class="seg" style="height:38%;"></div><div class="seg rvol" style="height:13%;"></div><div class="seg bo52" style="height:12%;"></div><div class="seg rs" style="height:8%;"></div><div class="seg other" style="height:29%;"></div><div class="lbl">NOW</div></div>
+          </div>
+          <div class="featdrift-legend">
+            <span><span class="sw vcp"></span>VCP</span>
+            <span><span class="sw rvol"></span>RVOL</span>
+            <span><span class="sw bo52"></span>52w BO</span>
+            <span><span class="sw rs"></span>RS</span>
+            <span><span class="sw other"></span>other</span>
+          </div>
+          <div class="cap">VCP weight rising 28% → 38% over 8w · RS declining slowly. Top features are stable. <span class="verdict-tag gn">✓ NO REGIME SHIFT</span></div>
+        </div>
+      </div>
+      <div class="ml-grid-2" style="margin-top:14px;">
+        <div class="ml-pane">
+          <h3>HOSMER-LEMESHOW χ² <span class="v gn">p = 0.42</span></h3>
+          <div class="hl-tile">
+            <div class="hd">GOODNESS-OF-FIT</div>
+            <div class="v gn">χ² = 7.83 · df=8</div>
+            <div class="cap"><b>p = 0.42 &gt; 0.05</b> — fail to reject H₀: model is well-calibrated. Per-band probabilities match realized outcomes within sampling error. <span class="verdict-tag gn">✓ CALIBRATION PASSES FORMAL TEST</span></div>
+          </div>
+        </div>
+        <div class="ml-pane">
+          <h3>PAPER vs REALIZED · SLIPPAGE <span class="v am">−0.4%</span></h3>
+          <div class="slip-tile">
+            <div class="hd">REALITY GAP</div>
+            <div class="v am">+2.4% real <span style="font-size:13px;color:var(--ink-3);">vs +2.8% paper</span></div>
+            <div class="deltabar">
+              <span>Paper avg<br><span class="paper">+2.8%</span></span>
+              <span class="arrow">→</span>
+              <span>Realized (post-slip)<br><span class="real">+2.4%</span></span>
+              <span class="delta">Δ −0.4% slip</span>
+            </div>
+            <div class="cap" style="margin-top:8px;">Avg friction: <b>40bps</b> (spread + market impact + half-day fill drag). Within institutional realism band (30-60bps). <span class="verdict-tag am">⚠ FACTOR INTO SIZING</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BUY-CALL ATTRIBUTION (direct answer to: how many BUYs won vs lost) -->
+    <div class="sect" id="buyattr">
+      <h2>BUY-CALL ATTRIBUTION <span class="meta">of every signal we routed BUY · how many actually got +ve vs −ve returns</span></h2>
+
+      <div class="buyattr">
+        <div class="ba-card lead">
+          <div class="lbl">PREDICTED BUY</div>
+          <div class="big" data-counter="42">0<span class="unit">issued</span></div>
+          <div class="sub">routed <b>BUY</b> across SWING / POSITION / INVEST · <b>39 resolved</b> · 3 pending</div>
+        </div>
+        <div class="ba-card gn">
+          <div class="lbl">+VE RETURNS</div>
+          <div class="big gn" data-counter="26">0</div>
+          <div class="sub"><b>67%</b> of resolved · avg <b>+5.1%</b></div>
+        </div>
+        <div class="ba-card rd">
+          <div class="lbl">−VE RETURNS</div>
+          <div class="big rd" data-counter="13">0</div>
+          <div class="sub"><b>33%</b> of resolved · avg <b>−3.4%</b></div>
+        </div>
+        <div class="ba-card am">
+          <div class="lbl">PENDING</div>
+          <div class="big am" data-counter="3">0</div>
+          <div class="sub">still inside horizon window</div>
+        </div>
+      </div>
+
+      <div class="buyattr-bar">
+        <div class="head">
+          <span class="ttl">OUTCOME SPLIT · 42 BUY-ROUTED PREDICTIONS</span>
+          <span class="total">26W · 13L · 3P</span>
+        </div>
+        <div class="bar">
+          <div class="seg win" style="flex:26;">26 <span class="pct">62%</span></div>
+          <div class="seg loss" style="flex:13;">13 <span class="pct">31%</span></div>
+          <div class="seg pend" style="flex:3;">3 <span class="pct">7%</span></div>
+        </div>
+        <div class="legend">
+          <span class="item"><span class="sw gn"></span>+VE realized · <b>26 / 42 = 62%</b> of all BUYs</span>
+          <span class="item"><span class="sw rd"></span>−VE realized · <b>13 / 42 = 31%</b></span>
+          <span class="item"><span class="sw am"></span>Pending · <b>3 / 42 = 7%</b></span>
+          <span class="item" style="margin-left:auto;color:var(--ink-3);">Win-rate of resolved BUYs: <b style="color:var(--gn);">67%</b> · vs 50% random</span>
+        </div>
+      </div>
+
+      <div class="buyattr-mode">
+        <table>
+          <thead><tr>
+            <th>MODE</th><th class="r">PREDICTED BUY</th><th class="r">+VE</th><th class="r">−VE</th><th class="r">PENDING</th><th>SPLIT</th><th class="r">HIT-RATE</th><th class="r">AVG RET</th>
+          </tr></thead>
+          <tbody>
+            <tr><td><span class="mode-name">SWING</span></td><td class="r">22</td>
+              <td class="r" style="color:var(--gn);font-weight:800;">15</td>
+              <td class="r" style="color:var(--rd);font-weight:800;">6</td>
+              <td class="r" style="color:var(--amb);">1</td>
+              <td><div class="mini-bar"><div class="s gn" style="flex:15"></div><div class="s rd" style="flex:6"></div><div class="s am" style="flex:1"></div></div></td>
+              <td class="r" style="color:var(--gn);font-weight:800;">71%</td>
+              <td class="r" style="color:var(--gn);font-weight:800;">+5.8%</td>
+            </tr>
+            <tr><td><span class="mode-name">POSITION</span></td><td class="r">14</td>
+              <td class="r" style="color:var(--gn);font-weight:800;">8</td>
+              <td class="r" style="color:var(--rd);font-weight:800;">5</td>
+              <td class="r" style="color:var(--amb);">1</td>
+              <td><div class="mini-bar"><div class="s gn" style="flex:8"></div><div class="s rd" style="flex:5"></div><div class="s am" style="flex:1"></div></div></td>
+              <td class="r" style="color:var(--gn);">62%</td>
+              <td class="r" style="color:var(--gn);">+3.6%</td>
+            </tr>
+            <tr><td><span class="mode-name">INVEST</span></td><td class="r">6</td>
+              <td class="r" style="color:var(--gn);font-weight:800;">3</td>
+              <td class="r" style="color:var(--rd);font-weight:800;">2</td>
+              <td class="r" style="color:var(--amb);">1</td>
+              <td><div class="mini-bar"><div class="s gn" style="flex:3"></div><div class="s rd" style="flex:2"></div><div class="s am" style="flex:1"></div></div></td>
+              <td class="r" style="color:var(--amb);">60%</td>
+              <td class="r" style="color:var(--gn);">+4.2%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PER-BAND CALIBRATION -->
+    <div class="sect">
+      <h2>PER-P(UP) BAND CALIBRATION <span class="meta">predicted vs realized · drives the recommendation above</span></h2>
+      <div class="tbl-wrap">
+        <table class="h-band-tbl">
+          <thead><tr><th>BAND</th><th class="r">N</th><th class="r">PRED</th><th class="r">REALIZED</th><th class="r">Δpp</th><th class="r">AVG %</th><th class="r">WILSON LB</th><th>VERDICT</th></tr></thead>
+          <tbody>
+            <tr class="recommend">
+              <td><span class="pill solid gn">P(UP) ≥ 0.65</span></td><td class="r">18</td><td class="r">68%</td>
+              <td class="r"><b style="color:var(--gn);">71%</b></td><td class="r" style="color:var(--gn);">+3pp</td>
+              <td class="r"><b style="color:var(--gn);">+4.2%</b></td><td class="r" style="color:var(--gn);">58%</td>
+              <td><span class="pill">RECOMMEND ★</span></td>
+            </tr>
+            <tr>
+              <td><span class="pill solid gn">0.55 – 0.65</span></td><td class="r">22</td><td class="r">60%</td>
+              <td class="r" style="color:var(--gn);">59%</td><td class="r">−1pp</td>
+              <td class="r" style="color:var(--gn);">+2.1%</td><td class="r">45%</td>
+              <td><span class="pill gn">✓ calibrated</span></td>
+            </tr>
+            <tr>
+              <td><span class="pill am">0.45 – 0.55</span></td><td class="r">14</td><td class="r">50%</td>
+              <td class="r" style="color:var(--amb);">48%</td><td class="r">−2pp</td>
+              <td class="r" style="color:var(--amb);">+0.3%</td><td class="r">32%</td>
+              <td><span class="pill am">~ near-random</span></td>
+            </tr>
+            <tr>
+              <td><span class="pill rd">0.35 – 0.45</span></td><td class="r">6</td><td class="r">40%</td>
+              <td class="r" style="color:var(--rd);">33%</td><td class="r">−7pp</td>
+              <td class="r" style="color:var(--rd);">−1.4%</td><td class="r">14%</td>
+              <td><span class="pill rd">avoid</span></td>
+            </tr>
+            <tr>
+              <td><span class="pill rd">P(UP) &lt; 0.35</span></td><td class="r">2</td><td class="r">30%</td>
+              <td class="r" style="color:var(--ink-3);">— sparse</td><td class="r" style="color:var(--ink-3);">—</td>
+              <td class="r" style="color:var(--ink-3);">—</td><td class="r" style="color:var(--ink-3);">—</td>
+              <td><span class="pill">n&lt;5 · skip</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- HONEST PODIUM with drill-down -->
+    <div class="sect">
+      <h2>HONEST PODIUM <span class="meta">top 5 winners + top 5 losers · click any to see the trade story</span></h2>
+      <div class="podium">
+        <div class="col">
+          <h3 class="gn">★ TOP 5 WINNERS</h3>
+          <div class="pcard gn" onclick="openStory('STEM','win')"><span class="rank">1</span><div><div class="tk">STEM</div><div class="meta">P(up) 0.71 · SWING · 5d</div></div><span class="val gn">+12.4%</span><span class="pill solid gn">+3.2R</span></div>
+          <div class="pcard gn" onclick="openStory('NVDA','win')"><span class="rank">2</span><div><div class="tk">NVDA</div><div class="meta">P(up) 0.68 · SWING · 3d</div></div><span class="val gn">+9.8%</span><span class="pill solid gn">+2.8R</span></div>
+          <div class="pcard gn" onclick="openStory('UONE','win')"><span class="rank">3</span><div><div class="tk">UONE</div><div class="meta">P(up) 0.67 · SWING · 5d</div></div><span class="val gn">+8.1%</span><span class="pill solid gn">+2.4R</span></div>
+          <div class="pcard gn" onclick="openStory('PLTR','win')"><span class="rank">4</span><div><div class="tk">PLTR</div><div class="meta">P(up) 0.66 · POSITION · 18d</div></div><span class="val gn">+7.5%</span><span class="pill solid gn">+2.1R</span></div>
+          <div class="pcard gn" onclick="openStory('META','win')"><span class="rank">5</span><div><div class="tk">META</div><div class="meta">P(up) 0.69 · SWING · 4d</div></div><span class="val gn">+6.2%</span><span class="pill solid gn">+1.9R</span></div>
+        </div>
+        <div class="col">
+          <h3 class="rd">✗ TOP 5 LOSERS</h3>
+          <div class="pcard rd" onclick="openStory('CAR','loss')"><span class="rank">1</span><div><div class="tk">CAR</div><div class="meta">P(up) 0.58 · SWING · 5d</div></div><span class="val rd">−8.7%</span><span class="pill solid rd">−2.4R</span></div>
+          <div class="pcard rd" onclick="openStory('CVNA','loss')"><span class="rank">2</span><div><div class="tk">CVNA</div><div class="meta">P(up) 0.61 · SWING · 4d</div></div><span class="val rd">−6.3%</span><span class="pill solid rd">−1.8R</span></div>
+          <div class="pcard rd" onclick="openStory('UPST','loss')"><span class="rank">3</span><div><div class="tk">UPST</div><div class="meta">P(up) 0.56 · POSITION · 12d</div></div><span class="val rd">−5.9%</span><span class="pill solid rd">−1.7R</span></div>
+          <div class="pcard rd" onclick="openStory('RIVN','loss')"><span class="rank">4</span><div><div class="tk">RIVN</div><div class="meta">P(up) 0.54 · SWING · 5d</div></div><span class="val rd">−4.8%</span><span class="pill solid rd">−1.4R</span></div>
+          <div class="pcard rd" onclick="openStory('ROKU','loss')"><span class="rank">5</span><div><div class="tk">ROKU</div><div class="meta">P(up) 0.52 · POSITION · 9d</div></div><span class="val rd">−4.1%</span><span class="pill solid rd">−1.2R</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BY-SECTOR OUTCOMES -->
+    <div class="sect">
+      <h2>SECTOR-OUTCOME RANKING <span class="meta">avg realized % by sector · which sectors actually paid off</span></h2>
+      <div class="sector-rank" id="sector-rank-grid"></div>
+    </div>
+
+    <!-- LAST 20 -->
+    <div class="sect">
+      <h2>LAST 20 HIGH-CONFIDENCE CALLS <span class="meta">P(up) ≥ 0.60 · newest left · click to drill</span></h2>
+      <div class="chipstrip" id="chipstrip"></div>
+    </div>
+
+    <!-- DETAIL TABLE -->
+    <div class="sect">
+      <h2>DETAIL <span class="meta">all 84 predictions · sortable · filterable</span></h2>
+      <div class="fchips">
+        <button class="on" data-f="ALL">ALL · 84</button>
+        <button data-f="WIN">WINNERS · 38</button>
+        <button data-f="LOSS">LOSERS · 24</button>
+        <button data-f="PEND">PENDING · 22</button>
+        <button data-f="SWING">SWING</button>
+        <button data-f="POS">POSITION</button>
+        <button data-f="INV">INVEST</button>
+        <button data-f="HIGH">P(up) ≥ 0.65</button>
+        <button data-f="MED">P(up) ≥ 0.55</button>
+        <div class="search">⌕ <input type="text" id="search-input" placeholder="filter ticker" autocomplete="off"></div>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>TICKER</th><th>SCAN</th><th>MODE</th><th class="r">P(UP)</th><th class="r">μ q50</th><th>REALIZED %</th><th class="r">R-MULT</th><th>STATUS</th><th class="r">DAYS</th></tr></thead>
+          <tbody id="hist-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="methodology">
+      <b>METHODOLOGY ·</b>
+      Hit-rate measured by <code>realized_pct &gt; 0</code>. R-multiples normalized against ATR-defined risk (<code>1R = 1× ATR at scan time</code>).
+      Pending rows have not yet hit T1 / stop / horizon expiry.
+      Bands are P(up) cuts; <code>n &lt; 5</code> falls back to "sparse" without a verdict pill.
+      Trend sparkline computed on rolling 8-week ISO buckets of <code>realized_pct</code>.
+      The recommendation banner is derived from the highest band whose <b>Wilson-95 lower bound</b> exceeds the breakeven hit-rate
+      required by the avg R-multiple in that band — explicit truth-telling beats false certainty.
+    </div>
+  </div>
+</div>
+
+<!-- TRADE STORY DRAWER -->
+<div class="drawer-bg" id="drawer-bg" onclick="closeStory()"></div>
+<div class="drawer" id="drawer">
+  <div class="hd">
+    <div class="tk" id="drw-tk">STEM</div>
+    <div class="meta" id="drw-meta">Trade story · 2026-05-18 → 2026-05-23 · SWING</div>
+    <button class="close" onclick="closeStory()">×</button>
+  </div>
+  <div class="body">
+    <section>
+      <h4>AT SCAN · WHAT THE MODEL SAW</h4>
+      <div class="ts" id="drw-saw"></div>
+    </section>
+    <section>
+      <h4>ISSUED TRADE PLAN</h4>
+      <div class="ts" id="drw-plan"></div>
+    </section>
+    <section>
+      <h4>PRICE PATH · ENTRY → EXIT</h4>
+      <div class="chart-stub" id="drw-chart"></div>
+    </section>
+    <section>
+      <h4>REALIZED OUTCOME</h4>
+      <div class="ts" id="drw-outcome"></div>
+    </section>
+    <section>
+      <h4>AUTO-DERIVED LESSON</h4>
+      <div class="lesson" id="drw-lesson"></div>
+    </section>
+  </div>
+</div>
+
+<!-- KEYBOARD MODAL -->
+<div class="kbmodal-bg" id="kbmodal-bg" onclick="closeKbHelp()">
+  <div class="kbmodal" onclick="event.stopPropagation()">
+    <h3>KEYBOARD SHORTCUTS</h3>
+    <div class="row"><span>Switch tab · Live / History</span><span><kbd>1</kbd><kbd>2</kbd></span></div>
+    <div class="row"><span>Cycle focus ticker</span><span><kbd>J</kbd><kbd>K</kbd></span></div>
+    <div class="row"><span>Focus first bull</span><span><kbd>G</kbd></span></div>
+    <div class="row"><span>Filter detail table</span><span><kbd>/</kbd></span></div>
+    <div class="row"><span>Toggle theme</span><span><kbd>T</kbd></span></div>
+    <div class="row"><span>Toggle density</span><span><kbd>D</kbd></span></div>
+    <div class="row"><span>Close · escape</span><span><kbd>Esc</kbd></span></div>
+    <div class="row"><span>This dialog</span><span><kbd>?</kbd></span></div>
+  </div>
+</div>
+
+<script>
+// ── THEME / DENSITY ────────────────────────────────────────────────
+function toggleTheme(){
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  document.querySelector('.tb-btn').textContent = next === 'dark' ? 'LIGHT' : 'DARK';
+  const kb = document.createElement('span'); kb.className='kb'; kb.textContent='T';
+  document.querySelector('.tb-btn').appendChild(kb);
+}
+function setDensity(d){
+  document.documentElement.setAttribute('data-density', d);
+  document.querySelectorAll('.dens-grp button').forEach(b => b.classList.toggle('on', b.dataset.dens === d));
+}
+
+// ── TAB SWITCH ─────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.getElementById('tab-live').classList.toggle('on', tab === 'live');
+  document.getElementById('tab-history').classList.toggle('on', tab === 'history');
+  document.getElementById('view-live').classList.toggle('hidden', tab !== 'live');
+  document.getElementById('view-history').classList.toggle('hidden', tab !== 'history');
+  document.querySelectorAll('#view-history .sect').forEach(s => s.classList.add('fadein'));
+  setTimeout(() => document.querySelectorAll('#view-history .sect').forEach(s => s.classList.remove('fadein')), 600);
+  if (tab === 'history') {
+    startCounters('#view-history');
+    drawSectorRank();
+    drawChipStrip();
+    renderHist();
+  }
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+// ── ANCHOR SCROLL ─────────────────────────────────────────────────
+function anchor(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({behavior:'smooth', block:'start'});
+  document.querySelectorAll('.anchorbar a').forEach(a => a.classList.remove('active'));
+  document.querySelector(`.anchorbar a[data-anchor="${id}"]`)?.classList.add('active');
+}
+
+// ── COUNTERS (animated number-up) ─────────────────────────────────
+function animateCounter(el, target, duration = 800, decimals = 0, prefix = '') {
+  const start = parseFloat(el.dataset.start || 0);
+  const t0 = performance.now();
+  const sub = el.querySelector('.unit');
+  const subHTML = sub ? sub.outerHTML : '';
+  function tick(now) {
+    const p = Math.min(1, (now - t0) / duration);
+    const eased = 1 - Math.pow(1 - p, 3);
+    const v = start + (target - start) * eased;
+    el.firstChild.nodeValue = (prefix && target >= 0 ? '+' : '') + v.toFixed(decimals);
+    if (sub) {
+      // re-attach the unit span (firstChild text only)
+      if (el.children.length === 0) el.insertAdjacentHTML('beforeend', subHTML);
+    }
+    if (p < 1) requestAnimationFrame(tick);
+  }
+  el.dataset.start = target;
+  requestAnimationFrame(tick);
+}
+function startCounters(scope = 'body') {
+  const root = document.querySelector(scope) || document.body;
+  root.querySelectorAll('[data-counter]').forEach(el => {
+    const v = parseFloat(el.dataset.counter);
+    animateCounter(el, v, 700, 0);
+  });
+  root.querySelectorAll('[data-counter-f]').forEach(el => {
+    const raw = el.dataset.counterF;
+    const v = parseFloat(raw);
+    const decimals = (raw.indexOf('.') >= 0) ? (raw.length - raw.indexOf('.') - 1) : 2;
+    animateCounter(el, v, 700, decimals, raw[0] === '+' ? '+' : '');
+  });
+}
+
+// ── BULLS DATA ─────────────────────────────────────────────────────
+// columns: tk, pup, ci_lo, ci_hi, z (cross-sectional), q50, q90, pt1, plan, rr, sec, er, status
+const BULLS = [
+  ['AAPL', 0.74, 0.66, 0.81, 1.82, +3.2, +6.8, 0.62, '176·192·204', 3.8, 'TECH', 23, 'BUY'],
+  ['NVDA', 0.71, 0.62, 0.79, 1.65, +4.1, +8.2, 0.59, '128·142·156', 4.2, 'TECH', 18, 'BUY'],
+  ['META', 0.69, 0.59, 0.78, 1.54, +2.8, +5.6, 0.58, '485·512·540', 3.5, 'COMM',  9, 'BUY'],
+  ['LLY',  0.67, 0.56, 0.77, 1.42, +2.4, +4.9, 0.55, '720·758·800', 3.1, 'HEALTH',31,'BUY'],
+  ['MSFT', 0.66, 0.54, 0.77, 1.36, +2.1, +4.4, 0.54, '402·420·438', 3.2, 'TECH',  12, 'BUY'],
+  ['AMD',  0.64, 0.51, 0.76, 1.23, +3.3, +7.1, 0.52, '142·158·175', 3.7, 'TECH',   5, 'BUY'],
+  ['CRWD', 0.63, 0.50, 0.75, 1.18, +2.6, +5.4, 0.51, '298·315·334', 3.4, 'TECH',  14, 'BUY'],
+  ['GOOG', 0.62, 0.48, 0.75, 1.12, +2.2, +4.7, 0.49, '175·184·194', 3.0, 'COMM',  18, 'BUY'],
+  ['PLTR', 0.61, 0.46, 0.75, 1.06, +3.8, +8.6, 0.48, '24·27·31',    3.6, 'TECH',  21, 'BUY'],
+  ['NET',  0.59, 0.43, 0.74, 0.94, +2.4, +5.1, 0.47, '88·94·102',   3.2, 'TECH',  16, 'WATCH'],
+  ['SHOP', 0.58, 0.41, 0.73, 0.88, +2.8, +6.2, 0.45, '70·76·83',    3.5, 'TECH',  27, 'WATCH'],
+  ['DDOG', 0.57, 0.39, 0.73, 0.82, +2.1, +4.6, 0.44, '128·138·148', 3.1, 'TECH',  11, 'WATCH'],
+];
+function histBadgeFor(pup){
+  if (pup >= 0.65) return '<span class="hbadge" data-tip="P(up) ≥ 0.65 · 18 closed · 71% hit · avg +4.2% · WILSON LB 58% · RECOMMEND">71%·+4.2%</span>';
+  if (pup >= 0.55) return '<span class="hbadge" data-tip="P(up) 0.55-0.65 · 22 closed · 59% hit · avg +2.1% · calibrated">59%·+2.1%</span>';
+  if (pup >= 0.45) return '<span class="hbadge" data-tip="P(up) 0.45-0.55 · 14 closed · 48% hit · near-random">48%·~0%</span>';
+  return '<span class="hbadge" data-tip="P(up) &lt; 0.45 · low historical edge">33%·−1.4%</span>';
+}
+function renderBulls(){
+  const tb = document.getElementById('bulls-tbody');
+  tb.innerHTML = BULLS.map(([tk,pup,ci_lo,ci_hi,z,q50,q90,pt1,plan,rr,sec,er,status]) => {
+    const erCls = er <= 3 ? 'urgent' : er <= 7 ? 'soon' : er <= 21 ? 'safe' : 'far';
+    const statusCls = status === 'BUY' ? 'solid gn' : 'am outlined';
+    const planParts = plan.split('·');
+    // CI bar: place lo/hi/dot proportional within [0,1]
+    const ciCell = `<span class="cibar" title="80% CI [${ci_lo.toFixed(2)}, ${ci_hi.toFixed(2)}]">
+      <span class="range" style="left:${ci_lo*100}%; right:${(1-ci_hi)*100}%;"></span>
+      <span class="lo" style="left:${ci_lo*100}%;"></span>
+      <span class="hi" style="left:${ci_hi*100}%;"></span>
+      <span class="dot" style="left:${pup*100}%;"></span>
+      <span class="lbl">[${ci_lo.toFixed(2)}, ${ci_hi.toFixed(2)}]</span>
+    </span>`;
+    const zCls = z >= 1.5 ? 'hi' : z >= 1.0 ? '' : 'lo';
+    return `<tr data-tk="${tk}" onclick="setFocus('${tk}')">
+      <td><span class="tk">${tk}</span></td>
+      <td class="r"><span class="sbar"><span class="fill" style="width:${(pup*100).toFixed(0)}%"></span><span class="lbl">${pup.toFixed(2)}</span></span>${ciCell}${histBadgeFor(pup)}</td>
+      <td class="r"><span class="zchip ${zCls}">Z ${z.toFixed(2)}</span></td>
+      <td class="r" style="color:var(--gn);">+${q50.toFixed(1)}%</td>
+      <td class="r" style="color:var(--gn);">+${q90.toFixed(1)}%</td>
+      <td class="r">${pt1.toFixed(2)}</td>
+      <td><span style="color:var(--rd);">$${planParts[0]}</span> · <span style="color:var(--gn);">$${planParts[1]}</span> · <span style="color:var(--gn);">$${planParts[2]}</span></td>
+      <td class="r" style="color:${rr>=3.5?'var(--gn)':'var(--amb)'};">${rr.toFixed(1)}</td>
+      <td><span class="sec">${sec}</span></td>
+      <td class="r"><span class="er ${erCls}">${er}d</span></td>
+      <td><span class="pill ${statusCls}">${status}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── BEARS ──────────────────────────────────────────────────────────
+const BEARS = [
+  ['LCID', 0.68, -3.4, -6.8, 0.61, 'AUTO',  9],
+  ['RIVN', 0.65, -2.8, -5.4, 0.58, 'AUTO',  12],
+  ['CVNA', 0.63, -3.1, -6.2, 0.56, 'AUTO',  4],
+  ['PARA', 0.61, -2.2, -4.6, 0.53, 'COMM',  18],
+  ['UPST', 0.58, -2.6, -5.1, 0.50, 'FIN',   11],
+  ['ROKU', 0.57, -1.8, -3.8, 0.49, 'COMM',  16],
+  ['CAR',  0.55, -3.2, -6.4, 0.47, 'DISC',  22],
+  ['BYND', 0.54, -2.4, -4.9, 0.46, 'CONS',  27],
+  ['HOOD', 0.52, -1.6, -3.4, 0.43, 'FIN',   8],
+  ['SOFI', 0.51, -1.4, -2.9, 0.42, 'FIN',   14],
+];
+function renderBears(){
+  const tb = document.getElementById('bears-tbody');
+  tb.innerHTML = BEARS.map(([tk,pdn,q50,q10,pstop,sec,er]) => {
+    const erCls = er <= 3 ? 'urgent' : er <= 7 ? 'soon' : er <= 21 ? 'safe' : 'far';
+    return `<tr><td><span class="tk">${tk}</span></td>
+      <td class="r"><span class="sbar"><span class="fill rd" style="width:${(pdn*100).toFixed(0)}%"></span><span class="lbl">${pdn.toFixed(2)}</span></span></td>
+      <td class="r" style="color:var(--rd);">${q50.toFixed(1)}%</td>
+      <td class="r" style="color:var(--rd);">${q10.toFixed(1)}%</td>
+      <td class="r">${pstop.toFixed(2)}</td>
+      <td><span class="sec">${sec}</span></td>
+      <td class="r"><span class="er ${erCls}">${er}d</span></td>
+      <td><span class="pill solid rd">EXIT</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── SECTOR HEAT ────────────────────────────────────────────────────
+const SECTORS = [
+  ['TECH', 78, 14, 2, 'hot'],
+  ['HEALTH', 62, 9, 1, 'warm'],
+  ['COMM', 58, 7, 2, 'warm'],
+  ['DISCRETIONARY', 48, 8, 4, 'calm'],
+  ['INDUSTRIAL', 42, 6, 3, 'calm'],
+  ['FINANCIAL', 38, 8, 5, 'calm'],
+  ['STAPLES', 24, 3, 5, 'cold'],
+  ['ENERGY', 18, 2, 6, 'cold'],
+  ['MATERIALS', 22, 3, 4, 'cold'],
+  ['UTILITIES', 32, 4, 4, 'calm'],
+  ['REIT', 36, 5, 4, 'calm'],
+  ['AUTO', 28, 3, 7, 'cold'],
+];
+function renderHeat(){
+  const g = document.getElementById('heat-grid');
+  g.innerHTML = SECTORS.map(([nm,pct,sg,sr,cls]) => {
+    const dots = '<span class="d gn"></span>'.repeat(Math.min(sg,5)) + '<span class="d rd"></span>'.repeat(Math.min(sr,5));
+    const pctCls = pct >= 55 ? 'gn' : pct <= 30 ? 'rd' : '';
+    return `<div class="stile ${cls}"><div class="nm">${nm}</div><div class="pct ${pctCls}">${pct}%</div>
+      <div class="sub">bull · ${sg}↑ / ${sr}↓</div><div class="dots">${dots}</div></div>`;
+  }).join('');
+}
+
+// ── DECILES ────────────────────────────────────────────────────────
+function renderDeciles(){
+  const swing=[-2.1,-1.4,-0.6,-0.1,0.3,0.8,1.6,2.4,3.5,5.2];
+  const pos  =[-1.8,-1.0,-0.4,0.0,0.4,0.9,1.4,1.9,2.6,3.4];
+  const inv  =[-3.4,-2.0,-0.8,0.2,1.1,2.0,3.4,5.6,8.4,12.2];
+  ['dec-swing','dec-pos','dec-inv'].forEach((id,i) => {
+    const data = [swing,pos,inv][i];
+    const max = Math.max(...data.map(Math.abs));
+    document.getElementById(id).innerHTML = data.map(v => {
+      const pct = Math.max(2, Math.abs(v)/max*100);
+      const cls = v < 0 ? 'rd' : '';
+      return `<div class="b ${cls}" style="height:${pct}%"></div>`;
+    }).join('');
+  });
+}
+
+// ── FOCUS PANE ─────────────────────────────────────────────────────
+const FOCUS_DATA = {
+  AAPL: { pup:0.74, q50:'+3.2%', pt1:0.62, rr:3.8, sec:'Tech',   er:23 },
+  NVDA: { pup:0.71, q50:'+4.1%', pt1:0.59, rr:4.2, sec:'Tech',   er:18 },
+  META: { pup:0.69, q50:'+2.8%', pt1:0.58, rr:3.5, sec:'Comm',   er:9 },
+  LLY:  { pup:0.67, q50:'+2.4%', pt1:0.55, rr:3.1, sec:'Health', er:31 },
+  MSFT: { pup:0.66, q50:'+2.1%', pt1:0.54, rr:3.2, sec:'Tech',   er:12 },
+  AMD:  { pup:0.64, q50:'+3.3%', pt1:0.52, rr:3.7, sec:'Tech',   er:5 },
+};
+const FOCUS_ORDER = Object.keys(FOCUS_DATA);
+let focusIdx = 0;
+function setFocus(tk){
+  if (!FOCUS_DATA[tk]) return;
+  focusIdx = FOCUS_ORDER.indexOf(tk);
+  const d = FOCUS_DATA[tk];
+  const tkEl = document.getElementById('focus-tk');
+  tkEl.classList.add('swap');
+  setTimeout(() => {
+    tkEl.textContent = tk;
+    document.getElementById('rail-focus-pill').textContent = tk;
+    document.getElementById('focus-sub').textContent = `${d.sec} · ER ${d.er}d · Mode SWING · click any row to swap`;
+    document.getElementById('kpi-q50').textContent = d.q50;
+    document.getElementById('kpi-pup').dataset.counterF = d.pup.toFixed(2);
+    document.getElementById('kpi-pt1').dataset.counterF = d.pt1.toFixed(2);
+    document.getElementById('kpi-rr').dataset.counterF = d.rr.toFixed(1);
+    animateCounter(document.getElementById('kpi-pup'), d.pup, 350, 2);
+    animateCounter(document.getElementById('kpi-pt1'), d.pt1, 350, 2);
+    animateCounter(document.getElementById('kpi-rr'),  d.rr,  350, 1);
+    tkEl.classList.remove('swap');
+  }, 180);
+  document.querySelectorAll('#bulls-tbody tr').forEach(r => r.classList.toggle('sel', r.dataset.tk === tk));
+}
+function cycleFocus(dir){
+  focusIdx = (focusIdx + dir + FOCUS_ORDER.length) % FOCUS_ORDER.length;
+  setFocus(FOCUS_ORDER[focusIdx]);
+}
+
+// ── CONE HOVER TOOLTIP ─────────────────────────────────────────────
+(function initConeHover(){
+  const svg = document.getElementById('cone-svg');
+  const tip = document.getElementById('cone-tip');
+  const wrap = document.getElementById('cone-wrap');
+  if (!svg) return;
+  const POINTS = [
+    {x:0,   t:'T+0', mu:'0.0%'},
+    {x:50,  t:'T+1', mu:'+1.2%'},
+    {x:105, t:'T+2', mu:'+2.4%'},
+    {x:160, t:'T+3', mu:'+3.2%'},
+    {x:215, t:'T+4', mu:'+4.1%'},
+    {x:270, t:'T+5', mu:'+5.4%'},
+  ];
+  svg.addEventListener('mousemove', (e) => {
+    const r = svg.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width * 320;
+    const closest = POINTS.reduce((a,b) => Math.abs(b.x - px) < Math.abs(a.x - px) ? b : a);
+    tip.style.opacity = '1';
+    tip.style.left = (e.clientX - wrap.getBoundingClientRect().left + 14) + 'px';
+    tip.style.top  = (e.clientY - wrap.getBoundingClientRect().top + 14) + 'px';
+    tip.textContent = `${closest.t} · μ ${closest.mu}`;
+  });
+  svg.addEventListener('mouseleave', () => tip.style.opacity = '0');
+})();
+
+// ── TREND HOVER ────────────────────────────────────────────────────
+(function initTrendHover(){
+  const dots = document.querySelectorAll('#trend-dots circle');
+  const tip = document.getElementById('trend-tip');
+  if (!tip) return;
+  dots.forEach(d => {
+    d.addEventListener('mouseenter', (e) => {
+      const r = d.getBoundingClientRect();
+      const par = d.closest('.trend').getBoundingClientRect();
+      tip.style.opacity = '1';
+      tip.style.left = (r.left + r.width/2 - par.left) + 'px';
+      tip.style.top  = (r.top - par.top - 8) + 'px';
+      tip.textContent = `${d.dataset.week} · ${d.dataset.val}`;
+    });
+    d.addEventListener('mouseleave', () => tip.style.opacity = '0');
+  });
+})();
+
+// ── HISTORY ────────────────────────────────────────────────────────
+const HIST = [
+  ['STEM','2026-05-18','SWING',0.71,+2.95,+12.4,+3.2,'WIN',5],
+  ['NVDA','2026-05-15','SWING',0.68,+4.10,+9.8,+2.8,'WIN',3],
+  ['UONE','2026-05-13','SWING',0.67,+2.05,+8.1,+2.4,'WIN',5],
+  ['PLTR','2026-05-10','POS',0.66,+3.80,+7.5,+2.1,'WIN',18],
+  ['META','2026-05-09','SWING',0.69,+2.80,+6.2,+1.9,'WIN',4],
+  ['AAPL','2026-05-08','SWING',0.65,+2.20,+5.4,+1.6,'WIN',5],
+  ['AMD','2026-05-07','SWING',0.64,+3.30,+4.7,+1.4,'WIN',4],
+  ['LLY','2026-05-04','POS',0.62,+2.40,+4.1,+1.2,'WIN',14],
+  ['MSFT','2026-05-04','SWING',0.61,+2.10,+0.4,+0.1,'WIN',5],
+  ['GOOG','2026-05-03','POS',0.60,+2.20,+3.2,+0.9,'WIN',16],
+  ['TSLA','2026-05-02','SWING',0.55,+1.80,-2.8,-0.8,'LOSS',5],
+  ['CRWD','2026-05-01','SWING',0.58,+2.60,+2.4,+0.7,'WIN',5],
+  ['RIVN','2026-04-30','SWING',0.54,+1.40,-4.8,-1.4,'LOSS',5],
+  ['SHOP','2026-04-29','SWING',0.62,+2.80,+1.9,+0.6,'WIN',4],
+  ['CVNA','2026-04-28','SWING',0.61,+1.20,-6.3,-1.8,'LOSS',4],
+  ['UPST','2026-04-27','POS',0.56,+0.80,-5.9,-1.7,'LOSS',12],
+  ['CAR','2026-04-26','SWING',0.58,+2.40,-8.7,-2.4,'LOSS',5],
+  ['ROKU','2026-04-25','POS',0.52,+0.40,-4.1,-1.2,'LOSS',9],
+];
+const FILTER_FNS = {
+  ALL: () => true, WIN: r => r[7]==='WIN', LOSS: r => r[7]==='LOSS', PEND: r => r[7]==='PEND',
+  SWING: r => r[2]==='SWING', POS: r => r[2]==='POS', INV: r => r[2]==='INV',
+  HIGH: r => r[3] >= 0.65, MED: r => r[3] >= 0.55,
+};
+let histFilter='ALL', histSearch='';
+function renderHist(){
+  const tb = document.getElementById('hist-tbody');
+  if (!tb) return;
+  const rows = HIST.filter(FILTER_FNS[histFilter]).filter(r => !histSearch || r[0].toLowerCase().includes(histSearch.toLowerCase()));
+  tb.innerHTML = rows.map(r => {
+    const [tk,sd,md,pup,q50,real,rmult,st,days] = r;
+    const fillW = Math.min(100, Math.abs(real) * 8);
+    const fillSide = real > 0 ? 'gn' : 'rd';
+    const sign = real > 0 ? '+' : '';
+    const stPill = st === 'WIN' ? 'solid gn' : st === 'LOSS' ? 'solid rd' : 'outlined';
+    return `<tr onclick="openStory('${tk}','${st === 'WIN' ? 'win' : 'loss'}')">
+      <td><span class="tk">${tk}</span></td><td>${sd}</td><td><span class="sec">${md}</span></td>
+      <td class="r">${pup.toFixed(2)}</td>
+      <td class="r" style="color:var(--${q50>=0?'gn':'rd'});">${q50>=0?'+':''}${q50.toFixed(2)}%</td>
+      <td><span class="bibar"><span class="fill ${fillSide}" style="width:${fillW/2}%"></span><span class="lbl">${sign}${real.toFixed(1)}%</span></span></td>
+      <td class="r" style="color:var(--${rmult>=0?'gn':'rd'});font-weight:800;">${rmult>=0?'+':''}${rmult.toFixed(2)}R</td>
+      <td><span class="pill ${stPill}">${st}</span></td>
+      <td class="r">${days}d</td>
+    </tr>`;
+  }).join('');
+}
+document.querySelectorAll('.fchips button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.fchips button').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); histFilter = b.dataset.f; renderHist();
+}));
+document.getElementById('search-input')?.addEventListener('input', e => { histSearch = e.target.value; renderHist(); });
+
+// ── SECTOR RANK BARS ───────────────────────────────────────────────
+const SECRANK = [
+  ['TECH',          +4.8, 90, 'gn', 14],
+  ['HEALTH',        +3.6, 75, 'gn', 9],
+  ['COMM',          +2.8, 60, 'gn', 7],
+  ['DISCRETIONARY', +1.9, 45, 'gn', 8],
+  ['INDUSTRIAL',    +0.8, 30, 'gn', 6],
+  ['FINANCIAL',     +0.2, 20, 'am', 8],
+  ['STAPLES',       -1.1, 30, 'rd', 5],
+  ['ENERGY',        -3.2, 80, 'rd', 5],
+];
+function drawSectorRank(){
+  const g = document.getElementById('sector-rank-grid');
+  if (!g) return;
+  g.innerHTML = SECRANK.map(([nm, v, w, cls, n]) => `
+    <div class="srow">
+      <span class="nm">${nm}</span>
+      <div class="bar"><span class="${v<0?'rd':''}" style="width:${w}%"></span></div>
+      <span class="v ${cls}">${v>=0?'+':''}${v.toFixed(1)}%</span>
+      <span class="n">n=${n}</span>
+    </div>`).join('');
+}
+
+// ── CHIP STRIP (last 20) ───────────────────────────────────────────
+const LAST20 = [
+  ['STEM','✓','+12.4%','gn'],['NVDA','✓','+9.8%','gn'],['UONE','✓','+8.1%','gn'],
+  ['PLTR','✓','+7.5%','gn'],['META','✓','+6.2%','gn'],['AAPL','✓','+5.4%','gn'],
+  ['AMD','✓','+4.7%','gn'],['LLY','✓','+4.1%','gn'],['MSFT','⊘','+0.4%','am'],
+  ['GOOG','✓','+3.2%','gn'],['TSLA','✗','−2.8%','rd'],['CRWD','✓','+2.4%','gn'],
+  ['SNOW','⏳','pending','am'],['RIVN','✗','−4.8%','rd'],['SHOP','✓','+1.9%','gn'],
+  ['CVNA','✗','−6.3%','rd'],['UPST','✗','−5.9%','rd'],['CAR','✗','−8.7%','rd'],
+  ['NET','⏳','pending','am'],['DDOG','⏳','pending','am'],
+];
+function drawChipStrip(){
+  const g = document.getElementById('chipstrip');
+  if (!g) return;
+  g.innerHTML = LAST20.map(([tk,ic,r,cls]) => `
+    <div class="ch" onclick="openStory('${tk}','${cls==='gn'?'win':cls==='rd'?'loss':'pend'}')">
+      <b>${tk}</b><span class="ico ${cls}">${ic}</span><span class="ret ${cls}">${r}</span>
+    </div>`).join('');
+}
+
+// ── TRADE STORY DRAWER ─────────────────────────────────────────────
+const STORIES = {
+  STEM: {
+    date:'2026-05-18 → 2026-05-23 · SWING · 5d',
+    saw: { 'P(up)':0.71, 'q50':'+2.95%', 'q90':'+8.4%', 'P(T1)':0.58,
+           'Confluences':'VCP · RVOL 2.3× · 52w BO',  'Sector':'Energy storage',
+           'Regime':'Risk-on choppy', 'IV rank':'62 (cheap)' },
+    plan: { 'Entry':'$8.25', 'Stop':'$7.84 (1.25× ATR)', 'T1':'$9.10 (+10.3%)', 'T2':'$10.50 (+27.3%)', 'R:R':3.5, 'Size':'4% (T1 · choppy)' },
+    chart: { entry:10, bars:[8,9,11,13,16,18,21,24,28,32,34,33], cls:'gn' },
+    outcome: { 'Exit':'$9.27', 'Held':'5d', 'Realized':'+12.4%', 'R-mult':'+3.2R', 'Max drawdown':'−1.2%', 'Result':'WIN' },
+    lesson:'Mode SWING + P(up) 0.71 + VCP base + cheap IV all aligned. The model nailed both direction AND magnitude (q50 +2.95% conservative vs realized +12.4%). Lesson: high-confidence (≥0.65) signals with VCP confluence over-deliver in choppy regimes — the conservative q50 baseline means the upside surprise is real edge, not luck.'
+  },
+  CAR: {
+    date:'2026-04-26 → 2026-05-01 · SWING · 5d',
+    saw: { 'P(up)':0.58, 'q50':'+2.40%', 'q90':'+5.1%', 'P(T1)':0.52,
+           'Confluences':'EMA pullback · No catalyst', 'Sector':'Auto rental',
+           'Regime':'Risk-on choppy', 'IV rank':'18 (rich)' },
+    plan: { 'Entry':'$11.40', 'Stop':'$10.73 (1.25× ATR)', 'T1':'$12.85 (+12.7%)', 'T2':'$15.20 (+33.3%)', 'R:R':3.1, 'Size':'3% (T2 · choppy)' },
+    chart: { entry:10, bars:[10,11,12,10,9,8,7,5,4,3,3,2], cls:'rd' },
+    outcome: { 'Exit':'$10.41 (stop hit)', 'Held':'5d', 'Realized':'−8.7%', 'R-mult':'−2.4R', 'Stop hit at':'D+3', 'Result':'LOSS' },
+    lesson:'P(up) 0.58 was in the near-random band (0.55-0.65 historically hits 59%, not enough edge for swings). Worse, IV rank was 18 (rich vol = expensive insurance, contrarian short signal). The trade ignored two red flags. Lesson: do not promote sub-0.65 signals unless there is a hard catalyst AND IV is cheap.'
+  },
+  NVDA: {
+    date:'2026-05-15 → 2026-05-18 · SWING · 3d',
+    saw: { 'P(up)':0.68, 'q50':'+4.10%', 'q90':'+9.2%', 'P(T1)':0.61,
+           'Confluences':'52w BO · RVOL 1.9× · UOA', 'Sector':'Semiconductor',
+           'Regime':'Risk-on choppy', 'IV rank':'52' },
+    plan: { 'Entry':'$128.40', 'Stop':'$122.16', 'T1':'$142.20 (+10.7%)', 'T2':'$156.00 (+21.5%)', 'R:R':4.2, 'Size':'5%' },
+    chart: { entry:10, bars:[10,11,13,15,17,19,21,22], cls:'gn' },
+    outcome: { 'Exit':'$141.00 (T1)', 'Held':'3d', 'Realized':'+9.8%', 'R-mult':'+2.8R', 'Result':'WIN' },
+    lesson:'Clean execution. P(up) 0.68 + UOA + 52w breakout = classic momentum stack. T1 hit in 3 days — the system\'s 5d horizon was conservative.'
+  },
+};
+function openStory(tk, _outcome){
+  const s = STORIES[tk] || STORIES.STEM;
+  document.getElementById('drw-tk').textContent = tk;
+  document.getElementById('drw-meta').textContent = `Trade story · ${s.date}`;
+  const renderKV = (obj) => Object.entries(obj).map(([k,v]) => `<div class="row"><span>${k}</span><b>${v}</b></div>`).join('');
+  document.getElementById('drw-saw').innerHTML = renderKV(s.saw);
+  document.getElementById('drw-plan').innerHTML = renderKV(s.plan);
+  document.getElementById('drw-outcome').innerHTML = renderKV(s.outcome);
+  document.getElementById('drw-lesson').textContent = s.lesson;
+  // chart stub
+  const chart = document.getElementById('drw-chart');
+  chart.innerHTML = '';
+  s.chart.bars.forEach((b, i) => {
+    const div = document.createElement('div');
+    div.className = 'bar' + (i === s.chart.entry ? ' entry' : '') + (i === s.chart.bars.length - 1 ? ' exit ' + s.chart.cls : '');
+    div.style.height = (b / Math.max(...s.chart.bars) * 100) + '%';
+    chart.appendChild(div);
+  });
+  document.getElementById('drawer-bg').classList.add('on');
+  document.getElementById('drawer').classList.add('on');
+}
+function closeStory(){
+  document.getElementById('drawer-bg').classList.remove('on');
+  document.getElementById('drawer').classList.remove('on');
+}
+
+// ── KEYBOARD ───────────────────────────────────────────────────────
+function openKbHelp(){ document.getElementById('kbmodal-bg').classList.add('on'); }
+function closeKbHelp(){ document.getElementById('kbmodal-bg').classList.remove('on'); }
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' && e.key !== 'Escape') return;
+  if (e.key === '1') switchTab('live');
+  else if (e.key === '2') switchTab('history');
+  else if (e.key === 'j' || e.key === 'J') cycleFocus(1);
+  else if (e.key === 'k' || e.key === 'K') cycleFocus(-1);
+  else if (e.key === 'g' || e.key === 'G') setFocus(FOCUS_ORDER[0]);
+  else if (e.key === 't' || e.key === 'T') toggleTheme();
+  else if (e.key === 'd' || e.key === 'D') {
+    const cur = document.documentElement.getAttribute('data-density');
+    setDensity(cur === 'exec' ? 'power' : 'exec');
+  }
+  else if (e.key === '/') { e.preventDefault(); const i = document.getElementById('search-input'); if (i) { switchTab('history'); setTimeout(() => i.focus(), 100); } }
+  else if (e.key === '?') openKbHelp();
+  else if (e.key === 'Escape') { closeStory(); closeKbHelp(); }
+});
+
+// ── INIT ───────────────────────────────────────────────────────────
+renderBulls();
+renderBears();
+renderHeat();
+renderDeciles();
+startCounters('#view-live');
+</script>
+
+</body>
+</html>
