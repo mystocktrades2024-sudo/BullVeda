@@ -1104,10 +1104,10 @@ function setTheme(mode) {
 <section class="smc-metrics">
 
   <!-- Card 1: Price Ladder (spans full height) — RICH redesign -->
-  <div class="smc-mc ladder">
+  <div class="smc-mc ladder" id="smcLadderRoot">
     <div class="smc-mc-h">
       <div class="smc-mc-h-l"><span class="ico">📊</span>PRICE LADDER · 60D · MULTI-LAYER</div>
-      <div class="smc-mc-h-r">SPOT <b style="color:var(--copper)">$439.79</b> · in <b style="color:var(--rd)">Q1 Deep Premium</b></div>
+      <div class="smc-mc-h-r" id="smcLadderSpotHdr">SPOT <b style="color:var(--copper)">$439.79</b> · in <b style="color:var(--rd)">Q1 Deep Premium</b></div>
     </div>
     <div class="ladder-wrap">
       <!-- LEFT · Levels panel · all secondary lines moved here to declutter the chart -->
@@ -1249,37 +1249,21 @@ function setTheme(mode) {
 
 </section>
 
-<!-- ═══════════ RANGE QUARTERS (finer than P/E/D) ═══════════ -->
-<section class="smc-quarters">
+<!-- ═══════════ RANGE QUARTERS (finer than P/E/D) — live wire 2026-05-25 ═══════════ -->
+<section class="smc-quarters" id="smcQuartersRoot">
   <div class="smc-quarters-h">
     <span>📏 Range Quarters · finer than premium/eq/discount</span>
-    <span style="color:var(--ink-3);font-weight:500;font-size:10.5px;letter-spacing:0.06em">60d range $402.00 → $443.50 · width $41.50</span>
+    <span id="smcQuartersHdr" style="color:var(--ink-3);font-weight:500;font-size:10.5px;letter-spacing:0.06em">60d range $— → $— · width $—</span>
   </div>
-  <div class="smc-quarters-bar">
-    <div class="smc-q q4">
-      <span class="lbl">Q4 · DEEP DISCOUNT</span>
-      <span class="pct">25%</span>
-      <span class="px">$402.00 – $412.38</span>
-    </div>
-    <div class="smc-q q3">
-      <span class="lbl">Q3 · DISCOUNT</span>
-      <span class="pct">25%</span>
-      <span class="px">$412.38 – $422.75</span>
-    </div>
-    <div class="smc-q q2">
-      <span class="lbl">Q2 · PREMIUM</span>
-      <span class="pct">25%</span>
-      <span class="px">$422.75 – $433.13</span>
-    </div>
-    <div class="smc-q q1 cur">
-      <span class="lbl">Q1 · DEEP PREMIUM ◆ SPOT</span>
-      <span class="pct">25%</span>
-      <span class="px">$433.13 – $443.50</span>
-    </div>
+  <div class="smc-quarters-bar" id="smcQuartersBar">
+    <div class="smc-q q4" data-q="4"><span class="lbl">Q4 · DEEP DISCOUNT</span><span class="pct">25%</span><span class="px">$—</span></div>
+    <div class="smc-q q3" data-q="3"><span class="lbl">Q3 · DISCOUNT</span><span class="pct">25%</span><span class="px">$—</span></div>
+    <div class="smc-q q2" data-q="2"><span class="lbl">Q2 · PREMIUM</span><span class="pct">25%</span><span class="px">$—</span></div>
+    <div class="smc-q q1" data-q="1"><span class="lbl">Q1 · DEEP PREMIUM</span><span class="pct">25%</span><span class="px">$—</span></div>
   </div>
-  <div class="smc-quarters-now">
-    <span>Spot <b>$439.79</b> is in <b>Q1 · DEEP PREMIUM</b> (top 25% of dealing range) — institutional <b>distribution zone</b>, not accumulation.</span>
-    <span>Best buy zone: <b>Q4 · DEEP DISCOUNT</b> (≤$412.38) where Bull OB #2 + SSL stack.</span>
+  <div class="smc-quarters-now" id="smcQuartersNow">
+    <span>Spot <b>$—</b> is in <b>—</b></span>
+    <span>Best buy zone: <b>Q4 · DEEP DISCOUNT</b></span>
   </div>
 </section>
 
@@ -3058,12 +3042,80 @@ function setTheme(mode) {
     svg += '</svg>';
     body.innerHTML = svg;
   }
-  // Schedule wireDealingRange after the main wire() — same 80ms throttle
+  // 2026-05-25 · Price Ladder wire — spot header + Range Quarters bar from
+  // t.smc_data.bars_daily extrema + t.price.
+  function wireLadderAndQuarters() {
+    var t  = (typeof window !== 'undefined') ? window.__SMC_T__ : null;
+    var sd = (typeof window !== 'undefined') ? window.__SMC_DATA__ : null;
+    if (!t) return;
+    var spot = +(t.price || 0);
+    // Range from bars_daily (60d range)
+    var bars = (sd && Array.isArray(sd.bars_daily)) ? sd.bars_daily : [];
+    var lo = 0, hi = 0;
+    if (bars.length >= 5) {
+      var highs = bars.map(function(b){ return +b.high; }).filter(function(x){ return x > 0; });
+      var lows  = bars.map(function(b){ return +b.low;  }).filter(function(x){ return x > 0; });
+      if (highs.length && lows.length) { hi = Math.max.apply(null, highs); lo = Math.min.apply(null, lows); }
+    }
+    if (!lo || !hi || hi <= lo) return;  // bail — keep static placeholder
+    var width = hi - lo;
+    var q4Hi = lo + width * 0.25;
+    var q3Hi = lo + width * 0.50;
+    var q2Hi = lo + width * 0.75;
+    // Spot's quartile
+    var spotQ = spot >= q2Hi ? 1 : spot >= q3Hi ? 2 : spot >= q4Hi ? 3 : 4;
+    var qNames = {1: 'Q1 · DEEP PREMIUM', 2: 'Q2 · PREMIUM', 3: 'Q3 · DISCOUNT', 4: 'Q4 · DEEP DISCOUNT'};
+    var qColors = {1: 'var(--rd)', 2: 'var(--am)', 3: 'var(--gn)', 4: 'var(--gn)'};
+    var spotLbl = qNames[spotQ] || '—';
+
+    var f = function(v) { return v >= 100 ? v.toFixed(0) : v.toFixed(2); };
+    // Card 1 header — replace "SPOT $439.79 · in Q1 Deep Premium"
+    var hdr = document.getElementById('smcLadderSpotHdr');
+    if (hdr) hdr.innerHTML = 'SPOT <b style="color:var(--copper)">$' + f(spot) + '</b> · in <b style="color:' + qColors[spotQ] + '">' + spotLbl + '</b>';
+    // Range Quarters
+    var qHdr = document.getElementById('smcQuartersHdr');
+    if (qHdr) qHdr.textContent = bars.length + 'd range $' + f(lo) + ' → $' + f(hi) + ' · width $' + width.toFixed(2);
+    var bar = document.getElementById('smcQuartersBar');
+    if (bar) {
+      var qs = bar.querySelectorAll('.smc-q');
+      // Q4 (lowest)
+      if (qs[0]) {
+        qs[0].querySelector('.px').textContent = '$' + f(lo) + ' – $' + f(q4Hi);
+        qs[0].classList.toggle('cur', spotQ === 4);
+        if (spotQ === 4) qs[0].querySelector('.lbl').innerHTML = 'Q4 · DEEP DISCOUNT ◆ SPOT';
+      }
+      if (qs[1]) {
+        qs[1].querySelector('.px').textContent = '$' + f(q4Hi) + ' – $' + f(q3Hi);
+        qs[1].classList.toggle('cur', spotQ === 3);
+        if (spotQ === 3) qs[1].querySelector('.lbl').innerHTML = 'Q3 · DISCOUNT ◆ SPOT';
+      }
+      if (qs[2]) {
+        qs[2].querySelector('.px').textContent = '$' + f(q3Hi) + ' – $' + f(q2Hi);
+        qs[2].classList.toggle('cur', spotQ === 2);
+        if (spotQ === 2) qs[2].querySelector('.lbl').innerHTML = 'Q2 · PREMIUM ◆ SPOT';
+      }
+      if (qs[3]) {
+        qs[3].querySelector('.px').textContent = '$' + f(q2Hi) + ' – $' + f(hi);
+        qs[3].classList.toggle('cur', spotQ === 1);
+        if (spotQ === 1) qs[3].querySelector('.lbl').innerHTML = 'Q1 · DEEP PREMIUM ◆ SPOT';
+      }
+    }
+    var now = document.getElementById('smcQuartersNow');
+    if (now) {
+      var bandAdvice = spotQ <= 2
+        ? 'institutional <b>distribution zone</b>, not accumulation'
+        : 'institutional <b>accumulation zone</b>, not distribution';
+      now.innerHTML = '<span>Spot <b>$' + f(spot) + '</b> is in <b>' + spotLbl + '</b> — ' + bandAdvice + '.</span>'
+                    + '<span>Best buy zone: <b>Q4 · DEEP DISCOUNT</b> (≤$' + f(q4Hi) + ').</span>';
+    }
+  }
+  // Schedule wireDealingRange + wireLadderAndQuarters after main wire() — same throttle
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function() { wire(); setTimeout(wireDealingRange, 100); });
+    document.addEventListener('DOMContentLoaded', function() { wire(); setTimeout(wireDealingRange, 100); setTimeout(wireLadderAndQuarters, 110); });
   } else {
     setTimeout(wire, 80);
     setTimeout(wireDealingRange, 100);
+    setTimeout(wireLadderAndQuarters, 110);
   }
 })();
 
