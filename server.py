@@ -7873,12 +7873,21 @@ async def options_flow_accuracy_api(window_days: int = 90):
 
 @app.get("/api/options-flow-journal")
 async def options_flow_journal_api(days: int = 90, limit: int = 200,
-                                    status: str = "", outcome: str = ""):
+                                    status: str = "", outcome: str = "",
+                                    include_backfill: bool = False,
+                                    source: str = ""):
     """Per-pick journal joining options_flow_history.jsonl with outcomes.
 
     Returns rows for the History sub-section: most-recent first, optional
     filter by status (STRONG/MODERATE/WEAK) or outcome (target_hit/stop_hit/
     expired/open). Outcome is 'pending' when not yet in the outcomes file.
+
+    When include_backfill=true, also merges resolved trades from
+    cache/picks_history.json as 'general_picks' source (real win/loss
+    outcomes from the main SwingTrade scanner — gives 1.5+ months of
+    track record while options-flow logger accumulates depth).
+
+    source filter: 'options_flow' | 'general_picks' | '' (both)
     """
     hist_path = BASE_DIR / "cache" / "options_flow_history.jsonl"
     out_path = BASE_DIR / "cache" / "options_flow_outcomes.jsonl"
@@ -7948,7 +7957,66 @@ async def options_flow_journal_api(days: int = 90, limit: int = 200,
             "mfe_pct": (oc or {}).get("mfe_pct"),
             "mae_pct": (oc or {}).get("mae_pct"),
             "days_held": (oc or {}).get("days_to_outcome"),
+            "source": "options_flow",
         })
+
+    # ─── Optional backfill from main picks_history.json ──────────────
+    backfill_n = 0
+    if include_backfill:
+        ph_path = BASE_DIR / "cache" / "picks_history.json"
+        if ph_path.exists():
+            try:
+                ph = json.loads(ph_path.read_text())
+                for tr in ph.get("trades", []) or []:
+                    d_str = tr.get("entry_date") or tr.get("run_date") or ""
+                    if not d_str or d_str < cutoff: continue
+                    # Map trade outcome → journal outcome
+                    win = tr.get("win")
+                    pnl = tr.get("pnl_pct") if tr.get("pnl_pct") is not None else tr.get("pct_chg")
+                    if win is True:    oc_val = "target_hit"
+                    elif win is False: oc_val = "stop_hit"
+                    else:              oc_val = "expired"
+                    # Setup family → status proxy (so the badge column has meaning)
+                    sfam = (tr.get("setup_family") or tr.get("setup_type") or "").upper()
+                    if sfam in ("IMPULSE CATALYST", "BREAKOUT EXPANSION", "52WK BREAKOUT", "VCP BREAKOUT"):
+                        st_proxy = "STRONG"
+                    elif sfam in ("TREND CONTINUATION", "EMA21 PULLBACK", "SQUEEZE EXPANSION"):
+                        st_proxy = "MODERATE"
+                    else:
+                        st_proxy = "WEAK"
+                    if status and st_proxy != status.upper(): continue
+                    if outcome and oc_val.lower() != outcome.lower(): continue
+                    if source and source.lower() != "general_picks": continue
+                    rr = tr.get("rr_ratio")
+                    entry = tr.get("entry_price")
+                    exit_px = tr.get("exit_price")
+                    rows.append({
+                        "date": d_str,
+                        "ticker": tr.get("ticker"),
+                        "sector": tr.get("sector") or "",
+                        "status": st_proxy,
+                        "entry": entry,
+                        "target": (entry * (1 + (pnl or 0)/100)) if (oc_val == "target_hit" and entry and pnl) else None,
+                        "stop": entry - tr.get("planned_risk") if (entry and tr.get("planned_risk")) else None,
+                        "rr": rr,
+                        "pc_ratio": None,
+                        "iv_pct": None,
+                        "max_pain": None,
+                        "outcome": oc_val,
+                        "realized_pct": pnl,
+                        "mfe_pct": tr.get("mfe_pct") if tr.get("mfe_pct") is not None else tr.get("mfe"),
+                        "mae_pct": tr.get("mae_pct") if tr.get("mae_pct") is not None else tr.get("mae"),
+                        "days_held": tr.get("hold_days"),
+                        "source": "general_picks",
+                        "setup": tr.get("setup_family") or tr.get("setup_type"),
+                    })
+                    backfill_n += 1
+            except Exception:
+                pass
+
+    # source filter on options_flow rows already applied implicitly; honor it here too
+    if source:
+        rows = [r for r in rows if r.get("source", "").lower() == source.lower()]
     # Sort newest first, then limit
     rows.sort(key=lambda r: (r["date"] or ""), reverse=True)
     rows = rows[:limit]
@@ -7982,7 +8050,9 @@ async def options_flow_journal_api(days: int = 90, limit: int = 200,
             "avg_loss_pct": round(avg_loss, 2),
         },
         "coverage": coverage,
-        "filters": {"days": days, "status": status, "outcome": outcome, "limit": limit},
+        "backfill_count": backfill_n,
+        "filters": {"days": days, "status": status, "outcome": outcome,
+                    "limit": limit, "include_backfill": include_backfill, "source": source},
     }
 
 

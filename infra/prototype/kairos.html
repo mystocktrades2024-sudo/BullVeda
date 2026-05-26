@@ -18161,14 +18161,14 @@ const QuantOptions = (function() {
               <thead><tr>
                 <th>Date</th>
                 <th>Ticker</th>
-                <th>Status</th>
+                <th>Source</th>
+                <th>Status / Setup</th>
                 <th class="r">Entry</th>
-                <th class="r">Target</th>
-                <th class="r">Stop</th>
                 <th class="r">R:R</th>
                 <th>Outcome</th>
                 <th class="r">Realized %</th>
                 <th class="r">MFE / MAE</th>
+                <th class="r">Days</th>
               </tr></thead>
               <tbody id="qo-hist-tbody"><tr><td colspan="10" style="text-align:center;color:var(--ink-3);padding:30px;font-family:var(--mono);font-size:12px">⌛ loading pick history…</td></tr></tbody>
             </table>
@@ -18367,7 +18367,7 @@ const QuantOptions = (function() {
     const sum = document.getElementById('qo-hist-summary');
     const sub = document.getElementById('qo-hist-sub');
     if (!tbody || !sum) return;
-    fetch('/api/options-flow-journal?days=365&limit=1000', { credentials: 'same-origin' })
+    fetch('/api/options-flow-journal?days=365&limit=2000&include_backfill=true', { credentials: 'same-origin' })
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (!d || !Array.isArray(d.rows)) {
@@ -18376,7 +18376,9 @@ const QuantOptions = (function() {
         }
         window._qoHistRows = d.rows;
         window._qoHistSummary = d.summary || {};
-        if (sub) sub.textContent = `${d.total} suggestions · ${d.summary.resolved || 0} resolved · ${d.summary.open || 0} pending · 365d window`;
+        const _bf = d.backfill_count || 0;
+        const _uoa = d.total - _bf;
+        if (sub) sub.textContent = `${d.total} picks · ${_uoa} options-flow + ${_bf} backfill · ${d.summary.resolved || 0} resolved · ${d.summary.open || 0} pending · 365d`;
         const cnt = document.getElementById('qo-subnav-hist-cnt');
         if (cnt) cnt.textContent = d.total;
         // Coverage banner — be honest about how much data actually exists.
@@ -18386,10 +18388,14 @@ const QuantOptions = (function() {
           const _daysAgo = Math.max(1, Math.round((Date.now() - new Date(cov.earliest).getTime()) / 86400000));
           const _short = cov.days_logged < 30;
           covEl.style.display = '';
-          covEl.innerHTML = `<b style="color:var(--copper)">Data coverage:</b> Options-flow snapshot logger started <b>${cov.earliest}</b> (${_daysAgo}d ago) · ${cov.days_logged} unique days logged · ${cov.total_picks} total picks captured. `
+          const _bfNote = _bf > 0
+            ? ` <b style="color:var(--ink-2)">+ ${_bf} backfill rows</b> from main picks_history (2026-04-06 → 05-20) merged for real win/loss data while options-flow logger builds depth.`
+            : '';
+          covEl.innerHTML = `<b style="color:var(--copper)">Data coverage:</b> Options-flow snapshot logger started <b>${cov.earliest}</b> (${_daysAgo}d ago) · ${cov.days_logged} unique days logged · ${cov.total_picks} options-flow picks captured.`
+            + _bfNote + ' '
             + (_short
-              ? `<span style="color:var(--am)">Building up — full 1-year track record requires ~365 days of daily snapshots. Each day's scan auto-appends; this is what the system has captured so far.</span>`
-              : `<span style="color:var(--gn)">Healthy history depth.</span>`);
+              ? `<span style="color:var(--am)">UOA-tagged rows building up — full options-flow-specific 1-year requires ~365 daily snapshots.</span>`
+              : `<span style="color:var(--gn)">Healthy options-flow history depth.</span>`);
         }
         // Summary chips
         const s = d.summary || {};
@@ -18443,24 +18449,32 @@ const QuantOptions = (function() {
       return '<span style="color:var(--ink-3)">⌛ pending</span>';
     };
     const stCls = (st) => st === 'STRONG' ? 'color:var(--gn);font-weight:700' : st === 'MODERATE' ? 'color:var(--am);font-weight:700' : 'color:var(--ink-2)';
-    tbody.innerHTML = filtered.slice(0, 200).map(r => {
+    tbody.innerHTML = filtered.slice(0, 500).map(r => {
       const realized = r.realized_pct;
       const realizedCls = realized == null ? 'color:var(--ink-3)' : realized > 0 ? 'color:var(--gn)' : 'color:var(--rd)';
       const realizedTxt = realized == null ? '—' : (realized > 0 ? '+' : '') + realized.toFixed(2) + '%';
       const mfeMae = (r.mfe_pct != null || r.mae_pct != null)
         ? `<span style="color:var(--gn)">+${_f(r.mfe_pct,1)}</span> / <span style="color:var(--rd)">${_f(r.mae_pct,1)}</span>`
         : '—';
+      // Source badge: blue for options_flow (real), gray for general_picks (backfill proxy)
+      const srcBadge = r.source === 'general_picks'
+        ? '<span title="Backfill from main picks_history" style="font-family:var(--mono);font-size:9.5px;letter-spacing:0.08em;padding:2px 6px;border-radius:2px;background:rgba(150,150,150,0.18);color:var(--ink-2)">BACKFILL</span>'
+        : '<span title="Options Flow scanner" style="font-family:var(--mono);font-size:9.5px;letter-spacing:0.08em;padding:2px 6px;border-radius:2px;background:rgba(217,119,87,0.18);color:var(--copper)">UOA</span>';
+      // Setup label: real options-flow has status (STRONG/MODERATE/WEAK), backfill has setup_family
+      const setupLbl = r.source === 'general_picks'
+        ? (r.setup || r.status || '—')
+        : (r.status || '—');
       return `<tr style="cursor:pointer" data-tkr="${r.ticker}">
         <td>${r.date || '—'}</td>
         <td style="font-weight:700">${r.ticker || '—'}</td>
-        <td style="${stCls(r.status)}">${r.status || '—'}</td>
+        <td>${srcBadge}</td>
+        <td style="${stCls(r.status)}">${setupLbl}</td>
         <td class="r">$${_f(r.entry, 2)}</td>
-        <td class="r">$${_f(r.target, 2)}</td>
-        <td class="r">$${_f(r.stop, 2)}</td>
         <td class="r">${_f(r.rr, 1)}</td>
         <td>${ocBadge(r.outcome)}</td>
         <td class="r" style="${realizedCls};font-weight:700">${realizedTxt}</td>
         <td class="r" style="font-size:11px">${mfeMae}</td>
+        <td class="r" style="color:var(--ink-2);font-size:11px">${r.days_held != null ? r.days_held + 'd' : '—'}</td>
       </tr>`;
     }).join('');
     // Row click → detail
