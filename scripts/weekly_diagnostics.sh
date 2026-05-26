@@ -53,6 +53,13 @@ python3 scripts/_weekly_diag_compare.py 2>&1 >> "$LOG"
 # Pushes Slack message + persists cache/forensics_weekly_<DATE>.json
 bash scripts/run_forensics_weekly.sh 2>&1 >> "$LOG"
 
+# 9c. Momentum snapshot belt-and-braces (third layer; daily plist is primary
+# fallback after swing_trade.py post-scan). Idempotent — safe even if already
+# snapshotted today.
+LOG_DIR="cache/logs"
+mkdir -p "$LOG_DIR"
+python3 momentum_snapshot.py 2>&1 | tee -a "$LOG_DIR/momentum_snapshot_weekly.log" >> "$LOG"
+
 # 10. Post completion status to Slack (always — success or failure)
 python3 -c "
 import time

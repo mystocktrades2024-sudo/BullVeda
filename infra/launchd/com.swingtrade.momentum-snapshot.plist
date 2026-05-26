@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.swingtrade.momentum-snapshot — daily belt-and-braces snapshot fallback.
+
+  Primary path:  swing_trade.py post-scan auto-calls momentum_snapshot.py
+                 (best-effort, swallowed exception so the scan never fails).
+  This plist:    fires at 8:00am PT (90 min after morning-briefing 6:30am)
+                 so the main scan has finished writing tickers.json /
+                 last_bundle.json. Script is idempotent — if the primary path
+                 already wrote today's snapshot, this is a no-op.
+  Weekly:        scripts/weekly_diagnostics.sh also runs the script Sundays
+                 5pm PT as a third layer of redundancy.
+
+  Safe to run multiple times per day. No --force, so date already snapshotted
+  exits via {"status":"skip","reason":"date already snapshotted"}.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.swingtrade.momentum-snapshot</string>
+
+    <!-- Daily at 8:00am PT (post morning-briefing 6:30am + main scan runtime) -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key><integer>8</integer>
+        <key>Minute</key><integer>0</integer>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade/scripts/launchd_wrapper.sh</string>
+        <string>com.swingtrade.momentum-snapshot</string>
+        <string>/usr/bin/python3</string>
+        <string>momentum_snapshot.py</string>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade/cache/logs/momentum_snapshot.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade/cache/logs/momentum_snapshot.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- RunAtLoad=false: don't fire on plist install/boot, only on schedule -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
