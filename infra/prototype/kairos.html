@@ -2175,14 +2175,53 @@ body.on-workspace .tabs { display: none; }
   font-size: 11px; color: var(--ink-3); font-style: italic;
 }
 
-/* 2026-05-26 · HISTORY HERO — radial gauge + KPI strip + curve + stratification */
+/* 2026-05-26 · HISTORY HERO — thesis band + radial gauge + KPI strip + curve + stratification */
 .qo-hh {
-  display: grid; grid-template-columns: 200px 1fr; gap: 14px;
+  display: grid; grid-template-columns: 200px 1fr;
+  grid-template-areas: "band band" "gauge kpis";
+  gap: 14px;
   margin-bottom: 14px;
   background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
   border: 1px solid var(--line); border-radius: 7px;
   padding: 14px;
 }
+.qo-hh-band {
+  grid-area: band;
+  display: flex; align-items: center;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  position: relative; overflow: hidden;
+}
+.qo-hh-band::before {
+  content: ''; position: absolute; top: 0; left: 0; bottom: 0; width: 4px;
+}
+.qo-hh-band.bull::before { background: linear-gradient(180deg, var(--gn), rgba(91,229,124,0.3)); }
+.qo-hh-band.bear::before { background: linear-gradient(180deg, var(--rd), rgba(255,107,91,0.3)); }
+.qo-hh-band.mix::before  { background: linear-gradient(180deg, var(--am), rgba(255,185,92,0.3)); }
+.qo-hh-band-l { padding-left: 12px; display: flex; flex-direction: column; gap: 2px; }
+.qo-hh-band-lbl {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.qo-hh-band-v {
+  font-family: var(--sans); font-size: 18px; font-weight: 800;
+  line-height: 1.1; letter-spacing: 0.02em;
+}
+.qo-hh-band.bull .qo-hh-band-v { color: var(--gn); }
+.qo-hh-band.bear .qo-hh-band-v { color: var(--rd); }
+.qo-hh-band.mix  .qo-hh-band-v { color: var(--am); }
+.qo-hh-band-meta {
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink-2);
+  margin-top: 3px; letter-spacing: 0.03em;
+}
+.qo-hh-band-meta b { color: var(--ink); font-weight: 700; }
+.qo-hh-band-meta b.gn { color: var(--gn); }
+.qo-hh-band-meta b.am { color: var(--am); }
+.qo-hh-band-meta b.rd { color: var(--rd); }
+.qo-hh > .qo-hh-gauge { grid-area: gauge; }
+.qo-hh > .qo-hh-kpis  { grid-area: kpis; }
 .qo-hh-gauge { display: flex; flex-direction: column; gap: 6px; }
 .qo-hh-gauge svg { max-height: 100px; }
 .qo-hh-gauge-foot {
@@ -19523,29 +19562,84 @@ const QuantOptions = (function() {
       });
   }
 
-  // 2026-05-26 · Hero painter — radial win-rate gauge + 5 KPI tiles.
+  // 2026-05-26 · Hero painter — quant-desk track-record band.
+  // Layout: thesis-style header → radial WR gauge + 5 institutional KPIs
+  // (PF · Avg W · Avg L · Expectancy · Sharpe-like · Max DD)
   function _paintHistHero(d) {
     const el = document.getElementById('qo-hist-hero');
     if (!el) return;
     const s = d.summary || {};
+    const rows = d.rows || [];
     const wr = s.win_rate_pct;
     const wrCls = wr == null ? 'nu' : wr >= 55 ? 'gn' : wr >= 45 ? 'am' : 'rd';
     const wrCol = wrCls === 'gn' ? 'var(--gn)' : wrCls === 'am' ? 'var(--am)' : wrCls === 'rd' ? 'var(--rd)' : 'var(--ink-3)';
-    // Build profit factor from avg win × wins vs avg loss × losses
+
+    // Profit factor from gross win vs gross loss
     const grossWin  = (s.avg_win_pct || 0) * (s.wins || 0);
     const grossLoss = Math.abs((s.avg_loss_pct || 0) * (s.losses || 0));
     const pf = grossLoss > 0 ? (grossWin / grossLoss) : null;
     const pfCls = pf == null ? 'nu' : pf >= 1.5 ? 'gn' : pf >= 1.0 ? 'am' : 'rd';
-    const edge = (s.wins || 0) - (s.losses || 0);
+
     // Expectancy = WR×avgWin + (1-WR)×avgLoss
     const wRate = wr != null ? wr/100 : null;
     const exp = (wRate != null && s.avg_win_pct != null && s.avg_loss_pct != null)
       ? (wRate * s.avg_win_pct + (1 - wRate) * s.avg_loss_pct) : null;
     const expCls = exp == null ? 'nu' : exp >= 1.0 ? 'gn' : exp >= 0 ? 'am' : 'rd';
+
+    // Return-Sharpe (per-pick) = mean / stdev of realized returns
+    const reals = rows
+      .filter(r => typeof r.realized_pct === 'number'
+                   && (r.outcome === 'target_hit' || r.outcome === 'stop_hit' || r.outcome === 'expired'))
+      .map(r => r.realized_pct);
+    let sharpe = null;
+    if (reals.length >= 3) {
+      const m = reals.reduce((a,b) => a+b, 0) / reals.length;
+      const v = reals.reduce((a,b) => a + (b-m)*(b-m), 0) / reals.length;
+      const sd = Math.sqrt(v);
+      sharpe = sd > 0 ? (m / sd) : null;
+    }
+    const shpCls = sharpe == null ? 'nu' : sharpe >= 0.3 ? 'gn' : sharpe >= 0 ? 'am' : 'rd';
+
+    // Max drawdown — worst peak-to-trough on cumulative equity curve
+    const cumReals = rows
+      .filter(r => typeof r.realized_pct === 'number'
+                   && (r.outcome === 'target_hit' || r.outcome === 'stop_hit' || r.outcome === 'expired'))
+      .sort((a,b) => (a.date || '').localeCompare(b.date || ''));
+    let maxDD = null;
+    if (cumReals.length >= 3) {
+      let cum = 0, peak = 0, dd = 0;
+      cumReals.forEach(r => {
+        cum += r.realized_pct;
+        if (cum > peak) peak = cum;
+        if (peak - cum > dd) dd = peak - cum;
+      });
+      maxDD = dd;
+    }
+    const ddCls = maxDD == null ? 'nu' : maxDD <= 5 ? 'gn' : maxDD <= 15 ? 'am' : 'rd';
+
     // Radial-gauge arc geometry (0..100%) → -120° → +120° = 240° sweep
     const arcPct = wr == null ? 0 : Math.max(0, Math.min(100, wr));
     const dash = (arcPct / 100) * 220;
+
+    // Thesis-style header verdict
+    const thesisCls = (wr != null && pf != null && wr >= 55 && pf >= 1.5) ? 'bull'
+                    : (wr != null && pf != null && wr < 45 && pf < 1.0) ? 'bear'
+                    : 'mix';
+    const thesisIco = thesisCls === 'bull' ? '✓' : thesisCls === 'bear' ? '✗' : '◐';
+    const thesisLbl = thesisCls === 'bull' ? 'EDGE CONFIRMED'
+                    : thesisCls === 'bear' ? 'EDGE UNDER REVIEW'
+                    : 'BUILDING TRACK RECORD';
+
     el.innerHTML = `
+      <div class="qo-hh-band ${thesisCls}">
+        <div class="qo-hh-band-l">
+          <div class="qo-hh-band-lbl">Track Record · ${s.resolved || 0} resolved</div>
+          <div class="qo-hh-band-v">${thesisIco} ${thesisLbl}</div>
+          <div class="qo-hh-band-meta">
+            <b>${s.wins || 0}W</b> · <b>${s.losses || 0}L</b> · <b>${s.open || 0}</b> pending · WR <b class="${wrCls}">${wr != null ? wr.toFixed(0) + '%' : '—'}</b> · PF <b class="${pfCls}">${pf != null ? pf.toFixed(2) : '—'}</b>
+          </div>
+        </div>
+      </div>
       <div class="qo-hh-gauge">
         <svg viewBox="0 0 120 90" style="width:100%;height:auto;display:block">
           <path d="M 15 75 A 45 45 0 1 1 105 75" fill="none" stroke="var(--line-2)" stroke-width="8" stroke-linecap="round"/>
@@ -19566,7 +19660,7 @@ const QuantOptions = (function() {
         <div class="qo-hh-kpi ${pfCls}">
           <div class="lbl">Profit Factor</div>
           <div class="v">${pf != null ? pf.toFixed(2) : '—'}</div>
-          <div class="sub">gross win / gross loss</div>
+          <div class="sub">gross W / gross L</div>
         </div>
         <div class="qo-hh-kpi gn">
           <div class="lbl">Avg Win</div>
@@ -19583,15 +19677,15 @@ const QuantOptions = (function() {
           <div class="v">${exp != null ? (exp >= 0 ? '+' : '') + exp.toFixed(2) + '%' : '—'}</div>
           <div class="sub">per-pick edge</div>
         </div>
-        <div class="qo-hh-kpi">
-          <div class="lbl">Edge</div>
-          <div class="v">${edge >= 0 ? '+' : ''}${edge}</div>
-          <div class="sub">wins − losses</div>
+        <div class="qo-hh-kpi ${shpCls}">
+          <div class="lbl">Return Sharpe</div>
+          <div class="v">${sharpe != null ? (sharpe >= 0 ? '+' : '') + sharpe.toFixed(2) : '—'}</div>
+          <div class="sub">mean / σ · per pick</div>
         </div>
-        <div class="qo-hh-kpi">
-          <div class="lbl">Open</div>
-          <div class="v">${s.open || 0}</div>
-          <div class="sub">pending resolve</div>
+        <div class="qo-hh-kpi ${ddCls}">
+          <div class="lbl">Max Drawdown</div>
+          <div class="v">${maxDD != null ? '-' + maxDD.toFixed(1) + '%' : '—'}</div>
+          <div class="sub">peak-to-trough</div>
         </div>
       </div>
     `;
@@ -19670,7 +19764,15 @@ const QuantOptions = (function() {
         pf: v.sumLoss < 0 ? v.sumWin / Math.abs(v.sumLoss) : null,
       })).filter(r => r.n >= 3).sort((a, b) => b.n - a.n);
     };
-    const byStatus = bucket(resolved, r => r.status);
+    // Conviction bucket replaces Status (which is redundant with the filter chips above)
+    const convOf = (r) => {
+      const c = (r.conviction || r.signal_strength || r.status_2 || '').toString().toUpperCase();
+      if (c.includes('STRONG'))   return 'STRONG';
+      if (c.includes('MODERATE')) return 'MODERATE';
+      if (c.includes('WEAK'))     return 'WEAK';
+      return '—';
+    };
+    const byConv   = bucket(resolved, convOf);
     const byDir    = bucket(resolved, r => (r.direction || 'long').toUpperCase());
     const bySector = bucket(resolved, r => r.sector).slice(0, 6);
 
@@ -19699,7 +19801,7 @@ const QuantOptions = (function() {
         </div>
       `;
     };
-    el.innerHTML = renderTable('🎯 By Verdict / Status', byStatus)
+    el.innerHTML = renderTable('● By Conviction', byConv)
                  + renderTable('▲▼ By Direction', byDir)
                  + renderTable('🏭 By Sector (top 6)', bySector);
   }
