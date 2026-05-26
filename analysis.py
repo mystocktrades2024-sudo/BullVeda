@@ -5833,7 +5833,31 @@ def kelly_position_size(stats: dict, regime_name: str, vix: float,
             _t = (sharpe_126d - _lo) / (_hi - _lo)
             _sharpe_mult = round(_min_mult + _t * (_max_mult - _min_mult), 3)
 
-    effective_regime_cap = effective_regime_cap * _earn_mult * _var_floor_mult * _sharpe_mult
+    # ── 2026-05-26 SHIP 4 · SMC-stop trap size tilt (config-flagged, default OFF) ──
+    # Senior-quant principle 9: when stop sits inside active Bull OB (MED+
+    # severity, non-catalyst sleeve), halve position size. The thesis is right
+    # but stop placement is structurally trapped — sweep risk warrants smaller
+    # exposure until SMC-suggested placement is validated in paper observation.
+    # Flag must remain OFF until ~30 logged trades confirm tilt improves PF/WR.
+    _smc_tilt_cfg = (config or {}).get("smc_stop_size_tilt") or {}
+    _smc_tilt_mult = 1.0
+    _smc_tilt_applied = False
+    _smc_tilt_reason = None
+    if _smc_tilt_cfg.get("enabled", False):
+        _smc_runtime = (_cfg.get("portfolio", {}) or {}).get("_runtime_smc_trap") or {}
+        _trap = bool(_smc_runtime.get("stop_inside_ob"))
+        _sev = (_smc_runtime.get("severity") or "").upper()
+        _suppr = bool(_smc_runtime.get("suppressed"))
+        _min_sev = (_smc_tilt_cfg.get("min_severity") or "MED").upper()
+        _skip_suppr = bool(_smc_tilt_cfg.get("skip_suppressed_sleeves", True))
+        _sev_rank = {"LOW": 1, "MED": 2, "HIGH": 3}
+        _meets_sev = _sev_rank.get(_sev, 0) >= _sev_rank.get(_min_sev, 2)
+        if _trap and _meets_sev and not (_suppr and _skip_suppr):
+            _smc_tilt_mult = float(_smc_tilt_cfg.get("size_multiplier", 0.5))
+            _smc_tilt_applied = True
+            _smc_tilt_reason = f"SMC trap {_sev}, sleeve not suppressed → ×{_smc_tilt_mult}"
+
+    effective_regime_cap = effective_regime_cap * _earn_mult * _var_floor_mult * _sharpe_mult * _smc_tilt_mult
     shares_from_risk = math.floor(shares_from_risk * effective_regime_cap)
     position_value = shares_from_risk * price
 
@@ -5865,6 +5889,9 @@ def kelly_position_size(stats: dict, regime_name: str, vix: float,
             "earnings_mult": _earn_mult if '_earn_mult' in dir() else 1.0,
             "var_floor_mult": _var_floor_mult if '_var_floor_mult' in dir() else 1.0,
             "sharpe_mult": _sharpe_mult if '_sharpe_mult' in dir() else 1.0,
+            "smc_stop_tilt_applied": _smc_tilt_applied,
+            "smc_stop_tilt_mult": _smc_tilt_mult,
+            "smc_stop_tilt_reason": _smc_tilt_reason,
             "effective_regime_cap": round(effective_regime_cap, 4),
             "final_alloc_pct": round(final_alloc_pct, 2),
             "final_shares": shares_from_risk,
@@ -5898,6 +5925,9 @@ def kelly_position_size(stats: dict, regime_name: str, vix: float,
         "cvar_975_pct":     _cvar_pct if '_cvar_pct' in dir() else None,
         "sharpe_mult":      _sharpe_mult if '_sharpe_mult' in dir() else 1.0,
         "sharpe_126d":      sharpe_126d,
+        "smc_stop_tilt_applied": _smc_tilt_applied,
+        "smc_stop_tilt_mult":    _smc_tilt_mult,
+        "smc_stop_tilt_reason":  _smc_tilt_reason,
         "effective_regime_cap": round(effective_regime_cap, 3),
         "risk_per_trade_pct": risk_per_trade_pct,
         "live_win_rate":    round(win_rate * 100, 1),
@@ -10659,6 +10689,38 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         _portfolio_runtime["_runtime_earn_days_for_ticker"] = (
             earnings.get("days_to_earnings") if isinstance(earnings, dict) else None
         )
+        # ── 2026-05-26 SHIP 4 · inject SMC trap context for kelly sizing ──
+        # Mirror the same logic canonical_trade_plan uses so the kelly-time
+        # trap classification matches what the UI shows downstream.
+        try:
+            from canonical_trade_plan import compute_smc_stop_fields as _csmc
+            _smc_obs_for_kelly = (smc_result or {}).get("order_blocks") or []
+            _sleeve_for_smc = None
+            if '_pead_audit' in dir() and isinstance(_pead_audit, dict) and _pead_audit.get("fired"):
+                _sleeve_for_smc = "pead"
+            elif '_esp_play_audit' in dir() and isinstance(_esp_play_audit, dict) and _esp_play_audit.get("fired"):
+                _sleeve_for_smc = "esp_play"
+            elif '_insider_cluster_audit' in dir() and isinstance(_insider_cluster_audit, dict) and _insider_cluster_audit.get("fired"):
+                _sleeve_for_smc = "insider_cluster"
+            else:
+                _sleeve_for_smc = plan.get("setup_family") or plan.get("setup_type")
+            _smc_kelly_fields = _csmc(
+                order_blocks=_smc_obs_for_kelly,
+                direction=plan.get("direction", "long"),
+                entry_mid=(plan.get("entry_mid") or plan.get("entry") or price),
+                legacy_stop=plan.get("stop"),
+                target1=plan.get("target1"),
+                spot=price,
+                fractal_low=tech["indicators"].get("fractal_low"),
+                sleeve=_sleeve_for_smc,
+            )
+            _portfolio_runtime["_runtime_smc_trap"] = {
+                "stop_inside_ob": bool(_smc_kelly_fields.get("stop_inside_ob")),
+                "severity": _smc_kelly_fields.get("stop_inside_ob_severity"),
+                "suppressed": bool(_smc_kelly_fields.get("stop_inside_ob_suppressed")),
+            }
+        except Exception:
+            _portfolio_runtime["_runtime_smc_trap"] = None
         # Compute per-ticker CVaR-97.5 inline from df closes (10-day horizon)
         try:
             import forward_dist as _fd
@@ -10696,6 +10758,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     try:
         _portfolio_runtime.pop("_runtime_earn_days_for_ticker", None)
         _portfolio_runtime.pop("_runtime_cvar_975_pct", None)
+        _portfolio_runtime.pop("_runtime_smc_trap", None)
     except Exception:
         pass
 
@@ -11487,6 +11550,10 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         "congressional": congressional,
         "reddit_wsb":    reddit_wsb,
         "industry": info.get("industry", "Unknown"),
+        # 2026-05-26 · Surface market_cap on the top-level entry so the Market
+        # Heatmap (kairos.html renderMarketMap) and other consumers can read it
+        # without diving into nested fmp/extra_fund dicts.
+        "market_cap": info.get("market_cap") or info.get("marketCap") or 0,
         "catalyst_tags":      catalyst_tags,
         "catalyst_tier":      catalyst_tier,
         "catalyst_meta":      catalyst_meta,
