@@ -18154,6 +18154,7 @@ const QuantOptions = (function() {
               </span>
             </span>
           </h2>
+          <div id="qo-hist-coverage" style="font:600 11px var(--mono);color:var(--ink-3);background:var(--bg-2);border:1px solid var(--line);border-left:3px solid var(--copper);border-radius:3px;padding:8px 12px;margin-bottom:12px;display:none"></div>
           <div id="qo-hist-summary" style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:12px;font-family:var(--mono);font-size:11px"></div>
           <div class="qf-tbl-wrap">
             <table class="qopt-tbl qf-tbl" id="qo-hist-tbl">
@@ -18366,7 +18367,7 @@ const QuantOptions = (function() {
     const sum = document.getElementById('qo-hist-summary');
     const sub = document.getElementById('qo-hist-sub');
     if (!tbody || !sum) return;
-    fetch('/api/options-flow-journal?days=90&limit=300', { credentials: 'same-origin' })
+    fetch('/api/options-flow-journal?days=365&limit=1000', { credentials: 'same-origin' })
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (!d || !Array.isArray(d.rows)) {
@@ -18375,9 +18376,21 @@ const QuantOptions = (function() {
         }
         window._qoHistRows = d.rows;
         window._qoHistSummary = d.summary || {};
-        if (sub) sub.textContent = `${d.total} suggestions · ${d.summary.resolved || 0} resolved · ${d.summary.open || 0} pending · 90d window`;
+        if (sub) sub.textContent = `${d.total} suggestions · ${d.summary.resolved || 0} resolved · ${d.summary.open || 0} pending · 365d window`;
         const cnt = document.getElementById('qo-subnav-hist-cnt');
         if (cnt) cnt.textContent = d.total;
+        // Coverage banner — be honest about how much data actually exists.
+        const cov = d.coverage || {};
+        const covEl = document.getElementById('qo-hist-coverage');
+        if (covEl && cov.earliest) {
+          const _daysAgo = Math.max(1, Math.round((Date.now() - new Date(cov.earliest).getTime()) / 86400000));
+          const _short = cov.days_logged < 30;
+          covEl.style.display = '';
+          covEl.innerHTML = `<b style="color:var(--copper)">Data coverage:</b> Options-flow snapshot logger started <b>${cov.earliest}</b> (${_daysAgo}d ago) · ${cov.days_logged} unique days logged · ${cov.total_picks} total picks captured. `
+            + (_short
+              ? `<span style="color:var(--am)">Building up — full 1-year track record requires ~365 days of daily snapshots. Each day's scan auto-appends; this is what the system has captured so far.</span>`
+              : `<span style="color:var(--gn)">Healthy history depth.</span>`);
+        }
         // Summary chips
         const s = d.summary || {};
         const wrCls = (s.win_rate_pct == null) ? '' : s.win_rate_pct >= 55 ? 'gn' : s.win_rate_pct >= 40 ? 'am' : 'rd';

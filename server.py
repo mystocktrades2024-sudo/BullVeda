@@ -7883,7 +7883,29 @@ async def options_flow_journal_api(days: int = 90, limit: int = 200,
     hist_path = BASE_DIR / "cache" / "options_flow_history.jsonl"
     out_path = BASE_DIR / "cache" / "options_flow_outcomes.jsonl"
     if not hist_path.exists():
-        return {"rows": [], "total": 0, "summary": {}, "message": "no history yet"}
+        return {"rows": [], "total": 0, "summary": {}, "coverage": {}, "message": "no history yet"}
+    # Coverage — earliest/latest dates in the raw history (independent of filters).
+    # User wants 1y track but logger started recently; surface the gap honestly.
+    coverage = {"earliest": None, "latest": None, "days_logged": 0, "total_picks": 0}
+    try:
+        _dates = set()
+        _ncov = 0
+        for _ln in hist_path.read_text().splitlines():
+            if not _ln.strip(): continue
+            try:
+                _d = json.loads(_ln).get("snap_date")
+                if _d:
+                    _dates.add(_d)
+                    _ncov += 1
+            except Exception:
+                continue
+        if _dates:
+            coverage["earliest"] = min(_dates)
+            coverage["latest"] = max(_dates)
+            coverage["days_logged"] = len(_dates)
+            coverage["total_picks"] = _ncov
+    except Exception:
+        pass
     # Build outcome index keyed by (snap_date, ticker)
     outcomes = {}
     if out_path.exists():
@@ -7959,6 +7981,7 @@ async def options_flow_journal_api(days: int = 90, limit: int = 200,
             "avg_win_pct": round(avg_win, 2),
             "avg_loss_pct": round(avg_loss, 2),
         },
+        "coverage": coverage,
         "filters": {"days": days, "status": status, "outcome": outcome, "limit": limit},
     }
 
