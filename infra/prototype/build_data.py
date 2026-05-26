@@ -2967,7 +2967,14 @@ def main():
         rs = float(sb.get("rs_score")  or 0)
         sm = float(sb.get("sm_score")  or 0)
         wt, wc, wr, wsm, wf = weights
-        return ((t/35)*wt + (c/20)*wc + (rs/20)*wr + (sm/15)*wsm + (fund/15)*wf)
+        # 2026-05-25: clamp each (pillar / pillar_max) ratio to [0, 1]. Without
+        # this clamp, over-cap pillars (e.g. tech_score=37.5 when max=35 because
+        # of bonuses, or fund>15 from PEAD multiplier) push the weighted sum >100.
+        # IONQ score=103 root cause. Mirrors the engine's normalized=min(100,...)
+        # at analysis.py:11057.
+        _r = lambda v, m: max(0.0, min(1.0, (float(v) or 0) / float(m)))
+        weighted = (_r(t,35)*wt + _r(c,20)*wc + _r(rs,20)*wr + _r(sm,15)*wsm + _r(fund,15)*wf)
+        return max(0.0, min(100.0, weighted))
 
     POSITION_W = (25, 10, 30, 5, 30)
     INVEST_W   = (15,  5, 10, 5, 65)
@@ -4428,7 +4435,7 @@ def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> Non
         print("  lite-aug: eodhd_client not importable — skipping OHLCV")
         return
 
-    n_ok, n_skip = 0, 0
+    n_ok, n_skip, n_full = 0, 0, 0
     for t, sources in extras.items():
         try:
             bars = _eod.eod(t, from_date=from_d, to_date=to_d, period="d") or []
@@ -4450,21 +4457,86 @@ def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> Non
                 })
 
             fund = fund_cache.get(t) or {}
-            general    = (fund.get("General") or {})   if isinstance(fund, dict) else {}
+            general    = (fund.get("General") or {})    if isinstance(fund, dict) else {}
             highlights = (fund.get("Highlights") or {}) if isinstance(fund, dict) else {}
+            technicals = (fund.get("Technicals") or {}) if isinstance(fund, dict) else {}
+            valuation  = (fund.get("Valuation") or {})  if isinstance(fund, dict) else {}
+
+            # bulk_fundamentals returns a thin payload — pull the full per-ticker
+            # fundamentals doc (24h cached) so we get AnalystRatings, full Technicals,
+            # Earnings, Financials, Holders. This is the bulk of the "full enrichment"
+            # cost: ~388 cache-misses on first run, near-free on subsequent runs.
+            full_fund = None
+            try:
+                full_fund = _eod.fundamentals(t)
+                if isinstance(full_fund, dict):
+                    analyst = full_fund.get("AnalystRatings") or {}
+                    earnings_ann = full_fund.get("Earnings") or {}
+                    # Merge — full fundamentals trumps bulk where available
+                    if not general    and full_fund.get("General"):    general    = full_fund["General"]
+                    if not highlights and full_fund.get("Highlights"): highlights = full_fund["Highlights"]
+                    if not technicals and full_fund.get("Technicals"): technicals = full_fund["Technicals"]
+                    if not valuation  and full_fund.get("Valuation"):  valuation  = full_fund["Valuation"]
+                else:
+                    analyst, earnings_ann = {}, {}
+            except Exception:
+                analyst, earnings_ann = {}, {}
 
             last_close = (bars[-1] or {}).get("close") if bars else None
+
+            # SMC bars — reshape OHLCV into the {time,open,high,low,close,volume}
+            # shape the §1 chart + concept gauges expect. No extra API call.
+            smc_bars = [
+                {"time": b["d"], "open": +b["o"], "high": +b["h"], "low": +b["l"],
+                 "close": +b["c"], "volume": +b.get("v", 0)}
+                for b in ohlcv if b.get("d") and b.get("c") is not None
+            ]
+
+            # Per-ticker news + sentiment (4h cached)
+            news_articles, news_sent = [], None
+            try:
+                _news = _eod.news(t, limit=20) or []
+                news_articles = _news if isinstance(_news, list) else []
+                # Average sentiment score across pulled articles (if EODHD attached one)
+                _scores = [a.get("sentiment", {}).get("polarity") for a in news_articles
+                           if isinstance(a, dict) and isinstance(a.get("sentiment"), dict)]
+                _scores = [s for s in _scores if isinstance(s, (int, float))]
+                if _scores: news_sent = sum(_scores) / len(_scores)
+            except Exception:
+                pass
+
+            # Insider transactions (24h cached) — aggregate to {buys, sells, net_value}
+            insider_agg = {}
+            try:
+                _ins = _eod.insider_transactions(t) or []
+                buys = sum(1 for r in _ins if isinstance(r, dict) and (r.get("transactionCode") in ("P", "A") or (r.get("transactionAcquiredDisposedCode") == "A")))
+                sells = sum(1 for r in _ins if isinstance(r, dict) and (r.get("transactionCode") in ("S", "D") or (r.get("transactionAcquiredDisposedCode") == "D")))
+                net_val = 0.0
+                for r in _ins:
+                    if not isinstance(r, dict): continue
+                    val = float(r.get("transactionAmount") or 0)
+                    if r.get("transactionAcquiredDisposedCode") == "A": net_val += val
+                    elif r.get("transactionAcquiredDisposedCode") == "D": net_val -= val
+                insider_agg = {"buys": buys, "sells": sells, "net_value": net_val, "n": len(_ins)}
+            except Exception:
+                pass
+
+            # Analyst consensus from full fundamentals
+            a_target = (analyst.get("TargetPrice") if isinstance(analyst, dict) else None)
+            a_buy    = (analyst.get("StrongBuy") or 0) + (analyst.get("Buy") or 0) if isinstance(analyst, dict) else None
+            a_hold   = analyst.get("Hold") if isinstance(analyst, dict) else None
+            a_sell   = (analyst.get("Sell") or 0) + (analyst.get("StrongSell") or 0) if isinstance(analyst, dict) else None
 
             all_rich[t] = {
                 "ticker":           t,
                 "symbol":           t,
-                "name":             general.get("Name") or t,
-                "sector":           general.get("Sector"),
-                "industry":         general.get("Industry"),
+                "name":             (general.get("Name") if isinstance(general, dict) else None) or t,
+                "sector":           general.get("Sector") if isinstance(general, dict) else None,
+                "industry":         general.get("Industry") if isinstance(general, dict) else None,
                 "price":            last_close,
                 "ohlcv":            ohlcv,
-                # Lite scoring — fields exist but are null so frontend renders
-                # "not scored in today's scan" state rather than crashing.
+                # Scoring fields still null — these tickers weren't run through the
+                # full 5-pillar pipeline. Frontend shows "not in today's scan" state.
                 "verdict":          None,
                 "score":            None,
                 "rs_rank":          None,
@@ -4482,27 +4554,62 @@ def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> Non
                 "target2":          None,
                 "earn_days":        None,
                 "catalyst_tier":    None,
-                "ticker_source":    sources[0] + "_extra",  # ml_extra / earnings_extra / options_extra
-                "market_cap":       highlights.get("MarketCapitalization"),
-                "fund_real":        {
-                    "name":     general.get("Name") or t,
-                    "sector":   general.get("Sector"),
-                    "industry": general.get("Industry"),
-                    "exchange": general.get("Exchange"),
-                    "country":  general.get("Country"),
-                    "market_cap": highlights.get("MarketCapitalization"),
+                "ticker_source":    sources[0] + "_extra",
+                # Now wired (was None in lite mode):
+                "market_cap":       (highlights.get("MarketCapitalization") if isinstance(highlights, dict) else None),
+                "beta":             (technicals.get("Beta") if isinstance(technicals, dict) else None),
+                "analyst_target":   a_target,
+                "analyst_buy":      a_buy,
+                "analyst_hold":     a_hold,
+                "analyst_sell":     a_sell,
+                "news_articles":    news_articles,
+                "news_sentiment_score": news_sent,
+                "insider":          insider_agg,
+                "smc_data":         {
+                    "bars_daily":      smc_bars,
+                    "order_blocks":    [],
+                    "fvgs":            [],
+                    "breakers":        [],
+                    "structure_events":[],
+                    "liquidity":       [],
+                    "multi_tf":        {},
+                    "synth":           True,  # zones not detected — bars are real
                 },
-                # Provenance — frontend reads this to show banners
-                "_data_completeness": "lite",
+                "fund_real":        {
+                    "name":       (general.get("Name") if isinstance(general, dict) else None) or t,
+                    "sector":     general.get("Sector") if isinstance(general, dict) else None,
+                    "industry":   general.get("Industry") if isinstance(general, dict) else None,
+                    "exchange":   general.get("Exchange") if isinstance(general, dict) else None,
+                    "country":    general.get("Country") if isinstance(general, dict) else None,
+                    "market_cap": (highlights.get("MarketCapitalization") if isinstance(highlights, dict) else None),
+                    "pe":         (highlights.get("PERatio") if isinstance(highlights, dict) else None),
+                    "eps":        (highlights.get("EarningsShare") if isinstance(highlights, dict) else None),
+                    "rev_growth_pct":   (highlights.get("QuarterlyRevenueGrowthYOY") if isinstance(highlights, dict) else None),
+                    "profit_margin_pct":(highlights.get("ProfitMargin") if isinstance(highlights, dict) else None),
+                },
+                # Store only the lean fundamentals slices (skip Financials/Holders/Earnings full
+                # statements — they'd bloat tickers.json by ~80MB for 388 extras). The fields the
+                # Value tab needs are already pulled into market_cap/beta/analyst_*/fund_real above.
+                "eodhd_fundamentals": ({
+                    "General":        full_fund.get("General"),
+                    "Highlights":     full_fund.get("Highlights"),
+                    "Valuation":      full_fund.get("Valuation"),
+                    "Technicals":     full_fund.get("Technicals"),
+                    "AnalystRatings": full_fund.get("AnalystRatings"),
+                } if isinstance(full_fund, dict) else None),
+                # Provenance — promoted from lite to full (with caveat that scoring
+                # pipeline didn't run, but raw data fields are populated).
+                "_data_completeness": "full_extra",
                 "_lite_sources":      sources,
             }
             n_ok += 1
+            if full_fund: n_full += 1
         except Exception as e:
             n_skip += 1
             if n_skip < 5:
-                print(f"  lite-aug {t}: {type(e).__name__}: {str(e)[:80]}")
+                print(f"  full-enrich {t}: {type(e).__name__}: {str(e)[:80]}")
 
-    print(f"  lite-universe: scored {n_ok}/{len(extras)} extras ({n_skip} skipped)")
+    print(f"  full-enrichment: scored {n_ok}/{len(extras)} extras ({n_full} with full fundamentals, {n_skip} skipped)")
 
 
 if __name__ == "__main__":

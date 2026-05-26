@@ -1497,8 +1497,27 @@ def run_daily_scan(force_fresh: bool = False):
         _earnings_in_qualified = [t for t in qualified if t in _earnings_guaranteed]
         # PEAD-window guarantee — post-report PEAD candidates
         _pead_in_qualified = [t for t in qualified if t in _pead_guaranteed]
+
+        # 2026-05-22 · Tier-2/3/4 curated-source guarantees · fixes the
+        # "0 of 79 IPOs scored" problem flagged in 2026-05-21 scan output.
+        # Without these guarantees, SP500's 474 names + earnings 54 saturate the
+        # 500-slot cap and IPO/screener/insider/etc. compete for ~zero slots.
+        # Now: guarantee every curated SMALL-tier source ticker (IPO, PEAD list,
+        # insider cluster, congressional, 200d new-high/low, crypto-adjacent).
+        # SKIPPED here: ETF holdings (660), screener momentum (200) — too wide,
+        # let them compete on prescore. Net new guaranteed: ~188 today.
+        _curated_sources = {
+            'recent_ipo', 'post_earnings_mover',
+            'insider_cluster', 'congressional',
+            'signal_200d_new_hi', 'signal_200d_new_lo',
+            'crypto_adjacent',
+        }
+        _curated_qualified = [t for t in qualified
+                              if ticker_sources.get(t) in _curated_sources]
+
         _guaranteed = (set(_zr1_qualified) | set(_sp500_in_qualified)
-                       | set(_earnings_in_qualified) | set(_pead_in_qualified))
+                       | set(_earnings_in_qualified) | set(_pead_in_qualified)
+                       | set(_curated_qualified))
         _non_guaranteed_sorted = sorted(
             [(t, s) for t, s in _prescores.items() if t not in _guaranteed],
             key=lambda x: x[1], reverse=True
@@ -1510,7 +1529,8 @@ def run_daily_scan(force_fresh: bool = False):
                  f"({len(_zr1_qualified)} Zacks #1 + "
                  f"{len(_earnings_in_qualified)} pre-earnings + "
                  f"{len(_pead_in_qualified)} PEAD post-report + "
-                 f"{len(_selected) - len(_zr1_qualified) - len(_earnings_in_qualified) - len(_pead_in_qualified)} top-ranked OHLCV)")
+                 f"{len(_curated_qualified)} curated-source guaranteed + "
+                 f"{len(_selected) - len(_guaranteed)} top-ranked OHLCV)")
     else:
         log.info(f"  Pre-screen: {len(qualified)} tickers (under {_max_enrich} threshold, no cut)")
 
@@ -2617,7 +2637,10 @@ def run_daily_scan(force_fresh: bool = False):
     for r in all_results:
         _pr = r.get("price", 0) or 0
         if 5 < _pr < 100:
-            r["score"] = (r.get("score") or 0) + 3
+            # 2026-05-25 fix: clamp to 100. Without this, a score-97 ticker
+            # bumped to 100 by this bonus + then bumped again by sector_rotation
+            # below would land at 103 (IONQ root cause).
+            r["score"] = max(0, min(100, (r.get("score") or 0) + 3))
             r["_affordable_bonus"] = True
             _affordable_boosted += 1
     if _affordable_boosted:
@@ -2637,7 +2660,8 @@ def run_daily_scan(force_fresh: bool = False):
             for r in all_results:
                 _sec_etf = (r.get("technicals") or {}).get("indicators", {}).get("sector_etf", "")
                 if _sec_etf in _leading_sectors:
-                    r["score"] = (r.get("score") or 0) + 3
+                    # 2026-05-25 fix: clamp to 100 (companion to affordable_bonus above)
+                    r["score"] = max(0, min(100, (r.get("score") or 0) + 3))
                     r["_sector_rotation_bonus"] = True
                     _sector_boosted += 1
             if _sector_boosted:
