@@ -7752,6 +7752,96 @@ async def earnings_prediction_log_api(auth: HTTPBasicCredentials = Depends(_chec
 async def options_flow_api():
     return {"total": 0, "results": [], "error": "options data removed; not in EODHD All-In-One"}
 
+
+@app.get("/api/options-flow-accuracy")
+async def options_flow_accuracy_api(window_days: int = 90):
+    """Projection accuracy summary for the daily Options Flow snapshots.
+
+    Reads cache/options_flow_outcomes.jsonl (populated by
+    scripts/options_flow_outcomes.py nightly) and aggregates:
+      - total picks in window
+      - WR (target_hit / resolved)
+      - PF (sum of winners / sum of losers, absolute realized returns)
+      - per-status breakdown (STRONG / MODERATE / WEAK)
+      - avg MFE / MAE
+      - target_hit rate vs expired vs stop_hit
+    """
+    hist_path = BASE_DIR / "cache" / "options_flow_history.jsonl"
+    out_path = BASE_DIR / "cache" / "options_flow_outcomes.jsonl"
+    history_total = 0
+    if hist_path.exists():
+        history_total = sum(1 for _ in hist_path.read_text().splitlines() if _.strip())
+    if not out_path.exists():
+        return {
+            "window_days": window_days,
+            "history_total": history_total,
+            "resolved": 0,
+            "message": "no resolved outcomes yet — run scripts/options_flow_outcomes.py "
+                       "(needs ≥7 days of history before any pick resolves)"
+        }
+    from datetime import datetime, timedelta
+    cutoff = (datetime.now() - timedelta(days=window_days)).strftime("%Y-%m-%d")
+    rows = []
+    for line in out_path.read_text().splitlines():
+        if not line.strip(): continue
+        try:
+            r = json.loads(line)
+            if (r.get("snap_date") or "") < cutoff: continue
+            rows.append(r)
+        except Exception:
+            continue
+    if not rows:
+        return {
+            "window_days": window_days,
+            "history_total": history_total,
+            "resolved": 0,
+            "message": f"no resolved outcomes in last {window_days} days"
+        }
+    # Aggregates
+    resolved = [r for r in rows if r.get("outcome") in ("target_hit", "stop_hit", "expired")]
+    open_n = sum(1 for r in rows if r.get("outcome") == "open")
+    target_hit = sum(1 for r in resolved if r.get("outcome") == "target_hit")
+    stop_hit = sum(1 for r in resolved if r.get("outcome") == "stop_hit")
+    expired = sum(1 for r in resolved if r.get("outcome") == "expired")
+    wins = [r.get("realized_return_pct") for r in resolved
+            if r.get("outcome") == "target_hit" and isinstance(r.get("realized_return_pct"), (int, float))]
+    losses = [r.get("realized_return_pct") for r in resolved
+              if r.get("outcome") == "stop_hit" and isinstance(r.get("realized_return_pct"), (int, float))]
+    wr = (target_hit / len(resolved) * 100) if resolved else None
+    total_win_pct = sum(w for w in wins if w > 0)
+    total_loss_pct = abs(sum(l for l in losses if l < 0))
+    pf = (total_win_pct / total_loss_pct) if total_loss_pct > 0 else None
+    avg_mfe = sum(r.get("mfe_pct") or 0 for r in resolved) / len(resolved) if resolved else 0
+    avg_mae = sum(r.get("mae_pct") or 0 for r in resolved) / len(resolved) if resolved else 0
+    avg_realized = sum(r.get("realized_return_pct") or 0 for r in resolved) / len(resolved) if resolved else 0
+    # Per-status breakdown
+    from collections import defaultdict
+    per_status = defaultdict(lambda: {"n": 0, "wins": 0, "expired": 0, "stops": 0})
+    for r in resolved:
+        st = r.get("status") or "UNKNOWN"
+        per_status[st]["n"] += 1
+        if r.get("outcome") == "target_hit":  per_status[st]["wins"] += 1
+        elif r.get("outcome") == "stop_hit":  per_status[st]["stops"] += 1
+        elif r.get("outcome") == "expired":   per_status[st]["expired"] += 1
+    # Most recent resolved picks (table view)
+    recent = sorted(resolved, key=lambda r: r.get("snap_date") or "", reverse=True)[:10]
+    return {
+        "window_days": window_days,
+        "history_total": history_total,
+        "open_count": open_n,
+        "resolved": len(resolved),
+        "target_hit": target_hit,
+        "stop_hit": stop_hit,
+        "expired": expired,
+        "win_rate_pct": round(wr, 1) if wr is not None else None,
+        "profit_factor": round(pf, 2) if pf is not None else None,
+        "avg_realized_return_pct": round(avg_realized, 2),
+        "avg_mfe_pct": round(avg_mfe, 2),
+        "avg_mae_pct": round(avg_mae, 2),
+        "per_status": dict(per_status),
+        "recent_resolved": recent,
+    }
+
 # -- Individual scanner APIs --
 @app.get("/api/insider-clusters")
 async def insider_clusters_api():

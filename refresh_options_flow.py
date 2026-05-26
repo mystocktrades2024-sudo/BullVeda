@@ -287,6 +287,36 @@ def main(force: bool = False) -> int:
     tmp.write_text(json.dumps(payload, default=str))
     tmp.replace(out_path)  # atomic on POSIX
 
+    # 2026-05-25 · history snapshot logger — append one line per pick to
+    # cache/options_flow_history.jsonl for later outcome tracking + accuracy
+    # measurement. Compact schema; the outcome tracker fills in realized
+    # results 7+ days later.
+    try:
+        hist_path = BASE / "cache" / "options_flow_history.jsonl"
+        hist_path.parent.mkdir(parents=True, exist_ok=True)
+        snap_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with open(hist_path, "a") as hf:
+            for pick in top30:
+                row = {
+                    "snap_date":   snap_date,
+                    "snap_ts":     payload["refreshed_at"],
+                    "ticker":      pick.get("ticker"),
+                    "price":       pick.get("price"),
+                    "status":      pick.get("status"),
+                    "put_call_ratio": pick.get("put_call_ratio"),
+                    "uoa_calls":   pick.get("uoa_calls"),
+                    "iv_percentile": pick.get("iv_percentile"),
+                    "max_pain":    pick.get("max_pain"),
+                    "stop":        pick.get("stop"),
+                    "target":      pick.get("target"),
+                    "rr":          pick.get("rr"),
+                    "sector":      pick.get("sector"),
+                }
+                hf.write(json.dumps(row, default=str) + "\n")
+        log.info(f"Logged {len(top30)} snapshots to options_flow_history.jsonl")
+    except Exception as e:
+        log.warning(f"options_flow history-log failed (non-fatal): {e}")
+
     strong = sum(1 for x in top30 if x.get("status") == "STRONG")
     mod    = sum(1 for x in top30 if x.get("status") == "MODERATE")
     log.info(f"Wrote {out_path.name}: {len(top30)} candidates "
