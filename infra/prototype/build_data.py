@@ -191,12 +191,29 @@ def _fetch_fundamentals_enrichment(tickers: list) -> dict:
     """
     try:
         import eodhd_client as ec
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         result = {}
-        # 2026-05-25: cap raised to 300 — covers all_scored + killed for the
-        # full detail-page experience. EODHD All-In-One has 1000/min headroom.
-        for sym in tickers[:300]:  # bumped from 100
+        # 2026-05-25: cap raised to 1000 — covers full all_scored + killed
+        # universe (~700 unique symbols). EODHD All-In-One has 1000/min
+        # headroom. Parallelized with 12 workers (rate limiter at 17/sec
+        # auto-throttles). Cold path ~70s, warm cache hits ~5s total.
+        syms_to_fetch = list(tickers[:1000])
+        def _fetch(sym):
             try:
-                f = ec.fundamentals(sym)
+                return sym, ec.fundamentals(sym)
+            except Exception:
+                return sym, None
+        funds_raw = {}
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            for fut in as_completed([pool.submit(_fetch, s) for s in syms_to_fetch]):
+                try:
+                    s, f = fut.result(timeout=30)
+                    funds_raw[s] = f
+                except Exception:
+                    pass
+        for sym in syms_to_fetch:
+            f = funds_raw.get(sym)
+            try:
                 if not f:
                     continue
                 gen  = f.get('General', {})
