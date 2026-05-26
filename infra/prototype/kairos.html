@@ -11031,9 +11031,15 @@ window._FIELD_CLAMPS = {
   score:         [0, 100],
   bap_score:     [0, 100],
 };
+// 2026-05-25 perf: WeakMap cache so we don't re-create a Proxy on every
+// tab switch (QuantDetail.render is called for each of 14 sub-tabs).
+// WeakMap auto-GCs entries when the underlying ticker object is freed.
+window._wrapTCache = window._wrapTCache || new WeakMap();
 window._wrapT = function(t) {
   if (!t || typeof t !== 'object' || t.__fldWrapped) return t;
-  return new Proxy(t, {
+  const cached = window._wrapTCache.get(t);
+  if (cached) return cached;
+  const proxy = new Proxy(t, {
     get(target, prop, receiver) {
       if (prop === '__fldWrapped') return true;
       let value;
@@ -11057,6 +11063,8 @@ window._wrapT = function(t) {
     ownKeys(target)   { return Reflect.ownKeys(target); },
     getOwnPropertyDescriptor(target, prop) { return Reflect.getOwnPropertyDescriptor(target, prop); },
   });
+  window._wrapTCache.set(t, proxy);
+  return proxy;
 };
 
 const _fmt = (v, d=2) => v == null ? '—' : (typeof v === 'number' ? v.toFixed(d) : String(v));

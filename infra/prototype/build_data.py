@@ -4435,14 +4435,46 @@ def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> Non
         print("  lite-aug: eodhd_client not importable — skipping OHLCV")
         return
 
+    # 2026-05-25 perf: parallelize the 4 EODHD calls per ticker × 388 tickers
+    # via ThreadPoolExecutor. eodhd_client._RateLimiter is thread-safe and
+    # auto-throttles at 17 req/sec. With 12 workers, cold-path drops from
+    # ~5min (sequential 388×4×~0.4s) to ~50s. Warm cache hits are < 5s total.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _fetch_one(t: str):
+        """Pull all 4 EODHD endpoints for a single ticker; return raw dict."""
+        out = {"ticker": t, "bars": None, "fund": None, "news": None, "insider": None}
+        try:    out["bars"]    = _eod.eod(t, from_date=from_d, to_date=to_d, period="d") or []
+        except Exception: pass
+        try:    out["fund"]    = _eod.fundamentals(t)
+        except Exception: pass
+        try:    out["news"]    = _eod.news(t, limit=10) or []
+        except Exception: pass
+        try:    out["insider"] = _eod.insider_transactions(t) or []
+        except Exception: pass
+        return out
+
+    print(f"  full-enrichment: dispatching {len(extras)} tickers × 4 EODHD endpoints across 12 workers...")
+    raw_fetched: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        futures = {pool.submit(_fetch_one, t): t for t in extras.keys()}
+        for fut in as_completed(futures):
+            try:
+                res = fut.result(timeout=30)
+                raw_fetched[res["ticker"]] = res
+            except Exception as e:
+                _t = futures[fut]
+                raw_fetched[_t] = {"ticker": _t, "bars": [], "fund": None, "news": [], "insider": [], "_error": str(e)[:80]}
+
+    # Build the rich row for each ticker — pure CPU work, no network
     n_ok, n_skip, n_full = 0, 0, 0
     for t, sources in extras.items():
+        fetched = raw_fetched.get(t) or {}
+        bars = fetched.get("bars") or []
+        if not bars or len(bars) < 5:
+            n_skip += 1
+            continue
         try:
-            bars = _eod.eod(t, from_date=from_d, to_date=to_d, period="d") or []
-            if not bars or len(bars) < 5:
-                n_skip += 1
-                continue
-
             # Normalize to compact bar shape {d,o,h,l,c,v} matching main rows
             ohlcv = []
             for bar in bars[-90:]:
@@ -4462,25 +4494,17 @@ def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> Non
             technicals = (fund.get("Technicals") or {}) if isinstance(fund, dict) else {}
             valuation  = (fund.get("Valuation") or {})  if isinstance(fund, dict) else {}
 
-            # bulk_fundamentals returns a thin payload — pull the full per-ticker
-            # fundamentals doc (24h cached) so we get AnalystRatings, full Technicals,
-            # Earnings, Financials, Holders. This is the bulk of the "full enrichment"
-            # cost: ~388 cache-misses on first run, near-free on subsequent runs.
-            full_fund = None
-            try:
-                full_fund = _eod.fundamentals(t)
-                if isinstance(full_fund, dict):
-                    analyst = full_fund.get("AnalystRatings") or {}
-                    earnings_ann = full_fund.get("Earnings") or {}
-                    # Merge — full fundamentals trumps bulk where available
-                    if not general    and full_fund.get("General"):    general    = full_fund["General"]
-                    if not highlights and full_fund.get("Highlights"): highlights = full_fund["Highlights"]
-                    if not technicals and full_fund.get("Technicals"): technicals = full_fund["Technicals"]
-                    if not valuation  and full_fund.get("Valuation"):  valuation  = full_fund["Valuation"]
-                else:
-                    analyst, earnings_ann = {}, {}
-            except Exception:
-                analyst, earnings_ann = {}, {}
+            # Per-ticker fundamentals (already fetched in parallel) — extract only
+            # the slices the UI reads. NOT stored as `eodhd_fundamentals` raw.
+            full_fund    = fetched.get("fund")
+            analyst, shares_stats = {}, {}
+            if isinstance(full_fund, dict):
+                analyst      = full_fund.get("AnalystRatings") or {}
+                shares_stats = full_fund.get("SharesStats") or {}
+                if not general    and full_fund.get("General"):    general    = full_fund["General"]
+                if not highlights and full_fund.get("Highlights"): highlights = full_fund["Highlights"]
+                if not technicals and full_fund.get("Technicals"): technicals = full_fund["Technicals"]
+                if not valuation  and full_fund.get("Valuation"):  valuation  = full_fund["Valuation"]
 
             last_close = (bars[-1] or {}).get("close") if bars else None
 
@@ -4492,23 +4516,28 @@ def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> Non
                 for b in ohlcv if b.get("d") and b.get("c") is not None
             ]
 
-            # Per-ticker news + sentiment (4h cached)
+            # News + sentiment (already fetched in parallel) — strip article content
             news_articles, news_sent = [], None
-            try:
-                _news = _eod.news(t, limit=20) or []
-                news_articles = _news if isinstance(_news, list) else []
-                # Average sentiment score across pulled articles (if EODHD attached one)
+            _news = fetched.get("news") or []
+            if isinstance(_news, list):
+                for _a in _news[:10]:
+                    if not isinstance(_a, dict): continue
+                    news_articles.append({
+                        "title":     _a.get("title"),
+                        "date":      _a.get("date"),
+                        "link":      _a.get("link"),
+                        "sentiment": _a.get("sentiment"),
+                        "symbols":   _a.get("symbols"),
+                    })
                 _scores = [a.get("sentiment", {}).get("polarity") for a in news_articles
-                           if isinstance(a, dict) and isinstance(a.get("sentiment"), dict)]
+                           if isinstance(a.get("sentiment"), dict)]
                 _scores = [s for s in _scores if isinstance(s, (int, float))]
                 if _scores: news_sent = sum(_scores) / len(_scores)
-            except Exception:
-                pass
 
-            # Insider transactions (24h cached) — aggregate to {buys, sells, net_value}
+            # Insider transactions (already fetched in parallel) — aggregate
             insider_agg = {}
-            try:
-                _ins = _eod.insider_transactions(t) or []
+            _ins = fetched.get("insider") or []
+            if isinstance(_ins, list) and _ins:
                 buys = sum(1 for r in _ins if isinstance(r, dict) and (r.get("transactionCode") in ("P", "A") or (r.get("transactionAcquiredDisposedCode") == "A")))
                 sells = sum(1 for r in _ins if isinstance(r, dict) and (r.get("transactionCode") in ("S", "D") or (r.get("transactionAcquiredDisposedCode") == "D")))
                 net_val = 0.0
@@ -4518,8 +4547,6 @@ def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> Non
                     if r.get("transactionAcquiredDisposedCode") == "A": net_val += val
                     elif r.get("transactionAcquiredDisposedCode") == "D": net_val -= val
                 insider_agg = {"buys": buys, "sells": sells, "net_value": net_val, "n": len(_ins)}
-            except Exception:
-                pass
 
             # Analyst consensus from full fundamentals
             a_target = (analyst.get("TargetPrice") if isinstance(analyst, dict) else None)
@@ -4575,28 +4602,47 @@ def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> Non
                     "multi_tf":        {},
                     "synth":           True,  # zones not detected — bars are real
                 },
+                # fund_real — lean schema matching main-scan tickers + the 22
+                # fields the Value tab actually reads. NO bulky eodhd_fundamentals
+                # blob (was adding 50MB+ to tickers.json — wasted bytes since UI
+                # only reads fund_real.*, fund_details.*, institutional.*).
                 "fund_real":        {
-                    "name":       (general.get("Name") if isinstance(general, dict) else None) or t,
-                    "sector":     general.get("Sector") if isinstance(general, dict) else None,
-                    "industry":   general.get("Industry") if isinstance(general, dict) else None,
-                    "exchange":   general.get("Exchange") if isinstance(general, dict) else None,
-                    "country":    general.get("Country") if isinstance(general, dict) else None,
-                    "market_cap": (highlights.get("MarketCapitalization") if isinstance(highlights, dict) else None),
-                    "pe":         (highlights.get("PERatio") if isinstance(highlights, dict) else None),
-                    "eps":        (highlights.get("EarningsShare") if isinstance(highlights, dict) else None),
-                    "rev_growth_pct":   (highlights.get("QuarterlyRevenueGrowthYOY") if isinstance(highlights, dict) else None),
-                    "profit_margin_pct":(highlights.get("ProfitMargin") if isinstance(highlights, dict) else None),
+                    "name":               (general.get("Name") if isinstance(general, dict) else None) or t,
+                    "sector":             general.get("Sector") if isinstance(general, dict) else None,
+                    "industry":           general.get("Industry") if isinstance(general, dict) else None,
+                    "exchange":           general.get("Exchange") if isinstance(general, dict) else None,
+                    "country":            general.get("Country") if isinstance(general, dict) else None,
+                    "market_cap":         (highlights.get("MarketCapitalization") if isinstance(highlights, dict) else None),
+                    "beta":               (technicals.get("Beta") if isinstance(technicals, dict) else None),
+                    "pe":                 (highlights.get("PERatio") if isinstance(highlights, dict) else None),
+                    "fwd_pe":             (valuation.get("ForwardPE")   if isinstance(valuation, dict) else None),
+                    "peg":                (highlights.get("PEGRatio")   if isinstance(highlights, dict) else None),
+                    "price_to_sales":     (valuation.get("PriceSalesTTM") if isinstance(valuation, dict) else None),
+                    "price_to_book":      (valuation.get("PriceBookMRQ")  if isinstance(valuation, dict) else None),
+                    "ev_ebitda":          (valuation.get("EnterpriseValueEbitda") if isinstance(valuation, dict) else None),
+                    "eps":                (highlights.get("EarningsShare") if isinstance(highlights, dict) else None),
+                    "rev_growth_pct":     (highlights.get("QuarterlyRevenueGrowthYOY") if isinstance(highlights, dict) else None),
+                    "eps_growth_pct":     (highlights.get("QuarterlyEarningsGrowthYOY") if isinstance(highlights, dict) else None),
+                    "profit_margin_pct":  (highlights.get("ProfitMargin")        if isinstance(highlights, dict) else None),
+                    "net_margin_pct":     (highlights.get("ProfitMargin")        if isinstance(highlights, dict) else None),
+                    "op_margin_pct":      (highlights.get("OperatingMarginTTM")  if isinstance(highlights, dict) else None),
+                    "roe_pct":            (highlights.get("ReturnOnEquityTTM")   if isinstance(highlights, dict) else None),
+                    "roa_pct":            (highlights.get("ReturnOnAssetsTTM")   if isinstance(highlights, dict) else None),
+                    "dividend_yield":     (highlights.get("DividendYield")       if isinstance(highlights, dict) else None),
+                    "annual_dividend":    (highlights.get("DividendShare")       if isinstance(highlights, dict) else None),
+                    "short_pct":          (shares_stats.get("ShortPercentFloat") if isinstance(shares_stats, dict) else None),
+                    "inst_own_pct":       (shares_stats.get("PercentInstitutions") if isinstance(shares_stats, dict) else None),
+                    "insider_own_pct":    (shares_stats.get("PercentInsiders")   if isinstance(shares_stats, dict) else None),
+                    "float_shares":       (shares_stats.get("SharesFloat")       if isinstance(shares_stats, dict) else None),
+                    "shares_out":         (shares_stats.get("SharesOutstanding") if isinstance(shares_stats, dict) else None),
+                    "52w_high":           (technicals.get("52WeekHigh")          if isinstance(technicals, dict) else None),
+                    "52w_low":            (technicals.get("52WeekLow")           if isinstance(technicals, dict) else None),
                 },
-                # Store only the lean fundamentals slices (skip Financials/Holders/Earnings full
-                # statements — they'd bloat tickers.json by ~80MB for 388 extras). The fields the
-                # Value tab needs are already pulled into market_cap/beta/analyst_*/fund_real above.
-                "eodhd_fundamentals": ({
-                    "General":        full_fund.get("General"),
-                    "Highlights":     full_fund.get("Highlights"),
-                    "Valuation":      full_fund.get("Valuation"),
-                    "Technicals":     full_fund.get("Technicals"),
-                    "AnalystRatings": full_fund.get("AnalystRatings"),
-                } if isinstance(full_fund, dict) else None),
+                # institutional namespace — UI reads `institutional.percent_institutions`
+                "institutional":    {
+                    "percent_institutions": (shares_stats.get("PercentInstitutions") if isinstance(shares_stats, dict) else None),
+                    "percent_insiders":     (shares_stats.get("PercentInsiders")     if isinstance(shares_stats, dict) else None),
+                },
                 # Provenance — promoted from lite to full (with caveat that scoring
                 # pipeline didn't run, but raw data fields are populated).
                 "_data_completeness": "full_extra",
