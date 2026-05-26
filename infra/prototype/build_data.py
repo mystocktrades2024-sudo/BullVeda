@@ -4354,6 +4354,70 @@ def main():
     TICKS.write_text(json.dumps(all_rich, default=str, allow_nan=False))
     print(f"wrote {TICKS} (n={len(all_rich)} tickers, {TICKS.stat().st_size:,} bytes)")
 
+    # ─── 2026-05-25 · tickers_lite.json — lazy-load architecture ────────
+    # kairos.html loads the LITE version on page-init (just scanner-table
+    # fields, ~5MB). On detail click it fetches /api/elite/<TKR> to enrich
+    # _tickerMap[sym] with heavy fields (smc_data, news_articles, insider,
+    # ohlcv 90d, fund_real, options_chain, gates_evaluated). The endpoint
+    # has a fast-path that reads from this same tickers.json file in <50ms.
+    # Saves ~28MB initial download + ~25MB browser memory.
+    LITE_FIELDS = {
+        # Identity
+        "ticker", "symbol", "name", "sector", "industry",
+        # Price / market
+        "price", "pct_chg", "day_change_pct", "market_cap", "beta",
+        # Verdict
+        "score", "raw_score", "verdict", "stage", "conviction_tier",
+        "setup_family", "setup_type", "catalyst_tier",
+        # Pillars (one number each — full breakdown lazy-loaded)
+        "rs_rank", "rvol", "rsi", "atr",
+        # Plan summary
+        "rr_ratio", "rr", "entry_low", "entry_high", "stop",
+        "target1", "target2", "t1", "t2", "stop_method",
+        # Mode / horizon
+        "_mode", "_data_completeness", "_lite_sources", "ticker_source",
+        "hold_period_min", "hold_period_max",
+        # Killed / reject
+        "killed", "kill_reason", "reject_reason",
+        # Earnings tile
+        "earn_days", "earnings_date",
+        # Setup family stats (already lean)
+        "_setup_wr", "_setup_wilson_lb", "_setup_n", "_setup_pf",
+        "_setup_avg_r", "_setup_reliability", "_setup_wilson_hi",
+        "_mechanism", "_falsification", "_setup_drift",
+        # ML edge
+        "_ml_p_up", "_ml_edge", "_ml_q50", "_fromMlEdge",
+        # Sentiment summary
+        "news_sentiment_score",
+        # Analyst summary (counts + target only)
+        "analyst_target", "analyst_buy", "analyst_hold", "analyst_sell", "analyst_upside",
+        # Score-mutation flags (UI shows these chips)
+        "_affordable_bonus", "_sector_rotation_bonus",
+        "score_mult_audit", "entry_quality_tilt_audit", "factor_overlay_audit",
+        # Regime context
+        "regime", "regime4",
+        # Audit (lean)
+        "decision_state", "entry_quality",
+        # Provenance
+        "_mode_primary", "_te_decision", "_te_cache_status",
+    }
+
+    def _to_lite(rec: dict) -> dict:
+        out = {k: rec.get(k) for k in LITE_FIELDS if k in rec}
+        # Sparkline — keep just the last 10 bars (closing prices) for the
+        # tile chart. Detail page fetches full 90-bar ohlcv via /api/elite.
+        ohlcv = rec.get("ohlcv") or []
+        if isinstance(ohlcv, list) and ohlcv:
+            out["spark"] = [round(float(b.get("c") or 0), 2)
+                            for b in ohlcv[-10:] if isinstance(b, dict) and b.get("c") is not None]
+        return out
+
+    LITE_PATH = OUT / "tickers_lite.json"
+    lite = {tk: _to_lite(r or {}) for tk, r in all_rich.items()}
+    LITE_PATH.write_text(json.dumps(lite, default=str, allow_nan=False))
+    print(f"wrote {LITE_PATH} (n={len(lite)} tickers, {LITE_PATH.stat().st_size:,} bytes, "
+          f"-{(1 - LITE_PATH.stat().st_size / TICKS.stat().st_size) * 100:.0f}% vs full)")
+
 
 # ════ Lite-universe augmentation · Option B · 2026-05-23 ═════════════════
 def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> None:

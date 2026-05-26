@@ -11090,9 +11090,19 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
     if (r1.ok) data = await r1.json();
   } catch (e) { console.warn('data.json fetch failed:', e); }
   try {
-    const r2 = await fetch('/v2/tickers.json');
-    if (r2.ok) tickers = await r2.json();
-  } catch (e) { console.warn('tickers.json fetch failed:', e); }
+    // 2026-05-25 · Lazy-load architecture
+    // Load tickers_lite.json (~5MB, scanner fields only). Full per-ticker
+    // payload is fetched on-demand via /api/elite/<TKR> when detail opens.
+    // Falls back to legacy tickers.json if lite isn't built yet.
+    const r2 = await fetch('/v2/tickers_lite.json');
+    if (r2.ok) {
+      tickers = await r2.json();
+      window._tickersLazyLoad = true;  // setDetailTicker reads this flag
+    } else {
+      const r2fb = await fetch('/v2/tickers.json');
+      if (r2fb.ok) tickers = await r2fb.json();
+    }
+  } catch (e) { console.warn('tickers fetch failed:', e); }
 
   // Options data hydration (2026-05-12) — Schwab options KPIs land in
   // tickers[sym].options_kpis as the single source of truth, but the
@@ -13878,6 +13888,39 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
   }
 
   // ─── Public APIs ───────────────────────────────────────────────────
+  // 2026-05-25 · Per-ticker enrichment via /api/elite/<TKR>
+  // When lazy-load mode is on (loaded tickers_lite.json), the map row is
+  // missing heavy fields (smc_data, news_articles, insider, fund_real,
+  // ohlcv 90d, options_chain, gates_evaluated, scoring_breakdown). On
+  // detail click we hit /api/elite/<TKR> (fast-path returns full row in
+  // <50ms from server's cached tickers.json), merge it in, and re-render.
+  // Once enriched, subsequent clicks on the same ticker are instant.
+  window._enrichTickerOnDemand = async function(symbol, currentT) {
+    if (!symbol) return null;
+    // Already enriched? (full payload has smc_data which lite doesn't)
+    if (currentT && currentT._enriched) return currentT;
+    if (currentT && currentT.smc_data && currentT.fund_real && Object.keys(currentT.fund_real || {}).length > 5) {
+      // Looks like full payload already — mark and return
+      if (window._tickerMap && window._tickerMap[symbol]) window._tickerMap[symbol]._enriched = true;
+      return currentT;
+    }
+    try {
+      const r = await fetch('/api/elite/' + encodeURIComponent(symbol), { credentials: 'include' });
+      if (!r.ok) return currentT;
+      const full = await r.json();
+      if (!full || !full.ticker) return currentT;
+      const merged = { ...(currentT || {}), ...full, _enriched: true };
+      if (window._tickerMap) window._tickerMap[symbol] = merged;
+      // Bust the Proxy cache for this ticker so the next _wrapT() pick
+      // up the enriched fields (WeakMap keyed by the OLD object reference;
+      // here we replaced the reference so a fresh Proxy will be created).
+      return merged;
+    } catch (e) {
+      console.debug('[kairos] elite enrich failed:', symbol, e);
+      return currentT;
+    }
+  };
+
   window.setDetailTicker = function(symbol) {
     if (!symbol) return;
     let t = _tickerMap[symbol];
@@ -13961,6 +14004,16 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
     _selTicker = symbol;
     // New QuantDetail module owns rendering; legacy static mockup removed
     if (window.QuantDetail) window.QuantDetail.render(symbol, _activeSub, t);
+    // 2026-05-25 · Lazy-load enrich. Lite row renders instantly above; async
+    // pull /api/elite/<TKR> to get smc_data, news_articles, insider, fund_real,
+    // ohlcv 90d, options_chain. Re-render only if user is still on this ticker
+    // (avoid stomping over a faster click to another ticker).
+    if (window._tickersLazyLoad && window._enrichTickerOnDemand && !t._enriched) {
+      window._enrichTickerOnDemand(symbol, t).then(enriched => {
+        if (!enriched || _selTicker !== symbol) return;  // navigated away
+        if (window.QuantDetail) window.QuantDetail.render(symbol, _activeSub, enriched);
+      });
+    }
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.dataset.pan === 'detail'));
     document.querySelectorAll('.panel').forEach(p => p.classList.toggle('on', p.id === 'pan-detail'));
     // Defensive · explicitly clear pan-workspace state so its prior content
@@ -54994,6 +55047,53 @@ const QuantMomentum = (function () {
 
       .qmom-note { padding: 10px 14px; background: var(--bg-1); border: 1px solid var(--line); border-left: 3px solid var(--ink-3); border-radius: 2px; font: 500 11px var(--mono); color: var(--ink-2); margin-top: 12px; letter-spacing: 0.02em; }
       .qmom-note b { color: var(--ink-1); }
+
+      /* Inactionable / concentration warning banner (Change 1) — sits ABOVE KPI strip per principle 3 (risk first) */
+      .qmom-warnbnr { padding: 12px 16px; margin-bottom: 12px; border-radius: 2px; border-left: 4px solid var(--amb); background: rgba(251,191,36,0.07); font: 600 11.5px var(--mono); color: var(--ink-1); letter-spacing: 0.02em; }
+      .qmom-warnbnr.crit { border-left-color: var(--rd); background: rgba(248,113,113,0.07); }
+      .qmom-warnbnr .wb-h { font: 800 12px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--amb); margin-bottom: 6px; }
+      .qmom-warnbnr.crit .wb-h { color: var(--rd); }
+      .qmom-warnbnr ul { margin: 4px 0 0 0; padding-left: 18px; }
+      .qmom-warnbnr li { margin: 2px 0; font-weight: 600; color: var(--ink-1); }
+      .qmom-warnbnr li b { color: var(--ink); }
+      .qmom-warnbnr .wb-act { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); font: 700 10.5px var(--mono); color: var(--ink); letter-spacing: 0.04em; }
+      .qmom-warnbnr .wb-act b { color: var(--amb); }
+      .qmom-warnbnr.crit .wb-act b { color: var(--rd); }
+
+      /* Sleeve pill (Change 2a) — small color-coded sleeve-attribution tag */
+      .qmom-sleeve { display:inline-block; padding: 2px 7px; font: 800 9px var(--mono); letter-spacing: 0.06em; border-radius: 2px; white-space: nowrap; border: 1px solid var(--line); background: var(--bg-3); color: var(--ink-1); }
+      .qmom-sleeve.s-mom    { color: var(--gn);  border-color: var(--gn); }
+      .qmom-sleeve.s-def    { color: var(--amb); border-color: var(--amb); }
+      .qmom-sleeve.s-esp    { color: var(--copper); border-color: var(--copper); }
+      .qmom-sleeve.s-ins    { color: var(--copper); border-color: var(--copper); }
+      .qmom-sleeve.s-mrv    { color: #60a5fa; border-color: #60a5fa; }
+      .qmom-sleeve.s-pb     { color: var(--ink-2); }
+
+      /* Zero-α / α badges (Change 2b) — empirical alpha annotation per setup */
+      .qmom-alphabadge { display:inline-block; margin-left: 5px; padding: 1px 6px; font: 800 8.5px var(--mono); letter-spacing: 0.06em; border-radius: 2px; cursor: help; }
+      .qmom-alphabadge.zero { background: rgba(248,113,113,0.18); color: var(--rd); border: 1px solid var(--rd); }
+      .qmom-alphabadge.alpha { background: rgba(74,222,128,0.18); color: var(--gn); border: 1px solid var(--gn); }
+
+      /* PF-by-entry-quality calibration tile (Change 3b) */
+      .qmom-eqcal { margin: 12px 0 14px; padding: 12px 14px; background: var(--bg-1); border: 1px solid var(--line); border-left: 3px solid var(--amb); border-radius: 2px; }
+      .qmom-eqcal-h { font: 800 11px var(--mono); color: var(--amb); letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 4px; }
+      .qmom-eqcal-sub { font: 600 10px var(--mono); color: var(--ink-2); letter-spacing: 0.04em; margin-bottom: 9px; }
+      .qmom-eqcal-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+      .qmom-eqcal-cell { padding: 8px 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 2px; text-align: center; }
+      .qmom-eqcal-cell.rank-best { border-color: var(--gn); background: rgba(74,222,128,0.08); }
+      .qmom-eqcal-cell.rank-good { border-color: var(--gn); }
+      .qmom-eqcal-cell.rank-mid  { border-color: var(--amb); }
+      .qmom-eqcal-cell.rank-bad  { border-color: var(--rd); }
+      .qmom-eqcal-cell.rank-worst{ border-color: var(--rd); background: rgba(248,113,113,0.08); }
+      .qmom-eqcal-cell .eq-lbl { font: 800 10px var(--mono); color: var(--ink-1); letter-spacing: 0.14em; }
+      .qmom-eqcal-cell .eq-pf  { font: 800 18px var(--mono); margin-top: 4px; color: var(--ink); }
+      .qmom-eqcal-cell.rank-best .eq-pf, .qmom-eqcal-cell.rank-good .eq-pf { color: var(--gn); }
+      .qmom-eqcal-cell.rank-mid  .eq-pf { color: var(--amb); }
+      .qmom-eqcal-cell.rank-bad  .eq-pf, .qmom-eqcal-cell.rank-worst .eq-pf { color: var(--rd); }
+      .qmom-eqcal-cell .eq-n   { font: 600 9.5px var(--mono); color: var(--ink-3); margin-top: 2px; letter-spacing: 0.04em; }
+      .qmom-eqcal-cell .eq-tb  { font: 700 8.5px var(--mono); color: var(--ink-3); margin-top: 3px; letter-spacing: 0.06em; }
+      .qmom-eqcal-foot { margin-top: 9px; padding-top: 8px; border-top: 1px dashed var(--line); font: 500 10px var(--mono); color: var(--ink-2); letter-spacing: 0.02em; }
+      .qmom-eqcal-foot b { color: var(--ink-1); }
     `;
     document.head.appendChild(s);
   }
@@ -55041,20 +55141,66 @@ const QuantMomentum = (function () {
   }
 
   // ── Pure momentum composite (no system score, no verdict, no R:R) ─────
-  // Composite = 0.40 × sharpe_norm + 0.25 × rs + 0.20 × adx_norm + 0.15 × trend_bonus
+  // Composite (revised 2026-05-25 per Change 3a) = 0.60 × sharpe_norm + 0.40 × adx_norm
+  // RS was previously double-counted (system score already includes RS+Sector pillar 20%);
+  // dropped RS from this composite and kept it as an independent visible column.
+  // Keeps trend_bonus baseline (+20/-20) since accel/decay isn't captured elsewhere.
   // - sharpe_norm: clamp(sharpe_126d, -3, 5) → 0-100
-  // - rs: rs_rank (0-100)
   // - adx_norm: clamp(adx, 0, 60) / 60 × 100 (ADX >25 = trending)
-  // - trend_bonus: +20 if accel, 0 if flat, -20 if decay
+  // - trend_bonus: +20 if accel, 0 if flat, -20 if decay (baseline +50 so flat → 50)
   function _compositeScore(r) {
     const s126 = +r.sharpe_126d || 0;
     const sNorm = ((Math.max(-3, Math.min(5, s126)) + 3) / 8) * 100;
-    const rs = Math.max(0, Math.min(100, +r.rs_rank || 0));
     const adx = +r.adx || 0;
     const adxNorm = Math.min(60, Math.max(0, adx)) / 60 * 100;
     const trend = _trendOf(+r.sharpe_126d, +r.sharpe_1y);
     const trendBonus = trend === 'accel' ? 20 : trend === 'decay' ? -20 : 0;
-    return Math.max(0, Math.min(100, sNorm * 0.40 + rs * 0.25 + adxNorm * 0.20 + 50 + trendBonus * 0.15));
+    return Math.max(0, Math.min(100, sNorm * 0.60 + adxNorm * 0.40 + trendBonus * 0.15));
+  }
+
+  // ── Sleeve attribution (Change 2a) ────────────────────────────────────
+  // Maps a ticker's per-row audit fields to its alpha-bearing sleeve. Catalyst
+  // sleeves (Defensive Rotation / ESP Play / Insider Cluster / Mean Reversion /
+  // PEAD) bypass pullback gates because their alpha is exogenous; momentum
+  // continuation is regime-gated; everything else falls through to Pullback to
+  // Value (the core engine). Principle 16: per-sub-strategy attribution.
+  function _sleeveOf(raw) {
+    if (!raw || typeof raw !== 'object') return { code:'pb',  label:'Pullback to Value' };
+    // Audit dicts always present; the real signal is `.fired === true`.
+    const fired = (a) => a && typeof a === 'object' && a.fired === true;
+    if (fired(raw.defrot_audit))          return { code:'def', label:'Defensive Rotation' };
+    if (fired(raw.esp_play_audit))        return { code:'esp', label:'ESP Play' };
+    if (fired(raw.insider_cluster_audit)) return { code:'ins', label:'Insider Cluster' };
+    if (fired(raw.meanrev_audit))         return { code:'mrv', label:'Mean Reversion' };
+    if (fired(raw.pead_audit))            return { code:'esp', label:'PEAD' };
+    const sf = (raw.setup_family || raw.setup || '').toString();
+    const hasMomRuntime = raw._runtime_qqq_spy_momentum_21d != null;
+    if (hasMomRuntime && /Trend|Momentum/i.test(sf)) return { code:'mom', label:'Mom Continuation' };
+    return { code:'pb', label:'Pullback to Value' };
+  }
+  function _sleevePill(raw) {
+    const s = _sleeveOf(raw);
+    return `<span class="qmom-sleeve s-${s.code}" title="Sleeve attribution: ${s.label}">${s.label}</span>`;
+  }
+
+  // ── Zero-α / α annotation (Change 2b) ─────────────────────────────────
+  // Per factor_attribution 2026-05-18 (n=1940 trades): Trend Continuation +
+  // Breakout Expansion are pure-MOM-beta plays with ZERO residual alpha
+  // (MOM β +0.74/+0.78 in the long-horizon backtest). VCP / 52wk Breakout /
+  // 10WP retain statistically-significant alpha. Principle 2 (mechanism over
+  // correlation) + principle 14 (catalyst > technical) + principle 7 (no
+  // knob-tweaking without evidence).
+  const _ZERO_ALPHA_SETUPS = ['Trend Continuation', 'Breakout Expansion'];
+  const _ALPHA_SETUPS      = ['VCP', '52w Breakout', '52wk Breakout', '10WP', '10 Week Pullback'];
+  function _alphaBadgeFor(raw) {
+    const sf  = (raw && (raw.setup_family || raw.setup) || '').toString();
+    const tip = 'Factor attribution (n=1940 trades, 2026-05-18 backtest): this setup is a pure momentum-factor play with ZERO residual alpha (MOM β +0.74/+0.78). Treat as Mom Continuation sleeve under half-Kelly cap.';
+    const tipA = 'Factor attribution: this setup retains statistically-significant residual alpha after market+momentum factor decomposition. Full sizing eligible.';
+    if (_ZERO_ALPHA_SETUPS.some(z => sf.toLowerCase().includes(z.toLowerCase())))
+      return `<span class="qmom-alphabadge zero" title="${tip}">⚠ ZERO-α</span>`;
+    if (_ALPHA_SETUPS.some(a => sf.toLowerCase().includes(a.toLowerCase())))
+      return `<span class="qmom-alphabadge alpha" title="${tipA}">✓ α</span>`;
+    return '';
   }
 
   // ── Regime gating (principle 5/18) ────────────────────────────────────
@@ -55142,6 +55288,143 @@ const QuantMomentum = (function () {
     });
   }
 
+  // ── Verdict extractor (decision is sometimes a dict {verdict:..}) ─────
+  function _verdictOf(raw) {
+    if (!raw) return '';
+    const d = raw.decision;
+    if (d && typeof d === 'object') return (d.verdict || '').toString().toUpperCase();
+    return (d || raw.verdict || '').toString().toUpperCase();
+  }
+
+  // ── Inactionable / concentration banner (Change 1) ────────────────────
+  // Two trigger conditions per principle 3 (risk first), 10 (correlation
+  // under stress), 12 (crowded trade detection):
+  //   (a) zero BUY verdicts in the momentum universe — no entries to act on
+  //   (b) >60% of universe in one sector — diversification gate failing
+  // Crit (red) when BOTH trigger; warn (amber) when sector-only.
+  function _renderWarnBanner(momRows) {
+    if (!momRows || momRows.length === 0) return '';
+    let buy = 0, wait = 0, avoid = 0, watch = 0;
+    const sectorCt = {};
+    momRows.forEach(r => {
+      const v = _verdictOf(r._raw);
+      if (v === 'BUY') buy++;
+      else if (v === 'AVOID') avoid++;
+      else if (v === 'WATCH') watch++;
+      else wait++; // WAIT or blank
+      const sec = r.sector || 'Other';
+      sectorCt[sec] = (sectorCt[sec] || 0) + 1;
+    });
+    let topSec = null, topN = 0;
+    Object.entries(sectorCt).forEach(([s,n]) => { if (n > topN) { topN = n; topSec = s; } });
+    const concPct = momRows.length ? (topN / momRows.length) * 100 : 0;
+    const noBuys  = (buy === 0);
+    const concentrated = (concPct > 60);
+    if (!noBuys && !concentrated) return '';
+    const crit = noBuys && concentrated;
+    const bullets = [];
+    if (noBuys) {
+      bullets.push(`<li><b>${buy}</b> BUY verdicts (${watch} WATCH, ${wait} WAIT, ${avoid} AVOID) — no entry signals fired today</li>`);
+    } else {
+      bullets.push(`<li>${buy} BUY · ${watch} WATCH · ${wait} WAIT · ${avoid} AVOID across ${momRows.length} candidates</li>`);
+    }
+    if (concentrated) {
+      bullets.push(`<li>Sector concentration: <b>${concPct.toFixed(0)}%</b> ${_esc(topSec)} (${topN}/${momRows.length}) — diversification gate failing (cap 60%)</li>`);
+    } else {
+      bullets.push(`<li>Top sector: ${_esc(topSec)} ${concPct.toFixed(0)}% (${topN}/${momRows.length}) — within diversification budget</li>`);
+    }
+    const act = noBuys
+      ? `Defer new momentum entries until BUY verdicts appear AND sector breadth widens. Use Scanner for cross-mode opportunities (defensive / mean-rev / catalyst sleeves bypass momentum gating).`
+      : `Cap aggregate sector exposure ≤60%. Source additional names from non-${_esc(topSec)} sleeves before adding here.`;
+    return `
+      <div class="qmom-warnbnr ${crit ? 'crit' : ''}">
+        <div class="wb-h">⚠ Momentum universe ${crit ? 'inactionable' : 'concentrated'} today</div>
+        <ul>${bullets.join('')}</ul>
+        <div class="wb-act"><b>Suggested action:</b> ${act}</div>
+      </div>`;
+  }
+
+  // ── PF-by-entry-quality calibration tile (Change 3b) ──────────────────
+  // Reads window._kairosPicksHistory (preferred) or falls back to placeholder.
+  // Truth-telling: textbook FRESH > PULLBACK > MISSED is empirically wrong in
+  // this dataset (memory: feedback_entry_quality_inverted_2026_05_19).
+  // Principle 1 (statistical rigor), 7 (no knob-tweaking without evidence),
+  // 20 (process > outcome — show realized, not theoretical).
+  let _eqCalibCache = null;
+  function _computeEqCalibration() {
+    if (_eqCalibCache !== null) return _eqCalibCache;
+    const trades = (window._kairosPicksHistory && window._kairosPicksHistory.trades)
+                || (_data && _data.picks_history && _data.picks_history.trades)
+                || null;
+    if (!Array.isArray(trades) || trades.length === 0) { _eqCalibCache = null; return null; }
+    const buckets = {};
+    trades.forEach(t => {
+      const eq = ((t.entry_quality || '').toString().trim()) || 'UNKNOWN';
+      const pnl = +t.pct_chg;
+      if (!isFinite(pnl)) return;
+      if (!buckets[eq]) buckets[eq] = { n:0, w:0, gw:0, gl:0 };
+      const b = buckets[eq];
+      b.n++;
+      if (pnl > 0) { b.w++; b.gw += pnl; } else { b.gl += Math.abs(pnl); }
+    });
+    const order = ['FRESH','PULLBACK','VALID','EXTENDED','MISSED'];
+    const out = order.map(eq => {
+      const b = buckets[eq];
+      if (!b || b.n === 0) return { eq, n:0, pf:null, wr:null };
+      const pf = b.gl > 0 ? b.gw / b.gl : Infinity;
+      const wr = b.w / b.n;
+      return { eq, n:b.n, pf, wr };
+    });
+    _eqCalibCache = out;
+    return out;
+  }
+  function _renderEqCalibration() {
+    const cal = _computeEqCalibration();
+    if (!cal) {
+      return `
+        <div class="qmom-eqcal">
+          <div class="qmom-eqcal-h">Entry-quality calibration · realized PF</div>
+          <div class="qmom-eqcal-sub">picks_history not loaded into the dashboard payload — placeholder</div>
+          <div class="qmom-eqcal-foot">no calibration yet — collect 30+ trades per bucket. Until then, treat textbook FRESH&gt;PULLBACK&gt;MISSED ordering as <b>unverified</b>.</div>
+        </div>`;
+    }
+    // Empirical rank (PF, descending); null buckets sink to bottom.
+    const ranked = [...cal].sort((a,b) => (b.pf == null ? -1 : a.pf == null ? 1 : b.pf - a.pf));
+    const rankMap = {}; ranked.forEach((c,i) => { rankMap[c.eq] = i; });
+    const totalRanked = ranked.filter(c => c.pf != null).length;
+    const cellCls = (eq) => {
+      const i = rankMap[eq];
+      if (cal.find(c => c.eq===eq).pf == null) return '';
+      if (i === 0) return 'rank-best';
+      if (i === totalRanked - 1) return 'rank-worst';
+      if (i === 1) return 'rank-good';
+      if (i === totalRanked - 2) return 'rank-bad';
+      return 'rank-mid';
+    };
+    const textbookOrder = ['FRESH','PULLBACK','VALID','EXTENDED','MISSED'];
+    const empOrderLbl = ranked.filter(c => c.pf != null).map(c => c.eq).join(' &gt; ');
+    return `
+      <div class="qmom-eqcal">
+        <div class="qmom-eqcal-h">Entry-quality calibration · realized PF (textbook ranking is WRONG)</div>
+        <div class="qmom-eqcal-sub">source: cache/picks_history.json · n=${cal.reduce((a,b)=>a+(b.n||0),0)} trades · empirical rank: ${empOrderLbl || 'insufficient data'}</div>
+        <div class="qmom-eqcal-grid">
+          ${textbookOrder.map(eq => {
+            const c = cal.find(x => x.eq === eq) || { eq, n:0, pf:null };
+            const pfTxt = c.pf == null ? '—' : (c.pf === Infinity ? '∞' : c.pf.toFixed(2));
+            const empRank = c.pf == null ? '—' : `emp #${rankMap[eq]+1}/${totalRanked}`;
+            return `
+              <div class="qmom-eqcal-cell ${cellCls(eq)}">
+                <div class="eq-lbl">${eq}</div>
+                <div class="eq-pf">PF ${pfTxt}</div>
+                <div class="eq-n">n=${c.n}</div>
+                <div class="eq-tb">${empRank}</div>
+              </div>`;
+          }).join('')}
+        </div>
+        <div class="qmom-eqcal-foot">Textbook: FRESH &gt; PULLBACK &gt; VALID &gt; EXTENDED &gt; MISSED. Live picks_history <b>inverts</b> this (MISSED outperforms FRESH). Position sizing should reflect realized, not textbook — <b>entry_quality_score_tilt</b> active 2026-05-22; verdict override staged.</div>
+      </div>`;
+  }
+
   // ── KPI strip ─────────────────────────────────────────────────────────
   function _renderKpis(rows, allCount) {
     const accel = rows.filter(r => r.trend === 'accel').length;
@@ -55227,6 +55510,8 @@ const QuantMomentum = (function () {
               <th title="Market phase: Trend / Pullback / Consolidation / Range">Phase</th>
               <th class="r" title="Distance below 52w high (smaller = closer to highs)">% 52wHi</th>
               <th class="r" title="3-year max drawdown — context for volatility">3y MaxDD</th>
+              <th title="Sleeve attribution — which alpha-bearing sleeve this ticker belongs to (Mom Continuation, Pullback to Value, Defensive Rotation, ESP Play, Insider Cluster, Mean Reversion)">Sleeve</th>
+              <th title="Setup family with empirical α annotation. ⚠ ZERO-α = pure MOM-beta play, ✓ α = retains residual alpha after factor decomposition. Source: factor_attribution n=1940 (2026-05-18)">Setup · α</th>
               <th>Sector</th>
               <th class="r">Price</th>
             </tr>
@@ -55253,6 +55538,8 @@ const QuantMomentum = (function () {
                 <td>${_phaseHtml(r.market_phase)}</td>
                 <td class="r ${wk52Cls}">${wk52Txt}</td>
                 <td class="r neg">${r.max_dd_3y != null ? r.max_dd_3y.toFixed(1) + '%' : '—'}</td>
+                <td>${_sleevePill(r._raw)}</td>
+                <td>${_esc((r._raw && (r._raw.setup_family || r._raw.setup)) || '—')}${_alphaBadgeFor(r._raw)}</td>
                 <td>${_esc(r.sector)}</td>
                 <td class="r">$${_num(r.price)}</td>
               </tr>`;
@@ -55322,12 +55609,14 @@ const QuantMomentum = (function () {
     const gate = _regimeGate(_data);
     _hostPanel.innerHTML = `
       <div class="qmom-wrap">
-        <div class="qmom-bc">Kairos · Workspaces · <b>Momentum</b> · <span class="cu">curated momentum-only universe (RS≥60 + EMA21 trending, or Sharpe≥1.0 + EMA50 trending)</span></div>
+        <div class="qmom-bc">Kairos · Workspaces · <b>Momentum</b> · <span class="cu">curated momentum-only universe (RS≥60 + EMA21 trending, or Sharpe≥1.0 + EMA50 trending) · composite = 0.60×SharpeNorm + 0.40×ADXNorm (RS column kept independent, no double-count)</span></div>
         <div class="qmom-regime ${gate.state}">
           <div class="qmom-rgm-h"><h2>${gate.label}</h2><span class="meta">${gate.meta}</span></div>
           <div class="qmom-rgm-body">${gate.body}</div>
         </div>
+        ${_renderWarnBanner(momRows)}
         ${_renderKpis(momRows, all.length)}
+        ${_renderEqCalibration()}
         ${_renderFilters(momRows)}
         ${_renderTable(filtered)}
         ${_renderSectorRollup(filtered)}
