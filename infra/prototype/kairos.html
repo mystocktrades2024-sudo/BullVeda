@@ -14541,25 +14541,129 @@ const V3_WORKSPACES = {
     title: 'Industries',
     sub: 'GICS performance · leaders + laggards',
     col1: { h:'TABLE', meta:'today', body: (d) => v3SectorList(d) },
-    col2: { h:'ROTATION', meta:'10d', body: () => v3GenericList(['Semis → leading','Energy → lagging','Real Estate → flat']) },
+    col2: { h:'ROTATION', meta:'10d trend', body: (d) => {
+      // Wire from data.sector_etf: leading = outperforming SPY, lagging = underperforming
+      const se = (d && d.sector_etf) || {};
+      const rows = Object.entries(se).filter(([k,v]) => k !== 'SPY' && v && typeof v === 'object')
+        .map(([k,v]) => ({k, name: v.sector || k, vs: +v.vs_spy_pct || 0, out: !!v.outperforming}))
+        .sort((a,b) => b.vs - a.vs);
+      if (!rows.length) return v3GenericList(['<i>sector data unavailable</i>']);
+      const top = rows.slice(0, 3).map(r => r.name + ' → leading (' + (r.vs >= 0 ? '+' : '') + r.vs.toFixed(1) + '%)');
+      const bot = rows.slice(-3).reverse().map(r => r.name + ' → lagging (' + r.vs.toFixed(1) + '%)');
+      return v3GenericList([...top, ...bot]);
+    } },
     col3: { h:'PLAN', meta:'allocate', body: () => '<div class="v3-pl">Skew long exposure toward top-2 leaders. Avoid bottom-2.</div>' },
-    col4: { h:'NAMES', meta:'top per', body: () => v3GenericList(['Semis · NVDA · AVGO','Software · MSFT · CRM','Banks · JPM · GS']) },
+    col4: { h:'NAMES', meta:'top per industry', body: (d) => {
+      // Wire from data.industries → industry → tickers[]
+      const inds = (d && d.industries) || [];
+      if (!inds.length) return v3GenericList(['<i>industry data unavailable</i>']);
+      const top = inds.slice(0, 6).map(i => {
+        const tkrs = (i.tickers || []).slice(0, 3).join(' · ');
+        return (i.industry || '—') + ' · ' + (tkrs || '—');
+      });
+      return v3GenericList(top);
+    } },
   },
   market: {
     title: 'Market',
     sub: 'regime · breadth · macro tape',
     col1: { h:'REGIME', meta:'current', body: (d) => v3RegimeStrip(d) },
-    col2: { h:'BREADTH', meta:'%>50d', body: () => v3GenericList(['SPX > 50d: 62%','SPX > 200d: 71%','New highs: 28','New lows: 9']) },
+    col2: { h:'BREADTH', meta:'%>50d', body: (d) => {
+      // Wire from data.market_breadth
+      const mb = (d && d.market_breadth) || {};
+      if (!mb || typeof mb !== 'object' || mb.total == null) return v3GenericList(['<i>breadth data unavailable</i>']);
+      const items = [];
+      if (mb.pct_above_50d != null)  items.push('S&P 500 > 50d: ' + (mb.pct_above_50d * 100).toFixed(0) + '%');
+      if (mb.pct_above_100d != null) items.push('S&P 500 > 100d: ' + (mb.pct_above_100d * 100).toFixed(0) + '%');
+      if (mb.pct_above_200d != null) items.push('S&P 500 > 200d: ' + (mb.pct_above_200d * 100).toFixed(0) + '%');
+      if (mb.new_highs_52w != null)  items.push('New 52w highs: ' + mb.new_highs_52w);
+      if (mb.new_lows_52w != null)   items.push('New 52w lows: ' + mb.new_lows_52w);
+      if (!items.length) items.push('total tickers: ' + (mb.total || '—'));
+      return v3GenericList(items);
+    } },
     col3: { h:'PLAN', meta:'risk-on lane', body: () => '<div class="v3-pl">BAP threshold tracks regime: 65 / 72 / 78 / no longs.</div>' },
-    col4: { h:'MACRO', meta:'feeds', body: () => v3GenericList(['VIX 14.2 · −3.1%','10Y 4.21 +2bp','DXY 102.4 −0.18%']) },
+    col4: { h:'MACRO', meta:'feeds', body: (d) => {
+      // Wire from data.macro_signals + bonds_forex
+      const ms = (d && d.macro_signals) || {};
+      const bf = (d && d.bonds_forex) || {};
+      const items = [];
+      const _q = (obj, key) => { const v = obj[key]; if (!v) return null; return v; };
+      const vix = ms.vix || _q(bf, 'VIX');
+      if (vix && vix.price != null) items.push('VIX ' + (+vix.price).toFixed(2) + (vix.chg5d != null ? ' · ' + (vix.chg5d >= 0 ? '+' : '') + (+vix.chg5d).toFixed(1) + '%' : ''));
+      const tlt = _q(bf, 'TLT');
+      if (tlt && tlt.price != null) items.push('TLT (20y) ' + (+tlt.price).toFixed(2) + ' · ' + ((+tlt.change_p || 0) * 100 >= 0 ? '+' : '') + (((+tlt.change_p || 0) * 100).toFixed(2)) + '%');
+      const dxy = ms.dxy || _q(bf, 'EURUSD.FOREX');
+      if (dxy && dxy.price != null) items.push((ms.dxy ? 'DXY ' : 'EUR/USD ') + (+dxy.price).toFixed(2));
+      const gld = ms.gld || _q(bf, 'GLD');
+      if (gld && gld.price != null) items.push('GLD ' + (+gld.price).toFixed(2));
+      const hyg = ms.hyg;
+      if (hyg && hyg.price != null) items.push('HYG (credit) ' + (+hyg.price).toFixed(2) + ' · trend ' + (hyg.trend || '—'));
+      return items.length ? v3GenericList(items) : v3GenericList(['<i>macro feeds unavailable</i>']);
+    } },
   },
-  macro: { title:'Macro · Events', sub:'FOMC · CPI · jobs report', col1:{h:'CALENDAR',meta:'+14d',body:(d)=>v3CalendarList(d)}, col2:{h:'IMPACT',meta:'tier',body:()=>v3GenericList(['FOMC · high','CPI · high','PPI · mid','Jobless · mid'])}, col3:{h:'PLAN',meta:'pre-event',body:()=>'<div class="v3-pl">Tighten stops 24h before high-impact events. No new entries inside ±4h window.</div>'}, col4:{h:'HISTORY',meta:'prior reactions',body:()=>v3GenericList(['Last FOMC: SPX +0.4%','Last CPI: SPX +1.2%'])} },
-  premarket: { title:'Pre-Market', sub:'4am–9:30am · gappers · catalysts', col1:{h:'GAPPERS',meta:'>3%',body:()=>v3GenericList(['Engine populates here from pre-market scanner'])}, col2:{h:'CATALYSTS',meta:'overnight',body:()=>v3GenericList(['Earnings AMC outliers','Upgrades/downgrades','Sector ETFs'])}, col3:{h:'PLAN',meta:'open',body:()=>'<div class="v3-pl">Gap > +5% on news = momentum-buy candidate. Gap > +5% no news = fade.</div>'}, col4:{h:'TAPE',meta:'feed',body:(d,a)=>v3IntelList(a)} },
-  events: { title:'IPO · Splits', sub:'corporate events · supply changes', col1:{h:'IPOS',meta:'next 30d',body:()=>v3GenericList(['Calendar feed populates here'])}, col2:{h:'SPLITS',meta:'announced',body:()=>v3GenericList(['Stock splits announced'])}, col3:{h:'PLAN',meta:'liquidity',body:()=>'<div class="v3-pl">First 6 weeks post-IPO usually noisy. Wait for 21-day base.</div>'}, col4:{h:'INTEL',meta:'wire',body:(d,a)=>v3IntelList(a)} },
-  themes: { title:'Themes', sub:'AI · energy · biotech · narratives', col1:{h:'ACTIVE',meta:'leaders',body:()=>v3GenericList(['AI infrastructure','Datacenter capex','Energy transition','Obesity meds'])}, col2:{h:'STRENGTH',meta:'RS',body:()=>v3GenericList(['AI Infra: RS 88','Energy: RS 42','Biotech: RS 56'])}, col3:{h:'PLAN',meta:'rotate',body:()=>'<div class="v3-pl">Stay with the leader theme until RS rolls.</div>'}, col4:{h:'NAMES',meta:'per theme',body:()=>v3GenericList(['AI Infra · NVDA · AVGO','Obesity · LLY · NVO'])} },
-  strategies: { title:'Strategies', sub:'setup-family playbooks · WR · PF', col1:{h:'FAMILIES',meta:'active',body:()=>v3GenericList(['Breakout Expansion','Trend Continuation','Impulse Catalyst','Special Situation'])}, col2:{h:'WR',meta:'30d backtest',body:()=>v3GenericList(['Bullflag · 80% WR (backtest)','Pull-21 · 75% WR (backtest)','VCP · 67% WR (backtest)'])}, col3:{h:'PLAN',meta:'pick by regime',body:()=>'<div class="v3-pl">Breakout in risk-on trending. Pullback in risk-on choppy. None in panic.</div>'}, col4:{h:'JOURNAL',meta:'recent',body:()=>v3GenericList(['Reads the trade journal by setup family'])} },
-  leveraged: { title:'Leveraged', sub:'2x · 3x ETFs · risk-managed', col1:{h:'ETFS',meta:'tracked',body:()=>v3GenericList(['TQQQ · 3x QQQ','SOXL · 3x semis','TSLL · 2x TSLA'])}, col2:{h:'RISK',meta:'sizing',body:()=>v3GenericList(['Position halved vs underlying','Decay drag applied','Daily reset modeled'])}, col3:{h:'PLAN',meta:'guardrails',body:()=>'<div class="v3-pl">No leverage in chop or risk-off. Decay eats the premium.</div>'}, col4:{h:'PERF',meta:'30d',body:()=>v3GenericList(['TQQQ trades render from journal'])} },
-  crypto: { title:'Crypto', sub:'BTC · ETH · spot + futures', col1:{h:'TAPE',meta:'majors',body:()=>v3GenericList(['BTC 68,420 · +1.2%','ETH 3,820 · +0.8%','SOL 184 · +2.4%'])}, col2:{h:'STRUCTURE',meta:'levels',body:()=>v3GenericList(['BTC support 64k','ETH resistance 4k','Major break = trend trigger'])}, col3:{h:'PLAN',meta:'regime',body:()=>'<div class="v3-pl">Treat as risk-on proxy. Decouples in panic regimes.</div>'}, col4:{h:'NEWS',meta:'today',body:(d,a)=>v3IntelList(a)} },
+  macro: { title:'Macro · Events', sub:'FOMC · CPI · jobs report', col1:{h:'CALENDAR',meta:'+14d',body:(d)=>v3CalendarList(d)}, col2:{h:'IMPACT',meta:'tier',body:()=>v3GenericList(['FOMC · high','CPI · high','PPI · mid','Jobless · mid'])}, col3:{h:'PLAN',meta:'pre-event',body:()=>'<div class="v3-pl">Tighten stops 24h before high-impact events. No new entries inside ±4h window.</div>'}, col4:{h:'MACRO TAPE',meta:'live',body:(d)=>{
+    // Wire from data.macro_signals
+    const ms = (d && d.macro_signals) || {};
+    const items = [];
+    ['hyg','lqd','dxy','gld','credit'].forEach(k => {
+      const v = ms[k];
+      if (v && v.price != null) items.push(k.toUpperCase() + ' ' + (+v.price).toFixed(2) + ' · trend ' + (v.trend || '—'));
+    });
+    return items.length ? v3GenericList(items) : v3GenericList(['<i>macro signals unavailable</i>']);
+  }} },
+  premarket: { title:'Pre-Market', sub:'4am–9:30am · gappers · catalysts', col1:{h:'GAPPERS',meta:'>3%',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · pre-market scanner feed not yet wired'])}, col2:{h:'CATALYSTS',meta:'overnight',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · Earnings AMC outliers','<span style="color:#fbbf24">⚠ DEMO</span> · Upgrades/downgrades','<span style="color:#fbbf24">⚠ DEMO</span> · Sector ETFs'])}, col3:{h:'PLAN',meta:'open',body:()=>'<div class="v3-pl">Gap > +5% on news = momentum-buy candidate. Gap > +5% no news = fade.</div>'}, col4:{h:'TAPE',meta:'feed',body:(d,a)=>v3IntelList(a)} },
+  events: { title:'IPO · Splits', sub:'corporate events · supply changes', col1:{h:'IPOS',meta:'next 30d',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · IPO calendar feed not yet wired'])}, col2:{h:'SPLITS',meta:'announced',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · Splits announcement feed not yet wired'])}, col3:{h:'PLAN',meta:'liquidity',body:()=>'<div class="v3-pl">First 6 weeks post-IPO usually noisy. Wait for 21-day base.</div>'}, col4:{h:'INTEL',meta:'wire',body:(d,a)=>v3IntelList(a)} },
+  themes: { title:'Themes', sub:'AI · energy · biotech · narratives', col1:{h:'ACTIVE',meta:'leaders',body:(d)=>{
+    // Wire from data.themes (key = theme name, value = ticker list)
+    const th = (d && d.themes) || {};
+    const items = Object.entries(th).filter(([k,v]) => Array.isArray(v) && v.length > 0)
+      .map(([k,v]) => k.replace(/_/g, ' ') + ' · ' + v.length + ' tickers');
+    return items.length ? v3GenericList(items) : v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · theme tagging feed empty']);
+  }}, col2:{h:'STRENGTH',meta:'RS',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · theme-level RS not computed yet'])}, col3:{h:'PLAN',meta:'rotate',body:()=>'<div class="v3-pl">Stay with the leader theme until RS rolls.</div>'}, col4:{h:'NAMES',meta:'per theme',body:(d)=>{
+    const th = (d && d.themes) || {};
+    const items = Object.entries(th).filter(([k,v]) => Array.isArray(v) && v.length > 0).slice(0, 6)
+      .map(([k,v]) => k.replace(/_/g, ' ') + ' · ' + v.slice(0, 4).join(' · '));
+    return items.length ? v3GenericList(items) : v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · no theme assignments']);
+  }} },
+  strategies: { title:'Strategies', sub:'setup-family playbooks · WR · PF', col1:{h:'FAMILIES',meta:'tracked',body:(d)=>{
+    // Wire from data.setup_family_stats keys
+    const sfs = (d && d.setup_family_stats) || {};
+    const items = Object.keys(sfs).slice(0, 8);
+    return items.length ? v3GenericList(items) : v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · setup_family_stats empty']);
+  }}, col2:{h:'EDGE',meta:'live WR · PF · n',body:(d)=>{
+    // Wire from data.setup_family_stats — each has win_rate, profit_factor, trades
+    const sfs = (d && d.setup_family_stats) || {};
+    const items = Object.entries(sfs).slice(0, 8).map(([name, s]) => {
+      const wr = s.win_rate != null ? (s.win_rate * 100).toFixed(0) + '%' : '—';
+      const pf = s.profit_factor != null ? (+s.profit_factor).toFixed(2) : '—';
+      const n  = s.trades != null ? 'n=' + s.trades : '';
+      return name + ' · WR ' + wr + ' · PF ' + pf + ' · ' + n;
+    });
+    return items.length ? v3GenericList(items) : v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · no setup stats']);
+  }}, col3:{h:'PLAN',meta:'pick by regime',body:()=>'<div class="v3-pl">Breakout in risk-on trending. Pullback in risk-on choppy. None in panic.</div>'}, col4:{h:'WILSON',meta:'95% LB',body:(d)=>{
+    // Surface Wilson lower bounds for promotion/kill decisions
+    const sfs = (d && d.setup_family_stats) || {};
+    const items = Object.entries(sfs).slice(0, 8).map(([name, s]) => {
+      const lb = s.wr_low_95 != null ? (s.wr_low_95 * 100).toFixed(0) + '%' : '—';
+      return name + ' · LB ' + lb;
+    });
+    return items.length ? v3GenericList(items) : v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · no Wilson data']);
+  }} },
+  leveraged: { title:'Leveraged', sub:'2x · 3x ETFs · risk-managed', col1:{h:'ETFS',meta:'tracked (static)',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · TQQQ · 3x QQQ','<span style="color:#fbbf24">⚠ DEMO</span> · SOXL · 3x semis','<span style="color:#fbbf24">⚠ DEMO</span> · TSLL · 2x TSLA'])}, col2:{h:'RISK',meta:'sizing rules',body:()=>v3GenericList(['Position halved vs underlying','Decay drag applied','Daily reset modeled'])}, col3:{h:'PLAN',meta:'guardrails',body:()=>'<div class="v3-pl">No leverage in chop or risk-off. Decay eats the premium.</div>'}, col4:{h:'PERF',meta:'30d',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · leveraged ETF perf feed not yet wired'])} },
+  crypto: { title:'Crypto', sub:'BTC · ETH · spot + futures', col1:{h:'TAPE',meta:'top picks',body:(d)=>{
+    // Wire from data.crypto.top_picks
+    const cr = (d && d.crypto) || {};
+    const picks = (cr.top_picks || []).slice(0, 6);
+    if (!picks.length) return v3GenericList(['<i>crypto picks unavailable</i>']);
+    return v3GenericList(picks.map(p => (p.symbol || p.id || '—').toUpperCase() + ' · ' + (p.name || '') + (p.price != null ? ' · $' + (+p.price).toFixed(2) : '') + (p.score != null ? ' · score ' + Math.round(+p.score) : '')));
+  }}, col2:{h:'REGIME',meta:'BTC',body:(d)=>{
+    const cr = (d && d.crypto) || {};
+    const items = [];
+    if (cr.btc_regime) items.push('BTC regime · ' + cr.btc_regime);
+    if (cr.btc_dominance != null) items.push('BTC dominance · ' + (+cr.btc_dominance).toFixed(1) + '%');
+    if (cr.btc_price != null) items.push('BTC ' + (+cr.btc_price).toFixed(0));
+    return items.length ? v3GenericList(items) : v3GenericList(['<i>BTC regime unavailable</i>']);
+  }}, col3:{h:'PLAN',meta:'regime',body:()=>'<div class="v3-pl">Treat as risk-on proxy. Decouples in panic regimes.</div>'}, col4:{h:'NEWS',meta:'today',body:(d,a)=>v3IntelList(a)} },
   playbook: { title:'Playbook', sub:'system rulebook · 5 pillars · 4 regimes · 20 principles', custom:'quantPlaybook', col1:{h:'RULES',meta:'live',body:()=>v3GenericList(['§01 Regime gate','§02 Wilson kill','§03 Event risk','§04 Sizing'])}, col2:{h:'THRESHOLDS',meta:'config',body:()=>v3GenericList(['BAP floor by regime','R:R ≥ 3.0','Earnings ≥ 14d clear'])}, col3:{h:'PLAN',meta:'when to override',body:()=>'<div class="v3-pl">Override flag + audit note. Each override is logged.</div>'}, col4:{h:'CHANGES',meta:'recent',body:()=>v3GenericList(['CHANGELOG renders from docs/changelog.md'])} },
   accuracy: { title:'Accuracy', sub:'forecast vs realized · calibration · drift', custom:'quantAccuracy', col1:{h:'CALIBRATION',meta:'30d (illustrative)',body:()=>v3GenericList(['ex: Predicted PF: 1.8 · Realized: 1.65','ex: Predicted WR: 62% · Realized: 58%'])}, col2:{h:'BUCKETS',meta:'score band',body:()=>v3GenericList(['BAP 80–90: 71% WR','BAP 70–80: 54% WR','BAP 60–70: 38% WR'])}, col3:{h:'PLAN',meta:'recalibrate',body:()=>'<div class="v3-pl">Recalibrate weekly. Drift detection runs nightly.</div>'}, col4:{h:'AUDIT',meta:'drift',body:()=>v3GenericList(['Drift-check logs here'])} },
   fields: { title:'Fields · Schema', sub:'ticker_snapshots · schema explorer · provenance', custom:'quantFields', col1:{h:'TIER 0',meta:'core 12',body:()=>v3GenericList(['ticker · price · score · verdict · setup','stop · target1 · target2 · rvol · rsi · adx'])}, col2:{h:'TIER 1',meta:'48 fields',body:()=>v3GenericList(['Full pillars · catalyst · entry quality','RS rank · sector · earnings · IV rank'])}, col3:{h:'TIER 2',meta:'120 fields',body:()=>'<div class="v3-pl">Every field captured per scan, append-only to ticker_snapshots SQLite.</div>'}, col4:{h:'AUDIT',meta:'today',body:()=>v3GenericList(['Today\'s snapshot count: N · last scan T'])} },
