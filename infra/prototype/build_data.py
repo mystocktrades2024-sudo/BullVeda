@@ -192,7 +192,9 @@ def _fetch_fundamentals_enrichment(tickers: list) -> dict:
     try:
         import eodhd_client as ec
         result = {}
-        for sym in tickers[:100]:  # bumped from 30 — covers full v2 dashboard
+        # 2026-05-25: cap raised to 300 — covers all_scored + killed for the
+        # full detail-page experience. EODHD All-In-One has 1000/min headroom.
+        for sym in tickers[:300]:  # bumped from 100
             try:
                 f = ec.fundamentals(sym)
                 if not f:
@@ -227,6 +229,28 @@ def _fetch_fundamentals_enrichment(tickers: list) -> dict:
                 # Segments (revenue by business unit) — not always present in EODHD; try ESG/Other keys
                 # In EODHD, segment data is in 'SegmentList' or under operational metrics; varies by ticker
                 segments = []
+                # 2026-05-25 · Extract 5 additional sections (Earnings.History/Trend,
+                # Holders.Institutions, InsiderTransactions, Cash_Flow_yearly) for
+                # main-scan tickers so the dashboard can wire Earnings §2/§3/§6,
+                # Intel §1/§2, Value §6 without re-fetching.
+                _eh = (f.get('Earnings') or {}).get('History') or {}
+                earnings_history = sorted(
+                    [{'date': k, **(v or {})} for k, v in _eh.items() if isinstance(v, dict)],
+                    key=lambda x: x.get('date') or '', reverse=True
+                )[:8]
+                _et = (f.get('Earnings') or {}).get('Trend') or {}
+                _et_sorted = sorted(
+                    [{'date': k, **(v or {})} for k, v in _et.items() if isinstance(v, dict)],
+                    key=lambda x: x.get('date') or ''
+                )
+                earnings_trend = _et_sorted[0] if _et_sorted else None
+                holders_institutions = list((f.get('Holders') or {}).get('Institutions', {}).values())[:10]
+                insider_transactions = list((f.get('InsiderTransactions') or {}).values())[:10]
+                _cf_yr = (f.get('Financials') or {}).get('Cash_Flow', {}).get('yearly') or {}
+                cash_flow_yearly = sorted(
+                    [{'date': k, **(v or {})} for k, v in _cf_yr.items() if isinstance(v, dict)],
+                    key=lambda x: x.get('date') or '', reverse=True
+                )[:4]
                 # Attempt parse — EODHD doesn't expose this consistently, so we leave empty if not found
                 result[sym] = {
                     'name':          gen.get('Name'),
@@ -255,6 +279,12 @@ def _fetch_fundamentals_enrichment(tickers: list) -> dict:
                         'shares_outstanding': ss.get('SharesOutstanding'),
                         'shares_outstanding_chg_pct': ss.get('SharesOutstandingPctChange'),
                     },
+                    # 2026-05-25 · 5 new sections for Earnings/Intel/Value wiring
+                    'earnings_history':     earnings_history,
+                    'earnings_trend':       earnings_trend,
+                    'holders_institutions': holders_institutions,
+                    'insider_transactions': insider_transactions,
+                    'cash_flow_yearly':     cash_flow_yearly,
                 }
             except Exception:
                 pass
@@ -2044,6 +2074,12 @@ def rich_row(r: dict, b: dict = None) -> dict:
         "monte_carlo":  _compute_monte_carlo_safe(r),
         # Extended fundamentals (FCF, capex, segments, geo) for deep-dive panel
         "eodhd_fund_extras": r.get("eodhd_fund_extras") or {},
+        # 2026-05-25 · 5 new EODHD sections for Earnings/Intel/Value wiring
+        "earnings_history":     r.get("earnings_history") or [],
+        "earnings_trend":       r.get("earnings_trend"),
+        "holders_institutions": r.get("holders_institutions") or [],
+        "insider_transactions": r.get("insider_transactions") or [],
+        "cash_flow_yearly":     r.get("cash_flow_yearly") or [],
 
         # Risk / sizing
         "kelly_size":   r.get("kelly_size") or {},
@@ -2871,8 +2907,12 @@ def main():
         _SYSTEM_GATE_REASON = ""
 
     # Enrich with EODHD data (Beta, MarketCap, Float, 52wk, Sentiment, Events)
+    # 2026-05-25: also include all_scored + killed so NVDA-class tickers (not in
+    # BUY/WATCH/SHORT/MT but in the broader pool) get fundamentals + earnings
+    # history / insider transactions / 13F holders for the detail page.
     all_candidate_rows = (b.get("buy_candidates") or []) + (b.get("watch_list") or []) + \
-                         (b.get("near_short_blocked") or []) + (b.get("medium_term_picks") or [])
+                         (b.get("near_short_blocked") or []) + (b.get("medium_term_picks") or []) + \
+                         (b.get("all_scored") or []) + (b.get("killed") or [])
     all_symbols = list({r.get("ticker") for r in all_candidate_rows if r.get("ticker")})
     print(f"Fetching EODHD enrichment for {len(all_symbols)} symbols...")
     fund_enrichment = _fetch_fundamentals_enrichment(all_symbols)
@@ -2926,6 +2966,11 @@ def main():
             # Extended fundamentals deep-dive payload
             if fe.get("eodhd_fund_extras"):
                 r["eodhd_fund_extras"] = fe["eodhd_fund_extras"]
+            # 2026-05-25 · Patch 5 new EODHD sections through to rich_row()
+            for _k in ("earnings_history", "earnings_trend", "holders_institutions",
+                       "insider_transactions", "cash_flow_yearly"):
+                if fe.get(_k):
+                    r[_k] = fe[_k]
         if sym in sentiment_data:
             # _fetch_sentiment now returns a rich summary: latest, avg_7d, avg_30d, trend, history
             r["eodhd_sentiment"] = sentiment_data[sym]
@@ -4707,6 +4752,32 @@ def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> Non
                     "percent_institutions": (shares_stats.get("PercentInstitutions") if isinstance(shares_stats, dict) else None),
                     "percent_insiders":     (shares_stats.get("PercentInsiders")     if isinstance(shares_stats, dict) else None),
                 },
+                # ── 2026-05-25 · 5 additional EODHD sections (extracted from
+                # full_fund) to enable wiring of Earnings/Intel/Value sections ──
+                # earnings_history: last 8 quarters from Earnings.History
+                "earnings_history": ((lambda h: sorted(
+                    [{"date": k, **(v or {})} for k, v in (h or {}).items() if isinstance(v, dict)],
+                    key=lambda x: x.get("date") or "",
+                    reverse=True
+                )[:8]) ((full_fund or {}).get("Earnings", {}).get("History") if isinstance(full_fund, dict) else None) if isinstance(full_fund, dict) else []),
+                # earnings_trend: latest period — has epsRevisionsUpLast7days/30days, eps trend snapshots
+                "earnings_trend": ((lambda tr: (sorted(
+                    [{"date": k, **(v or {})} for k, v in (tr or {}).items() if isinstance(v, dict)],
+                    key=lambda x: x.get("date") or "",
+                    reverse=False
+                ) or [None])[0]) ((full_fund or {}).get("Earnings", {}).get("Trend") if isinstance(full_fund, dict) else None) if isinstance(full_fund, dict) else None),
+                # holders_institutions: top 10 institutional holders for 13F section
+                "holders_institutions": (list((full_fund or {}).get("Holders", {}).get("Institutions", {}).values())[:10]
+                                         if isinstance(full_fund, dict) else []),
+                # insider_transactions: last 10 with REAL names for §1 Insider Tape
+                "insider_transactions": (list((full_fund or {}).get("InsiderTransactions", {}).values())[:10]
+                                         if isinstance(full_fund, dict) else []),
+                # cash_flow_yearly: last 4 years for Capital Allocation flow (Value §6)
+                "cash_flow_yearly": ((lambda cf: sorted(
+                    [{"date": k, **(v or {})} for k, v in (cf or {}).items() if isinstance(v, dict)],
+                    key=lambda x: x.get("date") or "",
+                    reverse=True
+                )[:4]) ((full_fund or {}).get("Financials", {}).get("Cash_Flow", {}).get("yearly") if isinstance(full_fund, dict) else None) if isinstance(full_fund, dict) else []),
                 # Provenance — promoted from lite to full (with caveat that scoring
                 # pipeline didn't run, but raw data fields are populated).
                 "_data_completeness": "full_extra",

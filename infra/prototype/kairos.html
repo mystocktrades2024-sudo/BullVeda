@@ -28762,7 +28762,91 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     if (_thesisTxt) {
       _thesisBlock = '<div style="margin:18px 10px 8px;padding:14px 16px;background:var(--bg-1,#11151a);border:1px solid var(--copper,#d97757);border-left:4px solid var(--copper,#d97757);border-radius:2px;font:600 12px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--ink-1,#d4d8d1);line-height:1.6"><div style="font:800 11px var(--mono);color:var(--copper,#d97757);letter-spacing:0.14em;margin-bottom:8px">📝 LIVE THESIS · ' + _esc(tk) + '</div>' + _esc(_thesisTxt) + '</div>';
     }
-    return cssWrap + '<div class="ivv2" style="padding:8px 10px">' + bc + _demoBanner + _bodyOut + _thesisBlock + '</div>';
+    // 2026-05-25 · LIVE VALUE block — Quality scorecard from t.fund_real,
+    // Statements from t.earnings_history, Capital Allocation from t.cash_flow_yearly
+    const _fr = (t && t.fund_real) || {};
+    const _eh = Array.isArray(t && t.earnings_history) ? t.earnings_history : [];
+    const _cfy = Array.isArray(t && t.cash_flow_yearly) ? t.cash_flow_yearly : [];
+    let _liveValue = '';
+    if (Object.keys(_fr).length > 5 || _eh.length > 0 || _cfy.length > 0) {
+      const _fK = (n) => { if (!n||!isFinite(+n)) return '$—'; const a=Math.abs(+n); if(a>=1e12) return '$'+(+n/1e12).toFixed(2)+'T'; if(a>=1e9) return '$'+(+n/1e9).toFixed(2)+'B'; if(a>=1e6) return '$'+(+n/1e6).toFixed(1)+'M'; if(a>=1e3) return '$'+(+n/1e3).toFixed(0)+'K'; return '$'+(+n).toFixed(0); };
+      const _pf = (v, d) => (v == null || !isFinite(+v)) ? '—' : (+v >= 0 ? '+' : '') + (+v * 100).toFixed(d == null ? 1 : d) + '%';
+      const _grade = (v, type) => {
+        if (v == null || !isFinite(+v)) return { lbl: '—', cls: 'ink-3' };
+        const n = +v;
+        if (type === 'margin') return n >= 0.20 ? { lbl: 'A', cls: 'gn' } : n >= 0.10 ? { lbl: 'B', cls: 'gn' } : n >= 0.05 ? { lbl: 'C', cls: 'am' } : { lbl: 'D', cls: 'rd' };
+        if (type === 'roe')    return n >= 0.20 ? { lbl: 'A', cls: 'gn' } : n >= 0.10 ? { lbl: 'B', cls: 'gn' } : n >= 0.05 ? { lbl: 'C', cls: 'am' } : { lbl: 'D', cls: 'rd' };
+        if (type === 'growth') return n >= 0.20 ? { lbl: 'A', cls: 'gn' } : n >= 0.10 ? { lbl: 'B', cls: 'gn' } : n >= 0 ? { lbl: 'C', cls: 'am' } : { lbl: 'D', cls: 'rd' };
+        return { lbl: '—', cls: 'ink-3' };
+      };
+      // QUALITY SCORECARD
+      const _quality = [
+        { k: 'Net Margin',      v: _fr.net_margin_pct,  type: 'margin' },
+        { k: 'Op Margin',       v: _fr.op_margin_pct,   type: 'margin' },
+        { k: 'ROE',             v: _fr.roe_pct,         type: 'roe' },
+        { k: 'ROA',             v: _fr.roa_pct,         type: 'roe' },
+        { k: 'Rev Growth YoY',  v: _fr.rev_growth_pct,  type: 'growth' },
+        { k: 'EPS Growth YoY',  v: _fr.eps_growth_pct,  type: 'growth' },
+      ];
+      const _qRows = _quality.map(q => {
+        const g = _grade(q.v, q.type);
+        return '<div style="display:grid;grid-template-columns:1fr 80px 40px;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font:600 11px var(--mono)">'
+          + '<span style="color:var(--ink-2)">' + q.k + '</span>'
+          + '<span style="text-align:right;color:var(--ink-1)"><b>' + _pf(q.v) + '</b></span>'
+          + '<span class="' + g.cls + '" style="text-align:center;font-size:14px"><b>' + g.lbl + '</b></span>'
+          + '</div>';
+      }).join('');
+      // STATEMENTS (8-quarter EPS revenue trail from earnings_history)
+      let _stmtRows = '';
+      _eh.slice(0, 8).forEach(h => {
+        const _dt = h.date || h.reportDate || '';
+        const _est = +h.epsEstimate, _act = +h.epsActual;
+        _stmtRows += '<tr><td style="color:var(--ink-2);font-size:10.5px">' + _esc(_dt) + '</td>'
+          + '<td style="text-align:right;color:var(--ink-2)">$' + (isFinite(_est) ? _est.toFixed(2) : '—') + '</td>'
+          + '<td style="text-align:right;color:var(--ink)"><b>$' + (isFinite(_act) ? _act.toFixed(2) : '—') + '</b></td></tr>';
+      });
+      // CAPITAL ALLOCATION FLOW (latest year cash_flow)
+      let _capAllocBlock = '';
+      if (_cfy.length > 0) {
+        const _cf = _cfy[0] || {};
+        const _ocf = Math.abs(+_cf.totalCashFromOperatingActivities) || 0;
+        const _capex = Math.abs(+_cf.capitalExpenditures) || 0;
+        const _fcf = _ocf - _capex;
+        const _div = Math.abs(+_cf.dividendsPaid) || 0;
+        const _buyb = Math.abs(+_cf.purchaseOfStock) || 0;
+        const _debt = Math.abs(+_cf.repurchaseOfDebt) || 0;
+        const _date = _cf.date || '';
+        function _alloc(label, val, total, color) {
+          const pct = (total && val) ? ((val / total) * 100) : 0;
+          return '<div style="display:grid;grid-template-columns:140px 1fr 80px 50px;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font:600 11px var(--mono);align-items:center">'
+            + '<span style="color:var(--ink-2)">' + label + '</span>'
+            + '<div style="height:6px;background:var(--bg-3,#1c2125);border-radius:1px;overflow:hidden"><div style="height:100%;width:' + Math.min(100, pct) + '%;background:' + color + '"></div></div>'
+            + '<span style="text-align:right;color:var(--ink-1)"><b>' + _fK(val) + '</b></span>'
+            + '<span style="text-align:right;color:var(--ink-3);font-size:10px">' + pct.toFixed(0) + '%</span>'
+            + '</div>';
+        }
+        _capAllocBlock = '<div style="height:1px;background:var(--line,#262b2d);margin:14px 0"></div>'
+          + '<div style="font:800 10px var(--mono);color:var(--copper,#d97757);letter-spacing:0.14em;margin-bottom:8px">💰 CAPITAL ALLOCATION FLOW · FY ' + _esc(_date) + '</div>'
+          + '<div style="font:600 10.5px var(--mono);color:var(--ink-2);margin-bottom:8px">Operating Cash Flow · <b style="color:var(--ink)">' + _fK(_ocf) + '</b> → Free Cash Flow · <b style="color:var(--copper)">' + _fK(_fcf) + '</b> (after CapEx ' + _fK(_capex) + ')</div>'
+          + _alloc('CapEx',     _capex, _ocf, '#fbbf24')
+          + _alloc('Dividends', _div,   _ocf, '#22c55e')
+          + _alloc('Buybacks',  _buyb,  _ocf, '#a78bfa')
+          + (_debt ? _alloc('Debt Paydown', _debt, _ocf, '#60a5fa') : '');
+      }
+      _liveValue = '<div style="margin:18px 10px 8px;background:var(--bg-1,#11151a);border:1px solid var(--gn,#22c55e);border-left:4px solid var(--gn,#22c55e);border-radius:2px;padding:14px 16px">'
+        + '<div style="font:800 11px var(--mono);color:var(--gn,#22c55e);letter-spacing:0.14em;margin-bottom:10px">📊 LIVE VALUE METRICS · ' + _esc(tk) + '</div>'
+        + (_qRows.length > 0 ?
+            '<div style="font:800 10px var(--mono);color:var(--copper,#d97757);letter-spacing:0.14em;margin-bottom:8px">⭐ QUALITY SCORECARD</div>'
+            + '<div style="display:grid;grid-template-columns:1fr 80px 40px;gap:8px;padding:0 0 4px;border-bottom:1px solid var(--line);font:700 9px var(--mono);color:var(--ink-3);letter-spacing:0.10em"><span>Metric</span><span style="text-align:right">Value</span><span style="text-align:center">Grade</span></div>'
+            + _qRows : '')
+        + (_stmtRows ?
+            '<div style="height:1px;background:var(--line,#262b2d);margin:14px 0"></div>'
+            + '<div style="font:800 10px var(--mono);color:var(--copper,#d97757);letter-spacing:0.14em;margin-bottom:8px">📊 EARNINGS STATEMENTS · last 8 quarters</div>'
+            + '<table style="width:100%;font:600 11px var(--mono);border-collapse:collapse"><thead><tr style="color:var(--ink-3);font-weight:700;font-size:9px;letter-spacing:0.10em"><th style="text-align:left;padding:6px 0;border-bottom:1px solid var(--line)">Quarter</th><th style="text-align:right;padding:6px 0;border-bottom:1px solid var(--line)">EPS Est</th><th style="text-align:right;padding:6px 0;border-bottom:1px solid var(--line)">EPS Actual</th></tr></thead><tbody>' + _stmtRows + '</tbody></table>' : '')
+        + _capAllocBlock
+        + '</div>';
+    }
+    return cssWrap + '<div class="ivv2" style="padding:8px 10px">' + bc + _demoBanner + _bodyOut + _liveValue + _thesisBlock + '</div>';
   }
 
   // Section dispatcher · routes section_id → individual renderer.
@@ -28987,12 +29071,41 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     for (const [re, val] of _rk_replacements) { try { body = body.replace(re, val); } catch (_) {} }
     // Build breadcrumb that mirrors prototype tone but uses live ticker
     const bc = '<div style="font:700 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--ink-3,#686c68);letter-spacing:0.18em;text-transform:uppercase;margin:8px 10px 14px"><span style="color:var(--copper,#d97757)">' + _esc(tk) + '</span> · DETAIL · <b style="color:var(--ink-1,#d4d8d1)">RISK</b></div>';
-    // DEMO-DATA banner — Risk tab sections (VaR distribution, drawdown stress matrix,
-    // Kelly cascade, liquidity profile, correlation, tail-event analysis, regime
-    // sensitivity, risk budget dials) still come from the AVGO prototype string.
-    // The real t.risk.* / t.kelly.* fields aren't fully wired yet.
-    const _demoBanner = '<div style="margin:8px 10px 12px;padding:10px 14px;border:1px solid #fbbf24;background:rgba(251,191,36,0.10);border-left:4px solid #fbbf24;border-radius:2px;font:600 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:#fbbf24;letter-spacing:0.06em">⚠ PARTIAL DATA · live wiring covers ticker / price / beta / sector only. VaR distributions, drawdown stress matrices, Kelly cascade, correlation tables, and risk-budget dials below are prototype placeholders pending full integration.</div>';
-    return cssWrap + '<div class="rkv2 k-risk-scope" style="padding:8px 10px">' + bc + _demoBanner + body + '</div>';
+    // 2026-05-25 · LIVE RISK METRICS block — real numbers from t.kelly_size + t.forward_dist
+    const _ks = (t && t.kelly_size) || {};
+    const _fd = (t && t.forward_dist) || {};
+    const _hasRiskData = (_ks && Object.keys(_ks).length > 5) || (_fd && Object.keys(_fd).length > 3);
+    let _liveRisk = '';
+    if (_hasRiskData) {
+      const _pf = (v, d) => (v == null || !isFinite(+v)) ? '—' : (v >= 0 ? '+' : '') + (+v).toFixed(d == null ? 2 : d) + '%';
+      const _fK = (n) => { if (!n||!isFinite(+n)) return '$—'; const a=Math.abs(+n); if(a>=1e6) return '$'+(+n/1e6).toFixed(1)+'M'; if(a>=1e3) return '$'+(+n/1e3).toFixed(0)+'K'; return '$'+(+n).toFixed(0); };
+      const _v95 = _fd.var_95_pct, _cvar = _fd.cvar_975_pct, _sharpe = _fd.sharpe, _pProf = _fd.p_profit;
+      const _ddPct = _ks.drawdown_pct, _kpct = _ks.kelly_pct, _hkpct = _ks.half_kelly_pct, _alloc = _ks.final_alloc_pct, _drisk = _ks.dollar_risk;
+      _liveRisk = '<div style="margin:8px 10px 12px;background:var(--bg-1,#11151a);border:1px solid var(--rd,#f87171);border-left:4px solid var(--rd,#f87171);border-radius:2px;padding:14px 16px">'
+        + '<div style="font:800 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--rd,#f87171);letter-spacing:0.14em;margin-bottom:10px">🛡 LIVE RISK METRICS · ' + _esc(tk) + '</div>'
+        + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;font:600 11px var(--mono)">'
+        + '<div><div style="color:var(--ink-3);font-size:10px;letter-spacing:0.10em;margin-bottom:4px">VaR 95% · 63d</div><div style="font-size:18px;font-weight:800;color:' + (_v95 != null && _v95 <= -10 ? 'var(--rd)' : 'var(--ink)') + '">' + _pf(_v95) + '</div><div style="color:var(--ink-3);font-size:9px;margin-top:2px">forward-dist</div></div>'
+        + '<div><div style="color:var(--ink-3);font-size:10px;letter-spacing:0.10em;margin-bottom:4px">CVaR 97.5%</div><div style="font-size:18px;font-weight:800;color:' + (_cvar != null && _cvar <= -15 ? 'var(--rd)' : 'var(--ink)') + '">' + _pf(_cvar) + '</div><div style="color:var(--ink-3);font-size:9px;margin-top:2px">tail-loss</div></div>'
+        + '<div><div style="color:var(--ink-3);font-size:10px;letter-spacing:0.10em;margin-bottom:4px">P(profit)</div><div style="font-size:18px;font-weight:800;color:' + (_pProf >= 55 ? 'var(--gn)' : _pProf >= 45 ? 'var(--am)' : 'var(--rd)') + '">' + (_pProf != null ? Math.round(_pProf) + '%' : '—') + '</div><div style="color:var(--ink-3);font-size:9px;margin-top:2px">Monte Carlo</div></div>'
+        + '<div><div style="color:var(--ink-3);font-size:10px;letter-spacing:0.10em;margin-bottom:4px">Fwd Sharpe</div><div style="font-size:18px;font-weight:800;color:' + (_sharpe >= 1 ? 'var(--gn)' : _sharpe >= 0 ? 'var(--am)' : 'var(--rd)') + '">' + (_sharpe != null ? (+_sharpe).toFixed(2) : '—') + '</div><div style="color:var(--ink-3);font-size:9px;margin-top:2px">63d horizon</div></div>'
+        + '</div>'
+        + '<div style="height:1px;background:var(--line,#262b2d);margin:14px 0"></div>'
+        + '<div style="font:800 10px var(--mono);color:var(--copper,#d97757);letter-spacing:0.14em;margin-bottom:8px">⚖ KELLY CASCADE</div>'
+        + '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;font:600 11px var(--mono)">'
+        + '<div><div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em">Full Kelly</div><div style="font-weight:700;color:var(--ink-2)">' + (_kpct != null ? (+_kpct).toFixed(1) + '%' : '—') + '</div></div>'
+        + '<div><div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em">Half Kelly</div><div style="font-weight:700;color:var(--ink-1)">' + (_hkpct != null ? (+_hkpct).toFixed(1) + '%' : '—') + '</div></div>'
+        + '<div><div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em">×Regime</div><div style="font-weight:700;color:' + (_ks.regime_mult >= 1 ? 'var(--gn)' : 'var(--am)') + '">' + (_ks.regime_mult != null ? (+_ks.regime_mult).toFixed(2) + '×' : '—') + '</div></div>'
+        + '<div><div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em">×VIX</div><div style="font-weight:700;color:' + (_ks.vix_mult >= 1 ? 'var(--gn)' : 'var(--am)') + '">' + (_ks.vix_mult != null ? (+_ks.vix_mult).toFixed(2) + '×' : '—') + '</div></div>'
+        + '<div><div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em">FINAL Alloc</div><div style="font-weight:800;color:var(--copper,#d97757);font-size:13px">' + (_alloc != null ? (+_alloc).toFixed(2) + '%' : '—') + '</div></div>'
+        + '</div>'
+        + (_drisk ? '<div style="margin-top:10px;font:600 10.5px var(--mono);color:var(--ink-2)">Dollar risk per trade · <b style="color:var(--rd)">' + _fK(_drisk) + '</b> · Position value · <b>' + _fK(_ks.position_value) + '</b> · ' + (_ks.suggested_shares ? '<b>' + _ks.suggested_shares + '</b> shares' : '—') + '</div>' : '')
+        + (_ddPct != null ? '<div style="margin-top:6px;font:600 10.5px var(--mono);color:var(--ink-3)">Current portfolio drawdown · <b style="color:' + (_ddPct <= -10 ? 'var(--rd)' : _ddPct <= -5 ? 'var(--am)' : 'var(--ink-2)') + '">' + _pf(_ddPct) + '</b></div>' : '')
+        + '</div>';
+    }
+    // DEMO-DATA banner — Risk tab sub-tables (correlation matrices, regime
+    // sensitivity, risk-budget dials) still come from the AVGO prototype.
+    const _demoBanner = '<div style="margin:8px 10px 12px;padding:10px 14px;border:1px solid #fbbf24;background:rgba(251,191,36,0.10);border-left:4px solid #fbbf24;border-radius:2px;font:600 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:#fbbf24;letter-spacing:0.06em">⚠ PARTIAL DATA · LIVE RISK METRICS panel above shows real VaR/CVaR/Kelly. Detailed stress matrices, correlation tables, and risk-budget dials below are prototype placeholders.</div>';
+    return cssWrap + '<div class="rkv2 k-risk-scope" style="padding:8px 10px">' + bc + _liveRisk + _demoBanner + body + '</div>';
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -29412,10 +29525,53 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     for (const [re, val] of _er_replacements) { try { body = body.replace(re, val); } catch (_) {} }
     // Build breadcrumb that mirrors prototype tone but uses live ticker
     const bc = '<div style="font:700 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--ink-3,#686c68);letter-spacing:0.18em;text-transform:uppercase;margin:8px 10px 14px"><span style="color:var(--copper,#d97757)">' + _esc(tk) + '</span> · DETAIL · <b style="color:var(--ink-1,#d4d8d1)">EARNINGS</b></div>';
-    // DEMO-DATA banner — sections §2 (history), §3 (revisions), §5 (sympathy),
-    // §6 (drift pattern), §7 (playbook), §8 (IV crush) still use AVGO prototype data.
-    const _demoBanner = '<div style="margin:8px 10px 12px;padding:10px 14px;border:1px solid #fbbf24;background:rgba(251,191,36,0.10);border-left:4px solid #fbbf24;border-radius:2px;font:600 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:#fbbf24;letter-spacing:0.06em">⚠ PARTIAL DATA · live wiring covers days-to-earnings / implied-move / beat-probability / ESP only. 8-quarter beat history, analyst revisions, sympathy cohort, pre-ER drift charts, post-ER playbook, and IV crush calendar below are prototype placeholders.</div>';
-    return cssWrap + '<div class="erv2 k-er-scope" style="padding:8px 10px">' + bc + _demoBanner + body + '</div>';
+    // 2026-05-25 · LIVE EARNINGS HISTORY block — real 8-quarter beats from
+    // t.earnings_history (EODHD Earnings.History extracted in build_data)
+    const _eh = Array.isArray(t && t.earnings_history) ? t.earnings_history : [];
+    const _et = (t && t.earnings_trend) || null;
+    let _liveEarn = '';
+    if (_eh.length > 0 || _et) {
+      let _histRows = '';
+      const _eh8 = _eh.slice(0, 8);
+      const _beats = _eh8.filter(h => (+h.surprisePercent || 0) > 0).length;
+      _eh8.forEach(h => {
+        const _dt = h.date || h.reportDate || '';
+        const _est = +h.epsEstimate, _act = +h.epsActual, _surp = +h.surprisePercent;
+        const _surpCls = !isFinite(_surp) ? 'ink-3' : _surp > 0 ? 'gn' : _surp < 0 ? 'rd' : 'am';
+        const _surpLbl = !isFinite(_surp) ? '—' : (_surp >= 0 ? '+' : '') + _surp.toFixed(2) + '%';
+        _histRows += '<tr><td style="color:var(--ink-2)">' + _esc(_dt) + '</td>'
+          + '<td style="text-align:right;color:var(--ink-2)">$' + (isFinite(_est) ? _est.toFixed(2) : '—') + '</td>'
+          + '<td style="text-align:right;color:var(--ink)"><b>$' + (isFinite(_act) ? _act.toFixed(2) : '—') + '</b></td>'
+          + '<td style="text-align:right" class="' + _surpCls + '"><b>' + _surpLbl + '</b></td></tr>';
+      });
+      let _revBlock = '';
+      if (_et && (_et.epsRevisionsUpLast30days != null || _et.epsRevisionsUpLast7days != null)) {
+        const _up30 = +_et.epsRevisionsUpLast30days || 0;
+        const _dn30 = +_et.epsRevisionsDownLast30days || 0;
+        const _up7 = +_et.epsRevisionsUpLast7days || 0;
+        const _dn7 = +_et.epsRevisionsDownLast7days || 0;
+        const _trend30 = _up30 - _dn30, _trend7 = _up7 - _dn7;
+        const _epsCur = +_et.epsTrendCurrent, _eps30 = +_et.epsTrend30daysAgo, _epsChg = (_epsCur && _eps30) ? ((_epsCur - _eps30) / _eps30 * 100) : null;
+        _revBlock = '<div style="height:1px;background:var(--line,#262b2d);margin:14px 0"></div>'
+          + '<div style="font:800 10px var(--mono);color:var(--copper,#d97757);letter-spacing:0.14em;margin-bottom:8px">📊 ANALYST REVISIONS · last 30d / 7d</div>'
+          + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font:600 11px var(--mono)">'
+          + '<div><div style="color:var(--ink-3);font-size:9px">UP · 30d</div><div style="font-weight:800;color:var(--gn);font-size:15px">' + _up30 + '</div></div>'
+          + '<div><div style="color:var(--ink-3);font-size:9px">DN · 30d</div><div style="font-weight:800;color:var(--rd);font-size:15px">' + _dn30 + '</div></div>'
+          + '<div><div style="color:var(--ink-3);font-size:9px">UP · 7d</div><div style="font-weight:700;color:var(--gn);font-size:13px">' + _up7 + '</div></div>'
+          + '<div><div style="color:var(--ink-3);font-size:9px">DN · 7d</div><div style="font-weight:700;color:var(--rd);font-size:13px">' + _dn7 + '</div></div>'
+          + '</div>'
+          + (_epsChg != null ? '<div style="margin-top:8px;font:600 10.5px var(--mono);color:var(--ink-2)">EPS estimate · 30d ago $' + _eps30.toFixed(2) + ' → now <b style="color:' + (_epsChg >= 0 ? 'var(--gn)' : 'var(--rd)') + '">$' + _epsCur.toFixed(2) + ' (' + (_epsChg >= 0 ? '+' : '') + _epsChg.toFixed(2) + '%)</b></div>' : '');
+      }
+      _liveEarn = '<div style="margin:8px 10px 12px;background:var(--bg-1,#11151a);border:1px solid var(--gn,#22c55e);border-left:4px solid var(--gn,#22c55e);border-radius:2px;padding:14px 16px">'
+        + '<div style="font:800 11px var(--mono);color:var(--gn,#22c55e);letter-spacing:0.14em;margin-bottom:10px">📈 LIVE EARNINGS HISTORY · ' + _eh8.length + ' quarters · ' + _beats + ' beats</div>'
+        + (_eh8.length > 0 ? '<table style="width:100%;font:600 11px var(--mono,JetBrains Mono,ui-monospace,monospace);border-collapse:collapse"><thead><tr style="color:var(--ink-3);font-weight:700"><th style="text-align:left;padding:6px 0;border-bottom:1px solid var(--line)">Quarter</th><th style="text-align:right;padding:6px 0;border-bottom:1px solid var(--line)">Est</th><th style="text-align:right;padding:6px 0;border-bottom:1px solid var(--line)">Actual</th><th style="text-align:right;padding:6px 0;border-bottom:1px solid var(--line)">Surprise</th></tr></thead><tbody>' + _histRows + '</tbody></table>' : '')
+        + _revBlock
+        + '</div>';
+    }
+    // DEMO-DATA banner — §5 (sympathy), §6 (drift), §7 (playbook), §8 (IV crush) still
+    // use AVGO prototype data. §2/§3 are now live above.
+    const _demoBanner = '<div style="margin:8px 10px 12px;padding:10px 14px;border:1px solid #fbbf24;background:rgba(251,191,36,0.10);border-left:4px solid #fbbf24;border-radius:2px;font:600 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:#fbbf24;letter-spacing:0.06em">⚠ PARTIAL DATA · LIVE EARNINGS panel above shows real history + revisions. Sympathy cohort, pre-ER drift, post-ER playbook, and IV crush below are prototype placeholders.</div>';
+    return cssWrap + '<div class="erv2 k-er-scope" style="padding:8px 10px">' + bc + _liveEarn + _demoBanner + body + '</div>';
   }
 
   function renderSection_earnings(id, t) {
@@ -42941,6 +43097,81 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       [/KIRSTEN CHEN/g, _insN > 0 ? 'INSIDER 3' : '—'],
       [/DIANE BRYANT/g, _insN > 0 ? 'INSIDER 4' : '—'],
     ];
+    // 2026-05-25 · Build LIVE INTEL block with real insider names, 13F, UOA
+    const _insTx = Array.isArray(t && t.insider_transactions) ? t.insider_transactions : [];
+    const _holders = Array.isArray(t && t.holders_institutions) ? t.holders_institutions : [];
+    const _ok = (t && t.options_kpis) || {};
+    let _liveIntel = '';
+    if (_insTx.length > 0 || _holders.length > 0 || _ok.put_call_ratio != null) {
+      // INSIDER section
+      let _insRows = '';
+      _insTx.slice(0, 6).forEach(tx => {
+        const _name = _esc(tx.ownerName || '—');
+        const _date = (tx.date || tx.transactionDate || '').slice(0, 10);
+        const _code = tx.transactionCode || '';
+        const _ad = tx.transactionAcquiredDisposed || '';
+        const _price = +tx.transactionPrice;
+        const _amt = +tx.transactionAmount;
+        const _isBuy = _ad === 'A' || ['P', 'A'].includes(_code);
+        const _isSell = _ad === 'D' || ['S', 'D'].includes(_code);
+        const _cls = _isBuy ? 'gn' : _isSell ? 'rd' : 'am';
+        const _action = _isBuy ? 'BUY' : _isSell ? 'SELL' : _code;
+        const _val = (isFinite(_amt) && _amt > 0 && isFinite(_price))
+          ? '$' + (_amt * _price / 1000).toFixed(0) + 'K' : (isFinite(_price) ? '@$' + _price.toFixed(2) : '—');
+        _insRows += '<div style="display:grid;grid-template-columns:80px 1fr 60px 90px;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font:600 11px var(--mono)">'
+          + '<span style="color:var(--ink-3)">' + _esc(_date) + '</span>'
+          + '<span style="color:var(--ink-1)">' + _name + '</span>'
+          + '<span class="' + _cls + '" style="text-align:center"><b>' + _action + '</b></span>'
+          + '<span style="text-align:right;color:var(--ink-2)">' + _val + '</span>'
+          + '</div>';
+      });
+      // 13F section
+      let _holdRows = '';
+      _holders.slice(0, 8).forEach(h => {
+        const _name = _esc(h.name || '—').slice(0, 30);
+        const _date = (h.date || '').slice(0, 10);
+        const _pct = +h.totalShares;
+        const _chgPct = +h.change_p;
+        const _chgCls = isFinite(_chgPct) && _chgPct > 0 ? 'gn' : isFinite(_chgPct) && _chgPct < 0 ? 'rd' : 'ink-3';
+        const _chgLbl = isFinite(_chgPct) ? (_chgPct > 0 ? '+' : '') + _chgPct.toFixed(2) + '%' : '—';
+        _holdRows += '<div style="display:grid;grid-template-columns:1fr 70px 80px 80px;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font:600 11px var(--mono)">'
+          + '<span style="color:var(--ink-1)">' + _name + '</span>'
+          + '<span style="color:var(--ink-3);text-align:right">' + (isFinite(_pct) ? _pct.toFixed(2) + '%' : '—') + '</span>'
+          + '<span class="' + _chgCls + '" style="text-align:right"><b>' + _chgLbl + '</b></span>'
+          + '<span style="color:var(--ink-3);text-align:right;font-size:9.5px">' + _esc(_date) + '</span>'
+          + '</div>';
+      });
+      // UOA section
+      const _pcr = +_ok.put_call_ratio;
+      const _mp = +_ok.max_pain;
+      const _gn = +_ok.gamma_net;
+      const _ivp = +_ok.iv_percentile;
+      const _uoaC = _ok.uoa_calls, _uoaP = _ok.uoa_puts;
+      let _uoaBlock = '';
+      if (isFinite(_pcr) || isFinite(_mp) || _ok.uoa_calls != null) {
+        _uoaBlock = '<div style="font:800 10px var(--mono);color:var(--copper,#d97757);letter-spacing:0.14em;margin:14px 0 8px">⚡ OPTIONS FLOW · UOA</div>'
+          + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font:600 11px var(--mono)">'
+          + '<div><div style="color:var(--ink-3);font-size:9px">P/C Ratio</div><div style="font-weight:800;color:' + (_pcr < 0.6 ? 'var(--gn)' : _pcr > 1.1 ? 'var(--rd)' : 'var(--am)') + ';font-size:14px">' + (isFinite(_pcr) ? _pcr.toFixed(2) : '—') + '</div></div>'
+          + '<div><div style="color:var(--ink-3);font-size:9px">Max Pain</div><div style="font-weight:700;color:var(--ink-1);font-size:14px">' + (isFinite(_mp) ? '$' + _mp.toFixed(0) : '—') + '</div></div>'
+          + '<div><div style="color:var(--ink-3);font-size:9px">IV Pctile</div><div style="font-weight:700;color:' + (_ivp >= 70 ? 'var(--rd)' : _ivp >= 30 ? 'var(--am)' : 'var(--gn)') + ';font-size:14px">' + (isFinite(_ivp) ? Math.round(_ivp) + '%' : '—') + '</div></div>'
+          + '<div><div style="color:var(--ink-3);font-size:9px">UOA</div><div style="font-weight:700;color:var(--ink-1);font-size:13px">' + (_uoaC ? 'C' : '') + (_uoaP ? '·P' : '') + (!_uoaC && !_uoaP ? '—' : '') + '</div></div>'
+          + '</div>';
+      }
+      _liveIntel = '<div style="margin:8px 10px 12px;background:var(--bg-1,#11151a);border:1px solid var(--copper,#d97757);border-left:4px solid var(--copper,#d97757);border-radius:2px;padding:14px 16px">'
+        + '<div style="font:800 11px var(--mono);color:var(--copper,#d97757);letter-spacing:0.14em;margin-bottom:10px">🎯 LIVE TAPE INTEL · ' + _esc(tk) + '</div>'
+        + (_insTx.length > 0
+            ? '<div style="font:800 10px var(--mono);color:var(--gn,#22c55e);letter-spacing:0.14em;margin-bottom:8px">💼 INSIDER TRANSACTIONS · last ' + _insTx.length + '</div>'
+              + '<div style="display:grid;grid-template-columns:80px 1fr 60px 90px;gap:8px;padding:0 0 6px;border-bottom:1px solid var(--line);font:700 9px var(--mono);color:var(--ink-3);letter-spacing:0.10em"><span>Date</span><span>Owner</span><span style="text-align:center">Action</span><span style="text-align:right">Value</span></div>'
+              + _insRows
+            : '')
+        + (_holders.length > 0
+            ? '<div style="font:800 10px var(--mono);color:var(--vio,#a78bfa);letter-spacing:0.14em;margin:14px 0 8px">🏛 13F POSITION CHANGES · top ' + Math.min(8, _holders.length) + ' holders</div>'
+              + '<div style="display:grid;grid-template-columns:1fr 70px 80px 80px;gap:8px;padding:0 0 6px;border-bottom:1px solid var(--line);font:700 9px var(--mono);color:var(--ink-3);letter-spacing:0.10em"><span>Holder</span><span style="text-align:right">%</span><span style="text-align:right">Δ%</span><span style="text-align:right">Date</span></div>'
+              + _holdRows
+            : '')
+        + _uoaBlock
+        + '</div>';
+    }
     // 2026-05-25 · Wire News Flow timeline if real articles exist. Replaces
     // the static AVGO news bullets with up to 5 real headlines from
     // t.news_articles[]. Each article: title + date + sentiment polarity.
@@ -42983,7 +43214,7 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       ? 'DEMO DATA · no live news or insider feed for this ticker. Insider rows, news headlines, congressional trades, UOA tables, and dark-pool counts below are prototype placeholders.'
       : 'PARTIAL DATA · live wiring covers ticker / price / sector / market cap only. Insider rows, news headlines, congressional trades, UOA tables, and dark-pool counts below are prototype placeholders pending full integration.';
     const demoBanner = '<div style="margin:8px 10px 12px;padding:10px 14px;border:1px solid ' + _sev + ';background:' + _bg + ';border-left:4px solid ' + _sev + ';border-radius:2px;font:600 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:' + _sev + ';letter-spacing:0.06em">⚠ ' + _msg + '</div>';
-    return cssWrap + '<div class="tfv2 k-tf-scope" style="padding:8px 10px">' + bc + demoBanner + body + '</div>';
+    return cssWrap + '<div class="tfv2 k-tf-scope" style="padding:8px 10px">' + bc + _liveIntel + demoBanner + body + '</div>';
   }
 
   // Combined Read · news×insider cross-correlation. Default landing view.
