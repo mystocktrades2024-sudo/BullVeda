@@ -6014,22 +6014,40 @@ async def elite_detail_for_ticker(ticker: str, deep: bool = False):
     if cache_key in cache and (now - cache[cache_key]['ts']) < 1800:
         return cache[cache_key]['data']
 
-    # FAST-PATH (2026-05-04): for tickers in the latest scan, return the pre-built
-    # rich_row from tickers.json instantly — saves the 6.6s cold-call cost.
-    # Only applies to quick-mode (deep=False); ?deep=true always re-computes.
+    # FAST-PATH (2026-05-04, perf-split 2026-05-25):
+    # Try tickers_main.json (27MB · ~150ms parse · main-scan tickers) first.
+    # Fall back to tickers_extras.json (70MB · lite-enriched extras) only if
+    # ticker missing from main. Saves ~600ms parse stall per rebuild.
+    # Legacy tickers.json kept as a final fallback for backwards compat.
     if not deep:
-        if not hasattr(elite_detail_for_ticker, '_tickers_json'):
-            elite_detail_for_ticker._tickers_json = {"ts": 0, "data": {}}
-        tj = elite_detail_for_ticker._tickers_json
-        tj_path = BASE_DIR / "infra" / "prototype" / "tickers.json"
-        try:
-            mtime = tj_path.stat().st_mtime if tj_path.exists() else 0
-            if mtime and mtime > tj["ts"]:
-                tj["data"] = json.loads(tj_path.read_text())
-                tj["ts"] = mtime
-        except Exception:
-            pass
-        prebuilt = (tj.get("data") or {}).get(ticker)
+        if not hasattr(elite_detail_for_ticker, '_tj_main'):
+            elite_detail_for_ticker._tj_main = {"ts": 0, "data": {}}
+        if not hasattr(elite_detail_for_ticker, '_tj_extras'):
+            elite_detail_for_ticker._tj_extras = {"ts": 0, "data": {}}
+        proto_dir = BASE_DIR / "infra" / "prototype"
+        main_path = proto_dir / "tickers_main.json"
+        extras_path = proto_dir / "tickers_extras.json"
+        legacy_path = proto_dir / "tickers.json"
+        def _maybe_reload(path, slot):
+            try:
+                if path.exists():
+                    m = path.stat().st_mtime
+                    if m and m > slot["ts"]:
+                        slot["data"] = json.loads(path.read_text())
+                        slot["ts"] = m
+            except Exception:
+                pass
+        _maybe_reload(main_path, elite_detail_for_ticker._tj_main)
+        prebuilt = (elite_detail_for_ticker._tj_main.get("data") or {}).get(ticker)
+        if not prebuilt:
+            _maybe_reload(extras_path, elite_detail_for_ticker._tj_extras)
+            prebuilt = (elite_detail_for_ticker._tj_extras.get("data") or {}).get(ticker)
+        if not prebuilt:
+            # Legacy fallback — only if neither split file has the ticker
+            if not hasattr(elite_detail_for_ticker, '_tickers_json'):
+                elite_detail_for_ticker._tickers_json = {"ts": 0, "data": {}}
+            _maybe_reload(legacy_path, elite_detail_for_ticker._tickers_json)
+            prebuilt = (elite_detail_for_ticker._tickers_json.get("data") or {}).get(ticker)
         if prebuilt:
             cache[cache_key] = {'ts': now, 'data': prebuilt}
             return prebuilt

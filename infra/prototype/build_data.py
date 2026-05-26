@@ -4416,6 +4416,24 @@ def main():
     TICKS.write_text(json.dumps(all_rich, default=str, allow_nan=False))
     print(f"wrote {TICKS} (n={len(all_rich)} tickers, {TICKS.stat().st_size:,} bytes)")
 
+    # ─── 2026-05-25 · perf split — tickers_main.json + tickers_extras.json ──
+    # The server /api/elite/<TKR> fast-path parses tickers.json on every
+    # file-mtime change. With 2600 tickers × 40KB avg = 100MB, that's a
+    # ~750ms parse stall after each rebuild. Split into two files:
+    #   - tickers_main.json: ~27MB main-scan tickers (~150 ms parse)
+    #   - tickers_extras.json: ~70MB lite-extras (loaded only when needed)
+    # Server tries main first → hits fast-path for the typical click.
+    MAIN_PATH = OUT / "tickers_main.json"
+    EXTRAS_PATH = OUT / "tickers_extras.json"
+    _main_subset = {tk: r for tk, r in all_rich.items()
+                    if (r or {}).get("_data_completeness") in (None, "full")}
+    _extras_subset = {tk: r for tk, r in all_rich.items()
+                      if (r or {}).get("_data_completeness") in ("full_extra", "lite")}
+    MAIN_PATH.write_text(json.dumps(_main_subset, default=str, allow_nan=False))
+    EXTRAS_PATH.write_text(json.dumps(_extras_subset, default=str, allow_nan=False))
+    print(f"wrote {MAIN_PATH.name} (n={len(_main_subset)}, {MAIN_PATH.stat().st_size:,} bytes)")
+    print(f"wrote {EXTRAS_PATH.name} (n={len(_extras_subset)}, {EXTRAS_PATH.stat().st_size:,} bytes)")
+
     # ─── 2026-05-25 · tickers_lite.json — lazy-load architecture ────────
     # kairos.html loads the LITE version on page-init (just scanner-table
     # fields, ~5MB). On detail click it fetches /api/elite/<TKR> to enrich
