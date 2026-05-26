@@ -6647,18 +6647,21 @@ async def schwab_health():
            "last_check_status": "unknown", "message": "", "reauth_cmd":
            "cd \"/Volumes/MyMacDisk/Claude Skills/SwingTrade\" && python3 schwab_auth.py oauth"}
 
-    # 1 · Refresh token age (from .env or environ)
-    issued = os.environ.get("SCHWAB_REFRESH_ISSUED_AT")
+    # 1 · Refresh token age — ALWAYS prefer .env (cron writes there on rotate;
+    # server's os.environ snapshot from startup goes stale within hours).
+    # Fall back to os.environ only when .env unreadable.
+    issued = None
+    try:
+        env_path = _P(__file__).resolve().parent / ".env"
+        if env_path.exists():
+            for line in env_path.read_text().splitlines():
+                if line.startswith("SCHWAB_REFRESH_ISSUED_AT="):
+                    issued = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+    except Exception:
+        pass
     if not issued:
-        try:
-            env_path = _P(__file__).resolve().parent / ".env"
-            if env_path.exists():
-                for line in env_path.read_text().splitlines():
-                    if line.startswith("SCHWAB_REFRESH_ISSUED_AT="):
-                        issued = line.split("=", 1)[1].strip().strip('"').strip("'")
-                        break
-        except Exception:
-            pass
+        issued = os.environ.get("SCHWAB_REFRESH_ISSUED_AT")
     if issued:
         try:
             out["token_age_days"] = round((time.time() - float(issued)) / 86400, 2)
@@ -7867,6 +7870,98 @@ async def options_flow_accuracy_api(window_days: int = 90):
         "per_status": dict(per_status),
         "recent_resolved": recent,
     }
+
+@app.get("/api/options-flow-journal")
+async def options_flow_journal_api(days: int = 90, limit: int = 200,
+                                    status: str = "", outcome: str = ""):
+    """Per-pick journal joining options_flow_history.jsonl with outcomes.
+
+    Returns rows for the History sub-section: most-recent first, optional
+    filter by status (STRONG/MODERATE/WEAK) or outcome (target_hit/stop_hit/
+    expired/open). Outcome is 'pending' when not yet in the outcomes file.
+    """
+    hist_path = BASE_DIR / "cache" / "options_flow_history.jsonl"
+    out_path = BASE_DIR / "cache" / "options_flow_outcomes.jsonl"
+    if not hist_path.exists():
+        return {"rows": [], "total": 0, "summary": {}, "message": "no history yet"}
+    # Build outcome index keyed by (snap_date, ticker)
+    outcomes = {}
+    if out_path.exists():
+        for ln in out_path.read_text().splitlines():
+            if not ln.strip(): continue
+            try:
+                r = json.loads(ln)
+                outcomes[(r.get("snap_date"), r.get("ticker"))] = r
+            except Exception:
+                continue
+    from datetime import datetime, timedelta
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    rows = []
+    for ln in hist_path.read_text().splitlines():
+        if not ln.strip(): continue
+        try:
+            h = json.loads(ln)
+        except Exception:
+            continue
+        if (h.get("snap_date") or "") < cutoff: continue
+        st = h.get("status") or ""
+        if status and st.upper() != status.upper(): continue
+        oc = outcomes.get((h.get("snap_date"), h.get("ticker")))
+        outcome_val = (oc.get("outcome") if oc else None) or "pending"
+        if outcome and outcome_val.lower() != outcome.lower(): continue
+        rows.append({
+            "date": h.get("snap_date"),
+            "ticker": h.get("ticker"),
+            "sector": h.get("sector"),
+            "status": st,
+            "entry": h.get("price"),
+            "target": h.get("target"),
+            "stop": h.get("stop"),
+            "rr": h.get("rr"),
+            "pc_ratio": h.get("put_call_ratio"),
+            "iv_pct": h.get("iv_percentile"),
+            "max_pain": h.get("max_pain"),
+            "outcome": outcome_val,
+            "realized_pct": (oc or {}).get("realized_return_pct"),
+            "mfe_pct": (oc or {}).get("mfe_pct"),
+            "mae_pct": (oc or {}).get("mae_pct"),
+            "days_held": (oc or {}).get("days_to_outcome"),
+        })
+    # Sort newest first, then limit
+    rows.sort(key=lambda r: (r["date"] or ""), reverse=True)
+    rows = rows[:limit]
+    # Summary across the filtered set
+    total = len(rows)
+    by_outcome = {"target_hit": 0, "stop_hit": 0, "expired": 0, "pending": 0}
+    win_returns = []
+    loss_returns = []
+    for r in rows:
+        oc = r["outcome"]
+        by_outcome[oc] = by_outcome.get(oc, 0) + 1
+        rr_pct = r.get("realized_pct")
+        if isinstance(rr_pct, (int, float)):
+            if oc == "target_hit": win_returns.append(rr_pct)
+            elif oc == "stop_hit": loss_returns.append(rr_pct)
+    resolved = total - by_outcome["pending"]
+    wr = (by_outcome["target_hit"] / resolved * 100) if resolved > 0 else None
+    avg_win = sum(win_returns) / len(win_returns) if win_returns else 0
+    avg_loss = sum(loss_returns) / len(loss_returns) if loss_returns else 0
+    return {
+        "rows": rows,
+        "total": total,
+        "summary": {
+            "resolved": resolved,
+            "open": by_outcome["pending"],
+            "wins": by_outcome["target_hit"],
+            "losses": by_outcome["stop_hit"],
+            "expired": by_outcome["expired"],
+            "win_rate_pct": round(wr, 1) if wr is not None else None,
+            "avg_win_pct": round(avg_win, 2),
+            "avg_loss_pct": round(avg_loss, 2),
+        },
+        "filters": {"days": days, "status": status, "outcome": outcome, "limit": limit},
+    }
+
 
 # -- Individual scanner APIs --
 @app.get("/api/insider-clusters")
