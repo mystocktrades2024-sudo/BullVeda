@@ -4315,6 +4315,14 @@ body.on-workspace .tabs { display: none; }
 #pan-detail .t-host .t1-vd.rd { color: var(--rd); background: rgba(255,107,91,0.10); }
 #pan-detail .t-host .t1-vd.nu { color: var(--ink-2); background: var(--bg-2); }
 #pan-detail .t-host .t1-tier { color: var(--ink-1); font-weight: 700; font-size: 11px; padding-left: 6px !important; border-right: none !important; }
+/* 2026-05-25 · Small inline label INSIDE the verdict + tier pills so the user
+   can tell at a glance which is "can I trade?" (TRADE) vs "what size?" (SIZE).
+   These two fields measure different things and frequently disagree — labels
+   make the divergence legible instead of confusing. */
+#pan-detail .t-host .t1-pill-lbl {
+  font-size: 8.5px; letter-spacing: 0.10em; color: var(--ink-3);
+  font-weight: 600; margin-right: 5px; opacity: 0.75; text-transform: uppercase;
+}
 #pan-detail .t-host .t1-bap { color: var(--ink-2); font-size: 11px; padding-left: 6px !important; border-right: none !important; }
 #pan-detail .t-host .t1-bap b { color: var(--ink); font-weight: 700; }
 #pan-detail .t-host .t1-plan { color: var(--ink-1); flex: 1; gap: 5px; min-width: 0; overflow: hidden; }
@@ -10958,6 +10966,80 @@ const DISPLAY = {
   l: (raw) => DISPLAY.label[raw] || raw,
 };
 
+// ═══════════════════════════════════════════════════════════════════════
+// FIELD ACCESSORS — single source of truth across all 14 sub-tabs.
+// 2026-05-25 cross-tab consistency fix. Every render function reads through
+// _fld(t, name) instead of t.* directly, so when the upstream schema gains
+// a new "preferred" path (e.g. canonical_trade_plan.stop) the value flows
+// to ALL tabs at once, never to just some of them.
+// ═══════════════════════════════════════════════════════════════════════
+window._FIELD_CHAINS = {
+  score      : ['canonical_trade_plan.score','scoring_breakdown.raw_total','score','bap_score'],
+  price      : ['live_price','quote_snapshot.last','quote.price','price'],
+  entry_low  : ['canonical_trade_plan.entry.low','trade_plan.entry_low','entry_low','entry_lo'],
+  entry_high : ['canonical_trade_plan.entry.high','trade_plan.entry_high','entry_high','entry_hi'],
+  stop       : ['canonical_trade_plan.stop','trade_plan.stop','stop'],
+  t1         : ['canonical_trade_plan.target1','trade_plan.target1','target1','t1','trade_levels.t1'],
+  t2         : ['canonical_trade_plan.target2','trade_plan.target2','target2','t2','trade_levels.t2'],
+  rr         : ['canonical_trade_plan.rr_ratio','trade_plan.rr_ratio','rr_ratio','rr'],
+  verdict    : ['canonical_trade_plan.verdict','verdict'],        // RAW: BUY/WATCH/SHORT/AVOID
+  tier       : ['canonical_trade_plan.conviction_tier','conviction_tier','conviction.label'],
+  rvol       : ['technicals.rvol','rvol_20','rvol'],
+  rsi        : ['technicals.rsi','rsi_14','rsi'],
+  earn_days  : ['earn_days','days_to_earnings','earnings.days_to_earnings','earnings_beat_prediction.days_to_earnings'],
+};
+window._fld = function(t, name) {
+  if (!t || !name) return null;
+  const chain = window._FIELD_CHAINS[name];
+  if (!chain) return t[name] ?? null;
+  for (const path of chain) {
+    let v = t;
+    for (const seg of path.split('.')) {
+      if (v == null) break;
+      v = v[seg];
+    }
+    if (v != null && v !== '') return v;
+  }
+  return null;
+};
+// Verdict-specific label accessor — returns SEC-safe display text (BULLISH/NEUTRAL/...)
+// instead of raw BUY/WATCH/etc. Use this anywhere a verdict is rendered AS TEXT.
+// (Use _fld(t,'verdict') when comparing values, e.g. `if (_fld(t,'verdict')==='BUY') ...`.)
+window._fldLabel = function(t, name) {
+  if (name === 'verdict') {
+    const raw = window._fld(t, 'verdict');
+    return raw ? DISPLAY.v(raw) : '—';
+  }
+  return window._fld(t, name);
+};
+
+// 2026-05-25 · _wrapT — wrap a ticker row so EVERY read for a field that
+// appears in _FIELD_CHAINS automatically routes through _fld (the fallback
+// chain). One change here means all 14 sub-tab render functions transparently
+// use the chain — no find-and-replace needed across the file.
+//
+// Reads for fields NOT in _FIELD_CHAINS fall through to the underlying object
+// unchanged, so `t.ticker`, `t.name`, `t.sector`, `t.ohlcv`, etc. all work
+// exactly as before. Writes also fall through. JSON.stringify, Object.keys,
+// spread `{...t}`, and `for...in` all preserve the underlying shape.
+window._wrapT = function(t) {
+  if (!t || typeof t !== 'object' || t.__fldWrapped) return t;
+  return new Proxy(t, {
+    get(target, prop, receiver) {
+      if (prop === '__fldWrapped') return true;
+      if (typeof prop === 'string' && window._FIELD_CHAINS && window._FIELD_CHAINS[prop]) {
+        const v = window._fld(target, prop);
+        if (v != null) return v;
+        // Fall through to direct access if chain resolved to null
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+    has(target, prop) { return Reflect.has(target, prop); },
+    ownKeys(target)   { return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, prop) { return Reflect.getOwnPropertyDescriptor(target, prop); },
+  });
+};
+
 const _fmt = (v, d=2) => v == null ? '—' : (typeof v === 'number' ? v.toFixed(d) : String(v));
 const _pct = (v, d=2) => v == null ? '—' : (v > 0 ? '+' : '') + Number(v).toFixed(d);
 const _money = (v) => v == null ? '—' : '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -11997,7 +12079,7 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
     const bg = (verdict === 'AVOID' || verdict === 'SHORT' || verdict === 'SELL') ? 'rgba(255,107,91,0.08)' : 'rgba(255,185,92,0.07)';
     return `<div style="background:${bg};border:1px solid ${c};border-left:2px solid ${c};border-radius:2px;padding:10px 14px;margin-bottom:12px;font-family:var(--mono);font-size:11.5px;color:var(--ink-1);line-height:1.65">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
-        <span style="letter-spacing:0.16em;text-transform:uppercase;color:${c};font-weight:700;font-size:9.5px">WHY ${verdict} · ${regime.toUpperCase().replace(/_/g,' ') || 'regime?'}</span>
+        <span style="letter-spacing:0.16em;text-transform:uppercase;color:${c};font-weight:700;font-size:9.5px">WHY ${DISPLAY.v(verdict)} · ${regime.toUpperCase().replace(/_/g,' ') || 'regime?'}</span>
         <span style="font-size:9px;color:var(--ink-3);letter-spacing:0.08em">tap LOGIC tab for full gate audit ▸</span>
       </div>
       <div>${whyHTML}</div>
@@ -12083,7 +12165,7 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
     return `<div style="margin-bottom:12px;padding:10px 14px;background:var(--bg-2);border:1px solid var(--line);border-left:2px solid ${c};font-family:var(--mono);font-variant-numeric:tabular-nums">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
         <span style="font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-3);font-weight:700">EVENT VOL · ER in ${dte}d · ATM straddle</span>
-        <span style="font-size:12px;font-weight:700;color:${c};letter-spacing:0.14em;padding:2px 10px;border-radius:2px;background:color-mix(in oklch,${c} 16%,transparent);border:1px solid color-mix(in oklch,${c} 40%,transparent)">${verdict}</span>
+        <span style="font-size:12px;font-weight:700;color:${c};letter-spacing:0.14em;padding:2px 10px;border-radius:2px;background:color-mix(in oklch,${c} 16%,transparent);border:1px solid color-mix(in oklch,${c} 40%,transparent)">${DISPLAY.v(verdict)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;font-size:11.5px">
         <div><div style="font-size:8.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-3);font-weight:700">Implied ±%</div><div style="font-size:14px;color:${im.implied_move_pct>=10?'var(--amb)':'var(--ink)'};font-weight:700">±${im.implied_move_pct.toFixed(2)}%</div></div>
@@ -13636,7 +13718,7 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
     const tkTip = `${tk}${name ? ' · ' + name.slice(0, 50) : ''}${sector ? '\n' + sector : ''}\nClick → open ticker home / external chart`;
     const pxTip = `Live price · ${_money(price)}\nClick → open price chart`;
     const chgTip = `Daily change · ${_fpct(chg)} (${dollarChg >= 0 ? '+' : ''}${_money(dollarChg).replace('$','$')})`;
-    const vdTip = `VERDICT · ${verdict}\nFinal screener decision after gates + scoring.\nUse this row to decide action.`;
+    const vdTip = `VERDICT · ${DISPLAY.v(verdict)}\nFinal screener decision after gates + scoring.\nUse this row to decide action.`;
     const bapTip = `BAP · Brutal Aggregate Pillar Score · ${bap}/100\nWeighted across Tech / RS / Quality / Smart-money / Catalyst pillars.`;
     const planTip = `Trade Plan · pre-placed orders\nEntry zone ${_money(entryLo)}-${_money(entryHi)} (limit buy)\nStop ${_money(stop)} (1.25× ATR · close-based)\nT1 ${_money(t1Price)} · T2 ${_money(t2Price)}\nHold: setup-dependent`;
     const rrTip = `Risk : Reward = 1 : ${rr.toFixed(1)}\nRisk/share ${_money(riskPerShare)} · Reward to T1 ${_money(t1Price - entryMid)}\nFloor: 3.0 ✓${rr >= 3 ? ' passes' : ' (below floor)'}`;
@@ -13652,7 +13734,7 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
             <span class="t1-tk" data-tip="${_esc(tkTip)}" data-tip-pos="below">${_esc(tk)}${sectorShort ? `<span class="sec">${_esc(sectorShort)}</span>` : ''}</span>
             <span class="t1-px" data-tip="${_esc(pxTip)}" data-tip-pos="below">${_money(price)}</span>
             <span class="t1-chg ${chgCls}" data-tip="${_esc(chgTip)}" data-tip-pos="below">${chgArrow}${Math.abs(chg).toFixed(2)}%</span>
-            <span class="t1-vd ${vdCls}" data-tip="${_esc(vdTip)}" data-tip-pos="below">${_esc(verdict)}</span>
+            <span class="t1-vd ${vdCls}" data-tip="${_esc(vdTip)}" data-tip-pos="below">${_esc(DISPLAY.v(verdict))}</span>
             ${tier ? `<span class="t1-tier" data-tip="${_esc(tierTip)}" data-tip-pos="below">${_esc(tier)}</span>` : ''}
             <span class="t1-bap" data-tip="${_esc(bapTip)}" data-tip-pos="below"><b>BAP ${bap}</b></span>
             ${(entryLo > 0 && stop > 0 && t1Price > 0) ? `
@@ -23877,7 +23959,7 @@ const QuantPerformance = (function() {
           <div class="qe-pane">
             <h2 class="qe-h2">System Edge Verdict <span class="meta">Wilson LB ${overallWilsonLB != null ? _fmt(overallWilsonLB, 0) : '—'}% · n=${wins+losses}</span></h2>
             <div class="qperf-verdict">
-              <div class="qperf-verdict-v ${verdictCls}">${verdict}</div>
+              <div class="qperf-verdict-v ${verdictCls}">${DISPLAY.v(verdict)}</div>
               <div class="qperf-verdict-nb">${verdictNb}</div>
               <div class="qperf-verdict-meta">
                 ${wr != null ? `<div class="row"><span class="k">Point estimate</span><span class="v">${_fmt(wr, 1)}% WR</span></div>` : ''}
@@ -26592,6 +26674,12 @@ window.QuantDetail = (function() {
       root.innerHTML = `<div style="padding:60px;text-align:center;color:var(--ink-3);font-family:var(--mono);font-size:12px">Ticker <b>${_esc(ticker)}</b> not resolved · try a different ticker</div>`;
       return;
     }
+    // 2026-05-25 · Wrap t in _fld-routing Proxy so EVERY t.* read across all
+    // 14 sub-tab render functions automatically uses the field fallback chain.
+    // Fields in _FIELD_CHAINS (score/price/stop/t1/t2/rr/verdict/tier/etc.)
+    // now resolve consistently — when canonical_trade_plan.* starts shipping,
+    // all 14 tabs see the new value at once. No find-and-replace needed.
+    t = window._wrapT ? window._wrapT(t) : t;
     _currentT = t;
     if (defaultSub && SUB_TABS.find(s => s.id === defaultSub)) _activeSubTab = defaultSub;
     // 2026-05-13 (round 5) · renderDecisionStrip removed — fully duplicated
@@ -26800,7 +26888,7 @@ window.QuantDetail = (function() {
     if (verdict === 'BUY' || (score >= 75 && (conv === 'T1' || conv === 'T2'))) {
       out.overview = { color:'gn', label:'BULLISH', reason:`score ${score} · ${conv||'tier set'}` };
     } else if (verdict === 'SHORT' || verdict === 'AVOID') {
-      out.overview = { color:'rd', label:verdict, reason:`engine says ${verdict}` };
+      out.overview = { color:'rd', label:DISPLAY.v(verdict), reason:`engine says ${DISPLAY.v(verdict)}` };
     } else if (score && score < 50) {
       out.overview = { color:'rd', label:'AVOID', reason:`score ${score} < 50 floor` };
     } else if (score) {
@@ -27961,7 +28049,7 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     const vColor = vCls === 'gn' ? '#5be57c' : vCls === 'rd' ? '#ff6b5b' : vCls === 'am' ? '#ffb95c' : 'var(--ink-2)';
     return `<div class="qln-the-call-row" style="margin:14px 0 4px;padding:10px 14px;background:rgba(${vCls==='gn'?'91,229,124':vCls==='rd'?'255,107,91':vCls==='am'?'255,185,92':'128,132,122'},0.08);border-left:3px solid ${vColor};border-radius:3px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;font:600 11.5px ui-monospace,monospace">
       <span style="color:var(--ink-3);letter-spacing:0.14em;flex-shrink:0">◆ ${lensName.toUpperCase()} · ${horizon}</span>
-      <span style="color:${vColor};font-weight:800;letter-spacing:0.06em;flex-shrink:0">THE CALL: ${verdict}</span>
+      <span style="color:${vColor};font-weight:800;letter-spacing:0.06em;flex-shrink:0">THE CALL: ${DISPLAY.v(verdict)}</span>
       <span style="color:var(--ink-1);font-weight:500;flex:1;min-width:200px">${reason}</span>
       ${trigger ? `<span style="color:var(--ink-3);font-size:10.5px;font-weight:500"><b>TRIGGER:</b> ${trigger}</span>` : ''}
     </div>`;
@@ -30531,12 +30619,15 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     const tk = t.ticker || '—';
     const name = (t.name || '').toString();
     const sector = (t.sector || '').toString();
-    const price = +t.price || 0;
+    // 2026-05-25 · read via _fld single source of truth so banner agrees with every sub-tab
+    const price = +(window._fld ? window._fld(t,'price') : t.price) || 0;
     const chg = +t.perf_1d || +t.pct_chg || 0;
     const dollarChg = (chg / 100) * price;
-    const verdict = (t.decision?.verdict || t.verdict || '—').toString().toUpperCase();
-    const tier = (t.conviction_tier || t.conviction || '').toString().toUpperCase();
-    const bap = Math.round(+t.score || 0);
+    const verdictRaw = (window._fld ? window._fld(t,'verdict') : (t.decision?.verdict || t.verdict || '—'));
+    const verdict = String(verdictRaw || '—').toUpperCase();
+    const verdictLbl = window._fldLabel ? window._fldLabel(t,'verdict') : DISPLAY.v(verdict);
+    const tier = String(window._fld ? (window._fld(t,'tier') || '') : (t.conviction_tier || t.conviction || '')).toUpperCase();
+    const bap = Math.round(+(window._fld ? window._fld(t,'score') : t.score) || 0);
     const setup = (t.setup_family || t.setup || '').toString().replace(/_/g, ' ');
     const entryQ = (t.entry_quality || '').toString().toUpperCase();
     const atrPctRaw = +t.atr_pct || (+t.atr && price ? (+t.atr / price * 100) : 0);
@@ -30559,12 +30650,19 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
       entryHi: _engPay.entry?.hi ?? null,
     } : {};
     // Canonical screener values (static scan-time structural targets)
+    // 2026-05-25 · sourced through _fld so all 14 sub-tabs read identical numbers
+    const _F = window._fld;
+    const _stopFld = _F ? +_F(t,'stop')      : +t.stop;
+    const _eloFld  = _F ? +_F(t,'entry_low') : +(t.entry_low ?? t.entry_lo);
+    const _ehiFld  = _F ? +_F(t,'entry_high'): +(t.entry_high ?? t.entry_hi);
+    const _t1Fld   = _F ? +_F(t,'t1')        : +(t.target1 ?? t.t1);
+    const _t2Fld   = _F ? +_F(t,'t2')        : +(t.target2 ?? t.t2);
     const _planCanon = {
-      stop: +t.stop || 0,
-      entryLo: +(t.entry_low ?? t.entry_lo) || 0,
-      entryHi: +(t.entry_high ?? t.entry_hi) || +(t.entry_low ?? t.entry_lo) || 0,
-      t1: +(t.target1 ?? t.t1) || 0,
-      t2: +(t.target2 ?? t.t2) || +(t.target1 ?? t.t1) || 0,
+      stop:    _stopFld || 0,
+      entryLo: _eloFld  || 0,
+      entryHi: _ehiFld  || _eloFld || 0,
+      t1:      _t1Fld   || 0,
+      t2:      _t2Fld   || _t1Fld || 0,
     };
     // Merge: engine overrides canon when available · NO ATR FALLBACK
     const _p = {
@@ -30584,16 +30682,22 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     const _riskForRR = _entryMidForRR - stop;
     const rr = (_useStratPlan && _riskForRR > 0)
       ? +((t1Price - _entryMidForRR) / _riskForRR).toFixed(2)
-      : (+(t.rr_ratio ?? t.rr) || 0);
+      : (+(_F ? _F(t,'rr') : (t.rr_ratio ?? t.rr)) || 0);
 
     const vdCls = verdict === 'BUY' ? 'gn' : (verdict === 'AVOID' || verdict === 'SELL' || verdict === 'SHORT' || verdict === 'KILL') ? 'rd' : (verdict === 'WATCH' || verdict === 'WAIT' || verdict === 'HOLD') ? 'am' : 'nu';
     const chgCls = chg > 0.01 ? 'gn' : chg < -0.01 ? 'rd' : 'nu';
     const chgArrow = chg > 0.01 ? '▲' : chg < -0.01 ? '▼' : '·';
     const rrCls = rr >= 3 ? 'gn' : rr >= 2 ? 'am' : rr > 0 ? 'rd' : 'nu';
-    const tierTip = tier === 'T1' ? 'Tier 1 (highest conviction) · full size'
-                 : tier === 'T2' ? 'Tier 2 (medium) · half size'
-                 : tier === 'T3' ? 'Tier 3 (small starter) · 15-30% size'
-                 : tier === 'WATCH' ? 'WATCH only · no capital'
+    // 2026-05-25 · Tier is a SCORE-BAND lookup (score≥88→T1, ≥78→T2, ≥70→T3,
+    // ≥60→WATCH, else AVOID). Independent of gate aggregation — answers
+    // "how big a position?" not "can I trade?". Mismatch with TRADE VERDICT
+    // is expected when a high-score ticker fails a gate (entry quality, R:R,
+    // earnings blackout, etc.) or vice-versa.
+    const tierTip = tier === 'T1' ? 'SCORE TIER · T1 · full size · score ≥88\nPure score-band — does not consider gates. See TRADE VERDICT for tradability.'
+                 : tier === 'T2' ? 'SCORE TIER · T2 · half size · score 78–87\nPure score-band — does not consider gates.'
+                 : tier === 'T3' ? 'SCORE TIER · T3 · 15-30% size · score 70–77\nPure score-band — does not consider gates.'
+                 : tier === 'WATCH' ? 'SCORE TIER · WATCH · no capital · score 60–69\nBelow position-size threshold.'
+                 : tier === 'AVOID' ? 'SCORE TIER · AVOID · score <60\nBelow tradable threshold by pure score.'
                  : 'Conviction tier not set';
 
     // R-multiples
@@ -30750,7 +30854,7 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     const tkTip = `${tk}${name ? ' · ' + name.slice(0, 50) : ''}${sector ? '\n' + sector : ''}\nClick → ticker home`;
     const pxTip = `Live price · ${_moneyL(price)}\nClick → price chart`;
     const chgTip = `Daily change · ${_fpct(chg)} (${dollarChg >= 0 ? '+' : ''}${_moneyL(dollarChg).replace('$','$')})`;
-    const vdTip = `VERDICT · ${verdict}\nFinal screener decision after gates + scoring.`;
+    const vdTip = `TRADE VERDICT · ${verdictLbl}\nGate-aggregated: regime · liquidity · earnings blackout · entry quality · R:R floor · setup kill list.\nAnswers: "Can I trade this today?"\nMay differ from Score Tier — verdict reflects whether gates pass; tier reflects raw score band.`;
     const bapTip = `BAP · Brutal Aggregate Pillar Score · ${bap}/100\nWeighted across Tech / RS / Quality / Smart-money / Catalyst pillars.`;
     const planTip = `Trade Plan · pre-placed orders\nEntry ${_moneyL(entryLo)}-${_moneyL(entryHi)} (limit buy)\nStop ${_moneyL(stop)} (1.25× ATR · close-based)\nT1 ${_moneyL(t1Price)} · T2 ${_moneyL(t2Price)}`;
     const rrTip = `Risk : Reward = 1 : ${rr.toFixed(1)}\nRisk/share ${_moneyL(riskPerShare)} · Reward to T1 ${_moneyL(t1Price - entryMid)}\nFloor: 3.0${rr >= 3 ? ' ✓ passes' : ' ⚠ below floor'}`;
@@ -30789,8 +30893,8 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
           <span class="t1-tk" data-tip="${_esc(tkTip)}" data-tip-pos="below">${_esc(tk)}${sectorShort ? `<span class="sec">${_esc(sectorShort)}</span>` : ''}</span>
           <span class="t1-px" data-tip="${_esc(pxTip)}" data-tip-pos="below" id="qdBannerPx">${_moneyL(price)}</span>
           <span class="t1-chg ${chgCls}" data-tip="${_esc(chgTip)}" data-tip-pos="below" id="qdBannerChgWrap">${chgArrow}${Math.abs(chg).toFixed(2)}%</span>
-          <span class="t1-vd ${vdCls}" data-tip="${_esc(vdTip)}" data-tip-pos="below">${_esc(verdict)}</span>
-          ${tier ? `<span class="t1-tier" data-tip="${_esc(tierTip)}" data-tip-pos="below">${_esc(tier)}</span>` : ''}
+          <span class="t1-vd ${vdCls}" data-tip="${_esc(vdTip)}" data-tip-pos="below"><span class="t1-pill-lbl">TRADE</span>${_esc(DISPLAY.v(verdict))}</span>
+          ${tier ? `<span class="t1-tier" data-tip="${_esc(tierTip)}" data-tip-pos="below"><span class="t1-pill-lbl">SIZE</span>${_esc(tier)}</span>` : ''}
           <span class="t1-bap" data-tip="${_esc(bapTip)}" data-tip-pos="below"><b>BAP ${bap}</b></span>
           ${(entryLo > 0 && stop > 0 && t1Price > 0) ? `
             <span class="t1-plan" data-tip="${_esc(planTip)}" data-tip-pos="below">
@@ -34721,7 +34825,7 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
         const rangePct = (((hypPx - stopP) / (t1c.price - stopP)) * 100).toFixed(0);
         stateEl.innerHTML = `
           <div class="smc-wi-cell"><div class="k">STOP→T1 %</div><div class="v ${rangePct >= 80 ? 'gn' : rangePct <= 20 ? 'rd' : 'am'}">${rangePct}%</div></div>
-          <div class="smc-wi-cell"><div class="k">VERDICT</div><div class="v ${vCls}">${verdict}</div></div>
+          <div class="smc-wi-cell"><div class="k">VERDICT</div><div class="v ${vCls}">${DISPLAY.v(verdict)}</div></div>
           <div class="smc-wi-cell"><div class="k">+OB STATE</div><div class="v ${oCls}">${obState}</div></div>
           <div class="smc-wi-cell"><div class="k">NEXT LEVEL</div><div class="v">${nextLvl}</div></div>`;
       };
@@ -42657,7 +42761,7 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       <div class="qln-panel">
         <div class="qln-h2"><span class="num">A</span>Cross-Read Verdict<span class="sub">— news × insider · is the smart money moving with the narrative?</span><span class="tag">SYNTHESIS</span></div>
         <div class="qln-g5" style="grid-template-columns:1.5fr 1fr 1fr 1fr 1fr">
-          <div class="qln-cell ${vCls}"><div class="qln-ck">VERDICT</div><div class="qln-cv ${vCls}" style="font-size:13px">${verdict}</div><div class="qln-csub">cross-read</div></div>
+          <div class="qln-cell ${vCls}"><div class="qln-ck">VERDICT</div><div class="qln-cv ${vCls}" style="font-size:13px">${DISPLAY.v(verdict)}</div><div class="qln-csub">cross-read</div></div>
           <div class="qln-cell ${newsBull?'gn':newsBear?'rd':'am'}"><div class="qln-ck">NEWS</div><div class="qln-cv">${newsScore != null ? (newsScore>=0?'+':'')+newsScore.toFixed(2) : '—'}</div><div class="qln-csub">30d composite</div></div>
           <div class="qln-cell ${insBull?'gn':insBear?'rd':'am'}"><div class="qln-ck">INSIDER</div><div class="qln-cv">${insBuys != null && insSells != null ? `+${insBuys} / −${insSells}` : '—'}</div><div class="qln-csub">90d Form 4</div></div>
           <div class="qln-cell ${ceoBuy?'gn':''}"><div class="qln-ck">CEO BUY</div><div class="qln-cv ${ceoBuy?'gn':'qd-dim'}">${ceoBuy?'YES':'no'}</div><div class="qln-csub">conviction signal</div></div>
@@ -53178,7 +53282,7 @@ const QuantMlEdge = (function () {
           <div class="a" style="flex:${a} 0 0;">α ${a.toFixed(0)}%</div>
           <div class="b" style="flex:${b} 0 0;">β ${b.toFixed(0)}%</div>
         </div>
-        <div class="ab-verdict ${vCls}">${verdict}</div>
+        <div class="ab-verdict ${vCls}">${DISPLAY.v(verdict)}</div>
         <div class="ab-num">EV <b>${fmt$(ev)}</b> vs β-only ${fmt$(beta_ev)} → claimed alpha <b>${fmt$(alpha)}</b>/sh</div>
       </div>`;
   }

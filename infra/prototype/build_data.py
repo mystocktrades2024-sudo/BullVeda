@@ -1558,10 +1558,19 @@ def compact_row(r: dict) -> dict:
         "cap_bucket":   _cap_bucket(r.get("market_cap")),
         "week52_high":  r.get("week52_high"),
         "week52_low":   r.get("week52_low"),
-        # conviction_tier falls back to conviction.label when the top-level
-        # field is unset by the scan (added 2026-05-11 — was null for all tickers
-        # because the scan only writes the nested conviction dict).
-        "conviction_tier": r.get("conviction_tier") or (r.get("conviction") or {}).get("label"),
+        # 2026-05-25 · conviction_tier now ALWAYS recomputed from the current
+        # score so it can't go stale. Previously fell back to nested
+        # `conviction.label` from the original pick, which was never re-synced
+        # — caused impossible labels (JBL=T2 at score 74, AAPL=WATCH at score 5).
+        # Lookup mirrors analysis.py:5473 `assign_conviction_tier` post-2026-05-11
+        # (score-band only — no gate dependencies — the verdict field owns gates).
+        "conviction_tier": (lambda _s: (
+            "T1"    if _s >= 88 else
+            "T2"    if _s >= 78 else
+            "T3"    if _s >= 70 else
+            "WATCH" if _s >= 60 else
+            "AVOID"
+        ))(r.get("score") or 0),
         "entry_quality":  r.get("entry_quality"),
         "star_rating":    r.get("star_rating"),
         "reaction_checklist": r.get("reaction_checklist") or [],
@@ -3779,7 +3788,12 @@ def main():
                     "ticker":   t,
                     "price":    r.get("price"),
                     "score":    r.get("score") or r.get("composite_score"),
-                    "verdict":  r.get("verdict") or (r.get("decision") or {}).get("verdict") or r.get("stage"),
+                    # 2026-05-25 · Anti-stale: prefer the freshly-scanned top-level
+                    # `verdict`. Only fall back to nested `decision.verdict` when the
+                    # top-level field is genuinely missing (legacy rows). `stage` is
+                    # a lifecycle marker that may carry over from prior runs — drop it
+                    # from the fallback chain.
+                    "verdict":  r.get("verdict") or (r.get("decision") or {}).get("verdict"),
                     "setup":    r.get("setup_family") or r.get("setup"),
                     "sector":   r.get("sector"),
                     "rs_rank":  r.get("rs_rank"),
