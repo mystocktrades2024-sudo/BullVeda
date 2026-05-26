@@ -5136,6 +5136,21 @@ if __name__ == "__main__":
 
     if not args or (len(args) == 1 and args[0].lower() == "--fresh"):
         run_daily_scan(force_fresh="--fresh" in args)
+        # Append today's top-20 Momentum candidates to data/momentum_snapshots.jsonl
+        # so the HISTORY sub-view of the Momentum tab can build a predicted-vs-
+        # realized calibration over time. Idempotent per-date; never raises.
+        try:
+            import momentum_snapshot as _ms
+            _msr = _ms.write_snapshot()
+            try:
+                log.info(f"momentum_snapshot: {_msr.get('status')} "
+                         f"date={_msr.get('date')} written={_msr.get('written')} "
+                         f"of {_msr.get('total_candidates','-')} candidates")
+            except Exception:
+                pass
+        except Exception as _mse:
+            try: log.warning(f"momentum_snapshot failed: {_mse}")
+            except Exception: pass
     elif args[0].lower() == "deep" and len(args) > 1:
         run_deep_dive(args[1].upper())
     elif args[0].lower() == "history":

@@ -540,6 +540,34 @@ async def _api_reports_list(auth: HTTPBasicCredentials = Depends(_check_auth),
         raise HTTPException(500, str(e))
 
 
+@app.get("/api/momentum-history")
+async def _api_momentum_history(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """
+    Predicted-vs-realized calibration for Momentum-tab picks.
+
+    Reads data/momentum_snapshots.jsonl, computes realized 5d forward returns
+    via eodhd_client.eod, compares to SPY baseline, returns {snapshots,
+    calibration}. Cached 1hr to keep EODHD pressure minimal.
+
+    Per CLAUDE.md principle 1 (statistical rigor — sample size surfaced),
+    11 (edge erosion — calibration tracked over time), 16 (per-sub-strategy
+    attribution), 20 (process > outcome — predicted vs realized, not P&L).
+    """
+    if isinstance(auth, Response):
+        return auth
+    try:
+        from momentum_history_api import build_momentum_history
+        return build_momentum_history()
+    except Exception as e:
+        # Return structured error so the UI can render it gracefully instead of 500
+        return {
+            "snapshots": [],
+            "calibration": None,
+            "status": "error",
+            "message": f"{type(e).__name__}: {str(e)[:200]}",
+        }
+
+
 @app.get("/api/system-status")
 async def _api_system_status(auth: HTTPBasicCredentials = Depends(_check_auth)):
     """JSON system-status report (same data as scripts/system_status.py --json)."""
