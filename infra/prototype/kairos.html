@@ -14664,9 +14664,31 @@ const V3_WORKSPACES = {
     if (cr.btc_price != null) items.push('BTC ' + (+cr.btc_price).toFixed(0));
     return items.length ? v3GenericList(items) : v3GenericList(['<i>BTC regime unavailable</i>']);
   }}, col3:{h:'PLAN',meta:'regime',body:()=>'<div class="v3-pl">Treat as risk-on proxy. Decouples in panic regimes.</div>'}, col4:{h:'NEWS',meta:'today',body:(d,a)=>v3IntelList(a)} },
-  playbook: { title:'Playbook', sub:'system rulebook · 5 pillars · 4 regimes · 20 principles', custom:'quantPlaybook', col1:{h:'RULES',meta:'live',body:()=>v3GenericList(['§01 Regime gate','§02 Wilson kill','§03 Event risk','§04 Sizing'])}, col2:{h:'THRESHOLDS',meta:'config',body:()=>v3GenericList(['BAP floor by regime','R:R ≥ 3.0','Earnings ≥ 14d clear'])}, col3:{h:'PLAN',meta:'when to override',body:()=>'<div class="v3-pl">Override flag + audit note. Each override is logged.</div>'}, col4:{h:'CHANGES',meta:'recent',body:()=>v3GenericList(['CHANGELOG renders from docs/changelog.md'])} },
-  accuracy: { title:'Accuracy', sub:'forecast vs realized · calibration · drift', custom:'quantAccuracy', col1:{h:'CALIBRATION',meta:'30d (illustrative)',body:()=>v3GenericList(['ex: Predicted PF: 1.8 · Realized: 1.65','ex: Predicted WR: 62% · Realized: 58%'])}, col2:{h:'BUCKETS',meta:'score band',body:()=>v3GenericList(['BAP 80–90: 71% WR','BAP 70–80: 54% WR','BAP 60–70: 38% WR'])}, col3:{h:'PLAN',meta:'recalibrate',body:()=>'<div class="v3-pl">Recalibrate weekly. Drift detection runs nightly.</div>'}, col4:{h:'AUDIT',meta:'drift',body:()=>v3GenericList(['Drift-check logs here'])} },
-  fields: { title:'Fields · Schema', sub:'ticker_snapshots · schema explorer · provenance', custom:'quantFields', col1:{h:'TIER 0',meta:'core 12',body:()=>v3GenericList(['ticker · price · score · verdict · setup','stop · target1 · target2 · rvol · rsi · adx'])}, col2:{h:'TIER 1',meta:'48 fields',body:()=>v3GenericList(['Full pillars · catalyst · entry quality','RS rank · sector · earnings · IV rank'])}, col3:{h:'TIER 2',meta:'120 fields',body:()=>'<div class="v3-pl">Every field captured per scan, append-only to ticker_snapshots SQLite.</div>'}, col4:{h:'AUDIT',meta:'today',body:()=>v3GenericList(['Today\'s snapshot count: N · last scan T'])} },
+  playbook: { title:'Playbook', sub:'system rulebook · 5 pillars · 4 regimes · 20 principles', custom:'quantPlaybook', col1:{h:'RULES',meta:'live',body:()=>v3GenericList(['§01 Regime gate (Risk-On Trending / Choppy / Risk-Off / Panic)','§02 Wilson kill (n≥30 + LB)','§03 Event risk (no entries within 7d of earnings)','§04 Sizing (half-Kelly × regime × VIX × DD multipliers)'])}, col2:{h:'THRESHOLDS',meta:'config-driven',body:(d)=>{
+    // Pull live regime thresholds from data.regime if available
+    const r = (d && d.regime) || {};
+    const items = ['BAP floor: risk-on trend 65 · choppy 72 · risk-off 78 · panic ∞', 'R:R ≥ 3.0 (4.0 in risk-off)', 'Earnings ≥ 14d clear (configurable)'];
+    if (r.name) items.unshift('Active regime · ' + r.name);
+    return v3GenericList(items);
+  }}, col3:{h:'PLAN',meta:'when to override',body:()=>'<div class="v3-pl">Override flag + audit note. Each override is logged in <code>data/open_items.json</code>.</div>'}, col4:{h:'CHANGES',meta:'recent',body:()=>v3GenericList(['See <code>docs/changelog.md</code> for full history','Recent: VINOD-BUGS-5, score overflow fix, lazy-load architecture'])} },
+  accuracy: { title:'Accuracy', sub:'forecast vs realized · calibration · drift', custom:'quantAccuracy', col1:{h:'CALIBRATION',meta:'30d',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · calibration report renders from <code>cache/ml/calibration_report.json</code>','Wire via /api/calibration endpoint (pending)'])}, col2:{h:'BUCKETS',meta:'score band',body:(d)=>{
+    // Surface setup_family_stats Wilson buckets — closest live proxy
+    const sfs = (d && d.setup_family_stats) || {};
+    const items = Object.entries(sfs).slice(0, 4).map(([name, s]) => {
+      const wr = s.win_rate != null ? (s.win_rate * 100).toFixed(0) + '%' : '—';
+      const lb = s.wr_low_95 != null ? (s.wr_low_95 * 100).toFixed(0) + '%' : '—';
+      return name + ' · WR ' + wr + ' · LB ' + lb;
+    });
+    return items.length ? v3GenericList(items) : v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · per-band stats need wire']);
+  }}, col3:{h:'PLAN',meta:'recalibrate',body:()=>'<div class="v3-pl">Recalibrate weekly. Drift detection runs nightly via launchd. See <code>scripts/sharpe_setup_trend.py</code>.</div>'}, col4:{h:'AUDIT',meta:'drift',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · drift log render pending — wire <code>cache/drift_alerts.json</code>'])} },
+  fields: { title:'Fields · Schema', sub:'ticker_snapshots · schema explorer · provenance', custom:'quantFields', col1:{h:'TIER 0',meta:'core 12',body:()=>v3GenericList(['ticker · price · score · verdict · setup','stop · target1 · target2 · rvol · rsi · adx'])}, col2:{h:'TIER 1',meta:'48 fields',body:()=>v3GenericList(['Full pillars · catalyst · entry quality','RS rank · sector · earnings · IV rank'])}, col3:{h:'TIER 2',meta:'120 fields',body:()=>'<div class="v3-pl">Every field captured per scan, append-only to <code>ticker_snapshots</code> SQLite. Schema in <code>db.py</code>.</div>'}, col4:{h:'AUDIT',meta:'today',body:(d)=>{
+    // Compute snapshot count + last scan from data
+    const items = [];
+    if (d && d.scan_count != null) items.push('Today\'s scan count · ' + d.scan_count);
+    if (d && d.run_timestamp) items.push('Last scan · ' + new Date(d.run_timestamp).toLocaleString());
+    if (d && d.run_date) items.push('Run date · ' + d.run_date);
+    return items.length ? v3GenericList(items) : v3GenericList(['<i>scan metadata unavailable</i>']);
+  }} },
   reference: { title:'Reference', sub:'glossary · sources · internal docs · A–Z', custom:'quantReference', col1:{h:'TERMS',meta:'a–z',body:()=>v3GenericList(['BAP · Bayesian Action Probability','RS · Relative Strength','MTF · Multi-timeframe alignment'])}, col2:{h:'SOURCES',meta:'data',body:()=>v3GenericList(['EODHD · OHLCV + fundamentals','Schwab · options chain','Zacks · proprietary rank'])}, col3:{h:'PLAN',meta:'cite',body:()=>'<div class="v3-pl">Every claim cites a source. Every source has a refresh cadence.</div>'}, col4:{h:'LINKS',meta:'external',body:()=>v3GenericList(['CLAUDE.md · system principles','docs/changelog.md','docs/lessons.md'])} },
   status: { title:'Status', sub:'system health · feeds · launchd jobs · incidents', custom:'quantStatus', col1:{h:'CHECKS',meta:'12 of 12',body:()=>v3GenericList(['EODHD quota · OK','Cache fill rate · OK','Last scan · OK','Server uptime · OK'])}, col2:{h:'FRESHNESS',meta:'feeds',body:()=>v3GenericList(['Tickers: 5m ago','Regime: 2h ago','Fundamentals: 4h ago'])}, col3:{h:'PLAN',meta:'incident',body:()=>'<div class="v3-pl">Slack alert on 2 consecutive health-check fails. Recovery message on resume.</div>'}, col4:{h:'INCIDENTS',meta:'recent',body:()=>v3GenericList(['No incidents in last 7 days'])} },
   settings: { title:'Settings', sub:'role · capabilities · preferences · audit', custom:'quantSettings', col1:{h:'ROLE',meta:'current',body:()=>v3GenericList(['Owner','All capabilities enabled','CapStudio matrix admin'])}, col2:{h:'CAPABILITIES',meta:'enabled',body:()=>v3GenericList(['Module render: ALL','Live trading: gated','Override gates: gated'])}, col3:{h:'PLAN',meta:'change',body:()=>'<div class="v3-pl">Role changes apply on next page load. CapStudio matrix is source of truth.</div>'}, col4:{h:'AUDIT',meta:'role log',body:()=>v3GenericList(['Role change log renders here'])} },
@@ -26622,6 +26644,7 @@ const QuantLeaders = (function() {
 
   function _renderFriendsPanel() {
     return `
+      <div style="margin:8px 10px 12px;padding:10px 14px;border:1px solid #f87171;background:rgba(248,113,113,0.10);border-left:4px solid #f87171;border-radius:2px;font:600 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:#f87171;letter-spacing:0.06em">⚠ DEMO DATA · Track Record / Friends Circle is a UI prototype. The 7 traders shown (Vinod K., Raj S., Phani G., Priya M., Anand T., Karthik R., Suresh B.) + their trades + R-multiples are all mock data. Will be replaced by <code>/v2/data_leaders.json</code> when social/leaderboard backend ships.</div>
       <div class="qlead-priv">
         <span class="ic">🛡</span>
         <span><b style="color:var(--ink)">Trust circle · invite-only.</b> You share with ${_circle.length} friends; they share with you. Real $ amounts are never exposed — only R-multiple, %, win-rate, and setup mix.</span>
@@ -26650,6 +26673,7 @@ const QuantLeaders = (function() {
 
   function _renderIdeasPanel() {
     return `
+      <div style="margin:8px 10px 12px;padding:10px 14px;border:1px solid #f87171;background:rgba(248,113,113,0.10);border-left:4px solid #f87171;border-radius:2px;font:600 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:#f87171;letter-spacing:0.06em">⚠ DEMO DATA · Pinned Ideas are UI prototypes. AVGO/CRWD/MU/FSLR cards + Vinod K./Raj S./Priya M./Suresh B. theses are all mock data. Backend not yet wired.</div>
       <div class="qlead-priv">
         <span class="ic">💡</span>
         <span><b style="color:var(--ink)">Pinned ideas</b> are picks friends chose to share with thesis. You see the reasoning, not just the ticker — so you decide for yourself, not blind-copy.</span>
