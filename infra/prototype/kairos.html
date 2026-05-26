@@ -18161,16 +18161,13 @@ const QuantOptions = (function() {
               <thead><tr>
                 <th>Date</th>
                 <th>Ticker</th>
-                <th>Source</th>
-                <th>Status / Setup</th>
-                <th class="r">Entry</th>
-                <th class="r">R:R</th>
-                <th>Outcome</th>
-                <th class="r">Realized %</th>
-                <th class="r">MFE / MAE</th>
-                <th class="r">Days</th>
+                <th>Verdict</th>
+                <th class="r">Predicted $</th>
+                <th class="r">Actual $</th>
+                <th>+ / −</th>
+                <th class="r">Return</th>
               </tr></thead>
-              <tbody id="qo-hist-tbody"><tr><td colspan="10" style="text-align:center;color:var(--ink-3);padding:30px;font-family:var(--mono);font-size:12px">⌛ loading pick history…</td></tr></tbody>
+              <tbody id="qo-hist-tbody"><tr><td colspan="7" style="text-align:center;color:var(--ink-3);padding:30px;font-family:var(--mono);font-size:12px">⌛ loading pick history…</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -18453,28 +18450,29 @@ const QuantOptions = (function() {
       const realized = r.realized_pct;
       const realizedCls = realized == null ? 'color:var(--ink-3)' : realized > 0 ? 'color:var(--gn)' : 'color:var(--rd)';
       const realizedTxt = realized == null ? '—' : (realized > 0 ? '+' : '') + realized.toFixed(2) + '%';
-      const mfeMae = (r.mfe_pct != null || r.mae_pct != null)
-        ? `<span style="color:var(--gn)">+${_f(r.mfe_pct,1)}</span> / <span style="color:var(--rd)">${_f(r.mae_pct,1)}</span>`
-        : '—';
-      // Source badge: blue for options_flow (real), gray for general_picks (backfill proxy)
-      const srcBadge = r.source === 'general_picks'
-        ? '<span title="Backfill from main picks_history" style="font-family:var(--mono);font-size:9.5px;letter-spacing:0.08em;padding:2px 6px;border-radius:2px;background:rgba(150,150,150,0.18);color:var(--ink-2)">BACKFILL</span>'
-        : '<span title="Options Flow scanner" style="font-family:var(--mono);font-size:9.5px;letter-spacing:0.08em;padding:2px 6px;border-radius:2px;background:rgba(217,119,87,0.18);color:var(--copper)">UOA</span>';
-      // Setup label: real options-flow has status (STRONG/MODERATE/WEAK), backfill has setup_family
-      const setupLbl = r.source === 'general_picks'
-        ? (r.setup || r.status || '—')
-        : (r.status || '—');
+      // Verdict label: STRONG/MODERATE/WEAK + direction badge
+      const dir = r.direction || 'long';
+      const dirIcon = dir === 'short' ? '▼' : '▲';
+      const dirColor = dir === 'short' ? 'var(--rd)' : 'var(--gn)';
+      const stCol = r.status === 'STRONG' ? 'var(--gn)' : r.status === 'MODERATE' ? 'var(--am)' : 'var(--ink-2)';
+      // Predicted = the target price the system called
+      const predicted = r.target;
+      // Actual = exit price if we have it, else current/last known
+      const actual = r.exit_price;
+      // + / − badge: green ✓ for win, red ✗ for loss, neutral ⌛ for pending
+      let posNeg;
+      if (r.outcome === 'target_hit')      posNeg = '<span style="color:var(--gn);font-weight:800;font-size:14px">✓ +ve</span>';
+      else if (r.outcome === 'stop_hit')   posNeg = '<span style="color:var(--rd);font-weight:800;font-size:14px">✗ −ve</span>';
+      else if (r.outcome === 'expired')    posNeg = '<span style="color:var(--am);font-weight:700">⏱ flat</span>';
+      else                                  posNeg = '<span style="color:var(--ink-3)">⌛ pending</span>';
       return `<tr style="cursor:pointer" data-tkr="${r.ticker}">
         <td>${r.date || '—'}</td>
         <td style="font-weight:700">${r.ticker || '—'}</td>
-        <td>${srcBadge}</td>
-        <td style="${stCls(r.status)}">${setupLbl}</td>
-        <td class="r">$${_f(r.entry, 2)}</td>
-        <td class="r">${_f(r.rr, 1)}</td>
-        <td>${ocBadge(r.outcome)}</td>
+        <td><span style="color:${dirColor};font-weight:700">${dirIcon} ${dir.toUpperCase()}</span> · <span style="color:${stCol};font-weight:700">${r.status || '—'}</span></td>
+        <td class="r" style="color:var(--ink-1);font-weight:600">$${_f(predicted, 2)}</td>
+        <td class="r" style="color:var(--ink-1)">${actual != null ? '$' + _f(actual, 2) : '—'}</td>
+        <td>${posNeg}</td>
         <td class="r" style="${realizedCls};font-weight:700">${realizedTxt}</td>
-        <td class="r" style="font-size:11px">${mfeMae}</td>
-        <td class="r" style="color:var(--ink-2);font-size:11px">${r.days_held != null ? r.days_held + 'd' : '—'}</td>
       </tr>`;
     }).join('');
     // Row click → detail
