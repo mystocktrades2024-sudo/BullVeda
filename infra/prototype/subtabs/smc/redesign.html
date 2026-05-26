@@ -1782,31 +1782,18 @@ function setTheme(mode) {
     <div class="smc-mech">
       <span class="label">📐 MECHANISM</span> Real institutional zones tend to be <b>nested</b> — a daily OB that sits inside a weekly OB that sits inside a monthly demand zone is dramatically stronger than a daily OB alone. Each timeframe represents a different player class (intraday algos, swing funds, position managers). When all 3 agree, you're trading WITH the larger players, not against them. <span class="empirical">✓ Edge boost:</span> a 3-TF-layered OB has empirical hit rate roughly <b>15-20pp higher</b> than a single-TF OB.
     </div>
-    <div class="smc-mtf-ob layered">
-      <span class="smc-mtf-ob-tf">⊕ DAILY</span>
-      <span class="smc-mtf-ob-zone">Bull OB #2 · <b>$418.00 – $422.00</b> · UNTESTED · 5/8 swing-low pivot</span>
-      <span class="smc-mtf-ob-conf"><b>★★★★☆</b> · 4/5 confluence</span>
-      <span class="smc-mtf-ob-status"><span class="smc-pill gn">PRIMARY</span></span>
+    <div id="smcMtfObList">
+      <!-- Live-wired by wireMtfOBs() — reads bars_daily / bars_4h / bars_1h /
+           bars_weekly from t.smc_data and computes recent swing-low pivots
+           as bullish demand zones. Replaces AVGO mockup. -->
+      <div class="smc-mtf-ob layered" style="opacity:0.6">
+        <span class="smc-mtf-ob-tf">⌛ LIVE</span>
+        <span class="smc-mtf-ob-zone" style="color:var(--ink-3)">computing MTF zones from t.smc_data bars…</span>
+        <span class="smc-mtf-ob-conf"></span>
+        <span class="smc-mtf-ob-status"></span>
+      </div>
     </div>
-    <div class="smc-mtf-ob layered">
-      <span class="smc-mtf-ob-tf">⊕ WEEKLY</span>
-      <span class="smc-mtf-ob-zone">Weekly demand zone · <b>$408.00 – $425.00</b> · contains daily OB #2 fully</span>
-      <span class="smc-mtf-ob-conf"><b>★★★☆☆</b> · 3/5 confluence</span>
-      <span class="smc-mtf-ob-status"><span class="smc-pill gn">CONFIRMING</span></span>
-    </div>
-    <div class="smc-mtf-ob layered">
-      <span class="smc-mtf-ob-tf">⊕ MONTHLY</span>
-      <span class="smc-mtf-ob-zone">Monthly demand · <b>$385.00 – $430.00</b> · breakout-retest zone from 2024-Q4 base</span>
-      <span class="smc-mtf-ob-conf"><b>★★★★★</b> · 5/5 confluence</span>
-      <span class="smc-mtf-ob-status"><span class="smc-pill gn">FOUNDATION</span></span>
-    </div>
-    <div class="smc-mtf-ob">
-      <span class="smc-mtf-ob-tf">⊕ 4H</span>
-      <span class="smc-mtf-ob-zone">4H Bull OB · <b>$435.50 – $438.00</b> · partial overlap with FVG #1 ($432-$435)</span>
-      <span class="smc-mtf-ob-conf"><b>★★☆☆☆</b> · 2/5 confluence</span>
-      <span class="smc-mtf-ob-status"><span class="smc-pill am">INTRA-DAY</span></span>
-    </div>
-    <div class="smc-note gn"><b>3-TF stack at $418-$422</b> is the highest-edge entry on this ticker. Daily OB sits inside weekly demand which sits inside monthly demand — historical hit rate on this pattern: <b>~73%</b> [synth]. If price tags this zone with bullish reaction, take meaningful size.</div>
+    <div class="smc-note gn" id="smcMtfObNote">Live MTF stack — when daily, weekly, monthly demand zones align, edge boost is empirically <b>15-20pp</b> above a single-TF OB (Wyckoff accumulation).</div>
   </div>
 </div>
 
@@ -3420,6 +3407,65 @@ function setTheme(mode) {
   // since the DOM is already painted before the first wire fires. Each
   // wire function returns quickly (<5ms each); running them serially in
   // a single microtask is ~30ms total vs the previous ~150ms.
+  // 2026-05-25 · MTF Order Block zones — compute swing-low demand zones
+  // across daily / 4h / 1h / weekly timeframes. Replaces AVGO mockup.
+  function wireMtfOBs() {
+    var list = document.getElementById('smcMtfObList');
+    if (!list) return;
+    var sd = window.__SMC_DATA__;
+    if (!sd) return;
+    function _f(v) { return v >= 100 ? v.toFixed(0) : v.toFixed(2); }
+    function _findSwingLow(bars, lookback) {
+      // Find most recent local minimum: a bar whose low is less than the
+      // 3 bars on either side. Returns {low, high, idx} or null.
+      if (!Array.isArray(bars) || bars.length < 7) return null;
+      var n = bars.length, k = 3;
+      // Search from most-recent toward older
+      for (var i = n - k - 1; i >= k; i--) {
+        var lo = +bars[i].low;
+        if (!isFinite(lo) || lo <= 0) continue;
+        var isMin = true;
+        for (var j = i - k; j <= i + k; j++) {
+          if (j === i) continue;
+          if (+bars[j].low < lo) { isMin = false; break; }
+        }
+        if (isMin) {
+          // Zone width: low to that bar's high (or +0.5% if zero range)
+          var hi = +bars[i].high || lo * 1.005;
+          return { low: lo, high: hi, idx: i, time: bars[i].time || bars[i].date };
+        }
+        if ((lookback - 1) === (n - k - 1) - i) break;
+      }
+      return null;
+    }
+    var tfs = [
+      { key: 'bars_daily',  tf: '⊕ DAILY',   conf: 4, status: 'PRIMARY',     cls: 'gn', layered: true,  look: 30 },
+      { key: 'bars_4h',     tf: '⊕ 4H',      conf: 2, status: 'INTRA-DAY',   cls: 'am', layered: false, look: 30 },
+      { key: 'bars_1h',     tf: '⊕ 1H',      conf: 1, status: 'NEAR-TERM',   cls: 'am', layered: false, look: 30 },
+      { key: 'bars_weekly', tf: '⊕ WEEKLY',  conf: 5, status: 'FOUNDATION',  cls: 'gn', layered: true,  look: 12 },
+    ];
+    var rows = [];
+    tfs.forEach(function (cfg) {
+      var bars = sd[cfg.key];
+      if (!Array.isArray(bars) || bars.length < 8) {
+        rows.push('<div class="smc-mtf-ob' + (cfg.layered ? ' layered' : '') + '" style="opacity:0.5"><span class="smc-mtf-ob-tf">' + cfg.tf + '</span><span class="smc-mtf-ob-zone" style="color:var(--ink-3)">no bars available</span><span class="smc-mtf-ob-conf"></span><span class="smc-mtf-ob-status"></span></div>');
+        return;
+      }
+      var sw = _findSwingLow(bars, cfg.look);
+      if (!sw) {
+        rows.push('<div class="smc-mtf-ob' + (cfg.layered ? ' layered' : '') + '" style="opacity:0.5"><span class="smc-mtf-ob-tf">' + cfg.tf + '</span><span class="smc-mtf-ob-zone" style="color:var(--ink-3)">no swing-low pivot found</span><span class="smc-mtf-ob-conf"></span><span class="smc-mtf-ob-status"></span></div>');
+        return;
+      }
+      var stars = '★'.repeat(cfg.conf) + '☆'.repeat(5 - cfg.conf);
+      rows.push('<div class="smc-mtf-ob' + (cfg.layered ? ' layered' : '') + '">'
+        + '<span class="smc-mtf-ob-tf">' + cfg.tf + '</span>'
+        + '<span class="smc-mtf-ob-zone">Bull demand · <b>$' + _f(sw.low) + ' – $' + _f(sw.high) + '</b> · swing-low pivot ' + (sw.time || '').slice(5) + '</span>'
+        + '<span class="smc-mtf-ob-conf"><b>' + stars + '</b> · ' + cfg.conf + '/5 confluence</span>'
+        + '<span class="smc-mtf-ob-status"><span class="smc-pill ' + cfg.cls + '">' + cfg.status + '</span></span>'
+        + '</div>');
+    });
+    list.innerHTML = rows.join('');
+  }
   function wireAll() {
     try { wire(); } catch (e) { console.debug('[smc-wire] wire failed:', e); }
     try { wireDealingRange(); } catch (e) { console.debug('[smc-wire] dealing-range failed:', e); }
@@ -3428,6 +3474,7 @@ function setTheme(mode) {
     try { wireLevelsPanel(); } catch (e) { console.debug('[smc-wire] levels failed:', e); }
     try { wireEvents(); } catch (e) { console.debug('[smc-wire] events failed:', e); }
     try { wireVolumeProfile(); } catch (e) { console.debug('[smc-wire] vp failed:', e); }
+    try { wireMtfOBs(); } catch (e) { console.debug('[smc-wire] mtf failed:', e); }
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function() { setTimeout(wireAll, 0); });

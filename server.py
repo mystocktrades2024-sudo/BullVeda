@@ -7753,6 +7753,32 @@ async def options_flow_api():
     return {"total": 0, "results": [], "error": "options data removed; not in EODHD All-In-One"}
 
 
+@app.get("/api/iv-history")
+async def iv_history_api(t: str, days: int = 90):
+    """Return per-ticker IV history from data/iv_history.jsonl for the Earnings tab's IV-crush chart."""
+    from datetime import datetime, timedelta
+    iv_path = BASE_DIR / "data" / "iv_history.jsonl"
+    if not iv_path.exists():
+        return {"ticker": t.upper(), "points": [], "error": "no iv_history file"}
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    tk = t.upper().strip()
+    pts = []
+    for line in iv_path.read_text().splitlines():
+        if not line.strip(): continue
+        try:
+            r = json.loads(line)
+            if (r.get("ticker") or "").upper() != tk: continue
+            d = (r.get("date") or "")[:10]
+            if d < cutoff: continue
+            iv = r.get("current_iv") or r.get("iv_percentile")
+            if iv is None: continue
+            pts.append({"date": d, "iv": float(iv)})
+        except Exception:
+            continue
+    pts.sort(key=lambda x: x.get("date") or "")
+    return {"ticker": tk, "points": pts, "count": len(pts)}
+
+
 @app.get("/api/options-flow-accuracy")
 async def options_flow_accuracy_api(window_days: int = 90):
     """Projection accuracy summary for the daily Options Flow snapshots.
