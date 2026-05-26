@@ -1278,19 +1278,19 @@ function setTheme(mode) {
 
 <div class="smc-detail-banner">Detail Briefing — mechanism · regime · TF-confluence · falsification</div>
 
-<!-- §1 PRICE CHART (kept full, but flagged synth) -->
+<!-- §1 PRICE CHART · live wire (2026-05-25) — bars from t.smc_data.bars_daily, zones from t.smc_data.* -->
 <div class="smc-section">
   <div class="smc-section-head">
     <div>
-      <div class="smc-section-title"><span class="num">§1</span>Live Price · 90-day candles · all zones overlaid <span class="smc-pill synth">[synth · awaiting bar wire-up]</span></div>
-      <div class="smc-section-sub">production · pull bars from <code style="font:600 10px var(--mono);background:var(--bg-3);padding:1px 4px">t.bars_daily</code> · zones from <code style="font:600 10px var(--mono);background:var(--bg-3);padding:1px 4px">t.smc_data.*</code></div>
+      <div class="smc-section-title" id="smcPriceTitle"><span class="num">§1</span>Live Price · daily candles · all zones overlaid</div>
+      <div class="smc-section-sub">live wire · bars from <code style="font:600 10px var(--mono);background:var(--bg-3);padding:1px 4px">t.smc_data.bars_daily</code> · zones from <code style="font:600 10px var(--mono);background:var(--bg-3);padding:1px 4px">t.smc_data.{order_blocks,fvgs,breakers}</code></div>
     </div>
-    <span class="smc-pill teal">5 zones · 1 swept (BSL 5/14) · 2 unmitigated</span>
+    <span class="smc-pill teal" id="smcPriceZoneCount">— zones</span>
   </div>
   <div class="smc-section-body">
     <div class="smc-chart-card">
       <div class="smc-chart-title">
-        <span>AVGO daily · 90d · with OB / FVG / Breaker overlays + sweep markers</span>
+        <span id="smcPriceChartTitle">daily · with OB / FVG / Breaker overlays + sweep markers</span>
         <span class="legend">
           <i style="background:#22c55e"></i>bull OB ·
           <i style="background:#f87171"></i>bear OB ·
@@ -1299,6 +1299,12 @@ function setTheme(mode) {
           <i style="background:#d97757"></i>sweep
         </span>
       </div>
+      <div id="smcPriceChart" style="width:100%;height:380px;position:relative;background:var(--bg);border:1px solid var(--line);border-radius:2px">
+        <div id="smcPriceChartLoading" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font:600 11px var(--mono);color:var(--ink-3);letter-spacing:0.08em">⌛ mounting candlestick chart…</div>
+      </div>
+      <div id="smcPriceChartLegacy" style="display:none">
+      <!-- legacy synth SVG kept hidden as fallback for tickers with no bars -->
+      <div class="smc-chart-title-fallback" style="margin-top:6px;font:600 10px var(--mono);color:var(--ink-3);letter-spacing:0.08em">⚠ no daily bars in t.smc_data.bars_daily — showing prototype reference frame</div>
       <svg viewBox="0 0 1200 380" preserveAspectRatio="none">
         <g font-family="ui-monospace,monospace" font-size="9" fill="var(--ink-3)" font-weight="600">
           <text x="20" y="30">$445</text>
@@ -1360,8 +1366,9 @@ function setTheme(mode) {
           <text x="1180" y="345">5/15</text>
         </g>
       </svg>
+      </div>
     </div>
-    <div class="smc-note teal"><b>5/14 BSL sweep — two interpretations:</b> (a) institutional sell-the-rip signal IF a discount-seeking retrace follows in next 1-3 sessions, OR (b) bullish stop-hunt + continuation IF spot reclaims $443 in same window. Both are valid hypotheses without follow-through evidence. Action: <b>wait for the next session's close-print</b> — that's the disambiguator.</div>
+    <div class="smc-note teal" id="smcPriceChartNote"><b>5/14 BSL sweep — two interpretations:</b> (a) institutional sell-the-rip signal IF a discount-seeking retrace follows in next 1-3 sessions, OR (b) bullish stop-hunt + continuation IF spot reclaims $443 in same window. Both are valid hypotheses without follow-through evidence. Action: <b>wait for the next session's close-print</b> — that's the disambiguator.</div>
   </div>
 </div>
 
@@ -2895,6 +2902,134 @@ function setTheme(mode) {
     document.addEventListener('DOMContentLoaded', wire);
   } else {
     setTimeout(wire, 80);
+  }
+})();
+
+// ════════════════════════════════════════════════════════════
+// 2026-05-25 · §1 Live Price Chart wire — real TradingView candles
+//   - bars from window.__SMC_T__.smc_data.bars_daily
+//   - zone overlays: order_blocks (green/red), fvgs (violet), breakers (amber)
+//   - structure event markers (CHoCH, BoS, sweep)
+// ════════════════════════════════════════════════════════════
+(function() {
+  var _smcPriceChart = null, _smcPriceSeries = null;
+  function mountSMCPrice() {
+    if (typeof LightweightCharts === 'undefined') { setTimeout(mountSMCPrice, 100); return; }
+    var container = document.getElementById('smcPriceChart');
+    if (!container) return;
+    var t  = (typeof window !== 'undefined') ? window.__SMC_T__ : null;
+    var sd = (typeof window !== 'undefined') ? window.__SMC_DATA__ : null;
+    if (!t) return;
+    var tk = (t.ticker || t.symbol || '').toString().toUpperCase();
+    var bars = (sd && Array.isArray(sd.bars_daily)) ? sd.bars_daily : null;
+    if (!bars || bars.length < 3) {
+      // Fallback to t.ohlcv (90-day cache from EODHD) if smc_data.bars_daily empty
+      var ohlcv = Array.isArray(t.ohlcv) ? t.ohlcv : null;
+      if (ohlcv && ohlcv.length >= 3) {
+        bars = ohlcv.map(function(b){ return { time:b.d, open:+b.o, high:+b.h, low:+b.l, close:+b.c }; });
+      }
+    }
+    if (!bars || bars.length < 3) {
+      // No bars available — show legacy SVG fallback
+      var loader = document.getElementById('smcPriceChartLoading');
+      if (loader) loader.remove();
+      var legacy = document.getElementById('smcPriceChartLegacy');
+      if (legacy) legacy.style.display = '';
+      container.style.display = 'none';
+      return;
+    }
+    // Clear any prior chart (ticker switch)
+    var loader = document.getElementById('smcPriceChartLoading');
+    if (loader) loader.remove();
+    if (_smcPriceChart) { try { _smcPriceChart.remove(); } catch(e){} _smcPriceChart = null; }
+    container.innerHTML = '';
+    var BG = getComputedStyle(document.body).getPropertyValue('--bg') || '#0a0d0c';
+    var LINE = getComputedStyle(document.body).getPropertyValue('--line') || '#262b2d';
+    var INK_3 = getComputedStyle(document.body).getPropertyValue('--ink-3') || '#686c68';
+    _smcPriceChart = LightweightCharts.createChart(container, {
+      width: container.clientWidth, height: 380,
+      layout: { background: { color: BG.trim() }, textColor: INK_3.trim() },
+      grid: { vertLines: { color: LINE.trim() }, horzLines: { color: LINE.trim() } },
+      rightPriceScale: { borderColor: LINE.trim() },
+      timeScale: { borderColor: LINE.trim(), timeVisible: false },
+      crosshair: { mode: 0 },
+    });
+    _smcPriceSeries = _smcPriceChart.addCandlestickSeries({
+      upColor: '#22c55e', downColor: '#f87171', borderUpColor: '#22c55e', borderDownColor: '#f87171',
+      wickUpColor: '#22c55e', wickDownColor: '#f87171',
+    });
+    var data = bars.map(function(b){
+      return { time: b.time || b.t || b.date || b.d, open: +b.open, high: +b.high, low: +b.low, close: +b.close };
+    }).filter(function(b){ return b.time && isFinite(b.open) && isFinite(b.close); });
+    _smcPriceSeries.setData(data);
+
+    // Zone overlays as horizontal price-line ranges (top + bottom of each zone)
+    var totalZones = 0;
+    function addZoneLines(arr, color, kindTag) {
+      (arr || []).forEach(function(z) {
+        var lo = +z.low, hi = +z.high;
+        if (!isFinite(lo) || !isFinite(hi)) return;
+        _smcPriceSeries.createPriceLine({ price: hi, color: color, lineWidth: 1, lineStyle: 2,
+          axisLabelVisible: true, title: kindTag + (z.status ? ' · ' + z.status : '') });
+        _smcPriceSeries.createPriceLine({ price: lo, color: color, lineWidth: 1, lineStyle: 2,
+          axisLabelVisible: false });
+        totalZones++;
+      });
+    }
+    if (sd) {
+      addZoneLines((sd.order_blocks || []).filter(function(z){return z.kind === 'bull_ob';}), '#22c55e', '⊕ Bull OB');
+      addZoneLines((sd.order_blocks || []).filter(function(z){return z.kind === 'bear_ob';}), '#f87171', '⨯ Bear OB');
+      addZoneLines(sd.breakers || [], '#fbbf24', '⚡ Breaker');
+      addZoneLines(sd.fvgs || [], '#a78bfa', '⌬ FVG');
+    }
+
+    // Structure event markers (CHoCH / BoS / sweep)
+    var markers = [];
+    if (sd && Array.isArray(sd.structure_events)) {
+      sd.structure_events.forEach(function(ev) {
+        if (!ev || !ev.time) return;
+        var k = String(ev.kind || ev.type || '').toLowerCase();
+        var m = { time: ev.time, position: 'aboveBar', shape: 'circle', color: '#60a5fa', text: '' };
+        if (k.indexOf('choch') >= 0)      { m.color = '#fbbf24'; m.text = '↻ CHoCH'; }
+        else if (k.indexOf('bos') >= 0)   { m.color = '#60a5fa'; m.text = '↑ BoS'; }
+        else if (k.indexOf('sweep') >= 0) { m.color = '#d97757'; m.text = '🔥 sweep'; }
+        else if (k.indexOf('break') >= 0) { m.color = '#fbbf24'; m.text = '⚡ break'; }
+        else m.text = ev.kind || '·';
+        markers.push(m);
+      });
+    }
+    if (sd && Array.isArray(sd.liquidity)) {
+      sd.liquidity.forEach(function(lq) {
+        if (!lq || !lq.swept_time) return;
+        var lvl = lq.kind === 'BSL' ? 'BSL' : lq.kind === 'SSL' ? 'SSL' : 'L';
+        markers.push({ time: lq.swept_time, position: lvl === 'BSL' ? 'aboveBar' : 'belowBar',
+          shape: 'arrowDown', color: '#d97757', text: '🔥 ' + lvl + ' swept' });
+      });
+    }
+    if (markers.length) _smcPriceSeries.setMarkers(markers.sort(function(a,b){ return a.time < b.time ? -1 : 1; }));
+
+    _smcPriceChart.timeScale().fitContent();
+
+    // Title + zone-count chip
+    var ttl = document.getElementById('smcPriceChartTitle');
+    if (ttl) ttl.textContent = tk + ' daily · ' + data.length + 'd · OB / FVG / Breaker overlays + sweep markers';
+    var chip = document.getElementById('smcPriceZoneCount');
+    if (chip) chip.textContent = totalZones + ' zones overlaid';
+    // Hide synth tactical note when we have real bars — text was AVGO-specific
+    var note = document.getElementById('smcPriceChartNote');
+    if (note) note.style.display = 'none';
+
+    // Re-fit on container resize
+    var ro = new ResizeObserver(function(){
+      if (_smcPriceChart) _smcPriceChart.applyOptions({ width: container.clientWidth });
+    });
+    ro.observe(container);
+  }
+  // Mount after DOM ready + give kairos shell time to inject __SMC_T__
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function(){ setTimeout(mountSMCPrice, 60); });
+  } else {
+    setTimeout(mountSMCPrice, 60);
   }
 })();
 
