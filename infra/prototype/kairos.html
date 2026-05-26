@@ -19106,13 +19106,15 @@ const QuantOptions = (function() {
               <thead><tr>
                 <th>Date</th>
                 <th>Ticker</th>
+                <th>Strategy</th>
+                <th>IVR</th>
                 <th>Verdict</th>
                 <th class="r">Predicted $</th>
                 <th class="r">Actual $</th>
                 <th>+ / −</th>
                 <th class="r">Return</th>
               </tr></thead>
-              <tbody id="qo-hist-tbody"><tr><td colspan="7" style="text-align:center;color:var(--ink-3);padding:30px;font-family:var(--mono);font-size:12px">⌛ loading pick history…</td></tr></tbody>
+              <tbody id="qo-hist-tbody"><tr><td colspan="9" style="text-align:center;color:var(--ink-3);padding:30px;font-family:var(--mono);font-size:12px">⌛ loading pick history…</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -19770,7 +19772,7 @@ const QuantOptions = (function() {
     el.innerHTML = `
       <div class="qo-hh-band ${thesisCls}">
         <div class="qo-hh-band-l">
-          <div class="qo-hh-band-lbl">Track Record · ${s.resolved || 0} resolved</div>
+          <div class="qo-hh-band-lbl">Track Record · ${s.resolved || 0} resolved · <span style="color:var(--ink-3);font-style:italic">spot-equivalent R (option-trade R pending entry/exit premium tracking)</span></div>
           <div class="qo-hh-band-v">${thesisIco} ${thesisLbl}</div>
           <div class="qo-hh-band-meta">
             <b>${s.wins || 0}W</b> · <b>${s.losses || 0}L</b> · <b>${s.open || 0}</b> pending · WR <b class="${wrCls}">${wr != null ? wr.toFixed(0) + '%' : '—'}</b> · PF <b class="${pfCls}">${pf != null ? pf.toFixed(2) : '—'}</b>
@@ -19909,9 +19911,13 @@ const QuantOptions = (function() {
       if (c.includes('WEAK'))     return 'WEAK';
       return '—';
     };
-    const byConv   = bucket(resolved, convOf);
-    const byDir    = bucket(resolved, r => (r.direction || 'long').toUpperCase());
-    const bySector = bucket(resolved, r => r.sector).slice(0, 6);
+    const byConv     = bucket(resolved, convOf);
+    const byDir      = bucket(resolved, r => (r.direction || 'long').toUpperCase());
+    const bySector   = bucket(resolved, r => r.sector).slice(0, 6);
+    // 2026-05-26 · OPTIONS-HISTORY-OPTION-R — new decomposition axes
+    const byStrategy = bucket(resolved, r => r.strategy || '—');
+    const byIVRegime = bucket(resolved, r => (r.iv_regime || 'unknown'));
+    const byCohort   = bucket(resolved, r => (r.cohort_top || '—'));
 
     const renderTable = (title, rows) => {
       if (!rows.length) return '';
@@ -19938,7 +19944,10 @@ const QuantOptions = (function() {
         </div>
       `;
     };
-    el.innerHTML = renderTable('● By Conviction', byConv)
+    el.innerHTML = renderTable('🎯 By Strategy', byStrategy)
+                 + renderTable('⚡ By IV Regime', byIVRegime)
+                 + renderTable('⏱ By Expiration Cohort', byCohort)
+                 + renderTable('● By Conviction', byConv)
                  + renderTable('▲▼ By Direction', byDir)
                  + renderTable('🏭 By Sector (top 6)', bySector);
   }
@@ -19950,7 +19959,7 @@ const QuantOptions = (function() {
     const filt = _qoHistFilter;
     const filtered = filt === 'all' ? rows : rows.filter(r => r.outcome === filt);
     if (!filtered.length) {
-      tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--ink-3);padding:30px;font-family:var(--mono);font-size:12px">no rows match filter "' + filt + '"</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--ink-3);padding:30px;font-family:var(--mono);font-size:12px">no rows match filter "' + filt + '"</td></tr>';
       return;
     }
     const _f = (n, d) => (n == null || isNaN(n)) ? '—' : Number(n).toFixed(d == null ? 2 : d);
@@ -19980,9 +19989,21 @@ const QuantOptions = (function() {
       else if (r.outcome === 'stop_hit')   posNeg = '<span style="color:var(--rd);font-weight:800;font-size:14px">✗ −ve</span>';
       else if (r.outcome === 'expired')    posNeg = '<span style="color:var(--am);font-weight:700">⏱ flat</span>';
       else                                  posNeg = '<span style="color:var(--ink-3)">⌛ pending</span>';
+      // 2026-05-26 · OPTIONS-HISTORY-OPTION-R — strategy + IV regime columns
+      const strat = r.strategy || '—';
+      const stratShort = strat.replace('Bull Call Spread', 'Bull C Spd')
+                              .replace('Bear Put Spread',  'Bear P Spd')
+                              .replace('Long Call',        'Lng Call')
+                              .replace('Long Put',         'Lng Put');
+      const ivReg = r.iv_regime || '—';
+      const ivRegCls = ivReg === 'rich' ? 'color:var(--rd);font-weight:700'
+                     : ivReg === 'cheap' ? 'color:var(--gn);font-weight:700'
+                     : ivReg === 'normal' ? 'color:var(--am)' : 'color:var(--ink-3)';
       return `<tr style="cursor:pointer" data-tkr="${r.ticker}">
         <td>${r.date || '—'}</td>
         <td style="font-weight:700">${r.ticker || '—'}</td>
+        <td style="font-family:var(--mono);font-size:10.5px">${stratShort}${r.atm_strike != null ? '<br><span style="color:var(--ink-3);font-size:9px">@$' + _f(r.atm_strike,0) + (r.atm_dte != null ? ' · '+r.atm_dte+'d' : '') + '</span>' : ''}</td>
+        <td style="${ivRegCls};font-family:var(--mono);font-size:10.5px">${ivReg}</td>
         <td><span style="color:${dirColor};font-weight:700">${dirIcon} ${dir.toUpperCase()}</span> · <span style="color:${stCol};font-weight:700">${r.status || '—'}</span></td>
         <td class="r" style="color:var(--ink-1);font-weight:600">$${_f(predicted, 2)}</td>
         <td class="r" style="color:var(--ink-1)">${actual != null ? '$' + _f(actual, 2) : '—'}</td>

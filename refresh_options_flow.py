@@ -334,6 +334,17 @@ def main(force: bool = False) -> int:
         snap_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         with open(hist_path, "a") as hf:
             for pick in top30:
+                # 2026-05-26 · OPTIONS-HISTORY-OPTION-R · log strategy + chain fields
+                # so future outcome trackers can compute true option-trade R-multiples
+                pcr = pick.get("put_call_ratio") or 1.0
+                iv_pct = pick.get("iv_percentile")
+                is_bull = pcr < 1.0
+                iv_rich = iv_pct is not None and iv_pct > 70
+                strategy = (
+                    ("Bull Call Spread" if iv_rich else "Long Call")
+                    if is_bull else
+                    ("Bear Put Spread" if iv_rich else "Long Put")
+                )
                 row = {
                     "snap_date":   snap_date,
                     "snap_ts":     payload["refreshed_at"],
@@ -348,6 +359,25 @@ def main(force: bool = False) -> int:
                     "target":      pick.get("target"),
                     "rr":          pick.get("rr"),
                     "sector":      pick.get("sector"),
+                    # New fields (commit 8 OPTIONS-HISTORY-OPTION-R)
+                    "strategy":     strategy,
+                    "atm_strike":   pick.get("atm_strike"),
+                    "atm_dte":      pick.get("atm_dte"),
+                    "atm_iv":       pick.get("atm_iv"),
+                    "atm_delta":    pick.get("atm_delta"),
+                    "hv20":         pick.get("hv20"),
+                    "ivrp":         pick.get("ivrp"),
+                    "direction":    "long" if is_bull else "short",
+                    "iv_regime":    ("rich" if iv_rich else
+                                     "cheap" if (iv_pct is not None and iv_pct < 30) else
+                                     "normal" if iv_pct is not None else "unknown"),
+                    "cohort_top":   max(
+                        [("0DTE",    pick.get("cohort_0dte_pct") or 0),
+                         ("weekly",  pick.get("cohort_weekly_pct") or 0),
+                         ("monthly", pick.get("cohort_monthly_pct") or 0),
+                         ("LEAP",    pick.get("cohort_leap_pct") or 0)],
+                        key=lambda kv: kv[1]
+                    )[0] if any(pick.get(k) for k in ("cohort_0dte_pct","cohort_weekly_pct","cohort_monthly_pct","cohort_leap_pct")) else None,
                 }
                 hf.write(json.dumps(row, default=str) + "\n")
         log.info(f"Logged {len(top30)} snapshots to options_flow_history.jsonl")
