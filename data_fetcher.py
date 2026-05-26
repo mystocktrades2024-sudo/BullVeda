@@ -4539,7 +4539,11 @@ def get_options_iv_data(ticker: str) -> dict:
             nonlocal call_oi, put_oi, call_vol, put_vol, uoa_calls, uoa_puts
             nonlocal cohort_0dte_vol, cohort_weekly_vol, cohort_monthly_vol, cohort_leap_vol
             nonlocal premium_call_dollars, premium_put_dollars
-            for exp_key, strikes in list(ex_map.items())[:4]:  # nearest 4 expirations
+            # 2026-05-26 · iterate 10 nearest expirations (was 4) so we capture both
+            # near-term flow cohorts AND a ≥14d expiration for Greeks extraction.
+            # Earlier cap of 4 missed Greek-viable expirations on high-volume names
+            # because slots 0-3 are typically 0/1/3/6 DTE (all <14d).
+            for exp_key, strikes in list(ex_map.items())[:10]:
                 # exp_key format "YYYY-MM-DD:DTE"
                 exp_dte = None
                 try:
@@ -4650,7 +4654,9 @@ def get_options_iv_data(ticker: str) -> dict:
             out["cohort_weekly_pct"]  = round(cohort_weekly_vol  / cohort_tot * 100, 1)
             out["cohort_monthly_pct"] = round(cohort_monthly_vol / cohort_tot * 100, 1)
             out["cohort_leap_pct"]    = round(cohort_leap_vol    / cohort_tot * 100, 1)
-        # ATM call Greeks (closest strike to spot, ≥14d expiration)
+        # ATM call Greeks (closest strike to spot, ≥14d expiration).
+        # Normalize IV: Schwab returns volatility as a percentage (41.755 = 41.755%),
+        # so divide by 100 to get the fraction the UI expects (0.32 = 32% IV).
         if atm_call_best:
             atm_call_best.pop("_score", None)
             for k in ("strike", "dte", "delta", "gamma", "theta", "vega", "iv"):
@@ -4658,7 +4664,12 @@ def get_options_iv_data(ticker: str) -> dict:
                 if v is None: continue
                 try: v = float(v)
                 except Exception: continue
-                out[f"atm_{k}"] = round(v, 4) if k in ("delta","gamma","theta","vega","iv") else round(v, 2) if k == "strike" else v
+                if k == "iv":
+                    out["atm_iv"] = round(v / 100, 4)  # → fraction
+                elif k == "strike":
+                    out["atm_strike"] = round(v, 2)
+                else:
+                    out[f"atm_{k}"] = round(v, 4)
             # ATM bid/ask spread as % of mid — liquidity proxy
             bid, ask = atm_call_best.get("bid"), atm_call_best.get("ask")
             try:
@@ -4667,15 +4678,22 @@ def get_options_iv_data(ticker: str) -> dict:
                 if mid > 0:
                     out["atm_bid_ask_pct"] = round((ask - bid) / mid * 100, 2)
             except Exception: pass
-        # Term-structure ratio — front ATM IV / back ATM IV
+        # Term-structure ratio — front ATM IV / back ATM IV.
+        # Skip the very-nearest expiration if DTE < 14 because 0-3 DTE IV is
+        # dominated by event/weekend microstructure, not term-structure signal.
+        # Picks the first ≥14d as "front" and the farthest as "back".
         if len(exp_atm_iv) >= 2:
             sorted_dtes = sorted(exp_atm_iv.keys())
-            front_dte, back_dte = sorted_dtes[0], sorted_dtes[-1]
+            # Find first viable front (≥14d) so term-ratio reflects 30d-vs-60d
+            # vol slope, not 0DTE-vs-30D microstructure noise
+            front_dte = next((d for d in sorted_dtes if d >= 14), sorted_dtes[0])
+            back_dte  = sorted_dtes[-1]
             front_ivs = exp_atm_iv[front_dte]
             back_ivs  = exp_atm_iv[back_dte]
-            if front_ivs and back_ivs:
-                front_iv = sum(front_ivs) / len(front_ivs)
-                back_iv  = sum(back_ivs)  / len(back_ivs)
+            if front_ivs and back_ivs and front_dte != back_dte:
+                # Normalize Schwab percentages → fractions for consistency
+                front_iv = sum(front_ivs) / len(front_ivs) / 100
+                back_iv  = sum(back_ivs)  / len(back_ivs)  / 100
                 out["front_iv"]   = round(front_iv, 4)
                 out["back_iv"]    = round(back_iv, 4)
                 if back_iv > 0:
