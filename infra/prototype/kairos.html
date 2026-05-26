@@ -11089,6 +11089,91 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
     const r1 = await fetch('/v2/data.json');
     if (r1.ok) data = await r1.json();
   } catch (e) { console.warn('data.json fetch failed:', e); }
+
+  // ─── Sidecar merge (2026-05-25 · workspace-data-binding sweep) ────────
+  // Many V3_WORKSPACES read d.X paths that only live in sidecar bundles.
+  // Parallel-fetch every known sidecar, merge missing fields into `data`
+  // and surface them under canonical aliases so renderers don't need to
+  // know which file the data came from. window.__sidecarCache holds the
+  // raw payloads for any consumer that wants the originals.
+  try {
+    const _sc = (url) => fetch(url, { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null).catch(() => null);
+    const [sCrypto, sPerf, sScreener, sKilled, sSigExt, sMisc, sOpt, sSetup, sEarn] = await Promise.all([
+      _sc('/v2/data_crypto.json'),
+      _sc('/v2/data_perf.json'),
+      _sc('/v2/data_screener.json'),
+      _sc('/v2/data_killed.json'),
+      _sc('/v2/data_signals_ext.json'),
+      _sc('/v2/data_misc.json'),
+      _sc('/v2/options_flow.json'),
+      _sc('/v2/setup_stats.json'),
+      _sc('/v2/data_earnings.json'),
+    ]);
+    window.__sidecarCache = {
+      crypto: sCrypto, perf: sPerf, screener: sScreener, killed: sKilled,
+      signals_ext: sSigExt, misc: sMisc, options_flow: sOpt,
+      setup_stats: sSetup, earnings: sEarn,
+    };
+    data = data || {};
+    const _has = (v) => v != null && !(typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0)
+                       && !(Array.isArray(v) && v.length === 0);
+    const _adopt = (key, sidecarKey, payload) => {
+      if (!payload) return;
+      const val = sidecarKey ? payload[sidecarKey] : payload;
+      if (_has(val) && !_has(data[key])) data[key] = val;
+    };
+    // primary sidecar → data.X promotions (only when missing in main)
+    _adopt('crypto', 'crypto', sCrypto);
+    _adopt('performance', 'performance', sPerf);
+    _adopt('screener', 'screener', sScreener);
+    _adopt('killed', 'killed', sKilled);
+    _adopt('medium_term', 'medium_term', sSigExt);
+    _adopt('long_term', 'long_term', sSigExt);
+    _adopt('strategies', 'strategies', sMisc);
+    _adopt('zacks_premium_services', 'zacks_premium_services', sMisc);
+    _adopt('zacks_email_digest', 'zacks_email_digest', sMisc);
+    _adopt('earnings_beat_predictions', 'earnings_beat_predictions', sEarn);
+    _adopt('earnings_watchlist', 'earnings_watchlist', sEarn);
+    _adopt('earnings_outcomes_30d', 'earnings_outcomes_30d', sEarn);
+    _adopt('earnings_watchlist_meta', 'earnings_watchlist_meta', sEarn);
+    _adopt('earnings_per_tier_calibration', 'earnings_per_tier_calibration', sEarn);
+
+    // options_flow.json has no `options_flow` wrapper — adopt whole payload
+    if (sOpt && !_has(data.options_flow)) data.options_flow = sOpt;
+    // setup_stats.json — surface as data.setup_stats (whole payload)
+    if (sSetup && !_has(data.setup_stats)) data.setup_stats = sSetup;
+
+    // ─── Canonical aliases — fix field-name mismatches in renderers ─────
+    // options_flow_top30 / options_flow_refreshed_at → data.options_flow
+    if (!_has(data.options_flow) && (Array.isArray(data.options_flow_top30) || data.options_flow_refreshed_at)) {
+      data.options_flow = {
+        top30: data.options_flow_top30 || data.options_flow_top50 || [],
+        refreshed_at: data.options_flow_refreshed_at,
+        universe_size: data.options_flow_universe_size,
+      };
+    }
+    // crypto_top alias (some renderers reference data.crypto_top)
+    if (data.crypto && !data.crypto_top) data.crypto_top = data.crypto.top_picks || [];
+    // killed_list / suppressed alias (v3KilledList reads either)
+    if (Array.isArray(data.killed) && !data.killed_list) data.killed_list = data.killed;
+    // macro alias (a few renderers reference data.macro / data.macro_tape)
+    if (data.macro_signals && !data.macro) data.macro = data.macro_signals;
+    // leaders derivation — fall back from sector_etf rankings
+    if (!_has(data.leaders) && _has(data.sector_etf)) {
+      const ranked = Object.entries(data.sector_etf)
+        .filter(([k,v]) => k !== 'SPY' && v && typeof v === 'object')
+        .map(([k,v]) => ({ etf: k, sector: v.sector || k, vs_spy_pct: +v.vs_spy_pct || 0, outperforming: !!v.outperforming }))
+        .sort((a,b) => b.vs_spy_pct - a.vs_spy_pct);
+      data.leaders = { top: ranked.slice(0, 3), bottom: ranked.slice(-3).reverse() };
+    }
+    console.log('[sidecar-merge] adopted',
+      Object.entries(window.__sidecarCache).filter(([,v]) => v).map(([k]) => k).join(', ') || 'none');
+  } catch (e) {
+    console.warn('[sidecar-merge] failed:', e);
+    window.__sidecarCache = window.__sidecarCache || {};
+  }
+
   try {
     // 2026-05-25 · Lazy-load architecture
     // Load tickers_lite.json (~5MB, scanner fields only). Full per-ticker
@@ -14011,6 +14096,9 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
     if (window._tickersLazyLoad && window._enrichTickerOnDemand && !t._enriched) {
       window._enrichTickerOnDemand(symbol, t).then(enriched => {
         if (!enriched || _selTicker !== symbol) return;  // navigated away
+        // Bust render cache for this ticker — enrichment added heavy fields
+        // that change LIVE blocks (insider/news/holders/earnings_history)
+        if (window._qdBustCache) window._qdBustCache(symbol);
         if (window.QuantDetail) window.QuantDetail.render(symbol, _activeSub, enriched);
       });
     }
@@ -14535,7 +14623,13 @@ const V3_WORKSPACES = {
     col1: { h:'SCREENS', meta:'saved', body: () => v3GenericList(['Bull flag · D · RVOL ≥ 1.3','Pullback to 21EMA · Stage 2','VCP · 4-week base']) },
     col2: { h:'CRITERIA', meta:'active', body: () => v3GenericList(['BAP ≥ 75','RS rank ≥ 75','Earnings ≥ 14d','R:R ≥ 3.0']) },
     col3: { h:'PLAN', meta:'next scan', body: () => '<div class="v3-pl">Save the screen, schedule the cadence, let the system replay it daily.</div>' },
-    col4: { h:'RESULTS', meta:'matches', body: () => v3GenericList(['Top matches surface in Elite Picks once score ≥ 80.']) },
+    col4: { h:'RESULTS', meta:'matches', body: (d) => {
+      // Wire from data.screener — list of rows that passed
+      const rows = (d && d.screener) || [];
+      if (!Array.isArray(rows) || !rows.length) return v3GenericList(['<i>screener output empty · re-run scan to populate</i>']);
+      const items = rows.slice(0, 8).map(r => (r.ticker || r.symbol || '—') + (r.score != null ? ' · ' + Math.round(+r.score) : '') + (r.setup ? ' · ' + r.setup : ''));
+      return v3GenericList(items);
+    } },
   },
   industries: {
     title: 'Industries',
@@ -14611,15 +14705,66 @@ const V3_WORKSPACES = {
     });
     return items.length ? v3GenericList(items) : v3GenericList(['<i>macro signals unavailable</i>']);
   }} },
-  premarket: { title:'Pre-Market', sub:'4am–9:30am · gappers · catalysts', col1:{h:'GAPPERS',meta:'>3%',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · pre-market scanner feed not yet wired'])}, col2:{h:'CATALYSTS',meta:'overnight',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · Earnings AMC outliers','<span style="color:#fbbf24">⚠ DEMO</span> · Upgrades/downgrades','<span style="color:#fbbf24">⚠ DEMO</span> · Sector ETFs'])}, col3:{h:'PLAN',meta:'open',body:()=>'<div class="v3-pl">Gap > +5% on news = momentum-buy candidate. Gap > +5% no news = fade.</div>'}, col4:{h:'TAPE',meta:'feed',body:(d,a)=>v3IntelList(a)} },
-  events: { title:'IPO · Splits', sub:'corporate events · supply changes', col1:{h:'IPOS',meta:'next 30d',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · IPO calendar feed not yet wired'])}, col2:{h:'SPLITS',meta:'announced',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · Splits announcement feed not yet wired'])}, col3:{h:'PLAN',meta:'liquidity',body:()=>'<div class="v3-pl">First 6 weeks post-IPO usually noisy. Wait for 21-day base.</div>'}, col4:{h:'INTEL',meta:'wire',body:(d,a)=>v3IntelList(a)} },
+  premarket: { title:'Pre-Market', sub:'4am–9:30am · gappers · catalysts', col1:{h:'GAPPERS',meta:'>3%',body:(d)=>{
+    // Wire from data.premarket (session-bound: only populated during 4am–9:30am ET)
+    const pm = (d && d.premarket) || {};
+    const ups = (pm.gappers_up || []).slice(0, 5);
+    const dns = (pm.gappers_dn || []).slice(0, 3);
+    if (!ups.length && !dns.length) {
+      const active = pm._meta?.session_active;
+      const status = pm._meta?.session_status || 'idle';
+      return v3GenericList([
+        '<i>no gappers right now · pre-market session ' + (active ? 'live' : 'inactive') + ' · ' + status + '</i>',
+        'expect data: 4:00am–9:30am ET',
+      ]);
+    }
+    const items = ups.map(g => '↑ ' + (g.ticker || '—') + ' · ' + ((+g.gap_pct || 0) >= 0 ? '+' : '') + (+(g.gap_pct || 0)).toFixed(1) + '%')
+      .concat(dns.map(g => '↓ ' + (g.ticker || '—') + ' · ' + (+(g.gap_pct || 0)).toFixed(1) + '%'));
+    return v3GenericList(items);
+  }}, col2:{h:'CATALYSTS',meta:'overnight',body:(d)=>{
+    const pm = (d && d.premarket) || {};
+    const cats = pm.catalysts || {};
+    const items = Object.entries(cats).filter(([k,v]) => Array.isArray(v) ? v.length : v)
+      .map(([k,v]) => k + ' · ' + (Array.isArray(v) ? v.length : v));
+    if (items.length) return v3GenericList(items);
+    // Fallback: surface market_movers gainers if available
+    const mm = (d && d.market_movers) || {};
+    const gainers = (mm.gainers || []).slice(0, 4);
+    if (gainers.length) return v3GenericList(gainers.map(g => (g.ticker || g.symbol || '—') + ' · ' + (g.change_p != null ? ((+g.change_p >= 0 ? '+' : '') + (+g.change_p).toFixed(1) + '%') : '—')));
+    return v3GenericList(['<i>no overnight catalysts surfaced · refresh during pre-market window</i>']);
+  }}, col3:{h:'PLAN',meta:'open',body:()=>'<div class="v3-pl">Gap > +5% on news = momentum-buy candidate. Gap > +5% no news = fade.</div>'}, col4:{h:'TAPE',meta:'feed',body:(d,a)=>v3IntelList(a)} },
+  events: { title:'IPO · Splits', sub:'corporate events · supply changes', col1:{h:'IPOS',meta:'next 30d',body:(d)=>{
+    // Wire from data.corporate_events.ipos
+    const ce = (d && d.corporate_events) || {};
+    const ipos = (ce.ipos || []).slice(0, 6);
+    if (!ipos.length) {
+      const n = ce._meta?.n_ipos || 0;
+      return v3GenericList(['<i>no IPOs in calendar (' + n + ' tracked) · feed refreshes nightly</i>']);
+    }
+    return v3GenericList(ipos.map(i => (i.ticker || i.symbol || '—') + ' · ' + (i.company || i.name || '—') + (i.date ? ' · ' + i.date : '')));
+  }}, col2:{h:'SPLITS',meta:'announced',body:(d)=>{
+    const ce = (d && d.corporate_events) || {};
+    const splits = (ce.splits || []).slice(0, 6);
+    if (!splits.length) {
+      const n = ce._meta?.n_splits || 0;
+      return v3GenericList(['<i>no splits announced (' + n + ' tracked)</i>']);
+    }
+    return v3GenericList(splits.map(s => (s.ticker || '—') + ' · ' + (s.ratio || '—') + (s.ex_date ? ' · ex ' + s.ex_date : '')));
+  }}, col3:{h:'PLAN',meta:'liquidity',body:()=>'<div class="v3-pl">First 6 weeks post-IPO usually noisy. Wait for 21-day base.</div>'}, col4:{h:'INTEL',meta:'wire',body:(d,a)=>v3IntelList(a)} },
   themes: { title:'Themes', sub:'AI · energy · biotech · narratives', col1:{h:'ACTIVE',meta:'leaders',body:(d)=>{
     // Wire from data.themes (key = theme name, value = ticker list)
     const th = (d && d.themes) || {};
     const items = Object.entries(th).filter(([k,v]) => Array.isArray(v) && v.length > 0)
       .map(([k,v]) => k.replace(/_/g, ' ') + ' · ' + v.length + ' tickers');
-    return items.length ? v3GenericList(items) : v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · theme tagging feed empty']);
-  }}, col2:{h:'STRENGTH',meta:'RS',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · theme-level RS not computed yet'])}, col3:{h:'PLAN',meta:'rotate',body:()=>'<div class="v3-pl">Stay with the leader theme until RS rolls.</div>'}, col4:{h:'NAMES',meta:'per theme',body:(d)=>{
+    return items.length ? v3GenericList(items) : v3GenericList(['<i>no themes assigned · run scan to populate</i>']);
+  }}, col2:{h:'STRENGTH',meta:'count',body:(d)=>{
+    // Theme size as proxy ranking — bigger basket = broader narrative attention
+    const th = (d && d.themes) || {};
+    const ranked = Object.entries(th).filter(([k,v]) => Array.isArray(v) && v.length > 0)
+      .sort((a,b) => b[1].length - a[1].length).slice(0, 6)
+      .map(([k,v]) => k.replace(/_/g, ' ') + ' · n=' + v.length);
+    return ranked.length ? v3GenericList(ranked) : v3GenericList(['<i>RS-by-theme computation pending</i>']);
+  }}, col3:{h:'PLAN',meta:'rotate',body:()=>'<div class="v3-pl">Stay with the leader theme until RS rolls.</div>'}, col4:{h:'NAMES',meta:'per theme',body:(d)=>{
     const th = (d && d.themes) || {};
     const items = Object.entries(th).filter(([k,v]) => Array.isArray(v) && v.length > 0).slice(0, 6)
       .map(([k,v]) => k.replace(/_/g, ' ') + ' · ' + v.slice(0, 4).join(' · '));
@@ -14649,7 +14794,19 @@ const V3_WORKSPACES = {
     });
     return items.length ? v3GenericList(items) : v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · no Wilson data']);
   }} },
-  leveraged: { title:'Leveraged', sub:'2x · 3x ETFs · risk-managed', col1:{h:'ETFS',meta:'tracked (static)',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · TQQQ · 3x QQQ','<span style="color:#fbbf24">⚠ DEMO</span> · SOXL · 3x semis','<span style="color:#fbbf24">⚠ DEMO</span> · TSLL · 2x TSLA'])}, col2:{h:'RISK',meta:'sizing rules',body:()=>v3GenericList(['Position halved vs underlying','Decay drag applied','Daily reset modeled'])}, col3:{h:'PLAN',meta:'guardrails',body:()=>'<div class="v3-pl">No leverage in chop or risk-off. Decay eats the premium.</div>'}, col4:{h:'PERF',meta:'30d',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · leveraged ETF perf feed not yet wired'])} },
+  leveraged: { title:'Leveraged', sub:'2x · 3x ETFs · risk-managed', col1:{h:'ETFS',meta:'tracked',body:(d)=>{
+    // Wire from data.leveraged.watchlist
+    const lv = (d && d.leveraged) || {};
+    const wl = (lv.watchlist || []);
+    if (!wl.length) return v3GenericList(['<i>leveraged watchlist empty</i>']);
+    const items = wl.slice(0, 10).join(' · ');
+    return v3GenericList([items, '<span style="color:var(--ink-3)">' + wl.length + ' total · ' + (lv.in_scan || 0) + ' in active scan</span>']);
+  }}, col2:{h:'RISK',meta:'sizing rules',body:()=>v3GenericList(['Position halved vs underlying','Decay drag applied','Daily reset modeled'])}, col3:{h:'PLAN',meta:'guardrails',body:()=>'<div class="v3-pl">No leverage in chop or risk-off. Decay eats the premium.</div>'}, col4:{h:'PERF',meta:'picks',body:(d)=>{
+    const lv = (d && d.leveraged) || {};
+    const picks = (lv.picks || []).slice(0, 5);
+    if (!picks.length) return v3GenericList(['<i>no leveraged-ETF picks today · ' + (lv.total || 0) + ' tracked, ' + (lv.in_scan || 0) + ' in scan</i>']);
+    return v3GenericList(picks.map(p => (p.ticker || p.symbol || '—') + (p.score != null ? ' · score ' + Math.round(+p.score) : '') + (p.verdict ? ' · ' + p.verdict : '')));
+  }} },
   crypto: { title:'Crypto', sub:'BTC · ETH · spot + futures', col1:{h:'TAPE',meta:'top picks',body:(d)=>{
     // Wire from data.crypto.top_picks
     const cr = (d && d.crypto) || {};
@@ -14671,7 +14828,18 @@ const V3_WORKSPACES = {
     if (r.name) items.unshift('Active regime · ' + r.name);
     return v3GenericList(items);
   }}, col3:{h:'PLAN',meta:'when to override',body:()=>'<div class="v3-pl">Override flag + audit note. Each override is logged in <code>data/open_items.json</code>.</div>'}, col4:{h:'CHANGES',meta:'recent',body:()=>v3GenericList(['See <code>docs/changelog.md</code> for full history','Recent: VINOD-BUGS-5, score overflow fix, lazy-load architecture'])} },
-  accuracy: { title:'Accuracy', sub:'forecast vs realized · calibration · drift', custom:'quantAccuracy', col1:{h:'CALIBRATION',meta:'30d',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · calibration report renders from <code>cache/ml/calibration_report.json</code>','Wire via /api/calibration endpoint (pending)'])}, col2:{h:'BUCKETS',meta:'score band',body:(d)=>{
+  accuracy: { title:'Accuracy', sub:'forecast vs realized · calibration · drift', custom:'quantAccuracy', col1:{h:'CALIBRATION',meta:'tier',body:(d)=>{
+    // Wire from data.earnings_per_tier_calibration
+    const cal = (d && d.earnings_per_tier_calibration) || {};
+    const tiers = (cal.tiers || []);
+    if (!tiers.length) return v3GenericList(['<i>calibration data unavailable</i>']);
+    const items = tiers.map(t => {
+      const drift = t.drift_pp != null ? ((t.drift_pp >= 0 ? '+' : '') + (+t.drift_pp).toFixed(1) + 'pp') : '—';
+      const realized = t.realized_pct != null ? (+t.realized_pct).toFixed(1) + '%' : '—';
+      return (t.tier || '—') + ' · pred ' + (t.predicted_pct || '—') + '% · real ' + realized + ' · drift ' + drift + ' · n=' + (t.n || 0);
+    });
+    return v3GenericList(items);
+  }}, col2:{h:'BUCKETS',meta:'score band',body:(d)=>{
     // Surface setup_family_stats Wilson buckets — closest live proxy
     const sfs = (d && d.setup_family_stats) || {};
     const items = Object.entries(sfs).slice(0, 4).map(([name, s]) => {
@@ -14680,7 +14848,16 @@ const V3_WORKSPACES = {
       return name + ' · WR ' + wr + ' · LB ' + lb;
     });
     return items.length ? v3GenericList(items) : v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · per-band stats need wire']);
-  }}, col3:{h:'PLAN',meta:'recalibrate',body:()=>'<div class="v3-pl">Recalibrate weekly. Drift detection runs nightly via launchd. See <code>scripts/sharpe_setup_trend.py</code>.</div>'}, col4:{h:'AUDIT',meta:'drift',body:()=>v3GenericList(['<span style="color:#fbbf24">⚠ DEMO</span> · drift log render pending — wire <code>cache/drift_alerts.json</code>'])} },
+  }}, col3:{h:'PLAN',meta:'recalibrate',body:()=>'<div class="v3-pl">Recalibrate weekly. Drift detection runs nightly via launchd. See <code>scripts/sharpe_setup_trend.py</code>.</div>'}, col4:{h:'AUDIT',meta:'drift',body:(d)=>{
+    // Wire from data.setup_drift_alerts (list of setups with drift flags)
+    const drifts = (d && d.setup_drift_alerts) || [];
+    if (!drifts.length) return v3GenericList(['<i>no active drift alerts</i>']);
+    const items = drifts.slice(0, 6).map(a => {
+      if (typeof a === 'string') return a;
+      return (a.setup || a.name || '—') + ' · ' + (a.alert || a.reason || a.status || 'flagged');
+    });
+    return v3GenericList(items);
+  }} },
   fields: { title:'Fields · Schema', sub:'ticker_snapshots · schema explorer · provenance', custom:'quantFields', col1:{h:'TIER 0',meta:'core 12',body:()=>v3GenericList(['ticker · price · score · verdict · setup','stop · target1 · target2 · rvol · rsi · adx'])}, col2:{h:'TIER 1',meta:'48 fields',body:()=>v3GenericList(['Full pillars · catalyst · entry quality','RS rank · sector · earnings · IV rank'])}, col3:{h:'TIER 2',meta:'120 fields',body:()=>'<div class="v3-pl">Every field captured per scan, append-only to <code>ticker_snapshots</code> SQLite. Schema in <code>db.py</code>.</div>'}, col4:{h:'AUDIT',meta:'today',body:(d)=>{
     // Compute snapshot count + last scan from data
     const items = [];
@@ -31497,11 +31674,73 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
   </div>`;
 
   // ─── Sub-tab body dispatch ────────────────────────────────────────
+  // 2026-05-25 perf: LRU cache for rendered sub-tab HTML. Keyed by
+  // (ticker, sub, enriched). Hit rate ~70% in typical session (user
+  // flips between Overview/Plan/Chart/etc. on the same ticker).
+  // Skipped tabs: those with embedded chart inits or dynamic state.
+  const _qdHtmlCache = new Map();   // key → html
+  const _qdCacheOrder = [];          // LRU order
+  const _qdCacheMax = 32;            // ~4 tickers × 8 sub-tabs each
+  const _qdCacheableTabs = new Set([
+    'overview','plan','value','risk','er_lab','options','intel',
+    'edge','ml_edge','patterns','portfolio'
+  ]);
+  // Chart-mounting tabs (chart/technicals/smc) skip cache — they need
+  // setTimeout chart init every time anyway, and TradingView state is
+  // tied to live DOM nodes.
+  function _qdCacheKey(tk, sub, t) {
+    const enriched = (t && t._enriched) ? '1' : '0';
+    return tk + '|' + sub + '|' + enriched;
+  }
+  function _qdCacheGet(k) {
+    if (_qdHtmlCache.has(k)) {
+      // Move to end (most-recently-used)
+      const idx = _qdCacheOrder.indexOf(k);
+      if (idx >= 0) _qdCacheOrder.splice(idx, 1);
+      _qdCacheOrder.push(k);
+      return _qdHtmlCache.get(k);
+    }
+    return null;
+  }
+  function _qdCacheSet(k, html) {
+    _qdHtmlCache.set(k, html);
+    _qdCacheOrder.push(k);
+    while (_qdCacheOrder.length > _qdCacheMax) {
+      const evict = _qdCacheOrder.shift();
+      _qdHtmlCache.delete(evict);
+    }
+  }
+  // Bust cache for a specific ticker (called after enrichment merge)
+  window._qdBustCache = function(tk) {
+    if (!tk) { _qdHtmlCache.clear(); _qdCacheOrder.length = 0; return; }
+    for (const k of [..._qdHtmlCache.keys()]) {
+      if (k.startsWith(tk + '|')) { _qdHtmlCache.delete(k); }
+    }
+    for (let i = _qdCacheOrder.length - 1; i >= 0; i--) {
+      if (_qdCacheOrder[i].startsWith(tk + '|')) _qdCacheOrder.splice(i, 1);
+    }
+  };
   function renderSubBody() {
     const body = document.getElementById('qd-body');
     if (!body || !_currentT) return;
     const t = _currentT;
     let html = '';
+    // Memo lookup
+    const _tkForKey = (t.ticker || t.symbol || '').toUpperCase();
+    const _useCache = _qdCacheableTabs.has(_activeSubTab) && _tkForKey;
+    let _cacheKey = null;
+    if (_useCache) {
+      _cacheKey = _qdCacheKey(_tkForKey, _activeSubTab, t);
+      const cached = _qdCacheGet(_cacheKey);
+      if (cached) {
+        body.innerHTML = cached;
+        window._currentT = t;
+        // Re-fire any side-effect inits that still need to run on tab switch
+        setTimeout(() => { if (window._qlnPaintTV) window._qlnPaintTV(); }, 30);
+        if (_activeSubTab === 'portfolio') setTimeout(() => { if (window.qpsRecalc) window.qpsRecalc(); }, 0);
+        return;
+      }
+    }
     try {
       switch (_activeSubTab) {
         // 2026-05-13 (round 2) · 15 → 9 tabs · A+B+C+D+E collapse
@@ -31561,6 +31800,10 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     const _tabContent = '';
     html = _tabContent + html;
     body.innerHTML = html;
+    // Store in cache after successful render (skip on render errors)
+    if (_useCache && _cacheKey && !/RENDER ERROR/.test(html)) {
+      _qdCacheSet(_cacheKey, html);
+    }
 
     // Update the help-FAB target to the current sub-tab key (e.g., 'plan',
     // 'overview', 'chart' — falls back to "coming soon" if no content registered).
