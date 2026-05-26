@@ -541,7 +541,10 @@ async def _api_reports_list(auth: HTTPBasicCredentials = Depends(_check_auth),
 
 
 @app.get("/api/momentum-history")
-async def _api_momentum_history(auth: HTTPBasicCredentials = Depends(_check_auth)):
+async def _api_momentum_history(
+    request: Request,
+    auth: HTTPBasicCredentials = Depends(_check_auth),
+):
     """
     Predicted-vs-realized calibration for Momentum-tab picks.
 
@@ -549,15 +552,27 @@ async def _api_momentum_history(auth: HTTPBasicCredentials = Depends(_check_auth
     via eodhd_client.eod, compares to SPY baseline, returns {snapshots,
     calibration}. Cached 1hr to keep EODHD pressure minimal.
 
+    Query params:
+        ?fresh=1  (or any truthy value) → bypass the 1hr cache and recompute.
+                  Response carries `cache_bypassed: true` for visibility.
+
     Per CLAUDE.md principle 1 (statistical rigor — sample size surfaced),
     11 (edge erosion — calibration tracked over time), 16 (per-sub-strategy
     attribution), 20 (process > outcome — predicted vs realized, not P&L).
     """
     if isinstance(auth, Response):
         return auth
+    # Truthy parser — any of 1/true/yes/y/on (case-insensitive) bypasses cache
+    fresh_raw = (request.query_params.get("fresh") or "").strip().lower()
+    fresh_flag = fresh_raw in {"1", "true", "yes", "y", "on"}
     try:
         from momentum_history_api import build_momentum_history
-        return build_momentum_history()
+        result = build_momentum_history(force_refresh=fresh_flag)
+        if fresh_flag and isinstance(result, dict):
+            # Don't mutate the cached object; return a shallow copy with the flag
+            result = dict(result)
+            result["cache_bypassed"] = True
+        return result
     except Exception as e:
         # Return structured error so the UI can render it gracefully instead of 500
         return {

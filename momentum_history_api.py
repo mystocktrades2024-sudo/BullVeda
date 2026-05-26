@@ -138,13 +138,18 @@ def _safe_mean(xs: list[float]) -> float | None:
     return (sum(xs) / len(xs)) if xs else None
 
 
-def build_momentum_history() -> dict:
+def build_momentum_history(force_refresh: bool = False) -> dict:
     """
     Public entry: returns the dict shape documented in CLAUDE.md ask.
+
+    Args:
+        force_refresh: if True, skip the 1hr in-process cache, recompute
+            from scratch, and repopulate the cache with the fresh value.
+            Caller stamps `cache_bypassed: true` on the response for visibility.
     """
-    # Cache hit?
+    # Cache hit? (skipped when force_refresh=True)
     now = time.time()
-    if _CACHE["value"] is not None and (now - _CACHE["ts"]) < _CACHE_TTL:
+    if (not force_refresh) and _CACHE["value"] is not None and (now - _CACHE["ts"]) < _CACHE_TTL:
         return _CACHE["value"]
 
     snaps = _load_snapshots()
