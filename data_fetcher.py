@@ -26,6 +26,17 @@ import time
 import numpy as np
 import pandas as pd
 import requests
+import socket
+# 2026-05-22 · Hard global socket timeout — prevents Python's TCP/SSL stack
+# from blocking indefinitely on a half-open connection.  The yfinance circuit
+# breaker (below) prevents NEW yf calls after N slow/failed responses, but it
+# does not reclaim already-open sockets in the urllib3 pool.  When the scan
+# transitions to atexit / session-close, those orphaned sockets get drained
+# via `_ssl.poll()` which has no Python-level timeout, hanging the scan for
+# arbitrary minutes.  setdefaulttimeout(30) ensures any socket.read() bails
+# after 30s — fast enough that scan-finalization cannot stall.  Increase via
+# SWINGTRADE_SOCKET_TIMEOUT env var if real EODHD calls start tripping it.
+socket.setdefaulttimeout(float(os.environ.get("SWINGTRADE_SOCKET_TIMEOUT", "30")))
 # yfinance — re-enabled as fallback after user request 2026-05-01.
 # EODHD is still primary; yfinance is used when EODHD rate-limits (HTTP 402)
 # or returns empty data. Specifically wired for news fallback first.
