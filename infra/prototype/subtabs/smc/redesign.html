@@ -2735,12 +2735,35 @@ function setTheme(mode) {
     var t  = (typeof window !== 'undefined') ? window.__SMC_T__ : null;
     if (!sd && !t) return;
 
+    // Bug 2 fix (2026-05-25): ticker-stamp guard. Stale wire from prior
+    // ticker (setTimeout(wire, 80) race) would write old data to the new
+    // panel. Bail if the root's data-sym no longer matches __SMC_T__.
+    var _root = document.getElementById('smcRedesignRoot');
+    var _curT = (t && (t.ticker || t.symbol) || '').toString().toUpperCase();
+    if (_root && _root.dataset && _root.dataset.sym && _curT && _root.dataset.sym !== _curT) return;
+
     var $ = function(id) { return document.getElementById(id); };
 
     // ── Banner KPIs ──
+    // Bug 2 fix (2026-05-25): unified source priority. Pick fLo + fHi from
+    // the SAME source so range/zone/bias are mutually consistent. Previously
+    // fLo could come from t.* while fHi fell through to bars_daily, producing
+    // inconsistent zone calcs.
     var spot = +(t && t.price) || 0;
-    var fLo  = +(t && t.fractal_low)  || (sd && sd.bars_daily && sd.bars_daily[0]?.low) || spot*0.95;
-    var fHi  = +(t && t.fractal_high) || (sd && sd.bars_daily && Math.max.apply(null, (sd.bars_daily || []).map(function(b){return +b.high;}))) || spot*1.05;
+    var bars = (sd && Array.isArray(sd.bars_daily)) ? sd.bars_daily : [];
+    var fLo = 0, fHi = 0, _hasRange = false;
+    if (+(t && t.fractal_low) && +(t && t.fractal_high)) {
+      fLo = +t.fractal_low; fHi = +t.fractal_high; _hasRange = true;
+    } else if (bars.length > 0) {
+      var _highs = bars.map(function(b){return +b.high;}).filter(function(x){return x>0;});
+      var _lows  = bars.map(function(b){return +b.low;}).filter(function(x){return x>0;});
+      if (_highs.length && _lows.length) {
+        fHi = Math.max.apply(null, _highs);
+        fLo = Math.min.apply(null, _lows);
+        _hasRange = true;
+      }
+    }
+    if (!_hasRange && spot > 0) { fLo = spot*0.95; fHi = spot*1.05; } // synth fallback
     var regime = String((t && (t.regime || t.regime4)) || '').toUpperCase() || '—';
     // Compute spot zone (P/E/D)
     var range = fHi - fLo;

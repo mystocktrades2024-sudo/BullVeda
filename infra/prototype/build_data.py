@@ -4298,6 +4298,37 @@ def main():
         if t in _ebp_by_t:
             rec["earnings_beat_prediction"] = _ebp_by_t[t]
 
+    # ── Bug 4 fix (2026-05-25): Backfill earnings-only tickers ──
+    # Watchlist tickers that never appeared in scan output (e.g. OOMA reports
+    # tomorrow but didn't pass the scan filters) were missing from tickers.json
+    # entirely, leaving the Earnings tab "Days to Report" blank. Add a stub
+    # row carrying earn_days + report_date so the tab populates.
+    _ew_full = {x["ticker"]: x for x in (data.get("earnings_watchlist") or [])
+                if isinstance(x, dict) and x.get("ticker")}
+    _backfilled = 0
+    for t, ew in _ew_full.items():
+        if t in all_rich: continue
+        days = ew.get("days_to_earnings")
+        if days is None: continue
+        all_rich[t] = {
+            "ticker": t,
+            "earn_days": days,
+            "earnings_date": ew.get("report_date") or ew.get("earnings_date"),
+            "earnings_estimate": ew.get("estimate") or ew.get("eps_estimate"),
+            "_mode": "earnings_only",
+            "stage": "EARNINGS_WATCH",
+            "name": ew.get("name"),
+            "sector": ew.get("sector"),
+            "price": ew.get("price"),
+            "_data_completeness": "lite",
+            "_lite_sources": ["earnings"],
+        }
+        if t in _ebp_by_t:
+            all_rich[t]["earnings_beat_prediction"] = _ebp_by_t[t]
+        _backfilled += 1
+    if _backfilled:
+        print(f"  earnings-watchlist backfill: {_backfilled} tickers added")
+
     # ─── Option B (2026-05-23): Unified ticker universe ───────────────
     # Augment tickers.json with ML / Earnings / Options-only tickers that
     # weren't in the main scan. Each gets OHLCV + name + sector + last price
