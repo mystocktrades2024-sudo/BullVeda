@@ -273,6 +273,43 @@ def main(force: bool = False) -> int:
     if not top30:
         log.warning("Scanner returned 0 candidates — universe may not have UOA imbalance right now")
 
+    # 2026-05-26 · OPTIONS-QUANT-DATA — enrich top30 with HV20 from EODHD daily
+    # bars, then compute IVRP (variance risk premium) = atm_iv − HV20.
+    # Vectorized: one EODHD call per ticker. Failures degrade gracefully to null.
+    try:
+        from data_fetcher import fetch_market_data
+        import numpy as np
+        tickers_for_hv = [p["ticker"] for p in top30 if p.get("atm_iv") is not None]
+        if tickers_for_hv:
+            md = fetch_market_data(tickers_for_hv, period="2mo")
+            for pick in top30:
+                tk = pick.get("ticker")
+                df = md.get(tk) if isinstance(md, dict) else None
+                if df is None or len(df) < 21:
+                    pick["hv20"] = None
+                    pick["ivrp"] = None
+                    continue
+                try:
+                    close = df["Close"].astype(float)
+                    logret = np.log(close / close.shift(1)).dropna()
+                    if len(logret) < 20:
+                        pick["hv20"] = None; pick["ivrp"] = None; continue
+                    # Annualized 20-day realized vol (252 trading days)
+                    hv20 = float(logret.iloc[-20:].std() * (252 ** 0.5))
+                    pick["hv20"] = round(hv20, 4)
+                    atm_iv = pick.get("atm_iv")
+                    if atm_iv is not None:
+                        # IVRP > 0 = IV richer than realized (sell premium edge)
+                        # IVRP < 0 = IV cheaper than realized (buy premium edge)
+                        pick["ivrp"] = round(float(atm_iv) - hv20, 4)
+                    else:
+                        pick["ivrp"] = None
+                except Exception:
+                    pick["hv20"] = None; pick["ivrp"] = None
+            log.info(f"HV20+IVRP computed for {sum(1 for p in top30 if p.get('hv20') is not None)}/{len(top30)} picks")
+    except Exception as e:
+        log.warning(f"HV20/IVRP enrichment failed (non-fatal): {e}")
+
     # Snapshot prior STRONG before overwriting, for delta-based Slack alert
     prev_strong = _read_previous_strong()
 

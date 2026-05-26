@@ -2264,14 +2264,24 @@ def _info_cache_path(ticker: str) -> Path:
 
 
 def _info_cache_load(ticker: str, max_age_days: int = 3):
-    """Load cached info if fresh enough (3-day TTL for swing traders). Returns dict or None."""
+    """Load cached info if fresh enough (3-day TTL for swing traders). Returns dict or None.
+
+    2026-05-26 · Skip low-quality cached entries (market_cap missing AND sector
+    Unknown) so that prior pollution by the finnhub+polygon fallback path
+    doesn't shadow a recoverable EODHD result. Without this, once any fallback
+    layer writes a degraded entry, every subsequent scan reuses it for 3 days.
+    """
     cp = _info_cache_path(ticker)
     try:
         if cp.exists():
             age_hours = (datetime.utcnow() - datetime.utcfromtimestamp(cp.stat().st_mtime)).total_seconds() / 3600
             if age_hours < max_age_days * 24:
                 data = json.loads(cp.read_text())
-                if data:  # don't serve empty cache
+                if data:
+                    mc = data.get("market_cap")
+                    sec = data.get("sector")
+                    if (mc in (0, None)) and (sec in (None, "", "Unknown")):
+                        return None  # treat as stale — let upstream lanes retry
                     return data
     except Exception:
         pass
@@ -2279,10 +2289,20 @@ def _info_cache_load(ticker: str, max_age_days: int = 3):
 
 
 def _info_cache_save(ticker: str, info: dict) -> None:
-    """Save info dict to disk cache."""
+    """Save info dict to disk cache.
+
+    2026-05-26 · Refuse to persist a degraded result (market_cap missing AND
+    sector Unknown). Otherwise the legacy fallback paths pin a 3-day-stale
+    bad entry over a recoverable EODHD result.
+    """
     try:
-        if info:  # only cache non-empty results
-            _info_cache_path(ticker).write_text(json.dumps(info))
+        if not info:
+            return
+        mc = info.get("market_cap")
+        sec = info.get("sector")
+        if (mc in (0, None)) and (sec in (None, "", "Unknown")):
+            return
+        _info_cache_path(ticker).write_text(json.dumps(info))
     except Exception:
         pass
 
@@ -2355,7 +2375,17 @@ def get_stock_info(ticker: str) -> dict:
     # Layer 2: EODHD real-time + fundamentals (replaces Schwab+Polygon+Finnhub+FMP)
     try:
         import eodhd_client as _eod
-        rt = _eod.real_time(ticker) or {}
+        # 2026-05-26 · `real_time` and `fundamentals` have independent EODHD
+        # quota and TTLs. Previously a real_time failure (e.g. HTTP 402 on the
+        # quote endpoint) raised and short-circuited the entire lane —
+        # including fundamentals, which is the source of market_cap, sector,
+        # margins, ratios, etc. Real-time price is only used for `px` here
+        # (and has a 52w_high fallback), so isolate its failures.
+        try:
+            rt = _eod.real_time(ticker) or {}
+        except Exception as _rte:
+            log.debug(f"eodhd real_time({ticker}) failed (lane continues): {_rte}")
+            rt = {}
         sf = get_schwab_fundamentals(ticker)  # Function name kept; now EODHD-backed.
 
         if isinstance(sf, dict) and not sf.get("error"):
@@ -4424,6 +4454,25 @@ def get_options_iv_data(ticker: str) -> dict:
            "put_call_ratio": None, "total_call_oi": 0, "total_put_oi": 0,
            "total_call_vol": 0, "total_put_vol": 0, "max_pain": None,
            "uoa_calls": 0, "uoa_puts": 0,
+           # 2026-05-26 · Quant options block (commit 1 OPTIONS-QUANT-DATA)
+           "atm_strike":      None,
+           "atm_dte":         None,
+           "atm_delta":       None,   # call-side ATM ~30D
+           "atm_gamma":       None,
+           "atm_theta":       None,
+           "atm_vega":        None,
+           "atm_iv":          None,   # ATM IV expressed as a fraction (0.32 = 32%)
+           "atm_bid_ask_pct": None,   # ATM call bid/ask spread as % of mid — liquidity proxy
+           "premium_call_$":  None,   # Σ call vol × mark × 100 (correct $ notional)
+           "premium_put_$":   None,
+           "premium_total_$": None,
+           "cohort_0dte_pct":  None,  # % of total option vol expiring same day
+           "cohort_weekly_pct":  None,  # % expiring ≤ 8d
+           "cohort_monthly_pct": None,  # % expiring 9-45d
+           "cohort_leap_pct":    None,  # % expiring > 45d
+           "front_iv":         None,   # ATM IV of nearest expiration
+           "back_iv":          None,   # ATM IV of farthest (within fetched expirations)
+           "term_ratio":       None,   # front_iv / back_iv (<1 = contango / normal; >1 = stressed)
            "source": "unavailable", "error": None}
 
     # Lazy-load .env so this works whether or not the parent process exported
@@ -4477,10 +4526,26 @@ def get_options_iv_data(ticker: str) -> dict:
         uoa_calls = uoa_puts = 0
         # Strike-level OI for max-pain calc
         strike_pain = {}
+        # 2026-05-26 · OPTIONS-QUANT-DATA · per-expiration premium $ + cohort buckets
+        cohort_0dte_vol = cohort_weekly_vol = cohort_monthly_vol = cohort_leap_vol = 0
+        premium_call_dollars = premium_put_dollars = 0.0
+        # Track expirations (DTE → ATM IV) for term-structure ratio
+        exp_atm_iv: dict[int, list[float]] = {}
+        # ATM call slot for Greeks pick — store the contract closest to the money
+        # at the nearest viable expiration ≥ 14d (avoid 0DTE/weekly Greek noise).
+        atm_call_best: dict = {}
 
         def _aggregate(ex_map, is_put: bool):
             nonlocal call_oi, put_oi, call_vol, put_vol, uoa_calls, uoa_puts
+            nonlocal cohort_0dte_vol, cohort_weekly_vol, cohort_monthly_vol, cohort_leap_vol
+            nonlocal premium_call_dollars, premium_put_dollars
             for exp_key, strikes in list(ex_map.items())[:4]:  # nearest 4 expirations
+                # exp_key format "YYYY-MM-DD:DTE"
+                exp_dte = None
+                try:
+                    exp_dte = int(exp_key.split(":")[-1])
+                except Exception:
+                    pass
                 for strike_str, contracts in strikes.items():
                     try:
                         strike = float(strike_str)
@@ -4490,22 +4555,61 @@ def get_options_iv_data(ticker: str) -> dict:
                         oi  = int(c.get("openInterest") or 0)
                         vol = int(c.get("totalVolume") or 0)
                         iv  = c.get("volatility")
+                        mark = c.get("mark") or c.get("last") or 0
+                        try: mark = float(mark)
+                        except Exception: mark = 0.0
+                        # Premium $ notional — correct math (vol × mark × 100)
+                        premium = vol * mark * 100
+                        # Expiration cohort bucketing (vol-weighted)
+                        if exp_dte is not None and vol > 0:
+                            if exp_dte == 0:    cohort_0dte_vol    += vol
+                            elif exp_dte <= 8:  cohort_weekly_vol  += vol
+                            elif exp_dte <= 45: cohort_monthly_vol += vol
+                            else:               cohort_leap_vol    += vol
                         if is_put:
                             put_oi  += oi
                             put_vol += vol
-                            # UOA — vol > 3× OI and OI > 100
+                            premium_put_dollars += premium
                             if oi > 100 and vol > oi * 3:
                                 uoa_puts += 1
                         else:
                             call_oi  += oi
                             call_vol += vol
+                            premium_call_dollars += premium
                             if oi > 100 and vol > oi * 3:
                                 uoa_calls += 1
+                            # Track ATM call for Greeks — pick the strike closest
+                            # to spot within the nearest expiration ≥ 14d (avoid
+                            # 0DTE/weekly Greek noise). Score = |strike-spot|/spot
+                            # plus penalty for sub-14d DTE.
+                            if spot and exp_dte is not None and exp_dte >= 14:
+                                moneyness = abs(strike - spot) / spot
+                                if moneyness <= 0.10:  # within ±10%
+                                    score = moneyness + max(0, (exp_dte - 30)) / 1000
+                                    prev_score = atm_call_best.get("_score")
+                                    if prev_score is None or score < prev_score:
+                                        atm_call_best.clear()
+                                        atm_call_best.update({
+                                            "_score":   score,
+                                            "strike":   strike,
+                                            "dte":      exp_dte,
+                                            "delta":    c.get("delta"),
+                                            "gamma":    c.get("gamma"),
+                                            "theta":    c.get("theta"),
+                                            "vega":     c.get("vega"),
+                                            "iv":       iv,
+                                            "bid":      c.get("bid"),
+                                            "ask":      c.get("ask"),
+                                            "mark":     mark,
+                                        })
                         # Strike-pain weight (calls + puts both contribute)
                         strike_pain[strike] = strike_pain.get(strike, 0) + oi
                         # Sample ATM IV (near-the-money strikes)
                         if iv and spot and 0.95 <= strike / spot <= 1.05:
-                            try: iv_samples.append(float(iv))
+                            try:
+                                iv_samples.append(float(iv))
+                                if exp_dte is not None:
+                                    exp_atm_iv.setdefault(exp_dte, []).append(float(iv))
                             except Exception: pass
 
         _aggregate(call_map, is_put=False)
@@ -4535,6 +4639,47 @@ def get_options_iv_data(ticker: str) -> dict:
         # For now, use ATR-based proxy (already in the codebase) when current_iv is known
         # Schwab doesn't return historical IV, so iv_rank stays None unless we cache history ourselves
         out["iv_rank"] = None  # placeholder — V-18 will add real-time IV-surface history
+
+        # 2026-05-26 · OPTIONS-QUANT-DATA — surface Greeks + premium $ + cohort + term
+        out["premium_call_$"]  = round(premium_call_dollars, 0) if premium_call_dollars else 0
+        out["premium_put_$"]   = round(premium_put_dollars, 0)  if premium_put_dollars  else 0
+        out["premium_total_$"] = out["premium_call_$"] + out["premium_put_$"]
+        cohort_tot = cohort_0dte_vol + cohort_weekly_vol + cohort_monthly_vol + cohort_leap_vol
+        if cohort_tot > 0:
+            out["cohort_0dte_pct"]    = round(cohort_0dte_vol    / cohort_tot * 100, 1)
+            out["cohort_weekly_pct"]  = round(cohort_weekly_vol  / cohort_tot * 100, 1)
+            out["cohort_monthly_pct"] = round(cohort_monthly_vol / cohort_tot * 100, 1)
+            out["cohort_leap_pct"]    = round(cohort_leap_vol    / cohort_tot * 100, 1)
+        # ATM call Greeks (closest strike to spot, ≥14d expiration)
+        if atm_call_best:
+            atm_call_best.pop("_score", None)
+            for k in ("strike", "dte", "delta", "gamma", "theta", "vega", "iv"):
+                v = atm_call_best.get(k)
+                if v is None: continue
+                try: v = float(v)
+                except Exception: continue
+                out[f"atm_{k}"] = round(v, 4) if k in ("delta","gamma","theta","vega","iv") else round(v, 2) if k == "strike" else v
+            # ATM bid/ask spread as % of mid — liquidity proxy
+            bid, ask = atm_call_best.get("bid"), atm_call_best.get("ask")
+            try:
+                bid, ask = float(bid), float(ask)
+                mid = (bid + ask) / 2
+                if mid > 0:
+                    out["atm_bid_ask_pct"] = round((ask - bid) / mid * 100, 2)
+            except Exception: pass
+        # Term-structure ratio — front ATM IV / back ATM IV
+        if len(exp_atm_iv) >= 2:
+            sorted_dtes = sorted(exp_atm_iv.keys())
+            front_dte, back_dte = sorted_dtes[0], sorted_dtes[-1]
+            front_ivs = exp_atm_iv[front_dte]
+            back_ivs  = exp_atm_iv[back_dte]
+            if front_ivs and back_ivs:
+                front_iv = sum(front_ivs) / len(front_ivs)
+                back_iv  = sum(back_ivs)  / len(back_ivs)
+                out["front_iv"]   = round(front_iv, 4)
+                out["back_iv"]    = round(back_iv, 4)
+                if back_iv > 0:
+                    out["term_ratio"] = round(front_iv / back_iv, 3)
 
         _cache_write(cache_key, out)
         return out
@@ -5698,7 +5843,10 @@ def _eodhd_fundamentals_to_schwab_schema(d: dict, ticker: str) -> dict | None:
         # Bonus fields downstream uses for sector/industry/short backfill
         "sector":              G.get("Sector"),
         "industry":            G.get("Industry"),
-        "market_cap":          G.get("MarketCapitalization"),
+        # 2026-05-26 · EODHD nests MarketCapitalization under Highlights, not
+        # General. The General fallback is kept defensively in case EODHD ever
+        # surfaces it there.
+        "market_cap":          H.get("MarketCapitalization") or G.get("MarketCapitalization"),
         "beta":                T.get("Beta"),
         "short_pct":           T.get("ShortPercent"),  # decimal: 0.0092 = 0.92%
         "country":             G.get("CountryName") or G.get("CountryISO"),

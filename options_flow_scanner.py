@@ -54,6 +54,25 @@ def scan(options_data: dict[str, dict],
             iv_pct = oi.get("iv_percentile")
             max_pain = oi.get("max_pain")
             gamma_net = oi.get("gamma_net")
+            # 2026-05-26 · OPTIONS-QUANT-DATA — pass-through fields
+            atm_delta = oi.get("atm_delta")
+            atm_gamma = oi.get("atm_gamma")
+            atm_theta = oi.get("atm_theta")
+            atm_vega  = oi.get("atm_vega")
+            atm_iv    = oi.get("atm_iv")
+            atm_strike = oi.get("atm_strike")
+            atm_dte   = oi.get("atm_dte")
+            atm_bid_ask_pct = oi.get("atm_bid_ask_pct")
+            premium_call_d   = oi.get("premium_call_$")
+            premium_put_d    = oi.get("premium_put_$")
+            premium_total_d  = oi.get("premium_total_$")
+            cohort_0dte   = oi.get("cohort_0dte_pct")
+            cohort_weekly = oi.get("cohort_weekly_pct")
+            cohort_monthly = oi.get("cohort_monthly_pct")
+            cohort_leap   = oi.get("cohort_leap_pct")
+            front_iv      = oi.get("front_iv")
+            back_iv       = oi.get("back_iv")
+            term_ratio    = oi.get("term_ratio")
 
             price = prices.get(ticker, 0)
             if price <= 0:
@@ -115,6 +134,25 @@ def scan(options_data: dict[str, dict],
                 "target": target,
                 "rr": round(rr, 1),
                 "sector": fund.get("sector", "Unknown"),
+                # 2026-05-26 · OPTIONS-QUANT-DATA — Greeks + premium $ + cohort + term
+                "atm_delta":  atm_delta,
+                "atm_gamma":  atm_gamma,
+                "atm_theta":  atm_theta,
+                "atm_vega":   atm_vega,
+                "atm_iv":     atm_iv,
+                "atm_strike": atm_strike,
+                "atm_dte":    atm_dte,
+                "atm_bid_ask_pct": atm_bid_ask_pct,
+                "premium_call_$":  premium_call_d,
+                "premium_put_$":   premium_put_d,
+                "premium_total_$": premium_total_d,
+                "cohort_0dte_pct":    cohort_0dte,
+                "cohort_weekly_pct":  cohort_weekly,
+                "cohort_monthly_pct": cohort_monthly,
+                "cohort_leap_pct":    cohort_leap,
+                "front_iv":   front_iv,
+                "back_iv":    back_iv,
+                "term_ratio": term_ratio,
             })
 
         except Exception as e:
