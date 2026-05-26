@@ -18730,19 +18730,11 @@ const QuantOptions = (function() {
     if (of.length === 0) {
       wsPanel.innerHTML = `
         <div class="qe-wrap">
-          <div class="qe-banner">
-            <div class="brand"><b>K · OPTIONS</b> flow cockpit</div>
-            <div class="title">Options Flow <span style="font-size:13px;font-weight:500;color:var(--ink-2);margin-left:6px;">No candidates</span></div>
-            <div class="stats">${freshPill}</div>
-          </div>
           <div style="padding:60px 22px;text-align:center;">
             <div style="font-family:'GT Sectra',Georgia,serif;font-style:italic;font-size:22px;color:var(--ink-1);margin-bottom:10px;">No qualifying UOA flow right now.</div>
             <div style="font-family:var(--mono);font-size:12px;color:var(--ink-2);max-width:540px;margin:0 auto;line-height:1.6;">
               The standalone scanner ran and returned 0 candidates that cleared the imbalance + liquidity + IV thresholds.
-              This is a real, honest empty state — not a render error. Last refresh: <b style="color:var(--ink-1)">${refreshedAt || 'never'}</b>.
-            </div>
-            <div style="margin-top:16px;font-family:var(--mono);font-size:11px;color:var(--ink-3);">
-              source: <span style="color:var(--ink-2)">${source}</span>
+              This is a real, honest empty state — not a render error.
             </div>
           </div>
         </div>`;
@@ -18752,171 +18744,7 @@ const QuantOptions = (function() {
     wsPanel.innerHTML = `
       <div class="qe-wrap">
 
-        <!-- BRAND ROW · slim header with freshness -->
-        <div class="qo-cockpit-brand">
-          <div class="qo-cb-brand">
-            <span class="qo-cb-mark">K · OPTIONS</span>
-            <span class="qo-cb-sub">flow cockpit</span>
-          </div>
-          <div class="qo-cb-vol ${verdictCls}">${cls.call}</div>
-          <div class="qo-cb-fresh">${freshPill}</div>
-        </div>
-
-        <!-- COMMAND BAR · 6 dense macro tiles -->
-        <div class="qo-cockpit">
-          <!-- TILE 1 · VIX with arc gauge -->
-          <div class="qoct-tile qoct-vix ${verdictCls}">
-            <div class="qoct-l">VIX · vol regime</div>
-            ${(() => {
-              // Build arc gauge: VIX range 10-40 → 240° arc
-              const v = vixCur != null ? Math.max(10, Math.min(40, vixCur)) : null;
-              if (v == null) return '<div class="qoct-v">—</div>';
-              const pct = (v - 10) / 30; // 0..1
-              const ang = -120 + pct * 240; // -120° → +120°
-              const col = v < 15 ? 'var(--gn)' : v < 20 ? 'var(--gn)' : v < 25 ? 'var(--am)' : v < 35 ? 'var(--am)' : 'var(--rd)';
-              return `
-                <div class="qoct-vix-row">
-                  <svg class="qoct-arc" viewBox="0 0 100 60">
-                    <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="var(--line-2)" stroke-width="6" stroke-linecap="round"/>
-                    <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="${col}" stroke-width="6"
-                      stroke-linecap="round" stroke-dasharray="${(pct * 125.6).toFixed(1)} 125.6"/>
-                    <text x="50" y="40" text-anchor="middle" font-family="ui-monospace,monospace" font-weight="800" font-size="16" fill="var(--ink)">${_fmt(vixCur,1)}</text>
-                  </svg>
-                  <div class="qoct-vix-meta">
-                    <div class="qoct-v" style="color:${col}">${cls.call}</div>
-                    ${vixChg != null ? `<div class="qoct-d ${vixChg >= 0 ? 'hi':'gn'}">${_sign(vixChg)}${_fmt(vixChg,1)}%</div>` : ''}
-                  </div>
-                </div>
-                <div class="qoct-axis"><span>10</span><span>20</span><span>30</span><span>40</span></div>
-              `;
-            })()}
-          </div>
-
-          <!-- TILE 2 · Directional flow bar (% calls vs % puts by contract vol) -->
-          <div class="qoct-tile">
-            <div class="qoct-l">flow direction · $ pressure</div>
-            ${(() => {
-              const totCall = of.reduce((s,x) => s + (+x.call_volume || 0), 0);
-              const totPut  = of.reduce((s,x) => s + (+x.put_volume  || 0), 0);
-              const tot = totCall + totPut;
-              const cPct = tot > 0 ? (totCall / tot * 100) : 50;
-              const pPct = 100 - cPct;
-              const _kb = (n) => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'k' : String(n);
-              return `
-                <div class="qoct-flow-bar">
-                  <div class="qoct-flow-call" style="width:${cPct}%"><span>${cPct.toFixed(0)}%</span></div>
-                  <div class="qoct-flow-put"  style="width:${pPct}%"><span>${pPct.toFixed(0)}%</span></div>
-                </div>
-                <div class="qoct-flow-meta">
-                  <span class="gn"><b>${_kb(totCall)}</b> calls</span>
-                  <span class="rd"><b>${_kb(totPut)}</b> puts</span>
-                </div>
-                <div class="qoct-flow-verdict ${cPct > 65 ? 'gn' : pPct > 65 ? 'rd' : 'am'}">${cPct > 65 ? 'BULLISH SKEW' : pPct > 65 ? 'BEARISH SKEW' : 'BALANCED'}</div>
-              `;
-            })()}
-          </div>
-
-          <!-- TILE 3 · Conviction stratification (STRONG/MOD/WEAK) -->
-          <div class="qoct-tile">
-            <div class="qoct-l">conviction · ${of.length} candidates</div>
-            ${(() => {
-              const strong = of.filter(x => String(x.status||'').toUpperCase() === 'STRONG').length;
-              const mod    = of.filter(x => String(x.status||'').toUpperCase() === 'MODERATE').length;
-              const weak   = of.filter(x => String(x.status||'').toUpperCase() === 'WEAK').length;
-              const tot = strong + mod + weak;
-              const w = (n) => tot > 0 ? (n / tot * 100) : 0;
-              return `
-                <div class="qoct-conv-bar">
-                  <div class="qoct-conv-strong" style="width:${w(strong)}%">${strong > 0 ? strong : ''}</div>
-                  <div class="qoct-conv-mod"    style="width:${w(mod)}%">${mod > 0 ? mod : ''}</div>
-                  <div class="qoct-conv-weak"   style="width:${w(weak)}%">${weak > 0 ? weak : ''}</div>
-                </div>
-                <div class="qoct-conv-legend">
-                  <span class="qoct-conv-leg-s">●● STRONG ${strong}</span>
-                  <span class="qoct-conv-leg-m">● MODERATE ${mod}</span>
-                  <span class="qoct-conv-leg-w">○ WEAK ${weak}</span>
-                </div>
-              `;
-            })()}
-          </div>
-
-          <!-- TILE 4 · IV regime histogram (under-30 cheap / 30-70 normal / over-70 rich) -->
-          <div class="qoct-tile">
-            <div class="qoct-l">IV regime distribution</div>
-            ${(() => {
-              const ivs = of.map(x => x.iv_percentile).filter(v => v != null && isFinite(v));
-              if (!ivs.length) return '<div class="qoct-iv-empty">IV % not enriched · Schwab refresh required</div>';
-              const cheap = ivs.filter(v => v < 30).length;
-              const norm  = ivs.filter(v => v >= 30 && v <= 70).length;
-              const rich  = ivs.filter(v => v > 70).length;
-              const tot = ivs.length;
-              const w = (n) => tot > 0 ? (n / tot * 100) : 0;
-              return `
-                <div class="qoct-iv-row">
-                  <div class="qoct-iv-bar">
-                    <div class="qoct-iv-cheap" style="height:${10 + (cheap/tot)*40}px" title="IV<30 · cheap (${cheap})"></div>
-                    <div class="qoct-iv-norm"  style="height:${10 + (norm/tot)*40}px" title="IV 30-70 · normal (${norm})"></div>
-                    <div class="qoct-iv-rich"  style="height:${10 + (rich/tot)*40}px" title="IV>70 · rich (${rich})"></div>
-                  </div>
-                  <div class="qoct-iv-meta">
-                    <div class="qoct-iv-cell gn">cheap · <b>${cheap}</b><span>buy premium</span></div>
-                    <div class="qoct-iv-cell am">normal · <b>${norm}</b><span>mixed</span></div>
-                    <div class="qoct-iv-cell rd">rich · <b>${rich}</b><span>sell premium</span></div>
-                  </div>
-                </div>
-              `;
-            })()}
-          </div>
-
-          <!-- TILE 5 · Top sector by options activity -->
-          <div class="qoct-tile">
-            <div class="qoct-l">sector flow · top mover</div>
-            ${(() => {
-              const sectMap = {};
-              of.forEach(x => {
-                const s = x.sector || '—';
-                if (!sectMap[s]) sectMap[s] = { call: 0, put: 0, count: 0 };
-                sectMap[s].call  += (+x.call_volume || 0);
-                sectMap[s].put   += (+x.put_volume  || 0);
-                sectMap[s].count += 1;
-              });
-              const ranked = Object.entries(sectMap)
-                .map(([s, v]) => ({ s, ...v, total: v.call + v.put, bias: v.call > v.put ? 'bull' : 'bear' }))
-                .sort((a, b) => b.total - a.total)
-                .slice(0, 3);
-              if (!ranked.length) return '<div class="qoct-iv-empty">no sector data</div>';
-              const _kb = (n) => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'k' : String(n);
-              const maxT = ranked[0].total || 1;
-              return ranked.map((r, i) => `
-                <div class="qoct-sect-row">
-                  <div class="qoct-sect-lbl ${i === 0 ? 'lead' : ''}">${r.s.slice(0, 22)} · ${r.count}</div>
-                  <div class="qoct-sect-bar">
-                    <div class="qoct-sect-fill ${r.bias === 'bull' ? 'bull' : 'bear'}" style="width:${(r.total / maxT * 100).toFixed(0)}%"></div>
-                  </div>
-                  <div class="qoct-sect-v">${_kb(r.total)}</div>
-                </div>
-              `).join('');
-            })()}
-          </div>
-
-          <!-- TILE 6 · Catalyst counter -->
-          <div class="qoct-tile">
-            <div class="qoct-l">earnings catalysts ahead</div>
-            ${(() => {
-              const ew = data.earnings_watchlist || [];
-              const er7  = ew.filter(e => e.days_to_earnings != null && e.days_to_earnings >= 0 && e.days_to_earnings <= 7).length;
-              const er14 = ew.filter(e => e.days_to_earnings != null && e.days_to_earnings > 7 && e.days_to_earnings <= 14).length;
-              const er30 = ew.filter(e => e.days_to_earnings != null && e.days_to_earnings > 14 && e.days_to_earnings <= 30).length;
-              return `
-                <div class="qoct-cat-grid">
-                  <div class="qoct-cat-cell rd"><div class="n">${er7}</div><div class="k">≤7d</div><div class="s">IV crush risk</div></div>
-                  <div class="qoct-cat-cell am"><div class="n">${er14}</div><div class="k">8-14d</div><div class="s">pre-ER drift</div></div>
-                  <div class="qoct-cat-cell"><div class="n">${er30}</div><div class="k">15-30d</div><div class="s">monitor</div></div>
-                </div>
-              `;
-            })()}
-          </div>
-        </div>
+        <!-- 2026-05-26 · CLEAN-SHEET HEADER · sub-nav only; brand + 6-tile cockpit + freshness pills removed -->
 
         <!-- SUB-TAB NAV · LIVE picks vs HISTORY · 2026-05-26 -->
         <div class="qo-subnav">
@@ -19144,11 +18972,8 @@ const QuantOptions = (function() {
     wsPanel.classList.add('qo-active');
 
     renderIdeas(data, of);
-    renderCockpitCards(data, of);    // writes to hidden placeholders (legacy)
-    renderVolSurface(data);           // writes to hidden placeholders (legacy)
     renderTable(data);
-    renderPlans(data, of);            // writes to hidden placeholder (legacy)
-    // 2026-05-26 · new market-structure painters
+    // 2026-05-26 · clean-sheet market-structure painters (legacy cockpit / vol-surface / plans painters retired)
     _paintMarketStructure(data, of);
     _paintSectorAndCatalyst(data, of);
     _wireOptionsSubnav(wsPanel);  // Live / History sub-tab switcher
@@ -19875,181 +19700,9 @@ const QuantOptions = (function() {
     });
   }
 
-  function renderCockpitCards(data, of) {
-    // Call-heavy (lowest P/C, highest call volume)
-    const callHeavy = of
-      .filter(x => typeof x.put_call_ratio === 'number')
-      .sort((a, b) => a.put_call_ratio - b.put_call_ratio)
-      .slice(0, 5);
-    document.getElementById('qo-calls-card').innerHTML = `
-      <div class="qo-card-h"><span class="qo-card-h-l"><span class="icon">⌃</span>CALL-HEAVY UOA</span><span class="qo-card-h-r">${callHeavy.length} tickers · bullish flow</span></div>
-      ${callHeavy.map(t => `
-        <div class="qo-uoa-row bullish" data-tkr="${t.ticker}">
-          <div class="qo-uoa-l">
-            <div class="qo-uoa-tkr">${t.ticker}</div>
-            <div class="qo-uoa-meta">${t.sector || ''} · $${_fmt(t.price,2)} · max pain $${_fmt(t.max_pain,2)}</div>
-          </div>
-          <div class="qo-uoa-r">
-            <div class="qo-uoa-ratio">${_fmt(t.put_call_ratio,2)}</div>
-            <div class="qo-uoa-vol">${_fmtInt(t.call_volume)}C / ${_fmtInt(t.put_volume)}P</div>
-          </div>
-        </div>
-      `).join('') || '<div style="padding:24px;text-align:center;color:var(--ink-3);font-family:var(--mono);font-size:12px;">No call-heavy UOA in this scan</div>'}
-    `;
+  // renderCockpitCards: retired 2026-05-26 (clean-sheet rebuild)
 
-    // Put-heavy (highest P/C)
-    const putHeavy = of
-      .filter(x => typeof x.put_call_ratio === 'number')
-      .sort((a, b) => b.put_call_ratio - a.put_call_ratio)
-      .slice(0, 5);
-    document.getElementById('qo-puts-card').innerHTML = `
-      <div class="qo-card-h"><span class="qo-card-h-l"><span class="icon">⌄</span>PUT-HEAVY UOA</span><span class="qo-card-h-r">${putHeavy.length} tickers · bearish flow</span></div>
-      ${putHeavy.map(t => `
-        <div class="qo-uoa-row bearish" data-tkr="${t.ticker}">
-          <div class="qo-uoa-l">
-            <div class="qo-uoa-tkr">${t.ticker}</div>
-            <div class="qo-uoa-meta">${t.sector || ''} · $${_fmt(t.price,2)} · max pain $${_fmt(t.max_pain,2)}</div>
-          </div>
-          <div class="qo-uoa-r">
-            <div class="qo-uoa-ratio">${_fmt(t.put_call_ratio,2)}</div>
-            <div class="qo-uoa-vol">${_fmtInt(t.call_volume)}C / ${_fmtInt(t.put_volume)}P</div>
-          </div>
-        </div>
-      `).join('') || '<div style="padding:24px;text-align:center;color:var(--ink-3);font-family:var(--mono);font-size:12px;">No put-heavy UOA in this scan</div>'}
-    `;
-
-    // Earnings IV crush risk — earnings ≤14d sorted by days
-    const earn = (data.earnings_watchlist || [])
-      .filter(e => e.days_to_earnings != null && e.days_to_earnings >= 0 && e.days_to_earnings <= 14)
-      .sort((a, b) => a.days_to_earnings - b.days_to_earnings)
-      .slice(0, 6);
-    document.getElementById('qo-earn-card').innerHTML = `
-      <div class="qo-card-h"><span class="qo-card-h-l"><span class="icon">⚡</span>EARNINGS IV CRUSH</span><span class="qo-card-h-r">${earn.length} ≤14d · close options first</span></div>
-      ${earn.map(e => {
-        const dte = e.days_to_earnings;
-        const act = dte <= 1 ? 'CLOSE TODAY' : dte <= 3 ? 'CLOSE 24-48H' : dte <= 7 ? 'PLAN EXIT' : 'WATCH';
-        return `<div class="qo-earn-row" data-tkr="${e.ticker}">
-          <div class="qo-earn-when"><span class="d">T+${dte}d</span><span class="l">${e.before_after_market || e.before_after || ''}</span></div>
-          <div class="qo-earn-body">
-            <div class="qo-earn-tkr">${e.ticker}</div>
-            <div class="qo-earn-sub">${e.report_date || ''} · est ${e.estimate != null ? '$'+e.estimate : '—'}</div>
-          </div>
-          <span class="qo-earn-act">${act}</span>
-        </div>`;
-      }).join('') || '<div style="padding:24px;text-align:center;color:var(--ink-3);font-family:var(--mono);font-size:12px;">No earnings in next 14d</div>'}
-    `;
-  }
-
-  function renderVolSurface(data) {
-    const oe = data.options_enriched || {};
-    const tickers = Object.keys(oe);
-    if (!tickers.length) {
-      const empty = '<div class="qo-surf-empty"><b>Schwab chain enrichment unavailable.</b><br>Re-run /Swing-Trade to populate.</div>';
-      ['qo-term-card','qo-skew-card','qo-gex-card'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = `<div class="qo-card-h"><span class="qo-card-h-l"><span class="icon">∅</span>NO DATA</span><span class="qo-card-h-r">—</span></div>${empty}`;
-      });
-      return;
-    }
-
-    // ── Term Structure card ──
-    const termRows = tickers.map(tkr => {
-      const e = oe[tkr];
-      const ts_raw = e.term_structure || [];
-      // 2026-05-26: filter to numeric-IV entries before iterating; previously
-      // unfiltered ts.map produced NaN y coords when any p.avg_iv was null,
-      // triggering SVG polyline "Expected number" console errors.
-      const ts = ts_raw.filter(x => typeof x.avg_iv === 'number' && isFinite(x.avg_iv));
-      if (ts.length < 2) return '';
-      const ivs = ts.map(x => x.avg_iv);
-      const front = ts[0].avg_iv, back = ts[ts.length - 1].avg_iv;
-      const shape = back > front * 1.05 ? 'contango' : back < front * 0.95 ? 'backward' : 'flat';
-      const shapeLbl = shape === 'contango' ? 'CONTANGO' : shape === 'backward' ? 'BACKWARD' : 'FLAT';
-      const minIV = Math.min(...ivs), maxIV = Math.max(...ivs);
-      const range = maxIV - minIV || 1;
-      const points = ts.map((p, i) => {
-        const x = (i / (ts.length - 1)) * 140;
-        const y = 24 - ((p.avg_iv - minIV) / range) * 20;
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      }).join(' ');
-      const stroke = shape === 'contango' ? 'var(--gn)' : shape === 'backward' ? 'var(--rd)' : 'var(--cy)';
-      return `<div class="qo-surf-row" data-tkr="${tkr}">
-        <span class="qo-surf-tkr">${tkr}</span>
-        <svg class="qo-term-spark" viewBox="0 0 140 28" preserveAspectRatio="none">
-          <polyline points="${points}" style="stroke:${stroke}"/>
-        </svg>
-        <div class="qo-term-info">
-          <div class="iv">${(e.live_iv_pct||0).toFixed(0)}%</div>
-          <div class="lbl ${shape}">${shapeLbl}</div>
-        </div>
-      </div>`;
-    }).join('');
-    document.getElementById('qo-term-card').innerHTML = `
-      <div class="qo-card-h"><span class="qo-card-h-l"><span class="icon">⌒</span>TERM STRUCTURE</span><span class="qo-card-h-r">front → back IV</span></div>
-      ${termRows}
-    `;
-
-    // ── Skew card ──
-    const skewRows = tickers.map(tkr => {
-      const e = oe[tkr];
-      const s = e.skew || {};
-      if (s.value == null) return '';
-      // value > 0 = put skew (negative for the market = fear). value < 0 = call skew (greed).
-      const v = s.value;
-      const absV = Math.abs(v);
-      const label = absV < 0.005 ? 'flat' : (v > 0 ? 'put' : 'call');
-      const lblText = label === 'put' ? 'PUT SKEW' : label === 'call' ? 'CALL SKEW' : 'FLAT';
-      // Bar: ±20pp around midpoint
-      const pct = Math.min(50, (absV * 1000) * 5);  // amplify visualization
-      return `<div class="qo-surf-row" data-tkr="${tkr}">
-        <span class="qo-surf-tkr">${tkr}</span>
-        <div class="qo-skew-bar">
-          <div class="mid"></div>
-          ${v > 0 ? `<div class="put" style="width:${pct}%"></div>` : v < 0 ? `<div class="call" style="width:${pct}%"></div>` : ''}
-        </div>
-        <div class="qo-skew-info">
-          <div class="v">${_sign(v)}${(v * 100).toFixed(2)}</div>
-          <div class="lbl ${label}">${lblText}</div>
-        </div>
-      </div>`;
-    }).join('');
-    document.getElementById('qo-skew-card').innerHTML = `
-      <div class="qo-card-h"><span class="qo-card-h-l"><span class="icon">⤧</span>SKEW · 25Δ</span><span class="qo-card-h-r">put-IV − call-IV</span></div>
-      ${skewRows}
-    `;
-
-    // ── Gamma Walls card ──
-    const gexRows = tickers.map(tkr => {
-      const e = oe[tkr];
-      const g = e.gex || {};
-      if (!g.wall_strike) return '';
-      const spot = e.spot;
-      const wall = g.wall_strike;
-      const kind = g.wall_kind === 'CALL_WALL' ? 'call' : 'put';
-      const lbl = g.wall_kind === 'CALL_WALL' ? 'CALL WALL' : 'PUT WALL';
-      const dist = ((wall - spot) / spot * 100).toFixed(1);
-      // Place spot and wall on a normalized 0-100 bar (clamped ±10% from midpoint)
-      const lo = Math.min(spot, wall) * 0.96;
-      const hi = Math.max(spot, wall) * 1.04;
-      const spotPos = ((spot - lo) / (hi - lo)) * 100;
-      const wallPos = ((wall - lo) / (hi - lo)) * 100;
-      return `<div class="qo-surf-row" data-tkr="${tkr}">
-        <span class="qo-surf-tkr">${tkr}</span>
-        <div class="qo-gex-bar">
-          <div class="wall-marker ${kind}" style="left:${Math.max(0,wallPos-4).toFixed(1)}%"></div>
-          <div class="spot-marker" style="left:${spotPos.toFixed(1)}%"></div>
-        </div>
-        <div class="qo-gex-info">
-          <div class="v">$${wall.toFixed(0)}</div>
-          <div class="lbl ${kind}">${lbl} · ${_sign(parseFloat(dist))}${dist}%</div>
-        </div>
-      </div>`;
-    }).join('');
-    document.getElementById('qo-gex-card').innerHTML = `
-      <div class="qo-card-h"><span class="qo-card-h-l"><span class="icon">⊥</span>GAMMA WALLS</span><span class="qo-card-h-r">spot → wall strike</span></div>
-      ${gexRows}
-    `;
-  }
+  // renderVolSurface:   retired 2026-05-26 (clean-sheet rebuild)
 
   function _tblRows(src) {
     const sorted = [...src].sort((a, b) => {
@@ -20132,35 +19785,7 @@ const QuantOptions = (function() {
     if (modal && modal.classList.contains('open')) renderModalTable(data);
   }
 
-  function renderPlans(data, of) {
-    const plans = of
-      .filter(t => typeof t.rr === 'number' && t.rr >= 2 && t.target && t.stop)
-      .sort((a, b) => b.rr - a.rr)
-      .slice(0, 6);
-    const _ivMap2 = {};
-    ((data.short_term||[]).concat(data.medium_term||[]).concat(data.long_term||[])).forEach(t => {
-      if (t.ticker && t.iv_rank != null) _ivMap2[t.ticker] = +t.iv_rank;
-    });
-    document.getElementById('qo-plans').innerHTML = plans.length ? plans.map(t => {
-      const verd = String(t.verdict || '').toLowerCase();
-      const _bullP = (t.put_call_ratio || 0) < 1;
-      const _ivRP = t.iv_percentile ?? _ivMap2[t.ticker] ?? null;
-      const direction = _ivRP != null && _ivRP > 70
-        ? (_bullP ? 'bull call spread' : 'bear put spread')
-        : (_bullP ? 'long call' : 'long put');
-      return `<div class="qo-plan-row" data-tkr="${t.ticker}">
-        <div class="qo-plan-tkr">${t.ticker}</div>
-        <div class="qo-plan-body">
-          <div><b>${direction}</b> · entry $${_fmt(t.price, 2)} → stop <b>$${_fmt(t.stop, 2)}</b> → T1 <b>$${_fmt(t.target, 2)}</b></div>
-          <div style="color:var(--ink-3);margin-top:3px;">${t.sector || ''} · max pain $${_fmt(t.max_pain, 2)} · P/C ${_fmt(t.put_call_ratio, 2)} · ${_fmtInt(t.total_options_vol)} contracts</div>
-        </div>
-        <div class="qo-plan-r">
-          <div class="qo-plan-rr">${_fmt(t.rr, 1)}:1</div>
-          <span class="qo-plan-verdict ${verd}">${t.verdict || '—'}</span>
-        </div>
-      </div>`;
-    }).join('') : '<div style="padding:24px;text-align:center;color:var(--ink-3);font-family:var(--mono);font-size:12px;">No plans with R:R ≥ 2.0 in this scan</div>';
-  }
+  // renderPlans:        retired 2026-05-26 (clean-sheet rebuild)
 
   return { render };
 })();
@@ -66776,7 +66401,7 @@ function setupV3Workspaces(arr, data) {
 const LENS_GUIDE = {
   scanner:        { unique: 'verdict + score + R:R for every scored ticker — the universal action table',         alt: 'Confluence Matrix for the dense multi-lens heatmap of the same universe' },
   elite:          { unique: 'curated TOP picks per (Swing/Position/Invest × BUY/WATCH/SHORT) — 9-cell grid',      alt: 'Signal Scanner for the full universe table, not just top picks' },
-  optionsflow:    { unique: 'unusual options activity (UOA imbalance, IV rank surges, P/C ratio, max pain)',      alt: 'ML Edge for direction probabilities derived from price/vol/structure' },
+  // optionsflow: lens-description suppressed 2026-05-26 per clean-sheet rebuild — the page header speaks for itself
   earnings:       { unique: 'beat-prediction scoring, calibration, ER calendar within 14d',                        alt: 'IPO·Splits for corporate calendars, Pre-Market for post-ER drift' },
   watchlist:      { unique: 'YOUR starred tickers — live Schwab prices + scan-derived verdict overlay',            alt: 'Signal Scanner for the full scored universe (this is your subset)' },
   positionAnalysis:{ unique: '360° hold/add/trim/exit review for ONE ticker (MC, VaR, stress, structural targets)', alt: 'Portfolio for all open positions at once, Detail panel for any other ticker' },
