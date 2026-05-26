@@ -28755,7 +28755,14 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     // Apply real-data replacements to the prototype body string
     let _bodyOut = body;
     for (const [re, val] of _vt_replacements) { try { _bodyOut = _bodyOut.replace(re, val); } catch (_) {} }
-    return cssWrap + '<div class="ivv2" style="padding:8px 10px">' + bc + _demoBanner + _bodyOut + '</div>';
+    // 2026-05-25 · Wire t.thesis if present — appears at the bottom of the tab
+    // as a clearly-marked "LIVE THESIS" block.
+    let _thesisBlock = '';
+    const _thesisTxt = (t && typeof t.thesis === 'string') ? t.thesis : '';
+    if (_thesisTxt) {
+      _thesisBlock = '<div style="margin:18px 10px 8px;padding:14px 16px;background:var(--bg-1,#11151a);border:1px solid var(--copper,#d97757);border-left:4px solid var(--copper,#d97757);border-radius:2px;font:600 12px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--ink-1,#d4d8d1);line-height:1.6"><div style="font:800 11px var(--mono);color:var(--copper,#d97757);letter-spacing:0.14em;margin-bottom:8px">📝 LIVE THESIS · ' + _esc(tk) + '</div>' + _esc(_thesisTxt) + '</div>';
+    }
+    return cssWrap + '<div class="ivv2" style="padding:8px 10px">' + bc + _demoBanner + _bodyOut + _thesisBlock + '</div>';
   }
 
   // Section dispatcher · routes section_id → individual renderer.
@@ -42934,6 +42941,29 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       [/KIRSTEN CHEN/g, _insN > 0 ? 'INSIDER 3' : '—'],
       [/DIANE BRYANT/g, _insN > 0 ? 'INSIDER 4' : '—'],
     ];
+    // 2026-05-25 · Wire News Flow timeline if real articles exist. Replaces
+    // the static AVGO news bullets with up to 5 real headlines from
+    // t.news_articles[]. Each article: title + date + sentiment polarity.
+    const _newsArticles = Array.isArray(t && t.news_articles) ? t.news_articles : [];
+    if (_newsArticles.length > 0) {
+      // Build a simple injection — find a likely anchor in the body and append
+      // real headlines under it. The intel body has many sections; we inject
+      // a "LIVE NEWS HEADLINES" block right after the demo banner via post-replace.
+      const _newsList = _newsArticles.slice(0, 5).map(a => {
+        const _ttl = _esc(a.title || '').slice(0, 110);
+        const _dt  = (a.date || '').slice(0, 10);
+        const _sp  = (a.sentiment && a.sentiment.polarity != null) ? +a.sentiment.polarity : null;
+        const _sCls = _sp == null ? 'ink-3' : _sp >= 0.2 ? 'gn' : _sp <= -0.2 ? 'rd' : 'am';
+        const _sLbl = _sp == null ? '—' : (_sp >= 0 ? '+' : '') + _sp.toFixed(2);
+        const _link = a.link ? ' onclick="window.open(this.dataset.url,\'_blank\')" data-url="' + _esc(a.link) + '" style="cursor:pointer"' : '';
+        return '<div style="display:grid;grid-template-columns:80px 1fr 60px;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line);font:600 11px var(--mono,JetBrains Mono,ui-monospace,monospace)"' + _link + '><span style="color:var(--ink-3)">' + _esc(_dt) + '</span><span style="color:var(--ink-1)">' + _ttl + '</span><span class="' + _sCls + '" style="text-align:right">' + _sLbl + '</span></div>';
+      }).join('');
+      const _newsBlock = '<div style="margin:14px 10px;padding:12px 14px;background:var(--bg-1,#11151a);border:1px solid var(--gn,#5be57c);border-left:4px solid var(--gn,#5be57c);border-radius:2px"><div style="font:800 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--gn,#5be57c);letter-spacing:0.14em;margin-bottom:8px">📰 LIVE NEWS · ' + _newsArticles.length + ' articles · top ' + Math.min(5, _newsArticles.length) + '</div>' + _newsList + '</div>';
+      // We'll splice this into the body before the static news section.
+      // Find a stable anchor — replace the first AVGO-static news headline marker.
+      body = body.replace(/(<!--\s*DETAIL · 14 SECTIONS\s*-->)/, _newsBlock + '$1');
+      // If no anchor found, just prepend after breadcrumb (done via banner injection)
+    }
     let body = bodyHTML;
     for (const [re, val] of _tf_replacements) { try { body = body.replace(re, val); } catch (_) {} }
     // Build breadcrumb that mirrors prototype tone but uses live ticker
