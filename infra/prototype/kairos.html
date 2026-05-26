@@ -18141,12 +18141,13 @@ const QuantOptions = (function() {
         _diskBundle = disk;
         const bundleLen = (data.options_flow_top30 || []).length;
         const diskLen = disk.top30.length;
-        // Prefer disk when (a) bundle is empty, (b) disk has more candidates,
-        // or (c) disk has a newer refreshed_at than the bundle's run_timestamp.
-        // Always re-render so the freshness pill reflects the actual source.
-        const diskTime = disk.refreshed_at ? Date.parse(disk.refreshed_at) : 0;
-        const bundleTime = data.run_timestamp ? Date.parse(data.run_timestamp) : 0;
-        if (bundleLen === 0 || diskLen > bundleLen || diskTime > bundleTime) {
+        // Standalone scanner is the live source-of-truth and runs every 5 min;
+        // bundled data updates only 4×/day. Always prefer disk when it carries
+        // a valid refreshed_at — the bundled run_timestamp uses a non-ISO
+        // "YYYY-MM-DD HH:MM" format that Date.parse returns NaN for, which
+        // silently broke the previous "diskTime > bundleTime" comparison.
+        const diskHasFresh = !!disk.refreshed_at && !isNaN(Date.parse(disk.refreshed_at));
+        if (bundleLen === 0 || diskLen > bundleLen || diskHasFresh) {
           data.options_flow_top30 = disk.top30;
           if (Array.isArray(disk.top50)) data.options_flow_top50 = disk.top50;
           data._of_refreshed_at = disk.refreshed_at;
