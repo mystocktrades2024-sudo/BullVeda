@@ -7927,7 +7927,9 @@ async def options_flow_journal_api(days: int = 90, limit: int = 200,
                 continue
     from datetime import datetime, timedelta
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    rows = []
+    # Dedupe by (snap_date, ticker) — scanner appends every 30 min, so one
+    # ticker on one day can have 48 duplicate rows. Keep highest snap_ts.
+    history_by_key = {}
     for ln in hist_path.read_text().splitlines():
         if not ln.strip(): continue
         try:
@@ -7935,6 +7937,12 @@ async def options_flow_journal_api(days: int = 90, limit: int = 200,
         except Exception:
             continue
         if (h.get("snap_date") or "") < cutoff: continue
+        key = (h.get("snap_date"), h.get("ticker"))
+        prev = history_by_key.get(key)
+        if prev is None or (h.get("snap_ts") or 0) > (prev.get("snap_ts") or 0):
+            history_by_key[key] = h
+    rows = []
+    for h in history_by_key.values():
         st = h.get("status") or ""
         if status and st.upper() != status.upper(): continue
         oc = outcomes.get((h.get("snap_date"), h.get("ticker")))

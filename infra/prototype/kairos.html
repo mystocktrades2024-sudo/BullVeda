@@ -18446,7 +18446,7 @@ const QuantOptions = (function() {
       return '<span style="color:var(--ink-3)">⌛ pending</span>';
     };
     const stCls = (st) => st === 'STRONG' ? 'color:var(--gn);font-weight:700' : st === 'MODERATE' ? 'color:var(--am);font-weight:700' : 'color:var(--ink-2)';
-    tbody.innerHTML = filtered.slice(0, 500).map(r => {
+    tbody.innerHTML = filtered.slice(0, 1500).map(r => {
       const realized = r.realized_pct;
       const realizedCls = realized == null ? 'color:var(--ink-3)' : realized > 0 ? 'color:var(--gn)' : 'color:var(--rd)';
       const realizedTxt = realized == null ? '—' : (realized > 0 ? '+' : '') + realized.toFixed(2) + '%';
@@ -38201,6 +38201,37 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
     const actionLine = isWatch || isExtended ? 'BUY · LONG · alert-triggered' : isShort ? 'SHORT · alert-triggered' : 'BUY · LONG · armed';
     const orderTypeNote = isWatch || isExtended ? 'LMT · GTC · 5-day expiry · fires on revert' : 'LMT · GTC · 5-day expiry';
 
+    // 2026-05-26 · SMC-aware stop layer — pull trap detector + suggested
+    // structural stop. Data lives on t.trade_plan.* AND t.canonical_trade_plan.risk.*
+    // AND mirrored top-level. Read whichever first satisfies.
+    const _smcStopInsideOB = !!(_g('canonical_trade_plan.risk.stop_inside_ob',
+                                    'trade_plan.stop_inside_ob', 'stop_inside_ob'));
+    const _smcStopSuggested = _num('canonical_trade_plan.risk.stop_smc_suggested',
+                                    'trade_plan.stop_smc_suggested', 'stop_smc_suggested');
+    const _smcStopSource = _g('canonical_trade_plan.risk.stop_smc_source',
+                              'trade_plan.stop_smc_source', 'stop_smc_source') || '';
+    const _smcStopDistPct = _num('canonical_trade_plan.risk.stop_smc_distance_pct',
+                                  'trade_plan.stop_smc_distance_pct', 'stop_smc_distance_pct');
+    const _smcStopRR = _num('canonical_trade_plan.risk.stop_smc_rr',
+                             'trade_plan.stop_smc_rr', 'stop_smc_rr');
+    const _smcInsideOBZone = _g('canonical_trade_plan.risk.stop_inside_ob_zone',
+                                 'trade_plan.stop_inside_ob_zone', 'stop_inside_ob_zone') || '';
+    // 2026-05-26 SHIP 1 + SHIP 2 — severity-chip routing & catalyst suppression.
+    const _smcSeverity = (_g('canonical_trade_plan.risk.stop_inside_ob_severity',
+                              'trade_plan.stop_inside_ob_severity', 'stop_inside_ob_severity') || '').toUpperCase();
+    const _smcSeverityScore = _num('canonical_trade_plan.risk.stop_inside_ob_score',
+                                    'trade_plan.stop_inside_ob_score', 'stop_inside_ob_score');
+    const _smcSuppressed = !!(_g('canonical_trade_plan.risk.stop_inside_ob_suppressed',
+                                  'trade_plan.stop_inside_ob_suppressed', 'stop_inside_ob_suppressed'));
+    const _smcSuppressReason = _g('canonical_trade_plan.risk.stop_inside_ob_suppress_reason',
+                                   'trade_plan.stop_inside_ob_suppress_reason', 'stop_inside_ob_suppress_reason') || '';
+    // Show comparison tile when SMC stop differs from legacy by > 5%
+    const _smcStopDiffPct = (_smcStopSuggested && stop) ? Math.abs(_smcStopSuggested - stop) / stop * 100 : 0;
+    const _showSmcCompare = _smcStopSuggested && stop && _smcStopDiffPct > 5;
+    // Compute SMC-stop R:R from limit price (for inline math in banner)
+    const _smcRiskPerShare = (_smcStopSuggested && limitPx) ? Math.abs(limitPx - _smcStopSuggested) : null;
+    const _smcRRFromLimit = (_smcRiskPerShare && t1Reward && _smcRiskPerShare > 0) ? (t1Reward / _smcRiskPerShare) : null;
+
     // Sizing cascade rows — render only the multipliers we have, fall through cleanly
     const cascadeRows = [];
     let running = halfKelly;
@@ -38427,6 +38458,59 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       '.ptv2 .pt-ribbon-state .sym{color:var(--ptink);margin-right:6px;font-size:14px}' +
       '.ptv2 .pt-ribbon-now{font:600 12px var(--ptmono);color:var(--ptink2);letter-spacing:0.04em}.ptv2 .pt-ribbon-now b{color:var(--ptink)}.ptv2 .pt-ribbon-now .amb{color:var(--ptam)}.ptv2 .pt-ribbon-now .gn{color:var(--ptgn)}' +
       '.ptv2 .pt-ribbon-act{font:800 11px var(--ptmono);padding:6px 14px;border-radius:2px;letter-spacing:0.14em;border:1px solid var(--ptamd);background:var(--ptambg);color:var(--ptam)}.ptv2 .pt-ribbon-act.gn{border-color:var(--ptgnd);background:var(--ptgnbg);color:var(--ptgn)}.ptv2 .pt-ribbon-act.rd{border-color:var(--ptrdd);background:var(--ptrdbg);color:var(--ptrd)}' +
+      // 2026-05-26 · SMC-aware stop placement warning + comparison tile
+      '.ptv2 .pt-smc-warn{background:rgba(248,113,113,0.06);border:1px solid var(--ptrd);border-left:4px solid var(--ptrd);border-radius:2px;padding:14px 18px;margin-bottom:14px;font-family:var(--ptmono);box-shadow:0 0 0 1px rgba(248,113,113,0.18)}' +
+      '.ptv2 .pt-smc-warn-h{font:800 13px var(--ptmono);color:var(--ptrd);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:8px}' +
+      '.ptv2 .pt-smc-warn-h .sym{font-size:18px;line-height:1}' +
+      '.ptv2 .pt-smc-warn-body{font:600 12px var(--ptmono);color:var(--ptink1);line-height:1.55;margin-bottom:12px}' +
+      '.ptv2 .pt-smc-warn-body b{color:var(--ptink)}.ptv2 .pt-smc-warn-body b.rd{color:var(--ptrd)}.ptv2 .pt-smc-warn-body b.am{color:var(--ptam)}.ptv2 .pt-smc-warn-body b.gn{color:var(--ptgn)}' +
+      '.ptv2 .pt-smc-warn-cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:10px 0}@media(max-width:760px){.ptv2 .pt-smc-warn-cmp{grid-template-columns:1fr}}' +
+      '.ptv2 .pt-smc-stop-card{background:var(--pt2);border:1px solid var(--ptline);border-radius:2px;padding:10px 14px}' +
+      '.ptv2 .pt-smc-stop-card.legacy{border-color:var(--ptrd);border-left:3px solid var(--ptrd)}' +
+      '.ptv2 .pt-smc-stop-card.suggested{border-color:var(--ptgn);border-left:3px solid var(--ptgn)}' +
+      '.ptv2 .pt-smc-stop-h{font:700 10px var(--ptmono);color:var(--ptink3);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:6px;display:flex;justify-content:space-between;align-items:baseline}' +
+      '.ptv2 .pt-smc-stop-card.legacy .pt-smc-stop-h{color:var(--ptrd)}' +
+      '.ptv2 .pt-smc-stop-card.suggested .pt-smc-stop-h{color:var(--ptgn)}' +
+      '.ptv2 .pt-smc-stop-h .badge{font:700 9px var(--ptmono);padding:2px 6px;border-radius:2px;letter-spacing:0.08em}' +
+      '.ptv2 .pt-smc-stop-card.legacy .pt-smc-stop-h .badge{background:rgba(248,113,113,0.18);color:var(--ptrd)}' +
+      '.ptv2 .pt-smc-stop-card.suggested .pt-smc-stop-h .badge{background:rgba(74,222,128,0.15);color:var(--ptgn)}' +
+      '.ptv2 .pt-smc-stop-v{font:800 22px var(--ptmono);color:var(--ptink);line-height:1.1;margin-bottom:4px}' +
+      '.ptv2 .pt-smc-stop-meta{font:600 11px var(--ptmono);color:var(--ptink2);letter-spacing:0.04em;line-height:1.4}' +
+      '.ptv2 .pt-smc-stop-meta b{color:var(--ptink)}.ptv2 .pt-smc-stop-meta b.rd{color:var(--ptrd)}.ptv2 .pt-smc-stop-meta b.gn{color:var(--ptgn)}.ptv2 .pt-smc-stop-meta b.am{color:var(--ptam)}' +
+      '.ptv2 .pt-smc-warn-actions{margin-top:8px;font:700 11px var(--ptmono);color:var(--ptink1);letter-spacing:0.04em;padding-top:10px;border-top:1px dashed var(--ptline)}' +
+      '.ptv2 .pt-smc-warn-actions b{color:var(--ptink)}' +
+      '.ptv2 .pt-smc-warn-actions .opt{display:block;margin-top:4px;color:var(--ptink2)}' +
+      '.ptv2 .pt-smc-warn-actions .opt b{color:var(--ptam)}' +
+      // Compact comparison tile (when no trap, just a difference > 5%)
+      '.ptv2 .pt-smc-cmp{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;background:var(--pt1);border:1px solid var(--ptline);border-left:4px solid var(--ptcp);border-radius:2px;padding:8px 14px;margin-bottom:14px;font-family:var(--ptmono)}' +
+      '.ptv2 .pt-smc-cmp-h{font:800 10px var(--ptmono);color:var(--ptcp);letter-spacing:0.14em;text-transform:uppercase}' +
+      '.ptv2 .pt-smc-cmp-body{font:600 11px var(--ptmono);color:var(--ptink1);letter-spacing:0.04em;line-height:1.5}' +
+      '.ptv2 .pt-smc-cmp-body b{color:var(--ptink)}.ptv2 .pt-smc-cmp-body b.rd{color:var(--ptrd)}.ptv2 .pt-smc-cmp-body b.gn{color:var(--ptgn)}.ptv2 .pt-smc-cmp-body b.am{color:var(--ptam)}' +
+      '.ptv2 .pt-smc-cmp-act{font:800 10px var(--ptmono);padding:5px 10px;border-radius:2px;letter-spacing:0.12em;border:1px solid var(--ptcp);background:var(--ptcpbg);color:var(--ptcp)}' +
+      // ── 2026-05-26 SHIP 1 · severity-chip routing ──
+      // HIGH retains the original red banner (no override needed; default chrome).
+      // MED tones down to amber border + lighter background.
+      // LOW renders as <details> + summary so it stays compact until expanded.
+      '.ptv2 .pt-smc-warn.sev-med{background:rgba(245,158,11,0.06);border:1px solid var(--ptam);border-left:4px solid var(--ptam);box-shadow:0 0 0 1px rgba(245,158,11,0.15)}' +
+      '.ptv2 .pt-smc-warn.sev-med .pt-smc-warn-h{color:var(--ptam)}' +
+      '.ptv2 .pt-smc-warn.sev-med .pt-smc-stop-card.legacy{border-color:var(--ptam);border-left-color:var(--ptam)}' +
+      '.ptv2 .pt-smc-warn.sev-med .pt-smc-stop-card.legacy .pt-smc-stop-h{color:var(--ptam)}' +
+      '.ptv2 .pt-smc-warn.sev-med .pt-smc-stop-card.legacy .pt-smc-stop-h .badge{background:rgba(245,158,11,0.18);color:var(--ptam)}' +
+      '.ptv2 details.pt-smc-warn.sev-low{background:rgba(255,255,255,0.025);border:1px solid var(--ptline);border-left:4px solid var(--ptink3);box-shadow:none;padding:6px 12px}' +
+      '.ptv2 details.pt-smc-warn.sev-low > summary.pt-smc-warn-h{color:var(--ptink2);font-size:11px;cursor:pointer;margin-bottom:0;display:flex;align-items:center;gap:8px;list-style:none}' +
+      '.ptv2 details.pt-smc-warn.sev-low > summary.pt-smc-warn-h::-webkit-details-marker{display:none}' +
+      '.ptv2 details.pt-smc-warn.sev-low[open]{padding:12px 16px}' +
+      '.ptv2 details.pt-smc-warn.sev-low[open] > summary.pt-smc-warn-h{margin-bottom:10px}' +
+      '.ptv2 .pt-smc-chev{margin-left:auto;font:600 9px var(--ptmono);color:var(--ptink3);letter-spacing:0.08em}' +
+      // severity pill (next to banner heading)
+      '.ptv2 .pt-smc-sev{display:inline-flex;align-items:center;gap:4px;font:800 9.5px var(--ptmono);letter-spacing:0.10em;padding:2px 8px;border-radius:2px;text-transform:uppercase;margin-left:8px}' +
+      '.ptv2 .pt-smc-sev.hi{background:rgba(248,113,113,0.20);color:var(--ptrd);border:1px solid rgba(248,113,113,0.55)}' +
+      '.ptv2 .pt-smc-sev.md{background:rgba(245,158,11,0.18);color:var(--ptam);border:1px solid rgba(245,158,11,0.55)}' +
+      '.ptv2 .pt-smc-sev.lo{background:rgba(255,255,255,0.04);color:var(--ptink3);border:1px solid var(--ptline);font-weight:600;letter-spacing:0.05em;text-transform:none}' +
+      // ── SHIP 2 · catalyst-sleeve suppressed note ──
+      '.ptv2 .pt-smc-suppressed{background:rgba(255,255,255,0.025);border:1px solid var(--ptline);border-left:3px solid var(--ptink3);border-radius:2px;padding:7px 12px;margin-bottom:14px;font:600 11px var(--ptmono);color:var(--ptink2);letter-spacing:0.03em;line-height:1.5}' +
+      '.ptv2 .pt-smc-suppressed b{color:var(--ptink)}.ptv2 .pt-smc-suppressed b.cp{color:var(--ptcp)}' +
+      '.ptv2 .pt-smc-suppressed .sym{margin-right:4px;font-size:13px;color:var(--ptink3)}' +
       '.ptv2 .pt-order-hero{display:grid;grid-template-columns:1.7fr 1fr;gap:12px;margin-bottom:14px}@media(max-width:1100px){.ptv2 .pt-order-hero{grid-template-columns:1fr}}' +
       '.ptv2 .pt-order-card{background:var(--pt1);border:1px solid var(--ptcp);border-left:4px solid var(--ptcp);border-radius:2px;overflow:hidden}' +
       '.ptv2 .pt-order-h{background:var(--ptcpbg);padding:10px 18px;border-bottom:1px solid var(--ptcp);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}' +
@@ -38617,6 +38701,94 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       + '</div>'
       + '<div class="pt-ribbon-act ' + (stateCls === 'gn' ? 'gn' : stateCls === 'rd' ? 'rd' : '') + '">' + _esc(ribbonAct) + '</div>'
       + '</div>';
+
+    // 2026-05-26 · SMC stop placement warning + comparison block.
+    // The trap (stop_inside_ob=true) is the worst case — render the full
+    // red-bordered warning banner with side-by-side stop cards + action.
+    // If no trap but SMC stop diverges from legacy by > 5%, render a
+    // compact copper-bordered comparison strip (informational, not alarm).
+    let smcWarnHTML = '';
+    const _legacyRRTxt = (rr ? rr.toFixed(2) : (riskPerShare && t1Reward ? (t1Reward / riskPerShare).toFixed(2) : '—'));
+    const _smcRRTxt = (_smcRRFromLimit != null ? _smcRRFromLimit.toFixed(2) : (_smcStopRR != null ? (+_smcStopRR).toFixed(2) : '—'));
+    const _smcDeltaPct = (_smcStopSuggested && stop) ? ((stop - _smcStopSuggested) / stop * 100) : 0;
+    const _rrFloor = 3.0;
+    const _smcRRBelowFloor = _smcRRFromLimit != null && _smcRRFromLimit < _rrFloor;
+
+    if (_smcStopInsideOB && _smcStopSuggested && stop && _smcSuppressed) {
+      // ── SHIP 2 · catalyst-sleeve suppression — informational note only.
+      // Preserve transparency (still surface the data) without raising alarm
+      // that's unlikely to fire as a real sweep on catalyst-dominated trades.
+      const _zoneLabel = _smcInsideOBZone || 'Bull OB zone';
+      const _reason = _smcSuppressReason || 'catalyst sleeve';
+      smcWarnHTML = ''
+        + '<div class="pt-smc-suppressed">'
+          + '<span class="sym">&#8505;</span> Stop sits inside <b>' + _esc(_zoneLabel) + '</b> '
+          + '&mdash; <b>suppressed</b> for <b class="cp">' + _esc(_reason) + '</b> (catalyst-dominated; structural sweep unlikely).'
+        + '</div>';
+    } else if (_smcStopInsideOB && _smcStopSuggested && stop) {
+      const _zoneLabel = _smcInsideOBZone || 'Bull OB zone';
+      const _actionLine = _smcRRBelowFloor
+        ? ('<b>Action:</b> widen stop to <b class="gn">$' + _smcStopSuggested.toFixed(2) + '</b> → R:R degrades to <b class="am">' + _smcRRTxt + '</b> (below 3:1 floor → <b class="am">consider WAIT</b>)'
+           + '<span class="opt"><b>Or wait</b> for OB sweep + reclaim candle, then re-enter at lower cost basis.</span>')
+        : ('<b>Action:</b> widen stop to <b class="gn">$' + _smcStopSuggested.toFixed(2) + '</b> → R:R still meets 3:1 floor (<b class="gn">' + _smcRRTxt + '</b>). Safer placement; same trade.');
+      // ── SHIP 1 · severity-routed chrome ──
+      //  HIGH → full red banner (current chrome).
+      //  MED  → amber chrome (lighter background, amber border).
+      //  LOW  → collapsed by default; click summary to expand.
+      const _sev = (_smcSeverity || 'HIGH').toUpperCase();
+      const _sevCls = _sev === 'HIGH' ? 'sev-high' : _sev === 'MED' ? 'sev-med' : 'sev-low';
+      const _sevPill = _sev === 'HIGH'
+        ? '<span class="pt-smc-sev hi">&#128683; HIGH SEVERITY</span>'
+        : _sev === 'MED'
+        ? '<span class="pt-smc-sev md">&#9888; MED SEVERITY</span>'
+        : '<span class="pt-smc-sev lo">&middot; LOW SEVERITY &middot; informational</span>';
+      const _sevScoreTxt = (_smcSeverityScore != null) ? (' &middot; score ' + _smcSeverityScore + '/6') : '';
+      const _bannerBody = ''
+        + '<div class="pt-smc-warn-body">'
+          + 'Your stop at <b class="rd">$' + stop.toFixed(2) + '</b> sits <b>INSIDE</b> the active <b>' + _esc(_zoneLabel) + '</b>. '
+          + 'A normal liquidity sweep of this Order Block will trigger your stop <b>before</b> the bounce &mdash; the very setup the system identified as structural support becomes the exit trigger.'
+        + '</div>'
+        + '<div class="pt-smc-warn-cmp">'
+          + '<div class="pt-smc-stop-card legacy">'
+            + '<div class="pt-smc-stop-h">Current Stop <span class="badge">TRAP</span></div>'
+            + '<div class="pt-smc-stop-v">$' + stop.toFixed(2) + '</div>'
+            + '<div class="pt-smc-stop-meta">1.25× ATR &middot; R:R <b class="rd">' + _legacyRRTxt + '</b> &middot; inside ' + _esc(_zoneLabel) + '</div>'
+          + '</div>'
+          + '<div class="pt-smc-stop-card suggested">'
+            + '<div class="pt-smc-stop-h">SMC Stop <span class="badge">SAFER</span></div>'
+            + '<div class="pt-smc-stop-v">$' + _smcStopSuggested.toFixed(2) + '</div>'
+            + '<div class="pt-smc-stop-meta">' + _esc((_smcStopSource || '').replace(/legacy stop .*$/, '').trim().replace(/\($/, '').trim()) + ' &middot; R:R <b class="' + (_smcRRBelowFloor ? 'am' : 'gn') + '">' + _smcRRTxt + '</b></div>'
+          + '</div>'
+        + '</div>'
+        + '<div class="pt-smc-warn-actions">' + _actionLine + '</div>';
+      if (_sev === 'LOW') {
+        // Collapsed by default — render as <details>
+        smcWarnHTML = ''
+          + '<details class="pt-smc-warn ' + _sevCls + '">'
+            + '<summary class="pt-smc-warn-h"><span class="sym">&#9888;</span> STOP PLACEMENT WARNING &middot; SMC TRAP DETECTED ' + _sevPill + _sevScoreTxt + ' <span class="pt-smc-chev">expand &#9662;</span></summary>'
+            + _bannerBody
+          + '</details>';
+      } else {
+        smcWarnHTML = ''
+          + '<div class="pt-smc-warn ' + _sevCls + '">'
+            + '<div class="pt-smc-warn-h"><span class="sym">' + (_sev === 'HIGH' ? '&#9940;' : '&#9888;') + '</span> STOP PLACEMENT WARNING &middot; SMC TRAP DETECTED ' + _sevPill + _sevScoreTxt + '</div>'
+            + _bannerBody
+          + '</div>';
+      }
+    } else if (_showSmcCompare) {
+      // Compact comparison strip — no trap, but levels diverge
+      const _dirNote = _smcDeltaPct > 0 ? 'wider · clears structure' : 'tighter · respects nearest OB';
+      smcWarnHTML = ''
+        + '<div class="pt-smc-cmp">'
+          + '<div class="pt-smc-cmp-h">◆ SMC STOP</div>'
+          + '<div class="pt-smc-cmp-body">'
+            + 'legacy <b class="rd">$' + stop.toFixed(2) + '</b> · R:R ' + _legacyRRTxt
+            + ' &nbsp;⟶&nbsp; SMC <b class="' + (_smcRRBelowFloor ? 'am' : 'gn') + '">$' + _smcStopSuggested.toFixed(2) + '</b> · R:R ' + _smcRRTxt
+            + ' &nbsp;·&nbsp; <b>' + (Math.abs(_smcDeltaPct)).toFixed(1) + '% ' + _dirNote + '</b>'
+          + '</div>'
+          + '<div class="pt-smc-cmp-act">' + (_smcRRBelowFloor ? 'REVIEW' : 'OPTIONAL') + '</div>'
+        + '</div>';
+    }
 
     // 2026-05-16 · Sleeve attribution chip — pulls 252d backtest stats from CLAUDE.md sleeve roster
     const _slvStats = {
@@ -39143,6 +39315,7 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       + cssWrap
       + '<div class="ptv2">'
         + '<div class="pt-bc"><span class="cp">' + _esc(tk) + '</span> · DETAIL · <b>PLAN · TICKET</b> · execution-first · order · size · trigger · invalidate</div>'
+        + smcWarnHTML
         + ribbonHTML
         + orderHTML
         + section1HTML
@@ -59024,13 +59197,30 @@ const MarketsV2 = (function () {
     // 2026-05-16 · Pull tickers from `arr` (the ticker array passed in by setupV3Workspaces),
     // NOT `data.tickers` (which is undefined). The scan output lives in `arr`.
     const tickers = Array.isArray(arr) ? arr : [];
+    // 2026-05-26 · upstream `perf_1d` and `pct_chg` are not populated by the scan
+    // (all 593 entries had them as null), so the heatmap rendered every cell at
+    // +0.00%. Resolve `chg` from a fallback chain ending in the daily bars,
+    // which the scan does populate reliably (smc_data.bars_daily).
+    const resolveChg = (t) => {
+      if (typeof t.perf_1d === 'number' && isFinite(t.perf_1d)) return +t.perf_1d;
+      if (typeof t.pct_chg === 'number' && isFinite(t.pct_chg)) return +t.pct_chg;
+      const inst = (t.inst_trend && typeof t.inst_trend.net_change_pct === 'number') ? +t.inst_trend.net_change_pct : null;
+      if (inst !== null && isFinite(inst) && inst !== 0) return inst;
+      const bars = (t.smc_data && Array.isArray(t.smc_data.bars_daily)) ? t.smc_data.bars_daily : null;
+      if (bars && bars.length >= 2) {
+        const last = +bars[bars.length - 1]?.close;
+        const prev = +bars[bars.length - 2]?.close;
+        if (last > 0 && prev > 0) return ((last - prev) / prev) * 100;
+      }
+      return 0;
+    };
     // Filter to tickers with valid price + change data
     let universe = tickers
       .filter(t => t && t.ticker && (+t.price > 0))
       .map(t => ({
         sym: String(t.ticker).toUpperCase(),
         sector: (t.sector || 'Other').toString().trim() || 'Other',
-        chg: (typeof t.perf_1d === 'number') ? +t.perf_1d : (typeof t.pct_chg === 'number' ? +t.pct_chg : 0),
+        chg: resolveChg(t),
         price: +t.price || 0,
         mcap: +t.market_cap || +t.mcap || (+t.price * 1e8), // fallback proxy
         name: t.name || t.ticker,
