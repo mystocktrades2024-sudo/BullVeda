@@ -675,8 +675,8 @@ function setTheme(mode) {
   <!-- ═══════ HERO BODY · 3-column rich grid ═══════ -->
   <div class="smc-hero-body">
 
-    <!-- LEFT · Dealing-range v2 (richer SVG with depth) -->
-    <div class="smc-dealing-v2">
+    <!-- LEFT · Dealing-range v2 — live-wired from t.smc_data (2026-05-25) -->
+    <div class="smc-dealing-v2" id="smcDealingRangeRoot">
       <div class="smc-dealing-v2-h">
         <span>Dealing range · zone-stack · spot trajectory</span>
         <span class="legend">
@@ -686,6 +686,12 @@ function setTheme(mode) {
           <i style="background:linear-gradient(90deg,rgba(251,191,36,0.50),rgba(251,191,36,0.10))"></i>Breaker
         </span>
       </div>
+      <!-- Dynamic SVG inserted by wireDealingRange() — reads window.__SMC_T__ + __SMC_DATA__ -->
+      <div id="smcDealingRangeBody" style="position:relative">
+        <!-- Default empty state shown if wire fails; populated when JS runs below -->
+        <div id="smcDealingRangeEmpty" style="padding:40px;text-align:center;color:var(--ink-3);font:600 11px var(--mono);letter-spacing:0.08em">⌛ wiring dealing range from t.smc_data…</div>
+      </div>
+      <div id="smcDealingRangeLegacy" style="display:none"><!-- legacy AVGO mockup -->
       <svg viewBox="0 0 600 280" preserveAspectRatio="xMidYMid meet">
         <defs>
           <linearGradient id="premGrad" x1="0" y1="0" x2="0" y2="1">
@@ -813,6 +819,7 @@ function setTheme(mode) {
           <text x="6.5" y="11" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#0a0d0c" font-weight="900">●</text>
         </g>
       </svg>
+      </div><!-- /#smcDealingRangeLegacy -->
     </div>
 
     <!-- MIDDLE · Concept gauges v2 (with Wilson CI + sparkline) -->
@@ -2898,10 +2905,165 @@ function setTheme(mode) {
     });
   }
 
+  // 2026-05-25 · Dealing-range wire — builds the LEFT-side SVG from real
+  // smc_data zones, spot price, and fLo/fHi range. Replaces the hardcoded
+  // AVGO mockup. Called after `wire()` completes so __SMC_T__ + __SMC_DATA__
+  // are in scope.
+  function wireDealingRange() {
+    var body = document.getElementById('smcDealingRangeBody');
+    if (!body) return;
+    var t  = (typeof window !== 'undefined') ? window.__SMC_T__ : null;
+    var sd = (typeof window !== 'undefined') ? window.__SMC_DATA__ : null;
+    if (!t) return;
+    var tk = (t.ticker || t.symbol || '').toString().toUpperCase();
+    // Ticker-stamp guard (companion to Bug 2 fix in main wire())
+    var rootEl = document.getElementById('smcDealingRangeRoot');
+    if (rootEl) rootEl.dataset.sym = tk;
+
+    // ── Compute range (fLo / fHi / spot) ──
+    var spot = +(t.price || 0);
+    var bars = (sd && Array.isArray(sd.bars_daily)) ? sd.bars_daily : [];
+    var fLo = +(t.fractal_low) || 0, fHi = +(t.fractal_high) || 0;
+    if (!fLo || !fHi) {
+      if (bars.length >= 5) {
+        var highs = bars.map(function(b){ return +b.high; }).filter(function(x){ return x > 0; });
+        var lows  = bars.map(function(b){ return +b.low;  }).filter(function(x){ return x > 0; });
+        if (highs.length && lows.length) { fHi = Math.max.apply(null, highs); fLo = Math.min.apply(null, lows); }
+      }
+    }
+    if (!fLo || !fHi || fHi <= fLo) {
+      body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--ink-3);font:600 11px var(--mono);letter-spacing:0.08em">⚠ no daily bars in t.smc_data — dealing range unavailable</div>';
+      return;
+    }
+    var range = fHi - fLo;
+    // Add 5% padding above/below so spot doesn't sit on the very edge
+    var visLo = fLo - range * 0.05;
+    var visHi = fHi + range * 0.05;
+    var visRange = visHi - visLo;
+
+    // SVG viewBox 600 × 280 — keep same as the legacy AVGO mock
+    var W = 600, H = 280;
+    var L = 50, R = 585;           // x bounds for bands/zones
+    var T_PAD = 15, B_PAD = 25;    // y padding inside viewBox
+    var plotH = H - T_PAD - B_PAD;
+
+    // Map price → y coordinate (higher price = lower y because SVG is inverted)
+    function p2y(p) { return T_PAD + plotH * (1 - (p - visLo) / visRange); }
+
+    // 3-band zones: premium top 33% / equilibrium mid 33% / discount bot 33%
+    var b33Hi = visLo + visRange * (2/3);   // top of equilibrium
+    var b33Lo = visLo + visRange * (1/3);   // top of discount
+
+    // ── Build SVG ──
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto">';
+    // <defs> — gradients
+    svg += '<defs>'
+      + '<linearGradient id="dgrPremGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(248,113,113,0.18)"/><stop offset="100%" stop-color="rgba(248,113,113,0.03)"/></linearGradient>'
+      + '<linearGradient id="dgrEqGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(251,191,36,0.04)"/><stop offset="50%" stop-color="rgba(251,191,36,0.12)"/><stop offset="100%" stop-color="rgba(251,191,36,0.04)"/></linearGradient>'
+      + '<linearGradient id="dgrDiscGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(74,222,128,0.03)"/><stop offset="100%" stop-color="rgba(74,222,128,0.18)"/></linearGradient>'
+      + '<linearGradient id="dgrBullObGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="rgba(74,222,128,0.55)"/><stop offset="100%" stop-color="rgba(74,222,128,0.12)"/></linearGradient>'
+      + '<linearGradient id="dgrBearObGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="rgba(248,113,113,0.55)"/><stop offset="100%" stop-color="rgba(248,113,113,0.12)"/></linearGradient>'
+      + '<linearGradient id="dgrBrkGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="rgba(251,191,36,0.55)"/><stop offset="100%" stop-color="rgba(251,191,36,0.12)"/></linearGradient>'
+      + '<linearGradient id="dgrFvgGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="rgba(167,139,250,0.40)"/><stop offset="100%" stop-color="rgba(167,139,250,0.10)"/></linearGradient>'
+      + '</defs>';
+
+    // Three bands (premium / equilibrium / discount)
+    var yPremTop = p2y(visHi), yPremBot = p2y(b33Hi);
+    var yEqTop   = yPremBot,   yEqBot   = p2y(b33Lo);
+    var yDiscTop = yEqBot,     yDiscBot = p2y(visLo);
+    svg += '<rect x="' + L + '" y="' + yPremTop + '" width="' + (R-L) + '" height="' + (yPremBot - yPremTop) + '" fill="url(#dgrPremGrad)" stroke="rgba(248,113,113,0.3)" stroke-width="0.5" stroke-dasharray="2 3"/>';
+    svg += '<text x="' + (L+10) + '" y="' + (yPremTop + 17) + '" font-family="ui-monospace,monospace" font-size="10" fill="#f87171" font-weight="900" letter-spacing="0.10em">PREMIUM</text>';
+    svg += '<text x="' + (L+10) + '" y="' + (yPremTop + 29) + '" font-family="ui-monospace,monospace" font-size="8" fill="#f87171" font-weight="600" opacity="0.8">top 33% · sell zone</text>';
+    svg += '<rect x="' + L + '" y="' + yEqTop + '" width="' + (R-L) + '" height="' + (yEqBot - yEqTop) + '" fill="url(#dgrEqGrad)" stroke="rgba(251,191,36,0.3)" stroke-width="0.5" stroke-dasharray="2 3"/>';
+    svg += '<text x="' + (L+10) + '" y="' + (yEqTop + 17) + '" font-family="ui-monospace,monospace" font-size="10" fill="#fbbf24" font-weight="900" letter-spacing="0.10em">EQUILIBRIUM</text>';
+    svg += '<text x="' + (L+10) + '" y="' + (yEqTop + 29) + '" font-family="ui-monospace,monospace" font-size="8" fill="#fbbf24" font-weight="600" opacity="0.8">mid 33% · no edge</text>';
+    svg += '<rect x="' + L + '" y="' + yDiscTop + '" width="' + (R-L) + '" height="' + (yDiscBot - yDiscTop) + '" fill="url(#dgrDiscGrad)" stroke="rgba(74,222,128,0.3)" stroke-width="0.5" stroke-dasharray="2 3"/>';
+    svg += '<text x="' + (L+10) + '" y="' + (yDiscTop + 17) + '" font-family="ui-monospace,monospace" font-size="10" fill="#22c55e" font-weight="900" letter-spacing="0.10em">DISCOUNT</text>';
+    svg += '<text x="' + (L+10) + '" y="' + (yDiscTop + 29) + '" font-family="ui-monospace,monospace" font-size="8" fill="#22c55e" font-weight="600" opacity="0.8">bot 33% · buy zone</text>';
+
+    // Price axis labels (5 grid lines)
+    var ticks = 5;
+    for (var i = 0; i < ticks; i++) {
+      var p = visHi - (visHi - visLo) * (i / (ticks - 1));
+      var y = p2y(p);
+      svg += '<text x="' + (L-6) + '" y="' + (y+3) + '" text-anchor="end" font-family="ui-monospace,monospace" font-size="9" fill="#9a9e98" font-weight="700">$' + (p >= 100 ? p.toFixed(0) : p.toFixed(2)) + '</text>';
+    }
+
+    // ── Zones (right column, x=380-585) ──
+    var zX = 390, zW = 195;
+    function drawZone(z, gradId, strokeColor, labelPrefix) {
+      var lo = +z.low, hi = +z.high;
+      if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return '';
+      // Clip to visible range
+      if (hi < visLo || lo > visHi) return '';
+      var yHi = Math.max(T_PAD, p2y(hi));
+      var yLo = Math.min(T_PAD + plotH, p2y(lo));
+      var h = Math.max(8, yLo - yHi);
+      var status = z.status ? ' · ' + z.status.toUpperCase() : '';
+      var out = '<rect x="' + zX + '" y="' + yHi + '" width="' + zW + '" height="' + h + '" fill="url(#' + gradId + ')" stroke="' + strokeColor + '" stroke-width="1.2"' + (gradId === 'dgrFvgGrad' ? ' stroke-dasharray="3 2"' : '') + '/>';
+      out += '<text x="' + (zX+7) + '" y="' + (yHi + 13) + '" font-family="ui-monospace,monospace" font-size="9" fill="' + strokeColor + '" font-weight="800">' + labelPrefix + ' $' + lo.toFixed(0) + '–$' + hi.toFixed(0) + status + '</text>';
+      return out;
+    }
+    // Helper: clamp to small N to avoid clutter
+    function _clamp(arr, n) { return (arr || []).slice(0, n); }
+    var obs = (sd && sd.order_blocks) || [];
+    var fvgs = (sd && sd.fvgs) || [];
+    var brks = (sd && sd.breakers) || [];
+
+    // Draw bear OBs in premium, bull OBs in discount, FVGs anywhere, breakers anywhere
+    _clamp(obs.filter(function(z){ return z.kind === 'bear_ob'; }), 2).forEach(function(z){ svg += drawZone(z, 'dgrBearObGrad', '#f87171', '⨯ Bear OB'); });
+    _clamp(obs.filter(function(z){ return z.kind === 'bull_ob'; }), 3).forEach(function(z){ svg += drawZone(z, 'dgrBullObGrad', '#22c55e', '⊕ Bull OB'); });
+    _clamp(fvgs, 3).forEach(function(z){ svg += drawZone(z, 'dgrFvgGrad', '#a78bfa', '⌬ FVG'); });
+    _clamp(brks, 2).forEach(function(z){ svg += drawZone(z, 'dgrBrkGrad', '#fbbf24', '⚡ Breaker'); });
+
+    // ── Equilibrium midline + label ──
+    var eqPrice = (visHi + visLo) / 2;
+    var yEq = p2y(eqPrice);
+    svg += '<line x1="' + L + '" y1="' + yEq + '" x2="' + zX + '" y2="' + yEq + '" stroke="#fbbf24" stroke-width="0.6" stroke-dasharray="4 3"/>';
+    svg += '<text x="' + (L+10) + '" y="' + (yEq - 4) + '" font-family="ui-monospace,monospace" font-size="8" fill="#fbbf24" font-weight="700">EQ 50% $' + eqPrice.toFixed(0) + '</text>';
+
+    // ── Spot price strip ──
+    if (spot > 0) {
+      var ySpot = p2y(spot);
+      var spotBand = (spot >= b33Hi) ? 'PREMIUM' : (spot <= b33Lo) ? 'DISCOUNT' : 'EQUILIBRIUM';
+      svg += '<rect x="' + L + '" y="' + (ySpot - 1) + '" width="' + (R-L) + '" height="2" fill="#d97757"/>';
+      var sx = 190, sw = 210, sy = ySpot - 8;
+      svg += '<rect x="' + sx + '" y="' + sy + '" width="' + sw + '" height="16" fill="#d97757" rx="2"/>';
+      svg += '<polygon points="' + sx + ',' + sy + ' ' + (sx-15) + ',' + (sy+8) + ' ' + sx + ',' + (sy+16) + '" fill="#d97757"/>';
+      svg += '<text x="' + (sx + sw/2) + '" y="' + (sy + 11) + '" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#0a0d0c" font-weight="900">▶ SPOT $' + spot.toFixed(2) + ' · in ' + spotBand + '</text>';
+    }
+
+    // ── 60d sparkline (closing prices, fitted to bottom strip) ──
+    if (bars.length >= 10) {
+      var closes = bars.map(function(b){ return +b.close; }).filter(function(x){ return x > 0; });
+      if (closes.length >= 5) {
+        var sLo = Math.min.apply(null, closes), sHi = Math.max.apply(null, closes);
+        var sRange = sHi - sLo || 1;
+        var sparkL = 60, sparkR = 380, sparkT = 215, sparkH = 30;
+        var sparkW = sparkR - sparkL;
+        var path = '';
+        closes.forEach(function(c, i) {
+          var x = sparkL + (sparkW * i / (closes.length - 1));
+          var y = sparkT + sparkH * (1 - (c - sLo) / sRange);
+          path += (i === 0 ? 'M ' : 'L ') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
+        });
+        svg += '<text x="' + sparkL + '" y="' + (sparkT - 4) + '" font-family="ui-monospace,monospace" font-size="7" fill="#686c68" font-weight="700">' + closes.length + 'D SPARK</text>';
+        svg += '<path d="' + path + '" fill="none" stroke="#22c55e" stroke-width="1.5"/>';
+        var lastX = sparkL + sparkW;
+        var lastY = sparkT + sparkH * (1 - (closes[closes.length-1] - sLo) / sRange);
+        svg += '<circle cx="' + lastX.toFixed(1) + '" cy="' + lastY.toFixed(1) + '" r="3" fill="#d97757"/>';
+      }
+    }
+
+    svg += '</svg>';
+    body.innerHTML = svg;
+  }
+  // Schedule wireDealingRange after the main wire() — same 80ms throttle
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', wire);
+    document.addEventListener('DOMContentLoaded', function() { wire(); setTimeout(wireDealingRange, 100); });
   } else {
     setTimeout(wire, 80);
+    setTimeout(wireDealingRange, 100);
   }
 })();
 
