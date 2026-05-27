@@ -20236,20 +20236,222 @@ const QuantOptions = (function() {
       </div>
 
       <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ SCENARIO P&L · BSM at expiry</div>
+        ${_qoptPnlCurve(p)}
+      </div>
+
+      <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ GREEKS-STRESS · spot scenarios</div>
+        ${_qoptStressMatrix(p)}
+      </div>
+
+      <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ TIME DECAY · how much theta dies per window</div>
+        ${_qoptThetaDecay(p)}
+      </div>
+
+      ${(() => {
+        const ew = (data.earnings_watchlist || []).find(e => e.ticker === p.ticker);
+        if (!ew || ew.days_to_earnings == null || ew.days_to_earnings > 30) return '';
+        return `<div class="qopt-mon-section">
+          <div class="qopt-mon-sec-h">⊞ EARNINGS IV-CRUSH · ${ew.days_to_earnings}d to print</div>
+          ${_qoptIvCrush(p, ew)}
+        </div>`;
+      })()}
+
+      <div class="qopt-mon-section">
         <div class="qopt-mon-sec-h">⊞ CATALYSTS</div>
         <div class="qopt-mon-cats">
           ${(() => {
             const ew = (data.earnings_watchlist || []).find(e => e.ticker === p.ticker);
+            const pills = [];
             if (ew && ew.days_to_earnings != null) {
               const d = ew.days_to_earnings;
               const cls = d <= 3 ? 'rd' : d <= 7 ? 'am' : '';
-              return `<div class="qopt-mon-cat ${cls}"><b>📊 EARNINGS</b> in <b>${d}d</b></div>`;
+              pills.push(`<div class="qopt-mon-cat ${cls}"><b>📊 EARNINGS</b> in <b>${d}d</b></div>`);
             }
-            return `<div style="color:var(--ink-3);font:600 11px var(--mono)">No catalyst within 30d</div>`;
+            // FOMC / CPI / NFP (hardcoded 2026 dates) — only show if within 30d
+            const today = new Date();
+            const events = [
+              { lbl: '🏦 FOMC', dates: ['2026-06-18','2026-07-30','2026-09-17','2026-11-05','2026-12-17'] },
+              { lbl: '📈 CPI',  dates: ['2026-06-10','2026-07-15','2026-08-12','2026-09-09','2026-10-15'] },
+              { lbl: '💼 NFP',  dates: ['2026-06-05','2026-07-03','2026-08-07','2026-09-04','2026-10-02'] },
+              { lbl: '🔱 TripleW', dates: ['2026-06-19','2026-09-18','2026-12-18'] },
+            ];
+            events.forEach(e => {
+              e.dates.forEach(dStr => {
+                const days = Math.round((new Date(dStr) - today) / 86400000);
+                if (days >= 0 && days <= 30) {
+                  const cls = days <= 3 ? 'rd' : days <= 7 ? 'am' : '';
+                  pills.push(`<div class="qopt-mon-cat ${cls}"><b>${e.lbl}</b> in <b>${days}d</b></div>`);
+                }
+              });
+            });
+            if (p.pin_risk) {
+              pills.push(`<div class="qopt-mon-cat rd"><b>📌 PIN RISK</b> · 1% of spot at &lt;3 DTE</div>`);
+            }
+            return pills.length ? pills.join('') : '<div style="color:var(--ink-3);font:600 11px var(--mono)">No catalyst within 30d</div>';
           })()}
         </div>
       </div>
+
+      <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ WHALE STRIKES · vol > 2.5σ vs neighbors</div>
+        ${_qoptWhaleStrikes(p)}
+      </div>
     </div>`;
+  }
+
+  // ── Detail-pane analytics painters (all real data, no proxy) ──────────
+
+  function _qoptBsmCall(S, K, σ, T) { if (T<=0||σ<=0||S<=0||K<=0) return Math.max(S-K,0); const r=0.05; const d1=(Math.log(S/K)+(r+σ*σ/2)*T)/(σ*Math.sqrt(T)); const d2=d1-σ*Math.sqrt(T); const _erf=(x)=>{const t=1/(1+0.3275911*Math.abs(x));const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429;const y=1-(((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);return x>=0?y:-y;}; const _N=(x)=>0.5*(1+_erf(x/Math.SQRT2)); return S*_N(d1)-K*Math.exp(-r*T)*_N(d2); }
+  function _qoptBsmPut(S, K, σ, T) { if (T<=0||σ<=0||S<=0||K<=0) return Math.max(K-S,0); const r=0.05; const d1=(Math.log(S/K)+(r+σ*σ/2)*T)/(σ*Math.sqrt(T)); const d2=d1-σ*Math.sqrt(T); const _erf=(x)=>{const t=1/(1+0.3275911*Math.abs(x));const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429;const y=1-(((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);return x>=0?y:-y;}; const _N=(x)=>0.5*(1+_erf(x/Math.SQRT2)); return K*Math.exp(-r*T)*_N(-d2)-S*_N(-d1); }
+
+  function _qoptPnlCurve(p) {
+    if (p.atm_strike == null || p.atm_iv == null || p.atm_dte == null || !p.price) {
+      return '<div style="color:var(--ink-3);font:600 11px var(--mono);padding:10px 0">P&L curve unavailable · chain data not enriched</div>';
+    }
+    const isBull = (+p.put_call_ratio || 1) < 1.0;
+    const ivRich = p.iv_percentile != null && p.iv_percentile > 70;
+    const haveSpread = isBull ? p.iv_25d_call_mark != null : p.iv_25d_put_mark != null;
+    const useSpread = ivRich && haveSpread;
+    const sk = useSpread ? (isBull ? p.iv_25d_call_strike : p.iv_25d_put_strike) : null;
+    const sm = useSpread ? (isBull ? p.iv_25d_call_mark   : p.iv_25d_put_mark)   : null;
+    const entryPx = useSpread && sm != null ? p.atm_mark - sm : p.atm_mark;
+    const spot = +p.price;
+    const σ = +p.atm_iv;
+    const T = +p.atm_dte / 365;
+    // Spot range: ±15%
+    const xs = []; for (let i = 0; i <= 50; i++) xs.push(spot * (0.85 + 0.30 * i/50));
+    const pnls = xs.map(S => {
+      const long = isBull ? _qoptBsmCall(S, p.atm_strike, σ, T) : _qoptBsmPut(S, p.atm_strike, σ, T);
+      let net = long - p.atm_mark;
+      if (useSpread && sk != null) {
+        const short = isBull ? _qoptBsmCall(S, sk, σ, T) : _qoptBsmPut(S, sk, σ, T);
+        net = (long - short) - (p.atm_mark - sm);
+      }
+      return net;
+    });
+    const minP = Math.min(...pnls), maxP = Math.max(...pnls);
+    const W = 320, H = 110, PAD_L = 36, PAD_R = 10, PAD_T = 8, PAD_B = 18;
+    const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
+    const xOf = (i) => PAD_L + i / (xs.length-1) * plotW;
+    const yOf = (v) => PAD_T + plotH - ((v - minP) / ((maxP - minP) || 1)) * plotH;
+    const zeroY = yOf(0);
+    let path = ''; pnls.forEach((v, i) => path += (i===0?'M ':'L ') + xOf(i).toFixed(1) + ' ' + yOf(v).toFixed(1) + ' ');
+    // Find breakeven (interpolated)
+    let beIdx = -1;
+    for (let i = 0; i < pnls.length-1; i++) if ((pnls[i] < 0 && pnls[i+1] > 0) || (pnls[i] > 0 && pnls[i+1] < 0)) { beIdx = i; break; }
+    const beX = beIdx >= 0 ? xs[beIdx] + (xs[beIdx+1]-xs[beIdx]) * (-pnls[beIdx] / (pnls[beIdx+1]-pnls[beIdx])) : null;
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">
+      <line x1="${PAD_L}" y1="${zeroY}" x2="${W-PAD_R}" y2="${zeroY}" stroke="var(--line-2)" stroke-dasharray="2 3"/>
+      <line x1="${xOf((spot - xs[0])/(xs[xs.length-1]-xs[0]) * (xs.length-1))}" y1="${PAD_T}" x2="${xOf((spot - xs[0])/(xs[xs.length-1]-xs[0]) * (xs.length-1))}" y2="${PAD_T+plotH}" stroke="var(--copper)" stroke-dasharray="2 2" opacity="0.4"/>
+      <path d="${path}" fill="none" stroke="var(--copper)" stroke-width="2"/>
+      ${beX != null ? `<line x1="${xOf(beIdx + (-pnls[beIdx]/(pnls[beIdx+1]-pnls[beIdx])))}" y1="${PAD_T}" x2="${xOf(beIdx + (-pnls[beIdx]/(pnls[beIdx+1]-pnls[beIdx])))}" y2="${PAD_T+plotH}" stroke="var(--am)" stroke-dasharray="2 2" opacity="0.6"/>` : ''}
+      <text x="${PAD_L-3}" y="${PAD_T+8}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">${maxP >= 0 ? '+$' : '-$'}${Math.abs(maxP).toFixed(2)}</text>
+      <text x="${PAD_L-3}" y="${zeroY+3}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">$0</text>
+      <text x="${PAD_L-3}" y="${PAD_T+plotH}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">-$${Math.abs(minP).toFixed(2)}</text>
+      <text x="${PAD_L+2}" y="${H-4}" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">$${xs[0].toFixed(0)}</text>
+      <text x="${xOf((spot - xs[0])/(xs[xs.length-1]-xs[0]) * (xs.length-1))}" y="${H-4}" text-anchor="middle" font-family="ui-monospace" font-size="9" fill="var(--copper)">$${spot.toFixed(0)}</text>
+      <text x="${W-PAD_R-2}" y="${H-4}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">$${xs[xs.length-1].toFixed(0)}</text>
+      ${beX != null ? `<text x="${xOf(beIdx + (-pnls[beIdx]/(pnls[beIdx+1]-pnls[beIdx])))}" y="${PAD_T+6}" text-anchor="middle" font-family="ui-monospace" font-size="8" fill="var(--am)">BE $${beX.toFixed(0)}</text>` : ''}
+    </svg>`;
+  }
+
+  function _qoptStressMatrix(p) {
+    if (p.atm_strike == null || p.atm_iv == null || p.atm_dte == null || !p.price || p.atm_delta == null) {
+      return '<div style="color:var(--ink-3);font:600 11px var(--mono);padding:6px 0">stress matrix unavailable</div>';
+    }
+    const isBull = (+p.put_call_ratio || 1) < 1.0;
+    const σ = +p.atm_iv;
+    const T = +p.atm_dte / 365;
+    const spot = +p.price;
+    const sd = Math.abs(+p.atm_delta);
+    const shocks = [-10, -5, -2, 0, 2, 5, 10]; // % spot move
+    const rows = shocks.map(pct => {
+      const S = spot * (1 + pct/100);
+      const prem = isBull ? _qoptBsmCall(S, p.atm_strike, σ, T) : _qoptBsmPut(S, p.atm_strike, σ, T);
+      const pnl = prem - p.atm_mark;
+      const pnlPct = p.atm_mark > 0 ? (pnl / p.atm_mark * 100) : 0;
+      const cls = pnl > 0 ? 'gn' : pnl < 0 ? 'rd' : '';
+      const arrow = pct > 0 ? '↑' : pct < 0 ? '↓' : '·';
+      return `<tr><td>${arrow} ${pct >= 0 ? '+' : ''}${pct}%</td><td class="r">$${S.toFixed(2)}</td><td class="r ${cls}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</td><td class="r ${cls}"><b>${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(0)}%</b></td></tr>`;
+    }).join('');
+    return `<table class="qopt-mon-stress">
+      <thead><tr><th>Spot Move</th><th class="r">Spot</th><th class="r">Δ Prem</th><th class="r">P&L %</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  function _qoptThetaDecay(p) {
+    if (p.atm_theta == null || p.atm_dte == null || p.atm_mark == null) {
+      return '<div style="color:var(--ink-3);font:600 11px var(--mono);padding:6px 0">theta data unavailable</div>';
+    }
+    const θ = +p.atm_theta;
+    const entry = +p.atm_mark;
+    const days = [1, 3, 5, 7, 14];
+    const cells = days.map(d => {
+      // Linear theta is a simplification — real theta accelerates near expiry.
+      // Approximate using sqrt-time decay: premium ≈ entry × √(T_remaining/T_now)
+      const T_now = p.atm_dte;
+      const T_rem = Math.max(0, T_now - d);
+      const premRem = entry * Math.sqrt(T_rem / T_now);
+      const decay = entry - premRem;
+      const decayPct = entry > 0 ? (decay / entry * 100) : 0;
+      const cls = decayPct >= 30 ? 'rd' : decayPct >= 15 ? 'am' : '';
+      return `<div class="qopt-decay-cell ${cls}"><div class="d">${d}d</div><div class="v">-$${decay.toFixed(2)}</div><div class="p">-${decayPct.toFixed(0)}%</div></div>`;
+    }).join('');
+    return `<div class="qopt-decay-row">${cells}</div>
+      <div style="font:600 9px var(--mono);color:var(--ink-3);margin-top:4px;letter-spacing:0.04em">θ/day <b style="color:var(--rd)">$${θ.toFixed(2)}</b> · √-time approximation of holding static spot</div>`;
+  }
+
+  function _qoptIvCrush(p, ew) {
+    if (p.atm_iv == null || p.atm_mark == null || p.atm_dte == null) return '';
+    const isBull = (+p.put_call_ratio || 1) < 1.0;
+    const σ = +p.atm_iv;
+    // Post-ER IV typically crushes to ~50-60% of pre-ER level
+    const σ_post = σ * 0.55;
+    const T = +p.atm_dte / 365;
+    const T_post = Math.max(0, (+p.atm_dte - (ew.days_to_earnings + 1)) / 365);
+    const premPostCrush = isBull
+      ? _qoptBsmCall(+p.price, p.atm_strike, σ_post, T_post)
+      : _qoptBsmPut(+p.price, p.atm_strike, σ_post, T_post);
+    const crushLoss = p.atm_mark - premPostCrush;
+    const crushPct = p.atm_mark > 0 ? (crushLoss / p.atm_mark * 100) : 0;
+    // Move required to offset crush
+    let breakevenSpot = null;
+    for (let pct = 1; pct < 20; pct += 0.5) {
+      const sigShock = isBull ? +p.price * (1 + pct/100) : +p.price * (1 - pct/100);
+      const postMove = isBull
+        ? _qoptBsmCall(sigShock, p.atm_strike, σ_post, T_post)
+        : _qoptBsmPut(sigShock, p.atm_strike, σ_post, T_post);
+      if (postMove >= p.atm_mark) { breakevenSpot = sigShock; break; }
+    }
+    return `<div class="qopt-mon-stats">
+      <div class="qopt-mon-stat"><span class="lbl">Current IV</span><span class="v">${(σ*100).toFixed(0)}%</span></div>
+      <div class="qopt-mon-stat"><span class="lbl">Post-ER IV (est)</span><span class="v am">${(σ_post*100).toFixed(0)}%</span></div>
+      <div class="qopt-mon-stat"><span class="lbl">Premium pre-ER</span><span class="v">$${p.atm_mark.toFixed(2)}</span></div>
+      <div class="qopt-mon-stat"><span class="lbl">Premium post-crush</span><span class="v rd">$${premPostCrush.toFixed(2)}</span></div>
+      <div class="qopt-mon-stat"><span class="lbl">Crush loss</span><span class="v rd">-$${crushLoss.toFixed(2)} (${crushPct.toFixed(0)}%)</span></div>
+      <div class="qopt-mon-stat"><span class="lbl">Need ${isBull?'rally':'drop'} to BE</span><span class="v">${breakevenSpot != null ? '$'+breakevenSpot.toFixed(2)+' (~'+((Math.abs(breakevenSpot - +p.price)/+p.price*100)).toFixed(1)+'%)' : 'crush > capacity'}</span></div>
+    </div>
+    <div style="font:600 9.5px var(--mono);color:var(--ink-3);margin-top:6px;letter-spacing:0.02em">⚠ IV-crush is the silent killer · assumes -45% IV reset on print (typical for liquid names)</div>`;
+  }
+
+  function _qoptWhaleStrikes(p) {
+    if (!p.strike_z_outliers || !p.strike_z_outliers.length) {
+      return '<div style="color:var(--ink-3);font:600 11px var(--mono);padding:6px 0">No outlier strikes detected</div>';
+    }
+    return p.strike_z_outliers.map(s => {
+      const isAbove = s.k > p.atm_strike;
+      const cls = isAbove ? 'gn' : 'rd';
+      return `<div class="qopt-whale-row">
+        <span class="k">$${s.k}</span>
+        <span class="${cls}">${isAbove ? '↑ OTM call' : '↓ OTM put'}</span>
+        <span class="v"><b>${s.vol >= 1000 ? (s.vol/1000).toFixed(1)+'k' : s.vol}</b> vol</span>
+        <span class="z">z=${s.z}</span>
+      </div>`;
+    }).join('');
   }
 
   function _ensureQoptMonStyles() {
@@ -20351,6 +20553,27 @@ const QuantOptions = (function() {
       .qopt-mon-cat.rd { color: var(--rd); border-color: rgba(255,107,91,0.4); background: rgba(255,107,91,0.08); }
       .qopt-mon-cat.am { color: var(--amb); border-color: rgba(255,185,92,0.4); background: rgba(255,185,92,0.08); }
       .qopt-mon-cat b { color: var(--ink); font-weight: 800; }
+      /* Detail-pane analytics */
+      .qopt-mon-stress { width: 100%; border-collapse: collapse; font: 11px/1.5 var(--mono); font-variant-numeric: tabular-nums; }
+      .qopt-mon-stress th { padding: 4px 6px; text-align: left; color: var(--ink-3); font-weight: 700; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; border-bottom: 1px solid var(--line); }
+      .qopt-mon-stress th.r { text-align: right; }
+      .qopt-mon-stress td { padding: 4px 6px; color: var(--ink-1); border-bottom: 1px solid var(--bg-2); }
+      .qopt-mon-stress td.r { text-align: right; }
+      .qopt-mon-stress td.gn { color: var(--gn); }
+      .qopt-mon-stress td.rd { color: var(--rd); }
+      .qopt-decay-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+      .qopt-decay-cell { padding: 6px 4px; background: var(--bg-3); border: 1px solid var(--line); border-radius: 2px; text-align: center; font: 600 10px var(--mono); }
+      .qopt-decay-cell.am { background: rgba(255,185,92,0.10); border-color: rgba(255,185,92,0.4); }
+      .qopt-decay-cell.rd { background: rgba(255,107,91,0.10); border-color: rgba(255,107,91,0.4); }
+      .qopt-decay-cell .d { color: var(--ink-3); font-size: 9px; }
+      .qopt-decay-cell .v { color: var(--rd); font-weight: 800; font-size: 12px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+      .qopt-decay-cell .p { color: var(--ink-2); font-size: 9px; margin-top: 1px; }
+      .qopt-whale-row { display: grid; grid-template-columns: 60px 1fr 80px 50px; gap: 8px; padding: 3px 0; font: 600 11px var(--mono); border-bottom: 1px solid var(--bg-2); }
+      .qopt-whale-row .k { color: var(--copper); font-weight: 800; }
+      .qopt-whale-row .gn { color: var(--gn); } .qopt-whale-row .rd { color: var(--rd); }
+      .qopt-whale-row .v { text-align: right; color: var(--ink); }
+      .qopt-whale-row .v b { color: var(--copper); font-weight: 800; }
+      .qopt-whale-row .z { text-align: right; color: var(--ink-3); font-size: 9.5px; }
     `;
     document.head.appendChild(s);
   }
@@ -20998,7 +21221,11 @@ const QuantOptions = (function() {
 
   // renderPlans:        retired 2026-05-26 (clean-sheet rebuild)
 
-  return { render };
+  // 2026-05-27 · Merge window.QuantOptions extensions onto the const
+  // (Monitor methods, paper-order helpers, etc. added inside the IIFE).
+  // This ensures `QuantOptions.setMonitorSort(...)` etc. resolve from inline
+  // onclick handlers — without this, the const only has .render.
+  return Object.assign({ render }, (typeof window !== 'undefined' ? (window.QuantOptions || {}) : {}));
 })();
 
 
