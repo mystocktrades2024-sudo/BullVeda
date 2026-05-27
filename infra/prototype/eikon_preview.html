@@ -241,6 +241,20 @@
   .eikon-iv-hv { grid-column: 1; grid-row: 4; }
   .eikon-cats  { grid-column: 2; grid-row: 4; }
   .eikon-news  { grid-column: 3; grid-row: 4; }
+  .eikon-sectors { grid-column: 1 / 3; grid-row: 5; }
+  .eikon-volcone { grid-column: 3; grid-row: 5; }
+  .eikon-sector-grid {
+    display: grid; grid-template-columns: repeat(11, 1fr); gap: 4px;
+    padding: 8px 12px;
+  }
+  .eikon-sector-cell {
+    text-align: center; padding: 6px 4px; border-radius: 3px;
+    font-family: var(--mono); font-size: 10px;
+    border: 1px solid var(--line);
+  }
+  .eikon-sector-cell .tk { font-weight: 800; color: var(--ink); font-size: 11px; }
+  .eikon-sector-cell .v { font-weight: 700; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .eikon-sector-cell .n { font-size: 9px; color: var(--ink-3); }
   .eikon-cat-pill {
     display: inline-flex; align-items: center; gap: 4px;
     padding: 3px 8px; border-radius: 3px;
@@ -373,6 +387,18 @@
     <div class="eikon-news-list" id="news-body">
       <div class="empty-cell">no news for selected ticker yet — wire EODHD news endpoint per ticker</div>
     </div>
+  </section>
+
+  <!-- SECTOR ETF HEATMAP -->
+  <section class="eikon-pane eikon-sectors">
+    <div class="eikon-pane-h">⊞ Sector ETF Heatmap <span class="right">5d % · color = momentum</span></div>
+    <div id="sectors-body"></div>
+  </section>
+
+  <!-- VOL CONE -->
+  <section class="eikon-pane eikon-volcone">
+    <div class="eikon-pane-h">⊞ Vol Cone <span class="right" id="volcone-meta">—</span></div>
+    <div id="volcone-body"></div>
   </section>
 
 </div>
@@ -844,7 +870,7 @@
     `;
   }
 
-  function paintIvHv() {
+  async function paintIvHv() {
     const body = document.getElementById('ivhv-body');
     const p = selectedPick();
     if (!p || p.atm_iv == null) { body.innerHTML = '<div class="empty-cell">no IV data</div>'; return; }
@@ -852,19 +878,51 @@
     const hv = p.hv20 != null ? p.hv20 * 100 : null;
     const ivrp = p.ivrp != null ? p.ivrp * 100 : null;
     const cls = ivrp == null ? '' : ivrp > 3 ? 'rd' : ivrp < -3 ? 'gn' : 'am';
-    const lbl = ivrp == null ? '' : ivrp > 3 ? 'IV richer than realized · sell-premium edge' : ivrp < -3 ? 'IV cheaper than realized · buy-premium edge' : 'fair';
+    const lbl = ivrp == null ? '' : ivrp > 3 ? 'IV rich · sell-premium' : ivrp < -3 ? 'IV cheap · buy-premium' : 'fair';
+    // Pull IV history from /api/iv-history (the daily-snapshot logger writes this)
+    let sparkSvg = '';
+    try {
+      const r = await fetch(`/api/iv-history?t=${encodeURIComponent(SELECTED_TK)}&days=60`, { credentials: 'include' });
+      if (r.ok) {
+        const d = await r.json();
+        const pts = (d.points || []).filter(x => x.iv != null && x.iv > 0);
+        if (pts.length >= 3) {
+          const W = 240, H = 60, PAD = 4;
+          const ivs = pts.map(x => +x.iv);
+          const minV = Math.min(...ivs), maxV = Math.max(...ivs), rng = maxV - minV || 1;
+          const xOf = (i) => PAD + (i / (pts.length-1)) * (W - 2*PAD);
+          const yOf = (v) => PAD + (H - 2*PAD) - ((v - minV) / rng) * (H - 2*PAD);
+          let path = '';
+          pts.forEach((pt, i) => path += (i === 0 ? 'M ' : 'L ') + xOf(i).toFixed(1) + ' ' + yOf(pt.iv).toFixed(1) + ' ');
+          const lastY = yOf(pts[pts.length-1].iv);
+          const lastX = xOf(pts.length-1);
+          sparkSvg = `
+            <div style="margin-top:8px">
+              <div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:3px">IV ${pts.length}d · ${pts[0].date.slice(5)}→${pts[pts.length-1].date.slice(5)}</div>
+              <svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;background:var(--bg-3);border-radius:3px">
+                <path d="${path}" fill="none" stroke="var(--copper)" stroke-width="1.5"/>
+                <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="3" fill="var(--copper)"/>
+                <text x="${PAD}" y="${PAD+8}" font-family="ui-monospace" font-size="8" fill="var(--ink-3)">${maxV.toFixed(0)}%</text>
+                <text x="${PAD}" y="${H-PAD}" font-family="ui-monospace" font-size="8" fill="var(--ink-3)">${minV.toFixed(0)}%</text>
+                <text x="${W-PAD-2}" y="${lastY-4}" text-anchor="end" font-family="ui-monospace" font-size="8" fill="var(--copper)" font-weight="700">${pts[pts.length-1].iv.toFixed(0)}%</text>
+              </svg>
+            </div>
+          `;
+        }
+      }
+    } catch (e) {}
     body.innerHTML = `
-      <div style="padding:14px;font-family:var(--mono);font-size:11px;line-height:1.7">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div style="background:var(--bg-3);padding:8px;border-radius:3px"><div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em;text-transform:uppercase">IV (ATM)</div><div style="color:var(--ink);font-weight:800;font-size:16px">${iv.toFixed(1)}%</div></div>
-          <div style="background:var(--bg-3);padding:8px;border-radius:3px"><div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em;text-transform:uppercase">HV20</div><div style="color:var(--ink);font-weight:800;font-size:16px">${hv != null ? hv.toFixed(1)+'%' : '—'}</div></div>
+      <div style="padding:12px;font-family:var(--mono);font-size:11px;line-height:1.5">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <div style="background:var(--bg-3);padding:6px 8px;border-radius:3px"><div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em;text-transform:uppercase">IV ATM</div><div style="color:var(--ink);font-weight:800;font-size:14px">${iv.toFixed(1)}%</div></div>
+          <div style="background:var(--bg-3);padding:6px 8px;border-radius:3px"><div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em;text-transform:uppercase">HV20</div><div style="color:var(--ink);font-weight:800;font-size:14px">${hv != null ? hv.toFixed(1)+'%' : '—'}</div></div>
         </div>
-        <div style="margin-top:10px;padding:10px;background:var(--bg-3);border-radius:3px;border-left:3px solid var(--${cls === 'rd' ? 'rd' : cls === 'gn' ? 'gn' : 'am'})">
+        <div style="margin-top:6px;padding:6px 8px;background:var(--bg-3);border-radius:3px;border-left:3px solid var(--${cls === 'rd' ? 'rd' : cls === 'gn' ? 'gn' : 'am'})">
           <div style="color:var(--ink-3);font-size:9px;letter-spacing:0.10em;text-transform:uppercase">IVRP · variance risk premium</div>
-          <div class="${cls}" style="font-weight:800;font-size:18px;margin-top:2px">${ivrp != null ? _sign(ivrp)+ivrp.toFixed(1)+'%' : '—'}</div>
-          <div style="color:var(--ink-2);font-size:10px;margin-top:2px">${lbl}</div>
+          <div class="${cls}" style="font-weight:800;font-size:16px;margin-top:1px">${ivrp != null ? _sign(ivrp)+ivrp.toFixed(1)+'%' : '—'}</div>
+          <div style="color:var(--ink-2);font-size:9.5px;margin-top:1px">${lbl}</div>
         </div>
-        <div style="margin-top:8px;font-size:9.5px;color:var(--ink-3);font-style:italic">historical IV time-series chart starts populating once daily IV is logged (deferred panel)</div>
+        ${sparkSvg}
       </div>
     `;
   }
@@ -930,6 +988,95 @@
     } catch (e) {
       body.innerHTML = '<div class="empty-cell">news endpoint unavailable</div>';
     }
+  }
+
+  async function paintSectors() {
+    const body = document.getElementById('sectors-body');
+    if (!body) return;
+    body.innerHTML = '<div class="empty-cell">loading…</div>';
+    // Sector ETF universe — the 11 GICS sector SPDRs
+    const ETFs = [
+      { tk: 'XLK', n: 'Tech' },
+      { tk: 'XLF', n: 'Fin' },
+      { tk: 'XLE', n: 'Energy' },
+      { tk: 'XLV', n: 'Health' },
+      { tk: 'XLY', n: 'Disc' },
+      { tk: 'XLI', n: 'Indus' },
+      { tk: 'XLP', n: 'Stpls' },
+      { tk: 'XLU', n: 'Utils' },
+      { tk: 'XLB', n: 'Mtls' },
+      { tk: 'XLRE',n: 'REIT' },
+      { tk: 'XLC', n: 'Comm' },
+    ];
+    // Try /api/sector-perf (may not exist), otherwise fetch each ticker's 5d change from server
+    try {
+      const r = await fetch(`/api/sector-perf?days=5`, { credentials: 'include' });
+      if (r.ok) {
+        const d = await r.json();
+        // Expected shape: {XLK: {chg5d: 1.2}, XLF: {chg5d: -0.3}, ...}
+        const data = d.sectors || d || {};
+        const cells = ETFs.map(s => {
+          const v = (data[s.tk] || {}).chg5d;
+          const cls = v == null ? 'nu' : v >= 1 ? 'gn' : v >= -1 ? 'am' : 'rd';
+          const bg = v == null ? 'var(--bg-3)'
+                   : v >=  2 ? 'rgba(91,229,124,0.30)'
+                   : v >=  0 ? 'rgba(91,229,124,0.15)'
+                   : v >= -2 ? 'rgba(255,107,91,0.15)'
+                   :          'rgba(255,107,91,0.30)';
+          return `<div class="eikon-sector-cell" style="background:${bg};border-color:${bg.replace('0.30','0.50').replace('0.15','0.35')}">
+            <div class="tk">${s.tk}</div>
+            <div class="n">${s.n}</div>
+            <div class="v ${cls}">${v != null ? (v >= 0 ? '+' : '') + v.toFixed(1) + '%' : '—'}</div>
+          </div>`;
+        }).join('');
+        body.innerHTML = `<div class="eikon-sector-grid">${cells}</div>`;
+        return;
+      }
+    } catch (e) {}
+    body.innerHTML = '<div class="empty-cell">/api/sector-perf endpoint not wired (will return 11-ETF 5d change once added)</div>';
+  }
+
+  async function paintVolCone() {
+    const body = document.getElementById('volcone-body');
+    const meta = document.getElementById('volcone-meta');
+    const p = selectedPick();
+    if (!p) { body.innerHTML = '<div class="empty-cell">select ticker</div>'; return; }
+    if (meta) meta.textContent = p.ticker;
+    // Vol cone = distribution of N-day realized vol over a lookback window.
+    // Compare current IV/HV20 against the cone of historical HV20s.
+    // We have hv20 (current), hv30, hv60 — show as a vertical comparison.
+    // For full cone we'd need 1-year of daily HV — use the multi-horizon HVs we have as a proxy.
+    const hvs = [
+      { lbl: 'HV20',  v: p.hv20 != null ? p.hv20 * 100 : null },
+      { lbl: 'HV30',  v: p.hv30 != null ? p.hv30 * 100 : null },
+      { lbl: 'HV60',  v: p.hv60 != null ? p.hv60 * 100 : null },
+      { lbl: 'IV ATM', v: p.atm_iv != null ? p.atm_iv * 100 : null, hi: true },
+    ].filter(x => x.v != null);
+    if (hvs.length < 2) { body.innerHTML = '<div class="empty-cell">need ≥2 HV/IV points</div>'; return; }
+    const minV = Math.min(...hvs.map(x => x.v)) * 0.9;
+    const maxV = Math.max(...hvs.map(x => x.v)) * 1.05;
+    const W = 280, H = 150, PAD_L = 36, PAD_R = 12, PAD_T = 12, PAD_B = 22;
+    const barW = (W - PAD_L - PAD_R) / hvs.length * 0.7;
+    const gap  = (W - PAD_L - PAD_R) / hvs.length * 0.3;
+    const xOf = (i) => PAD_L + i * (barW + gap) + gap/2;
+    const yOf = (v) => PAD_T + (H - PAD_T - PAD_B) - ((v - minV) / (maxV - minV)) * (H - PAD_T - PAD_B);
+    const bars = hvs.map((h, i) => {
+      const top = yOf(h.v);
+      const bot = PAD_T + (H - PAD_T - PAD_B);
+      const col = h.hi ? 'var(--copper)' : 'var(--am)';
+      return `<rect x="${xOf(i).toFixed(1)}" y="${top.toFixed(1)}" width="${barW.toFixed(1)}" height="${(bot - top).toFixed(1)}" fill="${col}" opacity="${h.hi ? 0.9 : 0.5}"/>
+        <text x="${(xOf(i) + barW/2).toFixed(1)}" y="${(top - 4).toFixed(1)}" text-anchor="middle" font-family="ui-monospace" font-size="9" fill="var(--ink)" font-weight="700">${h.v.toFixed(0)}</text>
+        <text x="${(xOf(i) + barW/2).toFixed(1)}" y="${H - 6}" text-anchor="middle" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">${h.lbl}</text>`;
+    }).join('');
+    body.innerHTML = `
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="display:block">
+        <line x1="${PAD_L}" y1="${PAD_T + H - PAD_T - PAD_B}" x2="${W-PAD_R}" y2="${PAD_T + H - PAD_T - PAD_B}" stroke="var(--line-2)"/>
+        <text x="${PAD_L-3}" y="${PAD_T+10}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">${maxV.toFixed(0)}%</text>
+        <text x="${PAD_L-3}" y="${PAD_T + H - PAD_T - PAD_B}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">${minV.toFixed(0)}%</text>
+        ${bars}
+      </svg>
+      <div style="font-family:var(--mono);font-size:9.5px;color:var(--ink-3);padding:4px 12px">copper bar = ATM IV vs realized cone</div>
+    `;
   }
 
   function paintCatalysts() {
@@ -1010,6 +1157,8 @@
     paintTape();
     paintCatalysts();
     paintNews();
+    paintSectors();
+    paintVolCone();
   }
 
   // Bootstrap

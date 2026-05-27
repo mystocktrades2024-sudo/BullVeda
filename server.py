@@ -7782,6 +7782,40 @@ async def iv_history_api(t: str, days: int = 90):
     return {"ticker": tk, "points": pts, "count": len(pts)}
 
 
+@app.get("/api/sector-perf")
+async def sector_perf_api(days: int = 5):
+    """11 GICS sector SPDR ETF performance over N days · for Eikon sector heatmap.
+
+    EODHD daily bars · uses fetch_market_data which is already on a hot cache path,
+    so this endpoint is cheap. Returns {sectors: {XLK: {price, chg1d, chg5d}, ...}}.
+    """
+    SECTORS = ["XLK","XLF","XLE","XLV","XLY","XLI","XLP","XLU","XLB","XLRE","XLC"]
+    try:
+        from data_fetcher import fetch_market_data
+        md = fetch_market_data(SECTORS, period="2mo")
+        out = {}
+        for tk in SECTORS:
+            df = md.get(tk) if isinstance(md, dict) else None
+            if df is None or len(df) < 6:
+                out[tk] = {"price": None, "chg1d": None, "chg5d": None}
+                continue
+            try:
+                close = df["Close"].astype(float)
+                cur   = float(close.iloc[-1])
+                p1    = float(close.iloc[-2]) if len(close) >= 2 else cur
+                p5    = float(close.iloc[-6]) if len(close) >= 6 else cur
+                out[tk] = {
+                    "price": round(cur, 2),
+                    "chg1d": round((cur - p1) / p1 * 100, 2) if p1 > 0 else None,
+                    "chg5d": round((cur - p5) / p5 * 100, 2) if p5 > 0 else None,
+                }
+            except Exception:
+                out[tk] = {"price": None, "chg1d": None, "chg5d": None}
+        return {"sectors": out, "days": days}
+    except Exception as e:
+        return {"sectors": {}, "error": str(e)}
+
+
 @app.get("/api/options-flow-accuracy")
 async def options_flow_accuracy_api(window_days: int = 90):
     """Projection accuracy summary for the daily Options Flow snapshots.
