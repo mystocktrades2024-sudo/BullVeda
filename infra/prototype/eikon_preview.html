@@ -329,6 +329,36 @@
   .eikon-sectors { grid-column: 1 / 3; grid-row: 5; }
   .eikon-volcone { grid-column: 3; grid-row: 5; }
   .eikon-vixterm { grid-column: 1 / 4; grid-row: 6; }
+  .eikon-altdata { grid-column: 1 / 4; grid-row: 7; }
+  .eikon-alerts  { grid-column: 1 / 4; grid-row: 8; }
+  .eikon-ad-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+    padding: 10px 14px;
+  }
+  @media (max-width: 1100px) { .eikon-ad-grid { grid-template-columns: repeat(2, 1fr); } }
+  .eikon-ad-card {
+    background: var(--bg-3); border: 1px solid var(--line);
+    border-radius: 4px; padding: 8px 10px;
+    font-family: var(--mono); font-size: 10px;
+  }
+  .eikon-ad-card .h {
+    font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.10em;
+    text-transform: uppercase; margin-bottom: 4px; font-weight: 700;
+  }
+  .eikon-ad-card .h .badge { background: var(--copper); color: var(--bg-0); padding: 1px 4px; border-radius: 2px; margin-left: 4px; font-size: 9px; }
+  .eikon-ad-card ul { margin: 0; padding: 0; list-style: none; }
+  .eikon-ad-card li { padding: 2px 0; line-height: 1.4; }
+  .eikon-ad-card li b { color: var(--ink); font-weight: 700; }
+  .eikon-ad-card .empty { color: var(--ink-3); font-style: italic; font-size: 10px; }
+  .eikon-alert-row {
+    display: flex; align-items: baseline; gap: 8px; padding: 4px 14px;
+    font-family: var(--mono); font-size: 10.5px; border-bottom: 1px solid var(--bg-3);
+  }
+  .eikon-alert-row:last-child { border-bottom: none; }
+  .eikon-alert-row .type { font-weight: 800; padding: 1px 5px; border-radius: 2px; font-size: 9px; letter-spacing: 0.08em; }
+  .eikon-alert-row .type.IVRP_RICH, .eikon-alert-row .type.TERM_FLIP, .eikon-alert-row .type.SKEW_FLIP { background: rgba(255,185,92,0.15); color: var(--am); }
+  .eikon-alert-row .type.IVRP_CHEAP { background: rgba(91,229,124,0.15); color: var(--gn); }
+  .eikon-alert-row .type.LOSS_STREAK, .eikon-alert-row .type.CATALYST_3D { background: rgba(255,107,91,0.15); color: var(--rd); }
   .eikon-vt-grid {
     display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
     padding: 10px 14px;
@@ -525,6 +555,18 @@
   <section class="eikon-pane eikon-vixterm">
     <div class="eikon-pane-h">⊞ VIX Term Structure + Vol Family <span class="right" id="vixterm-meta">—</span></div>
     <div id="vixterm-body"></div>
+  </section>
+
+  <!-- ALT-DATA: Senate trades + Reddit mentions + 13F + Wikipedia -->
+  <section class="eikon-pane eikon-altdata">
+    <div class="eikon-pane-h">⊞ Alt-Data <span class="right" id="altdata-tk">—</span></div>
+    <div id="altdata-body"></div>
+  </section>
+
+  <!-- ACTIVE ALERTS -->
+  <section class="eikon-pane eikon-alerts">
+    <div class="eikon-pane-h">⊞ Active Alerts <span class="right" id="alerts-meta">/api/options-alerts/check</span></div>
+    <div id="alerts-body"></div>
   </section>
 
 </div>
@@ -1212,6 +1254,69 @@
     }
   }
 
+  async function paintAltData() {
+    const body = document.getElementById('altdata-body');
+    const tkEl = document.getElementById('altdata-tk');
+    if (tkEl) tkEl.textContent = SELECTED_TK || '—';
+    if (!body || !SELECTED_TK) return;
+    body.innerHTML = '<div class="empty-cell">loading…</div>';
+    // Fire 4 endpoints in parallel
+    const [sen, edg, wiki, red] = await Promise.all([
+      fetch(`/api/senate-trades?t=${SELECTED_TK}&days=180&limit=10`, { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/edgar-13f?t=${SELECTED_TK}&limit=8`,                 { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/wiki-velocity?t=${SELECTED_TK}&days=30`,             { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/reddit-mentions?t=${SELECTED_TK}&days=7`,            { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
+    const card = (title, badge, content) => `<div class="eikon-ad-card"><div class="h">${title}${badge ? '<span class="badge">'+badge+'</span>' : ''}</div>${content}</div>`;
+    const senateHtml = sen && sen.trades && sen.trades.length
+      ? `<ul>${sen.trades.slice(0, 4).map(t => `<li><b>${t.senator || '?'}</b> · ${t.type || ''} · ${t.amount || ''} · ${t.date || ''}</li>`).join('')}</ul>`
+      : '<div class="empty">no senate trades</div>';
+    const edgarHtml = edg && edg.filings && edg.filings.length
+      ? `<ul>${edg.filings.slice(0, 4).map(f => `<li><b>${(f.filer || '?').slice(0,30)}</b> · ${f.date || ''}</li>`).join('')}</ul>`
+      : '<div class="empty">no recent 13F mentions</div>';
+    const wikiHtml = wiki && wiki.velocity_7d_vs_30d != null
+      ? `<ul>
+          <li>Page: <b>${(wiki.name || wiki.ticker).slice(0, 26)}</b></li>
+          <li>7d views: <b>${(wiki.recent_7d_mean || 0).toLocaleString()}</b>/day</li>
+          <li>Velocity: <b style="color:${wiki.velocity_7d_vs_30d > 1.5 ? 'var(--rd)' : wiki.velocity_7d_vs_30d > 1.1 ? 'var(--am)' : 'var(--gn)'}">${wiki.velocity_7d_vs_30d}×</b> (vs 30d)</li>
+        </ul>`
+      : '<div class="empty">wiki page lookup failed</div>';
+    const redditHtml = red && red.mention_count != null
+      ? `<ul>
+          <li>Mentions (7d): <b style="color:${red.verdict==='CROWDED'?'var(--rd)':red.verdict==='ACTIVE'?'var(--am)':'var(--gn)'}">${red.mention_count}</b></li>
+          <li>Verdict: <b>${red.verdict}</b></li>
+          ${(red.top_posts || []).slice(0, 2).map(p => `<li style="color:var(--ink-3)">${(p.title || '').slice(0, 40)}…</li>`).join('')}
+        </ul>`
+      : '<div class="empty">reddit search failed</div>';
+    body.innerHTML = `<div class="eikon-ad-grid">
+      ${card('🏛 Senate Trades · 180d', sen && sen.trades ? sen.trades.length : '', senateHtml)}
+      ${card('📑 EDGAR 13F Mentions',   edg && edg.filings ? edg.filings.length : '', edgarHtml)}
+      ${card('📚 Wikipedia Velocity',   '', wikiHtml)}
+      ${card('🦍 r/WSB Mentions · 7d',  red && red.verdict, redditHtml)}
+    </div>`;
+  }
+
+  async function paintAlerts() {
+    const body = document.getElementById('alerts-body');
+    if (!body) return;
+    body.innerHTML = '<div class="empty-cell">checking thresholds…</div>';
+    try {
+      const r = await fetch('/api/options-alerts/check', { credentials: 'include' });
+      if (!r.ok) throw new Error('alert check ' + r.status);
+      const d = await r.json();
+      if (!d.alerts || !d.alerts.length) {
+        body.innerHTML = '<div class="empty-cell">no active threshold breaches · system is calm</div>';
+        return;
+      }
+      body.innerHTML = d.alerts.map(a => `<div class="eikon-alert-row">
+        <span class="type ${a.type}">${a.type}</span>
+        <span>${a.msg || ''}</span>
+      </div>`).join('');
+    } catch (e) {
+      body.innerHTML = '<div class="empty-cell">alert endpoint unavailable</div>';
+    }
+  }
+
   function paintTopPicks() {
     const row = document.getElementById('toppicks-row');
     const meta = document.getElementById('toppicks-meta');
@@ -1502,6 +1607,8 @@
     paintSectors();
     paintVolCone();
     paintVixTerm();
+    paintAltData();
+    paintAlerts();
   }
 
   // Bootstrap
