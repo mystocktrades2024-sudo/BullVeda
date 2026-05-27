@@ -2575,7 +2575,7 @@ body.on-workspace .tabs { display: none; }
 }
 .qo-hh-strat-tbl { display: flex; flex-direction: column; gap: 4px; }
 .qo-hh-strat-h, .qo-hh-strat-r {
-  display: grid; grid-template-columns: 1.4fr 0.5fr 0.6fr 0.6fr 0.6fr 0.6fr;
+  display: grid; grid-template-columns: 1.3fr 0.45fr 0.55fr 0.6fr 0.5fr 0.55fr 0.55fr;
   gap: 6px; font-family: var(--mono); font-size: 10.5px;
   align-items: center;
 }
@@ -19980,23 +19980,38 @@ const QuantOptions = (function() {
       if (!rows.length) return '';
       const _wrCls = (w) => w >= 55 ? 'gn' : w >= 45 ? 'am' : 'rd';
       const _pfCls = (p) => p == null ? '' : p >= 1.5 ? 'gn' : p >= 1.0 ? 'am' : 'rd';
+      // 2026-05-26 · Wilson 95% lower bound — proper small-sample inference
+      // Wilson lower bound:  (p + z²/2n - z·√(p(1-p)/n + z²/4n²)) / (1 + z²/n)
+      const _wilson = (wins, n) => {
+        if (n < 1) return null;
+        const p = wins / n;
+        const z = 1.96;  // 95% CI
+        const denom = 1 + z*z/n;
+        const center = p + z*z/(2*n);
+        const margin = z * Math.sqrt(p*(1-p)/n + z*z/(4*n*n));
+        return (center - margin) / denom * 100;
+      };
       return `
         <div class="qo-hh-strat-card">
           <div class="qo-hh-strat-ttl">${title}</div>
           <div class="qo-hh-strat-tbl">
             <div class="qo-hh-strat-h">
-              <span>Bucket</span><span>n</span><span>WR</span><span>PF</span><span>Avg W</span><span>Avg L</span>
+              <span>Bucket</span><span>n</span><span>WR</span><span>Wilson</span><span>PF</span><span>Avg W</span><span>Avg L</span>
             </div>
-            ${rows.map(r => `
+            ${rows.map(r => {
+              const wlb = _wilson(r.wins, r.n);
+              const wlbCls = wlb == null ? '' : wlb >= 45 ? 'gn' : wlb >= 35 ? 'am' : 'rd';
+              return `
               <div class="qo-hh-strat-r">
                 <span class="lbl">${(r.key + '').slice(0, 18)}</span>
                 <span>${r.n}</span>
                 <span class="${_wrCls(r.wr)}">${r.wr.toFixed(0)}%</span>
+                <span class="${wlbCls}" title="Wilson 95% lower bound — honest small-sample WR floor">${wlb != null ? wlb.toFixed(0) + '%' : '—'}</span>
                 <span class="${_pfCls(r.pf)}">${r.pf != null ? r.pf.toFixed(2) : '—'}</span>
                 <span class="gn">+${r.avgWin.toFixed(1)}</span>
                 <span class="rd">${r.avgLoss.toFixed(1)}</span>
-              </div>
-            `).join('')}
+              </div>`;
+            }).join('')}
           </div>
         </div>
       `;

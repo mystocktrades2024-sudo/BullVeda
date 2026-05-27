@@ -1396,7 +1396,7 @@
     `;
   }
 
-  function paintCatalysts() {
+  async function paintCatalysts() {
     const body = document.getElementById('cats-body');
     const tk = document.getElementById('cats-tk');
     if (tk) tk.textContent = SELECTED_TK || '—';
@@ -1404,6 +1404,30 @@
     const p = selectedPick();
     const today = new Date();
     const pills = [];
+
+    // Ex-dividend + stock-split corporate actions from /api/corporate-actions
+    if (SELECTED_TK) {
+      try {
+        const r = await fetch(`/api/corporate-actions?t=${encodeURIComponent(SELECTED_TK)}&days=60`, { credentials: 'include' });
+        if (r.ok) {
+          const d = await r.json();
+          (d.ex_div || []).forEach(ed => {
+            const days = Math.round((new Date(ed.date) - today) / 86400000);
+            if (days >= 0 && days <= 60) {
+              const cls = days <= 3 ? 'rd' : days <= 7 ? 'am' : '';
+              pills.push(`<span class="eikon-cat-pill ${cls}">💰 EX-DIV<span class="d">+${days}d</span></span>`);
+            }
+          });
+          (d.splits || []).forEach(sp => {
+            const days = Math.round((new Date(sp.date) - today) / 86400000);
+            if (days >= 0 && days <= 60) {
+              pills.push(`<span class="eikon-cat-pill am">🔀 SPLIT ${sp.ratio || ''}<span class="d">+${days}d</span></span>`);
+            }
+          });
+        }
+      } catch (e) {}
+    }
+
     // 1. Earnings for selected ticker — find in earnings_watchlist if loaded
     const ew = (DATA && DATA.earnings_watchlist) || [];
     const earn = ew.find(e => e.ticker === SELECTED_TK);

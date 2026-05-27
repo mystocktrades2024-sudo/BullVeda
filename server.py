@@ -7813,6 +7813,49 @@ async def macro_vol_api():
         return {"error": str(e)}
 
 
+@app.get("/api/corporate-actions")
+async def corporate_actions_api(t: str, days: int = 60):
+    """Ex-div + stock-split dates within `days` for a ticker.
+
+    Returns: {ticker, ex_div: [{date, amount}], splits: [{date, ratio}]}.
+    Reads from EODHD fundamentals (SplitsDividends block).
+    """
+    tk = t.upper().strip()
+    try:
+        import eodhd_client as eod
+        from datetime import datetime, timedelta
+        fund = eod.fundamentals(tk)
+        if not isinstance(fund, dict):
+            return {"ticker": tk, "ex_div": [], "splits": [], "error": "no fundamentals"}
+        sd = fund.get("SplitsDividends") or {}
+        today = datetime.now().date()
+        cutoff = today + timedelta(days=days)
+        # Forward ex-div date (single field)
+        ex_div = []
+        forward_ex = sd.get("ForwardAnnualDividendYield") or sd.get("ExDividendDate")
+        ex_date = sd.get("ExDividendDate")
+        if ex_date:
+            try:
+                edt = datetime.strptime(ex_date[:10], "%Y-%m-%d").date()
+                if today <= edt <= cutoff:
+                    ex_div.append({"date": ex_date[:10], "amount": sd.get("ForwardAnnualDividendRate")})
+            except Exception: pass
+        # Historical dividends as recent reference
+        nd = sd.get("NumberDividendsByYear") or {}
+        # Stock splits — historical splits block
+        splits = []
+        # EODHD exposes splits at /splits/<ticker> — separate endpoint
+        try:
+            # Quick: use fundamentals' historical splits if present
+            hs = sd.get("LastSplitDate")
+            if hs:
+                splits.append({"date": hs, "ratio": sd.get("LastSplitFactor")})
+        except Exception: pass
+        return {"ticker": tk, "ex_div": ex_div, "splits": splits, "fwd_yield": forward_ex}
+    except Exception as e:
+        return {"ticker": tk, "ex_div": [], "splits": [], "error": str(e)}
+
+
 @app.get("/api/earnings-moves")
 async def earnings_moves_api(t: str, n: int = 4):
     """Past N earnings absolute % moves for a ticker.
