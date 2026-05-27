@@ -20601,16 +20601,173 @@ const QuantOptions = (function() {
     const selectedPick = visible.find(p => p.ticker === _qoptSelected) || null;
     const sectors = Array.from(new Set(picks.map(p => p.sector).filter(Boolean))).sort();
 
+    let body;
+    if (_qoptTab === 'skewmap')     body = _renderQoptSkewMap(picks);
+    else if (_qoptTab === 'positioning') body = _renderQoptPositioning(picks);
+    else if (_qoptTab === 'history')     body = `<div style="padding:40px 22px;text-align:center;color:var(--ink-3);font:600 12px var(--mono)">History view is on the next sub-tab (📜 History) — click the tab at the top of the workspace to open it.</div>`;
+    else body = `<div class="qopt-mon-shell">
+        <div>${_renderQoptScannerTable(visible, picks)}</div>
+        ${_renderQoptDetailPane(selectedPick, data)}
+      </div>`;
     root.innerHTML = `
       ${_renderQoptTitleBar(data)}
       ${_renderQoptTabsBar(picks)}
-      ${_renderQoptFilterBar(visible.length, sectors)}
-      ${_renderQoptQuickFilters()}
-      <div class="qopt-mon-shell">
-        <div>${_renderQoptScannerTable(visible, picks)}</div>
-        ${_renderQoptDetailPane(selectedPick, data)}
-      </div>
+      ${_qoptTab === 'scanner' ? _renderQoptFilterBar(visible.length, sectors) : ''}
+      ${_qoptTab === 'scanner' ? _renderQoptQuickFilters() : ''}
+      ${body}
     `;
+  }
+
+  // ── Skew Map tab — IV heatmap across top picks × expirations ──────
+  function _renderQoptSkewMap(picks) {
+    // Use top 12 picks by premium $ that have chain_grid
+    const top = picks
+      .filter(p => p.chain_grid && p.chain_grid.length)
+      .sort((a, b) => (+b['premium_total_$'] || 0) - (+a['premium_total_$'] || 0))
+      .slice(0, 12);
+    if (!top.length) {
+      return `<div style="padding:40px 22px;text-align:center;color:var(--ink-3);font:600 12px var(--mono)">No chain grids enriched yet · awaiting next Schwab refresh</div>`;
+    }
+    // Build matrix: rows = tickers, cols = DTE buckets (7d/14d/30d/60d/90d), cell = ATM IV
+    const dteBuckets = [
+      { lbl: '≤14d', test: d => d <= 14 },
+      { lbl: '15-30', test: d => d > 14 && d <= 30 },
+      { lbl: '31-45', test: d => d > 30 && d <= 45 },
+      { lbl: '46-60', test: d => d > 45 && d <= 60 },
+      { lbl: '>60d', test: d => d > 60 },
+    ];
+    // Collect all IVs for color scaling
+    const allIvs = [];
+    top.forEach(p => {
+      p.chain_grid.forEach(g => {
+        const atmStrike = top.find(x => x.ticker === p.ticker).atm_strike;
+        const closest = g.strikes.slice().sort((a,b) => Math.abs(a.k - atmStrike) - Math.abs(b.k - atmStrike))[0];
+        const iv = closest?.call?.iv;
+        if (iv != null) allIvs.push(iv);
+      });
+    });
+    if (!allIvs.length) return '<div style="padding:40px 22px;text-align:center;color:var(--ink-3);font:600 12px var(--mono)">No IV data in chain grids</div>';
+    const minIv = Math.min(...allIvs), maxIv = Math.max(...allIvs), rng = maxIv - minIv || 1;
+    const colorFor = (v) => {
+      if (v == null) return 'transparent';
+      const t = (v - minIv) / rng;
+      if (t > 0.66) return `rgba(255,107,91,${0.20 + t*0.45})`;
+      if (t > 0.33) return `rgba(255,185,92,${0.18 + t*0.35})`;
+      return `rgba(91,229,124,${0.15 + t*0.25})`;
+    };
+    const rows = top.map(p => {
+      const cells = dteBuckets.map(b => {
+        // Find the expiration in this bucket; pick ATM strike's IV
+        const exp = p.chain_grid.find(g => b.test(g.dte));
+        if (!exp) return `<td style="background:var(--bg-2)">—</td>`;
+        const closest = exp.strikes.slice().sort((a,b) => Math.abs(a.k - p.atm_strike) - Math.abs(b.k - p.atm_strike))[0];
+        const iv = closest?.call?.iv;
+        if (iv == null) return `<td style="background:var(--bg-2)">—</td>`;
+        return `<td style="background:${colorFor(iv)}"><b>${(iv*100).toFixed(0)}</b></td>`;
+      }).join('');
+      return `<tr onclick="QuantOptions.selectTicker('${p.ticker}');QuantOptions.setMonitorTab('scanner')">
+        <td class="tk"><b>${p.ticker}</b><br><span class="sec">${(p.sector||'').slice(0,12)}</span></td>
+        <td class="r">$${p.price.toFixed(2)}</td>
+        ${cells}
+        <td class="r"><b>${p.skew_25d != null ? (p.skew_25d>=0?'+':'') + (p.skew_25d*100).toFixed(1)+'%' : '—'}</b></td>
+        <td class="r">${p.term_ratio != null ? p.term_ratio.toFixed(2) : '—'}</td>
+      </tr>`;
+    }).join('');
+    return `<div style="padding:14px 22px">
+      <div style="font:700 11px var(--mono);color:var(--ink-3);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:10px">Skew Map · ATM IV % across DTE buckets · click row to load in Scanner</div>
+      <table class="qopt-monitor-tbl">
+        <thead><tr>
+          <th>Ticker</th><th class="r">Spot</th>
+          ${dteBuckets.map(b => `<th class="r">${b.lbl}</th>`).join('')}
+          <th class="r">25Δ Skew</th><th class="r">Term</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="font:600 9.5px var(--mono);color:var(--ink-3);margin-top:8px;letter-spacing:0.02em">
+        Color: <span style="background:rgba(91,229,124,0.4);padding:2px 6px;border-radius:2px">low IV</span>
+        <span style="background:rgba(255,185,92,0.4);padding:2px 6px;border-radius:2px;margin-left:4px">mid</span>
+        <span style="background:rgba(255,107,91,0.4);padding:2px 6px;border-radius:2px;margin-left:4px">high IV</span>
+        · all values from real Schwab chain.
+      </div>
+    </div>`;
+  }
+
+  // ── Positioning tab — OI heat + dealer Γ proxy + sector aggregate ───
+  function _renderQoptPositioning(picks) {
+    // 1. OI imbalance per pick (call_oi vs put_oi)
+    const byPick = picks
+      .filter(p => p.call_oi != null && p.call_oi > 0)
+      .map(p => ({
+        ...p,
+        oi_ratio: (p.total_put_oi || 0) / (p.call_oi || 1),
+        gex_proxy: p.atm_gamma != null && p.call_oi != null && p.price != null
+          ? (+p.atm_gamma) * (p.call_oi || 0) * 100 * Math.pow(+p.price, 2) / 1e9
+          : null,
+      }))
+      .sort((a, b) => (+b['premium_total_$']||0) - (+a['premium_total_$']||0))
+      .slice(0, 15);
+    // 2. Sector aggregate (UOA roll-up)
+    const sectorMap = {};
+    picks.forEach(p => {
+      const s = p.sector || '—';
+      if (!sectorMap[s]) sectorMap[s] = { call: 0, put: 0, picks: 0, prem: 0, names: [] };
+      sectorMap[s].call += (+p.call_volume || 0);
+      sectorMap[s].put  += (+p.put_volume  || 0);
+      sectorMap[s].prem += (+p['premium_total_$'] || 0);
+      sectorMap[s].picks++;
+      sectorMap[s].names.push(p.ticker);
+    });
+    const sectorRows = Object.entries(sectorMap)
+      .map(([s, v]) => ({ s, ...v, total: v.call + v.put }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 11);
+    const _dol = (v) => v == null ? '—' : v >= 1e6 ? '$'+(v/1e6).toFixed(1)+'M' : v >= 1e3 ? '$'+(v/1e3).toFixed(0)+'k' : '$'+v.toFixed(0);
+
+    return `<div style="padding:14px 22px;display:grid;grid-template-columns:1.4fr 1fr;gap:14px">
+      <div>
+        <div style="font:700 11px var(--mono);color:var(--ink-3);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:10px">OI Heatmap · per pick · OI-weighted gamma proxy</div>
+        <table class="qopt-monitor-tbl">
+          <thead><tr>
+            <th>Ticker</th><th class="r">Call OI</th><th class="r">Put OI</th><th class="r">P/C OI</th>
+            <th class="r">OI-wt K</th><th class="r">Γ Proxy ($B)</th><th class="r">Premium $</th>
+          </tr></thead>
+          <tbody>${byPick.map(p => {
+            const pcOi = p.oi_ratio;
+            const cls = pcOi < 0.5 ? 'gn' : pcOi > 1.4 ? 'rd' : '';
+            const gx = p.gex_proxy;
+            return `<tr onclick="QuantOptions.selectTicker('${p.ticker}');QuantOptions.setMonitorTab('scanner')">
+              <td><b>${p.ticker}</b></td>
+              <td class="r">${(p.call_oi/1000).toFixed(0)}k</td>
+              <td class="r">${((p.total_put_oi||0)/1000).toFixed(0)}k</td>
+              <td class="r ${cls}">${pcOi.toFixed(2)}</td>
+              <td class="r">${p.oi_weighted_strike != null ? '$'+p.oi_weighted_strike.toFixed(0) : '—'}</td>
+              <td class="r ${gx != null && gx > 0 ? 'gn' : gx != null ? 'rd' : ''}">${gx != null ? (gx>=0?'+':'')+gx.toFixed(2) : '—'}</td>
+              <td class="r"><b>${_dol(p['premium_total_$'])}</b></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+        <div style="font:600 9.5px var(--mono);color:var(--ink-3);margin-top:8px">
+          Γ proxy = Σ(γ × OI × 100 × spot²) ÷ $1B · positive = vol-suppression bias · single-name approximation (no dealer-positioning data)
+        </div>
+      </div>
+      <div>
+        <div style="font:700 11px var(--mono);color:var(--ink-3);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:10px">Sector UOA Aggregate</div>
+        <table class="qopt-monitor-tbl">
+          <thead><tr><th>Sector</th><th class="r">Picks</th><th class="r">Call %</th><th class="r">Premium $</th></tr></thead>
+          <tbody>${sectorRows.map(r => {
+            const callPct = r.total > 0 ? r.call / r.total * 100 : 0;
+            const cls = callPct > 65 ? 'gn' : callPct < 35 ? 'rd' : '';
+            return `<tr onclick="QuantOptions.setMonitorSector('${(r.s||'').replace(/'/g, '&#39;')}');QuantOptions.setMonitorTab('scanner')">
+              <td><b>${r.s.slice(0, 18)}</b><br><span class="sec" style="font-size:9.5px">${r.names.slice(0,3).join(' · ')}${r.names.length>3?'…':''}</span></td>
+              <td class="r">${r.picks}</td>
+              <td class="r ${cls}">${callPct.toFixed(0)}%</td>
+              <td class="r"><b>${_dol(r.prem)}</b></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+        <div style="font:600 9.5px var(--mono);color:var(--ink-3);margin-top:8px">Click sector → filter Scanner</div>
+      </div>
+    </div>`;
   }
 
   // Exposed helpers used by inline onclick handlers
