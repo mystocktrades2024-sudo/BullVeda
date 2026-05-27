@@ -20496,7 +20496,7 @@ const QuantOptions = (function() {
       .qmom14-quickchip.on { background:var(--copper);color:var(--bg-0);border-color:var(--copper); }
       .qmom14-quickchip.clear { color:var(--ink-3); }
 
-      .qopt-mon-shell { display: grid; grid-template-columns: 1fr 360px; gap: 14px; padding: 14px 22px; align-items: start; }
+      .qopt-mon-shell { display: grid; grid-template-columns: 1fr 360px; gap: 14px; padding: 14px 22px; align-items: stretch; min-height: calc(100vh - 280px); }
       @media (max-width: 1100px) { .qopt-mon-shell { grid-template-columns: 1fr; } }
       .qopt-monitor-tbl { width: 100%; border-collapse: collapse; font: 12px/1.4 var(--mono); font-variant-numeric: tabular-nums; background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; }
       .qopt-monitor-tbl thead th { padding: 9px 10px; background: var(--bg-3); color: var(--ink-3); font-weight: 700; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; text-align: left; border-bottom: 1px solid var(--line); cursor: pointer; white-space: nowrap; }
@@ -20574,6 +20574,17 @@ const QuantOptions = (function() {
       .qopt-whale-row .v { text-align: right; color: var(--ink); }
       .qopt-whale-row .v b { color: var(--copper); font-weight: 800; }
       .qopt-whale-row .z { text-align: right; color: var(--ink-3); font-size: 9.5px; }
+      /* Bottom analytics row — fills empty space under scanner table */
+      .qopt-bottom { margin-top: 14px; padding: 14px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; }
+      .qopt-bot-h { font: 800 11px var(--mono); letter-spacing: 0.18em; text-transform: uppercase; color: var(--copper); margin-bottom: 10px; }
+      .qopt-bot-grid { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr 1fr 1fr; gap: 10px; }
+      @media (max-width: 1500px) { .qopt-bot-grid { grid-template-columns: 1.5fr 1fr 1fr 1fr; } }
+      @media (max-width: 1100px) { .qopt-bot-grid { grid-template-columns: 1fr 1fr; } }
+      .qopt-bot-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 2px; padding: 8px; }
+      .qopt-bot-card-h { font: 700 9.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+      .qopt-bot-card .qopt-monitor-tbl { border: none; }
+      .qopt-bot-card .qopt-monitor-tbl thead th { padding: 4px 6px; font-size: 8.5px; background: transparent; }
+      .qopt-bot-card .qopt-monitor-tbl tbody td { padding: 4px 6px; font-size: 11px; }
     `;
     document.head.appendChild(s);
   }
@@ -20606,7 +20617,10 @@ const QuantOptions = (function() {
     else if (_qoptTab === 'positioning') body = _renderQoptPositioning(picks);
     else if (_qoptTab === 'history')     body = `<div style="padding:40px 22px;text-align:center;color:var(--ink-3);font:600 12px var(--mono)">History view is on the next sub-tab (📜 History) — click the tab at the top of the workspace to open it.</div>`;
     else body = `<div class="qopt-mon-shell">
-        <div>${_renderQoptScannerTable(visible, picks)}</div>
+        <div>
+          ${_renderQoptScannerTable(visible, picks)}
+          ${_renderQoptBottomRow(picks, visible, data)}
+        </div>
         ${_renderQoptDetailPane(selectedPick, data)}
       </div>`;
     root.innerHTML = `
@@ -20616,6 +20630,114 @@ const QuantOptions = (function() {
       ${_qoptTab === 'scanner' ? _renderQoptQuickFilters() : ''}
       ${body}
     `;
+  }
+
+  // ── Bottom analytics row — fills empty space under the scanner table ──
+  function _renderQoptBottomRow(allPicks, visible, data) {
+    if (!allPicks.length) return '';
+    const _dol = (v) => v == null ? '—' : v >= 1e6 ? '$'+(v/1e6).toFixed(1)+'M' : v >= 1e3 ? '$'+(v/1e3).toFixed(0)+'k' : '$'+v.toFixed(0);
+
+    // 1. Sector aggregate (pivot)
+    const sectorMap = {};
+    allPicks.forEach(p => {
+      const s = p.sector || '—';
+      if (!sectorMap[s]) sectorMap[s] = { picks: 0, prem: 0, call: 0, put: 0, ivrps: [] };
+      sectorMap[s].picks++;
+      sectorMap[s].prem += (+p['premium_total_$'] || 0);
+      sectorMap[s].call += (+p.call_volume || 0);
+      sectorMap[s].put  += (+p.put_volume  || 0);
+      if (p.ivrp != null) sectorMap[s].ivrps.push(p.ivrp);
+    });
+    const sectorRows = Object.entries(sectorMap)
+      .map(([s, v]) => ({ s, ...v, total: v.call + v.put, avgIvrp: v.ivrps.length ? v.ivrps.reduce((a,b)=>a+b,0)/v.ivrps.length : null }))
+      .sort((a, b) => b.prem - a.prem)
+      .slice(0, 11);
+
+    // 2. Top by-metric leaderboards (bull-skew, bear-skew, vol-rich, vol-cheap)
+    const top = (arr, n=5) => arr.slice(0, n);
+    const bySkew = allPicks.filter(p => p.skew_25d != null).sort((a,b) => b.skew_25d - a.skew_25d);
+    const byIvrp = allPicks.filter(p => p.ivrp != null).sort((a,b) => b.ivrp - a.ivrp);
+    const byPremium = allPicks.filter(p => p['premium_total_$'] != null).sort((a,b) => b['premium_total_$'] - a['premium_total_$']);
+
+    // 3. Catalyst horizon
+    const ew = (data.earnings_watchlist || []).filter(e => e.days_to_earnings != null && e.days_to_earnings >= 0 && e.days_to_earnings <= 30);
+    const ewByPick = ew.filter(e => allPicks.find(p => p.ticker === e.ticker)).sort((a,b) => a.days_to_earnings - b.days_to_earnings).slice(0, 8);
+
+    const renderMiniRow = (p, valFn, cls) => `<tr onclick="QuantOptions.selectTicker('${p.ticker}')">
+      <td class="tk"><b>${p.ticker}</b></td>
+      <td class="r ${cls(p)||''}">${valFn(p)}</td>
+    </tr>`;
+
+    return `<div class="qopt-bottom">
+      <div class="qopt-bot-h">⊞ MARKET DECOMPOSITION · all real chain data</div>
+      <div class="qopt-bot-grid">
+
+        <div class="qopt-bot-card">
+          <div class="qopt-bot-card-h">SECTOR FLOW · ranked by premium $</div>
+          <table class="qopt-monitor-tbl">
+            <thead><tr><th>Sector</th><th class="r">N</th><th class="r">Call %</th><th class="r">Avg IVRP</th><th class="r">Premium $</th></tr></thead>
+            <tbody>${sectorRows.map(r => {
+              const callPct = r.total > 0 ? r.call/r.total*100 : 0;
+              const ivrpPct = r.avgIvrp != null ? r.avgIvrp*100 : null;
+              return `<tr onclick="QuantOptions.setMonitorSector('${(r.s||'').replace(/'/g, '&#39;')}')">
+                <td><b>${r.s.slice(0,16)}</b></td>
+                <td class="r">${r.picks}</td>
+                <td class="r ${callPct>65?'gn':callPct<35?'rd':''}">${callPct.toFixed(0)}%</td>
+                <td class="r ${ivrpPct==null?'':ivrpPct>3?'rd':ivrpPct<-3?'gn':'am'}">${ivrpPct!=null?(ivrpPct>=0?'+':'')+ivrpPct.toFixed(1)+'%':'—'}</td>
+                <td class="r"><b>${_dol(r.prem)}</b></td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>
+        </div>
+
+        <div class="qopt-bot-card">
+          <div class="qopt-bot-card-h">🔥 IV RICH leaderboard · sell-premium edge</div>
+          <table class="qopt-monitor-tbl">
+            <thead><tr><th>Ticker</th><th class="r">IVRP</th></tr></thead>
+            <tbody>${top(byIvrp).map(p => renderMiniRow(p, x => (x.ivrp>=0?'+':'')+(x.ivrp*100).toFixed(1)+'%', x => x.ivrp>0.03?'rd':x.ivrp<-0.03?'gn':'')).join('')}</tbody>
+          </table>
+        </div>
+
+        <div class="qopt-bot-card">
+          <div class="qopt-bot-card-h">▲ CALL-SKEW leaderboard · upside chase</div>
+          <table class="qopt-monitor-tbl">
+            <thead><tr><th>Ticker</th><th class="r">25Δ Skew</th></tr></thead>
+            <tbody>${top(bySkew).map(p => renderMiniRow(p, x => (x.skew_25d>=0?'+':'')+(x.skew_25d*100).toFixed(1)+'%', x => x.skew_25d>0.02?'gn':x.skew_25d<-0.02?'rd':'')).join('')}</tbody>
+          </table>
+        </div>
+
+        <div class="qopt-bot-card">
+          <div class="qopt-bot-card-h">💰 PREMIUM $ leaderboard · institutional size</div>
+          <table class="qopt-monitor-tbl">
+            <thead><tr><th>Ticker</th><th class="r">Premium $</th></tr></thead>
+            <tbody>${top(byPremium).map(p => renderMiniRow(p, x => _dol(x['premium_total_$']), () => '')).join('')}</tbody>
+          </table>
+        </div>
+
+        <div class="qopt-bot-card">
+          <div class="qopt-bot-card-h">📊 EARNINGS HORIZON · ≤30d</div>
+          <table class="qopt-monitor-tbl">
+            <thead><tr><th>Ticker</th><th class="r">Days</th></tr></thead>
+            <tbody>${ewByPick.length ? ewByPick.map(e => `<tr onclick="QuantOptions.selectTicker('${e.ticker}')">
+              <td><b>${e.ticker}</b></td>
+              <td class="r ${e.days_to_earnings<=3?'rd':e.days_to_earnings<=7?'am':''}"><b>+${e.days_to_earnings}d</b></td>
+            </tr>`).join('') : '<tr><td colspan="2" style="text-align:center;color:var(--ink-3);font-size:11px">No earnings ≤30d</td></tr>'}</tbody>
+          </table>
+        </div>
+
+        <div class="qopt-bot-card">
+          <div class="qopt-bot-card-h">⚡ COMPOSITE LEADERS · best directional setups</div>
+          <table class="qopt-monitor-tbl">
+            <thead><tr><th>Ticker</th><th class="r">Conv</th></tr></thead>
+            <tbody>${allPicks.map(p => ({p, c: _qoptComposite(p)})).sort((a,b)=>b.c-a.c).slice(0, 5).map(({p, c}) => `<tr onclick="QuantOptions.selectTicker('${p.ticker}')">
+              <td><b>${p.ticker}</b></td>
+              <td class="r"><b style="color:${c>=65?'var(--gn)':c>=50?'var(--amb)':'var(--rd)'}">${c}%</b></td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>`;
   }
 
   // ── Skew Map tab — IV heatmap across top picks × expirations ──────
