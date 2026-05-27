@@ -7813,6 +7813,138 @@ async def macro_vol_api():
         return {"error": str(e)}
 
 
+@app.post("/api/options-alerts/check")
+@app.get("/api/options-alerts/check")
+async def options_alerts_check_api():
+    """Run all threshold checks against current options_flow.json and
+    fire Slack alerts for any new triggers. State persisted in
+    cache/options_alerts_state.json to avoid spam.
+
+    Checks (free / from existing data):
+      · IVRP_THRESHOLD       — any pick with IVRP > +10% (sell-prem) or < -10% (buy-prem)
+      · TERM_INVERSION       — VIX term ratio flips above/below 1.0
+      · SKEW_FLIP            — aggregate 25Δ skew sign flip (call → put or v.v.)
+      · CATALYST_3D          — any pick has earnings ≤ 3 days
+      · LOSS_STREAK          — last 5 outcome-resolved picks are all losses
+      · NEW_STRONG_UOA       — already in refresh_options_flow, mentioned here for completeness
+    """
+    from datetime import datetime
+    try:
+        of_path = BASE_DIR / "infra" / "prototype" / "options_flow.json"
+        state_path = BASE_DIR / "cache" / "options_alerts_state.json"
+        if not of_path.exists():
+            return {"alerts": [], "error": "no options_flow.json"}
+        d = json.loads(of_path.read_text())
+        picks = d.get("top30", []) or []
+        # Load prior alert state for dedupe
+        prior = {}
+        if state_path.exists():
+            try: prior = json.loads(state_path.read_text())
+            except Exception: prior = {}
+        alerts = []
+
+        # 1. IVRP threshold
+        for p in picks:
+            ivrp = p.get("ivrp")
+            if ivrp is None: continue
+            ivrp_pct = ivrp * 100
+            tk = p.get("ticker")
+            key = f"ivrp:{tk}"
+            last_state = prior.get(key, {}).get("state")
+            if ivrp_pct > 10 and last_state != "rich":
+                alerts.append({"type": "IVRP_RICH", "ticker": tk, "ivrp_pct": round(ivrp_pct, 1),
+                               "msg": f"{tk} IVRP +{ivrp_pct:.1f}% — IV richer than realized (sell-premium edge)"})
+                prior[key] = {"state": "rich", "ts": datetime.utcnow().isoformat()}
+            elif ivrp_pct < -10 and last_state != "cheap":
+                alerts.append({"type": "IVRP_CHEAP", "ticker": tk, "ivrp_pct": round(ivrp_pct, 1),
+                               "msg": f"{tk} IVRP {ivrp_pct:.1f}% — IV cheaper than realized (buy-premium edge)"})
+                prior[key] = {"state": "cheap", "ts": datetime.utcnow().isoformat()}
+
+        # 2. Aggregate term-structure inversion (median across picks)
+        terms = [p.get("term_ratio") for p in picks if p.get("term_ratio") is not None]
+        if terms:
+            terms.sort()
+            med_term = terms[len(terms)//2]
+            key = "term:aggregate"
+            last_state = prior.get(key, {}).get("state")
+            new_state = "backwardation" if med_term > 1.05 else "contango" if med_term < 0.95 else "flat"
+            if new_state != last_state and last_state is not None:
+                alerts.append({"type": "TERM_FLIP", "from": last_state, "to": new_state, "med_ratio": round(med_term, 3),
+                               "msg": f"Term structure flipped: {last_state} → {new_state} (median ratio {med_term:.2f})"})
+            prior[key] = {"state": new_state, "ts": datetime.utcnow().isoformat()}
+
+        # 3. Aggregate 25Δ skew sign flip
+        skews = [p.get("skew_25d") for p in picks if p.get("skew_25d") is not None]
+        if skews:
+            skews.sort()
+            med_skew = skews[len(skews)//2]
+            key = "skew:aggregate"
+            last_state = prior.get(key, {}).get("state")
+            new_state = "call_skew" if med_skew > 0.02 else "put_skew" if med_skew < -0.02 else "flat"
+            if new_state != last_state and last_state is not None and (new_state in ("call_skew","put_skew") or last_state in ("call_skew","put_skew")):
+                alerts.append({"type": "SKEW_FLIP", "from": last_state, "to": new_state, "med_skew_pct": round(med_skew*100, 1),
+                               "msg": f"25Δ skew flipped: {last_state} → {new_state} (median {med_skew*100:.1f}%)"})
+            prior[key] = {"state": new_state, "ts": datetime.utcnow().isoformat()}
+
+        # 4. Catalyst ≤ 3 days
+        for p in picks:
+            atm_dte = p.get("atm_dte")
+            if atm_dte is None or atm_dte > 7: continue
+            # We don't have per-pick earnings_days inline; use atm_dte < 3 as 0DTE proxy
+            if atm_dte <= 3:
+                tk = p.get("ticker")
+                key = f"cat3d:{tk}"
+                if not prior.get(key):
+                    alerts.append({"type": "CATALYST_3D", "ticker": tk, "dte": atm_dte,
+                                   "msg": f"{tk} ATM expiration in {atm_dte:.0f}d — high gamma/theta risk"})
+                    prior[key] = {"ts": datetime.utcnow().isoformat()}
+
+        # 5. Loss streak — last 5 resolved outcomes
+        try:
+            oc_path = BASE_DIR / "cache" / "options_flow_outcomes.jsonl"
+            if oc_path.exists():
+                resolved = []
+                for ln in oc_path.read_text().splitlines():
+                    if not ln.strip(): continue
+                    try:
+                        r = json.loads(ln)
+                        if r.get("outcome") in ("target_hit", "stop_hit"):
+                            resolved.append(r)
+                    except Exception: continue
+                resolved.sort(key=lambda r: r.get("resolved_at") or r.get("snap_date") or "", reverse=True)
+                last5 = resolved[:5]
+                if len(last5) == 5 and all(r.get("outcome") == "stop_hit" for r in last5):
+                    key = "loss_streak"
+                    if not prior.get(key) or (datetime.utcnow() - datetime.fromisoformat(prior[key].get("ts", "1970-01-01T00:00:00"))).days > 1:
+                        alerts.append({"type": "LOSS_STREAK", "count": 5,
+                                       "tickers": [r.get("ticker") for r in last5],
+                                       "msg": f"Loss streak: last 5 resolved picks all stop-hit — halt new BUYs and review."})
+                        prior[key] = {"ts": datetime.utcnow().isoformat()}
+        except Exception: pass
+
+        # Persist state
+        try:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(json.dumps(prior, default=str, indent=2))
+        except Exception: pass
+
+        # Fire Slack for any new alerts (async — don't block the response)
+        if alerts:
+            import threading
+            def _fire():
+                try:
+                    from alerts import send_alert
+                    title = f"⚡ Options Flow alerts · {len(alerts)} new"
+                    body = "\n".join(f"• {a['msg']}" for a in alerts[:10])
+                    send_alert("WARN", title, body)
+                except Exception: pass
+            threading.Thread(target=_fire, daemon=True).start()
+
+        return {"alerts": alerts, "count": len(alerts), "ts": datetime.utcnow().isoformat()}
+    except Exception as e:
+        return {"alerts": [], "error": str(e)}
+
+
 @app.get("/api/senate-trades")
 async def senate_trades_api(t: str = "", days: int = 90, limit: int = 50):
     """Senate / Congressional trades for a ticker (or all if t='').
