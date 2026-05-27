@@ -160,6 +160,10 @@
   .eikon-chain-tbl tr.atm .k::after  { content: '◀'; position: absolute; right: 3px; color: var(--copper); }
   .eikon-chain-tbl tr.delta25 .k { background: rgba(91,229,124,0.06); color: var(--ink-1); }
   .eikon-chain-tbl tr.delta25.is-put .k { background: rgba(255,107,91,0.06); }
+  .eikon-chain-tbl tr.maxpain .k { background: rgba(255,185,92,0.18); color: var(--am); font-weight: 800; }
+  .eikon-chain-tbl tr.maxpain .k::after { content: ' MP'; font-size: 8px; }
+  .eikon-chain-tbl td.uoa { background: rgba(217,119,87,0.20) !important; }
+  .eikon-chain-tbl td.uoa b { color: var(--copper); }
   .eikon-chain-tbl tr:hover { background: rgba(217,119,87,0.03); }
   .eikon-chain-tbl .call-cell { background: rgba(91,229,124,0.02); }
   .eikon-chain-tbl .put-cell  { background: rgba(255,107,91,0.02); }
@@ -235,7 +239,18 @@
   /* ── BOTTOM: UOA TAPE / IV-HV / NEWS ──────────────────────────────── */
   .eikon-tape  { grid-column: 1 / 3; grid-row: 3; }
   .eikon-iv-hv { grid-column: 1; grid-row: 4; }
-  .eikon-news  { grid-column: 2 / 4; grid-row: 4; }
+  .eikon-cats  { grid-column: 2; grid-row: 4; }
+  .eikon-news  { grid-column: 3; grid-row: 4; }
+  .eikon-cat-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; border-radius: 3px;
+    background: var(--bg-3); border: 1px solid var(--line);
+    font-family: var(--mono); font-size: 10px; font-weight: 700;
+    color: var(--ink-1); margin: 2px;
+  }
+  .eikon-cat-pill.rd { border-color: rgba(255,107,91,0.45); background: rgba(255,107,91,0.08); color: var(--rd); }
+  .eikon-cat-pill.am { border-color: rgba(255,185,92,0.45); background: rgba(255,185,92,0.08); color: var(--am); }
+  .eikon-cat-pill .d { font-size: 9px; opacity: 0.7; }
   .eikon-tape-tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 10.5px; }
   .eikon-tape-tbl th, .eikon-tape-tbl td {
     padding: 5px 10px; text-align: left; font-variant-numeric: tabular-nums;
@@ -283,8 +298,10 @@
     <span class="eikon-mkt-cell"><span class="k">VIX</span><span class="v" id="mkt-vix">—</span><span class="d nu" id="mkt-vix-d">—</span></span>
     <span class="eikon-mkt-cell"><span class="k">SPX</span><span class="v" id="mkt-spx">—</span><span class="d nu" id="mkt-spx-d">—</span></span>
     <span class="eikon-mkt-cell"><span class="k">QQQ</span><span class="v" id="mkt-qqq">—</span><span class="d nu" id="mkt-qqq-d">—</span></span>
-    <span class="eikon-mkt-cell"><span class="k">DXY</span><span class="v" id="mkt-dxy">—</span></span>
-    <span class="eikon-mkt-cell"><span class="k">10Y</span><span class="v" id="mkt-10y">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">DXY</span><span class="v" id="mkt-dxy">—</span><span class="d nu" id="mkt-dxy-d">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">GLD</span><span class="v" id="mkt-gld">—</span><span class="d nu" id="mkt-gld-d">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">HYG</span><span class="v" id="mkt-hyg">—</span><span class="d nu" id="mkt-hyg-d">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">REGIME</span><span class="v" id="mkt-regime">—</span></span>
   </span>
 </header>
 
@@ -344,6 +361,12 @@
     <div id="ivhv-body"></div>
   </section>
 
+  <!-- CATALYSTS -->
+  <section class="eikon-pane eikon-cats">
+    <div class="eikon-pane-h">⊞ Catalysts · 30d <span class="right" id="cats-tk">—</span></div>
+    <div id="cats-body" style="padding:10px 12px;font-family:var(--mono);font-size:11px"></div>
+  </section>
+
   <!-- NEWS -->
   <section class="eikon-pane eikon-news">
     <div class="eikon-pane-h">⊞ News <span class="right" id="news-tk">—</span></div>
@@ -398,7 +421,7 @@
       const r = await fetch('options_flow.json', { credentials: 'include' });
       if (r.ok) {
         DATA = await r.json();
-        // Try to fetch VIX/SPX from main data.json
+        // Try to fetch VIX/SPX + macro + regime from main data.json
         try {
           const r2 = await fetch('data.json', { credentials: 'include' });
           if (r2.ok) {
@@ -409,6 +432,15 @@
             DATA._spx_chg = d2.spy_chg_pct;
             DATA._qqq = d2.qqq_close;
             DATA._qqq_chg = d2.qqq_chg_pct;
+            // Macro signals: HYG (credit), UUP (DXY proxy), GLD
+            const ms = d2.macro_signals || {};
+            DATA._dxy     = (ms.UUP || {}).price;
+            DATA._dxy_chg = (ms.UUP || {}).chg5d;
+            DATA._gld     = (ms.GLD || {}).price;
+            DATA._gld_chg = (ms.GLD || {}).chg5d;
+            DATA._hyg     = (ms.HYG || {}).price;
+            DATA._hyg_chg = (ms.HYG || {}).chg5d;
+            DATA._regime  = d2.regime4 || d2.regime || (d2.regime_obj || {}).regime;
           }
         } catch (e) {}
       }
@@ -433,6 +465,17 @@
     set('mkt-vix', _f(DATA._vix, 1), DATA._vix_chg);
     set('mkt-spx', DATA._spx != null ? _f(DATA._spx, 0) : '—', DATA._spx_chg);
     set('mkt-qqq', DATA._qqq != null ? _f(DATA._qqq, 0) : '—', DATA._qqq_chg);
+    set('mkt-dxy', DATA._dxy != null ? _f(DATA._dxy, 1) : '—', DATA._dxy_chg);
+    set('mkt-gld', DATA._gld != null ? _f(DATA._gld, 1) : '—', DATA._gld_chg);
+    set('mkt-hyg', DATA._hyg != null ? _f(DATA._hyg, 1) : '—', DATA._hyg_chg);
+    // Regime label
+    const regEl = document.getElementById('mkt-regime');
+    if (regEl) {
+      const reg = (DATA._regime || '').toString();
+      const short = reg.replace('risk_on_trending','RISK-ON TR').replace('risk_on_choppy','CHOPPY').replace('risk_off_trending','RISK-OFF').replace('panic','PANIC');
+      regEl.textContent = short || '—';
+      regEl.className = 'v ' + (reg.includes('trending') && !reg.includes('off') ? 'gn' : reg.includes('panic') || reg.includes('off') ? 'rd' : 'am');
+    }
   }
 
   function paintWatchlist() {
@@ -492,10 +535,13 @@
     head.textContent = p.ticker;
     document.getElementById('chain-meta').textContent = `ATM $${_f(p.atm_strike, 2)} · ${_f(p.atm_dte, 0)}d`;
     const ivPct = p.atm_iv != null ? p.atm_iv * 100 : null;
+    // VIX-relative IV: ticker_IV / VIX × 100 — measures richness vs index
+    const vixRel = (ivPct != null && DATA._vix) ? ivPct / DATA._vix : null;
     meta.innerHTML = `
       <span class="tk">${p.ticker}</span>
       <span class="px">$${_f(p.price, 2)}</span>
-      <span class="ctx">spot · ATM IV <b>${_f(ivPct, 1)}%</b> · HV20 <b>${p.hv20 != null ? (p.hv20*100).toFixed(1)+'%' : '—'}</b> · IVRP <b class="${p.ivrp != null ? (p.ivrp > 0.03 ? 'rd' : p.ivrp > -0.03 ? 'am' : 'gn') : ''}">${p.ivrp != null ? _sign(p.ivrp*100)+(p.ivrp*100).toFixed(1)+'%' : '—'}</b> · 25Δ skew <b>${p.skew_25d != null ? _sign(p.skew_25d*100)+(p.skew_25d*100).toFixed(1)+'%' : '—'}</b> · term <b>${_f(p.term_ratio, 2)}</b></span>
+      <span class="ctx">spot · ATM IV <b>${_f(ivPct, 1)}%</b> · HV20 <b>${p.hv20 != null ? (p.hv20*100).toFixed(1)+'%' : '—'}</b> · HV30 <b>${p.hv30 != null ? (p.hv30*100).toFixed(1)+'%' : '—'}</b> · HV60 <b>${p.hv60 != null ? (p.hv60*100).toFixed(1)+'%' : '—'}</b> · IVRP <b class="${p.ivrp != null ? (p.ivrp > 0.03 ? 'rd' : p.ivrp > -0.03 ? 'am' : 'gn') : ''}">${p.ivrp != null ? _sign(p.ivrp*100)+(p.ivrp*100).toFixed(1)+'%' : '—'}</b> · 25Δ skew <b>${p.skew_25d != null ? _sign(p.skew_25d*100)+(p.skew_25d*100).toFixed(1)+'%' : '—'}</b> · term <b>${_f(p.term_ratio, 2)}</b><br>
+      <span style="color:var(--ink-3);font-size:9.5px">implied move <b style="color:var(--copper)">±${_f(p.implied_move_pct, 1)}%</b> · IV/VIX <b style="color:var(--copper)">${_f(vixRel, 2)}×</b> · vol-of-vol <b>${p.vol_of_vol != null ? (p.vol_of_vol*100).toFixed(1)+'%' : '—'}</b> · θ-decay <b>${p.theta_pct_per_day != null ? p.theta_pct_per_day.toFixed(1)+'%/d' : '—'}</b></span></span>
     `;
     // Read REAL chain grid from options_flow.json (plumbed via data_fetcher.chain_grid)
     if (!p.chain_grid || !p.chain_grid.length) {
@@ -518,16 +564,20 @@
     const fmtVol = (v) => v == null ? '—' : v >= 1000 ? (v/1000).toFixed(1) + 'k' : String(v);
     target.strikes.forEach(r => {
       const atm = atmK != null && Math.abs(r.k - atmK) < 0.5;
+      const isMP = p.max_pain != null && Math.abs(r.k - p.max_pain) < 0.5;
       const c = r.call || {}, pt = r.put || {};
-      const rowCls = atm ? 'atm' : '';
+      // Per-strike UOA tags — call/put with vol > 3× OI AND oi > 100 (matches our scan rule)
+      const cUoa = c.vol != null && c.oi != null && c.oi > 100 && c.vol > c.oi * 3;
+      const pUoa = pt.vol != null && pt.oi != null && pt.oi > 100 && pt.vol > pt.oi * 3;
+      const rowCls = atm ? 'atm' : isMP ? 'maxpain' : '';
       html += `<tr class="${rowCls}">
         <td class="call-cell">${c.bid != null ? c.bid.toFixed(2) : '—'}</td>
         <td class="call-cell">${c.ask != null ? c.ask.toFixed(2) : '—'}</td>
         <td class="call-cell">${c.delta != null ? (c.delta >= 0 ? '+' : '') + c.delta.toFixed(2) : '—'}</td>
         <td class="call-cell iv"><b>${c.iv != null ? (c.iv*100).toFixed(0) : '—'}</b></td>
-        <td class="call-cell vol"><b>${fmtVol(c.vol)}</b></td>
+        <td class="call-cell vol ${cUoa ? 'uoa' : ''}" title="${cUoa ? 'UOA: vol > 3× OI' : ''}"><b>${fmtVol(c.vol)}${cUoa ? '⚡' : ''}</b></td>
         <td class="k">${r.k.toFixed(r.k % 1 === 0 ? 0 : 2)}</td>
-        <td class="put-cell vol"><b>${fmtVol(pt.vol)}</b></td>
+        <td class="put-cell vol ${pUoa ? 'uoa' : ''}" title="${pUoa ? 'UOA: vol > 3× OI' : ''}"><b>${fmtVol(pt.vol)}${pUoa ? '⚡' : ''}</b></td>
         <td class="put-cell iv"><b>${pt.iv != null ? (pt.iv*100).toFixed(0) : '—'}</b></td>
         <td class="put-cell">${pt.delta != null ? pt.delta.toFixed(2) : '—'}</td>
         <td class="put-cell">${pt.bid != null ? pt.bid.toFixed(2) : '—'}</td>
@@ -605,6 +655,8 @@
           <div class="row"><span class="lbl">Max Gain</span><b class="${maxG != null && maxG > 0 ? 'gn' : ''}" style="color:var(--gn)">${maxG != null ? '+$' + _f(maxG, 2) : 'uncapped'}</b></div>
           <div class="row"><span class="lbl">Max Loss</span><b style="color:var(--rd)">-$${_f(maxL, 2)}</b></div>
           <div class="row"><span class="lbl">POP</span><b style="color:var(--copper)">${(pop*100).toFixed(0)}%</b></div>
+          ${p.theta_pct_per_day != null ? `<div class="row"><span class="lbl">θ-decay</span><b style="color:var(--rd)">${p.theta_pct_per_day.toFixed(1)}%/d</b></div>` : ''}
+          ${p.implied_move_pct != null ? `<div class="row"><span class="lbl">implied move</span><b style="color:var(--copper)">±${p.implied_move_pct.toFixed(1)}%</b></div>` : ''}
         </div>
       </div>
       <div class="eikon-strat-net">
@@ -694,39 +746,57 @@
     const body = document.getElementById('skew-body');
     const meta = document.getElementById('skew-meta');
     const p = selectedPick();
-    if (!p || p.atm_iv == null || p.iv_25d_call == null || p.iv_25d_put == null) {
-      body.innerHTML = '<div class="empty-cell">need 25Δ chain data</div>'; return;
+    if (!p || !p.chain_grid || !p.chain_grid.length) {
+      body.innerHTML = '<div class="empty-cell">need chain grid</div>'; return;
     }
-    meta.textContent = `IV % vs strike · ${_f(p.atm_dte, 0)}d`;
-    const points = [
-      { k: p.iv_25d_put_strike, iv: p.iv_25d_put, label: '25Δp' },
-      { k: p.atm_strike, iv: p.atm_iv, label: 'ATM' },
-      { k: p.iv_25d_call_strike, iv: p.iv_25d_call, label: '25Δc' },
-    ].filter(x => x.k != null);
-    if (points.length < 3) { body.innerHTML = '<div class="empty-cell">incomplete chain</div>'; return; }
-    const minK = Math.min(...points.map(x => x.k)) * 0.97;
-    const maxK = Math.max(...points.map(x => x.k)) * 1.03;
-    const minIv = Math.min(...points.map(x => x.iv)) * 0.92;
-    const maxIv = Math.max(...points.map(x => x.iv)) * 1.08;
-    const W = 340, H = 140, PAD_L = 32, PAD_R = 10, PAD_T = 12, PAD_B = 22;
+    // Multi-expiration skew: overlay one IV curve per expiration in chain_grid.
+    // For each expiration, build a polyline of (strike, call_IV) across all strikes.
+    meta.textContent = `IV % vs strike · ${p.chain_grid.length} expirations`;
+    // Find min/max strike and IV across ALL expirations
+    let minK = Infinity, maxK = -Infinity, minIv = Infinity, maxIv = -Infinity;
+    p.chain_grid.forEach(exp => {
+      exp.strikes.forEach(s => {
+        if (s.k < minK) minK = s.k;
+        if (s.k > maxK) maxK = s.k;
+        const iv = s.call && s.call.iv;
+        if (iv != null && iv > 0) {
+          if (iv < minIv) minIv = iv;
+          if (iv > maxIv) maxIv = iv;
+        }
+      });
+    });
+    if (minIv === Infinity) { body.innerHTML = '<div class="empty-cell">no IV in grid</div>'; return; }
+    minIv *= 0.95; maxIv *= 1.05;
+    const W = 340, H = 160, PAD_L = 32, PAD_R = 10, PAD_T = 18, PAD_B = 28;
     const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
-    const xOf = (k) => PAD_L + ((k - minK) / (maxK - minK)) * plotW;
-    const yOf = (iv) => PAD_T + plotH - ((iv - minIv) / (maxIv - minIv)) * plotH;
-    // Smooth quadratic through the 3 points
-    let path = '';
-    points.forEach((pt, i) => path += (i === 0 ? 'M ' : 'L ') + xOf(pt.k).toFixed(1) + ' ' + yOf(pt.iv).toFixed(1) + ' ');
+    const xOf = (k) => PAD_L + ((k - minK) / ((maxK - minK) || 1)) * plotW;
+    const yOf = (iv) => PAD_T + plotH - ((iv - minIv) / ((maxIv - minIv) || 1)) * plotH;
+    // Color per expiration: nearest = bright copper, farthest = dim grey
+    const expColors = ['var(--copper)', 'var(--am)', '#6a8a99', '#4a6678', '#3a4858'];
+    let lines = '';
+    let legend = '';
+    p.chain_grid.forEach((exp, i) => {
+      const points = exp.strikes
+        .filter(s => s.call && s.call.iv != null)
+        .sort((a,b) => a.k - b.k);
+      if (!points.length) return;
+      let path = '';
+      points.forEach((s, j) => path += (j === 0 ? 'M ' : 'L ') + xOf(s.k).toFixed(1) + ' ' + yOf(s.call.iv).toFixed(1) + ' ');
+      const col = expColors[i] || expColors[expColors.length-1];
+      lines += `<path d="${path}" fill="none" stroke="${col}" stroke-width="1.5" opacity="${1 - i * 0.12}"/>`;
+      points.forEach(s => lines += `<circle cx="${xOf(s.k).toFixed(1)}" cy="${yOf(s.call.iv).toFixed(1)}" r="2.5" fill="${col}" opacity="${1 - i * 0.12}"/>`);
+      legend += `<tspan dx="8" fill="${col}">${exp.dte}d</tspan>`;
+    });
     body.innerHTML = `
       <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="display:block">
         <line x1="${PAD_L}" y1="${PAD_T+plotH}" x2="${W-PAD_R}" y2="${PAD_T+plotH}" stroke="var(--line-2)"/>
-        <line x1="${xOf(p.atm_strike)}" y1="${PAD_T}" x2="${xOf(p.atm_strike)}" y2="${PAD_T+plotH}" stroke="var(--copper)" stroke-dasharray="2 2" opacity="0.3"/>
-        <path d="${path}" fill="none" stroke="var(--copper)" stroke-width="2"/>
-        ${points.map(pt => `
-          <circle cx="${xOf(pt.k)}" cy="${yOf(pt.iv)}" r="4" fill="var(--am)"/>
-          <text x="${xOf(pt.k)}" y="${yOf(pt.iv)-8}" text-anchor="middle" font-family="ui-monospace" font-size="9" fill="var(--ink-1)">${(pt.iv*100).toFixed(0)}%</text>
-          <text x="${xOf(pt.k)}" y="${H-6}" text-anchor="middle" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">${pt.label}</text>
-        `).join('')}
+        ${p.atm_strike != null ? `<line x1="${xOf(p.atm_strike)}" y1="${PAD_T}" x2="${xOf(p.atm_strike)}" y2="${PAD_T+plotH}" stroke="var(--copper)" stroke-dasharray="2 2" opacity="0.3"/>` : ''}
+        ${lines}
         <text x="${PAD_L-3}" y="${PAD_T+10}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">${(maxIv*100).toFixed(0)}%</text>
         <text x="${PAD_L-3}" y="${PAD_T+plotH}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">${(minIv*100).toFixed(0)}%</text>
+        <text x="${PAD_L}" y="${H-6}" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">$${minK.toFixed(0)}</text>
+        <text x="${W-PAD_R}" y="${H-6}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">$${maxK.toFixed(0)}</text>
+        <text x="${PAD_L}" y="${PAD_T-6}" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">DTEs:${legend}</text>
       </svg>
     `;
   }
@@ -835,11 +905,97 @@
     body.innerHTML = html;
   }
 
-  function paintNews() {
+  async function paintNews() {
     const tk = document.getElementById('news-tk');
+    const body = document.getElementById('news-body');
     if (tk) tk.textContent = SELECTED_TK || '—';
-    // News per ticker would come from a /api/news endpoint or news_articles in data.json
-    // — left as a stub since this preview file is standalone.
+    if (!body || !SELECTED_TK) return;
+    body.innerHTML = '<div class="empty-cell">loading…</div>';
+    try {
+      const r = await fetch(`/api/news?t=${encodeURIComponent(SELECTED_TK)}&limit=8`, { credentials: 'include' });
+      if (!r.ok) throw new Error('news fetch ' + r.status);
+      const d = await r.json();
+      const items = (d.articles || d.news || d || []).slice(0, 8);
+      if (!items.length) { body.innerHTML = '<div class="empty-cell">no recent news</div>'; return; }
+      body.innerHTML = items.map(n => {
+        const t = (n.date || n.published_at || n.time || '').slice(0, 16).replace('T', ' ');
+        const h = n.title || n.headline || '—';
+        const src = (n.source || n.publisher || '').slice(0, 20);
+        return `<div class="eikon-news-row">
+          <span class="t">${t.split(' ')[1] || t}</span>
+          <span class="h">${h.slice(0, 120)}</span>
+          <span class="src">${src}</span>
+        </div>`;
+      }).join('');
+    } catch (e) {
+      body.innerHTML = '<div class="empty-cell">news endpoint unavailable</div>';
+    }
+  }
+
+  function paintCatalysts() {
+    const body = document.getElementById('cats-body');
+    const tk = document.getElementById('cats-tk');
+    if (tk) tk.textContent = SELECTED_TK || '—';
+    if (!body) return;
+    const p = selectedPick();
+    const today = new Date();
+    const pills = [];
+    // 1. Earnings for selected ticker — find in earnings_watchlist if loaded
+    const ew = (DATA && DATA.earnings_watchlist) || [];
+    const earn = ew.find(e => e.ticker === SELECTED_TK);
+    if (earn && earn.days_to_earnings != null) {
+      const d = +earn.days_to_earnings;
+      const cls = d <= 3 ? 'rd' : d <= 7 ? 'am' : '';
+      pills.push(`<span class="eikon-cat-pill ${cls}">📊 EARNINGS<span class="d">+${d}d</span></span>`);
+    } else if (p && p.atm_dte != null) {
+      // No direct earnings hit — note expiry instead
+      pills.push(`<span class="eikon-cat-pill">⏱ EXPIRY<span class="d">+${Math.round(p.atm_dte)}d</span></span>`);
+    }
+    // 2. FOMC days — known schedule for the next year (8 meetings/year, ~6-week cycle)
+    const fomc2026 = ['2026-06-18','2026-07-30','2026-09-17','2026-11-05','2026-12-17'];
+    fomc2026.forEach(dStr => {
+      const days = Math.round((new Date(dStr) - today) / 86400000);
+      if (days >= 0 && days <= 30) {
+        const cls = days <= 3 ? 'rd' : days <= 7 ? 'am' : '';
+        pills.push(`<span class="eikon-cat-pill ${cls}">🏦 FOMC<span class="d">+${days}d</span></span>`);
+      }
+    });
+    // 3. CPI (Bureau of Labor Statistics releases mid-month, typically 2nd Tuesday)
+    const cpi2026 = ['2026-06-10','2026-07-15','2026-08-12','2026-09-09','2026-10-15'];
+    cpi2026.forEach(dStr => {
+      const days = Math.round((new Date(dStr) - today) / 86400000);
+      if (days >= 0 && days <= 30) {
+        const cls = days <= 3 ? 'rd' : days <= 7 ? 'am' : '';
+        pills.push(`<span class="eikon-cat-pill ${cls}">📈 CPI<span class="d">+${days}d</span></span>`);
+      }
+    });
+    // 4. NFP (1st Friday of every month, BLS)
+    const nfp2026 = ['2026-06-05','2026-07-03','2026-08-07','2026-09-04','2026-10-02'];
+    nfp2026.forEach(dStr => {
+      const days = Math.round((new Date(dStr) - today) / 86400000);
+      if (days >= 0 && days <= 30) {
+        const cls = days <= 3 ? 'rd' : days <= 7 ? 'am' : '';
+        pills.push(`<span class="eikon-cat-pill ${cls}">💼 NFP<span class="d">+${days}d</span></span>`);
+      }
+    });
+    // 5. Triple-witching — 3rd Friday of Mar/Jun/Sep/Dec
+    const tw2026 = ['2026-06-19','2026-09-18','2026-12-18'];
+    tw2026.forEach(dStr => {
+      const days = Math.round((new Date(dStr) - today) / 86400000);
+      if (days >= 0 && days <= 30) {
+        const cls = days <= 3 ? 'rd' : days <= 7 ? 'am' : '';
+        pills.push(`<span class="eikon-cat-pill ${cls}">🔱 TripleW<span class="d">+${days}d</span></span>`);
+      }
+    });
+    // 6. Macro env from data.json regime
+    if (DATA && DATA._regime) {
+      const reg = DATA._regime;
+      const regCls = reg.includes('panic') || reg.includes('off') ? 'rd' : reg.includes('choppy') ? 'am' : '';
+      pills.push(`<span class="eikon-cat-pill ${regCls}">🌐 ${reg.toUpperCase().replace('_',' ').slice(0,16)}</span>`);
+    }
+    body.innerHTML = pills.length
+      ? pills.join('')
+      : '<div class="empty-cell">no catalysts within 30 days</div>';
   }
 
   function renderAll() {
@@ -852,6 +1008,7 @@
     paintTerm();
     paintIvHv();
     paintTape();
+    paintCatalysts();
     paintNews();
   }
 

@@ -4470,6 +4470,10 @@ def get_options_iv_data(ticker: str) -> dict:
            # Full chain grid for Eikon Chain Montage / Vol Surface — 5 expirations × 7 strikes
            # each, raw bid/ask/mark/IV/Δ/vol/OI per side. ~1.7KB per ticker.
            "chain_grid":      None,
+           # Batch 1 quick wins
+           "implied_move_pct": None,   # ATM straddle (call_mark + put_mark) / spot × 100
+           "vol_of_vol":       None,   # σ of IV across strikes at ATM expiration
+           "theta_pct_per_day": None,  # |theta| / atm_mark — premium decay rate
            "premium_call_$":  None,   # Σ call vol × mark × 100 (correct $ notional)
            "premium_put_$":   None,
            "premium_total_$": None,
@@ -4757,6 +4761,60 @@ def get_options_iv_data(ticker: str) -> dict:
 
         # Expose uoa_puts (was tracked but never surfaced)
         out["uoa_puts"] = uoa_puts
+
+        # Batch 1 · derived metrics from chain data we already have:
+        #   - implied_move_pct = ATM straddle / spot (market-priced ±%)
+        #   - vol_of_vol = stdev(IV across strikes at the ATM expiration)
+        #   - theta_pct_per_day = |atm_theta| / atm_mark (rate of premium decay)
+        try:
+            if atm_call_best.get("mark") is not None and atm_call_best.get("strike") is not None:
+                # Need matching put at ATM strike — search the chain
+                atm_k = atm_call_best["strike"]
+                atm_dte_val = atm_call_best.get("dte")
+                put_mark_atm = None
+                for exp_key in put_map:
+                    try:
+                        ex_dte = int(exp_key.split(":")[-1])
+                    except Exception:
+                        continue
+                    if atm_dte_val is not None and abs(ex_dte - atm_dte_val) > 1:
+                        continue
+                    for k_str, contracts in (put_map.get(exp_key) or {}).items():
+                        try:
+                            if abs(float(k_str) - atm_k) < 0.01:
+                                put_mark_atm = (contracts or [{}])[0].get("mark")
+                                break
+                        except Exception: pass
+                    if put_mark_atm is not None: break
+                if put_mark_atm is not None and spot:
+                    try:
+                        straddle = float(atm_call_best["mark"]) + float(put_mark_atm)
+                        out["implied_move_pct"] = round(straddle / spot * 100, 2)
+                    except Exception: pass
+            # vol_of_vol — stdev of IVs across strikes at the ATM expiration
+            if atm_call_best.get("dte") is not None:
+                target_dte = atm_call_best["dte"]
+                exp_ivs = []
+                for exp_key in call_map:
+                    try:
+                        if int(exp_key.split(":")[-1]) == target_dte:
+                            for k_str, contracts in (call_map.get(exp_key) or {}).items():
+                                for c in (contracts or []):
+                                    iv = c.get("volatility")
+                                    if iv is not None:
+                                        try: exp_ivs.append(float(iv) / 100)
+                                        except Exception: pass
+                            break
+                    except Exception: pass
+                if len(exp_ivs) >= 3:
+                    import statistics
+                    out["vol_of_vol"] = round(statistics.stdev(exp_ivs), 4)
+            # theta_pct_per_day
+            if out.get("atm_theta") is not None and out.get("atm_mark"):
+                try:
+                    out["theta_pct_per_day"] = round(abs(float(out["atm_theta"])) / float(out["atm_mark"]) * 100, 2)
+                except Exception: pass
+        except Exception: pass
 
         # 2026-05-26 · EIKON-CHAIN-GRID · build full chain grid for the Eikon
         # preview / Chain Montage panel. 5 nearest expirations × 7 strikes closest

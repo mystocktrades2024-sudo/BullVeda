@@ -297,6 +297,15 @@ def main(force: bool = False) -> int:
                     # Annualized 20-day realized vol (252 trading days)
                     hv20 = float(logret.iloc[-20:].std() * (252 ** 0.5))
                     pick["hv20"] = round(hv20, 4)
+                    # HV30 / HV60 — broader-horizon realized vol for multi-tier IV-RV
+                    if len(logret) >= 30:
+                        pick["hv30"] = round(float(logret.iloc[-30:].std() * (252 ** 0.5)), 4)
+                    else:
+                        pick["hv30"] = None
+                    if len(logret) >= 60:
+                        pick["hv60"] = round(float(logret.iloc[-60:].std() * (252 ** 0.5)), 4)
+                    else:
+                        pick["hv60"] = None
                     atm_iv = pick.get("atm_iv")
                     if atm_iv is not None:
                         # IVRP > 0 = IV richer than realized (sell premium edge)
@@ -305,7 +314,7 @@ def main(force: bool = False) -> int:
                     else:
                         pick["ivrp"] = None
                 except Exception:
-                    pick["hv20"] = None; pick["ivrp"] = None
+                    pick["hv20"] = None; pick["hv30"] = None; pick["hv60"] = None; pick["ivrp"] = None
             log.info(f"HV20+IVRP computed for {sum(1 for p in top30 if p.get('hv20') is not None)}/{len(top30)} picks")
     except Exception as e:
         log.warning(f"HV20/IVRP enrichment failed (non-fatal): {e}")
