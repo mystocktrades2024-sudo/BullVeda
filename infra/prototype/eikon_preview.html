@@ -245,6 +245,27 @@
   .eikon-news  { grid-column: 3; grid-row: 4; }
   .eikon-sectors { grid-column: 1 / 3; grid-row: 5; }
   .eikon-volcone { grid-column: 3; grid-row: 5; }
+  .eikon-vixterm { grid-column: 1 / 4; grid-row: 6; }
+  .eikon-vt-grid {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+    padding: 10px 14px;
+  }
+  .eikon-vt-cell {
+    background: var(--bg-3); border: 1px solid var(--line);
+    border-radius: 4px; padding: 6px 8px;
+    font-family: var(--mono); text-align: center;
+  }
+  .eikon-vt-cell .lbl { font-size: 9px; color: var(--ink-3); letter-spacing: 0.10em; text-transform: uppercase; }
+  .eikon-vt-cell .v { font-size: 14px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .eikon-vt-cell.gn .v { color: var(--gn); }
+  .eikon-vt-cell.am .v { color: var(--am); }
+  .eikon-vt-cell.rd .v { color: var(--rd); }
+  .eikon-vt-foot {
+    padding: 0 14px 10px; font-family: var(--mono); font-size: 10px;
+    color: var(--ink-2); letter-spacing: 0.04em;
+  }
+  .eikon-vt-foot b { color: var(--ink); font-weight: 700; }
+  .eikon-vt-foot .gn { color: var(--gn); } .eikon-vt-foot .am { color: var(--am); } .eikon-vt-foot .rd { color: var(--rd); }
   .eikon-sector-grid {
     display: grid; grid-template-columns: repeat(11, 1fr); gap: 4px;
     padding: 8px 12px;
@@ -317,6 +338,11 @@
     <span class="eikon-mkt-cell"><span class="k">DXY</span><span class="v" id="mkt-dxy">—</span><span class="d nu" id="mkt-dxy-d">—</span></span>
     <span class="eikon-mkt-cell"><span class="k">GLD</span><span class="v" id="mkt-gld">—</span><span class="d nu" id="mkt-gld-d">—</span></span>
     <span class="eikon-mkt-cell"><span class="k">HYG</span><span class="v" id="mkt-hyg">—</span><span class="d nu" id="mkt-hyg-d">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">LQD</span><span class="v" id="mkt-lqd">—</span><span class="d nu" id="mkt-lqd-d">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">10Y·IEF</span><span class="v" id="mkt-ief">—</span><span class="d nu" id="mkt-ief-d">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">OIL·USO</span><span class="v" id="mkt-uso">—</span><span class="d nu" id="mkt-uso-d">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">VVIX</span><span class="v" id="mkt-vvix">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">SKEW</span><span class="v" id="mkt-skew">—</span></span>
     <span class="eikon-mkt-cell"><span class="k">REGIME</span><span class="v" id="mkt-regime">—</span></span>
   </span>
 </header>
@@ -403,6 +429,12 @@
     <div id="volcone-body"></div>
   </section>
 
+  <!-- VIX TERM STRUCTURE + VOL FAMILY -->
+  <section class="eikon-pane eikon-vixterm">
+    <div class="eikon-pane-h">⊞ VIX Term Structure + Vol Family <span class="right" id="vixterm-meta">—</span></div>
+    <div id="vixterm-body"></div>
+  </section>
+
 </div>
 
 <script>
@@ -471,6 +503,23 @@
             DATA._regime  = d2.regime4 || d2.regime || (d2.regime_obj || {}).regime;
           }
         } catch (e) {}
+        // Batch 5c · macro+vol family from /api/macro-vol (live, not bundle-cached)
+        try {
+          const rm = await fetch('/api/macro-vol', { credentials: 'include' });
+          if (rm.ok) {
+            const m = await rm.json();
+            DATA._vix9d = m.vix9d; DATA._vix3m = m.vix3m; DATA._vix6m = m.vix6m;
+            DATA._vvix = m.vvix;   DATA._skew = m.skew;
+            DATA._vix_term_ratio = m.vix_term_ratio;
+            DATA._vix_term_state = m.vix_term_state;
+            DATA._vix_vol_state  = m.vix_vol_state;
+            const ms = m.macro || {};
+            DATA._lqd = (ms.LQD || {}).price; DATA._lqd_chg = (ms.LQD || {}).chg5d;
+            DATA._ief = (ms.IEF || {}).price; DATA._ief_chg = (ms.IEF || {}).chg5d;
+            DATA._uso = (ms.USO || {}).price; DATA._uso_chg = (ms.USO || {}).chg5d;
+            DATA._tlt = (ms.TLT || {}).price; DATA._tlt_chg = (ms.TLT || {}).chg5d;
+          }
+        } catch (e) {}
       }
     } catch (e) {
       console.error('failed to load options_flow.json', e);
@@ -496,6 +545,19 @@
     set('mkt-dxy', DATA._dxy != null ? _f(DATA._dxy, 1) : '—', DATA._dxy_chg);
     set('mkt-gld', DATA._gld != null ? _f(DATA._gld, 1) : '—', DATA._gld_chg);
     set('mkt-hyg', DATA._hyg != null ? _f(DATA._hyg, 1) : '—', DATA._hyg_chg);
+    set('mkt-lqd', DATA._lqd != null ? _f(DATA._lqd, 1) : '—', DATA._lqd_chg);
+    set('mkt-ief', DATA._ief != null ? _f(DATA._ief, 1) : '—', DATA._ief_chg);
+    set('mkt-uso', DATA._uso != null ? _f(DATA._uso, 1) : '—', DATA._uso_chg);
+    const vvixEl = document.getElementById('mkt-vvix');
+    if (vvixEl) {
+      vvixEl.textContent = DATA._vvix != null ? _f(DATA._vvix, 1) : '—';
+      vvixEl.className = 'v ' + (DATA._vvix == null ? 'nu' : DATA._vvix > 110 ? 'rd' : DATA._vvix > 95 ? 'am' : 'gn');
+    }
+    const skewEl = document.getElementById('mkt-skew');
+    if (skewEl) {
+      skewEl.textContent = DATA._skew != null ? _f(DATA._skew, 0) : '—';
+      skewEl.className = 'v ' + (DATA._skew == null ? 'nu' : DATA._skew > 145 ? 'rd' : DATA._skew > 130 ? 'am' : 'gn');
+    }
     // Regime label
     const regEl = document.getElementById('mkt-regime');
     if (regEl) {
@@ -1021,6 +1083,46 @@
     }
   }
 
+  function paintVixTerm() {
+    const body = document.getElementById('vixterm-body');
+    const meta = document.getElementById('vixterm-meta');
+    if (!body) return;
+    const v = DATA;
+    const cells = [
+      { lbl: 'VIX9D · 9d',  v: v._vix9d,  hi: false },
+      { lbl: 'VIX · 30d',    v: v._vix,    hi: true },
+      { lbl: 'VIX3M · 90d',  v: v._vix3m,  hi: false },
+      { lbl: 'VIX6M · 180d', v: v._vix6m,  hi: false },
+      { lbl: 'VVIX · vol-of-VIX', v: v._vvix, hi: false },
+    ];
+    const html = `<div class="eikon-vt-grid">
+      ${cells.map(c => {
+        const cls = c.v == null ? 'nu' : c.v > 30 ? 'rd' : c.v > 20 ? 'am' : 'gn';
+        return `<div class="eikon-vt-cell ${cls}"><div class="lbl">${c.lbl}</div><div class="v">${c.v != null ? c.v.toFixed(1) : '—'}</div></div>`;
+      }).join('')}
+    </div>`;
+    // Term state verdict
+    const ts = v._vix_term_state || 'unknown';
+    const tsCls = ts === 'backwardation' ? 'rd' : ts === 'contango' ? 'gn' : 'am';
+    const vState = v._vix_vol_state || 'unknown';
+    const vStateCls = (vState === 'panic' || vState === 'spike_imminent') ? 'rd' :
+                      (vState === 'elevated' || vState === 'rising_fast' || vState === 'rising') ? 'am' :
+                      (vState === 'calm' || vState === 'complacent') ? 'gn' : 'nu';
+    const skew = v._skew;
+    const skewCls = skew == null ? 'nu' : skew > 145 ? 'rd' : skew > 130 ? 'am' : 'gn';
+    const skewLbl = skew == null ? '—' : skew > 145 ? 'high crash bid' : skew > 130 ? 'elevated' : 'normal';
+    body.innerHTML = html + `
+      <div class="eikon-vt-foot">
+        Term: <b class="${tsCls}">${ts.toUpperCase()}</b> · ratio <b>${v._vix_term_ratio != null ? v._vix_term_ratio.toFixed(3) : '—'}</b> ·
+        State: <b class="${vStateCls}">${vState.replace('_',' ').toUpperCase()}</b> ·
+        CBOE SKEW: <b class="${skewCls}">${skew != null ? skew.toFixed(0) : '—'}</b> (${skewLbl})
+      </div>
+    `;
+    if (meta) {
+      meta.textContent = ts + (v._vix_term_ratio != null ? ' · ' + v._vix_term_ratio.toFixed(2) : '');
+    }
+  }
+
   async function paintSectors() {
     const body = document.getElementById('sectors-body');
     if (!body) return;
@@ -1190,6 +1292,7 @@
     paintNews();
     paintSectors();
     paintVolCone();
+    paintVixTerm();
   }
 
   // Bootstrap

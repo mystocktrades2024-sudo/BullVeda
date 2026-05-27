@@ -4196,6 +4196,32 @@ def get_vix_data() -> dict:
         else:
             vol_state = "calm"
 
+        # Batch 5c — additional CBOE indices for the Eikon vol surface panels.
+        # VIX9D · short-term vol (9-day expectation). VIX6M · 6-month vol.
+        # SKEW · CBOE tail-risk index (~100 normal, 130+ = high crash hedge demand).
+        # VVIX · vol of VIX (>100 = elevated vol uncertainty).
+        # Missing data → null (don't fabricate).
+        extra_idx = {"vix9d": None, "vix6m": None, "skew": None, "vvix": None}
+        for fname, tickers in {
+            "vix9d": ("VIX9D.INDX",),
+            "vix6m": ("VIX6M.INDX",),
+            "skew":  ("SKEW.INDX",  "CBOE_SKEW.INDX"),
+            "vvix":  ("VVIX.INDX",),
+        }.items():
+            for _t in tickers:
+                try:
+                    _r = _eod.eod(_t, from_date=(_d.today() - _td(days=30)).isoformat())
+                    if _r:
+                        _df = pd.DataFrame(_r)
+                        _df["date"] = pd.to_datetime(_df["date"])
+                        _df = _df.set_index("date").sort_index()
+                        _c = (_df["adjusted_close"] if "adjusted_close" in _df.columns else _df["close"]).dropna()
+                        if len(_c) >= 1:
+                            extra_idx[fname] = round(float(_c.iloc[-1]), 2)
+                            break
+                except Exception as _idx_e:
+                    log.debug(f"{_t} fetch failed: {_idx_e}")
+
         return {
             "vix_current":          round(current, 1),
             "vix_ma20":             round(ma20, 1),
@@ -4209,6 +4235,11 @@ def get_vix_data() -> dict:
             "vol_state":            vol_state,
             "regime":               regime,
             "spike_recovery":       spike_recovery,
+            # Batch 5c — extended vol family
+            "vix9d":                extra_idx["vix9d"],
+            "vix6m":                extra_idx["vix6m"],
+            "skew":                 extra_idx["skew"],
+            "vvix":                 extra_idx["vvix"],
             "error":                None,
         }
     except Exception as e:
@@ -5085,7 +5116,13 @@ def get_macro_signals() -> dict:
         # LQD added 2026-05-11 for HYG/LQD credit-spread ratio (audit gap #2).
         # HYG alone conflates duration risk with credit risk; the ratio
         # against investment-grade LQD isolates the credit-spread signal.
-        macro_tickers = ["HYG", "LQD", "UUP", "GLD"]
+        # Batch 5c extension: + IEF (10Y treasury ETF proxy), USO (oil proxy),
+        # ^TNX (10Y yield direct), ^VIX9D, ^VIX, ^VIX3M, ^VIX6M (vol term structure),
+        # ^SKEW (CBOE skew index), ^VVIX (vol of VIX).
+        # Note: ^TNX may not be on EODHD All-In-One; IEF inverse is the practical
+        # proxy (rising 10Y yield → falling IEF). VIX-family indices and SKEW
+        # are CBOE indices — EODHD supports them under "INDX" exchange.
+        macro_tickers = ["HYG", "LQD", "UUP", "GLD", "IEF", "USO", "TLT"]
         # All 3 macro proxies via EODHD in one batched fetch
         _macro_md = fetch_market_data(macro_tickers, period="3mo")
         result = {}

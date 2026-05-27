@@ -7782,6 +7782,37 @@ async def iv_history_api(t: str, days: int = 90):
     return {"ticker": tk, "points": pts, "count": len(pts)}
 
 
+@app.get("/api/macro-vol")
+async def macro_vol_api():
+    """Live macro + vol-family snapshot for the Eikon top strip.
+
+    Returns VIX/VIX9D/VIX3M/VIX6M/VVIX/SKEW + DXY/GLD/HYG/LQD/IEF/USO/TLT.
+    Cached on the data_fetcher side (1h TTL for macro, 5min for VIX).
+    """
+    try:
+        from data_fetcher import get_vix_data, get_macro_signals
+        vix = get_vix_data() or {}
+        macro = get_macro_signals() or {}
+        return {
+            "vix":   vix.get("vix_current"),
+            "vix9d": vix.get("vix9d"),
+            "vix3m": vix.get("vix3m"),
+            "vix6m": vix.get("vix6m"),
+            "vvix":  vix.get("vvix"),
+            "skew":  vix.get("skew"),
+            "vix_term_ratio":  vix.get("term_structure_ratio"),
+            "vix_term_state":  vix.get("term_structure_state"),
+            "vix_vol_state":   vix.get("vol_state"),
+            "vix_slope_5d":    vix.get("slope_5d"),
+            "macro": {
+                k: macro.get(k) for k in ("HYG", "LQD", "UUP", "GLD", "IEF", "USO", "TLT")
+            },
+            "risk_signal": macro.get("risk_signal"),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/earnings-moves")
 async def earnings_moves_api(t: str, n: int = 4):
     """Past N earnings absolute % moves for a ticker.
