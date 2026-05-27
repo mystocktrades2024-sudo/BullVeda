@@ -7782,6 +7782,75 @@ async def iv_history_api(t: str, days: int = 90):
     return {"ticker": tk, "points": pts, "count": len(pts)}
 
 
+@app.get("/api/earnings-moves")
+async def earnings_moves_api(t: str, n: int = 4):
+    """Past N earnings absolute % moves for a ticker.
+
+    Returns: {ticker, moves: [{date, pre_close, post_close, abs_pct}], avg_abs_pct}.
+    For each historical earnings date in the past ~24 months, computes the
+    absolute % move from the close before earnings to the close after.
+
+    Lets the UI compare implied_move_pct (market expectation) vs realized
+    historical earnings reactions — over/under-priced detector.
+    """
+    from datetime import datetime, timedelta
+    tk = t.upper().strip()
+    try:
+        import eodhd_client as eod
+        # 24 months back of earnings dates
+        from_d = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
+        to_d   = datetime.now().strftime("%Y-%m-%d")
+        cal = eod.earnings_calendar(from_date=from_d, to_date=to_d, symbols=[tk])
+        if not cal or not isinstance(cal, dict):
+            return {"ticker": tk, "moves": [], "avg_abs_pct": None, "error": "no earnings calendar"}
+        rows = cal.get("earnings") or cal.get("data") or []
+        if not isinstance(rows, list):
+            return {"ticker": tk, "moves": [], "avg_abs_pct": None, "error": "unexpected calendar shape"}
+        # Sort by date desc, take last N + buffer
+        rows = sorted(rows, key=lambda r: r.get("report_date") or r.get("date") or "", reverse=True)[:n+2]
+        if not rows:
+            return {"ticker": tk, "moves": [], "avg_abs_pct": None}
+        # Fetch one wide bar window covering the oldest earnings date to today
+        from data_fetcher import fetch_market_data
+        oldest = rows[-1].get("report_date") or rows[-1].get("date")
+        # Add a 5-day buffer either side
+        oldest_dt = datetime.strptime(oldest[:10], "%Y-%m-%d") - timedelta(days=5)
+        md = fetch_market_data([tk], period="2y")
+        if not isinstance(md, dict) or md.get(tk) is None or len(md[tk]) < 5:
+            return {"ticker": tk, "moves": [], "avg_abs_pct": None, "error": "no bars"}
+        bars = md[tk]
+        moves = []
+        for r in rows:
+            ed_str = (r.get("report_date") or r.get("date") or "")[:10]
+            if not ed_str: continue
+            try:
+                ed = datetime.strptime(ed_str, "%Y-%m-%d")
+            except Exception: continue
+            # Pre-earnings = the trading day before; post = the trading day after
+            try:
+                bdf = bars[bars.index <= ed.strftime("%Y-%m-%d")]
+                if len(bdf) < 1: continue
+                pre_close = float(bdf["Close"].iloc[-1])
+                bdf_post = bars[bars.index > ed.strftime("%Y-%m-%d")]
+                if len(bdf_post) < 1: continue
+                post_close = float(bdf_post["Close"].iloc[0])
+                abs_pct = abs((post_close - pre_close) / pre_close * 100)
+                moves.append({
+                    "date": ed_str,
+                    "pre_close": round(pre_close, 2),
+                    "post_close": round(post_close, 2),
+                    "abs_pct": round(abs_pct, 2),
+                    "signed_pct": round((post_close - pre_close) / pre_close * 100, 2),
+                })
+            except Exception:
+                continue
+        moves = moves[:n]
+        avg = sum(m["abs_pct"] for m in moves) / len(moves) if moves else None
+        return {"ticker": tk, "moves": moves, "avg_abs_pct": round(avg, 2) if avg is not None else None, "count": len(moves)}
+    except Exception as e:
+        return {"ticker": tk, "moves": [], "avg_abs_pct": None, "error": str(e)}
+
+
 @app.get("/api/sector-perf")
 async def sector_perf_api(days: int = 5):
     """11 GICS sector SPDR ETF performance over N days · for Eikon sector heatmap.

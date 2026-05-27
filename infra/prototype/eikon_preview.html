@@ -164,6 +164,8 @@
   .eikon-chain-tbl tr.maxpain .k::after { content: ' MP'; font-size: 8px; }
   .eikon-chain-tbl td.uoa { background: rgba(217,119,87,0.20) !important; }
   .eikon-chain-tbl td.uoa b { color: var(--copper); }
+  .eikon-chain-tbl td.block { box-shadow: inset 0 0 0 1px rgba(255,185,92,0.6); }
+  .eikon-chain-tbl td.block b::after { content: ' ▪'; color: var(--am); }
   .eikon-chain-tbl tr:hover { background: rgba(217,119,87,0.03); }
   .eikon-chain-tbl .call-cell { background: rgba(91,229,124,0.02); }
   .eikon-chain-tbl .put-cell  { background: rgba(255,107,91,0.02); }
@@ -595,15 +597,18 @@
       // Per-strike UOA tags — call/put with vol > 3× OI AND oi > 100 (matches our scan rule)
       const cUoa = c.vol != null && c.oi != null && c.oi > 100 && c.vol > c.oi * 3;
       const pUoa = pt.vol != null && pt.oi != null && pt.oi > 100 && pt.vol > pt.oi * 3;
+      // Block detection — absolute size > 1000 contracts (institutional scale)
+      const cBlk = c.vol != null && c.vol > 1000;
+      const pBlk = pt.vol != null && pt.vol > 1000;
       const rowCls = atm ? 'atm' : isMP ? 'maxpain' : '';
       html += `<tr class="${rowCls}">
         <td class="call-cell">${c.bid != null ? c.bid.toFixed(2) : '—'}</td>
         <td class="call-cell">${c.ask != null ? c.ask.toFixed(2) : '—'}</td>
         <td class="call-cell">${c.delta != null ? (c.delta >= 0 ? '+' : '') + c.delta.toFixed(2) : '—'}</td>
         <td class="call-cell iv"><b>${c.iv != null ? (c.iv*100).toFixed(0) : '—'}</b></td>
-        <td class="call-cell vol ${cUoa ? 'uoa' : ''}" title="${cUoa ? 'UOA: vol > 3× OI' : ''}"><b>${fmtVol(c.vol)}${cUoa ? '⚡' : ''}</b></td>
+        <td class="call-cell vol ${cUoa ? 'uoa' : ''} ${cBlk ? 'block' : ''}" title="${[cUoa ? 'UOA: vol > 3× OI' : '', cBlk ? 'BLOCK: vol > 1000' : ''].filter(Boolean).join(' · ')}"><b>${fmtVol(c.vol)}${cUoa ? '⚡' : ''}</b></td>
         <td class="k">${r.k.toFixed(r.k % 1 === 0 ? 0 : 2)}</td>
-        <td class="put-cell vol ${pUoa ? 'uoa' : ''}" title="${pUoa ? 'UOA: vol > 3× OI' : ''}"><b>${fmtVol(pt.vol)}${pUoa ? '⚡' : ''}</b></td>
+        <td class="put-cell vol ${pUoa ? 'uoa' : ''} ${pBlk ? 'block' : ''}" title="${[pUoa ? 'UOA: vol > 3× OI' : '', pBlk ? 'BLOCK: vol > 1000' : ''].filter(Boolean).join(' · ')}"><b>${fmtVol(pt.vol)}${pUoa ? '⚡' : ''}</b></td>
         <td class="put-cell iv"><b>${pt.iv != null ? (pt.iv*100).toFixed(0) : '—'}</b></td>
         <td class="put-cell">${pt.delta != null ? pt.delta.toFixed(2) : '—'}</td>
         <td class="put-cell">${pt.bid != null ? pt.bid.toFixed(2) : '—'}</td>
@@ -879,6 +884,31 @@
     const ivrp = p.ivrp != null ? p.ivrp * 100 : null;
     const cls = ivrp == null ? '' : ivrp > 3 ? 'rd' : ivrp < -3 ? 'gn' : 'am';
     const lbl = ivrp == null ? '' : ivrp > 3 ? 'IV rich · sell-premium' : ivrp < -3 ? 'IV cheap · buy-premium' : 'fair';
+    // Earnings move history vs implied — over/under-priced detector
+    let earnHist = '';
+    try {
+      const r = await fetch(`/api/earnings-moves?t=${encodeURIComponent(SELECTED_TK)}&n=4`, { credentials: 'include' });
+      if (r.ok) {
+        const d = await r.json();
+        if (d.moves && d.moves.length) {
+          const avgImp = d.avg_abs_pct;
+          const impMove = p.implied_move_pct;
+          const verdict = impMove != null && avgImp != null
+            ? (impMove > avgImp * 1.2 ? '<span class="rd">implied richer than realized</span>'
+              : impMove < avgImp * 0.8 ? '<span class="gn">implied cheaper than realized</span>'
+              : '<span class="am">implied ≈ realized</span>')
+            : '';
+          earnHist = `
+            <div style="margin-top:6px;padding:6px 8px;background:var(--bg-3);border-radius:3px;border-left:3px solid var(--ink-4)">
+              <div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em;text-transform:uppercase">last 4 earnings moves · |Δ|</div>
+              <div style="font-weight:700;color:var(--ink);font-size:11px;margin:3px 0">
+                ${d.moves.map(m => `<span style="display:inline-block;margin-right:7px">${m.date.slice(5)}: <b style="color:var(--copper)">${m.abs_pct.toFixed(1)}%</b></span>`).join('')}
+              </div>
+              <div style="font-size:10px;color:var(--ink-2)">avg <b>${avgImp != null ? avgImp.toFixed(1)+'%' : '—'}</b> vs implied <b style="color:var(--copper)">±${impMove != null ? impMove.toFixed(1)+'%' : '—'}</b> — ${verdict}</div>
+            </div>`;
+        }
+      }
+    } catch (e) {}
     // Pull IV history from /api/iv-history (the daily-snapshot logger writes this)
     let sparkSvg = '';
     try {
@@ -922,6 +952,7 @@
           <div class="${cls}" style="font-weight:800;font-size:16px;margin-top:1px">${ivrp != null ? _sign(ivrp)+ivrp.toFixed(1)+'%' : '—'}</div>
           <div style="color:var(--ink-2);font-size:9.5px;margin-top:1px">${lbl}</div>
         </div>
+        ${earnHist}
         ${sparkSvg}
       </div>
     `;
