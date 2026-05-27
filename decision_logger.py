@@ -122,6 +122,24 @@ def _build_entry(
         "rr_ratio": dec.get("rr_ratio") or dec.get("rr") or ctx.get("rr"),
         "entry_price": dec.get("entry_price") or dec.get("price") or ctx.get("entry_price"),
     }
+    # 2026-05-26 SHIP 3 · SMC stop-trap context for Phase 3 walk-forward attribution.
+    # Lets us later answer: "did stop_inside_ob trades underperform peers?"
+    # Pulled from canonical_trade_plan.risk.* (single source of truth) — falls
+    # back to ctx if the caller pre-computed them. Skip nulls cleanly so
+    # legacy rows without SMC data don't grow keys with all-null values.
+    smc_fields = {
+        "smc_stop_inside_ob": ctx.get("smc_stop_inside_ob"),
+        "smc_stop_inside_ob_severity": ctx.get("smc_stop_inside_ob_severity"),
+        "smc_stop_inside_ob_suppressed": ctx.get("smc_stop_inside_ob_suppressed"),
+        "smc_stop_suggested": ctx.get("smc_stop_suggested"),
+        "smc_stop_rr": ctx.get("smc_stop_rr"),
+        # SHIP 4 — stop-depth-in-OB (the sweep mechanic itself)
+        "smc_stop_depth_in_ob_pct": ctx.get("smc_stop_depth_in_ob_pct"),
+        "smc_stop_depth_zone": ctx.get("smc_stop_depth_zone"),
+    }
+    for k, v in smc_fields.items():
+        if v is not None:
+            entry[k] = v
     return entry
 
 
@@ -213,6 +231,58 @@ def log_decisions_batch(
                 # gates_hit is a Wave 2B addition; pass through if present.
                 if "gates_hit" in r and "gates_hit" not in ctx:
                     ctx["gates_hit"] = r.get("gates_hit") or []
+
+                # 2026-05-26 SHIP 3 · pull SMC stop-trap context from canonical
+                # plan (preferred — single source of truth). Falls back to
+                # legacy trade_plan dict for callers that haven't migrated.
+                _ctp = r.get("canonical_trade_plan") if isinstance(r.get("canonical_trade_plan"), dict) else {}
+                _ctp_risk = (_ctp.get("risk") if isinstance(_ctp.get("risk"), dict) else {}) or {}
+                ctx.setdefault(
+                    "smc_stop_inside_ob",
+                    _ctp_risk.get("stop_inside_ob")
+                    if _ctp_risk.get("stop_inside_ob") is not None
+                    else plan.get("stop_inside_ob") if plan.get("stop_inside_ob") is not None
+                    else r.get("stop_inside_ob"),
+                )
+                ctx.setdefault(
+                    "smc_stop_inside_ob_severity",
+                    _ctp_risk.get("stop_inside_ob_severity")
+                    or plan.get("stop_inside_ob_severity")
+                    or r.get("stop_inside_ob_severity"),
+                )
+                ctx.setdefault(
+                    "smc_stop_inside_ob_suppressed",
+                    _ctp_risk.get("stop_inside_ob_suppressed")
+                    if _ctp_risk.get("stop_inside_ob_suppressed") is not None
+                    else plan.get("stop_inside_ob_suppressed") if plan.get("stop_inside_ob_suppressed") is not None
+                    else r.get("stop_inside_ob_suppressed"),
+                )
+                ctx.setdefault(
+                    "smc_stop_suggested",
+                    _ctp_risk.get("stop_smc_suggested")
+                    or plan.get("stop_smc_suggested")
+                    or r.get("stop_smc_suggested"),
+                )
+                ctx.setdefault(
+                    "smc_stop_rr",
+                    _ctp_risk.get("stop_smc_rr")
+                    or plan.get("stop_smc_rr")
+                    or r.get("stop_smc_rr"),
+                )
+                # SHIP 4 — depth fields (the sweep mechanic itself)
+                ctx.setdefault(
+                    "smc_stop_depth_in_ob_pct",
+                    _ctp_risk.get("stop_depth_in_ob_pct")
+                    if _ctp_risk.get("stop_depth_in_ob_pct") is not None
+                    else plan.get("stop_depth_in_ob_pct") if plan.get("stop_depth_in_ob_pct") is not None
+                    else r.get("stop_depth_in_ob_pct"),
+                )
+                ctx.setdefault(
+                    "smc_stop_depth_zone",
+                    _ctp_risk.get("stop_depth_zone")
+                    or plan.get("stop_depth_zone")
+                    or r.get("stop_depth_zone"),
+                )
 
                 # 2026-05-18 · Fix C: surface "insufficient_history" + similar
                 # gate reasons from score_breakdown when score=0. Previously

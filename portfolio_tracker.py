@@ -161,13 +161,22 @@ def _load_state() -> dict:
     if not STATE_PATH.exists():
         return _default_state()
 
-    try:
-        from state_layer import load_portfolio_state
-        state = load_portfolio_state()
-    except Exception:
-        # Defensive fallback — never let the shim break a scan
+    # K7 fix (2026-05-26): respect STATE_PATH when monkeypatched (tests redirect
+    # this to a tmp file). state_layer.load_portfolio_state() hard-codes
+    # DATA_DIR / "portfolio_state.json" and ignores the module-level override,
+    # so tests pulled in the live $96K account state instead of the $10K fixture.
+    _DEFAULT_STATE_PATH = BASE_DIR / "data" / "portfolio_state.json"
+    if STATE_PATH != _DEFAULT_STATE_PATH:
         with open(STATE_PATH) as f:
             state = json.load(f)
+    else:
+        try:
+            from state_layer import load_portfolio_state
+            state = load_portfolio_state()
+        except Exception:
+            # Defensive fallback — never let the shim break a scan
+            with open(STATE_PATH) as f:
+                state = json.load(f)
 
     current = state.get("_schema_version", 0)
     if current < PORTFOLIO_SCHEMA_VERSION:

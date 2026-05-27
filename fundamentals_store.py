@@ -111,9 +111,16 @@ def upsert(ticker: str, data: dict, source: str = "unknown") -> None:
            "raw_json": json.dumps(data, default=str)[:200_000]}
     for f in _MAPPABLE_FIELDS:
         v = data.get(f)
-        # Stringify dates, coerce to float for numeric cols
+        # Stringify dates, preserve strings for sector/industry, coerce numeric cols
+        # 2026-05-26 · Bug fix: previously sector/industry (TEXT columns in the
+        # schema) were sent through the numeric branch and float() coerced them
+        # to None, silently dropping every value. Result: all 2,169 cached rows
+        # had sector=None, which made get_stock_info skip the sqlite layer 0
+        # entirely (since the layer checks `rec.get("sector")` before returning).
         if f in ("last_earnings", "next_earnings", "short_float_fetched"):
             row[f] = str(v)[:19] if v else None
+        elif f in ("sector", "industry"):
+            row[f] = str(v) if v not in (None, "", "N/A") else None
         else:
             try:
                 row[f] = float(v) if v not in (None, "", "N/A") else None
@@ -140,8 +147,11 @@ def upsert_batch(rows: Iterable[tuple[str, dict, str]]) -> int:
                                     "raw_json": json.dumps(data, default=str)[:200_000]}
             for f in _MAPPABLE_FIELDS:
                 v = data.get(f)
+                # Mirror upsert() — preserve strings for sector/industry.
                 if f in ("last_earnings", "next_earnings", "short_float_fetched"):
                     row[f] = str(v)[:19] if v else None
+                elif f in ("sector", "industry"):
+                    row[f] = str(v) if v not in (None, "", "N/A") else None
                 else:
                     try:
                         row[f] = float(v) if v not in (None, "", "N/A") else None

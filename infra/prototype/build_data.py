@@ -2193,6 +2193,39 @@ def rich_row(r: dict, b: dict = None) -> dict:
         base["thesis_card"] = _bt(r)
     except Exception as _bt_err:
         base["thesis_card"] = {"error": str(_bt_err)[:120]}
+
+    # 2026-05-26 · SMC sub-tab levels (VWAP/AVWAP/fractals)
+    # Compute directly from the embedded ohlcv list so EVERY ticker gets
+    # populated, not just BUY/WATCH candidates that went through deep
+    # technical analysis. Upstream (analysis.py._vwap / _williams_fractals)
+    # only fires for scored tickers; this fills the gap for the other
+    # ~2300/2603 tickers the SMC widget needs to render.
+    try:
+        from lib.smc_levels import merge_smc_levels_into_ticker
+        merge_smc_levels_into_ticker(base)
+    except Exception as _smc_err:
+        # Non-fatal — widget falls back to its bars_daily computation
+        pass
+
+    # F3 (2026-05-26) · Mirror sleeve audit fields so offline backfills
+    # (e.g. scripts/backfill_smc_stops.py) can resolve sleeve suppression.
+    # Live scans have these in-memory but tickers.json previously did not
+    # persist them — offline tools could not tell whether a ticker was
+    # eligible for PEAD / ESP / Insider Cluster / Defensive Rotation /
+    # Mean Reversion / Momentum Continuation sleeves. We keep only the
+    # decision-relevant subset (fired + reason) so file size stays sane.
+    for _audit_key in ("pead_audit", "esp_play_audit", "insider_cluster_audit",
+                       "defrot_audit", "meanrev_audit", "momentum_continuation_audit"):
+        if _audit_key in r:
+            _val = r.get(_audit_key)
+            if isinstance(_val, dict):
+                base[_audit_key] = {
+                    "fired":  _val.get("fired", False),
+                    "reason": _val.get("reason") or _val.get("note"),
+                }
+            else:
+                base[_audit_key] = {"fired": False, "reason": None}
+
     return base
 
 
@@ -3713,6 +3746,27 @@ def main():
     # can be tagged with elite_score. Reuse the same result here.
     data["elite_picks"] = _elite
 
+    # 2026-05-25 · Surface picks_history into the dashboard payload so the
+    # Momentum tab's entry-quality calibration tile (and any other consumer)
+    # can read realized PF/WR per entry_quality bucket directly. Previously
+    # the calibration tile showed "picks_history not loaded into the
+    # dashboard payload — placeholder" because nothing surfaced the data.
+    # Schema: {"trades": [...], "runs": [...], "watch_triggers": [...]}.
+    # File is ~3-5MB after 1y+ of trades; keep only trades (the bulk consumer)
+    # to minimize payload bloat — runs/watch_triggers stay in the file.
+    try:
+        _ph_path = OUT.parent.parent / "cache" / "picks_history.json"
+        if _ph_path.exists():
+            import datetime as _dt
+            _ph = json.loads(_ph_path.read_text())
+            data["picks_history"] = {
+                "trades": _ph.get("trades") or [],
+                "_runs_count": len(_ph.get("runs") or []),
+                "_loaded_at": _dt.datetime.now().isoformat(timespec="seconds"),
+            }
+    except Exception as _ph_err:
+        print(f"  ⚠ picks_history surface failed (non-fatal): {_ph_err}")
+
     # Live Options Flow — top 30 UOA imbalance candidates from
     # options_flow_scanner. Surfaced as a separate dashboard panel for
     # institutional-flow-following entry triggers.
@@ -4790,29 +4844,32 @@ def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> Non
                 # ── 2026-05-25 · 5 additional EODHD sections (extracted from
                 # full_fund) to enable wiring of Earnings/Intel/Value sections ──
                 # earnings_history: last 8 quarters from Earnings.History
+                # K1 fix (2026-05-26): chained `.get("X", {}).get("Y")` AttributeErrored
+                # when intermediate key returned None (TKO scan failure). Use `(x or {})`
+                # pattern after every `.get()` so None payloads degrade to [] gracefully.
                 "earnings_history": ((lambda h: sorted(
                     [{"date": k, **(v or {})} for k, v in (h or {}).items() if isinstance(v, dict)],
                     key=lambda x: x.get("date") or "",
                     reverse=True
-                )[:8]) ((full_fund or {}).get("Earnings", {}).get("History") if isinstance(full_fund, dict) else None) if isinstance(full_fund, dict) else []),
+                )[:8]) ((((full_fund or {}).get("Earnings") or {}).get("History")) if isinstance(full_fund, dict) else None) if isinstance(full_fund, dict) else []),
                 # earnings_trend: latest period — has epsRevisionsUpLast7days/30days, eps trend snapshots
                 "earnings_trend": ((lambda tr: (sorted(
                     [{"date": k, **(v or {})} for k, v in (tr or {}).items() if isinstance(v, dict)],
                     key=lambda x: x.get("date") or "",
                     reverse=False
-                ) or [None])[0]) ((full_fund or {}).get("Earnings", {}).get("Trend") if isinstance(full_fund, dict) else None) if isinstance(full_fund, dict) else None),
+                ) or [None])[0]) ((((full_fund or {}).get("Earnings") or {}).get("Trend")) if isinstance(full_fund, dict) else None) if isinstance(full_fund, dict) else None),
                 # holders_institutions: top 10 institutional holders for 13F section
-                "holders_institutions": (list((full_fund or {}).get("Holders", {}).get("Institutions", {}).values())[:10]
+                "holders_institutions": (list((((full_fund or {}).get("Holders") or {}).get("Institutions") or {}).values())[:10]
                                          if isinstance(full_fund, dict) else []),
                 # insider_transactions: last 10 with REAL names for §1 Insider Tape
-                "insider_transactions": (list((full_fund or {}).get("InsiderTransactions", {}).values())[:10]
+                "insider_transactions": (list(((full_fund or {}).get("InsiderTransactions") or {}).values())[:10]
                                          if isinstance(full_fund, dict) else []),
                 # cash_flow_yearly: last 4 years for Capital Allocation flow (Value §6)
                 "cash_flow_yearly": ((lambda cf: sorted(
                     [{"date": k, **(v or {})} for k, v in (cf or {}).items() if isinstance(v, dict)],
                     key=lambda x: x.get("date") or "",
                     reverse=True
-                )[:4]) ((full_fund or {}).get("Financials", {}).get("Cash_Flow", {}).get("yearly") if isinstance(full_fund, dict) else None) if isinstance(full_fund, dict) else []),
+                )[:4]) ((((((full_fund or {}).get("Financials") or {}).get("Cash_Flow") or {}).get("yearly"))) if isinstance(full_fund, dict) else None) if isinstance(full_fund, dict) else []),
                 # Provenance — promoted from lite to full (with caveat that scoring
                 # pipeline didn't run, but raw data fields are populated).
                 "_data_completeness": "full_extra",
@@ -4822,8 +4879,10 @@ def _augment_with_lite_universe(all_rich: dict, bundle: dict, data: dict) -> Non
             if full_fund: n_full += 1
         except Exception as e:
             n_skip += 1
-            if n_skip < 5:
-                print(f"  full-enrich {t}: {type(e).__name__}: {str(e)[:80]}")
+            # K1: log every failure (was previously capped at 5) so we always know
+            # which ticker is silently dropping. AttributeError on chained .get()
+            # was the TKO failure mode prior to the (x or {}) hardening above.
+            print(f"  full-enrich {t}: {type(e).__name__}: {str(e)[:120]}")
 
     print(f"  full-enrichment: scored {n_ok}/{len(extras)} extras ({n_full} with full fundamentals, {n_skip} skipped)")
 

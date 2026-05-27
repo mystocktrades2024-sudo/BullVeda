@@ -101,6 +101,34 @@ class RiskMetrics:
     correlation_adj_pct: float | None = None        # adjustment for portfolio correlation
     risk_flags: list[dict] = field(default_factory=list)  # K2 VWAP-below-stop etc.
 
+    # ── SMC-aware stop layer (added 2026-05-26) ──
+    # Real-world bug (CORZ): canonical stop landed INSIDE the Bull Order Block
+    # zone that the same scan identified as structural support. A normal
+    # liquidity sweep of the OB hits the stop before price reverses. The
+    # thesis is right; the stop placement defeats it. These fields surface
+    # the trap and propose an alternative.
+    stop_smc_suggested: float | None = None         # 1% below the nearest active Bull OB low
+    stop_smc_source: str | None = None              # human-readable rationale
+    stop_smc_distance_pct: float | None = None      # |stop_smc - entry_mid| / entry_mid * 100
+    stop_smc_rr: float | None = None                # R:R if SMC stop is used vs target1
+    stop_inside_ob: bool = False                    # TRUE if legacy stop sits INSIDE an active Bull OB → trap
+    stop_inside_ob_zone: str | None = None          # e.g. "$20.81-$23.00 Bull OB"
+    # 2026-05-26 SHIP 1 — trap severity. Confluence-weighted; 158 traps was too noisy.
+    # Routes UI rendering: HIGH = full red banner, MED = amber chrome, LOW = collapsed.
+    stop_inside_ob_severity: str | None = None      # "LOW" | "MED" | "HIGH" | None
+    stop_inside_ob_score: int | None = None         # 0-9, the underlying weighted score
+    # 2026-05-26 SHIP 2 — sleeve suppression. Catalyst sleeves (PEAD/ESP/Insider)
+    # are catalyst-dominated; structural OB sweep mechanics rarely play out.
+    stop_inside_ob_suppressed: bool = False         # True when warning is suppressed
+    stop_inside_ob_suppress_reason: str | None = None  # e.g. "catalyst sleeve: PEAD"
+    # 2026-05-26 SHIP 4 — stop-depth-in-OB (the sweep mechanic itself).
+    # depth_pct = (ob_high - legacy_stop) / (ob_high - ob_low) * 100
+    #   0% = at top edge of OB; 100% = at bottom edge.
+    # MIDDLE (25-75%) is the deepest sweep risk — that's where institutional
+    # limit orders cluster and where stop-hunt sweeps target.
+    stop_depth_in_ob_pct: float | None = None       # 0-100 (or None if no trap)
+    stop_depth_zone: str | None = None              # TOP / UPPER / MIDDLE / LOWER / BOTTOM
+
 
 @dataclass
 class GateResults:
@@ -279,6 +307,368 @@ def _historical_setup_stats(setup_type: str | None, regime: str | None) -> tuple
     return stats, regime_ctx
 
 
+def compute_smc_stop_fields(
+    order_blocks: list[dict] | None,
+    direction: str,
+    entry_mid: float | None,
+    legacy_stop: float | None,
+    target1: float | None,
+    spot: float | None = None,
+    fractal_low: float | None = None,
+    sleeve: str | None = None,
+) -> dict:
+    """Compute SMC-aware stop suggestion + trap detector.
+
+    Real-world bug detector: when the canonical stop sits INSIDE an active
+    Bull Order Block, a normal liquidity sweep of the OB will trigger the
+    stop before price reverses (CORZ 2026-05-26 — stop $21.65 vs Bull OB
+    $20.81-$23.00).
+
+    Returns a dict with:
+      stop_smc_suggested        — proposed stop (1% below nearest Bull OB low)
+      stop_smc_source           — human-readable rationale
+      stop_smc_distance_pct     — abs(suggested - entry_mid) / entry_mid * 100
+      stop_smc_rr               — R:R using SMC stop vs target1
+      stop_inside_ob            — TRUE if legacy stop sits INSIDE an active Bull OB
+      stop_inside_ob_zone       — e.g. "$20.81-$23.00 Bull OB"
+
+    Direction support: "long" (BUY) and "short" (SHORT). SHORT mirrors BUY —
+    looks for Bear Order Blocks ABOVE spot, places stop 1% above the relevant
+    Bear OB high, and detects "stop inside Bear OB" as a buy-side liquidity
+    sweep trap (F6 — 2026-05-26).
+
+    Active = status in {'fresh', 'tested-held', 'mitigated'} — institutions
+    consider mitigated OBs (status='mitigated') as STILL TRADEABLE so long as
+    structure hasn't been broken. The OB has been "tagged" once; the second
+    sweep is where the supply trades.
+
+    NB: SwingTrade ships two OB sources:
+      - `t.smc.order_blocks`     — current production source; type/high/low
+      - `t.smc_data.order_blocks` — newer schema; kind/high/low/status
+    We accept BOTH shapes.
+    """
+    out = {
+        "stop_smc_suggested": None,
+        "stop_smc_source": None,
+        "stop_smc_distance_pct": None,
+        "stop_smc_rr": None,
+        "stop_inside_ob": False,
+        "stop_inside_ob_zone": None,
+        "stop_inside_ob_severity": None,
+        "stop_inside_ob_score": None,
+        "stop_inside_ob_suppressed": False,
+        "stop_inside_ob_suppress_reason": None,
+        "stop_depth_in_ob_pct": None,
+        "stop_depth_zone": None,
+    }
+
+    direction_norm = (direction or "long").lower()
+    if not order_blocks or direction_norm not in ("long", "short"):
+        return out
+    is_short = direction_norm == "short"
+
+    ref_price = float(spot or entry_mid or 0)
+    if ref_price <= 0:
+        return out
+
+    # ── normalize OB schema across both data sources ──
+    # For LONG: collect Bull OBs BELOW spot (structural support).
+    # For SHORT: collect Bear OBs ABOVE spot (structural resistance).
+    INVALID_STATUS = {"broken", "invalidated", "violated"}
+    direction_token = "bear" if is_short else "bull"
+    ob_label = "Bear" if is_short else "Bull"
+    # 2026-05-26 SHIP 1 — retain richer per-OB dict so we can compute severity.
+    relevant_obs: list[tuple[float, float]] = []   # (low, high)
+    relevant_obs_rich: list[dict] = []             # original OB dicts (status, confluence, strength, …)
+    for ob in order_blocks:
+        if not isinstance(ob, dict):
+            continue
+        kind_raw = (ob.get("type") or ob.get("kind") or "").lower()
+        if direction_token not in kind_raw:
+            continue
+        status_raw = (ob.get("status") or "").lower()
+        if status_raw in INVALID_STATUS:
+            continue
+        lo = ob.get("low")
+        hi = ob.get("high")
+        if lo is None or hi is None:
+            continue
+        try:
+            lo_f = float(lo)
+            hi_f = float(hi)
+        except (TypeError, ValueError):
+            continue
+        # LONG: Bull OB whose low sits BELOW ref (support beneath spot).
+        # SHORT: Bear OB whose high sits ABOVE ref (resistance above spot).
+        if is_short:
+            if hi_f > ref_price:
+                relevant_obs.append((lo_f, hi_f))
+                relevant_obs_rich.append(ob)
+        else:
+            if lo_f < ref_price:
+                relevant_obs.append((lo_f, hi_f))
+                relevant_obs_rich.append(ob)
+
+    if not relevant_obs:
+        # Fallback: 2% above/below fractal level if we have it (still structural)
+        if fractal_low and float(fractal_low) > 0:
+            fl = float(fractal_low)
+            if is_short:
+                # SHORT fallback: place 2% above fractal_low (which acts as a
+                # proxy resistance handle when no Bear OB exists). Caller passes
+                # whatever fractal anchor is most relevant — for SHORT this is
+                # typically a recent swing-high or fractal-high.
+                out["stop_smc_suggested"] = round(fl * 1.02, 2)
+                out["stop_smc_source"] = f"2% above fractal ${fl:.2f} (no Bear OB found)"
+            else:
+                out["stop_smc_suggested"] = round(fl * 0.98, 2)
+                out["stop_smc_source"] = f"2% below fractal_low ${fl:.2f} (no Bull OB found)"
+            if entry_mid:
+                out["stop_smc_distance_pct"] = round(abs(out["stop_smc_suggested"] - entry_mid) / entry_mid * 100, 2)
+            if entry_mid and target1:
+                if is_short:
+                    risk = out["stop_smc_suggested"] - entry_mid
+                    reward = entry_mid - target1
+                else:
+                    risk = entry_mid - out["stop_smc_suggested"]
+                    reward = target1 - entry_mid
+                if risk > 0 and reward > 0:
+                    out["stop_smc_rr"] = round(reward / risk, 2)
+        return out
+
+    # ── 1. SMC stop placement ──
+    # LONG: Place stop 1% BELOW deepest trap OB (or nearest OB) so liquidity
+    #       sweep can complete without exiting position.
+    # SHORT: Mirror — place stop 1% ABOVE highest trap OB (or nearest Bear OB)
+    #        so the buy-side liquidity sweep above spot can complete.
+    #
+    # We DON'T sweep clear of EVERY historical OB (some tickers emit dozens
+    # going back months — pulls stop absurdly far). Either:
+    #
+    #   A. If legacy stop is INSIDE one or more OBs → that's the trap.
+    #   B. Otherwise → use NEAREST OB to spot as routine structural reference.
+    if is_short:
+        # SHORT: sort ascending — nearest resistance is LOWEST-high Bear OB above spot
+        relevant_obs.sort(key=lambda x: x[1])
+        nearest_low, nearest_high = relevant_obs[0]
+    else:
+        # LONG: sort descending — nearest support is HIGHEST-low Bull OB below spot
+        relevant_obs.sort(key=lambda x: x[0], reverse=True)
+        nearest_low, nearest_high = relevant_obs[0]
+
+    trap_obs: list[tuple[float, float]] = []
+    if legacy_stop and float(legacy_stop) > 0:
+        ls = float(legacy_stop)
+        trap_obs = [(l, h) for (l, h) in relevant_obs if l <= ls <= h]
+
+    if trap_obs:
+        if is_short:
+            # SHORT trap: clear the HIGHEST trap OB high
+            trap_low = min(t[0] for t in trap_obs)
+            trap_high = max(t[1] for t in trap_obs)
+            smc_stop = round(trap_high * 1.01, 2)
+            out["stop_smc_suggested"] = smc_stop
+            out["stop_smc_source"] = (
+                f"1% above {ob_label} OB trap zone ${trap_low:.2f}-${trap_high:.2f} "
+                f"(legacy stop ${legacy_stop:.2f} sits INSIDE this OB)"
+            )
+        else:
+            # LONG trap: clear the DEEPEST trap OB low
+            trap_low = min(t[0] for t in trap_obs)
+            trap_high = max(t[1] for t in trap_obs)
+            smc_stop = round(trap_low * 0.99, 2)
+            out["stop_smc_suggested"] = smc_stop
+            out["stop_smc_source"] = (
+                f"1% below {ob_label} OB trap zone ${trap_low:.2f}-${trap_high:.2f} "
+                f"(legacy stop ${legacy_stop:.2f} sits INSIDE this OB)"
+            )
+    else:
+        if is_short:
+            smc_stop = round(nearest_high * 1.01, 2)
+            out["stop_smc_suggested"] = smc_stop
+            out["stop_smc_source"] = (
+                f"1% above nearest {ob_label} OB high ${nearest_high:.2f} "
+                f"(OB zone ${nearest_low:.2f}-${nearest_high:.2f})"
+            )
+        else:
+            smc_stop = round(nearest_low * 0.99, 2)
+            out["stop_smc_suggested"] = smc_stop
+            out["stop_smc_source"] = (
+                f"1% below nearest {ob_label} OB low ${nearest_low:.2f} "
+                f"(OB zone ${nearest_low:.2f}-${nearest_high:.2f})"
+            )
+
+    if entry_mid:
+        out["stop_smc_distance_pct"] = round(abs(smc_stop - entry_mid) / entry_mid * 100, 2)
+        if target1:
+            if is_short:
+                risk = smc_stop - entry_mid
+                reward = entry_mid - target1
+            else:
+                risk = entry_mid - smc_stop
+                reward = target1 - entry_mid
+            if risk > 0 and reward > 0:
+                out["stop_smc_rr"] = round(reward / risk, 2)
+
+    # ── 2. trap detector: legacy stop INSIDE any active OB zone ──
+    if legacy_stop and float(legacy_stop) > 0:
+        ls = float(legacy_stop)
+        # Trap = legacy_stop sits between min(any.low) and max(any.high)
+        # across all active OBs on the relevant side of spot.
+        ob_min_low = min(b[0] for b in relevant_obs)
+        ob_max_high = max(b[1] for b in relevant_obs)
+        if ob_min_low < ls < ob_max_high:
+            # find the specific OB that contains it for the zone label —
+            # pull the FULL dict so we can read confluence/strength/status.
+            containing_obs = [
+                ob for ob in relevant_obs_rich
+                if float(ob.get("low") or 0) <= ls <= float(ob.get("high") or 0)
+            ]
+            if containing_obs:
+                # LONG: pick the DEEPEST (lowest low) — defines the sweep path.
+                # SHORT: pick the HIGHEST (highest high) — defines the upside sweep.
+                if is_short:
+                    containing = max(containing_obs, key=lambda ob: float(ob.get("high") or 0))
+                else:
+                    containing = min(containing_obs, key=lambda ob: float(ob.get("low") or 0))
+                c_low = float(containing.get("low") or 0)
+                c_high = float(containing.get("high") or 0)
+                out["stop_inside_ob"] = True
+                out["stop_inside_ob_zone"] = f"${c_low:.2f}-${c_high:.2f} {ob_label} OB"
+
+                # ── SHIP 1 · trap severity scoring (0–6) ──
+                # Confluence weight (newer schema has confluence_score 0–5;
+                # legacy schema uses strength_score whose distribution is very
+                # different — empirically across 158 active traps the legacy
+                # distribution is: p25=0.6, median=1.0, p75=2.4, max=34.
+                # Calibrated thresholds: ≥2.0 → +2 (top quartile), ≥1.0 → +1.
+                score = 0
+                conf = containing.get("confluence_score")
+                if conf is None:
+                    strength = containing.get("strength_score") or 0
+                    try:
+                        strength_f = float(strength)
+                    except (TypeError, ValueError):
+                        strength_f = 0.0
+                    if strength_f >= 2.0:
+                        score += 2
+                    elif strength_f >= 1.0:
+                        score += 1
+                else:
+                    try:
+                        conf_f = float(conf)
+                    except (TypeError, ValueError):
+                        conf_f = 0.0
+                    if conf_f >= 3:
+                        score += 2
+                    elif conf_f >= 1:
+                        score += 1
+
+                # Status weight — fresh OBs sweep harder than touched ones.
+                # 'tested' and 'tested-held' both indicate the OB has been
+                # tagged once but still holds — treat as +1 (per spec).
+                # 'partial-mit' is an intermediate state — also +1.
+                status_norm = (containing.get("status") or "").lower()
+                if status_norm == "fresh":
+                    score += 2
+                elif status_norm in ("tested-held", "tested", "partial-mit"):
+                    score += 1
+                # mitigated / fully-mit → 0 (already worked, sweep less urgent)
+
+                # Proximity weight — close OBs are imminent risk.
+                mid_ob = (c_low + c_high) / 2.0
+                distance_pct = abs(mid_ob - ref_price) / ref_price * 100 if ref_price > 0 else 999
+                if distance_pct < 3:
+                    score += 2
+                elif distance_pct < 7:
+                    score += 1
+
+                # ── SHIP 4 · STOP-DEPTH-IN-OB — the actual sweep mechanic ──
+                # depth_pct = (ob_high - legacy_stop) / (ob_high - ob_low) * 100
+                #   0% = stop at top edge of OB (still inside, but a small wick
+                #        takes it out — least sweep-target risk)
+                # 100% = stop at bottom edge (also "exit edge"; institutions
+                #        already have to push deeper than the OB to fill)
+                # The MIDDLE is where institutional limit orders cluster and
+                # where stop-hunt sweeps target. CORZ at 62% depth = textbook.
+                ob_span = c_high - c_low
+                depth_pct = None
+                depth_zone = None
+                depth_weight = 0
+                if ob_span > 0:
+                    depth_pct = (c_high - ls) / ob_span * 100
+                    # Direction-symmetric: for SHORT (Bear OB), the "deep sweep"
+                    # target is also the MIDDLE of the OB. Flip the meaning of
+                    # TOP/BOTTOM so UI reads consistently — for shorts, the
+                    # "top edge" is the OB high (where stop hunt push starts).
+                    if is_short:
+                        depth_pct = (ls - c_low) / ob_span * 100
+                    # Categorize for UI chips
+                    if depth_pct < 15:
+                        depth_zone = "TOP"
+                    elif depth_pct < 25:
+                        depth_zone = "UPPER"
+                    elif depth_pct <= 75:
+                        depth_zone = "MIDDLE"
+                    elif depth_pct <= 85:
+                        depth_zone = "LOWER"
+                    else:
+                        depth_zone = "BOTTOM"
+                    # Weight: middle = deepest sweep risk
+                    if 25 < depth_pct < 75:
+                        depth_weight = 3
+                    elif 15 <= depth_pct <= 25 or 75 <= depth_pct <= 85:
+                        depth_weight = 2
+                    else:
+                        depth_weight = 1
+                    score += depth_weight
+                out["stop_depth_in_ob_pct"] = round(depth_pct, 2) if depth_pct is not None else None
+                out["stop_depth_zone"] = depth_zone
+
+                # Severity bands — recalibrated for new max score of 9:
+                #   confluence  0-2
+                #   status      0-2
+                #   proximity   0-2
+                #   depth       1-3 (always contributes when inside OB)
+                # MED FLOOR: any stop_inside_ob=true MUST surface as at least MED.
+                # The trap is the trap — collapsing it into a <details> means
+                # the user misses it. LOW is reserved for the no-trap case.
+                if score >= 6:
+                    severity = "HIGH"
+                else:
+                    severity = "MED"   # NEW FLOOR — never LOW for an actual trap
+                out["stop_inside_ob_score"] = int(score)
+                out["stop_inside_ob_severity"] = severity
+
+                # ── SHIP 2 · sleeve-conditional warning suppression ──
+                # Catalyst-driven sleeves are catalyst-dominated; structural
+                # OB sweep mechanics rarely play out within the short hold window.
+                # Suppress the alarm (preserve data) for these sleeves.
+                CATALYST_SLEEVES = {"pead", "esp_play", "insider_cluster"}
+                CATALYST_FAMILY_TOKENS = ("pead", "esp play", "esp_play",
+                                          "insider cluster", "insider_cluster")
+                sleeve_norm = (sleeve or "").strip().lower()
+                matched_sleeve = None
+                if sleeve_norm:
+                    if sleeve_norm in CATALYST_SLEEVES:
+                        matched_sleeve = sleeve_norm
+                    else:
+                        for tok in CATALYST_FAMILY_TOKENS:
+                            if tok in sleeve_norm:
+                                matched_sleeve = tok
+                                break
+                if matched_sleeve:
+                    pretty = (matched_sleeve
+                              .replace("_", " ")
+                              .replace("esp play", "ESP Play")
+                              .replace("pead", "PEAD")
+                              .replace("insider cluster", "Insider Cluster"))
+                    out["stop_inside_ob_suppressed"] = True
+                    out["stop_inside_ob_suppress_reason"] = f"catalyst sleeve: {pretty}"
+
+    return out
+
+
 def from_analysis_result(result: dict, regime_thresholds: dict | None = None,
                           git_commit: str | None = None) -> CanonicalTradePlan:
     """Assemble a CanonicalTradePlan from analyze_ticker() output.
@@ -300,11 +690,15 @@ def from_analysis_result(result: dict, regime_thresholds: dict | None = None,
 
     # Trade plan core
     tp = result.get("trade_plan") or {}
-    plan.entry = TradeZone(
-        low=tp.get("entry_low"),
-        mid=tp.get("entry_mid") or tp.get("entry"),
-        high=tp.get("entry_high"),
-    )
+    _e_low = tp.get("entry_low")
+    _e_high = tp.get("entry_high")
+    _e_mid = tp.get("entry_mid") or tp.get("entry")
+    if _e_mid is None and _e_low is not None and _e_high is not None:
+        try:
+            _e_mid = (float(_e_low) + float(_e_high)) / 2.0
+        except (TypeError, ValueError):
+            _e_mid = None
+    plan.entry = TradeZone(low=_e_low, mid=_e_mid, high=_e_high)
     plan.stop = tp.get("stop")
     plan.target1 = tp.get("target1")
     plan.target2 = tp.get("target2")
@@ -320,6 +714,50 @@ def from_analysis_result(result: dict, regime_thresholds: dict | None = None,
     # Drawdown haircut from kelly_size if present
     ksz = result.get("kelly_size") or {}
     plan.risk.drawdown_haircut = ksz.get("drawdown_mult", 1.0)
+
+    # ── SMC-aware stop layer (2026-05-26) ──
+    # Pull OBs from either source (`smc.order_blocks` is production today;
+    # `smc_data.order_blocks` is the newer schema). Compute the SMC stop
+    # suggestion + trap detector. Does NOT overwrite plan.stop (legacy);
+    # surfaces as parallel fields so the UI can show the comparison.
+    _smc = result.get("smc") or {}
+    _smc_data = result.get("smc_data") or {}
+    _obs = _smc.get("order_blocks") or _smc_data.get("order_blocks") or []
+    # ── SHIP 2 · resolve sleeve for suppression check ──
+    # Priority: explicit catalyst-sleeve audit `fired` flag > setup_family token.
+    _sleeve_hint = None
+    if (result.get("pead_audit") or {}).get("fired"):
+        _sleeve_hint = "pead"
+    elif (result.get("esp_play_audit") or {}).get("fired"):
+        _sleeve_hint = "esp_play"
+    elif (result.get("insider_cluster_audit") or {}).get("fired"):
+        _sleeve_hint = "insider_cluster"
+    else:
+        _sleeve_hint = (result.get("setup_family")
+                        or (result.get("trade_plan") or {}).get("setup_family"))
+    _smc_fields = compute_smc_stop_fields(
+        order_blocks=_obs,
+        direction=plan.direction,
+        entry_mid=plan.entry.mid,
+        legacy_stop=plan.stop,
+        target1=plan.target1,
+        spot=result.get("price"),
+        fractal_low=result.get("fractal_low"),
+        sleeve=_sleeve_hint,
+    )
+    plan.risk.stop_smc_suggested = _smc_fields["stop_smc_suggested"]
+    plan.risk.stop_smc_source = _smc_fields["stop_smc_source"]
+    plan.risk.stop_smc_distance_pct = _smc_fields["stop_smc_distance_pct"]
+    plan.risk.stop_smc_rr = _smc_fields["stop_smc_rr"]
+    plan.risk.stop_inside_ob = _smc_fields["stop_inside_ob"]
+    plan.risk.stop_inside_ob_zone = _smc_fields["stop_inside_ob_zone"]
+    plan.risk.stop_inside_ob_severity = _smc_fields.get("stop_inside_ob_severity")
+    plan.risk.stop_inside_ob_score = _smc_fields.get("stop_inside_ob_score")
+    plan.risk.stop_inside_ob_suppressed = _smc_fields.get("stop_inside_ob_suppressed", False)
+    plan.risk.stop_inside_ob_suppress_reason = _smc_fields.get("stop_inside_ob_suppress_reason")
+    # SHIP 4 — depth fields
+    plan.risk.stop_depth_in_ob_pct = _smc_fields.get("stop_depth_in_ob_pct")
+    plan.risk.stop_depth_zone = _smc_fields.get("stop_depth_zone")
 
     # Setup attribution
     plan.setup.setup_type = tp.get("setup_type") or result.get("setup_type")

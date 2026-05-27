@@ -395,6 +395,7 @@ def _detect_order_blocks(
     vwap_dict: dict | None = None,
     fractal_dict: dict | None = None,
     ema21: float | None = None,
+    volume_profile: dict | None = None,
 ) -> list[dict]:
     """
     Order Blocks — last opposing candle before an impulse move.
@@ -516,9 +517,17 @@ def _detect_order_blocks(
                     score += 1
                     tags.append("AVWAP")
                     break
-        # HVN proxy: formation bar volume > 1.5× 20d avg
+        # HVN confluence — F9 upgrade (2026-05-26):
+        # Real HVN test = OB midpoint falls inside a top-25% volume bin from
+        # the 60d price-binned volume profile. Falls back to the legacy
+        # 1-bar formation-volume proxy (>=1.5× 20d avg) when profile is
+        # unavailable, so detectors called without a profile still produce
+        # the legacy result.
         formation_vol_x = (vols[i] / avg_vol) if avg_vol > 0 else 0
-        if formation_vol_x >= 1.5:
+        if volume_profile and _is_price_in_hvn(mid, volume_profile):
+            score += 1
+            tags.append("HVN")
+        elif (not volume_profile) and formation_vol_x >= 1.5:
             score += 1
             tags.append("HVN")
         # EMA21 proximity
@@ -849,6 +858,278 @@ def _detect_breakers(
     return out
 
 
+# ════════════════════════════════════════════════════════════════════════
+# F8 — BOS / CHoCH structure-shift detector (2026-05-26)
+# ════════════════════════════════════════════════════════════════════════
+# BOS  (Break of Structure) = trend CONTINUATION
+#   • uptrend: close > last swing-high (prior HH or LH)
+#   • downtrend: close < last swing-low (prior LL or HL)
+#
+# CHoCH (Change of Character) = trend REVERSAL
+#   • prior uptrend (last pivot was HH): close < last swing-low → bearish CHoCH
+#   • prior downtrend (last pivot was LL): close > last swing-high → bullish CHoCH
+#
+# Algo:
+#   1. Identify pivot-highs and pivot-lows (existing _find_pivots, ±2 neighbors)
+#   2. Tag each pivot HH/HL/LH/LL based on the previous SAME-KIND pivot
+#   3. Walk forward through CLOSE prices; on each close that breaks the
+#      most recent relevant pivot, emit a structure event
+#   4. Persist last 5 events (most recent first)
+# ════════════════════════════════════════════════════════════════════════
+
+
+def _detect_structure_events(bars: list[dict], lookback: int = 60, max_events: int = 5) -> list[dict]:
+    """Detect BOS / CHoCH events from recent pivot-high / pivot-low history.
+
+    Returns list of {date, kind, direction, trigger_price, level_broken,
+    level_kind, days_ago} dicts, most recent first. Capped at `max_events`.
+    """
+    arr = _ohlcv_arrays(bars)
+    highs, lows, closes, dates = arr["h"], arr["l"], arr["c"], arr["d"]
+    n = len(closes)
+    if n < 10:
+        return []
+
+    start = max(0, n - lookback)
+    sub_highs = highs[start:]
+    sub_lows = lows[start:]
+    sub_closes = closes[start:]
+    sub_dates = dates[start:]
+
+    ph, pl = _find_pivots(sub_highs, sub_lows, neighbors=_PIVOT_NEIGHBOR_BARS)
+    if not ph and not pl:
+        return []
+
+    # ── 1. Build chronological pivot list with HH/HL/LH/LL classification ──
+    # Compare each pivot-high to the prior pivot-high (HH if higher, LH if lower)
+    # Compare each pivot-low to the prior pivot-low (HL if higher, LL if lower)
+    pivots = []
+    last_ph_price = None
+    for idx in ph:
+        kind = "HH" if (last_ph_price is None or sub_highs[idx] > last_ph_price) else "LH"
+        pivots.append({"idx": idx, "price": sub_highs[idx], "side": "H", "kind": kind})
+        last_ph_price = sub_highs[idx]
+    last_pl_price = None
+    for idx in pl:
+        kind = "HL" if (last_pl_price is None or sub_lows[idx] > last_pl_price) else "LL"
+        pivots.append({"idx": idx, "price": sub_lows[idx], "side": "L", "kind": kind})
+        last_pl_price = sub_lows[idx]
+    pivots.sort(key=lambda p: p["idx"])
+    if not pivots:
+        return []
+
+    # ── 2. Walk closes; at each bar, check break of nearest unbroken pivot ──
+    events: list[dict] = []
+    # Track which pivots are "active" (not yet broken). We allow each pivot
+    # to be broken once — after a break, it's consumed for future detection.
+    consumed = set()
+    last_dir = None  # 'up' / 'down' — tracks last regime to differentiate BOS vs CHoCH
+
+    # Seed last_dir from earliest pivot pair (HH or HL → up; LH or LL → down)
+    for p in pivots:
+        if p["kind"] in ("HH", "HL"):
+            last_dir = "up"; break
+        if p["kind"] in ("LH", "LL"):
+            last_dir = "down"; break
+    if last_dir is None:
+        last_dir = "up"
+
+    # For each close in scan window, identify which pivot it broke (if any)
+    for j in range(len(sub_closes)):
+        c = sub_closes[j]
+        # Find most recent active pivot-high BELOW current close (potential bullish break)
+        broken_high = None
+        for p in reversed(pivots):
+            if p["idx"] >= j or p["side"] != "H" or p["idx"] in consumed:
+                continue
+            if c > p["price"]:
+                broken_high = p
+            break
+        # Find most recent active pivot-low ABOVE current close (potential bearish break)
+        broken_low = None
+        for p in reversed(pivots):
+            if p["idx"] >= j or p["side"] != "L" or p["idx"] in consumed:
+                continue
+            if c < p["price"]:
+                broken_low = p
+            break
+
+        # Resolve to a single event (prefer the more recently formed pivot)
+        chosen = None
+        direction = None
+        if broken_high and broken_low:
+            if broken_high["idx"] >= broken_low["idx"]:
+                chosen = broken_high; direction = "bullish"
+            else:
+                chosen = broken_low; direction = "bearish"
+        elif broken_high:
+            chosen = broken_high; direction = "bullish"
+        elif broken_low:
+            chosen = broken_low; direction = "bearish"
+
+        if not chosen:
+            continue
+
+        # BOS vs CHoCH: matches prior direction → BOS (continuation);
+        #               flips direction → CHoCH (reversal)
+        if direction == "bullish":
+            kind = "BOS" if last_dir == "up" else "CHoCH"
+            new_dir = "up"
+        else:
+            kind = "BOS" if last_dir == "down" else "CHoCH"
+            new_dir = "down"
+
+        events.append({
+            "date":          sub_dates[j].isoformat(),
+            "kind":          kind,
+            "direction":     direction,
+            "trigger_price": round(float(c), 2),
+            "level_broken":  round(float(chosen["price"]), 2),
+            "level_kind":    chosen["kind"],
+            # days_ago measured against the LAST bar's date — pure calendar diff
+            "days_ago":      (sub_dates[-1] - sub_dates[j]).days,
+        })
+        consumed.add(chosen["idx"])
+        last_dir = new_dir
+
+    # Most recent first, cap to max_events
+    events.sort(key=lambda e: e["date"], reverse=True)
+    return events[:max_events]
+
+
+# ════════════════════════════════════════════════════════════════════════
+# F9 — Price-binned volume profile (real HVN / LVN) (2026-05-26)
+# ════════════════════════════════════════════════════════════════════════
+# Previous OB confluence used the 1-bar formation volume vs 20d avg as an
+# HVN proxy. Real HVN = horizontal price bin where CUMULATIVE volume across
+# all bars touching that bin is highest. This gives the true high-volume
+# node (where institutional positioning lives) — the structural defense
+# level for OB / Fib confluence.
+#
+# Bins: 20 (default) across full 60d price range. Each bar's volume is
+# distributed proportionally across bins it spans (touched-area-weighted)
+# rather than just attributing to typical price — this is closer to true
+# auction-market profile mechanics.
+# ════════════════════════════════════════════════════════════════════════
+
+
+def _compute_volume_profile(bars: list[dict], n_bins: int = 20, lookback: int = 60) -> dict:
+    """Build a price-binned volume profile + value area (POC/VAH/VAL).
+
+    Returns:
+      {
+        "nodes": [{price_low, price_high, volume, kind: 'HVN'|'LVN'|'normal'}],
+        "poc":   float,    # price-of-control: midpoint of highest-volume bin
+        "vah":   float,    # value-area-high upper boundary
+        "val":   float,    # value-area-low  lower boundary
+      }
+    """
+    arr = _ohlcv_arrays(bars)
+    highs, lows, vols = arr["h"], arr["l"], arr["v"]
+    n = len(highs)
+    if n < 10:
+        return {"nodes": [], "poc": None, "vah": None, "val": None}
+
+    start = max(0, n - lookback)
+    sub_highs = highs[start:]
+    sub_lows = lows[start:]
+    sub_vols = vols[start:]
+
+    pmin = min(sub_lows)
+    pmax = max(sub_highs)
+    if pmax <= pmin or n_bins < 2:
+        return {"nodes": [], "poc": None, "vah": None, "val": None}
+
+    bin_width = (pmax - pmin) / n_bins
+    bin_vols = [0.0] * n_bins
+
+    # Distribute each bar's volume proportionally across bins it spans
+    for h, l, v in zip(sub_highs, sub_lows, sub_vols):
+        if v <= 0 or h <= l:
+            continue
+        bar_range = h - l
+        # Find bin index range this bar touches
+        lo_idx = max(0, int((l - pmin) / bin_width))
+        hi_idx = min(n_bins - 1, int((h - pmin) / bin_width))
+        if lo_idx == hi_idx:
+            bin_vols[lo_idx] += v
+            continue
+        # Distribute proportional to overlap of bin with [l, h]
+        for bi in range(lo_idx, hi_idx + 1):
+            bin_lo = pmin + bi * bin_width
+            bin_hi = bin_lo + bin_width
+            overlap = max(0, min(h, bin_hi) - max(l, bin_lo))
+            if overlap > 0:
+                bin_vols[bi] += v * (overlap / bar_range)
+
+    total_vol = sum(bin_vols)
+    if total_vol <= 0:
+        return {"nodes": [], "poc": None, "vah": None, "val": None}
+
+    # Identify HVN / LVN: top 25% volume → HVN, bottom 25% → LVN
+    sorted_vols = sorted(bin_vols, reverse=True)
+    hvn_thresh = sorted_vols[max(0, n_bins // 4 - 1)] if n_bins >= 4 else sorted_vols[0]
+    lvn_thresh = sorted_vols[max(0, (n_bins * 3) // 4)] if n_bins >= 4 else sorted_vols[-1]
+
+    nodes = []
+    for bi, vv in enumerate(bin_vols):
+        bin_lo = pmin + bi * bin_width
+        bin_hi = bin_lo + bin_width
+        if vv >= hvn_thresh and vv > 0:
+            kind = "HVN"
+        elif vv <= lvn_thresh:
+            kind = "LVN"
+        else:
+            kind = "normal"
+        nodes.append({
+            "price_low":  round(bin_lo, 2),
+            "price_high": round(bin_hi, 2),
+            "volume":     int(vv),
+            "kind":       kind,
+        })
+
+    # POC: midpoint of highest-volume bin
+    poc_idx = max(range(n_bins), key=lambda i: bin_vols[i])
+    poc = round(pmin + (poc_idx + 0.5) * bin_width, 2)
+
+    # Value area = bins around POC covering 70% of total volume.
+    # Expand outward from POC, picking the heavier of the two neighbors each step.
+    va_volume = bin_vols[poc_idx]
+    target = total_vol * 0.70
+    lo_b, hi_b = poc_idx, poc_idx
+    while va_volume < target and (lo_b > 0 or hi_b < n_bins - 1):
+        left_vol = bin_vols[lo_b - 1] if lo_b > 0 else -1
+        right_vol = bin_vols[hi_b + 1] if hi_b < n_bins - 1 else -1
+        if right_vol >= left_vol and hi_b < n_bins - 1:
+            hi_b += 1
+            va_volume += bin_vols[hi_b]
+        elif lo_b > 0:
+            lo_b -= 1
+            va_volume += bin_vols[lo_b]
+        else:
+            break
+    val = round(pmin + lo_b * bin_width, 2)
+    vah = round(pmin + (hi_b + 1) * bin_width, 2)
+
+    return {"nodes": nodes, "poc": poc, "vah": vah, "val": val}
+
+
+def _is_price_in_hvn(price: float, profile: dict) -> bool:
+    """True iff `price` falls inside an HVN bin of the profile."""
+    if not isinstance(profile, dict) or not profile.get("nodes"):
+        return False
+    for node in profile["nodes"]:
+        if node.get("kind") != "HVN":
+            continue
+        lo = node.get("price_low")
+        hi = node.get("price_high")
+        if lo is None or hi is None:
+            continue
+        if lo <= price <= hi:
+            return True
+    return False
+
+
 def merge_smc_levels_into_ticker(ticker_entry: dict) -> dict:
     """
     Compute SMC levels for a ticker entry (in-place merge).
@@ -909,22 +1190,38 @@ def merge_smc_levels_into_ticker(ticker_entry: dict) -> dict:
             "fractal_high": ticker_entry.get("fractal_high"),
             "fractal_low": ticker_entry.get("fractal_low"),
         }
+        # F9: build volume profile FIRST so OB confluence can reference it
         try:
-            obs = _detect_order_blocks(ohlcv, spot, vwap_for_score, fractal_for_score, ema21)
+            vprofile = _compute_volume_profile(ohlcv, n_bins=20, lookback=60)
+        except Exception:
+            vprofile = {"nodes": [], "poc": None, "vah": None, "val": None}
+        try:
+            obs = _detect_order_blocks(ohlcv, spot, vwap_for_score, fractal_for_score, ema21, vprofile)
             fvgs = _detect_fvgs(ohlcv, spot)
             liq = _detect_liquidity(ohlcv, spot)
             brk = _detect_breakers(ohlcv, spot, vwap_for_score, fractal_for_score, ema21)
         except Exception:
             obs, fvgs, liq, brk = [], [], [], []
+        # F8: structure events (BOS / CHoCH)
+        try:
+            struct_events = _detect_structure_events(ohlcv, lookback=60, max_events=5)
+        except Exception:
+            struct_events = []
         existing_smc = ticker_entry.get("smc_data") or {}
         if not isinstance(existing_smc, dict):
             existing_smc = {}
         existing_smc.update({
-            "order_blocks": obs,
-            "fvgs": fvgs,
-            "liquidity": liq,
-            "breakers": brk,
+            "order_blocks":     obs,
+            "fvgs":             fvgs,
+            "liquidity":        liq,
+            "breakers":         brk,
+            "structure_events": struct_events,   # F8 — BOS / CHoCH
+            "volume_profile":   vprofile,        # F9 — price-binned profile
         })
         ticker_entry["smc_data"] = existing_smc
+        # F9 — also mirror at root path so widgets reading `t.volume_profile.*`
+        # see the data without needing to drill into `smc_data`. Coordinated
+        # field-name convention per the task spec.
+        ticker_entry["volume_profile"] = vprofile
 
     return ticker_entry

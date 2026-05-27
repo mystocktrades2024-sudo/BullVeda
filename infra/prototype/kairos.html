@@ -10510,7 +10510,6 @@ body.on-detail-tab .qdchk-trigger-btn { display: inline-flex; }
 
   <div class="sb-section">
     <div class="sb-h">Workspaces</div>
-    <div class="sb-link" data-tab="confluence"><span class="ico">◈</span>Confluence Matrix<span class="ct" id="sb-confluence">0</span></div>
     <div class="sb-link" data-tab="elite"><span class="ico">⌬</span>Conviction Grid<span class="ct" id="sb-elite">0</span></div>
     <div class="sb-link" data-tab="optionsflow"><span class="ico">⚡</span>Options Flow<span class="ct" id="sb-uoa">0</span></div>
     <div class="sb-link" data-tab="earnings"><span class="ico">📅</span>Earnings<span class="ct" id="sb-earn">0</span></div>
@@ -39561,6 +39560,11 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
                                   'trade_plan.stop_inside_ob_suppressed', 'stop_inside_ob_suppressed'));
     const _smcSuppressReason = _g('canonical_trade_plan.risk.stop_inside_ob_suppress_reason',
                                    'trade_plan.stop_inside_ob_suppress_reason', 'stop_inside_ob_suppress_reason') || '';
+    // 2026-05-26 SHIP 4 — stop depth in OB (the sweep mechanic itself).
+    const _smcDepthPct = _num('canonical_trade_plan.risk.stop_depth_in_ob_pct',
+                               'trade_plan.stop_depth_in_ob_pct', 'stop_depth_in_ob_pct');
+    const _smcDepthZone = (_g('canonical_trade_plan.risk.stop_depth_zone',
+                               'trade_plan.stop_depth_zone', 'stop_depth_zone') || '').toUpperCase();
     // Show comparison tile when SMC stop differs from legacy by > 5%
     const _smcStopDiffPct = (_smcStopSuggested && stop) ? Math.abs(_smcStopSuggested - stop) / stop * 100 : 0;
     const _showSmcCompare = _smcStopSuggested && stop && _smcStopDiffPct > 5;
@@ -39843,6 +39847,14 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       '.ptv2 .pt-smc-sev.hi{background:rgba(248,113,113,0.20);color:var(--ptrd);border:1px solid rgba(248,113,113,0.55)}' +
       '.ptv2 .pt-smc-sev.md{background:rgba(245,158,11,0.18);color:var(--ptam);border:1px solid rgba(245,158,11,0.55)}' +
       '.ptv2 .pt-smc-sev.lo{background:rgba(255,255,255,0.04);color:var(--ptink3);border:1px solid var(--ptline);font-weight:600;letter-spacing:0.05em;text-transform:none}' +
+      // SHIP 4 — depth chip (compact, neutral by default; MIDDLE = red, edges = amber/green)
+      '.ptv2 .pt-smc-depth{display:inline-flex;align-items:center;gap:4px;font:700 9.5px var(--ptmono);letter-spacing:0.06em;padding:2px 7px;border-radius:2px;margin-left:6px;background:rgba(255,255,255,0.04);border:1px solid var(--ptline);color:var(--ptink2)}' +
+      '.ptv2 .pt-smc-depth.middle{background:rgba(248,113,113,0.16);border-color:rgba(248,113,113,0.50);color:var(--ptrd)}' +
+      '.ptv2 .pt-smc-depth.upper,.ptv2 .pt-smc-depth.lower{background:rgba(245,158,11,0.14);border-color:rgba(245,158,11,0.45);color:var(--ptam)}' +
+      '.ptv2 .pt-smc-depth.top,.ptv2 .pt-smc-depth.bottom{background:rgba(255,255,255,0.04);border-color:var(--ptline);color:var(--ptink3)}' +
+      // SHIP 4 — depth headline strip rendered between warn-h and warn-body
+      '.ptv2 .pt-smc-depth-headline{font:800 11.5px var(--ptmono);letter-spacing:0.07em;padding:6px 10px;margin:0 0 10px;border-radius:2px;background:rgba(248,113,113,0.10);border-left:3px solid var(--ptrd);color:var(--ptink1)}' +
+      '.ptv2 .pt-smc-warn.sev-med .pt-smc-depth-headline{background:rgba(245,158,11,0.10);border-left-color:var(--ptam)}' +
       // ── SHIP 2 · catalyst-sleeve suppressed note ──
       '.ptv2 .pt-smc-suppressed{background:rgba(255,255,255,0.025);border:1px solid var(--ptline);border-left:3px solid var(--ptink3);border-radius:2px;padding:7px 12px;margin-bottom:14px;font:600 11px var(--ptmono);color:var(--ptink2);letter-spacing:0.03em;line-height:1.5}' +
       '.ptv2 .pt-smc-suppressed b{color:var(--ptink)}.ptv2 .pt-smc-suppressed b.cp{color:var(--ptcp)}' +
@@ -40078,7 +40090,20 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
         : _sev === 'MED'
         ? '<span class="pt-smc-sev md">&#9888; MED SEVERITY</span>'
         : '<span class="pt-smc-sev lo">&middot; LOW SEVERITY &middot; informational</span>';
-      const _sevScoreTxt = (_smcSeverityScore != null) ? (' &middot; score ' + _smcSeverityScore + '/6') : '';
+      // SHIP 4 — depth chip + headline banner. Depth is the truth-teller —
+      // a 60% depth instantly reads as "right where they hunt."
+      const _sevScoreTxt = (_smcSeverityScore != null) ? (' &middot; score ' + _smcSeverityScore + '/9') : '';
+      const _depthPctTxt = (_smcDepthPct != null) ? _smcDepthPct.toFixed(0) + '%' : null;
+      const _depthChip = (_depthPctTxt && _smcDepthZone)
+        ? (' <span class="pt-smc-depth ' + _smcDepthZone.toLowerCase() + '">&#9678; ' + _depthPctTxt + ' depth &middot; ' + _smcDepthZone + '</span>')
+        : '';
+      // Optional headline strip rendered above the body for HIGH/MED only.
+      const _depthHeadline = (_sev !== 'LOW' && _depthPctTxt)
+        ? ('<div class="pt-smc-depth-headline">' + (_sev === 'HIGH'
+              ? '&#128721; STOP DEEP INSIDE OB ZONE &middot; stop sits at <b>' + _depthPctTxt + ' depth</b> (sweep-perfect)'
+              : '&#9888; STOP INSIDE OB &middot; <b>' + _depthPctTxt + ' depth</b>')
+           + '</div>')
+        : '';
       const _bannerBody = ''
         + '<div class="pt-smc-warn-body">'
           + 'Your stop at <b class="rd">$' + stop.toFixed(2) + '</b> sits <b>INSIDE</b> the active <b>' + _esc(_zoneLabel) + '</b>. '
@@ -40099,15 +40124,17 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
         + '<div class="pt-smc-warn-actions">' + _actionLine + '</div>';
       if (_sev === 'LOW') {
         // Collapsed by default — render as <details>
+        // (After SHIP 4 MED-floor, real traps never fall here — kept defensively.)
         smcWarnHTML = ''
           + '<details class="pt-smc-warn ' + _sevCls + '">'
-            + '<summary class="pt-smc-warn-h"><span class="sym">&#9888;</span> STOP PLACEMENT WARNING &middot; SMC TRAP DETECTED ' + _sevPill + _sevScoreTxt + ' <span class="pt-smc-chev">expand &#9662;</span></summary>'
+            + '<summary class="pt-smc-warn-h"><span class="sym">&#9888;</span> STOP PLACEMENT WARNING &middot; SMC TRAP DETECTED ' + _sevPill + _sevScoreTxt + _depthChip + ' <span class="pt-smc-chev">expand &#9662;</span></summary>'
             + _bannerBody
           + '</details>';
       } else {
         smcWarnHTML = ''
           + '<div class="pt-smc-warn ' + _sevCls + '">'
-            + '<div class="pt-smc-warn-h"><span class="sym">' + (_sev === 'HIGH' ? '&#9940;' : '&#9888;') + '</span> STOP PLACEMENT WARNING &middot; SMC TRAP DETECTED ' + _sevPill + _sevScoreTxt + '</div>'
+            + '<div class="pt-smc-warn-h"><span class="sym">' + (_sev === 'HIGH' ? '&#9940;' : '&#9888;') + '</span> STOP PLACEMENT WARNING &middot; SMC TRAP DETECTED ' + _sevPill + _sevScoreTxt + _depthChip + '</div>'
+            + _depthHeadline
             + _bannerBody
           + '</div>';
       }
@@ -58098,6 +58125,315 @@ const QuantMomentum = (function () {
       body.light .qmom7-crash.amber { background: linear-gradient(135deg, rgba(251,191,36,0.06), var(--bg-1) 55%); }
       body.light .qmom7-crash.green { background: linear-gradient(135deg, rgba(74,222,128,0.06), var(--bg-1) 55%); }
       body.light .qmom7-loop { background: linear-gradient(90deg, rgba(217,119,87,0.05), var(--bg-1) 60%); }
+
+      /* ════════════════════════════════════════════════════════════════
+         qmom8-* · 2026-05-26 · WORKFLOW-DRIVEN momentum terminal
+         Shell: sticky top + left rail + mode-tabbed main + bottom strip
+         Replaces the qmom6+qmom7 vertical stack of mosaics.
+         ════════════════════════════════════════════════════════════════ */
+      .qmom8-wrap { padding: 14px 18px; font: 14px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-variant-numeric: tabular-nums; color: var(--ink); background: var(--bg); }
+      body.light .qmom8-wrap { color: var(--ink-1); }
+
+      .qmom8-shell {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        grid-template-columns: 280px 1fr;
+        grid-template-areas: "top top" "rail main" "bottom bottom";
+        gap: 8px;
+        min-height: calc(100vh - 200px);
+      }
+      .qmom8-shell.no-rail {
+        grid-template-columns: 1fr;
+        grid-template-areas: "top" "main" "bottom";
+      }
+      .qmom8-shell .qmom8-top    { grid-area: top; }
+      .qmom8-shell .qmom8-rail   { grid-area: rail; }
+      .qmom8-shell .qmom8-main   { grid-area: main; min-width: 0; }
+      .qmom8-shell .qmom8-bottom { grid-area: bottom; }
+
+      .qmom8-top {
+        position: sticky; top: 0; z-index: 30;
+        display: grid; grid-template-columns: minmax(280px, 1.3fr) 1fr 1fr auto auto;
+        gap: 10px; align-items: center;
+        padding: 8px 14px;
+        background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px;
+        font-variant-numeric: tabular-nums;
+      }
+      .qmom8-top .t-cell { display:flex; flex-direction:column; gap:2px; min-width:0; overflow:hidden; }
+      .qmom8-top .t-cell.regime { border-left: 3px solid var(--copper); padding-left: 9px; }
+      .qmom8-top .t-cell.regime.ACTIVE     { border-left-color: var(--gn);  }
+      .qmom8-top .t-cell.regime.DEGRADED   { border-left-color: var(--amb); }
+      .qmom8-top .t-cell.regime.INVERTED   { border-left-color: var(--rd);  }
+      .qmom8-top .t-cell.regime.SUPPRESSED { border-left-color: var(--rd);  }
+      .qmom8-top .t-k { font: 700 8.5px var(--mono); color: var(--ink-3); letter-spacing: 0.18em; text-transform: uppercase; }
+      .qmom8-top .t-v { font: 800 12.5px var(--mono); color: var(--ink); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .qmom8-top .t-v.gn { color: var(--gn); } .qmom8-top .t-v.am { color: var(--amb); } .qmom8-top .t-v.rd { color: var(--rd); } .qmom8-top .t-v.cu { color: var(--copper); }
+      .qmom8-top .t-s { font: 600 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .qmom8-top .t-chip { display:inline-flex; align-items:center; gap:6px; padding: 4px 9px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 2px; font: 800 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+      .qmom8-top .t-chip.gn { color: var(--gn); border-color: var(--gn); }
+      .qmom8-top .t-chip.am { color: var(--amb); border-color: var(--amb); }
+      .qmom8-top .t-chip.rd { color: var(--rd); border-color: var(--rd); }
+      .qmom8-top .t-view-toggle { display:inline-flex; gap: 2px; }
+      .qmom8-top .t-vp { padding: 5px 12px; font: 800 10px var(--mono); background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line); border-radius: 2px; cursor: pointer; letter-spacing: 0.14em; }
+      .qmom8-top .t-vp.on { background: var(--copper); color: #fff; border-color: var(--copper); }
+      .qmom8-top .t-vp:hover:not(.on) { color: var(--ink); }
+      .qmom8-top .t-half-btn { padding: 5px 11px; font: 800 10px var(--mono); background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line); border-radius: 2px; cursor: pointer; letter-spacing: 0.10em; white-space: nowrap; }
+      .qmom8-top .t-half-btn.on { background: var(--rd); color: #fff; border-color: var(--rd); }
+      .qmom8-top .t-half-btn:hover { color: var(--ink); }
+      .qmom8-top .t-half-btn.on:hover { color: #fff; }
+
+      .qmom8-rail {
+        background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px;
+        overflow-y: auto; max-height: calc(100vh - 220px); position: sticky; top: 70px;
+      }
+      .qmom8-rail .r-h {
+        display:flex; justify-content:space-between; align-items:baseline;
+        padding: 9px 12px; background: var(--bg-2); border-bottom: 1px solid var(--line);
+        font: 800 10px var(--mono); letter-spacing: 0.16em; text-transform: uppercase;
+        position: sticky; top: 0; z-index: 5;
+      }
+      .qmom8-rail .r-h.accel { color: var(--gn); }
+      .qmom8-rail .r-h.decay { color: var(--rd); border-top: 1px solid var(--line); }
+      .qmom8-rail .r-h .ct { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.04em; }
+      .qmom8-rail .r-row {
+        display: grid; grid-template-columns: 60px 1fr 64px; align-items: center; gap: 6px;
+        padding: 7px 12px; cursor: pointer;
+        border-bottom: 1px solid var(--bg-3); border-left: 3px solid transparent;
+        transition: background 100ms, border-left-color 100ms, transform 100ms;
+      }
+      .qmom8-rail .r-row:hover { background: var(--bg-2); transform: translateX(1px); }
+      .qmom8-rail .r-row.on   { background: rgba(217,119,87,0.10); border-left-color: var(--copper); }
+      .qmom8-rail .r-row.dim  { opacity: 0.35; }
+      .qmom8-rail .r-row .r-tk  { font: 800 11.5px var(--mono); color: var(--ink); letter-spacing: 0.05em; }
+      .qmom8-rail .r-row .r-dl  { font: 700 10px var(--mono); text-align: right; }
+      .qmom8-rail .r-row .r-dl.gn { color: var(--gn); } .qmom8-rail .r-row .r-dl.rd { color: var(--rd); } .qmom8-rail .r-row .r-dl.am { color: var(--amb); }
+      .qmom8-rail .r-row .r-sp { display:flex; justify-content:flex-end; }
+      .qmom8-rail .r-empty { padding: 18px 12px; text-align:center; color: var(--ink-3); font: 600 10.5px var(--mono); letter-spacing: 0.04em; }
+
+      .qmom8-mtabs {
+        display:flex; gap: 4px; align-items:center;
+        padding: 6px 10px; background: var(--bg-1); border: 1px solid var(--line);
+        border-radius: 2px; margin-bottom: 8px; position: sticky; top: 70px; z-index: 25;
+      }
+      .qmom8-mtabs .m-lbl { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.18em; text-transform: uppercase; margin-right: 8px; }
+      .qmom8-mtabs .m-pill {
+        padding: 7px 14px; font: 800 10.5px var(--mono); letter-spacing: 0.12em;
+        background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line);
+        border-radius: 2px; cursor: pointer;
+      }
+      .qmom8-mtabs .m-pill .m-kbd { display:inline-block; margin-left:6px; padding: 1px 5px; font-size: 8.5px; background: rgba(255,255,255,0.10); color: inherit; border-radius: 2px; opacity:0.7; }
+      .qmom8-mtabs .m-pill:hover:not(.on) { color: var(--ink); }
+      .qmom8-mtabs .m-pill.on { background: var(--copper); color: #fff; border-color: var(--copper); }
+      .qmom8-mtabs .m-meta { margin-left:auto; font: 600 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.06em; }
+
+      .qmom8-rotmap-h { display:flex; justify-content:space-between; align-items:baseline; padding: 10px 14px 6px; }
+      .qmom8-rotmap-h .h-l { font: 800 11px var(--mono); color: var(--copper); letter-spacing: 0.16em; text-transform: uppercase; }
+      .qmom8-rotmap-h .h-r { font: 600 10px var(--mono); color: var(--ink-3); letter-spacing: 0.04em; }
+      .qmom8-rotmap { background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; margin-bottom: 10px; }
+      .qmom8-rotmap-svg { width: 100%; height: 280px; display:block; background:
+        repeating-linear-gradient(0deg, transparent 0 39px, rgba(255,255,255,0.012) 39px 40px),
+        repeating-linear-gradient(90deg, transparent 0 39px, rgba(255,255,255,0.012) 39px 40px),
+        var(--bg-2);
+      }
+      .qmom8-rotmap-svg .axis { stroke: var(--ink-3); stroke-width: 1; }
+      .qmom8-rotmap-svg .axisl { fill: var(--ink-3); font: 700 9px var(--mono); }
+      .qmom8-rotmap-svg .gridl { stroke: var(--line); stroke-width: 0.5; stroke-dasharray: 2,3; }
+      .qmom8-rotmap-svg .qlbl { fill: var(--ink-3); font: 800 9px var(--mono); letter-spacing: 0.12em; opacity: 0.55; }
+      .qmom8-rotmap-svg .bub { cursor: pointer; transition: stroke-width 120ms; }
+      .qmom8-rotmap-svg .bub.in  { fill: var(--gn); fill-opacity: 0.18; stroke: var(--gn); stroke-width: 1.4; }
+      .qmom8-rotmap-svg .bub.out { fill: var(--rd); fill-opacity: 0.18; stroke: var(--rd); stroke-width: 1.4; }
+      .qmom8-rotmap-svg .bub.flat{ fill: var(--amb); fill-opacity: 0.15; stroke: var(--amb); stroke-width: 1.2; }
+      .qmom8-rotmap-svg .bub:hover { stroke-width: 2.4; }
+      .qmom8-rotmap-svg .bub-lbl { fill: var(--ink); font: 800 9.5px var(--mono); pointer-events: none; letter-spacing: 0.04em; }
+      .qmom8-rotmap-bars { padding: 8px 12px 14px; display:flex; flex-direction:column; gap:5px; }
+      .qmom8-rotmap-bars .b-row { display:grid; grid-template-columns: 130px 1fr 70px; gap: 10px; align-items: center; cursor: pointer; padding: 4px 4px; border-radius: 2px; }
+      .qmom8-rotmap-bars .b-row:hover { background: var(--bg-2); }
+      .qmom8-rotmap-bars .b-nm { font: 700 11px var(--mono); color: var(--ink-1); letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .qmom8-rotmap-bars .b-track { position: relative; height: 14px; background: var(--bg-3); border-radius: 2px; overflow: hidden; }
+      .qmom8-rotmap-bars .b-fill  { position:absolute; top:0; bottom:0; }
+      .qmom8-rotmap-bars .b-fill.in  { left:50%; background: linear-gradient(90deg, var(--gn), transparent); }
+      .qmom8-rotmap-bars .b-fill.out { right: 50%; background: linear-gradient(270deg, var(--rd), transparent); }
+      .qmom8-rotmap-bars .b-zero  { position:absolute; left:50%; top:0; bottom:0; width:1px; background: var(--ink-3); opacity: 0.6; }
+      .qmom8-rotmap-bars .b-val   { font: 800 10.5px var(--mono); text-align:right; }
+      .qmom8-rotmap-bars .b-val.gn { color: var(--gn); } .qmom8-rotmap-bars .b-val.rd { color: var(--rd); } .qmom8-rotmap-bars .b-val.am { color: var(--amb); }
+
+      .qmom8-quad-legend {
+        display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; margin: 8px 0 0;
+        padding: 8px 14px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 2px;
+        font: 600 9.5px var(--mono); color: var(--ink-2); letter-spacing: 0.06em;
+      }
+      .qmom8-quad-legend .ql { padding: 2px 5px; border-left: 2px solid var(--ink-3); }
+      .qmom8-quad-legend .ql.ne { border-left-color: var(--gn);  color: var(--gn); }
+      .qmom8-quad-legend .ql.se { border-left-color: #60a5fa; color:#60a5fa; }
+      .qmom8-quad-legend .ql.nw { border-left-color: var(--amb); color: var(--amb); }
+      .qmom8-quad-legend .ql.sw { border-left-color: var(--rd);  color: var(--rd); }
+
+      .qmom8-dd-empty { padding: 60px 20px; text-align:center; background: var(--bg-1); border: 1px dashed var(--line); border-radius: 2px; color: var(--ink-3); font: 600 12px var(--mono); letter-spacing: 0.04em; }
+      .qmom8-dd-empty b { color: var(--copper); display:block; margin-bottom: 8px; font: 800 14px var(--mono); letter-spacing: 0.14em; }
+      .qmom8-dd-head {
+        display:grid; grid-template-columns: 1fr auto auto auto; gap: 18px; align-items: end;
+        padding: 16px 18px; background: linear-gradient(135deg, rgba(217,119,87,0.06), var(--bg-1) 70%);
+        border: 1px solid var(--line); border-left: 3px solid var(--copper); border-radius: 2px; margin-bottom: 10px;
+      }
+      .qmom8-dd-head .h-tk-wrap { display:flex; flex-direction:column; gap:4px; min-width:0; }
+      .qmom8-dd-head .h-tk { font: 800 32px var(--display, 'Georgia, serif'); color: var(--copper); letter-spacing: 0.02em; line-height: 1; }
+      .qmom8-dd-head .h-nm { font: 600 11px var(--mono); color: var(--ink-2); letter-spacing: 0.04em; }
+      .qmom8-dd-head .h-sec { font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; }
+      .qmom8-dd-head .h-cell { display:flex; flex-direction:column; gap:3px; padding-left: 16px; border-left: 1px solid var(--line); min-width: 100px; }
+      .qmom8-dd-head .h-k { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; }
+      .qmom8-dd-head .h-v { font: 800 22px var(--mono); color: var(--ink); }
+      .qmom8-dd-head .h-v.gn { color: var(--gn); } .qmom8-dd-head .h-v.rd { color: var(--rd); } .qmom8-dd-head .h-v.am { color: var(--amb); } .qmom8-dd-head .h-v.cu { color: var(--copper); }
+      .qmom8-dd-head .h-s { font: 600 9.5px var(--mono); color: var(--ink-3); }
+
+      .qmom8-dd-grid { display: grid; grid-template-columns: 1fr 320px; gap: 10px; }
+      .qmom8-dd-card { background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; }
+      .qmom8-dd-card .c-h { padding: 9px 14px; background: var(--bg-2); border-bottom: 1px solid var(--line); font: 800 10px var(--mono); color: var(--copper); letter-spacing: 0.16em; text-transform: uppercase; display:flex; justify-content:space-between; align-items:center; }
+      .qmom8-dd-card .c-h .c-meta { font: 600 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.04em; }
+      .qmom8-dd-card .c-body { padding: 12px 14px; }
+
+      .qmom8-mtf { display:grid; grid-template-columns: 60px repeat(5, 1fr) 90px; gap: 6px; align-items: stretch; }
+      .qmom8-mtf .mtf-k { font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.10em; text-align:center; text-transform: uppercase; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+      .qmom8-mtf .mtf-c { padding: 12px 4px; border: 1px solid var(--line); border-radius: 2px; text-align:center; font: 800 14px var(--mono); }
+      .qmom8-mtf .mtf-c.strong { background: var(--gn); color: #000; border-color: var(--gn); }
+      .qmom8-mtf .mtf-c.pos    { background: rgba(74,222,128,0.18); color: var(--gn); border-color: var(--gn); }
+      .qmom8-mtf .mtf-c.flat   { background: var(--bg-3); color: var(--ink-2); }
+      .qmom8-mtf .mtf-c.neg    { background: rgba(248,113,113,0.18); color: var(--rd); border-color: var(--rd); }
+      .qmom8-mtf .mtf-c.bad    { background: var(--rd); color: #fff; border-color: var(--rd); }
+      .qmom8-mtf .mtf-c.unk    { background: var(--bg-3); color: var(--ink-3); }
+      .qmom8-mtf .mtf-badge { display:flex; align-items:center; justify-content:center; font: 800 9px var(--mono); letter-spacing: 0.06em; text-align:center; padding: 2px 4px; border-radius: 2px; }
+      .qmom8-mtf .mtf-badge.conso { background: rgba(74,222,128,0.18); color: var(--gn); border: 1px solid var(--gn); }
+      .qmom8-mtf .mtf-badge.disag { background: rgba(248,113,113,0.18); color: var(--rd); border: 1px solid var(--rd); }
+      .qmom8-mtf .mtf-badge.aligned { background: rgba(217,119,87,0.18); color: var(--copper); border: 1px solid var(--copper); }
+      .qmom8-mtf .mtf-badge.mixed { background: var(--bg-3); color: var(--ink-3); }
+
+      .qmom8-vp-row { display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px; }
+      .qmom8-vp-tile { padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 2px; text-align:center; }
+      .qmom8-vp-tile .k { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; }
+      .qmom8-vp-tile .v { font: 800 20px var(--mono); color: var(--ink); margin-top: 4px; }
+      .qmom8-vp-tile .v.cu { color: var(--copper); } .qmom8-vp-tile .v.gn { color: var(--gn); } .qmom8-vp-tile .v.am { color: var(--amb); }
+      .qmom8-vp-tile .s { font: 600 9.5px var(--mono); color: var(--ink-3); margin-top: 3px; letter-spacing: 0.04em; }
+
+      .qmom8-peer .pb-row { display:grid; grid-template-columns: 110px 1fr 60px; gap: 10px; align-items:center; padding: 5px 0; }
+      .qmom8-peer .pb-lbl { font: 700 10px var(--mono); color: var(--ink-2); letter-spacing: 0.04em; }
+      .qmom8-peer .pb-lbl.cu { color: var(--copper); font-weight: 800; }
+      .qmom8-peer .pb-track { position: relative; height: 14px; background: var(--bg-3); border-radius: 2px; overflow: hidden; }
+      .qmom8-peer .pb-fill { position:absolute; left:0; top:0; bottom:0; background: linear-gradient(90deg, var(--copper), rgba(217,119,87,0.3)); }
+      .qmom8-peer .pb-fill.med { background: linear-gradient(90deg, var(--ink-3), rgba(120,120,120,0.3)); }
+      .qmom8-peer .pb-fill.top { background: linear-gradient(90deg, var(--gn), rgba(74,222,128,0.3)); }
+      .qmom8-peer .pb-val { font: 800 10.5px var(--mono); color: var(--ink); text-align:right; }
+
+      .qmom8-act-ladder { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 10px; }
+      .qmom8-act-ladder .a-tile { padding: 9px 12px; border: 1px solid var(--line); border-radius: 2px; text-align:center; background: var(--bg-2); }
+      .qmom8-act-ladder .a-tile.entry  { border-left: 3px solid var(--copper); }
+      .qmom8-act-ladder .a-tile.target { border-left: 3px solid var(--gn); }
+      .qmom8-act-ladder .a-tile.stop   { border-left: 3px solid var(--rd); }
+      .qmom8-act-ladder .a-k { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; }
+      .qmom8-act-ladder .a-v { font: 800 16px var(--mono); margin-top: 3px; color: var(--ink); }
+      .qmom8-act-ladder .a-s { font: 600 9px var(--mono); color: var(--ink-3); margin-top: 2px; }
+      .qmom8-act-btn {
+        display:block; width:100%; padding: 12px 16px; margin-top: 10px;
+        font: 800 12px var(--mono); letter-spacing: 0.18em; text-transform: uppercase;
+        background: var(--copper); color: #fff; border: 1px solid var(--copper); border-radius: 2px;
+        cursor: pointer; transition: filter 100ms;
+      }
+      .qmom8-act-btn:hover { filter: brightness(1.12); }
+      .qmom8-act-btn.disabled { background: var(--bg-3); color: var(--ink-3); border-color: var(--line); cursor: not-allowed; filter: none; }
+
+      .qmom8-dd-side .s-tile { padding: 9px 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 2px; margin-bottom: 6px; }
+      .qmom8-dd-side .s-tile .s-k { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; }
+      .qmom8-dd-side .s-tile .s-v { font: 800 14px var(--mono); color: var(--ink); margin-top: 3px; }
+      .qmom8-dd-side .s-tile .s-v.gn { color: var(--gn); } .qmom8-dd-side .s-tile .s-v.rd { color: var(--rd); } .qmom8-dd-side .s-tile .s-v.am { color: var(--amb); } .qmom8-dd-side .s-tile .s-v.cu { color: var(--copper); }
+      .qmom8-dd-side .s-tile .s-list { display:flex; flex-wrap:wrap; gap: 4px; margin-top: 5px; }
+      .qmom8-dd-side .s-chip { display:inline-block; padding: 2px 7px; font: 700 9.5px var(--mono); background: var(--bg-3); color: var(--ink-1); border: 1px solid var(--line); border-radius: 2px; letter-spacing: 0.04em; }
+      .qmom8-dd-side .s-chip.gn { color: var(--gn); border-color: var(--gn); }
+      .qmom8-dd-side .s-chip.rd { color: var(--rd); border-color: var(--rd); }
+
+      .qmom8-exits { background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; }
+      .qmom8-exits-h { padding: 10px 14px; background: var(--bg-2); border-bottom: 1px solid var(--line); display:flex; justify-content:space-between; align-items:center; font: 800 11px var(--mono); color: var(--copper); letter-spacing: 0.16em; text-transform: uppercase; }
+      .qmom8-exits-h .meta { font: 600 10px var(--mono); color: var(--ink-3); letter-spacing: 0.04em; }
+      .qmom8-exits table { width:100%; border-collapse: collapse; font: 600 11.5px var(--mono); }
+      .qmom8-exits th { padding: 8px 12px; background: var(--bg-2); text-align: left; font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.10em; text-transform: uppercase; border-bottom: 1px solid var(--line); }
+      .qmom8-exits th.r { text-align:right; }
+      .qmom8-exits td { padding: 9px 12px; border-bottom: 1px solid var(--line); color: var(--ink-1); cursor: pointer; }
+      .qmom8-exits td.r { text-align:right; }
+      .qmom8-exits tr:hover td { background: var(--bg-3); color: var(--copper); }
+      .qmom8-exits .e-tk { font-weight: 800; color: var(--ink); letter-spacing: 0.04em; }
+      .qmom8-exits .e-sev { display:inline-block; padding: 2px 9px; font: 800 9.5px var(--mono); letter-spacing: 0.10em; border-radius: 2px; }
+      .qmom8-exits .e-sev.HIGH { background: var(--rd); color: #fff; }
+      .qmom8-exits .e-sev.MED  { background: rgba(251,191,36,0.18); color: var(--amb); border: 1px solid var(--amb); }
+      .qmom8-exits .e-sev.LOW  { background: rgba(96,165,250,0.18); color: #60a5fa; border: 1px solid #60a5fa; }
+      .qmom8-exits .e-act { font: 700 10px var(--mono); color: var(--ink-2); letter-spacing: 0.04em; }
+      .qmom8-exits .e-empty { padding: 60px 20px; text-align:center; color: var(--ink-3); font: 600 12px var(--mono); }
+
+      .qmom8-bottom {
+        position: sticky; bottom: 0; z-index: 20;
+        display:grid; grid-template-columns: 1fr auto auto; gap: 16px; align-items:center;
+        padding: 8px 14px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px;
+        font: 700 10.5px var(--mono); color: var(--ink-2); letter-spacing: 0.04em;
+      }
+      .qmom8-bottom .b-loop { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .qmom8-bottom .b-loop b { color: var(--ink); }
+      .qmom8-bottom .b-loop .lp-good { color: var(--gn); font-weight:800; }
+      .qmom8-bottom .b-loop .lp-bad  { color: var(--rd); font-weight:800; }
+      .qmom8-bottom .b-loop .lp-neu  { color: var(--ink-3); font-weight:800; }
+      .qmom8-bottom .b-meta { font: 700 10px var(--mono); color: var(--ink-3); letter-spacing: 0.06em; white-space: nowrap; }
+      .qmom8-bottom .b-meta b { color: var(--ink); }
+      .qmom8-bottom .b-meta .gn { color: var(--gn); } .qmom8-bottom .b-meta .rd { color: var(--rd); } .qmom8-bottom .b-meta .am { color: var(--amb); }
+
+      .qmom8-hverdict {
+        position: sticky; top: 0; z-index: 30;
+        display:grid; grid-template-columns: auto 1fr auto auto; gap: 16px; align-items: center;
+        padding: 9px 14px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px;
+      }
+      .qmom8-hverdict.gn { border-left: 3px solid var(--gn); }
+      .qmom8-hverdict.am { border-left: 3px solid var(--amb); }
+      .qmom8-hverdict.rd { border-left: 3px solid var(--rd); }
+      .qmom8-hverdict .hv-big { font: 800 13px var(--mono); color: var(--ink); letter-spacing: 0.06em; }
+      .qmom8-hverdict .hv-big .pct { font-size: 18px; }
+      .qmom8-hverdict .hv-big .pct.gn { color: var(--gn); } .qmom8-hverdict .hv-big .pct.am { color: var(--amb); } .qmom8-hverdict .hv-big .pct.rd { color: var(--rd); }
+      .qmom8-hverdict .hv-mid { font: 600 10.5px var(--mono); color: var(--ink-2); letter-spacing: 0.04em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .qmom8-hverdict .hv-mid b { color: var(--ink); }
+      .qmom8-hverdict .hv-tag { padding: 4px 10px; font: 800 10px var(--mono); letter-spacing: 0.14em; border-radius: 2px; }
+      .qmom8-hverdict .hv-tag.gn { background: var(--gn); color: #000; }
+      .qmom8-hverdict .hv-tag.am { background: rgba(251,191,36,0.18); color: var(--amb); border: 1px solid var(--amb); }
+      .qmom8-hverdict .hv-tag.rd { background: var(--rd); color: #fff; }
+
+      .qmom8-hcal-grid { display:grid; grid-template-columns: 1.6fr 1fr; gap: 10px; }
+      .qmom8-hcal-grid > * { min-width: 0; }
+      .qmom8-hcal-rel { background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
+      .qmom8-hcal-rel .rh { font: 800 11px var(--mono); color: var(--copper); letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 4px; }
+      .qmom8-hcal-rel .rh-sub { font: 600 10px var(--mono); color: var(--ink-3); margin-bottom: 12px; letter-spacing: 0.04em; }
+      .qmom8-hcal-rel svg { width:100%; height: 360px; display:block; }
+      .qmom8-hcal-rel svg .ax { stroke: var(--ink-3); stroke-width: 1; }
+      .qmom8-hcal-rel svg .gridl { stroke: var(--line); stroke-width: 0.5; stroke-dasharray: 2,3; }
+      .qmom8-hcal-rel svg .diag { stroke: var(--copper); stroke-dasharray: 4,3; stroke-width: 1.4; opacity: 0.65; }
+      .qmom8-hcal-rel svg .dot { fill: var(--copper); stroke: var(--bg-1); stroke-width: 1; }
+      .qmom8-hcal-rel svg .lbl { fill: var(--ink-3); font: 700 9px var(--mono); }
+      .qmom8-hcal-rel .rfoot { margin-top: 10px; font: 600 10px var(--mono); color: var(--ink-2); letter-spacing: 0.04em; padding-top: 8px; border-top: 1px dashed var(--line); }
+      .qmom8-hcal-rel .rfoot b { color: var(--ink); }
+      .qmom8-hcal-side { display:flex; flex-direction:column; gap: 10px; }
+
+      .qmom8-pnl-stats { display:grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+      .qmom8-pnl-stat { padding: 14px 16px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; border-left: 3px solid var(--copper); }
+      .qmom8-pnl-stat.gn { border-left-color: var(--gn); }
+      .qmom8-pnl-stat.rd { border-left-color: var(--rd); }
+      .qmom8-pnl-stat.am { border-left-color: var(--amb); }
+      .qmom8-pnl-stat .k { font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; }
+      .qmom8-pnl-stat .v { font: 800 26px var(--mono); margin-top: 5px; color: var(--ink); }
+      .qmom8-pnl-stat .v.gn { color: var(--gn); } .qmom8-pnl-stat .v.rd { color: var(--rd); } .qmom8-pnl-stat .v.am { color: var(--amb); }
+      .qmom8-pnl-stat .s { font: 600 10px var(--mono); color: var(--ink-3); margin-top: 3px; letter-spacing: 0.04em; }
+
+      .qmom8-dd-section-list { display:flex; flex-direction:column; gap: 10px; }
+
+      @media (max-width: 980px) {
+        .qmom8-shell { grid-template-columns: 1fr; grid-template-areas: "top" "rail" "main" "bottom"; }
+        .qmom8-rail { max-height: 220px; position: relative; top: 0; }
+        .qmom8-dd-grid { grid-template-columns: 1fr; }
+        .qmom8-hcal-grid { grid-template-columns: 1fr; }
+        .qmom8-top { grid-template-columns: 1fr 1fr; }
+      }
+
+      body.light .qmom8-rail .r-row.on { background: rgba(217,119,87,0.08); }
     `;
     document.head.appendChild(s);
   }
@@ -60143,66 +60479,983 @@ const QuantMomentum = (function () {
   }
 
 
-  function _repaint() {
-    if (!_hostPanel) return;
+  // ════════════════════════════════════════════════════════════════════
+  //  qmom8-* · 2026-05-26 · WORKFLOW-DRIVEN momentum terminal redesign
+  //  Modes: SCAN (rotation) · DRILL (deep-dive) · ACT (entry ladder in dd)
+  //         · REVIEW (history)
+  //  Persistent risk gates: regime + crash + crowding + half-size
+  //  ════════════════════════════════════════════════════════════════════
+  let _qmom8Mode = 'rotation';   // 'rotation' | 'deepdive' | 'exits'
+  let _qmom8HistMode = 'calibration'; // 'calibration' | 'pnl' | 'attribution'
+  let _qmom8SelectedTk = null;
+  let _qmom8KbBound = false;
+  try {
+    const m = window.localStorage.getItem('qmom8Mode');
+    if (m === 'rotation' || m === 'deepdive' || m === 'exits') _qmom8Mode = m;
+    const hm = window.localStorage.getItem('qmom8HistMode');
+    if (hm === 'calibration' || hm === 'pnl' || hm === 'attribution') _qmom8HistMode = hm;
+    const sel = window.localStorage.getItem('qmom8SelectedTk');
+    if (sel) _qmom8SelectedTk = sel;
+  } catch (e) {}
 
-    // HISTORY sub-view branch — renders independently of the live scan data.
-    if (_activeView === 'history') {
-      _hostPanel.innerHTML = _renderHistory();
+  function setMode(m) {
+    if (m !== 'rotation' && m !== 'deepdive' && m !== 'exits') return;
+    _qmom8Mode = m;
+    try { window.localStorage.setItem('qmom8Mode', m); } catch (e) {}
+    _repaint();
+  }
+  function setHistMode(m) {
+    if (m !== 'calibration' && m !== 'pnl' && m !== 'attribution') return;
+    _qmom8HistMode = m;
+    try { window.localStorage.setItem('qmom8HistMode', m); } catch (e) {}
+    _repaint();
+  }
+  function setSelected(tk) {
+    if (!tk) return;
+    _qmom8SelectedTk = String(tk).toUpperCase();
+    _qmom8Mode = 'deepdive';
+    try {
+      window.localStorage.setItem('qmom8SelectedTk', _qmom8SelectedTk);
+      window.localStorage.setItem('qmom8Mode', 'deepdive');
+    } catch (e) {}
+    _repaint();
+  }
+
+  // Compute accelerator + decayer arrays (used by rail + deep-dive cycling)
+  function _qmom8AccelDecay(momRows) {
+    const withDelta = (momRows || [])
+      .filter(r => r.sharpe_126d != null && r.sharpe_1y != null && !isNaN(r.sharpe_126d) && !isNaN(r.sharpe_1y))
+      .map(r => Object.assign({}, r, { _delta: r.sharpe_126d - r.sharpe_1y }));
+    const sorted = withDelta.slice().sort((a, b) => b._delta - a._delta);
+    return {
+      accel: sorted.slice(0, 10),
+      decay: sorted.slice().reverse().slice(0, 10),
+      all: sorted,
+    };
+  }
+
+  function _qmom8KbHandler(e) {
+    // Only respond when momentum panel is visible
+    if (!_hostPanel || !document.body.contains(_hostPanel)) return;
+    if (_activeView !== 'live') {
+      // History keys: 1/2/3 switch hist mode
+      if (e.key === '1') setHistMode('calibration');
+      else if (e.key === '2') setHistMode('pnl');
+      else if (e.key === '3') setHistMode('attribution');
       return;
     }
-
-    const all = _buildRows();
-    const momRows = all.filter(r => r._is_momentum);
-    if (all.length === 0) {
-      _hostPanel.innerHTML = `
-        <div class="qmom-wrap">
-          ${_viewToggle()}
-          <div class="qmom-bc">Kairos · Workspaces · <b>Momentum</b></div>
-          <div class="qmom-empty">
-            <div style="font:800 14px var(--mono);color:var(--copper);margin-bottom:10px">No scan data loaded yet</div>
-            <div>Run the daily scan or wait for the next 6/7/11/13:30/15:00 PT scheduled scan.</div>
-          </div>
-        </div>`;
-      return;
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.key === '1') setMode('rotation');
+    else if (e.key === '2') setMode('deepdive');
+    else if (e.key === '3') setMode('exits');
+    else if ((e.key === 'j' || e.key === 'k') && _qmom8Mode === 'deepdive') {
+      const all = _buildRows().filter(r => r._is_momentum);
+      const ad = _qmom8AccelDecay(all);
+      const list = ad.accel.length ? ad.accel : ad.all;
+      if (!list.length) return;
+      const idx = list.findIndex(r => r.ticker === _qmom8SelectedTk);
+      const nextIdx = e.key === 'j' ? Math.min(list.length - 1, idx + 1) : Math.max(0, idx - 1);
+      if (list[nextIdx]) setSelected(list[nextIdx].ticker);
     }
-    const filtered = _applyFilters(momRows).sort((a, b) => (b.sharpe_126d || 0) - (a.sharpe_126d || 0));
-    const gate = _regimeGate(_data);
-    // Suppressed/empty-momentum fallback message
-    const suppressedNote = (momRows.length === 0)
-      ? `<div class="qmom-empty" style="padding:30px 20px;border:1px dashed var(--line);border-radius:2px;margin:14px 0;">
-          <div style="font:800 14px var(--mono);color:var(--copper);margin-bottom:8px">No momentum candidates today</div>
-          <div style="font:600 11.5px var(--mono);color:var(--ink-2);letter-spacing:0.04em">
-            The momentum factor is <b>${gate.state}</b> in this regime — see the banner above. The full mosaic (factor health, scatter, leaders, sector heat) needs at least 2 candidates clearing the curated filter (RS≥60+EMA21 OR Sharpe≥1.0+EMA50). Cross-reference Signal Scanner for non-momentum sleeves (defensive / mean-rev / catalyst).
-          </div>
-        </div>`
-      : '';
-    _hostPanel.innerHTML = `
-      <div class="qmom-wrap">
-        ${_viewToggle()}
-        <div class="qmom-bc">Kairos · Workspaces · <b>Momentum</b> · <span class="cu">momentum-quant terminal — factor health · accelerator/decay scatter · leaders / decayers · sector heat · Z-score context</span></div>
-        <div class="qmom-regime ${gate.state}">
-          <div class="qmom-rgm-h"><h2>${gate.label}</h2><span class="meta">${gate.meta}</span></div>
-          <div class="qmom-rgm-body">${gate.body}</div>
+  }
+
+  // ── TOP STRIP · sticky risk gates ────────────────────────────────────
+  function _qmom8RenderTop(gate, momRows, view) {
+    // Crash-risk: lift inputs from _qmom7CrashRisk so we share the math
+    const reg = (_data && _data.regime) || {};
+    const vixObj = reg.vix && typeof reg.vix === 'object' ? +reg.vix.vix_current : +reg.vix;
+    const vix = isNaN(vixObj) ? null : vixObj;
+    const breadth = isNaN(+reg.breadth_pct_50d) ? null : +reg.breadth_pct_50d;
+    let spy1m = null;
+    try {
+      const arr = window._kairosTickersArr || [];
+      const spy = arr.find(r => r && (r.ticker === 'SPY' || r.symbol === 'SPY'));
+      if (spy) spy1m = +spy.perf_1m || +spy.perf_month || +spy.month_pct;
+      if ((spy1m == null || isNaN(spy1m)) && reg.spy_1m != null) spy1m = +reg.spy_1m;
+    } catch (e) {}
+    if (spy1m == null || isNaN(spy1m)) spy1m = 0;
+    let dispersion = 1.0;
+    try {
+      const sharps = (momRows || []).map(r => +r.sharpe_126d).filter(v => !isNaN(v));
+      if (sharps.length >= 5) {
+        const m = sharps.reduce((a,b)=>a+b,0) / sharps.length;
+        dispersion = Math.sqrt(sharps.reduce((a,b)=>a + (b-m)*(b-m), 0) / sharps.length);
+      }
+    } catch (e) {}
+    const vNum = vix == null ? 16 : vix;
+    const bNum = breadth == null ? 55 : breadth;
+    const prob = Math.max(0, Math.min(100,
+      Math.max(0, -spy1m) * 8 +
+      Math.max(0, 25 - vNum) * 2 +
+      Math.max(0, 50 - bNum) * 0.5 +
+      Math.max(0, 1 - dispersion) * 10
+    ));
+    const crashCls = prob > 30 ? 'rd' : prob >= 15 ? 'am' : 'gn';
+    const crashLbl = prob > 30 ? 'HIGH' : prob >= 15 ? 'ELEVATED' : 'LOW';
+
+    // Crowding rho heuristic — mirrors _qmom7CrowdingPanel summary
+    let rhoBar = null, rhoCls = 'am', rhoLbl = 'MIXED';
+    try {
+      const withDelta = (momRows || [])
+        .filter(r => r.sharpe_126d != null && r.sharpe_1y != null)
+        .map(r => Object.assign({}, r, { _delta: r.sharpe_126d - r.sharpe_1y }))
+        .sort((a,b) => b._delta - a._delta)
+        .slice(0, 10);
+      if (withDelta.length >= 2) {
+        let sum = 0, n = 0;
+        for (let i = 0; i < withDelta.length; i++) {
+          for (let j = i+1; j < withDelta.length; j++) {
+            sum += _qmom7SectorRho(withDelta[i].sector, withDelta[j].sector);
+            n++;
+          }
+        }
+        const avgRho = n ? sum / n : 0;
+        rhoBar = avgRho;
+        if (avgRho > 0.5) { rhoCls = 'rd'; rhoLbl = 'CROWDED'; }
+        else if (avgRho < 0.35) { rhoCls = 'gn'; rhoLbl = 'DIVERSIFIED'; }
+      }
+    } catch (e) {}
+
+    const stateMap = { ACTIVE:'gn', DEGRADED:'am', INVERTED:'rd', SUPPRESSED:'rd' };
+    const regimeColor = stateMap[gate.state] || 'cu';
+
+    return `
+      <div class="qmom8-top">
+        <div class="t-cell regime ${_esc(gate.state)}">
+          <div class="t-k">Regime</div>
+          <div class="t-v ${regimeColor}">${_esc(gate.label.replace(/^MOMENTUM FACTOR · /, ''))}</div>
+          <div class="t-s">${_esc(gate.meta)}</div>
         </div>
-        ${_qmom7CloseLoopTicker()}
-        ${_renderWarnBanner(momRows)}
-        ${_qmom7CrashRisk(_data)}
-        ${_qmom6RenderFactorHealth(momRows, all, gate)}
-        ${suppressedNote}
-        ${momRows.length >= 2 ? _qmom6RenderScatter(momRows) : ''}
-        ${momRows.length >= 2 ? _qmom6RenderLeaders(momRows) : ''}
-        ${momRows.length >= 2 ? _qmom7CrowdingPanel(momRows) : ''}
-        ${momRows.length >= 2 ? _qmom6RenderSectorHeat(momRows) : ''}
-        ${_renderEqCalibration()}
-        ${_renderFilters(momRows)}
-        ${_renderTable(filtered, momRows)}
-        ${momRows.length >= 2 ? _qmom7MultiTfPanel(filtered) : ''}
-        ${momRows.length >= 2 ? _qmom7ExitPanel(filtered) : ''}
-        <div class="qmom-note">
-          <b>What this tab is:</b> a momentum-quant terminal — factor health up top (state · accel/decay bipolar bar · universe Sharpe with trend · dispersion σ), accelerator/decay scatter as the centerpiece (above the y=x diagonal = accelerating; quadrants identify PRIMED / EARLY MOMENTUM / DECAYING LEADERS / TRASH), top-10 accelerators vs top-10 decayers side-by-side, sector heatmap, then the full candidate table with universe-wide <b>Z(Sharpe-126d)</b> and decile rank for distributional context. <i>No score, verdict, R:R columns by design</i> — those live in <b>Signal Scanner</b>. Switch to <b>HISTORY</b> (top toggle) for realized outcomes vs SPY.
+        <div class="t-cell">
+          <div class="t-k">Crash Risk</div>
+          <div class="t-v ${crashCls}">${prob.toFixed(0)}% · ${crashLbl}</div>
+          <div class="t-s">SPY 1m ${spy1m >= 0 ? '+' : ''}${spy1m.toFixed(1)}% · VIX ${vix == null ? '—' : vix.toFixed(1)} · breadth ${breadth == null ? '—' : breadth.toFixed(0)+'%'}</div>
+        </div>
+        <div class="t-cell">
+          <div class="t-k">Crowding ρ̄</div>
+          <div class="t-v ${rhoCls}">${rhoBar == null ? '—' : rhoBar.toFixed(2)} · ${rhoLbl}</div>
+          <div class="t-s">${_activeSector === 'all' ? 'top-10 accelerators · sector-heuristic ρ' : `filter: <b>${_esc(_activeSector)}</b> · <a onclick="QuantMomentum.setSector('all')" style="cursor:pointer;color:var(--copper);text-decoration:underline">clear</a>`}</div>
+        </div>
+        <div class="t-view-toggle">
+          <button class="t-vp ${view==='live'?'on':''}" onclick="QuantMomentum.setView('live')">LIVE</button>
+          <button class="t-vp ${view==='history'?'on':''}" onclick="QuantMomentum.setView('history')">HISTORY</button>
+        </div>
+        <button class="t-half-btn ${_qmom7HalfSize?'on':''}" onclick="QuantMomentum.toggleHalfSize()" title="Halves vol-targeted shares — applies on Deep Dive sizing">${_qmom7HalfSize ? 'HALF-SIZE · ON' : 'HALF-SIZE'}</button>
+      </div>
+    `;
+  }
+
+  // ── LEFT RAIL · accelerator/decayer watchlist ───────────────────────
+  function _qmom8RenderRail(momRows) {
+    const ad = _qmom8AccelDecay(momRows);
+    const maxAbs = Math.max(0.01, Math.max.apply(null, ad.all.map(r => Math.abs(r._delta || 0))));
+    const secFilter = _activeSector !== 'all' ? _activeSector : null;
+    const renderRow = (r, side) => {
+      const spark = _qmom6PriceSpark7(r._raw);
+      const sparkHtml = spark ? _qmom6Spark(spark, 64, 18, side === 'accel' ? 'gn' : 'rd') : '<span style="color:var(--ink-3);font-size:9px">—</span>';
+      const cls = side === 'accel' ? 'gn' : 'rd';
+      const selectedCls = r.ticker === _qmom8SelectedTk ? ' on' : '';
+      const dimCls = secFilter && r.sector !== secFilter ? ' dim' : '';
+      const tkEsc = _esc(r.ticker).replace(/'/g, "\\'");
+      return `<div class="r-row${selectedCls}${dimCls}" onclick="QuantMomentum.setSelected('${tkEsc}')">
+        <span class="r-tk">${_esc(r.ticker)}</span>
+        <span class="r-dl ${cls}">${(r._delta >= 0 ? '+' : '')}${r._delta.toFixed(2)}</span>
+        <span class="r-sp">${sparkHtml}</span>
+      </div>`;
+    };
+    const accelRows = ad.accel.length
+      ? ad.accel.map(r => renderRow(r, 'accel')).join('')
+      : '<div class="r-empty">No accelerators</div>';
+    const decayRows = ad.decay.length
+      ? ad.decay.map(r => renderRow(r, 'decay')).join('')
+      : '<div class="r-empty">No decayers</div>';
+    return `<div class="qmom8-rail">
+      <div class="r-h accel"><span>★ Accelerators</span><span class="ct">${ad.accel.length}</span></div>
+      ${accelRows}
+      <div class="r-h decay"><span>↓ Decayers</span><span class="ct">${ad.decay.length}</span></div>
+      ${decayRows}
+    </div>`;
+  }
+
+  // ── BOTTOM STRIP · close-the-loop ticker + model accuracy ───────────
+  function _qmom8RenderBottom() {
+    // Inline close-the-loop (mirrors _qmom7CloseLoopTicker logic but strip-styled)
+    let line = '';
+    const d = _histData;
+    if (d && Array.isArray(d.snapshots) && d.snapshots.length > 0) {
+      const resolved = d.snapshots.filter(s => {
+        const r = s.realized || {};
+        return r.status !== 'PENDING' && (r.pct_1d != null || r.pct_5d != null || r.alpha_pp != null);
+      });
+      resolved.sort((a, b) => {
+        const da = (a.date || ''), db = (b.date || '');
+        if (db !== da) return db.localeCompare(da);
+        return (a.rank || 99) - (b.rank || 99);
+      });
+      const top = resolved.find(s => (s.rank || 1) === 1) || resolved[0];
+      if (top) {
+        const r = top.realized || {};
+        const ret = r.pct_1d != null ? r.pct_1d : (r.pct_5d != null ? r.pct_5d : null);
+        const alpha = r.alpha_pp;
+        const horizon = r.pct_1d != null ? '1d' : '5d';
+        const cls = ret == null ? 'lp-neu' : ret > 0 ? 'lp-good' : 'lp-bad';
+        const mark = ret == null ? '—' : ret > 0 ? '✓' : '✗';
+        const edge = ret == null ? '' :
+          (alpha != null
+            ? (alpha > 0 ? '· edge confirmed' : '· SPY beat us')
+            : (ret > 0 ? '' : '· drawdown'));
+        line = `${_esc(top.date || 'recent')} top accelerator <b>${_esc(top.ticker || '—')}</b> → <span class="${cls}">${ret != null ? (ret >= 0 ? '+' : '') + ret.toFixed(2) + '%' : '—'}</span> in ${horizon} <span class="${cls}">${mark}</span> ${edge}`;
+      }
+    }
+    if (!line) {
+      line = `awaiting first resolution · open <b>HISTORY</b> to seed cache`;
+    }
+    // Model accuracy from cal trio
+    let acc = '—', accCls = 'am', n = 0, ic30 = null;
+    try {
+      const cal = d && d.calibration;
+      if (cal) {
+        n = cal.with_5d_data || 0;
+        if (cal.win_rate != null) {
+          const pct = Math.round(cal.win_rate * 100);
+          acc = pct + '%';
+          accCls = pct >= 55 ? 'gn' : pct >= 45 ? 'am' : 'rd';
+        }
+      }
+    } catch (e) {}
+    return `<div class="qmom8-bottom">
+      <div class="b-loop">${line}</div>
+      <div class="b-meta">model acc <b class="${accCls}">${acc}</b> · n=<b>${n}</b></div>
+      <div class="b-meta">click rail rows or ROTATION bubbles → DEEP DIVE</div>
+    </div>`;
+  }
+
+  // ── MAIN PANE · mode-tab bar (LIVE) ─────────────────────────────────
+  function _qmom8RenderModeTabs() {
+    const selBadge = _qmom8SelectedTk ? `· selected <b style="color:var(--copper)">${_esc(_qmom8SelectedTk)}</b>` : '';
+    return `<div class="qmom8-mtabs">
+      <span class="m-lbl">MODE</span>
+      <button class="m-pill ${_qmom8Mode==='rotation'?'on':''}" onclick="QuantMomentum.setMode('rotation')">SCAN · ROTATION<span class="m-kbd">1</span></button>
+      <button class="m-pill ${_qmom8Mode==='deepdive'?'on':''}" onclick="QuantMomentum.setMode('deepdive')">DRILL · DEEP DIVE<span class="m-kbd">2</span></button>
+      <button class="m-pill ${_qmom8Mode==='exits'?'on':''}" onclick="QuantMomentum.setMode('exits')">EXITS<span class="m-kbd">3</span></button>
+      <span class="m-meta">J/K cycle rail ${selBadge}</span>
+    </div>`;
+  }
+
+  // ── ROTATION mode · sector rotation map + accel/decay scatter ───────
+  function _qmom8RenderRotation(momRows) {
+    // Build sector aggregates: x = Δ Sharpe vs last week, y = today's avg Sharpe, r = candidate count
+    const bySec = {};
+    momRows.forEach(r => {
+      const s = r.sector || 'Unknown';
+      if (!bySec[s]) bySec[s] = { n: 0, sumSharp: 0 };
+      bySec[s].n++;
+      bySec[s].sumSharp += (+r.sharpe_126d || 0);
+    });
+    const cells = Object.entries(bySec)
+      .filter(([,v]) => v.n >= 1)
+      .map(([sec, v]) => {
+        const delta = _qmom7SectorDelta(sec);  // null if history missing
+        return { sec, n: v.n, avgSharp: v.sumSharp / v.n, delta };
+      })
+      .sort((a,b) => (b.delta == null ? -99 : b.delta) - (a.delta == null ? -99 : a.delta));
+
+    const hasHistory = cells.some(c => c.delta != null);
+    let mapHtml = '';
+    if (hasHistory) {
+      // 2D scatter
+      const W = 1080, H = 280, padL = 50, padR = 24, padT = 18, padB = 32;
+      const valid = cells.filter(c => c.delta != null);
+      const deltas = valid.map(c => c.delta);
+      const sharps = valid.map(c => c.avgSharp);
+      const xMin = Math.min(-0.3, Math.min.apply(null, deltas)), xMax = Math.max(0.3, Math.max.apply(null, deltas));
+      const yMin = Math.min(-0.3, Math.min.apply(null, sharps)), yMax = Math.max(1.5, Math.max.apply(null, sharps));
+      const xRange = (xMax - xMin) || 1, yRange = (yMax - yMin) || 1;
+      const px = v => padL + ((v - xMin) / xRange) * (W - padL - padR);
+      const py = v => padT + (H - padT - padB) - ((v - yMin) / yRange) * (H - padT - padB);
+      const x0 = px(0), y0 = py(0);
+      const maxN = Math.max.apply(null, valid.map(c => c.n));
+      const bubR = c => Math.max(8, Math.min(28, 8 + Math.sqrt(c.n / maxN) * 18));
+      const bubbles = valid.map(c => {
+        const cx = px(c.delta), cy = py(c.avgSharp), rr = bubR(c);
+        const cls = c.delta > 0.05 ? 'in' : c.delta < -0.05 ? 'out' : 'flat';
+        const escSec = _esc(c.sec).replace(/'/g, "\\'");
+        return `<g>
+          <circle class="bub ${cls}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${rr.toFixed(1)}"
+            onclick="QuantMomentum.setSector('${escSec}')"><title>${_esc(c.sec)} · n=${c.n} · Δ ${c.delta.toFixed(2)} · Sharpe ${c.avgSharp.toFixed(2)}</title></circle>
+          <text class="bub-lbl" x="${cx.toFixed(1)}" y="${(cy + 3).toFixed(1)}" text-anchor="middle">${_esc(c.sec.substring(0, 4).toUpperCase())}</text>
+        </g>`;
+      }).join('');
+      const xTicks = [-0.5, -0.25, 0, 0.25, 0.5].filter(v => v >= xMin && v <= xMax);
+      const yTicks = [0, 0.5, 1, 1.5, 2].filter(v => v >= yMin && v <= yMax);
+      mapHtml = `
+        <svg class="qmom8-rotmap-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+          <line class="gridl" x1="${padL}" y1="${y0}" x2="${(W-padR).toFixed(1)}" y2="${y0}"/>
+          <line class="gridl" x1="${x0}" y1="${padT}" x2="${x0}" y2="${(H-padB).toFixed(1)}"/>
+          <line class="axis" x1="${padL}" y1="${(H-padB).toFixed(1)}" x2="${(W-padR).toFixed(1)}" y2="${(H-padB).toFixed(1)}"/>
+          <line class="axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${(H-padB).toFixed(1)}"/>
+          <text class="qlbl" x="${(W-padR-8).toFixed(1)}" y="${(padT+14).toFixed(1)}" text-anchor="end">ROTATING IN · strong</text>
+          <text class="qlbl" x="${(padL+8).toFixed(1)}" y="${(padT+14).toFixed(1)}">FADING · still strong</text>
+          <text class="qlbl" x="${(padL+8).toFixed(1)}" y="${(H-padB-6).toFixed(1)}">FROZEN · weak + rotating out</text>
+          <text class="qlbl" x="${(W-padR-8).toFixed(1)}" y="${(H-padB-6).toFixed(1)}" text-anchor="end">EMERGING · weak but rotating in</text>
+          ${xTicks.map(t => `<text class="axisl" x="${px(t).toFixed(1)}" y="${(H-padB+14).toFixed(1)}" text-anchor="middle">${t.toFixed(2)}</text>`).join('')}
+          ${yTicks.map(t => `<text class="axisl" x="${(padL-6).toFixed(1)}" y="${(py(t)+3).toFixed(1)}" text-anchor="end">${t.toFixed(1)}</text>`).join('')}
+          <text class="axisl" x="${(W-padR).toFixed(1)}" y="${(H-padB+28).toFixed(1)}" text-anchor="end">Δ Sharpe vs last week →</text>
+          <text class="axisl" x="${(padL-6).toFixed(1)}" y="${(padT-6).toFixed(1)}" text-anchor="end">↑ Sharpe 126d (today)</text>
+          ${bubbles}
+        </svg>
+        <div class="qmom8-quad-legend">
+          <span class="ql ne">ROTATING IN · accel + strong (favor longs)</span>
+          <span class="ql se">EMERGING · accel + weak (early signals)</span>
+          <span class="ql nw">FADING · decel + still strong (trim)</span>
+          <span class="ql sw">FROZEN · decel + weak (avoid)</span>
+        </div>`;
+    } else {
+      // Fallback: horizontal "today vs last week" bars by sector Sharpe
+      const maxAbs = Math.max(0.01, Math.max.apply(null, cells.map(c => Math.abs(c.avgSharp))));
+      const bars = cells.slice(0, 14).map(c => {
+        const w = Math.abs(c.avgSharp) / maxAbs * 50;
+        const side = c.avgSharp >= 0 ? 'in' : 'out';
+        const cls = c.avgSharp >= 0.5 ? 'gn' : c.avgSharp >= 0 ? 'am' : 'rd';
+        const escSec = _esc(c.sec).replace(/'/g, "\\'");
+        return `<div class="b-row" onclick="QuantMomentum.setSector('${escSec}')">
+          <div class="b-nm">${_esc(c.sec)} · n=${c.n}</div>
+          <div class="b-track">
+            <div class="b-zero"></div>
+            <div class="b-fill ${side}" style="width:${w.toFixed(1)}%"></div>
+          </div>
+          <div class="b-val ${cls}">${c.avgSharp >= 0 ? '+' : ''}${c.avgSharp.toFixed(2)}</div>
+        </div>`;
+      }).join('');
+      mapHtml = `<div class="qmom8-rotmap-bars">${bars || '<div class="r-empty">No sector data</div>'}</div>
+        <div style="padding: 6px 14px 12px; font: 600 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.04em;">sector_etf_history missing — showing today's avg Sharpe 126d by sector · click bar to filter</div>`;
+    }
+    const totalCands = momRows.length;
+    return `<div class="qmom8-rotmap">
+      <div class="qmom8-rotmap-h">
+        <span class="h-l">⊞ Sector Rotation Map</span>
+        <span class="h-r">${cells.length} sectors · ${totalCands} candidates · ${hasHistory ? 'x=Δ Sharpe vs last wk · y=Sharpe today · bubble=#cands' : 'avg Sharpe 126d (history-fallback)'}</span>
+      </div>
+      ${mapHtml}
+    </div>
+    ${momRows.length >= 2 ? _qmom6RenderScatter(momRows) : '<div class="qmom8-dd-empty">Need ≥2 momentum candidates for accel/decay scatter</div>'}
+    `;
+  }
+
+  // ── DEEP-DIVE mode · per-ticker terminal ────────────────────────────
+  function _qmom8RenderDeepDive(momRows, all) {
+    // Resolve selected ticker (default = top accelerator)
+    const ad = _qmom8AccelDecay(momRows);
+    let row = null;
+    if (_qmom8SelectedTk) {
+      row = momRows.find(r => r.ticker === _qmom8SelectedTk) || all.find(r => r.ticker === _qmom8SelectedTk);
+    }
+    if (!row && ad.accel.length) row = ad.accel[0];
+    if (!row) {
+      return `<div class="qmom8-dd-empty"><b>No ticker selected</b>Pick an accelerator from the left rail, or run a scan that produces ≥1 momentum candidate.</div>`;
+    }
+    if (!_qmom8SelectedTk) _qmom8SelectedTk = row.ticker;
+
+    const raw = row._raw || {};
+    const price = (+row.price || +raw.price || 0);
+    const sharpe126 = row.sharpe_126d == null ? '—' : row.sharpe_126d.toFixed(2);
+    const sharpeCls = (row.sharpe_126d || 0) > 1 ? 'gn' : (row.sharpe_126d || 0) > 0 ? 'cu' : 'rd';
+    // Today's perf
+    let today = +raw.perf_1d;
+    if (isNaN(today)) today = +raw.pct_chg || +raw.day_change_pct || 0;
+    const todayCls = today > 0 ? 'gn' : today < 0 ? 'rd' : '';
+    // Universe avg Sharpe (proxy for "vs universe")
+    const uniSharps = (momRows || []).map(r => +r.sharpe_126d).filter(v => !isNaN(v));
+    const uniAvg = uniSharps.length ? uniSharps.reduce((a,b)=>a+b,0)/uniSharps.length : 0;
+    const deltaVsUni = (row.sharpe_126d || 0) - uniAvg;
+    const deltaCls = deltaVsUni > 0.3 ? 'gn' : deltaVsUni < -0.3 ? 'rd' : 'am';
+
+    // MultiTF cells
+    const cells = _qmom7MultiTfRow(row);
+    const cellCls = (v) => {
+      if (v == null || isNaN(v)) return 'unk';
+      if (v >= 5) return 'strong';
+      if (v >= 1) return 'pos';
+      if (v >= -1) return 'flat';
+      if (v >= -5) return 'neg';
+      return 'bad';
+    };
+    const fmtCell = (v) => v == null || isNaN(v) ? '—' : ((v >= 0 ? '+' : '') + v.toFixed(1) + '%');
+    let mtfBadge = '<div class="mtf-badge mixed">—</div>';
+    if (cells) {
+      const c126 = cells.find(x => x.k === '126d');
+      const c21  = cells.find(x => x.k === '21d');
+      const c5   = cells.find(x => x.k === '5d');
+      const c1   = cells.find(x => x.k === '1d');
+      if (c126 && c21 && c126.v != null && c21.v != null && c126.v > 10 && c21.v < 0) {
+        mtfBadge = '<div class="mtf-badge conso" title="long-term strength + short-term weakness">CONSOLIDATING</div>';
+      } else if (c5 && c21 && c5.v != null && c21.v != null && c5.v < -2 && c21.v > 5) {
+        mtfBadge = '<div class="mtf-badge disag" title="multi-TF disagreement">DISAGREEMENT</div>';
+      } else if (c1 && c5 && c21 && c1.v != null && c5.v != null && c21.v != null && c1.v > 0 && c5.v > 0 && c21.v > 0) {
+        mtfBadge = '<div class="mtf-badge aligned" title="all positive">ALIGNED</div>';
+      } else {
+        mtfBadge = '<div class="mtf-badge mixed">MIXED</div>';
+      }
+    }
+    const mtfHeader = `
+      <div class="mtf-k">TF</div>
+      <div class="mtf-k">1d</div>
+      <div class="mtf-k">5d</div>
+      <div class="mtf-k">21d</div>
+      <div class="mtf-k">63d</div>
+      <div class="mtf-k">126d</div>
+      <div class="mtf-k">Signal</div>`;
+    const mtfCells = cells
+      ? `<div class="mtf-c flat">${_esc(row.ticker)}</div>` + cells.map(c => `<div class="mtf-c ${cellCls(c.v)}">${fmtCell(c.v)}</div>`).join('') + mtfBadge
+      : `<div class="mtf-c flat">${_esc(row.ticker)}</div>` + ['1d','5d','21d','63d','126d'].map(() => '<div class="mtf-c unk">—</div>').join('') + mtfBadge;
+
+    // Vol target
+    const vt = _qmom7VolTarget(row, 1.0);
+    const sigmaPct = vt ? (vt.sigma * 100).toFixed(0) : '—';
+    const sharesStr = vt ? vt.shares : '—';
+    const beta = vt && vt.beta != null ? vt.beta.toFixed(2) : (+raw.beta || 1.0).toFixed(2);
+    const halfStr = _qmom7HalfSize ? ' (half-size)' : '';
+
+    // Peer comparison: this vs sector median vs top decile
+    const sectorPeers = (all || []).filter(r => r.sector === row.sector && r.sharpe_126d != null);
+    const sectorSharps = sectorPeers.map(r => +r.sharpe_126d).filter(v => !isNaN(v)).sort((a,b)=>a-b);
+    const peerMed = sectorSharps.length ? sectorSharps[Math.floor(sectorSharps.length/2)] : 0;
+    const topDecileIdx = Math.max(0, Math.floor(sectorSharps.length * 0.9));
+    const peerTop = sectorSharps.length ? sectorSharps[topDecileIdx] : 0;
+    const peerMax = Math.max(Math.abs(row.sharpe_126d || 0), Math.abs(peerMed), Math.abs(peerTop), 0.5);
+    const peerBars = `
+      <div class="pb-row">
+        <span class="pb-lbl cu">${_esc(row.ticker)}</span>
+        <div class="pb-track"><div class="pb-fill" style="width:${Math.min(100, Math.abs(row.sharpe_126d || 0) / peerMax * 100).toFixed(0)}%"></div></div>
+        <span class="pb-val">${(row.sharpe_126d || 0).toFixed(2)}</span>
+      </div>
+      <div class="pb-row">
+        <span class="pb-lbl">sector median</span>
+        <div class="pb-track"><div class="pb-fill med" style="width:${Math.min(100, Math.abs(peerMed) / peerMax * 100).toFixed(0)}%"></div></div>
+        <span class="pb-val">${peerMed.toFixed(2)}</span>
+      </div>
+      <div class="pb-row">
+        <span class="pb-lbl">sector top decile</span>
+        <div class="pb-track"><div class="pb-fill top" style="width:${Math.min(100, Math.abs(peerTop) / peerMax * 100).toFixed(0)}%"></div></div>
+        <span class="pb-val">${peerTop.toFixed(2)}</span>
+      </div>`;
+
+    // Action ladder — vol-targeted entry, 3R target, 1.5R stop heuristic
+    // Use 1.25× ATR proxy: stop offset = sigma/sqrt(252) × 1.25 × price; target = 3× stop
+    const dailySigma = vt ? vt.sigma / Math.sqrt(252) : 0.02;
+    const stopOffset = price * dailySigma * 1.25;
+    const stopPx = price - stopOffset;
+    const targetPx = price + stopOffset * 3;
+    const rrRatio = stopOffset > 0 ? 3 : 0;
+
+    // Right rail mini panel
+    const news = +raw.news_count_7d || +raw.news_articles_count || (raw.news_articles && raw.news_articles.length) || 0;
+    const erDays = raw.next_earnings_in_days != null ? +raw.next_earnings_in_days : (raw.days_to_earnings != null ? +raw.days_to_earnings : null);
+    const ivRank = +raw.iv_rank || +raw.iv_percentile || null;
+    const rsRank = +row.rs_rank || null;
+    const confluences = [];
+    if (raw.above_21ema) confluences.push({ lbl: 'above 21EMA', cls: 'gn' });
+    if (raw.above_50ema) confluences.push({ lbl: 'above 50EMA', cls: 'gn' });
+    if (raw.above_200sma) confluences.push({ lbl: 'above 200SMA', cls: 'gn' });
+    if (raw.above_50ema === false) confluences.push({ lbl: 'below 50EMA', cls: 'rd' });
+    if ((row.adx || 0) >= 25) confluences.push({ lbl: 'ADX≥25', cls: 'gn' });
+    if (row.trend === 'accel') confluences.push({ lbl: 'ACCEL', cls: 'gn' });
+    if (row.trend === 'decay') confluences.push({ lbl: 'DECAY', cls: 'rd' });
+    if (rsRank != null && rsRank >= 80) confluences.push({ lbl: `RS ${Math.round(rsRank)}`, cls: 'gn' });
+    if (row.market_phase) confluences.push({ lbl: row.market_phase, cls: row.market_phase === 'Trend' ? 'gn' : '' });
+    const conflList = confluences.length
+      ? confluences.map(c => `<span class="s-chip ${c.cls || ''}">${_esc(c.lbl)}</span>`).join('')
+      : '<span class="s-chip">—</span>';
+
+    const tkEsc = _esc(row.ticker).replace(/'/g, "\\'");
+    return `
+      <div class="qmom8-dd-head">
+        <div class="h-tk-wrap">
+          <div class="h-tk">${_esc(row.ticker)}</div>
+          <div class="h-nm">${_esc(row.name || raw.name || raw.company || '')}</div>
+          <div class="h-sec">${_esc(row.sector || 'Other')}</div>
+        </div>
+        <div class="h-cell">
+          <div class="h-k">Price</div>
+          <div class="h-v">${price ? '$' + price.toFixed(2) : '—'}</div>
+          <div class="h-s">${today ? (today >= 0 ? '+' : '') + today.toFixed(2) + '% today' : ''}</div>
+        </div>
+        <div class="h-cell">
+          <div class="h-k">Sharpe 126d</div>
+          <div class="h-v ${sharpeCls}">${sharpe126}</div>
+          <div class="h-s">1y ${row.sharpe_1y == null ? '—' : (row.sharpe_1y >= 0 ? '+' : '') + row.sharpe_1y.toFixed(2)}</div>
+        </div>
+        <div class="h-cell">
+          <div class="h-k">vs Universe</div>
+          <div class="h-v ${deltaCls}">${deltaVsUni >= 0 ? '+' : ''}${deltaVsUni.toFixed(2)}</div>
+          <div class="h-s">uni avg ${uniAvg.toFixed(2)} · n=${uniSharps.length}</div>
+        </div>
+      </div>
+      <div class="qmom8-dd-grid">
+        <div class="qmom8-dd-section-list">
+          <div class="qmom8-dd-card">
+            <div class="c-h">↻ Multi-Timeframe Momentum <span class="c-meta">stacked bars · CONSOLIDATING / DISAGREEMENT / ALIGNED detector</span></div>
+            <div class="c-body"><div class="qmom8-mtf">${mtfHeader}${mtfCells}</div></div>
+          </div>
+          <div class="qmom8-dd-card">
+            <div class="c-h">σ Vol Profile <span class="c-meta">60d annualized · vol-targeted sizing @ 1% portfolio risk · $10K notional</span></div>
+            <div class="c-body">
+              <div class="qmom8-vp-row">
+                <div class="qmom8-vp-tile"><div class="k">σ 60d</div><div class="v am">${sigmaPct}%</div><div class="s">annualized vol</div></div>
+                <div class="qmom8-vp-tile"><div class="k">Vol-targeted shares${halfStr}</div><div class="v cu">${sharesStr}</div><div class="s">@ 1% risk · $10K acct</div></div>
+                <div class="qmom8-vp-tile"><div class="k">β to SPY</div><div class="v">${beta}</div><div class="s">beta-adjusted exposure</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="qmom8-dd-card">
+            <div class="c-h">▲ Peer Comparison <span class="c-meta">within sector · Sharpe 126d</span></div>
+            <div class="c-body"><div class="qmom8-peer">${peerBars}</div></div>
+          </div>
+          <div class="qmom8-dd-card">
+            <div class="c-h">⊕ Action Ladder <span class="c-meta">vol-targeted entry · 3R target · 1.5R stop heuristic</span></div>
+            <div class="c-body">
+              <div class="qmom8-act-ladder">
+                <div class="a-tile entry"><div class="a-k">Entry</div><div class="a-v">${price ? '$' + price.toFixed(2) : '—'}</div><div class="a-s">${sharesStr} sh · vol-targeted</div></div>
+                <div class="a-tile target"><div class="a-k">3R Target</div><div class="a-v">${price ? '$' + targetPx.toFixed(2) : '—'}</div><div class="a-s">+${(stopOffset/price*100*3).toFixed(1)}%</div></div>
+                <div class="a-tile stop"><div class="a-k">Stop (1.25× σ)</div><div class="a-v">${price ? '$' + stopPx.toFixed(2) : '—'}</div><div class="a-s">−${(stopOffset/price*100).toFixed(1)}%</div></div>
+              </div>
+              <button class="qmom8-act-btn" onclick="(window.openPaperOrder||function(){alert('Paper-order route not wired in this build — copy entry/stop/target to executor manually')})('${tkEsc}', ${price.toFixed(2)}, ${stopPx.toFixed(2)}, ${targetPx.toFixed(2)}, ${vt ? vt.shares : 0})">PAPER · BUY ${_esc(row.ticker)}</button>
+            </div>
+          </div>
+        </div>
+        <div class="qmom8-dd-side">
+          <div class="s-tile">
+            <div class="s-k">Confluences</div>
+            <div class="s-list">${conflList}</div>
+          </div>
+          <div class="s-tile">
+            <div class="s-k">RS Rank</div>
+            <div class="s-v ${(rsRank || 0) >= 80 ? 'gn' : (rsRank || 0) >= 60 ? 'cu' : 'am'}">${rsRank == null ? '—' : Math.round(rsRank)}</div>
+          </div>
+          <div class="s-tile">
+            <div class="s-k">% from 52w High</div>
+            <div class="s-v ${(row.pct_from_52w_high || 0) > 25 ? 'rd' : (row.pct_from_52w_high || 0) > 10 ? 'am' : 'gn'}">${row.pct_from_52w_high == null ? '—' : '−' + row.pct_from_52w_high.toFixed(1) + '%'}</div>
+          </div>
+          <div class="s-tile">
+            <div class="s-k">News 7d</div>
+            <div class="s-v ${news > 0 ? 'cu' : ''}">${news || '—'}</div>
+          </div>
+          <div class="s-tile">
+            <div class="s-k">Earnings</div>
+            <div class="s-v ${erDays != null && erDays <= 7 ? 'rd' : ''}">${erDays == null ? '—' : 'in ' + erDays + 'd'}</div>
+          </div>
+          ${ivRank != null ? `<div class="s-tile"><div class="s-k">IV Rank</div><div class="s-v">${ivRank.toFixed(0)}%</div></div>` : ''}
+          <div class="s-tile">
+            <div class="s-k">ADX</div>
+            <div class="s-v ${(row.adx || 0) >= 25 ? 'gn' : 'am'}">${row.adx == null ? '—' : row.adx.toFixed(1)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── EXITS mode · full-width exit-trigger table w/ severity + action ──
+  function _qmom8RenderExits(momRows) {
+    // Lift logic from _qmom7ExitPanel but render full-width with action+exposure cols
+    const triggers = [];
+    momRows.forEach(r => {
+      const reasons = [];
+      let sev = 'LOW';
+      const raw = r._raw || {};
+      if (raw.above_21ema === false && raw.above_50ema === false) {
+        reasons.push('lost 21+50 EMA'); sev = 'HIGH';
+      } else if (raw.above_50ema === false) {
+        reasons.push('below 50EMA'); sev = 'MED';
+      }
+      if (r.sharpe_126d != null && r.sharpe_1y != null && r.sharpe_1y > 0.5 && r.sharpe_126d < r.sharpe_1y * 0.5) {
+        reasons.push(`Sharpe 126d<½ of 1y (${r.sharpe_126d.toFixed(2)} vs ${r.sharpe_1y.toFixed(2)})`);
+        if (sev !== 'HIGH') sev = 'MED';
+      }
+      if (r.pct_from_52w_high != null && r.pct_from_52w_high > 15) {
+        reasons.push(`${r.pct_from_52w_high.toFixed(1)}% off 52wHi`);
+        if (r.pct_from_52w_high > 25 && sev !== 'HIGH') sev = 'HIGH';
+      }
+      if (r.trend === 'decay') {
+        reasons.push('trend DECAY');
+        if (sev === 'LOW') sev = 'MED';
+      }
+      if (reasons.length > 0) triggers.push({ row: r, ticker: r.ticker, sector: r.sector, sev, reasons });
+    });
+    const sevRank = { HIGH: 3, MED: 2, LOW: 1 };
+    triggers.sort((a,b) => sevRank[b.sev] - sevRank[a.sev]);
+
+    // Get held exposure from portfolio
+    let positions = [];
+    try { positions = (_data && _data.portfolio && _data.portfolio.positions) || []; } catch (e) {}
+    const posMap = {};
+    positions.forEach(p => {
+      const tk = (p.ticker || p.symbol || '').toUpperCase();
+      if (!tk) return;
+      const shares = +p.shares || +p.qty || 0;
+      const px = +p.price || +p.entry || +p.current || 0;
+      if (shares && px) posMap[tk] = shares * px;
+    });
+    const suggestOf = (sev, held) => {
+      if (sev === 'HIGH' && held) return 'EXIT or trail tight';
+      if (sev === 'HIGH') return 'AVOID · cross-ref portfolio';
+      if (sev === 'MED' && held) return 'Trim 50% or tighten stop';
+      if (sev === 'MED') return 'Watch · do not add';
+      return 'Monitor';
+    };
+    const rowsHtml = triggers.length
+      ? triggers.map(t => {
+          const held = posMap[t.ticker] || 0;
+          const heldStr = held ? '$' + Math.round(held).toLocaleString() : '—';
+          const tkEsc = _esc(t.ticker).replace(/'/g, "\\'");
+          return `<tr onclick="QuantMomentum.setSelected('${tkEsc}')">
+            <td><span class="e-tk">${_esc(t.ticker)}</span></td>
+            <td>${_esc(t.sector || '—')}</td>
+            <td>${t.reasons.map(r => _esc(r)).join(' · ')}</td>
+            <td class="r"><span class="e-sev ${t.sev}">${t.sev}</span></td>
+            <td><span class="e-act">${suggestOf(t.sev, held)}</span></td>
+            <td class="r">${heldStr}</td>
+          </tr>`;
+        }).join('')
+      : `<tr><td colspan="6" class="e-empty">No active exit triggers · momentum universe healthy</td></tr>`;
+
+    return `<div class="qmom8-exits">
+      <div class="qmom8-exits-h">
+        <span>⊗ Exit Triggers · symmetric to entry</span>
+        <span class="meta">${triggers.length} active · sorted by severity · click row → DEEP DIVE</span>
+      </div>
+      <table>
+        <thead><tr>
+          <th>Ticker</th><th>Sector</th><th>Trigger reason</th><th class="r">Severity</th><th>Suggested action</th><th class="r">Held $</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>`;
+  }
+
+  // ── HISTORY shell renderers ─────────────────────────────────────────
+  function _qmom8RenderHistVerdict() {
+    const d = _histData;
+    const cal = d && d.calibration;
+    if (!cal) return `<div class="qmom8-hverdict am">
+      <div class="hv-big"><span class="pct am">—</span> awaiting data</div>
+      <div class="hv-mid">Open <b>HISTORY</b> view periodically to seed cache · data/momentum_snapshots.jsonl populates each scan</div>
+      <span class="hv-tag am">SEEDING</span>
+    </div>`;
+    const wr = cal.win_rate || 0;
+    const pct = Math.round(wr * 100);
+    const n = cal.with_5d_data || 0;
+    const alpha = cal.avg_alpha_pp;
+    // Wilson 95% lower bound
+    let lo = 0, hi = 100;
+    if (n > 0) {
+      const z = 1.96;
+      const phat = wr;
+      const denom = 1 + z*z/n;
+      const center = phat + z*z/(2*n);
+      const margin = z * Math.sqrt(phat*(1-phat)/n + z*z/(4*n*n));
+      lo = Math.max(0, Math.round((center - margin) / denom * 100));
+      hi = Math.min(100, Math.round((center + margin) / denom * 100));
+    }
+    let verdict, vcls;
+    if (n < 30) { verdict = 'INSUFFICIENT'; vcls = 'am'; }
+    else if (pct >= 55 && lo >= 50) { verdict = 'EDGE CONFIRMED'; vcls = 'gn'; }
+    else if (pct >= 45) { verdict = 'BORDERLINE'; vcls = 'am'; }
+    else { verdict = 'NO EDGE'; vcls = 'rd'; }
+    const pctCls = pct >= 55 ? 'gn' : pct >= 45 ? 'am' : 'rd';
+    return `<div class="qmom8-hverdict ${vcls}">
+      <div class="hv-big">model hit <span class="pct ${pctCls}">${pct}%</span> [${lo},${hi}]ci</div>
+      <div class="hv-mid">α <b>${_fmtPP(alpha)}</b> · n=<b>${n}</b> resolved · horizon ${d.horizon_days || 5}d · distinct days ${(cal.distinct_dates) || d.distinct_dates || '—'}</div>
+      <span class="hv-tag ${vcls}">${verdict}</span>
+      <div style="display:flex;gap:4px;">
+        <button class="m-pill ${_qmom8HistMode==='calibration'?'on':''}" style="padding:5px 11px;font-size:9.5px" onclick="QuantMomentum.setHistMode('calibration')">CAL<span class="m-kbd">1</span></button>
+        <button class="m-pill ${_qmom8HistMode==='pnl'?'on':''}" style="padding:5px 11px;font-size:9.5px" onclick="QuantMomentum.setHistMode('pnl')">P&L<span class="m-kbd">2</span></button>
+        <button class="m-pill ${_qmom8HistMode==='attribution'?'on':''}" style="padding:5px 11px;font-size:9.5px" onclick="QuantMomentum.setHistMode('attribution')">ATTRIBUTION<span class="m-kbd">3</span></button>
+      </div>
+    </div>`;
+  }
+
+  function _qmom8RenderHistCalibration() {
+    const d = _histData;
+    // Build large reliability diagram (replicates _qmom7CalTrio first pane at full size)
+    const snaps = (d && Array.isArray(d.snapshots)) ? d.snapshots : [];
+    const resolved = snaps.filter(s => {
+      const r = s.realized || {};
+      return r.status !== 'PENDING' && r.alpha_pp != null;
+    });
+    const composites = resolved.map(s => +(s.predicted && s.predicted.composite)).filter(v => !isNaN(v));
+    let bigPane = '';
+    if (composites.length >= 10) {
+      const lo = Math.min.apply(null, composites);
+      const hi = Math.max.apply(null, composites);
+      const span = (hi - lo) || 1;
+      const buckets = [];
+      for (let i = 0; i < 10; i++) buckets.push({ pred: 0, real: 0, n: 0 });
+      resolved.forEach(s => {
+        const c = +(s.predicted && s.predicted.composite);
+        if (isNaN(c)) return;
+        const bIdx = Math.min(9, Math.floor(((c - lo) / span) * 10));
+        const realHit = (s.realized && s.realized.alpha_pp > 0) ? 1 : 0;
+        buckets[bIdx].pred += (bIdx + 1) / 10;
+        buckets[bIdx].real += realHit;
+        buckets[bIdx].n++;
+      });
+      const W = 480, H = 360, pad = 40;
+      const grid = [0.2, 0.4, 0.6, 0.8];
+      const gridX = grid.map(t => `<line class="gridl" x1="${(pad + t*(W-2*pad)).toFixed(1)}" y1="${pad}" x2="${(pad + t*(W-2*pad)).toFixed(1)}" y2="${H-pad}"/>`).join('');
+      const gridY = grid.map(t => `<line class="gridl" x1="${pad}" y1="${(H - pad - t*(H-2*pad)).toFixed(1)}" x2="${W-pad}" y2="${(H - pad - t*(H-2*pad)).toFixed(1)}"/>`).join('');
+      const dots = buckets.map((b, i) => {
+        if (b.n === 0) return '';
+        const px = pad + ((b.pred / Math.max(b.n,1)) * (W - 2*pad));
+        const py = H - pad - ((b.real / Math.max(b.n,1)) * (H - 2*pad));
+        const radius = Math.max(4, Math.min(16, Math.sqrt(b.n) * 2.4));
+        return `<circle class="dot" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${radius.toFixed(1)}"><title>D${i+1} · n=${b.n} · pred=${(b.pred/Math.max(b.n,1)).toFixed(2)} · real=${(b.real/Math.max(b.n,1)).toFixed(2)}</title></circle>`;
+      }).join('');
+      // Brier score estimate
+      let brier = 0, bn = 0;
+      resolved.forEach(s => {
+        const c = +(s.predicted && s.predicted.composite);
+        if (isNaN(c)) return;
+        const p = (c - lo) / span;
+        const o = (s.realized && s.realized.alpha_pp > 0) ? 1 : 0;
+        brier += (p - o) * (p - o);
+        bn++;
+      });
+      const brierStr = bn ? (brier / bn).toFixed(3) : '—';
+      bigPane = `<div class="qmom8-hcal-rel">
+        <div class="rh">▌ Reliability Diagram</div>
+        <div class="rh-sub">predicted composite (x) vs realized α positive (y) · dots sized by √n · diagonal = perfectly calibrated</div>
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+          ${gridX}${gridY}
+          <line class="ax" x1="${pad}" y1="${H-pad}" x2="${W-pad}" y2="${H-pad}"/>
+          <line class="ax" x1="${pad}" y1="${pad}" x2="${pad}" y2="${H-pad}"/>
+          <line class="diag" x1="${pad}" y1="${H-pad}" x2="${W-pad}" y2="${pad}"/>
+          ${dots}
+          <text class="lbl" x="${pad}" y="${H-pad+18}">0</text>
+          <text class="lbl" x="${W-pad-10}" y="${H-pad+18}">predicted</text>
+          <text class="lbl" x="${pad-26}" y="${pad+4}">realized</text>
+          <text class="lbl" x="${pad-26}" y="${H-pad+4}">0</text>
+        </svg>
+        <div class="rfoot">n=<b>${resolved.length}</b> resolved · Brier <b>${brierStr}</b> · below diagonal = overconfident · above = underconfident · perfect = on diagonal</div>
+      </div>`;
+    } else {
+      bigPane = `<div class="qmom8-hcal-rel"><div class="rh">▌ Reliability Diagram</div><div class="rh-sub">need ≥10 resolved · have ${resolved.length}</div><div style="padding:40px;text-align:center;color:var(--ink-3);font:600 11px var(--mono)">Calibration data builds as snapshots resolve. Each scan adds today's top-20 picks; bars fill out 5 trading days later.</div></div>`;
+    }
+
+    // Side column: IC trend + Decile spread (extract from _qmom7CalTrio output by re-using)
+    const trio = _qmom7CalTrio(d);
+    // The trio is three .qmom7-cal-pane elements joined; split and grab last two
+    // Use a regex extract: panes 2 & 3
+    const paneMatches = trio.match(/<div class="qmom7-cal-pane">[\s\S]*?(?=<div class="qmom7-cal-pane">|<\/div>$)/g) || [];
+    const ic = paneMatches[1] || '';
+    const dec = paneMatches[2] || '';
+
+    return `<div class="qmom8-hcal-grid">
+      ${bigPane}
+      <div class="qmom8-hcal-side">${ic}${dec}</div>
+    </div>`;
+  }
+
+  function _qmom8RenderHistPnL() {
+    // Full-width equity curve + drawdown overlay + stats
+    const trades = (window._kairosPicksHistory && window._kairosPicksHistory.trades)
+                || (_data && _data.picks_history && _data.picks_history.trades)
+                || null;
+    const eqCurve = _qmom7EquityCurve();
+    // Stats extracted from same trades calc
+    let stats = '';
+    if (Array.isArray(trades) && trades.length >= 10) {
+      const closed = trades.filter(t => isFinite(+t.pct_chg) && (t.entry_date || t.run_date));
+      closed.sort((a,b) => ((a.entry_date || a.run_date) || '').localeCompare((b.entry_date || b.run_date) || ''));
+      let stratCum = 1, spyCum = 1;
+      const series = [];
+      closed.forEach(t => {
+        const pct = (+t.pct_chg) / 100;
+        const spyPct = isFinite(+t.market_spy_1m) ? (+t.market_spy_1m) / 100 / 4.2 : null;
+        stratCum *= (1 + pct);
+        if (spyPct != null) spyCum *= (1 + spyPct);
+        series.push({ strat: (stratCum - 1) * 100, spy: (spyCum - 1) * 100 });
+      });
+      const totalRet = (stratCum - 1) * 100;
+      const totalSpyRet = (spyCum - 1) * 100;
+      const alpha = totalRet - totalSpyRet;
+      let peak = -Infinity, maxDd = 0;
+      series.forEach(s => { if (s.strat > peak) peak = s.strat; const dd = peak - s.strat; if (dd > maxDd) maxDd = dd; });
+      const rets = series.map((s,i) => i === 0 ? s.strat : s.strat - series[i-1].strat).slice(1);
+      const meanRet = rets.length ? rets.reduce((a,b)=>a+b,0) / rets.length : 0;
+      const sdRet = rets.length ? Math.sqrt(rets.reduce((a,b)=>a + (b-meanRet)*(b-meanRet), 0) / rets.length) || 1 : 1;
+      const sharpe = (meanRet / sdRet) * Math.sqrt(252);
+      const retCls = totalRet > 0 ? 'gn' : 'rd';
+      const alphaCls = alpha > 0 ? 'gn' : 'rd';
+      const shCls = sharpe > 1 ? 'gn' : sharpe > 0 ? 'am' : 'rd';
+      stats = `<div class="qmom8-pnl-stats">
+        <div class="qmom8-pnl-stat ${retCls}">
+          <div class="k">Total Return</div>
+          <div class="v ${retCls}">${totalRet >= 0 ? '+' : ''}${totalRet.toFixed(1)}%</div>
+          <div class="s">cumulative · ${series.length} trades</div>
+        </div>
+        <div class="qmom8-pnl-stat ${alphaCls}">
+          <div class="k">α vs SPY</div>
+          <div class="v ${alphaCls}">${alpha >= 0 ? '+' : ''}${alpha.toFixed(1)}pp</div>
+          <div class="s">SPY ${totalSpyRet >= 0 ? '+' : ''}${totalSpyRet.toFixed(1)}%</div>
+        </div>
+        <div class="qmom8-pnl-stat rd">
+          <div class="k">Max Drawdown</div>
+          <div class="v rd">−${maxDd.toFixed(1)}%</div>
+          <div class="s">peak-to-trough</div>
+        </div>
+        <div class="qmom8-pnl-stat ${shCls}">
+          <div class="k">Sharpe (ann)</div>
+          <div class="v ${shCls}">${sharpe >= 0 ? '+' : ''}${sharpe.toFixed(2)}</div>
+          <div class="s">noisy at n&lt;30</div>
         </div>
       </div>`;
+    }
+    return `${eqCurve}${stats}`;
+  }
+
+  function _qmom8RenderHistAttribution() {
+    // Crash-attribution: detect any historical drawdown ≥10% inside the equity curve
+    let crashTable = '';
+    try {
+      const trades = (window._kairosPicksHistory && window._kairosPicksHistory.trades)
+                  || (_data && _data.picks_history && _data.picks_history.trades)
+                  || null;
+      if (Array.isArray(trades) && trades.length >= 20) {
+        const closed = trades.filter(t => isFinite(+t.pct_chg) && (t.entry_date || t.run_date));
+        closed.sort((a,b) => ((a.entry_date || a.run_date) || '').localeCompare((b.entry_date || b.run_date) || ''));
+        let cum = 1; const series = [];
+        closed.forEach(t => { cum *= (1 + (+t.pct_chg)/100); series.push({ d: t.entry_date || t.run_date, cum: (cum-1)*100, t }); });
+        let peak = -Infinity, peakIdx = -1;
+        const crashes = [];
+        for (let i = 0; i < series.length; i++) {
+          if (series[i].cum > peak) { peak = series[i].cum; peakIdx = i; }
+          const dd = peak - series[i].cum;
+          if (dd >= 10) {
+            // Find trough until recovery
+            let trough = i, troughV = series[i].cum;
+            for (let j = i+1; j < series.length && series[j].cum < peak; j++) {
+              if (series[j].cum < troughV) { trough = j; troughV = series[j].cum; }
+            }
+            const top3Losers = series.slice(peakIdx, trough+1)
+              .filter(s => +s.t.pct_chg < 0)
+              .sort((a,b) => +a.t.pct_chg - +b.t.pct_chg)
+              .slice(0,3);
+            crashes.push({
+              from: series[peakIdx].d, to: series[trough].d,
+              dd: peak - troughV,
+              losers: top3Losers.map(s => `${s.t.ticker} ${(+s.t.pct_chg).toFixed(1)}%`).join(' · '),
+            });
+            i = trough; peak = -Infinity;
+          }
+        }
+        if (crashes.length) {
+          crashTable = `<div class="qmom8-dd-card">
+            <div class="c-h">⚠ Past Drawdowns (≥10%) <span class="c-meta">crash attribution from equity curve</span></div>
+            <div class="c-body">
+              <table style="width:100%;border-collapse:collapse;font:600 11px var(--mono)">
+                <thead><tr style="border-bottom:1px solid var(--line)">
+                  <th style="text-align:left;padding:6px 8px;color:var(--ink-3);font:800 9px var(--mono);letter-spacing:0.10em">From</th>
+                  <th style="text-align:left;padding:6px 8px;color:var(--ink-3);font:800 9px var(--mono);letter-spacing:0.10em">To</th>
+                  <th style="text-align:right;padding:6px 8px;color:var(--ink-3);font:800 9px var(--mono);letter-spacing:0.10em">DD</th>
+                  <th style="text-align:left;padding:6px 8px;color:var(--ink-3);font:800 9px var(--mono);letter-spacing:0.10em">Top losers</th>
+                </tr></thead>
+                <tbody>${crashes.map(c => `<tr style="border-bottom:1px solid var(--bg-3)">
+                  <td style="padding:6px 8px">${_esc(c.from || '—')}</td>
+                  <td style="padding:6px 8px">${_esc(c.to || '—')}</td>
+                  <td style="padding:6px 8px;text-align:right;color:var(--rd);font-weight:800">−${c.dd.toFixed(1)}%</td>
+                  <td style="padding:6px 8px;color:var(--ink-2)">${_esc(c.losers || '—')}</td>
+                </tr>`).join('')}</tbody>
+              </table>
+            </div>
+          </div>`;
+        }
+      }
+    } catch (e) {}
+    return `${_qmom7SurvivalCurve()}${_qmom7SectorPerformance()}${_qmom7Podium()}${crashTable}`;
+  }
+
+  // ── ROUTER · _repaint() ─────────────────────────────────────────────
+  function _repaint() {
+    if (!_hostPanel) return;
+    // Bind keyboard once
+    if (!_qmom8KbBound) {
+      document.addEventListener('keydown', _qmom8KbHandler);
+      _qmom8KbBound = true;
+    }
+
+    // ── HISTORY view ─────────────────────────────────────────────────
+    if (_activeView === 'history') {
+      if (_histLoading) {
+        _hostPanel.innerHTML = `<div class="qmom8-wrap"><div class="qmom8-shell no-rail">
+          ${_qmom8RenderTop(_regimeGate(_data), [], 'history')}
+          <div class="qmom8-main"><div class="qmom8-dd-empty">loading calibration…</div></div>
+          ${_qmom8RenderBottom()}
+        </div></div>`;
+        return;
+      }
+      if (_histError) {
+        _hostPanel.innerHTML = `<div class="qmom8-wrap"><div class="qmom8-shell no-rail">
+          ${_qmom8RenderTop(_regimeGate(_data), [], 'history')}
+          <div class="qmom8-main"><div class="qmom8-dd-empty"><b>fetch error</b>${_esc(_histError)}</div></div>
+          ${_qmom8RenderBottom()}
+        </div></div>`;
+        return;
+      }
+      let body = '';
+      if (_qmom8HistMode === 'calibration') body = _qmom8RenderHistCalibration();
+      else if (_qmom8HistMode === 'pnl') body = _qmom8RenderHistPnL();
+      else if (_qmom8HistMode === 'attribution') body = _qmom8RenderHistAttribution();
+      _hostPanel.innerHTML = `<div class="qmom8-wrap">
+        <div class="qmom8-shell no-rail">
+          ${_qmom8RenderTop(_regimeGate(_data), [], 'history')}
+          <div class="qmom8-main">
+            ${_qmom8RenderHistVerdict()}
+            ${body}
+          </div>
+          ${_qmom8RenderBottom()}
+        </div>
+      </div>`;
+      return;
+    }
+
+    // ── LIVE view ────────────────────────────────────────────────────
+    const all = _buildRows();
+    const momRows = all.filter(r => r._is_momentum);
+    const gate = _regimeGate(_data);
+
+    if (all.length === 0) {
+      _hostPanel.innerHTML = `<div class="qmom8-wrap"><div class="qmom8-shell no-rail">
+        ${_qmom8RenderTop(gate, [], 'live')}
+        <div class="qmom8-main"><div class="qmom8-dd-empty"><b>No scan data loaded yet</b>Run the daily scan or wait for the next 6/7/11/13:30/15:00 PT scheduled scan.</div></div>
+        ${_qmom8RenderBottom()}
+      </div></div>`;
+      return;
+    }
+
+    // Auto-seed selected ticker = top accelerator if not set / not in current momRows
+    if (!_qmom8SelectedTk || !momRows.some(r => r.ticker === _qmom8SelectedTk)) {
+      const ad = _qmom8AccelDecay(momRows);
+      if (ad.accel.length) _qmom8SelectedTk = ad.accel[0].ticker;
+    }
+
+    let mainBody;
+    if (_qmom8Mode === 'rotation') mainBody = momRows.length >= 1 ? _qmom8RenderRotation(momRows) : '<div class="qmom8-dd-empty"><b>No momentum candidates</b>Factor suppressed in current regime — see top strip. Cross-reference Signal Scanner for non-momentum sleeves.</div>';
+    else if (_qmom8Mode === 'deepdive') mainBody = _qmom8RenderDeepDive(momRows, all);
+    else if (_qmom8Mode === 'exits') mainBody = _qmom8RenderExits(momRows);
+    else mainBody = '';
+
+    _hostPanel.innerHTML = `<div class="qmom8-wrap">
+      <div class="qmom8-shell">
+        ${_qmom8RenderTop(gate, momRows, 'live')}
+        ${_qmom8RenderRail(momRows)}
+        <div class="qmom8-main">
+          ${_qmom8RenderModeTabs()}
+          ${mainBody}
+        </div>
+        ${_qmom8RenderBottom()}
+      </div>
+    </div>`;
   }
 
   function setTrend(t)   { _activeTrend = t; _repaint(); }
@@ -60215,7 +61468,7 @@ const QuantMomentum = (function () {
   function setVerdict(_v)  { _repaint(); }
   function setGrade(_g)    { _repaint(); }
 
-  return { render, setTrend, setStage, setSector, setFamily, setQuality, setCatalyst, setVerdict, setGrade, setView, toggleHalfSize };
+  return { render, setTrend, setStage, setSector, setFamily, setQuality, setCatalyst, setVerdict, setGrade, setView, toggleHalfSize, setMode, setHistMode, setSelected };
 })();
 
 

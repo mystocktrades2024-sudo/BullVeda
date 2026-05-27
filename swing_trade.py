@@ -4309,8 +4309,40 @@ def run_daily_scan(force_fresh: bool = False):
     # 2026-05-18: count tickers with score=0. If >10 (out of typical 400-500),
     # indicates EODHD partial outage or scoring bug. Slack alert so user knows
     # BEFORE seeing empty BUY list. Includes per-pillar breakdown if available.
+    # 2026-05-26 (K2 defensive guard): exclude tickers whose score=0 is the result
+    # of an INTENTIONAL verdict-side rejection (Wilson-validated setup×band kills,
+    # sector blocklist, bear-setup demote, entry-quality gate, cooldown, score_mult
+    # kill). These are not data-quality problems — they are the engine working as
+    # designed. Without this filter, the alarm chronically misfires whenever a
+    # killed setup family (e.g., Trend Continuation@<50) is heavily represented
+    # in the universe. The TRUE outage signature is score=0 + no audit-trail
+    # reason + no score_mult_audit.killed.
     try:
-        _zero_score = [r for r in (all_results or []) if isinstance(r, dict) and (r.get("score") or 0) == 0]
+        _intent_markers = (
+            "kill", "blocklist", "bear", "demoted",
+            "cooldown", "wait for pullback", "fresh",
+        )
+        def _is_intentional_zero(r):
+            sma = r.get("score_mult_audit") or {}
+            if sma.get("killed"):
+                return True
+            at = r.get("audit_trail") or {}
+            reason = (at.get("reason") or "").lower()
+            if any(m in reason for m in _intent_markers):
+                return True
+            dec = r.get("decision") or {}
+            dec_reason = (dec.get("reason") or "").lower()
+            if any(m in dec_reason for m in _intent_markers):
+                return True
+            return False
+
+        _all_zero = [r for r in (all_results or []) if isinstance(r, dict) and (r.get("score") or 0) == 0]
+        _zero_score = [r for r in _all_zero if not _is_intentional_zero(r)]
+        _intentional_n = len(_all_zero) - len(_zero_score)
+        if _intentional_n > 0:
+            log.info(f"  score=0 breakdown: {_intentional_n} intentional verdict kills "
+                     f"(setup×band, sector blocklist, bear, FRESH gate, cooldown) "
+                     f"vs {len(_zero_score)} unexplained/data-quality")
         if len(_zero_score) > 10:
             _tk_sample = [r.get("ticker") for r in _zero_score[:15] if r.get("ticker")]
             # Aggregate which pillar caused most zeros (from score_breakdown)
@@ -4323,14 +4355,16 @@ def run_daily_scan(force_fresh: bool = False):
                         _pillar_zero[p] += 1
             _pillar_summary = " · ".join(f"{p}={n}" for p, n in _pillar_zero.most_common(3))
             log.warning(f"⚠ DATA-QUALITY ALARM: {len(_zero_score)} tickers scored 0 this scan "
-                        f"(typical: 0-5). Sample: {_tk_sample}. "
+                        f"(typical: 0-5, excluding {_intentional_n} intentional kills). "
+                        f"Sample: {_tk_sample}. "
                         f"Most-failed pillars: {_pillar_summary or 'unknown (no breakdown data)'}")
             try:
                 from alerts import send_alert
                 send_alert(
                     level="WARNING",
                     title=f"⚠ {len(_zero_score)} tickers scored 0",
-                    body=(f"This scan: {len(_zero_score)} tickers returned score=0 (typical: 0-5). "
+                    body=(f"This scan: {len(_zero_score)} tickers returned score=0 (typical: 0-5, "
+                          f"after excluding {_intentional_n} intentional kills). "
                           f"Likely EODHD partial outage or scoring pipeline gap.\n"
                           f"Sample: {', '.join(_tk_sample[:10])}\n"
                           f"Most-failed pillars: {_pillar_summary or 'no breakdown data yet'}\n"

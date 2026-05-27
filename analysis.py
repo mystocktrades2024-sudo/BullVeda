@@ -11554,6 +11554,17 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         # Heatmap (kairos.html renderMarketMap) and other consumers can read it
         # without diving into nested fmp/extra_fund dicts.
         "market_cap": info.get("market_cap") or info.get("marketCap") or 0,
+        # 2026-05-26 · Surface perf_1d (1-day % change from previous close) on
+        # the top-level entry. Computed from the daily bars already in scope so
+        # the heatmap and other consumers don't need to traverse smc_data or
+        # inst_trend fallbacks. None when fewer than 2 bars are available.
+        "perf_1d": (
+            lambda c=df.get("Close"): (
+                round((float(c.iloc[-1]) - float(c.iloc[-2])) / float(c.iloc[-2]) * 100, 2)
+                if c is not None and len(c) >= 2 and float(c.iloc[-2]) > 0
+                else None
+            )
+        )(),
         "catalyst_tags":      catalyst_tags,
         "catalyst_tier":      catalyst_tier,
         "catalyst_meta":      catalyst_meta,
