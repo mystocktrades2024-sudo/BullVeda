@@ -19861,10 +19861,20 @@ const QuantOptions = (function() {
     el.innerHTML = `
       <div class="qo-hh-band ${thesisCls}">
         <div class="qo-hh-band-l">
-          <div class="qo-hh-band-lbl">Track Record · ${s.resolved || 0} resolved · <span style="color:var(--ink-3);font-style:italic">spot-equivalent R (option-trade R pending entry/exit premium tracking)</span></div>
+          <div class="qo-hh-band-lbl">Track Record · ${s.resolved || 0} resolved${(() => {
+            // 2026-05-26 · OPTIONS-FINAL-4-PART-2 · honest framing of which R-metric is showing
+            const optR = s.option_resolved || 0;
+            const optCov = s.option_coverage_pct || 0;
+            if (optR > 0 && optCov >= 50) {
+              return ` · <span style="color:var(--copper);font-weight:700">option-trade R</span> (${optR}/${s.resolved} = ${optCov}% coverage)`;
+            } else if (optR > 0) {
+              return ` · <span style="color:var(--ink-3);font-style:italic">spot-equivalent R · ${optR} picks have option-R (BSM)</span>`;
+            }
+            return ` · <span style="color:var(--ink-3);font-style:italic">spot-equivalent R (option-R requires snapshots with atm_strike/iv/dte — accumulating)</span>`;
+          })()}</div>
           <div class="qo-hh-band-v">${thesisIco} ${thesisLbl}</div>
           <div class="qo-hh-band-meta">
-            <b>${s.wins || 0}W</b> · <b>${s.losses || 0}L</b> · <b>${s.open || 0}</b> pending · WR <b class="${wrCls}">${wr != null ? wr.toFixed(0) + '%' : '—'}</b> · PF <b class="${pfCls}">${pf != null ? pf.toFixed(2) : '—'}</b>
+            <b>${s.wins || 0}W</b> · <b>${s.losses || 0}L</b> · <b>${s.open || 0}</b> pending · WR <b class="${wrCls}">${wr != null ? wr.toFixed(0) + '%' : '—'}</b> · PF <b class="${pfCls}">${pf != null ? pf.toFixed(2) : '—'}</b>${s.option_avg_win_pct != null ? ` · <span style="color:var(--copper)">opt Avg W <b>+${s.option_avg_win_pct.toFixed(0)}%</b> · L <b>${s.option_avg_loss_pct.toFixed(0)}%</b></span>` : ''}
           </div>
         </div>
       </div>
@@ -20060,9 +20070,13 @@ const QuantOptions = (function() {
     };
     const stCls = (st) => st === 'STRONG' ? 'color:var(--gn);font-weight:700' : st === 'MODERATE' ? 'color:var(--am);font-weight:700' : 'color:var(--ink-2)';
     tbody.innerHTML = filtered.slice(0, 1500).map(r => {
-      const realized = r.realized_pct;
+      // 2026-05-26 · OPTIONS-FINAL-4-PART-2 · prefer option-trade R when available;
+      // fall back to spot-%. Tag with "opt" prefix so the user can see which metric.
+      const optPct = r.option_realized_pct;
+      const realized = (optPct != null) ? optPct : r.realized_pct;
+      const usingOptR = optPct != null;
       const realizedCls = realized == null ? 'color:var(--ink-3)' : realized > 0 ? 'color:var(--gn)' : 'color:var(--rd)';
-      const realizedTxt = realized == null ? '—' : (realized > 0 ? '+' : '') + realized.toFixed(2) + '%';
+      const realizedTxt = realized == null ? '—' : (usingOptR ? '<span style="color:var(--copper);font-size:9px;letter-spacing:0.06em">opt</span> ' : '') + (realized > 0 ? '+' : '') + realized.toFixed(2) + '%';
       // Verdict label: STRONG/MODERATE/WEAK + direction badge
       const dir = r.direction || 'long';
       const dirIcon = dir === 'short' ? '▼' : '▲';

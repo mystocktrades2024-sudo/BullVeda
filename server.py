@@ -7969,6 +7969,11 @@ async def options_flow_journal_api(days: int = 90, limit: int = 200,
             "win": (oc or {}).get("outcome") == "target_hit" if oc else None,
             "realized_pct": (oc or {}).get("realized_return_pct"),
             "realized_r": (oc or {}).get("realized_r"),
+            # 2026-05-26 · OPTIONS-FINAL-4-PART-2 · option-trade premium-based R
+            "option_entry_prem":   (oc or {}).get("option_entry_prem"),
+            "option_exit_prem":    (oc or {}).get("option_exit_prem"),
+            "option_realized_pct": (oc or {}).get("option_realized_pct"),
+            "option_realized_r":   (oc or {}).get("option_realized_r"),
             "mfe_pct": (oc or {}).get("mfe_pct"),
             "mae_pct": (oc or {}).get("mae_pct"),
             "days_held": (oc or {}).get("days_to_outcome"),
@@ -8054,8 +8059,12 @@ async def options_flow_journal_api(days: int = 90, limit: int = 200,
     # Summary across the filtered set
     total = len(rows)
     by_outcome = {"target_hit": 0, "stop_hit": 0, "expired": 0, "pending": 0}
+    # Spot-equivalent stats (always available)
     win_returns = []
     loss_returns = []
+    # Option-trade-R stats (only when snapshot has atm_strike/iv/dte)
+    opt_win_returns = []
+    opt_loss_returns = []
     for r in rows:
         oc = r["outcome"]
         by_outcome[oc] = by_outcome.get(oc, 0) + 1
@@ -8063,10 +8072,18 @@ async def options_flow_journal_api(days: int = 90, limit: int = 200,
         if isinstance(rr_pct, (int, float)):
             if oc == "target_hit": win_returns.append(rr_pct)
             elif oc == "stop_hit": loss_returns.append(rr_pct)
+        opt_pct = r.get("option_realized_pct")
+        if isinstance(opt_pct, (int, float)):
+            if oc == "target_hit": opt_win_returns.append(opt_pct)
+            elif oc == "stop_hit": opt_loss_returns.append(opt_pct)
     resolved = total - by_outcome["pending"]
     wr = (by_outcome["target_hit"] / resolved * 100) if resolved > 0 else None
     avg_win = sum(win_returns) / len(win_returns) if win_returns else 0
     avg_loss = sum(loss_returns) / len(loss_returns) if loss_returns else 0
+    # Option-trade stats
+    opt_avg_win  = sum(opt_win_returns)  / len(opt_win_returns)  if opt_win_returns  else 0
+    opt_avg_loss = sum(opt_loss_returns) / len(opt_loss_returns) if opt_loss_returns else 0
+    opt_resolved = len(opt_win_returns) + len(opt_loss_returns)
     return {
         "rows": rows,
         "total": total,
@@ -8079,6 +8096,11 @@ async def options_flow_journal_api(days: int = 90, limit: int = 200,
             "win_rate_pct": round(wr, 1) if wr is not None else None,
             "avg_win_pct": round(avg_win, 2),
             "avg_loss_pct": round(avg_loss, 2),
+            # 2026-05-26 · OPTIONS-FINAL-4-PART-2 · option-trade R block
+            "option_resolved":      opt_resolved,
+            "option_avg_win_pct":   round(opt_avg_win, 2) if opt_win_returns else None,
+            "option_avg_loss_pct":  round(opt_avg_loss, 2) if opt_loss_returns else None,
+            "option_coverage_pct":  round(opt_resolved / resolved * 100, 1) if resolved > 0 else 0,
         },
         "coverage": coverage,
         "backfill_count": backfill_n,
