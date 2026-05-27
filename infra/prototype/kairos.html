@@ -20015,6 +20015,21 @@ const QuantOptions = (function() {
   let _qoptSelected = null;
   let _qoptSort = 'conv_desc';
   let _qoptQuickFilter = null;  // top20, strong, long, short, ivrich, ivcheap, er7
+  // 2026-05-27 · finish-all batch
+  const _qoptStratOverride = (() => { try { return JSON.parse(localStorage.getItem('qopt-strat-override') || '{}'); } catch(_) { return {}; } })();
+  const _qoptSizes          = (() => { try { return JSON.parse(localStorage.getItem('qopt-sizes') || '{}'); } catch(_) { return {}; } })();
+  const _qoptNotes          = (() => { try { return JSON.parse(localStorage.getItem('qopt-notes') || '{}'); } catch(_) { return {}; } })();
+  const _qoptUserAlerts     = (() => { try { return JSON.parse(localStorage.getItem('qopt-user-alerts') || '[]'); } catch(_) { return []; } })();
+  const _qoptSavedScans     = (() => { try { return JSON.parse(localStorage.getItem('qopt-saved-scans') || '[]'); } catch(_) { return []; } })();
+  const _qoptPersist = () => {
+    try {
+      localStorage.setItem('qopt-strat-override', JSON.stringify(_qoptStratOverride));
+      localStorage.setItem('qopt-sizes',          JSON.stringify(_qoptSizes));
+      localStorage.setItem('qopt-notes',          JSON.stringify(_qoptNotes));
+      localStorage.setItem('qopt-user-alerts',    JSON.stringify(_qoptUserAlerts));
+      localStorage.setItem('qopt-saved-scans',    JSON.stringify(_qoptSavedScans));
+    } catch(_) {}
+  };
 
   function _qoptApplyQuickFilter(picks) {
     if (!_qoptQuickFilter) return picks;
@@ -20199,9 +20214,34 @@ const QuantOptions = (function() {
           <div class="qopt-mon-tt-cell tgt"><div class="lbl">🎯 TARGET</div><div class="v">${p.target ? '$' + (+p.target).toFixed(2) : '—'}</div><div class="sub">stock</div></div>
           <div class="qopt-mon-tt-cell stop"><div class="lbl">🛑 STOP</div><div class="v">${p.stop ? '$' + (+p.stop).toFixed(2) : '—'}</div><div class="sub">stock</div></div>
         </div>
+        <div class="qopt-mon-tt-sizer">
+          <div class="sz-row">
+            <span class="lbl">Contracts</span>
+            <input type="range" min="1" max="20" value="1" class="sz-slider" id="qopt-sz-slider-${p.ticker}"
+              oninput="QuantOptions.updateSize('${p.ticker}', this.value)">
+            <span class="sz-num" id="qopt-sz-num-${p.ticker}">1</span>
+          </div>
+          <div class="sz-stats" id="qopt-sz-stats-${p.ticker}">
+            <span class="cell"><span class="lbl">Total $</span><span class="v" id="qopt-sz-total-${p.ticker}">$${entryPx != null ? (entryPx*100).toFixed(0) : '—'}</span></span>
+            <span class="cell"><span class="lbl">Max Risk</span><span class="v rd" id="qopt-sz-risk-${p.ticker}">$${entryPx != null ? (entryPx*100).toFixed(0) : '—'}</span></span>
+            <span class="cell"><span class="lbl">Max Reward</span><span class="v gn" id="qopt-sz-reward-${p.ticker}">${useSpread && sk != null && sm != null ? '$'+((Math.abs(sk-p.atm_strike)-(p.atm_mark-sm))*100).toFixed(0) : 'uncapped'}</span></span>
+          </div>
+          <div class="sz-override">
+            <span class="lbl">Strategy override:</span>
+            <select class="sz-sel" id="qopt-strat-sel-${p.ticker}" onchange="QuantOptions.overrideStrategy('${p.ticker}', this.value)">
+              <option value="auto" ${!_qoptStratOverride[p.ticker]?'selected':''}>Auto · ${strat}</option>
+              <option value="long_call" ${_qoptStratOverride[p.ticker]==='long_call'?'selected':''}>Long Call</option>
+              <option value="long_put" ${_qoptStratOverride[p.ticker]==='long_put'?'selected':''}>Long Put</option>
+              <option value="bull_call_spread" ${_qoptStratOverride[p.ticker]==='bull_call_spread'?'selected':''}>Bull Call Spread</option>
+              <option value="bear_put_spread" ${_qoptStratOverride[p.ticker]==='bear_put_spread'?'selected':''}>Bear Put Spread</option>
+            </select>
+          </div>
+        </div>
         <div class="qopt-mon-tt-actions">
-          <button class="qopt-tt-btn primary" onclick="QuantOptions.paperOrder('${p.ticker}')">▶ Paper-Buy 1 ct</button>
+          <button class="qopt-tt-btn primary" onclick="QuantOptions.paperOrder('${p.ticker}')">▶ Paper-Buy <span id="qopt-buy-ct-${p.ticker}">1</span> ct</button>
           <button class="qopt-tt-btn" onclick="QuantOptions.starSave('${p.ticker}')">★ Save</button>
+          <button class="qopt-tt-btn" onclick="QuantOptions.addAlert('${p.ticker}')">🔔 Alert</button>
+          <button class="qopt-tt-btn" onclick="QuantOptions.addNote('${p.ticker}')">📝 Note</button>
           ${p.atm_dte != null && p.atm_dte < 7 ? `<button class="qopt-tt-btn" onclick="QuantOptions.rollSuggest('${p.ticker}')">🔄 Roll</button>` : ''}
           <span id="qopt-tt-status-${p.ticker}" style="font:600 10px var(--mono);color:var(--ink-2);align-self:center"></span>
         </div>
@@ -20355,6 +20395,26 @@ const QuantOptions = (function() {
         <div class="qopt-mon-sec-h">⊞ WHALE STRIKES · vol > 2.5σ vs neighbors</div>
         ${_qoptWhaleStrikes(p)}
       </div>
+
+      <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ TRADE JOURNAL · per-ticker notes</div>
+        <textarea class="qopt-journal" id="qopt-journal-${p.ticker}"
+          placeholder="Why this trade? · entry rationale · invalidation triggers · post-trade review"
+          oninput="QuantOptions.saveNote('${p.ticker}', this.value)">${(_qoptNotes[p.ticker] || '').replace(/</g,'&lt;')}</textarea>
+        <div class="qopt-journal-foot">
+          ${_qoptNotes[p.ticker] ? `<span style="color:var(--ink-3);font:600 9px var(--mono)">saved · ${(_qoptNotes[p.ticker]||'').length} chars</span>` : '<span style="color:var(--ink-4);font:600 9px var(--mono);font-style:italic">unsaved · auto-saves to localStorage on edit</span>'}
+        </div>
+      </div>
+
+      ${_qoptUserAlerts.filter(a => a.ticker === p.ticker).length ? `
+      <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ YOUR ACTIVE ALERTS · ${_qoptUserAlerts.filter(a => a.ticker === p.ticker).length}</div>
+        ${_qoptUserAlerts.filter(a => a.ticker === p.ticker).map((a, i) => `
+          <div class="qopt-alert-row">
+            <span class="lbl">${a.metric}</span> <span class="op">${a.op}</span> <span class="thr">${a.threshold}</span>
+            <button class="qopt-alert-del" onclick="QuantOptions.removeAlert(${_qoptUserAlerts.indexOf(a)})">✕</button>
+          </div>`).join('')}
+      </div>` : ''}
     </div>`;
   }
 
@@ -20657,6 +20717,41 @@ const QuantOptions = (function() {
       .qopt-alt-cell.am .v { color: var(--amb); } .qopt-alt-cell.rd .v { color: var(--rd); }
       .qopt-alt-foot { margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--bg-2); font: 600 9.5px var(--mono); color: var(--ink-2); }
       .qopt-alt-foot b { color: var(--ink); font-weight: 700; }
+      /* Position-size sizer + strategy override */
+      .qopt-mon-tt-sizer { margin-top: 8px; padding: 8px 10px; background: var(--bg-3); border: 1px solid var(--line); border-radius: 2px; }
+      .qopt-mon-tt-sizer .sz-row { display: grid; grid-template-columns: 70px 1fr 36px; gap: 8px; align-items: center; }
+      .qopt-mon-tt-sizer .sz-row .lbl { font: 700 9px var(--mono); letter-spacing: 0.10em; text-transform: uppercase; color: var(--ink-3); }
+      .qopt-mon-tt-sizer .sz-slider { width: 100%; height: 4px; -webkit-appearance: none; background: var(--bg-2); border-radius: 2px; outline: none; }
+      .qopt-mon-tt-sizer .sz-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--copper); border-radius: 50%; cursor: pointer; }
+      .qopt-mon-tt-sizer .sz-num { font: 800 16px var(--mono); color: var(--copper); text-align: right; }
+      .qopt-mon-tt-sizer .sz-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin-top: 6px; }
+      .qopt-mon-tt-sizer .sz-stats .cell { padding: 4px 6px; background: var(--bg-2); border-radius: 2px; }
+      .qopt-mon-tt-sizer .sz-stats .lbl { font: 700 8.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); display: block; }
+      .qopt-mon-tt-sizer .sz-stats .v { font: 800 12px var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+      .qopt-mon-tt-sizer .sz-stats .v.gn { color: var(--gn); } .qopt-mon-tt-sizer .sz-stats .v.rd { color: var(--rd); }
+      .qopt-mon-tt-sizer .sz-override { margin-top: 6px; display: flex; align-items: center; gap: 6px; }
+      .qopt-mon-tt-sizer .sz-override .lbl { font: 700 9px var(--mono); letter-spacing: 0.10em; text-transform: uppercase; color: var(--ink-3); }
+      .qopt-mon-tt-sizer .sz-sel { flex: 1; background: var(--bg); color: var(--ink); border: 1px solid var(--line); font: 500 11px var(--mono); padding: 3px 6px; border-radius: 2px; cursor: pointer; }
+      /* Trade journal */
+      .qopt-journal { width: 100%; min-height: 60px; resize: vertical; background: var(--bg-2); border: 1px solid var(--line); border-radius: 2px; padding: 8px; font: 12px/1.5 var(--mono); color: var(--ink); }
+      .qopt-journal:focus { border-color: var(--copper); outline: none; }
+      .qopt-journal-foot { margin-top: 3px; }
+      /* User alerts list */
+      .qopt-alert-row { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--bg-3); border: 1px solid var(--line); border-radius: 2px; margin-bottom: 4px; font: 600 11px var(--mono); }
+      .qopt-alert-row .lbl { color: var(--copper); font-weight: 700; text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.08em; }
+      .qopt-alert-row .op { color: var(--ink-2); }
+      .qopt-alert-row .thr { color: var(--ink); font-weight: 700; }
+      .qopt-alert-del { margin-left: auto; background: transparent; color: var(--ink-3); border: none; cursor: pointer; font-size: 12px; }
+      .qopt-alert-del:hover { color: var(--rd); }
+      /* Saved scans bar */
+      .qopt-saved-bar { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 16px; background: var(--bg); border-bottom: 1px solid var(--line); align-items: center; }
+      .qopt-saved-lbl { font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.18em; text-transform: uppercase; margin-right: 6px; }
+      .qopt-saved-pill { display: inline-flex; align-items: center; gap: 4px; background: var(--bg-3); color: var(--ink-1); border: 1px solid var(--line); padding: 4px 10px; border-radius: 2px; font: 600 10.5px var(--mono); cursor: pointer; }
+      .qopt-saved-pill:hover { border-color: var(--copper); color: var(--ink); }
+      .qopt-saved-pill .x { color: var(--ink-3); margin-left: 2px; font-size: 12px; }
+      .qopt-saved-pill .x:hover { color: var(--rd); }
+      .qopt-saved-add { background: transparent; color: var(--copper); border: 1px dashed var(--line); padding: 4px 10px; border-radius: 2px; font: 600 10.5px var(--mono); cursor: pointer; margin-left: auto; }
+      .qopt-saved-add:hover { border-color: var(--copper); background: rgba(217,119,87,0.06); }
     `;
     document.head.appendChild(s);
   }
@@ -20759,12 +20854,33 @@ const QuantOptions = (function() {
       ${_renderQoptTabsBar(picks)}
       ${_qoptTab === 'scanner' ? _renderQoptFilterBar(visible.length, sectors) : ''}
       ${_qoptTab === 'scanner' ? _renderQoptQuickFilters() : ''}
+      ${_qoptTab === 'scanner' ? _renderQoptSavedScans() : ''}
       ${body}
     `;
     // 2026-05-27 · async populate detail-pane extras (alt-data / news / corp actions)
     if (_qoptTab === 'scanner' && selectedPick) {
       setTimeout(() => _qoptLoadDetailExtras(selectedPick), 0);
     }
+  }
+
+  // ── Saved scans bar — captures current filter combo for one-click recall ──
+  function _renderQoptSavedScans() {
+    if (!_qoptSavedScans.length) {
+      return `<div class="qopt-saved-bar">
+        <span class="qopt-saved-lbl">Saved Scans</span>
+        <span style="color:var(--ink-3);font:600 10px var(--mono);font-style:italic">No saved scans yet</span>
+        <button class="qopt-saved-add" onclick="QuantOptions.saveCurrentScan()">+ Save current filters</button>
+      </div>`;
+    }
+    return `<div class="qopt-saved-bar">
+      <span class="qopt-saved-lbl">Saved Scans</span>
+      ${_qoptSavedScans.map((s, i) => `
+        <button class="qopt-saved-pill" onclick="QuantOptions.loadScan(${i})">
+          ${s.name}
+          <span class="x" onclick="event.stopPropagation();QuantOptions.removeScan(${i})">✕</span>
+        </button>`).join('')}
+      <button class="qopt-saved-add" onclick="QuantOptions.saveCurrentScan()">+ Save current</button>
+    </div>`;
   }
 
   // ── Bottom analytics row — fills empty space under the scanner table ──
@@ -21059,6 +21175,86 @@ const QuantOptions = (function() {
     };
     window.QuantOptions.setQuickFilter = function(k) {
       _qoptQuickFilter = _qoptQuickFilter === k ? null : k;
+      if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
+    };
+    window.QuantOptions.updateSize = function(tk, val) {
+      const n = +val || 1;
+      _qoptSizes[tk] = n; _qoptPersist();
+      const p = (window._qoptLastData?.picks || []).find(x => x.ticker === tk);
+      if (!p) return;
+      const isBull = (+p.put_call_ratio || 1) < 1.0;
+      const override = _qoptStratOverride[tk];
+      const ivRich = p.iv_percentile != null && p.iv_percentile > 70;
+      const haveShort = isBull ? p.iv_25d_call_mark != null : p.iv_25d_put_mark != null;
+      const useSpread = (override === 'bull_call_spread' || override === 'bear_put_spread')
+        || (!override && ivRich && haveShort);
+      const sk = useSpread ? (isBull ? p.iv_25d_call_strike : p.iv_25d_put_strike) : null;
+      const sm = useSpread ? (isBull ? p.iv_25d_call_mark   : p.iv_25d_put_mark)   : null;
+      const entryPx = useSpread && sm != null ? p.atm_mark - sm : p.atm_mark;
+      const total = entryPx * 100 * n;
+      const maxRisk = entryPx * 100 * n;
+      const maxReward = useSpread && sk != null
+        ? (Math.abs(sk - p.atm_strike) - (p.atm_mark - sm)) * 100 * n
+        : null;
+      const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+      set('qopt-sz-num-' + tk, n);
+      set('qopt-buy-ct-' + tk, n);
+      set('qopt-sz-total-' + tk, '$' + total.toFixed(0));
+      set('qopt-sz-risk-' + tk, '$' + maxRisk.toFixed(0));
+      set('qopt-sz-reward-' + tk, maxReward != null ? '$' + maxReward.toFixed(0) : 'uncapped');
+    };
+    window.QuantOptions.overrideStrategy = function(tk, val) {
+      if (val === 'auto') delete _qoptStratOverride[tk]; else _qoptStratOverride[tk] = val;
+      _qoptPersist();
+      if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
+    };
+    window.QuantOptions.saveNote = function(tk, val) {
+      if (val && val.trim()) _qoptNotes[tk] = val; else delete _qoptNotes[tk];
+      _qoptPersist();
+    };
+    window.QuantOptions.addAlert = function(tk) {
+      const metric = prompt('Alert metric · choose: ivrp · skew · term · price', 'ivrp');
+      if (!metric) return;
+      const op = prompt('Operator: > or <', '>');
+      if (!op) return;
+      const threshold = parseFloat(prompt('Threshold (% for ivrp/skew, raw for term/price)', '5'));
+      if (isNaN(threshold)) return;
+      _qoptUserAlerts.push({ ticker: tk, metric, op, threshold, ts: new Date().toISOString() });
+      _qoptPersist();
+      if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
+    };
+    window.QuantOptions.removeAlert = function(idx) {
+      _qoptUserAlerts.splice(idx, 1);
+      _qoptPersist();
+      if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
+    };
+    window.QuantOptions.addNote = function(tk) {
+      const el = document.getElementById('qopt-journal-' + tk);
+      if (el) { el.focus(); el.scrollIntoView({behavior: 'smooth', block: 'center'}); }
+    };
+    window.QuantOptions.saveCurrentScan = function() {
+      const name = prompt('Name this scan:', 'My Scan ' + (_qoptSavedScans.length + 1));
+      if (!name) return;
+      _qoptSavedScans.push({
+        name, dir: _qoptActiveDir, iv: _qoptActiveIvReg, coh: _qoptActiveCohort,
+        sector: _qoptActiveSector, quick: _qoptQuickFilter, sort: _qoptSort,
+      });
+      _qoptPersist();
+      if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
+    };
+    window.QuantOptions.loadScan = function(idx) {
+      const s = _qoptSavedScans[idx]; if (!s) return;
+      _qoptActiveDir    = s.dir    || 'all';
+      _qoptActiveIvReg  = s.iv     || 'all';
+      _qoptActiveCohort = s.coh    || 'all';
+      _qoptActiveSector = s.sector || 'all';
+      _qoptQuickFilter  = s.quick  || null;
+      _qoptSort         = s.sort   || 'conv_desc';
+      if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
+    };
+    window.QuantOptions.removeScan = function(idx) {
+      _qoptSavedScans.splice(idx, 1);
+      _qoptPersist();
       if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
     };
     window.QuantOptions.exportCsv = function() {
