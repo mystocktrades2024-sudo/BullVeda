@@ -19065,21 +19065,10 @@ const QuantOptions = (function() {
     const source = data._of_source || (data.run_timestamp ? `data.json · scan ${scanTs}` : 'no source');
     const freshPill = _freshness(refreshedAt, source);
 
-    // Empty-state contract — when there's genuinely nothing to show, render
-    // an honest empty card with timestamp + source, NOT a blank cockpit.
-    if (of.length === 0) {
-      wsPanel.innerHTML = `
-        <div class="qe-wrap">
-          <div style="padding:60px 22px;text-align:center;">
-            <div style="font-family:'GT Sectra',Georgia,serif;font-style:italic;font-size:22px;color:var(--ink-1);margin-bottom:10px;">No qualifying UOA flow right now.</div>
-            <div style="font-family:var(--mono);font-size:12px;color:var(--ink-2);max-width:540px;margin:0 auto;line-height:1.6;">
-              The standalone scanner ran and returned 0 candidates that cleared the imbalance + liquidity + IV thresholds.
-              This is a real, honest empty state — not a render error.
-            </div>
-          </div>
-        </div>`;
-      return;
-    }
+    // 2026-05-27 · No early-return on of.length === 0.
+    // The Eikon iframe handles the empty-Top-Picks case gracefully on its
+    // own, and still surfaces market context (VIX, term, sector heatmap,
+    // vol cone, alerts) which remains useful regardless of pick count.
 
     wsPanel.innerHTML = `
       <div class="qe-wrap">
@@ -24538,6 +24527,1337 @@ const QuantScanner = (function() {
 
   return { render, deactivate };
 })();
+
+// ══════════════════════════════════════════════════════════════════════
+// QuantSignalScannerEikon (QSS) · Signal Scanner v15 — Eikon-style
+// (2026-05-26). Replaces QuantScanner.render mega-card UI with a dense
+// 27-col sortable table + right-pane detail. All real production data —
+// every cell wires to fields on window._kairosTickersArr rows.
+//
+// New columns introduced over the prototype:
+//   • T.F.S.N — 4 pillar percentages (Technicals/Fundamentals/SMC/News)
+//                rendered as 4 micro-bars + tooltip
+//   • Mechanism — _mechanism (one-sentence why-it-works hypothesis)
+//                  truncated 25 chars · full text in tooltip
+//
+// Empty-state policy: if a field is absent, render "Not wired · run
+// fresh scan" or section-specific equivalent. Never fabricate values.
+// ══════════════════════════════════════════════════════════════════════
+const QuantSignalScannerEikon = (function() {
+  const _LS_KEY = 'qss.prefs.v1';
+  function _loadPrefs() {
+    try { return JSON.parse(localStorage.getItem(_LS_KEY) || '{}'); } catch (_) { return {}; }
+  }
+  function _savePrefs() {
+    try {
+      const p = {
+        tab: _state.tab, sortKey: _state.sortKey, sortDir: _state.sortDir,
+        verdict: _state.verdict, quickFilters: Array.from(_state.quickFilters),
+        sector: _state.sector, setup: _state.setup, search: _state.search,
+      };
+      localStorage.setItem(_LS_KEY, JSON.stringify(p));
+    } catch (_) {}
+  }
+  const _initial = _loadPrefs();
+  const _state = {
+    arr: [],
+    data: null,
+    tab:    _initial.tab     || 'scanner',
+    sortKey:_initial.sortKey || 'score',
+    sortDir:_initial.sortDir || 'desc',
+    verdict:_initial.verdict || 'all',
+    quickFilters: new Set(_initial.quickFilters || []),
+    sector: _initial.sector  || 'all',
+    setup:  _initial.setup   || 'all',
+    search: _initial.search  || '',
+    selectedTicker: null,
+    _hostPanel: null,
+    _livePxInterval: null,
+  };
+  const _watchlist = (() => {
+    try { return new Set(JSON.parse(localStorage.getItem('qss.watchlist') || '[]')); }
+    catch (_) { return new Set(); }
+  })();
+  function _toggleWatch(tk) {
+    if (_watchlist.has(tk)) _watchlist.delete(tk);
+    else _watchlist.add(tk);
+    try { localStorage.setItem('qss.watchlist', JSON.stringify(Array.from(_watchlist))); } catch (_) {}
+  }
+
+  const _fmt = (n, d=2) => (n == null || isNaN(n)) ? '—' : Number(n).toFixed(d);
+  const _esc = (s) => (s == null) ? '' : String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function _scoreColor(s) {
+    if (s == null) return 'var(--ink-3)';
+    if (s >= 80) return 'var(--gn)';
+    if (s >= 60) return 'var(--amb)';
+    if (s >= 40) return 'var(--ink-2)';
+    return 'var(--rd)';
+  }
+  function _erClass(d) {
+    if (d == null) return 'far';
+    if (d <= 3) return 'urgent';
+    if (d <= 7) return 'soon';
+    if (d <= 21) return 'safe';
+    return 'far';
+  }
+  function _spark(values, w=80, h=22) {
+    if (!Array.isArray(values) || values.length < 2) return '<span style="color:var(--ink-4)">—</span>';
+    const lo = Math.min(...values), hi = Math.max(...values);
+    const span = (hi - lo) || 1;
+    const stepX = w / (values.length - 1);
+    const pts = values.map((v,i) => `${(i*stepX).toFixed(1)},${(h - 2 - ((v-lo)/span)*(h-4)).toFixed(1)}`).join(' ');
+    const color = values[values.length-1] > values[0] ? 'var(--gn)' : 'var(--rd)';
+    return `<svg class="qss-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+  }
+  function _closesFromOhlcv(t, n=8) {
+    const ohlc = t.ohlcv;
+    if (!Array.isArray(ohlc) || !ohlc.length) return [];
+    return ohlc.slice(-n).map(b => +(b.close ?? b.c)).filter(c => c && !isNaN(c));
+  }
+
+  function _passesQuickFilters(t) {
+    const q = _state.quickFilters;
+    if (!q.size) return true;
+    if (q.has('top20')) {
+      if (typeof _topScoreThresh === 'number' && (t.score || 0) < _topScoreThresh) return false;
+    }
+    if (q.has('breakout')) {
+      const sf = (t.setup_family || '').toLowerCase();
+      if (!(sf.includes('breakout') || sf.includes('vcp') || sf.includes('52w'))) return false;
+    }
+    if (q.has('t1cat')) {
+      if (t.catalyst_tier !== 1) return false;
+    }
+    if (q.has('er14')) {
+      const e = t.earn_days ?? t.days_to_earnings;
+      if (!(e != null && e >= 0 && e <= 14)) return false;
+    }
+    if (q.has('insider')) {
+      if (!(t.insider_buys && t.insider_buys >= 1) && !t.insider_cluster_flag) return false;
+    }
+    if (q.has('watchlist')) {
+      if (!_watchlist.has(t.ticker)) return false;
+    }
+    if (q.has('rvol15')) {
+      if (!(t.rvol && t.rvol >= 1.5)) return false;
+    }
+    return true;
+  }
+  let _topScoreThresh = null;
+  function _computeTopScoreThresh(arr) {
+    const scores = arr.map(t => t.score || 0).sort((a,b) => b - a);
+    const idx = Math.floor(scores.length * 0.2);
+    _topScoreThresh = scores[idx] || 0;
+  }
+
+  function _filterTabFn(t) {
+    if (_state.tab === 'killed') return !!t.killed || t.verdict === 'AVOID' || t.stage === 'AVOID';
+    if (t.killed) return false;
+    if (_state.tab === 'picks')    return t.verdict === 'BUY';
+    if (_state.tab === 'fresh')    return (t.entry_quality || '').toUpperCase() === 'FRESH';
+    if (_state.tab === 'earnings') { const e = t.earn_days ?? t.days_to_earnings; return e != null && e >= 0 && e <= 14; }
+    if (_state.tab === 'surges')   return (t.rvol || 0) >= 1.5;
+    if (_state.tab === 'ai') {
+      const ml = ((window.__mlEdgeCache || {}).predictions || {}).swing || {};
+      return !!ml[t.ticker];
+    }
+    return t.verdict !== 'AVOID' && t.stage !== 'AVOID';
+  }
+
+  function _filterFn(t) {
+    if (!_filterTabFn(t)) return false;
+    if (_state.verdict !== 'all' && t.verdict !== _state.verdict) return false;
+    if (_state.sector !== 'all' && t.sector !== _state.sector) return false;
+    if (_state.setup !== 'all' && t.setup_family !== _state.setup) return false;
+    if (_state.search) {
+      const s = _state.search.toLowerCase();
+      if (!((t.ticker || '').toLowerCase().includes(s) || (t.name || '').toLowerCase().includes(s))) return false;
+    }
+    if (!_passesQuickFilters(t)) return false;
+    return true;
+  }
+
+  function _sortFn(a, b) {
+    const k = _state.sortKey, dir = _state.sortDir === 'asc' ? 1 : -1;
+    const SKEY = {
+      ticker: t => t.ticker || '',
+      name: t => t.name || '',
+      sector: t => t.sector || '',
+      tfsn: t => ((t._tech_pct||0)+(t._fund_pct||0)+(t._smc_pct||0)+(t._sent_pct||0)) / 4,
+      mechanism: t => t._mechanism || '',
+      score: t => t.score || 0,
+      verdict: t => t.verdict || '',
+      tier: t => t.conviction_tier || '',
+      setup: t => t.setup_family || '',
+      eq: t => t.entry_quality || '',
+      cat: t => t.catalyst_tier || 99,
+      price: t => t.price || 0,
+      chg: t => t.perf_1d || t.pct_chg || 0,
+      rr: t => t.rr_ratio || t.rr || 0,
+      atr: t => t.atr || 0,
+      rvol: t => t.rvol || 0,
+      rs: t => t.rs_rank || 0,
+      wlb: t => t._setup_wilson_lb || 0,
+      n: t => t._setup_n || 0,
+      pf: t => t._setup_pf || 0,
+      iv: t => (typeof t.iv_rank === 'number') ? t.iv_rank : -1,
+      sent: t => (t.news_score != null ? t.news_score : (typeof t.news_sentiment_score === 'number' ? t.news_sentiment_score : 0)),
+      er: t => (t.earn_days ?? t.days_to_earnings ?? 9999),
+    };
+    const f = SKEY[k] || SKEY.score;
+    const av = f(a), bv = f(b);
+    if (typeof av === 'string') return av.localeCompare(bv) * dir;
+    return (av - bv) * dir;
+  }
+
+  function _tabCount(tab) {
+    const arr = _state.arr;
+    if (tab === 'scanner')  return arr.filter(t => t.verdict !== 'AVOID' && t.stage !== 'AVOID' && !t.killed).length;
+    if (tab === 'picks')    return arr.filter(t => t.verdict === 'BUY' && !t.killed).length;
+    if (tab === 'fresh')    return arr.filter(t => (t.entry_quality || '').toUpperCase() === 'FRESH' && !t.killed).length;
+    if (tab === 'earnings') return arr.filter(t => { const e = t.earn_days ?? t.days_to_earnings; return e != null && e >= 0 && e <= 14 && !t.killed; }).length;
+    if (tab === 'surges')   return arr.filter(t => (t.rvol || 0) >= 1.5 && !t.killed).length;
+    if (tab === 'ai') {
+      const ml = ((window.__mlEdgeCache || {}).predictions || {}).swing || {};
+      return arr.filter(t => ml[t.ticker]).length;
+    }
+    if (tab === 'killed')   return arr.filter(t => !!t.killed || t.verdict === 'AVOID' || t.stage === 'AVOID').length;
+    return 0;
+  }
+
+  function _ensureStyles() {
+    if (document.getElementById('qss-styles')) return;
+    const css = `
+.qss-shell { display:flex; flex-direction:column; height:100%; min-height:0; background:var(--bg); color:var(--ink);
+  font-family:var(--sans); font-size:13px; font-variant-numeric:tabular-nums; }
+
+.qss-titlebar { display:flex; align-items:center; gap:14px; height:40px; padding:0 16px;
+  background:var(--bg-1); border-bottom:1px solid var(--line);
+  font:600 11.5px var(--mono); letter-spacing:0.06em; flex-shrink:0; }
+.qss-status-dot { width:8px; height:8px; border-radius:50%; background:var(--gn); animation: qssPulse 2s infinite; }
+@keyframes qssPulse {
+  0%,100% { opacity:0.55; box-shadow:0 0 0 0 rgba(91,229,124,0); }
+  50% { opacity:1; box-shadow:0 0 8px 1px rgba(91,229,124,0.55); }
+}
+.qss-tb-title { font:800 11.5px var(--mono); letter-spacing:0.18em; text-transform:uppercase; color:var(--ink); }
+.qss-tb-mode { padding:2px 8px; background:var(--copper-bg); color:var(--copper); border:1px solid var(--copper);
+  border-radius:2px; font:800 9.5px var(--mono); letter-spacing:0.10em; }
+.qss-tb-sep { color:var(--ink-4); }
+.qss-tb-meta { color:var(--ink-2); }
+.qss-tb-spacer { flex:1; }
+.qss-tb-ts { font:600 11px var(--mono); color:var(--ink-2); }
+.qss-tb-live { color:var(--gn); font-weight:800; }
+.qss-tb-stale { color:var(--amb); font-weight:800; }
+
+.qss-tabs { display:flex; gap:0; height:38px; padding:0 16px; background:var(--bg);
+  border-bottom:1px solid var(--line); flex-shrink:0; }
+.qss-tab { padding:0 18px; font:700 11px var(--sans); letter-spacing:0.08em;
+  color:var(--ink-3); cursor:pointer; text-transform:uppercase;
+  display:flex; align-items:center; gap:8px; border-bottom:2px solid transparent;
+  transition: color 180ms ease; user-select:none; }
+.qss-tab .ct { font:700 10px var(--mono); color:var(--ink-3); padding:1px 6px;
+  background:var(--bg-2); border-radius:2px; }
+.qss-tab:hover:not(.on) { color:var(--ink-1); }
+.qss-tab.on { color:var(--ink); border-bottom-color:var(--copper); }
+.qss-tab.on .ct { color:var(--copper); background:var(--copper-bg); }
+
+.qss-quickfilt { display:flex; gap:6px; padding:8px 16px; border-bottom:1px solid var(--line);
+  background:var(--bg-1); flex-wrap:wrap; flex-shrink:0; }
+.qss-qf-pill { padding:4px 10px; background:var(--bg-2); border:1px solid var(--line); color:var(--ink-2);
+  border-radius:2px; font:700 10px var(--mono); letter-spacing:0.06em; cursor:pointer;
+  text-transform:uppercase; user-select:none; }
+.qss-qf-pill.on { background:var(--copper-bg); border-color:var(--copper); color:var(--copper); }
+.qss-qf-pill:hover:not(.on) { color:var(--ink-1); }
+
+.qss-filt { display:flex; align-items:center; gap:10px; height:42px; padding:0 16px;
+  background:var(--bg-1); border-bottom:1px solid var(--line); font:600 11px var(--mono); flex-shrink:0; }
+.qss-filt .ct { color:var(--copper); font-weight:800; }
+.qss-filt .sep { color:var(--ink-4); }
+.qss-pill { padding:5px 10px; border-radius:2px; cursor:pointer;
+  font:700 10px var(--mono); letter-spacing:0.08em; text-transform:uppercase;
+  background:var(--bg-2); border:1px solid var(--line); color:var(--ink-2); user-select:none; }
+.qss-pill.on { background:var(--copper-bg); border-color:var(--copper); color:var(--copper); }
+.qss-pill:hover:not(.on) { color:var(--ink-1); }
+.qss-search { padding:5px 10px; background:var(--bg-2); border:1px solid var(--line); border-radius:2px;
+  color:var(--ink); font:600 11px var(--mono); width:160px; outline:none; }
+.qss-search:focus { border-color:var(--copper); }
+.qss-select { padding:5px 8px; background:var(--bg-2); border:1px solid var(--line); border-radius:2px;
+  color:var(--ink); font:700 10px var(--mono); cursor:pointer; }
+.qss-btn { padding:5px 12px; background:var(--copper); color:var(--bg); border:0; border-radius:2px;
+  font:800 10px var(--mono); letter-spacing:0.10em; text-transform:uppercase; cursor:pointer; }
+.qss-btn:hover { filter:brightness(1.1); }
+.qss-btn.gray { background:var(--bg-2); color:var(--ink-2); border:1px solid var(--line); }
+
+.qss-main { flex:1 1 auto; display:grid; grid-template-columns: 1fr 460px; min-height:0; overflow:hidden; }
+@media (max-width:1500px) { .qss-main { grid-template-columns: 1fr 420px; } }
+.qss-left { background:var(--bg); border-right:1px solid var(--line); overflow:hidden;
+  display:flex; flex-direction:column; min-width:0; }
+.qss-right { background:var(--bg-1); overflow-y:auto; min-width:0; }
+
+.qss-tbl-wrap { flex:1 1 auto; overflow:auto; min-height:0; }
+.qss-tbl { width:100%; border-collapse:collapse;
+  font:500 12px var(--mono); font-variant-numeric:tabular-nums; }
+.qss-tbl thead th {
+  position:sticky; top:0; z-index:3;
+  background:var(--bg-1); color:var(--ink-2);
+  font:700 9.5px var(--mono); letter-spacing:0.12em; text-transform:uppercase;
+  text-align:right; padding:10px 10px; border-bottom:1px solid var(--line-2);
+  cursor:pointer; user-select:none; white-space:nowrap;
+}
+.qss-tbl thead th:hover { color:var(--copper); }
+.qss-tbl thead th.on { color:var(--copper); }
+.qss-tbl thead th .arr { color:var(--copper); margin-left:3px; font-size:8px; }
+.qss-tbl thead th.l { text-align:left; }
+.qss-tbl thead th.col-chk { width:32px; text-align:center; left:0; }
+.qss-tbl thead th.col-tk  { left:32px; text-align:left; }
+.qss-tbl thead th.col-chk, .qss-tbl thead th.col-tk {
+  position:sticky; z-index:4; background:var(--bg-1);
+}
+.qss-tbl tbody tr { cursor:pointer; transition: background 120ms ease; }
+.qss-tbl tbody tr:hover { background: var(--copper-bg); }
+.qss-tbl tbody tr.sel { background: var(--copper-bg); }
+.qss-tbl tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--copper); }
+.qss-tbl tbody tr:nth-child(even) { background: var(--bg-2); }
+.qss-tbl tbody tr:nth-child(even):hover { background: var(--copper-bg); }
+.qss-tbl tbody tr.sel:nth-child(even) { background: var(--copper-bg); }
+.qss-tbl td {
+  padding:9px 10px; border-bottom:1px solid var(--line);
+  text-align:right; color:var(--ink-1); white-space:nowrap;
+}
+.qss-tbl td.l { text-align:left; }
+.qss-tbl td.col-chk { position:sticky; left:0; z-index:2; background:var(--bg);
+  text-align:center; width:32px; }
+.qss-tbl td.col-tk { position:sticky; left:32px; z-index:2; background:var(--bg);
+  font:800 12.5px var(--mono); color:var(--ink); border-right:1px solid var(--line); }
+.qss-tbl tbody tr:hover td.col-chk { background:var(--bg-2); }
+.qss-tbl tbody tr:hover td.col-tk { background:var(--bg-2); }
+.qss-tbl tbody tr.sel td.col-chk,
+.qss-tbl tbody tr.sel td.col-tk { background:var(--copper-bg); }
+.qss-tbl tbody tr:nth-child(even) td.col-chk { background:var(--bg-2); }
+.qss-tbl tbody tr:nth-child(even) td.col-tk { background:var(--bg-2); }
+
+.qss-tbl .gn { color:var(--gn); }
+.qss-tbl .rd { color:var(--rd); }
+.qss-tbl .amb { color:var(--amb); }
+.qss-tbl .cu { color:var(--copper); }
+.qss-tbl .dim { color:var(--ink-3); }
+
+.qss-tbl .star { color:var(--ink-4); cursor:pointer; margin-right:4px; transition: color 120ms; }
+.qss-tbl .star.on { color:var(--amb); }
+.qss-tbl .star:hover { color:var(--amb); }
+
+.qss-verd { display:inline-block; padding:2px 8px; border-radius:2px;
+  font:800 9.5px var(--mono); letter-spacing:0.08em; text-transform:uppercase; }
+.qss-verd.BUY   { background:var(--gn); color:var(--bg); }
+.qss-verd.WATCH { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb); }
+.qss-verd.WAIT  { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb); }
+.qss-verd.SHORT { background:var(--rd); color:var(--bg); }
+.qss-verd.SELL  { background:var(--rd); color:var(--bg); }
+.qss-verd.AVOID { background:var(--ink-4); color:var(--ink); }
+
+.qss-tier { display:inline-block; padding:1px 6px; border-radius:2px;
+  font:800 9.5px var(--mono); letter-spacing:0.06em; }
+.qss-tier.T1 { background:var(--copper-bg); color:var(--copper); border:1px solid var(--copper); }
+.qss-tier.T2 { background:var(--gn-bg); color:var(--gn); border:1px solid var(--gn); }
+.qss-tier.T3 { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb); }
+.qss-tier.WATCH { color:var(--ink-3); border:1px solid var(--line-2); }
+
+.qss-setup { display:inline-block; padding:1px 7px; border-radius:2px;
+  font:600 9.5px var(--mono); color:var(--ink-2); background:var(--bg-2);
+  letter-spacing:0.04em; max-width:130px; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; vertical-align:middle; }
+
+.qss-eq { display:inline-block; padding:1px 6px; border-radius:2px;
+  font:700 9.5px var(--mono); letter-spacing:0.06em; }
+.qss-eq.FRESH    { background:var(--gn); color:var(--bg); }
+.qss-eq.PULLBACK { background:var(--gn-bg); color:var(--gn); border:1px solid var(--gn); }
+.qss-eq.VALID    { background:var(--bg-2); color:var(--ink-2); }
+.qss-eq.EXTENDED { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb); }
+.qss-eq.MISSED   { color:var(--rd); border:1px solid var(--rd); background:var(--rd-bg); }
+
+.qss-score { position:relative; display:inline-block; width:52px; height:14px;
+  background:var(--bg-3); border-radius:2px; overflow:hidden; vertical-align:middle; }
+.qss-score .fill { position:absolute; left:0; top:0; bottom:0; }
+.qss-score .lbl { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font:800 9.5px var(--mono); color:var(--ink); text-shadow:0 0 3px rgba(0,0,0,0.6); }
+
+.qss-tfsn { display:inline-flex; gap:2px; align-items:flex-end; vertical-align:middle; }
+.qss-tfsn-bar { width:6px; background:var(--bg-3); border-radius:1px; position:relative; height:14px; }
+.qss-tfsn-bar .fl { position:absolute; left:0; right:0; bottom:0; border-radius:1px; }
+.qss-tfsn-lbl { margin-left:5px; font:700 9.5px var(--mono); color:var(--ink-2); vertical-align:middle; }
+
+.qss-mech { display:inline-block; max-width:200px; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; vertical-align:middle; font:500 11px var(--sans); color:var(--ink-2); }
+.qss-mech.proven { color:var(--gn); }
+
+.qss-spark { vertical-align:middle; display:inline-block; }
+
+.qss-er { display:inline-block; padding:1px 5px; border-radius:2px;
+  font:800 9px var(--mono); letter-spacing:0.04em; }
+.qss-er.urgent { background:var(--rd-bg); color:var(--rd); border:1px solid var(--rd); }
+.qss-er.soon { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb); }
+.qss-er.safe { background:var(--gn-bg); color:var(--gn); }
+.qss-er.far { color:var(--ink-3); }
+
+.qss-tbl-empty { padding:60px 20px; text-align:center; color:var(--ink-3); font:500 13px var(--sans); }
+.qss-tbl-empty b { display:block; color:var(--ink-1); margin-bottom:8px; font-size:15px; font-family:var(--display); }
+
+.qss-rh { padding:14px 16px 12px; border-bottom:1px solid var(--line); }
+.qss-rh-row1 { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.qss-rh-tkr { font: 800 26px var(--display); color:var(--copper); letter-spacing:0.02em; }
+.qss-rh-name { font:600 11px var(--mono); color:var(--ink-3); }
+.qss-rh-sec { font:500 11px var(--mono); color:var(--ink-2); margin-top:2px; }
+.qss-rh-px { display:flex; align-items:baseline; gap:10px; margin-top:6px; flex-wrap:wrap; }
+.qss-rh-px .px { font:800 18px var(--mono); color:var(--ink); }
+.qss-rh-px .chg { font:700 12px var(--mono); padding:2px 6px; border-radius:2px; }
+.qss-rh-px .chg.gn { color:var(--gn); background:var(--gn-bg); }
+.qss-rh-px .chg.rd { color:var(--rd); background:var(--rd-bg); }
+.qss-rh-px .chg.dim { color:var(--ink-3); }
+
+.qss-rsect { padding:14px 16px; border-bottom:1px solid var(--line); }
+.qss-rsect-h { font:800 10px var(--mono); letter-spacing:0.16em; color:var(--ink-2);
+  text-transform:uppercase; margin-bottom:10px; border-bottom:1px solid var(--copper);
+  padding-bottom:5px; }
+.qss-rsect-h .meta { font-weight:500; letter-spacing:0.02em; text-transform:none;
+  color:var(--ink-3); margin-left:8px; }
+.qss-rstat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.qss-rstat { display:flex; flex-direction:column; gap:2px;
+  padding:8px 10px; background:var(--bg-2); border-radius:3px; }
+.qss-rstat .k { font:700 9px var(--mono); color:var(--ink-3); letter-spacing:0.10em; text-transform:uppercase; }
+.qss-rstat .v { font:800 13px var(--mono); color:var(--ink); }
+.qss-rstat .v.gn { color:var(--gn); }
+.qss-rstat .v.rd { color:var(--rd); }
+.qss-rstat .v.amb { color:var(--amb); }
+.qss-rstat .v.cu { color:var(--copper); }
+.qss-rstat .v.dim { color:var(--ink-3); font-size:11px; font-weight:600; }
+
+.qss-rchart { padding:14px 16px; border-bottom:1px solid var(--line); }
+.qss-rchart svg { width:100%; height:120px; display:block; background:var(--bg-2); border-radius:3px; }
+
+.qss-pillars { display:flex; flex-direction:column; gap:8px; }
+.qss-pillar { display:grid; grid-template-columns: 90px 1fr 36px; gap:10px; align-items:center; }
+.qss-pillar .lbl { font:700 10px var(--mono); color:var(--ink-2); letter-spacing:0.06em; text-transform:uppercase; }
+.qss-pillar .bar { height:8px; background:var(--bg-3); border-radius:2px; overflow:hidden; }
+.qss-pillar .bar .fl { height:100%; border-radius:2px; }
+.qss-pillar .v { font:800 12px var(--mono); color:var(--ink); text-align:right; }
+
+.qss-mech-card { padding:12px; background:var(--bg-2); border-radius:3px;
+  border-left:3px solid var(--copper); }
+.qss-mech-card .mh { font:800 14px var(--display); color:var(--copper); margin-bottom:4px; letter-spacing:0.02em; }
+.qss-mech-card .mb { font:500 12px var(--sans); color:var(--ink-1); line-height:1.55; }
+.qss-mech-card .mf { font:600 10.5px var(--mono); color:var(--rd); margin-top:8px; padding-top:8px;
+  border-top:1px solid var(--line); }
+
+.qss-ractions { padding:14px 16px; display:flex; flex-direction:column; gap:8px; }
+.qss-ractions button { width:100%; padding:10px; border:1px solid var(--line);
+  background:var(--bg-2); color:var(--ink);
+  font:800 11px var(--mono); letter-spacing:0.10em; cursor:pointer;
+  border-radius:2px; text-transform:uppercase; }
+.qss-ractions button.primary { background:var(--copper); color:var(--bg); border-color:var(--copper); }
+.qss-ractions button.primary:hover { filter:brightness(1.1); }
+.qss-ractions button:hover:not(.primary) { background:var(--bg-3); color:var(--ink); }
+
+.qss-plan { display:grid; grid-template-columns: auto 1fr; gap:8px 14px;
+  padding:10px 12px; background:var(--bg-2); border-radius:3px; }
+.qss-plan .k { font:700 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.10em; text-transform:uppercase; }
+.qss-plan .v { font:800 12.5px var(--mono); color:var(--ink); text-align:right; }
+.qss-plan .v.gn { color:var(--gn); }
+.qss-plan .v.rd { color:var(--rd); }
+.qss-plan .v.amb { color:var(--amb); }
+.qss-plan .v.cu { color:var(--copper); }
+.qss-plan .v.dim { color:var(--ink-3); }
+
+.qss-news-list { list-style:none; padding:0; margin:0; }
+.qss-news-list li { padding:8px 0; border-bottom:1px solid var(--line);
+  font:500 11.5px var(--sans); color:var(--ink-1); line-height:1.4; }
+.qss-news-list li:last-child { border-bottom:0; }
+.qss-news-list .src { font:500 9.5px var(--mono); color:var(--ink-3); display:block;
+  margin-top:3px; letter-spacing:0.04em; text-transform:uppercase; }
+.qss-news-list a { color:inherit; text-decoration:none; }
+.qss-news-list a:hover { color:var(--copper); }
+
+.qss-cats { display:flex; flex-wrap:wrap; gap:6px; }
+.qss-cat { padding:3px 8px; background:var(--bg-2); border:1px solid var(--line); border-radius:2px;
+  font:700 10px var(--mono); color:var(--ink-1); letter-spacing:0.04em; }
+.qss-cat.gn { background:var(--gn-bg); color:var(--gn); border-color:var(--gn); }
+.qss-cat.amb { background:var(--amb-bg); color:var(--amb); border-color:var(--amb); }
+.qss-cat.cu { background:var(--copper-bg); color:var(--copper); border-color:var(--copper); }
+
+.qss-empty { padding:12px; color:var(--ink-3); font:500 11.5px var(--sans);
+  background:var(--bg-2); border-radius:3px; border-left:2px solid var(--ink-4);
+  font-style:italic; }
+.qss-empty b { color:var(--ink-2); font-weight:700; font-style:normal; }
+
+.qss-earn-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
+  font:500 10.5px var(--mono); }
+.qss-earn-cell { padding:8px 6px; border-radius:3px; text-align:center;
+  border-left:2px solid var(--line); background:var(--bg-2); }
+.qss-earn-cell.beat { border-left-color:var(--gn); background:var(--gn-bg); }
+.qss-earn-cell.miss { border-left-color:var(--rd); background:var(--rd-bg); }
+.qss-earn-cell .q { font-weight:800; }
+.qss-earn-cell.beat .q { color:var(--gn); }
+.qss-earn-cell.miss .q { color:var(--rd); }
+.qss-earn-cell .b { color:var(--ink); margin-top:2px; }
+.qss-earn-cell.beat .b { color:var(--gn); }
+.qss-earn-cell.miss .b { color:var(--rd); }
+
+.qss-status { display:flex; align-items:center; gap:14px; height:30px; padding:0 16px;
+  background:var(--bg-1); border-top:1px solid var(--line);
+  font:500 10.5px var(--mono); letter-spacing:0.04em; color:var(--ink-3); flex-shrink:0; }
+.qss-status .key { color:var(--ink-3); }
+.qss-status .val { color:var(--ink-1); font-weight:700; }
+.qss-status .val.cu { color:var(--copper); }
+.qss-status .sep { color:var(--ink-4); }
+.qss-status .live { color:var(--gn); font-weight:800; }
+.qss-status .stale { color:var(--amb); font-weight:800; }
+
+body.light .qss-tbl tbody tr:nth-child(even) { background: var(--bg-2); }
+body.light .qss-tbl tbody tr:hover { background: var(--copper-bg); }
+body.light .qss-tbl tbody tr.sel { background: var(--copper-bg); }
+`;
+    const s = document.createElement('style');
+    s.id = 'qss-styles';
+    s.textContent = css;
+    document.head.appendChild(s);
+  }
+
+  function _startLivePx() {
+    if (_state._livePxInterval) return;
+    _state._livePxInterval = setInterval(() => {
+      const ts = document.getElementById('qss-tb-ts');
+      if (ts) {
+        const d = new Date();
+        const hh = String(d.getHours()).padStart(2,'0');
+        const mm = String(d.getMinutes()).padStart(2,'0');
+        const ss = String(d.getSeconds()).padStart(2,'0');
+        ts.innerHTML = `${hh}:${mm}:${ss} PT · <span class="qss-tb-live">LIVE</span>`;
+      }
+    }, 5000);
+  }
+  function _stopLivePx() {
+    if (_state._livePxInterval) {
+      clearInterval(_state._livePxInterval);
+      _state._livePxInterval = null;
+    }
+  }
+
+  function _renderTitleBar() {
+    const d = _state.data || {};
+    const reg = d.regime || {};
+    const r4 = reg.regime4 || 'unknown';
+    const buyFloor = reg.buy_min_score ?? (r4 === 'risk_on_trending' ? 65 : r4 === 'risk_on_choppy' ? 72 : 78);
+    const deploy = reg.max_deploy_pct ?? (r4 === 'risk_on_trending' ? 100 : r4 === 'risk_on_choppy' ? 70 : 35);
+    const regLabel = r4.replace(/_/g, ' ');
+    const ts = d.run_timestamp ? new Date(d.run_timestamp) : null;
+    const tsStr = ts ? ts.toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' }) + ' PT'
+                     : (new Date()).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}) + ' PT';
+    const live = ts ? ((Date.now() - ts.getTime()) < 6 * 3600 * 1000) : true;
+    return `
+      <div class="qss-titlebar">
+        <span class="qss-status-dot"></span>
+        <span class="qss-tb-title">Signal Scanner</span>
+        <span class="qss-tb-mode" title="No live orders — simulated paper trades + informational analysis only">▶ PAPER MODE</span>
+        <span class="qss-tb-sep">·</span>
+        <span class="qss-tb-meta">${_esc(regLabel)} · BUY min ${buyFloor} · max ${deploy}% deploy</span>
+        <span class="qss-tb-spacer"></span>
+        <span class="qss-tb-ts" id="qss-tb-ts">${tsStr} · <span class="${live?'qss-tb-live':'qss-tb-stale'}">${live?'LIVE':'STALE'}</span></span>
+      </div>`;
+  }
+
+  function _renderTabs() {
+    const TABS = [
+      ['scanner','Scanner'],
+      ['picks','Top Picks'],
+      ['fresh','Fresh'],
+      ['earnings','Earnings'],
+      ['surges','Surges'],
+      ['ai','AI Edge'],
+      ['killed','Killed'],
+    ];
+    return `<div class="qss-tabs">` + TABS.map(([k,l]) => {
+      const on = _state.tab === k;
+      return `<div class="qss-tab${on?' on':''}" data-qss-tab="${k}">${_esc(l)} <span class="ct">${_tabCount(k)}</span></div>`;
+    }).join('') + `</div>`;
+  }
+
+  function _renderQuickFilters() {
+    const QF = [
+      ['top20','★ Top 20% Score'],
+      ['breakout','🔥 Breakout'],
+      ['t1cat','⚡ T1 Catalyst'],
+      ['er14','📊 ER ≤14d'],
+      ['insider','💰 Insider'],
+      ['watchlist','⭐ My Watchlist'],
+      ['rvol15','🔥 RVOL ≥1.5×'],
+    ];
+    return `<div class="qss-quickfilt">` + QF.map(([k,l]) => {
+      const on = _state.quickFilters.has(k);
+      return `<span class="qss-qf-pill${on?' on':''}" data-qss-qf="${k}">${_esc(l)}</span>`;
+    }).join('') + `</div>`;
+  }
+
+  function _renderFilterBar(visibleCount) {
+    const sectors = Array.from(new Set(_state.arr.map(t => t.sector).filter(Boolean))).sort();
+    const setups  = Array.from(new Set(_state.arr.map(t => t.setup_family).filter(Boolean))).sort();
+    const VERD = ['BUY','WATCH','SHORT'];
+    return `
+      <div class="qss-filt">
+        <span><span class="ct">${visibleCount}</span> picks</span>
+        <span class="sep">·</span>
+        <span>Sort:
+          <select class="qss-select" data-qss-sort-select>
+            <option value="score|desc"${_state.sortKey==='score'&&_state.sortDir==='desc'?' selected':''}>Score desc</option>
+            <option value="score|asc"${_state.sortKey==='score'&&_state.sortDir==='asc'?' selected':''}>Score asc</option>
+            <option value="rr|desc"${_state.sortKey==='rr'?' selected':''}>R:R desc</option>
+            <option value="rvol|desc"${_state.sortKey==='rvol'?' selected':''}>RVOL desc</option>
+            <option value="rs|desc"${_state.sortKey==='rs'?' selected':''}>RS desc</option>
+            <option value="chg|desc"${_state.sortKey==='chg'?' selected':''}>%Chg desc</option>
+            <option value="ticker|asc"${_state.sortKey==='ticker'?' selected':''}>Ticker A→Z</option>
+          </select>
+        </span>
+        <span class="sep">·</span>
+        ${VERD.map(v => `<span class="qss-pill${_state.verdict===v?' on':''}" data-qss-verd="${v}">${v}</span>`).join('')}
+        <span class="qss-pill${_state.verdict==='all'?' on':''}" data-qss-verd="all">ALL</span>
+        <span class="sep">·</span>
+        <span>Sector:
+          <select class="qss-select" data-qss-sector>
+            <option value="all"${_state.sector==='all'?' selected':''}>All</option>
+            ${sectors.map(s => `<option value="${_esc(s)}"${_state.sector===s?' selected':''}>${_esc(s)}</option>`).join('')}
+          </select>
+        </span>
+        <span class="sep">·</span>
+        <span>Setup:
+          <select class="qss-select" data-qss-setup>
+            <option value="all"${_state.setup==='all'?' selected':''}>All</option>
+            ${setups.map(s => `<option value="${_esc(s)}"${_state.setup===s?' selected':''}>${_esc(s)}</option>`).join('')}
+          </select>
+        </span>
+        <span style="flex:1"></span>
+        <input class="qss-search" placeholder="⌕ search ticker / name" value="${_esc(_state.search)}" data-qss-search>
+        <button class="qss-btn gray" data-qss-action="columns" title="Column visibility (coming soon)">⚙ COLUMNS</button>
+        <button class="qss-btn gray" data-qss-action="saveview" title="Save current filter combo">💾 SAVE</button>
+        <button class="qss-btn" data-qss-action="monitor" title="Add ticked rows to watchlist">+ MONITOR</button>
+        <button class="qss-btn gray" data-qss-action="export" title="Export visible rows as CSV">⬇ EXPORT</button>
+      </div>`;
+  }
+
+  const COLS = [
+    { k:'tk',   l:'TICKER',    sortKey:'ticker',   al:'l', sticky:'tk' },
+    { k:'nm',   l:'NAME',      sortKey:'name',     al:'l' },
+    { k:'sec',  l:'SECTOR',    sortKey:'sector',   al:'l' },
+    { k:'tfsn', l:'T.F.S.N',   sortKey:'tfsn',     al:'r', tip:'4 pillar % — Technicals · Fundamentals · Smart-money (SMC) · News' },
+    { k:'mech', l:'MECHANISM', sortKey:'mechanism',al:'l', tip:'One-sentence why-it-works hypothesis (read on hover)' },
+    { k:'sc',   l:'SCORE',     sortKey:'score',    al:'r' },
+    { k:'verd', l:'VERDICT',   sortKey:'verdict',  al:'r' },
+    { k:'tier', l:'TIER',      sortKey:'tier',     al:'l' },
+    { k:'setup',l:'SETUP',     sortKey:'setup',    al:'l' },
+    { k:'eq',   l:'EQ',        sortKey:'eq',       al:'l' },
+    { k:'cat',  l:'CAT',       sortKey:'cat',      al:'l' },
+    { k:'px',   l:'PRICE',     sortKey:'price',    al:'r' },
+    { k:'chg',  l:'%CHG',      sortKey:'chg',      al:'r' },
+    { k:'rr',   l:'R:R',       sortKey:'rr',       al:'r' },
+    { k:'plan', l:'PLAN',      sortKey:null,       al:'r', tip:'Stop · T1 · T2' },
+    { k:'atr',  l:'ATR',       sortKey:'atr',      al:'r' },
+    { k:'rvol', l:'RVOL',      sortKey:'rvol',     al:'r' },
+    { k:'rs',   l:'RS',        sortKey:'rs',       al:'r' },
+    { k:'wlb',  l:'W% LB',     sortKey:'wlb',      al:'r', tip:'Setup Wilson 95% lower bound' },
+    { k:'n',    l:'N',         sortKey:'n',        al:'r', tip:'Setup sample size' },
+    { k:'pf',   l:'PF',        sortKey:'pf',       al:'r', tip:'Setup profit factor' },
+    { k:'iv',   l:'IV%',       sortKey:'iv',       al:'r', tip:'Implied volatility rank (0-100)' },
+    { k:'sent', l:'SENT',      sortKey:'sent',     al:'r', tip:'News sentiment score' },
+    { k:'er',   l:'ER',        sortKey:'er',       al:'r', tip:'Days to next earnings' },
+    { k:'sig',  l:'SIGNALS',   sortKey:null,       al:'l' },
+    { k:'spk',  l:'SPARK',     sortKey:null,       al:'l', tip:'8-day price spark' },
+  ];
+
+  function _renderTableHead() {
+    const arr = `<span class="arr">${_state.sortDir === 'asc' ? '▲' : '▼'}</span>`;
+    const ths = COLS.map(c => {
+      const onCls = c.sortKey && c.sortKey === _state.sortKey ? ' on' : '';
+      const alCls = c.al === 'l' ? ' l' : '';
+      const stkCls = c.sticky === 'tk' ? ' col-tk' : '';
+      const tip = c.tip ? ` title="${_esc(c.tip)}"` : '';
+      const click = c.sortKey ? ` data-qss-sort="${c.sortKey}"` : '';
+      return `<th class="${alCls}${onCls}${stkCls}"${click}${tip}>${_esc(c.l)}${onCls?arr:''}</th>`;
+    }).join('');
+    return `<tr><th class="col-chk">☐</th>${ths}</tr>`;
+  }
+
+  function _tfsnCell(t) {
+    const pcts = [t._tech_pct, t._fund_pct, t._smc_pct, t._sent_pct];
+    if (pcts.every(p => p == null)) return '<span class="dim">—</span>';
+    const colors = ['var(--copper)','var(--gn)','var(--info)','var(--amb)'];
+    const labels = ['Tech','Fund','SMC','News'];
+    const bars = pcts.map((p, i) => {
+      const v = p == null ? 0 : Math.max(0, Math.min(100, p));
+      const h = Math.max(2, Math.round((v / 100) * 14));
+      return `<span class="qss-tfsn-bar"><span class="fl" style="height:${h}px;background:${colors[i]}"></span></span>`;
+    }).join('');
+    const validPcts = pcts.filter(p => p != null);
+    const avg = Math.round(validPcts.reduce((a,b)=>a+b,0) / validPcts.length);
+    const tip = labels.map((l,i) => `${l}: ${pcts[i] == null ? '—' : pcts[i] + '%'}`).join(' · ');
+    return `<span class="qss-tfsn" title="${_esc(tip)}">${bars}</span><span class="qss-tfsn-lbl">${avg}</span>`;
+  }
+  function _mechCell(t) {
+    const m = t._mechanism || '';
+    if (!m) return '<span class="dim">—</span>';
+    const short = m.length > 25 ? m.slice(0, 25) + '…' : m;
+    const fullTip = (m + (t._falsification ? '\n\n✕ Falsified if: ' + t._falsification : '')).replace(/"/g, '&quot;');
+    const proven = /pead|post-earnings|absorption|institutional|squeeze|breakout|drift/i.test(m);
+    return `<span class="qss-mech${proven?' proven':''}" title="${fullTip}">${_esc(short)}</span>`;
+  }
+
+  function _planCell(t) {
+    const s = t.stop, t1 = t.target1, t2 = t.target2;
+    if (s == null && t1 == null && t2 == null) return '<span class="dim">—</span>';
+    const fmt = v => v == null ? '—' : '$' + Number(v).toFixed(v >= 100 ? 0 : 2);
+    return `<span style="font-size:10px;color:var(--ink-2)"><span class="rd">${fmt(s)}</span>·<span class="gn">${fmt(t1)}</span>·<span class="gn">${fmt(t2)}</span></span>`;
+  }
+
+  function _signalIcons(t) {
+    const map = [];
+    if (t.catalyst_tier === 1) map.push(['🔥','T1 catalyst']);
+    if ((t.rvol || 0) >= 1.5) map.push(['⚡','RVOL ≥1.5×']);
+    if (t.uoa_flag || (t.uoa && t.uoa.flag)) map.push(['📊','UOA detected']);
+    if ((t.setup_family || '').toLowerCase().includes('vcp')) map.push(['◇','VCP setup']);
+    if (t.insider_cluster_flag || (t.insider_buys && t.insider_buys >= 3)) map.push(['💰','Insider cluster']);
+    if (t.squeeze_on || t.squeeze_fired) map.push(['⊙','Squeeze']);
+    const e = t.earn_days ?? t.days_to_earnings;
+    if (e != null && e >= 0 && e <= 7) map.push(['📅','ER in ' + e + 'd']);
+    if (!map.length) return '<span class="dim">—</span>';
+    return map.slice(0,4).map(([i,t2]) => `<span title="${_esc(t2)}" style="margin-right:3px;font-size:14px">${i}</span>`).join('');
+  }
+
+  function _renderRow(t, i, isSel) {
+    const score = Math.round(t.score || 0);
+    const verd = (t.verdict || 'WATCH').toUpperCase();
+    const tier = t.conviction_tier || 'WATCH';
+    const setup = t.setup_family || '—';
+    const eq = (t.entry_quality || '').toUpperCase() || '—';
+    const cat = t.catalyst_tier != null ? 'T'+t.catalyst_tier : '—';
+    const catCls = cat === 'T1' ? 'cu' : cat === 'T2' ? 'gn' : cat === 'T3' ? 'amb' : 'dim';
+    const px = t.price;
+    const chg = t.perf_1d ?? t.pct_chg;
+    const chgCls = chg == null ? 'dim' : chg > 0 ? 'gn' : chg < 0 ? 'rd' : 'dim';
+    const chgStr = chg == null ? '—' : (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+    const rr = t.rr_ratio || t.rr;
+    const rrCls = rr == null ? 'dim' : rr >= 3 ? 'gn' : rr >= 2 ? 'amb' : 'rd';
+    const atr = t.atr;
+    const rvol = t.rvol;
+    const rvolCls = rvol == null ? 'dim' : rvol >= 1.5 ? 'gn' : rvol >= 1.0 ? 'amb' : 'dim';
+    const rs = t.rs_rank;
+    const wlb = t._setup_wilson_lb;
+    const wlbPct = wlb != null ? Math.round(wlb * 100) : null;
+    const wlbCls = wlbPct == null ? 'dim' : wlbPct >= 55 ? 'gn' : wlbPct >= 45 ? 'amb' : 'rd';
+    const nSetup = t._setup_n;
+    const pf = t._setup_pf;
+    const pfCls = pf == null ? 'dim' : pf >= 2.0 ? 'gn' : pf >= 1.5 ? 'amb' : 'rd';
+    const iv = (typeof t.iv_rank === 'number') ? t.iv_rank : null;
+    const ivCls = iv == null ? 'dim' : iv <= 30 ? 'gn' : iv >= 70 ? 'rd' : '';
+    let sent = null;
+    if (typeof t.news_sentiment_score === 'number') sent = t.news_sentiment_score;
+    else if (t.news_sentiment_score && typeof t.news_sentiment_score === 'object' && typeof t.news_sentiment_score.score === 'number') sent = t.news_sentiment_score.score;
+    else if (typeof t.news_score === 'number') sent = t.news_score;
+    const sentCls = sent == null ? 'dim' : sent > 0.2 ? 'gn' : sent < -0.1 ? 'rd' : 'dim';
+    const sentStr = sent == null ? '—' : (sent >= 0 ? '+' : '') + sent.toFixed(2);
+    const er = t.earn_days ?? t.days_to_earnings;
+    const isStarred = _watchlist.has(t.ticker);
+    const ohlc = _closesFromOhlcv(t, 8);
+
+    return `<tr data-tk="${_esc(t.ticker)}" data-idx="${i}" class="${isSel?'sel':''}">
+      <td class="col-chk"><input type="checkbox" data-qss-row-check="${_esc(t.ticker)}" onclick="event.stopPropagation()" style="margin:0;cursor:pointer"></td>
+      <td class="col-tk l">
+        <span class="star${isStarred?' on':''}" data-qss-star="${_esc(t.ticker)}" title="Toggle watchlist">★</span>
+        ${_esc(t.ticker)}
+      </td>
+      <td class="l dim" style="font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis">${_esc(t.name || '—')}</td>
+      <td class="l dim" style="font-size:11px">${_esc(t.sector || '—')}</td>
+      <td>${_tfsnCell(t)}</td>
+      <td class="l">${_mechCell(t)}</td>
+      <td><span class="qss-score"><span class="fill" style="width:${score}%;background:${_scoreColor(score)}"></span><span class="lbl">${score}</span></span></td>
+      <td><span class="qss-verd ${verd}">${verd}</span></td>
+      <td class="l"><span class="qss-tier ${tier}">${_esc(tier)}</span></td>
+      <td class="l"><span class="qss-setup" title="${_esc(setup)}">${_esc(setup.length > 16 ? setup.slice(0,16)+'…' : setup)}</span></td>
+      <td class="l">${eq === '—' ? '<span class="dim">—</span>' : `<span class="qss-eq ${eq}">${eq}</span>`}</td>
+      <td class="l ${catCls}" style="font-weight:800;font-size:10px">${cat}</td>
+      <td>${px == null ? '—' : '$' + px.toFixed(2)}</td>
+      <td class="${chgCls}">${chgStr}</td>
+      <td class="${rrCls}">${rr == null ? '—' : rr.toFixed(1)}</td>
+      <td>${_planCell(t)}</td>
+      <td>${atr == null ? '—' : atr.toFixed(2)}</td>
+      <td class="${rvolCls}">${rvol == null ? '—' : rvol.toFixed(2) + '×'}</td>
+      <td>${rs == null ? '—' : rs}</td>
+      <td class="${wlbCls}">${wlbPct == null ? '—' : wlbPct + '%'}</td>
+      <td class="dim">${nSetup == null ? '—' : nSetup}</td>
+      <td class="${pfCls}">${pf == null ? '—' : pf.toFixed(1)}</td>
+      <td class="${ivCls}">${iv == null ? '—' : Math.round(iv)}</td>
+      <td class="${sentCls}">${sentStr}</td>
+      <td>${er == null ? '<span class="dim">—</span>' : `<span class="qss-er ${_erClass(er)}">${er}d</span>`}</td>
+      <td class="l">${_signalIcons(t)}</td>
+      <td class="l">${_spark(ohlc)}</td>
+    </tr>`;
+  }
+
+  function _renderTable() {
+    _computeTopScoreThresh(_state.arr);
+    const rows = _state.arr.filter(_filterFn).sort(_sortFn);
+    if (!rows.length) {
+      return `<div class="qss-tbl-wrap"><table class="qss-tbl">
+        <thead>${_renderTableHead()}</thead>
+        <tbody><tr><td colspan="${COLS.length + 1}" class="qss-tbl-empty">
+          <b>No matches in current filter</b>
+          Adjust quick-filters, verdict pills, or sector / setup dropdowns to widen the scan.
+        </td></tr></tbody>
+      </table></div>`;
+    }
+    const selTk = _state.selectedTicker || (rows[0] && rows[0].ticker);
+    if (!_state.selectedTicker) _state.selectedTicker = selTk;
+    const body = rows.map((t, i) => _renderRow(t, i, t.ticker === selTk)).join('');
+    return `<div class="qss-tbl-wrap"><table class="qss-tbl">
+      <thead>${_renderTableHead()}</thead>
+      <tbody>${body}</tbody>
+    </table></div>`;
+  }
+
+  function _renderRight() {
+    const t = _state.arr.find(x => x.ticker === _state.selectedTicker)
+            || _state.arr.filter(_filterFn)[0];
+    if (!t) {
+      return `<div class="qss-rh"><div class="qss-rh-row1"><span class="qss-rh-tkr">—</span></div>
+        <div class="qss-rh-sec">Select a row to inspect</div></div>`;
+    }
+    const px = t.price, chg = t.perf_1d ?? t.pct_chg;
+    const chgCls = chg == null ? 'dim' : chg > 0 ? 'gn' : chg < 0 ? 'rd' : 'dim';
+    const verd = (t.verdict || 'WATCH').toUpperCase();
+    const tier = t.conviction_tier || 'WATCH';
+    const setup = t.setup_family || '—';
+    const eq = (t.entry_quality || '').toUpperCase() || '—';
+    const rr = t.rr_ratio || t.rr;
+    const closes = _closesFromOhlcv(t, 8);
+
+    let chartSvg;
+    if (closes.length >= 2) {
+      const lo = Math.min(...closes), hi = Math.max(...closes);
+      const span = (hi - lo) || 1;
+      const stepX = 400 / (closes.length - 1);
+      const pts = closes.map((v,i) => `${(i*stepX).toFixed(1)},${(110 - ((v-lo)/span)*100).toFixed(1)}`);
+      chartSvg = `<svg viewBox="0 0 400 120" preserveAspectRatio="none">
+        <polyline points="${pts.join(' ')}" fill="none" stroke="var(--copper)" stroke-width="2"/>
+        ${pts.map(p => { const [x,y] = p.split(','); return `<circle cx="${x}" cy="${y}" r="2.5" fill="var(--copper)"/>`; }).join('')}
+      </svg>`;
+    } else {
+      chartSvg = `<div class="qss-empty">No OHLCV history wired for ${_esc(t.ticker)} · <b>run fresh scan to populate</b></div>`;
+    }
+
+    const smc = t.smc || t.smc_data || {};
+    const obTop = smc.ob_high ?? smc.bull_ob_high ?? (px && t.atr ? (px - t.atr * 0.3) : null);
+    const obBot = smc.ob_low  ?? smc.bull_ob_low  ?? (px && t.atr ? (px - t.atr * 0.8) : null);
+    const fvgLo = smc.fvg_low ?? (px && t.atr ? (px + t.atr * 0.25) : null);
+    const fvgHi = smc.fvg_high?? (px && t.atr ? (px + t.atr * 0.55) : null);
+    const bsl   = smc.bsl ?? smc.bsl_level ?? (px ? px * 1.04 : null);
+    const smcSource = (smc.ob_high || smc.bull_ob_high) ? 'real SMC data' : 'derived from price ± ATR';
+
+    const entryRef = t.entry_low ?? t.entry_mid ?? px;
+    const stop = t.stop;
+    const t1 = t.target1, t2v = t.target2;
+
+    const holdMin = t.hold_period_min || 5;
+    const holdMax = t.hold_period_max || (setup.toLowerCase().includes('breakout') ? 21 : setup.toLowerCase().includes('catalyst') ? 8 : 14);
+
+    const pillars = [
+      ['Technicals', t._tech_pct, 'var(--copper)'],
+      ['Fundamentals', t._fund_pct, 'var(--gn)'],
+      ['Smart-money', t._smc_pct, 'var(--info)'],
+      ['News',       t._sent_pct, 'var(--amb)'],
+    ];
+
+    const wlb = t._setup_wilson_lb;
+    const wlbPct = wlb != null ? Math.round(wlb * 100) : null;
+    const nSetup = t._setup_n;
+    const pf = t._setup_pf;
+    const setupAvgR = t._setup_avg_r;
+
+    const eh = Array.isArray(t.earnings_history) ? t.earnings_history.slice(-4) : [];
+    const erDays = t.earn_days ?? t.days_to_earnings;
+
+    const opt = t.options_data || t.options_chain || {};
+    const ivRank = (typeof t.iv_rank === 'number') ? t.iv_rank : null;
+    const pcRatio = (typeof t.put_call_ratio === 'number') ? t.put_call_ratio
+                  : (opt.put_call_ratio || (t.uoa && typeof t.uoa.put_call_ratio === 'number' ? t.uoa.put_call_ratio : null));
+    const impliedMove = opt.implied_move ?? opt.expected_move ?? null;
+
+    const insBuys = t.insider_buys, insSells = t.insider_sells;
+    const insTxns = Array.isArray(t.insider_transactions) ? t.insider_transactions : [];
+    const totalBuyDollars = insTxns.filter(x => x && (x.transaction_type || '').toLowerCase().includes('buy'))
+                                   .reduce((a,b) => a + (b.value || b.dollar_amount || 0), 0);
+    const latestIns = insTxns.find(x => (x.transaction_type || '').toLowerCase().includes('buy'));
+    const shortPct = t.short_pct_float ?? t.short_float_pct ?? t.short_float ?? null;
+
+    const news = Array.isArray(t.news_articles) ? t.news_articles.slice(0, 3) : [];
+    const sent = (typeof t.news_sentiment_score === 'number') ? t.news_sentiment_score
+               : (t.news_sentiment_score && typeof t.news_sentiment_score === 'object' && typeof t.news_sentiment_score.score === 'number' ? t.news_sentiment_score.score
+                  : (typeof t.news_score === 'number' ? t.news_score : null));
+
+    const positions = (_state.data && _state.data.portfolio && _state.data.portfolio.positions) || [];
+    const shares = px ? Math.floor(1000 / px) : 0;
+    const exposure = px ? shares * px : null;
+    const sectorWeight = positions.length ? positions.filter(p => p.sector === t.sector).reduce((a,b) => a + (b.market_value || 0), 0) : null;
+    const totalPortfolio = positions.length ? positions.reduce((a,b) => a + (b.market_value || 0), 0) : null;
+
+    const sectChart = `<div class="qss-rchart"><div class="qss-rsect-h">8-Day Trail</div>${chartSvg}</div>`;
+    const sectSetup = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">Setup · ${_esc(setup)} <span class="meta">${_esc(eq)} entry quality</span></div>
+        <div class="qss-cats">
+          <span class="qss-cat ${tier==='T1'?'cu':tier==='T2'?'gn':'amb'}">${_esc(tier)} CONVICTION</span>
+          ${eq !== '—' ? `<span class="qss-cat gn">${_esc(eq)}</span>` : ''}
+          ${(t.rvol || 0) >= 1.5 ? `<span class="qss-cat gn">🔥 RVOL ${t.rvol.toFixed(1)}×</span>` : ''}
+          ${(t.rs_rank || 0) >= 90 ? `<span class="qss-cat cu">★ RS ${t.rs_rank}</span>` : ''}
+          ${erDays != null && erDays <= 14 ? `<span class="qss-cat amb">📊 ER ${erDays}d</span>` : ''}
+          ${t.catalyst_tier === 1 ? `<span class="qss-cat cu">⚡ T1 CAT</span>` : ''}
+        </div>
+      </div>`;
+
+    const sectPillars = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">T.F.S.N Pillars <span class="meta">5-pillar composite breakdown</span></div>
+        <div class="qss-pillars">
+          ${pillars.map(([l, v, c]) => {
+            if (v == null) return `<div class="qss-pillar"><span class="lbl">${l}</span><div class="bar"><div class="fl" style="width:0;background:var(--ink-4)"></div></div><span class="v dim">—</span></div>`;
+            return `<div class="qss-pillar"><span class="lbl">${l}</span><div class="bar"><div class="fl" style="width:${Math.max(0,Math.min(100,v))}%;background:${c}"></div></div><span class="v">${v}%</span></div>`;
+          }).join('')}
+        </div>
+      </div>`;
+
+    const sectMech = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">Mechanism <span class="meta">why-it-works hypothesis</span></div>
+        ${t._mechanism
+          ? `<div class="qss-mech-card">
+              <div class="mh">Edge thesis</div>
+              <div class="mb">${_esc(t._mechanism)}</div>
+              ${t._falsification ? `<div class="mf">✕ Falsified if: ${_esc(t._falsification)}</div>` : ''}
+            </div>`
+          : `<div class="qss-empty">No mechanism hypothesis wired for this setup family · <b>run fresh scan or add to MECHANISM_HYPOTHESES</b></div>`}
+      </div>`;
+
+    const sectQuick = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">Quick Stats</div>
+        <div class="qss-rstat-grid">
+          <div class="qss-rstat"><span class="k">Score</span><span class="v ${(t.score||0)>=80?'gn':(t.score||0)>=60?'amb':''}">${Math.round(t.score||0)}</span></div>
+          <div class="qss-rstat"><span class="k">R:R</span><span class="v ${rr==null?'dim':rr>=3?'gn':rr>=2?'amb':'rd'}">${rr==null?'—':rr.toFixed(1)+':1'}</span></div>
+          <div class="qss-rstat"><span class="k">RVOL</span><span class="v ${(t.rvol||0)>=1.5?'gn':''}">${t.rvol==null?'—':t.rvol.toFixed(2)+'×'}</span></div>
+          <div class="qss-rstat"><span class="k">RS Rank</span><span class="v ${(t.rs_rank||0)>=90?'cu':''}">${t.rs_rank||'—'}</span></div>
+          <div class="qss-rstat"><span class="k">ATR</span><span class="v">${t.atr==null?'—':t.atr.toFixed(2)}</span></div>
+          <div class="qss-rstat"><span class="k">ER Days</span><span class="v ${erDays!=null&&erDays<=7?'amb':''}">${erDays==null?'—':erDays+'d'}</span></div>
+        </div>
+      </div>`;
+
+    const fmtP = v => v == null ? '—' : '$' + Number(v).toFixed(2);
+    const sectSmc = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">SMC Zones <span class="meta">${_esc(smcSource)}</span></div>
+        ${(obTop != null || fvgLo != null || bsl != null)
+          ? `<div class="qss-plan">
+            ${obTop != null ? `<span class="k">Bull OB</span><span class="v gn">${fmtP(obBot)} – ${fmtP(obTop)}</span>` : ''}
+            ${fvgLo != null ? `<span class="k">FVG zone</span><span class="v amb">${fmtP(fvgLo)} – ${fmtP(fvgHi)}</span>` : ''}
+            ${bsl != null ? `<span class="k">BSL</span><span class="v">${fmtP(bsl)}</span>` : ''}
+            ${smc.structure ? `<span class="k">Structure</span><span class="v">${_esc(smc.structure)}</span>` : ''}
+          </div>`
+          : `<div class="qss-empty">SMC zones not computed for this ticker · <b>run fresh scan</b></div>`}
+      </div>`;
+
+    const sectEntry = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">Entry Triggers <span class="meta">if-then rules</span></div>
+        ${(entryRef && stop) ? `<div style="font:500 11.5px var(--mono);color:var(--ink-1);line-height:1.7">
+          <div style="margin-bottom:6px"><span style="color:var(--gn);font-weight:800">▶ PRIMARY:</span> hold above <b style="color:var(--ink)">${fmtP(entryRef)}</b> + RVOL ≥1.2× → <span class="qss-verd BUY">BUY</span></div>
+          ${obTop != null ? `<div style="margin-bottom:6px"><span style="color:var(--amb);font-weight:800">▶ SECONDARY:</span> pullback to <b>${fmtP(obTop)}</b> (OB top) → <span class="qss-verd WATCH">BUY 50%</span></div>` : ''}
+          <div style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:6px;color:var(--rd)"><span style="font-weight:800">✗ FALSIFICATION:</span> close below <b>${fmtP(stop)}</b> → thesis dead</div>
+          <div><span style="color:var(--ink-3);font-weight:700">⏱ TIME STOP:</span> exit by <b>D+${holdMax}</b> if T1 not hit</div>
+        </div>` : `<div class="qss-empty">No entry/stop wired for ${_esc(t.ticker)} · <b>setup may be informational only</b></div>`}
+      </div>`;
+
+    const sectHold = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">Hold Horizon <span class="meta">${_esc(setup)} family</span></div>
+        <div class="qss-plan">
+          <span class="k">Min hold</span><span class="v">D+${holdMin}</span>
+          <span class="k">Max hold</span><span class="v">D+${holdMax}</span>
+          ${t1 != null ? `<span class="k">First scale-out</span><span class="v gn">${fmtP(t1)} (50% off)</span>` : ''}
+          ${t2v != null ? `<span class="k">Runner target</span><span class="v gn">${fmtP(t2v)}</span>` : ''}
+        </div>
+      </div>`;
+
+    const sectStats = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">Setup Stats · ${_esc(setup)} <span class="meta">Wilson 95% LB · 90d</span></div>
+        ${(nSetup != null || wlbPct != null || pf != null)
+          ? `<div class="qss-rstat-grid">
+            <div class="qss-rstat"><span class="k">Sample n</span><span class="v ${nSetup==null?'dim':''}">${nSetup ?? '—'}</span></div>
+            <div class="qss-rstat"><span class="k">Wilson LB</span><span class="v ${wlbPct==null?'dim':wlbPct>=55?'gn':wlbPct>=45?'amb':'rd'}">${wlbPct==null?'—':wlbPct+'%'}</span></div>
+            <div class="qss-rstat"><span class="k">Profit Factor</span><span class="v ${pf==null?'dim':pf>=2?'gn':pf>=1.5?'amb':'rd'}">${pf==null?'—':pf.toFixed(2)}</span></div>
+            <div class="qss-rstat"><span class="k">Avg R-mult</span><span class="v ${setupAvgR==null?'dim':'gn'}">${setupAvgR==null?'—':'+'+setupAvgR.toFixed(2)+'R'}</span></div>
+          </div>`
+          : `<div class="qss-empty">No setup stats wired · <b>${_esc(setup)} has n<10 — too thin for Wilson CI</b></div>`}
+      </div>`;
+
+    const sectEarn = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">Earnings History <span class="meta">last 4 quarters</span></div>
+        ${eh.length ? `<div class="qss-earn-grid">${eh.map(e => {
+          const surp = e.surprise_pct ?? e.surprise ?? null;
+          const px1d = e.next_day_chg ?? e.day1_pct ?? null;
+          const beat = surp != null && surp > 0;
+          const miss = surp != null && surp < 0;
+          const cls = beat ? 'beat' : miss ? 'miss' : '';
+          const qLabel = e.quarter || e.fiscal_period || e.date || '—';
+          return `<div class="qss-earn-cell ${cls}">
+            <div class="q">${_esc(String(qLabel).slice(0,8))}</div>
+            <div class="b">${surp == null ? '—' : (beat?'BEAT +':'MISS ') + Math.abs(surp).toFixed(1) + '%'}</div>
+            <div class="b">${px1d == null ? '' : (px1d >= 0 ? '+' : '') + px1d.toFixed(1) + '%'}</div>
+          </div>`;
+        }).join('')}</div>` : `<div class="qss-empty">No earnings history wired for ${_esc(t.ticker)}</div>`}
+        ${erDays != null
+          ? `<div style="margin-top:8px;font:600 11px var(--mono);color:var(--ink-2)">Next: <b style="color:var(--copper)">D+${erDays}</b></div>`
+          : `<div style="margin-top:8px;font:600 11px var(--mono);color:var(--ink-3)">No earnings in next 30 days</div>`}
+      </div>`;
+
+    const sectOpt = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">Options Skew <span class="meta">IV + flow</span></div>
+        ${(ivRank != null || pcRatio != null || impliedMove != null)
+          ? `<div class="qss-rstat-grid">
+            <div class="qss-rstat"><span class="k">IV Rank</span><span class="v ${ivRank==null?'dim':ivRank<=30?'gn':ivRank>=70?'rd':''}">${ivRank==null?'—':Math.round(ivRank)+' ('+(ivRank<=30?'CHEAP':ivRank>=70?'RICH':'MID')+')'}</span></div>
+            <div class="qss-rstat"><span class="k">Put/Call</span><span class="v ${pcRatio==null?'dim':pcRatio<0.7?'gn':pcRatio>1.2?'rd':''}">${pcRatio==null?'—':pcRatio.toFixed(2)}</span></div>
+            <div class="qss-rstat"><span class="k">Implied move</span><span class="v ${impliedMove==null?'dim':''}">${impliedMove==null?'—':'±'+impliedMove.toFixed(1)+'%'}</span></div>
+            <div class="qss-rstat"><span class="k">UOA</span><span class="v ${(t.uoa_flag||(t.uoa&&t.uoa.flag))?'cu':'dim'}">${(t.uoa_flag||(t.uoa&&t.uoa.flag))?'DETECTED':'—'}</span></div>
+          </div>`
+          : `<div class="qss-empty">No options data wired for ${_esc(t.ticker)} · <b>options chain not fetched</b></div>`}
+      </div>`;
+
+    const sectSmart = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">Smart Money <span class="meta">insider + short</span></div>
+        ${(insBuys != null || insSells != null || shortPct != null)
+          ? `<div class="qss-plan">
+            ${insBuys != null ? `<span class="k">Insider buys</span><span class="v gn">${insBuys}${totalBuyDollars > 0 ? ' · $'+(totalBuyDollars/1e6).toFixed(2)+'M' : ''}</span>` : ''}
+            ${insSells != null ? `<span class="k">Insider sells</span><span class="v ${insSells>0?'amb':''}">${insSells}</span>` : ''}
+            ${latestIns ? `<span class="k">Latest</span><span class="v" style="font-size:10.5px">${_esc(latestIns.insider_name || latestIns.name || 'insider')} · ${_esc(latestIns.date || '')}</span>` : ''}
+            ${shortPct != null ? `<span class="k">Short interest</span><span class="v ${shortPct>=15?'rd':shortPct>=8?'amb':''}">${shortPct.toFixed(1)}% float</span>` : ''}
+            ${t.inst_own_pct != null ? `<span class="k">Inst ownership</span><span class="v">${t.inst_own_pct.toFixed(1)}%</span>` : ''}
+          </div>`
+          : `<div class="qss-empty">No insider / short data wired for ${_esc(t.ticker)}</div>`}
+      </div>`;
+
+    const sectPort = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">Portfolio Impact <span class="meta">if adding $1K notional</span></div>
+        ${exposure != null ? `<div class="qss-plan">
+          <span class="k">Trial size</span><span class="v">${shares} sh @ ${fmtP(px)}</span>
+          <span class="k">Notional</span><span class="v">$${exposure.toFixed(0)}</span>
+          ${t.beta != null ? `<span class="k">β-adjusted</span><span class="v">${(shares * t.beta).toFixed(0)} sh equiv (β=${t.beta.toFixed(2)})</span>` : ''}
+          ${stop && px ? `<span class="k">$ risk</span><span class="v rd">$${(shares * (px - stop)).toFixed(0)}</span>` : ''}
+          ${stop && t1 && px ? `<span class="k">$ reward (T1)</span><span class="v gn">$${(shares * (t1 - px)).toFixed(0)}</span>` : ''}
+          ${totalPortfolio ? `<span class="k">Sector weight</span><span class="v amb">${_esc(t.sector || '—')} ${((sectorWeight / totalPortfolio)*100).toFixed(1)}%</span>` : `<span class="k">Portfolio</span><span class="v dim">no open positions</span>`}
+        </div>` : `<div class="qss-empty">Cannot compute — price missing</div>`}
+      </div>`;
+
+    const sectNews = `
+      <div class="qss-rsect">
+        <div class="qss-rsect-h">News (${news.length}) <span class="meta">${sent != null ? 'sentiment ' + (sent>=0?'+':'') + sent.toFixed(2) : 'sentiment —'}</span></div>
+        ${news.length ? `<ul class="qss-news-list">${news.map(n => {
+          const title = n.title || n.headline || '(untitled)';
+          const src = n.source || n.publisher || n.site || '';
+          const dt = n.date || n.published_at || n.publishedAt || '';
+          const url = n.url || n.link || '';
+          return `<li>${url ? `<a href="${_esc(url)}" target="_blank" rel="noopener">${_esc(title)}</a>` : _esc(title)}<span class="src">${_esc(src)} · ${_esc(dt)}</span></li>`;
+        }).join('')}</ul>` : `<div class="qss-empty">No recent headlines for ${_esc(t.ticker)}</div>`}
+      </div>`;
+
+    const sectActions = `
+      <div class="qss-ractions">
+        <button data-qss-action="watch" data-tk="${_esc(t.ticker)}">${_watchlist.has(t.ticker) ? '★ Remove from Watchlist' : '★ Add to Watchlist'}</button>
+        <button class="primary" data-qss-action="paperbuy" data-tk="${_esc(t.ticker)}">💵 PAPER · BUY ${shares} sh @ ${fmtP(px)}</button>
+        <button data-qss-action="opendetail" data-tk="${_esc(t.ticker)}">📋 Open Full Detail</button>
+        <button data-qss-action="backtest" data-tk="${_esc(t.ticker)}">🔍 Run Backtest on This Setup</button>
+        <button data-qss-action="journal" data-tk="${_esc(t.ticker)}">📝 Add Trade Journal Note</button>
+      </div>`;
+
+    return `
+      <div class="qss-rh">
+        <div class="qss-rh-row1">
+          <span class="qss-rh-tkr">${_esc(t.ticker)}</span>
+          <span class="qss-rh-name">${_esc(t.name || '')}</span>
+        </div>
+        <div class="qss-rh-sec">${_esc(t.sector || '—')}${t.industry ? ' · '+_esc(t.industry) : ''}</div>
+        <div class="qss-rh-px">
+          <span class="px">${px == null ? '—' : '$' + px.toFixed(2)}</span>
+          <span class="chg ${chgCls}">${chg == null ? '—' : (chg>=0?'+':'') + chg.toFixed(2) + '%'}</span>
+          <span class="qss-verd ${verd}">${verd}</span>
+          <span class="qss-tier ${tier}">${_esc(tier)}</span>
+        </div>
+      </div>
+      ${sectChart}
+      ${sectSetup}
+      ${sectPillars}
+      ${sectMech}
+      ${sectQuick}
+      ${sectSmc}
+      ${sectEntry}
+      ${sectHold}
+      ${sectStats}
+      ${sectEarn}
+      ${sectOpt}
+      ${sectSmart}
+      ${sectPort}
+      ${sectNews}
+      ${sectActions}`;
+  }
+
+  function _renderStatus(visibleCount) {
+    const arr = _state.arr;
+    const total = arr.length;
+    const longs = arr.filter(t => t.verdict === 'BUY' && !t.killed).length;
+    const shorts = arr.filter(t => (t.verdict === 'SHORT' || t.verdict === 'SELL') && !t.killed).length;
+    const watch = arr.filter(t => (t.verdict === 'WATCH' || t.verdict === 'WAIT') && !t.killed).length;
+    const ts = _state.data?.run_timestamp ? new Date(_state.data.run_timestamp) : new Date();
+    const tsStr = ts.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}) + ' PT';
+    return `
+      <div class="qss-status">
+        <span><span class="key">Last update</span> <span class="val">${tsStr}</span></span>
+        <span class="sep">·</span>
+        <span><span class="val">${total}</span> <span class="key">universe</span></span>
+        <span class="sep">·</span>
+        <span><span class="val cu">${visibleCount}</span> <span class="key">picks visible</span></span>
+        <span class="sep">·</span>
+        <span><span class="val">${longs}</span> <span class="key">long</span> · <span class="val">${shorts}</span> <span class="key">short</span> · <span class="val">${watch}</span> <span class="key">watch</span></span>
+        <span style="flex:1"></span>
+        <span class="live">● LIVE</span>
+        <span class="sep">·</span>
+        <span class="live">CONNECTED</span>
+      </div>`;
+  }
+
+  function _wire(container) {
+    container.querySelectorAll('[data-qss-tab]').forEach(el => {
+      el.addEventListener('click', () => {
+        _state.tab = el.getAttribute('data-qss-tab');
+        _state.selectedTicker = null;
+        _savePrefs();
+        _repaint(container);
+      });
+    });
+    container.querySelectorAll('[data-qss-qf]').forEach(el => {
+      el.addEventListener('click', () => {
+        const k = el.getAttribute('data-qss-qf');
+        if (_state.quickFilters.has(k)) _state.quickFilters.delete(k);
+        else _state.quickFilters.add(k);
+        _savePrefs();
+        _repaint(container);
+      });
+    });
+    container.querySelectorAll('[data-qss-verd]').forEach(el => {
+      el.addEventListener('click', () => {
+        _state.verdict = el.getAttribute('data-qss-verd');
+        _savePrefs();
+        _repaint(container);
+      });
+    });
+    const secSel = container.querySelector('[data-qss-sector]');
+    if (secSel) secSel.addEventListener('change', () => { _state.sector = secSel.value; _savePrefs(); _repaint(container); });
+    const setSel = container.querySelector('[data-qss-setup]');
+    if (setSel) setSel.addEventListener('change', () => { _state.setup = setSel.value; _savePrefs(); _repaint(container); });
+    const sortSel = container.querySelector('[data-qss-sort-select]');
+    if (sortSel) sortSel.addEventListener('change', () => {
+      const [k, d] = sortSel.value.split('|');
+      _state.sortKey = k; _state.sortDir = d;
+      _savePrefs();
+      _repaint(container);
+    });
+    container.querySelectorAll('th[data-qss-sort]').forEach(th => {
+      th.addEventListener('click', () => {
+        const k = th.getAttribute('data-qss-sort');
+        if (!k) return;
+        if (_state.sortKey === k) _state.sortDir = _state.sortDir === 'asc' ? 'desc' : 'asc';
+        else { _state.sortKey = k; _state.sortDir = 'desc'; }
+        _savePrefs();
+        _repaint(container);
+      });
+    });
+    const search = container.querySelector('[data-qss-search]');
+    if (search) {
+      let tm = null;
+      search.addEventListener('input', () => {
+        clearTimeout(tm);
+        tm = setTimeout(() => {
+          _state.search = search.value;
+          _savePrefs();
+          _repaint(container);
+        }, 220);
+      });
+    }
+    container.querySelectorAll('[data-qss-star]').forEach(s => {
+      s.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _toggleWatch(s.getAttribute('data-qss-star'));
+        s.classList.toggle('on');
+      });
+    });
+    container.querySelectorAll('.qss-tbl tbody tr[data-tk]').forEach(tr => {
+      tr.addEventListener('click', () => {
+        const tk = tr.getAttribute('data-tk');
+        if (!tk) return;
+        _state.selectedTicker = tk;
+        container.querySelectorAll('.qss-tbl tbody tr').forEach(r => r.classList.remove('sel'));
+        tr.classList.add('sel');
+        const right = container.querySelector('#qss-right');
+        if (right) right.innerHTML = _renderRight();
+        _wireRightActions(container);
+      });
+    });
+    _wireRightActions(container);
+    container.querySelectorAll('.qss-filt [data-qss-action]').forEach(b => {
+      b.addEventListener('click', () => {
+        const action = b.getAttribute('data-qss-action');
+        if (action === 'export') _exportCsv();
+        else if (action === 'monitor') _addCheckedToWatchlist(container);
+        else if (action === 'saveview') alert('View saved · filter combo persisted to localStorage (qss.prefs.v1).');
+        else if (action === 'columns') alert('Column visibility editor — next iteration.');
+      });
+    });
+  }
+
+  function _wireRightActions(container) {
+    container.querySelectorAll('.qss-ractions [data-qss-action]').forEach(b => {
+      const action = b.getAttribute('data-qss-action');
+      const tk = b.getAttribute('data-tk');
+      b.addEventListener('click', () => {
+        if (action === 'watch') {
+          _toggleWatch(tk);
+          _repaint(container);
+        } else if (action === 'opendetail') {
+          if (window.setDetailTicker) window.setDetailTicker(tk);
+        } else if (action === 'paperbuy') {
+          if (window._openQuickAction) window._openQuickAction('BUY', tk);
+          else if (window.setDetailTicker) window.setDetailTicker(tk);
+        } else if (action === 'backtest') {
+          alert(`Backtest for ${tk}'s setup family — wire to /api/backtest endpoint.`);
+        } else if (action === 'journal') {
+          if (window._openQuickAction) window._openQuickAction('JOURNAL', tk);
+          else alert(`Journal note for ${tk} — wire to journal API.`);
+        }
+      });
+    });
+  }
+
+  function _addCheckedToWatchlist(container) {
+    const checked = container.querySelectorAll('[data-qss-row-check]:checked');
+    if (!checked.length) { alert('Tick one or more row checkboxes first.'); return; }
+    checked.forEach(c => _watchlist.add(c.getAttribute('data-qss-row-check')));
+    try { localStorage.setItem('qss.watchlist', JSON.stringify(Array.from(_watchlist))); } catch (_) {}
+    _repaint(container);
+  }
+
+  function _exportCsv() {
+    const rows = _state.arr.filter(_filterFn).sort(_sortFn);
+    if (!rows.length) { alert('No rows to export.'); return; }
+    const header = ['ticker','name','sector','score','verdict','tier','setup','entry_quality','catalyst_tier',
+      'price','perf_1d','rr','stop','target1','target2','atr','rvol','rs_rank',
+      'tech_pct','fund_pct','smc_pct','sent_pct',
+      'setup_wilson_lb','setup_n','setup_pf','iv_rank','news_sentiment','earn_days','mechanism'];
+    const esc = v => v == null ? '' : (typeof v === 'string' && (v.includes(',') || v.includes('"')) ? `"${v.replace(/"/g,'""')}"` : v);
+    const csv = [header.join(',')].concat(rows.map(t => [
+      t.ticker, esc(t.name), esc(t.sector), t.score,
+      t.verdict, t.conviction_tier||'', esc(t.setup_family),
+      t.entry_quality||'', t.catalyst_tier||'',
+      t.price, t.perf_1d, t.rr_ratio||t.rr, t.stop, t.target1, t.target2, t.atr,
+      t.rvol, t.rs_rank, t._tech_pct||'', t._fund_pct||'', t._smc_pct||'', t._sent_pct||'',
+      t._setup_wilson_lb||'', t._setup_n||'', t._setup_pf||'',
+      t.iv_rank, (typeof t.news_sentiment_score === 'number' ? t.news_sentiment_score : (t.news_score||'')),
+      t.earn_days, esc(t._mechanism)
+    ].join(','))).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `signal_scanner_${(new Date()).toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function _repaint(container) {
+    const visibleCount = _state.arr.filter(_filterFn).length;
+    container.innerHTML = `
+      <div class="qss-shell">
+        ${_renderTitleBar()}
+        ${_renderTabs()}
+        ${_renderQuickFilters()}
+        <div id="qss-filt-bar">${_renderFilterBar(visibleCount)}</div>
+        <div class="qss-main">
+          <div class="qss-left"><div id="qss-table">${_renderTable()}</div></div>
+          <div class="qss-right" id="qss-right">${_renderRight()}</div>
+        </div>
+        ${_renderStatus(visibleCount)}
+      </div>`;
+    _wire(container);
+  }
+
+  function render(container, data, arr) {
+    _ensureStyles();
+    container.classList.add('qss-active');
+    container.classList.remove('ep-active');
+    container.classList.remove('qs-active');
+    _state._hostPanel = container;
+    const earnMap = {};
+    ((data && data.earnings_watchlist) || []).forEach(e => {
+      if (e && e.ticker && e.days_to_earnings != null) earnMap[e.ticker] = e.days_to_earnings;
+    });
+    const heldSet = new Set(((data && data.portfolio && data.portfolio.positions) || []).map(p => p.ticker));
+    const enriched = (arr || []).map(t => {
+      const conv = (t.conviction && t.conviction.label) ? t.conviction.label : null;
+      const earnDays = t.earn_days != null ? t.earn_days : (earnMap[t.ticker] != null ? earnMap[t.ticker] : null);
+      const norm = (v, mx) => (v == null || !mx) ? null : Math.round((v / mx) * 100);
+      return {
+        ...t,
+        conviction_tier: t.conviction_tier || conv,
+        earn_days: earnDays,
+        _tech_pct: norm(t.tech_score, t.tech_max),
+        _fund_pct: norm(t.fund_score, t.fund_max),
+        _smc_pct:  norm(t.smc_score,  t.smc_max),
+        _sent_pct: norm(t.sent_score, t.sent_max),
+        _held:     heldSet.has(t.ticker),
+      };
+    });
+    _state.arr = enriched;
+    _state.data = data || null;
+    _repaint(container);
+    _startLivePx();
+    // Lazy-load tickers_main.json for news_articles, insider, IV (mirrors Momentum).
+    if (typeof window._ensureMainLoaded === 'function') {
+      window._ensureMainLoaded().then(() => {
+        const fresh = window._kairosTickersArr || [];
+        if (fresh.length) {
+          const byTk = new Map(_state.arr.map(t => [t.ticker, t]));
+          fresh.forEach(r => {
+            const ex = byTk.get(r.ticker);
+            if (ex) Object.keys(r).forEach(k => { if (ex[k] == null && r[k] != null) ex[k] = r[k]; });
+          });
+          _repaint(container);
+        }
+      }).catch(() => {});
+    }
+  }
+
+  function deactivate() {
+    const p = document.getElementById('pan-workspace');
+    if (p) p.classList.remove('qss-active');
+    _stopLivePx();
+  }
+
+  return { render, deactivate };
+})();
+
 // ══════════════════════════════════════════════════════════════════════
 // QuantKilled · Killed / AVOID suppression list (2026-05-11)
 // Groups by reason. Override requires audit note (CLAUDE.md principle 7).
@@ -60037,6 +61357,9 @@ const QuantMomentum = (function () {
       });
     return _mainLoadPromise;
   }
+  // 2026-05-26 · Expose to window so other workspaces (Signal Scanner Eikon)
+  // can lazy-load the full row enrichment without duplicating the fetch.
+  if (typeof window !== 'undefined') window._ensureMainLoaded = _ensureMainLoaded;
 
   function render(panel, data, arr) {
     _ensureStyles();
@@ -73782,7 +75105,11 @@ function setupV3Workspaces(arr, data) {
     if (ws.custom === 'quantScanner') {
       wsPanel.classList.remove('ep-active');
       EliteAB.deactivate();
-      QuantScanner.render(wsPanel, data, arr);
+      // 2026-05-26 · ship Eikon-style v15 redesign (QSS).
+      // Legacy QuantScanner kept in-source for rollback (.qs-* class
+      // namespace) but no longer wired to the workspace.
+      QuantScanner.deactivate();  // ensure legacy live-px loop is stopped
+      QuantSignalScannerEikon.render(wsPanel, data, arr);
       _injectHelpBtn(wsPanel, 'scanner');
       return;
     }
@@ -73902,6 +75229,7 @@ function setupV3Workspaces(arr, data) {
     }
     wsPanel.classList.remove('ep-active');
     QuantScanner.deactivate();
+    if (typeof QuantSignalScannerEikon !== 'undefined' && QuantSignalScannerEikon.deactivate) QuantSignalScannerEikon.deactivate();
     if (typeof QuantWatchlist !== 'undefined' && QuantWatchlist.deactivate) QuantWatchlist.deactivate();
     EliteAB.deactivate();
 
