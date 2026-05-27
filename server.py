@@ -7813,6 +7813,25 @@ async def macro_vol_api():
         return {"error": str(e)}
 
 
+@app.get("/api/news")
+async def news_api(t: str, limit: int = 8):
+    """Per-ticker news from EODHD. Returns last N headlines."""
+    tk = t.upper().strip()
+    try:
+        import eodhd_client as eod
+        # eodhd_client.news returns list of {date, title, link, content, sentiment, ...}
+        rows = eod.news(tk, limit=limit) or []
+        articles = [{
+            "date":   r.get("date") or r.get("published_at"),
+            "title":  r.get("title") or r.get("headline") or "",
+            "source": (r.get("source") or "EODHD")[:30],
+            "url":    r.get("link") or r.get("url") or "",
+        } for r in rows[:limit] if r]
+        return {"ticker": tk, "articles": articles, "count": len(articles)}
+    except Exception as e:
+        return {"ticker": tk, "articles": [], "error": str(e)}
+
+
 @app.post("/api/options-alerts/check")
 @app.get("/api/options-alerts/check")
 async def options_alerts_check_api():

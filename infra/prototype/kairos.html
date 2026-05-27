@@ -74512,6 +74512,11 @@ window._toggleTheme = function() {
   const btn = document.getElementById('theme-toggle');
   if (btn) btn.textContent = isLight ? '🌙' : '☀';
   try { localStorage.setItem('kairos-theme', isLight ? 'light' : 'dark'); } catch(_) {}
+  // Propagate theme to Eikon iframe (Options Flow LIVE pane)
+  try {
+    const f = document.getElementById('eikon-live-frame');
+    if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'theme', light: isLight }, '*');
+  } catch(_) {}
 };
 // Restore saved preference on load
 (function() {
@@ -74523,6 +74528,20 @@ window._toggleTheme = function() {
     }
   } catch(_) {}
 })();
+// Sync theme to Eikon iframe whenever it loads
+document.addEventListener('DOMContentLoaded', () => {
+  const observer = new MutationObserver(() => {
+    const f = document.getElementById('eikon-live-frame');
+    if (f && !f._themeWired) {
+      f._themeWired = true;
+      f.addEventListener('load', () => {
+        const isLight = document.body.classList.contains('light');
+        try { f.contentWindow.postMessage({ type: 'theme', light: isLight }, '*'); } catch(_) {}
+      });
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+});
 
 // ══════════════════════════════════════════════════════════════════════
 // 2026-05-21 · User badge + sign-out (HTTP Basic Auth)
