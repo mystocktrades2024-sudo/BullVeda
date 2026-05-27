@@ -20012,6 +20012,7 @@ const QuantOptions = (function() {
   // 2026-05-27 · Options Monitor — reuses Momentum Monitor's qmom13/14 chrome
   // for full visual parity with the Momentum tab.
   let _qoptTab = 'scanner';
+  let _qoptDetailExpanded = false;   // 2026-05-27 · expanded full-width detail
   let _qoptSelected = null;
   let _qoptSort = 'conv_desc';
   let _qoptQuickFilter = null;  // top20, strong, long, short, ivrich, ivcheap, er7
@@ -20231,11 +20232,17 @@ const QuantOptions = (function() {
     const ccls = conv >= 65 ? 'gn' : conv >= 50 ? 'am' : 'rd';
     const stat = (lbl, val, cls) => `<div class="qopt-mon-stat"><span class="lbl">${lbl}</span><span class="v ${cls||''}">${val != null ? val : '—'}</span></div>`;
     const change = (data.short_term || []).find(x => x.ticker === p.ticker)?.pct_chg;
-    return `<div class="qopt-mon-detail">
-      <div class="qopt-mon-hero">
-        <div class="qopt-mon-tkr">${p.ticker}</div>
-        <div class="qopt-mon-sec">${(p.sector || '').toUpperCase()}</div>
-        <div class="qopt-mon-px">$${(+p.price).toFixed(2)} <span class="${(change||0)>=0?'gn':'rd'}" style="font-size:14px">${change != null ? (change>=0?'+':'') + change.toFixed(2) + '%' : ''}</span></div>
+    const isExpanded = arguments.length >= 3 ? arguments[2] : false;
+    return `<div class="qopt-mon-detail ${isExpanded ? 'expanded' : ''}">
+      <div class="qopt-mon-hero qopt-sticky-hero">
+        <div style="display:flex;align-items:start;justify-content:space-between">
+          <div>
+            <div class="qopt-mon-tkr">${p.ticker}</div>
+            <div class="qopt-mon-sec">${(p.sector || '').toUpperCase()}</div>
+            <div class="qopt-mon-px">$${(+p.price).toFixed(2)} <span class="${(change||0)>=0?'gn':'rd'}" style="font-size:14px">${change != null ? (change>=0?'+':'') + change.toFixed(2) + '%' : ''}</span></div>
+          </div>
+          <button class="qopt-expand-btn" onclick="QuantOptions.toggleDetailExpand()" title="${isExpanded ? 'Collapse to right rail' : 'Expand to fullscreen'}">${isExpanded ? '⛶ Collapse' : '⛶ Expand'}</button>
+        </div>
       </div>
 
       <div class="qopt-mon-section">
@@ -20248,9 +20255,17 @@ const QuantOptions = (function() {
         <div class="qopt-mon-tt-sizer">
           <div class="sz-row">
             <span class="lbl">Contracts</span>
-            <input type="range" min="1" max="20" value="1" class="sz-slider" id="qopt-sz-slider-${p.ticker}"
+            <input type="range" min="1" max="20" value="${_qoptSizes[p.ticker] || 1}" class="sz-slider" id="qopt-sz-slider-${p.ticker}"
               oninput="QuantOptions.updateSize('${p.ticker}', this.value)">
-            <span class="sz-num" id="qopt-sz-num-${p.ticker}">1</span>
+            <span class="sz-num" id="qopt-sz-num-${p.ticker}">${_qoptSizes[p.ticker] || 1}</span>
+          </div>
+          <div class="sz-presets">
+            <span class="lbl">Quick size</span>
+            <button class="qopt-tt-btn" onclick="QuantOptions.sizeByR('${p.ticker}', 0.5)">½R</button>
+            <button class="qopt-tt-btn" onclick="QuantOptions.sizeByR('${p.ticker}', 1)">1R</button>
+            <button class="qopt-tt-btn" onclick="QuantOptions.sizeByR('${p.ticker}', 2)">2R</button>
+            <button class="qopt-tt-btn" onclick="QuantOptions.sizeByPct('${p.ticker}', 0.005)">0.5% port</button>
+            <button class="qopt-tt-btn" onclick="QuantOptions.sizeByPct('${p.ticker}', 0.01)">1% port</button>
           </div>
           <div class="sz-stats" id="qopt-sz-stats-${p.ticker}">
             <span class="cell"><span class="lbl">Total $</span><span class="v" id="qopt-sz-total-${p.ticker}">$${entryPx != null ? (entryPx*100).toFixed(0) : '—'}</span></span>
@@ -20425,6 +20440,26 @@ const QuantOptions = (function() {
       <div class="qopt-mon-section">
         <div class="qopt-mon-sec-h">⊞ WHALE STRIKES · vol > 2.5σ vs neighbors</div>
         ${_qoptWhaleStrikes(p)}
+      </div>
+
+      <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ VOL RISK PREMIUM LADDER · IV vs realized horizons</div>
+        ${_qoptVrpLadder(p)}
+      </div>
+
+      <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ GREEKS VS TIME · static-spot decay schedule</div>
+        ${_qoptGreeksVsTime(p)}
+      </div>
+
+      <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ VOL SURFACE METRICS · 25Δ skew · butterfly · vega $</div>
+        ${_qoptVolSurfaceMetrics(p)}
+      </div>
+
+      <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ SMART FILL ESTIMATE · likely execution price</div>
+        ${_qoptSmartFill(p)}
       </div>
 
       <div class="qopt-mon-section">
@@ -20834,8 +20869,157 @@ const QuantOptions = (function() {
       .qopt-ml-stats .lbl { font: 700 8.5px var(--mono); letter-spacing: 0.10em; text-transform: uppercase; color: var(--ink-3); display: block; }
       .qopt-ml-stats .v { font: 800 12px var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
       .qopt-ml-stats .v.gn { color: var(--gn); } .qopt-ml-stats .v.rd { color: var(--rd); }
+      /* Expand detail view */
+      .qopt-expand-btn { background: var(--bg-3); color: var(--ink-1); border: 1px solid var(--line); padding: 4px 10px; border-radius: 2px; font: 700 10px var(--mono); cursor: pointer; letter-spacing: 0.04em; }
+      .qopt-expand-btn:hover { border-color: var(--copper); color: var(--ink); }
+      .qopt-expanded-wrap { padding: 14px 22px; }
+      .qopt-mon-detail.expanded {
+        position: static; max-height: none; overflow-y: visible;
+        background: var(--bg-1); padding: 22px;
+      }
+      .qopt-mon-detail.expanded .qopt-mon-stats { grid-template-columns: repeat(4, 1fr); }
+      .qopt-mon-detail.expanded .qopt-mon-section { padding-right: 0; }
+      /* Sticky table header + hero */
+      .qopt-monitor-tbl thead th { position: sticky; top: 0; z-index: 5; }
+      .qopt-sticky-hero { position: sticky; top: 0; z-index: 4; background: var(--bg-1); padding-bottom: 8px; }
+      /* Position size presets */
+      .sz-presets { display: flex; gap: 4px; margin-top: 6px; align-items: center; flex-wrap: wrap; }
+      .sz-presets .lbl { font: 700 9px var(--mono); letter-spacing: 0.10em; text-transform: uppercase; color: var(--ink-3); margin-right: 4px; }
+      .sz-presets .qopt-tt-btn { padding: 3px 8px; font-size: 9.5px; }
+      /* Misc */
+      .qopt-mon-stat .v.cop { color: var(--copper); }
     `;
     document.head.appendChild(s);
+  }
+
+  // ── Vol risk premium ladder ────────────────────────────────────────
+  function _qoptVrpLadder(p) {
+    if (p.atm_iv == null) return '<div style="color:var(--ink-3);font:600 11px var(--mono)">no IV data</div>';
+    const iv = p.atm_iv * 100;
+    const cells = [
+      { lbl: 'HV20', v: p.hv20 },
+      { lbl: 'HV30', v: p.hv30 },
+      { lbl: 'HV60', v: p.hv60 },
+      { lbl: 'HV90', v: p.hv90 },
+    ];
+    const rows = cells.map(c => {
+      if (c.v == null) return `<tr><td>${c.lbl}</td><td class="r">—</td><td class="r">—</td><td class="r">—</td></tr>`;
+      const hvPct = c.v * 100;
+      const vrp = iv - hvPct;
+      const cls = vrp > 3 ? 'rd' : vrp < -3 ? 'gn' : 'am';
+      const verdict = vrp > 3 ? 'IV rich' : vrp < -3 ? 'IV cheap' : 'fair';
+      return `<tr>
+        <td>${c.lbl}</td>
+        <td class="r">${hvPct.toFixed(1)}%</td>
+        <td class="r ${cls}">${vrp >= 0 ? '+' : ''}${vrp.toFixed(1)}%</td>
+        <td class="r ${cls}">${verdict}</td>
+      </tr>`;
+    }).join('');
+    return `<table class="qopt-mon-stress">
+      <thead><tr><th>Horizon</th><th class="r">Realized</th><th class="r">IV − HV</th><th class="r">Verdict</th></tr></thead>
+      <tbody><tr><td>IV (ATM)</td><td class="r"><b>${iv.toFixed(1)}%</b></td><td class="r">—</td><td class="r"><b>baseline</b></td></tr>${rows}</tbody>
+    </table>`;
+  }
+
+  // ── Greeks vs time · how Greeks decay at static spot ──────────────
+  function _qoptGreeksVsTime(p) {
+    if (p.atm_strike == null || p.atm_iv == null || p.atm_dte == null) {
+      return '<div style="color:var(--ink-3);font:600 11px var(--mono)">no chain greeks</div>';
+    }
+    const isBull = (+p.put_call_ratio || 1) < 1.0;
+    const σ = +p.atm_iv;
+    const spot = +p.price;
+    const days = [0, 1, 3, 7, 14];
+    // Approximate Greeks at future date assuming static spot
+    // Δ stays roughly same, Γ slightly higher, Θ higher (steeper near expiry), ν lower
+    // Use finite difference on BSM to estimate
+    const _erf = (x) => { const t = 1 / (1 + 0.3275911 * Math.abs(x)); const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429; const y = 1 - (((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x); return x >= 0 ? y : -y; };
+    const _N = (x) => 0.5 * (1 + _erf(x / Math.SQRT2));
+    const _Npdf = (x) => Math.exp(-x*x/2) / Math.sqrt(2*Math.PI);
+    const rows = days.map(d => {
+      const T = Math.max(0.001, (p.atm_dte - d) / 365);
+      if (T <= 0) return `<tr><td>${d}d</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td></tr>`;
+      const d1 = (Math.log(spot/p.atm_strike) + (0.05 + σ*σ/2)*T) / (σ*Math.sqrt(T));
+      const d2 = d1 - σ*Math.sqrt(T);
+      const Δ = isBull ? _N(d1) : _N(d1) - 1;
+      const Γ = _Npdf(d1) / (spot * σ * Math.sqrt(T));
+      const Θ = (-spot * _Npdf(d1) * σ / (2 * Math.sqrt(T)) - (isBull ? 0.05 * p.atm_strike * Math.exp(-0.05*T) * _N(d2) : -0.05 * p.atm_strike * Math.exp(-0.05*T) * _N(-d2))) / 365;
+      const ν = spot * _Npdf(d1) * Math.sqrt(T) / 100;
+      return `<tr>
+        <td>${d}d</td>
+        <td class="r">${(Δ >= 0 ? '+' : '') + Δ.toFixed(2)}</td>
+        <td class="r">${Γ.toFixed(4)}</td>
+        <td class="r rd">$${Θ.toFixed(2)}</td>
+        <td class="r gn">+$${ν.toFixed(2)}</td>
+      </tr>`;
+    }).join('');
+    return `<table class="qopt-mon-stress">
+      <thead><tr><th>Days from now</th><th class="r">Δ</th><th class="r">Γ</th><th class="r">Θ/d</th><th class="r">ν</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div style="font:600 9px var(--mono);color:var(--ink-3);margin-top:4px">BSM Greeks recomputed at each future date · spot held constant · σ held constant</div>`;
+  }
+
+  // ── Vol surface metrics · butterfly, vega $, risk reversal ladder ──
+  function _qoptVolSurfaceMetrics(p) {
+    const lines = [];
+    if (p.atm_iv != null && p.iv_25d_call != null && p.iv_25d_put != null) {
+      const atm = p.atm_iv * 100;
+      const c25 = p.iv_25d_call * 100;
+      const p25 = p.iv_25d_put * 100;
+      const butterfly = (c25 + p25) / 2 - atm;  // > 0 = "smile" curvature (wings paid up)
+      const cls = butterfly > 2 ? 'rd' : butterfly > 0 ? 'am' : 'gn';
+      lines.push(`<div class="qopt-mon-stat"><span class="lbl">Butterfly index</span><span class="v ${cls}">${butterfly >= 0 ? '+' : ''}${butterfly.toFixed(2)}%</span></div>`);
+      lines.push(`<div class="qopt-mon-stat"><span class="lbl">25Δ Risk Reversal</span><span class="v">${(c25 - p25 >= 0 ? '+' : '') + (c25 - p25).toFixed(2)}%</span></div>`);
+    }
+    if (p.atm_vega != null && p.atm_iv != null) {
+      const vegaDollar = +p.atm_vega * 100;  // per contract × 100 multiplier
+      lines.push(`<div class="qopt-mon-stat"><span class="lbl">Vega notional</span><span class="v gn">+$${vegaDollar.toFixed(0)}/ct/IVpp</span></div>`);
+    }
+    if (p.vol_of_vol != null) {
+      lines.push(`<div class="qopt-mon-stat"><span class="lbl">Vol of vol</span><span class="v">${(p.vol_of_vol*100).toFixed(1)}%</span></div>`);
+    }
+    if (p.iv_of_iv != null) {
+      lines.push(`<div class="qopt-mon-stat"><span class="lbl">IV of IV (30d)</span><span class="v">${p.iv_of_iv.toFixed(2)}</span></div>`);
+    }
+    if (p.iv_percentile_1y != null) {
+      const ivp = p.iv_percentile_1y;
+      const cls = ivp > 80 ? 'rd' : ivp > 50 ? 'am' : 'gn';
+      lines.push(`<div class="qopt-mon-stat"><span class="lbl">IV 1y rank</span><span class="v ${cls}">${ivp.toFixed(0)}%</span></div>`);
+    }
+    if (p.term_ratio != null) {
+      lines.push(`<div class="qopt-mon-stat"><span class="lbl">Term ratio</span><span class="v">${p.term_ratio.toFixed(2)}</span></div>`);
+    }
+    if (!lines.length) return '<div style="color:var(--ink-3);font:600 11px var(--mono)">no surface metrics</div>';
+    return `<div class="qopt-mon-stats">${lines.join('')}</div>`;
+  }
+
+  // ── Smart fill estimator ──────────────────────────────────────────
+  function _qoptSmartFill(p) {
+    if (p.atm_mark == null) return '<div style="color:var(--ink-3);font:600 11px var(--mono)">no chain mark</div>';
+    // Compute likely fill price from bid/ask spread
+    const ba = p.atm_bid_ask_pct;
+    if (ba == null) {
+      return `<div class="qopt-mon-stats">
+        <div class="qopt-mon-stat"><span class="lbl">Mark</span><span class="v">$${p.atm_mark.toFixed(2)}</span></div>
+        <div class="qopt-mon-stat"><span class="lbl">Fill estimate</span><span class="v">$${p.atm_mark.toFixed(2)} (mid)</span></div>
+      </div><div style="font:600 9px var(--mono);color:var(--ink-3);margin-top:4px">no bid/ask data · mid-mark used</div>`;
+    }
+    // Tight (<3%) → mid usually fills · OK (3-10%) → mid+30% · Wide (>10%) → at-ask
+    const mid = p.atm_mark;
+    const halfSpread = mid * ba / 200;  // ba is % of mid; half-spread = (ask-bid)/2
+    const tightFill   = mid;
+    const realisticFill = ba < 3 ? mid : ba < 10 ? mid + halfSpread * 0.6 : mid + halfSpread * 0.9;
+    const cls = ba < 3 ? 'gn' : ba < 10 ? 'am' : 'rd';
+    const verdict = ba < 3 ? 'tight · mid likely' : ba < 10 ? 'OK · mid+30% target' : 'wide · expect to pay ask';
+    return `<div class="qopt-mon-stats">
+      <div class="qopt-mon-stat"><span class="lbl">Bid/Ask</span><span class="v ${cls}">${ba.toFixed(1)}%</span></div>
+      <div class="qopt-mon-stat"><span class="lbl">Half-spread</span><span class="v">$${halfSpread.toFixed(2)}</span></div>
+      <div class="qopt-mon-stat"><span class="lbl">Mid (target)</span><span class="v">$${tightFill.toFixed(2)}</span></div>
+      <div class="qopt-mon-stat"><span class="lbl">Realistic fill</span><span class="v cop">$${realisticFill.toFixed(2)}</span></div>
+      <div class="qopt-mon-stat"><span class="lbl">Slip vs mid</span><span class="v ${cls}">${((realisticFill - mid) / mid * 100).toFixed(1)}%</span></div>
+      <div class="qopt-mon-stat"><span class="lbl">Verdict</span><span class="v ${cls}">${verdict}</span></div>
+    </div>`;
   }
 
   // ── Multi-leg builder ─────────────────────────────────────────────────
@@ -21017,6 +21201,17 @@ const QuantOptions = (function() {
     }
     const selectedPick = visible.find(p => p.ticker === _qoptSelected) || null;
     const sectors = Array.from(new Set(picks.map(p => p.sector).filter(Boolean))).sort();
+
+    // Expanded detail view — full-width overlay covering the table
+    if (_qoptDetailExpanded && _qoptTab === 'scanner' && selectedPick) {
+      root.innerHTML = `
+        ${_renderQoptTitleBar(data)}
+        ${_renderQoptTabsBar(picks)}
+        <div class="qopt-expanded-wrap">${_renderQoptDetailPane(selectedPick, data, true)}</div>
+      `;
+      setTimeout(() => _qoptLoadDetailExtras(selectedPick), 0);
+      return;
+    }
 
     let body;
     if (_qoptTab === 'skewmap')     body = _renderQoptSkewMap(picks);
@@ -21436,6 +21631,50 @@ const QuantOptions = (function() {
       _qoptSavedScans.splice(idx, 1);
       _qoptPersist();
       if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
+    };
+    window.QuantOptions.toggleDetailExpand = function() {
+      _qoptDetailExpanded = !_qoptDetailExpanded;
+      if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
+    };
+    window.QuantOptions.sizeByR = function(tk, r) {
+      // R = $1k risk per R · contracts = floor(R*1000 / per-contract-risk)
+      const p = (window._qoptLastData?.picks || []).find(x => x.ticker === tk);
+      if (!p || p.atm_mark == null) return;
+      const isBull = (+p.put_call_ratio || 1) < 1.0;
+      const ivRich = p.iv_percentile != null && p.iv_percentile > 70;
+      const haveShort = isBull ? p.iv_25d_call_mark != null : p.iv_25d_put_mark != null;
+      const override = _qoptStratOverride[tk];
+      const useSpread = (override === 'bull_call_spread' || override === 'bear_put_spread') ||
+                        (!override && ivRich && haveShort);
+      const sk = useSpread ? (isBull ? p.iv_25d_call_strike : p.iv_25d_put_strike) : null;
+      const sm = useSpread ? (isBull ? p.iv_25d_call_mark   : p.iv_25d_put_mark)   : null;
+      const entryPx = useSpread && sm != null ? p.atm_mark - sm : p.atm_mark;
+      const perCtRisk = entryPx * 100;
+      const budget = r * 1000;  // $1k per R baseline
+      const n = Math.max(1, Math.min(20, Math.floor(budget / perCtRisk)));
+      window.QuantOptions.updateSize(tk, n);
+      const slider = document.getElementById('qopt-sz-slider-' + tk);
+      if (slider) slider.value = n;
+    };
+    window.QuantOptions.sizeByPct = function(tk, pct) {
+      // Assumed portfolio = $100k baseline (configurable later)
+      const p = (window._qoptLastData?.picks || []).find(x => x.ticker === tk);
+      if (!p || p.atm_mark == null) return;
+      const port = 100000;
+      const budget = port * pct;
+      const isBull = (+p.put_call_ratio || 1) < 1.0;
+      const ivRich = p.iv_percentile != null && p.iv_percentile > 70;
+      const haveShort = isBull ? p.iv_25d_call_mark != null : p.iv_25d_put_mark != null;
+      const override = _qoptStratOverride[tk];
+      const useSpread = (override === 'bull_call_spread' || override === 'bear_put_spread') ||
+                        (!override && ivRich && haveShort);
+      const sk = useSpread ? (isBull ? p.iv_25d_call_strike : p.iv_25d_put_strike) : null;
+      const sm = useSpread ? (isBull ? p.iv_25d_call_mark   : p.iv_25d_put_mark)   : null;
+      const entryPx = useSpread && sm != null ? p.atm_mark - sm : p.atm_mark;
+      const n = Math.max(1, Math.min(20, Math.floor(budget / (entryPx * 100))));
+      window.QuantOptions.updateSize(tk, n);
+      const slider = document.getElementById('qopt-sz-slider-' + tk);
+      if (slider) slider.value = n;
     };
     window.QuantOptions.addLeg = function(tk) {
       const p = (window._qoptLastData?.picks || []).find(x => x.ticker === tk);
