@@ -2293,6 +2293,29 @@ body.on-workspace .tabs { display: none; }
   color: var(--ink); font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
+.qot-ticket-cell.gn { background: rgba(91,229,124,0.10); padding: 2px 6px; border-radius: 3px; }
+.qot-ticket-cell.rd { background: rgba(255,107,91,0.10); padding: 2px 6px; border-radius: 3px; }
+.qot-ticket-cell.gn .v { color: var(--gn); }
+.qot-ticket-cell.rd .v { color: var(--rd); }
+
+/* 2026-05-26 · OPTIONS-COMPOSITE-DIRECTIONAL — score chip next to action button */
+.qot-composite {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-top: 4px;
+  text-align: center;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  min-width: 32px;
+}
+.qot-composite.gn { background: rgba(91,229,124,0.15); border-color: rgba(91,229,124,0.4); color: var(--gn); }
+.qot-composite.am { background: rgba(255,185,92,0.15); border-color: rgba(255,185,92,0.4); color: var(--am); }
+.qot-composite.rd { background: rgba(255,107,91,0.15); border-color: rgba(255,107,91,0.4); color: var(--rd); }
 .qo-side-tile .qot-stat.pop .qot-stat-v { color: var(--copper); }
 .qo-side-tile .qot-foot {
   display: flex; flex-wrap: wrap; gap: 4px;
@@ -19241,11 +19264,39 @@ const QuantOptions = (function() {
     });
     const ranked = of
       .filter(t => t && t.ticker && typeof t.rr === 'number' && typeof t.put_call_ratio === 'number')
-      .map(t => ({
-        ...t,
-        _statRank: STATUS_RANK[String(t.status || '').toUpperCase()] || 0,
-        _bull: t.put_call_ratio < 1.0,
-      }));
+      .map(t => {
+        // 2026-05-26 · OPTIONS-COMPOSITE-DIRECTIONAL — replace PCR-only gate with
+        // a 3-factor composite (PCR + UOA-side + Δ-sign). PCR alone is folk-indicator
+        // (sold-puts and bought-puts share the same bucket without bid/ask side data,
+        // which Schwab doesn't expose). Adding UOA-side and ATM-Δ direction makes
+        // the directional call more honest about what we actually observe.
+        const pcr = +t.put_call_ratio || 1;
+        const uoaCalls = +t.uoa_calls || 0;
+        const uoaPuts  = +t.uoa_puts  || 0;
+        const uoaTot   = uoaCalls + uoaPuts;
+        const delta    = t.atm_delta;
+        // PCR score: 1 (very call-heavy) → 0 (very put-heavy); piecewise-linear at 1.0
+        const pcrScore = pcr < 1 ? Math.min(1, (1 - pcr) / 0.8)
+                                 : Math.max(0, 1 - (pcr - 1) / 0.8);
+        // UOA-side score: 1 = all call UOA, 0 = all put UOA, 0.5 = none / mixed
+        const uoaScore = uoaTot > 0 ? (uoaCalls / uoaTot) : 0.5;
+        // Δ-sign score: ATM-call Δ shapes the directional aggression
+        const dScore = delta == null ? 0.5
+                     : delta >= 0.55 ? 1
+                     : delta >= 0.45 ? 0.7
+                     : delta >= 0.35 ? 0.4
+                     : 0.1;
+        // Weighted composite — PCR 50% (loudest signal we have), UOA 30%, Δ 20%
+        const composite = pcrScore * 0.5 + uoaScore * 0.3 + dScore * 0.2;
+        return {
+          ...t,
+          _statRank: STATUS_RANK[String(t.status || '').toUpperCase()] || 0,
+          _bull: composite >= 0.5,
+          _composite: composite,
+          _pcrBull: pcr < 1.0,
+          _uoaBull: uoaScore >= 0.5,
+        };
+      });
 
     const bullPicks = ranked
       .filter(t => t._bull)
@@ -19274,6 +19325,10 @@ const QuantOptions = (function() {
       const vega      = t.atm_vega;
       const baSpread  = t.atm_bid_ask_pct;
       const termR     = t.term_ratio;
+      const skew25    = t.skew_25d;                // fraction · positive = call-skew
+      const skew25Pct = skew25 != null ? skew25 * 100 : null;
+      const composite = t._composite;              // 0..1
+      const pcrBullTag = t._pcrBull, uoaBullTag = t._uoaBull;
       const maxPain   = t.max_pain;
       const cohort0   = t.cohort_0dte_pct;
       const cohortW   = t.cohort_weekly_pct;
@@ -19351,6 +19406,15 @@ const QuantOptions = (function() {
           <div class="qot-actbox">
             <div class="qot-action">${actionLbl}</div>
             <div class="qot-conv" title="${status} conviction">${convDots}</div>
+            ${composite != null ? (() => {
+              const compPct = Math.round(composite * 100);
+              const compCls = compPct >= 65 ? 'gn' : compPct >= 50 ? 'am' : 'rd';
+              const tipParts = [];
+              tipParts.push('PCR ' + (pcrBullTag ? 'bull' : 'bear'));
+              tipParts.push('UOA ' + (uoaBullTag ? 'call' : 'put'));
+              if (delta != null) tipParts.push('Δ ' + delta.toFixed(2));
+              return `<div class="qot-composite ${compCls}" title="Composite directional score: ${tipParts.join(' · ')}">${compPct}%</div>`;
+            })() : ''}
           </div>
         </div>
         <div class="qot-spot">
@@ -19368,12 +19432,19 @@ const QuantOptions = (function() {
           <div class="qot-grk"><span class="lbl">ν</span><span class="v">${vega != null ? '+$'+(+vega).toFixed(2) : '—'}</span></div>
         </div>` : ''}
 
-        <!-- VOL EDGE · IV vs realized -->
-        ${atmIvPct != null || hv20Pct != null ? `
+        <!-- VOL EDGE · IV vs realized + 25Δ skew + term -->
+        ${atmIvPct != null || hv20Pct != null || skew25Pct != null ? `
         <div class="qot-vol">
           <div class="qot-vol-cell"><span class="lbl">IV</span><span class="v">${atmIvPct != null ? atmIvPct.toFixed(1)+'%' : '—'}</span></div>
           <div class="qot-vol-cell"><span class="lbl">HV20</span><span class="v">${hv20Pct != null ? hv20Pct.toFixed(1)+'%' : '—'}</span></div>
           <div class="qot-vol-cell ${ivrpCls}"><span class="lbl">IVRP</span><span class="v">${ivrpPct != null ? (ivrpPct>=0?'+':'') + ivrpPct.toFixed(1)+'%' : '—'}</span><span class="sub">${ivrpLbl}</span></div>
+          ${(() => {
+            if (skew25Pct == null) return '';
+            const skCls = skew25Pct > 2 ? 'gn' : skew25Pct < -2 ? 'rd' : 'am';
+            const skLbl = skew25Pct > 2 ? 'call skew' : skew25Pct < -2 ? 'put skew' : 'flat';
+            const skVal = (skew25Pct >= 0 ? '+' : '') + skew25Pct.toFixed(1) + '%';
+            return '<div class="qot-vol-cell ' + skCls + '"><span class="lbl">25Δ skew</span><span class="v">' + skVal + '</span><span class="sub">' + skLbl + '</span></div>';
+          })()}
           ${termR != null ? `<div class="qot-vol-cell"><span class="lbl">Term</span><span class="v">${(+termR).toFixed(2)}</span><span class="sub">${termR < 0.95 ? 'contango' : termR > 1.05 ? 'backwd' : 'flat'}</span></div>` : ''}
         </div>` : ''}
 
@@ -19407,17 +19478,36 @@ const QuantOptions = (function() {
           </div>` : ''}
         </div>
 
-        <!-- STRATEGY TICKET · concrete strike + breakeven (when ATM data available) -->
-        ${atmStrike != null && atmDte != null ? `
-        <div class="qot-ticket">
-          <div class="qot-ticket-h">${strat} · ATM $${(+atmStrike).toFixed(2)} · ${atmDte}d</div>
-          <div class="qot-ticket-row">
-            ${breakeven != null ? `<span class="qot-ticket-cell"><span class="lbl">BE</span><span class="v">$${breakeven.toFixed(2)}</span></span>` : ''}
-            ${atmMark != null   ? `<span class="qot-ticket-cell"><span class="lbl">Premium</span><span class="v">~$${atmMark.toFixed(2)}</span></span>` : ''}
-            ${theta != null     ? `<span class="qot-ticket-cell"><span class="lbl">θ/day</span><span class="v">$${theta.toFixed(2)}</span></span>` : ''}
-            ${vega != null      ? `<span class="qot-ticket-cell"><span class="lbl">ν/pt</span><span class="v">$${vega.toFixed(2)}</span></span>` : ''}
-          </div>
-        </div>` : ''}
+        <!-- STRATEGY TICKET · concrete strike + breakeven + premium-$ risk/reward -->
+        ${atmStrike != null && atmDte != null ? (() => {
+          // Premium-$ stop/target — Options don't move 1:1 with spot. Approximate the
+          // option-price move for a given spot move using |Δ| (delta-equivalence).
+          // Risk_$ ≈ entry_premium × |Δ| × (stop_distance / spot), per contract × 100.
+          // For Long Call: 3% spot drop ≈ delta × 3% × spot in option premium terms.
+          // Quick-math: $ at risk per contract = atm_mark × 100 × (|Δ| × stop_pct).
+          const sd = delta != null ? Math.abs(delta) : null;
+          const stopMove = Math.abs(stopPct) / 100;
+          const tgtMove  = Math.abs(tgtPct)  / 100;
+          // Premium move per contract = atm_mark × delta × spot_move (rough)
+          const premiumRisk_$   = (atmMark != null && sd != null) ? atmMark * sd * (stopMove / 0.01) * 100 / 100 : null;
+          // Cleaner — just delta-equivalent: option moves Δ × spot_move dollars; × 100 = per contract
+          const premRiskPerCt   = (sd != null && spot > 0) ? sd * spot * stopMove * 100 : null;
+          const premRewardPerCt = (sd != null && spot > 0) ? sd * spot * tgtMove  * 100 : null;
+          const ticketRows = [];
+          if (breakeven != null) ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">BE</span><span class="v">$${breakeven.toFixed(2)}</span></span>`);
+          if (atmMark != null)   ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">Premium</span><span class="v">~$${atmMark.toFixed(2)}</span></span>`);
+          if (theta != null)     ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">θ/day</span><span class="v">$${theta.toFixed(2)}</span></span>`);
+          if (vega != null)      ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">ν/pt</span><span class="v">$${vega.toFixed(2)}</span></span>`);
+          // Premium-$ risk/reward — single contract sizing
+          if (premRiskPerCt != null && premRewardPerCt != null) {
+            ticketRows.push(`<span class="qot-ticket-cell rd"><span class="lbl">Risk $</span><span class="v">$${premRiskPerCt.toFixed(0)}/ct</span></span>`);
+            ticketRows.push(`<span class="qot-ticket-cell gn"><span class="lbl">Reward $</span><span class="v">$${premRewardPerCt.toFixed(0)}/ct</span></span>`);
+          }
+          return `<div class="qot-ticket">
+            <div class="qot-ticket-h">${strat} · ATM $${(+atmStrike).toFixed(2)} · ${atmDte}d</div>
+            <div class="qot-ticket-row">${ticketRows.join('')}</div>
+          </div>`;
+        })() : ''}
 
         <div class="qot-flow" title="Call ${_fmtV(callV)} · Put ${_fmtV(putV)}">
           <div class="qot-flow-call" style="width:${callPct}%"></div>

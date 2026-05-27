@@ -4473,6 +4473,10 @@ def get_options_iv_data(ticker: str) -> dict:
            "front_iv":         None,   # ATM IV of nearest expiration
            "back_iv":          None,   # ATM IV of farthest (within fetched expirations)
            "term_ratio":       None,   # front_iv / back_iv (<1 = contango / normal; >1 = stressed)
+           "skew_25d":         None,   # 25Δ-call IV − 25Δ-put IV (fraction); >0 = call-skew (upside chase), <0 = put-skew (crash hedge)
+           "iv_25d_call":      None,   # IV of the contract closest to delta = +0.25
+           "iv_25d_put":       None,   # IV of the contract closest to delta = -0.25
+           "uoa_puts":         0,      # number of put strikes with vol > 3× OI (already aggregated, now exposed)
            "source": "unavailable", "error": None}
 
     # Lazy-load .env so this works whether or not the parent process exported
@@ -4534,6 +4538,10 @@ def get_options_iv_data(ticker: str) -> dict:
         # ATM call slot for Greeks pick — store the contract closest to the money
         # at the nearest viable expiration ≥ 14d (avoid 0DTE/weekly Greek noise).
         atm_call_best: dict = {}
+        # 25Δ skew tracking — find the call closest to |Δ|=0.25 and the put closest
+        # to |Δ|=0.25, both at the same viable expiration ≥14d. Skew = call_IV - put_IV.
+        skew_25d_call_best: dict = {}
+        skew_25d_put_best: dict = {}
 
         def _aggregate(ex_map, is_put: bool):
             nonlocal call_oi, put_oi, call_vol, put_vol, uoa_calls, uoa_puts
@@ -4576,6 +4584,24 @@ def get_options_iv_data(ticker: str) -> dict:
                             premium_put_dollars += premium
                             if oi > 100 and vol > oi * 3:
                                 uoa_puts += 1
+                            # 25Δ put tracking — put delta is negative; |Δ| ≈ 0.25
+                            d = c.get("delta")
+                            if d is not None and spot and exp_dte is not None and exp_dte >= 14:
+                                try:
+                                    d_f = float(d)
+                                    if -0.40 <= d_f <= -0.10:  # near 25Δ put band
+                                        target_dist = abs(abs(d_f) - 0.25)
+                                        dte_pen = max(0, (exp_dte - 30)) / 1000
+                                        score = target_dist + dte_pen
+                                        prev = skew_25d_put_best.get("_score")
+                                        if prev is None or score < prev:
+                                            skew_25d_put_best.clear()
+                                            skew_25d_put_best.update({
+                                                "_score": score, "iv": iv,
+                                                "delta":  d_f, "strike": strike,
+                                                "dte":    exp_dte,
+                                            })
+                                except Exception: pass
                         else:
                             call_oi  += oi
                             call_vol += vol
@@ -4606,6 +4632,24 @@ def get_options_iv_data(ticker: str) -> dict:
                                             "ask":      c.get("ask"),
                                             "mark":     mark,
                                         })
+                            # 25Δ call tracking — call delta is positive
+                            d = c.get("delta")
+                            if d is not None and spot and exp_dte is not None and exp_dte >= 14:
+                                try:
+                                    d_f = float(d)
+                                    if 0.10 <= d_f <= 0.40:  # near 25Δ call band
+                                        target_dist = abs(d_f - 0.25)
+                                        dte_pen = max(0, (exp_dte - 30)) / 1000
+                                        score = target_dist + dte_pen
+                                        prev = skew_25d_call_best.get("_score")
+                                        if prev is None or score < prev:
+                                            skew_25d_call_best.clear()
+                                            skew_25d_call_best.update({
+                                                "_score": score, "iv": iv,
+                                                "delta":  d_f, "strike": strike,
+                                                "dte":    exp_dte,
+                                            })
+                                except Exception: pass
                         # Strike-pain weight (calls + puts both contribute)
                         strike_pain[strike] = strike_pain.get(strike, 0) + oi
                         # Sample ATM IV (near-the-money strikes)
@@ -4678,6 +4722,22 @@ def get_options_iv_data(ticker: str) -> dict:
                 if mid > 0:
                     out["atm_bid_ask_pct"] = round((ask - bid) / mid * 100, 2)
             except Exception: pass
+        # 25Δ skew · risk-reversal proxy.
+        # Skew > 0 = call-skew (calls more bid up than puts → upside chase).
+        # Skew < 0 = put-skew (puts paid up → crash hedge / fear).
+        # Normalize Schwab percentages → fractions for consistency with atm_iv.
+        if skew_25d_call_best and skew_25d_put_best:
+            try:
+                c_iv = float(skew_25d_call_best.get("iv")) / 100
+                p_iv = float(skew_25d_put_best.get("iv"))  / 100
+                out["iv_25d_call"] = round(c_iv, 4)
+                out["iv_25d_put"]  = round(p_iv, 4)
+                out["skew_25d"]    = round(c_iv - p_iv, 4)
+            except Exception: pass
+
+        # Expose uoa_puts (was tracked but never surfaced)
+        out["uoa_puts"] = uoa_puts
+
         # Term-structure ratio — front ATM IV / back ATM IV.
         # Skip the very-nearest expiration if DTE < 14 because 0-3 DTE IV is
         # dominated by event/weekend microstructure, not term-structure signal.

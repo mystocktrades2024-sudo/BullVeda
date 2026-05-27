@@ -73,6 +73,10 @@ def scan(options_data: dict[str, dict],
             front_iv      = oi.get("front_iv")
             back_iv       = oi.get("back_iv")
             term_ratio    = oi.get("term_ratio")
+            skew_25d      = oi.get("skew_25d")
+            iv_25d_call   = oi.get("iv_25d_call")
+            iv_25d_put    = oi.get("iv_25d_put")
+            uoa_puts_n    = oi.get("uoa_puts") or 0
 
             price = prices.get(ticker, 0)
             if price <= 0:
@@ -153,6 +157,10 @@ def scan(options_data: dict[str, dict],
                 "front_iv":   front_iv,
                 "back_iv":    back_iv,
                 "term_ratio": term_ratio,
+                "skew_25d":    skew_25d,
+                "iv_25d_call": iv_25d_call,
+                "iv_25d_put":  iv_25d_put,
+                "uoa_puts":    uoa_puts_n,
             })
 
         except Exception as e:
