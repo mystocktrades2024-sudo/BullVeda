@@ -374,6 +374,24 @@
     font-size: 10px; color: var(--ink-2); letter-spacing: 0.02em;
   }
   .eikon-tt-foot b { color: var(--ink); font-weight: 700; }
+  .eikon-tt-actions {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center;
+  }
+  .eikon-tt-btn {
+    background: var(--bg-3); color: var(--ink-1); border: 1px solid var(--line);
+    padding: 5px 10px; border-radius: 3px; cursor: pointer;
+    font-family: var(--mono); font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.04em; transition: all 100ms;
+  }
+  .eikon-tt-btn:hover { background: var(--bg-2); border-color: var(--copper); }
+  .eikon-tt-btn.primary { background: var(--copper); color: var(--bg-0); border-color: var(--copper); }
+  .eikon-tt-btn.primary:hover { background: #c46647; }
+  .eikon-tt-btn.warn { background: rgba(255,185,92,0.15); border-color: rgba(255,185,92,0.5); color: var(--am); }
+  .eikon-tt-status {
+    font-family: var(--mono); font-size: 10px; color: var(--ink-2); margin-left: auto;
+  }
+  .eikon-tt-status.gn { color: var(--gn); }
+  .eikon-tt-status.rd { color: var(--rd); }
 
   /* ── RIGHT COL: VOL SURFACE / SKEW / TERM ─────────────────────────── */
   .eikon-volsurf { grid-column: 3; grid-row: 1; }
@@ -524,6 +542,8 @@
     <span class="eikon-mkt-cell"><span class="k">VVIX</span><span class="v" id="mkt-vvix">—</span></span>
     <span class="eikon-mkt-cell"><span class="k">SKEW</span><span class="v" id="mkt-skew">—</span></span>
     <span class="eikon-mkt-cell"><span class="k">REGIME</span><span class="v" id="mkt-regime">—</span></span>
+    <span class="eikon-mkt-cell" id="pf-greeks-cell"><span class="k">BOOK·Δ</span><span class="v" id="pf-delta">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">BOOK·Θ</span><span class="v" id="pf-theta">—</span></span>
   </span>
 </header>
 
@@ -768,11 +788,30 @@
     // Regime label
     const regEl = document.getElementById('mkt-regime');
     if (regEl) {
-      const reg = (DATA._regime || '').toString();
+      const reg = String(DATA._regime || '');
       const short = reg.replace('risk_on_trending','RISK-ON TR').replace('risk_on_choppy','CHOPPY').replace('risk_off_trending','RISK-OFF').replace('panic','PANIC');
       regEl.textContent = short || '—';
       regEl.className = 'v ' + (reg.includes('trending') && !reg.includes('off') ? 'gn' : reg.includes('panic') || reg.includes('off') ? 'rd' : 'am');
     }
+    // Portfolio (book) Greeks — fetch from /api/portfolio-options-greeks
+    (async () => {
+      try {
+        const r = await fetch('/api/portfolio-options-greeks', { credentials: 'include' });
+        if (r.ok) {
+          const g = await r.json();
+          const dEl = document.getElementById('pf-delta');
+          const tEl = document.getElementById('pf-theta');
+          if (dEl) {
+            dEl.textContent = g.open_count > 0 ? (g.net_delta >= 0 ? '+' : '') + g.net_delta : '—';
+            dEl.className = 'v ' + (g.net_delta > 0 ? 'gn' : g.net_delta < 0 ? 'rd' : 'nu');
+          }
+          if (tEl) {
+            tEl.textContent = g.open_count > 0 && g.net_theta != null ? (g.net_theta >= 0 ? '+' : '') + '$' + g.net_theta : '—';
+            tEl.className = 'v ' + (g.net_theta > 0 ? 'gn' : g.net_theta < 0 ? 'rd' : 'nu');
+          }
+        }
+      } catch (e) {}
+    })();
   }
 
   function paintWatchlist() {
@@ -999,6 +1038,12 @@
           <div class="eikon-tt-foot">
             Net debit <b>$${netDebit.toFixed(2)}/ct</b> · Hold to spot target OR close by <b>${closeBy}d</b> (avoid last-week θ cliff) · POP <b>${(pop*100).toFixed(0)}%</b>
           </div>
+          <div class="eikon-tt-actions">
+            <button class="eikon-tt-btn primary" onclick="window._eikonPaperOrder && window._eikonPaperOrder()">▶ Paper-Buy 1 ct via Alpaca</button>
+            <button class="eikon-tt-btn"         onclick="window._eikonStar && window._eikonStar()">★ Save to Watchlist</button>
+            ${p.atm_dte != null && p.atm_dte < 7 ? `<button class="eikon-tt-btn warn" onclick="window._eikonRoll && window._eikonRoll()">🔄 Roll Suggest (DTE ${p.atm_dte}d)</button>` : ''}
+            <span class="eikon-tt-status" id="eikon-tt-status"></span>
+          </div>
         </div>
         <div class="eikon-strat-leg">
           <span class="side long">${longLbl}</span>
@@ -1089,6 +1134,77 @@
         </svg>
       </div>
     `;
+
+    // Wire trade-ticket action buttons — captures current pick + ticket state
+    window._eikonPaperOrder = async () => {
+      const st = document.getElementById('eikon-tt-status');
+      if (st) { st.textContent = 'submitting…'; st.className = 'eikon-tt-status'; }
+      // Find next monthly expiration from chain_grid for the long leg (or use atm_dte expiration)
+      const exp = (p.chain_grid || []).find(g => g.dte === p.atm_dte) || (p.chain_grid || [])[0];
+      const longExp = exp ? exp.exp : null;
+      const body = {
+        ticker: p.ticker,
+        direction: useSpread ? (bull ? 'bull_call_spread' : 'bear_put_spread') : (bull ? 'long_call' : 'long_put'),
+        long_strike: p.atm_strike,
+        long_expiration: longExp,
+        short_strike: useSpread ? sk : null,
+        short_expiration: useSpread ? longExp : null,
+        contracts: 1,
+        entry_price: Number((entryPx || netDebit || 0).toFixed(2)),
+      };
+      try {
+        const r = await fetch('/api/options-paper-order', {
+          method: 'POST', credentials: 'include',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        if (d.success) {
+          if (st) { st.textContent = '✓ paper order ' + (d.order_id || '').slice(0,8); st.className = 'eikon-tt-status gn'; }
+        } else {
+          if (st) { st.textContent = '✗ ' + (d.error || 'failed').slice(0, 60); st.className = 'eikon-tt-status rd'; }
+        }
+      } catch (e) {
+        if (st) { st.textContent = '✗ ' + e.message; st.className = 'eikon-tt-status rd'; }
+      }
+    };
+
+    window._eikonStar = async () => {
+      const st = document.getElementById('eikon-tt-status');
+      if (st) { st.textContent = 'saving…'; st.className = 'eikon-tt-status'; }
+      try {
+        const r = await fetch('/api/custom/add', {
+          method: 'POST', credentials: 'include',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ ticker: p.ticker, note: 'from Eikon · ' + (useSpread ? strat : strat) }),
+        });
+        const d = await r.json();
+        if (d.success || d.already_tracked) {
+          if (st) { st.textContent = '★ saved · ' + p.ticker + (d.already_tracked ? ' (already in watchlist)' : ''); st.className = 'eikon-tt-status gn'; }
+        } else {
+          if (st) { st.textContent = '✗ ' + (d.error || 'failed').slice(0, 60); st.className = 'eikon-tt-status rd'; }
+        }
+      } catch (e) {
+        if (st) { st.textContent = '✗ ' + e.message; st.className = 'eikon-tt-status rd'; }
+      }
+    };
+
+    window._eikonRoll = async () => {
+      const st = document.getElementById('eikon-tt-status');
+      if (st) { st.textContent = 'finding roll target…'; st.className = 'eikon-tt-status'; }
+      try {
+        const r = await fetch(`/api/options-roll-suggest?t=${encodeURIComponent(p.ticker)}`, { credentials: 'include' });
+        const d = await r.json();
+        if (d.suggest) {
+          const s = d.suggest;
+          if (st) { st.textContent = `🔄 roll → $${s.strike}${bull ? 'C' : 'P'} · ${s.dte}d · mark $${s.mark} · Δ${s.delta != null ? s.delta.toFixed(2) : '—'}`; st.className = 'eikon-tt-status gn'; }
+        } else {
+          if (st) { st.textContent = '— ' + (d.msg || d.error || 'no roll target'); st.className = 'eikon-tt-status'; }
+        }
+      } catch (e) {
+        if (st) { st.textContent = '✗ ' + e.message; st.className = 'eikon-tt-status rd'; }
+      }
+    };
   }
 
   function paintVolSurface() {
@@ -1747,6 +1863,10 @@
 
   // Bootstrap
   loadData().then(renderAll);
+  // 30-second polling refresh (until Schwab Streamer is wired in Batch 4)
+  setInterval(() => {
+    loadData().then(renderAll);
+  }, 30000);
 
   // Search wiring
   document.getElementById('ticker-search').addEventListener('change', (e) => {

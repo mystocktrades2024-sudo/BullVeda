@@ -7813,6 +7813,201 @@ async def macro_vol_api():
         return {"error": str(e)}
 
 
+@app.post("/api/options-paper-order")
+async def options_paper_order_api(req: Request):
+    """Submit an Alpaca PAPER option order from the Eikon trade ticket.
+
+    Body: {ticker, direction (long_call/long_put/bull_call_spread/bear_put_spread),
+           long_strike, long_expiration, short_strike, short_expiration,
+           contracts, entry_price (limit)}
+
+    Returns: {success, order_id, error}. Always paper — refuses if Alpaca
+    creds suggest live account. Logs to data/options_orders.jsonl regardless.
+    """
+    from datetime import datetime
+    body = await req.json()
+    tk = (body.get("ticker") or "").upper().strip()
+    direction = body.get("direction") or "long_call"
+    long_k = body.get("long_strike"); long_exp = body.get("long_expiration")
+    short_k = body.get("short_strike"); short_exp = body.get("short_expiration")
+    contracts = int(body.get("contracts") or 1)
+    limit = body.get("entry_price")
+    # Audit log every request — paper or live attempt
+    try:
+        log_path = BASE_DIR / "data" / "options_orders.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a") as f:
+            f.write(json.dumps({
+                "ts": datetime.utcnow().isoformat(),
+                "ticker": tk, "direction": direction,
+                "long_strike": long_k, "long_expiration": long_exp,
+                "short_strike": short_k, "short_expiration": short_exp,
+                "contracts": contracts, "limit": limit,
+                "mode": "paper",
+            }, default=str) + "\n")
+    except Exception: pass
+
+    # Refuse if live trading is somehow enabled
+    try:
+        import alpaca_trade_api as tradeapi
+        from portfolio_tracker import is_paper_trading_enabled
+        ok, _msg = is_paper_trading_enabled()
+        if not ok:
+            return {"success": False, "error": "Paper trading not active. Run executor.py --activate first."}
+        # Construct OCC option symbol (root + exp YYMMDD + C/P + strike × 1000)
+        import re
+        if not long_exp or not long_k:
+            return {"success": False, "error": "missing long_strike or long_expiration"}
+        # Parse YYYY-MM-DD → YYMMDD
+        try:
+            exp_compact = long_exp.replace("-", "")[2:]  # YYMMDD
+        except Exception:
+            return {"success": False, "error": "bad expiration format (expected YYYY-MM-DD)"}
+        side = "C" if "call" in direction else "P"
+        strike_int = int(round(float(long_k) * 1000))
+        occ_symbol = f"{tk}{exp_compact}{side}{strike_int:08d}"
+        # For spreads, second leg
+        if "spread" in direction and short_k and short_exp:
+            short_compact = short_exp.replace("-", "")[2:]
+            short_strike_int = int(round(float(short_k) * 1000))
+            short_occ = f"{tk}{short_compact}{side}{short_strike_int:08d}"
+        else:
+            short_occ = None
+
+        # Alpaca order — single-leg market order on paper
+        # Note: Alpaca options trading requires the account to have options
+        # approval level 2+ AND PAPER_KEY/PAPER_SECRET in .env.
+        import os
+        key    = os.environ.get("ALPACA_PAPER_KEY") or os.environ.get("APCA_API_KEY_ID")
+        secret = os.environ.get("ALPACA_PAPER_SECRET") or os.environ.get("APCA_API_SECRET_KEY")
+        if not key or not secret:
+            return {"success": False, "error": "ALPACA_PAPER_KEY / SECRET missing in .env. Logged order to options_orders.jsonl for audit."}
+        api = tradeapi.REST(key, secret, base_url="https://paper-api.alpaca.markets", api_version="v2")
+        # Submit
+        if short_occ:
+            # Spread = mleg order
+            order = api.submit_order(
+                order_class="mleg",
+                qty=contracts,
+                type="limit", limit_price=limit,
+                time_in_force="day",
+                legs=[
+                    {"symbol": occ_symbol,  "ratio_qty": 1, "side": "buy",  "position_intent": "buying_to_open"},
+                    {"symbol": short_occ,   "ratio_qty": 1, "side": "sell", "position_intent": "selling_to_open"},
+                ],
+            )
+        else:
+            order = api.submit_order(
+                symbol=occ_symbol, qty=contracts,
+                side="buy", type="limit", limit_price=limit,
+                time_in_force="day",
+            )
+        return {"success": True, "order_id": getattr(order, "id", str(order)),
+                "occ": occ_symbol, "leg2_occ": short_occ, "mode": "paper"}
+    except ImportError:
+        return {"success": False, "error": "alpaca_trade_api not installed (pip3 install alpaca-trade-api)"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/options-roll-suggest")
+async def options_roll_suggest_api(t: str):
+    """When ATM DTE is short, suggest the next viable expiration for a roll.
+
+    Reads chain_grid from options_flow.json — picks the nearest expiration
+    ≥21 days from now. Returns proposed long strike (same delta target)
+    and current mark for the roll target.
+    """
+    of_path = BASE_DIR / "infra" / "prototype" / "options_flow.json"
+    if not of_path.exists():
+        return {"ticker": t, "suggest": None, "error": "no options_flow"}
+    try:
+        d = json.loads(of_path.read_text())
+        tk = t.upper().strip()
+        pick = next((p for p in d.get("top30", []) if p.get("ticker") == tk), None)
+        if not pick: return {"ticker": tk, "suggest": None, "error": "ticker not in current top30"}
+        if not pick.get("chain_grid"): return {"ticker": tk, "suggest": None, "error": "no chain grid"}
+        # Find first expiration ≥21d
+        target_exp = next((g for g in pick["chain_grid"] if g.get("dte", 0) >= 21), None)
+        if not target_exp:
+            return {"ticker": tk, "suggest": None, "msg": "no viable expirations ≥21d in current grid"}
+        # Find strike closest to original ATM
+        atm_k = pick.get("atm_strike")
+        closest = sorted(target_exp.get("strikes", []), key=lambda s: abs(s.get("k", 0) - (atm_k or 0)))[0]
+        c = (closest or {}).get("call") or {}
+        return {
+            "ticker": tk,
+            "current_dte": pick.get("atm_dte"),
+            "current_atm_strike": atm_k,
+            "current_atm_mark":   pick.get("atm_mark"),
+            "suggest": {
+                "exp": target_exp["exp"],
+                "dte": target_exp["dte"],
+                "strike": closest.get("k"),
+                "mark":   c.get("mark"),
+                "delta":  c.get("delta"),
+                "iv":     c.get("iv"),
+            },
+        }
+    except Exception as e:
+        return {"ticker": t, "suggest": None, "error": str(e)}
+
+
+@app.get("/api/portfolio-options-greeks")
+async def portfolio_options_greeks_api():
+    """Aggregate Δ/Γ/Θ/ν across open positions if they're option positions.
+
+    Reads cache/portfolio.json. For SHARE positions, contributes their
+    nominal delta (shares × 1). For OPTION positions (when field
+    'option_strike' present), contributes contracts × multiplier × Δ.
+
+    Returns {open_count, net_delta, net_gamma, net_theta, net_vega,
+             share_delta, option_delta, by_ticker}.
+    """
+    p_path = BASE_DIR / "cache" / "portfolio.json"
+    if not p_path.exists():
+        return {"open_count": 0, "net_delta": 0, "by_ticker": {}}
+    try:
+        pf = json.loads(p_path.read_text())
+        positions = pf.get("positions", []) if isinstance(pf, dict) else []
+        net_d = net_g = net_t = net_v = 0.0
+        share_d = opt_d = 0.0
+        by_tk = {}
+        for pos in positions:
+            tk = (pos.get("ticker") or "").upper()
+            shares = float(pos.get("shares") or 0)
+            direction = pos.get("direction", "long")
+            sign = 1 if direction == "long" else -1
+            opt_strike = pos.get("option_strike")
+            if opt_strike:
+                # Option position — aggregate Greeks if Δ/Γ/Θ/ν present in pos record
+                ctr = float(pos.get("contracts") or 1)
+                d = float(pos.get("delta") or 0) * ctr * 100 * sign
+                g = float(pos.get("gamma") or 0) * ctr * 100 * sign
+                t = float(pos.get("theta") or 0) * ctr * 100 * sign
+                v = float(pos.get("vega")  or 0) * ctr * 100 * sign
+                net_d += d; opt_d += d
+                net_g += g; net_t += t; net_v += v
+                by_tk[tk] = {"type": "option", "delta": round(d, 1), "contracts": ctr}
+            else:
+                # Share position — delta = shares × 1 (long) or -1 (short)
+                sd = shares * sign
+                net_d += sd; share_d += sd
+                by_tk[tk] = {"type": "share", "delta": round(sd, 0), "shares": shares}
+        return {
+            "open_count":   len(positions),
+            "net_delta":    round(net_d, 1),
+            "net_gamma":    round(net_g, 3),
+            "net_theta":    round(net_t, 1),
+            "net_vega":     round(net_v, 1),
+            "share_delta":  round(share_d, 0),
+            "option_delta": round(opt_d, 1),
+            "by_ticker":    by_tk,
+        }
+    except Exception as e:
+        return {"open_count": 0, "error": str(e)}
+
+
 @app.get("/api/news")
 async def news_api(t: str, limit: int = 8):
     """Per-ticker news from EODHD. Returns last N headlines."""
@@ -7977,7 +8172,7 @@ async def senate_trades_api(t: str = "", days: int = 90, limit: int = 50):
     try:
         url = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json"
         req = urllib.request.Request(url, headers={"User-Agent": "SwingTrade/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=4) as resp:
             data = json.loads(resp.read())
         tk = t.upper().strip()
         cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -8019,7 +8214,7 @@ async def edgar_13f_api(t: str, limit: int = 10):
         }
         url = f"https://efts.sec.gov/LATEST/search-index?{urllib.parse.urlencode(params)}"
         req = urllib.request.Request(url, headers={"User-Agent": "SwingTrade/1.0 admin@example.com"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=4) as resp:
             data = json.loads(resp.read())
         hits = ((data or {}).get("hits") or {}).get("hits") or []
         rows = []
@@ -8061,7 +8256,7 @@ async def wiki_velocity_api(t: str, days: int = 30):
     try:
         url = f"https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/all-agents/{urllib_quote(page_title)}/daily/{from_date}/{to_date}"
         req = urllib.request.Request(url, headers={"User-Agent": "SwingTrade/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=4) as resp:
             data = json.loads(resp.read())
         items = data.get("items") or []
         if not items:
@@ -8103,7 +8298,7 @@ async def reddit_mentions_api(t: str, days: int = 7):
         # Search WSB for ticker — Reddit's old JSON endpoint
         url = f"https://www.reddit.com/r/wallstreetbets/search.json?q={tk}&restrict_sr=1&sort=new&limit=100"
         req = urllib.request.Request(url, headers={"User-Agent": "SwingTrade/1.0 alt-data"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=4) as resp:
             data = json.loads(resp.read())
         children = ((data or {}).get("data") or {}).get("children") or []
         cutoff_ts = (datetime.now() - timedelta(days=days)).timestamp()
