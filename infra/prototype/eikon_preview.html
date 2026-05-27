@@ -750,6 +750,26 @@
           <div class="row"><span class="lbl">POP</span><b style="color:var(--copper)">${(pop*100).toFixed(0)}%</b></div>
           ${p.theta_pct_per_day != null ? `<div class="row"><span class="lbl">θ-decay</span><b style="color:var(--rd)">${p.theta_pct_per_day.toFixed(1)}%/d</b></div>` : ''}
           ${p.implied_move_pct != null ? `<div class="row"><span class="lbl">implied move</span><b style="color:var(--copper)">±${p.implied_move_pct.toFixed(1)}%</b></div>` : ''}
+          ${(() => {
+            // Kelly sizing — given POP + maxG/maxL, what fraction of bankroll?
+            // Kelly = (b·p - q) / b where b = maxG/maxL, p = POP, q = 1-POP.
+            // Half-Kelly for risk-management.
+            if (pop == null || maxG == null || maxL == null || maxL === 0) return '';
+            const b = maxG / maxL;
+            const k = (b * pop - (1 - pop)) / b;
+            const halfK = Math.max(0, Math.min(0.25, k / 2));  // clamp 0-25%
+            return `<div class="row"><span class="lbl">Kelly·½</span><b style="color:var(--am)">${(halfK*100).toFixed(1)}% bankroll</b></div>`;
+          })()}
+          ${(() => {
+            // Vega-stressed P&L — if IV drops 5pp, what's the P&L impact?
+            if (p.atm_vega == null || p.atm_iv == null) return '';
+            // 5 IV points = 0.05 fraction
+            const vegaShock = -5 * (+p.atm_vega) * 100;  // ν × ΔIV × 100 per contract
+            return `<div class="row"><span class="lbl">−5pp IV</span><b style="color:var(--rd)">${vegaShock.toFixed(0)}$/ct</b></div>`;
+          })()}
+          ${p.pin_risk ? `<div class="row"><span class="lbl">pin risk</span><b class="rd">YES</b></div>` : ''}
+          ${p.beta_to_spy != null ? `<div class="row"><span class="lbl">β-SPY</span><b>${p.beta_to_spy.toFixed(2)}</b></div>` : ''}
+          ${p.beta_adjusted_delta != null ? `<div class="row"><span class="lbl">β-Δ</span><b style="color:var(--copper)">${p.beta_adjusted_delta.toFixed(2)}</b></div>` : ''}
         </div>
       </div>
       <div class="eikon-strat-net">
@@ -767,6 +787,23 @@
             return Math.round((pcrSc*0.5 + uoaSc*0.3 + dSc*0.2) * 100);
           })()}%</div></div>
           <div class="eikon-strat-net-cell"><div class="lbl">R:R</div><div class="v">${_f(p.rr, 1)}</div></div>
+          ${(() => {
+            // R-multiple sizing for a $10k risk-per-trade reference budget
+            if (maxL == null || maxL === 0) return '';
+            const ctRisk = maxL * 100;  // $ at risk per contract
+            const refRisk = 1000;        // $1k reference R (typical retail R)
+            const ncts = Math.floor(refRisk / ctRisk);
+            return `<div class="eikon-strat-net-cell"><div class="lbl">$1k R</div><div class="v" style="color:var(--copper)">${ncts}ct</div></div>`;
+          })()}
+          ${(() => {
+            // Greeks budget — what % of portfolio Vega would this add?
+            // Assumes $100k portfolio with $5k vega budget (5% volatility-of-port).
+            if (p.atm_vega == null) return '';
+            const tradeVega = +p.atm_vega * 100;  // ν per contract × 100 multiplier
+            const budgetVega = 5000;
+            const pctBudget = (tradeVega / budgetVega * 100);
+            return `<div class="eikon-strat-net-cell"><div class="lbl">ν · % budget</div><div class="v">${pctBudget.toFixed(1)}%</div></div>`;
+          })()}
         </div>
       </div>
       <div class="eikon-strat-pnl">
