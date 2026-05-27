@@ -19081,10 +19081,14 @@ const QuantOptions = (function() {
           <button class="qo-subnav-btn" data-qosub="history">📜 History <span class="cnt" id="qo-subnav-hist-cnt">…</span></button>
         </div>
 
-        <!-- LIVE PANE -->
-        <div class="qo-subpane" data-qosub-pane="live">
-          <!-- 2026-05-26 · LIVE pane redesigned as Eikon · isolated via iframe -->
-          <iframe id="eikon-live-frame" src="/v2/eikon_preview.html" style="width:100%;height:calc(100vh - 240px);min-height:1200px;border:0;background:var(--bg-0);display:block;" loading="lazy"></iframe>
+        <!-- LIVE PANE · 2026-05-27 · native render matching Momentum pattern -->
+        <div class="qo-subpane qopt-wrap" data-qosub-pane="live" id="qopt-live-root">
+          <div class="qopt-bc">OPTIONS FLOW · <b>UOA imbalance</b> · <span class="cu">IV map</span> · trade plans</div>
+          <div id="qopt-regime"></div>
+          <div id="qopt-kpis" class="qopt-kpis"></div>
+          <div id="qopt-filters"></div>
+          <div id="qopt-tbl-wrap"></div>
+          <div id="qopt-detail" class="qopt-detail" style="display:none"></div>
         </div><!-- end LIVE pane -->
 
         <!-- HISTORY PANE -->
@@ -19173,11 +19177,9 @@ const QuantOptions = (function() {
     `;
     wsPanel.classList.add('qo-active');
 
-    renderIdeas(data, of);
-    renderTable(data);
-    // 2026-05-26 · clean-sheet market-structure painters (legacy cockpit / vol-surface / plans painters retired)
-    _paintMarketStructure(data, of);
-    _paintSectorAndCatalyst(data, of);
+    // 2026-05-27 · Native Options Flow render (Momentum-style)
+    window._qoptLastData = { data, picks: of };
+    _renderQoptNative(wsPanel, data, of);
     _wireOptionsSubnav(wsPanel);  // Live / History sub-tab switcher
 
     // Re-wire sort headers (operate on inline table only; modal hooks separately)
@@ -19667,6 +19669,424 @@ const QuantOptions = (function() {
   // 2026-05-26 · Sub-tab switcher · Live ↔ History.
   // Lazy-loads History the first time it's opened (saves the initial paint).
   let _qoHistLoaded = false;
+  // 2026-05-27 · Native Options Flow render (mirrors Momentum's layout)
+  let _qoptActiveDir    = 'all';   // all | long | short
+  let _qoptActiveIvReg  = 'all';   // all | cheap | normal | rich
+  let _qoptActiveCohort = 'all';   // all | 0DTE | weekly | monthly | LEAP
+  let _qoptActiveSector = 'all';
+  let _qoptExpandedTkr  = null;
+
+  function _ensureQoptStyles() {
+    if (document.getElementById('qopt-native-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'qopt-native-styles';
+    s.textContent = `
+      .qopt-wrap { padding: 18px 22px; font: 14px/1.5 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif; font-variant-numeric: tabular-nums; color: var(--ink); background: var(--bg); }
+      body.light .qopt-wrap { color: var(--ink-1); }
+      .qopt-bc { font: 700 11px var(--mono); color: var(--ink-3); letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 14px; }
+      .qopt-bc b { color: var(--ink-1); } .qopt-bc .cu { color: var(--copper); }
+
+      /* Regime banner */
+      .qopt-regime { padding: 14px 18px; margin-bottom: 14px; border-radius: 2px; border-left: 4px solid var(--copper); background: var(--bg-1); }
+      .qopt-regime.cheap     { border-left-color: var(--gn);  background: rgba(74,222,128,0.06); }
+      .qopt-regime.normal    { border-left-color: var(--copper); }
+      .qopt-regime.elevated  { border-left-color: var(--amb); background: rgba(251,191,36,0.06); }
+      .qopt-regime.high      { border-left-color: var(--rd);  background: rgba(248,113,113,0.06); }
+      .qopt-regime .qopt-rgm-h { display:flex; justify-content:space-between; align-items:baseline; }
+      .qopt-regime .qopt-rgm-h h2 { font: 800 16px var(--mono); letter-spacing: 0.06em; margin:0; color: var(--ink); }
+      .qopt-regime.cheap    .qopt-rgm-h h2 { color: var(--gn); }
+      .qopt-regime.elevated .qopt-rgm-h h2 { color: var(--amb); }
+      .qopt-regime.high     .qopt-rgm-h h2 { color: var(--rd); }
+      .qopt-regime .qopt-rgm-h .meta { font: 600 10.5px var(--mono); color: var(--ink-3); letter-spacing: 0.04em; }
+      .qopt-regime .qopt-rgm-body { font: 500 11.5px var(--mono); color: var(--ink-1); letter-spacing: 0.02em; margin-top: 6px; }
+      .qopt-regime .qopt-rgm-body b { color: var(--ink); }
+
+      /* KPI strip */
+      .qopt-kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 14px; }
+      @media (max-width: 1100px) { .qopt-kpis { grid-template-columns: repeat(3, 1fr); } }
+      .qopt-kpi { padding: 9px 11px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; border-left: 3px solid var(--copper); }
+      .qopt-kpi.gn { border-left-color: var(--gn); } .qopt-kpi.am { border-left-color: var(--amb); } .qopt-kpi.rd { border-left-color: var(--rd); }
+      .qopt-kpi .k { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; }
+      .qopt-kpi .v { font: 800 18px var(--mono); margin-top: 3px; color: var(--ink); }
+      .qopt-kpi .v.gn { color: var(--gn); } .qopt-kpi .v.am { color: var(--amb); } .qopt-kpi .v.rd { color: var(--rd); }
+      .qopt-kpi .s { font: 500 9.5px var(--mono); color: var(--ink-3); margin-top: 2px; }
+
+      /* Filter pills */
+      .qopt-filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 14px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; align-items: center; }
+      .qopt-filter-group { display: inline-flex; gap: 4px; align-items: center; }
+      .qopt-filter-lbl { font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.18em; text-transform: uppercase; margin-right: 6px; }
+      .qopt-pill { padding: 6px 12px; font: 700 10.5px var(--mono); background: var(--bg-3); color: var(--ink-1); border: 1px solid var(--line); border-radius: 2px; cursor: pointer; letter-spacing: 0.04em; }
+      .qopt-pill:hover { color: var(--ink); border-color: var(--copper); }
+      .qopt-pill.on { background: var(--copper); color: var(--bg-0); border-color: var(--copper); }
+      .qopt-pill .ct { color: var(--ink-3); font-size: 9.5px; margin-left: 4px; }
+      .qopt-pill.on .ct { color: rgba(255,255,255,0.7); }
+
+      /* Table */
+      .qopt-tbl-wrap { background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; overflow-x: auto; }
+      .qopt-tbl { width: 100%; border-collapse: collapse; font: 12px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+      .qopt-tbl thead th { padding: 8px 10px; background: var(--bg-3); color: var(--ink-3); font-weight: 700; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; cursor: pointer; }
+      .qopt-tbl thead th.r { text-align: right; }
+      .qopt-tbl tbody tr { border-bottom: 1px solid var(--bg-2); cursor: pointer; transition: background 100ms; }
+      .qopt-tbl tbody tr:hover { background: rgba(217,119,87,0.05); }
+      .qopt-tbl tbody tr.expanded { background: rgba(217,119,87,0.08); }
+      .qopt-tbl tbody td { padding: 7px 10px; color: var(--ink-1); white-space: nowrap; vertical-align: middle; }
+      .qopt-tbl tbody td.r { text-align: right; }
+      .qopt-tbl tbody td b { color: var(--ink); font-weight: 700; }
+      .qopt-tbl .tkr { font-weight: 800; color: var(--ink); font-size: 13px; }
+      .qopt-tbl .action { font-weight: 800; letter-spacing: 0.06em; padding: 2px 6px; border-radius: 2px; font-size: 10px; }
+      .qopt-tbl .action.long  { background: rgba(91,229,124,0.18); color: var(--gn); }
+      .qopt-tbl .action.short { background: rgba(255,107,91,0.18); color: var(--rd); }
+      .qopt-tbl .conv { font-weight: 800; padding: 1px 6px; border-radius: 2px; }
+      .qopt-tbl .conv.gn { background: rgba(91,229,124,0.18); color: var(--gn); }
+      .qopt-tbl .conv.am { background: rgba(255,185,92,0.18); color: var(--amb); }
+      .qopt-tbl .conv.rd { background: rgba(255,107,91,0.18); color: var(--rd); }
+      .qopt-tbl .gn { color: var(--gn); } .qopt-tbl .am { color: var(--amb); } .qopt-tbl .rd { color: var(--rd); }
+      .qopt-tbl .sec { font-size: 10.5px; color: var(--ink-3); }
+      .qopt-tbl .strat { color: var(--copper); font-weight: 700; font-size: 11px; }
+
+      /* Expandable detail row */
+      .qopt-detail-row td { padding: 0 !important; background: var(--bg-1); }
+      .qopt-detail { padding: 14px 18px; margin-top: 10px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; }
+      .qopt-detail-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+      .qopt-detail-card { padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 2px; }
+      .qopt-detail-card h3 { font: 800 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--copper); margin: 0 0 6px; }
+      .qopt-detail-card .row { display: flex; justify-content: space-between; font: 11px/1.6 var(--mono); }
+      .qopt-detail-card .row .lbl { color: var(--ink-3); }
+      .qopt-detail-card .row b { color: var(--ink); font-weight: 700; }
+      .qopt-tt { margin-top: 10px; padding: 10px 12px; background: linear-gradient(135deg, rgba(217,119,87,0.10), rgba(217,119,87,0.02)); border: 1px solid rgba(217,119,87,0.5); border-radius: 2px; }
+      .qopt-tt-h { font: 800 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--copper); margin-bottom: 6px; }
+      .qopt-tt-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+      .qopt-tt-cell { padding: 6px 8px; border-radius: 2px; border: 1px solid var(--line); background: var(--bg-3); }
+      .qopt-tt-cell.buy  { border-color: rgba(217,119,87,0.5); background: rgba(217,119,87,0.08); }
+      .qopt-tt-cell.tgt  { border-color: rgba(91,229,124,0.4);  background: rgba(91,229,124,0.08); }
+      .qopt-tt-cell.stop { border-color: rgba(255,107,91,0.4);  background: rgba(255,107,91,0.08); }
+      .qopt-tt-act { font: 800 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 2px; }
+      .qopt-tt-cell.buy  .qopt-tt-act { color: var(--copper); }
+      .qopt-tt-cell.tgt  .qopt-tt-act { color: var(--gn); }
+      .qopt-tt-cell.stop .qopt-tt-act { color: var(--rd); }
+      .qopt-tt-px  { font: 800 14px var(--mono); color: var(--ink); }
+      .qopt-tt-cell.tgt  .qopt-tt-px { color: var(--gn); }
+      .qopt-tt-cell.stop .qopt-tt-px { color: var(--rd); }
+      .qopt-tt-sub { font: 600 9.5px var(--mono); color: var(--ink-2); margin-top: 2px; }
+      .qopt-tt-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+      .qopt-tt-btn { background: var(--bg-3); color: var(--ink-1); border: 1px solid var(--line); padding: 4px 10px; border-radius: 2px; font: 700 10px var(--mono); cursor: pointer; }
+      .qopt-tt-btn:hover { border-color: var(--copper); }
+      .qopt-tt-btn.primary { background: var(--copper); color: var(--bg-0); border-color: var(--copper); }
+      .qopt-empty { padding: 40px 22px; text-align: center; color: var(--ink-3); font: 600 12px var(--mono); }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function _qoptComposite(p) {
+    const pcr = +p.put_call_ratio || 1;
+    const pcrSc = pcr < 1 ? Math.min(1, (1-pcr)/0.8) : Math.max(0, 1 - (pcr-1)/0.8);
+    const uoaTot = (+p.uoa_calls||0) + (+p.uoa_puts||0);
+    const uoaSc = uoaTot > 0 ? (+p.uoa_calls||0)/uoaTot : 0.5;
+    const dSc = p.atm_delta == null ? 0.5 : Math.abs(+p.atm_delta) >= 0.55 ? 1 : Math.abs(+p.atm_delta) >= 0.45 ? 0.7 : 0.4;
+    return Math.round((pcrSc*0.5 + uoaSc*0.3 + dSc*0.2) * 100);
+  }
+
+  function _qoptApplyFilters(picks) {
+    return picks.filter(p => {
+      const isBull = (+p.put_call_ratio || 1) < 1.0;
+      if (_qoptActiveDir === 'long'  && !isBull) return false;
+      if (_qoptActiveDir === 'short' &&  isBull) return false;
+      if (_qoptActiveIvReg !== 'all') {
+        const ivr = p.iv_percentile;
+        if (ivr == null) return false;
+        if (_qoptActiveIvReg === 'cheap'  && ivr >= 30) return false;
+        if (_qoptActiveIvReg === 'normal' && (ivr < 30 || ivr > 70)) return false;
+        if (_qoptActiveIvReg === 'rich'   && ivr <= 70) return false;
+      }
+      if (_qoptActiveCohort !== 'all') {
+        // Find top cohort of this pick
+        const buckets = [['0DTE',p.cohort_0dte_pct],['weekly',p.cohort_weekly_pct],['monthly',p.cohort_monthly_pct],['LEAP',p.cohort_leap_pct]].filter(([,v])=>v!=null);
+        if (!buckets.length) return false;
+        buckets.sort((a,b)=>b[1]-a[1]);
+        if (buckets[0][0] !== _qoptActiveCohort) return false;
+      }
+      if (_qoptActiveSector !== 'all' && p.sector !== _qoptActiveSector) return false;
+      return true;
+    });
+  }
+
+  function _renderQoptRegime(data, picks) {
+    const vix = (data.vix != null) ? +data.vix : null;
+    const vixCls = vix == null ? 'normal' : vix < 15 ? 'cheap' : vix < 20 ? 'normal' : vix < 25 ? 'elevated' : 'high';
+    const vixLbl = vix == null ? 'NORMAL' : vix < 15 ? 'CHEAP VOL' : vix < 20 ? 'NORMAL VOL' : vix < 25 ? 'ELEVATED VOL' : vix < 35 ? 'HEIGHTENED' : 'PANIC';
+    const totCall = picks.reduce((s,x)=>s+(+x.call_volume||0), 0);
+    const totPut  = picks.reduce((s,x)=>s+(+x.put_volume||0), 0);
+    const cPct = (totCall + totPut) > 0 ? (totCall / (totCall + totPut) * 100) : 50;
+    const dir = cPct > 65 ? 'BULL SKEW · long-premium favored' : cPct < 35 ? 'BEAR SKEW · put-side bid' : 'BALANCED · mixed flow';
+    const strong = picks.filter(x => String(x.status||'').toUpperCase() === 'STRONG').length;
+    return `<div class="qopt-regime ${vixCls}">
+      <div class="qopt-rgm-h">
+        <h2>${vixLbl}</h2>
+        <div class="meta">VIX ${vix != null ? vix.toFixed(1) : '—'} · ${dir}</div>
+      </div>
+      <div class="qopt-rgm-body">
+        ${picks.length} qualifying UOA · <b>${strong}</b> STRONG · <b>${cPct.toFixed(0)}%</b> call volume share ·
+        ${data.vix_chg_pct != null ? 'VIX <b>' + (data.vix_chg_pct>=0?'+':'') + data.vix_chg_pct.toFixed(1) + '%</b> 1d' : ''}
+      </div>
+    </div>`;
+  }
+
+  function _renderQoptKpis(data, picks) {
+    const ivrps = picks.map(x => x.ivrp).filter(v => v != null);
+    const avgIvrp = ivrps.length ? ivrps.reduce((s,v)=>s+v,0) / ivrps.length * 100 : null;
+    const skews = picks.map(x => x.skew_25d).filter(v => v != null);
+    const medSkew = skews.length ? skews.slice().sort((a,b)=>a-b)[Math.floor(skews.length/2)] * 100 : null;
+    const totPrem = picks.reduce((s,x)=>s+(+x['premium_total_$']||0), 0);
+    const strong = picks.filter(x => String(x.status||'').toUpperCase() === 'STRONG').length;
+    const terms = picks.map(x => x.term_ratio).filter(v => v != null);
+    const medTerm = terms.length ? terms.slice().sort((a,b)=>a-b)[Math.floor(terms.length/2)] : null;
+    const ew = (data.earnings_watchlist || []).filter(e => e.days_to_earnings != null && e.days_to_earnings >= 0 && e.days_to_earnings <= 7).length;
+    const _dol = (n) => n == null ? '—' : n >= 1e6 ? '$' + (n/1e6).toFixed(1) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'k' : '$' + n.toFixed(0);
+    return `
+      <div class="qopt-kpi ${avgIvrp != null && avgIvrp > 3 ? 'rd' : avgIvrp != null && avgIvrp < -3 ? 'gn' : ''}"><div class="k">Avg IVRP</div><div class="v ${avgIvrp != null && avgIvrp > 3 ? 'rd' : avgIvrp != null && avgIvrp < -3 ? 'gn' : ''}">${avgIvrp != null ? (avgIvrp>=0?'+':'')+avgIvrp.toFixed(1)+'%' : '—'}</div><div class="s">IV vs HV20</div></div>
+      <div class="qopt-kpi"><div class="k">25Δ Skew · agg</div><div class="v ${medSkew != null && medSkew > 2 ? 'gn' : medSkew != null && medSkew < -2 ? 'rd' : 'am'}">${medSkew != null ? (medSkew>=0?'+':'')+medSkew.toFixed(1)+'%' : '—'}</div><div class="s">median</div></div>
+      <div class="qopt-kpi"><div class="k">Term Ratio</div><div class="v ${medTerm != null && medTerm > 1.05 ? 'rd' : medTerm != null && medTerm < 0.95 ? 'gn' : 'am'}">${medTerm != null ? medTerm.toFixed(2) : '—'}</div><div class="s">${medTerm != null && medTerm > 1.05 ? 'backwardation' : medTerm != null && medTerm < 0.95 ? 'contango' : 'flat'}</div></div>
+      <div class="qopt-kpi"><div class="k">Premium $ today</div><div class="v">${_dol(totPrem)}</div><div class="s">Σ vol×mark×100</div></div>
+      <div class="qopt-kpi gn"><div class="k">STRONG signals</div><div class="v gn">${strong}</div><div class="s">of ${picks.length} qualifying</div></div>
+      <div class="qopt-kpi ${ew > 0 ? 'am' : ''}"><div class="k">Catalysts ≤7d</div><div class="v ${ew > 0 ? 'am' : ''}">${ew}</div><div class="s">earnings near</div></div>
+    `;
+  }
+
+  function _renderQoptFilters(picks) {
+    const dirCt = { long:0, short:0 };
+    const ivCt  = { cheap:0, normal:0, rich:0 };
+    const cohCt = { '0DTE':0, weekly:0, monthly:0, LEAP:0 };
+    picks.forEach(p => {
+      dirCt[((+p.put_call_ratio||1)<1.0)?'long':'short']++;
+      if (p.iv_percentile != null) {
+        ivCt[p.iv_percentile<30?'cheap':p.iv_percentile<=70?'normal':'rich']++;
+      }
+      const buckets = [['0DTE',p.cohort_0dte_pct],['weekly',p.cohort_weekly_pct],['monthly',p.cohort_monthly_pct],['LEAP',p.cohort_leap_pct]].filter(([,v])=>v!=null);
+      if (buckets.length) { buckets.sort((a,b)=>b[1]-a[1]); cohCt[buckets[0][0]]++; }
+    });
+    const pill = (group, k, lbl, ct) => `<button class="qopt-pill${(group==='dir'?_qoptActiveDir:group==='iv'?_qoptActiveIvReg:group==='coh'?_qoptActiveCohort:'')===k?' on':''}" onclick="QuantOptions.setFilter('${group}','${k}')">${lbl}${ct!=null?' <span class="ct">'+ct+'</span>':''}</button>`;
+    return `
+      <div class="qopt-filters">
+        <div class="qopt-filter-group"><span class="qopt-filter-lbl">Direction</span>
+          ${pill('dir','all','All')}${pill('dir','long','▲ Long', dirCt.long)}${pill('dir','short','▼ Short', dirCt.short)}
+        </div>
+        <div class="qopt-filter-group"><span class="qopt-filter-lbl">IV Regime</span>
+          ${pill('iv','all','All')}${pill('iv','cheap','Cheap <30',ivCt.cheap)}${pill('iv','normal','Normal',ivCt.normal)}${pill('iv','rich','Rich >70',ivCt.rich)}
+        </div>
+        <div class="qopt-filter-group"><span class="qopt-filter-lbl">Cohort</span>
+          ${pill('coh','all','All')}${pill('coh','0DTE','0DTE',cohCt['0DTE'])}${pill('coh','weekly','Weekly',cohCt.weekly)}${pill('coh','monthly','Monthly',cohCt.monthly)}${pill('coh','LEAP','LEAP',cohCt.LEAP)}
+        </div>
+        ${_qoptActiveSector !== 'all' ? `<div class="qopt-filter-group"><span class="qopt-filter-lbl">Sector</span><button class="qopt-pill on" onclick="QuantOptions.setFilter('sector','all')">${_qoptActiveSector} ✕</button></div>` : ''}
+      </div>`;
+  }
+
+  function _renderQoptTable(filteredPicks, allPicks, data) {
+    if (!filteredPicks.length) {
+      return `<div class="qopt-tbl-wrap"><div class="qopt-empty">No picks match current filters · ${allPicks.length} total UOA in scan</div></div>`;
+    }
+    const _fmtDol = (v) => v == null ? '—' : v >= 1e6 ? '$' + (v/1e6).toFixed(1) + 'M' : v >= 1e3 ? '$' + (v/1e3).toFixed(0) + 'k' : '$' + v.toFixed(0);
+    const _f = (n, d) => n == null || !isFinite(n) ? '—' : Number(n).toFixed(d == null ? 2 : d);
+    const rows = filteredPicks.map(p => {
+      const isBull = (+p.put_call_ratio || 1) < 1.0;
+      const conv = _qoptComposite(p);
+      const ccls = conv >= 65 ? 'gn' : conv >= 50 ? 'am' : 'rd';
+      const ivR  = p.iv_percentile;
+      const ivRich = ivR != null && ivR > 70;
+      const stratShort = isBull ? (ivRich && p.iv_25d_call_mark != null ? 'Bull C Spd' : 'Long C')
+                                 : (ivRich && p.iv_25d_put_mark  != null ? 'Bear P Spd' : 'Long P');
+      const ivPct = p.atm_iv != null ? (p.atm_iv*100).toFixed(0)+'%' : '—';
+      const ivrpPct = p.ivrp != null ? (p.ivrp >= 0 ? '+' : '') + (p.ivrp*100).toFixed(1) + '%' : '—';
+      const ivrpCls = p.ivrp == null ? '' : p.ivrp > 0.03 ? 'rd' : p.ivrp < -0.03 ? 'gn' : '';
+      const expanded = _qoptExpandedTkr === p.ticker ? ' expanded' : '';
+      return `<tr class="qopt-row${expanded}" data-tkr="${p.ticker}" onclick="QuantOptions.toggleRow('${p.ticker}')">
+        <td>
+          <div class="tkr">${p.ticker}</div>
+          <div class="sec">${(p.sector || '').slice(0, 14)}</div>
+        </td>
+        <td class="r"><b>$${(+p.price).toFixed(2)}</b></td>
+        <td><span class="action ${isBull?'long':'short'}">${isBull ? '▲ LONG' : '▼ SHORT'}</span></td>
+        <td><span class="conv ${ccls}">${conv}%</span></td>
+        <td><span class="strat">${stratShort}</span><br><span class="sec">$${p.atm_strike != null ? (+p.atm_strike).toFixed(0) : '—'} · ${p.atm_dte != null ? (+p.atm_dte).toFixed(0) : '—'}d</span></td>
+        <td class="r">Δ ${p.atm_delta != null ? (p.atm_delta>=0?'+':'')+(+p.atm_delta).toFixed(2) : '—'}<br><span class="sec">θ ${p.atm_theta != null ? '$'+(+p.atm_theta).toFixed(2) : '—'} · ν ${p.atm_vega != null ? '+$'+(+p.atm_vega).toFixed(2) : '—'}</span></td>
+        <td class="r">${ivPct}<br><span class="${ivrpCls}">IVRP ${ivrpPct}</span></td>
+        <td class="r">${p.skew_25d != null ? (p.skew_25d>=0?'+':'') + (p.skew_25d*100).toFixed(1) + '%' : '—'}<br><span class="sec">term ${_f(p.term_ratio, 2)}</span></td>
+        <td class="r"><b>${_fmtDol(p['premium_total_$'])}</b><br><span class="sec">${p.call_volume != null ? (p.call_volume/1000).toFixed(0)+'k C' : ''} · ${p.put_volume != null ? (p.put_volume/1000).toFixed(0)+'k P' : ''}</span></td>
+        <td class="r">${p.atm_bid_ask_pct != null ? p.atm_bid_ask_pct.toFixed(1)+'%' : '—'}<br><span class="sec">${p.max_pain != null ? 'MP $'+p.max_pain.toFixed(0) : ''}</span></td>
+      </tr>${expanded ? _renderQoptDetailRow(p, data) : ''}`;
+    }).join('');
+    return `<div class="qopt-tbl-wrap"><table class="qopt-tbl">
+      <thead><tr>
+        <th>Ticker</th><th class="r">Spot</th><th>Action</th><th>Conv</th><th>Strategy · K · DTE</th>
+        <th class="r">Greeks (ATM)</th><th class="r">IV / IVRP</th><th class="r">Skew · Term</th>
+        <th class="r">Premium $</th><th class="r">B/A · MP</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  function _renderQoptDetailRow(p, data) {
+    const isBull = (+p.put_call_ratio || 1) < 1.0;
+    const ivRich = p.iv_percentile != null && p.iv_percentile > 70;
+    const haveSpread = isBull ? p.iv_25d_call_mark != null : p.iv_25d_put_mark != null;
+    const useSpread = ivRich && haveSpread;
+    const strat = isBull ? (useSpread ? 'Bull Call Spread' : 'Long Call') : (useSpread ? 'Bear Put Spread' : 'Long Put');
+    // Erf + BSM
+    const _erf = (x) => { const t = 1 / (1 + 0.3275911 * Math.abs(x)); const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429; const y = 1 - (((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x); return x >= 0 ? y : -y; };
+    const _Ncdf = (x) => 0.5 * (1 + _erf(x / Math.SQRT2));
+    const bsmC = (S,K,σ,T) => { if (T<=0||σ<=0||S<=0||K<=0) return Math.max(S-K,0); const r=0.05, d1=(Math.log(S/K)+(r+σ*σ/2)*T)/(σ*Math.sqrt(T)), d2=d1-σ*Math.sqrt(T); return S*_Ncdf(d1)-K*Math.exp(-r*T)*_Ncdf(d2); };
+    const bsmP = (S,K,σ,T) => { if (T<=0||σ<=0||S<=0||K<=0) return Math.max(K-S,0); const r=0.05, d1=(Math.log(S/K)+(r+σ*σ/2)*T)/(σ*Math.sqrt(T)), d2=d1-σ*Math.sqrt(T); return K*Math.exp(-r*T)*_Ncdf(-d2)-S*_Ncdf(-d1); };
+    const T = (+p.atm_dte || 0) / 365, σ = +p.atm_iv || 0.30, spot = +p.price;
+    const sk = useSpread ? (isBull ? p.iv_25d_call_strike : p.iv_25d_put_strike) : null;
+    const sm = useSpread ? (isBull ? p.iv_25d_call_mark   : p.iv_25d_put_mark)   : null;
+    const entryPx = useSpread && sm != null ? p.atm_mark - sm : p.atm_mark;
+    const breakeven = isBull ? p.atm_strike + entryPx : p.atm_strike - entryPx;
+    const maxG = useSpread && sk != null ? Math.abs(sk - p.atm_strike) - entryPx : null;
+    const maxL = entryPx;
+    const stopPrem = useSpread
+      ? ((isBull ? bsmC(p.stop, p.atm_strike, σ, T) - bsmC(p.stop, sk, σ, T) : bsmP(p.stop, p.atm_strike, σ, T) - bsmP(p.stop, sk, σ, T)))
+      : (isBull ? bsmC(p.stop, p.atm_strike, σ, T) : bsmP(p.stop, p.atm_strike, σ, T));
+    const tgtPrem = useSpread
+      ? ((isBull ? bsmC(p.target, p.atm_strike, σ, T) - bsmC(p.target, sk, σ, T) : bsmP(p.target, p.atm_strike, σ, T) - bsmP(p.target, sk, σ, T)))
+      : (isBull ? bsmC(p.target, p.atm_strike, σ, T) : bsmP(p.target, p.atm_strike, σ, T));
+    const d2 = (Math.log(spot/p.atm_strike) + (0.05 - σ*σ/2)*T) / (σ*Math.sqrt(T));
+    const pop = isBull ? _Ncdf(d2) : _Ncdf(-d2);
+    const profitPct = entryPx > 0 ? (tgtPrem - entryPx) / entryPx * 100 : null;
+    const lossPct   = entryPx > 0 ? (stopPrem - entryPx) / entryPx * 100 : null;
+    return `<tr class="qopt-detail-row"><td colspan="10"><div class="qopt-detail">
+      <div class="qopt-tt">
+        <div class="qopt-tt-h">TRADE TICKET · ${strat} · ${p.ticker} ${useSpread?'$'+p.atm_strike+'/'+sk:p.atm_strike} · ${p.atm_dte}d</div>
+        <div class="qopt-tt-grid">
+          <div class="qopt-tt-cell buy">
+            <div class="qopt-tt-act">▶ BUY</div>
+            <div class="qopt-tt-px">$${entryPx != null ? entryPx.toFixed(2) : '—'}</div>
+            <div class="qopt-tt-sub">spot $${spot.toFixed(2)}</div>
+          </div>
+          <div class="qopt-tt-cell tgt">
+            <div class="qopt-tt-act">🎯 TARGET</div>
+            <div class="qopt-tt-px">$${tgtPrem != null ? tgtPrem.toFixed(2) : '—'}</div>
+            <div class="qopt-tt-sub">spot $${(+p.target).toFixed(2)}${profitPct != null ? ' · +' + profitPct.toFixed(0) + '%' : ''}</div>
+          </div>
+          <div class="qopt-tt-cell stop">
+            <div class="qopt-tt-act">🛑 STOP</div>
+            <div class="qopt-tt-px">$${stopPrem != null ? stopPrem.toFixed(2) : '—'}</div>
+            <div class="qopt-tt-sub">spot $${(+p.stop).toFixed(2)}${lossPct != null ? ' · ' + lossPct.toFixed(0) + '%' : ''}</div>
+          </div>
+        </div>
+        <div class="qopt-tt-actions">
+          <button class="qopt-tt-btn primary" onclick="event.stopPropagation();QuantOptions.paperOrder('${p.ticker}')">▶ Paper-Buy 1 ct via Alpaca</button>
+          <button class="qopt-tt-btn" onclick="event.stopPropagation();QuantOptions.starSave('${p.ticker}')">★ Save to Watchlist</button>
+          ${p.atm_dte != null && p.atm_dte < 7 ? `<button class="qopt-tt-btn" onclick="event.stopPropagation();QuantOptions.rollSuggest('${p.ticker}')">🔄 Roll</button>` : ''}
+          <span id="qopt-tt-status-${p.ticker}" class="qopt-tt-sub"></span>
+        </div>
+      </div>
+      <div class="qopt-detail-grid" style="margin-top:10px">
+        <div class="qopt-detail-card">
+          <h3>Trade Economics</h3>
+          <div class="row"><span class="lbl">Net Debit</span><b>$${entryPx ? entryPx.toFixed(2) : '—'}/ct</b></div>
+          <div class="row"><span class="lbl">Breakeven</span><b>$${breakeven ? breakeven.toFixed(2) : '—'}</b></div>
+          <div class="row"><span class="lbl">Max Gain</span><b class="gn">${maxG != null ? '+$'+maxG.toFixed(2) : 'uncapped'}</b></div>
+          <div class="row"><span class="lbl">Max Loss</span><b class="rd">-$${maxL.toFixed(2)}</b></div>
+          <div class="row"><span class="lbl">POP</span><b>${(pop*100).toFixed(0)}%</b></div>
+          <div class="row"><span class="lbl">θ-decay</span><b class="rd">${p.theta_pct_per_day != null ? p.theta_pct_per_day.toFixed(1)+'%/d' : '—'}</b></div>
+        </div>
+        <div class="qopt-detail-card">
+          <h3>Vol Edge</h3>
+          <div class="row"><span class="lbl">ATM IV</span><b>${p.atm_iv != null ? (p.atm_iv*100).toFixed(1)+'%' : '—'}</b></div>
+          <div class="row"><span class="lbl">HV20 / HV60</span><b>${p.hv20 != null ? (p.hv20*100).toFixed(0)+'%' : '—'} / ${p.hv60 != null ? (p.hv60*100).toFixed(0)+'%' : '—'}</b></div>
+          <div class="row"><span class="lbl">IVRP</span><b class="${p.ivrp == null ? '' : p.ivrp > 0.03 ? 'rd' : p.ivrp < -0.03 ? 'gn' : 'am'}">${p.ivrp != null ? (p.ivrp>=0?'+':'')+(p.ivrp*100).toFixed(1)+'%' : '—'}</b></div>
+          <div class="row"><span class="lbl">25Δ Skew</span><b>${p.skew_25d != null ? (p.skew_25d>=0?'+':'')+(p.skew_25d*100).toFixed(1)+'%' : '—'}</b></div>
+          <div class="row"><span class="lbl">Term ratio</span><b>${p.term_ratio != null ? p.term_ratio.toFixed(2) : '—'}</b></div>
+          <div class="row"><span class="lbl">Implied move</span><b>${p.implied_move_pct != null ? '±'+p.implied_move_pct.toFixed(1)+'%' : '—'}</b></div>
+        </div>
+        <div class="qopt-detail-card">
+          <h3>Positioning</h3>
+          <div class="row"><span class="lbl">Call vol / OI</span><b>${p.call_volume ? (p.call_volume/1000).toFixed(0)+'k' : '—'} / ${p.call_oi ? (p.call_oi/1000).toFixed(0)+'k' : '—'}</b></div>
+          <div class="row"><span class="lbl">P/C ratio</span><b>${p.put_call_ratio != null ? p.put_call_ratio.toFixed(2) : '—'}</b></div>
+          <div class="row"><span class="lbl">UOA C / P</span><b>${p.uoa_calls || 0} / ${p.uoa_puts || 0}</b></div>
+          <div class="row"><span class="lbl">Max pain</span><b>${p.max_pain != null ? '$'+p.max_pain.toFixed(0) : '—'}</b></div>
+          <div class="row"><span class="lbl">OI gravity</span><b>${p.oi_weighted_strike != null ? '$'+p.oi_weighted_strike.toFixed(0) : '—'}</b></div>
+          <div class="row"><span class="lbl">Liquidity</span><b>${p.atm_bid_ask_pct != null ? p.atm_bid_ask_pct.toFixed(1)+'% b/a' : '—'}</b></div>
+        </div>
+      </div>
+    </div></td></tr>`;
+  }
+
+  function _renderQoptNative(wsPanel, data, picks) {
+    _ensureQoptStyles();
+    const root = document.getElementById('qopt-live-root');
+    if (!root) return;
+    const filtered = _qoptApplyFilters(picks);
+    document.getElementById('qopt-regime').outerHTML = '<div id="qopt-regime">' + _renderQoptRegime(data, filtered) + '</div>';
+    document.getElementById('qopt-kpis').innerHTML = _renderQoptKpis(data, picks);
+    document.getElementById('qopt-filters').outerHTML = '<div id="qopt-filters">' + _renderQoptFilters(picks) + '</div>';
+    document.getElementById('qopt-tbl-wrap').outerHTML = '<div id="qopt-tbl-wrap">' + _renderQoptTable(filtered, picks, data) + '</div>';
+  }
+
+  // Exposed helpers used by inline onclick handlers
+  if (typeof window !== 'undefined') {
+    window.QuantOptions = window.QuantOptions || {};
+    window.QuantOptions.setFilter = function(group, val) {
+      if (group === 'dir')    _qoptActiveDir    = val;
+      if (group === 'iv')     _qoptActiveIvReg  = val;
+      if (group === 'coh')    _qoptActiveCohort = val;
+      if (group === 'sector') _qoptActiveSector = val;
+      if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
+    };
+    window.QuantOptions.toggleRow = function(tk) {
+      _qoptExpandedTkr = _qoptExpandedTkr === tk ? null : tk;
+      if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
+    };
+    window.QuantOptions.paperOrder = async function(tk) {
+      const st = document.getElementById('qopt-tt-status-' + tk);
+      if (st) st.textContent = 'submitting…';
+      const p = (window._qoptLastData?.picks || []).find(x => x.ticker === tk);
+      if (!p) return;
+      const isBull = (+p.put_call_ratio || 1) < 1.0;
+      const ivRich = p.iv_percentile != null && p.iv_percentile > 70;
+      const useSpread = ivRich && (isBull ? p.iv_25d_call_mark != null : p.iv_25d_put_mark != null);
+      const sk = useSpread ? (isBull ? p.iv_25d_call_strike : p.iv_25d_put_strike) : null;
+      const sm = useSpread ? (isBull ? p.iv_25d_call_mark   : p.iv_25d_put_mark)   : null;
+      const entryPx = useSpread && sm != null ? p.atm_mark - sm : p.atm_mark;
+      const longExp = (p.chain_grid || []).find(g => g.dte === p.atm_dte)?.exp || null;
+      try {
+        const r = await fetch('/api/options-paper-order', {
+          method: 'POST', credentials: 'include',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            ticker: p.ticker,
+            direction: useSpread ? (isBull?'bull_call_spread':'bear_put_spread') : (isBull?'long_call':'long_put'),
+            long_strike: p.atm_strike, long_expiration: longExp,
+            short_strike: useSpread ? sk : null, short_expiration: useSpread ? longExp : null,
+            contracts: 1, entry_price: Number((entryPx || 0).toFixed(2)),
+          })
+        });
+        const d = await r.json();
+        if (st) st.textContent = d.success ? ('✓ order ' + (d.order_id || '').slice(0,8)) : ('✗ ' + (d.error || 'failed').slice(0, 50));
+      } catch (e) { if (st) st.textContent = '✗ ' + e.message; }
+    };
+    window.QuantOptions.starSave = async function(tk) {
+      const st = document.getElementById('qopt-tt-status-' + tk);
+      if (st) st.textContent = 'saving…';
+      try {
+        const r = await fetch('/api/custom/add', {
+          method: 'POST', credentials: 'include',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ ticker: tk, note: 'from Options Flow' })
+        });
+        const d = await r.json();
+        if (st) st.textContent = (d.success || d.already_tracked) ? '★ saved' : ('✗ ' + (d.error || 'failed'));
+      } catch (e) { if (st) st.textContent = '✗ ' + e.message; }
+    };
+    window.QuantOptions.rollSuggest = async function(tk) {
+      const st = document.getElementById('qopt-tt-status-' + tk);
+      if (st) st.textContent = 'finding roll…';
+      try {
+        const r = await fetch('/api/options-roll-suggest?t=' + encodeURIComponent(tk), { credentials: 'include' });
+        const d = await r.json();
+        if (d.suggest && st) st.textContent = `🔄 → $${d.suggest.strike} · ${d.suggest.dte}d · mark $${d.suggest.mark}`;
+        else if (st) st.textContent = '— ' + (d.msg || d.error || 'no roll target');
+      } catch (e) { if (st) st.textContent = '✗ ' + e.message; }
+    };
+  }
+
   function _wireOptionsSubnav(wsPanel) {
     const btns = wsPanel.querySelectorAll('.qo-subnav-btn');
     const panes = wsPanel.querySelectorAll('.qo-subpane');
