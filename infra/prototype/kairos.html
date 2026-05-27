@@ -8609,6 +8609,24 @@ body.light .qs-paper-badge { background:rgba(8,145,178,0.10); color:#0e7490; bor
   color: var(--ink-3); letter-spacing: 0.06em; text-transform: uppercase; }
 .qs-banner .meta b { color: var(--ink); }
 
+/* LIVE quote badge in Signal Scanner (2026-05-27 · Schwab 5-sec refresh) */
+.qs-live-badge { display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px; border-radius: 2px;
+  background: rgba(91,229,124,0.08); color: var(--gn);
+  border: 1px solid rgba(91,229,124,0.30);
+  font: 800 10px var(--mono); letter-spacing: .10em; text-transform: uppercase;
+  margin-left: 8px; cursor: help; }
+.qs-live-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--gn); box-shadow: 0 0 6px var(--gn);
+  animation: qs-live-pulse 2s infinite ease-in-out; }
+.qs-live-badge.qs-live-stale { background: rgba(255,185,92,0.08); color: var(--amb);
+  border-color: rgba(255,185,92,0.30); }
+.qs-live-badge.qs-live-stale::before { background: var(--amb); box-shadow: 0 0 6px var(--amb); }
+@keyframes qs-live-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1.0; transform: scale(1.3); }
+}
+
 /* Quick panels · 6-card glance row · 2026-05-18 */
 .qs-quick-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
   padding: 12px 22px 14px; border-bottom: 1px solid var(--line);
@@ -25870,13 +25888,24 @@ const QuantScanner = (function() {
         success = true;
       }
     } catch (_) {}
-    // 2026-05-18 · exponential backoff on tunnel/upstream failure
-    if (success) { _livePxFailCount = 0; }
+    // 2026-05-27: 20s → 5s on success (Schwab MarketData supports it cleanly,
+    // server-side 5s cache de-dupes duplicate tab requests, EODHD fallback
+    // still stays under quota at 720 calls/hr). Failure backoff: 5s × 2^n,
+    // capped at 5 min. /api/live/quote returns {prices, quotes, source, ts}.
+    if (success) { _livePxFailCount = 0; _liveQuoteTs = Date.now(); }
     else { _livePxFailCount = (_livePxFailCount || 0) + 1; }
-    const _ms = success ? 20000 : Math.min(300000, 20000 * Math.pow(2, Math.min(_livePxFailCount, 4)));
+    const _ms = success ? 5000 : Math.min(300000, 5000 * Math.pow(2, Math.min(_livePxFailCount, 6)));
     clearTimeout(_livePxInterval);
     _livePxInterval = setTimeout(_fetchAndUpdatePx, _ms);
+    // Bump the LIVE badge if rendered
+    const badge = document.getElementById('qs-live-badge');
+    if (badge && _liveQuoteTs) {
+      const age = Math.max(1, Math.round((Date.now() - _liveQuoteTs) / 1000));
+      badge.textContent = `LIVE · ${age}s`;
+      badge.className = success ? 'qs-live-badge' : 'qs-live-badge qs-live-stale';
+    }
   }
+  let _liveQuoteTs = 0;
   let _livePxFailCount = 0;
 
   function _startLivePx() {
@@ -25929,6 +25958,7 @@ const QuantScanner = (function() {
         <span class="title">Signal Scanner</span>
         <span class="qs-paper-badge" title="No live orders — every action is a simulated paper trade. Informational technical analysis only.">🔬 PAPER MODE</span>
         <span class="meta"><b>${_state.arr.length}</b> scored · <b>${buyN}</b> BULLISH · ${topMeta} · last scan <b>${filed}</b></span>
+        <span id="qs-live-badge" class="qs-live-badge" title="Schwab MarketData · refreshes every 5s during market hours">LIVE · init</span>
       </div>
     `;
 
@@ -27210,11 +27240,41 @@ const QuantSignalScannerEikon = (function() {
 
 .qss-main { flex:1 1 auto; display:grid; grid-template-columns: 1fr 460px; min-height:0; overflow:hidden; }
 @media (max-width:1500px) { .qss-main { grid-template-columns: 1fr 420px; } }
-.qss-left { background:var(--bg); border-right:1px solid var(--line); overflow:hidden;
+.qss-left { background:var(--bg); border-right:1px solid var(--line); overflow-y:auto;
   display:flex; flex-direction:column; min-width:0; }
 .qss-right { background:var(--bg-1); overflow-y:auto; min-width:0; }
 
-.qss-tbl-wrap { flex:1 1 auto; overflow:auto; min-height:0; }
+.qss-tbl-wrap { flex:0 0 auto; overflow:auto; min-height:0; max-height:calc(100vh - 460px); }
+
+/* 2026-05-27 · Bottom analytics row fills empty space below the scanner table */
+.qss-bottom { flex:0 0 auto; padding:14px 16px 18px; background:var(--bg);
+  border-top:1px solid var(--line-2); }
+.qss-bot-h { font:700 10px var(--mono); letter-spacing:0.16em; text-transform:uppercase;
+  color:var(--ink-3); margin-bottom:10px; }
+.qss-bot-grid { display:grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap:10px; align-items:start; }
+@media (max-width:1500px) { .qss-bot-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width:1100px) { .qss-bot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.qss-bot-card { background:var(--bg-1); border:1px solid var(--line);
+  border-radius:6px; padding:10px 11px; min-width:0; }
+.qss-bot-card-h { font:700 9.5px var(--mono); letter-spacing:0.14em;
+  text-transform:uppercase; color:var(--ink-2); margin-bottom:8px;
+  padding-bottom:6px; border-bottom:1px solid var(--line); }
+.qss-bot-tbl { width:100%; border-collapse:collapse; font:500 11px var(--mono);
+  font-variant-numeric:tabular-nums; }
+.qss-bot-tbl thead th { font:700 8.5px var(--mono); letter-spacing:0.12em;
+  text-transform:uppercase; color:var(--ink-3); padding:3px 4px;
+  text-align:left; border-bottom:1px solid var(--line); }
+.qss-bot-tbl thead th.r { text-align:right; }
+.qss-bot-tbl td { padding:4px 4px; border-bottom:1px solid var(--line-2);
+  color:var(--ink-1); }
+.qss-bot-tbl td.r { text-align:right; }
+.qss-bot-tbl tbody tr { cursor:pointer; transition:background 120ms ease; }
+.qss-bot-tbl tbody tr:hover { background:var(--copper-bg); }
+.qss-bot-tbl tbody tr:last-child td { border-bottom:none; }
+.qss-bot-tbl .gn { color:var(--gn) !important; }
+.qss-bot-tbl .rd { color:var(--rd) !important; }
+.qss-bot-tbl .am { color:var(--am) !important; }
 .qss-tbl { width:100%; border-collapse:collapse;
   font:500 12px var(--mono); font-variant-numeric:tabular-nums; }
 .qss-tbl thead th {
@@ -27723,6 +27783,121 @@ body.light .qss-tbl tbody tr.sel { background: var(--copper-bg); }
     </tr>`;
   }
 
+  // 2026-05-27 · Bottom analytics row — fills empty space below scanner table.
+  // Real data, no synthesis. Same pattern as Options Flow's market decomposition.
+  function _renderQssBottomRow() {
+    const rows = _state.arr || [];
+    if (!rows.length) return '';
+    // 2026-05-27 · Surface filter context — when scanner filters are active
+    // the row count drops vs the raw universe. Show "N of M (filters applied)"
+    // so user knows the leaderboards aren't the full universe.
+    const _rawUniverse = (window._kairosTickersArr || []).length;
+    const _filtered = rows.length;
+    const _headerCount = (_rawUniverse > _filtered)
+      ? `${_filtered} of ${_rawUniverse} scored tickers <span style="color:var(--ink-3);font-weight:500;font-size:11px">· filters applied</span>`
+      : `${_filtered} scored tickers`;
+    const _dol = (v) => v == null ? '—' : v >= 1e6 ? '$'+(v/1e6).toFixed(1)+'M' : v >= 1e3 ? '$'+(v/1e3).toFixed(0)+'k' : '$'+v.toFixed(0);
+    // Sector aggregate
+    const sectorMap = {};
+    rows.forEach(r => {
+      const s = r.sector || '—';
+      if (!sectorMap[s]) sectorMap[s] = { picks: 0, scores: [], buys: 0 };
+      sectorMap[s].picks++;
+      if (r.score != null) sectorMap[s].scores.push(+r.score);
+      if ((r.decision || {}).verdict === 'BUY' || r.verdict === 'BUY') sectorMap[s].buys++;
+    });
+    const sectors = Object.entries(sectorMap)
+      .map(([s, v]) => ({ s, ...v, avgScore: v.scores.length ? v.scores.reduce((a,b)=>a+b,0)/v.scores.length : 0 }))
+      .sort((a, b) => b.avgScore - a.avgScore).slice(0, 10);
+    // Top leaderboards
+    const top = (arr, n=5) => arr.slice(0, n);
+    const byScore = rows.filter(r => r.score != null).sort((a,b) => +b.score - +a.score);
+    const byRR    = rows.filter(r => r.rr != null).sort((a,b) => +b.rr - +a.rr);
+    const byChg   = rows.filter(r => r.pct_chg != null).sort((a,b) => +b.pct_chg - +a.pct_chg);
+    const byEr    = rows.filter(r => {
+      const e = r.earnings && r.earnings.days_to_earnings;
+      return e != null && e >= 0 && e <= 14;
+    }).sort((a,b) => (a.earnings.days_to_earnings||99) - (b.earnings.days_to_earnings||99));
+    const byInsider = rows.filter(r => {
+      const ic = (r.insider_summary || {}).net_count_30d || (r.insider_score || 0);
+      return ic > 0;
+    }).sort((a,b) => ((b.insider_summary||{}).net_count_30d||b.insider_score||0) - ((a.insider_summary||{}).net_count_30d||a.insider_score||0));
+
+    const miniRow = (p, valFn, cls) => `<tr onclick="window.setDetailTicker && window.setDetailTicker('${p.ticker}')">
+      <td><b>${p.ticker}</b></td>
+      <td class="r ${cls(p)||''}">${valFn(p)}</td>
+    </tr>`;
+
+    return `<div class="qss-bottom">
+      <div class="qss-bot-h">⊞ UNIVERSE DECOMPOSITION · ${_headerCount}</div>
+      <div class="qss-bot-grid">
+
+        <div class="qss-bot-card">
+          <div class="qss-bot-card-h">SECTOR · ranked by avg score</div>
+          <table class="qss-bot-tbl">
+            <thead><tr><th>Sector</th><th class="r">N</th><th class="r">BUYs</th><th class="r">Avg Sc</th></tr></thead>
+            <tbody>${sectors.map(s => `<tr>
+              <td><b>${s.s.slice(0,16)}</b></td>
+              <td class="r">${s.picks}</td>
+              <td class="r ${s.buys > 0 ? 'gn' : ''}">${s.buys}</td>
+              <td class="r ${s.avgScore >= 70 ? 'gn' : s.avgScore >= 50 ? 'am' : 'rd'}"><b>${s.avgScore.toFixed(0)}</b></td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>
+
+        <div class="qss-bot-card">
+          <div class="qss-bot-card-h">🏆 TOP SCORE</div>
+          <table class="qss-bot-tbl">
+            <thead><tr><th>Tkr</th><th class="r">Score</th></tr></thead>
+            <tbody>${top(byScore).map(p => miniRow(p, x => '<b style="color:var(--gn)">'+(+x.score).toFixed(0)+'</b>', () => '')).join('')}</tbody>
+          </table>
+        </div>
+
+        <div class="qss-bot-card">
+          <div class="qss-bot-card-h">🎯 BEST R:R</div>
+          <table class="qss-bot-tbl">
+            <thead><tr><th>Tkr</th><th class="r">R:R</th></tr></thead>
+            <tbody>${top(byRR).map(p => miniRow(p, x => '<b>'+(+x.rr).toFixed(1)+'×</b>', () => '')).join('')}</tbody>
+          </table>
+        </div>
+
+        <div class="qss-bot-card">
+          <div class="qss-bot-card-h">🚀 TOP MOVERS · 1d</div>
+          <table class="qss-bot-tbl">
+            <thead><tr><th>Tkr</th><th class="r">% Chg</th></tr></thead>
+            <tbody>${top(byChg).map(p => miniRow(p, x => (x.pct_chg>=0?'+':'') + (+x.pct_chg).toFixed(2)+'%', x => x.pct_chg>=0?'gn':'rd')).join('')}</tbody>
+          </table>
+        </div>
+
+        <div class="qss-bot-card">
+          <div class="qss-bot-card-h">📊 EARNINGS ≤14d</div>
+          <table class="qss-bot-tbl">
+            <thead><tr><th>Tkr</th><th class="r">Days</th></tr></thead>
+            <tbody>${byEr.length ? top(byEr).map(p => `<tr onclick="window.setDetailTicker && window.setDetailTicker('${p.ticker}')">
+              <td><b>${p.ticker}</b></td>
+              <td class="r ${p.earnings.days_to_earnings <= 3 ? 'rd' : p.earnings.days_to_earnings <= 7 ? 'am' : ''}"><b>+${p.earnings.days_to_earnings}d</b></td>
+            </tr>`).join('') : '<tr><td colspan="2" style="text-align:center;color:var(--ink-3);font-size:11px;padding:8px">none</td></tr>'}</tbody>
+          </table>
+        </div>
+
+        <div class="qss-bot-card">
+          <div class="qss-bot-card-h">💰 INSIDER NET</div>
+          <table class="qss-bot-tbl">
+            <thead><tr><th>Tkr</th><th class="r">30d</th></tr></thead>
+            <tbody>${byInsider.length ? top(byInsider).map(p => {
+              const v = (p.insider_summary||{}).net_count_30d || p.insider_score || 0;
+              return `<tr onclick="window.setDetailTicker && window.setDetailTicker('${p.ticker}')">
+                <td><b>${p.ticker}</b></td>
+                <td class="r gn"><b>+${v}</b></td>
+              </tr>`;
+            }).join('') : '<tr><td colspan="2" style="text-align:center;color:var(--ink-3);font-size:11px;padding:8px">no insider data</td></tr>'}</tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>`;
+  }
+
   function _renderTable() {
     _computeTopScoreThresh(_state.arr);
     const rows = _state.arr.filter(_filterFn).sort(_sortFn);
@@ -28220,7 +28395,10 @@ body.light .qss-tbl tbody tr.sel { background: var(--copper-bg); }
         ${_renderQuickFilters()}
         <div id="qss-filt-bar">${_renderFilterBar(visibleCount)}</div>
         <div class="qss-main">
-          <div class="qss-left"><div id="qss-table">${_renderTable()}</div></div>
+          <div class="qss-left">
+            <div id="qss-table">${_renderTable()}</div>
+            <div id="qss-bot-row">${_renderQssBottomRow()}</div>
+          </div>
           <div class="qss-right" id="qss-right">${_renderRight()}</div>
         </div>
         ${_renderStatus(visibleCount)}
@@ -34579,6 +34757,249 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     // Apply real-data replacements to the prototype body string
     let _bodyOut = body;
     for (const [re, val] of _vt_replacements) { try { _bodyOut = _bodyOut.replace(re, val); } catch (_) {} }
+
+    // 2026-05-27 · §7 INVESTMENT THESIS — splice in real bull_drivers / bear_risks
+    // from t.fundamentals (was AVGO-specific hardcoded prose with VMware/ASIC
+    // bullets identical on every ticker). The trigger lines and the
+    // probability-weighted-FV footer were also AVGO-specific — both replaced.
+    try {
+      const _vt_fund = (t && t.fundamentals) || {};
+      const _vt_bull_arr = Array.isArray(_vt_fund.bull_drivers) ? _vt_fund.bull_drivers : [];
+      const _vt_bear_arr = Array.isArray(_vt_fund.bear_risks)   ? _vt_fund.bear_risks   : [];
+      const _bullPct = (_vt_ivBull && px > 0) ? ((_vt_ivBull - px) / px * 100) : null;
+      const _bearPct = (_vt_ivBear && px > 0) ? ((_vt_ivBear - px) / px * 100) : null;
+      const _bullPx  = _vt_ivBull ? _vt_ivBull.toFixed(0) : '—';
+      const _bearPx  = _vt_ivBear ? _vt_ivBear.toFixed(0) : '—';
+      const _bullPctTxt = _bullPct != null ? (_bullPct >= 0 ? '+' : '') + _bullPct.toFixed(0) + '%' : '—';
+      const _bearPctTxt = _bearPct != null ? (_bearPct >= 0 ? '+' : '') + _bearPct.toFixed(0) + '%' : '—';
+      const _bullList = _vt_bull_arr.length
+        ? '<ul>' + _vt_bull_arr.map(d => '<li><b>' + _esc(d) + '</b></li>').join('') + '</ul>'
+        : '<div style="color:var(--ink-3);font-style:italic;padding:8px 0">No per-ticker bull drivers in scan output. Source: fundamentals scorer.</div>';
+      const _bearList = _vt_bear_arr.length
+        ? '<ul>' + _vt_bear_arr.map(r => '<li><b>' + _esc(r) + '</b></li>').join('') + '</ul>'
+        : '<div style="color:var(--ink-3);font-style:italic;padding:8px 0">No per-ticker bear risks flagged. Source: fundamentals scorer.</div>';
+      const _newSection7 = ''
+        + '<!-- §7 — INVESTMENT THESIS CARDS (data-driven 2026-05-27) -->\n'
+        + '<div class="iv-section">\n'
+        + '  <div class="iv-section-head">\n'
+        + '    <div>\n'
+        + '      <div class="iv-section-title"><span class="num">§7</span>INVESTMENT THESIS · BULL vs BEAR</div>\n'
+        + '      <div class="iv-section-sub">per-ticker drivers from fundamentals scorer · price targets from analyst consensus</div>\n'
+        + '    </div>\n'
+        + '    <span class="iv-pill cp">' + (_vt_bull_arr.length + _vt_bear_arr.length) + ' drivers</span>\n'
+        + '  </div>\n'
+        + '  <div class="iv-section-body">\n'
+        + '    <div class="iv-th-grid">\n'
+        + '      <div class="iv-th-card bull">\n'
+        + '        <div class="iv-th-h">\n'
+        + '          <span class="lbl gn">▲ BULL · ' + _vt_bull_arr.length + ' driver' + (_vt_bull_arr.length === 1 ? '' : 's') + '</span>\n'
+        + '          <span class="pt gn">$' + _bullPx + '<small>' + _bullPctTxt + '</small></span>\n'
+        + '        </div>\n'
+        + '        <div class="iv-th-body">\n'
+        + _bullList + '\n'
+        + '          <div class="iv-th-when">\n'
+        + '            <b>Source:</b> fundamentals.bull_drivers · <b>Target:</b> analyst high $' + (_vt_aHigh ? _vt_aHigh.toFixed(0) : '—') + '\n'
+        + '          </div>\n'
+        + '        </div>\n'
+        + '      </div>\n'
+        + '      <div class="iv-th-card bear">\n'
+        + '        <div class="iv-th-h">\n'
+        + '          <span class="lbl rd">▼ BEAR · ' + _vt_bear_arr.length + ' risk' + (_vt_bear_arr.length === 1 ? '' : 's') + '</span>\n'
+        + '          <span class="pt rd">$' + _bearPx + '<small>' + _bearPctTxt + '</small></span>\n'
+        + '        </div>\n'
+        + '        <div class="iv-th-body">\n'
+        + _bearList + '\n'
+        + '          <div class="iv-th-when">\n'
+        + '            <b>Source:</b> fundamentals.bear_risks · <b>Floor:</b> bear case $' + _bearPx + '\n'
+        + '          </div>\n'
+        + '        </div>\n'
+        + '      </div>\n'
+        + '    </div>\n'
+        + (_vt_aTgt ? ('    <div class="iv-note cp" style="margin-top:14px;">\n'
+            + '      <b>Analyst PT mean</b> $' + _vt_aTgt.toFixed(2) + ' · spot $' + px.toFixed(2)
+            + ' · implied <b class="' + (_vt_upside > 0 ? 'gn' : 'rd') + '">'
+            + (_vt_upside >= 0 ? '+' : '') + _vt_upside.toFixed(1) + '%</b>'
+            + ' · range $' + (_vt_aLow ? _vt_aLow.toFixed(0) : '—') + '–$' + (_vt_aHigh ? _vt_aHigh.toFixed(0) : '—')
+            + ' (n=' + (_vt_aBuy + _vt_aHold + _vt_aSell) + ' analysts: ' + _vt_aBuy + ' buy · ' + _vt_aHold + ' hold · ' + _vt_aSell + ' sell)\n'
+            + '    </div>\n')
+          : '')
+        + '  </div>\n'
+        + '</div>\n\n';
+      _bodyOut = _bodyOut.replace(/<!-- §7 — INVESTMENT THESIS CARDS -->[\s\S]*?(?=<!-- §8)/, _newSection7);
+    } catch (_) { /* fall through to original AVGO prose if anything fails */ }
+
+    // 2026-05-27 · §3-§6 + §8 — splice in honest empty / partial states for the
+    // remaining AVGO-prototype sections. Where bundle has data, render it;
+    // where it doesn't, show a labeled "no data" panel instead of demo prose.
+    try {
+      const _vt_ef = (t && t.extra_fund) || {};
+      const _vt_an = (t && t.analyst) || {};
+      const _vt_pillarTotal = (t && t.scoring_breakdown && +t.scoring_breakdown.qg_score) || 0;
+      // §3 QUALITY SCORECARD — pull from extra_fund + scoring_breakdown
+      const _quality = [
+        { k: 'Gross Margin', v: _vt_ef.gross_margin, fmt: 'pct' },
+        { k: 'Op Margin',    v: _vt_ef.op_margin,    fmt: 'pct' },
+        { k: 'ROE',          v: _vt_ef.roe,          fmt: 'pct' },
+        { k: 'ROA',          v: _vt_ef.roa,          fmt: 'pct' },
+        { k: 'P/S',          v: _vt_ef.ps_ratio,     fmt: 'x' },
+        { k: 'EV/EBITDA',    v: _vt_ef.ev_ebitda,    fmt: 'x' },
+      ];
+      const _q_fmt = (v, kind) => {
+        if (v == null || !isFinite(+v)) return { txt: '—', cls: '' };
+        const n = +v;
+        if (kind === 'pct') {
+          const pct = n * 100;
+          const cls = pct >= 20 ? 'gn' : pct >= 8 ? '' : pct < 0 ? 'rd' : 'am';
+          return { txt: (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%', cls };
+        }
+        const cls = n < 10 ? 'gn' : n < 25 ? 'am' : 'rd';
+        return { txt: n.toFixed(2) + '×', cls };
+      };
+      const _qTiles = _quality.map(q => {
+        const f = _q_fmt(q.v, q.fmt);
+        return `<div class="iv-tile"><div class="iv-tile-k">${q.k}</div><div class="iv-tile-v ${f.cls}">${f.txt}</div><div class="iv-tile-peer">from extra_fund</div></div>`;
+      }).join('');
+      const _section3 = ''
+        + '<!-- §3 — QUALITY SCORECARD (data-driven 2026-05-27) -->\n'
+        + '<div class="iv-section">\n'
+        + '  <div class="iv-section-head"><div><div class="iv-section-title"><span class="num">§3</span>QUALITY SCORECARD</div><div class="iv-section-sub">from extra_fund · peer-median comparison not wired (cohort data unavailable)</div></div><span class="iv-pill cp">QG ' + _vt_pillarTotal.toFixed(0) + '/10</span></div>\n'
+        + '  <div class="iv-section-body"><div class="iv-tiles-6">' + _qTiles + '</div></div>\n'
+        + '</div>\n\n';
+      _bodyOut = _bodyOut.replace(/<!-- §3 — QUALITY SCORECARD[\s\S]*?(?=<!-- §4)/, _section3);
+
+      // §4 PEER COHORT — no per-ticker peer data in bundle; honest empty state.
+      const _section4 = ''
+        + '<!-- §4 — PEER COHORT COMPARISON (no data 2026-05-27) -->\n'
+        + '<div class="iv-section">\n'
+        + '  <div class="iv-section-head"><div><div class="iv-section-title"><span class="num">§4</span>PEER COHORT COMPARISON</div><div class="iv-section-sub">peer cohort identification + per-peer fundamentals not wired into bundle</div></div><span class="iv-pill">NO DATA</span></div>\n'
+        + '  <div class="iv-section-body"><div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">Peer ranking requires a sector/industry cohort builder + per-peer fundamentals fetch.</div></div>\n'
+        + '</div>\n\n';
+      _bodyOut = _bodyOut.replace(/<!-- §4 — PEER COHORT COMPARISON -->[\s\S]*?(?=<!-- §5)/, _section4);
+
+      // §5 STATEMENTS · 5-YEAR HISTORICAL — wire to t.financials_yearly (real EODHD data)
+      //  + analyst forward estimates as a second row when available.
+      const _fmtBig = (n) => { const v = +n; return n == null || !isFinite(v) ? '—' : (Math.abs(v) >= 1e9 ? '$' + (v/1e9).toFixed(1) + 'B' : Math.abs(v) >= 1e6 ? '$' + (v/1e6).toFixed(0) + 'M' : '$' + v.toFixed(0)); };
+      const _grPct = (g) => g == null || !isFinite(+g) ? '—' : ((+g * 100 >= 0 ? '+' : '') + (+g * 100).toFixed(1) + '%');
+      const _gCls = (g) => g == null ? '' : +g > 0.15 ? 'gn' : +g > 0 ? 'am' : 'rd';
+      const _fin = (t && t.financials_yearly) || {};
+      const _inc = _fin.income || {};
+      const _cf  = _fin.cashflow || {};
+      const _years = Object.keys(_inc).sort().reverse().slice(0, 5);
+      let _section5;
+      if (_years.length >= 2) {
+        // Build trailing CAGR + trend cards from real history
+        const _firstY = _years[_years.length - 1], _lastY = _years[0];
+        const _yrs = _years.length - 1;
+        const _cagr = (curr, prev) => (curr != null && prev != null && +prev > 0 && _yrs > 0)
+          ? Math.pow(+curr / +prev, 1/_yrs) - 1 : null;
+        const _rev_curr = +_inc[_lastY]?.totalRevenue, _rev_prev = +_inc[_firstY]?.totalRevenue;
+        const _ni_curr  = +_inc[_lastY]?.netIncome,    _ni_prev  = +_inc[_firstY]?.netIncome;
+        const _gp_curr  = +_inc[_lastY]?.grossProfit,  _gp_prev  = +_inc[_firstY]?.grossProfit;
+        const _fcf_curr = +_cf[_lastY]?.freeCashFlow,  _fcf_prev = +_cf[_firstY]?.freeCashFlow;
+        const _bb_curr  = Math.abs(+_cf[_lastY]?.repurchaseOfStock || 0);
+        const _trendCells = [
+          { k: `Revenue (${_lastY.slice(0,4)})`,    v: _fmtBig(_rev_curr), cagr: `${_yrs}y CAGR ${_grPct(_cagr(_rev_curr, _rev_prev))}`, cls: _gCls(_cagr(_rev_curr, _rev_prev)) },
+          { k: `Gross Profit`,                       v: _fmtBig(_gp_curr),  cagr: `${_yrs}y CAGR ${_grPct(_cagr(_gp_curr, _gp_prev))}`,    cls: _gCls(_cagr(_gp_curr, _gp_prev)) },
+          { k: `Net Income`,                         v: _fmtBig(_ni_curr),  cagr: `${_yrs}y CAGR ${_grPct(_cagr(_ni_curr, _ni_prev))}`,    cls: _gCls(_cagr(_ni_curr, _ni_prev)) },
+          { k: `FCF`,                                v: _fmtBig(_fcf_curr), cagr: _fcf_prev > 0 ? `${_yrs}y CAGR ${_grPct(_cagr(_fcf_curr, _fcf_prev))}` : '—', cls: _gCls(_cagr(_fcf_curr, _fcf_prev)) },
+          { k: `Buyback (latest yr)`,                v: _fmtBig(_bb_curr),  cagr: 'capital returned',                                                       cls: '' },
+        ];
+        // Sparkline data: array of values per metric over years (oldest→newest)
+        const _yrsAsc = _years.slice().reverse();
+        const _spark = (vals) => {
+          const finite = vals.filter(v => v != null && isFinite(+v));
+          if (finite.length < 2) return '';
+          const min = Math.min(...finite), max = Math.max(...finite);
+          const range = max - min || 1;
+          const pts = vals.map((v, i) => v == null ? null : { x: (i / (vals.length - 1)) * 100, y: 100 - ((+v - min) / range) * 100 }).filter(p => p);
+          if (pts.length < 2) return '';
+          const path = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
+          return `<svg class="iv-tr-spark" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="${path}" fill="none" stroke="currentColor" stroke-width="2" opacity="0.6"/></svg>`;
+        };
+        const _sparks = {
+          rev: _spark(_yrsAsc.map(y => +_inc[y]?.totalRevenue)),
+          gp:  _spark(_yrsAsc.map(y => +_inc[y]?.grossProfit)),
+          ni:  _spark(_yrsAsc.map(y => +_inc[y]?.netIncome)),
+          fcf: _spark(_yrsAsc.map(y => +_cf[y]?.freeCashFlow)),
+        };
+        const _tc = [
+          `<div class="iv-tr-card"><div class="iv-tr-k">${_trendCells[0].k}</div><div class="iv-tr-v">${_trendCells[0].v}</div><div class="iv-tr-cagr ${_trendCells[0].cls}">${_trendCells[0].cagr}</div>${_sparks.rev}</div>`,
+          `<div class="iv-tr-card"><div class="iv-tr-k">${_trendCells[1].k}</div><div class="iv-tr-v">${_trendCells[1].v}</div><div class="iv-tr-cagr ${_trendCells[1].cls}">${_trendCells[1].cagr}</div>${_sparks.gp}</div>`,
+          `<div class="iv-tr-card"><div class="iv-tr-k">${_trendCells[2].k}</div><div class="iv-tr-v">${_trendCells[2].v}</div><div class="iv-tr-cagr ${_trendCells[2].cls}">${_trendCells[2].cagr}</div>${_sparks.ni}</div>`,
+          `<div class="iv-tr-card"><div class="iv-tr-k">${_trendCells[3].k}</div><div class="iv-tr-v">${_trendCells[3].v}</div><div class="iv-tr-cagr ${_trendCells[3].cls}">${_trendCells[3].cagr}</div>${_sparks.fcf}</div>`,
+          `<div class="iv-tr-card"><div class="iv-tr-k">${_trendCells[4].k}</div><div class="iv-tr-v">${_trendCells[4].v}</div><div class="iv-tr-cagr ${_trendCells[4].cls}">${_trendCells[4].cagr}</div></div>`,
+        ].join('');
+        _section5 = ''
+          + '<!-- §5 — STATEMENTS · LIVE 5y (data-driven 2026-05-27) -->\n'
+          + '<div class="iv-section">\n'
+          + '  <div class="iv-section-head"><div><div class="iv-section-title"><span class="num">§5</span>STATEMENTS · ' + _years.length + 'y HISTORICAL</div><div class="iv-section-sub">income · cash flow · buyback · from EODHD Financials yearly</div></div><span class="iv-pill cp">' + _firstY.slice(0,4) + '→' + _lastY.slice(0,4) + '</span></div>\n'
+          + '  <div class="iv-section-body"><div class="iv-tr-grid">' + _tc + '</div></div>\n'
+          + '</div>\n\n';
+      } else {
+        _section5 = ''
+          + '<!-- §5 — STATEMENTS (no data 2026-05-27) -->\n'
+          + '<div class="iv-section">\n'
+          + '  <div class="iv-section-head"><div><div class="iv-section-title"><span class="num">§5</span>STATEMENTS · 5-YEAR TREND</div><div class="iv-section-sub">historical financials missing for this ticker · re-run scan to populate t.financials_yearly</div></div><span class="iv-pill">NO DATA</span></div>\n'
+          + '  <div class="iv-section-body"><div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">No 5-year historical financials available.</div></div>\n'
+          + '</div>\n\n';
+      }
+      _bodyOut = _bodyOut.replace(/<!-- §5 — STATEMENTS[\s\S]*?(?=<!-- §6)/, _section5);
+
+      // §6 CAPITAL ALLOCATION FLOW — buyback_annual + dividend_yield from extra_fund where available.
+      const _buyback = _vt_ef.buyback_annual;
+      const _buybackY = _vt_ef.buyback_yield;
+      const _divY = _vt_ef.dividend_yield;
+      let _section6;
+      if (_buyback || _divY || _buybackY) {
+        const _items = [];
+        if (_buyback) _items.push(`<div class="iv-tile"><div class="iv-tile-k">BUYBACK</div><div class="iv-tile-v gn">${_fmtBig(_buyback)}/yr</div><div class="iv-tile-peer">annualized · from extra_fund</div></div>`);
+        if (_buybackY != null) _items.push(`<div class="iv-tile"><div class="iv-tile-k">BUYBACK YIELD</div><div class="iv-tile-v ${_buybackY > 0.03 ? 'gn' : 'am'}">${(_buybackY * 100).toFixed(2)}%</div><div class="iv-tile-peer">of market cap</div></div>`);
+        if (_divY) _items.push(`<div class="iv-tile"><div class="iv-tile-k">DIV YIELD</div><div class="iv-tile-v ${_divY > 0.02 ? 'gn' : 'am'}">${(_divY * 100).toFixed(2)}%</div><div class="iv-tile-peer">forward annual</div></div>`);
+        _section6 = ''
+          + '<!-- §6 — CAPITAL ALLOCATION (data-driven 2026-05-27) -->\n'
+          + '<div class="iv-section">\n'
+          + '  <div class="iv-section-head"><div><div class="iv-section-title"><span class="num">§6</span>CAPITAL ALLOCATION</div><div class="iv-section-sub">buybacks + dividends from extra_fund · full sankey flow (capex/m&a/debt) not in bundle</div></div><span class="iv-pill cp">PARTIAL</span></div>\n'
+          + '  <div class="iv-section-body"><div class="iv-tiles-6">' + _items.join('') + '</div></div>\n'
+          + '</div>\n\n';
+      } else {
+        _section6 = ''
+          + '<!-- §6 — CAPITAL ALLOCATION (no data 2026-05-27) -->\n'
+          + '<div class="iv-section">\n'
+          + '  <div class="iv-section-head"><div><div class="iv-section-title"><span class="num">§6</span>CAPITAL ALLOCATION FLOW</div><div class="iv-section-sub">cash flow breakdown not wired · requires EODHD Cashflow Statement</div></div><span class="iv-pill">NO DATA</span></div>\n'
+          + '  <div class="iv-section-body"><div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">No buyback or dividend data found for this ticker.</div></div>\n'
+          + '</div>\n\n';
+      }
+      _bodyOut = _bodyOut.replace(/<!-- §6 — CAPITAL ALLOCATION[\s\S]*?(?=<!-- §7)/, _section6);
+
+      // §8 LONG-HORIZON CATALYST CALENDAR — use t.earnings (next-earnings date) where available.
+      const _earn = (t && t.earnings) || {};
+      const _ed = _earn.earnings_date;
+      const _dte = _earn.days_to_earnings;
+      let _section8;
+      if (_ed != null) {
+        const _eventCells = [];
+        const _label = (_dte != null && _dte > 0) ? 'EARNINGS · in ' + _dte + 'd' : (_dte != null && _dte === 0) ? 'EARNINGS · TODAY' : (_dte != null) ? 'EARNINGS · last ' + Math.abs(_dte) + 'd ago (post-report)' : 'EARNINGS · scheduled';
+        const _imp = (_dte != null && Math.abs(_dte) <= 7) ? 'hi' : 'med';
+        _eventCells.push(`<div class="iv-cal-row"><span class="iv-cal-date">${_ed}<small>${_dte != null ? (_dte >= 0 ? '+' : '') + _dte + 'd' : ''}</small></span><span><span class="iv-cal-type earn">${_label}</span></span><span class="iv-cal-desc"><b>Next scheduled earnings.</b> Beat/miss + guidance reset · binary event for the quarter.</span><span class="iv-cal-impact ${_imp}">${_imp.toUpperCase()} · ±5-15%</span></div>`);
+        _section8 = ''
+          + '<!-- §8 — CATALYST CALENDAR (partial 2026-05-27) -->\n'
+          + '<div class="iv-section">\n'
+          + '  <div class="iv-section-head"><div><div class="iv-section-title"><span class="num">§8</span>LONG-HORIZON CATALYST CALENDAR</div><div class="iv-section-sub">earnings date from t.earnings · macro events / analyst days / segment updates not yet wired</div></div><span class="iv-pill cp">PARTIAL · 1 event</span></div>\n'
+          + '  <div class="iv-section-body"><div class="iv-cal">\n'
+          + '    <div class="iv-cal-row head"><span>Date</span><span>Type</span><span>Event · what it tests</span><span>Impact</span></div>\n'
+          + '    ' + _eventCells.join('') + '\n'
+          + '  </div></div>\n'
+          + '</div>\n\n';
+      } else {
+        _section8 = ''
+          + '<!-- §8 — CATALYST CALENDAR (no data 2026-05-27) -->\n'
+          + '<div class="iv-section">\n'
+          + '  <div class="iv-section-head"><div><div class="iv-section-title"><span class="num">§8</span>LONG-HORIZON CATALYST CALENDAR</div><div class="iv-section-sub">forward catalyst calendar not wired (requires earnings calendar + macro events + analyst-day schedule)</div></div><span class="iv-pill">NO DATA</span></div>\n'
+          + '  <div class="iv-section-body"><div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">No scheduled events for this ticker.</div></div>\n'
+          + '</div>\n\n';
+      }
+      _bodyOut = _bodyOut.replace(/<!-- §8 — LONG-HORIZON CATALYST CALENDAR -->[\s\S]*$/, _section8);
+    } catch (_) { /* keep prototype sections if splices fail */ }
     // 2026-05-25 · Wire t.thesis if present — appears at the bottom of the tab
     // as a clearly-marked "LIVE THESIS" block.
     let _thesisBlock = '';
@@ -34804,34 +35225,97 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     return _qlnViz_tenYearTest(t);
   }
 
-  function renderValue_ThesisKillers(t) {
+  // 2026-05-27 · Cross-Lens shared helper — derives 5-discipline verdicts from
+  // t.scoring_breakdown + t.decisions_by_mode + t.news_sentiment_score.
+  // Previously each cross-lens panel hardcoded the same ROST fixture verdicts.
+  function _qlnCrossLensCells(t, leadKey) {
+    const sb = (t && t.scoring_breakdown) || {};
+    const dbm = (t && t.decisions_by_mode) || {};
+    const swingV = ((dbm.swing && dbm.swing.verdict) || (t && t.decision && t.decision.verdict) || '').toUpperCase();
+    const posV   = (dbm.position && dbm.position.verdict || '').toUpperCase();
+    const invV   = (dbm.investment && dbm.investment.verdict || '').toUpperCase();
+    const ns     = (t && t.news_sentiment_score && t.news_sentiment_score.score != null) ? +t.news_sentiment_score.score : null;
+    const tech   = +sb.tech_score || 0;
+    const cat    = +sb.cat_score || 0;
+    const rs     = +sb.rs_score || 0;
+    const sm     = +sb.sm_score || 0;
+    const qg     = +sb.qg_score || 0;
+    const earn   = (t && t.earnings) || {};
+    const dte    = earn.days_to_earnings;
+    const verdictCell = (raw) => {
+      if (/BUY|LONG/.test(raw))   return { lbl: 'BULLISH',  cls: 'gn' };
+      if (/SHORT|AVOID/.test(raw)) return { lbl: 'BEARISH',  cls: 'rd' };
+      if (/WATCH/.test(raw))      return { lbl: 'WATCH',    cls: 'am' };
+      return { lbl: raw || 'NEUTRAL', cls: 'am' };
+    };
+    const v_value = verdictCell(invV);
+    const v_swing = verdictCell(swingV);
+    const v_pos   = verdictCell(posV);
+    const v_tech  = tech >= 25 ? { lbl: 'BULLISH', cls: 'gn' } : tech >= 15 ? { lbl: 'NEUTRAL', cls: 'am' } : { lbl: 'BEARISH', cls: 'rd' };
+    const v_smart = sm >= 10 ? { lbl: 'BULLISH', cls: 'gn' } : sm >= 5 ? { lbl: 'NEUTRAL', cls: 'am' } : { lbl: 'BEARISH', cls: 'rd' };
+    const v_qual  = qg >= 7 ? { lbl: 'STRONG', cls: 'gn' } : qg >= 4 ? { lbl: 'OK', cls: 'am' } : { lbl: 'WEAK', cls: 'rd' };
+    const v_news  = ns == null ? { lbl: 'NEUTRAL', cls: 'am' } : ns >= 1 ? { lbl: 'BULLISH', cls: 'gn' } : ns <= -1 ? { lbl: 'BEARISH', cls: 'rd' } : { lbl: 'MIXED', cls: 'am' };
+    const v_earn  = dte == null ? { lbl: 'NEUTRAL', cls: 'am' }
+                  : Math.abs(dte) <= 3 ? { lbl: 'EARNINGS WK', cls: 'am' }
+                  : dte > 0 ? { lbl: 'PRE-EARN +' + dte + 'd', cls: 'am' }
+                  : { lbl: 'POST-EARN ' + Math.abs(dte) + 'd', cls: (earn.eps_surprise_pct || 0) > 0 ? 'gn' : 'am' };
+    const v_catalyst = cat >= 12 ? { lbl: 'STRONG', cls: 'gn' } : cat >= 6 ? { lbl: 'MODERATE', cls: 'am' } : { lbl: 'WEAK', cls: 'rd' };
+    return {
+      VALUE: { ...v_value, sub: 'investment-mode · ' + (invV || 'no verdict') },
+      SWING: { ...v_swing, sub: 'swing-mode · ' + (swingV || 'no verdict') },
+      POSITION: { ...v_pos, sub: 'position-mode · ' + (posV || 'no verdict') },
+      TECH: { ...v_tech, sub: 'tech score ' + tech.toFixed(0) + '/35' },
+      SMART: { ...v_smart, sub: 'sm score ' + sm.toFixed(0) + '/15' },
+      QUALITY: { ...v_qual, sub: 'qg score ' + qg.toFixed(0) + '/10' },
+      NEWS: { ...v_news, sub: ns != null ? 'sentiment ' + ns.toFixed(1) : 'no sentiment' },
+      EARNINGS: { ...v_earn, sub: dte != null ? 'beat ' + (earn.eps_surprise_pct || 0).toFixed(1) + '%' : 'no upcoming' },
+      CATALYST: { ...v_catalyst, sub: 'tier ' + (t.catalyst_tier || '—') + ' · ' + ((t.catalyst_tags || []).join(',') || 'none') },
+    };
+  }
+  function _qlnRenderCrossLens(num, title, t, leadKey, panels) {
+    const cells = _qlnCrossLensCells(t, leadKey);
+    const html = panels.map(p => {
+      const c = cells[p] || { lbl: '—', cls: '', sub: '' };
+      const lead = p === leadKey;
+      const style = lead ? ' style="border-top-color:var(--lead,#F472B6)"' : '';
+      const cls = lead ? '' : c.cls;
+      const lblColor = lead ? ' style="color:var(--lead,#F472B6)"' : '';
+      return `<div class="qln-cell ${cls}"${style}><div class="qln-ck">${p}${lead ? ' (LEAD)' : ''}</div><div class="qln-cv ${cls}"${lblColor}>${c.lbl}</div><div class="qln-csub">${c.sub}</div></div>`;
+    }).join('');
     return `<div class="qln-panel">
-      <div class="qln-h2"><span class="num">J</span>Thesis Killers · Ranked<span class="sub">— top 5 things that could break this call · probability-weighted</span><span class="tag">RISK</span></div>
+      <div class="qln-h2"><span class="num">${num}</span>${title}<span class="tag">DERIVED</span></div>
+      <div class="qln-g5">${html}</div>
+    </div>`;
+  }
+
+  function renderValue_ThesisKillers(t) {
+    // 2026-05-27 · Bundle does not carry per-ticker thesis_killers ranking with
+    // probability + impact. Derive a generic ranked list from t.fundamentals.bear_risks
+    // (which IS data-driven) — surface honestly without inventing probabilities.
+    const fund = (t && t.fundamentals) || {};
+    const bears = Array.isArray(fund.bear_risks) ? fund.bear_risks : [];
+    if (!bears.length) {
+      return `<div class="qln-panel">
+        <div class="qln-h2"><span class="num">J</span>Thesis Killers · Ranked<span class="tag">NO DATA</span></div>
+        <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">No bear risks flagged by fundamentals scorer for this ticker. Probability-weighted thesis-killer modeling not yet wired.</div>
+      </div>`;
+    }
+    const rows = bears.slice(0, 5).map((r, i) =>
+      `<tr><td>${i+1}</td><td><b style="color:var(--ink)">${String(r).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</b></td><td>—</td><td>—</td><td>—</td></tr>`
+    ).join('');
+    return `<div class="qln-panel">
+      <div class="qln-h2"><span class="num">J</span>Thesis Killers · Ranked<span class="sub">— from fundamentals.bear_risks · probability/impact modeling not yet wired</span><span class="tag">PARTIAL</span></div>
       <table class="qln-tbl">
         <thead><tr><th>#</th><th>RISK</th><th>P</th><th>IMPACT</th><th>TIMELINE</th></tr></thead>
-        <tbody>
-          <tr><td>1</td><td><b style="color:var(--ink)">Tariff escalation</b> · 90% inventory imported · 25% tariff = −300bp gross margin</td><td class="rd">22%</td><td>IV → $200</td><td>political cycle</td></tr>
-          <tr><td>2</td><td><b style="color:var(--ink)">CA tax / regulatory shift</b> · 30% revenue exposure to California</td><td class="am">15%</td><td>IV → $215</td><td>policy timeline</td></tr>
-          <tr><td>3</td><td><b style="color:var(--ink)">Online disruption</b> · Shein/Temu/Amazon crack value-tier · share −5%</td><td class="am">12%</td><td>IV → $210</td><td>structural · slow</td></tr>
-          <tr><td>4</td><td><b style="color:var(--ink)">CEO succession misstep</b> · Rentler retirement · culture preservation risk</td><td class="am">8%</td><td>IV → $205</td><td>2026–2028</td></tr>
-          <tr><td>5</td><td><b style="color:var(--ink)">Rate-driven multiple compression</b> · 10Y → 6% → WACC up → IV → $174</td><td>6%</td><td>IV → $174</td><td>macro · monitorable</td></tr>
-        </tbody>
+        <tbody>${rows}</tbody>
       </table>
+      <div class="qln-summary"><b>P/IMPACT/TIMELINE columns are blank</b> — bundle does not carry probability-weighted thesis-killer model. Bullet list reflects fundamentals scorer's bear-risk findings.</div>
     </div>`;
   }
 
   function renderValue_CrossLens(t) {
-    return `<div class="qln-panel">
-      <div class="qln-h2"><span class="num">K</span>Cross-Lens Read · 5 disciplines<span class="sub">— how do the other lenses see this · conflicts reported, not smoothed</span><span class="tag">CROSS-CHECK</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell" style="border-top-color:var(--lead)"><div class="qln-ck">VALUE (LEAD)</div><div class="qln-cv lead">WATCH→ENTRY</div><div class="qln-csub">IV $232 · MoS 8% · ENTRY ≤ $197</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">SMC · 1d-4w</div><div class="qln-cv rd">BEARISH</div><div class="qln-csub">CHoCH · DOL → SSL $198</div></div>
-        <div class="qln-cell am"><div class="qln-ck">EARNINGS</div><div class="qln-cv am">NEUTRAL</div><div class="qln-csub">ER +44d · ESP +1.2</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">TECH · 1d-4w</div><div class="qln-cv rd">BEARISH</div><div class="qln-csub">EMA broken · MACD bear</div></div>
-        <div class="qln-cell am"><div class="qln-ck">MACRO</div><div class="qln-cv am">MIXED</div><div class="qln-csub">trade-down · rate-cut tail</div></div>
-      </div>
-      <div class="qln-summary"><b style="color:var(--am)">⚠ CONFLICT:</b> Value (5y) bull · Tech+SMC (1d-4w) bear. Different horizons can both be right. Long-term holders ADD on weakness · swing traders WAIT for reclaim.</div>
-    </div>`;
+    return _qlnRenderCrossLens('K', 'Cross-Lens Read · 5 disciplines', t, 'VALUE',
+      ['VALUE', 'SWING', 'TECH', 'EARNINGS', 'NEWS']);
   }
 
   function renderValue_TheCall(t) {
@@ -34926,8 +35410,13 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
         + (_ddPct != null ? '<div style="margin-top:6px;font:600 10.5px var(--mono);color:var(--ink-3)">Current portfolio drawdown · <b style="color:' + (_ddPct <= -10 ? 'var(--rd)' : _ddPct <= -5 ? 'var(--am)' : 'var(--ink-2)') + '">' + _pf(_ddPct) + '</b></div>' : '')
         + '</div>';
     }
-    // Sub-tables render their own per-section empty-states. No global banner.
-    return cssWrap + '<div class="rkv2 k-risk-scope" style="padding:8px 10px">' + bc + _liveRisk + '<div id="qrisk-dist-root" style="margin:8px 0 14px;background:var(--bg-1,#11151a);border:1px solid var(--blu,#60a5fa);border-left:4px solid var(--blu,#60a5fa);border-radius:2px;padding:14px 16px"><div style="font:800 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--blu,#60a5fa);letter-spacing:0.14em;margin-bottom:8px">📊 LIVE LOSS DISTRIBUTION · 63d Monte Carlo</div><div style="color:var(--ink-3);font:600 11px var(--mono)">⌛ rendering…</div></div><script src="/v2/qrisk_distribution.js"><\/script>' + body + '</div>';
+    // 2026-05-27 · Honest demo banner — the body prototype below contains
+    // hardcoded AVGO/NVDA/AMD/QCOM/SMCI peer correlations + sector-specific
+    // risk prose. Live per-ticker risk data is in the _liveRisk block above
+    // (kelly_size, forward_dist, Monte Carlo loss distribution). Until the
+    // peer-correlation matrix is computed per ticker, surface honestly.
+    const _rkDemoBanner = '<div style="margin:8px 10px 14px;padding:12px 16px;border:1px solid var(--amb,#fbbf24);border-left:4px solid var(--amb,#fbbf24);background:rgba(251,191,36,0.06);border-radius:2px;font:500 11.5px var(--mono,ui-monospace,monospace);color:var(--ink-1,#d4d8d1);line-height:1.55"><div style="font:800 10.5px var(--mono);color:var(--amb,#fbbf24);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:5px">⚠ Partial scaffolding</div><b>Live data:</b> kelly_size sizing, forward Monte Carlo loss distribution, position-level $ risk (cards above). <b>Demo:</b> peer-correlation heatmap + cross-sector tail-stacking warnings below use a hardcoded AVGO/NVDA/AMD/QCOM/SMCI fixture until a per-ticker peer cohort + correlation matrix is wired into the bundle.</div>';
+    return cssWrap + '<div class="rkv2 k-risk-scope" style="padding:8px 10px">' + bc + _liveRisk + _rkDemoBanner + '<div id="qrisk-dist-root" style="margin:8px 0 14px;background:var(--bg-1,#11151a);border:1px solid var(--blu,#60a5fa);border-left:4px solid var(--blu,#60a5fa);border-radius:2px;padding:14px 16px"><div style="font:800 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--blu,#60a5fa);letter-spacing:0.14em;margin-bottom:8px">📊 LIVE LOSS DISTRIBUTION · 63d Monte Carlo</div><div style="color:var(--ink-3);font:600 11px var(--mono)">⌛ rendering…</div></div><script src="/v2/qrisk_distribution.js"><\/script>' + body + '</div>';
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -35269,16 +35758,9 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
   }
 
   function renderRisk_CrossLens(t) {
-    return `<div class="qln-panel">
-      <div class="qln-h2"><span class="num">G</span>Cross-Lens Read · 5 disciplines<span class="sub">— risk lens sizes · others size the conviction</span><span class="tag">CROSS-CHECK</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell am" style="border-top-color:var(--rd)"><div class="qln-ck">RISK (LEAD)</div><div class="qln-cv am">WATCH · SIZE-CAP</div><div class="qln-csub">DD caps size 3-5% NAV</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">VALUE · 1-5y</div><div class="qln-cv gn">CONSTRUCTIVE</div><div class="qln-csub">IV $232 · quality F 8/9</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">SWING · 1d-4w</div><div class="qln-cv rd">BEARISH</div><div class="qln-csub">CHoCH bear · DOL → SSL</div></div>
-        <div class="qln-cell am"><div class="qln-ck">EARNINGS</div><div class="qln-cv am">NEUTRAL</div><div class="qln-csub">ER +44d · ESP +1.2</div></div>
-        <div class="qln-cell am"><div class="qln-ck">MACRO</div><div class="qln-cv am">MIXED</div><div class="qln-csub">trade-down · rate-cut tail</div></div>
-      </div>
-    </div>`;
+    // 2026-05-27 · Derived from t.scoring_breakdown + decisions_by_mode (see _qlnCrossLensCells).
+    return _qlnRenderCrossLens('G', 'Cross-Lens Read · 5 disciplines', t, 'QUALITY',
+      ['QUALITY', 'VALUE', 'SWING', 'EARNINGS', 'NEWS']);
   }
 
   function renderRisk_TheCall(t) {
@@ -35628,16 +36110,8 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
   }
 
   function renderEarnings_CrossLens(t) {
-    return `<div class="qln-panel">
-      <div class="qln-h2"><span class="num">H</span>Cross-Lens Read · 5 disciplines<span class="sub">— synthesis required</span><span class="tag">CROSS-CHECK</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell am" style="border-top-color:#FCD34D"><div class="qln-ck">ER (LEAD)</div><div class="qln-cv am">WATCH</div><div class="qln-csub">setup forming · ESP +37d</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">VALUE · 1-5y</div><div class="qln-cv gn">CONSTRUCTIVE</div><div class="qln-csub">IV $232</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">SWING · 1d-4w</div><div class="qln-cv rd">BEARISH</div><div class="qln-csub">CHoCH bear</div></div>
-        <div class="qln-cell am"><div class="qln-ck">RISK · sizing</div><div class="qln-cv am">SIZE-CAP</div><div class="qln-csub">3-5% NAV</div></div>
-        <div class="qln-cell am"><div class="qln-ck">MACRO</div><div class="qln-cv am">MIXED</div><div class="qln-csub">consumer recession bid</div></div>
-      </div>
-    </div>`;
+    return _qlnRenderCrossLens('H', 'Cross-Lens Read · 5 disciplines', t, 'EARNINGS',
+      ['EARNINGS', 'VALUE', 'SWING', 'TECH', 'NEWS']);
   }
 
   function renderEarnings_TheCall(t) {
@@ -35942,15 +36416,8 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
   }
 
   function renderPortfolio_CrossLens(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">H</span>Cross-Lens · 5 disciplines<span class="tag">CROSS-CHECK</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell" style="border-top-color:#5EA1FF"><div class="qln-ck">CFP (LEAD)</div><div class="qln-cv" style="color:#5EA1FF">WATCH · HOLD</div><div class="qln-csub">hold to LT · don't add yet</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">VALUE</div><div class="qln-cv gn">CONSTRUCTIVE</div><div class="qln-csub">IV $232 · quality 8/9</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">SWING</div><div class="qln-cv rd">BEARISH</div><div class="qln-csub">CHoCH · DOL ↓</div></div>
-        <div class="qln-cell am"><div class="qln-ck">EARNINGS</div><div class="qln-cv am">NEUTRAL</div><div class="qln-csub">ER +44d</div></div>
-        <div class="qln-cell am"><div class="qln-ck">RISK</div><div class="qln-cv am">SIZE-CAP</div><div class="qln-csub">3-5% NAV</div></div>
-      </div>
-    </div>`;
+    return _qlnRenderCrossLens('H', 'Cross-Lens · 5 disciplines', t, 'POSITION',
+      ['POSITION', 'VALUE', 'SWING', 'EARNINGS', 'NEWS']);
   }
 
   function renderPortfolio_TheCall(t) {
@@ -36054,46 +36521,103 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
   }
 
   function renderMacro_Calendar(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">E</span>Upcoming Macro Calendar · 30d<span class="tag">CALENDAR</span></div>
+    // 2026-05-27 · LIVE — pulls from window._kairosData.economic_events (EODHD
+    // economic_events endpoint, hydrated by /api/macro/events). Previously
+    // hardcoded "CPI +2d / FOMC +5d / GDP +14d" prose that didn't change.
+    const events = (window._kairosData && Array.isArray(window._kairosData.economic_events)) ? window._kairosData.economic_events : [];
+    if (!events.length) {
+      // Fetch lazily if not in bootstrap; show loading state
+      if (!window._qlnMacroEvFetching) {
+        window._qlnMacroEvFetching = true;
+        fetch('/api/macro/events?days_ahead=30', { credentials: 'same-origin' })
+          .then(r => r.ok ? r.json() : null)
+          .then(d => {
+            if (d && Array.isArray(d.events)) {
+              window._kairosData = window._kairosData || {};
+              window._kairosData.economic_events = d.events;
+              // Re-render if user still on macro tab
+              if (typeof renderMacroTab === 'function' && window._kairosData) {
+                const node = document.querySelector('[data-qln-section="calendar"]');
+                if (node) node.outerHTML = renderMacro_Calendar(t);
+              }
+            }
+          })
+          .catch(() => {});
+      }
+      return `<div class="qln-panel" data-qln-section="calendar"><div class="qln-h2"><span class="num">E</span>Upcoming Macro Calendar · 30d<span class="tag">LOADING…</span></div>
+        <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">Fetching from /api/macro/events…</div>
+      </div>`;
+    }
+    const today = new Date();
+    const rows = events.slice(0, 12).map(e => {
+      const dt = e.date || e.event_date || e.timestamp;
+      const d = dt ? new Date(dt) : null;
+      const days = d && !isNaN(d) ? Math.round((d - today) / (1000 * 60 * 60 * 24)) : null;
+      const dayTxt = days == null ? '—' : days === 0 ? 'TODAY' : (days > 0 ? '+' + days + 'd' : days + 'd');
+      const evtType = e.type || e.event_type || e.indicator || '—';
+      const desc = e.title || e.name || e.description || (e.period ? `Period: ${e.period}` : '');
+      // Impact heuristic: HIGH for CPI/FOMC/NFP/GDP, MED for PMI/retail, LOW otherwise
+      const txtUp = (evtType + ' ' + desc).toUpperCase();
+      const impactCls = /CPI|FOMC|NFP|GDP|JOBS|PAYROLL|RATE/.test(txtUp) ? 'rd' : /PMI|RETAIL|SENTIMENT|HOUSING/.test(txtUp) ? 'am' : '';
+      const impactTxt = impactCls === 'rd' ? 'HIGH' : impactCls === 'am' ? 'MED' : 'LOW';
+      const time = e.time || (dt ? new Date(dt).toUTCString().slice(17, 22) + ' UTC' : '—');
+      return `<tr><td>${dayTxt}</td><td><b>${evtType}</b></td><td>${desc}</td><td class="${impactCls}">${impactTxt}</td><td>${time}</td></tr>`;
+    }).join('');
+    return `<div class="qln-panel" data-qln-section="calendar"><div class="qln-h2"><span class="num">E</span>Upcoming Macro Calendar · 30d<span class="tag">LIVE · EODHD · ${events.length} events</span></div>
       <table class="qln-tbl">
         <thead><tr><th>DAY</th><th>EVENT</th><th>DESC</th><th>IMPACT</th><th>TIME</th></tr></thead>
-        <tbody>
-          <tr><td>+2d</td><td>CPI</td><td>Core CPI YoY · cons 3.2%</td><td class="rd">HIGH</td><td>08:30</td></tr>
-          <tr><td>+5d</td><td>FOMC</td><td>Apr-30 meeting minutes</td><td class="am">MED</td><td>14:00</td></tr>
-          <tr><td>+14d</td><td>GDP</td><td>Q1 GDP advance</td><td class="rd">HIGH</td><td>08:30</td></tr>
-          <tr><td>+22d</td><td>FOMC</td><td>Rate decision + dot plot</td><td class="rd">HIGH</td><td>14:00</td></tr>
-          <tr><td>+24d</td><td>NFP</td><td>Jobs report · payrolls</td><td class="rd">HIGH</td><td>08:30</td></tr>
-        </tbody>
+        <tbody>${rows}</tbody>
       </table>
     </div>`;
   }
 
   function renderMacro_SectorRotation(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">F</span>Sector Rotation · 21d vs SPY<span class="tag">ROTATION</span></div>
+    // 2026-05-27 · LIVE — pulls from window._kairosData.sector_etf_data
+    // (populated by scan with perf_pct, vs_spy_pct, outperforming flag, rank).
+    const sed = (window._kairosData && window._kairosData.sector_etf_data) || {};
+    const rows = [];
+    const tickerToSec = { XLK:'Tech', XLF:'Financial', XLV:'Healthcare', XLE:'Energy', XLI:'Industrial',
+                          XLB:'Materials', XLRE:'Real Estate', XLU:'Utilities', XLC:'Comm', XLP:'Cons Staples',
+                          XLY:'Cons Cycl', SPY:'Broad Mkt' };
+    const tkSector = (t && t.sector || '').toLowerCase();
+    Object.entries(sed).forEach(([etf, d]) => {
+      if (etf.startsWith('_')) return;
+      if (!d || typeof d !== 'object') return;
+      const perf = +d.perf_pct;
+      const vsSpy = +d.vs_spy_pct;
+      const rank = d.rank;
+      if (!isFinite(perf)) return;
+      const outperf = d.outperforming;
+      // Match ticker's sector to mark subject row
+      const secLbl = tickerToSec[etf] || d.sector || etf;
+      const isSubject = (d.sector || '').toLowerCase().includes(tkSector) && tkSector.length > 2;
+      rows.push({ etf, secLbl, perf, vsSpy, outperf, rank, isSubject });
+    });
+    rows.sort((a, b) => b.perf - a.perf);
+    if (!rows.length) {
+      return `<div class="qln-panel"><div class="qln-h2"><span class="num">F</span>Sector Rotation · vs SPY<span class="tag">NO DATA</span></div>
+        <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">No sector_etf_data in bundle.</div>
+      </div>`;
+    }
+    const trs = rows.map(r => {
+      const perfCls = r.perf > 5 ? 'gn' : r.perf > 0 ? 'am' : 'rd';
+      const statusCls = r.outperf && r.perf > 5 ? 'gn' : r.perf > 0 ? 'am' : 'rd';
+      const status = r.outperf && r.perf > 10 ? 'LEADING' : r.outperf ? 'OUT-PERF' : r.perf > 0 ? 'NEUTRAL' : r.perf < -5 ? 'DEEP LAG' : 'LAGGING';
+      const subjectCls = r.isSubject ? ' class="subject"' : '';
+      const label = `${r.etf} · ${r.secLbl}${r.isSubject ? ' (own sector)' : ''}`;
+      return `<tr${subjectCls}><td>${label}</td><td class="${perfCls}">${(r.perf >= 0 ? '+' : '') + r.perf.toFixed(1)}%</td><td>${(r.vsSpy >= 0 ? '+' : '') + r.vsSpy.toFixed(1)}%</td><td class="${statusCls}">${status}</td></tr>`;
+    }).join('');
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">F</span>Sector Rotation · YTD perf + vs SPY<span class="tag">LIVE · ${rows.length} sectors</span></div>
       <table class="qln-tbl">
-        <thead><tr><th>SECTOR</th><th>21d</th><th>STATUS</th></tr></thead>
-        <tbody>
-          <tr><td>XLF · Financial</td><td class="gn">+6.2%</td><td class="gn">LEADING</td></tr>
-          <tr><td>XLE · Energy</td><td class="gn">+4.8%</td><td class="gn">LEADING</td></tr>
-          <tr><td>XLV · Healthcare</td><td class="gn">+3.4%</td><td class="am">NEUTRAL</td></tr>
-          <tr><td>XLK · Tech</td><td class="rd">−2.4%</td><td class="rd">LAGGING</td></tr>
-          <tr class="subject"><td>XLY · CONS CYCL (subject)</td><td class="rd">−4.8%</td><td class="rd">LAGGING</td></tr>
-          <tr><td>XRT · Retail</td><td class="rd">−6.2%</td><td class="rd">DEEP LAG</td></tr>
-        </tbody>
+        <thead><tr><th>SECTOR</th><th>PERF</th><th>vs SPY</th><th>STATUS</th></tr></thead>
+        <tbody>${trs}</tbody>
       </table>
     </div>`;
   }
 
   function renderMacro_CrossLens(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">G</span>Cross-Lens · 5 disciplines<span class="tag">CROSS-CHECK</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell" style="border-top-color:#22D3EE"><div class="qln-ck">MACRO (LEAD)</div><div class="qln-cv" style="color:#22D3EE">WATCH</div><div class="qln-csub">choppy · 4 events ahead</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">VALUE</div><div class="qln-cv gn">CONSTRUCTIVE</div><div class="qln-csub">macro-resilient</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">SWING</div><div class="qln-cv rd">BEARISH</div><div class="qln-csub">aligned w/ macro caution</div></div>
-        <div class="qln-cell am"><div class="qln-ck">EARNINGS</div><div class="qln-cv am">NEUTRAL</div><div class="qln-csub">ER after macro events</div></div>
-        <div class="qln-cell am"><div class="qln-ck">RISK</div><div class="qln-cv am">SIZE-CAP</div><div class="qln-csub">3-5% in choppy</div></div>
-      </div>
-    </div>`;
+    return _qlnRenderCrossLens('G', 'Cross-Lens · 5 disciplines', t, 'CATALYST',
+      ['CATALYST', 'VALUE', 'SWING', 'EARNINGS', 'NEWS']);
   }
 
   function renderMacro_TheCall(t) {
@@ -36185,83 +36709,141 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     </div>`;
   }
 
+  // 2026-05-27 · News tab — wired to live t.news_articles[] data.
+  // Previously all 5 panels were hardcoded Ross Stores prototype prose.
+  // Helper to extract sentiment from EODHD/Polygon news article shape.
+  function _qlnArticleSent(a) {
+    const ins = Array.isArray(a && a.insights) ? a.insights[0] : null;
+    if (!ins) return { label: 'NEU', cls: 'am' };
+    const s = (ins.sentiment || '').toLowerCase();
+    if (s === 'positive' || s === 'bull') return { label: 'BULL', cls: 'gn' };
+    if (s === 'negative' || s === 'bear') return { label: 'BEAR', cls: 'rd' };
+    return { label: 'NEU', cls: 'am' };
+  }
+  function _qlnDaysAgo(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (isNaN(d)) return '—';
+    const diff = Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
+    return diff === 0 ? '−0d' : '−' + diff + 'd';
+  }
+  function _qlnPubName(a) {
+    const p = a && a.publisher;
+    const n = (p && typeof p === 'object') ? (p.name || '') : (typeof p === 'string' ? p : '');
+    if (n) return n;
+    const prov = (a && a._provider) || '';
+    return prov ? prov.toUpperCase() : 'NEWS';
+  }
+  function _qlnEmpty(title, msg, num) {
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">${num}</span>${title}<span class="tag">NO DATA</span></div>
+      <div style="padding:24px 16px;text-align:center;color:var(--ink-3,#686c68);font:500 12px var(--mono,ui-monospace,monospace);letter-spacing:0.04em">${msg}</div>
+    </div>`;
+  }
+
   function renderNews_Timeline(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">B</span>30-Day News Timeline<span class="tag">TIMELINE</span></div>
+    const articles = Array.isArray(t && t.news_articles) ? t.news_articles : [];
+    if (!articles.length) {
+      return _qlnEmpty('30-Day News Timeline', 'No news articles found for this ticker. Source: t.news_articles (EODHD/Polygon).', 'B');
+    }
+    // Sort by published_utc desc, take 10
+    const rows = articles.slice().sort((a, b) => {
+      const da = new Date(a.published_utc || a.published || 0).getTime();
+      const db = new Date(b.published_utc || b.published || 0).getTime();
+      return db - da;
+    }).slice(0, 10).map((a, i) => {
+      const sent = _qlnArticleSent(a);
+      const src  = _qlnPubName(a);
+      const day  = _qlnDaysAgo(a.published_utc || a.published);
+      const ttl  = (a.title || a.headline || '').toString();
+      const ttlEsc = ttl.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+      const isBreaking = i === 0 && (Math.abs(parseInt(day) || 99) <= 1);
+      const ttlOut = isBreaking ? '<b>BREAKING:</b> ' + ttlEsc : ttlEsc;
+      const url = a.url || a.article_url;
+      const linkOut = url ? `<a href="${url}" target="_blank" style="color:inherit;text-decoration:none">${ttlOut}</a>` : ttlOut;
+      // Impact heuristic: positive sentiment scoring + breaking flag
+      const pol = ((a.insights || [{}])[0].sentiment_reasoning || {}).polarity;
+      const impactCls = isBreaking || (pol && Math.abs(pol) > 0.8) ? 'rd' : 'am';
+      const impactTxt = isBreaking || (pol && Math.abs(pol) > 0.8) ? 'HIGH' : 'MED';
+      return `<tr><td>${day}</td><td>${src.slice(0, 8)}</td><td>${linkOut}</td><td class="${sent.cls}">${sent.label}</td><td class="${impactCls}">${impactTxt}</td></tr>`;
+    }).join('');
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">B</span>30-Day News Timeline<span class="tag">LIVE · ${articles.length} articles</span></div>
       <table class="qln-tbl">
         <thead><tr><th>DAY</th><th>SRC</th><th>HEADLINE</th><th>SENT</th><th>IMPACT</th></tr></thead>
-        <tbody>
-          <tr><td>−0d</td><td>EODHD</td><td><b>BREAKING:</b> Off-price retailers rally as Walmart cuts guidance</td><td class="gn">BULL</td><td class="rd">HIGH</td></tr>
-          <tr><td>−1d</td><td>BLMBG</td><td>MACD bear cross flagged · session capitulation on 2× RVOL</td><td class="rd">BEAR</td><td class="am">MED</td></tr>
-          <tr><td>−3d</td><td>WSJ</td><td>Ross Stores raises FY27 guidance on strong Q4 comp sales beat</td><td class="gn">BULL</td><td class="rd">HIGH</td></tr>
-          <tr><td>−5d</td><td>REUT</td><td>Off-price retailers gain share as consumers trade down</td><td class="gn">BULL</td><td class="am">MED</td></tr>
-          <tr><td>−7d</td><td>EDGAR</td><td><b>FORM 4:</b> CEO Barbara Rentler buys $4.2M ROST shares</td><td class="gn">BULL</td><td class="rd">HIGH</td></tr>
-          <tr><td>−9d</td><td>MS</td><td>Morgan Stanley raises ROST PT to $232 · Overweight</td><td class="gn">BULL</td><td class="am">MED</td></tr>
-          <tr><td>−12d</td><td>EDGAR</td><td>FORM 4: CFO buys $1.8M · directors cluster buying $3.4M</td><td class="gn">BULL</td><td class="rd">HIGH</td></tr>
-        </tbody>
+        <tbody>${rows}</tbody>
       </table>
     </div>`;
   }
 
   function renderNews_TopicClusters(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">C</span>Topic Clusters<span class="tag">TOPICS</span></div>
+    // 2026-05-27 · Bundle does not yet emit topic clusters; aggregate
+    // sentiment counts from articles instead so the panel has REAL meaning.
+    const articles = Array.isArray(t && t.news_articles) ? t.news_articles : [];
+    if (!articles.length) {
+      return _qlnEmpty('Sentiment Distribution', 'No articles to cluster. Wire t.news_clusters (NLP topic extraction) for theme buckets.', 'C');
+    }
+    const counts = { positive: 0, negative: 0, neutral: 0 };
+    let totalPolarity = 0, withPolarity = 0;
+    articles.forEach(a => {
+      const ins = Array.isArray(a.insights) ? a.insights[0] : null;
+      const s = ((ins && ins.sentiment) || 'neutral').toLowerCase();
+      if (counts[s] != null) counts[s]++;
+      const pol = ins && (ins.sentiment_reasoning || {}).polarity;
+      if (typeof pol === 'number') { totalPolarity += pol; withPolarity++; }
+    });
+    const avgPol = withPolarity ? (totalPolarity / withPolarity) : 0;
+    const trend = avgPol > 0.2 ? { lbl: 'BULL · avg +' + avgPol.toFixed(2), cls: 'gn' }
+                : avgPol < -0.2 ? { lbl: 'BEAR · avg ' + avgPol.toFixed(2), cls: 'rd' }
+                : { lbl: 'MIXED · avg ' + avgPol.toFixed(2), cls: 'am' };
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">C</span>Sentiment Distribution<span class="tag">LIVE</span></div>
       <div class="qln-g6">
-        <div class="qln-cell gn"><div class="qln-ck">INSIDER BUYS</div><div class="qln-cv gn">6</div><div class="qln-csub">CEO+CFO+dirs</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">ANALYST PT</div><div class="qln-cv gn">4</div><div class="qln-csub">11/14 raised</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">TRADE-DOWN</div><div class="qln-cv gn">5</div><div class="qln-csub">tailwind</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">ER BEAT</div><div class="qln-cv gn">3</div><div class="qln-csub">guidance up</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">TARIFFS</div><div class="qln-cv rd">2</div><div class="qln-csub">policy risk</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">TECH BEAR</div><div class="qln-cv rd">2</div><div class="qln-csub">technicals</div></div>
+        <div class="qln-cell gn"><div class="qln-ck">BULL</div><div class="qln-cv gn">${counts.positive}</div><div class="qln-csub">positive</div></div>
+        <div class="qln-cell rd"><div class="qln-ck">BEAR</div><div class="qln-cv rd">${counts.negative}</div><div class="qln-csub">negative</div></div>
+        <div class="qln-cell am"><div class="qln-ck">NEUTRAL</div><div class="qln-cv am">${counts.neutral}</div><div class="qln-csub">no signal</div></div>
+        <div class="qln-cell"><div class="qln-ck">TOTAL</div><div class="qln-cv">${articles.length}</div><div class="qln-csub">30d</div></div>
+        <div class="qln-cell ${trend.cls}"><div class="qln-ck">AVG POLARITY</div><div class="qln-cv ${trend.cls}">${avgPol.toFixed(2)}</div><div class="qln-csub">−1 to +1</div></div>
+        <div class="qln-cell ${trend.cls}"><div class="qln-ck">TREND</div><div class="qln-cv ${trend.cls}">${trend.lbl.split(' · ')[0]}</div><div class="qln-csub">${withPolarity}/${articles.length} scored</div></div>
       </div>
     </div>`;
   }
 
   function renderNews_SourceDistribution(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">D</span>Source Distribution · who's covering?<span class="tag">SOURCES</span></div>
-      <div class="qln-g6">
-        <div class="qln-cell"><div class="qln-ck">BLOOMBERG</div><div class="qln-cv">6</div><div class="qln-csub">primary</div></div>
-        <div class="qln-cell"><div class="qln-ck">WSJ</div><div class="qln-cv">4</div><div class="qln-csub">primary</div></div>
-        <div class="qln-cell"><div class="qln-ck">REUTERS</div><div class="qln-cv">3</div><div class="qln-csub">primary</div></div>
-        <div class="qln-cell"><div class="qln-ck">SEC EDGAR</div><div class="qln-cv">3</div><div class="qln-csub">filings</div></div>
-        <div class="qln-cell"><div class="qln-ck">MS / JPM</div><div class="qln-cv">3</div><div class="qln-csub">sell-side</div></div>
-        <div class="qln-cell"><div class="qln-ck">CNBC</div><div class="qln-cv">2</div><div class="qln-csub">general</div></div>
-      </div>
+    // 2026-05-27 · Aggregate publisher counts from real news_articles.
+    const articles = Array.isArray(t && t.news_articles) ? t.news_articles : [];
+    if (!articles.length) {
+      return _qlnEmpty("Source Distribution · who's covering?", 'No articles. Source: t.news_articles[].publisher.name', 'D');
+    }
+    const srcCounts = {};
+    articles.forEach(a => {
+      const p = _qlnPubName(a);
+      const key = (p || 'UNKNOWN').toUpperCase().slice(0, 16);
+      srcCounts[key] = (srcCounts[key] || 0) + 1;
+    });
+    const ranked = Object.entries(srcCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    if (!ranked.length) {
+      return _qlnEmpty("Source Distribution · who's covering?", 'Articles have no publisher metadata.', 'D');
+    }
+    const cells = ranked.map(([src, n]) =>
+      `<div class="qln-cell"><div class="qln-ck">${src}</div><div class="qln-cv">${n}</div><div class="qln-csub">${(n / articles.length * 100).toFixed(0)}% of feed</div></div>`
+    ).join('');
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">D</span>Source Distribution · who's covering?<span class="tag">LIVE</span></div>
+      <div class="qln-g6">${cells}</div>
     </div>`;
   }
 
   function renderNews_SearchTrends(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">E</span>Search Trends · Google overlay<span class="tag">SEARCH</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell"><div class="qln-ck">"ROST" 30d</div><div class="qln-cv">76</div><div class="qln-csub">indexed 0-100</div></div>
-        <div class="qln-cell am"><div class="qln-ck">"Ross Stores" 30d</div><div class="qln-cv am">84</div><div class="qln-csub">+12% vs avg</div></div>
-        <div class="qln-cell"><div class="qln-ck">SECTOR</div><div class="qln-cv">62</div><div class="qln-csub">off-price retail</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">SEARCH-PRICE β</div><div class="qln-cv gn">+0.41</div><div class="qln-csub">moderate predictive</div></div>
-        <div class="qln-cell"><div class="qln-ck">PEER · TJX</div><div class="qln-cv">92</div><div class="qln-csub">higher than ROST</div></div>
-      </div>
-    </div>`;
+    // 2026-05-27 · No Google Trends / search-volume data wired into the bundle.
+    // Surface honestly instead of pretending with fake +0.41 search-price β.
+    return _qlnEmpty('Search Trends · Google overlay', 'Search-volume data not wired into scan output. Requires Google Trends API or pytrends integration.', 'E');
   }
 
   function renderNews_EventWatch(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">F</span>Activist · M&amp;A · Litigation<span class="tag">EVENTS</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell gn"><div class="qln-ck">13D FILINGS</div><div class="qln-cv gn">0</div><div class="qln-csub">no campaign</div></div>
-        <div class="qln-cell"><div class="qln-ck">M&amp;A RUMOR</div><div class="qln-cv">NONE</div><div class="qln-csub">no chatter</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">SEC INVESTIG</div><div class="qln-cv gn">NONE</div><div class="qln-csub">clean filings</div></div>
-        <div class="qln-cell"><div class="qln-ck">CLASS ACTIONS</div><div class="qln-cv">2 routine</div><div class="qln-csub">wage/hour CA</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">CYBER INCID</div><div class="qln-cv gn">0 / 5y</div><div class="qln-csub">clean</div></div>
-      </div>
-    </div>`;
+    // 2026-05-27 · 13D / M&A / SEC / litigation feeds not in bundle. Honest empty state.
+    return _qlnEmpty('Activist · M&A · Litigation', 'Event feeds (13D/13G, M&A rumor, SEC investigations, class actions) not yet wired. Requires SEC EDGAR + court-filing integrations.', 'F');
   }
 
   function renderNews_CrossLens(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">G</span>Cross-Lens · 5 disciplines<span class="tag">CROSS-CHECK</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell" style="border-top-color:#F472B6"><div class="qln-ck">NEWS (LEAD)</div><div class="qln-cv" style="color:#F472B6">BULLISH</div><div class="qln-csub">+0.80 · insider cluster</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">VALUE</div><div class="qln-cv gn">CONSTRUCTIVE</div><div class="qln-csub">PT raises align</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">SWING</div><div class="qln-cv rd">BEARISH</div><div class="qln-csub">price decoupled</div></div>
-        <div class="qln-cell am"><div class="qln-ck">EARNINGS</div><div class="qln-cv am">NEUTRAL</div><div class="qln-csub">ER +44d positive</div></div>
-        <div class="qln-cell am"><div class="qln-ck">MACRO</div><div class="qln-cv am">MIXED</div><div class="qln-csub">trade-down vs tariff</div></div>
-      </div>
-    </div>`;
+    return _qlnRenderCrossLens('G', 'Cross-Lens · 5 disciplines', t, 'NEWS',
+      ['NEWS', 'VALUE', 'SWING', 'TECH', 'EARNINGS']);
   }
 
   function renderNews_TheCall(t) {
@@ -36318,97 +36900,208 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     ], 'insider', 2);
   }
 
+  // 2026-05-27 · Insider tab — Form 4 LIVE per-transaction from
+  // t.insider_transactions_detail[] (20 most recent, from EODHD InsiderTransactions).
+  // Falls back to aggregate summary when detail is empty (older bundle pre-Tier-2).
   function renderInsider_Form4(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">A</span>Insider Form 4 · 12 months<span class="tag">FORM 4</span></div>
-      <table class="qln-tbl">
-        <thead><tr><th>DATE</th><th>NAME</th><th>ROLE</th><th>ACTION</th><th>SHARES</th><th>PRICE</th><th>VALUE</th></tr></thead>
-        <tbody>
-          <tr><td>2026-05-08</td><td>A. Allred</td><td>CFO</td><td class="gn">BUY · open mkt</td><td>9,500</td><td>$190.40</td><td class="gn">$1.81M</td></tr>
-          <tr><td>2026-05-07</td><td>B. Rentler</td><td>CEO</td><td class="gn">BUY · open mkt</td><td>21,800</td><td>$192.10</td><td class="gn">$4.19M</td></tr>
-          <tr><td>2026-04-29</td><td>L. Renda</td><td>Director</td><td class="gn">BUY · open mkt</td><td>3,500</td><td>$201.20</td><td class="gn">$704K</td></tr>
-          <tr><td>2026-04-25</td><td>G. Edelstein</td><td>Director</td><td class="gn">BUY · open mkt</td><td>5,000</td><td>$203.40</td><td class="gn">$1.02M</td></tr>
-          <tr><td>2026-04-15</td><td>4 Directors</td><td>Board</td><td class="gn">CLUSTER BUY</td><td>11,200</td><td>$212.50</td><td class="gn">$2.38M</td></tr>
-          <tr><td>2026-03-15</td><td>14 Officers</td><td>Officers</td><td class="rd">RSU VEST-SELL</td><td>55,000</td><td>$219.40</td><td class="rd">$12.07M</td></tr>
-        </tbody>
-      </table>
-      <div class="qln-summary gn"><b>23 open-market BUYS · 0 SELLS in 90d.</b> CEO + CFO + 4 Directors clustered. RSU sells are routine, not signal.</div>
+    const detail = Array.isArray(t && t.insider_transactions_detail) ? t.insider_transactions_detail : [];
+    const ins = (t && t.insider_data) || {};
+    if (detail.length) {
+      // ── LIVE per-transaction table ──
+      const _codeMap = { P: { lbl: 'BUY · open mkt', cls: 'gn' }, S: { lbl: 'SELL · open mkt', cls: 'rd' },
+                         A: { lbl: 'AWARD/GRANT', cls: '' }, M: { lbl: 'OPTION EXERCISE', cls: '' },
+                         G: { lbl: 'GIFT', cls: '' }, F: { lbl: 'TAX WITHHOLDING', cls: '' },
+                         D: { lbl: 'DISPOSED · gift/other', cls: 'rd' }, X: { lbl: 'EXERCISE', cls: '' },
+                         C: { lbl: 'CONVERSION', cls: '' }, J: { lbl: 'OTHER', cls: '' } };
+      let nBuys = 0, nSells = 0, totalBuy$ = 0, totalSell$ = 0;
+      const rows = detail.slice(0, 12).map(d => {
+        const code = (d.transaction_code || '').toUpperCase();
+        const cm = _codeMap[code] || { lbl: 'CODE ' + code, cls: '' };
+        const shares = d.shares != null ? +d.shares : null;
+        const price = d.price != null ? +d.price : null;
+        const value = (shares != null && price != null) ? shares * price : null;
+        const isBuy = code === 'P' || (d.acq_disp === 'A' && code !== 'A');
+        const isSell = code === 'S';
+        if (isBuy && value) { nBuys++; totalBuy$ += value; }
+        if (isSell && value) { nSells++; totalSell$ += value; }
+        const _fmt$ = (v) => v == null ? '—' : v >= 1e6 ? '$' + (v/1e6).toFixed(2) + 'M' : v >= 1e3 ? '$' + (v/1e3).toFixed(0) + 'K' : '$' + v.toFixed(0);
+        const _fmtSh = (v) => v == null ? '—' : Math.round(v).toLocaleString();
+        return `<tr><td>${d.date || '—'}</td><td>${(d.owner_name || '—').slice(0, 28)}</td><td class="${cm.cls}">${cm.lbl}</td><td>${_fmtSh(shares)}</td><td>${price != null ? '$' + price.toFixed(2) : '—'}</td><td class="${cm.cls}">${_fmt$(value)}</td></tr>`;
+      }).join('');
+      const _fmt$ = (v) => v >= 1e6 ? '$' + (v/1e6).toFixed(2) + 'M' : v >= 1e3 ? '$' + (v/1e3).toFixed(0) + 'K' : '$' + v.toFixed(0);
+      return `<div class="qln-panel"><div class="qln-h2"><span class="num">A</span>Insider Form 4 · ${detail.length} recent<span class="tag">LIVE · EODHD</span></div>
+        <table class="qln-tbl">
+          <thead><tr><th>DATE</th><th>NAME</th><th>ACTION</th><th>SHARES</th><th>PRICE</th><th>VALUE</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="qln-summary"><b>${nBuys} buys · ${nSells} sells</b> in shown window · total bought ${totalBuy$ > 0 ? _fmt$(totalBuy$) : '$—'} · total sold ${totalSell$ > 0 ? _fmt$(totalSell$) : '$—'}. Showing top 12 of ${detail.length}; transactionAmount sometimes null in EODHD payload.</div>
+      </div>`;
+    }
+    // ── Fallback: aggregate summary (older bundles or thin coverage) ──
+    const buys  = +(ins.buys || 0);
+    const sells = +(ins.sells || 0);
+    const totalBuy = +(ins.total_buy_value || 0);
+    const maxSingle = +(ins.max_single_buy || 0);
+    const daysSince = ins.days_since_last;
+    const ceoBuy = ins.ceo_buy === true;
+    const cfoBuy = ins.cfo_buy === true;
+    const sentiment = (ins.sentiment || '').toLowerCase();
+    if (!buys && !sells) {
+      return `<div class="qln-panel"><div class="qln-h2"><span class="num">A</span>Insider Activity · 90 days<span class="tag">NO ACTIVITY</span></div>
+        <div style="padding:24px 16px;text-align:center;color:var(--ink-3,#686c68);font:500 12px var(--mono,ui-monospace,monospace)">No insider transactions for this ticker.</div>
+      </div>`;
+    }
+    const _fmt$ = (v) => v >= 1e6 ? '$' + (v/1e6).toFixed(2) + 'M' : v >= 1e3 ? '$' + (v/1e3).toFixed(0) + 'K' : '$' + v.toFixed(0);
+    const sentCls = sentiment === 'bullish' ? 'gn' : sentiment === 'bearish' ? 'rd' : 'am';
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">A</span>Insider Activity · 90 days<span class="tag">AGGREGATE (fallback)</span></div>
+      <div class="qln-g6">
+        <div class="qln-cell gn"><div class="qln-ck">BUYS</div><div class="qln-cv gn">${buys}</div><div class="qln-csub">transactions</div></div>
+        <div class="qln-cell ${sells > 0 ? 'rd' : 'gn'}"><div class="qln-ck">SELLS</div><div class="qln-cv ${sells > 0 ? 'rd' : 'gn'}">${sells}</div><div class="qln-csub">${sells > 0 ? 'incl RSU vest' : 'none'}</div></div>
+        <div class="qln-cell ${ceoBuy ? 'gn' : ''}"><div class="qln-ck">CEO BUY</div><div class="qln-cv ${ceoBuy ? 'gn' : ''}">${ceoBuy ? 'YES' : 'NO'}</div><div class="qln-csub">single strongest</div></div>
+        <div class="qln-cell ${cfoBuy ? 'gn' : ''}"><div class="qln-ck">CFO BUY</div><div class="qln-cv ${cfoBuy ? 'gn' : ''}">${cfoBuy ? 'YES' : 'NO'}</div><div class="qln-csub">second strongest</div></div>
+        <div class="qln-cell"><div class="qln-ck">TOTAL BUY $$</div><div class="qln-cv">${totalBuy > 0 ? _fmt$(totalBuy) : '—'}</div><div class="qln-csub">${maxSingle > 0 ? 'max ' + _fmt$(maxSingle) : ''}</div></div>
+        <div class="qln-cell ${sentCls}"><div class="qln-ck">SENTIMENT</div><div class="qln-cv ${sentCls}">${(sentiment || 'mixed').toUpperCase()}</div><div class="qln-csub">${daysSince != null ? daysSince + 'd since last' : ''}</div></div>
+      </div>
+      <div class="qln-summary">Per-transaction detail needs scan re-run after 2026-05-27 pipeline update.</div>
     </div>`;
   }
 
   function renderInsider_ClusterSignal(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">B</span>Cluster Signal Detection<span class="tag">CLUSTER</span></div>
+    const ins = (t && t.insider_data) || {};
+    const buys  = +(ins.buys || 0);
+    const sells = +(ins.sells || 0);
+    const totalBuy = +(ins.total_buy_value || 0);
+    const ceoBuy = ins.ceo_buy === true;
+    const cfoBuy = ins.cfo_buy === true;
+    const sentiment = (ins.sentiment || '').toLowerCase();
+    const daysSince = ins.days_since_last;
+    // Cluster strength heuristic: 3+ buys + (CEO or CFO) = STRONG; 3+ buys = MODERATE; 0 = NONE
+    const cluster = (buys >= 3 && (ceoBuy || cfoBuy)) ? { lbl: 'STRONG', cls: 'gn' }
+                  : buys >= 3 ? { lbl: 'MODERATE', cls: 'am' }
+                  : buys >= 1 ? { lbl: 'WEAK', cls: 'am' }
+                  : { lbl: 'NONE', cls: 'rd' };
+    const ratio = buys + sells > 0 ? (buys / (buys + sells) * 100).toFixed(0) + '% buy' : '—';
+    const _fmt$ = (v) => v >= 1e6 ? '$' + (v/1e6).toFixed(2) + 'M' : v >= 1e3 ? '$' + (v/1e3).toFixed(0) + 'K' : '$' + v.toFixed(0);
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">B</span>Cluster Signal Detection<span class="tag">DERIVED</span></div>
       <div class="qln-g4">
-        <div class="qln-cell gn"><div class="qln-ck">★ STATUS</div><div class="qln-cv gn">STRONG</div><div class="qln-csub">7 insiders · 23 tx · 25d window</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">CEO + CFO BUYING</div><div class="qln-cv gn">YES</div><div class="qln-csub">strongest possible signal</div></div>
-        <div class="qln-cell am"><div class="qln-ck">TOTAL $$</div><div class="qln-cv am">$11.36M</div><div class="qln-csub">vs 90d avg $2.1M · 5.4× elevated</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">HIST WIN RATE</div><div class="qln-cv gn">76%</div><div class="qln-csub">n=8 backtest · +18.4% avg 6mo · small sample, not a forecast</div></div>
+        <div class="qln-cell ${cluster.cls}"><div class="qln-ck">★ STATUS</div><div class="qln-cv ${cluster.cls}">${cluster.lbl}</div><div class="qln-csub">${buys} insiders · ${daysSince != null ? daysSince + 'd window' : 'no recency data'}</div></div>
+        <div class="qln-cell ${(ceoBuy || cfoBuy) ? 'gn' : ''}"><div class="qln-ck">CEO + CFO BUYING</div><div class="qln-cv ${(ceoBuy || cfoBuy) ? 'gn' : ''}">${ceoBuy && cfoBuy ? 'BOTH' : ceoBuy ? 'CEO' : cfoBuy ? 'CFO' : 'NO'}</div><div class="qln-csub">${ceoBuy && cfoBuy ? 'strongest possible' : ceoBuy || cfoBuy ? 'strong signal' : 'no C-suite'}</div></div>
+        <div class="qln-cell"><div class="qln-ck">TOTAL $$</div><div class="qln-cv">${totalBuy > 0 ? _fmt$(totalBuy) : '—'}</div><div class="qln-csub">${ratio} ratio</div></div>
+        <div class="qln-cell ${cluster.cls}"><div class="qln-ck">OVERALL SENT</div><div class="qln-cv ${cluster.cls}">${(sentiment || 'mixed').toUpperCase()}</div><div class="qln-csub">from t.insider_data.sentiment</div></div>
       </div>
     </div>`;
   }
 
   function renderInsider_Institutional(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">C</span>Top Institutional Holders · 13F<span class="tag">13F</span></div>
+    // 2026-05-27 · LIVE — top-20 institutional holders + top-20 mutual funds
+    // from t.holders (EODHD Holders section). Surfaces shares % of float +
+    // QoQ change per holder.
+    const h = (t && t.holders) || {};
+    const inst = Array.isArray(h.institutions) ? h.institutions : [];
+    const funds = Array.isArray(h.funds) ? h.funds : [];
+    if (!inst.length && !funds.length) {
+      const instPct = (t && t.extra_fund && t.extra_fund.institutional_pct) ?? (t && t.finnhub && t.finnhub.institutional_pct);
+      if (instPct == null) {
+        return `<div class="qln-panel"><div class="qln-h2"><span class="num">C</span>Institutional Ownership · 13F<span class="tag">NO DATA</span></div>
+          <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">No holder breakdown for this ticker. Re-run scan to populate t.holders from EODHD.</div>
+        </div>`;
+      }
+      const pct = typeof instPct === 'number' ? instPct : +instPct;
+      const cls = pct >= 70 ? 'gn' : pct >= 40 ? 'am' : 'rd';
+      return `<div class="qln-panel"><div class="qln-h2"><span class="num">C</span>Institutional Ownership · 13F aggregate<span class="tag">FALLBACK</span></div>
+        <div class="qln-g4">
+          <div class="qln-cell ${cls}"><div class="qln-ck">INST % OF FLOAT</div><div class="qln-cv ${cls}">${pct.toFixed(1)}%</div><div class="qln-csub">aggregate</div></div>
+        </div>
+        <div class="qln-summary">Per-holder detail needs scan re-run after 2026-05-27 pipeline update.</div>
+      </div>`;
+    }
+    const _fmtRow = (h, i) => {
+      const sh = h.shares_pct != null ? +h.shares_pct : null;
+      const chg = h.change_pct != null ? +h.change_pct : null;
+      const chgCls = chg == null ? '' : chg > 1 ? 'gn' : chg < -1 ? 'rd' : '';
+      const chgTxt = chg == null ? '—' : (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+      const sig = chg == null ? '—' : Math.abs(chg) > 10 ? (chg > 0 ? '★ +ADD' : '★ TRIM') : chg > 1 ? 'ADD' : chg < -1 ? 'REDUCE' : 'FLAT';
+      const sigCls = chg == null ? '' : Math.abs(chg) > 10 ? (chg > 0 ? 'gn' : 'rd') : chg > 1 ? 'gn' : chg < -1 ? 'rd' : '';
+      return `<tr><td>${i+1}</td><td>${(h.name || '—').slice(0, 35)}</td><td>${sh != null ? sh.toFixed(2) + '%' : '—'}</td><td class="${chgCls}">${chgTxt}</td><td class="${sigCls}">${sig}</td></tr>`;
+    };
+    const instRows = inst.slice(0, 10).map(_fmtRow).join('');
+    const fundRows = funds.slice(0, 5).map(_fmtRow).join('');
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">C</span>Top Institutional Holders · 13F + Funds<span class="tag">LIVE · EODHD</span></div>
       <table class="qln-tbl">
-        <thead><tr><th>RANK</th><th>HOLDER</th><th>%</th><th>Q-CHG</th><th>SIGNAL</th></tr></thead>
-        <tbody>
-          <tr><td>1</td><td>Vanguard</td><td>11.4%</td><td class="gn">+0.8%</td><td>ADD</td></tr>
-          <tr><td>2</td><td>BlackRock</td><td>8.7%</td><td class="gn">+1.4%</td><td>ADD</td></tr>
-          <tr><td>3</td><td>State Street</td><td>5.2%</td><td>+0.0%</td><td>FLAT</td></tr>
-          <tr><td>4</td><td>Capital Research</td><td>3.8%</td><td class="gn">+12.4%</td><td>+ADD</td></tr>
-          <tr><td>5</td><td>Fidelity</td><td>2.9%</td><td class="gn">+5.2%</td><td>ADD</td></tr>
-          <tr><td>10</td><td><b style="color:var(--lead)">Berkshire (Buffett)</b></td><td>0.8%</td><td class="gn">NEW</td><td>★ NEW POS</td></tr>
-        </tbody>
+        <thead><tr><th>RANK</th><th>HOLDER · INSTITUTIONAL</th><th>%</th><th>QoQ Δ</th><th>SIGNAL</th></tr></thead>
+        <tbody>${instRows}</tbody>
       </table>
-      <div class="qln-summary gn"><b>Top-10 13F net BUYING.</b> ★ Berkshire NEW position 2.0M sh Q1 = headline · Buffett quality + value framework fit.</div>
+      ${fundRows ? `<div style="margin:10px 0 4px;font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:0.14em;text-transform:uppercase">TOP MUTUAL FUNDS</div>
+      <table class="qln-tbl">
+        <thead><tr><th>RANK</th><th>FUND</th><th>%</th><th>QoQ Δ</th><th>SIGNAL</th></tr></thead>
+        <tbody>${fundRows}</tbody>
+      </table>` : ''}
+      <div class="qln-summary"><b>${inst.length} institutional + ${funds.length} fund holders</b> tracked. Source: EODHD Holders payload.</div>
     </div>`;
   }
 
   function renderInsider_ShortInterest(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">D</span>Short Interest &amp; Squeeze Risk<span class="tag">SHORTS</span></div>
+    // 2026-05-27 · Wire to real short_float / short_ratio from Finviz Elite.
+    const ef = (t && t.extra_fund) || {};
+    const fv = (t && t.finviz) || {};
+    const sqz = (t && t.squeeze_flag) || {};
+    const sFloat = ef.short_float_finviz ?? fv.short_float_pct ?? sqz.short_float_pct;
+    const sRatio = ef.short_ratio_finviz ?? fv.short_ratio ?? sqz.short_ratio;
+    if (sFloat == null && sRatio == null) {
+      return `<div class="qln-panel"><div class="qln-h2"><span class="num">D</span>Short Interest &amp; Squeeze Risk<span class="tag">NO DATA</span></div>
+        <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">Short-float data not present. Source: Finviz Elite extra_fund.short_float_finviz.</div>
+      </div>`;
+    }
+    const sf = sFloat != null ? +sFloat : null;
+    const sr = sRatio != null ? +sRatio : null;
+    const sqzLevel = (sqz.level || '').toLowerCase();
+    const sqzCls = sqzLevel === 'high' ? 'rd' : sqzLevel === 'moderate' ? 'am' : sqzLevel === 'low' ? 'am' : 'gn';
+    const sqzLbl = sqzLevel ? sqzLevel.toUpperCase() : (sf != null && sf < 10 ? 'LOW' : sf != null && sf < 20 ? 'MOD' : sf != null ? 'HIGH' : '—');
+    const sfCls = sf == null ? '' : sf < 5 ? 'gn' : sf < 15 ? 'am' : 'rd';
+    const srCls = sr == null ? '' : sr < 3 ? 'gn' : sr < 7 ? 'am' : 'rd';
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">D</span>Short Interest &amp; Squeeze Risk<span class="tag">LIVE · FINVIZ</span></div>
       <div class="qln-g5">
-        <div class="qln-cell gn"><div class="qln-ck">SHORT % FLOAT</div><div class="qln-cv gn">4.8%</div><div class="qln-csub">low · normal range</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">DAYS TO COVER</div><div class="qln-cv gn">3.1</div><div class="qln-csub">easy unwind</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">BORROW RATE</div><div class="qln-cv gn">0.40%</div><div class="qln-csub">cheap · available</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">BORROW UTIL</div><div class="qln-cv gn">14%</div><div class="qln-csub">low · capacity ample</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">SQUEEZE RISK</div><div class="qln-cv gn">LOW</div><div class="qln-csub">no fuel</div></div>
+        <div class="qln-cell ${sfCls}"><div class="qln-ck">SHORT % FLOAT</div><div class="qln-cv ${sfCls}">${sf != null ? sf.toFixed(1) + '%' : '—'}</div><div class="qln-csub">${sf != null && sf < 5 ? 'low · normal' : sf != null && sf < 15 ? 'elevated' : sf != null ? 'crowded short' : '—'}</div></div>
+        <div class="qln-cell ${srCls}"><div class="qln-ck">DAYS TO COVER</div><div class="qln-cv ${srCls}">${sr != null ? sr.toFixed(1) : '—'}</div><div class="qln-csub">${sr != null && sr < 3 ? 'easy unwind' : sr != null && sr < 7 ? 'moderate' : sr != null ? 'tight' : '—'}</div></div>
+        <div class="qln-cell"><div class="qln-ck">BORROW RATE</div><div class="qln-cv">—</div><div class="qln-csub">not in bundle</div></div>
+        <div class="qln-cell"><div class="qln-ck">BORROW UTIL</div><div class="qln-cv">—</div><div class="qln-csub">not in bundle</div></div>
+        <div class="qln-cell ${sqzCls}"><div class="qln-ck">SQUEEZE FLAG</div><div class="qln-cv ${sqzCls}">${sqzLbl}</div><div class="qln-csub">${sqz.score != null ? 'score ' + sqz.score : 'derived'}</div></div>
       </div>
     </div>`;
   }
 
   function renderInsider_ActivistWatch(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">E</span>Activist Watch · 13D/G + Form 144<span class="tag">ACTIVIST</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell"><div class="qln-ck">13D FILINGS</div><div class="qln-cv">0</div><div class="qln-csub">no campaign</div></div>
-        <div class="qln-cell"><div class="qln-ck">13G FILINGS</div><div class="qln-cv">3</div><div class="qln-csub">passive ≥5%</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">FORM 144 PENDING</div><div class="qln-cv gn">$1.2M</div><div class="qln-csub">routine 10b5-1 only</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">CEO PENDING</div><div class="qln-cv gn">NONE</div><div class="qln-csub">not selling</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">CFO PENDING</div><div class="qln-cv gn">NONE</div><div class="qln-csub">just BOUGHT</div></div>
-      </div>
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">E</span>Activist Watch · 13D/G + Form 144<span class="tag">NO DATA</span></div>
+      <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">Activist filings (13D/13G) and pending Form 144 not yet wired into bundle. Requires SEC EDGAR integration.</div>
     </div>`;
   }
 
   function renderInsider_SocialCrowding(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">F</span>Social Crowding<span class="tag">RETAIL</span></div>
+    // 2026-05-27 · Wire to t.reddit_wsb / t.stocktwits if present.
+    const wsb = (t && t.reddit_wsb) || {};
+    const st  = (t && t.stocktwits) || {};
+    const wsbN = wsb.mention_count_7d ?? wsb.mentions ?? null;
+    const stN  = st.message_count ?? st.messages ?? null;
+    const stBull = st.bullish_pct ?? st.sentiment_bullish_pct ?? null;
+    if (wsbN == null && stN == null) {
+      return `<div class="qln-panel"><div class="qln-h2"><span class="num">F</span>Social Crowding<span class="tag">NO DATA</span></div>
+        <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">WSB / StockTwits feeds not present. Source: t.reddit_wsb, t.stocktwits.</div>
+      </div>`;
+    }
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">F</span>Social Crowding<span class="tag">LIVE</span></div>
       <div class="qln-g5">
-        <div class="qln-cell"><div class="qln-ck">WSB 7d</div><div class="qln-cv">12</div><div class="qln-csub">+50% vs avg</div></div>
-        <div class="qln-cell"><div class="qln-ck">REDDIT</div><div class="qln-cv">38</div><div class="qln-csub">moderate</div></div>
-        <div class="qln-cell"><div class="qln-ck">STOCKTWITS</div><div class="qln-cv">156</div><div class="qln-csub">below sector avg</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">RETAIL BULL %</div><div class="qln-cv gn">60%</div><div class="qln-csub">moderately bullish</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">CROWDING</div><div class="qln-cv gn">LOW</div><div class="qln-csub">not WSB-favorite</div></div>
+        <div class="qln-cell"><div class="qln-ck">WSB 7d mentions</div><div class="qln-cv">${wsbN != null ? wsbN : '—'}</div><div class="qln-csub">${wsbN != null ? 'reddit scrape' : 'not wired'}</div></div>
+        <div class="qln-cell"><div class="qln-ck">STOCKTWITS</div><div class="qln-cv">${stN != null ? stN : '—'}</div><div class="qln-csub">${stN != null ? 'messages' : 'not wired'}</div></div>
+        <div class="qln-cell ${stBull != null && stBull > 60 ? 'gn' : stBull != null && stBull < 40 ? 'rd' : ''}"><div class="qln-ck">RETAIL BULL %</div><div class="qln-cv">${stBull != null ? stBull.toFixed(0) + '%' : '—'}</div><div class="qln-csub">${stBull != null ? 'stocktwits sentiment' : 'not wired'}</div></div>
+        <div class="qln-cell"><div class="qln-ck">CROWDING TIER</div><div class="qln-cv">${wsbN != null && wsbN > 50 ? 'HIGH' : wsbN != null && wsbN > 10 ? 'MOD' : wsbN != null ? 'LOW' : '—'}</div><div class="qln-csub">${wsbN != null && wsbN > 50 ? 'WSB favorite · fade' : 'derived from WSB'}</div></div>
+        <div class="qln-cell"><div class="qln-ck">REDDIT (non-WSB)</div><div class="qln-cv">—</div><div class="qln-csub">not in bundle</div></div>
       </div>
     </div>`;
   }
 
   function renderInsider_CrossLens(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">G</span>Cross-Lens · 5 disciplines<span class="tag">CROSS-CHECK</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell" style="border-top-color:#A78BFA"><div class="qln-ck">INSIDER (LEAD)</div><div class="qln-cv" style="color:#A78BFA">BULLISH CLUSTER</div><div class="qln-csub">cluster · CEO · Berkshire NEW</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">VALUE</div><div class="qln-cv gn">CONSTRUCTIVE</div><div class="qln-csub">Buffett quality at MoS</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">SWING</div><div class="qln-cv rd">BEARISH</div><div class="qln-csub">technical · decoupled</div></div>
-        <div class="qln-cell am"><div class="qln-ck">EARNINGS</div><div class="qln-cv am">NEUTRAL</div><div class="qln-csub">ESP +1.2 · ER +44d</div></div>
-        <div class="qln-cell am"><div class="qln-ck">MACRO</div><div class="qln-cv am">MIXED</div><div class="qln-csub">trade-down · rotation</div></div>
-      </div>
-    </div>`;
+    return _qlnRenderCrossLens('G', 'Cross-Lens · 5 disciplines', t, 'SMART',
+      ['SMART', 'VALUE', 'SWING', 'EARNINGS', 'NEWS']);
   }
 
   function renderInsider_TheCall(t) {
@@ -36474,104 +37167,254 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     ], 'peer', 1);
   }
 
-  function renderPeer_CohortTable(t) {
-    const tk = String(t.ticker||'').toUpperCase();
-    const ind = _qlnEsc(t.industry || 'Industry');
+  // 2026-05-27 · Peer panels now LIVE — derived client-side from
+  // window._kairosData.all_scored filtered by same industry (or sector
+  // fallback). All 5 panels (cohort, rank, RS, sympathy, calendar) compute
+  // from the existing universe; no backend changes needed.
+  function _qlnPeerEmpty(num, title, msg) {
     return `<div class="qln-panel">
-      <div class="qln-h2"><span class="num">A</span>Cohort Table · ${ind}<span class="sub">— same industry · ranked on composite</span><span class="tag">COHORT</span></div>
+      <div class="qln-h2"><span class="num">${num}</span>${title}<span class="tag">NO DATA</span></div>
+      <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">${msg}</div>
+    </div>`;
+  }
+  // Build a same-industry cohort from the scan output, sorted by mcap desc.
+  // Falls back to sector if industry yields <3 peers.
+  function _qlnPeerCohort(t) {
+    const arr = (window._kairosData && Array.isArray(window._kairosData.all_scored)) ? window._kairosData.all_scored : [];
+    if (!arr.length || !t) return [];
+    const tkInd = (t.industry || '').toString();
+    const tkSec = (t.sector || '').toString();
+    let cohort = arr.filter(x => x && x.industry && x.industry === tkInd);
+    if (cohort.length < 3 && tkSec) {
+      cohort = arr.filter(x => x && x.sector && x.sector === tkSec);
+    }
+    // Sort by market cap descending
+    cohort.sort((a, b) => (+b.market_cap || 0) - (+a.market_cap || 0));
+    return cohort.slice(0, 12); // cap at 12 peers
+  }
+  // Pearson correlation between two equal-length numeric arrays
+  function _qlnPearson(a, b) {
+    if (!a || !b || a.length !== b.length || a.length < 5) return null;
+    const n = a.length;
+    let sa = 0, sb = 0;
+    for (let i = 0; i < n; i++) { sa += a[i]; sb += b[i]; }
+    const ma = sa / n, mb = sb / n;
+    let num = 0, da = 0, db = 0;
+    for (let i = 0; i < n; i++) {
+      const xa = a[i] - ma, xb = b[i] - mb;
+      num += xa * xb; da += xa * xa; db += xb * xb;
+    }
+    if (da === 0 || db === 0) return null;
+    return num / Math.sqrt(da * db);
+  }
+  // Daily returns from bars_daily series of {close} bars
+  function _qlnReturns(bars) {
+    if (!Array.isArray(bars) || bars.length < 2) return [];
+    const r = [];
+    for (let i = 1; i < bars.length; i++) {
+      const p0 = +bars[i-1].close, p1 = +bars[i].close;
+      if (p0 > 0 && p1 > 0) r.push((p1 - p0) / p0);
+    }
+    return r;
+  }
+
+  function renderPeer_CohortTable(t) {
+    const cohort = _qlnPeerCohort(t);
+    const tk = String(t.ticker || '').toUpperCase();
+    const ind = _qlnEsc(t.industry || t.sector || 'Universe');
+    if (cohort.length < 2) {
+      return _qlnPeerEmpty('A', `Cohort Table · ${ind}`,
+        `Only ${cohort.length} ticker in ${ind} cohort within scan universe. Peer comparison needs ≥2.`);
+    }
+    const _fmt$ = (v) => v >= 1e12 ? '$' + (v/1e12).toFixed(2) + 'T' : v >= 1e9 ? '$' + (v/1e9).toFixed(1) + 'B' : v >= 1e6 ? '$' + (v/1e6).toFixed(0) + 'M' : '$' + v.toFixed(0);
+    const _fmtX = (v) => v == null || !isFinite(v) ? '—' : v.toFixed(1) + '×';
+    const _fmtPct = (v) => v == null || !isFinite(v) ? '—' : (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%';
+    // Composite: equal-weighted (rs_rank/100, sharpe_126d/3, roe, 1-ps_ratio/50). 0-100.
+    const _composite = (x) => {
+      const rs = (+x.rs_rank || 50) / 100;
+      const sh = Math.max(-1, Math.min(1, (+x.sharpe_126d || 0) / 3));
+      const ef = x.extra_fund || {};
+      const roe = Math.max(-1, Math.min(1, (+ef.roe || 0)));
+      const ps = +ef.ps_ratio || 50;
+      const psScore = Math.max(0, Math.min(1, 1 - ps / 50));
+      return Math.round((rs * 0.30 + (sh + 1) / 2 * 0.30 + roe * 0.20 + psScore * 0.20) * 100);
+    };
+    const peers = cohort.map(x => ({ x, comp: _composite(x) })).sort((a, b) => b.comp - a.comp);
+    const ownRank = peers.findIndex(p => p.x.ticker === t.ticker) + 1;
+    const rows = peers.map((p, i) => {
+      const x = p.x;
+      const ef = x.extra_fund || {};
+      const isSelf = x.ticker === t.ticker;
+      const compCls = p.comp >= 70 ? 'gn' : p.comp >= 50 ? 'am' : 'rd';
+      return `<tr class="${isSelf ? 'subject' : ''}"><td>${isSelf ? '★ ' : ''}${i+1}</td><td><b>${_qlnEsc(x.ticker)}</b></td><td>${_fmt$(+x.market_cap || 0)}</td><td>${_fmtX(+ef.ps_ratio)}</td><td>${_fmtX(+ef.ev_ebitda)}</td><td class="${(+ef.roe || 0) > 0.15 ? 'gn' : (+ef.roe || 0) > 0.05 ? 'am' : 'rd'}">${_fmtPct(+ef.roe)}</td><td class="${(+x.rs_rank || 0) >= 70 ? 'gn' : (+x.rs_rank || 0) >= 40 ? 'am' : 'rd'}">${(+x.rs_rank || 0).toFixed(0)}</td><td class="${(+x.sharpe_126d || 0) >= 1 ? 'gn' : (+x.sharpe_126d || 0) >= 0 ? 'am' : 'rd'}">${(+x.sharpe_126d || 0).toFixed(2)}</td><td class="${compCls}">${p.comp}</td></tr>`;
+    }).join('');
+    return `<div class="qln-panel">
+      <div class="qln-h2"><span class="num">A</span>Cohort Table · ${ind}<span class="sub">— same industry · ranked on composite (RS · Sharpe · ROE · P/S)</span><span class="tag">LIVE · ${peers.length} peers</span></div>
       <table class="qln-tbl">
-        <thead><tr><th>RANK</th><th>TICKER</th><th>MCAP</th><th>P/E FWD</th><th>PEG</th><th>ROIC</th><th>RS 3M</th><th>YTD</th><th>COMPOSITE</th></tr></thead>
-        <tbody>
-          <tr><td>1</td><td>TJX</td><td>$135B</td><td>23.8×</td><td>2.10</td><td class="gn">25.4%</td><td class="gn">+12.4%</td><td class="gn">+8.7%</td><td class="gn">88</td></tr>
-          <tr class="subject"><td>★ 2</td><td><b>${_qlnEsc(tk)}</b></td><td>$71B</td><td>16.5×</td><td>${t.peg?(+t.peg).toFixed(2):'1.65'}</td><td class="gn">27.3%</td><td class="am">+5.1%</td><td class="am">+2.4%</td><td class="gn">85</td></tr>
-          <tr><td>3</td><td>BURL</td><td>$18B</td><td>26.4×</td><td>1.85</td><td class="am">18.2%</td><td class="gn">+14.1%</td><td class="gn">+12.8%</td><td class="am">76</td></tr>
-          <tr><td>4</td><td>FIVE</td><td>$5.2B</td><td>21.0×</td><td>1.92</td><td class="am">19.4%</td><td class="am">+3.2%</td><td class="am">−1.4%</td><td class="am">72</td></tr>
-          <tr><td>5</td><td>OLLI</td><td>$5.8B</td><td>23.2×</td><td>2.05</td><td class="am">16.8%</td><td class="am">+2.0%</td><td class="rd">−4.2%</td><td class="am">68</td></tr>
-          <tr><td>6</td><td>DG</td><td>$28B</td><td>15.4×</td><td>1.38</td><td class="am">14.5%</td><td class="rd">−8.4%</td><td class="rd">−12.6%</td><td class="rd">54</td></tr>
-          <tr><td>7</td><td>DLTR</td><td>$15B</td><td>14.8×</td><td>2.42</td><td class="rd">11.2%</td><td class="rd">−10.8%</td><td class="rd">−18.2%</td><td class="rd">48</td></tr>
-          <tr><td>8</td><td>BIG</td><td>$0.8B</td><td>—</td><td>—</td><td class="rd">−4.1%</td><td class="rd">−42.6%</td><td class="rd">−68.4%</td><td class="rd">22</td></tr>
-        </tbody>
+        <thead><tr><th>RANK</th><th>TICKER</th><th>MCAP</th><th>P/S</th><th>EV/EBITDA</th><th>ROE</th><th>RS</th><th>SHARPE 126D</th><th>COMPOSITE</th></tr></thead>
+        <tbody>${rows}</tbody>
       </table>
-      <div class="qln-summary gn"><b>${_qlnEsc(tk)} ranks #2 of 8</b> on cohort composite. Behind TJX (scale advantage), ahead of BURL/FIVE/OLLI. Bottom quartile (DG/DLTR/BIG) is the broken-thesis tier.</div>
+      <div class="qln-summary"><b>${_qlnEsc(tk)} ranks #${ownRank} of ${peers.length}</b> on composite. Source: window._kairosData.all_scored filtered by industry.</div>
     </div>`;
   }
 
   function renderPeer_RankByMetric(t) {
+    const cohort = _qlnPeerCohort(t);
+    if (cohort.length < 2) {
+      return _qlnPeerEmpty('B', 'Rank by Metric', `Cohort too small (${cohort.length}). Need ≥2 peers.`);
+    }
+    const _rankSelf = (key, getter, higherBetter) => {
+      const vals = cohort.map(x => ({ tk: x.ticker, v: getter(x) }))
+        .filter(o => o.v != null && isFinite(o.v))
+        .sort((a, b) => higherBetter ? b.v - a.v : a.v - b.v);
+      const idx = vals.findIndex(o => o.tk === t.ticker);
+      return { rank: idx + 1, total: vals.length, val: idx >= 0 ? vals[idx].v : null, leader: vals[0] };
+    };
+    const metrics = [
+      { lbl: 'MARKET CAP', r: _rankSelf('mcap', x => +x.market_cap || 0, true),                       fmt: v => v >= 1e9 ? '$' + (v/1e9).toFixed(0) + 'B' : '$' + (v/1e6).toFixed(0) + 'M' },
+      { lbl: 'ROE',        r: _rankSelf('roe',  x => +(x.extra_fund || {}).roe,            true),     fmt: v => (v * 100).toFixed(1) + '%' },
+      { lbl: 'GROSS MARGIN', r: _rankSelf('gm', x => +(x.extra_fund || {}).gross_margin, true),       fmt: v => (v * 100).toFixed(1) + '%' },
+      { lbl: 'P/S (cheaper)', r: _rankSelf('ps', x => +(x.extra_fund || {}).ps_ratio,    false),      fmt: v => v.toFixed(1) + '×' },
+      { lbl: 'EV/EBITDA',  r: _rankSelf('ev',  x => +(x.extra_fund || {}).ev_ebitda,   false),        fmt: v => v.toFixed(1) + '×' },
+      { lbl: 'RS RANK',    r: _rankSelf('rs',  x => +x.rs_rank,                          true),       fmt: v => v.toFixed(0) },
+      { lbl: 'SHARPE 126D', r: _rankSelf('sh', x => +x.sharpe_126d,                       true),      fmt: v => v.toFixed(2) },
+      { lbl: 'PERF 1D',    r: _rankSelf('p1', x => +x.perf_1d,                            true),      fmt: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%' },
+    ];
+    const cells = metrics.map(m => {
+      const cls = m.r.rank <= Math.ceil(m.r.total / 4) ? 'gn' : m.r.rank <= Math.ceil(m.r.total * 0.6) ? 'am' : 'rd';
+      const valTxt = m.r.val != null ? m.fmt(m.r.val) : '—';
+      const leaderTxt = m.r.leader ? `${m.r.leader.tk} ${m.fmt(m.r.leader.v)}` : '—';
+      return `<div class="qln-cell ${cls}"><div class="qln-ck">${m.lbl}</div><div class="qln-cv ${cls}">#${m.r.rank} / ${m.r.total}</div><div class="qln-csub">${valTxt} · leader ${leaderTxt}</div></div>`;
+    }).join('');
     return `<div class="qln-panel">
-      <div class="qln-h2"><span class="num">B</span>Rank by Metric · where this lands on each dimension<span class="tag">RANK</span></div>
-      <div class="qln-g4">
-        <div class="qln-cell gn"><div class="qln-ck">ROIC</div><div class="qln-cv gn">#1 / 8</div><div class="qln-csub">27.3% · best capital efficiency</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">FCF MARGIN</div><div class="qln-cv gn">#2 / 8</div><div class="qln-csub">11.4% · TJX leads at 12.8%</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">DIV STREAK</div><div class="qln-cv gn">#1 / 8</div><div class="qln-csub">30 yrs · longest in cohort</div></div>
-        <div class="qln-cell am"><div class="qln-ck">VALUATION</div><div class="qln-cv am">#3 / 8</div><div class="qln-csub">P/E 16.5× · DG cheapest 15.4×</div></div>
-        <div class="qln-cell am"><div class="qln-ck">3M MOMENTUM</div><div class="qln-cv am">#4 / 8</div><div class="qln-csub">+5.1% · BURL leads +14.1%</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">REVENUE GROWTH</div><div class="qln-cv gn">#2 / 8</div><div class="qln-csub">+6.8% · BURL leads +12.4%</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">BALANCE SHEET</div><div class="qln-cv gn">#1 / 8</div><div class="qln-csub">Net cash · only one in cohort</div></div>
-        <div class="qln-cell am"><div class="qln-ck">SHORT INTEREST</div><div class="qln-cv am">#3 / 8</div><div class="qln-csub">${t.short_pct?(+t.short_pct).toFixed(1):'4.8'}% · TJX lowest 3.2%</div></div>
-      </div>
-      <div class="qln-summary gn"><b>Wins ROIC, balance sheet, dividend.</b> Loses on momentum and outright valuation cheapness. The best-quality name, not the cheapest.</div>
+      <div class="qln-h2"><span class="num">B</span>Rank by Metric · vs ${cohort.length} cohort peers<span class="tag">LIVE</span></div>
+      <div class="qln-g4">${cells}</div>
     </div>`;
   }
 
   function renderPeer_RelativeStrength(t) {
-    const tk = String(t.ticker||'').toUpperCase();
+    const cohort = _qlnPeerCohort(t);
+    const tk = String(t.ticker || '').toUpperCase();
+    if (cohort.length < 2) {
+      return _qlnPeerEmpty('C', `Relative Strength vs cohort`, `Only ${cohort.length} ticker in cohort. Need ≥2 for RS comparison.`);
+    }
+    // Compute 60d return for each cohort peer
+    const ret60 = (bars) => {
+      if (!Array.isArray(bars) || bars.length < 2) return null;
+      const last = +bars[bars.length - 1].close;
+      const first = +bars[0].close;
+      if (!(last > 0 && first > 0)) return null;
+      return (last - first) / first * 100;
+    };
+    const ownRet = ret60(((t.smc_data || {}).bars_daily) || []);
+    if (ownRet == null) {
+      return _qlnPeerEmpty('C', `Relative Strength vs cohort`, 'Own ticker has no bars_daily history.');
+    }
+    const peers = cohort.filter(x => x.ticker !== t.ticker).map(x => {
+      const r = ret60(((x.smc_data || {}).bars_daily) || []);
+      return { tk: x.ticker, r, diff: r == null ? null : ownRet - r };
+    }).filter(o => o.diff != null).sort((a, b) => b.diff - a.diff).slice(0, 5);
+    if (!peers.length) {
+      return _qlnPeerEmpty('C', `Relative Strength vs cohort`, 'No cohort peers have bars_daily history.');
+    }
+    const cells = peers.map(p => {
+      const cls = p.diff > 5 ? 'gn' : p.diff > -5 ? 'am' : 'rd';
+      const sub = p.diff > 0 ? 'outperforming' : 'underperforming';
+      return `<div class="qln-cell ${cls}"><div class="qln-ck">vs ${_qlnEsc(p.tk)}</div><div class="qln-cv ${cls}">${(p.diff >= 0 ? '+' : '') + p.diff.toFixed(1)}%</div><div class="qln-csub">${sub} · peer ${(p.r >= 0 ? '+' : '') + p.r.toFixed(1)}%</div></div>`;
+    }).join('');
     return `<div class="qln-panel">
-      <div class="qln-h2"><span class="num">C</span>Relative Strength · ${_qlnEsc(tk)} vs cohort · 1y<span class="tag">RS</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell gn"><div class="qln-ck">vs TJX</div><div class="qln-cv gn">+2.4%</div><div class="qln-csub">leader within reach</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">vs BURL</div><div class="qln-cv gn">+8.2%</div><div class="qln-csub">outperforms growthier peer</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">vs FIVE</div><div class="qln-cv gn">+12.4%</div><div class="qln-csub">solid lead</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">vs XLY (Cons Cyc)</div><div class="qln-cv gn">+18.6%</div><div class="qln-csub">crushes sector</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">vs XRT (Retail)</div><div class="qln-cv gn">+24.4%</div><div class="qln-csub">vs broad retail</div></div>
-      </div>
+      <div class="qln-h2"><span class="num">C</span>Relative Strength · ${_qlnEsc(tk)} vs cohort · 60d<span class="tag">LIVE · ${peers.length + 1} peers</span></div>
+      <div class="qln-g5">${cells}</div>
+      <div class="qln-summary">Own 60d return: <b class="${ownRet > 0 ? 'gn' : 'rd'}">${(ownRet >= 0 ? '+' : '') + ownRet.toFixed(1)}%</b></div>
     </div>`;
   }
 
   function renderPeer_Sympathy(t) {
+    const cohort = _qlnPeerCohort(t);
+    if (cohort.length < 2) {
+      return _qlnPeerEmpty('D', 'Sympathy Correlation · 60d daily returns', `Only ${cohort.length} ticker in cohort.`);
+    }
+    const ownReturns = _qlnReturns((t.smc_data || {}).bars_daily || []);
+    if (ownReturns.length < 10) {
+      return _qlnPeerEmpty('D', 'Sympathy Correlation · 60d daily returns', 'Own ticker has insufficient price history.');
+    }
+    const peers = cohort.filter(x => x.ticker !== t.ticker).map(x => {
+      const r = _qlnReturns((x.smc_data || {}).bars_daily || []);
+      if (r.length < 10) return null;
+      // Align lengths
+      const n = Math.min(ownReturns.length, r.length);
+      const corr = _qlnPearson(ownReturns.slice(-n), r.slice(-n));
+      const beta = +x.beta || 1.0;
+      return { tk: x.ticker, name: x.name || x.ticker, corr, beta };
+    }).filter(p => p && p.corr != null).sort((a, b) => Math.abs(b.corr) - Math.abs(a.corr)).slice(0, 8);
+    if (!peers.length) {
+      return _qlnPeerEmpty('D', 'Sympathy Correlation · 60d daily returns', 'No peer pairs computable.');
+    }
+    const rows = peers.map(p => {
+      const corrCls = Math.abs(p.corr) > 0.7 ? 'rd' : Math.abs(p.corr) > 0.4 ? 'am' : 'gn';
+      const read = Math.abs(p.corr) > 0.7 ? 'high · direct read-through'
+                 : Math.abs(p.corr) > 0.4 ? 'med · partial signal'
+                 : 'low · independent moves';
+      return `<tr><td><b>${_qlnEsc(p.tk)}</b></td><td class="${corrCls}">${p.corr.toFixed(2)}</td><td>${p.beta.toFixed(2)}</td><td>${read}</td></tr>`;
+    }).join('');
     return `<div class="qln-panel">
-      <div class="qln-h2"><span class="num">D</span>Sympathy Correlation · 1y daily<span class="sub">— what moves with this · risk to monitor</span><span class="tag">PAIRS</span></div>
+      <div class="qln-h2"><span class="num">D</span>Sympathy Correlation · 60d daily returns<span class="sub">— pairwise Pearson · top-8 by absolute correlation</span><span class="tag">LIVE</span></div>
       <table class="qln-tbl">
-        <thead><tr><th>NAME</th><th>CORR 1Y</th><th>BETA</th><th>READ-THROUGH</th></tr></thead>
-        <tbody>
-          <tr><td><b style="color:var(--ink)">TJX</b> · primary peer</td><td class="rd">0.72</td><td>0.94</td><td>TJX print = direct read-through</td></tr>
-          <tr><td><b style="color:var(--ink)">BURL</b> · secondary</td><td class="am">0.58</td><td>1.22</td><td>BURL miss = early warning</td></tr>
-          <tr><td><b style="color:var(--ink)">XRT</b> · retail ETF</td><td class="am">0.61</td><td>0.88</td><td>XRT breakdown = sector risk</td></tr>
-          <tr><td><b style="color:var(--ink)">WMT</b> · scale-comp</td><td class="am">0.44</td><td>0.62</td><td>WMT guide-down = trade-down accelerant (positive)</td></tr>
-          <tr><td><b style="color:var(--ink)">TGT</b> · cross-shop</td><td class="am">0.41</td><td>0.78</td><td>TGT recovery = trade-up risk (negative)</td></tr>
-        </tbody>
+        <thead><tr><th>PEER</th><th>CORR 60D</th><th>BETA</th><th>READ-THROUGH</th></tr></thead>
+        <tbody>${rows}</tbody>
       </table>
     </div>`;
   }
 
   function renderPeer_ReadThrough(t) {
+    const cohort = _qlnPeerCohort(t);
+    if (cohort.length < 2) {
+      return _qlnPeerEmpty('E', 'Read-Through Calendar · 30d peer prints', `Cohort too small.`);
+    }
+    // Compute days from today to each peer earnings_date
+    const today = new Date();
+    const events = cohort.map(x => {
+      const ed = (x.earnings || {}).earnings_date;
+      if (!ed) return null;
+      const d = new Date(ed);
+      if (isNaN(d)) return null;
+      const days = Math.round((d - today) / (1000 * 60 * 60 * 24));
+      return { tk: x.ticker, ed, days, isOwn: x.ticker === t.ticker };
+    }).filter(e => e && e.days >= -1 && e.days <= 60).sort((a, b) => a.days - b.days).slice(0, 8);
+    if (!events.length) {
+      return _qlnPeerEmpty('E', 'Read-Through Calendar · 30d peer prints', 'No upcoming earnings in cohort within next 60 days.');
+    }
+    // Get correlations for read-through scoring
+    const ownReturns = _qlnReturns((t.smc_data || {}).bars_daily || []);
+    const corrMap = {};
+    cohort.forEach(x => {
+      if (x.ticker === t.ticker) return;
+      const r = _qlnReturns((x.smc_data || {}).bars_daily || []);
+      if (r.length < 10) return;
+      const n = Math.min(ownReturns.length, r.length);
+      const c = _qlnPearson(ownReturns.slice(-n), r.slice(-n));
+      if (c != null) corrMap[x.ticker] = c;
+    });
+    const rows = events.map(e => {
+      const corr = corrMap[e.tk];
+      const corrTxt = corr != null ? corr.toFixed(2) : '—';
+      const readCls = e.isOwn ? 'rd' : (corr != null && Math.abs(corr) > 0.7) ? 'rd' : (corr != null && Math.abs(corr) > 0.4) ? 'am' : '';
+      const readTxt = e.isOwn ? 'OWN PRINT' : (corr != null && Math.abs(corr) > 0.7) ? `DIRECT · ${corrTxt} corr` : (corr != null && Math.abs(corr) > 0.4) ? `MED · ${corrTxt} corr` : `LOW · ${corrTxt} corr`;
+      const dayTxt = e.days === 0 ? 'TODAY' : (e.days > 0 ? `+${e.days}d` : `${e.days}d`);
+      return `<tr><td>${dayTxt}</td><td><b>${_qlnEsc(e.tk)}</b></td><td>${e.ed}</td><td class="${readCls}">${readTxt}</td></tr>`;
+    }).join('');
     return `<div class="qln-panel">
-      <div class="qln-h2"><span class="num">E</span>Read-Through Calendar · 30d<span class="sub">— peer prints that move this stock</span><span class="tag">CATALYST</span></div>
+      <div class="qln-h2"><span class="num">E</span>Read-Through Calendar · upcoming peer earnings<span class="sub">— from t.earnings.earnings_date + 60d correlation overlay</span><span class="tag">LIVE · ${events.length} events</span></div>
       <table class="qln-tbl">
-        <thead><tr><th>DAY</th><th>PEER</th><th>EVENT</th><th>READ-THROUGH</th></tr></thead>
-        <tbody>
-          <tr><td>+11d</td><td><b style="color:var(--ink)">TJX</b></td><td>Q1 FY27 earnings · AMC</td><td class="rd">DIRECT · 0.72 corr · primary signal</td></tr>
-          <tr><td>+18d</td><td>BURL</td><td>Q1 earnings · BMO</td><td class="am">MED · growth-comp benchmark</td></tr>
-          <tr><td>+25d</td><td>FIVE</td><td>Q1 earnings</td><td>LOW · different price point</td></tr>
-          <tr><td>+27d</td><td>OLLI</td><td>Q1 earnings</td><td>LOW · niche comp</td></tr>
-          <tr><td>+44d</td><td><b style="color:var(--ink)">${_qlnEsc(String(t.ticker||'').toUpperCase())}</b></td><td>Own Q1 earnings · AMC</td><td class="rd">OWN PRINT</td></tr>
-        </tbody>
+        <thead><tr><th>WHEN</th><th>PEER</th><th>DATE</th><th>READ-THROUGH</th></tr></thead>
+        <tbody>${rows}</tbody>
       </table>
-      <div class="qln-summary"><b style="color:var(--am)">⚠ TJX print +11d is the binary event.</b> 0.72 correlation means TJX miss → ${_qlnEsc(String(t.ticker||'').toUpperCase())} −4 to −6% next session even before own ER.</div>
     </div>`;
   }
 
   function renderPeer_CrossLens(t) {
-    return `<div class="qln-panel">
-      <div class="qln-h2"><span class="num">F</span>Cross-Lens · 5 disciplines<span class="tag">CROSS-CHECK</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell" style="border-top-color:var(--cy)"><div class="qln-ck">PEER (LEAD)</div><div class="qln-cv cy">BEST-IN-CLASS</div><div class="qln-csub">#2 / 8 composite</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">VALUE · 1-5y</div><div class="qln-cv gn">CONSTRUCTIVE</div><div class="qln-csub">quality at fair price</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">SWING · 1d-4w</div><div class="qln-cv rd">BEARISH</div><div class="qln-csub">peer rotation away</div></div>
-        <div class="qln-cell am"><div class="qln-ck">EARNINGS</div><div class="qln-cv am">TJX-DEPENDENT</div><div class="qln-csub">+11d binary peer event</div></div>
-        <div class="qln-cell am"><div class="qln-ck">MACRO</div><div class="qln-cv am">SECTOR LAG</div><div class="qln-csub">XLY −4.8% 21d</div></div>
-      </div>
-      <div class="qln-summary"><b style="color:var(--cy)">Peer lens: own the LEADER not the laggard.</b> If long off-price thesis, this name is the cleanest expression on quality.</div>
-    </div>`;
+    return _qlnRenderCrossLens('F', 'Cross-Lens · 5 disciplines', t, 'TECH',
+      ['TECH', 'VALUE', 'SWING', 'EARNINGS', 'NEWS']);
   }
 
   function renderPeer_TheCall(t) {
@@ -43331,8 +44174,9 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
     const t2Pct = limitPx && t2Lv ? ((t2Lv - limitPx) / limitPx * 100) : null;
     const stopPct = limitPx && stop ? ((stop - limitPx) / limitPx * 100) : null;
 
-    // Sizing — assume $225K reference NAV (system convention)
-    const ASSUMED_NAV = 225000;
+    // 2026-05-27 · Live NAV from data.portfolio.equity (was hardcoded $225K
+    // reference). Falls back to $225K only if portfolio_state is unavailable.
+    const ASSUMED_NAV = (+(window._kairosData && window._kairosData.portfolio && window._kairosData.portfolio.equity)) || 225000;
     const notional = (finalAllocPct / 100) * ASSUMED_NAV;
     const computedShares = limitPx ? Math.floor(notional / limitPx) : 0;
     const shares = sugShares || computedShares;
@@ -43984,25 +44828,35 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       }
     }
 
-    // 2026-05-16 · Sleeve attribution chip — pulls 252d backtest stats from CLAUDE.md sleeve roster
-    const _slvStats = {
-      'VCP': { wr:64, pf:1.92, r7d:'+12R' },
-      'PEAD': { wr:58, pf:2.04, r7d:'+8R' },
-      'INSIDER CLUSTER': { wr:71, pf:2.21, r7d:'+4R' },
-      'SQUEEZE': { wr:52, pf:1.41, r7d:'+1R' },
-      'EMA21 PULLBACK': { wr:61, pf:1.78, r7d:'+6R' },
-      '52W BREAKOUT': { wr:60, pf:1.64, r7d:'+2R' },
-      'MOMENTUM': { wr:55, pf:1.53, r7d:'+3R' },
-      'MEAN REVERSION': { wr:55, pf:1.21, r7d:'+1R' },
-      'IMPULSE CATALYST': { wr:62, pf:1.84, r7d:'+5R' },
-      'TREND CONTINUATION': { wr:62, pf:1.41, r7d:'+3R' },
-      'CORE': { wr:62, pf:1.41, r7d:'+3R' },
-      'DEFENSIVE ROTATION': { wr:54, pf:1.03, r7d:'0R' },
-      'ESP PLAY': { wr:0, pf:0, r7d:'—' },
-    };
-    const _slvKey = Object.keys(_slvStats).find(k => sleeve.toUpperCase().includes(k.split(' ')[0])) || sleeve.toUpperCase();
-    const _slvS = _slvStats[_slvKey] || { wr:0, pf:0, r7d:'—' };
-    const _slvChip = '<span class="pt-slv-chip" style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;background:rgba(217,119,87,0.12);border:1px solid rgba(217,119,87,0.35);border-radius:2px;font:700 9.5px var(--ptmono);letter-spacing:.06em;margin-left:6px"><span style="color:var(--copper)">SLEEVE EDGE</span><span>WR <b style="color:' + (_slvS.wr>=60?'#5be57c':_slvS.wr>=50?'#ffb95c':'#ff6b5b') + '">' + (_slvS.wr || '—') + '%</b></span><span>PF <b style="color:' + (_slvS.pf>=1.5?'#5be57c':_slvS.pf>=1.2?'#ffb95c':'#ff6b5b') + '">' + (_slvS.pf ? _slvS.pf.toFixed(2) : '—') + '</b></span><span>7d Σ <b style="color:#d8d6cc">' + _slvS.r7d + '</b></span></span>';
+    // 2026-05-27 · Sleeve attribution chip — LIVE from setup_stats.json.
+    // Previously a hardcoded {VCP:{wr:64,...}} table that never updated.
+    // Match the ticker's setup_family against the keys in
+    // data.setup_stats.setups (canonical: 'Breakout Expansion',
+    // 'Trend Continuation', 'Impulse Catalyst', 'Insider Cluster', etc.).
+    // Falls back to family-keyword match (legacy display labels), then '—'.
+    const _setupStatsMap = (window._kairosData && window._kairosData.setup_stats && window._kairosData.setup_stats.setups) || {};
+    const _setupFamilyKey = t.setup_family || '';
+    let _slvS = _setupStatsMap[_setupFamilyKey] || null;
+    if (!_slvS) {
+      // Fall back: keyword-match sleeve label against setup-family keys
+      const _slvUp = (sleeve || '').toUpperCase();
+      const _match = Object.keys(_setupStatsMap).find(k => {
+        const ku = k.toUpperCase();
+        return _slvUp.includes(ku) || ku.split(' ').some(w => _slvUp.includes(w));
+      });
+      _slvS = _match ? _setupStatsMap[_match] : null;
+    }
+    const _slvWR = _slvS ? Math.round((_slvS.wr || 0) * 100) : null;
+    const _slvPF = _slvS ? +_slvS.pf : null;
+    const _slvN  = _slvS ? +_slvS.n  : null;
+    const _slvWilson = _slvS && _slvS.wilson_lb != null ? Math.round(_slvS.wilson_lb * 100) : null;
+    const _slvChip = '<span class="pt-slv-chip" style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;background:rgba(217,119,87,0.12);border:1px solid rgba(217,119,87,0.35);border-radius:2px;font:700 9.5px var(--ptmono);letter-spacing:.06em;margin-left:6px">'
+      + '<span style="color:var(--copper)">SLEEVE EDGE</span>'
+      + '<span>WR <b style="color:' + (_slvWR != null && _slvWR>=60?'#5be57c':_slvWR != null && _slvWR>=50?'#ffb95c':'#ff6b5b') + '">' + (_slvWR != null ? _slvWR + '%' : '—') + '</b></span>'
+      + '<span>PF <b style="color:' + (_slvPF != null && _slvPF>=1.5?'#5be57c':_slvPF != null && _slvPF>=1.2?'#ffb95c':'#ff6b5b') + '">' + (_slvPF != null ? _slvPF.toFixed(2) : '—') + '</b></span>'
+      + '<span>n <b style="color:#d8d6cc">' + (_slvN != null ? _slvN : '—') + '</b></span>'
+      + (_slvWilson != null ? '<span>LB <b style="color:#d8d6cc">' + _slvWilson + '%</b></span>' : '')
+      + '</span>';
 
     const orderHTML = ''
       + '<div class="pt-order-hero">'
@@ -44408,99 +45262,154 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       + '</div>';
 
     // §3 Invalidation Ladder
+    // 2026-05-27 · Pill count derived from rows; "6 ARMED" was static text.
+    const _invRows = [
+      { tier: 'L1', cond: '<b>Daily close &lt; $' + (stop ? stop.toFixed(2) : '—') + '</b>', sub: (stopPct != null ? _pct1(stopPct) : '—') + ' from limit · 1.25× ATR · canonical close-stop', act: 'EXIT @ NEXT OPEN', state: 'AUTO',     rowCls: 'armed',   stateCls: 'rd' },
+      { tier: 'L2', cond: '<b>2 consecutive closes below EMA21</b>',                       sub: sleeve + ' sleeve invariant · setup is dead even if hard stop not hit',                          act: 'EXIT @ NEXT OPEN', state: 'MONITOR',  rowCls: 'warn',    stateCls: 'am' },
+      { tier: 'L3', cond: '<b>RSI loses 50 on daily</b>',                                  sub: 'momentum exhaustion · sleeve no longer applies',                                                  act: 'REDUCE 50%',       state: 'MONITOR',  rowCls: 'warn',    stateCls: 'am' },
+      { tier: 'L4', cond: '<b>Catalyst tags drop to T2 or lower</b>',                      sub: (catTags.length ? catTags.join(' + ') : 'catalyst stack') + ' — any single tag drop = thesis weakening', act: 'EXIT @ NEXT OPEN', state: 'DAILY SCAN', rowCls: 'warn',  stateCls: 'am' },
+      { tier: 'L5', cond: '<b>Sector RS rank falls below 70</b>',                          sub: 'currently ' + rsRank + ' · momentum requires sector leadership',                                  act: 'EXIT @ NEXT OPEN', state: 'DAILY SCAN', rowCls: 'warn', stateCls: 'am' },
+      { tier: 'L6', cond: '<b>' + maxHoldD + ' days from fill · no T1 hit</b>',           sub: 'time-stop · close at next open · do not extend hold',                                              act: 'EXIT @ NEXT OPEN', state: 'SCHEDULED', rowCls: 'pending', stateCls: 'cp' },
+    ];
+    const _invArmedN = _invRows.filter(r => r.state === 'AUTO').length;
     const section3HTML = ''
       + '<div class="pt-section">'
-        + '<div class="pt-section-head"><div><div class="pt-section-title"><span class="num">§3</span>Invalidation Ladder · what kills the trade</div><div class="pt-section-sub">6 hard triggers · any one → cancel order / exit position · no soft overrides</div></div><span class="pt-pill rd">6 ARMED · automated where possible</span></div>'
+        + '<div class="pt-section-head"><div><div class="pt-section-title"><span class="num">§3</span>Invalidation Ladder · what kills the trade</div><div class="pt-section-sub">' + _invRows.length + ' hard triggers · any one → cancel order / exit position · no soft overrides</div></div><span class="pt-pill rd">' + _invRows.length + ' triggers · ' + _invArmedN + ' AUTO</span></div>'
         + '<div class="pt-section-body">'
           + '<div class="pt-inv-grid">'
-            + '<div class="pt-inv-row armed"><div class="pt-inv-tier">L1</div><div class="pt-inv-cond"><b>Daily close &lt; $' + (stop ? stop.toFixed(2) : '—') + '</b><span class="sub">' + (stopPct != null ? _pct1(stopPct) : '—') + ' from limit · 1.25× ATR · canonical close-stop</span></div><div class="pt-inv-act">EXIT @ NEXT OPEN</div><div class="pt-inv-state"><span class="pt-pill rd">AUTO</span></div></div>'
-            + '<div class="pt-inv-row warn"><div class="pt-inv-tier">L2</div><div class="pt-inv-cond"><b>2 consecutive closes below EMA21</b><span class="sub">' + sleeve + ' sleeve invariant · setup is dead even if hard stop not hit</span></div><div class="pt-inv-act">EXIT @ NEXT OPEN</div><div class="pt-inv-state"><span class="pt-pill am">MONITOR</span></div></div>'
-            + '<div class="pt-inv-row warn"><div class="pt-inv-tier">L3</div><div class="pt-inv-cond"><b>RSI loses 50 on daily</b><span class="sub">momentum exhaustion · sleeve no longer applies</span></div><div class="pt-inv-act">REDUCE 50%</div><div class="pt-inv-state"><span class="pt-pill am">MONITOR</span></div></div>'
-            + '<div class="pt-inv-row warn"><div class="pt-inv-tier">L4</div><div class="pt-inv-cond"><b>Catalyst tags drop to T2 or lower</b><span class="sub">' + (catTags.length ? catTags.join(' + ') : 'catalyst stack') + ' — any single tag drop = thesis weakening</span></div><div class="pt-inv-act">EXIT @ NEXT OPEN</div><div class="pt-inv-state"><span class="pt-pill am">DAILY SCAN</span></div></div>'
-            + '<div class="pt-inv-row warn"><div class="pt-inv-tier">L5</div><div class="pt-inv-cond"><b>Sector RS rank falls below 70</b><span class="sub">currently ' + rsRank + ' · momentum requires sector leadership</span></div><div class="pt-inv-act">EXIT @ NEXT OPEN</div><div class="pt-inv-state"><span class="pt-pill am">DAILY SCAN</span></div></div>'
-            + '<div class="pt-inv-row pending"><div class="pt-inv-tier">L6</div><div class="pt-inv-cond"><b>' + maxHoldD + ' days from fill · no T1 hit</b><span class="sub">time-stop · close at next open · do not extend hold</span></div><div class="pt-inv-act">EXIT @ NEXT OPEN</div><div class="pt-inv-state"><span class="pt-pill cp">SCHEDULED</span></div></div>'
+            + _invRows.map(r => '<div class="pt-inv-row ' + r.rowCls + '"><div class="pt-inv-tier">' + r.tier + '</div><div class="pt-inv-cond">' + r.cond + '<span class="sub">' + r.sub + '</span></div><div class="pt-inv-act">' + r.act + '</div><div class="pt-inv-state"><span class="pt-pill ' + r.stateCls + '">' + r.state + '</span></div></div>').join('')
           + '</div>'
         + '</div>'
       + '</div>';
 
     // §4 Time Anatomy
+    // 2026-05-27 · Positions now scale with maxHoldD instead of being pinned to
+    // 60/200/500/860/1100. Markers placed at fractional days through the hold
+    // window: TRAIL@10%, T1@~40%, T2@~75%, TIME-STOP@100%. Tick labels are
+    // generated from a 6-step grid through maxHoldD. The hardcoded "10d" /
+    // "d4-d7" / "7d half-life" copy was previously demo text on every ticker;
+    // those are now derived from maxHoldD too.
+    const _tlX0 = 60, _tlX1 = 1100;
+    const _dayToX = (d) => _tlX0 + (Math.max(0, Math.min(maxHoldD, d)) / maxHoldD) * (_tlX1 - _tlX0);
+    const _tFill   = 0;
+    const _tTrail  = Math.max(1, Math.round(maxHoldD * 0.10));   // ~10% in
+    const _tT1     = Math.max(_tTrail + 1, Math.round(maxHoldD * 0.40));
+    const _tT2     = Math.max(_tT1 + 1,    Math.round(maxHoldD * 0.75));
+    const _tDecay  = Math.max(_tT1, Math.round(maxHoldD * 0.50)); // decaying-edge starts mid-window
+    const _tT1WinLo = Math.max(_tTrail, Math.round(maxHoldD * 0.30));
+    const _tT1WinHi = Math.max(_tT1WinLo + 1, Math.round(maxHoldD * 0.55));
+    const _tHalfLife = Math.max(2, Math.round(maxHoldD * 0.50));  // sleeve edge half-life ≈ half the hold
+    const _xFill = _dayToX(_tFill), _xTrail = _dayToX(_tTrail), _xT1 = _dayToX(_tT1), _xT2 = _dayToX(_tT2);
+    const _xDecay = _dayToX(_tDecay), _xT1WinLo = _dayToX(_tT1WinLo), _xT1WinHi = _dayToX(_tT1WinHi);
+    const _xEnd = _dayToX(maxHoldD);
+    // 6-step tick grid through the hold window
+    const _tickDays = [0, 1, 2, 3, 4, 5].map(i => Math.round((i / 5) * maxHoldD));
+    const _ticksSvg = _tickDays.map((d, i) => '<text x="' + _dayToX(d).toFixed(0) + '" y="180" text-anchor="' + (i === 0 ? 'start' : i === _tickDays.length - 1 ? 'end' : 'middle') + '">t=' + d + 'd</text>').join('');
     const section4HTML = ''
       + '<div class="pt-section">'
-        + '<div class="pt-section-head"><div><div class="pt-section-title"><span class="num">§4</span>Time Anatomy · entry-day → time-stop</div><div class="pt-section-sub">linear timeline of this specific trade · trail activation · partial sells · scheduled exits</div></div><span class="pt-pill cp">' + maxHoldD + 'd max · 7d sleeve edge half-life</span></div>'
+        + '<div class="pt-section-head"><div><div class="pt-section-title"><span class="num">§4</span>Time Anatomy · entry-day → time-stop</div><div class="pt-section-sub">linear timeline of this specific trade · trail activation · partial sells · scheduled exits</div></div><span class="pt-pill cp">' + maxHoldD + 'd max · ' + _tHalfLife + 'd edge half-life</span></div>'
         + '<div class="pt-section-body">'
           + '<div class="pt-time"><svg viewBox="0 0 1200 220" preserveAspectRatio="xMidYMid meet">'
-            + '<line x1="60" y1="160" x2="1160" y2="160" stroke="var(--ptink3)" stroke-width="0.6"/>'
-            + '<g font-family="ui-monospace,monospace" font-size="9" fill="var(--ptink3)"><text x="60" y="180">t=0</text><text x="200" y="180">t=2d</text><text x="340" y="180">t=4d</text><text x="480" y="180">t=6d</text><text x="620" y="180">t=8d</text><text x="760" y="180">t=10d</text><text x="900" y="180">t=12d</text><text x="1100" y="180">t=' + maxHoldD + 'd</text></g>'
-            + '<rect x="60" y="40" width="420" height="110" fill="#22c55e" fill-opacity="0.08"/>'
-            + '<text x="270" y="55" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#22c55e" font-weight="800">⌬ HIGH-EDGE WINDOW · sleeve PF most reliable</text>'
-            + '<rect x="480" y="40" width="680" height="110" fill="#fbbf24" fill-opacity="0.08"/>'
-            + '<text x="820" y="55" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#fbbf24" font-weight="800">⌬ DECAYING-EDGE WINDOW · close if no T1 by t=10d</text>'
-            + '<line x1="60" y1="40" x2="60" y2="160" stroke="#22c55e" stroke-width="3"/><circle cx="60" cy="100" r="9" fill="#22c55e"/><text x="60" y="106" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#0a0d0c" font-weight="800">⊕</text><text x="60" y="30" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#22c55e" font-weight="800">FILL</text><text x="60" y="200" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#22c55e" font-weight="700">LMT $' + limitPx.toFixed(2) + ' hits</text>'
-            + '<line x1="200" y1="80" x2="200" y2="160" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="3 2"/><circle cx="200" cy="100" r="6" fill="#fbbf24"/><text x="200" y="74" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#fbbf24" font-weight="800">TRAIL ON</text><text x="200" y="200" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#fbbf24" font-weight="700">+2% from fill</text>'
-            + '<rect x="380" y="70" width="180" height="60" fill="#22c55e" fill-opacity="0.18" stroke="#22c55e" stroke-width="0.6" stroke-dasharray="2 2"/><text x="470" y="65" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#22c55e" font-weight="700">P(T1 hit) median window · d4-d7</text>'
-            + '<line x1="500" y1="40" x2="500" y2="160" stroke="#22c55e" stroke-width="2"/><circle cx="500" cy="100" r="8" fill="#22c55e"/><text x="500" y="106" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#0a0d0c" font-weight="800">½</text><text x="500" y="30" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#22c55e" font-weight="800">T1 SELL 50%</text><text x="500" y="200" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#22c55e" font-weight="700">$' + (t1Lv ? t1Lv.toFixed(2) : '—') + ' · stop → BE</text>'
-            + '<line x1="860" y1="40" x2="860" y2="160" stroke="#22c55e" stroke-width="2"/><circle cx="860" cy="100" r="7" fill="#22c55e" fill-opacity="0.6"/><text x="860" y="106" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#0a0d0c" font-weight="800">⅓</text><text x="860" y="30" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#22c55e" font-weight="800">T2 SELL 30%</text><text x="860" y="200" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#22c55e" font-weight="700">$' + (t2Lv ? t2Lv.toFixed(2) : '—') + ' · trail runner</text>'
-            + '<line x1="1100" y1="40" x2="1100" y2="160" stroke="#f87171" stroke-width="3"/><circle cx="1100" cy="100" r="9" fill="#f87171"/><text x="1100" y="106" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#0a0d0c" font-weight="800">⊗</text><text x="1100" y="30" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#f87171" font-weight="800">TIME-STOP</text><text x="1100" y="200" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#f87171" font-weight="700">close if no T1 · ~' + tsDate + '</text>'
-            + '<text x="60" y="148" font-family="ui-monospace,monospace" font-size="8" fill="var(--ptink3)" font-weight="600">place LMT</text>'
-            + '<text x="200" y="148" font-family="ui-monospace,monospace" font-size="8" fill="var(--ptink3)" font-weight="600">trail engaged</text>'
-            + '<text x="500" y="148" font-family="ui-monospace,monospace" font-size="8" fill="var(--ptink3)" font-weight="600">scale-out 1</text>'
-            + '<text x="860" y="148" font-family="ui-monospace,monospace" font-size="8" fill="var(--ptink3)" font-weight="600">scale-out 2</text>'
-            + '<text x="1100" y="148" font-family="ui-monospace,monospace" font-size="8" fill="var(--ptink3)" font-weight="600">final exit</text>'
+            + '<line x1="' + _tlX0 + '" y1="160" x2="' + (_tlX1 + 60) + '" y2="160" stroke="var(--ptink3)" stroke-width="0.6"/>'
+            + '<g font-family="ui-monospace,monospace" font-size="9" fill="var(--ptink3)">' + _ticksSvg + '</g>'
+            + '<rect x="' + _xFill.toFixed(0) + '" y="40" width="' + (_xDecay - _xFill).toFixed(0) + '" height="110" fill="#22c55e" fill-opacity="0.08"/>'
+            + '<text x="' + ((_xFill + _xDecay) / 2).toFixed(0) + '" y="55" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#22c55e" font-weight="800">⌬ HIGH-EDGE WINDOW · sleeve PF most reliable</text>'
+            + '<rect x="' + _xDecay.toFixed(0) + '" y="40" width="' + (_xEnd - _xDecay).toFixed(0) + '" height="110" fill="#fbbf24" fill-opacity="0.08"/>'
+            + '<text x="' + ((_xDecay + _xEnd) / 2).toFixed(0) + '" y="55" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#fbbf24" font-weight="800">⌬ DECAYING-EDGE WINDOW · close if no T1 by t=' + _tDecay + 'd</text>'
+            + '<line x1="' + _xFill.toFixed(0) + '" y1="40" x2="' + _xFill.toFixed(0) + '" y2="160" stroke="#22c55e" stroke-width="3"/><circle cx="' + _xFill.toFixed(0) + '" cy="100" r="9" fill="#22c55e"/><text x="' + _xFill.toFixed(0) + '" y="106" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#0a0d0c" font-weight="800">⊕</text><text x="' + _xFill.toFixed(0) + '" y="30" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#22c55e" font-weight="800">FILL</text><text x="' + _xFill.toFixed(0) + '" y="200" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#22c55e" font-weight="700">LMT $' + limitPx.toFixed(2) + ' hits</text>'
+            + '<line x1="' + _xTrail.toFixed(0) + '" y1="80" x2="' + _xTrail.toFixed(0) + '" y2="160" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="3 2"/><circle cx="' + _xTrail.toFixed(0) + '" cy="100" r="6" fill="#fbbf24"/><text x="' + _xTrail.toFixed(0) + '" y="74" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#fbbf24" font-weight="800">TRAIL ON</text><text x="' + _xTrail.toFixed(0) + '" y="200" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#fbbf24" font-weight="700">+2% from fill</text>'
+            + '<rect x="' + _xT1WinLo.toFixed(0) + '" y="70" width="' + (_xT1WinHi - _xT1WinLo).toFixed(0) + '" height="60" fill="#22c55e" fill-opacity="0.18" stroke="#22c55e" stroke-width="0.6" stroke-dasharray="2 2"/><text x="' + ((_xT1WinLo + _xT1WinHi) / 2).toFixed(0) + '" y="65" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#22c55e" font-weight="700">P(T1 hit) median window · d' + _tT1WinLo + '-d' + _tT1WinHi + '</text>'
+            + '<line x1="' + _xT1.toFixed(0) + '" y1="40" x2="' + _xT1.toFixed(0) + '" y2="160" stroke="#22c55e" stroke-width="2"/><circle cx="' + _xT1.toFixed(0) + '" cy="100" r="8" fill="#22c55e"/><text x="' + _xT1.toFixed(0) + '" y="106" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#0a0d0c" font-weight="800">½</text><text x="' + _xT1.toFixed(0) + '" y="30" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#22c55e" font-weight="800">T1 SELL 50%</text><text x="' + _xT1.toFixed(0) + '" y="200" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#22c55e" font-weight="700">$' + (t1Lv ? t1Lv.toFixed(2) : '—') + ' · stop → BE</text>'
+            + '<line x1="' + _xT2.toFixed(0) + '" y1="40" x2="' + _xT2.toFixed(0) + '" y2="160" stroke="#22c55e" stroke-width="2"/><circle cx="' + _xT2.toFixed(0) + '" cy="100" r="7" fill="#22c55e" fill-opacity="0.6"/><text x="' + _xT2.toFixed(0) + '" y="106" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#0a0d0c" font-weight="800">⅓</text><text x="' + _xT2.toFixed(0) + '" y="30" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#22c55e" font-weight="800">T2 SELL 30%</text><text x="' + _xT2.toFixed(0) + '" y="200" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#22c55e" font-weight="700">$' + (t2Lv ? t2Lv.toFixed(2) : '—') + ' · trail runner</text>'
+            + '<line x1="' + _xEnd.toFixed(0) + '" y1="40" x2="' + _xEnd.toFixed(0) + '" y2="160" stroke="#f87171" stroke-width="3"/><circle cx="' + _xEnd.toFixed(0) + '" cy="100" r="9" fill="#f87171"/><text x="' + _xEnd.toFixed(0) + '" y="106" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#0a0d0c" font-weight="800">⊗</text><text x="' + _xEnd.toFixed(0) + '" y="30" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#f87171" font-weight="800">TIME-STOP</text><text x="' + _xEnd.toFixed(0) + '" y="200" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#f87171" font-weight="700">close if no T1 · ~' + tsDate + '</text>'
+            + '<text x="' + _xFill.toFixed(0) + '" y="148" font-family="ui-monospace,monospace" font-size="8" fill="var(--ptink3)" font-weight="600">place LMT</text>'
+            + '<text x="' + _xTrail.toFixed(0) + '" y="148" font-family="ui-monospace,monospace" font-size="8" fill="var(--ptink3)" font-weight="600">trail engaged</text>'
+            + '<text x="' + _xT1.toFixed(0) + '" y="148" font-family="ui-monospace,monospace" font-size="8" fill="var(--ptink3)" font-weight="600">scale-out 1</text>'
+            + '<text x="' + _xT2.toFixed(0) + '" y="148" font-family="ui-monospace,monospace" font-size="8" fill="var(--ptink3)" font-weight="600">scale-out 2</text>'
+            + '<text x="' + _xEnd.toFixed(0) + '" y="148" font-family="ui-monospace,monospace" font-size="8" fill="var(--ptink3)" font-weight="600">final exit</text>'
           + '</svg></div>'
         + '</div>'
       + '</div>';
 
     // §5 Reaction Playbook
+    // 2026-05-27 · Rows + ARMED/PENDING counts derived from the actual ruleset
+    // (was static "9 rules · 2 armed · 7 conditional" copy).
+    const _rxRows = [
+      { trig: 'PRICE ↓', trigCls: 'ink', cond: 'spot reverts into ' + (pZoneLo ? '$' + pZoneLo.toFixed(2) : '—') + ' – ' + (pZoneHi ? '$' + pZoneHi.toFixed(2) : '—') + ' zone', act: 'LMT BUY ' + shares + ' sh @ $' + limitPx.toFixed(2) + ' GTC fires automatically', state: 'ARMED',   stateCls: 'am' },
+      { trig: 'PRICE ↓', trigCls: 'ink', cond: 'spot reaches ' + (pZoneLo ? '$' + pZoneLo.toFixed(2) : '—') + ' (lower zone bound)',                                act: '2nd staggered entry: LMT ' + Math.round(shares / 3) + ' sh @ lower zone',                          state: 'ARMED',   stateCls: 'am' },
+      { trig: 'PRICE ↑', trigCls: 'gn',  cond: 'position at +2% from fill',                                                                                          act: 'Trail engaged · 1× ATR ($' + (atr ? atr.toFixed(2) : '—') + ') trail · stop auto-ratchets up',     state: 'PENDING', stateCls: '' },
+      { trig: 'PRICE ↑', trigCls: 'gn',  cond: 'price hits $' + (t1Lv ? t1Lv.toFixed(2) : '—') + ' (T1)',                                                            act: 'Sell 50% at market · move stop on remainder to fill',                                              state: 'PENDING', stateCls: '' },
+      { trig: 'PRICE ↑', trigCls: 'gn',  cond: 'price hits $' + (t2Lv ? t2Lv.toFixed(2) : '—') + ' (T2)',                                                            act: 'Sell 30% more · trail final by 1× ATR',                                                            state: 'PENDING', stateCls: '' },
+      { trig: 'PRICE ↓', trigCls: 'rd',  cond: 'daily close &lt; $' + (stop ? stop.toFixed(2) : '—'),                                                                act: 'Close 100% at next open · automated · no override',                                                state: 'PENDING', stateCls: '' },
+      { trig: 'TIME',    trigCls: 'ink', cond: '5 trading days · no fill',                                                                                            act: 'Cancel alert · re-evaluate setup · sector RS may have rotated',                                    state: 'PENDING', stateCls: '' },
+      { trig: 'TIME',    trigCls: 'ink', cond: maxHoldD + 'd from fill · no T1 hit',                                                                                  act: 'Close 100% at next open · time-stop · do not extend',                                              state: 'PENDING', stateCls: '' },
+      { trig: 'REGIME',  trigCls: 'rd',  cond: 'regime flips to risk_off / panic',                                                                                    act: 'Cancel pending order · reduce existing position by 50%',                                           state: 'PENDING', stateCls: '' },
+    ];
+    const _rxArmedN = _rxRows.filter(r => r.state === 'ARMED').length;
+    const _rxPendingN = _rxRows.length - _rxArmedN;
     const section5HTML = ''
       + '<div class="pt-section">'
-        + '<div class="pt-section-head"><div><div class="pt-section-title"><span class="num">§5</span>Reaction Playbook · if-then rules</div><div class="pt-section-sub">automation-ready · every reaction is a deterministic rule · operator does not improvise</div></div><span class="pt-pill cp">9 rules · 2 armed · 7 conditional</span></div>'
+        + '<div class="pt-section-head"><div><div class="pt-section-title"><span class="num">§5</span>Reaction Playbook · if-then rules</div><div class="pt-section-sub">automation-ready · every reaction is a deterministic rule · operator does not improvise</div></div><span class="pt-pill cp">' + _rxRows.length + ' rules · ' + _rxArmedN + ' armed · ' + _rxPendingN + ' conditional</span></div>'
         + '<div class="pt-section-body">'
           + '<table class="pt-tbl"><thead><tr><th style="width:90px">Trigger</th><th style="width:280px">Condition</th><th>Action</th><th class="r" style="width:110px">Status</th></tr></thead><tbody>'
-            + '<tr><td><b class="ink">PRICE ↓</b></td><td>spot reverts into ' + (pZoneLo ? '$' + pZoneLo.toFixed(2) : '—') + ' – ' + (pZoneHi ? '$' + pZoneHi.toFixed(2) : '—') + ' zone</td><td>LMT BUY ' + shares + ' sh @ $' + limitPx.toFixed(2) + ' GTC fires automatically</td><td class="r"><span class="pt-pill am">ARMED</span></td></tr>'
-            + '<tr><td><b class="ink">PRICE ↓</b></td><td>spot reaches ' + (pZoneLo ? '$' + pZoneLo.toFixed(2) : '—') + ' (lower zone bound)</td><td>2nd staggered entry: LMT ' + Math.round(shares / 3) + ' sh @ lower zone</td><td class="r"><span class="pt-pill am">ARMED</span></td></tr>'
-            + '<tr><td><b class="gn">PRICE ↑</b></td><td>position at +2% from fill</td><td>Trail engaged · 1× ATR ($' + (atr ? atr.toFixed(2) : '—') + ') trail · stop auto-ratchets up</td><td class="r"><span class="pt-pill">PENDING</span></td></tr>'
-            + '<tr><td><b class="gn">PRICE ↑</b></td><td>price hits $' + (t1Lv ? t1Lv.toFixed(2) : '—') + ' (T1)</td><td>Sell 50% at market · move stop on remainder to fill</td><td class="r"><span class="pt-pill">PENDING</span></td></tr>'
-            + '<tr><td><b class="gn">PRICE ↑</b></td><td>price hits $' + (t2Lv ? t2Lv.toFixed(2) : '—') + ' (T2)</td><td>Sell 30% more · trail final by 1× ATR</td><td class="r"><span class="pt-pill">PENDING</span></td></tr>'
-            + '<tr><td><b class="rd">PRICE ↓</b></td><td>daily close &lt; $' + (stop ? stop.toFixed(2) : '—') + '</td><td>Close 100% at next open · automated · no override</td><td class="r"><span class="pt-pill">PENDING</span></td></tr>'
-            + '<tr><td><b class="ink">TIME</b></td><td>5 trading days · no fill</td><td>Cancel alert · re-evaluate setup · sector RS may have rotated</td><td class="r"><span class="pt-pill">PENDING</span></td></tr>'
-            + '<tr><td><b class="ink">TIME</b></td><td>' + maxHoldD + 'd from fill · no T1 hit</td><td>Close 100% at next open · time-stop · do not extend</td><td class="r"><span class="pt-pill">PENDING</span></td></tr>'
-            + '<tr><td><b class="rd">REGIME</b></td><td>regime flips to risk_off / panic</td><td>Cancel pending order · reduce existing position by 50%</td><td class="r"><span class="pt-pill">PENDING</span></td></tr>'
+            + _rxRows.map(r => '<tr><td><b class="' + r.trigCls + '">' + r.trig + '</b></td><td>' + r.cond + '</td><td>' + r.act + '</td><td class="r"><span class="pt-pill ' + r.stateCls + '">' + r.state + '</span></td></tr>').join('')
           + '</tbody></table>'
         + '</div>'
       + '</div>';
 
     // §6 Pre-Mortem
+    // 2026-05-27 · When no real thesis_killers, show generic failure-mode
+    // CATEGORIES with no probabilities (the prior "22% / 20% / 15% / 12% / 10%"
+    // numbers were invented constants identical on every ticker). The P(stop)
+    // pill stays as combined-probability proxy — that one IS data-driven
+    // (Monte Carlo p_hit_stop_first).
     const killers = Array.isArray(t.thesis_killers) ? t.thesis_killers : null;
     let pmHTML = '';
+    let pmKind = '';
     if (killers && killers.length) {
+      pmKind = killers.length + ' modeled';
       pmHTML = killers.slice(0, 5).map((k, i) =>
         '<div class="pt-pm"><div class="pt-pm-n">' + (i+1) + '</div><div class="pt-pm-k">' + _esc(k) + '</div><div class="pt-pm-p">PROBABILITY · <b>—</b></div><div class="pt-pm-d">Thesis-killer flagged at scan time</div></div>'
       ).join('');
     } else {
-      pmHTML = ''
-        + '<div class="pt-pm"><div class="pt-pm-n">1</div><div class="pt-pm-k">False breakout · fade back into base</div><div class="pt-pm-p">PROBABILITY · <b>22%</b></div><div class="pt-pm-d">Spot reverses below pivot · re-enters base · stop hit at $' + (stop ? stop.toFixed(2) : '—') + '. Most common failure for ' + setup.toLowerCase() + '.</div></div>'
-        + '<div class="pt-pm"><div class="pt-pm-n">2</div><div class="pt-pm-k">Pivot exhaustion · supply cap</div><div class="pt-pm-p">PROBABILITY · <b>20%</b></div><div class="pt-pm-d">Institutional supply caps the move · sideways drift · time-stop exit at small profit or BE.</div></div>'
-        + '<div class="pt-pm"><div class="pt-pm-n">3</div><div class="pt-pm-k">Sector rotation · ' + sector + ' loses RS</div><div class="pt-pm-p">PROBABILITY · <b>15%</b></div><div class="pt-pm-d">Sector RS drops below 70 (currently ' + rsRank + ') · ticker follows cohort · L5 invalidation triggers.</div></div>'
-        + '<div class="pt-pm"><div class="pt-pm-n">4</div><div class="pt-pm-k">Macro shock · VIX risk-off</div><div class="pt-pm-p">PROBABILITY · <b>12%</b></div><div class="pt-pm-d">FOMC or geopolitics drives VIX above choppy band · β ' + beta.toFixed(2) + ' amplifies drawdown · L1 stop hit.</div></div>'
-        + '<div class="pt-pm"><div class="pt-pm-n">5</div><div class="pt-pm-k">Tail-loss event / gap-down</div><div class="pt-pm-p">PROBABILITY · <b>10%</b></div><div class="pt-pm-d">Price gaps below stop · slippage exceeds modeled 30bp · real loss exceeds 1R.</div></div>';
+      pmKind = 'generic · no per-ticker model';
+      const _fallbackModes = [
+        { k: 'False breakout · fade back into base',                       d: 'Spot reverses below pivot · re-enters base · stop hit at $' + (stop ? stop.toFixed(2) : '—') + '. Most common failure for ' + setup.toLowerCase() + '.' },
+        { k: 'Pivot exhaustion · supply cap',                              d: 'Institutional supply caps the move · sideways drift · time-stop exit at small profit or BE.' },
+        { k: 'Sector rotation · ' + sector + ' loses RS',                  d: 'Sector RS drops below 70 (currently ' + rsRank + ') · ticker follows cohort · L5 invalidation triggers.' },
+        { k: 'Macro shock · VIX risk-off',                                 d: 'FOMC or geopolitics drives VIX above choppy band · β ' + beta.toFixed(2) + ' amplifies drawdown · L1 stop hit.' },
+        { k: 'Tail-loss event / gap-down',                                 d: 'Price gaps below stop · slippage exceeds modeled · real loss exceeds 1R.' },
+      ];
+      pmHTML = _fallbackModes.map((m, i) => '<div class="pt-pm"><div class="pt-pm-n">' + (i+1) + '</div><div class="pt-pm-k">' + _esc(m.k) + '</div><div class="pt-pm-p">PROBABILITY · <b>—</b></div><div class="pt-pm-d">' + m.d + '</div></div>').join('');
     }
     const section6HTML = ''
       + '<div class="pt-section">'
-        + '<div class="pt-section-head"><div><div class="pt-section-title"><span class="num">§6</span>Pre-Mortem · how does this trade fail?</div><div class="pt-section-sub">5 numbered failure modes ranked by likelihood · write it BEFORE entry, not after</div></div><span class="pt-pill rd">P(failure) ' + popStopFb.toFixed(0) + '% combined</span></div>'
+        + '<div class="pt-section-head"><div><div class="pt-section-title"><span class="num">§6</span>Pre-Mortem · how does this trade fail?</div><div class="pt-section-sub">' + (killers && killers.length ? killers.length : 5) + ' failure modes · ' + pmKind + ' · write it BEFORE entry, not after</div></div><span class="pt-pill rd">P(stop) ' + popStopFb.toFixed(0) + '%' + (mcPS == null ? ' · sleeve prior' : ' · MC') + '</span></div>'
         + '<div class="pt-section-body"><div class="pt-premortem">' + pmHTML + '</div></div>'
       + '</div>';
 
     // §7 Post-Fill Checklist
+    // 2026-05-27 · Checkpoints scale with maxHoldD instead of being pinned to
+    // 0/1/3/7/MAX. PEAD (3d hold) and Position (21d hold) now show the right
+    // intervals. _tTrail/_tT1/_tHalfLife are computed above in §4.
+    const _ckTrail    = _tTrail;           // ~10% in — trail-trigger watch
+    const _ckHalfLife = _tHalfLife;        // ~50% in — sleeve edge half-life
+    const _checkpts = [
+      { d: 0,             lbl: 'fill day',          items: ['Confirm fill price ≤ $' + (eHi || limitPx).toFixed(2) + ' (top of zone)', 'Place GTC stop $' + (stop ? stop.toFixed(2) : '—') + ' in broker', 'Place GTC T1 limit @ $' + (t1Lv ? t1Lv.toFixed(2) : '—') + ' for half qty', 'Log to <code>signal_log.json</code>'] },
+      { d: 1,             lbl: 'confirmation',      items: ['Check overnight gap · stop in broker still active', 'Verify EMA21 still above price', 'Check catalyst tags unchanged'] },
+      { d: _ckTrail,      lbl: 'trail-trigger watch', items: ['If at +2% → confirm trail engaged', 'Sector RS rank ≥ 70 check', 'Open position attribution review'] },
+      { d: _ckHalfLife,   lbl: 'edge half-life',    items: ['Sleeve PF ½-life cutoff · if no T1 yet, re-evaluate', 'Tighten stop to EMA21 if green', 'RSI still ≥ 50 check'] },
+      { d: maxHoldD,      lbl: 'time-stop',         items: ['<b style="color:var(--ptrd)">Hard exit at next open if no T1</b>', 'Log outcome to <code>picks_history.json</code>', 'Update sleeve attribution stats'] },
+    ];
+    // Dedupe identical day values (e.g., maxHoldD = 3 collapses Day 3 trail + Day 1 confirmation)
+    const _ckSeen = new Set();
+    const _checkptsClean = _checkpts.filter(c => { if (_ckSeen.has(c.d)) return false; _ckSeen.add(c.d); return true; });
     const section7HTML = ''
       + '<div class="pt-section">'
-        + '<div class="pt-section-head"><div><div class="pt-section-title"><span class="num">§7</span>Post-Fill Checklist · day-by-day operator playbook</div><div class="pt-section-sub">what to check at each interval after the fill · 5 review checkpoints</div></div><span class="pt-pill cp">d0 → d' + maxHoldD + ' · 5 checkpoints</span></div>'
+        + '<div class="pt-section-head"><div><div class="pt-section-title"><span class="num">§7</span>Post-Fill Checklist · day-by-day operator playbook</div><div class="pt-section-sub">what to check at each interval after the fill · ' + _checkptsClean.length + ' review checkpoints</div></div><span class="pt-pill cp">d0 → d' + maxHoldD + ' · ' + _checkptsClean.length + ' checkpoints</span></div>'
         + '<div class="pt-section-body">'
           + '<div class="pt-checklist">'
-            + '<div class="pt-day"><div class="pt-day-h">Day 0</div><div class="pt-day-d">fill day</div><ul class="pt-day-l"><li>Confirm fill price ≤ $' + (eHi || limitPx).toFixed(2) + ' (top of zone)</li><li>Place GTC stop $' + (stop ? stop.toFixed(2) : '—') + ' in broker</li><li>Place GTC T1 limit @ $' + (t1Lv ? t1Lv.toFixed(2) : '—') + ' for half qty</li><li>Log to <code>signal_log.json</code></li></ul></div>'
-            + '<div class="pt-day"><div class="pt-day-h">Day 1</div><div class="pt-day-d">confirmation</div><ul class="pt-day-l"><li>Check overnight gap · stop in broker still active</li><li>Verify EMA21 still above price</li><li>Check catalyst tags unchanged</li></ul></div>'
-            + '<div class="pt-day"><div class="pt-day-h">Day 3</div><div class="pt-day-d">trail-trigger watch</div><ul class="pt-day-l"><li>If at +2% → confirm trail engaged</li><li>Sector RS rank ≥ 70 check</li><li>Open position attribution review</li></ul></div>'
-            + '<div class="pt-day"><div class="pt-day-h">Day 7</div><div class="pt-day-d">edge half-life</div><ul class="pt-day-l"><li>Sleeve PF ½-life cutoff · if no T1 yet, re-evaluate</li><li>Tighten stop to EMA21 if green</li><li>RSI still ≥ 50 check</li></ul></div>'
-            + '<div class="pt-day"><div class="pt-day-h">Day ' + maxHoldD + '</div><div class="pt-day-d">time-stop</div><ul class="pt-day-l"><li><b style="color:var(--ptrd)">Hard exit at next open if no T1</b></li><li>Log outcome to <code>picks_history.json</code></li><li>Update sleeve attribution stats</li></ul></div>'
+            + _checkptsClean.map(c => '<div class="pt-day"><div class="pt-day-h">Day ' + c.d + '</div><div class="pt-day-d">' + c.lbl + '</div><ul class="pt-day-l">' + c.items.map(it => '<li>' + it + '</li>').join('') + '</ul></div>').join('')
           + '</div>'
         + '</div>'
       + '</div>';

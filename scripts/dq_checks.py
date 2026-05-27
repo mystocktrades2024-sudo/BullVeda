@@ -230,7 +230,81 @@ def main():
             fail += len(batch)
             print(f"  ! batch {i}: {type(e).__name__}: {str(e)[:200]}")
     print(f"\n  pushed={ok} failed={fail}")
+
+    # 2026-05-27: write verdict state + Slack alert on critical failures.
+    # State file lets run_daily_scan.sh check DQ verdict before launching.
+    _write_dq_state_and_alert(rows, failed)
+
     return 0 if fail == 0 else 1
+
+
+def _write_dq_state_and_alert(rows: list, failed: list) -> None:
+    """Persist a single-line verdict to cache/dq_check_state.json and Slack
+    if any critical failures (severity='error' or warning count > 5)."""
+    critical = [r for r in failed if r.get("severity") == "error"]
+    warnings = [r for r in failed if r.get("severity") == "warning"]
+    state = {
+        "verdict":    "FAIL" if critical else ("WARN" if warnings else "PASS"),
+        "n_checks":   len(rows),
+        "n_failed":   len(failed),
+        "n_critical": len(critical),
+        "n_warning":  len(warnings),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "top_failures": [
+            {"table": r["table_name"], "check": r["check_name"],
+             "severity": r.get("severity"), "details": r.get("details", "")[:200]}
+            for r in failed[:10]
+        ],
+    }
+    state_path = ROOT / "cache" / "dq_check_state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state, indent=2))
+    print(f"  wrote {state_path.name}: verdict={state['verdict']}")
+
+    # Slack ONLY on critical failures (the kind that would invalidate a scan).
+    # Warnings get logged but no Slack noise.
+    if not critical:
+        return
+
+    webhook = os.environ.get("SLACK_WEBHOOK_URL")
+    if not webhook:
+        env = ROOT / ".env"
+        if env.exists():
+            for line in env.read_text().splitlines():
+                if line.startswith("SLACK_WEBHOOK_URL="):
+                    webhook = line.split("=", 1)[1].strip(); break
+    if not webhook:
+        return
+
+    fail_lines = "\n".join(
+        f"  ❌ `{r['table_name']}.{r['check_name']}` — {r['details'][:120]}"
+        for r in critical[:10]
+    )
+    payload = {
+        "text": f"DQ FAIL — {len(critical)} critical checks failed",
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn",
+                "text": f"🚨 *Data Quality FAILED* — {len(critical)} critical failures"}},
+            {"type": "context", "elements": [{"type": "mrkdwn",
+                "text": f"Fires at 05:50 PT before the 06:00 scan. "
+                        f"Total: {len(rows)} checks · {len(critical)} critical · "
+                        f"{len(warnings)} warnings."}]},
+            {"type": "section", "text": {"type": "mrkdwn",
+                "text": f"*Critical failures:*\n{fail_lines}"}},
+            {"type": "context", "elements": [{"type": "mrkdwn",
+                "text": "⚠️ Scan still runs (don't block on DQ), but expect degraded outputs. "
+                        "Investigate via `cache/dq_check_state.json`."}]},
+        ],
+    }
+    try:
+        import requests
+        r = requests.post(webhook, json=payload, timeout=8)
+        if r.status_code == 200:
+            print(f"  Slack alert posted ({len(critical)} criticals)")
+        else:
+            print(f"  Slack post failed HTTP {r.status_code}")
+    except Exception as e:
+        print(f"  Slack post error: {e}")
 
 
 if __name__ == "__main__":

@@ -22,6 +22,25 @@ LOG_DIR="$ROOT/cache/logs"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/launchd-wrapper.log"
 
+# 2026-05-27: CPU/concurrency guard for heavy jobs. Jobs in HEAVY_LABELS
+# get skipped if load avg > 8 OR a swing scan is running OR another heavy
+# job is active. Prevents recurrence of 2026-05-27 12:11 outage (walk-forward
+# + scan competing → load 70 → tunnel 524). guard_heavy_job.sh `exit 0`s on
+# skip, which propagates here because we `source` it (not `bash`).
+HEAVY_LABELS=(
+  "com.swingtrade.walk-forward-tonight"
+  "com.swingtrade.ml-edge"
+  "com.swingtrade.ml-edge-intraday"
+  "com.swingtrade.weekly-backtest"
+  "com.swingtrade.enrich-nightly"
+)
+for heavy in "${HEAVY_LABELS[@]}"; do
+  if [ "$LABEL" = "$heavy" ]; then
+    source "$ROOT/scripts/guard_heavy_job.sh" "$LABEL"
+    break
+  fi
+done
+
 START_EPOCH=$(date +%s)
 START_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
