@@ -59,6 +59,89 @@
   .rd { color: var(--rd); }
   .nu { color: var(--ink-3); }
 
+  /* ── TOP PICKS · prominent strip above the main grid ─────────────── */
+  .eikon-toppicks {
+    margin: 8px 8px 0;
+    max-width: 1700px; margin-left: auto; margin-right: auto;
+    background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .eikon-toppicks-h {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 12px;
+    background: var(--bg-3);
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono); font-size: 10.5px;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--copper); font-weight: 800;
+  }
+  .eikon-toppicks-h .sub { color: var(--ink-3); font-weight: 500; letter-spacing: 0.04em; text-transform: none; font-size: 10px; margin-left: auto; }
+  .eikon-toppicks-row {
+    display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px;
+    padding: 8px;
+  }
+  @media (max-width: 1500px) { .eikon-toppicks-row { grid-template-columns: repeat(5, 1fr); } }
+  @media (max-width: 900px)  { .eikon-toppicks-row { grid-template-columns: repeat(2, 1fr); } }
+  .eikon-toppick {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 7px 10px;
+    cursor: pointer;
+    transition: all 100ms;
+    position: relative; overflow: hidden;
+  }
+  .eikon-toppick:hover {
+    border-color: var(--copper);
+    background: rgba(217,119,87,0.06);
+  }
+  .eikon-toppick.active {
+    border-color: var(--copper);
+    background: rgba(217,119,87,0.10);
+  }
+  .eikon-toppick::before {
+    content: ''; position: absolute; top: 0; left: 0; bottom: 0; width: 3px;
+  }
+  .eikon-toppick.bull::before { background: linear-gradient(180deg, var(--gn), rgba(91,229,124,0.3)); }
+  .eikon-toppick.bear::before { background: linear-gradient(180deg, var(--rd), rgba(255,107,91,0.3)); }
+  .eikon-tp-top {
+    display: flex; align-items: baseline; gap: 6px;
+    margin-left: 5px;
+  }
+  .eikon-tp-tk {
+    font-family: var(--sans); font-weight: 800; font-size: 14px;
+    color: var(--ink); letter-spacing: 0.02em;
+  }
+  .eikon-tp-arr { font-size: 11px; }
+  .eikon-tp-arr.bull { color: var(--gn); }
+  .eikon-tp-arr.bear { color: var(--rd); }
+  .eikon-tp-conv {
+    margin-left: auto;
+    font-family: var(--mono); font-size: 10px; font-weight: 800;
+    padding: 1px 5px; border-radius: 3px;
+    background: var(--bg-3); border: 1px solid var(--line);
+    color: var(--ink-2);
+  }
+  .eikon-tp-conv.gn { background: rgba(91,229,124,0.15); border-color: rgba(91,229,124,0.4); color: var(--gn); }
+  .eikon-tp-conv.am { background: rgba(255,185,92,0.15); border-color: rgba(255,185,92,0.4); color: var(--am); }
+  .eikon-tp-conv.rd { background: rgba(255,107,91,0.15); border-color: rgba(255,107,91,0.4); color: var(--rd); }
+  .eikon-tp-px {
+    font-family: var(--mono); font-size: 11px; font-weight: 700;
+    color: var(--copper); margin-left: 5px;
+  }
+  .eikon-tp-strat {
+    font-family: var(--mono); font-size: 9.5px; color: var(--ink-2);
+    margin: 2px 0 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .eikon-tp-stats {
+    display: flex; gap: 6px; margin: 3px 0 0 5px;
+    font-family: var(--mono); font-size: 9px; color: var(--ink-3);
+    flex-wrap: wrap;
+  }
+  .eikon-tp-stats b { color: var(--ink-1); font-weight: 700; }
+
   /* ── MAIN SHELL ───────────────────────────────────────────────────── */
   .eikon-shell {
     display: grid;
@@ -346,6 +429,15 @@
     <span class="eikon-mkt-cell"><span class="k">REGIME</span><span class="v" id="mkt-regime">—</span></span>
   </span>
 </header>
+
+<!-- TOP PICKS · always-visible strip, ranked by composite directional score -->
+<section class="eikon-toppicks" id="eikon-toppicks">
+  <div class="eikon-toppicks-h">
+    ⊞ Top Options Picks
+    <span class="sub" id="toppicks-meta">ranked by composite (PCR + UOA + Δ) · click to load</span>
+  </div>
+  <div class="eikon-toppicks-row" id="toppicks-row"></div>
+</section>
 
 <div class="eikon-shell">
 
@@ -1120,6 +1212,61 @@
     }
   }
 
+  function paintTopPicks() {
+    const row = document.getElementById('toppicks-row');
+    const meta = document.getElementById('toppicks-meta');
+    if (!row || !DATA) return;
+    const picks = (DATA.top30 || []).filter(p => p.put_call_ratio != null && p.atm_strike != null);
+    const conv = (p) => {
+      const pcr = p.put_call_ratio || 1;
+      const pcrSc = pcr < 1 ? Math.min(1, (1-pcr)/0.8) : Math.max(0, 1 - (pcr-1)/0.8);
+      const uoaTot = (+p.uoa_calls||0) + (+p.uoa_puts||0);
+      const uoaSc = uoaTot > 0 ? (+p.uoa_calls||0)/uoaTot : 0.5;
+      const dSc = p.atm_delta == null ? 0.5 : Math.abs(+p.atm_delta) >= 0.55 ? 1 : Math.abs(+p.atm_delta) >= 0.45 ? 0.7 : 0.4;
+      return Math.round((pcrSc*0.5 + uoaSc*0.3 + dSc*0.2) * 100);
+    };
+    // Take top 5 long + top 5 short by composite score
+    const ranked = picks.map(p => ({ p, c: conv(p), bull: (p.put_call_ratio || 1) < 1.0 }));
+    const bull = ranked.filter(x => x.bull).sort((a,b) => b.c - a.c).slice(0, 5);
+    const bear = ranked.filter(x => !x.bull).sort((a,b) => b.c - a.c).slice(0, 5);
+    const ordered = [...bull, ...bear];
+    if (meta) meta.textContent = `${bull.length} long · ${bear.length} short · click to load chain · ${picks.length} total UOA`;
+    row.innerHTML = ordered.map(({ p, c, bull }) => {
+      const cls = bull ? 'bull' : 'bear';
+      const ccls = c >= 65 ? 'gn' : c >= 50 ? 'am' : 'rd';
+      const ivR = p.iv_percentile;
+      const ivRich = ivR != null && ivR > 70;
+      const stratName = bull
+        ? (ivRich && p.iv_25d_call_mark != null ? 'Bull C Spd' : 'Long C')
+        : (ivRich && p.iv_25d_put_mark  != null ? 'Bear P Spd' : 'Long P');
+      const ivPct = p.atm_iv != null ? (p.atm_iv*100).toFixed(0) : '—';
+      const ivrpPct = p.ivrp != null ? ((p.ivrp >= 0 ? '+' : '') + (p.ivrp*100).toFixed(0)) : '—';
+      const ivrpCls = p.ivrp == null ? '' : p.ivrp > 0.03 ? 'rd' : p.ivrp < -0.03 ? 'gn' : 'am';
+      const premStr = p['premium_total_$'] != null ? _dol(p['premium_total_$']) : '—';
+      const active = SELECTED_TK === p.ticker ? 'active' : '';
+      return `<div class="eikon-toppick ${cls} ${active}" data-tk="${p.ticker}">
+        <div class="eikon-tp-top">
+          <span class="eikon-tp-tk">${p.ticker}</span>
+          <span class="eikon-tp-arr ${cls}">${bull ? '▲' : '▼'}</span>
+          <span class="eikon-tp-conv ${ccls}">${c}%</span>
+        </div>
+        <div class="eikon-tp-px">$${(+p.price).toFixed(2)}</div>
+        <div class="eikon-tp-strat">${stratName} · $${(+p.atm_strike).toFixed(0)} · ${(+p.atm_dte).toFixed(0)}d</div>
+        <div class="eikon-tp-stats">
+          <span>IV <b>${ivPct}%</b></span>
+          <span>IVRP <b class="${ivrpCls}">${ivrpPct}%</b></span>
+          <span>${premStr}</span>
+        </div>
+      </div>`;
+    }).join('');
+    row.querySelectorAll('[data-tk]').forEach(el => {
+      el.addEventListener('click', () => {
+        SELECTED_TK = el.dataset.tk;
+        renderAll();
+      });
+    });
+  }
+
   function paintVixTerm() {
     const body = document.getElementById('vixterm-body');
     const meta = document.getElementById('vixterm-meta');
@@ -1317,6 +1464,7 @@
 
   function renderAll() {
     paintTopStrip();
+    paintTopPicks();
     paintWatchlist();
     paintChain();
     paintStrategy();
