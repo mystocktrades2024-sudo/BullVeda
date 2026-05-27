@@ -7813,6 +7813,79 @@ async def macro_vol_api():
         return {"error": str(e)}
 
 
+@app.post("/api/options-stream/start")
+async def options_stream_start_api(req: Request):
+    """Start the Schwab Streamer WS connection for the given OCC symbols.
+
+    Body: {symbols: [...]}  — list of OCC option symbols (or build from
+                              {ticker, exp, side, strike} list under 'specs').
+    Free · uses existing Schwab brokerage auth.
+    """
+    body = await req.json()
+    syms = body.get("symbols") or []
+    if not syms and body.get("specs"):
+        try:
+            from schwab_streamer import build_occ
+            syms = [build_occ(s["ticker"], s["exp"], s["side"], float(s["strike"])) for s in body["specs"]]
+        except Exception as e:
+            return {"error": f"bad specs: {e}"}
+    try:
+        import schwab_streamer
+        return schwab_streamer.start_stream(syms)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/options-stream/status")
+async def options_stream_status_api():
+    try:
+        import schwab_streamer
+        return schwab_streamer.get_status()
+    except Exception as e:
+        return {"error": str(e), "connected": False}
+
+
+@app.post("/api/options-stream/stop")
+async def options_stream_stop_api():
+    try:
+        import schwab_streamer
+        return schwab_streamer.stop_stream()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/options-stream/sse")
+async def options_stream_sse_api():
+    """Server-Sent Events bridge — UI subscribes here for live ticks.
+
+    Streams JSON objects from the Schwab Streamer queue as SSE messages.
+    Each tick: {symbol, bid, ask, mark, last, iv, delta, gamma, theta, vega, ...}.
+    """
+    from fastapi.responses import StreamingResponse
+    import asyncio
+    try:
+        import schwab_streamer
+    except ImportError:
+        return {"error": "schwab_streamer not available"}
+    async def event_stream():
+        q = schwab_streamer.get_queue()
+        if q is None:
+            yield "event: error\ndata: {\"error\":\"streamer not started\"}\n\n"
+            return
+        yield "event: connected\ndata: {}\n\n"
+        try:
+            while True:
+                try:
+                    tick = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"data: {json.dumps(tick, default=str)}\n\n"
+                except asyncio.TimeoutError:
+                    # Keep-alive comment
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @app.post("/api/options-paper-order")
 async def options_paper_order_api(req: Request):
     """Submit an Alpaca PAPER option order from the Eikon trade ticket.
