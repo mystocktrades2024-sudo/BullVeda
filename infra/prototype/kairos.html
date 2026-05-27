@@ -19095,7 +19095,7 @@ const QuantOptions = (function() {
         <!-- LIVE PANE -->
         <div class="qo-subpane" data-qosub-pane="live">
           <!-- 2026-05-26 · LIVE pane redesigned as Eikon · isolated via iframe -->
-          <iframe id="eikon-live-frame" src="eikon_preview.html" style="width:100%;height:calc(100vh - 240px);min-height:1200px;border:0;background:var(--bg-0);display:block;" loading="lazy"></iframe>
+          <iframe id="eikon-live-frame" src="/v2/eikon_preview.html" style="width:100%;height:calc(100vh - 240px);min-height:1200px;border:0;background:var(--bg-0);display:block;" loading="lazy"></iframe>
         </div><!-- end LIVE pane -->
 
         <!-- HISTORY PANE -->
@@ -60001,9 +60001,24 @@ const QuantMomentum = (function () {
         const arr = window._kairosTickersArr || [];
         const idx = new Map();
         arr.forEach(r => { if (r && r.ticker) idx.set(r.ticker, r); });
-        const FIELDS = ['sharpe_126d','sharpe_1y','above_21ema','above_50ema','above_200sma',
-                        'ema_signal','trend','market_phase','adx','pct_from_52w_high',
-                        'composite','raw_momentum_score','ohlcv','rs_rank'];
+        const FIELDS = [
+          // Momentum core (existing)
+          'sharpe_126d','sharpe_1y','above_21ema','above_50ema','above_200sma',
+          'ema_signal','trend','market_phase','adx','pct_from_52w_high',
+          'composite','raw_momentum_score','ohlcv','rs_rank',
+          // Catalyst + context (added 2026-05-26)
+          'news_articles','news_sentiment_score','insider_activity','insider_cluster_flag',
+          'analyst_target','analyst_buy','analyst_sell','analyst_recommendations',
+          'earnings','earn_days','days_to_earnings','iv_rank','options_chain','uoa_flag',
+          'short_pct_float','short_interest_pct','short_float','days_to_cover',
+          'beta_spy','beta','high_52w','low_52w','fiftyTwoWeekHigh','fiftyTwoWeekLow','high_252',
+          'perf_1d','perf_5d','perf_21d','perf_63d','perf_126d',
+          'perf_week','perf_month','perf_quarter','perf_half_year','perf_year',
+          'rvol','obv_trend','sma200','sma50','sma20',
+          'verdict','catalyst_tier','setup_family','entry_quality','rr_ratio',
+          'target1','target2','stop','entry_low','entry_mid','entry_high',
+          'sector','industry','market_cap','name'
+        ];
         let merged = 0;
         for (const [sym, p] of Object.entries(main || {})) {
           const row = idx.get(sym);
@@ -66654,7 +66669,12 @@ const QuantMomentum = (function () {
     const rvol = _qmom13RVOL(r);
     const cats = _qmom13Catalysts(r);
 
-    const articles = ((r._raw && r._raw.news_articles) || []).slice(0, 5);
+    const articles = (
+      (r._raw && r._raw.news_articles) ||
+      r.news_articles ||
+      (r._r && r._r.news_articles) ||
+      []
+    ).slice(0, 5);
     const newsHtml = articles.length
       ? articles.map(a => {
           const t = a && (a.title || '');
