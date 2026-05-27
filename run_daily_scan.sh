@@ -27,7 +27,7 @@ EXIT_CODE=$?
 set -e
 
 if [ $EXIT_CODE -eq 0 ]; then
-    echo "Scan completed successfully — V2 at http://localhost:7432/v2/dashboard.html" >> "$LOG_FILE"
+    echo "Scan completed successfully — V2 at http://localhost:7432/kairos.html" >> "$LOG_FILE"
     # V2 dashboard: post-Phase-A (2026-05-08), legacy cache/dashboard.html is
     # no longer generated. Don't auto-open browser on every cron run — would
     # steal focus 14× per day. User opens V2 URL manually when needed.
@@ -130,6 +130,15 @@ if [ $EXIT_CODE -eq 0 ]; then
     echo "── Rolling Sharpe Kill alert check ──" >> "$LOG_FILE"
     set +e
     "$PYTHON" scripts/sharpe_kill_alert.py >> "$LOG_FILE" 2>&1
+    set -e
+
+    # ── Post-scan top-picks Slack digest (Swing · Options · Momentum · ML Edge) ──
+    # Sends one unified Slack message with top 5 per source after every scan.
+    # Idempotent — same scan window won't re-post identical picks (hash check).
+    SCAN_TAG=$(date +"%H:%M")
+    echo "── Post-scan Slack digest [$SCAN_TAG] ──" >> "$LOG_FILE"
+    set +e
+    "$PYTHON" scripts/post_scan_slack_alert.py --scan-tag "$SCAN_TAG" >> "$LOG_FILE" 2>&1
     set -e
 
     # ── Rebuild audit ledger (per-signal D1-D5/W1-W5/M1-M6 grid) ─────────

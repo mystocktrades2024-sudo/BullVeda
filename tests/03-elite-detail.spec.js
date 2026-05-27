@@ -14,7 +14,7 @@ test.describe('Elite-detail page', () => {
     });
     page.on('pageerror', err => errors.push('pageerror: ' + err.message));
 
-    const resp = await page.goto('/v2/elite-detail.html?t=AAPL', { waitUntil: 'networkidle' });
+    const resp = await page.goto('/kairos.html?t=AAPL', { waitUntil: 'networkidle' });
     expect(resp.status()).toBeLessThan(400);
 
     // Wait for the detail-shell to finish painting

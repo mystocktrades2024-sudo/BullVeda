@@ -5,8 +5,8 @@
 import { test, expect } from '@playwright/test';
 
 const STATIC_ROUTES = [
-  '/v2/dashboard.html',
-  '/v2/elite-detail.html',
+  '/kairos.html',
+  '/kairos.html',
   '/v2/_v',
   '/v2/core/shell.js',
   '/v2/core/shared.js',

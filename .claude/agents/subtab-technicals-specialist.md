@@ -31,5 +31,5 @@ You are the 02 Chart+ / Technicals specialist for the SwingTrade V2 dashboard pe
 ## Standard retest
 1. `node --check infra/prototype/subtabs/technicals/chart.js`
 2. Restart server: `launchctl unload && launchctl load ~/Library/LaunchAgents/com.swingtrade.server.plist`
-3. Browser: hard-refresh `/v2/elite-detail.html?t=AAPL`
+3. Browser: hard-refresh `/kairos.html?t=AAPL`
 4. Console should show `[detail-shell] rendered tab 'subtab-technicals' from module …`

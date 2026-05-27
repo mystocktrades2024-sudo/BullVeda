@@ -1,5 +1,5 @@
 // ─── SwingTrade iPad Shell ────────────────────────────────────────────
-// MVP: split-view list + iframe detail. Reuses /v2/elite-detail.html for
+// MVP: split-view list + iframe detail. Reuses /kairos.html for
 // per-ticker rendering — no module duplication.
 // Data source: same data.critical.json + tickers.json the desktop uses.
 
@@ -195,7 +195,7 @@ function renderSettingsView() {
     </div>
 
     <div style="font-size: 11px; color: var(--paper-3); letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 8px;">Open Desktop View</div>
-    <button onclick="window.location='/v2/dashboard.html'" style="width: 100%; padding: 14px; background: var(--bg-2); border: 1px solid var(--rule); border-radius: 10px; color: var(--accent); font-size: 14px; font-weight: 500; cursor: pointer; min-height: 44px;">
+    <button onclick="window.location='/kairos.html'" style="width: 100%; padding: 14px; background: var(--bg-2); border: 1px solid var(--rule); border-radius: 10px; color: var(--accent); font-size: 14px; font-weight: 500; cursor: pointer; min-height: 44px;">
       Open full desktop dashboard →
     </button>
     <div style="font-size: 11px; color: var(--paper-3); margin-top: 8px; text-align: center;">
@@ -210,7 +210,7 @@ function showDetail(ticker) {
   $('ipDetailTicker').textContent = ticker;
   // Reuse existing elite-detail.html via iframe — no module duplication
   const body = $('ipDetailBody');
-  body.innerHTML = `<iframe src="/v2/elite-detail.html?t=${encodeURIComponent(ticker)}" loading="lazy"></iframe>`;
+  body.innerHTML = `<iframe src="/kairos.html?t=${encodeURIComponent(ticker)}" loading="lazy"></iframe>`;
 
   // Portrait: slide in detail pane
   $('ipDetailPane').classList.add('shown');
@@ -222,7 +222,7 @@ function showDetail(ticker) {
 
   // Update External-link button to open detail in new tab
   $('ipExternBtn').onclick = () => {
-    window.open(`/v2/elite-detail.html?t=${encodeURIComponent(ticker)}`, '_blank');
+    window.open(`/kairos.html?t=${encodeURIComponent(ticker)}`, '_blank');
   };
 }
 

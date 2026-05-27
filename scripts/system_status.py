@@ -265,7 +265,7 @@ def _format_slack(report: dict) -> tuple[str, list]:
         "text": {
             "type": "mrkdwn",
             "text": (
-                "<https://trade.mystockholding.com/v2/dashboard.html|🔗 Live Dashboard> · "
+                "<https://trade.mystockholding.com/kairos.html|🔗 Live Dashboard> · "
                 "<https://trade.mystockholding.com/reports|📚 Report Archive> · "
                 "<https://trade.mystockholding.com/reports/latest/dashboard|🗂️ Latest Dashboard Snapshot> · "
                 "<https://trade.mystockholding.com/reports/latest/morning-briefing|🌅 Morning Briefing>"

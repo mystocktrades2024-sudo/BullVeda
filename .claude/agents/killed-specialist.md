@@ -31,5 +31,5 @@ You are the Killed / AVOID specialist for the SwingTrade V2 dashboard.
 ## Standard retest
 1. `node --check infra/prototype/tabs/killed/killed.js`
 2. Restart server: `launchctl unload && launchctl load ~/Library/LaunchAgents/com.swingtrade.server.plist`
-3. Browser: hard-refresh `/v2/dashboard.html`
+3. Browser: hard-refresh `/kairos.html`
 4. Console should show `[shell] rendered tab 'killed' from module …`

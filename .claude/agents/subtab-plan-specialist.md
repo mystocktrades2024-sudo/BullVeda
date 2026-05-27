@@ -31,5 +31,5 @@ You are the 05 Plan specialist for the SwingTrade V2 dashboard per-ticker detail
 ## Standard retest
 1. `node --check infra/prototype/subtabs/plan/plan.js`
 2. Restart server: `launchctl unload && launchctl load ~/Library/LaunchAgents/com.swingtrade.server.plist`
-3. Browser: hard-refresh `/v2/elite-detail.html?t=AAPL`
+3. Browser: hard-refresh `/kairos.html?t=AAPL`
 4. Console should show `[detail-shell] rendered tab 'subtab-plan' from module …`

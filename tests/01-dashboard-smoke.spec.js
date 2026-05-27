@@ -31,7 +31,7 @@ test.describe('Dashboard boot', () => {
     });
     page.on('pageerror', err => errors.push('pageerror: ' + err.message));
 
-    const resp = await page.goto('/v2/dashboard.html', { waitUntil: 'networkidle' });
+    const resp = await page.goto('/kairos.html', { waitUntil: 'networkidle' });
     expect(resp.status(), 'dashboard.html HTTP status').toBeLessThan(400);
 
     // Wait for the loader's final boot line to appear

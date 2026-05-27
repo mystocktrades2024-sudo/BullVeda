@@ -1,7 +1,7 @@
 # SwingTrade iPad Shell
 
 iPad-optimized PWA shell for the SwingTrade dashboard. **Reuses every existing
-sub-tab module** via iframe of `/v2/elite-detail.html` — no module duplication.
+sub-tab module** via iframe of `/kairos.html` — no module duplication.
 
 ## Open
 
@@ -44,7 +44,7 @@ sub-tab module** via iframe of `/v2/elite-detail.html` — no module duplication
 ## Data flow
 
 - Boots from `/v2/data.critical.json` (~1.5 MB) — same chunk desktop uses
-- Per-ticker detail: lazy `<iframe src="/v2/elite-detail.html?t=TICKER">`
+- Per-ticker detail: lazy `<iframe src="/kairos.html?t=TICKER">`
 - This means every Overview, Plan, Technicals, etc. update in the existing
   desktop modules **automatically appears in the iPad detail pane** with no
   duplication or porting.

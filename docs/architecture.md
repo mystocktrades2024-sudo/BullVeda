@@ -47,7 +47,7 @@ infra/prototype/tickers.json          — per-ticker drill-down (75 tickers)
        │
        ▼
 http://localhost:7432/v2/             — main V2 dashboard (signal scanner, etc.)
-http://localhost:7432/v2/elite-detail.html?t=AVT  — per-ticker drill-down
+http://localhost:7432/kairos.html?t=AVT  — per-ticker drill-down
 ```
 
 ## The 8-gate cascade (decision_engine.py)

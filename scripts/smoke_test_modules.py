@@ -167,7 +167,7 @@ def check_window_exposures():
 def check_routes():
     print("\n[7] Server routes respond (401 = registered + auth-gated)")
     routes = [
-        "/v2/dashboard.html", "/v2/elite-detail.html", "/v2/_v",
+        "/kairos.html", "/kairos.html", "/v2/_v",
         "/v2/core/shell.js", "/v2/core/shared.js", "/v2/core/drawer.js",
         "/v2/core/actions.js", "/v2/core/widgets.js",
         "/v2/core/elite-detail-shell.js",

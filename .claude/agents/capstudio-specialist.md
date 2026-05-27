@@ -43,7 +43,7 @@ You are the CapStudio specialist for the SwingTrade RBAC system.
 ## Standard retest
 1. `python3 -c "import auth; print(auth.user_has_permission('USER', 'tabs', 'TAB_ID'))"`
 2. Restart server: `launchctl unload && launchctl load ~/Library/LaunchAgents/com.swingtrade.server.plist`
-3. Open `/v2/dashboard.html#settings` → CapStudio sub-tab (admin-only). Verify matrix loads + role columns + functions.
+3. Open `/kairos.html#settings` → CapStudio sub-tab (admin-only). Verify matrix loads + role columns + functions.
 4. Toggle a checkbox, save, refresh — confirm grant persisted in `data/roles.json`.
 5. Switch user (different role) → confirm gated tabs are hidden in sidebar.
 

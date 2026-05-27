@@ -164,7 +164,7 @@ def _format_alert_slack(prior_state: str, new_state: str,
 
     blocks.append({"type": "section", "text": {"type": "mrkdwn",
         "text": "<https://trade.mystockholding.com/reports/latest/sharpe-monitor|📊 Open Monitor Report> · "
-                "<https://trade.mystockholding.com/v2/dashboard.html|🔗 Live Dashboard>"}})
+                "<https://trade.mystockholding.com/kairos.html|🔗 Live Dashboard>"}})
 
     return text, blocks
 
@@ -327,7 +327,7 @@ def _build_history_html(history: list[dict], current: dict) -> str:
   <a href="https://trade.mystockholding.com/reports">Report Archive</a>
   <a href="https://trade.mystockholding.com/reports/latest/morning-newsletter">Morning Brief</a>
   <a href="https://trade.mystockholding.com/reports/latest/strategy-roster">Strategy Roster</a>
-  <a href="https://trade.mystockholding.com/v2/dashboard.html">Live Dashboard</a>
+  <a href="https://trade.mystockholding.com/kairos.html">Live Dashboard</a>
 </footer>
 </div></body></html>"""
     return html

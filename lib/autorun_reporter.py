@@ -120,7 +120,7 @@ def report(autorun_name: str, status: str,
                 f"<https://trade.mystockholding.com/reports/latest/{report_kind}|🗂️ Latest {autorun_name}> · "
                 + link_text
             )
-        link_text += " · <https://trade.mystockholding.com/v2/dashboard.html|🔗 Live Dashboard>"
+        link_text += " · <https://trade.mystockholding.com/kairos.html|🔗 Live Dashboard>"
         blocks.append({
             "type": "context",
             "elements": [{"type": "mrkdwn", "text": link_text}],

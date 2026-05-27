@@ -31,5 +31,5 @@ You are the Why-this-is-X · Rule Engine specialist for the SwingTrade V2 dashbo
 ## Standard retest
 1. `node --check infra/prototype/subtabs/ruleengine/rule_engine.js`
 2. Restart server: `launchctl unload && launchctl load ~/Library/LaunchAgents/com.swingtrade.server.plist`
-3. Browser: hard-refresh `/v2/elite-detail.html?t=AAPL`
+3. Browser: hard-refresh `/kairos.html?t=AAPL`
 4. Console should show `[detail-shell] rendered tab 'subtab-ruleengine' from module …`

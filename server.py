@@ -275,6 +275,29 @@ async def _v2_root(auth: HTTPBasicCredentials = Depends(_check_auth)):
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/kairos.html")
 
+# Stale-link safety net (2026-05-27): /v2/dashboard.html and /v2/elite-detail.html
+# were the original v2 surface filenames. They got superseded by /kairos.html
+# but external bookmarks + scan-log print statements + old test specs still
+# reference them. Without these explicit redirects, those URLs 404 (the files
+# were deleted). MUST register BEFORE the catch-all /v2/{path:path}.
+@app.api_route("/v2/dashboard.html", methods=["GET","HEAD"])
+async def _v2_dashboard_legacy(request: Request,
+                               auth: HTTPBasicCredentials = Depends(_check_auth)):
+    from fastapi.responses import RedirectResponse
+    qs = request.url.query
+    target = "/kairos.html" + (f"?{qs}" if qs else "")
+    return RedirectResponse(url=target, status_code=307)
+
+@app.api_route("/v2/elite-detail.html", methods=["GET","HEAD"])
+async def _v2_elite_detail_legacy(request: Request,
+                                  auth: HTTPBasicCredentials = Depends(_check_auth)):
+    # elite-detail.html was the per-ticker detail page; now it's a sub-view
+    # inside kairos.html keyed off `?t=TICKER` or `#TICKER` URL hash.
+    from fastapi.responses import RedirectResponse
+    qs = request.url.query
+    target = "/kairos.html" + (f"?{qs}" if qs else "")
+    return RedirectResponse(url=target, status_code=307)
+
 @app.api_route("/v2/ml_edge_picks_history.jsonl", methods=["GET", "HEAD"])
 async def _v2_ml_edge_picks_history(auth: HTTPBasicCredentials = Depends(_check_auth)):
     """ML Edge picks history JSONL (2026-05-23 · History sub-tab data source).

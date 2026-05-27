@@ -470,7 +470,7 @@ def render_html(current_regime: str = None) -> str:
 </table>
 
 <footer>
-  <a href="https://trade.mystockholding.com/v2/dashboard.html">Live Dashboard</a>
+  <a href="https://trade.mystockholding.com/kairos.html">Live Dashboard</a>
   <a href="https://trade.mystockholding.com/reports">Report Archive</a>
   <a href="https://trade.mystockholding.com/reports/latest/morning-newsletter">Morning Brief</a>
   <a href="https://trade.mystockholding.com/reports/latest/dashboard">Latest Snapshot</a>

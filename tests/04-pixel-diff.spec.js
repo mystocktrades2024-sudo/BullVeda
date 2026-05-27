@@ -51,7 +51,7 @@ test.describe('Pixel-diff regression (MOD-2)', () => {
   // ── 1. Main dashboard at desktop (1440x900) ──────────────────────────
   test('dashboard.html @ desktop 1440', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/v2/dashboard.html', { waitUntil: 'networkidle' });
+    await page.goto('/kairos.html', { waitUntil: 'networkidle' });
     await page.waitForFunction(
       () => window.TAB_RENDERERS && Object.keys(window.TAB_RENDERERS).length > 0,
       { timeout: 15_000 }
@@ -67,7 +67,7 @@ test.describe('Pixel-diff regression (MOD-2)', () => {
   // ── 2. Main dashboard at tablet portrait (810x1080) ─────────────────
   test('dashboard.html @ tablet portrait 810', async ({ page }) => {
     await page.setViewportSize({ width: 810, height: 1080 });
-    await page.goto('/v2/dashboard.html', { waitUntil: 'networkidle' });
+    await page.goto('/kairos.html', { waitUntil: 'networkidle' });
     await page.waitForFunction(
       () => window.TAB_RENDERERS && Object.keys(window.TAB_RENDERERS).length > 0,
       { timeout: 15_000 }
@@ -83,7 +83,7 @@ test.describe('Pixel-diff regression (MOD-2)', () => {
   // ── 3. Main dashboard at phone (390x844, iPhone 13) ─────────────────
   test('dashboard.html @ phone 390', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/v2/dashboard.html', { waitUntil: 'networkidle' });
+    await page.goto('/kairos.html', { waitUntil: 'networkidle' });
     await page.waitForFunction(
       () => window.TAB_RENDERERS && Object.keys(window.TAB_RENDERERS).length > 0,
       { timeout: 15_000 }
@@ -101,7 +101,7 @@ test.describe('Pixel-diff regression (MOD-2)', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     // Pick a stable ticker — AVT was BUY in recent runs, but any will do.
     // We fail soft if the ticker doesn't exist (registry might be empty).
-    await page.goto('/v2/elite-detail.html?t=AVT', { waitUntil: 'networkidle' });
+    await page.goto('/kairos.html?t=AVT', { waitUntil: 'networkidle' });
     await page.waitForTimeout(1000);
     await stabilize(page);
     expect(await page.screenshot({ fullPage: false, animations: 'disabled' }))
@@ -114,7 +114,7 @@ test.describe('Pixel-diff regression (MOD-2)', () => {
   // ── 5. Elite-detail Plan sub-tab @ desktop ──────────────────────────
   test('elite-detail Plan @ desktop 1440', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/v2/elite-detail.html?t=AVT', { waitUntil: 'networkidle' });
+    await page.goto('/kairos.html?t=AVT', { waitUntil: 'networkidle' });
     await page.waitForTimeout(800);
     // Click Plan sub-tab
     const planTab = page.locator('.fd-tab[data-tab="plan"]').first();
@@ -133,7 +133,7 @@ test.describe('Pixel-diff regression (MOD-2)', () => {
   // ── 6. Elite-detail Overview @ phone (390) — checks MOB-1/MOB-2 ───
   test('elite-detail Overview @ phone 390', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/v2/elite-detail.html?t=AVT', { waitUntil: 'networkidle' });
+    await page.goto('/kairos.html?t=AVT', { waitUntil: 'networkidle' });
     await page.waitForTimeout(800);
     await stabilize(page);
     expect(await page.screenshot({ fullPage: false, animations: 'disabled' }))

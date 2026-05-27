@@ -14,7 +14,7 @@ Usage:
        python3 import_positions.py my_holdings.csv
        python3 import_positions.py my_holdings.csv --dry-run    # preview only
 
-  3. Verify in V2 dashboard at http://localhost:7432/v2/dashboard.html
+  3. Verify in V2 dashboard at http://localhost:7432/kairos.html
      → Portfolio tab.
 
 Each row creates a paper position via portfolio_tracker.add_position().
@@ -118,7 +118,7 @@ def main() -> int:
 
     print()
     print(f"Done — {added} added, {skipped} skipped (already open), {failed} failed")
-    print(f"View at: http://localhost:7432/v2/dashboard.html → Portfolio tab")
+    print(f"View at: http://localhost:7432/kairos.html → Portfolio tab")
     return 0 if added > 0 or skipped > 0 else 1
 
 

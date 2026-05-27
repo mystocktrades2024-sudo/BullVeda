@@ -55,7 +55,7 @@ grep -E "Position gated|Final counts" cache/logs/scan_*.log | tail -5
 ### B. Open the v2 dashboard
 
 ```
-http://localhost:7432/v2/elite-detail.html?t=HAL
+http://localhost:7432/kairos.html?t=HAL
 ```
 
 Click each tab to verify:

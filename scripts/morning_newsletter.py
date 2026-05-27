@@ -618,7 +618,7 @@ def _render_html(report: dict) -> str:
 </section>
 
 <footer>
-  <a href="https://trade.mystockholding.com/v2/dashboard.html">Live Dashboard</a>
+  <a href="https://trade.mystockholding.com/kairos.html">Live Dashboard</a>
   <a href="https://trade.mystockholding.com/reports">Report Archive</a>
   <a href="https://trade.mystockholding.com/reports/latest/dashboard">Latest Snapshot</a>
   <div class="disclaimer">

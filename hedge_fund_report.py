@@ -1337,7 +1337,7 @@ if (DRIFT && DRIFT.available) {{
 
 // Trades table
 fillTable('tradesTable', TRADES, [
-  {{ key: 'ticker', fmt: (v, r) => '<a href="/v2/elite-detail.html?t=' + v + '" style="color:var(--accent);text-decoration:none;">' + v + '</a>' }},
+  {{ key: 'ticker', fmt: (v, r) => '<a href="/kairos.html?t=' + v + '" style="color:var(--accent);text-decoration:none;">' + v + '</a>' }},
   {{ key: 'entry_date' }},
   {{ key: 'exit_date' }},
   {{ key: 'setup' }},

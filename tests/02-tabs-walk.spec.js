@@ -30,7 +30,7 @@ test.describe('Tabs walk', () => {
     });
     page.on('pageerror', err => errors.push('pageerror: ' + err.message));
 
-    await page.goto('/v2/dashboard.html', { waitUntil: 'networkidle' });
+    await page.goto('/kairos.html', { waitUntil: 'networkidle' });
 
     // Wait for shell.js to finish booting (overrides installed)
     await page.waitForFunction(

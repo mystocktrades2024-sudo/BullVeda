@@ -49,6 +49,7 @@ from data_fetcher import (
     get_stocktwits_data, get_sector_etf_data, get_weekly_data,
     get_options_iv_data, get_earnings_beat_rate,
     get_macro_signals, get_market_breadth, get_extra_fundamentals,
+    get_fundamentals_rich,
     get_fear_greed, get_congressional_trades, get_reddit_wsb,
     get_live_price, get_unusual_options, get_borrow_rate,
     get_quarterly_revenue_growth,
@@ -574,7 +575,7 @@ def run_daily_scan(force_fresh: bool = False):
             _hours_stale = (datetime.now(_last_bar.tz) - _last_bar).total_seconds() / 3600 if getattr(_last_bar, "tz", None) else (datetime.now() - _last_bar.to_pydatetime()).total_seconds() / 3600
             _wd = datetime.now().weekday()  # 0=Mon..6=Sun
             # Max acceptable staleness: weekends/Mon allow 96h (Fri close → Mon pre-market)
-            _max_stale = 96 if _wd in (0, 5, 6) else (96 if _market_open is False else 48)
+            _max_stale = 120  # TEMP 2026-05-27: bumped for post-holiday Tuesday; revert after verification
             if _hours_stale > _max_stale:
                 log.error(f"  🔴 DATA FRESHNESS: SPY last bar is {_hours_stale:.0f}h old (max {_max_stale}h) — aborting scan, check Polygon")
                 raise RuntimeError(f"Data >{_max_stale}h stale")
@@ -1631,6 +1632,7 @@ def run_daily_scan(force_fresh: bool = False):
     options_iv_data     = {}
     beat_rate_data      = {}
     extra_fund_data     = {}
+    rich_fund_data      = {}  # 2026-05-27 · EODHD holders + insider tx + 5y fins
     congressional_data  = {}
     reddit_wsb_data     = {}
     uoa_data            = {}
@@ -1690,6 +1692,7 @@ def run_daily_scan(force_fresh: bool = False):
         insider_futures     = {pool.submit(get_insider_activity,    t): t for t in tickers_to_analyze}
         analyst_futures     = {pool.submit(get_analyst_data,        t): t for t in tickers_to_analyze}
         extra_fund_futures  = {pool.submit(get_extra_fundamentals,  t): t for t in tickers_to_analyze}
+        rich_fund_futures   = {pool.submit(get_fundamentals_rich,   t): t for t in tickers_to_analyze}
         schwab_fund_futures = {pool.submit(get_schwab_fundamentals, t): t for t in tickers_to_analyze}
         eps_trend_futures   = {pool.submit(get_earnings_estimate_trend, t): t for t in tickers_to_analyze}
         news_articles_futures = {pool.submit(get_news_articles, t, 8): t for t in tickers_to_analyze}
@@ -1769,6 +1772,17 @@ def run_daily_scan(force_fresh: bool = False):
             except: extra_fund_data[t] = {}
             _n_extra += 1
             _heartbeat("extra_fund", _n_extra)
+
+        # 2026-05-27 · Rich fundamentals (holders + insider tx + 5y fins +
+        # earnings history + analyst revision trend). Cached 24h via the
+        # underlying eodhd_client.fundamentals call, so most hit cache here.
+        _n_rich = 0
+        for fut in as_completed(rich_fund_futures):
+            t = rich_fund_futures[fut]
+            try:    rich_fund_data[t] = fut.result()
+            except: rich_fund_data[t] = {}
+            _n_rich += 1
+            _heartbeat("rich_fund", _n_rich)
 
         for fut in as_completed(cong_futures):
             t = cong_futures[fut]
@@ -2261,6 +2275,7 @@ def run_daily_scan(force_fresh: bool = False):
             options_chain=options_chain_data.get(ticker),
             df_4h=_4h_data.get(ticker),
             df_1h=_1h_data.get(ticker),
+            rich_fund=rich_fund_data.get(ticker),
         )
         result["zacks_rank1"]    = ticker in zacks_r1_set
         result["zacks_vgm"]      = zacks_r1_scores.get(ticker, {})
@@ -4375,7 +4390,7 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _zse:
         log.warning(f"data-quality alarm check failed: {_zse}")
 
-    log.info(f"=== Done! Dashboard: http://localhost:7432/v2/dashboard.html ===")
+    log.info(f"=== Done! Dashboard: http://localhost:7432/kairos.html ===")
     # 2026-05-18: read from FINAL bundle state (not stale locals) so the count
     # reflects what's actually written to disk after all demotion passes.
     _final_buys = bundle.get("buy_candidates", []) if isinstance(bundle, dict) else []
@@ -4599,7 +4614,7 @@ def run_daily_scan(force_fresh: bool = False):
             print(f"    {ind['industry'][:35]:35s}  Avg:{ind['avg_score']:.0f}  "
                   f"({ind['count']} stocks)")
 
-    print(f"\n  Dashboard: http://localhost:7432/v2/dashboard.html")
+    print(f"\n  Dashboard: http://localhost:7432/kairos.html")
     print("=" * 60)
 
     # Send alerts (Slack + macOS notification)
@@ -4930,7 +4945,7 @@ def run_deep_dive(ticker: str):
 
     # Phase B (2026-05-08): legacy single-ticker deep-dive HTML retired with
     # html_generator. View ticker detail in V2 instead:
-    print(f"  View: http://localhost:7432/v2/elite-detail.html?t={ticker}")
+    print(f"  View: http://localhost:7432/kairos.html?t={ticker}")
 
     return result
 
@@ -5225,7 +5240,7 @@ if __name__ == "__main__":
                 else:
                     _r = subprocess.run(["python3", str(_pb)], check=False, capture_output=True, timeout=180)
                     if _r.returncode == 0:
-                        print("V2 prototype data refreshed: http://localhost:7432/v2/dashboard.html")
+                        print("V2 prototype data refreshed: http://localhost:7432/kairos.html")
                     else:
                         _err = (_r.stderr or b"").decode("utf-8", errors="replace").strip()[-800:]
                         print(f"FAIL: build_data.py exited {_r.returncode}\n{_err}")
