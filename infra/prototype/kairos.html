@@ -20238,7 +20238,6 @@ const QuantOptions = (function() {
         <div class="qopt-mon-tkr">${p.ticker}</div>
         <div class="qopt-mon-sec">${(p.sector || '').toUpperCase()}</div>
         <div class="qopt-mon-px">$${(+p.price).toFixed(2)} <span class="${(change||0)>=0?'gn':'rd'}" style="font-size:14px">${change != null ? (change>=0?'+':'') + change.toFixed(2) + '%' : ''}</span></div>
-        <div style="font:600 9.5px var(--mono);color:var(--ink-3);margin-top:4px;letter-spacing:0.04em">← Drag splitter to resize detail pane →</div>
       </div>
 
       <div class="qopt-mon-section">
@@ -20695,25 +20694,41 @@ const QuantOptions = (function() {
       .qmom14-quickchip.on { background:var(--copper);color:var(--bg-0);border-color:var(--copper); }
       .qmom14-quickchip.clear { color:var(--ink-3); }
 
-      .qopt-mon-shell { display: grid; grid-template-columns: 1fr 5px 360px; gap: 0; padding: 14px 22px; align-items: stretch; min-height: calc(100vh - 280px); }
-      .qopt-mon-left { padding-right: 10px; min-width: 0; }
-      .qopt-mon-splitter {
-        background: var(--line); width: 5px;
-        cursor: col-resize;
-        transition: background 100ms;
-        position: relative;
+      .qopt-mon-shell { display: grid; grid-template-columns: 1fr 360px; gap: 14px; padding: 14px 22px; align-items: stretch; min-height: calc(100vh - 280px); }
+      .qopt-mon-left { min-width: 0; }
+      .qopt-mon-right-wrap { position: relative; }
+      /* Edge grab handle on left edge of right pane */
+      .qopt-mon-edge {
+        position: absolute; left: -10px; top: 0; bottom: 0;
+        width: 14px; cursor: col-resize; z-index: 6;
+        display: flex; align-items: center; justify-content: center;
+        background: transparent; transition: background 150ms;
       }
-      .qopt-mon-splitter:hover { background: var(--copper); }
-      .qopt-mon-splitter::after {
-        content: ''; position: absolute; top: 50%; left: 50%;
-        transform: translate(-50%, -50%);
-        width: 2px; height: 30px;
-        background: var(--copper); opacity: 0;
-        transition: opacity 100ms;
+      .qopt-mon-edge:hover, .qopt-mon-edge.dragging { background: rgba(217,119,87,0.10); }
+      .qopt-mon-edge-grip {
+        font: 800 13px monospace; color: var(--ink-3);
+        background: var(--bg-3); border: 1px solid var(--line);
+        padding: 8px 2px; border-radius: 3px;
+        letter-spacing: -0.06em; line-height: 0.6;
+        transition: all 150ms; user-select: none;
       }
-      .qopt-mon-splitter:hover::after, .qopt-mon-splitter.dragging::after { opacity: 1; }
-      .qopt-mon-splitter.dragging { background: var(--copper); }
-      .qopt-mon-detail { margin-left: 10px; }
+      .qopt-mon-edge:hover .qopt-mon-edge-grip, .qopt-mon-edge.dragging .qopt-mon-edge-grip {
+        background: var(--copper); color: var(--bg-0); border-color: var(--copper);
+        transform: scaleY(1.2);
+      }
+      /* Quick size buttons in pane header */
+      .qopt-mon-size-controls {
+        position: absolute; top: 4px; right: 4px; z-index: 7;
+        display: flex; gap: 2px;
+      }
+      .qopt-size-btn {
+        background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line);
+        font: 700 9.5px var(--mono); padding: 3px 7px; border-radius: 2px;
+        cursor: pointer; letter-spacing: 0.04em;
+        transition: all 100ms;
+      }
+      .qopt-size-btn:hover { color: var(--ink); border-color: var(--copper); }
+      .qopt-size-btn.on { background: var(--copper); color: var(--bg-0); border-color: var(--copper); }
       @media (max-width: 1100px) { .qopt-mon-shell { grid-template-columns: 1fr; } }
       .qopt-monitor-tbl { width: 100%; border-collapse: collapse; font: 12px/1.4 var(--mono); font-variant-numeric: tabular-nums; background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; }
       .qopt-monitor-tbl thead th { padding: 9px 10px; background: var(--bg-3); color: var(--ink-3); font-weight: 700; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; text-align: left; border-bottom: 1px solid var(--line); cursor: pointer; white-space: nowrap; }
@@ -21225,8 +21240,18 @@ const QuantOptions = (function() {
           ${_renderQoptScannerTable(visible, picks)}
           ${_renderQoptBottomRow(picks, visible, data)}
         </div>
-        <div class="qopt-mon-splitter" id="qopt-mon-splitter" title="Drag to resize detail pane"></div>
-        ${_renderQoptDetailPane(selectedPick, data)}
+        <div class="qopt-mon-right-wrap">
+          <div class="qopt-mon-edge" id="qopt-mon-edge" title="Drag to resize · double-click to reset">
+            <div class="qopt-mon-edge-grip">⋮⋮</div>
+          </div>
+          <div class="qopt-mon-size-controls">
+            <button class="qopt-size-btn ${_qoptDetailWidth <= 320 ? 'on' : ''}" onclick="QuantOptions.setDetailWidth(280)" title="Compact · 280px">⤡ S</button>
+            <button class="qopt-size-btn ${_qoptDetailWidth > 320 && _qoptDetailWidth <= 480 ? 'on' : ''}" onclick="QuantOptions.setDetailWidth(380)" title="Medium · 380px">M</button>
+            <button class="qopt-size-btn ${_qoptDetailWidth > 480 && _qoptDetailWidth <= 700 ? 'on' : ''}" onclick="QuantOptions.setDetailWidth(560)" title="Large · 560px">L</button>
+            <button class="qopt-size-btn ${_qoptDetailWidth > 700 ? 'on' : ''}" onclick="QuantOptions.setDetailWidth(900)" title="X-Large · 900px">⤢ XL</button>
+          </div>
+          ${_renderQoptDetailPane(selectedPick, data)}
+        </div>
       </div>`;
     root.innerHTML = `
       ${_renderQoptTitleBar(data)}
@@ -21244,25 +21269,25 @@ const QuantOptions = (function() {
   }
 
   function _wireQoptSplitter() {
-    const splitter = document.getElementById('qopt-mon-splitter');
-    const shell    = document.getElementById('qopt-mon-shell');
-    if (!splitter || !shell || splitter._wired) return;
-    splitter._wired = true;
+    const handle = document.getElementById('qopt-mon-edge');
+    const shell  = document.getElementById('qopt-mon-shell');
+    if (!handle || !shell || handle._wired) return;
+    handle._wired = true;
     let dragging = false;
     let startX = 0;
     let startW = _qoptDetailWidth;
     const onMove = (e) => {
       if (!dragging) return;
       const dx = startX - (e.touches ? e.touches[0].clientX : e.clientX);
-      let newW = Math.max(280, Math.min(1100, startW + dx));
+      let newW = Math.max(260, Math.min(1200, startW + dx));
       _qoptDetailWidth = newW;
-      shell.style.gridTemplateColumns = `1fr 5px ${newW}px`;
+      shell.style.gridTemplateColumns = `1fr ${newW}px`;
       e.preventDefault();
     };
     const onUp = () => {
       if (!dragging) return;
       dragging = false;
-      splitter.classList.remove('dragging');
+      handle.classList.remove('dragging');
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       try { localStorage.setItem('qopt-detail-width', String(_qoptDetailWidth)); } catch(_) {}
@@ -21271,13 +21296,20 @@ const QuantOptions = (function() {
       dragging = true;
       startX = e.touches ? e.touches[0].clientX : e.clientX;
       startW = _qoptDetailWidth;
-      splitter.classList.add('dragging');
+      handle.classList.add('dragging');
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
       e.preventDefault();
     };
-    splitter.addEventListener('mousedown', onDown);
-    splitter.addEventListener('touchstart', onDown);
+    handle.addEventListener('mousedown', onDown);
+    handle.addEventListener('touchstart', onDown);
+    handle.addEventListener('dblclick', () => {
+      // Reset to default 360px
+      _qoptDetailWidth = 360;
+      shell.style.gridTemplateColumns = `1fr 360px`;
+      try { localStorage.setItem('qopt-detail-width', '360'); } catch(_) {}
+      if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
+    });
     document.addEventListener('mousemove', onMove);
     document.addEventListener('touchmove', onMove);
     document.addEventListener('mouseup',   onUp);
@@ -21680,6 +21712,13 @@ const QuantOptions = (function() {
     };
     window.QuantOptions.toggleDetailExpand = function() {
       _qoptDetailExpanded = !_qoptDetailExpanded;
+      if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
+    };
+    window.QuantOptions.setDetailWidth = function(w) {
+      _qoptDetailWidth = w;
+      const shell = document.getElementById('qopt-mon-shell');
+      if (shell) shell.style.gridTemplateColumns = `1fr ${w}px`;
+      try { localStorage.setItem('qopt-detail-width', String(w)); } catch(_) {}
       if (window._qoptLastData) _renderQoptNative(null, window._qoptLastData.data, window._qoptLastData.picks);
     };
     window.QuantOptions.sizeByR = function(tk, r) {
