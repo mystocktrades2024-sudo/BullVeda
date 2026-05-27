@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Options Flow · Eikon Preview</title>
+<style>
+  :root {
+    --bg-0: #0a0d0c;
+    --bg-1: #0f1413;
+    --bg-2: #14191a;
+    --bg-3: #1a2122;
+    --line:  #232c2d;
+    --line-2: #2c3839;
+    --ink:   #e8e6d8;
+    --ink-1: #c7c4b3;
+    --ink-2: #8c8a7a;
+    --ink-3: #5d5b4e;
+    --ink-4: #3a382f;
+    --copper: #d97757;
+    --gn: #5be57c;
+    --am: #ffb95c;
+    --rd: #ff6b5b;
+    --mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
+    --sans: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg-0); color: var(--ink-1); font-family: var(--sans); font-size: 13px; min-height: 100vh; }
+
+  /* ── TOP STRIP ────────────────────────────────────────────────────── */
+  .eikon-top {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 16px;
+    background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 11.5px;
+  }
+  .eikon-brand {
+    font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--copper);
+    font-size: 12.5px;
+  }
+  .eikon-brand .ico { color: var(--am); margin-right: 5px; }
+  .eikon-sep { color: var(--ink-3); }
+  .eikon-search {
+    background: var(--bg-3); border: 1px solid var(--line-2);
+    color: var(--ink); padding: 3px 10px; border-radius: 3px;
+    font-family: var(--mono); font-size: 11px;
+    outline: none; min-width: 200px;
+  }
+  .eikon-search:focus { border-color: var(--copper); }
+  .eikon-mkt { display: flex; gap: 14px; margin-left: auto; }
+  .eikon-mkt-cell { display: flex; gap: 5px; align-items: baseline; }
+  .eikon-mkt-cell .k { color: var(--ink-3); letter-spacing: 0.06em; }
+  .eikon-mkt-cell .v { color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .eikon-mkt-cell .d { font-weight: 600; font-size: 10.5px; }
+  .gn { color: var(--gn); }
+  .am { color: var(--am); }
+  .rd { color: var(--rd); }
+  .nu { color: var(--ink-3); }
+
+  /* ── MAIN SHELL ───────────────────────────────────────────────────── */
+  .eikon-shell {
+    display: grid;
+    grid-template-columns: 180px 1fr 360px;
+    grid-template-rows: auto auto auto;
+    gap: 8px;
+    padding: 8px;
+    max-width: 1700px;
+    margin: 0 auto;
+  }
+  .eikon-pane {
+    background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .eikon-pane-h {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px;
+    background: var(--bg-3);
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono); font-size: 9.5px; font-weight: 800;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--ink-2);
+  }
+  .eikon-pane-h .copper { color: var(--copper); }
+  .eikon-pane-h .right { margin-left: auto; color: var(--ink-3); font-weight: 500; letter-spacing: 0.04em; text-transform: none; font-size: 9px; }
+
+  /* ── WATCHLIST ────────────────────────────────────────────────────── */
+  .eikon-watch {
+    grid-column: 1;
+    grid-row: 1 / 3;
+  }
+  .eikon-watch-list { font-family: var(--mono); font-size: 11px; }
+  .eikon-watch-section {
+    padding: 4px 10px; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-3); background: var(--bg-3);
+    border-top: 1px solid var(--line);
+  }
+  .eikon-watch-row {
+    display: grid; grid-template-columns: 48px 18px 28px 1fr;
+    align-items: center;
+    padding: 5px 8px; gap: 4px;
+    cursor: pointer; border-bottom: 1px solid var(--bg-3);
+    transition: background 80ms;
+  }
+  .eikon-watch-row:hover { background: rgba(217,119,87,0.06); }
+  .eikon-watch-row.active { background: rgba(217,119,87,0.10); border-left: 2px solid var(--copper); padding-left: 6px; }
+  .eikon-watch-row .tk { font-weight: 800; color: var(--ink); }
+  .eikon-watch-row .arr { font-size: 12px; text-align: center; }
+  .eikon-watch-row .arr.up { color: var(--gn); }
+  .eikon-watch-row .arr.dn { color: var(--rd); }
+  .eikon-watch-row .conv { text-align: right; color: var(--ink-1); font-weight: 700; }
+  .eikon-watch-row .sec { color: var(--ink-3); font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ── CHAIN MONTAGE ────────────────────────────────────────────────── */
+  .eikon-chain { grid-column: 2; grid-row: 1; }
+  .eikon-chain-meta {
+    display: flex; gap: 14px; align-items: baseline;
+    padding: 6px 12px;
+    background: rgba(217,119,87,0.04);
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono); font-size: 10.5px;
+  }
+  .eikon-chain-meta .tk {
+    color: var(--ink); font-weight: 800; font-size: 16px;
+    letter-spacing: 0.02em;
+  }
+  .eikon-chain-meta .px { color: var(--copper); font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .eikon-chain-meta .ctx { color: var(--ink-3); }
+  .eikon-chain-meta .ctx b { color: var(--ink-1); font-weight: 600; }
+  .eikon-chain-tbl {
+    width: 100%; border-collapse: collapse;
+    font-family: var(--mono); font-size: 10.5px;
+  }
+  .eikon-chain-tbl thead {
+    background: var(--bg-3); position: sticky; top: 0;
+  }
+  .eikon-chain-tbl th {
+    padding: 4px 6px;
+    font-size: 9px; letter-spacing: 0.10em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 700;
+    border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  .eikon-chain-tbl th.calls { background: rgba(91,229,124,0.06); color: var(--gn); }
+  .eikon-chain-tbl th.puts  { background: rgba(255,107,91,0.06); color: var(--rd); }
+  .eikon-chain-tbl th.k     { background: var(--bg-2); color: var(--copper); text-align: center; }
+  .eikon-chain-tbl td {
+    padding: 5px 6px;
+    text-align: right; font-variant-numeric: tabular-nums;
+    border-bottom: 1px dashed var(--line); white-space: nowrap;
+  }
+  .eikon-chain-tbl .k {
+    text-align: center; font-weight: 800; color: var(--ink); background: var(--bg-3);
+    border-left: 1px solid var(--line); border-right: 1px solid var(--line);
+  }
+  .eikon-chain-tbl tr.atm .k { background: rgba(217,119,87,0.18); color: var(--copper); position: relative; }
+  .eikon-chain-tbl tr.atm .k::before { content: '▶'; position: absolute; left: 3px; color: var(--copper); }
+  .eikon-chain-tbl tr.atm .k::after  { content: '◀'; position: absolute; right: 3px; color: var(--copper); }
+  .eikon-chain-tbl tr.delta25 .k { background: rgba(91,229,124,0.06); color: var(--ink-1); }
+  .eikon-chain-tbl tr.delta25.is-put .k { background: rgba(255,107,91,0.06); }
+  .eikon-chain-tbl tr:hover { background: rgba(217,119,87,0.03); }
+  .eikon-chain-tbl .call-cell { background: rgba(91,229,124,0.02); }
+  .eikon-chain-tbl .put-cell  { background: rgba(255,107,91,0.02); }
+  .eikon-chain-tbl .iv b { color: var(--ink); font-weight: 700; }
+  .eikon-chain-tbl .vol b { color: var(--copper); font-weight: 700; }
+
+  /* ── STRATEGY BUILDER ─────────────────────────────────────────────── */
+  .eikon-strat { grid-column: 2; grid-row: 2; }
+  .eikon-strat-body {
+    display: grid; grid-template-columns: 1.2fr 1fr 1.4fr; gap: 0;
+  }
+  .eikon-strat-legs, .eikon-strat-net, .eikon-strat-pnl {
+    padding: 10px 14px;
+  }
+  .eikon-strat-legs { border-right: 1px solid var(--line); }
+  .eikon-strat-net  { border-right: 1px solid var(--line); }
+  .eikon-strat-name {
+    font-family: var(--mono); font-size: 11px; font-weight: 800;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--copper); margin-bottom: 6px;
+  }
+  .eikon-strat-leg {
+    display: grid; grid-template-columns: 60px 1fr auto;
+    align-items: baseline; gap: 8px;
+    font-family: var(--mono); font-size: 11px; line-height: 1.7;
+  }
+  .eikon-strat-leg .side {
+    font-weight: 800; letter-spacing: 0.04em;
+  }
+  .eikon-strat-leg .side.long  { color: var(--gn); }
+  .eikon-strat-leg .side.short { color: var(--rd); }
+  .eikon-strat-leg .desc { color: var(--ink-1); }
+  .eikon-strat-leg .px  { color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .eikon-strat-summary {
+    border-top: 1px dashed var(--line); margin-top: 8px; padding-top: 8px;
+    font-family: var(--mono); font-size: 11px; line-height: 1.75;
+  }
+  .eikon-strat-summary .row { display: flex; justify-content: space-between; }
+  .eikon-strat-summary .row b { color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .eikon-strat-summary .row .lbl { color: var(--ink-3); }
+  .eikon-strat-net-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+    font-family: var(--mono); font-size: 11.5px;
+  }
+  .eikon-strat-net-cell {
+    background: var(--bg-3); border: 1px solid var(--line);
+    border-radius: 3px; padding: 6px 10px;
+  }
+  .eikon-strat-net-cell .lbl {
+    font-size: 9px; color: var(--ink-3); letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .eikon-strat-net-cell .v {
+    font-size: 14px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .eikon-strat-net-cell .v.gn { color: var(--gn); }
+  .eikon-strat-net-cell .v.rd { color: var(--rd); }
+  .eikon-strat-net-cell .v.cop { color: var(--copper); }
+  .eikon-pnl-svg { width: 100%; height: 130px; }
+
+  /* ── RIGHT COL: VOL SURFACE / SKEW / TERM ─────────────────────────── */
+  .eikon-volsurf { grid-column: 3; grid-row: 1; }
+  .eikon-vs-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 10px; }
+  .eikon-vs-table th, .eikon-vs-table td { padding: 3px 5px; text-align: center; border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .eikon-vs-table th { background: var(--bg-3); color: var(--ink-3); font-weight: 700; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .eikon-vs-table td { color: var(--ink); }
+  .eikon-vs-table td.atm { background: rgba(217,119,87,0.10); color: var(--copper); font-weight: 700; }
+  .eikon-vs-legend { font-family: var(--mono); font-size: 9px; color: var(--ink-3); padding: 4px 12px; text-align: right; }
+  .eikon-vs-legend .swatch { display: inline-block; width: 14px; height: 9px; vertical-align: middle; margin: 0 3px; border-radius: 2px; }
+  .eikon-skew  { grid-column: 3; grid-row: 2; }
+  .eikon-term  { grid-column: 3; grid-row: 3; }
+  .eikon-skew svg, .eikon-term svg, .eikon-iv-hv svg { width: 100%; display: block; }
+
+  /* ── BOTTOM: UOA TAPE / IV-HV / NEWS ──────────────────────────────── */
+  .eikon-tape  { grid-column: 1 / 3; grid-row: 3; }
+  .eikon-iv-hv { grid-column: 1; grid-row: 4; }
+  .eikon-news  { grid-column: 2 / 4; grid-row: 4; }
+  .eikon-tape-tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 10.5px; }
+  .eikon-tape-tbl th, .eikon-tape-tbl td {
+    padding: 5px 10px; text-align: left; font-variant-numeric: tabular-nums;
+    border-bottom: 1px solid var(--bg-3);
+  }
+  .eikon-tape-tbl th {
+    background: var(--bg-3); color: var(--ink-3);
+    font-weight: 700; font-size: 9px; letter-spacing: 0.10em; text-transform: uppercase;
+  }
+  .eikon-tape-tbl td b { color: var(--ink); font-weight: 700; }
+  .eikon-tape-tbl tr.bull td.bias { color: var(--gn); font-weight: 700; }
+  .eikon-tape-tbl tr.bear td.bias { color: var(--rd); font-weight: 700; }
+  .eikon-news-list { padding: 8px 14px; font-family: var(--mono); font-size: 11px; line-height: 1.7; }
+  .eikon-news-row { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+  .eikon-news-row:last-child { border-bottom: none; }
+  .eikon-news-row .t { color: var(--ink-3); font-size: 9.5px; min-width: 50px; }
+  .eikon-news-row .h { color: var(--ink-1); }
+  .eikon-news-row .src { color: var(--copper); font-size: 9.5px; margin-left: auto; }
+
+  /* ── PREVIEW BANNER ───────────────────────────────────────────────── */
+  .preview-banner {
+    position: fixed; top: 0; right: 0;
+    padding: 4px 10px;
+    background: var(--copper); color: var(--bg-0);
+    font-family: var(--mono); font-size: 9.5px; font-weight: 800;
+    letter-spacing: 0.16em; z-index: 100;
+    border-bottom-left-radius: 5px;
+  }
+  .empty-cell {
+    padding: 18px; text-align: center;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--ink-3); font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<div class="preview-banner">EIKON PREVIEW · MOCKUP</div>
+
+<header class="eikon-top">
+  <span class="eikon-brand"><span class="ico">⚡</span>OPTIONS FLOW · EIKON</span>
+  <span class="eikon-sep">│</span>
+  <input class="eikon-search" placeholder="ticker ⌕ (e.g. INTC, AAPL)" id="ticker-search">
+  <span class="eikon-mkt" id="mkt-strip">
+    <span class="eikon-mkt-cell"><span class="k">VIX</span><span class="v" id="mkt-vix">—</span><span class="d nu" id="mkt-vix-d">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">SPX</span><span class="v" id="mkt-spx">—</span><span class="d nu" id="mkt-spx-d">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">QQQ</span><span class="v" id="mkt-qqq">—</span><span class="d nu" id="mkt-qqq-d">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">DXY</span><span class="v" id="mkt-dxy">—</span></span>
+    <span class="eikon-mkt-cell"><span class="k">10Y</span><span class="v" id="mkt-10y">—</span></span>
+  </span>
+</header>
+
+<div class="eikon-shell">
+
+  <!-- WATCHLIST -->
+  <section class="eikon-pane eikon-watch">
+    <div class="eikon-pane-h">⊞ Watchlist <span class="right" id="watch-count">—</span></div>
+    <div class="eikon-watch-list" id="watch-list"></div>
+  </section>
+
+  <!-- CHAIN MONTAGE -->
+  <section class="eikon-pane eikon-chain">
+    <div class="eikon-pane-h">⊞ Chain Montage <span class="copper" id="chain-tk">—</span><span class="right" id="chain-meta">—</span></div>
+    <div class="eikon-chain-meta" id="chain-meta-bar"></div>
+    <div id="chain-body"></div>
+  </section>
+
+  <!-- VOL SURFACE -->
+  <section class="eikon-pane eikon-volsurf">
+    <div class="eikon-pane-h">⊞ Vol Surface 2D <span class="right">IV % · strike↑ × DTE→</span></div>
+    <div id="volsurf-body"></div>
+    <div class="eikon-vs-legend">
+      <span class="swatch" style="background: rgba(255,107,91,0.6)"></span> high IV
+      <span class="swatch" style="background: rgba(255,185,92,0.5)"></span> mid
+      <span class="swatch" style="background: rgba(91,229,124,0.4)"></span> low
+    </div>
+  </section>
+
+  <!-- STRATEGY BUILDER -->
+  <section class="eikon-pane eikon-strat">
+    <div class="eikon-pane-h">⊞ Strategy Builder <span class="right" id="strat-tk">—</span></div>
+    <div class="eikon-strat-body" id="strat-body"></div>
+  </section>
+
+  <!-- SKEW CURVE -->
+  <section class="eikon-pane eikon-skew">
+    <div class="eikon-pane-h">⊞ Skew Curve <span class="right" id="skew-meta">—</span></div>
+    <div id="skew-body"></div>
+  </section>
+
+  <!-- UOA TAPE -->
+  <section class="eikon-pane eikon-tape">
+    <div class="eikon-pane-h">⊞ Top UOA Strikes <span class="right">vol &gt; 3× OI · ranked by premium $</span></div>
+    <div id="tape-body"></div>
+  </section>
+
+  <!-- TERM STRUCTURE -->
+  <section class="eikon-pane eikon-term">
+    <div class="eikon-pane-h">⊞ Term Structure <span class="right" id="term-meta">ATM IV</span></div>
+    <div id="term-body"></div>
+  </section>
+
+  <!-- IV vs HV20 -->
+  <section class="eikon-pane eikon-iv-hv">
+    <div class="eikon-pane-h">⊞ IV vs HV20 <span class="right">snapshot</span></div>
+    <div id="ivhv-body"></div>
+  </section>
+
+  <!-- NEWS -->
+  <section class="eikon-pane eikon-news">
+    <div class="eikon-pane-h">⊞ News <span class="right" id="news-tk">—</span></div>
+    <div class="eikon-news-list" id="news-body">
+      <div class="empty-cell">no news for selected ticker yet — wire EODHD news endpoint per ticker</div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function () {
+  const _f = (n, d) => (n == null || !isFinite(n)) ? '—' : Number(n).toFixed(d == null ? 2 : d);
+  const _fpct = (n, d) => (n == null || !isFinite(n)) ? '—' : Number(n).toFixed(d == null ? 1 : d) + '%';
+  const _sign = (n) => n >= 0 ? '+' : '';
+  const _dol = (n) => n == null ? '—' : n >= 1e6 ? '$' + (n/1e6).toFixed(1) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'k' : '$' + n.toFixed(0);
+
+  // Black-Scholes for chain-row pricing
+  const _erf = (x) => {
+    const t = 1 / (1 + 0.3275911 * Math.abs(x));
+    const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429;
+    const y = 1 - (((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);
+    return x >= 0 ? y : -y;
+  };
+  const _N = (x) => 0.5 * (1 + _erf(x / Math.SQRT2));
+  function bsmCall(S, K, sigma, T) {
+    if (T <= 0 || sigma <= 0 || S <= 0 || K <= 0) return Math.max(S - K, 0);
+    const r = 0.05;
+    const d1 = (Math.log(S/K) + (r + sigma*sigma/2)*T) / (sigma*Math.sqrt(T));
+    const d2 = d1 - sigma*Math.sqrt(T);
+    return S * _N(d1) - K * Math.exp(-r*T) * _N(d2);
+  }
+  function bsmPut(S, K, sigma, T) {
+    if (T <= 0 || sigma <= 0 || S <= 0 || K <= 0) return Math.max(K - S, 0);
+    const r = 0.05;
+    const d1 = (Math.log(S/K) + (r + sigma*sigma/2)*T) / (sigma*Math.sqrt(T));
+    const d2 = d1 - sigma*Math.sqrt(T);
+    return K * Math.exp(-r*T) * _N(-d2) - S * _N(-d1);
+  }
+  function bsmDelta(S, K, sigma, T, isCall) {
+    if (T <= 0 || sigma <= 0 || S <= 0 || K <= 0) return isCall ? (S > K ? 1 : 0) : (S < K ? -1 : 0);
+    const r = 0.05;
+    const d1 = (Math.log(S/K) + (r + sigma*sigma/2)*T) / (sigma*Math.sqrt(T));
+    return isCall ? _N(d1) : _N(d1) - 1;
+  }
+
+  let DATA = null;
+  let SELECTED_TK = null;
+
+  async function loadData() {
+    try {
+      const r = await fetch('options_flow.json', { credentials: 'include' });
+      if (r.ok) {
+        DATA = await r.json();
+        // Try to fetch VIX/SPX from main data.json
+        try {
+          const r2 = await fetch('data.json', { credentials: 'include' });
+          if (r2.ok) {
+            const d2 = await r2.json();
+            DATA._vix = d2.vix;
+            DATA._vix_chg = d2.vix_chg_pct;
+            DATA._spx = d2.spy_close || d2.spx_close;
+            DATA._spx_chg = d2.spy_chg_pct;
+            DATA._qqq = d2.qqq_close;
+            DATA._qqq_chg = d2.qqq_chg_pct;
+          }
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.error('failed to load options_flow.json', e);
+    }
+  }
+
+  function paintTopStrip() {
+    if (!DATA) return;
+    const set = (id, val, d) => {
+      const e = document.getElementById(id);
+      if (e) e.textContent = val;
+      if (d != null) {
+        const de = document.getElementById(id + '-d');
+        if (de) {
+          de.textContent = _sign(d) + _f(d, 1) + '%';
+          de.className = 'd ' + (d >= 0 ? 'gn' : 'rd');
+        }
+      }
+    };
+    set('mkt-vix', _f(DATA._vix, 1), DATA._vix_chg);
+    set('mkt-spx', DATA._spx != null ? _f(DATA._spx, 0) : '—', DATA._spx_chg);
+    set('mkt-qqq', DATA._qqq != null ? _f(DATA._qqq, 0) : '—', DATA._qqq_chg);
+  }
+
+  function paintWatchlist() {
+    const el = document.getElementById('watch-list');
+    const cnt = document.getElementById('watch-count');
+    if (!DATA || !el) return;
+    const picks = (DATA.top30 || []).filter(p => p.put_call_ratio != null);
+    cnt.textContent = picks.length + ' tickers';
+    const bull = picks.filter(p => p.put_call_ratio < 1.0).sort((a,b)=>(a.put_call_ratio||0)-(b.put_call_ratio||0)).slice(0, 8);
+    const bear = picks.filter(p => p.put_call_ratio >= 1.0).sort((a,b)=>(b.put_call_ratio||0)-(a.put_call_ratio||0)).slice(0, 5);
+    const conv = (p) => {
+      const pcr = p.put_call_ratio || 1;
+      const pcrSc = pcr < 1 ? Math.min(1, (1-pcr)/0.8) : Math.max(0, 1 - (pcr-1)/0.8);
+      const uoaTot = (+p.uoa_calls||0) + (+p.uoa_puts||0);
+      const uoaSc = uoaTot > 0 ? (+p.uoa_calls||0)/uoaTot : 0.5;
+      const dSc = p.atm_delta == null ? 0.5 : Math.abs(+p.atm_delta) >= 0.55 ? 1 : Math.abs(+p.atm_delta) >= 0.45 ? 0.7 : 0.4;
+      return Math.round((pcrSc*0.5 + uoaSc*0.3 + dSc*0.2) * 100);
+    };
+    const renderRow = (p, isBull) => {
+      const c = conv(p);
+      return `<div class="eikon-watch-row${SELECTED_TK === p.ticker ? ' active' : ''}" data-tk="${p.ticker}">
+        <span class="tk">${p.ticker}</span>
+        <span class="arr ${isBull ? 'up' : 'dn'}">${isBull ? '▲' : '▼'}</span>
+        <span class="conv">${c}</span>
+        <span class="sec">${(p.sector||'—').slice(0, 12)}</span>
+      </div>`;
+    };
+    el.innerHTML = `
+      <div class="eikon-watch-section">▲ Long · ${bull.length}</div>
+      ${bull.map(p => renderRow(p, true)).join('')}
+      <div class="eikon-watch-section">▼ Short · ${bear.length}</div>
+      ${bear.map(p => renderRow(p, false)).join('')}
+    `;
+    el.querySelectorAll('.eikon-watch-row').forEach(row => {
+      row.addEventListener('click', () => {
+        SELECTED_TK = row.dataset.tk;
+        renderAll();
+      });
+    });
+    // Auto-select first if none
+    if (!SELECTED_TK && bull.length) SELECTED_TK = bull[0].ticker;
+    if (!SELECTED_TK && bear.length) SELECTED_TK = bear[0].ticker;
+  }
+
+  function selectedPick() {
+    if (!DATA || !SELECTED_TK) return null;
+    return (DATA.top30 || []).find(p => p.ticker === SELECTED_TK);
+  }
+
+  function paintChain() {
+    const head = document.getElementById('chain-tk');
+    const meta = document.getElementById('chain-meta-bar');
+    const body = document.getElementById('chain-body');
+    if (!head || !body) return;
+    const p = selectedPick();
+    if (!p) { body.innerHTML = '<div class="empty-cell">select a ticker</div>'; return; }
+    head.textContent = p.ticker;
+    document.getElementById('chain-meta').textContent = `ATM $${_f(p.atm_strike, 2)} · ${_f(p.atm_dte, 0)}d`;
+    const ivPct = p.atm_iv != null ? p.atm_iv * 100 : null;
+    meta.innerHTML = `
+      <span class="tk">${p.ticker}</span>
+      <span class="px">$${_f(p.price, 2)}</span>
+      <span class="ctx">spot · ATM IV <b>${_f(ivPct, 1)}%</b> · HV20 <b>${p.hv20 != null ? (p.hv20*100).toFixed(1)+'%' : '—'}</b> · IVRP <b class="${p.ivrp != null ? (p.ivrp > 0.03 ? 'rd' : p.ivrp > -0.03 ? 'am' : 'gn') : ''}">${p.ivrp != null ? _sign(p.ivrp*100)+(p.ivrp*100).toFixed(1)+'%' : '—'}</b> · 25Δ skew <b>${p.skew_25d != null ? _sign(p.skew_25d*100)+(p.skew_25d*100).toFixed(1)+'%' : '—'}</b> · term <b>${_f(p.term_ratio, 2)}</b></span>
+    `;
+    // Read REAL chain grid from options_flow.json (plumbed via data_fetcher.chain_grid)
+    if (!p.chain_grid || !p.chain_grid.length) {
+      body.innerHTML = '<div class="empty-cell">chain grid not enriched · awaiting next Schwab refresh</div>';
+      return;
+    }
+    // Show the nearest-DTE expiration ≥ 14d. Fall back to the largest DTE we have.
+    const target = p.chain_grid.find(g => g.dte >= 14) || p.chain_grid[p.chain_grid.length-1];
+    const atmK = +p.atm_strike;
+    let html = `<table class="eikon-chain-tbl">
+      <thead><tr>
+        <th class="calls" colspan="5">— CALLS —</th>
+        <th class="k">K</th>
+        <th class="puts" colspan="5">— PUTS —</th>
+      </tr><tr>
+        <th class="calls">bid</th><th class="calls">ask</th><th class="calls">Δ</th><th class="calls">IV</th><th class="calls">vol</th>
+        <th class="k">${target.exp} · ${target.dte}d</th>
+        <th class="puts">vol</th><th class="puts">IV</th><th class="puts">Δ</th><th class="puts">bid</th><th class="puts">ask</th>
+      </tr></thead><tbody>`;
+    const fmtVol = (v) => v == null ? '—' : v >= 1000 ? (v/1000).toFixed(1) + 'k' : String(v);
+    target.strikes.forEach(r => {
+      const atm = atmK != null && Math.abs(r.k - atmK) < 0.5;
+      const c = r.call || {}, pt = r.put || {};
+      const rowCls = atm ? 'atm' : '';
+      html += `<tr class="${rowCls}">
+        <td class="call-cell">${c.bid != null ? c.bid.toFixed(2) : '—'}</td>
+        <td class="call-cell">${c.ask != null ? c.ask.toFixed(2) : '—'}</td>
+        <td class="call-cell">${c.delta != null ? (c.delta >= 0 ? '+' : '') + c.delta.toFixed(2) : '—'}</td>
+        <td class="call-cell iv"><b>${c.iv != null ? (c.iv*100).toFixed(0) : '—'}</b></td>
+        <td class="call-cell vol"><b>${fmtVol(c.vol)}</b></td>
+        <td class="k">${r.k.toFixed(r.k % 1 === 0 ? 0 : 2)}</td>
+        <td class="put-cell vol"><b>${fmtVol(pt.vol)}</b></td>
+        <td class="put-cell iv"><b>${pt.iv != null ? (pt.iv*100).toFixed(0) : '—'}</b></td>
+        <td class="put-cell">${pt.delta != null ? pt.delta.toFixed(2) : '—'}</td>
+        <td class="put-cell">${pt.bid != null ? pt.bid.toFixed(2) : '—'}</td>
+        <td class="put-cell">${pt.ask != null ? pt.ask.toFixed(2) : '—'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    body.innerHTML = html;
+  }
+
+  function paintStrategy() {
+    const body = document.getElementById('strat-body');
+    document.getElementById('strat-tk').textContent = SELECTED_TK || '—';
+    const p = selectedPick();
+    if (!p || p.atm_strike == null || p.atm_mark == null) {
+      body.innerHTML = '<div class="empty-cell">no chain data</div>'; return;
+    }
+    const bull = (p.put_call_ratio || 1) < 1.0;
+    const ivRich = (p.iv_percentile != null && p.iv_percentile > 70) || (p.ivrp != null && p.ivrp > 0.03);
+    const haveShort = bull ? p.iv_25d_call_mark != null : p.iv_25d_put_mark != null;
+    const useSpread = ivRich && haveShort;
+    const strat = bull ? (useSpread ? 'Bull Call Spread' : 'Long Call') : (useSpread ? 'Bear Put Spread' : 'Long Put');
+    const longSide = bull ? 'long' : 'long';
+    const longLbl  = bull ? 'Long' : 'Long';
+    const shortLbl = 'Short';
+    const sk = useSpread ? (bull ? p.iv_25d_call_strike : p.iv_25d_put_strike) : null;
+    const sm = useSpread ? (bull ? p.iv_25d_call_mark   : p.iv_25d_put_mark)   : null;
+    const netDebit = useSpread ? (p.atm_mark - sm) : p.atm_mark;
+    const be = bull ? p.atm_strike + netDebit : p.atm_strike - netDebit;
+    const maxG = useSpread ? (Math.abs(sk - p.atm_strike) - netDebit) : null;
+    const maxL = netDebit;
+    const T = p.atm_dte / 365;
+    const sigma = p.atm_iv;
+    const d2 = (Math.log(p.price / p.atm_strike) + (0.05 - sigma*sigma/2) * T) / (sigma * Math.sqrt(T));
+    const pop = bull ? _N(d2) : _N(-d2);
+
+    // P&L curve over [0.85·spot, 1.15·spot]
+    const spotMin = p.price * 0.85, spotMax = p.price * 1.15;
+    const xs = []; for (let i = 0; i <= 60; i++) xs.push(spotMin + (spotMax - spotMin) * (i / 60));
+    const pnl = xs.map(S => {
+      const lp = bull ? bsmCall(S, p.atm_strike, sigma, T) : bsmPut(S, p.atm_strike, sigma, T);
+      let net = lp - p.atm_mark;
+      if (useSpread) {
+        const sp = bull ? bsmCall(S, sk, sigma, T) : bsmPut(S, sk, sigma, T);
+        net = (lp - sp) - netDebit;
+      }
+      return { S, pnl: net };
+    });
+    const minP = Math.min(...pnl.map(x => x.pnl));
+    const maxP = Math.max(...pnl.map(x => x.pnl));
+    const W = 280, H = 130, PAD_L = 36, PAD_R = 10, PAD_T = 10, PAD_B = 22;
+    const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
+    const xOf = (S) => PAD_L + ((S - spotMin) / (spotMax - spotMin)) * plotW;
+    const yOf = (v) => PAD_T + plotH - ((v - minP) / ((maxP - minP) || 1)) * plotH;
+    const zeroY = yOf(0);
+    let path = '';
+    pnl.forEach((pt, i) => path += (i === 0 ? 'M ' : 'L ') + xOf(pt.S).toFixed(1) + ' ' + yOf(pt.pnl).toFixed(1) + ' ');
+
+    body.innerHTML = `
+      <div class="eikon-strat-legs">
+        <div class="eikon-strat-name">${strat}</div>
+        <div class="eikon-strat-leg">
+          <span class="side long">${longLbl}</span>
+          <span class="desc">${bull ? '$' + p.atm_strike + 'C' : '$' + p.atm_strike + 'P'} · ${_f(p.atm_dte, 0)}d</span>
+          <span class="px">$${_f(p.atm_mark, 2)}</span>
+        </div>
+        ${useSpread ? `<div class="eikon-strat-leg">
+          <span class="side short">${shortLbl}</span>
+          <span class="desc">${bull ? '$' + sk + 'C' : '$' + sk + 'P'} · ${_f(p.atm_dte, 0)}d</span>
+          <span class="px">$${_f(sm, 2)}</span>
+        </div>` : ''}
+        <div class="eikon-strat-summary">
+          <div class="row"><span class="lbl">Net Debit</span><b>$${_f(netDebit, 2)}</b></div>
+          <div class="row"><span class="lbl">Breakeven</span><b>$${_f(be, 2)}</b></div>
+          <div class="row"><span class="lbl">Max Gain</span><b class="${maxG != null && maxG > 0 ? 'gn' : ''}" style="color:var(--gn)">${maxG != null ? '+$' + _f(maxG, 2) : 'uncapped'}</b></div>
+          <div class="row"><span class="lbl">Max Loss</span><b style="color:var(--rd)">-$${_f(maxL, 2)}</b></div>
+          <div class="row"><span class="lbl">POP</span><b style="color:var(--copper)">${(pop*100).toFixed(0)}%</b></div>
+        </div>
+      </div>
+      <div class="eikon-strat-net">
+        <div class="eikon-strat-net-grid">
+          <div class="eikon-strat-net-cell"><div class="lbl">Net Δ</div><div class="v">${p.atm_delta != null ? _sign(p.atm_delta) + _f(p.atm_delta, 2) : '—'}</div></div>
+          <div class="eikon-strat-net-cell"><div class="lbl">Net Γ</div><div class="v">${p.atm_gamma != null ? _f(p.atm_gamma, 3) : '—'}</div></div>
+          <div class="eikon-strat-net-cell"><div class="lbl">Net Θ</div><div class="v rd">${p.atm_theta != null ? '$' + _f(p.atm_theta, 2) : '—'}</div></div>
+          <div class="eikon-strat-net-cell"><div class="lbl">Net ν</div><div class="v gn">${p.atm_vega != null ? '+$' + _f(p.atm_vega, 2) : '—'}</div></div>
+          <div class="eikon-strat-net-cell"><div class="lbl">Conv %</div><div class="v cop">${(function(){
+            const pcr = p.put_call_ratio||1;
+            const pcrSc = pcr < 1 ? Math.min(1, (1-pcr)/0.8) : Math.max(0, 1 - (pcr-1)/0.8);
+            const uoaTot = (+p.uoa_calls||0) + (+p.uoa_puts||0);
+            const uoaSc = uoaTot > 0 ? (+p.uoa_calls||0)/uoaTot : 0.5;
+            const dSc = p.atm_delta == null ? 0.5 : Math.abs(+p.atm_delta) >= 0.55 ? 1 : Math.abs(+p.atm_delta) >= 0.45 ? 0.7 : 0.4;
+            return Math.round((pcrSc*0.5 + uoaSc*0.3 + dSc*0.2) * 100);
+          })()}%</div></div>
+          <div class="eikon-strat-net-cell"><div class="lbl">R:R</div><div class="v">${_f(p.rr, 1)}</div></div>
+        </div>
+      </div>
+      <div class="eikon-strat-pnl">
+        <div style="font-family:var(--mono);font-size:9.5px;color:var(--ink-3);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:4px;">Scenario P&L · at expiration</div>
+        <svg class="eikon-pnl-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+          <line x1="${PAD_L}" y1="${zeroY}" x2="${W-PAD_R}" y2="${zeroY}" stroke="var(--line-2)" stroke-dasharray="3 3"/>
+          <line x1="${xOf(p.price)}" y1="${PAD_T}" x2="${xOf(p.price)}" y2="${PAD_T+plotH}" stroke="var(--copper)" stroke-dasharray="2 2" opacity="0.4"/>
+          <path d="${path}" fill="none" stroke="var(--copper)" stroke-width="2"/>
+          <text x="${PAD_L-3}" y="${PAD_T+10}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">${maxP >= 0 ? '+$':'-$'}${Math.abs(maxP).toFixed(2)}</text>
+          <text x="${PAD_L-3}" y="${zeroY+3}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">$0</text>
+          <text x="${PAD_L-3}" y="${PAD_T+plotH}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">-$${Math.abs(minP).toFixed(2)}</text>
+          <text x="${PAD_L+2}" y="${H-6}" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">$${spotMin.toFixed(0)}</text>
+          <text x="${xOf(p.price)}" y="${H-6}" text-anchor="middle" font-family="ui-monospace" font-size="9" fill="var(--copper)">$${p.price.toFixed(0)}</text>
+          <text x="${W-PAD_R-2}" y="${H-6}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">$${spotMax.toFixed(0)}</text>
+        </svg>
+      </div>
+    `;
+  }
+
+  function paintVolSurface() {
+    const body = document.getElementById('volsurf-body');
+    const p = selectedPick();
+    if (!p || !p.chain_grid || !p.chain_grid.length) {
+      body.innerHTML = '<div class="empty-cell">chain grid not enriched</div>'; return;
+    }
+    // Build a real grid from chain_grid: union of strikes × expirations from REAL data.
+    // Each cell = the call-side IV at (strike, DTE). No interpolation, no synthesis.
+    const atmK = p.atm_strike;
+    const dtes = p.chain_grid.map(g => g.dte);
+    // Find strikes that appear in most expirations (closest to ATM, top 5)
+    const allStrikesSet = new Set();
+    p.chain_grid.forEach(g => g.strikes.forEach(s => allStrikesSet.add(s.k)));
+    const allStrikes = Array.from(allStrikesSet).sort((a,b) => Math.abs(a - atmK) - Math.abs(b - atmK)).slice(0, 5).sort((a,b) => b - a);
+    // Lookup
+    const ivAt = (k, dte) => {
+      const exp = p.chain_grid.find(g => g.dte === dte);
+      if (!exp) return null;
+      const strike = exp.strikes.find(s => Math.abs(s.k - k) < 0.5);
+      if (!strike) return null;
+      return strike.call && strike.call.iv;
+    };
+    const allIv = [];
+    allStrikes.forEach(k => dtes.forEach(d => { const v = ivAt(k, d); if (v != null) allIv.push(v); }));
+    if (!allIv.length) { body.innerHTML = '<div class="empty-cell">no IV in chain grid</div>'; return; }
+    const minIv = Math.min(...allIv), maxIv = Math.max(...allIv), rng = maxIv - minIv || 1;
+    const colorFor = (v) => {
+      if (v == null) return 'transparent';
+      const t = (v - minIv) / rng;
+      if (t > 0.66) return `rgba(255,107,91,${0.25 + t*0.5})`;
+      if (t > 0.33) return `rgba(255,185,92,${0.20 + t*0.4})`;
+      return `rgba(91,229,124,${0.15 + t*0.3})`;
+    };
+    let html = '<table class="eikon-vs-table"><thead><tr><th>K↓ · DTE→</th>';
+    dtes.forEach(d => html += `<th>${d}d</th>`);
+    html += '</tr></thead><tbody>';
+    allStrikes.forEach(k => {
+      html += `<tr><th>${k.toFixed(k % 1 === 0 ? 0 : 1)}</th>`;
+      dtes.forEach(d => {
+        const v = ivAt(k, d);
+        const atm = atmK != null && Math.abs(k - atmK) < 0.5 && Math.abs(d - (p.atm_dte || 30)) < 5;
+        html += `<td class="${atm ? 'atm' : ''}" style="background:${colorFor(v)}">${v != null ? (v*100).toFixed(0) : '—'}</td>`;
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    body.innerHTML = html;
+  }
+
+  function paintSkew() {
+    const body = document.getElementById('skew-body');
+    const meta = document.getElementById('skew-meta');
+    const p = selectedPick();
+    if (!p || p.atm_iv == null || p.iv_25d_call == null || p.iv_25d_put == null) {
+      body.innerHTML = '<div class="empty-cell">need 25Δ chain data</div>'; return;
+    }
+    meta.textContent = `IV % vs strike · ${_f(p.atm_dte, 0)}d`;
+    const points = [
+      { k: p.iv_25d_put_strike, iv: p.iv_25d_put, label: '25Δp' },
+      { k: p.atm_strike, iv: p.atm_iv, label: 'ATM' },
+      { k: p.iv_25d_call_strike, iv: p.iv_25d_call, label: '25Δc' },
+    ].filter(x => x.k != null);
+    if (points.length < 3) { body.innerHTML = '<div class="empty-cell">incomplete chain</div>'; return; }
+    const minK = Math.min(...points.map(x => x.k)) * 0.97;
+    const maxK = Math.max(...points.map(x => x.k)) * 1.03;
+    const minIv = Math.min(...points.map(x => x.iv)) * 0.92;
+    const maxIv = Math.max(...points.map(x => x.iv)) * 1.08;
+    const W = 340, H = 140, PAD_L = 32, PAD_R = 10, PAD_T = 12, PAD_B = 22;
+    const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
+    const xOf = (k) => PAD_L + ((k - minK) / (maxK - minK)) * plotW;
+    const yOf = (iv) => PAD_T + plotH - ((iv - minIv) / (maxIv - minIv)) * plotH;
+    // Smooth quadratic through the 3 points
+    let path = '';
+    points.forEach((pt, i) => path += (i === 0 ? 'M ' : 'L ') + xOf(pt.k).toFixed(1) + ' ' + yOf(pt.iv).toFixed(1) + ' ');
+    body.innerHTML = `
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="display:block">
+        <line x1="${PAD_L}" y1="${PAD_T+plotH}" x2="${W-PAD_R}" y2="${PAD_T+plotH}" stroke="var(--line-2)"/>
+        <line x1="${xOf(p.atm_strike)}" y1="${PAD_T}" x2="${xOf(p.atm_strike)}" y2="${PAD_T+plotH}" stroke="var(--copper)" stroke-dasharray="2 2" opacity="0.3"/>
+        <path d="${path}" fill="none" stroke="var(--copper)" stroke-width="2"/>
+        ${points.map(pt => `
+          <circle cx="${xOf(pt.k)}" cy="${yOf(pt.iv)}" r="4" fill="var(--am)"/>
+          <text x="${xOf(pt.k)}" y="${yOf(pt.iv)-8}" text-anchor="middle" font-family="ui-monospace" font-size="9" fill="var(--ink-1)">${(pt.iv*100).toFixed(0)}%</text>
+          <text x="${xOf(pt.k)}" y="${H-6}" text-anchor="middle" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">${pt.label}</text>
+        `).join('')}
+        <text x="${PAD_L-3}" y="${PAD_T+10}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">${(maxIv*100).toFixed(0)}%</text>
+        <text x="${PAD_L-3}" y="${PAD_T+plotH}" text-anchor="end" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">${(minIv*100).toFixed(0)}%</text>
+      </svg>
+    `;
+  }
+
+  function paintTerm() {
+    const body = document.getElementById('term-body');
+    const p = selectedPick();
+    if (!p || !p.chain_grid || !p.chain_grid.length) {
+      body.innerHTML = '<div class="empty-cell">chain grid not enriched</div>'; return;
+    }
+    // Real ATM IV per expiration from chain_grid — find the strike closest to ATM
+    // in each expiration. No interpolation.
+    const atmK = p.atm_strike;
+    const points = p.chain_grid.map(g => {
+      if (!g.strikes.length) return null;
+      const closest = g.strikes.slice().sort((a,b) => Math.abs(a.k - atmK) - Math.abs(b.k - atmK))[0];
+      const iv = closest && closest.call && closest.call.iv;
+      return iv != null ? { dte: g.dte, iv } : null;
+    }).filter(x => x);
+    if (points.length < 2) {
+      body.innerHTML = '<div class="empty-cell">need ATM IV at ≥2 expirations</div>'; return;
+    }
+    const minIv = Math.min(...points.map(x => x.iv)) * 0.92;
+    const maxIv = Math.max(...points.map(x => x.iv)) * 1.08;
+    const minDte = Math.min(...points.map(x => x.dte));
+    const maxDte = Math.max(...points.map(x => x.dte));
+    const W = 340, H = 130, PAD_L = 32, PAD_R = 10, PAD_T = 12, PAD_B = 22;
+    const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
+    const xOf = (d) => PAD_L + ((d - minDte) / ((maxDte - minDte) || 1)) * plotW;
+    const yOf = (iv) => PAD_T + plotH - ((iv - minIv) / (maxIv - minIv)) * plotH;
+    let path = '';
+    points.forEach((pt, i) => path += (i === 0 ? 'M ' : 'L ') + xOf(pt.dte).toFixed(1) + ' ' + yOf(pt.iv).toFixed(1) + ' ');
+    const dir = p.term_ratio != null ? (p.term_ratio > 1.05 ? 'backwardation · stressed' : p.term_ratio < 0.95 ? 'contango · normal' : 'flat') : '';
+    body.innerHTML = `
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="display:block">
+        <line x1="${PAD_L}" y1="${PAD_T+plotH}" x2="${W-PAD_R}" y2="${PAD_T+plotH}" stroke="var(--line-2)"/>
+        <path d="${path}" fill="none" stroke="var(--copper)" stroke-width="2"/>
+        ${points.map(pt => `
+          <circle cx="${xOf(pt.dte)}" cy="${yOf(pt.iv)}" r="4" fill="var(--am)"/>
+          <text x="${xOf(pt.dte)}" y="${yOf(pt.iv)-8}" text-anchor="middle" font-family="ui-monospace" font-size="9" fill="var(--ink-1)">${(pt.iv*100).toFixed(0)}%</text>
+          <text x="${xOf(pt.dte)}" y="${H-6}" text-anchor="middle" font-family="ui-monospace" font-size="9" fill="var(--ink-3)">${pt.dte}d</text>
+        `).join('')}
+      </svg>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--ink-2);padding:4px 12px;text-align:center;letter-spacing:0.04em">term <b style="color:var(--ink)">${_f(p.term_ratio, 2)}</b> · ${dir}</div>
+    `;
+  }
+
+  function paintIvHv() {
+    const body = document.getElementById('ivhv-body');
+    const p = selectedPick();
+    if (!p || p.atm_iv == null) { body.innerHTML = '<div class="empty-cell">no IV data</div>'; return; }
+    const iv = p.atm_iv * 100;
+    const hv = p.hv20 != null ? p.hv20 * 100 : null;
+    const ivrp = p.ivrp != null ? p.ivrp * 100 : null;
+    const cls = ivrp == null ? '' : ivrp > 3 ? 'rd' : ivrp < -3 ? 'gn' : 'am';
+    const lbl = ivrp == null ? '' : ivrp > 3 ? 'IV richer than realized · sell-premium edge' : ivrp < -3 ? 'IV cheaper than realized · buy-premium edge' : 'fair';
+    body.innerHTML = `
+      <div style="padding:14px;font-family:var(--mono);font-size:11px;line-height:1.7">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div style="background:var(--bg-3);padding:8px;border-radius:3px"><div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em;text-transform:uppercase">IV (ATM)</div><div style="color:var(--ink);font-weight:800;font-size:16px">${iv.toFixed(1)}%</div></div>
+          <div style="background:var(--bg-3);padding:8px;border-radius:3px"><div style="color:var(--ink-3);font-size:9px;letter-spacing:0.08em;text-transform:uppercase">HV20</div><div style="color:var(--ink);font-weight:800;font-size:16px">${hv != null ? hv.toFixed(1)+'%' : '—'}</div></div>
+        </div>
+        <div style="margin-top:10px;padding:10px;background:var(--bg-3);border-radius:3px;border-left:3px solid var(--${cls === 'rd' ? 'rd' : cls === 'gn' ? 'gn' : 'am'})">
+          <div style="color:var(--ink-3);font-size:9px;letter-spacing:0.10em;text-transform:uppercase">IVRP · variance risk premium</div>
+          <div class="${cls}" style="font-weight:800;font-size:18px;margin-top:2px">${ivrp != null ? _sign(ivrp)+ivrp.toFixed(1)+'%' : '—'}</div>
+          <div style="color:var(--ink-2);font-size:10px;margin-top:2px">${lbl}</div>
+        </div>
+        <div style="margin-top:8px;font-size:9.5px;color:var(--ink-3);font-style:italic">historical IV time-series chart starts populating once daily IV is logged (deferred panel)</div>
+      </div>
+    `;
+  }
+
+  function paintTape() {
+    const body = document.getElementById('tape-body');
+    if (!DATA) return;
+    // Top picks ranked by premium_total_$ are our proxy for "Top UOA Strikes" until
+    // strike-level UOA data is plumbed from Schwab.
+    const ranked = (DATA.top30 || [])
+      .filter(p => p['premium_total_$'] != null && p['premium_total_$'] > 0)
+      .sort((a, b) => b['premium_total_$'] - a['premium_total_$'])
+      .slice(0, 10);
+    if (!ranked.length) { body.innerHTML = '<div class="empty-cell">no enriched picks</div>'; return; }
+    let html = `<table class="eikon-tape-tbl"><thead><tr>
+      <th>tkr</th><th>contract · sleeve</th><th>vol</th><th>IV %</th><th>Δ</th><th>premium $</th><th>cohort</th><th>bias</th>
+    </tr></thead><tbody>`;
+    ranked.forEach(p => {
+      const bull = (p.put_call_ratio || 1) < 1.0;
+      const cohort = (() => {
+        const buckets = [['0DTE', p.cohort_0dte_pct], ['weekly', p.cohort_weekly_pct], ['monthly', p.cohort_monthly_pct], ['LEAP', p.cohort_leap_pct]].filter(([,v]) => v != null);
+        if (!buckets.length) return '—';
+        buckets.sort((a,b) => b[1]-a[1]);
+        return buckets[0][0] + ' ' + buckets[0][1].toFixed(0) + '%';
+      })();
+      html += `<tr class="${bull ? 'bull' : 'bear'}">
+        <td><b>${p.ticker}</b></td>
+        <td>$${_f(p.atm_strike, 0)}${bull?'C':'P'} · ${_f(p.atm_dte, 0)}d</td>
+        <td><b>${_dol((+p.call_volume||0) + (+p.put_volume||0)).replace('$','')}</b></td>
+        <td><b>${p.atm_iv != null ? (p.atm_iv*100).toFixed(0) : '—'}</b></td>
+        <td>${p.atm_delta != null ? (p.atm_delta>=0?'+':'') + _f(p.atm_delta, 2) : '—'}</td>
+        <td><b>${_dol(p['premium_total_$'])}</b></td>
+        <td>${cohort}</td>
+        <td class="bias">${bull ? '▲ call-skew' : '▼ put-skew'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    body.innerHTML = html;
+  }
+
+  function paintNews() {
+    const tk = document.getElementById('news-tk');
+    if (tk) tk.textContent = SELECTED_TK || '—';
+    // News per ticker would come from a /api/news endpoint or news_articles in data.json
+    // — left as a stub since this preview file is standalone.
+  }
+
+  function renderAll() {
+    paintTopStrip();
+    paintWatchlist();
+    paintChain();
+    paintStrategy();
+    paintVolSurface();
+    paintSkew();
+    paintTerm();
+    paintIvHv();
+    paintTape();
+    paintNews();
+  }
+
+  // Bootstrap
+  loadData().then(renderAll);
+
+  // Search wiring
+  document.getElementById('ticker-search').addEventListener('change', (e) => {
+    const tk = e.target.value.trim().toUpperCase();
+    if (tk && DATA && DATA.top30.find(p => p.ticker === tk)) {
+      SELECTED_TK = tk;
+      renderAll();
+    }
+  });
+})();
+</script>
+</body>
+</html>

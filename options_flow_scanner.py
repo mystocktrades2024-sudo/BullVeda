@@ -82,6 +82,7 @@ def scan(options_data: dict[str, dict],
             iv_25d_put_mark    = oi.get("iv_25d_put_mark")
             atm_mark      = oi.get("atm_mark")
             uoa_puts_n    = oi.get("uoa_puts") or 0
+            chain_grid    = oi.get("chain_grid")
 
             price = prices.get(ticker, 0)
             if price <= 0:
@@ -171,6 +172,7 @@ def scan(options_data: dict[str, dict],
                 "iv_25d_put_mark":    iv_25d_put_mark,
                 "atm_mark":    atm_mark,
                 "uoa_puts":    uoa_puts_n,
+                "chain_grid":  chain_grid,
             })
 
         except Exception as e:

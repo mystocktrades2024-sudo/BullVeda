@@ -4467,6 +4467,9 @@ def get_options_iv_data(ticker: str) -> dict:
            # Real second-leg data for spread tickets (no estimation needed)
            "iv_25d_call_strike": None,  "iv_25d_call_mark":  None,
            "iv_25d_put_strike":  None,  "iv_25d_put_mark":   None,
+           # Full chain grid for Eikon Chain Montage / Vol Surface — 5 expirations × 7 strikes
+           # each, raw bid/ask/mark/IV/Δ/vol/OI per side. ~1.7KB per ticker.
+           "chain_grid":      None,
            "premium_call_$":  None,   # Σ call vol × mark × 100 (correct $ notional)
            "premium_put_$":   None,
            "premium_total_$": None,
@@ -4754,6 +4757,73 @@ def get_options_iv_data(ticker: str) -> dict:
 
         # Expose uoa_puts (was tracked but never surfaced)
         out["uoa_puts"] = uoa_puts
+
+        # 2026-05-26 · EIKON-CHAIN-GRID · build full chain grid for the Eikon
+        # preview / Chain Montage panel. 5 nearest expirations × 7 strikes closest
+        # to spot. Real chain data per (strike, expiration, side) — no BSM
+        # interpolation. ~1.7 KB per ticker.
+        if spot:
+            grid = []
+            for exp_key in list(set(list(call_map.keys()) + list(put_map.keys())))[:5]:
+                try:
+                    exp_date, dte_str = exp_key.split(":")
+                    dte = int(dte_str)
+                except Exception:
+                    continue
+                c_strikes = call_map.get(exp_key, {}) or {}
+                p_strikes = put_map.get(exp_key, {}) or {}
+                # Collect every unique strike at this expiration
+                strike_set = set()
+                for k_str in c_strikes:
+                    try: strike_set.add(float(k_str))
+                    except Exception: pass
+                for k_str in p_strikes:
+                    try: strike_set.add(float(k_str))
+                    except Exception: pass
+                if not strike_set: continue
+                # Pick 7 strikes closest to spot
+                chosen = sorted(sorted(strike_set, key=lambda k: abs(k - spot))[:7])
+                rows = []
+                for k in chosen:
+                    # Find the contract record (key format may vary slightly)
+                    c_rec, p_rec = None, None
+                    for k_str, contracts in c_strikes.items():
+                        try:
+                            if abs(float(k_str) - k) < 0.01:
+                                c_rec = (contracts or [{}])[0]; break
+                        except Exception: pass
+                    for k_str, contracts in p_strikes.items():
+                        try:
+                            if abs(float(k_str) - k) < 0.01:
+                                p_rec = (contracts or [{}])[0]; break
+                        except Exception: pass
+                    def _side(rec):
+                        if not rec: return None
+                        try: iv_raw = rec.get("volatility")
+                        except Exception: iv_raw = None
+                        try: iv_frac = round(float(iv_raw) / 100, 4) if iv_raw else None
+                        except Exception: iv_frac = None
+                        return {
+                            "bid":   rec.get("bid"),
+                            "ask":   rec.get("ask"),
+                            "mark":  rec.get("mark"),
+                            "iv":    iv_frac,           # fraction
+                            "delta": rec.get("delta"),
+                            "gamma": rec.get("gamma"),
+                            "theta": rec.get("theta"),
+                            "vega":  rec.get("vega"),
+                            "vol":   rec.get("totalVolume") or 0,
+                            "oi":    rec.get("openInterest") or 0,
+                        }
+                    rows.append({
+                        "k":    round(k, 2),
+                        "call": _side(c_rec),
+                        "put":  _side(p_rec),
+                    })
+                grid.append({"exp": exp_date, "dte": dte, "strikes": rows})
+            # Sort by DTE asc
+            grid.sort(key=lambda g: g.get("dte", 0))
+            out["chain_grid"] = grid[:5]
 
         # Term-structure ratio — front ATM IV / back ATM IV.
         # Skip the very-nearest expiration if DTE < 14 because 0-3 DTE IV is
