@@ -20208,13 +20208,54 @@ const QuantOptions = (function() {
       </div>
 
       <div class="qopt-mon-section">
-        <div class="qopt-mon-sec-h">⊞ GREEKS · ATM ~${p.atm_dte != null ? (+p.atm_dte).toFixed(0)+'d' : ''}</div>
-        <div class="qopt-mon-stats">
+        <div class="qopt-mon-sec-h">⊞ GREEKS · ATM ~${p.atm_dte != null ? (+p.atm_dte).toFixed(0)+'d' : ''}${useSpread ? ' · per-leg' : ''}</div>
+        ${useSpread ? (() => {
+          // Per-leg Greeks for spread structures (long leg + short leg)
+          // For short leg, fetch from chain_grid at the 25Δ strike
+          let shortG = {};
+          if (p.chain_grid) {
+            const exp = p.chain_grid.find(g => Math.abs(g.dte - p.atm_dte) < 5) || p.chain_grid[0];
+            if (exp) {
+              const target = exp.strikes.find(s => Math.abs(s.k - sk) < 0.5);
+              if (target) shortG = (isBull ? target.call : target.put) || {};
+            }
+          }
+          const sigSign = -1;  // short leg flips sign
+          const netD = (p.atm_delta || 0) + sigSign * (shortG.delta || 0);
+          const netG = (p.atm_gamma || 0) + sigSign * (shortG.gamma || 0);
+          const netT = (p.atm_theta || 0) + sigSign * (shortG.theta || 0);
+          const netV = (p.atm_vega  || 0) + sigSign * (shortG.vega  || 0);
+          return `<table class="qopt-mon-stress" style="width:100%">
+            <thead><tr><th>Leg</th><th class="r">Δ</th><th class="r">Γ</th><th class="r">Θ/d</th><th class="r">ν</th></tr></thead>
+            <tbody>
+              <tr><td><b style="color:var(--gn)">L $${(+p.atm_strike).toFixed(0)}</b></td>
+                <td class="r"><b>${p.atm_delta != null ? (p.atm_delta>=0?'+':'')+(+p.atm_delta).toFixed(2) : '—'}</b></td>
+                <td class="r">${p.atm_gamma != null ? (+p.atm_gamma).toFixed(3) : '—'}</td>
+                <td class="r rd">${p.atm_theta != null ? '$'+(+p.atm_theta).toFixed(2) : '—'}</td>
+                <td class="r gn">${p.atm_vega != null ? '+$'+(+p.atm_vega).toFixed(2) : '—'}</td>
+              </tr>
+              <tr><td><b style="color:var(--rd)">S $${(+sk).toFixed(0)}</b></td>
+                <td class="r">${shortG.delta != null ? '-'+(Math.abs(+shortG.delta)).toFixed(2) : '—'}</td>
+                <td class="r">${shortG.gamma != null ? '-'+(Math.abs(+shortG.gamma)).toFixed(3) : '—'}</td>
+                <td class="r gn">${shortG.theta != null ? '+$'+Math.abs(+shortG.theta).toFixed(2) : '—'}</td>
+                <td class="r rd">${shortG.vega != null ? '-$'+Math.abs(+shortG.vega).toFixed(2) : '—'}</td>
+              </tr>
+              <tr style="border-top:1px solid var(--line);background:rgba(217,119,87,0.06)">
+                <td><b style="color:var(--copper)">NET</b></td>
+                <td class="r"><b>${(netD>=0?'+':'')+netD.toFixed(2)}</b></td>
+                <td class="r"><b>${netG.toFixed(3)}</b></td>
+                <td class="r ${netT<0?'rd':'gn'}"><b>${netT>=0?'+':''}$${netT.toFixed(2)}</b></td>
+                <td class="r ${netV<0?'rd':'gn'}"><b>${netV>=0?'+':''}$${netV.toFixed(2)}</b></td>
+              </tr>
+            </tbody>
+          </table>
+          <div style="font:600 9px var(--mono);color:var(--ink-3);margin-top:4px">Short leg flips Greek sign · net = long − short</div>`;
+        })() : `<div class="qopt-mon-stats">
           ${stat('Δ', p.atm_delta != null ? (p.atm_delta>=0?'+':'')+(+p.atm_delta).toFixed(2) : '—')}
           ${stat('Γ', p.atm_gamma != null ? (+p.atm_gamma).toFixed(3) : '—')}
           ${stat('Θ/d', p.atm_theta != null ? '$'+(+p.atm_theta).toFixed(2) : '—', 'rd')}
           ${stat('ν', p.atm_vega != null ? '+$'+(+p.atm_vega).toFixed(2) : '—', 'gn')}
-        </div>
+        </div>`}
       </div>
 
       <div class="qopt-mon-section">
@@ -20258,6 +20299,21 @@ const QuantOptions = (function() {
           ${_qoptIvCrush(p, ew)}
         </div>`;
       })()}
+
+      <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ NEWS · last 5 headlines</div>
+        <div id="qopt-news-${p.ticker}" class="qopt-mon-news"><span style="color:var(--ink-3);font:600 10.5px var(--mono)">loading…</span></div>
+      </div>
+
+      <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ ALT-DATA · Senate · EDGAR · Wiki · Reddit</div>
+        <div id="qopt-alt-${p.ticker}" class="qopt-mon-alt"><span style="color:var(--ink-3);font:600 10.5px var(--mono)">loading…</span></div>
+      </div>
+
+      <div class="qopt-mon-section">
+        <div class="qopt-mon-sec-h">⊞ CORPORATE ACTIONS · ex-div · splits · ≤60d</div>
+        <div id="qopt-corp-${p.ticker}" class="qopt-mon-corp"><span style="color:var(--ink-3);font:600 10.5px var(--mono)">loading…</span></div>
+      </div>
 
       <div class="qopt-mon-section">
         <div class="qopt-mon-sec-h">⊞ CATALYSTS</div>
@@ -20585,8 +20641,83 @@ const QuantOptions = (function() {
       .qopt-bot-card .qopt-monitor-tbl { border: none; }
       .qopt-bot-card .qopt-monitor-tbl thead th { padding: 4px 6px; font-size: 8.5px; background: transparent; }
       .qopt-bot-card .qopt-monitor-tbl tbody td { padding: 4px 6px; font-size: 11px; }
+      /* Detail-pane news / alt-data / corp actions */
+      .qopt-mon-news { font: 600 11px var(--mono); }
+      .qopt-news-row { display: grid; grid-template-columns: 40px 1fr; gap: 6px; padding: 3px 0; border-bottom: 1px dashed var(--bg-2); align-items: baseline; }
+      .qopt-news-row:last-child { border-bottom: none; }
+      .qopt-news-row .t { color: var(--ink-3); font-size: 9.5px; }
+      .qopt-news-row .h { color: var(--ink-1); line-height: 1.3; }
+      .qopt-mon-alt { }
+      .qopt-alt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+      .qopt-alt-cell { background: var(--bg-3); border: 1px solid var(--line); border-radius: 2px; padding: 5px 8px; font: 600 11px var(--mono); }
+      .qopt-alt-cell.am { background: rgba(255,185,92,0.08); border-color: rgba(255,185,92,0.4); }
+      .qopt-alt-cell.rd { background: rgba(255,107,91,0.08); border-color: rgba(255,107,91,0.4); }
+      .qopt-alt-cell .lbl { color: var(--ink-3); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+      .qopt-alt-cell .v { color: var(--ink); font-weight: 800; font-size: 14px; margin-top: 1px; font-variant-numeric: tabular-nums; }
+      .qopt-alt-cell.am .v { color: var(--amb); } .qopt-alt-cell.rd .v { color: var(--rd); }
+      .qopt-alt-foot { margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--bg-2); font: 600 9.5px var(--mono); color: var(--ink-2); }
+      .qopt-alt-foot b { color: var(--ink); font-weight: 700; }
     `;
     document.head.appendChild(s);
+  }
+
+  // Async populate the detail-pane Alt-Data / News / Corporate-Actions sections
+  async function _qoptLoadDetailExtras(p) {
+    if (!p) return;
+    const tk = p.ticker;
+    const elNews = document.getElementById('qopt-news-' + tk);
+    const elAlt  = document.getElementById('qopt-alt-' + tk);
+    const elCorp = document.getElementById('qopt-corp-' + tk);
+    // Fire all 6 endpoints in parallel
+    const [news, sen, edg, wiki, red, corp] = await Promise.all([
+      fetch('/api/news?t=' + tk + '&limit=5',           {credentials:'include'}).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/senate-trades?t=' + tk + '&days=180&limit=5', {credentials:'include'}).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/edgar-13f?t=' + tk + '&limit=5',     {credentials:'include'}).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/wiki-velocity?t=' + tk + '&days=30', {credentials:'include'}).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/reddit-mentions?t=' + tk + '&days=7',{credentials:'include'}).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/corporate-actions?t=' + tk + '&days=60', {credentials:'include'}).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
+    // News
+    if (elNews) {
+      const items = (news && (news.articles || news.news)) || [];
+      elNews.innerHTML = items.length
+        ? items.slice(0,5).map(n => `<div class="qopt-news-row">
+            <span class="t">${(n.date || '').slice(11, 16) || (n.date || '').slice(5, 10)}</span>
+            <span class="h">${(n.title || '').slice(0, 90)}</span>
+          </div>`).join('')
+        : '<span style="color:var(--ink-3);font:600 10.5px var(--mono)">no recent news</span>';
+    }
+    // Alt-data (4-card mini grid)
+    if (elAlt) {
+      const senateCount = (sen && sen.trades || []).length;
+      const edgarCount  = (edg && edg.filings || []).length;
+      const wikiVel     = wiki && wiki.velocity_7d_vs_30d;
+      const redCount    = red && red.mention_count;
+      const redVerdict  = red && red.verdict;
+      elAlt.innerHTML = `<div class="qopt-alt-grid">
+        <div class="qopt-alt-cell"><div class="lbl">🏛 Senate · 180d</div><div class="v">${senateCount}</div></div>
+        <div class="qopt-alt-cell"><div class="lbl">📑 EDGAR 13F</div><div class="v">${edgarCount}</div></div>
+        <div class="qopt-alt-cell ${wikiVel != null && wikiVel > 1.5 ? 'rd' : wikiVel != null && wikiVel > 1.1 ? 'am' : ''}"><div class="lbl">📚 Wiki velocity</div><div class="v">${wikiVel != null ? wikiVel.toFixed(2)+'×' : '—'}</div></div>
+        <div class="qopt-alt-cell ${redVerdict === 'CROWDED' ? 'rd' : redVerdict === 'ACTIVE' ? 'am' : ''}"><div class="lbl">🦍 r/WSB · 7d</div><div class="v">${redCount != null ? redCount : '—'}</div></div>
+      </div>
+      ${(sen && sen.trades && sen.trades.length) ? '<div class="qopt-alt-foot"><b>Recent:</b> ' + sen.trades.slice(0,2).map(t => `${t.senator || '?'} · ${t.type || '?'} · ${t.date || ''}`).join(' · ') + '</div>' : ''}`;
+    }
+    // Corporate actions
+    if (elCorp) {
+      const pills = [];
+      ((corp && corp.ex_div) || []).forEach(ed => {
+        const days = Math.round((new Date(ed.date) - new Date()) / 86400000);
+        const cls = days <= 3 ? 'rd' : days <= 7 ? 'am' : '';
+        pills.push(`<div class="qopt-mon-cat ${cls}"><b>💰 EX-DIV</b> ${ed.amount ? '$'+(+ed.amount).toFixed(2) : ''} in <b>${days}d</b></div>`);
+      });
+      ((corp && corp.splits) || []).forEach(sp => {
+        const days = Math.round((new Date(sp.date) - new Date()) / 86400000);
+        pills.push(`<div class="qopt-mon-cat am"><b>🔀 SPLIT</b> ${sp.ratio||''} in <b>${days}d</b></div>`);
+      });
+      elCorp.innerHTML = pills.length
+        ? '<div class="qopt-mon-cats">' + pills.join('') + '</div>'
+        : '<span style="color:var(--ink-3);font:600 10.5px var(--mono)">none ≤60d</span>';
+    }
   }
 
   function _renderQoptNative(wsPanel, data, picks) {
@@ -20630,6 +20761,10 @@ const QuantOptions = (function() {
       ${_qoptTab === 'scanner' ? _renderQoptQuickFilters() : ''}
       ${body}
     `;
+    // 2026-05-27 · async populate detail-pane extras (alt-data / news / corp actions)
+    if (_qoptTab === 'scanner' && selectedPick) {
+      setTimeout(() => _qoptLoadDetailExtras(selectedPick), 0);
+    }
   }
 
   // ── Bottom analytics row — fills empty space under the scanner table ──
@@ -26060,7 +26195,7 @@ const QuantSignalScannerEikon = (function() {
   function _ensureStyles() {
     if (document.getElementById('qss-styles')) return;
     const css = `
-.qss-shell { display:flex; flex-direction:column; height:100%; min-height:0; background:var(--bg); color:var(--ink);
+.qss-shell { display:flex; flex-direction:column; height:100%; min-height: calc(100vh - 200px); background:var(--bg); color:var(--ink);
   font-family:var(--sans); font-size:13px; font-variant-numeric:tabular-nums; }
 
 .qss-titlebar { display:flex; align-items:center; gap:14px; height:40px; padding:0 16px;
