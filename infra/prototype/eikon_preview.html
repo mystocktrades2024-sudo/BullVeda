@@ -20,8 +20,10 @@
     --gn: #5be57c;
     --am: #ffb95c;
     --rd: #ff6b5b;
-    --mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
-    --sans: 'Inter', system-ui, -apple-system, sans-serif;
+    /* Match kairos.html font stack — both mono and sans use Aptos for visual continuity */
+    --mono: 'Aptos', 'Aptos Display', 'Segoe UI Variable Text', 'Segoe UI', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --sans: 'Aptos', 'Aptos Display', 'Segoe UI Variable Text', 'Segoe UI', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --serif: 'GT Sectra', Georgia, serif;
   }
   /* Light-mode overrides — mirror kairos.html palette so iframe matches parent */
   body.light {
@@ -325,6 +327,53 @@
   .eikon-strat-net-cell .v.rd { color: var(--rd); }
   .eikon-strat-net-cell .v.cop { color: var(--copper); }
   .eikon-pnl-svg { width: 100%; height: 130px; }
+
+  /* TRADE TICKET — prominent BUY/TARGET/STOP at the top of Strategy Builder */
+  .eikon-trade-ticket {
+    background: linear-gradient(135deg, rgba(217,119,87,0.10), rgba(217,119,87,0.02));
+    border: 1px solid rgba(217,119,87,0.5);
+    border-radius: 5px;
+    padding: 10px 14px;
+    margin-bottom: 10px;
+    font-family: var(--mono);
+  }
+  .eikon-tt-h {
+    font-size: 10.5px; font-weight: 800;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--copper); margin-bottom: 8px;
+  }
+  .eikon-tt-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+  }
+  .eikon-tt-cell {
+    background: var(--bg-3); border-radius: 4px;
+    padding: 8px 10px; position: relative; border: 1px solid var(--line);
+  }
+  .eikon-tt-cell.buy   { border-color: rgba(217,119,87,0.5); background: rgba(217,119,87,0.08); }
+  .eikon-tt-cell.tgt   { border-color: rgba(91,229,124,0.4); background: rgba(91,229,124,0.08); }
+  .eikon-tt-cell.stop  { border-color: rgba(255,107,91,0.4); background: rgba(255,107,91,0.08); }
+  .eikon-tt-act {
+    font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+    font-weight: 800; margin-bottom: 2px;
+  }
+  .eikon-tt-cell.buy  .eikon-tt-act { color: var(--copper); }
+  .eikon-tt-cell.tgt  .eikon-tt-act { color: var(--gn); }
+  .eikon-tt-cell.stop .eikon-tt-act { color: var(--rd); }
+  .eikon-tt-px {
+    font-size: 16px; font-weight: 800; color: var(--ink);
+    font-variant-numeric: tabular-nums; letter-spacing: 0.01em;
+  }
+  .eikon-tt-cell.tgt  .eikon-tt-px { color: var(--gn); }
+  .eikon-tt-cell.stop .eikon-tt-px { color: var(--rd); }
+  .eikon-tt-sub {
+    font-size: 9.5px; color: var(--ink-2); margin-top: 2px; letter-spacing: 0.02em;
+  }
+  .eikon-tt-sub b { color: var(--ink); font-weight: 700; }
+  .eikon-tt-foot {
+    margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line);
+    font-size: 10px; color: var(--ink-2); letter-spacing: 0.02em;
+  }
+  .eikon-tt-foot b { color: var(--ink); font-weight: 700; }
 
   /* ── RIGHT COL: VOL SURFACE / SKEW / TERM ─────────────────────────── */
   .eikon-volsurf { grid-column: 3; grid-row: 1; }
@@ -887,9 +936,70 @@
     let path = '';
     pnl.forEach((pt, i) => path += (i === 0 ? 'M ' : 'L ') + xOf(pt.S).toFixed(1) + ' ' + yOf(pt.pnl).toFixed(1) + ' ');
 
+    // ── TRADE TICKET · clear entry/target/stop using real chain marks ──
+    // Entry premium = the BUY price (ask if available, mid otherwise)
+    // Target premium = BSM-priced option price when spot reaches target
+    // Stop premium   = BSM-priced option price when spot hits stop
+    const askPx = (() => {
+      // Find ATM call/put ask from chain_grid
+      if (!p.chain_grid) return null;
+      const exp = p.chain_grid.find(g => g.dte === p.atm_dte) || p.chain_grid[0];
+      if (!exp) return null;
+      const strike = exp.strikes.find(s => Math.abs(s.k - p.atm_strike) < 0.5);
+      if (!strike) return null;
+      return bull ? (strike.call && strike.call.ask) : (strike.put && strike.put.ask);
+    })();
+    const entryPx = askPx != null ? askPx : p.atm_mark;
+    // BSM at stop/target (real values, no proxy)
+    const T = p.atm_dte / 365, sigma = p.atm_iv;
+    const targetSpot = +p.target;
+    const stopSpot   = +p.stop;
+    let tgtPrem, stopPrem;
+    if (useSpread && sm != null) {
+      const lT = bull ? bsmCall(targetSpot, p.atm_strike, sigma, T) : bsmPut(targetSpot, p.atm_strike, sigma, T);
+      const sT = bull ? bsmCall(targetSpot, sk, sigma, T)            : bsmPut(targetSpot, sk, sigma, T);
+      const lS = bull ? bsmCall(stopSpot,   p.atm_strike, sigma, T) : bsmPut(stopSpot,   p.atm_strike, sigma, T);
+      const sS = bull ? bsmCall(stopSpot,   sk, sigma, T)            : bsmPut(stopSpot,   sk, sigma, T);
+      tgtPrem  = lT - sT;
+      stopPrem = lS - sS;
+    } else {
+      tgtPrem  = bull ? bsmCall(targetSpot, p.atm_strike, sigma, T) : bsmPut(targetSpot, p.atm_strike, sigma, T);
+      stopPrem = bull ? bsmCall(stopSpot,   p.atm_strike, sigma, T) : bsmPut(stopSpot,   p.atm_strike, sigma, T);
+    }
+    const profitPct = entryPx > 0 ? (tgtPrem - entryPx) / entryPx * 100 : null;
+    const lossPct   = entryPx > 0 ? (stopPrem - entryPx) / entryPx * 100 : null;
+    const ctrSpec = useSpread
+      ? `${bull ? p.ticker+' $'+p.atm_strike+'C/' + sk + 'C' : p.ticker+' $'+p.atm_strike+'P/' + sk + 'P'} · ${p.atm_dte}d`
+      : `${p.ticker} $${p.atm_strike}${bull ? 'C' : 'P'} · ${p.atm_dte}d`;
+    // Recommended hold: close at target OR at DTE-5 (avoid last-week theta cliff)
+    const closeBy = Math.max(1, p.atm_dte - 5);
+
     body.innerHTML = `
       <div class="eikon-strat-legs">
         <div class="eikon-strat-name">${strat}</div>
+        <div class="eikon-trade-ticket">
+          <div class="eikon-tt-h">TRADE TICKET · ${ctrSpec}</div>
+          <div class="eikon-tt-grid">
+            <div class="eikon-tt-cell buy">
+              <div class="eikon-tt-act">▶ BUY</div>
+              <div class="eikon-tt-px">$${entryPx != null ? entryPx.toFixed(2) : '—'}</div>
+              <div class="eikon-tt-sub">spot <b>$${p.price.toFixed(2)}</b> · ${askPx != null ? 'at ask' : 'at mark'}</div>
+            </div>
+            <div class="eikon-tt-cell tgt">
+              <div class="eikon-tt-act">🎯 TARGET</div>
+              <div class="eikon-tt-px">$${tgtPrem != null ? tgtPrem.toFixed(2) : '—'}</div>
+              <div class="eikon-tt-sub">when spot <b>$${targetSpot.toFixed(2)}</b>${profitPct != null ? ' · <b style="color:var(--gn)">+'+profitPct.toFixed(0)+'%</b>' : ''}</div>
+            </div>
+            <div class="eikon-tt-cell stop">
+              <div class="eikon-tt-act">🛑 STOP</div>
+              <div class="eikon-tt-px">$${stopPrem != null ? stopPrem.toFixed(2) : '—'}</div>
+              <div class="eikon-tt-sub">when spot <b>$${stopSpot.toFixed(2)}</b>${lossPct != null ? ' · <b style="color:var(--rd)">'+lossPct.toFixed(0)+'%</b>' : ''}</div>
+            </div>
+          </div>
+          <div class="eikon-tt-foot">
+            Net debit <b>$${netDebit.toFixed(2)}/ct</b> · Hold to spot target OR close by <b>${closeBy}d</b> (avoid last-week θ cliff) · POP <b>${(pop*100).toFixed(0)}%</b>
+          </div>
+        </div>
         <div class="eikon-strat-leg">
           <span class="side long">${longLbl}</span>
           <span class="desc">${bull ? '$' + p.atm_strike + 'C' : '$' + p.atm_strike + 'P'} · ${_f(p.atm_dte, 0)}d</span>
