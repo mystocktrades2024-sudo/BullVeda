@@ -7813,6 +7813,169 @@ async def macro_vol_api():
         return {"error": str(e)}
 
 
+@app.get("/api/senate-trades")
+async def senate_trades_api(t: str = "", days: int = 90, limit: int = 50):
+    """Senate / Congressional trades for a ticker (or all if t='').
+
+    Source: SenateStockWatcher's free JSON feed at senatestockwatcher.com
+    (public domain). Returns last N filings within `days`.
+    Shape: {trades: [{senator, ticker, type, date, amount_range}]}
+    """
+    import urllib.request
+    from datetime import datetime, timedelta
+    try:
+        url = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json"
+        req = urllib.request.Request(url, headers={"User-Agent": "SwingTrade/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        tk = t.upper().strip()
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        rows = []
+        for r in data if isinstance(data, list) else []:
+            d = (r.get("transaction_date") or r.get("ptr_link") or "")[:10]
+            if d < cutoff: continue
+            sym = (r.get("ticker") or "").upper().replace("$", "").strip()
+            if tk and sym != tk: continue
+            rows.append({
+                "senator": r.get("senator"),
+                "ticker": sym,
+                "type": r.get("type"),
+                "date": d,
+                "amount": r.get("amount"),
+                "asset": (r.get("asset_description") or "")[:60],
+            })
+            if len(rows) >= limit: break
+        return {"trades": rows, "count": len(rows), "filter_ticker": tk or "all"}
+    except Exception as e:
+        return {"trades": [], "count": 0, "error": str(e)}
+
+
+@app.get("/api/edgar-13f")
+async def edgar_13f_api(t: str, limit: int = 10):
+    """Recent 13F filings mentioning a ticker (institutional positioning).
+
+    Source: SEC EDGAR full-text search at efts.sec.gov.
+    Returns last N 13F-HR filings that include the ticker, with filer name + date.
+    Shape: {ticker, filings: [{filer, cik, date, form, accession}]}
+    """
+    import urllib.request, urllib.parse
+    tk = t.upper().strip()
+    try:
+        params = {
+            "q": f'"{tk}"',
+            "forms": "13F-HR",
+            "dateRange": "custom",
+        }
+        url = f"https://efts.sec.gov/LATEST/search-index?{urllib.parse.urlencode(params)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "SwingTrade/1.0 admin@example.com"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        hits = ((data or {}).get("hits") or {}).get("hits") or []
+        rows = []
+        for h in hits[:limit]:
+            src = h.get("_source") or {}
+            adsh = src.get("adsh") or h.get("_id") or ""
+            rows.append({
+                "filer": (src.get("display_names") or ["?"])[0][:60],
+                "cik": src.get("ciks", [""])[0],
+                "date": (src.get("file_date") or "")[:10],
+                "form": src.get("forms", [""])[0],
+                "accession": adsh,
+            })
+        return {"ticker": tk, "filings": rows, "count": len(rows)}
+    except Exception as e:
+        return {"ticker": tk, "filings": [], "error": str(e)}
+
+
+@app.get("/api/wiki-velocity")
+async def wiki_velocity_api(t: str, days: int = 30):
+    """Wikipedia page view velocity for a ticker — alt-data on news interest.
+
+    Source: Wikimedia REST API (free, no auth). Returns daily page views
+    and computes a 7d/30d velocity ratio (current week vs 30d mean).
+    """
+    import urllib.request
+    from datetime import datetime, timedelta
+    tk = t.upper().strip()
+    # Get company name from EODHD fundamentals — fall back to ticker
+    try:
+        import eodhd_client as eod
+        fund = eod.fundamentals(tk)
+        name = (fund or {}).get("General", {}).get("Name") or tk
+    except Exception:
+        name = tk
+    page_title = name.split(",")[0].replace(" ", "_")[:50]
+    to_date = datetime.now().strftime("%Y%m%d")
+    from_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+    try:
+        url = f"https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/all-agents/{urllib_quote(page_title)}/daily/{from_date}/{to_date}"
+        req = urllib.request.Request(url, headers={"User-Agent": "SwingTrade/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        items = data.get("items") or []
+        if not items:
+            return {"ticker": tk, "name": name, "views": [], "velocity_7d_vs_30d": None}
+        views = [int(x.get("views") or 0) for x in items]
+        last_7 = views[-7:] if len(views) >= 7 else views
+        recent_mean = sum(last_7) / max(1, len(last_7))
+        overall_mean = sum(views) / max(1, len(views))
+        velocity = (recent_mean / overall_mean) if overall_mean > 0 else None
+        return {
+            "ticker": tk, "name": name,
+            "page_title": page_title,
+            "views": views,
+            "recent_7d_mean": round(recent_mean, 0),
+            "overall_mean": round(overall_mean, 0),
+            "velocity_7d_vs_30d": round(velocity, 2) if velocity is not None else None,
+        }
+    except Exception as e:
+        return {"ticker": tk, "name": name, "views": [], "error": str(e)}
+
+
+def urllib_quote(s):
+    import urllib.parse
+    return urllib.parse.quote(s, safe='')
+
+
+@app.get("/api/reddit-mentions")
+async def reddit_mentions_api(t: str, days: int = 7):
+    """Crowded-trade flag · mention count on r/wallstreetbets in last N days.
+
+    Source: Reddit's public JSON endpoint (no auth). Returns mention count
+    + sample post titles. High count = crowded trade.
+    Shape: {ticker, mention_count, top_posts: [{title, score, date}]}
+    """
+    import urllib.request
+    from datetime import datetime, timedelta
+    tk = t.upper().strip()
+    try:
+        # Search WSB for ticker — Reddit's old JSON endpoint
+        url = f"https://www.reddit.com/r/wallstreetbets/search.json?q={tk}&restrict_sr=1&sort=new&limit=100"
+        req = urllib.request.Request(url, headers={"User-Agent": "SwingTrade/1.0 alt-data"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        children = ((data or {}).get("data") or {}).get("children") or []
+        cutoff_ts = (datetime.now() - timedelta(days=days)).timestamp()
+        posts = []
+        for c in children:
+            d = (c or {}).get("data") or {}
+            if (d.get("created_utc") or 0) < cutoff_ts: continue
+            # Filter: ticker must appear in title to reduce false positives
+            if tk not in (d.get("title") or "").upper(): continue
+            posts.append({
+                "title":  d.get("title", "")[:120],
+                "score":  d.get("score"),
+                "date":   datetime.fromtimestamp(d.get("created_utc") or 0).strftime("%Y-%m-%d %H:%M"),
+                "url":    "https://reddit.com" + (d.get("permalink") or ""),
+            })
+        # Crowded-trade verdict — heuristic
+        n = len(posts)
+        verdict = "CROWDED" if n > 20 else "ACTIVE" if n > 5 else "QUIET"
+        return {"ticker": tk, "mention_count": n, "verdict": verdict, "top_posts": posts[:5]}
+    except Exception as e:
+        return {"ticker": tk, "mention_count": 0, "verdict": "unknown", "error": str(e)}
+
+
 @app.get("/api/corporate-actions")
 async def corporate_actions_api(t: str, days: int = 60):
     """Ex-div + stock-split dates within `days` for a ticker.
