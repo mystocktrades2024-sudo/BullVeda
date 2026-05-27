@@ -297,7 +297,7 @@ def main(force: bool = False) -> int:
                     # Annualized 20-day realized vol (252 trading days)
                     hv20 = float(logret.iloc[-20:].std() * (252 ** 0.5))
                     pick["hv20"] = round(hv20, 4)
-                    # HV30 / HV60 — broader-horizon realized vol for multi-tier IV-RV
+                    # HV30 / HV60 / HV90 — multi-horizon realized vol for IV-RV stratification
                     if len(logret) >= 30:
                         pick["hv30"] = round(float(logret.iloc[-30:].std() * (252 ** 0.5)), 4)
                     else:
@@ -306,6 +306,10 @@ def main(force: bool = False) -> int:
                         pick["hv60"] = round(float(logret.iloc[-60:].std() * (252 ** 0.5)), 4)
                     else:
                         pick["hv60"] = None
+                    if len(logret) >= 90:
+                        pick["hv90"] = round(float(logret.iloc[-90:].std() * (252 ** 0.5)), 4)
+                    else:
+                        pick["hv90"] = None
                     atm_iv = pick.get("atm_iv")
                     if atm_iv is not None:
                         # IVRP > 0 = IV richer than realized (sell premium edge)
@@ -314,10 +318,81 @@ def main(force: bool = False) -> int:
                     else:
                         pick["ivrp"] = None
                 except Exception:
-                    pick["hv20"] = None; pick["hv30"] = None; pick["hv60"] = None; pick["ivrp"] = None
-            log.info(f"HV20+IVRP computed for {sum(1 for p in top30 if p.get('hv20') is not None)}/{len(top30)} picks")
+                    pick["hv20"] = None; pick["hv30"] = None; pick["hv60"] = None
+                    pick["hv90"] = None; pick["ivrp"] = None
     except Exception as e:
         log.warning(f"HV20/IVRP enrichment failed (non-fatal): {e}")
+
+    # ── Batch 5 enrichments ─────────────────────────────────────────────
+    # 1. IV percentile (1y rank) + IV-of-IV from data/iv_history.jsonl
+    # 2. Beta-to-SPY + beta-adjusted Δ from EODHD daily bars
+    try:
+        import numpy as np
+        from datetime import datetime, timedelta
+        iv_hist_path = BASE / "data" / "iv_history.jsonl"
+        iv_history_by_tk = {}
+        if iv_hist_path.exists():
+            cutoff = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+            for ln in iv_hist_path.read_text().splitlines():
+                if not ln.strip(): continue
+                try:
+                    r = json.loads(ln)
+                    d = (r.get("date") or "")[:10]
+                    if d < cutoff: continue
+                    tk = (r.get("ticker") or "").upper()
+                    iv = r.get("current_iv")
+                    if tk and iv is not None:
+                        iv_history_by_tk.setdefault(tk, []).append(float(iv))
+                except Exception: continue
+        # SPY return series for beta calculation (fetched once)
+        spy_logret = None
+        try:
+            from data_fetcher import fetch_market_data
+            spy_df = fetch_market_data(["SPY"], period="3mo").get("SPY")
+            if spy_df is not None and len(spy_df) >= 60:
+                spy_close = spy_df["Close"].astype(float)
+                spy_logret = np.log(spy_close / spy_close.shift(1)).dropna()
+        except Exception: pass
+
+        for pick in top30:
+            tk = (pick.get("ticker") or "").upper()
+            # IV percentile (1y rank)
+            hist = iv_history_by_tk.get(tk, [])
+            if len(hist) >= 20 and pick.get("atm_iv") is not None:
+                cur_iv_pct = float(pick["atm_iv"]) * 100  # IV history stored as percent
+                below = sum(1 for v in hist if v < cur_iv_pct)
+                pick["iv_percentile_1y"] = round(below / len(hist) * 100, 1)
+            # IV-of-IV: σ of historical IV (last 30 points)
+            if len(hist) >= 10:
+                recent = hist[-30:]
+                if recent:
+                    m = sum(recent) / len(recent)
+                    var = sum((v-m)**2 for v in recent) / len(recent)
+                    pick["iv_of_iv"] = round(var ** 0.5, 2)
+            # Beta-to-SPY + beta-adjusted Δ
+            if spy_logret is not None:
+                try:
+                    tk_df = md.get(tk) if isinstance(md, dict) else None
+                    if tk_df is not None and len(tk_df) >= 60:
+                        tk_close = tk_df["Close"].astype(float)
+                        tk_logret = np.log(tk_close / tk_close.shift(1)).dropna()
+                        # Align by index
+                        common = tk_logret.index.intersection(spy_logret.index)
+                        if len(common) >= 30:
+                            x = spy_logret.loc[common].values
+                            y = tk_logret.loc[common].values
+                            cov = ((x - x.mean()) * (y - y.mean())).sum() / len(x)
+                            var = ((x - x.mean()) ** 2).sum() / len(x)
+                            if var > 0:
+                                beta = cov / var
+                                pick["beta_to_spy"] = round(beta, 2)
+                                if pick.get("atm_delta") is not None:
+                                    pick["beta_adjusted_delta"] = round(float(pick["atm_delta"]) * beta, 3)
+                except Exception: pass
+    except Exception as e:
+        log.warning(f"Batch 5 enrichment failed (non-fatal): {e}")
+
+    log.info(f"HV20+IVRP computed for {sum(1 for p in top30 if p.get('hv20') is not None)}/{len(top30)} picks")
 
     # Snapshot prior STRONG before overwriting, for delta-based Slack alert
     prev_strong = _read_previous_strong()
@@ -392,6 +467,29 @@ def main(force: bool = False) -> int:
         log.info(f"Logged {len(top30)} snapshots to options_flow_history.jsonl")
     except Exception as e:
         log.warning(f"options_flow history-log failed (non-fatal): {e}")
+
+    # 2026-05-26 · Batch 5 · OI snapshot logger — one row per ticker per day.
+    # Powers OI-change vs prior day (Tier A #3) + Repeated prints (Section D).
+    try:
+        from datetime import datetime as _dt
+        oi_hist_path = BASE / "cache" / "oi_history.jsonl"
+        today_str = _dt.now().strftime("%Y-%m-%d")
+        # Dedupe today's rows so re-runs don't compound (simple date-string filter)
+        if oi_hist_path.exists():
+            existing = oi_hist_path.read_text().splitlines()
+            keep = [ln for ln in existing if ln.strip() and f'"date": "{today_str}"' not in ln]
+            oi_hist_path.write_text("\n".join(keep) + ("\n" if keep else ""))
+        with open(oi_hist_path, "a") as f:
+            for pick in top30:
+                f.write(json.dumps({
+                    "date":     today_str,
+                    "ticker":   pick.get("ticker"),
+                    "call_oi":  pick.get("call_oi"),
+                    "put_oi":   pick.get("total_put_oi") or pick.get("put_oi") or 0,
+                }, default=str) + "\n")
+        log.info(f"OI history logged for {len(top30)} tickers")
+    except Exception as e:
+        log.warning(f"OI history log failed (non-fatal): {e}")
 
     strong = sum(1 for x in top30 if x.get("status") == "STRONG")
     mod    = sum(1 for x in top30 if x.get("status") == "MODERATE")

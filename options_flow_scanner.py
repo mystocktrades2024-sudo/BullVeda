@@ -86,6 +86,18 @@ def scan(options_data: dict[str, dict],
             implied_move  = oi.get("implied_move_pct")
             vol_of_vol    = oi.get("vol_of_vol")
             theta_pct     = oi.get("theta_pct_per_day")
+            # Batch 5 — derived metrics
+            atm_dte_td    = oi.get("atm_dte_trading")
+            oi_w_strike   = oi.get("oi_weighted_strike")
+            pc_oi_atm     = oi.get("pc_oi_ratio_atm")
+            net_delta_exp = oi.get("net_delta_by_exp")
+            theta_sched   = oi.get("theta_schedule")
+            strike_z_out  = oi.get("strike_z_outliers")
+            max_oi_strk   = oi.get("max_oi_strike")
+            oi_chg_call   = oi.get("oi_change_call")
+            oi_chg_put    = oi.get("oi_change_put")
+            oi_chg_total  = oi.get("oi_change_total")
+            pin_risk_v    = oi.get("pin_risk")
 
             price = prices.get(ticker, 0)
             if price <= 0:
@@ -179,6 +191,17 @@ def scan(options_data: dict[str, dict],
                 "implied_move_pct":  implied_move,
                 "vol_of_vol":         vol_of_vol,
                 "theta_pct_per_day":  theta_pct,
+                "atm_dte_trading":    atm_dte_td,
+                "oi_weighted_strike": oi_w_strike,
+                "pc_oi_ratio_atm":    pc_oi_atm,
+                "net_delta_by_exp":   net_delta_exp,
+                "theta_schedule":     theta_sched,
+                "strike_z_outliers":  strike_z_out,
+                "max_oi_strike":      max_oi_strk,
+                "oi_change_call":     oi_chg_call,
+                "oi_change_put":      oi_chg_put,
+                "oi_change_total":    oi_chg_total,
+                "pin_risk":           pin_risk_v,
             })
 
         except Exception as e:

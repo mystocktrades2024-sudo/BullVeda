@@ -4474,6 +4474,23 @@ def get_options_iv_data(ticker: str) -> dict:
            "implied_move_pct": None,   # ATM straddle (call_mark + put_mark) / spot × 100
            "vol_of_vol":       None,   # σ of IV across strikes at ATM expiration
            "theta_pct_per_day": None,  # |theta| / atm_mark — premium decay rate
+           # Batch 5 — Tier A/B/C extensions
+           "atm_dte_trading":  None,   # ATM DTE in trading days (× 5/7 calendar→trading approx)
+           "oi_change_total":  None,   # total OI Δ vs prior snapshot (positive = positioning built)
+           "oi_change_call":   None,
+           "oi_change_put":    None,
+           "oi_weighted_strike": None, # Σ(strike × oi) / Σoi — gravity (alt to max_pain)
+           "pc_oi_ratio_atm":  None,   # put_OI / call_OI within ±5% of spot
+           "net_delta_by_exp": None,   # {dte: Σ(call_oi × call_delta + put_oi × put_delta)}
+           "theta_schedule":   None,   # {1d: theta_for_nearest_dte, 7d: ..., 14d: ...}
+           "strike_z_outliers": None,  # list of strikes with vol Z-score > 2.5 vs neighbors
+           "max_oi_strike":    None,   # strike with highest combined OI
+           "hv90":             None,   # 90-day realized vol (set by refresh_options_flow)
+           "iv_percentile_1y": None,   # from iv_history.jsonl — set in refresh
+           "iv_of_iv":         None,   # σ(IV) over last 30d — set in refresh
+           "beta_to_spy":      None,   # 60d log-return regression beta — set in refresh
+           "beta_adjusted_delta": None,  # atm_delta × beta_to_spy
+           "pin_risk":         None,   # 1 if strikes within 1% of spot at <3 DTE, else 0
            "premium_call_$":  None,   # Σ call vol × mark × 100 (correct $ notional)
            "premium_put_$":   None,
            "premium_total_$": None,
@@ -4861,6 +4878,14 @@ def get_options_iv_data(ticker: str) -> dict:
                         except Exception: iv_raw = None
                         try: iv_frac = round(float(iv_raw) / 100, 4) if iv_raw else None
                         except Exception: iv_frac = None
+                        # Last trade time — Schwab returns epoch-ms, convert to ISO
+                        lt_raw = rec.get("tradeTimeInLong") or rec.get("tradeDate")
+                        last_trade = None
+                        if lt_raw:
+                            try:
+                                from datetime import datetime, timezone
+                                last_trade = datetime.fromtimestamp(int(lt_raw)/1000, tz=timezone.utc).isoformat()
+                            except Exception: pass
                         return {
                             "bid":   rec.get("bid"),
                             "ask":   rec.get("ask"),
@@ -4870,6 +4895,12 @@ def get_options_iv_data(ticker: str) -> dict:
                             "gamma": rec.get("gamma"),
                             "theta": rec.get("theta"),
                             "vega":  rec.get("vega"),
+                            "rho":   rec.get("rho"),                # Tier A #1
+                            "theo":  rec.get("theoreticalOptionValue"),  # #2
+                            "itm":   bool(rec.get("inTheMoney")),   # #4
+                            "settle": rec.get("settlementType"),    # #5 P=PM A=AM
+                            "mini":  bool(rec.get("mini")),         # #6
+                            "last_trade": last_trade,               # #7
                             "vol":   rec.get("totalVolume") or 0,
                             "oi":    rec.get("openInterest") or 0,
                         }
@@ -4882,6 +4913,128 @@ def get_options_iv_data(ticker: str) -> dict:
             # Sort by DTE asc
             grid.sort(key=lambda g: g.get("dte", 0))
             out["chain_grid"] = grid[:5]
+
+            # ── Batch 5 derived metrics from chain_grid ──────────────────────────
+            try:
+                # Trading-days DTE (Mon-Fri × 5/7 of calendar)
+                if out.get("atm_dte") is not None:
+                    out["atm_dte_trading"] = round(out["atm_dte"] * 5/7, 1)
+
+                # OI-weighted strike (gravity) — better than max_pain for fair-value estimate
+                oi_w_num, oi_w_den = 0.0, 0.0
+                max_oi_strike, max_oi_val = None, 0
+                pc_atm_call_oi, pc_atm_put_oi = 0, 0
+                # Aggregate OI per strike across ALL expirations in grid
+                strike_oi_call, strike_oi_put = {}, {}
+                strike_vol_call = {}
+                for exp in grid:
+                    for s in exp.get("strikes", []):
+                        K = s.get("k"); c = s.get("call") or {}; p = s.get("put") or {}
+                        if K is None: continue
+                        c_oi = c.get("oi") or 0
+                        p_oi = p.get("oi") or 0
+                        c_vol = c.get("vol") or 0
+                        strike_oi_call[K] = strike_oi_call.get(K, 0) + c_oi
+                        strike_oi_put[K]  = strike_oi_put.get(K, 0) + p_oi
+                        strike_vol_call[K] = strike_vol_call.get(K, 0) + c_vol
+                        total_oi = c_oi + p_oi
+                        oi_w_num += K * total_oi
+                        oi_w_den += total_oi
+                        if total_oi > max_oi_val:
+                            max_oi_val = total_oi; max_oi_strike = K
+                        if spot and 0.95 <= K/spot <= 1.05:
+                            pc_atm_call_oi += c_oi
+                            pc_atm_put_oi  += p_oi
+                if oi_w_den > 0:
+                    out["oi_weighted_strike"] = round(oi_w_num / oi_w_den, 2)
+                if max_oi_strike is not None:
+                    out["max_oi_strike"] = round(max_oi_strike, 2)
+                if pc_atm_call_oi > 0:
+                    out["pc_oi_ratio_atm"] = round(pc_atm_put_oi / pc_atm_call_oi, 3)
+
+                # Net Greeks aggregated by expiration: {dte: {delta, gamma, theta, vega}}
+                net_by_exp = {}
+                theta_schedule = {}
+                for exp in grid:
+                    dte = exp.get("dte")
+                    if dte is None: continue
+                    nd = ng = nt = nv = 0.0
+                    for s in exp.get("strikes", []):
+                        c = s.get("call") or {}; p = s.get("put") or {}
+                        for side, sign in [(c, 1), (p, 1)]:  # OI-weighted, both sides positive
+                            oi = side.get("oi") or 0
+                            if not oi: continue
+                            if side.get("delta") is not None: nd += float(side["delta"]) * oi
+                            if side.get("gamma") is not None: ng += float(side["gamma"]) * oi
+                            if side.get("theta") is not None: nt += float(side["theta"]) * oi
+                            if side.get("vega")  is not None: nv += float(side["vega"])  * oi
+                    net_by_exp[dte] = {
+                        "delta": round(nd, 1), "gamma": round(ng, 3),
+                        "theta": round(nt, 1), "vega": round(nv, 1),
+                    }
+                    # Theta schedule: bucket by DTE
+                    if dte <= 1:    theta_schedule["1d"]  = theta_schedule.get("1d", 0)  + nt
+                    elif dte <= 7:  theta_schedule["7d"]  = theta_schedule.get("7d", 0)  + nt
+                    elif dte <= 14: theta_schedule["14d"] = theta_schedule.get("14d", 0) + nt
+                    elif dte <= 30: theta_schedule["30d"] = theta_schedule.get("30d", 0) + nt
+                    else:           theta_schedule["60d"] = theta_schedule.get("60d", 0) + nt
+                out["net_delta_by_exp"] = net_by_exp
+                out["theta_schedule"]   = {k: round(v, 1) for k, v in theta_schedule.items()}
+
+                # Strike-clustering Z-score (call volume) — outlier strikes vs neighbors
+                if len(strike_vol_call) >= 3:
+                    import statistics
+                    vals = list(strike_vol_call.values())
+                    mean_v = statistics.mean(vals)
+                    sd_v = statistics.stdev(vals) if len(vals) > 1 else 0
+                    outliers = []
+                    if sd_v > 0:
+                        for K, v in strike_vol_call.items():
+                            z = (v - mean_v) / sd_v
+                            if z > 2.5:
+                                outliers.append({"k": round(K, 2), "vol": v, "z": round(z, 2)})
+                        outliers.sort(key=lambda x: -x["z"])
+                    out["strike_z_outliers"] = outliers[:5]
+
+                # Pin risk — strikes within 1% of spot at <3 DTE
+                if spot:
+                    pin = 0
+                    for exp in grid:
+                        if (exp.get("dte") or 99) < 3:
+                            for s in exp.get("strikes", []):
+                                if s.get("k") and abs(s["k"] - spot) / spot < 0.01:
+                                    pin = 1; break
+                            if pin: break
+                    out["pin_risk"] = pin
+
+                # OI-change vs prior snapshot — needs prior-day OI snapshot
+                # Read cache/oi_history.jsonl if present
+                try:
+                    from datetime import datetime as _dt, timedelta as _td
+                    oi_hist_path = BASE_DIR / "cache" / "oi_history.jsonl"
+                    if oi_hist_path.exists():
+                        today = _dt.now().strftime("%Y-%m-%d")
+                        yesterday = (_dt.now() - _td(days=1)).strftime("%Y-%m-%d")
+                        # Find prior snapshot's call_oi + put_oi for this ticker
+                        prior_c, prior_p = None, None
+                        # Walk file lines (recent at end); read last 500 lines max
+                        lines = oi_hist_path.read_text().splitlines()
+                        for ln in reversed(lines[-2000:]):
+                            try:
+                                _r = json.loads(ln)
+                                if _r.get("ticker") != ticker: continue
+                                if _r.get("date") == today: continue  # skip today
+                                if (_r.get("date") or "") < yesterday: break  # too old
+                                prior_c = _r.get("call_oi"); prior_p = _r.get("put_oi")
+                                break
+                            except Exception: continue
+                        if prior_c is not None and prior_p is not None:
+                            out["oi_change_call"]  = int(call_oi - prior_c)
+                            out["oi_change_put"]   = int(put_oi  - prior_p)
+                            out["oi_change_total"] = out["oi_change_call"] + out["oi_change_put"]
+                except Exception: pass
+            except Exception as _e:
+                pass
 
         # Term-structure ratio — front ATM IV / back ATM IV.
         # Skip the very-nearest expiration if DTE < 14 because 0-3 DTE IV is
