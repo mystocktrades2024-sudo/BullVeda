@@ -76,6 +76,11 @@ def scan(options_data: dict[str, dict],
             skew_25d      = oi.get("skew_25d")
             iv_25d_call   = oi.get("iv_25d_call")
             iv_25d_put    = oi.get("iv_25d_put")
+            iv_25d_call_strike = oi.get("iv_25d_call_strike")
+            iv_25d_call_mark   = oi.get("iv_25d_call_mark")
+            iv_25d_put_strike  = oi.get("iv_25d_put_strike")
+            iv_25d_put_mark    = oi.get("iv_25d_put_mark")
+            atm_mark      = oi.get("atm_mark")
             uoa_puts_n    = oi.get("uoa_puts") or 0
 
             price = prices.get(ticker, 0)
@@ -160,6 +165,11 @@ def scan(options_data: dict[str, dict],
                 "skew_25d":    skew_25d,
                 "iv_25d_call": iv_25d_call,
                 "iv_25d_put":  iv_25d_put,
+                "iv_25d_call_strike": iv_25d_call_strike,
+                "iv_25d_call_mark":   iv_25d_call_mark,
+                "iv_25d_put_strike":  iv_25d_put_strike,
+                "iv_25d_put_mark":    iv_25d_put_mark,
+                "atm_mark":    atm_mark,
                 "uoa_puts":    uoa_puts_n,
             })
 

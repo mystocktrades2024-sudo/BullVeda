@@ -4462,7 +4462,11 @@ def get_options_iv_data(ticker: str) -> dict:
            "atm_theta":       None,
            "atm_vega":        None,
            "atm_iv":          None,   # ATM IV expressed as a fraction (0.32 = 32%)
+           "atm_mark":        None,   # ATM call mark (real chain price)
            "atm_bid_ask_pct": None,   # ATM call bid/ask spread as % of mid — liquidity proxy
+           # Real second-leg data for spread tickets (no estimation needed)
+           "iv_25d_call_strike": None,  "iv_25d_call_mark":  None,
+           "iv_25d_put_strike":  None,  "iv_25d_put_mark":   None,
            "premium_call_$":  None,   # Σ call vol × mark × 100 (correct $ notional)
            "premium_put_$":   None,
            "premium_total_$": None,
@@ -4600,6 +4604,7 @@ def get_options_iv_data(ticker: str) -> dict:
                                                 "_score": score, "iv": iv,
                                                 "delta":  d_f, "strike": strike,
                                                 "dte":    exp_dte,
+                                                "mark":   mark,
                                             })
                                 except Exception: pass
                         else:
@@ -4648,6 +4653,7 @@ def get_options_iv_data(ticker: str) -> dict:
                                                 "_score": score, "iv": iv,
                                                 "delta":  d_f, "strike": strike,
                                                 "dte":    exp_dte,
+                                                "mark":   mark,
                                             })
                                 except Exception: pass
                         # Strike-pain weight (calls + puts both contribute)
@@ -4703,7 +4709,7 @@ def get_options_iv_data(ticker: str) -> dict:
         # so divide by 100 to get the fraction the UI expects (0.32 = 32% IV).
         if atm_call_best:
             atm_call_best.pop("_score", None)
-            for k in ("strike", "dte", "delta", "gamma", "theta", "vega", "iv"):
+            for k in ("strike", "dte", "delta", "gamma", "theta", "vega", "iv", "mark"):
                 v = atm_call_best.get(k)
                 if v is None: continue
                 try: v = float(v)
@@ -4712,6 +4718,8 @@ def get_options_iv_data(ticker: str) -> dict:
                     out["atm_iv"] = round(v / 100, 4)  # → fraction
                 elif k == "strike":
                     out["atm_strike"] = round(v, 2)
+                elif k == "mark":
+                    out["atm_mark"] = round(v, 2)
                 else:
                     out[f"atm_{k}"] = round(v, 4)
             # ATM bid/ask spread as % of mid — liquidity proxy
@@ -4733,6 +4741,15 @@ def get_options_iv_data(ticker: str) -> dict:
                 out["iv_25d_call"] = round(c_iv, 4)
                 out["iv_25d_put"]  = round(p_iv, 4)
                 out["skew_25d"]    = round(c_iv - p_iv, 4)
+                # Real strikes + marks for the spread short leg (no estimation)
+                if skew_25d_call_best.get("strike") is not None:
+                    out["iv_25d_call_strike"] = round(float(skew_25d_call_best["strike"]), 2)
+                if skew_25d_call_best.get("mark") is not None:
+                    out["iv_25d_call_mark"]   = round(float(skew_25d_call_best["mark"]), 2)
+                if skew_25d_put_best.get("strike") is not None:
+                    out["iv_25d_put_strike"]  = round(float(skew_25d_put_best["strike"]), 2)
+                if skew_25d_put_best.get("mark") is not None:
+                    out["iv_25d_put_mark"]    = round(float(skew_25d_put_best["mark"]), 2)
             except Exception: pass
 
         # Expose uoa_puts (was tracked but never surfaced)

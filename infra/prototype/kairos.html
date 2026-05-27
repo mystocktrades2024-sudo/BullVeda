@@ -8072,6 +8072,72 @@ body.ep-fit-mode .page { padding: 14px 16px 0; min-height: 0; }
 }
 .dab-pick-hero-snap .v { color: var(--ink); font-weight: 600; }
 
+/* ── 2026-05-26 · Mechanism Confluence strip + chip ─────────────────── */
+.mc-strip {
+  margin: 6px 0 8px;
+  padding: 6px 8px;
+  background: var(--bg-3, #161a18);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+}
+.mc-strip.mc-strong { border-color: var(--gn-dim, #166534); background: rgba(74,222,128,0.06); }
+.mc-strip.mc-mid    { border-color: var(--amb-dim, #92400e); background: rgba(251,191,36,0.05); }
+.mc-strip.mc-thin   { border-color: var(--rule); }
+.mc-strip .mc-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 5px;
+}
+.mc-strip .mc-label {
+  font: 700 8.5px var(--mono);
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.mc-strip .mc-count { font: 800 11px var(--mono); color: var(--ink-2); }
+.mc-strip.mc-strong .mc-count { color: var(--gn); }
+.mc-strip.mc-mid    .mc-count { color: var(--amb); }
+.mc-strip .mc-count b { color: inherit; font-size: 13px; }
+.mc-strip .mc-row {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.mc-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 6px;
+  font: 700 9px var(--mono);
+  letter-spacing: 0.06em;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  cursor: default;
+}
+.mc-chip.mc-lit {
+  background: var(--bg-2, #0d1110);
+  color: var(--ink);
+  border-color: var(--gn-dim, #166534);
+}
+.mc-strip.mc-strong .mc-chip.mc-lit { border-color: var(--gn); color: var(--gn); }
+.mc-strip.mc-mid    .mc-chip.mc-lit { border-color: var(--amb); color: var(--amb); }
+.mc-chip.mc-dim {
+  background: transparent;
+  color: var(--ink-4, #4a4e4a);
+  opacity: 0.5;
+}
+/* Compact chip on supporting cards */
+.mc-sup {
+  font: 800 10px var(--mono);
+  padding: 2px 7px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  color: var(--ink-2);
+  margin-right: 8px;
+  cursor: default;
+}
+.mc-sup.mc-strong { color: var(--gn); border-color: var(--gn-dim, #166534); background: rgba(74,222,128,0.07); }
+.mc-sup.mc-mid    { color: var(--amb); border-color: var(--amb-dim, #92400e); background: rgba(251,191,36,0.06); }
+.mc-sup.mc-thin   { color: var(--ink-3); }
+body.light .mc-strip { background: var(--bg-1, #fff); }
+body.light .mc-strip.mc-strong { background: rgba(22,163,74,0.07); }
+body.light .mc-strip.mc-mid { background: rgba(245,158,11,0.06); }
+body.light .mc-chip.mc-lit { background: var(--bg-0, #f5f4ed); }
+
 .dab-sup {
   display: flex; align-items: center; justify-content: space-between;
   padding: 7px 6px;
@@ -18924,16 +18990,14 @@ const QuantOptions = (function() {
             const medianTerm = terms.length ? terms.slice().sort((a,b)=>a-b)[Math.floor(terms.length/2)] : null;
             const termCls = medianTerm == null ? 'nu' : medianTerm < 0.95 ? 'gn' : medianTerm <= 1.05 ? 'am' : 'rd';
             const termLbl = medianTerm == null ? '—' : medianTerm < 0.95 ? 'contango · normal' : medianTerm <= 1.05 ? 'flat' : 'backwardation · stressed';
-            // Dealer GEX approximation — assumes calls dealer-sold, puts dealer-bought (SPX convention)
-            // Σ gamma × OI × 100 × spot² · positive=vol-suppression, negative=vol-amplification
-            let gexNet = 0, gexValid = 0;
-            of.forEach(x => {
-              const g = +x.atm_gamma, oi = +x.call_oi || 0, p = +x.price || 0;
-              if (g && oi && p) { gexNet += g * oi * 100 * p * p; gexValid++; }
-            });
-            const gexB = gexValid ? gexNet / 1e9 : null;  // billions
-            const gexCls = gexB == null ? 'nu' : gexB > 0 ? 'gn' : 'rd';
-            const gexLbl = gexB == null ? '—' : gexB > 0 ? 'vol suppressed' : 'vol amplified';
+            // Aggregate 25Δ skew across picks — real chain-derived sentiment.
+            // Median of per-pick skew_25d (call_IV − put_IV at |Δ|=0.25). Positive
+            // = call-skew dominant (upside chase). Negative = put-skew (crash bid).
+            const skews = of.map(x => x.skew_25d).filter(v => v != null && isFinite(v));
+            const medianSkew = skews.length ? skews.slice().sort((a,b)=>a-b)[Math.floor(skews.length/2)] : null;
+            const medianSkewPct = medianSkew != null ? medianSkew * 100 : null;
+            const skewCls = medianSkewPct == null ? 'nu' : medianSkewPct > 2 ? 'gn' : medianSkewPct < -2 ? 'rd' : 'am';
+            const skewLbl = medianSkewPct == null ? '—' : medianSkewPct > 2 ? 'call skew · upside chase' : medianSkewPct < -2 ? 'put skew · crash bid' : 'flat';
             // Net bias from premium $ (or vol fallback)
             const havePrem = of.some(x => x['premium_call_$'] != null);
             const callD = havePrem ? of.reduce((s,x)=>s+(+x['premium_call_$']||0),0) : of.reduce((s,x)=>s+(+x.call_volume||0)*(+x.price||0),0);
@@ -18954,10 +19018,10 @@ const QuantOptions = (function() {
                   <div class="v">${medianTerm != null ? medianTerm.toFixed(2) : '—'}</div>
                   <div class="sub">${termLbl}${terms.length ? ' · n='+terms.length : ''}</div>
                 </div>
-                <div class="qo-vrc-tile ${gexCls}">
-                  <div class="lbl">Dealer GEX (proxy)</div>
-                  <div class="v">${gexB != null ? (gexB >= 0 ? '+' : '') + gexB.toFixed(1) + 'B' : '—'}</div>
-                  <div class="sub">${gexLbl}${gexValid ? ' · n='+gexValid : ''}</div>
+                <div class="qo-vrc-tile ${skewCls}">
+                  <div class="lbl">25Δ Skew · aggregate</div>
+                  <div class="v">${medianSkewPct != null ? (medianSkewPct >= 0 ? '+' : '') + medianSkewPct.toFixed(1) + '%' : '—'}</div>
+                  <div class="sub">${skewLbl}${skews.length ? ' · n='+skews.length : ''}</div>
                 </div>
                 <div class="qo-vrc-tile ${biasCls}">
                   <div class="lbl">Net bias · premium \$</div>
@@ -19338,10 +19402,16 @@ const QuantOptions = (function() {
       const premCall  = t.premium_call_$  || t['premium_call_$'];
       const premPut   = t.premium_put_$   || t['premium_put_$'];
 
-      // Strategy choice: IV-rich → defined-risk (debit spread); IV-cheap → directional debit (long premium)
+      // Strategy choice: IV-rich → spread (real second leg from chain); IV-cheap → single-leg.
+      // Spread variant only when we have the 25Δ short-leg strike+mark from the chain.
+      const shortStrike = bull ? t.iv_25d_call_strike : t.iv_25d_put_strike;
+      const shortMark   = bull ? t.iv_25d_call_mark   : t.iv_25d_put_mark;
+      const haveSpread  = shortStrike != null && shortMark != null;
+      const useSpread   = ivRich && haveSpread;
       const strat = bull
-        ? (ivRich ? 'Bull Call Spread' : 'Long Call')
-        : (ivRich ? 'Bear Put Spread'  : 'Long Put');
+        ? (useSpread ? 'Bull Call Spread' : 'Long Call')
+        : (useSpread ? 'Bear Put Spread'  : 'Long Put');
+      const atmMarkReal = t.atm_mark;     // real chain mark, not BSM estimate
       const actionLbl = bull ? 'BUY' : 'SHORT';
       const spot = +t.price || 0;
       const tgt = +t.target || (bull ? spot * 1.07 : spot * 0.93);
@@ -19366,15 +19436,51 @@ const QuantOptions = (function() {
       const putPct  = 100 - callPct;
       const _fmtV = (v) => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'k' : String(v);
       const _fmtDol = (v) => v == null ? '—' : v >= 1e6 ? '$'+(v/1e6).toFixed(1)+'M' : v >= 1e3 ? '$'+(v/1e3).toFixed(0)+'k' : '$'+v.toFixed(0);
-      // Trade ticket math — long-premium baseline (defined-risk debit spread requires
-      // second-strike chain access, so we surface the long leg as the floor case)
-      // For Long Call: breakeven = strike + premium, max loss = premium, POP ≈ delta (rough)
-      // For Bull Call Spread: same long leg + a short leg at +1σ, net debit ~65% of mark
-      const atmMark = atmStrike != null && delta != null ? (atmStrike * (atmIvFrac || 0.30) * Math.sqrt((atmDte || 30) / 365) * 0.4) : null;
-      const breakeven = atmStrike != null && atmMark != null
-        ? (bull ? atmStrike + atmMark : atmStrike - atmMark)
-        : null;
-      const pop = delta != null ? Math.abs(delta) : null;
+      // Trade economics — real chain marks; BSM N(d2) for POP (no |Δ| proxy).
+      // erf-based standard normal CDF (no scipy in browser)
+      const _erf = (x) => {
+        // Abramowitz-Stegun 7.1.26
+        const t = 1 / (1 + 0.3275911 * Math.abs(x));
+        const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429;
+        const y = 1 - (((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);
+        return x >= 0 ? y : -y;
+      };
+      const _Ncdf = (x) => 0.5 * (1 + _erf(x / Math.SQRT2));
+      const _bsmCallPrice = (S, K, sigma, T) => {
+        if (T <= 0 || sigma <= 0 || S <= 0 || K <= 0) return Math.max(S - K, 0);
+        const r = 0.05;
+        const d1 = (Math.log(S/K) + (r + sigma*sigma/2)*T) / (sigma*Math.sqrt(T));
+        const d2 = d1 - sigma*Math.sqrt(T);
+        return S * _Ncdf(d1) - K * Math.exp(-r*T) * _Ncdf(d2);
+      };
+      const _bsmPutPrice = (S, K, sigma, T) => {
+        if (T <= 0 || sigma <= 0 || S <= 0 || K <= 0) return Math.max(K - S, 0);
+        const r = 0.05;
+        const d1 = (Math.log(S/K) + (r + sigma*sigma/2)*T) / (sigma*Math.sqrt(T));
+        const d2 = d1 - sigma*Math.sqrt(T);
+        return K * Math.exp(-r*T) * _Ncdf(-d2) - S * _Ncdf(-d1);
+      };
+      // P(option ITM at expiration) = N(d2) for call, N(-d2) for put
+      let pop = null;
+      if (atmStrike != null && atmIvFrac != null && atmDte != null && spot > 0) {
+        const T = atmDte / 365;
+        const sigma = atmIvFrac;
+        const d2 = (Math.log(spot/atmStrike) + (0.05 - sigma*sigma/2)*T) / (sigma*Math.sqrt(T));
+        pop = bull ? _Ncdf(d2) : _Ncdf(-d2);
+      }
+      // Net debit + breakeven from REAL marks
+      let netDebit = null, breakeven = null, maxGain = null, maxLoss = null;
+      if (useSpread && atmMarkReal != null && shortMark != null) {
+        netDebit = atmMarkReal - shortMark;
+        breakeven = bull ? atmStrike + netDebit : atmStrike - netDebit;
+        maxGain  = Math.abs(shortStrike - atmStrike) - netDebit;
+        maxLoss  = netDebit;
+      } else if (atmMarkReal != null) {
+        netDebit = atmMarkReal;
+        breakeven = bull ? atmStrike + atmMarkReal : atmStrike - atmMarkReal;
+        maxLoss = atmMarkReal;
+        maxGain = null;   // uncapped for single-leg long
+      }
 
       // Vol-edge badge classification
       const ivrpCls = ivrpPct == null ? '' : ivrpPct > 3 ? 'rd' : ivrpPct > -3 ? 'am' : 'gn';
@@ -19478,33 +19584,59 @@ const QuantOptions = (function() {
           </div>` : ''}
         </div>
 
-        <!-- STRATEGY TICKET · concrete strike + breakeven + premium-$ risk/reward -->
-        ${atmStrike != null && atmDte != null ? (() => {
-          // Premium-$ stop/target — Options don't move 1:1 with spot. Approximate the
-          // option-price move for a given spot move using |Δ| (delta-equivalence).
-          // Risk_$ ≈ entry_premium × |Δ| × (stop_distance / spot), per contract × 100.
-          // For Long Call: 3% spot drop ≈ delta × 3% × spot in option premium terms.
-          // Quick-math: $ at risk per contract = atm_mark × 100 × (|Δ| × stop_pct).
-          const sd = delta != null ? Math.abs(delta) : null;
-          const stopMove = Math.abs(stopPct) / 100;
-          const tgtMove  = Math.abs(tgtPct)  / 100;
-          // Premium move per contract = atm_mark × delta × spot_move (rough)
-          const premiumRisk_$   = (atmMark != null && sd != null) ? atmMark * sd * (stopMove / 0.01) * 100 / 100 : null;
-          // Cleaner — just delta-equivalent: option moves Δ × spot_move dollars; × 100 = per contract
-          const premRiskPerCt   = (sd != null && spot > 0) ? sd * spot * stopMove * 100 : null;
-          const premRewardPerCt = (sd != null && spot > 0) ? sd * spot * tgtMove  * 100 : null;
-          const ticketRows = [];
-          if (breakeven != null) ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">BE</span><span class="v">$${breakeven.toFixed(2)}</span></span>`);
-          if (atmMark != null)   ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">Premium</span><span class="v">~$${atmMark.toFixed(2)}</span></span>`);
-          if (theta != null)     ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">θ/day</span><span class="v">$${theta.toFixed(2)}</span></span>`);
-          if (vega != null)      ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">ν/pt</span><span class="v">$${vega.toFixed(2)}</span></span>`);
-          // Premium-$ risk/reward — single contract sizing
-          if (premRiskPerCt != null && premRewardPerCt != null) {
-            ticketRows.push(`<span class="qot-ticket-cell rd"><span class="lbl">Risk $</span><span class="v">$${premRiskPerCt.toFixed(0)}/ct</span></span>`);
-            ticketRows.push(`<span class="qot-ticket-cell gn"><span class="lbl">Reward $</span><span class="v">$${premRewardPerCt.toFixed(0)}/ct</span></span>`);
+        <!-- STRATEGY TICKET · real chain marks; BSM-priced risk/reward at stop/target -->
+        ${atmStrike != null && atmDte != null && atmMarkReal != null ? (() => {
+          // BSM-priced exit premium at stop and target (no delta-equivalence approximation).
+          const T = atmDte / 365;
+          const sigma = atmIvFrac;
+          let entryPrem = atmMarkReal;
+          let stopPrem = null, tgtPrem = null;
+          if (useSpread && shortMark != null) {
+            // For spreads: entry is net debit. Exit prices recompute both legs at new spot.
+            // Time to expiry stays same (we're sizing the trade, not aging it).
+            const longExitAtStop = bull
+              ? _bsmCallPrice(stop, atmStrike, sigma, T)
+              : _bsmPutPrice(stop, atmStrike, sigma, T);
+            const shortExitAtStop = bull
+              ? _bsmCallPrice(stop, shortStrike, sigma, T)
+              : _bsmPutPrice(stop, shortStrike, sigma, T);
+            const longExitAtTgt = bull
+              ? _bsmCallPrice(tgt, atmStrike, sigma, T)
+              : _bsmPutPrice(tgt, atmStrike, sigma, T);
+            const shortExitAtTgt = bull
+              ? _bsmCallPrice(tgt, shortStrike, sigma, T)
+              : _bsmPutPrice(tgt, shortStrike, sigma, T);
+            entryPrem = netDebit;
+            stopPrem  = longExitAtStop - shortExitAtStop;
+            tgtPrem   = longExitAtTgt  - shortExitAtTgt;
+          } else {
+            // Single-leg long premium
+            stopPrem = bull
+              ? _bsmCallPrice(stop, atmStrike, sigma, T)
+              : _bsmPutPrice(stop, atmStrike, sigma, T);
+            tgtPrem  = bull
+              ? _bsmCallPrice(tgt, atmStrike, sigma, T)
+              : _bsmPutPrice(tgt, atmStrike, sigma, T);
           }
+          // Per-contract $ (×100 multiplier)
+          const riskPerCt   = (entryPrem - stopPrem) * 100;
+          const rewardPerCt = (tgtPrem - entryPrem) * 100;
+          const ticketRows = [];
+          ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">BE</span><span class="v">$${breakeven.toFixed(2)}</span></span>`);
+          ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">Premium</span><span class="v">$${entryPrem.toFixed(2)}</span></span>`);
+          if (theta != null) ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">θ/day</span><span class="v">$${theta.toFixed(2)}</span></span>`);
+          if (vega != null)  ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">ν/pt</span><span class="v">$${vega.toFixed(2)}</span></span>`);
+          if (maxGain != null) ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">Max G</span><span class="v">$${maxGain.toFixed(2)}</span></span>`);
+          if (maxLoss != null) ticketRows.push(`<span class="qot-ticket-cell"><span class="lbl">Max L</span><span class="v">$${maxLoss.toFixed(2)}</span></span>`);
+          if (riskPerCt > 0 && rewardPerCt > 0) {
+            ticketRows.push(`<span class="qot-ticket-cell rd"><span class="lbl">Risk $</span><span class="v">$${riskPerCt.toFixed(0)}/ct</span></span>`);
+            ticketRows.push(`<span class="qot-ticket-cell gn"><span class="lbl">Reward $</span><span class="v">$${rewardPerCt.toFixed(0)}/ct</span></span>`);
+          }
+          const ticketH = useSpread
+            ? `${strat} · L $${atmStrike.toFixed(0)} / S $${shortStrike.toFixed(0)} · ${atmDte}d`
+            : `${strat} · $${atmStrike.toFixed(0)} · ${atmDte}d`;
           return `<div class="qot-ticket">
-            <div class="qot-ticket-h">${strat} · ATM $${(+atmStrike).toFixed(2)} · ${atmDte}d</div>
+            <div class="qot-ticket-h">${ticketH}</div>
             <div class="qot-ticket-row">${ticketRows.join('')}</div>
           </div>`;
         })() : ''}
@@ -19558,28 +19690,21 @@ const QuantOptions = (function() {
               : vixCur < 25 ? { call: 'Elevated',     cls: 'elev' }
               : vixCur < 35 ? { call: 'Heightened',   cls: 'high' }
               :               { call: 'Panic',        cls: 'high' };
-    // DOLLAR FLOW — correct premium $ math (vol × mark × 100) when available; fallback to spot proxy.
-    // 2026-05-26 · OPTIONS-QUANT — `premium_call_$` / `premium_put_$` are now computed in
-    // data_fetcher.get_options_iv_data using the chain mark, so we read them directly.
+    // DOLLAR FLOW — premium $ math from the chain (Σ vol × mark × 100).
+    // No spot-proxy fallback; if the chain hasn't enriched yet, show nothing.
     const havePrem = of.some(x => x['premium_call_$'] != null || x['premium_put_$'] != null);
-    let callDol, putDol, flowLabel;
-    if (havePrem) {
-      callDol = of.reduce((s, x) => s + (+x['premium_call_$'] || 0), 0);
-      putDol  = of.reduce((s, x) => s + (+x['premium_put_$']  || 0), 0);
-      flowLabel = 'Σ vol × mark × 100 · correct premium $';
-    } else {
-      // Schwab enrichment pending; degrade to vol × spot proxy with honest label
-      callDol = of.reduce((s, x) => s + (+x.call_volume || 0) * (+x.price || 0), 0);
-      putDol  = of.reduce((s, x) => s + (+x.put_volume  || 0) * (+x.price || 0), 0);
-      flowLabel = 'vol × spot proxy · enrichment pending';
-    }
-    const totDol = callDol + putDol;
-    const cPct = totDol > 0 ? (callDol / totDol * 100) : 50;
-    const pPct = 100 - cPct;
     const flowEl = document.getElementById('qo-flow-card');
-    if (flowEl) flowEl.innerHTML = `
+    if (!havePrem) {
+      if (flowEl) flowEl.innerHTML = '<div class="qo-mkt-big nu">—</div><div class="qo-mkt-sub">no chain data</div>';
+    } else {
+      const callDol = of.reduce((s, x) => s + (+x['premium_call_$'] || 0), 0);
+      const putDol  = of.reduce((s, x) => s + (+x['premium_put_$']  || 0), 0);
+      const totDol = callDol + putDol;
+      const cPct = totDol > 0 ? (callDol / totDol * 100) : 50;
+      const pPct = 100 - cPct;
+      if (flowEl) flowEl.innerHTML = `
       <div class="qo-mkt-big ${cPct > 65 ? 'gn' : pPct > 65 ? 'rd' : 'am'}">$${(totDol/1e6).toFixed(1)}M</div>
-      <div class="qo-mkt-sub">${flowLabel}</div>
+      <div class="qo-mkt-sub">premium $ · Σ vol × mark × 100</div>
       <div class="qo-mkt-bar">
         <div class="qo-mkt-bar-call" style="width:${cPct}%"></div>
         <div class="qo-mkt-bar-put"  style="width:${pPct}%"></div>
@@ -19597,6 +19722,7 @@ const QuantOptions = (function() {
         </div>
       </div>
     `;
+    }
 
     // POSITIONING — strong/mod/weak counts + call-heavy/put-heavy split
     const strong = of.filter(x => String(x.status||'').toUpperCase() === 'STRONG').length;
@@ -19862,15 +19988,9 @@ const QuantOptions = (function() {
       <div class="qo-hh-band ${thesisCls}">
         <div class="qo-hh-band-l">
           <div class="qo-hh-band-lbl">Track Record · ${s.resolved || 0} resolved${(() => {
-            // 2026-05-26 · OPTIONS-FINAL-4-PART-2 · honest framing of which R-metric is showing
             const optR = s.option_resolved || 0;
-            const optCov = s.option_coverage_pct || 0;
-            if (optR > 0 && optCov >= 50) {
-              return ` · <span style="color:var(--copper);font-weight:700">option-trade R</span> (${optR}/${s.resolved} = ${optCov}% coverage)`;
-            } else if (optR > 0) {
-              return ` · <span style="color:var(--ink-3);font-style:italic">spot-equivalent R · ${optR} picks have option-R (BSM)</span>`;
-            }
-            return ` · <span style="color:var(--ink-3);font-style:italic">spot-equivalent R (option-R requires snapshots with atm_strike/iv/dte — accumulating)</span>`;
+            if (optR > 0) return ` · <span style="color:var(--copper);font-weight:700">option-trade R</span> (${optR} picks)`;
+            return '';
           })()}</div>
           <div class="qo-hh-band-v">${thesisIco} ${thesisLbl}</div>
           <div class="qo-hh-band-meta">
@@ -50005,6 +50125,78 @@ const EliteAB = (function() {
 
   const STATE = { featured: null, mode: 'all', stage: 'all' };
 
+  // ── 2026-05-26 · Mechanism Confluence ──────────────────────────────
+  // 8 mechanistically-distinct factor groups derived from data ALREADY in
+  // tickers.json (catalyst_tags / catalyst_tier / ema_signal / setup_family /
+  // market_phase + insider_data). CLAUDE.md principle 2 (mechanism over
+  // correlation): groups chosen so each represents an independent edge
+  // hypothesis, not the same signal re-rendered. Replaces the killed
+  // Confluence Matrix tab — consolidates the question "what is firing for
+  // this pick?" into the existing decision surface.
+  const MECHANISMS = [
+    { key: 'tier1',     emoji: '🔥', label: 'TIER-1',    test: t => +t.catalyst_tier === 1,
+      why: 'catalyst_tier = 1 (PEAD / UOA / VCP / 52wk breakout)' },
+    { key: 'trend',     emoji: '⛰',  label: 'TREND',     test: t => t.ema_signal === 'BULLISH STACK' || t.market_phase === 'Trend',
+      why: 'EMA stack bullish or market_phase = Trend' },
+    { key: 'momentum',  emoji: '🚀', label: 'MOMENTUM',  test: t => _tagIn(t, ['MOMENTUM','52WK_BREAKOUT']),
+      why: 'MOMENTUM or 52-week breakout tag firing' },
+    { key: 'structure', emoji: '📊', label: 'STRUCTURE', test: t => _tagIn(t, ['VCP','POCKET_PIVOT','BREAKOUT']),
+      why: 'VCP / pocket pivot / breakout base' },
+    { key: 'uoa',       emoji: '⚡', label: 'UOA',       test: t => _tagIn(t, ['UOA']),
+      why: 'Unusual options activity tag' },
+    { key: 'squeeze',   emoji: '🔬', label: 'SQUEEZE',   test: t => _tagIn(t, ['SQUEEZE']),
+      why: 'BB/KC squeeze setup' },
+    { key: 'news',      emoji: '📰', label: 'NEWS',      test: t => _tagIn(t, ['NEWS_MOMENTUM']),
+      why: 'positive news catalyst' },
+    { key: 'insider',   emoji: '👁',  label: 'INSIDER',   test: t => _tagIn(t, ['INSIDER_CLUSTER']) || ((t.insider_data || {}).buys || 0) >= 3,
+      why: 'insider cluster tag or ≥3 insider buys' },
+  ];
+
+  function _tagIn(t, names) {
+    const tags = Array.isArray(t.catalyst_tags) ? t.catalyst_tags : [];
+    const upper = tags.map(x => String(x).toUpperCase());
+    return names.some(n => upper.includes(n));
+  }
+
+  // Build a ticker→full-row map once per render. window._kairosTickersArr is
+  // populated from /v2/tickers.json on boot — contains catalyst_tags and the
+  // other fields elite_picks drops.
+  let _tickerLookup = null;
+  function _getTicker(sym) {
+    if (!_tickerLookup) {
+      _tickerLookup = new Map();
+      const arr = window._kairosTickersArr || [];
+      for (const r of arr) if (r && r.ticker) _tickerLookup.set(r.ticker, r);
+    }
+    return _tickerLookup.get(sym) || null;
+  }
+  function _resetTickerLookup() { _tickerLookup = null; }
+
+  function _mechanismChips(p) {
+    const full = _getTicker(p.ticker) || p;
+    return MECHANISMS.map(m => ({ ...m, lit: !!m.test(full) }));
+  }
+
+  function _renderConfluenceStrip(p) {
+    const chips = _mechanismChips(p);
+    const lit = chips.filter(c => c.lit);
+    const n = lit.length;
+    const tone = n >= 5 ? 'strong' : n >= 3 ? 'mid' : 'thin';
+    const chipsHtml = chips.map(c => {
+      const cls = c.lit ? 'mc-chip mc-lit' : 'mc-chip mc-dim';
+      const title = `${c.label}: ${c.lit ? '✓ ' : '✗ '}${c.why}`;
+      return `<span class="${cls}" title="${title.replace(/"/g, '&quot;')}">${c.emoji} ${c.label}</span>`;
+    }).join('');
+    return `
+      <div class="mc-strip mc-${tone}">
+        <div class="mc-head">
+          <span class="mc-label">MECHANISM CONFLUENCE</span>
+          <span class="mc-count"><b>${n}</b>/8</span>
+        </div>
+        <div class="mc-row">${chipsHtml}</div>
+      </div>`;
+  }
+
   function buildRadarSVG(p) {
     const cx = 160, cy = 160, R = 120;
     const N = FACTOR_KEYS.length;
@@ -50074,6 +50266,7 @@ const EliteAB = (function() {
       </div>
       <div class="dab-pick-hero-name">${p.sector || ''}</div>
       <div class="dab-pick-hero-bars">${bars}</div>
+      ${_renderConfluenceStrip(p)}
       <div class="dab-pick-hero-snap">
         <div><div class="lbl">PRICE</div><span class="v">${fmtMoney(snap.price)}</span></div>
         <div><div class="lbl">R:R</div><span class="v">${fmt(snap.rr, 1)}</span></div>
@@ -50084,11 +50277,17 @@ const EliteAB = (function() {
 
   function renderSup(p, stageLc, featuredTkr) {
     const isFeatured = featuredTkr === p.ticker;
+    const chips = _mechanismChips(p);
+    const n = chips.filter(c => c.lit).length;
+    const litLabels = chips.filter(c => c.lit).map(c => `${c.emoji} ${c.label}`).join('  ·  ') || 'none';
+    const tone = n >= 5 ? 'strong' : n >= 3 ? 'mid' : 'thin';
+    const mcTitle = `Mechanism Confluence: ${n}/8 — ${litLabels}`;
     return `<div class="dab-sup ${stageLc} ${isFeatured ? 'featured' : ''}" data-tkr="${p.ticker}">
       <div>
         <span class="dab-sup-tkr">${p.ticker}</span>
         <span class="dab-sup-name">${p.sector || ''}</span>
       </div>
+      <span class="mc-sup mc-${tone}" title="${mcTitle.replace(/"/g, '&quot;')}">${n}/8</span>
       <div class="dab-sup-score"><b>${fmtInt(p.elite_score)}</b>/100</div>
     </div>`;
   }
@@ -58529,6 +58728,129 @@ const QuantMomentum = (function () {
 
       .qmom8-dd-section-list { display:flex; flex-direction:column; gap: 10px; }
 
+      /* ── SCREEN mode · Bloomberg EQS-style full universe table ────────── */
+      .qmom8-screen-wrap { background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; display: flex; flex-direction: column; min-height: 0; }
+      .qmom8-screen-toolbar {
+        display:grid; grid-template-columns: auto 1fr auto auto auto; gap: 14px; align-items: center;
+        padding: 8px 12px; background: var(--bg-2); border-bottom: 1px solid var(--line);
+        font: 600 10.5px var(--mono); color: var(--ink-2); letter-spacing: 0.04em; min-height: 36px;
+      }
+      .qmom8-screen-toolbar .grp { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+      .qmom8-screen-toolbar .lbl { font: 800 9px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; margin-right: 4px; }
+      .qmom8-screen-pill {
+        display:inline-block; padding: 4px 9px; font: 700 10px var(--mono); letter-spacing: 0.06em;
+        background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line); border-radius: 2px;
+        cursor: pointer; transition: all 100ms; white-space: nowrap;
+      }
+      .qmom8-screen-pill:hover { color: var(--copper); border-color: var(--copper); }
+      .qmom8-screen-pill.on { background: var(--copper); color: #fff; border-color: var(--copper); }
+      .qmom8-screen-pill .ct { font-size: 9px; opacity: 0.75; margin-left: 4px; }
+      .qmom8-screen-search {
+        padding: 4px 9px; font: 600 11px var(--mono); color: var(--ink); background: var(--bg-3);
+        border: 1px solid var(--line); border-radius: 2px; min-width: 140px; outline: none;
+      }
+      .qmom8-screen-search:focus { border-color: var(--copper); }
+      .qmom8-screen-secscroll { display:flex; gap:5px; overflow-x: auto; max-width: 100%; padding: 2px 0; }
+      .qmom8-screen-secscroll::-webkit-scrollbar { height: 4px; }
+      .qmom8-screen-secscroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
+
+      .qmom8-screen-tablewrap { overflow: auto; max-height: 72vh; background: var(--bg-1); }
+      .qmom8-screen-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font: 600 11px var(--mono); }
+      .qmom8-screen-table thead th {
+        position: sticky; top: 0; z-index: 5; background: var(--bg-2);
+        padding: 8px 8px; text-align: left; font: 800 9px var(--mono); color: var(--ink-3);
+        letter-spacing: 0.10em; text-transform: uppercase; border-bottom: 1px solid var(--line);
+        cursor: pointer; user-select: none; white-space: nowrap;
+      }
+      .qmom8-screen-table thead th.r { text-align: right; }
+      .qmom8-screen-table thead th.c { text-align: center; }
+      .qmom8-screen-table thead th:hover { color: var(--copper); }
+      .qmom8-screen-table thead th.sorted { color: var(--copper); border-bottom: 2px solid var(--copper); }
+      .qmom8-screen-table thead th.sorted .sa { display: inline-block; margin-left: 3px; }
+      .qmom8-screen-table thead th .sa { display: none; }
+      .qmom8-screen-table tbody td { padding: 6px 8px; border-bottom: 1px solid rgba(120,120,120,0.10); color: var(--ink-1); white-space: nowrap; vertical-align: middle; }
+      .qmom8-screen-table tbody td.r { text-align: right; }
+      .qmom8-screen-table tbody td.c { text-align: center; }
+      .qmom8-screen-table tbody tr { transition: background 100ms; }
+      .qmom8-screen-table tbody tr:hover { background: var(--bg-2); }
+      .qmom8-screen-table tbody tr:hover .qmom8-screen-tk { color: var(--copper); }
+      .qmom8-screen-table tbody tr.starred td:first-child { border-left: 3px solid var(--copper); }
+      .qmom8-screen-table tbody tr.starred { background: rgba(217,119,87,0.04); }
+      .qmom8-screen-table tbody tr.selected { background: rgba(217,119,87,0.10); }
+      .qmom8-screen-table tbody tr.selected td:first-child { border-left: 3px solid var(--copper); }
+
+      .qmom8-screen-table.density-comfortable tbody td { padding: 9px 8px; }
+      .qmom8-screen-table.density-dense       tbody td { padding: 5px 8px; font-size: 10.5px; }
+      .qmom8-screen-table.density-compact     tbody td { padding: 3px 7px; font-size: 10px; }
+
+      .qmom8-screen-tk { font: 800 12px var(--mono); color: var(--ink); letter-spacing: 0.04em; cursor: pointer; }
+      .qmom8-screen-rk { font: 700 10px var(--mono); color: var(--ink-3); }
+      .qmom8-screen-star { cursor: pointer; font-size: 13px; color: var(--ink-3); transition: color 100ms; }
+      .qmom8-screen-star:hover { color: var(--copper); }
+      .qmom8-screen-star.on { color: var(--copper); }
+      .qmom8-screen-secchip { display:inline-block; padding: 1px 6px; font: 700 9px var(--mono); background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line); border-radius: 2px; letter-spacing: 0.04em; }
+
+      .qmom8-screen-bar { display: inline-block; position: relative; height: 10px; width: 60px; background: var(--bg-3); border-radius: 1px; vertical-align: middle; margin-right: 5px; }
+      .qmom8-screen-bar .fl { position: absolute; left: 0; top: 0; bottom: 0; background: var(--copper); border-radius: 1px; }
+      .qmom8-screen-bar .fl.gn { background: var(--gn); } .qmom8-screen-bar .fl.rd { background: var(--rd); } .qmom8-screen-bar .fl.am { background: var(--amb); }
+      .qmom8-screen-cell-num { display: inline-flex; align-items: center; gap: 5px; font: 700 10.5px var(--mono); }
+      .qmom8-screen-cell-num.gn { color: var(--gn); } .qmom8-screen-cell-num.rd { color: var(--rd); } .qmom8-screen-cell-num.am { color: var(--amb); }
+
+      /* Bipolar bar for Δ Sharpe */
+      .qmom8-screen-bipolar { position: relative; display: inline-block; width: 80px; height: 10px; background: var(--bg-3); border-radius: 1px; vertical-align: middle; margin-right: 5px; }
+      .qmom8-screen-bipolar .mid { position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: var(--ink-3); }
+      .qmom8-screen-bipolar .pos { position: absolute; left: 50%; top: 0; bottom: 0; background: var(--gn); border-radius: 0 1px 1px 0; }
+      .qmom8-screen-bipolar .neg { position: absolute; right: 50%; top: 0; bottom: 0; background: var(--rd); border-radius: 1px 0 0 1px; }
+
+      .qmom8-screen-deci { display:inline-block; padding: 1px 6px; font: 800 9px var(--mono); border-radius: 2px; letter-spacing: 0.04em; }
+      .qmom8-screen-deci.d1, .qmom8-screen-deci.d2 { background: var(--gn); color: #000; }
+      .qmom8-screen-deci.d3, .qmom8-screen-deci.d4 { background: rgba(74,222,128,0.20); color: var(--gn); border: 1px solid var(--gn); }
+      .qmom8-screen-deci.d5, .qmom8-screen-deci.d6 { background: rgba(251,191,36,0.18); color: var(--amb); border: 1px solid var(--amb); }
+      .qmom8-screen-deci.d7, .qmom8-screen-deci.d8 { background: rgba(248,113,113,0.18); color: var(--rd); border: 1px solid var(--rd); }
+      .qmom8-screen-deci.d9, .qmom8-screen-deci.d10 { background: var(--rd); color: #fff; }
+
+      .qmom8-screen-phase { display:inline-block; padding: 1px 6px; font: 700 9px var(--mono); border-radius: 2px; letter-spacing: 0.04em; background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line); }
+      .qmom8-screen-phase.trend       { color: var(--gn); border-color: var(--gn); }
+      .qmom8-screen-phase.pullback    { color: var(--amb); border-color: var(--amb); }
+      .qmom8-screen-phase.consolidation { color: #60a5fa; border-color: #60a5fa; }
+      .qmom8-screen-phase.range       { color: var(--ink-3); }
+
+      .qmom8-screen-trend { font: 800 12px var(--mono); }
+      .qmom8-screen-trend.accel { color: var(--gn); }
+      .qmom8-screen-trend.decay { color: var(--rd); }
+      .qmom8-screen-trend.flat  { color: var(--ink-3); }
+
+      .qmom8-screen-emastack { display:inline-flex; gap:2px; font: 800 8.5px var(--mono); letter-spacing: 0; }
+      .qmom8-screen-emastack span { padding: 0 3px; border-radius: 1px; }
+      .qmom8-screen-emastack span.up { background: rgba(74,222,128,0.18); color: var(--gn); }
+      .qmom8-screen-emastack span.dn { background: rgba(248,113,113,0.18); color: var(--rd); }
+
+      .qmom8-screen-adx { font: 800 10.5px var(--mono); }
+      .qmom8-screen-adx.strong { color: var(--gn); } .qmom8-screen-adx.weak { color: var(--ink-3); }
+
+      .qmom8-screen-distbar { position:relative; display:inline-block; width: 64px; height: 10px; background: var(--bg-3); border-radius: 1px; vertical-align: middle; margin-right: 4px; }
+      .qmom8-screen-distbar .fl { position:absolute; right:0; top:0; bottom:0; border-radius: 1px; }
+      .qmom8-screen-distbar .fl.near { background: var(--gn); }
+      .qmom8-screen-distbar .fl.mid  { background: var(--amb); }
+      .qmom8-screen-distbar .fl.far  { background: var(--rd); }
+
+      .qmom8-screen-actbtn {
+        display:inline-block; padding: 1px 6px; font: 800 9.5px var(--mono); letter-spacing: 0.04em;
+        background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line); border-radius: 2px;
+        cursor: pointer; transition: all 100ms; margin-right: 3px;
+      }
+      .qmom8-screen-actbtn:hover { background: var(--copper); color: #fff; border-color: var(--copper); }
+
+      .qmom8-screen-foot {
+        padding: 7px 12px; background: var(--bg-2); border-top: 1px solid var(--line);
+        font: 600 10px var(--mono); color: var(--ink-3); letter-spacing: 0.04em;
+      }
+      .qmom8-screen-foot b { color: var(--ink-1); }
+      .qmom8-screen-foot .cu { color: var(--copper); }
+
+      body.light .qmom8-screen-table tbody tr.starred { background: rgba(217,119,87,0.06); }
+      body.light .qmom8-screen-table tbody tr.selected { background: rgba(217,119,87,0.12); }
+
       @media (max-width: 980px) {
         .qmom8-shell { grid-template-columns: 1fr; grid-template-areas: "top" "rail" "main" "bottom"; }
         .qmom8-rail { max-height: 220px; position: relative; top: 0; }
@@ -60589,24 +60911,94 @@ const QuantMomentum = (function () {
   //         · REVIEW (history)
   //  Persistent risk gates: regime + crash + crowding + half-size
   //  ════════════════════════════════════════════════════════════════════
-  let _qmom8Mode = 'rotation';   // 'rotation' | 'deepdive' | 'exits'
+  let _qmom8Mode = 'screen';   // 'screen' | 'rotation' | 'deepdive' | 'exits'
   let _qmom8HistMode = 'calibration'; // 'calibration' | 'pnl' | 'attribution'
   let _qmom8SelectedTk = null;
   let _qmom8KbBound = false;
+  // ── SCREEN-mode state ────────────────────────────────────────────────
+  let _qmom8ScreenSort = 'z_univ';
+  let _qmom8ScreenSortDir = 'desc';
+  let _qmom8ScreenSearch = '';
+  let _qmom8ScreenSectorFilter = [];
+  let _qmom8ScreenTrendFilter = 'all';
+  let _qmom8ScreenPhaseFilter = 'all';
+  let _qmom8ScreenDensity = 'comfortable';
+  let _qmom8WorkingSet = new Set();
   try {
     const m = window.localStorage.getItem('qmom8Mode');
-    if (m === 'rotation' || m === 'deepdive' || m === 'exits') _qmom8Mode = m;
+    if (m === 'screen' || m === 'rotation' || m === 'deepdive' || m === 'exits') _qmom8Mode = m;
     const hm = window.localStorage.getItem('qmom8HistMode');
     if (hm === 'calibration' || hm === 'pnl' || hm === 'attribution') _qmom8HistMode = hm;
     const sel = window.localStorage.getItem('qmom8SelectedTk');
     if (sel) _qmom8SelectedTk = sel;
+    const ss = window.localStorage.getItem('qmom8ScreenSort');     if (ss) _qmom8ScreenSort = ss;
+    const sd = window.localStorage.getItem('qmom8ScreenSortDir');  if (sd === 'asc' || sd === 'desc') _qmom8ScreenSortDir = sd;
+    const sq = window.localStorage.getItem('qmom8ScreenSearch');   if (sq) _qmom8ScreenSearch = sq;
+    const sf = window.localStorage.getItem('qmom8ScreenSectorFilter');
+    if (sf) { try { const a = JSON.parse(sf); if (Array.isArray(a)) _qmom8ScreenSectorFilter = a; } catch (_) {} }
+    const tf = window.localStorage.getItem('qmom8ScreenTrendFilter'); if (tf) _qmom8ScreenTrendFilter = tf;
+    const pf = window.localStorage.getItem('qmom8ScreenPhaseFilter'); if (pf) _qmom8ScreenPhaseFilter = pf;
+    const dn = window.localStorage.getItem('qmom8ScreenDensity');    if (dn === 'comfortable' || dn === 'dense' || dn === 'compact') _qmom8ScreenDensity = dn;
+    const ws = window.localStorage.getItem('qmom8WorkingSet');
+    if (ws) { try { const a = JSON.parse(ws); if (Array.isArray(a)) _qmom8WorkingSet = new Set(a); } catch (_) {} }
   } catch (e) {}
 
+  function _persistScreen() {
+    try {
+      window.localStorage.setItem('qmom8ScreenSort', _qmom8ScreenSort);
+      window.localStorage.setItem('qmom8ScreenSortDir', _qmom8ScreenSortDir);
+      window.localStorage.setItem('qmom8ScreenSearch', _qmom8ScreenSearch);
+      window.localStorage.setItem('qmom8ScreenSectorFilter', JSON.stringify(_qmom8ScreenSectorFilter));
+      window.localStorage.setItem('qmom8ScreenTrendFilter', _qmom8ScreenTrendFilter);
+      window.localStorage.setItem('qmom8ScreenPhaseFilter', _qmom8ScreenPhaseFilter);
+      window.localStorage.setItem('qmom8ScreenDensity', _qmom8ScreenDensity);
+      window.localStorage.setItem('qmom8WorkingSet', JSON.stringify(Array.from(_qmom8WorkingSet)));
+    } catch (e) {}
+  }
+
   function setMode(m) {
-    if (m !== 'rotation' && m !== 'deepdive' && m !== 'exits') return;
+    if (m !== 'screen' && m !== 'rotation' && m !== 'deepdive' && m !== 'exits') return;
     _qmom8Mode = m;
     try { window.localStorage.setItem('qmom8Mode', m); } catch (e) {}
     _repaint();
+  }
+  function setScreenSort(col) {
+    if (_qmom8ScreenSort === col) {
+      _qmom8ScreenSortDir = (_qmom8ScreenSortDir === 'desc') ? 'asc' : 'desc';
+    } else {
+      _qmom8ScreenSort = col;
+      // Default direction: sigma60d ascending (low-to-high), everything else descending
+      _qmom8ScreenSortDir = (col === 'sigma60') ? 'asc' : 'desc';
+    }
+    _persistScreen(); _repaint();
+  }
+  function setScreenSearch(q) { _qmom8ScreenSearch = (q || '').toUpperCase().trim(); _persistScreen(); _repaint(); }
+  function toggleScreenSector(sec) {
+    const i = _qmom8ScreenSectorFilter.indexOf(sec);
+    if (i >= 0) _qmom8ScreenSectorFilter.splice(i, 1);
+    else _qmom8ScreenSectorFilter.push(sec);
+    _persistScreen(); _repaint();
+  }
+  function clearScreenSectors() { _qmom8ScreenSectorFilter = []; _persistScreen(); _repaint(); }
+  function setScreenTrendFilter(t) { _qmom8ScreenTrendFilter = t; _persistScreen(); _repaint(); }
+  function setScreenPhaseFilter(p) { _qmom8ScreenPhaseFilter = p; _persistScreen(); _repaint(); }
+  function setScreenDensity(d) { if (d !== 'comfortable' && d !== 'dense' && d !== 'compact') return; _qmom8ScreenDensity = d; _persistScreen(); _repaint(); }
+  function toggleStar(tk) {
+    if (!tk) return;
+    const k = String(tk).toUpperCase();
+    if (_qmom8WorkingSet.has(k)) _qmom8WorkingSet.delete(k);
+    else _qmom8WorkingSet.add(k);
+    _persistScreen(); _repaint();
+  }
+  function paperBuy(tk) {
+    if (!tk) return;
+    try {
+      if (typeof window._openQuickAction === 'function') {
+        window._openQuickAction({ ticker: tk, action: 'BUY' });
+        return;
+      }
+    } catch (e) {}
+    alert('Paper-buy ' + tk + ' — wire window._openQuickAction to route');
   }
   function setHistMode(m) {
     if (m !== 'calibration' && m !== 'pnl' && m !== 'attribution') return;
@@ -60650,9 +61042,10 @@ const QuantMomentum = (function () {
     }
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    if (e.key === '1') setMode('rotation');
-    else if (e.key === '2') setMode('deepdive');
-    else if (e.key === '3') setMode('exits');
+    if (e.key === '1') setMode('screen');
+    else if (e.key === '2') setMode('rotation');
+    else if (e.key === '3') setMode('deepdive');
+    else if (e.key === '4') setMode('exits');
     else if ((e.key === 'j' || e.key === 'k') && _qmom8Mode === 'deepdive') {
       const all = _buildRows().filter(r => r._is_momentum);
       const ad = _qmom8AccelDecay(all);
@@ -60840,14 +61233,325 @@ const QuantMomentum = (function () {
     const selBadge = _qmom8SelectedTk ? `· selected <b style="color:var(--copper)">${_esc(_qmom8SelectedTk)}</b>` : '';
     return `<div class="qmom8-mtabs">
       <span class="m-lbl">MODE</span>
-      <button class="m-pill ${_qmom8Mode==='rotation'?'on':''}" onclick="QuantMomentum.setMode('rotation')">SCAN · ROTATION<span class="m-kbd">1</span></button>
-      <button class="m-pill ${_qmom8Mode==='deepdive'?'on':''}" onclick="QuantMomentum.setMode('deepdive')">DRILL · DEEP DIVE<span class="m-kbd">2</span></button>
-      <button class="m-pill ${_qmom8Mode==='exits'?'on':''}" onclick="QuantMomentum.setMode('exits')">EXITS<span class="m-kbd">3</span></button>
+      <button class="m-pill ${_qmom8Mode==='screen'?'on':''}" onclick="QuantMomentum.setMode('screen')">SCAN · SCREEN<span class="m-kbd">1</span></button>
+      <button class="m-pill ${_qmom8Mode==='rotation'?'on':''}" onclick="QuantMomentum.setMode('rotation')">SECTOR ROTATION<span class="m-kbd">2</span></button>
+      <button class="m-pill ${_qmom8Mode==='deepdive'?'on':''}" onclick="QuantMomentum.setMode('deepdive')">DEEP DIVE<span class="m-kbd">3</span></button>
+      <button class="m-pill ${_qmom8Mode==='exits'?'on':''}" onclick="QuantMomentum.setMode('exits')">EXITS<span class="m-kbd">4</span></button>
       <span class="m-meta">J/K cycle rail ${selBadge}</span>
     </div>`;
   }
 
   // ── ROTATION mode · sector rotation map + accel/decay scatter ───────
+  // ── SCREEN mode · Bloomberg EQS-style full universe table ──────────
+  function _qmom8RenderScreen(momRows, all) {
+    const rows = momRows || [];
+    const totalN = rows.length;
+    if (totalN === 0) {
+      return '<div class="qmom8-dd-empty"><b>No momentum candidates</b>Factor suppressed in current regime — see top strip. Cross-reference Signal Scanner for non-momentum sleeves.</div>';
+    }
+
+    // Universe Z-stats + sector-conditional Z-stats
+    const zUnivStats = _qmom6ComputeZ(rows);
+    const secZStats  = _qmom7ComputeSectorZ(rows);
+
+    // Precompute per-row metrics → flat object for sorting
+    const enriched = rows.map(r => {
+      const raw = r._raw || {};
+      const zu = _qmom6ZFor(r.sharpe_126d, zUnivStats);
+      const zsRaw = _qmom7SectorZFor(r, secZStats);
+      const dSharpe = (r.sharpe_126d != null && r.sharpe_1y != null) ? (r.sharpe_126d - r.sharpe_1y) : null;
+      const vt = _qmom7VolTarget(r, 1.0);
+      const sigma60 = vt ? vt.sigma : null;
+      const beta = (raw.beta_spy != null && !isNaN(+raw.beta_spy)) ? +raw.beta_spy
+                  : (raw.beta != null && !isNaN(+raw.beta)) ? +raw.beta
+                  : 1.00;
+      const adx = (r.adx != null && !isNaN(+r.adx)) ? +r.adx : null;
+      const stack = (r.above_21ema ? 1 : 0) + (r.above_50ema ? 1 : 0) + (r.above_200sma ? 1 : 0);
+      const phase = r.market_phase || raw.market_phase || null;
+      const dollarsAtRisk = vt && r.price ? Math.round(vt.shares * r.price) : null;
+      return {
+        ticker: r.ticker, name: r.name, sector: r.sector,
+        sharpe_126d: r.sharpe_126d, sharpe_1y: r.sharpe_1y,
+        rs_rank: r.rs_rank, trend: r.trend, price: r.price,
+        pct_from_52w_high: r.pct_from_52w_high,
+        above_21ema: r.above_21ema, above_50ema: r.above_50ema, above_200sma: r.above_200sma,
+        adx, phase, beta, sigma60,
+        vt_shares: vt ? vt.shares : null, vt_dollars: dollarsAtRisk,
+        z_univ: zu.z, decile: zu.decile, z_sector: zsRaw,
+        d_sharpe: dSharpe,
+        _raw: raw, _r: r,
+      };
+    });
+
+    // ── Filter ──
+    const search = _qmom8ScreenSearch;
+    const secSet = _qmom8ScreenSectorFilter;
+    const trFilt = _qmom8ScreenTrendFilter;
+    const phFilt = _qmom8ScreenPhaseFilter;
+    let visible = enriched.filter(r => {
+      if (search && !(r.ticker || '').includes(search)) return false;
+      if (secSet.length && secSet.indexOf(r.sector) < 0) return false;
+      if (trFilt !== 'all' && r.trend !== trFilt) return false;
+      if (phFilt !== 'all' && (r.phase || '').toLowerCase() !== phFilt) return false;
+      return true;
+    });
+
+    // ── Sort ──
+    const sortCol = _qmom8ScreenSort;
+    const dir = _qmom8ScreenSortDir;
+    const valFor = (r) => {
+      switch (sortCol) {
+        case 'z_univ':   return r.z_univ;
+        case 'z_sector': return r.z_sector;
+        case 'sharpe_126d': return r.sharpe_126d;
+        case 'sharpe_1y':   return r.sharpe_1y;
+        case 'd_sharpe':    return r.d_sharpe;
+        case 'rs_rank':     return r.rs_rank;
+        case 'sigma60':     return r.sigma60;
+        case 'decile':      return r.decile == null ? null : -r.decile; // D1 = best, so invert
+        case 'beta':        return r.beta;
+        case 'pct_52':      return r.pct_from_52w_high;
+        case 'adx':         return r.adx;
+        case 'ticker':      return r.ticker;
+        case 'sector':      return r.sector;
+        default: return r.z_univ;
+      }
+    };
+    visible.sort((a, b) => {
+      const va = valFor(a), vb = valFor(b);
+      const aNull = (va == null || (typeof va === 'number' && isNaN(va)));
+      const bNull = (vb == null || (typeof vb === 'number' && isNaN(vb)));
+      if (aNull && bNull) return 0;
+      if (aNull) return 1;
+      if (bNull) return -1;
+      if (typeof va === 'string') return dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+      return dir === 'asc' ? (va - vb) : (vb - va);
+    });
+
+    // ── Sector counts for toolbar pills ──
+    const secCt = {};
+    enriched.forEach(r => { const s = r.sector || 'Other'; secCt[s] = (secCt[s] || 0) + 1; });
+    const sectorPills = Object.entries(secCt)
+      .sort((a, b) => b[1] - a[1])
+      .map(([s, n]) => {
+        const on = secSet.indexOf(s) >= 0;
+        const escSec = _esc(s).replace(/'/g, "\\'");
+        return `<button class="qmom8-screen-pill ${on?'on':''}" onclick="QuantMomentum.toggleScreenSector('${escSec}')">${_esc(s)}<span class="ct">+${n}</span></button>`;
+      }).join('');
+
+    // ── Trend / Phase counts ──
+    const trCt = { accel: 0, flat: 0, decay: 0 };
+    const phCt = { trend: 0, pullback: 0, consolidation: 0, range: 0 };
+    enriched.forEach(r => {
+      if (trCt[r.trend] != null) trCt[r.trend]++;
+      const p = (r.phase || '').toLowerCase();
+      if (phCt[p] != null) phCt[p]++;
+    });
+
+    // ── Sort-pill bar ──
+    const sortPill = (k, lbl) => `<button class="qmom8-screen-pill ${_qmom8ScreenSort===k?'on':''}" onclick="QuantMomentum.setScreenSort('${k}')">${lbl}${_qmom8ScreenSort===k?(_qmom8ScreenSortDir==='desc'?' ↓':' ↑'):''}</button>`;
+    const trPill = (k, lbl, ct) => `<button class="qmom8-screen-pill ${_qmom8ScreenTrendFilter===k?'on':''}" onclick="QuantMomentum.setScreenTrendFilter('${k}')">${lbl}${ct!=null?` <span class="ct">${ct}</span>`:''}</button>`;
+    const phPill = (k, lbl, ct) => `<button class="qmom8-screen-pill ${_qmom8ScreenPhaseFilter===k?'on':''}" onclick="QuantMomentum.setScreenPhaseFilter('${k}')">${lbl}${ct!=null?` <span class="ct">${ct}</span>`:''}</button>`;
+    const dPill = (k, lbl) => `<button class="qmom8-screen-pill ${_qmom8ScreenDensity===k?'on':''}" onclick="QuantMomentum.setScreenDensity('${k}')">${lbl}</button>`;
+
+    const toolbar = `
+      <div class="qmom8-screen-toolbar">
+        <div class="grp">
+          <span class="lbl">SORT</span>
+          ${sortPill('z_univ', 'Z univ')}
+          ${sortPill('z_sector', 'Z sector')}
+          ${sortPill('sharpe_126d', 'Sharpe 126d')}
+          ${sortPill('sharpe_1y', 'Sharpe 1y')}
+          ${sortPill('d_sharpe', 'Δ Sharpe')}
+          ${sortPill('rs_rank', 'RS rank')}
+          ${sortPill('sigma60', 'σ60d')}
+        </div>
+        <div class="grp" style="flex-wrap:nowrap; min-width:0;">
+          <span class="lbl">SECTOR</span>
+          <div class="qmom8-screen-secscroll">
+            ${sectorPills}
+            ${secSet.length ? `<button class="qmom8-screen-pill" onclick="QuantMomentum.clearScreenSectors()">CLEAR ✕</button>` : ''}
+          </div>
+        </div>
+        <div class="grp">
+          <span class="lbl">TREND</span>
+          ${trPill('all', 'All', enriched.length)}
+          ${trPill('accel', '▲', trCt.accel)}
+          ${trPill('flat', '→', trCt.flat)}
+          ${trPill('decay', '▼', trCt.decay)}
+        </div>
+        <div class="grp">
+          <span class="lbl">PHASE</span>
+          ${phPill('all', 'All')}
+          ${phPill('trend', 'Trend', phCt.trend)}
+          ${phPill('pullback', 'Pullback', phCt.pullback)}
+          ${phPill('consolidation', 'Conso', phCt.consolidation)}
+          ${phPill('range', 'Range', phCt.range)}
+        </div>
+        <div class="grp">
+          <input class="qmom8-screen-search" type="text" placeholder="⌕ filter ticker" value="${_esc(_qmom8ScreenSearch)}" oninput="QuantMomentum.setScreenSearch(this.value)" />
+          <span class="lbl">DENSITY</span>
+          ${dPill('comfortable', 'C')}
+          ${dPill('dense', 'D')}
+          ${dPill('compact', '·')}
+        </div>
+      </div>`;
+
+    // ── Column header builder ──
+    const th = (key, label, align, sortable) => {
+      const cls = (align || '') + ' ' + (_qmom8ScreenSort === key ? 'sorted' : '');
+      const arrow = (_qmom8ScreenSort === key) ? `<span class="sa">${_qmom8ScreenSortDir==='desc'?'↓':'↑'}</span>` : '';
+      const click = sortable ? `onclick="QuantMomentum.setScreenSort('${key}')"` : '';
+      return `<th class="${cls.trim()}" ${click}>${label}${arrow}</th>`;
+    };
+
+    // ── Data formatters ──
+    const fmtZBar = (z) => {
+      if (z == null || isNaN(z)) return '<span style="color:var(--ink-3)">—</span>';
+      const clamped = Math.max(-3, Math.min(3, z));
+      const w = (Math.abs(clamped) / 3) * 60;
+      const cls = z >= 0.5 ? 'gn' : z <= -0.5 ? 'rd' : 'am';
+      return `<span class="qmom8-screen-bar"><span class="fl ${cls}" style="width:${w.toFixed(1)}px"></span></span>` +
+             `<span class="qmom8-screen-cell-num ${cls}">${z>=0?'+':''}${z.toFixed(2)}</span>`;
+    };
+    const fmtBipolar = (d) => {
+      if (d == null || isNaN(d)) return '<span style="color:var(--ink-3)">—</span>';
+      const clamped = Math.max(-1.5, Math.min(1.5, d));
+      const halfW = 40;
+      const fillW = (Math.abs(clamped) / 1.5) * halfW;
+      const html = (d >= 0)
+        ? `<span class="pos" style="width:${fillW.toFixed(1)}px"></span>`
+        : `<span class="neg" style="width:${fillW.toFixed(1)}px"></span>`;
+      const cls = d >= 0.4 ? 'gn' : d <= -0.4 ? 'rd' : 'am';
+      return `<span class="qmom8-screen-bipolar">${html}<span class="mid"></span></span>` +
+             `<span class="qmom8-screen-cell-num ${cls}">${d>=0?'+':''}${d.toFixed(2)}</span>`;
+    };
+    const fmtSharpeBar = (s) => {
+      if (s == null || isNaN(s)) return '<span style="color:var(--ink-3)">—</span>';
+      const clamped = Math.max(-1, Math.min(3, s));
+      const w = ((clamped + 1) / 4) * 60;
+      const cls = s >= 1.5 ? 'gn' : s >= 0.5 ? 'am' : s < 0 ? 'rd' : '';
+      return `<span class="qmom8-screen-bar"><span class="fl ${cls}" style="width:${w.toFixed(1)}px"></span></span>` +
+             `<span class="qmom8-screen-cell-num ${cls}">${s.toFixed(2)}</span>`;
+    };
+    const fmtRsBar = (r) => {
+      if (r == null || isNaN(r)) return '<span style="color:var(--ink-3)">—</span>';
+      const w = (r / 100) * 60;
+      const cls = r >= 80 ? 'gn' : r >= 50 ? 'am' : 'rd';
+      return `<span class="qmom8-screen-bar"><span class="fl ${cls}" style="width:${w.toFixed(1)}px"></span></span>` +
+             `<span class="qmom8-screen-cell-num ${cls}">${r.toFixed(0)}</span>`;
+    };
+    const fmtDeci = (d) => d == null ? '<span style="color:var(--ink-3)">—</span>' : `<span class="qmom8-screen-deci d${d}">D${d}</span>`;
+    const fmtSigma = (s) => s == null ? '<span style="color:var(--ink-3)">—</span>' : `<span class="qmom8-screen-cell-num">${(s*100).toFixed(0)}%</span>`;
+    const fmtBeta = (b) => b == null ? '—' : `<span class="qmom8-screen-cell-num">${b.toFixed(2)}</span>`;
+    const fmtDollars = (d) => d == null ? '—' : `<span class="qmom8-screen-cell-num">$${(d>=1000?(d/1000).toFixed(1)+'k':d.toFixed(0))}</span>`;
+    const fmt52 = (p) => {
+      if (p == null || isNaN(p)) return '—';
+      const abs = Math.abs(p);
+      const w = Math.min(64, (abs / 30) * 64);
+      const cls = abs <= 5 ? 'near' : abs <= 15 ? 'mid' : 'far';
+      return `<span class="qmom8-screen-distbar"><span class="fl ${cls}" style="width:${w.toFixed(1)}px"></span></span>` +
+             `<span class="qmom8-screen-cell-num ${abs<=5?'gn':abs<=15?'am':'rd'}">-${abs.toFixed(1)}%</span>`;
+    };
+    const fmtEmaStack = (r) => {
+      const s = (b, lbl) => `<span class="${b ? 'up' : 'dn'}">${lbl}${b?'↑':'↓'}</span>`;
+      return `<span class="qmom8-screen-emastack">${s(r.above_21ema, '21')}${s(r.above_50ema, '50')}${s(r.above_200sma, '200')}</span>`;
+    };
+    const fmtAdx = (a) => a == null ? '<span style="color:var(--ink-3)">—</span>' : `<span class="qmom8-screen-adx ${a>=25?'strong':'weak'}">${a.toFixed(0)}</span>`;
+    const fmtPhase = (p) => {
+      if (!p) return '<span style="color:var(--ink-3)">—</span>';
+      const k = String(p).toLowerCase();
+      return `<span class="qmom8-screen-phase ${k}">${_esc(p)}</span>`;
+    };
+    const fmtTrend = (t) => {
+      const sym = t === 'accel' ? '▲' : t === 'decay' ? '▼' : '→';
+      return `<span class="qmom8-screen-trend ${t}">${sym}</span>`;
+    };
+    const fmtSpark = (r) => {
+      const vals = _qmom6PriceSpark7(r._raw);
+      if (!vals) return '<span style="color:var(--ink-3)">—</span>';
+      const color = r.trend === 'accel' ? 'gn' : r.trend === 'decay' ? 'rd' : 'cu';
+      return _qmom6Spark(vals, 56, 16, color);
+    };
+
+    // ── Table rows ──
+    const bodyRows = visible.map((r, i) => {
+      const tkEsc = _esc(r.ticker).replace(/'/g, "\\'");
+      const star = _qmom8WorkingSet.has(r.ticker);
+      const sel  = (r.ticker === _qmom8SelectedTk);
+      return `<tr class="${star?'starred':''} ${sel?'selected':''}">
+        <td class="c"><span class="qmom8-screen-star ${star?'on':''}" onclick="QuantMomentum.toggleStar('${tkEsc}')" title="${star?'unstar':'add to working set'}">★</span></td>
+        <td class="r"><span class="qmom8-screen-rk">${i+1}</span></td>
+        <td><span class="qmom8-screen-tk" onclick="QuantMomentum.setSelected('${tkEsc}')" title="Open Deep Dive for ${tkEsc}">${_esc(r.ticker)}</span></td>
+        <td><span class="qmom8-screen-secchip">${_esc(r.sector || 'Other')}</span></td>
+        <td class="r">${fmtSharpeBar(r.sharpe_126d)}</td>
+        <td class="r">${fmtBipolar(r.d_sharpe)}</td>
+        <td class="r">${fmtZBar(r.z_univ)}</td>
+        <td class="r">${fmtZBar(r.z_sector)}</td>
+        <td class="c">${fmtDeci(r.decile)}</td>
+        <td class="r">${fmtRsBar(r.rs_rank)}</td>
+        <td class="r">${fmtSigma(r.sigma60)}</td>
+        <td class="r">${fmtDollars(r.vt_dollars)}</td>
+        <td class="r">${fmtBeta(r.beta)}</td>
+        <td class="r">${fmt52(r.pct_from_52w_high)}</td>
+        <td class="c">${fmtEmaStack(r)}</td>
+        <td class="r">${fmtAdx(r.adx)}</td>
+        <td class="c">${fmtPhase(r.phase)}</td>
+        <td class="c">${fmtTrend(r.trend)}</td>
+        <td class="c">${fmtSpark(r)}</td>
+        <td class="c">
+          <span class="qmom8-screen-actbtn" onclick="QuantMomentum.setSelected('${tkEsc}')" title="Deep Dive">🔍</span>
+          <span class="qmom8-screen-actbtn" onclick="QuantMomentum.paperBuy('${tkEsc}')" title="Paper Buy">💵</span>
+        </td>
+      </tr>`;
+    }).join('');
+
+    // ── Sort label for footer ──
+    const sortLabels = {
+      z_univ: 'Z (univ)', z_sector: 'Z (sector)', sharpe_126d: 'Sharpe 126d', sharpe_1y: 'Sharpe 1y',
+      d_sharpe: 'Δ Sharpe', rs_rank: 'RS rank', sigma60: 'σ60d', decile: 'Decile',
+      beta: 'β SPY', pct_52: '% 52wHi', adx: 'ADX', ticker: 'Ticker', sector: 'Sector',
+    };
+
+    return `
+      <div class="qmom8-screen-wrap">
+        ${toolbar}
+        <div class="qmom8-screen-tablewrap">
+          <table class="qmom8-screen-table density-${_qmom8ScreenDensity}">
+            <thead>
+              <tr>
+                <th class="c">☆</th>
+                <th class="r">#</th>
+                ${th('ticker', 'TICKER', '', true)}
+                ${th('sector', 'SECTOR', '', true)}
+                ${th('sharpe_126d', 'SHARPE 126D', 'r', true)}
+                ${th('d_sharpe', 'Δ SHARPE', 'r', true)}
+                ${th('z_univ', 'Z UNIV', 'r', true)}
+                ${th('z_sector', 'Z SECT', 'r', true)}
+                ${th('decile', 'DEC', 'c', true)}
+                ${th('rs_rank', 'RS', 'r', true)}
+                ${th('sigma60', 'σ60D', 'r', true)}
+                <th class="r">VOL-TGT $</th>
+                ${th('beta', 'β SPY', 'r', true)}
+                ${th('pct_52', '% 52wHi', 'r', true)}
+                <th class="c">EMA STACK</th>
+                ${th('adx', 'ADX', 'r', true)}
+                <th class="c">PHASE</th>
+                <th class="c">TREND</th>
+                <th class="c">SPARK 7D</th>
+                <th class="c">ACT</th>
+              </tr>
+            </thead>
+            <tbody>${bodyRows || `<tr><td colspan="20" style="padding:60px 20px; text-align:center; color: var(--ink-3); font: 600 12px var(--mono);">No rows match current filters · clear filters or widen search</td></tr>`}</tbody>
+          </table>
+        </div>
+        <div class="qmom8-screen-foot">
+          <b>${totalN}</b> rows · <b>${visible.length}/${totalN}</b> visible · sorted by <span class="cu">${_esc(sortLabels[sortCol] || sortCol)}</span> ${_qmom8ScreenSortDir} · click ticker to deep-dive · ★ to save to working set
+          ${_qmom8WorkingSet.size ? ` · <b>${_qmom8WorkingSet.size}</b> starred` : ''}
+        </div>
+      </div>`;
+  }
+
   function _qmom8RenderRotation(momRows) {
     // Build sector aggregates: x = Δ Sharpe vs last week, y = today's avg Sharpe, r = candidate count
     const bySec = {};
@@ -61544,7 +62248,8 @@ const QuantMomentum = (function () {
     }
 
     let mainBody;
-    if (_qmom8Mode === 'rotation') mainBody = momRows.length >= 1 ? _qmom8RenderRotation(momRows) : '<div class="qmom8-dd-empty"><b>No momentum candidates</b>Factor suppressed in current regime — see top strip. Cross-reference Signal Scanner for non-momentum sleeves.</div>';
+    if (_qmom8Mode === 'screen') mainBody = _qmom8RenderScreen(momRows, all);
+    else if (_qmom8Mode === 'rotation') mainBody = momRows.length >= 1 ? _qmom8RenderRotation(momRows) : '<div class="qmom8-dd-empty"><b>No momentum candidates</b>Factor suppressed in current regime — see top strip. Cross-reference Signal Scanner for non-momentum sleeves.</div>';
     else if (_qmom8Mode === 'deepdive') mainBody = _qmom8RenderDeepDive(momRows, all);
     else if (_qmom8Mode === 'exits') mainBody = _qmom8RenderExits(momRows);
     else mainBody = '';
@@ -61572,7 +62277,8 @@ const QuantMomentum = (function () {
   function setVerdict(_v)  { _repaint(); }
   function setGrade(_g)    { _repaint(); }
 
-  return { render, setTrend, setStage, setSector, setFamily, setQuality, setCatalyst, setVerdict, setGrade, setView, toggleHalfSize, setMode, setHistMode, setSelected };
+  return { render, setTrend, setStage, setSector, setFamily, setQuality, setCatalyst, setVerdict, setGrade, setView, toggleHalfSize, setMode, setHistMode, setSelected,
+           setScreenSort, setScreenSearch, toggleScreenSector, clearScreenSectors, setScreenTrendFilter, setScreenPhaseFilter, setScreenDensity, toggleStar, paperBuy };
 })();
 
 

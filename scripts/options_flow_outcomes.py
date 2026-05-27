@@ -127,21 +127,15 @@ def _compute_option_r(pick: dict, exit_spot: float, days_to_outcome: int) -> dic
         return {"option_entry_prem": round(entry_prem, 2),
                 "option_exit_prem":  round(exit_prem, 2),
                 "option_realized_pct": None, "option_realized_r": None}
-    # Single-leg return
+    # Long-premium R: (exit_premium − entry_premium) / entry_premium.
+    # Loss capped at -100% (option goes to 0). For long premium this is the
+    # exact realized return — no approximation needed.
     raw_pct = (exit_prem - entry_prem) / entry_prem * 100
-    # Spread haircut: if strategy is a defined-risk debit spread, the realized
-    # return is capped. Approximate by scaling raw single-leg return × 0.65.
-    strategy = (pick.get("strategy") or "").lower()
-    is_spread = "spread" in strategy
-    final_pct = raw_pct * 0.65 if is_spread else raw_pct
-    # Option-trade R = (premium delta) / (entry premium at risk).
-    # For long premium, R = realized_pct / 100 (loss capped at -100%).
-    realized_r = round(final_pct / 100, 3)
     return {
         "option_entry_prem":   round(entry_prem, 2),
         "option_exit_prem":    round(exit_prem,  2),
-        "option_realized_pct": round(final_pct, 2),
-        "option_realized_r":   realized_r,
+        "option_realized_pct": round(raw_pct, 2),
+        "option_realized_r":   round(raw_pct / 100, 3),
     }
 
 
