@@ -1654,13 +1654,20 @@ def compact_row(r: dict) -> dict:
         "expected_pullback": (r.get("trade_plan") or {}).get("expected_pullback"),
         "hold_period_min": (r.get("hold_period_guide") if isinstance(r.get("hold_period_guide"), dict) else {} or {}).get("min_days"),
         "hold_period_max": (r.get("hold_period_guide") if isinstance(r.get("hold_period_guide"), dict) else {} or {}).get("max_days"),
-        "tech_max":       (r.get("technicals") or {}).get("max", 35),
-        "fund_max":       (r.get("fundamentals") or {}).get("max", 10),
-        "sent_max":       15,
-        "smc_max":        15,
-        "tech_score":     (r.get("technicals") or {}).get("score") or (r.get("scoring_breakdown") or {}).get("technicals", {}).get("score") if isinstance((r.get("scoring_breakdown") or {}).get("technicals"), dict) else None,
+        # 2026-05-27 · 5-pillar extraction fix.
+        # scanner row carries: technicals.{score,max} · fundamentals.{score,max}
+        # · smc.{score} (max often null; default 15) · news_sentiment_score
+        # which is a dict {score, max, ...} not a number — extract .score.
+        "tech_max":       (r.get("technicals") or {}).get("max", 38),
+        "fund_max":       (r.get("fundamentals") or {}).get("max", 30),
+        "sent_max":       (r.get("news_sentiment_score") or {}).get("max", 15) if isinstance(r.get("news_sentiment_score"), dict) else 15,
+        "smc_max":        (r.get("smc") or {}).get("max") or 15,
+        "tech_score":     (r.get("technicals") or {}).get("score"),
         "fund_score":     (r.get("fundamentals") or {}).get("score"),
-        "sent_score":     (r.get("news_sentiment_score") or r.get("polygon_news_score") if isinstance(r.get("news_sentiment_score") or r.get("polygon_news_score"), (int, float)) else 0),
+        "smc_score":      (r.get("smc") or {}).get("score"),
+        "sent_score":     ((r.get("news_sentiment_score") or {}).get("score") if isinstance(r.get("news_sentiment_score"), dict)
+                           else r.get("news_sentiment_score") if isinstance(r.get("news_sentiment_score"), (int, float))
+                           else 0),
         "iv_rank":        (r.get("options_data") or {}).get("iv_rank"),
         "put_call_ratio": (r.get("options_data") or {}).get("put_call_ratio"),
         "squeeze_on":     bool((r.get("squeeze") or {}).get("on")) if isinstance(r.get("squeeze"), dict) else bool(r.get("squeeze")),
