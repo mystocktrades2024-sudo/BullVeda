@@ -21,6 +21,18 @@ echo "======================================" >> "$LOG_FILE"
 # Run the scan, capturing all output. Don't `set -e` exit on scan failure —
 # we want to log and notify, not crash the wrapper.
 cd "$SCRIPT_DIR"
+# 2026-05-28: heavy-once / light-often. The 06:00 scan does the full deep-enrich
+# (warms the 7-day fundamentals cache). The intraday scans run SCAN_MODE=light —
+# re-rank ALL tickers from warm cache + OHLCV, shrink the expensive-endpoint tier.
+# Keeps the full ~2,000-ticker universe ranked 6×/day without blowing the quota.
+_HHMM=$((10#$(date +%H%M)))
+if [ "$_HHMM" -lt 615 ]; then
+    export SCAN_MODE=""        # heavy: the 06:00 morning scan
+    echo "[$(date)] SCAN_MODE=heavy (full deep-enrich)" >> "$LOG_FILE"
+else
+    export SCAN_MODE="light"   # intraday: re-rank all, light deep-enrich
+    echo "[$(date)] SCAN_MODE=light (intraday re-rank)" >> "$LOG_FILE"
+fi
 set +e
 "$PYTHON" swing_trade.py >> "$LOG_FILE" 2>&1
 EXIT_CODE=$?

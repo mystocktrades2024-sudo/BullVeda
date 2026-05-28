@@ -1546,6 +1546,16 @@ def run_daily_scan(force_fresh: bool = False):
     # for the deep tier. Light-tier tickers can still produce a verdict from
     # OHLCV + cheap signals but won't get BUY upgrades (only WATCH at best).
     _tier1_n   = int(cfg.get("performance", {}).get("deep_enrichment_top_n", 200))
+    # 2026-05-28: LIGHT intraday mode. The heavy deep-enrich runs ONCE at 06:00
+    # (warms the 7-day fundamentals cache + does full options/UOA on top 1,500).
+    # The 5 intraday scans (07:00/11:00/13:30/15:00) run with SCAN_MODE=light:
+    # they still re-rank ALL tickers (cheap — OHLCV + warm-cached fundamentals),
+    # but shrink the expensive-endpoint tier (options/UOA/SEC/inst) to the top
+    # ~150 so each intraday scan finishes fast and stays well under quota.
+    _scan_mode = os.environ.get("SCAN_MODE", "").lower()
+    if _scan_mode == "light":
+        _tier1_n = min(_tier1_n, int(cfg.get("performance", {}).get("light_deep_enrichment_top_n", 150)))
+        log.info(f"  SCAN_MODE=light → deep-enrich tier shrunk to {_tier1_n} (intraday: re-rank all, deep-enrich top {_tier1_n})")
     _zr1_set   = set(zacks_r1_set) if "zacks_r1_set" in dir() else set()
     _eg_set    = _earnings_guaranteed if "_earnings_guaranteed" in dir() else set()
     _custom_set = {t for t, src in ticker_sources.items() if src in ("custom", "leveraged")}
@@ -1682,8 +1692,24 @@ def run_daily_scan(force_fresh: bool = False):
     # earlier in this function — downstream code uses .get(t, {}) so empty is safe.
 
     # Phase 5 tier helpers: cheap endpoints fire for ALL qualified tickers;
-    # expensive endpoints fire ONLY for tier-1 (~200) to keep API spend bounded.
+    # expensive endpoints fire ONLY for tier-1 (deep_enrichment_top_n) to bound spend.
     _t1 = [t for t in tickers_to_analyze if t in _tier1_set]
+
+    # ── 2026-05-28: fundamentals freshness strategy ──────────────────────────
+    # EODHD bulk-fundamentals is a separate paid add-on (403 on our All-In-One
+    # plan), so we CANNOT collapse per-ticker calls via bulk. Instead the win is
+    # the 7-day cache TTL on fundamentals() (eodhd_client): the weekly cold scan
+    # fetches per-ticker once, then every scan for the next 7 days hits the warm
+    # disk cache (0 network calls). Across 42 scans/week only 1 is cold.
+    # calendar-trends bulk IS attempted (cheap, fails gracefully if unavailable).
+    try:
+        import eodhd_client as _ec
+        if hasattr(_ec, "prewarm_calendar_trends"):
+            _ct = _ec.prewarm_calendar_trends(tickers_to_analyze)
+            if _ct.get("calls"):
+                log.info(f"  Bulk prewarm · calendar-trends: {_ct.get('ok',0)} cached in {_ct.get('calls',0)} bulk calls")
+    except Exception as _cte:
+        log.debug(f"calendar-trends prewarm skipped: {_cte}")
 
     with ThreadPoolExecutor(max_workers=pool_workers) as pool:
         # ── CHEAP endpoints (all qualified tickers) — EODHD bulk-able or cached

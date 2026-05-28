@@ -468,14 +468,19 @@ def real_time(tickers: list[str] | str, cache_ttl: int = 300) -> dict | list[dic
     return _request(f"real-time/{head}", params=params, cache_key=cache_key, cache_ttl=cache_ttl)
 
 
-def fundamentals(ticker: str, cache_ttl: int = 86400) -> dict | None:
-    """Fundamentals API — financials, ratios, sector, dividends, etc. 24h cache."""
+def fundamentals(ticker: str, cache_ttl: int = 604800) -> dict | None:
+    """Fundamentals API — financials, ratios, sector, dividends, etc.
+    2026-05-28: TTL 24h → 7 days. Fundamentals (P/E, margins, balance sheet)
+    change quarterly, not daily — re-fetching every scan was pure quota waste.
+    The earnings *event* (beat/miss, dates) is captured by the shorter-TTL
+    earnings/news endpoints, so the 7-day snapshot cache is safe. Raising TTL
+    reduces quota (opposite of the 'don't lower TTL' guardrail)."""
     sym = to_eodhd_symbol(ticker)
     return _request(f"fundamentals/{sym}", cache_key=f"fund_{sym}", cache_ttl=cache_ttl)
 
 
 def bulk_fundamentals(symbols: list[str], exchange: str = "US",
-                      cache_ttl: int = 86400) -> dict | None:
+                      cache_ttl: int = 604800) -> dict | None:
     """Bulk fundamentals — 1 EODHD call returns simplified fundamentals for up
     to ~100 tickers. Replaces per-ticker /fundamentals/X calls for cold-cache
     scans (Phase 3 optimization).
@@ -506,7 +511,7 @@ def bulk_fundamentals(symbols: list[str], exchange: str = "US",
 
 
 def prewarm_fundamentals(tickers: list[str], exchange: str = "US",
-                         chunk_size: int = 100, cache_ttl: int = 86400) -> dict:
+                         chunk_size: int = 100, cache_ttl: int = 604800) -> dict:
     """Pre-populate per-ticker fundamentals cache from bulk_fundamentals.
 
     Splits `tickers` into chunks of 100, calls bulk_fundamentals on each,
