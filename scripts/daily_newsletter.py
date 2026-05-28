@@ -2170,7 +2170,9 @@ def main() -> int:
         print("\n--- HTML PREVIEW (first 2000 chars) ---")
         print(html_doc[:2000])
         print("\n--- SLACK PAYLOAD (truncated) ---")
-        payload = _slack_payload(sections, news, regime_info, when, snapshot_url)
+        payload = _slack_payload(sections, news, regime_info, when, snapshot_url,
+                                 universe_news, mode=args.mode,
+                                 evening_extras=evening_extras)
         print(json.dumps(payload, indent=2, default=str)[:3000])
         return 0
 

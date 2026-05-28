@@ -15,7 +15,11 @@
 
 LABEL="$1"
 shift
-CMD="$@"
+# 2026-05-28: keep args as the positional array ("$@") and run them quoted.
+# CMD is a display-only string for the log. Previously `CMD="$@"; $CMD` word-split
+# on the space in "/Volumes/MyMacDisk/Claude Skills/..." → broke any absolute
+# script path (evening-newsletter exit=2). Run "$@" to preserve arguments.
+CMD="$*"
 
 ROOT="/Volumes/MyMacDisk/Claude Skills/SwingTrade"
 LOG_DIR="$ROOT/cache/logs"
@@ -46,9 +50,10 @@ START_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 echo "[$START_ISO] $LABEL: START · $CMD" >> "$LOG"
 
-# Run the command, capture stdout/stderr + exit code
+# Run the command, capture stdout/stderr + exit code.
+# "$@" preserves arguments with spaces (e.g. the project path).
 TMPOUT=$(mktemp)
-$CMD > "$TMPOUT" 2>&1
+"$@" > "$TMPOUT" 2>&1
 EXIT_CODE=$?
 
 END_EPOCH=$(date +%s)
