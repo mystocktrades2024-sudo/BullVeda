@@ -487,6 +487,52 @@ def _market_temperature_html(b: dict, dj: dict) -> str:
     </section>"""
 
 
+def _retail_sentiment_html() -> str:
+    """WSB trending + StockTwits crowd sentiment (from build_retail_sentiment.py)."""
+    d = _safe_load(REPO / "cache" / "retail_sentiment.json") or {}
+    wsb = d.get("wsb_trending") or []
+    st = d.get("stocktwits") or {}
+    if not wsb and not st:
+        return ""
+    # WSB top mentions as ranked chips
+    wsb_rows = ""
+    if wsb:
+        mx = max((w.get("mentions", 0) for w in wsb), default=1) or 1
+        wsb_rows = "".join(
+            f'<div style="display:grid;grid-template-columns:60px 1fr 44px;gap:10px;align-items:center;padding:5px 0">'
+            f'<span style="font:700 12px var(--mono);color:var(--ink)">{_esc(w["ticker"])}</span>'
+            f'<div style="height:8px;background:var(--bg-2);border-radius:4px;overflow:hidden">'
+            f'<div style="height:100%;width:{(w.get("mentions",0)/mx*100):.0f}%;background:linear-gradient(90deg,var(--cu),var(--gn))"></div></div>'
+            f'<span style="font:700 11px var(--mono);color:var(--ink-2);text-align:right">{w.get("mentions",0)}</span>'
+            f'</div>'
+            for w in wsb[:10]
+        )
+    # StockTwits sentiment
+    st_rows = ""
+    if st:
+        def _c(lbl): return "var(--gn)" if lbl == "bullish" else "var(--rd)" if lbl == "bearish" else "var(--ink-3)"
+        items = sorted(st.items(), key=lambda kv: -(kv[1].get("sentiment") or 0))
+        st_rows = "".join(
+            f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)">'
+            f'<span style="font:700 12px var(--mono);color:var(--ink)">{_esc(t)}</span>'
+            f'<span style="font:600 11px var(--mono)"><span style="color:var(--gn)">{v.get("bullish",0)}🟢</span> '
+            f'<span style="color:var(--rd)">{v.get("bearish",0)}🔴</span> '
+            f'<span style="color:{_c(v.get("label"))};font-weight:800;margin-left:6px">{(v.get("label") or "—").upper()}</span></span>'
+            f'</div>'
+            for t, v in items[:10]
+        )
+    return f"""
+    <section class="card">
+      <div class="card-h"><span class="ic">🗣</span><span class="ttl">Retail Sentiment</span>
+        <span class="card-meta">Reddit/WSB mentions · StockTwits crowd · free scrape</span></div>
+      <div class="grid2" style="padding:14px 18px">
+        <div><div style="font:700 10px var(--mono);color:var(--cu);letter-spacing:.12em;margin-bottom:8px">🔥 WSB TRENDING (mentions)</div>{wsb_rows or '<span style="color:var(--ink-3)">—</span>'}</div>
+        <div><div style="font:700 10px var(--mono);color:var(--cu);letter-spacing:.12em;margin-bottom:8px">💬 STOCKTWITS · your names</div>{st_rows or '<span style="color:var(--ink-3)">—</span>'}</div>
+      </div>
+      <div style="padding:0 18px 14px;font:500 10.5px var(--sans);color:var(--ink-3);font-style:italic">⚠ Crowded-trade signal (principle 12): when a name tops WSB + retail, edge is often priced-in — fade size or skip.</div>
+    </section>"""
+
+
 def _market_moving_news_html() -> str:
     """Filter universe news to high-impact / market-moving stories only."""
     try:
@@ -1640,6 +1686,8 @@ def _render_html(sections: dict, news: dict, regime: dict, when: str,
     cards.append(_sector_heatmap_html(dj))
     # 6. Multi-Signal Spotlight — cross-section tickers with full detail
     cards.append(_multi_signal_spotlight(sections, news))
+    # 6b. Retail sentiment (WSB + StockTwits)
+    cards.append(_retail_sentiment_html())
     # 4. Leadership signals (top industries, 52w hi/lo)
     cards.append(_leadership_signals_html(b, dj))
     # 5. System status
@@ -2022,6 +2070,23 @@ def _slack_payload(sections: dict, news: dict, regime: dict, when: str,
         )
         blocks.append({"type": "section", "text": {"type": "mrkdwn",
             "text": f"*📈 OPTIONS FLOW*\n{body}"}})
+
+    # Retail sentiment (WSB + StockTwits) — compact Slack block
+    _rs = _safe_load(REPO / "cache" / "retail_sentiment.json") or {}
+    _wsb = _rs.get("wsb_trending") or []
+    _st = _rs.get("stocktwits") or {}
+    if _wsb or _st:
+        lines = []
+        if _wsb:
+            lines.append("*🔥 WSB:* " + " · ".join(f"`{w['ticker']}` {w['mentions']}" for w in _wsb[:8]))
+        if _st:
+            bulls = [t for t, v in _st.items() if v.get("label") == "bullish"]
+            bears = [t for t, v in _st.items() if v.get("label") == "bearish"]
+            if bulls: lines.append("*💬 StockTwits bullish:* " + ", ".join(f"`{t}`" for t in bulls[:8]))
+            if bears: lines.append("*💬 StockTwits bearish:* " + ", ".join(f"`{t}`" for t in bears[:8]))
+        if lines:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn",
+                "text": "*🗣 RETAIL SENTIMENT*\n" + "\n".join(lines)}})
 
     # Universe news (macro / market-wide)
     if universe_news:
