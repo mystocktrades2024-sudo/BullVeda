@@ -9498,6 +9498,14 @@ body.light .qs-view-tab.on { color: #fff; }
   color: var(--amb); font-size: 12px; margin-right: 4px;
   display: inline-block; vertical-align: middle;
 }
+.qss-owned {
+  display: inline-block; vertical-align: middle; margin-left: 6px;
+  font: 800 8px var(--mono); letter-spacing: 0.08em;
+  color: var(--gn); background: rgba(91,229,124,0.12);
+  border: 1px solid rgba(91,229,124,0.36); border-radius: 4px;
+  padding: 2px 6px; cursor: pointer;
+}
+.qss-owned:hover { background: rgba(91,229,124,0.22); }
 
 /* ─── Shared workspace patterns (Portfolio / Killed / Performance) ──
    Same Kairos aesthetic as QuantScanner: italic serif banner + mono
@@ -22760,6 +22768,8 @@ const QuantPortfolio = (function() {
       table.qpfr-pos tbody td.am { color: var(--amb, #fbbf24); font-weight: 700; }
       table.qpfr-pos tbody td.side-l { color: var(--gn-dim, #166534); font-weight: 700; font-size: 9.5px; letter-spacing: 0.1em; }
       table.qpfr-pos tbody td.side-s { color: var(--rd-dim, #991b1b); font-weight: 700; font-size: 9.5px; letter-spacing: 0.1em; }
+      .qpfr-mgd { font: 700 8.5px var(--mono); letter-spacing: 0.06em; color: var(--gn); background: rgba(91,229,124,0.10); border: 1px solid rgba(91,229,124,0.30); border-radius: 4px; padding: 2px 6px; white-space: nowrap; }
+      .qpfr-mgd-note { font: 500 11px var(--sans, sans-serif); color: var(--ink-2); background: rgba(91,229,124,0.05); border: 1px solid rgba(91,229,124,0.18); border-left: 3px solid var(--gn); border-radius: 6px; padding: 9px 13px; margin-bottom: 10px; line-height: 1.5; }
       table.qpfr-pos tbody td.r-now { font-weight: 800; }
       table.qpfr-pos tbody td .pct-bar { display: inline-block; width: 30px; height: 3px; background: rgba(255,255,255,0.05); margin-left: 5px; position: relative; vertical-align: middle; }
       table.qpfr-pos tbody td .pct-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: currentColor; opacity: 0.7; }
@@ -22847,6 +22857,7 @@ const QuantPortfolio = (function() {
       const last = p.current_price || entry;
       const stop = p.stop || 0;
       const t1 = p.target1 || 0;
+      const t2 = p.target2 || 0;
       const pl = p.unrealized_pnl_dollars || 0;
       const plpct = p.unrealized_pnl_pct || 0;
       const isLong = side === 'LONG';
@@ -22903,17 +22914,20 @@ const QuantPortfolio = (function() {
         + '<td class="' + stopCls + '">' + (toStop >= 0 ? '+' : '') + toStop.toFixed(1) + '%' + stopBar + '</td>'
         + '<td>' + (t1 ? '$' + t1.toFixed(2) : '<span class="dim">—</span>') + '</td>'
         + '<td class="' + t1Cls + '">' + (toT1 != null ? (toT1 >= 0 ? '+' : '') + toT1.toFixed(1) + '%' : '<span class="dim">—</span>') + '</td>'
+        + '<td>' + (t2 ? '$' + t2.toFixed(2) : '<span class="dim">—</span>') + '</td>'
         + '<td class="r-now ' + rNowCls + '">' + rLabel + '</td>'
         + '<td>' + (days != null ? days + 'd' : '<span class="dim">—</span>') + '</td>'
         + '<td>' + erHtml + '</td>'
+        + '<td title="Auto-managed by the paper engine: protective stop placed at the broker, T1 partial + breakeven trail, auto-exit on earnings/regime/Sharpe-kill"><span class="qpfr-mgd">🤖 AUTO</span></td>'
         + '<td class="l dim">' + setup + '</td>'
         + '</tr>';
     }).join('');
-    return '<div style="max-height: 500px; overflow-y: auto;"><table class="qpfr-pos"><thead><tr>'
+    return '<div class="qpfr-mgd-note">🤖 Every position is auto-managed by the paper engine — protective stop at the broker, scale-out at T1 + trail to T2, auto-exit on earnings / regime-flip / Sharpe-kill. Exit triggers surface in the Action Queue below.</div>'
+      + '<div style="max-height: 500px; overflow-y: auto;"><table class="qpfr-pos"><thead><tr>'
       + '<th class="l">#</th><th class="l">TKR</th><th>SIDE</th><th>QTY</th>'
       + '<th>ENTRY</th><th>LAST</th><th>$P/L</th><th>%P/L</th>'
-      + '<th>STOP</th><th>%→STOP</th><th>T1</th><th>%→T1</th>'
-      + '<th>R NOW</th><th>DAYS</th><th>ER</th><th class="l">SETUP</th>'
+      + '<th>STOP</th><th>%→STOP</th><th>T1</th><th>%→T1</th><th>T2</th>'
+      + '<th>R NOW</th><th>DAYS</th><th>ER</th><th>MGD</th><th class="l">SETUP</th>'
       + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
 
@@ -28159,6 +28173,7 @@ body.light .qss-tbl tbody tr.sel { background: var(--copper-bg); }
       <td class="col-tk l">
         <span class="star${isStarred?' on':''}" data-qss-star="${_esc(t.ticker)}" title="Toggle watchlist">★</span>
         ${_esc(t.ticker)}
+        ${t._held ? `<span class="qss-owned" title="You own this — managed in Portfolio · Positions (stop, targets, auto-exit). Not a new entry." onclick="event.stopPropagation();document.querySelector('.sb-link[data-tab=portfolio]')?.click()">OWNED</span>` : ''}
       </td>
       <td class="l dim" style="font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis">${_esc(t.name || '—')}</td>
       <td class="l dim" style="font-size:11px">${_esc(t.sector || '—')}</td>
