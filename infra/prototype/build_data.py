@@ -4261,22 +4261,31 @@ def main():
                           "earnings_per_tier_calibration")
     _SCREENER_KEYS     = ("screener",)
     _CRYPTO_KEYS       = ("crypto",)
-    _SIGNALS_EXT_KEYS  = ("medium_term", "long_term")
+    # 2026-05-27 PERF #4: short_term (3.7MB) joins medium/long in signals_ext —
+    # its only 2 dashboard consumers use `|| []` guards (thesis sidebar count +
+    # one pct_chg lookup), so a [] stub is safe and the chunk backfills it.
+    _SIGNALS_EXT_KEYS  = ("short_term", "medium_term", "long_term")
+    # picks_history (1.2MB) has ZERO data.picks_history consumers in the
+    # dashboard (calibration reads /api/picks-history-aggregate instead) — drop
+    # it from critical entirely. Chunk emitted for any future consumer.
+    _HISTORY_KEYS      = ("picks_history",)
     _MISC_KEYS         = ("strategies", "zacks_premium_services", "zacks_email_digest")
     _LAZY_KEYS = (set(_PERF_KEYS) | set(_KILLED_KEYS) | set(_EARNINGS_KEYS)
                   | set(_SCREENER_KEYS) | set(_CRYPTO_KEYS)
-                  | set(_SIGNALS_EXT_KEYS) | set(_MISC_KEYS))
+                  | set(_SIGNALS_EXT_KEYS) | set(_HISTORY_KEYS) | set(_MISC_KEYS))
 
     _critical = {k: v for k, v in data.items() if k not in _LAZY_KEYS}
     # Stubs — match the SHAPE of the real chunk so renderers using `?.` / `||`
     # guards don't crash before the chunk arrives. killed/screener/medium_term/
-    # long_term are lists; crypto/strategies/zacks_* are dicts; performance is
-    # a dict with `.total` exposed for the sidebar count.
+    # long_term/short_term are lists; crypto/strategies/zacks_* are dicts;
+    # performance is a dict with `.total` exposed for the sidebar count.
     _critical["killed"] = []
     _critical["screener"] = []
     _critical["crypto"] = {}
+    _critical["short_term"]  = []
     _critical["medium_term"] = []
     _critical["long_term"]   = []
+    _critical["picks_history"] = []
     _critical["strategies"]            = {}
     _critical["zacks_premium_services"] = {}
     _critical["zacks_email_digest"]    = {}
@@ -4289,6 +4298,7 @@ def main():
         "screener":     len(data.get("screener") or []),
         "crypto":       len((data.get("crypto") or {}).get("top_picks") or []),
         "killed":       len(data.get("killed") or []),
+        "short_term":   len(data.get("short_term") or []),
         "medium_term":  len(data.get("medium_term") or []),
         "long_term":    len(data.get("long_term") or []),
     }
@@ -4300,6 +4310,7 @@ def main():
         "screener":    {k: data[k] for k in _SCREENER_KEYS    if k in data},
         "crypto":      {k: data[k] for k in _CRYPTO_KEYS      if k in data},
         "signals_ext": {k: data[k] for k in _SIGNALS_EXT_KEYS if k in data},
+        "history":     {k: data[k] for k in _HISTORY_KEYS     if k in data},
         "misc":        {k: data[k] for k in _MISC_KEYS        if k in data},
     }
 

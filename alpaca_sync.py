@@ -80,6 +80,11 @@ def _to_dict_order(o) -> dict:
         "created_at": o.created_at.isoformat() if o.created_at else None,
         "filled_at": o.filled_at.isoformat() if getattr(o, "filled_at", None) else None,
         "order_class": (o.order_class.value if getattr(o, "order_class", None) and hasattr(o.order_class, "value") else None),
+        # 2026-05-27 — capture bracket exit-leg prices so positions can show the
+        # REAL stop/target instead of a synthetic 3% placeholder.
+        "order_type": (o.order_type.value if getattr(o, "order_type", None) and hasattr(o.order_type, "value") else (o.type.value if getattr(o, "type", None) and hasattr(o.type, "value") else None)),
+        "stop_price": float(o.stop_price) if getattr(o, "stop_price", None) else None,
+        "limit_price": float(o.limit_price) if getattr(o, "limit_price", None) else None,
     }
 
 
@@ -109,7 +114,8 @@ def _pull_alpaca_state(client, since: datetime | None = None) -> dict:
 
 
 def _reconcile_positions(state: dict, alpaca_positions: list[dict],
-                         account_equity: float) -> tuple[list[str], list[str], list[str]]:
+                         account_equity: float,
+                         alpaca_orders: list[dict] | None = None) -> tuple[list[str], list[str], list[str]]:
     """Apply local-vs-Alpaca position diff. Mutates state.
 
     Returns (inserted, updated, closed) lists of tickers.
@@ -119,6 +125,26 @@ def _reconcile_positions(state: dict, alpaca_positions: list[dict],
     local_positions = state.get("positions", [])
     local_by_t = {p["ticker"]: p for p in local_positions}
     alpaca_by_t = {p["symbol"]: p for p in alpaca_positions}
+
+    # 2026-05-27 — build a ticker→{stop,target} map from OPEN bracket exit legs.
+    # A bracket buy leaves an OCO of an open SELL stop + open SELL limit; their
+    # stop_price / limit_price ARE the real stop/target (vs the synthetic 3%).
+    _bracket: dict[str, dict] = {}
+    for o in (alpaca_orders or []):
+        if (o.get("side") or "").lower() != "sell":
+            continue
+        st = (o.get("status") or "").lower()
+        if st in ("filled", "canceled", "expired", "rejected", "replaced"):
+            continue  # only OPEN exit legs reflect the live bracket
+        sym = (o.get("symbol") or "").upper()
+        if not sym:
+            continue
+        leg = _bracket.setdefault(sym, {})
+        otype = (o.get("order_type") or "").lower()
+        if "stop" in otype and o.get("stop_price") is not None:
+            leg["stop"] = round(float(o["stop_price"]), 2)
+        elif "limit" in otype and o.get("limit_price") is not None:
+            leg["target"] = round(float(o["limit_price"]), 2)
 
     inserted: list[str] = []
     updated: list[str] = []
@@ -154,14 +180,36 @@ def _reconcile_positions(state: dict, alpaca_positions: list[dict],
             lp["unrealized_pnl_dollars"] = round(ap["unrealized_pl"], 2)
             lp["unrealized_pnl_pct"] = round(ap["unrealized_plpc"], 2)
             lp["last_updated"] = today
+            # 2026-05-27 — refresh stop/target from the live bracket legs so the
+            # dashboard shows the real exit levels, not a stale synthetic 3%.
+            # When NO live bracket leg exists (entry bracket canceled, position
+            # running naked), mark _synthetic_stop so the UI flags it honestly.
+            _legs = _bracket.get(sym, {})
+            if _legs.get("stop") is not None:
+                lp["stop"] = _legs["stop"]; lp["_synthetic_stop"] = False
+            else:
+                lp["_synthetic_stop"] = True  # no real protective stop at broker
+            if _legs.get("target") is not None:
+                lp["target1"] = _legs["target"]
             updated.append(sym)
         else:
-            stop = round(avg * (0.97 if side == "long" else 1.03), 2)
-            target = round(avg * (1.05 if side == "long" else 0.95), 2)
+            # 2026-05-27 — prefer the REAL bracket exit-leg prices over a
+            # synthetic 3% placeholder. Open SELL stop order → stop; open SELL
+            # limit order → target. _bracket_legs built once below.
+            legs = _bracket.get(sym, {})
+            real_stop = legs.get("stop")
+            real_target = legs.get("target")
+            synthetic = (real_stop is None)
+            stop = real_stop if real_stop is not None else round(avg * (0.97 if side == "long" else 1.03), 2)
+            target = real_target if real_target is not None else round(avg * (1.05 if side == "long" else 0.95), 2)
             alloc = round(qty * avg / max(1.0, account_equity) * 100, 1)
             # Pull fill timestamp from most recent matching BUY order (added 2026-05-15)
+            # 2026-05-27 fix: `filled` was referenced but never defined here — the
+            # variable was only local to _reconcile_filled_orders. Plumb orders
+            # through as a parameter and filter inline.
             entry_dt = None
-            for o in sorted(filled, key=lambda x: x.get("filled_at") or x.get("created_at") or "", reverse=True):
+            _filled = [o for o in (alpaca_orders or []) if o.get("status") == "filled"]
+            for o in sorted(_filled, key=lambda x: x.get("filled_at") or x.get("created_at") or "", reverse=True):
                 if (o.get("symbol") or "").upper() == sym and (o.get("side") or "").lower() == "buy":
                     entry_dt = o.get("filled_at") or o.get("created_at")
                     break
@@ -341,7 +389,7 @@ def sync_alpaca_to_local(*, force: bool = False, verbose: bool = False) -> dict:
     equity = account["equity"]
 
     # 1. Position reconciliation
-    inserted, updated, closed = _reconcile_positions(state, pulled["positions"], equity)
+    inserted, updated, closed = _reconcile_positions(state, pulled["positions"], equity, alpaca_orders=pulled.get("orders") or [])
 
     # 2. Filled-order → closed_trades reconciliation
     new_closed_trades = _reconcile_filled_orders(state, pulled["orders"])

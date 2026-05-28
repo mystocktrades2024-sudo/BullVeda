@@ -408,6 +408,14 @@ from fastapi.responses import RedirectResponse
 async def root(auth: HTTPBasicCredentials = Depends(_check_auth)):
     return RedirectResponse(url="/kairos.html", status_code=302)
 
+# Legacy /dashboard URL (still in CLAUDE.md docs + old bookmarks + Lighthouse
+# targets) used to 404 with a JSON body — which made Lighthouse report
+# "not HTML (application/json)". Redirect to the canonical kairos.html surface.
+@app.api_route("/dashboard", methods=["GET", "HEAD"])
+async def _dashboard_legacy(request: Request, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    qs = request.url.query
+    return RedirectResponse(url="/kairos.html" + (f"?{qs}" if qs else ""), status_code=302)
+
 # -- /kairos.html — primary dashboard surface.
 @app.api_route("/kairos.html", methods=["GET","HEAD"])
 async def _kairos_page(auth: HTTPBasicCredentials = Depends(_check_auth)):

@@ -1,0 +1,801 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signal Scanner · Eikon Preview · Kairos</title>
+<style>
+/* Kairos baseline tokens — MATCH production kairos.html :root exactly */
+:root {
+  --bg:        #000000;
+  --bg-1:      #0a0d0c;
+  --bg-2:      #11151b;
+  --bg-3:      #1a1f17;
+  --bg-hover:  #14181d;
+  --ink:       #d8d6cc;
+  --ink-1:     #c4c7b9;
+  --ink-2:     #8d9180;
+  --ink-3:     #5e6356;
+  --ink-4:     #3d4338;
+  --line:      #1f2425;
+  --line-2:    #2a3030;
+  --gn:        #5be57c;
+  --gn-bg:     rgba(91,229,124,0.08);
+  --gn-dim:    rgba(91,229,124,0.35);
+  --rd:        #ff6b5b;
+  --rd-bg:     rgba(255,107,91,0.08);
+  --rd-dim:    rgba(255,107,91,0.35);
+  --amb:       #ffb95c;
+  --amb-bg:    rgba(255,185,92,0.10);
+  --amb-dim:   rgba(255,185,92,0.35);
+  --copper:    #d97757;
+  --copper-bg: rgba(217,119,87,0.08);
+  --copper-glow: rgba(217,119,87,0.30);
+  --info:      #5fa8d6;
+  --display:   'GT Sectra', 'Iowan Old Style', Georgia, serif;
+  --mono:      'Aptos', 'Aptos Display', 'Segoe UI Variable Text', 'Segoe UI', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, monospace;
+  --sans:      'Aptos', 'Aptos Display', 'Segoe UI Variable Text', 'Segoe UI', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+html[data-theme="light"] {
+  --bg:#f3f1ea; --bg-1:#ffffff; --bg-2:#f5f3eb; --bg-3:#ebe8df;
+  --ink:#1d211a; --ink-1:#3a3f33; --ink-2:#6b705f; --ink-3:#92968a; --ink-4:#c0c4b8;
+  --line:#dfdcd2; --line-2:#cdcabe;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:13px;
+  font-variant-numeric: tabular-nums; }
+
+/* SHELL — same as Momentum v13 */
+.qss-shell {
+  display:flex; flex-direction:column;
+  height:100vh;
+  background:var(--bg); color:var(--ink);
+}
+
+/* TITLE BAR */
+.qss-titlebar {
+  display:flex; align-items:center; gap:14px;
+  height:40px; padding:0 16px;
+  background:var(--bg-1);
+  border-bottom:1px solid var(--line);
+  font:600 11.5px var(--mono);
+  letter-spacing:0.06em;
+}
+.qss-status-dot {
+  width:8px; height:8px; border-radius:50%;
+  background:var(--gn);
+  animation: qssPulse 2s infinite;
+}
+@keyframes qssPulse {
+  0%,100% { opacity:0.55; box-shadow:0 0 0 0 rgba(91,229,124,0); }
+  50% { opacity:1; box-shadow:0 0 8px 1px rgba(91,229,124,0.55); }
+}
+.qss-tb-title { font:800 11.5px var(--mono); letter-spacing:0.18em; text-transform:uppercase; color:var(--ink); }
+.qss-tb-mode { padding:2px 8px; background:var(--copper-bg); color:var(--copper); border:1px solid var(--copper);
+  border-radius:2px; font:800 9.5px var(--mono); letter-spacing:0.10em; }
+.qss-tb-sep { color:var(--ink-4); }
+.qss-tb-meta { color:var(--ink-2); }
+.qss-tb-spacer { flex:1; }
+.qss-tb-ts { font:600 11px var(--mono); color:var(--ink-2); }
+
+/* TAB STRIP */
+.qss-tabs {
+  display:flex; gap:0;
+  height:38px; padding:0 16px;
+  background:var(--bg);
+  border-bottom:1px solid var(--line);
+}
+.qss-tab {
+  padding:0 18px; font:700 11px var(--sans); letter-spacing:0.08em;
+  color:var(--ink-3); cursor:pointer; text-transform:uppercase;
+  display:flex; align-items:center; gap:8px;
+  border-bottom:2px solid transparent;
+  transition: color 180ms ease;
+}
+.qss-tab .ct { font:700 10px var(--mono); color:var(--ink-3); padding:1px 6px;
+  background:var(--bg-2); border-radius:2px; }
+.qss-tab:hover:not(.on) { color:var(--ink-1); }
+.qss-tab.on { color:var(--ink); border-bottom-color:var(--copper); }
+.qss-tab.on .ct { color:var(--copper); background:var(--copper-bg); }
+
+/* FILTER BAR */
+.qss-filt {
+  display:flex; align-items:center; gap:10px;
+  height:42px; padding:0 16px;
+  background:var(--bg-1);
+  border-bottom:1px solid var(--line);
+  font:600 11px var(--mono);
+}
+.qss-filt .ct { color:var(--copper); font-weight:800; }
+.qss-filt .sep { color:var(--ink-4); }
+.qss-pill {
+  padding:5px 10px; border-radius:2px; cursor:pointer;
+  font:700 10px var(--mono); letter-spacing:0.08em; text-transform:uppercase;
+  background:var(--bg-2); border:1px solid var(--line); color:var(--ink-2);
+}
+.qss-pill.on { background:var(--copper-bg); border-color:var(--copper); color:var(--copper); }
+.qss-pill:hover:not(.on) { color:var(--ink-1); }
+.qss-search { padding:5px 10px; background:var(--bg-2); border:1px solid var(--line); border-radius:2px;
+  color:var(--ink); font:600 11px var(--mono); width:140px; outline:none; }
+.qss-search:focus { border-color:var(--copper); }
+.qss-btn { padding:5px 12px; background:var(--copper); color:var(--bg); border:0; border-radius:2px;
+  font:800 10px var(--mono); letter-spacing:0.10em; text-transform:uppercase; cursor:pointer; }
+.qss-btn:hover { filter:brightness(1.1); }
+.qss-btn.gray { background:var(--bg-2); color:var(--ink-2); border:1px solid var(--line); }
+
+/* MAIN — 2 columns */
+.qss-main {
+  flex:1 1 auto;
+  display:grid;
+  grid-template-columns: 1fr 460px;
+  min-height:0;
+  overflow:hidden;
+}
+@media (max-width:1500px) { .qss-main { grid-template-columns: 1fr 420px; } }
+.qss-left {
+  background:var(--bg);
+  border-right:1px solid var(--line);
+  overflow:hidden;
+  display:flex; flex-direction:column;
+}
+.qss-right {
+  background:var(--bg-1);
+  overflow-y:auto;
+}
+
+/* QUICK FILTER ROW (above table) */
+.qss-quickfilt {
+  display:flex; gap:6px; padding:8px 16px;
+  border-bottom:1px solid var(--line);
+  background:var(--bg-1);
+  flex-wrap:wrap;
+}
+.qss-qf-pill {
+  padding:4px 10px; background:var(--bg-2); border:1px solid var(--line); color:var(--ink-2);
+  border-radius:2px; font:700 10px var(--mono); letter-spacing:0.06em; cursor:pointer;
+  text-transform:uppercase;
+}
+.qss-qf-pill.on { background:var(--copper-bg); border-color:var(--copper); color:var(--copper); }
+
+/* TABLE — frozen first column */
+.qss-tbl-wrap {
+  flex:1 1 auto;
+  overflow:auto;
+  min-height:0;
+}
+.qss-tbl {
+  width:100%; border-collapse:collapse;
+  font:500 12px var(--mono); font-variant-numeric: tabular-nums;
+}
+.qss-tbl thead th {
+  position:sticky; top:0; z-index:3;
+  background:var(--bg-1);
+  color:var(--ink-2);
+  font:700 9.5px var(--mono);
+  letter-spacing:0.12em;
+  text-transform:uppercase;
+  text-align:right;
+  padding:10px 12px;
+  border-bottom:1px solid var(--line-2);
+  cursor:pointer;
+  user-select:none;
+  white-space:nowrap;
+}
+.qss-tbl thead th:hover { color:var(--copper); }
+.qss-tbl thead th.on { color:var(--copper); }
+.qss-tbl thead th.l { text-align:left; }
+.qss-tbl thead th.col-chk { width:32px; text-align:center; }
+.qss-tbl thead th.col-tk { left:32px; }
+.qss-tbl thead th.col-chk, .qss-tbl thead th.col-tk {
+  position:sticky; z-index:4;
+  background:var(--bg-1);
+}
+.qss-tbl thead th.col-chk { left:0; }
+.qss-tbl thead th.col-tk { text-align:left; }
+
+.qss-tbl tbody tr {
+  cursor:pointer;
+  transition: background 120ms ease;
+}
+.qss-tbl tbody tr:hover { background: rgba(217,119,87,0.04); }
+.qss-tbl tbody tr.sel { background: var(--copper-bg); }
+.qss-tbl tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--copper); }
+.qss-tbl tbody tr:nth-child(even) { background: rgba(255,255,255,0.012); }
+.qss-tbl tbody tr:nth-child(even):hover { background: rgba(217,119,87,0.06); }
+
+.qss-tbl td {
+  padding:9px 12px;
+  border-bottom:1px solid var(--line);
+  text-align:right;
+  color:var(--ink-1);
+  white-space:nowrap;
+}
+.qss-tbl td.l { text-align:left; }
+.qss-tbl td.col-chk { position:sticky; left:0; z-index:2; background:var(--bg);
+  text-align:center; width:32px; }
+.qss-tbl td.col-tk { position:sticky; left:32px; z-index:2; background:var(--bg);
+  font:800 12.5px var(--mono); color:var(--ink); border-right:1px solid var(--line); }
+.qss-tbl tbody tr:hover td.col-chk { background:var(--bg-2); }
+.qss-tbl tbody tr:hover td.col-tk { background:var(--bg-2); }
+.qss-tbl tbody tr.sel td.col-chk,
+.qss-tbl tbody tr.sel td.col-tk { background:var(--copper-bg); }
+
+/* Cell formatters */
+.qss-tbl .gn { color:var(--gn); }
+.qss-tbl .rd { color:var(--rd); }
+.qss-tbl .amb { color:var(--amb); }
+.qss-tbl .cu { color:var(--copper); }
+.qss-tbl .dim { color:var(--ink-3); }
+
+/* Verdict pill */
+.qss-verd { display:inline-block; padding:2px 8px; border-radius:2px;
+  font:800 9.5px var(--mono); letter-spacing:0.08em; text-transform:uppercase; }
+.qss-verd.BUY   { background:var(--gn); color:var(--bg); }
+.qss-verd.WATCH { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb); }
+.qss-verd.SHORT { background:var(--rd); color:var(--bg); }
+.qss-verd.AVOID { background:var(--ink-4); color:var(--ink); }
+
+/* Conviction tier */
+.qss-tier { display:inline-block; padding:1px 6px; border-radius:2px;
+  font:800 9.5px var(--mono); letter-spacing:0.06em; }
+.qss-tier.T1 { background:var(--copper-bg); color:var(--copper); border:1px solid var(--copper); }
+.qss-tier.T2 { background:var(--gn-bg); color:var(--gn); border:1px solid var(--gn); }
+.qss-tier.T3 { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb); }
+.qss-tier.WATCH { color:var(--ink-3); border:1px solid var(--line-2); }
+
+/* Setup family chip */
+.qss-setup { display:inline-block; padding:1px 7px; border-radius:2px;
+  font:600 9.5px var(--mono); color:var(--ink-2); background:var(--bg-2);
+  letter-spacing:0.04em; }
+
+/* Entry quality */
+.qss-eq { display:inline-block; padding:1px 6px; border-radius:2px;
+  font:700 9.5px var(--mono); letter-spacing:0.06em; }
+.qss-eq.FRESH    { background:var(--gn); color:var(--bg); }
+.qss-eq.PULLBACK { background:var(--gn-bg); color:var(--gn); border:1px solid var(--gn); }
+.qss-eq.VALID    { background:var(--bg-2); color:var(--ink-2); }
+.qss-eq.EXTENDED { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb); }
+.qss-eq.MISSED   { color:var(--rd); border:1px solid var(--rd); background:var(--rd-bg); }
+
+/* Score bar in cell */
+.qss-score { position:relative; display:inline-block; width:50px; height:14px;
+  background:var(--bg-3); border-radius:2px; overflow:hidden; vertical-align:middle; }
+.qss-score .fill { position:absolute; left:0; top:0; bottom:0; }
+.qss-score .lbl { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font:800 9.5px var(--mono); color:var(--ink); text-shadow:0 0 3px rgba(0,0,0,0.6); }
+
+/* Sparkline */
+.qss-spark { width:80px; height:22px; vertical-align:middle; }
+.qss-spark svg { display:block; }
+
+/* ER chip */
+.qss-er { display:inline-block; padding:1px 5px; border-radius:2px;
+  font:800 9px var(--mono); letter-spacing:0.04em; }
+.qss-er.urgent { background:var(--rd-bg); color:var(--rd); border:1px solid var(--rd); }
+.qss-er.soon { background:var(--amb-bg); color:var(--amb); border:1px solid var(--amb); }
+.qss-er.safe { background:var(--gn-bg); color:var(--gn); }
+.qss-er.far { color:var(--ink-3); }
+
+/* RIGHT PANE */
+.qss-rh { padding:14px 16px 12px; border-bottom:1px solid var(--line); }
+.qss-rh-row1 { display:flex; align-items:baseline; gap:10px; }
+.qss-rh-tkr { font: 800 26px var(--display); color:var(--copper); letter-spacing:0.02em; }
+.qss-rh-name { font:600 11px var(--mono); color:var(--ink-3); }
+.qss-rh-sec { font:500 11px var(--mono); color:var(--ink-2); margin-top:2px; }
+.qss-rh-px { display:flex; align-items:baseline; gap:10px; margin-top:6px; }
+.qss-rh-px .px { font:800 18px var(--mono); color:var(--ink); }
+.qss-rh-px .chg { font:700 12px var(--mono); padding:2px 6px; border-radius:2px; }
+.qss-rh-px .chg.gn { color:var(--gn); background:var(--gn-bg); }
+.qss-rh-px .chg.rd { color:var(--rd); background:var(--rd-bg); }
+
+.qss-rsect {
+  padding:14px 16px;
+  border-bottom:1px solid var(--line);
+}
+.qss-rsect-h {
+  font:800 10px var(--mono);
+  letter-spacing:0.16em;
+  color:var(--ink-2);
+  text-transform:uppercase;
+  margin-bottom:10px;
+  border-bottom:1px solid var(--copper);
+  padding-bottom:5px;
+}
+.qss-rsect-h .meta { font-weight:500; letter-spacing:0.02em; text-transform:none; color:var(--ink-3); margin-left:8px; }
+.qss-rstat-grid {
+  display:grid; grid-template-columns: 1fr 1fr;
+  gap:8px;
+}
+.qss-rstat {
+  display:flex; flex-direction:column; gap:2px;
+  padding:8px 10px;
+  background:var(--bg-2);
+  border-radius:3px;
+}
+.qss-rstat .k { font:700 9px var(--mono); color:var(--ink-3); letter-spacing:0.10em; text-transform:uppercase; }
+.qss-rstat .v { font:800 13px var(--mono); color:var(--ink); }
+.qss-rstat .v.gn { color:var(--gn); }
+.qss-rstat .v.rd { color:var(--rd); }
+.qss-rstat .v.amb { color:var(--amb); }
+.qss-rstat .v.cu { color:var(--copper); }
+
+.qss-rchart {
+  padding:14px 16px;
+  border-bottom:1px solid var(--line);
+}
+.qss-rchart svg { width:100%; height:120px; display:block; background:var(--bg-2); border-radius:3px; }
+
+.qss-ractions {
+  padding:14px 16px;
+  display:flex; flex-direction:column; gap:8px;
+}
+.qss-ractions button {
+  width:100%;
+  padding:10px;
+  border:1px solid var(--line);
+  background:var(--bg-2);
+  color:var(--ink);
+  font:800 11px var(--mono); letter-spacing:0.10em;
+  cursor:pointer;
+  border-radius:2px;
+  text-transform:uppercase;
+}
+.qss-ractions button.primary {
+  background:var(--copper);
+  color:var(--bg);
+  border-color:var(--copper);
+}
+.qss-ractions button.primary:hover { filter:brightness(1.1); }
+
+/* Trade plan */
+.qss-plan { display:grid; grid-template-columns: auto 1fr; gap:8px 14px;
+  padding:10px 12px; background:var(--bg-2); border-radius:3px; }
+.qss-plan .k { font:700 9.5px var(--mono); color:var(--ink-3); letter-spacing:0.10em; text-transform:uppercase; }
+.qss-plan .v { font:800 12.5px var(--mono); color:var(--ink); text-align:right; }
+.qss-plan .v.gn { color:var(--gn); }
+.qss-plan .v.rd { color:var(--rd); }
+
+/* News */
+.qss-news-list { list-style:none; padding:0; margin:0; }
+.qss-news-list li { padding:8px 0; border-bottom:1px solid var(--line); font:500 11.5px var(--sans); color:var(--ink-1); line-height:1.4; }
+.qss-news-list li:last-child { border-bottom:0; }
+.qss-news-list .src { font:500 9.5px var(--mono); color:var(--ink-3); display:block; margin-top:3px; letter-spacing:0.04em; text-transform:uppercase; }
+
+/* Catalysts row */
+.qss-cats { display:flex; flex-wrap:wrap; gap:6px; }
+.qss-cat { padding:3px 8px; background:var(--bg-2); border:1px solid var(--line); border-radius:2px;
+  font:700 10px var(--mono); color:var(--ink-1); letter-spacing:0.04em; }
+.qss-cat.gn { background:var(--gn-bg); color:var(--gn); border-color:var(--gn); }
+.qss-cat.amb { background:var(--amb-bg); color:var(--amb); border-color:var(--amb); }
+.qss-cat.cu { background:var(--copper-bg); color:var(--copper); border-color:var(--copper); }
+
+/* STATUS BAR */
+.qss-status {
+  display:flex; align-items:center; gap:14px;
+  height:30px; padding:0 16px;
+  background:var(--bg-1);
+  border-top:1px solid var(--line);
+  font:500 10.5px var(--mono); letter-spacing:0.04em;
+  color:var(--ink-3);
+}
+.qss-status .key { color:var(--ink-3); }
+.qss-status .val { color:var(--ink-1); font-weight:700; }
+.qss-status .val.cu { color:var(--copper); }
+.qss-status .sep { color:var(--ink-4); }
+.qss-status .live { color:var(--gn); font-weight:800; }
+.qss-status .stale { color:var(--amb); font-weight:800; }
+
+/* Empty state */
+.qss-rh-empty {
+  padding:40px 16px;
+  text-align:center;
+  color:var(--ink-3);
+  font:500 12px var(--sans);
+}
+.qss-rh-empty b { display:block; color:var(--ink-1); margin-bottom:6px; font-size:14px; }
+</style>
+</head>
+<body>
+
+<div class="qss-shell">
+
+  <!-- TITLE BAR -->
+  <div class="qss-titlebar">
+    <span class="qss-status-dot"></span>
+    <span class="qss-tb-title">Signal Scanner</span>
+    <span class="qss-tb-mode">▶ PAPER MODE</span>
+    <span class="qss-tb-sep">·</span>
+    <span class="qss-tb-meta">Risk-On Choppy · BUY min 72 · max 70% deploy</span>
+    <span class="qss-tb-spacer"></span>
+    <span class="qss-tb-ts">22:43:31 PT · LIVE</span>
+  </div>
+
+  <!-- TAB STRIP -->
+  <div class="qss-tabs">
+    <div class="qss-tab on">SCANNER <span class="ct">2603</span></div>
+    <div class="qss-tab">TOP PICKS <span class="ct">7</span></div>
+    <div class="qss-tab">FRESH <span class="ct">15</span></div>
+    <div class="qss-tab">EARNINGS <span class="ct">43</span></div>
+    <div class="qss-tab">SURGES <span class="ct">29</span></div>
+    <div class="qss-tab">AI EDGE <span class="ct">5</span></div>
+    <div class="qss-tab">KILLED <span class="ct">107</span></div>
+  </div>
+
+  <!-- QUICK FILTER ROW -->
+  <div class="qss-quickfilt">
+    <span class="qss-qf-pill on">★ TOP 20% SCORE</span>
+    <span class="qss-qf-pill">🔥 BREAKOUT</span>
+    <span class="qss-qf-pill">⚡ T1 CATALYST</span>
+    <span class="qss-qf-pill">📊 ER ≤14d</span>
+    <span class="qss-qf-pill">💰 INSIDER</span>
+    <span class="qss-qf-pill">⭐ MY WATCHLIST</span>
+    <span class="qss-qf-pill">🔥 RVOL ≥1.5×</span>
+  </div>
+
+  <!-- FILTER BAR -->
+  <div class="qss-filt">
+    <span><span class="ct">15</span> picks</span>
+    <span class="sep">·</span>
+    <span>Sort: <span class="cu">Score desc ▼</span></span>
+    <span class="sep">·</span>
+    <span class="qss-pill on">BUY</span>
+    <span class="qss-pill">WATCH</span>
+    <span class="qss-pill">SHORT</span>
+    <span class="sep">·</span>
+    <span>Sector: <span class="cu">All ▼</span></span>
+    <span class="sep">·</span>
+    <span>Setup: <span class="cu">All ▼</span></span>
+    <span style="flex:1"></span>
+    <input class="qss-search" placeholder="⌕ search ticker">
+    <button class="qss-btn gray">⚙ COLUMNS</button>
+    <button class="qss-btn gray">💾 SAVE VIEW</button>
+    <button class="qss-btn">+ MONITOR</button>
+    <button class="qss-btn gray">⬇ EXPORT</button>
+  </div>
+
+  <!-- MAIN -->
+  <div class="qss-main">
+
+    <!-- LEFT: SCANNER TABLE -->
+    <div class="qss-left">
+      <div class="qss-tbl-wrap">
+        <table class="qss-tbl">
+          <thead><tr>
+            <th class="col-chk">☐</th>
+            <th class="col-tk l">TICKER</th>
+            <th class="l" title="Company name">NAME</th>
+            <th class="l" title="GICS sector">SECTOR</th>
+            <th title="5-pillar composite score (0-100)">SCORE</th>
+            <th title="System recommendation">VERDICT</th>
+            <th class="l" title="Conviction tier (T1/T2/T3)">TIER</th>
+            <th class="l" title="Setup family classification">SETUP</th>
+            <th class="l" title="Entry quality vs pivot">EQ</th>
+            <th class="l" title="Catalyst tier (T1=direct alpha)">CAT</th>
+            <th title="Last price">PRICE</th>
+            <th title="Today's % change">%CHG</th>
+            <th title="Reward:Risk ratio">R:R</th>
+            <th title="Stop / Entry / T1 / T2">PLAN</th>
+            <th title="Average True Range (14d)">ATR</th>
+            <th title="Relative volume vs 20d avg">RVOL</th>
+            <th title="Relative Strength rank (1-100)">RS</th>
+            <th title="Setup Wilson 95% lower bound hit-rate">W% LB</th>
+            <th title="Setup sample size (last 90d)">N</th>
+            <th title="Setup profit factor">PF</th>
+            <th title="Implied volatility rank">IV%</th>
+            <th title="News sentiment (-1 to +1)">SENT</th>
+            <th title="Days to earnings">ER</th>
+            <th class="l" title="Active catalyst icons">SIGNALS</th>
+            <th class="l" title="8-day price spark">SPARK</th>
+          </tr></thead>
+          <tbody id="qss-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- RIGHT PANE -->
+    <div class="qss-right" id="qss-right"></div>
+
+  </div>
+
+  <!-- STATUS BAR -->
+  <div class="qss-status">
+    <span><span class="key">Last update</span> <span class="val">22:43:31 PT</span></span>
+    <span class="sep">·</span>
+    <span><span class="val">2603</span> <span class="key">universe</span></span>
+    <span class="sep">·</span>
+    <span><span class="val cu">15</span> <span class="key">picks visible</span></span>
+    <span class="sep">·</span>
+    <span><span class="val">593</span> <span class="key">universe</span></span>
+    <span class="sep">·</span>
+    <span><span class="val">5</span> <span class="key">long</span> · <span class="val">5</span> <span class="key">short</span> · <span class="val">67</span> <span class="key">watch</span></span>
+    <span style="flex:1"></span>
+    <span class="live">● LIVE</span>
+    <span class="sep">·</span>
+    <span class="live">CONNECTED</span>
+  </div>
+
+</div>
+
+<script>
+// Mock data — full Signal Scanner column set (kairos production fields)
+// [tk, name, sec, score, verd, tier, setup, eq, cat, px, chg, rr, stop, t1, t2, atr, rvol, rs, wr, n, pf, ivr, sent, er, signals, ohlc]
+const PICKS = [
+  ['IONQ','IonQ Inc','Technology',100,'BUY','T1','Breakout','FRESH','T1',63.64,0.00,4.2,60.50,69.34,75.22,1.85,1.8,95,0.64,42,2.4,38,+0.42,null,['BO','UOA','RVOL'],[55,58,57,60,62,61,63,64]],
+  ['CORZ','Core Scientific','Technology',98,'BUY','T1','VCP','FRESH','T1',25.26,0.00,3.8,24.05,28.06,30.85,0.68,2.1,92,0.58,38,2.1,52,+0.38,null,['VCP','RVOL','INS'],[22,23,22,24,25,24,25,25]],
+  ['PTRN','Patterson','Technology',97,'BUY','T1','Breakout','PULLBACK','T1',18.22,0.00,3.5,17.45,20.12,22.05,0.42,1.6,89,0.62,30,1.9,29,+0.18,null,['BO','RVOL'],[16,17,17,18,17,18,18,18]],
+  ['SOXX','iShares Semi','Technology',88,'BUY','T2','Trend Cont','VALID','T2',537.33,0.00,3.2,520.00,560.00,580.00,7.20,1.3,85,0.71,55,2.8,18,+0.22,null,['TC'],[510,515,520,525,530,532,535,537]],
+  ['KFY','Korn Ferry','Industrials',70,'BUY','T2','Pullback','PULLBACK','T2',68.03,0.00,2.8,65.20,72.50,75.80,1.65,1.1,78,0.55,24,1.7,45,+0.08,23,['PB','ER'],[65,66,67,66,67,68,67,68]],
+  ['ANET','Arista Networks','Technology',32,'WATCH','T3','Failed BO','EXTENDED','T3',154.03,3.66,1.2,148.50,160.00,165.00,3.20,0.84,75,0.42,18,1.1,28,-0.12,null,[],[148,150,152,150,151,153,152,154]],
+  ['AOSL','Alpha & Omega Semi','Technology',27,'WATCH','T3','Pullback','PULLBACK','T3',41.72,6.67,2.68,40.10,46.20,48.50,1.05,0.83,100,0.48,15,1.3,65,+0.05,null,['PB'],[38,39,40,40,41,40,41,42]],
+  ['APA','APA Corp','Energy',18,'WATCH','WATCH','Trend Cont','VALID','T3',38.80,1.20,2.49,37.20,42.30,45.10,0.95,0.56,100,0.52,22,1.5,40,-0.05,18,['ER'],[36,37,37,38,38,38,38,39]],
+  ['APP','AppLovin','Communication Services',18,'WATCH','WATCH','Base','VALID','T3',481.68,-0.87,0.21,470.00,500.00,520.00,9.40,0.82,82,0.45,20,1.2,55,-0.18,23,['ER'],[490,488,485,483,485,480,482,482]],
+  ['ARX','ARC Resources','Financial Services',39,'WATCH','T3','Trend Cont','VALID','T3',17.25,1.53,1.30,16.50,18.60,19.40,0.38,1.11,100,0.58,15,1.6,32,+0.10,null,['TC'],[16,16,17,17,17,17,17,17]],
+  ['NVDA','NVIDIA','Technology',92,'BUY','T1','Squeeze Exp','FRESH','T1',128.40,1.85,4.2,122.50,135.20,142.80,3.20,1.93,99,0.68,60,2.6,72,+0.48,18,['SQZ','UOA','RVOL','ER'],[120,122,124,123,126,127,128,128]],
+  ['META','Meta Platforms','Communication Services',87,'BUY','T1','EMA21 Pull','PULLBACK','T2',512.30,-0.42,3.6,500.00,535.00,558.00,9.80,1.45,91,0.62,42,2.3,38,+0.32,9,['PB','ER'],[500,505,508,510,508,512,510,512]],
+  ['LLY','Eli Lilly','Healthcare',81,'BUY','T2','Trend Cont','VALID','T2',758.20,2.10,3.1,740.00,795.00,825.00,12.50,1.22,87,0.65,48,2.2,28,+0.22,31,['TC'],[740,745,750,748,755,752,758,758]],
+  ['CRWD','CrowdStrike','Technology',76,'BUY','T2','VCP','PULLBACK','T2',315.40,0.85,3.3,308.00,332.00,348.00,6.80,1.31,82,0.58,32,2.0,48,+0.18,14,['VCP'],[305,308,310,309,313,312,314,315]],
+  ['PLTR','Palantir','Technology',74,'BUY','T2','52w BO','FRESH','T1',27.20,5.10,3.6,25.80,30.20,32.50,0.85,2.45,95,0.71,38,2.4,68,+0.42,21,['BO','RVOL','INS','SOC'],[22,23,24,24,25,26,27,27]],
+];
+
+function scoreColor(s) {
+  if (s >= 80) return 'var(--gn)';
+  if (s >= 60) return 'var(--amb)';
+  if (s >= 40) return 'var(--ink-2)';
+  return 'var(--rd)';
+}
+
+function erClass(d) {
+  if (d == null) return 'far';
+  if (d <= 3) return 'urgent';
+  if (d <= 7) return 'soon';
+  if (d <= 21) return 'safe';
+  return 'far';
+}
+
+function spark(values, width=80, height=22) {
+  if (!values || values.length < 2) return '';
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const span = (hi - lo) || 1;
+  const stepX = width / (values.length - 1);
+  const pts = values.map((v,i) => `${(i*stepX).toFixed(1)},${(height - 2 - ((v-lo)/span)*(height-4)).toFixed(1)}`).join(' ');
+  const color = values[values.length-1] > values[0] ? 'var(--gn)' : 'var(--rd)';
+  return `<svg class="qss-spark" viewBox="0 0 ${width} ${height}">
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5"/>
+  </svg>`;
+}
+
+let selectedIdx = 0;
+
+function renderRow(p, idx) {
+  const [tk,name,sec,score,verd,tier,setup,eq,cat,px,chg,rr,stop,t1,t2,atr,rvol,rs,wr,n,pf,ivr,sent,er,signals,ohlc] = p;
+  const chgCls = chg > 0 ? 'gn' : chg < 0 ? 'rd' : 'dim';
+  const rvolCls = rvol >= 1.5 ? 'gn' : rvol >= 1.0 ? 'amb' : 'dim';
+  const rrCls = rr >= 3 ? 'gn' : rr >= 2 ? 'amb' : 'rd';
+  const wrCls = wr >= 0.55 ? 'gn' : wr >= 0.45 ? 'amb' : 'rd';
+  const pfCls = pf >= 2.0 ? 'gn' : pf >= 1.5 ? 'amb' : 'rd';
+  const ivCls = ivr <= 30 ? 'gn' : ivr >= 70 ? 'rd' : 'dim';
+  const sentCls = sent > 0.2 ? 'gn' : sent < -0.1 ? 'rd' : 'dim';
+  const catCls = cat === 'T1' ? 'cu' : cat === 'T2' ? 'gn' : 'amb';
+  const signalIcons = (signals||[]).map(s => {
+    const m = {BO:'🔥',UOA:'⚡',RVOL:'📊',VCP:'◇',INS:'💰',SQZ:'⊙',ER:'📅',PB:'↘',TC:'↑',SOC:'💬'};
+    return `<span title="${s}" style="margin-right:2px">${m[s]||s}</span>`;
+  }).join('');
+  return `<tr data-idx="${idx}" class="${idx===selectedIdx?'sel':''}" onclick="selectRow(${idx})">
+    <td class="col-chk"><input type="checkbox" style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td>
+    <td class="col-tk l">★ ${tk}</td>
+    <td class="l dim" style="font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;">${name}</td>
+    <td class="l dim" style="font-size:11px;">${sec}</td>
+    <td><span class="qss-score"><span class="fill" style="width:${score}%;background:${scoreColor(score)}"></span><span class="lbl">${score}</span></span></td>
+    <td><span class="qss-verd ${verd}">${verd}</span></td>
+    <td class="l"><span class="qss-tier ${tier}">${tier}</span></td>
+    <td class="l"><span class="qss-setup">${setup}</span></td>
+    <td class="l"><span class="qss-eq ${eq}">${eq}</span></td>
+    <td class="l ${catCls}" style="font-weight:800;font-size:10px;">${cat}</td>
+    <td>$${px.toFixed(2)}</td>
+    <td class="${chgCls}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</td>
+    <td class="${rrCls}">${rr.toFixed(1)}</td>
+    <td style="font-size:10px;color:var(--ink-2)"><span class="rd">$${stop.toFixed(0)}</span>·<span class="gn">$${t1.toFixed(0)}</span>·<span class="gn">$${t2.toFixed(0)}</span></td>
+    <td>${atr.toFixed(2)}</td>
+    <td class="${rvolCls}">${rvol.toFixed(2)}×</td>
+    <td>${rs}</td>
+    <td class="${wrCls}">${(wr*100).toFixed(0)}%</td>
+    <td class="dim">${n}</td>
+    <td class="${pfCls}">${pf.toFixed(1)}</td>
+    <td class="${ivCls}">${ivr}</td>
+    <td class="${sentCls}">${sent >= 0 ? '+' : ''}${sent.toFixed(2)}</td>
+    <td>${er!=null ? `<span class="qss-er ${erClass(er)}">${er}d</span>` : '<span class="dim">—</span>'}</td>
+    <td class="l" style="font-size:14px;">${signalIcons||'<span class="dim">—</span>'}</td>
+    <td class="l">${spark(ohlc)}</td>
+  </tr>`;
+}
+
+function renderTable() {
+  document.getElementById('qss-tbody').innerHTML = PICKS.map((p,i) => renderRow(p,i)).join('');
+}
+
+function selectRow(idx) {
+  selectedIdx = idx;
+  renderTable();
+  renderRight();
+}
+
+function renderRight() {
+  const p = PICKS[selectedIdx];
+  const [tk,name,sec,score,verd,tier,setup,eq,cat,px,chg,rr,stop,t1,t2,atr,rvol,rs,wr,n,pf,ivr,sent,er,signals,ohlc] = p;
+  const chgCls = chg > 0 ? 'gn' : chg < 0 ? 'rd' : '';
+  const entry = px;
+  const shares = Math.floor(1000 / entry);
+  // Synthesize SMC zones based on price
+  const obTop = (entry * 0.99).toFixed(2);
+  const obBot = (entry * 0.97).toFixed(2);
+  const fvgLo = (entry * 1.015).toFixed(2);
+  const fvgHi = (entry * 1.028).toFixed(2);
+  const bsl = (entry * 1.04).toFixed(2);
+  document.getElementById('qss-right').innerHTML = `
+    <div class="qss-rh">
+      <div class="qss-rh-row1">
+        <span class="qss-rh-tkr">${tk}</span>
+        <span class="qss-rh-name">${name}</span>
+      </div>
+      <div class="qss-rh-sec">${sec}</div>
+      <div class="qss-rh-px">
+        <span class="px">$${px.toFixed(2)}</span>
+        <span class="chg ${chgCls}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</span>
+        <span class="qss-verd ${verd}">${verd}</span>
+        <span class="qss-tier ${tier}">${tier}</span>
+      </div>
+    </div>
+
+    <div class="qss-rchart">
+      <div class="qss-rsect-h">8-Day Trail</div>
+      <svg viewBox="0 0 400 120" preserveAspectRatio="none">
+        ${(() => {
+          const lo = Math.min(...ohlc), hi = Math.max(...ohlc);
+          const span = (hi - lo) || 1;
+          const stepX = 400 / (ohlc.length - 1);
+          const pts = ohlc.map((v,i) => `${(i*stepX).toFixed(1)},${(110 - ((v-lo)/span)*100).toFixed(1)}`);
+          return `<polyline points="${pts.join(' ')}" fill="none" stroke="var(--copper)" stroke-width="2"/>
+            ${pts.map(p => { const [x,y] = p.split(','); return `<circle cx="${x}" cy="${y}" r="2.5" fill="var(--copper)"/>`; }).join('')}`;
+        })()}
+      </svg>
+    </div>
+
+    <div class="qss-rsect">
+      <div class="qss-rsect-h">Setup · ${setup} <span class="meta">${eq} entry quality</span></div>
+      <div class="qss-cats">
+        <span class="qss-cat ${tier==='T1'?'cu':'amb'}">${tier} CONVICTION</span>
+        <span class="qss-cat gn">${eq}</span>
+        ${rvol >= 1.5 ? '<span class="qss-cat gn">🔥 RVOL ' + rvol.toFixed(1) + '×</span>' : ''}
+        ${rs >= 90 ? '<span class="qss-cat cu">★ RS ' + rs + '</span>' : ''}
+        ${er!=null && er<=14 ? '<span class="qss-cat amb">📊 ER ' + er + 'd</span>' : ''}
+      </div>
+    </div>
+
+    <div class="qss-rsect">
+      <div class="qss-rsect-h">Quick Stats</div>
+      <div class="qss-rstat-grid">
+        <div class="qss-rstat"><span class="k">Score</span><span class="v ${score>=80?'gn':score>=60?'amb':''}">${score}</span></div>
+        <div class="qss-rstat"><span class="k">R:R</span><span class="v ${rr>=3?'gn':rr>=2?'amb':'rd'}">${rr.toFixed(1)}:1</span></div>
+        <div class="qss-rstat"><span class="k">RVOL</span><span class="v ${rvol>=1.5?'gn':''}">${rvol.toFixed(2)}×</span></div>
+        <div class="qss-rstat"><span class="k">RS Rank</span><span class="v ${rs>=90?'cu':''}">${rs}</span></div>
+        <div class="qss-rstat"><span class="k">Sector</span><span class="v" style="font-size:11px">${sec.split(' ')[0]}</span></div>
+        <div class="qss-rstat"><span class="k">ER Days</span><span class="v ${er!=null && er<=7?'amb':''}">${er!=null?er+'d':'—'}</span></div>
+      </div>
+    </div>
+
+    <div class="qss-rsect">
+      <div class="qss-rsect-h">SMC Zones <span class="meta">order block + FVG context</span></div>
+      <div class="qss-plan">
+        <span class="k">Bull OB</span><span class="v gn">$${obBot} – $${obTop}</span>
+        <span class="k">FVG unfilled</span><span class="v amb">$${fvgLo} – $${fvgHi}</span>
+        <span class="k">BSL sweep</span><span class="v">$${bsl} (3d ago)</span>
+        <span class="k">Structure</span><span class="v gn">HH/HL · no CHoCH</span>
+        <span class="k">Last test</span><span class="v">OB held 2d ago</span>
+      </div>
+    </div>
+
+    <div class="qss-rsect">
+      <div class="qss-rsect-h">Entry Triggers <span class="meta">if-then rules</span></div>
+      <div style="font:500 11.5px var(--mono);color:var(--ink-1);line-height:1.7;">
+        <div style="margin-bottom:6px;"><span style="color:var(--gn);font-weight:800;">▶ PRIMARY:</span> break <b style="color:var(--ink)">$${(entry*1.005).toFixed(2)}</b> + RVOL >1.2× → <span class="qss-verd BUY">BUY 100% size</span></div>
+        <div style="margin-bottom:6px;"><span style="color:var(--amb);font-weight:800;">▶ SECONDARY:</span> pullback to <b>$${obTop}</b> (OB top) → <span class="qss-verd WATCH">BUY 50% size</span></div>
+        <div style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:6px;color:var(--rd);"><span style="font-weight:800;">✗ FALSIFICATION:</span> close below <b>$${obBot}</b> → thesis dead, no re-entry</div>
+        <div><span style="color:var(--ink-3);font-weight:700;">⏱ TIME STOP:</span> exit by <b>D+5</b> if T1 not hit (2026-05-31)</div>
+      </div>
+    </div>
+
+    <div class="qss-rsect">
+      <div class="qss-rsect-h">Hold Horizon <span class="meta">${setup} — typical 5d swing</span></div>
+      <div class="qss-plan">
+        <span class="k">Max hold</span><span class="v">D+5 · 2026-05-31</span>
+        <span class="k">Mid-trade check</span><span class="v">D+2 (trim if no progress)</span>
+        <span class="k">Exit by</span><span class="v">4pm Fri 2026-05-30</span>
+        <span class="k">Pyramid point</span><span class="v gn">$${(entry*1.025).toFixed(2)} (+2.5%)</span>
+        <span class="k">First scale-out</span><span class="v gn">$${t1.toFixed(2)} (50% off)</span>
+      </div>
+    </div>
+
+    <div class="qss-rsect">
+      <div class="qss-rsect-h">Setup Stats · ${setup} <span class="meta">Wilson 95% LB · last 90d</span></div>
+      <div class="qss-rstat-grid">
+        <div class="qss-rstat"><span class="k">Sample n</span><span class="v">${n}</span></div>
+        <div class="qss-rstat"><span class="k">Wilson LB</span><span class="v ${wr>=0.55?'gn':wr>=0.45?'amb':'rd'}">${(wr*100).toFixed(0)}%</span></div>
+        <div class="qss-rstat"><span class="k">Profit Factor</span><span class="v ${pf>=2?'gn':pf>=1.5?'amb':'rd'}">${pf.toFixed(2)}</span></div>
+        <div class="qss-rstat"><span class="k">Avg R-mult</span><span class="v gn">+${(pf*0.65).toFixed(1)}R</span></div>
+        <div class="qss-rstat"><span class="k">Regime fit</span><span class="v gn">✓ Choppy</span></div>
+        <div class="qss-rstat"><span class="k">Edge decay</span><span class="v">stable 8w</span></div>
+      </div>
+    </div>
+
+    <div class="qss-rsect">
+      <div class="qss-rsect-h">Earnings History <span class="meta">last 4 quarters</span></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font:500 10.5px var(--mono);">
+        <div style="padding:8px 6px;background:var(--gn-bg);border-radius:3px;text-align:center;border-left:2px solid var(--gn);"><div style="font-weight:800;color:var(--gn);">Q4 25</div><div style="color:var(--ink);margin-top:2px;">BEAT +12%</div><div style="color:var(--gn);margin-top:2px;">+4.8%</div></div>
+        <div style="padding:8px 6px;background:var(--gn-bg);border-radius:3px;text-align:center;border-left:2px solid var(--gn);"><div style="font-weight:800;color:var(--gn);">Q3 25</div><div style="color:var(--ink);margin-top:2px;">BEAT +8%</div><div style="color:var(--gn);margin-top:2px;">+2.1%</div></div>
+        <div style="padding:8px 6px;background:var(--rd-bg);border-radius:3px;text-align:center;border-left:2px solid var(--rd);"><div style="font-weight:800;color:var(--rd);">Q2 25</div><div style="color:var(--ink);margin-top:2px;">MISS −2%</div><div style="color:var(--rd);margin-top:2px;">−6.4%</div></div>
+        <div style="padding:8px 6px;background:var(--gn-bg);border-radius:3px;text-align:center;border-left:2px solid var(--gn);"><div style="font-weight:800;color:var(--gn);">Q1 25</div><div style="color:var(--ink);margin-top:2px;">BEAT +5%</div><div style="color:var(--gn);margin-top:2px;">+1.3%</div></div>
+      </div>
+      ${er!=null ? `<div style="margin-top:8px;font:600 11px var(--mono);color:var(--ink-2);">Next: <b style="color:var(--copper);">D+${er}</b> · implied move <b class="amb">±5.2%</b></div>` : '<div style="margin-top:8px;font:600 11px var(--mono);color:var(--ink-3);">No earnings in next 30 days</div>'}
+    </div>
+
+    <div class="qss-rsect">
+      <div class="qss-rsect-h">Options Skew <span class="meta">30d expiry</span></div>
+      <div class="qss-rstat-grid">
+        <div class="qss-rstat"><span class="k">IV Rank</span><span class="v ${ivr<=30?'gn':ivr>=70?'rd':''}">${ivr} (${ivr<=30?'CHEAP':ivr>=70?'RICH':'MID'})</span></div>
+        <div class="qss-rstat"><span class="k">Put/Call</span><span class="v ${ivr<0.7?'gn':ivr>1.2?'rd':''}">0.62</span></div>
+        <div class="qss-rstat"><span class="k">Implied move</span><span class="v">±5.4%</span></div>
+        <div class="qss-rstat"><span class="k">UOA</span><span class="v cu">CALL $185 · 3.2× avg</span></div>
+        <div class="qss-rstat"><span class="k">Skew</span><span class="v gn">−1.2 (calls richer)</span></div>
+        <div class="qss-rstat"><span class="k">Max pain</span><span class="v">$${(entry*0.98).toFixed(0)}</span></div>
+      </div>
+    </div>
+
+    <div class="qss-rsect">
+      <div class="qss-rsect-h">Smart Money · 90d <span class="meta">insider + institutional</span></div>
+      <div class="qss-plan">
+        <span class="k">Insider buys</span><span class="v gn">4 transactions · $2.4M</span>
+        <span class="k">Insider sells</span><span class="v">0</span>
+        <span class="k">Cluster timing</span><span class="v cu">★ TIGHT (within 14d)</span>
+        <span class="k">Latest</span><span class="v">CFO bought $850K · 2026-05-20</span>
+        <span class="k">Inst ownership Δ</span><span class="v gn">+2.4% last quarter</span>
+        <span class="k">Short interest</span><span class="v amb">8.4% float · 3.2 days to cover</span>
+      </div>
+    </div>
+
+    <div class="qss-rsect">
+      <div class="qss-rsect-h">Portfolio Impact <span class="meta">if adding ${shares} sh</span></div>
+      <div class="qss-plan">
+        <span class="k">Total exposure</span><span class="v">$${(shares*entry).toFixed(0)} (${((shares*entry)/100000).toFixed(1)}% of $100K)</span>
+        <span class="k">Sector weight</span><span class="v amb">${sec.split(' ')[0]} 32% → 36%</span>
+        <span class="k">Correlation Δ</span><span class="v gn">0.42 → 0.45 (diversified)</span>
+        <span class="k">β-adjusted size</span><span class="v">${(shares*1.05).toFixed(0)} sh</span>
+        <span class="k">Single-name cap</span><span class="v gn">✓ within 10% limit</span>
+        <span class="k">Risk budget used</span><span class="v">${((shares*atr)/2500*100).toFixed(1)}% of monthly</span>
+      </div>
+    </div>
+
+    <div class="qss-rsect">
+      <div class="qss-rsect-h">News (3) <span class="meta">last 24h · sentiment ${sent>=0?'+':''}${sent.toFixed(2)}</span></div>
+      <ul class="qss-news-list">
+        <li>${tk} reports strong Q4 earnings beat, raises FY guidance<span class="src">Reuters · 2h ago</span></li>
+        <li>Analysts upgrade ${tk} to Strong Buy on AI accelerator demand<span class="src">Barron's · 6h ago</span></li>
+        <li>${tk} insider purchases $2.4M in shares, second cluster this month<span class="src">SEC Form 4 · 1d ago</span></li>
+      </ul>
+    </div>
+
+    <div class="qss-ractions">
+      <button>★ Add to Monitor</button>
+      <button class="primary">💵 PAPER · BUY ${shares} sh @ $${px.toFixed(2)}</button>
+      <button>📋 Open Full Detail</button>
+      <button>🔍 Run Backtest on This Setup</button>
+      <button>📝 Add Trade Journal Note</button>
+    </div>
+  `;
+}
+
+renderTable();
+renderRight();
+</script>
+
+</body>
+</html>

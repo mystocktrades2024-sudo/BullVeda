@@ -575,7 +575,7 @@ def run_daily_scan(force_fresh: bool = False):
             _hours_stale = (datetime.now(_last_bar.tz) - _last_bar).total_seconds() / 3600 if getattr(_last_bar, "tz", None) else (datetime.now() - _last_bar.to_pydatetime()).total_seconds() / 3600
             _wd = datetime.now().weekday()  # 0=Mon..6=Sun
             # Max acceptable staleness: weekends/Mon allow 96h (Fri close → Mon pre-market)
-            _max_stale = 120  # TEMP 2026-05-27: bumped for post-holiday Tuesday; revert after verification
+            _max_stale = 96 if _wd in (0, 5, 6) else (96 if _market_open is False else 48)
             if _hours_stale > _max_stale:
                 log.error(f"  🔴 DATA FRESHNESS: SPY last bar is {_hours_stale:.0f}h old (max {_max_stale}h) — aborting scan, check Polygon")
                 raise RuntimeError(f"Data >{_max_stale}h stale")

@@ -7,7 +7,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Inter (body text) + JetBrains Mono (tabular labels). Aptos used locally
      when the user has it installed (Office 365), otherwise Inter is the look. -->
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- display=optional (2026-05-28 · CLS fix): with `swap`, the 175kB of web
+     fonts arrive ~5-6s in and reflow the ENTIRE page (serif↔sans metric
+     deltas) → CLS 0.74. `optional` blocks ~100ms then locks the fallback for
+     the whole session if the font isn't ready — no late swap, no reflow.
+     Dashboard prioritizes zero layout-shift over guaranteed web-font render. -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=optional" rel="stylesheet">
 <style>
 /*
  * Kairos · pure terminal dashboard — matches the user's reference (Image 3 / 4).
@@ -23,21 +28,21 @@
   font-family: 'Aptos';
   font-weight: 400;
   font-style: normal;
-  font-display: swap;
+  font-display: optional;
   src: local('Aptos'), local('Aptos Regular');
 }
 @font-face {
   font-family: 'Aptos';
   font-weight: 700;
   font-style: normal;
-  font-display: swap;
+  font-display: optional;
   src: local('Aptos Bold');
 }
 @font-face {
   font-family: 'Aptos';
   font-weight: 600;
   font-style: normal;
-  font-display: swap;
+  font-display: optional;
   src: local('Aptos SemiBold'), local('Aptos Semibold');
 }
 
@@ -322,7 +327,7 @@ body.light .schwab-auth-banner .sab-cmd { background: #e0e3de; color: #181c17; b
 html, body { font-family: var(--sans); }
 
 /* Big Kairos brand bar — top of page, always visible */
-@import url('https://fonts.googleapis.com/css2?family=GT+Sectra:wght@500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=GT+Sectra:wght@500&display=optional');
 .brandbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 28px 12px;
@@ -12335,9 +12340,19 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
 (async function wire() {
   let data = null, tickers = null;
   try {
-    const r1 = await fetch('/v2/data.json');
-    if (r1.ok) data = await r1.json();
-  } catch (e) { console.warn('data.json fetch failed:', e); }
+    // PERF #3 (2026-05-27): boot from the SLIM critical bundle (6.7MB) which
+    // stubs the heavy workspace keys (killed/performance/screener/medium_term/
+    // long_term ≈ 20.6MB). Those stubs are force-filled by the background
+    // sidecar/chunk load (window.__sidecarReady) after home renders. Critical
+    // path data payload: 28MB → 6.7MB. Falls back to full data.json if the
+    // critical bundle hasn't been built yet (older scans).
+    let r1 = await fetch('/v2/data.critical.json');
+    if (r1.ok) { data = await r1.json(); window._bootedFromCritical = true; }
+    else {
+      r1 = await fetch('/v2/data.json');
+      if (r1.ok) data = await r1.json();
+    }
+  } catch (e) { console.warn('data bootstrap fetch failed:', e); }
 
   // ─── Sidecar merge (2026-05-25 · workspace-data-binding sweep) ────────
   // Many V3_WORKSPACES read d.X paths that only live in sidecar bundles.
@@ -12345,7 +12360,16 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
   // and surface them under canonical aliases so renderers don't need to
   // know which file the data came from. window.__sidecarCache holds the
   // raw payloads for any consumer that wants the originals.
-  try {
+  // 2026-05-27 · PERF — sidecar bundles (~22MB: signals_ext 9.3, killed 4.9,
+  // perf 4.6, screener 2.2, + 5 small) used to be `await`ed on the boot
+  // critical path, blocking home render by ~22MB of download+parse. NONE of
+  // them feed the Home dashboard — each feeds ONE workspace (crypto→Crypto,
+  // killed→Killed, perf→Performance, screener→Screener, etc.). Now loaded in
+  // the BACKGROUND after first render; when they arrive we merge into `data`
+  // and repaint the active workspace if the user is sitting on a tab that
+  // needs them. Boot critical path drops from ~56MB → ~34MB.
+  window.__sidecarReady = (async () => {
+   try {
     const _sc = (url) => fetch(url, { cache: 'no-store' })
       .then(r => r.ok ? r.json() : null).catch(() => null);
     const [sCrypto, sPerf, sScreener, sKilled, sSigExt, sMisc, sOpt, sSetup, sEarn] = await Promise.all([
@@ -12372,6 +12396,29 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
       const val = sidecarKey ? payload[sidecarKey] : payload;
       if (_has(val) && !_has(data[key])) data[key] = val;
     };
+    // When booted from the slim critical bundle, the heavy workspace keys are
+    // present as STUBS (killed:[], performance:{total:N}, screener:[], etc.).
+    // Those must be FORCE-overwritten by the real chunk — the "only if missing"
+    // _adopt guard would skip performance:{total:N} since it has a key. So for
+    // the 5 chunked keys we overwrite unconditionally whenever the chunk has data.
+    const _force = (key, sidecarKey, payload) => {
+      if (!payload) return;
+      const val = sidecarKey ? payload[sidecarKey] : payload;
+      if (_has(val)) data[key] = val;  // overwrite stub with real chunk
+    };
+    if (window._bootedFromCritical) {
+      _force('killed', 'killed', sKilled);
+      _force('performance', 'performance', sPerf);
+      _force('screener', 'screener', sScreener);
+      _force('short_term', 'short_term', sSigExt);   // PERF #4 — was full in critical
+      _force('medium_term', 'medium_term', sSigExt);
+      _force('long_term', 'long_term', sSigExt);
+      // Refresh thesis sidebar count now that short_term is populated
+      try {
+        const _th = document.getElementById('sb-thesis');
+        if (_th && Array.isArray(data.short_term)) _th.textContent = data.short_term.filter(t => t.thesis_card).length;
+      } catch (_) {}
+    }
     // primary sidecar → data.X promotions (only when missing in main)
     _adopt('crypto', 'crypto', sCrypto);
     _adopt('performance', 'performance', sPerf);
@@ -12418,10 +12465,18 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
     }
     console.log('[sidecar-merge] adopted',
       Object.entries(window.__sidecarCache).filter(([,v]) => v).map(([k]) => k).join(', ') || 'none');
+    // Repaint the active workspace if the user is sitting on a sidecar-fed tab.
+    // Home (dash) + detail never need sidecars, so skip the repaint for them.
+    const _ak = window._v3ActiveKey;
+    const _sidecarTabs = ['crypto','performance','screener','killed','research','earnings','optionsflow','strategies'];
+    if (_ak && _sidecarTabs.indexOf(_ak) !== -1 && typeof window._v3SwitchTo === 'function') {
+      try { window._v3SwitchTo(_ak); } catch (_) {}
+    }
   } catch (e) {
     console.warn('[sidecar-merge] failed:', e);
     window.__sidecarCache = window.__sidecarCache || {};
   }
+  })();  // end background sidecar load (non-blocking)
 
   try {
     // 2026-05-25 · Lazy-load architecture
@@ -22993,18 +23048,36 @@ const QuantPortfolio = (function() {
     const ss = data.system_status || {};
     const cb = ss.circuit_breaker || {};
 
-    // Action queue
+    // Action queue — 2026-05-27 · direction-aware, computed live from price.
+    // Was long-only (NEM short falsely flagged STOP NEAR) and trusted possibly-
+    // stale *_hit flags. Now computes level-crossings from current_price with
+    // correct sign per direction. Note: position.stop may be a synthetic 3%
+    // placeholder if the real Alpaca bracket stop hasn't been synced — the
+    // detail line shows last vs stop so the user can sanity-check.
     const actions = [];
     positions.forEach(p => {
-      if (p.stop_hit) actions.push({ pos: p, kind: 'rd', ico: '✗', sev: 1, action: 'STOP TRIGGERED · close now', detail: `Hit at $${_fmt(p.stop,2)}` });
-      else if (p.t2_hit) actions.push({ pos: p, kind: 'gn', ico: '★', sev: 2, action: 'T2 HIT · trail aggressively', detail: `Target $${_fmt(p.target2,2)} reached` });
-      else if (p.t1_hit) actions.push({ pos: p, kind: 'gn', ico: '✓', sev: 2, action: 'T1 HIT · trim ⅔ · trail rest', detail: `Target $${_fmt(p.target1,2)} reached` });
+      const isLong = (p.direction !== 'short');
+      const last = p.current_price || p.entry_price || 0;
+      const stop = p.stop || 0;
+      const t1 = p.target1 || 0;
+      const t2 = p.target2 || 0;
+      const stopHit = stop > 0 && last > 0 && (isLong ? last <= stop : last >= stop);
+      const t2Hit   = t2 > 0 && last > 0 && (isLong ? last >= t2 : last <= t2);
+      const t1Hit   = t1 > 0 && last > 0 && (isLong ? last >= t1 : last <= t1);
+      const distToStop = (last > 0 && stop > 0)
+        ? (isLong ? ((last - stop) / last) : ((stop - last) / last)) * 100
+        : 999;
+      const synthFlag = p._synthetic_stop ? ' (synthetic stop)' : '';
+      if (stopHit)
+        actions.push({ pos: p, kind: 'rd', ico: '✗', sev: 1, action: 'STOP BREACHED · close now', detail: `last $${_fmt(last,2)} ${isLong?'≤':'≥'} stop $${_fmt(stop,2)}${synthFlag}` });
+      else if (t2Hit)
+        actions.push({ pos: p, kind: 'gn', ico: '★', sev: 2, action: 'T2 HIT · trail aggressively', detail: `last $${_fmt(last,2)} ${isLong?'≥':'≤'} T2 $${_fmt(t2,2)}` });
+      else if (t1Hit)
+        actions.push({ pos: p, kind: 'gn', ico: '✓', sev: 2, action: 'T1 HIT · trim ⅔ · trail rest', detail: `last $${_fmt(last,2)} ${isLong?'≥':'≤'} T1 $${_fmt(t1,2)}` });
       else if (p.days_to_earnings != null && p.days_to_earnings >= 0 && p.days_to_earnings <= 7)
         actions.push({ pos: p, kind: 'rd', ico: '⚠', sev: 1, action: `EARNINGS T+${p.days_to_earnings}d · flatten`, detail: `House rule §03.04` });
-      else if (p.current_price && p.stop) {
-        const dist = ((p.current_price - p.stop) / p.current_price) * 100;
-        if (dist < 1.5) actions.push({ pos: p, kind: 'am', ico: '!', sev: 3, action: 'STOP NEAR · review', detail: `${_fmt(dist,1)}% from stop` });
-      }
+      else if (distToStop >= 0 && distToStop < 1.5)
+        actions.push({ pos: p, kind: 'am', ico: '!', sev: 3, action: 'STOP NEAR · review', detail: `${_fmt(distToStop,1)}% from stop${synthFlag}` });
     });
     actions.sort((a, b) => a.sev - b.sev);
 
@@ -79217,6 +79290,7 @@ function setupV3Workspaces(arr, data) {
     `;
   };
   const switchTo = (panKey) => {
+    window._v3ActiveKey = panKey;  // tracked so background sidecar load can repaint
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('on'));
     const isWorkspace = panKey !== 'dash' && panKey !== 'detail';
     document.body.classList.toggle('on-workspace', isWorkspace);

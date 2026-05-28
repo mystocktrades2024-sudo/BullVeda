@@ -9318,7 +9318,8 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
                    news_articles: list | None = None,
                    options_chain: dict | None = None,
                    df_4h: "pd.DataFrame | None" = None,
-                   df_1h: "pd.DataFrame | None" = None) -> dict:
+                   df_1h: "pd.DataFrame | None" = None,
+                   rich_fund: dict | None = None) -> dict:
     """
     Run complete analysis pipeline for a single ticker.
     Returns full result dict with gate, scores, plan, decision.
@@ -11565,6 +11566,17 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
                 else None
             )
         )(),
+        # 2026-05-27 · Rich EODHD payload: holders (top-20 inst + 20 funds),
+        # insider_transactions (20 most recent Form 4), financials_yearly
+        # (5y income/cashflow/balance summary), earnings_history (8q beat/miss),
+        # earnings_trend (analyst revisions 7/30/60/90d ago). All cached via
+        # EODHD 24h cache; no extra API cost. Consumed by Insider/Value/Earnings
+        # lens renderers in kairos.html.
+        "holders":              (rich_fund or {}).get("holders") or {},
+        "insider_transactions_detail": (rich_fund or {}).get("insider_transactions") or [],
+        "financials_yearly":    (rich_fund or {}).get("financials_yearly") or {},
+        "earnings_history_multi": (rich_fund or {}).get("earnings_history") or [],
+        "earnings_trend":       (rich_fund or {}).get("earnings_trend") or {},
         "catalyst_tags":      catalyst_tags,
         "catalyst_tier":      catalyst_tier,
         "catalyst_meta":      catalyst_meta,

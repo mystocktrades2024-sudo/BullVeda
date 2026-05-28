@@ -5320,6 +5320,149 @@ def get_market_breadth(market_data: dict, universe_filter: set | None = None) ->
 # ── Extra Fundamentals (EV/EBITDA, P/FCF, revisions, institutional, buyback) ─
 
 @_mem_cached(ttl_seconds=3600)
+def get_fundamentals_rich(ticker: str) -> dict:
+    """
+    2026-05-27 · Extract rich structured payload from EODHD fundamentals
+    that the flat `_eodhd_fundamentals_to_schwab_schema` mapper discards:
+      - holders.institutions[20]  (Vanguard, BlackRock, ..., with shares + QoQ change)
+      - holders.funds[20]         (mutual funds top-20)
+      - insider_transactions[20]  (date, ownerName, transactionCode B/S, price, acquired/disposed)
+      - financials_yearly         (5y income + cashflow + balance summary, key fields only)
+      - earnings_history[8+]      (per-quarter beat/miss/surprise %)
+      - earnings_trend            (current-quarter analyst revisions: 7/30/60/90 days ago)
+    Same `fundamentals(ticker)` call as schema mapper (24h-cached), so adds
+    zero API cost when called in the same session as get_stock_info.
+    Returns an empty {} on failure rather than raising.
+    """
+    out: dict = {"holders": {}, "insider_transactions": [], "financials_yearly": {},
+                 "earnings_history": [], "earnings_trend": {}, "error": None}
+    try:
+        import eodhd_client as _eod
+        d = _eod.fundamentals(ticker) or {}
+        if not isinstance(d, dict):
+            out["error"] = "no eodhd payload"
+            return out
+
+        # ── HOLDERS ──
+        H = d.get("Holders") or {}
+        def _holders_top(section_key: str, limit: int = 20) -> list:
+            raw = H.get(section_key) or {}
+            if not isinstance(raw, dict): return []
+            rows = []
+            for _k, v in raw.items():
+                if not isinstance(v, dict): continue
+                rows.append({
+                    "name":           v.get("name"),
+                    "date":           v.get("date"),
+                    "shares_pct":     v.get("totalShares"),       # % of float
+                    "assets_pct":     v.get("totalAssets"),       # % of holder portfolio
+                    "current_shares": v.get("currentShares"),
+                    "change_shares":  v.get("change"),
+                    "change_pct":     v.get("change_p"),
+                })
+            # Sort by shares_pct desc, take top N
+            rows.sort(key=lambda r: -(r.get("shares_pct") or 0))
+            return rows[:limit]
+        out["holders"] = {
+            "institutions": _holders_top("Institutions", 20),
+            "funds":        _holders_top("Funds", 20),
+        }
+
+        # ── INSIDER TRANSACTIONS (top-20 most recent) ──
+        IT = d.get("InsiderTransactions") or {}
+        ins_rows = []
+        for _k, v in IT.items():
+            if not isinstance(v, dict): continue
+            ins_rows.append({
+                "date":            v.get("transactionDate") or v.get("date"),
+                "owner_name":      v.get("ownerName"),
+                "owner_cik":       v.get("ownerCik"),
+                "transaction_code": v.get("transactionCode"),    # P=purchase, S=sale, M=option-exercise, etc.
+                "shares":          v.get("transactionAmount"),
+                "price":           v.get("transactionPrice"),
+                "acq_disp":        v.get("transactionAcquiredDisposed"),  # A=acquired, D=disposed
+                "post_amount":     v.get("postTransactionAmount"),
+                "sec_link":        v.get("secLink"),
+            })
+        ins_rows.sort(key=lambda r: r.get("date") or "", reverse=True)
+        out["insider_transactions"] = ins_rows[:20]
+
+        # ── FINANCIALS · 5-YEAR ANNUAL SUMMARY ──
+        F = d.get("Financials") or {}
+        def _yearly_summary(section: str, fields: list) -> dict:
+            raw = ((F.get(section) or {}).get("yearly")) or {}
+            if not isinstance(raw, dict): return {}
+            years = sorted(raw.keys(), reverse=True)[:5]
+            return {y: {k: raw[y].get(k) for k in fields if raw[y].get(k) is not None} for y in years}
+        out["financials_yearly"] = {
+            "income":  _yearly_summary("Income_Statement",
+                ["date", "totalRevenue", "grossProfit", "operatingIncome",
+                 "netIncome", "researchDevelopment", "ebitda", "eps"]),
+            "cashflow": _yearly_summary("Cash_Flow",
+                ["date", "totalCashFromOperatingActivities", "capitalExpenditures",
+                 "freeCashFlow", "dividendsPaid", "repurchaseOfStock",
+                 "totalCashFromFinancingActivities"]),
+            "balance":  _yearly_summary("Balance_Sheet",
+                ["date", "totalAssets", "totalCurrentAssets", "totalLiab",
+                 "totalCurrentLiabilities", "totalStockholderEquity",
+                 "cash", "shortLongTermDebt", "longTermDebt"]),
+        }
+
+        # ── EARNINGS HISTORY · 8 QUARTERS ──
+        eh = (d.get("Earnings") or {}).get("History") or {}
+        if isinstance(eh, dict):
+            rows = []
+            for k, v in eh.items():
+                if not isinstance(v, dict): continue
+                rows.append({
+                    "report_date":     v.get("reportDate"),
+                    "before_after":    v.get("beforeAfterMarket"),
+                    "fiscal_end":      v.get("date"),
+                    "currency":        v.get("currency"),
+                    "eps_actual":      v.get("epsActual"),
+                    "eps_estimate":    v.get("epsEstimate"),
+                    "surprise":        v.get("epsDifference"),
+                    "surprise_pct":    v.get("surprisePercent"),
+                })
+            rows.sort(key=lambda r: r.get("fiscal_end") or "", reverse=True)
+            # Filter to only quarters with actuals (drop forward placeholders)
+            rows = [r for r in rows if r.get("eps_actual") is not None][:8]
+            out["earnings_history"] = rows
+
+        # ── EARNINGS TREND · ANALYST REVISIONS (current quarter detail) ──
+        et = (d.get("Earnings") or {}).get("Trend") or {}
+        if isinstance(et, dict):
+            buckets = {}
+            for k, v in et.items():
+                if not isinstance(v, dict): continue
+                period = v.get("period")
+                if period not in ("0q", "+1q", "0y", "+1y"): continue
+                buckets[period] = {
+                    "growth":          v.get("growth"),
+                    "eps_est_avg":     v.get("earningsEstimateAvg"),
+                    "eps_est_low":     v.get("earningsEstimateLow"),
+                    "eps_est_high":    v.get("earningsEstimateHigh"),
+                    "eps_est_n_analysts": v.get("earningsEstimateNumberOfAnalysts"),
+                    "eps_trend_current": v.get("epsTrendCurrent"),
+                    "eps_trend_7d":    v.get("epsTrend7daysAgo"),
+                    "eps_trend_30d":   v.get("epsTrend30daysAgo"),
+                    "eps_trend_60d":   v.get("epsTrend60daysAgo"),
+                    "eps_trend_90d":   v.get("epsTrend90daysAgo"),
+                    "revisions_up_7d":   v.get("epsRevisionsUpLast7days"),
+                    "revisions_up_30d":  v.get("epsRevisionsUpLast30days"),
+                    "revisions_down_7d":  v.get("epsRevisionsDownLast7days"),
+                    "revisions_down_30d": v.get("epsRevisionsDownLast30days"),
+                    "rev_est_avg":     v.get("revenueEstimateAvg"),
+                    "rev_est_growth":  v.get("revenueEstimateGrowth"),
+                }
+            out["earnings_trend"] = buckets
+
+        return out
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+        return out
+
+
 def get_extra_fundamentals(ticker: str) -> dict:
     """
     Supplementary fundamental signals not in get_stock_info():
