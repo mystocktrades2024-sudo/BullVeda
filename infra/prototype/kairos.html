@@ -22628,6 +22628,338 @@ const QuantPortfolio = (function() {
   const _fmtDol = (n) => { if (n==null||isNaN(n)) return '—'; const a = Math.abs(n); const s = n<0?'-':''; return a>=1e6?s+'$'+(a/1e6).toFixed(2)+'M':a>=1e3?s+'$'+(a/1e3).toFixed(1)+'k':s+'$'+a.toFixed(0); };
   const _sign = (n) => n>0?'+':'';
 
+  // ── 2026-05-27 · Refinitiv-style stylesheet (qpfr-* namespace) ─────────
+  // Design tokens: mono numerics, greyscale chrome, red/green only for P&L,
+  // 1px borders, square corners, high-density tables. No decoration.
+  function _ensureRefinitivStyles() {
+    if (document.getElementById('qpfr-styles')) return;
+    const css = `
+      .qpfr-root { background: var(--bg-0, #070908); color: var(--ink, #ecefe9); font: 12px/1.45 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 0; min-height: 100%; }
+      .qpfr-root * { font-variant-numeric: tabular-nums; }
+
+      /* Header */
+      .qpfr-hdr { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid var(--rule, #262b2d); background: var(--bg-1, #0d1110); }
+      .qpfr-hdr-l { display: flex; align-items: baseline; gap: 14px; }
+      .qpfr-crumb { font: 700 10px var(--mono); color: var(--ink-3, #686c68); letter-spacing: 0.18em; text-transform: uppercase; }
+      .qpfr-crumb b { color: var(--cu, #d97757); }
+      .qpfr-mode { font: 700 8.5px var(--mono); padding: 2px 7px; background: var(--bg-3, #161a18); border: 1px solid var(--rule); color: var(--ink-2, #9a9e98); letter-spacing: 0.14em; }
+      .qpfr-hdr-r { display: flex; align-items: center; gap: 9px; }
+      .qpfr-live { display: inline-flex; align-items: center; gap: 4px; font: 700 9px var(--mono); color: var(--gn, #4ade80); letter-spacing: 0.10em; padding: 3px 7px; border-left: 2px solid var(--gn); background: rgba(74,222,128,0.07); }
+      .qpfr-live small { opacity: 0.65; font-weight: 600; }
+      .qpfr-stamp { font: 600 9px var(--mono); color: var(--ink-3); letter-spacing: 0.10em; }
+      .qpfr-btn { background: transparent; border: 1px solid var(--rule); color: var(--ink-2); padding: 3px 9px; font: 700 9px var(--mono); letter-spacing: 0.10em; cursor: pointer; }
+      .qpfr-btn:hover { color: var(--ink); border-color: var(--ink-3); }
+      .qpfr-btn.primary { background: var(--gn); color: #000; border-color: var(--gn); padding: 4px 11px; }
+
+      /* Account strip — single row of KPIs, no panels, no padding fluff */
+      .qpfr-strip { display: flex; flex-wrap: wrap; align-items: stretch; border-bottom: 1px solid var(--rule); background: var(--bg-1); }
+      .qpfr-kpi { flex: 1 1 0; min-width: 100px; padding: 9px 12px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 2px; }
+      .qpfr-kpi:last-child { border-right: 0; }
+      .qpfr-kpi .lbl { font: 700 8.5px var(--mono); color: var(--ink-3); letter-spacing: 0.16em; text-transform: uppercase; }
+      .qpfr-kpi .val { font: 800 14px var(--mono); color: var(--ink); letter-spacing: 0.01em; }
+      .qpfr-kpi .val small { font: 600 10px var(--mono); color: var(--ink-3); margin-left: 4px; }
+      .qpfr-kpi.gn .val { color: var(--gn); }
+      .qpfr-kpi.gn .val small { color: var(--gn-dim, #166534); }
+      .qpfr-kpi.rd .val { color: var(--rd, #f87171); }
+      .qpfr-kpi.rd .val small { color: var(--rd-dim, #991b1b); }
+
+      /* Table chrome */
+      .qpfr-tblwrap { border-bottom: 1px solid var(--rule); }
+      .qpfr-tblhead { display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; background: var(--bg-1); border-bottom: 1px solid var(--rule); }
+      .qpfr-tblh-l { font: 800 11px var(--mono); color: var(--ink); letter-spacing: 0.14em; text-transform: uppercase; }
+      .qpfr-tblh-l small { font: 600 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.08em; margin-left: 8px; text-transform: none; }
+      .qpfr-tblh-r { display: flex; align-items: center; gap: 10px; }
+      .qpfr-stat { font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.10em; text-transform: uppercase; }
+      .qpfr-stat b { color: var(--ink); font-weight: 800; font-size: 11px; margin-left: 4px; }
+
+      /* Rail — 3-col compact strip below positions table */
+      .qpfr-rail { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border-bottom: 1px solid var(--rule); }
+      .qpfr-rail.qpfr-rail-wide, .qpfr-rail:has(.qpfr-rail-wide) { grid-template-columns: 1fr 1fr; }
+      .qpfr-rail-pane { padding: 10px 14px; border-right: 1px solid var(--rule); min-height: 120px; }
+      .qpfr-rail-pane:last-child { border-right: 0; }
+      .qpfr-rail-h { font: 800 10px var(--mono); color: var(--ink); letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 8px; }
+      .qpfr-rail-h small { font: 600 9px var(--mono); color: var(--ink-3); letter-spacing: 0.06em; margin-left: 6px; text-transform: none; }
+
+      /* House rule footer */
+      .qpfr-rule { padding: 9px 14px; background: var(--bg-1); border-top: 1px solid var(--rule); font: 500 11px/1.55 'Inter', sans-serif; color: var(--ink-2); }
+      .qpfr-rule b { color: var(--ink); font-weight: 700; letter-spacing: 0.04em; }
+
+      /* Light-mode overrides */
+      body.light .qpfr-root { background: var(--bg-0, #f5f4ed); color: var(--ink, #1a1d1a); }
+      body.light .qpfr-hdr,
+      body.light .qpfr-strip,
+      body.light .qpfr-tblhead,
+      body.light .qpfr-rule { background: var(--bg-1, #fff); }
+      /* ── Positions table — dense Refinitiv-grade ─────────────────── */
+      table.qpfr-pos { width: 100%; border-collapse: collapse; font: 11.5px var(--mono); font-variant-numeric: tabular-nums; }
+      table.qpfr-pos thead th { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.12em; text-transform: uppercase; padding: 7px 8px; text-align: right; background: var(--bg-2, #141817); border-bottom: 1px solid var(--rule); position: sticky; top: 0; cursor: pointer; user-select: none; white-space: nowrap; }
+      table.qpfr-pos thead th.l { text-align: left; }
+      table.qpfr-pos thead th:hover { color: var(--ink); background: var(--bg-3, #1a1e1d); }
+      table.qpfr-pos tbody td { padding: 5px 8px; text-align: right; border-bottom: 1px solid rgba(38,43,45,0.5); white-space: nowrap; }
+      table.qpfr-pos tbody td.l { text-align: left; }
+      table.qpfr-pos tbody tr:hover { background: rgba(217,119,87,0.04); cursor: pointer; }
+      table.qpfr-pos tbody td.tkr { font-weight: 800; color: var(--ink); letter-spacing: 0.04em; }
+      table.qpfr-pos tbody td.dim { color: var(--ink-3); }
+      table.qpfr-pos tbody td.gn { color: var(--gn); font-weight: 700; }
+      table.qpfr-pos tbody td.rd { color: var(--rd); font-weight: 700; }
+      table.qpfr-pos tbody td.am { color: var(--amb, #fbbf24); font-weight: 700; }
+      table.qpfr-pos tbody td.side-l { color: var(--gn-dim, #166534); font-weight: 700; font-size: 9.5px; letter-spacing: 0.1em; }
+      table.qpfr-pos tbody td.side-s { color: var(--rd-dim, #991b1b); font-weight: 700; font-size: 9.5px; letter-spacing: 0.1em; }
+      table.qpfr-pos tbody td.r-now { font-weight: 800; }
+      table.qpfr-pos tbody td .pct-bar { display: inline-block; width: 30px; height: 3px; background: rgba(255,255,255,0.05); margin-left: 5px; position: relative; vertical-align: middle; }
+      table.qpfr-pos tbody td .pct-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: currentColor; opacity: 0.7; }
+      .qpfr-er-chip { display: inline-block; padding: 1px 5px; font: 700 8.5px var(--mono); letter-spacing: 0.08em; border: 1px solid; }
+      .qpfr-er-chip.imm { color: var(--rd); border-color: var(--rd-dim, #991b1b); }
+      .qpfr-er-chip.warn { color: var(--amb); border-color: rgba(251,191,36,0.4); }
+      .qpfr-er-chip.ok { color: var(--ink-3); border-color: var(--rule); }
+      .qpfr-aq { list-style: none; margin: 0; padding: 0; font: 11px var(--mono); }
+      .qpfr-aq li { display: grid; grid-template-columns: 18px 50px 1fr; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid rgba(38,43,45,0.5); }
+      .qpfr-aq li:last-child { border-bottom: 0; }
+      .qpfr-aq li .ico { font-size: 12px; text-align: center; }
+      .qpfr-aq li .tk { font-weight: 800; font-size: 11.5px; color: var(--ink); letter-spacing: 0.04em; }
+      .qpfr-aq li .body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+      .qpfr-aq li .body .act { font-weight: 700; color: var(--ink); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .qpfr-aq li .body .det { font-size: 9.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .qpfr-aq li.sev-1 .ico, .qpfr-aq li.sev-1 .body .act { color: var(--rd); }
+      .qpfr-aq li.sev-2 .ico, .qpfr-aq li.sev-2 .body .act { color: var(--gn); }
+      .qpfr-aq li.sev-3 .ico { color: var(--amb); }
+      .qpfr-aq-empty { font: 600 11px var(--mono); color: var(--ink-3); padding: 20px 0; text-align: center; letter-spacing: 0.05em; }
+      table.qpfr-exp { width: 100%; border-collapse: collapse; font: 11px var(--mono); }
+      table.qpfr-exp td { padding: 4px 0; border-bottom: 1px solid rgba(38,43,45,0.4); }
+      table.qpfr-exp tr:last-child td { border-bottom: 0; }
+      table.qpfr-exp td.k { color: var(--ink-1); padding-right: 8px; }
+      table.qpfr-exp td.bar { width: 100%; padding: 0 8px; }
+      table.qpfr-exp td.bar i { display: block; height: 4px; background: var(--cu, #d97757); opacity: 0.7; }
+      table.qpfr-exp td.v { text-align: right; color: var(--ink); font-weight: 700; white-space: nowrap; }
+      table.qpfr-exp td.v small { color: var(--ink-3); font-weight: 600; margin-left: 4px; font-size: 9.5px; }
+      .qpfr-ec { width: 100%; height: 110px; background: var(--bg-2); border: 1px solid var(--rule); position: relative; }
+      .qpfr-ec svg { display: block; width: 100%; height: 100%; }
+      .qpfr-ec .ec-stats { position: absolute; top: 6px; left: 8px; font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.08em; }
+      .qpfr-ec .ec-stats b { color: var(--ink); font-size: 11px; }
+      table.qpfr-mini { width: 100%; border-collapse: collapse; font: 10.5px var(--mono); font-variant-numeric: tabular-nums; }
+      table.qpfr-mini thead th { font: 700 8.5px var(--mono); color: var(--ink-3); letter-spacing: 0.10em; text-transform: uppercase; padding: 5px 6px; text-align: right; border-bottom: 1px solid var(--rule); background: var(--bg-2); position: sticky; top: 0; }
+      table.qpfr-mini thead th.l { text-align: left; }
+      table.qpfr-mini tbody td { padding: 4px 6px; text-align: right; border-bottom: 1px solid rgba(38,43,45,0.4); }
+      table.qpfr-mini tbody td.l { text-align: left; }
+      table.qpfr-mini tbody td.tkr { font-weight: 800; color: var(--ink); }
+      table.qpfr-mini tbody td.gn { color: var(--gn); font-weight: 700; }
+      table.qpfr-mini tbody td.rd { color: var(--rd); font-weight: 700; }
+      table.qpfr-mini tbody td.dim { color: var(--ink-3); }
+      .qpfr-streak { display: inline-flex; gap: 1.5px; }
+      .qpfr-streak i { width: 6px; height: 10px; background: var(--ink-4, #4a4e4a); display: inline-block; }
+      .qpfr-streak i.w { background: var(--gn); }
+      .qpfr-streak i.l { background: var(--rd); }
+      /* ── 2026-05-27 · Density pass — Refinitiv-grade ──────────────── */
+      .qpfr-strip { padding: 0; }
+      .qpfr-kpi { padding: 7px 11px; min-width: 86px; }
+      .qpfr-kpi .lbl { font-size: 8px; letter-spacing: 0.18em; }
+      .qpfr-kpi .val { font-size: 13px; }
+      .qpfr-kpi .val small { font-size: 9.5px; margin-left: 3px; }
+      .qpfr-hdr { padding: 6px 12px; }
+      .qpfr-mode { font-size: 8px; padding: 2px 6px; }
+      .qpfr-crumb { font-size: 9.5px; }
+      .qpfr-btn { padding: 2px 8px; font-size: 8.5px; }
+      .qpfr-btn.primary { padding: 2px 8px; font-size: 9px; letter-spacing: 0.10em; }
+      .qpfr-tblhead { padding: 6px 12px; }
+      .qpfr-tblh-l { font-size: 10px; }
+      .qpfr-tblh-l small { font-size: 8.5px; }
+      .qpfr-rail-h { font-size: 9.5px; }
+      .qpfr-rail-pane { padding: 8px 12px; min-height: 100px; }
+      .qpfr-rule { padding: 7px 12px; font-size: 10px; }
+      /* Hide compliance bar + lens guide ONLY when portfolio is the active panel */
+      .qpfr-root ~ * #compliance-bar,
+      body:has(.qpfr-root[data-active="1"]) #compliance-bar { display: none; }
+
+
+    `;
+    const s = document.createElement('style');
+    s.id = 'qpfr-styles'; s.textContent = css;
+    document.head.appendChild(s);
+  }
+  // ── 2026-05-27 · Refinitiv-grade helpers (qpfr-* namespace) ──────────
+  function _qpfrPositions(positions, data) {
+    if (!positions.length) return '<div class="qpfr-aq-empty">No open positions · 100% cash</div>';
+    const _tk = (typeof window !== 'undefined' && window._kairosTickersArr) || [];
+    const _tmap = new Map();
+    for (const r of _tk) if (r && r.ticker) _tmap.set(r.ticker, r);
+    const rows = positions.map((p, i) => {
+      const sym = p.ticker;
+      const t = _tmap.get(sym) || {};
+      const side = (p.direction === 'short') ? 'SHORT' : 'LONG';
+      const sideCls = side === 'LONG' ? 'side-l' : 'side-s';
+      const qty = Math.abs(p.shares || 0);
+      const entry = p.entry_price || 0;
+      const last = p.current_price || entry;
+      const stop = p.stop || 0;
+      const t1 = p.target1 || 0;
+      const pl = p.unrealized_pnl_dollars || 0;
+      const plpct = p.unrealized_pnl_pct || 0;
+      const isLong = side === 'LONG';
+      // %→stop and %→T1 — direction-aware
+      const toStop = isLong
+        ? (last > 0 ? ((last - stop) / last) * 100 : 0)
+        : (last > 0 ? ((stop - last) / last) * 100 : 0);
+      const toT1 = isLong
+        ? (last > 0 && t1 > 0 ? ((t1 - last) / last) * 100 : null)
+        : (last > 0 && t1 > 0 ? ((last - t1) / last) * 100 : null);
+      // R NOW — handles trailed stops. If stop has been trailed past entry,
+      // the original 1R risk is "locked" and the trade is risk-free. Show
+      // protected-gain R based on (last - entry) / |entry × 0.02| (2% proxy).
+      const riskPerShare = isLong ? (entry - stop) : (stop - entry);
+      const moveFromEntry = isLong ? (last - entry) : (entry - last);
+      let rNow, rLabel;
+      if (riskPerShare > 0) {
+        rNow = moveFromEntry / riskPerShare;
+        rLabel = (rNow >= 0 ? '+' : '') + rNow.toFixed(2) + 'R';
+      } else if (entry > 0) {
+        // Trailed past entry — risk-free. Show "BE+" or "BE-" with protected-gain R.
+        const protectedR = moveFromEntry / (entry * 0.02);  // 2% proxy
+        rNow = protectedR;
+        rLabel = '🔒 ' + (protectedR >= 0 ? '+' : '') + protectedR.toFixed(2) + 'R';
+      } else {
+        rNow = null; rLabel = '—';
+      }
+      const days = p.days_held != null ? p.days_held : (p.entry_date ? Math.floor((new Date() - new Date(p.entry_date)) / 86400000) : null);
+      const er = p.days_to_earnings;
+      const erHtml = (er != null && er >= 0)
+        ? (er <= 3 ? '<span class="qpfr-er-chip imm">T+' + er + 'd</span>'
+          : er <= 7 ? '<span class="qpfr-er-chip warn">T+' + er + 'd</span>'
+          : '<span class="qpfr-er-chip ok">T+' + er + 'd</span>')
+        : '<span class="dim">—</span>';
+      const plCls = pl >= 0 ? 'gn' : 'rd';
+      const stopCls = toStop < 2 ? 'rd' : toStop < 5 ? 'am' : 'dim';
+      const t1Cls = (toT1 != null && Math.abs(toT1) < 2) ? 'gn' : 'dim';
+      const rNowCls = rNow == null ? 'dim' : rNow >= 1 ? 'gn' : rNow <= -0.5 ? 'rd' : 'am';
+      const stopBar = '<span class="pct-bar"><i style="width:' + Math.max(0, Math.min(100, toStop * 4)) + '%"></i></span>';
+      // Setup back-attribution: use tickers.json setup_family if local says 'alpaca_sync'
+      const setupRaw = p.setup_type || '';
+      const setupBackfill = (setupRaw === 'alpaca_sync' || setupRaw === '—') ? (t.setup_family || t.setup || '—') : setupRaw;
+      const setup = setupBackfill.replace('alpaca_sync', '—').slice(0, 14);
+      return '<tr data-tkr="' + sym + '" onclick="window.setDetailTicker && window.setDetailTicker(\'' + sym + '\')">'
+        + '<td class="l dim">' + (i + 1) + '</td>'
+        + '<td class="l tkr">' + sym + '</td>'
+        + '<td class="' + sideCls + '">' + side + '</td>'
+        + '<td>' + qty + '</td>'
+        + '<td>$' + entry.toFixed(2) + '</td>'
+        + '<td>$' + last.toFixed(2) + '</td>'
+        + '<td class="' + plCls + '">' + (pl >= 0 ? '+' : '') + '$' + Math.abs(pl).toFixed(0) + '</td>'
+        + '<td class="' + plCls + '">' + (plpct >= 0 ? '+' : '') + plpct.toFixed(2) + '%</td>'
+        + '<td>$' + stop.toFixed(2) + '</td>'
+        + '<td class="' + stopCls + '">' + (toStop >= 0 ? '+' : '') + toStop.toFixed(1) + '%' + stopBar + '</td>'
+        + '<td>' + (t1 ? '$' + t1.toFixed(2) : '<span class="dim">—</span>') + '</td>'
+        + '<td class="' + t1Cls + '">' + (toT1 != null ? (toT1 >= 0 ? '+' : '') + toT1.toFixed(1) + '%' : '<span class="dim">—</span>') + '</td>'
+        + '<td class="r-now ' + rNowCls + '">' + rLabel + '</td>'
+        + '<td>' + (days != null ? days + 'd' : '<span class="dim">—</span>') + '</td>'
+        + '<td>' + erHtml + '</td>'
+        + '<td class="l dim">' + setup + '</td>'
+        + '</tr>';
+    }).join('');
+    return '<div style="max-height: 500px; overflow-y: auto;"><table class="qpfr-pos"><thead><tr>'
+      + '<th class="l">#</th><th class="l">TKR</th><th>SIDE</th><th>QTY</th>'
+      + '<th>ENTRY</th><th>LAST</th><th>$P/L</th><th>%P/L</th>'
+      + '<th>STOP</th><th>%→STOP</th><th>T1</th><th>%→T1</th>'
+      + '<th>R NOW</th><th>DAYS</th><th>ER</th><th class="l">SETUP</th>'
+      + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+
+    function _qpfrActions(actions) {
+    if (!actions.length) return '<div class="qpfr-aq-empty">no triggers · all positions within tolerance</div>';
+    const items = actions.slice(0, 12).map(a => {
+      const sev = a.sev || 3;
+      return '<li class="sev-' + sev + '">'
+        + '<span class="ico">' + (a.ico || '·') + '</span>'
+        + '<span class="tk">' + ((a.pos && a.pos.ticker) || '—') + '</span>'
+        + '<span class="body"><span class="act">' + a.action + '</span><span class="det">' + (a.detail || '') + '</span></span>'
+        + '</li>';
+    }).join('');
+    return '<ul class="qpfr-aq">' + items + '</ul>';
+  }
+
+  function _qpfrExposure(map, total) {
+    const entries = Object.entries(map || {}).sort((a, b) => b[1] - a[1]);
+    if (!entries.length) return '<div class="qpfr-aq-empty">no exposure</div>';
+    const maxVal = entries[0][1] || 1;
+    const rows = entries.map(([k, v]) => {
+      const pct = total > 0 ? (v / total) * 100 : 0;
+      const barPct = (v / maxVal) * 100;
+      return '<tr><td class="k">' + k + '</td><td class="bar"><i style="width:' + barPct.toFixed(0) + '%"></i></td><td class="v">' + pct.toFixed(0) + '%<small>' + _fmtDol(v) + '</small></td></tr>';
+    }).join('');
+    return '<table class="qpfr-exp"><tbody>' + rows + '</tbody></table>';
+  }
+
+  function _qpfrEquityCurve(curve, equity) {
+    if (!curve || curve.length < 2) return '<div class="qpfr-aq-empty">collecting equity history…</div>';
+    const vals = curve.map(p => +p.equity || 0).filter(v => v > 0);
+    if (vals.length < 2) return '<div class="qpfr-aq-empty">need 2+ data points</div>';
+    const min = Math.min(...vals); const max = Math.max(...vals); const range = (max - min) || 1;
+    const W = 100, H = 60;
+    const pts = vals.map((v, i) => {
+      const x = (i / (vals.length - 1)) * W;
+      const y = H - ((v - min) / range) * H;
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    const lastV = vals[vals.length - 1] || equity;
+    const firstV = vals[0] || equity;
+    const totalRet = firstV > 0 ? ((lastV - firstV) / firstV) * 100 : 0;
+    let peak = vals[0], mdd = 0;
+    for (const v of vals) { if (v > peak) peak = v; const dd = peak > 0 ? ((v - peak) / peak) * 100 : 0; if (dd < mdd) mdd = dd; }
+    const stroke = totalRet >= 0 ? 'var(--gn)' : 'var(--rd)';
+    return '<div class="qpfr-ec"><div class="ec-stats">' + vals.length + ' PTS · <b>' + (totalRet >= 0 ? '+' : '') + totalRet.toFixed(2) + '%</b> · MAX DD <b>' + mdd.toFixed(1) + '%</b></div><svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none"><polyline points="' + pts + '" fill="none" stroke="' + stroke + '" stroke-width="0.8"/></svg></div>';
+  }
+
+  function _qpfrClosed(closed) {
+    if (!closed.length) return '<div class="qpfr-aq-empty">no closed trades yet</div>';
+    const sorted = [...closed].sort((a, b) => (b.exit_date || '').localeCompare(a.exit_date || ''));
+    const recent = sorted.slice(0, 20);
+    const last10 = sorted.slice(0, 10).reverse();
+    const streakBar = last10.map(c => '<i class="' + ((c.pnl_pct || 0) > 0 ? 'w' : 'l') + '"></i>').join('');
+    const totW = closed.filter(c => (c.pnl_pct || 0) > 0).length;
+    const totL = closed.filter(c => (c.pnl_pct || 0) <= 0).length;
+    const rows = recent.map(c => {
+      const pct = c.pnl_pct || c.realized_pnl_pct || 0;
+      const usd = c.pnl_dollars || c.realized_pnl_dollars || 0;
+      const cls = pct >= 0 ? 'gn' : 'rd';
+      const entry = +c.entry_price || 0;
+      const exit = +c.exit_price || 0;
+      const days = (c.entry_date && c.exit_date) ? Math.max(0, Math.floor((new Date(c.exit_date) - new Date(c.entry_date)) / 86400000)) : '—';
+      return '<tr>'
+        + '<td class="l tkr">' + (c.ticker || '—') + '</td>'
+        + '<td class="dim">' + days + 'd</td>'
+        + '<td>$' + entry.toFixed(2) + '</td>'
+        + '<td>$' + exit.toFixed(2) + '</td>'
+        + '<td class="' + cls + '">' + (usd >= 0 ? '+' : '') + '$' + Math.abs(usd).toFixed(0) + '</td>'
+        + '<td class="' + cls + '">' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%</td>'
+        + '<td class="l dim">' + (c.setup_type || '').slice(0, 16) + '</td>'
+        + '<td class="l dim">' + (c.exit_reason || '').slice(0, 14) + '</td>'
+        + '</tr>';
+    }).join('');
+    return '<div style="display:flex;align-items:center;gap:14px;padding:6px 14px;background:var(--bg-1);border-bottom:1px solid var(--rule);">'
+      + '<span style="font:700 9px var(--mono);color:var(--ink-3);letter-spacing:0.14em;text-transform:uppercase;">LAST 10 STREAK</span>'
+      + '<span class="qpfr-streak">' + streakBar + '</span>'
+      + '<span style="font:600 9.5px var(--mono);color:var(--ink-2);margin-left:auto;">' + closed.length + ' total · ' + totW + ' wins · ' + totL + ' losses</span>'
+      + '</div>'
+      + '<div style="max-height: 320px; overflow-y: auto;"><table class="qpfr-mini"><thead><tr>'
+      + '<th class="l">TKR</th><th>DAYS</th><th>ENTRY</th><th>EXIT</th><th>$P/L</th><th>%P/L</th><th class="l">SETUP</th><th class="l">EXIT</th>'
+      + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+
+  function _qpfrSetupAttrib(setupPerf) {
+    const entries = Object.entries(setupPerf || {})
+      .map(([k, s]) => ({ name: k, n: s.n, wins: s.wins, pnl: s.pnl, wr: s.n > 0 ? (s.wins / s.n) * 100 : 0 }))
+      .sort((a, b) => b.n - a.n);
+    if (!entries.length) return '<div class="qpfr-aq-empty">no setup attribution data yet</div>';
+    const rows = entries.map(e => {
+      const wrCls = e.wr >= 60 ? 'gn' : e.wr >= 40 ? '' : 'rd';
+      const plCls = e.pnl >= 0 ? 'gn' : 'rd';
+      return '<tr><td class="l tkr">' + e.name + '</td><td>' + e.n + '</td>'
+        + '<td class="' + wrCls + '">' + e.wr.toFixed(0) + '%</td>'
+        + '<td class="' + plCls + '">' + (e.pnl >= 0 ? '+' : '') + '$' + Math.abs(e.pnl).toFixed(0) + '</td>'
+        + '<td class="dim">' + e.wins + 'W / ' + (e.n - e.wins) + 'L</td></tr>';
+    }).join('');
+    return '<table class="qpfr-mini"><thead><tr><th class="l">SETUP</th><th>N</th><th>WR</th><th>$P/L</th><th class="l">W/L</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+
   let _sortKey = 'unrealized_pnl_pct';
   let _sortDir = 'desc';
 
@@ -22676,13 +23008,20 @@ const QuantPortfolio = (function() {
     });
     actions.sort((a, b) => a.sev - b.sev);
 
-    // Exposure maps
+    // Exposure maps — joined against window._kairosTickersArr for fresh sector/setup
     const secMap = {}, setupMap = {};
+    const _xArr = (typeof window !== 'undefined' && window._kairosTickersArr) || [];
+    const _xMap = new Map();
+    for (const r of _xArr) if (r && r.ticker) _xMap.set(r.ticker, r);
     positions.forEach(p => {
-      const sec = (data.tickers || {})[p.ticker]?.sector || p.sector || 'Unknown';
+      const t = _xMap.get(p.ticker) || (data.tickers || {})[p.ticker] || {};
+      const sec = t.sector || p.sector || 'Unknown';
+      const sfRaw = p.setup_type || '';
+      const stp = (sfRaw === 'alpaca_sync' || sfRaw === '' || sfRaw === '—')
+        ? (t.setup_family || t.setup || 'Unattributed')
+        : sfRaw;
       const sz = (p.shares || 0) * (p.current_price || p.entry_price || 0);
       secMap[sec] = (secMap[sec] || 0) + sz;
-      const stp = p.setup_type || 'Unknown';
       setupMap[stp] = (setupMap[stp] || 0) + sz;
     });
 
@@ -22697,104 +23036,97 @@ const QuantPortfolio = (function() {
       setupPerf[k].pnl += (c.pnl_dollars || c.realized_pnl_dollars || 0);
     });
 
+    // ── 2026-05-27 · Refinitiv-style redesign ─────────────────────────────
+    // Single horizontal account strip → positions table dominant (no panel
+    // borders) → compact exposure + actions rail → closed-trade journal.
+    // Density: every number monospace, only red/green for P&L, no decoration.
+    _ensureRefinitivStyles();
+    const buyingPower = (port.buying_power != null) ? port.buying_power : (cash * 4);  // 4x reg-T proxy if not provided
+    const betaWtd = positions.reduce((s, p) => s + (((p.shares || 0) * (p.current_price || p.entry_price || 0)) * (p.beta || 1.0)), 0);
+    const betaExp = totalMarket > 0 ? betaWtd / totalMarket : 1.0;
+    const dayPnl = positions.reduce((s, p) => s + (p.day_pnl_dollars || 0), 0);  // optional; 0 if not synced
     wsPanel.innerHTML = `
-      <div class="qe-wrap">
+      <div class="qpfr-root">
 
-        <div class="qe-banner">
-          <div class="brand"><b>K · PORTFOLIO</b> positions</div>
-          <div class="title">Portfolio <span style="font-size:13px;font-weight:500;color:var(--ink-2);margin-left:6px;">${positions.length} open · ${closed.length} closed</span></div>
-          <div class="stats">
-            <span class="stat"><b>${_fmtDol(equity)}</b> equity</span>
-            <span class="stat ${cashPct > 80 ? 'gn' : cashPct < 30 ? 'am' : ''}"><b>${_fmt(cashPct, 0)}%</b> cash</span>
-            <span class="stat ${unrealPnl$ >= 0 ? 'gn' : ''}"><b>${_sign(unrealPnl$)}${_fmtDol(unrealPnl$)}</b> unrealized</span>
-            <span class="stat ${realPnl$ >= 0 ? 'gn' : ''}"><b>${_sign(realPnl$)}${_fmtDol(realPnl$)}</b> realized</span>
-            <span class="stat ${maxDD < -5 ? 'am' : ''}"><b>${_fmt(maxDD, 1)}%</b> max DD</span>
-            ${cb.active ? '<span class="stat am">circuit <b>BREAKER</b></span>' : ''}
-            <span class="stat">scan <b>${(data.run_timestamp || '').slice(0,16).replace('T',' ')}</b></span>
-            <!-- 2026-05-19 · Live-price freshness chip + manual refresh (polls every 5s) -->
-            <span class="stat" id="qport-live-chip" title="Polls Schwab Market Data every 5s for current prices"><b>● LIVE</b> <small id="qport-live-age" style="opacity:.7">init…</small></span>
-            <button id="qport-live-refresh" class="qe-banner-btn" style="background:transparent;border:1px solid var(--line-2);color:var(--ink-2);padding:3px 9px;font:700 9px var(--mono);letter-spacing:.10em;border-radius:2px;cursor:pointer;margin-left:6px" title="Force refresh prices now">↻ REFRESH</button>
+        <!-- ═══════════════ HEADER + ACCOUNT STRIP ═══════════════ -->
+        <div class="qpfr-hdr">
+          <div class="qpfr-hdr-l">
+            <span class="qpfr-crumb">KAIROS · WORKSPACES · <b>PORTFOLIO · POSITIONS</b></span>
+            <span class="qpfr-mode">ALPACA PAPER</span>
+          </div>
+          <div class="qpfr-hdr-r">
+            <span class="qpfr-live" id="qport-live-chip"><b>● LIVE</b> <small id="qport-live-age">init…</small></span>
+            <button id="qport-live-refresh" class="qpfr-btn" title="Force refresh prices now">↻ REFRESH</button>
+            <span class="qpfr-stamp">SCAN ${(data.run_timestamp || '').slice(0,16).replace('T',' ')}</span>
           </div>
         </div>
 
-        <div class="qe-timing">
-          <div class="cell">
-            <div class="k">Open Positions</div>
-            <div class="n ${positions.length > 5 ? 'hi' : ''}">${positions.length}</div>
-            <div class="split">${positions.length === 0 ? '100% cash' : positions.length > 5 ? 'over diversified' : 'within 3-5 cap'}</div>
-          </div>
-          <div class="cell">
-            <div class="k">Capital Deployed</div>
-            <div class="n">${_fmt(100 - cashPct, 0)}%</div>
-            <div class="split">${_fmtDol(totalMarket)} of ${_fmtDol(equity)}</div>
-          </div>
-          <div class="cell">
-            <div class="k">Unrealized P&L</div>
-            <div class="n ${unrealPnl$ < 0 ? 'hi' : ''}">${_sign(unrealPnlPct)}${_fmt(unrealPnlPct,2)}%</div>
-            <div class="split">${_sign(unrealPnl$)}${_fmtDol(unrealPnl$)}</div>
-          </div>
-          <div class="cell">
-            <div class="k">Win Rate (closed)</div>
-            <div class="n ${wr != null && wr < 40 ? 'hi' : ''}">${wr != null ? wr.toFixed(0) + '%' : '—'}</div>
-            <div class="split">${wins}W / ${lossesC}L</div>
-          </div>
-          <div class="cell">
-            <div class="k">Action Queue</div>
-            <div class="n ${actions.length > 0 ? 'hi' : ''}">${actions.length}</div>
-            <div class="split">${actions.length === 0 ? 'no triggers' : actions.length === 1 ? '1 needs review' : 'needs review'}</div>
-          </div>
+        <div class="qpfr-strip">
+          <div class="qpfr-kpi"><span class="lbl">EQUITY</span><span class="val">${_fmtDol(equity)}</span></div>
+          <div class="qpfr-kpi"><span class="lbl">CASH</span><span class="val">${_fmtDol(cash)} <small>(${_fmt(cashPct,0)}%)</small></span></div>
+          <div class="qpfr-kpi"><span class="lbl">DEPLOYED</span><span class="val">${_fmtDol(totalMarket)} <small>(${_fmt(100-cashPct,0)}%)</small></span></div>
+          <div class="qpfr-kpi"><span class="lbl">BUYING PWR</span><span class="val">${_fmtDol(buyingPower)}</span></div>
+          <div class="qpfr-kpi ${unrealPnl$ >= 0 ? 'gn' : 'rd'}"><span class="lbl">UNREAL</span><span class="val">${_sign(unrealPnl$)}${_fmtDol(unrealPnl$)} <small>${_sign(unrealPnlPct)}${_fmt(unrealPnlPct,2)}%</small></span></div>
+          <div class="qpfr-kpi ${realPnl$ >= 0 ? 'gn' : 'rd'}"><span class="lbl">REAL YTD</span><span class="val">${_sign(realPnl$)}${_fmtDol(realPnl$)}</span></div>
+          <div class="qpfr-kpi"><span class="lbl">POS</span><span class="val">${positions.length} <small>/ 50</small></span></div>
+          <div class="qpfr-kpi"><span class="lbl">WIN RATE</span><span class="val">${wr != null ? wr.toFixed(0) + '%' : '—'} <small>${wins}W ${lossesC}L</small></span></div>
+          <div class="qpfr-kpi ${maxDD < -5 ? 'rd' : ''}"><span class="lbl">MAX DD</span><span class="val">${_fmt(maxDD,1)}%</span></div>
+          <div class="qpfr-kpi"><span class="lbl">β·EXP</span><span class="val">${_fmt(betaExp,2)}</span></div>
+          ${cb.active ? '<div class="qpfr-kpi rd"><span class="lbl">CIRCUIT</span><span class="val">BREAKER</span></div>' : ''}
         </div>
 
-        <div class="qe-grid">
-          <div class="qe-pane">
-            <h2 class="qe-h2">Action Queue <span class="meta">${actions.length} triggers · severity-sorted</span></h2>
-            ${renderActions(actions)}
-          </div>
-          <div class="qe-pane">
-            <h2 class="qe-h2">Equity Curve <span class="meta">${equityCurve.length} pts · max DD ${_fmt(maxDD, 1)}%</span></h2>
-            ${renderEquityCurve(equityCurve, equity)}
-          </div>
-        </div>
-
-        <div class="qe-pane">
-          <h2 class="qe-h2 qf-tbl-head">
-            <span>Open Positions <span class="meta">${positions.length} active · click ticker → Detail · click column to sort</span></span>
-            <span class="qf-tbl-controls">
-              <span class="stat" style="background:transparent;border:none;color:var(--ink-3);">total: <b style="color:var(--ink);">${_fmtDol(totalMarket)}</b></span>
-              <button class="qport-add-btn" onclick="window._openPositionModal && window._openPositionModal('', 0, 0, 0, 0, '')" style="background:var(--gn);color:#000;border:0;padding:5px 12px;font:700 10px var(--mono);letter-spacing:.08em;border-radius:2px;cursor:pointer;margin-left:8px" title="Open Add Position form">+ ADD POSITION</button>
+        <!-- ═══════════════ POSITIONS TABLE (dominant surface) ═══════════════ -->
+        <div class="qpfr-tblwrap">
+          <div class="qpfr-tblhead">
+            <span class="qpfr-tblh-l">OPEN POSITIONS <small>${positions.length} · click column to sort · click ticker for detail</small></span>
+            <span class="qpfr-tblh-r">
+              <span class="qpfr-stat">MARKET VALUE <b>${_fmtDol(totalMarket)}</b></span>
+              <button class="qpfr-btn primary" onclick="window._openPositionModal && window._openPositionModal('', 0, 0, 0, 0, '')">+ ADD POSITION</button>
             </span>
-          </h2>
-          ${renderPositionsTable(positions, data)}
+          </div>
+          ${_qpfrPositions(positions, data)}
         </div>
 
-        <div class="qe-grid">
-          <div class="qe-pane">
-            <h2 class="qe-h2">Sector Exposure <span class="meta">$ allocation by GICS sector</span></h2>
-            ${renderExposureBars(secMap, totalMarket)}
+        <!-- ═══════════════ EXPOSURE + ACTIONS RAIL ═══════════════ -->
+        <div class="qpfr-rail">
+          <div class="qpfr-rail-pane">
+            <div class="qpfr-rail-h">SECTOR EXPOSURE <small>$ alloc by GICS</small></div>
+            ${_qpfrExposure(secMap, totalMarket)}
           </div>
-          <div class="qe-pane">
-            <h2 class="qe-h2">Setup Exposure <span class="meta">$ allocation by setup family</span></h2>
-            ${renderExposureBars(setupMap, totalMarket)}
+          <div class="qpfr-rail-pane">
+            <div class="qpfr-rail-h">SETUP EXPOSURE <small>$ alloc by setup family</small></div>
+            ${_qpfrExposure(setupMap, totalMarket)}
           </div>
-        </div>
-
-        <div class="qe-grid">
-          <div class="qe-pane">
-            <h2 class="qe-h2">Setup Attribution <span class="meta">closed · WR · realized P&L per setup</span></h2>
-            ${renderSetupAttribution(setupPerf)}
-          </div>
-          <div class="qe-pane">
-            <h2 class="qe-h2">Recent Closes <span class="meta">${closed.length} trade${closed.length===1?'':'s'} · last 30d</span></h2>
-            ${renderRecentCloses(closed)}
+          <div class="qpfr-rail-pane">
+            <div class="qpfr-rail-h">ACTION QUEUE <small>${actions.length} triggers · severity-sorted</small></div>
+            ${_qpfrActions(actions)}
           </div>
         </div>
 
-        <div class="qe-rule">
-          <div class="ttl">House rule § Portfolio discipline</div>
-          Max <b>3-5 active positions</b>. <b>5-10% allocation per position</b>, regime + VIX + drawdown multiplied.
-          Every trade has a defined <b>1.25× ATR stop</b> and minimum <b>3:1 R:R</b> (4:1 in risk-off).
-          On <b>T1 hit</b>: trim ⅔, trail rest. On <b>stop hit</b>: close immediately, no exceptions.
-          On <b>earnings ≤7d</b>: flatten unless beat_score ≥ 65 (§ 03.04). On <b>circuit breaker active</b>: no new entries.
+        <!-- ═══════════════ EQUITY CURVE + CLOSED JOURNAL ═══════════════ -->
+        <div class="qpfr-rail">
+          <div class="qpfr-rail-pane qpfr-rail-wide">
+            <div class="qpfr-rail-h">EQUITY CURVE <small>${equityCurve.length} pts · max DD ${_fmt(maxDD,1)}%</small></div>
+            ${_qpfrEquityCurve(equityCurve, equity)}
+          </div>
+          <div class="qpfr-rail-pane qpfr-rail-wide">
+            <div class="qpfr-rail-h">SETUP ATTRIBUTION <small>closed · WR · realized P&L per setup</small></div>
+            ${_qpfrSetupAttrib(setupPerf)}
+          </div>
+        </div>
+
+        <div class="qpfr-tblwrap">
+          <div class="qpfr-tblhead">
+            <span class="qpfr-tblh-l">RECENT CLOSED TRADES <small>${closed.length} · last 30d</small></span>
+          </div>
+          ${_qpfrClosed(closed)}
+        </div>
+
+        <div class="qpfr-rule">
+          <b>HOUSE RULE § PORTFOLIO DISCIPLINE.</b>
+          Max 3-5 active positions. 5-10% per position, regime+VIX+DD multiplied. 1.25× ATR stop, min 3:1 R:R (4:1 risk-off).
+          T1 hit → trim ⅔, trail rest. Stop hit → close immediately. Earnings ≤7d → flatten unless beat_score ≥ 65 (§03.04).
+          Circuit breaker active → no new entries.
         </div>
 
       </div>
@@ -34728,6 +35060,11 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
       // 2026-05-25 · §2 / §6 disclaimer chips removed (no DCF model / FCF
       // breakdown feed in current pipeline — sections render their own
       // honest empty-state below the panel header).
+      // 2026-05-27 · Catch case-variant Hock Tan + VMware/ASIC narrative
+      // that the [/Broadcom/g, ...] pattern leaves intact on non-AVGO names.
+      [/Hock Tan/g, 'the CEO'],
+      [/VMware/g, '—'],
+      [/ASIC/g, 'segment'],
     ];
     const cssID = "kairos-value-css";
     const cssHTML = "<style id=\"kairos-value-css\">\n  .ivv2 {\n    --bg: #0a0d0c; --bg-1: #11151a; --bg-2: #161a1e; --bg-3: #1c2125;\n    --line: #262b2d; --line-2: #353a3c;\n    --ink: #ecefe9; --ink-1: #d4d8d1; --ink-2: #9a9e98; --ink-3: #686c68; --ink-4: #444947;\n    --gn: #4ade80; --gn-dim: #166534; --gn-bg: rgba(74,222,128,0.10);\n    --rd: #f87171; --rd-dim: #991b1b; --rd-bg: rgba(248,113,113,0.10);\n    --amb: #fbbf24; --amb-dim: #92400e; --amb-bg: rgba(251,191,36,0.10);\n    --copper: #d97757; --copper-bg: rgba(217,119,87,0.10);\n    --mono: 'JetBrains Mono', ui-monospace, monospace;\n  }\n  .ivv2 * { box-sizing: border-box; }\n  .ivv2 { font:14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: var(--ink); font-variant-numeric: tabular-nums; }\n\n  .breadcrumb { font: 700 11px var(--mono); color: var(--ink-3); letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 14px; }\n  .breadcrumb b { color: var(--ink-1); }\n  .breadcrumb .copper { color: var(--copper); }\n\n  /* ═══════════ VALUE-GAP HERO — the dominant element ═══════════ */\n  .iv-hero { background: var(--bg-1); border: 1px solid var(--line); border-left: 4px solid var(--copper); border-radius: 2px; margin-bottom: 14px; overflow: hidden; font-family: var(--mono); }\n  .iv-hero-top { display: grid; grid-template-columns: 220px 1fr 270px; gap: 0; border-bottom: 1px solid var(--line); }\n  .iv-hero-id { padding: 14px 18px; border-right: 1px solid var(--line); }\n  .iv-hero-tk { font-size: 28px; font-weight: 800; color: var(--ink); letter-spacing: 0.04em; line-height: 1; }\n  .iv-hero-name { font-size: 11px; color: var(--ink-3); margin: 4px 0 8px; }\n  .iv-hero-px { font-size: 22px; font-weight: 800; color: var(--ink); }\n  .iv-hero-chg { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 2px; margin-left: 6px; color: var(--gn); background: var(--gn-bg); }\n  .iv-hero-meta { margin-top: 10px; font-size: 10px; color: var(--ink-3); font-weight: 500; line-height: 1.7; }\n  .iv-hero-meta b { color: var(--ink); font-weight: 700; }\n  .iv-hero-meta .copper { color: var(--copper); }\n\n  .iv-hero-scale { padding: 12px 16px; border-right: 1px solid var(--line); }\n  .iv-hero-scale-h { display: flex; justify-content: space-between; align-items: baseline; font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 6px; }\n  .iv-hero-scale-h .copper { color: var(--copper); font-weight: 800; letter-spacing: 0.12em; }\n  .iv-hero-scale svg { width: 100%; height: 200px; display: block; }\n  .iv-hero-scale-foot { display: flex; justify-content: space-between; font: 600 10px var(--mono); color: var(--ink-2); margin-top: 4px; letter-spacing: 0.06em; }\n  .iv-hero-scale-foot b { color: var(--ink); }\n\n  .iv-hero-mos { padding: 12px 16px; }\n  .iv-hero-mos-h { font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 8px; }\n  .iv-hero-mos-h .copper { color: var(--copper); font-weight: 800; }\n  .iv-hero-mos-val { font: 800 36px var(--mono); color: var(--gn); line-height: 1; margin-bottom: 4px; }\n  .iv-hero-mos-val.am { color: var(--amb); } .iv-hero-mos-val.rd { color: var(--rd); }\n  .iv-hero-mos-sub { font: 600 11px var(--mono); color: var(--ink-2); letter-spacing: 0.04em; margin-bottom: 10px; }\n  .iv-hero-mos-tbl { font-family: var(--mono); font-size: 11px; }\n  .iv-hero-mos-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 5px 0; border-bottom: 1px dashed var(--line); }\n  .iv-hero-mos-row:last-child { border-bottom: none; }\n  .iv-hero-mos-row .lbl { color: var(--ink-3); font-weight: 600; }\n  .iv-hero-mos-row .v { color: var(--ink); font-weight: 700; }\n  .iv-hero-mos-row .v.gn { color: var(--gn); } .iv-hero-mos-row .v.am { color: var(--amb); } .iv-hero-mos-row .v.rd { color: var(--rd); }\n\n  /* Verdict / posture banner */\n  .iv-verdict { display: flex; align-items: center; gap: 14px; padding: 9px 18px; background: var(--bg-2); border-bottom: 1px solid var(--line); flex-wrap: wrap; }\n  .iv-verdict-badge { font-size: 16px; font-weight: 800; letter-spacing: 0.12em; padding: 5px 14px; border-radius: 2px; border: 1px solid; color: var(--amb); border-color: var(--amb-dim); background: var(--amb-bg); }\n  .iv-verdict-badge.gn { color: var(--gn); border-color: var(--gn-dim); background: var(--gn-bg); }\n  .iv-verdict-badge.rd { color: var(--rd); border-color: var(--rd-dim); background: var(--rd-bg); }\n  .iv-verdict-line { font: 600 12px var(--mono); color: var(--ink-1); letter-spacing: 0.02em; flex: 1; min-width: 280px; }\n  .iv-verdict-line b { color: var(--ink); font-weight: 800; }\n  .iv-verdict-line .gn { color: var(--gn); } .iv-verdict-line .rd { color: var(--rd); } .iv-verdict-line .am { color: var(--amb); } .iv-verdict-line .copper { color: var(--copper); }\n\n  /* Capital allocation strip in hero */\n  .iv-cap-strip { padding: 12px 18px 14px; font-family: var(--mono); }\n  .iv-cap-h { font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 6px; }\n  .iv-cap-h .copper { color: var(--copper); font-weight: 800; }\n  .iv-cap-bar { display: flex; width: 100%; height: 28px; border-radius: 2px; overflow: hidden; border: 1px solid var(--line); }\n  .iv-cap-seg { display: flex; flex-direction: column; align-items: center; justify-content: center; font: 800 11px var(--mono); color: #0a0d0c; }\n  .iv-cap-seg span { font-size: 8.5px; font-weight: 700; letter-spacing: 0.06em; opacity: 0.85; }\n  .iv-cap-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font: 600 10px var(--mono); color: var(--ink-2); letter-spacing: 0.04em; }\n  .iv-cap-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 1px; margin-right: 5px; vertical-align: middle; }\n  .iv-cap-legend b { color: var(--ink); font-weight: 700; }\n\n  /* ═══════════ DETAIL SECTIONS ═══════════ */\n  .iv-banner { font: 700 10px var(--mono); color: var(--ink-3); letter-spacing: 0.20em; text-transform: uppercase; margin: 18px 4px 12px; display: flex; align-items: center; gap: 10px; }\n  .iv-banner::before, .iv-banner::after { content: ''; flex: 1; height: 1px; background: var(--line); }\n\n  .iv-section { background: var(--bg-1); border: 1px solid var(--line); border-radius: 2px; margin-bottom: 12px; overflow: hidden; }\n  .iv-section-head { padding: 10px 18px 8px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }\n  .iv-section-title { font: 700 11.5px var(--mono); color: var(--ink-2); letter-spacing: 0.14em; text-transform: uppercase; }\n  .iv-section-title .num { color: var(--copper); margin-right: 6px; }\n  .iv-section-sub { font: 500 11px var(--mono); color: var(--ink-3); margin-top: 2px; letter-spacing: 0.06em; }\n  .iv-section-body { padding: 14px 18px 16px; }\n\n  /* Tables */\n  table.iv-tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }\n  table.iv-tbl th { text-align: left; padding: 7px 8px; font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.12em; text-transform: uppercase; border-bottom: 1px solid var(--line); font-weight: 700; }\n  table.iv-tbl th.r { text-align: right; }\n  table.iv-tbl th.c { text-align: center; }\n  table.iv-tbl td { padding: 9px 8px; border-bottom: 1px solid var(--line); color: var(--ink-1); font-size: 12px; }\n  table.iv-tbl td.r { text-align: right; }\n  table.iv-tbl td.c { text-align: center; }\n  table.iv-tbl tr:last-child td { border-bottom: none; }\n  table.iv-tbl tr.hl td { background: var(--copper-bg); }\n  table.iv-tbl tr.self td { background: rgba(217,119,87,0.05); border-bottom-color: var(--copper); }\n  table.iv-tbl tr.self td:first-child { color: var(--copper); font-weight: 800; }\n  table.iv-tbl b.gn { color: var(--gn); } table.iv-tbl b.rd { color: var(--rd); } table.iv-tbl b.am { color: var(--amb); } table.iv-tbl b.ink { color: var(--ink); } table.iv-tbl b.cp { color: var(--copper); }\n\n  /* MoS ladder */\n  .iv-mos-bar-cell { display: grid; grid-template-columns: 60px 1fr 60px; gap: 8px; align-items: center; }\n  .iv-mos-track { height: 8px; background: var(--bg-3); border-radius: 2px; position: relative; overflow: visible; border: 1px solid var(--line); }\n  .iv-mos-track .zero { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--ink-3); }\n  .iv-mos-fill { position: absolute; top: 0; bottom: 0; border-radius: 1px; }\n  .iv-mos-fill.gn { background: var(--gn); } .iv-mos-fill.rd { background: var(--rd); } .iv-mos-fill.am { background: var(--amb); }\n\n  /* Quality tiles */\n  .iv-tiles-6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }\n  .iv-tile { padding: 11px 12px; border: 1px solid var(--line); border-radius: 2px; background: var(--bg-1); min-width: 0; }\n  .iv-tile-k { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 5px; }\n  .iv-tile-v { font-family: var(--mono); font-size: 19px; font-weight: 800; line-height: 1.1; color: var(--ink); }\n  .iv-tile-v.gn { color: var(--gn); } .iv-tile-v.rd { color: var(--rd); } .iv-tile-v.am { color: var(--amb); }\n  .iv-tile-peer { font: 600 10px var(--mono); color: var(--ink-3); margin-top: 4px; letter-spacing: 0.02em; }\n  .iv-tile-peer b { color: var(--ink-1); font-weight: 700; }\n  .iv-tile-bar { height: 4px; background: var(--bg-3); border-radius: 1px; margin-top: 6px; overflow: visible; position: relative; }\n  .iv-tile-bar .peer-mark { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--ink-2); }\n  .iv-tile-bar .fill { height: 100%; border-radius: 1px; }\n  .iv-tile-bar .fill.gn { background: var(--gn); } .iv-tile-bar .fill.am { background: var(--amb); } .iv-tile-bar .fill.rd { background: var(--rd); }\n\n  /* Statements trend cards */\n  .iv-tr-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }\n  .iv-tr-card { padding: 10px 12px; border: 1px solid var(--line); border-radius: 2px; background: var(--bg-2); }\n  .iv-tr-k { font: 700 9px var(--mono); color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 4px; }\n  .iv-tr-v { font-family: var(--mono); font-size: 17px; font-weight: 800; line-height: 1.1; color: var(--ink); }\n  .iv-tr-cagr { font: 600 10px var(--mono); color: var(--gn); margin-top: 2px; }\n  .iv-tr-cagr.rd { color: var(--rd); } .iv-tr-cagr.am { color: var(--amb); }\n  .iv-tr-spark { width: 100%; height: 38px; display: block; margin-top: 6px; }\n\n  /* Capital allocation flow (sankey-lite) */\n  .iv-flow { background: var(--bg-2); border: 1px solid var(--line); border-radius: 2px; padding: 14px; }\n  .iv-flow svg { width: 100%; height: 220px; display: block; }\n\n  /* Thesis cards split */\n  .iv-th-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }\n  .iv-th-card { padding: 14px 16px; border-radius: 2px; border: 1px solid; background: var(--bg-2); }\n  .iv-th-card.bull { border-color: var(--gn-dim); border-left: 3px solid var(--gn); background: linear-gradient(90deg, var(--gn-bg) 0%, var(--bg-2) 60%); }\n  .iv-th-card.bear { border-color: var(--rd-dim); border-left: 3px solid var(--rd); background: linear-gradient(90deg, var(--rd-bg) 0%, var(--bg-2) 60%); }\n  .iv-th-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }\n  .iv-th-h .lbl { font: 800 11px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; }\n  .iv-th-h .lbl.gn { color: var(--gn); } .iv-th-h .lbl.rd { color: var(--rd); }\n  .iv-th-h .pt { font: 800 18px var(--mono); color: var(--ink); }\n  .iv-th-h .pt.gn { color: var(--gn); } .iv-th-h .pt.rd { color: var(--rd); }\n  .iv-th-h .pt small { font-size: 10px; color: var(--ink-3); font-weight: 600; letter-spacing: 0.05em; margin-left: 4px; }\n  .iv-th-body { font-family: var(--mono); font-size: 11.5px; color: var(--ink-1); line-height: 1.65; }\n  .iv-th-body ul { padding-left: 18px; margin: 0; }\n  .iv-th-body li { padding: 3px 0; }\n  .iv-th-body li b { color: var(--ink); font-weight: 700; }\n  .iv-th-when { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); font: 600 11px var(--mono); color: var(--ink-2); letter-spacing: 0.02em; }\n  .iv-th-when b { color: var(--ink); font-weight: 700; }\n  .iv-th-when .gn { color: var(--gn); } .iv-th-when .rd { color: var(--rd); }\n\n  /* Long-horizon calendar */\n  .iv-cal { font-family: var(--mono); }\n  .iv-cal-row { display: grid; grid-template-columns: 90px 110px 1fr 90px; gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--line); align-items: center; font-size: 11.5px; }\n  .iv-cal-row:last-child { border-bottom: none; }\n  .iv-cal-row.head { font: 700 9.5px var(--mono); color: var(--ink-3); letter-spacing: 0.12em; text-transform: uppercase; padding-top: 6px; padding-bottom: 6px; }\n  .iv-cal-date { color: var(--ink); font-weight: 700; }\n  .iv-cal-date small { display: block; font-size: 9.5px; color: var(--ink-3); font-weight: 600; margin-top: 2px; }\n  .iv-cal-type { font: 700 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 8px; border-radius: 2px; display: inline-block; }\n  .iv-cal-type.earn { color: var(--amb); background: var(--amb-bg); border: 1px solid var(--amb-dim); }\n  .iv-cal-type.div { color: var(--gn); background: var(--gn-bg); border: 1px solid var(--gn-dim); }\n  .iv-cal-type.day { color: var(--copper); background: var(--copper-bg); border: 1px solid var(--copper); }\n  .iv-cal-type.macro { color: var(--ink-2); background: var(--bg-3); border: 1px solid var(--line-2); }\n  .iv-cal-type.buyb { color: var(--gn); background: var(--gn-bg); border: 1px solid var(--gn-dim); }\n  .iv-cal-desc { color: var(--ink-1); font-size: 11.5px; }\n  .iv-cal-desc b { color: var(--ink); font-weight: 700; }\n  .iv-cal-impact { font: 700 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; text-align: right; }\n  .iv-cal-impact.hi { color: var(--rd); } .iv-cal-impact.med { color: var(--amb); } .iv-cal-impact.lo { color: var(--ink-3); }\n\n  .iv-note { margin-top: 10px; padding: 8px 12px; border-left: 2px solid var(--ink-4); background: var(--bg-2); border-radius: 0 2px 2px 0; font-size: 12px; color: var(--ink-2); line-height: 1.55; }\n  .iv-note.gn { border-left-color: var(--gn); } .iv-note.rd { border-left-color: var(--rd); } .iv-note.am { border-left-color: var(--amb); } .iv-note.cp { border-left-color: var(--copper); }\n  .iv-note b { color: var(--ink); }\n\n  .iv-pill { display: inline-block; padding: 2px 7px; font: 700 9px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; border-radius: 2px; background: var(--bg-2); border: 1px solid var(--line-2); color: var(--ink-2); }\n  .iv-pill.gn { color: var(--gn); border-color: var(--gn-dim); background: var(--gn-bg); }\n  .iv-pill.rd { color: var(--rd); border-color: var(--rd-dim); background: var(--rd-bg); }\n  .iv-pill.am { color: var(--amb); border-color: var(--amb-dim); background: var(--amb-bg); }\n  .iv-pill.cp { color: var(--copper); border-color: var(--copper); background: var(--copper-bg); }\n\n  .footer-note { text-align: center; color: var(--ink-3); font: 500 11px var(--mono); margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); letter-spacing: 0.06em; line-height: 1.7; }\n  .footer-note b { color: var(--copper); }\n  .footer-note .legal { color: var(--ink-4); font-size: 10px; }\n</style>";
@@ -35227,7 +35564,7 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
 
   // 2026-05-27 · Cross-Lens shared helper — derives 5-discipline verdicts from
   // t.scoring_breakdown + t.decisions_by_mode + t.news_sentiment_score.
-  // Previously each cross-lens panel hardcoded the same ROST fixture verdicts.
+  // Previously each cross-lens panel hardcoded the same fixture verdicts.
   function _qlnCrossLensCells(t, leadKey) {
     const sb = (t && t.scoring_breakdown) || {};
     const dbm = (t && t.decisions_by_mode) || {};
@@ -35821,11 +36158,37 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
       [/(er-cf-v gn lg">)72%(<)/g, '$1' + (_er_beatProb != null ? Math.round(_er_beatProb * 100) + '%' : '—') + '$2'],
       // Zacks ESP "+1.84%"
       [/\+1\.84%/g, _er_esp != null ? (_er_esp >= 0 ? '+' : '') + (+_er_esp).toFixed(2) + '%' : '—'],
+      // 2026-05-27 · Cohort sympathy table — replace fixed NVDA/MRVL peer
+      // read-throughs with generic prose since cohort sympathy beta isn't
+      // computed per-ticker yet. The AVGO swap above turned these into
+      // nonsensical "NVDA ER 15d after NVDA" lines.
+      [new RegExp(_esc(tk) + ' Sym 1-Day', 'g'), 'Peer Sym 1-Day'],
+      [new RegExp(_esc(tk) + ' Sym 5-Day', 'g'), 'Peer Sym 5-Day'],
+      [new RegExp(_esc(tk) + ' ER 15d after NVDA', 'g'), 'Pre-ER peer activity'],
+      [new RegExp(_esc(tk) + ' ER 8d after MRVL', 'g'), 'Pre-ER cohort activity'],
+      [new RegExp(_esc(tk) + ' sympathy beta to NVDA', 'g'), 'Sympathy beta to cohort lead'],
+      [new RegExp(_esc(tk) + " implied move likely", 'g'), 'Own implied move likely'],
+      [new RegExp(_esc(tk) + " implied move", 'g'), 'Own implied move'],
+      [new RegExp(_esc(tk) + " drifts", 'g'), 'Own ticker drifts'],
+      // Sympathy beta literals — generic placeholder until per-ticker computed
+      [/<b>0\.38<\/b> on 1-day, <b>0\.45<\/b>/g, '<b>—</b> on 1-day, <b>—</b>'],
+      [/<b>\+1\.8%<\/b> on average in the 5 days before/g, '<b>—</b> on average in the days before'],
+      [/NVDA reports <b>5\/21<\/b> \(15d before [^)]+\), MRVL <b>5\/28<\/b> \(8d before [^)]+\)/g,
+       'Cohort earnings dates available in Peer · Read-Through Calendar'],
+      // 2026-05-27 · Catch remaining hardcoded semi-cohort peers (cohort
+      // table uses NVDA/AMD/QCOM/MRVL — generic replacement for any non-semi).
+      [/NVDA · AMD · QCOM · MRVL recent prints/g, 'Same-industry peer recent prints'],
+      [/cohort tape mixed · NVDA leader/g, 'cohort tape mixed'],
     ];
     let body = bodyHTML;
     for (const [re, val] of _er_replacements) { try { body = body.replace(re, val); } catch (_) {} }
     // Build breadcrumb that mirrors prototype tone but uses live ticker
     const bc = '<div style="font:700 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--ink-3,#686c68);letter-spacing:0.18em;text-transform:uppercase;margin:8px 10px 14px"><span style="color:var(--copper,#d97757)">' + _esc(tk) + '</span> · DETAIL · <b style="color:var(--ink-1,#d4d8d1)">EARNINGS</b></div>';
+    // 2026-05-27 · Honest scaffolding banner — the body below has live data in
+    // multiple places (countdown · implied move · ESP · beat probability) but
+    // the cohort sympathy table + read-across prose are AVGO prototype
+    // scaffolding. Live earnings history shown in _liveEarn block below.
+    const _erDemoBanner = '<div style="margin:8px 10px 14px;padding:12px 16px;border:1px solid var(--amb,#fbbf24);border-left:4px solid var(--amb,#fbbf24);background:rgba(251,191,36,0.06);border-radius:2px;font:500 11.5px var(--mono,ui-monospace,monospace);color:var(--ink-1);line-height:1.55"><div style="font:800 10.5px var(--mono);color:var(--amb);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:5px">⚠ Partial scaffolding</div><b>Live:</b> ER countdown · implied move · beat probability · Zacks ESP · 8-quarter beat history (below). <b>Demo:</b> cohort sympathy table + read-across prose use a prototype semi-cohort fixture until per-ticker cohort sympathy beta is wired.</div>';
     // 2026-05-25 · LIVE EARNINGS HISTORY block — real 8-quarter beats from
     // t.earnings_history (EODHD Earnings.History extracted in build_data)
     const _eh = Array.isArray(t && t.earnings_history) ? t.earnings_history : [];
@@ -35871,7 +36234,7 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     }
     // Sub-sections (sympathy, drift, playbook, IV crush) render their own
     // per-section empty-states. No global banner.
-    return cssWrap + '<div class="erv2 k-er-scope" style="padding:8px 10px">' + bc + _liveEarn + '<div id="qearn-drift-root" style="margin:8px 0 14px;background:var(--bg-1,#11151a);border:1px solid var(--gn,#22c55e);border-left:4px solid var(--gn,#22c55e);border-radius:2px;padding:14px 16px"><div style="font:800 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--gn,#22c55e);letter-spacing:0.14em;margin-bottom:8px">📈 LIVE PRE-ER DRIFT · 5-day return into earnings</div><div style="color:var(--ink-3);font:600 11px var(--mono)">⌛ computing…</div></div><script src="/v2/qearn_drift.js"><\/script>' + '<div id="qearn-iv-root" style="margin:8px 0 14px;background:var(--bg-1,#11151a);border:1px solid var(--am,#fbbf24);border-left:4px solid var(--am,#fbbf24);border-radius:2px;padding:14px 16px"><div style="font:800 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--am,#fbbf24);letter-spacing:0.14em;margin-bottom:8px">⚡ LIVE IV CRUSH · per-ticker IV ramp + ER projection</div><div style="color:var(--ink-3);font:600 11px var(--mono)">⌛ loading IV history…</div></div><script src="/v2/qearn_iv_crush.js"><\/script>' + body + '</div>';
+    return cssWrap + '<div class="erv2 k-er-scope" style="padding:8px 10px">' + bc + _erDemoBanner + _liveEarn + '<div id="qearn-drift-root" style="margin:8px 0 14px;background:var(--bg-1,#11151a);border:1px solid var(--gn,#22c55e);border-left:4px solid var(--gn,#22c55e);border-radius:2px;padding:14px 16px"><div style="font:800 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--gn,#22c55e);letter-spacing:0.14em;margin-bottom:8px">📈 LIVE PRE-ER DRIFT · 5-day return into earnings</div><div style="color:var(--ink-3);font:600 11px var(--mono)">⌛ computing…</div></div><script src="/v2/qearn_drift.js"><\/script>' + '<div id="qearn-iv-root" style="margin:8px 0 14px;background:var(--bg-1,#11151a);border:1px solid var(--am,#fbbf24);border-left:4px solid var(--am,#fbbf24);border-radius:2px;padding:14px 16px"><div style="font:800 11px var(--mono,JetBrains Mono,ui-monospace,monospace);color:var(--am,#fbbf24);letter-spacing:0.14em;margin-bottom:8px">⚡ LIVE IV CRUSH · per-ticker IV ramp + ER projection</div><div style="color:var(--ink-3);font:600 11px var(--mono)">⌛ loading IV history…</div></div><script src="/v2/qearn_iv_crush.js"><\/script>' + body + '</div>';
   }
 
   function renderSection_earnings(id, t) {
@@ -36224,23 +36587,66 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     </div>`;
   }
 
+  // 2026-05-27 · Portfolio panels — pull from window._kairosData.portfolio.positions
+  // for held-position state, fall back to honest "not held" panels otherwise.
+  function _qpfHeldPos(t) {
+    const positions = (window._kairosData && window._kairosData.portfolio && Array.isArray(window._kairosData.portfolio.positions))
+      ? window._kairosData.portfolio.positions : [];
+    const tk = (t.ticker || '').toUpperCase();
+    return positions.find(p => (p.ticker || p.symbol || '').toUpperCase() === tk) || null;
+  }
+  function _qpfNav() {
+    return (window._kairosData && window._kairosData.portfolio && +window._kairosData.portfolio.equity) || 0;
+  }
+
   function renderPortfolio_StrategyFit(t) {
+    const held = _qpfHeldPos(t);
+    if (held) {
+      const cost = +held.entry_price || +held.cost_basis || 0;
+      const cur = +t.price || +held.current_price || 0;
+      const pnlPct = cost > 0 ? ((cur - cost) / cost * 100) : 0;
+      return _qlnStratFitPanel(t, [
+        { label:'SWING', hold:'2–10 d', vd:'N/A · HOLD', vdCls:'am', reason:'Already held — don\'t day-trade existing lots.', tgts:'Held qty ' + (held.shares || held.qty || 0) + ' sh' },
+        { label:'POSITION', hold:'2 wk – 6 mo', vd: pnlPct > 0 ? 'HOLD' : 'REVIEW', vdCls: pnlPct > 0 ? 'gn' : 'am', reason:'Held position — track vs stop/target.', tgts:`Cost $${cost.toFixed(2)} · current $${cur.toFixed(2)} · ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%` },
+        { label:'INVESTMENT', hold:'1+ yr', vd: pnlPct > 0 ? 'HOLD' : 'REVIEW', vdCls: pnlPct > 0 ? 'gn' : 'am', reason:'Thesis intact while stop holds.', tgts:`Stop ${held.stop ? '$' + (+held.stop).toFixed(2) : '—'}` },
+      ], 'portfolio', 1);
+    }
     return _qlnStratFitPanel(t, [
-      { label:'SWING', hold:'2–10 d', vd:'N/A · HOLD', vdCls:'am', reason:'Position lifecycle at Investment stage. Don\'t day-trade existing lots.', tgts:'Held lots are long-term oriented' },
-      { label:'POSITION', hold:'2 wk – 6 mo', vd:'HOLD', vdCls:'gn', reason:'Current 3.6% sizing fits sleeve · cap usage tight but acceptable.', tgts:'Cost $198.40 · current $214.55 · +8.1%' },
-      { label:'INVESTMENT', hold:'1+ yr', vd:'ADD on dip', vdCls:'gn', reason:'Tax-lot conversion to LT eligible 2027 · quality thesis intact.', tgts:'ADD trigger $208 + trim TJX 1% for cap room' },
-    ], 'portfolio', 2);
+      { label:'SWING', hold:'2–10 d', vd:'NEW POS', vdCls:'am', reason:'Not currently held. Evaluate as fresh entry per Plan tab sizing.', tgts:'Run Position Simulator first' },
+      { label:'POSITION', hold:'2 wk – 6 mo', vd:'NEW POS', vdCls:'am', reason:'Not held. Size per kelly cascade.', tgts:'See Plan tab for entry plan' },
+      { label:'INVESTMENT', hold:'1+ yr', vd:'NEW POS', vdCls:'am', reason:'Not held. Run quality + MoS check via Value tab.', tgts:'Check Value tab Bull vs Bear' },
+    ], 'portfolio', 1);
   }
 
   function renderPortfolio_HeldState(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">A</span>Held Position State<span class="sub">— exposure · cost · P&amp;L · days held · tax-lot</span><span class="tag">POSITION</span></div>
+    const held = _qpfHeldPos(t);
+    if (!held) {
+      return `<div class="qln-panel"><div class="qln-h2"><span class="num">A</span>Held Position State<span class="tag">NOT HELD</span></div>
+        <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">${_qlnEsc((t.ticker || '').toUpperCase())} is not currently in your portfolio. Evaluating as new entry.</div>
+      </div>`;
+    }
+    const cost = +held.entry_price || +held.cost_basis || 0;
+    const shares = +held.shares || +held.qty || 0;
+    const cur = +t.price || +held.current_price || 0;
+    const value = shares * cur;
+    const unrealPnl = (cur - cost) * shares;
+    const unrealPct = cost > 0 ? ((cur - cost) / cost * 100) : 0;
+    const nav = _qpfNav();
+    const navPct = nav > 0 ? (value / nav * 100) : 0;
+    const opened = held.opened_at || held.entry_date || held.opened;
+    let daysHeld = '—';
+    if (opened) {
+      try { daysHeld = Math.round((Date.now() - new Date(opened).getTime()) / (1000*60*60*24)) + 'd'; } catch (_) {}
+    }
+    const _f$ = (v) => v == null ? '—' : (v >= 0 ? '+$' : '−$') + Math.abs(v).toLocaleString(undefined, {maximumFractionDigits: 0});
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">A</span>Held Position State<span class="tag">LIVE</span></div>
       <div class="qln-g6">
-        <div class="qln-cell"><div class="qln-ck">HELD QTY</div><div class="qln-cv">85 sh</div><div class="qln-csub">long · paper</div></div>
-        <div class="qln-cell"><div class="qln-ck">COST BASIS</div><div class="qln-cv">$198.40</div><div class="qln-csub">avg · 2 lots</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">UNREAL P&amp;L</div><div class="qln-cv gn">+$1,372</div><div class="qln-csub">+8.14%</div></div>
-        <div class="qln-cell am"><div class="qln-ck">DAYS HELD</div><div class="qln-cv am">38d</div><div class="qln-csub">LT in 327d</div></div>
-        <div class="qln-cell"><div class="qln-ck">CURRENT VALUE</div><div class="qln-cv">$18,237</div><div class="qln-csub">3.6% NAV</div></div>
-        <div class="qln-cell"><div class="qln-ck">REALIZED YTD</div><div class="qln-cv">+$420</div><div class="qln-csub">prior trim</div></div>
+        <div class="qln-cell"><div class="qln-ck">HELD QTY</div><div class="qln-cv">${shares} sh</div><div class="qln-csub">${held.direction || 'long'} · ${held.account || 'paper'}</div></div>
+        <div class="qln-cell"><div class="qln-ck">COST BASIS</div><div class="qln-cv">$${cost.toFixed(2)}</div><div class="qln-csub">avg fill</div></div>
+        <div class="qln-cell ${unrealPnl >= 0 ? 'gn' : 'rd'}"><div class="qln-ck">UNREAL P&amp;L</div><div class="qln-cv ${unrealPnl >= 0 ? 'gn' : 'rd'}">${_f$(unrealPnl)}</div><div class="qln-csub">${(unrealPct >= 0 ? '+' : '') + unrealPct.toFixed(2)}%</div></div>
+        <div class="qln-cell"><div class="qln-ck">DAYS HELD</div><div class="qln-cv">${daysHeld}</div><div class="qln-csub">${opened ? 'opened ' + String(opened).slice(0, 10) : ''}</div></div>
+        <div class="qln-cell"><div class="qln-ck">CURRENT VALUE</div><div class="qln-cv">$${value.toLocaleString(undefined, {maximumFractionDigits: 0})}</div><div class="qln-csub">${navPct.toFixed(2)}% NAV</div></div>
+        <div class="qln-cell"><div class="qln-ck">STOP</div><div class="qln-cv">${held.stop ? '$' + (+held.stop).toFixed(2) : '—'}</div><div class="qln-csub">${held.target1 ? 'T1 $' + (+held.target1).toFixed(2) : ''}</div></div>
       </div>
     </div>`;
   }
@@ -36342,62 +36748,196 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
   }
 
   function renderPortfolio_CapUsage(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">B</span>Cap Usage · single-name · sector · factor<span class="tag">CAPS</span></div>
+    // 2026-05-27 · LIVE — compute single-name + sector cap usage from real positions.
+    const positions = (window._kairosData && window._kairosData.portfolio && Array.isArray(window._kairosData.portfolio.positions))
+      ? window._kairosData.portfolio.positions : [];
+    const nav = _qpfNav();
+    const tkSec = (t.sector || 'Other');
+    const held = _qpfHeldPos(t);
+    const heldVal = held ? (+held.shares || 0) * (+t.price || +held.current_price || 0) : 0;
+    const heldPct = nav > 0 ? heldVal / nav * 100 : 0;
+    // Aggregate by sector
+    const sectorTot = {};
+    positions.forEach(p => {
+      const v = (+p.shares || +p.qty || 0) * (+p.current_price || +p.entry_price || 0);
+      const sec = p.sector || 'Other';
+      sectorTot[sec] = (sectorTot[sec] || 0) + v;
+    });
+    const sectorPct = nav > 0 ? (sectorTot[tkSec] || 0) / nav * 100 : 0;
+    const _cap = (v, max) => v == null || max == null ? '—' : `${v.toFixed(1)}% / ${max.toFixed(1)}%`;
+    if (nav === 0) {
+      return `<div class="qln-panel"><div class="qln-h2"><span class="num">B</span>Cap Usage<span class="tag">NO PORTFOLIO</span></div>
+        <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">Portfolio NAV unavailable. Cap usage computation requires window._kairosData.portfolio.equity.</div>
+      </div>`;
+    }
+    const snCls = heldPct > 5 ? 'rd' : heldPct > 3 ? 'am' : 'gn';
+    const secCls = sectorPct > 18 ? 'rd' : sectorPct > 12 ? 'am' : 'gn';
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">B</span>Cap Usage · single-name · sector<span class="tag">LIVE</span></div>
       <div class="qln-g3">
-        <div class="qln-cell am"><div class="qln-ck">SINGLE-NAME</div><div class="qln-cv am">3.6% / 5.0%</div><div class="qln-csub">+1.4% room</div></div>
-        <div class="qln-cell am"><div class="qln-ck">SECTOR (Cons Cyc)</div><div class="qln-cv am">18% / 20%</div><div class="qln-csub">TIGHT · +2% room</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">FACTOR (Val Comp)</div><div class="qln-cv gn">28% / 35%</div><div class="qln-csub">+7% room</div></div>
+        <div class="qln-cell ${snCls}"><div class="qln-ck">SINGLE-NAME</div><div class="qln-cv ${snCls}">${_cap(heldPct, 5.0)}</div><div class="qln-csub">${(5 - heldPct).toFixed(1)}% room</div></div>
+        <div class="qln-cell ${secCls}"><div class="qln-ck">SECTOR (${_qlnEsc(tkSec)})</div><div class="qln-cv ${secCls}">${_cap(sectorPct, 20.0)}</div><div class="qln-csub">${(20 - sectorPct).toFixed(1)}% room</div></div>
+        <div class="qln-cell"><div class="qln-ck">FACTOR CAPS</div><div class="qln-cv">—</div><div class="qln-csub">factor-exposure feed not wired</div></div>
       </div>
-      <div class="qln-summary"><b style="color:var(--am)">Sector cap is binding constraint.</b> To add ROST, need to trim another Consumer Cyclical (TJX or LULU).</div>
+      <div class="qln-summary">NAV $${(nav/1000).toFixed(0)}K · ${positions.length} positions held. Caps per CLAUDE.md: single-name ≤5%, sector ≤20%.</div>
     </div>`;
   }
 
   function renderPortfolio_Correlation(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">C</span>Correlation to Existing Book<span class="tag">DIVERSIFICATION</span></div>
+    // 2026-05-27 · LIVE — compute correlations from real held positions using bars_daily.
+    const positions = (window._kairosData && window._kairosData.portfolio && Array.isArray(window._kairosData.portfolio.positions))
+      ? window._kairosData.portfolio.positions : [];
+    if (!positions.length) {
+      return `<div class="qln-panel"><div class="qln-h2"><span class="num">C</span>Correlation to Existing Book<span class="tag">EMPTY PORTFOLIO</span></div>
+        <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">No positions in current portfolio. Add positions via the Portfolio tab to see correlation diversification analysis.</div>
+      </div>`;
+    }
+    const nav = _qpfNav();
+    const ownReturns = _qlnReturns((t.smc_data || {}).bars_daily || []);
+    if (ownReturns.length < 10) {
+      return `<div class="qln-panel"><div class="qln-h2"><span class="num">C</span>Correlation to Existing Book<span class="tag">NO PRICE HIST</span></div>
+        <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">${_qlnEsc(t.ticker)} has insufficient bars_daily history for correlation.</div>
+      </div>`;
+    }
+    const tk = (t.ticker || '').toUpperCase();
+    const all_scored = (window._kairosData && window._kairosData.all_scored) || [];
+    const tkSec = t.sector || '';
+    const rows = positions.map(p => {
+      const pTk = (p.ticker || p.symbol || '').toUpperCase();
+      if (pTk === tk) return null;
+      const peer = all_scored.find(x => (x.ticker || '').toUpperCase() === pTk);
+      const peerSec = peer?.sector || p.sector || '';
+      const v = (+p.shares || 0) * (+p.current_price || +p.entry_price || 0);
+      const navPct = nav > 0 ? (v / nav * 100) : null;
+      let corr = null;
+      if (peer) {
+        const r = _qlnReturns((peer.smc_data || {}).bars_daily || []);
+        if (r.length >= 10) {
+          const n = Math.min(ownReturns.length, r.length);
+          corr = _qlnPearson(ownReturns.slice(-n), r.slice(-n));
+        }
+      }
+      const readCls = corr == null ? '' : Math.abs(corr) > 0.7 ? 'rd' : Math.abs(corr) > 0.4 ? 'am' : 'gn';
+      const readTxt = corr == null ? '— no peer history'
+                    : Math.abs(corr) > 0.7 ? 'heavily overlapping'
+                    : Math.abs(corr) > 0.4 ? 'moderate'
+                    : 'diversifying';
+      return `<tr><td><b>${_qlnEsc(pTk)}</b></td><td>${_qlnEsc(peerSec || '—')}</td><td>${navPct != null ? navPct.toFixed(1) + '%' : '—'}</td><td>${corr != null ? corr.toFixed(2) : '—'}</td><td class="${readCls}">${readTxt}</td></tr>`;
+    }).filter(Boolean).join('');
+    const heldRow = `<tr class="subject"><td>${_qlnEsc(tk)} (subject)</td><td>${_qlnEsc(tkSec || '—')}</td><td>—</td><td>—</td><td class="cp">${_qpfHeldPos(t) ? 'held' : 'new add'}</td></tr>`;
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">C</span>Correlation to Existing Book · 60d<span class="tag">LIVE · ${positions.length} positions</span></div>
       <table class="qln-tbl">
-        <thead><tr><th>HOLDING</th><th>SECTOR</th><th>NAV %</th><th>1y CORR</th><th>READ</th></tr></thead>
-        <tbody>
-          <tr><td>NVDA</td><td>Tech</td><td>5.2%</td><td>0.31</td><td class="gn">diversifying</td></tr>
-          <tr><td>AAPL</td><td>Tech</td><td>4.8%</td><td>0.48</td><td class="gn">low overlap</td></tr>
-          <tr><td>TJX</td><td>Cons Cyc</td><td>4.6%</td><td>0.72</td><td class="rd">heavily overlapping</td></tr>
-          <tr><td>LULU</td><td>Cons Cyc</td><td>3.8%</td><td>0.58</td><td class="am">moderate</td></tr>
-          <tr class="subject"><td>ROST (add)</td><td>Cons Cyc</td><td>+1.4%</td><td>—</td><td>net diversifier vs tech</td></tr>
-        </tbody>
+        <thead><tr><th>HOLDING</th><th>SECTOR</th><th>NAV %</th><th>60d CORR</th><th>READ</th></tr></thead>
+        <tbody>${rows}${heldRow}</tbody>
       </table>
     </div>`;
   }
 
   function renderPortfolio_FactorExposure(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">D</span>Factor Exposure Decomposition<span class="sub">— how ROST tilts your book's factors</span><span class="tag">FACTOR</span></div>
-      <div class="qln-g5">
-        <div class="qln-cell gn"><div class="qln-ck">QUALITY</div><div class="qln-cv gn">+0.18</div><div class="qln-csub">F-score 8/9</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">VALUE</div><div class="qln-cv gn">+0.12</div><div class="qln-csub">P/E below sector</div></div>
-        <div class="qln-cell"><div class="qln-ck">MOMENTUM</div><div class="qln-cv">−0.08</div><div class="qln-csub">recent weakness</div></div>
-        <div class="qln-cell am"><div class="qln-ck">LOW-VOL</div><div class="qln-cv am">+0.22</div><div class="qln-csub">β 0.88 defensive</div></div>
-        <div class="qln-cell"><div class="qln-ck">SIZE</div><div class="qln-cv">+0.0</div><div class="qln-csub">large-cap neutral</div></div>
-      </div>
+    // 2026-05-27 · Wire to t.factor_tags + scoring_breakdown.
+    const tags = Array.isArray(t.factor_tags) ? t.factor_tags : [];
+    const sb = t.scoring_breakdown || {};
+    const beta = +t.beta || 1.0;
+    const tk = _qlnEsc((t.ticker || '').toUpperCase());
+    const qual = +sb.qg_score || 0;
+    const mom  = +sb.tech_score || 0;
+    const rs   = +sb.rs_score || 0;
+    const _exp = (v, max) => v == null ? null : (v / max);
+    const items = [
+      { lbl: 'QUALITY',    sc: _exp(qual, 10), sub: `gate score ${qual}/10` },
+      { lbl: 'MOMENTUM',   sc: _exp(mom, 35),  sub: `tech score ${mom}/35` },
+      { lbl: 'RELATIVE STRENGTH', sc: _exp(rs, 20), sub: `RS rank ${(+t.rs_rank || 0).toFixed(0)}` },
+      { lbl: 'LOW-VOL',    sc: beta < 1 ? (1 - beta) : -(beta - 1) / 2, sub: `β ${beta.toFixed(2)}` },
+      { lbl: 'SIZE',       sc: null,           sub: `${((+t.market_cap || 0) / 1e9).toFixed(0)}B mcap` },
+    ];
+    const cells = items.map(it => {
+      const v = it.sc;
+      const txt = v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2);
+      const cls = v == null ? '' : v > 0.3 ? 'gn' : v < -0.3 ? 'rd' : v > 0 ? 'am' : '';
+      return `<div class="qln-cell ${cls}"><div class="qln-ck">${it.lbl}</div><div class="qln-cv ${cls}">${txt}</div><div class="qln-csub">${it.sub}</div></div>`;
+    }).join('');
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">D</span>Factor Exposure · ${tk} tilt<span class="tag">DERIVED · scoring_breakdown</span></div>
+      <div class="qln-g5">${cells}</div>
+      ${tags.length ? `<div class="qln-summary">Detected factor tags: <b>${tags.map(_qlnEsc).join(' · ')}</b></div>` : ''}
     </div>`;
   }
 
   function renderPortfolio_TaxLot(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">E</span>Tax-Lot Status · ST/LT proximity · wash-sale<span class="tag">TAX</span></div>
+    // 2026-05-27 · Wire to real held position. Bundle doesn't carry per-lot detail
+    // or wash-sale history; show what we have (single lot) + honest about missing.
+    const held = _qpfHeldPos(t);
+    if (!held) {
+      return `<div class="qln-panel"><div class="qln-h2"><span class="num">E</span>Tax-Lot Status<span class="tag">NOT HELD</span></div>
+        <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">No held position. Tax-lot analysis applies to existing positions only.</div>
+      </div>`;
+    }
+    const opened = held.opened_at || held.entry_date || held.opened;
+    let daysHeld = null, daysToLT = null, openedDate = '—';
+    if (opened) {
+      try {
+        const d = new Date(opened);
+        daysHeld = Math.round((Date.now() - d.getTime()) / (1000*60*60*24));
+        daysToLT = 365 - daysHeld;
+        openedDate = d.toISOString().slice(0, 10);
+      } catch (_) {}
+    }
+    const cost = +held.entry_price || +held.cost_basis || 0;
+    const cur = +t.price || +held.current_price || 0;
+    const shares = +held.shares || +held.qty || 0;
+    const unrealPnl = (cur - cost) * shares;
+    const ltCls = daysToLT == null ? '' : daysToLT <= 0 ? 'gn' : daysToLT < 60 ? 'am' : 'rd';
+    const ltTxt = daysToLT == null ? '—' : daysToLT <= 0 ? 'LT ELIGIBLE' : `LT in ${daysToLT}d`;
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">E</span>Tax-Lot Status<span class="tag">LIVE · single-lot view (per-lot detail not in bundle)</span></div>
       <div class="qln-g5">
-        <div class="qln-cell am"><div class="qln-ck">LOT 1 (60sh)</div><div class="qln-cv am">2026-04-05</div><div class="qln-csub">LT in 327d</div></div>
-        <div class="qln-cell am"><div class="qln-ck">LOT 2 (25sh)</div><div class="qln-cv am">2026-05-01</div><div class="qln-csub">LT in 353d</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">ST GAIN IF EXIT</div><div class="qln-cv rd">+$1,372</div><div class="qln-csub">taxed marginal</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">LT-SAVED</div><div class="qln-cv gn">$487</div><div class="qln-csub">vs ST · if held to LT</div></div>
-        <div class="qln-cell gn"><div class="qln-ck">WASH-SALE</div><div class="qln-cv gn">CLEAR</div><div class="qln-csub">no recent loss sells</div></div>
+        <div class="qln-cell"><div class="qln-ck">LOT (${shares}sh)</div><div class="qln-cv">${openedDate}</div><div class="qln-csub">${daysHeld != null ? daysHeld + 'd held' : ''}</div></div>
+        <div class="qln-cell ${ltCls}"><div class="qln-ck">LT STATUS</div><div class="qln-cv ${ltCls}">${ltTxt}</div><div class="qln-csub">365d for LT capital gains</div></div>
+        <div class="qln-cell ${unrealPnl >= 0 ? 'am' : 'gn'}"><div class="qln-ck">${unrealPnl >= 0 ? 'ST GAIN IF EXIT' : 'ST LOSS IF EXIT'}</div><div class="qln-cv ${unrealPnl >= 0 ? 'am' : 'gn'}">${(unrealPnl >= 0 ? '+$' : '−$') + Math.abs(unrealPnl).toLocaleString(undefined, {maximumFractionDigits: 0})}</div><div class="qln-csub">${unrealPnl >= 0 ? 'taxed marginal' : 'tax loss harvest'}</div></div>
+        <div class="qln-cell"><div class="qln-ck">LT SAVINGS</div><div class="qln-cv">—</div><div class="qln-csub">bracket data not wired</div></div>
+        <div class="qln-cell"><div class="qln-ck">WASH-SALE</div><div class="qln-cv">—</div><div class="qln-csub">30d sells history not wired</div></div>
       </div>
     </div>`;
   }
 
   function renderPortfolio_SleepTest(t) {
-    return `<div class="qln-panel"><div class="qln-h2"><span class="num">F</span>Sleep Test · can you hold through DD?<span class="tag">STRESS</span></div>
+    // 2026-05-27 · Compute proportional stress from held position OR proposed.
+    const tk = _qlnEsc((t.ticker || '').toUpperCase());
+    const held = _qpfHeldPos(t);
+    const nav = _qpfNav();
+    const beta = +t.beta || 1.0;
+    let posVal;
+    let label;
+    if (held) {
+      posVal = (+held.shares || 0) * (+t.price || +held.current_price || 0);
+      label = 'held';
+    } else {
+      // Hypothetical: assume 3% of NAV new position
+      posVal = nav * 0.03;
+      label = 'hypothetical 3% NAV';
+    }
+    if (!nav || !posVal) {
+      return `<div class="qln-panel"><div class="qln-h2"><span class="num">F</span>Sleep Test<span class="tag">NO PORTFOLIO</span></div>
+        <div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">Need NAV and position size. Add to portfolio or set NAV.</div>
+      </div>`;
+    }
+    const _f = (loss) => {
+      const dollarLoss = posVal * loss;
+      const navPct = (dollarLoss / nav) * 100;
+      const cls = navPct < 0.4 ? 'gn' : navPct < 1.0 ? 'am' : 'rd';
+      const verdict = navPct < 0.4 ? 'easy' : navPct < 1.0 ? 'ok' : navPct < 2.0 ? 'stress' : 'pain';
+      return { dollarLoss, navPct, cls, verdict };
+    };
+    const s10 = _f(0.10), s20 = _f(0.20), s30 = _f(0.30);
+    // Portfolio-level stress: SPY -20% with this ticker -35% (beta-amplified)
+    const spyDrop = 0.20;
+    const tkDrop = Math.min(0.45, 0.20 * beta + 0.10); // beta-amplified
+    const portfolioStress = (nav * spyDrop * 0.8) + (posVal * tkDrop);  // rough: 80% of NAV moves with SPY
+    const psNavPct = portfolioStress / nav * 100;
+    const _fmt = (v) => '−$' + Math.round(v).toLocaleString();
+    return `<div class="qln-panel"><div class="qln-h2"><span class="num">F</span>Sleep Test · can you hold through DD? · ${label}<span class="tag">DERIVED</span></div>
       <div class="qln-g4">
-        <div class="qln-cell gn"><div class="qln-ck">ROST −10% / 1mo</div><div class="qln-cv gn">−$1,824</div><div class="qln-csub">0.36% NAV · easy</div></div>
-        <div class="qln-cell am"><div class="qln-ck">ROST −20%</div><div class="qln-cv am">−$3,647</div><div class="qln-csub">0.73% NAV · ok</div></div>
-        <div class="qln-cell am"><div class="qln-ck">ROST −30%</div><div class="qln-cv am">−$5,471</div><div class="qln-csub">1.09% NAV · stress</div></div>
-        <div class="qln-cell rd"><div class="qln-ck">SPY−20% + ROST−35%</div><div class="qln-cv rd">−$50K total</div><div class="qln-csub">portfolio −10%</div></div>
+        <div class="qln-cell ${s10.cls}"><div class="qln-ck">${tk} −10%</div><div class="qln-cv ${s10.cls}">${_fmt(s10.dollarLoss)}</div><div class="qln-csub">${s10.navPct.toFixed(2)}% NAV · ${s10.verdict}</div></div>
+        <div class="qln-cell ${s20.cls}"><div class="qln-ck">${tk} −20%</div><div class="qln-cv ${s20.cls}">${_fmt(s20.dollarLoss)}</div><div class="qln-csub">${s20.navPct.toFixed(2)}% NAV · ${s20.verdict}</div></div>
+        <div class="qln-cell ${s30.cls}"><div class="qln-ck">${tk} −30%</div><div class="qln-cv ${s30.cls}">${_fmt(s30.dollarLoss)}</div><div class="qln-csub">${s30.navPct.toFixed(2)}% NAV · ${s30.verdict}</div></div>
+        <div class="qln-cell rd"><div class="qln-ck">SPY −20% + ${tk} −${(tkDrop*100).toFixed(0)}%</div><div class="qln-cv rd">${_fmt(portfolioStress)}</div><div class="qln-csub">portfolio −${psNavPct.toFixed(1)}% · β-amplified</div></div>
       </div>
     </div>`;
   }
@@ -37154,16 +37694,28 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
   }
 
   function renderPeer_StrategyFit(t) {
+    // 2026-05-27 · Find worst-performing same-industry peer for pair-trade hint.
+    let pairShort = 'cohort laggard', rsGap = '';
+    try {
+      const cohort = _qlnPeerCohort(t);
+      const ownRs = +t.rs_rank || 0;
+      const others = cohort.filter(x => x.ticker !== t.ticker).map(x => ({ tk: x.ticker, rs: +x.rs_rank || 0 }));
+      if (others.length) {
+        const worst = others.sort((a, b) => a.rs - b.rs)[0];
+        pairShort = worst.tk;
+        rsGap = ` (RS gap ${(ownRs - worst.rs >= 0 ? '+' : '')}${(ownRs - worst.rs).toFixed(0)})`;
+      }
+    } catch (_) {}
     return _qlnStratFitPanel(t, [
       { label:'SWING', hold:'2–10 d', vd:'PAIR · LONG/SHORT', vdCls:'am',
         reason:'Use peer divergence for hedged pair · long best-of-cohort, short worst.',
-        tgts:`Pair: long ${String(t.ticker||'').toUpperCase()} / short BURL (RS gap +12%)` },
+        tgts:`Pair: long ${String(t.ticker||'').toUpperCase()} / short ${pairShort}${rsGap}` },
       { label:'POSITION', hold:'2 wk – 6 mo', vd:'BEST EXPRESSION', vdCls:'gn',
         reason:'If thesis is right, best-of-cohort captures it cleanest with least exogenous noise.',
-        tgts:'Cohort rank 2/8 · top-quartile · 0.72 correl head sets ceiling' },
+        tgts:'See Peer · Cohort Table for live composite ranking' },
       { label:'INVESTMENT', hold:'1+ yr', vd:'OWN THE LEADER', vdCls:'gn',
         reason:'Multi-year compounders concentrate in cohort leaders · #1-2 by ROIC.',
-        tgts:'Rank by ROIC 1/8 · rank by FCF stability 2/8' },
+        tgts:'See Peer · Rank by Metric for ROIC ranking' },
     ], 'peer', 1);
   }
 
@@ -40848,18 +41400,53 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
 
     // ═══════════════════════════════════════════════════════════════════
     // §10 · PORTFOLIO IMPACT · CORRELATION HEATMAP
-    // ═══════════════════════════════════════════════════════════════════
-    const portCorr = t.portfolio_corr || [];
-    const corrPeers = portCorr.length ? portCorr.slice(0,4) : [['NVDA',0.78],['AMD',0.71],['SMCI',0.65],['AVGO',0.82]];
+    // 2026-05-27 · LIVE — compute correlations against current portfolio
+    // positions if held (data.portfolio.positions), else top-3 same-industry
+    // peers from all_scored. Previously fell back to [NVDA/AMD/SMCI/AVGO] —
+    // wrong on every non-semi ticker.
+    let portCorr = Array.isArray(t.portfolio_corr) ? t.portfolio_corr : [];
+    if (!portCorr.length) {
+      try {
+        const kd = window._kairosData || {};
+        const ownReturns = (typeof _qlnReturns === 'function') ? _qlnReturns((t.smc_data || {}).bars_daily || []) : [];
+        if (ownReturns.length >= 10) {
+          const positions = (kd.portfolio && Array.isArray(kd.portfolio.positions)) ? kd.portfolio.positions : [];
+          const heldTickers = positions.map(p => (p.ticker || p.symbol || '').toUpperCase()).filter(s => s && s !== (t.ticker || '').toUpperCase());
+          let candidates = [];
+          if (heldTickers.length) {
+            candidates = (kd.all_scored || []).filter(x => heldTickers.includes((x.ticker || '').toUpperCase()));
+          }
+          if (!candidates.length) {
+            // Fallback: top-3 same-industry peers by market cap
+            const peers = (kd.all_scored || []).filter(x => x.industry === t.industry && x.ticker !== t.ticker);
+            peers.sort((a, b) => (+b.market_cap || 0) - (+a.market_cap || 0));
+            candidates = peers.slice(0, 4);
+          }
+          const computed = candidates.map(x => {
+            const r = _qlnReturns((x.smc_data || {}).bars_daily || []);
+            if (r.length < 10) return null;
+            const n = Math.min(ownReturns.length, r.length);
+            const c = _qlnPearson(ownReturns.slice(-n), r.slice(-n));
+            return c == null ? null : [x.ticker, +c.toFixed(2)];
+          }).filter(Boolean).slice(0, 4);
+          if (computed.length) portCorr = computed;
+        }
+      } catch (_) {}
+    }
+    // Final fallback: render the panel as empty rather than fake numbers
+    const corrPeers = portCorr.length ? portCorr.slice(0,4) : null;
     const corrCell = (val) => {
       if (val >= 0.8) return 'background:#15803d;color:#f5f7f5';
       if (val >= 0.6) return 'background:#22c55e;color:#0a0d0c';
       if (val >= 0.4) return 'background:rgba(251,191,36,0.4);color:var(--ink)';
       return 'background:#9a9e98;color:#0a0d0c';
     };
-    const portBody = `<div style="display:grid;grid-template-columns:3fr 2fr;gap:12px">
+    const _avgCorr = corrPeers ? (corrPeers.reduce((s,[,c])=>s+c,0)/corrPeers.length) : null;
+    const portBody = !corrPeers ? `<div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">
+        No correlation data — no positions held in portfolio and no same-industry peers with sufficient price history.
+      </div>` : `<div style="display:grid;grid-template-columns:3fr 2fr;gap:12px">
       <div style="background:var(--bg-2);border:1px solid var(--line);border-radius:2px;padding:10px 12px">
-        <div style="font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:8px">Correlation matrix · 90d rolling</div>
+        <div style="font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:8px">Correlation matrix · 60d rolling · ${(window._kairosData?.portfolio?.positions || []).length ? 'vs held positions' : 'vs same-industry peers'}</div>
         <div style="display:grid;grid-template-columns:80px ${corrPeers.map(() => '1fr').join(' ')} 1fr;gap:2px;font-family:var(--mono);font-size:11px">
           <div></div>
           ${corrPeers.map(([p]) => `<div style="padding:6px;text-align:center;font-weight:800;color:var(--ink-2)">${esc(p)}</div>`).join('')}
@@ -40877,7 +41464,7 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       </div>
       <div style="display:flex;flex-direction:column;gap:10px">
         <div class="opt-tile"><div class="opt-tile-k">Portfolio β · proposed</div><div class="opt-tile-v am">→ ${(1.05 + (_beta - 1) * 0.07).toFixed(2)}</div><div class="opt-tile-s">target ≤1.20 · ${_beta.toFixed(2)} solo</div></div>
-        <div class="opt-tile"><div class="opt-tile-k">Avg Correlation</div><div class="opt-tile-v ${corrPeers.reduce((s,[,c])=>s+c,0)/corrPeers.length > 0.7 ? 'rd' : 'am'}">${(corrPeers.reduce((s,[,c])=>s+c,0)/corrPeers.length).toFixed(2)}</div><div class="opt-tile-s">${corrPeers.reduce((s,[,c])=>s+c,0)/corrPeers.length > 0.7 ? 'high · concentration risk' : 'acceptable'}</div></div>
+        <div class="opt-tile"><div class="opt-tile-k">Avg Correlation</div><div class="opt-tile-v ${_avgCorr > 0.7 ? 'rd' : 'am'}">${_avgCorr.toFixed(2)}</div><div class="opt-tile-s">${_avgCorr > 0.7 ? 'high · concentration risk' : 'acceptable'}</div></div>
         <div class="opt-tile"><div class="opt-tile-k">Sector Cap</div><div class="opt-tile-v gn">headroom OK</div><div class="opt-tile-s">${esc(t.sector || '—')} · within limit</div></div>
       </div>
     </div>
@@ -50100,6 +50687,23 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       [/K\. SAMUELI|KENNETH SAMUELI/g, _insN > 0 ? 'INSIDER 2' : '—'],
       [/KIRSTEN CHEN/g, _insN > 0 ? 'INSIDER 3' : '—'],
       [/DIANE BRYANT/g, _insN > 0 ? 'INSIDER 4' : '—'],
+      // 2026-05-27 · Catch case-variant Hock Tan + AVGO-specific entities that
+      // leaked through (VMware references in news headlines, Broadcom/MSFT
+      // pair-trade prose, custom-ASIC narrative).
+      [/Hock Tan/g, _insN > 0 ? 'CEO' : '—'],
+      [/VMware Integration Ahead of Plan/g, 'Operational update'],
+      [/VMware/g, '—'],
+      [/Broadcom vs Microsoft/g, _esc((_tf_name || tk).split(' ')[0]) + ' vs cohort peer'],
+      [/Custom AI Silicon Pipeline Said to Double Through 2027/g, 'Long-term growth catalyst'],
+      [/cites custom-ASIC market share/g, 'cites segment leadership'],
+      [/custom-ASIC market share/g, 'segment leadership'],
+      [/ASIC pipeline/g, 'growth pipeline'],
+      // 2026-05-27 · UOA strike-example $475 — swap with ATM strike from
+      // options_kpis when available, else show "—".
+      [/>\$475</g, '>' + (() => {
+        const atm = (t && t.options_kpis && t.options_kpis.atm_strike) || (px ? Math.round(px / 5) * 5 : null);
+        return atm ? '$' + atm : '$—';
+      })() + '<'],
     ];
     // 2026-05-25 · Build LIVE INTEL block with real insider names, 13F, UOA
     const _insTx = Array.isArray(t && t.insider_transactions) ? t.insider_transactions : [];
