@@ -1,0 +1,1079 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kairos · Reference Dashboards</title>
+<style>html,body{margin:0;padding:0;background:#080a10;min-height:100vh}#root{min-height:100vh}
+#err{display:none;color:#e05252;font:13px/1.5 monospace;padding:24px;white-space:pre-wrap}</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head><body>
+<div id="root"></div>
+<pre id="err"></pre>
+<script type="text/babel" data-presets="react">
+try {
+const {useState, useEffect, useRef, useMemo, useCallback} = React;
+const {RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, Legend, LineChart, Line, BarChart, Bar, Cell, PieChart, Pie, ComposedChart, Scatter, ScatterChart, ReferenceLine} = Recharts;
+
+/* ─── SHARED DATA ─── */
+const signals = [
+  { ticker:"NVDA", type:"BREAKOUT", dir:"LONG",  conf:5, chg:"+2.3%", vol:"4.1x", time:"14:23", gate:14 },
+  { ticker:"AMD",  type:"VOL SPIKE",dir:"LONG",  conf:4, chg:"+1.1%", vol:"2.8x", time:"14:21", gate:11 },
+  { ticker:"TSLA", type:"MOMENTUM", dir:"SHORT", conf:2, chg:"-0.8%", vol:"1.9x", time:"14:18", gate:6  },
+  { ticker:"SPY",  type:"BREAKOUT", dir:"LONG",  conf:5, chg:"+0.4%", vol:"3.5x", time:"14:15", gate:14 },
+  { ticker:"AAPL", type:"REL STR",  dir:"LONG",  conf:4, chg:"+1.7%", vol:"2.2x", time:"14:12", gate:12 },
+  { ticker:"QQQ",  type:"REVERSAL", dir:"SHORT", conf:3, chg:"-0.3%", vol:"2.6x", time:"14:09", gate:8  },
+  { ticker:"META", type:"BREAKOUT", dir:"LONG",  conf:4, chg:"+3.1%", vol:"3.1x", time:"14:06", gate:13 },
+];
+const flow = [
+  { ticker:"SPY",  exp:"05/31",strike:"530C",size:"$2.4M",type:"SWEEP",bullish:true,  time:"14:22" },
+  { ticker:"NVDA", exp:"06/07",strike:"950C",size:"$1.1M",type:"BLOCK",bullish:true,  time:"14:20" },
+  { ticker:"TSLA", exp:"05/31",strike:"175P",size:"$890K",type:"SWEEP",bullish:false, time:"14:17" },
+  { ticker:"QQQ",  exp:"06/14",strike:"455P",size:"$2.0M",type:"BLOCK",bullish:false, time:"14:15" },
+  { ticker:"AAPL", exp:"06/07",strike:"215C",size:"$670K",type:"SWEEP",bullish:true,  time:"14:11" },
+  { ticker:"AMD",  exp:"05/31",strike:"165C",size:"$450K",type:"SWEEP",bullish:true,  time:"14:08" },
+];
+const darkPool = [
+  { ticker:"MSFT", size:"$48.2M", price:"428.40", prem:"+1.2%", time:"14:19" },
+  { ticker:"SPY",  size:"$31.7M", price:"528.90", prem:"+0.3%", time:"14:16" },
+  { ticker:"NVDA", size:"$22.4M", price:"948.50", prem:"+0.8%", time:"14:13" },
+  { ticker:"GOOGL",size:"$18.9M", price:"175.20", prem:"-0.4%", time:"14:10" },
+];
+const pillars = [
+  { subject:"Momentum", A:82, fullMark:100 },
+  { subject:"Volume",   A:71, fullMark:100 },
+  { subject:"Options",  A:88, fullMark:100 },
+  { subject:"Macro",    A:65, fullMark:100 },
+  { subject:"Sentiment",A:79, fullMark:100 },
+];
+const pnlData = [
+  {d:"W1",v:0},{d:"W2",v:340},{d:"W3",v:280},{d:"W4",v:620},
+  {d:"W5",v:510},{d:"W6",v:890},{d:"W7",v:740},{d:"W8",v:1240},
+  {d:"W9",v:1180},{d:"W10",v:1620},{d:"W11",v:1890},{d:"W12",v:2340},
+];
+const leaderboard = [
+  { rank:1,  name:"axl_capital",   ret:"+312%", cal:0.81, verified:true  },
+  { rank:2,  name:"theta_trader",  ret:"+287%", cal:0.78, verified:true  },
+  { rank:3,  name:"iron_condor_k", ret:"+241%", cal:0.74, verified:true  },
+  { rank:47, name:"you",           ret:"+38%",  cal:0.61, verified:false },
+  { rank:48, name:"rho_delta22",   ret:"+37%",  cal:0.59, verified:false },
+];
+const sectors = [
+  { name:"Tech",   val:"+1.8",hot:true  }, { name:"Energy",  val:"-0.4",hot:false },
+  { name:"Finance",val:"+0.7",hot:false }, { name:"Health",  val:"+0.3",hot:false },
+  { name:"Cons",   val:"+1.2",hot:true  }, { name:"Utility", val:"-0.2",hot:false },
+  { name:"Mater",  val:"+0.5",hot:false }, { name:"RE",      val:"-0.8",hot:false },
+  { name:"Telecom",val:"+0.9",hot:false }, { name:"Indust",  val:"+0.6",hot:false },
+  { name:"Staples",val:"+0.1",hot:false }, { name:"Intl",    val:"+1.4",hot:true  },
+];
+
+/* ─── SHARED STYLES ─── */
+const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&display=swap');
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+*{box-sizing:border-box;margin:0;padding:0}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:#080a10}
+::-webkit-scrollbar-thumb{background:#1e2435;border-radius:2px}
+button{cursor:pointer;font-family:inherit}`;
+
+const C = {
+  bg:"#080a10", surface:"#0c0e16", border:"#161b27",
+  text:"#d4dae8", muted:"#4a5368", dim:"#262d3d",
+  green:"#34c77b", red:"#e05252", gold:"#d69e2e",
+  amber:"#ed8936", blue:"#4299e1", platinum:"#e2e8f0",
+};
+
+/* ─── REUSABLE ATOMS ─── */
+const Mono = ({children, size=11, color=C.muted, weight="400", style={}}) => (
+  <span style={{fontFamily:"'Space Mono',monospace",fontSize:size,color,fontWeight:weight,letterSpacing:"0.5px",...style}}>{children}</span>
+);
+const Tag = ({children, color=C.gold}) => (
+  <span style={{
+    fontFamily:"'Space Mono',monospace",fontSize:8,fontWeight:700,letterSpacing:"1.5px",
+    padding:"2px 7px",borderRadius:3,background:color+"18",border:`1px solid ${color}40`,color,
+  }}>{children}</span>
+);
+const Badge = ({label, color}) => (
+  <div style={{
+    display:"inline-flex",alignItems:"center",gap:5,
+    background:color+"12",border:`1px solid ${color}30`,
+    borderRadius:20,padding:"3px 10px",
+  }}>
+    <div style={{width:5,height:5,borderRadius:"50%",background:color,animation:"pulse 2s infinite"}}/>
+    <Mono size={8} color={color} weight="700" style={{letterSpacing:2}}>{label}</Mono>
+  </div>
+);
+const Panel = ({children,style={}}) => (
+  <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,...style}}>{children}</div>
+);
+const PanelHead = ({label, right, accent=C.gold}) => (
+  <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+    <Mono size={9} color={accent} weight="700" style={{letterSpacing:2}}>{label}</Mono>
+    {right}
+  </div>
+);
+const Lock = ({tier}) => (
+  <div style={{
+    position:"absolute",inset:0,borderRadius:12,zIndex:10,
+    background:"rgba(8,10,16,0.82)",backdropFilter:"blur(3px)",
+    display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,
+  }}>
+    <div style={{fontSize:20}}>🔒</div>
+    <Mono size={9} color={C.muted} weight="700" style={{letterSpacing:2}}>UNLOCK AT TIER {tier}</Mono>
+  </div>
+);
+const ConfDots = ({val, max=5, color=C.gold}) => (
+  <div style={{display:"flex",gap:3}}>
+    {Array.from({length:max}).map((_,i)=>(
+      <div key={i} style={{width:6,height:6,borderRadius:"50%",background:i<val?color:C.dim}}/>
+    ))}
+  </div>
+);
+const DirPill = ({dir}) => (
+  <span style={{
+    fontFamily:"'Space Mono',monospace",fontSize:8,fontWeight:700,letterSpacing:1,
+    padding:"2px 8px",borderRadius:3,
+    background:dir==="LONG"?C.green+"18":C.red+"18",
+    color:dir==="LONG"?C.green:C.red,
+    border:`1px solid ${dir==="LONG"?C.green:C.red}30`,
+  }}>{dir}</span>
+);
+
+/* ═══════════════════════════════════════════════
+   TIER 0 — FREE
+═══════════════════════════════════════════════ */
+function Tier0() {
+  const [paperPnl] = useState(2340);
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 300px",gap:14,padding:20,minHeight:"calc(100vh - 100px)"}}>
+      {/* Signal feed */}
+      <Panel style={{gridColumn:"1/2"}}>
+        <PanelHead label="SIGNAL FEED — BASIC" accent="#a0aec0"
+          right={<Tag color="#a0aec0">FREE</Tag>}/>
+        <div style={{padding:12,display:"flex",flexDirection:"column",gap:6}}>
+          {signals.slice(0,5).map((s,i)=>(
+            <div key={i} style={{
+              padding:"10px 12px",background:C.bg,borderRadius:8,
+              border:`1px solid ${C.border}`,
+              animation:`fadeUp .35s ease both`,animationDelay:`${i*60}ms`,
+            }}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <Mono size={13} color={C.text} weight="700">{s.ticker}</Mono>
+                  <Tag color="#a0aec0">{s.type}</Tag>
+                  <DirPill dir={s.dir}/>
+                </div>
+                <Mono size={10} color={C.muted}>{s.time}</Mono>
+              </div>
+              <div style={{display:"flex",gap:16}}>
+                <Mono size={10} color={s.dir==="LONG"?C.green:C.red}>{s.chg}</Mono>
+                <Mono size={10} color={C.muted}>Vol {s.vol}</Mono>
+                <span style={{fontSize:9,color:C.dim,fontFamily:"'Space Mono',monospace"}}>ML SCORE: LOCKED</span>
+              </div>
+            </div>
+          ))}
+          <div style={{position:"relative",borderRadius:8,overflow:"hidden"}}>
+            <div style={{padding:"10px 12px",background:C.bg,borderRadius:8,border:`1px solid ${C.border}`,opacity:0.3}}>
+              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4}}>
+                <Mono size={13} color={C.text} weight="700">META</Mono>
+                <Tag color="#a0aec0">BREAKOUT</Tag><DirPill dir="LONG"/>
+              </div>
+              <div style={{display:"flex",gap:16}}><Mono size={10} color={C.green}>+3.1%</Mono></div>
+            </div>
+            <Lock tier={1}/>
+          </div>
+        </div>
+      </Panel>
+
+      {/* Paper trading */}
+      <Panel style={{gridColumn:"2/3",display:"flex",flexDirection:"column"}}>
+        <PanelHead label="PAPER TRADING" accent="#a0aec0"
+          right={<Badge label="LIVE TRACKING" color="#a0aec0"/>}/>
+        <div style={{padding:16,flex:1}}>
+          <div style={{marginBottom:16}}>
+            <Mono size={9} color={C.muted} style={{display:"block",marginBottom:4}}>PAPER P&L (12 WEEKS)</Mono>
+            <div style={{fontSize:32,fontWeight:800,fontFamily:"'Space Mono',monospace",color:C.green,letterSpacing:-1}}>
+              +${paperPnl.toLocaleString()}
+            </div>
+            <Mono size={9} color={C.muted}>simulated · not real capital</Mono>
+          </div>
+          <div style={{height:120,marginBottom:16}}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={pnlData}>
+                <defs>
+                  <linearGradient id="g0" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={C.green} stopOpacity={0.2}/>
+                    <stop offset="95%" stopColor={C.green} stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <Area type="monotone" dataKey="v" stroke={C.green} strokeWidth={1.5} fill="url(#g0)" dot={false}/>
+                <XAxis dataKey="d" hide/>
+                <YAxis hide/>
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {[
+              {ticker:"NVDA",entry:"$920",pnl:"+$340",dir:"LONG"},
+              {ticker:"SPY", entry:"$521",pnl:"+$95", dir:"LONG"},
+              {ticker:"TSLA",entry:"$182",pnl:"-$60",dir:"SHORT"},
+            ].map((p,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 10px",background:C.bg,borderRadius:6,border:`1px solid ${C.border}`}}>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <Mono size={11} color={C.text} weight="700">{p.ticker}</Mono>
+                  <DirPill dir={p.dir}/>
+                </div>
+                <div style={{display:"flex",gap:12}}>
+                  <Mono size={10} color={C.muted}>{p.entry}</Mono>
+                  <Mono size={10} color={p.pnl.startsWith("+")?C.green:C.red} weight="700">{p.pnl}</Mono>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Panel>
+
+      {/* Right col */}
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        {/* Leaderboard */}
+        <Panel>
+          <PanelHead label="LEADERBOARD" accent="#a0aec0"/>
+          <div style={{padding:12,display:"flex",flexDirection:"column",gap:4}}>
+            {leaderboard.map((l,i)=>(
+              <div key={i} style={{
+                display:"flex",alignItems:"center",gap:8,padding:"7px 8px",
+                borderRadius:6,
+                background:l.name==="you"?"rgba(160,174,192,0.06)":C.bg,
+                border:`1px solid ${l.name==="you"?"#a0aec050":C.border}`,
+              }}>
+                <Mono size={10} color={l.name==="you"?"#a0aec0":C.muted} weight={l.name==="you"?"700":"400"} style={{width:22}}>#{l.rank}</Mono>
+                <Mono size={10} color={l.name==="you"?C.text:C.muted} weight={l.name==="you"?"700":"400"} style={{flex:1}}>{l.name}</Mono>
+                <Mono size={10} color={C.green}>{l.ret}</Mono>
+                {!l.verified && <Mono size={8} color={C.dim}>unverified</Mono>}
+                {l.verified && <div style={{width:8,height:8,borderRadius:"50%",background:C.gold}}/>}
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        {/* Share card */}
+        <Panel>
+          <PanelHead label="SHARE YOUR RANK" accent="#a0aec0"/>
+          <div style={{padding:16}}>
+            <div style={{
+              background:"linear-gradient(135deg,#0f1320,#12192a)",
+              border:"1px solid #262d3d",borderRadius:10,padding:16,marginBottom:12,
+              textAlign:"center",
+            }}>
+              <Mono size={8} color="#a0aec0" weight="700" style={{display:"block",letterSpacing:3,marginBottom:6}}>KAIROS FREE</Mono>
+              <div style={{fontSize:28,fontWeight:800,fontFamily:"'Space Mono',monospace",color:C.green,marginBottom:2}}>+38%</div>
+              <Mono size={9} color={C.muted}>Paper P&L · Rank #47</Mono>
+            </div>
+            <button style={{
+              width:"100%",padding:"9px",borderRadius:8,border:"1px solid #a0aec030",
+              background:"transparent",color:"#a0aec0",
+              fontFamily:"'Space Mono',monospace",fontSize:9,fontWeight:700,letterSpacing:2,
+            }}>SHARE TO X →</button>
+          </div>
+        </Panel>
+
+        {/* Locked teaser */}
+        <Panel style={{position:"relative",overflow:"hidden",minHeight:100}}>
+          <PanelHead label="ML SCORING" accent={C.dim}/>
+          <div style={{padding:12,opacity:0.15}}>
+            <ConfDots val={4}/>
+          </div>
+          <Lock tier={1}/>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   TIER 1 — STARTER $19.99
+═══════════════════════════════════════════════ */
+function Tier1() {
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 280px",gap:14,padding:20}}>
+      {/* Signal feed with ML confidence */}
+      <Panel style={{gridColumn:"1/2",gridRow:"1/3"}}>
+        <PanelHead label="REAL-TIME SIGNALS" accent={C.green}
+          right={<Badge label="LIVE" color={C.green}/>}/>
+        <div style={{padding:"8px 12px",borderBottom:`1px solid ${C.border}`}}>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <div style={{width:8,height:8,borderRadius:2,background:C.green+"20",border:`1px solid ${C.green}40`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <div style={{width:4,height:4,borderRadius:1,background:C.green}}/>
+            </div>
+            <Mono size={9} color={C.green}>MARKET REGIME: BULLISH EXPANSION</Mono>
+          </div>
+        </div>
+        <div style={{padding:12,display:"flex",flexDirection:"column",gap:6}}>
+          {signals.map((s,i)=>(
+            <div key={i} style={{
+              padding:"11px 12px",background:C.bg,borderRadius:8,
+              border:`1px solid ${C.border}`,
+              animation:`fadeUp .35s ease both`,animationDelay:`${i*60}ms`,
+              transition:"border-color .2s",
+            }}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <Mono size={13} color={C.text} weight="700">{s.ticker}</Mono>
+                  <Tag color={C.green}>{s.type}</Tag>
+                  <DirPill dir={s.dir}/>
+                </div>
+                <Mono size={9} color={C.muted}>{s.time}</Mono>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{display:"flex",gap:12}}>
+                  <Mono size={10} color={s.dir==="LONG"?C.green:C.red} weight="700">{s.chg}</Mono>
+                  <Mono size={10} color={C.muted}>Vol {s.vol}</Mono>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <Mono size={8} color={C.muted}>CONF</Mono>
+                  <ConfDots val={s.conf} color={C.green}/>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      {/* Sector heatmap */}
+      <Panel>
+        <PanelHead label="SECTOR ROTATION" accent={C.green}/>
+        <div style={{padding:12,display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>
+          {sectors.map((s,i)=>{
+            const v = parseFloat(s.val);
+            const bg = v > 1.2 ? C.green+"25" : v > 0 ? C.green+"10" : v > -0.5 ? C.red+"10" : C.red+"20";
+            const cl = v > 0 ? C.green : C.red;
+            return (
+              <div key={i} style={{background:bg,borderRadius:6,padding:"8px 6px",textAlign:"center",border:`1px solid ${cl}20`}}>
+                <div style={{fontSize:9,fontFamily:"'Space Mono',monospace",color:cl,fontWeight:700,marginBottom:2}}>{s.val}%</div>
+                <div style={{fontSize:8,fontFamily:"'DM Sans',sans-serif",color:C.muted}}>{s.name}</div>
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
+
+      {/* Basic options flow (limited) */}
+      <Panel style={{position:"relative",overflow:"hidden"}}>
+        <PanelHead label="OPTIONS FLOW — BASIC" accent={C.green}
+          right={<Tag color={C.green}>3 ROWS</Tag>}/>
+        <div style={{padding:12,display:"flex",flexDirection:"column",gap:4}}>
+          {flow.slice(0,3).map((f,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 10px",background:C.bg,borderRadius:6,border:`1px solid ${C.border}`}}>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <Mono size={11} color={C.text} weight="700">{f.ticker}</Mono>
+                <Mono size={9} color={C.muted}>{f.strike}</Mono>
+              </div>
+              <Mono size={10} color={f.bullish?C.green:C.red} weight="700">{f.size}</Mono>
+            </div>
+          ))}
+          <div style={{position:"relative",borderRadius:8,overflow:"hidden"}}>
+            <div style={{opacity:0.2,padding:"8px 10px",background:C.bg,borderRadius:6,border:`1px solid ${C.border}`}}>
+              <Mono size={11} color={C.text}>QQQ · 455P · $2.0M</Mono>
+            </div>
+            <Lock tier={2}/>
+          </div>
+        </div>
+      </Panel>
+
+      {/* Right col */}
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <Panel>
+          <PanelHead label="WATCHLIST" accent={C.green}
+            right={<Mono size={9} color={C.muted}>8/10 used</Mono>}/>
+          <div style={{padding:10,display:"flex",flexDirection:"column",gap:4}}>
+            {[
+              {t:"NVDA",p:"$948",c:"+2.3%"},
+              {t:"AAPL",p:"$213",c:"+1.7%"},
+              {t:"AMD", p:"$162",c:"+1.1%"},
+              {t:"SPY", p:"$528",c:"+0.4%"},
+              {t:"META",p:"$491",c:"+3.1%"},
+              {t:"MSFT",p:"$428",c:"+0.6%"},
+            ].map((w,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 8px",background:C.bg,borderRadius:6,border:`1px solid ${C.border}`}}>
+                <Mono size={11} color={C.text} weight="700">{w.t}</Mono>
+                <div style={{display:"flex",gap:10}}>
+                  <Mono size={10} color={C.muted}>{w.p}</Mono>
+                  <Mono size={10} color={C.green} weight="700">{w.c}</Mono>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel style={{position:"relative",overflow:"hidden",minHeight:80}}>
+          <PanelHead label="COMPOSITE SCORE" accent={C.dim}/>
+          <div style={{padding:12,opacity:0.15,display:"flex",gap:4}}>
+            {pillars.map((p,i)=><div key={i} style={{flex:1,height:30,background:C.gold,borderRadius:2}}/>)}
+          </div>
+          <Lock tier={2}/>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   TIER 2 — CORE $49.99
+═══════════════════════════════════════════════ */
+function Tier2() {
+  const [activeTab, setActiveTab] = useState("flow");
+  const compositeScore = 77;
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"200px 1fr 1fr",gap:14,padding:20,height:"calc(100vh - 100px)"}}>
+      {/* Sidebar */}
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <Panel>
+          <div style={{padding:14}}>
+            <Mono size={8} color={C.gold} weight="700" style={{letterSpacing:2,display:"block",marginBottom:10}}>COMPOSITE SCORE</Mono>
+            <div style={{position:"relative",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:10}}>
+              <svg width="100" height="100" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="42" fill="none" stroke={C.dim} strokeWidth="6"/>
+                <circle cx="50" cy="50" r="42" fill="none" stroke={C.gold} strokeWidth="6"
+                  strokeDasharray={`${2*Math.PI*42*compositeScore/100} ${2*Math.PI*42}`}
+                  strokeLinecap="round" transform="rotate(-90 50 50)"/>
+                <text x="50" y="54" textAnchor="middle" fontFamily="Space Mono" fontSize="20" fontWeight="700" fill="#e2e8f0">{compositeScore}</text>
+              </svg>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {pillars.map((p,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <Mono size={8} color={C.muted}>{p.subject}</Mono>
+                  <div style={{display:"flex",alignItems:"center",gap:4}}>
+                    <div style={{width:40,height:3,borderRadius:2,background:C.dim,overflow:"hidden"}}>
+                      <div style={{width:`${p.A}%`,height:"100%",background:p.A>75?C.gold:p.A>50?C.amber:C.muted,borderRadius:2}}/>
+                    </div>
+                    <Mono size={8} color={C.text}>{p.A}</Mono>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Panel>
+        <Panel>
+          <div style={{padding:12}}>
+            <Mono size={8} color={C.gold} weight="700" style={{letterSpacing:2,display:"block",marginBottom:10}}>14-GATE PIPELINE</Mono>
+            <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+              {Array.from({length:14}).map((_,i)=>(
+                <div key={i} style={{
+                  width:20,height:20,borderRadius:4,
+                  background:i<11?C.gold+"20":C.dim,
+                  border:`1px solid ${i<11?C.gold+"50":C.border}`,
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                }}>
+                  <Mono size={7} color={i<11?C.gold:C.dim}>{i+1}</Mono>
+                </div>
+              ))}
+            </div>
+            <Mono size={8} color={C.muted} style={{display:"block",marginTop:8}}>11/14 gates cleared</Mono>
+          </div>
+        </Panel>
+        <Panel>
+          <div style={{padding:12}}>
+            <Mono size={8} color={C.gold} weight="700" style={{letterSpacing:2,display:"block",marginBottom:10}}>KELLY SIZING</Mono>
+            <div style={{marginBottom:8}}>
+              <Mono size={8} color={C.muted} style={{display:"block",marginBottom:4}}>WIN RATE</Mono>
+              <Mono size={18} color={C.text} weight="700">63.4%</Mono>
+            </div>
+            <div style={{marginBottom:8}}>
+              <Mono size={8} color={C.muted} style={{display:"block",marginBottom:4}}>KELLY %</Mono>
+              <Mono size={18} color={C.gold} weight="700">12.8%</Mono>
+            </div>
+            <div style={{padding:"8px",background:`${C.gold}10`,borderRadius:6,border:`1px solid ${C.gold}30`}}>
+              <Mono size={8} color={C.gold}>On $10,000 account: size to $1,280</Mono>
+            </div>
+          </div>
+        </Panel>
+      </div>
+
+      {/* Center: Radar + signals */}
+      <div style={{display:"flex",flexDirection:"column",gap:14,overflow:"hidden"}}>
+        <Panel>
+          <PanelHead label="5-PILLAR COMPOSITE" accent={C.gold}
+            right={<Badge label="NVDA LONG" color={C.gold}/>}/>
+          <div style={{padding:8,height:200}}>
+            <ResponsiveContainer width="100%" height="100%">
+              <RadarChart data={pillars}>
+                <PolarGrid stroke={C.border}/>
+                <PolarAngleAxis dataKey="subject" tick={{fill:C.muted,fontSize:9,fontFamily:"Space Mono"}}/>
+                <Radar name="score" dataKey="A" stroke={C.gold} fill={C.gold} fillOpacity={0.15} strokeWidth={1.5}/>
+              </RadarChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+        <Panel style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+          <PanelHead label="CONFLUENCE MATRIX" accent={C.gold}/>
+          <div style={{padding:12,display:"flex",flexDirection:"column",gap:5,overflow:"auto",flex:1}}>
+            {[
+              {factor:"Options Flow Alignment",  strength:88, status:"CONFIRM"},
+              {factor:"Volume Profile",           strength:71, status:"CONFIRM"},
+              {factor:"GEX Positioning",          strength:65, status:"NEUTRAL"},
+              {factor:"Macro Regime",             strength:78, status:"CONFIRM"},
+              {factor:"Sector Momentum",          strength:82, status:"CONFIRM"},
+              {factor:"Price Action Structure",   strength:59, status:"NEUTRAL"},
+              {factor:"Sentiment / Dark Pool",    strength:74, status:"CONFIRM"},
+            ].map((f,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",background:C.bg,borderRadius:6,border:`1px solid ${C.border}`}}>
+                <div style={{width:60,height:4,borderRadius:2,background:C.dim,overflow:"hidden",flexShrink:0}}>
+                  <div style={{width:`${f.strength}%`,height:"100%",background:f.strength>70?C.gold:C.muted,borderRadius:2}}/>
+                </div>
+                <Mono size={9} color={C.muted} style={{flex:1}}>{f.factor}</Mono>
+                <Tag color={f.status==="CONFIRM"?C.green:C.muted}>{f.status}</Tag>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </div>
+
+      {/* Right: Flow + dark pool */}
+      <div style={{display:"flex",flexDirection:"column",gap:14,overflow:"hidden"}}>
+        <Panel>
+          <div style={{display:"flex",borderBottom:`1px solid ${C.border}`}}>
+            {["flow","dark"].map(t=>(
+              <button key={t} onClick={()=>setActiveTab(t)} style={{
+                flex:1,padding:"10px",border:"none",background:"transparent",
+                fontFamily:"'Space Mono',monospace",fontSize:9,fontWeight:700,letterSpacing:2,
+                color:activeTab===t?C.gold:C.muted,
+                borderBottom:activeTab===t?`2px solid ${C.gold}`:"2px solid transparent",
+              }}>
+                {t==="flow"?"OPTIONS FLOW":"DARK POOL"}
+              </button>
+            ))}
+          </div>
+          <div style={{padding:10,display:"flex",flexDirection:"column",gap:4}}>
+            {activeTab==="flow" ? flow.map((f,i)=>(
+              <div key={i} style={{
+                display:"flex",justifyContent:"space-between",alignItems:"center",
+                padding:"9px 10px",background:C.bg,borderRadius:6,
+                border:`1px solid ${f.bullish?C.green+"20":C.red+"20"}`,
+                animation:`fadeUp .3s ease both`,animationDelay:`${i*40}ms`,
+              }}>
+                <div>
+                  <div style={{display:"flex",gap:8,marginBottom:2}}>
+                    <Mono size={11} color={C.text} weight="700">{f.ticker}</Mono>
+                    <Mono size={9} color={C.muted}>{f.strike}</Mono>
+                    <Tag color={f.bullish?C.green:C.red}>{f.type}</Tag>
+                  </div>
+                  <Mono size={9} color={C.muted}>{f.exp} · {f.time}</Mono>
+                </div>
+                <Mono size={11} color={f.bullish?C.green:C.red} weight="700">{f.size}</Mono>
+              </div>
+            )) : darkPool.map((d,i)=>(
+              <div key={i} style={{
+                display:"flex",justifyContent:"space-between",alignItems:"center",
+                padding:"9px 10px",background:C.bg,borderRadius:6,border:`1px solid ${C.border}`,
+                animation:`fadeUp .3s ease both`,animationDelay:`${i*40}ms`,
+              }}>
+                <div>
+                  <Mono size={11} color={C.text} weight="700" style={{display:"block",marginBottom:2}}>{d.ticker}</Mono>
+                  <Mono size={9} color={C.muted}>@ ${d.price}</Mono>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <Mono size={11} color={C.gold} weight="700" style={{display:"block"}}>{d.size}</Mono>
+                  <Mono size={9} color={C.green}>{d.prem}</Mono>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel>
+          <PanelHead label="STRESS SCENARIOS" accent={C.gold}/>
+          <div style={{padding:12,display:"flex",flexDirection:"column",gap:5}}>
+            {[
+              {scenario:"Base Case (+1.5% rally)",   impact:"+$1,840",pos:true},
+              {scenario:"Fed Surprise (−50bps)",      impact:"+$3,100",pos:true},
+              {scenario:"Drawdown (−3% sell-off)",   impact:"−$920",  pos:false},
+              {scenario:"VIX Spike (>25)",            impact:"−$1,260",pos:false},
+            ].map((s,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 10px",background:C.bg,borderRadius:6,border:`1px solid ${C.border}`}}>
+                <Mono size={9} color={C.muted}>{s.scenario}</Mono>
+                <Mono size={10} color={s.pos?C.green:C.red} weight="700">{s.impact}</Mono>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   TIER 3 — PRO $149
+═══════════════════════════════════════════════ */
+function Tier3() {
+  const [apiActive, setApiActive] = useState(false);
+  const brier = 0.71;
+  const hashStr = "3a7f2c1d...9e84b260";
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,padding:20}}>
+      {/* Verified identity card */}
+      <Panel style={{gridColumn:"1/2",background:"linear-gradient(145deg,#0d1020,#101525)"}}>
+        <PanelHead label="VERIFIED IDENTITY" accent={C.amber}
+          right={<Badge label="CRYPTOGRAPHIC" color={C.amber}/>}/>
+        <div style={{padding:20}}>
+          <div style={{
+            background:"linear-gradient(135deg,#0a0c14,#0e1220)",
+            border:`1px solid ${C.amber}30`,borderRadius:12,padding:20,marginBottom:16,
+            position:"relative",overflow:"hidden",
+          }}>
+            <div style={{
+              position:"absolute",top:-30,right:-30,width:100,height:100,
+              borderRadius:"50%",background:`radial-gradient(circle,${C.amber}20,transparent 70%)`,
+            }}/>
+            <div style={{marginBottom:12}}>
+              <Mono size={9} color={C.muted} weight="700" style={{letterSpacing:2,display:"block",marginBottom:4}}>TRADER</Mono>
+              <div style={{fontSize:20,fontWeight:800,fontFamily:"'DM Sans',sans-serif",color:C.text}}>axl_capital</div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+              {[
+                {label:"VERIFIED RETURN",val:"+312%",color:C.green},
+                {label:"LEADERBOARD",val:"#1 Global",color:C.amber},
+                {label:"TRADES",val:"847",color:C.text},
+                {label:"SINCE",val:"Jan 2024",color:C.text},
+              ].map((s,i)=>(
+                <div key={i} style={{background:`${C.amber}08`,borderRadius:6,padding:"8px 10px"}}>
+                  <Mono size={8} color={C.muted} style={{display:"block",marginBottom:3}}>{s.label}</Mono>
+                  <Mono size={13} color={s.color} weight="700">{s.val}</Mono>
+                </div>
+              ))}
+            </div>
+            <div style={{background:`${C.amber}08`,borderRadius:6,padding:"8px 10px",border:`1px solid ${C.amber}20`}}>
+              <Mono size={8} color={C.muted} style={{display:"block",marginBottom:3}}>CRYPTOGRAPHIC HASH</Mono>
+              <Mono size={9} color={C.amber}>{hashStr}</Mono>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button style={{
+              flex:1,padding:"9px",border:`1px solid ${C.amber}40`,borderRadius:8,
+              background:`${C.amber}10`,color:C.amber,
+              fontFamily:"'Space Mono',monospace",fontSize:9,fontWeight:700,letterSpacing:1,
+            }}>SHARE PROFILE</button>
+            <button style={{
+              flex:1,padding:"9px",border:`1px solid ${C.amber}40`,borderRadius:8,
+              background:`${C.amber}10`,color:C.amber,
+              fontFamily:"'Space Mono',monospace",fontSize:9,fontWeight:700,letterSpacing:1,
+            }}>VIEW PUBLIC →</button>
+          </div>
+        </div>
+      </Panel>
+
+      {/* Calibration score */}
+      <Panel>
+        <PanelHead label="BRIER CALIBRATION" accent={C.amber}/>
+        <div style={{padding:20}}>
+          <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
+            <svg width="140" height="140" viewBox="0 0 140 140">
+              <circle cx="70" cy="70" r="58" fill="none" stroke={C.dim} strokeWidth="8"/>
+              <circle cx="70" cy="70" r="58" fill="none" stroke={C.amber} strokeWidth="8"
+                strokeDasharray={`${2*Math.PI*58*brier} ${2*Math.PI*58}`}
+                strokeLinecap="round" transform="rotate(-90 70 70)"
+                style={{filter:`drop-shadow(0 0 6px ${C.amber}80)`}}/>
+              <text x="70" y="68" textAnchor="middle" fontFamily="Space Mono" fontSize="26" fontWeight="700" fill="#e2e8f0">{brier}</text>
+              <text x="70" y="84" textAnchor="middle" fontFamily="DM Sans" fontSize="10" fill={C.muted}>Brier Score</text>
+            </svg>
+          </div>
+          <div style={{textAlign:"center",marginBottom:14}}>
+            <Tag color={C.amber}>TOP 8% CALIBRATION</Tag>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {[
+              {label:"Win Rate",    val:"63.4%"},
+              {label:"Avg R:R",     val:"2.4:1"},
+              {label:"Max DD",      val:"-11.2%"},
+              {label:"Sharpe",      val:"1.87"},
+              {label:"Profit Factor",val:"2.31"},
+            ].map((s,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 10px",background:C.bg,borderRadius:6,border:`1px solid ${C.border}`}}>
+                <Mono size={9} color={C.muted}>{s.label}</Mono>
+                <Mono size={10} color={C.text} weight="700">{s.val}</Mono>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Panel>
+
+      {/* Institutional + Auto-exec */}
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <Panel>
+          <PanelHead label="INSTITUTIONAL VISIBILITY" accent={C.amber}/>
+          <div style={{padding:14}}>
+            <div style={{marginBottom:12}}>
+              <Mono size={8} color={C.muted} style={{display:"block",marginBottom:8}}>PROFILE VIEWS THIS MONTH</Mono>
+              <Mono size={28} color={C.amber} weight="700">247</Mono>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {[
+                {type:"Prop Firm",     name:"Apex Trader",   action:"Viewed profile"},
+                {type:"Family Office", name:"Redwood Capital",action:"Requested track record"},
+                {type:"Hedge Fund",    name:"⬛ Anonymous",    action:"Viewed calibration score"},
+              ].map((v,i)=>(
+                <div key={i} style={{padding:"9px 10px",background:C.bg,borderRadius:6,border:`1px solid ${C.amber}20`,marginBottom:4}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                    <Mono size={10} color={C.text} weight="700">{v.name}</Mono>
+                    <Tag color={C.amber}>{v.type}</Tag>
+                  </div>
+                  <Mono size={9} color={C.muted}>{v.action}</Mono>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Panel>
+
+        <Panel>
+          <PanelHead label="AUTO-EXECUTION API" accent={C.amber}
+            right={<span style={{fontSize:9,fontFamily:"'Space Mono',monospace",color:C.muted,background:`${C.amber}10`,padding:"2px 6px",borderRadius:3}}>BETA</span>}/>
+          <div style={{padding:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <Mono size={9} color={C.muted}>STATUS</Mono>
+              <div
+                onClick={()=>setApiActive(a=>!a)}
+                style={{
+                  width:40,height:22,borderRadius:11,
+                  background:apiActive?C.amber:C.dim,
+                  position:"relative",cursor:"pointer",transition:"background .2s",
+                }}>
+                <div style={{
+                  position:"absolute",top:3,
+                  left:apiActive?20:3,
+                  width:16,height:16,borderRadius:"50%",
+                  background:"#fff",transition:"left .2s",
+                }}/>
+              </div>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {[
+                {label:"Connected broker","val":"tastytrade"},
+                {label:"Max position size","val":"$5,000"},
+                {label:"Daily trade limit","val":"10 trades"},
+                {label:"Stop-loss auto","val":"Enabled"},
+              ].map((r,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 8px",background:C.bg,borderRadius:5,border:`1px solid ${C.border}`}}>
+                  <Mono size={8} color={C.muted}>{r.label}</Mono>
+                  <Mono size={8} color={C.text} weight="700">{r.val}</Mono>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Panel>
+      </div>
+
+      {/* Track record chart */}
+      <Panel style={{gridColumn:"1/4"}}>
+        <PanelHead label="VERIFIED TRACK RECORD — 12 MONTH" accent={C.amber}
+          right={<Mono size={9} color={C.green}>+312% verified return</Mono>}/>
+        <div style={{padding:16,height:140}}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={[
+              {m:"Jan",v:0},{m:"Feb",v:18},{m:"Mar",v:42},{m:"Apr",v:38},
+              {m:"May",v:67},{m:"Jun",v:91},{m:"Jul",v:84},{m:"Aug",v:128},
+              {m:"Sep",v:156},{m:"Oct",v:142},{m:"Nov",v:218},{m:"Dec",v:312},
+            ]}>
+              <defs>
+                <linearGradient id="ga" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={C.amber} stopOpacity={0.25}/>
+                  <stop offset="95%" stopColor={C.amber} stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <Area type="monotone" dataKey="v" stroke={C.amber} strokeWidth={2} fill="url(#ga)" dot={false}/>
+              <XAxis dataKey="m" tick={{fill:C.muted,fontSize:9,fontFamily:"Space Mono"}} axisLine={false} tickLine={false}/>
+              <YAxis tick={{fill:C.muted,fontSize:9,fontFamily:"Space Mono"}} axisLine={false} tickLine={false} tickFormatter={v=>`+${v}%`}/>
+              <Tooltip contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontFamily:"Space Mono",fontSize:10}} formatter={v=>[`+${v}%`,"Return"]}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   TIER 4 — ELITE $330
+═══════════════════════════════════════════════ */
+function Tier4() {
+  const [exportOpen, setExportOpen] = useState(false);
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gridTemplateRows:"auto auto auto",gap:14,padding:20}}>
+      {/* Portfolio overview */}
+      <Panel style={{gridColumn:"1/3"}}>
+        <PanelHead label="MULTI-ACCOUNT AGGREGATION" accent={C.platinum}
+          right={<Badge label="3 ACCOUNTS" color={C.platinum}/>}/>
+        <div style={{padding:14,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+          {[
+            {name:"Main Account",   broker:"tastytrade",  pnl:"+$48,240",ret:"+31.2%",color:C.green},
+            {name:"Options Account",broker:"IBKR",        pnl:"+$22,880",ret:"+18.7%",color:C.amber},
+            {name:"IRA Account",    broker:"Schwab",      pnl:"+$9,120",ret:"+8.4%", color:C.blue},
+          ].map((a,i)=>(
+            <div key={i} style={{
+              background:C.bg,borderRadius:8,padding:12,
+              border:`1px solid ${a.color}25`,
+            }}>
+              <div style={{marginBottom:8}}>
+                <Mono size={9} color={C.muted} style={{display:"block",marginBottom:2}}>{a.broker}</Mono>
+                <Mono size={10} color={C.text} weight="700">{a.name}</Mono>
+              </div>
+              <div style={{fontSize:18,fontWeight:800,fontFamily:"'Space Mono',monospace",color:a.color,marginBottom:2}}>{a.pnl}</div>
+              <Tag color={a.color}>{a.ret}</Tag>
+            </div>
+          ))}
+        </div>
+        <div style={{padding:"10px 14px",borderTop:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between"}}>
+          <Mono size={9} color={C.muted}>TOTAL PORTFOLIO</Mono>
+          <Mono size={12} color={C.platinum} weight="700">+$80,240 (+22.1%)</Mono>
+        </div>
+      </Panel>
+
+      {/* Prop firm pipeline */}
+      <Panel style={{gridColumn:"3/5"}}>
+        <PanelHead label="PROP FIRM PIPELINE" accent={C.platinum}
+          right={<Tag color={C.platinum}>DIRECT CONNECT</Tag>}/>
+        <div style={{padding:12,display:"flex",flexDirection:"column",gap:6}}>
+          {[
+            {firm:"Apex Trader Funding",status:"OFFER PENDING",  fund:"$150K",color:C.green},
+            {firm:"FTMO",               status:"EVALUATION",     fund:"$100K",color:C.amber},
+            {firm:"MyForexFunds",       status:"INTRODUCTION",   fund:"$200K",color:C.blue},
+            {firm:"True Trader",        status:"TRACK RECORD SENT",fund:"$50K",color:C.muted},
+          ].map((p,i)=>(
+            <div key={i} style={{
+              display:"flex",alignItems:"center",justifyContent:"space-between",
+              padding:"10px 12px",background:C.bg,borderRadius:6,
+              border:`1px solid ${p.color}25`,marginBottom:4,
+            }}>
+              <div>
+                <Mono size={10} color={C.text} weight="700" style={{display:"block",marginBottom:2}}>{p.firm}</Mono>
+                <Tag color={p.color}>{p.status}</Tag>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <Mono size={9} color={C.muted} style={{display:"block",marginBottom:2}}>FUNDED ACCOUNT</Mono>
+                <Mono size={12} color={p.color} weight="700">{p.fund}</Mono>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      {/* Custom ML */}
+      <Panel style={{gridColumn:"1/2"}}>
+        <PanelHead label="CUSTOM ML MODEL" accent={C.platinum}
+          right={<span style={{fontSize:8,fontFamily:"'Space Mono',monospace",color:C.muted}}>BETA</span>}/>
+        <div style={{padding:14}}>
+          <div style={{marginBottom:12}}>
+            <Mono size={8} color={C.muted} style={{display:"block",marginBottom:4}}>MODEL STATUS</Mono>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:C.green,animation:"pulse 2s infinite"}}/>
+              <Mono size={10} color={C.green} weight="700">TRAINING · EPOCH 24/50</Mono>
+            </div>
+          </div>
+          <div style={{background:C.bg,borderRadius:6,padding:10,border:`1px solid ${C.border}`,marginBottom:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+              <Mono size={8} color={C.muted}>PROGRESS</Mono>
+              <Mono size={8} color={C.text}>48%</Mono>
+            </div>
+            <div style={{height:4,background:C.dim,borderRadius:2}}>
+              <div style={{width:"48%",height:"100%",background:`linear-gradient(90deg,${C.platinum},${C.blue})`,borderRadius:2}}/>
+            </div>
+          </div>
+          {[
+            {label:"Training samples","val":"47,200"},
+            {label:"Base model","val":"Kairos-v3"},
+            {label:"Fine-tune scope","val":"NVDA signals"},
+          ].map((r,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",marginBottom:4,padding:"5px 8px",background:C.bg,borderRadius:5,border:`1px solid ${C.border}`}}>
+              <Mono size={8} color={C.muted}>{r.label}</Mono>
+              <Mono size={8} color={C.text} weight="700">{r.val}</Mono>
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      {/* Team seats */}
+      <Panel style={{gridColumn:"2/3"}}>
+        <PanelHead label="TEAM SEATS" accent={C.platinum}
+          right={<Mono size={9} color={C.muted}>3/3 used</Mono>}/>
+        <div style={{padding:14,display:"flex",flexDirection:"column",gap:8}}>
+          {[
+            {name:"You (Admin)",  role:"FULL ACCESS", active:true},
+            {name:"alex_r",       role:"READ + TRADE", active:true},
+            {name:"trading_vm",   role:"READ ONLY",    active:false},
+          ].map((u,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 10px",background:C.bg,borderRadius:6,border:`1px solid ${C.border}`}}>
+              <div style={{
+                width:28,height:28,borderRadius:"50%",
+                background:`linear-gradient(135deg,${C.platinum}20,${C.blue}20)`,
+                display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,
+              }}>
+                <Mono size={10} color={C.text} weight="700">{u.name[0].toUpperCase()}</Mono>
+              </div>
+              <div style={{flex:1}}>
+                <Mono size={10} color={C.text} weight="700" style={{display:"block"}}>{u.name}</Mono>
+                <Tag color={u.active?C.platinum:C.muted}>{u.role}</Tag>
+              </div>
+              <div style={{width:8,height:8,borderRadius:"50%",background:u.active?C.green:C.dim}}/>
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      {/* Data export */}
+      <Panel style={{gridColumn:"3/4"}}>
+        <PanelHead label="BLOOMBERG-GRADE EXPORT" accent={C.platinum}/>
+        <div style={{padding:14}}>
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+            {[
+              {label:"Full signal history","fmt":"CSV / JSON"},
+              {label:"Verified track record","fmt":"PDF / API"},
+              {label:"Options flow raw data","fmt":"CSV"},
+              {label:"Calibration dataset","fmt":"JSON"},
+            ].map((e,i)=>(
+              <div key={i} style={{
+                display:"flex",justifyContent:"space-between",alignItems:"center",
+                padding:"8px 10px",background:C.bg,borderRadius:6,border:`1px solid ${C.border}`,
+              }}>
+                <Mono size={9} color={C.muted}>{e.label}</Mono>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <Mono size={8} color={C.dim}>{e.fmt}</Mono>
+                  <button style={{
+                    padding:"3px 8px",border:`1px solid ${C.platinum}30`,borderRadius:4,
+                    background:`${C.platinum}08`,color:C.platinum,
+                    fontFamily:"'Space Mono',monospace",fontSize:8,fontWeight:700,
+                  }}>↓</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{padding:"8px 10px",background:`${C.platinum}06`,borderRadius:6,border:`1px solid ${C.platinum}15`}}>
+            <Mono size={8} color={C.platinum}>API key: kairos_elite_7f2a...c19d</Mono>
+          </div>
+        </div>
+      </Panel>
+
+      {/* Account manager */}
+      <Panel style={{gridColumn:"4/5"}}>
+        <PanelHead label="ACCOUNT MANAGER" accent={C.platinum}/>
+        <div style={{padding:14}}>
+          <div style={{
+            background:`linear-gradient(135deg,${C.platinum}08,${C.blue}05)`,
+            border:`1px solid ${C.platinum}20`,borderRadius:10,padding:14,marginBottom:12,
+          }}>
+            <div style={{
+              width:40,height:40,borderRadius:"50%",
+              background:`linear-gradient(135deg,${C.platinum}30,${C.blue}30)`,
+              display:"flex",alignItems:"center",justifyContent:"center",
+              marginBottom:8,
+            }}>
+              <Mono size={14} color={C.platinum} weight="700">JR</Mono>
+            </div>
+            <Mono size={11} color={C.text} weight="700" style={{display:"block",marginBottom:2}}>James R.</Mono>
+            <Mono size={9} color={C.muted} style={{display:"block",marginBottom:8}}>Elite Account Manager</Mono>
+            <Tag color={C.green}>ONLINE NOW</Tag>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            <button style={{
+              width:"100%",padding:"9px",border:`1px solid ${C.platinum}30`,borderRadius:7,
+              background:`${C.platinum}10`,color:C.platinum,
+              fontFamily:"'Space Mono',monospace",fontSize:9,fontWeight:700,letterSpacing:1,
+            }}>OPEN SLACK CHANNEL</button>
+            <button style={{
+              width:"100%",padding:"9px",border:`1px solid ${C.border}`,borderRadius:7,
+              background:"transparent",color:C.muted,
+              fontFamily:"'Space Mono',monospace",fontSize:9,fontWeight:700,letterSpacing:1,
+            }}>BOOK STRATEGY CALL</button>
+          </div>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   ROOT — TIER SWITCHER
+═══════════════════════════════════════════════ */
+const TIERS = [
+  { id:0, label:"FREE",     sub:"Tier 0", accent:"#a0aec0",  Component:Tier0 },
+  { id:1, label:"$19.99",   sub:"Tier 1", accent:C.green,    Component:Tier1 },
+  { id:2, label:"$49.99",   sub:"Tier 2", accent:C.gold,     Component:Tier2 },
+  { id:3, label:"$149",     sub:"Tier 3", accent:C.amber,    Component:Tier3 },
+  { id:4, label:"$330",     sub:"Tier 4", accent:C.platinum, Component:Tier4 },
+];
+
+function App() {
+  const [active, setActive] = useState(2);
+  const T = TIERS[active];
+
+  return (
+    <div style={{background:C.bg,minHeight:"100vh",color:C.text,fontFamily:"'DM Sans',sans-serif"}}>
+      <style>{FONTS}</style>
+
+      {/* Top bar */}
+      <div style={{
+        background:C.surface,borderBottom:`1px solid ${C.border}`,
+        padding:"0 20px",display:"flex",alignItems:"center",justifyContent:"space-between",
+        height:52,position:"sticky",top:0,zIndex:100,
+      }}>
+        {/* Logo */}
+        <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+          <div style={{
+            width:24,height:24,background:`linear-gradient(135deg,${C.gold},${C.amber})`,
+            borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",
+          }}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M6 1L11 3.5V8.5L6 11L1 8.5V3.5L6 1Z" stroke="#0a0a0f" strokeWidth="1.5" fill="none"/>
+            </svg>
+          </div>
+          <Mono size={13} color={C.text} weight="700">KAIROS<span style={{color:C.gold}}>+</span></Mono>
+        </div>
+
+        {/* Tier switcher */}
+        <div style={{display:"flex",gap:2,background:C.bg,borderRadius:10,padding:3,border:`1px solid ${C.border}`}}>
+          {TIERS.map(t=>(
+            <button key={t.id} onClick={()=>setActive(t.id)} style={{
+              padding:"5px 14px",borderRadius:7,border:"none",
+              background:active===t.id?`${t.accent}15`:"transparent",
+              transition:"all .2s",
+            }}>
+              <div style={{textAlign:"center"}}>
+                <Mono size={8} color={active===t.id?t.accent:C.dim} weight="700" style={{letterSpacing:1,display:"block"}}>{t.sub}</Mono>
+                <Mono size={9} color={active===t.id?t.accent:C.muted} weight={active===t.id?"700":"400"}>{t.label}</Mono>
+              </div>
+              {active===t.id&&<div style={{height:2,background:t.accent,borderRadius:1,marginTop:3}}/>}
+            </button>
+          ))}
+        </div>
+
+        {/* Right */}
+        <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+          <Badge label={`TIER ${active} ACTIVE`} color={T.accent}/>
+          <div style={{
+            width:28,height:28,borderRadius:"50%",
+            background:`linear-gradient(135deg,${T.accent}30,${T.accent}10)`,
+            border:`1px solid ${T.accent}40`,
+            display:"flex",alignItems:"center",justifyContent:"center",
+          }}>
+            <Mono size={10} color={T.accent} weight="700">A</Mono>
+          </div>
+        </div>
+      </div>
+
+      {/* Dashboard */}
+      <div key={active} style={{animation:"fadeUp .3s ease both",overflow:"auto"}}>
+        <T.Component/>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+} catch(e) {
+  document.getElementById('err').style.display='block';
+  document.getElementById('err').textContent='Render error:\n'+(e&&e.stack||e);
+  console.error(e);
+}
+</script>
+</body></html>

@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kairos · Reference Pricing</title>
+<style>html,body{margin:0;padding:0;background:#080a10;min-height:100vh}#root{min-height:100vh}
+#err{display:none;color:#e05252;font:13px/1.5 monospace;padding:24px;white-space:pre-wrap}</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head><body>
+<div id="root"></div>
+<pre id="err"></pre>
+<script type="text/babel" data-presets="react">
+try {
+const {useState, useEffect, useRef, useMemo, useCallback} = React;
+
+
+const tiers = [
+  {
+    id: 0,
+    name: "Free",
+    label: "KAIROS FREE",
+    price: 0,
+    tagline: "Prove you belong here.",
+    accent: "#4a5568",
+    accentGlow: "rgba(74,85,104,0.3)",
+    accentText: "#a0aec0",
+    badge: null,
+    features: [
+      { text: "Basic breakout & volume spike alerts", included: true },
+      { text: "Relative strength & momentum ranking", included: true },
+      { text: "Paper trading with real P&L tracking", included: true },
+      { text: "Public leaderboard visibility", included: true },
+      { text: "One-tap X & Reddit share cards", included: true },
+      { text: "Community feed access", included: true },
+      { text: "3 active watchlists", included: true },
+      { text: "ML composite scoring", included: false },
+      { text: "Options flow data", included: false },
+      { text: "Verified track record", included: false },
+    ],
+    cta: "Start Free",
+    ctaStyle: "outline",
+  },
+  {
+    id: 1,
+    name: "Starter",
+    label: "TIER 1 · STARTER",
+    price: 19.99,
+    tagline: "Real signals. Real time.",
+    accent: "#38a169",
+    accentGlow: "rgba(56,161,105,0.25)",
+    accentText: "#68d391",
+    badge: null,
+    features: [
+      { text: "Everything in Free", included: true, bold: true },
+      { text: "Real-time signal alerts (push + email)", included: true },
+      { text: "Basic ML signal scoring (1–5 confidence)", included: true },
+      { text: "10 active watchlists", included: true },
+      { text: "Daily market regime indicator", included: true },
+      { text: "Sector rotation heatmap", included: true },
+      { text: "Basic options flow feed", included: true },
+      { text: "5-pillar composite scoring", included: false },
+      { text: "Kelly position sizing", included: false },
+      { text: "Verified track record", included: false },
+    ],
+    cta: "Get Starter",
+    ctaStyle: "outline",
+  },
+  {
+    id: 2,
+    name: "Core",
+    label: "TIER 2 · CORE",
+    price: 49.99,
+    tagline: "The full intelligence layer.",
+    accent: "#d69e2e",
+    accentGlow: "rgba(214,158,46,0.3)",
+    accentText: "#f6e05e",
+    badge: "MOST POPULAR",
+    features: [
+      { text: "Everything in Starter", included: true, bold: true },
+      { text: "Full 5-pillar composite scoring", included: true },
+      { text: "Cross-tab confluence analysis", included: true },
+      { text: "14-gate signal pipeline", included: true },
+      { text: "Kelly criterion position sizing", included: true },
+      { text: "Stress scenario modeling", included: true },
+      { text: "Full options flow + dark pool feed", included: true },
+      { text: "Unlimited watchlists & custom alerts", included: true },
+      { text: "Verified track record", included: false },
+      { text: "Institutional profile", included: false },
+    ],
+    cta: "Get Core",
+    ctaStyle: "filled",
+    featured: true,
+  },
+  {
+    id: 3,
+    name: "Pro",
+    label: "TIER 3 · PRO",
+    price: 149,
+    tagline: "Your record. Verified.",
+    accent: "#ed8936",
+    accentGlow: "rgba(237,137,54,0.3)",
+    accentText: "#fbd38d",
+    badge: null,
+    features: [
+      { text: "Everything in Core", included: true, bold: true },
+      { text: "Cryptographically verified track record", included: true },
+      { text: "Calibration score & Brier scoring", included: true },
+      { text: "Leaderboard ranking (public profile)", included: true },
+      { text: "Auto-execution API (beta — personal use)", included: true },
+      { text: "Regulatory profile page", included: true },
+      { text: "Priority signal delivery (sub-50ms)", included: true },
+      { text: "Institutional talent search visibility", included: true },
+      { text: "White-label share cards", included: true },
+      { text: "Dedicated Slack channel support", included: true },
+    ],
+    cta: "Get Pro",
+    ctaStyle: "outline",
+  },
+  {
+    id: 4,
+    name: "Elite",
+    label: "TIER 4 · ELITE",
+    price: 330,
+    tagline: "Institutional-grade. Retail-accessible.",
+    accent: "#e2e8f0",
+    accentGlow: "rgba(226,232,240,0.2)",
+    accentText: "#ffffff",
+    badge: "INSTITUTIONAL",
+    features: [
+      { text: "Everything in Pro", included: true, bold: true },
+      { text: "Multi-account portfolio aggregation", included: true },
+      { text: "Bloomberg-grade data export (CSV/API)", included: true },
+      { text: "Full institutional visibility profile", included: true },
+      { text: "Prop firm & allocator direct connect", included: true },
+      { text: "Custom ML model fine-tuning (beta)", included: true },
+      { text: "Team seats (up to 3 users)", included: true },
+      { text: "White-glove onboarding & strategy review", included: true },
+      { text: "Dedicated account manager", included: true },
+      { text: "Early access to all new features", included: true },
+    ],
+    cta: "Get Elite",
+    ctaStyle: "platinum",
+  },
+];
+
+const CheckIcon = ({ filled, color }) => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+    {filled ? (
+      <>
+        <circle cx="8" cy="8" r="8" fill={color} fillOpacity="0.15" />
+        <path d="M5 8l2 2 4-4" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </>
+    ) : (
+      <path d="M5 8h6" stroke="#2d3748" strokeWidth="1.5" strokeLinecap="round" />
+    )}
+  </svg>
+);
+
+const TierCard = ({ tier, isAnnual, index }) => {
+  const [hovered, setHovered] = useState(false);
+  const price = isAnnual ? (tier.price * 0.8).toFixed(tier.price === 0 ? 0 : 2) : tier.price;
+  const displayPrice = tier.price === 0 ? "0" : price;
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: "relative",
+        background: tier.featured
+          ? `linear-gradient(160deg, #0f1117 0%, #13161f 100%)`
+          : "#0c0e14",
+        border: `1px solid ${hovered || tier.featured ? tier.accent + "60" : "#1a1f2e"}`,
+        borderRadius: "16px",
+        padding: "28px 24px 24px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "20px",
+        cursor: "default",
+        transform: tier.featured ? "translateY(-8px)" : hovered ? "translateY(-3px)" : "translateY(0)",
+        transition: "all 0.3s cubic-bezier(0.4,0,0.2,1)",
+        boxShadow: tier.featured
+          ? `0 0 40px ${tier.accentGlow}, 0 20px 60px rgba(0,0,0,0.5)`
+          : hovered
+          ? `0 0 20px ${tier.accentGlow}, 0 10px 40px rgba(0,0,0,0.4)`
+          : "0 4px 20px rgba(0,0,0,0.3)",
+        animationDelay: `${index * 80}ms`,
+        animation: "fadeSlideUp 0.5s ease both",
+        flex: "1 1 0",
+        minWidth: 0,
+      }}
+    >
+      {/* Glow bar top */}
+      <div style={{
+        position: "absolute",
+        top: 0,
+        left: "20%",
+        right: "20%",
+        height: "1px",
+        background: `linear-gradient(90deg, transparent, ${tier.accent}, transparent)`,
+        opacity: hovered || tier.featured ? 1 : 0.3,
+        transition: "opacity 0.3s",
+      }} />
+
+      {/* Badge */}
+      {tier.badge && (
+        <div style={{
+          position: "absolute",
+          top: "-12px",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: tier.featured ? tier.accent : tier.accent + "20",
+          border: `1px solid ${tier.accent}`,
+          color: tier.featured ? "#0a0a0f" : tier.accentText,
+          fontSize: "9px",
+          fontWeight: "800",
+          letterSpacing: "2px",
+          padding: "3px 12px",
+          borderRadius: "20px",
+          fontFamily: "'Space Mono', monospace",
+          whiteSpace: "nowrap",
+        }}>
+          {tier.badge}
+        </div>
+      )}
+
+      {/* Header */}
+      <div>
+        <div style={{
+          fontSize: "9px",
+          fontWeight: "700",
+          letterSpacing: "2.5px",
+          color: tier.accentText,
+          fontFamily: "'Space Mono', monospace",
+          marginBottom: "8px",
+          opacity: 0.8,
+        }}>
+          {tier.label}
+        </div>
+        <div style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: "4px",
+          marginBottom: "6px",
+        }}>
+          <span style={{
+            fontSize: "13px",
+            color: tier.accentText,
+            fontFamily: "'Space Mono', monospace",
+            opacity: 0.7,
+            marginTop: "4px",
+          }}>
+            {tier.price > 0 ? "$" : ""}
+          </span>
+          <span style={{
+            fontSize: "42px",
+            fontWeight: "800",
+            color: tier.price === 0 ? "#4a5568" : tier.accentText,
+            fontFamily: "'Space Mono', monospace",
+            lineHeight: 1,
+            letterSpacing: "-2px",
+          }}>
+            {tier.price === 0 ? "FREE" : displayPrice}
+          </span>
+          {tier.price > 0 && (
+            <span style={{
+              fontSize: "11px",
+              color: "#4a5568",
+              fontFamily: "'Space Mono', monospace",
+              marginBottom: "4px",
+            }}>
+              /mo{isAnnual ? "*" : ""}
+            </span>
+          )}
+        </div>
+        <div style={{
+          fontSize: "12px",
+          color: "#5a6478",
+          fontFamily: "'DM Sans', sans-serif",
+          fontStyle: "italic",
+          letterSpacing: "0.2px",
+        }}>
+          {tier.tagline}
+        </div>
+      </div>
+
+      {/* Divider */}
+      <div style={{ height: "1px", background: "#1a1f2e" }} />
+
+      {/* Features */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "9px", flex: 1 }}>
+        {tier.features.map((f, i) => (
+          <div key={i} style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "9px",
+            opacity: f.included ? 1 : 0.3,
+          }}>
+            <div style={{ marginTop: "1px", flexShrink: 0 }}>
+              <CheckIcon filled={f.included} color={tier.accent} />
+            </div>
+            <span style={{
+              fontSize: "12px",
+              color: f.included ? (f.bold ? tier.accentText : "#9ba3b8") : "#3d4455",
+              fontFamily: "'DM Sans', sans-serif",
+              lineHeight: "1.4",
+              fontWeight: f.bold ? "600" : "400",
+            }}>
+              {f.text}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* CTA */}
+      <button style={{
+        width: "100%",
+        padding: "12px",
+        borderRadius: "10px",
+        fontSize: "12px",
+        fontWeight: "700",
+        fontFamily: "'Space Mono', monospace",
+        letterSpacing: "1.5px",
+        cursor: "pointer",
+        transition: "all 0.2s",
+        border: tier.ctaStyle === "filled"
+          ? "none"
+          : tier.ctaStyle === "platinum"
+          ? `1px solid ${tier.accent}`
+          : `1px solid ${tier.accent}50`,
+        background: tier.ctaStyle === "filled"
+          ? `linear-gradient(135deg, ${tier.accent}, ${tier.accent}cc)`
+          : tier.ctaStyle === "platinum"
+          ? `linear-gradient(135deg, ${tier.accent}15, ${tier.accent}08)`
+          : "transparent",
+        color: tier.ctaStyle === "filled" ? "#0a0a0f" : tier.accentText,
+        boxShadow: tier.ctaStyle === "filled"
+          ? `0 4px 20px ${tier.accentGlow}`
+          : "none",
+      }}>
+        {tier.cta}
+      </button>
+    </div>
+  );
+};
+
+function KairosPricing() {
+  const [isAnnual, setIsAnnual] = useState(false);
+  const [activeTab, setActiveTab] = useState("features");
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: "#080a10",
+      fontFamily: "'DM Sans', sans-serif",
+      color: "#e2e8f0",
+      overflowX: "hidden",
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:ital,wght@0,300;0,400;0,600;0,700;0,800;1,400&display=swap');
+        
+        @keyframes fadeSlideUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+        @keyframes scanline {
+          0% { transform: translateY(-100%); }
+          100% { transform: translateY(100vh); }
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #080a10; }
+        ::-webkit-scrollbar-thumb { background: #1a2035; border-radius: 3px; }
+        button:hover { filter: brightness(1.1); }
+      `}</style>
+
+      {/* Background grid */}
+      <div style={{
+        position: "fixed",
+        inset: 0,
+        backgroundImage: `
+          linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px)
+        `,
+        backgroundSize: "40px 40px",
+        pointerEvents: "none",
+        zIndex: 0,
+      }} />
+
+      {/* Radial glow top center */}
+      <div style={{
+        position: "fixed",
+        top: "-200px",
+        left: "50%",
+        transform: "translateX(-50%)",
+        width: "800px",
+        height: "600px",
+        background: "radial-gradient(ellipse, rgba(214,158,46,0.06) 0%, transparent 70%)",
+        pointerEvents: "none",
+        zIndex: 0,
+      }} />
+
+      <div style={{ position: "relative", zIndex: 1, maxWidth: "1280px", margin: "0 auto", padding: "0 24px 80px" }}>
+
+        {/* Nav */}
+        <nav style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "24px 0",
+          borderBottom: "1px solid #12161f",
+          marginBottom: "64px",
+          animation: "fadeSlideUp 0.4s ease both",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{
+              width: "28px",
+              height: "28px",
+              background: "linear-gradient(135deg, #d69e2e, #ed8936)",
+              borderRadius: "6px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M7 1L13 4.5V9.5L7 13L1 9.5V4.5L7 1Z" stroke="#0a0a0f" strokeWidth="1.5" fill="none"/>
+                <path d="M7 4L10 5.8V9.2L7 11L4 9.2V5.8L7 4Z" fill="#0a0a0f" fillOpacity="0.4"/>
+              </svg>
+            </div>
+            <span style={{
+              fontSize: "15px",
+              fontWeight: "800",
+              fontFamily: "'Space Mono', monospace",
+              letterSpacing: "1px",
+              color: "#e2e8f0",
+            }}>
+              KAIROS<span style={{ color: "#d69e2e" }}>+</span>
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: "8px" }}>
+            {["Features", "Compare", "FAQ"].map(item => (
+              <button key={item} style={{
+                background: "none",
+                border: "none",
+                color: "#4a5568",
+                fontSize: "12px",
+                fontFamily: "'Space Mono', monospace",
+                cursor: "pointer",
+                padding: "6px 12px",
+                borderRadius: "6px",
+              }}>{item}</button>
+            ))}
+          </div>
+        </nav>
+
+        {/* Hero */}
+        <div style={{
+          textAlign: "center",
+          marginBottom: "56px",
+          animation: "fadeSlideUp 0.45s ease both",
+          animationDelay: "80ms",
+        }}>
+          <div style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            background: "rgba(214,158,46,0.08)",
+            border: "1px solid rgba(214,158,46,0.2)",
+            borderRadius: "20px",
+            padding: "5px 14px",
+            marginBottom: "20px",
+          }}>
+            <div style={{
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: "#d69e2e",
+              animation: "pulse 2s infinite",
+            }} />
+            <span style={{
+              fontSize: "10px",
+              fontFamily: "'Space Mono', monospace",
+              color: "#d69e2e",
+              letterSpacing: "2px",
+            }}>
+              LIVE · PRICING 2026
+            </span>
+          </div>
+
+          <h1 style={{
+            fontSize: "clamp(36px, 5vw, 60px)",
+            fontWeight: "800",
+            lineHeight: 1.05,
+            letterSpacing: "-2px",
+            color: "#f7fafc",
+            marginBottom: "16px",
+          }}>
+            Intelligence that scales<br />
+            <span style={{
+              background: "linear-gradient(135deg, #d69e2e, #ed8936)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+            }}>
+              with your conviction.
+            </span>
+          </h1>
+          <p style={{
+            fontSize: "15px",
+            color: "#5a6478",
+            maxWidth: "460px",
+            margin: "0 auto 32px",
+            lineHeight: 1.7,
+          }}>
+            From paper trading to cryptographic proof of performance.
+            Every tier is a step closer to being undeniable.
+          </p>
+
+          {/* Billing toggle */}
+          <div style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "12px",
+            background: "#0f1117",
+            border: "1px solid #1a1f2e",
+            borderRadius: "30px",
+            padding: "5px",
+          }}>
+            <button
+              onClick={() => setIsAnnual(false)}
+              style={{
+                padding: "7px 18px",
+                borderRadius: "24px",
+                border: "none",
+                background: !isAnnual ? "#1a2035" : "transparent",
+                color: !isAnnual ? "#e2e8f0" : "#4a5568",
+                fontSize: "11px",
+                fontFamily: "'Space Mono', monospace",
+                cursor: "pointer",
+                letterSpacing: "1px",
+                transition: "all 0.2s",
+              }}>
+              MONTHLY
+            </button>
+            <button
+              onClick={() => setIsAnnual(true)}
+              style={{
+                padding: "7px 18px",
+                borderRadius: "24px",
+                border: "none",
+                background: isAnnual ? "#1a2035" : "transparent",
+                color: isAnnual ? "#e2e8f0" : "#4a5568",
+                fontSize: "11px",
+                fontFamily: "'Space Mono', monospace",
+                cursor: "pointer",
+                letterSpacing: "1px",
+                transition: "all 0.2s",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}>
+              ANNUAL
+              <span style={{
+                background: "rgba(56,161,105,0.2)",
+                color: "#68d391",
+                fontSize: "9px",
+                padding: "1px 6px",
+                borderRadius: "10px",
+                fontWeight: "700",
+              }}>
+                −20%
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* Cards */}
+        <div style={{
+          display: "flex",
+          gap: "14px",
+          alignItems: "flex-start",
+          marginBottom: "48px",
+          flexWrap: "wrap",
+        }}>
+          {tiers.map((tier, i) => (
+            <TierCard key={tier.id} tier={tier} isAnnual={isAnnual} index={i} />
+          ))}
+        </div>
+
+        {/* Annual footnote */}
+        {isAnnual && (
+          <p style={{
+            textAlign: "center",
+            fontSize: "11px",
+            color: "#3d4455",
+            fontFamily: "'Space Mono', monospace",
+            marginBottom: "48px",
+          }}>
+            * Billed annually. Monthly price shown. Cancel anytime.
+          </p>
+        )}
+
+        {/* Feature comparison table */}
+        <div style={{
+          background: "#0c0e14",
+          border: "1px solid #1a1f2e",
+          borderRadius: "16px",
+          overflow: "hidden",
+          marginBottom: "48px",
+          animation: "fadeSlideUp 0.5s ease both",
+          animationDelay: "400ms",
+        }}>
+          <div style={{
+            padding: "20px 28px",
+            borderBottom: "1px solid #1a1f2e",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}>
+            <span style={{
+              fontSize: "11px",
+              fontFamily: "'Space Mono', monospace",
+              color: "#d69e2e",
+              letterSpacing: "2px",
+            }}>
+              FULL COMPARISON
+            </span>
+            <span style={{ fontSize: "11px", color: "#3d4455", fontFamily: "'Space Mono', monospace" }}>
+              ALL TIERS
+            </span>
+          </div>
+
+          {[
+            { category: "Signals & Alerts", rows: [
+              { feature: "Basic market alerts", tiers: [true, true, true, true, true] },
+              { feature: "Real-time push notifications", tiers: [false, true, true, true, true] },
+              { feature: "ML confidence scoring (1–5)", tiers: [false, true, true, true, true] },
+              { feature: "5-pillar composite score", tiers: [false, false, true, true, true] },
+              { feature: "14-gate signal pipeline", tiers: [false, false, true, true, true] },
+              { feature: "Sub-50ms priority delivery", tiers: [false, false, false, true, true] },
+            ]},
+            { category: "Analytics", rows: [
+              { feature: "Paper trading & P&L tracking", tiers: [true, true, true, true, true] },
+              { feature: "Sector rotation heatmap", tiers: [false, true, true, true, true] },
+              { feature: "Kelly criterion position sizing", tiers: [false, false, true, true, true] },
+              { feature: "Options flow + dark pool feed", tiers: [false, false, true, true, true] },
+              { feature: "Stress scenario modeling", tiers: [false, false, true, true, true] },
+              { feature: "Custom ML model fine-tuning", tiers: [false, false, false, false, true] },
+            ]},
+            { category: "Identity & Verification", rows: [
+              { feature: "Public leaderboard listing", tiers: [true, true, true, true, true] },
+              { feature: "Cryptographic track record", tiers: [false, false, false, true, true] },
+              { feature: "Brier calibration scoring", tiers: [false, false, false, true, true] },
+              { feature: "Regulatory profile page", tiers: [false, false, false, true, true] },
+              { feature: "Institutional talent visibility", tiers: [false, false, false, true, true] },
+              { feature: "Prop firm direct connect", tiers: [false, false, false, false, true] },
+            ]},
+            { category: "Platform & Access", rows: [
+              { feature: "Watchlists", tiers: ["3", "10", "∞", "∞", "∞"] },
+              { feature: "Team seats", tiers: ["1", "1", "1", "1", "3"] },
+              { feature: "Auto-execution API", tiers: [false, false, false, "Beta", true] },
+              { feature: "Bloomberg-grade data export", tiers: [false, false, false, false, true] },
+              { feature: "White-glove onboarding", tiers: [false, false, false, false, true] },
+              { feature: "Dedicated account manager", tiers: [false, false, false, false, true] },
+            ]},
+          ].map((section, si) => (
+            <div key={si}>
+              <div style={{
+                padding: "10px 28px",
+                background: "#080a10",
+                borderTop: si > 0 ? "1px solid #1a1f2e" : "none",
+              }}>
+                <span style={{
+                  fontSize: "9px",
+                  fontFamily: "'Space Mono', monospace",
+                  letterSpacing: "2px",
+                  color: "#3d4455",
+                }}>
+                  {section.category.toUpperCase()}
+                </span>
+              </div>
+              {section.rows.map((row, ri) => (
+                <div key={ri} style={{
+                  display: "grid",
+                  gridTemplateColumns: "240px repeat(5, 1fr)",
+                  borderTop: "1px solid #11141d",
+                  padding: "0 28px",
+                }}>
+                  <div style={{
+                    padding: "11px 0",
+                    fontSize: "12px",
+                    color: "#6b7280",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
+                    {row.feature}
+                  </div>
+                  {row.tiers.map((val, ti) => {
+                    const accent = tiers[ti].accent;
+                    return (
+                      <div key={ti} style={{
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        padding: "11px 0",
+                        background: ti === 2 ? "rgba(214,158,46,0.03)" : "transparent",
+                      }}>
+                        {typeof val === "string" ? (
+                          <span style={{
+                            fontSize: "10px",
+                            fontFamily: "'Space Mono', monospace",
+                            color: accent,
+                            fontWeight: "700",
+                          }}>{val}</span>
+                        ) : val ? (
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                            <circle cx="7" cy="7" r="7" fill={accent} fillOpacity="0.15"/>
+                            <path d="M4 7l2 2 4-4" stroke={accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        ) : (
+                          <div style={{ width: "14px", height: "1px", background: "#1a1f2e" }} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {/* Trust bar */}
+        <div style={{
+          display: "flex",
+          justifyContent: "center",
+          gap: "40px",
+          flexWrap: "wrap",
+          padding: "32px 0",
+          borderTop: "1px solid #12161f",
+          animation: "fadeSlideUp 0.5s ease both",
+          animationDelay: "500ms",
+        }}>
+          {[
+            { label: "VERIFIED TRADERS", value: "14,200+" },
+            { label: "AVG CALIBRATION SCORE", value: "0.71" },
+            { label: "SIGNALS PROCESSED TODAY", value: "2.4M" },
+            { label: "LEADERBOARD COUNTRIES", value: "38" },
+          ].map((stat, i) => (
+            <div key={i} style={{ textAlign: "center" }}>
+              <div style={{
+                fontSize: "22px",
+                fontWeight: "800",
+                fontFamily: "'Space Mono', monospace",
+                color: "#d69e2e",
+                letterSpacing: "-1px",
+              }}>
+                {stat.value}
+              </div>
+              <div style={{
+                fontSize: "9px",
+                fontFamily: "'Space Mono', monospace",
+                letterSpacing: "2px",
+                color: "#3d4455",
+                marginTop: "4px",
+              }}>
+                {stat.label}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Bottom CTA */}
+        <div style={{
+          textAlign: "center",
+          padding: "48px 24px",
+          background: "linear-gradient(160deg, #0f1117 0%, #0c0e14 100%)",
+          border: "1px solid #1a1f2e",
+          borderRadius: "20px",
+          marginTop: "32px",
+          animation: "fadeSlideUp 0.5s ease both",
+          animationDelay: "600ms",
+        }}>
+          <div style={{
+            fontSize: "11px",
+            fontFamily: "'Space Mono', monospace",
+            color: "#d69e2e",
+            letterSpacing: "3px",
+            marginBottom: "12px",
+          }}>
+            START WITHOUT A CARD
+          </div>
+          <h2 style={{
+            fontSize: "clamp(24px, 3vw, 38px)",
+            fontWeight: "800",
+            color: "#f7fafc",
+            letterSpacing: "-1px",
+            marginBottom: "12px",
+          }}>
+            Your track record starts at zero.
+          </h2>
+          <p style={{
+            color: "#4a5568",
+            fontSize: "14px",
+            maxWidth: "380px",
+            margin: "0 auto 28px",
+            lineHeight: 1.6,
+          }}>
+            Every verified elite on this platform started on the free tier.
+            The leaderboard doesn't lie.
+          </p>
+          <button style={{
+            background: "linear-gradient(135deg, #d69e2e, #ed8936)",
+            border: "none",
+            color: "#0a0a0f",
+            padding: "14px 40px",
+            borderRadius: "10px",
+            fontSize: "12px",
+            fontWeight: "800",
+            fontFamily: "'Space Mono', monospace",
+            letterSpacing: "1.5px",
+            cursor: "pointer",
+            boxShadow: "0 4px 30px rgba(214,158,46,0.35)",
+          }}>
+            JOIN FREE →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(KairosPricing));
+} catch(e) {
+  document.getElementById('err').style.display='block';
+  document.getElementById('err').textContent='Render error:\n'+(e&&e.stack||e);
+  console.error(e);
+}
+</script>
+</body></html>

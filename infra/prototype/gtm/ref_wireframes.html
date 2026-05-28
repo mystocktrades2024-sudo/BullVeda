@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kairos · Wireframes v2</title>
+<style>html,body{margin:0;padding:0;min-height:100vh}#root{min-height:100vh}
+#err{display:none;color:#c00;font:13px/1.5 monospace;padding:24px;white-space:pre-wrap}</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head><body><div id="root"></div><pre id="err"></pre>
+<script type="text/babel" data-presets="react">
+try {
+const {useState, useEffect, useRef, useMemo, useCallback} = React;
+
+/* ─── TOKENS ─── */
+const W = {
+  canvas:"#E8EBF0", frame:"#FFFFFF", border:"#D1D6E0", borderDk:"#B0B8CC",
+  fill:"#F3F5F8", fillMd:"#E8EBF0", text:"#9BA8BB", textDk:"#6B7A94",
+  label:"#4A5568", blue:"#4F6AF0", blueLt:"#EEF1FE", red:"#EF4444",
+  redLt:"#FEF2F2", green:"#22C55E", greenLt:"#F0FDF4", amber:"#F59E0B",
+  amberLt:"#FFFBEB", platinum:"#94A3B8",
+};
+
+const FONTS = `
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  ::-webkit-scrollbar{width:5px;height:5px}
+  ::-webkit-scrollbar-track{background:${W.canvas}}
+  ::-webkit-scrollbar-thumb{background:${W.border};border-radius:3px}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+`;
+
+/* ─── ATOMS ─── */
+const Mono = ({ c, s=9, w="600", children, style={} }) => (
+  <span style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:s,color:c||W.textDk,fontWeight:w,letterSpacing:"0.6px",textTransform:"uppercase",...style}}>{children}</span>
+);
+const Sans = ({ c, s=10, w="400", children, style={} }) => (
+  <span style={{fontFamily:"'IBM Plex Sans',sans-serif",fontSize:s,color:c||W.textDk,fontWeight:w,...style}}>{children}</span>
+);
+const ANum = ({ n, color=W.blue }) => (
+  <div style={{width:18,height:18,borderRadius:"50%",background:color,color:"#fff",fontFamily:"'IBM Plex Mono',monospace",fontSize:9,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{n}</div>
+);
+const TLine = ({ w="100%", h=8, bg, style={} }) => (
+  <div style={{height:h,background:bg||W.fillMd,borderRadius:2,width:w,...style}}/>
+);
+const Pill = ({ w=50, color }) => (
+  <div style={{height:14,width:w,borderRadius:7,background:color||W.fillMd,border:`1px solid ${W.border}`}}/>
+);
+const ChartBox = ({ height=80, label="CHART", dashed=false, style={} }) => (
+  <div style={{height,background:W.fill,border:`1px ${dashed?"dashed":"solid"} ${W.border}`,borderRadius:6,position:"relative",overflow:"hidden",...style}}>
+    <svg width="100%" height="100%" style={{position:"absolute",inset:0}}>
+      <line x1="0" y1="0" x2="100%" y2="100%" stroke={W.border} strokeWidth="1"/>
+      <line x1="100%" y1="0" x2="0" y2="100%" stroke={W.border} strokeWidth="1"/>
+    </svg>
+    <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <Mono c={W.text} s={8}>{label}</Mono>
+    </div>
+  </div>
+);
+const Frame = ({ children, label, accent, annotationNum, locked, style={} }) => (
+  <div style={{background:locked?W.redLt:W.frame,border:`1px ${locked?"dashed":"solid"} ${locked?W.red+"60":W.border}`,borderRadius:8,position:"relative",...style}}>
+    {label && (
+      <div style={{padding:"8px 12px",borderBottom:`1px solid ${locked?W.red+"30":W.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:locked?W.redLt:W.fill,borderRadius:"7px 7px 0 0"}}>
+        <Mono c={locked?W.red:accent||W.textDk} s={8}>{label}</Mono>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          {locked && <Mono c={W.red} s={8}>🔒 LOCKED</Mono>}
+          {annotationNum && <ANum n={annotationNum} color={accent||W.blue}/>}
+        </div>
+      </div>
+    )}
+    {children}
+  </div>
+);
+const WBtn = ({ label, variant="outline", full=false, accent, style={} }) => (
+  <div style={{width:full?"100%":"auto",padding:"8px 14px",borderRadius:6,textAlign:"center",background:variant==="filled"?(accent||W.blue)+"18":"transparent",border:`1px ${variant==="dashed"?"dashed":"solid"} ${variant==="filled"?(accent||W.blue):W.borderDk}`,...style}}>
+    <Mono c={variant==="filled"?(accent||W.blue):W.textDk} s={8}>{label}</Mono>
+  </div>
+);
+const WToggle = ({ active }) => (
+  <div style={{width:34,height:18,borderRadius:9,border:`1px solid ${W.borderDk}`,background:active?W.blue+"30":W.fill,position:"relative",flexShrink:0}}>
+    <div style={{position:"absolute",top:2,left:active?16:2,width:12,height:12,borderRadius:"50%",background:active?W.blue:W.borderDk,transition:"left .2s"}}/>
+  </div>
+);
+const Row = ({ children, highlighted=false, style={} }) => (
+  <div style={{padding:"7px 10px",background:highlighted?W.blueLt:W.fill,border:`1px solid ${highlighted?W.blue+"40":W.border}`,borderRadius:5,display:"flex",alignItems:"center",gap:8,...style}}>{children}</div>
+);
+const GaugeCircle = ({ size=90, pct=77, accent=W.blue }) => {
+  const r = size/2-6, cx=size/2, cy=size/2;
+  const circ = 2*Math.PI*r;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={W.fillMd} strokeWidth="5"/>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={accent} strokeWidth="5"
+        strokeDasharray={`${circ*pct/100} ${circ}`} strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`}/>
+      <text x={cx} y={cy+1} textAnchor="middle" dominantBaseline="middle" fontFamily="IBM Plex Mono" fontSize={size>80?18:12} fontWeight="700" fill={W.label}>{pct}</text>
+    </svg>
+  );
+};
+const RadarPlaceholder = ({ size=130 }) => {
+  const cx=size/2, cy=size/2, r=size/2-10;
+  const pts5 = (rr) => Array.from({length:5}).map((_,i)=>{
+    const a=(i*72-90)*Math.PI/180;
+    return [cx+rr*Math.cos(a), cy+rr*Math.sin(a)];
+  });
+  const poly = pts5(r*0.7).map(p=>p.join(",")).join(" ");
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      {[0.3,0.6,0.9].map((rr,i)=>(
+        <polygon key={i} points={pts5(r*rr).map(p=>p.join(",")).join(" ")} fill="none" stroke={W.border} strokeWidth="0.5"/>
+      ))}
+      {pts5(r).map((p,i)=>(
+        <line key={i} x1={cx} y1={cy} x2={p[0]} y2={p[1]} stroke={W.border} strokeWidth="0.8"/>
+      ))}
+      <polygon points={poly} fill={W.blue+"20"} stroke={W.blue} strokeWidth="1.5"/>
+      {pts5(r).map((p,i)=>(
+        <text key={i} x={p[0]} y={p[1]} textAnchor="middle" dominantBaseline="middle"
+          fontFamily="IBM Plex Mono" fontSize="7" fill={W.textDk} transform={`translate(${(p[0]-cx)*0.22},${(p[1]-cy)*0.22})`}>
+          {["MMTM","VOL","OPT","MACRO","SNTMT"][i]}
+        </text>
+      ))}
+    </svg>
+  );
+};
+
+/* ─── PHONE SHELL ─── */
+const PhoneShell = ({ children, accent=W.blue }) => (
+  <div style={{width:200,flexShrink:0,background:W.label,borderRadius:28,padding:"12px 6px",boxShadow:"0 8px 32px rgba(0,0,0,0.15)"}}>
+    <div style={{background:W.frame,borderRadius:22,overflow:"hidden",minHeight:380}}>
+      <div style={{background:W.label,height:28,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+        <div style={{width:40,height:5,borderRadius:3,background:W.border}}/>
+        <div style={{width:8,height:8,borderRadius:"50%",background:W.border}}/>
+      </div>
+      <div style={{padding:"0 0 8px"}}>{children}</div>
+    </div>
+  </div>
+);
+
+/* ═══════════ GATE PIPELINE DETAILED ═══════════ */
+const GATES = [
+  {n:1,name:"Trend Align",cleared:true},{n:2,name:"Vol Confirm",cleared:true},
+  {n:3,name:"Rel Strength",cleared:true},{n:4,name:"Sector Mom.",cleared:true},
+  {n:5,name:"GEX Position",cleared:true},{n:6,name:"Options Flow",cleared:true},
+  {n:7,name:"Dark Pool",cleared:true},{n:8,name:"Macro Regime",cleared:true},
+  {n:9,name:"Sentiment",cleared:true},{n:10,name:"Price Struct.",cleared:true},
+  {n:11,name:"Vol Check",cleared:true},{n:12,name:"Time of Day",cleared:false},
+  {n:13,name:"Corr. Filter",cleared:false},{n:14,name:"Final Score",cleared:false},
+];
+
+/* ═══════════════════════════════════════════════
+   TIER 0 — FREE (with empty-state toggle)
+═══════════════════════════════════════════════ */
+function WireTier0({ view }) {
+  const empty = view === "mobile";
+
+  if (view === "mobile") {
+    return (
+      <PhoneShell accent="#9BA8BB">
+        {/* Mobile nav */}
+        <div style={{background:W.fill,borderBottom:`1px solid ${W.border}`,padding:"8px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <Mono c={W.label} s={9}>KAIROS FREE</Mono>
+          <div style={{width:22,height:22,borderRadius:"50%",background:W.fillMd,border:`1px solid ${W.border}`}}/>
+        </div>
+        {/* Empty state */}
+        <div style={{padding:10,display:"flex",flexDirection:"column",gap:8,alignItems:"center",paddingTop:24}}>
+          <div style={{width:48,height:48,borderRadius:"50%",background:W.fill,border:`2px dashed ${W.border}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <Mono c={W.text} s={16}>?</Mono>
+          </div>
+          <Mono c={W.label} s={9} style={{textAlign:"center",display:"block",lineHeight:1.5}}>YOUR RANK IS UNCLAIMED</Mono>
+          <Sans c={W.textDk} s={9} style={{textAlign:"center",lineHeight:1.5}}>Start a paper trade to appear on the leaderboard</Sans>
+          <WBtn label="START FIRST TRADE →" full variant="filled" accent={W.label}/>
+          <div style={{width:"100%",height:1,background:W.border,margin:"4px 0"}}/>
+          <Mono c={W.text} s={8} style={{display:"block",marginBottom:4}}>LEADERBOARD PREVIEW</Mono>
+          {[{r:1,n:"axl_capital"},{r:2,n:"theta_trader"},{r:3,n:"iron_condor"}].map((l,i)=>(
+            <Row key={i} style={{width:"100%",padding:"6px 8px"}}>
+              <TLine w={14} h={8}/>
+              <TLine w={70} h={8} style={{flex:1}}/>
+              <TLine w={30} h={8} bg={W.greenLt}/>
+            </Row>
+          ))}
+          <Row style={{width:"100%",padding:"6px 8px",background:W.fillMd,border:`1px dashed ${W.borderDk}`}}>
+            <Mono c={W.text} s={8}>— </Mono>
+            <Mono c={W.text} s={8} style={{flex:1}}>You · unranked</Mono>
+          </Row>
+        </div>
+      </PhoneShell>
+    );
+  }
+
+  // Desktop — empty state
+  return (
+    <div style={{animation:"fadeIn .3s ease both"}}>
+      {/* Empty state hero */}
+      <Frame label="Dashboard — Empty State (First Visit)" accent="#9BA8BB" annotationNum={1} style={{marginBottom:10}}>
+        <div style={{padding:24,display:"flex",flexDirection:"column",alignItems:"center",gap:12,textAlign:"center"}}>
+          <div style={{width:64,height:64,borderRadius:"50%",background:W.fill,border:`2px dashed ${W.borderDk}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <Mono c={W.text} s={24}>?</Mono>
+          </div>
+          <div>
+            <Mono c={W.label} s={12} style={{display:"block",marginBottom:6}}>Your leaderboard rank is unclaimed.</Mono>
+            <Sans c={W.textDk} s={11} style={{lineHeight:1.6,maxWidth:360,display:"block",margin:"0 auto"}}>
+              Every verified trader on Kairos+ started here. Place your first paper trade to appear on the public leaderboard and start building a track record.
+            </Sans>
+          </div>
+          <WBtn label="Start Your First Paper Trade →" variant="filled" accent="#9BA8BB" style={{padding:"10px 24px"}}/>
+        </div>
+      </Frame>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 260px",gap:10}}>
+        {/* Signal Feed */}
+        <Frame label="Signal Feed — Basic Alerts Only" accent="#9BA8BB" annotationNum={2}>
+          <div style={{padding:10,display:"flex",flexDirection:"column",gap:6}}>
+            <div style={{padding:"6px 8px",background:W.fill,borderRadius:4,border:`1px solid ${W.border}`}}>
+              <Mono c={W.textDk} s={8}>TICKER · TYPE · DIRECTION · NO ML SCORE</Mono>
+            </div>
+            {[0,1,2,3].map(i=>(
+              <div key={i} style={{padding:"8px 10px",background:W.fill,border:`1px solid ${W.border}`,borderRadius:5}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                  <div style={{display:"flex",gap:6}}><TLine w={30} h={10} bg={W.label}/><Pill w={50}/><Pill w={36} color={W.greenLt}/></div>
+                  <TLine w={24} h={7}/>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{display:"flex",gap:10}}><TLine w={30}/><TLine w={24}/></div>
+                  <Mono c={W.text} s={7}>ML SCORE: UPGRADE</Mono>
+                </div>
+              </div>
+            ))}
+            {/* Upgrade nudge — what they're missing */}
+            <div style={{padding:10,background:W.blueLt,border:`1px solid ${W.blue}30`,borderRadius:5}}>
+              <Mono c={W.blue} s={8} style={{display:"block",marginBottom:4}}>⚡ WHAT YOU'RE MISSING</Mono>
+              <Sans c={W.textDk} s={9} style={{lineHeight:1.5}}>The last NVDA signal scored 5/5. Subscribers who acted on it saw +2.3%. You saw the ticker but not the score.</Sans>
+            </div>
+          </div>
+        </Frame>
+
+        {/* Paper trading — empty */}
+        <Frame label="Paper Trading" accent="#9BA8BB" annotationNum={3}>
+          <div style={{padding:12}}>
+            <div style={{height:100,background:W.fill,border:`2px dashed ${W.border}`,borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,marginBottom:10}}>
+              <Mono c={W.text} s={9}>NO PAPER TRADES YET</Mono>
+              <WBtn label="Open first position" variant="dashed"/>
+            </div>
+            <ChartBox height={70} label="P&L CHART — AWAITING FIRST TRADE" dashed/>
+          </div>
+        </Frame>
+
+        {/* Right */}
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <Frame label="Leaderboard" accent="#9BA8BB" annotationNum={4}>
+            <div style={{padding:10,display:"flex",flexDirection:"column",gap:4}}>
+              {[1,2,3].map(i=>(
+                <Row key={i}><TLine w={16} h={8}/><TLine w={60} style={{flex:1}}/><TLine w={30} bg={W.greenLt}/><div style={{width:8,height:8,borderRadius:"50%",background:W.amber}}/></Row>
+              ))}
+              <div style={{padding:"6px 8px",background:W.fillMd,border:`1px dashed ${W.borderDk}`,borderRadius:5,display:"flex",gap:8}}>
+                <Mono c={W.text} s={8}>—</Mono>
+                <Mono c={W.text} s={8} style={{flex:1}}>You · unranked</Mono>
+                <Mono c={W.text} s={7}>needs 1 trade</Mono>
+              </div>
+            </div>
+          </Frame>
+          <Frame label="Share Card" accent="#9BA8BB" annotationNum={5}>
+            <div style={{padding:10}}>
+              <div style={{background:W.fill,border:`2px dashed ${W.border}`,borderRadius:6,padding:12,marginBottom:8,textAlign:"center"}}>
+                <Mono c={W.text} s={8} style={{display:"block",marginBottom:4}}>SHAREABLE CARD — INACTIVE</Mono>
+                <Sans c={W.textDk} s={9}>Unlocks after your first paper trade</Sans>
+              </div>
+              <WBtn label="Share to X →" full variant="dashed"/>
+            </div>
+          </Frame>
+          <Frame label="ML Scoring" accent="#9BA8BB" locked annotationNum={6}>
+            <div style={{padding:10,opacity:0.25}}>
+              <div style={{display:"flex",gap:3}}>{[0,0,0,0,0].map((_,i)=><div key={i} style={{width:10,height:10,borderRadius:"50%",background:W.borderDk}}/>)}</div>
+            </div>
+          </Frame>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   TIER 1 — STARTER
+═══════════════════════════════════════════════ */
+function WireTier1({ view }) {
+  if (view === "mobile") {
+    return (
+      <PhoneShell accent={W.green}>
+        <div style={{background:W.greenLt,borderBottom:`1px solid ${W.green}30`,padding:"6px 10px",display:"flex",alignItems:"center",gap:6}}>
+          <div style={{width:6,height:6,borderRadius:"50%",background:W.green,animation:"pulse 2s infinite"}}/>
+          <Mono c={W.green} s={8}>LIVE SIGNAL ALERT</Mono>
+        </div>
+        <div style={{padding:10,display:"flex",flexDirection:"column",gap:8}}>
+          {/* Alert card */}
+          <div style={{background:W.fill,border:`1px solid ${W.green}40`,borderRadius:8,padding:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+              <TLine w={40} h={14} bg={W.label}/>
+              <Pill w={50} color={W.greenLt}/>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <TLine w={60} h={10}/>
+              <div style={{display:"flex",gap:3}}>{[1,1,1,1,0].map((v,i)=><div key={i} style={{width:8,height:8,borderRadius:"50%",background:v?W.green:W.fillMd}}/>)}</div>
+            </div>
+            <Mono c={W.textDk} s={8} style={{display:"block",marginBottom:8}}>CONF: 4/5 · VOL: 2.8X</Mono>
+            <div style={{display:"flex",gap:6}}>
+              <WBtn label="VIEW SIGNAL" variant="filled" accent={W.green} style={{flex:1,padding:"7px"}}/>
+              <WBtn label="DISMISS" style={{flex:1,padding:"7px"}}/>
+            </div>
+          </div>
+          <Mono c={W.textDk} s={8} style={{display:"block",marginBottom:2}}>TODAY'S SIGNALS</Mono>
+          {[0,1,2,3].map(i=>(
+            <Row key={i} style={{padding:"8px 10px"}}>
+              <TLine w={28} h={9} bg={W.label}/>
+              <TLine w={50} style={{flex:1}}/>
+              <div style={{display:"flex",gap:2}}>{[1,1,i<2?1:0,0,0].map((v,j)=><div key={j} style={{width:6,height:6,borderRadius:"50%",background:v?W.green:W.fillMd}}/>)}</div>
+            </Row>
+          ))}
+        </div>
+      </PhoneShell>
+    );
+  }
+
+  return (
+    <div style={{animation:"fadeIn .3s ease both"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 260px",gap:10}}>
+        <Frame label="Real-Time Signals + ML Confidence" accent={W.green} annotationNum={1}>
+          <div style={{padding:10,display:"flex",flexDirection:"column",gap:6}}>
+            <div style={{padding:"6px 8px",background:W.greenLt,borderRadius:4,border:`1px solid ${W.green}30`,display:"flex",alignItems:"center",gap:6}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:W.green,flexShrink:0}}/>
+              <Mono c={W.green} s={8}>MARKET REGIME · BULLISH EXPANSION</Mono>
+            </div>
+            {[0,1,2,3,4,5].map(i=>(
+              <div key={i} style={{padding:"8px 10px",background:W.fill,border:`1px solid ${W.border}`,borderRadius:5}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                  <div style={{display:"flex",gap:6}}><TLine w={30} h={10} bg={W.label}/><Pill w={50}/><Pill w={36} color={i%3===2?W.redLt:W.greenLt}/></div>
+                  <TLine w={24} h={7}/>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{display:"flex",gap:10}}><TLine w={28}/><TLine w={22}/></div>
+                  <div style={{display:"flex",gap:3}}>{[1,1,1,i<3?1:0,i<2?1:0].map((v,j)=><div key={j} style={{width:7,height:7,borderRadius:"50%",background:v?W.green:W.fillMd}}/>)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Frame>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <Frame label="Sector Rotation Heatmap" accent={W.green} annotationNum={2}>
+            <div style={{padding:10}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>
+                {["Tech","Energy","Finance","Health","Cons","Utility","Mater","RE","Telecom","Indust","Staples","Intl"].map((s,i)=>(
+                  <div key={i} style={{padding:"6px 4px",borderRadius:4,textAlign:"center",background:[0,4,11].includes(i)?W.greenLt:i===7?W.redLt:W.fill,border:`1px solid ${W.border}`}}>
+                    <TLine w="70%" h={7} style={{margin:"0 auto 3px"}}/>
+                    <TLine w="50%" h={6} style={{margin:"0 auto"}}/>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Frame>
+          <Frame label="Options Flow — 3 Rows (4+ Locked)" accent={W.green} annotationNum={3}>
+            <div style={{padding:10,display:"flex",flexDirection:"column",gap:5}}>
+              {[0,1,2].map(i=>(
+                <Row key={i}>
+                  <TLine w={30} h={10} bg={W.label}/>
+                  <TLine w={40}/>
+                  <div style={{flex:1}}/>
+                  <TLine w={40} bg={i===1?W.redLt:W.greenLt}/>
+                </Row>
+              ))}
+              <div style={{padding:"8px 10px",background:W.redLt,border:`1px dashed ${W.red}40`,borderRadius:5,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <Mono c={W.red} s={8}>🔒 +12 MORE SIGNALS LOCKED</Mono>
+                <WBtn label="UPGRADE" variant="filled" accent={W.red} style={{padding:"3px 8px"}}/>
+              </div>
+            </div>
+          </Frame>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <Frame label="Watchlist — 10 max" accent={W.green} annotationNum={4}>
+            <div style={{padding:10,display:"flex",flexDirection:"column",gap:4}}>
+              {[0,1,2,3,4,5].map(i=>(
+                <Row key={i}><TLine w={30} h={10} bg={W.label}/><div style={{flex:1}}/><TLine w={28}/><TLine w={30} bg={W.greenLt}/></Row>
+              ))}
+              <div style={{padding:"5px 8px",background:W.fillMd,borderRadius:4,textAlign:"center"}}><Mono c={W.text} s={8}>6 / 10 SLOTS USED</Mono></div>
+            </div>
+          </Frame>
+          <Frame label="Composite Score" accent={W.green} locked annotationNum={5}>
+            <div style={{padding:12,opacity:0.2,display:"flex",justifyContent:"center"}}><GaugeCircle size={70} pct={77}/></div>
+          </Frame>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   TIER 2 — CORE (composite score as hero)
+═══════════════════════════════════════════════ */
+function WireTier2({ view }) {
+  const [tab, setTab] = useState("flow");
+
+  if (view === "mobile") {
+    return (
+      <PhoneShell accent={W.amber}>
+        <div style={{background:W.amberLt,borderBottom:`1px solid ${W.amber}30`,padding:"6px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <Mono c={W.amber} s={8}>COMPOSITE SCORE</Mono>
+          <Mono c={W.textDk} s={8}>NVDA · LONG</Mono>
+        </div>
+        <div style={{padding:10,display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
+          <GaugeCircle size={100} pct={77} accent={W.amber}/>
+          <Mono c={W.amber} s={9} style={{display:"block",textAlign:"center"}}>HIGH CONVICTION SIGNAL</Mono>
+          <div style={{width:"100%",display:"flex",flexDirection:"column",gap:4}}>
+            {["Momentum","Volume","Options","Macro","Sentiment"].map((p,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",background:W.fill,borderRadius:4,border:`1px solid ${W.border}`}}>
+                <Mono c={W.textDk} s={8}>{p}</Mono>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <div style={{width:40,height:3,borderRadius:2,background:W.fillMd}}><div style={{width:`${[82,71,88,65,79][i]}%`,height:"100%",background:W.amber,borderRadius:2}}/></div>
+                  <Mono c={W.label} s={8}>{[82,71,88,65,79][i]}</Mono>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:6,width:"100%"}}>
+            <WBtn label="TAKE TRADE" variant="filled" accent={W.amber} style={{flex:1,padding:"8px"}}/>
+            <WBtn label="SKIP" style={{flex:1,padding:"8px"}}/>
+          </div>
+        </div>
+      </PhoneShell>
+    );
+  }
+
+  return (
+    <div style={{animation:"fadeIn .3s ease both"}}>
+      {/* ── HERO: Composite Score ── */}
+      <Frame label="Composite Intelligence Score — Primary Decision View" accent={W.amber} annotationNum={1} style={{marginBottom:10}}>
+        <div style={{padding:16}}>
+          <div style={{display:"flex",gap:20,alignItems:"center"}}>
+            {/* Big gauge */}
+            <div style={{flexShrink:0}}><GaugeCircle size={110} pct={77} accent={W.amber}/></div>
+            {/* Verdict block */}
+            <div style={{flex:1}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                <TLine w={80} h={20} bg={W.label}/>
+                <Pill w={60} color={W.greenLt}/>
+                <Pill w={80} color={W.amberLt}/>
+              </div>
+              <TLine w="60%" h={8} style={{marginBottom:4}}/>
+              <TLine w="40%" h={8}/>
+              {/* Verdict */}
+              <div style={{marginTop:10,padding:"8px 12px",background:W.amberLt,border:`1px solid ${W.amber}40`,borderRadius:6,display:"flex",gap:10,alignItems:"center"}}>
+                <Mono c={W.amber} s={10}>COMPOSITE VERDICT</Mono>
+                <div style={{flex:1}}/>
+                <Mono c={W.amber} s={11} w="700">HIGH CONVICTION · LONG</Mono>
+              </div>
+            </div>
+            {/* 5 pillars inline */}
+            <div style={{display:"flex",gap:8,flexShrink:0}}>
+              {["MMT","VOL","OPT","MAC","SNT"].map((p,i)=>(
+                <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+                  <div style={{width:28,height:28,borderRadius:"50%",background:[82,71,88,65,79][i]>75?W.amberLt:W.fill,border:`1px solid ${[82,71,88,65,79][i]>75?W.amber:W.border}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <Mono c={[82,71,88,65,79][i]>75?W.amber:W.textDk} s={7}>{[82,71,88,65,79][i]}</Mono>
+                  </div>
+                  <Mono c={W.text} s={6}>{p}</Mono>
+                </div>
+              ))}
+            </div>
+            {/* Kelly call-out */}
+            <div style={{background:W.fill,border:`1px solid ${W.border}`,borderRadius:8,padding:12,flexShrink:0,minWidth:110}}>
+              <Mono c={W.textDk} s={8} style={{display:"block",marginBottom:4}}>KELLY SIZE</Mono>
+              <TLine w={50} h={18} bg={W.amber}/>
+              <Mono c={W.text} s={8} style={{display:"block",marginTop:4}}>OF PORTFOLIO</Mono>
+            </div>
+          </div>
+        </div>
+      </Frame>
+
+      {/* ── BELOW-FOLD: 3-col detail ── */}
+      <div style={{display:"grid",gridTemplateColumns:"180px 1fr 1fr",gap:10}}>
+        {/* Sidebar: 14-gate detailed */}
+        <Frame label="14-Gate Pipeline" accent={W.amber} annotationNum={2}>
+          <div style={{padding:10}}>
+            <div style={{display:"flex",flexDirection:"column",gap:3}}>
+              {GATES.map((g,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 6px",background:g.cleared?W.amberLt:W.fill,border:`1px solid ${g.cleared?W.amber+"40":W.border}`,borderRadius:4}}>
+                  <div style={{width:14,height:14,borderRadius:3,background:g.cleared?W.amber+"20":W.fillMd,border:`1px solid ${g.cleared?W.amber+"60":W.border}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                    <Mono c={g.cleared?W.amber:W.text} s={6}>{g.n}</Mono>
+                  </div>
+                  <Mono c={g.cleared?W.label:W.text} s={7}>{g.name}</Mono>
+                  {g.cleared&&<div style={{marginLeft:"auto",width:6,height:6,borderRadius:"50%",background:W.green}}/>}
+                </div>
+              ))}
+            </div>
+            <div style={{marginTop:8,padding:"5px 8px",background:W.amberLt,borderRadius:4,border:`1px solid ${W.amber}30`}}>
+              <Mono c={W.amber} s={8}>11/14 CLEARED</Mono>
+            </div>
+          </div>
+        </Frame>
+
+        {/* Center: Radar + confluence */}
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <Frame label="5-Pillar Radar" accent={W.amber} annotationNum={3}>
+            <div style={{padding:8,display:"flex",justifyContent:"center"}}><RadarPlaceholder size={140}/></div>
+          </Frame>
+          <Frame label="Confluence Matrix" accent={W.amber} annotationNum={4} style={{flex:1}}>
+            <div style={{padding:10,display:"flex",flexDirection:"column",gap:4}}>
+              {["Options Flow","Volume Profile","GEX","Macro","Sector Mom.","Price Action","Dark Pool"].map((f,i)=>(
+                <Row key={i}><div style={{width:50,height:3,borderRadius:2,background:W.fillMd,flexShrink:0,overflow:"hidden"}}><div style={{width:`${[88,71,65,78,82,59,74][i]}%`,height:"100%",background:[0,1,3,4,6].includes(i)?W.amber:W.text}}/></div><TLine w={80} style={{flex:1}}/><Pill w={55} color={[0,1,3,4,6].includes(i)?W.amberLt:W.fillMd}/></Row>
+              ))}
+            </div>
+          </Frame>
+        </div>
+
+        {/* Right: flow tabs + stress */}
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <Frame label="Flow & Dark Pool" accent={W.amber} annotationNum={5}>
+            <div style={{display:"flex",borderBottom:`1px solid ${W.border}`}}>
+              {["OPTIONS FLOW","DARK POOL"].map(t=>(
+                <button key={t} onClick={()=>setTab(t)} style={{flex:1,padding:"7px",border:"none",background:tab===t?W.amberLt:"transparent",borderBottom:tab===t?`2px solid ${W.amber}`:"2px solid transparent",cursor:"pointer"}}>
+                  <Mono c={tab===t?W.amber:W.text} s={8}>{t}</Mono>
+                </button>
+              ))}
+            </div>
+            <div style={{padding:10,display:"flex",flexDirection:"column",gap:4}}>
+              {[0,1,2,3,4].map(i=>(
+                <Row key={i}><TLine w={28} h={10} bg={W.label}/><TLine w={36}/><Pill w={40}/><div style={{flex:1}}/><TLine w={36} bg={i%3===2?W.redLt:W.greenLt}/></Row>
+              ))}
+            </div>
+          </Frame>
+          <Frame label="Stress Scenarios" accent={W.amber} annotationNum={6}>
+            <div style={{padding:10,display:"flex",flexDirection:"column",gap:4}}>
+              {["Base Case","Fed Surprise","Drawdown (−3%)","VIX Spike >25"].map((s,i)=>(
+                <Row key={i}><TLine w={110}/><div style={{flex:1}}/><TLine w={50} bg={i<2?W.greenLt:W.redLt}/></Row>
+              ))}
+            </div>
+          </Frame>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   TIER 3 — PRO (certificate-style identity card)
+═══════════════════════════════════════════════ */
+function WireTier3({ view }) {
+  if (view === "mobile") {
+    return (
+      <PhoneShell accent={W.amber}>
+        <div style={{background:"#1C1F2E",padding:10,display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <Mono c={W.amber} s={8}>KAIROS+ VERIFIED</Mono>
+            <div style={{width:8,height:8,borderRadius:"50%",background:W.green,animation:"pulse 2s infinite"}}/>
+          </div>
+          <div style={{textAlign:"center",padding:"8px 0"}}>
+            <TLine w="50%" h={14} bg="#2A2F44" style={{margin:"0 auto 6px"}}/>
+            <TLine w="30%" h={8} bg="#2A2F44" style={{margin:"0 auto"}}/>
+          </div>
+          <div style={{background:"#252940",borderRadius:6,padding:8,border:`1px solid ${W.amber}30`}}>
+            <Mono c={W.amber} s={7} style={{display:"block",marginBottom:3}}>CRYPTOGRAPHIC HASH</Mono>
+            <TLine w="80%" h={8} bg={W.amber+"30"}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            {["RETURN","RANK","CAL. SCORE","TRADES"].map((l,i)=>(
+              <div key={i} style={{background:"#252940",borderRadius:5,padding:"6px 8px"}}>
+                <Mono c={W.text} s={7} style={{display:"block",marginBottom:3}}>{l}</Mono>
+                <TLine w="60%" h={10} bg={W.amber+"40"}/>
+              </div>
+            ))}
+          </div>
+          <WBtn label="SHARE PROFILE" full variant="filled" accent={W.amber} style={{marginTop:4}}/>
+        </div>
+        <div style={{padding:10,display:"flex",flexDirection:"column",gap:5}}>
+          <Mono c={W.textDk} s={8} style={{display:"block",marginBottom:2}}>INSTITUTION ACTIVITY</Mono>
+          {[0,1,2].map(i=>(
+            <Row key={i} style={{padding:"6px 8px"}}>
+              <TLine w={70} style={{flex:1}}/>
+              <Pill w={50} color={W.amberLt}/>
+            </Row>
+          ))}
+        </div>
+      </PhoneShell>
+    );
+  }
+
+  return (
+    <div style={{animation:"fadeIn .3s ease both"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+
+        {/* Certificate Identity Card */}
+        <Frame label="Verified Identity Certificate" accent={W.amber} annotationNum={1}>
+          <div style={{padding:14}}>
+            {/* Certificate — dark bg, amber glow */}
+            <div style={{background:"#16192A",borderRadius:12,overflow:"hidden",marginBottom:12,position:"relative"}}>
+              {/* Certificate border */}
+              <div style={{position:"absolute",inset:3,border:`1px solid ${W.amber}25`,borderRadius:10,pointerEvents:"none"}}/>
+              {/* Header band */}
+              <div style={{background:W.amber+"18",borderBottom:`1px solid ${W.amber}30`,padding:"8px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <Mono c={W.amber} s={9}>KAIROS+ VERIFIED</Mono>
+                <div style={{width:8,height:8,borderRadius:"50%",background:W.green}}/>
+              </div>
+              <div style={{padding:14}}>
+                {/* Avatar + name */}
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                  <div style={{width:36,height:36,borderRadius:"50%",background:W.amber+"20",border:`2px solid ${W.amber}40`,flexShrink:0}}/>
+                  <div>
+                    <TLine w={80} h={12} bg={W.amber+"40"} style={{marginBottom:3}}/>
+                    <TLine w={50} h={7} bg="#2A2F44"/>
+                  </div>
+                </div>
+                {/* Stats grid */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:10}}>
+                  {["VERIFIED RETURN","LEADERBOARD RANK","TOTAL TRADES","ACTIVE SINCE"].map((l,i)=>(
+                    <div key={i} style={{background:"#1E2238",borderRadius:6,padding:"7px 8px"}}>
+                      <Mono c={W.text} s={6} style={{display:"block",marginBottom:3}}>{l}</Mono>
+                      <TLine w="60%" h={10} bg={W.amber+"40"}/>
+                    </div>
+                  ))}
+                </div>
+                {/* Hash */}
+                <div style={{background:"#1A1D2E",border:`1px solid ${W.amber}30`,borderRadius:6,padding:"8px 10px"}}>
+                  <Mono c={W.amber} s={7} style={{display:"block",marginBottom:4}}>CRYPTOGRAPHIC ATTESTATION</Mono>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{width:8,height:8,borderRadius:2,background:W.amber+"40",flexShrink:0}}/>
+                    <TLine w="75%" h={7} bg={W.amber+"30"}/>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <WBtn label="SHARE PROFILE" variant="filled" accent={W.amber} style={{flex:1}}/>
+              <WBtn label="VIEW PUBLIC →" style={{flex:1}}/>
+            </div>
+          </div>
+        </Frame>
+
+        {/* Calibration */}
+        <Frame label="Brier Calibration Score" accent={W.amber} annotationNum={2}>
+          <div style={{padding:14}}>
+            <div style={{display:"flex",justifyContent:"center",marginBottom:10}}>
+              <GaugeCircle size={110} pct={71} accent={W.amber}/>
+            </div>
+            <div style={{textAlign:"center",marginBottom:12}}>
+              <Pill w={130} color={W.amberLt} style={{margin:"0 auto"}}/>
+              <Sans c={W.textDk} s={9} style={{display:"block",marginTop:4}}>Top 8% calibration</Sans>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {["Win Rate","Avg R:R","Max Drawdown","Sharpe Ratio","Profit Factor"].map((s,i)=>(
+                <Row key={i}><TLine w={90}/><div style={{flex:1}}/><TLine w={36}/></Row>
+              ))}
+            </div>
+          </div>
+        </Frame>
+
+        {/* Institutional + auto-exec */}
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <Frame label="Institutional Visibility Feed" accent={W.amber} annotationNum={3}>
+            <div style={{padding:12}}>
+              <div style={{marginBottom:10}}>
+                <Mono c={W.textDk} s={8} style={{display:"block",marginBottom:3}}>PROFILE VIEWS · THIS MONTH</Mono>
+                <TLine w="40%" h={24} bg={W.amber+"30"}/>
+              </div>
+              {["Prop Firm","Family Office","Hedge Fund"].map((t,i)=>(
+                <div key={i} style={{padding:"8px 10px",background:W.fill,borderRadius:5,border:`1px solid ${W.amber}20`,marginBottom:5}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                    <TLine w={80} h={9}/>
+                    <Pill w={60} color={W.amberLt}/>
+                  </div>
+                  <TLine w="65%" h={7}/>
+                </div>
+              ))}
+            </div>
+          </Frame>
+          <Frame label="Auto-Execution API — Beta" accent={W.amber} annotationNum={4}>
+            <div style={{padding:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <Mono c={W.textDk} s={8}>BROKER CONNECTION</Mono>
+                <WToggle active/>
+              </div>
+              {["Connected broker","Max size","Daily limit","Stop-loss"].map((r,i)=>(
+                <Row key={i} style={{marginBottom:4}}><TLine w={90}/><div style={{flex:1}}/><TLine w={46}/></Row>
+              ))}
+            </div>
+          </Frame>
+        </div>
+      </div>
+      {/* Track record chart */}
+      <div style={{marginTop:10}}>
+        <Frame label="Verified Track Record — 12-Month Return (Full Width)" accent={W.amber} annotationNum={5}>
+          <div style={{padding:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+              <TLine w={120}/><TLine w={80} bg={W.greenLt}/>
+            </div>
+            <ChartBox height={80} label="VERIFIED RETURN AREA CHART — CRYPTOGRAPHIC ANCHOR POINTS"/>
+          </div>
+        </Frame>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   TIER 4 — ELITE
+═══════════════════════════════════════════════ */
+function WireTier4({ view }) {
+  if (view === "mobile") {
+    return (
+      <PhoneShell accent={W.platinum}>
+        <div style={{background:W.fill,borderBottom:`1px solid ${W.border}`,padding:"6px 10px",display:"flex",justifyContent:"space-between"}}>
+          <Mono c={W.label} s={8}>ELITE COMMAND</Mono>
+          <Mono c={W.green} s={8}>+22.1%</Mono>
+        </div>
+        <div style={{padding:10,display:"flex",flexDirection:"column",gap:7}}>
+          <Mono c={W.textDk} s={8} style={{display:"block"}}>ACCOUNTS</Mono>
+          {["Main · tastytrade","Options · IBKR","IRA · Schwab"].map((a,i)=>(
+            <div key={i} style={{padding:"8px 10px",background:W.fill,borderRadius:6,border:`1px solid ${W.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <TLine w={80} h={8}/>
+              <TLine w={50} h={10} bg={W.greenLt}/>
+            </div>
+          ))}
+          <div style={{height:1,background:W.border}}/>
+          <Mono c={W.textDk} s={8} style={{display:"block"}}>PROP FIRM PIPELINE</Mono>
+          {["OFFER PENDING","EVALUATION"].map((s,i)=>(
+            <div key={i} style={{padding:"7px 10px",background:W.fill,borderRadius:5,border:`1px solid ${W.border}`,display:"flex",justifyContent:"space-between"}}>
+              <TLine w={80} h={8}/>
+              <Pill w={70} color={i===0?W.greenLt:W.amberLt}/>
+            </div>
+          ))}
+          <WBtn label="OPEN SLACK →" full variant="filled" accent={W.label}/>
+        </div>
+      </PhoneShell>
+    );
+  }
+
+  return (
+    <div style={{animation:"fadeIn .3s ease both"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:10}}>
+        <Frame label="Multi-Account Aggregation" accent={W.platinum} annotationNum={1} style={{gridColumn:"1/3"}}>
+          <div style={{padding:12}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
+              {["Main · tastytrade","Options · IBKR","IRA · Schwab"].map((a,i)=>(
+                <div key={i} style={{background:W.fill,borderRadius:6,padding:10,border:`1px solid ${W.border}`}}>
+                  <TLine w="80%" h={6} style={{marginBottom:4}}/><TLine w="60%" h={6} style={{marginBottom:6}}/><TLine w="70%" h={16}/><div style={{marginTop:4}}><Pill w={50} color={W.greenLt}/></div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",background:W.fill,borderRadius:5,border:`1px solid ${W.borderDk}`}}>
+              <Mono c={W.textDk} s={8}>TOTAL PORTFOLIO P&L</Mono><TLine w={80}/>
+            </div>
+          </div>
+        </Frame>
+        <Frame label="Prop Firm Pipeline" accent={W.platinum} annotationNum={2} style={{gridColumn:"3/5"}}>
+          <div style={{padding:10,display:"flex",flexDirection:"column",gap:5}}>
+            {["OFFER PENDING","EVALUATION","INTRODUCTION","TRACK RECORD SENT"].map((s,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 10px",background:W.fill,borderRadius:5,border:`1px solid ${W.border}`,marginBottom:4}}>
+                <div><TLine w={90} h={10} style={{marginBottom:4}}/><Pill w={80} color={i===0?W.greenLt:i===1?W.amberLt:W.fillMd}/></div>
+                <div style={{textAlign:"right"}}><TLine w={60} h={7} style={{marginBottom:4}}/><TLine w={40} h={12}/></div>
+              </div>
+            ))}
+          </div>
+        </Frame>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10}}>
+        <Frame label="Custom ML Model" accent={W.platinum} annotationNum={3}>
+          <div style={{padding:12}}>
+            <div style={{marginBottom:8}}><Mono c={W.textDk} s={8} style={{display:"block",marginBottom:4}}>MODEL STATUS</Mono><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:8,height:8,borderRadius:"50%",background:W.green}}/><TLine w="70%" h={8}/></div></div>
+            <div style={{background:W.fill,borderRadius:5,padding:8,border:`1px solid ${W.border}`,marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><Mono c={W.textDk} s={7}>TRAINING PROGRESS</Mono><Mono c={W.textDk} s={7}>48%</Mono></div><div style={{height:4,background:W.fillMd,borderRadius:2}}><div style={{width:"48%",height:"100%",background:W.blue,borderRadius:2}}/></div></div>
+            {["Training samples","Base model","Fine-tune scope"].map((r,i)=>(<Row key={i} style={{marginBottom:4}}><TLine w={80}/><div style={{flex:1}}/><TLine w={46}/></Row>))}
+          </div>
+        </Frame>
+        <Frame label="Team Seats — 3 max" accent={W.platinum} annotationNum={4}>
+          <div style={{padding:12,display:"flex",flexDirection:"column",gap:7}}>
+            {["You (Admin)","alex_r","trading_vm"].map((u,i)=>(
+              <Row key={i} highlighted={i===0}>
+                <div style={{width:28,height:28,borderRadius:"50%",background:W.fillMd,border:`1px solid ${W.border}`,flexShrink:0}}/>
+                <div style={{flex:1}}><TLine w="70%" h={9} style={{marginBottom:4}}/><Pill w={60} color={i<2?W.blueLt:W.fillMd}/></div>
+                <div style={{width:8,height:8,borderRadius:"50%",background:i<2?W.green:W.border}}/>
+              </Row>
+            ))}
+          </div>
+        </Frame>
+        <Frame label="Bloomberg-Grade Export" accent={W.platinum} annotationNum={5}>
+          <div style={{padding:12}}>
+            <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:10}}>
+              {["Full signal history","Verified track record","Options flow data","Calibration dataset"].map((e,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 8px",background:W.fill,borderRadius:5,border:`1px solid ${W.border}`}}>
+                  <TLine w={90}/><div style={{display:"flex",gap:5}}><TLine w={28}/><div style={{width:20,height:16,borderRadius:3,background:W.blueLt,border:`1px solid ${W.blue}30`}}/></div>
+                </div>
+              ))}
+            </div>
+            <div style={{background:W.fill,borderRadius:5,padding:"6px 8px",border:`1px solid ${W.border}`}}><TLine w="80%" h={7}/></div>
+          </div>
+        </Frame>
+        <Frame label="Dedicated Account Manager" accent={W.platinum} annotationNum={6}>
+          <div style={{padding:12}}>
+            <div style={{background:W.fill,border:`1px solid ${W.border}`,borderRadius:8,padding:12,marginBottom:10}}>
+              <div style={{width:36,height:36,borderRadius:"50%",background:W.fillMd,border:`1px solid ${W.borderDk}`,marginBottom:8}}/>
+              <TLine w="60%" h={10} style={{marginBottom:4}}/><TLine w="80%" h={7} style={{marginBottom:6}}/><Pill w={70} color={W.greenLt}/>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              <WBtn label="OPEN SLACK CHANNEL" full variant="filled" accent={W.label}/>
+              <WBtn label="BOOK STRATEGY CALL" full/>
+            </div>
+          </div>
+        </Frame>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ ANNOTATIONS ═══ */
+const ANNOTS = {
+  0:[
+    {n:1,c:W.blue,title:"Empty State — First Visit",desc:"No signals, no rank, no P&L. Single CTA: 'Start your first paper trade'. This is the onboarding hook that was missing in v1."},
+    {n:2,c:W.blue,title:"Upgrade Nudge — Contextual",desc:"A real example of what a paying user saw vs what free user saw. Not just a lock — a missed opportunity."},
+    {n:3,c:W.blue,title:"Paper Trading — Empty",desc:"Dashed placeholder communicates future state. Encourages first action."},
+    {n:4,c:W.blue,title:"Leaderboard — Unranked",desc:"User visible at bottom, greyed, 'needs 1 trade'. Creates proximity to the rank they want."},
+    {n:5,c:W.blue,title:"Share Card — Inactive",desc:"Disabled until first trade. Reward mechanic: earn the share card."},
+    {n:6,c:W.blue,title:"ML Scoring — Locked",desc:"Visible enough to create desire. Not enough to satisfy it."},
+  ],
+  1:[
+    {n:1,c:W.green,title:"Signal Feed + Confidence Dots",desc:"1–5 dot system. Real-time badge + market regime indicator at top. Both new vs free tier."},
+    {n:2,c:W.green,title:"Sector Heatmap",desc:"12-cell grid. Color intensity shows heat. Hot sectors (Tech, Cons, Intl) highlighted green."},
+    {n:3,c:W.green,title:"Options Flow — Hard Gate",desc:"3 visible rows, then a red '12 MORE SIGNALS LOCKED' strip with upgrade CTA. Much more aggressive than v1."},
+    {n:4,c:W.green,title:"Watchlist — Slot Counter",desc:"'6/10 SLOTS USED' counter creates urgency without being aggressive."},
+    {n:5,c:W.green,title:"Composite Score — Teased",desc:"Gauge visible but locked. Shows the shape of what's above."},
+  ],
+  2:[
+    {n:1,c:W.amber,title:"Composite Score — HERO",desc:"Full-width, above the fold. The 77/100 number is the product thesis. Verdict, pillars, and Kelly sizing all in one row. This is the fix from v1."},
+    {n:2,c:W.amber,title:"14-Gate Pipeline — Named",desc:"Each gate labeled with its function. Cleared vs pending is now meaningful, not just a count."},
+    {n:3,c:W.amber,title:"5-Pillar Radar",desc:"Pentagon chart moved below the hero. Supporting context, not the lead."},
+    {n:4,c:W.amber,title:"Confluence Matrix",desc:"Strength bars + CONFIRM/NEUTRAL tags. Gives analysts the detail they need."},
+    {n:5,c:W.amber,title:"Tabbed Flow / Dark Pool",desc:"Full access to both feeds. Tab saves vertical space."},
+    {n:6,c:W.amber,title:"Stress Scenarios",desc:"4 macro scenarios with P&L impact. Sizing context."},
+  ],
+  3:[
+    {n:1,c:W.amber,title:"Identity Certificate — Dark BG",desc:"Dark panel with amber glow. Hash as a visual design element. Feels like something earned — a credential, not a data card. The fix from v1."},
+    {n:2,c:W.amber,title:"Brier Score Gauge",desc:"Calibration score with percentile context. Stats table below."},
+    {n:3,c:W.amber,title:"Institutional Visibility Feed",desc:"Live feed of who viewed your profile and what action they took. Converts platform use into career capital."},
+    {n:4,c:W.amber,title:"Auto-Execution API — Beta",desc:"Toggle + broker config. Personal use, FINRA-safe structure."},
+    {n:5,c:W.amber,title:"Track Record — Full Width",desc:"12-month verified return chart. Cryptographic anchor points annotated on timeline."},
+  ],
+  4:[
+    {n:1,c:W.platinum,title:"Multi-Account Aggregation",desc:"3 broker accounts unified into one portfolio view. Total P&L row at bottom."},
+    {n:2,c:W.platinum,title:"Prop Firm Pipeline",desc:"CRM-lite deal stages. Status badges. Converts Tier 4 from a tool into a career accelerator."},
+    {n:3,c:W.platinum,title:"Custom ML Fine-Tuning",desc:"Training progress on personal signal history. Epoch counter. Differentiates Elite from Pro in a substantive way."},
+    {n:4,c:W.platinum,title:"Team Seats",desc:"3-user role system. Online indicator. Enables trading groups / small prop desks."},
+    {n:5,c:W.platinum,title:"Bloomberg Export",desc:"Per-dataset download with format labels. API key exposed. Institutional portability."},
+    {n:6,c:W.platinum,title:"Account Manager Card",desc:"Named human contact. Slack + call booking. Tier 4 is a relationship, not just a subscription."},
+  ],
+};
+
+/* ═══ ROOT ═══ */
+const TIERS = [
+  {id:0,label:"FREE",sub:"Tier 0",accent:"#9BA8BB",Component:WireTier0},
+  {id:1,label:"$19.99",sub:"Tier 1",accent:W.green,Component:WireTier1},
+  {id:2,label:"$49.99",sub:"Tier 2",accent:W.amber,Component:WireTier2},
+  {id:3,label:"$149",sub:"Tier 3",accent:W.amber,Component:WireTier3},
+  {id:4,label:"$330",sub:"Tier 4",accent:W.platinum,Component:WireTier4},
+];
+
+function App() {
+  const [active, setActive] = useState(0);
+  const [view, setView] = useState("desktop");
+  const [showAnnotations, setShowAnnotations] = useState(true);
+  const T = TIERS[active];
+
+  return (
+    <div style={{background:W.canvas,minHeight:"100vh",fontFamily:"'IBM Plex Sans',sans-serif",color:W.label}}>
+      <style>{FONTS}</style>
+
+      {/* Toolbar */}
+      <div style={{background:W.frame,borderBottom:`1px solid ${W.border}`,padding:"0 20px",display:"flex",alignItems:"center",justifyContent:"space-between",height:52,position:"sticky",top:0,zIndex:100}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:4,height:28,background:T.accent,borderRadius:3}}/>
+          <div>
+            <Mono c={T.accent} s={10} style={{display:"block"}}>KAIROS+</Mono>
+            <Mono c={W.text} s={7}>WIREFRAME KIT v2 · {T.sub}</Mono>
+          </div>
+        </div>
+
+        {/* Tier tabs */}
+        <div style={{display:"flex",gap:2,background:W.fill,borderRadius:10,padding:3,border:`1px solid ${W.border}`}}>
+          {TIERS.map(t=>(
+            <button key={t.id} onClick={()=>setActive(t.id)} style={{padding:"5px 12px",borderRadius:7,border:"none",background:active===t.id?W.frame:"transparent",boxShadow:active===t.id?"0 1px 4px rgba(0,0,0,0.08)":"none",cursor:"pointer",transition:"all .15s"}}>
+              <Mono c={active===t.id?t.accent:W.text} s={7} style={{display:"block"}}>{t.sub}</Mono>
+              <Mono c={active===t.id?W.label:W.text} s={9} w={active===t.id?"700":"400"}>{t.label}</Mono>
+            </button>
+          ))}
+        </div>
+
+        {/* Controls */}
+        <div style={{display:"flex",gap:6}}>
+          {["desktop","mobile"].map(v=>(
+            <button key={v} onClick={()=>setView(v)} style={{padding:"6px 12px",borderRadius:6,border:`1px solid ${view===v?T.accent:W.border}`,background:view===v?T.accent+"15":"transparent",cursor:"pointer"}}>
+              <Mono c={view===v?T.accent:W.textDk} s={8}>{v==="desktop"?"⬛ DESKTOP":"📱 MOBILE"}</Mono>
+            </button>
+          ))}
+          <button onClick={()=>setShowAnnotations(a=>!a)} style={{padding:"6px 12px",borderRadius:6,border:`1px solid ${showAnnotations?W.blue:W.border}`,background:showAnnotations?W.blueLt:"transparent",cursor:"pointer"}}>
+            <Mono c={showAnnotations?W.blue:W.textDk} s={8}>ANNOTATIONS</Mono>
+          </button>
+        </div>
+      </div>
+
+      {/* Canvas */}
+      <div style={{padding:20,maxWidth:1440,margin:"0 auto"}}>
+        {/* Tier header */}
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14,paddingBottom:12,borderBottom:`1px solid ${W.border}`}}>
+          <div style={{width:4,height:32,background:T.accent,borderRadius:2}}/>
+          <div>
+            <Mono c={T.accent} s={12} style={{display:"block",marginBottom:2}}>{T.sub} Dashboard — {view==="mobile"?"Mobile Flow":"Desktop"}</Mono>
+            <Sans c={W.textDk} s={11}>{[
+              "Free · Empty-state first visit, basic signals, leaderboard with unranked slot, contextual upgrade nudge.",
+              "Starter · Real-time ML confidence, sector heatmap, hard-gated options flow, watchlist counter.",
+              "Core · Composite score as full-width hero, named 14-gate pipeline, radar + confluence below.",
+              "Pro · Certificate-style identity card, calibration gauge, institutional visibility feed.",
+              "Elite · Multi-account command center, prop firm pipeline, custom ML, team seats, account manager."
+            ][active]}</Sans>
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:showAnnotations?"1fr 270px":"1fr",gap:16,alignItems:"start"}}>
+          {/* Wireframe */}
+          <div key={`${active}-${view}`} style={{animation:"fadeIn .25s ease both"}}>
+            {view==="mobile" ? (
+              <div style={{display:"flex",justifyContent:"center",padding:"20px 0"}}>
+                <T.Component view="mobile"/>
+              </div>
+            ) : (
+              <T.Component view="desktop"/>
+            )}
+          </div>
+
+          {/* Annotations */}
+          {showAnnotations && (
+            <div style={{position:"sticky",top:70,display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{background:W.frame,border:`1px solid ${W.border}`,borderRadius:8,padding:14}}>
+                <Mono c={W.blue} s={9} style={{display:"block",marginBottom:10}}>ANNOTATIONS</Mono>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {ANNOTS[active].map((item,i)=>(
+                    <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+                      <ANum n={item.n} color={item.c}/>
+                      <div>
+                        <Mono c={W.label} s={8} style={{display:"block",marginBottom:2}}>{item.title}</Mono>
+                        <Sans c={W.textDk} s={9} style={{lineHeight:1.5}}>{item.desc}</Sans>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{background:W.frame,border:`1px solid ${W.border}`,borderRadius:8,padding:14}}>
+                <Mono c={W.textDk} s={9} style={{display:"block",marginBottom:8}}>LEGEND</Mono>
+                {[
+                  {bg:W.fill,     border:W.border,        label:"Component placeholder"},
+                  {bg:W.blueLt,   border:W.blue+"40",     label:"Active / selected state"},
+                  {bg:W.greenLt,  border:W.green+"40",    label:"Positive / bullish value"},
+                  {bg:W.redLt,    border:W.red+"40",      label:"Locked / gated (dashed)"},
+                  {bg:W.amberLt,  border:W.amber+"40",    label:"Verified / credentialed"},
+                  {bg:"#16192A",  border:W.amber+"40",    label:"Certificate dark panel"},
+                ].map((l,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+                    <div style={{width:14,height:14,borderRadius:3,background:l.bg,border:`1px solid ${l.border}`,flexShrink:0}}/>
+                    <Mono c={W.textDk} s={8}>{l.label}</Mono>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+} catch(e) { const x=document.getElementById('err'); x.style.display='block'; x.textContent='Render error:\n'+(e&&e.stack||e); console.error(e); }
+</script></body></html>

@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kairos · Triage → Decision</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0b0d; --bg1:#0f1114; --bg2:#14171b; --bg3:#191d22;
+  --line:#1c2026; --line2:#272c34; --line3:#343b45;
+  --ink:#e8eaee; --ink2:#9097a1; --ink3:#5b626c; --ink4:#3d434c;
+  --acc:#d4a04a;            /* single accent — selection / key levels only */
+  --acc-dim:#6b5526;
+  --up:#5bb98a; --dn:#d66b6b; --warn:#d4a04a; --info:#6b8aff;
+  --uncert:#565b63;          /* thin-sample / low-confidence grey */
+  --mono:'JetBrains Mono',monospace; --sans:'Inter',-apple-system,system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:13px/1.45 var(--sans);
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;height:100vh;overflow:hidden}
+.app{display:flex;flex-direction:column;height:100vh}
+
+/* ── REGIME LENS BAR (ambient, persistent) ── */
+.lens{display:flex;align-items:stretch;border-bottom:1px solid var(--line2);background:var(--bg1);height:46px;flex-shrink:0}
+.lens .brand{display:flex;align-items:center;gap:9px;padding:0 18px;border-right:1px solid var(--line2)}
+.lens .brand .o{width:9px;height:9px;border-radius:2px;background:var(--acc);box-shadow:0 0 8px var(--acc-dim)}
+.lens .brand b{font:800 15px var(--sans);letter-spacing:.02em}
+.lens .seg{display:flex;flex-direction:column;justify-content:center;gap:1px;padding:0 18px;border-right:1px solid var(--line)}
+.lens .seg .l{font:700 8px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink3)}
+.lens .seg .v{font:700 12px var(--mono);color:var(--ink)}
+.lens .seg .v.up{color:var(--up)} .lens .seg .v.warn{color:var(--warn)}
+.lens .lensnote{display:flex;align-items:center;gap:8px;padding:0 18px;color:var(--ink2);font:500 11px var(--sans);font-style:italic}
+.lens .spacer{flex:1}
+.lens .live{display:flex;align-items:center;gap:7px;padding:0 18px;font:700 10px var(--mono);color:var(--up);letter-spacing:.08em}
+.lens .live .d{width:6px;height:6px;border-radius:50%;background:var(--up);box-shadow:0 0 7px var(--up);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+.lens .clock{display:flex;align-items:center;padding:0 18px;border-left:1px solid var(--line);color:var(--ink2);font:600 11px var(--mono)}
+
+/* ── MAIN SPLIT ── */
+.split{flex:1;display:grid;grid-template-columns:430px 1fr;min-height:0}
+.cohort{border-right:1px solid var(--line2);background:var(--bg);display:flex;flex-direction:column;min-height:0}
+.decision{background:var(--bg);overflow-y:auto;min-height:0}
+
+/* ── COHORT (left: triage) ── */
+.cohort-h{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line2);background:var(--bg1)}
+.cohort-h .t{font:700 11px var(--mono);letter-spacing:.12em;text-transform:uppercase}
+.cohort-h .funnel{margin-left:auto;font:600 10px var(--mono);color:var(--ink3)}
+.cohort-h .funnel b{color:var(--acc)}
+.cohort-sort{display:flex;gap:0;border-bottom:1px solid var(--line);background:var(--bg1);font:700 8px var(--mono);letter-spacing:.10em;color:var(--ink3);text-transform:uppercase}
+.cohort-sort span{padding:7px 16px;cursor:pointer}
+.cohort-sort span.on{color:var(--acc);box-shadow:inset 0 -2px 0 var(--acc)}
+.cohort-list{overflow-y:auto;flex:1}
+.crow{display:grid;grid-template-columns:auto 1fr auto;gap:12px;padding:13px 16px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .12s}
+.crow:hover{background:var(--bg1)}
+.crow.sel{background:var(--bg2);box-shadow:inset 3px 0 0 var(--acc)}
+.crow .verd{display:flex;flex-direction:column;align-items:center;gap:3px;width:42px}
+.crow .vpill{font:800 8px var(--mono);letter-spacing:.06em;padding:3px 0;width:100%;text-align:center;border-radius:2px}
+.vpill.buy{background:rgba(91,185,138,.14);color:var(--up);border:1px solid rgba(91,185,138,.34)}
+.vpill.watch{background:rgba(212,160,74,.12);color:var(--warn);border:1px solid rgba(212,160,74,.30)}
+.crow .tier{font:700 8px var(--mono);color:var(--ink3)}
+.crow .mid .sym{font:700 15px var(--mono);color:var(--ink)}
+.crow .mid .meta{font:500 10px var(--mono);color:var(--ink3);margin-top:2px}
+.crow .mid .spark{margin-top:5px}
+/* score + uncertainty cluster */
+.crow .sx{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+.crow .score{font:800 19px var(--mono);line-height:1}
+.crow .pctile{display:flex;align-items:center;gap:5px;font:600 9px var(--mono);color:var(--ink3)}
+.crow .pctile .pbar{width:46px;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden}
+.crow .pctile .pbar i{display:block;height:100%;background:var(--ink2)}
+.crow .wr{font:600 9px var(--mono)}
+.crow .wr .lb{color:var(--ink3)}
+.crow .wr.thin{color:var(--uncert)}  /* thin sample = greyed */
+
+/* ── DECISION (right) ── */
+.dwrap{padding:0}
+.dhead{display:flex;align-items:flex-start;gap:20px;padding:20px 24px;border-bottom:1px solid var(--line2)}
+.dhead .idn{flex:1}
+.dhead .sym{font:800 30px var(--sans);letter-spacing:-.01em}
+.dhead .sub{font:600 12px var(--mono);color:var(--ink2);margin-top:3px}
+.dhead .sub .up{color:var(--up)}
+.dhead .nm{font:500 12px var(--sans);color:var(--ink3);margin-top:6px;font-style:italic;max-width:520px;line-height:1.5}
+/* verdict arc */
+.varc{text-align:center;width:160px;flex-shrink:0}
+.varc .vlabel{font:800 22px var(--sans);letter-spacing:.02em;color:var(--up)}
+.varc .vconf{font:600 10px var(--mono);color:var(--ink3);letter-spacing:.10em;text-transform:uppercase;margin-top:2px}
+.varc .vmeta{font:600 10px var(--mono);color:var(--ink2);margin-top:6px}
+
+/* section */
+.sec{padding:18px 24px;border-bottom:1px solid var(--line)}
+.sec-h{font:700 9.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin-bottom:13px;display:flex;align-items:center;gap:10px}
+.sec-h .rule{flex:1;height:1px;background:var(--line)}
+
+/* RISK FIRST ticket */
+.risk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.rcell{background:var(--bg1);padding:13px 15px}
+.rcell.danger{background:rgba(214,107,107,.06)}
+.rcell .l{font:700 8.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink3)}
+.rcell .v{font:800 19px var(--mono);margin-top:4px}
+.rcell .v.dn{color:var(--dn)} .rcell .v.up{color:var(--up)} .rcell .v.acc{color:var(--acc)}
+.rcell .d{font:500 9.5px var(--mono);color:var(--ink3);margin-top:2px}
+.targets{display:flex;gap:10px;margin-top:12px}
+.tgt{flex:1;background:var(--bg1);border:1px solid var(--line);border-left:2px solid var(--up);border-radius:3px;padding:10px 13px}
+.tgt .l{font:700 8.5px var(--mono);letter-spacing:.10em;color:var(--ink3);text-transform:uppercase}
+.tgt .v{font:800 16px var(--mono);color:var(--up);margin-top:3px}
+.tgt .d{font:500 9px var(--mono);color:var(--ink3);margin-top:1px}
+
+/* EVIDENCE — relative context */
+.ev-row{display:grid;grid-template-columns:120px 1fr 150px;gap:14px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.ev-row:last-child{border-bottom:0}
+.ev-name{font:600 12px var(--sans);color:var(--ink)}
+.ev-name small{display:block;font:500 10px var(--mono);color:var(--ink3);margin-top:1px}
+.ev-track{position:relative;height:24px;background:var(--bg2);border-radius:3px;overflow:hidden}
+.ev-track .fill{position:absolute;top:0;bottom:0;left:0;background:linear-gradient(90deg,var(--bg3),var(--ink4));border-radius:3px}
+.ev-track .mark{position:absolute;top:0;bottom:0;width:2px;background:var(--acc);box-shadow:0 0 6px var(--acc-dim)}
+.ev-track .cohort-band{position:absolute;top:50%;transform:translateY(-50%);height:10px;background:rgba(255,255,255,.05);border-left:1px dashed var(--ink4);border-right:1px dashed var(--ink4)}
+.ev-val{text-align:right;font:600 11px var(--mono)}
+.ev-val b{font-weight:800;color:var(--ink)}
+.ev-val .so{color:var(--ink3);font-weight:500}
+.ev-val .pc{color:var(--acc)}
+
+/* SO-WHAT chips */
+.sowhat{display:flex;flex-wrap:wrap;gap:8px}
+.swchip{background:var(--bg1);border:1px solid var(--line);border-radius:3px;padding:7px 11px;font:600 11px var(--mono)}
+.swchip b{color:var(--ink);font-weight:800;margin-right:6px}
+.swchip .read{color:var(--ink2);font-weight:500}
+.swchip.pos{border-left:2px solid var(--up)} .swchip.neg{border-left:2px solid var(--dn)} .swchip.neu{border-left:2px solid var(--ink4)}
+
+/* FALSIFICATION / pre-mortem */
+.falsify{background:rgba(214,107,107,.05);border:1px solid rgba(214,107,107,.18);border-radius:4px;padding:14px 16px}
+.falsify .ft{font:700 10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dn);margin-bottom:10px}
+.falsify ul{list-style:none;display:flex;flex-direction:column;gap:8px}
+.falsify li{display:flex;gap:10px;font:500 12px var(--sans);color:var(--ink2);line-height:1.5}
+.falsify li::before{content:'✕';color:var(--dn);font:700 11px var(--mono);flex-shrink:0;margin-top:1px}
+.falsify li b{color:var(--ink);font-weight:600}
+
+/* GATES audit */
+.gates{display:flex;flex-wrap:wrap;gap:7px}
+.gate{display:flex;align-items:center;gap:6px;background:var(--bg1);border:1px solid var(--line);border-radius:99px;padding:5px 11px;font:600 10px var(--mono)}
+.gate.pass{color:var(--up)} .gate.pass::before{content:'✓'}
+.gate.fail{color:var(--dn)} .gate.fail::before{content:'✕'}
+.gate.bypass{color:var(--ink3)} .gate.bypass::before{content:'⊘'}
+
+/* TRACK RECORD — uncertainty forward */
+.track-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.tr-block .trh{font:600 11px var(--sans);color:var(--ink2);margin-bottom:10px}
+.tr-row{display:grid;grid-template-columns:130px 1fr 90px;gap:12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
+.tr-row:last-child{border-bottom:0}
+.tr-name{font:600 11px var(--mono);color:var(--ink)}
+.tr-ci{position:relative;height:20px}
+.tr-ci .axis{position:absolute;top:50%;left:0;right:0;height:1px;background:var(--line2)}
+.tr-ci .be{position:absolute;top:3px;bottom:3px;width:1px;background:var(--ink4)}  /* breakeven */
+.tr-ci .band{position:absolute;top:50%;transform:translateY(-50%);height:8px;border-radius:99px;background:rgba(91,185,138,.18);border:1px solid rgba(91,185,138,.4)}
+.tr-ci .point{position:absolute;top:50%;transform:translate(-50%,-50%);width:8px;height:8px;border-radius:50%;background:var(--up)}
+.tr-ci.thin .band{background:rgba(86,91,99,.18);border-color:rgba(86,91,99,.5)}
+.tr-ci.thin .point{background:var(--uncert)}
+.tr-val{text-align:right;font:600 11px var(--mono)}
+.tr-val b{color:var(--ink);font-weight:800}
+.tr-val.thin b{color:var(--uncert)} .tr-val .n{color:var(--ink3)}
+/* distribution cone */
+.cone{height:120px;position:relative;margin-top:6px}
+.cone svg{width:100%;height:100%;overflow:visible}
+
+.note{font:500 10.5px var(--sans);color:var(--ink3);font-style:italic;margin-top:10px;line-height:1.5}
+.actions{display:flex;gap:10px;padding:16px 24px}
+.btn{flex:1;padding:11px;border-radius:4px;font:800 12px var(--sans);letter-spacing:.04em;cursor:pointer;border:1px solid var(--line2);background:var(--bg1);color:var(--ink)}
+.btn.primary{background:var(--up);color:#06140d;border-color:var(--up)}
+.btn.ghost{background:transparent;color:var(--ink2)}
+</style></head>
+<body><div class="app">
+
+  <!-- REGIME LENS (ambient) -->
+  <div class="lens">
+    <div class="brand"><span class="o"></span><b>Kairos</b></div>
+    <div class="seg"><span class="l">Regime</span><span class="v warn">Risk-On · Choppy</span></div>
+    <div class="seg"><span class="l">VIX</span><span class="v up">16.9</span></div>
+    <div class="seg"><span class="l">Breadth</span><span class="v">55.9%</span></div>
+    <div class="seg"><span class="l">BUY floor</span><span class="v">72</span></div>
+    <div class="seg"><span class="l">Max size</span><span class="v">70%</span></div>
+    <div class="lensnote">Numbers below are read <b style="color:var(--ink);font-style:normal;margin:0 4px">in this regime</b> — a 58% WR in choppy ≠ 58% in trending.</div>
+    <div class="spacer"></div>
+    <div class="live"><span class="d"></span>LIVE · 5s</div>
+    <div class="clock">06:34 PT · scan 06:00</div>
+  </div>
+
+  <div class="split">
+    <!-- LEFT: TRIAGE -->
+    <div class="cohort">
+      <div class="cohort-h"><span class="t">Candidate Cohort</span>
+        <span class="funnel">1,847 scanned → <b>7</b> cleared all gates</span></div>
+      <div class="cohort-sort"><span class="on">Composite</span><span>Conviction</span><span>R:R</span><span>WR·LB</span><span>Fresh</span></div>
+      <div class="cohort-list">
+
+        <div class="crow sel">
+          <div class="verd"><span class="vpill buy">BUY</span><span class="tier">T1</span></div>
+          <div class="mid"><div class="sym">IONQ</div><div class="meta">Breakout Exp · Tech · RS 100</div>
+            <svg class="spark" width="150" height="22" viewBox="0 0 150 22"><polyline fill="none" stroke="var(--up)" stroke-width="1.5" points="2,18 18,17 34,18 50,13 66,11 82,12 98,7 114,5 148,2"/></svg></div>
+          <div class="sx"><span class="score" style="color:var(--up)">93</span>
+            <span class="pctile">p99 <span class="pbar"><i style="width:99%"></i></span></span>
+            <span class="wr">62% <span class="lb">LB 44 · n41</span></span></div>
+        </div>
+
+        <div class="crow">
+          <div class="verd"><span class="vpill buy">BUY</span><span class="tier">T1</span></div>
+          <div class="mid"><div class="sym">COMM</div><div class="meta">Breakout Exp · Tech · RS 91</div>
+            <svg class="spark" width="150" height="22" viewBox="0 0 150 22"><polyline fill="none" stroke="var(--up)" stroke-width="1.5" points="2,16 18,17 34,13 50,14 66,10 82,9 98,10 114,6 148,4"/></svg></div>
+          <div class="sx"><span class="score" style="color:var(--up)">90</span>
+            <span class="pctile">p97 <span class="pbar"><i style="width:97%"></i></span></span>
+            <span class="wr">58% <span class="lb">LB 41 · n63</span></span></div>
+        </div>
+
+        <div class="crow">
+          <div class="verd"><span class="vpill buy">BUY</span><span class="tier">T2</span></div>
+          <div class="mid"><div class="sym">CORZ</div><div class="meta">Breakout Exp · Tech · RS 100</div>
+            <svg class="spark" width="150" height="22" viewBox="0 0 150 22"><polyline fill="none" stroke="var(--up)" stroke-width="1.5" points="2,19 18,17 34,18 50,14 66,15 82,10 98,9 114,6 148,4"/></svg></div>
+          <div class="sx"><span class="score" style="color:var(--up)">88</span>
+            <span class="pctile">p95 <span class="pbar"><i style="width:95%"></i></span></span>
+            <span class="wr thin">— <span class="lb">n7 · thin</span></span></div>
+        </div>
+
+        <div class="crow">
+          <div class="verd"><span class="vpill buy">BUY</span><span class="tier">T2</span></div>
+          <div class="mid"><div class="sym">APLD</div><div class="meta">Breakout Exp · Tech · RS 100</div>
+            <svg class="spark" width="150" height="22" viewBox="0 0 150 22"><polyline fill="none" stroke="var(--warn)" stroke-width="1.5" points="2,14 18,16 34,12 50,13 66,14 82,9 98,11 114,7 148,6"/></svg></div>
+          <div class="sx"><span class="score" style="color:var(--warn)">85</span>
+            <span class="pctile">p92 <span class="pbar"><i style="width:92%"></i></span></span>
+            <span class="wr">55% <span class="lb">LB 38 · n28</span></span></div>
+        </div>
+
+        <div class="crow">
+          <div class="verd"><span class="vpill watch">WATCH</span><span class="tier">T3</span></div>
+          <div class="mid"><div class="sym">CRNC</div><div class="meta">Breakout Exp · Tech · RS 100 · EXTENDED</div>
+            <svg class="spark" width="150" height="22" viewBox="0 0 150 22"><polyline fill="none" stroke="var(--warn)" stroke-width="1.5" points="2,15 18,13 34,14 50,11 66,12 82,8 98,10 114,9 148,7"/></svg></div>
+          <div class="sx"><span class="score" style="color:var(--warn)">86</span>
+            <span class="pctile">p93 <span class="pbar"><i style="width:93%"></i></span></span>
+            <span class="wr thin">— <span class="lb">n4 · thin</span></span></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- RIGHT: DECISION -->
+    <div class="decision">
+      <div class="dwrap">
+
+        <div class="dhead">
+          <div class="idn">
+            <div class="sym">IONQ</div>
+            <div class="sub">$63.62 <span class="up">▲ +6.1%</span> · IonQ Inc · Technology · $2.1B mcap</div>
+            <div class="nm">Mechanism — supply absorption before expansion. Fresh breakout from a 9-week base on rising volume; analyst targets revised +24% overnight. The VCP structure the system is built to wait for.</div>
+          </div>
+          <div class="varc">
+            <svg width="150" height="84" viewBox="0 0 160 90">
+              <path d="M 14 80 A 66 66 0 0 1 146 80" fill="none" stroke="#1c2026" stroke-width="9"/>
+              <path d="M 14 80 A 66 66 0 0 1 130 33" fill="none" stroke="var(--up)" stroke-width="9" stroke-linecap="round"/>
+              <text x="80" y="68" text-anchor="middle" fill="var(--up)" font-family="Inter" font-weight="800" font-size="30">93</text>
+            </svg>
+            <div class="vlabel">BUY</div>
+            <div class="vconf">High conviction · T1</div>
+            <div class="vmeta">cleared 11 / 11 gates</div>
+          </div>
+        </div>
+
+        <!-- RISK FIRST -->
+        <div class="sec">
+          <div class="sec-h">Risk first<span class="rule"></span>position before targets</div>
+          <div class="risk-grid">
+            <div class="rcell danger"><div class="l">Max loss / share</div><div class="v dn">−$7.50</div><div class="d">to stop $56.12</div></div>
+            <div class="rcell danger"><div class="l">Stop (close-based)</div><div class="v dn">$56.12</div><div class="d">1.25× ATR · −11.8%</div></div>
+            <div class="rcell"><div class="l">Size (½-Kelly)</div><div class="v acc">6.2%</div><div class="d">regime×VIX×DD adj</div></div>
+            <div class="rcell"><div class="l">Portfolio risk</div><div class="v">0.74%</div><div class="d">of equity at stop</div></div>
+          </div>
+          <div class="targets">
+            <div class="tgt"><div class="l">T1 · scale 50%</div><div class="v">$84.96</div><div class="d">+33.5% · 3.6R</div></div>
+            <div class="tgt"><div class="l">T2 · runner</div><div class="v">$99.38</div><div class="d">+56.2% · 5.5R</div></div>
+            <div class="tgt" style="border-left-color:var(--ink4)"><div class="l">Hold guide</div><div class="v" style="color:var(--ink)">7–21d</div><div class="d">trail past +2%</div></div>
+          </div>
+        </div>
+
+        <!-- EVIDENCE relative -->
+        <div class="sec">
+          <div class="sec-h">Evidence · relative to cohort<span class="rule"></span>where this name sits vs the other 6</div>
+          <div class="ev-row">
+            <div class="ev-name">Technicals<small>EMA stack · RVOL</small></div>
+            <div class="ev-track"><div class="fill" style="width:91%"></div><div class="cohort-band" style="left:62%;width:24%"></div><div class="mark" style="left:91%"></div></div>
+            <div class="ev-val"><b>31/35</b> <span class="so">· EMA8&gt;21&gt;50</span> <span class="pc">p88</span></div>
+          </div>
+          <div class="ev-row">
+            <div class="ev-name">Catalyst<small>R:R · UOA · IV</small></div>
+            <div class="ev-track"><div class="fill" style="width:85%"></div><div class="cohort-band" style="left:55%;width:28%"></div><div class="mark" style="left:85%"></div></div>
+            <div class="ev-val"><b>17/20</b> <span class="so">· PT +24%</span> <span class="pc">p82</span></div>
+          </div>
+          <div class="ev-row">
+            <div class="ev-name">RS + Sector<small>63d rank</small></div>
+            <div class="ev-track"><div class="fill" style="width:100%"></div><div class="cohort-band" style="left:70%;width:25%"></div><div class="mark" style="left:100%"></div></div>
+            <div class="ev-val"><b>20/20</b> <span class="so">· RS 100</span> <span class="pc">p99</span></div>
+          </div>
+          <div class="ev-row">
+            <div class="ev-name">Smart Money<small>insider · short</small></div>
+            <div class="ev-track"><div class="fill" style="width:60%"></div><div class="cohort-band" style="left:45%;width:30%"></div><div class="mark" style="left:60%"></div></div>
+            <div class="ev-val"><b>9/15</b> <span class="so">· neutral</span> <span class="pc">p54</span></div>
+          </div>
+          <div class="ev-row">
+            <div class="ev-name">Quality Gate<small>fundamentals</small></div>
+            <div class="ev-track"><div class="fill" style="width:70%"></div><div class="cohort-band" style="left:50%;width:30%"></div><div class="mark" style="left:70%"></div></div>
+            <div class="ev-val"><b>7/10</b> <span class="so">· pre-profit</span> <span class="pc">p61</span></div>
+          </div>
+          <div class="note">Dashed band = where the 7-candidate cohort sits. Amber line = IONQ. It leads on RS &amp; technicals, mid-pack on smart money.</div>
+        </div>
+
+        <!-- SO WHAT -->
+        <div class="sec">
+          <div class="sec-h">Read-through<span class="rule"></span>metric → meaning</div>
+          <div class="sowhat">
+            <div class="swchip pos"><b>RSI 64</b><span class="read">rising, not overbought</span></div>
+            <div class="swchip pos"><b>RVOL 1.8×</b><span class="read">accumulation confirmed</span></div>
+            <div class="swchip pos"><b>ADX 31</b><span class="read">trend strengthening</span></div>
+            <div class="swchip neu"><b>IV 41%ile</b><span class="read">vol not yet rich</span></div>
+            <div class="swchip pos"><b>Entry FRESH</b><span class="read">0.4 ATR off pivot</span></div>
+            <div class="swchip neg"><b>Earnings +18d</b><span class="read">outside blackout, watch</span></div>
+          </div>
+        </div>
+
+        <!-- FALSIFICATION -->
+        <div class="sec">
+          <div class="falsify">
+            <div class="ft">Pre-mortem · what kills this trade</div>
+            <ul>
+              <li><b>Close below $56.12</b> — base breaks, thesis void. Hard stop, no override.</li>
+              <li><b>RVOL drops &lt;1.0 on the breakout day</b> — no demand behind the move; supply not absorbed.</li>
+              <li><b>Sector (XLK) rolls −3%+</b> — IONQ is high-beta; correlated cluster (CORZ/COMM) amplifies drawdown.</li>
+              <li><b>Fails to clear $66 in 3 sessions</b> — momentum stalls, reassess as range-bound.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- GATES -->
+        <div class="sec">
+          <div class="sec-h">Gates evaluated<span class="rule"></span>auditable · 11 of 11 passed</div>
+          <div class="gates">
+            <span class="gate pass">liquidity</span><span class="gate pass">earnings blackout</span>
+            <span class="gate pass">regime</span><span class="gate pass">entry quality</span>
+            <span class="gate pass">R:R ≥ 3:1</span><span class="gate pass">score floor</span>
+            <span class="gate pass">RS ≥ 75</span><span class="gate pass">fund adequacy</span>
+            <span class="gate pass">tail-loss filter</span><span class="gate pass">crowded-trade</span>
+            <span class="gate pass">Sharpe gate</span>
+          </div>
+        </div>
+
+        <!-- TRACK RECORD — uncertainty forward -->
+        <div class="sec">
+          <div class="sec-h">Track record · with confidence<span class="rule"></span>point estimates lie — these are intervals</div>
+          <div class="track-grid">
+            <div class="tr-block">
+              <div class="trh">Breakout Expansion × this regime</div>
+              <div class="tr-row">
+                <div class="tr-name">All regimes</div>
+                <div class="tr-ci"><div class="axis"></div><div class="be" style="left:45%"></div><div class="band" style="left:44%;width:30%"></div><div class="point" style="left:58%"></div></div>
+                <div class="tr-val"><b>58%</b> <span class="n">n=132</span></div>
+              </div>
+              <div class="tr-row">
+                <div class="tr-name">Risk-On Choppy</div>
+                <div class="tr-ci"><div class="axis"></div><div class="be" style="left:45%"></div><div class="band" style="left:41%;width:28%"></div><div class="point" style="left:55%"></div></div>
+                <div class="tr-val"><b>55%</b> <span class="n">n=63</span></div>
+              </div>
+              <div class="tr-row">
+                <div class="tr-name">Trending</div>
+                <div class="tr-ci"><div class="axis"></div><div class="be" style="left:45%"></div><div class="band" style="left:52%;width:26%"></div><div class="point" style="left:67%"></div></div>
+                <div class="tr-val"><b>67%</b> <span class="n">n=41</span></div>
+              </div>
+              <div class="tr-row">
+                <div class="tr-name">Panic</div>
+                <div class="tr-ci thin"><div class="axis"></div><div class="be" style="left:45%"></div><div class="band" style="left:18%;width:62%"></div><div class="point" style="left:40%"></div></div>
+                <div class="tr-val thin"><b>40%</b> <span class="n">n=5</span></div>
+              </div>
+              <div class="note">Wider band = less certainty. Panic (n=5) is too thin to trust — greyed. The edge concentrates in <b style="color:var(--ink);font-style:normal">trending</b>; choppy is acceptable, not strong.</div>
+            </div>
+
+            <div class="tr-block">
+              <div class="trh">Forward 5-day return · distribution</div>
+              <div class="cone">
+                <svg viewBox="0 0 320 120" preserveAspectRatio="none">
+                  <!-- zero line -->
+                  <line x1="0" y1="78" x2="320" y2="78" stroke="#272c34" stroke-width="1"/>
+                  <!-- q10-q90 cone -->
+                  <path d="M 4 78 L 316 26 L 316 110 Z" fill="rgba(91,185,138,.08)"/>
+                  <!-- q25-q75 -->
+                  <path d="M 4 78 L 316 44 L 316 92 Z" fill="rgba(91,185,138,.14)"/>
+                  <!-- median -->
+                  <line x1="4" y1="78" x2="316" y2="62" stroke="var(--up)" stroke-width="2"/>
+                  <circle cx="316" cy="62" r="3" fill="var(--up)"/>
+                </svg>
+              </div>
+              <div class="tr-row" style="border:0;padding-top:10px">
+                <div class="tr-name">q10 / q50 / q90</div>
+                <div class="tr-ci"></div>
+                <div class="tr-val"><span style="color:var(--dn)">−3.6%</span> / <b>+0.3%</b> / <span style="color:var(--up)">+3.1%</span></div>
+              </div>
+              <div class="note">ML 3-head forecast. Positive skew, median edge +0.3%/5d. P(hits T1 before stop) = 41%.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn primary">BUY · place limit $61.89–64.77</button>
+          <button class="btn">WATCH</button>
+          <button class="btn ghost">Full detail →</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+document.querySelectorAll('.crow').forEach(r=>r.onclick=()=>{
+  document.querySelectorAll('.crow').forEach(x=>x.classList.remove('sel'));
+  r.classList.add('sel');
+});
+</script>
+</body></html>
