@@ -450,6 +450,27 @@ def main():
                 _log_order(log_entry)
                 skipped += 1
                 break
+            # 2026-05-28: skip assets Alpaca can't trade (not found / inactive /
+            # not fractionable-as-required) BEFORE submitting, so autonomous runs
+            # don't emit failed-order noise every cycle (e.g. COMM, ALE).
+            if not args.dry_run and client is not None:
+                try:
+                    _asset = client.get_asset(entry["ticker"])
+                    if not getattr(_asset, "tradable", True):
+                        print(f"  SKIP {entry['ticker']:6s} — not tradable on Alpaca")
+                        log.info(f"skip {entry['ticker']}: asset not tradable")
+                        log_entry["action"] = "skip"; log_entry["reason"] = "asset not tradable"
+                        log_entry["status"] = "skipped_not_tradable"; _log_order(log_entry)
+                        skipped += 1
+                        continue
+                except Exception:
+                    # asset lookup failed (likely "not found") → skip, don't submit
+                    print(f"  SKIP {entry['ticker']:6s} — asset not found on Alpaca")
+                    log.info(f"skip {entry['ticker']}: asset not found")
+                    log_entry["action"] = "skip"; log_entry["reason"] = "asset not found"
+                    log_entry["status"] = "skipped_not_found"; _log_order(log_entry)
+                    skipped += 1
+                    continue
             print(f"  {'WOULD ORDER' if args.dry_run else 'ORDER'} {entry['ticker']:6s} "
                   f"{entry['qty']}x @ ${entry['entry_limit']} "
                   f"stop ${entry['stop']} tgt ${entry['target']} ({entry['setup']})")
