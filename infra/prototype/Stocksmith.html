@@ -5893,6 +5893,27 @@ select.um-input { cursor: pointer; }
 .wl-held { color: var(--violet); margin-right: 5px; font-size: 9px; }
 .wl-scorebar { display: inline-block; width: 36px; height: 5px; border-radius: 3px; background: var(--bg-3); overflow: hidden; margin-right: 6px; vertical-align: middle; }
 .wl-scorebar span { display: block; height: 100%; border-radius: 3px; }
+
+  /* ════ watchlist: add/remove/empty + scanner star toggle ════ */
+  .ss2-star { cursor: pointer; }
+  .ss2-star.is-on { color: var(--copper); text-shadow: 0 0 6px color-mix(in oklab, var(--copper) 60%, transparent); }
+  .wl-add { display: inline-flex; align-items: stretch; }
+  .wl-add input { padding: 6px 12px; background: var(--glass-bg-1); border: 1px solid var(--glass-line); border-right: none; border-radius: var(--r-pill) 0 0 var(--r-pill); color: var(--ink); font-family: var(--mono); font-size: 11px; min-width: 150px; }
+  .wl-add-btn { padding: 6px 14px; background: color-mix(in oklab, var(--copper) 18%, transparent); border: 1px solid color-mix(in oklab, var(--copper) 40%, transparent); border-radius: 0 var(--r-pill) var(--r-pill) 0; color: var(--copper); font-size: 11px; cursor: pointer; }
+  .wl-add-btn:hover { background: color-mix(in oklab, var(--copper) 28%, transparent); }
+  .wl-add--big { margin-top: 16px; }
+  .wl-rm { background: transparent; border: none; color: var(--ink-4); cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: var(--r-2); }
+  .wl-rm:hover { color: var(--rd); background: color-mix(in oklab, var(--rd) 14%, transparent); }
+  .wl-rm-btn { background: transparent; border: 1px solid var(--glass-line); color: var(--ink-3); cursor: pointer; font-family: var(--mono); font-size: 10px; padding: 6px 10px; border-radius: var(--r-pill); white-space: nowrap; }
+  .wl-rm-btn:hover { color: var(--rd); border-color: color-mix(in oklab, var(--rd) 40%, transparent); }
+  .wl-manual { font-size: 8px; margin-left: 3px; vertical-align: super; }
+  .sdp-actions { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .sdp-actions .sdp-open { flex: 1; margin-bottom: 0; }
+  .wl-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 48px 20px; color: var(--ink-2); }
+  .wl-empty-glyph { font-size: 44px; color: var(--copper); opacity: 0.7; line-height: 1; }
+  .wl-empty h2 { font-size: 16px; letter-spacing: 0.04em; color: var(--ink); margin: 0; }
+  .wl-empty p { font-size: 12px; line-height: 1.6; max-width: 440px; margin: 0; }
+
 </style>
 
 <!-- React + Babel (pinned, same as kairos.html prototype convention) -->
@@ -6068,6 +6089,7 @@ const sparkSeed = (sym, up) => { const code=(sym.charCodeAt(0)||65)+(sym.charCod
    ════════════════════════════════════════════════════════════════ */
 function IconRail({ activeId, onPick, tier, expanded, onToggle }) {
   const [hover, setHover] = useState(null);
+  const wl = useWatchlist();   // live watchlist count for the Watchlist rail badge
   return (
     <aside className={`ir ${expanded ? "ir--expanded" : ""}`}>
       <div className="ir-brand-row">
@@ -6098,6 +6120,7 @@ function IconRail({ activeId, onPick, tier, expanded, onToggle }) {
             const active = activeId === it.id;
             const minT = SURFACE_TIER[it.id] ?? 0;
             const locked = minT > tier;
+            const cnt = it.id === "watchlist" ? (wl.length || null) : it.count;  // Watchlist badge = real saved count
             return (
               <button key={it.id} className={`ir-item ${active?"is-active":""} ${locked?"is-locked":""}`}
                       onClick={() => onPick(it.id)} onMouseEnter={() => setHover(it.id)} onMouseLeave={() => setHover(null)} title={it.label}>
@@ -6105,8 +6128,8 @@ function IconRail({ activeId, onPick, tier, expanded, onToggle }) {
                 <span className="ir-label">{it.label}</span>
                 {locked
                   ? <span className="ir-lock" title={`Tier ${minT}+`}>🔒</span>
-                  : (it.count != null && <span className={`ir-count ${it.tone ? `ir-count--${it.tone}` : ""}`}>{it.count}</span>)}
-                {!expanded && hover === it.id && <span className="ir-tip mono">{it.label}{locked?` · TIER ${minT}+`:it.count!=null?` · ${it.count}`:""}</span>}
+                  : (cnt != null && <span className={`ir-count ${it.tone ? `ir-count--${it.tone}` : ""}`}>{cnt}</span>)}
+                {!expanded && hover === it.id && <span className="ir-tip mono">{it.label}{locked?` · TIER ${minT}+`:cnt!=null?` · ${cnt}`:""}</span>}
               </button>
             );
           })}
@@ -6966,6 +6989,7 @@ function ScanTh({ col, sort, onClick, r, children }) {
 
 function SurfaceSignalScanner({ screener, data, onTicker }) {
   const universe = useMemo(() => mapScannerRows(screener, data), [screener, data]);
+  const watch = useWatchlist();   // ★ membership — re-renders when the user stars/unstars
   const [tab, setTab] = useState("scanner");
   const [pills, setPills] = useState({});
   const [side, setSide] = useState(() => window.__scanFilter || "ALL");
@@ -7072,7 +7096,7 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
           <tbody>{rows.map((t, i) => (
             <tr key={t.sym + i} onClick={()=>onTicker(t.sym)}>
               <td className="ss2-chk"><input type="checkbox" checked={selected.has(t.sym)} onChange={()=>toggleSel(t.sym)} onClick={e=>e.stopPropagation()} /></td>
-              <td className="mono ss2-sym"><span className="ss2-star">★</span><b>{t.sym}</b></td>
+              <td className="mono ss2-sym"><span className={`ss2-star ${watch.includes(t.sym)?"is-on":""}`} title={watch.includes(t.sym)?"Remove from watchlist":"Add to watchlist"} onClick={e=>{ e.stopPropagation(); wlToggle(t.sym); }}>★</span><b>{t.sym}</b></td>
               <td className="mono dim">{t.name}</td>
               <td className="dim2 mono">{t.sector}</td>
               <td className="mono dim"><span className="ss2-tfsn">{t.tfsn.map((v,k)=><span key={k} className={`ss2-tfsn-dot ss2-tfsn--${v===2?"pass":v===1?"neut":"fail"}`} title={["Tech","Fund","SMC","News"][k]} />)}</span></td>
@@ -13666,57 +13690,76 @@ window.SurfaceSocial = SurfaceSocial;
 
 /* ════════════════════════════════════════════════════════════════
    WATCHLIST SURFACE — ported from design src/surface-watchlist.jsx.
-   Bound to the LIVE scan universe (mapScannerRows) instead of the design's
-   WATCHLIST mock; falls back to a small inline list before the feed loads.
+   USER-CURATED: the list is whatever the user adds (here or via the ★ in the
+   Signal Scanner), persisted to localStorage and synced across surfaces.
+   Per-ticker market data is enriched from the live scan universe when present.
    ════════════════════════════════════════════════════════════════ */
+
+// ── persistent user watchlist store (localStorage + cross-surface sync) ──
+const WL_KEY = "ss_watchlist";
+function wlRead(){ try { return JSON.parse((typeof localStorage!=="undefined"&&localStorage.getItem(WL_KEY))||"[]"); } catch(e){ return []; } }
+function wlWrite(arr){
+  try { if (typeof localStorage!=="undefined") localStorage.setItem(WL_KEY, JSON.stringify(arr)); } catch(e){}
+  try { window.dispatchEvent(new CustomEvent("ss-watchlist-change",{ detail:arr })); } catch(e){}
+}
+function wlAdd(sym){ sym=(sym||"").trim().toUpperCase(); if(!sym) return; const a=wlRead(); if(!a.includes(sym)) wlWrite([...a,sym]); }
+function wlRemove(sym){ sym=(sym||"").trim().toUpperCase(); wlWrite(wlRead().filter(s=>s!==sym)); }
+function wlToggle(sym){ sym=(sym||"").trim().toUpperCase(); if(!sym) return; const a=wlRead(); a.includes(sym)?wlWrite(a.filter(s=>s!==sym)):wlWrite([...a,sym]); }
+function useWatchlist(){
+  const [syms, setSyms] = useState(() => wlRead());
+  useEffect(() => {
+    const h = () => setSyms(wlRead());
+    window.addEventListener("ss-watchlist-change", h);
+    window.addEventListener("storage", h);
+    return () => { window.removeEventListener("ss-watchlist-change", h); window.removeEventListener("storage", h); };
+  }, []);
+  return syms;
+}
+// expose so the Signal Scanner ★ can toggle membership
+window.ssWatchlist = { read: wlRead, add: wlAdd, remove: wlRemove, toggle: wlToggle, has: (s)=>wlRead().includes((s||"").trim().toUpperCase()) };
+
 const WL_MODE = [["all","All"],["swing","Swing"],["position","Position"]];
 const WL_VERD = [["all","All"],["BUY","Bullish"],["WATCH","Neutral"],["AVOID","Avoid"],["held","★ Held"]];
-const WL_FALLBACK = [
-  { sym:"ARCM", name:"Arclight Materials", sector:"Materials", score:78, verdict:"BUY", setup:"Continuation Breakout", price:67.42, chg:1.83 },
-  { sym:"NVTS", name:"Navitas Semi", sector:"Tech", score:71, verdict:"BUY", setup:"VCP", price:14.20, chg:2.10 },
-  { sym:"ROST", name:"Ross Stores", sector:"Retail", score:64, verdict:"WATCH", setup:"EMA21 Pullback", price:138.9, chg:-0.4 },
-];
 
 function wlNum(v, d=0){ const n=parseFloat(v); return isNaN(n)?d:n; }
 
-// universe row (mapScannerRows) → enriched watchlist row
-function wlBuildRows(universe) {
-  const src = (universe && universe.length) ? universe : WL_FALLBACK;
-  return src.map((w, i) => {
-    const code = (w.sym.charCodeAt(0)||65) + (w.sym.charCodeAt(1)||65);
-    const score = Math.round(w.score || 0);
-    return {
-      sym: w.sym, name: w.name || w.sym, sector: w.sector || "—",
-      setup: w.setup || "—", verdict: w.verdict || "WATCH",
-      score, price: w.price || 0, chg: w.chg || 0,
-      held: i < 3,
-      tier: w.tier || (score>=75?"T1":score>=60?"T2":score>=45?"T3":"WATCH"),
-      modeTag: code % 2 === 0 ? "swing" : "position",
-      rs: w.rs != null ? w.rs : Math.max(20, Math.min(98, 40 + Math.round((score-55)*1.3))),
-      rvol: wlNum(w.rvol, 0.6 + (code%14)/10),
-      rr: wlNum(w.rr, 1 + (score-50)/30),
-      earn: w.er != null ? w.er : (3 + code%40),
-      tfsn: (w.tfsn && w.tfsn.length===4) ? w.tfsn : [0,1,2,3].map(k => (code + k*5) % 3),
-      iv: w.iv != null ? w.iv : 30 + code%28,
-      wlb: w.wlb != null ? w.wlb : Math.max(30, Math.min(70, 45 + (score-58))),
-      n: w.n != null ? w.n : 160 + (code%9)*40,
-      pf: wlNum(w.pf, 1 + (code%16)/10),
-      insider: w.insider != null ? w.insider : (code%9)-4,
-      sent: w.sent != null ? w.sent : ((code%7)-3)/3,
-      mech: w.mechanism || (w.verdict === "AVOID" ? "Distribution · failing breakout"
-        : ["Supply absorbed · vol-dry base","Demand reclaim · institutional bid","VCP contraction · 5th squeeze","Pullback to EMA21 · trend re-add"][code%4]),
-    };
-  });
+// one user symbol → enriched row (market data from the scan universe when present)
+function wlRowFrom(sym, uni, heldSet){
+  const w = uni.find(r => r.sym === sym) || null;
+  const code = (sym.charCodeAt(0)||65) + (sym.charCodeAt(1)||65);
+  const score = Math.round((w && w.score) || 0);
+  return {
+    sym, inUniverse: !!w,
+    name: (w && w.name) || sym, sector: (w && w.sector) || "—",
+    setup: (w && w.setup) || "—", verdict: (w && w.verdict) || "WATCH",
+    score, price: (w && w.price) || 0, chg: (w && w.chg) || 0,
+    held: heldSet.has(sym),
+    tier: (w && w.tier) || (score>=75?"T1":score>=60?"T2":score>=45?"T3":"WATCH"),
+    modeTag: code % 2 === 0 ? "swing" : "position",
+    rs: (w && w.rs != null) ? w.rs : 0,
+    rvol: w ? wlNum(w.rvol, 0) : 0,
+    rr: w ? wlNum(w.rr, 0) : 0,
+    earn: (w && w.er != null) ? w.er : null,
+    tfsn: (w && w.tfsn && w.tfsn.length===4) ? w.tfsn : [0,0,0,0],
+    wlb: (w && w.wlb != null) ? w.wlb : null,
+    n: (w && w.n != null) ? w.n : null,
+    pf: w ? wlNum(w.pf, 0) : 0,
+    mech: (w && w.mechanism) || (w ? "—" : "Not in today's scan — add as a manual watch."),
+  };
 }
 
-function SurfaceWatchlist({ onTicker, universe }) {
+function SurfaceWatchlist({ onTicker, universe, held }) {
+  const syms = useWatchlist();
+  const heldSet = useMemo(() => new Set((held||[]).map(s => (s||"").toUpperCase())), [held]);
   const [mode, setMode] = useState("all");
   const [verd, setVerd] = useState("all");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState({ col: "score", dir: -1 });
   const [sel, setSel] = useState(null);
+  const [add, setAdd] = useState("");
 
-  const allRows = useMemo(() => wlBuildRows(universe), [universe]);
+  const uni = universe || [];
+  const allRows = useMemo(() => syms.map(s => wlRowFrom(s, uni, heldSet)), [syms, uni, heldSet]);
 
   const rows = useMemo(() => {
     let r = allRows;
@@ -13739,7 +13782,8 @@ function SurfaceWatchlist({ onTicker, universe }) {
     avg: allRows.length ? Math.round(allRows.reduce((s, x) => s + x.score, 0) / allRows.length) : 0,
   }), [allRows]);
 
-  const selRow = useMemo(() => rows.find(r => r.sym === sel) || allRows.find(r => r.sym === sel) || rows[0] || allRows[0], [rows, allRows, sel]);
+  const selRow = useMemo(() => rows.find(r => r.sym === sel) || rows[0] || null, [rows, sel]);
+  const doAdd = () => { const s=add.trim().toUpperCase(); if(s){ wlAdd(s); setSel(s); setAdd(""); } };
 
   const TH = (col, label, r) => (
     <th className={`${r ? "r" : ""} wsx-th ${sort.col === col ? "is-active" : ""}`}
@@ -13748,19 +13792,28 @@ function SurfaceWatchlist({ onTicker, universe }) {
     </th>
   );
 
+  const AddBox = ({ big }) => (
+    <div className={`wl-add ${big ? "wl-add--big" : ""}`}>
+      <input className="mono" placeholder="＋ add ticker (e.g. NVDA)" value={add}
+             onChange={e => setAdd(e.target.value)}
+             onKeyDown={e => { if (e.key === "Enter") doAdd(); }} />
+      <button className="wl-add-btn mono" onClick={doAdd}>Add</button>
+    </div>
+  );
+
   return (
     <div className="surface wsx wsx--copper wl-surface">
       <div className="wsx-hdr">
         <div className="wsx-hdr-l">
           <div className="wsx-eyebrow mono">USER-CURATED · ★ STARRED + MANUAL</div>
           <h1 className="wsx-title mono">Watchlist</h1>
-          <div className="wsx-sub mono dim2">live price + Δ% · sourced from the scan universe · star-sync to localStorage pending</div>
+          <div className="wsx-sub mono dim2">your tickers · ★ in the Signal Scanner or add here · saved to localStorage</div>
         </div>
-        <div className="wsx-hdr-r"><FreshnessPill state="live" age="12s" /><span className="mono dim2">src · scan universe + last_bundle</span></div>
+        <div className="wsx-hdr-r"><FreshnessPill state="live" age="12s" /><span className="mono dim2">{syms.length} saved · live quotes from scan</span></div>
       </div>
 
       <div className="wsx-kpis">
-        <div className="wsx-kpi wsx-kpi--copper"><div className="wsx-kpi-l mono">WATCHING</div><div className="wsx-kpi-v mono kpi-tone--copper">{kpi.watching}</div><div className="wsx-kpi-s mono dim2">tracked names</div></div>
+        <div className="wsx-kpi wsx-kpi--copper"><div className="wsx-kpi-l mono">WATCHING</div><div className="wsx-kpi-v mono kpi-tone--copper">{kpi.watching}</div><div className="wsx-kpi-s mono dim2">your names</div></div>
         <div className="wsx-kpi wsx-kpi--gn"><div className="wsx-kpi-l mono">BULLISH</div><div className="wsx-kpi-v mono kpi-tone--gn">{kpi.bull}</div><div className="wsx-kpi-s mono dim2">actionable BUY</div></div>
         <div className="wsx-kpi wsx-kpi--rd"><div className="wsx-kpi-l mono">BEARISH</div><div className="wsx-kpi-v mono kpi-tone--rd">{kpi.bear}</div><div className="wsx-kpi-s mono dim2">avoid / short</div></div>
         <div className="wsx-kpi wsx-kpi--violet"><div className="wsx-kpi-l mono">HELD</div><div className="wsx-kpi-v mono kpi-tone--violet">{kpi.held}</div><div className="wsx-kpi-s mono dim2">in portfolio</div></div>
@@ -13775,32 +13828,42 @@ function SurfaceWatchlist({ onTicker, universe }) {
           {WL_VERD.map(([id, l]) => <button key={id} className={`wl-chip wl-chip--${id} ${verd === id ? "is-on" : ""}`} onClick={() => setVerd(id)}>{l}</button>)}
         </div>
         <input className="wl-search mono" placeholder="⌕ filter…" value={q} onChange={e => setQ(e.target.value)} />
+        <AddBox />
       </div>
 
+      {syms.length === 0 ? (
+        <div className="wl-empty">
+          <div className="wl-empty-glyph">☆</div>
+          <h2 className="mono">Your watchlist is empty</h2>
+          <p className="mono dim2">Add a ticker below, or click the <span className="copper">★</span> on any row in the Signal Scanner — your list is saved to this browser and syncs here.</p>
+          <AddBox big />
+        </div>
+      ) : (
       <div className="wl-split">
         <div className="wsx-body wl-tbl-wrap">
           <table className="dtable wsx-tbl wl-tbl">
             <thead><tr>
               {TH("sym","Sym")}<th>Name</th><th>Setup</th>{TH("verdict","Verdict")}<th>Tier</th>{TH("score","Score",true)}
               <th>T·F·S·N</th>{TH("price","Px",true)}{TH("chg","Δ%",true)}{TH("rs","RS",true)}{TH("rvol","RVOL",true)}
-              {TH("rr","R:R",true)}{TH("earn","Earn",true)}
+              {TH("rr","R:R",true)}{TH("earn","Earn",true)}<th></th>
             </tr></thead>
             <tbody>
               {rows.map((t, i) => (
                 <tr key={t.sym + i} className={selRow && selRow.sym === t.sym ? "is-sel" : ""} onClick={() => setSel(t.sym)} onDoubleClick={() => onTicker && onTicker(t.sym)}>
-                  <td className="mono"><span className="wl-held" style={{ opacity: t.held ? 1 : 0 }}>●</span><b>{t.sym}</b></td>
+                  <td className="mono"><span className="wl-held" style={{ opacity: t.held ? 1 : 0 }}>●</span><b>{t.sym}</b>{!t.inUniverse && <span className="wl-manual mono dim2" title="Not in today's scan">·m</span>}</td>
                   <td className="dim">{t.name}</td>
                   <td className="mono dim">{t.setup}</td>
                   <td><Pill tone={t.verdict === "BUY" ? "gn" : t.verdict === "AVOID" ? "rd" : "amb"} small>{t.verdict}</Pill></td>
                   <td><span className={`ss2-tier ss2-tier--${String(t.tier).toLowerCase().replace("watch","t3")}`}>{t.tier}</span></td>
-                  <td className="r"><span className="wl-scorebar"><span style={{ width: `${t.score}%`, background: t.score>=75?"var(--gn)":t.score>=60?"var(--amb)":"var(--rd)" }} /></span><b className="mono">{t.score}</b></td>
+                  <td className="r"><span className="wl-scorebar"><span style={{ width: `${t.score}%`, background: t.score>=75?"var(--gn)":t.score>=60?"var(--amb)":"var(--rd)" }} /></span><b className="mono">{t.score||"—"}</b></td>
                   <td><span className="ss2-tfsn">{t.tfsn.map((v,k)=><span key={k} className={`ss2-tfsn-dot ss2-tfsn--${v===2?"pass":v===1?"neut":"fail"}`} />)}</span></td>
-                  <td className="r mono tabular">${t.price.toFixed(2)}</td>
-                  <td className={`r mono tabular ${t.chg>=0?"up":"dn"}`}>{t.chg>=0?"+":""}{t.chg.toFixed(2)}%</td>
-                  <td className="r mono tabular">{t.rs}</td>
-                  <td className={`r mono tabular ${t.rvol>=1.5?"up":"dim"}`}>{t.rvol.toFixed(2)}×</td>
-                  <td className="r mono tabular">{t.rr.toFixed(2)}</td>
+                  <td className="r mono tabular">{t.price?`$${t.price.toFixed(2)}`:"—"}</td>
+                  <td className={`r mono tabular ${t.chg>=0?"up":"dn"}`}>{t.price?`${t.chg>=0?"+":""}${t.chg.toFixed(2)}%`:"—"}</td>
+                  <td className="r mono tabular">{t.rs||"—"}</td>
+                  <td className={`r mono tabular ${t.rvol>=1.5?"up":"dim"}`}>{t.rvol?`${t.rvol.toFixed(2)}×`:"—"}</td>
+                  <td className="r mono tabular">{t.rr?t.rr.toFixed(2):"—"}</td>
                   <td className={`r mono tabular ${t.earn!=null&&t.earn<=10?"warn":"dim"}`}>{t.earn!=null?t.earn+"d":"—"}</td>
+                  <td><button className="wl-rm" title="Remove from watchlist" onClick={e => { e.stopPropagation(); wlRemove(t.sym); }}>✕</button></td>
                 </tr>
               ))}
             </tbody>
@@ -13808,6 +13871,7 @@ function SurfaceWatchlist({ onTicker, universe }) {
         </div>
         {selRow && <WLDetailPane t={selRow} onTicker={onTicker} />}
       </div>
+      )}
     </div>
   );
 }
@@ -13824,24 +13888,27 @@ function WLDetailPane({ t, onTicker }) {
       <div className="sdp-hdr">
         <div>
           <div className="sdp-sym mono"><b>{t.sym}</b> {t.held && <span className="wl-held">●</span>}</div>
-          <div className="sdp-px mono">${t.price.toFixed(2)} <span className={t.chg>=0?"up":"dn"}>{t.chg>=0?"+":""}{t.chg.toFixed(2)}%</span></div>
+          <div className="sdp-px mono">{t.price?`$${t.price.toFixed(2)} `:"— "}<span className={t.chg>=0?"up":"dn"}>{t.price?`${t.chg>=0?"+":""}${t.chg.toFixed(2)}%`:""}</span></div>
         </div>
         <div className="sdp-hdr-r">
-          <span className={`ss2-score ss2-score--${t.score>=75?"gn":t.score>=60?"amb":"rd"}`}>{t.score}</span>
+          <span className={`ss2-score ss2-score--${t.score>=75?"gn":t.score>=60?"amb":"rd"}`}>{t.score||"—"}</span>
           <Pill tone={toneV} small>{t.verdict}</Pill>
         </div>
       </div>
-      <button className="sdp-open mono" onClick={() => onTicker && onTicker(t.sym)}>OPEN 14-LENS DETAIL →</button>
+      <div className="sdp-actions">
+        <button className="sdp-open mono" onClick={() => onTicker && onTicker(t.sym)}>OPEN 14-LENS DETAIL →</button>
+        <button className="wl-rm-btn mono" onClick={() => wlRemove(t.sym)}>✕ Remove</button>
+      </div>
       <div className="sdp-body">
         <Sec n="01" title="CONVICTION"><div className="sdp-arc"><div className="sdp-arc-fill" style={{ width: `${t.score}%` }} /></div><KV k="tier" v={t.tier} /><KV k="conviction" v={`${t.score}%`} tone="copper" /></Sec>
         <Sec n="02" title="T·F·S·N PILLARS">{[["Tech",t.score-2,"cy"],["Fund",t.score-12,"violet"],["SMC",t.score-6,"gn"],["News",t.score-18,"violet"]].map(([l,v,c],i)=>(
           <div key={i} className="sdp-bar"><span className="mono dim2">{l}</span><div className="sdp-bar-t"><div className="sdp-bar-f" style={{width:`${Math.max(8,Math.min(100,v))}%`,background:`var(--${c})`}}/></div><span className="mono">{Math.max(8,Math.min(100,v))}</span></div>))}</Sec>
         <Sec n="03" title="MECHANISM"><div className="sdp-mech mono">{t.mech}</div></Sec>
-        <Sec n="04" title="ENTRY · PLAN"><KV k="entry" v={`$${(t.price*0.995).toFixed(2)}`} tone="copper" /><KV k="stop" v={`$${(t.price*0.94).toFixed(2)}`} tone="rd" /><KV k="T1" v={`$${(t.price*1.12).toFixed(2)}`} tone="gn" /><KV k="R:R" v={t.rr.toFixed(2)} tone="copper" /></Sec>
+        <Sec n="04" title="ENTRY · PLAN"><KV k="entry" v={t.price?`$${(t.price*0.995).toFixed(2)}`:"—"} tone="copper" /><KV k="stop" v={t.price?`$${(t.price*0.94).toFixed(2)}`:"—"} tone="rd" /><KV k="T1" v={t.price?`$${(t.price*1.12).toFixed(2)}`:"—"} tone="gn" /><KV k="R:R" v={t.rr?t.rr.toFixed(2):"—"} tone="copper" /></Sec>
         <Sec n="05" title="MODE · HOLD"><KV k="mode" v={t.modeTag} /><KV k="hold" v={t.modeTag==="swing"?"7d":"30d"} /><KV k="held" v={t.held?"yes · in book":"no"} tone={t.held?"gn":"ink"} /></Sec>
-        <Sec n="06" title="SETUP STATS"><KV k="family" v={t.setup} /><KV k="Wilson LB" v={`${t.wlb}%`} tone={t.wlb>=50?"gn":"amb"} /><KV k="n · PF" v={`${t.n} · ${t.pf.toFixed(2)}`} /></Sec>
-        <Sec n="07" title="MOMENTUM"><KV k="RS rank" v={t.rs} tone={t.rs>=70?"gn":"ink"} /><KV k="RVOL" v={`${t.rvol.toFixed(2)}×`} tone={t.rvol>=1.5?"gn":"ink"} /><KV k="1D" v={`${t.chg>=0?"+":""}${t.chg.toFixed(2)}%`} tone={t.chg>=0?"gn":"rd"} /></Sec>
-        <Sec n="08" title="DECISION"><KV k="gates" v={`${t.verdict==="AVOID"?"6":"9"} / 10`} tone={t.verdict==="AVOID"?"rd":"gn"} /><KV k="verdict" v={t.verdict} tone={toneV} /></Sec>
+        <Sec n="06" title="SETUP STATS"><KV k="family" v={t.setup} /><KV k="Wilson LB" v={t.wlb!=null?`${t.wlb}%`:"—"} tone={t.wlb>=50?"gn":"amb"} /><KV k="n · PF" v={t.n!=null?`${t.n} · ${t.pf.toFixed(2)}`:"—"} /></Sec>
+        <Sec n="07" title="MOMENTUM"><KV k="RS rank" v={t.rs||"—"} tone={t.rs>=70?"gn":"ink"} /><KV k="RVOL" v={t.rvol?`${t.rvol.toFixed(2)}×`:"—"} tone={t.rvol>=1.5?"gn":"ink"} /><KV k="1D" v={t.price?`${t.chg>=0?"+":""}${t.chg.toFixed(2)}%`:"—"} tone={t.chg>=0?"gn":"rd"} /></Sec>
+        <Sec n="08" title="DECISION"><KV k="gates" v={t.inUniverse?`${t.verdict==="AVOID"?"6":"9"} / 10`:"—"} tone={t.verdict==="AVOID"?"rd":"gn"} /><KV k="verdict" v={t.verdict} tone={toneV} /></Sec>
       </div>
     </div>
   );
@@ -13911,6 +13978,10 @@ function App() {
     return { equity: p.equity, cash: p.cash, positions: (p.positions||[]).length };
   }, [data]);
 
+  // Symbols held in the paper book — drives the Watchlist HELD flag.
+  const heldSyms = useMemo(() => (((data && data.portfolio && data.portfolio.positions) || [])
+    .map(p => (p.ticker || p.symbol || p.sym || "").toUpperCase()).filter(Boolean)), [data]);
+
   // Universe (shared by the scan column + Watchlist) + the active ticker's detail shape.
   const universe = useMemo(() => mapScannerRows(screener, data), [screener, data]);
   const detailTicker = useMemo(() => detailSym ? toDetailTicker(universe.find(r => r.sym === detailSym), detailSym) : null, [detailSym, universe]);
@@ -13926,7 +13997,7 @@ function App() {
   } else if (surface === "signal-scanner") {
     body = <div className="main-home"><SurfaceSignalScanner screener={screener} data={data} onTicker={onTicker} /></div>;
   } else if (surface === "watchlist") {
-    body = <div className="main-home"><SurfaceWatchlist onTicker={onTicker} universe={universe} /></div>;
+    body = <div className="main-home"><SurfaceWatchlist onTicker={onTicker} universe={universe} held={heldSyms} /></div>;
   } else if (surface === "performance") {
     body = <div className="main-home"><SurfacePerformance onTicker={onTicker} /></div>;
   } else if (surface === "strategies") {
