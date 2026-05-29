@@ -27,6 +27,14 @@ python3 executor.py --status >> "$LOG" 2>&1
 python3 executor.py --submit >> "$LOG" 2>&1
 EXIT_CODE=$?
 
+# 2b. Arm protective GTC stops on every open position (2026-05-28).
+# Bracket DAY orders cancel their stop/target legs at close if the entry
+# doesn't fill same-session, leaving positions naked. This guarantees a live
+# GTC stop on every fill regardless of how the entry resolved. Paper-only
+# (arm_stops reuses executor._make_client → paper=True). Non-fatal.
+echo "---- arm_stops $DATE ----" >> "$LOG"
+python3 scripts/arm_stops.py --submit >> "$LOG" 2>&1 || echo "arm_stops non-fatal error" >> "$LOG"
+
 # 3. Slack status on completion (autorun_reporter handles per-order notifs;
 #    this is the wrapper-level summary)
 python3 -c "

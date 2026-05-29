@@ -85,11 +85,26 @@ def main() -> int:
     print(f"=== arm_stops ({mode}) — {len(positions)} positions · {len(protected)} already protected ===")
     print(f"Alpaca paper: equity=${float(account.equity):,.2f}")
 
+    # 2026-05-28 — pull LIVE quotes for the clamp. Alpaca's position
+    # current_price lags the real market (it raced us on MRVL: position said
+    # $205.81 while market was $203.22 → stop landed above market → rejected).
+    # A fresh Schwab L1 last is authoritative for the "below current" check.
+    live_last = {}
+    try:
+        import schwab_client as _sc
+        for _sym, _blob in (_sc.get_quotes_batch([p.symbol for p in positions]) or {}).items():
+            _q = (_blob or {}).get("quote") or {}
+            _lp = _q.get("lastPrice") or _q.get("bidPrice")
+            if _lp:
+                live_last[_sym.upper()] = float(_lp)
+    except Exception as e:
+        print(f"  (live-quote fetch failed, falling back to position price: {e})")
+
     armed = skipped = failed = 0
     for p in positions:
         sym = p.symbol
         qty = abs(int(float(p.qty)))
-        last = float(p.current_price)
+        last = live_last.get(sym.upper()) or float(p.current_price)
         is_long = int(float(p.qty)) > 0
 
         if sym in protected:
@@ -104,10 +119,13 @@ def main() -> int:
 
         # Clamp so the stop is on the correct side of market (Alpaca rejects
         # an immediately-triggerable stop). Longs: stop below last. Shorts: above.
+        # 1% buffer (was 0.5%) absorbs intra-request price drift on fast movers —
+        # a tighter buffer raced the market on MRVL (stop landed above a ticked-
+        # down price → rejected).
         if is_long:
-            stop_price = min(float(want), round(last * 0.995, 2))
+            stop_price = min(float(want), round(last * 0.99, 2))
         else:
-            stop_price = max(float(want), round(last * 1.005, 2))
+            stop_price = max(float(want), round(last * 1.01, 2))
         stop_price = round(stop_price, 2)
 
         side = OrderSide.SELL if is_long else OrderSide.BUY
