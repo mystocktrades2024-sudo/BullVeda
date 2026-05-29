@@ -4,6 +4,49 @@
 **Scope:** the 14-lens per-ticker detail panel ported from the Claude Design handoff
 (`design_handoff_swingtrade_v2` / `src/lens-*.jsx`).
 
+---
+
+## ⟳ 2026-05-29 sync (designer overnight update — share `atV1KMEsBpRcasOK205Uzg`)
+
+Synced the designer's overnight rebuild. All verified: full Babel compile + renderToString
+smoke-test pass for 12 lenses × 3 modes × 3 hero styles + 7 surfaces.
+
+- **Chart lens → TradingView Lightweight Charts.** The canonical Chart is now
+  `lens-thesis-chart.jsx` (real candles + volume + crosshair + zoom/pan, TF tabs, EMA/BB/VWAP/
+  Ichimoku/SMC overlays, plan price-lines). Added the `lightweight-charts@4.1.3` CDN script; chart
+  creation is guarded inside `useEffect` (SSR-safe). The old `chart-patterns` LensChart was retired
+  (kept as dead `CptChartLegacy`); **Patterns** still uses `chart-patterns`' `LensPatterns`.
+  *Live:* spot + plan price-lines (`ticker.price/pivot/stop/t1/t2`). *Illustrative:* candle series.
+- **SMC + Risk** rebuilt (407→885 lines): full ICT/SMC surface (HTF context, order blocks, FVG/BoS/
+  CHoCH log, liquidity sweeps, MTF screener, structure-map SVG, breaker/mitigation, OTE, kill-zones,
+  5-step entry-model state machine, confluence, mitigation hit-rate) + richer Risk (loss-distribution
+  cone, live Kelly, VaR/CVaR/Sharpe, 6×5 stress grid). Live anchors as before; detector/engine
+  output illustrative.
+- **cc-7 — lens-tab scrollbar killed.** Detail tabs now use the **Wrap** variant (`dp-tabs--wrap`,
+  multi-row, no horizontal scrollbar) by default; `lens-tabs.css` also ships compact/minimal/scroll.
+- **cc-8 — IconRail expand/collapse.** Chevron in the rail brand row toggles a labeled 214-px sidebar
+  (`.ir--expanded` + `.app--rail-open`, grid adapted to Stocksmith's 3-column layout).
+
+### New workspace surfaces (replace the old placeholder tabs)
+Built from `quant-viz.jsx` (shared `Q*` primitives: equity curve, underwater DD, histogram, monthly
+heatmap, diverging bars, gauge bars, sparkline) + the surface files. **All data is illustrative mock**
+(EODHD/Schwab-shaped), same wiring policy as the lenses — they need their real feeds wired later.
+
+| Surface | Built from | Content |
+|---|---|---|
+| **Performance** | surface-perf | equity vs SPY + underwater DD, 8 KPI tiles, monthly heatmap, P&L attribution, R-dist |
+| **Strategies** | surface-perf | sleeve library, Wilson-LB gauges, edge-decay sparks, regime-fit |
+| **Alerts** | surface-desk | severity triage, P0/P1/P2 filters, one-click actions |
+| **Trade Journal** | surface-desk | cumulative-R curve, R-dist, edge-by-sleeve, behavioral attribution, graded log |
+| **Playbook** | surface-desk | regime banner, sleeve×regime matrix, entry gates, sizing/risk, pre-mortem |
+| **Themes** | surface-themes | narrative-basket cards, basket equity sparks, RS/breadth/flow, constituents |
+| **Social** | surface-social | sentiment rows (illustrative) |
+
+Routed in `App` (replaced `SurfacePlaceholder` for performance/strategies/alerts/journal/playbook/
+themes/social). Each accepts `onTicker` for drill-down.
+
+---
+
 This documents **what is wired to live data and what is still illustrative, and why** — so the
 next pass knows exactly which backend feed each placeholder is waiting on.
 
