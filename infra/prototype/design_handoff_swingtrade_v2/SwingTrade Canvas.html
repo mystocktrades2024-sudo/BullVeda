@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SwingTrade V2 — Design Canvas</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<link rel="stylesheet" href="tokens.css" />
+<link rel="stylesheet" href="components.css" />
+<link rel="stylesheet" href="shell.css" />
+<link rel="stylesheet" href="lenses.css" />
+<link rel="stylesheet" href="aurora.css" />
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="src/data.jsx"></script>
+<script type="text/babel" src="src/components.jsx"></script>
+<script type="text/babel" src="src/detail-panel.jsx"></script>
+<script type="text/babel" src="src/lens-plan.jsx"></script>
+<script type="text/babel" src="src/lens-technicals.jsx"></script>
+<script type="text/babel" src="src/lens-investment.jsx"></script>
+<script type="text/babel" src="src/market-map.jsx"></script>
+
+<style>
+  html, body { background: var(--bg, #0a0d0c); }
+  body { font-family: var(--sans); color: var(--ink); }
+  [data-theme="obsidian-gold"] body { background: #0a0d0c; }
+  .scope-dark { background: #0a0d0c; color: #ecefe9; padding: 20px; border-radius: 8px; }
+  .scope-dark * { color-scheme: dark; }
+  .ab-frame { background: #0a0d0c; color: #ecefe9; padding: 16px; height: 100%; }
+  .swatch-card {
+    background: var(--bg-1); border: 1px solid var(--line); border-radius: 6px;
+    padding: 14px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .swatch-card-hdr { font-family: var(--mono); font-size: 11px; color: var(--copper); letter-spacing: 0.14em; text-transform: uppercase; }
+  .swatch-row { display: flex; gap: 6px; align-items: center; }
+  .swatch-chip { width: 28px; height: 28px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); }
+  .swatch-chip-label { font-family: var(--mono); font-size: 10px; color: var(--ink-2); letter-spacing: 0.04em; min-width: 110px; }
+
+  .type-spec { background: #0a0d0c; color: #ecefe9; border: 1px solid #262b2d; border-radius: 6px; padding: 18px; height: 100%; display: flex; flex-direction: column; gap: 14px; }
+  .type-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-bottom: 1px dashed #262b2d; }
+  .type-meta { font-family: 'JetBrains Mono'; font-size: 9.5px; color: #686c68; letter-spacing: 0.14em; text-transform: uppercase; }
+  .type-sample { color: #ecefe9; }
+  .type-sample.h1 { font-family: 'JetBrains Mono'; font-size: 32px; font-weight: 500; letter-spacing: 0.04em; }
+  .type-sample.h2 { font-family: 'JetBrains Mono'; font-size: 22px; font-weight: 500; letter-spacing: 0.04em; }
+  .type-sample.h3 { font-family: 'JetBrains Mono'; font-size: 16px; font-weight: 500; letter-spacing: 0.04em; }
+  .type-sample.label { font-family: 'JetBrains Mono'; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #8b8f8b; }
+  .type-sample.num { font-family: 'JetBrains Mono'; font-size: 28px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .type-sample.prose { font-family: 'Inter'; font-size: 14px; line-height: 1.55; max-width: 60ch; }
+  .type-sample.body { font-family: 'JetBrains Mono'; font-size: 11px; }
+
+  .ab-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; height: 100%; box-sizing: border-box; }
+  .ab-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; height: 100%; box-sizing: border-box; }
+  .ab-stack  { display: flex; flex-direction: column; gap: 12px; height: 100%; box-sizing: border-box; }
+
+  /* Make focused-mode canvas dark variants always render */
+  [data-canvas-theme="midnight-cyan"]   { background: #0a0e14; }
+  [data-canvas-theme="forest-terminal"] { background: #0a100c; }
+  [data-canvas-theme="ivory-editorial"] { background: #f6f5f1; }
+  [data-canvas-theme="arctic-light"]    { background: #f4f6fa; }
+</style>
+
+</head>
+<body>
+
+<div id="root"></div>
+
+<script type="text/babel">
+// ─── Theme-scoped wrapper ─────────────────────────────────────────
+function ThemeScope({ theme = "obsidian-gold", style, children }) {
+  // Apply theme tokens locally by setting data-theme on a wrapper
+  // (works because our tokens.css cascades by [data-theme="…"])
+  React.useEffect(() => {
+    // ensure the root html element has *some* theme so vars resolve outside
+    if (!document.documentElement.getAttribute("data-theme")) {
+      document.documentElement.setAttribute("data-theme", "obsidian-gold");
+    }
+  }, []);
+  return (
+    <div data-theme={theme} data-canvas-theme={theme} style={{
+      background: "var(--bg)",
+      color: "var(--ink)",
+      padding: 12,
+      height: "100%",
+      boxSizing: "border-box",
+      overflow: "hidden",
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ─── Static mock — Plan hero in isolation ─────────────────────────
+function MockPlanHero() {
+  return <PlanHero ticker={TICKER} mode="SWING" />;
+}
+function PlanHeroLocal() { return null; }
+
+// (We import LensPlan etc. as live components — they manage their own state.)
+// To keep the canvas a true STATIC representation of each section, we render
+// the whole lens but freeze it.
+
+function App() {
+  return (
+    <DesignCanvas>
+
+      {/* ━━━━━━━━━━ BRAND & FOUNDATIONS ━━━━━━━━━━ */}
+      <DCSection id="found" title="Foundations" subtitle="Tokens · type · color · grammar pieces — same vocabulary across all 14 lenses.">
+
+        <DCArtboard id="palette-obsidian" label="Theme · Obsidian Gold (default)" width={580} height={420}>
+          <ThemeScope theme="obsidian-gold">
+            <div className="swatch-card" style={{ height: "100%", overflow: "auto" }}>
+              <div className="swatch-card-hdr">Surfaces · Ink · Accent</div>
+              {[
+                ["--bg",      "page background"],
+                ["--bg-1",    "card surface"],
+                ["--bg-2",    "panel surface"],
+                ["--bg-3",    "inset / hover"],
+                ["--line",    "borders"],
+                ["--line-2",  "borders strong"],
+                ["--ink",     "primary text"],
+                ["--ink-1",   "ink·1"],
+                ["--ink-2",   "ink·2 · dim"],
+                ["--ink-3",   "ink·3 · dimmer"],
+                ["--copper",  "brand accent · section numbers / actives"],
+                ["--gn",      "bullish · pass · good"],
+                ["--rd",      "bearish · fail · risk"],
+                ["--amb",     "neutral · caution"],
+                ["--cy",      "categorical · Tech / SMC"],
+                ["--violet",  "categorical · Catalyst / Patterns"],
+              ].map(([k, lbl]) => (
+                <div key={k} className="swatch-row">
+                  <div className="swatch-chip" style={{ background: `var(${k})` }} />
+                  <span className="swatch-chip-label">{k}</span>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 10.5, color: "var(--ink-3)" }}>{lbl}</span>
+                </div>
+              ))}
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+        <DCArtboard id="palette-cyan" label="Theme · Midnight Cyan" width={300} height={420}>
+          <ThemeScope theme="midnight-cyan">
+            <div className="swatch-card" style={{ height: "100%" }}>
+              <div className="swatch-card-hdr">Cool dark · cyan accent</div>
+              <div className="swatch-row"><div className="swatch-chip" style={{ background: "var(--bg)" }} /><span className="swatch-chip-label">--bg</span></div>
+              <div className="swatch-row"><div className="swatch-chip" style={{ background: "var(--bg-2)" }} /><span className="swatch-chip-label">--bg-2</span></div>
+              <div className="swatch-row"><div className="swatch-chip" style={{ background: "var(--copper)" }} /><span className="swatch-chip-label">--copper</span></div>
+              <div className="swatch-row"><div className="swatch-chip" style={{ background: "var(--ink)" }} /><span className="swatch-chip-label">--ink</span></div>
+              <div className="swatch-row"><div className="swatch-chip" style={{ background: "var(--gn)" }} /><span className="swatch-chip-label">--gn</span></div>
+              <div className="swatch-row"><div className="swatch-chip" style={{ background: "var(--rd)" }} /><span className="swatch-chip-label">--rd</span></div>
+              <div style={{ marginTop: 12, fontFamily: "var(--mono)", fontSize: 11, color: "var(--copper)" }}>BUY · ARCM +1.84%</div>
+              <div style={{ fontFamily: "var(--mono)", fontSize: 22, color: "var(--ink)" }}>$67.42</div>
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+        <DCArtboard id="palette-forest" label="Theme · Forest Terminal" width={300} height={420}>
+          <ThemeScope theme="forest-terminal">
+            <div className="swatch-card" style={{ height: "100%" }}>
+              <div className="swatch-card-hdr">Hacker green</div>
+              <div className="swatch-row"><div className="swatch-chip" style={{ background: "var(--bg)" }} /><span className="swatch-chip-label">--bg</span></div>
+              <div className="swatch-row"><div className="swatch-chip" style={{ background: "var(--copper)" }} /><span className="swatch-chip-label">--copper</span></div>
+              <div className="swatch-row"><div className="swatch-chip" style={{ background: "var(--ink)" }} /><span className="swatch-chip-label">--ink</span></div>
+              <div style={{ marginTop: 12, fontFamily: "var(--mono)", fontSize: 11, color: "var(--copper)" }}>PASS · 5 of 5 gates</div>
+              <div style={{ fontFamily: "var(--mono)", fontSize: 22, color: "var(--ink)" }}>$67.42</div>
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+        <DCArtboard id="palette-ivory" label="Theme · Ivory Editorial (light)" width={300} height={420}>
+          <ThemeScope theme="ivory-editorial">
+            <div className="swatch-card" style={{ height: "100%" }}>
+              <div className="swatch-card-hdr">Warm light · editorial</div>
+              <div className="swatch-row"><div className="swatch-chip" style={{ background: "var(--bg)" }} /><span className="swatch-chip-label">--bg</span></div>
+              <div className="swatch-row"><div className="swatch-chip" style={{ background: "var(--copper)" }} /><span className="swatch-chip-label">--copper</span></div>
+              <div className="swatch-row"><div className="swatch-chip" style={{ background: "var(--ink)" }} /><span className="swatch-chip-label">--ink</span></div>
+              <div style={{ marginTop: 12, fontFamily: "var(--mono)", fontSize: 11, color: "var(--copper)" }}>BUY · ARCM +1.84%</div>
+              <div style={{ fontFamily: "var(--mono)", fontSize: 22, color: "var(--ink)" }}>$67.42</div>
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+        <DCArtboard id="typography" label="Type system" width={580} height={420}>
+          <ThemeScope theme="obsidian-gold">
+            <div className="type-spec">
+              <div className="type-row">
+                <div className="type-meta">JetBrains Mono · 500 · numbers + labels + headers</div>
+                <div className="type-sample h1">$67.42 <span style={{ color: "#4ade80" }}>+1.84%</span></div>
+              </div>
+              <div className="type-row">
+                <div className="type-meta">Mono · 22 · section H2</div>
+                <div className="type-sample h2">§01 ORDER TICKET</div>
+              </div>
+              <div className="type-row">
+                <div className="type-meta">Mono · 11 · 0.18em tracked · cap labels</div>
+                <div className="type-sample label">Wilson Lower Bound · n=47</div>
+              </div>
+              <div className="type-row">
+                <div className="type-meta">Mono · 28 · tabular numerics</div>
+                <div className="type-sample num">78<span style={{ color: "#686c68", fontSize: 14 }}>/100</span></div>
+              </div>
+              <div className="type-row">
+                <div className="type-meta">Inter · 14 · prose / explainers</div>
+                <div className="type-sample prose">Take the breakout above $66.18, half-Kelly size. Setup hist. win-rate 62%, Wilson LB 48%, n=47 instances.</div>
+              </div>
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+        <DCArtboard id="grammar" label="Section header · 3 variants" width={580} height={300}>
+          <ThemeScope theme="obsidian-gold">
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 8 }}>
+              <SectionHeader n={1} title="ORDER TICKET" sub="Schwab · STOP LIMIT · OCO bracket" style="copper" />
+              <SectionHeader n={2} title="ORDER TICKET" sub="Schwab · STOP LIMIT · OCO bracket" style="minimal" />
+              <SectionHeader n={3} title="ORDER TICKET" sub="Schwab · STOP LIMIT · OCO bracket" style="sticky-rail" />
+              <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--ink-3)", letterSpacing: "0.10em", padding: "0 16px" }}>
+                Switchable via Tweaks → Section grammar
+              </div>
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+        <DCArtboard id="kpi-styles" label="KPI tile · 3 variants" width={580} height={220}>
+          <ThemeScope theme="obsidian-gold">
+            <div className="ab-grid-3" style={{ padding: 8 }}>
+              <KpiTile label="ENTRY" value="$66.18" tone="copper" sub="pivot of base #2" style="bare" />
+              <KpiTile label="REVENUE TTM" value="$1.04B" tone="gn" style="sparkline"
+                       spark={[620, 712, 824, 919, 1042]} />
+              <KpiTile label="1D CHG" value="$67.42" tone="ink" style="delta" delta={1.84} />
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+        <DCArtboard id="pills" label="Pills · status vocabulary" width={580} height={140}>
+          <ThemeScope theme="obsidian-gold">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: 16, alignItems: "center" }}>
+              <Pill tone="gn" dot>LIVE · 14:23:08</Pill>
+              <Pill tone="rd" small>STALE 4m</Pill>
+              <Pill tone="amb" small>SCAFFOLD</Pill>
+              <Pill tone="ink" small>NO DATA</Pill>
+              <Pill tone="gn">BUY</Pill>
+              <Pill tone="amb">WATCH</Pill>
+              <Pill tone="rd">AVOID</Pill>
+              <Pill tone="copper">SCORE 78</Pill>
+              <Pill tone="cy" small>SMC · OB+BoS</Pill>
+              <Pill tone="violet" small>PATTERNS · FLAG</Pill>
+              <Pill tone="blue" small>VALUE</Pill>
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+        <DCArtboard id="wilson" label="Wilson · honesty surface" width={580} height={140}>
+          <ThemeScope theme="obsidian-gold">
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 16 }}>
+              <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--ink-3)", letterSpacing: "0.14em" }}>HEALTHY SAMPLE</div>
+              <WilsonPill n={47} winRate={0.617} lb={0.477} />
+              <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--ink-3)", letterSpacing: "0.14em", marginTop: 4 }}>BELOW N&lt;30 — FLAGS RED</div>
+              <WilsonPill n={18} winRate={0.611} lb={0.391} />
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+        <DCArtboard id="states" label="Four data states · live · loading · empty · scaffold" width={1180} height={260}>
+          <ThemeScope theme="obsidian-gold">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, padding: 12, height: "100%", boxSizing: "border-box" }}>
+              <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 6, overflow: "hidden" }}>
+                <SectionHeader n={1} title="LIVE" sub="Source: EODHD · 18s old" freshness="live" freshnessAge="18s" style="copper" />
+                <div className="lens-pad">
+                  <KpiTile label="ENTRY" value="$66.18" tone="copper" sub="pivot of base #2" />
+                </div>
+              </div>
+              <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 6, overflow: "hidden" }}>
+                <SectionHeader n={2} title="LOADING" sub="Async fetch in flight" freshness="loading" style="copper" />
+                <StateWrap state="loading" source="EODHD · InsiderTransactions">{null}</StateWrap>
+              </div>
+              <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 6, overflow: "hidden" }}>
+                <SectionHeader n={3} title="EMPTY" sub="Feed exists · ticker has nothing" freshness="empty" style="copper" />
+                <StateWrap state="empty" source="EODHD · InsiderTransactions">{null}</StateWrap>
+              </div>
+              <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 6, overflow: "hidden" }}>
+                <SectionHeader n={4} title="SCAFFOLD" sub="Layout built · feed not wired" freshness="scaffold" style="copper" />
+                <StateWrap state="scaffold" scaffoldOf="EODHD InsiderTransactions">
+                  <div className="lens-pad">
+                    <KpiTile label="13F holders" value="38" tone="ink" sub="placeholder" />
+                  </div>
+                </StateWrap>
+              </div>
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+        <DCArtboard id="xlens" label="Cross-Lens 5-cell confluence strip" width={1180} height={150}>
+          <ThemeScope theme="obsidian-gold">
+            <div style={{ padding: 16 }}>
+              <CrossLens lead="copper" cells={[
+                { lens: "Overview",   verdict: "BUY",    tone: "gn",  note: "score 78 · 4 of 5 pillars green" },
+                { lens: "Technicals", verdict: "PASS",   tone: "gn",  note: "RSI 64 · MACD+ · VWAP-reclaim" },
+                { lens: "Value",      verdict: "MARG.",  tone: "amb", note: "MoS 6% · slight premium" },
+                { lens: "Risk",       verdict: "OK",     tone: "gn",  note: "VaR(1d) −2.1% · half-Kelly 0.42" },
+                { lens: "Earnings",   verdict: "11 d",   tone: "amb", note: "ER in window · cap size" },
+              ]} />
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+      </DCSection>
+
+      {/* ━━━━━━━━━━ SHELL COMPOSITIONS ━━━━━━━━━━ */}
+      <DCSection id="shell" title="Shell · 3-column (E) with focus mode (C)" subtitle="Default = three co-equal columns. Focus mode collapses the scan column to a thin rail — chosen direction for the build.">
+
+        <DCArtboard id="shell-default" label="Default · scan column M" width={1380} height={620}>
+          <ThemeScope theme="obsidian-gold">
+            <div style={{ height: "100%", overflow: "hidden", display: "grid", gridTemplateColumns: "56px 248px 1fr", border: "1px solid var(--line)", borderRadius: 6 }}>
+              <MiniIconRail active="market-map" />
+              <MiniScanColumn surface="buy" widthCat="M" />
+              <MiniDetailColumn />
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+        <DCArtboard id="shell-focus" label="Focus mode · scan rail collapsed" width={1380} height={620}>
+          <ThemeScope theme="obsidian-gold">
+            <div style={{ height: "100%", overflow: "hidden", display: "grid", gridTemplateColumns: "56px 64px 1fr", border: "1px solid var(--line)", borderRadius: 6 }}>
+              <MiniIconRail active="buy" />
+              <MiniScanColumn surface="buy" widthCat="C" collapsed />
+              <MiniDetailColumn focus />
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+
+      </DCSection>
+
+      {/* ━━━━━━━━━━ MARKET MAP ━━━━━━━━━━ */}
+      <DCSection id="map" title="Market Map" subtitle="TradingView-style treemap · sized by market cap · colored by 1D %. Default landing surface.">
+        <DCArtboard id="map-default" label="Market Map · 1D · dark" width={1180} height={520}>
+          <ThemeScope theme="obsidian-gold">
+            <MarketMap onTicker={() => {}} dims={{ w: 1100, h: 380 }} />
+          </ThemeScope>
+        </DCArtboard>
+        <DCArtboard id="map-light" label="Market Map · light theme" width={1180} height={520}>
+          <ThemeScope theme="ivory-editorial">
+            <MarketMap onTicker={() => {}} dims={{ w: 1100, h: 380 }} />
+          </ThemeScope>
+        </DCArtboard>
+      </DCSection>
+
+      {/* ━━━━━━━━━━ LENSES ━━━━━━━━━━ */}
+      <DCSection id="plan" title="Lens · Plan · Ticket" subtitle="Execution-ready ticket · sizing cascade · time-anatomy ribbon · invalidation ladder.">
+        <DCArtboard id="plan-full" label="Plan · full lens (scrollable)" width={1180} height={1000}>
+          <ThemeScope theme="obsidian-gold">
+            <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, height: "100%", overflow: "auto" }}>
+              <LensPlan ticker={TICKER} mode="SWING" sizeCat="XL" headerStyle="copper" kpiStyle="bare" heroStyle="radar" />
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="tech" title="Lens · Technicals" subtitle="10-section discipline view · indicators · pattern matrix · S/R · Wilson · regime edge.">
+        <DCArtboard id="tech-full" label="Technicals · full lens (scrollable)" width={1180} height={1000}>
+          <ThemeScope theme="obsidian-gold">
+            <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, height: "100%", overflow: "auto" }}>
+              <LensTechnicals ticker={TICKER} mode="SWING" sizeCat="XL" headerStyle="copper" kpiStyle="bare" heroStyle="radar" />
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="inv" title="Lens · Investment · Value" subtitle="Value-gap scale · quality scorecard · peer cohort · 5y statements · bull/bear · catalysts.">
+        <DCArtboard id="inv-full" label="Investment · full lens (scrollable)" width={1180} height={1000}>
+          <ThemeScope theme="obsidian-gold">
+            <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, height: "100%", overflow: "auto" }}>
+              <LensInvestment ticker={TICKER} mode="INVESTMENT" sizeCat="XL" headerStyle="copper" kpiStyle="bare" heroStyle="radar" />
+            </div>
+          </ThemeScope>
+        </DCArtboard>
+      </DCSection>
+
+    </DesignCanvas>
+  );
+}
+
+// ─── Mini shell pieces for shell composition mocks ─────────────────
+function MiniIconRail({ active }) {
+  return (
+    <div style={{ background: "var(--bg-1)", borderRight: "1px solid var(--line)", display: "flex", flexDirection: "column", alignItems: "center", padding: 8, gap: 4 }}>
+      <div style={{ width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", borderBottom: "1px solid var(--line)" }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <rect x="2" y="14" width="3" height="8" fill="var(--copper)" />
+          <rect x="7" y="9" width="3" height="13" fill="var(--copper)" />
+          <rect x="12" y="4" width="3" height="18" fill="var(--copper)" />
+        </svg>
+      </div>
+      {["map", "watch", "buy", "elite", "screener", "themes"].map(id => (
+        <div key={id} style={{
+          width: 36, height: 32, borderRadius: 4,
+          background: active === id ? "var(--copper-bg)" : "transparent",
+          border: active === id ? "1px solid var(--copper-dim)" : "1px solid transparent",
+          display: "flex", alignItems: "center", justifyContent: "center"
+        }}>
+          <div style={{ width: 14, height: 14, background: active === id ? "var(--copper)" : "var(--ink-3)", borderRadius: 2, opacity: 0.7 }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MiniScanColumn({ surface, widthCat, collapsed }) {
+  const items = WATCHLIST.filter(w => w.verdict === "BUY").slice(0, 6);
+  return (
+    <div style={{ background: "var(--bg-1)", borderRight: "1px solid var(--line)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      {!collapsed && (
+        <div style={{ padding: 10, borderBottom: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", gap: 4 }}>
+            {["MAP", "BUY", "WATCH", "ELITE"].map(t => (
+              <span key={t} style={{
+                flex: 1, padding: "4px 6px", textAlign: "center",
+                fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.10em",
+                border: "1px solid var(--line)", borderRadius: 4,
+                background: t === "BUY" ? "var(--gn-bg)" : "transparent",
+                color: t === "BUY" ? "var(--gn)" : "var(--ink-3)",
+              }}>{t}</span>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={{ flex: 1, overflow: "hidden" }}>
+        {items.map((it, i) => (
+          collapsed ? (
+            <div key={it.sym} style={{
+              padding: "6px 4px", textAlign: "center",
+              background: i === 0 ? "var(--copper-bg)" : "transparent",
+              borderLeft: i === 0 ? "2px solid var(--copper)" : "2px solid transparent",
+              borderBottom: "1px solid var(--bg-2)",
+            }}>
+              <div style={{ fontFamily: "var(--mono)", fontSize: 10.5, color: i === 0 ? "var(--copper)" : "var(--ink-1)" }}>{it.sym}</div>
+              <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: it.chg >= 0 ? "var(--gn)" : "var(--rd)" }}>
+                {it.chg >= 0 ? "+" : ""}{it.chg.toFixed(1)}
+              </div>
+            </div>
+          ) : (
+            <div key={it.sym} style={{
+              padding: "8px 10px",
+              background: i === 0 ? "var(--copper-bg)" : "transparent",
+              borderLeft: i === 0 ? "2px solid var(--copper)" : "2px solid transparent",
+              borderBottom: "1px solid var(--bg-2)",
+            }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--ink-3)", minWidth: 18 }}>{String(i+1).padStart(2,"0")}</span>
+                <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: i === 0 ? "var(--copper)" : "var(--ink)", fontWeight: 600 }}>{it.sym}</span>
+                <span style={{ marginLeft: "auto", fontFamily: "var(--mono)", fontSize: 10, color: it.chg >= 0 ? "var(--gn)" : "var(--rd)" }}>{it.chg >= 0 ? "+" : ""}{it.chg.toFixed(2)}%</span>
+                <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-1)" }}>{it.score}</span>
+              </div>
+              <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 2 }}>{it.name}</div>
+            </div>
+          )
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MiniDetailColumn({ focus }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg)" }}>
+      <div style={{ padding: 10, borderBottom: "1px solid var(--line)", background: "var(--bg-1)", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--ink)" }}><b>ARCM</b></span>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-3)", marginLeft: 8 }}>Arclight Materials · $4.82B</span>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 16, color: "var(--ink)", marginTop: 2 }}>
+            $67.42 <span style={{ color: "var(--gn)", fontSize: 12 }}>+1.84%</span>
+          </div>
+        </div>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--copper)", padding: "4px 8px", border: "1px solid var(--copper-dim)", borderRadius: 4 }}>
+          {focus ? "EXIT FOCUS" : "◉ FOCUS"}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 6, padding: 8, borderBottom: "1px solid var(--line)", background: "var(--bg-1)" }}>
+        {["OV", "PLAN", "CHRT", "TECH", "PATT", "SMC", "VAL", "RSK"].map((t, i) => (
+          <span key={t} style={{
+            fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.08em",
+            padding: "3px 6px", borderRadius: 3,
+            background: i === 1 ? "var(--copper-bg)" : "transparent",
+            color: i === 1 ? "var(--copper)" : "var(--ink-3)",
+            border: i === 1 ? "1px solid var(--copper-dim)" : "1px solid transparent",
+          }}>{t}</span>
+        ))}
+      </div>
+      <div style={{ flex: 1, overflow: "hidden" }}>
+        <PlanHero ticker={TICKER} mode="SWING" />
+        <div style={{ padding: 14 }}>
+          <SectionHeader n={1} title="ORDER TICKET" sub="STOP LIMIT · OCO" style="copper" />
+          <div style={{ padding: "10px 0", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+            <KpiTile label="ENTRY" value="$66.18" tone="copper" />
+            <KpiTile label="STOP" value="$62.40" tone="rd" sub="−5.7%" />
+            <KpiTile label="T1" value="$72.80" tone="gn" sub="+8.0%" />
+            <KpiTile label="T2" value="$78.20" tone="gn" sub="+16.0%" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+
+</body>
+</html>

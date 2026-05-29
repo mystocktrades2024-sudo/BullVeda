@@ -1,0 +1,315 @@
+// detail-panel.jsx — the resizable, sub-tab-nav right panel
+// Hosts the 14 lens shells (only 3 are fully built: Plan, Technicals, Investment).
+
+const { useState: useStateDP, useEffect: useEffectDP, useRef: useRefDP } = React;
+
+function DetailPanel({
+  ticker, lensId, onLensId,
+  containerWidth = 800,
+  mode,
+  headerStyle, kpiStyle, heroStyle,
+  focusMode, onToggleFocus,
+}) {
+  // resolve panel size category for reflow (driven by actual rendered width)
+  const sizeCat = containerWidth < 540 ? "S" : containerWidth < 760 ? "M" : containerWidth < 1000 ? "L" : "XL";
+
+  return (
+    <section className={`dpanel dpanel--${sizeCat}`}>
+      <DetailHeader ticker={ticker} mode={mode} sizeCat={sizeCat}
+                    focusMode={focusMode} onToggleFocus={onToggleFocus} />
+
+      <DetailTabs lensId={lensId} onLensId={onLensId} sizeCat={sizeCat} />
+
+      <div className="dpanel-body">
+        <DetailLens
+          lensId={lensId}
+          ticker={ticker}
+          mode={mode}
+          sizeCat={sizeCat}
+          headerStyle={headerStyle}
+          kpiStyle={kpiStyle}
+          heroStyle={heroStyle}
+        />
+      </div>
+    </section>
+  );
+}
+
+function DetailHeader({ ticker, mode, sizeCat, focusMode, onToggleFocus }) {
+  return (
+    <div className="dp-hdr">
+      <div className="dp-hdr-row">
+        <div className="dp-hdr-id">
+          <div className="dp-hdr-sym mono"><b>{ticker.symbol}</b></div>
+          <div className="dp-hdr-meta dim2">
+            <span>{ticker.exchange}</span>
+            <span>·</span>
+            <span>{ticker.sector} · {ticker.industry}</span>
+            <span>·</span>
+            <span className="mono">${(ticker.mcap / 1e9).toFixed(2)}B</span>
+          </div>
+        </div>
+        <div className="dp-hdr-actions">
+          <span className={`dp-hdr-mode mono`}>Mode <b className="copper">{mode}</b></span>
+          <button className="btn btn--sm">＋ Watchlist</button>
+          <button
+            className={`btn btn--sm ${focusMode ? "btn--primary" : ""}`}
+            onClick={onToggleFocus}
+            title={focusMode ? "Exit focus mode (show scan list)" : "Focus mode (collapse scan list)"}
+          >
+            {focusMode ? "◀ Exit Focus" : "◉ Focus"}
+          </button>
+        </div>
+      </div>
+      <div className="dp-hdr-row dp-hdr-quote">
+        <div className="dp-quote-price mono"><b>${ticker.price.toFixed(2)}</b></div>
+        <div className={`dp-quote-chg mono ${ticker.chg >= 0 ? "up" : "dn"}`}>
+          {ticker.chg >= 0 ? "+" : ""}{ticker.chgAbs.toFixed(2)} ({ticker.chg.toFixed(2)}%)
+        </div>
+        <div className="dp-quote-extra mono dim">
+          <span>VOL <b className="dim2">{(ticker.vol/1e6).toFixed(2)}M</b></span>
+          <span>· AVG <b className="dim2">{(ticker.avgVol/1e6).toFixed(2)}M</b></span>
+          <span>· RSI <b className="dim2">{ticker.rsi.toFixed(1)}</b></span>
+          <span>· β <b className="dim2">{ticker.beta.toFixed(2)}</b></span>
+        </div>
+        <div className="dp-hdr-spacer" />
+        <Pill tone="gn" small dot>LIVE · 14:23:08 ET</Pill>
+        <Pill tone="copper" small>{ticker.verdict} · {ticker.score}</Pill>
+      </div>
+    </div>
+  );
+}
+
+function DetailTabs({ lensId, onLensId, sizeCat }) {
+  return (
+    <div className="dp-tabs">
+      <div className="dp-tabs-scroll">
+        {LENSES.map((l, i) => {
+          const active = lensId === l.id;
+          return (
+            <button
+              key={l.id}
+              className={`dp-tab dp-tab--${l.accent} ${active ? "is-on" : ""}`}
+              onClick={() => onLensId(l.id)}
+              title={l.q}
+            >
+              <span className="dp-tab-icon">{LENS_ICONS[l.id]}</span>
+              <span className="dp-tab-num mono">{String(i + 1).padStart(2, "0")}</span>
+              <span className="dp-tab-label">{l.label.replace(/ · .*/, "")}</span>
+              <span className={`dp-tab-dot dp-tab-dot--${l.verdict}`} title={`verdict ${l.verdict}`} />
+              <span className="dp-tab-kbd kbd">{l.kbd}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DetailLens({ lensId, ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
+  const props = { ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle };
+  if (lensId === "plan")       return <LensPlan       {...props} />;
+  if (lensId === "technicals") return <LensTechnicals {...props} />;
+  if (lensId === "investment") return <LensInvestment {...props} />;
+  if (lensId === "overview")   return <LensOverview   {...props} />;
+  if (lensId === "chart")      return <LensChart      {...props} />;
+  if (lensId === "patterns")   return <LensPatterns   {...props} />;
+  if (lensId === "smc")        return <LensSMC        {...props} />;
+  if (lensId === "risk")       return <LensRisk       {...props} />;
+  if (lensId === "earnings")   return <LensEarnings   {...props} />;
+  if (lensId === "options")    return <LensOptions    {...props} />;
+  if (lensId === "portfolio")  return <LensPortfolio  {...props} />;
+  if (lensId === "tape")       return <LensTape       {...props} />;
+  if (lensId === "track")      return <LensTrack      {...props} />;
+  if (lensId === "mledge")     return <LensML         {...props} />;
+  return <LensStub lensId={lensId} />;
+}
+
+function LensStub({ lensId }) {
+  const lens = LENSES.find(l => l.id === lensId);
+  return (
+    <div className="lens-stub">
+      <div className="lens-stub-card">
+        <div className="label-cap">Lens</div>
+        <h2 className="mono">{lens?.label}</h2>
+        <div className="mono dim2">{lens?.q}</div>
+        <div className="state-banner" style={{ margin: 0, marginTop: 16 }}>
+          <span className="state-banner-icon">⚠</span>
+          <span>
+            <b>Partial scaffolding</b> — lens shell reachable, content not built in this prototype.
+            <br />
+            Built lenses: <b>Overview · Plan · Ticket · Technicals · Investment · Value</b>.
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──── Overview lens (compact — relies on hero + cross-lens) ──────────
+function LensOverview({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
+  const state = useStateToggle("ov-state", "live");
+  return (
+    <div className="lens">
+      <VerdictHero ticker={ticker} mode={mode} heroStyle={heroStyle} sizeCat={sizeCat} />
+
+      <div className="lens-section">
+        <SectionHeader n={1} title="Trigger · Invalidate · Sizing"
+          sub={`Source: scan output · ${ticker.setupFamily}`}
+          style={headerStyle}
+          right={<StateToggle name="ov-state" />}
+        />
+        <StateWrap state={state.value} source="scan output · last_bundle.json">
+          <div className="lens-pad">
+            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+              <KpiTile label="Trigger" value={`>$${ticker.pivot.toFixed(2)}`} tone="copper" sub="pivot of base #2" style={kpiStyle} />
+              <KpiTile label="Stop" value={`$${ticker.stop.toFixed(2)}`} tone="rd" sub="−5.7% from entry" style={kpiStyle} />
+              <KpiTile label="T1 / T2" value={`$${ticker.t1.toFixed(0)} · $${ticker.t2.toFixed(0)}`} tone="gn" sub="+8.0% · +16.0%" style={kpiStyle} />
+              <KpiTile label="R-mult" value={ticker.rMultiple.toFixed(2)} unit="R" tone="copper" sub="risk-adjusted" style={kpiStyle}
+                       delta={null} />
+            </div>
+          </div>
+        </StateWrap>
+      </div>
+
+      <div className="lens-section">
+        <SectionHeader n={2} title="Cross-Lens Confluence"
+          sub="How the other disciplines see ARCM right now"
+          style={headerStyle}
+        />
+        <div className="lens-pad">
+          <CrossLens
+            lead="copper"
+            cells={[
+              { lens: "Overview",  verdict: "BUY",   tone: "gn", note: `score ${ticker.score} · 4 of 5 pillars green` },
+              { lens: "Technicals",verdict: "PASS",  tone: "gn", note: "RSI 64 · MACD+ · VWAP-reclaim" },
+              { lens: "Value",     verdict: "MARG.", tone: "amb",note: "MoS 6% · slight premium" },
+              { lens: "Risk",      verdict: "OK",    tone: "gn", note: "VaR(1d) −2.1% · half-Kelly 0.42" },
+              { lens: "Earnings",  verdict: "11 d",  tone: "amb",note: "ER in window · cap size" },
+            ]}
+          />
+        </div>
+      </div>
+
+      <div className="lens-section">
+        <SectionHeader n={3} title="Pre-Mortem"
+          sub="What would make this thesis wrong?"
+          style={headerStyle}
+        />
+        <div className="lens-pad">
+          <div className="premortem">
+            <div className="premortem-row">
+              <span className="pm-num mono">1</span>
+              <span className="pm-text">Loses VWAP intraday AND closes below $65.10 — invalidation cascade.</span>
+              <Pill tone="rd" small>HARD</Pill>
+            </div>
+            <div className="premortem-row">
+              <span className="pm-num mono">2</span>
+              <span className="pm-text">Sector ETF (XLB) breaks 50-DMA on +1.5σ volume — regime flip.</span>
+              <Pill tone="amb" small>MEDIUM</Pill>
+            </div>
+            <div className="premortem-row">
+              <span className="pm-num mono">3</span>
+              <span className="pm-text">CPI prints &gt;0.4% MoM next Wed — risk-off reset.</span>
+              <Pill tone="amb" small>MACRO</Pill>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="lens-call">
+        <span className="label-cap">The Call · {mode}</span>
+        <span className="mono">
+          Take the breakout above <b className="copper">${ticker.pivot.toFixed(2)}</b>,
+          half-Kelly size · {(ticker.setupStats.winRate*100).toFixed(0)}% historical · n={ticker.setupStats.n}.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Hero ────────────────────────────────────────────────────────────
+function VerdictHero({ ticker, mode, heroStyle, sizeCat }) {
+  // heroStyle: 'radar' | 'gauge' | 'cone'
+  return (
+    <div className="hero">
+      <div className="hero-left">
+        <div className="hero-verdict-block">
+          <div className="label-cap">Master verdict · {mode}</div>
+          <div className="hero-verdict">
+            <span className="hero-verdict-tag">{ticker.verdict}</span>
+            <span className="hero-verdict-score mono">{ticker.score}<span className="hero-score-unit">/100</span></span>
+          </div>
+          <div className="hero-verdict-line mono dim2">
+            {ticker.setupFamily} · hold ~{ticker.holdDays}d · target {ticker.rMultiple.toFixed(1)}R
+          </div>
+        </div>
+
+        <div className="hero-pillars">
+          {Object.entries(ticker.pillars).map(([k, v]) => (
+            <div key={k} className="hero-pill-row">
+              <span className="label-cap">{k}</span>
+              <div className="hero-pill-bar">
+                <div
+                  className="hero-pill-fill"
+                  style={{ width: `${v}%`, background: v >= 70 ? "var(--gn)" : v >= 50 ? "var(--amb)" : "var(--rd)" }}
+                />
+              </div>
+              <span className="mono tabular">{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="hero-right">
+        {heroStyle === "gauge" && <Gauge value={ticker.score} label="OVERALL SCORE" size={sizeCat === "S" ? 110 : 150} />}
+        {heroStyle === "radar" && <Radar pillars={ticker.pillars} size={sizeCat === "S" ? 150 : 200} />}
+        {heroStyle === "cone" && (
+          <div className="hero-cone-wrap">
+            <div className="label-cap" style={{ marginBottom: 6 }}>10D implied cone · σ ±{ticker.ml.magnitude.hi.toFixed(0)}%</div>
+            <Cone lo={ticker.ml.magnitude.lo} mid={ticker.ml.magnitude.mid} hi={ticker.ml.magnitude.hi} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// State toggle helper — tiny hook + UI
+const __stateStore = {};
+function useStateToggle(key, initial = "live") {
+  const [v, setV] = useStateDP(() => __stateStore[key] || initial);
+  useEffectDP(() => {
+    const handler = (e) => { if (e.detail.key === key) setV(e.detail.value); };
+    window.addEventListener("state-toggle", handler);
+    return () => window.removeEventListener("state-toggle", handler);
+  }, [key]);
+  return { value: v };
+}
+
+function StateToggle({ name }) {
+  const [v, setV] = useStateDP(() => __stateStore[name] || "live");
+  const set = (val) => {
+    __stateStore[name] = val;
+    setV(val);
+    window.dispatchEvent(new CustomEvent("state-toggle", { detail: { key: name, value: val }}));
+  };
+  return (
+    <div className="state-toggle" title="Cycle the 4 data states for this section">
+      {[
+        { v: "live",     label: "Live",   tone: "gn" },
+        { v: "loading",  label: "···",    tone: "ink" },
+        { v: "empty",    label: "Empty",  tone: "ink" },
+        { v: "scaffold", label: "Scaf",   tone: "amb" },
+      ].map(opt => (
+        <button
+          key={opt.v}
+          className={`st-btn ${v === opt.v ? `is-on st-${opt.tone}` : ""}`}
+          onClick={() => set(opt.v)}
+        >{opt.label}</button>
+      ))}
+    </div>
+  );
+}
+
+Object.assign(window, { DetailPanel, useStateToggle, StateToggle, VerdictHero });
