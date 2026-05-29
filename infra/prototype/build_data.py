@@ -4369,6 +4369,14 @@ def main():
     for t in _killed_by_t:
         if t and t not in _seen:
             _seen.add(t); _ordered_targets.append(t)
+    # 2026-05-28: include the FULL all_scored universe so EVERY ranked ticker
+    # (~1,840 across S&P500 + R1000 + R2000) appears in the Signal Scanner —
+    # not just short/medium/long/screener/killed (~397). Deep detail is built
+    # for the enriched top tier; the rest carry their scan score/verdict/
+    # technicals and fall back to on-demand /api/analyze when clicked.
+    for t in _all_scored_by_t:
+        if t and t not in _seen:
+            _seen.add(t); _ordered_targets.append(t)
 
     all_rich = {}
     _rich_failures: list[tuple[str, str]] = []

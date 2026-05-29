@@ -16685,10 +16685,13 @@ const QuantHome = (function() {
         <div class="qcdc-r"><span class="qcdc-score rd">${_fmtInt(k.elite_score)||'—'}</span><span class="qcdc-rr">killed</span></div>
         <button class="qcdc-act rd" onclick="event.stopPropagation();window.setDetailTicker&&window.setDetailTicker('${k.ticker}')">WHY?</button>
       </div>`;
-    }).join('') : `<div class="qcdc-empty">No recent kills<br><span style="color:var(--ink-2)">Wilson gate quiet</span></div>`;
+    }).join('') : `<div class="qcdc-empty">0 new kills today<br><span style="color:var(--ink-2)">Wilson gate quiet · ${killed} on cumulative list</span></div>`;
+    // KD-011 · lead with today's status, de-emphasize the cumulative count.
+    // The big "112" implies live danger; the message says nothing fired today.
+    const killedNewToday = recent.length;
     document.getElementById('qc-avoid').innerHTML = `
-      <div class="qc-card-h"><span class="qc-card-h-l"><span class="icon">▼</span>AVOID</span><span class="qc-card-h-r">${killed} on kill list</span></div>
-      <div class="qc-avoid-kpi"><div class="v">${killed}</div><div class="lbl">Tickers on Kill List · Wilson-gated</div></div>
+      <div class="qc-card-h" title="Tickers that failed at least one hard gate. The system won't generate BUY signals for these. ${killed} is the cumulative list, not today's events."><span class="qc-card-h-l"><span class="icon">▼</span>KILL LIST</span><span class="qc-card-h-r">${killed} total · ${killedNewToday} new today</span></div>
+      <div class="qc-avoid-kpi" title="Tickers that failed at least one hard gate. The system won't generate BUY signals for these. ${killed} is the cumulative list, not today's events."><div class="v" style="font-size:18px">${killedNewToday} <span style="font-size:11px;color:var(--ink-3);font-weight:600">new today</span></div><div class="lbl">${killed} cumulative · Wilson-gated · won't BUY these</div></div>
       ${avoidRows}
       <div class="qcdc-cta rd"><span>No entries · capital preserved</span><a onclick="(window.MarketsV2||{}).activate&&MarketsV2.activate('killed')">VIEW ALL →</a></div>
     `;
@@ -16916,7 +16919,7 @@ const QuantHome = (function() {
     wrap.innerHTML = `<div class="qctt">
       <div class="qctt-logo">${tkr.slice(0,2)}</div>
       <div class="qctt-main">
-        <div class="qctt-eyebrow">TODAY'S #1 TRADE · ${setup.toUpperCase()}${incomplete ? ' · <span style="color:var(--amb)">PLAN INCOMPLETE</span>' : ''}</div>
+        <div class="qctt-eyebrow">TODAY'S #1 TRADE · ${setup.toUpperCase()}${incomplete ? ` · <span style="color:var(--amb)" title="Stop/T1 not carried in this summary snapshot — full entry/stop/targets load when you open the ticket. This is not a missing strategy.">PLAN NUMBERS PENDING · OPEN TICKET</span>` : ''}</div>
         <div class="qctt-line">
           <span>${tkr}</span>
           <span class="verdict ${verdictCls}">BUY ${sc|0}</span>
@@ -16991,10 +16994,14 @@ const QuantHome = (function() {
     });
     const pnlCls = dayPnL >= 0 ? 'gn' : 'rd';
     const eqStr = equity >= 1000 ? '$' + (equity/1000).toFixed(1) + 'K' : '$' + equity.toFixed(0);
+    // KD-012 · every P&L figure is from the PAPER account (automation is paper-only
+    // per project memory feedback_paper_only_automation.md). Label the source so
+    // the +$ open P&L can't be read as live money.
+    const _paperBadge = `<span title="Alpaca paper account — not live money. All P&L is simulated." style="font:800 8px var(--mono);letter-spacing:.10em;color:var(--amb);background:var(--amb-bg,rgba(255,185,92,0.10));border:1px solid var(--amb-dim,#92400e);border-radius:2px;padding:1px 4px;margin-left:5px;vertical-align:middle">PAPER</span>`;
     wrap.innerHTML = `<div class="qcmp">
-      <div class="qcmp-cell"><span class="qcmp-k">My Equity</span><span class="qcmp-v">${eqStr}</span><span class="qcmp-s">paper account</span></div>
-      <div class="qcmp-cell"><span class="qcmp-k">Today's P&L</span><span class="qcmp-v ${pnlCls}">${dayPnL>=0?'+':''}$${Math.abs(dayPnL).toFixed(0)}</span><span class="qcmp-s ${pnlCls}">${dayPnLPct>=0?'+':''}${dayPnLPct.toFixed(2)}%</span></div>
-      <div class="qcmp-cell"><span class="qcmp-k">Open Positions</span><span class="qcmp-v cy">${positions.length}</span><span class="qcmp-s">unrealized <b class="${totalUnrealized>=0?'gn':'rd'}" style="color:${totalUnrealized>=0?'var(--gn)':'var(--rd)'}">${totalUnrealized>=0?'+':''}$${Math.abs(totalUnrealized).toFixed(0)}</b></span></div>
+      <div class="qcmp-cell"><span class="qcmp-k">My Equity${_paperBadge}</span><span class="qcmp-v">${eqStr}</span><span class="qcmp-s">paper account</span></div>
+      <div class="qcmp-cell"><span class="qcmp-k">Today's P&L${_paperBadge}</span><span class="qcmp-v ${pnlCls}">${dayPnL>=0?'+':''}$${Math.abs(dayPnL).toFixed(0)}</span><span class="qcmp-s ${pnlCls}">${dayPnLPct>=0?'+':''}${dayPnLPct.toFixed(2)}% · paper</span></div>
+      <div class="qcmp-cell"><span class="qcmp-k">Open Positions</span><span class="qcmp-v cy">${positions.length}</span><span class="qcmp-s">unrealized <b class="${totalUnrealized>=0?'gn':'rd'}" style="color:${totalUnrealized>=0?'var(--gn)':'var(--rd)'}">${totalUnrealized>=0?'+':''}$${Math.abs(totalUnrealized).toFixed(0)}</b> · paper</span></div>
       <div class="qcmp-cell"><span class="qcmp-k">Cash</span><span class="qcmp-v ${cashPct>=70?'am':'gn'}">${cashPct.toFixed(0)}%</span><span class="qcmp-s">$${(cash/1000).toFixed(1)}K dry</span></div>
       <div class="qcmp-cell"><span class="qcmp-k">Top Winner</span><span class="qcmp-v gn">${best?best.ticker:'—'}</span><span class="qcmp-s">${best?(+best.unrealized_pnl_pct>=0?'+':'')+(+best.unrealized_pnl_pct||0).toFixed(1)+'%':'no positions'}</span></div>
       <div class="qcmp-cell"><span class="qcmp-k">Top Loser</span><span class="qcmp-v ${worst&&+worst.unrealized_pnl_pct<0?'rd':'gn'}">${worst?worst.ticker:'—'}</span><span class="qcmp-s">${worst?(+worst.unrealized_pnl_pct>=0?'+':'')+(+worst.unrealized_pnl_pct||0).toFixed(1)+'%':''}</span></div>
@@ -17195,18 +17202,35 @@ const QuantHome = (function() {
       if (Array.isArray(stored) && stored.length) watch = buildRows(stored);
     } catch(e) {}
     const watchIsUserSet = watch.length > 0;
+    // KD-012 · a $0.00 / +0.00% row means different things: the ticker isn't in
+    // today's scan pool (no quote joined) vs the quote genuinely loaded as 0.
+    // We tag each row so the user can tell stale/unmatched from a real quote.
+    const _wlScanTs = (data && data.run_timestamp || '').slice(11, 16);
+    const _wlMarketHours = (() => {
+      try {
+        const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const d = et.getDay(); const mins = et.getHours() * 60 + et.getMinutes();
+        return d >= 1 && d <= 5 && mins >= 570 && mins < 960; // 9:30–16:00 ET, Mon–Fri
+      } catch (_) { return false; }
+    })();
     const watchRows = watch.length ? watch.map(w => {
       const tkr = w.ticker;
       const px = +w.price || 0;
       const chg = +w.chg_pct || +w.perf_1d || 0;
+      const inScan = byTkr[tkr] != null; // joined to today's scored universe?
+      const noQuote = !(px > 0);
+      // Distinguish "not in scan pool" from "market closed / quote stale".
+      const qNote = noQuote
+        ? (inScan ? (_wlMarketHours ? 'quote stale' : 'market closed') : 'not in today’s scan pool')
+        : '';
       const state = (w.state || w.verdict || w.decision || (chg >= 1 ? 'TRIGGER' : chg <= -2 ? 'WAIT' : 'MONITOR')).toString().slice(0,8);
       const sCls = /BUY|TRIGGER|FRESH/i.test(state) ? 'gn' : /AVOID|KILL/i.test(state) ? 'rd' : /WATCH|WAIT/i.test(state) ? 'am' : 'cy';
-      return `<div class="qcwl-row" onclick="window.setDetailTicker&&window.setDetailTicker('${tkr}')">
+      return `<div class="qcwl-row" title="${noQuote ? 'No live quote — ' + qNote : 'Last quote from scan ' + (_wlScanTs || '—')}" onclick="window.setDetailTicker&&window.setDetailTicker('${tkr}')">
         <div class="qcwl-logo">${tkr.slice(0,2)}</div>
         <div class="qcwl-tkr">${tkr}</div>
-        <div class="qcwl-px">$${px.toFixed(2)}</div>
-        <div class="qcwl-chg ${chg>=0?'gn':'rd'}">${chg>=0?'+':''}${chg.toFixed(2)}%</div>
-        <div class="qcwl-state ${sCls}">${state}</div>
+        <div class="qcwl-px">${noQuote ? '<span style="color:var(--ink-3)">$0.00</span>' : '$' + px.toFixed(2)}</div>
+        <div class="qcwl-chg ${noQuote ? '' : (chg>=0?'gn':'rd')}">${noQuote ? '<span style="color:var(--ink-3)">—</span>' : (chg>=0?'+':'') + chg.toFixed(2) + '%'}</div>
+        <div class="qcwl-state ${noQuote ? 'am' : sCls}" title="${noQuote ? qNote : state}">${noQuote ? (inScan ? 'STALE' : 'NO QUOTE') : state}</div>
       </div>`;
     }).join('') : `<div class="qcwl-empty">No watchlist yet<br><a onclick="window._kairosAddWatchlist&&window._kairosAddWatchlist()" style="color:var(--copper);cursor:pointer;font-weight:700">+ add your first ticker</a></div>`;
     // Global watchlist add/remove handlers — write to SAME localStorage key
@@ -17309,7 +17333,10 @@ const QuantHome = (function() {
     const dashLen = hasMood ? (mood/100)*283 : 0;
     wrap.innerHTML = `<div class="qcwm">
       <div class="qcwl">
-        <div class="qcwl-h"><span>★ My Watchlist</span><span class="add" onclick="window._kairosAddWatchlist&&window._kairosAddWatchlist()">+ ADD TICKER</span></div>
+        <div class="qcwl-h" title="Quotes joined from the latest scan (${_wlScanTs || 'no scan time'}). $0.00 = ticker not in today's scan pool or quote stale (see each row).">
+          <span>★ My Watchlist${_wlScanTs ? ` <span style="color:var(--ink-3);font-weight:500;letter-spacing:0">· quotes @ ${_wlScanTs}</span>` : ''}</span>
+          <span class="add" onclick="window._kairosAddWatchlist&&window._kairosAddWatchlist()">+ ADD TICKER</span>
+        </div>
         ${watchRows}
       </div>
       ${(function _renderRichMood(){
@@ -17360,11 +17387,18 @@ const QuantHome = (function() {
           mood >= 45 ? `<b>Cautious.</b> Mixed signals — pick spots, normal sizing.` :
           mood >= 30 ? `<b>Fear in the tape.</b> Reduce size; wait for confirmation.` :
           `<b>Extreme fear.</b> Capital preservation mode — cash + defensive ETFs.`;
+        // KD-008/010 · per-metric definitions for tooltips + source label.
+        // The mood composite is built ONLY from the components that loaded
+        // (weights.length guard above), so a null input is held OUT, not
+        // counted as 0. We surface that explicitly below.
+        const _moodInputsTotal = 3;
+        const _moodInputsLive = [vS, brS, pS].filter(v => v != null).length;
+        const _moodExcluded = _moodInputsTotal - _moodInputsLive;
         // Top driver (component furthest from neutral 50)
         const compRows = [
-          { k: 'VIX',     val: vix,     score: moodComp.vix,     sub: (vix == null ? 'feed unavailable' : vix >= 25 ? '<b>elevated</b> · panic risk' : vix >= 18 ? '<b>above median</b> · choppy' : vix >= 13 ? '<b>median</b> · normal' : '<b>low vol</b> · complacent'), fmt: (v) => v == null ? '—' : v.toFixed(1) },
-          { k: 'BREADTH', val: breadth, score: moodComp.breadth, sub: (breadth == null ? 'feed unavailable' : breadth >= 65 ? '<b>broad rally</b> · risk-on' : breadth >= 50 ? '<b>above median</b> · constructive' : breadth >= 40 ? '<b>below median</b> · narrow' : '<b>weak breadth</b> · risk-off'), fmt: (v) => v == null ? '—' : v.toFixed(0) + '%' },
-          { k: 'P/C',     val: pc,      score: moodComp.pc,      sub: (pc == null ? 'feed unavailable' : pc >= 1.0 ? '<b>bearish bets</b> dominate' : pc >= 0.85 ? '<b>neutral</b> sentiment' : '<b>bullish bets</b> dominate'), fmt: (v) => v == null ? '—' : v.toFixed(2) },
+          { k: 'VIX',     val: vix,     score: moodComp.vix,     def: 'VIX = CBOE volatility index · expected 30d S&P move', sub: (vix == null ? 'feed unavailable · held out of mood score' : vix >= 25 ? '<b>elevated</b> · panic risk' : vix >= 18 ? '<b>above median</b> · choppy' : vix >= 13 ? '<b>median</b> · normal' : '<b>low vol</b> · complacent'), fmt: (v) => v == null ? '—' : v.toFixed(1) },
+          { k: 'BREADTH', val: breadth, score: moodComp.breadth, def: 'BREADTH = % of S&P names above their 50-day MA (source: SPY 50d breadth)', sub: (breadth == null ? 'feed unavailable · held out of mood score' : breadth >= 65 ? '<b>broad rally</b> · risk-on' : breadth >= 50 ? '<b>above median</b> · constructive' : breadth >= 40 ? '<b>below median</b> · narrow' : '<b>weak breadth</b> · risk-off'), fmt: (v) => v == null ? '—' : v.toFixed(0) + '%' },
+          { k: 'P/C',     val: pc,      score: moodComp.pc,      def: 'P/C = Put/Call ratio · options-market sentiment (>1 bearish, <0.85 bullish)', sub: (pc == null ? 'feed unavailable · held out of mood score' : pc >= 1.0 ? '<b>bearish bets</b> dominate' : pc >= 0.85 ? '<b>neutral</b> sentiment' : '<b>bullish bets</b> dominate'), fmt: (v) => v == null ? '—' : v.toFixed(2) },
         ];
         const _scoreCls = (s) => s == null ? 'gr' : s >= 60 ? 'gn' : s >= 45 ? 'cy' : s >= 30 ? 'am' : 'rd';
         const driverCandidates = compRows.filter(c => c.score != null).map(c => ({ ...c, distance: Math.abs(c.score - 50) }));
@@ -17419,12 +17453,13 @@ const QuantHome = (function() {
             </div>
             <div class="qcmm-right">
               ${compRows.map(c => `
-                <div class="qcmm-comp-row">
-                  <div class="ch"><span class="k">${c.k}</span><span class="v ${_scoreCls(c.score)}">${c.fmt(c.val)}</span></div>
+                <div class="qcmm-comp-row" title="${c.def || c.k}">
+                  <div class="ch"><span class="k" title="${c.def || c.k}" style="cursor:help;border-bottom:1px dotted var(--ink-3)">${c.k}</span><span class="v ${_scoreCls(c.score)}">${c.fmt(c.val)}</span></div>
                   <div class="qcmm-bar"><div class="qcmm-bar-fill" style="width:${c.score!=null?c.score:0}%"></div>${c.score!=null?`<div class="qcmm-bar-needle" style="left:calc(${c.score}% - 1px)"></div>`:''}</div>
                   <div class="qcmm-comp-sub">${c.sub}</div>
                 </div>
               `).join('')}
+              <div class="qcmm-comp-sub" style="margin:2px 0 6px;color:var(--ink-3)" title="The 62/100 mood composite is a weighted blend of only the inputs that loaded; null feeds are held out (not counted as 0).">${_moodExcluded === 0 ? 'Mood score uses all 3 inputs (VIX 45% · breadth 45% · P/C 10%)' : `Mood score excludes ${_moodExcluded} unavailable input${_moodExcluded===1?'':'s'} · computed on ${_moodInputsLive}/${_moodInputsTotal} feeds`}</div>
               <div class="qcmm-driver"><span class="k">▦ DRIVER</span>${driverTxt}<br><span class="k">▦ ACTION</span>${actionTxt}</div>
             </div>
           </div>
@@ -18580,6 +18615,11 @@ const QuantHome = (function() {
     // ── Derive REAL fires from tickers + verdicts (and live counts if exposed) ──
     const liveCounts = (data && data.sleeve_counts) || {};
     const tickers = Array.isArray(window._kairosTickersArr) ? window._kairosTickersArr : [];
+    // KD-009 · a 0 means different things: scan ran + found nothing vs feed never
+    // populated. We have real data if EITHER sleeve_counts is present OR the
+    // scored-ticker array loaded. If neither, the sleeve scan didn't run.
+    const _sleeveScanRan = (data && data.sleeve_counts != null) || tickers.length > 0;
+    const _sleeveScanTs = (data && data.run_timestamp || '').slice(11, 16);
     const detectFires = (sleeveName) => {
       const n = sleeveName.toLowerCase();
       const isBuyOrWatch = t => /BUY|WATCH/i.test(t.verdict || t.decision || '');
@@ -18622,13 +18662,26 @@ const QuantHome = (function() {
         s._live = true;
       }
     });
-    wrap.innerHTML = showing.map(s => `
-      <div class="qcs ${s.status}" onclick="document.querySelector('.sb-link[data-tab=strategies]')?.click()" title="${s._live ? 'live tracker stats' : 'backtest reference · live stats pending'}">
+    wrap.innerHTML = showing.map(s => {
+      // KD-009 · disambiguate a 0: scan ran (real "no signals today") vs feed
+      // error (count couldn't be derived because nothing loaded).
+      const fireCtx = s.fires > 0
+        ? `${s.fires} firing${_sleeveScanTs ? ' · ' + _sleeveScanTs : ''}`
+        : (_sleeveScanRan
+            ? `0 · no signals today${_sleeveScanTs ? ' · scan ' + _sleeveScanTs : ''}`
+            : '— · feed error · scan not loaded');
+      const countCls = s.fires > 0 ? (s.status === 'hot' ? 'gn' : s.status === 'warm' ? 'am' : '')
+                                    : (_sleeveScanRan ? '' : 'am');
+      const countDisp = (s.fires === 0 && !_sleeveScanRan) ? '—' : s.fires;
+      return `
+      <div class="qcs ${s.status}" onclick="document.querySelector('.sb-link[data-tab=strategies]')?.click()" title="${s._live ? 'live tracker stats' : 'backtest reference · live stats pending'} · ${fireCtx}">
         <span class="qcs-pulse"></span>
-        <div class="qcs-head"><span class="qcs-name">${s.icon} ${s.name}</span><span class="qcs-count ${s.status==='hot'?'gn':s.status==='warm'?'am':''}">${s.fires}</span></div>
+        <div class="qcs-head"><span class="qcs-name">${s.icon} ${s.name}</span><span class="qcs-count ${countCls}">${countDisp}</span></div>
         <div class="qcs-meta">WR <b>${s.wr ? s.wr + '%' : '—'}</b> · PF <b>${s.pf ? s.pf.toFixed(1) : '—'}</b>${s._live ? '' : ' <span style="color:var(--ink-3);font-weight:500">· bt</span>'}</div>
+        <div class="qcs-meta" style="margin-top:2px;color:var(--ink-3)">${fireCtx}</div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   // 2026-05-16 · Risk surface row on Home
@@ -28136,6 +28189,22 @@ body.light .qss-tbl tbody tr.sel { background: var(--copper-bg); }
     const score = Math.round(t.score || 0);
     const verd = (t.verdict || 'WATCH').toUpperCase();
     const tier = t.conviction_tier || 'WATCH';
+    // KD-004 · regime-aware BUY threshold so "score X → WATCH" is explained on the card.
+    // Pull the live buy_min_score from the regime payload (same source as the title bar);
+    // fall back to per-regime defaults when the config block isn't present.
+    const _reg = (_state.data && _state.data.regime) || {};
+    const _r4 = _reg.regime4 || 'unknown';
+    const _rt = (_reg.regime4_thresholds && _reg.regime4_thresholds[_r4]) || null;
+    const _buyMin = (_rt && _rt.buy_min_score != null) ? _rt.buy_min_score
+                  : (_reg.buy_min_score != null) ? _reg.buy_min_score
+                  : (_r4 === 'risk_on_trending' ? 65 : _r4 === 'risk_on_choppy' ? 72 : 78);
+    const _regLbl = _r4.replace(/_/g, ' ');
+    const _clears = score >= _buyMin;
+    // Why a clearing score still shows WATCH/non-BUY: a gate blocked it or it was tier-demoted.
+    const _whyNotBuy = (_clears && verd !== 'BUY')
+      ? (t.reject_reason ? 'gate-blocked: ' + t.reject_reason : 'gate-blocked or tier-demoted')
+      : (!_clears ? 'below BUY threshold' : '');
+    const _scoreTip = `Composite Score ${score}/100\nBUY threshold (${_regLbl}): ${_buyMin}\n${_clears ? 'score ' + score + ' ≥ ' + _buyMin + ' → clears the score floor' : 'score ' + score + ' < ' + _buyMin + ' → below floor → WATCH'}${_clears && verd !== 'BUY' ? '\nverdict ' + verd + ' — ' + _whyNotBuy : ''}\nThreshold is regime-dependent; it rises in choppy/risk-off regimes.`;
     const setup = t.setup_family || '—';
     const eq = (t.entry_quality || '').toUpperCase() || '—';
     const cat = t.catalyst_tier != null ? 'T'+t.catalyst_tier : '—';
@@ -28179,8 +28248,8 @@ body.light .qss-tbl tbody tr.sel { background: var(--copper-bg); }
       <td class="l dim" style="font-size:11px">${_esc(t.sector || '—')}</td>
       <td>${_tfsnCell(t)}</td>
       <td class="l">${_mechCell(t)}</td>
-      <td><span class="qss-score"><span class="fill" style="width:${score}%;background:${_scoreColor(score)}"></span><span class="lbl">${score}</span></span></td>
-      <td><span class="qss-verd ${verd}">${verd}</span></td>
+      <td title="${_esc(_scoreTip)}"><span class="qss-score"><span class="fill" style="width:${score}%;background:${_scoreColor(score)}"></span><span class="lbl">${score}</span></span><span style="display:block;font-size:8.5px;letter-spacing:.02em;margin-top:1px;color:${_clears ? 'var(--gn)' : 'var(--ink-3)'}">${_clears ? '≥' : '<'}${_buyMin} BUY${_clears && verd !== 'BUY' ? ' · ' + _esc(verd === 'WATCH' ? 'WATCH (gated)' : verd) : ''}</span></td>
+      <td title="${_esc('BUY threshold (' + _regLbl + '): ' + _buyMin + ' · this score: ' + score + ' → ' + (verd === 'BUY' ? 'BUY' : verd + (_clears ? ' (gate-blocked or tier-demoted)' : ' (below threshold)')))}"><span class="qss-verd ${verd}">${verd}</span></td>
       <td class="l"><span class="qss-tier ${tier}">${_esc(tier)}</span></td>
       <td class="l"><span class="qss-setup" title="${_esc(setup)}">${_esc(setup.length > 16 ? setup.slice(0,16)+'…' : setup)}</span></td>
       <td class="l">${eq === '—' ? '<span class="dim">—</span>' : `<span class="qss-eq ${eq}">${eq}</span>`}</td>
@@ -34121,17 +34190,32 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
     const buyN = lenses.filter(l=>l.vote==='BULLISH' || l.vote==='STANDARD').length;
     const watchN = lenses.filter(l=>l.vote==='WATCH' || l.vote==='SIZE-CAP' || l.vote==='HELD').length;
     const shortN = lenses.filter(l=>l.vote==='SHORT' || l.vote==='BEARISH' || l.vote==='TIGHT').length;
+    // KD-006 · the composite verdict is NOT a raw lens tally — it comes from the engine's
+    // pillar-weighted Composite Score + gates. Surface that so "2 BULL / 4 WATCH → BUY"
+    // is not read as a contradiction. Horizon-weighting per mode (see below) is informational.
+    const _lensEsc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const _engineVerdict = (t.decision?.verdict || t.verdict || '').toUpperCase() || '—';
+    const _isSplit = buyN > 0 && (watchN > 0 || shortN > 0) && (buyN < lenses.length);
+    // Horizon weights: which lenses dominate per mode (the system tilts long-cycle vs tape
+    // lenses by horizon — these are the documented tilts, not a live recompute of the verdict).
+    const _mode = String(t.mode || t._mode || '').toUpperCase();
+    const _weightNote = /INVEST/.test(_mode)
+      ? 'INVEST horizon weights long-cycle lenses (Value · Earnings · Macro) above tape lenses (Swing · News).'
+      : /POS/.test(_mode)
+      ? 'POSITION horizon balances long-cycle and tape lenses.'
+      : 'SWING horizon weights tape lenses (Swing · News · Insider) above long-cycle lenses (Value · Macro).';
     return `<div class="qln-panel"><div class="qln-h2"><span class="num">A</span>8-Lens Cross-Votes · with reasoning<span class="sub">— who says what · disagreement surfaced not smoothed</span><span class="tag">SYNTHESIS</span></div>
       <table class="qln-tbl"><thead><tr><th>LENS</th><th>VOTE</th><th>REASONING</th></tr></thead>
       <tbody>${lenses.map(l => `<tr><td><b>${l.nm}</b></td><td style="color:var(--${l.cls});font-weight:700">${l.vote}</td><td class="qd-dim" style="color:var(--ink-2)">${l.reason}</td></tr>`).join('')}</tbody>
       </table>
-      <div style="font:700 9.5px ui-monospace,monospace;color:var(--ink-3);letter-spacing:.14em;margin:14px 0 4px">VOTE DISTRIBUTION</div>
+      <div style="font:700 9.5px ui-monospace,monospace;color:var(--ink-3);letter-spacing:.14em;margin:14px 0 4px">VOTE DISTRIBUTION · raw count</div>
       <div style="display:flex;height:24px;border-radius:3px;overflow:hidden;border:1px solid var(--line)">
         ${buyN?`<div style="flex:${buyN};background:var(--gn);display:flex;align-items:center;justify-content:center;font:800 11px ui-monospace,monospace;color:#000">${buyN} BULLISH</div>`:''}
         ${watchN?`<div style="flex:${watchN};background:var(--am);display:flex;align-items:center;justify-content:center;font:800 11px ui-monospace,monospace;color:#000">${watchN} WATCH</div>`:''}
         ${shortN?`<div style="flex:${shortN};background:var(--rd);display:flex;align-items:center;justify-content:center;font:800 11px ui-monospace,monospace;color:#000">${shortN} SHORT</div>`:''}
       </div>
-      <div class="qln-summary am" style="margin-top:10px"><b>SPLIT ${buyN}/${watchN}/${shortN}</b> — lens disagreement at horizon. Investment-horizon weights long-cycle lenses; swing-horizon weights tape lenses.</div>
+      ${_isSplit ? `<div style="margin-top:8px"><span style="display:inline-block;background:rgba(255,185,92,.18);color:var(--am);border:1px solid var(--am);border-radius:3px;padding:3px 9px;font:800 9.5px ui-monospace,monospace;letter-spacing:.08em" data-tip="Lenses disagree. The composite verdict is decided by the engine's pillar-weighted Composite Score + gates, not by counting lens votes — so a SPLIT can still route to BUY. Read each lens's reasoning above before entering.">SPLIT SIGNAL · review lens reasoning before entry</span></div>` : ''}
+      <div class="qln-summary am" style="margin-top:10px" data-tip="Raw lens count does not decide the verdict. The engine's Composite Score (pillar-weighted) + hard gates set the verdict; lenses are an informational cross-check. ${_lensEsc(_weightNote)}"><b>SPLIT ${buyN}/${watchN}/${shortN}</b> → engine verdict <b style="color:var(--${/BUY|BULL/.test(_engineVerdict)?'gn':/SHORT|AVOID|BEAR/.test(_engineVerdict)?'rd':'am'})">${_engineVerdict}</b>. The verdict is set by the engine's weighted Composite Score + gates, NOT by counting lens votes — so a split can still route to BUY. ${_lensEsc(_weightNote)}</div>
     </div>`;
   }
 
@@ -34605,8 +34689,25 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
   function _qlnStratFitPanel(t, scenarios, lensName, bestIdx) {
     // scenarios: [{ui:'SWING', label, hold, vd, vdCls, reason, tgts}, ...] of length 3
     const tk = (t.ticker || '').toUpperCase();
+    // KD-005 · reconcile a Macro AVOID on the SWING horizon with a BUY-grade fit
+    // on a longer horizon. Without this, the Macro tab can read "Swing: AVOID"
+    // while the Plan tab recommends BUY (in POSITION mode, 14d+ hold) — looks
+    // contradictory. Surface the mode mismatch honestly instead.
+    const _MODE_BY_IDX = ['SWING', 'POSITION', 'INVESTMENT'];
+    let _reconcileBanner = '';
+    try {
+      const swing = scenarios.find(s => /swing/i.test(s.ui || s.label || '')) || scenarios[0];
+      const best = (bestIdx != null && scenarios[bestIdx]) ? scenarios[bestIdx] : null;
+      const swingAvoid = swing && /avoid|short/i.test(swing.vd || '');
+      const bestBuy = best && /buy|entry/i.test(best.vd || '');
+      const bestMode = best ? (best.ui || _MODE_BY_IDX[bestIdx] || 'longer-horizon') : '';
+      if (swingAvoid && bestBuy && bestIdx !== 0) {
+        _reconcileBanner = `<div style="margin:0 0 12px;padding:9px 12px;background:var(--amb-bg,rgba(255,185,92,0.10));border:1px solid var(--amb-dim,#92400e);border-left:3px solid var(--amb);border-radius:2px;font:600 11px var(--mono);color:var(--ink-1);line-height:1.5">Macro flags <b style="color:var(--rd)">AVOID</b> for the <b>SWING</b> horizon (2–10d). The active plan runs in <b style="color:var(--amb)">${_qlnEsc(String(bestMode).toUpperCase())}</b> mode (${_qlnEsc(best.hold || 'longer hold')}) — the BUY is horizon-specific, not a contradiction. See the cells below for each horizon's read.</div>`;
+      }
+    } catch (_) { /* non-fatal — banner is informational only */ }
     return `<div class="qln-panel lead">
       <div class="qln-h2"><span class="num">★</span>Strategy Fit · 3-Horizon Verdict<span class="sub">— how each strategy reads ${_qlnEsc(tk)} · ALWAYS shown across all tabs</span><span class="tag">ALL</span></div>
+      ${_reconcileBanner}
       <div class="qln-g3">
         ${scenarios.map((s, i) => `
           <div class="qln-cell${i===bestIdx?' best':''}" style="border-top-color:${i===0?'var(--am)':i===1?'#5EA1FF':'var(--lead)'};border-left:3px solid ${i===0?'var(--am)':i===1?'#5EA1FF':'var(--lead)'};padding:14px 16px">
@@ -35416,11 +35517,25 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
           + '  </div></div>\n'
           + '</div>\n\n';
       } else {
+        // KD-007 · distinguish the three NO-DATA states honestly:
+        //  (a) earnings field absent entirely        → feed not wired for ticker
+        //  (b) earnings field present but empty {}    → connected, no event scheduled
+        //  (c) field exists w/ no parsable date       → fall back to (a) wording
+        const _earnFieldPresent = (t && Object.prototype.hasOwnProperty.call(t, 'earnings') && _earn && Object.keys(_earn).length > 0);
+        const _freshTs = (t && t.run_timestamp || (window._kairosData && window._kairosData.run_timestamp) || '').slice(0, 16).replace('T', ' ');
+        const _pill = _earnFieldPresent ? 'NO EVENTS' : 'FEED NOT WIRED';
+        const _sub = _earnFieldPresent
+          ? 'earnings feed connected · no dated catalyst returned · macro / analyst-day schedules not yet wired'
+          : 'forward catalyst calendar feed not wired for this ticker (requires earnings calendar + macro events + analyst-day schedule)';
+        const _body = _earnFieldPresent
+          ? 'No scheduled events in the next 90 days for ' + _esc(tk) + '.'
+          : 'Catalyst calendar feed not wired for this ticker.';
+        const _foot = _freshTs ? '<div style="margin-top:8px;font:500 10px var(--mono);color:var(--ink-4)">as of ' + _esc(_freshTs) + '</div>' : '';
         _section8 = ''
-          + '<!-- §8 — CATALYST CALENDAR (no data 2026-05-27) -->\n'
+          + '<!-- §8 — CATALYST CALENDAR (no data 2026-05-27 · KD-007 3-state) -->\n'
           + '<div class="iv-section">\n'
-          + '  <div class="iv-section-head"><div><div class="iv-section-title"><span class="num">§8</span>LONG-HORIZON CATALYST CALENDAR</div><div class="iv-section-sub">forward catalyst calendar not wired (requires earnings calendar + macro events + analyst-day schedule)</div></div><span class="iv-pill">NO DATA</span></div>\n'
-          + '  <div class="iv-section-body"><div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">No scheduled events for this ticker.</div></div>\n'
+          + '  <div class="iv-section-head"><div><div class="iv-section-title"><span class="num">§8</span>LONG-HORIZON CATALYST CALENDAR</div><div class="iv-section-sub">' + _sub + '</div></div><span class="iv-pill">' + _pill + '</span></div>\n'
+          + '  <div class="iv-section-body"><div style="padding:24px 16px;text-align:center;color:var(--ink-3);font:500 12px var(--mono)">' + _body + _foot + '</div></div>\n'
           + '</div>\n\n';
       }
       _bodyOut = _bodyOut.replace(/<!-- §8 — LONG-HORIZON CATALYST CALENDAR -->[\s\S]*$/, _section8);
@@ -41080,6 +41195,23 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
         ${pillarBar('RS · SECTOR', pRS, 20, 'gn', `relative strength rank · sector ${esc(t.sector || '—')}`)}
         ${pillarBar('SMART $', pSM, 15, 'am', `analyst consensus ${esc(t.analyst_consensus || '—')} · insider neutral`)}
         ${pillarBar('QUALITY', pQ, 10, 'gn', `analyst tgt ${t.analyst_target ? '$' + t.analyst_target : '—'} · upside ${t.analyst_upside ? t.analyst_upside.toFixed(0) + '%' : '—'}`)}
+        ${(() => {
+          // KD-002 · reconcile the pillar raw sum against the canonical Composite Score.
+          // totalP = capped sum of the 5 pillars (what the bars above add to).
+          // _score = canonical Composite Score from the engine (may differ — it includes
+          // cross-tab / setup-multiplier adjustments NOT visible in the 5 pillar bars).
+          const _rawSum = Math.round(totalP);
+          const _comp = (_score != null && isFinite(+_score)) ? Math.round(+_score) : null;
+          const _adj = _comp != null ? _comp - _rawSum : null;
+          const _adjStr = _adj == null ? '—' : (_adj > 0 ? '+' + _adj : '' + _adj);
+          const _haveSb = !!(sb && (sb.tech_score != null || sb.catalyst_score != null || sb.rs_score != null || sb.sm_score != null || sb.q_score != null));
+          // Honest note: when scoring_breakdown isn't in the payload the pillars are
+          // mode-weighted estimates of _score, so any gap is estimation noise, not a real adjustment.
+          const _tipMath = _haveSb
+            ? `Pillar raw sum = TECH+CATALYST+RS+SMART\$+QUALITY (each capped at its max) = ${_rawSum}.\nComposite Score = ${_comp == null ? '—' : _comp} — the engine's canonical 0-100 number.\nThe ${_adjStr} gap is the cross-tab / setup-multiplier adjustment applied on top of the raw pillars; it is NOT broken out per-pillar in the payload.`
+            : `Pillar raw sum = ${_rawSum}. The 5 pillar bars here are mode-weighted ESTIMATES derived from the Composite Score (scoring_breakdown not in payload), so the ${_adjStr} gap is estimation rounding, not a real adjustment.`;
+          return `<div class="opt-note" data-tip="${esc(_tipMath)}" style="margin-top:8px;cursor:help"><b>Pillar raw: ${_rawSum}</b> · adjustments: <b>${_adjStr}</b> · <b>Composite: ${_comp == null ? '—' : _comp}</b>${_haveSb ? ' — gap = cross-tab / setup-multiplier overlay (not split per-pillar)' : ' — pillars are estimates of Composite (scoring_breakdown not in payload); gap is rounding'}</div>`;
+        })()}
       </div>
     </div>`;
 
@@ -41593,7 +41725,7 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       ${_S('1', 'Multi-Timeframe Alignment', '1H · 4H · Daily · Weekly verdicts side-by-side · catch divergence early', mtfBody, `<span class="opt-pill gn">${mtfFrames.filter(f => /BULL|BUY/.test(f.v)).length}/4 ALIGNED</span>`)}
       ${_S('2', 'Mechanism · Setup Family', 'WHY this setup has edge · visual pattern + 1-line hypothesis + sleeve stats', mechBody, `<span class="opt-pill gn">${esc(_setupFam.toUpperCase())}</span>`)}
       ${_S('3', 'Risk Profile · Stress Scenarios', 'stop · DD haircut · β-adjusted · stress matrix for adverse regimes', stressBody, `<span class="opt-pill am">β ${_beta.toFixed(2)} · ATR ${_atrPct.toFixed(1)}%</span>`)}
-      ${_S('4', '5-Pillar Score Breakdown', 'composite ' + totalP.toFixed(0) + '/100 decomposed · radar + per-pillar narratives', pillarBody, `<span class="opt-pill gn">${totalP.toFixed(0)} / 100</span>`)}
+      ${_S('4', '5-Pillar Score Breakdown', 'pillar raw ' + totalP.toFixed(0) + '/100 (bars) · Composite ' + ((_score != null && isFinite(+_score)) ? Math.round(+_score) : '—') + '/100 (engine) · radar + per-pillar narratives', pillarBody, `<span class="opt-pill gn" data-tip="Pillar raw = sum of the 5 capped bars below.&#10;Composite = engine's canonical 0-100 score (drives the BUY decision).&#10;They can differ — see the reconciliation row below the bars.">raw ${totalP.toFixed(0)} · comp ${(_score != null && isFinite(+_score)) ? Math.round(+_score) : '—'}</span>`)}
       ${_S('5', 'Setup Edge · Wilson CI · Calibration', 'historical WR + 95% confidence band · score-to-outcome calibration', wilsonBody, `<span class="opt-pill ${n >= 30 ? 'gn' : 'am'}">${n >= 30 ? 'CLEARED N≥30' : 'N=' + n + ' · HALF-SIZE'}</span>`)}
       ${_S('6', 'Cross-Tab Confluence', '6 detail sub-tabs aligned vs divergent · heatmap + headline read', xtabBody, `<span class="opt-pill gn">${tabs.filter(k => /BULL|BUY/.test(_xv(k))).length}/6 ALIGNED</span>`)}
       ${_S('7', 'Catalyst Calendar · Gantt', 'visual timeline · entry/exit/blackout/event markers · ER zone shaded', ganttBody, `<span class="opt-pill ${_earnDays != null && _earnDays > 0 && _earnDays <= 14 ? 'am' : 'gn'}">${_earnDays != null && _earnDays > 0 ? 'ER IN ' + _earnDays + 'D' : 'NO ER IMMINENT'}</span>`)}
@@ -46830,15 +46962,16 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
 
     return `
       <div class="qd-tech-hero">
-        <div class="qd-tech-grade" style="color:${vColor}">${verdict || '—'}<span class="sub">${passed}/${total} GATES · score ${score}</span></div>
+        <div class="qd-tech-grade" style="color:${vColor}">${verdict || '—'}<span class="sub" data-tip="Gate Score = ${passed} of ${total} hard gates passed (independent of the Composite Score).&#10;Composite Score = ${score}/100 — the pillar-weighted scoring number.&#10;Both metrics must clear their own thresholds for a BUY.">Gate Score ${passed}/${total} · Composite ${score}/100</span></div>
         <div class="qd-tech-dims">
           <div class="qd-tech-dim"><span class="k">REGIME</span><span class="bar"><span style="width:60%;background:var(--amb)"></span></span><span class="v">${regime}</span></div>
           <div class="qd-tech-dim"><span class="k">SETUP</span><span class="bar"><span style="width:60%;background:var(--copper)"></span></span><span class="v" style="font-size:10px">${(setup||'—').slice(0,18)}</span></div>
-          <div class="qd-tech-dim"><span class="k">GATES PASS</span><span class="bar"><span style="width:${(passed/total*100)}%;background:${passed/total>=0.7?'var(--gn)':passed/total>=0.5?'var(--amb)':'var(--rd)'}"></span></span><span class="v">${passed}/${total}</span></div>
+          <div class="qd-tech-dim" data-tip="Gate Score: how many pre-trade hard gates this signal passed. This is NOT the Composite Score — it is a pass/fail count, not a 0-100 quality score."><span class="k">GATE SCORE</span><span class="bar"><span style="width:${(passed/total*100)}%;background:${passed/total>=0.7?'var(--gn)':passed/total>=0.5?'var(--amb)':'var(--rd)'}"></span></span><span class="v">${passed}/${total}</span></div>
         </div>
       </div>
       <div class="qd-c">
-        <div class="qd-c-h"><span class="qd-c-h-l">GATE CASCADE · decision audit trail</span><span class="qd-c-h-r">${passed}/${total} passed</span></div>
+        <div class="qd-c-h"><span class="qd-c-h-l" data-tip="Gate Score is the count of hard gates passed. It is independent of the Composite Score (the pillar-weighted 0-100 number shown in Overview). A signal can have a high Composite Score but still fail a gate — and vice versa. Both must clear thresholds for a BUY.">GATE CASCADE · decision audit trail</span><span class="qd-c-h-r">Gate Score ${passed}/${total}</span></div>
+        <div class="opt-note" style="margin:0 0 8px"><b>Gate Score is independent of Composite Score</b> — Gate Score (${passed}/${total}) counts hard gates passed; Composite (${score}/100) is the pillar-weighted quality number. <b>Both must clear thresholds for a BUY.</b></div>
         <div class="qd-c-body">
           ${gates.length ? `<table class="qd-tbl"><thead><tr><th>#</th><th>Gate</th><th>Result</th><th>Detail</th></tr></thead><tbody>${gates.map((g, i) => {
             const ok = g.passed || g.pass;
@@ -79938,6 +80071,218 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     })
     .catch(() => { /* not authenticated or endpoint down — leave hidden */ });
+})();
+
+// ══════════════════════════════════════════════════════════════════════
+// 2026-05-28 · Commercial tier gating (Phase 2 — lock states + upgrade nudge)
+// ──────────────────────────────────────────────────────────────────────
+// Reads /api/me {tier, tabs_allowed} + the capability registry {tabs[id].tier}
+// and gates the sidebar:
+//   • tab unlocked (in tabs_allowed) ............ normal
+//   • commercial tab above user's tier ......... LOCKED (🔒 + tier badge,
+//        click → upgrade nudge instead of switching)
+//   • internal tab not allowed (tier === null) . hidden (operator-only)
+// Owners/admins get tier 4 from /api/me, so nothing locks for them.
+// Self-contained — does not touch existing nav/switch logic.
+// ══════════════════════════════════════════════════════════════════════
+(function _tierGating() {
+  const TIER_META = {
+    1: { name: 'Starter', price: '$19.99/mo', accent: '#68d391' },
+    2: { name: 'Core',    price: '$49.99/mo', accent: '#d69e2e' },
+    3: { name: 'Pro',     price: '$149/mo',   accent: '#ed8936' },
+    4: { name: 'Elite',   price: '$330/mo',   accent: '#e2e8f0' },
+  };
+
+  // Inject component styles (not theme palette — safe as a <style> block).
+  if (!document.getElementById('tier-gating-styles')) {
+    const st = document.createElement('style');
+    st.id = 'tier-gating-styles';
+    st.textContent = `
+      .sb-link.sb-locked { opacity: .55; cursor: not-allowed; position: relative; }
+      .sb-link.sb-locked:hover { opacity: .8; }
+      .sb-link.sb-locked .sb-lock { margin-left: auto; font-size: 10px; opacity: .85; }
+      .sb-link.sb-locked .sb-tierbadge {
+        margin-left: 6px; font-size: 8px; font-weight: 700; letter-spacing: .5px;
+        padding: 1px 5px; border-radius: 4px; text-transform: uppercase;
+        font-family: var(--mono, monospace); }
+      #tier-upsell-ov {
+        position: fixed; inset: 0; background: rgba(4,6,10,.72); z-index: 9999;
+        display: none; align-items: center; justify-content: center;
+        backdrop-filter: blur(3px); }
+      #tier-upsell-ov.on { display: flex; }
+      #tier-upsell {
+        width: 380px; max-width: 92vw; background: #0c0e14;
+        border: 1px solid #1f2533; border-radius: 14px; padding: 26px 24px;
+        font-family: var(--sans, system-ui); text-align: center;
+        box-shadow: 0 24px 70px rgba(0,0,0,.6); animation: tuPop .2s ease both; }
+      @keyframes tuPop { from { opacity:0; transform: translateY(12px) scale(.98); } to { opacity:1; transform:none; } }
+      #tier-upsell .tu-lock { font-size: 30px; margin-bottom: 8px; }
+      #tier-upsell .tu-badge {
+        display:inline-block; font-family: var(--mono,monospace); font-size: 9px;
+        font-weight: 800; letter-spacing: 2px; padding: 4px 12px; border-radius: 20px;
+        margin-bottom: 14px; }
+      #tier-upsell h3 { font-size: 17px; color: #f7fafc; margin: 0 0 8px; font-weight: 800; }
+      #tier-upsell p { font-size: 13px; color: #8b94a7; line-height: 1.6; margin: 0 0 20px; }
+      #tier-upsell .tu-price { font-family: var(--mono,monospace); font-weight: 800; }
+      #tier-upsell .tu-actions { display:flex; gap: 8px; }
+      #tier-upsell button {
+        flex: 1; padding: 11px; border-radius: 9px; font-size: 12px; font-weight: 700;
+        font-family: var(--mono,monospace); letter-spacing: 1px; cursor: pointer;
+        border: 1px solid #2a3142; background: transparent; color: #9ba3b8; }
+      #tier-upsell button.tu-primary { border: none; color: #0a0a0f; }
+    `;
+    document.head.appendChild(st);
+  }
+
+  // Upgrade-nudge modal (built once, reused).
+  let ov = document.getElementById('tier-upsell-ov');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'tier-upsell-ov';
+    ov.innerHTML = `<div id="tier-upsell">
+      <div class="tu-lock">🔒</div>
+      <div class="tu-badge" id="tu-badge"></div>
+      <h3 id="tu-title"></h3>
+      <p id="tu-body"></p>
+      <div class="tu-actions">
+        <button id="tu-close">MAYBE LATER</button>
+        <button class="tu-primary" id="tu-upgrade">SEE PLANS</button>
+      </div></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('on'); });
+    ov.querySelector('#tu-close').addEventListener('click', () => ov.classList.remove('on'));
+    ov.querySelector('#tu-upgrade').addEventListener('click', () => {
+      window.location.href = '/v2/kairos_tier_mapping.html';
+    });
+  }
+  function showUpsell(tabLabel, reqTier) {
+    const m = TIER_META[reqTier] || TIER_META[2];
+    ov.querySelector('#tu-badge').textContent = 'TIER · ' + m.name.toUpperCase();
+    ov.querySelector('#tu-badge').style.cssText =
+      `display:inline-block;background:${m.accent}1a;color:${m.accent};border:1px solid ${m.accent}55;`;
+    ov.querySelector('#tu-title').textContent = tabLabel + ' is a ' + m.name + ' feature';
+    ov.querySelector('#tu-body').innerHTML =
+      `Unlock <b>${tabLabel}</b> and everything in ${m.name} for ` +
+      `<span class="tu-price" style="color:${m.accent}">${m.price}</span>.`;
+    ov.querySelector('#tu-upgrade').style.background =
+      `linear-gradient(135deg, ${m.accent}, ${m.accent}cc)`;
+    ov.classList.add('on');
+  }
+
+  function apply(me, reg) {
+    const userTier = (me && me.tier != null) ? me.tier : 0;
+    const allowed = new Set((me && me.tabs_allowed) || []);
+    const tabs = (reg && reg.tabs) || {};
+    document.querySelectorAll('.sb-link[data-tab]').forEach(el => {
+      const id = el.getAttribute('data-tab');
+      const entry = tabs[id];
+      if (!entry) return;                       // not a commercial surface — leave alone
+      const reqTier = entry.tier;
+      if (allowed.has(id)) {                    // unlocked
+        el.classList.remove('sb-locked');
+        el.querySelectorAll('.sb-lock,.sb-tierbadge').forEach(n => n.remove());
+        return;
+      }
+      if (reqTier == null) {                    // internal/operator-only — hide
+        el.style.display = 'none';
+        return;
+      }
+      if (reqTier <= userTier) return;          // shouldn't happen, but don't lock
+      // LOCK it
+      if (!el.classList.contains('sb-locked')) {
+        el.classList.add('sb-locked');
+        const m = TIER_META[reqTier] || {};
+        const badge = document.createElement('span');
+        badge.className = 'sb-tierbadge';
+        badge.textContent = m.name || 'PRO';
+        badge.style.cssText = `background:${(m.accent||'#d69e2e')}1a;color:${m.accent||'#d69e2e'};`;
+        const lock = document.createElement('span');
+        lock.className = 'sb-lock'; lock.textContent = '🔒';
+        // strip the live count chip so locked rows read clean
+        const ct = el.querySelector('.ct'); if (ct) ct.remove();
+        el.appendChild(lock); el.appendChild(badge);
+        const label = (el.textContent || id).replace(/🔒.*$/, '').trim();
+        el.addEventListener('click', ev => {
+          ev.preventDefault(); ev.stopPropagation();
+          showUpsell(label || id, reqTier);
+        }, true);  // capture phase — beats the nav switch handler
+      }
+    });
+  }
+
+  // Compute what tabs a given tier unlocks, straight from the registry —
+  // mirrors the backend's cumulative rule (tier !== null && tier <= N).
+  function allowedForTier(n, reg) {
+    const out = [];
+    const tabs = (reg && reg.tabs) || {};
+    for (const id in tabs) {
+      const t = tabs[id].tier;
+      if (t != null && t <= n) out.push(id);
+    }
+    return out;
+  }
+
+  // ── Admin-only preview switcher: simulate any tier without re-login ──
+  // Honored ONLY for admins/owners (a customer can't self-upgrade this way).
+  function buildSwitcher(me) {
+    if (!(me.is_admin || me.is_owner)) return;
+    if (document.getElementById('tier-switcher')) return;
+    const cur = localStorage.getItem('kairos.previewTier');
+    const box = document.createElement('div');
+    box.id = 'tier-switcher';
+    box.style.cssText =
+      'position:fixed;bottom:14px;left:14px;z-index:9998;background:#0c0e14;' +
+      'border:1px solid #2a3142;border-radius:10px;padding:7px 9px;display:flex;' +
+      'gap:7px;align-items:center;font-family:var(--mono,monospace);font-size:10px;' +
+      'box-shadow:0 8px 28px rgba(0,0,0,.5)';
+    box.innerHTML =
+      '<span style="color:#d69e2e;letter-spacing:1px">PREVIEW AS</span>' +
+      '<select id="tier-sw-sel" style="background:#11141d;color:#e2e8f0;border:1px solid #2a3142;' +
+      'border-radius:6px;padding:4px 6px;font-family:inherit;font-size:10px;cursor:pointer">' +
+      '<option value="">(my access)</option>' +
+      '<option value="0">Free</option><option value="1">Starter</option>' +
+      '<option value="2">Core</option><option value="3">Pro</option>' +
+      '<option value="4">Elite</option></select>' +
+      '<span id="tier-sw-hint" style="color:#5a6478">admin preview</span>';
+    document.body.appendChild(box);
+    const sel = box.querySelector('#tier-sw-sel');
+    if (cur !== null && cur !== '') sel.value = cur;
+    sel.addEventListener('change', () => {
+      if (sel.value === '') localStorage.removeItem('kairos.previewTier');
+      else localStorage.setItem('kairos.previewTier', sel.value);
+      location.reload();   // simplest reliable way to re-gate from a clean slate
+    });
+  }
+
+  function boot() {
+    fetch('/api/me', { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : null)
+      .then(me => {
+        if (!me) return;
+        buildSwitcher(me);
+        // Apply admin preview override if set.
+        const pv = localStorage.getItem('kairos.previewTier');
+        if (pv !== null && pv !== '' && (me.is_admin || me.is_owner)) {
+          const n = parseInt(pv, 10);
+          me = Object.assign({}, me, { tier: n, _preview: true });
+          const reg = window.__capRegistry;
+          me.tabs_allowed = (reg && !reg._stub) ? allowedForTier(n, reg) : me.tabs_allowed;
+        }
+        window.__userTier = me.tier;
+        window.__userPlan = me.plan;
+        const run = () => {
+          if (me._preview) me.tabs_allowed = allowedForTier(me.tier, window.__capRegistry);
+          apply(me, window.__capRegistry);
+        };
+        if (window.__capRegistry && !window.__capRegistry._stub) run();
+        else window.addEventListener('cap-registry-loaded', run, { once: true });
+        // safety: registry may have already loaded as a stub; retry shortly
+        setTimeout(() => { if (window.__capRegistry) run(); }, 1500);
+      })
+      .catch(() => {});
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
 })();
 
 window._signOut = function() {
