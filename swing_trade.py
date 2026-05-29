@@ -3469,7 +3469,7 @@ def run_daily_scan(force_fresh: bool = False):
     _dh("Polygon News NLP", "Polygon", sum(1 for r in all_results if r.get("news_sentiment_score", {}).get("score") is not None), _n_res, threshold_warn=30)
     _dh("Insider Activity", "SEC/OpenInsider", sum(1 for r in all_results if (r.get("insider_data") or {}).get("buys", 0) + (r.get("insider_data") or {}).get("sells", 0) > 0), _n_res)
     _dh("Short Interest", "Finviz/Borrow", sum(1 for r in all_results if r.get("sentiment", {}).get("details", {}).get("short_interest", "N/A") != "N/A (0/2)"), _n_res)
-    _dh("IV Rank", "yfinance/Polygon", sum(1 for r in all_results if (r.get("options_data") or {}).get("iv_rank") is not None), _n_res)
+    _dh("IV Rank", "Schwab options", sum(1 for r in all_results if (r.get("options_data") or {}).get("iv_rank") is not None or (r.get("options_kpis") or {}).get("iv_rank") is not None or (r.get("options_kpis") or {}).get("iv_percentile") is not None), _n_res)
     _dh("Beat Rate", "yfinance (tier-1)", sum(1 for r in all_results if (r.get("beat_rate") or {}).get("beat_rate") is not None), _n_res)
     _dh("Sector", "Polygon/Schwab", sum(1 for r in all_results if r.get("sector") not in (None, "Unknown", "")), _n_res)
     _dh("Beta", "Finviz/yfinance", sum(1 for r in all_results if r.get("beta") is not None), _n_res)

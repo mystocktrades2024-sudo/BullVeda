@@ -174,6 +174,20 @@ def analyze_chain(ticker: str, chain: dict, last_price: float = 0) -> dict:
     if gamma_sum != 0:
         result["gamma_net"] = round(gamma_sum)
 
+    # ── 2026-05-28 · Derived fields the dashboard/widgets read ───────────
+    # iv_rank — alias of iv_percentile. The UI's "IV Rank" widget + the
+    # System Status data-health check read `iv_rank`, but the kpis path only
+    # computed `iv_percentile`. Same signal, was always null under iv_rank.
+    if result.get("iv_percentile") is not None:
+        result["iv_rank"] = result["iv_percentile"]
+    # atm_iv — near-money average IV (already computed as iv_current).
+    if result.get("iv_current") is not None:
+        result["atm_iv"] = result["iv_current"]
+        # expected_move_pct — 1-month (~30 DTE) 1-sigma expected move as % of
+        # spot: ATM_IV × sqrt(DTE/365). 30/365 → ×0.2865. Standard convention.
+        import math as _math
+        result["expected_move_pct"] = round(result["iv_current"] * _math.sqrt(30.0 / 365.0), 2)
+
     return result
 
 
