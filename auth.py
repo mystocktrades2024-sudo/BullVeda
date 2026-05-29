@@ -181,12 +181,19 @@ def update_user(username: str, **fields) -> dict:
         raise ValueError(f"user '{username}' not found")
     if username == OWNER and fields.get("disabled"):
         raise ValueError("owner account cannot be disabled")
-    allowed = {"display_name", "email", "role", "disabled", "must_change_password",
+    allowed = {"display_name", "email", "role", "plan", "disabled", "must_change_password",
                "tab_profile", "tabs_override", "sub_tabs_override", "actions_override"}
     confirm_demote = bool(fields.pop("__confirm_owner_demote__", False))
     for k, v in fields.items():
         if k not in allowed:
             continue
+        if k == "plan":
+            # Commercial tier (free/starter/core/pro/elite). Empty = no plan.
+            if v in (None, ""):
+                u.pop("plan", None)
+                continue
+            if not get_role(v):
+                raise ValueError(f"plan '{v}' does not exist")
         if k == "role":
             if not get_role(v):
                 raise ValueError(f"role '{v}' does not exist")
@@ -328,11 +335,19 @@ def user_has_permission(username: str, perm_type: str, perm: str) -> bool:
     u = data.get("users", {}).get(username)
     if not u or u.get("disabled"):
         return False
-    role = get_role(u.get("role") or "viewer")
-    if not role:
-        return False
-    perms = (role.get("permissions") or {}).get(perm_type) or []
-    return "*" in perms or perm in perms
+    # Effective permission = operator role ∪ commercial plan (tier-role).
+    # `role` governs internal/operator access; `plan` governs the paid ladder.
+    # A user clears the gate if EITHER grants it.
+    for role_id in (u.get("role") or "viewer", u.get("plan")):
+        if not role_id:
+            continue
+        role = get_role(role_id)
+        if not role:
+            continue
+        perms = (role.get("permissions") or {}).get(perm_type) or []
+        if "*" in perms or perm in perms:
+            return True
+    return False
 
 
 def get_user_permissions(username: str) -> dict:
@@ -349,13 +364,21 @@ def get_user_permissions(username: str) -> dict:
     empty = {"tabs": [], "sub_tabs": [], "actions": []}
     if not u:
         return empty
+    # Effective permission = operator role ∪ commercial plan (tier-role).
+    # Union the two roles' lists per key; a per-user override still wins outright.
     role = get_role(u.get("role") or "viewer")
+    plan = get_role(u.get("plan")) if u.get("plan") else None
     role_perms = (role or {}).get("permissions") or {}
+    plan_perms = (plan or {}).get("permissions") or {}
     def _pick(key, override_key):
         ov = u.get(override_key)
         if isinstance(ov, list) and len(ov) > 0:
             return list(ov)
-        return list(role_perms.get(key) or [])
+        merged = list(role_perms.get(key) or [])
+        for p in (plan_perms.get(key) or []):
+            if p not in merged:
+                merged.append(p)
+        return merged
     return {
         "tabs":     _pick("tabs",     "tabs_override"),
         "sub_tabs": _pick("sub_tabs", "sub_tabs_override"),

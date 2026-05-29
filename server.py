@@ -1702,10 +1702,19 @@ async def whoami(auth: HTTPBasicCredentials = Depends(_check_auth)):
     username = auth.username
     user = _auth_mod.get_user(username) or {}
     perms = _auth_mod.get_user_permissions(username) or {}
+    plan_id = user.get("plan")
+    plan_role = _auth_mod.get_role(plan_id) if plan_id else None
+    plan_tier = (plan_role or {}).get("tier") if plan_role else None
+    # Owners/admins have no commercial plan but see everything — surface them as
+    # top-tier so the frontend never shows them an upgrade nudge.
+    if plan_tier is None and (_auth_mod.is_admin(username) or user.get("is_owner")):
+        plan_tier = 4
     return JSONResponse({
         "username":       username,
         "display_name":   user.get("display_name") or username,
         "role":           user.get("role") or "viewer",
+        "plan":           plan_id,
+        "tier":           plan_tier,
         "is_admin":       _auth_mod.is_admin(username),
         "is_owner":       bool(user.get("is_owner")),
         "tab_profile":    user.get("tab_profile") or "trader",
