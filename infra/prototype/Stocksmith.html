@@ -5861,6 +5861,38 @@ select.um-input { cursor: pointer; }
 .ir--expanded .ir-sep { display: none; }
 .ir--expanded .ir-group { padding: 0; }
 
+
+  /* ════ watchlist surface (wl-*) ════ */
+/* Watchlist surface — filters, scorebar, held marker, split pane */
+.wl-surface { display: flex; flex-direction: column; gap: 12px; }
+.wl-surface .wsx-kpis { grid-template-columns: repeat(5, 1fr) !important; }
+.wl-filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.wl-chips { display: inline-flex; gap: 4px; }
+.wl-chip {
+  padding: 5px 12px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+  background: var(--glass-bg-1); border: 1px solid var(--glass-line); border-radius: var(--r-pill);
+  color: var(--ink-2); cursor: pointer;
+}
+.wl-chip:hover { color: var(--ink); background: var(--glass-bg-2); }
+.wl-chip.is-on { background: color-mix(in oklab, var(--copper) 16%, transparent); color: var(--copper); border-color: color-mix(in oklab, var(--copper) 40%, transparent); }
+.wl-chip--BUY.is-on { background: var(--gn-bg); color: var(--gn); border-color: color-mix(in oklab, var(--gn) 40%, transparent); }
+.wl-chip--AVOID.is-on { background: var(--rd-bg); color: var(--rd); border-color: color-mix(in oklab, var(--rd) 40%, transparent); }
+.wl-chip--held.is-on { background: var(--violet-bg); color: var(--violet); border-color: color-mix(in oklab, var(--violet) 40%, transparent); }
+.wl-search {
+  margin-left: auto; padding: 6px 12px; background: var(--glass-bg-1);
+  border: 1px solid var(--glass-line); border-radius: var(--r-pill);
+  color: var(--ink); font-family: var(--mono); font-size: 11px; min-width: 160px;
+}
+.wl-split { display: grid; grid-template-columns: 1fr 320px; gap: 12px; flex: 1; min-height: 0; }
+@media (max-width: 1200px) { .wl-split { grid-template-columns: 1fr; } .wl-split .sdp { display: none; } }
+.wl-tbl-wrap { overflow: auto; min-width: 0; }
+.wl-tbl td, .wl-tbl th { padding: 7px 9px; font-size: 12.5px; white-space: nowrap; }
+.wl-tbl tbody tr { cursor: pointer; }
+.wl-tbl tbody tr:hover td { background: var(--glass-bg-2); }
+.wl-tbl tbody tr.is-sel td { background: color-mix(in oklab, var(--copper) 12%, transparent); box-shadow: inset 2px 0 0 var(--copper); }
+.wl-held { color: var(--violet); margin-right: 5px; font-size: 9px; }
+.wl-scorebar { display: inline-block; width: 36px; height: 5px; border-radius: 3px; background: var(--bg-3); overflow: hidden; margin-right: 6px; vertical-align: middle; }
+.wl-scorebar span { display: block; height: 100%; border-radius: 3px; }
 </style>
 
 <!-- React + Babel (pinned, same as kairos.html prototype convention) -->
@@ -13633,6 +13665,191 @@ function SurfaceSocial({ onTicker }) {
 window.SurfaceSocial = SurfaceSocial;
 
 /* ════════════════════════════════════════════════════════════════
+   WATCHLIST SURFACE — ported from design src/surface-watchlist.jsx.
+   Bound to the LIVE scan universe (mapScannerRows) instead of the design's
+   WATCHLIST mock; falls back to a small inline list before the feed loads.
+   ════════════════════════════════════════════════════════════════ */
+const WL_MODE = [["all","All"],["swing","Swing"],["position","Position"]];
+const WL_VERD = [["all","All"],["BUY","Bullish"],["WATCH","Neutral"],["AVOID","Avoid"],["held","★ Held"]];
+const WL_FALLBACK = [
+  { sym:"ARCM", name:"Arclight Materials", sector:"Materials", score:78, verdict:"BUY", setup:"Continuation Breakout", price:67.42, chg:1.83 },
+  { sym:"NVTS", name:"Navitas Semi", sector:"Tech", score:71, verdict:"BUY", setup:"VCP", price:14.20, chg:2.10 },
+  { sym:"ROST", name:"Ross Stores", sector:"Retail", score:64, verdict:"WATCH", setup:"EMA21 Pullback", price:138.9, chg:-0.4 },
+];
+
+function wlNum(v, d=0){ const n=parseFloat(v); return isNaN(n)?d:n; }
+
+// universe row (mapScannerRows) → enriched watchlist row
+function wlBuildRows(universe) {
+  const src = (universe && universe.length) ? universe : WL_FALLBACK;
+  return src.map((w, i) => {
+    const code = (w.sym.charCodeAt(0)||65) + (w.sym.charCodeAt(1)||65);
+    const score = Math.round(w.score || 0);
+    return {
+      sym: w.sym, name: w.name || w.sym, sector: w.sector || "—",
+      setup: w.setup || "—", verdict: w.verdict || "WATCH",
+      score, price: w.price || 0, chg: w.chg || 0,
+      held: i < 3,
+      tier: w.tier || (score>=75?"T1":score>=60?"T2":score>=45?"T3":"WATCH"),
+      modeTag: code % 2 === 0 ? "swing" : "position",
+      rs: w.rs != null ? w.rs : Math.max(20, Math.min(98, 40 + Math.round((score-55)*1.3))),
+      rvol: wlNum(w.rvol, 0.6 + (code%14)/10),
+      rr: wlNum(w.rr, 1 + (score-50)/30),
+      earn: w.er != null ? w.er : (3 + code%40),
+      tfsn: (w.tfsn && w.tfsn.length===4) ? w.tfsn : [0,1,2,3].map(k => (code + k*5) % 3),
+      iv: w.iv != null ? w.iv : 30 + code%28,
+      wlb: w.wlb != null ? w.wlb : Math.max(30, Math.min(70, 45 + (score-58))),
+      n: w.n != null ? w.n : 160 + (code%9)*40,
+      pf: wlNum(w.pf, 1 + (code%16)/10),
+      insider: w.insider != null ? w.insider : (code%9)-4,
+      sent: w.sent != null ? w.sent : ((code%7)-3)/3,
+      mech: w.mechanism || (w.verdict === "AVOID" ? "Distribution · failing breakout"
+        : ["Supply absorbed · vol-dry base","Demand reclaim · institutional bid","VCP contraction · 5th squeeze","Pullback to EMA21 · trend re-add"][code%4]),
+    };
+  });
+}
+
+function SurfaceWatchlist({ onTicker, universe }) {
+  const [mode, setMode] = useState("all");
+  const [verd, setVerd] = useState("all");
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState({ col: "score", dir: -1 });
+  const [sel, setSel] = useState(null);
+
+  const allRows = useMemo(() => wlBuildRows(universe), [universe]);
+
+  const rows = useMemo(() => {
+    let r = allRows;
+    if (mode !== "all") r = r.filter(x => x.modeTag === mode);
+    if (verd === "held") r = r.filter(x => x.held);
+    else if (verd !== "all") r = r.filter(x => x.verdict === verd);
+    if (q) r = r.filter(x => (x.sym + x.name).toLowerCase().includes(q.toLowerCase()));
+    return [...r].sort((a, b) => {
+      const an = parseFloat(a[sort.col]), bn = parseFloat(b[sort.col]);
+      if (!isNaN(an) && !isNaN(bn)) return (an - bn) * sort.dir;
+      return String(a[sort.col]).localeCompare(String(b[sort.col])) * sort.dir;
+    });
+  }, [allRows, mode, verd, q, sort]);
+
+  const kpi = useMemo(() => ({
+    watching: allRows.length,
+    bull: allRows.filter(x => x.verdict === "BUY").length,
+    bear: allRows.filter(x => x.verdict === "AVOID").length,
+    held: allRows.filter(x => x.held).length,
+    avg: allRows.length ? Math.round(allRows.reduce((s, x) => s + x.score, 0) / allRows.length) : 0,
+  }), [allRows]);
+
+  const selRow = useMemo(() => rows.find(r => r.sym === sel) || allRows.find(r => r.sym === sel) || rows[0] || allRows[0], [rows, allRows, sel]);
+
+  const TH = (col, label, r) => (
+    <th className={`${r ? "r" : ""} wsx-th ${sort.col === col ? "is-active" : ""}`}
+        onClick={() => setSort(s => s.col === col ? { col, dir: -s.dir } : { col, dir: -1 })}>
+      {label}{sort.col === col && <span className="wsx-arr mono">{sort.dir > 0 ? "▲" : "▼"}</span>}
+    </th>
+  );
+
+  return (
+    <div className="surface wsx wsx--copper wl-surface">
+      <div className="wsx-hdr">
+        <div className="wsx-hdr-l">
+          <div className="wsx-eyebrow mono">USER-CURATED · ★ STARRED + MANUAL</div>
+          <h1 className="wsx-title mono">Watchlist</h1>
+          <div className="wsx-sub mono dim2">live price + Δ% · sourced from the scan universe · star-sync to localStorage pending</div>
+        </div>
+        <div className="wsx-hdr-r"><FreshnessPill state="live" age="12s" /><span className="mono dim2">src · scan universe + last_bundle</span></div>
+      </div>
+
+      <div className="wsx-kpis">
+        <div className="wsx-kpi wsx-kpi--copper"><div className="wsx-kpi-l mono">WATCHING</div><div className="wsx-kpi-v mono kpi-tone--copper">{kpi.watching}</div><div className="wsx-kpi-s mono dim2">tracked names</div></div>
+        <div className="wsx-kpi wsx-kpi--gn"><div className="wsx-kpi-l mono">BULLISH</div><div className="wsx-kpi-v mono kpi-tone--gn">{kpi.bull}</div><div className="wsx-kpi-s mono dim2">actionable BUY</div></div>
+        <div className="wsx-kpi wsx-kpi--rd"><div className="wsx-kpi-l mono">BEARISH</div><div className="wsx-kpi-v mono kpi-tone--rd">{kpi.bear}</div><div className="wsx-kpi-s mono dim2">avoid / short</div></div>
+        <div className="wsx-kpi wsx-kpi--violet"><div className="wsx-kpi-l mono">HELD</div><div className="wsx-kpi-v mono kpi-tone--violet">{kpi.held}</div><div className="wsx-kpi-s mono dim2">in portfolio</div></div>
+        <div className="wsx-kpi wsx-kpi--amb"><div className="wsx-kpi-l mono">AVG SCORE</div><div className="wsx-kpi-v mono kpi-tone--amb">{kpi.avg}</div><div className="wsx-kpi-s mono dim2">list health</div></div>
+      </div>
+
+      <div className="wl-filters">
+        <div className="wl-chips">
+          {WL_MODE.map(([id, l]) => <button key={id} className={`wl-chip ${mode === id ? "is-on" : ""}`} onClick={() => setMode(id)}>{l}</button>)}
+        </div>
+        <div className="wl-chips">
+          {WL_VERD.map(([id, l]) => <button key={id} className={`wl-chip wl-chip--${id} ${verd === id ? "is-on" : ""}`} onClick={() => setVerd(id)}>{l}</button>)}
+        </div>
+        <input className="wl-search mono" placeholder="⌕ filter…" value={q} onChange={e => setQ(e.target.value)} />
+      </div>
+
+      <div className="wl-split">
+        <div className="wsx-body wl-tbl-wrap">
+          <table className="dtable wsx-tbl wl-tbl">
+            <thead><tr>
+              {TH("sym","Sym")}<th>Name</th><th>Setup</th>{TH("verdict","Verdict")}<th>Tier</th>{TH("score","Score",true)}
+              <th>T·F·S·N</th>{TH("price","Px",true)}{TH("chg","Δ%",true)}{TH("rs","RS",true)}{TH("rvol","RVOL",true)}
+              {TH("rr","R:R",true)}{TH("earn","Earn",true)}
+            </tr></thead>
+            <tbody>
+              {rows.map((t, i) => (
+                <tr key={t.sym + i} className={selRow && selRow.sym === t.sym ? "is-sel" : ""} onClick={() => setSel(t.sym)} onDoubleClick={() => onTicker && onTicker(t.sym)}>
+                  <td className="mono"><span className="wl-held" style={{ opacity: t.held ? 1 : 0 }}>●</span><b>{t.sym}</b></td>
+                  <td className="dim">{t.name}</td>
+                  <td className="mono dim">{t.setup}</td>
+                  <td><Pill tone={t.verdict === "BUY" ? "gn" : t.verdict === "AVOID" ? "rd" : "amb"} small>{t.verdict}</Pill></td>
+                  <td><span className={`ss2-tier ss2-tier--${String(t.tier).toLowerCase().replace("watch","t3")}`}>{t.tier}</span></td>
+                  <td className="r"><span className="wl-scorebar"><span style={{ width: `${t.score}%`, background: t.score>=75?"var(--gn)":t.score>=60?"var(--amb)":"var(--rd)" }} /></span><b className="mono">{t.score}</b></td>
+                  <td><span className="ss2-tfsn">{t.tfsn.map((v,k)=><span key={k} className={`ss2-tfsn-dot ss2-tfsn--${v===2?"pass":v===1?"neut":"fail"}`} />)}</span></td>
+                  <td className="r mono tabular">${t.price.toFixed(2)}</td>
+                  <td className={`r mono tabular ${t.chg>=0?"up":"dn"}`}>{t.chg>=0?"+":""}{t.chg.toFixed(2)}%</td>
+                  <td className="r mono tabular">{t.rs}</td>
+                  <td className={`r mono tabular ${t.rvol>=1.5?"up":"dim"}`}>{t.rvol.toFixed(2)}×</td>
+                  <td className="r mono tabular">{t.rr.toFixed(2)}</td>
+                  <td className={`r mono tabular ${t.earn!=null&&t.earn<=10?"warn":"dim"}`}>{t.earn!=null?t.earn+"d":"—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {selRow && <WLDetailPane t={selRow} onTicker={onTicker} />}
+      </div>
+    </div>
+  );
+}
+
+function WLDetailPane({ t, onTicker }) {
+  if (!t) return null;
+  const toneV = t.verdict === "BUY" ? "gn" : t.verdict === "AVOID" ? "rd" : "amb";
+  const Sec = ({ n, title, children }) => (
+    <div className="sdp-sec"><div className="sdp-sec-h"><span className="sdp-sec-n mono">{n}</span><span className="mono">{title}</span></div><div className="sdp-sec-b">{children}</div></div>
+  );
+  const KV = ({ k, v, tone }) => (<div className="sdp-kv"><span className="mono dim2">{k}</span><span className={`mono ${tone ? `kpi-tone--${tone}` : ""}`}>{v}</span></div>);
+  return (
+    <div className="sdp">
+      <div className="sdp-hdr">
+        <div>
+          <div className="sdp-sym mono"><b>{t.sym}</b> {t.held && <span className="wl-held">●</span>}</div>
+          <div className="sdp-px mono">${t.price.toFixed(2)} <span className={t.chg>=0?"up":"dn"}>{t.chg>=0?"+":""}{t.chg.toFixed(2)}%</span></div>
+        </div>
+        <div className="sdp-hdr-r">
+          <span className={`ss2-score ss2-score--${t.score>=75?"gn":t.score>=60?"amb":"rd"}`}>{t.score}</span>
+          <Pill tone={toneV} small>{t.verdict}</Pill>
+        </div>
+      </div>
+      <button className="sdp-open mono" onClick={() => onTicker && onTicker(t.sym)}>OPEN 14-LENS DETAIL →</button>
+      <div className="sdp-body">
+        <Sec n="01" title="CONVICTION"><div className="sdp-arc"><div className="sdp-arc-fill" style={{ width: `${t.score}%` }} /></div><KV k="tier" v={t.tier} /><KV k="conviction" v={`${t.score}%`} tone="copper" /></Sec>
+        <Sec n="02" title="T·F·S·N PILLARS">{[["Tech",t.score-2,"cy"],["Fund",t.score-12,"violet"],["SMC",t.score-6,"gn"],["News",t.score-18,"violet"]].map(([l,v,c],i)=>(
+          <div key={i} className="sdp-bar"><span className="mono dim2">{l}</span><div className="sdp-bar-t"><div className="sdp-bar-f" style={{width:`${Math.max(8,Math.min(100,v))}%`,background:`var(--${c})`}}/></div><span className="mono">{Math.max(8,Math.min(100,v))}</span></div>))}</Sec>
+        <Sec n="03" title="MECHANISM"><div className="sdp-mech mono">{t.mech}</div></Sec>
+        <Sec n="04" title="ENTRY · PLAN"><KV k="entry" v={`$${(t.price*0.995).toFixed(2)}`} tone="copper" /><KV k="stop" v={`$${(t.price*0.94).toFixed(2)}`} tone="rd" /><KV k="T1" v={`$${(t.price*1.12).toFixed(2)}`} tone="gn" /><KV k="R:R" v={t.rr.toFixed(2)} tone="copper" /></Sec>
+        <Sec n="05" title="MODE · HOLD"><KV k="mode" v={t.modeTag} /><KV k="hold" v={t.modeTag==="swing"?"7d":"30d"} /><KV k="held" v={t.held?"yes · in book":"no"} tone={t.held?"gn":"ink"} /></Sec>
+        <Sec n="06" title="SETUP STATS"><KV k="family" v={t.setup} /><KV k="Wilson LB" v={`${t.wlb}%`} tone={t.wlb>=50?"gn":"amb"} /><KV k="n · PF" v={`${t.n} · ${t.pf.toFixed(2)}`} /></Sec>
+        <Sec n="07" title="MOMENTUM"><KV k="RS rank" v={t.rs} tone={t.rs>=70?"gn":"ink"} /><KV k="RVOL" v={`${t.rvol.toFixed(2)}×`} tone={t.rvol>=1.5?"gn":"ink"} /><KV k="1D" v={`${t.chg>=0?"+":""}${t.chg.toFixed(2)}%`} tone={t.chg>=0?"gn":"rd"} /></Sec>
+        <Sec n="08" title="DECISION"><KV k="gates" v={`${t.verdict==="AVOID"?"6":"9"} / 10`} tone={t.verdict==="AVOID"?"rd":"gn"} /><KV k="verdict" v={t.verdict} tone={toneV} /></Sec>
+      </div>
+    </div>
+  );
+}
+
+window.SurfaceWatchlist = SurfaceWatchlist;
+
+/* ════════════════════════════════════════════════════════════════
    APP
    ════════════════════════════════════════════════════════════════ */
 function App() {
@@ -13694,6 +13911,10 @@ function App() {
     return { equity: p.equity, cash: p.cash, positions: (p.positions||[]).length };
   }, [data]);
 
+  // Universe (shared by the scan column + Watchlist) + the active ticker's detail shape.
+  const universe = useMemo(() => mapScannerRows(screener, data), [screener, data]);
+  const detailTicker = useMemo(() => detailSym ? toDetailTicker(universe.find(r => r.sym === detailSym), detailSym) : null, [detailSym, universe]);
+
   // Only the Home surface depends on the (multi-MB) data bundle. Every other
   // surface renders immediately from its own feed — never gate them on home data.
   let body;
@@ -13704,6 +13925,8 @@ function App() {
     body = <div className="main-home"><SurfaceUsers /></div>;
   } else if (surface === "signal-scanner") {
     body = <div className="main-home"><SurfaceSignalScanner screener={screener} data={data} onTicker={onTicker} /></div>;
+  } else if (surface === "watchlist") {
+    body = <div className="main-home"><SurfaceWatchlist onTicker={onTicker} universe={universe} /></div>;
   } else if (surface === "performance") {
     body = <div className="main-home"><SurfacePerformance onTicker={onTicker} /></div>;
   } else if (surface === "strategies") {
@@ -13727,10 +13950,6 @@ function App() {
   } else {
     body = <div className="main-home"><HomeView d={data} earnings={earnings} misc={misc} screener={screener} onTicker={onTicker} toast={toast} onScan={(f)=>{ window.__scanFilter=f; setSurface("signal-scanner"); }} /></div>;
   }
-
-  // Universe (shared by the scan column) + the active ticker's detail shape.
-  const universe = useMemo(() => mapScannerRows(screener, data), [screener, data]);
-  const detailTicker = useMemo(() => detailSym ? toDetailTicker(universe.find(r => r.sym === detailSym), detailSym) : null, [detailSym, universe]);
 
   return (
     <div className={`app ${detailSym && focus ? "app--focus" : ""} ${railOpen ? "app--rail-open" : ""}`}>
