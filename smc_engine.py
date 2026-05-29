@@ -86,6 +86,16 @@ class Zone:
     status: str = "untested"   # 'untested' | 'partial' | 'tested-held' | 'tested-breached'
     volume_at_formation: float = 0
     confluence_factors: list[str] = field(default_factory=list)
+    # 2026-05-29 · Mitigation tracking — the actionable layer.
+    # mitigated   : has price returned into the zone since formation?
+    # is_live     : untested AND not breached → still a tradeable setup
+    # mitigation_date : first date price tapped the zone (None if untested)
+    # dist_from_price_pct : signed % from current close to zone mid (+ = zone
+    #                       above price, − = below). Entry-timing read.
+    mitigated: bool = False
+    is_live: bool = True
+    mitigation_date: str = ""
+    dist_from_price_pct: float = 0.0
 
 
 @dataclass
@@ -178,21 +188,37 @@ def _detect_order_blocks(df: pd.DataFrame, lookback: int = 60, max_zones: int = 
                 volume_at_formation=round(rel_vol, 2),
             ))
 
-    # Mark status based on bars AFTER the OB
+    # Mark status + mitigation based on bars AFTER the OB
+    cur_close = float(closes[-1]) if n_total else 0.0
     for z in zones:
+        zone_mid = (z.low + z.high) / 2.0
+        z.dist_from_price_pct = round((zone_mid - cur_close) / cur_close * 100, 2) if cur_close > 0 else 0.0
         if z.bar_idx + 2 >= n_total:
-            z.status = "untested"
+            z.status = "untested"; z.mitigated = False; z.is_live = True
             continue
         post_highs = highs[z.bar_idx + 2:]
         post_lows  = lows[z.bar_idx + 2:]
+        post_dates = dates[z.bar_idx + 2:]
         if z.kind == "bull_ob":
-            tagged  = ((post_lows <= z.high) & (post_lows >= z.low)).any()
+            tag_mask = (post_lows <= z.high) & (post_lows >= z.low)
+            tagged   = tag_mask.any()
             breached = (post_lows < z.low).any()
-            z.status = "tested-breached" if breached else ("tested-held" if tagged else "untested")
         else:
-            tagged  = ((post_highs >= z.low) & (post_highs <= z.high)).any()
+            tag_mask = (post_highs >= z.low) & (post_highs <= z.high)
+            tagged   = tag_mask.any()
             breached = (post_highs > z.high).any()
-            z.status = "tested-breached" if breached else ("tested-held" if tagged else "untested")
+        z.status = "tested-breached" if breached else ("tested-held" if tagged else "untested")
+        # Mitigated = price has returned into the zone (tagged) OR blown through it.
+        z.mitigated = bool(tagged or breached)
+        # Live = formed, not yet tapped, not breached → still a clean setup.
+        z.is_live = (z.status == "untested")
+        # First tap date (only meaningful when tagged)
+        if tagged:
+            try:
+                first_idx = int(np.argmax(tag_mask))  # first True
+                z.mitigation_date = str(post_dates[first_idx])[:10]
+            except Exception:
+                z.mitigation_date = ""
 
     zones.sort(key=lambda z: z.bar_idx)
     return zones[-max_zones:]
@@ -434,6 +460,19 @@ def detect_smc_zones(df: pd.DataFrame, weekly_df: Optional[pd.DataFrame] = None,
     bars_1h = _attach_intraday_bars(df_1h, n=200) if df_1h is not None else []
     bars_4h = _attach_intraday_bars(df_4h, n=120) if df_4h is not None else []
     bars_weekly = attach_bars_daily(weekly_df, n=104) if weekly_df is not None else _resample_weekly_bars(df, n=104)
+    # 2026-05-29 · Nearest LIVE order block — the entry-timing read. Of the
+    # untested (unmitigated) OBs, find the one closest to current price. A live
+    # bull OB just below price = a buy-the-dip target; a live bear OB just above
+    # = resistance / short zone. Mitigated/breached OBs are excluded (spent).
+    live_obs = [z for z in obs if z.is_live]
+    nearest_live = None
+    if live_obs:
+        z = min(live_obs, key=lambda z: abs(z.dist_from_price_pct))
+        nearest_live = {
+            "kind": z.kind, "low": z.low, "high": z.high, "date": z.date,
+            "dist_from_price_pct": z.dist_from_price_pct,
+            "volume_at_formation": z.volume_at_formation,
+        }
     return {
         "order_blocks":     [asdict(z) for z in obs],
         "fvgs":             [asdict(z) for z in fvgs],
@@ -445,6 +484,10 @@ def detect_smc_zones(df: pd.DataFrame, weekly_df: Optional[pd.DataFrame] = None,
         "bars_1h":          bars_1h,
         "bars_4h":          bars_4h,
         "bars_weekly":      bars_weekly,
+        # Mitigation summary (2026-05-29)
+        "ob_live_count":    len(live_obs),
+        "ob_total_count":   len(obs),
+        "nearest_live_ob":  nearest_live,
         "synth":            False,
     }
 
