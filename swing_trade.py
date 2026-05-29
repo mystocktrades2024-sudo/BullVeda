@@ -1659,7 +1659,39 @@ def run_daily_scan(force_fresh: bool = False):
     # Stubbed callers return empty dicts; downstream code handles None gracefully.
     finviz_bulk      = {}
     finviz_news_list = []
+
+    # 2026-05-28 · Level-1 quote snapshot (bid/ask/last/sizes/volume) from
+    # Schwab Market Data /quotes — batched at 500 symbols/call so the full
+    # universe costs ~2-4 calls. Gives the dashboard live marks for P&L + exit
+    # alerts across ALL modes (swing/position/invest). Previously stubbed {}
+    # → quote_snapshot data-health was 0/N. Schwab Market Data scope only —
+    # no Trader-API / account access needed.
     quote_snapshot = {}
+    try:
+        import schwab_client as _sc
+        _raw_q = _sc.get_quotes_batch(tickers_to_analyze)
+        for _sym, _blob in (_raw_q or {}).items():
+            _q = (_blob or {}).get("quote") or {}
+            if not _q:
+                continue
+            quote_snapshot[_sym.upper()] = {
+                "bid":        _q.get("bidPrice"),
+                "ask":        _q.get("askPrice"),
+                "last":       _q.get("lastPrice"),
+                "bid_size":   _q.get("bidSize"),
+                "ask_size":   _q.get("askSize"),
+                "last_size":  _q.get("lastSize"),
+                "volume":     _q.get("totalVolume"),
+                "mark":       _q.get("mark"),
+                "quote_time": _q.get("quoteTime"),
+                "trade_time": _q.get("tradeTime"),
+                "spread_pct": (round((_q["askPrice"] - _q["bidPrice"]) / _q["bidPrice"] * 100, 3)
+                               if _q.get("askPrice") and _q.get("bidPrice") and _q["bidPrice"] > 0 else None),
+                "_source": "schwab_l1",
+            }
+        log.info(f"  Schwab L1 quote snapshot: {len(quote_snapshot)}/{len(tickers_to_analyze)} tickers")
+    except Exception as _q_err:
+        log.warning(f"  Schwab quote snapshot failed (non-fatal): {_q_err}")
 
     news_articles_data = {}
     options_chain_data = {}
@@ -3477,7 +3509,7 @@ def run_daily_scan(force_fresh: bool = False):
     _dh("Analyst Revisions", "Finviz scrape", sum(1 for r in all_results if (r.get("analyst") or {}).get("total_analysts", 0) > 0 or (r.get("analyst") or {}).get("target_mean") is not None), _n_res)
     _dh("Estimate Revision", "Finviz EPS", sum(1 for r in all_results if r.get("extra_fund", {}).get("estimate_revision")), _n_res)
     _dh("Weekly OHLCV", "Polygon", sum(1 for r in all_results if r.get("scoring_breakdown", {}).get("bonus_total", 0) != 0), _n_res, threshold_warn=30)
-    _dh("Quote Snapshot", "EODHD", sum(1 for r in all_results if r.get("quote_snapshot")), _n_res)
+    _dh("Quote Snapshot", "Schwab L1", sum(1 for r in all_results if r.get("quote_snapshot")), _n_res)
     _dh("Finnhub Data", "Finnhub", sum(1 for r in all_results if r.get("finnhub") and len(r["finnhub"]) > 3), _n_res)
     _dh("FMP Data", "FMP", sum(1 for r in all_results if r.get("fmp") and len(r["fmp"]) > 3), _n_res)
     _dh("SMC Zones", "Polygon OHLCV", sum(1 for r in all_results if r.get("smc", {}).get("score", 0) != 0), _n_res, threshold_warn=30)
