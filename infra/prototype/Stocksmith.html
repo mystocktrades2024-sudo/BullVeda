@@ -4207,48 +4207,20 @@ select.um-input { cursor: pointer; }
   @keyframes ss-toast-in { from { opacity:0; transform:translate(-50%,8px);} to {opacity:1; transform:translate(-50%,0);} }
 
   /* ════════════════════════════════════════════════════════════
-     PER-TICKER DETAIL OVERLAY — host for the 14-lens detail panel.
-     Full-screen drawer; .dpanel fills it and .dpanel-body scrolls.
+     PER-TICKER DETAIL — in-layout master·detail (NOT a modal).
+     Clicking a ticker swaps the main body for the DetailPanel and
+     shows the collapsible ScanColumn beside it (.app grid handles
+     the column; .app--focus collapses it). These are small extras.
      ════════════════════════════════════════════════════════════ */
-  .ss-detail-overlay {
-    position: fixed; inset: 0; z-index: 8000;
-    display: flex;
-    background: color-mix(in oklab, var(--bg) 78%, transparent);
-    backdrop-filter: blur(5px);
-    animation: ss-detail-in 0.16s ease;
-  }
-  @keyframes ss-detail-in { from { opacity: 0; } to { opacity: 1; } }
-  .ss-detail-shell {
-    margin: auto;
-    width: min(1240px, 96vw);
-    height: 94vh;
-    display: flex; flex-direction: column;
-    background: var(--bg);
-    border: 1px solid var(--glass-line-2);
-    border-radius: var(--r-3);
-    box-shadow: var(--shadow-2), 0 0 0 1px color-mix(in oklab, var(--copper) 10%, transparent);
-    overflow: hidden;
-    position: relative;
-  }
-  .ss-detail-shell .dpanel { flex: 1; min-height: 0; }
-  .ss-detail-shell .dpanel-body { flex: 1; min-height: 0; overflow-y: auto; }
-  .ss-detail-close {
-    position: absolute; top: 11px; right: 14px; z-index: 5;
-    width: 28px; height: 28px; border-radius: 50%;
+  .sc--collapsed { overflow: hidden; }
+  .sc--collapsed .sc-list { padding: 6px 4px; }
+  .dp-back {
     display: inline-flex; align-items: center; justify-content: center;
-    background: var(--glass-bg-2); border: 1px solid var(--glass-line-2);
-    color: var(--ink-2); font-family: var(--mono); font-size: 15px; cursor: pointer;
-    transition: all 0.12s;
+    width: 26px; height: 26px; border-radius: var(--r-2);
+    background: var(--glass-bg-2); border: 1px solid var(--glass-line); color: var(--ink-2);
+    font-family: var(--mono); font-size: 13px; cursor: pointer;
   }
-  .ss-detail-close:hover { color: var(--rd); border-color: color-mix(in oklab, var(--rd) 45%, transparent); }
-  /* header mode toggle (SWING / POSITION / INVESTMENT) */
-  .dp-mode-seg { display: inline-flex; gap: 1px; background: var(--glass-line); padding: 1px; border-radius: var(--r-2); }
-  .dp-mode-seg button {
-    background: transparent; border: none; cursor: pointer;
-    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.10em;
-    padding: 4px 9px; border-radius: calc(var(--r-2) - 1px); color: var(--ink-3);
-  }
-  .dp-mode-seg button.is-on { background: var(--copper-bg); color: var(--copper); }
+  .dp-back:hover { color: var(--copper); border-color: color-mix(in oklab, var(--copper) 40%, transparent); }
   .dp-hero-seg { display: inline-flex; gap: 4px; }
   .dp-hero-seg button {
     background: var(--glass-bg-2); border: 1px solid var(--glass-line); cursor: pointer;
@@ -4761,7 +4733,7 @@ function UserMenu({ book }) {
   );
 }
 
-function CommandBar({ surface, theme, onTheme, tier, onTier, onHome, book }) {
+function CommandBar({ surface, ticker, mode, onMode, focusMode, onToggleFocus, theme, onTheme, tier, onTier, onHome, book }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
   const time = now.toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", second:"2-digit", hour12:false });
@@ -4775,6 +4747,7 @@ function CommandBar({ surface, theme, onTheme, tier, onTier, onHome, book }) {
         <div className="cmd-breadcrumb mono">
           <button className="cmd-bc-link" onClick={onHome}>Home</button>
           {surface !== "home" && (<><span className="dim">/</span><span className="copper">{SURFACE_LABEL(surface)}</span></>)}
+          {ticker && (<><span className="dim">/</span><span><b>{ticker}</b></span></>)}
         </div>
       </div>
       <div className="cmd-center">
@@ -4785,6 +4758,11 @@ function CommandBar({ surface, theme, onTheme, tier, onTier, onHome, book }) {
         </div>
       </div>
       <div className="cmd-right">
+        {ticker && (
+          <div className="cmd-mode seg">
+            {["SWING","POSITION","INVESTMENT"].map(m => <button key={m} className={`seg-btn ${mode===m?"is-on":""}`} onClick={()=>onMode(m)}>{m}</button>)}
+          </div>
+        )}
         <ThemeQuickPick value={theme} onChange={onTheme} />
         <TierPicker value={tier} onChange={onTier} />
         <div className="cmd-time" title={date}><span className="cmd-time-pulse" /><span className="cmd-time-v mono">{time}</span><span className="cmd-time-tz mono dim">ET</span></div>
@@ -6539,18 +6517,19 @@ function LensStub({ lensId }) {
     </div>
   );
 }
-function DetailHeader({ ticker, mode, onMode, heroStyle, onHeroStyle, sizeCat, onClose }) {
+function DetailHeader({ ticker, sizeCat, heroStyle, onHeroStyle, focusMode, onToggleFocus, onBack }) {
   return (
     <div className="dp-hdr">
       <div className="dp-hdr-row">
         <div className="dp-hdr-id">
+          <button className="dp-back" onClick={onBack} title="Back to scan (Esc)">◀</button>
           <div className="dp-hdr-sym mono"><b>{ticker.symbol}</b></div>
           <div className="dp-hdr-meta dim2"><span>{ticker.exchange}</span><span>·</span><span>{ticker.sector} · {ticker.industry}</span><span>·</span><span className="mono">${(ticker.mcap/1e9).toFixed(2)}B</span></div>
         </div>
         <div className="dp-hdr-actions">
-          <div className="dp-mode-seg">{["SWING","POSITION","INVESTMENT"].map(m=><button key={m} className={mode===m?"is-on":""} onClick={()=>onMode(m)}>{m}</button>)}</div>
           <div className="dp-hero-seg">{[["radar","◵"],["gauge","◔"],["cone","◿"]].map(([h,g])=><button key={h} className={heroStyle===h?"is-on":""} onClick={()=>onHeroStyle(h)} title={`hero · ${h}`}>{g}</button>)}</div>
           <button className="btn btn--sm">＋ Watchlist</button>
+          <button className={`btn btn--sm ${focusMode?"btn--primary":""}`} onClick={onToggleFocus} title={focusMode?"Exit focus mode (show scan list)":"Focus mode (collapse scan list)"}>{focusMode?"◀ Exit Focus":"◉ Focus"}</button>
         </div>
       </div>
       <div className="dp-hdr-row dp-hdr-quote">
@@ -6586,36 +6565,96 @@ function DetailTabs({ lensId, onLensId, sizeCat, tier=4 }) {
     </div>
   );
 }
-function DetailPanel({ ticker, tier=4, onClose }) {
-  const [lensId, setLensId] = useState("overview");
-  const [mode, setMode] = useState("SWING");
-  const [heroStyle, setHeroStyle] = useState("radar");
-  const sizeCat = "XL";
+// In-layout detail panel — fills the main content area (NOT a modal). Width is
+// observed so the lens grids reflow S/M/L/XL exactly like the prototype.
+function DetailPanel({ ticker, lensId, onLensId, mode, heroStyle, onHeroStyle, focusMode, onToggleFocus, onBack, tier=4 }) {
+  const ref = useRef(null);
+  const [w, setW] = useState(960);
+  useEffect(() => {
+    if (!ref.current || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(es => { for (const e of es) setW(Math.round(e.contentRect.width)); });
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  const sizeCat = w < 540 ? "S" : w < 760 ? "M" : w < 1000 ? "L" : "XL";
   return (
-    <section className={`dpanel dpanel--${sizeCat}`}>
-      <DetailHeader ticker={ticker} mode={mode} onMode={setMode} heroStyle={heroStyle} onHeroStyle={setHeroStyle} sizeCat={sizeCat} onClose={onClose} />
-      <DetailTabs lensId={lensId} onLensId={setLensId} sizeCat={sizeCat} tier={tier} />
+    <section className={`dpanel dpanel--${sizeCat}`} ref={ref}>
+      <DetailHeader ticker={ticker} sizeCat={sizeCat} heroStyle={heroStyle} onHeroStyle={onHeroStyle} focusMode={focusMode} onToggleFocus={onToggleFocus} onBack={onBack} />
+      <DetailTabs lensId={lensId} onLensId={onLensId} sizeCat={sizeCat} tier={tier} />
       <div className="dpanel-body">
         <DetailLens lensId={lensId} ticker={ticker} mode={mode} sizeCat={sizeCat} headerStyle="copper" kpiStyle="bare" heroStyle={heroStyle} />
       </div>
     </section>
   );
 }
-function DetailOverlay({ sym, screener, data, tier, toast, onClose }) {
-  const ticker = useMemo(() => {
-    const uni = mapScannerRows(screener, data);
-    const row = uni.find(r => r.sym === sym);
-    return toDetailTicker(row, sym);
-  }, [sym, screener, data]);
-  useEffect(() => { window.__tier = tier; window.__ssToastFn = toast; }, [tier, toast]);
-  return ReactDOM.createPortal((
-    <div className="ss-detail-overlay" onMouseDown={(e)=>{ if (e.target.classList.contains("ss-detail-overlay")) onClose(); }}>
-      <div className="ss-detail-shell">
-        <button className="ss-detail-close" onClick={onClose} title="Close (Esc)">✕</button>
-        <DetailPanel ticker={ticker} tier={tier} onClose={onClose} />
+
+/* ── ScanColumn — collapsible candidate list beside the detail panel ── */
+const SCAN_WIDTHS = { S:192, M:248, L:320, XL:400 };
+const scSparkCache = {};
+function scSpark(sym) {
+  if (scSparkCache[sym]) return scSparkCache[sym];
+  let p = 50 + (sym.charCodeAt(0) % 20); const arr = []; const trend = (((sym.charCodeAt(1)||0) % 5) - 2) * 0.2;
+  for (let i=0;i<22;i++){ p += trend + Math.sin(i*0.6 + sym.charCodeAt(0))*0.7; arr.push(p); }
+  scSparkCache[sym] = arr; return arr;
+}
+function ScanColumn({ universe, activeTicker, onTicker, widthCat, onWidthCat, collapsed }) {
+  const [tab, setTab] = useState("top");
+  const items = useMemo(() => {
+    let r = universe || [];
+    if (tab === "buy")   r = r.filter(x => x.verdict === "BUY");
+    if (tab === "watch") r = r.filter(x => x.verdict === "WATCH");
+    if (tab === "top")   r = r.filter(x => x.score >= 70);
+    return [...r].sort((a,b) => b.score - a.score).slice(0, 60);
+  }, [universe, tab]);
+  const width = collapsed ? 64 : SCAN_WIDTHS[widthCat];
+  const wc = collapsed ? "C" : widthCat;
+  return (
+    <aside className={`sc ${collapsed?"sc--collapsed":""}`} style={{ width }}>
+      {!collapsed && (
+        <div className="sc-hdr">
+          <div className="sc-surf-tabs">
+            {[{id:"top",label:"TOP",tone:"copper"},{id:"buy",label:"BUY",tone:"gn"},{id:"watch",label:"WATCH",tone:"ink"},{id:"all",label:"ALL",tone:"violet"}].map(t=>(
+              <button key={t.id} className={`sc-surf ${tab===t.id?"is-on":""} sc-surf--${t.tone}`} onClick={()=>setTab(t.id)}>{t.label}</button>
+            ))}
+          </div>
+          <div className="sc-presets">{["S","M","L","XL"].map(s=><button key={s} className={`sc-preset ${widthCat===s?"is-on":""}`} onClick={()=>onWidthCat(s)} title={`Scan column width ${s}`}>{s}</button>)}</div>
+        </div>
+      )}
+      <div className="sc-list">
+        {items.map((it,i)=><ScanRow key={it.sym+i} item={it} active={it.sym===activeTicker} onClick={()=>onTicker(it.sym)} widthCat={wc} collapsed={collapsed} rank={i+1} />)}
+        {items.length===0 && <div className="sc-empty"><div className="state-msg-em">No candidates in this scan.</div><div className="state-msg mono dim">Switch tab · or wait for next bundle.</div></div>}
       </div>
-    </div>
-  ), document.body);
+      {!collapsed && <div className="sc-foot"><FreshnessPill state="live" age="18s" /><span className="mono dim2">{(universe||[]).length} ranked</span></div>}
+    </aside>
+  );
+}
+function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
+  const vt = item.verdict==="BUY"?"gn":item.verdict==="AVOID"?"rd":"amb";
+  if (collapsed) {
+    return (
+      <button className={`sc-row sc-row--mini ${active?"is-active":""}`} onClick={onClick} title={`${item.name} · ${item.verdict} · score ${item.score}`}>
+        <span className={`sc-row-sym mono ${active?"copper":""}`}>{item.sym}</span>
+        <span className={`sc-row-chg mono ${item.chg>=0?"up":"dn"}`}>{item.chg>=0?"+":""}{(item.chg||0).toFixed(1)}</span>
+      </button>
+    );
+  }
+  return (
+    <button className={`sc-row ${active?"is-active":""}`} onClick={onClick}>
+      <div className="sc-row-head">
+        <span className="sc-row-rank mono dim">{String(rank).padStart(2,"0")}</span>
+        <span className={`sc-row-sym mono ${active?"copper":""}`}><b>{item.sym}</b></span>
+        <span className={`sc-row-chg mono ${item.chg>=0?"up":"dn"}`}>{item.chg>=0?"+":""}{(item.chg||0).toFixed(2)}%</span>
+        <span className="sc-row-score mono"><b>{item.score}</b></span>
+      </div>
+      {(widthCat==="M"||widthCat==="L"||widthCat==="XL") && (
+        <div className="sc-row-meta"><span className="sc-row-name dim">{item.name}</span>{(widthCat==="L"||widthCat==="XL") && <span className="sc-row-px mono dim2">${(item.price||0).toFixed(2)}</span>}</div>
+      )}
+      {(widthCat==="L"||widthCat==="XL") && (
+        <div className="sc-row-foot"><Pill tone={vt} small>{item.verdict}</Pill><span className="sc-row-setup mono dim">{item.setup}</span></div>
+      )}
+      {widthCat==="XL" && <div className="sc-row-spark"><Sparkline data={scSpark(item.sym)} color={`var(--${item.chg>=0?"gn":"rd"})`} w={180} h={20} /></div>}
+    </button>
+  );
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -6631,9 +6670,14 @@ function App() {
   const [screener, setScreener] = useState(null); // null = loading
   const [err, setErr] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
-  const [detailSym, setDetailSym] = useState(null);  // open per-ticker 14-lens detail panel
+  const [detailSym, setDetailSym] = useState(null);  // active ticker → in-layout 14-lens detail panel
+  const [lensId, setLensId] = useState("overview");
+  const [mode, setMode] = useState("SWING");          // SWING · POSITION · INVESTMENT
+  const [heroStyle, setHeroStyle] = useState("radar"); // radar · gauge · cone
+  const [focus, setFocus] = useState(false);           // focus mode collapses the scan column
+  const [scanWidth, setScanWidth] = useState("M");     // S · M · L · XL
 
-  useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
+  useEffect(() => { document.documentElement.setAttribute("data-theme", theme); window.__tier = tier; window.__ssToastFn = toast; });
 
   // Fetch the same payloads kairos.html consumes.
   useEffect(() => {
@@ -6644,24 +6688,30 @@ function App() {
     get("/v2/data_screener.json").then(j => setScreener((j && j.screener) || [])).catch(() => get("data_screener.json").then(j => setScreener((j && j.screener) || [])).catch(() => setScreener([])));
   }, []);
 
-  useEffect(() => {
-    const onKey = (e) => { if (["INPUT","TEXTAREA"].includes(e.target.tagName)) return; if (e.key==="Escape") { setSurface("home"); } };
-    window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
   const toast = (msg) => { setToastMsg(msg); clearTimeout(window.__ssToast); window.__ssToast = setTimeout(() => setToastMsg(null), 2600); };
-  const onTicker = (sym) => setDetailSym(sym);
+  const onTicker = (sym, lens) => { setLensId(lens || "overview"); setDetailSym(sym); };
 
-  // Esc closes the detail panel first (before the home-reset handler). Capture
-  // phase + stopPropagation so it beats the global Escape→home listener above.
+  // Keyboard: lens shortcuts (1-9/letters) + f (focus) when a ticker is open;
+  // Esc closes the detail panel first, else resets to home.
   useEffect(() => {
-    if (!detailSym) return;
-    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setDetailSym(null); } };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    const lensMap = { "1":"overview","2":"plan","3":"chart","4":"patterns","5":"smc","6":"risk","7":"investment","8":"earnings","9":"options",
+                      "t":"technicals","T":"technicals","o":"options","O":"options","i":"tape","I":"tape","m":"mledge","M":"mledge" };
+    const onKey = (e) => {
+      if (["INPUT","TEXTAREA"].includes(e.target.tagName)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "Escape") { if (detailSym) { setDetailSym(null); } else { setSurface("home"); } return; }
+      if (!detailSym) return;
+      if (e.key === "f" || e.key === "F") { setFocus(v => !v); return; }
+      const next = lensMap[e.key];
+      if (next) { e.preventDefault(); setLensId(next); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [detailSym]);
-  const onPick = (id) => setSurface(id);
-  const goHome = () => setSurface("home");
+
+  // Rail click switches workspace AND exits any open ticker (prototype behavior).
+  const onPick = (id) => { setDetailSym(null); setSurface(id); };
+  const goHome = () => { setDetailSym(null); setSurface("home"); };
 
   const book = useMemo(() => {
     const p = (data && data.portfolio) || {};
@@ -6688,15 +6738,28 @@ function App() {
     body = <div className="main-home"><HomeView d={data} earnings={earnings} misc={misc} screener={screener} onTicker={onTicker} toast={toast} onScan={(f)=>{ window.__scanFilter=f; setSurface("signal-scanner"); }} /></div>;
   }
 
+  // Universe (shared by the scan column) + the active ticker's detail shape.
+  const universe = useMemo(() => mapScannerRows(screener, data), [screener, data]);
+  const detailTicker = useMemo(() => detailSym ? toDetailTicker(universe.find(r => r.sym === detailSym), detailSym) : null, [detailSym, universe]);
+
   return (
-    <div className="app">
+    <div className={`app ${detailSym && focus ? "app--focus" : ""}`}>
       <IconRail activeId={surface} onPick={onPick} tier={tier} />
+      {detailSym && (
+        <ScanColumn universe={universe} activeTicker={detailSym} onTicker={onTicker}
+                    widthCat={scanWidth} onWidthCat={setScanWidth} collapsed={focus} />
+      )}
       <main className="main">
-        <CommandBar surface={surface} theme={theme} onTheme={setTheme} tier={tier} onTier={setTier} onHome={goHome} book={book} />
-        {body}
+        <CommandBar surface={surface} ticker={detailSym} mode={mode} onMode={setMode}
+                    focusMode={focus} onToggleFocus={()=>setFocus(v=>!v)}
+                    theme={theme} onTheme={setTheme} tier={tier} onTier={setTier} onHome={goHome} book={book} />
+        {detailSym
+          ? <DetailPanel ticker={detailTicker} lensId={lensId} onLensId={setLensId} mode={mode}
+                         heroStyle={heroStyle} onHeroStyle={setHeroStyle} focusMode={focus}
+                         onToggleFocus={()=>setFocus(v=>!v)} onBack={()=>setDetailSym(null)} tier={tier} />
+          : body}
       </main>
       {toastMsg && <div className="ss-toast">{toastMsg}</div>}
-      {detailSym && <DetailOverlay sym={detailSym} screener={screener} data={data} tier={tier} toast={toast} onClose={()=>setDetailSym(null)} />}
     </div>
   );
 }
