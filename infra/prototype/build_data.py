@@ -4350,6 +4350,35 @@ def main():
         _path.write_text(json.dumps(_chunk, default=str, indent=0, allow_nan=False))
         print(f"wrote {_path.name} ({_path.stat().st_size:,} bytes)")
 
+    # ─── X (Twitter) chatter sidecar ──────────────────────────────────────
+    # Reads cache/x_signal.json (written by scripts/build_x_signal.py — free
+    # Nitter RSS poll of tracked handles every 4h) and emits a slimmed-down
+    # version for the dashboard. Stocksmith + kairos read this sidecar.
+    try:
+        _xs_path = ROOT / "cache" / "x_signal.json"
+        if _xs_path.exists():
+            _xs = json.loads(_xs_path.read_text())
+            _x_out = {
+                "_meta": _xs.get("_meta", {}),
+                "config": _xs.get("config", {}),
+                "top_tickers_24h": _xs.get("top_tickers_24h", [])[:20],
+                "top_tickers_7d":  _xs.get("top_tickers_7d",  [])[:30],
+                "by_handle":       _xs.get("by_handle", {}),
+                "recent_posts":    _xs.get("recent_posts", [])[:100],
+                "by_ticker": {t["ticker"]: _xs.get("by_ticker", {}).get(t["ticker"])
+                              for t in (_xs.get("top_tickers_7d", [])[:60])
+                              if _xs.get("by_ticker", {}).get(t["ticker"])},
+            }
+            _xpath = OUT / "data_x_chatter.json"
+            _xpath.write_text(json.dumps(_x_out, default=str, indent=0, allow_nan=False))
+            print(f"wrote {_xpath.name} ({_xpath.stat().st_size:,} bytes · "
+                  f"{_x_out['_meta'].get('handles_polled','?')} handles, "
+                  f"{_x_out['_meta'].get('unique_tickers','?')} tickers)")
+        else:
+            print("skipped data_x_chatter.json (cache/x_signal.json absent — run scripts/build_x_signal.py first)")
+    except Exception as _e:
+        print(f"WARN: data_x_chatter.json emit failed: {_e}")
+
     # Tickers — rich payload for elite-detail page
     # Pre-build earn_days lookup from the loaded earnings_watchlist so we can
     # stamp it onto each src row BEFORE rich_row() rebuilds the output dict
