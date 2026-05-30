@@ -4219,6 +4219,14 @@ select.um-input { cursor: pointer; }
 
 /* A4 — defensive-tape banner (ML Predictions grid) */
 .aip-defensive { margin: 0 0 11px; padding: 8px 11px; border: 1px solid var(--rd); border-left: 3px solid var(--rd); border-radius: 6px; background: color-mix(in oklab, var(--rd) 12%, var(--bg-1)); color: var(--ink); font-size: 11.5px; }
+
+/* C1 — Automated Trade consolidated workspace */
+.atc { display: flex; flex-direction: column; }
+.atc-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 10px; }
+.atc-head .wsx-title { margin: 0; }
+.atc-sub { font-size: 11px; }
+.atc-tabs { margin: 0 0 14px; flex-wrap: wrap; }
+.atc-body > .surface { padding: 0; }
 </style>
 
 <!-- Supplemental (Stocksmith-only): loading / scaffold / placeholder / toast.
@@ -19092,6 +19100,43 @@ function pfMonths(map) {
   });
 }
 
+// C1 â Automated Trade: consolidates the paper-book management surfaces into ONE
+// tabbed workspace. Each sub-tab renders the existing real-data surface component
+// (no new data paths). Exposure is folded into Risk (SurfaceRisk renders both the
+// risk metrics and the Factor Exposure / Sector Allocation panel).
+function SurfaceAutomatedTrade({ onTicker, data, universe, heldSyms }) {
+  const [sub, setSub] = useState("positions");
+  const TABS = [
+    ["positions", "Positions"],
+    ["performance", "Performance"],
+    ["journal", "Journal"],
+    ["watchlist", "Watchlist"],
+    ["risk", "Risk · Exposure"],
+    ["alerts", "Alerts"],
+  ];
+  return (
+    <div className="surface atc">
+      <div className="atc-head">
+        <h1 className="wsx-title mono">Automated Trade</h1>
+        <span className="atc-sub mono dim2">paper · auto-managed book · positions → performance → journal → watchlist → risk → alerts</span>
+      </div>
+      <div className="lab-tabs atc-tabs">
+        {TABS.map(([id, l]) => (
+          <button key={id} className={"lab-tab " + (sub === id ? "is-on" : "")} onClick={() => setSub(id)}>{l}</button>
+        ))}
+      </div>
+      <div className="atc-body">
+        {sub === "positions"   && <SurfacePortfolio   onTicker={onTicker} data={data} />}
+        {sub === "performance" && <SurfacePerformance onTicker={onTicker} data={data} />}
+        {sub === "journal"     && <SurfaceJournal     onTicker={onTicker} data={data} />}
+        {sub === "watchlist"   && <SurfaceWatchlist   onTicker={onTicker} universe={universe} held={heldSyms} />}
+        {sub === "risk"        && <SurfaceRisk        onTicker={onTicker} data={data} />}
+        {sub === "alerts"      && <SurfaceAlerts      onTicker={onTicker} data={data} />}
+      </div>
+    </div>
+  );
+}
+
 function SurfacePortfolio({ onTicker, data }) {
   const onTick = typeof onTicker === "function" ? onTicker : function () {};
   const D = data || (typeof window !== "undefined" && window.__ssData) || {};
@@ -32169,7 +32214,7 @@ function App() {
   } else if (surface === "watchlist") {
     body = <div className="main-home"><SurfaceWatchlist onTicker={onTicker} universe={universe} held={heldSyms} /></div>;
   } else if (surface === "portfolio-srf") {
-    body = <div className="main-home"><SurfacePortfolio onTicker={onTicker} data={data} /></div>;
+    body = <div className="main-home"><SurfaceAutomatedTrade onTicker={onTicker} data={data} universe={universe} heldSyms={heldSyms} /></div>;
   } else if (surface === "momentum") {
     body = <div className="main-home"><SurfaceMomentum onTicker={onTicker} data={data} screener={screener} /></div>;
   } else if (surface === "premarket") {
