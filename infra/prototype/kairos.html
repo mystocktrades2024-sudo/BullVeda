@@ -10931,7 +10931,7 @@ body.on-detail-tab .qdchk-trigger-btn { display: inline-flex; }
 
       <!-- 2026-05-16 · Discovery row · 52w highs · Squeezes · Insider · UOA -->
       <div class="qc-h">
-        <div class="qc-h-l"><span class="qc-h-title">Discovery</span><span class="qc-h-sub">what's emerging · 52w highs · squeezes · insider · UOA</span></div>
+        <div class="qc-h-l"><span class="qc-h-title">Discovery</span><span class="qc-h-sub">what's emerging · 52w highs · squeezes · insider · UOA · X chatter</span></div>
       </div>
       <div class="qc-discovery" id="qc-discovery"></div>
 
@@ -12380,7 +12380,7 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
    try {
     const _sc = (url) => fetch(url, { cache: 'no-store' })
       .then(r => r.ok ? r.json() : null).catch(() => null);
-    const [sCrypto, sPerf, sScreener, sKilled, sSigExt, sMisc, sOpt, sSetup, sEarn] = await Promise.all([
+    const [sCrypto, sPerf, sScreener, sKilled, sSigExt, sMisc, sOpt, sSetup, sEarn, sXChat] = await Promise.all([
       _sc('/v2/data_crypto.json'),
       _sc('/v2/data_perf.json'),
       _sc('/v2/data_screener.json'),
@@ -12390,11 +12390,12 @@ const _bapClass = (s) => s == null ? 'bad' : s >= 75 ? '' : s >= 65 ? 'lo' : 'ba
       _sc('/v2/options_flow.json'),
       _sc('/v2/setup_stats.json'),
       _sc('/v2/data_earnings.json'),
+      _sc('/v2/data_x_chatter.json'),
     ]);
     window.__sidecarCache = {
       crypto: sCrypto, perf: sPerf, screener: sScreener, killed: sKilled,
       signals_ext: sSigExt, misc: sMisc, options_flow: sOpt,
-      setup_stats: sSetup, earnings: sEarn,
+      setup_stats: sSetup, earnings: sEarn, x_chatter: sXChat,
     };
     data = data || {};
     const _has = (v) => v != null && !(typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0)
@@ -18305,18 +18306,21 @@ const QuantHome = (function() {
       const st = document.createElement('style');
       st.id = 'qc-discovery-css';
       st.textContent = `
-        .qc-discovery{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
-        @media(max-width:1200px){.qc-discovery{grid-template-columns:repeat(2,1fr)}}
+        .qc-discovery{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px}
+        @media(max-width:1400px){.qc-discovery{grid-template-columns:repeat(3,1fr)}}
+        @media(max-width:1000px){.qc-discovery{grid-template-columns:repeat(2,1fr)}}
         .qcd{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;display:flex;flex-direction:column;overflow:hidden;min-height:200px}
         .qcd.highs{border-top:2px solid var(--gn)}
         .qcd.sqz{border-top:2px solid #a78bfa}
         .qcd.insider{border-top:2px solid var(--copper)}
         .qcd.uoa{border-top:2px solid var(--rd)}
+        .qcd.xchat{border-top:2px solid #5b9bf2}
         .qcd-head{padding:9px 12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline;font:800 10.5px var(--mono);letter-spacing:.10em;text-transform:uppercase}
         .qcd.highs .qcd-head{color:var(--gn)}
         .qcd.sqz .qcd-head{color:#a78bfa}
         .qcd.insider .qcd-head{color:var(--copper)}
         .qcd.uoa .qcd-head{color:var(--rd)}
+        .qcd.xchat .qcd-head{color:#5b9bf2}
         .qcd-head .c{font:800 13px var(--mono);color:var(--ink)}
         .qcd-row{display:grid;grid-template-columns:48px 1fr 65px;gap:7px;align-items:center;padding:7px 12px;border-bottom:1px dashed var(--line);font:600 11px var(--mono);cursor:pointer;transition:background 80ms}
         .qcd-row:hover{background:var(--bg-3)}
@@ -18324,7 +18328,7 @@ const QuantHome = (function() {
         .qcd-row .sym{font:800 11.5px var(--mono);color:var(--ink);letter-spacing:.04em}
         .qcd-row .meta{font:500 9.5px var(--mono);color:var(--ink-3);letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .qcd-row .px{text-align:right;color:var(--ink);font-weight:700;font-size:10.5px}
-        .qcd-row .px.gn{color:var(--gn)} .qcd-row .px.rd{color:var(--rd)} .qcd-row .px.vio{color:#a78bfa} .qcd-row .px.copper{color:var(--copper)}
+        .qcd-row .px.gn{color:var(--gn)} .qcd-row .px.rd{color:var(--rd)} .qcd-row .px.vio{color:#a78bfa} .qcd-row .px.copper{color:var(--copper)} .qcd-row .px.blue{color:#5b9bf2}
       `;
       document.head.appendChild(st);
     }
@@ -18356,11 +18360,28 @@ const QuantHome = (function() {
       const rows = items.length ? items.map(t => _row(t, kind)).join('') : '<div style="padding:30px 12px;text-align:center;font:500 10.5px var(--mono);color:var(--ink-3);font-style:italic">no signals today</div>';
       return `<div class="qcd ${kind}"><div class="qcd-head"><span>${title}</span><span class="c">${count}</span></div>${rows}</div>`;
     };
+    // X CHATTER — tracked X handles via Nitter (free, no API). Source: data_x_chatter.json
+    const xchat = (window.__sidecarCache && window.__sidecarCache.x_chatter) || null;
+    const xTop = (xchat && xchat.top_tickers_24h) || [];
+    const xRows = xTop.slice(0, 4).map(x => {
+      const ti = (window._kairosTickersArr || []).find(t => t && t.ticker === x.ticker) || { ticker: x.ticker };
+      // synthesize fields _row() expects, plus an x_chatter meta
+      return Object.assign({}, ti, {
+        _xmeta: (x.mentions_24h || 0) + 'x · ' + (x.n_unique_handles || 0) + ' handles',
+        _xpx: (x.mentions_24h || 0) + ' (' + (x.mentions_7d || 0) + ')',
+      });
+    });
+    const _xrow = (t) => `<div class="qcd-row" onclick="window.setDetailTicker&&window.setDetailTicker('${t.ticker}')"><a class="tk" href="#" onclick="window.setDetailTicker&&window.setDetailTicker(\'${t.ticker}\');return false" style="text-decoration:none"><span class="sym">${t.ticker}</span></a><span class="meta">${t._xmeta}</span><span class="px blue">${t._xpx}</span></div>`;
+    const _xcard = (title, count, items) => {
+      const rows = items.length ? items.map(_xrow).join('') : '<div style="padding:30px 12px;text-align:center;font:500 10.5px var(--mono);color:var(--ink-3);font-style:italic">no chatter today</div>';
+      return `<div class="qcd xchat"><div class="qcd-head"><span>${title}</span><span class="c">${count}</span></div>${rows}</div>`;
+    };
     wrap.innerHTML =
       _card('▲ 52W HIGHS', valid.filter(t => +t.perf_1d > 2).length, 'highs', highs) +
       _card('⌛ SQUEEZE', sqz.length, 'sqz', sqz) +
       _card('⌬ INSIDER', insider.length, 'insider', insider) +
-      _card('⚡ UOA', uoa.length, 'uoa', uoa);
+      _card('⚡ UOA', uoa.length, 'uoa', uoa) +
+      _xcard('🐦 X CHATTER', xTop.length, xRows);
   }
 
   // 2026-05-16 · Catalyst Gantt — horizontal timeline · auto-scale to relevant events
