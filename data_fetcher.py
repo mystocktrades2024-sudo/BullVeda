@@ -398,21 +398,22 @@ def get_nasdaq_100() -> list[str]:
 
 
 def get_nasdaq_all() -> list[str]:
-    """ALL common stocks listed on NASDAQ (EODHD exchange-symbol-list/NASDAQ).
-    Filters to Type='Common Stock' (drops ETFs/ADRs/warrants/units/preferred/funds)
-    so the scanner ranks tradable equities. Most overlap R1000/R2000; the net-new
-    chunk is the non-Russell NASDAQ small/micro-caps. Opt-in via config
-    universe.include_nasdaq_all — widens the pre-screen pool (Step 2), not the
-    enrichment cap (Step 4 stays bounded by max_enrichment_tickers)."""
+    """ALL common stocks AND ETFs listed on NASDAQ (EODHD exchange-symbol-list/NASDAQ).
+    Keeps Type in {Common Stock, ETF} (drops ADRs/warrants/units/preferred/funds/notes)
+    so the scanner ranks tradable equities + ETFs. Most equities overlap R1000/R2000;
+    the net-new chunk is the non-Russell NASDAQ small/micro-caps + NASDAQ-listed ETFs.
+    Opt-in via config universe.include_nasdaq_all — widens the pre-screen pool (Step 2),
+    not the enrichment cap (Step 4 stays bounded by max_enrichment_tickers)."""
     try:
         import eodhd_client as _eod
         syms = _eod.exchange_symbol_list("NASDAQ") or []
+        keep = {"Common Stock", "ETF"}
         seen = set(); ded = []
         for s in syms:
             if not isinstance(s, dict):
                 continue
             code = (s.get("Code") or "").strip().upper()
-            if not code or (s.get("Type") or "") != "Common Stock":
+            if not code or (s.get("Type") or "") not in keep:
                 continue
             if any(code.endswith(sfx) for sfx in ("WS", "U", "R", "P")) and len(code) > 4:
                 continue
