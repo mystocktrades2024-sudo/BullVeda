@@ -681,6 +681,18 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _t1e:
         log.debug(f"Tier-1 universe expansion fetch: {_t1e}")
 
+    # 2026-05-30 · Full NASDAQ exchange (opt-in) — all NASDAQ common stocks so the
+    # scanner ranks the whole exchange, not just NDX-100. Net-new = non-Russell
+    # small/micro-caps. Enrichment stays capped (max_enrichment_tickers).
+    nasdaq_all = []
+    try:
+        if (cfg.get("universe") or {}).get("include_nasdaq_all"):
+            from data_fetcher import get_nasdaq_all
+            nasdaq_all = get_nasdaq_all()
+            log.info(f"  NASDAQ (full exchange, common stock): {len(nasdaq_all)} tickers")
+    except Exception as _nae:
+        log.warning(f"  NASDAQ full-exchange fetch failed: {_nae}")
+
     # 2026-05-21 · Tier-2 universe extras · recent IPOs + post-earnings movers
     recent_ipos, pead_movers = [], []
     try:
@@ -842,8 +854,9 @@ def run_daily_scan(force_fresh: bool = False):
         screen_set   = set(t.upper() for t in screener_tickers)
         newhi_set    = set(t.upper() for t in new_highs_200d)
         newlo_set    = set(t.upper() for t in new_lows_200d)
+        ndxall_set   = set(t.upper() for t in nasdaq_all)
         base_set = (sp500_set | r1000_set | r2000_set | mid400_set | sml600_set
-                    | ndx_set | ipo_set | pead_set | insider_set | congress_set
+                    | ndx_set | ndxall_set | ipo_set | pead_set | insider_set | congress_set
                     | etf_set | crypto_set | screen_set | newhi_set | newlo_set
                     | zacks_r1_set | set(custom))
         universe = list(base_set)
@@ -854,6 +867,7 @@ def run_daily_scan(force_fresh: bool = False):
         for t in sml600_set:   ticker_sources.setdefault(t, "sp_smallcap_600")
         for t in r2000_set:    ticker_sources.setdefault(t, "russell2000")
         for t in ndx_set:      ticker_sources.setdefault(t, "nasdaq_100")
+        for t in ndxall_set:   ticker_sources.setdefault(t, "nasdaq_exchange")
         for t in ipo_set:      ticker_sources.setdefault(t, "recent_ipo")
         for t in pead_set:     ticker_sources.setdefault(t, "post_earnings_mover")
         for t in insider_set:  ticker_sources.setdefault(t, "insider_cluster")
@@ -868,7 +882,7 @@ def run_daily_scan(force_fresh: bool = False):
         log.info(f"  Universe: {len(universe)} "
                  f"(S&P 500={len(sp500)}, R1000={len(russell1000)}, "
                  f"R2000={len(russell2000)}, MID400={len(sp_mid400)}, "
-                 f"SML600={len(sp_small600)}, NDX100={len(nasdaq100)}, "
+                 f"SML600={len(sp_small600)}, NDX100={len(nasdaq100)}, NDXall={len(nasdaq_all)}, "
                  f"IPOs={len(recent_ipos)}, PEAD={len(pead_movers)}, "
                  f"insider={len(insider_cluster_tickers)}, "
                  f"congress={len(congressional_tickers)}, "

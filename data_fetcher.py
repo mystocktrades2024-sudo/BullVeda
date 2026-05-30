@@ -397,6 +397,36 @@ def get_nasdaq_100() -> list[str]:
     return _eodhd_universe("NDX") or []
 
 
+def get_nasdaq_all() -> list[str]:
+    """ALL common stocks listed on NASDAQ (EODHD exchange-symbol-list/NASDAQ).
+    Filters to Type='Common Stock' (drops ETFs/ADRs/warrants/units/preferred/funds)
+    so the scanner ranks tradable equities. Most overlap R1000/R2000; the net-new
+    chunk is the non-Russell NASDAQ small/micro-caps. Opt-in via config
+    universe.include_nasdaq_all — widens the pre-screen pool (Step 2), not the
+    enrichment cap (Step 4 stays bounded by max_enrichment_tickers)."""
+    try:
+        import eodhd_client as _eod
+        syms = _eod.exchange_symbol_list("NASDAQ") or []
+        seen = set(); ded = []
+        for s in syms:
+            if not isinstance(s, dict):
+                continue
+            code = (s.get("Code") or "").strip().upper()
+            if not code or (s.get("Type") or "") != "Common Stock":
+                continue
+            if any(code.endswith(sfx) for sfx in ("WS", "U", "R", "P")) and len(code) > 4:
+                continue
+            if code not in seen:
+                seen.add(code); ded.append(code)
+        return ded
+    except Exception as e:
+        try:
+            import logging as _lg; _lg.getLogger("swingtrade.data").warning(f"get_nasdaq_all failed: {e}")
+        except Exception:
+            pass
+        return []
+
+
 def get_universe_as_of(as_of_date: str, include_r1000: bool = True,
                         include_custom: bool = True) -> list[str]:
     """Point-in-time universe = S&P 500 (historical) ∪ R1000 (current) ∪ custom.
