@@ -11845,8 +11845,12 @@ const TC_TF_THESIS = {
   "1D": { bias:"BULL", tone:"up", read:"Primary trend up — base #2 breakout above pivot on +1.6× RVOL, stacked EMAs, above cloud.", struct:"BOS ↑ · above Kumo", note:"thesis timeframe" },
   "1W": { bias:"NEUTRAL", tone:"amb", read:"Higher-timeframe still basing — range-bound. Bull thesis valid but HTF resistance overhead; size down.", struct:"range · no break", note:"context timeframe" },
 };
+const MODE_TF = { SWING: "4H", POSITION: "1D", INVESTMENT: "1W" };  // B5 — chart TF follows the global SWING/POSITION/INVESTMENT mode
 function LensChart({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
-  const [tf, setTf] = useTCs("1D");
+  const [tf, setTf] = useTCs(MODE_TF[mode] || "1D");
+  const [tfTouched, setTfTouched] = useTCs(false);          // once the user picks a TF manually, stop auto-following the mode
+  React.useEffect(() => { if (!tfTouched) setTf(MODE_TF[mode] || "1D"); }, [mode]);
+  const pickTf = (k) => { setTfTouched(true); setTf(k); };
   const [full, setFull] = useTCs(false);
   const [indMenu, setIndMenu] = useTCs(false);
   const [ind, setInd] = useTCs({ ema:false, bb:false, avwap:false, ichi:false, smc:false, vp:false });
@@ -11924,7 +11928,7 @@ function LensChart({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) 
 
       <div className="tc-mtf">
         {["1H","4H","1D","1W"].map(k=>(
-          <button key={k} className={`tc-tf ${tf===k?"is-on":""}`} onClick={()=>setTf(k)}>
+          <button key={k} className={`tc-tf ${tf===k?"is-on":""}`} onClick={()=>pickTf(k)}>
             <span className="mono">{k}</span>
             <span className={`mono kpi-tone--${TC_TF_THESIS[k].tone==="up"?"gn":"amb"}`}>{TC_TF_THESIS[k].bias}</span>
           </button>
@@ -13035,18 +13039,27 @@ function SmrLossCone({ ticker }) {
 }
 
 function SmrRiskCones({ ticker }) {
+  // B3 — cone scales with the global horizon. Base magnitude is a ~10d forecast;
+  // median drift scales ∝ days, P10/P90 dispersion ∝ √days (Brownian σ·√t).
+  const mode = (typeof window !== "undefined" && window.__tmode) || "SWING";
+  const HD = { SWING: 1, POSITION: 10, INVESTMENT: 21 };
+  const days = HD[mode] || 10, k = days / 10, sq = Math.sqrt(k);
   const mag = (ticker && ticker.ml && ticker.ml.magnitude) || null;
   const px = ticker && typeof ticker.price === "number" ? ticker.price : null;
-  const lo = mag && mag.lo != null ? mag.lo : null;
-  const mid = mag && mag.mid != null ? mag.mid : null;
-  const hi = mag && mag.hi != null ? mag.hi : null;
+  const lo0 = mag && mag.lo != null ? mag.lo : null;
+  const mid0 = mag && mag.mid != null ? mag.mid : null;
+  const hi0 = mag && mag.hi != null ? mag.hi : null;
+  const mid = mid0 != null ? mid0 * k : null;
+  const lo = (lo0 != null && mid0 != null) ? (mid - (mid0 - lo0) * sq) : (lo0 != null ? lo0 * sq : null);
+  const hi = (hi0 != null && mid0 != null) ? (mid + (hi0 - mid0) * sq) : (hi0 != null ? hi0 * sq : null);
   const band = (p) => (px != null && p != null) ? "$" + (px * (1 + p / 100)).toFixed(2) : "—";
+  const d = days + "d";
   return (
     <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-      <KpiTile label="10d · P10" value={lo != null ? lo.toFixed(1) + "%" : "—"} tone="rd" sub={band(lo)} />
-      <KpiTile label="10d · P50" value={mid != null ? (mid >= 0 ? "+" : "") + mid.toFixed(1) + "%" : "—"} tone="gn" sub={band(mid)} />
-      <KpiTile label="10d · P90" value={hi != null ? "+" + hi.toFixed(1) + "%" : "—"} tone="gn" sub={band(hi)} />
-      <KpiTile label="Cone width" value={(lo != null && hi != null) ? (hi - lo).toFixed(1) + "pp" : "—"} tone="amb" sub="P90 − P10" />
+      <KpiTile label={d + " · P10"} value={lo != null ? lo.toFixed(1) + "%" : "—"} tone="rd" sub={band(lo)} />
+      <KpiTile label={d + " · P50"} value={mid != null ? (mid >= 0 ? "+" : "") + mid.toFixed(1) + "%" : "—"} tone="gn" sub={band(mid)} />
+      <KpiTile label={d + " · P90"} value={hi != null ? "+" + hi.toFixed(1) + "%" : "—"} tone="gn" sub={band(hi)} />
+      <KpiTile label="Cone width" value={(lo != null && hi != null) ? (hi - lo).toFixed(1) + "pp" : "—"} tone="amb" sub={"P90 − P10 · " + mode.toLowerCase()} />
     </div>
   );
 }
