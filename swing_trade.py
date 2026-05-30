@@ -4216,8 +4216,15 @@ def run_daily_scan(force_fresh: bool = False):
         except Exception as _sc_e:
             log.warning(f"Sector concentration cap step failed (skipped): {_sc_e}")
 
-        # #11: Portfolio-level position cap — don't emit more BUYs than slots available
+        # #11: Portfolio-level position cap — DISABLED by default (2026-05-30).
+        # It demoted valid BUY signals to WATCH purely because the OWNER's paper book was
+        # near capacity — gating a multi-user informational signal by one user's slots
+        # (violates project_unified_system_1k_to_1m + user-agency). The paper EXECUTOR
+        # enforces its own max_positions independently (executor.py:225), so the BUY list
+        # can stay complete without over-trading. Set decision_engine_portfolio_cap_enabled
+        # =true in config.json to restore slot-based demotion.
         try:
+            _cap_on = bool(_de_cfg.get("decision_engine_portfolio_cap_enabled", False))
             _max_open = int(_de_cfg.get("max_total_open_positions", 15))
             # Phase B.1 (2026-05-09): route through state_layer for cache + future Mode 2.
             _cur_open = 0
@@ -4235,7 +4242,11 @@ def run_daily_scan(force_fresh: bool = False):
                         _cur_open = 0
             _slots = max(0, _max_open - _cur_open)
             _bcs = bundle.get("buy_candidates") or []
-            if len(_bcs) > _slots:
+            if not _cap_on:
+                log.info(f"  Portfolio cap: OFF — all {len(_bcs)} BUY candidate(s) kept "
+                         f"({_cur_open} paper position(s) open; executor enforces max_positions "
+                         f"independently). Set decision_engine_portfolio_cap_enabled=true to restore.")
+            if _cap_on and len(_bcs) > _slots:
                 _bcs.sort(key=lambda x: -(x.get("score") or 0))
                 _kept = _bcs[:_slots]
                 _excess = _bcs[_slots:]
