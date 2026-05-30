@@ -4785,6 +4785,49 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as e:
         log.debug(f"Position tracker stop check failed: {e}")
 
+    # ── ML Edge inference over the FRESH bundle (config-gated) ───────────
+    # PROBLEM-2 fix: the standalone ml.run_ml_edge launchd job fires at 05:00,
+    # BEFORE this 06:30 scan, so it always scored YESTERDAY's bundle. Running
+    # inference here — AFTER cache/last_bundle.json is written and the v2
+    # dashboard/build_data + snapshots are finalized — couples predictions to
+    # today's scan. The local Parquet archive was just delta-updated at the top
+    # of this scan, so feature_extractor reads fresh bars WITHOUT new EODHD
+    # calls. Fully guarded: this must NEVER raise into the scan.
+    try:
+        _ml_cfg = (cfg.get("ml_edge") or {}) if isinstance(cfg, dict) else {}
+        if _ml_cfg.get("run_after_scan", False):
+            log.info("ML Edge: running inference over fresh bundle (run_after_scan=true)...")
+            try:
+                import time as _ml_time
+                _ml_start = _ml_time.time()
+                _ml_ran = False
+                # Prefer in-process call — defaults to universe=bundle (last_bundle.json).
+                try:
+                    from ml.run_ml_edge import main as _ml_edge_main
+                    _ml_edge_main([])
+                    _ml_ran = True
+                except Exception as _ml_imp_e:
+                    log.warning(f"ML Edge: in-process call failed ({type(_ml_imp_e).__name__}: "
+                                f"{str(_ml_imp_e)[:160]}) — falling back to subprocess")
+                    import subprocess as _ml_sub
+                    _r = _ml_sub.run([sys.executable, "-m", "ml.run_ml_edge"],
+                                     cwd=str(BASE_DIR), timeout=1800,
+                                     capture_output=True)
+                    if _r.returncode == 0:
+                        _ml_ran = True
+                    else:
+                        _err = (_r.stderr or b"").decode("utf-8", errors="replace").strip()[-400:]
+                        log.warning(f"ML Edge subprocess exit {_r.returncode}: {_err}")
+                if _ml_ran:
+                    log.info(f"ML Edge: inference finished in {_ml_time.time()-_ml_start:.0f}s")
+            except Exception as _ml_inner_e:
+                log.warning(f"ML Edge: inference failed (non-fatal): "
+                            f"{type(_ml_inner_e).__name__}: {str(_ml_inner_e)[:200]}")
+        else:
+            log.debug("ML Edge: run_after_scan disabled — skipping post-scan inference")
+    except Exception as _ml_outer_e:
+        log.warning(f"ML Edge post-scan hook skipped (non-fatal): {_ml_outer_e}")
+
     # Auto-start server so live analysis + portfolio work in the browser
     _auto_start_server()
 

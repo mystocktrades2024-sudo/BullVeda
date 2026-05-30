@@ -41,14 +41,77 @@ def _bars_df(bars: list[dict]) -> pd.DataFrame | None:
     return df
 
 
+def _archive_bars_df(ticker: str) -> "pd.DataFrame | None":
+    """Load bars from the daily scan's local Parquet archive (NO network call).
+
+    The 06:30 scan runs ``data_archive.delta_update`` right before scanning, so
+    ``data/ohlcv/{ticker}.parquet`` already holds today's fresh bars minutes
+    before ML Edge runs. Reading it here avoids re-hitting the EODHD quota
+    (which caused today's 402-on-SPY).
+
+    The archive frame is date-INDEXED with capitalized OHLCV columns; this
+    reshapes it to the EXACT shape ``_bars_df`` returns (a ``date`` *column*
+    plus lowercase ``open/high/low/close/adj_close/volume`` and ``px``), so the
+    downstream 17-feature math in ``_features_from_df`` is byte-for-byte
+    identical regardless of source. Archive has no adjusted close, so ``px``
+    falls back to ``close`` (same as ``_bars_df`` when ``adj_close`` is NaN).
+
+    Returns None (caller falls back to ``eodhd_client.eod``) if the archive has
+    no usable bars or on any error.
+    """
+    try:
+        from data_archive import load_ticker as _archive_load
+    except Exception:
+        return None
+    try:
+        adf = _archive_load(ticker)
+    except Exception:
+        return None
+    if adf is None or len(adf) == 0:
+        return None
+    try:
+        df = adf.reset_index()
+        # The archive index is unnamed → reset_index() yields an "index" col;
+        # otherwise it carries the index name (usually "date" or "Date").
+        idx_col = df.columns[0]
+        df = df.rename(columns={
+            idx_col: "date",
+            "Open": "open", "High": "high", "Low": "low",
+            "Close": "close", "Volume": "volume",
+        })
+        if "date" not in df.columns or "close" not in df.columns:
+            return None
+        df["date"] = pd.to_datetime(df["date"])
+        if df["date"].dt.tz is not None:
+            df["date"] = df["date"].dt.tz_localize(None)
+        df = df.sort_values("date").reset_index(drop=True)
+        # Archive carries no adjusted close → mirror _bars_df fallback semantics.
+        df["adj_close"] = df.get("adj_close", df["close"])
+        df["px"] = df["adj_close"].fillna(df["close"])
+        # Guard: need the columns _features_from_df consumes.
+        for col in ("high", "low", "volume", "px"):
+            if col not in df.columns:
+                return None
+        return df
+    except Exception:
+        return None
+
+
 def _spy_series() -> pd.Series:
     global _spy_cache
     if _spy_cache is not None:
         return _spy_cache
-    today = datetime.utcnow().date()
-    from_d = (today - timedelta(days=400)).isoformat()
-    bars = eodhd_client.eod("SPY", from_date=from_d, to_date=today.isoformat())
-    df = _bars_df(bars)
+    # Prefer the scan's already-fetched bars (no network); fall back to EODHD.
+    df = None
+    try:
+        df = _archive_bars_df("SPY")
+    except Exception:
+        df = None
+    if df is None:
+        today = datetime.utcnow().date()
+        from_d = (today - timedelta(days=400)).isoformat()
+        bars = eodhd_client.eod("SPY", from_date=from_d, to_date=today.isoformat())
+        df = _bars_df(bars)
     _spy_cache = df.set_index("date")["px"] if df is not None else pd.Series(dtype=float)
     return _spy_cache
 
@@ -119,13 +182,21 @@ def _features_from_df(df: pd.DataFrame, spy_px: pd.Series) -> dict | None:
 
 def extract_for_ticker(ticker: str) -> dict | None:
     """Returns a 17-feature dict for the latest bar of `ticker`, or None on failure."""
-    today = datetime.utcnow().date()
-    from_d = (today - timedelta(days=400)).isoformat()  # 400d covers 252+rolling
+    # Prefer the scan's already-fetched bars (local Parquet archive, no network).
+    # Only fall through to a live EODHD fetch if the archive has nothing usable.
+    df = None
     try:
-        bars = eodhd_client.eod(ticker, from_date=from_d, to_date=today.isoformat())
+        df = _archive_bars_df(ticker)
     except Exception:
-        return None
-    df = _bars_df(bars)
+        df = None
+    if df is None:
+        today = datetime.utcnow().date()
+        from_d = (today - timedelta(days=400)).isoformat()  # 400d covers 252+rolling
+        try:
+            bars = eodhd_client.eod(ticker, from_date=from_d, to_date=today.isoformat())
+        except Exception:
+            return None
+        df = _bars_df(bars)
     if df is None:
         return None
     return _features_from_df(df, _spy_series())

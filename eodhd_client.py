@@ -327,6 +327,110 @@ def flush_quota_to_supabase() -> dict:
     return summary
 
 
+# ── Daily call-budget guard ───────────────────────────────────────────────────
+# Tracks actual NETWORK calls per Pacific calendar day in a tiny JSON state file.
+# When the day's count >= soft_limit, NON-ESSENTIAL calls short-circuit and raise
+# EODHDError BEFORE hitting the network, so ~15 scheduled jobs sharing the 100K/day
+# EODHD quota fail fast/cheap instead of cascading real HTTP 402s.
+#
+# FALLBACK-SAFE CONTRACT: every helper here is wrapped so that ANY failure
+# (guard disabled, unreadable/corrupt state, missing config, exceptions) falls
+# through to ORIGINAL behavior — i.e. allow the call. The guard only ever ADDS an
+# early exit when it is clearly over the soft limit.
+_QUOTA_STATE_PATH = BASE_DIR / "cache" / "eodhd_quota.json"
+_QUOTA_LOCK = threading.Lock()
+
+
+def _pacific_date_str() -> str:
+    """Today's date (YYYY-MM-DD) in Pacific time, matching the rest of the system."""
+    try:
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
+        return _dt.now(_ZI("America/Los_Angeles")).strftime("%Y-%m-%d")
+    except Exception:
+        # Last-resort fallback — never raise out of the guard
+        from datetime import date as _date
+        return _date.today().isoformat()
+
+
+def _load_quota_config() -> dict:
+    """Read the eodhd_quota block from config/config.json. Crash-safe defaults."""
+    defaults = {"daily_limit": 100000, "soft_limit": 95000, "guard_enabled": True}
+    try:
+        cfg_path = BASE_DIR / "config" / "config.json"
+        blk = json.loads(cfg_path.read_text()).get("eodhd_quota", {}) or {}
+        return {
+            "daily_limit": int(blk.get("daily_limit", defaults["daily_limit"])),
+            "soft_limit": int(blk.get("soft_limit", defaults["soft_limit"])),
+            "guard_enabled": bool(blk.get("guard_enabled", defaults["guard_enabled"])),
+        }
+    except Exception:
+        return dict(defaults)
+
+
+def _read_quota_state() -> dict:
+    """Read {date, count}; reset to today/0 on date rollover or corruption."""
+    today = _pacific_date_str()
+    try:
+        raw = json.loads(_QUOTA_STATE_PATH.read_text())
+        if raw.get("date") == today:
+            return {"date": today, "count": int(raw.get("count", 0))}
+    except Exception:
+        pass
+    return {"date": today, "count": 0}
+
+
+def _write_quota_state(state: dict) -> None:
+    """Atomic-ish, crash-safe write. Never raises."""
+    try:
+        _QUOTA_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _QUOTA_STATE_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"date": state["date"], "count": int(state["count"])}))
+        tmp.replace(_QUOTA_STATE_PATH)
+    except Exception as e:
+        log.debug(f"quota state write failed: {e}")
+
+
+def _bump_quota_count() -> None:
+    """Increment today's persisted network-call count. Never raises."""
+    try:
+        with _QUOTA_LOCK:
+            st = _read_quota_state()
+            st["count"] += 1
+            _write_quota_state(st)
+    except Exception:
+        pass
+
+
+def eodhd_quota_status() -> dict:
+    """Observability helper — current day's budget state. No network.
+    Returns {date, count, soft_limit, daily_limit, remaining}."""
+    cfg = _load_quota_config()
+    st = _read_quota_state()
+    return {
+        "date": st["date"],
+        "count": st["count"],
+        "soft_limit": cfg["soft_limit"],
+        "daily_limit": cfg["daily_limit"],
+        "remaining": max(0, cfg["daily_limit"] - st["count"]),
+    }
+
+
+def _quota_guard_blocks(endpoint: str, essential: bool) -> bool:
+    """True only when we should short-circuit a NON-essential network call.
+    Fully fallback-safe: any error → False (allow the call)."""
+    if essential:
+        return False
+    try:
+        cfg = _load_quota_config()
+        if not cfg["guard_enabled"]:
+            return False
+        st = _read_quota_state()
+        return st["count"] >= cfg["soft_limit"]
+    except Exception:
+        return False
+
+
 def _request(
     endpoint: str,
     params: dict | None = None,
@@ -336,6 +440,7 @@ def _request(
     max_retries: int = 3,
     base_delay: float = 1.5,
     timeout: int = DEFAULT_TIMEOUT,
+    essential: bool = False,
 ) -> Any:
     """
     Core EODHD HTTP wrapper.
@@ -353,6 +458,17 @@ def _request(
             _bump_endpoint(endpoint, "cache_hit")
             return cached
 
+    # Daily call-budget guard — short-circuit non-essential NETWORK calls once the
+    # soft limit is reached so jobs fail cheap instead of cascading real 402s.
+    # Cache HITS already returned above and are never blocked. Fully fallback-safe:
+    # _quota_guard_blocks returns False on any error → original behavior preserved.
+    if _quota_guard_blocks(endpoint, essential):
+        cfg = _load_quota_config()
+        raise EODHDError(
+            f"quota guard: soft limit {cfg['soft_limit']} reached, "
+            f"deferring non-essential call ({endpoint})"
+        )
+
     full_params = dict(params or {})
     full_params.setdefault("api_token", _API_KEY)
     full_params.setdefault("fmt", "json")
@@ -365,6 +481,7 @@ def _request(
             _limiter.acquire()
             _CALL_COUNTER["network"] += 1  # tally every network call (incl. retries)
             _bump_endpoint(endpoint, "network")
+            _bump_quota_count()  # persist per-Pacific-day budget count (never raises)
             resp = _session.get(url, params=full_params, timeout=timeout)
 
             # 200: success
