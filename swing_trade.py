@@ -442,12 +442,54 @@ def print_active_config_banner(config: dict, regime4: str | None = None) -> None
         log.warning(f"print_active_config_banner failed: {e}")
 
 
+def _circuit_breaker_review_reminder(cfg):
+    """If the drawdown breaker is disabled, ping Slack every 90 days to re-evaluate.
+    Self-rolling: posts when today >= review_date, then advances review_date +90d."""
+    try:
+        cb = (cfg.get("circuit_breaker") or {})
+        if not cb.get("disabled"):
+            return
+        from datetime import date, timedelta
+        rd = cb.get("review_date")
+        if not rd or date.today() < date.fromisoformat(str(rd)):
+            return
+        # fire the reminder
+        try:
+            import os, json as _json
+            url = os.environ.get("SLACK_WEBHOOK_URL", "")
+            if url:
+                import urllib.request
+                msg = (f"⏰ *Circuit breaker review* — the drawdown circuit breaker has been "
+                       f"DISABLED (paper-trading mode) since the last review. It's been ~90 days. "
+                       f"Re-evaluate whether to keep it off, and *re-enable it before any LIVE trading* "
+                       f"(`config/config.json` → `circuit_breaker.disabled = false`).")
+                req = urllib.request.Request(url, data=_json.dumps({"text": msg}).encode(),
+                                             headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=8)
+                log.info("  Circuit-breaker 90-day review reminder posted to Slack.")
+        except Exception as _se:
+            log.warning(f"  CB review reminder Slack post failed: {_se}")
+        # advance the review date +90 days in config.json (idempotent — won't re-fire today)
+        try:
+            from pathlib import Path as _P
+            import json as _json
+            cpath = _P(__file__).resolve().parent / "config" / "config.json"
+            full = _json.loads(cpath.read_text())
+            full.setdefault("circuit_breaker", {})["review_date"] = (date.fromisoformat(str(rd)) + timedelta(days=90)).isoformat()
+            cpath.write_text(_json.dumps(full, indent=2))
+        except Exception as _ce:
+            log.warning(f"  CB review_date advance failed: {_ce}")
+    except Exception:
+        pass
+
+
 def run_daily_scan(force_fresh: bool = False):
     """Full daily scan pipeline."""
     cfg = load_config()
     run_date      = datetime.now().strftime("%Y-%m-%d")
     run_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     log.info(f"=== SwingTrade Daily Scan — {run_timestamp} ===")
+    _circuit_breaker_review_reminder(cfg)
 
     # ── 2026-05-22: Schwab refresh-token health probe ──
     # Refresh tokens have a 7-day lifetime; if the scanner stops for >7d (or

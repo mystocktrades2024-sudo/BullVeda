@@ -2310,6 +2310,302 @@ async def ohlcv_api(ticker: str, days: int = 120, tf: str = "1D"):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+
+# ── Per-ticker detail feeds for the v2 dashboard (read-only) ──────────────
+# Surface data the engine already computes but doesn't ship in the JSON bundle:
+# extra indicators, ML heads, deep fundamentals (incl. 13F holders + Form-4),
+# and social sentiment. All reuse existing functions; none touch scan/trading.
+
+@app.get("/api/indicators/{ticker}")
+async def indicators_api(ticker: str, days: int = 200):
+    """Stoch/MFI/CMF/OBV/BollingerB computed from EODHD OHLCV (latest values)."""
+    ticker = ticker.upper().strip()
+    try:
+        import numpy as np, pandas as pd
+        from data_fetcher import fetch_ohlcv_with_failover
+        df, _ = fetch_ohlcv_with_failover(ticker, days=days)
+        if df is None or df.empty:
+            raise HTTPException(404, f"No OHLCV for {ticker}")
+        c, h, l, v = df["Close"].squeeze(), df["High"].squeeze(), df["Low"].squeeze(), df["Volume"].squeeze()
+        def last(x):
+            x = x.dropna()
+            return round(float(x.iloc[-1]), 4) if len(x) else None
+        ll, hh = l.rolling(14).min(), h.rolling(14).max()
+        k = (100 * (c - ll) / (hh - ll).replace(0, np.nan)).rolling(3).mean()
+        d = k.rolling(3).mean()
+        delta = c.diff()
+        up = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
+        dn = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
+        rsi = 100 - 100 / (1 + up / dn.replace(0, np.nan))
+        tp = (h + l + c) / 3; mf = tp * v
+        pos = mf.where(tp > tp.shift(1), 0.0); neg = mf.where(tp < tp.shift(1), 0.0)
+        mfi = 100 - 100 / (1 + pos.rolling(14).sum() / neg.rolling(14).sum().replace(0, np.nan))
+        mfm = ((c - l) - (h - c)) / (h - l).replace(0, np.nan)
+        cmf = (mfm * v).rolling(20).sum() / v.rolling(20).sum().replace(0, np.nan)
+        obv = (np.sign(c.diff()).fillna(0) * v).cumsum()
+        obv_slope = (float(obv.iloc[-1]) - float(obv.iloc[-21])) if len(obv) > 21 else None
+        ma = c.rolling(20).mean(); sd = c.rolling(20).std()
+        ub, lb = ma + 2 * sd, ma - 2 * sd
+        pctb = (c - lb) / (ub - lb).replace(0, np.nan)
+        return {"ticker": ticker, "rsi": last(rsi), "stoch_k": last(k), "stoch_d": last(d),
+                "mfi": last(mfi), "cmf": last(cmf),
+                "obv_trend": ("rising" if obv_slope and obv_slope > 0 else "falling" if obv_slope else None),
+                "bb_pctb": last(pctb), "bb_upper": last(ub), "bb_lower": last(lb), "bb_mid": last(ma),
+                "price": last(c)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.get("/api/ml/{ticker}")
+async def ml_api(ticker: str, mode: str = "swing"):
+    """ML edge heads (direction · hit-net · magnitude · SHAP · verdict)."""
+    ticker = ticker.upper().strip()
+    try:
+        from ml.predict import predict_one
+        p = predict_one({"ticker": ticker}, mode=mode)
+        if not p:
+            raise HTTPException(404, f"No ML prediction for {ticker}")
+        return {"ticker": ticker, "mode": mode, **p}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.get("/api/fundamentals/{ticker}")
+async def fundamentals_api(ticker: str):
+    """Deep fundamentals from EODHD: highlights, valuation, 5y financials,
+    8Q earnings history, 13F institutional holders, Form-4 insider transactions."""
+    ticker = ticker.upper().strip()
+    try:
+        import eodhd_client as eod
+        f = eod.fundamentals(ticker) or {}
+        if not f:
+            raise HTTPException(404, f"No fundamentals for {ticker}")
+        G = f.get("General", {}) or {}; H = f.get("Highlights", {}) or {}
+        V = f.get("Valuation", {}) or {}; E = f.get("Earnings", {}) or {}
+        Fin = f.get("Financials", {}) or {}; SS = f.get("SharesStats", {}) or {}
+        Hold = f.get("Holders", {}) or {}; Ins = f.get("InsiderTransactions", {}) or {}
+        def _yr(block, n=5):
+            y = (block or {}).get("yearly", {}) or {}
+            return [dict(date=k, **{kk: vv for kk, vv in (v or {}).items()})
+                    for k, v in list(sorted(y.items(), reverse=True))[:n]]
+        ehist = E.get("History", {}) or {}
+        earnings_hist = [v for _, v in list(sorted(ehist.items(), reverse=True))[:8]] if isinstance(ehist, dict) else (ehist or [])[:8]
+        return {
+            "ticker": ticker, "name": G.get("Name"), "sector": G.get("Sector"),
+            "industry": G.get("Industry"), "description": G.get("Description"),
+            "highlights": {k: H.get(k) for k in ("MarketCapitalization", "PERatio", "PEGRatio",
+                "EPSEstimateCurrentYear", "ProfitMargin", "OperatingMarginTTM", "ReturnOnEquityTTM",
+                "ReturnOnAssetsTTM", "QuarterlyRevenueGrowthYOY", "QuarterlyEarningsGrowthYOY",
+                "DividendYield", "EBITDA", "Beta", "52WeekHigh", "52WeekLow", "WallStreetTargetPrice")},
+            "valuation": {k: V.get(k) for k in ("TrailingPE", "ForwardPE", "PriceSalesTTM",
+                "PriceBookMRQ", "EnterpriseValue", "EnterpriseValueRevenue", "EnterpriseValueEbitda")},
+            "shares": {k: SS.get(k) for k in ("SharesOutstanding", "SharesFloat", "PercentInsiders",
+                "PercentInstitutions", "ShortPercentFloat", "ShortRatio")},
+            "earnings_history": earnings_hist,
+            "income_5y": _yr(Fin.get("Income_Statement")),
+            "cashflow_5y": _yr(Fin.get("Cash_Flow")),
+            "holders_institutions": list((Hold.get("Institutions", {}) or {}).values())[:15],   # 13F
+            "insider_transactions": list((Ins or {}).values())[:15] if isinstance(Ins, dict) else (Ins or [])[:15],  # Form-4
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.get("/api/social/{ticker}")
+async def social_api(ticker: str):
+    """Social + news sentiment + SEC Form-4 insider activity (live, on-demand)."""
+    ticker = ticker.upper().strip()
+    out = {"ticker": ticker}
+    try:
+        from data_fetcher import get_stocktwits_data
+        out["stocktwits"] = get_stocktwits_data(ticker)
+    except Exception as e:
+        out["stocktwits"] = {"error": str(e)}
+    try:
+        from data_fetcher import get_news_sentiment
+        out["news_sentiment"] = get_news_sentiment(ticker)
+    except Exception as e:
+        out["news_sentiment"] = {"error": str(e)}
+    try:
+        from data_fetcher import get_insider_activity
+        out["insider"] = get_insider_activity(ticker)
+    except Exception as e:
+        out["insider"] = {"error": str(e)}
+    return out
+
+@app.get("/api/journal")
+async def journal_api(limit: int = 400):
+    """Closed-trade journal from the signal log — REAL per-trade R, MAE/MFE, exit reason."""
+    import json
+    try:
+        rows = json.loads((BASE_DIR / "data" / "signal_log.json").read_text())
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    if not isinstance(rows, list):
+        rows = []
+    keep = ("ticker", "date", "direction", "strategy", "score", "stars", "entry_price",
+            "stop", "target1", "target2", "rr", "actual_pnl_pct", "actual_r_multiple",
+            "mae_pct", "mfe_pct", "exit_reason", "result", "outcome_5d", "outcome_10d", "status")
+    out = [{k: r.get(k) for k in keep} for r in rows
+           if isinstance(r, dict) and (r.get("actual_r_multiple") is not None or r.get("actual_pnl_pct") is not None)]
+    return {"n": len(out), "trades": out[-limit:]}
+
+_UNIVERSE_CACHE = {"mtime": None, "payload": None}
+_TICKER_FULL_CACHE = {"mtime": None, "index": None}
+
+@app.get("/api/ticker/{sym}")
+async def ticker_full_api(sym: str):
+    """Full ~159KB scored row for ONE ticker (everything the 14 detail lenses need).
+    Reads cache/last_bundle.json `all_scored` (the ~1855 deeply-enriched names),
+    indexed by ticker in memory and invalidated on the file's mtime. Falls back to
+    Supabase ticker_detail for the long tail when present (added by the analysis sync).
+    """
+    import json, os, gzip
+    sym = (sym or "").upper().strip()
+    path = BASE_DIR / "cache" / "last_bundle.json"
+    # 1) in-memory index over last_bundle.all_scored (covers the enriched set)
+    try:
+        mt = os.path.getmtime(path)
+        global _TICKER_FULL_CACHE
+        if _TICKER_FULL_CACHE["mtime"] != mt or _TICKER_FULL_CACHE["index"] is None:
+            bundle = json.loads(path.read_text())
+            idx = {}
+            for r in (bundle.get("all_scored") or []):
+                if isinstance(r, dict) and r.get("ticker"):
+                    idx[str(r["ticker"]).upper()] = r
+            _TICKER_FULL_CACHE = {"mtime": mt, "index": idx}
+        row = _TICKER_FULL_CACHE["index"].get(sym)
+        if row is not None:
+            return {"ticker": sym, "source": "bundle", "row": row}
+    except Exception:
+        pass
+    # 2) Supabase ticker_detail fallback (long tail / persisted detail)
+    try:
+        import os as _os, httpx as _hx, gzip as _gz, base64 as _b64
+        url = _os.environ.get("SUPABASE_URL"); key = _os.environ.get("SUPABASE_SERVICE_KEY")
+        if url and key:
+            r = _hx.get(f"{url}/rest/v1/ticker_detail",
+                        params={"ticker": f"eq.{sym}", "select": "detail_gz", "limit": 1},
+                        headers={"apikey": key, "Authorization": f"Bearer {key}"}, timeout=8)
+            rows = r.json() if r.status_code == 200 else []
+            if rows and rows[0].get("detail_gz"):
+                raw = _gz.decompress(_b64.b64decode(rows[0]["detail_gz"]))
+                return {"ticker": sym, "source": "supabase", "row": json.loads(raw)}
+    except Exception:
+        pass
+    # 3) LIVE assembly for the >1855 tail (not scored this run) — real price + identity
+    #    + valuation/growth from EODHD. The composite score/verdict/options/SMC need
+    #    the full scan pipeline, so those stay null (lenses show "—"); the Chart and
+    #    AI-Edge lenses self-fetch /api/ohlcv + /api/ml so they populate regardless.
+    try:
+        import eodhd_client as _eod
+        f = _eod.fundamentals(sym) or {}
+        G = f.get("General", {}) or {}; H = f.get("Highlights", {}) or {}; V = f.get("Valuation", {}) or {}; T = f.get("Technicals", {}) or {}
+        def _n(x):
+            try: return float(x) if x not in (None, "", "NA") else None
+            except Exception: return None
+        price = None
+        try:
+            rt = _eod.real_time(sym) or {}
+            price = _n(rt.get("close") if isinstance(rt, dict) else None)
+        except Exception:
+            price = None
+        if price is None: price = _n(H.get("52WeekLow"))  # last-ditch, avoid $0
+        if not G and price is None:
+            raise HTTPException(404, f"no scored detail for {sym}")
+        row = {
+            "ticker": sym, "name": G.get("Name") or sym, "sector": G.get("Sector"),
+            "industry": G.get("Industry"), "price": price,
+            "market_cap": _n(H.get("MarketCapitalization")),
+            "beta": _n(T.get("Beta")), "week52_high": _n(T.get("52WeekHigh") or H.get("52WeekHigh")),
+            "week52_low": _n(T.get("52WeekLow") or H.get("52WeekLow")),
+            "fundamentals": {
+                "_live": True,
+                "pe": _n(H.get("PERatio")), "peg": _n(H.get("PEGRatio")),
+                "ps": _n(V.get("PriceSalesTTM")), "pb": _n(V.get("PriceBookMRQ")),
+                "profit_margin": _n(H.get("ProfitMargin")), "operating_margin": _n(H.get("OperatingMarginTTM")),
+                "roe": _n(H.get("ReturnOnEquityTTM")), "roa": _n(H.get("ReturnOnAssetsTTM")),
+                "revenue_growth": _n(H.get("QuarterlyRevenueGrowthYOY")), "eps_growth": _n(H.get("QuarterlyEarningsGrowthYOY")),
+                "dividend_yield": _n(H.get("DividendYield")), "eps": _n(H.get("EarningsShare")),
+                "revenue_ttm": _n(H.get("RevenueTTM")),
+            },
+            "_live": True, "_partial": True,
+        }
+        return {"ticker": sym, "source": "live", "row": row}
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    raise HTTPException(404, f"no scored detail for {sym}")
+
+@app.get("/api/universe")
+async def universe_api(limit: int = 0):
+    """Full scored universe (all ~1832 ranked names) — compact scanner-shaped rows
+    read from cache/last_bundle.json `all_scored` (the bundle ships only the top
+    actionable slice in data_screener.json). The 275MB source is parsed once and the
+    compact payload is cached in memory until the file's mtime changes.
+    `limit` (e.g. 1000) returns the top-N by score for a smaller startup payload."""
+    import json, os
+    path = BASE_DIR / "cache" / "last_bundle.json"
+    try:
+        mt = os.path.getmtime(path)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    def _slice(p):
+        if limit and limit > 0 and isinstance(p.get("screener"), list) and len(p["screener"]) > limit:
+            return {**p, "screener": p["screener"][:limit], "n": limit, "_total": p.get("n")}
+        return p
+    global _UNIVERSE_CACHE
+    if _UNIVERSE_CACHE["mtime"] == mt and _UNIVERSE_CACHE["payload"] is not None:
+        return _slice(_UNIVERSE_CACHE["payload"])
+    try:
+        bundle = json.loads(path.read_text())
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    allsc = bundle.get("all_scored") or []
+    def row(r):
+        ctp = r.get("canonical_trade_plan") or {}
+        entry = ctp.get("entry") or {}
+        elo = entry.get("low"); stop = ctp.get("stop"); t1 = ctp.get("target1"); t2 = ctp.get("target2")
+        rr = None
+        try:
+            if elo and stop and t1 and (elo - stop): rr = round((t1 - elo) / (elo - stop), 2)
+        except Exception: pass
+        dec = r.get("decision") or {}; conv = r.get("conviction") or {}
+        earn = r.get("earnings") or {}; sb = r.get("scoring_breakdown") or {}; ok = r.get("options_kpis") or {}
+        # T·F·S·N pillars (score + max) for the scanner dots
+        T = r.get("technicals") or {}; F = r.get("fundamentals") or {}
+        S = r.get("smc") or {}; N = r.get("sentiment") or {}
+        return {
+            "ticker": r.get("ticker"), "name": r.get("name") or r.get("ticker"),
+            "sector": r.get("sector"), "industry": r.get("industry"),
+            "score": r.get("score"), "stage": dec.get("verdict"),
+            "setup": r.get("setup_family"), "conviction_tier": conv.get("label"),
+            "catalyst_tier": r.get("catalyst_tier"), "entry_quality": r.get("entry_quality"),
+            "price": r.get("price"), "pct_chg": r.get("perf_1d"),
+            "rr": rr, "stop": stop, "entry_lo": elo, "t1": t1, "t2": t2,
+            "rvol": r.get("rvol"), "rs_rank": r.get("rs_rank"), "rsi": r.get("rsi"),
+            "beta": r.get("beta"), "market_cap": r.get("market_cap"),
+            "iv_rank": ok.get("iv_rank") if ok.get("iv_rank") is not None else r.get("iv_rank"),
+            "earn_days": earn.get("days_to_earnings"),
+            "sharpe_126d": r.get("sharpe_126d"), "sortino_126d": r.get("sortino_126d"),
+            "tech_score": T.get("score"), "tech_max": T.get("max"),
+            "fund_score": F.get("score"), "fund_max": F.get("max"),
+            "smc_score": S.get("score"), "smc_max": S.get("max") if S.get("max") is not None else 15,
+            "sent_score": N.get("score"), "sent_max": N.get("max"),
+            "sector_pct_rank": r.get("sector_pct_rank"), "macd_signal": r.get("macd_signal"),
+            "perf_1d": r.get("perf_1d"), "perf_week": r.get("perf_week"), "perf_month": r.get("perf_month"),
+            "star_rating": r.get("star_rating"), "week52_high": r.get("week52_high"), "week52_low": r.get("week52_low"),
+            "above_50ema": r.get("above_50ema"), "above_200sma": r.get("above_200sma"), "adx": r.get("adx"),
+        }
+    rows = [row(r) for r in allsc if isinstance(r, dict) and r.get("ticker")]
+    payload = {"n": len(rows), "scan_count": bundle.get("scan_count") or len(rows), "screener": rows}
+    _UNIVERSE_CACHE = {"mtime": mt, "payload": payload}
+    return _slice(payload)
+
 @app.get("/api/portfolio")
 async def portfolio_get():
     """Return current portfolio summary + positions for live rendering."""
@@ -4986,6 +5282,731 @@ async def ml_edge_diff_api(mode: str = "swing"):
         "new_bears":      new_bears[:15],
         "dropped":        dropped[:25],
     }
+
+
+_ML_EDGE_FULL_CACHE = {"mtime": None, "data": None}
+
+@app.get("/api/ml_edge")
+async def ml_edge_api(mode: str = "swing", limit: int = 60, side: str = "all"):
+    """Top-N live ML-edge predictions for the AI Predictions surface.
+
+    Reads cache/ml_edge_predictions.json — the FULL per-ticker model forecast set
+    (~1,700 names: direction / magnitude / hit-net / SHAP). This is independent of
+    elite_picks, which is gated by the system circuit breaker; the raw model
+    forecasts are always available even when actionable picks are suppressed.
+    """
+    import json
+    from pathlib import Path
+    p = Path("cache/ml_edge_predictions.json")
+    if not p.exists():
+        return {"error": "no predictions file", "mode": mode, "rows": []}
+    try:
+        mt = p.stat().st_mtime
+        global _ML_EDGE_FULL_CACHE
+        if _ML_EDGE_FULL_CACHE["mtime"] != mt:
+            _ML_EDGE_FULL_CACHE = {"mtime": mt, "data": json.loads(p.read_text())}
+        doc = _ML_EDGE_FULL_CACHE["data"]
+    except Exception as e:
+        return {"error": f"read failed: {e}", "mode": mode, "rows": []}
+
+    preds = (doc.get("predictions") or {}).get(mode) or {}
+    meta = doc.get("_meta") or {}
+    rows = []
+    for sym, pr in preds.items():
+        if not isinstance(pr, dict):
+            continue
+        v = pr.get("verdict") or {}
+        dirn = pr.get("direction") or {}
+        mag = pr.get("magnitude") or {}
+        hit = pr.get("hit_net") or {}
+        edge = dirn.get("edge")
+        if edge is None:
+            edge = v.get("edge", 0)
+        rows.append({
+            "ticker": sym,
+            "name": pr.get("name") or sym,
+            "sector": pr.get("sector") or "",
+            "verdict": v.get("text") or "—",
+            "level": v.get("level") or "",
+            "color": v.get("color") or "ink",
+            "p_up": dirn.get("p_up"),
+            "p_dn": dirn.get("p_dn"),
+            "q50": mag.get("q50"),
+            "q10": mag.get("q10"),
+            "q90": mag.get("q90"),
+            "p_t1": hit.get("p_t1_first"),
+            "p_stop": hit.get("p_stop_first"),
+            "edge": edge,
+            "confidence": v.get("confidence") or "",
+            "confluences": (v.get("confluences") or [])[:3],
+            "in_sp500": pr.get("in_sp500"),
+        })
+
+    if side == "bull":
+        rows = [r for r in rows if (r["edge"] or 0) > 0.02]
+    elif side == "bear":
+        rows = [r for r in rows if (r["edge"] or 0) < -0.02]
+    rows.sort(key=lambda r: (r["edge"] if r["edge"] is not None else 0), reverse=(side != "bear"))
+    return {
+        "mode": mode,
+        "generated_at": meta.get("generated_at"),
+        "n_total": len(preds),
+        "n_features_ok": meta.get("n_features_ok"),
+        "rows": rows[:max(1, min(200, limit))],
+    }
+
+
+# ---------------------------------------------------------------------------
+# AI Predictions (v12 ai-predict contract) — REAL model output, no mock.
+# Combines the 3 horizon modes (swing/position/invest) from
+# cache/ml_edge_predictions.json into ONE Prediction per symbol, matching the
+# TS `Prediction` type in design_handoff_ai_predictions/README.md.
+# In-memory cached by file mtime (mirrors /api/ml_edge).
+# ---------------------------------------------------------------------------
+_AI_PREDICT_PRED_CACHE = {"mtime": None, "data": None}   # ml_edge_predictions.json
+_AI_PREDICT_ACC_CACHE = {"mtime": None, "data": None}    # data.critical.json accuracy
+_AI_PREDICT_PX_CACHE = {"mtime": None, "data": None}     # ticker->price from bundle
+
+
+def _ai_predict_load_preds():
+    """Load cache/ml_edge_predictions.json, cached by mtime. Returns doc or None."""
+    import json
+    p = BASE_DIR / "cache" / "ml_edge_predictions.json"
+    if not p.exists():
+        return None
+    try:
+        mt = p.stat().st_mtime
+        global _AI_PREDICT_PRED_CACHE
+        if _AI_PREDICT_PRED_CACHE["mtime"] != mt:
+            _AI_PREDICT_PRED_CACHE = {"mtime": mt, "data": json.loads(p.read_text())}
+        return _AI_PREDICT_PRED_CACHE["data"]
+    except Exception:
+        return None
+
+
+def _ai_predict_load_accuracy():
+    """Load accuracy block from infra/prototype/data.critical.json, cached by mtime."""
+    import json
+    p = BASE_DIR / "infra" / "prototype" / "data.critical.json"
+    if not p.exists():
+        return {}
+    try:
+        mt = p.stat().st_mtime
+        global _AI_PREDICT_ACC_CACHE
+        if _AI_PREDICT_ACC_CACHE["mtime"] != mt:
+            doc = json.loads(p.read_text())
+            _AI_PREDICT_ACC_CACHE = {"mtime": mt, "data": (doc.get("accuracy") or {})}
+        return _AI_PREDICT_ACC_CACHE["data"] or {}
+    except Exception:
+        return {}
+
+
+def _ai_predict_price_map():
+    """Build {ticker: price} from cache/last_bundle.json all_scored, cached by mtime."""
+    import json
+    p = BASE_DIR / "cache" / "last_bundle.json"
+    if not p.exists():
+        return {}
+    try:
+        mt = p.stat().st_mtime
+        global _AI_PREDICT_PX_CACHE
+        if _AI_PREDICT_PX_CACHE["mtime"] != mt:
+            doc = json.loads(p.read_text())
+            pm = {}
+            for key in ("all_scored", "buy_candidates", "watch_list", "killed",
+                        "medium_term_picks", "long_term_picks"):
+                for r in (doc.get(key) or []):
+                    if not isinstance(r, dict):
+                        continue
+                    t = r.get("ticker") or r.get("symbol")
+                    px = r.get("price") or r.get("last") or r.get("close")
+                    if t and px and t not in pm:
+                        try:
+                            pm[t] = float(px)
+                        except Exception:
+                            pass
+            _AI_PREDICT_PX_CACHE = {"mtime": mt, "data": pm}
+        return _AI_PREDICT_PX_CACHE["data"] or {}
+    except Exception:
+        return {}
+
+
+def _ai_clamp(x, lo, hi):
+    try:
+        x = float(x)
+    except Exception:
+        return None
+    return max(lo, min(hi, x))
+
+
+def _ai_tanh(x):
+    import math
+    try:
+        return math.tanh(float(x))
+    except Exception:
+        return 0.0
+
+
+def _ai_conf_from_verdict(conf):
+    c = (conf or "").upper()
+    if c in ("HIGH", "MED", "LOW"):
+        return c
+    if c in ("MEDIUM",):
+        return "MED"
+    return "LOW"
+
+
+def _ai_build_heads(swing_pred):
+    """3 real heads from the SWING mode pred. Returns (heads, ens)."""
+    dirn = (swing_pred.get("direction") or {})
+    mag = (swing_pred.get("magnitude") or {})
+    hit = (swing_pred.get("hit_net") or {})
+
+    d_edge = dirn.get("edge")
+    q50 = mag.get("q50")
+    p_t1 = hit.get("p_t1_first")
+    p_stop = hit.get("p_stop_first")
+
+    gb_score = _ai_clamp(d_edge if d_edge is not None else 0.0, -1.0, 1.0) or 0.0
+    reg_score = _ai_clamp(_ai_tanh((q50 or 0.0) / 5.0), -1.0, 1.0) or 0.0
+    seq_raw = (p_t1 or 0.0) - (p_stop or 0.0)
+    seq_score = _ai_clamp(seq_raw, -1.0, 1.0) or 0.0
+
+    p_up = dirn.get("p_up")
+    heads = [
+        {"id": "gb", "label": "Direction", "score": round(gb_score, 4), "w": 0.45,
+         "note": (f"P(up) {round(p_up*100):d}%" if isinstance(p_up, (int, float)) else "direction edge")},
+        {"id": "reg", "label": "Magnitude", "score": round(reg_score, 4), "w": 0.35,
+         "note": (f"q50 {round(q50, 2)}%" if isinstance(q50, (int, float)) else "expected move")},
+        {"id": "seq", "label": "Hit-Net", "score": round(seq_score, 4), "w": 0.20,
+         "note": (f"P(T1 first) {round((p_t1 or 0.0)*100):d}% vs stop {round((p_stop or 0.0)*100):d}%")},
+    ]
+    ens = sum(h["score"] * h["w"] for h in heads)
+    return heads, round(ens, 4)
+
+
+def _ai_build_cone(swing_mag, px, days):
+    """Deterministic GBM-style fan whose terminal day matches swing q10..q90.
+
+    Returns {p10,p25,p50,p75,p90: [len days+1]}. If px is None the bands are in
+    percent terms (anchored at 0). Variance scales by sqrt(day/days)."""
+    import math
+    n = days + 1
+    qs = {
+        "p10": swing_mag.get("q10"),
+        "p25": swing_mag.get("q25"),
+        "p50": swing_mag.get("q50"),
+        "p75": swing_mag.get("q75"),
+        "p90": swing_mag.get("q90"),
+    }
+    # default to a flat zero cone if quantiles missing
+    out = {k: [] for k in qs}
+    base = px if (isinstance(px, (int, float)) and px > 0) else None
+    for k, term_pct in qs.items():
+        tp = float(term_pct) if isinstance(term_pct, (int, float)) else 0.0
+        series = []
+        for day in range(n):
+            # variance fan: scale terminal pct by sqrt(day/days); day0 = anchor
+            frac = math.sqrt(day / days) if days > 0 else 0.0
+            pct = tp * frac
+            if base is not None:
+                series.append(round(base * (1.0 + pct / 100.0), 4))
+            else:
+                series.append(round(pct, 4))
+        out[k] = series
+    return out
+
+
+def _ai_build_prediction(sym, preds_by_mode, px_map):
+    """Combine swing/position/invest preds into one v12 Prediction. Never raises."""
+    try:
+        swing = preds_by_mode.get("swing") or {}
+        position = preds_by_mode.get("position") or {}
+        invest = preds_by_mode.get("invest") or {}
+        if not isinstance(swing, dict) or not swing:
+            return None
+
+        v = swing.get("verdict") or {}
+        dirn = swing.get("direction") or {}
+        smag = swing.get("magnitude") or {}
+        pmag = position.get("magnitude") or {}
+        imag = invest.get("magnitude") or {}
+        mm = swing.get("model_meta") or {}
+
+        px = px_map.get(sym)
+        try:
+            px = float(px) if px is not None else None
+        except Exception:
+            px = None
+
+        heads, ens = _ai_build_heads(swing)
+
+        # P(up): swing direction, clamped
+        p_up = _ai_clamp(dirn.get("p_up"), 0.05, 0.95)
+        if p_up is None:
+            p_up = 0.5
+
+        conf = _ai_conf_from_verdict(v.get("confidence"))
+
+        # agreement: heads whose sign matches ens sign
+        ens_sign = 1 if ens > 0 else (-1 if ens < 0 else 0)
+        agree = 0
+        for h in heads:
+            hs = 1 if h["score"] > 0 else (-1 if h["score"] < 0 else 0)
+            if hs != 0 and hs == ens_sign:
+                agree += 1
+
+        # score 0-100 from ens; prefer verdict.edge if it is a richer 0-100ish signal
+        v_edge = v.get("edge")
+        score = round(50 + ens * 50)
+        score = int(max(0, min(100, score)))
+
+        verdict = "BUY" if score >= 66 else ("SELL" if score <= 40 else "HOLD")
+
+        def _hz(label, mag):
+            return {
+                "l": label,
+                "med": mag.get("q50"),
+                "lo": mag.get("q10"),
+                "hi": mag.get("q90"),
+                "ret": mag.get("q50"),
+            }
+        horizons = [
+            _hz("1W", smag),
+            _hz("1M", pmag),
+            _hz("3M", imag),
+        ]
+
+        days = 63
+        cone = _ai_build_cone(smag, px, days)
+
+        # target = invest q75; stop = swing q10 (percent moves off px)
+        target = None
+        stop = None
+        if px is not None:
+            iq75 = imag.get("q75")
+            sq10 = smag.get("q10")
+            if isinstance(iq75, (int, float)):
+                target = round(px * (1.0 + float(iq75) / 100.0), 4)
+            if isinstance(sq10, (int, float)):
+                stop = round(px * (1.0 + float(sq10) / 100.0), 4)
+
+        # feats from swing SHAP (shap.dir_top: {feature, shap})
+        feats = []
+        shap_blob = swing.get("shap") or {}
+        shap_list = []
+        if isinstance(shap_blob, dict):
+            shap_list = shap_blob.get("dir_top") or shap_blob.get("top") or []
+        elif isinstance(shap_blob, list):
+            shap_list = shap_blob
+        for item in shap_list:
+            if not isinstance(item, dict):
+                continue
+            k = item.get("feature") or item.get("name")
+            val = item.get("shap")
+            if val is None:
+                val = item.get("value")
+            if val is None:
+                val = item.get("contribution")
+            if k is None or val is None:
+                continue
+            try:
+                feats.append({"k": str(k), "grp": "model", "v": round(float(val), 6)})
+            except Exception:
+                continue
+        feats.sort(key=lambda f: abs(f["v"]), reverse=True)
+        feat_max = max((abs(f["v"]) for f in feats), default=0.0)
+
+        return {
+            "sym": sym,
+            "name": swing.get("name") or sym,
+            "sector": swing.get("sector") or "",
+            "px": px,
+            "heads": heads,
+            "ens": ens,
+            "pUp": round(p_up, 4),
+            "conf": conf,
+            "agree": agree,
+            "score": score,
+            "verdict": verdict,
+            "horizons": horizons,
+            "cone": cone,
+            "days": days,
+            "target": target,
+            "stop": stop,
+            "feats": feats,
+            "featMax": round(feat_max, 6),
+            "analogs": [],
+            "_analogs_note": "historical analog matching not yet computed",
+            "analogWin": None,
+            "_verdict_edge": v_edge,
+            "_confluences": (v.get("confluences") or [])[:3],
+        }
+    except Exception:
+        return None
+
+
+def _ai_model_block(doc, swing_sample):
+    """Build _model {calibration, backtest} from accuracy + model_meta."""
+    acc = _ai_predict_load_accuracy()
+    by_band = acc.get("by_score_band") or {}
+    summary = acc.get("summary") or {}
+    mm = (swing_sample or {}).get("model_meta") or {}
+    mode_metrics = mm.get("mode_metrics") or {}
+    hit = (swing_sample or {}).get("hit_net") or {}
+    return {
+        "calibration": by_band,
+        "backtest": {
+            "summary": summary,
+            "n_total": acc.get("n_total"),
+            "n_closed": acc.get("n_closed"),
+            "model_auc": hit.get("model_auc"),
+            "model_n": hit.get("model_n"),
+            "mode_metrics": mode_metrics,
+            "trained_at": mm.get("trained_at"),
+            "calibration_health": mm.get("calibration_health"),
+        },
+    }
+
+
+def _ai_predict_all_rows(doc):
+    """Build all Predictions (one per symbol with a swing pred). Returns list."""
+    preds = doc.get("predictions") or {}
+    swing = preds.get("swing") or {}
+    position = preds.get("position") or {}
+    invest = preds.get("invest") or {}
+    px_map = _ai_predict_price_map()
+    rows = []
+    for sym in swing.keys():
+        pred = _ai_build_prediction(
+            sym,
+            {"swing": swing.get(sym), "position": position.get(sym), "invest": invest.get(sym)},
+            px_map,
+        )
+        if pred is not None:
+            rows.append(pred)
+    return rows
+
+
+@app.get("/api/ai_predict")
+async def ai_predict_api(limit: int = 60, sort: str = "score"):
+    """v12 AI Predictions board — REAL model output (no mock).
+
+    Combines swing/position/invest forecasts from cache/ml_edge_predictions.json
+    into one Prediction per symbol (the TS `Prediction` contract). Ranked by
+    `sort` (score|pup|ens) desc. Never 500s."""
+    doc = _ai_predict_load_preds()
+    if not doc:
+        return {"error": "no predictions file", "generated_at": None, "n_total": 0, "rows": []}
+    try:
+        meta = doc.get("_meta") or {}
+        rows = _ai_predict_all_rows(doc)
+        keyfn = {
+            "score": lambda r: (r.get("score") or 0),
+            "pup": lambda r: (r.get("pUp") or 0),
+            "ens": lambda r: (r.get("ens") or 0),
+        }.get((sort or "score").lower(), lambda r: (r.get("score") or 0))
+        rows.sort(key=keyfn, reverse=True)
+        n_total = len(rows)
+        lim = max(1, min(2000, limit))
+        swing_sample = next(iter((doc.get("predictions") or {}).get("swing", {}).values()), None)
+        return {
+            "generated_at": meta.get("generated_at"),
+            "n_total": n_total,
+            "sort": (sort or "score").lower(),
+            "rows": rows[:lim],
+            "_model": _ai_model_block(doc, swing_sample),
+            "_meta": {
+                "n_features_ok": meta.get("n_features_ok"),
+                "mode_days": meta.get("mode_days"),
+                "universe": meta.get("universe"),
+            },
+        }
+    except Exception as e:
+        return {"error": f"build failed: {e}", "generated_at": None, "n_total": 0, "rows": []}
+
+
+@app.get("/api/ai_predict/{sym}")
+async def ai_predict_one_api(sym: str):
+    """Single v12 Prediction for one symbol (REAL model output). 404-ish json."""
+    doc = _ai_predict_load_preds()
+    if not doc:
+        return {"error": "no predictions file", "sym": sym}
+    try:
+        preds = doc.get("predictions") or {}
+        S = (sym or "").upper().strip()
+        swing = preds.get("swing") or {}
+        # case-insensitive lookup
+        key = S if S in swing else next((k for k in swing if k.upper() == S), None)
+        if key is None:
+            return {"error": f"symbol not found: {sym}", "sym": S}
+        px_map = _ai_predict_price_map()
+        pred = _ai_build_prediction(
+            key,
+            {"swing": swing.get(key),
+             "position": (preds.get("position") or {}).get(key),
+             "invest": (preds.get("invest") or {}).get(key)},
+            px_map,
+        )
+        if pred is None:
+            return {"error": f"could not build prediction: {sym}", "sym": S}
+        return pred
+    except Exception as e:
+        return {"error": f"build failed: {e}", "sym": sym}
+
+
+@app.get("/api/settings")
+async def settings_api():
+    """Read-only live config (safe subset, secrets redacted) + env flags.
+
+    Reads config/config.json and recursively REDACTs any key whose name contains
+    cred/token/secret/key/password/webhook (case-insensitive) to "***" at any depth.
+    """
+    import json, os
+    from pathlib import Path
+
+    SECRET_HINTS = ("cred", "token", "secret", "key", "password", "webhook")
+
+    def _redact(obj):
+        if isinstance(obj, dict):
+            out = {}
+            for k, v in obj.items():
+                if isinstance(k, str) and any(h in k.lower() for h in SECRET_HINTS):
+                    out[k] = "***"
+                else:
+                    out[k] = _redact(v)
+            return out
+        if isinstance(obj, list):
+            return [_redact(x) for x in obj]
+        return obj
+
+    p = BASE_DIR / "config" / "config.json"
+    try:
+        cfg = json.loads(p.read_text())
+        safe_cfg = _redact(cfg)
+    except Exception as e:
+        safe_cfg = {"_error": f"read failed: {e}"}
+
+    env_flags = {
+        "SCORING_MODE": os.environ.get("SCORING_MODE", "legacy"),
+        "BACKTEST_NO_FUNDAMENTALS": os.environ.get("BACKTEST_NO_FUNDAMENTALS", "0"),
+        "SLIPPAGE_MODEL": os.environ.get("SLIPPAGE_MODEL", "realistic"),
+        "SWINGTRADE_USE_SQLITE": os.environ.get("SWINGTRADE_USE_SQLITE", "1"),
+    }
+
+    return {
+        "config": safe_cfg,
+        "env_flags": env_flags,
+        "_readonly": True,
+        "_path": "config/config.json",
+    }
+
+
+_STATUS_CACHE = {"ts": 0.0, "payload": None}
+
+@app.get("/api/status")
+async def status_api():
+    """Real system health — never 500s; returns partials with _errors list.
+    Cached ~20s (the launchctl subprocess is the main cost; monitoring data tolerates
+    brief staleness)."""
+    import os, time, json, subprocess, sqlite3
+    from datetime import datetime, timezone
+
+    global _STATUS_CACHE
+    if _STATUS_CACHE["payload"] is not None and (time.time() - _STATUS_CACHE["ts"]) < 20:
+        return _STATUS_CACHE["payload"]
+
+    errors = []
+    result = {}
+
+    # --- data_freshness ---
+    freshness = []
+    now = time.time()
+    for rel in (
+        "cache/last_bundle.json",
+        "infra/prototype/data.critical.json",
+        "cache/ml_edge_predictions.json",
+        "data/portfolio_state.json",
+    ):
+        try:
+            fp = BASE_DIR / rel
+            if fp.exists():
+                st = os.stat(fp)
+                freshness.append({
+                    "file": rel,
+                    "age_min": round((now - st.st_mtime) / 60.0, 2),
+                    "mtime_iso": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(),
+                })
+        except Exception as e:
+            errors.append(f"freshness[{rel}]: {e}")
+    result["data_freshness"] = freshness
+
+    # --- launchd ---
+    launchd = []
+    try:
+        out = subprocess.run(
+            ["launchctl", "list"], capture_output=True, text=True, timeout=5
+        ).stdout
+        for line in out.splitlines():
+            low = line.lower()
+            if "swingtrade" in low or "com.swingtrade" in low:
+                parts = line.split()
+                pid = parts[0] if len(parts) > 0 else None
+                status = parts[1] if len(parts) > 1 else None
+                label = parts[2] if len(parts) > 2 else line.strip()
+                launchd.append({"label": label, "pid": pid, "status": status})
+        result["launchd"] = launchd
+    except Exception as e:
+        result["launchd"] = []
+        result["_launchd_note"] = f"launchctl unavailable: {e}"
+
+    # --- db ---
+    db = {}
+    try:
+        dbp = BASE_DIR / "data" / "swingtrade.db"
+        if dbp.exists():
+            conn = sqlite3.connect(f"file:{dbp}?mode=ro", uri=True)
+            try:
+                for tbl in ("positions", "signals"):
+                    try:
+                        db[tbl] = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+                    except Exception:
+                        db[tbl] = None
+            finally:
+                conn.close()
+        result["db"] = db
+    except Exception as e:
+        result["db"] = {}
+        errors.append(f"db: {e}")
+
+    # --- circuit_breaker ---
+    try:
+        import portfolio_tracker
+        result["circuit_breaker"] = portfolio_tracker.check_circuit_breaker()
+    except Exception as e:
+        result["circuit_breaker"] = None
+        errors.append(f"circuit_breaker: {e}")
+
+    # --- regime ---
+    try:
+        bp = BASE_DIR / "cache" / "last_bundle.json"
+        if bp.exists():
+            bundle = json.loads(bp.read_text())
+            result["regime"] = bundle.get("regime")
+        else:
+            result["regime"] = None
+    except Exception as e:
+        result["regime"] = None
+        errors.append(f"regime: {e}")
+
+    # --- server ---
+    result["server"] = {"pid": os.getpid()}
+
+    result["_errors"] = errors
+    _STATUS_CACHE = {"ts": time.time(), "payload": result}
+    return result
+
+
+@app.get("/api/supabase")
+async def supabase_api():
+    """Read-only Supabase sync state."""
+    import os, json
+    from pathlib import Path
+
+    p = BASE_DIR / "data" / "supabase_sync_state.json"
+    if not p.exists():
+        return {"configured": False, "state": None, "_note": "no sync state file"}
+    try:
+        state = json.loads(p.read_text())
+    except Exception as e:
+        state = {"_error": f"read failed: {e}"}
+    return {
+        "configured": bool(os.environ.get("SUPABASE_URL")),
+        "state": state,
+        "_path": "data/supabase_sync_state.json",
+    }
+
+
+@app.get("/api/ollama/tags")
+async def ollama_tags_api():
+    """List available LLM models for the Kairos assistant.
+
+    Provider order: Gemini (if GEMINI_API_KEY set) → local Ollama. Kept at the
+    /api/ollama/* path so the Kairos surface needs no change.
+    """
+    import os
+    import httpx
+    gem_key = os.environ.get("GEMINI_API_KEY")
+    if gem_key:
+        gem_model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+        return {"models": [{"name": gem_model}], "_provider": "gemini"}
+    ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+    try:
+        async with httpx.AsyncClient(timeout=4) as client:
+            r = await client.get(f"{ollama_url}/api/tags")
+            j = r.json()
+            j["_provider"] = "ollama"
+            return j
+    except Exception:
+        return {"models": [], "_error": "no LLM provider reachable (set GEMINI_API_KEY or start ollama)", "_url": ollama_url}
+
+
+@app.post("/api/ollama/chat")
+async def ollama_chat_api(request: Request):
+    """Chat completion for the Kairos assistant.
+
+    Provider order: Gemini (GEMINI_API_KEY) → local Ollama. Accepts the Ollama
+    chat body {model, messages:[{role,content}], stream}; always returns the
+    Ollama-shaped {message:{role:"assistant", content}, _provider}.
+    """
+    import os
+    import httpx
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    messages = body.get("messages") or []
+
+    # ── 1. Gemini (primary, if key present) ──────────────────────────────
+    gem_key = os.environ.get("GEMINI_API_KEY")
+    if gem_key:
+        gem_model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+        sys_txt = "\n\n".join(m.get("content", "") for m in messages if m.get("role") == "system")
+        contents = []
+        for m in messages:
+            role = m.get("role")
+            if role == "system":
+                continue
+            contents.append({"role": "model" if role == "assistant" else "user",
+                             "parts": [{"text": m.get("content", "")}]})
+        payload = {"contents": contents}
+        if sys_txt:
+            payload["systemInstruction"] = {"parts": [{"text": sys_txt}]}
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{gem_model}:generateContent?key={gem_key}"
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                r = await client.post(url, json=payload)
+                j = r.json()
+                cand = (j.get("candidates") or [{}])[0]
+                parts = ((cand.get("content") or {}).get("parts") or [{}])
+                text = "".join(p.get("text", "") for p in parts)
+                if text:
+                    return {"message": {"role": "assistant", "content": text}, "_provider": "gemini", "model": gem_model}
+                # Gemini returned no text (blocked/empty) → fall through to Ollama
+        except Exception:
+            pass  # fall through to Ollama
+
+    # ── 2. Ollama (fallback) ─────────────────────────────────────────────
+    ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+    body["stream"] = False
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(f"{ollama_url}/api/chat", json=body)
+            j = r.json()
+            j["_provider"] = "ollama"
+            return j
+    except Exception:
+        return {"_error": "no LLM reachable — set GEMINI_API_KEY or start `ollama serve`", "_url": ollama_url}
 
 
 @app.get("/api/ml-edge-drift")
