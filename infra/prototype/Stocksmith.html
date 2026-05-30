@@ -4208,6 +4208,14 @@ select.um-input { cursor: pointer; }
 }
 .um-del:hover { background: color-mix(in oklab, var(--rd) 18%, transparent) !important; }
 
+
+/* A5/A6 — Cross-Mode + projection (AI Edge lens) */
+.aicm { margin: 0 0 14px; padding: 11px 12px; border: 1px solid var(--line); border-left: 3px solid var(--violet); border-radius: 8px; background: var(--bg-1); }
+.aicm-head { display: flex; align-items: center; justify-content: space-between; margin: 0 0 9px; }
+.aicm-tbl tr.is-active td { background: rgba(139,108,255,0.08); }
+.aicm-tbl tr.is-active td:first-child { font-weight: 600; }
+.aicm-proj { margin-top: 11px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.aicm-proj .label-cap { margin: 0 0 7px; display: block; }
 </style>
 
 <!-- Supplemental (Stocksmith-only): loading / scaffold / placeholder / toast.
@@ -15965,6 +15973,105 @@ function TmlDistributionBars({ ticker }) {
 // ────────────────────────────────────────────────────────────
 // ML EDGE — direction, magnitude cone, hit-net probability
 // ────────────────────────────────────────────────────────────
+// ââ A5 + A6 â Cross-Mode agreement + mode-aware projection ââââââââââââââ
+// Real per-horizon model reads via /api/ml/{sym}?mode=swing|position|invest.
+// A5: ALIGNED/MIXED/DIVERGENT across the 3 horizons. A6: projection for the
+// ACTIVE global mode (entry=spot Â· stop=P10 Â· T1=P75 Â· T2=P90 Â· EV=median).
+const AICM_MODES = [
+  { id: "swing", label: "SWING", days: 5 },
+  { id: "position", label: "POSITION", days: 21 },
+  { id: "invest", label: "INVEST", days: 126 },
+];
+function aicmDir(d) {
+  if (!d) return 0;
+  const up = ptNum(d.p_up, 0), dn = ptNum(d.p_dn, 0);
+  return up > dn + 0.05 ? 1 : dn > up + 0.05 ? -1 : 0;
+}
+function aicmNorm(m) {
+  const x = (m || "swing").toString().toUpperCase();
+  return x.indexOf("POS") === 0 ? "position" : x.indexOf("INV") === 0 ? "invest" : "swing";
+}
+function aicmTone(c) {
+  return c === "gn" || c === "pass" || c === "up" ? "gn" : c === "rd" || c === "dn" ? "rd"
+       : c === "warn" || c === "amb" ? "amb" : "ink";
+}
+function AICrossMode({ sym, px, activeMode }) {
+  const [rows, setRows] = useState(null);
+  const [load, setLoad] = useState(true);
+  useEffect(function () {
+    if (!sym) { setLoad(false); return; }
+    setRows(null); setLoad(true);
+    let got = {}, n = 0, cancels = [];
+    AICM_MODES.forEach(function (m) {
+      const c = ptFetchJSON("/api/ml/" + encodeURIComponent(sym) + "?mode=" + m.id, function (j, e) {
+        got[m.id] = e ? { __err: String(e) } : (j || { __err: "empty" });
+        n += 1; if (n === AICM_MODES.length) { setRows(got); setLoad(false); }
+      });
+      cancels.push(c);
+    });
+    return function () { cancels.forEach(function (c) { c && c(); }); };
+  }, [sym]);
+
+  if (load) return <div className="aicm"><div className="ss-empty mono dim2" style={{ padding: 12 }}>Loading cross-mode modelâ¦</div></div>;
+  if (!rows) return null;
+  const norm = aicmNorm(activeMode);
+  const dirs = AICM_MODES.map(function (m) { const r = rows[m.id]; return r && !r.__err ? aicmDir(r.direction) : 0; });
+  const nz = dirs.filter(function (x) { return x !== 0; });
+  const allSame = nz.length >= 2 && nz.every(function (x) { return x === nz[0]; });
+  const ends = [dirs[0], dirs[2]].filter(function (x) { return x !== 0; });
+  const divergent = ends.length === 2 && ends[0] !== ends[1];
+  const agree = divergent ? "DIVERGENT" : allSame ? "ALIGNED" : "MIXED";
+  const agreeTone = agree === "ALIGNED" ? "gn" : agree === "DIVERGENT" ? "rd" : "amb";
+  const ar = rows[norm];
+  const proj = (function () {
+    if (!ar || ar.__err || !ar.magnitude || px == null) return null;
+    const g = ar.magnitude, p = function (q) { return px * (1 + ptNum(q, 0) / 100); };
+    const entry = px, stop = p(g.q10), t1 = p(g.q75), t2 = p(g.q90);
+    const risk = entry - stop, rew = t1 - entry;
+    return { entry: entry, stop: stop, t1: t1, t2: t2, ev: ptNum(g.q50, null),
+             rr: risk > 0 ? rew / risk : null, color: (ar.verdict && ar.verdict.color) || "ink" };
+  })();
+  return (
+    <div className="aicm">
+      <div className="aicm-head">
+        <span className="label-cap">Cross-Mode Â· model agreement</span>
+        <Pill tone={agreeTone} dot>{agree}</Pill>
+      </div>
+      <table className="dtable aicm-tbl">
+        <thead><tr><th>Horizon</th><th className="r">P(up)</th><th className="r">Median</th><th className="r">P10âP90</th><th>Verdict</th></tr></thead>
+        <tbody>
+          {AICM_MODES.map(function (m) {
+            const r = rows[m.id];
+            if (!r || r.__err) return <tr key={m.id}><td className="mono">{m.label} Â· {m.days}d</td><td className="r dim2" colSpan={4}>model unavailable</td></tr>;
+            const d = r.direction || {}, g = r.magnitude || {}, v = r.verdict || {};
+            const isActive = m.id === norm;
+            return (
+              <tr key={m.id} className={isActive ? "is-active" : ""}>
+                <td className="mono">{m.label} Â· {m.days}d{isActive ? " ◂" : ""}</td>
+                <td className="r mono tabular">{d.p_up == null ? "—" : (d.p_up * 100).toFixed(0) + "%"}</td>
+                <td className={"r mono tabular " + (g.q50 == null ? "dim" : g.q50 >= 0 ? "up" : "dn")}>{g.q50 == null ? "—" : (g.q50 >= 0 ? "+" : "") + g.q50.toFixed(1) + "%"}</td>
+                <td className="r mono tabular dim2">{g.q10 == null || g.q90 == null ? "—" : g.q10.toFixed(0) + "→+" + g.q90.toFixed(0)}</td>
+                <td><Pill tone={aicmTone(v.color)} small>{v.text || "—"}</Pill></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {proj && (
+        <div className="aicm-proj">
+          <div className="label-cap">Projection · {norm} <span className="dim2">(entry=spot · stop=P10 · T1=P75 · T2=P90)</span></div>
+          <div className="kpi-row" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
+            <KpiTile label="Entry" value={"$" + proj.entry.toFixed(2)} tone="ink" sub="spot" />
+            <KpiTile label="Stop · P10" value={"$" + proj.stop.toFixed(2)} tone="rd" sub={((proj.stop / proj.entry - 1) * 100).toFixed(1) + "%"} />
+            <KpiTile label="T1 · P75" value={"$" + proj.t1.toFixed(2)} tone="gn" sub={"+" + ((proj.t1 / proj.entry - 1) * 100).toFixed(1) + "%"} />
+            <KpiTile label="T2 · P90" value={"$" + proj.t2.toFixed(2)} tone="gn" sub={"+" + ((proj.t2 / proj.entry - 1) * 100).toFixed(1) + "%"} />
+            <KpiTile label="R:R · EV" value={proj.rr == null ? "—" : proj.rr.toFixed(2) + "R"} tone={agreeTone} sub={proj.ev == null ? "—" : "EV " + (proj.ev >= 0 ? "+" : "") + proj.ev.toFixed(1) + "%"} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("ml-1"); const s2 = useStateToggle("ml-2");
   const s3 = useStateToggle("ml-3"); const s4 = useStateToggle("ml-4");
@@ -16031,6 +16138,7 @@ function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
 
   return (
     <div className="lens lens--ml">
+      <AICrossMode sym={sym} px={ptNum(t.price, null)} activeMode={mlMode} />
       <div className="hero ml-hero">
         <div className="th-left">
           <div className="label-cap">AI Edge · {modeLabel}{horizon != null ? ` · ${horizon}d` : ""}</div>
