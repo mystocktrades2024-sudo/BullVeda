@@ -1193,6 +1193,40 @@ def check_circuit_breaker() -> dict:
       drawdown > 4% in 10 days   → risk-off mode
       drawdown > 8% from peak    → stop new trades until manual review
     """
+    # Manual owner override (config circuit_breaker): `disabled: true` turns the
+    # drawdown breaker fully off (paper-trading mode); `paused_until: "YYYY-MM-DD"`
+    # turns it off until a date. Either way it reports inactive regardless of
+    # loss-streak/drawdown. Capital-preservation override — auditable.
+    # (read from the FULL config — CFG is only the portfolio.config_e subset)
+    _cb_cfg, _paused_until = {}, None
+    try:
+        with open(CONFIG_PATH) as _f:
+            _cb_cfg = (json.load(_f).get("circuit_breaker") or {})
+            _paused_until = _cb_cfg.get("paused_until")
+    except Exception:
+        _cb_cfg, _paused_until = {}, None
+    if _cb_cfg.get("disabled"):
+        return {
+            "active": False, "level": "normal",
+            "reasons": ["DISABLED by owner (paper-trading mode)"],
+            "consecutive_losers": 0, "drawdown_pct": 0.0,
+            "realized_drawdown_pct": 0.0, "drawdown_10d_pct": 0.0,
+            "next_unlock_date": None, "disabled": True,
+            "review_date": _cb_cfg.get("review_date"),
+        }
+    if _paused_until:
+        try:
+            if date.today() <= date.fromisoformat(str(_paused_until)):
+                return {
+                    "active": False, "level": "normal",
+                    "reasons": [f"PAUSED by owner until {_paused_until}"],
+                    "consecutive_losers": 0, "drawdown_pct": 0.0,
+                    "realized_drawdown_pct": 0.0, "drawdown_10d_pct": 0.0,
+                    "next_unlock_date": None, "paused_until": str(_paused_until),
+                }
+        except Exception:
+            pass
+
     state = _load_state()
     closed = state.get("closed_trades") or []
     curve = state.get("equity_curve") or []
