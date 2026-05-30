@@ -30168,6 +30168,13 @@ function kaiScreenText() {
 
 // derive the open ticker from the detail panel header (guarded)
 function kaiOpenTicker() {
+  // prefer the panel-published rich ticker (toDetailTicker shape) when present —
+  // it's the same ticker the detail lenses render, so the dossier stays consistent.
+  try {
+    if (typeof window !== "undefined" && window.__ssDetailTicker && window.__ssDetailTicker.symbol) {
+      return window.__ssDetailTicker;
+    }
+  } catch (e) {}
   try {
     if (typeof document === "undefined" || !document.querySelector) return null;
     if (!document.querySelector(".dpanel-body")) return null;   // no detail panel open
@@ -30214,6 +30221,215 @@ function kaiBuildContext(ctx) {
   return lines.join(" ");
 }
 
+/* ════════════════════════════════════════════════════════════════════════
+   KAIROS CROSS-LENS DOSSIER  (port of prototype surface-agent.jsx §4)
+   buildKairosContext / tickerDossier / kaiComputeComposite — assemble a
+   cross-lens dossier for the OPEN ticker from REAL data so Kairos can answer
+   about ANY lens (Overview/Technicals/SMC/Patterns/Investment/Earnings/Risk/
+   Options/AI-Edge) even when the user is on a different tab, and offline.
+   Production has no window.compositeVerdict / window.AIPredict, so we synthesize
+   both from the live toDetailTicker shape + /api/ml/{sym}. Every read is guarded.
+   ════════════════════════════════════════════════════════════════════════ */
+
+// map the active global mode → the ML/setup mode key (swing|position|invest)
+function kaiModeKey() {
+  try {
+    const m = (typeof window !== "undefined" && window.__tmode) || "SWING";
+    const x = String(m).toUpperCase();
+    return x.indexOf("POS") === 0 ? "position" : x.indexOf("INV") === 0 ? "invest" : "swing";
+  } catch (e) { return "swing"; }
+}
+
+// the OPEN ticker in the rich toDetailTicker shape (pillars/setupStats/earnings/
+// plan levels). Prefers the panel-published window.__ssDetailTicker; falls back
+// to the thin kaiOpenTicker() derived from the DOM + screener bundle.
+function kaiOpenDossierTicker() {
+  try {
+    if (typeof window !== "undefined" && window.__ssDetailTicker && window.__ssDetailTicker.symbol) {
+      return window.__ssDetailTicker;
+    }
+  } catch (e) {}
+  try { return kaiOpenTicker(); } catch (e) { return null; }
+}
+
+// derive per-lens stances (0-100 + why) from the REAL toDetailTicker fields.
+// Mirrors the prototype's compositeVerdict.lenses array 1:1 in shape {k,v,why}.
+function kaiLensStances(t) {
+  const out = [];
+  if (!t) return out;
+  const num = (v, d) => (v == null || isNaN(+v)) ? d : +v;
+  const clamp = (v) => Math.max(0, Math.min(100, Math.round(v)));
+  const p = t.pillars || {};
+  const raw = t.raw || {};
+  const ss = t.setupStats || {};
+  const score = num(t.score, null);
+  const rr = num(t.rMultiple, null);
+  const rsi = num(t.rsi, null);
+  const add = (k, v, why) => { if (v != null) out.push({ k: k, v: clamp(v), why: why }); };
+
+  // Overview — the reconciled composite score itself
+  if (score != null) add("Overview", score, `composite ${score}/100 · verdict ${t.verdict || "—"}`);
+  // Technicals — technical pillar, coloured by RSI posture
+  if (p.technical != null) {
+    const rsiNote = rsi != null ? (rsi >= 70 ? `RSI ${Math.round(rsi)} (extended)` : rsi <= 35 ? `RSI ${Math.round(rsi)} (oversold)` : `RSI ${Math.round(rsi)}`) : "trend/indicators";
+    add("Technicals", p.technical, rsiNote);
+  }
+  // SMC — smart-money / edge pillar (smc_score in raw)
+  if (p.edge != null) add("SMC", p.edge, `order-block / structure edge${raw.smc_score != null ? ` (${raw.smc_score}/${raw.smc_max || "—"})` : ""}`);
+  // Patterns — blend of technical + edge as a structure read
+  if (p.technical != null || p.edge != null) {
+    const pv = (num(p.technical, 50) + num(p.edge, 50)) / 2;
+    add("Patterns", pv, t.setupFamily && t.setupFamily !== "—" ? `setup ${t.setupFamily}` : "pattern structure");
+  }
+  // Investment — fundamental pillar
+  if (p.fundamental != null) add("Investment", p.fundamental, `fundamentals${raw.fund_score != null ? ` (${raw.fund_score}/${raw.fund_max || "—"})` : ""}`);
+  // Earnings — catalyst pillar + days-to-print
+  if (p.catalyst != null) {
+    const e = t.earnings || {};
+    const ed = e.days != null ? `print in ${e.days}d` : "no dated catalyst";
+    add("Earnings", p.catalyst, `${t.cat && t.cat !== "—" ? t.cat + " catalyst · " : ""}${ed}`);
+  }
+  // Risk — risk pillar (higher = better R:R / bounded downside)
+  if (p.risk != null) add("Risk", p.risk, rr != null ? `R:R ${rr.toFixed(2)} · stop $${num(t.stop, 0).toFixed(2)}` : "downside bounded at stop");
+  // Options — IV/flow proxy: short-float + edge (real options head absent → proxy)
+  if (raw.short_pct != null || p.edge != null) {
+    const ov = raw.short_pct != null ? clamp(50 + (raw.short_pct - 5) * 2) : num(p.edge, 50);
+    add("Options", ov, raw.short_pct != null ? `short float ${num(raw.short_pct, 0).toFixed(1)}%` : "vol/flow proxy");
+  }
+  // AI Edge — Wilson LB of the setup as the persistence read (ML overlay added later)
+  if (ss.wilsonLB != null) add("AI Edge", ss.wilsonLB * 100, `setup Wilson LB ${(ss.wilsonLB * 100).toFixed(0)}% · n=${ss.n != null ? ss.n : "—"}`);
+  return out;
+}
+
+// reconcile per-lens stances into a composite verdict. Matches the prototype
+// compositeVerdict return shape: {lenses, verdict, net, conf, disagree, agree,
+// caution, fail, dissenters}. Net = score if present else lens mean.
+function kaiComputeComposite(t) {
+  const lenses = kaiLensStances(t);
+  if (!lenses.length) return null;
+  const vals = lenses.map(l => l.v);
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const net = (t && t.score != null && !isNaN(+t.score)) ? Math.round(+t.score) : Math.round(mean);
+  const agree = lenses.filter(l => l.v >= 62).length;
+  const caution = lenses.filter(l => l.v >= 46 && l.v < 62).length;
+  const fail = lenses.filter(l => l.v < 46).length;
+  // dispersion → disagreement label
+  const variance = vals.reduce((a, b) => a + (b - mean) * (b - mean), 0) / vals.length;
+  const sd = Math.sqrt(variance);
+  const disagree = sd >= 22 ? "high" : sd >= 12 ? "moderate" : "low";
+  // dissenters = lenses on the OTHER side of the composite stance
+  const bullish = net >= 58;
+  const dissenters = lenses.filter(l => bullish ? l.v < 46 : l.v >= 62);
+  const conf = (disagree === "low" && (bullish ? agree >= fail + 2 : fail >= agree + 2)) ? "high"
+             : disagree === "high" ? "low" : "med";
+  const verdict = (t && t.verdict) ? t.verdict
+    : net >= 80 ? "BUY" : net >= 65 ? "WATCH" : net >= 50 ? "HOLD" : "AVOID";
+  return { lenses, verdict, net, conf, disagree, agree, caution, fail, dissenters };
+}
+
+// fetch + cache the ML projection for a symbol/mode, shaped like AICrossMode's
+// proj: {horizon, pUp, ci, entry, stop, t1, t2, rr, ev, verdict}. Synchronous
+// read from window.__kaiMlCache (populated by kaiPrefetchMl). Returns null if not
+// yet loaded — the dossier degrades gracefully (fields → "—").
+function kaiMlProjection(sym, moKey, px) {
+  try {
+    const cache = (typeof window !== "undefined" && window.__kaiMlCache) || {};
+    const key = (sym || "") + ":" + (moKey || "swing");
+    const r = cache[key];
+    if (!r || r.__err) return null;
+    const d = r.direction || {}, g = r.magnitude || {}, v = r.verdict || {};
+    const spot = (px != null && !isNaN(+px)) ? +px : null;
+    if (spot == null || g.q10 == null || g.q90 == null) {
+      // still surface direction even without a price to anchor the cone
+      const pUp = d.p_up != null ? +d.p_up : null;
+      if (pUp == null) return null;
+      const ciL = d.ci_low != null ? +d.ci_low : (pUp != null ? Math.max(0, pUp - 0.1) : null);
+      const ciH = d.ci_high != null ? +d.ci_high : (pUp != null ? Math.min(1, pUp + 0.1) : null);
+      const horizons = { swing: 5, position: 21, invest: 126 };
+      return { horizon: horizons[moKey] || 5, pUp: pUp, ci: [ciL, ciH], entry: null, stop: null,
+               t1: null, t2: null, rr: null, ev: g.q50 != null ? +g.q50 : null, verdict: v.text || "—" };
+    }
+    const p = (q) => spot * (1 + (+q) / 100);
+    const entry = spot, stop = p(g.q10), t1 = p(g.q75 != null ? g.q75 : g.q90), t2 = p(g.q90);
+    const risk = entry - stop, rew = t1 - entry;
+    const pUp = d.p_up != null ? +d.p_up : null;
+    const ciL = d.ci_low != null ? +d.ci_low : (pUp != null ? Math.max(0, pUp - 0.1) : null);
+    const ciH = d.ci_high != null ? +d.ci_high : (pUp != null ? Math.min(1, pUp + 0.1) : null);
+    const horizons = { swing: 5, position: 21, invest: 126 };
+    return {
+      horizon: horizons[moKey] || 5,
+      pUp: pUp, ci: [ciL, ciH],
+      entry: entry, stop: stop, t1: t1, t2: t2,
+      rr: risk > 0 ? +(rew / risk).toFixed(2) : null,
+      ev: g.q50 != null ? +g.q50 : null,
+      verdict: v.text || "—",
+    };
+  } catch (e) { return null; }
+}
+
+// best-effort async prefetch of the open ticker's ML payload into window.__kaiMlCache
+// so the synchronous dossier read has it ready. Guarded; never throws.
+function kaiPrefetchMl(sym, moKey) {
+  try {
+    if (typeof fetch === "undefined" || !sym) return;
+    if (!window.__kaiMlCache) window.__kaiMlCache = {};
+    const key = sym + ":" + moKey;
+    if (window.__kaiMlCache[key] !== undefined) return; // already loaded / in-flight
+    window.__kaiMlCache[key] = null; // mark in-flight
+    fetch("/api/ml/" + encodeURIComponent(sym) + "?mode=" + encodeURIComponent(moKey), { credentials: "same-origin", cache: "no-store" })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { try { window.__kaiMlCache[key] = j || { __err: "empty" }; } catch (e) {} })
+      .catch(e => { try { window.__kaiMlCache[key] = { __err: String(e) }; } catch (e2) {} });
+  } catch (e) {}
+}
+
+// assemble the full cross-lens dossier for the OPEN ticker (port of prototype
+// tickerDossier). Returns {sym,name,verdict,score,mode,cv,pj,pillars,setupStats,
+// earnings,setupFamily,rMultiple,holdDays,stop,t1,t2,pivot} or null. Never throws.
+function kaiTickerDossier(sym) {
+  try {
+    const t = kaiOpenDossierTicker();
+    if (!t || (sym && t.symbol && String(t.symbol).toUpperCase() !== String(sym).toUpperCase())) {
+      // a sym was requested that isn't the open one → no rich shape available
+      if (sym && t && t.symbol && String(t.symbol).toUpperCase() !== String(sym).toUpperCase()) return null;
+    }
+    if (!t || !t.symbol) return null;
+    const moKey = kaiModeKey();
+    const d = {
+      sym: t.symbol, name: t.name, verdict: t.verdict, score: t.score, mode: moKey.toUpperCase(),
+      pillars: t.pillars, setupStats: t.setupStats, earnings: t.earnings,
+      setupFamily: t.setupFamily, rMultiple: t.rMultiple, holdDays: t.holdDays,
+      stop: t.stop, t1: t.t1, t2: t.t2, pivot: t.pivot,
+    };
+    try { d.cv = kaiComputeComposite(t); } catch (e) { d.cv = null; }
+    try { kaiPrefetchMl(t.symbol, moKey); d.pj = kaiMlProjection(t.symbol, moKey, t.price); } catch (e) { d.pj = null; }
+    return d;
+  } catch (e) { return null; }
+}
+
+// build the cross-lens dossier CONTEXT string injected as system/context into the
+// LLM request (port of prototype buildContext §4 dossier block). Extends the
+// existing kaiBuildContext with composite verdict + per-lens stances + ML forecast.
+function kaiBuildDossierContext(ctx) {
+  const lines = [];
+  try {
+    const t = kaiOpenDossierTicker();
+    if (!t || !t.symbol) return "";
+    const mode = kaiModeKey().toUpperCase();
+    if (t.pillars) lines.push("Pillars (0-100): " + Object.entries(t.pillars).map(([k, v]) => `${k} ${v}`).join(", ") + ".");
+    if (t.setupStats) lines.push(`Setup stats: ${t.setupFamily || "setup"} · win-rate ${((t.setupStats.winRate || 0) * 100).toFixed(0)}% · Wilson LB ${((t.setupStats.wilsonLB || 0) * 100).toFixed(0)}% · n=${t.setupStats.n != null ? t.setupStats.n : "—"} · R ${(t.rMultiple || 0).toFixed(2)}.`);
+    if (t.earnings) lines.push(`Earnings in ${t.earnings.days != null ? t.earnings.days : "—"}d${t.earnings.date && t.earnings.date !== "—" ? " (" + t.earnings.date + ")" : ""}.`);
+    const cv = kaiComputeComposite(t);
+    if (cv) lines.push(`COMPOSITE VERDICT (reconciled across ${cv.lenses.length} lenses): ${cv.verdict} ${cv.net}/100, confidence ${cv.conf}, disagreement ${cv.disagree}. Per-lens stance: ${cv.lenses.map(l => `${l.k} ${l.v}`).join(", ")}. Dissenting lenses: ${cv.dissenters.length ? cv.dissenters.map(x => x.k).join(", ") : "none"}.`);
+    const pj = kaiMlProjection(t.symbol, kaiModeKey(), t.price);
+    if (pj && pj.pUp != null) {
+      const ci = pj.ci || [null, null];
+      lines.push(`ML forecast (${pj.horizon}d): P(up) ${Math.round(pj.pUp * 100)}%${ci[0] != null && ci[1] != null ? ` [CI ${Math.round(ci[0] * 100)}-${Math.round(ci[1] * 100)}%]` : ""}${pj.entry != null ? `, entry $${pj.entry.toFixed(2)}, stop $${pj.stop.toFixed(2)} (q10), T1 $${pj.t1.toFixed(2)} (q75), T2 $${pj.t2.toFixed(2)} (q90), R:R ${pj.rr}` : ""}${pj.ev != null ? `, EV ${pj.ev >= 0 ? "+" : ""}${pj.ev}%` : ""}, verdict ${pj.verdict}.`);
+    }
+  } catch (e) { return lines.join(" "); }
+  return lines.join(" ");
+}
+
 // grounded scripted analyst — answers ONLY from the REAL retrieved slices.
 // Never canned market numbers; if the bundle has nothing, says so honestly.
 function kaiFallbackAnswer(q, ctx, bundle) {
@@ -30221,6 +30437,50 @@ function kaiFallbackAnswer(q, ctx, bundle) {
   const sym = ctx.ticker ? ctx.ticker.symbol : null;
   const b = bundle || {};
   const note = `\n\n_Ollama not reachable — grounded fallback. Answer built from the live data bundle (start \`ollama serve\` for full reasoning)._`;
+
+  // ── per-ticker questions answer from the FULL cross-lens dossier, any lens ──
+  // (port of prototype fallbackAnswer §4 — works even when the user is on a
+  //  different tab, because the dossier is assembled for the OPEN ticker.)
+  let D = null;
+  try { D = kaiTickerDossier(sym); } catch (e) { D = null; }
+  if (D) {
+    const cv = D.cv, pj = D.pj;
+    const num = (v) => (v == null || isNaN(+v)) ? null : +v;
+    const f2 = (v) => num(v) != null ? num(v).toFixed(2) : "—";
+    const lensWord = /smc|smart money|order block/.test(ql) ? "SMC"
+      : /option|greek|iv|call|put/.test(ql) ? "Options"
+      : /earning|eps|beat/.test(ql) ? "Earnings"
+      : /pattern|wyckoff|elliott|fib/.test(ql) ? "Patterns"
+      : /technical|rsi|macd|momentum/.test(ql) ? "Technicals"
+      : /value|intrinsic|fundamental|dcf|invest/.test(ql) ? "Investment"
+      : /ml|ai|forecast|predict|edge/.test(ql) ? "AI Edge"
+      : null;
+    // a specific lens was asked about → answer with that lens's stance from the composite
+    if (lensWord && cv) {
+      const l = cv.lenses.find(x => x.k === lensWord || x.k.indexOf(lensWord) === 0);
+      const stance = l ? (l.v >= 62 ? "bullish" : l.v >= 46 ? "neutral" : "bearish") : "—";
+      return `**${D.sym} · ${lensWord} read**\n\n${lensWord} scores **${l ? l.v : "—"}/100** (${stance})${l ? ` — ${l.why}` : ""}.\n\nIn the reconciled picture it's **${cv.verdict} ${cv.net}/100** across ${cv.lenses.length} lenses (confidence ${cv.conf}, ${cv.disagree} disagreement)${cv.dissenters.length ? `; the dissenters are ${cv.dissenters.map(x => x.k).join(", ")}` : "; no lens materially dissents"}.\n\n_Open the ${lensWord} tab for the full breakdown._${note}`;
+    }
+    // summary / verdict / "should I buy" → full reconciled read
+    if (/summar|verdict|14|lens|buy|short|should i|conviction|overall|why/.test(ql) && cv) {
+      const linesL = cv.lenses.slice().sort((a, c) => c.v - a.v).map(x => `- **${x.k}** ${x.v}/100 — ${x.why}`).join("\n");
+      return `**${D.sym} — reconciled cross-lens verdict**\n\n**${cv.verdict} · ${cv.net}/100** · confidence ${cv.conf} · ${cv.agree} agree / ${cv.caution} caution / ${cv.fail} against.\n\n${linesL}\n\n${cv.dissenters.length ? `⚠ **Dissenting:** ${cv.dissenters.map(x => x.k).join(", ")} — reconcile these before sizing.` : "✓ Clean confluence — no lens materially dissents."}${pj && pj.pUp != null ? `\n\nML (${pj.horizon}d): P(up) **${Math.round(pj.pUp * 100)}%**${pj.entry != null ? `, entry $${f2(pj.entry)} · stop $${f2(pj.stop)} · T1 $${f2(pj.t1)} · T2 $${f2(pj.t2)}, R:R ${pj.rr}` : ""}.` : ""}${note}`;
+    }
+    // plan / entry / target / stop → from projection + plan
+    if (/plan|trade|entry|target|stop|size|r:r|level/.test(ql)) {
+      const entry = num(D.pivot) ? num(D.pivot) * 1.002 : (pj ? num(pj.entry) : null);
+      return `**${D.sym} — ${D.mode} trade plan**\n\n- **Entry** — $${entry != null ? entry.toFixed(2) : "—"} (close above pivot, RVOL ≥ 1.3×)\n- **Stop** — $${num(D.stop) != null ? f2(D.stop) : (pj ? f2(pj.stop) : "—")}\n- **T1 · T2** — $${f2(D.t1)} · $${f2(D.t2)}\n- **R-multiple** — ${num(D.rMultiple) != null ? num(D.rMultiple).toFixed(2) : "—"}R · hold ~${D.holdDays != null ? D.holdDays : "—"}d${pj && pj.ev != null ? ` · EV ${pj.ev >= 0 ? "+" : ""}${pj.ev}%` : ""}\n- **Setup** — ${D.setupFamily || "—"}${D.setupStats ? ` · win ${((D.setupStats.winRate || 0) * 100).toFixed(0)}% · Wilson LB ${((D.setupStats.wilsonLB || 0) * 100).toFixed(0)}% · n=${D.setupStats.n != null ? D.setupStats.n : "—"}` : ""}\n\n_Plan · Ticket lens has the exact order + sizing cascade._${note}`;
+    }
+    // risk → pillars + stop
+    if (/risk|var|kelly|downside|exposure|drawdown/.test(ql)) {
+      return `**${D.sym} — risk read (${D.mode})**\n\n${D.pillars && D.pillars.risk != null ? `Risk pillar **${D.pillars.risk}/100**. ` : ""}Downside is bounded at the **$${num(D.stop) != null ? f2(D.stop) : "—"}** stop${pj && pj.stop != null ? ` (q10 $${f2(pj.stop)})` : ""}. Size half-Kelly off the Risk lens; the loss cones + VaR there scale to your ${D.mode} horizon.\n\n_Open the Risk tab for VaR/CVaR, Kelly sizing and the stress grid._${note}`;
+    }
+    // earnings timing
+    if (/when|earning|catalyst|event|print/.test(ql) && D.earnings) {
+      const ed = D.earnings.days;
+      return `**${D.sym} — events**\n\nNext earnings in **${ed != null ? ed : "—"}d**${D.earnings.date && D.earnings.date !== "—" ? ` (${D.earnings.date})` : ""}. ${(ed != null && ed <= (D.holdDays || 9)) ? "⚠ That lands **inside** your hold window — expect an IV-crush + gap risk; consider trimming into the print." : "It's **outside** the typical hold window, so the swing thesis isn't event-gated."}\n\n_Earnings tab has the implied-move cone + beat history._${note}`;
+    }
+  }
 
   // ── BUY / top verdicts from real screener ──
   if (Array.isArray(b.universe) && /buy|top|verdict|best|which|rank|scan/.test(ql)) {
@@ -30357,6 +30617,13 @@ function SurfaceAgent(props) {
   const ctxNow = getCtx();
   const suggests = ctxNow.ticker ? KAI_SUGGEST.ticker(ctxNow.ticker.symbol) : KAI_SUGGEST.base;
 
+  // warm the cross-lens dossier's ML cache for the open ticker (best-effort) so
+  // the synchronous dossier read has the /api/ml forecast ready when asked.
+  const openSym = ctxNow.ticker ? ctxNow.ticker.symbol : null;
+  useKaiEffect(() => {
+    try { if (openSym) kaiPrefetchMl(openSym, kaiModeKey()); } catch (e) {}
+  }, [openSym]);
+
   const send = async (text) => {
     const q = (text != null ? text : input).trim();
     if (!q || busy || typeof fetch === "undefined") return;
@@ -30368,9 +30635,13 @@ function SurfaceAgent(props) {
     let bundle = {};
     try { bundle = (window.KairosData ? window.KairosData.retrieve(q, ctx) : {}) || {}; } catch (e) { bundle = {}; }
     const ctxStr = kaiBuildContext(ctx);
+    // cross-lens dossier for the OPEN ticker (composite verdict + per-lens stances
+    // + ML forecast) so Kairos answers about ANY lens, keyed to ticker + __tmode.
+    let dossierStr = "";
+    try { dossierStr = kaiBuildDossierContext(ctx); } catch (e) { dossierStr = ""; }
     const catalog = (function () { try { return window.KairosData ? window.KairosData.catalog() : ""; } catch (e) { return ""; } })();
     const dataStr = Object.keys(bundle).length ? ` RELEVANT DATA (JSON, use to answer precisely): ${JSON.stringify(bundle)}` : "";
-    const sys = `${KAI_SYS_BASE} You can pull from these datasets: ${catalog}. CONTEXT: ${ctxStr}${dataStr}`;
+    const sys = `${KAI_SYS_BASE} You can pull from these datasets: ${catalog}. CONTEXT: ${ctxStr}${dossierStr ? " CROSS-LENS DOSSIER (reconciled across all lenses for the open ticker — use to answer about ANY lens, even ones not on screen): " + dossierStr : ""}${dataStr}`;
 
     const userMsg = { id: nextId(), role: "user", content: q };
     const convo = [...msgs, userMsg];
@@ -32672,6 +32943,17 @@ function App() {
     const mapped = (raw ? mapScannerRows([raw], data)[0] : undefined) || universe.find(r => r.sym === detailSym);
     return toDetailTicker(mapped, detailSym, raw);
   }, [detailSym, universe, allRows, data, detailRaw]);
+
+  // Publish the OPEN ticker (rich toDetailTicker shape) + its raw row to window so
+  // Kairos (SurfaceAgent) can assemble a cross-lens dossier for ANY lens, even when
+  // the user is on a different tab. Guarded — never throws.
+  useEffect(() => {
+    try {
+      window.__ssDetailSym = detailSym || null;
+      window.__ssDetailTicker = detailSym ? detailTicker : null;
+      window.__ssDetailRaw = detailSym ? (detailRaw || null) : null;
+    } catch (e) {}
+  }, [detailSym, detailTicker, detailRaw]);
 
   // Only the Home surface depends on the (multi-MB) data bundle. Every other
   // surface renders immediately from its own feed — never gate them on home data.
