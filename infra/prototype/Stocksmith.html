@@ -4216,6 +4216,9 @@ select.um-input { cursor: pointer; }
 .aicm-tbl tr.is-active td:first-child { font-weight: 600; }
 .aicm-proj { margin-top: 11px; padding-top: 10px; border-top: 1px dashed var(--line); }
 .aicm-proj .label-cap { margin: 0 0 7px; display: block; }
+
+/* A4 — defensive-tape banner (ML Predictions grid) */
+.aip-defensive { margin: 0 0 11px; padding: 8px 11px; border: 1px solid var(--rd); border-left: 3px solid var(--rd); border-radius: 6px; background: color-mix(in oklab, var(--rd) 12%, var(--bg-1)); color: var(--ink); font-size: 11.5px; }
 </style>
 
 <!-- Supplemental (Stocksmith-only): loading / scaffold / placeholder / toast.
@@ -31088,10 +31091,20 @@ function AvMlGrid({ mode, onT, blocked, meta }) {
     return () => { alive = false; };
   }, [mode]);
   const tone = (c) => (c === "gn" || c === "up") ? "gn" : (c === "rd" || c === "dn") ? "rd" : (c === "warn" || c === "amb") ? "amb" : "ink";
+  // A4 â adaptive BUY threshold / DEFENSIVE TAPE: when the strongest name in the
+  // pool is weak (max P(up) < 55%), the actionable bar drops to max(45%, poolMaxâ10pp).
+  const poolMax = st.rows.reduce((m, r) => (r && typeof r.p_up === "number" && r.p_up > m) ? r.p_up : m, 0);
+  const defensive = !st.loading && !st.err && st.rows.length > 0 && poolMax > 0 && poolMax < 0.55;
+  const minPup = Math.max(0.45, poolMax - 0.10);
   return (
     <div>
+      {defensive && (
+        <div className="aip-defensive mono">
+          ⚠ <b>DEFENSIVE TAPE</b> · pool max P(up) {(poolMax * 100).toFixed(0)}% &lt; 55%. Adaptive BUY bar lowered to <b>{(minPup * 100).toFixed(0)}%</b> (max of 45% and poolMax−10pp). Fewer names clear — size down.
+        </div>
+      )}
       {st.loading ? (
-        <div className="ss-empty">Loading ML forecasts…</div>
+        <div className="ss-empty">Loading ML forecastsâ¦</div>
       ) : st.err ? (
         <div className="ss-empty">ML forecasts unavailable ({st.err}). Source: cache/ml_edge_predictions.json via /api/ml_edge.</div>
       ) : st.rows.length === 0 ? (
