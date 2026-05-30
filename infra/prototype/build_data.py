@@ -1709,6 +1709,14 @@ def compact_row(r: dict) -> dict:
         # unexplained.
         "score_mult_audit":         r.get("score_mult_audit"),
         "entry_quality_tilt_audit": r.get("entry_quality_tilt_audit"),
+        # 2026-05-30 · Per-ticker fields detail-page + Stocksmith need but
+        # were 0/2089 in tickers.json (compact_row didn't propagate them):
+        #   quote_snapshot — Schwab L1 bid/ask/last/sizes/volume/spread
+        #   beat_rate      — earnings beat-rate dict (yfinance, tier-1)
+        #   fundamentals   — full score_fundamentals output (details/drivers/risks)
+        "quote_snapshot":           r.get("quote_snapshot") or {},
+        "beat_rate":                r.get("beat_rate") or {},
+        "fundamentals":             r.get("fundamentals") or {},
         # Scan-over-scan diff (audit log panel)
         "change_log":              _compute_change_log(r, _PREV_BUNDLE_INDEX.get(r.get("ticker"), {}), _PREV_BUNDLE_DATE),
         # 2026-05-17 · SMC engine output (zones · structure · liquidity · multi-TF bars).
@@ -3304,6 +3312,26 @@ def main():
             portfolio["cash"]         = ps.get("cash")
             portfolio["monthly_pnl"]  = ps.get("monthly_pnl") or {}
             portfolio["equity_curve"] = ps.get("equity_curve") or []
+            # 2026-05-30 · Cross-dashboard schema parity. Stocksmith reads
+            # `p.ticker || p.symbol` and renders `p.sector`. Alpaca-synced
+            # positions carry only `ticker` + qty — backfill `symbol`, `sector`,
+            # `industry` from the all_scored ticker index so both dashboards see
+            # identical row schemas. Best-effort; never blocks portfolio load.
+            try:
+                _tk_idx = {(r.get("ticker") or "").upper(): r
+                           for r in (b.get("all_scored") or [])
+                           if isinstance(r, dict) and r.get("ticker")}
+                for p in portfolio["positions"]:
+                    sym = (p.get("ticker") or "").upper()
+                    if sym and not p.get("symbol"):
+                        p["symbol"] = sym
+                    if sym and not p.get("sector"):
+                        _ref = _tk_idx.get(sym) or {}
+                        if _ref.get("sector"):   p["sector"]   = _ref["sector"]
+                        if _ref.get("industry") and not p.get("industry"):
+                            p["industry"] = _ref["industry"]
+            except Exception:
+                pass
         except Exception as e:
             portfolio["error"] = str(e)
 

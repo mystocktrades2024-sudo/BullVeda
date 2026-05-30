@@ -36,6 +36,7 @@ in the design's `src/data.jsx` and `src/home.jsx` is NOT used.
 | Discovery · UOA | `data.critical.json` · `options_flow_top30` (status/uoa_calls/put_call_ratio) |
 | Discovery · EMERGING | `data_screener.json` · cap_bucket Small/Mid × stage BUY/WATCH × rs_rank |
 | Top movers | `data.critical.json` · `market_movers.gainers/losers` (perf_1d is a fraction → ×100) |
+| Discovery · X CHATTER | `data_x_chatter.json` · `top_tickers_24h` (mentions×handles across tracked X handles via Nitter RSS — see `scripts/build_x_signal.py` + `config/x_handles.json`) |
 | Earnings today | `data_earnings.json` · `earnings_watchlist` (days_to_earnings=0) + `earnings_beat_predictions` + `portfolio.positions` cross-ref |
 | Top stories | **live** `/api/news?t=…` (EODHD) for `_news_top_tickers`; sentiment from screener `sent_score` |
 | Overnight signals | `data_screener.json` (stage=BUY, insider clusters) + `setup_drift_alerts` + bundle event |
