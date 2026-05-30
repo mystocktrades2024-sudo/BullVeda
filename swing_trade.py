@@ -730,8 +730,11 @@ def run_daily_scan(force_fresh: bool = False):
     try:
         if (cfg.get("universe") or {}).get("include_nasdaq_all"):
             from data_fetcher import get_nasdaq_all
-            nasdaq_all = get_nasdaq_all()
-            log.info(f"  NASDAQ (full exchange, common stock): {len(nasdaq_all)} tickers")
+            _u = cfg.get("universe") or {}
+            _topn = int(_u.get("nasdaq_all_top_n", 1000))
+            _mindv = float(_u.get("nasdaq_all_min_dollar_vol", 10_000_000))
+            nasdaq_all = get_nasdaq_all(top_n=_topn, min_dollar_vol=_mindv)
+            log.info(f"  NASDAQ {_topn if _topn > 0 else 'all'} (top liquid · >=${_mindv/1e6:.0f}M $vol): {len(nasdaq_all)} tickers")
     except Exception as _nae:
         log.warning(f"  NASDAQ full-exchange fetch failed: {_nae}")
 

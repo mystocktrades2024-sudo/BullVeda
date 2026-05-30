@@ -397,18 +397,24 @@ def get_nasdaq_100() -> list[str]:
     return _eodhd_universe("NDX") or []
 
 
-def get_nasdaq_all() -> list[str]:
-    """ALL common stocks AND ETFs listed on NASDAQ (EODHD exchange-symbol-list/NASDAQ).
-    Keeps Type in {Common Stock, ETF} (drops ADRs/warrants/units/preferred/funds/notes)
-    so the scanner ranks tradable equities + ETFs. Most equities overlap R1000/R2000;
-    the net-new chunk is the non-Russell NASDAQ small/micro-caps + NASDAQ-listed ETFs.
-    Opt-in via config universe.include_nasdaq_all — widens the pre-screen pool (Step 2),
-    not the enrichment cap (Step 4 stays bounded by max_enrichment_tickers)."""
+def get_nasdaq_all(top_n: int = 1000, min_dollar_vol: float = 10_000_000) -> list[str]:
+    """"NASDAQ 1000" — the top-`top_n` most-liquid NASDAQ-listed equities + ETFs.
+
+    Was the full ~4,805-name exchange list; liquidity-gated 2026-05-30 so the daily
+    scan stays fast. One bulk_eod(NASDAQ) call gives last-day close×volume for every
+    symbol; we keep Type in {Common Stock, ETF}, filter dollar-volume >= min_dollar_vol,
+    rank descending, and return the top `top_n` codes. Most overlap R1000/R2000/NDX100;
+    the net-new chunk is off-index liquid NASDAQ small-caps + NASDAQ-listed ETFs.
+
+    Opt-in via config universe.include_nasdaq_all; sized via universe.nasdaq_all_top_n
+    + universe.nasdaq_all_min_dollar_vol. Pass top_n<=0 to disable the cap (full
+    liquidity-gated list). Returns [] on a bulk hiccup — the index universes still
+    cover the liquid NASDAQ names, so this stays purely additive."""
     try:
         import eodhd_client as _eod
         syms = _eod.exchange_symbol_list("NASDAQ") or []
         keep = {"Common Stock", "ETF"}
-        seen = set(); ded = []
+        eligible = set()
         for s in syms:
             if not isinstance(s, dict):
                 continue
@@ -417,9 +423,34 @@ def get_nasdaq_all() -> list[str]:
                 continue
             if any(code.endswith(sfx) for sfx in ("WS", "U", "R", "P")) and len(code) > 4:
                 continue
-            if code not in seen:
-                seen.add(code); ded.append(code)
-        return ded
+            eligible.add(code)
+        if not eligible:
+            return []
+        rows = _eod.bulk_eod(exchange="NASDAQ") or []
+        if not isinstance(rows, list) or not rows:
+            try:
+                import logging as _lg; _lg.getLogger("swingtrade.data").warning(
+                    "get_nasdaq_all: bulk_eod(NASDAQ) returned no rows — skipping NASDAQ-all (index universes still cover liquid NASDAQ names)")
+            except Exception:
+                pass
+            return []
+        ranked = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            code = (r.get("code") or "").strip().upper()
+            if code not in eligible:
+                continue
+            try:
+                dv = float(r.get("close") or r.get("adjusted_close") or 0) * float(r.get("volume") or 0)
+            except (TypeError, ValueError):
+                continue
+            if dv >= min_dollar_vol:
+                ranked.append((code, dv))
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        if top_n and top_n > 0:
+            ranked = ranked[:top_n]
+        return [c for c, _ in ranked]
     except Exception as e:
         try:
             import logging as _lg; _lg.getLogger("swingtrade.data").warning(f"get_nasdaq_all failed: {e}")
