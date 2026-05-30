@@ -4227,6 +4227,39 @@ select.um-input { cursor: pointer; }
 .atc-sub { font-size: 11px; }
 .atc-tabs { margin: 0 0 14px; flex-wrap: wrap; }
 .atc-body > .surface { padding: 0; }
+
+/* ── AI price-projection chart (ported verbatim from ai-predict.css) ── */
+.aip-pchart-wrap { position:relative; background:var(--bg-0, var(--bg)); border:1px solid var(--line); border-radius:8px; padding:8px 6px; overflow:hidden; }
+.aip-pchart-svg { display:block; width:100%; }
+.aipc-grid { stroke:var(--line); stroke-width:1; stroke-dasharray:1 6; opacity:0.5; }
+.aipc-wm { fill:var(--ink-1); font-size:62px; font-weight:800; letter-spacing:0.04em; font-family:var(--mono); opacity:0.05; }
+.aipc-up .aipc-body { fill:var(--bg-1); stroke:var(--gn); }
+.aipc-up .aipc-wick { stroke:var(--gn); stroke-width:1; opacity:0.9; }
+.aipc-dn .aipc-body { fill:var(--rd); stroke:var(--rd); }
+.aipc-dn .aipc-wick { stroke:var(--rd); stroke-width:1; opacity:0.9; }
+.aipc-ma20 { stroke:var(--cy); stroke-width:1.5; opacity:0.95; }
+.aipc-ma50 { stroke:var(--amb); stroke-width:1.5; opacity:0.9; }
+.aipc-ma200 { stroke:var(--ink-3); stroke-width:1.5; opacity:0.85; }
+.aipc-bo-fill { fill:var(--gn); opacity:0.08; }
+.aipc-bo-line { stroke:var(--gn); stroke-width:1.4; opacity:0.7; stroke-dasharray:4 3; }
+.aipc-bo-label { fill:var(--gn); font-size:13px; font-weight:700; letter-spacing:0.08em; font-family:var(--mono); }
+.aipc-ai-box { fill:var(--violet); fill-opacity:0.1; stroke:var(--violet); stroke-opacity:0.45; stroke-width:1; }
+.aipc-dot { fill:var(--cy); stroke:var(--bg-0, var(--bg)); stroke-width:1.5; }
+.aipc-dot-lbl { fill:var(--ink-2); font-size:11px; font-weight:600; font-family:var(--mono); }
+.aipc-axis { stroke:var(--line-2); stroke-width:1; }
+.aipc-axis-lbl { fill:var(--ink-3); font-size:10.5px; font-weight:500; font-family:var(--mono); }
+.aipc-tgt-pill { fill:var(--violet); }
+.aipc-tgt-txt { fill:var(--bg-0, #0c0e0e); font-size:11px; font-weight:700; font-family:var(--mono); }
+.aipc-ai-note { fill:var(--violet); font-size:13px; font-weight:700; font-family:var(--mono); }
+.aipc-malbl { font-size:9.5px; font-weight:700; font-family:var(--mono); }
+.aipc-malbl-20 { fill:var(--cy); }
+.aipc-malbl-50 { fill:var(--amb); }
+.aipc-malbl-200 { fill:var(--ink-3); }
+/* host wiring helpers */
+.aipc-section { margin:10px 0 14px; }
+.aipc-section > .label-cap { display:block; margin:0 0 6px; }
+.aipc-badge { position:absolute; top:8px; left:10px; z-index:2; font-size:9.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--ink-3); background:var(--bg-1); border:1px solid var(--line); border-radius:4px; padding:2px 6px; opacity:0.9; }
+.aipc-na { padding:18px; font-size:12px; text-align:center; border:1px dashed var(--line); border-radius:8px; }
 </style>
 
 <!-- Supplemental (Stocksmith-only): loading / scaffold / placeholder / toast.
@@ -16083,6 +16116,186 @@ function AICrossMode({ sym, px, activeMode }) {
     </div>
   );
 }
+
+// ── AI price-projection chart — faithful 1:1 port of the prototype's
+//    AIProjectionChart (surface-ai.jsx 296–445). History candles + MAs + swing
+//    pivots + breakout box are derived from REAL daily bars; the forward
+//    projection box + candles + AI target are anchored to the REAL live spot and
+//    the model's REAL q90. SVG/geometry/labels kept verbatim from the prototype.
+//    Props: sym, bars[{o,c,hi,lo}] (Patterns shape; may be empty), proj{entry, mag{q10,q50,q75,q90}}.
+function AIProjectionChart({ sym, bars, proj }) {
+  const [ref, w] = useWidth(900);
+  const M = useMemo(() => {
+    if (!proj || proj.entry == null || !proj.mag || proj.mag.q90 == null) return null;
+    const spot = proj.entry;
+    const fwdN = 16;
+    // ── REAL history bars (Patterns shape {o,c,hi,lo}) → last ≤60. If none are
+    //    available, synthesize a small deterministic demo history so the live
+    //    forecast still renders (flagged via `demo`).
+    let hist, demo = false;
+    const real = Array.isArray(bars) ? bars.filter(b => b && isFinite(b.o) && isFinite(b.c) && isFinite(b.hi) && isFinite(b.lo)) : [];
+    if (real.length >= 20) {
+      hist = real.slice(-60).map(b => ({ o: b.o, c: b.c, hi: b.hi, lo: b.lo }));
+    } else {
+      demo = true;
+      const rngD = pvRng(pvSeed(sym, real));
+      hist = [];
+      let prev = spot * 0.82;
+      for (let k = 0; k < 60; k++) {
+        const drift = spot * (0.82 + 0.18 * (k / 59));
+        const c = drift + (rngD() - 0.5) * spot * 0.02;
+        const o = prev + (rngD() - 0.5) * spot * 0.012;
+        const hi = Math.max(o, c) + rngD() * spot * 0.01;
+        const lo = Math.min(o, c) - rngD() * spot * 0.01;
+        hist.push({ o, c, hi, lo });
+        prev = c;
+      }
+      hist[hist.length - 1] = { o: prev, c: spot, hi: Math.max(prev, spot) * 1.003, lo: Math.min(prev, spot) * 0.997 };
+    }
+    const histN = hist.length;
+    // ── breakout consolidation box from the REAL trailing base (the window just
+    //    before the current bar): use its high/low as baseHi/baseLo. ──
+    const boxFrom = Math.max(0, histN - 1 - 24), boxTo = Math.max(boxFrom + 1, histN - 4);
+    const baseWin = hist.slice(boxFrom, boxTo);
+    const baseHi = baseWin.length ? Math.max(...baseWin.map(b => b.hi)) : spot * 0.945;
+    const baseLo = baseWin.length ? Math.min(...baseWin.map(b => b.lo)) : spot * 0.855;
+    const breakoutIdx = histN - 1;
+
+    const rng = pvRng(pvSeed(sym, real) ^ 0xA17);
+    const tgt = spot * (1 + proj.mag.q90 / 100);          // headline AI target (q90 — the box top)
+    const retPct = proj.mag.q90;
+    const fwd = [];
+    let prevC = spot;
+    for (let k = 1; k <= fwdN; k++) {
+      const t = k / fwdN;
+      const mid = spot + (tgt - spot) * (t * 0.7 + t * t * 0.3);
+      const band = spot * 0.009 * Math.sqrt(k);
+      const c = mid + (rng() - 0.5) * band;
+      const o = prevC + (rng() - 0.5) * band * 0.5;
+      const hi = Math.max(o, c) + rng() * band * 0.6;
+      const lo = Math.min(o, c) - rng() * band * 0.6;
+      fwd.push({ o, c, hi, lo, v: 0, proj: true });
+      prevC = c;
+    }
+    const allBars = hist.concat(fwd);
+    const ma = (win) => allBars.map((_, i) => {
+      const s = Math.max(0, i - win + 1);
+      const sl = allBars.slice(s, i + 1);
+      return sl.reduce((a, b) => a + b.c, 0) / sl.length;
+    });
+    // swing pivots (local extrema) for blue dots + labels, historical region only
+    const piv = [];
+    for (let i = 4; i < histN - 4; i++) {
+      const c = hist[i];
+      const isHi = hist.slice(i - 3, i + 4).every(b => b.hi <= c.hi + 1e-6);
+      const isLo = hist.slice(i - 3, i + 4).every(b => b.lo >= c.lo - 1e-6);
+      if (isHi) piv.push({ i, price: c.hi, kind: "hi" });
+      else if (isLo) piv.push({ i, price: c.lo, kind: "lo" });
+    }
+    const highs = piv.filter(p => p.kind === "hi").sort((a, b) => b.price - a.price).slice(0, 2);
+    const lows = piv.filter(p => p.kind === "lo").sort((a, b) => a.price - b.price).slice(0, 2);
+    return { bars: allBars, histN, fwdN, spot, tgt, retPct, baseLo, baseHi, breakoutIdx, demo,
+      boxFrom,
+      ma20: ma(20), ma50: ma(50), ma200: ma(200),
+      dots: [...highs, ...lows] };
+  }, [sym, bars, proj]);
+
+  if (!M) return <div className="aipc-na mono dim2">projection unavailable</div>;
+
+  // geometry
+  const W = Math.max(560, w), H = 420;
+  const padL = 10, padR = 78, padT = 16, padB = 16;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const N = M.bars.length;
+  const xStep = plotW / N;
+  const xOf = i => padL + i * xStep + xStep / 2;
+  const allP = M.bars.flatMap(b => [b.hi, b.lo]).concat([M.tgt, ...M.ma200.filter(Boolean)]);
+  const pMin = Math.min(...allP), pMax = Math.max(...allP);
+  const rng = (pMax - pMin) || 1, yPad = rng * 0.08;
+  const yMin = pMin - yPad, yMax = pMax + yPad;
+  const yOf = v => padT + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
+  const bw = Math.max(1.4, Math.min(7, xStep * 0.58));
+  const plotR = padL + plotW;
+  const maPath = arr => arr.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
+  const axisTicks = [0, 0.2, 0.4, 0.6, 0.8, 1].map(f => yMin + (yMax - yMin) * f);
+  const bx0 = xOf(M.boxFrom), bx1 = xOf(M.breakoutIdx);
+  const aiX0 = xOf(M.histN) - xStep * 0.5;
+  const fwdHi = Math.max(...M.bars.slice(M.histN).map(b => b.hi));
+  const fwdLo = Math.min(...M.bars.slice(M.histN).map(b => b.lo));
+
+  return (
+    <div className="aip-pchart-wrap" ref={ref}>
+      <div className="aipc-badge mono">{M.demo ? "demo history · live forecast" : "live forecast"}</div>
+      <svg width={W} height={H} className="aip-pchart-svg">
+        {/* dashed grid */}
+        {axisTicks.map((gv, k) => (
+          <line key={`gy${k}`} x1={padL} y1={yOf(gv)} x2={plotR} y2={yOf(gv)} className="aipc-grid" />
+        ))}
+        {Array.from({ length: 11 }, (_, k) => {
+          const gx = padL + (plotW / 10) * k;
+          return <line key={`gx${k}`} x1={gx} y1={padT} x2={gx} y2={padT + plotH} className="aipc-grid" />;
+        })}
+        {/* watermark */}
+        <text x={padL + plotW * 0.34} y={padT + plotH * 0.74} className="aipc-wm">{sym}</text>
+
+        {/* Breakout consolidation box */}
+        <rect x={bx0} y={yOf(M.baseHi)} width={bx1 - bx0} height={yOf(M.baseLo) - yOf(M.baseHi)} className="aipc-bo-fill" />
+        <line x1={bx0} y1={yOf(M.baseHi)} x2={bx1} y2={yOf(M.baseHi)} className="aipc-bo-line" />
+        <line x1={bx0} y1={yOf(M.baseLo)} x2={bx1} y2={yOf(M.baseLo)} className="aipc-bo-line" />
+        <text x={(bx0 + bx1) / 2} y={yOf(M.baseHi) - 8} className="aipc-bo-label" textAnchor="middle">Breakout</text>
+
+        {/* AI Prediction box */}
+        <rect x={aiX0} y={yOf(fwdHi) - 6} width={plotR - aiX0} height={yOf(fwdLo) - yOf(fwdHi) + 12} className="aipc-ai-box" rx="3" />
+
+        {/* MAs (drawn under candles) */}
+        <polyline points={maPath(M.ma200)} className="aipc-ma200" fill="none" />
+        <polyline points={maPath(M.ma50)} className="aipc-ma50" fill="none" />
+        <polyline points={maPath(M.ma20)} className="aipc-ma20" fill="none" />
+        {/* inline MA labels at the current bar */}
+        {[["MA20", M.ma20, "aipc-malbl-20"], ["MA50", M.ma50, "aipc-malbl-50"], ["MA200", M.ma200, "aipc-malbl-200"]].map(([lbl, arr, cls]) => (
+          <text key={lbl} x={xOf(M.histN - 1) - 6} y={yOf(arr[M.histN - 1]) + 3} className={`aipc-malbl ${cls}`} textAnchor="end">{lbl}</text>
+        ))}
+
+        {/* candles */}
+        {M.bars.map((d, i) => {
+          const up = d.c >= d.o;
+          const x = xOf(i);
+          const cls = up ? "aipc-up" : "aipc-dn";
+          const bt = yOf(Math.max(d.o, d.c)), bh = Math.max(1, Math.abs(yOf(d.o) - yOf(d.c)));
+          return (
+            <g key={i} className={cls} opacity={i >= M.histN ? 0.92 : 1}>
+              <line x1={x} y1={yOf(d.hi)} x2={x} y2={yOf(d.lo)} className="aipc-wick" />
+              <rect x={x - bw / 2} y={bt} width={bw} height={bh} className="aipc-body" />
+            </g>
+          );
+        })}
+
+        {/* swing dots + price labels */}
+        {M.dots.map((p, k) => (
+          <g key={`d${k}`}>
+            <circle cx={xOf(p.i)} cy={yOf(p.price)} r="4" className="aipc-dot" />
+            <text x={xOf(p.i)} y={yOf(p.price) + (p.kind === "hi" ? -10 : 16)} className="aipc-dot-lbl" textAnchor="middle">{p.price.toFixed(2)}</text>
+          </g>
+        ))}
+
+        {/* right price axis */}
+        <line x1={plotR} y1={padT} x2={plotR} y2={padT + plotH} className="aipc-axis" />
+        {axisTicks.slice(1).map((gv, k) => (
+          <text key={`ax${k}`} x={plotR + 7} y={yOf(gv) + 4} className="aipc-axis-lbl">{gv.toFixed(2)}</text>
+        ))}
+        {/* AI target pill */}
+        <g>
+          <rect x={plotR + 3} y={yOf(M.tgt) - 11} width={padR - 6} height={22} rx="4" className="aipc-tgt-pill" />
+          <text x={plotR + 3 + (padR - 6) / 2} y={yOf(M.tgt) + 4} className="aipc-tgt-txt" textAnchor="middle">{M.tgt.toFixed(2)}</text>
+        </g>
+
+        {/* AI Prediction annotation */}
+        <text x={plotR - 4} y={yOf(fwdHi) - 14} className="aipc-ai-note" textAnchor="end">✨ AI Prediction +{(+M.retPct).toFixed(1)}%</text>
+      </svg>
+    </div>
+  );
+}
+
 function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("ml-1"); const s2 = useStateToggle("ml-2");
   const s3 = useStateToggle("ml-3"); const s4 = useStateToggle("ml-4");
@@ -16147,9 +16360,25 @@ function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const confidence = verdict ? ptNum(verdict.confidence, null) : null;
   const confluences = (verdict && Array.isArray(verdict.confluences)) ? verdict.confluences : [];
 
+  // ── price-projection chart wiring: REAL daily bars (same source as Patterns)
+  //    + projection from the live spot and the model's REAL magnitude quantiles. ──
+  const aipFeed = usePvOhlcv(sym);
+  const aipSpot = ptNum(t.price, null) != null ? ptNum(t.price, null)
+    : (aipFeed.bars && aipFeed.bars.length ? aipFeed.bars[aipFeed.bars.length - 1].c : null);
+  const aipProj = (aipSpot != null && q90 != null) ? {
+    entry: aipSpot,
+    mag: { q10: q10, q50: q50, q75: q75, q90: q90 },
+  } : null;
+
   return (
     <div className="lens lens--ml">
       <AICrossMode sym={sym} px={ptNum(t.price, null)} activeMode={mlMode} />
+      {aipProj && (
+        <div className="aipc-section">
+          <div className="label-cap">Price Projection · {modeLabel}{horizon != null ? ` · ${horizon}d` : ""} <span className="dim2">(real bars · forward zone from q90)</span></div>
+          <AIProjectionChart sym={sym} bars={aipFeed.bars} proj={aipProj} />
+        </div>
+      )}
       <div className="hero ml-hero">
         <div className="th-left">
           <div className="label-cap">AI Edge · {modeLabel}{horizon != null ? ` · ${horizon}d` : ""}</div>
@@ -25461,6 +25690,15 @@ function MLForecastView({ bars, raw, dir, symbol }) {
     return { verdict, score, pUp };
   })();
 
+  // ── price-projection chart: REAL bars + projection from the AI ensemble's REAL
+  //    magnitude quantiles, anchored to the last REAL close as spot. ──
+  const aipSpot = (bars && bars.length) ? bars[bars.length - 1].c : null;
+  const aipMag = (ai.state === "ready" && ai.data && ai.data.magnitude) ? ai.data.magnitude : null;
+  const aipProj = (aipSpot != null && aipMag && aipMag.q90 != null) ? {
+    entry: aipSpot,
+    mag: { q10: ptNum(aipMag.q10, null), q50: ptNum(aipMag.q50, null), q75: ptNum(aipMag.q75, null), q90: ptNum(aipMag.q90, null) },
+  } : null;
+
   return (
     <div className="pv-view">
       <div className="pv-pad"><PvHeuristic>Meta-model treating the {M.feats.length} pattern theories as model features — each feature is the REAL per-theory read on the real bars (not a static base). Weights are fixed priors (context/structure heaviest); the ensemble probability and the projection band (from real ATR) are computed live. Theories that can't compute on this history show <b>"—"</b> and drop out of the weighting.</PvHeuristic></div>
@@ -25516,6 +25754,13 @@ function MLForecastView({ bars, raw, dir, symbol }) {
         <div className="mono dim2" style={{ fontSize: 11, lineHeight: 1.5 }}>
           This meta-model treats the {M.feats.length} pattern theories as features, weights them by fixed priors, and blends their real reads into a single probability — then cross-checks the standalone ML Predictions ensemble. Feature stances and the projection band are computed from real bars + real ATR; the weights are fixed priors, not fit on forward outcomes.
         </div>
+      </div>
+
+      <SectionHeader n={2} title="AI price projection" sub="real history candles + MAs + swing pivots · forward zone & target from the AI ensemble q90" style="minimal" />
+      <div className="pv-pad">
+        {aipProj
+          ? <AIProjectionChart sym={symbol} bars={bars} proj={aipProj} />
+          : <div className="mono dim2" style={{ fontSize: 12, padding: 8 }}>{ai.state === "loading" ? "Loading AI forecast…" : "Projection shows here when /api/ml returns magnitude quantiles — otherwise —."}</div>}
       </div>
     </div>
   );
