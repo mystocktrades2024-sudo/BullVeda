@@ -1,4 +1,4 @@
-// lens-track.jsx + lens-mledge.jsx — Track Record + ML Edge
+// lens-track.jsx + lens-mledge.jsx — Track Record + AI Edge
 
 // ────────────────────────────────────────────────────────────
 // TRACK RECORD — Wilson CI per setup, PF, median R, edge decay
@@ -100,7 +100,7 @@ function LensTrack({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) 
           <CrossLens lead="gn" cells={[
             { lens: "Track Rec.",  verdict: "EDGE",  tone: "gn",  note: "Wilson 47.7% · PF 1.41 haircut" },
             { lens: "Plan",        verdict: "READY", tone: "gn",  note: "R 1.74 · sized" },
-            { lens: "ML Edge",     verdict: "+0.18", tone: "gn",  note: "hit-net agrees" },
+            { lens: "AI Edge",     verdict: "+0.18", tone: "gn",  note: "hit-net agrees" },
             { lens: "Regime",      verdict: "BULL",  tone: "gn",  note: "highest historical WR regime" },
             { lens: "Risk",        verdict: "OK",    tone: "gn",  note: "expectancy · half-Kelly fits" },
           ]} />
@@ -205,16 +205,23 @@ function DistributionBars() {
 function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("ml-1"); const s2 = useStateToggle("ml-2");
   const s3 = useStateToggle("ml-3"); const s4 = useStateToggle("ml-4");
+  // mode-aware forecast from the shared projection engine
+  const moKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing";
+  const pj = (window.AIPredict && ticker && ticker.symbol) ? window.AIPredict.projection(ticker.symbol, moKey) : null;
+  const hz = pj ? pj.horizon : "10d";
+  const pUp = pj ? pj.pUp : 0.61;
+  const hitNet = pj ? +(pj.hit.p_t1_first - pj.hit.p_stop_first).toFixed(2) : 0.18;
+  const dirTone = pUp >= 0.6 ? "gn" : pUp >= 0.45 ? "amb" : "rd";
 
   return (
     <div className="lens lens--ml">
       <div className="hero ml-hero">
         <div className="th-left">
-          <div className="label-cap">3-head ML forecast · 10-day horizon</div>
+          <div className="label-cap">3-head ML forecast · {hz} horizon · {mode}</div>
           <div className="th-score">
-            <div className="th-score-num mono">+0.18</div>
-            <Pill tone="gn" dot>hit-net edge</Pill>
-            <Pill tone="gn" small>Direction 61%</Pill>
+            <div className="th-score-num mono">{hitNet >= 0 ? "+" : ""}{hitNet.toFixed(2)}</div>
+            <Pill tone={hitNet >= 0 ? "gn" : "rd"} dot>hit-net edge</Pill>
+            <Pill tone={dirTone} small>Direction {Math.round(pUp * 100)}%</Pill>
             <Pill tone="amb" small>Magnitude wide</Pill>
           </div>
           <div className="th-pill-row">
@@ -224,34 +231,45 @@ function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           </div>
         </div>
         <div className="th-right">
-          <MLConeChart ticker={ticker} />
+          <MLConeChart ticker={ticker} pj={pj} />
         </div>
       </div>
 
       <div className="lens-section">
         <SectionHeader n={1} title="Head 1 · Direction"
-          sub="P(up) over next 10 sessions"
+          sub={`P(up) over next ${hz}`}
           style={headerStyle} right={<StateToggle name="ml-1" />} />
         <StateWrap state={s1.value} source="ml_edge_predictions.json · classifier head">
-          <div className="lens-pad"><ProbBar v={0.61} label="P(up · 10d)" /></div>
+          <div className="lens-pad"><ProbBar v={pUp} label={`P(up · ${hz})`} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
         <SectionHeader n={2} title="Head 2 · Magnitude Cone"
-          sub="quantile regression · 10-day return distribution"
+          sub={`quantile regression · ${hz} return distribution`}
           style={headerStyle} right={<StateToggle name="ml-2" />} />
         <StateWrap state={s2.value} source="quantile regressor head">
           <div className="lens-pad">
             <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="P10" value="−4.2%" tone="rd" />
-              <KpiTile label="P50 (median)" value="+6.4%" tone="gn" />
-              <KpiTile label="P90" value="+12.1%" tone="gn" />
-              <KpiTile label="Skew" value="+0.42" tone="gn" sub="right-skewed" />
+              <KpiTile label="P10" value={`${pj ? (pj.mag.q10>=0?"+":"") + pj.mag.q10 : "−4.2"}%`} tone="rd" />
+              <KpiTile label="P50 (median)" value={`${pj ? (pj.mag.q50>=0?"+":"") + pj.mag.q50 : "+6.4"}%`} tone={pj && pj.mag.q50 < 0 ? "rd" : "gn"} />
+              <KpiTile label="P90" value={`${pj ? "+" + pj.mag.q90 : "+12.1"}%`} tone="gn" />
+              <KpiTile label="Skew" value={pj ? ((pj.mag.q90 + pj.mag.q10) >= 0 ? "+0.42" : "−0.31") : "+0.42"} tone="gn" sub="right-skewed" />
             </div>
           </div>
         </StateWrap>
       </div>
+
+      {window.AIProjectionChart && pj && (
+        <div className="lens-section">
+          <SectionHeader n={2.5} title="Price Projection · annotated chart"
+            sub={`candles · MA20/50/200 · breakout base · forward AI zone → target +${pj.mag.q90}%`}
+            style={headerStyle} right={<StateToggle name="ml-25" />} />
+          <StateWrap state={s2.value} source="OHLCV (demo) + ml_edge projection">
+            <div className="lens-pad">{React.createElement(window.AIProjectionChart, { P: { sym: ticker.symbol, px: ticker.price }, proj: pj })}</div>
+          </StateWrap>
+        </div>
+      )}
 
       <div className="lens-section">
         <SectionHeader n={3} title="Head 3 · Hit-Net (T1 vs Stop)"
@@ -275,9 +293,9 @@ function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
         <SectionHeader n={5} title="Cross-Lens Confluence" style={headerStyle} />
         <div className="lens-pad">
           <CrossLens lead="violet" cells={[
-            { lens: "ML Edge",     verdict: "+0.18", tone: "gn", note: "hit-net positive · cal OK" },
-            { lens: "Direction",   verdict: "61%",   tone: "gn", note: "P(up) 10d" },
-            { lens: "Magnitude",   verdict: "WIDE",  tone: "amb",note: "P10 −4 / P90 +12" },
+            { lens: "AI Edge",     verdict: `${hitNet >= 0 ? "+" : ""}${hitNet.toFixed(2)}`, tone: hitNet >= 0 ? "gn" : "rd", note: `hit-net · ${hz}` },
+            { lens: "Direction",   verdict: `${Math.round(pUp * 100)}%`,   tone: dirTone, note: `P(up) ${hz}` },
+            { lens: "Magnitude",   verdict: "WIDE",  tone: "amb",note: pj ? `q10 ${pj.mag.q10} / q90 +${pj.mag.q90}` : "P10 −4 / P90 +12" },
             { lens: "Track Rec.",  verdict: "EDGE",  tone: "gn", note: "Wilson 47.7%" },
             { lens: "Plan",        verdict: "READY", tone: "gn", note: "R 1.74" },
           ]} />
@@ -285,9 +303,9 @@ function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </div>
 
       <div className="lens-call">
-        <span className="label-cap">The Call · ML Edge</span>
+        <span className="label-cap">The Call · AI Edge · {mode}</span>
         <span className="mono">
-          P(T1 first) − P(stop first) = <b className="up">+0.18</b>. Calibration OK,
+          P(T1 first) − P(stop first) = <b className={hitNet >= 0 ? "up" : "dn"}>{hitNet >= 0 ? "+" : ""}{hitNet.toFixed(2)}</b> over the <b>{hz}</b> horizon. Calibration OK,
           drift low. Model and rules agree.
         </span>
       </div>
@@ -335,19 +353,35 @@ function HitNetBar() {
   );
 }
 
-function MLConeChart({ ticker }) {
+function MLConeChart({ ticker, pj }) {
+  const q90 = pj ? pj.mag.q90 : 12.1, q50 = pj ? pj.mag.q50 : 6.4, q10 = pj ? pj.mag.q10 : -4.2;
+  const hz = pj ? pj.horizon : "10d";
   return (
-    <svg viewBox="0 0 300 120" width="300" height="120">
+    <svg viewBox="0 0 300 120" width="300" height="120" style={{ overflow: "visible" }}>
+      <defs>
+        <linearGradient id="mlc-gn" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--gn)" stopOpacity="0.35" />
+          <stop offset="100%" stopColor="var(--gn)" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id="mlc-rd" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stopColor="var(--rd)" stopOpacity="0.30" />
+          <stop offset="100%" stopColor="var(--rd)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
       <line x1="20" y1="60" x2="280" y2="60" stroke="var(--line)" strokeDasharray="3 3" />
-      <path d="M 20 60 Q 150 24 280 16" stroke="var(--gn)" strokeWidth="1.4" fill="none" opacity="0.45" />
-      <path d="M 20 60 Q 150 38 280 38" stroke="var(--gn)" strokeWidth="1.5" fill="none" />
-      <path d="M 20 60 Q 150 88 280 104" stroke="var(--rd)" strokeWidth="1.4" fill="none" opacity="0.45" />
-      <circle cx="20" cy="60" r="3" fill="var(--copper)" />
-      <text x="276" y="13" fontSize="9" className="mono" textAnchor="end" fill="var(--gn)">P90 +12.1%</text>
-      <text x="276" y="35" fontSize="9" className="mono" textAnchor="end" fill="var(--gn)">P50 +6.4%</text>
-      <text x="276" y="113" fontSize="9" className="mono" textAnchor="end" fill="var(--rd)">P10 −4.2%</text>
+      <path d="M 20 60 Q 150 24 280 16 L 280 60 L 20 60 Z" fill="url(#mlc-gn)" />
+      <path d="M 20 60 Q 150 88 280 104 L 280 60 L 20 60 Z" fill="url(#mlc-rd)" />
+      <path d="M 20 60 Q 150 24 280 16" stroke="var(--gn)" strokeWidth="1.4" fill="none" opacity="0.55" />
+      <path d="M 20 60 Q 150 38 280 38" stroke="var(--gn)" strokeWidth="1.8" fill="none"
+            style={{ filter: "drop-shadow(0 0 6px var(--gn))" }} />
+      <path d="M 20 60 Q 150 88 280 104" stroke="var(--rd)" strokeWidth="1.4" fill="none" opacity="0.55" />
+      <circle cx="20" cy="60" r="4" fill="var(--copper)"
+              style={{ filter: "drop-shadow(0 0 8px var(--copper))" }} />
+      <text x="276" y="13" fontSize="9.5" className="mono" textAnchor="end" fill="var(--gn)">P90 +{q90}%</text>
+      <text x="276" y="35" fontSize="9.5" className="mono" textAnchor="end" fill="var(--gn)" fontWeight="500">P50 {q50 >= 0 ? "+" : ""}{q50}%</text>
+      <text x="276" y="113" fontSize="9.5" className="mono" textAnchor="end" fill="var(--rd)">P10 {q10}%</text>
       <text x="20" y="113" fontSize="9" className="mono" fill="var(--ink-3)">T+0</text>
-      <text x="276" y="60" fontSize="9" className="mono" textAnchor="end" fill="var(--ink-3)">T+10</text>
+      <text x="276" y="60" fontSize="9" className="mono" textAnchor="end" fill="var(--ink-3)">{hz}</text>
     </svg>
   );
 }

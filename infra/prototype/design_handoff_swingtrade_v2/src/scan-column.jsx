@@ -144,12 +144,30 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
           )}
         </div>
       )}
+      {(widthCat === "M" || widthCat === "L" || widthCat === "XL") && (
+        <div className="sc-conv" title={`conviction ${item.score}/100`}>
+          <span className="sc-conv-fill" style={{ width: `${item.score}%`, background: `var(--${item.score >= 66 ? "gn" : item.score >= 50 ? "amb" : "rd"})` }} />
+        </div>
+      )}
       {(widthCat === "L" || widthCat === "XL") && (
         <div className="sc-row-foot">
           <Pill tone={verdictTone} small>{item.verdict}</Pill>
           <span className="sc-row-setup mono dim">{item.setup}</span>
         </div>
       )}
+      {(widthCat === "M" || widthCat === "L" || widthCat === "XL") && (() => {
+        const s = scanSignals(item);
+        return (
+          <div className="sc-row-chips">
+            <span className="sc-chip" title="relative volume vs 20-day avg"><span className="sc-chip-k">RVOL</span><b className={s.rvol >= 1.5 ? "up" : "dim2"}>{s.rvol.toFixed(1)}×</b></span>
+            <span className="sc-chip" title="ML model P(up) over swing horizon"><span className="sc-chip-k">P↑</span><b className={`kpi-tone--${s.pUp >= 60 ? "gn" : s.pUp >= 45 ? "amb" : "rd"}`}>{s.pUp}%</b></span>
+            <span className="sc-chip" title="reward:risk to T1"><span className="sc-chip-k">R:R</span><b className={s.rr >= 2 ? "up" : "dim2"}>{s.rr.toFixed(1)}</b></span>
+            <span className="sc-chip" title="distance to breakout pivot"><span className="sc-chip-k">PIV</span><b className={Math.abs(s.toPivot) <= 1 ? "up" : "dim2"}>{s.toPivot >= 0 ? "+" : ""}{s.toPivot}%</b></span>
+            {s.insider !== 0 && <span className={`sc-flowdot sc-flowdot--${s.insider > 0 ? "buy" : "sell"}`} title={`insider net ${s.insider > 0 ? "buying" : "selling"} (90d)`}>{s.insider > 0 ? "▲" : "▼"}</span>}
+            {s.erDays <= 7 && <span className="sc-chip sc-chip--er" title={`earnings in ${s.erDays} sessions`}>⚡ ER {s.erDays}d</span>}
+          </div>
+        );
+      })()}
       {widthCat === "XL" && (
         <div className="sc-row-spark">
           <Sparkline data={fakeSpark(item.sym)} color={`var(--${item.chg >= 0 ? "gn" : "rd"})`} w={180} h={20} />
@@ -157,6 +175,25 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
       )}
     </button>
   );
+}
+
+// Per-symbol derived scan signals (RVOL, ML P(up), R:R, earnings days)
+const scanSigCache = {};
+function scanSignals(item) {
+  const sym = item.sym;
+  if (scanSigCache[sym]) return scanSigCache[sym];
+  let h = 0; for (let i = 0; i < sym.length; i++) h = (h * 31 + sym.charCodeAt(i)) >>> 0;
+  const rvol = +(0.7 + (h % 240) / 100).toFixed(2);
+  let pUp;
+  try { pUp = window.AIPredict ? Math.round(window.AIPredict.predict(sym).pUp * 100) : null; } catch (e) { pUp = null; }
+  if (pUp == null) pUp = Math.round(38 + (h % 50));
+  const rr = +(1.1 + ((h >> 3) % 220) / 100).toFixed(2);
+  const erDays = (h >> 5) % 45;
+  const toPivot = +(((h >> 7) % 90) / 10 - 4.5).toFixed(1);   // % distance to pivot (−4.5..+4.5)
+  const insider = ((h >> 9) % 3) - 1;                         // -1 sell / 0 none / +1 buy
+  const s = { rvol, pUp, rr, erDays, toPivot, insider };
+  scanSigCache[sym] = s;
+  return s;
 }
 
 // Stable per-symbol sparkline data
