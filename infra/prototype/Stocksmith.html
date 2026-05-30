@@ -4327,6 +4327,13 @@ select.um-input { cursor: pointer; }
 .app, .main, .dpanel { min-height: 0; }
 .dpanel-body, .main-home, .wsx { min-height: 0; overflow-y: auto; }
 .dpanel-body > *, .main-home > *, .wsx > * { flex-shrink: 0; }
+
+/* ── §6b — DCF sensitivity heatmap grid ── */
+.dcf-sens { display:flex; flex-direction:column; }
+.dcf-grid { width:100%; }
+.dcf-grid th.r, .dcf-grid td.r { text-align:right; }
+.dcf-cell { text-align:center !important; font-variant-numeric:tabular-nums; transition:background .12s ease; }
+.dcf-cell:hover { outline:1px solid var(--glass-line); }
 </style>
 
 <!-- Supplemental (Stocksmith-only): loading / scaffold / placeholder / toast.
@@ -13222,16 +13229,25 @@ function SmrVarTable({ ticker }) {
   const raw = invRaw(ticker);
   const cvarObj = ssData().cvar_portfolio || {};
   const cvarErr = cvarObj && cvarObj.error;
+  // §6a — horizon-aware VaR/CVaR. cvar_portfolio carries 1-day book figures; scale
+  // ∝ √(horizon days) per Brownian σ·√t (matches SmrRiskCones P10/P90 dispersion and
+  // the prototype VarTable: sig = dvol · √hd). Relabel to the active horizon.
+  const mode = (typeof window !== "undefined" && window.__tmode) || "SWING";
+  const HD = { SWING: 1, POSITION: 10, INVESTMENT: 21 };
+  const days = HD[mode] || 1, sq = Math.sqrt(days);
+  const lbl = days === 1 ? "1d" : days + "d";
   const fmtPct = (v) => (v == null || isNaN(v)) ? "—" : (Number(v) * (Math.abs(v) <= 1 ? 100 : 1)).toFixed(2) + "%";
+  // scale the raw 1-day decimal/percent figure by √days, then format
+  const scalePct = (v) => (v == null || isNaN(v)) ? "—" : fmtPct(Number(v) * sq);
   // cvar_portfolio fields vary; surface common ones if present, else "—"
-  const varV  = cvarErr ? "—" : (cvarObj.var_95 != null ? fmtPct(cvarObj.var_95) : "—");
-  const cvarV = cvarErr ? "—" : (cvarObj.cvar_95 != null ? fmtPct(cvarObj.cvar_95) : "—");
+  const varV  = cvarErr ? "—" : (cvarObj.var_95 != null ? scalePct(cvarObj.var_95) : "—");
+  const cvarV = cvarErr ? "—" : (cvarObj.cvar_95 != null ? scalePct(cvarObj.cvar_95) : "—");
   const sharpe  = raw.sharpe_126d  != null ? (raw.sharpe_126d >= 0 ? "+" : "") + Number(raw.sharpe_126d).toFixed(2) : "—";
   const sortino = raw.sortino_126d != null ? (raw.sortino_126d >= 0 ? "+" : "") + Number(raw.sortino_126d).toFixed(2) : "—";
-  const note = cvarErr ? cvarObj.error : "book";
+  const note = cvarErr ? cvarObj.error : (days === 1 ? "book" : "book · √" + days + " scaled");
   const rows = [
-    { metric: "VaR · 1d · 95% (book)",  v: varV,  abs: cvarErr ? "—" : "book",  tone: "amb" },
-    { metric: "CVaR · 1d · 95% (book)", v: cvarV, abs: cvarErr ? note : "tail avg", tone: "amb" },
+    { metric: "VaR · " + lbl + " · 95% (book)",  v: varV,  abs: cvarErr ? "—" : note,  tone: "amb" },
+    { metric: "CVaR · " + lbl + " · 95% (book)", v: cvarV, abs: cvarErr ? note : "tail avg", tone: "amb" },
     { metric: "Sharpe · 126d",          v: sharpe,  abs: "per-ticker", tone: raw.sharpe_126d > 0 ? "gn" : raw.sharpe_126d != null ? "rd" : "ink" },
     { metric: "Sortino · 126d",         v: sortino, abs: "per-ticker", tone: raw.sortino_126d > 0 ? "gn" : raw.sortino_126d != null ? "rd" : "ink" },
     { metric: "Kelly size",             v: "—", abs: "sizing head not in bundle", tone: "ink" },
@@ -13239,7 +13255,7 @@ function SmrVarTable({ ticker }) {
   ];
   return (
     <table className="dtable">
-      <thead><tr><th>Metric</th><th className="r">Value</th><th>Absolute</th></tr></thead>
+      <thead><tr><th>Metric · {mode.toLowerCase()} horizon</th><th className="r">Value</th><th>Absolute</th></tr></thead>
       <tbody>
         {rows.map((r, i) => (
           <tr key={i}>
@@ -13345,6 +13361,15 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
           style={headerStyle} right={<StateToggle name="iv-2" />} />
         <StateWrap state={s2.value} source="EODHD · fundamentals feed (highlights + valuation)">
           <div className="lens-pad"><InvQualityCard ticker={ticker} fund={fund} status={status} /></div>
+        </StateWrap>
+      </div>
+
+      <div className="lens-section">
+        <SectionHeader title="DCF Sensitivity"
+          sub="intrinsic value across WACC × terminal growth · heat vs spot"
+          style={headerStyle} />
+        <StateWrap state={true} source="EODHD · FCF (cashflow_5y) + shares + growth · Gordon two-stage">
+          <div className="lens-pad"><InvDcfSensitivity ticker={ticker} fund={fund} status={status} /></div>
         </StateWrap>
       </div>
 
@@ -13627,6 +13652,82 @@ function InvPeerCohort({ ticker, fund, status }) {
 }
 
 // ─── §4 5-yr statements ──────────────────────────────────────────────
+// §6b — DCF sensitivity grid. Fair value across WACC × terminal-growth; cells shaded
+// by margin-of-safety vs live price. Math/layout reproduced 1:1 from the prototype
+// DcfSensitivity (Gordon-style fv(w,g) = base·((baseW−baseG)/(w−g))); only the BASE
+// intrinsic value is now derived from real EODHD fundamentals (latest FCF/share +
+// growth) instead of the synthetic cur·1.055. Fallback-safe: any missing real input
+// reverts to the prototype synthetic base so the grid always renders.
+function InvDcfSensitivity({ ticker, fund, status }) {
+  const cur = ticker && typeof ticker.price === "number" ? ticker.price : null;
+  if (cur == null || cur <= 0) {
+    return <div className="dcf-sens mono dim2" style={{ padding: "10px 4px" }}>
+      DCF sensitivity — live price unavailable → "—".
+    </div>;
+  }
+  const hl  = (fund && fund.highlights) || {};
+  const sh  = (fund && fund.shares) || {};
+
+  // Real inputs (each independently fallback-safe).
+  const cash = (fund && Array.isArray(fund.cashflow_5y)) ? fund.cashflow_5y.slice() : [];
+  cash.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  const latestFcf = cash.length ? fundNum(cash[0].freeCashFlow) : null;
+  const mcap   = fundNum(hl.MarketCapitalization);
+  // shares outstanding: highlights → shares stat → back out from mcap/price
+  const shares = fundNum(hl.SharesOutstanding) != null ? fundNum(hl.SharesOutstanding)
+               : (fundNum(sh.SharesOutstanding) != null ? fundNum(sh.SharesOutstanding)
+               : (mcap != null && cur > 0 ? mcap / cur : null));
+  // terminal growth anchor from real revenue growth (clamped to a sane perpetual range)
+  const revG = fundNum(hl.QuarterlyRevenueGrowthYOY); // fraction
+  const gAnchor = revG != null ? Math.max(0.02, Math.min(0.05, revG)) : 0.03;
+
+  // Base intrinsic value at baseW / gAnchor:
+  //   real path → Gordon on FCF/share: FCF·(1+g)/(w−g) per share, less net debt/share.
+  //   net debt not in feed → treated as 0 (equity≈firm value) and labelled below.
+  const baseW = 0.09, baseG = gAnchor;
+  let base, real = false, fcfShare = null;
+  if (latestFcf != null && shares != null && shares > 0) {
+    fcfShare = latestFcf / shares;
+    const gordon = fcfShare * (1 + baseG) / (baseW - baseG); // per-share intrinsic at base case
+    if (isFinite(gordon) && gordon > 0) { base = gordon; real = true; }
+  }
+  if (base == null) base = cur * 1.055; // prototype synthetic fallback
+
+  const waccs = [0.08, 0.09, 0.10, 0.11];
+  const grows = [Math.max(0.01, baseG - 0.01), baseG, Math.min(0.06, baseG + 0.01), Math.min(0.07, baseG + 0.02)];
+  // verbatim sensitivity: scale base case by the Gordon ratio at (w,g)
+  const fv = (w, g) => base * ((baseW - baseG) / (w - g));
+  const tone = mos => mos >= 8 ? "gn" : mos >= 0 ? "amb" : "rd";
+
+  return (
+    <div className="dcf-sens">
+      <div className="label-cap" style={{ marginBottom: 8 }}>
+        DCF Sensitivity · fair value by WACC × terminal growth{" "}
+        <span className="dim2">(spot ${cur.toFixed(0)}{real && fcfShare != null ? " · FCF/sh $" + fcfShare.toFixed(2) : ""})</span>
+      </div>
+      <table className="dtable dcf-grid">
+        <thead><tr><th className="dim2">WACC ↓ · g →</th>{grows.map((g, i) => <th key={i} className="r">{(g*100).toFixed(0)}%</th>)}</tr></thead>
+        <tbody>
+          {waccs.map(w => (
+            <tr key={w}>
+              <td className="mono dim2">{(w*100).toFixed(0)}%</td>
+              {grows.map((g, gi) => {
+                const val = fv(w, g); const mos = (val / cur - 1) * 100;
+                return <td key={gi} className={`r mono dcf-cell kpi-tone--${tone(mos)}`} title={`MoS ${mos >= 0 ? "+" : ""}${mos.toFixed(0)}%`} style={{ background: `color-mix(in oklab, var(--${tone(mos)}) ${Math.min(22, Math.abs(mos))}%, transparent)` }}>${val.toFixed(0)}</td>;
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 6 }}>
+        Each cell = intrinsic value at that discount rate &amp; perpetual growth; green = trades below fair (margin), red = premium. {real
+          ? <span>Base case (<b>{(baseW*100).toFixed(0)}% / {(baseG*100).toFixed(0)}%</b>) built from latest FCF/share &amp; revenue-growth anchor (EODHD). Net debt not in feed → equity≈firm value.</span>
+          : <span>{status === "loading" ? "Fundamentals loading — grid uses synthetic base." : "FCF/share or shares not in feed → grid uses synthetic base (estimate-not-in-feed)."}</span>}
+      </div>
+    </div>
+  );
+}
+
 function InvStatements({ ticker, fund, status }) {
   const income = (fund && Array.isArray(fund.income_5y)) ? fund.income_5y.slice() : [];
   const cash   = (fund && Array.isArray(fund.cashflow_5y)) ? fund.cashflow_5y.slice() : [];
@@ -13865,6 +13966,15 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       </div>
 
       <div className="lens-section">
+        <SectionHeader title="Whisper · Revision Breadth"
+          sub="whisper-vs-consensus gap · estimate-revision up/down breadth · the leading tell before the print"
+          style={headerStyle} />
+        <StateWrap state={true} source="screener · esp_play (whisper=most-accurate−consensus) + revision_trend">
+          <div className="lens-pad"><EoWhisperRevisions ticker={ticker} /></div>
+        </StateWrap>
+      </div>
+
+      <div className="lens-section">
         <SectionHeader n={3} title="8-Quarter Track Record"
           sub="EPS surprise · revenue surprise · 1-day reaction"
           style={headerStyle} right={<StateToggle name="er-3" />} />
@@ -13909,6 +14019,109 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
             ? <span>ER in <b>{days}d</b>{implied != null ? <span> · implied move <b className="warn">±{implied}%</b></span> : null}{espPct != null ? <span> · ESP <b className={espPct > 0 ? "up" : "warn"}>{espPct >= 0 ? "+" : ""}{espPct}%</b></span> : null}. Scale down through the window — 8-Q track record + drift/crush backtest not in bundle.</span>
             : <span>No earnings date in feed → earnings verdict <b>—</b>.</span>}
         </span>
+      </div>
+    </div>
+  );
+}
+
+// §6c — Whisper-vs-consensus gap + estimate-revision breadth. Layout/math reproduced
+// 1:1 from the prototype lens-earnings-options AnalystRevisions + the whisper KPI. Real
+// wiring: whisper gap ← esp_play.esp_pct (Zacks ESP = most-accurate-est − consensus, i.e.
+// the whisper-vs-street gap); revision breadth ← revision_trend / estimate_revisions when
+// present. Every field is fallback-safe → "—" + an estimate-not-in-feed label.
+function EoWhisperRevisions({ ticker }) {
+  const t = ticker || {};
+  const raw = invRaw(t);
+  const esp = raw.esp_play || {};
+  // Whisper-vs-consensus: ESP% IS the whisper gap (most-accurate est − consensus).
+  const espPct = esp.esp_pct;
+  const whisperTxt = (espPct != null && !isNaN(espPct)) ? (espPct >= 0 ? "+" : "") + Number(espPct).toFixed(1) + "%" : "—";
+  const whisperTone = espPct == null ? "ink" : (espPct > 0 ? "gn" : "rd");
+  // Real EPS estimate / consensus if the feed carries them (several possible field names).
+  const consEps = raw.eps_estimate != null ? Number(raw.eps_estimate)
+                : (raw.eps_consensus != null ? Number(raw.eps_consensus)
+                : (esp.consensus_eps != null ? Number(esp.consensus_eps) : null));
+  const mostAcc = esp.most_accurate_eps != null ? Number(esp.most_accurate_eps)
+                : (raw.whisper_eps != null ? Number(raw.whisper_eps) : null);
+  const consTxt = consEps != null ? "$" + consEps.toFixed(2) : "—";
+  const whispEps = mostAcc != null ? "$" + mostAcc.toFixed(2)
+                 : (consEps != null && espPct != null ? "$" + (consEps * (1 + espPct / 100)).toFixed(2) + " (impl.)" : "—");
+
+  // Revision breadth: up/down counts + 90d % move + direction, from the feed if present.
+  const rev = (raw.revision_trend && typeof raw.revision_trend === "object") ? raw.revision_trend
+            : (raw.estimate_revisions && typeof raw.estimate_revisions === "object") ? raw.estimate_revisions : {};
+  const fnum = (v) => (v == null || isNaN(Number(v))) ? null : Number(v);
+  const upN = fnum(rev.up != null ? rev.up : rev.revisions_up);
+  const dnN = fnum(rev.down != null ? rev.down : rev.revisions_down);
+  const revPct = fnum(rev.pct_90d != null ? rev.pct_90d : (rev.change_pct != null ? rev.change_pct : null));
+  const revDir = rev.direction ? String(rev.direction).toUpperCase()
+               : (upN != null && dnN != null ? (upN > dnN ? "RISING" : upN < dnN ? "FALLING" : "FLAT") : null);
+  const upDnTxt = (upN != null && dnN != null) ? upN + " : " + dnN : "—";
+  const upDnTone = (upN != null && dnN != null) ? (upN > dnN ? "gn" : upN < dnN ? "rd" : "amb") : "ink";
+  const revPctTxt = revPct != null ? (revPct >= 0 ? "+" : "") + revPct.toFixed(1) + "%" : "—";
+  const revDirTone = revDir === "RISING" ? "gn" : revDir === "FALLING" ? "rd" : revDir ? "amb" : "ink";
+  const haveRev = upN != null || dnN != null || revPct != null || revDir != null;
+
+  // est-trend sparkline: real 6-pt estimate series if present, else derived 2-pt (90d-ago→now)
+  const series = Array.isArray(rev.series) ? rev.series.map(fnum).filter(v => v != null) : [];
+  const spark = series.length >= 2 ? series
+              : (consEps != null && revPct != null ? [consEps / (1 + revPct / 100), consEps] : []);
+  const w = 150, hh = 38;
+  let sparkSvg = null;
+  if (spark.length >= 2) {
+    const mn = Math.min(...spark), mx = Math.max(...spark);
+    const sx = i => 4 + (i / (spark.length - 1)) * (w - 8);
+    const sy = v => hh - 4 - ((v - mn) / (mx - mn || 1)) * (hh - 8);
+    sparkSvg = (
+      <svg width={w} height={hh} style={{ display: "block" }}>
+        <defs><linearGradient id="eo-rev-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--gn)" stopOpacity="0.3" /><stop offset="100%" stopColor="var(--gn)" stopOpacity="0" /></linearGradient></defs>
+        <path d={`M ${sx(0)},${hh - 4} L ${spark.map((v, i) => `${sx(i)},${sy(v)}`).join(" L ")} L ${sx(spark.length - 1)},${hh - 4} Z`} fill="url(#eo-rev-g)" />
+        <polyline points={spark.map((v, i) => `${sx(i)},${sy(v)}`).join(" ")} fill="none" stroke="var(--gn)" strokeWidth="1.8" />
+        <circle cx={sx(spark.length - 1)} cy={sy(spark[spark.length - 1])} r="3" fill="var(--gn)" />
+      </svg>
+    );
+  }
+
+  return (
+    <div>
+      <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+        <KpiTile label="Whisper vs consensus" value={whisperTxt} tone={whisperTone}
+          sub={espPct != null ? whispEps + " whisper · " + consTxt + " est" : "Zacks ESP not in feed"} />
+        <KpiTile label="Consensus EPS · next Q" value={consTxt} tone="ink"
+          sub={consEps != null ? "street estimate" : "estimate not in feed"} />
+        <KpiTile label="Up : Down revisions" value={upDnTxt} tone={upDnTone}
+          sub={haveRev && (upN != null || dnN != null) ? "last 90 days" : "revision breadth not in feed"} />
+        <KpiTile label="Revision trend" value={revDir || "—"} tone={revDirTone}
+          sub={revPct != null ? revPctTxt + " · 90d" : (revDir ? "direction" : "not in feed")} />
+      </div>
+      {(sparkSvg || haveRev) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
+          {sparkSvg && (
+            <div>
+              <div className="label-cap" style={{ marginBottom: 4 }}>Consensus estimate · trend</div>
+              {sparkSvg}
+            </div>
+          )}
+          <table className="dtable" style={{ flex: 1, minWidth: 280 }}>
+            <thead><tr><th>Horizon</th><th className="r">Now</th><th className="r">90d ago</th><th className="r">Δ</th><th className="r">Up/Dn</th></tr></thead>
+            <tbody>
+              <tr>
+                <td className="mono"><b>Next Q</b></td>
+                <td className="r mono tabular">{consTxt}</td>
+                <td className="r mono tabular dim2">{(consEps != null && revPct != null) ? "$" + (consEps / (1 + revPct / 100)).toFixed(2) : "—"}</td>
+                <td className={`r mono tabular ${revPct != null ? (revPct >= 0 ? "up" : "dn") : "dim2"}`}>{revPctTxt}</td>
+                <td className="r mono tabular">{(upN != null && dnN != null) ? <span><span className="up">{upN}</span><span className="dim2">/</span><span className="dn">{dnN}</span></span> : "—"}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="mono dim2" style={{ marginTop: 10, fontSize: 11, lineHeight: 1.5 }}>
+        {espPct != null
+          ? <span>Whisper-vs-consensus gap <b className={espPct >= 0 ? "up" : "dn"}>{whisperTxt}</b> (Zacks ESP = most-accurate est − street). {haveRev
+              ? <span>Estimate-revision breadth <b className={upDnTone === "gn" ? "up" : "dn"}>{upDnTxt}</b> ({revDir || "—"}) — rising consensus is the single best leading tell before the print.</span>
+              : <span>Revision up/down breadth not in this feed → "—" (estimate-not-in-feed).</span>}</span>
+          : <span>Zacks ESP not present for this name → whisper gap "—" (estimate-not-in-feed). {haveRev ? "Revision breadth " + upDnTxt + " (" + (revDir || "—") + ")." : "No revision breadth either."}</span>}
       </div>
     </div>
   );
