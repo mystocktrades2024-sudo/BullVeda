@@ -2576,6 +2576,11 @@ async def universe_api(limit: int = 0):
         except Exception: pass
         dec = r.get("decision") or {}; conv = r.get("conviction") or {}
         earn = r.get("earnings") or {}; sb = r.get("scoring_breakdown") or {}; ok = r.get("options_kpis") or {}
+        idd = r.get("insider_data") or {}
+        try:
+            insider_net = int(idd.get("buys") or 0) - int(idd.get("sells") or 0)
+        except Exception:
+            insider_net = 0
         # T·F·S·N pillars (score + max) for the scanner dots
         T = r.get("technicals") or {}; F = r.get("fundamentals") or {}
         S = r.get("smc") or {}; N = r.get("sentiment") or {}
@@ -2590,7 +2595,7 @@ async def universe_api(limit: int = 0):
             "rvol": r.get("rvol"), "rs_rank": r.get("rs_rank"), "rsi": r.get("rsi"),
             "beta": r.get("beta"), "market_cap": r.get("market_cap"),
             "iv_rank": ok.get("iv_rank") if ok.get("iv_rank") is not None else r.get("iv_rank"),
-            "earn_days": earn.get("days_to_earnings"),
+            "earn_days": earn.get("days_to_earnings"), "insider_net": insider_net,
             "sharpe_126d": r.get("sharpe_126d"), "sortino_126d": r.get("sortino_126d"),
             "tech_score": T.get("score"), "tech_max": T.get("max"),
             "fund_score": F.get("score"), "fund_max": F.get("max"),

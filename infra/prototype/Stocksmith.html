@@ -4310,6 +4310,23 @@ select.um-input { cursor: pointer; }
 .otk-pg-total b { color:var(--ink-1); font-size:13px; }
 .otk-pg-reset { font-family:var(--mono); font-size:10px; color:var(--ink-3); background:none; border:1px solid var(--glass-line); border-radius:4px; padding:3px 8px; cursor:pointer; }
 .otk-pg-select { background:var(--bg-2); color:var(--ink-1); border:1px solid var(--glass-line); border-radius:4px; font-family:var(--mono); font-size:11px; padding:3px 6px; cursor:pointer; }
+
+/* ── §9 Scan-row enrichment chips (RVOL · P↑ · R:R · PIV · insider dot · ⚡ER · conviction bar) ── */
+.sc-conv { height:3px; border-radius:2px; background:var(--bg-2); overflow:hidden; margin-top:1px; }
+.sc-conv-fill { display:block; height:100%; border-radius:2px; }
+.sc-row-chips { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; margin-top:3px; }
+.sc-chip { display:inline-flex; align-items:center; gap:3px; font-family:var(--mono); font-size:9px; line-height:1; padding:2px 5px; border-radius:4px; background:var(--bg-2); border:1px solid var(--line); white-space:nowrap; }
+.sc-chip-k { font-size:8px; letter-spacing:0.04em; color:var(--ink-3); text-transform:uppercase; }
+.sc-chip b { font-size:9.5px; }
+.sc-chip--er { color:var(--amb); border-color:color-mix(in oklab,var(--amb) 45%,transparent); background:color-mix(in oklab,var(--amb) 10%,transparent); }
+.sc-flowdot { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:50%; font-size:9px; line-height:1; }
+.sc-flowdot--buy { color:var(--gn); background:color-mix(in oklab,var(--gn) 14%,transparent); }
+.sc-flowdot--sell { color:var(--rd); background:color-mix(in oklab,var(--rd) 14%,transparent); }
+
+/* ── §3 Scroll-container collapse fixes — let flex children keep natural height ── */
+.app, .main, .dpanel { min-height: 0; }
+.dpanel-body, .main-home, .wsx { min-height: 0; overflow-y: auto; }
+.dpanel-body > *, .main-home > *, .wsx > * { flex-shrink: 0; }
 </style>
 
 <!-- Supplemental (Stocksmith-only): loading / scaffold / placeholder / toast.
@@ -9984,7 +10001,8 @@ function mapScannerRows(screener, data) {
       iv: r.iv_rank != null ? Math.round(r.iv_rank) : null,
       sent: typeof r.sent_score === "number" ? r.sent_score : (r.sent_score && typeof r.sent_score.score === "number" ? r.sent_score.score : 0),
       er: r.earn_days != null ? r.earn_days : null,
-      insider: r.insider_buys || 0,
+      insider: r.insider_net != null ? r.insider_net : (r.insider_buys || 0),
+      pUp: r.p_up != null ? (r.p_up <= 1 ? r.p_up * 100 : r.p_up) : null,
       signals,
     };
   });
@@ -11239,6 +11257,23 @@ function scSpark(sym) {
   for (let i=0;i<22;i++){ p += trend + Math.sin(i*0.6 + sym.charCodeAt(0))*0.7; arr.push(p); }
   scSparkCache[sym] = arr; return arr;
 }
+// Per-row enrichment chips — REAL data off the mapped scan row (mapScannerRows output).
+// Each field is null/absent when the real source field is missing → chip omits gracefully.
+// rvol ← r.rvol · rr ← r.rr (trade-plan R:R) · toPivot ← price vs entry_lo pivot ·
+// erDays ← r.er (earn_days) · insider ← r.insider (insider_net) · pUp ← r.pUp (ML, if present).
+function scanSignals(item) {
+  const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+  const rvol = num(item.rvol);
+  const rr = num(item.rr);
+  const price = num(item.price);
+  const pivot = num(item.entry);               // entry_lo = breakout/entry pivot (real)
+  const toPivot = (price != null && pivot != null && pivot !== 0)
+    ? +(((price - pivot) / pivot) * 100).toFixed(1) : null;
+  const pUp = (item.pUp != null && Number.isFinite(+item.pUp)) ? Math.round(+item.pUp) : null;
+  const erDays = (item.er != null && Number.isFinite(+item.er)) ? +item.er : null;
+  const insider = Number.isFinite(+item.insider) ? +item.insider : 0;
+  return { rvol, rr, toPivot, pUp, erDays, insider };
+}
 function ScanColumn({ universe, activeTicker, onTicker, widthCat, onWidthCat, collapsed }) {
   const [tab, setTab] = useState("top");
   const items = useMemo(() => {
@@ -11291,9 +11326,26 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
       {(widthCat==="M"||widthCat==="L"||widthCat==="XL") && (
         <div className="sc-row-meta"><span className="sc-row-name dim">{item.name}</span>{(widthCat==="L"||widthCat==="XL") && <span className="sc-row-px mono dim2">${(item.price||0).toFixed(2)}</span>}</div>
       )}
+      {(widthCat==="M"||widthCat==="L"||widthCat==="XL") && (
+        <div className="sc-conv" title={`conviction ${item.score}/100`}>
+          <span className="sc-conv-fill" style={{ width:`${Math.max(0,Math.min(100,item.score||0))}%`, background:`var(--${(item.score||0)>=66?"gn":(item.score||0)>=50?"amb":"rd"})` }} />
+        </div>
+      )}
       {(widthCat==="L"||widthCat==="XL") && (
         <div className="sc-row-foot"><Pill tone={vt} small>{item.verdict}</Pill><span className="sc-row-setup mono dim">{item.setup}</span></div>
       )}
+      {(widthCat==="M"||widthCat==="L"||widthCat==="XL") && (() => {
+        const s = scanSignals(item);
+        const chips = [];
+        if (s.rvol != null) chips.push(<span key="rvol" className="sc-chip" title="relative volume vs 20-day avg"><span className="sc-chip-k">RVOL</span><b className={s.rvol>=1.5?"up":"dim2"}>{s.rvol.toFixed(1)}×</b></span>);
+        if (s.pUp != null) chips.push(<span key="pup" className="sc-chip" title="ML model P(up) over swing horizon"><span className="sc-chip-k">P↑</span><b className={`kpi-tone--${s.pUp>=60?"gn":s.pUp>=45?"amb":"rd"}`}>{s.pUp}%</b></span>);
+        if (s.rr != null) chips.push(<span key="rr" className="sc-chip" title="reward:risk to T1"><span className="sc-chip-k">R:R</span><b className={s.rr>=2?"up":"dim2"}>{s.rr.toFixed(1)}</b></span>);
+        if (s.toPivot != null) chips.push(<span key="piv" className="sc-chip" title="distance to entry pivot"><span className="sc-chip-k">PIV</span><b className={Math.abs(s.toPivot)<=1?"up":"dim2"}>{s.toPivot>=0?"+":""}{s.toPivot}%</b></span>);
+        if (s.insider !== 0) chips.push(<span key="ins" className={`sc-flowdot sc-flowdot--${s.insider>0?"buy":"sell"}`} title={`insider net ${s.insider>0?"buying":"selling"} (90d)`}>{s.insider>0?"▲":"▼"}</span>);
+        if (s.erDays != null && s.erDays <= 7 && s.erDays >= 0) chips.push(<span key="er" className="sc-chip sc-chip--er" title={`earnings in ${s.erDays} sessions`}>⚡ ER {s.erDays}d</span>);
+        if (!chips.length) return null;
+        return <div className="sc-row-chips">{chips}</div>;
+      })()}
       {widthCat==="XL" && <div className="sc-row-spark"><Sparkline data={scSpark(item.sym)} color={`var(--${item.chg>=0?"gn":"rd"})`} w={180} h={20} /></div>}
     </button>
   );
