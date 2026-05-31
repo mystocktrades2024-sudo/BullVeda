@@ -5378,7 +5378,22 @@ if __name__ == "__main__":
             sys.exit(2)
 
     if not args or (len(args) == 1 and args[0].lower() == "--fresh"):
-        run_daily_scan(force_fresh="--fresh" in args)
+        try:
+            run_daily_scan(force_fresh="--fresh" in args)
+        except Exception as _scan_exc:
+            # scan-failure alert (Q2) — a crashed scan was silent before; ping Slack then re-raise.
+            try:
+                import json as _json, urllib.request as _ur, traceback as _tb
+                _wh = os.environ.get("SLACK_WEBHOOK_URL", "")
+                if _wh:
+                    _ur.urlopen(_ur.Request(
+                        _wh, data=_json.dumps({"text": f":rotating_light: *SwingTrade scan FAILED* — "
+                        f"{type(_scan_exc).__name__}: {str(_scan_exc)[:300]}"}).encode(),
+                        headers={"Content-Type": "application/json"}), timeout=8)
+                log.error("Scan failed: %s", _tb.format_exc())
+            except Exception:
+                pass
+            raise
         # Append today's top-20 Momentum candidates to data/momentum_snapshots.jsonl
         # so the HISTORY sub-view of the Momentum tab can build a predicted-vs-
         # realized calibration over time. Idempotent per-date; never raises.
