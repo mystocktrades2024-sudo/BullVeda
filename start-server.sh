@@ -5,8 +5,10 @@
 
 cd "$(dirname "$0")"
 
-# Kill any existing server
-pkill -f "python3 server.py" 2>/dev/null
+# Kill any existing server (match "server.py" regardless of the python argv0 —
+# Xcode's framework python shows as "Python", so "python3 server.py" never matched
+# and instances stacked up). Excludes this launcher script itself.
+pkill -f "[Pp]ython.* server.py" 2>/dev/null
 
 # Start in background with auto-restart on crash
 while true; do

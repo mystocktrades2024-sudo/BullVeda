@@ -2795,7 +2795,20 @@ async def universe_api(limit: int = 0):
             "star_rating": r.get("star_rating"), "week52_high": r.get("week52_high"), "week52_low": r.get("week52_low"),
             "above_50ema": r.get("above_50ema"), "above_200sma": r.get("above_200sma"), "adx": r.get("adx"),
         }
-    rows = [row(r) for r in allsc if isinstance(r, dict) and r.get("ticker")]
+    # Sanitize NaN/Infinity → None. Some bundle rows carry non-finite floats
+    # (e.g. a divide-by-zero rr/sharpe); Starlette's JSONResponse uses
+    # json.dumps(allow_nan=False) and 500s the WHOLE endpoint on a single one —
+    # which empties the entire scanner. Clean recursively so it never happens.
+    import math as _math
+    def _finite(o):
+        if isinstance(o, float):
+            return o if _math.isfinite(o) else None
+        if isinstance(o, dict):
+            return {k: _finite(v) for k, v in o.items()}
+        if isinstance(o, list):
+            return [_finite(v) for v in o]
+        return o
+    rows = [_finite(row(r)) for r in allsc if isinstance(r, dict) and r.get("ticker")]
     payload = {"n": len(rows), "scan_count": bundle.get("scan_count") or len(rows), "screener": rows}
     _UNIVERSE_CACHE = {"mtime": mt, "payload": payload}
     return _slice(payload)
