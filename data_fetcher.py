@@ -4712,6 +4712,13 @@ def get_options_iv_data(ticker: str) -> dict:
                         oi  = int(c.get("openInterest") or 0)
                         vol = int(c.get("totalVolume") or 0)
                         iv  = c.get("volatility")
+                        # Schwab encodes "no quote" as volatility = -999.0. IV is a
+                        # volatility (always > 0), so null ANY non-positive sentinel here
+                        # before it normalizes to -9.99 (= -999/100) and leaks into atm_iv.
+                        try:
+                            iv = None if iv is None or float(iv) <= 0 else iv
+                        except (TypeError, ValueError):
+                            iv = None
                         mark = c.get("mark") or c.get("last") or 0
                         try: mark = float(mark)
                         except Exception: mark = 0.0
