@@ -3491,6 +3491,30 @@ def get_news_sentiment(ticker: str) -> dict:
 
         soup = BeautifulSoup(resp.text, "xml")
         items = soup.find_all("item")[:10]
+        titles = [(it.find("title").text or "") for it in items if it.find("title")]
+
+        # FinBERT (ONNX, local, no torch/LLM) — PRIMARY scorer; lexicon fallback below.
+        try:
+            import finbert_sentiment as _fb
+            _fbres = _fb.score_headlines(titles)
+        except Exception:
+            _fbres = None
+        if _fbres and _fbres.get("n"):
+            m = _fbres["score"]
+            score = 3 if m > 0.25 else 1 if m > 0.05 else -3 if m < -0.25 else -1 if m < -0.05 else 0
+            bias = _fbres["label"]
+            try:
+                import json as _j, datetime as _dt
+                from pathlib import Path as _P
+                _lp = _P(__file__).resolve().parent / "cache" / "ml" / "sentiment_log.jsonl"
+                _lp.parent.mkdir(parents=True, exist_ok=True)
+                with open(_lp, "a") as _f:
+                    _f.write(_j.dumps({"asof": _dt.datetime.now().isoformat(), "ticker": ticker,
+                                       "finbert": m, "n": _fbres["n"]}) + "\n")
+            except Exception:
+                pass
+            return {"score": score, "headlines": len(titles), "bias": bias,
+                    "finbert": round(m, 4), "source": "finbert", "n": _fbres["n"]}
 
         positive = {"beat", "surge", "upgrade", "bullish", "growth", "profit",
                      "wins", "partnership", "deal", "buyback", "record", "strong",
@@ -3500,10 +3524,10 @@ def get_news_sentiment(ticker: str) -> dict:
                     "underperform", "negative", "disappoint", "risk"}
 
         pos_count, neg_count = 0, 0
-        for item in items:
-            title = (item.find("title").text or "").lower()
-            pos_count += sum(1 for w in positive if w in title)
-            neg_count += sum(1 for w in negative if w in title)
+        for title in titles:
+            tl = title.lower()
+            pos_count += sum(1 for w in positive if w in tl)
+            neg_count += sum(1 for w in negative if w in tl)
 
         net = pos_count - neg_count
         if net >= 3:
@@ -3517,8 +3541,8 @@ def get_news_sentiment(ticker: str) -> dict:
         else:
             score, bias = 0, "neutral"
 
-        return {"score": score, "headlines": len(items), "bias": bias,
-                "positive": pos_count, "negative": neg_count}
+        return {"score": score, "headlines": len(titles), "bias": bias,
+                "positive": pos_count, "negative": neg_count, "source": "lexicon"}
     except Exception:
         return {"score": 0, "headlines": 0, "bias": "neutral"}
 
