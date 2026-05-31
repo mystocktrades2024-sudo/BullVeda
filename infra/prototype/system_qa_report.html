@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SwingTrade — System Q&A + Data Flow</title>
+<style>
+:root{--bg:#0b0e0d;--bg1:#121614;--bg2:#1a201d;--line:#283330;--ink:#e8eee9;--ink2:#9fb0a8;--ink3:#6b7d75;
+--gn:#4ade80;--rd:#f87171;--amb:#fbbf24;--cy:#38bdf8;--violet:#a78bfa;--copper:#d4915c;--mono:ui-monospace,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,system-ui,sans-serif;padding:0 0 80px}
+.wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+header{background:linear-gradient(135deg,#12201a,#0b0e0d);border-bottom:1px solid var(--line);padding:30px 0 24px;margin-bottom:8px}
+h1{margin:0 0 4px;font-size:25px;letter-spacing:-.4px}
+.sub{color:var(--ink2);font-size:13px}
+h2{margin:34px 0 12px;font-size:18px;border-left:3px solid var(--copper);padding-left:11px}
+h3{margin:20px 0 8px;font-size:14.5px;color:var(--cy)}
+.card{background:var(--bg1);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:12px 0}
+.verdict{font-weight:700;padding:2px 9px;border-radius:6px;font-size:12px;font-family:var(--mono)}
+.v-no{background:rgba(248,113,113,.16);color:var(--rd)}
+.v-part{background:rgba(251,191,36,.16);color:var(--amb)}
+.v-yes{background:rgba(74,222,128,.16);color:var(--gn)}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--ink3);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+td.m,.mono{font-family:var(--mono);font-size:12.5px}
+.gn{color:var(--gn)}.rd{color:var(--rd)}.amb{color:var(--amb)}.cy{color:var(--cy)}.vi{color:var(--violet)}.dim{color:var(--ink3)}
+.pill{display:inline-block;padding:1px 7px;border-radius:5px;font-size:11px;font-family:var(--mono);background:var(--bg2);border:1px solid var(--line)}
+.flow{background:var(--bg1);border:1px solid var(--line);border-radius:10px;padding:18px;overflow-x:auto}
+pre{font-family:var(--mono);font-size:12px;line-height:1.5;margin:0;color:var(--ink2);white-space:pre}
+.rec{background:rgba(56,189,248,.08);border-left:3px solid var(--cy);padding:10px 14px;border-radius:0 8px 8px 0;margin:10px 0;font-size:13px}
+.warn{background:rgba(251,191,36,.08);border-left:3px solid var(--amb);padding:10px 14px;border-radius:0 8px 8px 0;margin:10px 0;font-size:13px}
+.gap{background:rgba(248,113,113,.07);border-left:3px solid var(--rd);padding:10px 14px;border-radius:0 8px 8px 0;margin:10px 0;font-size:13px}
+ul{margin:6px 0;padding-left:20px}li{margin:3px 0}
+.kbd{font-family:var(--mono);background:var(--bg2);padding:1px 6px;border-radius:4px;border:1px solid var(--line);font-size:12px}
+.toc a{color:var(--cy);text-decoration:none;margin-right:16px;font-size:13px}
+</style></head><body>
+<header><div class="wrap">
+<h1>SwingTrade — System Q&amp;A, Data Flow &amp; Cache</h1>
+<div class="sub">Generated 2026-05-31 · answers your 7 open questions, grounded in the actual code</div>
+<div class="toc" style="margin-top:12px">
+<a href="#q1">1·Slack alerts</a><a href="#q2">2·Jobs</a><a href="#q3">3·Regime</a><a href="#q4">4·ML validation</a><a href="#q5">5·Audit</a><a href="#flow">Data→Supabase</a><a href="#cache">Mac cache</a></div>
+</div></header>
+<div class="wrap">
+
+<!-- Q1 -->
+<h2 id="q1">1 · Will I get daily newsletter + Slack alerts (buy/sell/options/momentum/ml-ai/earnings)?</h2>
+<div class="card">
+<p><span class="verdict v-part">PARTIALLY — and less than you'd expect, because we disabled 7 notifiers earlier this session.</span></p>
+<p>In the "aggressive notification trim" you approved, I moved 7 notifier jobs to <span class="mono">disabled/</span>. Here's the honest current state of what actually reaches Slack:</p>
+<table>
+<tr><th>You asked for</th><th>Status</th><th>Which job</th></tr>
+<tr><td>Daily newsletter</td><td><span class="rd">✗ OFF</span></td><td>daily-newsletter-morning + evening — <b>disabled</b></td></tr>
+<tr><td>Buy/Sell on all stocks</td><td><span class="amb">◑ partial</span></td><td>morning-briefing (06:30) posts the scan's BUY/SELL/SHORT picks — but only the briefing, not a per-name stream</td></tr>
+<tr><td>Options</td><td><span class="amb">◑ partial</span></td><td>optionsflow runs (every 15m) but only writes data; the UOA Slack alert path needs confirming</td></tr>
+<tr><td>Momentum</td><td><span class="gn">✓ in briefing</span></td><td>morning-briefing includes momentum</td></tr>
+<tr><td>ML / AI predictions</td><td><span class="rd">✗ none</span></td><td>no Slack notifier surfaces ML-edge / AI predictions at all</td></tr>
+<tr><td>Earnings</td><td><span class="gn">✓ yes</span></td><td>beatalert (05:45) posts STRONG earnings-beat candidates</td></tr>
+<tr><td>Drift / model health</td><td><span class="gn">✓ yes</span></td><td>driftalert (16:30) posts model-drift warnings</td></tr>
+</table>
+<p><b>Live Slack notifiers right now:</b> <span class="pill">morning-briefing 06:30</span> <span class="pill">beatalert 05:45</span> <span class="pill">driftalert 16:30</span> <span class="pill">weekly-digest Sun</span></p>
+<div class="gap"><b>The gap vs what you want:</b> NO daily newsletter, NO dedicated ML/AI-predictions alert, NO per-stock buy/sell stream beyond the one morning briefing. The morning-briefing <em>does</em> cover buy/sell/short/options/momentum/earnings/regime in one post — so if you read that, you get most of it once a day.</div>
+<div class="rec"><b>Recommendation / decision needed:</b> If you want the fuller flow back, I can (a) re-enable <span class="mono">daily-newsletter</span> (one consolidated AM+PM email/Slack covering everything), and (b) add a NEW <span class="mono">ml-alert</span> Slack job surfacing top ML-edge / AI picks daily (this doesn't exist today). Say the word and I'll wire both. Re-enabling is reversible — the plists are parked in <span class="mono">infra/launchd/disabled/</span>.</div>
+</div>
+
+<!-- Q2 -->
+<h2 id="q2">2 · Are all jobs scheduled right? Overlaps? Anything missing?</h2>
+<div class="card">
+<p><span class="verdict v-yes">MOSTLY RIGHT</span> — the big overlaps were already fixed this session (daily scan 6×→2×, prewarm 14×→3×, premarket 12×→2×, 6 EOD snapshots→1, schwab-sync 1m→5m). Current schedule by time-of-day:</p>
+<table>
+<tr><th>Time (PT)</th><th>Job</th><th>Purpose</th></tr>
+<tr><td class="m">02:00</td><td>edgar-fundamentals</td><td>SEC statements → fundamentals.db</td></tr>
+<tr><td class="m">02:15</td><td>enrich-nightly</td><td>nightly enrichment</td></tr>
+<tr><td class="m">02:30</td><td>full-enrich-nightly</td><td><span class="cy">NEW</span> — all ~3000 tickers deep → /api/ticker</td></tr>
+<tr><td class="m">03:00 Sun</td><td>ml-retrain-weekly</td><td>gated model retrain</td></tr>
+<tr><td class="m">05:30,06:00</td><td>premarket-scan</td><td>pre-open scan</td></tr>
+<tr><td class="m">05:45</td><td>beatalert</td><td>earnings-beat Slack</td></tr>
+<tr><td class="m">06:00,11:00</td><td>daily (scan)</td><td>THE scan (heavy AM + midday)</td></tr>
+<tr><td class="m">06:30</td><td>morning-briefing</td><td>Slack briefing</td></tr>
+<tr><td class="m">16:30</td><td>driftalert</td><td>model drift Slack</td></tr>
+<tr><td class="m">16:35 M-F</td><td>eod-snapshots</td><td>consolidated EOD metrics (was 6 jobs)</td></tr>
+<tr><td class="m">19:00</td><td>ml-close-loop</td><td>label realized outcomes</td></tr>
+<tr><td class="m">19:30</td><td>ml-accuracy</td><td><span class="cy">NEW</span> — daily accuracy snapshot</td></tr>
+<tr><td class="m">23:00</td><td>walk-forward-tonight</td><td>backtest</td></tr>
+</table>
+<div class="warn"><b>Two minor items:</b> (1) <span class="mono">02:00→02:30</span> nightly cluster (edgar→enrich→full-enrich) runs back-to-back — full-enrich is the long one (~25min) and is EODHD-throttled; fine since they're sequential, but if full-enrich slips past 06:00 it'd collide with the morning scan. Worth a guard. (2) <span class="mono">momentum-snapshot</span> remains <b>not loaded</b> (still your call to enable or retire).</p></div>
+<div class="rec"><b>Missing (vs a complete ops loop):</b> no dedicated <b>ML-predictions Slack</b> (see Q1), and no <b>"scan failed" / "quota exhausted" alert</b> — today a failed scan is silent until you check logs. A 1-line health-alert on scan exit would close that.</div>
+</div>
+
+<!-- Q3 -->
+<h2 id="q3">3 · How are we testing regime + improving accuracy?</h2>
+<div class="card">
+<h3>Regime detection (the most important code in the system)</h3>
+<p>4-regime model in <span class="mono">data_fetcher.get_market_regime()</span>: classifies into <span class="pill">risk_on_trending</span> <span class="pill">risk_on_choppy</span> <span class="pill">risk_off_trending</span> <span class="pill">panic</span> from SPY/QQQ vs EMA50/200, VIX, and breadth (% above 50d). 2-bar hysteresis prevents flip-flopping.</p>
+<h3>How it's tested</h3>
+<table>
+<tr><th>Test</th><th>What it checks</th><th>Status</th></tr>
+<tr><td class="m">regime_sharpe_decomp.py</td><td>per-regime × per-setup Sharpe — "does this setup work in THIS regime?"</td><td class="gn">exists</td></tr>
+<tr><td class="m">sharpe_per_regime.py</td><td>per-stock Sharpe by regime</td><td class="gn">exists</td></tr>
+<tr><td>regime gate A/B</td><td>backtest gates ON vs OFF (2026-05-13: identical in choppy — gates only fire in trending)</td><td class="amb">done, inconclusive</td></tr>
+<tr><td>breadth-universe match</td><td>live breadth must use same universe as backtest (SP500 ~503)</td><td class="gn">fixed 2026-05-10</td></tr>
+</table>
+<div class="gap"><b>The honest gap:</b> regime is tested for <em>per-setup Sharpe decomposition</em>, but there's <b>no regime-classification accuracy test</b> — i.e. "when the model said risk_on_trending, was the next 5d actually trending?". The classifier is rule-based (not validated against labeled regime outcomes). Per CLAUDE.md principle 18, regime should be tested 10× harder than any setup — this is the weakest validation link.</div>
+<h3>How to improve accuracy (model direction head is the weak spot at ~0.43)</h3>
+<ul>
+<li><b>FinBERT sentiment</b> (shipped today) → once it has leak-free history, add as GBM feature #18 — targets the weak direction head directly.</li>
+<li><b>Finviz bulk breadth</b> (activated today) → richer ownership/short/SMA features for all tickers.</li>
+<li><b>Regime-conditional models</b> — train separate models per regime (currently one model spans all regimes; per principle 5 this is the highest-value structural change).</li>
+<li><b>Bigger sample</b> — currently 2024-02→2026-01 (355K rows). A 5-yr backfill would help the rarer regimes (panic/risk_off are under-sampled).</li>
+</ul>
+</div>
+
+<!-- Q4 -->
+<h2 id="q4">4 · ML validation</h2>
+<div class="card">
+<p><span class="verdict v-yes">SOLID for hit-net, modest for direction</span> — and now self-monitoring (daily accuracy job added today).</p>
+<table>
+<tr><th>Layer</th><th>Method</th><th>Latest result</th></tr>
+<tr><td>Walk-forward holdout</td><td>train earliest 75% / test last 25% (no look-ahead)</td><td class="m">355,827 rows · 2024-02→2026-01</td></tr>
+<tr><td>Direction (3-class)</td><td>accuracy + log-loss + calibration deciles</td><td class="amb">acc 0.41–0.45 (random=0.33)</td></tr>
+<tr><td>Hit-net (T1-before-stop)</td><td>AUC + Brier, per-threshold</td><td class="gn">AUC 0.76–0.79, Brier 0.12</td></tr>
+<tr><td>Magnitude (quantiles)</td><td>pinball loss q10–q90</td><td class="gn">q50 pinball 0.018</td></tr>
+<tr><td>Calibration</td><td>isotonic; reliability table</td><td class="gn">health: ok</td></tr>
+<tr><td>Champion/challenger gate</td><td>promote only if beats champion</td><td class="gn">3/3 promoted today</td></tr>
+<tr><td>Realized (close-loop)</td><td>live trades: predicted vs actual</td><td class="amb">accumulating (n&lt;30)</td></tr>
+</table>
+<div class="rec"><b>Key insight from today's holdout:</b> hit-net AUC <b>scales with target size</b> — 0.59 @ 1.5% target → 0.78 @ 10% target. The model is most accurate exactly where swing R:R matters (bigger moves). Trust the hit-net head; treat direction as a soft tilt.</div>
+<p><b>New today:</b> <span class="mono">scripts/ml_accuracy_report.py</span> (on-demand) + <span class="mono">ml-accuracy</span> launchd job (daily 19:30) → builds <span class="mono">cache/ml/accuracy_history.jsonl</span> trend so edge-erosion shows up early.</p>
+<div class="gap"><b>Gap:</b> the truest test — <b>realized</b> out-of-sample accuracy — is still <span class="mono">null</span> (no closed live trades yet). It matures only as paper trades close. That's the number to watch at n≥30.</div>
+</div>
+
+<!-- Q5 -->
+<h2 id="q5">5 · Are we auditing back — "I said BUY/bullish, why -ve result?" (and vice versa)</h2>
+<div class="card">
+<p><span class="verdict v-part">PARTIAL — the pieces exist, but there's no single "explain this pick's outcome" tool.</span></p>
+<h3>What exists today</h3>
+<table>
+<tr><th>Capability</th><th>Where</th><th>Answers</th></tr>
+<tr><td>Decision audit trail</td><td class="m">decision_engine.compute_final_verdict + reject_reason (×12)</td><td>WHY a verdict was BUY/WATCH/AVOID at decision time (which gates fired)</td></tr>
+<tr><td>Per-setup attribution</td><td class="m">snapshot_strategy_attribution.py · tracker.compute_stats_by_setup</td><td>which SETUPS win/lose (PF, WR by family)</td></tr>
+<tr><td>Regime×setup decomp</td><td class="m">regime_sharpe_decomp.py</td><td>which setup×regime combos lose money</td></tr>
+<tr><td>Two outcome logs</td><td class="m">picks_history.json + signal_log.json</td><td>every pick's forward outcome is recorded</td></tr>
+<tr><td>MAE/MFE analyzer</td><td class="m">TEST-MAE-MFE (open item)</td><td><span class="rd">NOT built</span> — would show how far losers ran against you</td></tr>
+</table>
+<div class="gap"><b>The honest gap — exactly what you're asking for:</b> there is <b>no single report</b> that takes a closed BUY that lost (or a bullish call that went -ve) and says <em>"you bought TICKER, scored 82, setup=VCP, regime=choppy; it lost -4% because [stop hit on day 2 / earnings gap / regime flip]; this setup×regime has PF 0.7 over n=14"</em>. The raw data to build it exists (decision log + outcome logs + attribution), but the <b>"why did THIS pick fail" forensics view</b> isn't assembled.</div>
+<div class="rec"><b>This is the most valuable thing I could build next:</b> a <span class="mono">pick_forensics.py</span> / dashboard tab that, for every closed pick, joins (decision verdict + gates that fired) × (realized outcome) × (setup×regime stats) → a per-pick post-mortem and an aggregate "where BUY calls go wrong / where AVOID calls would've won" view. It directly answers your question and feeds back into kill-list decisions (principle 4 + 16). Want me to build it?</div>
+</div>
+
+<!-- DATA FLOW -->
+<h2 id="flow">Data flow → Supabase</h2>
+<div class="flow"><pre>
+INGEST (per scan)                          STORE                         SERVE
+─────────────────                          ─────                         ─────
+EODHD bulk-EOD ──┐                                                        FastAPI :7432
+local parquet  ──┼─► fetch_ohlcv_with_     cache/last_bundle.json ──┐    /api/status
+  (data/ohlcv/)  │     failover (the seam)   (~300MB, full scan)    │    /api/universe
+Finviz bulk   ───┤                         data/swingtrade.db ──────┼──► /api/ticker
+Schwab(opt/qt)───┤   swing_trade.py        data/fundamentals.db ────┤    /api/ml*
+SEC EDGAR    ────┘     run_daily_scan       data/portfolio_state.json│    /api/ai_predict
+                            │                                        │         │
+                            ▼                                        ▼         ▼
+                    ┌─ Step1 universe (~3564 set-union)        Supabase    Stocksmith.html
+                    ├─ Step2 market data (bulk+archive)       (~50 tables)  kairos.html
+                    ├─ Step3 price/vol filter                     ▲
+                    ├─ Step4 enrich (cap 1000 / 3500 nightly)     │
+                    ├─ Step5 score → decision_engine              │
+                    ├─ Step6 elite + ML-edge (run_after_scan)     │
+                    └─ writes last_bundle.json ───────────────────┤
+                                                                  │
+   SUPABASE SYNC (2 paths):                                       │
+     1. swing_trade.py end-of-scan ► supabase_analysis_sync.sync_scan(bundle)
+        BACKGROUND thread (#2 perf) — normalizes bundle into ~50 child tables
+        keyed by analysis_id (ticker_analyses parent + per-domain children)
+     2. supabase-sync launchd (every 30m) ► migrate_sqlite_to_supabase.py
+        mirrors SQLite tables (positions, signals) for the live dashboard
+</pre></div>
+<div class="card">
+<p><b>Why Supabase at all?</b> It's the <span class="cy">cloud read-layer</span> for the public dashboard (trade.mystockholding.com) + the long-tail <span class="mono">/api/ticker</span> fallback — so any ticker resolves even if it's not in the local 300MB bundle. The scan writes locally first (fast, authoritative); Supabase is the mirror.</p>
+<p><b>The sync is normalized:</b> <span class="mono">sync_scan</span> explodes the bundle into a parent <span class="mono">ticker_analyses</span> row (per scan, keyed by analysis_id) + ~50 child tables (one per domain: technicals, fundamentals, options, decision, etc.). ~1,837 tickers × ~50 tables ≈ the 12-min write we backgrounded so it no longer blocks the dashboard.</p>
+</div>
+
+<!-- CACHE -->
+<h2 id="cache">Why so much Mac cache? (~11GB)</h2>
+<div class="card">
+<p><span class="verdict v-yes">It's almost all regenerable + intentional</span> — not bloat. Breakdown of the big chunks:</p>
+<table>
+<tr><th>Path</th><th>~Size</th><th>What it is</th><th>Regenerable?</th></tr>
+<tr><td class="m">data/ohlcv/*.parquet</td><td>large</td><td>local OHLCV archive (1043 tickers, delta-updated) — <b>this is the quota saver</b>: avoids re-fetching history every scan</td><td class="gn">yes (re-fetch)</td></tr>
+<tr><td class="m">cache/ml/historical_backfill.json</td><td>434MB</td><td>the 355K-row ML training set</td><td class="gn">yes (rebuild)</td></tr>
+<tr><td class="m">cache/last_bundle.json</td><td>~300MB</td><td>latest full scan output (every ticker, every field)</td><td class="gn">yes (next scan)</td></tr>
+<tr><td class="m">cache/models/finbert/model.onnx</td><td>417MB</td><td>FinBERT sentiment model (downloaded today)</td><td class="gn">yes (re-download)</td></tr>
+<tr><td class="m">data/swingtrade.db</td><td>~150MB</td><td>SQLite primary (18 tables, history)</td><td class="amb">semi (has history)</td></tr>
+<tr><td class="m">cache/target_engine/</td><td>~13MB</td><td>structural target cache (3000+ files)</td><td class="gn">yes</td></tr>
+<tr><td class="m">cache/_cache_news_*.json etc</td><td>many small</td><td>per-ticker API response cache (TTL-tuned for quota)</td><td class="gn">yes</td></tr>
+</table>
+<div class="rec"><b>Why it's needed:</b> the cache is the entire reason EODHD's 100K/day quota survives — the parquet archive means a scan re-fetches only <em>new</em> bars (not 1yr × 3000 tickers every run), and the per-ticker response caches (TTL-tuned, don't lower them) absorb repeat calls. Trading the disk for API quota is the correct call.</div>
+<div class="warn"><b>If you want to reclaim space:</b> safe to delete anytime (all regenerate): <span class="mono">cache/last_bundle.json</span> (rebuilds next scan), <span class="mono">cache/target_engine/</span>, old <span class="mono">cache/_cache_*</span>. The two worth keeping: <span class="mono">data/ohlcv/</span> (else a full re-fetch burns quota) and <span class="mono">data/swingtrade.db</span> (has your history). The 417MB FinBERT model + 434MB backfill are the only large "new" additions this session — both gitignored, both regenerable.</div>
+</div>
+
+<h2>Summary — what needs a decision from you</h2>
+<div class="card">
+<ol>
+<li><b>Q1 Slack:</b> re-enable daily-newsletter + add an ML-predictions alert? (Currently you only get morning-briefing + beatalert + driftalert + weekly.)</li>
+<li><b>Q2 Jobs:</b> add a scan-failure/quota alert + decide momentum-snapshot (load or retire)?</li>
+<li><b>Q3 Regime:</b> build a regime-classification accuracy test + consider regime-conditional models?</li>
+<li><b>Q5 Audit:</b> build <span class="mono">pick_forensics</span> — the "why did this BUY lose" post-mortem? <span class="cy">(highest value)</span></li>
+</ol>
+<p class="dim">All four are real, scoped, and buildable. None are blocked by quota or licenses.</p>
+</div>
+
+</div></body></html>
