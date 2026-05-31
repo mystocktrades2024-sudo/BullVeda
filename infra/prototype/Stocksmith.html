@@ -8997,6 +8997,29 @@ body.light .kairos-fab { box-shadow: 0 6px 18px rgba(0,0,0,0.12); }
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useMemo } = React;
 
+// ── SEC-compliance display layer (ported from prototype src/data.jsx) ─────────
+// Signals are informational directional bias, NOT an instruction to transact.
+// Internal verdict codes (BUY/WATCH/SHORT/AVOID/SELL/HOLD/PASS) still drive ALL
+// filtering/logic — only the DISPLAYED string is remapped. Never render a raw
+// verdict as a signal label — always secBias().
+const SEC_BIAS = {
+  BUY:   { label: "Bullish", tone: "gn"  },
+  WATCH: { label: "Neutral", tone: "amb" },
+  HOLD:  { label: "Neutral", tone: "amb" },
+  SHORT: { label: "Bearish", tone: "rd"  },
+  SELL:  { label: "Bearish", tone: "rd"  },
+  AVOID: { label: "Bearish", tone: "rd"  },
+  PASS:  { label: "Bearish", tone: "rd"  },
+};
+function secBias(v) { const k = String(v == null ? "" : v).toUpperCase(); return (SEC_BIAS[k] && SEC_BIAS[k].label) || v; }
+function secBiasTone(v) { const k = String(v == null ? "" : v).toUpperCase(); return (SEC_BIAS[k] && SEC_BIAS[k].tone) || "amb"; }
+const SEC_DISCLAIMER = "Informational and educational analytics only — not investment advice or a recommendation to buy or sell any security. Signals describe a quantitative directional bias, not a solicitation. Paper mode · no live orders. Past performance does not guarantee future results.";
+const SEC_DISCLAIMER_SHORT = "Informational only · not investment advice · paper mode";
+if (typeof window !== "undefined") {
+  window.secBias = secBias; window.secBiasTone = secBiasTone;
+  window.SEC_BIAS = SEC_BIAS; window.SEC_DISCLAIMER = SEC_DISCLAIMER; window.SEC_DISCLAIMER_SHORT = SEC_DISCLAIMER_SHORT;
+}
+
 /* ════════════════════════════════════════════════════════════════
    CONFIG — themes + commercial tiers + icon rail (from design bundle)
    ════════════════════════════════════════════════════════════════ */
@@ -10290,7 +10313,7 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
               <td className="mono dim"><span className="ss2-tfsn">{t.tfsn.map((v,k)=><span key={k} className={`ss2-tfsn-dot ss2-tfsn--${v===2?"pass":v===1?"neut":"fail"}`} title={["Tech","Fund","SMC","News"][k]} />)}</span></td>
               <td className="mono dim2">{t.mechanism}</td>
               <td className="r"><span className={`ss2-score ss2-score--${t.score>=75?"gn":t.score>=60?"amb":"rd"}`}>{t.score}</span></td>
-              <td><Pill tone={t.verdict==="BUY"?"gn":t.verdict==="AVOID"?"rd":"amb"} small>{t.verdict}</Pill></td>
+              <td><Pill tone={t.verdict==="BUY"?"gn":t.verdict==="AVOID"?"rd":"amb"} small>{secBias(t.verdict)}</Pill></td>
               <td><span className={`ss2-tier ss2-tier--${String(t.tier).toLowerCase()}`}>{t.tier}</span></td>
               <td className="mono dim">{t.setup}</td>
               <td><span className={`ss2-eq ss2-eq--${t.eq==="EXTENDED"?"amb":t.eq==="MISSED"?"rd":"ink"}`}>{t.eq}</span></td>
@@ -11303,7 +11326,7 @@ function DetailHeader({ ticker, sizeCat, heroStyle, onHeroStyle, focusMode, onTo
         <div className="dp-quote-extra mono dim"><span>VOL <b className="dim2">{(ticker.vol/1e6).toFixed(2)}M</b></span><span>· AVG <b className="dim2">{(ticker.avgVol/1e6).toFixed(2)}M</b></span><span>· RSI <b className="dim2">{ticker.rsi.toFixed(1)}</b></span><span>· β <b className="dim2">{ticker.beta.toFixed(2)}</b></span></div>
         <div className="dp-hdr-spacer" />
         <Pill tone="gn" small dot>LIVE</Pill>
-        <Pill tone="copper" small>{ticker.verdict} · {ticker.score}</Pill>
+        <Pill tone="copper" small>{secBias(ticker.verdict)} · {ticker.score}</Pill>
       </div>
     </div>
   );
@@ -11438,7 +11461,7 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
         </div>
       )}
       {(widthCat==="L"||widthCat==="XL") && (
-        <div className="sc-row-foot"><Pill tone={vt} small>{item.verdict}</Pill><span className="sc-row-setup mono dim">{item.setup}</span></div>
+        <div className="sc-row-foot"><Pill tone={vt} small>{secBias(item.verdict)}</Pill><span className="sc-row-setup mono dim">{item.setup}</span></div>
       )}
       {(widthCat==="M"||widthCat==="L"||widthCat==="XL") && (() => {
         const s = scanSignals(item);
@@ -18830,7 +18853,7 @@ function SurfaceWatchlist({ onTicker, universe, held }) {
                   <td className="mono"><span className="wl-held" style={{ opacity: t.held ? 1 : 0 }}>●</span><b>{t.sym}</b>{!t.inUniverse && <span className="wl-manual mono dim2" title="Not in today's scan">·m</span>}</td>
                   <td className="dim">{t.name}</td>
                   <td className="mono dim">{t.setup}</td>
-                  <td><Pill tone={t.verdict === "BUY" ? "gn" : t.verdict === "AVOID" ? "rd" : "amb"} small>{t.verdict}</Pill></td>
+                  <td><Pill tone={t.verdict === "BUY" ? "gn" : t.verdict === "AVOID" ? "rd" : "amb"} small>{secBias(t.verdict)}</Pill></td>
                   <td><span className={`ss2-tier ss2-tier--${String(t.tier).toLowerCase().replace("watch","t3")}`}>{t.tier}</span></td>
                   <td className="r"><span className="wl-scorebar"><span style={{ width: `${t.score}%`, background: t.score>=75?"var(--gn)":t.score>=60?"var(--amb)":"var(--rd)" }} /></span><b className="mono">{t.score||"—"}</b></td>
                   <td><span className="ss2-tfsn">{t.tfsn.map((v,k)=><span key={k} className={`ss2-tfsn-dot ss2-tfsn--${v===2?"pass":v===1?"neut":"fail"}`} />)}</span></td>
@@ -18869,7 +18892,7 @@ function WLDetailPane({ t, onTicker }) {
         </div>
         <div className="sdp-hdr-r">
           <span className={`ss2-score ss2-score--${t.score>=75?"gn":t.score>=60?"amb":"rd"}`}>{t.score||"—"}</span>
-          <Pill tone={toneV} small>{t.verdict}</Pill>
+          <Pill tone={toneV} small>{secBias(t.verdict)}</Pill>
         </div>
       </div>
       <div className="sdp-actions">
@@ -23804,7 +23827,7 @@ function LbBacktest({ setupRows, meta, cfg }) {
               <td className="r mono tabular dim2">{r.n === null ? "—" : r.n}</td>
               <td className="r mono tabular">{r.wr === null ? "—" : `${r.wr.toFixed(1)}%`}</td>
               <td className={`r mono tabular ${(r.pnl || 0) >= 0 ? "up" : "dn"}`}>{r.pnl === null ? "—" : `${r.pnl >= 0 ? "+" : ""}${r.pnl.toFixed(2)}%`}</td>
-              <td><Pill tone={lbVerdictTone(r.verdict)} small>{String(r.verdict).toUpperCase()}</Pill></td>
+              <td><Pill tone={lbVerdictTone(r.verdict)} small>{secBias(r.verdict)}</Pill></td>
             </tr>
           )) : <tr><td colSpan={5} className="mono dim2" style={{ textAlign: "center", padding: "14px" }}>No setup stats.</td></tr>}</tbody>
         </table>
@@ -23833,7 +23856,7 @@ function LbCalib({ setupRows }) {
               <td className="r mono tabular">{r.wr === null ? "—" : `${r.wr.toFixed(1)}%`}</td>
               <td className={`r mono tabular kpi-tone--${tone}`}>{r.wrLb === null ? "—" : `${r.wrLb.toFixed(1)}%`}</td>
               <td><span className="lab-icbar" style={{ width: "90px" }}><span style={{ width: `${lbW}%`, background: `var(--${tone})` }} /></span></td>
-              <td><Pill tone={lbVerdictTone(r.verdict)} small>{String(r.verdict).toUpperCase()}</Pill></td>
+              <td><Pill tone={lbVerdictTone(r.verdict)} small>{secBias(r.verdict)}</Pill></td>
             </tr>
           );
         }) : <tr><td colSpan={6} className="mono dim2" style={{ textAlign: "center", padding: "14px" }}>No setup stats.</td></tr>}</tbody>
