@@ -12570,15 +12570,94 @@ ${credit?"Credit":"Debit"} after realistic fill: $${costNow} (${contracts} contr
 }
 window.OptIntent = OptIntent; window.OptStructure = OptStructure; window.OptReality = OptReality;
 
+// ─── Entry Checklist — runs the buy funnel live as ✓/✗ rows (prototype lens-overview.jsx) ───
+(function () {
+  const css = `
+  .bk { background:var(--glass-bg-1); border:1px solid var(--glass-line); border-radius:8px; padding:13px 15px; display:flex; flex-direction:column; gap:10px; margin-bottom:4px; }
+  .bk-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .bk-head-l { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+  .bk-tag { font:700 9px var(--mono); letter-spacing:0.12em; color:var(--copper); border:1px solid color-mix(in oklab,var(--copper) 40%,transparent); border-radius:3px; padding:3px 8px; }
+  .bk-score { font:700 13px var(--mono); }
+  .bk-verdict { font:700 9px var(--mono); letter-spacing:0.08em; padding:3px 9px; border-radius:999px; border:1px solid currentColor; }
+  .bk-bar { height:6px; border-radius:999px; background:var(--glass-bg-2); overflow:hidden; }
+  .bk-bar i { display:block; height:100%; border-radius:999px; }
+  .bk-rows { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; }
+  .bk-row { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--glass-line); }
+  .bk-ic { flex:none; width:17px; height:17px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font:700 10px var(--mono); }
+  .bk-ic--pass { background:color-mix(in oklab,var(--gn) 22%,transparent); color:var(--gn); }
+  .bk-ic--fail { background:color-mix(in oklab,var(--rd) 18%,transparent); color:var(--rd); }
+  .bk-k { flex:1; font-size:11.5px; color:var(--ink-1); }
+  .bk-v { flex:none; font:600 11px var(--mono); }
+  .bk-need { flex:none; font:500 9px var(--mono); color:var(--ink-3); min-width:54px; text-align:right; }
+  .bk-foot { font-size:10px; padding-top:5px; border-top:1px solid var(--glass-line); }
+  @media (max-width:680px){ .bk-rows{ grid-template-columns:1fr; } }`;
+  if (!document.getElementById("bk-css")) { const s = document.createElement("style"); s.id = "bk-css"; s.textContent = css; document.head.appendChild(s); }
+})();
+function BuyChecklist({ ticker, mode }) {
+  const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
+  const net = cv ? cv.net : (ticker.score || 60);
+  const bias = window.secBias ? window.secBias(cv ? cv.verdict : ticker.verdict) : "—";
+  const moKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing";
+  const proj = (window.AIPredict && ticker.symbol) ? window.AIPredict.projection(ticker.symbol, moKey) : null;
+  const lensV = n => cv ? (cv.lenses.find(l => l.k === n || l.k.startsWith(n)) || {}).v : null;
+  const ss = ticker.setupStats || {};
+  const rr = ticker.rMultiple || 0;
+  const erDays = ticker.earnings ? ticker.earnings.days : null;
+  const hold = ticker.holdDays || 9;
+  const checks = [
+    { k: "Bias is Bullish", v: `${bias} ${net}`, need: "≥66", pass: net >= 66 },
+    { k: "Lens confluence", v: cv ? `${cv.agree}/${cv.lenses.length}` : "—", need: "majority", pass: cv ? cv.agree >= Math.ceil(cv.lenses.length * 0.5) : false },
+    { k: "Technicals aligned", v: lensV("Technicals") != null ? `${lensV("Technicals")}` : "—", need: "≥60", pass: (lensV("Technicals") || 0) >= 60 },
+    { k: "Pattern / SMC", v: lensV("Patterns") != null ? `${lensV("Patterns")}` : "—", need: "≥60", pass: (lensV("Patterns") || 0) >= 60 },
+    { k: "AI P(up)", v: proj ? `${Math.round(proj.pUp * 100)}%` : "—", need: "≥55%", pass: proj ? proj.pUp >= 0.55 : false },
+    { k: "Setup edge", v: ss.wilsonLB ? `${(ss.wilsonLB * 100).toFixed(0)}% n${ss.n}` : "—", need: "LB≥45·n≥30", pass: (ss.wilsonLB || 0) >= 0.45 && (ss.n || 0) >= 30 },
+    { k: "Reward : Risk", v: `${rr.toFixed(2)}R`, need: "≥2.0", pass: rr >= 2 },
+    { k: "Earnings clear", v: erDays != null ? `${erDays}d` : "none", need: `>${hold}d`, pass: erDays != null ? erDays > hold : true },
+  ];
+  const passed = checks.filter(c => c.pass).length, total = checks.length;
+  const vtone = passed === total ? "gn" : passed >= total - 2 ? "amb" : "rd";
+  const vlabel = passed === total ? "COMPLETE" : passed >= total - 2 ? "FORMING" : "INCOMPLETE";
+  return (
+    <div className="bk">
+      <div className="bk-head">
+        <div className="bk-head-l">
+          <span className="bk-tag mono">ENTRY CHECKLIST</span>
+          <span className={`bk-score kpi-tone--${vtone}`}>{passed}<span className="dim2">/{total}</span></span>
+          <span className="mono dim2" style={{ fontSize: 10.5 }}>criteria met · the buy funnel, live</span>
+        </div>
+        <span className={`bk-verdict kpi-tone--${vtone}`}>{vlabel}</span>
+      </div>
+      <div className="bk-bar"><i style={{ width: `${passed / total * 100}%`, background: `var(--${vtone})` }} /></div>
+      <div className="bk-rows">
+        {checks.map((c, i) => (
+          <div key={i} className="bk-row">
+            <span className={`bk-ic bk-ic--${c.pass ? "pass" : "fail"}`}>{c.pass ? "✓" : "✕"}</span>
+            <span className="bk-k">{c.k}</span>
+            <span className={`bk-v kpi-tone--${c.pass ? "gn" : "rd"}`}>{c.v}</span>
+            <span className="bk-need">{c.need}</span>
+          </div>
+        ))}
+      </div>
+      <div className="bk-foot mono dim2">{passed === total ? "All entry criteria met — the setup is complete." : `${total - passed} criteri${total - passed === 1 ? "on" : "a"} not met — treat as a watch until they clear.`} Informational / educational only — not advice.</div>
+    </div>
+  );
+}
+window.BuyChecklist = BuyChecklist;
+
 function LensOverview({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("ov-1"), s3 = useStateToggle("ov-3"), s4 = useStateToggle("ov-4"), s6 = useStateToggle("ov-6"), s8 = useStateToggle("ov-8");
   const tier = window.__tier ?? 4;
   return (
     <div className="lens lens--ov">
+      {window.CompositeVerdict && <CompositeVerdict ticker={ticker} mode={mode} onLens={(name) => {
+        const map = { "Overview":"overview","AI Edge":"mledge","Technicals":"technicals","Patterns":"patterns","SMC":"smc","Value":"investment","Risk":"risk","Track Rec.":"mledge","Plan":"plan","Earnings":"earnings","Options":"options","Insider":"tape","Tape":"tape" };
+        if (window.__setLens && map[name]) window.__setLens(map[name]);
+      }} />}
       <DeskRead ticker={ticker} mode={mode} />
-      <VerdictHero ticker={ticker} mode={mode} heroStyle={heroStyle} sizeCat={sizeCat} />
       <ThesisCard ticker={ticker} mode={mode} />
+      <BuyChecklist ticker={ticker} mode={mode} />
       <NewsCatalysts ticker={ticker} />
+      <VerdictHero ticker={ticker} mode={mode} heroStyle={heroStyle} sizeCat={sizeCat} />
       <div className="lens-section">
         <SectionHeader n="0" title="Company Snapshot · Quant Read" sub="who they are · why now · where the numbers come from" style={headerStyle} right={<FreshnessPill state="live" age="18s" />} />
         <div className="lens-pad"><CompanySnapshot ticker={ticker} /></div>
