@@ -4350,6 +4350,23 @@ def main():
         _path.write_text(json.dumps(_chunk, default=str, indent=0, allow_nan=False))
         print(f"wrote {_path.name} ({_path.stat().st_size:,} bytes)")
 
+    # ─── data_leaders.json — Track Record surface ─────────────────────────
+    # 2026-05-31 fix: dashboard fetches /v2/data_leaders.json but it was never
+    # produced → stale/empty Track Record + empty month axis. Emitted here from
+    # cache/audit_ledger.json via the canonical date-coalescer (build_leaders.py).
+    try:
+        import sys as _sys
+        _here = str(Path(__file__).resolve().parent)
+        if _here not in _sys.path:
+            _sys.path.insert(0, _here)
+        from build_leaders import build as _build_leaders, OUT as _LEADERS_OUT
+        _ld = _build_leaders()
+        _LEADERS_OUT.write_text(json.dumps(_ld, separators=(",", ":")))
+        print(f"wrote {_LEADERS_OUT.name} ({_LEADERS_OUT.stat().st_size:,} bytes · "
+              f"{_ld['totalCalls']} signals)")
+    except Exception as _ld_err:
+        print(f"  ⚠ data_leaders.json emit failed (non-fatal): {_ld_err}")
+
     # ─── X (Twitter) chatter sidecar ──────────────────────────────────────
     # Reads cache/x_signal.json (written by scripts/build_x_signal.py — free
     # Nitter RSS poll of tracked handles every 4h) and emits a slimmed-down
