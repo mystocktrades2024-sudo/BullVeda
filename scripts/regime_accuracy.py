@@ -33,13 +33,12 @@ SPY = BASE / "data" / "ohlcv" / "SPY.parquet"
 def _spy_series():
     import pandas as pd
     df = pd.read_parquet(SPY)
-    # normalize date index + close
-    dcol = next((c for c in ("date", "Date") if c in df.columns), None)
-    ccol = next((c for c in ("adj_close", "Adj Close", "close", "Close") if c in df.columns), None)
-    if dcol is None and df.index.name:
-        df = df.reset_index(); dcol = df.columns[0]
-    df[dcol] = pd.to_datetime(df[dcol])
-    return df.sort_values(dcol).set_index(dcol)[ccol]
+    # archive parquet is DatetimeIndex + OHLCV columns
+    if not isinstance(df.index, pd.DatetimeIndex):
+        dcol = next((c for c in ("date", "Date") if c in df.columns), df.columns[0])
+        df = df.set_index(pd.to_datetime(df[dcol]))
+    ccol = next((c for c in ("adj_close", "Adj Close", "Close", "close") if c in df.columns), None)
+    return df.sort_index()[ccol]
 
 
 def regime_label_by_date():
