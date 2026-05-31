@@ -109,6 +109,13 @@ SURVIVORSHIP_WR_ADJUSTMENT = 0.04  # -4pp conservative haircut applied to report
 #   - ~200 API calls for 500 tickers × N quarters, cache heavily
 # Live scoring remains unchanged — live yfinance IS point-in-time for today.
 BACKTEST_DISABLE_FUNDAMENTALS = os.environ.get("BACKTEST_NO_FUNDAMENTALS", "0") == "1"
+# Audit #4 Tier 2 (shipped 2026-05-31): point-in-time fundamentals via free SEC EDGAR
+# (edgar_client.fundamentals_as_of). When BACKTEST_PIT_FUNDAMENTALS=1, the statement-derived
+# fundamental inputs (net margin, EPS growth, revenue growth) come from the filing that was
+# PUBLIC as of the test date (period end <= as_of AND filed <= as_of — no look-ahead) instead
+# of TODAY's restated FINVIZ values. Market/analyst fields (peg/fwd_pe/roe/etc.) are dropped
+# in this mode rather than carried with look-ahead. ETF/ADR/no-coverage names neutralize.
+BACKTEST_PIT_FUNDAMENTALS = os.environ.get("BACKTEST_PIT_FUNDAMENTALS", "0") == "1"
 FUNDAMENTAL_LOOKAHEAD_WARNING = (
     "FUNDAMENTAL LOOK-AHEAD: yfinance current data applied to historical signals. "
     "Backtest WR inflated ~1-2pp. See audit #4 / module docstring for full fix plan. "
@@ -299,10 +306,28 @@ def _score_as_of(ticker: str, df_full: pd.DataFrame, as_of_date: pd.Timestamp,
     news     = {"score": 0, "bias": "neutral"}
     insider  = {"buys": 0, "sells": 0, "sentiment": "neutral"}
 
-    # Build extra_fund from FINVIZ data (fundamentals are quarterly — minor look-ahead)
+    # Build extra_fund. Default = current FINVIZ (minor quarterly look-ahead). With
+    # BACKTEST_PIT_FUNDAMENTALS=1 = point-in-time SEC EDGAR statements (audit #4 Tier 2).
     _ef: dict = {}
     _borrow: dict = {}
-    if finviz_data:
+    if BACKTEST_PIT_FUNDAMENTALS:
+        # Audit #4 Tier 2: statement fundamentals as PUBLIC on as_of_date (no look-ahead).
+        try:
+            import edgar_client as _edg
+            _asof = str(as_of_date)[:10]
+            _pit = _edg.fundamentals_as_of(ticker, _asof) or {}
+            # only CLEAN, point-in-time, score_fundamentals-consumed fields:
+            #   profit_margin = net income / revenue (consumed); revenue_growth = YoY.
+            # eps growth is intentionally omitted — EDGAR exposes QoQ, not an annual figure,
+            # and mapping QoQ into an annual field would distort the score.
+            if _pit.get("net_margin") is not None:     _ef["profit_margin"]  = _pit["net_margin"]
+            if _pit.get("revenue_growth") is not None: _ef["revenue_growth"] = _pit["revenue_growth"]
+        except Exception:
+            pass
+        # market/analyst + short-interest fields intentionally omitted (no point-in-time
+        # source -> carrying TODAY's values would be look-ahead). Names with no EDGAR
+        # coverage (ETF/ADR) get an empty _ef -> fundamentals pillar effectively neutral.
+    elif finviz_data:
         fvz = finviz_data
         # Margins / profitability (normalize % → ratio)
         for fvz_k, ef_k, pct in [
