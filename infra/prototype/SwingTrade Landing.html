@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en" data-dir="obsidian">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kairos — the quant terminal for serious swing traders</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   DESIGN TOKENS — locked to the terminal's Obsidian theme.
+   Values synced to SwingTrade tokens.css defaults so the marketing
+   site → terminal transition is pixel-seamless. Everything is Inter;
+   .mono = Inter with tabular figures (the terminal uses no mono face).
+   (The 4 alternate design directions were removed — Obsidian only.)
+   ============================================================ */
+:root{
+  --mono:"Inter",sans-serif;
+  --r:14px; --maxw:1200px;
+  --t:cubic-bezier(.4,0,.2,1);
+}
+[data-dir="obsidian"]{
+  --bg:#0a0d0c; --bg-1:#11151a; --bg-2:#161a1e; --panel:#13171c;
+  --ink:#ecefe9; --ink-2:#9a9e98; --ink-3:#7c807c; --line:#262b2d; --line-2:#353a3c;
+  --accent:#d97757; --accent-2:#4ade80; --accent-ink:#0a0d0c;
+  --rd:#f87171; --amb:#fbbf24;
+  --grad:radial-gradient(1200px 600px at 70% -10%, rgba(217,119,87,.16), transparent 60%);
+  --font:"Inter",sans-serif; --display:"Inter",sans-serif; --display-w:800; --display-ls:-.03em;
+  --hero-cols:1.1fr .9fr; --card-bg:var(--bg-1); --pill-r:999px;
+}
+
+*{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+body::before{content:"";position:fixed;inset:0;background:var(--grad);pointer-events:none;z-index:0;}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px;position:relative;z-index:1;}
+a{color:inherit;text-decoration:none;}
+h1,h2,h3{font-family:var(--display);font-weight:var(--display-w);letter-spacing:var(--display-ls);line-height:1.05;}
+.mono{font-family:var(--mono);font-feature-settings:"tnum","zero";font-variant-numeric:tabular-nums;}
+.accent{color:var(--accent);}
+
+/* nav */
+.nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:color-mix(in oklab,var(--bg) 78%,transparent);border-bottom:1px solid var(--line);}
+.nav-in{display:flex;align-items:center;gap:20px;height:64px;}
+.logo{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:800;font-size:18px;letter-spacing:-.02em;}
+.logo-mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:grid;place-items:center;color:var(--accent-ink);font-weight:900;font-size:14px;}
+.nav-links{display:flex;gap:26px;margin-left:14px;}
+.nav-links a{color:var(--ink-2);font-size:14px;font-weight:500;transition:color .2s;}
+.nav-links a:hover{color:var(--ink);}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:12px;}
+.btn{font-family:var(--font);font-weight:600;font-size:14px;border-radius:var(--pill-r);padding:10px 18px;cursor:pointer;border:1px solid transparent;transition:transform .15s var(--t),background .2s,border-color .2s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;}
+.btn:hover{transform:translateY(-1px);}
+.btn-ghost{background:transparent;border-color:var(--line-2);color:var(--ink);}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent);}
+.btn-primary{background:var(--accent);color:var(--accent-ink);box-shadow:0 6px 24px -8px var(--accent);}
+.btn-lg{padding:14px 26px;font-size:15px;}
+
+/* hero */
+.hero{padding:78px 0 60px;}
+.hero-grid{display:grid;grid-template-columns:var(--hero-cols);gap:48px;align-items:center;}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);border:1px solid var(--line-2);border-radius:999px;padding:5px 13px;margin-bottom:22px;}
+.eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--accent-2);box-shadow:0 0 8px var(--accent-2);}
+h1.hero-h{font-size:clamp(38px,5.4vw,68px);margin-bottom:20px;}
+.hero-sub{font-size:clamp(16px,1.4vw,19px);color:var(--ink-2);max-width:560px;margin-bottom:30px;}
+.hero-cta{display:flex;gap:14px;flex-wrap:wrap;align-items:center;}
+.hero-note{font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-top:16px;}
+/* product preview frame */
+.preview{border:1px solid var(--line-2);border-radius:var(--r);overflow:hidden;background:var(--bg-1);box-shadow:0 40px 100px -30px rgba(0,0,0,.7);position:relative;}
+.preview-bar{display:flex;align-items:center;gap:7px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--bg-2);}
+.preview-bar i{width:10px;height:10px;border-radius:50%;background:var(--line-2);display:block;}
+.preview-bar .u{margin-left:12px;font-family:var(--mono);font-size:11px;color:var(--ink-3);}
+.preview-shot{display:block;width:100%;height:auto;}
+.preview-live{position:relative;width:100%;aspect-ratio:16/10;overflow:hidden;background:var(--bg);}
+.preview-live iframe{position:absolute;top:0;left:0;width:1440px;height:900px;border:0;transform:scale(.42);transform-origin:top left;}
+@media(max-width:1100px){.preview-live iframe{transform:scale(.3);}}
+/* click-to-load poster — avoids loading the heavy terminal on first paint */
+.preview-poster{position:absolute;inset:0;display:grid;place-items:center;background:
+  radial-gradient(700px 360px at 50% 0%, color-mix(in oklab,var(--accent) 16%,transparent), transparent 60%),
+  repeating-linear-gradient(0deg,transparent 0 26px,color-mix(in oklab,var(--line) 60%,transparent) 26px 27px),
+  repeating-linear-gradient(90deg,transparent 0 26px,color-mix(in oklab,var(--line) 60%,transparent) 26px 27px),var(--bg);}
+.poster-cta{display:flex;flex-direction:column;align-items:center;gap:12px;}
+.poster-eyebrow{font-size:11px;letter-spacing:.18em;color:var(--accent);}
+.poster-note{font-size:11px;color:var(--ink-3);}
+
+/* trust strip */
+.trust{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:22px 0;}
+.trust-in{display:flex;align-items:center;justify-content:space-between;gap:30px;flex-wrap:wrap;}
+.trust-stat{display:flex;flex-direction:column;gap:2px;}
+.trust-stat b{font-family:var(--display);font-size:26px;}
+.trust-stat span{font-family:var(--mono);font-size:11px;color:var(--ink-3);letter-spacing:.05em;}
+.trust-src{font-family:var(--mono);font-size:12px;color:var(--ink-2);}
+.trust-src b{color:var(--accent);}
+
+/* sections */
+section{padding:80px 0;position:relative;z-index:1;}
+.sec-head{text-align:center;max-width:680px;margin:0 auto 48px;}
+.sec-tag{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);}
+.sec-head h2{font-size:clamp(28px,3.4vw,42px);margin:12px 0;}
+.sec-head p{color:var(--ink-2);font-size:17px;}
+
+/* feature grid */
+.feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+.feat{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--r);padding:26px;transition:transform .2s var(--t),border-color .2s;}
+.feat:hover{transform:translateY(-3px);border-color:var(--accent);}
+.feat-ico{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;margin-bottom:16px;background:color-mix(in oklab,var(--accent) 16%,transparent);color:var(--accent);}
+.feat-ico svg{width:22px;height:22px;}
+.feat h3{font-size:18px;margin-bottom:8px;font-family:var(--font);font-weight:700;letter-spacing:0;}
+.feat p{color:var(--ink-2);font-size:14px;}
+.feat .tagline{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-top:12px;}
+
+/* showcase split */
+.showcase{display:grid;grid-template-columns:1fr 1fr;gap:44px;align-items:center;margin-bottom:50px;}
+.showcase:nth-child(even) .showcase-txt{order:2;}
+.showcase-txt h3{font-size:clamp(24px,2.6vw,32px);margin-bottom:14px;}
+.showcase-txt p{color:var(--ink-2);font-size:16px;margin-bottom:18px;}
+.showcase-list{display:flex;flex-direction:column;gap:10px;}
+.showcase-list li{list-style:none;display:flex;gap:10px;align-items:flex-start;font-size:14px;color:var(--ink-2);}
+.showcase-list .ck{color:var(--accent-2);flex:none;font-weight:700;}
+.showcase-img{border:1px solid var(--line-2);border-radius:var(--r);overflow:hidden;box-shadow:0 30px 70px -28px rgba(0,0,0,.6);}
+.showcase-img img{display:block;width:100%;}
+
+/* how it works */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+.step{position:relative;padding:28px;border:1px solid var(--line);border-radius:var(--r);background:var(--card-bg);}
+.step-n{font-family:var(--mono);font-size:13px;color:var(--accent-ink);background:var(--accent);width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:700;margin-bottom:14px;}
+.step h3{font-size:17px;font-family:var(--font);font-weight:700;letter-spacing:0;margin-bottom:8px;}
+.step p{color:var(--ink-2);font-size:14px;}
+
+/* pricing */
+.price-toggle{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:36px;font-family:var(--mono);font-size:13px;color:var(--ink-2);}
+.tg{width:46px;height:25px;border-radius:999px;background:var(--bg-2);border:1px solid var(--line-2);position:relative;cursor:pointer;transition:background .2s;}
+.tg::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:var(--accent);transition:left .2s var(--t);}
+.tg.on::after{left:23px;}
+.save{font-size:11px;color:var(--accent-2);border:1px solid var(--accent-2);border-radius:999px;padding:2px 8px;}
+.price-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;align-items:stretch;}
+.tier{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--r);padding:24px 18px;display:flex;flex-direction:column;position:relative;transition:transform .2s;}
+.tier.pop{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 30px 70px -34px var(--accent);}
+.tier.pop::before{content:"MOST POPULAR";position:absolute;top:-11px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;background:var(--accent);color:var(--accent-ink);padding:4px 12px;border-radius:999px;font-weight:700;}
+.tier-name{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);}
+.tier-price{font-family:var(--display);font-size:34px;margin:10px 0 2px;}
+.tier-price small{font-size:15px;color:var(--ink-3);font-family:var(--mono);}
+.tier-desc{color:var(--ink-2);font-size:12.5px;min-height:50px;margin-bottom:16px;}
+.tier-feat{list-style:none;display:flex;flex-direction:column;gap:11px;margin-bottom:24px;flex:1;}
+.tier-feat li{display:flex;gap:9px;font-size:13.5px;color:var(--ink-2);align-items:flex-start;}
+.tier-feat .ck{color:var(--accent-2);flex:none;}
+.tier .btn{justify-content:center;}
+/* comparison matrix */
+.cmp-wrap{margin-top:40px;}
+.cmp{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;}
+.cmp-h{display:flex;justify-content:space-between;align-items:center;padding:16px 22px;border-bottom:1px solid var(--line);}
+.cmp-h .mono{font-size:11px;letter-spacing:.16em;color:var(--accent);}
+.cmp-h .dim{color:var(--ink-3);}
+.cmp-row{display:grid;grid-template-columns:2fr repeat(5,1fr);border-top:1px solid var(--line);align-items:center;}
+.cmp-row--head{border-top:none;background:var(--bg-2);}
+.cmp-tier{text-align:center;padding:11px 4px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--ink-2);}
+.cmp-cat{padding:9px 22px;background:var(--bg-2);font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);border-top:1px solid var(--line);}
+.cmp-feat{padding:11px 22px;font-size:13px;color:var(--ink-2);}
+.cmp-foot{padding:13px 22px;font-size:11px;color:var(--ink-3);border-top:1px solid var(--line);}
+.cmp-cell{display:flex;justify-content:center;align-items:center;padding:11px 4px;}
+.cmp-cell--pop{background:color-mix(in oklab,var(--accent) 5%,transparent);}
+.cmp-txt{font-size:11px;color:var(--accent);font-weight:700;}
+.cmp-dash{width:13px;height:1px;background:var(--line-2);display:block;}
+@media(max-width:900px){.cmp-wrap{overflow-x:auto;}.cmp{min-width:680px;}}
+
+/* CTA */
+.cta{text-align:center;border:1px solid var(--line-2);border-radius:var(--r);padding:60px 30px;background:linear-gradient(180deg,var(--bg-1),var(--bg));position:relative;overflow:hidden;}
+.cta h2{font-size:clamp(28px,3.6vw,46px);margin-bottom:16px;}
+.cta p{color:var(--ink-2);font-size:17px;margin-bottom:28px;}
+
+/* footer */
+footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px;}
+.foot-in{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:center;}
+.foot-links{display:flex;gap:22px;flex-wrap:wrap;}
+.foot-links a{color:var(--ink-3);font-size:13px;}
+.foot-links a:hover{color:var(--ink);}
+.foot-dis{color:var(--ink-3);font-size:11px;font-family:var(--mono);max-width:560px;margin-top:14px;}
+
+@media(max-width:900px){
+  .hero-grid,.showcase{grid-template-columns:1fr;}
+  .feat-grid,.steps,.price-grid{grid-template-columns:1fr;}
+  .nav-links{display:none;}
+  .showcase:nth-child(even) .showcase-txt{order:0;}
+}
+
+/* login modal */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:100;display:none;place-items:center;}
+.modal-bg.on{display:grid;}
+.modal{background:var(--bg-1);border:1px solid var(--line-2);border-radius:var(--r);padding:34px;width:min(420px,92vw);position:relative;}
+.modal h3{font-size:24px;margin-bottom:6px;}
+.modal p{color:var(--ink-2);font-size:14px;margin-bottom:22px;}
+.modal label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--ink-3);margin:14px 0 6px;text-transform:uppercase;}
+.modal input{width:100%;background:var(--bg-2);border:1px solid var(--line-2);border-radius:8px;padding:11px 13px;color:var(--ink);font-family:var(--font);font-size:14px;outline:none;}
+.modal input:focus{border-color:var(--accent);}
+.modal .btn{width:100%;justify-content:center;margin-top:22px;}
+.modal-x{position:absolute;top:16px;right:18px;color:var(--ink-3);cursor:pointer;font-size:20px;background:none;border:none;}
+.modal-alt{text-align:center;font-size:13px;color:var(--ink-3);margin-top:16px;}
+.modal-alt a{color:var(--accent);}
+
+/* ---- scroll reveal ---- */
+.reveal{opacity:0;transform:translateY(22px);transition:opacity .7s var(--t),transform .7s var(--t);}
+.reveal.in{opacity:1;transform:none;}
+
+/* ---- mobile nav ---- */
+.nav-burger{display:none;margin-left:auto;background:none;border:1px solid var(--line-2);border-radius:8px;width:40px;height:38px;color:var(--ink);cursor:pointer;font-size:18px;}
+.mobile-menu{display:none;flex-direction:column;gap:4px;padding:12px 28px 20px;border-bottom:1px solid var(--line);background:var(--bg-1);}
+.mobile-menu.on{display:flex;}
+.mobile-menu a{padding:10px 0;color:var(--ink-2);font-size:15px;border-bottom:1px solid var(--line);}
+
+/* ---- personas / who it's for ---- */
+.persona-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+.persona{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--r);padding:26px;}
+.persona-tag{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);}
+.persona h3{font-size:19px;margin:8px 0 10px;font-family:var(--font);font-weight:700;letter-spacing:0;}
+.persona p{color:var(--ink-2);font-size:14px;}
+
+/* ---- proof / track record ---- */
+.proof-grid{display:grid;grid-template-columns:1.3fr .7fr;gap:30px;align-items:center;}
+.proof-card{background:var(--card-bg);border:1px solid var(--line-2);border-radius:var(--r);padding:24px;box-shadow:0 30px 70px -34px rgba(0,0,0,.5);}
+.proof-chart{width:100%;height:auto;display:block;}
+.proof-stats{display:flex;flex-direction:column;gap:16px;}
+.proof-stat{border-left:2px solid var(--accent);padding-left:16px;}
+.proof-stat b{font-family:var(--display);font-size:34px;display:block;line-height:1;}
+.proof-stat span{font-family:var(--mono);font-size:12px;color:var(--ink-3);}
+.proof-note{font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-top:18px;}
+
+/* ---- testimonials ---- */
+.quote-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+.quote{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--r);padding:26px;display:flex;flex-direction:column;gap:16px;}
+.quote-stars{color:var(--accent);font-size:14px;letter-spacing:2px;}
+.quote p{font-size:15px;color:var(--ink);line-height:1.5;font-family:var(--display);font-weight:400;}
+.quote-who{display:flex;align-items:center;gap:11px;margin-top:auto;}
+.quote-av{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:grid;place-items:center;color:var(--accent-ink);font-weight:700;font-size:14px;}
+.quote-who b{font-size:14px;display:block;}
+.quote-who span{font-family:var(--mono);font-size:11px;color:var(--ink-3);}
+.logos{display:flex;justify-content:center;align-items:center;gap:34px;flex-wrap:wrap;margin-top:40px;opacity:.6;}
+.logos span{font-family:var(--display);font-weight:700;font-size:18px;color:var(--ink-3);letter-spacing:-.01em;}
+
+/* ---- compare vs alternatives ---- */
+.versus{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;}
+.vs-col{padding:0;}
+.vs-col.kairos{background:color-mix(in oklab,var(--accent) 7%,transparent);}
+.vs-head{padding:18px 20px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-align:center;color:var(--ink-2);}
+.vs-col.kairos .vs-head{color:var(--accent);font-weight:700;}
+.vs-row{padding:13px 20px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-2);display:flex;gap:8px;align-items:flex-start;min-height:46px;}
+.vs-row .ic{flex:none;}
+.vs-yes{color:var(--accent-2);} .vs-no{color:var(--ink-3);}
+
+/* ---- FAQ ---- */
+.faq-list{max-width:780px;margin:0 auto;display:flex;flex-direction:column;gap:0;}
+.faq-item{border-bottom:1px solid var(--line);}
+.faq-q{width:100%;text-align:left;background:none;border:none;color:var(--ink);font-family:var(--font);font-size:16px;font-weight:600;padding:20px 0;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:16px;}
+.faq-q .pm{color:var(--accent);font-size:22px;transition:transform .25s;flex:none;}
+.faq-item.open .pm{transform:rotate(45deg);}
+.faq-a{max-height:0;overflow:hidden;transition:max-height .3s var(--t);color:var(--ink-2);font-size:14.5px;}
+.faq-a div{padding:0 0 20px;}
+
+/* ---- risk band ---- */
+.riskband{border:1px solid var(--line-2);border-radius:var(--r);padding:20px 24px;display:flex;gap:16px;align-items:flex-start;margin-top:36px;background:var(--bg-2);}
+.riskband .ico{flex:none;color:var(--accent);}
+.riskband p{font-size:13px;color:var(--ink-2);}
+.riskband b{color:var(--ink);}
+
+/* ---- guarantee + newsletter ---- */
+.guarantee{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--ink-2);margin-top:18px;justify-content:center;}
+.guarantee .ck{color:var(--accent-2);}
+.news{display:flex;gap:10px;max-width:420px;margin:22px auto 0;}
+.news input{flex:1;background:var(--bg-2);border:1px solid var(--line-2);border-radius:var(--pill-r);padding:12px 16px;color:var(--ink);font-family:var(--font);font-size:14px;outline:none;}
+.news input:focus{border-color:var(--accent);}
+
+@media(max-width:900px){
+  .nav-burger{display:block;}
+  .persona-grid,.proof-grid,.quote-grid,.versus{grid-template-columns:1fr;}
+  .versus{border:none;}.vs-col{border:1px solid var(--line);border-radius:var(--r);margin-bottom:12px;}
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav"><div class="wrap nav-in">
+  <div class="logo"><span class="logo-mark">K</span> Kairos</div>
+  <div class="nav-links">
+    <a href="#features">Platform</a>
+    <a href="#proof">Proof</a>
+    <a href="#how">How it works</a>
+    <a href="#pricing">Pricing</a>
+    <a href="#faq">FAQ</a>
+  </div>
+  <div class="nav-right">
+    <button class="btn btn-ghost" onclick="openLogin()">Log in</button>
+    <button class="btn btn-primary" onclick="openLogin()">Start free</button>
+  </div>
+  <button class="nav-burger" onclick="document.getElementById('mobileMenu').classList.toggle('on')">☰</button>
+</div></nav>
+<div class="mobile-menu" id="mobileMenu">
+  <a href="#features" onclick="document.getElementById('mobileMenu').classList.remove('on')">Platform</a>
+  <a href="#proof" onclick="document.getElementById('mobileMenu').classList.remove('on')">Proof</a>
+  <a href="#how" onclick="document.getElementById('mobileMenu').classList.remove('on')">How it works</a>
+  <a href="#pricing" onclick="document.getElementById('mobileMenu').classList.remove('on')">Pricing</a>
+  <a href="#faq" onclick="document.getElementById('mobileMenu').classList.remove('on')">FAQ</a>
+  <a href="#" onclick="openLogin();document.getElementById('mobileMenu').classList.remove('on');return false;">Log in</a>
+</div>
+
+<!-- HERO -->
+<header class="hero"><div class="wrap hero-grid">
+  <div>
+    <span class="eyebrow"><span class="dot"></span> Live quant engine for swing traders</span>
+    <h1 class="hero-h">Trade like a desk.<br>Not like a tab.</h1>
+    <p class="hero-sub">Kairos distills a deep market universe into a focused, edge-validated shortlist — fusing every analytical discipline, a calibrated ML engine, options analytics and book-level risk into one terminal built for serious swing traders.</p>
+    <div class="hero-cta">
+      <button class="btn btn-primary btn-lg" onclick="openLogin()">Enter the terminal →</button>
+      <a class="btn btn-ghost btn-lg" href="#features">See what's inside</a>
+    </div>
+    <div class="hero-note">No card to start · cancel anytime · paper-trading sandbox included</div>
+  </div>
+  <div class="preview">
+    <div class="preview-bar"><i></i><i></i><i></i><span class="u mono">kairos.terminal / live</span></div>
+    <div class="preview-live" id="heroPreview">
+      <div class="preview-poster" id="heroPoster">
+        <div class="poster-cta">
+          <div class="poster-eyebrow mono">KAIROS · QUANT TERMINAL</div>
+          <button class="btn btn-primary" onclick="loadLivePreview()">▶ Load live preview</button>
+          <div class="poster-note mono">opens the live terminal in paper mode</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></header>
+
+<!-- TRUST -->
+<div class="trust"><div class="wrap trust-in">
+  <div class="trust-src">Institutional-grade market data · real-time quotes &amp; options</div>
+  <div class="trust-stat"><b>Ranked daily</b><span>thousands of names → a focused shortlist</span></div>
+  <div class="trust-stat"><b>Multi-lens</b><span>every discipline in one composite bias</span></div>
+  <div class="trust-stat"><b>Calibrated AI</b><span>probabilities you can audit</span></div>
+  <div class="trust-stat"><b>3 modes</b><span>swing · position · invest</span></div>
+</div></div>
+
+<!-- FEATURES -->
+<section id="features"><div class="wrap">
+  <div class="sec-head reveal">
+    <div class="sec-tag">Who it's for</div>
+    <h2>Built for traders who treat it like a profession</h2>
+    <p>Whether you run your own book or manage capital, Kairos meets you at your level.</p>
+  </div>
+  <div class="persona-grid">
+    <div class="persona reveal">
+      <div class="persona-tag">The solo swing trader</div>
+      <h3>You're tired of tab-hopping</h3>
+      <p>TradingView in one window, a screener in another, a spreadsheet for sizing. Kairos collapses the whole workflow into one terminal that hands you a ranked shortlist and a fireable plan.</p>
+    </div>
+    <div class="persona reveal">
+      <div class="persona-tag">The serious part-timer</div>
+      <h3>You have an hour, not all day</h3>
+      <p>You can't watch the tape for eight hours. Kairos does the scanning and reconciling overnight, so your hour is spent deciding — not digging.</p>
+    </div>
+    <div class="persona reveal">
+      <div class="persona-tag">The emerging manager</div>
+      <h3>You answer for a book</h3>
+      <p>Book-level factor risk, portfolio Greeks, an optimizer and your own performance log — the institutional tooling that usually costs five figures a seat.</p>
+    </div>
+  </div>
+</div></section>
+
+<!-- FEATURES GRID -->
+<section><div class="wrap">
+  <div class="sec-head reveal">
+    <div class="sec-tag">One terminal · every discipline</div>
+    <h2>Everything a swing desk needs, in one surface</h2>
+    <p>Discovery, analysis, execution planning and risk — no more stitching together five tools and a spreadsheet.</p>
+  </div>
+  <div class="feat-grid" id="featGrid"></div>
+</div></section>
+
+<!-- SHOWCASE -->
+<section id="showcase" style="background:var(--bg-1);border-top:1px solid var(--line);border-bottom:1px solid var(--line);"><div class="wrap">
+  <div class="sec-head">
+    <div class="sec-tag">Inside the terminal</div>
+    <h2>Built by quants, for the way you actually trade</h2>
+  </div>
+  <div class="showcase">
+    <div class="showcase-txt">
+      <h3>One scan. Five conviction setups.</h3>
+      <p>Every morning Kairos ranks the universe by edge (R × Wilson LB), regime-fits it, and surfaces the handful worth your attention — each row enriched with RVOL, ML P(up), R:R, pivot distance and an earnings flag.</p>
+      <ul class="showcase-list">
+        <li><span class="ck">✓</span> Regime &amp; tape read with a multi-stage scan funnel</li>
+        <li><span class="ck">✓</span> Composite bias reconciles every lens into one read</li>
+        <li><span class="ck">✓</span> Best-ideas board: top 5 from each discovery engine</li>
+      </ul>
+    </div>
+    <div class="showcase-img"><img src="marketing/shot-home.png" alt="Kairos home scan" loading="lazy" /></div>
+  </div>
+  <div class="showcase">
+    <div class="showcase-txt">
+      <h3>An ML edge you can actually audit.</h3>
+      <p>A multi-head ensemble — direction, magnitude cone and hit-net — projects each name across swing / position / invest horizons, with calibration and feature importances shown openly. No black box.</p>
+      <ul class="showcase-list">
+        <li><span class="ck">✓</span> Annotated price projection: MAs, breakout base, forward AI zone</li>
+        <li><span class="ck">✓</span> Cross-mode disagreement flags trades vs investments</li>
+        <li><span class="ck">✓</span> Calibration &amp; feature importances shown — no black box</li>
+      </ul>
+    </div>
+    <div class="showcase-img"><img src="marketing/shot-ml.png" alt="Kairos ML predictions" loading="lazy" /></div>
+  </div>
+  <div class="showcase">
+    <div class="showcase-txt">
+      <h3>Options, priced like a desk.</h3>
+      <p>A full options cockpit — chain, Greeks and vol surface — plus a Black-Scholes profit grid that maps P&amp;L across price × time, with a manual calculator and six strategy presets from long calls to cash-secured puts.</p>
+      <ul class="showcase-list">
+        <li><span class="ck">✓</span> Daily % return grid with spot line + target band</li>
+        <li><span class="ck">✓</span> IV-shift &amp; earnings-crush stress in one click</li>
+        <li><span class="ck">✓</span> Buy/Write · Call/Put · live cost &amp; credit</li>
+      </ul>
+    </div>
+    <div class="showcase-img"><img src="marketing/shot-options.png" alt="Kairos options cockpit" loading="lazy" /></div>
+  </div>
+  <div class="showcase">
+    <div class="showcase-txt">
+      <h3>Risk at the book level, not just the ticker.</h3>
+      <p>Most tools reason one name at a time. Kairos aggregates your whole book — factor tilts, gross/net/leverage, portfolio Greeks, concentration and per-name risk contribution — then suggests optimizer weights and hedges.</p>
+      <ul class="showcase-list">
+        <li><span class="ck">✓</span> Barra-style factor exposure &amp; net/gross/β</li>
+        <li><span class="ck">✓</span> Optimizer + vol-targeting + return attribution</li>
+        <li><span class="ck">✓</span> Crowding, capacity &amp; hedge overlays</li>
+      </ul>
+    </div>
+    <div class="showcase-img"><img src="marketing/shot-bookrisk.png" alt="Kairos book risk" loading="lazy" /></div>
+  </div>
+</div></div></section>
+
+<!-- PROOF -->
+<section id="proof"><div class="wrap">
+  <div class="sec-head reveal">
+    <div class="sec-tag">Process, not promises</div>
+    <h2>A transparent method — so you can audit every call</h2>
+    <p>Kairos doesn't promise returns. It shows its work: every signal is reconciled across disciplines and tracked forward against the market, so you can judge the process yourself.</p>
+  </div>
+  <div class="proof-grid">
+    <div class="proof-card reveal">
+      <svg class="proof-chart" viewBox="0 0 600 260" fill="none">
+        <g stroke="var(--line)" stroke-width="1">
+          <line x1="0" y1="65" x2="600" y2="65"/><line x1="0" y1="130" x2="600" y2="130"/><line x1="0" y1="195" x2="600" y2="195"/>
+        </g>
+        <!-- methodology pipeline, not a performance curve -->
+        <g font-family="var(--mono)" font-size="11" fill="var(--ink-3)">
+          <circle cx="70" cy="60" r="6" fill="var(--accent)"/><text x="70" y="90" text-anchor="middle">Scan</text>
+          <circle cx="215" cy="130" r="6" fill="var(--accent)"/><text x="215" y="160" text-anchor="middle">Reconcile</text>
+          <circle cx="385" cy="100" r="6" fill="var(--accent)"/><text x="385" y="130" text-anchor="middle">Bias</text>
+          <circle cx="530" cy="160" r="6" fill="var(--accent)"/><text x="530" y="190" text-anchor="middle">Track forward</text>
+        </g>
+        <path d="M70 60 L215 130 L385 100 L530 160" stroke="var(--accent)" stroke-width="2.2" fill="none" stroke-dasharray="0"/>
+        <text x="14" y="28" font-family="var(--mono)" font-size="12" fill="var(--accent)">The Kairos pipeline</text>
+      </svg>
+    </div>
+    <div class="proof-stats reveal">
+      <div class="proof-stat"><b>Every call</b><span>logged &amp; forward-scored vs the market</span></div>
+      <div class="proof-stat"><b>Shown openly</b><span>confidence, drivers &amp; disagreement</span></div>
+      <div class="proof-stat"><b>Your data</b><span>review the method inside your account</span></div>
+      <div class="proof-note">Kairos publishes no performance claims on this page. The in-app track record reflects signals only and is not a representation of any user's actual results. Past or simulated performance does not guarantee future results.</div>
+    </div>
+  </div>
+</div></section>
+
+<!-- HOW IT WORKS -->
+<section id="how"><div class="wrap">
+  <div class="sec-head">
+    <div class="sec-tag">From open to order</div>
+    <h2>Three steps to a fireable plan</h2>
+  </div>
+  <div class="steps">
+    <div class="step"><div class="step-n">1</div><h3>Scan &amp; rank</h3><p>The engine ranks a deep universe by validated edge and regime fit, then hands you the highest-conviction setups — not a 200-row dump.</p></div>
+    <div class="step"><div class="step-n">2</div><h3>Analyze every angle</h3><p>Technicals, SMC, patterns, value, earnings, options, ML edge and risk — reconciled into one composite bias with dissenters surfaced.</p></div>
+    <div class="step"><div class="step-n">3</div><h3>Plan, size &amp; track</h3><p>A fireable bracket with live Kelly sizing, book-level risk, and a forward-scored track record so you learn what's actually working.</p></div>
+  </div>
+</div></section>
+
+<!-- COMPARE VS ALTERNATIVES -->
+<section><div class="wrap">
+  <div class="sec-head reveal">
+    <div class="sec-tag">Why one terminal wins</div>
+    <h2>Kairos vs the stack you're running now</h2>
+  </div>
+  <div class="versus reveal">
+    <div class="vs-col">
+      <div class="vs-head">Screener + charts + spreadsheet</div>
+      <div class="vs-row"><span class="ic vs-no">○</span> Manually cross-check every signal</div>
+      <div class="vs-row"><span class="ic vs-no">○</span> No reconciled bias — you arbitrate</div>
+      <div class="vs-row"><span class="ic vs-no">○</span> Sizing &amp; risk in a fragile spreadsheet</div>
+      <div class="vs-row"><span class="ic vs-no">○</span> No record of what actually worked</div>
+      <div class="vs-row"><span class="ic vs-no">○</span> 3–5 subscriptions, 5 tabs</div>
+    </div>
+    <div class="vs-col">
+      <div class="vs-head">Generic "AI stock picker"</div>
+      <div class="vs-row"><span class="ic vs-no">○</span> Black-box score, no reasoning</div>
+      <div class="vs-row"><span class="ic vs-no">○</span> No calibration or track record</div>
+      <div class="vs-row"><span class="ic vs-no">○</span> One horizon, one number</div>
+      <div class="vs-row"><span class="ic vs-no">○</span> No options or book-level risk</div>
+      <div class="vs-row"><span class="ic vs-no">○</span> Hype, not edge</div>
+    </div>
+    <div class="vs-col kairos">
+      <div class="vs-head">Kairos</div>
+      <div class="vs-row"><span class="ic vs-yes">✓</span> Every discipline reconciled automatically</div>
+      <div class="vs-row"><span class="ic vs-yes">✓</span> One composite bias, dissenters named</div>
+      <div class="vs-row"><span class="ic vs-yes">✓</span> Live Kelly sizing + book-level risk</div>
+      <div class="vs-row"><span class="ic vs-yes">✓</span> Forward-scored, verifiable track record</div>
+      <div class="vs-row"><span class="ic vs-yes">✓</span> One terminal, one login</div>
+    </div>
+  </div>
+</div></section>
+
+<!-- PRICING -->
+<section id="pricing" style="background:var(--bg-1);border-top:1px solid var(--line);border-bottom:1px solid var(--line);"><div class="wrap">
+  <div class="sec-head">
+    <div class="sec-tag">Pricing</div>
+    <h2>Start free. Scale to a full desk.</h2>
+    <p>Every plan includes the paper-trading sandbox. Upgrade when the edge pays for itself.</p>
+  </div>
+  <div class="price-toggle">
+    <span>Monthly</span>
+    <div class="tg" id="billTg" onclick="toggleBill()"></div>
+    <span>Annual</span><span class="save">save 20%</span>
+  </div>
+  <div class="price-grid" id="priceGrid"></div>
+  <div class="guarantee"><span class="ck">✓</span> 14-day money-back guarantee · cancel anytime · no card to start free</div>
+  <div class="cmp-wrap" id="cmpWrap"></div>
+  <div class="riskband reveal">
+    <span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l9 5v6c0 5-4 8-9 9-5-1-9-4-9-9V7z"/><path d="M12 8v5M12 16v.5"/></svg></span>
+    <p><b>A research tool, not investment advice.</b> Kairos surfaces analysis and probabilities to inform your own decisions. Trading involves substantial risk of loss; signals, backtests and simulated performance do not guarantee future results. The paper-trading sandbox is simulated and uses no real capital.</p>
+  </div>
+</div></section>
+
+<!-- FAQ -->
+<section id="faq"><div class="wrap">
+  <div class="sec-head reveal">
+    <div class="sec-tag">Questions, answered</div>
+    <h2>Everything you'd ask before signing up</h2>
+  </div>
+  <div class="faq-list" id="faqList"></div>
+</div></section>
+
+<!-- CTA -->
+<section><div class="wrap"><div class="cta">
+  <h2>Your edge is hiding in plain sight.<br>Kairos surfaces it.</h2>
+  <p>Join traders running a real quant desk from one terminal.</p>
+  <button class="btn btn-primary btn-lg" onclick="openLogin()">Enter the terminal →</button>
+  <div class="guarantee"><span class="ck">✓</span> Start free · 14-day money-back on any paid plan</div>
+  <form class="news" onsubmit="this.querySelector('input').value='';this.querySelector('button').textContent='Subscribed ✓';return false;">
+    <input type="email" placeholder="Get the weekly market read →" required />
+    <button class="btn btn-ghost" type="submit">Subscribe</button>
+  </form>
+</div></div></section>
+
+<!-- FOOTER -->
+<footer><div class="wrap">
+  <div class="foot-in">
+    <div class="logo"><span class="logo-mark">K</span> Kairos</div>
+    <div class="foot-links">
+      <a href="#features">Platform</a><a href="#pricing">Pricing</a><a href="#how">How it works</a>
+      <a href="#" onclick="openLogin();return false;">Log in</a>
+    </div>
+  </div>
+  <p class="foot-dis">Kairos is a research &amp; analytical software tool that provides impersonal, non-personalized market information and is <b>not a registered investment adviser, broker-dealer, or financial planner</b>. Nothing on this site or in the product is investment, legal, or tax advice, or a recommendation to buy or sell any security. All output is informational and identical for every user. Trading involves substantial risk of loss and is not suitable for everyone. Any signals, scores, backtests, or simulated results are hypothetical, do not reflect actual trading, and do not guarantee future results. The paper-trading sandbox is simulated and uses no real capital. You are solely responsible for your own decisions. © Kairos.</p>
+</div></footer>
+
+<!-- LOGIN MODAL -->
+<div class="modal-bg" id="loginModal" onclick="if(event.target===this)closeLogin()">
+  <div class="modal">
+    <button class="modal-x" onclick="closeLogin()">✕</button>
+    <h3>Welcome back</h3>
+    <p>Log in to your Kairos terminal.</p>
+    <label>Email</label>
+    <input type="email" placeholder="you@desk.com" />
+    <label>Password</label>
+    <input type="password" placeholder="••••••••" />
+    <a class="btn btn-primary" href="#" onclick="return gotoTerminal('login')">Log in →</a>
+    <div class="modal-alt">New here? <a href="#" onclick="return gotoTerminal('signup')">Start your free trial</a></div>
+  </div>
+</div>
+
+<script>
+/* ---- terminal handoff ----
+   Single config point for the app URL. Local/prototype: sibling Stocksmith.html.
+   Production: swap TERMINAL_URL to the auth-gated route (e.g. "/app") and replace
+   gotoTerminal() with a real Supabase Auth flow that redirects post-login,
+   carrying the same ?from / ?welcome / ?plan params. */
+const TERMINAL_URL = "Stocksmith.html";
+let intendedPlan = null;                 // set by pricing buttons → carried into signup
+function terminalHref(mode){
+  const p = new URLSearchParams();
+  if(mode==='signup'){ p.set('welcome','1'); } else { p.set('from','login'); }
+  if(intendedPlan){ p.set('plan', intendedPlan); }
+  const q = p.toString();
+  return TERMINAL_URL + (q ? ('?'+q) : '');
+}
+function gotoTerminal(mode){ window.location.href = terminalHref(mode); return false; }
+function loadLivePreview(){
+  const host=document.getElementById('heroPreview'); if(!host) return;
+  host.innerHTML='<iframe src="'+TERMINAL_URL+'" title="Kairos terminal — live preview" loading="lazy" scrolling="no"></iframe>';
+}
+
+/* ---- features ---- */
+const ICONS={
+  scan:'<path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/>',
+  ml:'<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8 11l8-4M8 13l8 4"/>',
+  opt:'<path d="M3 17l5-5 4 3 7-8"/><path d="M16 4h5v5"/>',
+  risk:'<path d="M12 2l9 5v6c0 5-4 8-9 9-5-1-9-4-9-9V7z"/>',
+  pat:'<path d="M3 16l4-6 4 4 5-9 5 7"/>',
+  book:'<path d="M4 4h16v16H4z"/><path d="M4 9h16M9 9v11"/>',
+  ai:'<path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><circle cx="12" cy="12" r="4"/>',
+  flow:'<path d="M3 12h6l3-8 4 16 2-8h3"/>',
+  kairos:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+  chk:'<path d="M9 11l3 3 8-8"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  bt:'<path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 5-7"/>',
+  rp:'<circle cx="12" cy="12" r="9"/><path d="M10 9l5 3-5 3z"/>'
+};
+const FEATURES=[
+  ['scan','Signal Scanner','A deep universe ranked by validated edge and regime fit — EDGE letter grades, READY flags, and segments: Top Picks, Fresh, Surges, AI Edge and more.','Discovery'],
+  ['ml','ML Predictions','A multi-head ensemble (direction · magnitude · hit-net) across three horizons, with calibration and feature importances shown openly.','Calibrated AI'],
+  ['pat','Patterns · every theory','Wyckoff, Elliott, Fibonacci, Volume Profile, SMC, harmonics and more — fused into one weighted confluence engine.','Structure'],
+  ['opt','Options Cockpit','Dealer GEX map, chain, Greeks, vol surface, and a Black-Scholes profit grid with a manual calculator and strategy presets.','Execution'],
+  ['risk','Risk &amp; Book Risk','Loss cones, live Kelly, VaR/CVaR, factor tilts, portfolio Greeks, optimizer, crowding and hedge overlays.','Survival'],
+  ['ai','Composite Bias','Every lens reconciled into one 0–100 Bullish / Neutral / Bearish read with a written thesis and the dissenting lenses named — never a silent black box.','Decision'],
+  ['chk','Entry Checklist','A go / no-go gate cascade — every condition must pass before the bracket fires, with honest fill realism on the ticket.','Discipline'],
+  ['flow','Tape &amp; Flow','News, insider transactions, sentiment, 13F holders and a catalyst calendar — with an AI catalyst classifier — in one event tape.','Context'],
+  ['bt','Strategy Backtester','Replay any setup family over real history: win rate, profit factor, max drawdown, average R and an equity curve, slippage-haircut applied.','Validation'],
+  ['rp','Replay Practice','Step real historical bars one at a time and place paper entries to build pattern-reading skill — no live money.','Practice'],
+  ['book','Track Record','Every signal logged and tracked forward so you can review the method over time — inside your own account.','Accountability'],
+  ['kairos','Ask Kairos','An embedded analyst that reads the full cross-lens dossier of any open ticker and explains the read in plain language.','Copilot'],
+];
+document.getElementById('featGrid').innerHTML=FEATURES.map(f=>`
+  <div class="feat">
+    <div class="feat-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[f[0]]}</svg></div>
+    <h3>${f[1]}</h3><p>${f[2]}</p><div class="tagline">${f[3]}</div>
+  </div>`).join('');
+
+/* ---- pricing ---- */
+const TIERS=[
+  {name:'Free',price:0,d:'Prove the edge to yourself.',pop:false,feat:['Daily ranked scan — top 5','Core technical + pattern lenses','Paper-trading sandbox + P&L','1 portfolio · 3 watchlists','Composite bias (read-only)']},
+  {name:'Starter',price:19,d:'Real signals, real time.',pop:false,feat:['Everything in Free','Real-time alerts (push + email)','ML signal score (1–5 confidence)','Sector rotation + regime read','Basic options-flow feed']},
+  {name:'Core',price:49,d:'The full intelligence layer.',pop:true,feat:['Everything in Starter','Every lens + ML Predictions','Composite bias + thesis + dissenters','Options cockpit + profit calculator','Kelly sizing + stress scenarios','Ask Kairos copilot']},
+  {name:'Pro',price:149,d:'Depth for the dedicated.',pop:false,feat:['Everything in Core','Book Risk: factor · Greeks · optimizer','Automated Trade + execution blotter','Signal track record + calibration','Multi-portfolio + API access †','Priority real-time delivery']},
+  {name:'Elite',price:330,d:'Institutional, retail-accessible.',pop:false,feat:['Everything in Pro','Multi-account aggregation','Custom ML fine-tuning †','Prop-firm / allocator connect †','Team seats (3) + data export †','Dedicated account manager']},
+];
+let annual=false;
+function renderPrice(){
+  document.getElementById('priceGrid').innerHTML=TIERS.map(t=>{
+    const price=t.price===0?'Free':'$'+(annual?Math.round(t.price*0.8):t.price);
+    return `<div class="tier ${t.pop?'pop':''}">
+      <div class="tier-name">${t.name}</div>
+      <div class="tier-price">${price}${t.price?'<small>/mo</small>':''}</div>
+      <div class="tier-desc">${t.d}${annual&&t.price?' <span class="mono" style="color:var(--accent-2);font-size:11px;">billed annually</span>':''}</div>
+      <ul class="tier-feat">${t.feat.map(f=>`<li><span class="ck">✓</span> ${f}</li>`).join('')}</ul>
+      <button class="btn ${t.pop?'btn-primary':'btn-ghost'}" onclick="openLogin('${t.name.toLowerCase()}')">${t.price?(t.pop?'Start free trial':'Choose '+t.name):'Start free'}</button>
+    </div>`;
+  }).join('');
+}
+function toggleBill(){annual=!annual;document.getElementById('billTg').classList.toggle('on',annual);renderPrice();
+  const sv=document.querySelector('.save');if(sv)sv.textContent=annual?'saving 20% · ~$120/yr on Core':'save 20%';}
+renderPrice();
+
+/* ---- full comparison matrix ---- */
+const CMP=[
+  ['Signals & Alerts',[
+    ['Daily ranked scan (top 5)',[1,1,1,1,1]],
+    ['Real-time alerts (push/email)',[0,1,1,1,1]],
+    ['ML confidence score (1–5)',[0,1,1,1,1]],
+    ['Full ML Predictions (multi-head)',[0,0,1,1,1]],
+    ['Full composite bias + thesis',[0,0,1,1,1]],
+    ['Priority real-time delivery',[0,0,0,1,1]],
+  ]],
+  ['Analytics',[
+    ['Paper-trading + P&L',[1,1,1,1,1]],
+    ['Options cockpit + profit grid',[0,0,1,1,1]],
+    ['Kelly sizing + stress scenarios',[0,0,1,1,1]],
+    ['Book Risk (factor · Greeks · optimizer)',[0,0,0,1,1]],
+    ['Custom ML fine-tuning †',[0,0,0,0,1]],
+  ]],
+  ['Identity & Access',[
+    ['Watchlists',['3','10','∞','∞','∞']],
+    ['Signal track record (in-app)',[0,0,0,1,1]],
+    ['Automated Trade + blotter',[0,0,0,1,1]],
+    ['Multi-account + data export †',[0,0,0,0,1]],
+    ['Team seats',['1','1','1','1','3']],
+    ['Dedicated account manager',[0,0,0,0,1]],
+  ]],
+];
+const ckSvg='<svg viewBox="0 0 14 14" width="14" height="14" fill="none"><circle cx="7" cy="7" r="7" fill="var(--accent)" fill-opacity="0.16"/><path d="M4 7l2 2 4-4" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+document.getElementById('cmpWrap').innerHTML=`
+  <div class="cmp">
+    <div class="cmp-h"><span class="mono">FULL COMPARISON</span><span class="mono dim">Free · Starter · Core · Pro · Elite</span></div>
+    <div class="cmp-row cmp-row--head"><div></div>${TIERS.map(t=>`<div class="cmp-tier">${t.name}</div>`).join('')}</div>
+    ${CMP.map(sec=>`
+      <div class="cmp-cat">${sec[0]}</div>
+      ${sec[1].map(row=>`<div class="cmp-row"><div class="cmp-feat">${row[0]}</div>${row[1].map((v,i)=>`<div class="cmp-cell${i===2?' cmp-cell--pop':''}">${typeof v==='string'?`<span class="cmp-txt mono">${v}</span>`:v?ckSvg:'<span class="cmp-dash"></span>'}</div>`).join('')}</div>`).join('')}
+    `).join('')}
+    <div class="cmp-foot mono">† On the roadmap — not yet live in the terminal. Every other capability ships today.</div>
+  </div>`;
+
+/* ---- login modal ---- */
+function openLogin(plan){ if(plan) intendedPlan=plan; document.getElementById('loginModal').classList.add('on'); }
+function closeLogin(){document.getElementById('loginModal').classList.remove('on');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeLogin();});
+
+/* ---- FAQ ---- */
+const FAQ=[
+  ['Is Kairos giving me financial advice?','No. Kairos is a research and analysis tool. It surfaces signals, probabilities and risk so you can make your own informed decisions. Nothing here is a recommendation to buy or sell any security.'],
+  ['Where does the data come from?','Institutional-grade market data providers supply fundamentals, real-time quotes and options chains. The paper-trading sandbox is fully simulated and uses no real money.'],
+  ['Do I need to connect a brokerage?','Not to start. You can run the full analysis and paper-trade with no account linked. Brokerage connection is optional and only needed if you later want live execution features.'],
+  ['What\'s the difference between the plans?','Free gives you the daily ranked scan and sandbox. Paid tiers progressively unlock the full lens stack, ML predictions, options analytics, book-level risk and your verified track record. The full matrix is above.'],
+  ['Can I cancel anytime?','Yes — cancel in one click, no questions. Paid plans also carry a 14-day money-back guarantee, so you can try the full terminal risk-free.'],
+  ['Is this for day trading or long-term investing?','Kairos is built for swing and position trading, with three holding-period modes (swing / position / invest) so the targets, risk and ML horizon adapt to how long you hold.'],
+  ['Will it work if I\'m not technical?','Yes. The composite bias distils everything into one Bullish / Neutral / Bearish read with plain-language reasoning, and Ask Kairos explains any number on screen. The depth is there when you want it, hidden when you don\'t.'],
+  ['How is the ML different from other "AI" tools?','It\'s calibrated and auditable — you see the probability, the confidence interval, the feature drivers, and where the model disagrees with itself across horizons. No single black-box score.'],
+];
+document.getElementById('faqList').innerHTML=FAQ.map((f,i)=>`
+  <div class="faq-item">
+    <button class="faq-q" onclick="toggleFaq(${i})">${f[0]}<span class="pm">+</span></button>
+    <div class="faq-a" id="faq${i}"><div>${f[1]}</div></div>
+  </div>`).join('');
+function toggleFaq(i){
+  const item=document.querySelectorAll('.faq-item')[i];
+  const a=document.getElementById('faq'+i);
+  const open=item.classList.toggle('open');
+  a.style.maxHeight=open?a.scrollHeight+'px':'0';
+}
+
+/* ---- scroll reveal ---- */
+const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}})},{threshold:.12});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+/* safety: never leave content stuck hidden (e.g. no-IO env or fast scroll) */
+setTimeout(()=>{document.querySelectorAll('.reveal:not(.in)').forEach(el=>{const r=el.getBoundingClientRect();if(r.top<window.innerHeight)el.classList.add('in');});},900);
+window.addEventListener('load',()=>document.querySelectorAll('.reveal:not(.in)').forEach(el=>{const r=el.getBoundingClientRect();if(r.top<window.innerHeight+40)el.classList.add('in');}));
+</script>
+</body>
+</html>
