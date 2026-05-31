@@ -11000,12 +11000,27 @@ window.AiExplain = AiExplain;
 
 // ── Fill Realism — honest paper fills (next-bar open + spread + slippage) ──
 function FillRealism({ ticker, sizeMult }) {
+  // Live NBBO half-spread via /api/live/quote (Schwab bid/ask); heuristic fallback.
+  const [q, setQ] = useState(null);
+  useEffect(() => {
+    if (typeof fetch === "undefined" || !ticker.symbol) return;
+    let alive = true;
+    fetch(`/api/live/quote?tickers=${encodeURIComponent(ticker.symbol)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { if (alive && j && j.quotes && j.quotes[ticker.symbol]) setQ(j.quotes[ticker.symbol]); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [ticker.symbol]);
   const shares = Math.round(110 * (sizeMult || 1));
   const signal = ticker.pivot * 1.002;
   const code = (ticker.symbol?.charCodeAt(0) || 70) + (ticker.symbol?.charCodeAt(1) || 70);
-  const gapBps = 5 + (code % 6);
-  const spreadBps = 3 + (code % 5);
-  const slipBps = 5 + (code % 7);
+  // real half-spread (bps) from NBBO when present; else heuristic
+  const bid = q && (q.bid ?? q.bidPrice), ask = q && (q.ask ?? q.askPrice);
+  const liveHalfBps = (bid > 0 && ask > 0 && ask > bid) ? ((ask - bid) / ((ask + bid) / 2) * 1e4 / 2) : null;
+  const spreadSrc = liveHalfBps != null ? "live NBBO" : "pay the offer";
+  const gapBps = 5 + (code % 6);            // next-bar open drift — historical-stat assumption
+  const spreadBps = liveHalfBps != null ? Math.max(1, Math.round(liveHalfBps)) : (3 + (code % 5));
+  const slipBps = 5 + (code % 7);           // ADV/size impact — modelled
   const nextOpen = signal * (1 + gapBps / 1e4);
   const halfSpread = signal * spreadBps / 1e4;
   const slip = signal * slipBps / 1e4;
@@ -11023,7 +11038,7 @@ function FillRealism({ ticker, sizeMult }) {
   const steps = [
     { l: "Signal", v: `$${signal.toFixed(2)}`, s: "plan price", tone: "ink" },
     { l: "Next-bar open", v: `+${gapBps}bp`, s: "stop-buy triggers", tone: "amb", add: true },
-    { l: "½ spread", v: `+${spreadBps}bp`, s: "pay the offer", tone: "amb", add: true },
+    { l: "½ spread", v: `+${spreadBps}bp`, s: spreadSrc, tone: "amb", add: true },
     { l: "Slippage", v: `+${slipBps}bp`, s: "market impact", tone: "amb", add: true },
     { l: "Realistic fill", v: `$${fill.toFixed(2)}`, s: `${slipPct >= 0 ? "+" : ""}${slipPct.toFixed(2)}%`, tone: "rd", strong: true },
   ];
@@ -11232,7 +11247,8 @@ window.NewsCatalysts = NewsCatalysts;
 
 // ── Bar-Replay practice — step bars, place paper entries (educational) ──
 function ReplayPractice({ ticker }) {
-  const bars = useMemo(() => {
+  // Real daily bars via /api/ohlcv; deterministic seeded bars as fallback.
+  const seeded = useMemo(() => {
     const code = (ticker.symbol?.charCodeAt(0) || 70) + (ticker.symbol?.charCodeAt(1) || 70);
     const rnd = (() => { let s = code * 9301 + 49297; return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; }; })();
     let p = ticker.price * 0.82; const out = [];
@@ -11246,8 +11262,26 @@ function ReplayPractice({ ticker }) {
     }
     return out;
   }, [ticker]);
+  const [real, setReal] = useState(null);
+  useEffect(() => {
+    if (typeof fetch === "undefined" || !ticker.symbol) return;
+    let alive = true;
+    fetch(`/api/ohlcv/${encodeURIComponent(ticker.symbol)}?days=110&tf=1D`)
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        if (!alive || !j) return;
+        const c = Array.isArray(j.candles) ? j.candles : [];
+        const mapped = c.filter(b => b && b.close != null)
+          .map(b => ({ o: +(+b.open).toFixed(2), h: +(+b.high).toFixed(2), l: +(+b.low).toFixed(2), c: +(+b.close).toFixed(2) }));
+        if (mapped.length >= 50) setReal(mapped.slice(-90));
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [ticker.symbol]);
+  const bars = (real && real.length >= 50) ? real : seeded;
+  const isReal = bars === real;
 
-  const START = 28;
+  const START = Math.min(28, Math.max(10, Math.floor(bars.length * 0.35)));
   const [idx, setIdx] = useState(START);
   const [playing, setPlaying] = useState(false);
   const [entry, setEntry] = useState(null);
@@ -11339,37 +11373,66 @@ function ReplayPractice({ ticker }) {
           ))}
         </div>
       )}
-      <div className="rp-foot mono dim2">Practice only — hindsight on past bars to build pattern-reading skill. Not advice; results don't predict the future.</div>
+      <div className="rp-foot mono dim2">{isReal ? `Real daily bars (${ticker.symbol} · EODHD /api/ohlcv).` : "Illustrative bars (live OHLCV unavailable)."} Practice only — hindsight on past bars to build pattern-reading skill. Not advice; results don't predict the future.</div>
     </div>
   );
 }
 window.ReplayPractice = ReplayPractice;
 
 // ── Dealer GEX panel — net dealer gamma by strike + plain-English read ──
+function finishGex(spot, rows) {
+  let maxPain = rows[0].k, minPay = Infinity;
+  rows.forEach(r => { let p = 0; rows.forEach(s => { p += Math.max(0, r.k - s.k) * s.callOI + Math.max(0, s.k - r.k) * s.putOI; }); if (p < minPay) { minPay = p; maxPain = r.k; } });
+  const callWall = rows.reduce((a, b) => b.callOI > a.callOI ? b : a).k;
+  const putWall = rows.reduce((a, b) => b.putOI > a.putOI ? b : a).k;
+  let flip = spot; for (let i = 1; i < rows.length; i++) { if ((rows[i - 1].net < 0) !== (rows[i].net < 0)) { flip = rows[i].k; break; } }
+  const total = +rows.reduce((a, b) => a + b.net, 0).toFixed(2);
+  return { rows, maxPain, callWall, putWall, flip, total };
+}
 function OtkGEX({ o }) {
+  // Real Schwab chain (OI × γ) via /api/options/{sym}; deterministic model as fallback.
+  const [chain, setChain] = useState(null);
+  useEffect(() => {
+    if (typeof fetch === "undefined" || !o.sym) return;
+    let alive = true;
+    fetch(`/api/options/${encodeURIComponent(o.sym)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { if (alive && j && !j.error && Array.isArray(j.expirations) && j.expirations.length) setChain(j); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [o.sym]);
   const g = useMemo(() => {
+    const k = 4e-6;
+    // ── real chain: front expiration with OI on both sides ──
+    if (chain && Array.isArray(chain.expirations) && chain.expirations.length) {
+      const spot = chain.spot || o.spot;
+      const ex = chain.expirations[0];
+      const rows = (ex.strikes || [])
+        .filter(s => s.strike != null)
+        .map(s => {
+          const cg = (s.call && s.call.gamma) || 0, pg = (s.put && s.put.gamma) || 0;
+          const coi = (s.call && s.call.oi) || 0, poi = (s.put && s.put.oi) || 0;
+          const net = +(((-coi * cg) + (poi * pg)) * spot * spot * k).toFixed(2);
+          return { k: Math.round(s.strike), callOI: coi, putOI: poi, net };
+        });
+      const totalOI = rows.reduce((a, b) => a + b.callOI + b.putOI, 0);
+      if (rows.length >= 5 && totalOI > 0) return { ...finishGex(spot, rows), _real: true };
+    }
+    // ── deterministic model fallback (no chain / market closed) ──
     const spot = o.spot;
     const step = Math.max(1, Math.round(spot * 0.025));
     const atmK = Math.round(spot / step) * step;
     const rows = [];
     for (let i = -5; i <= 5; i++) {
-      const k = atmK + i * step;
-      const dist = (k - spot) / spot;
+      const kk = atmK + i * step;
+      const dist = (kk - spot) / spot;
       const callOI = Math.round(4600 * Math.exp(-Math.pow((dist - 0.025) * 8, 2)) + 90);
       const putOI = Math.round(6200 * Math.exp(-Math.pow((dist + 0.035) * 8, 2)) + 90);
       const gamma = Math.exp(-Math.pow(dist * 7, 2)) * 0.09;
-      const callGEX = -callOI * gamma * spot * spot * 4e-6;
-      const putGEX = putOI * gamma * spot * spot * 4e-6;
-      rows.push({ k, callOI, putOI, net: +(callGEX + putGEX).toFixed(2) });
+      rows.push({ k: kk, callOI, putOI, net: +(((-callOI * gamma) + (putOI * gamma)) * spot * spot * k).toFixed(2) });
     }
-    let maxPain = rows[0].k, minPay = Infinity;
-    rows.forEach(r => { let p = 0; rows.forEach(s => { p += Math.max(0, r.k - s.k) * s.callOI + Math.max(0, s.k - r.k) * s.putOI; }); if (p < minPay) { minPay = p; maxPain = r.k; } });
-    const callWall = rows.reduce((a, b) => b.callOI > a.callOI ? b : a).k;
-    const putWall = rows.reduce((a, b) => b.putOI > a.putOI ? b : a).k;
-    let flip = spot; for (let i = 1; i < rows.length; i++) { if ((rows[i - 1].net < 0) !== (rows[i].net < 0)) { flip = rows[i].k; break; } }
-    const total = +rows.reduce((a, b) => a + b.net, 0).toFixed(2);
-    return { rows, maxPain, callWall, putWall, flip, total };
-  }, [o]);
+    return { ...finishGex(spot, rows), _real: false };
+  }, [o, chain]);
 
   const W = 720, H = 220, padL = 16, padR = 16, padT = 16, padB = 30;
   const n = g.rows.length, bw = (W - padL - padR) / n;
@@ -11389,7 +11452,7 @@ Flip level (calm-vs-volatile switch): $${g.flip}
 Magnet by Friday / max pain: $${g.maxPain}`;
   return (
     <div className="otk-card otk-card--wide">
-      <div className="otk-card-h mono">DEALER GAMMA (GEX) · by strike · <span className="dim2">computed from chain OI × γ</span></div>
+      <div className="otk-card-h mono">DEALER GAMMA (GEX) · by strike · <span className="dim2">{g._real ? "Schwab chain · OI × γ" : "model OI × γ (chain unavailable)"}</span></div>
       <div className="otk-gex-kpis">
         <div className="otk-gex-kpi"><span className="mono dim2">NET GEX</span><span className={`mono otk-gex-kv ${pos ? "up" : "dn"}`}>{pos ? "+" : "−"}${Math.abs(g.total).toFixed(1)}mm</span><span className="mono dim2" style={{ fontSize: 8 }}>{pos ? "stabilizing" : "amplifying"}</span></div>
         <div className="otk-gex-kpi"><span className="mono dim2">γ-FLIP</span><span className="mono otk-gex-kv warn">${g.flip}</span></div>
@@ -11503,7 +11566,23 @@ function StrategyBacktester({ sleeves }) {
   const [riskPct, setRiskPct] = useState(1.0);
   const [res, setRes] = useState(null);
 
-  const run = () => {
+  const run = async () => {
+    // ── real: replay this setup's CLOSED trades from signal_log (server) ──
+    try {
+      const r = await fetch(`/api/setup-backtest?setup=${encodeURIComponent(strat)}&min_score=${minScore}&days=365`);
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.ok && j.n >= 8) {
+          setRes({
+            n: j.n, winRate: j.winRate, pf: j.pf, avgR: j.avgR,
+            totalPct: +(j.totalR * riskPct).toFixed(1), ddPct: +(j.maxDD * riskPct).toFixed(1),
+            eq: j.eq, strat: j.setup, hold, minScore, riskPct, real: true,
+          });
+          return;
+        }
+      }
+    } catch (e) { /* fall through to simulation */ }
+    // ── fallback: simulated path seeded from real per-sleeve stats ──
     const s = list.find(x => x.k === strat) || list[0];
     const sN = s.n != null ? s.n : 40, sWr = s.wr != null ? s.wr : 52, sMedR = s.medR != null ? s.medR : 0.5;
     let seed = (String(strat).length * 131 + hold * 7 + minScore * 3 + Math.round(riskPct * 10)) | 0;
@@ -11525,7 +11604,7 @@ function StrategyBacktester({ sleeves }) {
     setRes({
       n, winRate: +(wins / n * 100).toFixed(0), pf: gL > 0 ? +(gW / gL).toFixed(2) : 99,
       avgR: +(cumR / n).toFixed(2), totalPct: +(cumR * riskPct).toFixed(1), ddPct: +(maxDD * riskPct).toFixed(1),
-      eq, strat: s.k, hold, minScore, riskPct,
+      eq, strat: s.k, hold, minScore, riskPct, real: false,
     });
   };
 
@@ -11568,7 +11647,9 @@ Trades: ${res.n}. Win rate: ${res.winRate}%. Profit factor: ${res.pf}. Total ret
           </div>
           <BtEquity eq={res.eq} />
           {window.AiExplain && <AiExplain build={aiPrompt} label="Explain this result" />}
-          <div className="bt-foot mono dim2">Hypothetical past performance on simulated history — does <b>not</b> predict future results. Informational / educational only, not advice.</div>
+          <div className="bt-foot mono dim2">{res.real
+            ? <React.Fragment>Replayed <b>{res.n}</b> actual <b>closed</b> trades for {res.strat} from the signal log (R = realized P&amp;L ÷ stop-risk). Past results don't predict the future. Informational only, not advice.</React.Fragment>
+            : <React.Fragment>No closed-trade history for this filter — showing a path <b>simulated</b> from this sleeve's real win-rate/PF/avg-R. Does <b>not</b> predict future results. Informational only, not advice.</React.Fragment>}</div>
         </React.Fragment>
       ) : <div className="bt-empty mono dim2">Pick a rule and press <b>Run backtest</b> to see how it would have performed on past data.</div>}
     </div>
@@ -11595,6 +11676,222 @@ function BtEquity({ eq }) {
   );
 }
 window.BtEquity = BtEquity;
+
+/* ════════════════════════════════════════════════════════════════
+   OPTIONS — intent-first decision layer (hand-ported from
+   options_redesign_v1.html · Appendix of HANDOVER_new_features.md).
+   ① INTENT → ③ STRUCTURE → ④ REALITY. Stocksmith's existing GEX +
+   Vol-Regime + Expected-Move sections serve as ② CONTEXT; the chain /
+   greeks / strategy-matrix sections serve as ⑤ ADVANCED. Paper-only.
+   ──────────────────────────────────────────────────────────────── */
+(function () {
+  const css = `
+  .opx-step{padding:14px 0 4px;}
+  .opx-step-h{display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap;}
+  .opx-step-n{font:700 11px var(--mono);color:#0c130f;background:var(--copper);border-radius:999px;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;}
+  .opx-step-t{font-size:14px;font-weight:600;letter-spacing:0.03em;}
+  .opx-intent{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+  @media(max-width:760px){.opx-intent{grid-template-columns:repeat(2,1fr);}}
+  .opx-intent-btn{display:flex;flex-direction:column;gap:5px;align-items:flex-start;padding:14px;cursor:pointer;text-align:left;background:var(--glass-bg-1);border:1px solid var(--glass-line);border-radius:var(--r-3);color:var(--ink-1);}
+  .opx-intent-btn:hover{border-color:color-mix(in oklab,var(--copper) 50%,transparent);}
+  .opx-intent-btn.is-on{border-color:var(--copper);background:color-mix(in oklab,var(--copper) 9%,transparent);box-shadow:0 0 0 1px var(--copper) inset;}
+  .opx-intent-ic{font-size:20px;}.opx-intent-l{font-size:14px;font-weight:700;}.opx-intent-d{font-size:11px;color:var(--ink-2);line-height:1.4;}
+  .opx-intent-sug{font:700 8.5px var(--mono);letter-spacing:0.08em;color:var(--copper);}
+  .opx-struct{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  @media(max-width:760px){.opx-struct{grid-template-columns:1fr;}}
+  .opx-struct-card{position:relative;display:flex;flex-direction:column;gap:7px;padding:14px;cursor:pointer;text-align:left;background:var(--glass-bg-1);border:1px solid var(--glass-line);border-radius:var(--r-3);color:var(--ink-1);}
+  .opx-struct-card:hover{border-color:color-mix(in oklab,var(--copper) 45%,transparent);}
+  .opx-struct-card.is-on{border-color:var(--copper);background:color-mix(in oklab,var(--copper) 8%,transparent);}
+  .opx-struct-rec{position:absolute;top:-9px;left:12px;font:700 8px var(--mono);letter-spacing:0.1em;color:#0c130f;background:var(--copper);border-radius:3px;padding:2px 7px;}
+  .opx-struct-name{font-size:14px;font-weight:700;}.opx-struct-when{font-size:11px;color:var(--ink-2);line-height:1.45;}
+  .opx-struct-legs{display:flex;flex-wrap:wrap;gap:5px;}
+  .opx-struct-leg{font:600 10.5px var(--mono);padding:2px 7px;border-radius:4px;}
+  .opx-struct-leg.buy{color:var(--gn);background:var(--gn-bg);}.opx-struct-leg.sell{color:var(--rd);background:var(--rd-bg);}
+  .opx-struct-mini{display:flex;gap:12px;font-size:10.5px;color:var(--ink-2);}
+  .opx-reality{display:grid;grid-template-columns:1.1fr 1fr;gap:12px;}
+  @media(max-width:900px){.opx-reality{grid-template-columns:1fr;}}
+  .opx-rcard{background:var(--glass-bg-1);border:1px solid var(--glass-line);border-radius:var(--r-3);padding:13px 15px;display:flex;flex-direction:column;gap:9px;}
+  .opx-rcard-h{font:600 10px var(--mono);letter-spacing:0.14em;color:var(--ink-2);}
+  .opx-payoff-svg{background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);display:block;}
+  .opx-rkpis{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;}
+  .opx-rkpi{background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);padding:8px 9px;display:flex;flex-direction:column;gap:2px;}
+  .opx-rkpi-v{font-size:15px;font-weight:700;}
+  .opx-fill-flow{display:flex;align-items:stretch;flex-wrap:wrap;gap:6px;}
+  .opx-fill-step{display:flex;flex-direction:column;gap:1px;padding:6px 10px;min-width:84px;background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);}
+  .opx-fill-step.is-strong{border-color:color-mix(in oklab,var(--rd) 45%,transparent);background:color-mix(in oklab,var(--rd) 8%,transparent);}
+  .opx-fill-l{font-size:9px;letter-spacing:0.05em;text-transform:uppercase;color:var(--ink-3);}
+  .opx-fill-v{font-size:13px;font-weight:700;}
+  .opx-fill-arrow{display:flex;align-items:center;color:var(--ink-3);font-weight:700;}
+  .opx-whathappens{font-size:13px;line-height:1.6;color:var(--ink-1);padding:11px 12px;background:color-mix(in oklab,var(--copper) 8%,transparent);border:1px solid color-mix(in oklab,var(--copper) 26%,transparent);border-radius:var(--r-2);}
+  .opx-actions{display:flex;gap:6px;flex-wrap:wrap;}
+  .opx-jr{width:100%;background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);color:var(--ink);font-family:var(--mono);font-size:11px;padding:8px 10px;min-height:54px;resize:vertical;}`;
+  if (!document.getElementById("opx-css")) { const s = document.createElement("style"); s.id = "opx-css"; s.textContent = css; document.head.appendChild(s); }
+})();
+
+const OPX_EXPIRIES = [{ dte:7, iv:96.2 },{ dte:21, iv:88.1 },{ dte:35, iv:85.4 },{ dte:63, iv:79.0 },{ dte:120, iv:75.6 },{ dte:245, iv:73.2 }];
+function deriveOptTicket(ticker, dte) {
+  const spot = ticker.price || ticker.pivot || 100;
+  const exp = OPX_EXPIRIES.find(e => e.dte === dte) || OPX_EXPIRIES[2];
+  const tFac = Math.sqrt(dte / 35);
+  const prem = +(spot * 0.093 * tFac).toFixed(2);
+  const strike = Math.round(spot);
+  const iv = exp.iv, hv20 = 107.9, ivrp = +(iv - hv20).toFixed(1);
+  const erDays = ticker.earnings ? ticker.earnings.days : null;
+  return { spot, prem, strike, be:+(strike+prem).toFixed(2), target:+(spot*1.07).toFixed(2), stop:+(spot*0.97).toFixed(2),
+    iv, hv20, ivrp, dte, sym:ticker.symbol, ba:7.2, skew:18.7, beta:1.58,
+    impMove:+(iv/100*Math.sqrt(dte/252)*100).toFixed(1), erDays, erInWindow: erDays!=null && erDays<=dte,
+    ivCrush: (erDays!=null && erDays<=dte) ? Math.round(iv*0.34) : 0 };
+}
+function optStrikes(S){ return { k0:`$${Math.round(S)}`, k1:`$${Math.round(S*1.08)}`, k2:`$${Math.round(S*1.16)}`, k1d:`$${Math.round(S*0.95)}`, k2d:`$${Math.round(S*0.87)}` }; }
+const OPX_STRATS = {
+  "Long Call":        { dir:"bull", legs:s=>[`+1 C ${s.k0}`], calc:(S,P)=>({ debit:P, maxLoss:P*100, maxGain:"open", be:S+P, pop:46 }) },
+  "Bull Call Spread": { dir:"bull", legs:s=>[`+1 C ${s.k0}`,`−1 C ${s.k1}`], calc:(S,P)=>{const d=+(P*0.45).toFixed(2),w=+(S*0.08).toFixed(2);return{ debit:d, maxLoss:d*100, maxGain:+((w-d)*100).toFixed(0), be:+(S+d).toFixed(2), pop:41 };} },
+  "Long Put":         { dir:"bear", legs:s=>[`+1 P ${s.k0}`], calc:(S,P)=>({ debit:P, maxLoss:P*100, maxGain:+((S-P)*100).toFixed(0), be:S-P, pop:44 }) },
+  "Bear Put Spread":  { dir:"bear", legs:s=>[`+1 P ${s.k0}`,`−1 P ${s.k1d}`], calc:(S,P)=>{const d=+(P*0.45).toFixed(2),w=+(S*0.08).toFixed(2);return{ debit:d, maxLoss:d*100, maxGain:+((w-d)*100).toFixed(0), be:+(S-d).toFixed(2), pop:43 };} },
+  "Covered Call":     { dir:"neutral-bull", legs:s=>[`+100 shares`,`−1 C ${s.k1}`], calc:(S,P)=>{const c=+(P*0.55).toFixed(2);return{ debit:-c, maxLoss:+((S-c)*100).toFixed(0), maxGain:+((S*0.05+c)*100).toFixed(0), be:+(S-c).toFixed(2), pop:62 };} },
+  "Cash-Secured Put": { dir:"neutral-bull", legs:s=>[`−1 P ${s.k1d}`], calc:(S,P)=>{const c=+(P*0.6).toFixed(2);return{ debit:-c, maxLoss:+((S*0.95-c)*100).toFixed(0), maxGain:+(c*100).toFixed(0), be:+(S*0.95-c).toFixed(2), pop:68 };} },
+  "Iron Condor":      { dir:"neutral", legs:s=>[`−1 C ${s.k1}`,`+1 C ${s.k2}`,`−1 P ${s.k1d}`,`+1 P ${s.k2d}`], calc:(S,P)=>{const c=+(P*0.5).toFixed(2),w=+(S*0.06).toFixed(2);return{ debit:-c, maxLoss:+((w-c)*100).toFixed(0), maxGain:+(c*100).toFixed(0), be:`${(S*0.94).toFixed(0)}–${(S*1.06).toFixed(0)}`, pop:64 };} },
+};
+const OPX_INTENTS = [
+  { k:"Bullish", ic:"📈", d:"You expect the stock to go up." },
+  { k:"Bearish", ic:"📉", d:"You expect the stock to go down." },
+  { k:"Range",   ic:"↔",  d:"You expect it to chop sideways." },
+  { k:"Income",  ic:"💵", d:"You want to get paid premium / cash flow." },
+];
+const OPX_MATRIX = {
+  Bullish:{ cheap:{ rec:"Long Call", alts:["Bull Call Spread","Cash-Secured Put"] }, rich:{ rec:"Bull Call Spread", alts:["Cash-Secured Put","Long Call"] } },
+  Bearish:{ cheap:{ rec:"Long Put", alts:["Bear Put Spread"] }, rich:{ rec:"Bear Put Spread", alts:["Long Put"] } },
+  Range:{ cheap:{ rec:"WAIT", alts:["Iron Condor"] }, rich:{ rec:"Iron Condor", alts:["Cash-Secured Put"] } },
+  Income:{ cheap:{ rec:"Cash-Secured Put", alts:["Covered Call"] }, rich:{ rec:"Covered Call", alts:["Cash-Secured Put"] } },
+};
+const OPX_WHEN = {
+  "Long Call":"Simplest bullish bet. Defined risk = the premium. Use when IV is cheap and you want uncapped upside.",
+  "Bull Call Spread":"Finance the long call by selling a higher strike. Cheaper, caps upside. Use when IV is rich.",
+  "Long Put":"Simplest bearish bet. Defined risk = the premium. Use when IV is cheap.",
+  "Bear Put Spread":"Buy a put, sell a lower one. Cheaper, caps downside profit. Use when IV is rich.",
+  "Iron Condor":"Sell a call spread + a put spread. Profits if price stays in a range. Use when IV is rich and you expect chop.",
+  "Cash-Secured Put":"Get paid to agree to buy lower. Bullish-to-neutral income; keep the credit if it stays above the strike.",
+  "Covered Call":"Own shares + sell a call against them. Income in a flat-to-up tape; caps upside at the short strike.",
+  "WAIT":"IV is cheap and you expect chop — no clean edge. A calendar or simply waiting is often the best 'trade'.",
+};
+const optIntentFromBias = (b) => { const v=(b||"").toUpperCase(); return (v.includes("BULL")||v==="BUY")?"Bullish":(v.includes("BEAR")||v==="SHORT"||v==="AVOID")?"Bearish":"Range"; };
+
+function OptPayoff({ r, o }) {
+  const W=380,H=170,padL=40,padR=16,padT=14,padB=24,lo=o.spot*0.80,hi=o.spot*1.20,rng=hi-lo;
+  const x=p=>padL+((p-lo)/rng)*(W-padL-padR);
+  const ml=typeof r.maxLoss==="number"?-r.maxLoss:-(o.prem*100);
+  const mg=r.maxGain==="open"?(hi-o.spot)*100:(typeof r.maxGain==="number"?r.maxGain:o.prem*100);
+  const beNum=typeof r.be==="number"?r.be:o.spot;
+  const pnl=p=>{const dir=r.dir||"bull";if(dir==="neutral"){return Math.abs(p-o.spot)<o.spot*0.06?mg:ml;}
+    const slope=(mg-ml)/((dir.includes("bear")?(lo-hi):(hi-lo))||1);let v=(p-beNum)*slope*(dir.includes("bear")?-1:1);return Math.max(ml,Math.min(mg,v));};
+  const yMin=ml*1.1,yMax=mg*1.1,y=v=>padT+(1-(v-yMin)/((yMax-yMin)||1))*(H-padT-padB),pts=[];
+  for(let p=lo;p<=hi;p+=0.5)pts.push([x(p),y(pnl(p))]);
+  return (
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" className="opx-payoff-svg">
+      {[mg,0,ml].map((v,i)=>(<g key={i}><line x1={padL} y1={y(v)} x2={W-padR} y2={y(v)} stroke="var(--glass-line)" strokeDasharray={v===0?"none":"2 3"} opacity={v===0?0.8:0.4}/>
+        <text x={padL-5} y={y(v)+3} fontSize="9" className="mono" textAnchor="end" fill={v>0?"var(--gn)":v<0?"var(--rd)":"var(--ink-3)"}>{v>=0?"+":"−"}${Math.abs(v).toFixed(0)}</text></g>))}
+      <polyline points={pts.map(p=>p.join(",")).join(" ")} fill="none" stroke="var(--cy)" strokeWidth="2.2" />
+      <line x1={x(o.spot)} y1={padT} x2={x(o.spot)} y2={H-padB} stroke="var(--ink)" strokeDasharray="3 3" opacity="0.6"/>
+      <text x={x(o.spot)} y={H-10} fontSize="8.5" className="mono" textAnchor="middle" fill="var(--ink-2)">spot ${o.spot.toFixed(0)}</text>
+    </svg>
+  );
+}
+function OptIntent({ intent, onIntent, suggested, gexRegime }) {
+  return (
+    <div className="opx-step">
+      <div className="opx-step-h"><span className="opx-step-n mono">①</span><span className="opx-step-t">What's your view?</span><span className="mono dim2" style={{fontSize:11}}>pick an intent — the structure below adapts</span></div>
+      <div className="opx-intent">{OPX_INTENTS.map(it=>(
+        <button key={it.k} className={`opx-intent-btn ${intent===it.k?"is-on":""}`} onClick={()=>onIntent(it.k)}>
+          <span className="opx-intent-ic">{it.ic}</span><span className="opx-intent-l">{it.k}</span><span className="opx-intent-d">{it.d}</span>
+          {suggested===it.k && <span className="opx-intent-sug mono">✦ SUGGESTED</span>}
+        </button>))}</div>
+      <div className="mono dim2" style={{fontSize:11,marginTop:9}}>Suggested <b className="copper">{suggested}</b> — from this name's read and a <b className={gexRegime==="range"?"up":"dn"}>{gexRegime==="range"?"positive-GEX / range":"negative-GEX / trend"}</b> dealer-gamma regime. You can override.</div>
+    </div>
+  );
+}
+function OptStructure({ intent, o, picked, onPick }) {
+  const ivCheap = o.ivrp < 0;
+  const m = OPX_MATRIX[intent][ivCheap?"cheap":"rich"];
+  const cards = [{ name:m.rec, rec:true }, ...m.alts.map(a=>({ name:a, rec:false }))];
+  const sk = optStrikes(o.spot);
+  return (
+    <div className="opx-step">
+      <div className="opx-step-h"><span className="opx-step-n mono">③</span><span className="opx-step-t">What should you trade?</span><span className="mono dim2" style={{fontSize:11}}>{intent} + IV {ivCheap?"cheap":"rich"} → recommended structure</span></div>
+      <div className="opx-struct">{cards.map((c,i)=>{
+        const wait=c.name==="WAIT", def=!wait&&OPX_STRATS[c.name], legs=def?def.legs(sk):[], r=def?def.calc(o.spot,o.prem):null;
+        return (<button key={i} className={`opx-struct-card ${picked===c.name?"is-on":""}`} onClick={()=>onPick(c.name)}>
+          {c.rec && <span className="opx-struct-rec mono">RECOMMENDED</span>}
+          <span className="opx-struct-name">{wait?"Wait / Calendar":c.name}</span>
+          <span className="opx-struct-when">{OPX_WHEN[c.name]}</span>
+          {!wait && <div className="opx-struct-legs">{legs.map((l,j)=><span key={j} className={`opx-struct-leg ${l[0]==="+"?"buy":"sell"}`}>{l}</span>)}</div>}
+          {r && <div className="opx-struct-mini mono"><span>{r.debit<0?"credit":"debit"} <b className={r.debit<0?"up":""}>${Math.abs(r.debit).toFixed(2)}</b></span><span>POP <b className={r.pop>=60?"up":""}>{r.pop}%</b></span><span>{def.dir} bias</span></div>}
+        </button>);})}</div>
+    </div>
+  );
+}
+function OptReality({ structure, o, ticker }) {
+  const [contracts, setContracts] = useState(1);
+  const jkey = "opx-journal-" + (ticker.symbol || "x");
+  const [note, setNote] = useState(() => { try { return localStorage.getItem(jkey) || ""; } catch(e) { return ""; } });
+  const wait = structure==="WAIT", def = !wait && OPX_STRATS[structure];
+  if (wait || !def) return (
+    <div className="opx-step"><div className="opx-step-h"><span className="opx-step-n mono">④</span><span className="opx-step-t">The honest trade</span></div>
+      <div className="opx-whathappens">IV is cheap and the read is range-bound — there's no high-quality options structure here. The disciplined move is often to <b>wait</b> for IV to richen (then sell premium) or for a directional break. Informational only — not advice.</div></div>
+  );
+  const r = def.calc(o.spot, o.prem), credit = r.debit < 0, mid = Math.abs(r.debit);
+  const halfSpread = +(mid * (o.ba/100) / 2).toFixed(2), slip = +(mid * 0.022).toFixed(2);
+  const realFill = credit ? +(mid - halfSpread - slip).toFixed(2) : +(mid + halfSpread + slip).toFixed(2);
+  const costNow = +(realFill * 100 * contracts).toFixed(0), slipCost = Math.round((credit?(mid-realFill):(realFill-mid))*100*contracts), popAfter = Math.max(0, r.pop-3);
+  const dirWord = def.dir.includes("bull")?"rises":def.dir.includes("bear")?"falls":"stays in the range";
+  const what = credit
+    ? `You collect about $${costNow} now. You keep it if ${ticker.symbol} ${dirWord} through ${o.dte}-day expiry. Worst case is roughly −$${typeof r.maxLoss==="number"?r.maxLoss.toLocaleString():r.maxLoss}.`
+    : `You pay about $${costNow} now (your max loss). You profit if ${ticker.symbol} ${dirWord} enough to clear breakeven ${typeof r.be==="number"?"$"+r.be.toFixed(2):r.be} by ${o.dte}-day expiry; max gain ${r.maxGain==="open"?"is uncapped to the upside":"≈ +$"+(typeof r.maxGain==="number"?r.maxGain.toLocaleString():r.maxGain)}.`;
+  const tradePrompt = ()=>`Explain this paper options trade to a beginner in plain English (3-4 sentences). Say what has to happen to profit, the worst case, and one thing to watch. Not advice.
+Structure: ${structure} on ${ticker.symbol} at spot $${o.spot.toFixed(2)}, ${o.dte} DTE.
+${credit?"Credit":"Debit"} after realistic fill: $${costNow} (${contracts} contract${contracts>1?"s":""}). Breakeven: ${typeof r.be==="number"?"$"+r.be.toFixed(2):r.be}. Max loss: $${typeof r.maxLoss==="number"?r.maxLoss:r.maxLoss}. Max gain: ${r.maxGain==="open"?"uncapped":"$"+(typeof r.maxGain==="number"?r.maxGain:r.maxGain)}. POP after costs: ${popAfter}%.${o.erInWindow?` Earnings in ${o.erDays}d sit inside the expiry (IV-crush risk).`:""}`;
+  const fillSteps = [
+    { l:"Mid", v:`$${mid.toFixed(2)}`, s:"quoted mid", tone:"ink" },
+    { l:"½ spread", v:`${credit?"−":"+"}$${halfSpread.toFixed(2)}`, s:`${o.ba}% wide`, tone:"amb" },
+    { l:"Slippage", v:`${credit?"−":"+"}$${slip.toFixed(2)}`, s:"market impact", tone:"amb" },
+    { l:credit?"Real credit":"Real debit", v:`$${realFill.toFixed(2)}`, s:`${contracts}× = $${costNow}`, tone:"rd", strong:true },
+  ];
+  return (
+    <div className="opx-step">
+      <div className="opx-step-h"><span className="opx-step-n mono">④</span><span className="opx-step-t">The honest trade</span><span className="mono dim2" style={{fontSize:11}}>{structure} · realistic fill (not mid) · paper-only</span></div>
+      <div className="opx-reality">
+        <div className="opx-rcard">
+          <div className="opx-rcard-h mono">PAYOFF AT EXPIRY · {structure}</div>
+          <OptPayoff r={r} o={o} />
+          <div className="opx-rkpis">
+            <div className="opx-rkpi"><span className="label-cap">{credit?"Max gain":"Max loss"}</span><span className={`opx-rkpi-v mono ${credit?"up":"dn"}`}>{credit?"+":"−"}${typeof (credit?r.maxGain:r.maxLoss)==="number"?(credit?r.maxGain:r.maxLoss).toLocaleString():(credit?r.maxGain:r.maxLoss)}</span></div>
+            <div className="opx-rkpi"><span className="label-cap">Breakeven</span><span className="opx-rkpi-v mono">{typeof r.be==="number"?"$"+r.be.toFixed(2):r.be}</span></div>
+            <div className="opx-rkpi"><span className="label-cap">POP · after costs</span><span className={`opx-rkpi-v mono ${popAfter>=55?"up":""}`}>{popAfter}%</span></div>
+          </div>
+        </div>
+        <div className="opx-rcard">
+          <div className="opx-rcard-h mono">OPTION FILL REALISM · paper</div>
+          <div className="opx-fill-flow">{fillSteps.map((st,i)=>(<React.Fragment key={i}>
+            <div className={`opx-fill-step ${st.strong?"is-strong":""}`}><span className="opx-fill-l">{st.l}</span><span className={`opx-fill-v mono kpi-tone--${st.tone}`}>{st.v}</span><span className="opx-fill-l" style={{textTransform:"none"}}>{st.s}</span></div>
+            {i<fillSteps.length-1 && <span className="opx-fill-arrow mono">→</span>}</React.Fragment>))}</div>
+          <div className="opx-rcard-h mono" style={{marginTop:4}}>WHAT HAS TO HAPPEN</div>
+          <div className="opx-whathappens">{what} <span className="dim2">Costs ~<b className="dn">${Math.abs(slipCost)}</b> vs mid — paper P&amp;L scores this realistic fill. Not advice.</span></div>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span className="mono dim2" style={{fontSize:11}}>Contracts</span>
+            <button className="btn btn--sm" onClick={()=>setContracts(c=>Math.max(1,c-1))}>−</button><span className="mono">{contracts}</span><button className="btn btn--sm" onClick={()=>setContracts(c=>c+1)}>+</button>
+          </div>
+          <div className="opx-actions">
+            <button className="btn btn--primary" onClick={()=>window.__ssToastFn&&window.__ssToastFn(`${structure} on ${ticker.symbol} — Paper-Buy ${contracts}ct queued (paper · dry-run)`)}>▶ Paper-Buy {contracts} ct</button>
+            <button className="btn btn--sm">★ Save</button><button className="btn btn--sm">🔔 Alert</button>
+          </div>
+          {window.AiExplain && <AiExplain build={tradePrompt} label="Explain this trade" />}
+          <textarea className="opx-jr mono" placeholder="Why this trade? · invalidation · post-trade review" value={note} onChange={e=>{setNote(e.target.value);try{localStorage.setItem(jkey,e.target.value);}catch(e2){}}} />
+          <div className="mono dim2" style={{fontSize:10}}>Paper-only · no live routing. Realistic fill = mid {credit?"−":"+"} ½ spread {credit?"−":"+"} slippage. Not advice.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+window.OptIntent = OptIntent; window.OptStructure = OptStructure; window.OptReality = OptReality;
 
 function LensOverview({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("ov-1"), s3 = useStateToggle("ov-3"), s4 = useStateToggle("ov-4"), s6 = useStateToggle("ov-6"), s8 = useStateToggle("ov-8");
@@ -15195,9 +15492,27 @@ function LensOptions({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }
   const gexTog = useStateToggle("opx-gex");
   const sec = [s(0), s(1), s(2), s(3), s(35), s(37), s(4), s(45), s(5), s(6), s(8)];
   const tgtDte = MODE_DTE[mode] || 35;
+  // ── intent-first decision layer (Appendix redesign) ──
+  const oTicket = useMemo(() => deriveOptTicket(ticker, tgtDte), [ticker, tgtDte]);
+  const gexRegime = useMemo(() => {
+    const spot = oTicket.spot, step = Math.max(1, Math.round(spot * 0.025)), atmK = Math.round(spot / step) * step; let total = 0;
+    for (let i = -5; i <= 5; i++) { const k = atmK + i * step, dist = (k - spot) / spot;
+      const coi = Math.round(4600 * Math.exp(-Math.pow((dist - 0.025) * 8, 2)) + 90), poi = Math.round(6200 * Math.exp(-Math.pow((dist + 0.035) * 8, 2)) + 90);
+      const gamma = Math.exp(-Math.pow(dist * 7, 2)) * 0.09; total += (-coi + poi) * gamma * spot * spot * 4e-6; }
+    return total >= 0 ? "range" : "trend";
+  }, [oTicket]);
+  const suggestedIntent = useMemo(() => { const base = optIntentFromBias(ticker.verdict || ticker.bias); return (gexRegime === "range" && base !== "Bearish") ? "Range" : base; }, [ticker, gexRegime]);
+  const [optIntent, setOptIntent] = useState(suggestedIntent);
+  useEffect(() => { setOptIntent(suggestedIntent); }, [suggestedIntent]);
+  const optRec = OPX_MATRIX[optIntent][oTicket.ivrp < 0 ? "cheap" : "rich"].rec;
+  const [optPicked, setOptPicked] = useState(optRec);
+  useEffect(() => { setOptPicked(optRec); }, [optRec]);
   return (
     <div className="lens lens--opt">
       <EoOptionsHeroPro ticker={ticker} />
+      <div className="lens-pad" style={{ paddingBottom: 0 }}>
+        <OptIntent intent={optIntent} onIntent={setOptIntent} suggested={suggestedIntent} gexRegime={gexRegime} />
+      </div>
       <div className="lens-section">
         <SectionHeader n="0" title="Dealer Gamma (GEX) · why price moves"
           sub="net dealer gamma by strike · walls · γ-flip · max-pain · plain-English read for the shares"
@@ -15205,6 +15520,10 @@ function LensOptions({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }
         <StateWrap state={gexTog.value} source="Schwab options chain (OI × γ) · dealer-gamma model">
           <div className="lens-pad"><OtkGEX o={{ spot: ticker.price, sym: ticker.symbol }} /></div>
         </StateWrap>
+      </div>
+      <div className="lens-pad" style={{ paddingTop: 0 }}>
+        <OptStructure intent={optIntent} o={oTicket} picked={optPicked} onPick={setOptPicked} />
+        <OptReality structure={optPicked} o={oTicket} ticker={ticker} />
       </div>
       <div className="lens-section">
         <SectionHeader n="0b" title="Session · Context"

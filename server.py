@@ -4318,6 +4318,85 @@ async def whatif_backtest_api(req: Request):
     }
 
 
+@app.get("/api/setup-backtest")
+async def setup_backtest_api(setup: str = "", min_score: int = 60, days: int = 365):
+    """Real per-setup equity curve from closed signal_log trades.
+
+    Powers the Strategies-surface Backtester. Replays actual CLOSED trades for one
+    setup family (filtered by min_score + lookback days), in date order, accumulating
+    R-multiples. R = realized pnl_pct / |risk_pct|, with risk_pct from the trade's
+    stop distance when both entry+stop are logged, else a 3.0% default (signal_log
+    often omits entry; 3% approximates the engine's typical 1.25x ATR stop).
+    Returns ordered eq curve + WR/PF/avgR/maxDD/totalR.
+
+    Never 500s. On missing data returns {ok: False, reason} so the UI can fall back.
+    """
+    import json
+    from pathlib import Path
+    from datetime import datetime, timedelta
+    setup = (setup or "").strip()
+    sl_path = Path("data/signal_log.json")
+    if not sl_path.exists():
+        return {"ok": False, "reason": "signal_log.json missing"}
+    try:
+        sl = json.load(open(sl_path))
+    except Exception as e:
+        return {"ok": False, "reason": str(e)}
+    cutoff = (datetime.now() - timedelta(days=int(days))).strftime("%Y-%m-%d")
+    rows = [
+        s for s in sl
+        if s.get("status") == "CLOSED" and s.get("actual_pnl_pct") is not None
+        and (s.get("date") or "") >= cutoff
+        and (not setup or (s.get("strategy") or "") == setup)
+        and (s.get("score") or 0) >= int(min_score)
+    ]
+    rows.sort(key=lambda s: (s.get("date") or ""))
+    if not rows:
+        return {"ok": False, "reason": "no closed trades for filter", "setup": setup, "n": 0}
+
+    def _risk_pct(s):
+        # prefer measured stop distance; else the engine's default 1.25%-ish risk unit
+        try:
+            entry = float(s.get("entry") or s.get("entry_price") or 0)
+            stop = float(s.get("stop") or s.get("stop_price") or 0)
+            if entry > 0 and stop > 0 and entry != stop:
+                return abs(entry - stop) / entry * 100.0
+        except Exception:
+            pass
+        return 3.0
+
+    eq = [0.0]
+    cumR = peak = maxDD = gW = gL = 0.0
+    wins = 0
+    rlist = []
+    for s in rows:
+        pnl = float(s.get("actual_pnl_pct") or 0)
+        rp = _risk_pct(s) or 1.25
+        r = round(pnl / rp, 2)
+        rlist.append(r)
+        cumR += r
+        if r >= 0:
+            wins += 1; gW += r
+        else:
+            gL += -r
+        eq.append(round(cumR, 2))
+        peak = max(peak, cumR)
+        if peak - cumR > maxDD:
+            maxDD = peak - cumR
+    n = len(rows)
+    return {
+        "ok": True, "setup": setup or "ALL", "min_score": int(min_score), "days": int(days),
+        "n": n,
+        "winRate": round(wins / n * 100, 0),
+        "pf": round(gW / gL, 2) if gL > 0 else 99,
+        "avgR": round(cumR / n, 2),
+        "totalR": round(cumR, 2),
+        "maxDD": round(maxDD, 2),
+        "eq": eq,
+        "source": "signal_log.json · closed trades",
+    }
+
+
 @app.get("/api/setup-tuner")
 async def setup_tuner_get():
     """Return current setup_score_multipliers + live per-setup stats for tuning UI."""
@@ -6472,6 +6551,10 @@ async def options_chain_api(sym: str):
             "gamma": _v(c.get("gamma")),
             "theta": _v(c.get("theta")),
             "vega":  _v(c.get("vega")),
+            # OI + volume — consumed by the dealer-GEX panel (OI × γ × spot²).
+            # extract_chain_greeks already emits these as "oi"/"vol".
+            "oi":    _v(c.get("oi")),
+            "vol":   _v(c.get("vol")),
         }
 
     out_exps = []
