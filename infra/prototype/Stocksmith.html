@@ -3967,6 +3967,23 @@ body {
 .ss2-score--amb { background: var(--amb); color: var(--bg); }
 .ss2-score--rd  { background: var(--rd); color: var(--bg); }
 
+/* EDGE factor-grade medallion + strip (A1) */
+.ss2-edge { display: inline-flex; align-items: center; gap: 7px; }
+.ss2-medal { position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%; font-family: var(--mono); font-weight: 700; font-size: 10.5px; flex: none;
+  background: conic-gradient(currentColor var(--deg, 0deg), color-mix(in oklab, currentColor 16%, transparent) 0); }
+.ss2-medal::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--bg-1); z-index: 1; }
+.ss2-medal { color: var(--ink-3); }
+.ss2-medal-txt { position: relative; z-index: 2; color: currentColor; }
+.ss2-medal--gn { color: var(--gn); } .ss2-medal--amb { color: var(--amb); } .ss2-medal--rd { color: var(--rd); } .ss2-medal--dim { color: var(--ink-3); }
+.ss2-gstrip { display: inline-flex; gap: 2px; }
+.ss2-gs { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.05; }
+.ss2-gs-k { font-family: var(--mono); font-size: 6.5px; letter-spacing: .04em; color: var(--ink-3); }
+.ss2-gs-v { font-family: var(--mono); font-size: 9.5px; font-weight: 700; }
+.ss2-gs-v.g-a { color: var(--gn); } .ss2-gs-v.g-b { color: color-mix(in oklab, var(--gn) 70%, var(--amb)); }
+.ss2-gs-v.g-c { color: var(--amb); } .ss2-gs-v.g-d { color: color-mix(in oklab, var(--rd) 68%, var(--amb)); }
+.ss2-gs-v.g-f { color: var(--rd); } .ss2-gs-v.g-na { color: var(--ink-3); opacity: .5; }
+
 .ss2-tier {
   display: inline-block;
   padding: 2px 8px;
@@ -10160,6 +10177,30 @@ function ScanTh({ col, sort, onClick, r, children }) {
   return <th className={`${r?"r":""} ss-th ${active?"is-active":""}`} onClick={()=>onClick(s=>s.col===col?{col,dir:-s.dir}:{col,dir:-1})}><span>{children}</span>{active && <span className="ss-th-arrow mono">{sort.dir>0?"▲":"▼"}</span>}</th>;
 }
 
+// ── EDGE factor-grade system (A1) — REAL factors, informational only ──────────
+// 6 factors 0-100 → A-F; EDGE = swing-weighted composite over AVAILABLE factors.
+// Value/Growth need fundamentals not on the scanner row → null (rendered '·',
+// excluded from the weighted mean rather than faked).
+const EDGE_GR = (n) => n == null ? null : n >= 82 ? "A" : n >= 66 ? "B" : n >= 46 ? "C" : n >= 30 ? "D" : "F";
+const edgeTone = (ltr) => (ltr === "A" || ltr === "B") ? "gn" : ltr === "C" ? "amb" : ltr ? "rd" : "dim";
+const EDGE_W = { s: 1.4, t: 1.3, m: 1.2, r: 1.0, v: 0.6, g: 0.6 };
+const EDGE_FACTORS = [["t", "TRD"], ["m", "MOM"], ["s", "SET"], ["r", "R:R"], ["v", "VAL"], ["g", "GRO"]];
+function edgeGrades(t) {
+  const cl = (n) => n == null ? null : Math.max(4, Math.min(99, Math.round(n)));
+  const num = (v) => { const n = parseFloat(v); return isFinite(n) ? n : null; };
+  const score = num(t.score), rs = num(t.rs), adx = num(t.adx), rr = num(t.rr);
+  const p1 = num(t.r1m != null ? t.r1m : t.perf_month), rvol = num(t.rvol);
+  let tr = null; if (rs != null || adx != null) tr = cl(0.6 * (rs != null ? rs : 50) + 0.4 * (adx != null ? Math.min(100, adx * 2.2) : 50));
+  let mo = null; if (p1 != null || rvol != null) mo = cl(50 + (p1 != null ? p1 * 1.4 : 0) + (rvol != null ? (rvol - 1) * 14 : 0));
+  const se = score != null ? cl(score) : null;
+  const rrG = rr != null ? cl(rr * 24) : null;
+  const gRaw = { t: tr, m: mo, s: se, r: rrG, v: null, g: null };
+  let wsum = 0, acc = 0;
+  for (const k of Object.keys(EDGE_W)) { if (gRaw[k] != null) { acc += gRaw[k] * EDGE_W[k]; wsum += EDGE_W[k]; } }
+  const edgePct = wsum ? cl(acc / wsum) : null;
+  return { grades: { t: EDGE_GR(tr), m: EDGE_GR(mo), s: EDGE_GR(se), r: EDGE_GR(rrG), v: null, g: null }, edge: EDGE_GR(edgePct), edgePct };
+}
+
 function SurfaceSignalScanner({ screener, data, onTicker }) {
   // Full scored universe (~1832) — lazy-loaded from /api/universe on toggle.
   const [showFull, setShowFull] = useState(true);   // default: full scored universe (~1832)
@@ -10285,7 +10326,8 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
             <ScanTh col="sym" sort={sort} onClick={setSort}>TICKER</ScanTh>
             <th>NAME</th><th>SECTOR</th><th>T.F.S.N</th><th>MECHANISM</th>
             <ScanTh col="score" sort={sort} onClick={setSort} r>SCORE</ScanTh>
-            <th>VERDICT</th><th>TIER</th><th>SETUP</th><th>EQ</th><th>CAT</th>
+            <th>EDGE · GRADES</th>
+            <th>BIAS</th><th>TIER</th><th>SETUP</th><th>EQ</th><th>CAT</th>
             <ScanTh col="price" sort={sort} onClick={setSort} r>PRICE</ScanTh>
             <ScanTh col="chg" sort={sort} onClick={setSort} r>%CHG</ScanTh>
             <ScanTh col="rr" sort={sort} onClick={setSort} r>R:R</ScanTh>
@@ -10303,7 +10345,7 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
             <ScanTh col="er" sort={sort} onClick={setSort} r>ER</ScanTh>
             <th>SIGNALS</th><th>SPARK</th>
           </tr></thead>
-          <tbody>{padTop>0 && <tr style={{height:padTop}} aria-hidden><td colSpan={29} style={{padding:0,border:"none"}} /></tr>}
+          <tbody>{padTop>0 && <tr style={{height:padTop}} aria-hidden><td colSpan={30} style={{padding:0,border:"none"}} /></tr>}
           {visible.map((t, i) => (
             <tr key={t.sym} onClick={()=>onTicker(t.sym)}>
               <td className="ss2-chk"><input type="checkbox" checked={selected.has(t.sym)} onChange={()=>toggleSel(t.sym)} onClick={e=>e.stopPropagation()} /></td>
@@ -10313,6 +10355,14 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
               <td className="mono dim"><span className="ss2-tfsn">{t.tfsn.map((v,k)=><span key={k} className={`ss2-tfsn-dot ss2-tfsn--${v===2?"pass":v===1?"neut":"fail"}`} title={["Tech","Fund","SMC","News"][k]} />)}</span></td>
               <td className="mono dim2">{t.mechanism}</td>
               <td className="r"><span className={`ss2-score ss2-score--${t.score>=75?"gn":t.score>=60?"amb":"rd"}`}>{t.score}</span></td>
+              <td>{(()=>{ const eg=edgeGrades(t); return (
+                <span className="ss2-edge" title="EDGE · swing-weighted composite of available factor grades — quantitative analytics, informational only (not a recommendation)">
+                  <span className={`ss2-medal ss2-medal--${edgeTone(eg.edge)}`} style={{"--deg":((eg.edgePct||0)*3.6)+"deg"}}><span className="ss2-medal-txt">{eg.edge||"·"}</span></span>
+                  <span className="ss2-gstrip">{EDGE_FACTORS.map(([k,lbl])=>(
+                    <span key={k} className="ss2-gs" title={`${lbl} grade ${eg.grades[k]||"n/a"}`}><span className="ss2-gs-k">{lbl}</span><span className={`ss2-gs-v g-${eg.grades[k]?eg.grades[k].toLowerCase():"na"}`}>{eg.grades[k]||"·"}</span></span>
+                  ))}</span>
+                </span>
+              ); })()}</td>
               <td><Pill tone={t.verdict==="BUY"?"gn":t.verdict==="AVOID"?"rd":"amb"} small>{secBias(t.verdict)}</Pill></td>
               <td><span className={`ss2-tier ss2-tier--${String(t.tier).toLowerCase()}`}>{t.tier}</span></td>
               <td className="mono dim">{t.setup}</td>
