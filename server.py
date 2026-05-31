@@ -187,6 +187,23 @@ def _check_auth(credentials: HTTPBasicCredentials = Depends(_security)):
     return credentials
 
 
+def _soft_authed(request: Request) -> bool:
+    """Non-raising auth check for HTML page routes — reads the Basic header directly
+    so we can REDIRECT unauthenticated visitors to the public landing instead of
+    popping a browser password box (HTTPBasic auto-raises 401 on a missing header)."""
+    hdr = request.headers.get("authorization", "")
+    if not hdr.startswith("Basic "):
+        return False
+    try:
+        import base64
+        user, _, pw = base64.b64decode(hdr[6:]).decode("utf-8", "ignore").partition(":")
+    except Exception:
+        return False
+    if not user or not _auth_mod.verify_user(user, pw):
+        return False
+    return _session_check_and_bump(user)
+
+
 def _require_admin(credentials: HTTPBasicCredentials = Depends(_security)):
     """Dependency that authenticates AND requires admin role."""
     user = _auth_mod.verify_user(credentials.username, credentials.password)
@@ -442,15 +459,19 @@ async def _app_terminal(request: Request, auth: HTTPBasicCredentials = Depends(_
 # targets) used to 404 with a JSON body — which made Lighthouse report
 # "not HTML (application/json)". Redirect to the canonical kairos.html surface.
 @app.api_route("/dashboard", methods=["GET", "HEAD"])
-async def _dashboard_legacy(request: Request, auth: HTTPBasicCredentials = Depends(_check_auth)):
+async def _dashboard_legacy(request: Request):
+    # Unauthenticated → bounce to the public landing (no password box on a cached/
+    # bookmarked deep URL). Authenticated → on to the terminal at /app.
+    if not _soft_authed(request):
+        return RedirectResponse(url="/", status_code=302)
     qs = request.url.query
-    return RedirectResponse(url="/kairos.html" + (f"?{qs}" if qs else ""), status_code=302)
+    return RedirectResponse(url="/app" + (f"?{qs}" if qs else ""), status_code=302)
 
-# -- /kairos.html — primary dashboard surface.
+# -- /kairos.html — legacy dashboard surface (terminal is now Stocksmith at /app).
 @app.api_route("/kairos.html", methods=["GET","HEAD"])
-async def _kairos_page(auth: HTTPBasicCredentials = Depends(_check_auth)):
-    if isinstance(auth, Response):
-        return auth
+async def _kairos_page(request: Request):
+    if not _soft_authed(request):
+        return RedirectResponse(url="/", status_code=302)   # landing-first for stray visits
     p = (_PROTOTYPE_DIR / "kairos.html").resolve()
     if not p.exists() or not p.is_file():
         raise HTTPException(404, "kairos.html not built")
