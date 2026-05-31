@@ -28792,7 +28792,45 @@ function trDerive(data) {
   return { D, acc, summary, strategies, bands, dirRows, ledger, equity, months, closedN: closedRaw.length };
 }
 
+// ── SigLedger reducer over /v2/data_leaders.json (real D1–M12 forward grid) ──
+// Powers the Decay view (per-source avg return by horizon) that the aggregate
+// accuracy bundle cannot. Pure: ret() reads the real grid, direction-aligned.
+function trBuildLeaders(raw) {
+  if (!raw || !Array.isArray(raw.signals) || !Array.isArray(raw.horizons)) return null;
+  const HZ = raw.horizons.map((h, i) => ({ id: h.id, label: h.label, days: h.days, group: h.group, idx: i }));
+  const SRC = (raw.sources || []).map(s => ({ id: s.id, label: s.label }));
+  const SIG = raw.signals;
+  const ret = (sig, hz) => {
+    const v = (sig.ret || {})[hz.id];
+    if (typeof v !== "number" || isNaN(v)) return null;
+    return sig.dir === "short" ? -v : v;   // direction-aligned
+  };
+  const agg = (srcId, hz) => {
+    const vals = [];
+    for (const s of SIG) { if (s.source !== srcId) continue; const r = ret(s, hz); if (r != null) vals.push(r); }
+    if (!vals.length) return { mean: null, hit: null, n: 0 };
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const hit = vals.filter(v => v > 0).length / vals.length;
+    return { mean: +mean.toFixed(2), hit: +(hit * 100).toFixed(0), n: vals.length };
+  };
+  const sources = SRC.map(s => ({
+    id: s.id, label: s.label,
+    decay: HZ.map(hz => ({ hz: hz.id, group: hz.group, days: hz.days, ...agg(s.id, hz) })),
+  })).filter(s => s.decay.some(d => d.n > 0));
+  return { HZ, sources, totalCalls: SIG.length, generatedAt: raw.generated_at || null };
+}
+
 function SurfaceTrackRecord({ onTicker, data }) {
+  const [sl, setSl] = useTR(null);   // SigLedger forward-return grid (lazy-fetched)
+  useEffect(() => {
+    let alive = true;
+    if (typeof fetch === "undefined") return;
+    fetch("/v2/data_leaders.json", { cache: "no-store" })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { if (alive && j) setSl(trBuildLeaders(j)); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const der = useTRm(() => trDerive(data), [data]);
   const [metric, setMetric] = useTR("r");        // r (avg R) | wr (win rate) — real analogue of edge|raw
   const [group, setGroup] = useTR("W");           // D | W | M — prototype heatmap/decay group toggle
@@ -28846,7 +28884,7 @@ function SurfaceTrackRecord({ onTicker, data }) {
 
       {tab === "heatmap" && <TrHeatmapView der={der} group={group} />}
       {tab === "leaderboard" && <TrLeaderboardView der={der} metric={metric} onPick={(s) => { setSrcFilter(s); setTab("ledger"); }} />}
-      {tab === "decay" && <TrDecayView der={der} group={group} metric={metric} />}
+      {tab === "decay" && <TrDecayView der={der} group={group} metric={metric} sl={sl} />}
       {tab === "ledger" && <TrLedgerView der={der} metric={metric} srcFilter={srcFilter} setSrcFilter={setSrcFilter} onTicker={onTicker} />}
       {tab === "calibration" && <TrCalibrationView der={der} />}
       {tab === "regime" && <TrRegimeView der={der} metric={metric} />}
@@ -28940,34 +28978,60 @@ function TrLeaderboardView({ der, metric, onPick }) {
 // forward-return path — so a true decay/half-life curve cannot be drawn without
 // fabricating data. The prototype's legend + chart frame are preserved; the chart
 // area carries an honest "needs resolved-horizon history" state.
-function TrDecayView({ der, group, metric }) {
-  const board = der.strategies;
+function TrDecayView({ der, group, metric, sl }) {
   const w = 920, h = 300, padL = 44, padR = 16, padT = 16, padB = 28;
   const plotW = w - padL - padR, plotH = h - padT - padB;
   const COL = ["var(--copper)", "var(--cy)", "var(--gn)", "var(--violet)", "var(--amb)", "var(--blue)", "var(--rd)", "var(--ink-2)"];
-  const legend = board.slice(0, 8);
+  const [hidden, setHidden] = useTR({});
+
+  // No SigLedger yet → loading / unavailable frame.
+  if (!sl || !sl.sources || !sl.sources.length) {
+    return (
+      <div className="wsx-body">
+        <div className="pf-chart trk-chart">
+          <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+            <text x={w / 2} y={padT + plotH / 2 - 8} fontSize="13" textAnchor="middle" className="mono" fill="var(--ink-2)">{sl === null ? "Loading forward-return grid…" : "No matured forward-return history yet"}</text>
+            <text x={w / 2} y={padT + plotH / 2 + 12} fontSize="10.5" textAnchor="middle" className="mono" fill="var(--ink-3)">source: /v2/data_leaders.json (built nightly from the audit ledger)</text>
+          </svg>
+        </div>
+        <div className="lab-verdict mono dim2">Decay curves chart each engine's average forward return by horizon — where a line peaks is its best holding period; where it crosses zero is the edge half-life. Populates from <b>data_leaders.json</b> (real D1–M12 grid) once signals mature.</div>
+      </div>
+    );
+  }
+
+  // Real per-source decay over the selected D/W/M horizon band.
+  const hzs = sl.HZ.filter(hz => hz.group === group);
+  const board = sl.sources.map(s => ({
+    id: s.id, label: s.label,
+    pts: hzs.map(hz => { const d = s.decay.find(x => x.hz === hz.id); return { hz: hz.id, ...(d || { mean: null, hit: null, n: 0 }) }; }),
+  })).filter(s => s.pts.some(p => p.n > 0));
+
+  const allVals = board.flatMap(s => s.pts.filter(p => p.mean != null && !hidden[s.id]).map(p => (metric === "wr" ? (p.hit - 50) / 12.5 : p.mean)));
+  const maxV = Math.max(2, ...allVals), minV = Math.min(-2, ...allVals);
+  const xs = hzs.map((hz, i) => padL + (hzs.length === 1 ? plotW / 2 : (i / (hzs.length - 1)) * plotW));
+  const y = v => padT + plotH - ((v - minV) / ((maxV - minV) || 1)) * plotH;
+  const val = p => metric === "wr" ? (p.hit - 50) / 12.5 : p.mean;   // win-rate centered at 50% → 0-line
+
   return (
     <div className="wsx-body">
-      <div className="trk-decay-legend">{legend.length ? legend.map((s, i) => (
-        <button key={s.id} className="trk-dl off" disabled title="per-horizon path unavailable">
+      <div className="trk-decay-legend">{board.map((s, i) => (
+        <button key={s.id} className={`trk-dl ${hidden[s.id] ? "off" : ""}`} onClick={() => setHidden(h => ({ ...h, [s.id]: !h[s.id] }))}>
           <span className="trk-dl-dot" style={{ background: COL[i % COL.length] }} />{s.label}
         </button>
-      )) : <span className="trk-dl off" style={{ cursor: "default" }}>no strategies in bundle</span>}</div>
+      ))}</div>
       <div className="pf-chart trk-chart">
         <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-          {[2, 0, -2].map((gv, k) => {
-            const y = padT + plotH - ((gv + 2) / 4) * plotH;
-            return <g key={k}><line x1={padL} y1={y} x2={w - padR} y2={y} stroke="var(--line)" strokeDasharray={gv === 0 ? "none" : "1 5"} opacity={gv === 0 ? 0.7 : 0.4} /><text x={padL - 6} y={y + 3} fontSize="10" textAnchor="end" className="mono" fill="var(--ink-3)">{gv >= 0 ? "+" : ""}{gv.toFixed(1)}</text></g>;
+          {[maxV, (maxV + minV) / 2, 0, minV].map((gv, k) => (
+            <g key={k}><line x1={padL} y1={y(gv)} x2={w - padR} y2={y(gv)} stroke="var(--line)" strokeDasharray={gv === 0 ? "none" : "1 5"} opacity={gv === 0 ? 0.7 : 0.4} /><text x={padL - 6} y={y(gv) + 3} fontSize="10" textAnchor="end" className="mono" fill="var(--ink-3)">{metric === "wr" ? Math.round(50 + gv * 12.5) + "%" : (gv >= 0 ? "+" : "") + gv.toFixed(1)}</text></g>
+          ))}
+          {hzs.map((hz, i) => <text key={hz.id} x={xs[i]} y={h - 8} fontSize="10" textAnchor="middle" className="mono" fill="var(--ink-3)">{hz.label}</text>)}
+          {board.map((s, si) => { if (hidden[s.id]) return null;
+            const pts = s.pts.map((p, i) => p.mean != null ? `${xs[i]},${y(val(p))}` : null).filter(Boolean).join(" ");
+            return <g key={s.id}><polyline points={pts} fill="none" stroke={COL[si % COL.length]} strokeWidth="2" opacity="0.9" />{s.pts.map((p, i) => p.mean != null ? <circle key={i} cx={xs[i]} cy={y(val(p))} r="2.6" fill={COL[si % COL.length]}><title>{`${s.label} ${p.hz}: ${trPct(p.mean)} · hit ${p.hit}% · n=${p.n}`}</title></circle> : null)}</g>;
           })}
-          {["D1", "W1", "W2", "W4", "M1", "M3", "M6"].map((lab, i, a) => {
-            const x = padL + (i / (a.length - 1)) * plotW;
-            return <text key={lab} x={x} y={h - 8} fontSize="10" textAnchor="middle" className="mono" fill="var(--ink-3)">{lab}</text>;
-          })}
-          <text x={w / 2} y={padT + plotH / 2 - 8} fontSize="13" textAnchor="middle" className="mono" fill="var(--ink-2)">Decay curves need resolved-horizon history</text>
-          <text x={w / 2} y={padT + plotH / 2 + 12} fontSize="10.5" textAnchor="middle" className="mono" fill="var(--ink-3)">accuracy stores aggregate R/PF/WR per strategy — not the D1–M12 forward-return path</text>
         </svg>
       </div>
-      <div className="lab-verdict mono dim2">Decay/half-life curves chart avg {metric === "wr" ? "win rate" : "edge"} by horizon ({group === "D" ? "Daily" : group === "W" ? "Weekly" : "Monthly"} band) — where a line peaks is the engine's best holding period; where it crosses zero is its half-life. This needs a <b>per-horizon (D1–M12) forward-return path per strategy</b>, which the accuracy bundle does not store. Shown as a frame, not fabricated — wire resolved-horizon outcomes to populate it.</div>
+      <div className="lab-verdict mono dim2">Avg {metric === "wr" ? "win-rate (50% = flat line)" : "forward return"} by horizon ({group === "D" ? "Daily" : group === "W" ? "Weekly" : "Monthly"} band), direction-aligned, matured signals only · {sl.totalCalls} calls from the audit ledger. Where a line <b>peaks</b> is the engine's best holding period; where it crosses zero is its <b>half-life</b>. Click legend to toggle engines.</div>
     </div>
   );
 }
