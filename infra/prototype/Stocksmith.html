@@ -31161,13 +31161,13 @@ const KAI_SYS_BASE =
 
 const KAI_SUGGEST = {
   base: [
-    "Summarize today's top BUY verdicts.",
+    "Summarize today's strongest Bullish-bias names.",
     "Which of my holdings breach my risk profile?",
     "What changed across the market today?",
     "Which setup family has the best edge?",
   ],
   ticker: (s) => [
-    `Summarize ${s}'s verdict and why.`,
+    `Summarize ${s}'s bias and why.`,
     `What does the model predict for ${s}?`,
     `Draft a swing trade plan for ${s}.`,
     `What's the biggest risk on ${s} right now?`,
@@ -31249,7 +31249,7 @@ function kaiBuildContext(ctx) {
     const t = ctx.ticker;
     lines.push(`Open ticker: ${t.symbol}${t.name ? " (" + t.name + ")" : ""}.`);
     const facts = [];
-    if (t.verdict) facts.push(`verdict ${t.verdict}`);
+    if (t.verdict) facts.push(`bias ${secBias(t.verdict)}`);
     if (t.score != null) facts.push(`score ${t.score}`);
     if (t.price != null) facts.push(`price $${Number(t.price).toFixed ? Number(t.price).toFixed(2) : t.price}`);
     if (t.sector) facts.push(`sector ${t.sector}`);
@@ -31307,7 +31307,7 @@ function kaiLensStances(t) {
   const add = (k, v, why) => { if (v != null) out.push({ k: k, v: clamp(v), why: why }); };
 
   // Overview — the reconciled composite score itself
-  if (score != null) add("Overview", score, `composite ${score}/100 · verdict ${t.verdict || "—"}`);
+  if (score != null) add("Overview", score, `composite ${score}/100 · bias ${t.verdict ? secBias(t.verdict) : "—"}`);
   // Technicals — technical pillar, coloured by RSI posture
   if (p.technical != null) {
     const rsiNote = rsi != null ? (rsi >= 70 ? `RSI ${Math.round(rsi)} (extended)` : rsi <= 35 ? `RSI ${Math.round(rsi)} (oversold)` : `RSI ${Math.round(rsi)}`) : "trend/indicators";
@@ -31459,11 +31459,11 @@ function kaiBuildDossierContext(ctx) {
     if (t.setupStats) lines.push(`Setup stats: ${t.setupFamily || "setup"} · win-rate ${((t.setupStats.winRate || 0) * 100).toFixed(0)}% · Wilson LB ${((t.setupStats.wilsonLB || 0) * 100).toFixed(0)}% · n=${t.setupStats.n != null ? t.setupStats.n : "—"} · R ${(t.rMultiple || 0).toFixed(2)}.`);
     if (t.earnings) lines.push(`Earnings in ${t.earnings.days != null ? t.earnings.days : "—"}d${t.earnings.date && t.earnings.date !== "—" ? " (" + t.earnings.date + ")" : ""}.`);
     const cv = kaiComputeComposite(t);
-    if (cv) lines.push(`COMPOSITE VERDICT (reconciled across ${cv.lenses.length} lenses): ${cv.verdict} ${cv.net}/100, confidence ${cv.conf}, disagreement ${cv.disagree}. Per-lens stance: ${cv.lenses.map(l => `${l.k} ${l.v}`).join(", ")}. Dissenting lenses: ${cv.dissenters.length ? cv.dissenters.map(x => x.k).join(", ") : "none"}.`);
+    if (cv) lines.push(`COMPOSITE BIAS (reconciled across ${cv.lenses.length} lenses): ${secBias(cv.verdict)} ${cv.net}/100, confidence ${cv.conf}, disagreement ${cv.disagree}. Per-lens stance: ${cv.lenses.map(l => `${l.k} ${l.v}`).join(", ")}. Dissenting lenses: ${cv.dissenters.length ? cv.dissenters.map(x => x.k).join(", ") : "none"}.`);
     const pj = kaiMlProjection(t.symbol, kaiModeKey(), t.price);
     if (pj && pj.pUp != null) {
       const ci = pj.ci || [null, null];
-      lines.push(`ML forecast (${pj.horizon}d): P(up) ${Math.round(pj.pUp * 100)}%${ci[0] != null && ci[1] != null ? ` [CI ${Math.round(ci[0] * 100)}-${Math.round(ci[1] * 100)}%]` : ""}${pj.entry != null ? `, entry $${pj.entry.toFixed(2)}, stop $${pj.stop.toFixed(2)} (q10), T1 $${pj.t1.toFixed(2)} (q75), T2 $${pj.t2.toFixed(2)} (q90), R:R ${pj.rr}` : ""}${pj.ev != null ? `, EV ${pj.ev >= 0 ? "+" : ""}${pj.ev}%` : ""}, verdict ${pj.verdict}.`);
+      lines.push(`ML forecast (${pj.horizon}d): P(up) ${Math.round(pj.pUp * 100)}%${ci[0] != null && ci[1] != null ? ` [CI ${Math.round(ci[0] * 100)}-${Math.round(ci[1] * 100)}%]` : ""}${pj.entry != null ? `, entry $${pj.entry.toFixed(2)}, stop $${pj.stop.toFixed(2)} (q10), T1 $${pj.t1.toFixed(2)} (q75), T2 $${pj.t2.toFixed(2)} (q90), R:R ${pj.rr}` : ""}${pj.ev != null ? `, EV ${pj.ev >= 0 ? "+" : ""}${pj.ev}%` : ""}, bias ${secBias(pj.verdict)}.`);
     }
   } catch (e) { return lines.join(" "); }
   return lines.join(" ");
@@ -31498,12 +31498,12 @@ function kaiFallbackAnswer(q, ctx, bundle) {
     if (lensWord && cv) {
       const l = cv.lenses.find(x => x.k === lensWord || x.k.indexOf(lensWord) === 0);
       const stance = l ? (l.v >= 62 ? "bullish" : l.v >= 46 ? "neutral" : "bearish") : "—";
-      return `**${D.sym} · ${lensWord} read**\n\n${lensWord} scores **${l ? l.v : "—"}/100** (${stance})${l ? ` — ${l.why}` : ""}.\n\nIn the reconciled picture it's **${cv.verdict} ${cv.net}/100** across ${cv.lenses.length} lenses (confidence ${cv.conf}, ${cv.disagree} disagreement)${cv.dissenters.length ? `; the dissenters are ${cv.dissenters.map(x => x.k).join(", ")}` : "; no lens materially dissents"}.\n\n_Open the ${lensWord} tab for the full breakdown._${note}`;
+      return `**${D.sym} · ${lensWord} read**\n\n${lensWord} scores **${l ? l.v : "—"}/100** (${stance})${l ? ` — ${l.why}` : ""}.\n\nIn the reconciled picture it's **${secBias(cv.verdict)} ${cv.net}/100** across ${cv.lenses.length} lenses (confidence ${cv.conf}, ${cv.disagree} disagreement)${cv.dissenters.length ? `; the dissenters are ${cv.dissenters.map(x => x.k).join(", ")}` : "; no lens materially dissents"}.\n\n_Open the ${lensWord} tab for the full breakdown._${note}`;
     }
     // summary / verdict / "should I buy" → full reconciled read
     if (/summar|verdict|14|lens|buy|short|should i|conviction|overall|why/.test(ql) && cv) {
       const linesL = cv.lenses.slice().sort((a, c) => c.v - a.v).map(x => `- **${x.k}** ${x.v}/100 — ${x.why}`).join("\n");
-      return `**${D.sym} — reconciled cross-lens verdict**\n\n**${cv.verdict} · ${cv.net}/100** · confidence ${cv.conf} · ${cv.agree} agree / ${cv.caution} caution / ${cv.fail} against.\n\n${linesL}\n\n${cv.dissenters.length ? `⚠ **Dissenting:** ${cv.dissenters.map(x => x.k).join(", ")} — reconcile these before sizing.` : "✓ Clean confluence — no lens materially dissents."}${pj && pj.pUp != null ? `\n\nML (${pj.horizon}d): P(up) **${Math.round(pj.pUp * 100)}%**${pj.entry != null ? `, entry $${f2(pj.entry)} · stop $${f2(pj.stop)} · T1 $${f2(pj.t1)} · T2 $${f2(pj.t2)}, R:R ${pj.rr}` : ""}.` : ""}${note}`;
+      return `**${D.sym} — reconciled cross-lens bias**\n\n**${secBias(cv.verdict)} · ${cv.net}/100** · confidence ${cv.conf} · ${cv.agree} agree / ${cv.caution} caution / ${cv.fail} against.\n\n${linesL}\n\n${cv.dissenters.length ? `⚠ **Dissenting:** ${cv.dissenters.map(x => x.k).join(", ")} — reconcile these before sizing.` : "✓ Clean confluence — no lens materially dissents."}${pj && pj.pUp != null ? `\n\nML (${pj.horizon}d): P(up) **${Math.round(pj.pUp * 100)}%**${pj.entry != null ? `, entry $${f2(pj.entry)} · stop $${f2(pj.stop)} · T1 $${f2(pj.t1)} · T2 $${f2(pj.t2)}, R:R ${pj.rr}` : ""}.` : ""}${note}`;
     }
     // plan / entry / target / stop → from projection + plan
     if (/plan|trade|entry|target|stop|size|r:r|level/.test(ql)) {
