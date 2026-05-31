@@ -82,14 +82,20 @@ def score_band(s):
     return "90+" if s >= 90 else "80-89" if s >= 80 else "70-79" if s >= 70 else "60-69" if s >= 60 else "<60"
 
 
-def run(verdict_filter=None, min_n=5):
+def run(verdict_filter=None, min_n=5, days=0):
     trades = load_trades()
     if not trades:
         return {"error": "no trades in picks_history.json"}
+    if days and days > 0:
+        import datetime as _dt
+        # cutoff on exit_date (the trade closed within the window); fall back to entry_date
+        cutoff = (_dt.date.today() - _dt.timedelta(days=days)).isoformat()
+        trades = [t for t in trades
+                  if str(t.get("exit_date") or t.get("entry_date") or "") >= cutoff]
     if verdict_filter:
         trades = [t for t in trades if str(t.get("verdict", "")).upper() == verdict_filter.upper()]
 
-    out = {"n_total": len(trades)}
+    out = {"n_total": len(trades), "window_days": days or "all"}
 
     # ── 1. VERDICT TRUTH ──────────────────────────────────────────
     by_verdict = defaultdict(list)
@@ -158,7 +164,7 @@ def print_report(r):
     if r.get("error"):
         print("ERROR:", r["error"]); return
     print("=" * 92)
-    print(f"  PICK FORENSICS — {r['n_total']} closed trades   (why BUY loses / where calls break)")
+    print(f"  PICK FORENSICS — {r['n_total']} closed trades · window={r.get('window_days')}   (why BUY loses)")
     print("=" * 92)
     print("\n[1] VERDICT TRUTH — did the call match the outcome?")
     for v, st in r["verdict_truth"].items():
@@ -193,9 +199,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--verdict", default=None)
     ap.add_argument("--min-n", type=int, default=5)
+    ap.add_argument("--days", type=int, default=0, help="only trades closed in last N days (0=all)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
-    rep = run(verdict_filter=args.verdict, min_n=args.min_n)
+    rep = run(verdict_filter=args.verdict, min_n=args.min_n, days=args.days)
     if args.json:
         print(json.dumps(rep, indent=2, default=str))
     else:
