@@ -179,5 +179,22 @@ def main() -> int:
     return 0
 
 
+def prune_companyfacts(max_age_days: int = 90):
+    """Prune cache/edgar/companyfacts_*.json older than max_age_days (statements change
+    quarterly, so 90d is safe). Keeps the EDGAR cache from growing unbounded (~2.4GB)."""
+    import os, glob, time
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cache', 'edgar')
+    cutoff = time.time() - max_age_days * 86400
+    n = freed = 0
+    for fp in glob.glob(os.path.join(base, 'companyfacts_*.json')):
+        try:
+            if os.path.getmtime(fp) < cutoff:
+                freed += os.path.getsize(fp); os.remove(fp); n += 1
+        except Exception:
+            pass
+    print(f"[edgar-prune] removed {n} stale companyfacts ({freed//1024//1024}MB freed)")
+
+
 if __name__ == "__main__":
+    prune_companyfacts()
     sys.exit(main())
