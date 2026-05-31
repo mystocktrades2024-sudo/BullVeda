@@ -38,4 +38,10 @@ with open(hist, "a") as f:
     f.write(json.dumps(row) + "\n")
 print(f"[accuracy-cron] appended trend line · realized_n={row['realized_n']}")
 PY
+# Weekly Slack digest — Sundays only (day-of-week 7), to avoid daily noise.
+# The daily run still logs + appends the trend line above every day.
+if [ "$(date +%u)" -eq 7 ]; then
+    /usr/bin/python3 "$ROOT/scripts/ml_accuracy_report.py" --slack >> "$LOG" 2>&1
+    echo "[$(date)] ml accuracy Slack digest posted (weekly)" >> "$LOG"
+fi
 echo "[$(date)] ml accuracy snapshot done" >> "$LOG"

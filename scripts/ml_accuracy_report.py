@@ -124,5 +124,68 @@ def main():
     print("=" * 64)
 
 
+def _slack_webhook():
+    url = os.environ.get("SLACK_WEBHOOK_URL")
+    if url:
+        return url
+    envf = BASE / ".env"
+    if envf.exists():
+        for line in envf.read_text().splitlines():
+            if line.startswith("SLACK_WEBHOOK_URL="):
+                return line.split("=", 1)[1].strip()
+    return None
+
+
+def slack_report():
+    """Compact ML-accuracy digest for Slack: champion (live) + realized maturity."""
+    cm = _load("champion_metrics.json")
+    cr = _load("calibration_report.json")
+    cl = _load("close_loop_report.json")
+    L = [":robot_face: *ML Model Accuracy*"]
+    if cr and not cr.get("_error"):
+        L.append(f"_trained {str(cr.get('trained_at'))[:10]} · n={cr.get('n_total')} · "
+                 f"{cr.get('feature_count')} feats_")
+    if cm and not cm.get("_error"):
+        for mode, v in (cm.get("modes") or {}).items():
+            if isinstance(v, dict):
+                da = v.get("direction_accuracy")
+                au = v.get("hit_net_auc")
+                flag = ":white_check_mark:" if (au or 0) >= 0.65 else ":warning:"
+                L.append(f"{flag} *{mode}*: hit-AUC {_num(au, 3)} [{_grade_auc(au)}] · "
+                         f"dir {_num(da, 3)} [{_grade_dir(da)}] · brier {_num(v.get('brier'), 3)}")
+    else:
+        L.append("- no champion_metrics yet")
+    # realized maturity
+    n = (cl or {}).get("n") or (cl or {}).get("n_labeled") if cl and not cl.get("_error") else None
+    if n:
+        rhr = (cl or {}).get("realized_hit_rate")
+        L.append(f":dart: *Realized* (live trades): n={n}" + (f" hit={_num(rhr)}" if rhr is not None else "")
+                 + (" ⚠ n<30, immature" if isinstance(n, (int, float)) and n < 30 else ""))
+    else:
+        L.append(":dart: *Realized*: 0 closed live trades yet — accumulating")
+    L.append("_hit-net AUC is the money metric; direction is 3-class (random=0.33)._")
+    return "\n".join(L)
+
+
+def _slack_post(text):
+    url = _slack_webhook()
+    if not url:
+        print("SLACK_WEBHOOK_URL not set — skipping Slack post")
+        return False
+    import json as _j, urllib.request as _ur
+    try:
+        _ur.urlopen(_ur.Request(url, data=_j.dumps({"text": text}).encode(),
+                    headers={"Content-Type": "application/json"}), timeout=10)
+        return True
+    except Exception as e:
+        print("slack post failed:", e)
+        return False
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    if "--slack" in sys.argv:
+        sent = _slack_post(slack_report())
+        print(f"[ml-accuracy] slack sent={sent}")
+    else:
+        main()
