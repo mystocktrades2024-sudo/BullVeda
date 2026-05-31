@@ -274,7 +274,10 @@ def main(argv: list[str]) -> int:
             override = a.split("=", 1)[1]
     res = write_snapshot(override_date=override, force=force)
     print(json.dumps(res, indent=2))
-    return 0 if res.get("status") == "ok" else 1
+    # exit 0 for success AND idempotent skip ("already snapshotted" is a healthy no-op,
+    # not a failure — returning 1 made launchd/dashboard flag the job degraded every day).
+    # Reserve non-zero for a genuine error status.
+    return 1 if res.get("status") == "error" else 0
 
 
 if __name__ == "__main__":
