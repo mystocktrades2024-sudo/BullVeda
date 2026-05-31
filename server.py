@@ -2456,6 +2456,40 @@ async def journal_api(limit: int = 400):
 _UNIVERSE_CACHE = {"mtime": None, "payload": None}
 _TICKER_FULL_CACHE = {"mtime": None, "index": None}
 
+_REV_TREND_CACHE = {"mtime": None, "map": {}}
+def _revision_trend_for(sym: str):
+    """Real estimate-revision breadth from data/earnings_beat_predictions.json (cached
+    file — quota-free), normalized to the EoWhisperRevisions field names. Powers the
+    Earnings lens whisper/revision panel without any live EODHD call."""
+    import os, json
+    try:
+        p = BASE_DIR / "data" / "earnings_beat_predictions.json"
+        mt = os.path.getmtime(p)
+        global _REV_TREND_CACHE
+        if _REV_TREND_CACHE["mtime"] != mt:
+            d = json.loads(p.read_text())
+            preds = d.get("predictions") or d
+            if isinstance(preds, dict):
+                preds = list(preds.values())
+            m = {}
+            for pr in (preds or []):
+                t = str(pr.get("ticker") or "").upper()
+                rt = (pr.get("breakdown") or {}).get("revision_trend") or {}
+                if t and rt:
+                    m[t] = {
+                        "up": rt.get("up_30d"), "down": rt.get("down_30d"), "net": rt.get("net_30d"),
+                        "pct_90d": rt.get("slope_90d_pct"), "pct_30d": rt.get("slope_30d_pct"),
+                        "direction": rt.get("direction"),
+                        "eps_current": rt.get("eps_current"), "eps_90d_ago": rt.get("eps_90d_ago"),
+                        "series": [v for v in (rt.get("eps_90d_ago"), rt.get("eps_30d_ago"), rt.get("eps_current")) if v is not None],
+                        "period_date": rt.get("period_date"),
+                    }
+            _REV_TREND_CACHE = {"mtime": mt, "map": m}
+        return _REV_TREND_CACHE["map"].get(str(sym).upper())
+    except Exception:
+        return None
+
+
 @app.get("/api/ticker/{sym}")
 async def ticker_full_api(sym: str):
     """Full ~159KB scored row for ONE ticker (everything the 14 detail lenses need).
@@ -2479,6 +2513,9 @@ async def ticker_full_api(sym: str):
             _TICKER_FULL_CACHE = {"mtime": mt, "index": idx}
         row = _TICKER_FULL_CACHE["index"].get(sym)
         if row is not None:
+            _rt = _revision_trend_for(sym)
+            if _rt and not row.get("revision_trend"):
+                row = {**row, "revision_trend": _rt}
             return {"ticker": sym, "source": "bundle", "row": row}
     except Exception:
         pass
