@@ -15261,26 +15261,107 @@ function eoBsPut(S, K, T, sigma, r = 0.04) {
   return eoBsCall(S, K, T, sigma, r) - S + K * Math.exp(-r * T);   // put-call parity
 }
 
+// ── Live Schwab option chain hook ──────────────────────────────────
+// Fetches /api/options/{sym} (REAL Schwab marks/IV/Greeks). Mirrors the
+// usePvOhlcv pattern. NEVER throws — on error/closed-market the endpoint
+// returns 200 with {error}, and we expose state so the ticket can fall
+// back to its Black-Scholes pricer.
+function useSchwabOptions(symbol) {
+  const [data, setData] = React.useState({ state: "loading", chain: null, err: null });
+  React.useEffect(() => {
+    if (typeof fetch === "undefined" || !symbol || symbol === "—") {
+      setData({ state: "idle", chain: null, err: null });
+      return;
+    }
+    let alive = true;
+    setData({ state: "loading", chain: null, err: null });
+    fetch(`/api/options/${encodeURIComponent(symbol)}`, { credentials: "same-origin" })
+      .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(raw => {
+        if (!alive) return;
+        // Endpoint returns {error} (200) when Schwab is unavailable → treat as "no live data"
+        if (!raw || raw.error || !Array.isArray(raw.expirations) || !raw.expirations.length) {
+          setData({ state: "empty", chain: null, err: (raw && raw.error) || null });
+          return;
+        }
+        setData({ state: "ready", chain: raw, err: null });
+      })
+      .catch(err => { if (alive) setData({ state: "error", chain: null, err: String(err) }); });
+    return () => { alive = false; };
+  }, [symbol]);
+  return data;
+}
+
+// Pull the real leg (call/put marks + iv + greeks) at a given strike from a
+// live Schwab chain payload, preferring the nearest expiration. Returns null
+// when the chain is absent or the strike has no live quote.
+function eoChainLegAtStrike(chain, strike, otype) {
+  if (!chain || !Array.isArray(chain.expirations) || !chain.expirations.length) return null;
+  const exp = chain.expirations[0];
+  if (!exp || !Array.isArray(exp.strikes)) return null;
+  // closest listed strike to the requested one
+  let best = null, bd = Infinity;
+  for (const s of exp.strikes) {
+    const d = Math.abs((s.strike || 0) - strike);
+    if (d < bd) { bd = d; best = s; }
+  }
+  if (!best) return null;
+  const leg = otype === "put" ? best.put : best.call;
+  if (!leg) return null;
+  const mark = (leg.mark != null) ? leg.mark
+             : (leg.bid != null && leg.ask != null) ? (leg.bid + leg.ask) / 2 : null;
+  return { strike: best.strike, mark, iv: leg.iv, delta: leg.delta,
+           gamma: leg.gamma, theta: leg.theta, vega: leg.vega, dte: exp.dte };
+}
+
 // Build an option-ticket object `o` (shape expected by the ported OtkProfitGrid)
 // from the ticker's REAL Schwab/EODHD options data — fallback-safe (never throws).
-function eoBuildOptTicket(ticker, mode) {
+// `live` (optional) is the /api/options payload from useSchwabOptions — when
+// present and usable, its REAL ATM strike/IV/DTE/premium override the bundle +
+// BS-theo fallback. `o.source` records which path supplied the premium/IV.
+function eoBuildOptTicket(ticker, mode, live) {
   const t = ticker || {};
   const { flow, enr } = eoBundle(t);
-  const spot = eoNum(t.price) !== null ? eoNum(t.price) : 100;
+  // Prefer live Schwab spot when available, else the ticker price.
+  let spot = (live && eoNum(live.spot) !== null) ? eoNum(live.spot)
+           : (eoNum(t.price) !== null ? eoNum(t.price) : 100);
   // DTE: real ATM dte from flow, else mode default (SWING~35 / POSITION~63 / INVESTMENT~245)
   const modeDte = mode === "POSITION" ? 63 : mode === "INVESTMENT" ? 245 : 35;
   const dteReal = eoNum(flow.atm_dte);
-  const dte = dteReal !== null && dteReal > 0 ? Math.round(dteReal) : modeDte;
+  let dte = dteReal !== null && dteReal > 0 ? Math.round(dteReal) : modeDte;
   // ATM IV: enr.live_iv preferred, then flow.atm_iv — normalize fraction→percent
   let ivRaw = eoNum(enr.live_iv) !== null ? eoNum(enr.live_iv) : eoNum(flow.atm_iv);
   if (ivRaw === null) ivRaw = 49;                    // fallback σ
-  const iv = ivRaw <= 5 ? ivRaw * 100 : ivRaw;        // fraction → percent
+  let iv = ivRaw <= 5 ? ivRaw * 100 : ivRaw;          // fraction → percent
   // ATM call premium: prefer a real chain mid, else BS-theo at-the-money
-  const strike = Math.round(spot);
+  let strike = Math.round(spot);
   const premReal = eoNum(flow.atm_call_mid) !== null ? eoNum(flow.atm_call_mid)
                  : (eoNum(flow.atm_premium) !== null ? eoNum(flow.atm_premium) : null);
-  const premTheo = +eoBsCall(spot, strike, Math.max(1, dte) / 365, Math.max(0.05, iv / 100), 0.045).toFixed(2);
-  const prem = premReal !== null && premReal > 0 ? +premReal.toFixed(2) : (premTheo > 0 ? premTheo : +(spot * 0.05).toFixed(2));
+  let prem = null;
+  let source = "bs";          // "schwab" once any live field is applied below
+
+  // ── REAL Schwab override ────────────────────────────────────────
+  // When the live chain is usable, prefer its ATM strike/IV/DTE/premium.
+  if (live && live.atm) {
+    const a = live.atm;
+    if (eoNum(a.strike) !== null) { strike = Math.round(eoNum(a.strike)); source = "schwab"; }
+    if (eoNum(a.dte) !== null && eoNum(a.dte) > 0) { dte = Math.round(eoNum(a.dte)); source = "schwab"; }
+    if (eoNum(a.iv) !== null) {
+      const liv = eoNum(a.iv);
+      iv = liv <= 5 ? liv * 100 : liv;               // fraction → percent
+      source = "schwab";
+    }
+    if (eoNum(a.call_mid) !== null && eoNum(a.call_mid) > 0) {
+      prem = +eoNum(a.call_mid).toFixed(2);
+      source = "schwab";
+    }
+  }
+
+  // BS-theo / bundle fallback for premium when no live mark
+  if (prem === null) {
+    const premTheo = +eoBsCall(spot, strike, Math.max(1, dte) / 365, Math.max(0.05, iv / 100), 0.045).toFixed(2);
+    prem = premReal !== null && premReal > 0 ? +premReal.toFixed(2) : (premTheo > 0 ? premTheo : +(spot * 0.05).toFixed(2));
+  }
   const be = +(strike + prem).toFixed(2);
   // target: Plan T1 if present, else +6% move
   const target = eoNum(t.t1) !== null ? eoNum(t.t1) : +(spot * 1.06).toFixed(2);
@@ -15290,18 +15371,26 @@ function eoBuildOptTicket(ticker, mode) {
   const erInWindow = erDays !== null && erDays <= dte;
   const ivCrush = Math.round(iv * 0.34);              // vol-pts dropped post-print
   return { spot, prem, strike, be, target, stop, iv, dte, sym: t.symbol || "—",
-           erDays, erInWindow, ivCrush };
+           erDays, erInWindow, ivCrush, source,
+           // raw live chain (for per-strike marks when the user picks a strike)
+           liveChain: (live && Array.isArray(live.expirations)) ? live : null };
 }
 
 // Profit calculator — option P&L% across (price level) × (days held).
 // Ported VERBATIM from lens-options-ticket.jsx OtkProfitGrid({ o }); §2 grid + §8 manual mode/presets.
-function OtkProfitGrid({ o }) {
+function OtkProfitGrid({ o, liveState, liveErr }) {
   const [ivShift, setIvShift] = React.useState(0);          // vol-point shift (−10/0/+10) or "crush"
   const [dir, setDir] = React.useState("buy");              // buy | write
   const [otype, setOtype] = React.useState("call");          // call | put
   const [strike, setStrike] = React.useState(o.strike);
   const [prem, setPrem] = React.useState(o.prem);
   const [contracts, setContracts] = React.useState(1);
+  // Is a real Schwab chain backing this ticket? (vs BS-theo illustrative)
+  const hasLiveChain = !!o.liveChain;
+  // Whether the CURRENTLY-shown premium came from a live Schwab mark.
+  // (true initially when the ATM premium was Schwab-sourced; recomputed on
+  // strike/type changes via the effect below.)
+  const [premLive, setPremLive] = React.useState(o.source === "schwab");
   // strategy presets — each pins direction + option type + a sensible strike
   const STRATS = {
     "Long Call": { dir: "buy", otype: "call", k: () => Math.round(o.spot), note: "bullish" },
@@ -15317,9 +15406,27 @@ function OtkProfitGrid({ o }) {
     setStrat(name); setDir(s.dir); setOtype(s.otype); setStrike(s.k());
   };
   // reset manual inputs when the underlying ticket changes
-  React.useEffect(() => { setStrike(o.strike); setPrem(o.prem); }, [o.strike, o.prem]);
+  React.useEffect(() => {
+    setStrike(o.strike); setPrem(o.prem); setPremLive(o.source === "schwab");
+  }, [o.strike, o.prem, o.source]);
+  // Live per-strike leg from the Schwab chain for the CURRENTLY selected strike/type.
+  // Drives real premium + real IV when the user picks a strike that Schwab quotes.
+  const liveLeg = hasLiveChain ? eoChainLegAtStrike(o.liveChain, strike, otype) : null;
+  // When the user changes strike/type and Schwab has a real mark, auto-fill premium.
+  React.useEffect(() => {
+    if (liveLeg && liveLeg.mark != null && liveLeg.mark > 0) {
+      setPrem(+liveLeg.mark.toFixed(2)); setPremLive(true);
+    } else if (hasLiveChain) {
+      setPremLive(false);                 // strike not quoted live → BS for this leg
+    }
+    // eslint-disable-next-line
+  }, [strike, otype]);
   const crush = ivShift === "crush";
-  const sigma = Math.max(0.05, (o.iv + (crush ? -(o.ivCrush || Math.round(o.iv * 0.34)) : ivShift)) / 100);
+  // Base IV: prefer the live per-strike IV (already a fraction from Schwab) when present.
+  const liveIvPct = (liveLeg && liveLeg.iv != null && liveLeg.iv > 0)
+    ? (liveLeg.iv <= 5 ? liveLeg.iv * 100 : liveLeg.iv) : null;
+  const baseIv = liveIvPct != null ? liveIvPct : o.iv;
+  const sigma = Math.max(0.05, (baseIv + (crush ? -(o.ivCrush || Math.round(baseIv * 0.34)) : ivShift)) / 100);
   const entry = prem;                                         // premium per share (manual)
   const r = 0.045;
   const totalCost = entry * 100 * contracts * (dir === "write" ? -1 : 1);
@@ -15352,7 +15459,27 @@ function OtkProfitGrid({ o }) {
     <div className="otk-pg">
       <div className="otk-pg-hd">
         <span className="otk-pg-title mono">{dir === "write" ? "WRITE" : "LONG"} ${strike} {otype.toUpperCase()} · {o.dte} DTE · {contracts}×</span>
-        <span className="otk-pg-params mono dim2">illustrative BS · σ {(sigma * 100).toFixed(0)}% · r {(r * 100).toFixed(1)}% · anchored on live spot ${o.spot.toFixed(2)}</span>
+        {(() => {
+          // Live-data indicator: real Schwab marks vs illustrative BS model.
+          const live = hasLiveChain && premLive;
+          const label = live ? "live Schwab chain"
+                      : hasLiveChain ? "live chain · BS leg (strike not quoted)"
+                      : "BS model (illustrative)";
+          const dotColor = live ? "#28d17c" : hasLiveChain ? "#e0b341" : "#7a8590";
+          const tip = liveErr ? ("Schwab: " + liveErr)
+                    : liveState === "loading" ? "fetching Schwab chain…"
+                    : live ? "premium/IV/DTE from live Schwab marks"
+                    : "Schwab chain unavailable — Black-Scholes theoretical pricing";
+          return (
+            <span className="otk-pg-src mono dim2" title={tip}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+              <span style={{ width: "7px", height: "7px", borderRadius: "50%",
+                             background: dotColor, display: "inline-block" }}></span>
+              {label}
+            </span>
+          );
+        })()}
+        <span className="otk-pg-params mono dim2">{(hasLiveChain && premLive) ? "real marks" : "illustrative BS"} · σ {(sigma * 100).toFixed(0)}% · r {(r * 100).toFixed(1)}% · anchored on live spot ${o.spot.toFixed(2)}</span>
       </div>
       <div className="otk-pg-form">
         <label className="otk-pg-fld mono">Strategy
@@ -15415,8 +15542,12 @@ function OtkProfitGrid({ o }) {
 }
 
 function EoProfitGrid({ ticker, mode }) {
-  const o = eoBuildOptTicket(ticker, mode);
-  return <OtkProfitGrid o={o} />;
+  const sym = (ticker && ticker.symbol) || null;
+  const live = useSchwabOptions(sym);
+  // pass the ready chain payload (or null) into the ticket builder
+  const liveChain = live.state === "ready" ? live.chain : null;
+  const o = eoBuildOptTicket(ticker, mode, liveChain);
+  return <OtkProfitGrid o={o} liveState={live.state} liveErr={live.err} />;
 }
 
 function EoProfitGridLegacy({ ticker }) {

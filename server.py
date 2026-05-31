@@ -6377,6 +6377,157 @@ async def portfolio_live_prices(tickers: str = ""):
     }
 
 
+# ─────────────────────────────────────────────────────────────────────
+# REAL Schwab option chain → Options Profit Calculator.
+# Schwab Market Data /chains has its own rate-limit pool (separate from the
+# EODHD daily quota), so this is NOT blocked when EODHD is exhausted.
+# In-memory cache ~10 min/symbol (mirrors _STATUS_CACHE TTL pattern).
+# Fallback-safe: any failure returns HTTP 200 with {error, spot?} so the
+# frontend degrades to its own Black-Scholes pricer.
+# ─────────────────────────────────────────────────────────────────────
+_OPTIONS_CHAIN_CACHE: dict = {}          # {SYM: {"ts": float, "payload": dict}}
+_OPTIONS_CHAIN_TTL_S = 600               # 10 min
+
+def _schwab_spot_fallback(sym: str):
+    """Best-effort live price when the chain itself can't be fetched."""
+    try:
+        import schwab_client
+        blob = schwab_client.get_quote(sym) or {}
+        q = blob.get("quote") or {}
+        px = q.get("lastPrice") or q.get("regularMarketLastPrice") or q.get("bidPrice")
+        if isinstance(px, (int, float)):
+            return round(float(px), 4)
+    except Exception:
+        pass
+    return None
+
+
+@app.get("/api/options/{sym}")
+async def options_chain_api(sym: str):
+    """Live Schwab option marks (premium, IV, Greeks) for one ticker.
+
+    Shape (compact, consumed by the Options Profit Calculator):
+      {
+        sym, spot, source, ts,
+        atm: {dte, iv, call_mid, put_mid, strike},
+        expirations: [
+          {dte, expiration, strikes: [
+             {strike,
+              call:{mark,bid,ask,iv,delta,gamma,theta,vega},
+              put :{mark,bid,ask,iv,delta,gamma,theta,vega}} ]}
+        ]
+      }
+    Never 500s. On any error returns {sym, error, spot?} with HTTP 200.
+    """
+    import time as _t
+    sym = (sym or "").strip().upper()
+    if not sym:
+        return {"sym": sym, "error": "empty symbol", "spot": None}
+
+    now = _t.time()
+    cached = _OPTIONS_CHAIN_CACHE.get(sym)
+    if cached and (now - cached["ts"]) < _OPTIONS_CHAIN_TTL_S:
+        return cached["payload"]
+
+    try:
+        import schwab_client
+    except Exception as e:
+        return {"sym": sym, "error": f"schwab_client import failed: {e}", "spot": None}
+
+    # Fetch chain (calls+puts, a handful of strikes around the money, ~3 expirations)
+    try:
+        chain = schwab_client.get_chains(sym, contract_type="ALL", strike_count=8,
+                                         include_underlying=True)
+    except Exception as e:
+        return {"sym": sym, "error": f"get_chains failed: {e}",
+                "spot": _schwab_spot_fallback(sym)}
+
+    if not chain or not isinstance(chain, dict):
+        return {"sym": sym, "error": "no chain returned (market closed / token / no options)",
+                "spot": _schwab_spot_fallback(sym)}
+
+    try:
+        greeks = schwab_client.extract_chain_greeks(chain, max_expirations=3)
+    except Exception as e:
+        return {"sym": sym, "error": f"extract_chain_greeks failed: {e}",
+                "spot": chain.get("underlyingPrice") or _schwab_spot_fallback(sym)}
+
+    spot = greeks.get("underlying_price") or chain.get("underlyingPrice") \
+        or _schwab_spot_fallback(sym)
+    exps = greeks.get("expirations") or []
+    if spot is None or not exps:
+        return {"sym": sym, "error": "chain present but no usable spot/expirations",
+                "spot": spot}
+
+    def _leg(c: dict) -> dict:
+        # Schwab encodes "no quote" as -999.0 — null those out.
+        def _v(x):
+            return None if (x is None or (isinstance(x, (int, float)) and x <= -999)) else x
+        return {
+            "mark":  _v(c.get("mark")),
+            "bid":   _v(c.get("bid")),
+            "ask":   _v(c.get("ask")),
+            "iv":    _v(c.get("iv")),
+            "delta": _v(c.get("delta")),
+            "gamma": _v(c.get("gamma")),
+            "theta": _v(c.get("theta")),
+            "vega":  _v(c.get("vega")),
+        }
+
+    out_exps = []
+    for ex in exps:
+        calls_by_strike = {}
+        puts_by_strike = {}
+        for c in (ex.get("calls") or []):
+            k = c.get("strike")
+            if k is not None:
+                calls_by_strike[float(k)] = c
+        for p in (ex.get("puts") or []):
+            k = p.get("strike")
+            if k is not None:
+                puts_by_strike[float(k)] = p
+        all_strikes = sorted(set(calls_by_strike) | set(puts_by_strike))
+        strikes = []
+        for k in all_strikes:
+            strikes.append({
+                "strike": k,
+                "call": _leg(calls_by_strike.get(k, {})),
+                "put":  _leg(puts_by_strike.get(k, {})),
+            })
+        out_exps.append({
+            "dte": ex.get("dte"),
+            "expiration": ex.get("expiration"),
+            "strikes": strikes,
+        })
+
+    # ATM = strike closest to spot in the nearest expiration
+    atm = None
+    if out_exps and out_exps[0]["strikes"]:
+        near = out_exps[0]
+        atm_row = min(near["strikes"], key=lambda s: abs((s["strike"] or 0) - spot))
+        call_iv = atm_row["call"].get("iv")
+        put_iv = atm_row["put"].get("iv")
+        atm_iv = call_iv if call_iv is not None else put_iv
+        atm = {
+            "dte": near.get("dte"),
+            "strike": atm_row["strike"],
+            "iv": atm_iv,
+            "call_mid": atm_row["call"].get("mark"),
+            "put_mid": atm_row["put"].get("mark"),
+        }
+
+    payload = {
+        "sym": sym,
+        "spot": spot,
+        "source": "schwab.marketdata.v1/chains",
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "atm": atm,
+        "expirations": out_exps,
+    }
+    _OPTIONS_CHAIN_CACHE[sym] = {"ts": now, "payload": payload}
+    return payload
+
+
 @app.post("/api/portfolio/add")
 async def portfolio_add(req: Request, _: HTTPBasicCredentials = Depends(_require_action("submit_trade"))):
     body = await req.json()
