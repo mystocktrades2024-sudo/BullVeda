@@ -13154,14 +13154,20 @@ function LensRisk({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s3 = useStateToggle("rk-3"); const s4 = useStateToggle("rk-4");
   const s5 = useStateToggle("rk-5");
 
+  const symbol = (ticker && ticker.symbol) || (ticker && ticker.raw && ticker.raw.ticker) || null;
+  const { fund } = useFundamentals(symbol);
+
   const raw = invRaw(ticker);
   const erDays = (ticker && ticker.earnings && ticker.earnings.days != null) ? ticker.earnings.days
                : (raw.earn_days != null ? raw.earn_days : null);
   const erTxt  = erDays != null ? erDays : "—";
   const rMult  = (ticker && ticker.rMultiple != null) ? SmrFix(ticker.rMultiple, 2, "—") : "—";
   const stop   = (ticker && ticker.stop != null) ? `$${SmrFix(ticker.stop, 2, "—")}` : "—";
-  // beta is real (ticker.beta / raw.beta); post-fill book β not in feed → no synthetic offset
-  const betaReal = (ticker && ticker.beta != null) ? ticker.beta : (raw.beta != null ? raw.beta : null);
+  // beta: bundle row (ticker.beta / raw.beta) → EODHD fundamentals (highlights.Beta) fallback.
+  const betaFund = fundNum((fund && fund.highlights && fund.highlights.Beta));
+  const betaReal = (ticker && ticker.beta != null) ? ticker.beta
+                 : (raw.beta != null ? raw.beta
+                 : (betaFund != null ? betaFund : null));
   const betaPre  = betaReal != null ? SmrFix(betaReal, 2, "—") : "—";
   const sharpe   = raw.sharpe_126d != null ? SmrFix(raw.sharpe_126d, 2, "—") : "—";
 
@@ -13211,7 +13217,7 @@ function LensRisk({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="portfolio CVaR (book) + per-ticker risk-adjusted return"
           style={headerStyle} right={<StateToggle name="rk-3" />} />
         <StateWrap state={s3.value} source="cvar_portfolio + ticker.raw.sharpe/sortino">
-          <div className="lens-pad"><SmrVarTable ticker={ticker} /></div>
+          <div className="lens-pad"><SmrVarTable ticker={ticker} betaFallback={betaReal} /></div>
         </StateWrap>
       </div>
 
@@ -13324,8 +13330,13 @@ function SmrRiskCones({ ticker }) {
   );
 }
 
-function SmrVarTable({ ticker }) {
+function SmrVarTable({ ticker, betaFallback }) {
   const raw = invRaw(ticker);
+  // Beta: bundle row → caller-provided fallback (LensRisk resolves EODHD highlights.Beta).
+  const betaRaw = (ticker && ticker.beta != null) ? ticker.beta
+                : (raw.beta != null ? raw.beta
+                : (betaFallback != null ? betaFallback : null));
+  const betaTxt = betaRaw != null ? Number(betaRaw).toFixed(2) : "—";
   const cvarObj = ssData().cvar_portfolio || {};
   const cvarErr = cvarObj && cvarObj.error;
   // §6a — horizon-aware VaR/CVaR. cvar_portfolio carries 1-day book figures; scale
@@ -13349,6 +13360,7 @@ function SmrVarTable({ ticker }) {
     { metric: "CVaR · " + lbl + " · 95% (book)", v: cvarV, abs: cvarErr ? note : "tail avg", tone: "amb" },
     { metric: "Sharpe · 126d",          v: sharpe,  abs: "per-ticker", tone: raw.sharpe_126d > 0 ? "gn" : raw.sharpe_126d != null ? "rd" : "ink" },
     { metric: "Sortino · 126d",         v: sortino, abs: "per-ticker", tone: raw.sortino_126d > 0 ? "gn" : raw.sortino_126d != null ? "rd" : "ink" },
+    { metric: "Beta · vs SPY",          v: betaTxt, abs: betaTxt !== "—" ? "per-name" : "not in feed", tone: "ink" },
     { metric: "Kelly size",             v: "—", abs: "sizing head not in bundle", tone: "ink" },
     { metric: "Max DD if stop hits",    v: "—", abs: "equity-curve head not in bundle", tone: "ink" },
   ];
@@ -13766,12 +13778,18 @@ function InvDcfSensitivity({ ticker, fund, status }) {
   }
   const hl  = (fund && fund.highlights) || {};
   const sh  = (fund && fund.shares) || {};
+  const val = (fund && fund.valuation) || {};
 
   // Real inputs (each independently fallback-safe).
   const cash = (fund && Array.isArray(fund.cashflow_5y)) ? fund.cashflow_5y.slice() : [];
   cash.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
   const latestFcf = cash.length ? fundNum(cash[0].freeCashFlow) : null;
   const mcap   = fundNum(hl.MarketCapitalization);
+  // Net debt = EnterpriseValue − MarketCapitalization (both EODHD). If either is
+  // absent, fall back to net debt = 0 (equity ≈ firm value) and label accordingly.
+  const ev      = fundNum(val.EnterpriseValue);
+  const haveNetDebt = (ev != null && mcap != null);
+  const netDebt = haveNetDebt ? (ev - mcap) : 0;
   // shares outstanding: highlights → shares stat → back out from mcap/price
   const shares = fundNum(hl.SharesOutstanding) != null ? fundNum(hl.SharesOutstanding)
                : (fundNum(sh.SharesOutstanding) != null ? fundNum(sh.SharesOutstanding)
@@ -13781,14 +13799,16 @@ function InvDcfSensitivity({ ticker, fund, status }) {
   const gAnchor = revG != null ? Math.max(0.02, Math.min(0.05, revG)) : 0.03;
 
   // Base intrinsic value at baseW / gAnchor:
-  //   real path → Gordon on FCF/share: FCF·(1+g)/(w−g) per share, less net debt/share.
-  //   net debt not in feed → treated as 0 (equity≈firm value) and labelled below.
+  //   real path → Gordon on FCF/share gives FIRM value/share; subtract net-debt/share
+  //   to get equity value/share. Net debt = EV − mktcap (EODHD); 0 if either absent.
   const baseW = 0.09, baseG = gAnchor;
-  let base, real = false, fcfShare = null;
+  let base, real = false, fcfShare = null, netDebtShare = null;
   if (latestFcf != null && shares != null && shares > 0) {
     fcfShare = latestFcf / shares;
-    const gordon = fcfShare * (1 + baseG) / (baseW - baseG); // per-share intrinsic at base case
-    if (isFinite(gordon) && gordon > 0) { base = gordon; real = true; }
+    netDebtShare = netDebt / shares; // 0 when net debt unavailable
+    const firmShare = fcfShare * (1 + baseG) / (baseW - baseG); // firm value/share at base case
+    const equityShare = firmShare - netDebtShare;               // intrinsic EQUITY value/share
+    if (isFinite(equityShare) && equityShare > 0) { base = equityShare; real = true; }
   }
   // NO demo data: if a real Gordon base can't be built from FCF/share + shares,
   // show an honest unavailable state rather than a fabricated fair value.
@@ -13807,8 +13827,12 @@ function InvDcfSensitivity({ ticker, fund, status }) {
 
   const waccs = [0.08, 0.09, 0.10, 0.11];
   const grows = [Math.max(0.01, baseG - 0.01), baseG, Math.min(0.06, baseG + 0.01), Math.min(0.07, baseG + 0.02)];
-  // verbatim sensitivity: scale base case by the Gordon ratio at (w,g)
-  const fv = (w, g) => base * ((baseW - baseG) / (w - g));
+  // Sensitivity: scale the FIRM value/share by the Gordon ratio at (w,g), then
+  // subtract the (constant) net-debt/share to recover equity value/share. Net debt
+  // does not move with WACC/growth, so only the firm-value leg is scaled.
+  const baseFirmShare = base + (netDebtShare || 0); // reconstruct firm/share at base case
+  const nds = netDebtShare || 0;
+  const fv = (w, g) => baseFirmShare * ((baseW - baseG) / (w - g)) - nds;
   const tone = mos => mos >= 8 ? "gn" : mos >= 0 ? "amb" : "rd";
 
   return (
@@ -13833,7 +13857,9 @@ function InvDcfSensitivity({ ticker, fund, status }) {
       </table>
       <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 6 }}>
         Each cell = intrinsic value at that discount rate &amp; perpetual growth; green = trades below fair (margin), red = premium. {real
-          ? <span>Base case (<b>{(baseW*100).toFixed(0)}% / {(baseG*100).toFixed(0)}%</b>) built from latest FCF/share &amp; revenue-growth anchor (EODHD). Net debt not in feed → equity≈firm value.</span>
+          ? <span>Base case (<b>{(baseW*100).toFixed(0)}% / {(baseG*100).toFixed(0)}%</b>) built from latest FCF/share &amp; revenue-growth anchor (EODHD). {haveNetDebt
+              ? <span>Net debt {netDebt < 0 ? "−" : ""}${(Math.abs(netDebt)/1e9).toFixed(1)}B (EV−mktcap) deducted → equity value/share.</span>
+              : <span>Net debt not in feed → equity≈firm value.</span>}</span>
           : <span>{status === "loading" ? "Fundamentals loading — grid uses synthetic base." : "FCF/share or shares not in feed → grid uses synthetic base (estimate-not-in-feed)."}</span>}
       </div>
     </div>
@@ -20388,6 +20414,38 @@ function BookRiskPanel({ pos, equity, cash, closed, onTicker }) {
   const [targetVol, setTargetVol] = useState(15);
   const [sortRisk, setSortRisk] = useState(true);
 
+  // ── Crowding wire: per-name EODHD fundamentals (short interest / days-to-cover /
+  // institutional %). The paper book is ≤10 names → fetch each once, cache by symbol.
+  // crowdFund[sym] === undefined → not yet fetched; null → fetched but no data; obj → shares block.
+  const [crowdFund, setCrowdFund] = useState({});
+  const crowdSyms = useMemo(() => {
+    const seen = {};
+    (Array.isArray(pos) ? pos : []).forEach(p => {
+      const s = p && p.sym ? String(p.sym).toUpperCase() : null;
+      if (s) seen[s] = 1;
+    });
+    return Object.keys(seen);
+  }, [pos]);
+  useEffect(() => {
+    if (typeof fetch === "undefined") return;            // render-safe (renderToString)
+    let alive = true;
+    const need = crowdSyms.filter(s => crowdFund[s] === undefined);
+    if (!need.length) return;
+    // Mark in-flight as null up-front so we never double-fetch (concurrency guard).
+    setCrowdFund(prev => {
+      const nx = { ...prev };
+      need.forEach(s => { if (nx[s] === undefined) nx[s] = null; });
+      return nx;
+    });
+    need.forEach(sym => {
+      fetch("/api/fundamentals/" + encodeURIComponent(sym), { credentials: "same-origin" })
+        .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .then(j => { if (!alive) return; const sh = (j && j.shares) || null; setCrowdFund(prev => ({ ...prev, [sym]: sh })); })
+        .catch(() => { if (!alive) return; setCrowdFund(prev => ({ ...prev, [sym]: null })); });
+    });
+    return () => { alive = false; };
+  }, [crowdSyms]);
+
   const m = useMemo(() => {
     const all = Array.isArray(pos) ? pos : [];
     // priced equity legs only (need mv to weight anything honestly)
@@ -20674,25 +20732,61 @@ function BookRiskPanel({ pos, equity, cash, closed, onTicker }) {
         })()}
       </div>
 
-      {/* ── Crowding & positioning: needs short-interest / 13F feed → unavailable, labeled ── */}
+      {/* ── Crowding & positioning: per-name short interest / DTC / institutional % from EODHD ── */}
       <div className="lab-card">
         <div className="lab-card-h mono">CROWDING &amp; POSITIONING · per name</div>
-        <table className="dtable brk-tbl">
-          <thead><tr><th>Name</th><th className="r">Short int.</th><th className="r">Days-to-cover</th><th className="r">13F Δ qtr</th><th className="r">Crowding</th><th className="r">Capacity</th></tr></thead>
-          <tbody>
-            {m.names.slice().sort((a, b) => b.wtPct - a.wtPct).map((r, i) => (
-              <tr key={r.sym + "_" + i} className="brk-row" onClick={() => onTick(r.sym)}>
-                <td className="mono"><b>{r.sym}</b></td>
-                <td className="r mono dim2">—</td>
-                <td className="r mono dim2">—</td>
-                <td className="r mono dim2">—</td>
-                <td className="r mono dim2">—</td>
-                <td className="r mono dim2">—</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="lab-verdict mono dim2">Crowding blends short interest, days-to-cover and 13F flow — none of which are in the bundle, so every cell shows <b>—</b> rather than a fabricated score. Wire a short-interest / 13F feed to populate this.</div>
+        {(() => {
+          // Short-float fields come back as fractions (0.12) OR percents (12) → normalize to %.
+          const toPct = (v) => { const n = fundNum(v); if (n === null) return null; return Math.abs(n) <= 1 ? n * 100 : n; };
+          const crowdRows = m.names.slice().sort((a, b) => b.wtPct - a.wtPct).map(r => {
+            const sym = String(r.sym || "").toUpperCase();
+            const sh = crowdFund[sym];                 // undefined=loading, null=none, obj=shares block
+            const loading = sh === undefined;
+            const shortFloat = sh ? toPct(sh.ShortPercentFloat) : null;
+            const dtc        = sh ? fundNum(sh.ShortRatio) : null;
+            const instPct    = sh ? toPct(sh.PercentInstitutions) : null;
+            // Crowding read: high short-float OR high institutional ownership = crowded.
+            let crowd = null;
+            if (shortFloat !== null || instPct !== null) {
+              const sfScore = shortFloat !== null ? Math.min(1, shortFloat / 20) : 0;     // 20%+ short = max
+              const inScore = instPct    !== null ? Math.min(1, Math.max(0, (instPct - 60) / 40)) : 0; // 60→100% inst
+              const c = Math.max(sfScore, inScore);
+              crowd = c >= 0.66 ? "high" : c >= 0.33 ? "mod" : "low";
+            }
+            return { sym: r.sym, wt: r.wtAbs, loading, shortFloat, dtc, instPct, crowd };
+          });
+          // Portfolio-level read: weight-weighted avg short-float over names that have it.
+          let wSum = 0, sfW = 0, highShort = 0, haveAny = false;
+          crowdRows.forEach(c => {
+            if (c.shortFloat !== null) { haveAny = true; sfW += c.shortFloat * (c.wt || 0); wSum += (c.wt || 0); if (c.shortFloat > 10) highShort++; }
+          });
+          const avgSF = (haveAny && wSum) ? sfW / wSum : null;
+          const cTone = (k) => k === "high" ? "rd" : k === "mod" ? "amb" : k === "low" ? "gn" : "ink";
+          return (
+            <React.Fragment>
+              <div className="brk-tiles" style={{ gridTemplateColumns: "repeat(3,1fr)", margin: "0 0 10px" }}>
+                <BrkTile l="Wt-avg short float" v={avgSF !== null ? avgSF.toFixed(1) + "%" : "—"} s="weighted by position" tone={avgSF !== null ? (avgSF > 10 ? "rd" : avgSF > 5 ? "amb" : "gn") : "ink"} small />
+                <BrkTile l="Names >10% short" v={haveAny ? String(highShort) : "—"} s={`of ${crowdRows.length} names`} tone={highShort > 0 ? "amb" : "gn"} small />
+                <BrkTile l="High-crowding" v={haveAny ? String(crowdRows.filter(c => c.crowd === "high").length) : "—"} s="short or 13F crowded" tone={crowdRows.some(c => c.crowd === "high") ? "amb" : "gn"} small />
+              </div>
+              <table className="dtable brk-tbl">
+                <thead><tr><th>Name</th><th className="r">Short float</th><th className="r">Days-to-cover</th><th className="r">Institutional %</th><th className="r">Crowding</th></tr></thead>
+                <tbody>
+                  {crowdRows.map((c, i) => (
+                    <tr key={c.sym + "_" + i} className="brk-row" onClick={() => onTick(c.sym)}>
+                      <td className="mono"><b>{c.sym}</b></td>
+                      <td className="r mono dim2">{c.loading ? "…" : (c.shortFloat !== null ? c.shortFloat.toFixed(1) + "%" : "—")}</td>
+                      <td className="r mono dim2">{c.loading ? "…" : (c.dtc !== null ? c.dtc.toFixed(1) : "—")}</td>
+                      <td className="r mono dim2">{c.loading ? "…" : (c.instPct !== null ? c.instPct.toFixed(0) + "%" : "—")}</td>
+                      <td className={`r mono kpi-tone--${cTone(c.crowd)}`}>{c.loading ? "…" : (c.crowd ? c.crowd.toUpperCase() : "—")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="lab-verdict mono dim2">Short float, days-to-cover and institutional ownership are <b>REAL</b> per-name EODHD fundamentals (one fetch per book name). Crowding flags a name when short float ≥ ~13% <i>or</i> institutional ownership is very high (≥ ~87%) — both mark a consensus/squeeze-prone position. Cells show <b>—</b> where a name's field is absent. Paper book — informational, not orders.</div>
+            </React.Fragment>
+          );
+        })()}
       </div>
 
       {/* ── Risk contribution: weight REAL; standalone-vol DERIVED from |pnl%| (labeled) ── */}
