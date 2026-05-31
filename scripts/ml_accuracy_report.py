@@ -172,14 +172,18 @@ def _slack_post(text):
     if not url:
         print("SLACK_WEBHOOK_URL not set — skipping Slack post")
         return False
-    import json as _j, urllib.request as _ur
-    try:
-        _ur.urlopen(_ur.Request(url, data=_j.dumps({"text": text}).encode(),
-                    headers={"Content-Type": "application/json"}), timeout=10)
-        return True
-    except Exception as e:
-        print("slack post failed:", e)
-        return False
+    import json as _j, urllib.request as _ur, time as _t
+    for _attempt in range(3):  # retry — network/DNS is intermittently flaky (iboss)
+        try:
+            _ur.urlopen(_ur.Request(url, data=_j.dumps({"text": text}).encode(),
+                        headers={"Content-Type": "application/json"}), timeout=10)
+            return True
+        except Exception as e:
+            if _attempt == 2:
+                print("slack post failed after 3 tries:", e)
+                return False
+            _t.sleep(3 * (_attempt + 1))
+    return False
 
 
 if __name__ == "__main__":
