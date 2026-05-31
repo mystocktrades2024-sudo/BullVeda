@@ -4397,6 +4397,23 @@ async def setup_backtest_api(setup: str = "", min_score: int = 60, days: int = 3
     }
 
 
+@app.get("/api/public-config")
+async def public_config_api():
+    """Public, client-safe config for the marketing landing page (SwingTrade Landing.html).
+
+    Returns ONLY publishable values: the Supabase project URL + the anon/publishable
+    key (designed to be exposed in client JS), plus the terminal route. NEVER returns
+    SUPABASE_SERVICE_KEY. If the anon key isn't configured the landing's Supabase Auth
+    path stays dormant and CTAs fall back to the direct handoff. No auth required.
+    """
+    import os
+    return {
+        "supabase_url": os.environ.get("SUPABASE_URL", ""),
+        "supabase_anon_key": os.environ.get("SUPABASE_ANON_KEY", ""),
+        "terminal_url": os.environ.get("TERMINAL_URL", "/dashboard"),
+    }
+
+
 @app.get("/api/setup-tuner")
 async def setup_tuner_get():
     """Return current setup_score_multipliers + live per-setup stats for tuning UI."""

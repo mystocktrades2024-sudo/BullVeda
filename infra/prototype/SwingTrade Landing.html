@@ -192,6 +192,7 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px;}
 .modal label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--ink-3);margin:14px 0 6px;text-transform:uppercase;}
 .modal input{width:100%;background:var(--bg-2);border:1px solid var(--line-2);border-radius:8px;padding:11px 13px;color:var(--ink);font-family:var(--font);font-size:14px;outline:none;}
 .modal input:focus{border-color:var(--accent);}
+.auth-msg{font-size:12px;min-height:16px;margin:8px 0 4px;color:var(--ink-3);}
 .modal .btn{width:100%;justify-content:center;margin-top:22px;}
 .modal-x{position:absolute;top:16px;right:18px;color:var(--ink-3);cursor:pointer;font-size:20px;background:none;border:none;}
 .modal-alt{text-align:center;font-size:13px;color:var(--ink-3);margin-top:16px;}
@@ -570,11 +571,12 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px;}
     <h3>Welcome back</h3>
     <p>Log in to your Kairos terminal.</p>
     <label>Email</label>
-    <input type="email" placeholder="you@desk.com" />
+    <input type="email" id="authEmail" placeholder="you@desk.com" />
     <label>Password</label>
-    <input type="password" placeholder="••••••••" />
-    <a class="btn btn-primary" href="#" onclick="return gotoTerminal('login')">Log in →</a>
-    <div class="modal-alt">New here? <a href="#" onclick="return gotoTerminal('signup')">Start your free trial</a></div>
+    <input type="password" id="authPass" placeholder="••••••••" />
+    <div id="authMsg" class="auth-msg"></div>
+    <a class="btn btn-primary" href="#" onclick="return doAuth('login')">Log in →</a>
+    <div class="modal-alt">New here? <a href="#" onclick="return doAuth('signup')">Start your free trial</a></div>
   </div>
 </div>
 
@@ -587,17 +589,54 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px;}
 const TERMINAL_URL = "Stocksmith.html";
 let intendedPlan = null;                 // set by pricing buttons → carried into signup
 function terminalHref(mode){
+  const base = (_sbCfg && _sbCfg.terminal_url) ? _sbCfg.terminal_url : TERMINAL_URL;  // prod route override
   const p = new URLSearchParams();
   if(mode==='signup'){ p.set('welcome','1'); } else { p.set('from','login'); }
   if(intendedPlan){ p.set('plan', intendedPlan); }
   const q = p.toString();
-  return TERMINAL_URL + (q ? ('?'+q) : '');
+  return base + (q ? ('?'+q) : '');
 }
 function gotoTerminal(mode){ window.location.href = terminalHref(mode); return false; }
 function loadLivePreview(){
   const host=document.getElementById('heroPreview'); if(!host) return;
   host.innerHTML='<iframe src="'+TERMINAL_URL+'" title="Kairos terminal — live preview" loading="lazy" scrolling="no"></iframe>';
 }
+
+/* ---- Supabase Auth (production) ----
+   Pulls publishable config from /api/public-config (same-origin in prod). If an anon
+   key is configured, the modal performs a real Supabase email/password auth and, on
+   success, redirects to the terminal with the handoff params. With no anon key — or
+   config unreachable (e.g. opening the file directly) — doAuth() falls back to the
+   direct handoff so the page still works. The SERVICE key is never sent to the client. */
+let _sb=null, _sbCfg=null;
+async function _initAuth(){
+  if(_sbCfg!==null) return _sbCfg;
+  try{ const r=await fetch('/api/public-config',{cache:'no-store'}); _sbCfg=r.ok?await r.json():{}; }
+  catch(e){ _sbCfg={}; }
+  if(_sbCfg && _sbCfg.supabase_url && _sbCfg.supabase_anon_key && !_sb){
+    try{ const m=await import('https://esm.sh/@supabase/supabase-js@2'); _sb=m.createClient(_sbCfg.supabase_url,_sbCfg.supabase_anon_key); }
+    catch(e){ _sb=null; }
+  }
+  return _sbCfg;
+}
+function _authMsg(t,err){ const el=document.getElementById('authMsg'); if(el){ el.textContent=t||''; el.style.color=err?'var(--rd)':'var(--ink-3)'; } }
+async function doAuth(mode){
+  await _initAuth();
+  if(!_sb){ return gotoTerminal(mode); }   // no Supabase configured → direct handoff
+  const email=(document.getElementById('authEmail')||{}).value||'';
+  const pass=(document.getElementById('authPass')||{}).value||'';
+  if(!email||!pass){ _authMsg('Enter your email and password.',true); return false; }
+  _authMsg('Working…',false);
+  try{
+    const {error} = mode==='signup'
+      ? await _sb.auth.signUp({email,password:pass})
+      : await _sb.auth.signInWithPassword({email,password:pass});
+    if(error){ _authMsg(error.message||'Authentication failed.',true); return false; }
+    window.location.href=terminalHref(mode);
+  }catch(e){ _authMsg('Auth service unreachable — try again.',true); }
+  return false;
+}
+_initAuth();   /* warm config + client once, non-blocking */
 
 /* ---- features ---- */
 const ICONS={
