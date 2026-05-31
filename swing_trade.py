@@ -1716,7 +1716,15 @@ def run_daily_scan(force_fresh: bool = False):
 
     # FINVIZ bulk + Polygon snapshot decommissioned 2026-04-25 (EODHD-only).
     # Stubbed callers return empty dicts; downstream code handles None gracefully.
+    # FINVIZ bulk (#b): whole-universe breadth in ~5 calls (short-float/ownership/SMA/
+    # rel-vol/perf/valuation/margins/beta) — was dormant ({}); the scoring engine already
+    # consumes finviz_bulk. Populating it gives those fields to ALL tickers + offloads EODHD.
     finviz_bulk      = {}
+    try:
+        finviz_bulk = get_finviz_bulk() or {}
+        log.info(f"  Finviz bulk: {len(finviz_bulk)} tickers (breadth/ownership/short/SMA — whole-universe, offloads EODHD per-ticker)")
+    except Exception as _fve:
+        log.warning(f"  Finviz bulk fetch failed (non-fatal): {_fve}")
     finviz_news_list = []
 
     # 2026-05-28 · Level-1 quote snapshot (bid/ask/last/sizes/volume) from
