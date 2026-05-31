@@ -405,8 +405,38 @@ async def _v2_file(path: str, request: Request, auth: HTTPBasicCredentials = Dep
 from fastapi.responses import RedirectResponse
 
 @app.get("/")
-async def root(auth: HTTPBasicCredentials = Depends(_check_auth)):
-    return RedirectResponse(url="/kairos.html", status_code=302)
+async def root():
+    """Public marketing landing — UNAUTHENTICATED (crawlable). The terminal is
+    auth-gated at /app. (Handover §3.3: landing at /, terminal gated at /app.)"""
+    p = (_PROTOTYPE_DIR / "SwingTrade Landing.html").resolve()
+    if not p.exists():
+        return RedirectResponse(url="/kairos.html", status_code=302)  # fallback if landing absent
+    return Response(content=p.read_bytes(), media_type="text/html",
+                    headers={"Cache-Control": "no-store"})
+
+@app.get("/marketing/{fname}")
+async def _marketing_asset(fname: str):
+    """Public marketing assets (showcase screenshots) — UNAUTHENTICATED so the
+    landing's <img> tags load before login. Path-traversal guarded."""
+    if "/" in fname or ".." in fname or not fname.endswith((".png", ".jpg", ".jpeg", ".webp", ".svg")):
+        raise HTTPException(404, "not found")
+    p = (_PROTOTYPE_DIR / "marketing" / fname).resolve()
+    if not str(p).startswith(str((_PROTOTYPE_DIR / "marketing").resolve())) or not p.exists():
+        raise HTTPException(404, "not found")
+    mt = {"png":"image/png","jpg":"image/jpeg","jpeg":"image/jpeg","webp":"image/webp","svg":"image/svg+xml"}[fname.rsplit(".",1)[-1]]
+    return FileResponse(p, media_type=mt, headers={"Cache-Control": "public, max-age=3600"})
+
+@app.api_route("/app", methods=["GET", "HEAD"])
+async def _app_terminal(request: Request, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Auth-gated terminal — serves the built Stocksmith terminal (handoff reader +
+    all surfaces). The landing hands off here with ?from=login | ?welcome=1 [&plan=]."""
+    if isinstance(auth, Response):
+        return auth
+    p = (_PROTOTYPE_DIR / "Stocksmith.html").resolve()
+    if not p.exists():
+        return RedirectResponse(url="/kairos.html" + (f"?{request.url.query}" if request.url.query else ""), status_code=302)
+    return Response(content=p.read_bytes(), media_type="text/html",
+                    headers={"Cache-Control": "no-store"})
 
 # Legacy /dashboard URL (still in CLAUDE.md docs + old bookmarks + Lighthouse
 # targets) used to 404 with a JSON body — which made Lighthouse report
@@ -4410,7 +4440,7 @@ async def public_config_api():
     return {
         "supabase_url": os.environ.get("SUPABASE_URL", ""),
         "supabase_anon_key": os.environ.get("SUPABASE_ANON_KEY", ""),
-        "terminal_url": os.environ.get("TERMINAL_URL", "/dashboard"),
+        "terminal_url": os.environ.get("TERMINAL_URL", "/app"),
     }
 
 
