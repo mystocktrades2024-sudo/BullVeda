@@ -4369,20 +4369,31 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _me:
         log.debug(f"meta upsert skipped (non-fatal): {_me}")
 
-    # Mirror the full scan into Supabase (analysis-domain tables).
-    # Non-fatal: errors logged but never break the scan.
+    # Mirror the full scan into Supabase (analysis-domain tables) — BACKGROUND (#2 perf).
+    # The ~12-min normalized write used to block the dashboard / options-flow / notification.
+    # Run it in a NON-daemon thread: it overlaps the remaining post-bundle steps and the
+    # process still waits for it before exiting (guaranteed completion; uses the correct
+    # in-memory bundle — no stale-file risk). Non-fatal: errors logged, never break the scan.
+    def _supabase_sync_bg(_b):
+        try:
+            from supabase_analysis_sync import sync_scan as _sync_analysis_scan
+            _res = _sync_analysis_scan(_b)
+            if _res.get("ok"):
+                log.info(
+                    f"supabase analysis sync (bg): {_res.get('n_tickers', 0)} tickers in "
+                    f"{_res.get('elapsed_sec', 0):.1f}s · errors={_res.get('errors') or 'none'}"
+                )
+            elif _res.get("reason") != "disabled":
+                log.warning(f"supabase analysis sync skipped: {_res.get('reason')}")
+        except Exception as _se:
+            log.warning(f"supabase analysis sync failed (non-fatal): {_se}")
     try:
-        from supabase_analysis_sync import sync_scan as _sync_analysis_scan
-        _res = _sync_analysis_scan(bundle)
-        if _res.get("ok"):
-            log.info(
-                f"supabase analysis sync: {_res.get('n_tickers', 0)} tickers in "
-                f"{_res.get('elapsed_sec', 0):.1f}s · errors={_res.get('errors') or 'none'}"
-            )
-        elif _res.get("reason") != "disabled":
-            log.warning(f"supabase analysis sync skipped: {_res.get('reason')}")
+        import threading as _thr
+        _thr.Thread(target=_supabase_sync_bg, args=(bundle,), name="supabase-sync", daemon=False).start()
+        log.info("  supabase analysis sync: dispatched to background (non-blocking, #2 perf)")
     except Exception as _se:
-        log.warning(f"supabase analysis sync failed (non-fatal): {_se}")
+        log.warning(f"supabase sync background dispatch failed, running inline: {_se}")
+        _supabase_sync_bg(bundle)
 
     # Options flow refresh — always pull fresh UOA data from the standalone
     # scanner (200-ticker universe) before build_data.py reads it (2026-05-11).
