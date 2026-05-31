@@ -195,15 +195,108 @@ def print_report(r):
     print("=" * 92)
 
 
+# -- per-sleeve EXTENDED/MISSED monitor (the catalyst-bypass cohort) --
+SLEEVES = ["PEAD", "Impulse Catalyst", "Momentum Continuation", "Mean Reversion",
+           "Defensive Rotation", "Insider Cluster", "ESP Play",
+           "Breakout Expansion", "Trend Continuation"]
+
+
+def sleeve_extended_monitor(days=14):
+    """Per-sleeve BUY + EXTENDED/MISSED perf (the bypass cohort). Flags PF<1.0 as bleeding
+    so the PEAD-style extended gate can be extended if a sleeve deteriorates."""
+    trades = load_trades()
+    if days and days > 0:
+        import datetime as _dt
+        cut = (_dt.date.today() - _dt.timedelta(days=days)).isoformat()
+        trades = [t for t in trades if str(t.get("exit_date") or t.get("entry_date") or "") >= cut]
+    rows = []
+    for fam in SLEEVES:
+        ext = [t for t in trades if t.get("setup_family") == fam
+               and str(t.get("verdict", "")).upper() == "BUY"
+               and t.get("entry_quality") in ("EXTENDED", "MISSED")]
+        st = _stats(ext)
+        if st:
+            st["sleeve"] = fam
+            st["bleeding"] = st["pf"] < 1.0
+            rows.append(st)
+    rows.sort(key=lambda r: r["pf"])
+    return rows
+
+
+def _slack_webhook():
+    import os
+    from pathlib import Path
+    url = os.environ.get("SLACK_WEBHOOK_URL")
+    if url:
+        return url
+    envf = Path(__file__).resolve().parent.parent / ".env"
+    if envf.exists():
+        for line in envf.read_text().splitlines():
+            if line.startswith("SLACK_WEBHOOK_URL="):
+                return line.split("=", 1)[1].strip()
+    return None
+
+
+def _slack_post(text):
+    url = _slack_webhook()
+    if not url:
+        print("SLACK_WEBHOOK_URL not set - skipping Slack post")
+        return False
+    import json as _j, urllib.request as _ur
+    try:
+        _ur.urlopen(_ur.Request(url, data=_j.dumps({"text": text}).encode(),
+                    headers={"Content-Type": "application/json"}), timeout=10)
+        return True
+    except Exception as e:
+        print("slack post failed:", e)
+        return False
+
+
+def slack_report(days=14):
+    r = run(min_n=3, days=days)
+    if r.get("error"):
+        return ":warning: pick_forensics: " + r["error"]
+    L = [":mag: *Pick Forensics - last %dd* (%d closed)" % (days, r["n_total"])]
+    vt = r.get("verdict_truth", {})
+    for v in ("BUY", "WATCH"):
+        st = vt.get(v)
+        if st:
+            extra = (" - %d lost" % st.get("went_wrong")) if "went_wrong" in st else ""
+            L.append("- *%s*: n=%d wr=%.0f%% avg=%+.2f%% pf=%.2f%s" %
+                     (v, st["n"], st["wr"]*100, st["avg_pnl"], st["pf"], extra))
+    L.append("*Catalyst sleeves - EXTENDED/MISSED (bypass cohort):*")
+    mon = sleeve_extended_monitor(days)
+    if not mon:
+        L.append("- (no extended-entry BUYs in window)")
+    for m in mon:
+        flag = ":red_circle:" if m["bleeding"] else ":white_check_mark:"
+        L.append("%s %s: n=%d wr=%.0f%% avg=%+.2f%% pf=%.2f" %
+                 (flag, m["sleeve"], m["n"], m["wr"]*100, m["avg_pnl"], m["pf"]))
+    bleeders = [m["sleeve"] for m in mon if m["bleeding"] and m["n"] >= 5]
+    if bleeders:
+        L.append("_Bleeding (PF<1, n>=5): %s - candidates for the PEAD-style extended gate._"
+                 % ", ".join(bleeders))
+    return "\n".join(L)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--verdict", default=None)
     ap.add_argument("--min-n", type=int, default=5)
     ap.add_argument("--days", type=int, default=0, help="only trades closed in last N days (0=all)")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--sleeves", action="store_true", help="per-sleeve EXTENDED/MISSED monitor")
+    ap.add_argument("--slack", action="store_true", help="post a compact digest to Slack")
     args = ap.parse_args()
-    rep = run(verdict_filter=args.verdict, min_n=args.min_n, days=args.days)
-    if args.json:
-        print(json.dumps(rep, indent=2, default=str))
+    if args.slack:
+        sent = _slack_post(slack_report(days=args.days or 14))
+        print("[pick_forensics] slack sent=%s" % sent)
+    elif args.sleeves:
+        for m in sleeve_extended_monitor(days=args.days or 14):
+            print("  %-24s %s  [%s]" % (m["sleeve"], _fmt(m), "BLEEDING" if m["bleeding"] else "ok"))
     else:
-        print_report(rep)
+        rep = run(verdict_filter=args.verdict, min_n=args.min_n, days=args.days)
+        if args.json:
+            print(json.dumps(rep, indent=2, default=str))
+        else:
+            print_report(rep)
