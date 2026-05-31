@@ -1,0 +1,907 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Options Lens · Redesign Prototype (intent-first)</title>
+<!--
+  options_redesign_v1.html — PROTOTYPE for the Options-lens "complete redesign"
+  (APPENDIX of HANDOVER_new_features.md). Intent-first, progressive disclosure,
+  beginner-leaning, PAPER-ONLY. The prototype is the contract:
+    ① INTENT  ② CONTEXT (GEX headline)  ③ STRUCTURE  ④ REALITY (honest fill)  ⑤ ADVANCED (collapsed)
+  Reuses the kept assets verbatim where possible: bsCall/bsPut, OtkGEX, OtkPayoffBig,
+  OtkProfitGrid, OtkChain mini-charts, OTK_STRATS, OtkJournal, AiExplain.
+  Mock-seeded (deterministic math); production swaps = Schwab chain + EODHD IV/news + Gemini.
+  Once approved, hand-port the structure into infra/prototype/Stocksmith.html.
+-->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<style>
+/* ── design tokens (subset of tokens.css · obsidian-gold) ── */
+:root{
+  --bg:#0a0d0c;--bg-0:#0a0d0c;--bg-1:#11151a;--bg-2:#161a1e;--bg-3:#1c2125;--bg-4:#20262b;
+  --line:#262b2d;--line-2:#353a3c;
+  --ink:#ecefe9;--ink-1:#c4c8c2;--ink-2:#9a9e98;--ink-3:#7c807c;--ink-4:#4a4e4a;
+  --copper:#d97757;--copper-dim:#a55a40;--copper-bg:rgba(217,119,87,0.10);
+  --gn:#4ade80;--gn-dim:#2f7a4a;--gn-bg:rgba(74,222,128,0.10);
+  --rd:#f87171;--rd-dim:#8a3f3f;--rd-bg:rgba(248,113,113,0.10);
+  --amb:#fbbf24;--amb-dim:#8a6a18;--amb-bg:rgba(251,191,36,0.10);
+  --cy:#60d5d5;--cy-bg:rgba(96,213,213,0.10);
+  --violet:#a78bfa;--violet-bg:rgba(167,139,250,0.10);--blue:#5b9bf2;
+  --mono:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --glass-bg-1:rgba(255,255,255,0.018);--glass-bg-2:rgba(255,255,255,0.03);--glass-bg-3:rgba(255,255,255,0.05);
+  --glass-line:rgba(255,255,255,0.07);
+  --r-1:3px;--r-2:5px;--r-3:8px;--r-4:12px;--r-pill:999px;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box;}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+.up{color:var(--gn);}.dn{color:var(--rd);}.warn{color:var(--amb);}.dim{color:var(--ink-3);}.dim2{color:var(--ink-2);}
+.copper{color:var(--copper);}.cy{color:var(--cy);}.violet{color:var(--violet);}.amb-c{color:var(--amb);}
+.label-cap{font-family:var(--mono);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-3);}
+.kpi-tone--gn{color:var(--gn);}.kpi-tone--rd{color:var(--rd);}.kpi-tone--amb{color:var(--amb);}
+.kpi-tone--cy{color:var(--cy);}.kpi-tone--copper{color:var(--copper);}.kpi-tone--ink{color:var(--ink-1);}.kpi-tone--violet{color:var(--violet);}
+::-webkit-scrollbar{width:10px;height:10px;}::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;border:2px solid var(--bg);}
+.btn{font-family:var(--mono);font-size:12px;color:var(--ink-1);background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);padding:7px 12px;cursor:pointer;}
+.btn:hover{border-color:var(--copper);color:var(--ink);}
+.btn--sm{font-size:10.5px;padding:5px 9px;}
+.btn--primary{color:#0c130f;background:var(--gn);border-color:transparent;font-weight:700;}
+.dtable{width:100%;border-collapse:collapse;}
+.dtable th{text-align:left;font-weight:500;}.dtable td.r,.dtable th.r{text-align:right;}.dtable td.c,.dtable th.c{text-align:center;}
+
+/* shell */
+.app{height:100vh;overflow:auto;}
+.appbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px;padding:10px 18px;background:color-mix(in oklab,var(--bg-1) 92%,transparent);border-bottom:1px solid var(--glass-line);backdrop-filter:blur(8px);}
+.appbar h1{font-size:14px;margin:0;letter-spacing:0.04em;}
+.appbar .tag{font:700 9px var(--mono);letter-spacing:0.12em;color:var(--copper);border:1px solid color-mix(in oklab,var(--copper) 40%,transparent);border-radius:3px;padding:3px 8px;}
+.appbar .paper{font:700 9px var(--mono);letter-spacing:0.12em;color:var(--gn);border:1px solid color-mix(in oklab,var(--gn) 40%,transparent);border-radius:3px;padding:3px 8px;}
+.appbar .tk{margin-left:auto;display:flex;gap:5px;}
+.appbar .tk button{font:600 11px var(--mono);color:var(--ink-2);background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-pill);padding:4px 12px;cursor:pointer;}
+.appbar .tk button.is-on{color:var(--copper);border-color:var(--copper);}
+
+.lens--otk{display:flex;flex-direction:column;gap:0;padding-bottom:60px;}
+
+/* progressive-disclosure step shell */
+.opx-step{border-bottom:1px solid var(--glass-line);padding:16px 18px;}
+.opx-step-h{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+.opx-step-n{font:700 11px var(--mono);color:#0c130f;background:var(--copper);border-radius:var(--r-pill);width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;}
+.opx-step-t{font-size:14px;font-weight:600;letter-spacing:0.03em;}
+.opx-step-s{font-size:11px;}
+
+/* ① INTENT */
+.opx-intent{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+@media(max-width:760px){.opx-intent{grid-template-columns:repeat(2,1fr);}}
+.opx-intent-btn{display:flex;flex-direction:column;gap:5px;align-items:flex-start;padding:16px 16px;cursor:pointer;text-align:left;
+  background:var(--glass-bg-1);border:1px solid var(--glass-line);border-radius:var(--r-3);color:var(--ink-1);transition:border-color .12s;}
+.opx-intent-btn:hover{border-color:color-mix(in oklab,var(--copper) 50%,transparent);}
+.opx-intent-btn.is-on{border-color:var(--copper);background:color-mix(in oklab,var(--copper) 9%,transparent);box-shadow:0 0 0 1px var(--copper) inset;}
+.opx-intent-ic{font-size:22px;}
+.opx-intent-l{font-size:15px;font-weight:700;}
+.opx-intent-d{font-size:11px;color:var(--ink-2);line-height:1.4;}
+.opx-intent-sug{font:700 8.5px var(--mono);letter-spacing:0.08em;color:var(--copper);}
+.opx-suggest{font-size:11px;margin-top:10px;}
+
+/* ② CONTEXT */
+.opx-ctx-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
+@media(max-width:900px){.opx-ctx-grid{grid-template-columns:1fr;}}
+.opx-vol{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.opx-vol-cell{background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);padding:10px 11px;display:flex;flex-direction:column;gap:3px;cursor:help;}
+.opx-vol-k{font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-3);}
+.opx-vol-v{font-size:16px;font-weight:700;}
+.opx-vol-s{font-size:10px;color:var(--ink-2);}
+.opx-em{display:flex;flex-direction:column;gap:8px;}
+.opx-em-cone{position:relative;height:46px;background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);}
+
+/* ③ STRUCTURE */
+.opx-struct{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+@media(max-width:760px){.opx-struct{grid-template-columns:1fr;}}
+.opx-struct-card{position:relative;display:flex;flex-direction:column;gap:7px;padding:14px;cursor:pointer;text-align:left;
+  background:var(--glass-bg-1);border:1px solid var(--glass-line);border-radius:var(--r-3);color:var(--ink-1);}
+.opx-struct-card:hover{border-color:color-mix(in oklab,var(--copper) 45%,transparent);}
+.opx-struct-card.is-on{border-color:var(--copper);background:color-mix(in oklab,var(--copper) 8%,transparent);}
+.opx-struct-rec{position:absolute;top:-9px;left:12px;font:700 8px var(--mono);letter-spacing:0.1em;color:#0c130f;background:var(--copper);border-radius:3px;padding:2px 7px;}
+.opx-struct-name{font-size:14px;font-weight:700;}
+.opx-struct-when{font-size:11px;color:var(--ink-2);line-height:1.45;}
+.opx-struct-legs{display:flex;flex-wrap:wrap;gap:5px;}
+.opx-struct-leg{font:600 10.5px var(--mono);padding:2px 7px;border-radius:4px;}
+.opx-struct-leg.buy{color:var(--gn);background:var(--gn-bg);}.opx-struct-leg.sell{color:var(--rd);background:var(--rd-bg);}
+.opx-struct-mini{display:flex;gap:12px;font-size:10.5px;color:var(--ink-2);}
+
+/* ④ REALITY */
+.opx-reality{display:grid;grid-template-columns:1.1fr 1fr;gap:12px;}
+@media(max-width:900px){.opx-reality{grid-template-columns:1fr;}}
+.opx-rcard{background:var(--glass-bg-1);border:1px solid var(--glass-line);border-radius:var(--r-3);padding:13px 15px;display:flex;flex-direction:column;gap:9px;}
+.opx-rcard-h{font:600 10px var(--mono);letter-spacing:0.14em;color:var(--ink-2);}
+.opx-payoff-svg{background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);display:block;}
+.opx-rkpis{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;}
+.opx-rkpi{background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);padding:8px 9px;display:flex;flex-direction:column;gap:2px;}
+.opx-rkpi-v{font-size:15px;font-weight:700;}
+.opx-fill-flow{display:flex;align-items:stretch;flex-wrap:wrap;gap:6px;}
+.opx-fill-step{display:flex;flex-direction:column;gap:1px;padding:6px 10px;min-width:84px;background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);}
+.opx-fill-step.is-strong{border-color:color-mix(in oklab,var(--rd) 45%,transparent);background:color-mix(in oklab,var(--rd) 8%,transparent);}
+.opx-fill-l{font-size:9px;letter-spacing:0.05em;text-transform:uppercase;color:var(--ink-3);}
+.opx-fill-v{font-size:13px;font-weight:700;}
+.opx-fill-arrow{display:flex;align-items:center;color:var(--ink-3);font-weight:700;}
+.opx-whathappens{font-size:13px;line-height:1.6;color:var(--ink-1);padding:11px 12px;background:color-mix(in oklab,var(--copper) 8%,transparent);border:1px solid color-mix(in oklab,var(--copper) 26%,transparent);border-radius:var(--r-2);}
+.opx-actions{display:flex;gap:6px;flex-wrap:wrap;}
+.opx-foot{font-size:10px;color:var(--ink-3);padding-top:6px;border-top:1px solid var(--glass-line);}
+.otk-journal{width:100%;background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);color:var(--ink);font-family:var(--mono);font-size:11px;padding:8px 10px;min-height:64px;resize:vertical;}
+
+/* ⑤ ADVANCED */
+.opx-adv-toggle{width:100%;text-align:left;font:600 12px var(--mono);color:var(--ink-1);background:var(--glass-bg-1);border:1px solid var(--glass-line);border-radius:var(--r-3);padding:12px 15px;cursor:pointer;display:flex;align-items:center;gap:10px;}
+.opx-adv-toggle:hover{border-color:var(--copper);}
+.opx-adv-toggle .chev{transition:transform .15s;}
+.opx-adv-toggle.is-open .chev{transform:rotate(90deg);}
+
+/* shared otk styles (from lens-options-ticket.css) */
+.otk-card{background:var(--glass-bg-1);border:1px solid var(--glass-line);border-radius:var(--r-3);padding:12px 14px;display:flex;flex-direction:column;gap:8px;}
+.otk-card--wide{grid-column:1 / -1;}
+.otk-card-h{font-family:var(--mono);font-size:10px;letter-spacing:0.14em;color:var(--ink-2);}
+.otk-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
+@media(max-width:900px){.otk-grid{grid-template-columns:1fr;}}
+.otk-gex-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;}
+.otk-gex-kpi{display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 4px;background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);}
+.otk-gex-kpi .dim2{font-size:8.5px;letter-spacing:0.08em;}
+.otk-gex-kv{font-size:14px;font-weight:700;}
+.otk-gex-svg{display:block;margin-top:2px;}
+.otk-gex-stock{display:flex;flex-direction:column;align-items:flex-start;gap:7px;margin-top:8px;padding:11px 12px;background:color-mix(in oklab,var(--copper) 9%,transparent);border:1px solid color-mix(in oklab,var(--copper) 28%,transparent);border-radius:var(--r-2);}
+.otk-gex-stock-tag{flex:none;font:700 8.5px var(--mono);letter-spacing:0.1em;color:var(--copper);border:1px solid color-mix(in oklab,var(--copper) 40%,transparent);border-radius:3px;padding:3px 6px;}
+.otk-gex-plain{display:flex;flex-direction:column;gap:4px;font-size:12px;line-height:1.5;width:100%;}
+.otk-gex-pl-hd{font-size:13px;color:var(--ink-1);margin-bottom:2px;}
+.otk-gex-pl-row{color:var(--ink-2);}
+.otk-gex-pl-k{display:inline-block;min-width:118px;font-weight:700;letter-spacing:0.02em;}
+.otk-gex-pl-foot{font-size:10.5px;margin-top:4px;padding-top:6px;border-top:1px solid var(--glass-line);}
+.otk-gex-stock-top{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px;}
+.otk-verdict-mini{font-size:11px;padding-top:6px;border-top:1px solid var(--glass-line);}
+.otk-greeks{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+.otk-greek{background:var(--glass-bg-2);border-radius:var(--r-2);padding:8px;text-align:center;display:flex;flex-direction:column;gap:2px;}
+.otk-greek-v{font-size:16px;font-weight:600;}
+.otk-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:4px 14px;}
+.otk-stat{display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:1px solid var(--glass-line);}
+.otk-tbl{font-size:11px;}.otk-tbl td,.otk-tbl th{padding:5px 8px;}
+.otk-mini-svg{background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);}
+.otk-chain td{padding:5px 8px;}
+.otk-atm{margin-left:6px;font-size:8px;letter-spacing:0.1em;padding:1px 5px;border-radius:var(--r-pill);background:color-mix(in oklab,var(--copper) 20%,transparent);color:var(--copper);}
+.otk-oibar{height:6px;background:var(--bg-3);border-radius:var(--r-pill);overflow:hidden;min-width:50px;}
+.otk-oibar i{display:block;height:100%;background:var(--cy);border-radius:var(--r-pill);}
+.otk-pg{overflow-x:auto;}
+.otk-pg-tbl{width:100%;border-collapse:collapse;font-size:12px;}
+.otk-pg-tbl th,.otk-pg-tbl td{padding:6px 8px;text-align:center;}
+.otk-pg-tbl thead th{font-size:10px;letter-spacing:0.04em;color:var(--ink-3);border-bottom:1px solid var(--glass-line);font-weight:500;}
+.otk-pg-corner{text-align:left !important;color:var(--ink-3);white-space:nowrap;}
+.otk-pg-rowh{text-align:left !important;font-weight:600;white-space:nowrap;}
+.otk-pg-cell{font-weight:600;border-radius:3px;}
+.otk-pg--g3{background:color-mix(in oklab,var(--gn) 42%,transparent);color:#eafff2;}
+.otk-pg--g2{background:color-mix(in oklab,var(--gn) 26%,transparent);color:var(--gn);}
+.otk-pg--g1{background:color-mix(in oklab,var(--gn) 12%,transparent);color:var(--gn);}
+.otk-pg--r1{background:color-mix(in oklab,var(--rd) 12%,transparent);color:var(--rd);}
+.otk-pg--r2{background:color-mix(in oklab,var(--rd) 26%,transparent);color:var(--rd);}
+.otk-pg--r3{background:color-mix(in oklab,var(--rd) 44%,transparent);color:#ffecea;}
+.otk-pg-foot{font-size:10.5px;line-height:1.5;margin-top:9px;}
+.otk-pg-iv{display:flex;align-items:center;gap:6px;margin-bottom:9px;flex-wrap:wrap;}
+.otk-pg-iv>span:first-child{font-size:9.5px;letter-spacing:0.1em;text-transform:uppercase;}
+.otk-pg-ivbtn{font-family:var(--mono);font-size:10.5px;color:var(--ink-2);background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:4px;padding:3px 9px;cursor:pointer;}
+.otk-pg-ivbtn.is-on{color:var(--copper);border-color:var(--copper);}
+.otk-pg-ivbtn--crush.is-on{color:var(--amb);border-color:var(--amb);}
+.otk-pg-ivnow{margin-left:auto;font-size:10.5px;}
+.otk-pg-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;margin-bottom:10px;background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);flex-wrap:wrap;}
+.otk-pg-title{font-size:12px;font-weight:700;letter-spacing:0.08em;color:var(--ink-1);}
+.otk-pg-params{font-size:10.5px;}
+.otk-pg-scroll{overflow-x:auto;}
+.otk-pg-tbl--rich th,.otk-pg-tbl--rich td{padding:5px 7px;}
+.otk-pg-tbl--rich thead th{vertical-align:bottom;}
+.otk-pg-colsub{font-size:8.5px;font-weight:400;}
+.otk-pg-tbl--rich .otk-pg-rowh{text-align:right !important;color:var(--ink-2);font-weight:600;font-size:11.5px;padding-right:10px;}
+.otk-pg-tbl--rich .otk-pg-cell{text-align:center;font-size:11.5px;min-width:38px;}
+.otk-pg-pctcol{text-align:right !important;}.otk-pg-pct{text-align:right;font-size:10.5px;}
+.otk-pg-spotrow td,.otk-pg-spotrow th{border-top:1.5px solid var(--cy);border-bottom:1.5px solid var(--cy);}
+.otk-pg-spotrow .otk-pg-rowh{color:var(--cy);}
+.otk-pg-tgtrow td,.otk-pg-tgtrow th{border-top:1px dashed var(--amb);border-bottom:1px dashed var(--amb);}
+.otk-pg-form{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;margin-bottom:10px;background:var(--glass-bg-2);border:1px solid var(--glass-line);border-radius:var(--r-2);}
+.otk-pg-seg{display:inline-flex;border:1px solid var(--glass-line);border-radius:5px;overflow:hidden;}
+.otk-pg-seg button{font-family:var(--mono);font-size:11px;color:var(--ink-2);background:transparent;border:none;padding:4px 11px;cursor:pointer;}
+.otk-pg-seg button.is-on{background:var(--copper);color:var(--bg-0);font-weight:700;}
+.otk-pg-fld{display:inline-flex;align-items:center;gap:5px;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-3);}
+.otk-pg-inwrap{display:inline-flex;align-items:center;gap:3px;color:var(--ink-2);background:var(--bg-2);border:1px solid var(--glass-line);border-radius:4px;padding:2px 6px;}
+.otk-pg-inwrap input{width:52px;background:transparent;border:none;color:var(--ink-1);font-family:var(--mono);font-size:12px;outline:none;}
+.otk-pg-total{font-size:11px;color:var(--ink-3);letter-spacing:0.04em;margin-left:auto;}
+.otk-pg-total b{color:var(--ink-1);font-size:13px;}
+.otk-pg-reset{font-family:var(--mono);font-size:10px;color:var(--ink-3);background:none;border:1px solid var(--glass-line);border-radius:4px;padding:3px 8px;cursor:pointer;}
+.otk-pg-select{background:var(--bg-2);color:var(--ink-1);border:1px solid var(--glass-line);border-radius:4px;font-family:var(--mono);font-size:11px;padding:3px 6px;cursor:pointer;}
+
+/* AiExplain (aix) */
+.aix{display:flex;flex-direction:column;gap:6px;}
+.aix-btn{align-self:flex-start;cursor:pointer;font:700 9.5px var(--mono);letter-spacing:0.04em;color:var(--cy);background:color-mix(in oklab,var(--cy) 10%,transparent);border:1px solid color-mix(in oklab,var(--cy) 38%,transparent);border-radius:999px;padding:4px 11px;}
+.aix-btn:hover{background:color-mix(in oklab,var(--cy) 18%,transparent);}
+.aix-btn:disabled{opacity:0.6;cursor:default;}
+.aix-out{display:flex;flex-direction:column;gap:5px;padding:10px 12px;background:color-mix(in oklab,var(--cy) 7%,transparent);border:1px solid color-mix(in oklab,var(--cy) 26%,transparent);border-radius:6px;}
+.aix-tag{font:700 8.5px var(--mono);letter-spacing:0.1em;color:var(--cy);}
+.aix-txt{font-size:12.5px;line-height:1.6;color:var(--ink-1);white-space:pre-wrap;}
+
+/* news catalysts (nc) */
+.nc{display:flex;flex-direction:column;gap:7px;}
+.nc-row{display:flex;align-items:center;gap:9px;padding:6px 8px;background:var(--glass-bg-2);border-radius:5px;border-left:2px solid var(--glass-line);}
+.nc-row--high{border-left-color:var(--gn);}.nc-row--med{border-left-color:var(--amb);}.nc-row--low{border-left-color:var(--ink-4);}
+.nc-time{flex:none;font:600 9.5px var(--mono);color:var(--ink-3);min-width:34px;}
+.nc-type{flex:none;font:700 8.5px var(--mono);letter-spacing:0.05em;padding:2px 6px;border-radius:3px;background:color-mix(in oklab,var(--cy) 14%,transparent);color:var(--cy);}
+.nc-mat{flex:none;font:700 8px var(--mono);letter-spacing:0.06em;}
+.nc-mat--high{color:var(--gn);}.nc-mat--med{color:var(--amb);}.nc-mat--low{color:var(--ink-3);}
+.nc-h{font-size:11.5px;color:var(--ink-2);line-height:1.4;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useMemo, useEffect } = React;
+
+/* ════════ shared AI layer (paper-only; wired to /api/ollama/chat if served) ════════ */
+window.aiComplete = async (base) => {
+  const guard = "\n\nWrite PLAIN TEXT ONLY — no markdown, no headings, no # or ** symbols, no bullet characters. Keep it short, simple, jargon-free. Informational/educational ONLY — do NOT tell anyone to buy or sell, and add no disclaimer.";
+  try {
+    const r = await fetch("/api/ollama/chat", { method:"POST", headers:{ "Content-Type":"application/json" }, credentials:"same-origin",
+      body: JSON.stringify({ messages:[{ role:"user", content:String(base||"")+guard }], stream:false }) });
+    if (!r.ok) throw new Error("http "+r.status);
+    const j = await r.json();
+    const text = (j && j.message && j.message.content || "").trim();
+    if (!text) throw new Error("empty");
+    return { ok:true, text };
+  } catch (e) {
+    return { ok:false, text:"AI explainer isn't connected in this preview — in production it calls the Kairos / Gemini proxy. The summary above still applies." };
+  }
+};
+function AiExplain({ build, label="Explain with AI", tag="KAIROS" }) {
+  const [ai, setAi] = useState(null);
+  const run = async () => { setAi("loading"); const r = await window.aiComplete(typeof build==="function"?build():build); setAi(r.text); };
+  return (
+    <div className="aix">
+      <button className="aix-btn mono" onClick={run} disabled={ai==="loading"}>{ai==="loading"?"✦ thinking…":"✦ "+label}</button>
+      {ai && ai!=="loading" && <div className="aix-out mono"><span className="aix-tag">✦ {tag}</span><span className="aix-txt">{ai}</span></div>}
+    </div>
+  );
+}
+
+/* ════════ Black-Scholes (kept verbatim) ════════ */
+function bsNormCdf(x){const t=1/(1+0.2316419*Math.abs(x));const d=0.3989423*Math.exp(-x*x/2);let p=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274))));return x>0?1-p:p;}
+function bsCall(S,K,T,sigma,r=0.04){if(T<=0)return Math.max(S-K,0);const v=sigma*Math.sqrt(T);const d1=(Math.log(S/K)+(r+sigma*sigma/2)*T)/v;const d2=d1-v;return S*bsNormCdf(d1)-K*Math.exp(-r*T)*bsNormCdf(d2);}
+function bsPut(S,K,T,sigma,r=0.04){if(T<=0)return Math.max(K-S,0);return bsCall(S,K,T,sigma,r)-S+K*Math.exp(-r*T);}
+
+const EXPIRIES = [
+  { dte:7, tag:"Weekly", iv:96.2 },{ dte:21, tag:"Weekly", iv:88.1 },{ dte:35, tag:"Monthly", iv:85.4, def:true },
+  { dte:63, tag:"Monthly", iv:79.0 },{ dte:120, tag:"LEAP-ish", iv:75.6 },{ dte:245, tag:"LEAP", iv:73.2 },
+];
+
+/* ════════ mock tickers (deterministic; production = Schwab + EODHD) ════════ */
+const TICKERS = {
+  NVDA: { symbol:"NVDA", name:"NVIDIA", price:58.40, bias:"BULLISH", sector:"Technology", earnings:{ days:11, date:"May 30" } },
+  WMB:  { symbol:"WMB",  name:"Williams Cos", price:42.10, bias:"NEUTRAL", sector:"Energy", earnings:{ days:24, date:"Jun 12" } },
+  XOM:  { symbol:"XOM",  name:"Exxon Mobil", price:88.70, bias:"BEARISH", sector:"Energy", earnings:{ days:6, date:"May 25" } },
+};
+
+function deriveTicket(ticker, dte){
+  const spot = ticker.price;
+  const exp = EXPIRIES.find(e=>e.dte===dte) || EXPIRIES[2];
+  const tFac = Math.sqrt(dte/35);
+  const prem = +(spot*0.093*tFac).toFixed(2);
+  const strike = Math.round(spot);
+  const be = +(strike+prem).toFixed(2);
+  const target = +(spot*1.07).toFixed(2);
+  const stop = +(spot*0.97).toFixed(2);
+  const iv = exp.iv, hv20 = 107.9, ivrp = +(iv-hv20).toFixed(1);
+  const rr = +(((target-be)/Math.max(0.01,be-stop))*1.8).toFixed(1);
+  const impMove = +(iv/100*Math.sqrt(dte/252)*100).toFixed(1);
+  const erDays = ticker.earnings?.days ?? 11;
+  const erInWindow = erDays <= dte;
+  return { spot, prem, strike, be, target, stop, iv, hv20, ivrp, rr, dte, expTag:exp.tag, sym:ticker.symbol,
+    delta:0.57, gamma:0.084, theta:-0.04, vega:0.02, pop:46, impMove, skew:18.7, term:1.19, maxPain:Math.round(spot),
+    ba:7.2, beta:1.58, edge:86, erDays, erInWindow, ivCrush: erInWindow ? Math.round(iv*0.34) : 0 };
+}
+
+/* ════════ KEPT ASSETS (reused as-is) ════════ */
+// Dealer GEX — net dealer gamma by strike + plain-English read (verbatim)
+function OtkGEX({ o }) {
+  const g = useMemo(() => {
+    const spot=o.spot, step=Math.max(1,Math.round(spot*0.025)), atmK=Math.round(spot/step)*step, rows=[];
+    for(let i=-5;i<=5;i++){const k=atmK+i*step;const dist=(k-spot)/spot;
+      const callOI=Math.round(4600*Math.exp(-Math.pow((dist-0.025)*8,2))+90);
+      const putOI=Math.round(6200*Math.exp(-Math.pow((dist+0.035)*8,2))+90);
+      const gamma=Math.exp(-Math.pow(dist*7,2))*0.09;
+      rows.push({ k, callOI, putOI, net:+((-callOI*gamma*spot*spot*4e-6)+(putOI*gamma*spot*spot*4e-6)).toFixed(2) });}
+    let maxPain=rows[0].k,minPay=Infinity;
+    rows.forEach(r=>{let p=0;rows.forEach(s=>{p+=Math.max(0,r.k-s.k)*s.callOI+Math.max(0,s.k-r.k)*s.putOI;});if(p<minPay){minPay=p;maxPain=r.k;}});
+    const callWall=rows.reduce((a,b)=>b.callOI>a.callOI?b:a).k, putWall=rows.reduce((a,b)=>b.putOI>a.putOI?b:a).k;
+    let flip=spot;for(let i=1;i<rows.length;i++){if((rows[i-1].net<0)!==(rows[i].net<0)){flip=rows[i].k;break;}}
+    return { rows, maxPain, callWall, putWall, flip, total:+rows.reduce((a,b)=>a+b.net,0).toFixed(2) };
+  }, [o]);
+  const W=720,H=220,padL=16,padR=16,padT=16,padB=30,n=g.rows.length,bw=(W-padL-padR)/n;
+  const maxAbs=Math.max(...g.rows.map(r=>Math.abs(r.net)),0.1),y0=padT+(H-padT-padB)/2,yh=(H-padT-padB)/2;
+  const cx=i=>padL+bw*(i+0.5);
+  const spotI=(o.spot-g.rows[0].k)/(g.rows[n-1].k-g.rows[0].k)*(n-1),spotX=padL+bw*(spotI+0.5),pos=g.total>=0;
+  const gexPrompt=()=>`Explain options dealer-gamma (GEX) to a BEGINNER STOCK trader (they don't trade options) in plain, simple English. Use the live numbers for ${o.sym} below: 3-4 short sentences, use the actual prices, end with ONE practical takeaway for someone trading the shares.
+Spot price: $${o.spot.toFixed(2)}
+Net GEX: ${g.total>=0?"+":""}${g.total} (${g.total>=0?"positive — moves get dampened, range-bound day":"negative — moves get amplified, trending day"})
+Ceiling / call wall: $${g.callWall}
+Floor / put wall: $${g.putWall}
+Flip level: $${g.flip}
+Max pain: $${g.maxPain}`;
+  return (
+    <div className="otk-card otk-card--wide">
+      <div className="otk-card-h mono">DEALER GAMMA (GEX) · by strike · <span className="dim2">computed from chain OI × γ</span></div>
+      <div className="otk-gex-kpis">
+        <div className="otk-gex-kpi"><span className="mono dim2">NET GEX</span><span className={`mono otk-gex-kv ${pos?"up":"dn"}`}>{pos?"+":"−"}${Math.abs(g.total).toFixed(1)}mm</span><span className="mono dim2" style={{fontSize:8}}>{pos?"stabilizing":"amplifying"}</span></div>
+        <div className="otk-gex-kpi"><span className="mono dim2">γ-FLIP</span><span className="mono otk-gex-kv warn">${g.flip}</span></div>
+        <div className="otk-gex-kpi"><span className="mono dim2">MAX PAIN</span><span className="mono otk-gex-kv copper">${g.maxPain}</span></div>
+        <div className="otk-gex-kpi"><span className="mono dim2">CALL WALL</span><span className="mono otk-gex-kv up">${g.callWall}</span></div>
+        <div className="otk-gex-kpi"><span className="mono dim2">PUT WALL</span><span className="mono otk-gex-kv dn">${g.putWall}</span></div>
+      </div>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" className="otk-gex-svg">
+        <line x1={padL} y1={y0} x2={W-padR} y2={y0} stroke="var(--glass-line)" />
+        {g.rows.map((r,i)=>{const h=(Math.abs(r.net)/maxAbs)*yh,up=r.net>=0;return(
+          <g key={i}><rect x={cx(i)-bw*0.32} y={up?y0-h:y0} width={bw*0.64} height={h} fill={up?"var(--gn)":"var(--rd)"} opacity="0.78" rx="1.5" />
+          <text x={cx(i)} y={H-9} fontSize="9" className="mono" textAnchor="middle" fill={r.k===g.maxPain?"var(--copper)":"var(--ink-3)"}>${r.k}</text></g>);})}
+        {(()=>{const marks=[{k:g.callWall,lbl:"CALL WALL",c:"var(--gn)"},{k:g.putWall,lbl:"PUT WALL",c:"var(--rd)"},{k:g.flip,lbl:"γ-FLIP",c:"var(--amb)"}];const used={};
+          return marks.map((m,mi)=>{const i=g.rows.findIndex(rw=>rw.k===m.k);if(i<0)return null;const xx=cx(i);const slot=(used[i]=(used[i]||0)+1);const ly=padT+7+(slot-1)*11;
+            return(<g key={mi}><line x1={xx} y1={padT} x2={xx} y2={H-padB} stroke={m.c} strokeWidth="1.2" opacity="0.4" />
+              <rect x={xx-26} y={ly-8} width="52" height="11" rx="2" fill="var(--bg-1)" opacity="0.85" />
+              <text x={xx} y={ly} fontSize="7.5" className="mono" textAnchor="middle" fill={m.c} fontWeight="700">{m.lbl}</text></g>);});})()}
+        <line x1={spotX} y1={padT} x2={spotX} y2={H-padB} stroke="var(--ink)" strokeDasharray="3 3" opacity="0.7" />
+        <text x={spotX} y={padT-4} fontSize="8.5" className="mono" textAnchor="middle" fill="var(--ink-2)">spot ${o.spot.toFixed(0)}</text>
+        <text x={padL+2} y={padT+8} fontSize="8" className="mono" fill="var(--gn)">+ dealers dampen</text>
+        <text x={padL+2} y={H-padB-2} fontSize="8" className="mono" fill="var(--rd)">− dealers amplify</text>
+      </svg>
+      <div className="otk-verdict-mini mono">
+        <span className={pos?"up":"dn"}>{pos?"POSITIVE γ":"NEGATIVE γ"}</span> ·{" "}
+        {pos ? <React.Fragment>dealers buy dips / sell rips → moves get <b>dampened</b>; price tends toward <b className="copper">max-pain ${g.maxPain}</b> and pins between <b className="dn">put wall ${g.putWall}</b> and <b className="up">call wall ${g.callWall}</b>. A break <b>below the γ-flip ${g.flip}</b> turns this amplifying.</React.Fragment>
+             : <React.Fragment>dealer hedging <b>amplifies</b> moves (air-pockets) — expect larger swings; reclaiming the <b className="warn">γ-flip ${g.flip}</b> would restore stability.</React.Fragment>}
+        <span className="dim2"> · informational, not advice.</span>
+      </div>
+      <div className="otk-gex-stock">
+        <div className="otk-gex-stock-top"><span className="otk-gex-stock-tag mono">FOR THE STOCK</span></div>
+        <div className="otk-gex-plain mono">
+          {pos ? <React.Fragment>
+            <div className="otk-gex-pl-hd"><b className="up">Likely a calm, range-bound day.</b> It should mostly trade between two prices:</div>
+            <div className="otk-gex-pl-row"><span className="otk-gex-pl-k dn">FLOOR ${g.putWall}</span> — dips here tend to <b>bounce back up</b>.</div>
+            <div className="otk-gex-pl-row"><span className="otk-gex-pl-k up">CEILING ${g.callWall}</span> — rallies here tend to <b>stall / pull back</b>.</div>
+            <div className="otk-gex-pl-row"><span className="otk-gex-pl-k warn">IF IT BREAKS ${g.flip}+</span> the calm is over — it can <b>run</b>.</div>
+            <div className="otk-gex-pl-foot dim2">Expect chop between <b>${g.putWall}</b> and <b>${g.callWall}</b>, often drifting to about <b>${g.maxPain}</b> by Friday. Not advice.</div>
+          </React.Fragment> : <React.Fragment>
+            <div className="otk-gex-pl-hd"><b className="dn">Likely a fast, trending day.</b> Moves get bigger and harder to fade:</div>
+            <div className="otk-gex-pl-row"><span className="otk-gex-pl-k dn">${g.putWall} may not hold</span> — a drop can keep falling.</div>
+            <div className="otk-gex-pl-row"><span className="otk-gex-pl-k up">${g.callWall} may not cap it</span> — a rally can keep running.</div>
+            <div className="otk-gex-pl-row"><span className="otk-gex-pl-k warn">WATCH ${g.flip}</span> — back above usually restores calm.</div>
+            <div className="otk-gex-pl-foot dim2">Bigger swings, breakouts can run — don't bet on bounces today. Not advice.</div>
+          </React.Fragment>}
+        </div>
+        <AiExplain build={gexPrompt} label="Explain with AI" />
+      </div>
+    </div>
+  );
+}
+
+// strategy presets (kept verbatim — for ③ STRUCTURE + ④ REALITY payoff math)
+const OTK_STRATS = {
+  "Long Call":        { dir:"bull", legs:s=>[`+1 C ${s.k0}`], calc:(S,P)=>({ debit:P, maxLoss:P*100, maxGain:"open", be:S+P, pop:46 }) },
+  "Bull Call Spread": { dir:"bull", legs:s=>[`+1 C ${s.k0}`,`−1 C ${s.k1}`], calc:(S,P)=>{const d=+(P*0.45).toFixed(2),w=+(S*0.08).toFixed(2);return{ debit:d, maxLoss:d*100, maxGain:+((w-d)*100).toFixed(0), be:+(S+d).toFixed(2), pop:41 };} },
+  "Long Put":         { dir:"bear", legs:s=>[`+1 P ${s.k0}`], calc:(S,P)=>({ debit:P, maxLoss:P*100, maxGain:+((S-P)*100).toFixed(0), be:S-P, pop:44 }) },
+  "Bear Put Spread":  { dir:"bear", legs:s=>[`+1 P ${s.k0}`,`−1 P ${s.k1d}`], calc:(S,P)=>{const d=+(P*0.45).toFixed(2),w=+(S*0.08).toFixed(2);return{ debit:d, maxLoss:d*100, maxGain:+((w-d)*100).toFixed(0), be:+(S-d).toFixed(2), pop:43 };} },
+  "Covered Call":     { dir:"neutral-bull", legs:s=>[`+100 shares`,`−1 C ${s.k1}`], calc:(S,P)=>{const c=+(P*0.55).toFixed(2);return{ debit:-c, maxLoss:+((S-c)*100).toFixed(0), maxGain:+((S*0.05+c)*100).toFixed(0), be:+(S-c).toFixed(2), pop:62 };} },
+  "Cash-Secured Put": { dir:"neutral-bull", legs:s=>[`−1 P ${s.k1d}`], calc:(S,P)=>{const c=+(P*0.6).toFixed(2);return{ debit:-c, maxLoss:+((S*0.95-c)*100).toFixed(0), maxGain:+(c*100).toFixed(0), be:+(S*0.95-c).toFixed(2), pop:68 };} },
+  "Iron Condor":      { dir:"neutral", legs:s=>[`−1 C ${s.k1}`,`+1 C ${s.k2}`,`−1 P ${s.k1d}`,`+1 P ${s.k2d}`], calc:(S,P)=>{const c=+(P*0.5).toFixed(2),w=+(S*0.06).toFixed(2);return{ debit:-c, maxLoss:+((w-c)*100).toFixed(0), maxGain:+(c*100).toFixed(0), be:`${(S*0.94).toFixed(0)}–${(S*1.06).toFixed(0)}`, pop:64 };} },
+};
+function strikesFor(S){ return { k0:`$${Math.round(S)}`, k1:`$${Math.round(S*1.08)}`, k2:`$${Math.round(S*1.16)}`, k1d:`$${Math.round(S*0.95)}`, k2d:`$${Math.round(S*0.87)}` }; }
+
+// Profit grid (kept verbatim) — used in ⑤ ADVANCED
+function OtkProfitGrid({ o }) {
+  const [ivShift, setIvShift] = useState(0);
+  const [dir, setDir] = useState("buy");
+  const [otype, setOtype] = useState("call");
+  const [strike, setStrike] = useState(o.strike);
+  const [prem, setPrem] = useState(o.prem);
+  const [contracts, setContracts] = useState(1);
+  const STRATS = {
+    "Long Call":{dir:"buy",otype:"call",k:()=>Math.round(o.spot),note:"bullish"},
+    "Long Put":{dir:"buy",otype:"put",k:()=>Math.round(o.spot),note:"bearish"},
+    "Covered Call":{dir:"write",otype:"call",k:()=>Math.round(o.spot*1.05),note:"income"},
+    "Cash Secured Put":{dir:"write",otype:"put",k:()=>Math.round(o.spot*0.95),note:"bullish · get paid to wait"},
+  };
+  const [strat, setStrat] = useState("Long Call");
+  const applyStrat=(name)=>{const s=STRATS[name];if(!s)return;setStrat(name);setDir(s.dir);setOtype(s.otype);setStrike(s.k());};
+  useEffect(()=>{setStrike(o.strike);setPrem(o.prem);},[o.strike,o.prem]);
+  const crush=ivShift==="crush";
+  const sigma=Math.max(0.05,(o.iv+(crush?-(o.ivCrush||Math.round(o.iv*0.34)):ivShift))/100);
+  const entry=prem,r=0.045,totalCost=entry*100*contracts*(dir==="write"?-1:1);
+  const optVal=(S,T)=>otype==="put"?bsPut(S,strike,T,sigma,r):bsCall(S,strike,T,sigma,r);
+  const pcts=[];for(let p=6.6;p>=-7.2;p-=0.62)pcts.push(+p.toFixed(1));
+  const step=Math.max(5,Math.round(o.dte/7/5)*5);const days=[];for(let d=0;d<o.dte;d+=step)days.push(d);days.push(o.dte);
+  const colLbl=days.map((d,i)=>i===0?["Today","d0"]:d>=o.dte?["EXPIRY","exp"]:[`+${d}d`,`+${d}`]);
+  const cell=(pricePct,daysHeld)=>{const S=o.spot*(1+pricePct/100);const Trem=Math.max(0,(o.dte-daysHeld))/365;const val=optVal(S,Trem);const pl=(val-entry)/entry*100;return dir==="write"?-pl:pl;};
+  const tone=pct=>{if(pct>=40)return"g3";if(pct>=12)return"g2";if(pct>=0)return"g1";if(pct>-25)return"r1";if(pct>-55)return"r2";return"r3";};
+  const targetPct=+(((o.target||o.spot*1.06)/o.spot-1)*100).toFixed(1);
+  const nearest=(val)=>pcts.reduce((a,b)=>Math.abs(b-val)<Math.abs(a-val)?b:a,pcts[0]);
+  const spotRow=nearest(0),tgtRow=nearest(targetPct);
+  return (
+    <div className="otk-pg">
+      <div className="otk-pg-hd">
+        <span className="otk-pg-title mono">{dir==="write"?"WRITE":"LONG"} ${strike} {otype.toUpperCase()} · {o.dte} DTE · {contracts}×</span>
+        <span className="otk-pg-params mono dim2">illustrative BS · σ {(sigma*100).toFixed(0)}% · r {(r*100).toFixed(1)}% · anchored on spot ${o.spot.toFixed(2)}</span>
+      </div>
+      <div className="otk-pg-form">
+        <label className="otk-pg-fld mono">Strategy
+          <select className="otk-pg-select" value={strat} onChange={e=>applyStrat(e.target.value)}>{Object.keys(STRATS).map(n=><option key={n} value={n}>{n} ({STRATS[n].note})</option>)}</select>
+        </label>
+        <div className="otk-pg-seg">{["buy","write"].map(d=><button key={d} className={dir===d?"is-on":""} onClick={()=>setDir(d)}>{d==="buy"?"Buy":"Write"}</button>)}</div>
+        <div className="otk-pg-seg">{["call","put"].map(t=><button key={t} className={otype===t?"is-on":""} onClick={()=>setOtype(t)}>{t==="call"?"Call":"Put"}</button>)}</div>
+        <label className="otk-pg-fld mono">Strike <span className="otk-pg-inwrap">$<input type="number" step="1" value={strike} onChange={e=>setStrike(+e.target.value||0)} /></span></label>
+        <label className="otk-pg-fld mono">Premium <span className="otk-pg-inwrap">$<input type="number" step="0.01" value={prem} onChange={e=>setPrem(+e.target.value||0)} /></span></label>
+        <span className="otk-pg-total mono">{dir==="write"?"Credit":"Total cost"} <b className={dir==="write"?"up":""}>${Math.abs(totalCost).toFixed(2)}</b></span>
+        <button className="otk-pg-reset mono" onClick={()=>{applyStrat("Long Call");setPrem(o.prem);setContracts(1);}}>reset</button>
+      </div>
+      <div className="otk-pg-iv">
+        <span className="mono dim2">IV scenario</span>
+        {[["-10",-10],["flat",0],["+10",10]].map(([l,v])=><button key={l} className={`otk-pg-ivbtn ${ivShift===v?"is-on":""}`} onClick={()=>setIvShift(v)}>{typeof v==="number"&&v>0?"+":""}{l==="flat"?"IV flat":l+" vol"}</button>)}
+        <button className={`otk-pg-ivbtn otk-pg-ivbtn--crush ${crush?"is-on":""}`} onClick={()=>setIvShift("crush")}>⚡ ER crush</button>
+        <span className="mono dim2 otk-pg-ivnow">σ now <b>{(sigma*100).toFixed(0)}%</b></span>
+      </div>
+      <div className="otk-pg-scroll">
+        <table className="otk-pg-tbl otk-pg-tbl--rich">
+          <thead><tr><th className="otk-pg-corner mono">Price ▾</th>{colLbl.map((l,i)=><th key={i} className="mono"><div>{l[0]}</div><div className="otk-pg-colsub dim2">{l[1]}</div></th>)}<th className="mono otk-pg-pctcol">±% spot</th></tr></thead>
+          <tbody>{pcts.map((pp,ri)=>{const price=o.spot*(1+pp/100);const isSpot=pp===spotRow,isTgt=pp===tgtRow&&!isSpot;return(
+            <tr key={ri} className={`${isSpot?"otk-pg-spotrow":""} ${isTgt?"otk-pg-tgtrow":""}`}>
+              <th className="otk-pg-rowh mono">${price.toFixed(0)}</th>
+              {days.map((d,ci)=>{const pct=cell(pp,d);return <td key={ci} className={`otk-pg-cell otk-pg--${tone(pct)} mono`}>{pct>=0?"+":""}{Math.round(pct)}</td>;})}
+              <td className="otk-pg-pct mono dim2">{isSpot?"spot":(pp>=0?"+":"")+pp+"%"}</td>
+            </tr>);})}</tbody>
+        </table>
+      </div>
+      <div className="otk-pg-foot mono dim2">Each cell = % return on the <b>${entry.toFixed(2)}</b> premium at that price &amp; date, IV {crush?"crushed":ivShift?`shifted ${ivShift>0?"+":""}${ivShift}pts`:"held"} at σ {(sigma*100).toFixed(0)}%. The <span className="cy">cyan line</span> is spot; <span className="amb-c">amber</span> is the T1 target. EXPIRY = intrinsic; left→right shows theta erosion.</div>
+    </div>
+  );
+}
+
+// chain mini-charts (kept) — used in ⑤ ADVANCED
+function OtkChain({ o }) {
+  const strikes = useMemo(()=>{const base=o.strike,step=Math.max(1,Math.round(o.spot*0.025)),rows=[];
+    for(let k=base-step*4;k<=base+step*4;k+=step){const itm=k<o.spot,dist=(k-o.spot)/o.spot;
+      const cPrem=Math.max(0.05,o.prem-dist*o.spot*0.55),cDelta=Math.max(0.03,Math.min(0.97,0.5-dist*6));
+      const ivK=+(o.iv+Math.abs(dist)*42).toFixed(1),oi=Math.round(4200*Math.exp(-Math.abs(dist)*8)+120),vol=Math.round(oi*(0.3+((k*7)%53)/100));
+      rows.push({ k, itm, cPrem, cDelta, ivK, oi, vol, atm:k===base });}return rows;},[o]);
+  const maxOI=Math.max(...strikes.map(s=>s.oi));
+  const term=EXPIRIES.map(e=>({ dte:e.dte, iv:e.iv, on:e.dte===o.dte }));
+  const tW=300,tH=120,tPadL=34,tPadB=22,tPadT=12,tPadR=12,tMaxIV=Math.max(...term.map(t=>t.iv)),tMinIV=Math.min(...term.map(t=>t.iv));
+  const tx=i=>tPadL+(i/(term.length-1))*(tW-tPadL-tPadR),ty=v=>tPadT+(1-((v-tMinIV+3)/(tMaxIV-tMinIV+6)))*(tH-tPadT-tPadB);
+  const skew=strikes.map(s=>({ k:s.k, iv:s.ivK, atm:s.atm }));
+  const sW=300,sH=120,sPadL=34,sPadB=22,sPadT=12,sPadR=12,sMaxIV=Math.max(...skew.map(s=>s.iv)),sMinIV=Math.min(...skew.map(s=>s.iv));
+  const sx=i=>sPadL+(i/(skew.length-1))*(sW-sPadL-sPadR),sy=v=>sPadT+(1-((v-sMinIV+2)/(sMaxIV-sMinIV+4)))*(sH-sPadT-sPadB);
+  const contango=term[term.length-1].iv>term[0].iv;
+  return (
+    <div className="otk-grid">
+      <div className="otk-card otk-card--wide">
+        <div className="otk-card-h mono">CALL CHAIN · {o.dte}DTE · ±4 strikes</div>
+        <table className="dtable otk-tbl otk-chain">
+          <thead><tr><th>Strike</th><th>Moneyness</th><th className="r">Δ</th><th className="r">IV</th><th className="r">Mid</th><th className="r">Vol</th><th className="r">OI</th><th>OI depth</th></tr></thead>
+          <tbody>{strikes.map((s,i)=>(<tr key={i} className={s.atm?"is-current":""}>
+            <td className="mono"><b>${s.k}</b>{s.atm&&<span className="otk-atm mono">ATM</span>}</td>
+            <td className={`mono ${s.itm?"up":"dim2"}`}>{s.itm?"ITM":(s.k===o.strike?"ATM":"OTM")} {((s.k-o.spot)/o.spot*100).toFixed(1)}%</td>
+            <td className="r mono">{s.cDelta.toFixed(2)}</td><td className="r mono">{s.ivK}%</td><td className="r mono cy">${s.cPrem.toFixed(2)}</td>
+            <td className="r mono dim2">{s.vol.toLocaleString()}</td><td className="r mono">{s.oi.toLocaleString()}</td>
+            <td><div className="otk-oibar"><i style={{width:`${s.oi/maxOI*100}%`}}/></div></td></tr>))}</tbody>
+        </table>
+      </div>
+      <div className="otk-card">
+        <div className="otk-card-h mono">VOL TERM STRUCTURE · IV by DTE</div>
+        <svg width="100%" height={tH} viewBox={`0 0 ${tW} ${tH}`} className="otk-mini-svg">
+          <polyline points={term.map((t,i)=>`${tx(i)},${ty(t.iv)}`).join(" ")} fill="none" stroke="var(--copper)" strokeWidth="2" />
+          {term.map((t,i)=>(<g key={i}><circle cx={tx(i)} cy={ty(t.iv)} r={t.on?5:3} fill={t.on?"var(--copper)":"var(--ink-2)"} /><text x={tx(i)} y={tH-8} fontSize="8" className="mono" textAnchor="middle" fill={t.on?"var(--copper)":"var(--ink-3)"}>{t.dte}d</text></g>))}
+        </svg>
+        <div className="otk-verdict-mini mono"><span className={contango?"warn":"up"}>{contango?"CONTANGO":"BACKWARDATION"}</span> · {contango?"front cheap vs back":"front rich — event premium"}</div>
+      </div>
+      <div className="otk-card">
+        <div className="otk-card-h mono">SKEW CURVE · IV by strike</div>
+        <svg width="100%" height={sH} viewBox={`0 0 ${sW} ${sH}`} className="otk-mini-svg">
+          <polyline points={skew.map((s,i)=>`${sx(i)},${sy(s.iv)}`).join(" ")} fill="none" stroke="var(--violet)" strokeWidth="2" />
+          {skew.map((s,i)=>s.atm&&<line key={i} x1={sx(i)} y1={sPadT} x2={sx(i)} y2={sH-sPadB} stroke="var(--copper)" strokeDasharray="3 3" opacity="0.6"/>)}
+          {skew.map((s,i)=>(<circle key={i} cx={sx(i)} cy={sy(s.iv)} r={s.atm?4:2.5} fill={s.atm?"var(--copper)":"var(--violet)"}/>))}
+        </svg>
+        <div className="otk-verdict-mini mono"><span className="warn">PUT SKEW +{o.skew}%</span> · downside fear bid</div>
+      </div>
+    </div>
+  );
+}
+
+// per-ticker journal (kept) — localStorage
+function OtkJournal({ symbol }) {
+  const key="otk-journal-"+(symbol||"x");
+  const [val,setVal]=useState(()=>{try{return localStorage.getItem(key)||"";}catch(e){return"";}});
+  return (
+    <React.Fragment>
+      <textarea className="otk-journal mono" placeholder="Why this trade? · entry rationale · invalidation triggers · post-trade review"
+        value={val} onChange={e=>{setVal(e.target.value);try{localStorage.setItem(key,e.target.value);}catch(e2){}}} />
+      <div className="mono dim2" style={{fontSize:9}}>auto-saves to localStorage per ticker{symbol?` · ${symbol}`:""}</div>
+    </React.Fragment>
+  );
+}
+
+/* ════════ NEW — intent-first redesign components ════════ */
+const INTENTS = [
+  { k:"Bullish",  ic:"📈", d:"You expect the stock to go up." },
+  { k:"Bearish",  ic:"📉", d:"You expect the stock to go down." },
+  { k:"Range",    ic:"↔",  d:"You expect it to chop sideways." },
+  { k:"Income",   ic:"💵", d:"You want to get paid premium / cash flow." },
+];
+// intent + IV regime → recommended structure + 2 alternatives
+const STRUCTURE_MATRIX = {
+  Bullish:  { cheap:{ rec:"Long Call", alts:["Bull Call Spread","Cash-Secured Put"] }, rich:{ rec:"Bull Call Spread", alts:["Cash-Secured Put","Long Call"] } },
+  Bearish:  { cheap:{ rec:"Long Put", alts:["Bear Put Spread"] }, rich:{ rec:"Bear Put Spread", alts:["Long Put"] } },
+  Range:    { cheap:{ rec:"WAIT", alts:["Iron Condor"] }, rich:{ rec:"Iron Condor", alts:["Cash-Secured Put"] } },
+  Income:   { cheap:{ rec:"Cash-Secured Put", alts:["Covered Call"] }, rich:{ rec:"Covered Call", alts:["Cash-Secured Put"] } },
+};
+const STRUCT_WHEN = {
+  "Long Call":"Simplest bullish bet. Defined risk = the premium. Use when IV is cheap and you want uncapped upside.",
+  "Bull Call Spread":"Finance the long call by selling a higher strike. Cheaper, caps upside. Use when IV is rich.",
+  "Long Put":"Simplest bearish bet. Defined risk = the premium. Use when IV is cheap.",
+  "Bear Put Spread":"Buy a put, sell a lower one. Cheaper, caps downside profit. Use when IV is rich.",
+  "Iron Condor":"Sell a call spread + a put spread. Profits if price stays in a range. Use when IV is rich and you expect chop.",
+  "Cash-Secured Put":"Get paid to agree to buy lower. Bullish-to-neutral income; you keep the credit if it stays above the strike.",
+  "Covered Call":"Own shares + sell a call against them. Income in a flat-to-up tape; caps upside at the short strike.",
+  "WAIT":"IV is cheap and you expect chop — there's no clean edge. A calendar or simply waiting is often the best 'trade'.",
+};
+const intentFromBias = (bias) => bias==="BULLISH"?"Bullish":bias==="BEARISH"?"Bearish":"Range";
+
+function Step({ n, title, sub, children }) {
+  return (
+    <div className="opx-step">
+      <div className="opx-step-h"><span className="opx-step-n mono">{n}</span><span className="opx-step-t">{title}</span><span className="opx-step-s mono dim2">{sub}</span></div>
+      {children}
+    </div>
+  );
+}
+
+// ① INTENT
+function OptIntent({ intent, onIntent, suggested, gexRegime }) {
+  return (
+    <Step n="①" title="What's your view?" sub="pick an intent — everything below adapts to it">
+      <div className="opx-intent">
+        {INTENTS.map(it=>(
+          <button key={it.k} className={`opx-intent-btn ${intent===it.k?"is-on":""}`} onClick={()=>onIntent(it.k)}>
+            <span className="opx-intent-ic">{it.ic}</span>
+            <span className="opx-intent-l">{it.k}</span>
+            <span className="opx-intent-d">{it.d}</span>
+            {suggested===it.k && <span className="opx-intent-sug mono">✦ SUGGESTED</span>}
+          </button>
+        ))}
+      </div>
+      <div className="opx-suggest mono dim2">Suggested <b className="copper">{suggested}</b> — from the ticker's bias and a <b className={gexRegime==="range"?"up":"dn"}>{gexRegime==="range"?"positive-GEX / range":"negative-GEX / trend"}</b> read. You can override.</div>
+    </Step>
+  );
+}
+
+// ② CONTEXT — GEX headline + vol regime + expected move + catalysts
+function VolRegimeStrip({ o }) {
+  const ivCheap = o.ivrp < 0;
+  const contango = EXPIRIES[EXPIRIES.length-1].iv > EXPIRIES[0].iv;
+  const cells = [
+    { k:"IV Rank", v: ivCheap?"CHEAP":"RICH", tone: ivCheap?"up":"warn", s:`IV ${o.iv}% vs HV ${o.hv20}% · IVRP ${o.ivrp}%` },
+    { k:"Term", v: contango?"CONTANGO":"BACKWARD.", tone: contango?"warn":"up", s: contango?"front cheap vs back":"front rich · event premium" },
+    { k:"Skew", v:"PUT-SKEW", tone:"warn", s:`25Δ +${o.skew}% · downside fear bid` },
+  ];
+  return (
+    <div className="otk-card">
+      <div className="otk-card-h mono">VOL REGIME · is premium cheap or rich?</div>
+      <div className="opx-vol">
+        {cells.map((c,i)=>(<div key={i} className="opx-vol-cell" title={c.s}>
+          <span className="opx-vol-k">{c.k}</span><span className={`opx-vol-v mono kpi-tone--${c.tone==="up"?"gn":c.tone==="warn"?"amb":"rd"}`}>{c.v}</span><span className="opx-vol-s mono">{c.s}</span></div>))}
+      </div>
+    </div>
+  );
+}
+function ExpectedMove({ o }) {
+  const lo=(o.spot*(1-o.impMove/100)).toFixed(2), hi=(o.spot*(1+o.impMove/100)).toFixed(2);
+  return (
+    <div className="otk-card">
+      <div className="otk-card-h mono">EXPECTED MOVE · {o.dte}DTE {o.erInWindow && <span className="warn">· ⚡ earnings inside window</span>}</div>
+      <div className="opx-em">
+        <div className="mono" style={{fontSize:13}}>±{o.impMove}% implied · <b className="dn">${lo}</b> ↔ <b className="up">${hi}</b></div>
+        <div className="opx-em-cone">
+          <svg width="100%" height="46" viewBox="0 0 300 46" preserveAspectRatio="none">
+            <line x1="10" y1="23" x2="290" y2="23" stroke="var(--glass-line)" />
+            <rect x="90" y="10" width="120" height="26" fill="color-mix(in oklab,var(--cy) 14%,transparent)" stroke="color-mix(in oklab,var(--cy) 40%,transparent)" rx="3" />
+            <line x1="150" y1="6" x2="150" y2="40" stroke="var(--ink)" strokeDasharray="2 2" />
+            <text x="92" y="46" fontSize="8" className="mono" fill="var(--rd)">${lo}</text>
+            <text x="150" y="8" fontSize="8" className="mono" textAnchor="middle" fill="var(--ink-2)">spot ${o.spot.toFixed(0)}</text>
+            <text x="208" y="46" fontSize="8" className="mono" textAnchor="end" fill="var(--gn)">${hi}</text>
+          </svg>
+        </div>
+        <div className="otk-verdict-mini mono dim2">
+          {o.erInWindow ? <React.Fragment><span className="warn">IV-crush risk</span> — earnings in {o.erDays}d sit inside this expiry; IV can drop ~{o.ivCrush} pts the morning after, hurting long premium even if you're right on direction.</React.Fragment>
+                        : <React.Fragment><span className="up">No earnings before expiry</span> — clean theta, no IV-crush event in the window.</React.Fragment>}
+        </div>
+      </div>
+    </div>
+  );
+}
+function NewsCatalysts({ ticker }) {
+  const [ai,setAi]=useState(null);
+  const sec=ticker.sector||"sector";
+  const heads=[
+    { t:"08:42", h:`Analyst reiterates Buy on ${ticker.symbol}, raises PT`, type:"RATING", mat:"med" },
+    { t:"06:15", h:`${sec} flows turn positive on macro print`, type:"MACRO", mat:"low" },
+    { t:"Yest", h:`${sec} peer guides above consensus — read-through`, type:"GUIDANCE", mat:"high" },
+    { t:"2d", h:`Insider cluster buy disclosed (Form 4)`, type:"INSIDER", mat:"high" },
+  ];
+  const classify=async()=>{setAi("loading");const prompt=`You are a news catalyst classifier for a stock trader following ${ticker.symbol}. For EACH headline below, give one short line: catalyst type, materiality (high/med/low), tradeable-now vs priced-in. Be concise.\n`+heads.map(h=>`- ${h.h}`).join("\n");const r=await window.aiComplete(prompt);setAi(r.text);};
+  return (
+    <div className="otk-card otk-card--wide">
+      <div className="otk-card-h mono" style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span>NEWS CATALYSTS · type · materiality · freshness</span>
+        <button className="aix-btn mono" onClick={classify} disabled={ai==="loading"}>{ai==="loading"?"✦ thinking…":"✦ Classify catalysts"}</button>
+      </div>
+      <div className="nc">
+        {heads.map((n,i)=>(<div key={i} className={`nc-row nc-row--${n.mat}`}>
+          <span className="nc-time">{n.t}</span><span className="nc-type">{n.type}</span>
+          <span className={`nc-mat nc-mat--${n.mat}`}>{n.mat==="high"?"MATERIAL":n.mat==="med"?"MODERATE":"LOW"}</span>
+          <span className="nc-h">{n.h}</span></div>))}
+        {ai && ai!=="loading" && <div className="aix-out mono" style={{width:"100%"}}><span className="aix-tag">✦ KAIROS · CATALYST READ</span><span className="aix-txt">{ai}</span></div>}
+      </div>
+    </div>
+  );
+}
+function OptContext({ o, ticker }) {
+  return (
+    <Step n="②" title="Why does it move?" sub="dealer positioning leads · vol regime · expected move · catalysts">
+      <div className="otk-grid">
+        <OtkGEX o={o} />
+        <div className="opx-ctx-grid otk-card--wide" style={{border:"none",background:"none",padding:0}}>
+          <VolRegimeStrip o={o} />
+          <ExpectedMove o={o} />
+        </div>
+        <NewsCatalysts ticker={ticker} />
+      </div>
+    </Step>
+  );
+}
+
+// ③ STRUCTURE — recommend best-fit + 2 alternatives
+function OptStructure({ intent, o, picked, onPick }) {
+  const ivCheap = o.ivrp < 0;
+  const m = STRUCTURE_MATRIX[intent][ivCheap?"cheap":"rich"];
+  const cards = [{ name:m.rec, rec:true }, ...m.alts.map(a=>({ name:a, rec:false }))];
+  const sk = strikesFor(o.spot);
+  return (
+    <Step n="③" title="What should you trade?" sub={`${intent} + IV ${ivCheap?"cheap":"rich"} → recommended structure (pre-filled)`}>
+      <div className="opx-struct">
+        {cards.map((c,i)=>{
+          const wait = c.name==="WAIT";
+          const def = !wait && OTK_STRATS[c.name];
+          const legs = def ? def.legs(sk) : [];
+          const r = def ? def.calc(o.spot, o.prem) : null;
+          return (
+            <button key={i} className={`opx-struct-card ${picked===c.name?"is-on":""}`} onClick={()=>onPick(c.name)}>
+              {c.rec && <span className="opx-struct-rec mono">RECOMMENDED</span>}
+              <span className="opx-struct-name">{wait?"Wait / Calendar":c.name}</span>
+              <span className="opx-struct-when">{STRUCT_WHEN[c.name]}</span>
+              {!wait && <div className="opx-struct-legs">{legs.map((l,j)=><span key={j} className={`opx-struct-leg ${l[0]==="+"?"buy":"sell"}`}>{l}</span>)}</div>}
+              {r && <div className="opx-struct-mini mono">
+                <span>{r.debit<0?"credit":"debit"} <b className={r.debit<0?"up":""}>${Math.abs(r.debit).toFixed(2)}</b></span>
+                <span>POP <b className={r.pop>=60?"up":""}>{r.pop}%</b></span>
+                <span>{def.dir} bias</span>
+              </div>}
+            </button>
+          );
+        })}
+      </div>
+    </Step>
+  );
+}
+
+// ④ REALITY — honest option fill + plain-English + paper-buy + journal
+function OptPayoff({ r, o }) {
+  // generic capped payoff from the calc result {maxLoss, maxGain, be}
+  const W=380,H=180,padL=40,padR=16,padT=14,padB=26;
+  const lo=o.spot*0.80, hi=o.spot*1.20, rng=hi-lo;
+  const x=p=>padL+((p-lo)/rng)*(W-padL-padR);
+  const ml=typeof r.maxLoss==="number"?-r.maxLoss:-(o.prem*100);
+  const mg=r.maxGain==="open"?(hi-o.spot)*100:(typeof r.maxGain==="number"?r.maxGain:o.prem*100);
+  const beNum=typeof r.be==="number"?r.be:o.spot;
+  const pnl=p=>{ // crude monotone payoff: clamp between ml and mg, zero at BE
+    const dir=r.dir||"bull";
+    const slope=(mg-ml)/((dir.includes("bear")?(lo-hi):(hi-lo))||1);
+    let v=(p-beNum)*slope*((dir.includes("bear"))?-1:1);
+    if(dir==="neutral"){ const inBand=Math.abs(p-o.spot)<o.spot*0.06; v=inBand?mg:ml; }
+    return Math.max(ml,Math.min(mg,v));
+  };
+  const yMin=ml*1.1, yMax=mg*1.1;
+  const y=v=>padT+(1-(v-yMin)/((yMax-yMin)||1))*(H-padT-padB);
+  const y0=y(0), pts=[]; for(let p=lo;p<=hi;p+=0.5)pts.push([x(p),y(pnl(p))]);
+  return (
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" className="opx-payoff-svg">
+      {[mg,0,ml].map((v,i)=>(<g key={i}><line x1={padL} y1={y(v)} x2={W-padR} y2={y(v)} stroke="var(--glass-line)" strokeDasharray={v===0?"none":"2 3"} opacity={v===0?0.8:0.4}/>
+        <text x={padL-5} y={y(v)+3} fontSize="9" className="mono" textAnchor="end" fill={v>0?"var(--gn)":v<0?"var(--rd)":"var(--ink-3)"}>{v>=0?"+":"−"}${Math.abs(v).toFixed(0)}</text></g>))}
+      <polyline points={pts.map(p=>p.join(",")).join(" ")} fill="none" stroke="var(--cy)" strokeWidth="2.2" />
+      <line x1={x(o.spot)} y1={padT} x2={x(o.spot)} y2={H-padB} stroke="var(--ink)" strokeDasharray="3 3" opacity="0.6"/>
+      <text x={x(o.spot)} y={H-12} fontSize="8.5" className="mono" textAnchor="middle" fill="var(--ink-2)">spot ${o.spot.toFixed(0)}</text>
+    </svg>
+  );
+}
+function OptReality({ structure, o, ticker }) {
+  const [contracts, setContracts] = useState(1);
+  const wait = structure==="WAIT";
+  const def = !wait && OTK_STRATS[structure];
+  if (wait || !def) return (
+    <Step n="④" title="The honest trade" sub="no clean edge right now">
+      <div className="opx-rcard"><div className="opx-whathappens">IV is cheap and the read is range-bound — there's no high-quality options structure here. The most disciplined move is often to <b>wait</b> for IV to richen (then sell premium) or for a directional break. Not advice.</div></div>
+    </Step>
+  );
+  const sk = strikesFor(o.spot);
+  const r = def.calc(o.spot, o.prem);
+  const credit = r.debit < 0;
+  // option fill realism: mid → +½ spread → slippage → realistic debit/credit
+  const mid = Math.abs(r.debit);
+  const halfSpread = +(mid * (o.ba/100) / 2).toFixed(2);
+  const slip = +(mid * 0.022).toFixed(2);
+  const realFill = credit ? +(mid - halfSpread - slip).toFixed(2) : +(mid + halfSpread + slip).toFixed(2);
+  const costNow = +(realFill * 100 * contracts).toFixed(0);
+  const slipCost = Math.round((credit ? (mid-realFill) : (realFill-mid)) * 100 * contracts);
+  const popAfter = Math.max(0, r.pop - 3);   // costs nudge POP down
+  const dirWord = def.dir.includes("bull") ? "rises" : def.dir.includes("bear") ? "falls" : "stays in the range";
+  const what = credit
+    ? `You collect about $${costNow} now. You keep it if ${ticker.symbol} ${dirWord} through ${o.dte}-day expiry. Your risk is defined by the structure — worst case is roughly −$${typeof r.maxLoss==="number"?r.maxLoss.toLocaleString():r.maxLoss}.`
+    : `You pay about $${costNow} now (your max loss). You profit if ${ticker.symbol} ${dirWord} enough to clear breakeven ${typeof r.be==="number"?"$"+r.be.toFixed(2):r.be} by ${o.dte}-day expiry; max gain ${r.maxGain==="open"?"is uncapped to the upside":"≈ +$"+(typeof r.maxGain==="number"?r.maxGain.toLocaleString():r.maxGain)}.`;
+  const tradePrompt = ()=>`Explain this paper options trade to a beginner in plain English (3-4 sentences). Say what has to happen to profit, what the worst case is, and one thing to watch. Not advice.
+Structure: ${structure} on ${ticker.symbol} at spot $${o.spot.toFixed(2)}, ${o.dte} DTE.
+${credit?"Credit":"Debit"} after realistic fill: $${costNow} (${contracts} contract${contracts>1?"s":""}). Breakeven: ${typeof r.be==="number"?"$"+r.be.toFixed(2):r.be}. Max loss: $${typeof r.maxLoss==="number"?r.maxLoss:r.maxLoss}. Max gain: ${r.maxGain==="open"?"uncapped":"$"+(typeof r.maxGain==="number"?r.maxGain:r.maxGain)}. POP after costs: ${popAfter}%.${o.erInWindow?` Earnings in ${o.erDays}d sit inside the expiry (IV-crush risk).`:""}`;
+  const fillSteps = [
+    { l:"Mid", v:`$${mid.toFixed(2)}`, s:"quoted mid", tone:"ink" },
+    { l:"½ spread", v:`${credit?"−":"+"}$${halfSpread.toFixed(2)}`, s:`${o.ba}% wide`, tone:"amb" },
+    { l:"Slippage", v:`${credit?"−":"+"}$${slip.toFixed(2)}`, s:"market impact", tone:"amb" },
+    { l:credit?"Real credit":"Real debit", v:`$${realFill.toFixed(2)}`, s:`${contracts}× = $${costNow}`, tone:"rd", strong:true },
+  ];
+  return (
+    <Step n="④" title="The honest trade" sub={`${structure} · realistic fill (not mid) · paper-only`}>
+      <div className="opx-reality">
+        <div className="opx-rcard">
+          <div className="opx-rcard-h mono">PAYOFF AT EXPIRY · {structure}</div>
+          <OptPayoff r={r} o={o} />
+          <div className="opx-rkpis">
+            <div className="opx-rkpi"><span className="label-cap">{credit?"Max gain":"Max loss"}</span><span className={`opx-rkpi-v mono ${credit?"up":"dn"}`}>{credit?"+":"−"}${typeof (credit?r.maxGain:r.maxLoss)==="number"?(credit?r.maxGain:r.maxLoss).toLocaleString():(credit?r.maxGain:r.maxLoss)}</span></div>
+            <div className="opx-rkpi"><span className="label-cap">Breakeven</span><span className="opx-rkpi-v mono">{typeof r.be==="number"?"$"+r.be.toFixed(2):r.be}</span></div>
+            <div className="opx-rkpi"><span className="label-cap">POP · after costs</span><span className={`opx-rkpi-v mono ${popAfter>=55?"up":""}`}>{popAfter}%</span></div>
+          </div>
+        </div>
+        <div className="opx-rcard">
+          <div className="opx-rcard-h mono">OPTION FILL REALISM · paper</div>
+          <div className="opx-fill-flow">
+            {fillSteps.map((st,i)=>(<React.Fragment key={i}>
+              <div className={`opx-fill-step ${st.strong?"is-strong":""}`}><span className="opx-fill-l">{st.l}</span><span className={`opx-fill-v mono kpi-tone--${st.tone}`}>{st.v}</span><span className="opx-fill-l" style={{textTransform:"none"}}>{st.s}</span></div>
+              {i<fillSteps.length-1 && <span className="opx-fill-arrow mono">→</span>}
+            </React.Fragment>))}
+          </div>
+          <div className="opx-rcard-h mono" style={{marginTop:4}}>WHAT HAS TO HAPPEN</div>
+          <div className="opx-whathappens">{what} <span className="dim2">Costs you about <b className="dn">${Math.abs(slipCost)}</b> vs the mid — paper P&amp;L scores this realistic fill. Informational only — not advice.</span></div>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span className="mono dim2" style={{fontSize:11}}>Contracts</span>
+            <button className="btn btn--sm" onClick={()=>setContracts(c=>Math.max(1,c-1))}>−</button>
+            <span className="mono">{contracts}</span>
+            <button className="btn btn--sm" onClick={()=>setContracts(c=>c+1)}>+</button>
+          </div>
+          <div className="opx-actions">
+            <button className="btn btn--primary" onClick={()=>alert(`${structure} on ${ticker.symbol} — Paper-Buy ${contracts}ct queued (paper · dry-run).`)}>▶ Paper-Buy {contracts} ct</button>
+            <button className="btn btn--sm">★ Save</button>
+            <button className="btn btn--sm">🔔 Alert</button>
+          </div>
+          <AiExplain build={tradePrompt} label="Explain this trade" />
+          <OtkJournal symbol={ticker.symbol} />
+          <div className="opx-foot mono">Paper-only · no live order routing. Realistic fill = mid {credit?"−":"+"} ½ spread {credit?"−":"+"} slippage. Not advice.</div>
+        </div>
+      </div>
+    </Step>
+  );
+}
+
+// ⑤ ADVANCED — full cockpit, collapsed by default
+function OptAdvanced({ o }) {
+  const [open, setOpen] = useState(false);
+  const stress=[["↓ -10%",o.spot*0.9,-1.27,-61],["↓ -5%",o.spot*0.95,-0.84,-40],["· +0%",o.spot,-0.30,-14],["↑ +5%",o.spot*1.05,0.35,17],["↑ +10%",o.spot*1.10,1.09,53]];
+  return (
+    <div className="opx-step" style={{borderBottom:"none"}}>
+      <button className={`opx-adv-toggle ${open?"is-open":""}`} onClick={()=>setOpen(v=>!v)}>
+        <span className="chev">▸</span> ⑤ Show Greeks &amp; chain <span className="dim2 mono" style={{fontWeight:400}}>· full cockpit for advanced users (collapsed for beginners)</span>
+      </button>
+      {open && (
+        <div style={{marginTop:12}}>
+          <div className="otk-grid">
+            <div className="otk-card">
+              <div className="otk-card-h mono">GREEKS · ATM ~{o.dte}d</div>
+              <div className="otk-greeks">{[["Δ","+"+o.delta],["Γ",o.gamma],["Θ/d","$"+o.theta],["ν","+$"+o.vega]].map(([k,v],i)=>(<div key={i} className="otk-greek"><span className="mono dim2">{k}</span><span className="mono otk-greek-v">{v}</span></div>))}</div>
+            </div>
+            <div className="otk-card">
+              <div className="otk-card-h mono">QUICK STATS</div>
+              <div className="otk-stats">{[["IV",o.iv+"%"],["HV20",o.hv20+"%"],["IVRP",o.ivrp+"%"],["25Δ Skew","+"+o.skew+"%"],["Imp move","±"+o.impMove+"%"],["POP",o.pop+"%"],["Max Pain","$"+o.maxPain],["β-SPY",o.beta]].map(([k,v],i)=>(<div key={i} className="otk-stat"><span className="mono dim2">{k}</span><span className="mono">{v}</span></div>))}</div>
+            </div>
+            <div className="otk-card otk-card--wide">
+              <div className="otk-card-h mono">PROFIT CALCULATOR · daily % return grid <span className="dim2" style={{textTransform:"none"}}>· Black-Scholes</span></div>
+              <OtkProfitGrid o={o} />
+            </div>
+            <div className="otk-card">
+              <div className="otk-card-h mono">GREEKS-STRESS · spot scenarios</div>
+              <table className="dtable otk-tbl"><thead><tr><th>Move</th><th className="r">Spot</th><th className="r">ΔPrem</th><th className="r">P&L%</th></tr></thead>
+                <tbody>{stress.map((r,i)=>(<tr key={i}><td className="mono">{r[0]}</td><td className="r mono">${r[1].toFixed(2)}</td><td className={`r mono ${r[2]>=0?"up":"dn"}`}>{r[2]>=0?"+":""}${Math.abs(r[2]).toFixed(2)}</td><td className={`r mono ${r[3]>=0?"up":"dn"}`}>{r[3]>=0?"+":""}{r[3]}%</td></tr>))}</tbody></table>
+            </div>
+            <div className="otk-card">
+              <div className="otk-card-h mono">LIQUIDITY GRADE</div>
+              <div className="otk-stats">{[["Spread %",o.ba+"%"],["OI @ strike","4,200"],["Vol today","2,310"],["Slip est.","2.2%"],["Fill speed","~3s mid"]].map(([k,v],i)=>(<div key={i} className="otk-stat"><span className="mono dim2">{k}</span><span className="mono">{v}</span></div>))}</div>
+              <div className="otk-verdict-mini mono"><span className="up">FILLABLE</span> · limit @ mid, work to mid+½spread</div>
+            </div>
+            <OtkChain o={o} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ════════ wrapper — the new Options lens ════════ */
+function LensOptionsV2({ ticker }) {
+  const modeDte = 35;
+  const [dte, setDte] = useState(modeDte);
+  const o = useMemo(()=>deriveTicket(ticker, dte), [ticker, dte]);
+  // GEX regime (sign of net) — drives the intent suggestion
+  const gexRegime = useMemo(()=>{
+    const spot=o.spot, step=Math.max(1,Math.round(spot*0.025)), atmK=Math.round(spot/step)*step; let total=0;
+    for(let i=-5;i<=5;i++){const k=atmK+i*step;const dist=(k-spot)/spot;
+      const callOI=Math.round(4600*Math.exp(-Math.pow((dist-0.025)*8,2))+90), putOI=Math.round(6200*Math.exp(-Math.pow((dist+0.035)*8,2))+90);
+      const gamma=Math.exp(-Math.pow(dist*7,2))*0.09; total+=(-callOI+putOI)*gamma*spot*spot*4e-6;}
+    return total>=0?"range":"trend";
+  }, [o]);
+  const suggested = useMemo(()=>{ const base=intentFromBias(ticker.bias); return (gexRegime==="range"&&base!=="Bearish")?"Range":base; }, [ticker, gexRegime]);
+  const [intent, setIntent] = useState(suggested);
+  useEffect(()=>{ setIntent(suggested); }, [suggested]);
+  // recommended structure for current intent + IV regime
+  const ivCheap = o.ivrp < 0;
+  const rec = STRUCTURE_MATRIX[intent][ivCheap?"cheap":"rich"].rec;
+  const [picked, setPicked] = useState(rec);
+  useEffect(()=>{ setPicked(rec); }, [rec]);
+
+  return (
+    <div className="lens lens--otk">
+      <div className="opx-step" style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+        <span className="mono" style={{fontSize:20,fontWeight:700}}>{ticker.symbol}</span>
+        <span className="mono dim2">{ticker.name} · ${o.spot.toFixed(2)} · {ticker.sector}</span>
+        <span className="mono dim2">bias <b className={ticker.bias==="BULLISH"?"up":ticker.bias==="BEARISH"?"dn":"warn"}>{ticker.bias}</b></span>
+        <div style={{marginLeft:"auto",display:"flex",gap:4,alignItems:"center"}}>
+          <span className="mono dim2" style={{fontSize:10}}>EXPIRY</span>
+          {EXPIRIES.map(e=>(<button key={e.dte} className="btn btn--sm" style={dte===e.dte?{borderColor:"var(--copper)",color:"var(--copper)"}:{}} onClick={()=>setDte(e.dte)}>{e.dte}d</button>))}
+        </div>
+      </div>
+      <OptIntent intent={intent} onIntent={setIntent} suggested={suggested} gexRegime={gexRegime} />
+      <OptContext o={o} ticker={ticker} />
+      <OptStructure intent={intent} o={o} picked={picked} onPick={setPicked} />
+      <OptReality structure={picked} o={o} ticker={ticker} />
+      <OptAdvanced o={o} />
+    </div>
+  );
+}
+
+function App() {
+  const [sym, setSym] = useState("NVDA");
+  return (
+    <div className="app">
+      <div className="appbar">
+        <span className="tag mono">OPTIONS · REDESIGN</span>
+        <h1>Intent-first Options Lens</h1>
+        <span className="paper mono">PAPER MODE</span>
+        <div className="tk">
+          {Object.keys(TICKERS).map(s=>(<button key={s} className={sym===s?"is-on":""} onClick={()=>setSym(s)}>{s}</button>))}
+        </div>
+      </div>
+      <LensOptionsV2 ticker={TICKERS[sym]} />
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
