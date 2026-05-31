@@ -13790,7 +13790,20 @@ function InvDcfSensitivity({ ticker, fund, status }) {
     const gordon = fcfShare * (1 + baseG) / (baseW - baseG); // per-share intrinsic at base case
     if (isFinite(gordon) && gordon > 0) { base = gordon; real = true; }
   }
-  if (base == null) base = cur * 1.055; // prototype synthetic fallback
+  // NO demo data: if a real Gordon base can't be built from FCF/share + shares,
+  // show an honest unavailable state rather than a fabricated fair value.
+  if (!real || base == null) {
+    return (
+      <div className="dcf-sens">
+        <div className="label-cap" style={{ marginBottom: 8 }}>DCF Sensitivity · fair value by WACC × terminal growth</div>
+        <div className="mono dim2" style={{ fontSize: 11, padding: "10px 4px" }}>
+          {status === "loading"
+            ? "Fundamentals loading…"
+            : "DCF needs real FCF/share + shares outstanding (EODHD fundamentals) — not in this feed. No synthetic estimate shown."}
+        </div>
+      </div>
+    );
+  }
 
   const waccs = [0.08, 0.09, 0.10, 0.11];
   const grows = [Math.max(0.01, baseG - 0.01), baseG, Math.min(0.06, baseG + 0.01), Math.min(0.07, baseG + 0.02)];
@@ -16720,29 +16733,13 @@ function AIProjectionChart({ sym, bars, proj }) {
     if (!proj || proj.entry == null || !proj.mag || proj.mag.q90 == null) return null;
     const spot = proj.entry;
     const fwdN = 16;
-    // ── REAL history bars (Patterns shape {o,c,hi,lo}) → last ≤60. If none are
-    //    available, synthesize a small deterministic demo history so the live
-    //    forecast still renders (flagged via `demo`).
-    let hist, demo = false;
+    // ── REAL history bars only (Patterns shape {o,c,hi,lo}) → last ≤60. NO demo
+    //    data: if real history is unavailable we render an honest empty state
+    //    rather than fabricating candles.
+    const demo = false;
     const real = Array.isArray(bars) ? bars.filter(b => b && isFinite(b.o) && isFinite(b.c) && isFinite(b.hi) && isFinite(b.lo)) : [];
-    if (real.length >= 20) {
-      hist = real.slice(-60).map(b => ({ o: b.o, c: b.c, hi: b.hi, lo: b.lo }));
-    } else {
-      demo = true;
-      const rngD = pvRng(pvSeed(sym, real));
-      hist = [];
-      let prev = spot * 0.82;
-      for (let k = 0; k < 60; k++) {
-        const drift = spot * (0.82 + 0.18 * (k / 59));
-        const c = drift + (rngD() - 0.5) * spot * 0.02;
-        const o = prev + (rngD() - 0.5) * spot * 0.012;
-        const hi = Math.max(o, c) + rngD() * spot * 0.01;
-        const lo = Math.min(o, c) - rngD() * spot * 0.01;
-        hist.push({ o, c, hi, lo });
-        prev = c;
-      }
-      hist[hist.length - 1] = { o: prev, c: spot, hi: Math.max(prev, spot) * 1.003, lo: Math.min(prev, spot) * 0.997 };
-    }
+    if (real.length < 20) return { insufficient: true };
+    const hist = real.slice(-60).map(b => ({ o: b.o, c: b.c, hi: b.hi, lo: b.lo }));
     const histN = hist.length;
     // ── breakout consolidation box from the REAL trailing base (the window just
     //    before the current bar): use its high/low as baseHi/baseLo. ──
@@ -16792,6 +16789,7 @@ function AIProjectionChart({ sym, bars, proj }) {
   }, [sym, bars, proj]);
 
   if (!M) return <div className="aipc-na mono dim2">projection unavailable</div>;
+  if (M.insufficient) return <div className="aipc-na mono dim2">awaiting real price history</div>;
 
   // geometry
   const W = Math.max(560, w), H = 420;
@@ -16816,7 +16814,7 @@ function AIProjectionChart({ sym, bars, proj }) {
 
   return (
     <div className="aip-pchart-wrap" ref={ref}>
-      <div className="aipc-badge mono">{M.demo ? "demo history · live forecast" : "live forecast"}</div>
+      <div className="aipc-badge mono">live forecast · real bars</div>
       <svg width={W} height={H} className="aip-pchart-svg">
         {/* dashed grid */}
         {axisTicks.map((gv, k) => (

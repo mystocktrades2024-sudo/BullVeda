@@ -2566,6 +2566,18 @@ async def universe_api(limit: int = 0):
     except Exception as e:
         raise HTTPException(500, str(e))
     allsc = bundle.get("all_scored") or []
+    # ML p_up join (cached ml_edge_predictions.json — real per-symbol direction,
+    # swing mode default; no live EODHD needed). Powers the scanner P↑ chip.
+    ml_pup = {}
+    try:
+        _mlf = BASE_DIR / "cache" / "ml_edge_predictions.json"
+        _preds = (json.loads(_mlf.read_text()).get("predictions") or {}).get("swing") or {}
+        for _sym, _p in _preds.items():
+            _d = (_p or {}).get("direction") or {}
+            if _d.get("p_up") is not None:
+                ml_pup[str(_sym).upper()] = round(float(_d["p_up"]), 4)
+    except Exception:
+        ml_pup = {}
     def row(r):
         ctp = r.get("canonical_trade_plan") or {}
         entry = ctp.get("entry") or {}
@@ -2596,6 +2608,7 @@ async def universe_api(limit: int = 0):
             "beta": r.get("beta"), "market_cap": r.get("market_cap"),
             "iv_rank": ok.get("iv_rank") if ok.get("iv_rank") is not None else r.get("iv_rank"),
             "earn_days": earn.get("days_to_earnings"), "insider_net": insider_net,
+            "p_up": ml_pup.get(str(r.get("ticker") or "").upper()),
             "sharpe_126d": r.get("sharpe_126d"), "sortino_126d": r.get("sortino_126d"),
             "tech_score": T.get("score"), "tech_max": T.get("max"),
             "fund_score": F.get("score"), "fund_max": F.get("max"),
