@@ -529,6 +529,27 @@ def compute_rolling_sharpe_kill_state(config: dict | None = None) -> dict:
     return state
 
 
+_PEAD_GATE_CACHE = {"v": None}
+def _pead_extended_gate_on() -> bool:
+    """True if config.pead_extended_entry_gate._enabled — when on, PEAD/Impulse Catalyst
+    EXTENDED/MISSED entries do NOT bypass the entry_quality gate (they fall to WATCH).
+    Default ON (shipped 2026-05-31 from pick_forensics evidence). Cached after first read."""
+    if _PEAD_GATE_CACHE["v"] is not None:
+        return _PEAD_GATE_CACHE["v"]
+    val = True  # default ON
+    try:
+        from pathlib import Path as _P
+        import json as _json
+        cfg = _json.loads((_P(__file__).parent / "config" / "config.json").read_text())
+        blk = cfg.get("pead_extended_entry_gate")
+        if isinstance(blk, dict) and "_enabled" in blk:
+            val = bool(blk["_enabled"])
+    except Exception:
+        val = True
+    _PEAD_GATE_CACHE["v"] = val
+    return val
+
+
 def _eval_hard_gates(t: dict, regime: str | None = None,
                      entry_quality_relax_regimes: set | None = None,
                      sector_blocklist: list | None = None,
@@ -638,6 +659,13 @@ def _eval_hard_gates(t: dict, regime: str | None = None,
     elif _is_meanrev_eq and _eq_bad:
         passed = True
         reason = f"entry_quality={eq} allowed for Mean Reversion sleeve (EXTENDED-down IS the trigger) (bypass)"
+    elif _is_pead_eq and _eq_bad and _pead_extended_gate_on() and eq in ("MISSED", "EXTENDED"):
+        # PEAD-EXTENDED-GATE (2026-05-31, pick_forensics): PEAD/Impulse Catalyst alpha is the
+        # INITIAL gap (Bernard-Thomas drift decays fast). Chasing it EXTENDED/MISSED bled —
+        # recent n=20 = 25% WR, -2.6% avg. So a PEAD that is already EXTENDED/MISSED does NOT
+        # bypass; it falls to WATCH. A FRESH PEAD gap (the real edge) still passes (eq not bad).
+        passed = False
+        reason = f"entry_quality={eq} — PEAD already extended, gap edge spent (pead_extended_entry_gate)"
     elif _is_pead_eq and _eq_bad:
         passed = True
         reason = f"entry_quality={eq} allowed for PEAD sleeve (gap-up entry IS the trigger) (bypass)"
