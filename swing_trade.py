@@ -1504,7 +1504,11 @@ def run_daily_scan(force_fresh: bool = False):
         except Exception:
             return 0.0
 
-    _max_enrich = cfg.get("performance", {}).get("max_enrichment_tickers", 350)
+    # MAX_ENRICHMENT_OVERRIDE: nightly full-universe enrich batch sets this (e.g. 3500)
+    # to deep-enrich ALL ranked tickers off-hours (throttle-paced, alone -> no per-minute
+    # burst), pre-populating every ticker detail for /api/ticker. Daily scan leaves unset.
+    _max_enrich = int(os.environ.get("MAX_ENRICHMENT_OVERRIDE") or
+                      cfg.get("performance", {}).get("max_enrichment_tickers", 350))
 
     # Earnings-window guarantee (2026-05-08 — INOD-class fix).
     # Any ticker reporting earnings in the next 10 days gets GUARANTEED
