@@ -133,7 +133,9 @@ from starlette.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # -- Basic Auth (file-backed user/role store via auth.py, 2026-05-07 migration) --
-_security = HTTPBasic()
+# auto_error=False so a missing Authorization header returns None instead of raising
+# 401 immediately — lets _check_auth honor a signed session cookie first (modal login).
+_security = HTTPBasic(auto_error=False)
 import auth as _auth_mod
 _auth_mod.ensure_seed()  # creates data/users.json from defaults if missing
 
@@ -163,7 +165,53 @@ def _session_check_and_bump(username: str) -> bool:
         return True
 
 
-def _check_auth(credentials: HTTPBasicCredentials = Depends(_security)):
+# ── Signed session cookie (2026-05-31) — lets the landing modal log in via
+# POST /api/login instead of the browser's native Basic-Auth dialog. HMAC-signed
+# (stdlib only); accepted by _check_auth + _soft_authed alongside Basic Auth. ──
+import os as _os_sess, hmac as _hmac_sess, hashlib as _hashlib_sess, base64 as _b64_sess
+_SESSION_SECRET = (_os_sess.environ.get("SESSION_SECRET")
+                   or _os_sess.environ.get("SUPABASE_SERVICE_KEY")
+                   or "swingtrade-dev-session-secret").encode()
+_SESSION_TTL = 8 * 3600  # 8h cookie lifetime (idle-timeout still applies via bump)
+
+def _sign_session(username: str) -> str:
+    exp = str(int(_time.time()) + _SESSION_TTL)
+    msg = f"{username}|{exp}"
+    sig = _hmac_sess.new(_SESSION_SECRET, msg.encode(), _hashlib_sess.sha256).hexdigest()
+    return _b64_sess.urlsafe_b64encode(f"{msg}|{sig}".encode()).decode()
+
+def _verify_session(token: str):
+    try:
+        raw = _b64_sess.urlsafe_b64decode(token.encode()).decode()
+        username, exp, sig = raw.rsplit("|", 2)
+        if int(exp) < int(_time.time()):
+            return None
+        good = _hmac_sess.new(_SESSION_SECRET, f"{username}|{exp}".encode(), _hashlib_sess.sha256).hexdigest()
+        return username if _hmac_sess.compare_digest(good, sig) else None
+    except Exception:
+        return None
+
+def _session_user(request) -> "str | None":
+    tok = request.cookies.get("ss_session")
+    return _verify_session(tok) if tok else None
+
+
+def _check_auth(request: Request, credentials: HTTPBasicCredentials = Depends(_security)):
+    # 1) signed session cookie (issued by POST /api/login — the modal path)
+    su = _session_user(request)
+    if su:
+        if not _session_check_and_bump(su):
+            from fastapi.responses import Response
+            return Response(status_code=401, headers={"WWW-Authenticate": "Basic", "X-Session-Expired": "idle-timeout"},
+                            content="Session expired (30 min idle). Re-authenticate.")
+        try: _auth_mod.set_last_login(su)
+        except Exception: pass
+        return HTTPBasicCredentials(username=su, password="")
+    # 2) HTTP Basic Auth (native dialog / curl / cached creds)
+    if credentials is None:
+        from fastapi.responses import Response
+        return Response(status_code=401, headers={"WWW-Authenticate": "Basic"},
+                        content="Unauthorized")
     user = _auth_mod.verify_user(credentials.username, credentials.password)
     if not user:
         from fastapi.responses import Response
@@ -188,9 +236,12 @@ def _check_auth(credentials: HTTPBasicCredentials = Depends(_security)):
 
 
 def _soft_authed(request: Request) -> bool:
-    """Non-raising auth check for HTML page routes — reads the Basic header directly
-    so we can REDIRECT unauthenticated visitors to the public landing instead of
-    popping a browser password box (HTTPBasic auto-raises 401 on a missing header)."""
+    """Non-raising auth check for HTML page routes — accepts the signed session cookie
+    OR the Basic header directly, so we can REDIRECT unauthenticated visitors to the
+    public landing instead of popping a browser password box."""
+    su = _session_user(request)
+    if su:
+        return _session_check_and_bump(su)
     hdr = request.headers.get("authorization", "")
     if not hdr.startswith("Basic "):
         return False
@@ -204,8 +255,22 @@ def _soft_authed(request: Request) -> bool:
     return _session_check_and_bump(user)
 
 
-def _require_admin(credentials: HTTPBasicCredentials = Depends(_security)):
+def _require_admin(request: Request, credentials: HTTPBasicCredentials = Depends(_security)):
     """Dependency that authenticates AND requires admin role."""
+    su = _session_user(request)
+    if su:
+        if not _session_check_and_bump(su):
+            from fastapi.responses import Response
+            return Response(status_code=401, headers={"WWW-Authenticate": "Basic", "X-Session-Expired": "idle-timeout"},
+                            content="Session expired (30 min idle). Re-authenticate.")
+        if not _auth_mod.is_admin(su):
+            from fastapi.responses import Response
+            return Response(status_code=403, content="Admin role required")
+        return HTTPBasicCredentials(username=su, password="")
+    if credentials is None:
+        from fastapi.responses import Response
+        return Response(status_code=401, headers={"WWW-Authenticate": "Basic"},
+                        content="Unauthorized")
     user = _auth_mod.verify_user(credentials.username, credentials.password)
     if not user:
         from fastapi.responses import Response
@@ -1699,6 +1764,29 @@ async def _home_redirect(auth: HTTPBasicCredentials = Depends(_check_auth)):
 # Lets V2 dashboard + elite-detail apply the right tab visibility profile
 # automatically based on the server-side user record, instead of falling back
 # to the localStorage default ('trader') which hides quant-only tabs like Models.
+@app.post("/api/login")
+async def api_login(request: Request):
+    """Session-cookie login for the marketing-modal handoff. Validates the
+    username/password against the file-backed user store and, on success, sets a
+    signed HttpOnly `ss_session` cookie that _check_auth / _soft_authed accept —
+    so the user reaches /app without the browser's native Basic-Auth dialog.
+    (When Supabase Auth is configured the landing uses that instead.) Always public."""
+    from fastapi.responses import JSONResponse
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    u = (body.get("username") or body.get("email") or "").strip()
+    p = body.get("password") or ""
+    if not u or not _auth_mod.verify_user(u, p):
+        return JSONResponse({"ok": False, "error": "Invalid username or password"}, status_code=401)
+    _session_check_and_bump(u)
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie("ss_session", _sign_session(u), max_age=_SESSION_TTL,
+                    httponly=True, samesite="lax", secure=(request.url.scheme == "https"), path="/")
+    return resp
+
+
 @app.get("/api/logout")
 async def logout(request: Request):
     """Force the browser to drop cached HTTP Basic Auth credentials.

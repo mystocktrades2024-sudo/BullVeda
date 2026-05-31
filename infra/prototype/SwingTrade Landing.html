@@ -570,8 +570,8 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px;}
     <button class="modal-x" onclick="closeLogin()">✕</button>
     <h3>Welcome back</h3>
     <p>Log in to your Kairos terminal.</p>
-    <label>Email</label>
-    <input type="email" id="authEmail" placeholder="you@desk.com" />
+    <label>Email or username</label>
+    <input type="text" id="authEmail" placeholder="you@desk.com" />
     <label>Password</label>
     <input type="password" id="authPass" placeholder="••••••••" />
     <div id="authMsg" class="auth-msg"></div>
@@ -622,18 +622,29 @@ async function _initAuth(){
 function _authMsg(t,err){ const el=document.getElementById('authMsg'); if(el){ el.textContent=t||''; el.style.color=err?'var(--rd)':'var(--ink-3)'; } }
 async function doAuth(mode){
   await _initAuth();
-  if(!_sb){ return gotoTerminal(mode); }   // no Supabase configured → direct handoff
   const email=(document.getElementById('authEmail')||{}).value||'';
   const pass=(document.getElementById('authPass')||{}).value||'';
-  if(!email||!pass){ _authMsg('Enter your email and password.',true); return false; }
+  if(!email||!pass){ _authMsg('Enter your email/username and password.',true); return false; }
   _authMsg('Working…',false);
+  // Supabase Auth path (when an anon key is configured)
+  if(_sb){
+    try{
+      const {error} = mode==='signup'
+        ? await _sb.auth.signUp({email,password:pass})
+        : await _sb.auth.signInWithPassword({email,password:pass});
+      if(error){ _authMsg(error.message||'Authentication failed.',true); return false; }
+      window.location.href=terminalHref(mode); return false;
+    }catch(e){ _authMsg('Auth service unreachable — try again.',true); return false; }
+  }
+  // Fallback: session-cookie login against the terminal's user store (POST /api/login).
+  // On success the ss_session cookie is set, so /app loads without the native dialog.
   try{
-    const {error} = mode==='signup'
-      ? await _sb.auth.signUp({email,password:pass})
-      : await _sb.auth.signInWithPassword({email,password:pass});
-    if(error){ _authMsg(error.message||'Authentication failed.',true); return false; }
-    window.location.href=terminalHref(mode);
-  }catch(e){ _authMsg('Auth service unreachable — try again.',true); }
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:email,password:pass})});
+    if(r.ok){ window.location.href=terminalHref(mode); return false; }
+    const j=await r.json().catch(()=>({}));
+    _authMsg(j.error||'Wrong username or password.',true);
+  }catch(e){ _authMsg('Login service unreachable.',true); }
   return false;
 }
 _initAuth();   /* warm config + client once, non-blocking */
