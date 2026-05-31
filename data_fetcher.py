@@ -290,11 +290,23 @@ def _cache_read(key: str, ttl_seconds: int) -> dict | None:
 
 
 def _cache_write(key: str, data: dict) -> None:
-    """Write dict to disk cache."""
+    """Write dict to disk cache.
+
+    Self-pruning for time-bucketed keys: keys ending in "_<digits>" (e.g.
+    opts_iv_MSFT_<2h-bucket>) rotate every TTL window and old buckets never expire
+    on their own — they piled up to 63k+ files. After writing the current bucket,
+    delete the same family's stale buckets so the cache stays bounded.
+    """
     try:
         fp = BASE_DIR / "cache" / f"_cache_{key}.json"
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(json.dumps(data))
+        base, sep, last = key.rpartition("_")
+        if sep and base and last.isdigit():
+            for old in fp.parent.glob(f"_cache_{base}_*.json"):
+                if old.name != fp.name:
+                    try: old.unlink()
+                    except OSError: pass
     except Exception as e:
         log.debug(f"Cache write failed for {key}: {e}")
 
