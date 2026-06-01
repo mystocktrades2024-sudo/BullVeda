@@ -18257,20 +18257,7 @@ function SurfaceAlerts({ onTicker, data }) {
   );
 }
 
-const JOURNAL = [
-  { date: "May 24", sym: "ARGN", sleeve: "Cont. BO", dir: "L", entry: 198.40, exit: 213.40, r: 1.84, pnl: 1210, days: 9, grade: "A", plan: true, tag: "—" },
-  { date: "May 21", sym: "VLCT", sleeve: "Pullback", dir: "L", entry: 44.10, exit: 42.80, r: -1.00, pnl: -420, days: 3, grade: "B", plan: true, tag: "—" },
-  { date: "May 16", sym: "ZOTR", sleeve: "Flag", dir: "L", entry: 38.20, exit: 44.60, r: 2.10, pnl: 1480, days: 14, grade: "A", plan: true, tag: "—" },
-  { date: "May 12", sym: "MERC", sleeve: "Range", dir: "L", entry: 18.40, exit: 17.20, r: -0.60, pnl: -252, days: 5, grade: "C", plan: false, tag: "chased entry" },
-  { date: "May 08", sym: "NVRH", sleeve: "Pullback", dir: "L", entry: 138.0, exit: 142.1, r: 0.41, pnl: 320, days: 7, grade: "B", plan: true, tag: "early exit" },
-  { date: "May 02", sym: "DRSH", sleeve: "Breakout", dir: "L", entry: 51.20, exit: 56.10, r: 1.62, pnl: 980, days: 6, grade: "A", plan: true, tag: "—" },
-  { date: "Apr 28", sym: "BIVO", sleeve: "Mean Rev", dir: "L", entry: 74.0, exit: 71.4, r: -1.00, pnl: -390, days: 2, grade: "B", plan: true, tag: "—" },
-  { date: "Apr 22", sym: "FRAC", sleeve: "Gap & Go", dir: "L", entry: 24.10, exit: 22.60, r: -0.85, pnl: -310, days: 1, grade: "C", plan: false, tag: "no stop set" },
-  { date: "Apr 15", sym: "INDX", sleeve: "Cont. BO", dir: "L", entry: 88.4, exit: 96.2, r: 2.40, pnl: 1640, days: 11, grade: "A", plan: true, tag: "—" },
-  { date: "Apr 09", sym: "HAVN", sleeve: "Pullback", dir: "L", entry: 41.0, exit: 39.8, r: -0.70, pnl: -280, days: 4, grade: "B", plan: true, tag: "—" },
-  { date: "Apr 03", sym: "KOPL", sleeve: "VCP", dir: "L", entry: 30.2, exit: 34.1, r: 1.55, pnl: 860, days: 8, grade: "A", plan: true, tag: "—" },
-  { date: "Mar 27", sym: "TWPN", sleeve: "Range", dir: "S", entry: 62.0, exit: 64.4, r: -1.00, pnl: -480, days: 3, grade: "C", plan: false, tag: "fought trend" },
-];
+// (removed dead mock JOURNAL const — SurfaceJournal uses the real /api/journal feed + portfolio.closed)
 
 function SurfaceJournal({ onTicker, data }) {
   const d = _ssData(data);
@@ -18567,12 +18554,42 @@ const PREMORTEM = [
   ["Edge decay", "sleeve Wilson < 40% → quarantine, stop new entries"],
 ];
 
+// documented sleeve→regime activation policy (config/strategy roster), 2=run 1=selective 0=off.
+// This is the system's standing RULE, not a per-regime backtest — labeled as such in the footnote.
+const STRAT_REGIME = {
+  "Trend Continuation": { bull: 2, chop: 2, bear: 0 },
+  "Breakout Expansion": { bull: 2, chop: 1, bear: 0 },
+  "Special Situation":  { bull: 1, chop: 1, bear: 2 },
+  "Impulse Catalyst":   { bull: 2, chop: 2, bear: 1 },
+};
 function SurfacePlaybook({ onTicker }) {
-  const sleeves = window.SLEEVES || [];
+  const D = (typeof window !== "undefined" && window.__ssData) || {};
+  const reg = D.regime || {};
+  const mb = D.market_breadth || {};
+  const fam = D.setup_family_stats || {};
+  // active regime column from REAL regime4
+  const r4 = reg.regime4 || reg.regime4_raw || "";
+  const active = /bear|off|panic/.test(r4) ? "bear" : /chop|neutral/.test(r4) ? "chop" : "bull";
   const regCols = [["bull", "RISK ON", "gn"], ["chop", "CHOP", "amb"], ["bear", "RISK OFF", "rd"]];
-  const active = "bull";
   const dotLbl = v => v >= 2 ? "RUN" : v === 1 ? "SEL" : "OFF";
   const dotTone = v => v >= 2 ? "gn" : v === 1 ? "amb" : "rd";
+
+  // REAL sleeves from setup_family_stats (Wilson LB + derived status); regime fit from documented policy
+  const sleeves = Object.keys(fam).map(k => {
+    const s = fam[k] || {};
+    const lb = _num(s.wr_low_95) != null ? _num(s.wr_low_95) * 100 : null;
+    const pf = _num(s.profit_factor);
+    let status = "selective";
+    if (lb != null && lb < 40) status = "watch";
+    else if (pf != null && pf < 1.0) status = "watch";
+    else if (lb != null && lb >= 45 && pf != null && pf >= 1.3) status = "stable";
+    const family = (typeof STRAT_FAMILY !== "undefined" && STRAT_FAMILY[k]) || null;
+    const regime = (family && STRAT_REGIME[family]) || { bull: 1, chop: 1, bear: 1 };
+    return { k, lb, status, regime, hasPolicy: !!(family && STRAT_REGIME[family]) };
+  }).sort((a, b) => (b.lb || 0) - (a.lb || 0));
+
+  const regLbl = active === "bear" ? "RISK OFF" : active === "chop" ? "CHOP" : "RISK ON";
+  const regTone = active === "bear" ? "dn" : active === "chop" ? "warn" : "up";
 
   return (
     <div className="surface wsx wsx--gn q-playbook">
@@ -18583,8 +18600,8 @@ function SurfacePlaybook({ onTicker }) {
           <div className="wsx-sub mono dim2">the standing rules — which sleeves to run in the current regime, the 10 entry gates, sizing limits, and the pre-mortem</div>
         </div>
         <div className="wsx-hdr-r">
-          <FreshnessPill state="live" age="regime 18s" />
-          <span className="mono dim2">src · regime context · setup_stats · risk policy</span>
+          <FreshnessPill state={reg.regime4 ? "live" : "empty"} age="regime" />
+          <span className="mono dim2">src · regime context · setup_family_stats · risk policy</span>
         </div>
       </div>
 
@@ -18592,12 +18609,15 @@ function SurfacePlaybook({ onTicker }) {
         <div className="q-regime-main">
           <span className="q-regime-dot" />
           <div>
-            <div className="q-regime-lbl mono up">REGIME · RISK ON</div>
-            <div className="q-regime-sub mono dim2">bull · low-vol · breadth expanding — run momentum &amp; continuation sleeves at full size</div>
+            <div className={`q-regime-lbl mono ${regTone}`}>REGIME · {regLbl}</div>
+            <div className="q-regime-sub mono dim2">{(reg.regime4 || "—")} · breadth {mb.pct_above_50d != null ? mb.pct_above_50d + "% > 50-DMA" : "—"} · max size {reg.max_size_pct != null ? reg.max_size_pct + "%" : "—"}{reg.distribution_days != null ? ` · ${reg.distribution_days} distribution days` : ""}</div>
           </div>
         </div>
         <div className="q-regime-tiles">
-          {[["VIX", "16.3", "gn", "−1.8%"], ["BREADTH A/D", "1.84", "gn", "expanding"], ["10Y", "4.32%", "gn", "−14bp 5d"], ["% > 50-DMA", "68%", "gn", "risk-on"]].map((t, i) => (
+          {[["% > 50-DMA", mb.pct_above_50d != null ? mb.pct_above_50d + "%" : "—", mb.pct_above_50d >= 50 ? "gn" : "rd", mb.label_50 || ""],
+            ["A/D (H:L)", mb.hl_ratio != null ? mb.hl_ratio.toFixed(2) : "—", mb.hl_ratio >= 1 ? "gn" : "rd", `${mb.new_highs ?? "—"}H/${mb.new_lows ?? "—"}L`],
+            ["MAX SIZE", reg.max_size_pct != null ? reg.max_size_pct + "%" : "—", reg.max_size_pct >= 70 ? "gn" : "amb", "regime cap"],
+            ["SPY 1D", reg.spy_daily_chg != null ? `${reg.spy_daily_chg >= 0 ? "+" : ""}${reg.spy_daily_chg}%` : "—", reg.spy_daily_chg >= 0 ? "gn" : "rd", reg.above_50ema ? "> 50EMA" : "< 50EMA"]].map((t, i) => (
             <div key={i} className="q-regime-tile"><span className="mono dim2">{t[0]}</span><span className={`mono kpi-tone--${t[2]}`}>{t[1]}</span><span className="mono dim2">{t[3]}</span></div>
           ))}
         </div>
@@ -18605,22 +18625,24 @@ function SurfacePlaybook({ onTicker }) {
 
       <div className="lab-card">
         <div className="lab-card-h mono">SLEEVE ACTIVATION MATRIX · current regime highlighted</div>
+        {sleeves.length ? (
         <table className="dtable wsx-tbl q-matrix">
-          <thead><tr><th>Sleeve</th>{regCols.map(([k, l, t]) => <th key={k} className={`c ${k === active ? "q-mx-active" : ""}`}>{l}{k === active && <span className="q-mx-now mono"> ◂ now</span>}</th>)}<th className="r">Wilson</th><th>Status</th></tr></thead>
+          <thead><tr><th>Sleeve</th>{regCols.map(([k, l, t]) => <th key={k} className={`c ${k === active ? "q-mx-active" : ""}`}>{l}{k === active && <span className="q-mx-now mono"> ◂ now</span>}</th>)}<th className="r">Wilson LB</th><th>Status</th></tr></thead>
           <tbody>{sleeves.map(s => (
             <tr key={s.k}>
               <td><b>{s.k}</b></td>
               {regCols.map(([k]) => (
                 <td key={k} className={`c ${k === active ? "q-mx-active" : ""}`}>
-                  <span className={`q-mx-cell q-mx-cell--${dotTone(s.regime[k])}`}>{dotLbl(s.regime[k])}</span>
+                  {s.hasPolicy ? <span className={`q-mx-cell q-mx-cell--${dotTone(s.regime[k])}`}>{dotLbl(s.regime[k])}</span> : <span className="dim2">—</span>}
                 </td>
               ))}
-              <td className={`r tabular ${s.lb >= 45 ? "up" : s.lb >= 40 ? "warn" : "dn"}`}>{s.lb.toFixed(0)}%</td>
-              <td><Pill tone={s.status === "stable" ? "gn" : s.status === "decaying" ? "amb" : "ink"} small>{s.status}</Pill></td>
+              <td className={`r tabular ${s.lb != null ? (s.lb >= 45 ? "up" : s.lb >= 40 ? "warn" : "dn") : "dim2"}`}>{s.lb != null ? s.lb.toFixed(0) + "%" : "—"}</td>
+              <td><Pill tone={s.status === "stable" ? "gn" : s.status === "watch" ? "amb" : "ink"} small>{s.status}</Pill></td>
             </tr>
           ))}</tbody>
         </table>
-        <div className="lab-verdict mono dim2">In <b className="up">RISK ON</b>: run Continuation BO, VCP, Pullback, Earnings Drift at full size. Mean-Revert &amp; Range-Fade are OFF in trend. Decaying sleeves at half size.</div>
+        ) : <div className="pf-note mono dim2" style={{ padding: "24px 0", textAlign: "center" }}>— no setup_family_stats in bundle —</div>}
+        <div className="lab-verdict mono dim2">Wilson LB + status are REAL (data.setup_family_stats). Regime columns are the <b>documented sleeve policy</b> (config strategy roster), not a per-regime backtest. Sleeves below the 40% Wilson floor auto-quarantine.</div>
       </div>
 
       <div className="q-grid2">
@@ -18635,7 +18657,7 @@ function SurfacePlaybook({ onTicker }) {
               </div>
             ))}
           </div>
-          <div className="lab-verdict mono dim2">A single failed gate kills the trade — no soft overrides. 9/10 pass; <b className="warn">Fund check</b> flagged on one name.</div>
+          <div className="lab-verdict mono dim2">A single failed gate kills the trade — no soft overrides. Gates are evaluated per-candidate at scan time; the live pass/fail trail is on each ticker's Plan lens.</div>
         </div>
         <div className="lab-card">
           <div className="lab-card-h mono">SIZING &amp; RISK POLICY · live vs limit</div>
@@ -18808,32 +18830,69 @@ window.SurfaceThemes = SurfaceThemes;
 //  SOCIAL SENTIMENT
 // ═══════════════════════════════════════════════════════════════════════════
 
-const SOC_ROWS = [
-  { sym:"ARGN", name:"Argentum Robotics", score:+0.62, d24:+0.18, mentions:4820, vel:"+38%", src:"Reddit·X·StockTwits", tone:"gn" },
-  { sym:"ARCM", name:"Arclight Materials", score:+0.41, d24:+0.09, mentions:2110, vel:"+12%", src:"X·StockTwits", tone:"gn" },
-  { sym:"GENO", name:"Genoa Biosystems",  score:+0.55, d24:+0.31, mentions:3640, vel:"+74%", src:"Reddit·X", tone:"gn" },
-  { sym:"MERC", name:"Mercia Semi",        score:-0.38, d24:-0.22, mentions:1890, vel:"+9%",  src:"X", tone:"rd" },
-  { sym:"DRSH", name:"Druseh Energy",      score:+0.28, d24:+0.04, mentions:980,  vel:"−3%",  src:"StockTwits", tone:"amb" },
-  { sym:"BIVO", name:"Bivota Pharma",      score:-0.51, d24:-0.34, mentions:2470, vel:"+41%", src:"Reddit", tone:"rd" },
-];
+// REAL X-chatter feed (data_x_chatter.json) — tracked X/StockTwits handles via Nitter RSS.
+// Mention-counted, NOT polarity-scored (the feed carries no sentiment score), surfaced honestly.
+function useXChatter() {
+  const [x, setX] = useState(() => (typeof window !== "undefined" && window.__ssXChatter) || null);
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.__ssXChatter) { setX(window.__ssXChatter); return; }
+    if (typeof fetch === "undefined") return;
+    let live = true;
+    fetch("/v2/data_x_chatter.json", { cache: "no-store" })
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((j) => { if (typeof window !== "undefined") window.__ssXChatter = j || {}; if (live) setX(j || {}); })
+      .catch(() => { if (live) setX({}); });
+    return () => { live = false; };
+  }, []);
+  return x;
+}
 
 function SurfaceSocial({ onTicker }) {
-  const [sort, setSort] = useState({ col:"mentions", dir:-1 });
-  const rows = useMemo(() => [...SOC_ROWS].sort((a,b)=>{ const v=(typeof a[sort.col]==="number"?a[sort.col]-b[sort.col]:String(a[sort.col]).localeCompare(String(b[sort.col]))); return v*sort.dir; }), [sort]);
-  const net = (SOC_ROWS.reduce((a,r)=>a+r.score,0)/SOC_ROWS.length);
+  const x = useXChatter();
+  const [sort, setSort] = useState({ col: "mentions24", dir: -1 });
+  const data = useMemo(() => {
+    const tt = (x && (x.top_tickers_24h || x.top_tickers_7d)) || [];
+    const rows = tt.map((t) => {
+      const m24 = t.mentions_24h || 0, m7 = t.mentions_7d || 0;
+      const dailyAvg7 = m7 > 0 ? m7 / 7 : 0;
+      const velPct = dailyAvg7 > 0 ? Math.round((m24 / dailyAvg7 - 1) * 100) : (m24 > 0 ? 100 : 0);
+      return { sym: t.ticker, mentions24: m24, mentions7: m7, handles: t.n_unique_handles || 0,
+        velPct, srcHandle: t.latest_handle || "—", excerpt: (t.latest_excerpt || "").replace(/\s+/g, " ").slice(0, 90) };
+    }).filter((r) => r.sym);
+    return rows;
+  }, [x]);
+  const rows = useMemo(() => [...data].sort((a, b) => {
+    const v = typeof a[sort.col] === "number" ? a[sort.col] - b[sort.col] : String(a[sort.col]).localeCompare(String(b[sort.col]));
+    return v * sort.dir;
+  }), [data, sort]);
+  const totalM = data.reduce((a, r) => a + r.mentions24, 0);
+  const velLeader = data.length ? [...data].sort((a, b) => b.velPct - a.velPct)[0] : null;
+  const byHandle = (x && x.by_handle) || {};
+  const handleRows = Object.keys(byHandle).map((h) => ({ handle: h, n: (byHandle[h] && (byHandle[h].n_posts_24h || byHandle[h].n_posts)) || (Array.isArray(byHandle[h]) ? byHandle[h].length : 0) }))
+    .sort((a, b) => b.n - a.n).slice(0, 6);
+  const recent = ((x && x.recent_posts) || []).slice(0, 6);
+  const gen = (x && x._meta && x._meta.generated_at) || null;
+
+  if (x == null) return <div className="surface soc-surface"><div className="ss-empty">Loading X-chatter… <span className="mono dim2">/v2/data_x_chatter.json</span></div></div>;
+
   return (
     <div className="surface soc-surface">
       <div className="soc-hdr">
         <div>
-          <div className="soc-eyebrow mono">SOCIAL SENTIMENT · CROWD POSITIONING</div>
-          <h1 className="soc-title mono">Crowd net <span className={net>=0?"up":"dn"}>{net>=0?"+":""}{net.toFixed(2)}</span> · <span className="amb">contrarian-aware</span></h1>
-          <div className="soc-sub mono dim2">Reddit · X · StockTwits · aggregated, spam-filtered, velocity-weighted · src: social-feed aggregator</div>
+          <div className="soc-eyebrow mono">SOCIAL · X / STOCKTWITS HANDLE TRACKING</div>
+          <h1 className="soc-title mono">Crowd mentions · <span className="cy">{data.length} tickers</span> · <span className="amb">velocity-ranked</span></h1>
+          <div className="soc-sub mono dim2">tracked X / StockTwits handles via Nitter RSS · mention-counted (no polarity score in feed) · src: data_x_chatter</div>
         </div>
-        <FreshnessPill state="live" age="42s" />
+        <FreshnessPill state={data.length ? "live" : "empty"} age="x-feed" />
       </div>
 
       <div className="soc-kpis">
-        {[["NET TONE",(net>=0?"+":"")+net.toFixed(2),"gn","bullish crowd"],["MENTIONS 24h","15.9k","ink","+28% vs 7d avg"],["VELOCITY LEADER","GENO","cy","+74% surge"],["CONTRARIAN FLAG","BIVO","rd","bearish + spiking"],["BOT-FILTERED","18%","amb","spam removed"],["BREADTH","58%","gn","names net-positive"]].map((k,i)=>(
+        {[["MENTIONS 24h", totalM.toLocaleString(), "cy", `${data.length} tickers`],
+          ["TICKERS", data.length, "ink", "with mentions"],
+          ["VELOCITY LEADER", velLeader ? velLeader.sym : "—", "gn", velLeader ? `${velLeader.velPct >= 0 ? "+" : ""}${velLeader.velPct}% vs 7d avg` : "—"],
+          ["TOP TICKER", rows[0] ? rows[0].sym : "—", "violet", rows[0] ? `${rows[0].mentions24} mentions` : "—"],
+          ["HANDLES", Object.keys(byHandle).length || "—", "amb", "tracked"],
+          ["FEED", gen ? "live" : "—", "gn", gen ? "Nitter RSS" : "no feed"]].map((k, i) => (
           <div key={i} className={`soc-kpi soc-kpi--${k[2]}`}>
             <div className="soc-kpi-l mono">{k[0]}</div>
             <div className={`soc-kpi-v mono kpi-tone--${k[2]}`}>{k[1]}</div>
@@ -18844,54 +18903,54 @@ function SurfaceSocial({ onTicker }) {
 
       <div className="soc-main">
         <div className="soc-tblwrap">
-          <div className="soc-card-h mono">CROWD LEADERBOARD · sentiment × velocity · <span className="dim2">click to open</span></div>
+          <div className="soc-card-h mono">MENTION LEADERBOARD · 24h × velocity · <span className="dim2">click to open</span></div>
+          {rows.length ? (
           <table className="dtable soc-tbl">
             <thead><tr>
-              {[["sym","Sym"],["name","Name"],["score","Tone"],["d24","Δ24h"],["mentions","Mentions"],["vel","Velocity"],["src","Sources"]].map(([c,l])=>(
-                <th key={c} className={["score","d24","mentions"].includes(c)?"r":""} onClick={()=>setSort(s=>({col:c,dir:s.col===c?-s.dir:-1}))} style={{cursor:"pointer"}}>{l}{sort.col===c?(sort.dir>0?" ▲":" ▼"):""}</th>
+              {[["sym", "Sym"], ["mentions24", "24h"], ["mentions7", "7d"], ["velPct", "Velocity"], ["handles", "Handles"], ["srcHandle", "Latest source"]].map(([c, l]) => (
+                <th key={c} className={["mentions24", "mentions7", "velPct", "handles"].includes(c) ? "r" : ""} onClick={() => setSort(s => ({ col: c, dir: s.col === c ? -s.dir : -1 }))} style={{ cursor: "pointer" }}>{l}{sort.col === c ? (sort.dir > 0 ? " ▲" : " ▼") : ""}</th>
               ))}
             </tr></thead>
             <tbody>
-              {rows.map(r=>(
-                <tr key={r.sym} onClick={()=>onTicker && onTicker(r.sym)} style={{cursor:"pointer"}}>
+              {rows.map(r => (
+                <tr key={r.sym} onClick={() => onTicker && onTicker(r.sym)} style={{ cursor: "pointer" }} title={r.excerpt}>
                   <td className="mono"><b>{r.sym}</b></td>
-                  <td className="dim">{r.name}</td>
-                  <td className="r"><span className={`soc-bar soc-bar--${r.tone}`}><i style={{width:`${Math.abs(r.score)*50}%`, marginLeft:r.score<0?`${50-Math.abs(r.score)*50}%`:"50%"}}/></span> <span className={`mono kpi-tone--${r.tone}`}>{r.score>=0?"+":""}{r.score.toFixed(2)}</span></td>
-                  <td className={`r mono ${r.d24>=0?"up":"dn"}`}>{r.d24>=0?"+":""}{r.d24.toFixed(2)}</td>
-                  <td className="r mono">{r.mentions.toLocaleString()}</td>
-                  <td className={`mono ${r.vel.startsWith("+")?"up":r.vel.startsWith("−")?"dn":"dim2"}`}>{r.vel}</td>
-                  <td className="mono dim2">{r.src}</td>
+                  <td className="r mono"><b>{r.mentions24}</b></td>
+                  <td className="r mono dim2">{r.mentions7}</td>
+                  <td className={`r mono ${r.velPct > 0 ? "up" : r.velPct < 0 ? "dn" : "dim2"}`}>{r.velPct >= 0 ? "+" : ""}{r.velPct}%</td>
+                  <td className="r mono dim2">{r.handles}</td>
+                  <td className="mono dim2">@{r.srcHandle}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          ) : <div className="ss-empty">No tracked-handle mentions in the current feed window. Source: data_x_chatter · Nitter RSS poll.</div>}
         </div>
         <div className="soc-side">
           <div className="soc-card">
-            <div className="soc-card-h mono">CONTRARIAN MATRIX</div>
-            <div className="soc-quad">
-              <div className="soc-q soc-q--rd"><span className="mono">crowd bull + price weak</span><span className="mono dim2">fade · 2 names</span></div>
-              <div className="soc-q soc-q--gn"><span className="mono">crowd bull + price strong</span><span className="mono dim2">confirm · 3 names</span></div>
-              <div className="soc-q soc-q--amb"><span className="mono">crowd bear + price strong</span><span className="mono dim2">squeeze · 1 name</span></div>
-              <div className="soc-q soc-q--ink"><span className="mono">crowd bear + price weak</span><span className="mono dim2">avoid · 4 names</span></div>
-            </div>
-            <div className="mono dim" style={{fontSize:10.5,marginTop:6}}>Social is a contrarian input — extreme bullish crowd + weak tape = fade signal, not confirmation.</div>
+            <div className="soc-card-h mono">TOP HANDLES · by posts</div>
+            {handleRows.length ? (
+              <div className="soc-spark-list">
+                {handleRows.map((h, i) => {
+                  const mx = Math.max(...handleRows.map(z => z.n), 1);
+                  return <div key={i} className="soc-spk-row"><span className="mono">@{h.handle}</span><div className="soc-spk"><div className="soc-spk-f soc-spk--cy" style={{ width: `${(h.n / mx) * 100}%` }} /></div><span className="mono dim2">{h.n}</span></div>;
+                })}
+              </div>
+            ) : <div className="mono dim2" style={{ fontSize: 11 }}>No handle breakdown in feed.</div>}
           </div>
           <div className="soc-card">
-            <div className="soc-card-h mono">MENTION VELOCITY · 24h</div>
+            <div className="soc-card-h mono">RECENT POSTS · tracked handles</div>
             <div className="soc-spark-list">
-              {SOC_ROWS.slice(0,4).map(r=>(
-                <div key={r.sym} className="soc-spk-row"><span className="mono">{r.sym}</span><div className="soc-spk"><div className={`soc-spk-f soc-spk--${r.tone}`} style={{width:`${Math.min(100,r.mentions/50)}%`}}/></div><span className={`mono ${r.vel.startsWith("+")?"up":"dim2"}`}>{r.vel}</span></div>
-              ))}
+              {recent.length ? recent.map((p, i) => (
+                <div key={i} className="soc-spk-row" style={{ alignItems: "flex-start", flexDirection: "column", gap: 2 }} onClick={() => p.ticker && onTicker && onTicker(p.ticker)}>
+                  <span className="mono dim2" style={{ fontSize: 10 }}>@{p.handle}{p.ticker ? ` · ${p.ticker}` : ""}</span>
+                  <span className="mono" style={{ fontSize: 10.5, lineHeight: 1.4 }}>{(p.title || "").replace(/\s+/g, " ").slice(0, 110)}</span>
+                </div>
+              )) : <div className="mono dim2" style={{ fontSize: 11 }}>No recent posts in feed.</div>}
             </div>
           </div>
           <div className="soc-card">
-            <div className="soc-card-h mono">SOURCE MIX</div>
-            <div className="soc-srcmix">
-              {[["Reddit",42,"violet"],["X / Twitter",38,"cy"],["StockTwits",20,"gn"]].map((s,i)=>(
-                <div key={i} className="soc-src-row"><span className="mono">{s[0]}</span><div className="soc-src-bar"><div style={{width:`${s[1]}%`,background:`var(--${s[2]})`}}/></div><span className="mono dim2">{s[1]}%</span></div>
-              ))}
-            </div>
+            <div className="mono dim" style={{ fontSize: 10.5 }}>This feed tracks curated X / StockTwits handles (Nitter RSS) and counts ticker mentions + velocity. It is <b>not</b> a sentiment-polarity model — no bull/bear score is fabricated. Use as an attention/crowding signal, read against the tape.</div>
           </div>
         </div>
       </div>
