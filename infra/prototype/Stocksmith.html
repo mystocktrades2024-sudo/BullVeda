@@ -11806,7 +11806,7 @@ function OtkLensOptions({ ticker, mode }) {
       </div>
 
       <div className="otk-body">
-        {tab==="chain" && <OtkChain o={o} setDte={setDte} />}
+        {tab==="chain" && <OtkChain o={o} setDte={setDte} chain={chain} />}
         {tab==="pricing" && <OtkPricing o={o} />}
         {tab==="context" && <OtkContext o={o} ticker={ticker} />}
         {tab==="build" && <OtkBuild o={o} />}
@@ -11854,27 +11854,36 @@ function OtkPayoffBig({ o }) {
 }
 
 // ───── TAB: CHAIN & EXPIRY ─────
-function OtkChain({ o, setDte }) {
+function OtkChain({ o, setDte, chain }) {
   const strikes = useOTm(() => {
-    const base = o.strike;
-    const step = Math.max(1, Math.round(o.spot * 0.025));
-    const rows = [];
+    // REAL per-strike chain from /api/options when available (the same payload `o` was built from)
+    const realExps = (chain && !chain.__empty && Array.isArray(chain.expirations)) ? chain.expirations : null;
+    if (realExps && realExps.length) {
+      const e = realExps.reduce((b, x) => (Math.abs(x.dte - o.dte) < Math.abs(b.dte - o.dte) ? x : b), realExps[0]);
+      const spot = (chain.spot) || o.spot;
+      const all = (e.strikes || []).slice().sort((a, b) => a.strike - b.strike);
+      // ATM = strike closest to spot; show ±5 around it
+      let ai = 0; all.forEach((s, i) => { if (Math.abs(s.strike - spot) < Math.abs((all[ai].strike) - spot)) ai = i; });
+      const win = all.slice(Math.max(0, ai - 5), ai + 6);
+      const rows = win.map(s => {
+        const c = s.call || {};
+        const mid = (num(c.bid) != null && num(c.ask) != null) ? (num(c.bid) + num(c.ask)) / 2 : num(c.mark);
+        return { k: s.strike, itm: s.strike < spot, cPrem: mid != null ? mid : null, cDelta: num(c.delta),
+          ivK: num(c.iv) != null ? +num(c.iv).toFixed(1) : null, oi: num(c.oi), vol: num(c.vol), atm: Math.abs(s.strike - spot) === Math.abs((all[ai].strike) - spot), real: true };
+      }).filter(r => r.k != null);
+      if (rows.length) return rows;
+    }
+    // fallback model (no live chain) — clearly approximate
+    const base = o.strike, step = Math.max(1, Math.round(o.spot * 0.025)), rows = [];
     for (let k = base - step*4; k <= base + step*4; k += step) {
-      const itm = k < o.spot;
       const dist = (k - o.spot) / o.spot;
-      const cPrem = Math.max(0.05, o.prem - dist * o.spot * 0.55);
-      const cDelta = Math.max(0.03, Math.min(0.97, 0.5 - dist * 6));
-      const ivK = +(o.iv + Math.abs(dist) * 42).toFixed(1); // smile
-      const oi = Math.round(4200 * Math.exp(-Math.abs(dist)*8) + 120);
-      // Illustrative per-strike fill: no real per-strike volume exists (options_kpis carries only
-      // aggregate total_call_vol/total_put_vol, not a per-strike breakdown). Synthesized for shape.
-      const vol = Math.round(oi * (0.3 + Math.random()*0.6));
-      rows.push({ k, itm, cPrem, cDelta, ivK, oi, vol, atm: k === base });
+      rows.push({ k, itm: k < o.spot, cPrem: Math.max(0.05, o.prem - dist * o.spot * 0.55), cDelta: Math.max(0.03, Math.min(0.97, 0.5 - dist * 6)),
+        ivK: o.iv != null ? +(o.iv + Math.abs(dist) * 42).toFixed(1) : null, oi: null, vol: null, atm: k === base, real: false });
     }
     return rows;
-  }, [o]);
+  }, [o, chain]);
 
-  const maxOI = Math.max(...strikes.map(s => s.oi));
+  const maxOI = Math.max(...strikes.map(s => s.oi || 0), 1);
 
   // term structure: IV by DTE
   const term = (o.termCurve || EXPIRIES).map(e => ({ dte: e.dte, iv: e.iv, on: e.dte === o.dte }));
@@ -11884,7 +11893,7 @@ function OtkChain({ o, setDte }) {
   const ty = v => tPadT + (1-((v-tMinIV+3)/(tMaxIV-tMinIV+6)))*(tH-tPadT-tPadB);
 
   // skew curve: IV by delta/strike
-  const skew = strikes.map(s => ({ k: s.k, iv: s.ivK, atm: s.atm }));
+  const skew = strikes.filter(s => s.ivK != null).map(s => ({ k: s.k, iv: s.ivK, atm: s.atm }));
   const sW=300, sH=120, sPadL=34, sPadB=22, sPadT=12, sPadR=12;
   const sMaxIV=Math.max(...skew.map(s=>s.iv)), sMinIV=Math.min(...skew.map(s=>s.iv));
   const sx = i => sPadL + (i/(skew.length-1))*(sW-sPadL-sPadR);
@@ -11895,19 +11904,19 @@ function OtkChain({ o, setDte }) {
   return (
     <div className="otk-grid">
       <div className="otk-card otk-card--wide">
-        <div className="otk-card-h mono">CALL CHAIN · {o.dte}DTE · ±4 strikes · <span className="dim2">tap a strike to inspect</span></div>
+        <div className="otk-card-h mono">CALL CHAIN · {o.dte}DTE · ATM ±5 · <span className="dim2">{o.real?"live Schwab chain":"model"} · tap a strike</span></div>
         <table className="dtable otk-tbl otk-chain">
           <thead><tr><th>Strike</th><th>Moneyness</th><th className="r">Δ</th><th className="r">IV</th><th className="r">Bid/Ask mid</th><th className="r">Volume</th><th className="r">Open Int</th><th>OI depth</th></tr></thead>
           <tbody>{strikes.map((s,i)=>(
             <tr key={i} className={s.atm?"is-current":""}>
               <td className="mono"><b>${s.k}</b>{s.atm && <span className="otk-atm mono">ATM</span>}</td>
               <td className={`mono ${s.itm?"up":"dim2"}`}>{s.itm?"ITM":(s.k===o.strike?"ATM":"OTM")} {((s.k-o.spot)/o.spot*100).toFixed(1)}%</td>
-              <td className="r mono">{s.cDelta.toFixed(2)}</td>
-              <td className="r mono">{s.ivK}%</td>
-              <td className="r mono cy">${s.cPrem.toFixed(2)}</td>
-              <td className="r mono dim2">{s.vol.toLocaleString()}</td>
-              <td className="r mono">{s.oi.toLocaleString()}</td>
-              <td><div className="otk-oibar"><i style={{width:`${s.oi/maxOI*100}%`}}/></div></td>
+              <td className="r mono">{s.cDelta != null ? s.cDelta.toFixed(2) : "—"}</td>
+              <td className="r mono">{s.ivK != null ? s.ivK + "%" : "—"}</td>
+              <td className="r mono cy">{s.cPrem != null ? "$" + s.cPrem.toFixed(2) : "—"}</td>
+              <td className="r mono dim2">{s.vol != null ? s.vol.toLocaleString() : "—"}</td>
+              <td className="r mono">{s.oi != null ? s.oi.toLocaleString() : "—"}</td>
+              <td><div className="otk-oibar"><i style={{width:`${(s.oi||0)/maxOI*100}%`}}/></div></td>
             </tr>
           ))}</tbody>
         </table>
