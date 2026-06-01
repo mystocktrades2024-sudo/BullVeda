@@ -229,6 +229,27 @@ def _reconcile_positions(state: dict, alpaca_positions: list[dict],
     # Reload again so caller sees the latest state
     state.clear()
     state.update(json.loads(STATE_PATH.read_text()))
+
+    # Backfill live marks on any position missing a current price. add_position()
+    # records only entry_price/shares, so a just-synced fill shows current_price=None
+    # → the dashboard renders "—" for LAST/MKT VAL/P&L. (The in-place update loop
+    # above also sets current_price, but those edits are on `local_by_t` refs that
+    # get discarded by the state reload right above — so persist it here, after the
+    # reload, for every position Alpaca can price.) (2026-06-01)
+    _patched = False
+    for lp in state.get("positions", []):
+        ap = alpaca_by_t.get(lp.get("ticker"))
+        if ap and not lp.get("current_price"):
+            lp["current_price"] = round(ap["current_price"], 2)
+            lp["unrealized_pnl_dollars"] = round(ap["unrealized_pl"], 2)
+            lp["unrealized_pnl_pct"] = round(ap["unrealized_plpc"], 2)
+            lp["position_size"] = round(abs(ap["market_value"]), 2)
+            lp["highest_price"] = round(max(lp.get("highest_price") or ap["avg_entry_price"], ap["current_price"]), 2)
+            lp["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            _patched = True
+    if _patched:
+        STATE_PATH.write_text(json.dumps(state, indent=2, default=str))
+
     return inserted, updated, closed
 
 
