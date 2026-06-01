@@ -2225,36 +2225,26 @@ async def ohlcv_api(ticker: str, days: int = 120, tf: str = "1D"):
     try:
         import numpy as np, pandas as pd
         df = None
-        if tf == "1H":
-            from data_fetcher import get_polygon_ohlcv
-            df = get_polygon_ohlcv(ticker, days=min(days, 30), timespan="hour", multiplier=1)
-        elif tf == "4H":
-            from data_fetcher import get_polygon_ohlcv
-            df = get_polygon_ohlcv(ticker, days=min(days, 60), timespan="hour", multiplier=4)
-        elif tf == "1W":
-            from data_fetcher import get_polygon_ohlcv
-            df = get_polygon_ohlcv(ticker, days=min(days, 730), timespan="week", multiplier=1)
-        if df is None or (hasattr(df, 'empty') and df.empty):
-            from data_fetcher import fetch_ohlcv_with_failover
-            # Intraday (1H/4H): Schwab pricehistory (market-data entitled) — 30-min
-            # bars resampled to 1H/4H. EODHD has no intraday on the current plan.
-            if tf in ("1H", "4H"):
-                try:
-                    import schwab_client as _sch
-                    ph = _sch.get_pricehistory(ticker, period_type="day", period=10,
-                                               frequency_type="minute", frequency=30)
-                    cdl = (ph or {}).get("candles") or []
-                    if cdl:
-                        df = pd.DataFrame(cdl)
-                        df["datetime"] = pd.to_datetime(df["datetime"], unit="ms")
-                        df = df.set_index("datetime").sort_index()
-                        df = df.rename(columns={"open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"})
-                        df = df.resample("1h" if tf == "1H" else "4h").agg(
-                            {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
-                except Exception:
-                    df = None
-            # EODHD intraday fallback (in case Schwab market-data is unavailable)
-            if (df is None or (hasattr(df, 'empty') and df.empty)) and tf in ("1H", "4H"):
+        # Intraday (1H/4H): Schwab pricehistory is the ONLY real source (EODHD plan has
+        # no intraday; the legacy get_polygon_ohlcv path returns DAILY bars mislabeled as
+        # hourly — never use it for intraday). If Schwab + EODHD-intraday both fail we
+        # return 404 rather than serving daily-as-intraday.
+        if tf in ("1H", "4H"):
+            try:
+                import schwab_client as _sch
+                ph = _sch.get_pricehistory(ticker, period_type="day", period=10,
+                                           frequency_type="minute", frequency=30)
+                cdl = (ph or {}).get("candles") or []
+                if cdl:
+                    df = pd.DataFrame(cdl)
+                    df["datetime"] = pd.to_datetime(df["datetime"], unit="ms")
+                    df = df.set_index("datetime").sort_index()
+                    df = df.rename(columns={"open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"})
+                    df = df.resample("1h" if tf == "1H" else "4h").agg(
+                        {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
+            except Exception:
+                df = None
+            if df is None or (hasattr(df, 'empty') and df.empty):
                 try:
                     import eodhd_client as _eod_intra
                     rows = _eod_intra.intraday(ticker, interval="1h")
@@ -2269,7 +2259,13 @@ async def ohlcv_api(ticker: str, days: int = 120, tf: str = "1D"):
                 except Exception:
                     pass
             if df is None or (hasattr(df, 'empty') and df.empty):
-                df, _ = fetch_ohlcv_with_failover(ticker, days=days)
+                raise HTTPException(404, f"No intraday ({tf}) data for {ticker}")
+        elif tf == "1W":
+            from data_fetcher import get_polygon_ohlcv
+            df = get_polygon_ohlcv(ticker, days=min(days, 730), timespan="week", multiplier=1)
+        if df is None or (hasattr(df, 'empty') and df.empty):
+            from data_fetcher import fetch_ohlcv_with_failover
+            df, _ = fetch_ohlcv_with_failover(ticker, days=days)
         if df is None or df.empty:
             raise HTTPException(404, f"No OHLCV data for {ticker}")
         c = df["Close"].squeeze()

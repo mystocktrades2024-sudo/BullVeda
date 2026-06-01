@@ -14645,14 +14645,42 @@ function smcSMT(stockBars, spyBars) {
   else if (sLL && mHL) { read = "BEARISH SMT"; tone = "rd"; note = "stock lower-low while SPY higher-low → relative weakness"; }
   return { read, tone, note, stock: sHL ? "higher low" : sLL ? "lower low" : "flat", spy: mHL ? "higher low" : mLL ? "lower low" : "flat" };
 }
+// light bias for an intraday/HTF timeframe (EMA stack + 20-bar structure break)
+function mtfBiasOf(bars) {
+  if (!bars || bars.length < 12) return null;   // adaptive — Schwab day/minute caps 4H at ~16 bars
+  const n = bars.length, px = bars[n - 1].c, cl = bars.map(b => b.c);
+  const ema = (v, s) => { const k = 2 / (s + 1); let e = v[0]; for (let i = 1; i < v.length; i++) e = v[i] * k + e * (1 - k); return e; };
+  const e21 = ema(cl, Math.min(21, n - 1)), e50 = ema(cl, Math.min(50, n - 1));
+  const stack = px > e21 && e21 > e50, down = px < e21 && e21 < e50;
+  const wlen = Math.min(20, n - 2), win = bars.slice(-wlen - 1, -1), hh = Math.max(...win.map(b => b.hi)), ll = Math.min(...win.map(b => b.lo));
+  const bias = stack ? "BULL" : down ? "BEAR" : "NEUT", tone = stack ? "gn" : down ? "rd" : "amb";
+  const struct = px > hh ? "BOS \u2191 \u00b7 range high" : px < ll ? "BOS \u2193 \u00b7 range low" : (px > e21 ? "above 21-EMA" : "below 21-EMA");
+  return { bias, tone, struct };
+}
+// real 1H + 4H bias from Schwab intraday (/api/ohlcv tf=1H/4H)
+function useMtfBias(symbol) {
+  const [m, setM] = React.useState(null);
+  React.useEffect(() => {
+    if (typeof fetch === "undefined" || !symbol) return;
+    let live = true; setM(null);
+    Promise.all([
+      fetch(`/api/ohlcv/${encodeURIComponent(symbol)}?tf=1H&days=12`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null),
+      fetch(`/api/ohlcv/${encodeURIComponent(symbol)}?tf=4H&days=30`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null),
+    ]).then(([a, b]) => { if (live) setM({ h1: mtfBiasOf(pvMapCandles(a || {})), h4: mtfBiasOf(pvMapCandles(b || {})), h1bars: pvMapCandles(a || {}) }); })
+      .catch(() => { if (live) setM({ h1: null, h4: null }); });
+    return () => { live = false; };
+  }, [symbol]);
+  return m;
+}
 function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const ox = usePvOhlcv(ticker && ticker.symbol);
   const spy = usePvOhlcv("SPY");
   const S = React.useMemo(() => smcCompute(ox.bars), [ox.bars]);
   const smt = React.useMemo(() => smcSMT(ox.bars, spy.bars), [ox.bars, spy.bars]);
-  return <LensSMCInner ticker={ticker} mode={mode} sizeCat={sizeCat} headerStyle={headerStyle} kpiStyle={kpiStyle} heroStyle={heroStyle} S={S} oxState={ox.state} smt={smt} />;
+  const mtf = useMtfBias(ticker && ticker.symbol);
+  return <LensSMCInner ticker={ticker} mode={mode} sizeCat={sizeCat} headerStyle={headerStyle} kpiStyle={kpiStyle} heroStyle={heroStyle} S={S} oxState={ox.state} smt={smt} mtf={mtf} />;
 }
-function LensSMCInner({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle, S, oxState, smt }) {
+function LensSMCInner({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle, S, oxState, smt, mtf }) {
   const s1 = useStateToggle("sm-1"); const s2 = useStateToggle("sm-2");
   const s3 = useStateToggle("sm-3"); const s4 = useStateToggle("sm-4");
   const s0 = useStateToggle("sm-0"); const s5 = useStateToggle("sm-5");
@@ -14765,8 +14793,8 @@ function LensSMCInner({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle,
         <SectionHeader n={5} title="MTF Screener"
           sub="confluence across 1H · 4H · D · W"
           style={headerStyle} right={<StateToggle name="sm-4" />} />
-        <StateWrap state={s4.value} source="real daily structure (D) + weekly resample (W); 1H/4H need intraday feed">
-          <div className="lens-pad"><MTFScreener S={S} /></div>
+        <StateWrap state={s4.value} source="real 1H/4H (Schwab intraday) + daily (D) + weekly resample (W)">
+          <div className="lens-pad"><MTFScreener S={S} mtf={mtf} /></div>
         </StateWrap>
       </div>
 
@@ -14801,8 +14829,8 @@ function LensSMCInner({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle,
         <SectionHeader n={9} title="Kill Zones · SMT Divergence"
           sub="session timing edge · correlated-pair divergence"
           style={headerStyle} right={<StateToggle name="sm-9" />} />
-        <StateWrap state={s9b.value} source="session timing + SMT need intraday/correlated-pair feed">
-          <div className="lens-pad"><SMCKillSMT S={S} smt={smt} /></div>
+        <StateWrap state={s9b.value} source="session range from Schwab 1H bars (ET) + SMT vs SPY">
+          <div className="lens-pad"><SMCKillSMT S={S} smt={smt} mtf={mtf} /></div>
         </StateWrap>
       </div>
 
@@ -14819,8 +14847,8 @@ function LensSMCInner({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle,
         <SectionHeader n={11} title="Trend-State Machine"
           sub="persistent CHoCH/BoS regime across timeframes"
           style={headerStyle} right={<StateToggle name="sm-11" />} />
-        <StateWrap state={s11b.value} source="real daily (D) + weekly (W) structure; 1H/4H need intraday feed">
-          <div className="lens-pad"><SMCTrendState S={S} /></div>
+        <StateWrap state={s11b.value} source="real 1H/4H (Schwab intraday) + daily (D) + weekly (W)">
+          <div className="lens-pad"><SMCTrendState S={S} mtf={mtf} /></div>
         </StateWrap>
       </div>
 
@@ -15109,7 +15137,7 @@ function smcWeekly(bars) {
   if (cur) wk.push(cur);
   return wk.length >= 4 ? wk : null;
 }
-function MTFScreener({ S }) {
+function MTFScreener({ S, mtf }) {
   if (!S) return null;
   const wk = smcWeekly(S.bars);
   let wBias = "—", wNote = "needs ≥4 weekly buckets", wTone = "ink", wTrend = "→";
@@ -15122,8 +15150,8 @@ function MTFScreener({ S }) {
   }
   const dTone = S.bias === "BULL" ? "gn" : S.bias === "BEAR" ? "rd" : "amb";
   const rows = [
-    { tf: "1H", bias: "—", trend: "·", note: "needs intraday feed", tone: "ink" },
-    { tf: "4H", bias: "—", trend: "·", note: "needs intraday feed", tone: "ink" },
+    { tf: "1H", bias: mtf&&mtf.h1?mtf.h1.bias:"—", trend: mtf&&mtf.h1?(mtf.h1.bias==="BULL"?"\u2191":mtf.h1.bias==="BEAR"?"\u2193":"\u2192"):"\u00b7", note: mtf?(mtf.h1?mtf.h1.struct:"no intraday bars"):"loading\u2026", tone: mtf&&mtf.h1?mtf.h1.tone:"ink" },
+    { tf: "4H", bias: mtf&&mtf.h4?mtf.h4.bias:"—", trend: mtf&&mtf.h4?(mtf.h4.bias==="BULL"?"\u2191":mtf.h4.bias==="BEAR"?"\u2193":"\u2192"):"\u00b7", note: mtf?(mtf.h4?mtf.h4.struct:"no intraday bars"):"loading\u2026", tone: mtf&&mtf.h4?mtf.h4.tone:"ink" },
     { tf: "1D", bias: S.bias, trend: S.bias === "BULL" ? "↑" : S.bias === "BEAR" ? "↓" : "→", note: S.lastBreak ? `${S.lastBreak.tag} ${S.lastBreak.dir} @ ${smc$(S.lastBreak.price)} · EMA ${S.emaStack ? "stacked" : "mixed"}` : "no recent break", tone: dTone },
     { tf: "1W", bias: wBias, trend: wTrend, note: wNote, tone: wTone },
   ];
@@ -15402,7 +15430,7 @@ window.LensSMC = LensSMC;
 window.LensRisk = LensRisk;
 
 // Trend-state machine across timeframes — daily (real) + weekly (resample); intraday needs a feed
-function SMCTrendState({ S }) {
+function SMCTrendState({ S, mtf }) {
   if (!S) return null;
   const wk = smcWeekly(S.bars);
   let wBias = "—", wNote = "needs ≥3 weekly buckets", wTone = "ink";
@@ -15415,8 +15443,8 @@ function SMCTrendState({ S }) {
   const dWord = S.bias === "BULL" ? "BULLISH" : S.bias === "BEAR" ? "BEARISH" : "NEUTRAL";
   const dTone = S.bias === "BULL" ? "gn" : S.bias === "BEAR" ? "rd" : "amb";
   const rows = [
-    ["1H", "—", "intraday feed needed", "—", "ink"],
-    ["4H", "—", "intraday feed needed", "—", "ink"],
+    ["1H", mtf&&mtf.h1?(mtf.h1.bias==="BULL"?"BULLISH":mtf.h1.bias==="BEAR"?"BEARISH":"NEUTRAL"):"\u2014", mtf&&mtf.h1?mtf.h1.struct:(mtf?"no bars":"loading\u2026"), "Schwab", mtf&&mtf.h1?mtf.h1.tone:"ink"],
+    ["4H", mtf&&mtf.h4?(mtf.h4.bias==="BULL"?"BULLISH":mtf.h4.bias==="BEAR"?"BEARISH":"NEUTRAL"):"\u2014", mtf&&mtf.h4?mtf.h4.struct:(mtf?"no bars":"loading\u2026"), "Schwab", mtf&&mtf.h4?mtf.h4.tone:"ink"],
     ["1D", dWord, S.lastBreak ? `${S.lastBreak.tag} ${S.lastBreak.dir === "bull" ? "↑" : "↓"}` : "no break", S.lastBreak ? smcDate(S.lastBreak.t) : "—", dTone],
     ["1W", wBias, wNote, wk ? `${wk.length} wk` : "—", wTone],
   ];
@@ -15684,16 +15712,40 @@ function SMCVoidOTE({ S }) {
   );
 }
 
-function SMCKillSMT({ S, smt }) {
+// session activity (ICT kill-zones) from real intraday bars — avg range per ET session.
+// No Date.now() at render: "current" session = ET hour of the most recent bar.
+function smcSessions(bars) {
+  if (!bars || !bars.length) return null;
+  const etHour = (t) => { const d = new Date(t < 2e10 ? t * 1000 : t); const h = new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: "America/New_York" }).format(d); return parseInt(h, 10) % 24; };
+  const seg = { "London": [2, 5], "NY AM": [8, 12], "NY PM": [12, 16] };
+  const acc = { "London": [], "NY AM": [], "NY PM": [] };
+  bars.slice(-60).forEach(b => { const h = etHour(b.t), rng = b.hi - b.lo; for (const k in seg) { if (h >= seg[k][0] && h < seg[k][1]) acc[k].push(rng); } });
+  const last = bars[bars.length - 1], curH = etHour(last.t);
+  const rows = Object.keys(seg).map(k => { const v = acc[k]; const avg = v.length ? v.reduce((a, c) => a + c, 0) / v.length : null; const active = curH >= seg[k][0] && curH < seg[k][1]; return { k, avg, n: v.length, active }; });
+  const best = rows.filter(r => r.avg != null).sort((a, b) => b.avg - a.avg)[0];
+  return { rows, best: best ? best.k : null, curH };
+}
+function SMCKillSMT({ S, smt, mtf }) {
   // session kill-zones need intraday timestamps; SMT needs correlated-pair bars — neither in the daily feed
   return (
     <div className="smc-sub smc-2col">
       <div>
-        <div className="label-cap" style={{marginBottom:6}}>KILL ZONES · session edge</div>
-        {[["London open","02:00–05:00 ET"],["NY AM","08:30–11:00 ET"],["NY PM","13:30–16:00 ET"]].map((r,i)=>(
-          <div key={i} className="smc-row smc-row--ink"><span className="mono">{r[0]}</span><span className="mono dim2">{r[1]}</span><span className="mono dim2">—</span></div>
-        ))}
-        <div className="mono dim2" style={{fontSize:10.5,marginTop:6}}>Session kill-zone activity needs an intraday (1H/15m) feed — daily bars can't time the open. Shown as —.</div>
+        <div className="label-cap" style={{marginBottom:6}}>KILL ZONES · session range <span className="dim2">· Schwab 1H</span></div>
+        {(() => {
+          const ss = (mtf && mtf.h1bars) ? smcSessions(mtf.h1bars) : null;
+          const wins = { "London": "02:00–05:00 ET", "NY AM": "08:00–12:00 ET", "NY PM": "12:00–16:00 ET" };
+          if (!ss) return <div className="mono dim2" style={{fontSize:11,padding:"4px 0"}}>{mtf ? "No intraday bars for session analysis." : "Loading Schwab 1H bars…"}</div>;
+          return <>
+            {ss.rows.map((r,i)=>(
+              <div key={i} className={`smc-row smc-row--${r.active?"gn":r.k===ss.best?"amb":"ink"}`}>
+                <span className="mono">{r.k}{r.active?" · ACTIVE":""}</span>
+                <span className="mono dim2">{wins[r.k]}</span>
+                <span className={`mono ${r.k===ss.best?"up":"dim2"}`}>{r.avg!=null?"avg rng $"+r.avg.toFixed(2):"—"}</span>
+              </div>
+            ))}
+            <div className="mono dim2" style={{fontSize:10.5,marginTop:6}}>Avg per-bar range per ET session from real Schwab 1H bars. Highest-range session = <b className="warn">{ss.best||"—"}</b> (where the day's expansion concentrates).</div>
+          </>;
+        })()}
       </div>
       <div>
         <div className="label-cap" style={{marginBottom:6}}>SMT DIVERGENCE · stock vs SPY <span className="dim2">· real</span></div>
