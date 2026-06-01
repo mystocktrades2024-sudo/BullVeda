@@ -9648,12 +9648,47 @@ function Discovery({ d, screener, xChatter, onTicker }) {
   );
 }
 
+// live scan-universe movers — data.critical.json market_movers is empty, but /api/universe (765 rows)
+// carries real per-name pct_chg. Cached on window; honestly empty when the market is closed (all 0).
+function useUniverseMovers() {
+  const [m, setM] = React.useState(() => (typeof window !== "undefined" && window.__ssMovers) || null);
+  React.useEffect(() => {
+    if (typeof window !== "undefined" && window.__ssMovers) { setM(window.__ssMovers); return; }
+    if (typeof fetch === "undefined") return;
+    let live = true;
+    fetch("/api/universe", { credentials: "same-origin" })
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((j) => {
+        const rows = (j && j.screener) || [];
+        const ch = rows.filter((r) => r && r.ticker && typeof r.pct_chg === "number" && r.pct_chg !== 0)
+          .map((r) => ({ ticker: r.ticker, sector: r.sector || "", pct: r.pct_chg }))
+          .sort((a, b) => b.pct - a.pct);
+        const out = { gainers: ch.slice(0, 6), losers: ch.slice(-6).reverse() };
+        if (typeof window !== "undefined") window.__ssMovers = out;
+        if (live) setM(out);
+      })
+      .catch(() => { if (live) setM({ gainers: [], losers: [] }); });
+    return () => { live = false; };
+  }, []);
+  return m;
+}
+
 function TopMovers({ d, onTicker }) {
   const mm = d.market_movers || {};
   const idxName = (x) => ({ "$SPX":"S&P", "$COMPX":"NQ", "$DJI":"DOW" }[x] || (x||"").replace("$",""));
   const map = (arr) => (arr||[]).slice(0,6).map(x => ({ sym:x.ticker, sector:idxName(x.index), chg:(x.perf_1d||0)*100 }));
-  const gainers = map(mm.gainers), losers = map(mm.losers);
-  if (!gainers.length && !losers.length) return <EmptyState>No movers in this bundle. Source: data.critical.json · market_movers.</EmptyState>;
+  // hook must run unconditionally (before any early return)
+  const uni = useUniverseMovers();
+  let gainers = map(mm.gainers), losers = map(mm.losers);
+  let src = "data.critical.json · market_movers";
+  if (!gainers.length && !losers.length && uni && (uni.gainers.length || uni.losers.length)) {
+    gainers = uni.gainers.map((x) => ({ sym: x.ticker, sector: x.sector, chg: x.pct }));
+    losers = uni.losers.map((x) => ({ sym: x.ticker, sector: x.sector, chg: x.pct }));
+    src = "live scan universe · pct_chg";
+  }
+  if (!gainers.length && !losers.length) {
+    return <EmptyState>{uni == null ? "Loading movers from the scan universe…" : "No movers — market closed or pct_chg flat across the scan universe."}</EmptyState>;
+  }
   const col = (items) => (
     <div className="tm-col">
       {items.map(m => (
@@ -9670,6 +9705,7 @@ function TopMovers({ d, onTicker }) {
     <div className="tm">
       <div className="tm-head"><span className="mono gn">▲ GAINERS</span><span className="mono rd">▼ LOSERS</span></div>
       <div className="tm-2col">{col(gainers)}{col(losers)}</div>
+      <div className="mono dim2" style={{ fontSize: 9.5, marginTop: 4, opacity: 0.6 }}>src · {src}</div>
     </div>
   );
 }
@@ -13063,12 +13099,16 @@ function toDetailTicker(row, sym, raw) {
   const tf = (d)=> d===2?80 : d===1?58 : 38;
   const clamp = (v,lo,hi)=>Math.max(lo,Math.min(hi,Math.round(v)));
   const pctOf = (s,m)=> (s!=null && m) ? clamp(s/m*100,0,100) : null;
-  const price = raw.price ?? row.price ?? 0;
-  const pivot = raw.entry_lo ?? parseFloat(row.entry) ?? price ?? 0;
-  const stop  = raw.stop ?? parseFloat(row.stop) ?? (price?price*0.95:0);
-  const t1    = raw.t1 ?? parseFloat(row.t1plan) ?? (price?price*1.08:0);
-  const t2    = raw.t2 ?? (pivot + (t1-pivot)*2);
-  const rr    = raw.rr ?? parseFloat(row.rr) ?? 1.7;
+  // numeric guard — parseFloat(undefined) is NaN, and `NaN ?? fb` does NOT fall
+  // through (?? only catches null/undefined), so a ticker missing trade-plan
+  // fields previously yielded pivot/stop/t1 = NaN → NaN expectancy/R:R/downside.
+  const numOr = (v, fb) => { const n = typeof v === "number" ? v : parseFloat(v); return Number.isFinite(n) ? n : fb; };
+  const price = numOr(raw.price, numOr(row.price, 0));
+  const pivot = numOr(raw.entry_lo, numOr(row.entry, price || 0));
+  const stop  = numOr(raw.stop, numOr(row.stop, price ? price*0.95 : 0));
+  const t1    = numOr(raw.t1, numOr(row.t1plan, price ? price*1.08 : 0));
+  const t2    = numOr(raw.t2, pivot + (t1 - pivot) * 2);
+  const rr    = numOr(raw.rr, numOr(row.rr, 1.7));
   const wlb   = row.wlb!=null ? row.wlb/100 : 0.45;
   const winRate = row.regWR!=null ? row.regWR/100 : Math.min(0.75, wlb+0.13);
   const erDays = raw.earn_days ?? row.er ?? null;
