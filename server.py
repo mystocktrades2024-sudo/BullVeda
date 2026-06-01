@@ -2636,9 +2636,19 @@ async def ticker_full_api(sym: str):
     indexed by ticker in memory and invalidated on the file's mtime. Falls back to
     Supabase ticker_detail for the long tail when present (added by the analysis sync).
     """
-    import json, os, gzip
+    import json, os, gzip, math
     sym = (sym or "").upper().strip()
     path = BASE_DIR / "cache" / "last_bundle.json"
+    def _nan_safe(o):
+        # Bundle rows carry NaN/Inf floats (e.g. extra_fund.peg) which FastAPI's
+        # strict JSON encoder rejects (→ 500). Replace with None so the row serializes.
+        if isinstance(o, float):
+            return None if (math.isnan(o) or math.isinf(o)) else o
+        if isinstance(o, dict):
+            return {k: _nan_safe(v) for k, v in o.items()}
+        if isinstance(o, (list, tuple)):
+            return [_nan_safe(v) for v in o]
+        return o
     # 1) in-memory index over last_bundle.all_scored (covers the enriched set)
     try:
         mt = os.path.getmtime(path)
@@ -2655,7 +2665,7 @@ async def ticker_full_api(sym: str):
             _rt = _revision_trend_for(sym)
             if _rt and not row.get("revision_trend"):
                 row = {**row, "revision_trend": _rt}
-            return {"ticker": sym, "source": "bundle", "row": row}
+            return {"ticker": sym, "source": "bundle", "row": _nan_safe(row)}
     except Exception:
         pass
     # 2) Supabase ticker_detail fallback (long tail / persisted detail)
@@ -2669,7 +2679,7 @@ async def ticker_full_api(sym: str):
             rows = r.json() if r.status_code == 200 else []
             if rows and rows[0].get("detail_gz"):
                 raw = _gz.decompress(_b64.b64decode(rows[0]["detail_gz"]))
-                return {"ticker": sym, "source": "supabase", "row": json.loads(raw)}
+                return {"ticker": sym, "source": "supabase", "row": _nan_safe(json.loads(raw))}
     except Exception:
         pass
     # 3) LIVE assembly for the >1855 tail (not scored this run) — real price + identity
