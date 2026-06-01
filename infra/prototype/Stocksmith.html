@@ -14121,12 +14121,26 @@ window.PatternMatrix = PatternMatrix;
 // ────────────────────────────────────────────────────────────
 // CHART lens — full OHLC + HTF bias strip + indicator overlays
 // ────────────────────────────────────────────────────────────
-const TC_TF_THESIS = {
-  "1H": { bias:"BULL", tone:"up", read:"Intraday uptrend — higher-lows, holding VWAP. Tactical entries on pullbacks to the rising 21-EMA.", struct:"BOS ↑ · OB holding", note:"execution timeframe" },
-  "4H": { bias:"BULL", tone:"up", read:"Swing leg intact — clean break of prior 4H range, no CHoCH. MACD above signal.", struct:"BOS ↑ · FVG below", note:"swing trigger timeframe" },
-  "1D": { bias:"BULL", tone:"up", read:"Primary trend up — base #2 breakout above pivot on +1.6× RVOL, stacked EMAs, above cloud.", struct:"BOS ↑ · above Kumo", note:"thesis timeframe" },
-  "1W": { bias:"NEUTRAL", tone:"amb", read:"Higher-timeframe still basing — range-bound. Bull thesis valid but HTF resistance overhead; size down.", struct:"range · no break", note:"context timeframe" },
-};
+// per-TF descriptor labels (accurate role of each TF — not data)
+const TC_TF_NOTE = { "1H": "execution timeframe", "4H": "swing trigger timeframe", "1D": "thesis timeframe", "1W": "context timeframe" };
+// REAL per-timeframe bias from the loaded bars (EMA stack + 20-bar structure break)
+function tcTfBias(bars) {
+  if (!bars || bars.length < 30) return null;
+  const n = bars.length, px = bars[n - 1].close, cl = bars.map(b => b.close);
+  const ema = (v, s) => { const k = 2 / (s + 1); let e = v[0]; for (let i = 1; i < v.length; i++) e = v[i] * k + e * (1 - k); return e; };
+  const e21 = ema(cl, 21), e50 = ema(cl, 50);
+  const stack = px > e21 && e21 > e50, down = px < e21 && e21 < e50;
+  const win = bars.slice(-21, -1), hh = Math.max(...win.map(b => b.high)), ll = Math.min(...win.map(b => b.low));
+  const brokeUp = px > hh, brokeDn = px < ll;
+  const bias = stack ? "BULL" : down ? "BEAR" : "NEUTRAL", tone = stack ? "up" : down ? "dn" : "amb";
+  const struct = brokeUp ? "BOS ↑ · 20-bar high" : brokeDn ? "BOS ↓ · 20-bar low" : (px > e21 ? "above 21-EMA" : "below 21-EMA");
+  const read = bias === "BULL"
+    ? `Uptrend — price above stacked EMAs (21 ${e21.toFixed(2)} > 50 ${e50.toFixed(2)}). ${brokeUp ? "Fresh 20-bar breakout." : "Holding the trend; pullbacks to the rising 21-EMA are tactical adds."}`
+    : bias === "BEAR"
+    ? `Downtrend — price below stacked EMAs (21 ${e21.toFixed(2)} < 50 ${e50.toFixed(2)}). ${brokeDn ? "Fresh 20-bar breakdown." : "Below value; rallies into the 21-EMA are distribution."}`
+    : `Mixed — EMAs not stacked (21 ${e21.toFixed(2)} · 50 ${e50.toFixed(2)}). Range / transition; wait for a clean break before committing.`;
+  return { bias, tone, read, struct };
+}
 const MODE_TF = { SWING: "4H", POSITION: "1D", INVESTMENT: "1W" };  // B5 — chart TF follows the global SWING/POSITION/INVESTMENT mode
 function LensChart({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const [tf, setTf] = useTCs(MODE_TF[mode] || "1D");
@@ -14137,7 +14151,6 @@ function LensChart({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) 
   const [indMenu, setIndMenu] = useTCs(false);
   const [ind, setInd] = useTCs({ ema:false, bb:false, avwap:false, ichi:false, smc:false, vp:false });
   const togInd = (k) => setInd(s => ({ ...s, [k]: !s[k] }));
-  const tfx = TC_TF_THESIS[tf];
 
   // REAL OHLCV state — empty until the browser-only effect fetches it.
   // status: "load" | "ok" | "empty"
@@ -14183,6 +14196,8 @@ function LensChart({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) 
   );
 
   const hasData = feed.status === "ok" && d.bars.length > 0;
+  // REAL bias for the loaded TF (the others can't be computed without their own fetch)
+  const tfx = tcTfBias(feed.status === "ok" ? feed.bars : null);
 
   return (
     <div className={`lens lens--tc ${full?"tc-full":""}`}>
@@ -14212,13 +14227,22 @@ function LensChart({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) 
         {["1H","4H","1D","1W"].map(k=>(
           <button key={k} className={`tc-tf ${tf===k?"is-on":""}`} onClick={()=>pickTf(k)}>
             <span className="mono">{k}</span>
-            <span className={`mono kpi-tone--${TC_TF_THESIS[k].tone==="up"?"gn":"amb"}`}>{TC_TF_THESIS[k].bias}</span>
+            <span className={`mono kpi-tone--${(k===tf && tfx) ? (tfx.tone==="up"?"gn":tfx.tone==="dn"?"rd":"amb") : "ink"}`}>{(k===tf && tfx) ? tfx.bias : "·"}</span>
           </button>
         ))}
         <div className="tc-tf-read">
-          <span className={`tc-tf-tag mono kpi-tone--${tfx.tone==="up"?"gn":"amb"}`}>{tf} · {tfx.bias}</span>
-          <span className="mono tc-tf-txt">{tfx.read}</span>
-          <span className="mono dim2 tc-tf-struct">{tfx.struct} · <i>{tfx.note}</i></span>
+          {tfx ? (
+            <>
+              <span className={`tc-tf-tag mono kpi-tone--${tfx.tone==="up"?"gn":tfx.tone==="dn"?"rd":"amb"}`}>{tf} · {tfx.bias}</span>
+              <span className="mono tc-tf-txt">{tfx.read}</span>
+              <span className="mono dim2 tc-tf-struct">{tfx.struct} · <i>{TC_TF_NOTE[tf]}</i></span>
+            </>
+          ) : (
+            <>
+              <span className="tc-tf-tag mono dim2">{tf} · —</span>
+              <span className="mono dim2 tc-tf-txt">{feed.status==="load" ? "Loading "+tf+" bars…" : "No "+tf+" data — bias shown only for the loaded timeframe ("+TC_TF_NOTE[tf]+")."}</span>
+            </>
+          )}
         </div>
       </div>
 
