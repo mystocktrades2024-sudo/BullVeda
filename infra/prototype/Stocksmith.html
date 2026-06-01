@@ -11762,6 +11762,8 @@ function OtkChain({ o, setDte }) {
       const cDelta = Math.max(0.03, Math.min(0.97, 0.5 - dist * 6));
       const ivK = +(o.iv + Math.abs(dist) * 42).toFixed(1); // smile
       const oi = Math.round(4200 * Math.exp(-Math.abs(dist)*8) + 120);
+      // Illustrative per-strike fill: no real per-strike volume exists (options_kpis carries only
+      // aggregate total_call_vol/total_put_vol, not a per-strike breakdown). Synthesized for shape.
       const vol = Math.round(oi * (0.3 + Math.random()*0.6));
       rows.push({ k, itm, cPrem, cDelta, ivK, oi, vol, atm: k === base });
     }
@@ -13550,17 +13552,35 @@ function TechHero({ ticker, mode, heroStyle, sizeCat }) {
         </div>
       </div>
       <div className="th-right">
-        <MiniChart />
+        <MiniChart ticker={ticker} />
       </div>
     </div>
   );
 }
 
-// Mock OHLC chart preview
-function MiniChart() {
+// OHLC chart preview — real bars from ticker.raw.smc_data.bars_daily when present, else mock fallback
+function MiniChart({ ticker }) {
   const w = 320, h = 110;
   const bars = 60;
+  const realBars = (ticker && ticker.raw && ticker.raw.smc_data && Array.isArray(ticker.raw.smc_data.bars_daily))
+    ? ticker.raw.smc_data.bars_daily : null;
   const data = useMemoTL(() => {
+    // Real OHLC path: map the last `bars` daily bars (accepts {open,high,low,close} or {o,h,l,c})
+    if (realBars && realBars.length) {
+      const slice = realBars.slice(-bars);
+      const out = [];
+      for (let i = 0; i < slice.length; i++) {
+        const b = slice[i] || {};
+        const o = Number(b.open != null ? b.open : b.o);
+        const c = Number(b.close != null ? b.close : b.c);
+        const hi = Number(b.high != null ? b.high : b.h);
+        const lo = Number(b.low != null ? b.low : b.l);
+        if ([o, c, hi, lo].some(v => !isFinite(v))) continue;
+        out.push({ o, c, hi, lo });
+      }
+      if (out.length) return out;
+    }
+    // Fallback: mock candles (no real bars available)
     const out = [];
     let p = 56;
     for (let i = 0; i < bars; i++) {
@@ -13575,11 +13595,12 @@ function MiniChart() {
       out.push({ o, c, hi, lo });
     }
     return out;
-  }, []);
+  }, [realBars]);
+  const nBars = data.length || bars;
   const min = Math.min(...data.map(d => d.lo));
   const max = Math.max(...data.map(d => d.hi));
-  const range = max - min;
-  const xStep = w / bars;
+  const range = (max - min) || 1;
+  const xStep = w / nBars;
   const yFor = v => h - ((v - min) / range) * (h - 10) - 5;
   const pivotY = yFor(min + range * 0.78);
   const lastBar = data[data.length - 1];
@@ -30398,8 +30419,10 @@ function MpfSummaryRow({ sum, allView }) {
 }
 
 function MpfSpark({ rows }) {
-  // small equity-path sketch scaled to current book size — uses index/sin only
-  // (NO Math.random, so it is render-stable and renderToString-safe).
+  // DECORATIVE: small equity-path sketch scaled to current book size — uses index/sin only.
+  // The user-created MyPF books (window.MyPF, localStorage) store holdings/trades/cash but NO
+  // dated equity time-series, so there is no real curve to render here — this is ornamental only.
+  // (NO Math.random, so it is render-stable and renderToString-safe.)
   const data = useMpfM(() => { const a = []; let v = 0; const n = rows.length || 1; for (let i = 0; i < 40; i++) { v += 0.3 + Math.sin(i * 0.4) * 0.4 + Math.sin(i * 0.17 + n) * 0.3; a.push(v); } return a; }, [rows.length]);
   const w = 440, h = 64, min = Math.min(...data, -1), max = Math.max(...data, 8);
   const x = i => (i / (data.length - 1)) * w, y = v => h - ((v - min) / (max - min)) * (h - 6) - 3;
