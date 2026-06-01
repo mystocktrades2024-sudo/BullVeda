@@ -10661,13 +10661,16 @@ function Cone({ lo, mid, hi, current=0, w=280, h=110 }) {
 }
 
 /* ── Overview lens ──────────────────────────────────────────────── */
+// real account NAV from portfolio_state (null when not connected — never fabricated)
+function ssNAV() { try { const e = window.__ssData && window.__ssData.portfolio && window.__ssData.portfolio.equity; return (e != null && !isNaN(+e)) ? +e : null; } catch (_) { return null; } }
 function VerdictHero({ ticker, mode, heroStyle, sizeCat }) {
   const pillars = ticker.pillars;
   const entry = ticker.pivot * 1.002;
   const risk = entry - ticker.stop;
   const reward1 = ticker.t1 - entry;
   const ss = ticker.setupStats;
-  const sh = Math.round((6.8/100) * 108420 / entry);
+  const _nav = ssNAV();
+  const sh = _nav != null ? Math.round((6.8 / 100) * _nav / entry) : null;
   return (
     <div className="hero vh-rich vh-rich--compact">
       <div className="vhr-cockpit">
@@ -10703,7 +10706,7 @@ function VerdictHero({ ticker, mode, heroStyle, sizeCat }) {
             <div className="vhr-tk"><div className="vhr-tk-l label-cap">ENTRY</div><div className="vhr-tk-v mono copper">${entry.toFixed(2)}</div></div>
             <div className="vhr-tk"><div className="vhr-tk-l label-cap">STOP · MAX LOSS</div><div className="vhr-tk-v mono dn">${ticker.stop.toFixed(2)}</div><div className="vhr-tk-sub mono dim2">−${risk.toFixed(2)} · −{(risk/entry*100).toFixed(1)}%</div></div>
             <div className="vhr-tk"><div className="vhr-tk-l label-cap">T1 · T2</div><div className="vhr-tk-v mono up">${ticker.t1.toFixed(2)} <span className="dim2">·</span> ${ticker.t2.toFixed(2)}</div><div className="vhr-tk-sub mono dim2">+${reward1.toFixed(2)} · {(reward1/risk).toFixed(2)}R</div></div>
-            <div className="vhr-tk"><div className="vhr-tk-l label-cap">SIZE · NAV</div><div className="vhr-tk-v mono">{sh} sh</div><div className="vhr-tk-sub mono dim2">${(sh*entry).toLocaleString(undefined,{maximumFractionDigits:0})} · 6.8% NAV</div></div>
+            <div className="vhr-tk"><div className="vhr-tk-l label-cap">SIZE · NAV</div><div className="vhr-tk-v mono">{sh != null ? sh + " sh" : "—"}</div><div className="vhr-tk-sub mono dim2">{sh != null ? `$${(sh*entry).toLocaleString(undefined,{maximumFractionDigits:0})} · 6.8% NAV` : "connect portfolio for $ size"}</div></div>
             <div className="vhr-tk"><div className="vhr-tk-l label-cap">R · WILSON</div><div className="vhr-tk-v mono copper">{ticker.rMultiple.toFixed(2)}R</div><div className="vhr-tk-sub mono dim2">LB {(ss.wilsonLB*100).toFixed(1)}% · PF {ss.pf.toFixed(2)}</div></div>
           </div>
 
@@ -10738,9 +10741,9 @@ function DeskRead({ ticker, mode }) {
       <div className="dr-metrics">
         <DrCell label="EXPECTANCY" value={`${evR>=0?"+":""}${evR}R`} tone={evR>=0?"gn":"rd"} tip="p·b − q · per unit risk" />
         <DrCell label="EDGE · WILSON LB" value={`${(lb*100).toFixed(0)}%`} tone={lb>=0.45?"gn":"amb"} tip={`95% lower bound · n=${ss.n}`} />
-        <DrCell label="DOWNSIDE" value={`−$${maxLoss.toFixed(0)}`} tone="rd" tip="hard stop · ~110 sh" />
+        <DrCell label="DOWNSIDE" value={`−$${maxLoss.toFixed(0)}`} tone="rd" tip="per-share at hard stop" />
         <DrCell label="R:R" value={`${(reward/risk).toFixed(2)}`} tone="copper" tip="reward ÷ risk to T1" />
-        <DrCell label="CORREL → BOOK" value="0.34" tone="gn" tip="cap 0.55 · adds cleanly" />
+        <DrCell label="CORREL → BOOK" value="—" tone="ink" tip="needs pairwise book-correlation feed (not in bundle)" />
         <DrCell label="LIQUIDITY" value="A" tone="gn" tip="tight spread · deep ADV" />
         <DrCell label="REGIME FIT" value={`${(ss.winRate*100).toFixed(0)}%`} tone="gn" tip="setup WR in current regime" />
         <DrCell label="TIME RISK" value={ticker.earnings.days<=14?`ER ${ticker.earnings.days}d`:"clear"} tone={ticker.earnings.days<=14?"amb":"gn"} tip="trim pre-print if ER near" />
@@ -12897,7 +12900,7 @@ function modeAdjustP2(ticker, mode) {
   return ticker;
 }
 function PlanActionPanel({ ticker, mode, sizeMult }) {
-  const entry = ticker.pivot*1.002, sh = Math.round(110*sizeMult), notional = (sh*entry).toFixed(0), navPct = (6.8*sizeMult).toFixed(1);
+  const entry = ticker.pivot*1.002; const _navPAP = ssNAV(); const _baseP = _navPAP!=null ? Math.max(1, Math.round((6.8/100)*_navPAP/entry)) : 100; const sh = Math.round(_baseP*sizeMult), notional = (sh*entry).toFixed(0), navPct = (6.8*sizeMult).toFixed(1);
   return (
     <div className="pap">
       <div className="pap-l">
@@ -12917,7 +12920,7 @@ function TbMetric({ label, value, sub, tone, big }) {
 }
 function TradeBlueprint({ ticker }) {
   const entry = ticker.pivot*1.002, cur = ticker.price, stop = ticker.stop, t1 = ticker.t1, t2 = ticker.t2;
-  const atr = Math.max(0.05, Math.abs(entry-stop)/1.25), risk = entry-stop, reward1 = t1-entry, reward2 = t2-entry, qty = 110;
+  const atr = Math.max(0.05, Math.abs(entry-stop)/1.25), risk = entry-stop, reward1 = t1-entry, reward2 = t2-entry; const _navTB = ssNAV(); const qty = _navTB!=null ? Math.max(1, Math.round((6.8/100)*_navTB/entry)) : 100;
   const maxLoss = risk*qty, t1Gain = reward1*qty, t2Gain = reward2*qty;
   const W=900, H=380, padT=46, padB=60, padL=72, padR=100;
   const xMin = stop-1.5, xMax = t2+1.5, xRange = xMax-xMin, innerW = W-padL-padR, innerH = H-padT-padB;
@@ -12929,7 +12932,7 @@ function TradeBlueprint({ ticker }) {
   const samples = []; for(let p=xMin;p<=xMax;p+=0.2) samples.push([x(p), y(pnlAt(p))]);
   const levels = [
     { p:stop, c:"var(--rd)", lbl:"STOP", v:`$${stop.toFixed(2)}`, sub:`−$${maxLoss.toFixed(0)}` },
-    { p:entry, c:"var(--copper)", lbl:"ENTRY", v:`$${entry.toFixed(2)}`, sub:"pivot · 110 sh", big:true },
+    { p:entry, c:"var(--copper)", lbl:"ENTRY", v:`$${entry.toFixed(2)}`, sub:_navTB!=null?`pivot · ${qty} sh`:"pivot · 100-sh illustration", big:true },
     { p:cur, c:"var(--copper)", lbl:"NOW", v:`$${cur.toFixed(2)}`, sub:pnlAt(cur)>=0?`+$${pnlAt(cur).toFixed(0)}`:`−$${Math.abs(pnlAt(cur)).toFixed(0)}`, dotted:true },
     { p:t1, c:"var(--gn)", lbl:"T1", v:`$${t1.toFixed(2)}`, sub:`+$${t1Gain.toFixed(0)}`, big:true },
     { p:t2, c:"var(--gn)", lbl:"T2", v:`$${t2.toFixed(2)}`, sub:`+$${t2Gain.toFixed(0)}` },
@@ -12937,7 +12940,7 @@ function TradeBlueprint({ ticker }) {
   return (
     <div className="tbv2">
       <div className="tbv2-metrics">
-        <TbMetric label="Risk · 1R" value={`−$${maxLoss.toFixed(0)}`} sub={`${(maxLoss/108420*100).toFixed(2)}% NAV`} tone="rd" />
+        <TbMetric label="Risk · 1R" value={`−$${maxLoss.toFixed(0)}`} sub={_navTB!=null?`${(maxLoss/_navTB*100).toFixed(2)}% NAV`:"per-position"} tone="rd" />
         <TbMetric label="R:R · T1" value={`${(reward1/risk).toFixed(2)}R`} sub={`+$${t1Gain.toFixed(0)} reward`} tone="gn" big />
         <TbMetric label="R:R · T2" value={`${(reward2/risk).toFixed(2)}R`} sub={`+$${t2Gain.toFixed(0)} reward`} tone="gn" />
         <TbMetric label="% to Stop" value={`−${(risk/entry*100).toFixed(2)}%`} sub={`$${risk.toFixed(2)} below`} tone="rd" />
@@ -12979,7 +12982,7 @@ function TradeBlueprint({ ticker }) {
           <text x={W-padR+8} y={y(t2Gain)+3} fontSize="10" className="mono" fill="var(--gn)">+{(reward2/risk).toFixed(2)}R</text>
           <text x={W-padR+8} y={y(t1Gain)+3} fontSize="10" className="mono" fill="var(--gn)">+{(reward1/risk).toFixed(2)}R</text>
           <text x={W-padR+8} y={y(-maxLoss)+3} fontSize="10" className="mono" fill="var(--rd)">−1.00R</text>
-          <text x={padL} y={20} fontSize="11" className="mono" fill="var(--ink-2)" letterSpacing="0.14em">P&amp;L · $ (110 sh · BUY-STOP bracket)</text>
+          <text x={padL} y={20} fontSize="11" className="mono" fill="var(--ink-2)" letterSpacing="0.14em">P&amp;L · $ ({_navTB!=null?qty:100} sh{_navTB!=null?"":" illustration"} · BUY-STOP bracket)</text>
           <text x={W-padR} y={H-8} fontSize="10.5" className="mono" textAnchor="end" fill="var(--ink-3)">price ($)  →</text>
         </svg>
       </div>
@@ -12999,9 +13002,9 @@ function SwGate({ label, v, pass }) {
   return <div className={`sw-gate ${pass?"is-pass":"is-fail"}`}><span className="sw-gate-m mono">{pass?"✓":"✕"}</span><span className="sw-gate-l mono">{label}</span><span className={`sw-gate-v mono ${pass?"up":"dn"}`}>{v}</span></div>;
 }
 function SizingWorkbench({ ticker, sizeMult, onSizeMult, kellyFrac, onKellyFrac }) {
-  const entry = ticker.pivot*1.002, risk = entry-ticker.stop, reward = ticker.t1-entry, baseSh = 110;
+  const entry = ticker.pivot*1.002, risk = entry-ticker.stop, reward = ticker.t1-entry; const _navBase = ssNAV(); const baseSh = _navBase!=null ? Math.max(1, Math.round((6.8/100)*_navBase/entry)) : 100;
   const sh = Math.round(baseSh*sizeMult*(kellyFrac/0.5)), notional = sh*entry, maxLoss = sh*risk;
-  const navPct = notional/108420*100, lossNavPct = maxLoss/108420*100, wr = ticker.setupStats.winRate;
+  const _navSW = ssNAV(); const navPct = _navSW!=null?notional/_navSW*100:null, lossNavPct = _navSW!=null?maxLoss/_navSW*100:null, wr = ticker.setupStats.winRate;
   return (
     <div className="sw">
       <div className="sw-controls">
@@ -13011,7 +13014,7 @@ function SizingWorkbench({ ticker, sizeMult, onSizeMult, kellyFrac, onKellyFrac 
           <div className="sw-ticks mono dim2"><span>¼K</span><span>½K</span><span>¾K</span><span>full</span></div>
         </div>
         <div className="sw-ctrl">
-          <div className="sw-ctrl-l"><span className="label-cap">Size multiplier</span><span className="mono"><b className="copper">{sizeMult.toFixed(2)}×</b> of base 110 sh</span></div>
+          <div className="sw-ctrl-l"><span className="label-cap">Size multiplier</span><span className="mono"><b className="copper">{sizeMult.toFixed(2)}×</b> of base size</span></div>
           <input type="range" min="0.25" max="2.50" step="0.05" value={sizeMult} onChange={e=>onSizeMult(parseFloat(e.target.value))} className="sw-range" />
           <div className="sw-ticks mono dim2"><span>0.25×</span><span>1×</span><span>1.5×</span><span>2×</span><span>2.5×</span></div>
         </div>
@@ -13019,14 +13022,14 @@ function SizingWorkbench({ ticker, sizeMult, onSizeMult, kellyFrac, onKellyFrac 
       <div className="sw-out">
         <SwTile label="Shares" value={sh} tone="copper" />
         <SwTile label="Notional" value={`$${notional.toLocaleString(undefined,{maximumFractionDigits:0})}`} tone="ink" />
-        <SwTile label="% NAV" value={`${navPct.toFixed(1)}%`} tone={navPct>7?"amb":"gn"} sub="cap 10%" />
-        <SwTile label="Max loss" value={`$${maxLoss.toFixed(0)}`} tone="rd" sub={`${lossNavPct.toFixed(2)}% NAV`} />
+        <SwTile label="% NAV" value={navPct != null ? `${navPct.toFixed(1)}%` : "—"} tone={navPct != null && navPct > 7 ? "amb" : "gn"} sub={_navSW != null ? "cap 10%" : "connect NAV"} />
+        <SwTile label="Max loss" value={`$${maxLoss.toFixed(0)}`} tone="rd" sub={lossNavPct != null ? `${lossNavPct.toFixed(2)}% NAV` : "per-position"} />
         <SwTile label="R-mult" value={`${(reward/risk).toFixed(2)}R`} tone="copper" sub="T1 / risk" />
         <SwTile label="Expectancy" value={`+$${(reward*wr - risk*(1-wr)).toFixed(0)} ·`} tone="gn" sub={`× ${sh} sh · Wilson WR`} />
       </div>
       <div className="sw-gates">
-        <SwGate label="Max loss ≤ 0.75% NAV" v={lossNavPct.toFixed(2)+"%"} pass={lossNavPct<=0.75} />
-        <SwGate label="% NAV ≤ 10%" v={navPct.toFixed(1)+"%"} pass={navPct<=10} />
+        <SwGate label="Max loss ≤ 0.75% NAV" v={lossNavPct != null ? lossNavPct.toFixed(2)+"%" : "—"} pass={lossNavPct != null ? lossNavPct<=0.75 : false} />
+        <SwGate label="% NAV ≤ 10%" v={navPct != null ? navPct.toFixed(1)+"%" : "—"} pass={navPct != null ? navPct<=10 : false} />
         <SwGate label="R-mult ≥ 1.5" v={(reward/risk).toFixed(2)+"R"} pass={(reward/risk)>=1.5} />
         <SwGate label="Wilson LB ≥ 45%" v={`${(ticker.setupStats.wilsonLB*100).toFixed(1)}%`} pass={ticker.setupStats.wilsonLB>=0.45} />
       </div>
@@ -13126,8 +13129,8 @@ function PlaybookTree() {
 function AuditLog({ ticker }) {
   const items = [
     { phase:"PRE-FILL", item:`OCO bracket constructed · stop $${ticker.stop.toFixed(2)} + T1 $${ticker.t1.toFixed(2)} + T2 $${ticker.t2.toFixed(2)}`, done:true },
-    { phase:"PRE-FILL", item:"Sizing approved · half-Kelly · 110 sh · 6.8% NAV", done:true },
-    { phase:"PRE-FILL", item:"Correlation-to-book check · 0.34 ≤ 0.55", done:true },
+    { phase:"PRE-FILL", item:"Sizing approved · half-Kelly (see Risk lens for live size)", done:true },
+    { phase:"PRE-FILL", item:"Correlation-to-book check (needs book-correlation feed)", done:false },
     { phase:"PRE-FILL", item:"Sleep-test · max-down ≥ planned stop", done:true },
     { phase:"FILL", item:"Order acknowledged · venue assigned · OCO IDs set", done:false, sub:"awaits trigger" },
     { phase:"POST-FILL", item:"Position added to portfolio_state · risk recompute", done:false },
@@ -13186,7 +13189,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
             <CrossLens lead="copper" cells={[
               { lens:"Plan", verdict:"READY", tone:"gn", note:`R ${ticker.rMultiple.toFixed(2)} · half-Kelly` },
               { lens:"Technicals", verdict:"PASS", tone:"gn", note:`tech ${t0.pillars.technical}` },
-              { lens:"Risk", verdict:"OK", tone:"gn", note:"VaR(1d) −2.1%" },
+              { lens:"Risk", verdict:"OK", tone:"gn", note:"live VaR in Risk lens" },
               { lens:"Earnings", verdict:`${ticker.earnings.days} d`, tone:ticker.earnings.days<=14?"amb":"gn", note:ticker.earnings.days<=14?"size −25% pre-ER":"clear" },
               { lens:"Track Rec.", verdict:"EDGE", tone:"gn", note:`n=${ticker.setupStats.n} · pf ${ticker.setupStats.pf.toFixed(2)}` },
             ]} />
@@ -13195,7 +13198,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       </div>
       <div className="lens-call">
         <span className="label-cap">The Read · {mode}</span>
-        <span className="mono">BUY-STOP LIMIT <b className="copper">${(ticker.pivot*1.002).toFixed(2)}</b> · stop <b className="dn">${ticker.stop.toFixed(2)}</b> · T1 <b className="up">${ticker.t1.toFixed(2)}</b> · {Math.round(110*sizeMult)} shares · {(6.8*sizeMult).toFixed(1)}% NAV.</span>
+        <span className="mono">BUY-STOP LIMIT <b className="copper">${(ticker.pivot*1.002).toFixed(2)}</b> · stop <b className="dn">${ticker.stop.toFixed(2)}</b> · T1 <b className="up">${ticker.t1.toFixed(2)}</b> · {(()=>{const nv=ssNAV();const ent=ticker.pivot*1.002;const bp=nv!=null?Math.max(1,Math.round((6.8/100)*nv/ent)):100;return Math.round(bp*sizeMult);})()} shares · {(6.8*sizeMult).toFixed(1)}% NAV.</span>
       </div>
     </div>
   );
@@ -15399,7 +15402,7 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
             { lens: "Value",      verdict: "MARG.", tone: "amb", note: "MoS 6% · slight premium" },
             { lens: "Quality",    verdict: "A−",    tone: "gn",  note: "ROIC 18% · low debt" },
             { lens: "Earnings",   verdict: "BEAT?", tone: "amb", note: "ESP +4.1% · 11d out" },
-            { lens: "Risk",       verdict: "OK",    tone: "gn",  note: "VaR(1d) −2.1%" },
+            { lens: "Risk",       verdict: "OK",    tone: "gn",  note: "live VaR in Risk lens" },
             { lens: "Tape",       verdict: "+12 ins", tone: "gn", note: "net insider buys 90d" },
           ]} />
         </div>
