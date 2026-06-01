@@ -16088,84 +16088,57 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
   const s1 = useStateToggle("er-1"); const s2 = useStateToggle("er-2");
   const s3 = useStateToggle("er-3"); const s4 = useStateToggle("er-4");
   const s5 = useStateToggle("er-5"); const s6 = useStateToggle("er-6");
+  const fx = useInvFundamentals(ticker && ticker.symbol);
+  const eh = (fx.f && fx.f.earnings_history) || [];   // REAL 8Q EPS est/act/surprise
+  // reported quarters only (epsActual present), newest→oldest
+  const reported = eh.filter(e => e.epsActual != null).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const beats = reported.filter(e => num(e.surprisePercent) != null && num(e.surprisePercent) > 0).length;
+  const avgSurp = reported.length ? reported.reduce((a, e) => a + (num(e.surprisePercent) || 0), 0) / reported.length : null;
+  const erDays = ticker && ticker.earnings ? num(ticker.earnings.days) : null;
 
   return (
     <div className="lens lens--er">
-      <ERCockpit ticker={ticker} />
+      <ERCockpit ticker={ticker} reported={reported} erDays={erDays} beats={beats} avgSurp={avgSurp} loading={fx.state === "loading"} />
 
       <div className="lens-section">
-        <SectionHeader n={1} title="Implied Move · Cone"
-          sub="ATM straddle pricing the move · current vs 4-quarter realized"
-          style={headerStyle} right={<StateToggle name="er-1" />} />
-        <StateWrap state={s1.value} source="Schwab · options chain ATM">
+        <SectionHeader n={1} title="Implied Move · IV" sub="ATM straddle / IV — from the live options chain" style={headerStyle} right={<StateToggle name="er-1" />} />
+        <StateWrap state={s1.value} source="Schwab options chain (Options lens)">
+          <div className="lens-pad mono dim2" style={{ padding: "10px 0" }}>Implied move + ATM IV + IV/HV ratio are computed live in the <b>Options</b> lens (real Schwab chain). Not duplicated here with fabricated numbers — open Options for the real straddle pricing.</div>
+        </StateWrap>
+      </div>
+
+      <div className="lens-section">
+        <SectionHeader n={2} title="Beat-Probability · ESP" sub="Zacks ESP + surprise model" style={headerStyle} right={<StateToggle name="er-2" />} />
+        <StateWrap state={s2.value} source="Zacks ESP (Earnings AI surface)">
           <div className="lens-pad">
-            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="Implied 1-day" value="±6.4%" tone="amb" sub="$63.10 — $71.74" />
-              <KpiTile label="Realized 4Q avg" value="±5.8%" tone="ink" sub="historic move" />
-              <KpiTile label="Implied / realized" value="1.10×" tone="amb" sub="slightly rich" />
-              <KpiTile label="IV at ATM" value="48.2%" tone="ink" sub="vs 30d HV 34%" />
+            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+              <KpiTile label="Historical beat rate" value={reported.length ? `${Math.round(beats / reported.length * 100)}%` : "—"} tone={reported.length && beats / reported.length >= 0.6 ? "gn" : "amb"} sub={reported.length ? `${beats}/${reported.length} quarters` : "no history"} />
+              <KpiTile label="Avg surprise" value={avgSurp != null ? `${avgSurp >= 0 ? "+" : ""}${avgSurp.toFixed(1)}%` : "—"} tone={avgSurp >= 0 ? "gn" : "rd"} sub="realized, last 8Q" />
+              <KpiTile label="Next report" value={erDays != null ? `${erDays}d` : "—"} tone="ink" sub={ticker.earnings && ticker.earnings.date ? String(ticker.earnings.date).slice(0, 10) : "scan row"} />
             </div>
+            <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 6 }}>Zacks ESP / whisper / rank are surfaced in the <b>Earnings AI</b> surface (esp_picks), not per-ticker here. Beat rate + avg surprise above are REAL from EODHD earnings history.</div>
           </div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={2} title="Beat-Probability · ESP"
-          sub="Zacks ESP + earnings-surprise model"
-          style={headerStyle} right={<StateToggle name="er-2" />} />
-        <StateWrap state={s2.value} source="Zacks · ESP · proprietary blend">
-          <div className="lens-pad">
-            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
-              <KpiTile label="Zacks ESP" value="+4.1%" tone="gn" sub="most accurate est. − consensus" />
-              <KpiTile label="Whisper vs consensus" value="+2.7%" tone="gn" sub="$1.54 whisper · $1.50 est" />
-              <KpiTile label="Zacks rank" value="#2 BUY" tone="gn" sub="6 analyst rev up · 1 down" />
-              <KpiTile label="Model beat prob" value="64%" tone="gn" sub="Wilson LB 51%" />
-              <KpiTile label="Post-ER drift" value="+1.8%" tone="gn" sub="median · last 12 quarters" />
-            </div>
-          </div>
+        <SectionHeader n={3} title="Analyst EPS Revisions" sub="estimate trend across reported quarters" style={headerStyle} right={<StateToggle name="er-6" />} />
+        <StateWrap state={s6.value} source="EODHD · earnings history estimates">
+          <div className="lens-pad"><AnalystRevisions eh={eh} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={3} title="Analyst EPS Revisions"
-          sub="the leading edge of beat probability · rising consensus precedes upside surprises"
-          style={headerStyle} right={<StateToggle name="er-6" />} />
-        <StateWrap state={s6.value} source="Zacks / EODHD · estimate revisions">
-          <div className="lens-pad"><AnalystRevisions /></div>
-        </StateWrap>
-      </div>
-
-      <div className="lens-section">
-        <SectionHeader n={4} title="8-Quarter Beat History"
-          sub="how flow reacted · EPS & rev surprise · 1-day reaction · 5-day continuation · PEAD drift?"
-          style={headerStyle} right={<StateToggle name="er-3" />} />
+        <SectionHeader n={4} title="8-Quarter Beat History" sub="EPS estimate vs actual · surprise %" style={headerStyle} right={<StateToggle name="er-3" />} />
         <StateWrap state={s3.value} source="EODHD · Earnings history">
-          <div className="lens-pad"><ERHistory /></div>
+          <div className="lens-pad"><ERHistory reported={reported} loading={fx.state === "loading"} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={5} title="Pre-ER Drift · IV Crush"
-          sub="how the name typically behaves heading in & out of print"
-          style={headerStyle} right={<StateToggle name="er-4" />} />
-        <StateWrap state={s4.value} source="EODHD + Schwab · 12-Q backtest">
-          <div className="lens-pad">
-            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="Pre-ER drift T−5" value="+1.2%" tone="gn" sub="median · 12-Q" />
-              <KpiTile label="Pre-ER drift T−1" value="+0.4%" tone="gn" sub="last-day rally" />
-              <KpiTile label="IV crush · T+0" value="−42%" tone="rd" sub="ATM crush typical" />
-              <KpiTile label="Avg post-ER vol" value="22 → 32%" tone="amb" sub="vol expansion" />
-            </div>
-          </div>
-        </StateWrap>
-      </div>
-
-      <div className="lens-section">
-        <SectionHeader n={6} title="Post-Earnings Drift · PEAD"
-          sub="how the stock drifts AFTER the print — the beat / miss edge"
-          style={headerStyle} right={<StateToggle name="er-5" />} />
-        <StateWrap state={s5.value} source="EODHD · 12-Q post-earnings backtest">
-          <div className="lens-pad"><PEADPanel ticker={ticker} /></div>
+        <SectionHeader n={6} title="Post-Earnings Drift · PEAD" sub="how the stock drifts after a beat/miss" style={headerStyle} right={<StateToggle name="er-5" />} />
+        <StateWrap state={s5.value} source="ML hit-net (ML Edge lens)">
+          <div className="lens-pad mono dim2" style={{ padding: "10px 0" }}>Per-ticker post-earnings drift is modelled live in the <b>ML Edge</b> lens (/api/ml). The aggregate PEAD sleeve edge is in <b>Strategies</b>. Not shown here with a fabricated 12-Q backtest.</div>
         </StateWrap>
       </div>
 
@@ -16173,11 +16146,11 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
         <SectionHeader n={7} title="Cross-Lens Confluence" style={headerStyle} />
         <div className="lens-pad">
           <CrossLens lead="amb" cells={[
-            { lens: "Earnings",   verdict: "11 d",   tone: "amb", note: "trim 25% T−2 · ESP +4.1%" },
-            { lens: "Options",    verdict: "RICH",   tone: "amb", note: "IV/HV 1.42 · post crush −42%" },
-            { lens: "Plan",       verdict: "ADJUST", tone: "amb", note: "scale down through window" },
-            { lens: "Risk",       verdict: "CAPPED", tone: "gn",  note: "max loss bounded at stop" },
-            { lens: "Track Rec",  verdict: "EDGE",   tone: "gn",  note: "beat-drift hist. positive" },
+            { lens: "Earnings", verdict: erDays != null ? erDays + "d" : "—", tone: erDays != null && erDays <= 7 ? "rd" : erDays != null && erDays <= 14 ? "amb" : "gn", note: erDays != null && erDays <= 7 ? "blackout window" : "to next report" },
+            { lens: "Beat rate", verdict: reported.length ? Math.round(beats / reported.length * 100) + "%" : "—", tone: reported.length && beats / reported.length >= 0.6 ? "gn" : "amb", note: reported.length ? `${beats}/${reported.length}Q` : "no history" },
+            { lens: "Avg surprise", verdict: avgSurp != null ? (avgSurp >= 0 ? "+" : "") + avgSurp.toFixed(1) + "%" : "—", tone: avgSurp >= 0 ? "gn" : "rd", note: "realized" },
+            { lens: "Options", verdict: "→ lens", tone: "ink", note: "live IV / implied move" },
+            { lens: "ML Edge", verdict: "→ lens", tone: "ink", note: "live PEAD / hit-net" },
           ]} />
         </div>
       </div>
@@ -16185,8 +16158,9 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       <div className="lens-call">
         <span className="label-cap">The Read · Earnings</span>
         <span className="mono">
-          Structure holds above the breakout · stats favor scaling 25% near T−2 sessions · vol crush post-ER
-          is where the edge historically re-rates if the thesis stays intact. Event risk is elevated into the print.
+          {erDays != null ? <>Next report in <b className={erDays <= 7 ? "dn" : "amb"}>{erDays}d</b>{erDays <= 7 ? " — earnings blackout, no fresh swing entries." : "."} </> : "No dated earnings catalyst in the scan row. "}
+          {reported.length ? <>Real beat record <b className={beats / reported.length >= 0.6 ? "up" : "amb"}>{beats}/{reported.length}</b> ({Math.round(beats / reported.length * 100)}%), avg surprise <b className={avgSurp >= 0 ? "up" : "dn"}>{avgSurp >= 0 ? "+" : ""}{avgSurp.toFixed(1)}%</b>. </> : ""}
+          Implied move + PEAD live in Options + ML Edge lenses. All from EODHD earnings history — none fabricated.
         </span>
       </div>
     </div>
@@ -16231,163 +16205,116 @@ function ImpliedMoveCone() {
   );
 }
 
-function ERHistory() {
-  const rows = [
-    { q: "Q1 FY26", date: "03-Mar-2026", est: 1.50, act: 1.57, eps: "+4.6%", rev: "+2.8%", rx: "+5.4%", cont: "+2.1%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-    { q: "Q4 FY25", date: "11-Dec-2025", est: 1.39, act: 1.49, eps: "+7.2%", rev: "+4.1%", rx: "+8.1%", cont: "+3.4%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-    { q: "Q3 FY25", date: "04-Sep-2025", est: 1.28, act: 1.33, eps: "+3.9%", rev: "+1.6%", rx: "+1.2%", cont: "−1.8%", tape: "BEAT+FADE", t: "amb" },
-    { q: "Q2 FY25", date: "05-Jun-2025", est: 1.20, act: 1.28, eps: "+6.5%", rev: "+3.2%", rx: "+6.2%", cont: "+1.9%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-    { q: "Q1 FY25", date: "06-Mar-2025", est: 1.06, act: 1.15, eps: "+8.4%", rev: "+5.0%", rx: "+9.6%", cont: "+4.3%", tape: "BEAT+RUNAWAY", t: "gn" },
-    { q: "Q4 FY24", date: "05-Dec-2024", est: 1.03, act: 1.07, eps: "+4.2%", rev: "+1.4%", rx: "+3.8%", cont: "+0.4%", tape: "BEAT+GAP", t: "gn" },
-    { q: "Q3 FY24", date: "05-Sep-2024", est: 0.92, act: 0.98, eps: "+6.1%", rev: "+2.3%", rx: "+4.1%", cont: "+1.6%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-    { q: "Q2 FY24", date: "06-Jun-2024", est: 0.88, act: 0.93, eps: "+5.7%", rev: "+2.7%", rx: "+3.5%", cont: "+2.6%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-  ];
-  const sgn = v => v.indexOf("−") === 0 ? "dn" : "up";
+function ERHistory({ reported, loading }) {
+  const rows = (reported || []).slice(0, 8);
+  if (!rows.length) return <div className="mono dim2" style={{ fontSize: 12, padding: 8 }}>{loading ? "Loading earnings history… /api/fundamentals" : "No reported-quarter earnings history in /api/fundamentals for this name."}</div>;
+  const beats = rows.filter(r => num(r.surprisePercent) > 0).length;
+  const avg = rows.reduce((a, r) => a + (num(r.surprisePercent) || 0), 0) / rows.length;
   return (
     <div>
-      <div className="er-bh-badge"><Pill tone="gn" small dot>8 / 8 BEATS · WR 100%</Pill><span className="mono dim2">avg surprise +5.8% · perfect beat record</span></div>
+      <div className="er-bh-badge">
+        <Pill tone={beats / rows.length >= 0.6 ? "gn" : "amb"} small dot>{beats} / {rows.length} BEATS · {Math.round(beats / rows.length * 100)}%</Pill>
+        <span className="mono dim2">avg surprise {avg >= 0 ? "+" : ""}{avg.toFixed(1)}% · real EODHD history</span>
+      </div>
       <table className="dtable er-bh-tbl">
-        <thead>
-          <tr>
-            <th>Quarter</th><th>Report date</th>
-            <th className="r">EPS est</th><th className="r">EPS act</th><th className="r">EPS surp</th>
-            <th className="r">Rev surp</th><th className="r">1-day Rx</th><th className="r">5-day cont</th><th>Tape</th>
-          </tr>
-        </thead>
+        <thead><tr><th>Report date</th><th className="r">EPS est</th><th className="r">EPS act</th><th className="r">Surprise</th><th className="r">Diff</th><th>When</th></tr></thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={i}>
-              <td className="mono"><b>{r.q}</b></td>
-              <td className="mono dim">{r.date}</td>
-              <td className="r mono tabular dim2">${r.est.toFixed(2)}</td>
-              <td className="r mono tabular"><b>${r.act.toFixed(2)}</b></td>
-              <td className="r mono tabular up">{r.eps}</td>
-              <td className="r mono tabular up">{r.rev}</td>
-              <td className={`r mono tabular ${sgn(r.rx)}`}>{r.rx}</td>
-              <td className={`r mono tabular ${sgn(r.cont)}`}>{r.cont}</td>
-              <td><Pill tone={r.t} small>{r.tape}</Pill></td>
-            </tr>
-          ))}
+          {rows.map((r, i) => {
+            const sp = num(r.surprisePercent), est = num(r.epsEstimate), act = num(r.epsActual), diff = num(r.epsDifference);
+            return (
+              <tr key={i}>
+                <td className="mono dim">{String(r.reportDate || r.date).slice(0, 10)}</td>
+                <td className="r mono tabular dim2">{est != null ? "$" + est.toFixed(2) : "—"}</td>
+                <td className="r mono tabular"><b>{act != null ? "$" + act.toFixed(2) : "—"}</b></td>
+                <td className={`r mono tabular ${sp != null ? (sp >= 0 ? "up" : "dn") : "dim2"}`}>{sp != null ? (sp >= 0 ? "+" : "") + sp.toFixed(1) + "%" : "—"}</td>
+                <td className={`r mono tabular ${diff != null ? (diff >= 0 ? "up" : "dn") : "dim2"}`}>{diff != null ? (diff >= 0 ? "+" : "") + diff.toFixed(2) : "—"}</td>
+                <td className="mono dim2">{r.beforeAfterMarket || "—"}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+      <div className="mono dim2" style={{ fontSize: 10, marginTop: 6 }}>Real EODHD earnings history. 1-day reaction / 5-day continuation / revenue surprise aren't in the EPS feed — modelled live in ML Edge, not fabricated here.</div>
     </div>
   );
 }
 
 // ─── §3 · Analyst EPS revisions — leading edge of beat probability ──
-function AnalystRevisions() {
-  const est = [1.41, 1.42, 1.44, 1.46, 1.48, 1.50];
-  const w = 150, hh = 38, mn = Math.min(...est), mx = Math.max(...est);
+function AnalystRevisions({ eh }) {
+  // REAL EPS estimate trend across quarters (chronological). Up/down revision counts + Zacks ESP
+  // aren't in the EPS feed → surfaced honestly.
+  const chron = (eh || []).filter(e => num(e.epsEstimate) != null).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const est = chron.map(e => num(e.epsEstimate));
+  if (est.length < 2) return <div className="mono dim2" style={{ fontSize: 12, padding: 8 }}>EPS estimate history not available in /api/fundamentals for this name.</div>;
+  const w = 180, hh = 40, mn = Math.min(...est), mx = Math.max(...est);
   const sx = i => 4 + (i / (est.length - 1)) * (w - 8);
   const sy = v => hh - 4 - ((v - mn) / (mx - mn || 1)) * (hh - 8);
-  const rows = [
-    { p: "Next Q · Q2 FY26", now: "$1.52", ago: "$1.44", d: "+5.6%", up: 9, dn: 1 },
-    { p: "FY26", now: "$6.05", ago: "$5.78", d: "+4.7%", up: 11, dn: 2 },
-    { p: "FY27", now: "$7.10", ago: "$6.80", d: "+4.4%", up: 8, dn: 1 },
-  ];
+  const first = est[0], last = est[est.length - 1];
+  const trendUp = last >= first;
+  const next = (eh || []).filter(e => e.epsActual == null && num(e.epsEstimate) != null).sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
   return (
     <div>
-      <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <KpiTile label="Consensus EPS · next Q" value="$1.50" tone="ink" sub="from $1.44 · 90d ago" />
-        <KpiTile label="90-day revision" value="+6.4%" tone="gn" sub="estimate raised" />
-        <KpiTile label="Up : Down revisions" value="9 : 1" tone="gn" sub="last 90 days" />
-        <KpiTile label="Revision trend" value="RISING" tone="gn" sub="bullish lead" />
+      <div className="kpi-row" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+        <KpiTile label="Next-Q est EPS" value={next ? "$" + num(next.epsEstimate).toFixed(2) : "—"} tone="ink" sub={next ? String(next.date).slice(0, 10) : "no forward est"} />
+        <KpiTile label="Latest reported est" value={"$" + last.toFixed(2)} tone="ink" sub="most recent quarter" />
+        <KpiTile label="Estimate trend" value={trendUp ? "RISING" : "FALLING"} tone={trendUp ? "gn" : "rd"} sub={`${est.length}Q · ${first.toFixed(2)}→${last.toFixed(2)}`} />
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
-        <div>
-          <div className="label-cap" style={{ marginBottom: 4 }}>Consensus estimate · 6-mo trend</div>
-          <svg width={w} height={hh} style={{ display: "block" }}>
-            <defs><linearGradient id="er-rev-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--gn)" stopOpacity="0.3" /><stop offset="100%" stopColor="var(--gn)" stopOpacity="0" /></linearGradient></defs>
-            <path d={`M ${sx(0)},${hh - 4} L ${est.map((v, i) => `${sx(i)},${sy(v)}`).join(" L ")} L ${sx(est.length - 1)},${hh - 4} Z`} fill="url(#er-rev-g)" />
-            <polyline points={est.map((v, i) => `${sx(i)},${sy(v)}`).join(" ")} fill="none" stroke="var(--gn)" strokeWidth="1.8" />
-            <circle cx={sx(est.length - 1)} cy={sy(est[est.length - 1])} r="3" fill="var(--gn)" />
-          </svg>
-        </div>
-        <table className="dtable" style={{ flex: 1, minWidth: 280 }}>
-          <thead><tr><th>Horizon</th><th className="r">Now</th><th className="r">90d ago</th><th className="r">Δ</th><th className="r">Up/Dn</th></tr></thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td className="mono"><b>{r.p}</b></td>
-                <td className="r mono tabular">{r.now}</td>
-                <td className="r mono tabular dim2">{r.ago}</td>
-                <td className="r mono tabular up">{r.d}</td>
-                <td className="r mono tabular"><span className="up">{r.up}</span><span className="dim2">/</span><span className="dn">{r.dn}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div style={{ marginTop: 12 }}>
+        <div className="label-cap" style={{ marginBottom: 4 }}>EPS estimate · {est.length}-quarter trend</div>
+        <svg width={w} height={hh} style={{ display: "block" }}>
+          <defs><linearGradient id="er-rev-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={`var(--${trendUp ? "gn" : "rd"})`} stopOpacity="0.3" /><stop offset="100%" stopColor={`var(--${trendUp ? "gn" : "rd"})`} stopOpacity="0" /></linearGradient></defs>
+          <path d={`M ${sx(0)},${hh - 4} L ${est.map((v, i) => `${sx(i)},${sy(v)}`).join(" L ")} L ${sx(est.length - 1)},${hh - 4} Z`} fill="url(#er-rev-g)" />
+          <polyline points={est.map((v, i) => `${sx(i)},${sy(v)}`).join(" ")} fill="none" stroke={`var(--${trendUp ? "gn" : "rd"})`} strokeWidth="1.8" />
+          <circle cx={sx(est.length - 1)} cy={sy(last)} r="3" fill={`var(--${trendUp ? "gn" : "rd"})`} />
+        </svg>
       </div>
       <div className="mono dim2" style={{ marginTop: 10, fontSize: 11, lineHeight: 1.5 }}>
-        Estimate revisions are the single best leading indicator of beats — <b className="up">rising consensus</b> (+6.4% over 90d, 9 up vs 1 down) plus positive Zacks ESP (+4.1%) precede upside surprises. The drift in estimates is the early tell before the print.
+        Real EPS estimate trend from EODHD earnings history. Up/down analyst-revision counts and Zacks ESP are in the <b>Earnings AI</b> surface (esp_picks) — not duplicated with fabricated counts here.
       </div>
     </div>
   );
 }
 
 // ─── §1 · ER countdown + implied-move cone cockpit ──────────────────
-function ERCockpit({ ticker }) {
-  const cur = (ticker && ticker.price) || 213.4;
-  const [ref, w] = useWidth(640);
-  const im = 0.064; // 1σ implied move
-  const surprises = [["Q2'24", 5.7], ["Q3'24", 6.1], ["Q4'24", 4.2], ["Q1'25", 8.4], ["Q2'25", 6.5], ["Q3'25", 3.9], ["Q4'25", 7.2], ["Q1'26", 4.6]];
-  const smax = Math.max(...surprises.map(s => s[1]));
-  // cone geometry
-  const h = 188, padT = 22, padB = 30, padR = 62, padL = 10;
-  const plotW = Math.max(120, w - padL - padR), plotR = padL + plotW, plotH = h - padT - padB;
-  const erX = padL + plotW * 0.60;
-  const vmax = cur * (1 + 2 * im) * 1.012, vmin = cur * (1 - 2 * im) * 0.988;
-  const yOf = v => padT + plotH - ((v - vmin) / (vmax - vmin)) * plotH;
-  const lvls = [["+2σ", cur * (1 + 2 * im)], ["+1σ", cur * (1 + im)], ["spot", cur], ["−1σ", cur * (1 - im)], ["−2σ", cur * (1 - 2 * im)]];
+function ERCockpit({ ticker, reported, erDays, beats, avgSurp, loading }) {
+  const cur = num(ticker && ticker.price);
+  const rows = (reported || []).slice(0, 8).slice().reverse(); // oldest→newest for bars
+  const surprises = rows.map(r => ({ q: String(r.date).slice(2, 7), v: num(r.surprisePercent) }));
+  const withV = surprises.filter(s => s.v != null);
+  const smax = withV.length ? Math.max(...withV.map(s => Math.abs(s.v)), 1) : 1;
+  const beatRate = (reported && reported.length) ? Math.round(beats / reported.length * 100) : null;
+  const nextDate = ticker && ticker.earnings && ticker.earnings.date ? String(ticker.earnings.date).slice(0, 10) : null;
   return (
     <div className="er-ck">
       <div className="er-ck-top">
-        <span className="er-ck-title mono">⌛ ER COUNTDOWN · IMPLIED-MOVE CONE</span>
-        <span className="er-ck-meta mono">cycle <b>Q2 FY26</b> · cadence Sep / Dec / Mar / Jun · last report <b>03-Mar-2026</b></span>
+        <span className="er-ck-title mono">⌛ EARNINGS · COUNTDOWN + REAL BEAT HISTORY</span>
+        <span className="er-ck-meta mono">{reported && reported.length ? <>last report <b>{String(reported[0].reportDate || reported[0].date).slice(0, 10)}</b></> : "no reported history in feed"}</span>
       </div>
       <div className="er-ck-body">
         <div className="er-ck-days">
           <div className="label-cap">Days to report</div>
-          <div className="er-ck-days-num mono">11</div>
-          <div className="mono dim2">Jun 05 · AMC · conf-call 14:00 PT</div>
+          <div className="er-ck-days-num mono">{erDays != null ? erDays : "—"}</div>
+          <div className="mono dim2">{nextDate || (erDays != null ? "from scan row" : "no dated catalyst")}{erDays != null && erDays <= 7 ? " · BLACKOUT" : ""}</div>
         </div>
-        <div className="er-ck-cone" ref={ref}>
-          <svg width={w} height={h}>
-            <defs>
-              <linearGradient id="er-cone-g" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="var(--violet)" stopOpacity="0.05" /><stop offset="100%" stopColor="var(--violet)" stopOpacity="0.22" /></linearGradient>
-            </defs>
-            <text x={padL} y={14} fontSize="9" className="mono" fill="var(--ink-3)" style={{ letterSpacing: "0.1em" }}>TODAY · ${cur.toFixed(2)}  →  ER  →  ER+7D · 1σ &amp; 2σ BANDS</text>
-            {/* 2σ then 1σ cone */}
-            <path d={`M ${erX},${yOf(cur)} L ${plotR},${yOf(cur * (1 + 2 * im))} L ${plotR},${yOf(cur * (1 - 2 * im))} Z`} fill="url(#er-cone-g)" opacity="0.55" />
-            <path d={`M ${erX},${yOf(cur)} L ${plotR},${yOf(cur * (1 + im))} L ${plotR},${yOf(cur * (1 - im))} Z`} fill="var(--violet)" opacity="0.22" />
-            {/* spot line + ER marker */}
-            <line x1={padL} y1={yOf(cur)} x2={erX} y2={yOf(cur)} stroke="var(--ink-1)" strokeWidth="2" />
-            <line x1={erX} y1={yOf(cur)} x2={plotR} y2={yOf(cur)} stroke="var(--copper)" strokeWidth="1.4" strokeDasharray="4 4" />
-            <line x1={erX} y1={padT} x2={erX} y2={padT + plotH} stroke="var(--copper)" strokeDasharray="3 3" opacity="0.7" />
-            <text x={erX + 5} y={padT + 8} fontSize="9.5" className="mono" fill="var(--copper)" style={{ fontWeight: 700 }}>ER · 6/5 AMC</text>
-            <circle cx={padL} cy={yOf(cur)} r="3" fill="var(--ink-1)" />
-            {lvls.map(([l, v], i) => (
-              <text key={i} x={plotR + 4} y={yOf(v) + 3} fontSize="9" className="mono" fill={`var(--${l === "spot" ? "copper" : "violet"})`} style={{ fontWeight: l === "spot" ? 700 : 500 }}>{l} ${v.toFixed(0)}</text>
-            ))}
-          </svg>
+        <div className="er-ck-stats" style={{ flex: 1 }}>
+          <div className="er-ck-stat"><div className="label-cap">Beat rate (real)</div><div className={`er-ck-stat-v mono ${beatRate >= 60 ? "gn-c" : ""}`}>{beatRate != null ? beatRate + "%" : "—"}</div><div className="mono dim2">{reported && reported.length ? `${beats}/${reported.length} quarters` : "no history"}</div></div>
+          <div className="er-ck-stat"><div className="label-cap">Avg surprise</div><div className={`er-ck-stat-v mono ${avgSurp >= 0 ? "amb" : ""}`}>{avgSurp != null ? (avgSurp >= 0 ? "+" : "") + avgSurp.toFixed(1) + "%" : "—"}</div><div className="mono dim2">realized, last {reported ? reported.length : 0}Q</div></div>
+          <div className="er-ck-stat"><div className="label-cap">Implied move</div><div className="er-ck-stat-v mono dim2">→ Options</div><div className="mono dim2">live IV in Options lens</div></div>
         </div>
-      </div>
-      <div className="er-ck-stats">
-        <div className="er-ck-stat"><div className="label-cap">Implied move</div><div className="er-ck-stat-v mono amb">±{(cur * im).toFixed(2)}</div><div className="mono dim2">±{(im * 100).toFixed(1)}% · ATM straddle</div></div>
-        <div className="er-ck-stat"><div className="label-cap">ATM straddle premium</div><div className="er-ck-stat-v mono">${(cur * im * 1.06).toFixed(2)}</div><div className="mono dim2">ATM C+P · exp 6/06 · 1d-post-ER</div></div>
-        <div className="er-ck-stat"><div className="label-cap">Beat probability</div><div className="er-ck-stat-v mono gn-c">64%</div><div className="mono dim2">Zacks ESP +4.1% · Rank #2</div></div>
       </div>
       <div className="er-ck-bars">
-        <div className="er-ck-bars-h"><span className="label-cap">8-Quarter EPS surprise</span><span className="mono dim2">beat-rate <b className="up">8/8 · 100%</b> · avg surprise <b className="up">+5.8%</b></span></div>
-        <div className="er-ck-bars-row">
-          {surprises.map(([q, v], i) => (
-            <div key={i} className="er-ck-bar">
-              <div className="er-ck-bar-v mono">+{v.toFixed(1)}</div>
-              <div className="er-ck-bar-fill" style={{ height: `${(v / smax) * 100}%` }} />
-              <div className="er-ck-bar-q mono dim2">{q}</div>
-            </div>
-          ))}
-        </div>
+        <div className="er-ck-bars-h"><span className="label-cap">EPS surprise · per reported quarter (real)</span><span className="mono dim2">{beatRate != null ? <>beat-rate <b className={beatRate >= 60 ? "up" : "amb"}>{beats}/{reported.length} · {beatRate}%</b></> : ""}{avgSurp != null ? <> · avg <b className={avgSurp >= 0 ? "up" : "dn"}>{avgSurp >= 0 ? "+" : ""}{avgSurp.toFixed(1)}%</b></> : ""}</span></div>
+        {withV.length ? (
+          <div className="er-ck-bars-row">
+            {surprises.map((s, i) => (
+              <div key={i} className="er-ck-bar">
+                <div className={`er-ck-bar-v mono ${s.v != null && s.v < 0 ? "dn" : ""}`}>{s.v != null ? (s.v >= 0 ? "+" : "") + s.v.toFixed(1) : "—"}</div>
+                <div className="er-ck-bar-fill" style={{ height: `${s.v != null ? (Math.abs(s.v) / smax) * 100 : 0}%`, background: s.v != null && s.v < 0 ? "var(--rd)" : undefined }} />
+                <div className="er-ck-bar-q mono dim2">{s.q}</div>
+              </div>
+            ))}
+          </div>
+        ) : <div className="mono dim2" style={{ fontSize: 12, padding: 8 }}>{loading ? "Loading earnings history…" : "No reported-quarter surprise data in /api/fundamentals."}</div>}
       </div>
     </div>
   );
