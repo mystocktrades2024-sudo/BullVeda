@@ -343,9 +343,23 @@ function useLiveTicker(base) {
 let _loadPromise = null;
 function loadCompanionData() {
   if (_loadPromise) return _loadPromise;
-  _loadPromise = fetch("/v2/data.critical.json", { credentials: "same-origin" })
-    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-    .then((d) => { _applyData(d, null); return window.SCAN_META; })
+  // Fetch the scan bundle AND the LIVE portfolio in parallel. data.critical.json's
+  // portfolio block is a once-a-day scan snapshot (goes stale as fills land
+  // intraday); /api/portfolio reads the live Alpaca-synced portfolio_state.json,
+  // so Portfolio / Track Record / Book Risk reflect the real account, not a snapshot.
+  _loadPromise = Promise.all([
+    fetch("/v2/data.critical.json", { credentials: "same-origin" })
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }),
+    fetch("/api/portfolio", { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null),
+  ])
+    .then(([d, live]) => {
+      _applyData(d, null);
+      if (live && Array.isArray(live.positions)) {
+        window.PORTFOLIO_LIVE = { ...live, closed: live.closed_trades || live.closed || [] };
+      }
+      return window.SCAN_META;
+    })
     .catch((e) => { console.warn("[companion] live data failed:", e); _seedEmpty(String(e.message || e)); return window.SCAN_META; });
   return _loadPromise;
 }
