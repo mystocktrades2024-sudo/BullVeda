@@ -2569,8 +2569,12 @@ async def fundamentals_api(ticker: str):
         Hold = f.get("Holders", {}) or {}; Ins = f.get("InsiderTransactions", {}) or {}
         def _yr(block, n=5):
             y = (block or {}).get("yearly", {}) or {}
-            return [dict(date=k, **{kk: vv for kk, vv in (v or {}).items()})
-                    for k, v in list(sorted(y.items(), reverse=True))[:n]]
+            out = []
+            for k, v in list(sorted(y.items(), reverse=True))[:n]:
+                row = dict(v or {})   # copy the yearly row (may already contain a 'date' key)
+                row["date"] = k       # set explicitly — avoids dict(date=k, **row) kwarg collision
+                out.append(row)
+            return out
         ehist = E.get("History", {}) or {}
         earnings_hist = [v for _, v in list(sorted(ehist.items(), reverse=True))[:8]] if isinstance(ehist, dict) else (ehist or [])[:8]
         return {
