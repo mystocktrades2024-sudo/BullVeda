@@ -9685,6 +9685,15 @@ function TopSetups({ d, onTicker }) {
 // Honest-empty cards when a feed has no data (esp_picks, AIPredict, insider, smc all degrade gracefully).
 function TopByEngine({ d, screener, onTicker, onSurface }) {
   const sc = (screener || []).filter(r => r && r.ticker);
+  // ML Predictions card — real /api/ai_predict (60 rows); window.AIPredict never exists in prod.
+  const [aiRows, setAiRows] = React.useState(null);
+  React.useEffect(() => {
+    if (typeof fetch === "undefined") return;
+    let live = true;
+    fetch("/api/ai_predict", { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
+      .then(j => { if (live) setAiRows((j && j.rows) || []); }).catch(() => { if (live) setAiRows([]); });
+    return () => { live = false; };
+  }, []);
   // 1 · MOMENTUM — scored universe by RS rank (data_screener.json · rs_rank)
   const momentum = sc.filter(r => r.rs_rank != null).sort((a, b) => (b.rs_rank || 0) - (a.rs_rank || 0))
     .slice(0, 5).map(r => [r.ticker, String(Math.round(r.rs_rank))]);
@@ -9696,11 +9705,10 @@ function TopByEngine({ d, screener, onTicker, onSurface }) {
     const v = prob != null ? Math.round(prob > 1 ? prob : prob * 100) + "%" : (o.esp != null ? `ESP ${o.esp > 0 ? "+" : ""}${o.esp}` : "—");
     return [o.ticker || o.symbol || o.sym, v, prob];
   }).filter(x => x[0]).sort((a, b) => (b[2] || 0) - (a[2] || 0)).slice(0, 5).map(x => [x[0], x[1]]);
-  // 3 · ML PREDICTIONS — window.AIPredict ensemble when present (does not exist in prod → honest empty)
-  let ml = [];
-  if (typeof window !== "undefined" && window.AIPredict && window.AIPredict.all) {
-    try { ml = window.AIPredict.all().slice(0, 5).map(p => [p.sym, Math.round((p.pUp || 0.5) * 100) + "%"]); } catch (e) { ml = []; }
-  }
+  // 3 · ML PREDICTIONS — real 3-head ensemble from /api/ai_predict (top by P(up))
+  const ml = (aiRows || []).filter(r => r && r.sym && r.pUp != null)
+    .sort((a, b) => (b.pUp || 0) - (a.pUp || 0)).slice(0, 5)
+    .map(r => [r.sym, Math.round(r.pUp * 100) + "%"]);
   // 4 · OPTIONS FLOW — UOA scanner by reward:risk (data.critical.json · options_flow_top30 · rr)
   const options = (d.options_flow_top30 || []).filter(x => x && x.ticker && x.rr != null)
     .sort((a, b) => (b.rr || 0) - (a.rr || 0)).slice(0, 5).map(x => [x.ticker, Number(x.rr).toFixed(1)]);
@@ -9714,8 +9722,8 @@ function TopByEngine({ d, screener, onTicker, onSurface }) {
 
   const engines = [
     { id: "momentum",    title: "Momentum",       metric: "RS",    surface: "momentum",     accent: "var(--copper)", rows: momentum, empty: "no RS-ranked names in scan" },
-    { id: "earnings-ai", title: "Earnings AI",    metric: "beat",  surface: "premarket",    accent: "var(--amb)",    rows: earnAI,   empty: "no ESP earnings plays today" },
-    { id: "ml",          title: "ML Predictions", metric: "P(up)", surface: "ai-predict",   accent: "var(--violet)", rows: ml,       empty: "ML ensemble offline" },
+    { id: "earnings-ai", title: "Earnings AI",    metric: "beat",  surface: "premarket",    accent: "var(--amb)",    rows: earnAI,   empty: "no ESP plays — 0 names meet ESP>0·Rank≤3·earn≤7d today" },
+    { id: "ml",          title: "ML Predictions", metric: "P(up)", surface: "ai-predict",   accent: "var(--violet)", rows: ml,       empty: aiRows === null ? "loading ML ensemble…" : "no ML predictions" },
     { id: "options",     title: "Options Flow",   metric: "R:R",   surface: "options-flow", accent: "var(--violet)", rows: options,  empty: "no UOA flow in scan" },
     { id: "insider",     title: "Insider",        metric: "buys",  surface: "insider",      accent: "var(--cy)",     rows: insider,  empty: "no insider clusters today" },
     { id: "smc",         title: "SMC / Patterns", metric: "conf",  surface: "smc-patterns", accent: "var(--violet)", rows: smc,      empty: "no SMC structure scored" },
