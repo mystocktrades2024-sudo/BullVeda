@@ -9370,11 +9370,34 @@ function UserMenu({ book }) {
   );
 }
 
-function CommandBar({ surface, ticker, mode, onMode, focusMode, onToggleFocus, theme, onTheme, tier, onTier, onHome, book }) {
+function CommandBar({ surface, ticker, mode, onMode, focusMode, onToggleFocus, theme, onTheme, tier, onTier, onHome, book, onTicker, universe }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
   const time = now.toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", second:"2-digit", hour12:false });
   const date = now.toLocaleDateString("en-US", { month:"short", day:"2-digit", year:"numeric" });
+
+  // ── global search — open ANY ticker (resolves via /api/ticker, not just the
+  //    scan universe). `/` focuses; Enter or click opens. Autocomplete from the
+  //    scored universe; free-text symbols open directly. ──
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const searchRef = useRef(null);
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = (document.activeElement && document.activeElement.tagName || "").toLowerCase();
+      if (e.key === "/" && tag !== "input" && tag !== "textarea") { e.preventDefault(); searchRef.current && searchRef.current.focus(); }
+      else if (e.key === "Escape" && document.activeElement === searchRef.current) { setQ(""); setOpen(false); searchRef.current.blur(); }
+    };
+    window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const ql = q.trim().toUpperCase();
+  const symQ = ql.charAt(0) === "/" ? (ql.split(/\s+/)[1] || "") : ql;   // strip a leading /command word
+  const matches = (q.trim() && Array.isArray(universe))
+    ? universe.filter(t => ((t.sym || "") + " " + (t.name || "")).toUpperCase().includes(symQ)).slice(0, 8) : [];
+  const go = (sym) => { sym = (sym || "").toUpperCase(); if (!sym || !onTicker) return; onTicker(sym); setQ(""); setOpen(false); searchRef.current && searchRef.current.blur(); };
+  const onSearchKey = (e) => {
+    if (e.key === "Enter") { const pick = (matches[0] && matches[0].sym) || symQ; if (/^[A-Z][A-Z.\-]{0,6}$/.test(pick)) go(pick); }
+  };
   return (
     <div className="cmd">
       <div className="cmd-left">
@@ -9388,10 +9411,37 @@ function CommandBar({ surface, ticker, mode, onMode, focusMode, onToggleFocus, t
         </div>
       </div>
       <div className="cmd-center">
-        <div className="cmd-search">
+        <div className="cmd-search" style={{ position: "relative" }}>
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="7" cy="7" r="4" stroke="currentColor" strokeWidth="1.4" /><line x1="10" y1="10" x2="14" y2="14" stroke="currentColor" strokeWidth="1.4" /></svg>
-          <input placeholder="Symbol or /command (e.g. /verdict NVTS, /scan breakout)…" />
+          <input ref={searchRef} value={q} placeholder="Symbol or /command (e.g. NVTS, /verdict CORZ)…"
+                 onChange={e => { setQ(e.target.value); setOpen(true); }}
+                 onKeyDown={onSearchKey}
+                 onFocus={() => setOpen(true)}
+                 onBlur={() => setTimeout(() => setOpen(false), 160)} />
           <span className="kbd">/</span>
+          {open && q.trim() && (
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 1200,
+                          background: "var(--bg-1, #14171b)", border: "1px solid var(--line, #2a2f37)", borderRadius: 10,
+                          boxShadow: "0 14px 40px -12px rgba(0,0,0,0.7)", overflow: "hidden", maxHeight: 320, overflowY: "auto" }}>
+              {matches.map(m => (
+                <button key={m.sym} onMouseDown={() => go(m.sym)}
+                        style={{ display: "flex", alignItems: "baseline", gap: 10, width: "100%", textAlign: "left",
+                                 padding: "9px 12px", background: "none", border: "none", borderBottom: "1px solid var(--line, #23272e)", cursor: "pointer" }}>
+                  <span className="mono" style={{ fontWeight: 700, color: "var(--copper, #d97757)", minWidth: 52 }}>{m.sym}</span>
+                  <span style={{ color: "var(--ink-2, #9aa0a8)", fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name || ""}</span>
+                  {m.score != null && <span className="mono" style={{ marginLeft: "auto", color: "var(--ink-3,#6b7178)", fontSize: 11 }}>{m.score}</span>}
+                </button>
+              ))}
+              {/^[A-Z][A-Z.\-]{0,6}$/.test(symQ) && (
+                <button onMouseDown={() => go(symQ)}
+                        style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+                                 padding: "9px 12px", background: "var(--bg-2,#1a1e23)", border: "none", cursor: "pointer", color: "var(--ink-2,#9aa0a8)", fontSize: 12.5 }}>
+                  <span>↵ Open</span><span className="mono" style={{ fontWeight: 700, color: "var(--copper,#d97757)" }}>{symQ}</span>
+                  <span style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--ink-3,#6b7178)" }}>any US ticker · live</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div className="cmd-right">
@@ -34532,7 +34582,8 @@ function App() {
       <main className="main" ref={mainRef}>
         <CommandBar surface={surface} ticker={detailSym} mode={mode} onMode={setMode}
                     focusMode={focus} onToggleFocus={()=>setFocus(v=>!v)}
-                    theme={theme} onTheme={setTheme} tier={tier} onTier={setTier} onHome={goHome} book={book} />
+                    theme={theme} onTheme={setTheme} tier={tier} onTier={setTier} onHome={goHome} book={book}
+                    onTicker={onTicker} universe={universe} />
         {detailSym
           ? <DetailPanel ticker={detailTicker} lensId={lensId} onLensId={setLensId} mode={mode}
                          heroStyle={heroStyle} onHeroStyle={setHeroStyle} focusMode={focus}
