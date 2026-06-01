@@ -17600,6 +17600,61 @@ const SLEEVES = [
 ];
 
 const REGIMES = [["bull", "RISK ON", "gn"], ["chop", "CHOP", "amb"], ["bear", "RISK OFF", "rd"]];
+
+// ── Performance real-data helpers (no fabrication) ──
+function _perfSectorMap(d) {
+  const map = {};
+  const trades = ((d.picks_history || {}).trades) || [];
+  for (const t of trades) { if (t && t.ticker && t.sector && !map[t.ticker]) map[t.ticker] = t.sector; }
+  return map;
+}
+function _perfAttr(closed, keyFn) {
+  const agg = {};
+  for (const c of (closed || [])) {
+    const k = keyFn(c) || "Unknown";
+    const v = _num(c && c.pnl_dollars) || 0;
+    agg[k] = (agg[k] || 0) + v;
+  }
+  return Object.keys(agg).map(k => ({ label: k, value: +agg[k].toFixed(2), tone: agg[k] >= 0 ? "gn" : "rd" }))
+    .filter(x => x.value !== 0).sort((a, b) => b.value - a.value);
+}
+// periodic book returns from the dated equity curve; SPY/alpha NOT in bundle → null (rendered —)
+function _perfPeriodic(curve) {
+  const pts = (curve || []).filter(p => p && p.date != null && _num(p.equity) != null)
+    .map(p => ({ d: String(p.date), e: _num(p.equity) }));
+  if (pts.length < 2) return { rows: [], startDate: null };
+  const last = pts[pts.length - 1], lastD = new Date(last.d + "T00:00:00");
+  const startDate = pts[0].d;
+  const anchorAtOrBefore = (cutoff) => {
+    let a = pts[0], partial = pts[0].d > cutoff; // curve starts after the cutoff → partial
+    for (const p of pts) { if (p.d <= cutoff) a = p; }
+    return { a, partial };
+  };
+  const iso = dt => dt.toISOString().slice(0, 10);
+  const wd = lastD.getUTCDay(); // 0=Sun
+  const monday = new Date(lastD); monday.setUTCDate(lastD.getUTCDate() - ((wd + 6) % 7));
+  const mtd = new Date(Date.UTC(lastD.getUTCFullYear(), lastD.getUTCMonth(), 1));
+  const qtd = new Date(Date.UTC(lastD.getUTCFullYear(), Math.floor(lastD.getUTCMonth() / 3) * 3, 1));
+  const ytd = new Date(Date.UTC(lastD.getUTCFullYear(), 0, 1));
+  // "Today" = prior calendar day's last close → true 1-day return (curve has intraday marks)
+  const priorDay = pts.filter(p => p.d < last.d).map(p => p.d);
+  const lastPriorDate = priorDay.length ? priorDay[priorDay.length - 1] : null;
+  const defs = [
+    ["Today", lastPriorDate], ["WTD", iso(monday)], ["MTD", iso(mtd)], ["QTD", iso(qtd)], ["YTD", iso(ytd)],
+  ];
+  const rows = defs.map(([label, cutoff]) => {
+    let bookPct = null, partial = false;
+    if (cutoff == null) { bookPct = null; }
+    else {
+      const { a, partial: pp } = anchorAtOrBefore(cutoff);
+      partial = label === "Today" ? false : pp;
+      bookPct = a.e ? (last.e / a.e - 1) * 100 : null;
+    }
+    return { label, book: bookPct, partial, spy: null, alpha: null, sharpe: null };
+  });
+  return { rows, startDate };
+}
+
 function SurfacePerformance({ onTicker, data }) {
   const d = _ssData(data);
   const portfolio = d.portfolio || {};
@@ -17635,18 +17690,28 @@ function SurfacePerformance({ onTicker, data }) {
 
   const months = _monthsFromMap(portfolio.monthly_pnl);
 
-  // P&L attribution by sleeve from accuracy.by_strategy (use avg_r × n as net-R proxy if no $)
-  const byStrat = accuracy.by_strategy || {};
-  const sleeveAttr = Object.keys(byStrat).map(k => {
-    const s = byStrat[k] || {};
-    const r = _num(s.avg_r), n = _num(s.n);
-    const v = (r != null && n != null) ? +(r * n).toFixed(2) : 0;
-    return { label: k, value: v, tone: v >= 0 ? "gn" : "rd" };
-  }).filter(x => x.value !== 0).sort((a, b) => b.value - a.value);
+  // P&L attribution by sleeve + by sector — REAL closed pnl_dollars (no proxy, no fabrication)
+  const secMap = useMemo(() => _perfSectorMap(d), [d]);
+  const sleeveAttr = useMemo(() => _perfAttr(portfolio.closed, c => c && c.setup_type), [portfolio]);
+  const sectorAttr = useMemo(() => _perfAttr(portfolio.closed, c => secMap[c && c.ticker]), [portfolio, secMap]);
+
+  // periodic book returns from dated equity curve — SPY/alpha not in bundle (rendered —)
+  const periodic = useMemo(() => _perfPeriodic(portfolio.equity_curve), [portfolio]);
 
   // R-distribution from closed pnl_pct
   const rbins = _rBucketsFromClosed(portfolio.closed);
   const hasClosed = Array.isArray(portfolio.closed) && portfolio.closed.length > 0;
+  const nC = hasClosed ? portfolio.closed.length : 0;
+  const bestR = hasClosed ? Math.max(...portfolio.closed.map(t => (_num(t.pnl_pct) || 0))) / 100 : null;
+
+  // CAGR guarded — annualizing a short curve overstates; require >=90 calendar days of curve
+  const curveDays = (() => {
+    const c = portfolio.equity_curve || [];
+    if (c.length < 2 || !c[0].date || !c[c.length - 1].date) return 0;
+    return Math.round((new Date(c[c.length - 1].date) - new Date(c[0].date)) / 86400000);
+  })();
+  const cagr = (curveDays >= 90 && D.totalRet != null)
+    ? (Math.pow(1 + D.totalRet / 100, 365 / curveDays) - 1) * 100 : null;
 
   const equity = _num(portfolio.equity);
   const realized = (portfolio.closed || []).reduce((a, t) => a + (_num(t && t.pnl_dollars) || 0), 0);
@@ -17660,19 +17725,20 @@ function SurfacePerformance({ onTicker, data }) {
         <div className="wsx-hdr-l">
           <div className="wsx-eyebrow mono">EQUITY CURVE · ATTRIBUTION · RISK-ADJUSTED</div>
           <h1 className="wsx-title mono">Performance</h1>
-          <div className="wsx-sub mono dim2">realized + open P&amp;L · drawdown · per-sleeve attribution · R-distribution</div>
+          <div className="wsx-sub mono dim2">realized + open P&amp;L · drawdown · per-sleeve &amp; per-sector attribution · R-distribution</div>
         </div>
         <div className="wsx-hdr-r">
           <FreshnessPill state="live" age="live" />
-          <span className="mono dim2">src · portfolio_state · accuracy · trade_log</span>
+          <span className="mono dim2">src · portfolio_state · trade_log · picks_history</span>
         </div>
       </div>
 
+      {/* hero: headline + equity curve + underwater */}
       <div className="q-perf-hero">
         <div className="q-hero-l">
           <div className="q-hero-eyebrow mono dim2">NET RETURN · curve</div>
           <div className={`q-hero-num mono ${D.totalRet != null && D.totalRet < 0 ? "dn" : "up"}`}>{_pct(D.totalRet, 2)}</div>
-          <div className="q-hero-sub mono">equity <span className="dim2">{equity != null ? `$${Math.round(equity).toLocaleString()}` : "—"}</span></div>
+          <div className="q-hero-sub mono">equity <span className="dim2">{equity != null ? `$${Math.round(equity).toLocaleString()}` : "—"}</span> · vs SPY <span className="dim2">—</span></div>
           <div className="q-hero-chips">
             <span className="q-chip mono"><b className={realized >= 0 ? "up" : "dn"}>{hasRealized ? _money(realized) : "—"}</b> realized</span>
             <span className="q-chip mono"><b className={openPnl >= 0 ? "up" : "dn"}>{hasOpen ? _money(openPnl) : "—"}</b> open</span>
@@ -17681,9 +17747,10 @@ function SurfacePerformance({ onTicker, data }) {
         </div>
         <div className="q-hero-r">
           <div className="q-eq-head">
-            <span className="mono dim2">EQUITY CURVE · {D.B.length} points</span>
+            <span className="mono dim2">CUMULATIVE RETURN · {D.B.length} sessions</span>
             <span className="q-eq-legend mono">
               <i className="q-sw" style={{ background: "var(--gn)" }} />book
+              <i className="q-sw q-sw--dash" />SPY <span className="dim2" style={{ marginLeft: 4 }}>(n/a)</span>
             </span>
           </div>
           {D.hasCurve
@@ -17699,15 +17766,16 @@ function SurfacePerformance({ onTicker, data }) {
         </div>
       </div>
 
+      {/* risk-adjusted KPI strip — prototype labels, all real-computed */}
       <div className="q-kpis">
-        {[["WIN RATE", winRate != null ? winRate.toFixed(1) + "%" : "—", "gn", nClosed != null ? `n=${nClosed}` : "closed"],
-          ["PROFIT FACTOR", _fx(pf, 2), pf != null && pf >= 1.2 ? "gn" : "amb", "gross W ÷ L"],
-          ["EXPECTANCY", expectancy != null ? `+${expectancy.toFixed(2)}R` : "—", "copper", "per trade"],
-          ["AVG R", avgR != null ? `${avgR >= 0 ? "+" : ""}${avgR.toFixed(2)}R` : "—", "gn", "per trade"],
-          ["AVG WIN", avgWin != null ? `+${avgWin.toFixed(2)}R` : "—", "gn", "winners"],
-          ["AVG LOSS", avgLoss != null ? `${avgLoss.toFixed(2)}R` : "—", "rd", "losers"],
+        {[["CAGR", cagr != null ? `${cagr >= 0 ? "+" : ""}${cagr.toFixed(1)}%` : "—", "gn", cagr != null ? "annualized" : "need 90d curve"],
+          ["SHARPE", _fx(D.sharpe, 2), "gn", "daily · rf 4.3%"],
+          ["SORTINO", _fx(D.sortino, 2), "gn", "downside-adj"],
+          ["CALMAR", _fx(calmar, 2), "gn", "ret ÷ maxDD"],
           ["MAX DD", D.maxDD != null ? D.maxDD.toFixed(1) + "%" : "—", "rd", "peak-trough"],
-          ["SHARPE", _fx(D.sharpe, 2), "gn", "daily · rf 4.3%"]].map((k, i) => (
+          ["PROFIT FACTOR", _fx(pf, 2), pf != null && pf >= 1.2 ? "gn" : "amb", "gross W ÷ L"],
+          ["WIN RATE", winRate != null ? winRate.toFixed(1) + "%" : "—", "gn", nClosed != null ? `n=${nClosed}` : "closed"],
+          ["EXPECTANCY", expectancy != null ? `+${expectancy.toFixed(2)}R` : "—", "copper", "per trade"]].map((k, i) => (
           <div key={i} className={`q-kpi q-kpi--${k[2]}`}>
             <div className="q-kpi-l mono">{k[0]}</div>
             <div className={`q-kpi-v mono kpi-tone--${k[2]}`}>{k[1]}</div>
@@ -17716,34 +17784,30 @@ function SurfacePerformance({ onTicker, data }) {
         ))}
       </div>
 
+      {/* monthly returns strip */}
       <div className="lab-card">
-        <div className="lab-card-h mono">MONTHLY RETURNS</div>
+        <div className="lab-card-h mono">MONTHLY RETURNS · trailing 12</div>
         {months.length
           ? <QMonths months={months} />
           : <div className="pf-note mono dim2">— no monthly_pnl in bundle —</div>}
       </div>
 
+      {/* attribution + distribution grid */}
       <div className="q-grid2">
         <div className="lab-card">
-          <div className="lab-card-h mono">P&amp;L ATTRIBUTION · by sleeve (net R)</div>
+          <div className="lab-card-h mono">P&amp;L ATTRIBUTION · by sleeve</div>
           {sleeveAttr.length
-            ? <QDiverge rows={sleeveAttr} fmt={v => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}R`} />
-            : <div className="pf-note mono dim2">— no per-strategy attribution —</div>}
+            ? <QDiverge rows={sleeveAttr} fmt={v => `${v >= 0 ? "+" : "−"}$${Math.abs(v).toLocaleString()}`} />
+            : <div className="pf-note mono dim2">— no closed-trade attribution —</div>}
         </div>
         <div className="lab-card">
-          <div className="lab-card-h mono">RISK-ADJUSTED · from equity curve</div>
-          <table className="dtable wsx-tbl pf-mini">
-            <thead><tr><th>Metric</th><th className="r">Value</th><th className="r">Basis</th></tr></thead>
-            <tbody>
-              {[["Sharpe", _fx(D.sharpe, 2), "daily"], ["Sortino", _fx(D.sortino, 2), "downside"],
-                ["Calmar", _fx(calmar, 2), "ret ÷ maxDD"], ["Max DD", D.maxDD != null ? D.maxDD.toFixed(1) + "%" : "—", "peak-trough"]].map((r, i) => (
-                <tr key={i}><td className="mono">{r[0]}</td><td className="r tabular">{r[1]}</td><td className="r tabular dim2">{r[2]}</td></tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="lab-card-h mono">P&amp;L ATTRIBUTION · by sector</div>
+          {sectorAttr.length
+            ? <QDiverge rows={sectorAttr} fmt={v => `${v >= 0 ? "+" : "−"}$${Math.abs(v).toLocaleString()}`} />
+            : <div className="pf-note mono dim2">— no sector-mapped closed trades —</div>}
         </div>
         <div className="lab-card">
-          <div className="lab-card-h mono">R-MULTIPLE DISTRIBUTION{hasClosed ? ` · n=${portfolio.closed.length} closed` : ""}</div>
+          <div className="lab-card-h mono">R-MULTIPLE DISTRIBUTION{hasClosed ? ` · n=${nC} closed` : ""}</div>
           {hasClosed
             ? <QHist bins={rbins} h={140} />
             : <div className="pf-note mono dim2" style={{ padding: "24px 0", textAlign: "center" }}>— no closed trades —</div>}
@@ -17751,26 +17815,26 @@ function SurfacePerformance({ onTicker, data }) {
             <span>avg win <b className="up">{avgWin != null ? `+${avgWin.toFixed(2)}R` : "—"}</b></span>
             <span>avg loss <b className="dn">{avgLoss != null ? `${avgLoss.toFixed(2)}R` : "—"}</b></span>
             <span>payoff <b>{(avgWin != null && avgLoss != null && avgLoss !== 0) ? `${Math.abs(avgWin / avgLoss).toFixed(2)}×` : "—"}</b></span>
-            <span>PF <b>{_fx(pf, 2)}</b></span>
+            <span>best <b className="up">{bestR != null ? `${bestR >= 0 ? "+" : ""}${bestR.toFixed(1)}R` : "—"}</b></span>
           </div>
         </div>
         <div className="lab-card">
-          <div className="lab-card-h mono">BY SCORE BAND · win rate</div>
+          <div className="lab-card-h mono">PERIODIC RETURNS · book vs SPY</div>
           <table className="dtable wsx-tbl pf-mini">
-            <thead><tr><th>Band</th><th className="r">n</th><th className="r">WR</th><th className="r">PF</th></tr></thead>
-            <tbody>{(() => {
-              const bands = accuracy.by_score_band || {};
-              const keys = Object.keys(bands);
-              if (!keys.length) return <tr><td className="dim2" colSpan="4">— no score-band breakdown —</td></tr>;
-              return keys.sort().map((k, i) => {
-                const b = bands[k] || {};
-                return <tr key={i}><td className="mono">{k}</td>
-                  <td className="r tabular dim">{_num(b.n) != null ? b.n : "—"}</td>
-                  <td className="r tabular up">{_num(b.win_rate) != null ? b.win_rate.toFixed(0) + "%" : "—"}</td>
-                  <td className="r tabular">{_fx(b.pf, 2)}</td></tr>;
-              });
-            })()}</tbody>
+            <thead><tr><th>Period</th><th className="r">Book</th><th className="r">SPY</th><th className="r">α</th><th className="r">Sharpe</th></tr></thead>
+            <tbody>{periodic.rows.length ? periodic.rows.map((r, i) => (
+              <tr key={i}>
+                <td className="mono">{r.label}{r.partial ? "*" : ""}</td>
+                <td className={`r tabular ${r.book != null ? (r.book >= 0 ? "up" : "dn") : "dim2"}`}>{r.book != null ? `${r.book >= 0 ? "+" : ""}${r.book.toFixed(2)}%` : "—"}</td>
+                <td className="r tabular dim2">—</td>
+                <td className="r tabular dim2">—</td>
+                <td className="r tabular dim2">—</td>
+              </tr>
+            )) : <tr><td className="dim2" colSpan="5">— no dated equity curve —</td></tr>}</tbody>
           </table>
+          <div className="pf-note mono dim2" style={{ marginTop: 6 }}>
+            Book from dated equity_curve{periodic.startDate ? ` (since ${periodic.startDate})` : ""}. SPY benchmark + α + per-period Sharpe not in bundle → —{periodic.rows.some(r => r.partial) ? " · * partial (curve starts mid-period)" : ""}.
+          </div>
         </div>
       </div>
 
@@ -17781,10 +17845,13 @@ function SurfacePerformance({ onTicker, data }) {
           if (expectancy != null) parts.push(`expectancy +${expectancy.toFixed(2)}R/trade`);
           if (D.maxDD != null) parts.push(`max drawdown ${D.maxDD.toFixed(1)}%`);
           if (D.sharpe != null) parts.push(`Sharpe ${D.sharpe.toFixed(2)}`);
+          const lead = sectorAttr[0], lag = sectorAttr[sectorAttr.length - 1];
+          if (lead && lead.value > 0) parts.push(`top sector ${lead.label} ${_money(lead.value)}`);
+          if (lag && lag.value < 0) parts.push(`${lag.label} the drag ${_money(lag.value)}`);
           return parts.length ? parts.join(" · ") + "." : "Insufficient closed-trade history for a verdict — accumulate n≥30 before judging edge.";
         })()}
       </div>
-      <div className="pf-note mono dim2">All figures from live portfolio_state + accuracy bundle. Sharpe/Sortino/Calmar computed from the equity curve when present, else shown as —. No fabricated numbers.</div>
+      <div className="pf-note mono dim2">All figures from live portfolio_state + trade_log + picks_history sector map. Sharpe/Sortino/Calmar from the equity curve; sleeve/sector attribution from realized closed pnl_dollars. SPY benchmark not licensed in bundle → shown as —. No fabricated numbers.</div>
     </div>
   );
 }
