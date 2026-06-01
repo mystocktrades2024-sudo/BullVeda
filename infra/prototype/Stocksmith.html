@@ -14805,111 +14805,121 @@ function MTFScreener() {
 // ────────────────────────────────────────────────────────────
 // RISK — VaR, Kelly, drawdown, stress, liquidity
 // ────────────────────────────────────────────────────────────
+// real per-ticker risk: realized vol from /api/ohlcv, Kelly from setupStats, NAV from portfolio
+function riskCompute(ticker, bars) {
+  const px = num(ticker && ticker.price) ?? (bars && bars.length ? bars[bars.length - 1].c : null);
+  let dvol = null, atr = null;
+  if (bars && bars.length >= 25) {
+    const rets = pvDailyReturns(bars).slice(-60);
+    dvol = pvMeanStd(rets).std;            // real 1-day sigma
+    atr = _tlLast(pvATR(bars, 14));
+  }
+  const ss = (ticker && ticker.setupStats) || {};
+  const p = num(ss.winRate), pf = num(ss.pf);
+  // raw Kelly fraction = p·(1 − 1/PF)  (derived from p, payoff via PF) — real, bounded [0,1]
+  const kelly = (p != null && pf != null && pf > 0) ? Math.max(0, Math.min(1, p * (1 - 1 / pf))) : null;
+  const D = (typeof window !== "undefined" && window.__ssData) || {};
+  const nav = num(D.portfolio && D.portfolio.equity);
+  const rr = num(ticker && ticker.rMultiple);
+  const beta = num(ticker && (ticker.beta || (ticker.raw && ticker.raw.beta)));
+  return { px, dvol, atr, kelly, halfK: kelly != null ? kelly / 2 : null, p, pf, nav, rr, beta, n: ss.n };
+}
 function LensRisk({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("rk-1"); const s2 = useStateToggle("rk-2");
   const s3 = useStateToggle("rk-3"); const s4 = useStateToggle("rk-4");
   const s5 = useStateToggle("rk-5");
+  const ox = usePvOhlcv(ticker && ticker.symbol);
+  const R = React.useMemo(() => riskCompute(ticker, ox.bars), [ticker, ox.bars]);
+  const F = (v, d, suf = "", pre = "") => (v == null || v !== v) ? "—" : pre + (+v).toFixed(d) + suf;
+  const hd = mode === "POSITION" ? 10 : mode === "INVESTMENT" ? 21 : 1;
+  const erDays = ticker && ticker.earnings ? ticker.earnings.days : null;
+  // sizing in $ from real NAV + half-Kelly (capped at regime max if present)
+  const cap = num((window.__ssData && window.__ssData.regime && window.__ssData.regime.max_size_pct)) ;
+  const sizePct = R.halfK != null ? Math.min(R.halfK * 100, cap != null ? cap : 100) : null;
+  const posNotional = (R.nav != null && sizePct != null) ? R.nav * sizePct / 100 : null;
+  const maxLoss = (posNotional != null && R.rr != null && R.px && num(ticker.stop) != null) ? posNotional * Math.abs(R.px - num(ticker.stop)) / R.px : null;
 
   return (
     <div className="lens lens--risk">
       <div className="hero risk-hero">
         <div className="th-left">
-          <div className="label-cap">Risk read · per-trade + book</div>
+          <div className="label-cap">Risk read · per-trade · realized-vol</div>
           <div className="th-score">
-            <div className="th-score-num mono">OK</div>
-            <Pill tone="gn" dot>within gates</Pill>
-            <Pill tone="amb" small>ER in 11d · cap size</Pill>
+            <div className="th-score-num mono">{R.dvol != null ? F(R.dvol * 100, 1, "%") : "—"}</div>
+            <Pill tone="ink" dot>1-day realized σ</Pill>
+            {erDays != null && erDays <= (ticker.holdDays || 9) ? <Pill tone="amb" small>ER in {erDays}d · cap size</Pill> : null}
           </div>
         </div>
         <div className="th-right">
-          <LossCone />
+          <LossCone R={R} />
         </div>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={1} title="Loss-Distribution Cones"
-          sub="1-day · 1σ / 2σ / 3σ · based on 60d realized vol"
-          style={headerStyle} right={<StateToggle name="rk-1" />} />
-        <StateWrap state={s1.value} source="vol engine · 60d realized">
-          <div className="lens-pad"><RiskCones ticker={ticker} mode={mode} /></div>
+        <SectionHeader n={1} title="Loss-Distribution Cones" sub="1σ / 2σ / 3σ · from real 60d realized vol" style={headerStyle} right={<StateToggle name="rk-1" />} />
+        <StateWrap state={s1.value} source="/api/ohlcv · 60d realized vol">
+          <div className="lens-pad"><RiskCones R={R} mode={mode} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={2} title="Live Kelly · Sizing Metrics"
-          sub="real-time using current edge + portfolio_state"
-          style={headerStyle} right={<StateToggle name="rk-2" />} />
-        <StateWrap state={s2.value} source="risk engine">
+        <SectionHeader n={2} title="Kelly · Sizing Metrics" sub="from real setup edge (win-rate × PF) + portfolio NAV" style={headerStyle} right={<StateToggle name="rk-2" />} />
+        <StateWrap state={s2.value} source="setup_family_stats + portfolio_state">
           <div className="lens-pad">
             <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="Raw Kelly" value="84%" tone="amb" sub="(p·b−q)/b" />
-              <KpiTile label="½ Kelly · capped" value="42%" tone="copper" sub="discipline" />
-              <KpiTile label="Final size %" value="6.8%" tone="copper" sub="of NAV · 110 sh" />
-              <KpiTile label="Max loss" value="$420" tone="rd" sub="0.39% of NAV" />
+              <KpiTile label="Raw Kelly" value={R.kelly != null ? F(R.kelly * 100, 0, "%") : "—"} tone="amb" sub={R.p != null ? `p ${(R.p*100).toFixed(0)}% · PF ${F(R.pf,2)}` : "needs setup stats"} />
+              <KpiTile label="½ Kelly" value={R.halfK != null ? F(R.halfK * 100, 0, "%") : "—"} tone="copper" sub="discipline" />
+              <KpiTile label="Final size %" value={sizePct != null ? F(sizePct, 1, "%") : "—"} tone="copper" sub={cap != null ? `cap ${cap}% (regime)` : "of NAV"} />
+              <KpiTile label="Max loss" value={maxLoss != null ? "$" + Math.round(maxLoss).toLocaleString() : "—"} tone="rd" sub={(maxLoss != null && R.nav) ? `${(maxLoss / R.nav * 100).toFixed(2)}% of NAV` : "needs NAV + stop"} />
             </div>
+            {(R.kelly == null || R.nav == null) && <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 6 }}>{R.kelly == null ? "Kelly needs setup_family_stats (win-rate + PF). " : ""}{R.nav == null ? "$ sizing needs portfolio_state NAV — shown as — rather than fabricated." : ""}</div>}
           </div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={3} title="VaR · CVaR · Sharpe"
-          sub="1d · 10d · per-ticker + post-fill book impact"
-          style={headerStyle} right={<StateToggle name="rk-3" />} />
-        <StateWrap state={s3.value} source="risk engine · MC + parametric">
-          <div className="lens-pad"><VarTable ticker={ticker} mode={mode} /></div>
+        <SectionHeader n={3} title="VaR · CVaR" sub={`${hd}d parametric · from real realized vol`} style={headerStyle} right={<StateToggle name="rk-3" />} />
+        <StateWrap state={s3.value} source="parametric VaR · /api/ohlcv vol">
+          <div className="lens-pad"><VarTable R={R} mode={mode} ticker={ticker} posNotional={posNotional} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={4} title="Stress · 6 × 5 Heatmap"
-          sub="scenario × outcome · MoS in each cell"
-          style={headerStyle} right={<StateToggle name="rk-4" />} />
-        <StateWrap state={s4.value} source="scenario engine">
-          <div className="lens-pad"><StressGrid /></div>
+        <SectionHeader n={4} title="Stress Scenarios" sub="σ-scaled shocks from real realized vol" style={headerStyle} right={<StateToggle name="rk-4" />} />
+        <StateWrap state={s4.value} source="scenario engine · σ-scaled">
+          <div className="lens-pad"><StressGrid R={R} posNotional={posNotional} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={5} title="Liquidity Ladder · β exposure"
-          sub="bid/ask depth · ADV slip · book-β post-fill"
-          style={headerStyle} right={<StateToggle name="rk-5" />} />
-        <StateWrap state={s5.value} source="quotes + portfolio_state">
+        <SectionHeader n={5} title="Liquidity · β exposure" sub="ATR · realized vol · beta (book-β needs per-name feed)" style={headerStyle} right={<StateToggle name="rk-5" />} />
+        <StateWrap state={s5.value} source="/api/ohlcv + scan row">
           <div className="lens-pad">
             <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="L1 spread" value="$0.04" tone="gn" sub="6 bps · OK" />
-              <KpiTile label="ADV slip est." value="−$0.03" tone="gn" sub="110 sh / 1.12M ADV" />
-              <KpiTile label="Book β · pre" value="0.93" tone="ink" />
-              <KpiTile label="Book β · post" value="0.96" tone="amb" sub="+0.03 · within cap 1.10" />
+              <KpiTile label="ATR(14)" value={F(R.atr, 2, "", "$")} tone="ink" sub={R.atr != null && R.px ? `${(R.atr/R.px*100).toFixed(1)}% of px` : "—"} />
+              <KpiTile label="Realized σ (1d)" value={F(R.dvol != null ? R.dvol*100 : null, 1, "%")} tone="amb" sub="60d daily" />
+              <KpiTile label="Beta (SPY)" value={F(R.beta, 2)} tone="ink" sub={R.beta != null ? "scan row" : "not in row"} />
+              <KpiTile label="L1 spread" value="—" tone="ink" sub="needs live quote" />
             </div>
           </div>
         </StateWrap>
-      </div>
-
-      <div className="lens-section">
-        <SectionHeader n={6} title="Cross-Lens Confluence" style={headerStyle} />
-        <div className="lens-pad">
-          <CrossLens lead="rd" cells={[
-            { lens: "Risk",       verdict: "OK",     tone: "gn",  note: "all gates pass · cap size pre-ER" },
-            { lens: "Plan",       verdict: "READY",  tone: "gn",  note: "R 1.74 · stop $62.40" },
-            { lens: "Earnings",   verdict: "11 d",   tone: "amb", note: "trim 25% pre-ER" },
-            { lens: "Portfolio",  verdict: "FIT",    tone: "gn",  note: "correl 0.34 · NAV 6.8%" },
-            { lens: "Liquidity",  verdict: "OK",     tone: "gn",  note: "1.12M ADV · 6 bps spread" },
-          ]} />
-        </div>
       </div>
 
       <div className="lens-call">
         <span className="label-cap">The Read · Risk</span>
         <span className="mono">
-          Max loss <b className="dn">$420</b> = 0.39% NAV · VaR(1d) <b className="warn">−2.1%</b> ·
-          Sharpe contrib +0.04. <b>Pass.</b>
+          {R.dvol != null ? <>Realized 1-day σ <b>{F(R.dvol*100,1,"%")}</b> → {hd}d VaR(95%) ≈ <b className="warn">−{(R.dvol*Math.sqrt(hd)*1.645*100).toFixed(1)}%</b>. </> : "Realized-vol risk loads from /api/ohlcv. "}
+          {maxLoss != null ? <>Max loss at stop <b className="dn">${Math.round(maxLoss).toLocaleString()}</b> ({(maxLoss/R.nav*100).toFixed(2)}% NAV). </> : (num(ticker.stop)!=null && R.px ? <>Stop ${F(ticker.stop,2)} = {(Math.abs(R.px-num(ticker.stop))/R.px*100).toFixed(1)}% downside. </> : "")}
+          All from real vol + setup edge; nothing fabricated.
         </span>
       </div>
     </div>
   );
 }
 
-function LossCone() {
+function LossCone({ R }) {
+  const v1 = (R && R.dvol != null) ? R.dvol * 100 : null;
+  const fmt = (k) => v1 == null ? "—" : (k >= 0 ? "+" : "") + (v1 * k).toFixed(1) + "%";
   return (
     <svg viewBox="0 0 280 110" width="280" height="110" style={{ overflow: "visible" }}>
       <defs>
@@ -14930,47 +14940,48 @@ function LossCone() {
       <path d="M 20 55 Q 130 14 270 14"  stroke="var(--gn)" strokeWidth="1.1" fill="none" opacity="0.5" />
       <path d="M 20 55 Q 130 96 270 96"  stroke="var(--rd)" strokeWidth="1.1" fill="none" opacity="0.5" />
       <circle cx="20" cy="55" r="4" fill="var(--copper)" style={{ filter: "drop-shadow(0 0 8px var(--copper))" }} />
-      <text x="266" y="11" fontSize="9.5" className="mono" textAnchor="end" fill="var(--gn)">+3σ +6.4%</text>
-      <text x="266" y="27" fontSize="9.5" className="mono" textAnchor="end" fill="var(--gn)">+1σ +2.1%</text>
-      <text x="266" y="82" fontSize="9.5" className="mono" textAnchor="end" fill="var(--rd)">−1σ −2.1%</text>
-      <text x="266" y="106" fontSize="9.5" className="mono" textAnchor="end" fill="var(--rd)">−3σ −6.4%</text>
+      <text x="266" y="11" fontSize="9.5" className="mono" textAnchor="end" fill="var(--gn)">+3σ {fmt(3)}</text>
+      <text x="266" y="27" fontSize="9.5" className="mono" textAnchor="end" fill="var(--gn)">+1σ {fmt(1)}</text>
+      <text x="266" y="82" fontSize="9.5" className="mono" textAnchor="end" fill="var(--rd)">−1σ {fmt(-1)}</text>
+      <text x="266" y="106" fontSize="9.5" className="mono" textAnchor="end" fill="var(--rd)">−3σ {fmt(-3)}</text>
     </svg>
   );
 }
 
-function RiskCones({ ticker, mode }) {
-  const px = (ticker && ticker.price) || 67.42;
-  const dvol = 0.021;                                   // 1d 1σ
+function RiskCones({ R, mode }) {
+  if (!R || R.dvol == null || R.px == null) return <div className="mono dim2" style={{ fontSize: 12 }}>Loss cones load from real /api/ohlcv realized vol.</div>;
+  const px = R.px, dvol = R.dvol;
   const hd = mode === "POSITION" ? 10 : mode === "INVESTMENT" ? 21 : 1;
   const lbl = hd === 1 ? "1d" : hd + "d";
   const s1 = dvol * Math.sqrt(hd);
   const band = (k) => `$${(px * (1 - s1 * k)).toFixed(2)} — $${(px * (1 + s1 * k)).toFixed(2)}`;
+  const hd2 = hd === 1 ? 10 : hd * 2;
   return (
     <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
       <KpiTile label={`${lbl} · 1σ`} value={`±${(s1 * 100).toFixed(1)}%`} tone="ink" sub={band(1)} />
       <KpiTile label={`${lbl} · 2σ`} value={`±${(s1 * 200).toFixed(1)}%`} tone="amb" sub={band(2)} />
       <KpiTile label={`${lbl} · 3σ`} value={`±${(s1 * 300).toFixed(1)}%`} tone="rd" sub={band(3)} />
-      <KpiTile label={`${hd === 1 ? "10d" : (hd * 2) + "d"} · 1σ`} value={`±${(dvol * Math.sqrt(hd === 1 ? 10 : hd * 2) * 100).toFixed(1)}%`} tone="amb" sub={band(1)} />
+      <KpiTile label={`${hd2}d · 1σ`} value={`±${(dvol * Math.sqrt(hd2) * 100).toFixed(1)}%`} tone="amb" sub="from realized vol" />
     </div>
   );
 }
 
-function VarTable({ ticker, mode }) {
+function VarTable({ R, mode, ticker, posNotional }) {
+  if (!R || R.dvol == null) return <div className="mono dim2" style={{ fontSize: 12 }}>VaR loads from real /api/ohlcv realized vol.</div>;
   const hd = mode === "POSITION" ? 10 : mode === "INVESTMENT" ? 21 : 1;
   const lbl = hd === 1 ? "1d" : hd + "d";
-  const dvol = 0.021;                                  // 1-day 1σ
-  const sig = dvol * Math.sqrt(hd);
-  const inv = 7416;                                    // demo book notional for the position
+  const sig = R.dvol * Math.sqrt(hd);
   const var95 = +(sig * 1.645 * 100).toFixed(1);
   const cvar = +(sig * 2.06 * 100).toFixed(1);
-  const var2x = +(dvol * Math.sqrt(hd === 1 ? 10 : hd * 2) * 1.645 * 100).toFixed(1);
+  const hd2 = hd === 1 ? 10 : hd * 2;
+  const var2x = +(R.dvol * Math.sqrt(hd2) * 1.645 * 100).toFixed(1);
+  const dollar = (pct) => posNotional != null ? `−$${Math.round(pct / 100 * posNotional).toLocaleString()}` : "—";
+  const stopDD = (R.px && num(ticker && ticker.stop) != null) ? -(Math.abs(R.px - num(ticker.stop)) / R.px * 100) : null;
   const rows = [
-    { metric: `VaR · ${lbl} · 95%`,  v: `−${var95}%`, abs: `−$${Math.round(var95/100*inv)} (110 sh)`, tone: var95 > 5 ? "rd" : "amb" },
-    { metric: `CVaR · ${lbl} · 95%`, v: `−${cvar}%`, abs: `−$${Math.round(cvar/100*inv)} (tail avg)`, tone: "rd" },
-    { metric: `VaR · ${hd === 1 ? "10d" : (hd*2)+"d"} · 95%`, v: `−${var2x}%`, abs: `−$${Math.round(var2x/100*inv)}`, tone: "rd" },
-    { metric: "Sharpe contrib", v: "+0.04", abs: "on book", tone: "gn" },
-    { metric: "Sortino contrib", v: "+0.07", abs: "on book", tone: "gn" },
-    { metric: "Max DD if stop hits", v: "−5.9%", abs: "−$420 · 0.39% NAV", tone: "rd" },
+    { metric: `VaR · ${lbl} · 95%`, v: `−${var95}%`, abs: dollar(var95) + (posNotional != null ? " (Kelly-sized)" : " (NAV n/a)"), tone: var95 > 5 ? "rd" : "amb" },
+    { metric: `CVaR · ${lbl} · 95%`, v: `−${cvar}%`, abs: dollar(cvar) + " (tail avg)", tone: "rd" },
+    { metric: `VaR · ${hd2}d · 95%`, v: `−${var2x}%`, abs: dollar(var2x), tone: "rd" },
+    { metric: "Max DD if stop hits", v: stopDD != null ? `${stopDD.toFixed(1)}%` : "—", abs: (stopDD != null && posNotional != null) ? `−$${Math.round(Math.abs(stopDD) / 100 * posNotional).toLocaleString()}` : "needs stop + NAV", tone: "rd" },
   ];
   return (
     <table className="dtable">
@@ -14984,37 +14995,46 @@ function VarTable({ ticker, mode }) {
           </tr>
         ))}
       </tbody>
+      <tfoot><tr><td colSpan="3" className="mono dim2" style={{ fontSize: 10, paddingTop: 6 }}>Parametric VaR from real 60d realized vol (/api/ohlcv). $ figures use the Kelly-sized position when NAV is available; Sharpe/Sortino contribution needs book history (Performance tab).</td></tr></tfoot>
     </table>
   );
 }
 
-function StressGrid() {
-  const scenarios = [
-    "−3σ market gap", "Rate +50bp", "VIX → 30", "Sector ETF −5%", "Earnings −15%", "Liquidity halve",
+function StressGrid({ R, posNotional }) {
+  if (!R || R.dvol == null) return <div className="mono dim2" style={{ fontSize: 12 }}>Stress scenarios scale off real realized vol.</div>;
+  // shocks expressed in multiples of the real 1-day sigma
+  const sig = R.dvol;
+  const scen = [
+    { name: "−1σ day", k: 1 }, { name: "−2σ day", k: 2 }, { name: "−3σ gap", k: 3 },
+    { name: "−2σ × 3 days", k: 2 * Math.sqrt(3) }, { name: "−3σ × 5 days", k: 3 * Math.sqrt(5) }, { name: "−10σ tail (crash)", k: 10 },
   ];
-  const outcomes = ["P&L", "% NAV", "Stop hit?", "Days to recover", "Action"];
-  // synthesize
-  const grid = scenarios.map((s, i) => [
-    { v: `−$${(380 + i * 90).toFixed(0)}`,  tone: i < 3 ? "amb" : "rd" },
-    { v: `−${(0.35 + i * 0.10).toFixed(2)}%`, tone: i < 3 ? "amb" : "rd" },
-    { v: i < 2 ? "no" : i < 4 ? "tight" : "YES", tone: i < 2 ? "gn" : i < 4 ? "amb" : "rd" },
-    { v: i < 2 ? "1–2" : i < 4 ? "3–5" : "—", tone: "ink" },
-    { v: i < 2 ? "hold" : i < 4 ? "trim 25%" : "flatten", tone: i < 2 ? "gn" : i < 4 ? "amb" : "rd" },
-  ]);
+  const stopPct = (R.px && R.px) ? null : null;
+  const outcomes = ["Move", "% of pos", "$ impact", "vs stop", "Action"];
+  const grid = scen.map((s) => {
+    const movePct = sig * s.k * 100;
+    const dollar = posNotional != null ? `−$${Math.round(movePct / 100 * posNotional).toLocaleString()}` : "—";
+    const sev = s.k <= 1 ? "amb" : s.k <= 3 ? "amb" : "rd";
+    return [
+      { v: `−${movePct.toFixed(1)}%`, tone: sev },
+      { v: `−${movePct.toFixed(1)}%`, tone: sev },
+      { v: dollar, tone: sev },
+      { v: movePct >= 8 ? "likely hit" : movePct >= 4 ? "tight" : "inside", tone: movePct >= 8 ? "rd" : movePct >= 4 ? "amb" : "gn" },
+      { v: movePct >= 8 ? "flatten" : movePct >= 4 ? "trim" : "hold", tone: movePct >= 8 ? "rd" : movePct >= 4 ? "amb" : "gn" },
+    ];
+  });
   return (
-    <div className="stress-grid">
-      <div className="sg-corner" />
-      {outcomes.map((o, i) => (
-        <div key={i} className="sg-col-hdr mono label-cap">{o}</div>
-      ))}
-      {scenarios.map((s, r) => (
-        <React.Fragment key={r}>
-          <div className="sg-row-hdr mono">{s}</div>
-          {grid[r].map((c, ci) => (
-            <div key={ci} className={`sg-cell sg-${c.tone}`}>{c.v}</div>
-          ))}
-        </React.Fragment>
-      ))}
+    <div>
+      <div className="stress-grid">
+        <div className="sg-corner" />
+        {outcomes.map((o, i) => <div key={i} className="sg-col-hdr mono label-cap">{o}</div>)}
+        {scen.map((s, r) => (
+          <React.Fragment key={r}>
+            <div className="sg-row-hdr mono">{s.name}</div>
+            {grid[r].map((c, ci) => <div key={ci} className={`sg-cell sg-${c.tone}`}>{c.v}</div>)}
+          </React.Fragment>
+        ))}
+      </div>
+      <div className="mono dim2" style={{ fontSize: 10, marginTop: 6 }}>Shocks = multiples of the real 1-day realized σ ({(sig * 100).toFixed(1)}%). $ uses the Kelly-sized position when NAV is available.</div>
     </div>
   );
 }
