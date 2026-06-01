@@ -17105,90 +17105,83 @@ function LensTrack({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) 
   const s1 = useStateToggle("tr-1"); const s2 = useStateToggle("tr-2");
   const s3 = useStateToggle("tr-3"); const s4 = useStateToggle("tr-4");
   const s5 = useStateToggle("tr-5");
+  const s = ticker.setupStats || {};
+  const has = s.n != null;
+  const F = (v, d, suf = "", pre = "") => (v == null || v !== v) ? "—" : pre + (+v).toFixed(d) + suf;
+  const wrPct = s.winRate != null ? s.winRate * 100 : null;
+  const lbPct = s.wilsonLB != null ? s.wilsonLB * 100 : null;
+  const hiPct = s.wilsonHi != null ? s.wilsonHi * 100 : (s.hi != null ? s.hi * 100 : null);
+
+  if (!has) return (
+    <div className="lens lens--track">
+      <div className="hero track-hero"><div className="th-left"><div className="label-cap">Setup edge · "{ticker.setupFamily || "—"}"</div>
+        <div className="lens-pad mono dim2" style={{ paddingTop: 8 }}>No per-setup track record for this name in the bundle (setup_family_stats). Aggregate edge lives in the Strategies + Track-Record surfaces. Nothing fabricated.</div></div></div>
+    </div>
+  );
 
   return (
     <div className="lens lens--track">
       <div className="hero track-hero">
         <div className="th-left">
-          <div className="label-cap">Setup edge · "{ticker.setupFamily}"</div>
+          <div className="label-cap">Setup edge · "{ticker.setupFamily || "—"}"</div>
           <div className="th-score">
-            <div className="th-score-num mono">EDGE</div>
-            <Pill tone="gn" dot>Wilson LB 47.7%</Pill>
-            <Pill tone="gn" small>PF 1.84 (raw)</Pill>
-            <Pill tone="amb" small>PF 1.41 (haircut)</Pill>
+            <div className={`th-score-num mono kpi-tone--${lbPct >= 45 ? "gn" : "rd"}`}>{lbPct >= 45 ? "EDGE" : lbPct != null ? "THIN" : "—"}</div>
+            {lbPct != null && <Pill tone={lbPct >= 45 ? "gn" : "rd"} dot>Wilson LB {lbPct.toFixed(1)}%</Pill>}
+            {s.pf != null && <Pill tone={s.pf >= 1.3 ? "gn" : "amb"} small>PF {s.pf.toFixed(2)}</Pill>}
           </div>
           <div style={{ marginTop: 12 }}>
-            <WilsonPill n={ticker.setupStats.n} winRate={ticker.setupStats.winRate} lb={ticker.setupStats.wilsonLB} />
+            <WilsonPill n={s.n} winRate={s.winRate} lb={s.wilsonLB} />
           </div>
         </div>
-        <div className="th-right">
-          <EdgeDecayChart />
-        </div>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={1} title="Headline Edge"
-          sub="Wilson CI · profit factor · median R · n"
-          style={headerStyle} right={<StateToggle name="tr-1" />} />
-        <StateWrap state={s1.value} source="setup_stats.json · per-family">
+        <SectionHeader n={1} title="Headline Edge" sub="Wilson CI · profit factor · avg R · n" style={headerStyle} right={<StateToggle name="tr-1" />} />
+        <StateWrap state={s1.value} source="setup_family_stats · per-family">
           <div className="lens-pad">
             <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="Win rate" value="61.7%" tone="gn" sub="n=47" />
-              <KpiTile label="Wilson 95% LB" value="47.7%" tone="gn" sub="above 45% gate" />
-              <KpiTile label="Profit factor" value="1.84" tone="gn" sub="haircut 1.41" />
-              <KpiTile label="Median R" value="+0.72" tone="gn" sub="per closed trade" />
+              <KpiTile label="Win rate" value={F(wrPct, 1, "%")} tone="gn" sub={`n=${s.n}`} />
+              <KpiTile label="Wilson 95% LB" value={F(lbPct, 1, "%")} tone={lbPct >= 45 ? "gn" : "rd"} sub={lbPct >= 45 ? "above 45% gate" : "below 45% gate"} />
+              <KpiTile label="Profit factor" value={F(s.pf, 2)} tone={s.pf >= 1.3 ? "gn" : "amb"} sub="gross W ÷ L" />
+              <KpiTile label="Avg R" value={F(s.medianR, 2, "R", s.medianR >= 0 ? "+" : "")} tone={s.medianR >= 0 ? "gn" : "rd"} sub="per closed trade" />
             </div>
           </div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={2} title="Forward Expectancy"
-          sub="conditional on this exact setup, regime-matched"
-          style={headerStyle} right={<StateToggle name="tr-2" />} />
-        <StateWrap state={s2.value} source="walk-forward · 12-mo holdout">
+        <SectionHeader n={2} title="Edge Read" sub="from this setup's realized record" style={headerStyle} right={<StateToggle name="tr-2" />} />
+        <StateWrap state={s2.value} source="setup_family_stats">
           <div className="lens-pad">
             <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="Median fwd 10d" value="+2.4%" tone="gn" />
-              <KpiTile label="P(T1 first)" value="58.5%" tone="gn" />
-              <KpiTile label="P(stop first)" value="40.0%" tone="amb" />
-              <KpiTile label="Expectancy · R" value="+0.51" tone="gn" sub="per trade" />
+              <KpiTile label="P(win) ≈ WR" value={F(wrPct, 0, "%")} tone="gn" sub="realized hit rate" />
+              <KpiTile label="P(loss)" value={F(wrPct != null ? 100 - wrPct : null, 0, "%")} tone="amb" />
+              <KpiTile label="Wilson 95% hi" value={F(hiPct, 1, "%")} tone="ink" sub="CI upper" />
+              <KpiTile label="Expectancy · R" value={F(s.medianR, 2, "R", s.medianR >= 0 ? "+" : "")} tone={s.medianR >= 0 ? "gn" : "rd"} sub="avg per trade" />
             </div>
+            <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 6 }}>Per-trade forward-return distribution + P(T1 vs stop) are modelled live in the <b>ML Edge</b> lens (/api/ml hit-net), not stored per-setup here.</div>
           </div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={3} title="Edge Decay · 12-mo Blocks"
-          sub="rolling Wilson LB over trailing windows"
-          style={headerStyle} right={<StateToggle name="tr-3" />} />
-        <StateWrap state={s3.value} source="rolling-window backtest">
-          <div className="lens-pad"><EdgeDecayPanel /></div>
+        <SectionHeader n={3} title="Edge Decay · rolling blocks" sub="rolling Wilson LB over trailing windows" style={headerStyle} right={<StateToggle name="tr-3" />} />
+        <StateWrap state={s3.value} source="setup-trend radar">
+          <div className="lens-pad mono dim2" style={{ padding: "10px 0" }}>Rolling per-setup Wilson history isn't carried per-ticker in the bundle. The live edge-erosion radar runs in <b>Strategies</b> + <code>scripts/sharpe_setup_trend.py</code>. Current Wilson LB <b className={lbPct >= 45 ? "up" : "dn"}>{F(lbPct, 1, "%")}</b> (n={s.n}). Shown as text rather than a fabricated decay curve.</div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={4} title="Walk-Forward Holdout"
-          sub="train · validate · holdout slices · prevents over-fit"
-          style={headerStyle} right={<StateToggle name="tr-4" />} />
-        <StateWrap state={s4.value} source="walk-forward harness">
+        <SectionHeader n={4} title="Reliability" sub="sample adequacy · CI width" style={headerStyle} right={<StateToggle name="tr-4" />} />
+        <StateWrap state={s4.value} source="setup_family_stats">
           <div className="lens-pad">
             <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="In-sample WR" value="63.2%" tone="ink" sub="train" />
-              <KpiTile label="Out-of-sample WR" value="61.7%" tone="gn" sub="holdout — no decay" />
-              <KpiTile label="KS drift" value="0.08" tone="gn" sub="below 0.15 alert" />
-              <KpiTile label="Stability score" value="A−" tone="gn" sub="stable last 4 blocks" />
+              <KpiTile label="Sample n" value={String(s.n)} tone={s.n >= 30 ? "gn" : "amb"} sub={s.n >= 30 ? "≥30 standard" : "<30 preliminary"} />
+              <KpiTile label="CI width" value={s.ci != null ? F(s.ci, 0, "pp") : (lbPct != null && hiPct != null ? F(hiPct - lbPct, 0, "pp") : "—")} tone="ink" sub="Wilson hi−lo" />
+              <KpiTile label="Reliability" value={s.reliability != null ? String(s.reliability) : (s.n >= 100 ? "high" : s.n >= 30 ? "medium" : "low")} tone={s.n >= 100 ? "gn" : s.n >= 30 ? "amb" : "rd"} />
+              <KpiTile label="Clears floor" value={lbPct >= 45 ? "YES" : "NO"} tone={lbPct >= 45 ? "gn" : "rd"} sub="LB ≥ 45%" />
             </div>
           </div>
-        </StateWrap>
-      </div>
-
-      <div className="lens-section">
-        <SectionHeader n={5} title="Forward Monte Carlo"
-          sub="2,000 paths · setup-conditional · 10-day horizon"
-          style={headerStyle} right={<StateToggle name="tr-5" />} />
-        <StateWrap state={s5.value} source="MC harness · holdout-trained">
-          <div className="lens-pad"><DistributionBars /></div>
         </StateWrap>
       </div>
 
@@ -17196,11 +17189,11 @@ function LensTrack({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) 
         <SectionHeader n={6} title="Cross-Lens Confluence" style={headerStyle} />
         <div className="lens-pad">
           <CrossLens lead="gn" cells={[
-            { lens: "Track Rec.",  verdict: "EDGE",  tone: "gn",  note: "Wilson 47.7% · PF 1.41 haircut" },
-            { lens: "Plan",        verdict: "READY", tone: "gn",  note: "R 1.74 · sized" },
-            { lens: "AI Edge",     verdict: "+0.18", tone: "gn",  note: "hit-net agrees" },
-            { lens: "Regime",      verdict: "BULL",  tone: "gn",  note: "highest historical WR regime" },
-            { lens: "Risk",        verdict: "OK",    tone: "gn",  note: "expectancy · half-Kelly fits" },
+            { lens: "Track Rec.", verdict: lbPct >= 45 ? "EDGE" : "THIN", tone: lbPct >= 45 ? "gn" : "rd", note: `Wilson ${F(lbPct, 1, "%")} · PF ${F(s.pf, 2)}` },
+            { lens: "Win rate", verdict: F(wrPct, 0, "%"), tone: wrPct >= 50 ? "gn" : "amb", note: `n=${s.n}` },
+            { lens: "Avg R", verdict: F(s.medianR, 2, "R", s.medianR >= 0 ? "+" : ""), tone: s.medianR >= 0 ? "gn" : "rd", note: "per trade" },
+            { lens: "Sample", verdict: s.n >= 30 ? "OK" : "THIN", tone: s.n >= 30 ? "gn" : "amb", note: s.n >= 30 ? "≥30" : "<30 preliminary" },
+            { lens: "AI Edge", verdict: "→ lens", tone: "ink", note: "live /api/ml hit-net" },
           ]} />
         </div>
       </div>
@@ -17208,8 +17201,7 @@ function LensTrack({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) 
       <div className="lens-call">
         <span className="label-cap">The Read · Track Record</span>
         <span className="mono">
-          n=<b>47</b>, Wilson LB <b className="up">47.7%</b>, expectancy
-          <b className="up">+0.51R</b> per trade. <b>Edge is real and stable.</b>
+          {ticker.setupFamily || "Setup"}: n=<b>{s.n}</b>, Wilson LB <b className={lbPct >= 45 ? "up" : "dn"}>{F(lbPct, 1, "%")}</b>, avg <b className={s.medianR >= 0 ? "up" : "dn"}>{F(s.medianR, 2, "R", s.medianR >= 0 ? "+" : "")}</b> per trade. {lbPct >= 45 ? "Clears the 45% capital floor." : s.n < 30 ? "Sub-30 sample — trade at reduced size." : "Below the 45% floor — quarantine candidate."} All from setup_family_stats.
         </span>
       </div>
     </div>
