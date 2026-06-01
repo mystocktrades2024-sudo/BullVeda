@@ -18,7 +18,14 @@ ROOT="/Volumes/MyMacDisk/Claude Skills/SwingTrade"
 cd "$ROOT" || exit 1
 LOG="$ROOT/cache/logs/nightly_full_enrich.log"
 mkdir -p "$ROOT/cache/logs"
-echo "==== nightly full-universe enrich — $(date) ====" >> "$LOG"
+
+# launchd jobs inherit a low file-descriptor soft limit (~256). The full-universe
+# enrich (3500 tickers) opens far more concurrent sockets/files than the daily
+# top-1000 scan and exhausts it → "OSError: [Errno 24] Too many open files"
+# (crashed 2026-06-01). Raise the soft limit (hard limit is unlimited on this host).
+ulimit -n 10240 2>/dev/null || ulimit -Sn 10240 2>/dev/null || true
+
+echo "==== nightly full-universe enrich — $(date) (fd limit $(ulimit -n)) ====" >> "$LOG"
 
 # Deep-enrich the whole ranked universe this run (overrides config max_enrichment_tickers).
 export MAX_ENRICHMENT_OVERRIDE=3500
