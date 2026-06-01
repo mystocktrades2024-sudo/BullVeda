@@ -13527,23 +13527,92 @@ function TchNum(v, d, dec) {
 
 const { useMemo: useMemoTL } = React;
 
+// ── Technicals indicator engine — all computed from REAL /api/ohlcv bars {t,o,c,hi,lo,v} ──
+function _tlLast(a) { return a && a.length ? a[a.length - 1] : null; }
+function tlIndicators(bars) {
+  if (!bars || bars.length < 30) return null;
+  const n = bars.length, c = bars.map(b => b.c), h = bars.map(b => b.hi), l = bars.map(b => b.lo), v = bars.map(b => b.v);
+  const last = bars[n - 1], px = last.c;
+  // RSI(14) Wilder
+  let g = 0, ls = 0; for (let i = n - 14; i < n; i++) { const d = c[i] - c[i - 1]; if (d >= 0) g += d; else ls -= d; }
+  const rsi = ls === 0 ? 100 : 100 - 100 / (1 + (g / 14) / (ls / 14));
+  // moving averages
+  const ema9 = _tlLast(pvEMA(c, 9)), ema21 = _tlLast(pvEMA(c, 21)), ema50 = _tlLast(pvEMA(c, 50)), ema100 = _tlLast(pvEMA(c, 100));
+  const sma20 = _tlLast(pvSMA(c, 20)), sma50 = _tlLast(pvSMA(c, 50)), sma200 = n >= 200 ? _tlLast(pvSMA(c, 200)) : null;
+  // MACD(12,26,9)
+  const e12 = pvEMA(c, 12), e26 = pvEMA(c, 26), macdLine = e12.map((x, i) => x - e26[i]), sig = pvEMA(macdLine, 9);
+  const macd = macdLine[n - 1], macdSig = sig[n - 1], macdHist = macd - macdSig;
+  // Stochastic(14,3)
+  const sk = []; for (let i = 13; i < n; i++) { const hh = Math.max(...h.slice(i - 13, i + 1)), ll = Math.min(...l.slice(i - 13, i + 1)); sk.push(hh === ll ? 50 : ((c[i] - ll) / (hh - ll)) * 100); }
+  const stochK = _tlLast(sk), stochD = sk.length >= 3 ? (sk[sk.length - 1] + sk[sk.length - 2] + sk[sk.length - 3]) / 3 : stochK;
+  // ADX(14) Wilder
+  let tr14 = 0, pdm14 = 0, ndm14 = 0; const diN = 14;
+  for (let i = n - diN; i < n; i++) { const up = h[i] - h[i - 1], dn = l[i - 1] - l[i]; const pdm = (up > dn && up > 0) ? up : 0, ndm = (dn > up && dn > 0) ? dn : 0; const tr = Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1])); tr14 += tr; pdm14 += pdm; ndm14 += ndm; }
+  const pDI = tr14 ? (pdm14 / tr14) * 100 : 0, mDI = tr14 ? (ndm14 / tr14) * 100 : 0;
+  const adx = (pDI + mDI) ? Math.abs(pDI - mDI) / (pDI + mDI) * 100 : 0;
+  // MFI(14)
+  let pmf = 0, nmf = 0; for (let i = n - 14; i < n; i++) { const tp = (h[i] + l[i] + c[i]) / 3, tpPrev = (h[i - 1] + l[i - 1] + c[i - 1]) / 3, rmf = tp * v[i]; if (tp > tpPrev) pmf += rmf; else nmf += rmf; }
+  const mfi = nmf === 0 ? 100 : 100 - 100 / (1 + pmf / nmf);
+  // CMF(20)
+  let mfv = 0, vol20 = 0; for (let i = n - 20; i < n; i++) { const rng = h[i] - l[i]; const m = rng ? ((c[i] - l[i]) - (h[i] - c[i])) / rng : 0; mfv += m * v[i]; vol20 += v[i]; }
+  const cmf = vol20 ? mfv / vol20 : 0;
+  // ATR(14), Bollinger %B(20,2)
+  const atr = _tlLast(pvATR(bars, 14));
+  const sd20 = _tlLast(pvStdev(c, 20)); const bbU = sma20 != null ? sma20 + 2 * sd20 : null, bbL = sma20 != null ? sma20 - 2 * sd20 : null;
+  const bbB = (bbU != null && bbU !== bbL) ? (px - bbL) / (bbU - bbL) : null;
+  // OBV + slope, RVOL
+  let obv = 0; const obvSeries = [0]; for (let i = 1; i < n; i++) { obv += c[i] > c[i - 1] ? v[i] : c[i] < c[i - 1] ? -v[i] : 0; obvSeries.push(obv); }
+  const obvSlope = obvSeries[n - 1] - (obvSeries[n - 11] || 0);
+  const avgV20 = _tlLast(pvSMA(v, 20)); const rvol = avgV20 ? last.v / avgV20 : null;
+  // A/D read from CMF
+  const ad = cmf > 0.05 ? "ACCUM." : cmf < -0.05 ? "DISTRIB." : "NEUTRAL";
+  // 52w hi/lo from window
+  const hi52 = Math.max(...h), lo52 = Math.min(...l);
+  return { px, n, rsi, ema9, ema21, ema50, ema100, sma20, sma50, sma200, macd, macdSig, macdHist,
+    stochK, stochD, adx, pDI, mDI, mfi, cmf, atr, bbB, bbU, bbL, obv, obvSlope, ad, rvol, avgV20, lastV: last.v, hi52, lo52, bars };
+}
+// SR ladder from real bars: volume-profile POC/VA + recent swing pivots + plan levels
+function tlSRLevels(bars, ticker) {
+  const out = [];
+  if (bars && bars.length >= 20) {
+    const h = bars.map(b => b.hi), l = bars.map(b => b.lo);
+    // recent swing highs/lows (5-bar fractals) over last ~60 bars
+    const start = Math.max(2, bars.length - 60);
+    for (let i = start; i < bars.length - 2; i++) {
+      if (h[i] > h[i - 1] && h[i] > h[i - 2] && h[i] > h[i + 1] && h[i] > h[i + 2]) out.push({ price: h[i], kind: "swing high" });
+      if (l[i] < l[i - 1] && l[i] < l[i - 2] && l[i] < l[i + 1] && l[i] < l[i + 2]) out.push({ price: l[i], kind: "swing low" });
+    }
+  }
+  // plan levels from the real ticker row
+  const pin = (p, k) => { const n = num(p); if (n != null) out.push({ price: n, kind: k }); };
+  pin(ticker && (ticker.t2 || ticker.target2), "target 2"); pin(ticker && (ticker.t1 || ticker.target1), "target 1");
+  pin(ticker && ticker.pivot, "pivot"); pin(ticker && ticker.stop, "hard stop");
+  // dedup near-equal levels, sort desc
+  const dedup = []; out.sort((a, b) => b.price - a.price).forEach(x => { if (!dedup.some(d => Math.abs(d.price - x.price) / x.price < 0.004)) dedup.push(x); });
+  return dedup;
+}
 function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("tl-1"); const s2 = useStateToggle("tl-2");
   const s3 = useStateToggle("tl-3"); const s4 = useStateToggle("tl-4");
   const s5 = useStateToggle("tl-5"); const s6 = useStateToggle("tl-6");
   const s7 = useStateToggle("tl-7"); const s8 = useStateToggle("tl-8");
+  // REAL indicators from /api/ohlcv
+  const ox = usePvOhlcv(ticker && ticker.symbol);
+  const T = React.useMemo(() => tlIndicators(ox.bars), [ox.bars]);
+  const loading = ox.state === "loading";
 
   return (
     <div className="lens lens--tech">
       {window.LensSummaryBar && <LensSummaryBar ticker={ticker} mode={mode} kind="technicals" />}
       <TechHero ticker={ticker} mode={mode} heroStyle={heroStyle} sizeCat={sizeCat} />
+      {!T && <div className="lens-pad mono dim2" style={{ padding: "8px 0" }}>{loading ? "Loading live OHLCV for indicators…" : `Indicators need ≥30 daily bars — /api/ohlcv returned ${ox.state === "error" ? "an error" : "too few bars"} for ${ticker && ticker.symbol}.`}</div>}
 
       <div className="lens-section">
         <SectionHeader n={1} title="Indicator Dashboard"
           sub="RSI · MACD · Stoch · ADX · MFI · CMF · cross-confirms"
           style={headerStyle} right={<StateToggle name="tl-1" />} />
         <StateWrap state={s1.value} source="EODHD · daily OHLC + computed">
-          <div className="lens-pad"><IndicatorDash ticker={ticker} /></div>
+          <div className="lens-pad"><IndicatorDash T={T} /></div>
         </StateWrap>
       </div>
 
@@ -13552,7 +13621,7 @@ function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
           sub="stacked-bullish · price above all major MAs"
           style={headerStyle} right={<StateToggle name="tl-2" />} />
         <StateWrap state={s2.value} source="computed · 200d window">
-          <div className="lens-pad"><MAStack ticker={ticker} /></div>
+          <div className="lens-pad"><MAStack T={T} ticker={ticker} /></div>
         </StateWrap>
       </div>
 
@@ -13565,7 +13634,7 @@ function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
             <button className="tl-xlink mono" onClick={() => window.__setLens && window.__setLens("patterns")}>
               ↗ Open <b>Patterns</b> for the 14-theory confluence engine (Wyckoff · Elliott · Fib · Harmonic …) — single source of truth for setups
             </button>
-            <PatternMatrix />
+            <PatternMatrix T={T} ticker={ticker} />
           </div>
         </StateWrap>
       </div>
@@ -13575,7 +13644,7 @@ function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
           sub="VWAP · Fibs · pivots · prior highs · option-OI walls"
           style={headerStyle} right={<StateToggle name="tl-4" />} />
         <StateWrap state={s4.value} source="6-source confluence engine">
-          <div className="lens-pad"><SRLadder ticker={ticker} /></div>
+          <div className="lens-pad"><SRLadder T={T} ticker={ticker} /></div>
         </StateWrap>
       </div>
 
@@ -13584,7 +13653,7 @@ function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
           sub="RVOL · OBV · MFI · pocket-pivot · accumulation/distribution"
           style={headerStyle} right={<StateToggle name="tl-5" />} />
         <StateWrap state={s5.value} source="EODHD · intraday + daily">
-          <div className="lens-pad"><VolumeAnalytics /></div>
+          <div className="lens-pad"><VolumeAnalytics T={T} /></div>
         </StateWrap>
       </div>
 
@@ -13602,7 +13671,7 @@ function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
           sub="same setup across 4 macro regimes"
           style={headerStyle} right={<StateToggle name="tl-7" />} />
         <StateWrap state={s7.value} source="regime engine · VIX × trend × yield-slope">
-          <div className="lens-pad"><RegimeEdge /></div>
+          <div className="lens-pad"><RegimeEdge ticker={ticker} /></div>
         </StateWrap>
       </div>
 
@@ -13612,13 +13681,17 @@ function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
           style={headerStyle} right={<StateToggle name="tl-8" />} />
         <StateWrap state={s8.value} source="all-lens aggregator">
           <div className="lens-pad">
-            <CrossLens lead="cy" cells={[
-              { lens: "Technicals", verdict: "PASS",   tone: "gn", note: "RSI 64 · MACD+ · VWAP-reclaim" },
-              { lens: "Patterns",   verdict: "FLAG·B", tone: "gn", note: "8-wk base · vol-dry pullback" },
-              { lens: "SMC",        verdict: "OB+BoS", tone: "gn", note: "BoS @ $66 · OB held $63" },
-              { lens: "Risk",       verdict: "OK",     tone: "gn", note: "VaR(1d) −2.1%" },
-              { lens: "ML Edge",    verdict: "+0.18",  tone: "gn", note: "hit-net edge · cal-OK" },
-            ]} />
+            <CrossLens lead="cy" cells={(() => {
+              const stk = T ? (T.ema9>T.ema21 && T.ema21>T.ema50 ? "STACKED" : T.px>T.ema50 ? "ABOVE 50" : "BELOW 50") : "—";
+              const stkT = T ? (T.ema9>T.ema21 && T.ema21>T.ema50 ? "gn" : T.px>T.ema50 ? "amb" : "rd") : "ink";
+              const momT = T ? (T.macdHist>=0 && T.rsi>=50 ? "gn" : T.macdHist<0 && T.rsi<50 ? "rd" : "amb") : "ink";
+              return [
+              { lens: "MA Stack",  verdict: stk, tone: stkT, note: T ? `EMA9/21/50 ${pvFmt(T.ema9,2)}/${pvFmt(T.ema21,2)}/${pvFmt(T.ema50,2)}` : "—" },
+              { lens: "Momentum",  verdict: T ? (T.rsi>=50?"BULL":"BEAR") : "—", tone: momT, note: T ? `RSI ${pvFmt(T.rsi,0)} · MACD ${T.macdHist>=0?"+":""}${pvFmt(T.macdHist,2)}` : "—" },
+              { lens: "Trend",     verdict: T ? (T.adx>=25?"TRENDING":"CHOP") : "—", tone: T&&T.adx>=25?"gn":"amb", note: T ? `ADX ${pvFmt(T.adx,1)} · +DI ${pvFmt(T.pDI,0)}/−DI ${pvFmt(T.mDI,0)}` : "—" },
+              { lens: "Volume",    verdict: T ? T.ad : "—", tone: T && T.cmf>0 ? "gn" : T && T.cmf<0 ? "rd" : "ink", note: T ? `RVOL ${pvFmt(T.rvol,2)}× · CMF ${T.cmf>=0?"+":""}${pvFmt(T.cmf,2)}` : "—" },
+              { lens: "Setup",     verdict: ticker.setupStats && ticker.setupStats.wilsonLB!=null ? "EDGE" : "—", tone: "ink", note: ticker.setupStats && ticker.setupStats.wilsonLB!=null ? `Wilson LB ${(ticker.setupStats.wilsonLB*100).toFixed(0)}%` : "setup_stats —" },
+            ]; })()} />
           </div>
         </StateWrap>
       </div>
@@ -13626,8 +13699,7 @@ function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
       <div className="lens-call">
         <span className="label-cap">The Read · Technicals</span>
         <span className="mono">
-          Stacked-bullish · breakout confirmed if close &gt; <b className="copper">$66.40</b>
-          on &gt; <b>1.30× RVOL</b>. Stop <b className="dn">$62.40</b>. R-multiple 1.74.
+          {T ? <>{T.ema9>T.ema21 && T.ema21>T.ema50 ? "Stacked-bullish" : T.px>T.ema50 ? "Above 50-EMA" : "Below 50-EMA"} · RSI <b>{pvFmt(T.rsi,0)}</b> · ADX <b>{pvFmt(T.adx,1)}</b> ({T.adx>=25?"trending":"choppy"}) · RVOL <b>{pvFmt(T.rvol,2)}×</b>. {(num(ticker.pivot)!=null)?<>Breakout pivot <b className="copper">${pvFmt(ticker.pivot,2)}</b>. </>:null}{(num(ticker.stop)!=null)?<>Stop <b className="dn">${pvFmt(ticker.stop,2)}</b>.</>:null}</> : "Live OHLCV indicators load here — nothing fabricated when bars are unavailable."}
         </span>
       </div>
     </div>
@@ -13743,25 +13815,29 @@ function MiniChart({ ticker }) {
 }
 
 // ─── §1 Indicator dashboard ──────────────────────────────────────────
-function IndicatorDash({ ticker }) {
-  // RSI/price divergence detector — derived per-ticker so it varies by name
-  const P = (ticker && ticker.pillars) || {};
-  const tech = P.technical ?? 60, edge = P.edge ?? 60;
-  const rsiSlope = tech - 55, priceSlope = edge - 55;
-  const bearDiv = priceSlope > 4 && rsiSlope < -2;
-  const bullDiv = priceSlope < -4 && rsiSlope > 2;
-  const div = bearDiv ? { t: "BEARISH DIVERGENCE", tone: "rd", note: "price making highs, RSI/MACD not confirming — momentum fading" }
-            : bullDiv ? { t: "BULLISH DIVERGENCE", tone: "gn", note: "price making lows, momentum turning up — reversal setup" }
-            : { t: "NO DIVERGENCE", tone: "gn", note: "oscillators confirm price — trend intact" };
+function IndicatorDash({ T }) {
+  if (!T) return <div className="mono dim2" style={{ fontSize: 12 }}>Indicators load from live OHLCV.</div>;
+  const tone = (cond) => cond === true ? "gn" : cond === false ? "rd" : "amb";
+  const div = (() => {
+    // real RSI vs price divergence over last ~10 bars
+    const b = T.bars, n = b.length;
+    if (n < 12) return { t: "NO DIVERGENCE", tone: "gn", note: "insufficient history" };
+    const pHi = b[n - 1].c > Math.max(...b.slice(n - 11, n - 1).map(x => x.c));
+    const pLo = b[n - 1].c < Math.min(...b.slice(n - 11, n - 1).map(x => x.c));
+    if (pHi && T.rsi < 60 && T.macdHist < 0) return { t: "BEARISH DIVERGENCE", tone: "rd", note: "price at highs, momentum not confirming" };
+    if (pLo && T.rsi > 40 && T.macdHist > 0) return { t: "BULLISH DIVERGENCE", tone: "gn", note: "price at lows, momentum turning up" };
+    return { t: "NO DIVERGENCE", tone: "gn", note: "oscillators confirm price" };
+  })();
+  const atrPct = T.atr != null && T.px ? (T.atr / T.px * 100) : null;
   const indicators = [
-    { name: "RSI(14)",       v: 64.2,  state: "bullish", note: ">50, not overbought", tone: "gn" },
-    { name: "MACD(12,26,9)", v: "+0.42", state: "bullish", note: "fresh cross 3d ago", tone: "gn" },
-    { name: "Stoch(14,3,3)", v: "76 / 71", state: "rising", note: "no divergence", tone: "gn" },
-    { name: "ADX(14)",       v: 28.4,  state: "trending", note: ">25 = trend", tone: "gn" },
-    { name: "MFI(14)",       v: 62.1,  state: "neutral", note: "money-flow rising", tone: "gn" },
-    { name: "CMF(20)",       v: "+0.14", state: "accumulation", note: "buyers control", tone: "gn" },
-    { name: "ATR(14)",       v: "1.24 ($)", state: "stable", note: "1.8% of price", tone: "ink" },
-    { name: "BB %B(20,2)",   v: 0.71,  state: "upper third", note: "no squeeze", tone: "amb" },
+    { name: "RSI(14)", v: pvFmt(T.rsi, 1), state: T.rsi >= 70 ? "overbought" : T.rsi <= 30 ? "oversold" : T.rsi >= 50 ? "bullish" : "bearish", note: T.rsi >= 50 ? ">50" : "<50", tone: tone(T.rsi >= 50 && T.rsi < 70) },
+    { name: "MACD(12,26,9)", v: (T.macdHist >= 0 ? "+" : "") + pvFmt(T.macdHist, 2), state: T.macdHist >= 0 ? "bullish" : "bearish", note: T.macd >= T.macdSig ? "above signal" : "below signal", tone: tone(T.macdHist >= 0) },
+    { name: "Stoch(14,3)", v: pvFmt(T.stochK, 0) + " / " + pvFmt(T.stochD, 0), state: T.stochK >= 80 ? "overbought" : T.stochK <= 20 ? "oversold" : "neutral", note: T.stochK >= T.stochD ? "rising" : "falling", tone: tone(T.stochK < 80 && T.stochK >= T.stochD) },
+    { name: "ADX(14)", v: pvFmt(T.adx, 1), state: T.adx >= 25 ? "trending" : "choppy", note: T.pDI >= T.mDI ? "+DI lead" : "−DI lead", tone: tone(T.adx >= 25 && T.pDI >= T.mDI) },
+    { name: "MFI(14)", v: pvFmt(T.mfi, 1), state: T.mfi >= 80 ? "overbought" : T.mfi <= 20 ? "oversold" : "neutral", note: T.mfi >= 50 ? "inflow" : "outflow", tone: tone(T.mfi >= 50 && T.mfi < 80) },
+    { name: "CMF(20)", v: (T.cmf >= 0 ? "+" : "") + pvFmt(T.cmf, 2), state: T.cmf > 0.05 ? "accumulation" : T.cmf < -0.05 ? "distribution" : "neutral", note: T.cmf >= 0 ? "buyers" : "sellers", tone: tone(T.cmf > 0) },
+    { name: "ATR(14)", v: pvFmt(T.atr, 2) + " $", state: "volatility", note: atrPct != null ? pvFmt(atrPct, 1) + "% of px" : "—", tone: "ink" },
+    { name: "BB %B(20,2)", v: pvFmt(T.bbB, 2), state: T.bbB == null ? "—" : T.bbB > 1 ? "above band" : T.bbB > 0.8 ? "upper" : T.bbB < 0.2 ? "lower" : "mid", note: T.bbB != null && (T.bbB > 1 || T.bbB < 0) ? "extended" : "in band", tone: T.bbB != null && T.bbB > 0.8 ? "amb" : "ink" },
   ];
   return (
     <div>
@@ -13779,68 +13855,62 @@ function IndicatorDash({ ticker }) {
         </div>
       ))}
       </div>
+      <div className="mono dim2" style={{ fontSize: 10, marginTop: 6 }}>Computed live from {T.n} daily bars · /api/ohlcv.</div>
     </div>
   );
 }
 
-// ─── §2 MA stack ─────────────────────────────────────────────────────
-function MAStack({ ticker }) {
-  const rows = [
-    { ma: "Price",   v: ticker.price, tone: "copper" },
-    { ma: "EMA 9",   v: 66.80, tone: "gn", delta: "+0.62" },
-    { ma: "EMA 21",  v: 65.10, tone: "gn", delta: "+2.32" },
-    { ma: "SMA 50",  v: 64.10, tone: "gn", delta: "+3.32" },
-    { ma: "EMA 100", v: 61.20, tone: "gn", delta: "+6.22" },
-    { ma: "SMA 200", v: 58.40, tone: "gn", delta: "+9.02" },
-  ];
+// ─── §2 MA stack (real EMAs/SMAs from bars) ──────────────────────────
+function MAStack({ T, ticker }) {
+  if (!T) return <div className="mono dim2" style={{ fontSize: 12 }}>MA stack loads from live OHLCV.</div>;
+  const px = T.px;
+  const mk = (ma, v) => v == null ? null : { ma, v, delta: px - v };
+  const rows = [{ ma: "Price", v: px, price: true }, mk("EMA 9", T.ema9), mk("EMA 21", T.ema21), mk("SMA 50", T.sma50), mk("EMA 100", T.ema100), mk("SMA 200", T.sma200)].filter(Boolean);
+  const stacked = T.ema9 > T.ema21 && T.ema21 > T.ema50 && (T.sma200 == null || T.px > T.sma200);
   return (
     <div className="ma-stack">
       <div className="ma-stack-grid">
         {rows.map((r, i) => (
           <div key={i} className="ma-row">
             <span className="mono ma-label">{r.ma}</span>
-            <span className={`mono kpi-tone--${r.tone} ma-v`}>${r.v.toFixed(2)}</span>
-            {r.delta && <span className="mono ma-delta up">{r.delta}</span>}
+            <span className={`mono kpi-tone--${r.price ? "copper" : r.delta >= 0 ? "gn" : "rd"} ma-v`}>${r.v.toFixed(2)}</span>
+            {!r.price && <span className={`mono ma-delta ${r.delta >= 0 ? "up" : "dn"}`}>{r.delta >= 0 ? "+" : ""}{r.delta.toFixed(2)}</span>}
           </div>
         ))}
       </div>
       <div className="ma-summary">
-        <Pill tone="gn" dot>STACKED-BULLISH</Pill>
-        <span className="mono dim2">Every MA below price · slopes positive · last cross 32d ago.</span>
+        <Pill tone={stacked ? "gn" : px > T.ema50 ? "amb" : "rd"} dot>{stacked ? "STACKED-BULLISH" : px > T.ema50 ? "ABOVE 50-EMA" : "BELOW 50-EMA"}</Pill>
+        <span className="mono dim2">{stacked ? "Price above all MAs · EMA9>21>50." : px > T.ema50 ? "Above mid MA, not fully stacked." : "Below 50-EMA — trend weak."}</span>
       </div>
     </div>
   );
 }
 
-// ─── §3 Pattern matrix ───────────────────────────────────────────────
-function PatternMatrix() {
+// ─── §3 Pattern quick-read (real signals from bars; full theory in Patterns lens) ───
+function PatternMatrix({ T, ticker }) {
+  if (!T) return <div className="mono dim2" style={{ fontSize: 12 }}>Quick reads load from live OHLCV.</div>;
+  const px = T.px, pos52 = (T.hi52 > T.lo52) ? (px - T.lo52) / (T.hi52 - T.lo52) : 0.5;
+  const bbWidth = (T.bbU != null && T.sma20) ? (T.bbU - T.bbL) / T.sma20 : null;
   const rows = [
-    { method: "Cup & Handle",   det: "FORMING",  conf: 0.46, note: "handle 6d in" },
-    { method: "VCP (Minervini)", det: "CONFIRMED", conf: 0.74, note: "5 contractions · vol-dry" },
-    { method: "Flag",           det: "—",        conf: 0,    note: "no flag context" },
-    { method: "Breakout-Base #2",det: "ACTIVE",  conf: 0.81, note: "pivot $66.18 · vol dry" },
-    { method: "Wyckoff",        det: "PHASE D",  conf: 0.62, note: "spring + SOS confirmed" },
-    { method: "Elliott (impulse)", det: "WAVE 3", conf: 0.51, note: "of 5 · target $74.20" },
+    { method: "EMA trend stack", det: T.ema9 > T.ema21 && T.ema21 > T.ema50 ? "STACKED" : px > T.ema50 ? "PARTIAL" : "—", conf: T.ema9 > T.ema21 && T.ema21 > T.ema50 ? 1 : px > T.ema50 ? 0.5 : 0, note: `EMA9/21/50 ${pvFmt(T.ema9,1)}/${pvFmt(T.ema21,1)}/${pvFmt(T.ema50,1)}` },
+    { method: "Momentum (RSI+MACD)", det: T.rsi >= 50 && T.macdHist >= 0 ? "BULLISH" : T.rsi < 50 && T.macdHist < 0 ? "BEARISH" : "MIXED", conf: T.rsi >= 50 && T.macdHist >= 0 ? 0.8 : 0.4, note: `RSI ${pvFmt(T.rsi,0)} · MACD ${T.macdHist>=0?"+":""}${pvFmt(T.macdHist,2)}` },
+    { method: "Trend strength (ADX)", det: T.adx >= 25 ? "TRENDING" : "CHOPPY", conf: Math.min(1, T.adx / 50), note: `ADX ${pvFmt(T.adx,1)} · ${T.pDI>=T.mDI?"+DI":"−DI"} lead` },
+    { method: "BB squeeze", det: bbWidth != null && bbWidth < 0.08 ? "SQUEEZE" : "—", conf: bbWidth != null ? Math.max(0, 1 - bbWidth / 0.15) : 0, note: bbWidth != null ? `band width ${(bbWidth*100).toFixed(1)}%` : "—" },
+    { method: "52-wk position", det: pos52 >= 0.9 ? "NEAR HIGH" : pos52 <= 0.1 ? "NEAR LOW" : "MID-RANGE", conf: pos52, note: `${(pos52*100).toFixed(0)}% of 52w range` },
+    { method: "Volume / accumulation", det: T.cmf > 0.05 ? "ACCUM." : T.cmf < -0.05 ? "DISTRIB." : "NEUTRAL", conf: Math.min(1, Math.abs(T.cmf) * 4), note: `RVOL ${pvFmt(T.rvol,2)}× · CMF ${T.cmf>=0?"+":""}${pvFmt(T.cmf,2)}` },
   ];
   return (
     <div className="pat-tbl">
       <div className="pat-row pat-row--hdr">
-        <span className="label-cap">Method</span>
-        <span className="label-cap">Detected</span>
-        <span className="label-cap" style={{ textAlign: "right" }}>Conf</span>
-        <span className="label-cap">Note</span>
+        <span className="label-cap">Signal</span><span className="label-cap">Read</span>
+        <span className="label-cap" style={{ textAlign: "right" }}>Strength</span><span className="label-cap">Detail</span>
       </div>
       {rows.map((r, i) => (
         <div key={i} className="pat-row">
           <span className="mono">{r.method}</span>
-          <span className={`mono ${r.det === "—" ? "dim" : r.det === "CONFIRMED" || r.det === "ACTIVE" ? "up" : "copper"}`}>{r.det}</span>
+          <span className={`mono ${r.det === "—" ? "dim" : /BULL|STACK|TRENDING|ACCUM|NEAR HIGH|SQUEEZE/.test(r.det) ? "up" : /BEAR|DISTRIB|NEAR LOW/.test(r.det) ? "dn" : "copper"}`}>{r.det}</span>
           <span className="mono" style={{ textAlign: "right" }}>
-            {r.conf ? (
-              <span className="pat-conf">
-                <span className="pat-conf-bar"><span style={{ width: `${r.conf * 100}%` }} /></span>
-                {(r.conf * 100).toFixed(0)}%
-              </span>
-            ) : "—"}
+            {r.conf ? <span className="pat-conf"><span className="pat-conf-bar"><span style={{ width: `${r.conf * 100}%` }} /></span>{(r.conf * 100).toFixed(0)}%</span> : "—"}
           </span>
           <span className="mono dim">{r.note}</span>
         </div>
@@ -13849,61 +13919,55 @@ function PatternMatrix() {
   );
 }
 
-// ─── §4 S/R Confluence ───────────────────────────────────────────────
-function SRLadder({ ticker }) {
-  const rows = [
-    { px: 74.20, lbl: "R3 · Elliott wv-3 target",       sources: ["EW", "Fib"], strong: true },
-    { px: 72.80, lbl: "T1 · 0.618 extension",           sources: ["Fib", "VWAP"] },
-    { px: 70.40, lbl: "Prior swing high",               sources: ["Pivot", "PriorH"] },
-    { px: 68.10, lbl: "0.382 ext.",                     sources: ["Fib"] },
-    { px: 67.42, lbl: "Current price",                  sources: ["—"], current: true },
-    { px: 66.18, lbl: "Pivot · base #2 high",           sources: ["Pivot", "Volume"], strong: true },
-    { px: 65.10, lbl: "Day-VWAP · also 5-day VAH",      sources: ["VWAP", "Profile"] },
-    { px: 64.10, lbl: "50-DMA · rising",                sources: ["MA"] },
-    { px: 62.40, lbl: "Hard stop · last LL",            sources: ["Pivot", "ATR"], strong: true, stop: true },
-    { px: 60.00, lbl: "$60 strike OI wall",             sources: ["Opt"] },
-  ];
+// ─── §4 S/R Confluence (real swing pivots + plan levels) ─────────────
+function SRLadder({ T, ticker }) {
+  const bars = T && T.bars;
+  const levels = tlSRLevels(bars, ticker);
+  const px = (T && T.px) || num(ticker && ticker.price);
+  if (!levels.length || px == null) return <div className="mono dim2" style={{ fontSize: 12 }}>S/R levels load from live OHLCV + plan.</div>;
+  // insert current price marker in order
+  const rows = levels.slice();
+  if (!rows.some(r => Math.abs(r.price - px) / px < 0.002)) rows.push({ price: px, kind: "current price", current: true });
+  rows.sort((a, b) => b.price - a.price);
   return (
     <div className="sr-ladder">
-      {rows.map((r, i) => (
-        <div key={i} className={`sr-row ${r.current ? "sr-current" : ""} ${r.stop ? "sr-stop" : ""} ${r.strong ? "sr-strong" : ""}`}>
-          <span className={`mono sr-px ${r.stop ? "dn" : r.current ? "copper" : ""}`}>${r.px.toFixed(2)}</span>
-          <span className="mono sr-lbl">{r.lbl}</span>
-          <span className="sr-sources">
-            {r.sources.map((s, j) => s !== "—" ? <span key={j} className="sr-src mono">{s}</span> : null)}
-          </span>
-        </div>
-      ))}
+      {rows.map((r, i) => {
+        const stop = /stop/.test(r.kind), strong = /target|pivot|stop/.test(r.kind);
+        return (
+          <div key={i} className={`sr-row ${r.current ? "sr-current" : ""} ${stop ? "sr-stop" : ""} ${strong ? "sr-strong" : ""}`}>
+            <span className={`mono sr-px ${stop ? "dn" : r.current ? "copper" : ""}`}>${r.price.toFixed(2)}</span>
+            <span className="mono sr-lbl">{r.kind}{r.current ? "" : px && r.price > px ? " · resistance" : " · support"}</span>
+            <span className="sr-sources"><span className="sr-src mono">{/target|pivot|stop/.test(r.kind) ? "plan" : "swing"}</span></span>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 // ─── §5 Volume analytics ─────────────────────────────────────────────
-function VolumeAnalytics() {
+function VolumeAnalytics({ T }) {
+  if (!T) return <div className="mono dim2" style={{ fontSize: 12 }}>Volume analytics load from live OHLCV.</div>;
+  const fmtV = (x) => x == null ? "—" : x >= 1e6 ? (x / 1e6).toFixed(2) + "M" : x >= 1e3 ? (x / 1e3).toFixed(0) + "K" : String(Math.round(x));
+  const bars = T.bars.slice(-32);
+  const maxV = Math.max(...bars.map(b => b.v), 1);
   return (
     <div className="vol-block">
       <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <KpiTile label="RVOL today" value="1.18×" tone="amb" sub="below pivot trigger (≥1.3×)" />
-        <KpiTile label="20d avg vol" value="1.12M" tone="ink" sub="sh/day" />
-        <KpiTile label="OBV trend" value="↑ rising" tone="gn" sub="14-day slope positive" />
-        <KpiTile label="A/D line" value="ACCUM." tone="gn" sub="3 of last 5 weeks" />
+        <KpiTile label="RVOL today" value={T.rvol != null ? pvFmt(T.rvol, 2) + "×" : "—"} tone={T.rvol >= 1.3 ? "gn" : "amb"} sub={T.rvol >= 1.3 ? "above 1.3× trigger" : "below pivot trigger (≥1.3×)"} />
+        <KpiTile label="20d avg vol" value={fmtV(T.avgV20)} tone="ink" sub="sh/day" />
+        <KpiTile label="OBV trend" value={T.obvSlope > 0 ? "↑ rising" : T.obvSlope < 0 ? "↓ falling" : "→ flat"} tone={T.obvSlope > 0 ? "gn" : T.obvSlope < 0 ? "rd" : "ink"} sub="10-day slope" />
+        <KpiTile label="A/D (CMF)" value={T.ad} tone={T.cmf > 0.05 ? "gn" : T.cmf < -0.05 ? "rd" : "ink"} sub={`CMF ${T.cmf >= 0 ? "+" : ""}${pvFmt(T.cmf, 2)}`} />
       </div>
       <div className="vol-bars">
-        {Array.from({ length: 32 }, (_, i) => {
-          const v = 0.4 + Math.abs(Math.sin(i * 0.6)) * 0.6 + (i > 26 ? 0.3 : 0);
-          const up = (i % 3) !== 1;
-          return (
-            <div
-              key={i}
-              className={`vol-bar ${up ? "up" : "dn"} ${i === 28 ? "is-pivot" : ""}`}
-              style={{ height: `${v * 100}%` }}
-              title={`session ${i}`}
-            />
-          );
+        {bars.map((b, i) => {
+          const up = i === 0 ? true : b.c >= bars[i - 1].c;
+          const pivot = b.v >= maxV * 0.95;
+          return <div key={i} className={`vol-bar ${up ? "up" : "dn"} ${pivot ? "is-pivot" : ""}`} style={{ height: `${(b.v / maxV) * 100}%` }} title={`vol ${fmtV(b.v)}`} />;
         })}
       </div>
       <div className="vol-note mono dim2">
-        Last 32 sessions · pivot tested on lower-than-avg volume (dry pullback = constructive).
+        Last {bars.length} sessions · real daily volume (/api/ohlcv). RVOL {T.rvol != null ? pvFmt(T.rvol, 2) + "×" : "—"} vs 20-day average.
       </div>
     </div>
   );
@@ -13912,23 +13976,23 @@ function VolumeAnalytics() {
 // ─── §6 Statistical backbone (Wilson) ────────────────────────────────
 function StatBackbone({ ticker }) {
   const s = ticker.setupStats;
+  if (!s || s.n == null) return <div className="mono dim2" style={{ fontSize: 12, padding: 8 }}>No per-setup statistics for this name in the bundle (setup_family_stats). Nothing fabricated.</div>;
+  const F = (v, d, suf = "", pre = "") => (v == null || v !== v) ? "—" : pre + (+v).toFixed(d) + suf;
   return (
     <div className="stat-block">
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <WilsonPill n={s.n} winRate={s.winRate} lb={s.wilsonLB} />
-        <Pill tone="gn" small>PROFIT FACTOR {s.pf.toFixed(2)}</Pill>
-        <Pill tone="copper" small>MEDIAN +{s.medianR.toFixed(2)}R</Pill>
+        {s.pf != null && <Pill tone={s.pf >= 1.3 ? "gn" : "amb"} small>PROFIT FACTOR {s.pf.toFixed(2)}</Pill>}
+        {s.medianR != null && <Pill tone="copper" small>AVG {s.medianR >= 0 ? "+" : ""}{s.medianR.toFixed(2)}R</Pill>}
       </div>
       <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginTop: 12 }}>
-        <KpiTile label="Forward 10d (n=47)" value="+2.4%" tone="gn" sub="median return" />
-        <KpiTile label="Hit rate T1" value="58.5%" tone="gn" sub="of n=47" />
-        <KpiTile label="Avg loser" value="−1.04R" tone="rd" sub="bounded at stop" />
-        <KpiTile label="Edge decay" value="STABLE" tone="gn" sub="last 12-mo block" />
+        <KpiTile label="Sample (n)" value={s.n != null ? String(s.n) : "—"} tone={s.n >= 30 ? "gn" : "amb"} sub={s.n >= 30 ? "≥30 standard" : "<30 preliminary"} />
+        <KpiTile label="Win rate" value={F(s.winRate != null ? s.winRate * 100 : null, 1, "%")} tone="gn" sub="raw WR" />
+        <KpiTile label="Wilson LB" value={F(s.wilsonLB != null ? s.wilsonLB * 100 : null, 1, "%")} tone={s.wilsonLB >= 0.4 ? "gn" : "rd"} sub="95% lower bound" />
+        <KpiTile label="Avg R" value={F(s.medianR, 2, "R", s.medianR >= 0 ? "+" : "")} tone={s.medianR >= 0 ? "gn" : "rd"} sub="per trade" />
       </div>
-      <OutcomeDist ticker={ticker} />
       <div className="stat-note mono dim">
-        Source: setup_stats.json · Wilson 95% lower bound used everywhere.
-        Sample &lt; 30 would flag this section red.
+        Source: setup_family_stats · Wilson 95% lower bound gates capital. Per-trade forward-return distribution and edge-decay series are not carried per-ticker in the bundle → shown only in the Strategies/Track surfaces. Nothing fabricated here.
       </div>
     </div>
   );
@@ -13965,27 +14029,37 @@ function OutcomeDist({ ticker }) {
 }
 
 // ─── §7 Regime-conditional edge ──────────────────────────────────────
-function RegimeEdge() {
-  const regimes = [
-    { name: "Bull · low-VIX",  wr: 0.71, n: 22, pf: 2.40, current: true },
-    { name: "Bull · high-VIX", wr: 0.58, n: 14, pf: 1.62 },
-    { name: "Range",           wr: 0.46, n: 8,  pf: 0.94 },
-    { name: "Bear",            wr: 0.32, n: 3,  pf: 0.41, low: true },
-  ];
+function RegimeEdge({ ticker }) {
+  // Current regime is REAL (from the live bundle). Per-(setup × regime) win-rate breakdown
+  // is NOT carried per-ticker in the bundle → surfaced honestly, not fabricated.
+  const D = (typeof window !== "undefined" && window.__ssData) || {};
+  const reg = D.regime || {};
+  const r4 = reg.regime4 || reg.regime4_raw || "—";
+  const vix = num(reg.vix != null ? reg.vix : (D.market_breadth && D.market_breadth.vix));
+  const labels = ["risk_on_trending", "risk_on_choppy", "risk_off_trending", "panic"];
+  const pretty = { risk_on_trending: "Risk-On Trending", risk_on_choppy: "Risk-On Choppy", risk_off_trending: "Risk-Off", panic: "Panic" };
   return (
-    <div className="reg-grid">
-      {regimes.map((r, i) => (
-        <div key={i} className={`reg-cell ${r.current ? "is-current" : ""} ${r.low ? "is-low" : ""}`}>
-          <div className="reg-name mono">{r.name}</div>
-          {r.current && <div className="reg-pin mono copper">NOW</div>}
-          <div className="reg-wr mono">
-            <span className="reg-wr-v">{(r.wr * 100).toFixed(0)}%</span>
-            <span className="label-cap dim">win-rate · n={r.n}</span>
-          </div>
-          <div className="reg-pf mono dim2">PF {r.pf.toFixed(2)}</div>
-          {r.low && <Pill tone="rd" small>n&lt;30</Pill>}
-        </div>
-      ))}
+    <div>
+      <div className="reg-grid">
+        {labels.map((rk, i) => {
+          const cur = rk === r4;
+          return (
+            <div key={i} className={`reg-cell ${cur ? "is-current" : ""}`}>
+              <div className="reg-name mono">{pretty[rk]}</div>
+              {cur && <div className="reg-pin mono copper">NOW</div>}
+              <div className="reg-wr mono">
+                <span className="reg-wr-v dim2">—</span>
+                <span className="label-cap dim">per-setup WR n/a</span>
+              </div>
+              <div className="reg-pf mono dim2">{cur ? "active regime" : ""}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="stat-note mono dim" style={{ marginTop: 8 }}>
+        Live regime: <b className="copper">{pretty[r4] || r4}</b>{vix != null ? ` · VIX ${vix.toFixed(1)}` : ""}{reg.breadth_pct_50d != null ? ` · breadth ${reg.breadth_pct_50d}%` : ""}.
+        Per-(setup × regime) win-rate breakdown isn't carried per-ticker in the bundle — it lives in the Strategies / Research-Lab surfaces (regime_sharpe_decomp). Shown as — rather than fabricated.
+      </div>
     </div>
   );
 }
