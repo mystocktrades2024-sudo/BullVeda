@@ -6845,7 +6845,84 @@ async def options_chain_api(sym: str):
         "expirations": out_exps,
     }
     _OPTIONS_CHAIN_CACHE[sym] = {"ts": now, "payload": payload}
+    # snapshot today's ATM IV → builds an IV time-series for vol-of-vol (free, in-stack)
+    try:
+        if atm and atm.get("iv") is not None:
+            ivdir = Path("cache/iv_history"); ivdir.mkdir(parents=True, exist_ok=True)
+            fp = ivdir / f"{sym}.jsonl"
+            today = datetime.now().strftime("%Y-%m-%d")
+            last = ""
+            if fp.exists():
+                try:
+                    lines = fp.read_text().strip().splitlines()
+                    if lines: last = json.loads(lines[-1]).get("date", "")
+                except Exception: pass
+            if last != today:
+                with open(fp, "a") as _fh:
+                    _fh.write(json.dumps({"date": today, "iv": round(float(atm["iv"]), 4),
+                                          "spot": spot, "dte": atm.get("dte")}) + "\n")
+    except Exception:
+        pass
     return payload
+
+
+@app.get("/api/iv-history/{sym}")
+async def iv_history_api(sym: str):
+    """ATM-IV time series + vol-of-vol (stdev of daily IV changes, annualized).
+    Built from daily snapshots written by /api/options. Returns empty + n
+    until enough sessions accumulate — honest 'building' state, never faked."""
+    import statistics, math
+    sym = sym.upper().strip()
+    fp = Path("cache/iv_history") / f"{sym}.jsonl"
+    if not fp.exists():
+        return {"sym": sym, "n": 0, "series": [], "vov": None, "note": "no IV snapshots yet"}
+    rows = []
+    for ln in fp.read_text().strip().splitlines():
+        try:
+            r = json.loads(ln)
+            if r.get("iv") is not None: rows.append(r)
+        except Exception: pass
+    ivs = [float(r["iv"]) for r in rows]
+    vov = None
+    if len(ivs) >= 6:
+        # daily log-changes in IV → annualized stdev = "vol of vol"
+        ch = [math.log(ivs[i] / ivs[i - 1]) for i in range(1, len(ivs)) if ivs[i - 1] > 0 and ivs[i] > 0]
+        if len(ch) >= 5:
+            vov = round(statistics.pstdev(ch) * math.sqrt(252) * 100, 1)
+    return {"sym": sym, "n": len(rows), "series": rows[-60:], "vov": vov,
+            "latest_iv": (round(ivs[-1] if ivs[-1] > 5 else ivs[-1] * 100, 1) if ivs else None),
+            "note": None if vov is not None else f"building ({len(rows)}/6+ sessions)"}
+
+
+_RETURNS_CACHE = {}
+
+@app.get("/api/returns")
+async def returns_api(tickers: str = "", periods: str = "5,21,63"):
+    """Batched multi-period % returns from daily bars (cached 1h). Used by the
+    Themes surface to compute real 1w/1m/3m per-theme returns. periods = trading
+    days (5≈1w, 21≈1m, 63≈3m)."""
+    import time as _t
+    from data_fetcher import fetch_ohlcv_with_failover
+    pers = [int(x) for x in periods.split(",") if x.strip().isdigit()] or [5, 21, 63]
+    syms = [s.strip().upper().replace("$", "") for s in tickers.split(",") if s.strip()][:80]
+    out = {}
+    for sym in syms:
+        c = _RETURNS_CACHE.get(sym)
+        if c and (_t.time() - c[0]) < 3600:
+            out[sym] = c[1]; continue
+        try:
+            df, _ = fetch_ohlcv_with_failover(sym, days=int(max(pers) * 1.65) + 25)
+            if df is None or getattr(df, "empty", True):
+                out[sym] = None; continue
+            cl = df["Close"].squeeze()
+            cl = cl.tolist() if hasattr(cl, "tolist") else list(cl)
+            last = cl[-1]; r = {}
+            for p in pers:
+                r["r%d" % p] = round((last / cl[-1 - p] - 1) * 100, 2) if (len(cl) > p and cl[-1 - p]) else None
+            _RETURNS_CACHE[sym] = (_t.time(), r); out[sym] = r
+        except Exception:
+            out[sym] = None
+    return {"returns": out, "periods": pers}
 
 
 @app.post("/api/portfolio/add")
@@ -9819,39 +9896,51 @@ async def options_alerts_check_api():
         return {"alerts": [], "error": str(e)}
 
 
+_SENATE_CACHE = {"data": None, "fetched": 0.0}
+
 @app.get("/api/senate-trades")
 async def senate_trades_api(t: str = "", days: int = 90, limit: int = 50):
     """Senate / Congressional trades for a ticker (or all if t='').
 
-    Source: SenateStockWatcher's free JSON feed at senatestockwatcher.com
-    (public domain). Returns last N filings within `days`.
-    Shape: {trades: [{senator, ticker, type, date, amount_range}]}
+    Source: the Senate Stock Watcher GitHub mirror (free, public-domain JSON).
+    The old S3 buckets now 403; this mirror is the working free feed but is
+    HISTORICAL (last refreshed ~2020) -- so we return the most recent AVAILABLE
+    filings for the ticker (no hard `days` cutoff) and surface `as_of`/`stale`
+    so the UI can label it honestly rather than show a misleading empty window.
+    Fresh real-time congressional data needs a paid API (out of policy).
     """
-    import urllib.request
-    from datetime import datetime, timedelta
+    import urllib.request, time as _time
+    from datetime import datetime
+    def _norm_date(x):
+        x = (x or "").strip()
+        if not x: return ""
+        if "/" in x:
+            try:
+                m, d, y = x.split("/"); return "%04d-%02d-%02d" % (int(y), int(m), int(d))
+            except Exception: return ""
+        return x[:10]
     try:
-        url = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json"
-        req = urllib.request.Request(url, headers={"User-Agent": "SwingTrade/1.0"})
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            data = json.loads(resp.read())
+        if not _SENATE_CACHE["data"] or (_time.time() - _SENATE_CACHE["fetched"]) > 43200:
+            url = "https://raw.githubusercontent.com/timothycarambat/senate-stock-watcher-data/master/aggregate/all_transactions.json"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (SwingTrade)"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                _SENATE_CACHE["data"] = json.loads(resp.read()); _SENATE_CACHE["fetched"] = _time.time()
+        data = _SENATE_CACHE["data"] or []
         tk = t.upper().strip()
-        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        rows = []
+        all_dates, rows = [], []
         for r in data if isinstance(data, list) else []:
-            d = (r.get("transaction_date") or r.get("ptr_link") or "")[:10]
-            if d < cutoff: continue
+            d = _norm_date(r.get("transaction_date"))
+            if d: all_dates.append(d)
             sym = (r.get("ticker") or "").upper().replace("$", "").strip()
             if tk and sym != tk: continue
-            rows.append({
-                "senator": r.get("senator"),
-                "ticker": sym,
-                "type": r.get("type"),
-                "date": d,
-                "amount": r.get("amount"),
-                "asset": (r.get("asset_description") or "")[:60],
-            })
-            if len(rows) >= limit: break
-        return {"trades": rows, "count": len(rows), "filter_ticker": tk or "all"}
+            rows.append({"senator": r.get("senator"), "ticker": sym, "type": r.get("type"),
+                         "date": d, "amount": r.get("amount"), "asset": (r.get("asset_description") or "")[:60]})
+        rows.sort(key=lambda x: x["date"], reverse=True)
+        rows = rows[:limit]
+        as_of = max(all_dates) if all_dates else None
+        stale = bool(as_of and as_of < (datetime.now().strftime("%Y") + "-01-01"))
+        return {"trades": rows, "count": len(rows), "filter_ticker": tk or "all",
+                "as_of": as_of, "stale": stale, "source": "senate-stock-watcher (GitHub mirror)"}
     except Exception as e:
         return {"trades": [], "count": 0, "error": str(e)}
 
@@ -9910,7 +9999,23 @@ async def wiki_velocity_api(t: str, days: int = 30):
         name = (fund or {}).get("General", {}).get("Name") or tk
     except Exception:
         name = tk
-    page_title = name.split(",")[0].replace(" ", "_")[:50]
+    # Resolve the canonical Wikipedia article title via the free opensearch API
+    # (the EODHD company name rarely matches the exact article title → 404 before).
+    def _resolve_wiki_title(q):
+        try:
+            su = "https://en.wikipedia.org/w/api.php?action=opensearch&limit=1&namespace=0&format=json&search=" + urllib_quote(q)
+            rq = urllib.request.Request(su, headers={"User-Agent": "Mozilla/5.0 (SwingTrade)"})
+            with urllib.request.urlopen(rq, timeout=4) as r:
+                arr = json.loads(r.read())
+            titles = arr[1] if isinstance(arr, list) and len(arr) > 1 else []
+            return titles[0].replace(" ", "_") if titles else None
+        except Exception:
+            return None
+    base = name.split(",")[0]
+    for suf in (" Corporation", " Corp", " Incorporated", " Inc", " Ltd", " plc", " Co", " Holdings", " Group", " Class A", " Common Stock", "."):
+        if base.endswith(suf): base = base[: -len(suf)]
+    page_title = (_resolve_wiki_title(base) or _resolve_wiki_title(name.split(",")[0])
+                  or base.replace(" ", "_")[:60])
     to_date = datetime.now().strftime("%Y%m%d")
     from_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
     try:
