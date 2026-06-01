@@ -3018,6 +3018,33 @@ body {
 .tm-bar i.up { background: var(--gn); }
 .tm-bar i.dn { background: var(--rd); }
 
+/* Best ideas · top 5 per engine (ported from home-discovery.css) */
+.tbe-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 18px; }
+.tbe-card { position: relative; background: var(--glass-bg-1); border: 1px solid var(--glass-line); border-radius: var(--r-3); overflow: hidden; transition: border-color .16s, transform .16s; }
+.tbe-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--eng, var(--copper)); opacity: .9; }
+.tbe-card:hover { border-color: color-mix(in oklab, var(--eng, var(--copper)) 45%, var(--glass-line)); transform: translateY(-1px); }
+.tbe-head { width: 100%; display: flex; flex-direction: column; gap: 3px; align-items: flex-start; padding: 10px 11px 9px; background: var(--glass-bg-2); border: none; border-bottom: 1px solid var(--glass-line); cursor: pointer; text-align: left; }
+.tbe-title { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-1); font-weight: 600; letter-spacing: .01em; }
+.tbe-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--eng, var(--copper)); box-shadow: 0 0 0 2px color-mix(in oklab, var(--eng, var(--copper)) 22%, transparent); flex: none; }
+.tbe-metric { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 3px; }
+.tbe-arrow { transition: transform .16s; display: inline-block; }
+.tbe-head:hover .tbe-metric { color: var(--eng, var(--copper)); }
+.tbe-head:hover .tbe-arrow { transform: translateX(2px); }
+.tbe-list { display: flex; flex-direction: column; }
+.tbe-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; padding: 6px 11px; background: none; border: none; border-top: 1px solid var(--glass-line); cursor: pointer; text-align: left; color: inherit; transition: background .14s, padding-left .14s; }
+.tbe-row:first-child { border-top: none; }
+.tbe-row:hover { background: color-mix(in oklab, var(--eng, var(--copper)) 9%, transparent); padding-left: 14px; }
+.tbe-rank { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px; font-size: 9.5px; font-weight: 700; color: var(--ink-3); background: var(--glass-bg-3); }
+.tbe-row.is-lead .tbe-rank { color: var(--eng, var(--copper)); background: color-mix(in oklab, var(--eng, var(--copper)) 16%, transparent); }
+.tbe-sym { font-size: 12px; color: var(--ink-2); }
+.tbe-row.is-lead .tbe-sym { color: var(--ink-1); }
+.tbe-sym b { font-weight: 600; }
+.tbe-v { font-size: 11px; color: var(--ink-2); font-feature-settings: "tnum"; text-align: right; }
+.tbe-row.is-lead .tbe-v { color: var(--eng, var(--copper)); font-weight: 700; }
+.tbe-empty { padding: 14px 11px; font-size: 10px; color: var(--ink-3); text-align: center; }
+@media (max-width: 1100px) { .tbe-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 640px) { .tbe-grid { grid-template-columns: repeat(2, 1fr); } }
+
 /* ===== themes-extra.css ===== */
 /* themes-extra.css — additional palettes + flat (non-glossy) themes.
    Loaded LAST so flat themes can override glass tokens from aurora.css. */
@@ -9477,7 +9504,7 @@ const REGIME_MAP = {
   panic:             ["PANIC",   "DEFEND",   "rd", "rd"],
 };
 
-function HomeView({ d, earnings, misc, screener, onTicker, toast, onScan, xChatter }) {
+function HomeView({ d, earnings, misc, screener, onTicker, toast, onScan, onSurface, xChatter }) {
   return (
     <div className="home">
       <HomeHero d={d} toast={toast} onScan={onScan} />
@@ -9489,6 +9516,9 @@ function HomeView({ d, earnings, misc, screener, onTicker, toast, onScan, xChatt
         <HomeCard title="◐ Discovery" sub="52w · squeeze · insider · UOA · emerging · X chatter"><Discovery d={d} screener={screener} xChatter={xChatter} onTicker={onTicker} /></HomeCard>
         <HomeCard title="Top movers" sub="gainers · losers · scan universe"><TopMovers d={d} onTicker={onTicker} /></HomeCard>
       </div>
+
+      <div className="home-sec-label"><span className="mono">BEST IDEAS · TOP 5 PER ENGINE</span><span className="mono dim2">each discovery model's highest-conviction names today</span></div>
+      <TopByEngine d={d} screener={screener} onTicker={onTicker} onSurface={onSurface} />
 
       <div className="home-sec-label"><span className="mono">ATTENTION · CATALYSTS &amp; FLOW</span><span className="mono dim2">today · live headlines · drift</span></div>
       <div className="home-grid-3">
@@ -9646,6 +9676,72 @@ function TopSetups({ d, onTicker }) {
           </span>
           <span className={`tset-v mono ${r.v==="BUY"?"up":"warn"}`}>{r.v}</span>
         </button>
+      ))}
+    </div>
+  );
+}
+
+// BEST IDEAS · top 5 per discovery engine — every row wired to a REAL source.
+// Honest-empty cards when a feed has no data (esp_picks, AIPredict, insider, smc all degrade gracefully).
+function TopByEngine({ d, screener, onTicker, onSurface }) {
+  const sc = (screener || []).filter(r => r && r.ticker);
+  // 1 · MOMENTUM — scored universe by RS rank (data_screener.json · rs_rank)
+  const momentum = sc.filter(r => r.rs_rank != null).sort((a, b) => (b.rs_rank || 0) - (a.rs_rank || 0))
+    .slice(0, 5).map(r => [r.ticker, String(Math.round(r.rs_rank))]);
+  // 2 · EARNINGS AI — Zacks ESP beat predictions (data.critical.json · esp_picks; empty today)
+  const espRows = Array.isArray(d.esp_picks) ? d.esp_picks : [];
+  const earnAI = espRows.map(p => {
+    const o = p || {};
+    const prob = o.beat_prob != null ? o.beat_prob : (o.beat_probability != null ? o.beat_probability : null);
+    const v = prob != null ? Math.round(prob > 1 ? prob : prob * 100) + "%" : (o.esp != null ? `ESP ${o.esp > 0 ? "+" : ""}${o.esp}` : "—");
+    return [o.ticker || o.symbol || o.sym, v, prob];
+  }).filter(x => x[0]).sort((a, b) => (b[2] || 0) - (a[2] || 0)).slice(0, 5).map(x => [x[0], x[1]]);
+  // 3 · ML PREDICTIONS — window.AIPredict ensemble when present (does not exist in prod → honest empty)
+  let ml = [];
+  if (typeof window !== "undefined" && window.AIPredict && window.AIPredict.all) {
+    try { ml = window.AIPredict.all().slice(0, 5).map(p => [p.sym, Math.round((p.pUp || 0.5) * 100) + "%"]); } catch (e) { ml = []; }
+  }
+  // 4 · OPTIONS FLOW — UOA scanner by reward:risk (data.critical.json · options_flow_top30 · rr)
+  const options = (d.options_flow_top30 || []).filter(x => x && x.ticker && x.rr != null)
+    .sort((a, b) => (b.rr || 0) - (a.rr || 0)).slice(0, 5).map(x => [x.ticker, Number(x.rr).toFixed(1)]);
+  // 5 · INSIDER — clean buy clusters (data_screener.json · insider_buys, 0 sells)
+  const insider = sc.filter(r => (r.insider_buys || 0) > 0 && (r.insider_sells || 0) === 0)
+    .sort((a, b) => (b.insider_buys || 0) - (a.insider_buys || 0)).slice(0, 5)
+    .map(r => [r.ticker, `+${r.insider_buys}`]);
+  // 6 · SMC / PATTERNS — scored universe by SMC structure score (data_screener.json · smc_score)
+  const smc = sc.filter(r => r.smc_score != null).sort((a, b) => (b.smc_score || 0) - (a.smc_score || 0))
+    .slice(0, 5).map(r => [r.ticker, Number(r.smc_score).toFixed(1)]);
+
+  const engines = [
+    { id: "momentum",    title: "Momentum",       metric: "RS",    surface: "momentum",     accent: "var(--copper)", rows: momentum, empty: "no RS-ranked names in scan" },
+    { id: "earnings-ai", title: "Earnings AI",    metric: "beat",  surface: "premarket",    accent: "var(--amb)",    rows: earnAI,   empty: "no ESP earnings plays today" },
+    { id: "ml",          title: "ML Predictions", metric: "P(up)", surface: "ai-predict",   accent: "var(--violet)", rows: ml,       empty: "ML ensemble offline" },
+    { id: "options",     title: "Options Flow",   metric: "R:R",   surface: "options-flow", accent: "var(--violet)", rows: options,  empty: "no UOA flow in scan" },
+    { id: "insider",     title: "Insider",        metric: "buys",  surface: "insider",      accent: "var(--cy)",     rows: insider,  empty: "no insider clusters today" },
+    { id: "smc",         title: "SMC / Patterns", metric: "conf",  surface: "smc-patterns", accent: "var(--violet)", rows: smc,      empty: "no SMC structure scored" },
+  ];
+  return (
+    <div className="tbe-grid">
+      {engines.map(e => (
+        <div key={e.id} className="tbe-card" style={{ "--eng": e.accent }}>
+          <button className="tbe-head" onClick={() => onSurface && onSurface(e.surface)}>
+            <span className="tbe-title mono"><span className="tbe-dot" />{e.title}</span>
+            <span className="tbe-metric mono dim2">{e.metric} <span className="tbe-arrow">→</span></span>
+          </button>
+          {e.rows.length ? (
+            <div className="tbe-list">
+              {e.rows.map(([sym, v], i) => (
+                <button key={sym + i} className={`tbe-row ${i === 0 ? "is-lead" : ""}`} onClick={() => onTicker && onTicker(sym)}>
+                  <span className="tbe-rank mono">{i + 1}</span>
+                  <span className="tbe-sym mono"><b>{sym}</b></span>
+                  <span className="tbe-v mono">{v}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="tbe-empty mono">{e.empty}</div>
+          )}
+        </div>
       ))}
     </div>
   );
@@ -12293,7 +12389,7 @@ function OtkContext({ o, ticker, chain }) {
   const [alt, setAlt] = React.useState({ edgar: null, insider: null });
   React.useEffect(() => {
     if (typeof fetch === "undefined" || !sym) return;
-    let live = true; setNews({ state: "load", articles: null }); setSoc(null); setAlt({ edgar: null, insider: null });
+    let live = true; setNews({ state: "load", articles: null }); setSoc(null); setAlt({ edgar: null, insider: null, ivhist: null, senate: null, wiki: null });
     fetch(`/api/news?t=${encodeURIComponent(sym)}&limit=6`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
       .then(j => { if (live) setNews({ state: "ok", articles: (j && j.articles) || [] }); }).catch(() => { if (live) setNews({ state: "err", articles: [] }); });
     fetch(`/api/social/${encodeURIComponent(sym)}`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
@@ -12302,6 +12398,12 @@ function OtkContext({ o, ticker, chain }) {
       .then(j => { if (live) setAlt(a => ({ ...a, edgar: (j && j.filings) || [] })); }).catch(() => {});
     fetch(`/api/insider/${encodeURIComponent(sym)}`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
       .then(j => { if (live) setAlt(a => ({ ...a, insider: (j && j.transactions) || [] })); }).catch(() => {});
+    fetch(`/api/iv-history/${encodeURIComponent(sym)}`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
+      .then(j => { if (live) setAlt(a => ({ ...a, ivhist: j || {} })); }).catch(() => {});
+    fetch(`/api/senate-trades?t=${encodeURIComponent(sym)}&limit=20`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
+      .then(j => { if (live) setAlt(a => ({ ...a, senate: j || {} })); }).catch(() => {});
+    fetch(`/api/wiki-velocity?t=${encodeURIComponent(sym)}`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
+      .then(j => { if (live) setAlt(a => ({ ...a, wiki: j || {} })); }).catch(() => {});
     return () => { live = false; };
   }, [sym]);
   const st = soc && soc.stocktwits;
@@ -12377,7 +12479,8 @@ function OtkContext({ o, ticker, chain }) {
             ["StockTwits bull", st?st.bull_pct+"%":"—", st?(st.bull_pct>=55?"gn":st.bull_pct<=45?"rd":"amb"):"ink"],
             ["13-F filers", alt.edgar==null?"…":String(alt.edgar.length), alt.edgar&&alt.edgar.length?"gn":"ink"],
             ["Insider tx (1y)", alt.insider==null?"…":String(alt.insider.length), alt.insider&&alt.insider.length?"amb":"ink"],
-            ["Senate · Wiki", "—", "ink"],
+            ["Senate filings", alt.senate==null?"…":(alt.senate.count?alt.senate.count+(alt.senate.stale?" (hist)":""):"0"), alt.senate&&alt.senate.count?"amb":"ink"],
+            ["Wiki views Δ", (alt.wiki==null)?"…":(alt.wiki.velocity_7d_vs_30d!=null?(alt.wiki.velocity_7d_vs_30d>=1?"+":"")+((alt.wiki.velocity_7d_vs_30d-1)*100).toFixed(0)+"% wk":"—"), alt.wiki&&alt.wiki.velocity_7d_vs_30d>1.1?"gn":"ink"],
           ].map((a,i)=>(
             <div key={i} className="otk-alt-cell"><div className="mono dim2">{a[0]}</div><div className={`mono kpi-tone--${a[2]}`}>{a[1]}</div></div>
           ))}
@@ -12392,11 +12495,11 @@ function OtkContext({ o, ticker, chain }) {
             ["Butterfly",volSurf.bf!=null?(volSurf.bf>=0?"+":"")+volSurf.bf+"%":"—"],
             ["Term ratio",otkF(o.term)],["ATM IV",otkFx(o.iv,1,"%")],
             ["Vega/ct",o.vega!=null?"$"+(o.vega*100).toFixed(0)+"/IVpp":"—"],
-            ["Vol-of-vol","—"]].map(([k,v],i)=>(
+            ["Vol-of-vol", alt.ivhist==null?"…":(alt.ivhist.vov!=null?alt.ivhist.vov+"%":(alt.ivhist.note||"—"))]].map(([k,v],i)=>(
             <div key={i} className="otk-stat"><span className="mono dim2">{k}</span><span className="mono">{v}</span></div>
           ))}
         </div>
-        <div className="mono dim2" style={{fontSize:10,padding:"2px"}}>Skew/RR/butterfly/term/IV/vega computed from the live Schwab chain ({volSurf.src||"—"}). Vol-of-vol needs an IV time-series (single snapshot only) — shown as —.</div>
+        <div className="mono dim2" style={{fontSize:10,padding:"2px"}}>Skew/RR/butterfly/term/IV/vega from the live Schwab chain ({volSurf.src||"—"}). Vol-of-vol = annualized stdev of daily ATM-IV changes (builds from snapshots; "building" until ≥6 sessions).</div>
       </div>
     </div>
   );
@@ -19278,15 +19381,30 @@ function useUniverseRows() {
   }, []);
   return m;
 }
+// real multi-period (1w/1m/3m) returns per member, batched from /api/returns
+function useThemeReturns() {
+  const [r, setR] = useState(null);
+  useEffect(() => {
+    if (typeof fetch === "undefined" || typeof THM_BASKETS === "undefined") return;
+    const syms = [...new Set(THM_BASKETS.flatMap(t => t.cons.map(c => String(c[0]).toUpperCase())))];
+    let live = true;
+    fetch("/api/returns?tickers=" + encodeURIComponent(syms.join(",")) + "&periods=5,21,63", { credentials: "same-origin" })
+      .then(x => x.ok ? x.json() : null).then(j => { if (live) setR((j && j.returns) || {}); }).catch(() => { if (live) setR({}); });
+    return () => { live = false; };
+  }, []);
+  return r;
+}
 function SurfaceThemes({ onTicker, data }) {
   const [view, setView] = useState("baskets");      // baskets · rotation
   const [period, setPeriod] = useState("chg1d");
   const uni = useUniverseRows();
+  const ret = useThemeReturns();
   const pick = onTicker || (() => {});
-  // enrich curated baskets with REAL per-member data (1-day %, RS rank) from /api/universe.
-  // multi-period (1w/1m/3m), flow and the sparkline curve have NO real feed → null (rendered —).
+  // enrich curated baskets with REAL per-member data: 1-day %/RS from /api/universe,
+  // 1w/1m/3m from /api/returns (avg across members). flow + sparkline curve have no real feed → null.
   const baskets = useMemo(() => {
-    const U = uni || {};
+    const U = uni || {}, R = ret || {};
+    const avg = (arr) => arr.length ? +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1) : null;
     return THM_BASKETS.map(t => {
       const cons = t.cons.map(c => { const u = U[String(c[0]).toUpperCase()]; return [c[0], u && u.pct != null ? +u.pct : null, u && u.rs != null ? +u.rs : null]; });
       const chgs = cons.map(c => c[1]).filter(v => v != null);
@@ -19294,9 +19412,13 @@ function SurfaceThemes({ onTicker, data }) {
       const chg1d = chgs.length ? +(chgs.reduce((a, b) => a + b, 0) / chgs.length).toFixed(1) : null;
       const rs = rss.length ? Math.round(rss.reduce((a, b) => a + b, 0) / rss.length) : null;
       const breadth = chgs.length ? Math.round(chgs.filter(v => v > 0).length / chgs.length * 100) : null;
-      return { ...t, cons, chg1d, chg1w: null, chg1m: null, chg3m: null, rs, rsPrev: null, breadth, breadthPrev: null, flow: null, curve: null, members: t.cons.length, _matched: chgs.length };
+      const memR = t.cons.map(c => R[String(c[0]).toUpperCase()]).filter(Boolean);
+      const r1w = avg(memR.map(x => x.r5).filter(v => v != null));
+      const r1m = avg(memR.map(x => x.r21).filter(v => v != null));
+      const r3m = avg(memR.map(x => x.r63).filter(v => v != null));
+      return { ...t, cons, chg1d, chg1w: r1w, chg1m: r1m, chg3m: r3m, rs, rsPrev: null, breadth, breadthPrev: null, flow: null, curve: null, members: t.cons.length, _matched: chgs.length };
     });
-  }, [uni]);
+  }, [uni, ret]);
   const [sel, setSel] = useState(THM_BASKETS[0].k);
   const cur = baskets.find(t => t.k === sel) || baskets[0];
   const perLabel = period === "chg1d" ? "1D" : (THM_PERIODS.find(p => p[0] === period) || ["", period])[1];
@@ -19320,7 +19442,7 @@ function SurfaceThemes({ onTicker, data }) {
         </div>
         <div className="wsx-hdr-r">
           <FreshnessPill state={uni ? "live" : "empty"} age="1d" />
-          <span className="mono dim2">src · curated membership · /api/universe (1-day % + RS) · multi-period n/a</span>
+          <span className="mono dim2">src · curated membership · /api/universe (1-day % + RS) · /api/returns (1w/1m/3m)</span>
         </div>
       </div>
 
@@ -23240,7 +23362,7 @@ function ThmRotation({ baskets, sel, onSelect, onTicker }) {
               );
             })}</tbody>
           </table>
-          <div className="q-rot-verdict mono dim2"><b className={`kpi-tone--${curQ.tone}`}>{cur.k} · {curQ.label}</b> — {curQ.note}. RS-rank + 1-day + breadth are real (/api/universe); multi-period momentum/flow not fed.</div>
+          <div className="q-rot-verdict mono dim2"><b className={`kpi-tone--${curQ.tone}`}>{cur.k} · {curQ.label}</b> — {curQ.note}. RS-rank + 1-day + breadth (/api/universe) and 1w/1m/3m (/api/returns) are real; net-flow not fed.</div>
         </div>
       </div>
     </>
@@ -35308,7 +35430,7 @@ function App() {
   } else if (data === undefined) {
     body = <div className="ss-boot"><span className="ss-boot-dot" />Loading Stocksmith · fetching /v2/data.critical.json…</div>;
   } else {
-    body = <div className="main-home"><HomeView d={data} earnings={earnings} misc={misc} screener={screener} onTicker={onTicker} toast={toast} xChatter={xChatter} onScan={(f)=>{ window.__scanFilter=f; setSurface("signal-scanner"); }} /></div>;
+    body = <div className="main-home"><HomeView d={data} earnings={earnings} misc={misc} screener={screener} onTicker={onTicker} toast={toast} xChatter={xChatter} onSurface={onPick} onScan={(f)=>{ window.__scanFilter=f; setSurface("signal-scanner"); }} /></div>;
   }
 
   return (
