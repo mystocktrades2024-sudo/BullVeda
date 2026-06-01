@@ -30951,6 +30951,12 @@ function SurfaceMyPortfolios({ onTicker, data }) {
   const list = MyPF.list();
   const active = MyPF.active();
 
+  // compute pf + summary BEFORE any early return so the hook order is stable
+  // across the empty→non-empty transition (React: hooks must run unconditionally,
+  // every render, in the same order — an early return between hooks crashes).
+  const pf = allView ? MyPF.combined() : (active || { id: null, name: "—", holdings: [], trades: [], cash: 0 });
+  const sum = useMpfM(() => MyPF.summarize(pf), [pf, tab, allView, adding, data, ver]);
+
   // empty state — no portfolios at all (like the watchlist starting empty)
   if (!allView && (!list || list.length === 0)) {
     return (
@@ -30971,9 +30977,6 @@ function SurfaceMyPortfolios({ onTicker, data }) {
       </div>
     );
   }
-
-  const pf = allView ? MyPF.combined() : (active || { id: null, name: "—", holdings: [], trades: [], cash: 0 });
-  const sum = useMpfM(() => MyPF.summarize(pf), [pf, tab, allView, adding, data, ver]);
 
   return (
     <div className="surface wsx wsx--copper mpf">
