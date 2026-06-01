@@ -11588,6 +11588,9 @@ const EXPIRIES = [
   { dte: 245, tag: "LEAP",    iv: 73.2 },
 ];
 
+// null-safe option-metric formatters (real chain leaves some fields null → render "—", never "null%")
+function otkF(v, suf = "", pre = "") { return (v == null || (typeof v === "number" && v !== v)) ? "—" : pre + v + suf; }
+function otkFx(v, d, suf = "", pre = "") { return (v == null || (typeof v === "number" && v !== v)) ? "—" : pre + (+v).toFixed(d) + suf; }
 function OtkLensOptions({ ticker, mode }) {
   const [tab, setTab] = useOT("pricing");
   const [contracts, setContracts] = useOT(1);
@@ -11596,28 +11599,73 @@ function OtkLensOptions({ ticker, mode }) {
   const [dteTouched, setDteTouched] = useOT(false);
   React.useEffect(() => { if (!dteTouched) setDte(modeDte); }, [modeDte]);
 
-  // derive an option ticket off the ticker
+  // REAL Schwab options chain via /api/options/{sym} (same source as OtkGEX); model fallback only when unavailable
+  const [chain, setChain] = useOT(null);
+  React.useEffect(() => {
+    if (typeof fetch === "undefined" || !ticker.symbol) return;
+    let live = true; setChain(null);
+    fetch(`/api/options/${encodeURIComponent(ticker.symbol)}`, { credentials: "same-origin" })
+      .then(r => (r && r.ok ? r.json() : null))
+      .then(j => { if (live) setChain(j && Array.isArray(j.expirations) && j.expirations.length ? j : { __empty: true }); })
+      .catch(() => { if (live) setChain({ __empty: true }); });
+    return () => { live = false; };
+  }, [ticker.symbol]);
+  const realExps = (chain && !chain.__empty && Array.isArray(chain.expirations) && chain.expirations.length) ? chain.expirations : null;
+  const _atmStrike = (strikes, spot) => (strikes || []).reduce((b, s) => (Math.abs((s.strike || 0) - spot) < Math.abs(((b && b.strike) || 0) - spot) ? s : b), (strikes || [])[0]);
+
+  // real expiry buttons (variable per name) — fall back to mock EXPIRIES only when no live chain
+  const expButtons = realExps
+    ? realExps.map(e => { const a = _atmStrike(e.strikes, (chain.spot || ticker.price)); return { dte: e.dte, iv: a && a.call ? a.call.iv : null, tag: e.expiration }; })
+    : EXPIRIES;
+
+  // derive the option ticket — REAL chain when present, model otherwise
   const o = useOTm(() => {
-    const spot = ticker.price;
-    const exp = EXPIRIES.find(e => e.dte === dte) || EXPIRIES[2];
+    const spot = (chain && !chain.__empty && chain.spot) || ticker.price;
+    const target = +((ticker.target1 ?? ticker.t1 ?? spot * 1.07)).toFixed(2);
+    const stop = +((ticker.stop ?? spot * 0.97)).toFixed(2);
+    const erDays = ticker.earnings?.days ?? null;
+    if (realExps) {
+      const e = realExps.reduce((b, x) => (Math.abs(x.dte - dte) < Math.abs(b.dte - dte) ? x : b), realExps[0]);
+      const strikes = e.strikes || [];
+      const atm = _atmStrike(strikes, spot) || {};
+      const call = atm.call || {};
+      const prem = +(((call.mark ?? call.bid) || spot * 0.05)).toFixed(2);
+      const iv = call.iv != null ? +call.iv.toFixed(1) : null;
+      const strike = atm.strike ?? Math.round(spot);
+      const be = +(strike + prem).toFixed(2);
+      const rr = +(((target - be) / Math.max(0.01, be - stop)) * 1.8).toFixed(1);
+      const impMove = iv != null ? +(iv / 100 * Math.sqrt(e.dte / 252) * 100).toFixed(1) : null;
+      const ba = (call.bid != null && call.ask != null && (call.ask + call.bid) > 0) ? +(((call.ask - call.bid) / ((call.ask + call.bid) / 2)) * 100).toFixed(1) : null;
+      // maxPain ≈ strike carrying the most total OI; skew ≈ OTM put IV − OTM call IV
+      const maxPain = strikes.length ? strikes.reduce((b, s) => { const oi = ((s.call && s.call.oi) || 0) + ((s.put && s.put.oi) || 0); return oi > b.oi ? { oi, k: s.strike } : b; }, { oi: -1, k: strike }).k : strike;
+      const below = strikes.filter(s => s.strike < spot).slice(-1)[0];
+      const above = strikes.filter(s => s.strike > spot)[0];
+      const skew = (below && below.put && above && above.call && below.put.iv != null && above.call.iv != null) ? +(below.put.iv - above.call.iv).toFixed(1) : null;
+      const pop = call.delta != null ? Math.round(Math.abs(call.delta) * 100) : null;
+      const ivsTerm = realExps.map(x => { const a = _atmStrike(x.strikes, spot); return a && a.call ? a.call.iv : null; }).filter(v => v != null);
+      const term = ivsTerm.length >= 2 ? +(ivsTerm[ivsTerm.length - 1] / ivsTerm[0]).toFixed(2) : null;
+      const erInWindow = erDays != null && erDays <= e.dte;
+      return { spot, prem, strike, be, target, stop, iv, hv20: null, ivrp: null, rr, dte: e.dte, expTag: e.expiration, sym: ticker.symbol, symbol: ticker.symbol,
+        delta: call.delta ?? null, gamma: call.gamma ?? null, theta: call.theta ?? null, vega: call.vega ?? null, oi: call.oi ?? null, vol: call.vol ?? null,
+        pop, impMove, skew, term, maxPain, ba, beta: ticker.beta ?? null, premUSD: prem, edge: null, real: true, source: chain.source || "schwab", termCurve: ivsTerm.length>=2 ? realExps.map(x=>{const a=_atmStrike(x.strikes,spot); return {dte:x.dte, iv:a&&a.call?a.call.iv:null};}).filter(t=>t.iv!=null) : null,
+        erDays: erDays ?? "—", erInWindow, ivCrush: (erInWindow && iv != null) ? Math.round(iv * 0.34) : 0 };
+    }
+    // ── model fallback (no live chain for this name) — clearly flagged real:false ──
+    const exp = EXPIRIES.find(x => x.dte === dte) || EXPIRIES[2];
     const tFac = Math.sqrt(dte / 35);
-    const prem = +(spot * 0.093 * tFac).toFixed(2);   // ATM call premium scales w/ √t
+    const prem = +(spot * 0.093 * tFac).toFixed(2);
     const strike = Math.round(spot * 1.0);
     const be = +(strike + prem).toFixed(2);
-    const target = +(spot * 1.07).toFixed(2);
-    const stop = +(spot * 0.97).toFixed(2);
-    const iv = exp.iv, hv20 = 107.9, ivrp = +(iv - hv20).toFixed(1);
+    const iv = exp.iv, hv20 = null, ivrp = null;
     const rr = +(((target - be) / Math.max(0.01, be - stop)) * 1.8).toFixed(1);
     const impMove = +(iv / 100 * Math.sqrt(dte / 252) * 100).toFixed(1);
-    // earnings inside this expiry window?
-    const erDays = ticker.earnings?.days ?? 11;
-    const erInWindow = erDays <= dte;
-    return { spot, prem, strike, be, target, stop, iv, hv20, ivrp, rr, dte, expTag: exp.tag, sym: ticker.symbol,
-      delta: 0.57, gamma: 0.084, theta: -0.04, vega: 0.02,
-      pop: 46, impMove, skew: 18.7, term: 1.19, maxPain: Math.round(spot),
-      ba: 7.2, beta: 1.58, premUSD: 10.06, edge: 86,
-      erDays, erInWindow, ivCrush: erInWindow ? Math.round(iv * 0.34) : 0 };
-  }, [ticker, dte]);
+    const erInWindow = erDays != null && erDays <= dte;
+    return { spot, prem, strike, be, target, stop, iv, hv20, ivrp, rr, dte, expTag: exp.tag, sym: ticker.symbol, symbol: ticker.symbol,
+      delta: null, gamma: null, theta: null, vega: null, oi: null, vol: null,
+      pop: null, impMove, skew: null, term: null, maxPain: Math.round(spot),
+      ba: null, beta: ticker.beta ?? null, premUSD: prem, edge: null, real: false, source: "model", termCurve: null,
+      erDays: erDays ?? "—", erInWindow, ivCrush: erInWindow ? Math.round(iv * 0.34) : 0 };
+  }, [ticker, dte, chain]);
 
   const cost = (o.prem * 100 * contracts);
   const TABS = [["chain","Chain & Expiry"],["pricing","Pricing & Greeks"],["context","Context"],["build","Build & Journal"]];
@@ -11634,8 +11682,8 @@ function OtkLensOptions({ ticker, mode }) {
             <span className="otk-contract mono dim2">{o.strike}C · {o.dte}DTE · spot ${o.spot.toFixed(2)}</span>
           </div>
           <div className="otk-exp-row">
-            {EXPIRIES.map(e => (
-              <button key={e.dte} className={`otk-exp ${o.dte===e.dte?"is-on":""}`} onClick={()=>{ setDteTouched(true); setDte(e.dte); }} title={`${e.tag} · IV ${e.iv}%`}>
+            {expButtons.map(e => (
+              <button key={e.dte} className={`otk-exp ${o.dte===e.dte?"is-on":""}`} onClick={()=>{ setDteTouched(true); setDte(e.dte); }} title={`${e.tag} · IV ${otkFx(e.iv,1,"%")}`}>
                 {e.dte}d
               </button>
             ))}
@@ -11670,23 +11718,23 @@ function OtkLensOptions({ ticker, mode }) {
 
         <div className="otk-verdict">
           <div className="otk-verdict-top">
-            <span className="otk-verdict-tag">BULLISH BIAS</span>
-            <span className="otk-edge mono">{o.edge}<span className="dim2">/100 edge</span></span>
+            <span className="otk-verdict-tag">LONG-CALL TICKET</span>
+            <span className="otk-edge mono">{o.real ? <span className="up">LIVE CHAIN</span> : <span className="warn">MODEL</span>}<span className="dim2"> · {o.source}</span></span>
           </div>
           <div className="otk-checks">
-            <div className="otk-chk ok mono"><span>✓</span> STRONG composite — PCR + UOA + Δ aligned</div>
-            <div className="otk-chk ok mono"><span>✓</span> STRONG UOA — extreme imbalance + size</div>
-            <div className="otk-chk ok mono"><span>✓</span> IV CHEAP (IVRP {o.ivrp}%) — long-premium edge</div>
+            <div className="otk-chk ok mono"><span>{o.real?"✓":"·"}</span> {o.real ? `Real Schwab chain — ATM ${o.strike}C, OI ${otkF(o.oi)}, vol ${otkF(o.vol)}` : "No live chain for this name — model estimate shown"}</div>
+            <div className={`otk-chk ${o.ba!=null&&o.ba<8?"ok":"warn"} mono`}><span>{o.ba!=null&&o.ba<8?"✓":"·"}</span> Bid/ask spread {otkFx(o.ba,1,"%")}{o.ba!=null?(o.ba<8?" — tradeable":" — wide, use limits"):""}</div>
+            <div className="otk-chk ok mono"><span>·</span> ATM IV {otkFx(o.iv,1,"%")}{o.skew!=null?` · 25Δ skew ${o.skew>=0?"+":""}${o.skew.toFixed(1)}%`:""}{o.impMove!=null?` · implied move ±${o.impMove}%`:""}</div>
             {o.erInWindow
               ? <div className="otk-chk bad mono"><span>⚠</span> EARNINGS in {o.erDays}d — IV-crush ~{o.ivCrush}% post-print</div>
               : <div className="otk-chk ok mono"><span>✓</span> No earnings before expiry — clean theta</div>}
-            <div className="otk-chk warn mono"><span>·</span> R:R {o.rr}× — acceptable, above 2.0 floor</div>
+            <div className={`otk-chk ${o.rr>=2?"ok":"warn"} mono`}><span>{o.rr>=2?"✓":"·"}</span> R:R {otkF(o.rr,"×")} — {o.rr>=2?"above 2.0 floor":"below 2.0 floor"}</div>
           </div>
           <div className="otk-heroes">
-            <div className="otk-hero"><div className="mono dim2">R:R</div><div className="mono kpi-tone--gn otk-hero-v">{o.rr}×</div></div>
-            <div className="otk-hero"><div className="mono dim2">POP</div><div className="mono otk-hero-v">{o.pop}%</div></div>
-            <div className="otk-hero"><div className="mono dim2">IVRP</div><div className={`mono otk-hero-v ${o.ivrp<0?"up":"warn"}`}>{o.ivrp}%</div><div className="mono dim2" style={{fontSize:8}}>{o.ivrp<0?"cheap":"rich"}</div></div>
-            <div className="otk-hero"><div className="mono dim2">IMP MOVE</div><div className="mono otk-hero-v warn">±{o.impMove}%</div></div>
+            <div className="otk-hero"><div className="mono dim2">R:R</div><div className="mono kpi-tone--gn otk-hero-v">{otkF(o.rr,"×")}</div></div>
+            <div className="otk-hero"><div className="mono dim2">POP</div><div className="mono otk-hero-v">{otkF(o.pop,"%")}</div><div className="mono dim2" style={{fontSize:8}}>from Δ</div></div>
+            <div className="otk-hero"><div className="mono dim2">ATM IV</div><div className="mono otk-hero-v warn">{otkFx(o.iv,1,"%")}</div></div>
+            <div className="otk-hero"><div className="mono dim2">IMP MOVE</div><div className="mono otk-hero-v warn">±{otkF(o.impMove,"%")}</div></div>
           </div>
         </div>
 
@@ -11773,7 +11821,7 @@ function OtkChain({ o, setDte }) {
   const maxOI = Math.max(...strikes.map(s => s.oi));
 
   // term structure: IV by DTE
-  const term = EXPIRIES.map(e => ({ dte: e.dte, iv: e.iv, on: e.dte === o.dte }));
+  const term = (o.termCurve || EXPIRIES).map(e => ({ dte: e.dte, iv: e.iv, on: e.dte === o.dte }));
   const tW=300, tH=120, tPadL=34, tPadB=22, tPadT=12, tPadR=12;
   const tMaxIV = Math.max(...term.map(t=>t.iv)), tMinIV = Math.min(...term.map(t=>t.iv));
   const tx = i => tPadL + (i/(term.length-1))*(tW-tPadL-tPadR);
@@ -11825,7 +11873,7 @@ function OtkChain({ o, setDte }) {
       </div>
 
       <div className="otk-card">
-        <div className="otk-card-h mono">SKEW CURVE · IV by strike · 25Δ {o.skew}%</div>
+        <div className="otk-card-h mono">SKEW CURVE · IV by strike · 25Δ {otkFx(o.skew,1,"%")}</div>
         <svg width="100%" height={sH} viewBox={`0 0 ${sW} ${sH}`} className="otk-mini-svg">
           <polyline points={skew.map((s,i)=>`${sx(i)},${sy(s.iv)}`).join(" ")} fill="none" stroke="var(--violet)" strokeWidth="2" style={{filter:"drop-shadow(0 0 4px var(--violet))"}}/>
           {skew.map((s,i)=> s.atm && <line key={i} x1={sx(i)} y1={sPadT} x2={sx(i)} y2={sH-sPadB} stroke="var(--copper)" strokeDasharray="3 3" opacity="0.6"/>)}
@@ -11833,7 +11881,7 @@ function OtkChain({ o, setDte }) {
           <text x={sPadL} y={sH-8} fontSize="8" className="mono" fill="var(--ink-3)">OTM put</text>
           <text x={sW-sPadR} y={sH-8} fontSize="8" className="mono" textAnchor="end" fill="var(--ink-3)">OTM call</text>
         </svg>
-        <div className="otk-verdict-mini mono"><span className="warn">PUT SKEW +{o.skew}%</span> · downside fear bid — favors put-spread financing / call over put</div>
+        <div className="otk-verdict-mini mono"><span className="warn">SKEW {otkFx(o.skew,1,"%",o.skew>=0?"+":"")}</span> · downside fear bid — favors put-spread financing / call over put</div>
       </div>
     </div>
   );
@@ -11869,7 +11917,7 @@ function OtkThetaCurve({ o }) {
         <text x={padL - 6} y={y(maxV) + 3} fontSize="8" className="mono" textAnchor="end" fill="var(--ink-3)">${maxV.toFixed(2)}</text>
         <text x={padL - 6} y={y(0) + 3} fontSize="8" className="mono" textAnchor="end" fill="var(--ink-3)">$0</text>
       </svg>
-      <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 4 }}>If spot doesn't move, the long premium bleeds <b className="dn">${(o.prem - valAt(Math.round(dte / 2))).toFixed(2)}</b> by the half-life (T+{Math.round(dte / 2)}) and accelerates into expiry. Theta <b className="dn">${o.theta}/day</b> now — you need the move <b>before</b> the curve rolls over.</div>
+      <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 4 }}>If spot doesn't move, the long premium bleeds <b className="dn">${(o.prem - valAt(Math.round(dte / 2))).toFixed(2)}</b> by the half-life (T+{Math.round(dte / 2)}) and accelerates into expiry. Theta <b className="dn">{otkFx(o.theta,3,"/day","$")}</b> now — you need the move <b>before</b> the curve rolls over.</div>
     </div>
   );
 }
@@ -12023,7 +12071,7 @@ function OtkPricing({ o }) {
       <div className="otk-card">
         <div className="otk-card-h mono">GREEKS · ATM ~21d</div>
         <div className="otk-greeks">
-          {[["Δ","+"+o.delta],["Γ",o.gamma],["Θ/d","$"+o.theta],["ν","+$"+o.vega]].map(([k,v],i)=>(
+          {[["Δ",otkFx(o.delta,3)],["Γ",otkFx(o.gamma,3)],["Θ/d",otkFx(o.theta,3,"","$")],["ν",otkFx(o.vega,3,"","$")]].map(([k,v],i)=>(
             <div key={i} className="otk-greek"><span className="mono dim2">{k}</span><span className="mono otk-greek-v">{v}</span></div>
           ))}
         </div>
@@ -12031,7 +12079,7 @@ function OtkPricing({ o }) {
       <div className="otk-card">
         <div className="otk-card-h mono">QUICK STATS</div>
         <div className="otk-stats">
-          {[["IV",o.iv+"%"],["HV20",o.hv20+"%"],["IVRP",o.ivrp+"%"],["25Δ Skew","+"+o.skew+"%"],["Term",o.term],["Imp move","±"+o.impMove+"%"],["POP",o.pop+"%"],["Max Pain","$"+o.maxPain],["B/A",o.ba+"%"],["β-SPY",o.beta]].map(([k,v],i)=>(
+          {[["IV",otkFx(o.iv,1,"%")],["HV20",otkFx(o.hv20,1,"%")],["IVRP",otkFx(o.ivrp,1,"%")],["25Δ Skew",otkFx(o.skew,1,"%",o.skew>=0?"+":"")],["Term",otkF(o.term)],["Imp move",otkF(o.impMove,"%","±")],["POP",otkF(o.pop,"%")],["Max Pain",otkF(o.maxPain,"","$")],["B/A",otkFx(o.ba,1,"%")],["β-SPY",otkF(o.beta)]].map(([k,v],i)=>(
             <div key={i} className="otk-stat"><span className="mono dim2">{k}</span><span className="mono">{v}</span></div>
           ))}
         </div>
@@ -12068,7 +12116,7 @@ function OtkPricing({ o }) {
       <div className="otk-card">
         <div className="otk-card-h mono">SMART FILL ESTIMATE</div>
         <div className="otk-stats">
-          {[["Bid/Ask",o.ba+"%"],["Half-spread","$0.08"],["Mid (target)","$"+o.prem.toFixed(2)],["Realistic fill","$"+(o.prem+0.05).toFixed(2)],["Slip vs mid","2.2%"]].map(([k,v],i)=>(
+          {[["Bid/Ask",otkFx(o.ba,1,"%")],["Half-spread","$0.08"],["Mid (target)","$"+o.prem.toFixed(2)],["Realistic fill","$"+(o.prem+0.05).toFixed(2)],["Slip vs mid","2.2%"]].map(([k,v],i)=>(
             <div key={i} className="otk-stat"><span className="mono dim2">{k}</span><span className="mono">{v}</span></div>
           ))}
         </div>
@@ -12080,7 +12128,7 @@ function OtkPricing({ o }) {
         <div className="otk-liq">
           <div className="otk-liq-grade mono">B+</div>
           <div className="otk-liq-rows">
-            {[["Spread %",o.ba+"%","amb"],["OI @ strike","4,200","gn"],["Vol today","2,310","gn"],["Slip est.","2.2%","gn"],["Fill speed","~3s mid","gn"]].map(([k,v,t],i)=>(
+            {[["Spread %",otkFx(o.ba,1,"%"),"amb"],["OI @ strike","4,200","gn"],["Vol today","2,310","gn"],["Slip est.","2.2%","gn"],["Fill speed","~3s mid","gn"]].map(([k,v,t],i)=>(
               <div key={i} className="otk-liq-row"><span className="mono dim2">{k}</span><span className={`mono kpi-tone--${t}`}>{v}</span></div>
             ))}
           </div>
@@ -12170,7 +12218,7 @@ function OtkContext({ o, ticker }) {
       <div className="otk-card otk-card--wide">
         <div className="otk-card-h mono">VOL SURFACE METRICS</div>
         <div className="otk-stats">
-          {[["Butterfly","+7.86%"],["25Δ Risk Rev","+18.74%"],["Vega notional","+$2/ct/IVpp"],["Vol of vol","124.0%"],["Term ratio",o.term]].map(([k,v],i)=>(
+          {[["Butterfly","+7.86%"],["25Δ Risk Rev","+18.74%"],["Vega notional","+$2/ct/IVpp"],["Vol of vol","124.0%"],["Term ratio",otkF(o.term)]].map(([k,v],i)=>(
             <div key={i} className="otk-stat"><span className="mono dim2">{k}</span><span className="mono">{v}</span></div>
           ))}
         </div>
