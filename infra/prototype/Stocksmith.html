@@ -8159,6 +8159,10 @@ select.um-input { cursor: pointer; }
 .mpf-editable { cursor: text; border-bottom: 1px dashed transparent; }
 .mpf-editable:hover { border-bottom-color: var(--ink-3); }
 .mpf-ovr { color: var(--cy); }
+/* live-quote flash — price ticks green/red on each 5s real-mark refresh */
+.mpf-live { display: inline-block; border-radius: 3px; padding: 0 3px; transition: background-color .25s ease, color .25s ease; }
+.mpf-live--up { background: color-mix(in oklab, var(--gn) 26%, transparent); color: var(--gn); }
+.mpf-live--dn { background: color-mix(in oklab, var(--rd) 26%, transparent); color: var(--rd); }
 .mpf-cell-edit { width: 72px; padding: 2px 5px; background: var(--bg-3); border: 1px solid var(--copper); border-radius: 3px; color: var(--ink-1); font-size: 12px; text-align: right; }
 .mpf-notes { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .mpf-foot td { border-top: 2px solid var(--line-2); padding-top: 9px; font-size: 12px; }
@@ -11798,7 +11802,7 @@ function OtkLensOptions({ ticker, mode }) {
       <div className="otk-body">
         {tab==="chain" && <OtkChain o={o} setDte={setDte} chain={chain} />}
         {tab==="pricing" && <OtkPricing o={o} />}
-        {tab==="context" && <OtkContext o={o} ticker={ticker} />}
+        {tab==="context" && <OtkContext o={o} ticker={ticker} chain={chain} />}
         {tab==="build" && <OtkBuild o={o} />}
       </div>
     </div>
@@ -12282,21 +12286,48 @@ function otkAgo(dateStr) {
   const ms = Date.parse(dateStr); if (isNaN(ms)) return String(dateStr).slice(5, 10);
   return ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][new Date(ms).getMonth()] + " " + new Date(ms).getDate();
 }
-function OtkContext({ o, ticker }) {
+function OtkContext({ o, ticker, chain }) {
   const sym = o && (o.sym || o.symbol);
   const [news, setNews] = React.useState({ state: "load", articles: null });
   const [soc, setSoc] = React.useState(null);
+  const [alt, setAlt] = React.useState({ edgar: null, insider: null });
   React.useEffect(() => {
     if (typeof fetch === "undefined" || !sym) return;
-    let live = true; setNews({ state: "load", articles: null }); setSoc(null);
+    let live = true; setNews({ state: "load", articles: null }); setSoc(null); setAlt({ edgar: null, insider: null });
     fetch(`/api/news?t=${encodeURIComponent(sym)}&limit=6`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
       .then(j => { if (live) setNews({ state: "ok", articles: (j && j.articles) || [] }); }).catch(() => { if (live) setNews({ state: "err", articles: [] }); });
     fetch(`/api/social/${encodeURIComponent(sym)}`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
       .then(j => { if (live) setSoc(j); }).catch(() => {});
+    fetch(`/api/edgar-13f?t=${encodeURIComponent(sym)}`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
+      .then(j => { if (live) setAlt(a => ({ ...a, edgar: (j && j.filings) || [] })); }).catch(() => {});
+    fetch(`/api/insider/${encodeURIComponent(sym)}`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
+      .then(j => { if (live) setAlt(a => ({ ...a, insider: (j && j.transactions) || [] })); }).catch(() => {});
     return () => { live = false; };
   }, [sym]);
   const st = soc && soc.stocktwits;
   const erDays = ticker && ticker.earnings ? ticker.earnings.days : null;
+  // REAL 25Δ risk-reversal + butterfly from the live chain (nearest-DTE expiry, by delta)
+  const volSurf = React.useMemo(() => {
+    const exps = chain && !chain.__empty && Array.isArray(chain.expirations) ? chain.expirations : null;
+    if (!exps || !exps.length) return { rr: o.skew != null ? -o.skew : null, bf: null, src: o.skew != null ? "skew" : null };
+    const e = exps.reduce((b, x) => Math.abs(x.dte - (o.dte || 30)) < Math.abs(b.dte - (o.dte || 30)) ? x : b, exps[0]);
+    const ks = e.strikes || [];
+    const atm = ks.reduce((b, s) => Math.abs((s.strike || 0) - o.spot) < Math.abs(((b && b.strike) || 0) - o.spot) ? s : b, ks[0]) || {};
+    // normalize IV to PERCENT (chain iv may be fraction 0.69 or percent 69)
+    const pct = (v) => v == null ? null : (v <= 5 ? v * 100 : v);
+    const atmP = pct(atm.call && atm.call.iv != null ? atm.call.iv : o.iv);
+    // nearest 25-delta call (Δ≈0.25) and put (Δ≈−0.25)
+    const c25 = ks.filter(s => s.call && s.call.delta != null).reduce((b, s) => Math.abs(Math.abs(s.call.delta) - 0.25) < Math.abs(Math.abs((b && b.call && b.call.delta) || 1) - 0.25) ? s : b, null);
+    const p25 = ks.filter(s => s.put && s.put.delta != null).reduce((b, s) => Math.abs(Math.abs(s.put.delta) - 0.25) < Math.abs(Math.abs((b && b.put && b.put.delta) || 1) - 0.25) ? s : b, null);
+    const cP = pct(c25 && c25.call ? c25.call.iv : null), pP = pct(p25 && p25.put ? p25.put.iv : null);
+    // risk-reversal = 25Δ call IV − 25Δ put IV; prefer the builder's validated skew (rr = −skew)
+    let rr = o.skew != null ? +(-o.skew).toFixed(1) : ((cP != null && pP != null) ? +(cP - pP).toFixed(1) : null);
+    // butterfly = avg wing IV − ATM IV; only when plausible (8-strike grid is coarse)
+    let bf = (cP != null && pP != null && atmP != null) ? +(((cP + pP) / 2 - atmP)).toFixed(1) : null;
+    if (rr != null && Math.abs(rr) > 60) rr = null;       // implausible from coarse grid → omit
+    if (bf != null && Math.abs(bf) > 40) bf = null;
+    return { rr, bf, src: (rr != null || bf != null) ? "chain" : null };
+  }, [chain, o]);
   return (
     <div className="otk-grid">
       <OtkGEX o={o} />
@@ -12340,27 +12371,32 @@ function OtkContext({ o, ticker }) {
         </div>
       </div>
       <div className="otk-card otk-card--wide">
-        <div className="otk-card-h mono">ALT-DATA · StockTwits · Senate · EDGAR · Wiki</div>
+        <div className="otk-card-h mono">ALT-DATA · StockTwits · 13-F · Insider · Senate · Wiki</div>
         <div className="otk-alt">
           {[
             ["StockTwits bull", st?st.bull_pct+"%":"—", st?(st.bull_pct>=55?"gn":st.bull_pct<=45?"rd":"amb"):"ink"],
-            ["ST msg volume", st?String(st.message_volume):"—", st&&st.message_volume>20?"gn":"ink"],
-            ["Trending", st?(st.trending?"yes":"no"):"—", st&&st.trending?"gn":"ink"],
-            ["Senate · EDGAR · Wiki", "—", "ink"],
+            ["13-F filers", alt.edgar==null?"…":String(alt.edgar.length), alt.edgar&&alt.edgar.length?"gn":"ink"],
+            ["Insider tx (1y)", alt.insider==null?"…":String(alt.insider.length), alt.insider&&alt.insider.length?"amb":"ink"],
+            ["Senate · Wiki", "—", "ink"],
           ].map((a,i)=>(
             <div key={i} className="otk-alt-cell"><div className="mono dim2">{a[0]}</div><div className={`mono kpi-tone--${a[2]}`}>{a[1]}</div></div>
           ))}
         </div>
-        <div className="mono dim2" style={{fontSize:10,padding:"2px"}}>StockTwits is live; Senate/EDGAR/Wiki-views scrapers aren't wired into this lens — shown as —.</div>
+        <div className="mono dim2" style={{fontSize:10,padding:"2px"}}>StockTwits + EDGAR 13-F + insider are live. Senate (upstream source 403) and Wiki-views (404 for this name) unavailable now — shown as —, not fabricated.</div>
       </div>
       <div className="otk-card otk-card--wide">
         <div className="otk-card-h mono">VOL SURFACE METRICS</div>
         <div className="otk-stats">
-          {[["25Δ Skew",otkFx(o.skew,1,"%",o.skew>=0?"+":"")],["Term ratio",otkF(o.term)],["ATM IV",otkFx(o.iv,1,"%")],["Vega/ct",o.vega!=null?"$"+(o.vega*100).toFixed(0)+"/IVpp":"—"],["Butterfly · vol-of-vol","—"]].map(([k,v],i)=>(
+          {[["25Δ Skew",otkFx(o.skew,1,"%",o.skew>=0?"+":"")],
+            ["25Δ Risk-Rev",volSurf.rr!=null?(volSurf.rr>=0?"+":"")+volSurf.rr+"%":"—"],
+            ["Butterfly",volSurf.bf!=null?(volSurf.bf>=0?"+":"")+volSurf.bf+"%":"—"],
+            ["Term ratio",otkF(o.term)],["ATM IV",otkFx(o.iv,1,"%")],
+            ["Vega/ct",o.vega!=null?"$"+(o.vega*100).toFixed(0)+"/IVpp":"—"],
+            ["Vol-of-vol","—"]].map(([k,v],i)=>(
             <div key={i} className="otk-stat"><span className="mono dim2">{k}</span><span className="mono">{v}</span></div>
           ))}
         </div>
-        <div className="mono dim2" style={{fontSize:10,padding:"2px"}}>Skew/term/IV/vega are real from the chain. Butterfly + vol-of-vol need a full per-delta IV surface — not exposed by the chain feed.</div>
+        <div className="mono dim2" style={{fontSize:10,padding:"2px"}}>Skew/RR/butterfly/term/IV/vega computed from the live Schwab chain ({volSurf.src||"—"}). Vol-of-vol needs an IV time-series (single snapshot only) — shown as —.</div>
       </div>
     </div>
   );
@@ -14303,8 +14339,14 @@ function TcLWChart({ d, ind, full, hasData, status }) {
   useTCe(() => {
     if (typeof window === "undefined" || !wrap.current || !window.LightweightCharts) return;
     const cssv = (n,f) => (getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f);
-    const chart = window.LightweightCharts.createChart(wrap.current, {
-      autoSize: true,
+    // SELF-HEAL: autoSize:false + explicit size. When the lens mounts while hidden
+    // (detail-panel lens switch), LWC otherwise pins the canvas to its 300×150
+    // fallback and never grows. fit() re-derives size from the live box; a
+    // ResizeObserver + a cheap 350ms heal loop re-fit if the backing drifts.
+    const wr = wrap.current;
+    const chart = window.LightweightCharts.createChart(wr, {
+      autoSize: false,
+      width: Math.max(10, wr.clientWidth), height: Math.max(10, wr.clientHeight),
       layout: { background:{ color:"transparent" }, textColor: cssv("--ink-2","#8590a3"), fontFamily:"inherit" },
       grid: { vertLines:{ color:"rgba(255,255,255,0.04)" }, horzLines:{ color:"rgba(255,255,255,0.04)" } },
       crosshair: { mode: 1 },
@@ -14319,7 +14361,37 @@ function TcLWChart({ d, ind, full, hasData, status }) {
     const vol = chart.addHistogramSeries({ priceFormat:{ type:"volume" }, priceScaleId:"vol" });
     chart.priceScale("vol").applyOptions({ scaleMargins:{ top:0.82, bottom:0 } });
     seriesRef.current = { chart, candle, vol, overlays:[], priceLines:[] };
-    return () => { chart.remove(); chartRef.current=null; seriesRef.current={}; };
+
+    const fit = () => {
+      const host = wrap.current; if (!host) return false;
+      const r = host.getBoundingClientRect();
+      const w = Math.round(r.width), h = Math.round(r.height) || 288;
+      if (w < 20) return false;                       // still hidden / unlaid-out
+      try {
+        // jiggle the size so LWC reallocates the bitmap and repaints, even if it
+        // was first sized while hidden (otherwise the backing stays 300×150).
+        chart.resize(w - 1, h, true);
+        chart.resize(w, h, true);
+        chart.timeScale().fitContent();
+        if (seriesRef.current.replay) seriesRef.current.replay();
+      } catch (e) {}
+      return true;
+    };
+    seriesRef.current.fit = fit;
+
+    const ro = (typeof ResizeObserver !== "undefined") ? new ResizeObserver(() => requestAnimationFrame(fit)) : null;
+    if (ro) ro.observe(wr);
+    fit();
+    // persistent self-heal: if the canvas backing ever drifts from the container
+    // width (e.g. mounted while hidden), re-fit. Cheap; runs for the lifetime.
+    const heal = setInterval(() => {
+      const host = wrap.current; if (!host) return;
+      const w = Math.round(host.getBoundingClientRect().width); if (w < 20) return;
+      const cv = host.querySelector("canvas");
+      if (!cv || Math.abs(cv.width - w) > 6) fit();
+    }, 350);
+
+    return () => { try { clearInterval(heal); if (ro) ro.disconnect(); chart.remove(); } catch (e) {} chartRef.current=null; seriesRef.current={}; };
   }, []);
 
   // feed REAL candles + volume + plan lines + markers + overlays on data/ind change
@@ -14331,6 +14403,9 @@ function TcLWChart({ d, ind, full, hasData, status }) {
     // candlestick series wants {time,open,high,low,close} only
     s.candle.setData(bars.map(b => ({ time:b.time, open:b.open, high:b.high, low:b.low, close:b.close })));
     s.vol.setData(Array.isArray(d.vol) ? d.vol : []);
+    // replay hook — lets fit()/heal re-push the candles if the chart first
+    // rendered while hidden and lost its bitmap (self-heal path).
+    s.replay = () => { try { s.candle.setData(bars.map(b => ({ time:b.time, open:b.open, high:b.high, low:b.low, close:b.close }))); } catch (e) {} };
 
     // plan price lines (REAL ticker.pivot/stop/t1/t2)
     s.priceLines.forEach(pl => { try { s.candle.removePriceLine(pl); } catch(e){} });
@@ -14553,12 +14628,31 @@ function smcGrade(S) {
 }
 const smc$ = (v, d = 2) => (v == null || isNaN(v)) ? "—" : "$" + (+v).toFixed(d);
 
+// SMT divergence vs the broad market (SPY) — real higher-low / lower-low comparison.
+// Bullish SMT: stock prints a higher low while SPY prints a lower low (relative strength).
+function smcSMT(stockBars, spyBars) {
+  const lows = (b) => {
+    if (!b || b.length < 20) return null;
+    const w = b.slice(-20), h = Math.floor(w.length / 2);
+    return { prev: Math.min(...w.slice(0, h).map(x => x.lo)), recent: Math.min(...w.slice(h).map(x => x.lo)) };
+  };
+  const s = lows(stockBars), m = lows(spyBars);
+  if (!s || !m) return null;
+  const sHL = s.recent > s.prev, sLL = s.recent < s.prev;
+  const mHL = m.recent > m.prev, mLL = m.recent < m.prev;
+  let read = "ALIGNED", tone = "ink", note = "stock and SPY moving together";
+  if (sHL && mLL) { read = "BULLISH SMT"; tone = "gn"; note = "stock higher-low while SPY lower-low → relative strength"; }
+  else if (sLL && mHL) { read = "BEARISH SMT"; tone = "rd"; note = "stock lower-low while SPY higher-low → relative weakness"; }
+  return { read, tone, note, stock: sHL ? "higher low" : sLL ? "lower low" : "flat", spy: mHL ? "higher low" : mLL ? "lower low" : "flat" };
+}
 function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const ox = usePvOhlcv(ticker && ticker.symbol);
+  const spy = usePvOhlcv("SPY");
   const S = React.useMemo(() => smcCompute(ox.bars), [ox.bars]);
-  return <LensSMCInner ticker={ticker} mode={mode} sizeCat={sizeCat} headerStyle={headerStyle} kpiStyle={kpiStyle} heroStyle={heroStyle} S={S} oxState={ox.state} />;
+  const smt = React.useMemo(() => smcSMT(ox.bars, spy.bars), [ox.bars, spy.bars]);
+  return <LensSMCInner ticker={ticker} mode={mode} sizeCat={sizeCat} headerStyle={headerStyle} kpiStyle={kpiStyle} heroStyle={heroStyle} S={S} oxState={ox.state} smt={smt} />;
 }
-function LensSMCInner({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle, S, oxState }) {
+function LensSMCInner({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle, S, oxState, smt }) {
   const s1 = useStateToggle("sm-1"); const s2 = useStateToggle("sm-2");
   const s3 = useStateToggle("sm-3"); const s4 = useStateToggle("sm-4");
   const s0 = useStateToggle("sm-0"); const s5 = useStateToggle("sm-5");
@@ -14708,7 +14802,7 @@ function LensSMCInner({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle,
           sub="session timing edge · correlated-pair divergence"
           style={headerStyle} right={<StateToggle name="sm-9" />} />
         <StateWrap state={s9b.value} source="session timing + SMT need intraday/correlated-pair feed">
-          <div className="lens-pad"><SMCKillSMT S={S} /></div>
+          <div className="lens-pad"><SMCKillSMT S={S} smt={smt} /></div>
         </StateWrap>
       </div>
 
@@ -15056,7 +15150,7 @@ function MTFScreener({ S }) {
 // RISK — VaR, Kelly, drawdown, stress, liquidity
 // ────────────────────────────────────────────────────────────
 // real per-ticker risk: realized vol from /api/ohlcv, Kelly from setupStats, NAV from portfolio
-function riskCompute(ticker, bars) {
+function riskCompute(ticker, bars, spyBars) {
   const px = num(ticker && ticker.price) ?? (bars && bars.length ? bars[bars.length - 1].c : null);
   let dvol = null, atr = null;
   if (bars && bars.length >= 25) {
@@ -15071,15 +15165,30 @@ function riskCompute(ticker, bars) {
   const D = (typeof window !== "undefined" && window.__ssData) || {};
   const nav = num(D.portfolio && D.portfolio.equity);
   const rr = num(ticker && ticker.rMultiple);
-  const beta = num(ticker && (ticker.beta || (ticker.raw && ticker.raw.beta)));
-  return { px, dvol, atr, kelly, halfK: kelly != null ? kelly / 2 : null, p, pf, nav, rr, beta, n: ss.n };
+  let beta = num(ticker && (ticker.beta || (ticker.raw && ticker.raw.beta)));
+  let betaSrc = beta != null ? "scan row" : null;
+  // fallback: compute beta = cov(stock,SPY)/var(SPY) over aligned daily returns
+  if (beta == null && bars && spyBars && bars.length >= 40 && spyBars.length >= 40) {
+    const n = Math.min(bars.length, spyBars.length, 120);
+    const sr = pvDailyReturns(bars.slice(-n)), mr = pvDailyReturns(spyBars.slice(-n));
+    const k = Math.min(sr.length, mr.length);
+    if (k >= 30) {
+      const sa = sr.slice(-k), ma = mr.slice(-k);
+      const mm = ma.reduce((a, c) => a + c, 0) / k, ms = sa.reduce((a, c) => a + c, 0) / k;
+      let cov = 0, varm = 0;
+      for (let i = 0; i < k; i++) { cov += (sa[i] - ms) * (ma[i] - mm); varm += (ma[i] - mm) ** 2; }
+      if (varm > 0) { beta = +(cov / varm).toFixed(2); betaSrc = "computed vs SPY"; }
+    }
+  }
+  return { px, dvol, atr, kelly, halfK: kelly != null ? kelly / 2 : null, p, pf, nav, rr, beta, betaSrc, n: ss.n };
 }
 function LensRisk({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("rk-1"); const s2 = useStateToggle("rk-2");
   const s3 = useStateToggle("rk-3"); const s4 = useStateToggle("rk-4");
   const s5 = useStateToggle("rk-5");
   const ox = usePvOhlcv(ticker && ticker.symbol);
-  const R = React.useMemo(() => riskCompute(ticker, ox.bars), [ticker, ox.bars]);
+  const spy = usePvOhlcv("SPY");
+  const R = React.useMemo(() => riskCompute(ticker, ox.bars, spy.bars), [ticker, ox.bars, spy.bars]);
   const F = (v, d, suf = "", pre = "") => (v == null || v !== v) ? "—" : pre + (+v).toFixed(d) + suf;
   const hd = mode === "POSITION" ? 10 : mode === "INVESTMENT" ? 21 : 1;
   const erDays = ticker && ticker.earnings ? ticker.earnings.days : null;
@@ -15148,7 +15257,7 @@ function LensRisk({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
             <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
               <KpiTile label="ATR(14)" value={F(R.atr, 2, "", "$")} tone="ink" sub={R.atr != null && R.px ? `${(R.atr/R.px*100).toFixed(1)}% of px` : "—"} />
               <KpiTile label="Realized σ (1d)" value={F(R.dvol != null ? R.dvol*100 : null, 1, "%")} tone="amb" sub="60d daily" />
-              <KpiTile label="Beta (SPY)" value={F(R.beta, 2)} tone="ink" sub={R.beta != null ? "scan row" : "not in row"} />
+              <KpiTile label="Beta (SPY)" value={F(R.beta, 2)} tone="ink" sub={R.betaSrc || "needs ≥30 bars"} />
               <KpiTile label="L1 spread" value="—" tone="ink" sub="needs live quote" />
             </div>
           </div>
@@ -15575,7 +15684,7 @@ function SMCVoidOTE({ S }) {
   );
 }
 
-function SMCKillSMT({ S }) {
+function SMCKillSMT({ S, smt }) {
   // session kill-zones need intraday timestamps; SMT needs correlated-pair bars — neither in the daily feed
   return (
     <div className="smc-sub smc-2col">
@@ -15587,10 +15696,13 @@ function SMCKillSMT({ S }) {
         <div className="mono dim2" style={{fontSize:10.5,marginTop:6}}>Session kill-zone activity needs an intraday (1H/15m) feed — daily bars can't time the open. Shown as —.</div>
       </div>
       <div>
-        <div className="label-cap" style={{marginBottom:6}}>SMT DIVERGENCE · stock vs sector ETF <span className="dim2">· method</span></div>
-        <div className="smc-row smc-row--ink"><span className="mono">Stock</span><span className="mono dim2">—</span></div>
-        <div className="smc-row smc-row--ink"><span className="mono">Sector ETF</span><span className="mono dim2">—</span></div>
-        <div className="mono dim" style={{fontSize:11,marginTop:6}}>Bullish SMT: a name holding a higher low while its sector ETF makes a lower low is a smart-money accumulation tell. Computing it live needs synchronized correlated-pair bars (stock + sector ETF) — not wired into this daily feed, so shown as the method only rather than a fabricated reading.</div>
+        <div className="label-cap" style={{marginBottom:6}}>SMT DIVERGENCE · stock vs SPY <span className="dim2">· real</span></div>
+        {smt ? <>
+          <div className={`smc-row smc-row--${smt.stock==="higher low"?"gn":smt.stock==="lower low"?"rd":"ink"}`}><span className="mono">Stock</span><span className={`mono ${smt.stock==="higher low"?"up":smt.stock==="lower low"?"dn":"dim2"}`}>{smt.stock}</span></div>
+          <div className={`smc-row smc-row--${smt.spy==="higher low"?"gn":smt.spy==="lower low"?"rd":"ink"}`}><span className="mono">SPY</span><span className={`mono ${smt.spy==="higher low"?"up":smt.spy==="lower low"?"dn":"dim2"}`}>{smt.spy}</span></div>
+          <div className={`smc-row smc-row--${smt.tone}`}><span className="mono">SMT read</span><span className={`mono kpi-tone--${smt.tone}`}>{smt.read}</span></div>
+          <div className="mono dim" style={{fontSize:11,marginTop:6}}>{smt.note}. (Computed from real 20-bar swing lows · stock vs SPY /api/ohlcv.)</div>
+        </> : <div className="mono dim2" style={{fontSize:11}}>Loading SPY bars for SMT comparison…</div>}
       </div>
     </div>
   );
@@ -30592,11 +30704,49 @@ const { useState: useMpf, useEffect: useMpfE, useMemo: useMpfM, useRef: useMpfR 
     return out;
   }
 
+  // Live-quote overlay — fresh prices pulled every 5s from /api/portfolio (REAL
+  // Alpaca-paper marks). Keyed by symbol → { last, dayPct, sector }. Empty until
+  // the first tick() resolves; markets-closed = marks simply don't move (honest).
+  const LIVE_QUOTES = {};
+
   // Real price for one symbol, or null when unknown. NEVER simulated.
+  // Live overlay (5s /api/portfolio refresh) wins over the static scan bundle.
   function realPrice(sym) {
     if (!sym) return null;
+    const k = String(sym).toUpperCase();
+    if (LIVE_QUOTES[k]) return LIVE_QUOTES[k];
     const m = mpfPriceMap();
-    return m[String(sym).toUpperCase()] || null;
+    return m[k] || null;
+  }
+
+  // Live re-price: re-fetch /api/portfolio (REAL marks) and overlay fresh prices.
+  // NO simulation / Math.random — when the market is closed marks don't change and
+  // LivePrice simply won't flash. Returns the count of symbols refreshed (async).
+  function tick() {
+    try {
+      if (typeof fetch === "undefined") return 0;
+      fetch("/api/portfolio", { credentials: "same-origin", cache: "no-store" })
+        .then(r => (r && r.ok) ? r.json() : null)
+        .then(live => {
+          if (!live || !Array.isArray(live.positions)) return;
+          let moved = 0;
+          live.positions.forEach(p => {
+            if (!p) return;
+            const sym = String(p.ticker || p.symbol || "").toUpperCase();
+            if (!sym) return;
+            const px = Number(p.current_price != null ? p.current_price : p.price);
+            if (!isFinite(px) || px <= 0) return;
+            let dp = (p.day_change_pct != null ? p.day_change_pct : null);
+            if (dp != null && Math.abs(Number(dp)) <= 1) dp = Number(dp) * 100;
+            const prev = LIVE_QUOTES[sym];
+            if (!prev || prev.last !== px) moved++;
+            LIVE_QUOTES[sym] = { last: px, dayPct: (dp != null && isFinite(Number(dp)) ? Number(dp) : (prev ? prev.dayPct : null)), sector: p.sector || (prev ? prev.sector : null) };
+          });
+          if (moved) emit();
+        })
+        .catch(() => {});
+    } catch (e) {}
+    return 0;
   }
 
   function metaFor(sym, assetType, bundleSector) {
@@ -30746,7 +30896,7 @@ const { useState: useMpf, useEffect: useMpfE, useMemo: useMpfM, useRef: useMpfR 
     removeHolding: (id, hid) => { const p = state.portfolios.find(x => x.id === id); if (!p) return; p.holdings = p.holdings.filter(x => x.id !== hid); save(); },
     addTrade: (id, t) => { const p = state.portfolios.find(x => x.id === id); if (!p) return; p.trades.unshift({ id: uid(), fee: 0, ...t }); save(); },
     removeTrade: (id, tid) => { const p = state.portfolios.find(x => x.id === id); if (!p) return; p.trades = p.trades.filter(x => x.id !== tid); save(); },
-    summarize, risk, enrich, realPrice,
+    summarize, risk, enrich, realPrice, tick,
     combined: () => ({ id: "__all", name: "All Portfolios", cash: state.portfolios.reduce((s, p) => s + (p.cash || 0), 0), holdings: state.portfolios.flatMap(p => p.holdings), trades: state.portfolios.flatMap(p => p.trades) }),
     reset: () => { state = seed(); save(); },
   };
@@ -30759,8 +30909,27 @@ const { useState: useMpf, useEffect: useMpfE, useMemo: useMpfM, useRef: useMpfR 
 // ────────────────────────────────────────────────────────────────────────────
 
 function useMyPF() {
-  const [, f] = useMpf(0);
+  const [v, f] = useMpf(0);
   useMpfE(() => { const h = () => f(x => x + 1); window.addEventListener("mypf-change", h); return () => window.removeEventListener("mypf-change", h); }, []);
+  return v;
+}
+
+// Live-ticking price cell — flashes green/red for 650ms when the REAL quote moves
+// vs its previous render (prev tracked in a ref). Driven by the 5s /api/portfolio
+// refresh in MpfHoldingsTab; markets-closed = value unchanged = no flash (honest).
+function MpfLivePrice({ value, override }) {
+  const prev = useMpfR(value);
+  const [flash, setFlash] = useMpf(null);
+  useMpfE(() => {
+    if (prev.current != null && value !== prev.current) {
+      setFlash(value > prev.current ? "up" : "dn");
+      const t = setTimeout(() => setFlash(null), 650);
+      prev.current = value;
+      return () => clearTimeout(t);
+    }
+    prev.current = value;
+  }, [value]);
+  return <span className={`mpf-live ${override ? "mpf-ovr" : ""} ${flash ? "mpf-live--" + flash : ""}`}>${Number(value).toFixed(2)}</span>;
 }
 
 const MP_ASSET = [["stock", "Stock"], ["etf", "ETF"], ["crypto", "Crypto"], ["cash", "Cash"]];
@@ -30773,7 +30942,7 @@ function MpfTile({ l, v, s, tone }) {
 }
 
 function SurfaceMyPortfolios({ onTicker, data }) {
-  useMyPF();
+  const ver = useMyPF();
   const MyPF = window.MyPF;
   const [tab, setTab] = useMpf("holdings");
   const [allView, setAllView] = useMpf(false);
@@ -30804,7 +30973,7 @@ function SurfaceMyPortfolios({ onTicker, data }) {
   }
 
   const pf = allView ? MyPF.combined() : (active || { id: null, name: "—", holdings: [], trades: [], cash: 0 });
-  const sum = useMpfM(() => MyPF.summarize(pf), [pf, tab, allView, adding, data]);
+  const sum = useMpfM(() => MyPF.summarize(pf), [pf, tab, allView, adding, data, ver]);
 
   return (
     <div className="surface wsx wsx--copper mpf">
@@ -30819,7 +30988,7 @@ function SurfaceMyPortfolios({ onTicker, data }) {
         <div className="wsx-hdr-r">
           <button className="mpf-btn" onClick={() => window.dispatchEvent(new CustomEvent("mypf-change"))} title="Re-read live prices from the latest scan bundle">⟳ Prices</button>
           <MpfRiskProfilePill />
-          <FreshnessPill state="live" age="scan" />
+          <FreshnessPill state="live" age="5s" />
         </div>
       </div>
 
@@ -30965,6 +31134,14 @@ function MpfHoldingsTab({ pf, sum, allView, adding, setAdding, onTicker }) {
   const MyPF = window.MyPF;
   const [edit, setEdit] = useMpf(null); // {hid, field}
   const rows = sum.rows;
+  // Live quotes — re-fetch REAL marks (/api/portfolio) every 5s so Price + Day
+  // refresh in real time and MpfLivePrice flashes on genuine moves. No simulation.
+  useMpfE(() => {
+    if (!MyPF || !MyPF.tick) return;
+    MyPF.tick();
+    const iv = setInterval(() => MyPF.tick(), 5000);
+    return () => clearInterval(iv);
+  }, []);
   return (
     <div className="wsx-body">
       {adding && !allView && <MpfAddHoldingForm pfId={pf.id} onDone={() => setAdding(false)} />}
@@ -30996,7 +31173,7 @@ function MpfHoldingsTab({ pf, sum, allView, adding, setAdding, onTicker }) {
                 <td><span className={`mpf-type mpf-type--${r.type}`}>{r.type}</span></td>
                 <td className="r tabular">{cellEdit("qty", r.qty, r.qty)}</td>
                 <td className="r tabular dim">{cellEdit("cost", r.cost, "$" + (Number(r.cost) || 0).toFixed(2))}</td>
-                <td className="r tabular">{cellEdit("priceOverride", r.last, r.priced ? <span className={r.priceOverride != null ? "mpf-ovr" : ""}>${Number(r.last).toFixed(2)}</span> : <span className="dim2" title="Not in today's scan universe — no live price">—</span>)}</td>
+                <td className="r tabular">{cellEdit("priceOverride", r.last, r.priced ? <MpfLivePrice value={r.last} override={r.priceOverride != null} /> : <span className="dim2" title="Not in today's scan universe — no live price">—</span>)}</td>
                 <td className={`r tabular ${r.dayPct >= 0 ? "up" : "dn"}`}>{r.type === "cash" || r.dayPct == null ? "—" : MpfPct(r.dayPct)}</td>
                 <td className="r tabular">{r.priced ? Mpf$(r.mv) : "—"}</td>
                 <td className={`r tabular ${(r.pnl || 0) >= 0 ? "up" : "dn"}`}><b>{r.priced ? Mpf$(r.pnl) : "—"}</b></td>
