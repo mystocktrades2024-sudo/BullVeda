@@ -223,8 +223,9 @@ Grep of the rendered code paths after this session's cleanup:
 
 Wired to real feeds (were honest `—`): **25Δ Risk-Reversal + Butterfly** (live Schwab chain), **EDGAR 13-F + insider** alt-data, **SMC SMT divergence** (stock vs SPY), **Risk Beta(SPY)** (computed vs SPY when scan-row beta absent).
 
+Wired to **Schwab intraday** (commit 33edad30f): **1H/4H structure** (Chart MTF, SMC MTF Screener + Trend-State) and **session kill-zones** (ICT NY AM/PM avg range by ET session) now real — `/api/ohlcv` intraday routes to Schwab `pricehistory` (30-min → resampled). London session shows `—` (regular-hours feed has no pre-market).
+
 Still honest `—` — genuinely no free feed in the stack:
-- **Intraday 1H/4H structure + session kill-zones** — `/api/ohlcv?tf=1h` returns 0 candles (no intraday feed).
 - **Vol-of-vol** — needs an IV time series; chain is a single snapshot.
 - **Book-aggregate greeks** — needs an open-options-positions feed (paper book is equity-only).
 - **Senate trades** — upstream source returns HTTP 403 (Senate Stock Watcher S3 blocked).
