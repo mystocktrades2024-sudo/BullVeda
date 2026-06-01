@@ -226,7 +226,7 @@ function Companion({ initialTab = "home", initialSym = null, initialDetail = fal
 
   const doAction = (kind) => {
     const t = ticker;
-    if (kind === "desktop") { setSheet(null); const url = "/v2/kairos.html" + (t ? "?t=" + encodeURIComponent(t.symbol) : ""); try { window.top.location.href = url; } catch (e) { window.location.href = url; } return; }
+    if (kind === "desktop") { setSheet(null); const url = "/app?view=desktop" + (t ? "&t=" + encodeURIComponent(t.symbol) : ""); try { window.top.location.href = url; } catch (e) { window.location.href = url; } return; }
     if (!t) return;
     if (kind === "actions") return setSheet("actions");
     if (kind === "alert") return setSheet("alert");

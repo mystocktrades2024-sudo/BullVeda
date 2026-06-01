@@ -510,15 +510,57 @@ async def _marketing_asset(fname: str):
 
 @app.api_route("/app", methods=["GET", "HEAD"])
 async def _app_terminal(request: Request, auth: HTTPBasicCredentials = Depends(_check_auth)):
-    """Auth-gated terminal — serves the built Stocksmith terminal (handoff reader +
-    all surfaces). The landing hands off here with ?from=login | ?welcome=1 [&plan=]."""
+    """Auth-gated terminal entry. Auto-routes by device: desktop → Stocksmith
+    terminal, phone/tablet → the /v2/mobile companion. iPadOS Safari reports a
+    desktop Mac UA, so the decision is made client-side (navigator.maxTouchPoints
+    reliably flags iPad). Sticky via the `st_view` cookie; `?view=desktop|mobile`
+    forces + persists a choice so a user is never trapped on the wrong surface."""
     if isinstance(auth, Response):
         return auth
-    p = (_PROTOTYPE_DIR / "Stocksmith.html").resolve()
-    if not p.exists():
-        return RedirectResponse(url="/kairos.html" + (f"?{request.url.query}" if request.url.query else ""), status_code=302)
-    return Response(content=p.read_bytes(), media_type="text/html",
-                    headers={"Cache-Control": "no-store"})
+    from urllib.parse import urlencode
+    view = (request.query_params.get("view") or "").lower()
+    cookie_view = (request.cookies.get("st_view") or "").lower()
+    qd = {k: v for k, v in request.query_params.items() if k != "view"}
+    qs = ("?" + urlencode(qd)) if qd else ""
+
+    def _serve_desktop():
+        p = (_PROTOTYPE_DIR / "Stocksmith.html").resolve()
+        if not p.exists():
+            return RedirectResponse(url="/kairos.html" + qs, status_code=302)
+        return Response(content=p.read_bytes(), media_type="text/html",
+                        headers={"Cache-Control": "no-store"})
+
+    def _go_mobile():
+        return RedirectResponse(url="/v2/mobile/index.html" + qs, status_code=302)
+
+    # explicit override (persists for next time)
+    if view == "desktop":
+        r = _serve_desktop(); r.set_cookie("st_view", "desktop", max_age=31536000, samesite="lax"); return r
+    if view == "mobile":
+        r = _go_mobile(); r.set_cookie("st_view", "mobile", max_age=31536000, samesite="lax"); return r
+    # sticky prior decision
+    if cookie_view == "desktop":
+        return _serve_desktop()
+    if cookie_view == "mobile":
+        return _go_mobile()
+    # HEAD / no decision yet for a crawler-ish probe → don't shim, just serve desktop
+    if request.method == "HEAD":
+        return _serve_desktop()
+    # First authenticated GET with no decision → tiny client-side router. Catches
+    # iPad (maxTouchPoints>1 + Mac UA) which a server UA sniff would miss, then
+    # bounces back through /app?view=… so the choice sticks as a cookie.
+    shim = (
+        "<!doctype html><meta charset=utf-8><title>SwingTrade</title>"
+        "<style>html,body{margin:0;height:100%;background:#07090b}</style>"
+        "<script>(function(){var ua=navigator.userAgent||'';"
+        "var phone=/iPhone|iPod|Android.*Mobile|Windows Phone/i.test(ua);"
+        "var ipad=(navigator.maxTouchPoints>1 && /Macintosh|iPad/i.test(ua));"
+        "var smalltouch=(navigator.maxTouchPoints>0 && window.matchMedia('(max-width:1024px)').matches);"
+        "var m=phone||ipad||smalltouch;"
+        "var q=location.search?(location.search.replace(/^\\?/,'')+'&'):'';"
+        "location.replace('/app?'+q+(m?'view=mobile':'view=desktop'));})();</script>"
+    )
+    return Response(content=shim, media_type="text/html", headers={"Cache-Control": "no-store"})
 
 # Legacy /dashboard URL (still in CLAUDE.md docs + old bookmarks + Lighthouse
 # targets) used to 404 with a JSON body — which made Lighthouse report
