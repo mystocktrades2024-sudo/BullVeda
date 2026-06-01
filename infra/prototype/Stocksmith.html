@@ -17789,6 +17789,23 @@ function SurfacePerformance({ onTicker, data }) {
   );
 }
 
+// real mechanism hypotheses (verbatim from canonical_trade_plan.py:MECHANISM_HYPOTHESES) + setup→family map
+const STRAT_FAMILY = {
+  "EMA21 Pullback": "Trend Continuation", "EMA50 Pullback": "Trend Continuation",
+  "Bounce off Support": "Trend Continuation", "10-Week Pullback": "Trend Continuation",
+  "Trend Continuation": "Trend Continuation", "RS New High": "Trend Continuation",
+  "VCP Breakout": "Breakout Expansion", "Near-VCP Breakout": "Breakout Expansion",
+  "52wk Breakout": "Breakout Expansion", "Stage 2 Breakout (52w high)": "Breakout Expansion",
+  "Squeeze Breakout": "Breakout Expansion", "Squeeze Expansion": "Breakout Expansion",
+  "Pocket Pivot": "Breakout Expansion", "Breakout Expansion": "Breakout Expansion",
+  "Insider Cluster": "Special Situation", "Breakdown": "Special Situation",
+};
+const STRAT_MECH = {
+  "Impulse Catalyst": "Post-earnings announcement drift (PEAD) and unusual options activity front-run analyst revisions; institutional buy programs spread over 5-8 days.",
+  "Breakout Expansion": "Volume contraction (VCP) preceding a breakout reflects supply absorption; the breakout above resistance triggers stop-runs and momentum-fund buying.",
+  "Trend Continuation": "Pullbacks to EMA21/50 in established uptrends are buy points where institutional buyers re-add. Rally resumes within 1-3 days when buying absorbs the pullback.",
+  "Special Situation": "Insider cluster buys, short squeezes, and float rotations are non-technical catalysts that reprice the stock outside its normal volatility regime.",
+};
 function SurfaceStrategies({ onTicker, data }) {
   const d = _ssData(data);
   const fam = d.setup_family_stats || {};
@@ -17803,16 +17820,21 @@ function SurfaceStrategies({ onTicker, data }) {
       const lbFrac = _num(s.wr_low_95);
       const lb = lbFrac != null ? lbFrac * 100 : null;
       const hiFrac = _num(s.wr_high_95);
+      const pf = _num(s.profit_factor);
+      const n = _num(s.trades);
+      const rel = s.reliability != null ? String(s.reliability) : null;
+      // status derived from the REAL Wilson-floor quarantine rule — not a fabricated trend label
+      let status = "selective";
+      if (lb != null && lb < 40) status = "watch";
+      else if (pf != null && pf < 1.0) status = "watch";
+      else if (rel && rel.toLowerCase().includes("high") && lb != null && lb >= 45) status = "stable";
+      else if (lb != null && lb >= 45 && pf != null && pf >= 1.3) status = "stable";
       return {
-        k,
-        n: _num(s.trades),
-        wins: _num(s.wins),
-        wr, lb,
+        k, n, wins: _num(s.wins), wr, lb,
         hi: hiFrac != null ? hiFrac * 100 : null,
-        ci: _num(s.ci_width_pp),
-        pf: _num(s.profit_factor),
-        medR: _num(s.avg_r),
-        reliability: s.reliability != null ? String(s.reliability) : null,
+        ci: _num(s.ci_width_pp), pf, medR: _num(s.avg_r),
+        reliability: rel, status,
+        family: STRAT_FAMILY[k] || null,
       };
     }).sort((a, b) => (b.lb || 0) - (a.lb || 0));
   }, [fam]);
@@ -17825,14 +17847,15 @@ function SurfaceStrategies({ onTicker, data }) {
   const lbVals = sleeves.map(s => s.lb).filter(v => v != null);
   const bestLb = lbVals.length ? Math.max(...lbVals) : null;
   const belowFloor = sleeves.filter(s => s.lb != null && s.lb < 40).length;
+  const curMech = cur ? (STRAT_MECH[cur.family] || null) : null;
 
   return (
     <div className="surface wsx wsx--copper q-strat">
       <div className="wsx-hdr">
         <div className="wsx-hdr-l">
-          <div className="wsx-eyebrow mono">SETUP FAMILIES · WILSON-VALIDATED EDGE</div>
+          <div className="wsx-eyebrow mono">SLEEVE LIBRARY · LIVE EDGE · WALK-FORWARD</div>
           <h1 className="wsx-title mono">Strategies</h1>
-          <div className="wsx-sub mono dim2">{sleeves.length} setup families · Wilson lower-bound win rate · profit factor · reliability · vs 40% floor</div>
+          <div className="wsx-sub mono dim2">{sleeves.length} setup families · Wilson-validated win rate · profit factor · edge-decay · regime fit</div>
         </div>
         <div className="wsx-hdr-r">
           <FreshnessPill state="live" age="bundle" />
@@ -17843,8 +17866,8 @@ function SurfaceStrategies({ onTicker, data }) {
       <div className="q-kpis q-kpis--4">
         {[["SLEEVES", sleeves.length, "copper", "with stats"],
           ["BEST WILSON LB", bestLb != null ? bestLb.toFixed(1) + "%" : "—", "gn", "validated floor"],
-          ["AVG PROFIT FACTOR", avgPf, "gn", "across families"],
-          ["BELOW 40% FLOOR", belowFloor, belowFloor > 0 ? "amb" : "gn", "Wilson LB < 40%"]].map((k, i) => (
+          ["AVG PROFIT FACTOR", avgPf, "gn", "haircut"],
+          ["BELOW 40% FLOOR", belowFloor, belowFloor > 0 ? "amb" : "gn", "Wilson LB < 40% · quarantine"]].map((k, i) => (
           <div key={i} className={`q-kpi q-kpi--${k[2]}`}>
             <div className="q-kpi-l mono">{k[0]}</div>
             <div className={`q-kpi-v mono kpi-tone--${k[2]}`}>{k[1]}</div>
@@ -17860,31 +17883,29 @@ function SurfaceStrategies({ onTicker, data }) {
           <table className="dtable wsx-tbl q-strat-tbl">
             <thead><tr>
               <th>Strategy</th><th className="r">n</th><th className="r">WR</th><th>Wilson LB · vs 40% floor</th>
-              <th className="r">PF</th><th className="r">Avg R</th><th>Edge decay</th>
-              <th className="c">Reliability</th><th>by_strategy WR</th>
+              <th className="r">PF</th><th className="r">Med R</th><th>Edge decay · 7mo</th>
+              <th className="c">Bull</th><th className="c">Chop</th><th className="c">Bear</th><th>Status</th>
             </tr></thead>
-            <tbody>{sleeves.map(s => {
-              const xs = byStrat[s.k] || {};
-              const xsWr = _num(xs.win_rate);
-              return (
-                <tr key={s.k} className={cur && cur.k === s.k ? "is-sel" : ""} onClick={() => setSel(s.k)}>
-                  <td><b>{s.k}</b></td>
-                  <td className={`r tabular ${s.n != null && s.n < 30 ? "warn" : "dim"}`}>{s.n != null ? s.n : "—"}</td>
-                  <td className="r tabular up">{s.wr != null ? s.wr.toFixed(1) + "%" : "—"}</td>
-                  <td>
-                    {s.lb != null ? <React.Fragment>
-                      <div className="q-wilson"><QGaugeBar pct={s.lb} cap={40} tone={s.lb >= 45 ? "gn" : s.lb >= 40 ? "amb" : "rd"} /></div>
-                      <span className={`mono q-wilson-v ${s.lb >= 45 ? "up" : s.lb >= 40 ? "warn" : "dn"}`}>{s.lb.toFixed(0)}%</span>
-                    </React.Fragment> : <span className="dim2">—</span>}
-                  </td>
-                  <td className={`r tabular ${s.pf != null ? (s.pf >= 1.5 ? "up" : s.pf >= 1.2 ? "" : "dn") : ""}`}>{_fx(s.pf, 2)}</td>
-                  <td className="r tabular up">{s.medR != null ? `${s.medR >= 0 ? "+" : ""}${s.medR.toFixed(2)}R` : "—"}</td>
-                  <td><span className="dim2 mono">—</span></td>
-                  <td className="c">{s.reliability ? <Pill tone={s.reliability.toLowerCase().includes("high") ? "gn" : s.reliability.toLowerCase().includes("low") ? "amb" : "ink"} small>{s.reliability}</Pill> : <span className="dim2">—</span>}</td>
-                  <td>{xsWr != null ? <span className="mono up">{(xsWr <= 1 ? xsWr * 100 : xsWr).toFixed(1)}%</span> : <span className="dim2">—</span>}</td>
-                </tr>
-              );
-            })}</tbody>
+            <tbody>{sleeves.map(s => (
+              <tr key={s.k} className={cur && cur.k === s.k ? "is-sel" : ""} onClick={() => setSel(s.k)}>
+                <td><b>{s.k}</b></td>
+                <td className={`r tabular ${s.n != null && s.n < 30 ? "warn" : "dim"}`}>{s.n != null ? s.n : "—"}</td>
+                <td className="r tabular up">{s.wr != null ? s.wr.toFixed(1) + "%" : "—"}</td>
+                <td>
+                  {s.lb != null ? <React.Fragment>
+                    <div className="q-wilson"><QGaugeBar pct={s.lb} cap={40} tone={s.lb >= 45 ? "gn" : s.lb >= 40 ? "amb" : "rd"} /></div>
+                    <span className={`mono q-wilson-v ${s.lb >= 45 ? "up" : s.lb >= 40 ? "warn" : "dn"}`}>{s.lb.toFixed(0)}%</span>
+                  </React.Fragment> : <span className="dim2">—</span>}
+                </td>
+                <td className={`r tabular ${s.pf != null ? (s.pf >= 1.5 ? "up" : s.pf >= 1.2 ? "" : "dn") : ""}`}>{_fx(s.pf, 2)}</td>
+                <td className="r tabular up">{s.medR != null ? `${s.medR >= 0 ? "+" : ""}${s.medR.toFixed(2)}R` : "—"}</td>
+                <td><span className="dim2 mono">—</span></td>
+                <td className="c"><span className="q-reg-dot q-reg-dot--ink" /></td>
+                <td className="c"><span className="q-reg-dot q-reg-dot--ink" /></td>
+                <td className="c"><span className="q-reg-dot q-reg-dot--ink" /></td>
+                <td><Pill tone={s.status === "stable" ? "gn" : s.status === "watch" ? "amb" : "ink"} small>{s.status}</Pill></td>
+              </tr>
+            ))}</tbody>
           </table>
         ) : <div className="pf-note mono dim2" style={{ padding: "32px 0", textAlign: "center" }}>— no setup_family_stats in bundle —</div>}
       </div>
@@ -17892,28 +17913,33 @@ function SurfaceStrategies({ onTicker, data }) {
       {cur && (
         <div className="q-grid2">
           <div className="lab-card">
-            <div className="lab-card-h mono">{cur.k.toUpperCase()} · WILSON CONFIDENCE INTERVAL</div>
+            <div className="lab-card-h mono">{cur.k.toUpperCase()} · EDGE DECAY · rolling Wilson LB</div>
             <div className="q-decay-big" style={{ minHeight: 120 }}>
               {cur.lb != null ? <div className="q-wilson"><QGaugeBar pct={cur.lb} cap={40} tone={cur.lb >= 45 ? "gn" : cur.lb >= 40 ? "amb" : "rd"} /></div> : <div className="pf-note mono dim2">— no Wilson LB —</div>}
+              <div className="pf-note mono dim2" style={{ marginTop: 8 }}>Rolling per-sleeve history not logged in bundle — current Wilson interval shown (LB · WR · HI).</div>
             </div>
             <div className="q-dist-stats mono">
-              <span>LB <b className={cur.lb != null && cur.lb >= 45 ? "up" : "warn"}>{cur.lb != null ? cur.lb.toFixed(0) + "%" : "—"}</b></span>
-              <span>WR <b>{cur.wr != null ? cur.wr.toFixed(0) + "%" : "—"}</b></span>
+              <span>now <b className={cur.lb != null && cur.lb >= 45 ? "up" : "warn"}>{cur.lb != null ? cur.lb.toFixed(0) + "%" : "—"}</b></span>
+              <span>floor <b className="dim">40%</b></span>
               <span>HI <b className="dim">{cur.hi != null ? cur.hi.toFixed(0) + "%" : "—"}</b></span>
               <span>n <b className={cur.n != null && cur.n < 30 ? "warn" : ""}>{cur.n != null ? cur.n : "—"}</b></span>
               <span>PF <b className={cur.pf != null && cur.pf >= 1.5 ? "up" : ""}>{_fx(cur.pf, 2)}</b></span>
             </div>
           </div>
           <div className="lab-card">
-            <div className="lab-card-h mono">{cur.k.toUpperCase()} · STATS</div>
+            <div className="lab-card-h mono">{cur.k.toUpperCase()} · MECHANISM + FALSIFIER</div>
             <div className="q-mech">
               <div className="q-mech-row">
-                <span className="q-mech-k mono up">▸ SAMPLE</span>
-                <span className="q-mech-v">{cur.n != null ? `${cur.n} trades` : "—"}{cur.wins != null ? ` · ${cur.wins} wins` : ""}{cur.ci != null ? ` · CI width ${cur.ci.toFixed(0)}pp` : ""}</span>
+                <span className="q-mech-k mono up">▸ WHY IT WORKS</span>
+                <span className="q-mech-v">{curMech || "Mechanism hypothesis not mapped for this setup family."}</span>
               </div>
               <div className="q-mech-row">
-                <span className="q-mech-k mono dn">▸ EDGE</span>
-                <span className="q-mech-v">{cur.lb != null ? (cur.lb >= 40 ? `Wilson LB ${cur.lb.toFixed(0)}% clears the 40% capital floor.` : `Wilson LB ${cur.lb.toFixed(0)}% is BELOW the 40% floor — size down / quarantine.`) : "No Wilson lower-bound available."}</span>
+                <span className="q-mech-k mono dn">▸ KILL SWITCH</span>
+                <span className="q-mech-v">{cur.lb != null
+                  ? (cur.lb >= 40
+                    ? `Auto-quarantine if Wilson LB closes below the 40% floor over trailing trades. Now ${cur.lb.toFixed(0)}% · PF ${_fx(cur.pf, 2)} — clears.`
+                    : `Wilson LB ${cur.lb.toFixed(0)}% is BELOW the 40% floor — quarantined / size down until it rebuilds n.`)
+                  : "No Wilson lower-bound available — trade at min size until n accumulates."}</span>
               </div>
               <div className="q-mech-regime">
                 {REGIMES.map(([key, lbl, tone]) => (
@@ -17934,7 +17960,7 @@ function SurfaceStrategies({ onTicker, data }) {
         {belowFloor > 0 ? ` ${belowFloor} sleeve(s) currently below floor.` : " All sleeves with stats clear the floor."}
         {" "}Regime-fit and edge-decay series are not present in the bundle (shown as —).
       </div>
-      <div className="pf-note mono dim2">Stats from setup_family_stats — Wilson lower-bound, not raw WR, gates capital. by_strategy cross-references the live accuracy bundle.</div>
+      <div className="pf-note mono dim2">Stats from setup_family_stats — Wilson lower-bound, not raw WR, gates capital. Mechanism text verbatim from canonical_trade_plan.py. Regime dots: green=run · amber=selective · red=off (no per-sleeve regime data in bundle → neutral).</div>
     </div>
   );
 }
