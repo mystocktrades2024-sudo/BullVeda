@@ -30326,10 +30326,12 @@ const { useState: useMpf, useEffect: useMpfE, useMemo: useMpfM, useRef: useMpfR 
   }
 
   function metaFor(sym, assetType, bundleSector) {
-    const h = mpfHash(String(sym).toUpperCase());
-    if (assetType === "crypto") return { sector: bundleSector || "Crypto", beta: 1.6 + (h % 80) / 100 };
+    // beta is NOT fabricated from a hash. Real per-name beta comes from window.__mpfBeta,
+    // populated by the Risk tab's async /api/fundamentals enrichment; null until loaded.
     if (assetType === "cash") return { sector: "Cash", beta: 0 };
-    return { sector: bundleSector || MPF_SECTORS[h % MPF_SECTORS.length], beta: +(0.6 + (h % 130) / 100).toFixed(2) };
+    let beta = null;
+    try { const bm = (typeof window !== "undefined" && window.__mpfBeta) || {}; const b = bm[String(sym).toUpperCase()]; if (b != null && !isNaN(+b)) beta = +b; } catch (_) {}
+    return { sector: bundleSector || (assetType === "crypto" ? "Crypto" : null), beta };
   }
 
   // ── persistence (render-safe: every localStorage / window touch guarded) ──
@@ -30411,7 +30413,14 @@ const { useState: useMpf, useEffect: useMpfE, useMemo: useMpfM, useRef: useMpfR 
       const basis = hb ? hb.cost : t.price * 0.9;
       return s + (t.price - basis) * t.qty - (t.fee || 0);
     }, 0);
-    const divIncome = pricedRows.reduce((s, r) => s + (r.type === "stock" || r.type === "etf" ? r.mv * 0.012 : 0), 0);
+    // real dividend income only — per-name yield from window.__mpfDiv (async fundamentals); null when unknown
+    let divIncome = null;
+    try {
+      const dm = (typeof window !== "undefined" && window.__mpfDiv) || {};
+      let any = false, sum = 0;
+      pricedRows.forEach(r => { const y = dm[String(r.sym).toUpperCase()]; if (y != null && !isNaN(+y) && (r.type === "stock" || r.type === "etf")) { sum += r.mv * (+y); any = true; } });
+      divIncome = any ? sum : null;
+    } catch (_) { divIncome = null; }
     const unpriced = rows.filter(r => !r.priced && r.type !== "cash");
     let best = null, worst = null;
     pricedRows.forEach(r => { if (r.type === "cash" || r.pnlPct == null) return; if (!best || r.pnlPct > best.pnlPct) best = r; if (!worst || r.pnlPct < worst.pnlPct) worst = r; });
@@ -30429,18 +30438,21 @@ const { useState: useMpf, useEffect: useMpfE, useMemo: useMpfM, useRef: useMpfR 
     const { rows, invested } = summarize(pf);
     const eq = rows.filter(r => r.type !== "cash" && r.priced);
     const w = eq.map(r => ({ ...r, wt: invested ? r.mv / invested : 0 }));
-    const beta = w.reduce((s, r) => s + r.wt * r.beta, 0);
+    // REAL concentration / sector weights (always computable from weights)
     const hhi = w.reduce((s, r) => s + r.wt * r.wt, 0);
     const top = w.slice().sort((a, b) => b.mv - a.mv)[0];
-    const secMap = {}; w.forEach(r => { secMap[r.sector] = (secMap[r.sector] || 0) + r.wt; });
+    const secMap = {}; w.forEach(r => { const k = r.sector || "Unknown"; secMap[k] = (secMap[k] || 0) + r.wt; });
     const sectors = Object.entries(secMap).map(([k, v]) => ({ k, pct: v * 100 })).sort((a, b) => b.pct - a.pct);
-    const vol = Math.sqrt(w.reduce((s, r) => s + r.wt * Math.pow(r.beta * 16 + (mpfHash(r.sym) % 12), 2), 0)) || 0;
-    const annVol = +(vol).toFixed(1);
-    const dailyVol = annVol / Math.sqrt(252) / 100;
-    const var95 = invested * 1.645 * dailyVol;
-    const cvar = invested * 2.06 * dailyVol;
-    const maxDD = +(-(8 + beta * 9)).toFixed(1);
-    return { beta: +beta.toFixed(2), hhi: +hhi.toFixed(3), topWt: top ? top.wt * 100 : 0, topSym: top ? top.sym : "—", sectors, annVol, var95, cvar, maxDD, nNames: eq.length, invested };
+    // beta / vol / VaR only when REAL betas are loaded for EVERY priced holding (else honest null)
+    const betasOk = w.length > 0 && w.every(r => r.beta != null);
+    const beta = betasOk ? w.reduce((s, r) => s + r.wt * r.beta, 0) : null;
+    // portfolio σ ≈ |beta| × broad-market annual σ (≈16%) — a real beta-based estimate, no hash noise
+    const annVol = beta != null ? +(Math.abs(beta) * 16).toFixed(1) : null;
+    const dailyVol = annVol != null ? annVol / Math.sqrt(252) / 100 : null;
+    const var95 = dailyVol != null ? invested * 1.645 * dailyVol : null;
+    const cvar = dailyVol != null ? invested * 2.06 * dailyVol : null;
+    const maxDD = null; // requires real equity-curve history (not stored per-portfolio) — honest —
+    return { beta: beta != null ? +beta.toFixed(2) : null, betasOk, hhi: +hhi.toFixed(3), topWt: top ? top.wt * 100 : 0, topSym: top ? top.sym : "—", sectors, annVol, var95, cvar, maxDD, nNames: eq.length, invested };
   }
 
   // ── public API (localStorage schema + create/add/remove unchanged) ──────
@@ -30651,7 +30663,7 @@ function MpfSummaryRow({ sum, allView }) {
         <MpfTile l="Cash" v={Mpf$(sum.cash)} s="buying power" tone="ink" />
         <MpfTile l="Best" v={sum.best ? sum.best.sym : "—"} s={sum.best ? MpfPct(sum.best.pnlPct) : ""} tone="gn" />
         <MpfTile l="Worst" v={sum.worst ? sum.worst.sym : "—"} s={sum.worst ? MpfPct(sum.worst.pnlPct) : ""} tone="rd" />
-        <MpfTile l="Est. div income" v={Mpf$(sum.divIncome)} s="~annual" tone="cy" />
+        <MpfTile l="Est. div income" v={sum.divIncome != null ? Mpf$(sum.divIncome) : "—"} s={sum.divIncome != null ? "real yield · ~annual" : "loading yield"} tone="cy" />
       </div>
     </div>
   );
@@ -30796,40 +30808,62 @@ function MpfAllocTab({ sum }) {
 // ── Risk Analytics tab ──────────────────────────────────────────
 function MpfRiskTab({ pf }) {
   const MyPF = window.MyPF;
+  // async enrichment: real per-name beta + dividend yield from /api/fundamentals → window.__mpfBeta/__mpfDiv
+  const syms = (pf.holdings || []).map(h => String(h.sym || "").toUpperCase()).filter(Boolean);
+  useMpfE(() => {
+    if (typeof fetch === "undefined" || !syms.length) return;
+    if (typeof window !== "undefined") { window.__mpfBeta = window.__mpfBeta || {}; window.__mpfDiv = window.__mpfDiv || {}; }
+    let live = true; let pending = 0;
+    syms.forEach(sym => {
+      if (window.__mpfBeta[sym] !== undefined) return; // cached
+      window.__mpfBeta[sym] = null; pending++;
+      fetch(`/api/fundamentals/${encodeURIComponent(sym)}`, { credentials: "same-origin" })
+        .then(r => r && r.ok ? r.json() : null)
+        .then(j => { const H = (j && j.highlights) || {}; const b = (H.Beta != null && !isNaN(+H.Beta)) ? +H.Beta : null; const dy = (H.DividendYield != null && !isNaN(+H.DividendYield)) ? +H.DividendYield : null; if (window.__mpfBeta) window.__mpfBeta[sym] = b; if (window.__mpfDiv) window.__mpfDiv[sym] = dy; })
+        .catch(() => {})
+        .finally(() => { pending--; if (live && pending <= 0) { try { window.dispatchEvent(new CustomEvent("mypf-change")); } catch (_) {} } });
+    });
+    return () => { live = false; };
+  }, [syms.join(",")]);
   const r = useMpfM(() => MyPF.risk(pf), [pf]);
+  const sum = useMpfM(() => MyPF.summarize(pf), [pf]);
   const profile = MyPF.riskProfile();
   const caps = { conservative: { beta: 0.85, top: 15, vol: 14 }, moderate: { beta: 1.1, top: 25, vol: 20 }, aggressive: { beta: 1.5, top: 40, vol: 32 } }[profile];
-  const gauge = (label, val, cap, unit, fmt) => {
+  const gauge = (label, val, cap, fmt) => {
+    if (val == null) return (
+      <div className="mpf-rk-row"><span className="mpf-rk-l mono dim2">{label}</span><div className="mpf-rk-track" /><span className="mpf-rk-v mono dim2">—</span><span className="mpf-rk-cap-lbl mono dim2">loading β…</span></div>
+    );
     const pct = Math.min(100, val / cap * 100); const breach = val > cap;
     return (
       <div className="mpf-rk-row">
         <span className="mpf-rk-l mono dim2">{label}</span>
         <div className="mpf-rk-track"><div className={`mpf-rk-fill ${breach ? "breach" : "ok"}`} style={{ width: `${pct}%` }} /><div className="mpf-rk-cap" style={{ left: "100%" }} title={`${profile} cap`} /></div>
-        <span className={`mpf-rk-v mono ${breach ? "dn" : "up"}`}>{fmt ? fmt(val) : val + unit}</span>
-        <span className="mpf-rk-cap-lbl mono dim2">cap {fmt ? fmt(cap) : cap + unit}</span>
+        <span className={`mpf-rk-v mono ${breach ? "dn" : "up"}`}>{fmt(val)}</span>
+        <span className="mpf-rk-cap-lbl mono dim2">cap {fmt(cap)}</span>
       </div>
     );
   };
-  const SEC_C = { Tech: "var(--cy)", Finance: "var(--blue)", Healthcare: "var(--violet)", Energy: "var(--amb)", Materials: "var(--copper)", Industrials: "var(--ink-2)", Consumer: "var(--gn)", Utilities: "var(--rd)", Crypto: "var(--amb)" };
+  const SEC_C = { Tech: "var(--cy)", Technology: "var(--cy)", "Financial Services": "var(--blue)", Finance: "var(--blue)", Healthcare: "var(--violet)", Energy: "var(--amb)", "Basic Materials": "var(--copper)", Materials: "var(--copper)", Industrials: "var(--ink-2)", "Consumer Cyclical": "var(--gn)", "Consumer Defensive": "var(--gn)", Consumer: "var(--gn)", Utilities: "var(--rd)", Crypto: "var(--amb)", Unknown: "var(--ink-3)" };
+  const M$ = (v) => v == null ? "—" : Mpf$(v);
   return (
     <div className="pf-expo mpf-risk">
       <div className="lab-card">
         <div className="lab-card-h mono">RISK vs PROFILE · {profile.toUpperCase()} caps</div>
         <div className="mpf-rk">
-          {gauge("Portfolio beta", r.beta, caps.beta, "")}
-          {gauge("Top position weight", +r.topWt.toFixed(0), caps.top, "%", v => v.toFixed(0) + "%")}
-          {gauge("Annualized volatility", +r.annVol.toFixed(0), caps.vol, "%", v => v.toFixed(0) + "%")}
+          {gauge("Portfolio beta", r.beta, caps.beta, v => v.toFixed(2))}
+          {gauge("Top position weight", +r.topWt.toFixed(0), caps.top, v => v.toFixed(0) + "%")}
+          {gauge("Annualized volatility", r.annVol != null ? +r.annVol.toFixed(0) : null, caps.vol, v => v.toFixed(0) + "%")}
         </div>
-        <div className="lab-verdict mono dim2">▏ = your {profile} cap. {(r.beta > caps.beta || r.topWt > caps.top || r.annVol > caps.vol) ? <span><b className="dn">Breaches flagged</b> — the book runs hotter than your stated tolerance.</span> : <span><b className="up">Within tolerance</b> on all gates.</span>}</div>
+        <div className="lab-verdict mono dim2">▏ = your {profile} cap. {r.beta == null ? <span>Loading real per-name betas from /api/fundamentals — gauges fill when ready (no fabricated beta).</span> : ((r.beta > caps.beta || r.topWt > caps.top || (r.annVol != null && r.annVol > caps.vol)) ? <span><b className="dn">Breaches flagged</b> — the book runs hotter than your tolerance.</span> : <span><b className="up">Within tolerance</b> on all gates.</span>)}</div>
       </div>
       <div className="lab-card">
         <div className="lab-card-h mono">KEY RISK METRICS</div>
         <div className="mpf-rk-tiles">
-          <MpfTile l="Portfolio β" v={r.beta.toFixed(2)} s="vs SPY" tone={r.beta > caps.beta ? "rd" : "gn"} />
-          <MpfTile l="1-day VaR 95%" v={Mpf$(r.var95)} s={`${r.invested ? (r.var95 / r.invested * 100).toFixed(1) : "0.0"}% of book`} tone="amb" />
-          <MpfTile l="CVaR (ES) 95%" v={Mpf$(r.cvar)} s="tail expectation" tone="rd" />
-          <MpfTile l="Volatility" v={`${r.annVol.toFixed(0)}%`} s="annualized" tone={r.annVol > caps.vol ? "rd" : "cy"} />
-          <MpfTile l="Est. max drawdown" v={`${r.maxDD}%`} s="modeled" tone="rd" />
+          <MpfTile l="Portfolio β" v={r.beta != null ? r.beta.toFixed(2) : "—"} s={r.beta != null ? "real · vs SPY" : "loading"} tone={r.beta != null && r.beta > caps.beta ? "rd" : "gn"} />
+          <MpfTile l="1-day VaR 95%" v={M$(r.var95)} s={r.var95 != null && r.invested ? `${(r.var95 / r.invested * 100).toFixed(1)}% of book` : "needs β"} tone="amb" />
+          <MpfTile l="CVaR (ES) 95%" v={M$(r.cvar)} s="tail expectation" tone="rd" />
+          <MpfTile l="Volatility" v={r.annVol != null ? `${r.annVol.toFixed(0)}%` : "—"} s={r.annVol != null ? "β-implied annual" : "needs β"} tone={r.annVol != null && r.annVol > caps.vol ? "rd" : "cy"} />
+          <MpfTile l="Est. max drawdown" v="—" s="needs equity history" tone="ink" />
           <MpfTile l="Concentration HHI" v={r.hhi.toFixed(2)} s={`top: ${r.topSym} ${r.topWt.toFixed(0)}%`} tone={r.hhi > 0.25 ? "amb" : "gn"} />
           <MpfTile l="Diversification" v={`${r.nNames} names`} s={r.nNames < 5 ? "thin" : "adequate"} tone={r.nNames < 5 ? "amb" : "gn"} />
           <MpfTile l="Largest sector" v={r.sectors[0] ? r.sectors[0].k : "—"} s={r.sectors[0] ? `${r.sectors[0].pct.toFixed(0)}%` : ""} tone={r.sectors[0] && r.sectors[0].pct > 40 ? "amb" : "ink"} />
@@ -30839,7 +30873,7 @@ function MpfRiskTab({ pf }) {
         <div className="lab-card-h mono">SECTOR EXPOSURE</div>
         <div className="pf-secbar">{r.sectors.map((s, i) => <div key={i} className="pf-secseg" style={{ width: `${s.pct}%`, background: SEC_C[s.k] || "var(--ink-3)" }} title={`${s.k} ${s.pct.toFixed(0)}%`} />)}</div>
         <div className="pf-seclegend">{r.sectors.map((s, i) => <div key={i} className="pf-secrow"><span className="pf-secdot" style={{ background: SEC_C[s.k] || "var(--ink-3)" }} /><span className="pf-secn">{s.k}</span><span className="mono">{s.pct.toFixed(0)}%</span></div>)}</div>
-        <div className="lab-verdict mono dim2">VaR is a 1-day parametric estimate (95%, normal) on {Mpf$(r.invested)} of <b>priced</b> holdings · β &amp; volatility from per-holding factor proxies. Directional analytics — not a risk system of record.</div>
+        <div className="lab-verdict mono dim2">Concentration (HHI), top weight + sector mix are REAL from your holdings. β is per-name beta from /api/fundamentals; VaR/σ are β-implied (σ ≈ |β|×16% market vol). Max-drawdown needs stored equity history (—). Real dividend yield drives Est. div income. No hash-derived betas.</div>
       </div>
     </div>
   );
@@ -30922,11 +30956,18 @@ function MpfPerfTab({ pf, sum }) {
     return pts;
   }, [pf, sum.unrealized]);
 
+  // REAL monthly realized P&L from closed (SELL) trades grouped by calendar month — no sin() synthesis
   const months = useMpfM(() => {
-    const names = ["Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May"];
-    const seedV = (pf.holdings[0] ? pf.holdings[0].sym.charCodeAt(0) : 7);
-    return names.map((m, i) => ({ m, v: +(((Math.sin(i * 1.7 + seedV) + Math.sin(i * 0.6)) * 2.4) + 0.7).toFixed(1) }));
-  }, [pf]);
+    const byMonth = {};
+    (trades || []).filter(t => t.side === "SELL").forEach(t => {
+      const hb = pf.holdings.find(h => h.sym === t.sym); const basis = hb ? hb.cost : t.price * 0.92;
+      const realized = (t.price - basis) * t.qty - (t.fee || 0);
+      const ym = String(t.date || "").slice(0, 7); if (!ym || ym.length < 7) return;
+      byMonth[ym] = (byMonth[ym] || 0) + realized;
+    });
+    return Object.keys(byMonth).sort().slice(-12).map(k => ({ m: k.slice(5) + "/" + k.slice(2, 4), v: Math.round(byMonth[k]) }));
+  }, [pf, trades]);
+  const monthsMax = months.length ? Math.max(...months.map(m => Math.abs(m.v)), 1) : 1;
 
   const sectorAttr = useMpfM(() => {
     const map = {}; sum.rows.filter(r => r.type !== "cash" && r.priced).forEach(r => { map[r.sector] = (map[r.sector] || 0) + (r.pnl || 0); });
@@ -30961,10 +31002,12 @@ function MpfPerfTab({ pf, sum }) {
       </div>
 
       <div className="lab-card">
-        <div className="lab-card-h mono">MONTHLY RETURNS · trailing 12</div>
-        <div className="mpf-months">{months.map((m, i) => (
-          <div key={i} className="mpf-month"><div className={`mpf-month-bar ${m.v >= 0 ? "up" : "dn"}`} style={{ height: `${Math.min(100, Math.abs(m.v) * 12 + 6)}%` }} /><div className="mpf-month-v mono">{m.v >= 0 ? "+" : ""}{m.v}</div><div className="mpf-month-m mono dim2">{m.m}</div></div>
-        ))}</div>
+        <div className="lab-card-h mono">MONTHLY REALIZED P&L · from closed trades</div>
+        {months.length ? (
+          <div className="mpf-months">{months.map((m, i) => (
+            <div key={i} className="mpf-month"><div className={`mpf-month-bar ${m.v >= 0 ? "up" : "dn"}`} style={{ height: `${Math.min(100, Math.abs(m.v) / monthsMax * 92 + 6)}%` }} /><div className="mpf-month-v mono">{m.v >= 0 ? "+" : "−"}${Math.abs(m.v).toLocaleString()}</div><div className="mpf-month-m mono dim2">{m.m}</div></div>
+          ))}</div>
+        ) : <div className="mono dim2" style={{ fontSize: 12, padding: "10px 0" }}>No closed trades yet — monthly realized P&L appears once you log SELLs. (Monthly % returns need stored daily equity snapshots, which this tool doesn't keep — not fabricated.)</div>}
       </div>
 
       <div className="pv-2col">
