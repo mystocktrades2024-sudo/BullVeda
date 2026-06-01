@@ -34977,7 +34977,17 @@ function App() {
   // Fetch the same payloads kairos.html consumes.
   useEffect(() => {
     const get = (u) => fetch(u, { cache:"no-store" }).then(r => r.ok ? r.json() : Promise.reject(r.status));
-    get("/v2/data.critical.json").then(setData).catch(() => get("data.critical.json").then(setData).catch(e => setErr(e)));
+    // data.critical.json's portfolio block is a once-a-day scan snapshot (goes
+    // stale as fills land intraday — showed 5 while Alpaca held 11). Overlay the
+    // LIVE portfolio (/api/portfolio → portfolio_state.json) so every portfolio
+    // surface (Automated Trade, Portfolio, Performance, Track Record) matches the
+    // real account — same source the mobile/iPad companion uses.
+    const _mergeLivePortfolio = (d) => get("/api/portfolio")
+      .then(live => (live && Array.isArray(live.positions))
+        ? { ...d, portfolio: { ...live, closed: live.closed_trades || live.closed || [] } } : d)
+      .catch(() => d);
+    get("/v2/data.critical.json").then(_mergeLivePortfolio).then(setData)
+      .catch(() => get("data.critical.json").then(_mergeLivePortfolio).then(setData).catch(e => setErr(e)));
     get("/v2/data_earnings.json").then(setEarnings).catch(() => get("data_earnings.json").then(setEarnings).catch(() => setEarnings({})));
     get("/v2/data_misc.json").then(setMisc).catch(() => get("data_misc.json").then(setMisc).catch(() => setMisc({})));
     get("/v2/data_screener.json").then(j => setScreener((j && j.screener) || [])).catch(() => get("data_screener.json").then(j => setScreener((j && j.screener) || [])).catch(() => setScreener([])));
