@@ -17655,6 +17655,47 @@ function _perfPeriodic(curve) {
   return { rows, startDate };
 }
 
+// shared ticker→sector map from /api/universe (765 rows, full sector coverage) — cached on window.
+// data.critical.json carries empty picks_history, so /api/universe is the real source for closed-trade sector tagging.
+function useSectorMap() {
+  const [m, setM] = React.useState(() => (typeof window !== "undefined" && window.__ssSectorMap) || null);
+  React.useEffect(() => {
+    if (typeof window !== "undefined" && window.__ssSectorMap) { setM(window.__ssSectorMap); return; }
+    let live = true;
+    // merge two real ticker→sector sources: /api/universe (current scan, 765) + picks_history (historical, ~348)
+    Promise.all([
+      fetch("/api/universe", { credentials: "same-origin" }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch("/v2/data_history.json", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([uni, hist]) => {
+      const map = {};
+      const phRaw = hist && hist.picks_history;
+      const ph = (phRaw && phRaw.trades) || (Array.isArray(phRaw) ? phRaw : []);
+      for (const r of ph) { if (r && r.ticker && r.sector && !map[r.ticker]) map[r.ticker] = r.sector; }
+      const rows = (uni && uni.screener) || [];
+      for (const r of rows) { if (r && r.ticker && r.sector) map[r.ticker] = r.sector; } // current scan wins
+      if (typeof window !== "undefined") window.__ssSectorMap = map;
+      if (live) setM(map);
+    }).catch(() => { if (live) setM({}); });
+    return () => { live = false; };
+  }, []);
+  return m;
+}
+
+// earnings_watchlist lives in data_earnings.json (not data.critical.json) — fetch it directly, cached on window.
+function useEarningsWL() {
+  const [wl, setWl] = React.useState(() => (typeof window !== "undefined" && window.__ssEarnWL) || null);
+  React.useEffect(() => {
+    if (typeof window !== "undefined" && window.__ssEarnWL) { setWl(window.__ssEarnWL); return; }
+    let live = true;
+    fetch("/v2/data_earnings.json", { cache: "no-store" })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { const arr = (j && j.earnings_watchlist) || []; if (typeof window !== "undefined") window.__ssEarnWL = arr; if (live) setWl(arr); })
+      .catch(() => { if (live) setWl([]); });
+    return () => { live = false; };
+  }, []);
+  return wl;
+}
+
 function SurfacePerformance({ onTicker, data }) {
   const d = _ssData(data);
   const portfolio = d.portfolio || {};
@@ -17691,7 +17732,9 @@ function SurfacePerformance({ onTicker, data }) {
   const months = _monthsFromMap(portfolio.monthly_pnl);
 
   // P&L attribution by sleeve + by sector — REAL closed pnl_dollars (no proxy, no fabrication)
-  const secMap = useMemo(() => _perfSectorMap(d), [d]);
+  // sector map from /api/universe (data.critical.json picks_history is empty live); dev-bundle fallback merged in
+  const uSecMap = useSectorMap();
+  const secMap = useMemo(() => Object.assign({}, _perfSectorMap(d), uSecMap || {}), [d, uSecMap]);
   const sleeveAttr = useMemo(() => _perfAttr(portfolio.closed, c => c && c.setup_type), [portfolio]);
   const sectorAttr = useMemo(() => _perfAttr(portfolio.closed, c => secMap[c && c.ticker]), [portfolio, secMap]);
 
@@ -21846,6 +21889,44 @@ function SurfaceSector({ onTicker, data }) {
   const idx = (se && se._indices) || {};
   const ext = (se && se._ext_macro) || {};
 
+  // REAL RRG axes from sector_pairs.rs_table: rs_21d = relative-strength level (x),
+  // rs_21d − rs_63d = RS-momentum (y). Quadrant is the canonical RRG read.
+  const rsTable = (data && data.sector_pairs && data.sector_pairs.rs_table) || {};
+  const rsFor = (sym) => rsTable[sym] || null;
+  const quadOf = (sym) => {
+    const r = rsFor(sym);
+    if (!r) return null;
+    const lvl = num(r.rs_21d), prev = num(r.rs_63d);
+    if (lvl == null) return null;
+    const mom = prev != null ? lvl - prev : 0;
+    if (lvl >= 0 && mom >= 0) return "leading";
+    if (lvl < 0 && mom >= 0) return "improving";
+    if (lvl >= 0 && mom < 0) return "weakening";
+    return "lagging";
+  };
+  const QUAD_TONE = { leading: "gn", improving: "ink", weakening: "amb", lagging: "rd" };
+  // sector_etf names vs /api/universe (yfinance) names differ for 5 sectors — canonicalize for the earnings join
+  const SEC_ALIAS = { "Financials": "Financial Services", "Materials": "Basic Materials", "Communication Svcs": "Communication Services", "Consumer Staples": "Consumer Defensive", "Consumer Disc.": "Consumer Cyclical" };
+  const canonSec = (s) => SEC_ALIAS[s] || s;
+
+  // EARNINGS VELOCITY next 7d by sector — REAL count from earnings_watchlist (data_earnings.json)
+  // mapped through the /api/universe ticker→sector index (765 rows). Partial coverage surfaced honestly.
+  const uSecMap = useSectorMap();
+  const earnWL = useEarningsWL();
+  const earnVel = useSecm(() => {
+    const tkSec = uSecMap || {};
+    const wl = earnWL || [];
+    const cnt = {}; let mapped = 0, total = 0;
+    for (const e of wl) {
+      const dte = num(e && e.days_to_earnings);
+      if (dte == null || dte > 7) continue;
+      total++;
+      const sec = tkSec[e.ticker];
+      if (sec) { cnt[sec] = (cnt[sec] || 0) + 1; mapped++; }
+    }
+    return { cnt, mapped, total };
+  }, [uSecMap, earnWL]);
+
   // KPIs from REAL data
   const withVs = sectors.filter((s) => s.vs_spy_pct != null);
   const leader = withVs.length ? withVs.reduce((a, b) => (b.vs_spy_pct > a.vs_spy_pct ? b : a)) : null;
@@ -21904,7 +21985,7 @@ function SurfaceSector({ onTicker, data }) {
       <div className="sec-grid">
         {/* Heatmap */}
         <div className="lab-card">
-          <div className="lab-card-h mono">{sectors.length}-SECTOR HEATMAP · colored by RS vs SPY</div>
+          <div className="lab-card-h mono">{sectors.length}-SECTOR HEATMAP · {period} perf · sized equal, colored by perf</div>
           <div className="sec-heat">
             {sectors.map((s, i) => {
               const v = s.vs_spy_pct;
@@ -21925,23 +22006,31 @@ function SurfaceSector({ onTicker, data }) {
           </div>
         </div>
 
-        {/* RS quadrant (real axes) */}
+        {/* RRG rotation quadrant — REAL axes from rs_table (rs_21d × RS-momentum) */}
         <div className="lab-card">
-          <div className="lab-card-h mono">RS QUADRANT · vs-SPY (x) × perf (y)</div>
+          <div className="lab-card-h mono">RRG · ROTATION QUADRANT</div>
           <svg viewBox="0 0 260 240" className="sec-rrg" preserveAspectRatio="xMidYMid meet">
-            <rect x="20" y="10" width="220" height="220" fill="none" stroke="var(--glass-line)" />
-            <line x1={x0} y1="10" x2={x0} y2="230" stroke="var(--glass-line)" />
-            <line x1="20" y1={y0} x2="240" y2={y0} stroke="var(--glass-line)" />
-            <text x="232" y="22" fontSize="8" className="mono" fill="var(--gn)" textAnchor="end">LEADING</text>
-            <text x="28" y="22" fontSize="8" className="mono" fill="var(--blue)">IMPROVING</text>
-            <text x="232" y="226" fontSize="8" className="mono" fill="var(--amb)" textAnchor="end">WEAKENING</text>
-            <text x="28" y="226" fontSize="8" className="mono" fill="var(--rd)">LAGGING</text>
+            <rect x="20" y="10" width="110" height="110" fill="color-mix(in oklab, var(--blue) 7%, transparent)" />
+            <rect x="130" y="10" width="110" height="110" fill="color-mix(in oklab, var(--gn) 8%, transparent)" />
+            <rect x="20" y="120" width="110" height="110" fill="color-mix(in oklab, var(--rd) 8%, transparent)" />
+            <rect x="130" y="120" width="110" height="110" fill="color-mix(in oklab, var(--amb) 7%, transparent)" />
+            <line x1="130" y1="10" x2="130" y2="230" stroke="var(--glass-line)" /><line x1="20" y1="120" x2="240" y2="120" stroke="var(--glass-line)" />
+            <text x="135" y="22" fontSize="8" className="mono" fill="var(--gn)">LEADING</text>
+            <text x="25" y="22" fontSize="8" className="mono" fill="var(--blue)">IMPROVING</text>
+            <text x="135" y="226" fontSize="8" className="mono" fill="var(--amb)">WEAKENING</text>
+            <text x="25" y="226" fontSize="8" className="mono" fill="var(--rd)">LAGGING</text>
             {sectors.map((s) => {
-              if (s.vs_spy_pct == null || s.perf_pct == null) return null;
-              const cx = sx(s.vs_spy_pct), cy = sy(s.perf_pct);
-              const col = s.vs_spy_pct >= 0
-                ? (s.perf_pct >= 0 ? "var(--gn)" : "var(--blue)")
-                : (s.perf_pct >= 0 ? "var(--amb)" : "var(--rd)");
+              const r = rsFor(s.sym);
+              if (!r) return null;
+              const lvl = num(r.rs_21d), prev = num(r.rs_63d);
+              if (lvl == null) return null;
+              const mom = prev != null ? lvl - prev : 0;
+              // map level/momentum to 0..100 viewport (clamp ±40 RS, ±20 momentum)
+              const px = Math.max(0, Math.min(100, 50 + (lvl / 40) * 50));
+              const py = Math.max(0, Math.min(100, 50 + (mom / 20) * 50));
+              const cx = 20 + (px / 100) * 220, cy = 230 - (py / 100) * 220;
+              const q = quadOf(s.sym) || "lagging";
+              const col = q === "leading" ? "var(--gn)" : q === "improving" ? "var(--blue)" : q === "weakening" ? "var(--amb)" : "var(--rd)";
               return (
                 <g key={s.sym}>
                   <circle cx={cx} cy={cy} r="4" fill={col} style={{ filter: `drop-shadow(0 0 4px ${col})` }} />
@@ -21950,33 +22039,62 @@ function SurfaceSector({ onTicker, data }) {
               );
             })}
           </svg>
-          <div className="lab-verdict mono dim2">Axes are REAL: x = vs-SPY %, y = period perf %. (RS-momentum axis not in bundle — absolute perf substituted.)</div>
+          <div className="lab-verdict mono dim2">REAL axes: x = rs_21d (relative-strength level), y = rs_21d − rs_63d (RS-momentum). Source: data.sector_pairs.rs_table.</div>
         </div>
       </div>
 
       <div className="sec-grid">
         {/* Leadership table */}
         <div className="lab-card">
-          <div className="lab-card-h mono">SECTOR LEADERSHIP · vs SPY · rank</div>
+          <div className="lab-card-h mono">SECTOR LEADERSHIP · vs SPY · breadth · flows</div>
           <table className="dtable wsx-tbl sec-tbl">
-            <thead><tr><th>ETF</th><th>Sector</th><th className="r">Perf %</th><th className="r">vs SPY</th><th className="r">Price</th><th className="r">Rank</th><th>Status</th></tr></thead>
-            <tbody>{sectors.map((s) => (
+            <thead><tr><th>ETF</th><th>Sector</th><th className="r">{period} %</th><th className="r">RS</th><th className="r">vs SPY</th><th>Quadrant</th><th className="r">Breadth</th><th className="r">Earn 7d</th></tr></thead>
+            <tbody>{sectors.map((s) => {
+              const r = rsFor(s.sym);
+              const q = quadOf(s.sym);
+              const e7 = earnVel.cnt[canonSec(s.sector)] || 0;
+              return (
               <tr key={s.sym} onClick={() => go(s.sym)}>
                 <td className="mono"><b>{s.sym}</b></td>
                 <td className="dim">{s.sector}</td>
                 <td className={`r mono tabular ${s.perf_pct != null && s.perf_pct >= 0 ? "up" : "dn"}`}>{pct(s.perf_pct)}</td>
+                <td className="r mono tabular">{r && num(r.rs_21d) != null ? <b>{num(r.rs_21d).toFixed(1)}</b> : "—"}</td>
                 <td className={`r mono tabular ${s.vs_spy_pct != null && s.vs_spy_pct >= 0 ? "up" : "dn"}`}>{pct(s.vs_spy_pct)}</td>
-                <td className="r mono tabular dim">{s.price != null ? `$${fmt(s.price)}` : "—"}</td>
-                <td className="r mono tabular"><b>{s.rank != null ? `#${s.rank}` : "—"}</b></td>
-                <td><span className={`pm-taxon pm-tax--${s.outperforming ? "gn" : "rd"}`}>{s.outperforming ? "outperforming" : "lagging"}</span></td>
+                <td>{q ? <span className={`pm-taxon pm-tax--${QUAD_TONE[q]}`}>{q}</span> : <span className="dim2">—</span>}</td>
+                <td className="r mono tabular dim2">—</td>
+                <td className={`r mono tabular ${e7 >= 3 ? "amb" : "dim"}`}>{e7 || "—"}</td>
               </tr>
-            ))}</tbody>
+            );})}</tbody>
           </table>
+          <div className="lab-verdict mono dim2">RS = rs_21d (data.sector_pairs.rs_table). Per-sector breadth (% above 50-DMA) not in bundle → —. Earn 7d from earnings_watchlist mapped to sector.</div>
         </div>
 
-        {/* Cross-asset / intermarket strip from REAL _indices + _ext_macro */}
+        {/* Earnings velocity next 7d by sector (REAL, partial coverage surfaced) */}
         <div className="lab-card">
-          <div className="lab-card-h mono">INDICES · INTERMARKET · from _indices + _ext_macro</div>
+          <div className="lab-card-h mono">EARNINGS VELOCITY · next 7d by sector</div>
+          <div className="sec-velocity">
+            {(() => {
+              const rows = sectors.map((s) => ({ sym: s.sym, name: s.sector, n: earnVel.cnt[canonSec(s.sector)] || 0 }))
+                .filter((r) => r.n > 0).sort((a, b) => b.n - a.n).slice(0, 7);
+              if (!rows.length) return <EmptyState>No next-7d reporters mapped to a sector in this bundle.</EmptyState>;
+              const maxN = Math.max(...rows.map((r) => r.n), 1);
+              return rows.map((r, i) => (
+                <div key={i} className="sec-vel-row">
+                  <span className="mono sec-vel-etf">{r.sym}</span>
+                  <span className="mono dim2 sec-vel-name">{r.name}</span>
+                  <div className="sec-vel-bar"><div style={{ width: `${(r.n / maxN) * 100}%`, background: r.n >= 3 ? "var(--amb)" : "var(--cy)" }} /></div>
+                  <span className="mono sec-vel-n">{r.n}</span>
+                </div>
+              ));
+            })()}
+          </div>
+          <div className="lab-verdict mono dim2">{earnVel.mapped}/{earnVel.total} next-7d reporters are sector-tagged in the bundle. Sectors with clustered reporters face sympathy moves &amp; dispersion. Source: EODHD /calendar (earnings_watchlist).</div>
+        </div>
+      </div>
+
+      <div className="lab-card">
+        {/* Cross-asset / intermarket strip from REAL _indices + bonds_forex + macro_signals */}
+          <div className="lab-card-h mono">CROSS-ASSET · STYLE · THEMATIC ETFs</div>
           <div className="sec-xa">
             {(() => {
               const cells = [];
@@ -22005,13 +22123,12 @@ function SurfaceSector({ onTicker, data }) {
               });
             })()}
           </div>
-          <div className="lab-verdict mono dim2">Indices perf from <b>_indices</b>; macro (USO/SMH/COPX) 20d change from <b>_ext_macro</b>. Earnings-velocity feed not in bundle.</div>
+          <div className="lab-verdict mono dim2">Beyond the 11 GICS sectors: indices (QQQ·DIA·IWM) from <b>_indices</b> and macro (USO·SMH·COPX) 20d change from <b>_ext_macro</b> — the wider ETF rotation universe.</div>
         </div>
-      </div>
 
       <div className="pm-note mono dim2">
-        Heatmap + RS from <b>data.sector_etf</b> (EODHD /eod sector SPDRs): perf_pct, vs_spy_pct, rank, outperforming are REAL.
-        RS-momentum quadrant axis, % above 50-DMA breadth, and earnings velocity are <b>not in the bundle</b> — omitted rather than fabricated.
+        Heatmap + RS + leadership from <b>data.sector_etf</b> (perf_pct, vs_spy_pct, rank) and <b>sector_pairs.rs_table</b> (rs_21d/rs_63d → RRG axes + quadrant) — all REAL.
+        Earnings velocity from <b>earnings_watchlist</b> mapped to sector (partial coverage surfaced). Per-sector breadth (% above 50-DMA) not in the bundle → shown as — rather than fabricated.
       </div>
     </div>
   );
