@@ -15319,15 +15319,37 @@ function invNum(v, dp, fallback) {
 // Value-gap hero, quality scorecard, peer cohort, 5-yr statements,
 // capital allocation, bull-vs-bear, long-horizon catalyst calendar.
 
+// REAL fundamentals from /api/fundamentals/{sym} (EODHD): highlights/valuation/5y statements/holders
+function useInvFundamentals(symbol) {
+  const [st, setSt] = React.useState({ state: "loading", f: null });
+  React.useEffect(() => {
+    if (typeof fetch === "undefined" || !symbol) { setSt({ state: "empty", f: null }); return; }
+    let live = true; setSt({ state: "loading", f: null });
+    fetch(`/api/fundamentals/${encodeURIComponent(symbol)}`, { credentials: "same-origin" })
+      .then(r => (r && r.ok ? r.json() : Promise.reject(r ? r.status : "x")))
+      .then(j => { if (live) setSt({ state: (j && j.ticker) ? "ok" : "empty", f: j }); })
+      .catch(() => { if (live) setSt({ state: "error", f: null }); });
+    return () => { live = false; };
+  }, [symbol]);
+  return st;
+}
 function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("iv-1"); const s2 = useStateToggle("iv-2");
   const s3 = useStateToggle("iv-3"); const s4 = useStateToggle("iv-4");
   const s5 = useStateToggle("iv-5"); const s6 = useStateToggle("iv-6");
   const s7 = useStateToggle("iv-7");
+  const fx = useInvFundamentals(ticker && ticker.symbol);
+  const F = fx.f;
+  const H = (F && F.highlights) || {}, Vv = (F && F.valuation) || {};
+  const tgt = num(H.WallStreetTargetPrice);
+  const mosPct = (tgt != null && ticker.price) ? (tgt / ticker.price - 1) * 100 : null;
+  const roe = num(H.ReturnOnEquityTTM);
 
   return (
     <div className="lens lens--inv">
-      <ValueHero ticker={ticker} mode={mode} />
+      {fx.state === "loading" && <div className="lens-pad mono dim2" style={{ padding: "6px 0" }}>Loading fundamentals… /api/fundamentals/{ticker && ticker.symbol}</div>}
+      {fx.state === "error" && <div className="lens-pad mono dim2" style={{ padding: "6px 0" }}>Fundamentals unavailable for {ticker && ticker.symbol} (/api/fundamentals error). Values shown as — rather than fabricated.</div>}
+      <ValueHero ticker={ticker} mode={mode} F={F} />
 
       <div className="lens-section">
         <SectionHeader n={1} title="Price vs Intrinsic Value · 5-Year"
@@ -15336,8 +15358,8 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
         <StateWrap state={s1.value} source="DCF + multiples · 3-scenario · 5y rolling">
           <div className="lens-pad">
             <div className="iv-split">
-              <div className="iv-split-main"><ValueBands5Y ticker={ticker} /></div>
-              <div className="iv-split-side"><ValueScale ticker={ticker} /><MarginOfSafety ticker={ticker} /></div>
+              <div className="iv-split-main"><ValueBands5Y ticker={ticker} F={F} /></div>
+              <div className="iv-split-side"><ValueScale ticker={ticker} F={F} /><MarginOfSafety ticker={ticker} F={F} /></div>
             </div>
           </div>
         </StateWrap>
@@ -15346,7 +15368,7 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
           sub="business · balance-sheet · operator · trend"
           style={headerStyle} right={<StateToggle name="iv-2" />} />
         <StateWrap state={s2.value} source="EODHD · Highlights + Fundamentals">
-          <div className="lens-pad"><QualityCard /></div>
+          <div className="lens-pad"><QualityCard F={F} /></div>
         </StateWrap>
       </div>
 
@@ -15364,7 +15386,7 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
           sub="revenue · GP · NI · FCF · buybacks · with sparklines"
           style={headerStyle} right={<StateToggle name="iv-4" />} />
         <StateWrap state={s4.value} source="EODHD · Financials_5y">
-          <div className="lens-pad"><Statements /></div>
+          <div className="lens-pad"><Statements F={F} /></div>
         </StateWrap>
       </div>
 
@@ -15373,7 +15395,7 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
           sub="where every dollar of FCF went · 5y window"
           style={headerStyle} right={<StateToggle name="iv-5" />} />
         <StateWrap state={s5.value} source="EODHD · Capital_Flow">
-          <div className="lens-pad"><CapAlloc /></div>
+          <div className="lens-pad"><CapAlloc F={F} /></div>
         </StateWrap>
       </div>
 
@@ -15382,7 +15404,7 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
           sub="strongest case both ways · pre-mortem · written before entry"
           style={headerStyle} right={<StateToggle name="iv-6" />} />
         <StateWrap state={s6.value} source="thesis library · per-ticker">
-          <div className="lens-pad"><BullBear /></div>
+          <div className="lens-pad"><BullBear F={F} ticker={ticker} /></div>
         </StateWrap>
       </div>
 
@@ -15391,7 +15413,7 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
           sub="next 12 months · earnings · capacity · regulatory"
           style={headerStyle} right={<StateToggle name="iv-7" />} />
         <StateWrap state={s7.value} source="EODHD · calendar + analyst trend">
-          <div className="lens-pad"><CatCal /></div>
+          <div className="lens-pad"><CatCal ticker={ticker} F={F} /></div>
         </StateWrap>
       </div>
 
@@ -15399,11 +15421,11 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
         <SectionHeader n={8} title="Cross-Lens Confluence" style={headerStyle} />
         <div className="lens-pad">
           <CrossLens lead="violet" cells={[
-            { lens: "Value",      verdict: "MARG.", tone: "amb", note: "MoS 6% · slight premium" },
-            { lens: "Quality",    verdict: "A−",    tone: "gn",  note: "ROIC 18% · low debt" },
-            { lens: "Earnings",   verdict: "BEAT?", tone: "amb", note: "ESP +4.1% · 11d out" },
-            { lens: "Risk",       verdict: "OK",    tone: "gn",  note: "live VaR in Risk lens" },
-            { lens: "Tape",       verdict: "+12 ins", tone: "gn", note: "net insider buys 90d" },
+            { lens: "Value", verdict: mosPct!=null ? (mosPct>=0?"+":"")+mosPct.toFixed(0)+"%" : "—", tone: mosPct!=null ? (mosPct>=10?"gn":mosPct>=-5?"amb":"rd") : "ink", note: tgt!=null ? `analyst PT $${tgt.toFixed(2)} vs $${ticker.price.toFixed(2)}` : "no analyst PT" },
+            { lens: "Quality", verdict: roe!=null ? (roe>=0.12?"strong":roe>=0?"thin":"neg") : "—", tone: roe!=null ? (roe>=0.12?"gn":roe>=0?"amb":"rd") : "ink", note: roe!=null ? `ROE ${(roe*100).toFixed(1)}%` : "—" },
+            { lens: "Valuation", verdict: num(Vv.TrailingPE) ? "PE "+num(Vv.TrailingPE).toFixed(0) : (num(Vv.PriceSalesTTM)?"P/S "+num(Vv.PriceSalesTTM).toFixed(1):"—"), tone: "ink", note: num(Vv.ForwardPE) ? "fwd PE "+num(Vv.ForwardPE).toFixed(0) : "" },
+            { lens: "Risk", verdict: "→ lens", tone: "ink", note: "live VaR in Risk lens" },
+            { lens: "Tape", verdict: F && (F.insider_transactions||[]).length ? (F.insider_transactions.length)+" ins" : "→ lens", tone: "ink", note: "Form-4 in Tape lens" },
           ]} />
         </div>
       </div>
@@ -15411,8 +15433,9 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
       <div className="lens-call">
         <span className="label-cap">The Read · Investment</span>
         <span className="mono">
-          <b className="copper">MoS 6%</b> · quality A− · valuation is more attractive on a pullback to{' '}
-          <b>${(ticker.price * 0.93).toFixed(2)}</b>. Bias stays Neutral until an ER catalyst clears.
+          {tgt!=null ? <>Analyst PT <b className="copper">${tgt.toFixed(2)}</b> = <b className={mosPct>=0?"up":"dn"}>{mosPct>=0?"+":""}{mosPct.toFixed(0)}% MoS</b>. </> : "No analyst price target in feed. "}
+          {roe!=null ? <>ROE <b className={roe>=0?"up":"dn"}>{(roe*100).toFixed(1)}%</b>{num(H.ProfitMargin)!=null?`, net margin ${(num(H.ProfitMargin)*100).toFixed(1)}%`:""}. </> : ""}
+          All from /api/fundamentals — none fabricated.
         </span>
       </div>
     </div>
@@ -15420,20 +15443,29 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
 }
 
 // ─── Hero ──────────────────────────────────────────────────────────
-function ValueHero({ ticker, mode }) {
+function ValueHero({ ticker, mode, F }) {
   const cur = ticker.price;
+  const H = (F && F.highlights) || {}, V = (F && F.valuation) || {};
+  const tgt = num(H.WallStreetTargetPrice);
+  const hi52 = num(H["52WeekHigh"]), lo52 = num(H["52WeekLow"]);
+  const mos = (tgt != null && cur) ? (tgt / cur - 1) * 100 : null;
+  const verdict = ticker.verdict || (mos != null ? (mos >= 15 ? "BUY" : mos >= 0 ? "WATCH" : "AVOID") : "—");
+  const score = num(ticker.score);
+  const tone = mos == null ? "ink" : mos >= 10 ? "gn" : mos >= -5 ? "amb" : "rd";
   return (
     <div className="hero value-hero">
       <div className="vh-top">
         <div>
-          <div className="label-cap">Master verdict · INVESTMENT mode</div>
+          <div className="label-cap">Valuation read · INVESTMENT mode · /api/fundamentals</div>
           <div className="vh-verdict">
-            <span className="vh-tag">WATCH</span>
-            <span className="vh-score mono">71<span className="th-score-unit">/100</span></span>
-            <Pill tone="amb" small>MoS 6%</Pill>
+            <span className="vh-tag">{window.secBias ? window.secBias(verdict) : verdict}</span>
+            {score != null && <span className="vh-score mono">{Math.round(score)}<span className="th-score-unit">/100</span></span>}
+            {mos != null && <Pill tone={tone} small>MoS {mos >= 0 ? "+" : ""}{mos.toFixed(0)}%</Pill>}
           </div>
           <div className="vh-line mono dim2">
-            Fair ${(cur * 0.95).toFixed(0)} · target ${(cur * 1.06).toFixed(0)}–${(cur * 1.16).toFixed(0)} · bull ${(cur * 1.40).toFixed(0)} · bear ${(cur * 0.78).toFixed(0)}. Current <b>${cur.toFixed(2)}</b> sits ~5% above fair.
+            {tgt != null ? <>Analyst PT <b>${tgt.toFixed(2)}</b> vs current <b>${cur.toFixed(2)}</b> ({mos >= 0 ? "+" : ""}{mos.toFixed(1)}% upside). </> : <>No analyst price target in feed. Current <b>${cur.toFixed(2)}</b>. </>}
+            {(hi52 != null && lo52 != null) ? <>52-wk ${lo52.toFixed(2)}–${hi52.toFixed(2)}. </> : null}
+            {num(V.TrailingPE) ? <>P/E {(+V.TrailingPE).toFixed(1)}{num(V.ForwardPE) ? ` (fwd ${(+V.ForwardPE).toFixed(1)})` : ""}.</> : (num(V.PriceSalesTTM) ? <>P/S {(+V.PriceSalesTTM).toFixed(1)} (no earnings).</> : null)}
           </div>
         </div>
       </div>
@@ -15454,7 +15486,40 @@ function ivSmooth(pts) {
   return d;
 }
 
-function ValueBands5Y({ ticker }) {
+function ValueBands5Y({ ticker, F }) {
+  // No real 5-year rolling intrinsic-value series exists (would need a DCF engine).
+  // Show the REAL anchors instead: current price within the 52-week range + analyst PT.
+  const cur = ticker.price;
+  const H = (F && F.highlights) || {};
+  const hi = num(H["52WeekHigh"]), lo = num(H["52WeekLow"]), pt = num(H.WallStreetTargetPrice);
+  if (lo == null || hi == null || hi <= lo) {
+    return <div className="mono dim2" style={{ fontSize: 12, padding: "16px 0" }}>5-year intrinsic-value bands require a DCF engine (not in the bundle). 52-week range + analyst target unavailable for {ticker.symbol} in /api/fundamentals — shown empty rather than with a fabricated fair-value curve.</div>;
+  }
+  const span = hi - lo;
+  const pos = (v) => Math.max(0, Math.min(100, (v - lo) / span * 100));
+  const pctRange = ((cur - lo) / span * 100);
+  const mos = pt != null ? (pt / cur - 1) * 100 : null;
+  return (
+    <div style={{ padding: "10px 0" }}>
+      <div className="label-cap" style={{ marginBottom: 10 }}>Price within 52-week range · analyst target (real anchors)</div>
+      <div style={{ position: "relative", height: 30, background: "var(--glass-line,rgba(255,255,255,0.06))", borderRadius: 6, marginBottom: 8 }}>
+        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pos(cur)}%`, background: "color-mix(in oklab, var(--copper) 22%, transparent)", borderRadius: "6px 0 0 6px" }} />
+        <div style={{ position: "absolute", left: `${pos(cur)}%`, top: -4, bottom: -4, width: 2, background: "var(--copper)" }} title={`current $${cur.toFixed(2)}`} />
+        {pt != null && <div style={{ position: "absolute", left: `${pos(pt)}%`, top: -4, bottom: -4, width: 2, background: pt >= cur ? "var(--gn)" : "var(--rd)" }} title={`analyst PT $${pt.toFixed(2)}`} />}
+      </div>
+      <div className="mono dim2" style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5 }}>
+        <span>52w low ${lo.toFixed(2)}</span>
+        <span>current <b className="copper">${cur.toFixed(2)}</b> ({pctRange.toFixed(0)}% of range)</span>
+        <span>52w high ${hi.toFixed(2)}</span>
+      </div>
+      <div className="mono dim2" style={{ fontSize: 11, marginTop: 10 }}>
+        {pt != null ? <>Analyst price target <b className={pt >= cur ? "up" : "dn"}>${pt.toFixed(2)}</b> ({mos >= 0 ? "+" : ""}{mos.toFixed(0)}% vs current). </> : "No analyst price target in feed. "}
+        Multi-scenario DCF / rolling fair-value bands need a cash-flow-projection engine (not in the bundle) — not fabricated here.
+      </div>
+    </div>
+  );
+}
+function _ValueBands5Y_legacy_unused({ ticker }) {
   const cur = ticker.price;
   const uid = React.useId();
   const [ref, w] = useWidth(900);
@@ -15565,67 +15630,50 @@ function ValueBands5Y({ ticker }) {
 }
 
 // ─── §1 · Margin of safety vs fair value (methodology ladder) ───────
-function MarginOfSafety({ ticker }) {
+function MarginOfSafety({ ticker, F }) {
   const cur = ticker.price;
-  const methods = [
-    { m: "Analyst PT · mean", sub: "consensus target", mos: 8.1 },
-    { m: "DCF · 10y · 9% WACC · 3% g", sub: "discounted cash flow", mos: 5.5 },
-    { m: "P/FCF · 5y avg reversion", sub: "cash-flow multiple", mos: 7.3 },
-    { m: "EV/EBITDA · peer reversion", sub: "enterprise multiple", mos: 3.1 },
-    { m: "Peer P/E reversion", sub: "relative earnings", mos: -2.4 },
-    { m: "Graham Number", sub: "√(22.5·EPS·BV)", mos: -5.6 },
-  ];
-  const wts = [0.30, 0.30, 0.12, 0.10, 0.08, 0.10];
-  const blended = methods.reduce((s, x, i) => s + x.mos * wts[i], 0);
+  const H = (F && F.highlights) || {}, V = (F && F.valuation) || {};
   const tone = v => v >= 4 ? "gn" : v <= -4 ? "rd" : "amb";
-  const Bar = ({ v }) => {
-    const cap = Math.max(-25, Math.min(25, v));
-    const half = Math.abs(cap) / 25 * 50;
-    return (
-      <div className="iv-mos-bar-cell">
-        <span className="mono dim2">−25%</span>
-        <div className="iv-mos-track">
-          <span className="zero" />
-          <div className={`iv-mos-fill ${tone(v)}`} style={v >= 0 ? { left: "50%", width: `${half}%` } : { left: `${50 - half}%`, width: `${half}%` }} />
-        </div>
-        <span className="mono dim2">+25%</span>
-      </div>
-    );
-  };
+  // REAL valuation anchors only — no fabricated DCF/Graham. Each row uses a value actually in the feed.
+  const rows = [];
+  const pt = num(H.WallStreetTargetPrice);
+  if (pt != null) rows.push({ m: "Analyst price target (mean)", sub: "consensus", fv: pt, mos: (pt / cur - 1) * 100 });
+  const ps = num(V.PriceSalesTTM);
+  // (no sector/peer multiple feed → cannot reversion-value honestly; omit rather than fabricate)
+  const blended = rows.length ? rows.reduce((s, x) => s + x.mos, 0) / rows.length : null;
   return (
     <div className="iv-mos">
       <div className="iv-mos-hd">
         <div className="iv-mos-blend">
-          <div className="label-cap">Margin of Safety · vs fair value</div>
-          <div className={`iv-mos-blend-v mono kpi-tone--${tone(blended)}`}>{blended >= 0 ? "+" : ""}{blended.toFixed(1)}%</div>
-          <div className="mono dim2">blended across {methods.length} independent lenses · weighted</div>
+          <div className="label-cap">Margin of Safety · vs analyst target</div>
+          <div className={`iv-mos-blend-v mono kpi-tone--${blended != null ? tone(blended) : "ink"}`}>{blended != null ? (blended >= 0 ? "+" : "") + blended.toFixed(1) + "%" : "—"}</div>
+          <div className="mono dim2">{rows.length ? `${rows.length} real valuation anchor${rows.length === 1 ? "" : "s"}` : "no analyst target in feed"}</div>
         </div>
-        <Pill tone={tone(blended)} small>{blended >= 4 ? "MARGIN" : blended <= -4 ? "PREMIUM" : "FAIR ± "}{Math.abs(blended).toFixed(0)}%</Pill>
+        {blended != null && <Pill tone={tone(blended)} small>{blended >= 4 ? "MARGIN" : blended <= -4 ? "PREMIUM" : "FAIR"} {Math.abs(blended).toFixed(0)}%</Pill>}
       </div>
-      <table className="pv-table iv-mos-tbl">
-        <thead><tr>
-          <th className="label-cap">Methodology</th>
-          <th className="label-cap" style={{ textAlign: "right" }}>Fair value</th>
-          <th className="label-cap" style={{ textAlign: "right" }}>MoS</th>
-          <th className="label-cap">−25% · spot · +25%</th>
-        </tr></thead>
-        <tbody>
-          {methods.map((x, i) => (
-            <tr key={i}>
-              <td><b>{x.m}</b><br /><span className="dim2" style={{ fontSize: 10 }}>{x.sub}</span></td>
-              <td className="mono" style={{ textAlign: "right" }}>${(cur * (1 + x.mos / 100)).toFixed(0)}</td>
-              <td className="mono" style={{ textAlign: "right", color: `var(--${tone(x.mos)})`, fontWeight: 700 }}>{x.mos >= 0 ? "+" : ""}{x.mos}%</td>
-              <td><Bar v={x.mos} /></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <DcfSensitivity ticker={ticker} />
+      {rows.length ? (
+        <table className="pv-table iv-mos-tbl">
+          <thead><tr><th className="label-cap">Method</th><th className="label-cap" style={{ textAlign: "right" }}>Fair value</th><th className="label-cap" style={{ textAlign: "right" }}>MoS</th></tr></thead>
+          <tbody>
+            {rows.map((x, i) => (
+              <tr key={i}>
+                <td><b>{x.m}</b><br /><span className="dim2" style={{ fontSize: 10 }}>{x.sub}</span></td>
+                <td className="mono" style={{ textAlign: "right" }}>${x.fv.toFixed(2)}</td>
+                <td className="mono" style={{ textAlign: "right", color: `var(--${tone(x.mos)})`, fontWeight: 700 }}>{x.mos >= 0 ? "+" : ""}{x.mos.toFixed(0)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+      <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 8 }}>
+        Multi-method DCF / P-FCF / EV-EBITDA / Graham valuation needs a cash-flow-projection + peer-multiple engine (not in the bundle). Only feed-real anchors are shown — fabricated DCF rows were removed. P/S {ps != null ? ps.toFixed(1) + "×" : "—"}, P/E {num(V.TrailingPE) ? (+V.TrailingPE).toFixed(1) : "— (no earnings)"}.
+      </div>
     </div>
   );
 }
 
-// DCF sensitivity — fair value across WACC × terminal-growth, shaded by MoS vs spot
+// DcfSensitivity — legacy fabricated Gordon grid, NO LONGER CALLED (MarginOfSafety dropped it
+// since there is no real DCF/FCF-projection feed). Retained dead to avoid line churn.
 function DcfSensitivity({ ticker }) {
   const cur = ticker.price;
   const waccs = [0.08, 0.09, 0.10, 0.11];
@@ -15657,11 +15705,19 @@ function DcfSensitivity({ ticker }) {
 }
 
 // ─── §1 Value scale · bear / fair / target range / bull ─────────────
-function ValueScale({ ticker }) {
+function ValueScale({ ticker, F }) {
   const cur = ticker.price;
-  // levels derived from current price so the scale is sensible for any ticker
-  const bear = cur * 0.78, fair = cur * 0.95, tgtLo = cur * 1.06, tgtHi = cur * 1.16, bull = cur * 1.40;
-  const pos = v => Math.max(0, Math.min(100, ((v - bear) / (bull - bear)) * 100));
+  const H = (F && F.highlights) || {};
+  const lo52 = num(H["52WeekHigh"]) != null && num(H["52WeekLow"]) != null ? num(H["52WeekLow"]) : null;
+  const hi52 = num(H["52WeekHigh"]);
+  const pt = num(H.WallStreetTargetPrice);
+  // REAL anchors: 52-week low (bear) · current · analyst PT (target) · 52-week high (bull).
+  // Fall back to price-relative only if the feed lacks the 52w range (clearly the no-data case).
+  const bear = lo52 != null ? lo52 : cur * 0.85;
+  const bull = hi52 != null ? hi52 : cur * 1.15;
+  const fair = pt != null ? pt : cur;
+  const tgtLo = pt != null ? pt : cur, tgtHi = pt != null ? pt : cur;
+  const pos = v => Math.max(0, Math.min(100, ((v - bear) / (Math.max(bull - bear, 0.01)) ) * 100));
   const fmt = v => `$${v.toFixed(0)}`;
   return (
     <div className="vh-scale">
@@ -15729,30 +15785,43 @@ function ValueScaleStatic({ ticker }) {
   );
 }
 
-// ─── §2 Quality scorecard ────────────────────────────────────────────
-function QualityCard() {
+// ─── §2 Quality scorecard (REAL /api/fundamentals) ───────────────────
+function QualityCard({ F }) {
+  if (!F || !F.ticker) return <div className="mono dim2" style={{ fontSize: 12, padding: 8 }}>Quality scorecard loads from /api/fundamentals (highlights + 5y statements).</div>;
+  const H = F.highlights || {}, V = F.valuation || {}, SS = F.shares || {};
+  const inc = F.income_5y || [];
+  const pctT = (v, good) => (v == null || v !== v) ? "ink" : ((good ? v > 0 : v < 0) ? "gn" : "rd");
+  const pct = (v, d = 1) => (v == null || v !== v) ? "—" : (v * 100).toFixed(d) + "%";
+  const latest = inc[0] || {};
+  const gm = (num(latest.grossProfit) != null && num(latest.totalRevenue)) ? num(latest.grossProfit) / num(latest.totalRevenue) : null;
+  const opm = num(H.OperatingMarginTTM), roe = num(H.ReturnOnEquityTTM), roa = num(H.ReturnOnAssetsTTM), pm = num(H.ProfitMargin);
+  const revG = num(H.QuarterlyRevenueGrowthYOY);
+  const revs = inc.map(r => num(r.totalRevenue)).filter(v => v != null);
+  const revCagr = (revs.length >= 2 && revs[revs.length - 1] > 0) ? Math.pow(revs[0] / revs[revs.length - 1], 1 / (revs.length - 1)) - 1 : null;
+  const t = (cond) => cond == null ? "ink" : cond ? "gn" : "rd";
+  const grade = (arr) => { const s = arr.filter(g => g === "gn").length, bad = arr.filter(g => g === "rd").length; return bad >= 2 ? "C" : s >= 3 ? "A" : s >= 2 ? "A-" : s >= 1 ? "B" : "C+"; };
   const cats = [
-    { cat: "Business",   grade: "A",  metrics: [
-      { k: "ROIC (5y avg)", v: "18.2%", tone: "gn" },
-      { k: "Gross margin",   v: "42.1%", tone: "gn" },
-      { k: "Op margin",      v: "16.4%", tone: "gn" },
+    { cat: "Business", metrics: [
+      { k: "ROE (TTM)", v: pct(roe), tone: pctT(roe, true) },
+      { k: "Gross margin", v: pct(gm), tone: pctT(gm, true) },
+      { k: "Op margin (TTM)", v: pct(opm), tone: pctT(opm, true) },
     ]},
-    { cat: "Balance",    grade: "A-", metrics: [
-      { k: "Net-debt / EBITDA", v: "0.81×", tone: "gn" },
-      { k: "Interest cover",    v: "12.4×", tone: "gn" },
-      { k: "Current ratio",     v: "2.10",  tone: "gn" },
+    { cat: "Valuation", metrics: [
+      { k: "Trailing P/E", v: num(V.TrailingPE) ? (+V.TrailingPE).toFixed(1) : "— (no E)", tone: "ink" },
+      { k: "Forward P/E", v: num(V.ForwardPE) ? (+V.ForwardPE).toFixed(1) : "—", tone: "ink" },
+      { k: "P/S · P/B", v: `${num(V.PriceSalesTTM) ? (+V.PriceSalesTTM).toFixed(1) : "—"} · ${num(V.PriceBookMRQ) ? (+V.PriceBookMRQ).toFixed(1) : "—"}`, tone: "ink" },
     ]},
-    { cat: "Operator",   grade: "B+", metrics: [
-      { k: "Insider own",     v: "4.2%",   tone: "amb" },
-      { k: "Buybacks (5y)",   v: "$640M",  tone: "gn" },
-      { k: "Dilution (5y)",   v: "−2.1%",  tone: "gn" },
+    { cat: "Ownership", metrics: [
+      { k: "Insider own", v: num(SS.PercentInsiders) != null ? num(SS.PercentInsiders).toFixed(1) + "%" : "—", tone: "ink" },
+      { k: "Institutions", v: num(SS.PercentInstitutions) != null ? num(SS.PercentInstitutions).toFixed(1) + "%" : "—", tone: "ink" },
+      { k: "Short float", v: num(SS.ShortPercentFloat) != null ? num(SS.ShortPercentFloat).toFixed(1) + "%" : "—", tone: num(SS.ShortPercentFloat) > 10 ? "rd" : "ink" },
     ]},
-    { cat: "Trend",      grade: "B",  metrics: [
-      { k: "Rev CAGR 5y",     v: "11.4%", tone: "gn" },
-      { k: "FCF CAGR 5y",     v: "9.8%",  tone: "gn" },
-      { k: "Margin trend",    v: "FLAT",  tone: "amb" },
+    { cat: "Trend", metrics: [
+      { k: "Rev CAGR (5y)", v: pct(revCagr), tone: pctT(revCagr, true) },
+      { k: "Rev growth YoY", v: pct(revG), tone: pctT(revG, true) },
+      { k: "Net margin", v: pct(pm), tone: pctT(pm, true) },
     ]},
-  ];
+  ].map(c => ({ ...c, grade: grade(c.metrics.map(m => m.tone)) }));
   return (
     <div className="quality">
       {cats.map((c, i) => (
@@ -15790,100 +15859,115 @@ function PeerCohort() {
 }
 
 // ─── §4 5-yr statements ──────────────────────────────────────────────
-function Statements() {
+function Statements({ F }) {
+  if (!F || !(F.income_5y || []).length) return <div className="mono dim2" style={{ fontSize: 12, padding: 8 }}>5-year statements load from /api/fundamentals (EODHD Financials).</div>;
+  const inc = (F.income_5y || []).slice().reverse();   // oldest → newest
+  const cf = {}; (F.cashflow_5y || []).forEach(r => { cf[String(r.date).slice(0, 4)] = r; });
+  const yrs = inc.map(r => String(r.date).slice(0, 4));
+  const mil = (v) => v == null || v !== v ? null : v / 1e6;
+  const fcfFor = (yr) => { const c = cf[yr]; if (!c) return null; const o = num(c.totalCashFromOperatingActivities), cx = num(c.capitalExpenditures); return (o != null) ? o + (cx != null ? cx : 0) : null; }; // capex is negative
   const rows = [
-    { line: "Revenue",   vals: [620, 712, 824, 919, 1042], unit: "M", tone: "ink" },
-    { line: "Gross Pft", vals: [264, 304, 351, 388, 438],  unit: "M", tone: "ink" },
-    { line: "Op Inc",    vals: [86, 112, 130, 148, 171],   unit: "M", tone: "ink" },
-    { line: "Net Inc",   vals: [62, 82, 96, 108, 124],     unit: "M", tone: "ink" },
-    { line: "FCF",       vals: [54, 78, 88, 101, 118],     unit: "M", tone: "gn" },
-    { line: "Buyback",   vals: [40, 80, 120, 180, 220],    unit: "M cum", tone: "copper" },
-    { line: "Sh out",    vals: [82.1, 81.4, 80.6, 79.8, 79.0], unit: "M", tone: "gn", neg: true },
+    { line: "Revenue", get: r => mil(num(r.totalRevenue)) },
+    { line: "Gross Pft", get: r => mil(num(r.grossProfit)) },
+    { line: "Op Inc", get: r => mil(num(r.operatingIncome)) },
+    { line: "Net Inc", get: r => mil(num(r.netIncome)) },
+    { line: "EBITDA", get: r => mil(num(r.ebitda)) },
+    { line: "FCF", get: r => { const v = fcfFor(String(r.date).slice(0, 4)); return v != null ? v / 1e6 : null; } },
   ];
+  const fmt = (v) => v == null ? "—" : (Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + "B" : Math.round(v).toLocaleString() + "M");
   return (
     <table className="dtable statements">
-      <thead>
-        <tr>
-          <th>Line</th>
-          <th className="r">2022</th>
-          <th className="r">2023</th>
-          <th className="r">2024</th>
-          <th className="r">2025</th>
-          <th className="r">TTM</th>
-          <th>Trend</th>
-          <th className="r">5y</th>
-        </tr>
-      </thead>
+      <thead><tr><th>Line ($)</th>{yrs.map((y, i) => <th key={i} className="r">{y}</th>)}<th>Trend</th><th className="r">CAGR</th></tr></thead>
       <tbody>
         {rows.map((r, i) => {
-          const first = r.vals[0];
-          const last = r.vals[r.vals.length - 1];
-          const cagr = ((Math.pow(last/first, 1/4) - 1) * 100).toFixed(1);
-          const good = r.neg ? Number(cagr) < 0 : Number(cagr) > 0;
+          const vals = inc.map(r.get);
+          const fin = vals.filter(v => v != null);
+          const first = fin[0], last = fin[fin.length - 1];
+          const cagr = (first != null && last != null && first > 0 && last > 0 && fin.length >= 2) ? ((Math.pow(last / first, 1 / (fin.length - 1)) - 1) * 100) : null;
+          const good = cagr != null && cagr > 0;
           return (
             <tr key={i}>
               <td className="mono">{r.line}</td>
-              {r.vals.map((v, j) => (
-                <td key={j} className="r mono tabular">{v.toLocaleString()}</td>
-              ))}
-              <td><Sparkline data={r.vals} color={`var(--${good ? "gn" : "rd"})`} w={60} h={18} /></td>
-              <td className={`r mono tabular ${good ? "up" : "dn"}`}>{cagr}%</td>
+              {vals.map((v, j) => <td key={j} className={`r mono tabular ${v != null && v < 0 ? "dn" : ""}`}>{fmt(v)}</td>)}
+              <td>{fin.length >= 2 ? <Sparkline data={fin} color={`var(--${good ? "gn" : "rd"})`} w={60} h={18} /> : <span className="dim2">—</span>}</td>
+              <td className={`r mono tabular ${cagr != null ? (good ? "up" : "dn") : "dim2"}`}>{cagr != null ? cagr.toFixed(1) + "%" : "—"}</td>
             </tr>
           );
         })}
       </tbody>
+      <tfoot><tr><td colSpan={yrs.length + 3} className="mono dim2" style={{ fontSize: 10, paddingTop: 6 }}>Real EODHD annual statements. FCF = operating cash flow + capex (capex negative). Negatives shown in red.</td></tr></tfoot>
     </table>
   );
 }
 
-// ─── §5 Capital allocation ───────────────────────────────────────────
-function CapAlloc() {
+// ─── §5 Capital allocation (REAL cashflow_5y) ────────────────────────
+function CapAlloc({ F }) {
+  const cfs = (F && F.cashflow_5y) || [];
+  if (!cfs.length) return <div className="mono dim2" style={{ fontSize: 12, padding: 8 }}>Capital allocation loads from /api/fundamentals (5y cash-flow statement).</div>;
+  // sum absolute uses over the available years
+  let buyback = 0, dividends = 0, capex = 0, debt = 0;
+  cfs.forEach(c => {
+    const sps = num(c.salePurchaseOfStock); if (sps != null && sps < 0) buyback += -sps;   // net repurchases
+    const dv = num(c.dividendsPaid); if (dv != null) dividends += Math.abs(dv);
+    const cx = num(c.capitalExpenditures); if (cx != null) capex += Math.abs(cx);
+    const nb = num(c.netBorrowings); if (nb != null && nb < 0) debt += -nb;                 // net repayment
+  });
   const items = [
-    { use: "Buybacks",      amt: 220, pct: 0.40, tone: "copper" },
-    { use: "Reinvestment",  amt: 178, pct: 0.32, tone: "gn" },
-    { use: "Dividends",     amt:  62, pct: 0.11, tone: "ink" },
-    { use: "Debt paydown",  amt:  56, pct: 0.10, tone: "ink" },
-    { use: "M&A",           amt:  38, pct: 0.07, tone: "amb" },
-  ];
+    { use: "Reinvestment (capex)", amt: capex, tone: "gn" },
+    { use: "Buybacks", amt: buyback, tone: "copper" },
+    { use: "Dividends", amt: dividends, tone: "ink" },
+    { use: "Debt paydown", amt: debt, tone: "ink" },
+  ].filter(it => it.amt > 0);
+  const total = items.reduce((a, it) => a + it.amt, 0) || 1;
+  items.forEach(it => it.pct = it.amt / total);
+  const M = (v) => Math.abs(v) >= 1e9 ? "$" + (v / 1e9).toFixed(1) + "B" : "$" + Math.round(v / 1e6).toLocaleString() + "M";
+  if (!items.length) return <div className="mono dim2" style={{ fontSize: 12, padding: 8 }}>No buyback/dividend/capex/debt activity in the 5y cash-flow statement.</div>;
   return (
     <div className="cap-alloc">
       <div className="cap-bar">
-        {items.map((it, i) => (
-          <div key={i} className={`cap-seg cap-${it.tone}`} style={{ width: `${it.pct * 100}%` }}
-               title={`${it.use}: $${it.amt}M`} />
-        ))}
+        {items.map((it, i) => <div key={i} className={`cap-seg cap-${it.tone}`} style={{ width: `${it.pct * 100}%` }} title={`${it.use}: ${M(it.amt)}`} />)}
       </div>
       <div className="cap-legend">
         {items.map((it, i) => (
           <div key={i} className="cap-row">
             <span className={`cap-sw cap-${it.tone}`} />
             <span className="cap-use mono">{it.use}</span>
-            <span className="cap-amt mono dim2">${it.amt}M</span>
+            <span className="cap-amt mono dim2">{M(it.amt)}</span>
             <span className="cap-pct mono">{(it.pct * 100).toFixed(0)}%</span>
           </div>
         ))}
       </div>
-      <div className="cap-note mono dim">
-        Last 5 years of FCF deployment. Owner-friendly: 40% repurchases at avg $54.20 (currently above).
-      </div>
+      <div className="cap-note mono dim">Real {cfs.length}-year cash-flow deployment (EODHD). Buybacks = net stock repurchases; capex = reinvestment.</div>
     </div>
   );
 }
 
-// ─── §6 Bull vs Bear ─────────────────────────────────────────────────
-function BullBear() {
-  const bull = [
-    "Capacity expansion at Akron plant ships H2 — +18% volume.",
-    "Specialty-coatings mix at 38% of revenue · structurally higher GM.",
-    "Insider buying 9 of last 12 weeks · $4.2M net.",
-    "China decoupling tailwind for US specialty-chem reshoring.",
-  ];
-  const bear = [
-    "Specialty-chem cycle peaks 12–18m ahead of broad market — top-call risk.",
-    "Top-2 customer = 31% of revenue (concentration).",
-    "EBITDA margin trend flat 3 quarters · pricing power thesis fading.",
-    "ER in 11d · last 4 quarters: 3 beats / 1 in-line · trapped on guide?",
-  ];
+// ─── §6 Bull vs Bear (data-driven from REAL fundamentals) ────────────
+function BullBear({ F, ticker }) {
+  if (!F || !F.ticker) return <div className="mono dim2" style={{ fontSize: 12, padding: 8 }}>Bull/bear points are generated from real fundamentals (/api/fundamentals) — load pending.</div>;
+  const H = F.highlights || {}, V = F.valuation || {}, SS = F.shares || {};
+  const inc = F.income_5y || [];
+  const pc = (v) => (v * 100).toFixed(1) + "%";
+  const roe = num(H.ReturnOnEquityTTM), pm = num(H.ProfitMargin), opm = num(H.OperatingMarginTTM), revG = num(H.QuarterlyRevenueGrowthYOY);
+  const tgt = num(H.WallStreetTargetPrice), pe = num(V.TrailingPE), fpe = num(V.ForwardPE), ps = num(V.PriceSalesTTM);
+  const shortF = num(SS.ShortPercentFloat), inst = num(SS.PercentInstitutions), ins = num(SS.PercentInsiders);
+  const revs = inc.map(r => num(r.totalRevenue)).filter(v => v != null);
+  const revCagr = (revs.length >= 2 && revs[revs.length - 1] > 0) ? Math.pow(revs[0] / revs[revs.length - 1], 1 / (revs.length - 1)) - 1 : null;
+  const bull = [], bear = [];
+  if (roe != null) (roe >= 0.12 ? bull : bear).push(`ROE ${pc(roe)} (TTM)${roe >= 0.12 ? " — strong capital returns" : " — weak / negative returns"}`);
+  if (pm != null) (pm > 0 ? bull : bear).push(`Net margin ${pc(pm)}${pm > 0 ? " — profitable" : " — unprofitable"}`);
+  if (opm != null && pm == null) (opm > 0 ? bull : bear).push(`Operating margin ${pc(opm)}`);
+  if (revG != null) (revG >= 0 ? bull : bear).push(`Revenue ${revG >= 0 ? "growing" : "shrinking"} ${pc(revG)} YoY`);
+  if (revCagr != null) (revCagr >= 0.08 ? bull : revCagr < 0 ? bear : null) && (revCagr >= 0.08 ? bull : bear).push(`5y revenue CAGR ${pc(revCagr)}`);
+  if (tgt != null && ticker.price) { const up = (tgt / ticker.price - 1) * 100; (up >= 0 ? bull : bear).push(`Analyst PT $${tgt.toFixed(2)} = ${up >= 0 ? "+" : ""}${up.toFixed(0)}% vs price`); }
+  if (fpe != null && pe != null && fpe > 0 && pe > 0) (fpe < pe ? bull : bear).push(`Forward P/E ${fpe.toFixed(1)} ${fpe < pe ? "below" : "above"} trailing ${pe.toFixed(1)} — earnings ${fpe < pe ? "expected to grow" : "expected to fall"}`);
+  if (pe != null && pe > 40) bear.push(`Rich valuation — P/E ${pe.toFixed(1)}`);
+  if (pe == null && (num(H.ProfitMargin) === 0 || (pm != null && pm <= 0))) bear.push(`No P/E — not yet profitable${ps != null ? `, P/S ${ps.toFixed(1)}` : ""}`);
+  if (shortF != null) (shortF >= 10 ? bear : bull).push(`Short float ${shortF.toFixed(1)}%${shortF >= 10 ? " — crowded short / squeeze risk" : " — light"}`);
+  if (inst != null && inst >= 50) bull.push(`Institutional ownership ${inst.toFixed(0)}%`);
+  if (ins != null && ins >= 5) bull.push(`Insider ownership ${ins.toFixed(1)}% — aligned`);
+  if (!bull.length) bull.push("No clearly bullish fundamental factor in the current data.");
+  if (!bear.length) bear.push("No clearly bearish fundamental factor in the current data.");
   return (
     <div className="bullbear">
       <div className="bb-col bb-col--bull">
@@ -15915,24 +15999,24 @@ function BullBear() {
 }
 
 // ─── §7 Long-horizon catalyst calendar ───────────────────────────────
-function CatCal() {
-  const events = [
-    { when: "Jun 09 · 11d",    label: "Q1 ER",                       tone: "amb",   imp: "high" },
-    { when: "Jun 27",          label: "Industry conf (BMO Materials)", tone: "ink",   imp: "med" },
-    { when: "Aug 12 · 78d",    label: "Capacity ribbon-cut · Akron", tone: "gn",    imp: "high" },
-    { when: "Sep 30",          label: "Q2 ER",                       tone: "amb",   imp: "high" },
-    { when: "Nov 06",          label: "Investor day · 5-yr LRP",     tone: "copper",imp: "high" },
-    { when: "2027 H1",         label: "Specialty-coatings JV close", tone: "violet",imp: "med" },
-  ];
+function CatCal({ ticker, F }) {
+  const events = [];
+  const ed = ticker && ticker.earnings ? ticker.earnings.days : null;
+  if (ed != null) events.push({ when: `next ER · ${ed}d`, label: "Earnings report", tone: "amb", imp: "high" });
+  const eh = (F && F.earnings_history) || [];
+  if (eh.length) { const lastDate = eh[0] && (eh[0].reportDate || eh[0].date); if (lastDate) events.push({ when: String(lastDate).slice(0, 10), label: "Last reported", tone: "ink", imp: "med" }); }
+  const dy = F && num(F.highlights && F.highlights.DividendYield);
+  if (dy) events.push({ when: "quarterly", label: `Dividend · yield ${(dy * 100).toFixed(2)}%`, tone: "gn", imp: "med" });
   return (
     <div className="catcal">
-      {events.map((e, i) => (
+      {events.length ? events.map((e, i) => (
         <div key={i} className={`cat-row cat-${e.tone}`}>
           <span className="cat-when mono">{e.when}</span>
           <span className="cat-label">{e.label}</span>
           <Pill tone={e.imp === "high" ? "amb" : "ink"} small>{e.imp}</Pill>
         </div>
-      ))}
+      )) : <div className="mono dim2" style={{ fontSize: 12, padding: 8 }}>Next earnings date from the scan row; longer-horizon catalysts (capacity/regulatory/investor-day) need a corporate-events feed not in the bundle — shown empty rather than fabricated.</div>}
+      {events.length ? <div className="mono dim2" style={{ fontSize: 10, marginTop: 6 }}>Earnings/dividend from scan row + /api/fundamentals. Capacity/regulatory/M&A catalysts need a corporate-events feed (not in bundle).</div> : null}
     </div>
   );
 }
