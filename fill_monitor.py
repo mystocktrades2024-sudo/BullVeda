@@ -105,6 +105,26 @@ def main():
                     print(f"    ERROR canceling: {e}")
 
     print(f"\n{canceled} canceled, {expired} expired" + (" (dry-run)" if args.dry_run else ""))
+
+    # 2026-06-01 — reconcile local portfolio state with Alpaca every cycle.
+    # fill_monitor runs every 10 min all session, but nothing else synced ENTRY
+    # fills into local state after the 06:35 submit (which runs BEFORE fills land).
+    # Result: entry-fills sat unsynced for the whole day (local showed 5 positions
+    # while Alpaca held 11). Pull filled positions into local state here so the
+    # dashboard/portfolio reflects reality within ~10 min. Best-effort.
+    if not args.dry_run:
+        try:
+            from alpaca_sync import sync_alpaca_to_local
+            r = sync_alpaca_to_local(force=True, verbose=False)
+            if r.get("ok"):
+                ins = r.get("inserted") or []
+                print(f"reconcile OK — equity ${r.get('equity', 0):,.0f}"
+                      + (f" · inserted {len(ins)}: {','.join(ins)}" if ins else " · no new fills"))
+            else:
+                print(f"reconcile skipped: {r.get('error') or r.get('skipped')}")
+        except Exception as e:
+            print(f"reconcile error: {e}")
+
     return 0
 
 

@@ -456,9 +456,13 @@ def main():
             if not args.dry_run and client is not None:
                 try:
                     _asset = client.get_asset(entry["ticker"])
-                    if not getattr(_asset, "tradable", True):
+                    # tradable=False catches delisted; status!="active" catches the
+                    # "asset is not active" rejection class (e.g. ALE: tradable but
+                    # inactive) that previously slipped through to a failed submit.
+                    _astatus = str(getattr(_asset, "status", "active") or "active").lower()
+                    if not getattr(_asset, "tradable", True) or _astatus != "active":
                         print(f"  SKIP {entry['ticker']:6s} — not tradable on Alpaca")
-                        log.info(f"skip {entry['ticker']}: asset not tradable")
+                        log.info(f"skip {entry['ticker']}: asset not tradable/active (status={_astatus})")
                         log_entry["action"] = "skip"; log_entry["reason"] = "asset not tradable"
                         log_entry["status"] = "skipped_not_tradable"; _log_order(log_entry)
                         skipped += 1
