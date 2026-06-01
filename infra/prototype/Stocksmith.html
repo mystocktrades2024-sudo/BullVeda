@@ -13836,74 +13836,58 @@ function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
 
 // ─── Hero ─────────────────────────────────────────────────────────
 function TechHero({ ticker, mode, heroStyle, sizeCat }) {
+  const ox = usePvOhlcv(ticker && ticker.symbol);
+  const T = React.useMemo(() => tlIndicators(ox.bars), [ox.bars]);
+  const stacked = T && T.px > T.ema21 && T.ema21 > T.ema50;
+  const bearStack = T && T.px < T.ema21 && T.ema21 < T.ema50;
+  const verdict = !T ? "—" : stacked ? "STACKED-BULLISH" : bearStack ? "STACKED-BEARISH" : "MIXED";
   return (
     <div className="hero tech-hero">
       <div className="th-left">
         <div className="label-cap">Composite technical · {mode}</div>
         <div className="th-score">
-          <div className="th-score-num mono">{Math.round(ticker.pillars.technical)}<span className="th-score-unit">/100</span></div>
-          <Pill tone="gn" dot>STACKED-BULLISH</Pill>
+          <div className="th-score-num mono">{ticker.pillars && ticker.pillars.technical != null ? Math.round(ticker.pillars.technical) : "—"}<span className="th-score-unit">/100</span></div>
+          <Pill tone={stacked ? "gn" : verdict === "MIXED" ? "amb" : verdict === "—" ? "ink" : "rd"} dot>{verdict}</Pill>
         </div>
         <div className="th-pill-row">
-          <Pill tone="gn" small>RSI 64</Pill>
-          <Pill tone="gn" small>MACD+</Pill>
-          <Pill tone="gn" small>ADX 28</Pill>
-          <Pill tone="amb" small>RVOL 1.18×</Pill>
-          <Pill tone="gn" small>VWAP·rec</Pill>
+          {T ? <>
+            <Pill tone={T.rsi >= 50 ? "gn" : "amb"} small>RSI {T.rsi.toFixed(0)}</Pill>
+            <Pill tone={T.macdHist >= 0 ? "gn" : "rd"} small>MACD{T.macdHist >= 0 ? "+" : "−"}</Pill>
+            <Pill tone={T.adx >= 25 ? "gn" : "amb"} small>ADX {T.adx.toFixed(0)}</Pill>
+            <Pill tone={T.rvol != null && T.rvol >= 1.2 ? "gn" : "amb"} small>RVOL {T.rvol != null ? T.rvol.toFixed(2) + "×" : "—"}</Pill>
+            <Pill tone={T.cmf >= 0.05 ? "gn" : T.cmf <= -0.05 ? "rd" : "amb"} small>{T.ad}</Pill>
+          </> : <Pill tone="ink" small>{ox.state === "loading" ? "loading…" : "no bars"}</Pill>}
         </div>
       </div>
       <div className="th-right">
-        <MiniChart ticker={ticker} />
+        <MiniChart bars={ox.bars} T={T} />
       </div>
     </div>
   );
 }
 
-// OHLC chart preview — real bars from ticker.raw.smc_data.bars_daily when present, else mock fallback
-function MiniChart({ ticker }) {
+// OHLC chart preview — REAL bars from /api/ohlcv (usePvOhlcv, shape {o,c,hi,lo}). No mock.
+function MiniChart({ bars, T }) {
   const w = 320, h = 110;
-  const bars = 60;
-  const realBars = (ticker && ticker.raw && ticker.raw.smc_data && Array.isArray(ticker.raw.smc_data.bars_daily))
-    ? ticker.raw.smc_data.bars_daily : null;
+  const maxBars = 60;
   const data = useMemoTL(() => {
-    // Real OHLC path: map the last `bars` daily bars (accepts {open,high,low,close} or {o,h,l,c})
-    if (realBars && realBars.length) {
-      const slice = realBars.slice(-bars);
-      const out = [];
-      for (let i = 0; i < slice.length; i++) {
-        const b = slice[i] || {};
-        const o = Number(b.open != null ? b.open : b.o);
-        const c = Number(b.close != null ? b.close : b.c);
-        const hi = Number(b.high != null ? b.high : b.h);
-        const lo = Number(b.low != null ? b.low : b.l);
-        if ([o, c, hi, lo].some(v => !isFinite(v))) continue;
-        out.push({ o, c, hi, lo });
-      }
-      if (out.length) return out;
-    }
-    // Fallback: mock candles (no real bars available)
-    const out = [];
-    let p = 56;
-    for (let i = 0; i < bars; i++) {
-      const trend = 0.18 + (i > 42 ? 0.4 : 0);
-      const noise = (Math.sin(i * 0.7) + Math.cos(i * 0.3)) * 0.4;
-      const dip = (i > 28 && i < 42) ? -0.8 : 0;
-      p = p + trend + noise + dip;
-      const o = p - Math.random() * 0.3;
-      const c = p + (Math.random() - 0.4) * 0.5;
-      const hi = Math.max(o, c) + Math.random() * 0.4;
-      const lo = Math.min(o, c) - Math.random() * 0.4;
-      out.push({ o, c, hi, lo });
-    }
-    return out;
-  }, [realBars]);
-  const nBars = data.length || bars;
+    if (!Array.isArray(bars) || !bars.length) return [];
+    return bars.slice(-maxBars).map(b => ({ o: +b.o, c: +b.c, hi: +b.hi, lo: +b.lo }))
+      .filter(d => [d.o, d.c, d.hi, d.lo].every(v => isFinite(v)));
+  }, [bars]);
+  if (!data.length) {
+    return <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="mini-chart"><text x={w/2} y={h/2} fontSize="10" className="mono" textAnchor="middle" fill="var(--ink-3)">loading bars…</text></svg>;
+  }
+  const nBars = data.length;
   const min = Math.min(...data.map(d => d.lo));
   const max = Math.max(...data.map(d => d.hi));
   const range = (max - min) || 1;
   const xStep = w / nBars;
   const yFor = v => h - ((v - min) / range) * (h - 10) - 5;
-  const pivotY = yFor(min + range * 0.78);
+  // real pivot: nearest resistance — recent 20-bar swing high (or EMA21 if available)
+  const recHigh = Math.max(...data.slice(-20).map(d => d.hi));
+  const pivot = (T && T.ema21 != null && T.ema21 >= min && T.ema21 <= max) ? recHigh : recHigh;
+  const pivotY = yFor(pivot);
   const lastBar = data[data.length - 1];
   const lastX = (data.length - 1) * xStep + xStep / 2;
 
@@ -13921,7 +13905,7 @@ function MiniChart({ ticker }) {
       {/* Pivot line */}
       <line x1="0" y1={pivotY} x2={w} y2={pivotY} stroke="var(--copper)" strokeOpacity="0.7" strokeDasharray="3 3"
             style={{ filter: "drop-shadow(0 0 4px var(--copper))" }} />
-      <text x={w - 4} y={pivotY - 3} fontSize="8.5" className="mono" textAnchor="end" fill="var(--copper)" letterSpacing="0.10em">PIVOT 66.18</text>
+      <text x={w - 4} y={pivotY - 3} fontSize="8.5" className="mono" textAnchor="end" fill="var(--copper)" letterSpacing="0.10em">PIVOT {pivot.toFixed(2)}</text>
       {/* Candles */}
       {data.map((d, i) => {
         const up = d.c >= d.o;
