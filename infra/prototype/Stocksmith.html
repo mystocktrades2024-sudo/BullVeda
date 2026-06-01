@@ -12127,14 +12127,39 @@ function OtkProfitGridX({ o }) {
   );
 }
 
+// annualized realized vol (%) over the last `win` daily returns
+function otkHV(bars, win) {
+  if (!bars || bars.length < win + 2) return null;
+  const cl = bars.slice(-(win + 1)).map(b => b.c);
+  const rets = []; for (let i = 1; i < cl.length; i++) rets.push(Math.log(cl[i] / cl[i - 1]));
+  const m = rets.reduce((a, c) => a + c, 0) / rets.length;
+  const v = rets.reduce((a, c) => a + (c - m) ** 2, 0) / (rets.length - 1);
+  return +(Math.sqrt(v) * Math.sqrt(252) * 100).toFixed(1);
+}
 function OtkPricing({ o }) {
-  const stress=[["↓ -10%",o.spot*0.9,-1.27,-61],["↓ -5%",o.spot*0.95,-0.84,-40],["↓ -2%",o.spot*0.98,-0.53,-25],["· +0%",o.spot,-0.30,-14],["↑ +2%",o.spot*1.02,-0.05,-3],["↑ +5%",o.spot*1.05,0.35,17],["↑ +10%",o.spot*1.10,1.09,53]];
-  const decay=[["1d",-0.05,-2],["3d",-0.15,-7],["5d",-0.26,-13],["7d",-0.38,-18],["14d",-0.88,-42]];
-  const vrp=[["IV (ATM)","85.4%","—","baseline","ink"],["HV20","107.9%","-22.4%","IV cheap","gn"],["HV30","93.5%","-8.1%","IV cheap","gn"],["HV60","75.2%","+10.2%","IV rich","rd"],["HV90","76.1%","+9.3%","IV rich","rd"]];
+  const ox = usePvOhlcv(o && (o.sym || o.symbol));
+  const bars = ox.bars;
+  const hv = { 20: otkHV(bars, 20), 30: otkHV(bars, 30), 60: otkHV(bars, 60), 90: otkHV(bars, 90) };
+  // GREEKS-STRESS — premium reprice via Δ·ΔS + ½·Γ·ΔS² (real when greeks present)
+  const moves = [-0.10, -0.05, -0.02, 0, 0.02, 0.05, 0.10];
+  const haveGreeks = o.delta != null && o.gamma != null;
+  const stress = moves.map(mv => {
+    const ds = o.spot * mv;
+    const dPrem = haveGreeks ? (o.delta * ds + 0.5 * o.gamma * ds * ds) : null;
+    const pnl = (dPrem != null && o.prem) ? dPrem / o.prem * 100 : null;
+    return { lbl: (mv > 0 ? "↑ +" : mv < 0 ? "↓ " : "· +") + (mv * 100).toFixed(0) + "%", spot: o.spot * (1 + mv), dPrem, pnl };
+  });
+  // VRP ladder — real ATM IV vs realized HV at each horizon
+  const vrp = [{ h: "IV (ATM)", rv: o.iv, d: null, verdict: "baseline", tone: "ink" }].concat(
+    [20, 30, 60, 90].map(w => {
+      const rv = hv[w], d = (o.iv != null && rv != null) ? +(o.iv - rv).toFixed(1) : null;
+      return { h: "HV" + w, rv, d, verdict: d == null ? "—" : d > 3 ? "IV rich" : d < -3 ? "IV cheap" : "fair", tone: d == null ? "ink" : d > 3 ? "rd" : d < -3 ? "gn" : "amb" };
+    })
+  );
   return (
     <div className="otk-grid">
       <div className="otk-card">
-        <div className="otk-card-h mono">GREEKS · ATM ~21d</div>
+        <div className="otk-card-h mono">GREEKS · ATM ~{o.dte}d</div>
         <div className="otk-greeks">
           {[["Δ",otkFx(o.delta,3)],["Γ",otkFx(o.gamma,3)],["Θ/d",otkFx(o.theta,3,"","$")],["ν",otkFx(o.vega,3,"","$")]].map(([k,v],i)=>(
             <div key={i} className="otk-greek"><span className="mono dim2">{k}</span><span className="mono otk-greek-v">{v}</span></div>
@@ -12144,7 +12169,7 @@ function OtkPricing({ o }) {
       <div className="otk-card">
         <div className="otk-card-h mono">QUICK STATS</div>
         <div className="otk-stats">
-          {[["IV",otkFx(o.iv,1,"%")],["HV20",otkFx(o.hv20,1,"%")],["IVRP",otkFx(o.ivrp,1,"%")],["25Δ Skew",otkFx(o.skew,1,"%",o.skew>=0?"+":"")],["Term",otkF(o.term)],["Imp move",otkF(o.impMove,"%","±")],["POP",otkF(o.pop,"%")],["Max Pain",otkF(o.maxPain,"","$")],["B/A",otkFx(o.ba,1,"%")],["β-SPY",otkF(o.beta)]].map(([k,v],i)=>(
+          {[["IV",otkFx(o.iv,1,"%")],["HV20",otkFx(hv[20],1,"%")],["IVRP",hv[20]!=null&&o.iv!=null?otkFx(o.iv-hv[20],1,"%",(o.iv-hv[20])>=0?"+":""):"—"],["25Δ Skew",otkFx(o.skew,1,"%",o.skew>=0?"+":"")],["Term",otkF(o.term)],["Imp move",otkF(o.impMove,"%","±")],["POP",otkF(o.pop,"%")],["Max Pain",otkF(o.maxPain,"","$")],["B/A",otkFx(o.ba,1,"%")],["β-SPY",otkF(o.beta)]].map(([k,v],i)=>(
             <div key={i} className="otk-stat"><span className="mono dim2">{k}</span><span className="mono">{v}</span></div>
           ))}
         </div>
@@ -12154,20 +12179,22 @@ function OtkPricing({ o }) {
         <table className="dtable otk-tbl">
           <thead><tr><th>Spot Move</th><th className="r">Spot</th><th className="r">Δ Prem</th><th className="r">P&L %</th></tr></thead>
           <tbody>{stress.map((r,i)=>(
-            <tr key={i}><td className="mono">{r[0]}</td><td className="r mono">${r[1].toFixed(2)}</td>
-              <td className={`r mono ${r[2]>=0?"up":"dn"}`}>{r[2]>=0?"+":""}${Math.abs(r[2]).toFixed(2)}</td>
-              <td className={`r mono ${r[3]>=0?"up":"dn"}`}>{r[3]>=0?"+":""}{r[3]}%</td></tr>
+            <tr key={i}><td className="mono">{r.lbl}</td><td className="r mono">${r.spot.toFixed(2)}</td>
+              <td className={`r mono ${r.dPrem==null?"dim2":r.dPrem>=0?"up":"dn"}`}>{r.dPrem==null?"—":(r.dPrem>=0?"+":"−")+"$"+Math.abs(r.dPrem).toFixed(2)}</td>
+              <td className={`r mono ${r.pnl==null?"dim2":r.pnl>=0?"up":"dn"}`}>{r.pnl==null?"—":(r.pnl>=0?"+":"")+r.pnl.toFixed(0)+"%"}</td></tr>
           ))}</tbody>
         </table>
+        {!haveGreeks && <div className="mono dim2" style={{fontSize:10,padding:"4px 2px"}}>Reprice needs live chain Δ/Γ — model fallback has none.</div>}
       </div>
       <div className="otk-card">
         <div className="otk-card-h mono">VOL RISK PREMIUM LADDER · IV vs realized</div>
         <table className="dtable otk-tbl">
           <thead><tr><th>Horizon</th><th className="r">Realized</th><th className="r">IV − HV</th><th>Verdict</th></tr></thead>
           <tbody>{vrp.map((r,i)=>(
-            <tr key={i}><td className="mono">{r[0]}</td><td className="r mono">{r[1]}</td><td className={`r mono kpi-tone--${r[4]}`}>{r[2]}</td><td><span className={`kpi-tone--${r[4]} mono`}>{r[3]}</span></td></tr>
+            <tr key={i}><td className="mono">{r.h}</td><td className="r mono">{otkFx(r.rv,1,"%")}</td><td className={`r mono kpi-tone--${r.tone}`}>{r.d==null?"—":(r.d>=0?"+":"")+r.d+"%"}</td><td><span className={`kpi-tone--${r.tone} mono`}>{r.verdict}</span></td></tr>
           ))}</tbody>
         </table>
+        <div className="mono dim2" style={{fontSize:10,padding:"4px 2px"}}>HV = annualized realized vol from /api/ohlcv; IV = live ATM chain IV. {o.iv==null?"ATM IV needs a live chain.":""}</div>
       </div>
       <div className="otk-card otk-card--wide">
         <div className="otk-card-h mono">PROFIT CALCULATOR · DAILY % RETURN GRID <span className="dim2" style={{textTransform:"none",letterSpacing:".04em"}}>· option P&amp;L across spot move × days held (Black-Scholes, IV held)</span></div>
@@ -12181,37 +12208,48 @@ function OtkPricing({ o }) {
       <div className="otk-card">
         <div className="otk-card-h mono">SMART FILL ESTIMATE</div>
         <div className="otk-stats">
-          {[["Bid/Ask",otkFx(o.ba,1,"%")],["Half-spread","$0.08"],["Mid (target)","$"+o.prem.toFixed(2)],["Realistic fill","$"+(o.prem+0.05).toFixed(2)],["Slip vs mid","2.2%"]].map(([k,v],i)=>(
+          {(() => {
+            const halfSpr = (o.ba != null && o.prem) ? o.prem * (o.ba / 100) / 2 : null;
+            const fill = halfSpr != null ? o.prem + halfSpr : null;
+            return [["Bid/Ask",otkFx(o.ba,1,"%")],["Half-spread",halfSpr!=null?"$"+halfSpr.toFixed(2):"—"],["Mid (target)","$"+o.prem.toFixed(2)],["Realistic fill",fill!=null?"$"+fill.toFixed(2):"—"],["Slip vs mid",o.ba!=null?(o.ba/2).toFixed(1)+"%":"—"]];
+          })().map(([k,v],i)=>(
             <div key={i} className="otk-stat"><span className="mono dim2">{k}</span><span className="mono">{v}</span></div>
           ))}
         </div>
-        <div className="otk-verdict-mini mono"><span className="up">OK</span> · mid+30% target</div>
+        <div className="otk-verdict-mini mono">{o.ba==null?<span className="dim2">— needs live chain bid/ask</span>:o.ba<8?<><span className="up">OK</span> · limit @ mid, work to mid+½spread</>:<><span className="warn">WIDE</span> · patient limit only</>}</div>
       </div>
 
       <div className="otk-card">
         <div className="otk-card-h mono">LIQUIDITY GRADE · can I get filled?</div>
-        <div className="otk-liq">
-          <div className="otk-liq-grade mono">B+</div>
-          <div className="otk-liq-rows">
-            {[["Spread %",otkFx(o.ba,1,"%"),"amb"],["OI @ strike","4,200","gn"],["Vol today","2,310","gn"],["Slip est.","2.2%","gn"],["Fill speed","~3s mid","gn"]].map(([k,v,t],i)=>(
-              <div key={i} className="otk-liq-row"><span className="mono dim2">{k}</span><span className={`mono kpi-tone--${t}`}>{v}</span></div>
-            ))}
-          </div>
-        </div>
-        <div className="otk-verdict-mini mono"><span className="up">FILLABLE</span> · use limit @ mid, work up to mid+½spread</div>
+        {(() => {
+          const spreadOk = o.ba != null && o.ba < 8, oiOk = o.oi != null && o.oi >= 500, volOk = o.vol != null && o.vol >= 200;
+          const pts = (spreadOk?1:0)+(oiOk?1:0)+(volOk?1:0)+(o.ba!=null&&o.ba<4?1:0);
+          const grade = o.ba==null&&o.oi==null ? "—" : pts>=4?"A":pts>=3?"B+":pts>=2?"B":pts>=1?"C":"D";
+          return (
+            <div className="otk-liq">
+              <div className="otk-liq-grade mono">{grade}</div>
+              <div className="otk-liq-rows">
+                {[["Spread %",otkFx(o.ba,1,"%"),o.ba==null?"ink":spreadOk?"gn":"amb"],["OI @ strike",otkF(o.oi),o.oi==null?"ink":oiOk?"gn":"amb"],["Vol today",otkF(o.vol),o.vol==null?"ink":volOk?"gn":"amb"],["Slip est.",o.ba!=null?(o.ba/2).toFixed(1)+"%":"—",o.ba==null?"ink":o.ba<8?"gn":"amb"],["Source",o.real?"live chain":"model","ink"]].map(([k,v,t],i)=>(
+                  <div key={i} className="otk-liq-row"><span className="mono dim2">{k}</span><span className={`mono kpi-tone--${t}`}>{v}</span></div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+        <div className="otk-verdict-mini mono">{o.real?(o.ba!=null&&o.ba<8?<><span className="up">FILLABLE</span> · limit @ mid</>:<><span className="warn">CHECK SPREAD</span></>):<span className="dim2">model estimate — no live chain</span>}</div>
       </div>
 
       <div className="otk-card">
-        <div className="otk-card-h mono">BOOK GREEKS IMPACT · marginal Δ to portfolio</div>
+        <div className="otk-card-h mono">PER-CONTRACT GREEKS · marginal book impact</div>
         <table className="dtable otk-tbl">
-          <thead><tr><th>Greek</th><th className="r">Book now</th><th className="r">+ this trade</th><th className="r">After</th></tr></thead>
+          <thead><tr><th>Greek</th><th className="r">+ 1 contract</th><th className="r">Book now</th><th className="r">After</th></tr></thead>
           <tbody>
-            {[["Net Δ","+182","+57","+239","amb"],["Net Γ","+3.1","+8.4","+11.5","amb"],["Net Θ/d","−$112","−$4","−$116","dn"],["Net ν","+$340","+$2","+$342","gn"],["β-wtd Δ","+0.93","+0.09","+1.02","amb"]].map((r,i)=>(
-              <tr key={i}><td className="mono">{r[0]}</td><td className="r mono dim2">{r[1]}</td><td className="r mono cy">{r[2]}</td><td className={`r mono kpi-tone--${r[4]}`}>{r[3]}</td></tr>
+            {[["Net Δ",o.delta!=null?(o.delta*100).toFixed(0):null,"Δ shares"],["Net Γ",o.gamma!=null?(o.gamma*100).toFixed(1):null,""],["Net Θ/d",o.theta!=null?"$"+(o.theta*100).toFixed(0):null,""],["Net ν",o.vega!=null?"$"+(o.vega*100).toFixed(0):null,"/IVpp"]].map((r,i)=>(
+              <tr key={i}><td className="mono">{r[0]} <span className="dim2">{r[2]}</span></td><td className="r mono cy">{r[1]==null?"—":(+r[1]>=0?"+":"")+r[1]}</td><td className="r mono dim2">—</td><td className="r mono dim2">—</td></tr>
             ))}
           </tbody>
         </table>
-        <div className="otk-verdict-mini mono"><span className="warn">Δ tilts net-long</span> · adds directional; vega still light</div>
+        <div className="otk-verdict-mini mono"><span className="dim2">Per-contract greeks are real (×100 multiplier). Book-aggregate Δ/Γ/Θ/ν need an open-options-positions feed — shown as —.</span></div>
       </div>
 
       <div className="otk-card">
@@ -12244,49 +12282,90 @@ function OtkPricing({ o }) {
 // Dealer gamma exposure (GEX) — computed from the option chain OI × gamma.
 // Net positive GEX = dealers dampen moves (price pins toward walls); negative = moves amplified.
 
+function otkAgo(dateStr) {
+  if (!dateStr) return "";
+  const ms = Date.parse(dateStr); if (isNaN(ms)) return String(dateStr).slice(5, 10);
+  return ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][new Date(ms).getMonth()] + " " + new Date(ms).getDate();
+}
 function OtkContext({ o, ticker }) {
+  const sym = o && (o.sym || o.symbol);
+  const [news, setNews] = React.useState({ state: "load", articles: null });
+  const [soc, setSoc] = React.useState(null);
+  React.useEffect(() => {
+    if (typeof fetch === "undefined" || !sym) return;
+    let live = true; setNews({ state: "load", articles: null }); setSoc(null);
+    fetch(`/api/news?t=${encodeURIComponent(sym)}&limit=6`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
+      .then(j => { if (live) setNews({ state: "ok", articles: (j && j.articles) || [] }); }).catch(() => { if (live) setNews({ state: "err", articles: [] }); });
+    fetch(`/api/social/${encodeURIComponent(sym)}`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null)
+      .then(j => { if (live) setSoc(j); }).catch(() => {});
+    return () => { live = false; };
+  }, [sym]);
+  const st = soc && soc.stocktwits;
+  const erDays = ticker && ticker.earnings ? ticker.earnings.days : null;
   return (
     <div className="otk-grid">
       <OtkGEX o={o} />
       <div className="otk-card otk-card--wide">
-        <div className="otk-card-h mono">NEWS · last headlines</div>
+        <div className="otk-card-h mono">NEWS · last headlines <span className="dim2">· EODHD</span></div>
         <div className="otk-news">
-          {[["08:42","Analyst reiterates Buy, raises PT","gn"],["07:15","Sector flows turn positive on macro","gn"],["Yesterday","Mixed guidance from peer name","amb"]].map((n,i)=>(
-            <div key={i} className={`otk-news-row otk-news--${n[2]}`}><span className="mono dim2">{n[0]}</span><span className="mono">{n[1]}</span></div>
-          ))}
+          {news.state === "load" ? <div className="otk-news-row mono dim2">Loading headlines…</div>
+            : !news.articles || !news.articles.length ? <div className="otk-news-row mono dim2">No recent headlines for {sym}.</div>
+            : news.articles.slice(0, 5).map((n, i) => (
+              <a key={i} className="otk-news-row otk-news--ink" href={n.url} target="_blank" rel="noopener" style={{ textDecoration: "none" }}>
+                <span className="mono dim2">{otkAgo(n.date)}</span><span className="mono">{n.title}</span>
+              </a>
+            ))}
         </div>
       </div>
       <div className="otk-card">
         <div className="otk-card-h mono">CATALYSTS</div>
         <div className="otk-cats">
-          {[["🏦 FOMC","20d"],["📈 CPI","12d"],["💼 NFP","7d"],["🔱 TripleW","21d"]].map((c,i)=>(
-            <div key={i} className="otk-cat"><span className="mono">{c[0]}</span><span className="mono amb">{c[1]}</span></div>
-          ))}
+          <div className="otk-cat"><span className="mono">📊 Earnings</span><span className={`mono ${erDays!=null&&erDays<=14?"amb":"dim2"}`}>{erDays!=null?erDays+"d":"—"}</span></div>
+          <div className="otk-cat"><span className="mono">⏳ Expiry</span><span className="mono amb">{o.dte}d</span></div>
+          <div className="otk-cat"><span className="mono">💥 IV-crush</span><span className={`mono ${o.erInWindow?"dn":"dim2"}`}>{o.erInWindow?"~"+o.ivCrush+"%":"none"}</span></div>
+        </div>
+        <div className="mono dim2" style={{fontSize:10,padding:"4px 2px"}}>Macro events (FOMC/CPI/NFP) need a calendar feed — not wired.</div>
+      </div>
+      <div className="otk-card">
+        <div className="otk-card-h mono">PIN / MAX-PAIN · ≤exp</div>
+        <div className="otk-news">
+          <div className="otk-news-row mono"><span className="dim2">Max-pain</span><span className="mono">{otkF(o.maxPain,"","$")}</span></div>
+          <div className="otk-news-row mono"><span className="dim2">vs spot</span><span className="mono">{o.maxPain!=null&&o.spot?((o.maxPain-o.spot)/o.spot*100).toFixed(1)+"%":"—"}</span></div>
+          <div className="otk-news-row mono"><span className="dim2">Pin risk</span><span className={`mono ${o.maxPain===o.strike?"warn":"dim2"}`}>{o.maxPain===o.strike?"HIGH @ strike":"low"}</span></div>
         </div>
       </div>
       <div className="otk-card">
-        <div className="otk-card-h mono">CORPORATE ACTIONS · ≤60d</div>
-        <div className="otk-news"><div className="otk-news-row mono dim2">No ex-div / splits in window</div></div>
-      </div>
-      <div className="otk-card">
-        <div className="otk-card-h mono">WHALE STRIKES · vol &gt; 2.5σ</div>
-        <div className="otk-news"><div className="otk-news-row mono dim2">No outlier strikes detected</div></div>
+        <div className="otk-card-h mono">SOCIAL · StockTwits</div>
+        <div className="otk-news">
+          {st ? <>
+            <div className="otk-news-row mono"><span className="dim2">Sentiment</span><span className={`mono ${st.bull_pct>=55?"up":st.bull_pct<=45?"dn":"warn"}`}>{st.bull_pct}% bull</span></div>
+            <div className="otk-news-row mono"><span className="dim2">Messages</span><span className="mono">{st.message_volume}</span></div>
+            <div className="otk-news-row mono"><span className="dim2">Watchers</span><span className="mono">{st.watchlist_count!=null?st.watchlist_count.toLocaleString():"—"}</span></div>
+          </> : <div className="otk-news-row mono dim2">{soc===null?"Loading…":"No StockTwits data."}</div>}
+        </div>
       </div>
       <div className="otk-card otk-card--wide">
-        <div className="otk-card-h mono">ALT-DATA · Senate · EDGAR · Wiki · Reddit</div>
+        <div className="otk-card-h mono">ALT-DATA · StockTwits · Senate · EDGAR · Wiki</div>
         <div className="otk-alt">
-          {[["Senate trades","0 filings 90d","ink"],["EDGAR 8-K","1 recent","amb"],["Wiki views","+12% wk","gn"],["Reddit mentions","+38% wk","gn"]].map((a,i)=>(
+          {[
+            ["StockTwits bull", st?st.bull_pct+"%":"—", st?(st.bull_pct>=55?"gn":st.bull_pct<=45?"rd":"amb"):"ink"],
+            ["ST msg volume", st?String(st.message_volume):"—", st&&st.message_volume>20?"gn":"ink"],
+            ["Trending", st?(st.trending?"yes":"no"):"—", st&&st.trending?"gn":"ink"],
+            ["Senate · EDGAR · Wiki", "—", "ink"],
+          ].map((a,i)=>(
             <div key={i} className="otk-alt-cell"><div className="mono dim2">{a[0]}</div><div className={`mono kpi-tone--${a[2]}`}>{a[1]}</div></div>
           ))}
         </div>
+        <div className="mono dim2" style={{fontSize:10,padding:"2px"}}>StockTwits is live; Senate/EDGAR/Wiki-views scrapers aren't wired into this lens — shown as —.</div>
       </div>
       <div className="otk-card otk-card--wide">
         <div className="otk-card-h mono">VOL SURFACE METRICS</div>
         <div className="otk-stats">
-          {[["Butterfly","+7.86%"],["25Δ Risk Rev","+18.74%"],["Vega notional","+$2/ct/IVpp"],["Vol of vol","124.0%"],["Term ratio",otkF(o.term)]].map(([k,v],i)=>(
+          {[["25Δ Skew",otkFx(o.skew,1,"%",o.skew>=0?"+":"")],["Term ratio",otkF(o.term)],["ATM IV",otkFx(o.iv,1,"%")],["Vega/ct",o.vega!=null?"$"+(o.vega*100).toFixed(0)+"/IVpp":"—"],["Butterfly · vol-of-vol","—"]].map(([k,v],i)=>(
             <div key={i} className="otk-stat"><span className="mono dim2">{k}</span><span className="mono">{v}</span></div>
           ))}
         </div>
+        <div className="mono dim2" style={{fontSize:10,padding:"2px"}}>Skew/term/IV/vega are real from the chain. Butterfly + vol-of-vol need a full per-delta IV surface — not exposed by the chain feed.</div>
       </div>
     </div>
   );
