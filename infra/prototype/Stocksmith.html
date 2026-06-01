@@ -12736,9 +12736,8 @@ function BuyChecklist({ ticker, mode }) {
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
   const net = cv ? cv.net : (ticker.score || 60);
   const bias = window.secBias ? window.secBias(cv ? cv.verdict : ticker.verdict) : "—";
-  const moKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing";
-  const proj = (window.AIPredict && ticker.symbol) ? window.AIPredict.projection(ticker.symbol, moKey) : null;
   const lensV = n => cv ? (cv.lenses.find(l => l.k === n || l.k.startsWith(n)) || {}).v : null;
+  const aiEdge = lensV("AI Edge"); // real setup-persistence read from the composite (no window.AIPredict reliance)
   const ss = ticker.setupStats || {};
   const rr = ticker.rMultiple || 0;
   const erDays = ticker.earnings ? ticker.earnings.days : null;
@@ -12748,7 +12747,7 @@ function BuyChecklist({ ticker, mode }) {
     { k: "Lens confluence", v: cv ? `${cv.agree}/${cv.lenses.length}` : "—", need: "majority", pass: cv ? cv.agree >= Math.ceil(cv.lenses.length * 0.5) : false },
     { k: "Technicals aligned", v: lensV("Technicals") != null ? `${lensV("Technicals")}` : "—", need: "≥60", pass: (lensV("Technicals") || 0) >= 60 },
     { k: "Pattern / SMC", v: lensV("Patterns") != null ? `${lensV("Patterns")}` : "—", need: "≥60", pass: (lensV("Patterns") || 0) >= 60 },
-    { k: "AI P(up)", v: proj ? `${Math.round(proj.pUp * 100)}%` : "—", need: "≥55%", pass: proj ? proj.pUp >= 0.55 : false },
+    { k: "AI Edge (setup persistence)", v: aiEdge != null ? `${Math.round(aiEdge)}` : "—", need: "≥55", pass: (aiEdge || 0) >= 55 },
     { k: "Setup edge", v: ss.wilsonLB ? `${(ss.wilsonLB * 100).toFixed(0)}% n${ss.n}` : "—", need: "LB≥45·n≥30", pass: (ss.wilsonLB || 0) >= 0.45 && (ss.n || 0) >= 30 },
     { k: "Reward : Risk", v: `${rr.toFixed(2)}R`, need: "≥2.0", pass: rr >= 2 },
     { k: "Earnings clear", v: erDays != null ? `${erDays}d` : "none", need: `>${hold}d`, pass: erDays != null ? erDays > hold : true },
@@ -12782,6 +12781,44 @@ function BuyChecklist({ ticker, mode }) {
   );
 }
 window.BuyChecklist = BuyChecklist;
+
+// Reconciled cross-lens composite — REAL per-pillar scores via window.compositeVerdict (kaiComputeComposite)
+function CompositeVerdict({ ticker, mode, onLens }) {
+  const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
+  if (!cv || !cv.lenses || !cv.lenses.length) return null;
+  const bias = window.secBias ? window.secBias(cv.verdict) : cv.verdict;
+  const tone = cv.net >= 70 ? "gn" : cv.net >= 50 ? "amb" : "rd";
+  const lt = (v) => v >= 62 ? "gn" : v >= 46 ? "amb" : "rd";
+  return (
+    <div className="lens-section">
+      <SectionHeader n="✦" title="Composite Verdict · reconciled across lenses"
+        sub={`${cv.lenses.length} lenses · ${cv.conf} confidence · ${cv.disagree} disagreement`} />
+      <div className="lens-pad">
+        <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
+          <span className={`mono kpi-tone--${tone}`} style={{ fontSize: 26, fontWeight: 700 }}>{cv.net}<span className="dim2" style={{ fontSize: 13 }}>/100</span></span>
+          <span className={`mono kpi-tone--${tone}`} style={{ fontSize: 15, fontWeight: 600 }}>{bias}</span>
+          <span className="mono dim2">{cv.agree} agree · {cv.caution} caution · {cv.fail} against</span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 5 }}>
+          {cv.lenses.map((l, i) => (
+            <button key={i} onClick={() => onLens && onLens(l.k)} title={l.why}
+              style={{ display: "grid", gridTemplateColumns: "120px 1fr 38px", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer", padding: "2px 0", textAlign: "left" }}>
+              <span className="mono dim2" style={{ fontSize: 11 }}>{l.k}</span>
+              <span style={{ height: 7, borderRadius: 4, background: "var(--glass-line,rgba(255,255,255,0.08))", overflow: "hidden" }}>
+                <i style={{ display: "block", height: "100%", width: `${l.v}%`, background: `var(--${lt(l.v)})` }} />
+              </span>
+              <span className={`mono kpi-tone--${lt(l.v)}`} style={{ fontSize: 11, textAlign: "right" }}>{l.v}</span>
+            </button>
+          ))}
+        </div>
+        <div className="mono dim2" style={{ fontSize: 11, marginTop: 8 }}>
+          {cv.dissenters && cv.dissenters.length ? `⚠ Dissenting: ${cv.dissenters.map(x => x.k).join(", ")} — reconcile before sizing.` : "✓ Clean confluence — no lens materially dissents."} Reconciled from real per-pillar scores; click a lens to open it.
+        </div>
+      </div>
+    </div>
+  );
+}
+window.CompositeVerdict = CompositeVerdict;
 
 function LensOverview({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("ov-1"), s3 = useStateToggle("ov-3"), s4 = useStateToggle("ov-4"), s6 = useStateToggle("ov-6"), s8 = useStateToggle("ov-8");
@@ -31885,6 +31922,12 @@ function kaiComputeComposite(t) {
   const verdict = (t && t.verdict) ? t.verdict
     : net >= 80 ? "BUY" : net >= 65 ? "WATCH" : net >= 50 ? "HOLD" : "AVOID";
   return { lenses, verdict, net, conf, disagree, agree, caution, fail, dissenters };
+}
+
+// Expose the reconciled composite to the detail lenses (ThesisCard / BuyChecklist /
+// the Overview CompositeVerdict block). Computes from REAL per-pillar scores — no fabrication.
+if (typeof window !== "undefined") {
+  window.compositeVerdict = function (t, mode) { try { return kaiComputeComposite(t); } catch (e) { return null; } };
 }
 
 // fetch + cache the ML projection for a symbol/mode, shaped like AICrossMode's
