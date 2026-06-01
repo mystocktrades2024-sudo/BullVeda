@@ -86,13 +86,21 @@ function LPlan({ ticker: t, mode }) {
 
 /* 03 · CHART */
 function LChart({ ticker: t, mode }) {
+  const R = t._row || {};
   const h = hash(t.symbol);
-  const pts = Array.from({ length: 40 }, (_, i) => {
-    const base = t.price * 0.9, drift = (i / 39) * t.price * 0.12;
-    const wob = Math.sin(i * 0.7 + h) * t.price * 0.02 + Math.sin(i * 0.31) * t.price * 0.015;
-    return base + drift + wob;
-  });
-  pts[pts.length - 1] = t.price;
+  const bars = (R.smc_data && R.smc_data.bars_daily) || [];
+  const realPts = bars.slice(-40).map((b) => Number(b && b.close != null ? b.close : (b && b.c != null ? b.c : (Array.isArray(b) ? b[3] : 0)))).filter((v) => v > 0);
+  let pts;
+  if (realPts.length >= 2) {
+    pts = realPts;
+  } else {
+    pts = Array.from({ length: 40 }, (_, i) => {
+      const base = t.price * 0.9, drift = (i / 39) * t.price * 0.12;
+      const wob = Math.sin(i * 0.7 + h) * t.price * 0.02 + Math.sin(i * 0.31) * t.price * 0.015;
+      return base + drift + wob;
+    });
+    pts[pts.length - 1] = t.price;
+  }
   const min = Math.min(...pts, t.stop), max = Math.max(...pts, t.t1);
   const X = (i) => (i / (pts.length - 1)) * 100;
   const Y = (v) => 100 - ((v - min) / (max - min)) * 100;
@@ -135,12 +143,19 @@ function LChart({ ticker: t, mode }) {
 
 /* 04 · TECHNICALS */
 function LTechnicals({ ticker: t, mode }) {
+  const R = t._row || {};
   const rsiTone = t.rsi > 70 ? "amb" : t.rsi > 50 ? "gn" : "rd";
+  const adxM = ((R.technicals && R.technicals.details && R.technicals.details.trend) || "").match(/ADX\s+(\d+)/);
+  const adx = adxM ? +adxM[1] : null;
+  const macdSig = R.macd_signal || "";
+  const macdBull = /BULL/i.test(macdSig);
+  const emaSig = R.ema_signal || "";
+  const emaBull = /BULL/i.test(emaSig);
   const rows = [
     ["RSI (14)", `${fmt(t.rsi, 1)}`, t.rsi > 50 ? "BULL" : "BEAR", rsiTone, t.rsi],
-    ["MACD", "Signal+", "RISING", "gn", 72],
-    ["MA stack (20>50>200)", t.rsi > 50 ? "Aligned" : "Mixed", t.rsi > 50 ? "BULL" : "FLAT", t.rsi > 50 ? "gn" : "amb", t.pillars.technical],
-    ["ADX trend strength", `${28 + (hash(t.symbol) % 14)}`, "TRENDING", "gn", 64],
+    ["MACD", macdSig || "—", macdSig ? (macdBull ? "BULL" : "BEAR") : "—", macdSig ? (macdBull ? "gn" : "rd") : "amb", macdSig ? (macdBull ? 72 : 28) : 0],
+    ["MA stack (20>50>200)", emaSig || "—", emaSig ? (emaBull ? "BULL" : "FLAT") : "—", emaSig ? (emaBull ? "gn" : "amb") : "amb", t.pillars.technical],
+    ["ADX trend strength", adx != null ? `${adx}` : "—", adx != null ? (adx >= 25 ? "TRENDING" : "WEAK") : "—", adx != null ? (adx >= 25 ? "gn" : "amb") : "amb", adx != null ? Math.min(100, adx) : 0],
     ["ATR (14) · Bollinger", `${fmt(t.price * 0.028, 2)}`, "EXPANDING", "amb", 58],
     ["Relative volume", `${fmt(t.vol / t.avgVol, 1)}×`, t.vol > t.avgVol ? "ABOVE" : "BELOW", t.vol > t.avgVol ? "gn" : "amb", Math.min(100, (t.vol / t.avgVol) * 55)],
   ];
@@ -158,64 +173,84 @@ function LTechnicals({ ticker: t, mode }) {
           <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.5 }}>Composite technical pillar. Trend, momentum, and volume agree {t.pillars.technical >= 67 ? "strongly" : "moderately"} — {t.pillars.technical >= 67 ? "constructive" : "mixed"} read for {mode}.</div>
         </Panel>
       </Sec>
-      <Read mode={mode}>{t.rsi > 50 ? "Momentum and trend confirm" : "Trend is mixed"} — RSI <b>{fmt(t.rsi, 0)}</b>, MACD rising, {fmt(t.vol / t.avgVol, 1)}× volume. {t.rsi > 70 ? "Watch for extension." : "Room to run toward T1."}</Read>
+      <Read mode={mode}>{t.rsi > 50 ? "Momentum and trend confirm" : "Trend is mixed"} — RSI <b>{fmt(t.rsi, 0)}</b>{macdSig ? <span>, MACD {macdBull ? "bullish" : "bearish"}</span> : null}, {fmt(t.vol / t.avgVol, 1)}× volume. {t.rsi > 70 ? "Watch for extension." : "Room to run toward T1."}</Read>
     </div>
   );
 }
 
 /* 05 · PATTERNS */
 function LPatterns({ ticker: t, mode }) {
-  const h = hash(t.symbol);
-  const theories = [
-    ["Wyckoff", "Accumulation ph. D", "gn"], ["Elliott", "Wave 3 impulse", "gn"],
-    ["Fibonacci", "0.618 reclaim", "gn"], ["Volume profile", "Above POC", "gn"],
-    ["Ichimoku", "Above cloud", "gn"], ["TD Sequential", "Setup 6 ↑", "amb"],
-    ["Classical", "Cup & handle", "gn"], ["Harmonic", "No active pattern", "amb"],
-    ["Wolfe wave", "Forming · EPA", "amb"], ["Candlesticks", "Bull engulf", "gn"],
-    ["Gann", "Above 1×1", "gn"], ["Monte Carlo", `${50 + (h % 22)}% > T1`, "gn"],
-  ];
-  const bull = theories.filter((x) => x[2] === "gn").length;
+  const R = t._row || {};
+  const tc = R.theory_confluence || {};
+  const states = tc.states || {};
+  const stateTone = (s) => {
+    const v = (s || "").toLowerCase();
+    if (/bull|accumulation|up|long|impulse/.test(v)) return "gn";
+    if (/bear|distribution|down|short|corrective/.test(v)) return "rd";
+    return "amb";
+  };
+  const THEORY_NAMES = { dow: "Dow theory", wyckoff: "Wyckoff", elliott: "Elliott", gann: "Gann" };
+  const theories = Object.keys(states).length
+    ? Object.keys(states).map((k) => [THEORY_NAMES[k] || k, String(states[k] != null ? states[k] : "—"), stateTone(states[k])])
+    : [];
+  const bullCount = tc.bull_count != null ? tc.bull_count : theories.filter((x) => x[2] === "gn").length;
+  const bearCount = tc.bear_count != null ? tc.bear_count : theories.filter((x) => x[2] === "rd").length;
+  const total = (bullCount + bearCount) || theories.length || 1;
+  const bull = bullCount;
   return (
     <div>
       <Sec n={1} title="Confluence engine" sub="weighted · MTF">
         <Panel style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div style={{ position: "relative", width: 78, height: 78, flex: "none" }}>
-            <GaugeRing value={Math.round((bull / theories.length) * 100)} size={78} stroke={7} tone="gn" />
-            <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontWeight: 800, fontSize: 16 }} className="mono">{bull}/{theories.length}</div>
+            <GaugeRing value={Math.round((bull / total) * 100)} size={78} stroke={7} tone="gn" />
+            <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontWeight: 800, fontSize: 16 }} className="mono">{theories.length ? `${bull}/${total}` : "—"}</div>
           </div>
-          <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.5 }}><b style={{ color: "var(--gn)" }}>{bull} of {theories.length}</b> pattern theories read constructive across daily + weekly. Composite favors continuation.</div>
+          <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.5 }}>{theories.length ? <span><b style={{ color: "var(--gn)" }}>{bull} of {total}</b> pattern theories read constructive. Composite {bull >= bearCount ? "favors continuation" : "leans cautious"}.</span> : "No multi-theory confluence data available for this ticker."}</div>
         </Panel>
       </Sec>
-      <Sec n={2} title="Theory grid" sub="13 disciplines">
-        <div className="cmp-theories">
-          {theories.map(([name, read, tone]) => (
-            <div className="cmp-theory" key={name}>
-              <div className="cmp-theory-hd"><span className="cmp-theory-name">{name}</span><span className="cmp-theory-dot" style={{ background: toneVar(tone) }} /></div>
-              <div className="cmp-theory-read">{read}</div>
-            </div>
-          ))}
-        </div>
+      <Sec n={2} title="Theory grid" sub="disciplines">
+        {theories.length ? (
+          <div className="cmp-theories">
+            {theories.map(([name, read, tone]) => (
+              <div className="cmp-theory" key={name}>
+                <div className="cmp-theory-hd"><span className="cmp-theory-name">{name}</span><span className="cmp-theory-dot" style={{ background: toneVar(tone) }} /></div>
+                <div className="cmp-theory-read">{read}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Panel><Row name="Theory confluence" value="—" /></Panel>
+        )}
       </Sec>
-      <Read mode={mode}>Pattern confluence is <b>{bull >= 8 ? "strong" : "mixed"}</b> — {bull} disciplines align bullish. Highest-weight signals: Wyckoff phase D and Elliott wave 3.</Read>
+      <Read mode={mode}>{theories.length ? <span>Pattern confluence is <b>{bull >= bearCount ? "constructive" : "mixed"}</b> — {bull} of {total} disciplines align bullish.</span> : "Multi-theory pattern data is unavailable for this ticker."}</Read>
     </div>
   );
 }
 
 /* 06 · SMC */
 function LSMC({ ticker: t, mode }) {
+  const R = t._row || {};
+  const smc = R.smc || {};
+  const dir = smc.smc_direction != null ? String(smc.smc_direction) : null;
+  const bos = smc.bos_choch != null ? String(smc.bos_choch) : null;
+  const obEntry = smc.ob_entry_zone != null ? Number(smc.ob_entry_zone) : null;
+  const obStop = smc.ob_stop != null ? Number(smc.ob_stop) : null;
+  const fvgTarget = smc.fvg_target != null ? Number(smc.fvg_target) : null;
+  const dirTone = dir ? (/bull|up|long/i.test(dir) ? "gn" : /bear|down|short/i.test(dir) ? "rd" : "amb") : "amb";
+  const obSub = obEntry != null ? (obStop != null ? `$${fmt(obEntry)} · stop $${fmt(obStop)}` : `$${fmt(obEntry)}`) : "—";
   return (
     <div>
       <Sec n={1} title="Market structure" sub="HTF bias">
         <Panel>
-          <Row name="Structure" sub="higher highs / higher lows" chip="BULLISH BOS" chipTone="gn" />
-          <Row name="Last event" sub={`break of structure @ $${fmt(t.pivot * 0.99)}`} chip="BOS" chipTone="gn" />
-          <Row name="CHoCH risk" sub={`below $${fmt(t.stop * 1.03)}`} chip="WATCH" chipTone="amb" />
+          <Row name="Structure" sub={dir ? `SMC direction` : "no structure read"} chip={dir || "—"} chipTone={dirTone} />
+          <Row name="Last event" sub={bos ? "break / change of structure" : "—"} chip={bos || "—"} chipTone={bos ? (/bull/i.test(bos) ? "gn" : /bear|choch/i.test(bos) ? "rd" : "amb") : "amb"} />
+          <Row name="CHoCH risk" sub={obStop != null ? `below $${fmt(obStop)}` : "—"} chip="WATCH" chipTone="amb" />
         </Panel>
       </Sec>
       <Sec n={2} title="Liquidity" sub="order flow">
         <Panel>
-          <Row name="Demand order block" sub={`$${fmt(t.price * 0.96)} – $${fmt(t.price * 0.975)}`} chip="UNMIT." chipTone="gn" />
-          <Row name="Fair value gap" sub={`$${fmt(t.price * 1.01)} – $${fmt(t.price * 1.03)}`} chip="OPEN" chipTone="copper" />
+          <Row name="Demand order block" sub={obSub} chip={obEntry != null ? "UNMIT." : "—"} chipTone={obEntry != null ? "gn" : "amb"} />
+          <Row name="Fair value gap" sub={fvgTarget != null ? `target $${fmt(fvgTarget)}` : "—"} chip={fvgTarget != null ? "OPEN" : "—"} chipTone={fvgTarget != null ? "copper" : "amb"} />
           <Row name="Buy-side liquidity" sub={`resting above $${fmt(t.t1)}`} chip="TARGET" chipTone="gn" />
           <Row name="Sell-side sweep" sub={`stops below $${fmt(t.stop)}`} chip="RISK" chipTone="rd" />
         </Panel>
@@ -267,9 +302,13 @@ function LInvestment({ ticker: t, mode }) {
 
 /* 08 · EARNINGS */
 function LEarnings({ ticker: t, mode }) {
-  const h = hash(t.symbol);
-  const beats = Array.from({ length: 8 }, (_, i) => +(((h >> i) % 11) - 4));
-  const beatProb = 50 + (t.pillars.catalyst - 50);
+  const R = t._row || {};
+  const ehm = Array.isArray(R.earnings_history_multi) ? R.earnings_history_multi : [];
+  const beats = ehm.map((q) => Number(q && q.surprise_pct) || 0);
+  const hasBeats = beats.length > 0;
+  const beatCount = beats.filter((b) => b > 0).length;
+  const beatRate = R.beat_rate && R.beat_rate.beat_rate != null ? Number(R.beat_rate.beat_rate) : null;
+  const beatProb = beatRate != null ? Math.round(beatRate <= 1 ? beatRate * 100 : beatRate) : 50 + (t.pillars.catalyst - 50);
   const implied = t.ml.magnitude.hi;
   return (
     <div>
@@ -286,9 +325,9 @@ function LEarnings({ ticker: t, mode }) {
           </div>
         </Panel>
       </Sec>
-      <Sec n={3} title="Beat history" sub="last 8 quarters · surprise %">
-        <Panel><Sparkbars data={beats} />
-          <div style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 8 }} className="mono">{beats.filter((b) => b > 0).length}/8 beats · avg {fmt(beats.reduce((a, b) => a + b, 0) / 8, 1)}% surprise</div>
+      <Sec n={3} title="Beat history" sub={`last ${hasBeats ? beats.length : 8} quarters · surprise %`}>
+        <Panel>{hasBeats ? <Sparkbars data={beats} /> : null}
+          <div style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 8 }} className="mono">{hasBeats ? `${beatCount}/${beats.length} beats · avg ${fmt(beats.reduce((a, b) => a + b, 0) / beats.length, 1)}% surprise` : "—"}</div>
         </Panel>
       </Sec>
       <Read mode={mode}>{t.earnings.days < 14 ? <span>ER in <b>{t.earnings.days}d</b> — inside the window. Cap size or wait through the print.</span> : <span>ER is <b>{t.earnings.days}d</b> out — outside the {mode} window. Implied move <b>±{fmt(implied, 0)}%</b>.</span>}</Read>
@@ -313,7 +352,7 @@ function LRisk({ ticker: t, mode }) {
         <Panel>
           <Row name="Beta (β)" value={fmt(t.beta)} chip={t.beta > 1.2 ? "HIGH" : "MOD"} chipTone={t.beta > 1.2 ? "amb" : "gn"} meter={Math.min(100, t.beta * 55)} meterTone={t.beta > 1.2 ? "amb" : "gn"} />
           <Row name="Sharpe (setup)" value={fmt(0.7 + t.score / 120, 2)} chip="OK" chipTone="gn" />
-          <Row name="Max drawdown" sub="historical, this sleeve" value={pct(-(8 + (hash(t.symbol) % 10)), 0)} valTone="rd" />
+          <Row name="Max drawdown" sub="historical, this sleeve" value="—" valTone="rd" />
           <Row name="Profit factor" value={fmt(t.setupStats.pf)} chip={t.setupStats.pf > 1.5 ? "EDGE" : "THIN"} chipTone={t.setupStats.pf > 1.5 ? "gn" : "amb"} />
         </Panel>
       </Sec>
@@ -327,22 +366,30 @@ function LRisk({ ticker: t, mode }) {
 
 /* 10 · OPTIONS */
 function LOptions({ ticker: t, mode }) {
-  const h = hash(t.symbol);
-  const ivRank = 30 + (h % 55), netPrem = +(((h % 200) - 70) / 10).toFixed(1);
-  const maxPain = +(t.price * (0.97 + (h % 6) / 100)).toFixed(0);
+  const R = t._row || {};
+  const ok = R.options_kpis || {};
+  const oi = R.options_intelligence || {};
+  const ivRank = ok.iv_percentile != null ? Number(ok.iv_percentile) : (oi.iv_rank_est != null ? Number(oi.iv_rank_est) : null);
+  const maxPain = ok.max_pain != null ? Number(ok.max_pain) : null;
+  const pcr = ok.put_call_ratio != null ? Number(ok.put_call_ratio) : null;
+  const callVol = ok.call_vol_sum != null ? Number(ok.call_vol_sum) : null;
+  const putVol = ok.put_vol_sum != null ? Number(ok.put_vol_sum) : null;
+  const netVol = (callVol != null && putVol != null) ? callVol - putVol : null;
+  const flow = oi.dominant_flow != null ? String(oi.dominant_flow) : null;
+  const flowBull = flow ? /call|bull|up/i.test(flow) : (netVol != null ? netVol >= 0 : null);
   return (
     <div>
       <Sec n={1} title="Vol surface">
         <StatStrip items={[
-          { v: pct(ivRank), l: "IV rank", tone: ivRank > 60 ? "amb" : "gn" }, { v: ivRank > 50 ? "Backward" : "Contango", l: "Term" }, { v: "Put-skew", l: "Smile" },
+          { v: ivRank != null ? pct(ivRank) : "—", l: "IV rank", tone: ivRank != null ? (ivRank > 60 ? "amb" : "gn") : "amb" }, { v: ivRank != null ? (ivRank > 50 ? "Backward" : "Contango") : "—", l: "Term" }, { v: pcr != null ? (pcr > 1 ? "Put-skew" : "Call-skew") : "—", l: "Smile" },
         ]} />
       </Sec>
-      <Sec n={2} title="Flow & positioning" sub="net premium">
+      <Sec n={2} title="Flow & positioning" sub="net flow">
         <Panel>
-          <Row name="Net premium (1d)" value={`${netPrem >= 0 ? "+" : ""}$${fmt(Math.abs(netPrem))}M`} valTone={netPrem >= 0 ? "gn" : "rd"} chip={netPrem >= 0 ? "CALL-LED" : "PUT-LED"} chipTone={netPrem >= 0 ? "gn" : "rd"} />
-          <Row name="Unusual sweeps" sub={`${2 + (h % 6)} prints > $250k`} chip="BULLISH" chipTone="gn" />
-          <Row name="Max pain" sub="this Friday" value={`$${fmt(maxPain)}`} valTone="copper" />
-          <Row name="Put / call OI" value={fmt(0.6 + (h % 9) / 10, 2)} chip="LOW" chipTone="gn" />
+          <Row name="Net flow (vol)" value={netVol != null ? `${netVol >= 0 ? "+" : ""}${fmt(netVol / 1e3, 0)}k` : (flow || "—")} valTone={flowBull == null ? "copper" : flowBull ? "gn" : "rd"} chip={flow ? flow.toUpperCase().slice(0, 12) : (flowBull == null ? "—" : flowBull ? "CALL-LED" : "PUT-LED")} chipTone={flowBull == null ? "amb" : flowBull ? "gn" : "rd"} />
+          <Row name="Unusual sweeps" sub="—" chip="—" chipTone="amb" />
+          <Row name="Max pain" sub="nearest expiry" value={maxPain != null ? `$${fmt(maxPain)}` : "—"} valTone="copper" />
+          <Row name="Put / call ratio" value={pcr != null ? fmt(pcr, 2) : "—"} chip={pcr != null ? (pcr < 0.8 ? "LOW" : pcr > 1.2 ? "HIGH" : "MID") : "—"} chipTone={pcr != null ? (pcr < 0.8 ? "gn" : pcr > 1.2 ? "rd" : "amb") : "amb"} />
         </Panel>
       </Sec>
       <Sec n={3} title="Suggested structure">
@@ -350,33 +397,46 @@ function LOptions({ ticker: t, mode }) {
           <Row name={`${fmt(t.pivot, 0)} / ${fmt(t.t1, 0)} call debit spread`} sub={`def. risk · ${t.earnings.days < 14 ? "post-ER expiry" : "30–45 DTE"}`} chip="DIRECTIONAL" chipTone="copper" />
         </Panel>
       </Sec>
-      <Read mode={mode}>IV rank <b>{ivRank}%</b> with <b>{netPrem >= 0 ? "call-led" : "put-led"}</b> net premium. {ivRank > 60 ? "Elevated IV favors spreads over long calls." : "Cheap-ish IV — long premium viable."} Max pain ${fmt(maxPain)}.</Read>
+      <Read mode={mode}>IV rank <b>{ivRank != null ? `${fmt(ivRank, 0)}%` : "—"}</b>{flowBull != null ? <span> with <b>{flowBull ? "call-led" : "put-led"}</b> flow</span> : null}. {ivRank != null ? (ivRank > 60 ? "Elevated IV favors spreads over long calls." : "Cheap-ish IV — long premium viable.") : "Options data unavailable for this ticker."} {maxPain != null ? `Max pain $${fmt(maxPain)}.` : ""}</Read>
     </div>
   );
 }
 
 /* 11 · TAPE */
 function LTape({ ticker: t, mode }) {
-  const news = [
-    [`${t.name} guides Q3 above consensus on volume strength`, "Newswire · 32m", "gn"],
-    [`Analyst lifts ${t.symbol} target, cites margin inflection`, "Street · 2h", "gn"],
-    [`Sector ETF inflows hit 4-week high`, "Macro · 5h", "amb"],
-  ];
+  const R = t._row || {};
+  const articles = Array.isArray(R.news_articles) ? R.news_articles : [];
+  const sentTone = (s) => {
+    const v = Number(s);
+    if (!isNaN(v)) return v > 0.1 ? "gn" : v < -0.1 ? "rd" : "amb";
+    const sv = (s || "").toLowerCase();
+    if (/pos|bull/.test(sv)) return "gn";
+    if (/neg|bear/.test(sv)) return "rd";
+    return "amb";
+  };
+  const news = articles.slice(0, 3).map((a) => [
+    (a && (a.title || a.headline)) || "—",
+    (a && (a.source || a.date || a.published || "")) || "",
+    sentTone(a && a.sentiment),
+  ]);
+  const insiderBuys = R.insider_data && R.insider_data.buys != null ? R.insider_data.buys : null;
   return (
     <div>
       <Sec n={1} title="News & sentiment" sub="24h">
         <Panel><div className="cmp-news">
-          {news.map(([hd, meta, tone], i) => (
-            <div className="cmp-news-row" key={i}><span className="cmp-news-tick" style={{ background: toneVar(tone) }} /><div className="cmp-news-body"><div className="cmp-news-hd">{hd}</div><div className="cmp-news-meta">{meta}</div></div></div>
-          ))}
+          {news.length ? news.map(([hd, meta, tone], i) => (
+            <div className="cmp-news-row" key={i}><span className="cmp-news-tick" style={{ background: toneVar(tone) }} /><div className="cmp-news-body"><div className="cmp-news-hd">{hd}</div><div className="cmp-news-meta">{meta || "—"}</div></div></div>
+          )) : (
+            <div className="cmp-news-row"><span className="cmp-news-tick" style={{ background: toneVar("amb") }} /><div className="cmp-news-body"><div className="cmp-news-hd">No recent headlines</div><div className="cmp-news-meta">—</div></div></div>
+          )}
         </div></Panel>
       </Sec>
       <Sec n={2} title="Smart money" sub="insider · 13F">
         <Panel>
           <Row name="Insider ownership" value={pct(t.insiderOwn, 1)} chip={t.insiderOwn > 5 ? "ALIGNED" : "LOW"} chipTone={t.insiderOwn > 5 ? "gn" : "amb"} />
-          <Row name="Recent insider buys" sub="last 90 days" chip={`${1 + (hash(t.symbol) % 4)} filed`} chipTone="gn" />
+          <Row name="Recent insider buys" sub="last 90 days" chip={`${insiderBuys != null ? insiderBuys : "—"} filed`} chipTone={insiderBuys != null && insiderBuys > 0 ? "gn" : "amb"} />
           <Row name="13F net change" sub="institutions, last quarter" chip="ACCUMULATING" chipTone="gn" />
-          <Row name="Block prints today" sub="> 50k shares" value={`${2 + (hash(t.symbol) % 7)}`} valTone="copper" />
+          <Row name="Block prints today" sub="> 50k shares" value="—" valTone="copper" />
         </Panel>
       </Sec>
       <Sec n={3} title="Tape levels">
