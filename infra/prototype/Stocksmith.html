@@ -14205,6 +14205,8 @@ function tcTfBias(bars) {
   return { bias, tone, read, struct };
 }
 const MODE_TF = { SWING: "4H", POSITION: "1D", INVESTMENT: "1W" };  // B5 — chart TF follows the global SWING/POSITION/INVESTMENT mode
+// React hook aliases for the Chart lens (were referenced but never bound → LensChart crashed)
+const useTCs = React.useState, useTCe = React.useEffect, useTC = React.useMemo, useTCr = React.useRef;
 function LensChart({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const [tf, setTf] = useTCs(MODE_TF[mode] || "1D");
   const [tfTouched, setTfTouched] = useTCs(false);          // once the user picks a TF manually, stop auto-following the mode
@@ -34404,10 +34406,31 @@ function spRows(data) {
     .sort((a, b) => b.composite - a.composite);
 }
 
+// the live `data` prop is the critical SUBSET (screener empty) — fetch the full
+// 744-row scan from /api/universe (rows under .screener). Cached on window.
+function useSPUniverseRaw() {
+  const [rows, setRows] = React.useState(() => (typeof window !== "undefined" && window.__ssUniverseRaw) || null);
+  React.useEffect(() => {
+    if (typeof window !== "undefined" && window.__ssUniverseRaw) { setRows(window.__ssUniverseRaw); return; }
+    if (typeof fetch === "undefined") return;
+    let live = true;
+    fetch("/api/universe", { credentials: "same-origin" }).then(r => r.ok ? r.json() : null).then(j => {
+      const arr = (j && (j.screener || j.scan)) || [];
+      if (typeof window !== "undefined") window.__ssUniverseRaw = arr;
+      if (live) setRows(arr);
+    }).catch(() => { if (live) setRows([]); });
+    return () => { live = false; };
+  }, []);
+  return rows;
+}
+
 function SurfaceSMCPatterns({ onTicker, data }) {
   const onT = onTicker || (() => {});
   const [tab, setTab] = useSP("board");
-  const all = useSPm(() => spRows(data), [data]);
+  const uniRaw = useSPUniverseRaw();
+  // prefer the full live universe; fall back to the (subset) data prop while loading
+  const src = (uniRaw && uniRaw.length) ? { screener: uniRaw } : data;
+  const all = useSPm(() => spRows(src), [src]);
 
   if (!all.length) {
     return (
@@ -34419,7 +34442,7 @@ function SurfaceSMCPatterns({ onTicker, data }) {
             <div className="wsx-sub mono dim2">universe-wide smart-money structure + multi-method pattern confluence</div>
           </div>
         </div>
-        <div className="pm-note mono dim2">No scan rows available yet. Source: data_screener.json → window.__ssData.screener.</div>
+        <div className="pm-note mono dim2">{uniRaw == null ? "Loading scan universe… (/api/universe)" : "No scan rows available — today's scan returned no names with active structure."}</div>
       </div>
     );
   }
