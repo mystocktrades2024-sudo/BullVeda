@@ -23437,7 +23437,23 @@ function SurfaceAIPredictions({ onTicker, data }) {
 
   const model = bd.model || {};
   const bt = model.backtest || {};
-  const cal = Array.isArray(model.calibration) ? model.calibration : [];
+  // /api/ai_predict._model.calibration is a score-band OBJECT (90-100/80-89/.../<60), not an array —
+  // normalize to the {lo,hi,pred,realized,n,pf} shape AvCalib expects (score-band/100 vs realized win_rate).
+  const cal = useMemoAv(() => {
+    const c = model.calibration;
+    if (Array.isArray(c)) return c;
+    if (!c || typeof c !== "object") return [];
+    return Object.keys(c).map((band) => {
+      const b = c[band] || {};
+      const m = band.match(/(\d+)\s*-\s*(\d+)/);
+      let lo, hi;
+      if (m) { lo = +m[1] / 100; hi = +m[2] / 100; }
+      else if (band.indexOf("<") >= 0) { const t = +(band.replace(/\D/g, "") || 60); lo = 0; hi = t / 100; }
+      else { lo = 0; hi = 1; }
+      const wr = AvNum(b.win_rate);
+      return { band, lo, hi, pred: (lo + hi) / 2, realized: wr != null ? wr / 100 : null, n: AvNum(b.n), pf: AvNum(b.pf) };
+    }).filter((r) => r.realized != null).sort((a, b) => a.pred - b.pred);
+  }, [model]);
 
   const openDetail = (s) => { setPick(s); setView("detail"); };
 
@@ -23483,7 +23499,7 @@ function SurfaceAIPredictions({ onTicker, data }) {
       </div>
 
       {view === "board"  && <AvBoard all={all} onOpen={openDetail} n={bd.n} />}
-      {view === "detail" && <AvDetail sym={pick} all={all} onPick={setPick} onTicker={onT} />}
+      {view === "detail" && <AvDetail sym={pick} all={all} onPick={setPick} onTicker={onT} cal={cal} bt={bt} />}
       {view === "calib"  && <AvCalib cal={cal} bt={bt} />}
 
       <div className="pf-note mono dim2">
@@ -32910,7 +32926,7 @@ function AvBoard({ all, onOpen, n }) {
 
 /* ── per-ticker forecast detail (fetches /api/ai_predict/{sym}) ───── */
 
-function AvDetail({ sym, all, onPick, onTicker }) {
+function AvDetail({ sym, all, onPick, onTicker, cal, bt }) {
   const [st, setSt] = useStateAv({ phase: "idle", P: null, err: null });
 
   useEffectAv(() => {
@@ -32937,12 +32953,12 @@ function AvDetail({ sym, all, onPick, onTicker }) {
 
       {!P ? (
         <div className="ss-empty">{st.phase === "loading" ? "Loading forecast…" : st.phase === "err" ? `Forecast unavailable (${st.err}).` : "Select a ticker."}</div>
-      ) : <AvDetailBody P={P} onTicker={onTicker} />}
+      ) : <AvDetailBody P={P} onTicker={onTicker} cal={cal} bt={bt} />}
     </div>
   );
 }
 
-function AvDetailBody({ P, onTicker }) {
+function AvDetailBody({ P, onTicker, cal, bt }) {
   const px = AvNum(P.px), pUp = AvNum(P.pUp), ens = AvNum(P.ens), score = AvNum(P.score);
   const target = AvNum(P.target), stop = AvNum(P.stop), analogWin = AvNum(P.analogWin);
   const heads = Array.isArray(P.heads) ? P.heads : [];
@@ -33044,6 +33060,60 @@ function AvDetailBody({ P, onTicker }) {
             ) : null}
           </div>
         )}
+      </div>
+
+      {/* calibration — REAL score-band win-rate (predicted edge vs realized) */}
+      <div className="lab-card">
+        <div className="lab-card-h mono">CALIBRATION <span className="dim2">· predicted vs realized</span></div>
+        {Array.isArray(cal) && cal.length ? (
+          <div>
+            <table className="dtable wsx-tbl">
+              <thead><tr><th>Score band</th><th className="r">n</th><th className="r">Predicted</th><th className="r">Realized WR</th><th className="r">PF</th></tr></thead>
+              <tbody>{cal.map((c, i) => {
+                const pred = AvNum(c.pred), real = AvNum(c.realized);
+                const gap = (pred != null && real != null) ? Math.abs(pred - real) : null;
+                return (
+                  <tr key={i}>
+                    <td className="mono">{c.band || (c.lo != null && c.hi != null ? `${Math.round(c.lo * 100)}-${Math.round(c.hi * 100)}` : "—")}</td>
+                    <td className="r mono tabular dim">{AvNum(c.n) == null ? "—" : c.n}</td>
+                    <td className="r mono tabular dim2">{pred == null ? "—" : Math.round(pred * 100) + "%"}</td>
+                    <td className={`r mono tabular ${real != null && real >= 0.5 ? "up" : "dn"}`}><b>{real == null ? "—" : Math.round(real * 100) + "%"}</b></td>
+                    <td className={`r mono tabular ${AvNum(c.pf) != null && c.pf >= 1.5 ? "up" : ""}`}>{AvNum(c.pf) == null ? "—" : c.pf.toFixed(2)}</td>
+                  </tr>
+                );
+              })}</tbody>
+            </table>
+            <div className="lab-verdict mono dim2">Higher score bands should realize higher win rates — monotonic bands = well-calibrated. Source: _model.calibration (live accuracy bundle).</div>
+          </div>
+        ) : <div className="ss-empty">Calibration bands not in this prediction payload.</div>}
+      </div>
+
+      {/* out-of-sample backtest — REAL model backtest meta */}
+      <div className="lab-card">
+        <div className="lab-card-h mono">OUT-OF-SAMPLE BACKTEST <span className="dim2">· forward-tested edge</span></div>
+        {(() => {
+          const auc = AvNum(bt && bt.auc), hit = AvNum(bt && bt.hit), brier = AvNum(bt && bt.brier), sharpe = AvNum(bt && bt.sharpe), n = AvNum(bt && bt.n);
+          if ([auc, hit, brier, sharpe, n].every((x) => x == null)) {
+            return <div className="ss-empty">Out-of-sample backtest metrics not in this prediction payload — shown as — rather than fabricated.</div>;
+          }
+          const tiles = [
+            ["ROC AUC", auc == null ? "—" : auc.toFixed(2), "discrimination"],
+            ["HIT RATE", hit == null ? "—" : Math.round(hit * 100) + "%", n == null ? "forward" : "n=" + n],
+            ["BRIER", brier == null ? "—" : brier.toFixed(3), "lower = sharper"],
+            ["STRATEGY SHARPE", sharpe == null ? "—" : sharpe.toFixed(2), "risk-adj"],
+          ];
+          return (
+            <div className="aip-bt-grid">
+              {tiles.map((t, i) => (
+                <div key={i} className="aip-btk">
+                  <div className="label-cap">{t[0]}</div>
+                  <div className="aip-btk-v mono">{t[1]}</div>
+                  <div className="mono dim2">{t[2]}</div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
