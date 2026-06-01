@@ -2236,12 +2236,28 @@ async def ohlcv_api(ticker: str, days: int = 120, tf: str = "1D"):
             df = get_polygon_ohlcv(ticker, days=min(days, 730), timespan="week", multiplier=1)
         if df is None or (hasattr(df, 'empty') and df.empty):
             from data_fetcher import fetch_ohlcv_with_failover
-            # Intraday (1H/4H) via EODHD intraday endpoint
+            # Intraday (1H/4H): Schwab pricehistory (market-data entitled) — 30-min
+            # bars resampled to 1H/4H. EODHD has no intraday on the current plan.
             if tf in ("1H", "4H"):
                 try:
+                    import schwab_client as _sch
+                    ph = _sch.get_pricehistory(ticker, period_type="day", period=10,
+                                               frequency_type="minute", frequency=30)
+                    cdl = (ph or {}).get("candles") or []
+                    if cdl:
+                        df = pd.DataFrame(cdl)
+                        df["datetime"] = pd.to_datetime(df["datetime"], unit="ms")
+                        df = df.set_index("datetime").sort_index()
+                        df = df.rename(columns={"open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"})
+                        df = df.resample("1h" if tf == "1H" else "4h").agg(
+                            {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
+                except Exception:
+                    df = None
+            # EODHD intraday fallback (in case Schwab market-data is unavailable)
+            if (df is None or (hasattr(df, 'empty') and df.empty)) and tf in ("1H", "4H"):
+                try:
                     import eodhd_client as _eod_intra
-                    _interval = "1h"  # EODHD supports 1m, 5m, 1h
-                    rows = _eod_intra.intraday(ticker, interval=_interval)
+                    rows = _eod_intra.intraday(ticker, interval="1h")
                     if rows:
                         df = pd.DataFrame(rows)
                         if "datetime" in df.columns:
