@@ -18871,25 +18871,54 @@ window.SurfacePlaybook = SurfacePlaybook;
 //  THEMES
 // ═══════════════════════════════════════════════════════════════════════════
 
+// real ticker→{pct_chg, rs_rank} map from /api/universe (window-cached)
+function useUniverseRows() {
+  const [m, setM] = useState(() => (typeof window !== "undefined" && window.__ssUniRows) || null);
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.__ssUniRows) { setM(window.__ssUniRows); return; }
+    if (typeof fetch === "undefined") return;
+    let live = true;
+    fetch("/api/universe", { credentials: "same-origin" }).then(r => r.ok ? r.json() : null).then(j => {
+      const rows = (j && j.screener) || []; const map = {};
+      for (const r of rows) { if (r && r.ticker) map[String(r.ticker).toUpperCase()] = { pct: r.pct_chg, rs: r.rs_rank, sector: r.sector }; }
+      if (typeof window !== "undefined") window.__ssUniRows = map;
+      if (live) setM(map);
+    }).catch(() => { if (live) setM({}); });
+    return () => { live = false; };
+  }, []);
+  return m;
+}
 function SurfaceThemes({ onTicker, data }) {
   const [view, setView] = useState("baskets");      // baskets · rotation
-  const [period, setPeriod] = useState("chg1m");
-  const [sel, setSel] = useState(THM_BASKETS[0].k);
-  const cur = THM_BASKETS.find(t => t.k === sel) || THM_BASKETS[0];
-  const perEntry = THM_PERIODS.find(p => p[0] === period) || THM_PERIODS[1];
-  const perLabel = perEntry[1];
+  const [period, setPeriod] = useState("chg1d");
+  const uni = useUniverseRows();
   const pick = onTicker || (() => {});
+  // enrich curated baskets with REAL per-member data (1-day %, RS rank) from /api/universe.
+  // multi-period (1w/1m/3m), flow and the sparkline curve have NO real feed → null (rendered —).
+  const baskets = useMemo(() => {
+    const U = uni || {};
+    return THM_BASKETS.map(t => {
+      const cons = t.cons.map(c => { const u = U[String(c[0]).toUpperCase()]; return [c[0], u && u.pct != null ? +u.pct : null, u && u.rs != null ? +u.rs : null]; });
+      const chgs = cons.map(c => c[1]).filter(v => v != null);
+      const rss = cons.map(c => c[2]).filter(v => v != null);
+      const chg1d = chgs.length ? +(chgs.reduce((a, b) => a + b, 0) / chgs.length).toFixed(1) : null;
+      const rs = rss.length ? Math.round(rss.reduce((a, b) => a + b, 0) / rss.length) : null;
+      const breadth = chgs.length ? Math.round(chgs.filter(v => v > 0).length / chgs.length * 100) : null;
+      return { ...t, cons, chg1d, chg1w: null, chg1m: null, chg3m: null, rs, rsPrev: null, breadth, breadthPrev: null, flow: null, curve: null, members: t.cons.length, _matched: chgs.length };
+    });
+  }, [uni]);
+  const [sel, setSel] = useState(THM_BASKETS[0].k);
+  const cur = baskets.find(t => t.k === sel) || baskets[0];
+  const perLabel = period === "chg1d" ? "1D" : (THM_PERIODS.find(p => p[0] === period) || ["", period])[1];
 
-  // crowding map — which baskets each ticker appears in
   const crowd = useMemo(() => {
     const m = {};
-    THM_BASKETS.forEach(t => t.cons.forEach(c => { (m[c[0]] = m[c[0]] || []).push(t.k); }));
+    baskets.forEach(t => t.cons.forEach(c => { (m[c[0]] = m[c[0]] || []).push(t.k); }));
     return m;
-  }, []);
+  }, [baskets]);
   const crowdedCount = Object.values(crowd).filter(a => a.length >= 2).length;
-  const hottest = [...THM_BASKETS].sort((a, b) => (Number(b[period]) || 0) - (Number(a[period]) || 0))[0];
-  const hotChg = Number(hottest[period]) || 0;
-  const netFlow = THM_BASKETS.reduce((a, t) => a + (Number(t.flow) || 0), 0);
+  const hottest = [...baskets].sort((a, b) => ((b.chg1d == null ? -1e9 : b.chg1d)) - ((a.chg1d == null ? -1e9 : a.chg1d)))[0];
+  const hotChg = hottest && hottest.chg1d != null ? hottest.chg1d : null;
 
   return (
     <div className="surface wsx wsx--violet q-themes">
@@ -18900,8 +18929,8 @@ function SurfaceThemes({ onTicker, data }) {
           <div className="wsx-sub mono dim2">curated baskets · multi-period return · relative strength · breadth trend · rotation map · crowding · drill to top-10</div>
         </div>
         <div className="wsx-hdr-r">
-          <FreshnessPill state="live" age="eod + 18s" />
-          <span className="mono dim2">src · curated baskets · EODHD /eod · flow model</span>
+          <FreshnessPill state={uni ? "live" : "empty"} age="1d" />
+          <span className="mono dim2">src · curated membership · /api/universe (1-day % + RS) · multi-period n/a</span>
         </div>
       </div>
 
@@ -18910,20 +18939,20 @@ function SurfaceThemes({ onTicker, data }) {
         <button className={`lab-tab ${view === "rotation" ? "is-on" : ""}`} onClick={() => setView("rotation")}>Rotation</button>
         {view === "baskets" && (
           <div className="seg q-period">
-            {THM_PERIODS.map(([id, l]) => <button key={id} className={`seg-btn ${period === id ? "is-on" : ""}`} onClick={() => setPeriod(id)}>{l}</button>)}
+            {[["chg1d","1D"]].concat(THM_PERIODS).map(([id, l]) => <button key={id} className={`seg-btn ${period === id ? "is-on" : ""}`} onClick={() => setPeriod(id)}>{l}</button>)}
           </div>
         )}
       </div>
 
       {view === "rotation"
-        ? <ThmRotation baskets={THM_BASKETS} sel={sel} onSelect={setSel} onTicker={pick} />
+        ? <ThmRotation baskets={baskets} sel={sel} onSelect={setSel} onTicker={pick} />
         : (
         <>
           <div className="q-kpis q-kpis--4">
-            {[["ACTIVE THEMES", THM_BASKETS.length, "violet", "tracked"],
-              ["HOTTEST · " + perLabel, `${hottest.k.split(" ")[0]} ${hotChg >= 0 ? "+" : ""}${hotChg}%`, "gn", `RS ${hottest.rs} leader`],
+            {[["ACTIVE THEMES", baskets.length, "violet", "curated"],
+              ["HOTTEST · 1D", hottest && hottest.chg1d != null ? `${hottest.k.split(" ")[0]} ${hottest.chg1d >= 0 ? "+" : ""}${hottest.chg1d}%` : "—", "gn", hottest && hottest.rs != null ? `RS ${hottest.rs}` : "—"],
               ["CROWDED NAMES", crowdedCount, "amb", "in 2+ baskets"],
-              ["NET 5D FLOW", `+$${(netFlow / 1000).toFixed(1)}B`, "gn", "into baskets"]].map((k, i) => (
+              ["NET FLOW", "—", "ink", "no flow feed"]].map((k, i) => (
               <div key={i} className={`q-kpi q-kpi--${k[2]}`}>
                 <div className="q-kpi-l mono">{k[0]}</div>
                 <div className={`q-kpi-v mono kpi-tone--${k[2]}`}>{k[1]}</div>
@@ -18934,8 +18963,8 @@ function SurfaceThemes({ onTicker, data }) {
 
           {/* theme cards */}
           <div className="q-theme-grid">
-            {THM_BASKETS.map((t, ti) => {
-              const chg = Number(t[period]) || 0, q = thmRotQuad(t);
+            {baskets.map((t, ti) => {
+              const chg = t[period] != null ? Number(t[period]) : null, q = thmRotQuad(t);
               const nCrowd = t.cons.filter(c => (crowd[c[0]] || []).length >= 2).length;
               const rsD = (Number(t.rs) || 0) - (Number(t.rsPrev) || 0);
               const flow = Number(t.flow) || 0;
@@ -18946,25 +18975,25 @@ function SurfaceThemes({ onTicker, data }) {
                       <div className="q-tc-name">{t.k}</div>
                       <div className="q-tc-tag mono dim2">{t.tag}</div>
                     </div>
-                    <div className={`q-tc-chg mono ${chg >= 0 ? "up" : "dn"}`}><span className="q-tc-chg-v">{chg >= 0 ? "+" : ""}{chg}%</span><span className="q-tc-chg-l mono dim2">{perLabel}</span></div>
+                    <div className={`q-tc-chg mono ${chg == null ? "dim2" : chg >= 0 ? "up" : "dn"}`}><span className="q-tc-chg-v">{chg == null ? "—" : (chg >= 0 ? "+" : "") + chg + "%"}</span><span className="q-tc-chg-l mono dim2">{perLabel}{period !== "chg1d" ? " n/a" : ""}</span></div>
                   </div>
-                  <ThmSpark data={t.curve} tone={t.tone} sid={ti} />
+                  {t.curve ? <ThmSpark data={t.curve} tone={t.tone} sid={ti} /> : <div style={{ height: 6 }} />}
                   <div className="q-tc-tags">
                     <span className={`q-phase q-phase--${q.k}`}>{q.label}</span>
                     {nCrowd > 0 && <span className="q-crowd-chip" title={`${nCrowd} constituents also appear in other themes`}>⋈ {nCrowd} crowded</span>}
                   </div>
                   <div className="q-tc-meta">
-                    <span className="mono"><span className="dim2">RS</span> <b className={(Number(t.rs) || 0) >= 70 ? "up" : (Number(t.rs) || 0) >= 50 ? "warn" : "dn"}>{t.rs}</b> <span className={`q-bdelta ${rsD >= 0 ? "up" : "dn"}`}>{rsD >= 0 ? "+" : ""}{rsD}</span></span>
-                    <ThmBreadthTrend now={t.breadth} prev={t.breadthPrev} />
-                    <span className="mono"><span className="dim2">FLOW</span> <b className={flow >= 0 ? "up" : "dn"}>{flow >= 0 ? "+" : "−"}${Math.abs(flow)}M</b></span>
-                    <span className="mono"><span className="dim2">NAMES</span> <b>{t.members}</b></span>
+                    <span className="mono"><span className="dim2">RS</span> <b className={t.rs == null ? "dim2" : t.rs >= 70 ? "up" : t.rs >= 50 ? "warn" : "dn"}>{t.rs == null ? "—" : t.rs}</b></span>
+                    <span className="mono"><span className="dim2">BREADTH</span> <b className={t.breadth == null ? "dim2" : t.breadth >= 50 ? "up" : "dn"}>{t.breadth == null ? "—" : t.breadth + "%"}</b></span>
+                    <span className="mono"><span className="dim2">1D</span> <b className={t.chg1d == null ? "dim2" : t.chg1d >= 0 ? "up" : "dn"}>{t.chg1d == null ? "—" : (t.chg1d >= 0 ? "+" : "") + t.chg1d + "%"}</b></span>
+                    <span className="mono"><span className="dim2">NAMES</span> <b>{t._matched}/{t.members}</b></span>
                   </div>
                   <div className="q-tc-chips">
                     {t.cons.map(c => {
                       const crowded = (crowd[c[0]] || []).length >= 2, isLead = c[0] === t.lead;
                       return (
                         <button key={c[0]} className={`q-tc-chip mono ${isLead ? "q-tc-chip--lead" : ""} ${crowded ? "q-tc-chip--crowd" : ""}`}
-                                title={`${c[0]} · RS ${c[2]}${isLead ? " · basket leader" : ""}${crowded ? " · also in " + (crowd[c[0]] || []).filter(k => k !== t.k).length + " other theme(s)" : ""}`}
+                                title={`${c[0]}${c[2] != null ? " · RS " + c[2] : ""}${isLead ? " · basket leader" : ""}${crowded ? " · also in " + (crowd[c[0]] || []).filter(k => k !== t.k).length + " other theme(s)" : ""}`}
                                 onClick={(e) => { e.stopPropagation(); pick(c[0]); }}>{c[0]}</button>
                       );
                     })}
@@ -18979,27 +19008,27 @@ function SurfaceThemes({ onTicker, data }) {
             <div className="lab-card-h mono">{cur.k.toUpperCase()} · TOP 10 CONSTITUENTS · {cur.members} names total · RS-weighted</div>
             <table className="dtable wsx-tbl q-cons-tbl">
               <thead><tr><th>#</th><th>Sym</th><th className="r">1D %</th><th className="r">RS rank</th><th>RS vs SPX</th><th>Role</th><th>Crowding</th></tr></thead>
-              <tbody>{cur.cons.map((c, i) => {
+              <tbody>{[...cur.cons].sort((a, b) => (b[2] == null ? -1 : b[2]) - (a[2] == null ? -1 : a[2])).map((c, i) => {
                 const others = (crowd[c[0]] || []).filter(k => k !== cur.k);
-                const chg1d = Number(c[1]) || 0, rsRank = Number(c[2]) || 0;
+                const chg1d = c[1], rsRank = c[2];
                 return (
                   <tr key={i} onClick={() => pick(c[0])}>
                     <td className="mono dim2">{String(i + 1).padStart(2, "0")}</td>
                     <td><b className="mono">{c[0]}</b></td>
-                    <td className={`r tabular ${chg1d >= 0 ? "up" : "dn"}`}>{chg1d >= 0 ? "+" : ""}{chg1d}%</td>
-                    <td className="r tabular"><b>{c[2]}</b></td>
-                    <td><div className="q-rs-bar"><div className="q-rs-fill" style={{ width: `${rsRank}%`, background: rsRank >= 70 ? "var(--gn)" : rsRank >= 50 ? "var(--amb)" : "var(--rd)" }} /></div></td>
-                    <td>{c[0] === cur.lead ? <Pill tone="copper" small>LEADER</Pill> : rsRank >= 60 ? <Pill tone="gn" small>strong</Pill> : rsRank >= 45 ? <Pill tone="amb" small>inline</Pill> : <Pill tone="rd" small>laggard</Pill>}</td>
+                    <td className={`r tabular ${chg1d == null ? "dim2" : chg1d >= 0 ? "up" : "dn"}`}>{chg1d == null ? "—" : (chg1d >= 0 ? "+" : "") + chg1d + "%"}</td>
+                    <td className="r tabular"><b>{rsRank == null ? "—" : rsRank}</b></td>
+                    <td><div className="q-rs-bar"><div className="q-rs-fill" style={{ width: `${rsRank || 0}%`, background: rsRank >= 70 ? "var(--gn)" : rsRank >= 50 ? "var(--amb)" : "var(--rd)" }} /></div></td>
+                    <td>{rsRank == null ? <span className="dim2 mono">—</span> : rsRank >= 60 ? <Pill tone="gn" small>strong</Pill> : rsRank >= 45 ? <Pill tone="amb" small>inline</Pill> : <Pill tone="rd" small>laggard</Pill>}</td>
                     <td>{others.length ? <span className="q-crowd-chip q-crowd-chip--sm" title={`Also in: ${others.join(", ")}`}>⋈ {others.map(o => o.split(" ")[0]).join(", ")}</span> : <span className="dim2 mono">—</span>}</td>
                   </tr>
                 );
               })}</tbody>
             </table>
-            <div className="lab-verdict mono dim2">Trade the <b className="copper">leaders</b>, not the basket — RS dispersion within a hot theme is wide. {cur.lead} carries {cur.k}; laggards (&lt;45 RS) are sympathy risk. <b className="amb">⋈ crowded</b> names sit in multiple themes — sizing them as separate bets understates concentration.</div>
+            <div className="lab-verdict mono dim2">Members + 1-day % + RS-rank are REAL (/api/universe; {cur._matched}/{cur.members} matched). Trade the <b className="copper">leaders</b>, not the basket — RS dispersion within a theme is wide. <b className="amb">⋈ crowded</b> names sit in multiple themes — understated concentration.</div>
           </div>
         </>
         )}
-      <div className="pf-note mono dim2">Baskets are curated and RS-weighted — a theme's print is the weighted basket return, but entries are screened name-by-name through the same 10 gates. Rotation map plots RS level against its 4-week change to show where capital is moving. Flows estimate net premium into constituents over 5 sessions. Click any name → 14-lens detail.</div>
+      <div className="pf-note mono dim2">Basket membership is curated; per-member 1-day % and RS-rank are REAL from /api/universe. Multi-period returns (1W/1M/3M), net flows and the RS-momentum rotation map need feeds not in the stack → shown as — rather than fabricated. Click any name → 14-lens detail.</div>
     </div>
   );
 }
@@ -22676,12 +22705,19 @@ function SurfaceEtfScreener({ onTicker, data }) {
 const ETF_CATS = ["All", "Sector", "Index", "Macro"];
 
 function thmRotQuad(t) {
-  const rsD = (Number(t.rs) || 0) - (Number(t.rsPrev) || 0);
-  const strong = (Number(t.rs) || 0) >= 65, up = rsD >= 0;
-  if (strong && up)  return { k: "leading",   tone: "gn",  label: "LEADING",   note: "ride · strongest + improving" };
-  if (strong && !up) return { k: "weakening", tone: "amb", label: "WEAKENING", note: "trim · strong but rolling over" };
-  if (!strong && up) return { k: "improving", tone: "cy",  label: "IMPROVING", note: "watch · basing, RS turning up" };
-  return { k: "lagging", tone: "rd", label: "LAGGING", note: "avoid · weak + still falling" };
+  // RS-momentum (rs vs prior rs) needs an RS-history feed that isn't available → classify by RS LEVEL only.
+  if (t.rs == null) return { k: "lagging", tone: "ink", label: "—", note: "no RS data" };
+  if (t.rsPrev != null) {
+    const rsD = t.rs - t.rsPrev, strong = t.rs >= 65, up = rsD >= 0;
+    if (strong && up) return { k: "leading", tone: "gn", label: "LEADING", note: "strongest + improving" };
+    if (strong && !up) return { k: "weakening", tone: "amb", label: "WEAKENING", note: "strong but rolling over" };
+    if (!strong && up) return { k: "improving", tone: "cy", label: "IMPROVING", note: "basing, RS turning up" };
+    return { k: "lagging", tone: "rd", label: "LAGGING", note: "weak + still falling" };
+  }
+  // level-only (no momentum history)
+  return t.rs >= 70 ? { k: "leading", tone: "gn", label: "STRONG RS", note: "RS " + t.rs }
+    : t.rs >= 50 ? { k: "improving", tone: "cy", label: "MID RS", note: "RS " + t.rs }
+    : { k: "lagging", tone: "rd", label: "WEAK RS", note: "RS " + t.rs };
 }
 
 function ThmSpark({ data, tone, sid }) {
@@ -22760,16 +22796,17 @@ function ThmRRG({ baskets, sel, onSelect }) {
 }
 
 function ThmRotation({ baskets, sel, onSelect, onTicker }) {
-  const ranked = [...baskets].sort((a, b) => ((Number(b.rs) || 0) - (Number(b.rsPrev) || 0)) - ((Number(a.rs) || 0) - (Number(a.rsPrev) || 0)));
+  // rank by REAL avg RS level (RS-momentum / 4-week Δ needs an RS-history feed → not available)
+  const ranked = [...baskets].sort((a, b) => ((b.rs == null ? -1 : b.rs)) - ((a.rs == null ? -1 : a.rs)));
   const counts = baskets.reduce((m, t) => { const k = thmRotQuad(t).k; m[k] = (m[k] || 0) + 1; return m; }, {});
   const cur = baskets.find(t => t.k === sel) || baskets[0];
   const curQ = thmRotQuad(cur);
-  const topD = ranked.length ? (Number(ranked[0].rs) || 0) - (Number(ranked[0].rsPrev) || 0) : 0;
+  const maxRs = Math.max(...baskets.map(b => b.rs || 0), 1);
   return (
     <>
       <div className="q-kpis q-kpis--4">
-        {[["LEADING", counts.leading || 0, "gn", "ride"], ["IMPROVING", counts.improving || 0, "cy", "watch for entry"],
-          ["WEAKENING", counts.weakening || 0, "amb", "trim / tighten"], ["LAGGING", counts.lagging || 0, "rd", "avoid"]].map((k, i) => (
+        {[["STRONG RS", counts.leading || 0, "gn", "RS ≥ 70"], ["MID RS", counts.improving || 0, "cy", "RS 50–70"],
+          ["WEAK RS", counts.lagging || 0, "rd", "RS < 50"], ["THEMES", baskets.length, "violet", "curated"]].map((k, i) => (
           <div key={i} className={`q-kpi q-kpi--${k[2]}`}>
             <div className="q-kpi-l mono">{k[0]}</div>
             <div className={`q-kpi-v mono kpi-tone--${k[2]}`}>{k[1]}</div>
@@ -22780,29 +22817,37 @@ function ThmRotation({ baskets, sel, onSelect, onTicker }) {
 
       <div className="q-rot-grid">
         <div className="lab-card">
-          <div className="lab-card-h mono">ROTATION MAP · RS LEVEL × RS MOMENTUM <span className="dim2">· bubble ∝ net flow · click a theme</span></div>
-          <ThmRRG baskets={baskets} sel={sel} onSelect={onSelect} />
-          <div className="q-rrg-note mono dim2">Clockwise drift is the normal lifecycle: <b className="cy">Improving</b> → <b className="up">Leading</b> → <b className="amb">Weakening</b> → <b className="dn">Lagging</b>. Capital is rotating <b className="up">into {ranked.length ? ranked[0].k : "—"}</b> (RS +{topD}) and <b className="dn">out of {ranked.length ? ranked[ranked.length - 1].k : "—"}</b>.</div>
+          <div className="lab-card-h mono">RS LEADERSHIP · avg member RS-rank <span className="dim2">· real · click a theme</span></div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 0" }}>
+            {ranked.map(t => (
+              <button key={t.k} onClick={() => onSelect(t.k)} style={{ display: "grid", gridTemplateColumns: "150px 1fr 46px", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: "2px 0", opacity: sel === t.k ? 1 : 0.82 }}>
+                <span className="mono" style={{ fontSize: 11 }}>{t.k}</span>
+                <span style={{ height: 9, borderRadius: 5, background: "var(--glass-line,rgba(255,255,255,0.07))", overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${(t.rs || 0) / maxRs * 100}%`, background: t.rs >= 70 ? "var(--gn)" : t.rs >= 50 ? "var(--amb)" : "var(--rd)" }} /></span>
+                <span className={`mono ${t.rs == null ? "dim2" : t.rs >= 70 ? "up" : t.rs >= 50 ? "warn" : "dn"}`} style={{ fontSize: 11, textAlign: "right" }}>{t.rs == null ? "—" : t.rs}</span>
+              </button>
+            ))}
+          </div>
+          <div className="q-rrg-note mono dim2">Avg member RS-rank per theme (real, /api/universe). The RS-<b>momentum</b> rotation quadrant (RS level × 4-week change) needs an RS-history feed not in the stack — shown as a level ranking rather than a fabricated rotation map.</div>
         </div>
 
         <div className="lab-card">
-          <div className="lab-card-h mono">MOMENTUM RANK · 4-WEEK Δ</div>
+          <div className="lab-card-h mono">THEME RANK · RS + 1-day</div>
           <table className="dtable wsx-tbl q-rot-tbl">
-            <thead><tr><th>Theme</th><th className="r">RS</th><th className="r">Δ 4w</th><th className="r">1M</th><th>Phase</th></tr></thead>
+            <thead><tr><th>Theme</th><th className="r">RS</th><th className="r">1D %</th><th className="r">Breadth</th><th>RS read</th></tr></thead>
             <tbody>{ranked.map(t => {
-              const rsD = (Number(t.rs) || 0) - (Number(t.rsPrev) || 0), q = thmRotQuad(t), c1m = Number(t.chg1m) || 0;
+              const q = thmRotQuad(t);
               return (
                 <tr key={t.k} className={sel === t.k ? "is-sel" : ""} onClick={() => onSelect(t.k)} style={{ cursor: "pointer" }}>
                   <td><b>{t.k}</b></td>
-                  <td className="r mono tabular"><b>{t.rs}</b></td>
-                  <td className={`r mono tabular ${rsD >= 0 ? "up" : "dn"}`}>{rsD >= 0 ? "▲+" : "▼"}{rsD}</td>
-                  <td className={`r mono tabular ${c1m >= 0 ? "up" : "dn"}`}>{c1m >= 0 ? "+" : ""}{c1m}%</td>
+                  <td className="r mono tabular"><b>{t.rs == null ? "—" : t.rs}</b></td>
+                  <td className={`r mono tabular ${t.chg1d == null ? "dim2" : t.chg1d >= 0 ? "up" : "dn"}`}>{t.chg1d == null ? "—" : (t.chg1d >= 0 ? "+" : "") + t.chg1d + "%"}</td>
+                  <td className={`r mono tabular ${t.breadth == null ? "dim2" : t.breadth >= 50 ? "up" : "dn"}`}>{t.breadth == null ? "—" : t.breadth + "%"}</td>
                   <td><span className={`q-phase q-phase--${q.k}`}>{q.label}</span></td>
                 </tr>
               );
             })}</tbody>
           </table>
-          <div className="q-rot-verdict mono dim2"><b className={`kpi-tone--${curQ.tone}`}>{cur.k} · {curQ.label}</b> — {curQ.note}. Trade phase, not just price: a Leading theme with breadth still expanding is the cleanest tailwind; a Weakening one is a distribution tell even while it prints green.</div>
+          <div className="q-rot-verdict mono dim2"><b className={`kpi-tone--${curQ.tone}`}>{cur.k} · {curQ.label}</b> — {curQ.note}. RS-rank + 1-day + breadth are real (/api/universe); multi-period momentum/flow not fed.</div>
         </div>
       </div>
     </>
