@@ -11807,7 +11807,12 @@ function OtkLensOptions({ ticker, mode }) {
 
 function OtkPayoffBig({ o }) {
   const W=380, H=210, padL=44, padR=20, padT=18, padB=30;
-  const lo=o.spot*0.82, hi=o.spot*1.20, rng=hi-lo;
+  // domain must contain be/target/strike/stop so breakeven never falls off-canvas
+  // (otherwise x(be) > W → negative-width clip rect; SVG render warning, fix 2026-06-01)
+  const _f=(v,d)=> (v!=null && isFinite(v)) ? v : d;
+  const lo=Math.min(o.spot*0.82, _f(o.stop,o.spot), _f(o.be,o.spot))*0.99;
+  const hi=Math.max(o.spot*1.20, _f(o.target,o.spot), _f(o.be,o.spot), _f(o.strike,o.spot))*1.01;
+  const rng=(hi-lo)||1;
   const x=p=> padL + ((p-lo)/rng)*(W-padL-padR);
   const pnl=p=> Math.max(-o.prem, (p>o.strike? p-o.strike : 0) - o.prem);
   const maxG=hi-o.strike-o.prem, maxL=-o.prem;
@@ -11824,7 +11829,7 @@ function OtkPayoffBig({ o }) {
           <text x={padL-5} y={y(v)+3} fontSize="9" className="mono" textAnchor="end" fill={v>0?"var(--gn)":v<0?"var(--rd)":"var(--ink-3)"}>{v>=0?"+":"−"}${Math.abs(v*100).toFixed(0)}</text></g>
       ))}
       {/* profit fill */}
-      <clipPath id="otk-cp"><rect x={beX} y="0" width={W-beX} height={y0}/></clipPath>
+      <clipPath id="otk-cp"><rect x={beX} y="0" width={Math.max(0,W-beX)} height={Math.max(0,y0)}/></clipPath>
       <path d={`M ${padL} ${y0} L ${pts.map(p=>p.join(",")).join(" L ")} L ${W-padR} ${y0} Z`} fill="url(#otk-bg)" clipPath="url(#otk-cp)"/>
       {/* payoff line split at BE */}
       <polyline points={pts.filter(p=>p[0]<=beX).map(p=>p.join(",")).join(" ")} fill="none" stroke="var(--rd)" strokeWidth="2.4"/>
