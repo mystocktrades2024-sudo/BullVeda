@@ -219,9 +219,17 @@ Grep of the rendered code paths after this session's cleanup:
 - Options Black-Scholes profit grid + multi-leg spread builder (anchored on live spot/IV).
 - Risk Lab β-hedge sizing ("illustrative · not orders"; SPY β shown `—`).
 
-## Honest `—` gaps (no feed; rendered empty with sourcing note)
+## Gap closure (fix-all pass, commit 63ef13bd2)
 
-Intraday 1H/4H structure · session kill-zones · SMT correlated-pair · butterfly/vol-of-vol surface · book-aggregate greeks · Senate/EDGAR/Wiki alt-data · per-name SPY beta · multi-period theme returns.
+Wired to real feeds (were honest `—`): **25Δ Risk-Reversal + Butterfly** (live Schwab chain), **EDGAR 13-F + insider** alt-data, **SMC SMT divergence** (stock vs SPY), **Risk Beta(SPY)** (computed vs SPY when scan-row beta absent).
+
+Still honest `—` — genuinely no free feed in the stack:
+- **Intraday 1H/4H structure + session kill-zones** — `/api/ohlcv?tf=1h` returns 0 candles (no intraday feed).
+- **Vol-of-vol** — needs an IV time series; chain is a single snapshot.
+- **Book-aggregate greeks** — needs an open-options-positions feed (paper book is equity-only).
+- **Senate trades** — upstream source returns HTTP 403 (Senate Stock Watcher S3 blocked).
+- **Wiki pageviews** — Wikipedia API 404 for these tickers.
+- **Multi-period theme returns (1w/1m/3m)** — would need per-member historical batch (heavy).
 
 ## Job-load status (2026-06-01)
 
