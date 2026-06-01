@@ -21647,6 +21647,12 @@ function SurfacePreMarket({ onTicker, data }) {
 
   const [filter, setFilter] = useState("all");
 
+  // REAL cockpit-panel sources: macro calendar (economic_events), earnings reporters
+  // (earnings_watchlist via data_earnings.json), your book (portfolio.positions).
+  const econEvents = Array.isArray(root.economic_events) ? root.economic_events : [];
+  const earnWL = useEarningsWL();
+  const positions = (root.portfolio && Array.isArray(root.portfolio.positions)) ? root.portfolio.positions : [];
+
   const gappersUp = useMemo(
     () => (Array.isArray(pm.gappers_up) ? pm.gappers_up : []).map(pmMapGapper).filter((r) => r.sym),
     [pm.gappers_up]
@@ -21788,10 +21794,114 @@ function SurfacePreMarket({ onTicker, data }) {
         )}
       </div>
 
-      {/* Catalyst wire — real catalysts only; honest empty state otherwise. */}
+      {/* Cockpit panels — all REAL sources; honest empty/em-dash where the feed is silent. */}
       <div className="pm-panels">
+        {/* Macro calendar — REAL economic_events */}
         <div className="lab-card">
-          <div className="lab-card-h mono">📰 CATALYST WIRE · pre-market headlines</div>
+          <div className="lab-card-h mono">⚠ MACRO CALENDAR · pre-open prints</div>
+          {econEvents.length ? (
+            <div className="pm-macro">
+              {econEvents.slice(0, 8).map((m, i) => {
+                const dt = String(m.date || "").replace("T", " ").slice(0, 16);
+                const fcst = m.estimate != null ? m.estimate : "—";
+                const prior = m.previous != null ? m.previous : "—";
+                const actual = m.actual;
+                return (
+                  <div key={i} className="pm-macro-row pm-macro--ink">
+                    <span className="mono pm-macro-t">{dt || "—"}</span>
+                    <span className="mono pm-macro-e">{m.type || "—"}{m.period ? <span className="dim2"> · {m.period}</span> : null}</span>
+                    {m.country ? <Pill tone="ink" small>{m.country}</Pill> : <span className="dim2">—</span>}
+                    <span className="mono dim2 pm-macro-f">{actual != null ? <b>actual {actual}</b> : null} fcst {fcst} · prior {prior}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : <div className="pm-wire-empty mono dim2">No scheduled macro prints in the bundle. Source: EODHD /economic calendar (data.economic_events).</div>}
+        </div>
+
+        {/* Earnings reporters — REAL earnings_watchlist (data_earnings.json) */}
+        <div className="lab-card">
+          <div className="lab-card-h mono">📊 EARNINGS REPORTERS · overnight + BMO</div>
+          {Array.isArray(earnWL) && earnWL.filter(e => (e && e.days_to_earnings != null && e.days_to_earnings <= 2)).length ? (
+            <table className="dtable wsx-tbl pm-mini-tbl">
+              <thead><tr><th>Sym</th><th>When</th><th className="r">Est EPS</th><th className="r">Actual</th><th className="r">Surprise</th></tr></thead>
+              <tbody>{earnWL.filter(e => e && e.days_to_earnings != null && e.days_to_earnings <= 2)
+                .sort((a, b) => (a.days_to_earnings - b.days_to_earnings)).slice(0, 8).map((r, i) => {
+                  const bam = (r.before_after_market || "").toLowerCase();
+                  const when = bam.includes("before") ? "BMO" : bam.includes("after") ? "AMC" : (r.days_to_earnings === 0 ? "today" : `D-${r.days_to_earnings}`);
+                  const est = r.estimate != null ? r.estimate : null;
+                  const act = (r.actual != null && r.actual !== 0) ? r.actual : null;
+                  const surp = (est != null && act != null && est !== 0) ? ((act - est) / Math.abs(est)) * 100 : null;
+                  return (
+                    <tr key={i} onClick={() => onT(r.ticker)}>
+                      <td className="mono"><b>{r.ticker}</b></td>
+                      <td className={`mono ${when === "BMO" ? "cy" : when === "AMC" ? "amb" : "dim2"}`}>{when}</td>
+                      <td className="r mono tabular">{est != null ? `$${est}` : "—"}</td>
+                      <td className="r mono tabular">{act != null ? `$${act}` : "—"}</td>
+                      <td className={`r mono tabular ${surp != null ? (surp >= 0 ? "up" : "dn") : "dim2"}`}>{surp != null ? `${surp >= 0 ? "+" : ""}${surp.toFixed(1)}%` : "—"}</td>
+                    </tr>
+                  );
+                })}</tbody>
+            </table>
+          ) : <div className="pm-wire-empty mono dim2">No reporters in the next 2 sessions. Source: EODHD /calendar (data_earnings.json · earnings_watchlist). Pre-market react not in bundle → —.</div>}
+        </div>
+
+        {/* Your book — REAL portfolio.positions */}
+        <div className="lab-card">
+          <div className="lab-card-h mono">💼 YOUR BOOK · pre-market exposure</div>
+          {positions.length ? (
+            <div className="pm-book">
+              {positions.map((p, i) => {
+                const pnl = pmNum(p.unrealized_pnl_dollars);
+                const dayPct = pmNum(p.day_change_pct != null ? p.day_change_pct : p.pct_chg);
+                return (
+                  <div key={i} className="pm-book-row" onClick={() => onT(p.ticker || p.symbol)}>
+                    <span className="mono"><b>{p.ticker || p.symbol}</b></span>
+                    <span className={`mono ${dayPct != null ? (dayPct >= 0 ? "up" : "dn") : "dim2"}`}>{dayPct != null ? `${dayPct >= 0 ? "+" : ""}${dayPct.toFixed(1)}%` : "—"}</span>
+                    <span className={`mono ${pnl != null ? (pnl >= 0 ? "up" : "dn") : "dim2"}`}>{pnl != null ? `${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(0)}` : "—"}</span>
+                    <span className="mono dim2">{p.direction || "held"}{p.shares != null ? ` · ${p.shares} sh` : ""}</span>
+                  </div>
+                );
+              })}
+              <div className="pm-book-net mono"><span className="dim2">Open P&amp;L</span> {(() => {
+                const tot = positions.reduce((a, p) => a + (pmNum(p.unrealized_pnl_dollars) || 0), 0);
+                return <b className={tot >= 0 ? "up" : "dn"}>{tot >= 0 ? "+" : "−"}${Math.abs(tot).toFixed(0)}</b>;
+              })()} <span className="dim2">· {positions.length} position{positions.length === 1 ? "" : "s"} · pre-market gap per name not in bundle</span></div>
+            </div>
+          ) : <div className="pm-wire-empty mono dim2">No open positions. Source: portfolio_state (data.portfolio.positions).</div>}
+        </div>
+
+        {/* Sector pre-market heat — REAL, aggregated from gappers grouped by sector */}
+        <div className="lab-card">
+          <div className="lab-card-h mono">🔥 SECTOR PRE-MARKET HEAT</div>
+          {(() => {
+            const agg = {};
+            allRows.forEach((r) => { const s = r.sector || "—"; if (!agg[s]) agg[s] = { sum: 0, n: 0 }; if (r.gap != null) { agg[s].sum += r.gap; agg[s].n += 1; } });
+            const rowsS = Object.keys(agg).filter((k) => k !== "—" && agg[k].n > 0)
+              .map((k) => ({ name: k, avg: agg[k].sum / agg[k].n, n: agg[k].n }))
+              .sort((a, b) => b.avg - a.avg).slice(0, 8);
+            if (!rowsS.length) return <div className="pm-wire-empty mono dim2">No sector-tagged gappers yet — populates as the pre-market board fills.</div>;
+            return (
+              <div className="pm-secheat">
+                {rowsS.map((s, i) => {
+                  const tone = s.avg >= 0.3 ? "gn" : s.avg <= -0.3 ? "rd" : "ink";
+                  return <div key={i} className={`pm-sec pm-sec--${tone}`}><span className="mono pm-sec-n">{s.name}</span><span className={`mono kpi-tone--${tone}`}>{s.avg >= 0 ? "+" : ""}{s.avg.toFixed(1)}%</span><span className="mono dim2">{s.n} gapper{s.n === 1 ? "" : "s"}</span></div>;
+                })}
+              </div>
+            );
+          })()}
+          <div className="lab-verdict mono dim2">Avg pre-market gap per sector across today's gappers — sectors gapping together signal rotation, not idiosyncratic moves.</div>
+        </div>
+
+        {/* Gap statistics — backtested study not carried in the live bundle (honest empty, no fabricated rates) */}
+        <div className="lab-card">
+          <div className="lab-card-h mono">📈 GAP STATISTICS · backtested edge</div>
+          <div className="pm-wire-empty mono dim2">Historical gap fill/hold-rate study (by gap bucket) is not carried in the live bundle — shown as — rather than fabricated. Computed offline from the 10y EODHD gap study; wire-in pending a /api/gap-stats feed.</div>
+        </div>
+
+        {/* News wire — real catalysts/headlines only; honest empty state otherwise. */}
+        <div className="lab-card">
+          <div className="lab-card-h mono">📰 NEWS WIRE · gapper headlines</div>
           {hasCatalysts ? (
             <div className="pm-wire">
               {catalysts.map((n, i) => (
