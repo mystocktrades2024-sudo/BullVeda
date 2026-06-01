@@ -9207,7 +9207,6 @@ function FreshnessPill({ state="live", age }) {
 const num = (v, d=2) => (v==null || isNaN(v)) ? null : Number(v);
 const fmt = (v, d=2) => v==null || isNaN(v) ? "—" : Number(v).toLocaleString("en-US", { minimumFractionDigits:d, maximumFractionDigits:d });
 const pct = (v, d=2) => v==null || isNaN(v) ? "—" : (v>=0?"+":"") + Number(v).toFixed(d) + "%";
-const sparkSeed = (sym, up) => { const code=(sym.charCodeAt(0)||65)+(sym.charCodeAt(2)||65); const a=[]; let v=0; for(let i=0;i<18;i++){ v+=(Math.sin(i*0.6+code)+(up?0.18:-0.14))*0.5; a.push(v);} return a; };
 
 /* ════════════════════════════════════════════════════════════════
    SHELL — IconRail · CommandBar · ThemeQuickPick · TierPicker · UserMenu
@@ -9583,10 +9582,6 @@ function HomeHero({ d, toast, onScan }) {
   );
 }
 
-function Spark({ sym, up }) {
-  const data = useMemo(() => sparkSeed(sym, up), [sym, up]);
-  return <Sparkline data={data} color={`var(--${up?"gn":"rd"})`} w={48} h={20} />;
-}
 
 function IndexStrip({ d }) {
   const idx = (d.sector_etf && d.sector_etf._indices) || {};
@@ -9614,7 +9609,6 @@ function IndexStrip({ d }) {
             <span className="ix-s mono">{i.s}</span>
             <span className="ix-v mono">{i.v!=null?fmt(i.v, i.v>=1000?0:2):"—"}</span>
             <span className={`ix-c mono ${c==null?"":up?"up":"dn"}`}>{c==null?"—":pct(c)}</span>
-            {c!=null && <Spark sym={i.s} up={up} />}
           </div>
         );
       })}
@@ -10257,10 +10251,6 @@ function MTFDots({ states }) {
   const labels = ["1H","4H","1D","1W"];
   return <span className="mtf-dots">{states.map((s,i)=><span key={i} className={`mtf-dot mtf-${s}`} title={`${labels[i]} · ${s}`} />)}</span>;
 }
-function SsSpark({ sym, chg }) {
-  const data = useMemo(() => { const code=(sym?.charCodeAt(0)||65); const a=[]; let v=0; for(let i=0;i<24;i++){v+=(Math.sin(i*0.4+code)+Math.cos(i*0.7))*0.5+(chg||0)*0.06;a.push(v);} return a; }, [sym, chg]);
-  return <Sparkline data={data} color={`var(--${chg>=0?"gn":"rd"})`} w={70} h={20} />;
-}
 function ScanTh({ col, sort, onClick, r, children }) {
   const active = sort.col === col;
   return <th className={`${r?"r":""} ss-th ${active?"is-active":""}`} onClick={()=>onClick(s=>s.col===col?{col,dir:-s.dir}:{col,dir:-1})}><span>{children}</span>{active && <span className="ss-th-arrow mono">{sort.dir>0?"▲":"▼"}</span>}</th>;
@@ -10432,7 +10422,7 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
             <ScanTh col="iv" sort={sort} onClick={setSort} r>IV%</ScanTh>
             <ScanTh col="sent" sort={sort} onClick={setSort} r>SENT</ScanTh>
             <ScanTh col="er" sort={sort} onClick={setSort} r>ER</ScanTh>
-            <th>SIGNALS</th><th>SPARK</th>
+            <th>SIGNALS</th>
           </tr></thead>
           <tbody>{padTop>0 && <tr style={{height:padTop}} aria-hidden><td colSpan={30} style={{padding:0,border:"none"}} /></tr>}
           {visible.map((t, i) => (
@@ -10473,7 +10463,6 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
               <td className={`r mono tabular ${t.sent>0?"up":t.sent<0?"dn":"dim"}`}>{t.sent>0?"+":""}{t.sent}</td>
               <td className={`r mono tabular ${t.er!=null&&t.er<=14?"warn":"dim"}`}>{t.er!=null?t.er:"—"}</td>
               <td className="mono ss2-signals">{t.signals.join(" ")}</td>
-              <td><SsSpark sym={t.sym} chg={t.chg} /></td>
             </tr>
           ))}
           {padBot>0 && <tr style={{height:padBot}} aria-hidden><td colSpan={29} style={{padding:0,border:"none"}} /></tr>}
@@ -11105,14 +11094,15 @@ function FillRealism({ ticker, sizeMult }) {
   }, [ticker.symbol]);
   const shares = Math.round(110 * (sizeMult || 1));
   const signal = ticker.pivot * 1.002;
-  const code = (ticker.symbol?.charCodeAt(0) || 70) + (ticker.symbol?.charCodeAt(1) || 70);
-  // real half-spread (bps) from NBBO when present; else heuristic
+  // real half-spread (bps) from NBBO when present; else a flat modeled assumption.
+  // (gap/slip are fixed modeled constants — NOT varied per symbol; a ticker's
+  //  slippage doesn't depend on its name. Real per-name impact needs an ADV/L2 feed.)
   const bid = q && (q.bid ?? q.bidPrice), ask = q && (q.ask ?? q.askPrice);
   const liveHalfBps = (bid > 0 && ask > 0 && ask > bid) ? ((ask - bid) / ((ask + bid) / 2) * 1e4 / 2) : null;
-  const spreadSrc = liveHalfBps != null ? "live NBBO" : "pay the offer";
-  const gapBps = 5 + (code % 6);            // next-bar open drift — historical-stat assumption
-  const spreadBps = liveHalfBps != null ? Math.max(1, Math.round(liveHalfBps)) : (3 + (code % 5));
-  const slipBps = 5 + (code % 7);           // ADV/size impact — modelled
+  const spreadSrc = liveHalfBps != null ? "live NBBO" : "modeled (no live quote)";
+  const gapBps = 5;                          // next-bar open drift — flat modeled assumption
+  const spreadBps = liveHalfBps != null ? Math.max(1, Math.round(liveHalfBps)) : 5;
+  const slipBps = 5;                          // ADV/size impact — flat modeled assumption
   const nextOpen = signal * (1 + gapBps / 1e4);
   const halfSpread = signal * spreadBps / 1e4;
   const slip = signal * slipBps / 1e4;
@@ -11120,7 +11110,7 @@ function FillRealism({ ticker, sizeMult }) {
   const slipCost = Math.round((fill - signal) * shares);
   const slipPct = (fill / signal - 1) * 100;
   const stop = ticker.stop;
-  const stopGapBps = 10 + (code % 14);
+  const stopGapBps = 10;                      // stop-fill slippage — flat modeled assumption
   const stopFill = +(stop * (1 - stopGapBps / 1e4)).toFixed(2);
   const stopExtra = Math.round((stop - stopFill) * shares);
   const t1 = ticker.t1;
@@ -13532,13 +13522,6 @@ function DetailPanel({ ticker, lensId, onLensId, mode, heroStyle, onHeroStyle, f
 
 /* ── ScanColumn — collapsible candidate list beside the detail panel ── */
 const SCAN_WIDTHS = { S:192, M:248, L:320, XL:400 };
-const scSparkCache = {};
-function scSpark(sym) {
-  if (scSparkCache[sym]) return scSparkCache[sym];
-  let p = 50 + (sym.charCodeAt(0) % 20); const arr = []; const trend = (((sym.charCodeAt(1)||0) % 5) - 2) * 0.2;
-  for (let i=0;i<22;i++){ p += trend + Math.sin(i*0.6 + sym.charCodeAt(0))*0.7; arr.push(p); }
-  scSparkCache[sym] = arr; return arr;
-}
 // Per-row enrichment chips — REAL data off the mapped scan row (mapScannerRows output).
 // Each field is null/absent when the real source field is missing → chip omits gracefully.
 // rvol ← r.rvol · rr ← r.rr (trade-plan R:R) · toPivot ← price vs entry_lo pivot ·
@@ -13628,7 +13611,6 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
         if (!chips.length) return null;
         return <div className="sc-row-chips">{chips}</div>;
       })()}
-      {widthCat==="XL" && <div className="sc-row-spark"><Sparkline data={scSpark(item.sym)} color={`var(--${item.chg>=0?"gn":"rd"})`} w={180} h={20} /></div>}
     </button>
   );
 }
@@ -14105,36 +14087,6 @@ function StatBackbone({ ticker }) {
       </div>
       <div className="stat-note mono dim">
         Source: setup_family_stats · Wilson 95% lower bound gates capital. Per-trade forward-return distribution and edge-decay series are not carried per-ticker in the bundle → shown only in the Strategies/Track surfaces. Nothing fabricated here.
-      </div>
-    </div>
-  );
-}
-
-// ─── §6b Outcome distribution — histogram of realized R over the sample ──
-function OutcomeDist({ ticker }) {
-  const seed = (ticker.symbol || "X").charCodeAt(0) + (ticker.symbol || "X").length;
-  // R buckets from -2R to +4R; shape skews to the setup's win-rate
-  const wr = (ticker.setupStats && ticker.setupStats.winRate) || 0.6;
-  const buckets = [
-    { r: "≤−2R", base: 3 }, { r: "−2→−1R", base: 8 }, { r: "−1→0R", base: 14 },
-    { r: "0→+1R", base: 12 }, { r: "+1→+2R", base: 11 }, { r: "+2→+3R", base: 7 }, { r: "≥+3R", base: 4 },
-  ].map((b, i) => {
-    const win = i >= 3;
-    const v = Math.max(1, Math.round(b.base * (win ? wr * 1.6 : (1 - wr) * 1.7) + ((seed * (i + 3)) % 5)));
-    return { ...b, v, win };
-  });
-  const max = Math.max(...buckets.map(b => b.v));
-  const total = buckets.reduce((s, b) => s + b.v, 0);
-  return (
-    <div className="odist">
-      <div className="odist-h mono dim2">OUTCOME DISTRIBUTION · realized R over n={total} <span className="dim">(setup-conditional)</span></div>
-      <div className="odist-bars">
-        {buckets.map((b, i) => (
-          <div key={i} className="odist-col" title={`${b.r}: ${b.v} trades`}>
-            <span className={`odist-bar ${b.win ? "win" : "loss"}`} style={{ height: `${(b.v / max) * 64 + 4}px` }} />
-            <span className="odist-k mono">{b.r}</span>
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -19475,8 +19427,11 @@ function wlNum(v, d=0){ const n=parseFloat(v); return isNaN(n)?d:n; }
 // one user symbol → enriched row (market data from the scan universe when present)
 function wlRowFrom(sym, uni, heldSet){
   const w = uni.find(r => r.sym === sym) || null;
-  const code = (sym.charCodeAt(0)||65) + (sym.charCodeAt(1)||65);
   const score = Math.round((w && w.score) || 0);
+  // horizon derived from the REAL setup family (impulse/PEAD = swing; breakout/trend = position)
+  const _setup = (w && w.setup) || "";
+  const _modeTag = /impulse|pead|gap|momentum|squeeze/i.test(_setup) ? "swing"
+    : /breakout|trend|continuation|vcp|base|52|pullback/i.test(_setup) ? "position" : "swing";
   return {
     sym, inUniverse: !!w,
     name: (w && w.name) || sym, sector: (w && w.sector) || "—",
@@ -19484,7 +19439,7 @@ function wlRowFrom(sym, uni, heldSet){
     score, price: (w && w.price) || 0, chg: (w && w.chg) || 0,
     held: heldSet.has(sym),
     tier: (w && w.tier) || (score>=75?"T1":score>=60?"T2":score>=45?"T3":"WATCH"),
-    modeTag: code % 2 === 0 ? "swing" : "position",
+    modeTag: _modeTag,
     rs: (w && w.rs != null) ? w.rs : 0,
     rvol: w ? wlNum(w.rvol, 0) : 0,
     rr: w ? wlNum(w.rr, 0) : 0,
@@ -34627,12 +34582,6 @@ const useStS = React.useState, useStE = React.useEffect, useStM = React.useMemo;
 
 /* ── seeded jitter so node sparklines feel live (visual only — no fabricated metric) ── */
 
-function stJit(seed, n, base, amp) {
-  const out = []; let s = (seed | 0) || 1;
-  for (let i = 0; i < n; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; out.push(base + (s / 0x7fffffff - 0.5) * amp); }
-  return out;
-}
-
 const ST_STATEMAP = { ok: { c: "gn", l: "Operational" }, degraded: { c: "amb", l: "Degraded" }, lag: { c: "amb", l: "Lagging" }, down: { c: "rd", l: "Down" } };
 
 // age (minutes) → tone:  fresh <60 green · <360 amber · else red
@@ -34668,10 +34617,10 @@ function StStatKpi({ k, v, tone, s }) {
 
 function StPipelineNode({ n, tick }) {
   const st = ST_STATEMAP[n.state] || ST_STATEMAP.ok;
-  // spark is decorative liveness only; height is fixed if no real latency series
-  const spark = useStM(() => stJit((n.id.charCodeAt(0) || 65) + (tick || 0), 16, 50, 24), [tick, n.id]);
-  const w = 120, h = 30, mn = Math.min.apply(null, spark), mx = Math.max.apply(null, spark);
-  const pts = spark.map((val, i) => `${(i / (spark.length - 1)) * w},${h - ((val - mn) / ((mx - mn) || 1)) * (h - 4) - 2}`).join(" ");
+  // no real per-node latency series in the feed → flat baseline (honest, not fabricated jitter).
+  // real node metrics (lat / rps / quota) render below, with "—" when absent.
+  const w = 120, h = 30;
+  const pts = `0,${h/2} ${w},${h/2}`;
   return (
     <div className={`stat-node stat-node--${st.c}`}>
       <div className="stat-node-top">
