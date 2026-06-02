@@ -1550,8 +1550,15 @@ def compact_row(r: dict) -> dict:
         "macd_bullish": bool((r.get("macd_signal") or "") in ("bullish","bull")),
         "price":      r.get("price"),
         "pct_chg":    techs.get("pct_chg") or r.get("pct_chg") or 0,
-        "perf_week":  techs.get("perf_week"),
-        "perf_month": techs.get("perf_month"),
+        # perf_week/perf_month: the real Finviz % live in finviz_elite.perf_week_pct
+        # / perf_month_pct (techs.perf_week is unset) — the Momentum surface's
+        # Accelerating/Fading/Persistent filters need these. Fall back to legacy path.
+        "perf_week":  ((r.get("finviz_elite") or {}).get("perf_week_pct")
+                       if (r.get("finviz_elite") or {}).get("perf_week_pct") is not None
+                       else techs.get("perf_week")),
+        "perf_month": ((r.get("finviz_elite") or {}).get("perf_month_pct")
+                       if (r.get("finviz_elite") or {}).get("perf_month_pct") is not None
+                       else techs.get("perf_month")),
         "entry_lo":   tp.get("entry_low") or tp.get("primary_zone_low"),
         "entry_hi":   tp.get("entry_high") or tp.get("primary_zone_high"),
         "stop":       tp.get("stop"),
@@ -1637,7 +1644,9 @@ def compact_row(r: dict) -> dict:
                                or (r.get("technicals") or {}).get("above_ema8")),
         "above_21ema":    bool(((r.get("technicals") or {}).get("indicators") or {}).get("above_20ema")
                                or (r.get("technicals") or {}).get("above_ema21")),
-        "adx":            (r.get("technicals") or {}).get("adx"),
+        "adx":            (((r.get("technicals") or {}).get("indicators") or {}).get("adx")
+                           if ((r.get("technicals") or {}).get("indicators") or {}).get("adx") is not None
+                           else (r.get("technicals") or {}).get("adx")),
         "alloc_pct":      ((r.get("trade_plan") or {}).get("allocation_pct")
                           or r.get("allocation_pct") or 0),
         # Sharpe / Sortino / consistency surfaced for v2 dashboard column (item #2, #8, #12)

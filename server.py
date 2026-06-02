@@ -2859,9 +2859,20 @@ async def universe_api(limit: int = 0):
             "smc_score": S.get("score"), "smc_max": S.get("max") if S.get("max") is not None else 15,
             "sent_score": N.get("score"), "sent_max": N.get("max"),
             "sector_pct_rank": r.get("sector_pct_rank"), "macd_signal": r.get("macd_signal"),
-            "perf_1d": r.get("perf_1d"), "perf_week": r.get("perf_week"), "perf_month": r.get("perf_month"),
+            # Momentum fields: top-level perf_week/adx/above_50ema are unset on the
+            # bundle row — the real values live in finviz_elite.perf_*_pct and
+            # technicals.indicators.{adx,above_50ema,above_200sma}. Read those so
+            # the Momentum surface's Accelerating/Fading/Persistent tabs populate.
+            "perf_1d": r.get("perf_1d"),
+            "perf_week": ((r.get("finviz_elite") or {}).get("perf_week_pct")
+                          if (r.get("finviz_elite") or {}).get("perf_week_pct") is not None else r.get("perf_week")),
+            "perf_month": ((r.get("finviz_elite") or {}).get("perf_month_pct")
+                           if (r.get("finviz_elite") or {}).get("perf_month_pct") is not None else r.get("perf_month")),
             "star_rating": r.get("star_rating"), "week52_high": r.get("week52_high"), "week52_low": r.get("week52_low"),
-            "above_50ema": r.get("above_50ema"), "above_200sma": r.get("above_200sma"), "adx": r.get("adx"),
+            "above_50ema": bool(((r.get("technicals") or {}).get("indicators") or {}).get("above_50ema")) if ((r.get("technicals") or {}).get("indicators") or {}).get("above_50ema") is not None else r.get("above_50ema"),
+            "above_200sma": bool(((r.get("technicals") or {}).get("indicators") or {}).get("above_200sma")) if ((r.get("technicals") or {}).get("indicators") or {}).get("above_200sma") is not None else r.get("above_200sma"),
+            "adx": (((r.get("technicals") or {}).get("indicators") or {}).get("adx")
+                    if ((r.get("technicals") or {}).get("indicators") or {}).get("adx") is not None else r.get("adx")),
         }
     # Sanitize NaN/Infinity → None. Some bundle rows carry non-finite floats
     # (e.g. a divide-by-zero rr/sharpe); Starlette's JSONResponse uses
