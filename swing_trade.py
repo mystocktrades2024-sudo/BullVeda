@@ -1447,6 +1447,24 @@ def run_daily_scan(force_fresh: bool = False):
     # Step 3.5: Fast OHLCV pre-screen — reduce enrichment universe before any API calls
     # Scores every qualified ticker using only in-memory price/volume data (zero HTTP requests).
     # Keeps top N by score + all Zacks #1 tickers unconditionally.
+    #
+    # 2026-06-02 · prescreen v2 (config performance.prescreen_v2, default ON):
+    # the v1 score was pure trend-momentum, which (a) under-ranked RS leaders in a
+    # flat tape, (b) scored coiled pre-breakout (VCP/squeeze) names ~0, (c) actively
+    # PENALIZED pullbacks — cutting the exact entries the Mean-Reversion + EMA-pullback
+    # sleeves buy. v2 adds RS-vs-SPY, a liquidity tilt, a volatility-contraction bonus,
+    # and replaces the blanket pullback penalty with an oversold-above-200EMA credit.
+    # Flip to false to revert to v1 momentum-only ranking.
+    _prescreen_v2 = bool(cfg.get("performance", {}).get("prescreen_v2", True))
+    # SPY benchmark returns for the RS term — computed ONCE, not per-ticker.
+    _spy_ret5 = _spy_ret21 = None
+    if spy_close is not None and len(spy_close) >= 23:
+        try:
+            _spy_ret5  = (float(spy_close.iloc[-1]) / float(spy_close.iloc[-6])  - 1) * 100
+            _spy_ret21 = (float(spy_close.iloc[-1]) / float(spy_close.iloc[-22]) - 1) * 100
+        except Exception:
+            _spy_ret5 = _spy_ret21 = None
+
     def _fast_prescreen_score(df: pd.DataFrame) -> float:
         try:
             close = df["Close"].dropna()
@@ -1457,6 +1475,7 @@ def run_daily_scan(force_fresh: bool = False):
 
             e8  = float(close.ewm(span=8,  adjust=False).mean().iloc[-1])
             e21 = float(close.ewm(span=21, adjust=False).mean().iloc[-1])
+            e200 = float(close.ewm(span=200, adjust=False).mean().iloc[-1]) if len(close) >= 200 else None
             e50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
 
             score = 0.0
@@ -1494,13 +1513,65 @@ def run_daily_scan(force_fresh: bool = False):
                 if   rvol >= 2.0: score += 2.0
                 elif rvol >= 1.5: score += 1.0
 
-            # 5-day momentum
+            # 5-day momentum (thrust credit kept in both v1 and v2)
+            ret5 = ret21 = None
             if len(close) >= 6:
                 ret5 = (float(close.iloc[-1]) / float(close.iloc[-6]) - 1) * 100
-                if   ret5 >= 3.0:  score += 1.0
-                elif ret5 <= -5.0: score -= 2.0
+                if ret5 >= 3.0:
+                    score += 1.0
+            if len(close) >= 22:
+                ret21 = (float(close.iloc[-1]) / float(close.iloc[-22]) - 1) * 100
 
-            return round(min(10.0, max(0.0, score)), 1)
+            if not _prescreen_v2:
+                # v1 behavior: blanket penalty on any 5d dump
+                if ret5 is not None and ret5 <= -5.0:
+                    score -= 2.0
+                return round(min(10.0, max(0.0, score)), 1)
+
+            # ── prescreen v2 additions ────────────────────────────────────────
+            # GAP #4 — don't penalize a pullback inside an uptrend; only penalize a
+            # true breakdown (5d dump AND price below EMA50). Reward oversold dips
+            # that hold above the 200EMA — the Mean-Reversion / EMA-pullback entry.
+            if ret5 is not None and ret5 <= -5.0 and price < e50:
+                score -= 1.5                                  # breakdown, not pullback
+            if rsi < 35 and e200 is not None and price > e200:
+                score += 2.0                                  # oversold-in-uptrend (mean-rev setup)
+            elif 35 <= rsi < 45 and price > e21:
+                score += 0.75                                 # shallow pullback holding EMA21
+
+            # GAP #2 — relative strength vs SPY (regime-aware ranking). Uses the
+            # longer 21d window primarily, 5d as a tiebreak.
+            if ret21 is not None and _spy_ret21 is not None:
+                rs21 = ret21 - _spy_ret21
+                if   rs21 >= 5.0: score += 2.0
+                elif rs21 >= 2.0: score += 1.25
+                elif rs21 >= 0.0: score += 0.5
+                elif rs21 <= -8.0: score -= 1.0               # severe laggard
+            if ret5 is not None and _spy_ret5 is not None and (ret5 - _spy_ret5) >= 2.0:
+                score += 0.5
+
+            # GAP #1 — liquidity tilt (all qualified already clear the $10M ADV floor;
+            # this biases the ranking toward deeper, lower-slippage names).
+            if len(vol) >= 20:
+                avg_vol = float(vol.rolling(20).mean().iloc[-1])
+                dollar_vol = price * avg_vol
+                if   dollar_vol >= 50e6: score += 1.0
+                elif dollar_vol >= 20e6: score += 0.5
+
+            # GAP #3 — volatility contraction (VCP / squeeze): recent realized vol
+            # collapsing while price coils near its 20d high = pre-breakout energy
+            # that pure-trend scoring misses entirely.
+            if len(close) >= 30:
+                rets = close.pct_change().dropna()
+                vol_recent = float(rets.iloc[-10:].std())
+                vol_prior  = float(rets.iloc[-30:-10].std())
+                hi20 = float(close.iloc[-20:].max())
+                if vol_prior > 0 and vol_recent < 0.70 * vol_prior and price >= 0.95 * hi20:
+                    score += 2.0                              # tight coil near highs
+                elif vol_prior > 0 and vol_recent < 0.80 * vol_prior and price >= 0.90 * hi20:
+                    score += 1.0
+
+            return round(min(16.0, max(0.0, score)), 1)
         except Exception:
             return 0.0
 
@@ -1557,6 +1628,16 @@ def run_daily_scan(force_fresh: bool = False):
         # even when their short-term pre-screen score is low. Without this, they
         # never appear in `all_scored` and Long-term picks miss the obvious names.
         _sp500_in_qualified = [t for t in qualified if t in sp500_set and t not in zacks_r1_set]
+        # NASDAQ-100 guarantee (2026-06-02): SYMMETRIC with the S&P 500 guarantee
+        # above. The major NASDAQ index names (AAPL/NVDA/MSFT/AMD/etc.) must reach
+        # scoring regardless of short-term momentum prescore — same as S&P 500.
+        # Without this, pure-NASDAQ names had to EARN their 1500-slot on momentum
+        # while every S&P 500 name was free → NASDAQ was under-represented (only
+        # ~34% of top-liquid NASDAQ scored). nasdaq100 is always populated (full
+        # + zacks mode). Net-new is small (most NDX100 ⊂ S&P 500) but closes the
+        # asymmetry for the NASDAQ-only flagship names.
+        _ndx100_set = set(nasdaq100) if nasdaq100 else set()
+        _ndx_in_qualified = [t for t in qualified if t in _ndx100_set and t not in zacks_r1_set and t not in sp500_set]
         # Earnings-window guarantee — overlap with qualified universe
         _earnings_in_qualified = [t for t in qualified if t in _earnings_guaranteed]
         # PEAD-window guarantee — post-report PEAD candidates
@@ -1580,6 +1661,7 @@ def run_daily_scan(force_fresh: bool = False):
                               if ticker_sources.get(t) in _curated_sources]
 
         _guaranteed = (set(_zr1_qualified) | set(_sp500_in_qualified)
+                       | set(_ndx_in_qualified)
                        | set(_earnings_in_qualified) | set(_pead_in_qualified)
                        | set(_curated_qualified))
         _non_guaranteed_sorted = sorted(
@@ -1591,6 +1673,8 @@ def run_daily_scan(force_fresh: bool = False):
         qualified       = {t: df for t, df in qualified.items() if t in _selected}
         log.info(f"  Pre-screen: {len(_prescores)} → {len(qualified)} tickers "
                  f"({len(_zr1_qualified)} Zacks #1 + "
+                 f"{len(_sp500_in_qualified)} S&P 500 + "
+                 f"{len(_ndx_in_qualified)} NASDAQ-100 + "
                  f"{len(_earnings_in_qualified)} pre-earnings + "
                  f"{len(_pead_in_qualified)} PEAD post-report + "
                  f"{len(_curated_qualified)} curated-source guaranteed + "
