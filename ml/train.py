@@ -53,14 +53,59 @@ def _split_walk_forward(X: pd.DataFrame, ys: dict, train_frac: float = 0.75):
     return tr, ho
 
 
+def _fit_isotonic_heldout(make_base, X_tr, y_tr, calib_frac: float = 0.25, multiclass: bool = False):
+    """Fit the base model on the EARLIER part of the (time-ordered) train set, then
+    fit the isotonic calibrator on a SEPARATE later slice — never the rows the base
+    already saw. Fixes the optimistic in-sample calibration leak the 2026-06-01
+    audit measured (holdout Brier 0.42 calib-on-train vs 0.50 honest). Falls back to
+    the legacy in-sample fit only when the calibration slice is too thin to trust.
+    Returns (calibrated_model, mode) where mode ∈ {"heldout","insample_fallback"}."""
+    n = len(X_tr)
+    cut = max(1, int(n * (1.0 - calib_frac)))
+    Xb, yb = X_tr.iloc[:cut], y_tr.iloc[:cut]
+    Xc, yc = X_tr.iloc[cut:], y_tr.iloc[cut:]
+    need_classes = 3 if multiclass else 2
+    distinct = (yc.nunique() if hasattr(yc, "nunique") else len(set(yc)))
+    if len(Xc) >= 20 and distinct >= need_classes and (yb.nunique() if hasattr(yb, "nunique") else len(set(yb))) >= need_classes:
+        base = make_base(); base.fit(Xb, yb)
+        cal = CalibratedClassifierCV(base, method="isotonic", cv="prefit")
+        cal.fit(Xc, yc)
+        return cal, "heldout"
+    base = make_base(); base.fit(X_tr, y_tr)
+    cal = CalibratedClassifierCV(base, method="isotonic", cv="prefit")
+    cal.fit(X_tr, y_tr)
+    return cal, "insample_fallback"
+
+
+def _auc_with_ci(y_true, p, n_boot: int = 2000, seed: int = 42):
+    """Point AUC + bootstrap 95% CI. On small holdouts a single AUC is a fragile
+    point estimate (audit: hit-net holdout n≈94 → ±0.10); the CI surfaces that so
+    the UI can't over-trust one number. Returns (auc, lo, hi) — lo/hi None if AUC
+    is undefined (single-class holdout)."""
+    y = np.asarray(y_true); p = np.asarray(p)
+    try:
+        point = float(roc_auc_score(y, p))
+    except ValueError:
+        return float("nan"), None, None
+    rng = np.random.default_rng(seed); n = len(y); aucs = []
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, n)
+        if len(np.unique(y[idx])) < 2:
+            continue
+        aucs.append(roc_auc_score(y[idx], p[idx]))
+    if not aucs:
+        return point, None, None
+    lo, hi = np.percentile(aucs, [2.5, 97.5])
+    return point, float(lo), float(hi)
+
+
 def _train_direction(X, y_dir, train_idx, holdout_idx, dates):
-    base = GradientBoostingClassifier(
+    _make = lambda: GradientBoostingClassifier(
         n_estimators=120, max_depth=3, learning_rate=0.05,
         subsample=0.85, random_state=42,
     )
-    base.fit(X.iloc[train_idx], y_dir.iloc[train_idx])
-    cal = CalibratedClassifierCV(base, method="isotonic", cv="prefit")
-    cal.fit(X.iloc[train_idx], y_dir.iloc[train_idx])
+    # Calibrate on a held-out slice of train, not the rows the base saw (no leak).
+    cal, calib_mode = _fit_isotonic_heldout(_make, X.iloc[train_idx], y_dir.iloc[train_idx], multiclass=True)
 
     p_holdout = cal.predict_proba(X.iloc[holdout_idx])
     pred = p_holdout.argmax(axis=1)
@@ -81,6 +126,7 @@ def _train_direction(X, y_dir, train_idx, holdout_idx, dates):
             "base_rate_up": float((truth == 2).mean()),
             "base_rate_dn": float((truth == 0).mean()),
             "decile_mean": {int(k): float(v) for k, v in decile_mean.items()},
+            "calib_mode": calib_mode,
         },
     }
 
@@ -132,28 +178,26 @@ def _train_hit_net(X, y_hit, train_idx, holdout_idx):
                         "n_train": int(len(X_tr)), "n_holdout": int(len(X_ho))},
         }
 
-    base = GradientBoostingClassifier(
+    _make = lambda: GradientBoostingClassifier(
         n_estimators=120, max_depth=3, learning_rate=0.05,
         subsample=0.85, random_state=42,
     )
-    base.fit(X_tr, y_tr)
-    cal = CalibratedClassifierCV(base, method="isotonic", cv="prefit")
-    cal.fit(X_tr, y_tr)
+    # Calibrate on a held-out slice of train, not the rows the base saw (no leak).
+    cal, calib_mode = _fit_isotonic_heldout(_make, X_tr, y_tr)
 
     p_ho = cal.predict_proba(X_ho)[:, 1]
-    try:
-        auc = float(roc_auc_score(y_ho, p_ho))
-    except ValueError:
-        auc = float("nan")
+    auc, auc_lo, auc_hi = _auc_with_ci(y_ho.values, p_ho)   # point AUC + bootstrap 95% CI
     brier = float(brier_score_loss(y_ho, p_ho))
     base_rate = float(y_ho.mean())
 
     return {
         "model": cal,
         "metrics": {
-            "auc": auc, "brier": brier, "base_rate": base_rate,
+            "auc": auc, "auc_ci_lo": auc_lo, "auc_ci_hi": auc_hi,
+            "brier": brier, "base_rate": base_rate,
             "n_train": int(len(X_tr)), "n_holdout": int(len(X_ho)),
             "wilson_lb_base_rate": _wilson_lb(base_rate, len(X_ho)),
+            "calib_mode": calib_mode,
         },
     }
 
