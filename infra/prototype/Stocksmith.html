@@ -9518,7 +9518,7 @@ function HomeView({ d, earnings, misc, screener, onTicker, toast, onScan, onSurf
       </div>
 
       <div className="home-sec-label"><span className="mono">BEST IDEAS · TOP 5 PER ENGINE</span><span className="mono dim2">each discovery model's highest-conviction names today</span></div>
-      <TopByEngine d={d} screener={screener} onTicker={onTicker} onSurface={onSurface} />
+      <TopByEngine d={d} earnings={earnings} screener={screener} onTicker={onTicker} onSurface={onSurface} />
 
       <div className="home-sec-label"><span className="mono">ATTENTION · CATALYSTS &amp; FLOW</span><span className="mono dim2">today · live headlines · drift</span></div>
       <div className="home-grid-3">
@@ -9683,7 +9683,7 @@ function TopSetups({ d, onTicker }) {
 
 // BEST IDEAS · top 5 per discovery engine — every row wired to a REAL source.
 // Honest-empty cards when a feed has no data (esp_picks, AIPredict, insider, smc all degrade gracefully).
-function TopByEngine({ d, screener, onTicker, onSurface }) {
+function TopByEngine({ d, earnings, screener, onTicker, onSurface }) {
   const sc = (screener || []).filter(r => r && r.ticker);
   // ML Predictions card — real /api/ai_predict (60 rows); window.AIPredict never exists in prod.
   const [aiRows, setAiRows] = React.useState(null);
@@ -9697,13 +9697,20 @@ function TopByEngine({ d, screener, onTicker, onSurface }) {
   // 1 · MOMENTUM — scored universe by RS rank (data_screener.json · rs_rank)
   const momentum = sc.filter(r => r.rs_rank != null).sort((a, b) => (b.rs_rank || 0) - (a.rs_rank || 0))
     .slice(0, 5).map(r => [r.ticker, String(Math.round(r.rs_rank))]);
-  // 2 · EARNINGS AI — Zacks ESP beat predictions (data.critical.json · esp_picks; empty today)
-  const espRows = Array.isArray(d.esp_picks) ? d.esp_picks : [];
-  const earnAI = espRows.map(p => {
+  // 2 · EARNINGS AI — the model's beat predictions for ALL upcoming earnings
+  //     (data_earnings.json · earnings_beat_predictions — 64 names). This is the
+  //     broad real source; NOT gated on the narrow Zacks-ESP picks (which require
+  //     ESP>0·Rank≤3·earn≤7d and are usually empty). Falls back to esp_picks only
+  //     if the earnings feed is missing.
+  const ebp = (earnings && Array.isArray(earnings.earnings_beat_predictions)) ? earnings.earnings_beat_predictions
+            : (Array.isArray(d.esp_picks) ? d.esp_picks : []);
+  const earnAI = ebp.map(p => {
     const o = p || {};
-    const prob = o.beat_prob != null ? o.beat_prob : (o.beat_probability != null ? o.beat_probability : null);
-    const v = prob != null ? Math.round(prob > 1 ? prob : prob * 100) + "%" : (o.esp != null ? `ESP ${o.esp > 0 ? "+" : ""}${o.esp}` : "—");
-    return [o.ticker || o.symbol || o.sym, v, prob];
+    const score = o.beat_score != null ? o.beat_score
+                : (o.beat_prob != null ? (o.beat_prob > 1 ? o.beat_prob : o.beat_prob * 100)
+                : (o.beat_probability != null ? (o.beat_probability > 1 ? o.beat_probability : o.beat_probability * 100) : null));
+    const v = score != null ? Math.round(score) + "%" : "—";
+    return [o.ticker || o.symbol || o.sym, v, score];
   }).filter(x => x[0]).sort((a, b) => (b[2] || 0) - (a[2] || 0)).slice(0, 5).map(x => [x[0], x[1]]);
   // 3 · ML PREDICTIONS — real 3-head ensemble from /api/ai_predict (top by P(up))
   const ml = (aiRows || []).filter(r => r && r.sym && r.pUp != null)
@@ -9722,7 +9729,7 @@ function TopByEngine({ d, screener, onTicker, onSurface }) {
 
   const engines = [
     { id: "momentum",    title: "Momentum",       metric: "RS",    surface: "momentum",     accent: "var(--copper)", rows: momentum, empty: "no RS-ranked names in scan" },
-    { id: "earnings-ai", title: "Earnings AI",    metric: "beat",  surface: "premarket",    accent: "var(--amb)",    rows: earnAI,   empty: "no ESP plays — 0 names meet ESP>0·Rank≤3·earn≤7d today" },
+    { id: "earnings-ai", title: "Earnings AI",    metric: "beat",  surface: "earnings-ai",  accent: "var(--amb)",    rows: earnAI,   empty: "no upcoming earnings in the model window" },
     { id: "ml",          title: "ML Predictions", metric: "P(up)", surface: "ai-predict",   accent: "var(--violet)", rows: ml,       empty: aiRows === null ? "loading ML ensemble…" : "no ML predictions" },
     { id: "options",     title: "Options Flow",   metric: "R:R",   surface: "options-flow", accent: "var(--violet)", rows: options,  empty: "no UOA flow in scan" },
     { id: "insider",     title: "Insider",        metric: "buys",  surface: "insider",      accent: "var(--cy)",     rows: insider,  empty: "no insider clusters today" },
