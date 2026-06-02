@@ -11540,8 +11540,19 @@ function ConfluenceHeatmap({ ticker, onLens }) {
   const ss = ticker.setupStats || {};
   const erDays = (ticker.earnings && ticker.earnings.days != null) ? ticker.earnings.days : null;
   const num = (v) => (v != null && v !== "None" && !isNaN(+v)) ? +v : null;
-  // setup name — full row stores it under setup_family; universe under setup
-  const setupName = r.setup || r.setup_family || (ticker.setupFamily && ticker.setupFamily !== "—" ? ticker.setupFamily : null);
+  // Real compute fallbacks so EVERY tile populates — even for tickers outside the
+  // ranked top-1000 (where scan-computed smc/setup/analyst fields don't exist):
+  //   SMC + Patterns ← smcCompute() on live /api/ohlcv bars (same engine as the SMC lens)
+  //   Value          ← WallStreetTargetPrice from /api/fundamentals (EODHD)
+  const ox = (typeof usePvOhlcv === "function") ? usePvOhlcv(ticker && ticker.symbol) : { state: "", bars: [] };
+  const smc = (ox && ox.state === "ready" && Array.isArray(ox.bars) && ox.bars.length >= 30 && typeof smcCompute === "function") ? smcCompute(ox.bars) : null;
+  const fxC = (typeof useInvFundamentals === "function") ? useInvFundamentals(ticker && ticker.symbol) : { f: null };
+  const wallPT = (fxC && fxC.f) ? num((fxC.f.highlights || {}).WallStreetTargetPrice) : null;
+  const pxC = num(ticker.price);
+  const valUpside = num(r.analyst_upside) != null ? num(r.analyst_upside) : ((wallPT != null && pxC) ? (wallPT / pxC - 1) * 100 : null);
+  // setup name — full row stores it under setup_family; universe under setup; else SMC structure read
+  const scanSetup = r.setup || r.setup_family || (ticker.setupFamily && ticker.setupFamily !== "—" ? ticker.setupFamily : null);
+  const setupName = scanSetup || (smc ? (smc.lastBreak ? `${smc.lastBreak.dir === "bull" ? "↑" : "↓"} ${smc.lastBreak.tag}` : (smc.emaStack ? "EMA stack" : smc.bias)) : null);
   // insider — real net comes from insider_data {buys,sells} or insider_net
   const insData = (r.insider_data && typeof r.insider_data === "object") ? r.insider_data : null;
   const insNet = insData ? ((num(insData.buys) || 0) - (num(insData.sells) || 0)) : num(r.insider_net);
@@ -11553,9 +11564,9 @@ function ConfluenceHeatmap({ ticker, onLens }) {
     { lens: "Plan", v: ticker.rMultiple != null ? `R ${ticker.rMultiple.toFixed(2)}` : "—", tone: ticker.rMultiple != null && ticker.rMultiple >= 1.5 ? "gn" : "amb", note: ticker.rMultiple != null ? "bracket set" : "no R" },
     { lens: "Chart", v: p.technical != null ? (p.technical >= 70 ? "TREND+" : p.technical >= 50 ? "MIXED" : "WEAK") : "—", tone: p.technical != null ? (p.technical >= 70 ? "gn" : p.technical >= 50 ? "amb" : "rd") : "ink", note: p.technical != null ? `tech ${p.technical}` : "no tech" },
     { lens: "Technicals", v: p.technical != null ? (p.technical >= 60 ? "PASS" : "SOFT") : "—", tone: p.technical != null ? (p.technical >= 60 ? "gn" : "amb") : "ink", note: p.technical != null ? `tech ${p.technical}` : "no tech" },
-    { lens: "Patterns", v: setupName || "—", tone: setupName ? "gn" : "ink", note: r.catalyst_tier != null ? `cat T${r.catalyst_tier}` : (setupName ? "pattern" : "no pattern") },
-    { lens: "SMC", v: num(r.smc_score) != null ? "SCORED" : "—", tone: num(r.smc_score) != null ? (num(r.smc_max) && num(r.smc_score) / num(r.smc_max) >= 0.6 ? "gn" : "amb") : "ink", note: num(r.smc_score) != null && num(r.smc_max) ? `${Math.round(num(r.smc_score) / num(r.smc_max) * 100)}%` : "no smc" },
-    { lens: "Value", v: num(r.analyst_upside) != null ? (num(r.analyst_upside) >= 10 ? "UPSIDE" : "MARG.") : "—", tone: num(r.analyst_upside) != null ? (num(r.analyst_upside) >= 10 ? "gn" : "amb") : "ink", note: num(r.analyst_upside) != null ? `${num(r.analyst_upside) >= 0 ? "+" : ""}${num(r.analyst_upside).toFixed(0)}%` : "no PT" },
+    { lens: "Patterns", v: setupName || "—", tone: setupName ? (scanSetup ? "gn" : "amb") : "ink", note: scanSetup ? (r.catalyst_tier != null ? `cat T${r.catalyst_tier}` : "scan setup") : (smc ? "live structure" : "no pattern") },
+    { lens: "SMC", v: num(r.smc_score) != null ? "SCORED" : (smc ? smc.bias : "—"), tone: num(r.smc_score) != null ? (num(r.smc_max) && num(r.smc_score) / num(r.smc_max) >= 0.6 ? "gn" : "amb") : (smc ? (smc.bias === "BULL" ? "gn" : smc.bias === "BEAR" ? "rd" : "amb") : "ink"), note: num(r.smc_score) != null && num(r.smc_max) ? `${Math.round(num(r.smc_score) / num(r.smc_max) * 100)}%` : (smc ? (smc.lastBreak ? `${smc.lastBreak.tag} ${smc.lastBreak.dir}` : `${smc.obs.length} OB`) : "no smc") },
+    { lens: "Value", v: valUpside != null ? (valUpside >= 10 ? "UPSIDE" : valUpside >= -5 ? "MARG." : "RICH") : "—", tone: valUpside != null ? (valUpside >= 10 ? "gn" : valUpside >= -5 ? "amb" : "rd") : "ink", note: valUpside != null ? `${valUpside >= 0 ? "+" : ""}${valUpside.toFixed(0)}%${wallPT != null && num(r.analyst_upside) == null ? " · PT $" + wallPT.toFixed(0) : ""}` : "no PT" },
     { lens: "Risk", v: p.risk != null ? (p.risk >= 60 ? "OK" : "TIGHT") : "—", tone: p.risk != null ? (p.risk >= 60 ? "gn" : "amb") : "ink", note: p.risk != null ? `risk ${p.risk}` : "no risk" },
     { lens: "Earnings", v: erDays != null ? `${erDays}d` : "—", tone: erDays != null ? (erDays <= 14 ? "amb" : "gn") : "ink", note: erDays != null ? (erDays <= 14 ? "trim pre-ER" : "clear") : "no date" },
     { lens: "Options", v: num(r.iv_rank) != null ? (num(r.iv_rank) >= 60 ? "RICH" : "FAIR") : "—", tone: num(r.iv_rank) != null ? (num(r.iv_rank) >= 60 ? "amb" : "gn") : "ink", note: num(r.iv_rank) != null ? `IVR ${num(r.iv_rank).toFixed(0)}` : "no IV" },
