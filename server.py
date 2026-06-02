@@ -2980,6 +2980,9 @@ async def universe_api(limit: int = 0):
             "news_age_h": _news_age_hours(r.get("news_articles")),
             "grade_value": (r.get("grade_value") if r.get("grade_value") not in (None, "", "N/A", "NA") else None),
             "grade_growth": (r.get("grade_growth") if r.get("grade_growth") not in (None, "", "N/A", "NA") else None),
+            # 10-gate rule-engine audit (Overview §2 GateCascade) + why-blocked reason
+            "gates_evaluated": (r.get("gates_evaluated") if isinstance(r.get("gates_evaluated"), list) else None),
+            "reject_reason": r.get("reject_reason") or None,
         }
     # Sanitize NaN/Infinity → None. Some bundle rows carry non-finite floats
     # (e.g. a divide-by-zero rr/sharpe); Starlette's JSONResponse uses

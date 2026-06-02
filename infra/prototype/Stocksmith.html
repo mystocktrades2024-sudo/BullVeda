@@ -11476,108 +11476,62 @@ function DeskRead({ ticker, mode }) {
     </div>
   );
 }
+// §1 · WHO + EARNINGS cards (prototype CompanySnapshot structure, real data).
+// Deep company fields (float, insider %) come from /api/fundamentals (EODHD);
+// everything else is the scan row. Honest "—" for genuinely-absent fields.
 function CompanySnapshot({ ticker }) {
+  const fx = (typeof useInvFundamentals === "function") ? useInvFundamentals(ticker && ticker.symbol) : { state: "empty", f: null };
+  const f = fx.f || {};
+  const hl = f.highlights || {}, sh = f.shares || {};
   const r = ticker.raw || {};
   const num = (v) => (v != null && !isNaN(v)) ? Number(v) : null;
-  const fmt = (v, d = 2, suf = "") => { const n = num(v); return n != null ? n.toFixed(d) + suf : "—"; };
-  const mcap = num(r.market_cap) ?? num(ticker.mcap);
-  const mcapStr = mcap != null ? "$" + (mcap / 1e9).toFixed(2) + "B" : "—";
-  const beta = num(r.beta) ?? num(ticker.beta);
-  const shortPct = num(r.short_pct) ?? num(ticker.shortFloat);
-  const insiderBuys = num(r.insider_buys), insiderSells = num(r.insider_sells);
-  const insiderNet = (insiderBuys != null || insiderSells != null) ? ((insiderBuys || 0) - (insiderSells || 0)) : null;
-  const rsi = num(r.rsi) ?? num(ticker.rsi);
-  const adx = num(r.adx);
+  const mcap = num(r.market_cap) ?? num(ticker.mcap) ?? num(hl.MarketCapitalization);
+  const mcapStr = mcap != null ? (mcap >= 1e9 ? "$" + (mcap / 1e9).toFixed(2) + "B" : "$" + (mcap / 1e6).toFixed(0) + "M") : "—";
+  const beta = num(ticker.beta) ?? num(r.beta) ?? num(hl.Beta);
+  const shortPct = num(r.short_float) ?? num(ticker.shortFloat) ?? (num(sh.ShortPercentFloat) != null ? num(sh.ShortPercentFloat) * 100 : null);
+  const floatSh = num(sh.SharesFloat);
+  const insiderOwn = num(sh.PercentInsiders);
+  const adv = num(r.avg_volume) ?? num(ticker.avgVol);
+  const spread = num(r.spread_pct) ?? num(ticker.spreadPct);
+  const rsi = num(ticker.rsi) ?? num(r.rsi);
   const sector = r.sector || ticker.sector || "—";
   const industry = r.industry || ticker.industry || sector;
-
-  // Valuation — only fields actually in the feed
-  const ptarget = num(r.analyst_target);
-  const upside = num(r.analyst_upside);
-  const consensus = r.analyst_consensus || "—";
-  const peg = num(r.peg);
-  const revG = num(r.rev_growth);
-  const netM = num(r.net_margin);
-  const ivRank = num(r.iv_rank);
-  const sbuy = num(r.analyst_strong_buy), buy = num(r.analyst_buy), hold = num(r.analyst_hold), sell = num(r.analyst_sell);
-  const ratingCounts = (sbuy != null || buy != null || hold != null || sell != null)
-    ? `SB ${sbuy ?? 0} · B ${buy ?? 0} · H ${hold ?? 0} · S ${sell ?? 0}` : "—";
-
-  // Earnings — real
+  const exch = ticker.exchange || r.exchange || (f.general && f.general.Exchange) || "";
+  const epsEst = (num(hl.EPSEstimateCurrentYear) === 0 ? null : num(hl.EPSEstimateCurrentYear));
+  const ivRank = num(r.iv_rank) ?? num(ticker.ivRank);
   const erDays = (ticker.earnings && ticker.earnings.days != null) ? ticker.earnings.days : num(r.earn_days);
   const erDate = (ticker.earnings && ticker.earnings.date) ? ticker.earnings.date : "—";
-  const beat = r.earnings_beat;
-  const beatStr = beat != null ? (beat === true ? "beat last Q" : beat === false ? "miss last Q" : String(beat)) : "—";
-
-  // Why buy / why not — derived from real pillars/score/setupStats/caveats
-  const pillars = ticker.pillars || {};
-  const greens = Object.values(pillars).filter(v => v != null && v >= 70).length;
-  const ss = ticker.setupStats || {};
-  const caveats = Array.isArray(r.caveats) ? r.caveats : [];
-
+  const desc = (f.general && f.general.Description) ? f.general.Description : "";
+  const blurb = desc ? desc.slice(0, 180) + (desc.length > 180 ? "…" : "") : `${sector} · ${industry}${ticker.setupFamily ? " · screened on the " + ticker.setupFamily + " setup" : ""}.`;
   return (
-    <div className="cs-grid">
+    <React.Fragment>
       <div className="cs-card cs-card--who">
-        <div className="cs-card-hdr"><div className="label-cap">WHO · {ticker.symbol}</div><span className="mono dim2">{ticker.exchange} · {sector} · {industry}</span></div>
-        <div className="cs-name mono">{ticker.name}</div>
-        <div className="cs-blurb mono dim">{sector} · {industry} · screened on the {ticker.setupFamily} setup.</div>
+        <div className="cs-card-hdr"><div className="label-cap">WHO · {ticker.symbol}</div><span className="mono dim2">{[exch, sector, industry].filter(Boolean).join(" · ")}</span></div>
+        <div className="cs-name mono">{ticker.name || ticker.symbol}</div>
+        <div className="cs-blurb mono dim">{blurb}</div>
         <div className="cs-meta">
           <span className="cs-chip mono"><span className="dim2">mcap</span> <b>{mcapStr}</b></span>
           <span className="cs-chip mono"><span className="dim2">β</span> <b>{beta != null ? beta.toFixed(2) : "—"}</b></span>
+          <span className="cs-chip mono"><span className="dim2">float</span> <b>{floatSh != null ? (floatSh / 1e6).toFixed(1) + "M" : "—"}</b></span>
           <span className="cs-chip mono"><span className="dim2">short</span> <b>{shortPct != null ? shortPct.toFixed(1) + "%" : "—"}</b></span>
-          <span className="cs-chip mono"><span className="dim2">insider net</span> <b>{insiderNet != null ? (insiderNet >= 0 ? "+" : "") + insiderNet : "—"}</b></span>
-          <span className="cs-chip mono"><span className="dim2">ADX</span> <b>{adx != null ? adx.toFixed(1) : "—"}</b></span>
-          <span className="cs-chip mono"><span className="dim2">RSI</span> <b>{rsi != null ? rsi.toFixed(1) : "—"}</b></span>
+          <span className="cs-chip mono"><span className="dim2">insider own</span> <b>{insiderOwn != null ? insiderOwn.toFixed(1) + "%" : "—"}</b></span>
+          <span className="cs-chip mono"><span className="dim2">ADV 20d</span> <b>{adv != null ? (adv / 1e6).toFixed(2) + "M sh" : "—"}</b></span>
+          <span className="cs-chip mono"><span className="dim2">spread</span> <b className={spread != null && spread <= 0.1 ? "up" : ""}>{spread != null ? spread.toFixed(2) + "%" : "—"}</b></span>
+          <span className="cs-chip mono"><span className="dim2">RSI</span> <b>{rsi != null ? rsi.toFixed(0) : "—"}</b></span>
         </div>
       </div>
       <div className="cs-card cs-card--er">
         <div className="cs-card-hdr"><div className="label-cap">EARNINGS · NEXT CATALYST</div>{erDays != null ? <Pill tone="amb" small>T−{erDays}d</Pill> : <Pill tone="ink" small>no date</Pill>}</div>
         <div className="cs-er-big"><div className="cs-er-num mono">{erDays != null ? erDays : "—"}</div><div className="cs-er-meta"><div className="mono dim2">days to print</div><div className="mono"><b>{erDate}</b></div></div></div>
         <div className="cs-er-tiles">
-          <div className="cs-er-tile"><span className="label-cap">Last Q</span><span className={`mono ${beat === true ? "up" : beat === false ? "dn" : ""}`}><b>{beatStr}</b></span></div>
-          <div className="cs-er-tile"><span className="label-cap">EPS est.</span><span className="mono"><b>—</b></span></div>
+          <div className="cs-er-tile"><span className="label-cap">EPS est.</span><span className="mono"><b>{epsEst != null ? "$" + epsEst.toFixed(2) : "—"}</b></span></div>
           <div className="cs-er-tile"><span className="label-cap">IV rank</span><span className="mono"><b>{ivRank != null ? ivRank.toFixed(0) : "—"}</b></span></div>
+          <div className="cs-er-tile"><span className="label-cap">Beat rate</span><span className="mono"><b>—</b></span></div>
           <div className="cs-er-tile"><span className="label-cap">Implied move</span><span className="mono"><b>—</b></span></div>
         </div>
-        <div className="cs-er-history mono"><span className="dim2">8Q history:</span> <span className="dim">— not in feed</span></div>
+        <div className="cs-er-history mono"><span className="dim2">8Q surprise history:</span> <span className="dim">— not in feed (EODHD highlights only)</span></div>
       </div>
-      <div className="cs-card cs-card--val">
-        <div className="cs-card-hdr"><div className="label-cap">VALUATION · QUALITY</div><Pill tone="amb" small>analyst + growth feed</Pill></div>
-        <div className="cs-val-row">
-          <div className="cs-val-tile"><span className="label-cap">Analyst PT</span><span className="mono"><b>{ptarget != null ? "$" + ptarget.toFixed(2) : "—"}</b></span><span className="mono dim2">{consensus}</span></div>
-          <div className="cs-val-tile"><span className="label-cap">Upside</span><span className={`mono ${upside != null && upside >= 0 ? "up" : upside != null ? "dn" : ""}`}><b>{upside != null ? (upside >= 0 ? "+" : "") + upside.toFixed(1) + "%" : "—"}</b></span><span className="mono dim2">{ratingCounts}</span></div>
-          <div className="cs-val-tile"><span className="label-cap">P/E TTM</span><span className="mono"><b>—</b></span><span className="mono dim2">not in feed</span></div>
-          <div className="cs-val-tile"><span className="label-cap">EV/EBITDA</span><span className="mono"><b>—</b></span><span className="mono dim2">not in feed</span></div>
-        </div>
-        <div className="cs-val-row">
-          <div className="cs-val-tile"><span className="label-cap">PEG</span><span className="mono"><b>{peg != null ? peg.toFixed(2) : "—"}</b></span><span className="mono dim2">{peg != null && peg < 1 ? "growth-cheap" : "—"}</span></div>
-          <div className="cs-val-tile"><span className="label-cap">Rev growth</span><span className={`mono ${revG != null && revG >= 0 ? "up" : revG != null ? "dn" : ""}`}><b>{revG != null ? (revG >= 0 ? "+" : "") + revG.toFixed(1) + "%" : "—"}</b></span><span className="mono dim2">YoY</span></div>
-          <div className="cs-val-tile"><span className="label-cap">Net margin</span><span className={`mono ${netM != null && netM >= 0 ? "up" : netM != null ? "dn" : ""}`}><b>{netM != null ? netM.toFixed(1) + "%" : "—"}</b></span><span className="mono dim2">TTM</span></div>
-          <div className="cs-val-tile"><span className="label-cap">ROIC · FCF</span><span className="mono"><b>—</b></span><span className="mono dim2">not in feed</span></div>
-        </div>
-      </div>
-      <div className="cs-card cs-card--src">
-        <div className="cs-card-hdr"><div className="label-cap">WHY BULLISH · WHY NOT</div><Pill tone={ticker.verdict === "BUY" ? "gn" : ticker.verdict === "AVOID" ? "rd" : "amb"} small>{secBias(ticker.verdict)}</Pill></div>
-        <div className="cs-bb">
-          <div className="cs-bb-col cs-bb--bull">
-            <div className="cs-bb-h mono"><span className="up">▲ WHY BUY</span></div>
-            <div className="cs-bb-row"><span className="cs-bb-dot up" /><span className="mono">Score {ticker.score}/100 · {greens} of {Object.keys(pillars).length} pillars green</span></div>
-            {ss.wilsonLB != null && <div className="cs-bb-row"><span className="cs-bb-dot up" /><span className="mono">Edge · Wilson LB {(ss.wilsonLB * 100).toFixed(0)}% · n={ss.n ?? "—"} · PF {ss.pf != null ? ss.pf.toFixed(2) : "—"}</span></div>}
-            {ticker.rMultiple != null && <div className="cs-bb-row"><span className="cs-bb-dot up" /><span className="mono">R:R {ticker.rMultiple.toFixed(2)} to T1 · downside bounded one stop</span></div>}
-            {upside != null && upside > 0 && <div className="cs-bb-row"><span className="cs-bb-dot up" /><span className="mono">Analyst upside {upside.toFixed(1)}% · {consensus}</span></div>}
-          </div>
-          <div className="cs-bb-col cs-bb--bear">
-            <div className="cs-bb-h mono"><span className="dn">▼ WHY NOT</span></div>
-            {erDays != null && erDays <= 14 && <div className="cs-bb-row"><span className="cs-bb-dot amb" /><span className="mono">ER in {erDays}d · inside the T1 window</span></div>}
-            {pillars.catalyst != null && pillars.catalyst < 60 && <div className="cs-bb-row"><span className="cs-bb-dot amb" /><span className="mono">Catalyst pillar soft ({pillars.catalyst}) · drift, not dated event</span></div>}
-            {shortPct != null && shortPct >= 10 && <div className="cs-bb-row"><span className="cs-bb-dot amb" /><span className="mono">Short float {shortPct.toFixed(1)}% · squeeze/crowding risk</span></div>}
-            {caveats.slice(0, 2).map((c, i) => <div key={i} className="cs-bb-row"><span className="cs-bb-dot amb" /><span className="mono">{c}</span></div>)}
-            {caveats.length === 0 && (erDays == null || erDays > 14) && (pillars.catalyst == null || pillars.catalyst >= 60) && <div className="cs-bb-row"><span className="cs-bb-dot dim2" /><span className="mono dim2">No caveats flagged in scan row.</span></div>}
-          </div>
-        </div>
-        <div className="cs-bb-net mono"><span className="dim2">NET:</span> {ticker.verdict === "BUY" ? <>Edge &amp; structure outweigh the caveats — <b className="copper">take it{erDays != null && erDays <= 14 ? ", trim size pre-ER" : ""}</b>.</> : <>Wait for a cleaner trigger.</>}</div>
-      </div>
-    </div>
+    </React.Fragment>
   );
 }
 function ConfluenceHeatmap({ ticker, onLens }) {
@@ -11628,6 +11582,18 @@ function SleeveAttribution({ ticker }) {
   const mechanism = r.trade_thesis || r.thesis || ticker.mechanism || "—";
   const fam = ticker.setupFamily ? String(ticker.setupFamily).toUpperCase() : "—";
   const premortem = falsif[ticker.setupFamily];
+  // LAST 5 — real recent closed trades for this setup family (Alpaca paper book, /api/portfolio → portfolio.closed)
+  const famKey = (ticker.setupFamily || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const closed = Array.isArray(data.portfolio && data.portfolio.closed) ? data.portfolio.closed : [];
+  const recent = closed
+    .filter(t => { const st = (t.setup_type || t.setup || "").toLowerCase().replace(/[^a-z0-9]+/g, ""); return famKey && st && (st === famKey || st.includes(famKey) || famKey.includes(st)); })
+    .sort((a, b) => String(b.exit_date || "").localeCompare(String(a.exit_date || "")))
+    .slice(0, 5)
+    .map(t => {
+      const pct = (t.pnl_pct != null && !isNaN(+t.pnl_pct)) ? +t.pnl_pct : null;
+      const d = String(t.exit_date || "").slice(5, 10);
+      return { sym: t.ticker || t.symbol || "—", date: d || "—", pct, tone: pct == null ? "ink" : pct > 0.5 ? "gn" : pct < -0.5 ? "rd" : "amb" };
+    });
   return (
     <div className="sleeve">
       <div className="sleeve-row"><span className="sleeve-lbl mono">SLEEVE</span><div><Pill tone="copper">{fam}</Pill> <span className="mono dim2">· catalyst tier {ticker.cat}</span>{pf != null && <span className="mono dim2"> · family PF {pf.toFixed(2)}</span>}</div></div>
@@ -11639,7 +11605,11 @@ function SleeveAttribution({ ticker }) {
           : <span className="mono dim2">no falsification criterion in bundle for this family</span>}
       </div>
       <div className="sleeve-row"><span className="sleeve-lbl mono">LAST 5</span>
-        <span className="mono dim2">recent instances not in bundle</span>
+        {recent.length
+          ? <div className="sleeve-recent">{recent.map((s, i) => (
+              <div key={i} className="sleeve-rec"><span className="mono"><b>{s.sym}</b></span><span className="mono dim2">{s.date}</span><span className={`mono kpi-tone--${s.tone}`}>{s.pct != null ? `${s.pct >= 0 ? "+" : ""}${s.pct.toFixed(1)}%` : "—"}</span></div>
+            ))}</div>
+          : <span className="mono dim2">no closed trades in this family yet (paper book)</span>}
       </div>
     </div>
   );
@@ -11650,7 +11620,7 @@ function GateCascade({ ticker }) {
   if (!gates.length) {
     return (
       <div className="gates">
-        <div className="gate-row gate-ink"><span className="gate-mark mono">—</span><span className="gate-lbl dim2">gate audit not in scan row</span></div>
+        <div className="gates-summary mono dim2" style={{ borderTop: "none", paddingTop: 0 }}>Gate audit not in this scan row — the 10-gate rule-engine trace is recorded for ranked candidates; this ticker was resolved outside the latest scan.</div>
       </div>
     );
   }
@@ -13705,18 +13675,39 @@ function PreMortemNote({ symbol }) {
     </div>
   );
 }
+// §1 · VALUATION · QUALITY (prototype 8-tile card, real EODHD fundamentals).
+// Fields genuinely absent from /api/fundamentals render "—" rather than fabricated peers.
 function CompanyValuation({ ticker }) {
-  const F = (v, d, fb) => (v == null || isNaN(v)) ? (fb || "—") : (+v).toFixed(d);
+  const fx = (typeof useInvFundamentals === "function") ? useInvFundamentals(ticker && ticker.symbol) : { state: "empty", f: null };
+  const f = fx.f || {};
+  const hl = f.highlights || {}, val = f.valuation || {};
+  const num = (v) => (v != null && !isNaN(v)) ? Number(v) : null;
+  const pos = (v) => { const n = num(v); return (n != null && n > 0) ? n : null; };  // 0/neg multiple = n/a by convention
+  const pe = pos(val.TrailingPE) ?? pos(hl.PERatio);
+  const fwdPe = pos(val.ForwardPE);
+  const evRev = pos(val.EnterpriseValueRevenue);     // EV/Sales (closest real proxy to P/S)
+  const evEbitda = pos(val.EnterpriseValueEbitda);
+  const peg = pos(hl.PEGRatio);
+  const opMargin = num(hl.OperatingMarginTTM);        // fraction
+  const profMargin = num(hl.ProfitMargin);            // fraction
+  const revG = num(hl.QuarterlyRevenueGrowthYOY);     // fraction
+  const loading = fx.state === "loading";
+  const dash = (v, fmt) => (v == null ? (loading ? "·" : "—") : fmt(v));
   return (
       <div className="cs-card cs-card--val">
-        <div className="cs-card-hdr"><div className="label-cap">VALUATION · QUALITY</div><Pill tone="amb" small>fundamentals</Pill></div>
+        <div className="cs-card-hdr"><div className="label-cap">VALUATION · QUALITY</div><Pill tone="amb" small>EODHD fundamentals</Pill></div>
         <div className="cs-val-row">
-          <div className="cs-val-tile"><span className="label-cap">P/E TTM</span><span className="mono"><b>{F(ticker.pe,1)}</b></span><span className="mono dim2">trailing</span></div>
-          <div className="cs-val-tile"><span className="label-cap">Fwd P/E</span><span className="mono up"><b>{F(ticker.fwdPe,1)}</b></span><span className="mono dim2">forward</span></div>
-          <div className="cs-val-tile"><span className="label-cap">Beta</span><span className="mono"><b>{F(ticker.beta,2)}</b></span><span className="mono dim2">vs SPY</span></div>
-          <div className="cs-val-tile"><span className="label-cap">Mkt cap</span><span className="mono up"><b>{ticker.mcap!=null?(ticker.mcap>=1e9?"$"+(ticker.mcap/1e9).toFixed(1)+"B":"$"+(ticker.mcap/1e6).toFixed(0)+"M"):"—"}</b></span><span className="mono dim2">size</span></div>
+          <div className="cs-val-tile"><span className="label-cap">P/E TTM</span><span className="mono"><b>{dash(pe, v => v.toFixed(1))}</b></span><span className="mono dim2">trailing</span></div>
+          <div className="cs-val-tile"><span className="label-cap">Fwd P/E</span><span className="mono up"><b>{dash(fwdPe, v => v.toFixed(1))}</b></span><span className="mono dim2">forward</span></div>
+          <div className="cs-val-tile"><span className="label-cap">EV/Sales</span><span className="mono"><b>{dash(evRev, v => v.toFixed(1) + "×")}</b></span><span className="mono dim2">enterprise</span></div>
+          <div className="cs-val-tile"><span className="label-cap">EV/EBITDA</span><span className="mono up"><b>{dash(evEbitda, v => v.toFixed(1) + "×")}</b></span><span className="mono dim2">enterprise</span></div>
         </div>
-        <div className="cs-val-tile" style={{marginTop:8}}><span className="mono dim2" style={{fontSize:10}}>Deeper valuation (P/S, EV/EBITDA, ROIC, margins, FCF yield, peer multiples) is in the <b className="copper">Value</b> lens — wired to /api/fundamentals (EODHD).</span></div>
+        <div className="cs-val-row">
+          <div className="cs-val-tile"><span className="label-cap">PEG</span><span className="mono"><b>{dash(peg, v => v.toFixed(2))}</b></span><span className="mono dim2">{peg != null ? (peg < 1 ? "growth-cheap" : "growth-rich") : "—"}</span></div>
+          <div className="cs-val-tile"><span className="label-cap">Op margin</span><span className={`mono ${opMargin != null && opMargin >= 0 ? "up" : opMargin != null ? "dn" : ""}`}><b>{dash(opMargin, v => (v * 100).toFixed(1) + "%")}</b></span><span className="mono dim2">TTM</span></div>
+          <div className="cs-val-tile"><span className="label-cap">Net margin</span><span className={`mono ${profMargin != null && profMargin >= 0 ? "up" : profMargin != null ? "dn" : ""}`}><b>{dash(profMargin, v => (v * 100).toFixed(1) + "%")}</b></span><span className="mono dim2">TTM</span></div>
+          <div className="cs-val-tile"><span className="label-cap">Rev growth</span><span className={`mono ${revG != null && revG >= 0 ? "up" : revG != null ? "dn" : ""}`}><b>{dash(revG, v => (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%")}</b></span><span className="mono dim2">YoY Q</span></div>
+        </div>
       </div>
   );
 }
@@ -13726,7 +13717,8 @@ function LensOverview({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
   const routeLens = (name) => { const map = { "Overview":"overview","AI Edge":"mledge","Technicals":"technicals","Patterns":"patterns","SMC":"smc","Value":"investment","Investment":"investment","Risk":"risk","Track Rec.":"mledge","Plan":"plan","Earnings":"earnings","Options":"options","Insider":"tape","Tape":"tape","Chart":"chart","Portfolio":"tape" }; if (window.__setLens && map[name]) window.__setLens(map[name]); };
   return (
     <div className="lens lens--ov">
-      {window.CompositeVerdict && <CompositeVerdict ticker={tk} mode={mode} onLens={routeLens} />}
+      {/* Prototype: DecisionHero is the single answer block — no separate CompositeVerdict
+          bar (per-lens detail lives in §3 Lens Confluence). */}
       <DecisionHero ticker={tk} mode={mode} heroStyle={heroStyle} sizeCat={sizeCat} onLens={routeLens} />
 
       <OvSection n={1} title="Company & Catalysts · Context" sub="who they are · valuation · earnings · what's hitting the tape" headerStyle={headerStyle} defaultOpen={true} teaser="Profile · valuation · earnings · classified catalysts">
