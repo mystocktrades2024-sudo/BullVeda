@@ -80,14 +80,35 @@ def _load_backfill() -> pd.DataFrame:
     return df
 
 
-def _train_direction(X, y_dir, tr, ho):
-    base = HistGradientBoostingClassifier(
+def _make_hgb():
+    return HistGradientBoostingClassifier(
         max_iter=150, max_depth=4, learning_rate=0.05,
         l2_regularization=0.5, random_state=42,
     )
-    base.fit(X.iloc[tr], y_dir.iloc[tr])
-    cal = CalibratedClassifierCV(base, method="isotonic", cv="prefit")
-    cal.fit(X.iloc[tr], y_dir.iloc[tr])
+
+
+def _fit_isotonic_heldout(make_base, X_tr, y_tr, calib_frac: float = 0.20, multiclass: bool = False):
+    """Calibrate on a SEPARATE later slice of the (time-ordered) train set — never
+    the rows the base saw. Fixes the in-sample calibration leak (audit 2026-06-01:
+    held-out Brier is the honest one). Falls back to in-sample only when the calib
+    slice is too thin. Returns (calibrated_model, mode)."""
+    n = len(X_tr); cut = max(1, int(n * (1.0 - calib_frac)))
+    Xb = X_tr.iloc[:cut]; yb = y_tr.iloc[:cut]
+    Xc = X_tr.iloc[cut:]; yc = y_tr.iloc[cut:]
+    need = 3 if multiclass else 2
+    dist_c = yc.nunique() if hasattr(yc, "nunique") else len(set(yc))
+    dist_b = yb.nunique() if hasattr(yb, "nunique") else len(set(yb))
+    if len(Xc) >= 200 and dist_c >= need and dist_b >= need:
+        base = make_base(); base.fit(Xb, yb)
+        cal = CalibratedClassifierCV(base, method="isotonic", cv="prefit"); cal.fit(Xc, yc)
+        return cal, "heldout"
+    base = make_base(); base.fit(X_tr, y_tr)
+    cal = CalibratedClassifierCV(base, method="isotonic", cv="prefit"); cal.fit(X_tr, y_tr)
+    return cal, "insample_fallback"
+
+
+def _train_direction(X, y_dir, tr, ho):
+    cal, _calib_mode = _fit_isotonic_heldout(_make_hgb, X.iloc[tr], y_dir.iloc[tr], multiclass=True)
     p_ho = cal.predict_proba(X.iloc[ho])
     pred = p_ho.argmax(axis=1)
     truth = y_dir.iloc[ho].values
@@ -155,13 +176,7 @@ def _train_hit_net_conditional(X, y_mag, tr, ho, thresholds: list[float]):
     X_tr_cond, y_tr_cond = _build_conditional(tr)
     X_ho_cond, y_ho_cond = _build_conditional(ho)
 
-    base = HistGradientBoostingClassifier(
-        max_iter=150, max_depth=4, learning_rate=0.05,
-        l2_regularization=0.5, random_state=42,
-    )
-    base.fit(X_tr_cond, y_tr_cond)
-    cal = CalibratedClassifierCV(base, method="isotonic", cv="prefit")
-    cal.fit(X_tr_cond, y_tr_cond)
+    cal, _calib_mode = _fit_isotonic_heldout(_make_hgb, X_tr_cond, y_tr_cond)
     p_ho = cal.predict_proba(X_ho_cond)[:, 1]
     truth = y_ho_cond.values
     try:

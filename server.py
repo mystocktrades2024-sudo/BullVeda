@@ -6097,21 +6097,44 @@ def _ai_build_prediction(sym, preds_by_mode, px_map):
 
 
 def _ai_model_block(doc, swing_sample):
-    """Build _model {calibration, backtest} from accuracy + model_meta."""
+    """Build _model {calibration, backtest} from accuracy + model_meta.
+
+    2026-06-01: surface the PRODUCTION model's real metrics. predict.py serves
+    the historical model (cache/ml/calibration_report_historical.json — hit-net
+    AUC ~0.76 on a 533k holdout), but this block was only showing the legacy
+    signal-band table + a (usually missing) per-row model_auc — understating a
+    strong model. Read the historical report and surface its real AUC/Brier/
+    per-threshold/n so the tab reflects what's actually predicting."""
     acc = _ai_predict_load_accuracy()
     by_band = acc.get("by_score_band") or {}
     summary = acc.get("summary") or {}
     mm = (swing_sample or {}).get("model_meta") or {}
     mode_metrics = mm.get("mode_metrics") or {}
     hit = (swing_sample or {}).get("hit_net") or {}
+    # Real production-model metrics from the historical training report.
+    hist_hit = {}
+    try:
+        import json as _json
+        _hp = BASE_DIR / "cache" / "ml" / "calibration_report_historical.json"
+        if _hp.exists():
+            _hr = _json.loads(_hp.read_text())
+            hist_hit = (((_hr.get("modes") or {}).get("swing") or {}).get("hit_net") or {})
+    except Exception:
+        hist_hit = {}
+    model_auc = hit.get("model_auc")
+    if model_auc is None and hist_hit.get("auc") is not None:
+        model_auc = hist_hit.get("auc")
     return {
         "calibration": by_band,
         "backtest": {
             "summary": summary,
             "n_total": acc.get("n_total"),
             "n_closed": acc.get("n_closed"),
-            "model_auc": hit.get("model_auc"),
-            "model_n": hit.get("model_n"),
+            "model_auc": model_auc,
+            "model_n": hit.get("model_n") or hist_hit.get("n_holdout"),
+            "model_brier": hist_hit.get("brier"),
+            "model_auc_by_threshold": hist_hit.get("per_threshold"),
+            "model_source": "historical_backfill" if hist_hit else "legacy",
             "mode_metrics": mode_metrics,
             "trained_at": mm.get("trained_at"),
             "calibration_health": mm.get("calibration_health"),
