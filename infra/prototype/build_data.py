@@ -22,6 +22,13 @@ sys.path.insert(0, str(ROOT))  # so we can import eodhd_client
 _PREV_BUNDLE_INDEX: dict = {}
 _PREV_BUNDLE_DATE: str = ""
 
+# Module-level ML p_up map {TICKER: p_up} — set by main() from
+# cache/ml_edge_predictions.json (swing mode), read by compact_row() so the
+# default Screener view (data_screener.json) carries the AI EDGE column.
+# Without this the column was blank unless the user toggled the /api/universe
+# full view (which joins p_up server-side).
+_ML_PUP: dict = {}
+
 # System-level gating state (circuit breaker / forced cash / macro blackout) —
 # set by main() so _compute_mode_verdicts can demote Position/Invest BUYs in
 # lockdown, matching what the engine already does for Swing.
@@ -1531,6 +1538,7 @@ def compact_row(r: dict) -> dict:
     _row = {
         "ticker":     sym,
         "name":       raw_name,
+        "p_up":       _ML_PUP.get((sym or "").upper()),
         "sector":     r.get("sector") or fe.get("sector") or "",
         "industry":   r.get("industry") or fe.get("industry") or "",
         "setup":      r.get("setup_family") or r.get("setup") or "",
@@ -2960,10 +2968,24 @@ def _enrich_cockpit_data(data: dict) -> None:
 
 
 def main():
-    global _PREV_BUNDLE_INDEX, _PREV_BUNDLE_DATE, _SYSTEM_GATE_ACTIVE, _SYSTEM_GATE_REASON
+    global _PREV_BUNDLE_INDEX, _PREV_BUNDLE_DATE, _SYSTEM_GATE_ACTIVE, _SYSTEM_GATE_REASON, _ML_PUP
     _prev = _load_previous_bundle_index()
     _PREV_BUNDLE_DATE = _prev.pop("_snapshot_date", "") if _prev else ""
     _PREV_BUNDLE_INDEX = _prev or {}
+    # Load ML swing p_up so compact_row() can emit the AI EDGE column into
+    # data_screener.json (default Screener view). Mirrors the /api/universe join.
+    try:
+        _mlp = ROOT / "cache" / "ml_edge_predictions.json"
+        if _mlp.exists():
+            _mld = json.loads(_mlp.read_text())
+            _swing = ((_mld.get("predictions") or {}).get("swing") or {})
+            _ML_PUP = {str(_s).upper(): round(float((_p.get("direction") or {}).get("p_up")), 4)
+                       for _s, _p in _swing.items()
+                       if (_p.get("direction") or {}).get("p_up") is not None}
+            print(f"  ML p_up map: {len(_ML_PUP)} swing predictions → AI EDGE column")
+    except Exception as _mle:
+        print(f"  ML p_up map load failed (AI EDGE will be blank): {_mle}")
+        _ML_PUP = {}
     b = json.loads(BUNDLE.read_text())
     # Capture system-level gates so _compute_mode_verdicts can honor them too
     _ss = b.get("system_status") or {}

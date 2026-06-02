@@ -2891,6 +2891,16 @@ async def universe_api(limit: int = 0):
         mt = os.path.getmtime(path)
     except Exception as e:
         raise HTTPException(500, str(e))
+    # Fold the ML-predictions mtime into the cache key. The p_up join below reads
+    # ml_edge_predictions.json, which regenerates AFTER the scan bundle (ML retrain
+    # 05:15 + post-scan inference). Keying only on the bundle mtime froze the p_up
+    # join at whatever (partial) state the ML file had when the bundle was written
+    # — the AI EDGE column came up empty/partial. Invalidate on EITHER file change.
+    try:
+        _ml_mt = os.path.getmtime(BASE_DIR / "cache" / "ml_edge_predictions.json")
+    except Exception:
+        _ml_mt = 0
+    mt = (mt, _ml_mt)
     def _slice(p):
         if limit and limit > 0 and isinstance(p.get("screener"), list) and len(p["screener"]) > limit:
             return {**p, "screener": p["screener"][:limit], "n": limit, "_total": p.get("n")}
