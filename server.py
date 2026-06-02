@@ -2978,6 +2978,8 @@ async def universe_api(limit: int = 0):
             "insider_usd": ((r.get("insider_data") or {}).get("total_buy_value")),
             "spread_pct": ((r.get("quote_snapshot") or {}).get("spread_pct")),
             "news_age_h": _news_age_hours(r.get("news_articles")),
+            "grade_value": (r.get("grade_value") if r.get("grade_value") not in (None, "", "N/A", "NA") else None),
+            "grade_growth": (r.get("grade_growth") if r.get("grade_growth") not in (None, "", "N/A", "NA") else None),
         }
     # Sanitize NaN/Infinity → None. Some bundle rows carry non-finite floats
     # (e.g. a divide-by-zero rr/sharpe); Starlette's JSONResponse uses

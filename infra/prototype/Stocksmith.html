@@ -10429,6 +10429,8 @@ function mapScannerRows(screener, data) {
       insUsd: (r.insider_usd != null && r.insider_usd !== 0) ? r.insider_usd : null,
       spread: r.spread_pct != null ? +(r.spread_pct * 100).toFixed(1) : null,
       newsAge: r.news_age_h != null ? r.news_age_h : null,
+      gradeValue: r.grade_value || null,
+      gradeGrowth: r.grade_growth || null,
       ready: (() => { let n = 0; if (r.above_50ema) n++; if (r.above_200sma) n++; if ((r.rvol || 0) >= 1.2) n++; if ((r.adx || 0) >= 20) n++; if (r.rsi != null && r.rsi >= 40 && r.rsi <= 72) n++; if ((r.rr || 0) >= 2) n++; return n; })(),
       signals,
     };
@@ -10461,11 +10463,14 @@ function edgeGrades(t) {
   let mo = null; if (p1 != null || rvol != null) mo = cl(50 + (p1 != null ? p1 * 1.4 : 0) + (rvol != null ? (rvol - 1) * 14 : 0));
   const se = score != null ? cl(score) : null;
   const rrG = rr != null ? cl(rr * 24) : null;
-  const gRaw = { t: tr, m: mo, s: se, r: rrG, v: null, g: null };
+  const LET2PCT = { A: 90, B: 74, C: 56, D: 38, F: 25 };
+  const valLtr = (t.gradeValue && /^[A-F]$/.test(t.gradeValue)) ? t.gradeValue : null;
+  const groLtr = (t.gradeGrowth && /^[A-F]$/.test(t.gradeGrowth)) ? t.gradeGrowth : null;
+  const gRaw = { t: tr, m: mo, s: se, r: rrG, v: valLtr ? LET2PCT[valLtr] : null, g: groLtr ? LET2PCT[groLtr] : null };
   let wsum = 0, acc = 0;
   for (const k of Object.keys(EDGE_W)) { if (gRaw[k] != null) { acc += gRaw[k] * EDGE_W[k]; wsum += EDGE_W[k]; } }
   const edgePct = wsum ? cl(acc / wsum) : null;
-  return { grades: { t: EDGE_GR(tr), m: EDGE_GR(mo), s: EDGE_GR(se), r: EDGE_GR(rrG), v: null, g: null }, edge: EDGE_GR(edgePct), edgePct };
+  return { grades: { t: EDGE_GR(tr), m: EDGE_GR(mo), s: EDGE_GR(se), r: EDGE_GR(rrG), v: valLtr, g: groLtr }, edge: EDGE_GR(edgePct), edgePct };
 }
 
 const SCAN_LEDGER_KEY = "stocksmith.scan_ledger.v1";
