@@ -198,14 +198,63 @@ def _train_hit_net_conditional(X, y_mag, tr, ho, thresholds: list[float]):
             }
         except ValueError:
             per_thr[f"{T*100:.1f}%"] = {"auc": None, "base_rate": float(truth[sl].mean()), "n": int(n_per)}
+
+    # --- Selectivity: realized hit rate per prediction-probability decile ---
+    # For each target T, score the base holdout at a FIXED target_thr_pct=T,
+    # then bucket predictions into deciles and report the realized fraction
+    # that actually reached +T%. This turns "AUC 0.76" into a tradeable
+    # threshold: "trade the top decile → X% hit vs Y% base".
+    selectivity = _compute_selectivity(cal, X, y_mag, ho, thresholds)
+
     return cal, {
         "auc": auc, "brier": brier, "base_rate": base_rate,
         "n_train": int(len(X_tr_cond)), "n_holdout": int(len(X_ho_cond)),
         "wilson_lb_base_rate": _wilson_lb(base_rate, len(X_ho_cond)),
         "thresholds_pct": [T * 100 for T in thresholds],
         "per_threshold": per_thr,
+        "selectivity":   selectivity,
         "conditional":   True,
     }
+
+
+def _compute_selectivity(cal, X, y_mag, ho, thresholds: list[float]):
+    """Per-decile realized hit rate on the holdout, scored at each FIXED target.
+
+    Returns {"primary_target_pct": T0*100, "by_target": [ {target_pct, base,
+    top10, top25, top50, lift, decile_ladder[10], n}, ... ]}. The decile
+    ladder is monotonic when the model's ranking carries real edge."""
+    Xb = X.iloc[ho].reset_index(drop=True)
+    yb = y_mag.iloc[ho].reset_index(drop=True).values
+    n = len(yb)
+    by_target = []
+    for T in thresholds:
+        Xj = Xb.copy()
+        Xj["target_thr_pct"] = T * 100
+        p = cal.predict_proba(Xj)[:, 1]
+        true = (yb >= T).astype(float)
+        base = float(true.mean())
+        order = np.argsort(-p)  # most-confident first
+
+        def _rate(frac):
+            k = max(1, int(n * frac))
+            return float(true[order[:k]].mean())
+
+        d10, d25, d50 = _rate(0.10), _rate(0.25), _rate(0.50)
+        try:
+            dec = pd.qcut(pd.Series(p).rank(method="first"), 10, labels=False).values
+            ladder = [float(true[dec == i].mean()) for i in range(10)]
+        except (ValueError, IndexError):
+            ladder = []
+        by_target.append({
+            "target_pct": round(T * 100, 1),
+            "base": base, "top10": d10, "top25": d25, "top50": d50,
+            "lift": (round(d10 / base, 2) if base > 0 else None),
+            "decile_ladder": ladder, "n": int(n),
+        })
+    # primary = median threshold (the canonical swing/position/invest target)
+    primary = thresholds[len(thresholds) // 2] * 100 if thresholds else None
+    return {"primary_target_pct": (round(primary, 1) if primary else None),
+            "by_target": by_target}
 
 
 def _refit_full(X, y_dir, y_mag, thresholds):
