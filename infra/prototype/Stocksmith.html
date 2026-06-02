@@ -8006,6 +8006,7 @@ select.um-input { cursor: pointer; }
 .ts-affects { font-size: 8.5px; letter-spacing: 0.04em; text-transform: uppercase; margin-left: 2px; }
 .ts-tk { font-family: var(--mono); font-size: 9.5px; font-weight: 600; color: var(--ink-1); background: var(--glass-bg-1); border: 1px solid var(--glass-line); border-radius: var(--r-2); padding: 1px 6px; cursor: pointer; }
 .ts-tk:hover { border-color: var(--copper); color: var(--copper); }
+.ss2-ledger { margin-left: auto; font-size: 10px; white-space: nowrap; }
 /* ===== Upcoming IPOs surface ===== */
 .ipo-title { font-size: 17px; font-weight: 700; color: var(--ink); margin: 2px 0 0; }
 .ipo-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px 16px; }
@@ -10438,6 +10439,38 @@ function edgeGrades(t) {
   return { grades: { t: EDGE_GR(tr), m: EDGE_GR(mo), s: EDGE_GR(se), r: EDGE_GR(rrG), v: null, g: null }, edge: EDGE_GR(edgePct), edgePct };
 }
 
+const SCAN_LEDGER_KEY = "stocksmith.scan_ledger.v1";
+function logScanLedger(rows) {
+  try {
+    if (typeof localStorage === "undefined" || !rows || !rows.length) return 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const log = JSON.parse(localStorage.getItem(SCAN_LEDGER_KEY) || "[]");
+    const seen = new Set(log.map(e => e.d + "|" + e.sym));
+    let added = 0;
+    rows.forEach(t => {
+      const sym = t.sym || t.ticker; if (!sym) return;
+      const id = today + "|" + sym; if (seen.has(id)) return;
+      const g = t.grades || {};
+      log.push({ d: today, ts: Date.now(), sym, name: t.name, sector: t.sector, score: t.score,
+        verdict: t.verdict, rr: t.rr, rvol: t.rvol, rs: t.rs, er: t.er, price: t.price, chg: t.chg,
+        vG: g.v, gG: g.g, mG: g.m });
+      seen.add(id); added++;
+    });
+    if (added) localStorage.setItem(SCAN_LEDGER_KEY, JSON.stringify(log.slice(-8000)));
+    return log.length;
+  } catch (e) { return 0; }
+}
+function exportScanLedger() {
+  try {
+    const log = JSON.parse(localStorage.getItem(SCAN_LEDGER_KEY) || "[]");
+    if (!log.length) return;
+    const cols = ["d","ts","sym","name","sector","score","verdict","rr","rvol","rs","er","price","chg","vG","gG","mG"];
+    const esc = v => { v = v == null ? "" : String(v); v = v.replace(/"/g, '""'); return /[",\n]/.test(v) ? '"' + v + '"' : v; };
+    const csv = [cols.join(","), ...log.map(e => cols.map(c => esc(e[c])).join(","))].join("\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = "scan-ledger-" + log.length + ".csv"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (e) {}
+}
 function SurfaceSignalScanner({ screener, data, onTicker }) {
   // Full scored universe (~1832) — lazy-loaded from /api/universe on toggle.
   const [showFull, setShowFull] = useState(true);   // default: full scored universe (~1832)
@@ -10451,6 +10484,8 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
       .catch(e => setFullErr(e));
   }, [showFull, fullRows]);
   const universe = useMemo(() => mapScannerRows((showFull && fullRows) ? fullRows : screener, data), [screener, data, showFull, fullRows]);
+  const [ledgerN, setLedgerN] = useState(() => { try { return JSON.parse(localStorage.getItem(SCAN_LEDGER_KEY) || "[]").length; } catch (e) { return 0; } });
+  useEffect(() => { if (universe && universe.length) { const n = logScanLedger(universe); if (n) setLedgerN(n); } }, [universe]);
   const watch = useWatchlist();   // ★ membership — re-renders when the user stars/unstars
   const [tab, setTab] = useState("scanner");
   const [pills, setPills] = useState({});
@@ -10555,6 +10590,8 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
         <span className="mono dim2">Setup:</span>
         <select className="ss2-sel mono" value={setupF} onChange={e=>setSetupF(e.target.value)}>{setupOpts.map(s=><option key={s} value={s}>{s==="all"?"All setups":s}</option>)}</select>
         <input className="ss2-search mono" placeholder="⌕ search ticker / name…" value={q} onChange={e=>setQ(e.target.value)} />
+        <span className="ss2-ledger mono dim2" title="Append-only scan ledger (localStorage) — every name snapshotted daily for backtest + audit">⛁ {ledgerN.toLocaleString()} logged</span>
+        <button className="ss2-clear mono" onClick={exportScanLedger} title="Export the full scan ledger as CSV">⤓ ledger</button>
       </div>
       <div className="ss2-tbl-wrap" ref={wrapRef}>
         <table className="dtable ss2-tbl">
