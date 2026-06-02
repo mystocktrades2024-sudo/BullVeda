@@ -21985,22 +21985,60 @@ function MomentumHistory() {
   const cal = hist.calibration || null;
   const snaps = Array.isArray(hist.snapshots) ? hist.snapshots : [];
 
-  // No calibration yet → honest message (error / empty / pending).
-  if (!cal || status === "error" || status === "no_history_yet") {
-    const msg = status === "error"
+  // No realized calibration yet (error / pending). When PENDING we still have the
+  // logged snapshot picks — show them (awaiting their 5-trading-day forward return)
+  // instead of a blank message, so the tab has real content as the history matures.
+  if (!cal || status === "error" || status === "no_history_yet" || status === "pending") {
+    const isErr = status === "error";
+    const dates = [...new Set(snaps.map(s => s.date))].sort();
+    const matured = snaps.filter(s => s && s.realized != null).length;
+    const pending = snaps.length - matured;
+    const msg = isErr
       ? "— momentum calibration unavailable"
-      : (hist.message || "— momentum calibration unavailable (insufficient realized history)");
+      : (hist.message || "Realized 5-day outcomes accrue 5 trading days after each snapshot.");
     return (
       <div className="moh">
         <div className="moh-kpis">
-          {["TOTAL PICKS", "WITH 5D DATA", "WIN RATE", "AVG ALPHA", "AVG REALIZED", "VS SPY"].map((k, i) => (
-            <MohK key={i} k={k} v="—" tone="ink" s="no data" />
-          ))}
+          <MohK k="TOTAL PICKS"  v={snaps.length ? String(snaps.length) : "—"} tone="ink" s={dates.length ? `${dates.length} day${dates.length === 1 ? "" : "s"} logged` : "no data"} />
+          <MohK k="WITH 5D DATA" v={String(matured)} tone={matured ? "gn" : "ink"} s="realized" />
+          <MohK k="PENDING"      v={String(pending)} tone="amb" s="maturing · need 5 trading days" />
+          <MohK k="FIRST SNAP"   v={dates[0] || "—"} tone="ink" s="tracking since" />
+          <MohK k="WIN RATE"     v="—" tone="ink" s="pending" />
+          <MohK k="AVG ALPHA"    v="—" tone="ink" s="pending" />
         </div>
         <div className="moh-note mono dim2">
-          {msg} · source: data/momentum_snapshots.jsonl × EODHD. Predicted verdict + composite vs realized
-          5-day forward return (SPY-relative). Win-rate carries its sample size so a thin sample can't masquerade as edge.
+          {msg} · the picks below are logged and awaiting their SPY-relative 5-day forward return.
+          source: data/momentum_snapshots.jsonl × EODHD.
         </div>
+        {snaps.length > 0 && (
+          <table className="wsx-tbl mono" style={{ width: "100%", marginTop: 10 }}>
+            <thead><tr>
+              <th className="wsx-th">DATE</th><th className="wsx-th">#</th><th className="wsx-th">SYM</th>
+              <th className="wsx-th">SLEEVE</th><th className="wsx-th">SETUP</th>
+              <th className="wsx-th r">COMP</th><th className="wsx-th r">RS</th><th className="wsx-th r">OUTCOME</th>
+            </tr></thead>
+            <tbody>
+              {snaps.slice(0, 60).map((s, i) => {
+                const p = (s && s.predicted) || {};
+                const a = (s && s.realized && (s.realized.alpha_pp != null ? s.realized.alpha_pp : s.realized.alpha)) ;
+                return (
+                  <tr key={i}>
+                    <td className="dim2">{s.date}</td>
+                    <td className="dim">{s.rank}</td>
+                    <td><b className="copper">{s.ticker}</b></td>
+                    <td className="dim2">{p.sleeve || "—"}</td>
+                    <td className="dim2">{p.setup || "—"}</td>
+                    <td className="r">{p.composite != null ? Math.round(p.composite) : "—"}</td>
+                    <td className="r">{p.rs_rank != null ? Math.round(p.rs_rank) : "—"}</td>
+                    <td className="r">{s.realized != null && a != null
+                      ? <span className={a >= 0 ? "up" : "dn"}>{(a >= 0 ? "+" : "") + Number(a).toFixed(1) + "pp"}</span>
+                      : <span className="amb mono" style={{ fontSize: 10.5 }}>pending</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
     );
   }
