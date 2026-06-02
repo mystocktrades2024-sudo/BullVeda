@@ -168,6 +168,7 @@ def _reconcile_positions(state: dict, alpaca_positions: list[dict],
     # 2. Both-sided → update current_price + unrealized_pnl in place
     # 3. Alpaca-only → insert with sane defaults (setup_type='alpaca_sync' placeholder; v2 attributes back to scan)
     today = date.today().isoformat()
+    now_ts = datetime.now().strftime('%Y-%m-%d %H:%M')
     for sym, ap in alpaca_by_t.items():
         avg = ap["avg_entry_price"]
         cur = ap["current_price"]
@@ -175,22 +176,10 @@ def _reconcile_positions(state: dict, alpaca_positions: list[dict],
         side = ap["side"]
 
         if sym in local_by_t:
-            lp = local_by_t[sym]
-            lp["current_price"] = round(cur, 2)
-            lp["unrealized_pnl_dollars"] = round(ap["unrealized_pl"], 2)
-            lp["unrealized_pnl_pct"] = round(ap["unrealized_plpc"], 2)
-            lp["last_updated"] = today
-            # 2026-05-27 — refresh stop/target from the live bracket legs so the
-            # dashboard shows the real exit levels, not a stale synthetic 3%.
-            # When NO live bracket leg exists (entry bracket canceled, position
-            # running naked), mark _synthetic_stop so the UI flags it honestly.
-            _legs = _bracket.get(sym, {})
-            if _legs.get("stop") is not None:
-                lp["stop"] = _legs["stop"]; lp["_synthetic_stop"] = False
-            else:
-                lp["_synthetic_stop"] = True  # no real protective stop at broker
-            if _legs.get("target") is not None:
-                lp["target1"] = _legs["target"]
+            # NOTE: in-place edits here are DISCARDED by the state reload at the end
+            # of this function. The authoritative both-sided reconcile (shares /
+            # direction / entry / price / stop-target) runs in the persistent
+            # post-reload loop below, which is what actually gets written to disk.
             updated.append(sym)
         else:
             # 2026-05-27 — prefer the REAL bracket exit-leg prices over a
@@ -236,17 +225,38 @@ def _reconcile_positions(state: dict, alpaca_positions: list[dict],
     # above also sets current_price, but those edits are on `local_by_t` refs that
     # get discarded by the state reload right above — so persist it here, after the
     # reload, for every position Alpaca can price.) (2026-06-01)
+    # 2026-06-01 — FULL both-sided reconcile to Alpaca truth, AFTER the reload so
+    # the edits persist (the in-place loop above runs on refs the reload discards).
+    # Shares / direction / avg-entry can all change intraday (partial closes, adds,
+    # flips) — previously only missing prices were backfilled, so the dashboard kept
+    # stale share counts (IONQ showed 87 while Alpaca held 1; NEM long vs short).
+    _now = datetime.now().strftime("%Y-%m-%d %H:%M")
     _patched = False
     for lp in state.get("positions", []):
         ap = alpaca_by_t.get(lp.get("ticker"))
-        if ap and not lp.get("current_price"):
-            lp["current_price"] = round(ap["current_price"], 2)
-            lp["unrealized_pnl_dollars"] = round(ap["unrealized_pl"], 2)
-            lp["unrealized_pnl_pct"] = round(ap["unrealized_plpc"], 2)
-            lp["position_size"] = round(abs(ap["market_value"]), 2)
-            lp["highest_price"] = round(max(lp.get("highest_price") or ap["avg_entry_price"], ap["current_price"]), 2)
-            lp["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-            _patched = True
+        if not ap:
+            continue
+        try:
+            qv = abs(int(ap["qty"])); side = ap["side"]; avg = float(ap["avg_entry_price"]); cur = float(ap["current_price"])
+        except Exception:
+            continue
+        lp["shares"] = qv
+        lp["signed_qty"] = qv if side == "long" else -qv
+        lp["direction"] = side
+        lp["entry_price"] = round(avg, 2)
+        lp["current_price"] = round(cur, 2)
+        lp["position_size"] = round(abs(ap.get("market_value") or qv * cur), 2)
+        lp["allocation_pct"] = round(qv * avg / max(1.0, account_equity) * 100, 1)
+        lp["unrealized_pnl_dollars"] = round(ap.get("unrealized_pl") or 0.0, 2)
+        lp["unrealized_pnl_pct"] = round(ap.get("unrealized_plpc") or 0.0, 2)
+        lp["highest_price"] = round(max(lp.get("highest_price") or avg, cur), 2)
+        lp["last_updated"] = _now
+        _legs = _bracket.get(lp.get("ticker"), {})
+        if _legs.get("stop") is not None:
+            lp["stop"] = _legs["stop"]; lp["_synthetic_stop"] = False
+        if _legs.get("target") is not None:
+            lp["target1"] = _legs["target"]
+        _patched = True
     if _patched:
         STATE_PATH.write_text(json.dumps(state, indent=2, default=str))
 
