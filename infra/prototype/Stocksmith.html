@@ -21966,16 +21966,77 @@ function mo52wPos(t) {
 function MomentumHistory() {
   const [hist, setHist] = useState(null);   // null = loading
   const [err, setErr] = useState(null);
+  const [sig, setSig] = useState(null);     // REAL signal track record (signal_log)
 
   useEffect(() => {
     if (typeof fetch === "undefined") return; // render-safe (renderToString)
     let alive = true;
+    // Primary: the real logged signal history (data/signal_log.json) with realized
+    // P&L + alpha-vs-SPY — the full track record that exists (since ~2026-04-13).
+    fetch("/api/momentum-signals?limit=600", { credentials: "same-origin" })
+      .then(r => r.ok ? r.json() : null).then(j => { if (alive) setSig(j || { signals: [], summary: null }); })
+      .catch(() => { if (alive) setSig({ signals: [], summary: null }); });
+    // Secondary: the forward-prediction calibration (3-day momentum snapshots).
     fetch("/api/momentum-history", { credentials: "same-origin" })
       .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then(j => { if (alive) { setHist(j || {}); setErr(null); } })
       .catch(e => { if (alive) { setHist({}); setErr(String(e)); } });
     return () => { alive = false; };
   }, []);
+
+  // ── REAL signal track record (signal_log) — the primary "Signal History" view ──
+  if (sig === null) {
+    return <div className="moh"><div className="moh-note mono dim2">— loading signal history…</div></div>;
+  }
+  {
+    const rows = Array.isArray(sig.signals) ? sig.signals : [];
+    if (rows.length) {
+      const sm = sig.summary || {};
+      const span = sm.first_date && sm.last_date ? `${sm.first_date} → ${sm.last_date}` : "—";
+      return (
+        <div className="moh">
+          <div className="moh-kpis">
+            <MohK k="SIGNALS" v={String(sm.n_total != null ? sm.n_total : rows.length)} tone="copper" s={`${sm.n_days || "—"} trading days`} />
+            <MohK k="CLOSED" v={String(sm.n_closed != null ? sm.n_closed : "—")} tone="ink" s={`${sm.n_open != null ? sm.n_open : "—"} still open`} />
+            <MohK k="WIN RATE" v={sm.win_rate != null ? `${sm.win_rate}%` : "—"} tone={sm.win_rate != null && sm.win_rate >= 50 ? "gn" : "amb"} s="closed signals" />
+            <MohK k="AVG ALPHA" v={sm.avg_alpha_pp != null ? `${sm.avg_alpha_pp >= 0 ? "+" : ""}${sm.avg_alpha_pp}pp` : "—"} tone={sm.avg_alpha_pp != null && sm.avg_alpha_pp >= 0 ? "gn" : "rd"} s="vs SPY" />
+            <MohK k="AVG P&L" v={sm.avg_pnl_pct != null ? `${sm.avg_pnl_pct >= 0 ? "+" : ""}${sm.avg_pnl_pct}%` : "—"} tone={sm.avg_pnl_pct != null && sm.avg_pnl_pct >= 0 ? "gn" : "rd"} s="realized" />
+            <MohK k="BEAT SPY" v={sm.beat_spy_pct != null ? `${sm.beat_spy_pct}%` : "—"} tone="ink" s="of realized" />
+          </div>
+          <div className="moh-note mono dim2">
+            Every logged momentum signal with its realized P&L and SPY-relative alpha. The full history that exists ({span}) —
+            not a synthetic year; open signals show <span className="amb">pending</span> until they close. source: data/signal_log.json.
+          </div>
+          <table className="wsx-tbl mono" style={{ width: "100%", marginTop: 10 }}>
+            <thead><tr>
+              <th className="wsx-th">DATE</th><th className="wsx-th">SYM</th><th className="wsx-th">STRATEGY</th>
+              <th className="wsx-th r">SCORE</th><th className="wsx-th r">RS</th>
+              <th className="wsx-th r">P&L</th><th className="wsx-th r">ALPHA</th><th className="wsx-th r">RESULT</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((s, i) => {
+                const pnl = s.pnl_pct, al = s.alpha;
+                const res = (s.result || "").replace("_EXPIRED", "").replace("TARGET_HIT", "TARGET");
+                const open = (s.status || "").toUpperCase() !== "CLOSED";
+                return (
+                  <tr key={i}>
+                    <td className="dim2">{s.date}</td>
+                    <td><b className="copper">{s.ticker}</b></td>
+                    <td className="dim2">{s.strategy}</td>
+                    <td className="r">{s.score != null ? Math.round(s.score) : "—"}</td>
+                    <td className="r">{s.rs_rank != null ? Math.round(s.rs_rank) : "—"}</td>
+                    <td className="r">{pnl != null ? <span className={pnl >= 0 ? "up" : "dn"}>{(pnl >= 0 ? "+" : "") + pnl.toFixed(1) + "%"}</span> : "—"}</td>
+                    <td className="r">{al != null ? <span className={al >= 0 ? "up" : "dn"}>{(al >= 0 ? "+" : "") + al.toFixed(1) + "pp"}</span> : (open ? <span className="amb" style={{ fontSize: 10.5 }}>pending</span> : "—")}</td>
+                    <td className="r dim2" style={{ fontSize: 10.5 }}>{open ? "OPEN" : (res || "—")}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+  }
 
   if (hist === null) {
     return <div className="moh"><div className="moh-note mono dim2">— loading momentum calibration…</div></div>;

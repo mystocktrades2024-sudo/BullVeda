@@ -772,6 +772,74 @@ async def _api_momentum_history(
         }
 
 
+@app.get("/api/momentum-signals")
+async def _api_momentum_signals(
+    limit: int = 600,
+    momentum_only: bool = True,
+    auth: HTTPBasicCredentials = Depends(_check_auth),
+):
+    """The REAL signal track record from data/signal_log.json — every logged
+    momentum signal with its realized P&L and alpha-vs-SPY. Powers the Momentum
+    "Signal History" tab. No fabrication: only signals that were actually logged
+    and (for closed ones) actually realized. This is the full history that exists
+    (the system began logging ~2026-04-13), not a synthetic year."""
+    if isinstance(auth, Response):
+        return auth
+    import json, math
+    MOM = {"RS New High", "Trend Continuation", "EMA21 Pullback", "EMA50 Pullback",
+           "Pocket Pivot", "Near-VCP Breakout", "VCP Breakout", "10-Week Pullback",
+           "Breakout Expansion", "Impulse Catalyst"}
+    def _n(v):
+        try:
+            f = float(v); return None if (math.isnan(f) or math.isinf(f)) else f
+        except Exception:
+            return None
+    try:
+        raw = json.loads((BASE_DIR / "data" / "signal_log.json").read_text())
+    except Exception as e:
+        return {"signals": [], "n": 0, "summary": None, "status": "error", "message": str(e)[:200]}
+    sigs = raw if isinstance(raw, list) else (raw.get("signals") or raw.get("entries") or [])
+    out = []
+    for s in sigs:
+        if not isinstance(s, dict) or not s.get("ticker"):
+            continue
+        strat = s.get("strategy") or s.get("setup_family") or ""
+        if momentum_only and strat not in MOM:
+            continue
+        out.append({
+            "date": (s.get("date") or "")[:10],
+            "ticker": s.get("ticker"),
+            "strategy": strat or "—",
+            "score": _n(s.get("score")),
+            "rs_rank": _n(s.get("rs_rank")),
+            "stars": _n(s.get("stars")),
+            "pnl_pct": _n(s.get("actual_pnl_pct")),
+            "alpha": _n(s.get("alpha_vs_spy")),
+            "result": s.get("result"),
+            "status": s.get("status"),
+            "direction": s.get("direction") or "long",
+        })
+    out.sort(key=lambda x: x.get("date") or "", reverse=True)
+    # Real summary KPIs — computed only from signals that actually realized.
+    closed = [x for x in out if (x.get("status") or "").upper() == "CLOSED"]
+    realized = [x for x in out if x.get("alpha") is not None]
+    wins = sum(1 for x in closed if (x.get("result") or "") in ("WIN_EXPIRED", "TARGET_HIT")
+               or (x.get("pnl_pct") is not None and x["pnl_pct"] > 0))
+    dates = sorted({x["date"] for x in out if x["date"]})
+    summary = {
+        "n_total": len(out), "n_closed": len(closed), "n_open": len(out) - len(closed),
+        "n_realized": len(realized),
+        "win_rate": round(100 * wins / len(closed)) if closed else None,
+        "avg_alpha_pp": round(sum(x["alpha"] for x in realized) / len(realized), 2) if realized else None,
+        "avg_pnl_pct": round(sum(x["pnl_pct"] for x in realized if x.get("pnl_pct") is not None)
+                             / max(1, sum(1 for x in realized if x.get("pnl_pct") is not None)), 2) if realized else None,
+        "beat_spy_pct": round(100 * sum(1 for x in realized if x["alpha"] > 0) / len(realized)) if realized else None,
+        "first_date": dates[0] if dates else None, "last_date": dates[-1] if dates else None,
+        "n_days": len(dates),
+    }
+    return {"signals": out[:max(0, limit)], "n": len(out), "summary": summary, "status": "ok"}
+
+
 @app.get("/api/system-status")
 async def _api_system_status(auth: HTTPBasicCredentials = Depends(_check_auth)):
     """JSON system-status report (same data as scripts/system_status.py --json)."""
