@@ -371,6 +371,7 @@ _ENDPOINT_COUNTER: dict[str, dict[str, int]] = {}
 def _endpoint_class(endpoint: str) -> str:
     """Map a raw endpoint path to a bucket class for quota tracking."""
     e = endpoint.lower().lstrip("/")
+    if e.startswith("eod-bulk"):                   return "bulk"
     if e.startswith("eod/"):                       return "eod"
     if e.startswith("intraday/"):                  return "intraday"
     if e.startswith("real-time/"):                 return "real_time"
@@ -379,11 +380,31 @@ def _endpoint_class(endpoint: str) -> str:
     if e.startswith("news"):                       return "news"
     if e.startswith("div/"):                       return "dividends"
     if e.startswith("splits/"):                    return "splits"
+    if e.startswith("screener"):                   return "screener"
     if "exchange" in e:                            return "exchange_symbols"
     if e.startswith("calendar/"):                  return "calendar"
     if e.startswith("technical/"):                 return "technical"
     if e.startswith("sentiments"):                 return "sentiment"
     return "other"
+
+
+# EODHD bills WEIGHTED API-units per endpoint (NOT 1 per request) — the root
+# cause of the historical under-count: the daily counter bumped +1/request while
+# EODHD charged e.g. 10 for fundamentals → local 18K vs real 100K on 2026-06-02.
+# These weights mirror EODHD's published API-consumption table so the local
+# counter tracks BILLED units. (sync_quota_from_server() still corrects drift.)
+_ENDPOINT_COST: dict[str, int] = {
+    "eod": 1, "news": 1, "dividends": 1, "splits": 1, "real_time": 1,
+    "exchange_symbols": 1, "calendar": 1, "sentiment": 1, "other": 1,
+    "intraday": 5, "technical": 5, "screener": 5,
+    "fundamentals": 10, "options": 10,
+    "bulk": 100,   # eod-bulk-last-day returns a whole exchange — billed at 100
+}
+
+
+def _endpoint_cost(endpoint: str) -> int:
+    """EODHD API-unit cost for one request to this endpoint (default 1)."""
+    return _ENDPOINT_COST.get(_endpoint_class(endpoint), 1)
 
 
 def _bump_endpoint(endpoint: str, kind: str = "network") -> None:
@@ -507,15 +528,47 @@ def _write_quota_state(state: dict) -> None:
         log.debug(f"quota state write failed: {e}")
 
 
-def _bump_quota_count() -> None:
-    """Increment today's persisted network-call count. Never raises."""
+def _bump_quota_count(cost: int = 1) -> None:
+    """Add this call's EODHD-billed unit cost to today's persisted count.
+    cost mirrors EODHD's per-endpoint weighting (fundamentals=10, intraday=5,
+    bulk=100, …) so the local counter tracks BILLED units, not request count.
+    Never raises."""
     try:
         with _QUOTA_LOCK:
             st = _read_quota_state()
-            st["count"] += 1
+            st["count"] += max(1, int(cost))
             _write_quota_state(st)
     except Exception:
         pass
+
+
+def sync_quota_from_server() -> dict:
+    """Reconcile the local daily counter to EODHD's AUTHORITATIVE usage via the
+    /user endpoint (returns apiRequests = real billed units used today). This
+    eliminates any residual drift between our weighted estimate and EODHD's
+    books. Cheap (1 unit), crash-safe — returns {} and leaves local state intact
+    on any failure. Call at scan start so the budget guard sees the true number."""
+    try:
+        data = _request("user", essential=True, max_retries=1)
+        if not isinstance(data, dict):
+            return {}
+        used = data.get("apiRequests")
+        limit = data.get("dailyRateLimit")
+        if used is None:
+            return {}
+        with _QUOTA_LOCK:
+            st = _read_quota_state()
+            # Trust the server only when it's HIGHER than our local tally — never
+            # let a stale/rolled-over server read lower our in-day count.
+            if int(used) > int(st.get("count", 0)):
+                st["count"] = int(used)
+                _write_quota_state(st)
+        log.info(f"  EODHD quota synced from server: {used:,}"
+                 + (f" / {limit:,}" if limit else "") + " billed units used today")
+        return {"used": int(used), "limit": int(limit) if limit else None}
+    except Exception as e:
+        log.debug(f"sync_quota_from_server failed (continuing): {e}")
+        return {}
 
 
 def eodhd_quota_status() -> dict:
@@ -610,7 +663,7 @@ def _request(
             _limiter.acquire()
             _CALL_COUNTER["network"] += 1  # tally every network call (incl. retries)
             _bump_endpoint(endpoint, "network")
-            _bump_quota_count()  # persist per-Pacific-day budget count (never raises)
+            _bump_quota_count(_endpoint_cost(endpoint))  # weighted billed-unit count (never raises)
             resp = _session.get(url, params=full_params, timeout=timeout)
 
             # 200: success

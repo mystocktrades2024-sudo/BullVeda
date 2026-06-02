@@ -491,6 +491,38 @@ def run_daily_scan(force_fresh: bool = False):
     log.info(f"=== SwingTrade Daily Scan — {run_timestamp} ===")
     _circuit_breaker_review_reminder(cfg)
 
+    # ── EODHD quota preflight (2026-06-02) ──────────────────────────────────
+    # Reconcile the daily counter to EODHD's AUTHORITATIVE billed-unit usage,
+    # then throttle/abort if near the limit. Root cause being fixed: the local
+    # counter bumped +1/request while EODHD bills weighted units (fundamentals
+    # =10, intraday=5, bulk=100) → it read 18K while real usage was ~100K, so
+    # the budget guard never fired and stacked scans + the 3500-name nightly
+    # enrich blew through 100K silently (2026-06-02). Now: sync to truth, then
+    #   ≥ throttle_pct → light mode (skip deep fundamentals — the 10× driver)
+    #   ≥ abort_pct    → skip this scan (don't burn the last calls on a run that
+    #                    would degrade to Yahoo-fallback anyway). Resets 00:00 UTC.
+    try:
+        import eodhd_client as _ecq
+        _ecq.sync_quota_from_server()                # reconcile to real usage (1 unit)
+        _qs   = _ecq.eodhd_quota_status()
+        _used = int(_qs.get("count", 0)); _cap = int(_qs.get("daily_limit", 100000) or 100000)
+        _pct  = (_used / _cap * 100) if _cap else 0.0
+        _qcfg = cfg.get("eodhd_quota", {}) or {}
+        _throttle_pct = float(_qcfg.get("throttle_pct", 85))
+        _abort_pct    = float(_qcfg.get("abort_pct", 97))
+        log.info(f"  EODHD budget: {_used:,}/{_cap:,} ({_pct:.0f}%) billed units used today "
+                 f"(throttle ≥{_throttle_pct:.0f}% · abort ≥{_abort_pct:.0f}%)")
+        if _pct >= _abort_pct:
+            log.warning(f"🔴 EODHD quota at {_pct:.0f}% (≥{_abort_pct:.0f}%) — SKIPPING scan to avoid "
+                        f"burning the last calls on a degraded run. Budget resets 00:00 UTC.")
+            return
+        if _pct >= _throttle_pct and os.environ.get("SCAN_MODE", "").lower() != "light":
+            os.environ["SCAN_MODE"] = "light"
+            log.warning(f"🟡 EODHD quota at {_pct:.0f}% (≥{_throttle_pct:.0f}%) — THROTTLING to light "
+                        f"mode (shrink deep-enrich tier, skip most fundamentals) to protect the budget.")
+    except Exception as _qe:
+        log.debug(f"EODHD quota preflight skipped (non-fatal): {_qe}")
+
     # ── 2026-05-22: Schwab refresh-token health probe ──
     # Refresh tokens have a 7-day lifetime; if the scanner stops for >7d (or
     # the rotated token wasn't written back), Schwab calls fail with HTTP 400

@@ -6,7 +6,9 @@
   "eodhd_quota": {
     "daily_limit": 100000,
     "soft_limit": 95000,
-    "guard_enabled": true
+    "guard_enabled": true,
+    "throttle_pct": 85,
+    "abort_pct": 97
   },
   "circuit_breaker": {
     "disabled": true,
@@ -1062,9 +1064,9 @@
     "prescreen_v2": true,
     "_note_prescreen_v2": "2026-06-02: enhanced top-N selection score. v1 was pure trend-momentum (under-ranked RS leaders in flat tape, scored coiled VCP/squeeze ~0, PENALIZED pullbacks that the Mean-Rev/EMA-pullback sleeves buy). v2 adds: RS-vs-SPY (regime-aware), liquidity tilt (deeper $ vol), volatility-contraction bonus (VCP/squeeze pre-breakout), and replaces the blanket pullback penalty with oversold-above-200EMA credit. Set false to revert to v1 momentum-only. Changes WHICH 1500 get scored, not how many.",
     "max_enrichment_tickers": 1500,
-    "_note_enrich": "Tickers above this threshold are cut by fast OHLCV pre-screen before Step 4. Guaranteed inclusions (SP500, Zacks #1, earnings-window, PEAD, curated info-edge sources) bypass the cap; remaining slots fill from top-ranked OHLCV. Raise if you want wider coverage, lower for fewer EODHD calls. 2026-06-01: 1000->1500 (user: 'top 1500 + NASDAQ'). Safe ONLY because the cross-process shared EODHD limiter (eodhd_client._SharedRateLimiter, EODHD_SHARED_LIMITER=1) now gives the whole key ONE 950/min budget so concurrent jobs pace behind the scan instead of bursting past EODHD's 1000/min. ~1500x8=12K calls/scan vs 94K daily headroom; per-MINUTE is the binding constraint, handled by the shared limiter + job staggering. Without the shared limiter this WILL re-trigger the 2026-05-30 abort regression — do not raise here while EODHD_SHARED_LIMITER=0.",
+    "_note_enrich": "Tickers above this threshold are cut by fast OHLCV pre-screen before Step 4. Guaranteed inclusions (SP500, Zacks #1, earnings-window, PEAD, curated info-edge sources) bypass the cap; remaining slots fill from top-ranked OHLCV. Raise if you want wider coverage, lower for fewer EODHD calls. 2026-06-01: 1000->1500 (user: 'top 1500 + NASDAQ'). Safe ONLY because the cross-process shared EODHD limiter (eodhd_client._SharedRateLimiter, EODHD_SHARED_LIMITER=1) now gives the whole key ONE 950/min budget so concurrent jobs pace behind the scan instead of bursting past EODHD's 1000/min. ~1500x8=12K calls/scan vs 94K daily headroom; per-MINUTE is the binding constraint, handled by the shared limiter + job staggering. Without the shared limiter this WILL re-trigger the 2026-05-30 abort regression \u2014 do not raise here while EODHD_SHARED_LIMITER=0.",
     "deep_enrichment_top_n": 500,
-    "_note_deep_enrich": "DECOUPLED from max_enrichment_tickers 2026-06-02. This is the EXPENSIVE-tier cap: only the top N (by pre-screen score, + guaranteed sets) get the heavy per-ticker external scrapes (options/UOA/gamma/WSB/StockTwits/congressional/SEC). The remaining (max_enrichment_tickers - N) are LIGHT tier: scored on OHLCV + cheap EODHD fundamentals, WATCH-eligible only. Was 1500 (== max), which made a full deep run scrape all 1500 names — the external-scrape tail (StockTwits/WSB/congressional w/ timeouts) does NOT scale to 1500 and stalled the 06:00 run for hours. 500 keeps the actionable top fully enriched (BUY candidates are top ~50-100) while the 500-1500 tail still ranks. Intraday SCAN_MODE=light shrinks this further to light_deep_enrichment_top_n.",
+    "_note_deep_enrich": "DECOUPLED from max_enrichment_tickers 2026-06-02. This is the EXPENSIVE-tier cap: only the top N (by pre-screen score, + guaranteed sets) get the heavy per-ticker external scrapes (options/UOA/gamma/WSB/StockTwits/congressional/SEC). The remaining (max_enrichment_tickers - N) are LIGHT tier: scored on OHLCV + cheap EODHD fundamentals, WATCH-eligible only. Was 1500 (== max), which made a full deep run scrape all 1500 names \u2014 the external-scrape tail (StockTwits/WSB/congressional w/ timeouts) does NOT scale to 1500 and stalled the 06:00 run for hours. 500 keeps the actionable top fully enriched (BUY candidates are top ~50-100) while the 500-1500 tail still ranks. Intraday SCAN_MODE=light shrinks this further to light_deep_enrichment_top_n.",
     "light_deep_enrichment_top_n": 150
   },
   "time_stops": {
