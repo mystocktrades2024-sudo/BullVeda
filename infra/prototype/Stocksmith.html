@@ -8010,6 +8010,15 @@ select.um-input { cursor: pointer; }
 .trk-toggle--sm button { padding: 4px 9px; font-size: 10px; text-transform: capitalize; }
 
 .trk-tabs { align-items: center; }
+.trk-month-sel { background: var(--bg-2); color: var(--ink-1); border: 1px solid var(--line-2); border-radius: var(--r-1); font-family: var(--mono); font-size: 11px; padding: 4px 8px; cursor: pointer; }
+.trk-range { display: inline-flex; align-items: center; gap: 5px; }
+.trk-date { background: var(--bg-2); color: var(--ink-1); border: 1px solid var(--line-2); border-radius: var(--r-1); font-family: var(--mono); font-size: 11px; padding: 3px 6px; cursor: pointer; color-scheme: dark; }
+.trk-range-clear { border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink-2); border-radius: var(--r-1); cursor: pointer; font-size: 10px; padding: 3px 7px; }
+.trk-range-clear:hover { color: var(--rd); border-color: var(--rd); }
+.trk-pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 10px 0 4px; }
+.trk-page-btn { padding: 5px 14px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink-2); cursor: pointer; font-family: var(--mono); font-size: 11px; border-radius: var(--r-1); }
+.trk-page-btn:hover:not(:disabled) { color: var(--copper); border-color: var(--copper); }
+.trk-page-btn:disabled { opacity: 0.4; cursor: default; }
 .trk-grp { margin-left: auto; display: inline-flex; gap: 4px; }
 .trk-grp-btn { padding: 5px 11px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink-2); cursor: pointer; font-family: var(--mono); font-size: 11px; border-radius: var(--r-1); }
 .trk-grp-btn.is-on { background: var(--cy-bg); border-color: var(--cy); color: var(--cy); }
@@ -30138,7 +30147,7 @@ function trRealLedger(raw) {
   const SIGNALS = raw.signals.map(s => ({
     id: s.id, source: s.source, sym: s.sym, dir: s.dir, setup: s.setup, verdict: s.verdict,
     regime: (typeof s.regime === "string" ? s.regime : "") || "",
-    age: num(s.age) || 0, refPrice: num(s.refPrice) || 0, predProb: num(s.predProb), ret: s.ret || {},
+    age: num(s.age) || 0, date: s.date || null, refPrice: num(s.refPrice) || 0, predProb: num(s.predProb), ret: s.ret || {},
   }));
   const ret = (sig, hz) => { let v = sig.ret[hz.id]; if (typeof v !== "number" || isNaN(v)) return { v: null, raw: null, edge: null, mature: false }; if (sig.dir === "short") v = -v; return { v, raw: v, edge: v, mature: true }; };
   function aggregate(srcId, hz) {
@@ -30352,8 +30361,38 @@ function DecayView({ SL, hzs, board, metric, group }) {
 function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
   const [dir, setDir] = useTR("all");
   const [view, setView] = useTR("path"); // path | full
-  const rows = useTRm(() => SL.ledger(metric, srcFilter ? { source: srcFilter } : null).filter(r => dir === "all" || r.dir === dir), [metric, srcFilter, dir]);
+  const [period, setPeriod] = useTR("1y");  // 1m | 3m | 6m | 1y | all — default last 1 year
+  const [month, setMonth] = useTR("all");   // "YYYY-MM" or "all"
+  const [dateFrom, setDateFrom] = useTR("");
+  const [dateTo, setDateTo] = useTR("");
+  const [page, setPage] = useTR(0);
+  const PAGE_SIZE = 50;
+  const PERIOD_DAYS = { "1m": 31, "3m": 93, "6m": 186, "1y": 372, "all": 99999 };
   const NH = SL.HZ.length;
+  const allRows = useTRm(() => SL.ledger(metric, srcFilter ? { source: srcFilter } : null), [metric, srcFilter]);
+  // available months from real signal dates (newest first) for the month picker
+  const months = useTRm(() => [...new Set(allRows.map(r => (r.date || "").slice(0, 7)).filter(Boolean))].sort().reverse(), [allRows]);
+  const rows = useTRm(() => {
+    const maxAge = PERIOD_DAYS[period] != null ? PERIOD_DAYS[period] : 372;
+    const hasRange = !!(dateFrom || dateTo);
+    return allRows.filter(r => {
+      if (dir !== "all" && r.dir !== dir) return false;
+      const rd = r.date || new Date(Date.now() - r.age * 86400000).toISOString().slice(0, 10);
+      if (hasRange) {                                   // explicit date range wins
+        if (dateFrom && rd < dateFrom) return false;
+        if (dateTo && rd > dateTo) return false;
+      } else if (month !== "all") {                     // then a specific month
+        if (rd.slice(0, 7) !== month) return false;
+      } else if ((r.age || 0) > maxAge) return false;   // else the lookback window
+      return true;
+    });
+  }, [allRows, dir, period, month, dateFrom, dateTo]);
+  // reset to first page whenever the filter set changes
+  useEffect(() => { setPage(0); }, [dir, period, month, dateFrom, dateTo, srcFilter, metric, view]);
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const curPage = Math.min(page, totalPages - 1);
+  const pageRows = rows.slice(curPage * PAGE_SIZE, curPage * PAGE_SIZE + PAGE_SIZE);
+  const _rowDate = (r) => r.date ? new Date(r.date + "T00:00:00") : new Date(Date.now() - r.age * 86400000);
   const exportCSV = () => {
     const head = ["Logged date", "Days ago", "Symbol", "Source", "Direction", "Ref price", "Status", "Matured", ...SL.HZ.map(h => h.id)];
     const lines = [head.join(",")];
@@ -30383,6 +30422,19 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
           {SL.SOURCES.map(s => <button key={s.id} className={`trk-chip ${srcFilter === s.id ? "is-on" : ""}`} onClick={() => setSrcFilter(s.id)}>{s.label}</button>)}
         </div>
         <div className="trk-led-acts">
+          <div className="trk-toggle trk-toggle--sm" title="Lookback window">
+            {[["1m","1M"],["3m","3M"],["6m","6M"],["1y","1Y"],["all","All"]].map(([id,l]) => <button key={id} className={(month==="all"&&period===id) ? "is-on" : ""} onClick={() => { setMonth("all"); setPeriod(id); }}>{l}</button>)}
+          </div>
+          <select className="trk-month-sel" value={month} onChange={e => setMonth(e.target.value)} title="Jump to a specific month">
+            <option value="all">All months</option>
+            {months.map(m => <option key={m} value={m}>{new Date(m + "-01T00:00:00").toLocaleDateString("en-US", { month: "short", year: "numeric" })}</option>)}
+          </select>
+          <span className="trk-range">
+            <input type="date" className="trk-date" value={dateFrom} max={dateTo || undefined} onChange={e => { setDateFrom(e.target.value); }} title="From date" />
+            <span className="dim2 mono">→</span>
+            <input type="date" className="trk-date" value={dateTo} min={dateFrom || undefined} onChange={e => { setDateTo(e.target.value); }} title="To date" />
+            {(dateFrom || dateTo) && <button className="trk-range-clear" onClick={() => { setDateFrom(""); setDateTo(""); }} title="Clear date range">✕</button>}
+          </span>
           <div className="trk-toggle trk-toggle--sm">
             {["all", "long", "short"].map(d => <button key={d} className={dir === d ? "is-on" : ""} onClick={() => setDir(d)}>{d}</button>)}
           </div>
@@ -30396,8 +30448,8 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
       {view === "path" ? (
         <table className="dtable wsx-tbl trk-led">
           <thead><tr><th>Logged</th><th>Date</th><th>Symbol</th><th>Source</th><th>Dir</th><th className="r">Ref px</th><th>Forward path</th><th className="r">Latest</th><th className="r">Matured</th><th>Status</th></tr></thead>
-          <tbody>{rows.slice(0, 60).map(r => {
-            const d = new Date(Date.now() - r.age * 86400000);
+          <tbody>{pageRows.map(r => {
+            const d = _rowDate(r);
             const dStr = d.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "2-digit" });
             return (
             <tr key={r.id} onClick={() => onTicker && onTicker(r.sym)}>
@@ -30422,8 +30474,8 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
               <th className="trk-full-sticky">Date</th><th className="trk-full-sticky2">Sym</th><th>Src</th><th>Dir</th>
               {SL.HZ.map(h => <th key={h.id} className="trk-full-hz">{h.label}</th>)}
             </tr></thead>
-            <tbody>{rows.slice(0, 80).map(r => {
-              const dStr = new Date(Date.now() - r.age * 86400000).toLocaleDateString("en-US", { day: "2-digit", month: "short" });
+            <tbody>{pageRows.map(r => {
+              const dStr = _rowDate(r).toLocaleDateString("en-US", { day: "2-digit", month: "short" });
               return (
                 <tr key={r.id} onClick={() => onTicker && onTicker(r.sym)}>
                   <td className="trk-full-sticky mono dim2">{dStr}</td>
@@ -30441,7 +30493,12 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
           </table>
         </div>
       )}
-      <div className="lab-verdict mono dim2">{rows.length} calls{srcFilter ? ` · ${SL.SOURCE_BY[srcFilter].label}` : ""} · {metric === "edge" ? "edge vs SPY" : "raw return"} · <b>{view === "full" ? "every horizon as a column" : "sparkline path"}</b>. <b>⤓ Export CSV</b> downloads all {NH} horizon columns for every call — opens in Excel. Click a row → ticker detail.</div>
+      <div className="trk-pager">
+        <button className="trk-page-btn" disabled={curPage <= 0} onClick={() => setPage(curPage - 1)}>‹ Prev</button>
+        <span className="mono dim2">Page {curPage + 1} of {totalPages} · {rows.length} calls{srcFilter ? ` · ${SL.SOURCE_BY[srcFilter].label}` : ""}{(dateFrom || dateTo) ? ` · ${dateFrom || "…"} → ${dateTo || "…"}` : month === "all" ? ` · last ${period.toUpperCase()}` : ` · ${new Date(month + "-01T00:00:00").toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}</span>
+        <button className="trk-page-btn" disabled={curPage >= totalPages - 1} onClick={() => setPage(curPage + 1)}>Next ›</button>
+      </div>
+      <div className="lab-verdict mono dim2">{metric === "edge" ? "edge vs SPY" : "raw return"} · <b>{view === "full" ? "every horizon as a column" : "sparkline path"}</b> · showing {pageRows.length} of {rows.length}. <b>⤓ Export CSV</b> exports the full filtered set ({NH} horizon columns) — opens in Excel. Click a row → ticker detail.</div>
     </div>
   );
 }
