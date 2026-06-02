@@ -2853,6 +2853,31 @@ async def ticker_full_api(sym: str):
         pass
     raise HTTPException(404, f"no scored detail for {sym}")
 
+def _news_age_hours(articles):
+    """Hours since the most-recent dated headline (news_articles[].published_utc)."""
+    if not isinstance(articles, list) or not articles:
+        return None
+    import datetime as _d
+    latest = None
+    for a in articles:
+        ts = (a or {}).get("published_utc") or (a or {}).get("date") or (a or {}).get("published_at")
+        if not ts:
+            continue
+        try:
+            dt = _d.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_d.timezone.utc)
+            if latest is None or dt > latest:
+                latest = dt
+        except Exception:
+            continue
+    if latest is None:
+        return None
+    try:
+        return round((_d.datetime.now(_d.timezone.utc) - latest).total_seconds() / 3600.0, 1)
+    except Exception:
+        return None
+
 @app.get("/api/universe")
 async def universe_api(limit: int = 0):
     """Full scored universe (all ~1832 ranked names) — compact scanner-shaped rows
@@ -2951,6 +2976,8 @@ async def universe_api(limit: int = 0):
             "perf_3m": ((r.get("finviz_elite") or {}).get("perf_quarter_pct")),
             "analyst_upside": ((r.get("analyst") or {}).get("upside_pct")),
             "insider_usd": ((r.get("insider_data") or {}).get("total_buy_value")),
+            "spread_pct": ((r.get("quote_snapshot") or {}).get("spread_pct")),
+            "news_age_h": _news_age_hours(r.get("news_articles")),
         }
     # Sanitize NaN/Infinity → None. Some bundle rows carry non-finite floats
     # (e.g. a divide-by-zero rr/sharpe); Starlette's JSONResponse uses
@@ -6140,6 +6167,7 @@ def _ai_model_block(doc, swing_sample):
     # reads as "bad" next to a 0.76 AUC. The model's edge is in the AUC (it RANKS the
     # ~17% that hit very well); accuracy is the right paired "how-often-right" number.
     _pt = hist_hit.get("per_threshold") or {}
+    _sel = hist_hit.get("selectivity") or {}
     _hit = hist_dir.get("accuracy")
     n_ho = hit.get("model_n") or hist_hit.get("n_holdout")
     return {
@@ -6159,6 +6187,9 @@ def _ai_model_block(doc, swing_sample):
             "model_n": n_ho,
             "model_brier": hist_hit.get("brier"),
             "model_auc_by_threshold": _pt,
+            # Selectivity ladder: realized hit rate per prediction-probability
+            # decile at each target — turns AUC into a tradeable threshold.
+            "selectivity": _sel,
             "model_source": "historical_backfill" if hist_hit else "legacy",
             "mode_metrics": mode_metrics,
             "trained_at": mm.get("trained_at"),

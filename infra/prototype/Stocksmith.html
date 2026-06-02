@@ -10427,6 +10427,8 @@ function mapScannerRows(screener, data) {
       si: r.short_float != null ? +Number(r.short_float).toFixed(1) : null,
       tgt: r.analyst_upside != null ? +Number(r.analyst_upside).toFixed(1) : null,
       insUsd: (r.insider_usd != null && r.insider_usd !== 0) ? r.insider_usd : null,
+      spread: r.spread_pct != null ? +(r.spread_pct * 100).toFixed(1) : null,
+      newsAge: r.news_age_h != null ? r.news_age_h : null,
       ready: (() => { let n = 0; if (r.above_50ema) n++; if (r.above_200sma) n++; if ((r.rvol || 0) >= 1.2) n++; if ((r.adx || 0) >= 20) n++; if (r.rsi != null && r.rsi >= 40 && r.rsi <= 72) n++; if ((r.rr || 0) >= 2) n++; return n; })(),
       signals,
     };
@@ -10650,7 +10652,7 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
             <ScanTh col="beta" sort={sort} onClick={setSort} r>BETA</ScanTh>
             <ScanTh col="dvol" sort={sort} onClick={setSort} r>$VOL</ScanTh>
             <ScanTh col="si" sort={sort} onClick={setSort} r>SI%</ScanTh>
-            <th className="r">SPRD</th>
+            <ScanTh col="spread" sort={sort} onClick={setSort} r>SPRD</ScanTh>
             <th>MTF · 1H·4H·1D·1W</th>
             <ScanTh col="regWR" sort={sort} onClick={setSort} r>REG WR</ScanTh>
             <ScanTh col="rs" sort={sort} onClick={setSort} r>RS</ScanTh>
@@ -10662,7 +10664,7 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
             <ScanTh col="iv" sort={sort} onClick={setSort} r>IV%</ScanTh>
             <ScanTh col="sent" sort={sort} onClick={setSort} r>SENT</ScanTh>
             <ScanTh col="tgt" sort={sort} onClick={setSort} r>TGT↑</ScanTh>
-            <th className="r">NEWS</th>
+            <ScanTh col="newsAge" sort={sort} onClick={setSort} r>NEWS</ScanTh>
             <ScanTh col="insUsd" sort={sort} onClick={setSort} r>INS$</ScanTh>
             <ScanTh col="er" sort={sort} onClick={setSort} r>ER</ScanTh>
             <th>SIGNALS</th>
@@ -10705,7 +10707,7 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
               <td className="r mono tabular dim" title="beta vs SPY">{t.beta!=null?t.beta.toFixed(2):"—"}</td>
               <td className="r mono tabular dim" title="dollar volume (price × avg volume)">{t.dvol!=null?ssFmtBig(t.dvol):"—"}</td>
               <td className={`r mono tabular ${t.si!=null&&t.si>=20?"warn":"dim"}`} title="short interest % float">{t.si!=null?t.si+"%":"—"}</td>
-              <td className="r mono tabular dim" title="avg bid/ask spread — needs live quote feed">—</td>
+              <td className={`r mono tabular ${t.spread==null?"dim":t.spread<=10?"":"warn"}`} title="bid/ask spread (Schwab quote snapshot)">{t.spread!=null?t.spread+"bp":"—"}</td>
               <td><MTFDots states={t.mtf} /></td>
               <td className={`r mono tabular ${t.regWR>=60?"up":t.regWR>=50?"warn":t.regWR==null?"dim":"dn"}`}>{t.regWR!=null?t.regWR+"%":"—"}</td>
               <td className="r mono tabular">{t.rs}</td>
@@ -10717,7 +10719,7 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
               <td className="r mono tabular dim">{t.iv!=null?t.iv:"—"}</td>
               <td className={`r mono tabular ${t.sent>0?"up":t.sent<0?"dn":"dim"}`}>{t.sent>0?"+":""}{t.sent}</td>
               <td className={`r mono tabular ${t.tgt==null?"dim":t.tgt>=15?"up":t.tgt>=5?"warn":"dim"}`} title="upside to mean analyst target">{t.tgt!=null?(t.tgt>=0?"+":"")+t.tgt+"%":"—"}</td>
-              <td className="r mono tabular dim" title="hours since last catalyst — needs news-timestamp feed">—</td>
+              <td className={`r mono tabular ${t.newsAge==null?"dim":t.newsAge<=6?"warn":"dim"}`} title="hours since latest headline (news_articles)">{t.newsAge!=null?(t.newsAge<48?t.newsAge+"h":Math.round(t.newsAge/24)+"d"):"—"}</td>
               <td className={`r mono tabular ${t.insUsd==null?"dim":t.insUsd>0?"up":"dn"}`} title="insider net buy value (90d)">{t.insUsd!=null?(t.insUsd>0?"+":"−")+"$"+(Math.abs(t.insUsd)/1e6).toFixed(1)+"M":"—"}</td>
               <td className={`r mono tabular ${t.er!=null&&t.er<=14?"warn":"dim"}`}>{t.er!=null?t.er:"—"}</td>
               <td className="mono ss2-signals">{t.signals.join(" ")}</td>
@@ -34588,6 +34590,14 @@ function AvCalib({ cal, bt }) {
   const x = (p) => pad + p * plot, y = (p) => h - pad - p * (h - pad * 2);
   const auc = AvNum(bt.auc), hit = AvNum(bt.hit), brier = AvNum(bt.brier), sharpe = AvNum(bt.sharpe);
 
+  // Selectivity: realized hit rate per prediction-probability decile.
+  const sel = bt.selectivity || {};
+  const selTargets = Array.isArray(sel.by_target) ? sel.by_target : [];
+  const primaryPct = AvNum(sel.primary_target_pct);
+  const primary = selTargets.find((t) => AvNum(t.target_pct) === primaryPct) || selTargets[0] || null;
+  const ladder = (primary && Array.isArray(primary.decile_ladder)) ? primary.decile_ladder.map(AvNum) : [];
+  const ladderMax = ladder.length ? Math.max(...ladder.filter((v) => v != null), 0.01) : 1;
+
   return (
     <div className="pf-expo">
       <div className="lab-card">
@@ -34622,6 +34632,44 @@ function AvCalib({ cal, bt }) {
           </table>
         ) : null}
       </div>
+      {selTargets.length > 0 ? (
+        <div className="lab-card">
+          <div className="lab-card-h mono">SELECTIVITY · realized hit rate by P-rank decile{primary ? <span className="dim2"> · target +{AvFix(primary.target_pct, 0)}% · n={primary.n}</span> : null}</div>
+          {ladder.length === 10 ? (
+            <div>
+              <svg width="100%" height="148" viewBox="0 0 340 148" preserveAspectRatio="none" style={{ display: "block" }} aria-label="Decile hit-rate ladder">
+                {(() => { const bw = 30, gap = 3, x0 = 8, ph = 110, by = 124;
+                  const baseY = primary && AvNum(primary.base) != null ? by - (AvNum(primary.base) / ladderMax) * ph : null;
+                  return (<g>
+                    {ladder.map((v, i) => { const hh = v == null ? 0 : (v / ladderMax) * ph; const bx = x0 + i * (bw + gap);
+                      const top = i >= 7; return (
+                      <g key={i}>
+                        <rect x={bx} y={by - hh} width={bw} height={hh} rx="2" fill={top ? "var(--gn)" : "var(--violet)"} opacity={top ? 0.92 : 0.5} />
+                        <text x={bx + bw / 2} y={by - hh - 4} fontSize="8.5" textAnchor="middle" className="mono" fill="var(--ink-1)">{v == null ? "" : Math.round(v * 100) + "%"}</text>
+                        <text x={bx + bw / 2} y={by + 12} fontSize="8" textAnchor="middle" className="mono" fill="var(--ink-3)">{i === 0 ? "low" : i === 9 ? "top" : "D" + i}</text>
+                      </g>); })}
+                    {baseY != null ? <g><line x1="4" y1={baseY} x2="336" y2={baseY} stroke="var(--amb)" strokeDasharray="4 3" opacity="0.8" /><text x="336" y={baseY - 3} fontSize="8.5" textAnchor="end" className="mono" fill="var(--amb)">base {Math.round(AvNum(primary.base) * 100)}%</text></g> : null}
+                  </g>); })()}
+              </svg>
+              <div className="lab-verdict mono dim2">Each bar = one decile of the model's P(hit) ranking on the holdout. <b>Green = top 30%</b>. The ladder climbs left→right because the ranking carries real edge — the model's most-confident calls hit far more often than the base rate (amber line). Trade the top decile, not the average name.</div>
+            </div>
+          ) : null}
+          <table className="dtable wsx-tbl" style={{ marginTop: 10 }}>
+            <thead><tr><th>Target</th><th className="r">Base</th><th className="r">Top 10%</th><th className="r">Top 25%</th><th className="r">Top 50%</th><th className="r">Lift</th></tr></thead>
+            <tbody>{selTargets.map((t, i) => { const b = AvNum(t.base), t10 = AvNum(t.top10), t25 = AvNum(t.top25), t50 = AvNum(t.top50), lf = AvNum(t.lift);
+              const isP = AvNum(t.target_pct) === primaryPct;
+              return (<tr key={i} style={isP ? { background: "var(--bg-1)" } : null}>
+                <td className="mono">{isP ? "▸ " : ""}+{AvFix(t.target_pct, 0)}%</td>
+                <td className="r mono tabular dim2">{b == null ? "—" : Math.round(b * 100) + "%"}</td>
+                <td className="r mono tabular up"><b>{t10 == null ? "—" : Math.round(t10 * 100) + "%"}</b></td>
+                <td className="r mono tabular">{t25 == null ? "—" : Math.round(t25 * 100) + "%"}</td>
+                <td className="r mono tabular">{t50 == null ? "—" : Math.round(t50 * 100) + "%"}</td>
+                <td className="r mono tabular gn-c">{lf == null ? "—" : lf.toFixed(1) + "×"}</td>
+              </tr>); })}</tbody>
+          </table>
+          <div className="lab-verdict mono dim2">How to read: at the <b>+{primary ? AvFix(primary.target_pct, 0) : "—"}%</b> target, the average name hits {primary ? Math.round(AvNum(primary.base) * 100) : "—"}% of the time, but the model's top 10% hit {primary ? Math.round(AvNum(primary.top10) * 100) : "—"}% — a {primary && AvNum(primary.lift) ? AvNum(primary.lift).toFixed(1) : "—"}× lift. Lift grows for bigger targets: the model is strongest on larger moves. This is the threshold to trade, not the AUC abstraction.</div>
+        </div>
+      ) : null}
     </div>
   );
 }
