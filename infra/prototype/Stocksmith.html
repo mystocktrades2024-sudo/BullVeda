@@ -8013,6 +8013,28 @@ select.um-input { cursor: pointer; }
 .ss2-sq--low, .ss2-sq--mid, .ss2-sq--high, .ss2-sq--on { color: var(--amb); background: color-mix(in oklab, var(--amb) 12%, transparent); }
 .ss2-sq--high { color: var(--rd); background: color-mix(in oklab, var(--rd) 14%, transparent); }
 .ss2-spark { display: block; }
+/* ===== Overview lens v5 — collapsible sections + grids ===== */
+.ov-sec-head { cursor: pointer; border-radius: var(--r-2, 7px); }
+.ov-sec-head:hover .sec-hdr-title { color: var(--copper); }
+.ov-sec-chev { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; color: var(--copper); font-size: 11px; transition: transform .16s ease; }
+.ov-sec-chev.is-open { transform: rotate(90deg); }
+.ov-sec.is-closed { opacity: 0.92; }
+.ov-sec-teaser { display: block; width: 100%; text-align: left; margin: 2px 16px 6px; padding: 9px 13px; background: var(--glass-bg-1); border: 1px dashed var(--glass-line); border-radius: var(--r-2, 7px); color: var(--ink-2); font-size: 11px; cursor: pointer; transition: border-color .15s; width: calc(100% - 32px); }
+.ov-sec-teaser:hover { border-color: color-mix(in oklab, var(--copper) 40%, var(--glass-line)); color: var(--ink-1); }
+.ov-co2x2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+.ov-co2x2 > .nc, .ov-co2x2 > .cs-card { margin: 0; }
+.ov-honest-3col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; align-items: start; }
+.ov-honest-block { min-width: 0; }
+.ov-honest-sub { display: block; margin: 0 0 8px; font-size: 9.5px; letter-spacing: 0.08em; color: var(--ink-3); }
+.ov-more { margin-top: 12px; border: 1px solid var(--glass-line); border-radius: var(--r-2, 7px); background: var(--glass-bg-1); overflow: hidden; }
+.ov-more[open] { border-color: color-mix(in oklab, var(--copper) 30%, var(--glass-line)); }
+.ov-more-sum { list-style: none; cursor: pointer; padding: 9px 13px; font-size: 11px; color: var(--ink-2); user-select: none; }
+.ov-more-sum::-webkit-details-marker { display: none; }
+.ov-more-sum:hover { color: var(--ink-1); }
+.ov-more-body { padding: 0 13px 13px; }
+.pm-note-wrap { margin-top: 10px; }
+.pm-note { width: 100%; min-height: 56px; resize: vertical; background: var(--glass-bg-2); color: var(--ink-1); border: 1px solid var(--glass-line); border-radius: var(--r-2, 7px); padding: 8px 10px; font-size: 11px; }
+@media (max-width: 1100px) { .ov-co2x2 { grid-template-columns: 1fr; } .ov-honest-3col { grid-template-columns: 1fr; } }
 /* ===== Upcoming IPOs surface ===== */
 .ipo-title { font-size: 17px; font-weight: 700; color: var(--ink); margin: 2px 0 0; }
 .ipo-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px 16px; }
@@ -13211,71 +13233,115 @@ function CompositeVerdict({ ticker, mode, onLens }) {
 }
 window.CompositeVerdict = CompositeVerdict;
 
+function OvSection({ n, title, sub, headerStyle, defaultOpen = true, teaser, children }) {
+  const key = "ovsecv5-" + n;
+  const [open, setOpen] = React.useState(() => { try { const v = localStorage.getItem(key); return v == null ? defaultOpen : v === "1"; } catch (e) { return defaultOpen; } });
+  React.useEffect(() => {
+    const h = (e) => { if (e.detail === n - 1) setOpen(true); };
+    window.addEventListener("ov-jump-open", h);
+    return () => window.removeEventListener("ov-jump-open", h);
+  }, [n]);
+  const toggle = () => setOpen(o => { const nx = !o; try { localStorage.setItem(key, nx ? "1" : "0"); } catch (e) {} return nx; });
+  return (
+    <div className={`lens-section ov-sec ${open ? "is-open" : "is-closed"}`}>
+      <div className="ov-sec-head" onClick={toggle} role="button" tabIndex={0}
+        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}>
+        <SectionHeader n={n} title={title} sub={sub} style={headerStyle}
+          right={<span className={`ov-sec-chev mono ${open ? "is-open" : ""}`}>▸</span>} />
+      </div>
+      {open
+        ? <div className="lens-pad">{children}</div>
+        : <button className="ov-sec-teaser mono" onClick={toggle}>{teaser || `Show ${(title || "").split(" · ")[0]}`} <span className="copper">· expand</span></button>}
+    </div>
+  );
+}
+function PreMortemNote({ symbol }) {
+  const key = "premortem-" + (symbol || "x");
+  const [val, setVal] = React.useState(() => { try { return localStorage.getItem(key) || ""; } catch (e) { return ""; } });
+  return (
+    <div className="pm-note-wrap">
+      <div className="label-cap" style={{ marginBottom: 6 }}>Your pre-mortem · written before entry</div>
+      <textarea className="pm-note mono" placeholder="If this trade fails, the most likely reason will be… (your own words — saved per ticker)"
+        value={val} onChange={e => { setVal(e.target.value); try { localStorage.setItem(key, e.target.value); } catch (e2) {} }} />
+    </div>
+  );
+}
+function CompanyValuation({ ticker }) {
+  const F = (v, d, fb) => (v == null || isNaN(v)) ? (fb || "—") : (+v).toFixed(d);
+  return (
+      <div className="cs-card cs-card--val">
+        <div className="cs-card-hdr"><div className="label-cap">VALUATION · QUALITY</div><Pill tone="amb" small>fundamentals</Pill></div>
+        <div className="cs-val-row">
+          <div className="cs-val-tile"><span className="label-cap">P/E TTM</span><span className="mono"><b>{F(ticker.pe,1)}</b></span><span className="mono dim2">trailing</span></div>
+          <div className="cs-val-tile"><span className="label-cap">Fwd P/E</span><span className="mono up"><b>{F(ticker.fwdPe,1)}</b></span><span className="mono dim2">forward</span></div>
+          <div className="cs-val-tile"><span className="label-cap">Beta</span><span className="mono"><b>{F(ticker.beta,2)}</b></span><span className="mono dim2">vs SPY</span></div>
+          <div className="cs-val-tile"><span className="label-cap">Mkt cap</span><span className="mono up"><b>{ticker.mcap!=null?(ticker.mcap>=1e9?"$"+(ticker.mcap/1e9).toFixed(1)+"B":"$"+(ticker.mcap/1e6).toFixed(0)+"M"):"—"}</b></span><span className="mono dim2">size</span></div>
+        </div>
+        <div className="cs-val-tile" style={{marginTop:8}}><span className="mono dim2" style={{fontSize:10}}>Deeper valuation (P/S, EV/EBITDA, ROIC, margins, FCF yield, peer multiples) is in the <b className="copper">Value</b> lens — wired to /api/fundamentals (EODHD).</span></div>
+      </div>
+  );
+}
 function LensOverview({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
-  const s1 = useStateToggle("ov-1"), s3 = useStateToggle("ov-3"), s4 = useStateToggle("ov-4"), s6 = useStateToggle("ov-6"), s8 = useStateToggle("ov-8");
+  const tk = (typeof modeAdjustP2 === "function" ? modeAdjustP2(ticker, mode) : ticker);
   const tier = window.__tier ?? 4;
+  const routeLens = (name) => { const map = { "Overview":"overview","AI Edge":"mledge","Technicals":"technicals","Patterns":"patterns","SMC":"smc","Value":"investment","Risk":"risk","Track Rec.":"mledge","Plan":"plan","Earnings":"earnings","Options":"options","Insider":"tape","Tape":"tape","Chart":"chart","Portfolio":"tape" }; if (window.__setLens && map[name]) window.__setLens(map[name]); };
   return (
     <div className="lens lens--ov">
-      {window.CompositeVerdict && <CompositeVerdict ticker={ticker} mode={mode} onLens={(name) => {
-        const map = { "Overview":"overview","AI Edge":"mledge","Technicals":"technicals","Patterns":"patterns","SMC":"smc","Value":"investment","Risk":"risk","Track Rec.":"mledge","Plan":"plan","Earnings":"earnings","Options":"options","Insider":"tape","Tape":"tape" };
-        if (window.__setLens && map[name]) window.__setLens(map[name]);
-      }} />}
-      <DeskRead ticker={ticker} mode={mode} />
-      <ThesisCard ticker={ticker} mode={mode} />
-      <BuyChecklist ticker={ticker} mode={mode} />
-      <NewsCatalysts ticker={ticker} />
-      <VerdictHero ticker={ticker} mode={mode} heroStyle={heroStyle} sizeCat={sizeCat} />
-      <div className="lens-section">
-        <SectionHeader n="0" title="Company Snapshot · Quant Read" sub="who they are · why now · where the numbers come from" style={headerStyle} right={<FreshnessPill state="live" age="18s" />} />
-        <div className="lens-pad"><CompanySnapshot ticker={ticker} /></div>
-      </div>
-      <div className="lens-section">
-        <SectionHeader n={1} title="14-Lens Confluence Heatmap" sub="every discipline's verdict at a glance · conflicts surfaced" style={headerStyle} right={<StateToggle name="ov-1" />} />
-        <StateWrap state={s1.value} source="all-lens aggregator · live polling"><div className="lens-pad"><ConfluenceHeatmap ticker={ticker} /></div></StateWrap>
-      </div>
-      <div className="lens-section">
-        <SectionHeader n={2} title="Sleeve Attribution · Mechanism" sub="which strategy family · alpha source · last 5 instances" style={headerStyle} right={<StateToggle name="ov-3" />} />
-        <StateWrap state={s3.value} source="strategy classifier + setup_stats.json"><div className="lens-pad"><SleeveAttribution ticker={ticker} /></div></StateWrap>
-      </div>
-      {tier >= 3 && (
-      <div className="lens-2col">
-        <div className="lens-section">
-          <SectionHeader n={3} title="Rule-Engine · Gate Cascade Audit" sub="how this name got from ranked → BUY · every gate in order · PRO+" style={headerStyle} right={<StateToggle name="ov-4" />} />
-          <StateWrap state={s4.value} source="rule engine · audit log"><div className="lens-pad"><GateCascade ticker={ticker} /></div></StateWrap>
+      {window.CompositeVerdict && <CompositeVerdict ticker={tk} mode={mode} onLens={routeLens} />}
+      <VerdictHero ticker={tk} mode={mode} heroStyle={heroStyle} sizeCat={sizeCat} />
+
+      <OvSection n={1} title="Company & Catalysts · Context" sub="who they are · valuation · earnings · what's hitting the tape" headerStyle={headerStyle} defaultOpen={true} teaser="Profile · valuation · earnings · classified catalysts">
+        <div className="ov-co2x2">
+          <CompanySnapshot ticker={tk} />
+          <CompanyValuation ticker={tk} />
+          <NewsCatalysts ticker={tk} />
         </div>
-        <div className="lens-section">
-          <SectionHeader n={4} title="What Changed · 24h Delta" sub="since last bundle · per-pillar deltas" style={headerStyle} right={<StateToggle name="ov-6" />} />
-          <StateWrap state={s6.value} source="bundle diff · per-pillar last 24h"><div className="lens-pad"><WhatChanged ticker={ticker} /></div></StateWrap>
-        </div>
-      </div>
-      )}
-      <div className="lens-section">
-        <SectionHeader n={5} title="Pre-Mortem · Honesty Surface" sub="what would make this thesis wrong · written before entry" style={headerStyle} right={<StateToggle name="ov-8" />} />
-        <StateWrap state={s8.value} source="thesis library · per-ticker">
-          <div className="lens-pad">
+      </OvSection>
+
+      <OvSection n={2} title="Entry Readiness · Are We Cleared?" sub="the buy funnel as ✓/✗ · plus the full rule-engine audit" headerStyle={headerStyle}>
+        <BuyChecklist ticker={tk} mode={mode} />
+        {tier >= 3 && (
+          <details className="ov-more">
+            <summary className="ov-more-sum mono">Show the full 10-gate rule-engine audit · how the universe ranked → BUY · PRO+</summary>
+            <div className="ov-more-body"><GateCascade ticker={tk} /></div>
+          </details>
+        )}
+      </OvSection>
+
+      <OvSection n={3} title="Lens Confluence · The Evidence" sub="every discipline's read · click any tile to open that lens" headerStyle={headerStyle}>
+        <ConfluenceHeatmap ticker={tk} />
+      </OvSection>
+
+      <OvSection n={4} title="The Case · Bull vs Bear" sub="why it's a buy — and what would make it wrong" headerStyle={headerStyle}>
+        <ThesisCard ticker={tk} mode={mode} />
+      </OvSection>
+
+      <OvSection n={5} title="Keep Me Honest" sub="what would break the thesis · what moved in 24h · why the edge exists" headerStyle={headerStyle} defaultOpen={true} teaser="pre-mortem triggers · your note · 24h deltas · sleeve mechanism">
+        <div className="ov-honest-3col">
+          <div className="ov-honest-block">
+            <div className="ov-honest-sub label-cap">▼ What would make this wrong · pre-mortem</div>
             <div className="premortem">
               <div className="premortem-row"><span className="pm-num mono">1</span><span className="pm-text">Loses VWAP intraday AND closes below the stop — invalidation cascade.</span><Pill tone="rd" small>HARD</Pill></div>
               <div className="premortem-row"><span className="pm-num mono">2</span><span className="pm-text">Sector ETF breaks 50-DMA on +1.5σ volume — regime flip.</span><Pill tone="amb" small>MEDIUM</Pill></div>
               <div className="premortem-row"><span className="pm-num mono">3</span><span className="pm-text">CPI prints &gt;0.4% MoM — risk-off reset.</span><Pill tone="amb" small>MACRO</Pill></div>
+              <div className="premortem-row"><span className="pm-num mono">4</span><span className="pm-text">Top customer cuts guidance on the next call — fundamental break.</span><Pill tone="rd" small>FUNDAMENTAL</Pill></div>
             </div>
+            <PreMortemNote symbol={tk.symbol} />
           </div>
-        </StateWrap>
-      </div>
-      <div className="lens-section">
-        <SectionHeader n={6} title="Cross-Lens Confluence" style={headerStyle} />
-        <div className="lens-pad">
-          <CrossLens lead="copper" cells={[
-            { lens:"Overview", verdict:ticker.verdict, tone:ticker.verdict==="BUY"?"gn":"amb", note:`score ${ticker.score}` },
-            { lens:"Technicals", verdict:"PASS", tone:"gn", note:`tech ${ticker.pillars.technical}` },
-            { lens:"Value", verdict:"MARG.", tone:"amb", note:"MoS 6%" },
-            { lens:"Risk", verdict:"OK", tone:"gn", note:`risk ${ticker.pillars.risk}` },
-            { lens:"Earnings", verdict:`${ticker.earnings.days} d`, tone:ticker.earnings.days<=14?"amb":"gn", note:ticker.earnings.days<=14?"trim pre-ER":"clear" },
-          ]} />
+          <div className="ov-honest-block">
+            <div className="ov-honest-sub label-cap">↗ What changed · last 24h</div>
+            <WhatChanged ticker={tk} />
+          </div>
+          <div className="ov-honest-block">
+            <div className="ov-honest-sub label-cap">⚙ Why the edge exists · mechanism</div>
+            <SleeveAttribution ticker={tk} />
+          </div>
         </div>
-      </div>
+      </OvSection>
+
       <div className="lens-call">
         <span className="label-cap">The Read · {mode}</span>
-        <span className="mono">Take the breakout above <b className="copper">${ticker.pivot.toFixed(2)}</b>, half-Kelly size · Wilson LB <b className="up">{(ticker.setupStats.wilsonLB*100).toFixed(1)}%</b> · PF {ticker.setupStats.pf.toFixed(2)}.</span>
+        <span className="mono">Take the breakout above <b className="copper">${tk.pivot.toFixed(2)}</b>, half-Kelly size · Wilson LB <b className="up">{(tk.setupStats.wilsonLB*100).toFixed(1)}%</b> · PF {tk.setupStats.pf.toFixed(2)}.</span>
       </div>
     </div>
   );
