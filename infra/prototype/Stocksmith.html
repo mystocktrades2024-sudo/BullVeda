@@ -8010,6 +8010,8 @@ select.um-input { cursor: pointer; }
 .trk-toggle--sm button { padding: 4px 9px; font-size: 10px; text-transform: capitalize; }
 
 .trk-tabs { align-items: center; }
+.trk-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+.trk-sort:hover { color: var(--copper); }
 .trk-month-sel { background: var(--bg-2); color: var(--ink-1); border: 1px solid var(--line-2); border-radius: var(--r-1); font-family: var(--mono); font-size: 11px; padding: 4px 8px; cursor: pointer; }
 .trk-range { display: inline-flex; align-items: center; gap: 5px; }
 .trk-date { background: var(--bg-2); color: var(--ink-1); border: 1px solid var(--line-2); border-radius: var(--r-1); font-family: var(--mono); font-size: 11px; padding: 3px 6px; cursor: pointer; color-scheme: dark; }
@@ -30365,6 +30367,8 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
   const [month, setMonth] = useTR("all");   // "YYYY-MM" or "all"
   const [dateFrom, setDateFrom] = useTR("");
   const [dateTo, setDateTo] = useTR("");
+  const [sortKey, setSortKey] = useTR("");   // "" = default (newest first) · date|sym|src|dir|<HZ id>
+  const [sortDir, setSortDir] = useTR(-1);
   const [page, setPage] = useTR(0);
   const PAGE_SIZE = 50;
   const PERIOD_DAYS = { "1m": 31, "3m": 93, "6m": 186, "1y": 372, "all": 99999 };
@@ -30375,7 +30379,7 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
   const rows = useTRm(() => {
     const maxAge = PERIOD_DAYS[period] != null ? PERIOD_DAYS[period] : 372;
     const hasRange = !!(dateFrom || dateTo);
-    return allRows.filter(r => {
+    const out = allRows.filter(r => {
       if (dir !== "all" && r.dir !== dir) return false;
       const rd = r.date || new Date(Date.now() - r.age * 86400000).toISOString().slice(0, 10);
       if (hasRange) {                                   // explicit date range wins
@@ -30386,7 +30390,31 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
       } else if ((r.age || 0) > maxAge) return false;   // else the lookback window
       return true;
     });
-  }, [allRows, dir, period, month, dateFrom, dateTo]);
+    if (sortKey) {
+      const sv = (r) => {
+        if (sortKey === "date") return r.date || "";
+        if (sortKey === "sym") return r.sym || "";
+        if (sortKey === "src") return r.label || "";
+        if (sortKey === "dir") return r.dir || "";
+        const i = SL.HZ.findIndex(h => h.id === sortKey);
+        if (i >= 0) { const p = r.path[i]; return (p && p.mature) ? p.v : null; }
+        return null;
+      };
+      out.sort((a, b) => {
+        const va = sv(a), vb = sv(b);
+        if (va == null && vb == null) return 0;
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        if (typeof va === "string") return sortDir * va.localeCompare(vb);
+        return sortDir * (va - vb);
+      });
+    } else {
+      out.sort((a, b) => a.age - b.age);
+    }
+    return out;
+  }, [allRows, dir, period, month, dateFrom, dateTo, sortKey, sortDir]);
+  const toggleSort = (k) => { if (sortKey === k) setSortDir(d => -d); else { setSortKey(k); setSortDir(k === "sym" || k === "src" || k === "dir" || k === "date" ? 1 : -1); } };
+  const sArrow = (k) => sortKey === k ? (sortDir > 0 ? " ▲" : " ▼") : "";
   // reset to first page whenever the filter set changes
   useEffect(() => { setPage(0); }, [dir, period, month, dateFrom, dateTo, srcFilter, metric, view]);
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
@@ -30447,7 +30475,7 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
       </div>
       {view === "path" ? (
         <table className="dtable wsx-tbl trk-led">
-          <thead><tr><th>Logged</th><th>Date</th><th>Symbol</th><th>Source</th><th>Dir</th><th className="r">Ref px</th><th>Forward path</th><th className="r">Latest</th><th className="r">Matured</th><th>Status</th></tr></thead>
+          <thead><tr><th>Logged</th><th className="trk-sort" onClick={() => toggleSort("date")}>Date{sArrow("date")}</th><th className="trk-sort" onClick={() => toggleSort("sym")}>Symbol{sArrow("sym")}</th><th className="trk-sort" onClick={() => toggleSort("src")}>Source{sArrow("src")}</th><th className="trk-sort" onClick={() => toggleSort("dir")}>Dir{sArrow("dir")}</th><th className="r">Ref px</th><th>Forward path</th><th className="r">Latest</th><th className="r">Matured</th><th>Status</th></tr></thead>
           <tbody>{pageRows.map(r => {
             const d = _rowDate(r);
             const dStr = d.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "2-digit" });
@@ -30471,8 +30499,11 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
         <div className="trk-full-wrap">
           <table className="trk-full">
             <thead><tr>
-              <th className="trk-full-sticky">Date</th><th className="trk-full-sticky2">Sym</th><th>Src</th><th>Dir</th>
-              {SL.HZ.map(h => <th key={h.id} className="trk-full-hz">{h.label}</th>)}
+              <th className="trk-full-sticky trk-sort" onClick={() => toggleSort("date")}>Date{sArrow("date")}</th>
+              <th className="trk-full-sticky2 trk-sort" onClick={() => toggleSort("sym")}>Sym{sArrow("sym")}</th>
+              <th className="trk-sort" onClick={() => toggleSort("src")}>Src{sArrow("src")}</th>
+              <th className="trk-sort" onClick={() => toggleSort("dir")}>Dir{sArrow("dir")}</th>
+              {SL.HZ.map(h => <th key={h.id} className="trk-full-hz trk-sort" onClick={() => toggleSort(h.id)} title={`Sort by ${h.label} return`}>{h.label}{sArrow(h.id)}</th>)}
             </tr></thead>
             <tbody>{pageRows.map(r => {
               const dStr = _rowDate(r).toLocaleDateString("en-US", { day: "2-digit", month: "short" });
