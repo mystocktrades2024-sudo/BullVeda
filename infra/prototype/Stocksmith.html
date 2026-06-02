@@ -11539,19 +11539,28 @@ function ConfluenceHeatmap({ ticker, onLens }) {
   const p = ticker.pillars || {};
   const ss = ticker.setupStats || {};
   const erDays = (ticker.earnings && ticker.earnings.days != null) ? ticker.earnings.days : null;
+  const num = (v) => (v != null && v !== "None" && !isNaN(+v)) ? +v : null;
+  // setup name — full row stores it under setup_family; universe under setup
+  const setupName = r.setup || r.setup_family || (ticker.setupFamily && ticker.setupFamily !== "—" ? ticker.setupFamily : null);
+  // insider — real net comes from insider_data {buys,sells} or insider_net
+  const insData = (r.insider_data && typeof r.insider_data === "object") ? r.insider_data : null;
+  const insNet = insData ? ((num(insData.buys) || 0) - (num(insData.sells) || 0)) : num(r.insider_net);
+  // portfolio fit — real open positions (Alpaca paper book)
+  const _posn = (window.__ssData && window.__ssData.portfolio && Array.isArray(window.__ssData.portfolio.positions)) ? window.__ssData.portfolio.positions : [];
+  const _held = _posn.find(pp => (pp.ticker || pp.symbol || "").toUpperCase() === (ticker.symbol || "").toUpperCase());
   const cells = [
     { lens: "Overview", v: ticker.verdict, tone: ticker.verdict === "BUY" ? "gn" : ticker.verdict === "AVOID" ? "rd" : "amb", note: `score ${ticker.score}` },
     { lens: "Plan", v: ticker.rMultiple != null ? `R ${ticker.rMultiple.toFixed(2)}` : "—", tone: ticker.rMultiple != null && ticker.rMultiple >= 1.5 ? "gn" : "amb", note: ticker.rMultiple != null ? "bracket set" : "no R" },
     { lens: "Chart", v: p.technical != null ? (p.technical >= 70 ? "TREND+" : p.technical >= 50 ? "MIXED" : "WEAK") : "—", tone: p.technical != null ? (p.technical >= 70 ? "gn" : p.technical >= 50 ? "amb" : "rd") : "ink", note: p.technical != null ? `tech ${p.technical}` : "no tech" },
     { lens: "Technicals", v: p.technical != null ? (p.technical >= 60 ? "PASS" : "SOFT") : "—", tone: p.technical != null ? (p.technical >= 60 ? "gn" : "amb") : "ink", note: p.technical != null ? `tech ${p.technical}` : "no tech" },
-    { lens: "Patterns", v: r.setup || "—", tone: r.setup ? "gn" : "ink", note: r.catalyst_tier != null ? `cat T${r.catalyst_tier}` : "no pattern" },
-    { lens: "SMC", v: r.smc_score != null ? "SCORED" : "—", tone: r.smc_score != null ? (r.smc_max && r.smc_score / r.smc_max >= 0.6 ? "gn" : "amb") : "ink", note: r.smc_score != null && r.smc_max ? `${Math.round(r.smc_score / r.smc_max * 100)}%` : "no smc" },
-    { lens: "Value", v: r.analyst_upside != null ? (r.analyst_upside >= 10 ? "UPSIDE" : "MARG.") : "—", tone: r.analyst_upside != null ? (r.analyst_upside >= 10 ? "gn" : "amb") : "ink", note: r.analyst_upside != null ? `${r.analyst_upside >= 0 ? "+" : ""}${Number(r.analyst_upside).toFixed(0)}%` : "no PT" },
+    { lens: "Patterns", v: setupName || "—", tone: setupName ? "gn" : "ink", note: r.catalyst_tier != null ? `cat T${r.catalyst_tier}` : (setupName ? "pattern" : "no pattern") },
+    { lens: "SMC", v: num(r.smc_score) != null ? "SCORED" : "—", tone: num(r.smc_score) != null ? (num(r.smc_max) && num(r.smc_score) / num(r.smc_max) >= 0.6 ? "gn" : "amb") : "ink", note: num(r.smc_score) != null && num(r.smc_max) ? `${Math.round(num(r.smc_score) / num(r.smc_max) * 100)}%` : "no smc" },
+    { lens: "Value", v: num(r.analyst_upside) != null ? (num(r.analyst_upside) >= 10 ? "UPSIDE" : "MARG.") : "—", tone: num(r.analyst_upside) != null ? (num(r.analyst_upside) >= 10 ? "gn" : "amb") : "ink", note: num(r.analyst_upside) != null ? `${num(r.analyst_upside) >= 0 ? "+" : ""}${num(r.analyst_upside).toFixed(0)}%` : "no PT" },
     { lens: "Risk", v: p.risk != null ? (p.risk >= 60 ? "OK" : "TIGHT") : "—", tone: p.risk != null ? (p.risk >= 60 ? "gn" : "amb") : "ink", note: p.risk != null ? `risk ${p.risk}` : "no risk" },
     { lens: "Earnings", v: erDays != null ? `${erDays}d` : "—", tone: erDays != null ? (erDays <= 14 ? "amb" : "gn") : "ink", note: erDays != null ? (erDays <= 14 ? "trim pre-ER" : "clear") : "no date" },
-    { lens: "Options", v: r.iv_rank != null ? (r.iv_rank >= 60 ? "RICH" : "FAIR") : "—", tone: r.iv_rank != null ? (r.iv_rank >= 60 ? "amb" : "gn") : "ink", note: r.iv_rank != null ? `IVR ${Number(r.iv_rank).toFixed(0)}` : "no IV" },
-    { lens: "Portfolio", v: "—", tone: "ink", note: "fit not in row" },
-    { lens: "Tape", v: r.insider_buys != null || r.insider_sells != null ? `${(r.insider_buys || 0) - (r.insider_sells || 0) >= 0 ? "+" : ""}${(r.insider_buys || 0) - (r.insider_sells || 0)} INS` : "—", tone: r.insider_buys != null ? ((r.insider_buys || 0) - (r.insider_sells || 0) > 0 ? "gn" : "amb") : "ink", note: r.sent_score != null ? `sent ${r.sent_score}` : "insider net" },
+    { lens: "Options", v: num(r.iv_rank) != null ? (num(r.iv_rank) >= 60 ? "RICH" : "FAIR") : "—", tone: num(r.iv_rank) != null ? (num(r.iv_rank) >= 60 ? "amb" : "gn") : "ink", note: num(r.iv_rank) != null ? `IVR ${num(r.iv_rank).toFixed(0)}` : "no IV" },
+    { lens: "Portfolio", v: _held ? "HELD" : (_posn.length ? "FLAT" : "—"), tone: _held ? "amb" : "gn", note: _held ? `${num(_held.allocation_pct) != null ? num(_held.allocation_pct).toFixed(1) + "% NAV" : "in book"}` : (_posn.length ? `${_posn.length} open · not held` : "no book") },
+    { lens: "Tape", v: insNet != null ? `${insNet >= 0 ? "+" : ""}${insNet} INS` : "—", tone: insNet != null ? (insNet > 0 ? "gn" : insNet < 0 ? "rd" : "amb") : "ink", note: insData && insData.sentiment ? String(insData.sentiment) : (num(r.sent_score) != null ? `sent ${num(r.sent_score)}` : "net insider") },
     { lens: "Track Rec.", v: ss.wilsonLB != null ? (ss.wilsonLB >= 0.45 ? "EDGE" : "THIN") : "—", tone: ss.wilsonLB != null ? (ss.wilsonLB >= 0.45 ? "gn" : "amb") : "ink", note: ss.wilsonLB != null ? `Wilson ${(ss.wilsonLB * 100).toFixed(0)}` : "no stats" },
     { lens: "AI Edge", v: r.star_rating != null ? `★${r.star_rating}` : "—", tone: r.star_rating != null ? (r.star_rating >= 4 ? "gn" : "amb") : "ink", note: r.star_rating != null ? "star rating" : "no ml in row" },
   ];
@@ -36317,8 +36326,21 @@ function App() {
   }, [detailSym]);
   const detailTicker = useMemo(() => {
     if (!detailSym) return null;
-    // Prefer the full fetched row; else the (compact) top-1000 row; else top-50.
-    const raw = detailRaw || allRows.find(r => r.ticker === detailSym);
+    // The /api/ticker full row (fundamentals, insider_data, news — 145 fields) LACKS
+    // the scan-computed scores (smc_score, iv_rank, short_float, analyst_upside,
+    // sector_pct_rank, setup, squeeze) that live only in the /api/universe row. Merge:
+    // universe row as base, full row overlaid where it has a REAL value — so every
+    // lens (Confluence, Intel, Risk…) sees the union, never a null that wiped a score.
+    const uni = allRows.find(r => r.ticker === detailSym);
+    let raw = null;
+    if (detailRaw || uni) {
+      raw = { ...(uni || {}) };
+      const o = detailRaw || {};
+      for (const k in o) {
+        const v = o[k];
+        if (v != null && v !== "None" && v !== "" && !(typeof v === "number" && isNaN(v))) raw[k] = v;
+      }
+    }
     const mapped = (raw ? mapScannerRows([raw], data)[0] : undefined) || universe.find(r => r.sym === detailSym);
     return toDetailTicker(mapped, detailSym, raw);
   }, [detailSym, universe, allRows, data, detailRaw]);
