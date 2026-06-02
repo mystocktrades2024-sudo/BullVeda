@@ -6112,28 +6112,43 @@ def _ai_model_block(doc, swing_sample):
     mode_metrics = mm.get("mode_metrics") or {}
     hit = (swing_sample or {}).get("hit_net") or {}
     # Real production-model metrics from the historical training report.
-    hist_hit = {}
+    hist_hit, hist_dir = {}, {}
     try:
         import json as _json
         _hp = BASE_DIR / "cache" / "ml" / "calibration_report_historical.json"
         if _hp.exists():
-            _hr = _json.loads(_hp.read_text())
-            hist_hit = (((_hr.get("modes") or {}).get("swing") or {}).get("hit_net") or {})
+            _sw = (((_json.loads(_hp.read_text())).get("modes") or {}).get("swing") or {})
+            hist_hit = _sw.get("hit_net") or {}
+            hist_dir = _sw.get("direction") or {}
     except Exception:
-        hist_hit = {}
+        hist_hit, hist_dir = {}, {}
     model_auc = hit.get("model_auc")
     if model_auc is None and hist_hit.get("auc") is not None:
         model_auc = hist_hit.get("auc")
+    # HIT RATE KPI = the model's DIRECTIONAL accuracy (honest, intuitive). NOT the
+    # target base-rate (~17% reach a +3.5% move) — that's a base rate, not skill, and
+    # reads as "bad" next to a 0.76 AUC. The model's edge is in the AUC (it RANKS the
+    # ~17% that hit very well); accuracy is the right paired "how-often-right" number.
+    _pt = hist_hit.get("per_threshold") or {}
+    _hit = hist_dir.get("accuracy")
+    n_ho = hit.get("model_n") or hist_hit.get("n_holdout")
     return {
         "calibration": by_band,
         "backtest": {
             "summary": summary,
             "n_total": acc.get("n_total"),
             "n_closed": acc.get("n_closed"),
+            # field names the ML-tab frontend reads (bt.auc / bt.hit / bt.n / bt.brier)
+            "auc": model_auc,
+            "hit": _hit,
+            "n": n_ho,
+            "brier": hist_hit.get("brier"),
+            "horizon": "5d",
+            # explicit aliases + the richer breakdown
             "model_auc": model_auc,
-            "model_n": hit.get("model_n") or hist_hit.get("n_holdout"),
+            "model_n": n_ho,
             "model_brier": hist_hit.get("brier"),
-            "model_auc_by_threshold": hist_hit.get("per_threshold"),
+            "model_auc_by_threshold": _pt,
             "model_source": "historical_backfill" if hist_hit else "legacy",
             "mode_metrics": mode_metrics,
             "trained_at": mm.get("trained_at"),
