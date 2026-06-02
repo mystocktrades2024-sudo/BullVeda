@@ -9878,12 +9878,22 @@ async def news_api(t: str, limit: int = 8):
         import eodhd_client as eod
         # eodhd_client.news returns list of {date, title, link, content, sentiment, ...}
         rows = eod.news(tk, limit=limit) or []
-        articles = [{
-            "date":   r.get("date") or r.get("published_at"),
-            "title":  r.get("title") or r.get("headline") or "",
-            "source": (r.get("source") or "EODHD")[:30],
-            "url":    r.get("link") or r.get("url") or "",
-        } for r in rows[:limit] if r]
+        def _art(r):
+            sent = r.get("sentiment") or {}
+            pos, neg = float(sent.get("pos") or 0), float(sent.get("neg") or 0)
+            syms = [str(x).split(".")[0] for x in (r.get("symbols") or []) if x][:4]
+            content = (r.get("content") or "").strip().replace("\n", " ")
+            return {
+                "date":   r.get("date") or r.get("published_at"),
+                "title":  r.get("title") or r.get("headline") or "",
+                "source": (r.get("source") or "EODHD")[:30],
+                "url":    r.get("link") or r.get("url") or "",
+                "summary": content[:220],
+                "symbols": syms,
+                "sent":   round(pos - neg, 2),                # real EODHD pos−neg, −1..+1
+                "polarity": sent.get("polarity"),
+            }
+        articles = [_art(r) for r in rows[:limit] if r]
         return {"ticker": tk, "articles": articles, "count": len(articles)}
     except Exception as e:
         return {"ticker": tk, "articles": [], "error": str(e)}

@@ -7999,6 +7999,13 @@ select.um-input { cursor: pointer; }
 .pv-map-chips { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .pv-map-strength { font-size: 11px; font-weight: 700; margin-left: 4px; }
 .pv-map-row--current .pv-map-label { color: var(--copper); }
+/* Top Stories — prototype richer card (summary / impact / affects) */
+.ts-sum { font-size: 10.5px; line-height: 1.45; color: var(--ink-2); margin-top: 3px; }
+.ts-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.ts-impact { font-size: 8.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 7px; border-radius: var(--r-pill); border: 1px solid color-mix(in oklab, currentColor 38%, transparent); background: color-mix(in oklab, currentColor 12%, transparent); }
+.ts-affects { font-size: 8.5px; letter-spacing: 0.04em; text-transform: uppercase; margin-left: 2px; }
+.ts-tk { font-family: var(--mono); font-size: 9.5px; font-weight: 600; color: var(--ink-1); background: var(--glass-bg-1); border: 1px solid var(--glass-line); border-radius: var(--r-2); padding: 1px 6px; cursor: pointer; }
+.ts-tk:hover { border-color: var(--copper); color: var(--copper); }
 /* ===== Upcoming IPOs surface ===== */
 .ipo-title { font-size: 17px; font-weight: 700; color: var(--ink); margin: 2px 0 0; }
 .ipo-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px 16px; }
@@ -9962,18 +9969,30 @@ function TopStories({ d, screener, onTicker }) {
   return (
     <div className="ts">
       {news.map((s, i) => {
+        // real EODHD article sentiment (pos−neg, −1..+1); fall back to scan sent_score
+        const artSent = (typeof s.sent === "number") ? s.sent : null;
         const ss = sentBy[s.sym];
-        const tone = ss == null ? "ink" : ss >= 3 ? "gn" : ss <= 1 ? "rd" : "amb";
+        const score = artSent != null ? artSent : (ss != null ? (ss - 2) / 2 : null);
+        const tone = score == null ? "ink" : score > 0.05 ? "gn" : score < -0.05 ? "rd" : "amb";
         const time = String(s.date || "").slice(11, 16) || String(s.date || "").slice(5, 10);
+        const impact = score == null ? null : score > 0.05 ? "Bullish tone" : score < -0.05 ? "Bearish tone" : "Neutral tone";
+        const impactTone = score == null ? "ink" : score > 0.05 ? "gn" : score < -0.05 ? "rd" : "amb";
+        const affects = (s.symbols && s.symbols.length ? s.symbols : (s.sym ? [s.sym] : []));
         return (
           <div key={i} className={`ts-row ts-${tone}`} onClick={() => s.sym && onTicker(s.sym)}>
             <div className="ts-top">
               <span className="ts-time mono dim2">{time}</span>
               <span className="ts-src mono dim2">{s.source || "EODHD"}</span>
               {s.sym && <span className="ts-sym mono">{s.sym}</span>}
-              {ss != null && <span className={`ts-sent mono ${ss >= 2 ? "up" : "dn"}`}>sent {ss}</span>}
+              {score != null && <span className={`ts-sent mono ${score >= 0 ? "up" : "dn"}`}>{score >= 0 ? "+" : ""}{score.toFixed(2)}</span>}
             </div>
-            <div className="ts-head">{s.title}</div>
+            <div className="ts-head">{s.url ? <a href={s.url} target="_blank" rel="noopener" style={{ color: "inherit", textDecoration: "none" }} onClick={e => e.stopPropagation()}>{s.title}</a> : s.title}</div>
+            {s.summary ? <div className="ts-sum">{s.summary}{s.summary.length >= 220 ? "…" : ""}</div> : null}
+            <div className="ts-foot">
+              {impact && <span className={`ts-impact mono kpi-tone--${impactTone}`}>{impact}</span>}
+              {affects.length ? <span className="ts-affects mono dim2">affects</span> : null}
+              {affects.map(tk => <button key={tk} className="ts-tk mono" onClick={e => { e.stopPropagation(); onTicker && onTicker(tk); }}>{tk}</button>)}
+            </div>
           </div>
         );
       })}
