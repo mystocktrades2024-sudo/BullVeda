@@ -7715,7 +7715,11 @@ async def search_tickers(q: str = "", limit: int = 10):
 async def macro_events(days_ahead: int = 14):
     """Economic events calendar (FOMC/CPI/NFP/PMI). Usage: /api/macro/events?days_ahead=14"""
     try:
-        import eodhd_client as ec, datetime as _dt
+        import eodhd_client as ec, datetime as _dt, time as _t
+        _ck = f"{event_type}:{days_ahead}"
+        _c = _FIN_EVENTS_CACHE.get(_ck)
+        if _c and (_t.time() - _c[0]) < 3600:   # 1h cache — IPO/splits calendar changes daily
+            return _c[1]
         today = _dt.date.today()
         end = today + _dt.timedelta(days=days_ahead)
         events = ec.economic_events(from_date=today.isoformat(), to_date=end.isoformat(), country="US") or []
@@ -7973,6 +7977,8 @@ async def etf_holdings(ticker: str):
         raise HTTPException(500, str(e))
 
 
+_FIN_EVENTS_CACHE = {}
+
 @app.get("/api/events/financial")
 async def financial_events_endpoint(event_type: str = "ipos", days_ahead: int = 30):
     """Financial events — IPOs / splits / secondary offerings.
@@ -7999,9 +8005,11 @@ async def financial_events_endpoint(event_type: str = "ipos", days_ahead: int = 
                 events = []
         else:
             events = []
-        return {"event_type": event_type, "events": events[:50],
+        _payload = {"event_type": event_type, "events": events[:50],
                 "count": len(events),
                 "from": today.isoformat(), "to": end.isoformat()}
+        _FIN_EVENTS_CACHE[_ck] = (_t.time(), _payload)
+        return _payload
     except Exception as e:
         raise HTTPException(500, str(e))
 
