@@ -574,6 +574,19 @@ def _request(
             _bump_endpoint(endpoint, "cache_hit")
             return cached
 
+    # Cache-only / offline mode (EODHD_CACHE_ONLY=1): NEVER hit the network.
+    # Returns cache even if stale (ignore TTL), else None. Used by the offline
+    # dashboard regen so rebuilding data_*.json from the existing bundle costs
+    # ZERO EODHD calls. Checked per-call so it's immune to import ordering.
+    if os.environ.get("EODHD_CACHE_ONLY") == "1":
+        if cache_key:
+            stale = _cache_read(cache_key, 10 ** 12)  # any age
+            if stale is not None:
+                _CALL_COUNTER["cache_hit"] += 1
+                _bump_endpoint(endpoint, "cache_hit")
+                return stale
+        return None
+
     # Daily call-budget guard — short-circuit non-essential NETWORK calls once the
     # soft limit is reached so jobs fail cheap instead of cascading real 402s.
     # Cache HITS already returned above and are never blocked. Fully fallback-safe:

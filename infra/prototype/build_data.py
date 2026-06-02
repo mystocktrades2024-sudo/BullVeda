@@ -7,6 +7,7 @@ nested dicts (elliott_wave, reaction_checklist, trade_plan) in tickers.json for 
 elite-detail full-analysis page.
 """
 import json
+import os
 from pathlib import Path
 
 import sys
@@ -2969,6 +2970,10 @@ def _enrich_cockpit_data(data: dict) -> None:
 
 def main():
     global _PREV_BUNDLE_INDEX, _PREV_BUNDLE_DATE, _SYSTEM_GATE_ACTIVE, _SYSTEM_GATE_REASON, _ML_PUP
+    if os.environ.get("EODHD_CACHE_ONLY") == "1":
+        print("  [OFFLINE REGEN] EODHD_CACHE_ONLY=1 — rebuilding data_*.json from bundle + cache, "
+              "ZERO network. Lite-universe extras (ML/earnings/options-only tickers) are skipped; "
+              "the next full scan restores them.")
     _prev = _load_previous_bundle_index()
     _PREV_BUNDLE_DATE = _prev.pop("_snapshot_date", "") if _prev else ""
     _PREV_BUNDLE_INDEX = _prev or {}
