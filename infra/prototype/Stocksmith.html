@@ -10940,6 +10940,445 @@ function Cone({ lo, mid, hi, current=0, w=280, h=110 }) {
 /* ── Overview lens ──────────────────────────────────────────────── */
 // real account NAV from portfolio_state (null when not connected — never fabricated)
 function ssNAV() { try { const e = window.__ssData && window.__ssData.portfolio && window.__ssData.portfolio.equity; return (e != null && !isNaN(+e)) ? +e : null; } catch (_) { return null; } }
+/* ===== Overview lens v5 · DecisionHero + SetupChart (real /api/ohlcv bars) ===== */
+(function () {
+  var css = `
+  .dh{ background:var(--glass-bg-1); border:1px solid var(--glass-line); border-radius:10px; padding:0; margin-bottom:14px; overflow:hidden; }
+  .dh--gn{ border-left:3px solid var(--gn); } .dh--amb{ border-left:3px solid var(--amb); } .dh--rd{ border-left:3px solid var(--rd); }
+  .dh-top{ display:grid; grid-template-columns:auto 1fr; gap:20px; padding:16px 18px 14px; align-items:center; }
+  .dh-vis{ flex:none; display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .dh-main{ display:flex; flex-direction:column; gap:9px; min-width:0; }
+  .dh-eyebrow{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .dh-eyebrow-l{ font-size:10px; letter-spacing:.16em; color:var(--ink-3); }
+  .dh-verdict{ display:flex; align-items:baseline; gap:13px; flex-wrap:wrap; }
+  .dh-bias{ font-size:25px; font-weight:700; letter-spacing:.01em; line-height:1; }
+  .dh-bias--gn{ color:var(--gn); } .dh-bias--amb{ color:var(--amb); } .dh-bias--rd{ color:var(--rd); }
+  .dh-net{ font-family:var(--mono); font-size:27px; font-weight:600; line-height:1; color:var(--ink-1); }
+  .dh-net-of{ font-size:13px; color:var(--ink-3); }
+  .dh-conf{ font-family:var(--mono); font-size:10.5px; color:var(--ink-2); }
+  .dh-counts{ display:flex; gap:6px; }
+  .dh-cnt{ font-family:var(--mono); font-size:9.5px; font-weight:700; letter-spacing:.05em; padding:2px 8px; border-radius:20px; }
+  .dh-cnt--gn{ color:var(--gn); background:color-mix(in oklab,var(--gn) 14%,transparent); }
+  .dh-cnt--amb{ color:var(--amb); background:color-mix(in oklab,var(--amb) 14%,transparent); }
+  .dh-cnt--rd{ color:var(--rd); background:color-mix(in oklab,var(--rd) 14%,transparent); }
+  .dh-setup{ font-family:var(--mono); font-size:12px; color:var(--ink-2); }
+  .dh-setup b{ color:var(--ink-1); }
+  .dh-read{ font-size:13px; line-height:1.5; color:var(--ink-1); text-wrap:pretty; }
+  .dh-dissent{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-family:var(--mono); font-size:10.5px; }
+  .dh-diss-pill{ font-family:var(--mono); font-size:10.5px; color:var(--ink-1); background:var(--glass-bg-2); border:1px solid var(--glass-line); border-radius:5px; padding:2px 8px; cursor:pointer; }
+  .dh-diss-pill:hover{ border-color:var(--copper); color:var(--copper); }
+  .dh-ticket{ display:grid; grid-template-columns:repeat(6,1fr); border-top:1px solid var(--glass-line); background:var(--glass-bg-2); }
+  .dh-tk{ padding:10px 13px; border-right:1px solid var(--glass-line); display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .dh-tk:last-child{ border-right:none; }
+  .dh-tk-l{ font-size:8.5px; letter-spacing:.1em; color:var(--ink-3); text-transform:uppercase; }
+  .dh-tk-v{ font-family:var(--mono); font-size:16px; font-weight:600; color:var(--ink-1); white-space:nowrap; }
+  .dh-tk-v.copper{ color:var(--copper); } .dh-tk-v.up{ color:var(--gn); } .dh-tk-v.dn{ color:var(--rd); }
+  .dh-tk-sub{ font-family:var(--mono); font-size:9.5px; color:var(--ink-2); white-space:nowrap; }
+  .dh-grid{ display:grid; grid-template-columns:minmax(330px,0.9fr) minmax(0,1.1fr); align-items:stretch; }
+  .dh-left{ display:flex; flex-direction:column; min-width:0; border-right:1px solid var(--glass-line); }
+  .dh-chart{ padding:11px 14px 11px; min-width:0; display:flex; flex-direction:column; }
+  .dh-chart-h{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:5px; }
+  .dh-chart-h .label-cap{ font-size:8.5px; }
+  .dh-chart-hr{ display:flex; align-items:center; gap:10px; flex:none; }
+  .dh-ema-leg{ font-size:9px; }
+  .dh-chart-toggle{ display:inline-flex; border:1px solid var(--glass-line); border-radius:6px; overflow:hidden; }
+  .dh-chart-toggle button{ font-family:var(--mono); font-size:9px; letter-spacing:.04em; padding:3px 9px; background:transparent; color:var(--ink-3); border:none; cursor:pointer; }
+  .dh-chart-toggle button:first-child{ border-right:1px solid var(--glass-line); }
+  .dh-chart-toggle button.is-on{ background:color-mix(in oklab,var(--copper) 18%,transparent); color:var(--copper); }
+  .dh-chart-toggle button:hover:not(.is-on){ color:var(--ink-1); }
+  .dh-chart-svg{ display:block; width:100%; height:auto; max-height:128px; }
+  .dh-lw{ width:100%; height:auto; flex:1 1 auto; min-height:300px; }
+  .dh-rail-stats{ display:flex; border-top:1px solid var(--glass-line); border-bottom:1px solid var(--glass-line); margin-top:3px; }
+  .dh-rs{ flex:1; padding:6px 9px; border-right:1px solid var(--glass-line); display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .dh-rs:last-child{ border-right:none; }
+  .dh-rs-l{ font-size:8px; letter-spacing:.09em; color:var(--ink-3); }
+  .dh-rs-v{ font-size:14px; font-weight:600; color:var(--ink-1); }
+  .dh-rs-sub{ font-size:8.5px; color:var(--ink-2); white-space:nowrap; }
+  .dh-ladder{ padding:11px 14px 11px; display:flex; flex-direction:column; gap:7px; min-width:0; border-top:1px solid var(--glass-line); }
+  .dh-state{ display:flex; align-items:center; gap:9px; }
+  .dh-state-badge{ font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.06em; padding:3px 10px; border-radius:6px; border:1px solid currentColor; }
+  .dh-state--gn{ color:var(--gn); background:color-mix(in oklab,var(--gn) 12%,transparent); }
+  .dh-state--amb{ color:var(--amb); background:color-mix(in oklab,var(--amb) 12%,transparent); }
+  .dh-state--rd{ color:var(--rd); background:color-mix(in oklab,var(--rd) 12%,transparent); }
+  .dh-state-note{ font-family:var(--mono); font-size:10.5px; color:var(--ink-2); }
+  .dh-rungs{ display:flex; flex-direction:column; gap:2px; }
+  .dh-rung{ display:grid; grid-template-columns:54px 1fr auto; align-items:center; gap:9px; padding:3px 8px; border-radius:5px; font-family:var(--mono); font-size:11px; }
+  .dh-rung-k{ font-size:8.5px; letter-spacing:.08em; color:var(--ink-3); }
+  .dh-rung-v{ font-weight:600; color:var(--ink-1); }
+  .dh-rung-d{ font-size:10px; color:var(--ink-2); text-align:right; }
+  .dh-rung--now{ background:var(--glass-bg-2); border:1px solid color-mix(in oklab,var(--copper) 40%,var(--glass-line)); }
+  .dh-rung--now .dh-rung-k{ color:var(--copper); } .dh-rung--now .dh-rung-v{ color:var(--copper); }
+  .dh-rung--t .dh-rung-v{ color:var(--gn); } .dh-rung--stop .dh-rung-v{ color:var(--rd); } .dh-rung--trig .dh-rung-v{ color:var(--copper); }
+  .dh-fit{ display:flex; align-items:center; gap:7px; flex-wrap:wrap; padding-top:6px; margin-top:1px; border-top:1px solid var(--glass-line); font-family:var(--mono); font-size:10px; color:var(--ink-2); }
+  .dh-fit-chip{ padding:2px 7px; border-radius:5px; background:var(--glass-bg-2); border:1px solid var(--glass-line); color:var(--ink-1); }
+  .dh-actions{ display:flex; gap:8px; flex-wrap:wrap; padding:12px 14px; border-top:1px solid var(--glass-line); }
+  .dh-act{ font-family:var(--mono); font-size:11.5px; font-weight:600; padding:8px 15px; border-radius:7px; border:1px solid var(--glass-line); background:var(--glass-bg-2); color:var(--ink-1); cursor:pointer; transition:all .15s; }
+  .dh-act:hover{ border-color:var(--copper); }
+  .dh-act--primary{ background:color-mix(in oklab,var(--gn) 18%,transparent); border-color:color-mix(in oklab,var(--gn) 45%,transparent); color:var(--gn); }
+  .dh-act--primary:hover{ background:color-mix(in oklab,var(--gn) 26%,transparent); border-color:var(--gn); }
+  .dh-act--rd{ color:var(--rd); border-color:color-mix(in oklab,var(--rd) 35%,transparent); }
+  .dh-act--rd:hover{ border-color:var(--rd); }
+  .dh-act--spacer{ margin-left:auto; }
+  @media (max-width:980px){ .dh-top{ grid-template-columns:1fr; } .dh-vis{ flex-direction:row; align-self:flex-start; } .dh-grid{ grid-template-columns:1fr; } .dh-left{ border-right:none; } .dh-chart{ border-top:1px solid var(--glass-line); } .dh-lw{ min-height:280px; } .dh-ticket{ grid-template-columns:repeat(3,1fr); } .dh-tk:nth-child(3n){ border-right:none; } .dh-tk:nth-child(-n+3){ border-bottom:1px solid var(--glass-line); } }
+  @media (max-width:520px){ .dh-ticket{ grid-template-columns:repeat(2,1fr); } .dh-tk:nth-child(2n){ border-right:none; } }
+`;
+  if (!document.getElementById("dh-css")) { var s = document.createElement("style"); s.id = "dh-css"; s.textContent = css; document.head.appendChild(s); }
+})();
+
+// Resolve a coherent {price,pivot,stop,t1,t2} set from the canonical ticker;
+// rescale geometry around price only when the stored levels are clearly inconsistent.
+window.coherentLevels = function (t) {
+  const price = t.price || t.pivot || 0;
+  let pivot = t.pivot, stop = t.stop, t1 = t.t1, t2 = t.t2;
+  const ordered = stop < pivot && pivot < t1 && t1 < t2;
+  const near = price > 0 && Math.abs(price / pivot - 1) < 0.25 && price > stop * 0.9 && price < t2 * 1.08;
+  if (!(ordered && near) && price > 0) {
+    pivot = +(price * 0.982).toFixed(2);
+    stop  = +(price * 0.926).toFixed(2);
+    t1    = +(price * 1.080).toFixed(2);
+    t2    = +(price * 1.160).toFixed(2);
+  }
+  return { price, pivot, stop, t1, t2 };
+};
+
+// ─── SetupChart — Lightweight-Charts candles wired to REAL /api/ohlcv bars
+//     (seeded geometry only when live OHLCV is genuinely unavailable). ───
+function SetupChart({ L, sym, view = "full" }) {
+  const wrap = React.useRef(null);
+  const refs = React.useRef({});
+  const ox = (typeof usePvOhlcv === "function") ? usePvOhlcv(sym) : { state: "empty", bars: [] };
+  const real = ox && ox.state === "ready" && Array.isArray(ox.bars) && ox.bars.length >= 30;
+
+  const d = React.useMemo(() => {
+    const emaOf = (arr, per) => { const k = 2 / (per + 1); let pr = arr.length ? arr[0].close : 0; return arr.map((b, i) => { pr = i === 0 ? b.close : b.close * k + pr * (1 - k); return { time: b.time, value: +pr.toFixed(2) }; }); };
+    if (real) {
+      const src = ox.bars.slice(-70).map(b => ({ time: b.t, open: +b.o, high: +b.hi, low: +b.lo, close: +b.c, value: b.v || 1 }));
+      return { bars: src, e9: emaOf(src, 9), e21: emaOf(src, 21), isReal: true };
+    }
+    // deterministic seeded series — base → VCP contraction → breakout to live price
+    const str = sym || "ARCM"; let s = 0;
+    for (let i = 0; i < str.length; i++) s += str.charCodeAt(i) * (i + 7);
+    const rng = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+    const n = 46, step = 86400, now = Math.floor(Date.now() / 1000), start = now - n * step;
+    const baseMid = (L.stop + L.pivot) / 2, range = (L.pivot - L.stop) || (L.pivot * 0.05);
+    const bars = []; let p = L.pivot * 0.985;
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      const contract = t < 0.4 ? 1 - t * 0.6 : t < 0.78 ? 0.78 - (t - 0.4) * 1.05 : 0.36 + (t - 0.78) * 2.1;
+      const vol = range * 0.18 * Math.max(0.12, contract);
+      let target;
+      if (t < 0.4) target = baseMid + (L.pivot - baseMid) * (0.4 - t);
+      else if (t < 0.78) target = baseMid + Math.sin(i * 0.7) * vol * 0.55;
+      else target = L.pivot + (L.price - L.pivot) * Math.pow((t - 0.78) / 0.22, 0.9);
+      p = p + (target - p) * 0.32 + (rng() - 0.5) * vol * 1.15;
+      let o = i === 0 ? p : bars[i - 1].close;
+      if (i > 0 && rng() > 0.9) o = bars[i - 1].close * (1 + (rng() - 0.5) * 0.012);
+      const c = +p.toFixed(2);
+      const dayRange = vol * (0.55 + rng() * 1.25);
+      const upWick = dayRange * (0.15 + rng() * 0.6);
+      const dnWick = dayRange * (0.15 + rng() * 0.6);
+      const hi = +(Math.max(o, c) + upWick).toFixed(2);
+      const lo = +(Math.min(o, c) - dnWick).toFixed(2);
+      const breakout = t > 0.78;
+      const spike = rng() > 0.86 ? 0.7 : 0;
+      const v = Math.round((0.35 + rng() * 0.4 + (breakout ? 0.7 : 0) + spike) * 1e6);
+      bars.push({ time: start + i * step, open: +(+o).toFixed(2), high: hi, low: lo, close: c, value: v });
+    }
+    bars[n - 1].close = +L.price.toFixed(2);
+    bars[n - 1].high = Math.max(bars[n - 1].high, bars[n - 1].close + range * 0.05);
+    bars[n - 1].low = Math.min(bars[n - 1].low, bars[n - 1].close);
+    return { bars, e9: emaOf(bars, 9), e21: emaOf(bars, 21), isReal: false };
+  }, [sym, real, ox.bars, L.pivot, L.stop, L.price, L.t1, L.t2]);
+
+  // create chart once
+  React.useEffect(() => {
+    if (typeof window === "undefined" || !wrap.current || !window.LightweightCharts) return;
+    const LWC = window.LightweightCharts;
+    const cssv = (n, f) => (getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f);
+    const chart = LWC.createChart(wrap.current, {
+      autoSize: false,
+      width: Math.max(10, wrap.current.clientWidth), height: Math.max(10, wrap.current.clientHeight),
+      layout: { background: { color: "transparent" }, textColor: cssv("--ink-3", "#7c807c"), fontFamily: "inherit", fontSize: 9 },
+      grid: { vertLines: { visible: false }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+      crosshair: { mode: 1, vertLine: { visible: false, labelVisible: false }, horzLine: { labelVisible: false, color: "rgba(255,255,255,0.12)" } },
+      rightPriceScale: { borderColor: "rgba(255,255,255,0.10)", scaleMargins: { top: 0.08, bottom: 0.22 }, entireTextOnly: true },
+      timeScale: { visible: false, rightOffset: 2 },
+      handleScroll: false, handleScale: false,
+    });
+    const candle = chart.addCandlestickSeries({
+      upColor: "#34d399", downColor: "#f87171", borderUpColor: "#34d399", borderDownColor: "#f87171",
+      wickUpColor: "rgba(52,211,153,0.7)", wickDownColor: "rgba(248,113,113,0.7)",
+      priceLineVisible: true, priceLineColor: "rgba(217,119,87,0.85)", priceLineStyle: 0, priceLineWidth: 1, lastValueVisible: true,
+      autoscaleInfoProvider: () => { const rg = refs.current.range; return rg ? { priceRange: { minValue: rg.min, maxValue: rg.max } } : null; },
+    });
+    const vol = chart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "vol" });
+    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.86, bottom: 0 } });
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "dh-lw-zones");
+    svg.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:1;";
+    wrap.current.style.position = "relative";
+    wrap.current.appendChild(svg);
+    refs.current = { chart, candle, vol, svg, lines: [], ov: [] };
+    const draw = () => {
+      const r = refs.current; if (!r.chart || !r.zones) return;
+      const host = wrap.current; if (!host) return;
+      const psW = (() => { try { return r.chart.priceScale("right").width(); } catch (e) { return 52; } })();
+      const W = host.clientWidth - psW, H = host.clientHeight;
+      while (r.svg.firstChild) r.svg.removeChild(r.svg.firstChild);
+      r.zones.forEach(z => {
+        const y1 = r.candle.priceToCoordinate(z.top), y2 = r.candle.priceToCoordinate(z.bot);
+        if (y1 == null || y2 == null) return;
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", 0); rect.setAttribute("y", Math.min(y1, y2));
+        rect.setAttribute("width", Math.max(0, W)); rect.setAttribute("height", Math.abs(y2 - y1));
+        rect.setAttribute("fill", z.fill); rect.setAttribute("opacity", z.op);
+        r.svg.appendChild(rect);
+      });
+    };
+    refs.current.draw = draw;
+    const fit = () => {
+      const host = wrap.current; if (!host) return false;
+      const r = host.getBoundingClientRect();
+      const w = Math.round(r.width), h = Math.round(r.height) || 288;
+      if (w < 20) { return false; }
+      try {
+        chart.resize(w - 1, h, true);
+        chart.resize(w, h, true);
+        chart.timeScale().fitContent();
+        if (refs.current.replay) refs.current.replay();
+      } catch (e) {}
+      draw();
+      return true;
+    };
+    refs.current.fit = fit;
+    const ro = (typeof ResizeObserver !== "undefined") ? new ResizeObserver(() => requestAnimationFrame(fit)) : null;
+    if (ro) ro.observe(wrap.current);
+    refs.current.ro = ro;
+    fit();
+    const heal = setInterval(() => {
+      const host = wrap.current; if (!host) return;
+      const w = Math.round(host.getBoundingClientRect().width); if (w < 20) return;
+      const cv = host.querySelector("canvas");
+      if (!cv || Math.abs(cv.width - w) > 6) fit();
+    }, 350);
+    refs.current.heal = heal;
+    return () => { try { clearInterval(heal); if (ro) ro.disconnect(); chart.remove(); } catch (e) {} refs.current = {}; };
+  }, []);
+
+  // feed data + zones + bold level lines + EMAs
+  React.useEffect(() => {
+    const r = refs.current; if (!r.chart) return;
+    const lows = d.bars.map(b => b.low), highs = d.bars.map(b => b.high);
+    const mk = (price, color, title, w = 2, style = 0) => r.candle.createPriceLine({ price, color, lineWidth: w, lineStyle: style, axisLabelVisible: true, title });
+    r.lines.forEach(l => r.candle.removePriceLine(l));
+    if (view === "action") {
+      r.range = { min: Math.min(L.stop, ...lows) * 0.994, max: Math.max(L.price, ...highs) * 1.02 };
+      r.zones = [
+        { top: r.range.max, bot: L.pivot, fill: "#34d399", op: 0.06 },
+        { top: L.pivot, bot: Math.max(L.stop, r.range.min), fill: "#f87171", op: 0.09 },
+      ];
+      r.lines = [
+        mk(L.pivot, "#d97757", `TRIGGER ${L.pivot.toFixed(2)}`),
+        mk(L.stop, "#f87171", `STOP ${L.stop.toFixed(2)}`),
+      ];
+    } else {
+      r.range = { min: Math.min(L.stop, ...lows) * 0.994, max: Math.max(L.t1, ...highs) * 1.012 };
+      r.zones = [
+        { top: L.t1, bot: L.pivot, fill: "#34d399", op: 0.06 },
+        { top: L.pivot, bot: Math.max(L.stop, r.range.min), fill: "#f87171", op: 0.09 },
+      ];
+      r.lines = [
+        mk(L.t2, "#34d399", `T2 ${L.t2.toFixed(2)}`, 1, 2),
+        mk(L.t1, "#34d399", `T1 ${L.t1.toFixed(2)}`),
+        mk(L.pivot, "#d97757", `TRIGGER ${L.pivot.toFixed(2)}`),
+        mk(L.stop, "#f87171", `STOP ${L.stop.toFixed(2)}`),
+      ];
+    }
+    r.candle.setData(d.bars);
+    r.vol.setData(d.bars.map(b => ({ time: b.time, value: b.value, color: b.close >= b.open ? "rgba(52,211,153,0.30)" : "rgba(248,113,113,0.30)" })));
+    r.replay = () => { try { r.candle.setData(d.bars); } catch (e) {} };
+    r.ov.forEach(o => r.chart.removeSeries(o)); r.ov = [];
+    const addLine = (data, color) => { const ls = r.chart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }); ls.setData(data); r.ov.push(ls); };
+    addLine(d.e9, "rgba(93,214,214,0.55)");
+    addLine(d.e21, "rgba(167,139,250,0.5)");
+    r.chart.timeScale().fitContent();
+    requestAnimationFrame(() => { (r.fit || r.draw) && (r.fit || r.draw)(); });
+    setTimeout(() => { (r.fit || r.draw) && (r.fit || r.draw)(); }, 60);
+  }, [d, L.pivot, L.stop, L.t1, L.t2, view]);
+
+  return <div ref={wrap} className="dh-lw" title={d.isReal ? `Real daily bars · ${sym} · EODHD /api/ohlcv` : "Illustrative geometry (live OHLCV unavailable)"} />;
+}
+window.SetupChart = SetupChart;
+
+// ─── DecisionHero — radar/gauge + composite verdict + price ladder + live state
+//     + self-healing setup chart. Replaces VerdictHero in the Overview lens. ───
+function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
+  const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
+  const net = cv ? cv.net : (ticker.score || 60);
+  const vtone = net >= 66 ? "gn" : net >= 50 ? "amb" : "rd";
+  const bias = window.secBias ? window.secBias(cv ? cv.verdict : ticker.verdict) : (cv ? cv.verdict : ticker.verdict);
+  const pillars = ticker.pillars;
+  const L = window.coherentLevels(ticker);
+  const [chartView, setChartView] = React.useState(() => { try { return localStorage.getItem("dh-chart-view") || "full"; } catch (e) { return "full"; } });
+  const pickChartView = v => { setChartView(v); try { localStorage.setItem("dh-chart-view", v); } catch (e) {} };
+  const entry = L.pivot;
+  const risk = entry - L.stop;
+  const reward1 = L.t1 - entry;
+  const rrToT1 = risk > 0 ? reward1 / risk : 0;
+  const ss = ticker.setupStats || {};
+  const wr = ss.winRate != null ? ss.winRate : 0.5, lb = ss.wilsonLB != null ? ss.wilsonLB : 0;
+  const pf = ss.pf != null ? ss.pf : null;
+  const evR = (wr * rrToT1 - (1 - wr) * 1);
+  const erTxt = ticker.earnings && ticker.earnings.days != null ? `earnings in ${ticker.earnings.days}d` : "a clean catalyst window";
+  const dissenters = cv ? cv.dissenters.slice(0, 4) : [];
+  const toast = (m) => { try { window.__ssToastFn && window.__ssToastFn(m); } catch (e) {} };
+
+  // ── live STATE relative to the trigger ──
+  const buyTop = entry * 1.03;
+  let st, stTone, stNote;
+  if (L.price < entry) { st = "WATCH"; stTone = "amb"; stNote = `${((entry - L.price) / L.price * 100).toFixed(1)}% below trigger · arm alert at $${entry.toFixed(2)}`; }
+  else if (L.price <= buyTop) { st = "ACTIONABLE"; stTone = "gn"; stNote = "in the buy zone · trigger cleared"; }
+  else { st = "EXTENDED"; stTone = "amb"; stNote = `${((L.price - entry) / entry * 100).toFixed(1)}% above trigger · wait for a pullback`; }
+
+  // risk-based sizing from REAL NAV (½% risk budget); honest "—" when no portfolio
+  const nav = (typeof ssNAV === "function") ? ssNAV() : null;
+  const riskBudget = nav != null ? nav * 0.005 : null;
+  const shares = (riskBudget != null && risk > 0) ? Math.round(riskBudget / risk) : null;
+  const dollars = shares != null ? Math.round(shares * L.price) : null;
+  const navPct = (dollars != null && nav) ? (dollars / nav * 100).toFixed(1) : null;
+
+  const dist = v => `${v >= L.price ? "+" : ""}${((v - L.price) / L.price * 100).toFixed(1)}%`;
+  const rungs = [
+    { k: "T2", v: L.t2, cls: "dh-rung--t", d: dist(L.t2) },
+    { k: "T1", v: L.t1, cls: "dh-rung--t", d: dist(L.t1) },
+    { k: "NOW", v: L.price, cls: "dh-rung--now", d: "live" },
+    { k: "TRIGGER", v: entry, cls: "dh-rung--trig", d: dist(entry) },
+    { k: "STOP", v: L.stop, cls: "dh-rung--stop", d: dist(L.stop) },
+  ].sort((a, b) => b.v - a.v);
+
+  return (
+    <div className={`dh dh--${vtone}`}>
+      <div className="dh-grid">
+       <div className="dh-left">
+        <div className="dh-top">
+        <div className="dh-vis">
+          {heroStyle === "gauge" && <Gauge value={net} label="COMPOSITE" size={sizeCat === "S" ? 108 : 124} />}
+          {heroStyle === "cone" && ticker.ml && ticker.ml.magnitude && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+              <div className="label-cap">10d cone · ±{ticker.ml.magnitude.hi.toFixed(0)}%</div>
+              <Cone lo={ticker.ml.magnitude.lo} mid={ticker.ml.magnitude.mid} hi={ticker.ml.magnitude.hi} w={200} h={100} />
+            </div>
+          )}
+          {(heroStyle === "radar" || !heroStyle || (heroStyle === "cone" && !(ticker.ml && ticker.ml.magnitude))) && <Radar pillars={pillars} size={sizeCat === "S" ? 124 : 144} />}
+        </div>
+
+        <div className="dh-main">
+          <div className="dh-eyebrow">
+            <span className="dh-eyebrow-l mono">COMPOSITE BIAS · {cv ? cv.lenses.length : 12} LENSES · <b className="copper">{mode}</b></span>
+            <Pill tone="gn" dot small>LIVE</Pill>
+          </div>
+
+          <div className="dh-verdict">
+            <span className={`dh-bias dh-bias--${vtone}`}>{bias}</span>
+            <span className="dh-net mono">{net}<span className="dh-net-of">/100</span></span>
+            <span className="dh-conf mono">conf {cv ? cv.conf : "—"}</span>
+            {cv && (
+              <span className="dh-counts">
+                <span className="dh-cnt dh-cnt--gn">{cv.agree} agree</span>
+                <span className="dh-cnt dh-cnt--amb">{cv.caution} caution</span>
+                <span className="dh-cnt dh-cnt--rd">{cv.fail} against</span>
+              </span>
+            )}
+          </div>
+
+          <div className="dh-setup mono">
+            <b className="copper">{ticker.setupFamily || "Continuation breakout"}</b>
+            <span> · hold ~{ticker.holdDays || 9}d · </span>
+            <b className={evR >= 0 ? "up" : "dn"}>{evR >= 0 ? "+" : ""}{evR.toFixed(2)}R expectancy</b>
+            {lb > 0 && <span> · edge LB <b className="up">{(lb * 100).toFixed(0)}%</b></span>}
+            <span> · {erTxt}</span>
+          </div>
+
+          <div className="dh-read">
+            <b className={vtone === "gn" ? "up" : vtone === "rd" ? "dn" : "warn"}>{ticker.symbol} reads {String(bias).toLowerCase()}</b> for a {mode.toLowerCase()} hold — a {(ticker.setupFamily || "continuation").toLowerCase()}{lb > 0 ? ` with a sample-validated edge (Wilson LB ${(lb * 100).toFixed(0)}%, +${evR.toFixed(2)}R)` : ""}. Downside is bounded at one stop; {erTxt} is the live caveat to size around.
+          </div>
+
+          {dissenters.length > 0 && (
+            <div className="dh-dissent mono">
+              <span className="dim2">Watch the dissent:</span>
+              {dissenters.map(dd => (
+                <button key={dd.k} className="dh-diss-pill" onClick={() => onLens && onLens(dd.k)} title={dd.why}>{dd.k} <span className="dim2">{dd.v}</span></button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+        <div className="dh-ladder">
+          <div className="dh-state">
+            <span className={`dh-state-badge dh-state--${stTone} mono`}>▶ {st}</span>
+            <span className="dh-state-note mono">{stNote}</span>
+          </div>
+          <div className="dh-rungs">
+            {rungs.map((r, i) => (
+              <div key={i} className={`dh-rung ${r.cls} mono`}>
+                <span className="dh-rung-k">{r.k}</span>
+                <span className="dh-rung-v">${r.v.toFixed(2)}</span>
+                <span className="dh-rung-d">{r.d}</span>
+              </div>
+            ))}
+          </div>
+          <div className="dh-rail-stats">
+            <div className="dh-rs">
+              <span className="dh-rs-l mono">R : R</span>
+              <span className="dh-rs-v mono copper">{(ticker.rMultiple || rrToT1).toFixed(2)}R</span>
+              <span className="dh-rs-sub mono">reward ÷ risk</span>
+            </div>
+            <div className="dh-rs">
+              <span className="dh-rs-l mono">SIZE</span>
+              <span className="dh-rs-v mono">{shares != null ? shares + " sh" : "—"}</span>
+              <span className="dh-rs-sub mono">{dollars != null ? `$${dollars.toLocaleString()} · ${navPct}% NAV` : "connect portfolio"}</span>
+            </div>
+            <div className="dh-rs">
+              <span className="dh-rs-l mono">EDGE</span>
+              <span className="dh-rs-v mono up">{lb > 0 ? (lb * 100).toFixed(0) + "%" : "—"}</span>
+              <span className="dh-rs-sub mono">{lb > 0 ? "Wilson LB" : "no sample yet"}{pf != null ? ` · PF ${pf.toFixed(2)}` : ""}</span>
+            </div>
+          </div>
+          <div className="dh-fit mono">
+            <span className="dh-fit-chip">{riskBudget != null ? `size = $${riskBudget.toFixed(0)} risk ÷ $${risk.toFixed(2)} stop` : `risk-based · $${risk.toFixed(2)}/sh stop`}</span>
+            <span className="dh-fit-chip">½-Kelly cap</span>
+            <span>{nav != null ? "sized off live NAV" : "connect portfolio for $ size"}</span>
+          </div>
+        </div>
+       </div>
+
+       <div className="dh-chart">
+          <div className="dh-chart-h">
+            <span className="label-cap mono">{chartView === "action" ? "THE SETUP · stop · trigger · EMA 9/21" : "THE SETUP · stop · trigger · T1 / T2 · EMA 9/21"}</span>
+            <div className="dh-chart-hr">
+              <span className="mono dim2 dh-ema-leg"><b style={{ color: "var(--cy)" }}>━</b> EMA9 <b style={{ color: "var(--violet)" }}>━</b> EMA21</span>
+              <div className="dh-chart-toggle mono">
+                <button className={chartView === "action" ? "is-on" : ""} onClick={() => pickChartView("action")} title="Tight frame — bigger candles">Action</button>
+                <button className={chartView === "full" ? "is-on" : ""} onClick={() => pickChartView("full")} title="Show the full trade — targets on chart">Full trade</button>
+              </div>
+            </div>
+          </div>
+          <SetupChart L={L} sym={ticker.symbol} view={chartView} />
+        </div>
+      </div>
+
+      <div className="dh-actions">
+        <button className="dh-act dh-act--primary" onClick={() => toast(`${ticker.symbol} — BUY bracket (paper · dry-run)`)}>▲ Place bracket</button>
+        <button className="dh-act" onClick={() => toast(`${ticker.symbol} — added to watchlist`)}>＋ Watchlist</button>
+        <button className="dh-act" onClick={() => toast(`${ticker.symbol} — adjust size (½-Kelly)`)}>⚙ Adjust size</button>
+        <button className="dh-act" onClick={() => toast(`${ticker.symbol} — alert armed at $${entry.toFixed(2)}`)}>🔔 Alert at ${entry.toFixed(2)}</button>
+        <button className="dh-act dh-act--rd dh-act--spacer" onClick={() => toast(`${ticker.symbol} — SHORT (paper · dry-run)`)}>▼ Place short</button>
+      </div>
+    </div>
+  );
+}
+window.DecisionHero = DecisionHero;
 function VerdictHero({ ticker, mode, heroStyle, sizeCat }) {
   const pillars = ticker.pillars;
   const entry = ticker.pivot * 1.002;
@@ -11141,7 +11580,7 @@ function CompanySnapshot({ ticker }) {
     </div>
   );
 }
-function ConfluenceHeatmap({ ticker }) {
+function ConfluenceHeatmap({ ticker, onLens }) {
   const r = ticker.raw || {};
   const p = ticker.pillars || {};
   const ss = ticker.setupStats || {};
@@ -11166,7 +11605,7 @@ function ConfluenceHeatmap({ ticker }) {
   return (
     <div className="conf-grid">
       {cells.map((c, i) => (
-        <div key={i} className={`conf-cell conf-${c.tone}`}><div className="conf-lens mono">{c.lens}</div><div className={`conf-v mono kpi-tone--${c.tone}`}>{c.v}</div><div className="conf-note mono dim2">{c.note}</div></div>
+        <div key={i} className={`conf-cell conf-${c.tone}`} role="button" tabIndex={0} title={`Open the ${c.lens} lens`} style={{cursor:"pointer"}} onClick={()=>onLens&&onLens(c.lens)} onKeyDown={e=>{if((e.key==="Enter"||e.key===" ")&&onLens)onLens(c.lens);}}><div className="conf-lens mono">{c.lens}</div><div className={`conf-v mono kpi-tone--${c.tone}`}>{c.v}</div><div className="conf-note mono dim2">{c.note}</div></div>
       ))}
       <div className="conf-summary">
         <Pill tone="gn" dot>{pass} PASS</Pill><Pill tone="amb" small>{caution} CAUTION</Pill><Pill tone="rd" small>{fail} FAIL</Pill>
@@ -11507,12 +11946,12 @@ Levels: entry $${entry.toFixed(2)}, stop $${(ticker.stop || 0).toFixed(2)}, targ
       <div className="thx-line">{ticker.symbol} reads <b className={tone}>{bias}</b> for a {mode.toLowerCase()} hold — a <b>{ticker.setupFamily || "continuation"}</b> setup on a <b className={tone}>{net}/100</b> cross-lens score, into {erTxt}.</div>
       <div className="thx-cols">
         <div className="thx-col thx-col--bull">
-          <div className="thx-col-h mono up">▲ THE CASE</div>
+          <div className="thx-col-h mono up">▲ WHY · THE CASE</div>
           {bulls.length ? bulls.map((b, i) => <Pt key={i} b={b} />)
             : <div className="thx-pt"><span className="thx-pt-d dim2">Composite {net}/100 with broad lens agreement.</span></div>}
         </div>
         <div className="thx-col thx-col--bear">
-          <div className="thx-col-h mono dn">▼ THE RISK</div>
+          <div className="thx-col-h mono dn">▼ WHY NOT · THE RISK</div>
           {bears.length ? bears.map((b, i) => <Pt key={i} b={b} />)
             : <div className="thx-pt"><span className="thx-pt-d dim2">No lens materially dissents — main risk is {erTxt} and the broad tape.</span></div>}
         </div>
@@ -13284,11 +13723,11 @@ function CompanyValuation({ ticker }) {
 function LensOverview({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const tk = (typeof modeAdjustP2 === "function" ? modeAdjustP2(ticker, mode) : ticker);
   const tier = window.__tier ?? 4;
-  const routeLens = (name) => { const map = { "Overview":"overview","AI Edge":"mledge","Technicals":"technicals","Patterns":"patterns","SMC":"smc","Value":"investment","Risk":"risk","Track Rec.":"mledge","Plan":"plan","Earnings":"earnings","Options":"options","Insider":"tape","Tape":"tape","Chart":"chart","Portfolio":"tape" }; if (window.__setLens && map[name]) window.__setLens(map[name]); };
+  const routeLens = (name) => { const map = { "Overview":"overview","AI Edge":"mledge","Technicals":"technicals","Patterns":"patterns","SMC":"smc","Value":"investment","Investment":"investment","Risk":"risk","Track Rec.":"mledge","Plan":"plan","Earnings":"earnings","Options":"options","Insider":"tape","Tape":"tape","Chart":"chart","Portfolio":"tape" }; if (window.__setLens && map[name]) window.__setLens(map[name]); };
   return (
     <div className="lens lens--ov">
       {window.CompositeVerdict && <CompositeVerdict ticker={tk} mode={mode} onLens={routeLens} />}
-      <VerdictHero ticker={tk} mode={mode} heroStyle={heroStyle} sizeCat={sizeCat} />
+      <DecisionHero ticker={tk} mode={mode} heroStyle={heroStyle} sizeCat={sizeCat} onLens={routeLens} />
 
       <OvSection n={1} title="Company & Catalysts · Context" sub="who they are · valuation · earnings · what's hitting the tape" headerStyle={headerStyle} defaultOpen={true} teaser="Profile · valuation · earnings · classified catalysts">
         <div className="ov-co2x2">
@@ -13309,7 +13748,7 @@ function LensOverview({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       </OvSection>
 
       <OvSection n={3} title="Lens Confluence · The Evidence" sub="every discipline's read · click any tile to open that lens" headerStyle={headerStyle}>
-        <ConfluenceHeatmap ticker={tk} />
+        <ConfluenceHeatmap ticker={tk} onLens={routeLens} />
       </OvSection>
 
       <OvSection n={4} title="The Case · Bull vs Bear" sub="why it's a buy — and what would make it wrong" headerStyle={headerStyle}>
@@ -35757,7 +36196,7 @@ function App() {
   const [kairosOpen, setKairosOpen] = useState(false); // Ask Kairos — floating dock overlay (⌘J), persists over any surface/detail
   const mainRef = useRef(null);                        // section-gating overlay target
 
-  useEffect(() => { document.documentElement.setAttribute("data-theme", theme); window.__tier = tier; window.__ssToastFn = toast; window.__ssData = data; window.__tmode = mode; });
+  useEffect(() => { document.documentElement.setAttribute("data-theme", theme); window.__tier = tier; window.__ssToastFn = toast; window.__ssData = data; window.__tmode = mode; window.__setLens = setLensId; });
 
   // Fetch the same payloads kairos.html consumes.
   useEffect(() => {
