@@ -2941,6 +2941,16 @@ async def universe_api(limit: int = 0):
             "above_200sma": bool(((r.get("technicals") or {}).get("indicators") or {}).get("above_200sma")) if ((r.get("technicals") or {}).get("indicators") or {}).get("above_200sma") is not None else r.get("above_200sma"),
             "adx": (((r.get("technicals") or {}).get("indicators") or {}).get("adx")
                     if ((r.get("technicals") or {}).get("indicators") or {}).get("adx") is not None else r.get("adx")),
+            # extra scanner columns (match the design prototype 1:1) — all real from the bundle
+            "vwap20": ((r.get("vwap") or {}).get("vwap_20d")),
+            "squeeze": (((r.get("squeeze_flag") or {}).get("level")) if isinstance(r.get("squeeze_flag"), dict) else (r.get("squeeze") if isinstance(r.get("squeeze"), str) else None)),
+            "avg_volume": r.get("avg_volume"),
+            "short_float": (((r.get("finviz_elite") or {}).get("short_float_pct"))
+                            if (r.get("finviz_elite") or {}).get("short_float_pct") is not None
+                            else ((r.get("squeeze_flag") or {}).get("short_float_pct") if isinstance(r.get("squeeze_flag"), dict) else None)),
+            "perf_3m": ((r.get("finviz_elite") or {}).get("perf_quarter_pct")),
+            "analyst_upside": ((r.get("analyst") or {}).get("upside_pct")),
+            "insider_usd": ((r.get("insider_data") or {}).get("total_buy_value")),
         }
     # Sanitize NaN/Infinity → None. Some bundle rows carry non-finite floats
     # (e.g. a divide-by-zero rr/sharpe); Starlette's JSONResponse uses
