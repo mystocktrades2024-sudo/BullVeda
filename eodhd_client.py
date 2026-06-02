@@ -196,7 +196,123 @@ class _RateLimiter:
             }
 
 
-_limiter = _RateLimiter(_RATE_PER_SEC, _RATE_PER_MIN, _RATE_PER_DAY)
+class _SharedRateLimiter:
+    """Cross-process token bucket — one budget for the whole EODHD key.
+
+    The per-process _RateLimiter cannot see calls made by OTHER processes
+    (options_flow_refresh, position_watch, portfolio_sync, ad-hoc scans).
+    Each thinks it owns 950/min, so when they overlap the main scan the
+    COMBINED rate blows past EODHD's real 1,000/min → 429s → fill-rate
+    craters → 30% abort guard trips (the 2026-05-30 regression root cause).
+
+    This limiter persists the sliding-window timestamps to a single file
+    guarded by fcntl.flock, so every process on the host shares ONE
+    950/min + 95K/day budget. Satellite jobs naturally pace behind a
+    running scan instead of colliding with it.
+
+    Fail-open: any IO/lock error falls back to the in-process limiter so
+    the limiter infra can never abort a scan."""
+
+    def __init__(self, per_sec: int, per_min: int, per_day: int, state_path: Path,
+                 fallback: "_RateLimiter"):
+        self.per_sec = per_sec
+        self.per_min = per_min
+        self.per_day = per_day
+        self._path = state_path
+        self._lockpath = state_path.with_suffix(".lock")
+        self._fallback = fallback
+        self._tlock = threading.Lock()  # serialize this process's threads first (cheap)
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            import fcntl  # noqa: F401 — probe availability
+            self._ok = True
+        except Exception:
+            self._ok = False
+
+    def _read(self) -> dict:
+        try:
+            return json.loads(self._path.read_text())
+        except Exception:
+            return {}
+
+    def _write(self, state: dict) -> None:
+        try:
+            tmp = self._path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(state))
+            tmp.replace(self._path)
+        except Exception as e:
+            log.debug(f"shared limiter write failed: {e}")
+
+    def acquire(self):
+        if not self._ok:
+            return self._fallback.acquire()
+        import fcntl
+        from datetime import date as _date
+        while True:
+            wait = 0.0
+            with self._tlock:  # in-process gate so 16 workers don't thrash the file lock
+                try:
+                    lf = open(self._lockpath, "w")
+                    try:
+                        fcntl.flock(lf, fcntl.LOCK_EX)
+                        now = time.time()
+                        st = self._read()
+                        ts = [t for t in st.get("ts", []) if isinstance(t, (int, float)) and t > now - 60]
+                        day_date = st.get("day_date")
+                        day_count = int(st.get("day_count", 0))
+                        today = _date.today().isoformat()
+                        if day_date != today:
+                            day_date, day_count = today, 0
+                        sec = sum(1 for t in ts if t > now - 1.0)
+                        if day_count >= self.per_day:
+                            self._write({"ts": ts, "day_date": day_date, "day_count": day_count})
+                            raise RuntimeError(
+                                f"EODHD daily limit exhausted ({self.per_day}). Reset at UTC midnight.")
+                        if sec >= self.per_sec:
+                            wait = 1.0 - (now - max(t for t in ts if t > now - 1.0)) + 0.01
+                        elif len(ts) >= self.per_min:
+                            wait = ts[0] + 60 - now + 0.05
+                        else:
+                            ts.append(now)
+                            self._write({"ts": ts, "day_date": day_date, "day_count": day_count + 1})
+                            return
+                    finally:
+                        fcntl.flock(lf, fcntl.LOCK_UN)
+                        lf.close()
+                except RuntimeError:
+                    raise
+                except Exception as e:
+                    log.debug(f"shared limiter fell back to in-process: {e}")
+                    return self._fallback.acquire()
+            time.sleep(max(0.01, wait))
+
+    def stats(self) -> dict:
+        if not self._ok:
+            return self._fallback.stats()
+        try:
+            st = self._read()
+            now = time.time()
+            ts = [t for t in st.get("ts", []) if t > now - 60]
+            return {
+                "second_used": sum(1 for t in ts if t > now - 1.0), "second_cap": self.per_sec,
+                "minute_used": len(ts), "minute_cap": self.per_min,
+                "day_used": int(st.get("day_count", 0)), "day_cap": self.per_day,
+                "shared": True,
+            }
+        except Exception:
+            return self._fallback.stats()
+
+
+_inproc_limiter = _RateLimiter(_RATE_PER_SEC, _RATE_PER_MIN, _RATE_PER_DAY)
+# Cross-process shared limiter is ON by default — set EODHD_SHARED_LIMITER=0 to
+# revert to per-process limiting (the old behavior that collided under concurrency).
+if os.environ.get("EODHD_SHARED_LIMITER", "1") != "0":
+    _limiter = _SharedRateLimiter(
+        _RATE_PER_SEC, _RATE_PER_MIN, _RATE_PER_DAY,
+        _CACHE_DIR / "_ratelimit_shared.json", _inproc_limiter,
+    )
+else:
+    _limiter = _inproc_limiter
 
 
 # ── HTTP session with retry ───────────────────────────────────────────────────
