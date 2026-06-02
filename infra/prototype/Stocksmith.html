@@ -8007,6 +8007,8 @@ select.um-input { cursor: pointer; }
 .ts-tk { font-family: var(--mono); font-size: 9.5px; font-weight: 600; color: var(--ink-1); background: var(--glass-bg-1); border: 1px solid var(--glass-line); border-radius: var(--r-2); padding: 1px 6px; cursor: pointer; }
 .ts-tk:hover { border-color: var(--copper); color: var(--copper); }
 .ss2-ledger { margin-left: auto; font-size: 10px; white-space: nowrap; }
+.ss2-ready { font-family: var(--mono); font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: var(--r-2); }
+.ss2-ready--gn { color: var(--gn); } .ss2-ready--amb { color: var(--amb); } .ss2-ready--rd { color: var(--ink-3); }
 /* ===== Upcoming IPOs surface ===== */
 .ipo-title { font-size: 17px; font-weight: 700; color: var(--ink); margin: 2px 0 0; }
 .ipo-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px 16px; }
@@ -10401,6 +10403,12 @@ function mapScannerRows(screener, data) {
       er: r.earn_days != null ? r.earn_days : null,
       insider: r.insider_net != null ? r.insider_net : (r.insider_buys || 0),
       pUp: r.p_up != null ? (r.p_up <= 1 ? r.p_up * 100 : r.p_up) : null,
+      aiEdge: r.p_up != null ? (r.p_up <= 1 ? r.p_up : r.p_up / 100) - 0.5 : null,  // ML edge vs coin-flip
+      off52: r.week52_high ? +(((r.price - r.week52_high) / r.week52_high) * 100).toFixed(1) : null,
+      adx: r.adx != null ? Math.round(r.adx) : null,
+      beta: r.beta != null ? +Number(r.beta).toFixed(2) : null,
+      r1m: r.perf_month != null ? +((r.perf_month <= 5 ? r.perf_month * 100 : r.perf_month)).toFixed(1) : null,
+      ready: (() => { let n = 0; if (r.above_50ema) n++; if (r.above_200sma) n++; if ((r.rvol || 0) >= 1.2) n++; if ((r.adx || 0) >= 20) n++; if (r.rsi != null && r.rsi >= 40 && r.rsi <= 72) n++; if ((r.rr || 0) >= 2) n++; return n; })(),
       signals,
     };
   });
@@ -10491,6 +10499,9 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
   const [pills, setPills] = useState({});
   const [side, setSide] = useState(() => window.__scanFilter || "ALL");
   const [sort, setSort] = useState({ col: "score", dir: -1 });   // score descending by default
+  const [sortSel, setSortSel] = useState("Score ↓");
+  const SS_SORT_MAP = { "Ticker A→Z": { col: "sym", dir: 1 }, "EDGE ↓": { col: "edgePct", dir: -1 }, "Score ↓": { col: "score", dir: -1 }, "R:R ↓": { col: "rr", dir: -1 }, "RVOL ↓": { col: "rvol", dir: -1 }, "RS ↓": { col: "rs", dir: -1 } };
+  const onSortSel = (label) => { setSortSel(label); if (SS_SORT_MAP[label]) setSort(SS_SORT_MAP[label]); };
   const [secF, setSecF] = useState("all");
   const [setupF, setSetupF] = useState("all");
   const [q, setQ] = useState("");
@@ -10520,6 +10531,7 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
     { id:"fresh",     label:"FRESH",     count: universe.filter(t=>t.eq==="FRESH").length, tone:"cy" },
     { id:"earnings",  label:"EARNINGS",  count: universe.filter(t=>t.er!=null&&t.er<=14).length, tone:"amb" },
     { id:"surges",    label:"SURGES",    count: universe.filter(t=>parseFloat(t.rvol)>=1.5).length, tone:"gn" },
+    { id:"ai-edge",   label:"AI EDGE",   count: universe.filter(t=>t.aiEdge!=null&&t.aiEdge>=0.05).length, tone:"violet" },
     { id:"killed",    label:"EXCLUDED",  count: universe.filter(t=>t.verdict==="AVOID").length, tone:"rd" },
   ];
   const PILLS = [
@@ -10534,6 +10546,7 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
     if (tab === "surges")    r = r.filter(t => parseFloat(t.rvol) >= 1.5);
     if (tab === "killed")    r = r.filter(t => t.verdict === "AVOID");
     if (tab === "fresh")     r = r.filter(t => t.eq === "FRESH");
+    if (tab === "ai-edge")   r = r.filter(t => t.aiEdge != null && t.aiEdge >= 0.05);
     if (side === "BUY")   r = r.filter(t => t.verdict === "BUY");
     if (side === "WATCH") r = r.filter(t => t.verdict === "WATCH");
     if (side === "SHORT") r = r.filter(t => t.verdict === "AVOID");
@@ -10578,6 +10591,10 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
       </div>
       <div className="ss2-toolbar">
         <span className="mono"><b className="copper">{rows.length}</b> <span className="dim2">{showFull ? "of "+universe.length+" universe" : "picks"}</span></span>
+        <span className="mono dim2">Sort:</span>
+        <select className="ss2-sel mono" value={sortSel} onChange={e => onSortSel(e.target.value)}>
+          <option>Score ↓</option><option>Ticker A→Z</option><option>EDGE ↓</option><option>R:R ↓</option><option>RVOL ↓</option><option>RS ↓</option>
+        </select>
         <button className={`ss2-side-btn ${showFull?"is-on ss2-side--all":""}`} onClick={()=>setShowFull(v=>!v)}
                 title="Toggle the full scored universe (~1832) vs the top actionable picks">
           {showFull ? (fullRows ? `★ FULL UNIVERSE · ${fullRows.length}` : (fullErr ? "FULL · error" : "FULL · loading…")) : "▦ FULL UNIVERSE"}
@@ -10601,16 +10618,20 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
             <th>NAME</th><th>SECTOR</th><th>T.F.S.N</th><th>MECHANISM</th>
             <ScanTh col="score" sort={sort} onClick={setSort} r>SCORE</ScanTh>
             <th>EDGE · GRADES</th>
-            <th>BIAS</th><th>TIER</th><th>SETUP</th><th>EQ</th><th>CAT</th>
+            <th>BIAS</th><ScanTh col="ready" sort={sort} onClick={setSort} r>READY</ScanTh><th>TIER</th><th>SETUP</th><th>EQ</th><th>CAT</th>
             <ScanTh col="price" sort={sort} onClick={setSort} r>PRICE</ScanTh>
             <ScanTh col="chg" sort={sort} onClick={setSort} r>%CHG</ScanTh>
+            <ScanTh col="off52" sort={sort} onClick={setSort} r>%52WH</ScanTh>
             <ScanTh col="rr" sort={sort} onClick={setSort} r>R:R</ScanTh>
             <th>PLAN</th>
             <ScanTh col="atr" sort={sort} onClick={setSort} r>ATR</ScanTh>
             <ScanTh col="rvol" sort={sort} onClick={setSort} r>RVOL</ScanTh>
+            <ScanTh col="adx" sort={sort} onClick={setSort} r>ADX</ScanTh>
+            <ScanTh col="beta" sort={sort} onClick={setSort} r>BETA</ScanTh>
             <th>MTF · 1H·4H·1D·1W</th>
             <ScanTh col="regWR" sort={sort} onClick={setSort} r>REG WR</ScanTh>
             <ScanTh col="rs" sort={sort} onClick={setSort} r>RS</ScanTh>
+            <ScanTh col="r1m" sort={sort} onClick={setSort} r>1M</ScanTh>
             <ScanTh col="wlb" sort={sort} onClick={setSort} r>W% LB</ScanTh>
             <ScanTh col="n" sort={sort} onClick={setSort} r>N</ScanTh>
             <ScanTh col="pf" sort={sort} onClick={setSort} r>PF</ScanTh>
@@ -10619,7 +10640,7 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
             <ScanTh col="er" sort={sort} onClick={setSort} r>ER</ScanTh>
             <th>SIGNALS</th>
           </tr></thead>
-          <tbody>{padTop>0 && <tr style={{height:padTop}} aria-hidden><td colSpan={30} style={{padding:0,border:"none"}} /></tr>}
+          <tbody>{padTop>0 && <tr style={{height:padTop}} aria-hidden><td colSpan={35} style={{padding:0,border:"none"}} /></tr>}
           {visible.map((t, i) => (
             <tr key={t.sym} onClick={()=>onTicker(t.sym)}>
               <td className="ss2-chk"><input type="checkbox" checked={selected.has(t.sym)} onChange={()=>toggleSel(t.sym)} onClick={e=>e.stopPropagation()} /></td>
@@ -10638,19 +10659,24 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
                 </span>
               ); })()}</td>
               <td><Pill tone={t.verdict==="BUY"?"gn":t.verdict==="AVOID"?"rd":"amb"} small>{secBias(t.verdict)}</Pill></td>
+              <td className="r">{(()=>{const n=t.ready||0;const tn=n>=6?"gn":n>=4?"amb":"rd";return <span className={`ss2-ready ss2-ready--${tn}`} title={`${n} of 6 entry criteria met`}>{n}/6</span>;})()}</td>
               <td><span className={`ss2-tier ss2-tier--${String(t.tier).toLowerCase()}`}>{t.tier}</span></td>
               <td className="mono dim">{t.setup}</td>
               <td><span className={`ss2-eq ss2-eq--${t.eq==="EXTENDED"?"amb":t.eq==="MISSED"?"rd":"ink"}`}>{t.eq}</span></td>
               <td><span className="ss2-cat mono">{t.cat}</span></td>
               <td className="r mono tabular">${(t.price||0).toFixed(2)}</td>
               <td className={`r mono tabular ${t.chg>=0?"up":"dn"}`}>{t.chg>=0?"+":""}{(t.chg||0).toFixed(2)}%</td>
+              <td className={`r mono tabular ${t.off52==null?"dim":t.off52>=-5?"up":t.off52>=-15?"":"dim"}`} title="distance from 52-week high">{t.off52!=null?t.off52+"%":"—"}</td>
               <td className="r mono tabular"><b className={parseFloat(t.rr)>=2?"up":""}>{t.rr}</b></td>
               <td className="mono ss2-plan"><span className="dn">${t.stop}</span><span className="copper">${t.entry}</span><span className="up">${t.t1plan}</span></td>
               <td className="r mono tabular dim">{t.atr}</td>
               <td className={`r mono tabular ${parseFloat(t.rvol)>=1.5?"up":"dim"}`}>{t.rvol}×</td>
+              <td className={`r mono tabular ${t.adx==null?"dim":t.adx>=25?"up":t.adx>=20?"warn":"dim"}`} title="ADX · trend strength">{t.adx!=null?t.adx:"—"}</td>
+              <td className="r mono tabular dim" title="beta vs SPY">{t.beta!=null?t.beta.toFixed(2):"—"}</td>
               <td><MTFDots states={t.mtf} /></td>
               <td className={`r mono tabular ${t.regWR>=60?"up":t.regWR>=50?"warn":t.regWR==null?"dim":"dn"}`}>{t.regWR!=null?t.regWR+"%":"—"}</td>
               <td className="r mono tabular">{t.rs}</td>
+              <td className={`r mono tabular ${t.r1m==null?"dim":t.r1m>=0?"up":"dn"}`} title="1-month return">{t.r1m!=null?(t.r1m>=0?"+":"")+t.r1m+"%":"—"}</td>
               <td className={`r mono tabular ${t.wlb==null?"dim":t.wlb>=50?"up":"warn"}`}>{t.wlb!=null?t.wlb+"%":"—"}</td>
               <td className="r mono tabular dim">{t.n!=null?t.n:"—"}</td>
               <td className="r mono tabular">{t.pf}</td>
@@ -10660,7 +10686,7 @@ function SurfaceSignalScanner({ screener, data, onTicker }) {
               <td className="mono ss2-signals">{t.signals.join(" ")}</td>
             </tr>
           ))}
-          {padBot>0 && <tr style={{height:padBot}} aria-hidden><td colSpan={29} style={{padding:0,border:"none"}} /></tr>}
+          {padBot>0 && <tr style={{height:padBot}} aria-hidden><td colSpan={35} style={{padding:0,border:"none"}} /></tr>}
           </tbody>
         </table>
       </div>
