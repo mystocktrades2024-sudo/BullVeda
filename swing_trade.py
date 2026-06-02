@@ -857,6 +857,46 @@ def run_daily_scan(force_fresh: bool = False):
              f"Ultimate: {len(ultimate_data['all_trades'])} open trades | "
              f"Confidential: {len(ultimate_data['confidential_commentary'])} articles")
 
+    # ── ALWAYS-INCLUDE coverage set ────────────────────────────────────────
+    # Mandatory: a name someone BOUGHT or that the system ever PICKED must keep
+    # getting scored every day, even after it falls out of the ranked universe —
+    # otherwise a holder gets no stop/target/exit read on a live position. These
+    # bypass the price/volume/liquidity filter AND the enrichment cap below.
+    #   held      = current open positions (Alpaca paper book / portfolio_state)
+    #   past_pick = every historical pick the system issued + closed trades
+    held_syms: set[str] = set()
+    pastpick_syms: set[str] = set()
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        _ps = _Path("data/portfolio_state.json")
+        if _ps.exists():
+            _pd = _json.loads(_ps.read_text())
+            for _p in (_pd.get("positions") or []):
+                _t = (_p.get("ticker") or _p.get("symbol") or "").upper()
+                if _t:
+                    held_syms.add(_t)
+            for _c in (_pd.get("closed_trades") or _pd.get("closed") or []):
+                _t = (_c.get("ticker") or _c.get("symbol") or "").upper()
+                if _t:
+                    pastpick_syms.add(_t)
+        _ph = _Path("cache/picks_history.json")
+        if _ph.exists():
+            _phd = _json.loads(_ph.read_text())
+            for _key in ("trades", "TRADES", "watch_triggers", "WATCH_TRIGGERS"):
+                for _r in (_phd.get(_key) or []):
+                    if isinstance(_r, dict):
+                        _t = (_r.get("ticker") or _r.get("symbol") or _r.get("sym") or "").upper()
+                        if _t:
+                            pastpick_syms.add(_t)
+    except Exception as _e:
+        log.warning(f"  always-include set build failed (continuing): {_e}")
+    # held names are never merely "past_pick"
+    pastpick_syms -= held_syms
+    always_include = held_syms | pastpick_syms
+    log.info(f"  Always-include coverage: {len(held_syms)} held + {len(pastpick_syms)} past-pick = "
+             f"{len(always_include)} force-scanned (bypass filter + enrichment cap)")
+
     # Build universe
     custom = universe_cfg.get("custom_watchlist", [])
     zacks_rank1_only = universe_cfg.get("zacks_rank1_only", False)
@@ -877,13 +917,18 @@ def run_daily_scan(force_fresh: bool = False):
     if zacks_rank1_only and zacks_r1:
         # Narrow/fast mode: Zacks Rank #1 + custom watchlist
         # Russell 1000 Rank #1 stocks are already inside zacks_r1_set (Zacks ranks all US stocks)
-        universe = list(zacks_r1_set | set(custom))
+        universe = list(zacks_r1_set | set(custom) | always_include)
         for t in zacks_r1_set:
             ticker_sources[t] = "zacks_rank1"
         for t in custom:
             ticker_sources.setdefault(t, "custom")
+        for t in held_syms:
+            ticker_sources.setdefault(t, "held")
+        for t in pastpick_syms:
+            ticker_sources.setdefault(t, "past_pick")
         log.info(f"  Universe (Zacks #1 mode): {len(universe)} "
-                 f"(Zacks #1={len(zacks_r1)}, Russell 1000 R#1 included above, custom={len(custom)})")
+                 f"(Zacks #1={len(zacks_r1)}, Russell 1000 R#1 included above, custom={len(custom)}, "
+                 f"always-include={len(always_include)})")
     else:
         # Full mode union of all sources (indices + extras + info-edge + thematic)
         r2000_set    = set(russell2000)
@@ -903,7 +948,7 @@ def run_daily_scan(force_fresh: bool = False):
         base_set = (sp500_set | r1000_set | r2000_set | mid400_set | sml600_set
                     | ndx_set | ndxall_set | ipo_set | pead_set | insider_set | congress_set
                     | etf_set | crypto_set | screen_set | newhi_set | newlo_set
-                    | zacks_r1_set | set(custom))
+                    | zacks_r1_set | set(custom) | always_include)
         universe = list(base_set)
         # Source tagging — first-source-wins. Most curated → least curated.
         for t in sp500_set:    ticker_sources[t] = "sp500"
@@ -924,6 +969,8 @@ def run_daily_scan(force_fresh: bool = False):
         for t in newlo_set:    ticker_sources.setdefault(t, "signal_200d_new_lo")
         for t in zacks_r1_set: ticker_sources.setdefault(t, "zacks_rank1")
         for t in custom:       ticker_sources.setdefault(t, "custom")
+        for t in held_syms:    ticker_sources.setdefault(t, "held")
+        for t in pastpick_syms: ticker_sources.setdefault(t, "past_pick")
         log.info(f"  Universe: {len(universe)} "
                  f"(S&P 500={len(sp500)}, R1000={len(russell1000)}, "
                  f"R2000={len(russell2000)}, MID400={len(sp_mid400)}, "
@@ -1003,7 +1050,7 @@ def run_daily_scan(force_fresh: bool = False):
                         for r in _scr_rows if isinstance(r, dict)}
             if _scr_set:
                 _ub = len(universe)
-                universe = [t for t in universe if t.upper() in _scr_set or ticker_sources.get(t) in ("custom", "leveraged")]
+                universe = [t for t in universe if t.upper() in _scr_set or ticker_sources.get(t) in ("custom", "leveraged") or t.upper() in always_include]
                 log.info(f"  Screener pre-filter: {_ub} → {len(universe)} ({_ub - len(universe)} below mcap/ADV/price floors)")
         except Exception as e:
             log.warning(f"  Screener pre-filter failed (continuing without): {e}")
@@ -1035,10 +1082,10 @@ def run_daily_scan(force_fresh: bool = False):
                 _close = float(_rec.get("close") or _rec.get("adjusted_close") or 0)
                 _vol   = float(_rec.get("volume") or 0)
                 _dv    = _close * _vol
-                # ALWAYS keep custom + leveraged + Zacks #1 even if out of range
-                if ticker_sources.get(_t) in ("custom", "leveraged", "zacks_r1"):
+                # ALWAYS keep custom + leveraged + Zacks #1 + held/past-pick even if out of range
+                if ticker_sources.get(_t) in ("custom", "leveraged", "zacks_r1") or _t.upper() in always_include:
                     _kept.append(_t)
-                    _ts_keep[_t] = ticker_sources[_t]
+                    _ts_keep[_t] = ticker_sources.get(_t, "held" if _t.upper() in held_syms else "past_pick")
                     continue
                 if _min_price <= _close <= _max_price and _dv >= _min_dv:
                     _kept.append(_t)
@@ -1426,7 +1473,10 @@ def run_daily_scan(force_fresh: bool = False):
             avg_vol = float(df["Volume"].rolling(20).mean().dropna().iloc[-1]) if len(df) >= 20 else vol
             daily_dv = avg_vol * price
 
-            if min_price <= price <= max_price and daily_dv >= min_dv:
+            # Always-include (held + past-pick) bypass the price/volume gate — a name
+            # someone holds must be scored for exit management even if it now trades
+            # below the liquidity/price floor or has fallen out of range.
+            if (min_price <= price <= max_price and daily_dv >= min_dv) or ticker.upper() in always_include:
                 qualified[ticker] = df
             elif ticker in zacks_r1_set:
                 # Record why this Zacks #1 stock was filtered out
@@ -1660,10 +1710,15 @@ def run_daily_scan(force_fresh: bool = False):
         _curated_qualified = [t for t in qualified
                               if ticker_sources.get(t) in _curated_sources]
 
+        # Always-include (held + past-pick) — never cut by the enrichment cap.
+        # A held/previously-picked name MUST be deep-scored every scan so the
+        # holder gets a current stop/target/exit read, not stale coverage.
+        _alwaysinc_qualified = [t for t in qualified if t.upper() in always_include]
+
         _guaranteed = (set(_zr1_qualified) | set(_sp500_in_qualified)
                        | set(_ndx_in_qualified)
                        | set(_earnings_in_qualified) | set(_pead_in_qualified)
-                       | set(_curated_qualified))
+                       | set(_curated_qualified) | set(_alwaysinc_qualified))
         _non_guaranteed_sorted = sorted(
             [(t, s) for t, s in _prescores.items() if t not in _guaranteed],
             key=lambda x: x[1], reverse=True
@@ -1706,10 +1761,11 @@ def run_daily_scan(force_fresh: bool = False):
     _zr1_set   = set(zacks_r1_set) if "zacks_r1_set" in dir() else set()
     _eg_set    = _earnings_guaranteed if "_earnings_guaranteed" in dir() else set()
     _custom_set = {t for t, src in ticker_sources.items() if src in ("custom", "leveraged")}
+    _alwaysinc_set = {t for t in qualified if t.upper() in always_include}
     # Score all qualifying tickers cheaply (reuse the local pre-screen helper)
     _all_scores = {t: _fast_prescreen_score(df) for t, df in qualified.items()}
     # Tier-1 = (guaranteed sets) + (top-N by score until we hit _tier1_n)
-    _t1_guaranteed = _zr1_set | _eg_set | _custom_set
+    _t1_guaranteed = _zr1_set | _eg_set | _custom_set | _alwaysinc_set
     _t1_guaranteed &= set(qualified.keys())
     _sorted = sorted(
         [(t, s) for t, s in _all_scores.items() if t not in _t1_guaranteed],
