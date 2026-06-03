@@ -502,17 +502,29 @@ async def root(request: Request, auth: HTTPBasicCredentials = Depends(_check_aut
     # clear-cut phones → mobile companion
     if not force_desktop and _re_root.search(r"iPhone|iPod|Android.*Mobile|Windows Phone|BlackBerry|Opera Mini|IEMobile", ua, _re_root.I):
         return RedirectResponse(url="/v2/mobile/index.html", status_code=302)
+    return _serve_bullveda_bundle(request, inject_guard=not force_desktop)
+
+
+def _serve_bullveda_bundle(request: Request, inject_guard: bool):
+    """Serve the 2.5MB BullVeda bundle with ETag revalidation so the browser CACHES it
+    and only re-downloads when it actually changes (after a rebuild). Repeat loads get a
+    tiny 304 instead of 2.5MB — the single biggest perf win for the common reload case."""
     p = (_PROTOTYPE_DIR / "bullveda" / "BullVeda.html").resolve()
     if not p.exists():
         return RedirectResponse(url="/v2/bullveda/BullVeda.html", status_code=302)  # fallback
+    st = p.stat()
+    etag = f'W/"bv-{int(st.st_mtime)}-{st.st_size}-{1 if inject_guard else 0}"'
+    cc = "no-cache, must-revalidate"  # cache, but revalidate each load (cheap 304 when unchanged)
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": cc})
     html = p.read_bytes()
-    if not force_desktop:
-        # iPad / Mac-UA touch tablets → bounce to mobile before the 2.5MB bundle loads
+    if inject_guard:
+        # iPad / Mac-UA touch tablets → bounce to mobile before the bundle runs
         guard = (b"<script>try{if(navigator.maxTouchPoints>1&&/Macintosh|iPad/i.test(navigator.userAgent)"
                  b"){location.replace('/v2/mobile/index.html');}}catch(e){}</script>")
         html = html.replace(b"<head>", b"<head>" + guard, 1)
     return Response(content=html, media_type="text/html",
-                    headers={"Cache-Control": "no-store"})
+                    headers={"ETag": etag, "Cache-Control": cc})
 
 
 _BV_BOOT_CACHE = {}  # rel-path → (mtime, parsed-json) for the combined boot endpoint

@@ -174,3 +174,65 @@ Schwab (live quotes, options) and free sources (WSB/insider/membership) add **ze
 
 **Review trigger:** if EODHD sustained spend exceeds ~20K/day, something re-routed wrong —
 check this table first. The provider for each data type is fixed; only cadence is tunable.
+
+---
+
+# Per-surface API cost + data risk (2026-06-03)
+
+The principle after the routing fix: **interaction is free; only scanning costs EODHD.**
+Clicking around the dashboard = ~1 Schwab call (live quote) + ~0 EODHD (detail renders
+from bundle/cache; ML/SMC/technicals are local compute).
+
+## Left-nav surfaces
+
+| Surface | Provider(s) | Cadence | API calls/update | Risk |
+|---|---|---|---|---|
+| Home / Market Map | scan + Schwab | 30min; price 10–20s | Schwab ~1 · EODHD 0 | Low |
+| Signal Scanner | scan + Schwab | 30min; price 20s | Schwab 1–3 batch · EODHD 0 | Low |
+| Themes | EODHD ETF | 1×/day | EODHD ~25 | Med (daily) |
+| Sectors · ETFs | EODHD | 1×/day+scan | EODHD ~22 | Low |
+| Pre-Market | Schwab ext-hrs | 05:30/06:00 | Schwab 1 · EODHD 0 | Med |
+| Upcoming IPOs | EODHD calendar | 1×/day | EODHD ~2 | **High — sparse source** |
+| Crypto Market | EODHD + list | 30min | EODHD ~20 | **High — no 24/7 feed** |
+| News · Sentiment | EODHD news + StockTwits/ApeWisdom | 2–4h / build | EODHD ~few-hundred (cached) · free 1–9 | Med — scrape fragility |
+| Momentum | scan + local | 30min + 08:00 | EODHD 0 (in-scan) | Low |
+| Earnings AI | EODHD + Zacks(Gmail) + local | morning | EODHD ~10 · Gmail 0 | Med |
+| ML Predictions | local models | 30min / daily retrain | **0 API** | Med — model drift (monitored) |
+| Options Flow | Schwab options | 15min | Schwab ~30–60 · EODHD 0 | Low |
+| Insider Trading | openinsider (+EODHD fallback) | weekly+scan | **1 free call** (3000 EODHD only on scrape fail) | Med — scrape fragility |
+| SMC / Patterns | local smc_engine | 1×/day | **0** (cached bars) | Med — daily-stale |
+| Strategies · Backtest | local + EODHD | scan / Sun | EODHD heavy Sun only | Med — backtest caveats |
+| Automated Trade | Alpaca paper | 06:35+10min | Alpaca · EODHD 0 | Med — PAPER only |
+| My Portfolios | Alpaca + Schwab | sync+10–20s | Alpaca 1 + Schwab 1 · EODHD 0 | Low |
+| Book Risk | Alpaca + local | scan | Alpaca 1 · EODHD 0 | Low |
+| Track Record | local logs | 30min | **0 API** | Med — WATCH-entry bias |
+| Playbook/Settings/Users/Status/Help | static/config/local | manual/60s | 0–1 | Low |
+
+## Detail sub-tabs (per ticker open)
+
+| Sub-tab | Provider(s) | Cadence | API calls/open | Risk |
+|---|---|---|---|---|
+| 01 Overview | scan+ML+Schwab | 30min; 5s | Schwab 1 · EODHD 0–1 · ML 0 | Low |
+| 02 Plan | scan+Schwab | 30min; 5s | Schwab 1 · EODHD 0 | Low |
+| 03 Chart | EODHD bars | on-open+lazy | EODHD 0 cached / 1 cold | Med |
+| 04 Technicals | EODHD→local | 30min | 0 (cached) | Low |
+| 05 Patterns | local | 30min | 0 | Med — heuristic |
+| 06 SMC | local smc_engine | daily | 0 (cached bars) | Med |
+| 07 Investment·Value | EODHD fundamentals | weekly | EODHD 0 cached / 1 cold | Med — ≤7d stale (OK) |
+| 08 Earnings | EODHD+Zacks+local | daily | EODHD 0–1 | Med |
+| 09 Risk | local+Alpaca+Schwab | 30min/live | Schwab 1 · EODHD 0 | Low |
+| 10 Options | Schwab chain | 15min | Schwab 1–2 (2h cache) · EODHD 0 | Low |
+| 11 Tape · Flow | Schwab+local | 15min | Schwab 1–2 · EODHD 0 | Med |
+| 12 AI Edge | local models | 30min | **0 API** | Med — drift |
+| 13 Time Anatomy | local table | scan lookup | **0 API** | Med — base-rate not prediction |
+
+## Risk map — what to watch
+- **High:** IPOs (sparse — EDGAR S-1 backstop not yet wired), Crypto (no 24/7 feed).
+- **Med — scrape fragility:** News/social (ApeWisdom/StockTwits), Insider (openinsider) — free, no SLA, can silently empty on site changes (each has a fallback + honest empty-state).
+- **Med — model:** ML Edge, Time Anatomy, beat-predict — estimates, not facts; ML drift monitored + retrained daily.
+- **Med — discipline:** Track Record (WATCH-entry bias), Strategies (survivorship haircut).
+- **Low:** Scanner, Plan, Options, Portfolio, live prices (Schwab + scan-fresh + real broker).
+
+## Two structural risks
+1. **Free-scrape fragility** — News/social + insider ride free third-party sources with no SLA. Mitigated by fallbacks + honest "—".
+2. **EODHD-dependence when maxed** — anything EODHD-sourced freezes if quota maxes (happened 2026-06-03). The routing fix keeps daily spend ~8K (10× headroom) so it shouldn't recur; live data moved to Schwab to decouple.
