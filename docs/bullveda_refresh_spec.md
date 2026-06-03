@@ -114,3 +114,63 @@ The detail panel opens via class **P** (on-open fresh quote), then individual su
 - **Free**: social scrapes (N), local state (Status).
 
 All cadences are config knobs (see `config/config.json` → `freshness` block, to be added).
+
+---
+
+# PERMANENT Provider-Routing Policy (the durable contract)
+
+**Problem this fixes:** on 2026-06-03 EODHD hit 100% by 09:30 and the scan aborted. Root
+cause was *routing*, not volume — fundamentals were re-fetched nightly (~62K/night), live
+quotes spent EODHD on every click, and ml-edge cold-fetched the whole universe. The rule
+below is permanent: **EODHD is the scarce resource; route everything possible off it.**
+
+## The iron rule
+> **EODHD (95K/day, metered) is used ONLY for what no other source provides.**
+> **Schwab (no daily cap) carries ALL live/quote/options data.**
+> **Free sources carry sentiment, insider, IPO, membership.**
+> Target sustained EODHD spend: **≤ 15K/day** (≈6× headroom to the 85K throttle).
+
+## Permanent provider assignment (by data type — never re-route without updating this)
+
+| Data type | Provider | Why permanent | Enforcement point |
+|---|---|---|---|
+| Live price / %chg / quote | **Schwab** | no daily cap; real-time | `/api/live_quotes`, `/api/ticker` (Schwab-primary), `BV.fetchLive` |
+| Options chain / IV / gamma / flow | **Schwab** | off-budget; 15-min refresh | `/api/options`, `refresh_options_flow.py` (StartInterval 900s) |
+| Daily/weekly OHLCV | **EODHD** | sole source; **1 bulk call/day** | `bulk_eod` (7200s TTL) |
+| Fundamentals | **EODHD** | sole source; quarterly | **Saturday-only** (`enrich-fundamentals-weekly`, 6-day TTL) |
+| News + sentiment | **EODHD news** | adequate; 4h TTL | scan + `/api/news` |
+| Earnings calendar / EPS | **EODHD** | sole source; 6h TTL | morning builders |
+| WSB / retail sentiment | **ApeWisdom (free)** | Reddit `.json` 403s now | `build_retail_sentiment.py` |
+| StockTwits sentiment | **StockTwits (free)** | public API works | `build_retail_sentiment.py` |
+| Insider clusters | **openinsider (free)** | pre-aggregated, 1 call vs 3000 EODHD | `build_universe_insider_cluster.py` (EODHD fallback) |
+| IPO / splits calendar | **EODHD** | works (8+31/day); EDGAR S-1 if it thins | `fetch_corporate_events.py` |
+| Index membership | **Wikipedia (free)** | point-in-time snapshots | `snapshot_membership.py` |
+| ML forecasts | **Local models** | compute on cached features | `ml.run_ml_edge --universe bundle` |
+| SMC / patterns / time-anatomy / scoring | **Local compute** | no API | client + scan engine |
+
+## Permanent EODHD-conservation rules (enforced, not advisory)
+
+1. **Never spend EODHD on a live quote.** All quotes → Schwab. (`/api/ticker` Schwab-primary, 2026-06-03.)
+2. **Fundamentals fetch once per week (Saturday), never nightly.** (`enrich-nightly --skip-fundamentals`; `enrich-fundamentals-weekly` Sat 03:00.)
+3. **ml-edge reads the bundle, never cold-fetches `--universe all`.** (`com.swingtrade.ml-edge` → `bundle`.)
+4. **Scans = 1 heavy + 4 light/day.** Heavy deep-enriches ≤1500; light deep-enriches ≤150. (`run_daily_scan.sh` clock gate.)
+5. **No redundant nightly enrich.** `full-enrich-nightly` retired; folded into 05:15 heavy.
+6. **Budget guard stays on:** throttle ≥85%, abort ≥97% (`eodhd_quota` config). The guard is the backstop, not the plan.
+7. **No manual full scans during the day.** Use `swing_trade.py regen` (0 EODHD) to rebuild the dashboard from the last bundle.
+
+## Steady-state daily EODHD budget (post-fix)
+
+| Consumer | Calls/day | Notes |
+|---|---|---|
+| `enrich-nightly` (tech-only weeknights) | ~60–260 | bulk_eod + calendar bulks |
+| `enrich-fundamentals-weekly` (Sat only) | ~3,000 / **7** ≈ 430 avg | amortized |
+| Heavy scan 05:15 | ~1,500 | fundamentals warm from Sat |
+| 4 light scans | ~2,400 | ~600 each |
+| ml-edge (bundle) + intraday | ~600 | |
+| news / iv / misc | ~1,000 | |
+| **Total** | **≈ 6–9K/day** | **vs 95K cap → ~10× headroom** |
+
+Schwab (live quotes, options) and free sources (WSB/insider/membership) add **zero** to this.
+
+**Review trigger:** if EODHD sustained spend exceeds ~20K/day, something re-routed wrong —
+check this table first. The provider for each data type is fixed; only cadence is tunable.

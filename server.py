@@ -1060,15 +1060,31 @@ async def position_analysis(
     if not tk:
         raise HTTPException(400, "ticker required")
 
-    # ── 1. live quote ──────────────────────────────────────────────────
+    # ── 1. live quote (Schwab PRIMARY — OFF the EODHD budget; EODHD fallback) ──
+    # Permanent routing (2026-06-03): every ticker-detail open used to spend an EODHD
+    # real_time call. Schwab Market Data has no daily cap, so the live mark comes from
+    # Schwab; EODHD is hit only if Schwab is unavailable. Keeps /api/ticker EODHD-free.
     quote = {}
     try:
-        from eodhd_client import real_time as _eod_rt
-        q = _eod_rt(tk)
-        if isinstance(q, dict):
-            quote = q
+        import schwab_client as _sc
+        _blob = (_sc.get_quotes_batch([tk]) or {}).get(tk.upper()) or {}
+        _q = _blob.get("quote") or {}
+        if _q.get("lastPrice") is not None:
+            quote = {
+                "close":         _q.get("lastPrice"),
+                "previousClose": _q.get("closePrice"),
+                "change_p":      _q.get("netPercentChange"),
+            }
     except Exception:
         pass
+    if not quote:                                   # Schwab unavailable → EODHD fallback
+        try:
+            from eodhd_client import real_time as _eod_rt
+            q = _eod_rt(tk)
+            if isinstance(q, dict):
+                quote = q
+        except Exception:
+            pass
 
     cur_px = float(quote.get("close") or quote.get("previousClose") or 0) or None
     chg_pct_1d = quote.get("change_p")
