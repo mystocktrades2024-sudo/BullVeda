@@ -298,49 +298,110 @@ function LensTime({ ticker, mode }) {
     </div>;
   }
   const sess = (n) => n == null ? "—" : "S" + n;
+  // ── derive the quant read from the curve (natural frequencies + time distribution) ──
+  const ceil = Math.min(ta.ceiling, ta.curve.length - 1);
+  const atC = ta.curve[ceil] || ta.curve[ta.curve.length - 1];
+  let reached = Math.round((atC.sT1 || 0) * 100);
+  let stopped = Math.round((atC.sSt || 0) * 100);
+  let openN = Math.max(0, 100 - reached - stopped);
+  const pctlSess = (frac) => { const tgt = ta.pHitT1 * frac; for (let s = 0; s < ta.curve.length; s++) if ((ta.curve[s].sT1 || 0) >= tgt) return s; return null; };
+  const p25 = pctlSess(0.25), p75 = pctlSess(0.75);
+  // time stop = decay threshold, but never beyond the mode's hard ceiling
+  const timeStop = Math.min(ta.decayT1 != null ? ta.decayT1 : ta.hardStop, ta.hardStop);
+  // verdict
+  let verdict, vtone;
+  if (ta.earnWallT2) { verdict = "HOLD TO T1 · TRIM INTO ER"; vtone = "amb"; }
+  else if (reached >= stopped + 8) { verdict = "FAVORABLE CLOCK"; vtone = "gn"; }
+  else if (stopped >= reached + 12) { verdict = "STOP-HEAVY · TIGHT TIME BUDGET"; vtone = "rd"; }
+  else { verdict = "BALANCED CLOCK"; vtone = "amb"; }
+  const readMedian = ta.medianT1 != null ? `a median of ${ta.medianT1} sessions${p75 != null ? ` (a quarter need >${p75})` : ""}` : "an uncertain horizon";
+
   return (
     <div className="lens-pad" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: "var(--copper)", letterSpacing: ".04em" }}>⏱ TIME ANATOMY</div>
-        <span className="mono dim2" style={{ fontSize: 12 }}>when does this resolve? · regime-conditioned survival</span>
+        <span className="mono dim2" style={{ fontSize: 12 }}>how long until this hits its target — or times out?</span>
         {ta.source === "calibrated"
           ? <span className="mono" style={{ marginLeft: "auto", fontSize: 10, padding: "3px 8px", borderRadius: 999, background: "color-mix(in oklab, var(--gn) 16%, var(--bg-1))", color: "var(--gn)", border: "1px solid color-mix(in oklab, var(--gn) 35%, transparent)" }}>CALIBRATED · {ta.confidence.level} · n={ta.confidence.analogues.toLocaleString()}</span>
           : <span className="mono" style={{ marginLeft: "auto", fontSize: 10, padding: "3px 8px", borderRadius: 999, background: "color-mix(in oklab, var(--amb) 16%, var(--bg-1))", color: "var(--amb)", border: "1px solid color-mix(in oklab, var(--amb) 35%, transparent)" }}>MODELED · NO ANALOGUES</span>}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
-        <TaTile k="MEDIAN → T1" v={sess(ta.medianT1)} sub={`fastest S${ta.captureLo}–S${ta.captureHi}`} tone="gn" />
-        <TaTile k="MEDIAN → T2" v={sess(ta.medianT2)} sub={ta.earnWallT2 ? "post-ER" : (ta.distT2 != null ? ta.distT2 + " ATR" : "—")} tone="violet" />
-        <TaTile k="DECAY · TIME STOP" v={sess(ta.decayT1)} sub="edge < carry beyond" tone="copper" />
-        <TaTile k="HARD STOP" v={sess(ta.hardStop)} sub={`${ta.holdMode} ceiling ${ta.ceiling}`} tone="amb" />
-        <TaTile k="P(T1 eventual)" v={(ta.pHitT1 * 100).toFixed(0) + "%"} sub="before stop" tone="gn" />
-        <TaTile k="P(T2 | T1)" v={ta.pT2givenT1 == null ? "—" : (ta.pT2givenT1 * 100).toFixed(0) + "%"} sub="conditional path" tone="violet" />
+      {/* ── THE READ — plain-English synthesis + verdict ── */}
+      <div style={{ background: "linear-gradient(180deg, color-mix(in oklab, var(--copper) 9%, var(--bg-1)), var(--bg-1))", border: "1px solid color-mix(in oklab, var(--copper) 30%, transparent)", borderRadius: 12, padding: "12px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <span className="label-cap mono" style={{ fontSize: 10, color: "var(--copper)", letterSpacing: ".14em" }}>THE READ</span>
+          <span className="mono" style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 999, color: `var(--${vtone})`, background: `color-mix(in oklab, var(--${vtone}) 14%, transparent)`, border: `1px solid color-mix(in oklab, var(--${vtone}) 35%, transparent)` }}>{verdict}</span>
+        </div>
+        <div className="mono" style={{ fontSize: 13, lineHeight: 1.6, color: "var(--ink-0)" }}>
+          Across <b>{ta.confidence.analogues != null ? ta.confidence.analogues.toLocaleString() : "—"}</b> historical setups in <i>this exact context</i>, by your <b>{ta.holdMode}</b> horizon (<b>S{ta.ceiling}</b>): <b className="gn">{reached}</b> reached T1 first, <b className="rd">{stopped}</b> stopped out first. The ones that worked hit T1 in {readMedian}. <b>Edge decays after S{timeStop}</b> — exit there if still unresolved.{ta.earnWallT2 ? <span> Earnings land at <b className="rd">S{ta.earnDays}</b>, before the T2 median — treat as <b>T1-only into the event</b>.</span> : (ta.medianT2 != null ? <span> A runner to T2 needs a median <b>S{ta.medianT2}</b>.</span> : null)}
+        </div>
       </div>
 
+      {/* ── NATURAL FREQUENCY — the competing-risk outcome, in plain counts ── */}
+      <div>
+        <div className="label-cap mono" style={{ fontSize: 10, color: "var(--ink-2)", letterSpacing: ".12em", marginBottom: 6 }}>OUT OF 100 SETUPS LIKE THIS · BY YOUR S{ta.ceiling} HORIZON</div>
+        <div style={{ display: "flex", height: 30, borderRadius: 8, overflow: "hidden", border: "1px solid var(--ink-2)" }}>
+          {reached > 0 && <div style={{ width: reached + "%", background: "color-mix(in oklab, var(--gn) 80%, transparent)", display: "flex", alignItems: "center", justifyContent: "center" }}><span className="mono" style={{ fontSize: 11, fontWeight: 700, color: "#071" }}>{reached}</span></div>}
+          {stopped > 0 && <div style={{ width: stopped + "%", background: "color-mix(in oklab, var(--rd) 78%, transparent)", display: "flex", alignItems: "center", justifyContent: "center" }}><span className="mono" style={{ fontSize: 11, fontWeight: 700, color: "#400" }}>{stopped}</span></div>}
+          {openN > 0 && <div style={{ width: openN + "%", background: "var(--ink-2)", display: "flex", alignItems: "center", justifyContent: "center" }}><span className="mono" style={{ fontSize: 11, color: "var(--ink-0)" }}>{openN}</span></div>}
+        </div>
+        <div style={{ display: "flex", gap: 18, marginTop: 5 }}>
+          <span className="mono" style={{ fontSize: 11, color: "var(--gn)" }}>■ {reached} reached T1 first</span>
+          <span className="mono" style={{ fontSize: 11, color: "var(--rd)" }}>■ {stopped} stopped out first</span>
+          <span className="mono dim2" style={{ fontSize: 11 }}>■ {openN} still open (timed out)</span>
+        </div>
+      </div>
+
+      {/* ── TIME-TO-T1 distribution (those that reached) ── */}
+      {ta.medianT1 != null && (
+        <div>
+          <div className="label-cap mono" style={{ fontSize: 10, color: "var(--ink-2)", letterSpacing: ".12em", marginBottom: 6 }}>IF IT WORKS · SESSIONS TO T1</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
+            {[["P10", pctlSess(0.1)], ["P25", p25], ["MEDIAN", ta.medianT1], ["P75", p75], ["P90", pctlSess(0.9)]].map(([k, v]) => (
+              <div key={k} style={{ textAlign: "center", padding: "7px 4px", background: k === "MEDIAN" ? "color-mix(in oklab, var(--gn) 14%, var(--bg-1))" : "var(--bg-1)", border: "1px solid " + (k === "MEDIAN" ? "color-mix(in oklab, var(--gn) 40%, transparent)" : "var(--ink-2)"), borderRadius: 8 }}>
+                <div className="mono dim2" style={{ fontSize: 9.5 }}>{k}</div>
+                <div className="mono" style={{ fontSize: 16, fontWeight: 600, color: k === "MEDIAN" ? "var(--gn)" : "var(--ink-0)" }}>{sess(v)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── decision tiles ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
+        <TaTile k="TIME STOP" v={sess(timeStop)} sub="exit if unresolved" tone="copper" />
+        <TaTile k="HARD CEILING" v={sess(ta.hardStop)} sub={`${ta.holdMode} max ${ta.ceiling}`} tone="amb" />
+        <TaTile k="→ T2 MEDIAN" v={sess(ta.medianT2)} sub={ta.earnWallT2 ? "post-ER" : (ta.distT2 != null ? ta.distT2 + " ATR away" : "—")} tone="violet" />
+        <TaTile k="P(T2 | T1)" v={ta.pT2givenT1 == null ? "—" : (ta.pT2givenT1 * 100).toFixed(0) + "%"} sub="runner reaches T2" tone="violet" />
+      </div>
+
+      {/* ── survival chart ── */}
       <div style={{ background: "var(--bg-1)", border: "1px solid var(--ink-2)", borderRadius: 12, padding: "12px 14px" }}>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 6 }}>
-          <span className="mono" style={{ fontSize: 11, color: "var(--gn)" }}>━ S_T1 (reach T1)</span>
-          {ta.medianT2 != null && <span className="mono" style={{ fontSize: 11, color: "var(--violet)" }}>━ S_T2</span>}
-          <span className="mono" style={{ fontSize: 11, color: "var(--rd)" }}>━ S_Stop</span>
+          <span className="label-cap mono" style={{ fontSize: 10, color: "var(--ink-2)", letterSpacing: ".12em" }}>CUMULATIVE PROBABILITY BY SESSION</span>
+          <span className="mono" style={{ fontSize: 11, color: "var(--gn)", marginLeft: "auto" }}>━ reached T1</span>
+          {ta.medianT2 != null && <span className="mono" style={{ fontSize: 11, color: "var(--violet)" }}>━ reached T2</span>}
+          <span className="mono" style={{ fontSize: 11, color: "var(--rd)" }}>━ stopped out</span>
           <span className="mono dim2" style={{ fontSize: 11 }}>┈ still open</span>
-          <span className="mono" style={{ fontSize: 11, color: "var(--copper)", marginLeft: "auto" }}>┊ decay S{ta.decayT1}</span>
+          <span className="mono" style={{ fontSize: 11, color: "var(--copper)" }}>┊ time stop S{timeStop}</span>
         </div>
         <TaCurve data={ta} />
       </div>
 
       {ta.earnWallT2 && (
         <div style={{ background: "color-mix(in oklab, var(--rd) 10%, var(--bg-1))", border: "1px solid color-mix(in oklab, var(--rd) 35%, transparent)", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, lineHeight: 1.5, color: "var(--ink-1)" }}>
-          <b className="rd">⛔ EARNINGS WALL.</b> Earnings in ~<b>{ta.earnDays}</b> sessions but the T2 median is <b>S{ta.medianT2}</b> — T2 is <b>not reachable pre-earnings</b>. Read: treat as a <b>T1-only trade into the event</b>, trim at T1 per the playbook, and re-evaluate the T2 leg after the binary resolves.
+          <b className="rd">⛔ EARNINGS WALL.</b> Earnings in ~<b>{ta.earnDays}</b> sessions but T2 typically needs <b>S{ta.medianT2}</b> — T2 is <b>not reachable pre-earnings</b>. Trade it as <b>T1-only into the event</b>, trim at T1, then re-evaluate the runner once the binary resolves.
         </div>
       )}
 
+      {/* ── conditions in plain English ── */}
       <div>
-        <div className="label-cap mono" style={{ fontSize: 10, color: "var(--ink-2)", letterSpacing: ".12em", marginBottom: 6 }}>CONDITIONING · 6 ORTHOGONAL VARIABLES (live)</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 6 }}>
-          {[["V1 Regime", ta.buckets.V1], ["V2 Vol state", ta.buckets.V2], ["V3 Sector RS", ta.buckets.V3], ["V4 Quality×Family", ta.buckets.V4], ["V5 ATR→T1", ta.buckets.V5], ["V6 ATR→T2", ta.buckets.V6]].map(([k, v]) => (
-            <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "5px 9px", background: "var(--bg-1)", borderRadius: 7, border: "1px solid var(--ink-2)" }}>
+        <div className="label-cap mono" style={{ fontSize: 10, color: "var(--ink-2)", letterSpacing: ".12em", marginBottom: 6 }}>WHY THIS CLOCK · THE 6 LIVE CONDITIONS MATCHED</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 6 }}>
+          {[["Market regime", ta.buckets.V1], ["Volatility", ta.buckets.V2], ["Relative strength", ta.buckets.V3], ["Setup × quality", ta.buckets.V4], ["Distance to T1", ta.buckets.V5], ["Distance to T2", ta.buckets.V6]].map(([k, v]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "6px 10px", background: "var(--bg-1)", borderRadius: 7, border: "1px solid var(--ink-2)" }}>
               <span className="mono dim2" style={{ fontSize: 10.5 }}>{k}</span>
-              <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-0)" }}>{v}</span>
+              <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-0)", fontWeight: 600 }}>{v}</span>
             </div>
           ))}
         </div>
@@ -349,9 +410,9 @@ function LensTime({ ticker, mode }) {
       <div className="mono dim2" style={{ fontSize: 10.5, lineHeight: 1.5, borderTop: "1px solid var(--ink-2)", paddingTop: 8 }}>
         Confidence: <b className={ta.source === "calibrated" ? (ta.confidence.level === "HIGH" ? "gn" : ta.confidence.level === "MED" ? "amb" : "rd") : "amb"}>{ta.confidence.level}</b> — {ta.confidence.note}.
         {ta.source === "calibrated"
-          ? ` Empirical competing-risk survival curves from cached daily bars (${ta.confidence.dateRange ? ta.confidence.dateRange[0] + "→" + ta.confidence.dateRange[1] : "multi-year"}), conditioned on the live V1–V6 cell with k-nearest collapse for sparse cells. Distribution + confidence shown, never a single number. v1 window is ~3y; the 20-yr rebuild widens regime coverage.`
-          : " Parametric estimate seeded by the live V1–V6 — used only because no calibrated analogues matched these conditions."}
-        {" "}Informational only · not advice.
+          ? ` Empirical competing-risk survival from cached daily bars (${ta.confidence.dateRange ? ta.confidence.dateRange[0] + "→" + ta.confidence.dateRange[1] : "multi-year"}), matched on the 6 live conditions (k-nearest collapse for sparse cells). It estimates the time-to-resolution distribution for setups like this — not a prediction for this specific name. v1 window ~3y; the 20-yr rebuild widens regime coverage.`
+          : " Parametric estimate seeded by the live conditions — shown only because no calibrated analogues matched."}
+        {" "}Informational & educational · not advice.
       </div>
     </div>
   );
