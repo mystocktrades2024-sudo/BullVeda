@@ -27320,79 +27320,100 @@ window.SurfaceBookRisk = SurfaceBookRisk;
 </script>
 <script>/* src/signalledger-data.jsx */
 (function() {
-  const HZ = [];
-  for (let d = 1; d <= 5; d++) HZ.push({ id: "D" + d, label: "D" + d, days: d, group: "D" });
-  for (let w = 1; w <= 12; w++) HZ.push({ id: "W" + w, label: "W" + w, days: w * 5, group: "W" });
-  for (let m = 1; m <= 12; m++) HZ.push({ id: "M" + m, label: "M" + m, days: m * 21, group: "M" });
-  const HZ_BY = {};
-  HZ.forEach((h, i) => {
-    h.idx = i;
-    HZ_BY[h.id] = h;
-  });
-  const SOURCES = [
-    { id: "screeners", label: "Screeners", peak: 18, amp: 2.6, breadth: 22, base: 0.2, vol: 3.2, dirBias: 0.86, n: 34 },
-    { id: "earnings", label: "Earnings", peak: 4, amp: 3.4, breadth: 12, base: -0.1, vol: 4.1, dirBias: 0.78, n: 28 },
-    { id: "options", label: "Options", peak: 9, amp: 2.9, breadth: 14, base: 0, vol: 4.6, dirBias: 0.6, n: 26 },
-    { id: "ai", label: "AI Predictions", peak: 25, amp: 3, breadth: 34, base: 0.3, vol: 3, dirBias: 0.82, n: 40, hasProb: true },
-    { id: "insiders", label: "Insiders", peak: 63, amp: 3.6, breadth: 55, base: 0.1, vol: 3.4, dirBias: 0.9, n: 22 },
-    { id: "momentum", label: "Momentum", peak: 16, amp: 3.1, breadth: 18, base: 0.1, vol: 3.6, dirBias: 0.92, n: 32 },
-    { id: "smc", label: "SMC / Patterns", peak: 10, amp: 2.4, breadth: 15, base: 0, vol: 3.8, dirBias: 0.7, n: 24 },
-    { id: "verdict", label: "Overall Verdict", peak: 22, amp: 3.2, breadth: 30, base: 0.4, vol: 2.8, dirBias: 0.84, n: 36 }
-  ];
-  const SOURCE_BY = {};
-  SOURCES.forEach((s) => SOURCE_BY[s.id] = s);
-  const SYMS = ["NVDA", "ARGN", "ARCM", "DRSH", "BORA", "FLNX", "INPR", "MERC", "NVRH", "KOPL", "ZOTR", "HAVN", "VLCT", "GENO", "KARO", "NEXO", "FRAC", "LIGN", "BIVO", "AXLE", "IPSO", "TSLA", "AMD", "SOFI", "PLTR", "CRWD", "SNOW", "NET", "DDOG", "ABNB"];
-  const REGIMES = ["bull", "bull", "chop", "bull", "chop", "bear"];
-  function mulberry(a) {
-    return function() {
+  let HZ, HZ_BY, SOURCES, SOURCE_BY, SIGNALS, ret, totalCalls, REAL = false;
+  let LDR = null;
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", "/v2/data_leaders.json", false);
+    xhr.withCredentials = true;
+    xhr.send(null);
+    if (xhr.status === 200) LDR = JSON.parse(xhr.responseText);
+  } catch (e) {
+    LDR = null;
+  }
+  if (LDR && Array.isArray(LDR.signals) && LDR.signals.length && Array.isArray(LDR.horizons)) {
+    REAL = true;
+    HZ = LDR.horizons.map((h, i) => ({ id: h.id, label: h.label, days: h.days, group: h.group, idx: h.idx != null ? h.idx : i }));
+    HZ_BY = {};
+    HZ.forEach((h) => {
+      HZ_BY[h.id] = h;
+    });
+    SOURCES = (LDR.sources || []).map((s) => ({ id: s.id, label: s.label }));
+    SOURCE_BY = {};
+    SOURCES.forEach((s) => {
+      SOURCE_BY[s.id] = s;
+    });
+    SIGNALS = LDR.signals;
+    totalCalls = LDR.totalCalls || SIGNALS.length;
+    ret = function(sig, hz) {
+      const v = (sig.ret || {})[hz.id];
+      if (v == null) return { edge: null, raw: null, mature: false };
+      const aligned = +(sig.dir === "short" ? -v : v).toFixed(2);
+      return { edge: aligned, raw: aligned, mature: true };
+    };
+  } else {
+    HZ = [];
+    for (let d = 1; d <= 5; d++) HZ.push({ id: "D" + d, label: "D" + d, days: d, group: "D" });
+    for (let w = 1; w <= 12; w++) HZ.push({ id: "W" + w, label: "W" + w, days: w * 5, group: "W" });
+    for (let m = 1; m <= 12; m++) HZ.push({ id: "M" + m, label: "M" + m, days: m * 21, group: "M" });
+    HZ_BY = {};
+    HZ.forEach((h, i) => {
+      h.idx = i;
+      HZ_BY[h.id] = h;
+    });
+    SOURCES = [
+      { id: "screeners", label: "Screeners", peak: 18, amp: 2.6, breadth: 22, base: 0.2, vol: 3.2, dirBias: 0.86, n: 34 },
+      { id: "earnings", label: "Earnings", peak: 4, amp: 3.4, breadth: 12, base: -0.1, vol: 4.1, dirBias: 0.78, n: 28 },
+      { id: "options", label: "Options", peak: 9, amp: 2.9, breadth: 14, base: 0, vol: 4.6, dirBias: 0.6, n: 26 },
+      { id: "ai", label: "AI Predictions", peak: 25, amp: 3, breadth: 34, base: 0.3, vol: 3, dirBias: 0.82, n: 40, hasProb: true },
+      { id: "insiders", label: "Insiders", peak: 63, amp: 3.6, breadth: 55, base: 0.1, vol: 3.4, dirBias: 0.9, n: 22 },
+      { id: "momentum", label: "Momentum", peak: 16, amp: 3.1, breadth: 18, base: 0.1, vol: 3.6, dirBias: 0.92, n: 32 },
+      { id: "smc", label: "SMC / Patterns", peak: 10, amp: 2.4, breadth: 15, base: 0, vol: 3.8, dirBias: 0.7, n: 24 },
+      { id: "verdict", label: "Overall Verdict", peak: 22, amp: 3.2, breadth: 30, base: 0.4, vol: 2.8, dirBias: 0.84, n: 36 }
+    ];
+    SOURCE_BY = {};
+    SOURCES.forEach((s) => SOURCE_BY[s.id] = s);
+    const SYMS = ["NVDA", "ARGN", "ARCM", "DRSH", "BORA", "FLNX", "INPR", "MERC", "NVRH", "KOPL", "ZOTR", "HAVN", "VLCT", "GENO", "KARO", "NEXO", "FRAC", "LIGN", "BIVO", "AXLE", "IPSO", "TSLA", "AMD", "SOFI", "PLTR", "CRWD", "SNOW", "NET", "DDOG", "ABNB"];
+    const REGIMES = ["bull", "bull", "chop", "bull", "chop", "bear"];
+    const mulberry = (a) => function() {
       a |= 0;
       a = a + 1831565813 | 0;
       let t = Math.imul(a ^ a >>> 15, 1 | a);
       t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
       return ((t ^ t >>> 14) >>> 0) / 4294967296;
     };
-  }
-  function gauss(rng2) {
-    let u = 0, v = 0;
-    while (!u) u = rng2();
-    while (!v) v = rng2();
-    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-  }
-  const TODAY = 0;
-  const rng = mulberry(987654321);
-  const SIGNALS = [];
-  let sid = 0;
-  SOURCES.forEach((src) => {
-    for (let k = 0; k < src.n; k++) {
-      const age = Math.floor(Math.pow(rng(), 0.7) * 365) + 1;
-      const sym = SYMS[Math.floor(rng() * SYMS.length)];
-      const dir = rng() < src.dirBias ? "long" : "short";
-      const regime = REGIMES[Math.floor(rng() * REGIMES.length)];
-      const refPrice = +(15 + rng() * 400).toFixed(2);
-      const predProb = src.hasProb ? +(0.5 + rng() * 0.45).toFixed(2) : null;
-      const skill = rng() - 0.42;
-      SIGNALS.push({ id: "s" + sid++, source: src.id, sym, dir, regime, age, refPrice, predProb, skill, seed: Math.floor(rng() * 1e9) });
-    }
-  });
-  function meanEdge(src, hz) {
-    const g = src.amp * Math.exp(-Math.pow(hz.days - src.peak, 2) / (2 * src.breadth * src.breadth));
-    const drift = -4e-3 * hz.days;
-    return src.base + g + drift;
-  }
-  function spyMove(hz, seed) {
-    const r = mulberry(seed ^ 43981);
-    return hz.days * 0.018 + gauss(r) * Math.sqrt(hz.days) * 0.35;
-  }
-  function ret(sig, hz) {
-    const src = SOURCE_BY[sig.source];
-    const mature = hz.days <= sig.age;
-    const r = mulberry(sig.seed ^ hz.idx * 2654435761);
-    const idio = gauss(r) * src.vol;
-    const peakProx = Math.exp(-Math.pow(hz.days - src.peak, 2) / (2 * src.breadth * src.breadth));
-    const edge = meanEdge(src, hz) + idio + sig.skill * src.amp * peakProx * 1.4;
-    const sM = spyMove(hz, sig.seed);
-    const raw = sig.dir === "long" ? edge + sM : edge - sM;
-    return { edge: +edge.toFixed(2), raw: +raw.toFixed(2), mature };
+    const gauss = (rng2) => {
+      let u = 0, v = 0;
+      while (!u) u = rng2();
+      while (!v) v = rng2();
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    };
+    const rng = mulberry(987654321);
+    SIGNALS = [];
+    let sid = 0;
+    SOURCES.forEach((src) => {
+      for (let k = 0; k < src.n; k++) {
+        const age = Math.floor(Math.pow(rng(), 0.7) * 365) + 1;
+        SIGNALS.push({ id: "s" + sid++, source: src.id, sym: SYMS[Math.floor(rng() * SYMS.length)], dir: rng() < src.dirBias ? "long" : "short", regime: REGIMES[Math.floor(rng() * REGIMES.length)], age, refPrice: +(15 + rng() * 400).toFixed(2), predProb: src.hasProb ? +(0.5 + rng() * 0.45).toFixed(2) : null, skill: rng() - 0.42, seed: Math.floor(rng() * 1e9) });
+      }
+    });
+    const meanEdge = (src, hz) => src.base + src.amp * Math.exp(-Math.pow(hz.days - src.peak, 2) / (2 * src.breadth * src.breadth)) - 4e-3 * hz.days;
+    const spyMove = (hz, seed) => {
+      const r = mulberry(seed ^ 43981);
+      return hz.days * 0.018 + gauss(r) * Math.sqrt(hz.days) * 0.35;
+    };
+    ret = function(sig, hz) {
+      const src = SOURCE_BY[sig.source];
+      const mature = hz.days <= sig.age;
+      const r = mulberry(sig.seed ^ hz.idx * 2654435761);
+      const idio = gauss(r) * src.vol;
+      const peakProx = Math.exp(-Math.pow(hz.days - src.peak, 2) / (2 * src.breadth * src.breadth));
+      const edge = meanEdge(src, hz) + idio + sig.skill * src.amp * peakProx * 1.4;
+      const sM = spyMove(hz, sig.seed);
+      const raw = sig.dir === "long" ? edge + sM : edge - sM;
+      return { edge: +edge.toFixed(2), raw: +raw.toFixed(2), mature };
+    };
+    totalCalls = SIGNALS.length;
   }
   function aggregate(sourceId, hz, metric) {
     const sigs = SIGNALS.filter((s) => s.source === sourceId);
@@ -27421,17 +27442,15 @@ window.SurfaceBookRisk = SurfaceBookRisk;
       if (!best || d.mean > best.mean) best = d;
     });
     const sigs = SIGNALS.filter((s) => s.source === sourceId);
-    const w2 = HZ_BY["W2"];
-    let gw = 0, gl = 0, nb = 0, wins = 0;
+    const w2 = HZ_BY["W2"] || HZ[Math.min(HZ.length - 1, 8)];
+    let gw = 0, gl = 0, nb = 0;
     const indiv = [];
     sigs.forEach((s) => {
       const r = ret(s, w2);
       if (r.mature) {
         const v = metric === "raw" ? r.raw : r.edge;
-        if (v > 0) {
-          gw += v;
-          wins++;
-        } else gl += -v;
+        if (v > 0) gw += v;
+        else gl += -v;
         nb++;
         indiv.push({ sym: s.sym, v });
       }
@@ -27439,7 +27458,7 @@ window.SurfaceBookRisk = SurfaceBookRisk;
     const pf = gl > 0 ? +(gw / gl).toFixed(2) : gw > 0 ? 99 : 0;
     indiv.sort((a, b) => b.v - a.v);
     const tstat = aggregate(sourceId, w2, metric).t;
-    return { id: sourceId, label: SOURCE_BY[sourceId].label, decay, avgEdge, avgHit, best, pf, nTotal: sigs.length, nMatured: nb, best1: indiv[0], worst1: indiv[indiv.length - 1], tstat, sig: Math.abs(tstat) >= 2 };
+    return { id: sourceId, label: (SOURCE_BY[sourceId] || {}).label || sourceId, decay, avgEdge, avgHit, best, pf, nTotal: sigs.length, nMatured: nb, best1: indiv[0], worst1: indiv[indiv.length - 1], tstat, sig: Math.abs(tstat) >= 2 };
   }
   function leaderboard(metric) {
     return SOURCES.map((s) => sourceSummary(s.id, metric)).sort((a, b) => b.avgEdge - a.avgEdge);
@@ -27452,14 +27471,15 @@ window.SurfaceBookRisk = SurfaceBookRisk;
       });
       const mat = path.filter((p) => p.mature);
       const last = mat.length ? mat[mat.length - 1] : null;
-      return { ...s, label: SOURCE_BY[s.source].label, path, last, status: s.age < HZ_BY["M12"].days ? "maturing" : "matured", maturedN: mat.length };
+      const m12 = HZ_BY["M9"] || HZ_BY["M12"] || HZ[HZ.length - 1];
+      return { ...s, label: (SOURCE_BY[s.source] || {}).label || s.source, path, last, status: s.age < m12.days ? "maturing" : "matured", maturedN: mat.length };
     }).sort((a, b) => a.age - b.age);
   }
   function calibration(metric) {
-    const w2 = HZ_BY["W2"];
+    const w2 = HZ_BY["W2"] || HZ[Math.min(HZ.length - 1, 8)];
     const buckets = [[0.5, 0.6], [0.6, 0.7], [0.7, 0.8], [0.8, 0.9], [0.9, 1.01]];
     return buckets.map(([lo, hi]) => {
-      const sigs = SIGNALS.filter((s) => s.source === "ai" && s.predProb >= lo && s.predProb < hi);
+      const sigs = SIGNALS.filter((s) => s.source === "ai" && s.predProb != null && s.predProb >= lo && s.predProb < hi);
       let n = 0, w = 0;
       sigs.forEach((s) => {
         const r = ret(s, w2);
@@ -27472,7 +27492,7 @@ window.SurfaceBookRisk = SurfaceBookRisk;
     });
   }
   function regimeHits(metric) {
-    const w2 = HZ_BY["W2"];
+    const w2 = HZ_BY["W2"] || HZ[Math.min(HZ.length - 1, 8)];
     const out = {};
     ["bull", "chop", "bear"].forEach((rg) => {
       out[rg] = SOURCES.map((src) => {
@@ -27491,7 +27511,7 @@ window.SurfaceBookRisk = SurfaceBookRisk;
     return out;
   }
   function equityCurve(sourceId, hzId, metric) {
-    const hz = HZ_BY[hzId] || HZ_BY["W2"];
+    const hz = HZ_BY[hzId] || HZ_BY["W2"] || HZ[Math.min(HZ.length - 1, 8)];
     const sigs = SIGNALS.filter((s) => sourceId === "__all" || s.source === sourceId).slice().sort((a, b) => b.age - a.age);
     let cum = 0;
     const pts = [{ i: 0, v: 0 }];
@@ -27504,21 +27524,7 @@ window.SurfaceBookRisk = SurfaceBookRisk;
     });
     return pts;
   }
-  window.SigLedger = {
-    HZ,
-    HZ_BY,
-    SOURCES,
-    SOURCE_BY,
-    SIGNALS,
-    aggregate,
-    sourceSummary,
-    leaderboard,
-    ledger,
-    calibration,
-    regimeHits,
-    equityCurve,
-    totalCalls: SIGNALS.length
-  };
+  window.SigLedger = { HZ, HZ_BY, SOURCES, SOURCE_BY, SIGNALS, aggregate, sourceSummary, leaderboard, ledger, calibration, regimeHits, equityCurve, totalCalls, real: REAL };
 })();
 </script>
 <script>/* src/surface-track-record.jsx */
@@ -27539,7 +27545,16 @@ function SurfaceTrackRecord({ onTicker }) {
   const [srcFilter, setSrcFilter] = useTR(null);
   const hzs = useTRm(() => SL.HZ.filter((h) => h.group === group), [group]);
   const board = useTRm(() => SL.leaderboard(metric), [metric]);
-  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--copper trk" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "TRACK RECORD \xB7 SIGNAL ACCOUNTABILITY"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Track Record"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "did our calls work? \xB7 ", SL.totalCalls, " signals \xB7 8 sources \xB7 forward returns D1\u2013M12 \xB7 direction-aligned")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement("div", { className: "trk-toggle" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Metric"), /* @__PURE__ */ React.createElement("button", { className: metric === "edge" ? "is-on" : "", onClick: () => setMetric("edge") }, "Edge vs SPY"), /* @__PURE__ */ React.createElement("button", { className: metric === "raw" ? "is-on" : "", onClick: () => setMetric("raw") }, "Raw return")), /* @__PURE__ */ React.createElement(FreshnessPill, { state: "stale", age: "modeled" }))), /* @__PURE__ */ React.createElement("div", { className: "trk-banner", style: {
+  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--copper trk" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "TRACK RECORD \xB7 SIGNAL ACCOUNTABILITY"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Track Record"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "did our calls work? \xB7 ", SL.totalCalls, " signals \xB7 8 sources \xB7 forward returns D1\u2013M12 \xB7 direction-aligned")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement("div", { className: "trk-toggle" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Metric"), /* @__PURE__ */ React.createElement("button", { className: metric === "edge" ? "is-on" : "", onClick: () => setMetric("edge") }, "Edge vs SPY"), /* @__PURE__ */ React.createElement("button", { className: metric === "raw" ? "is-on" : "", onClick: () => setMetric("raw") }, "Raw return")), /* @__PURE__ */ React.createElement(FreshnessPill, { state: SL.real ? "live" : "stale", age: SL.real ? "EOD" : "modeled" }))), SL.real ? /* @__PURE__ */ React.createElement("div", { className: "trk-banner", style: {
+    margin: "10px 0 4px",
+    padding: "9px 14px",
+    borderRadius: 10,
+    background: "color-mix(in oklab, var(--gn) 9%, var(--bg-1))",
+    border: "1px solid color-mix(in oklab, var(--gn) 30%, transparent)",
+    color: "var(--ink-1)",
+    fontSize: 12.5,
+    lineHeight: 1.5
+  } }, /* @__PURE__ */ React.createElement("b", { className: "up" }, "Live forward-scored ledger."), " Every published call is logged at signal time and scored forward at each horizon as it matures \u2014 direction-aligned, real returns from the append-only store (signal_log + audit_ledger, emitted nightly). ", /* @__PURE__ */ React.createElement("b", null, SL.totalCalls.toLocaleString()), " calls across", " ", SL.SOURCES.length, " sources. Younger calls show partial paths labeled ", /* @__PURE__ */ React.createElement("b", null, "maturing"), " until their horizon resolves.") : /* @__PURE__ */ React.createElement("div", { className: "trk-banner", style: {
     margin: "10px 0 4px",
     padding: "10px 14px",
     borderRadius: 10,
@@ -27548,10 +27563,10 @@ function SurfaceTrackRecord({ onTicker }) {
     color: "var(--ink-1)",
     fontSize: 12.5,
     lineHeight: 1.5
-  } }, /* @__PURE__ */ React.createElement("b", { className: "amb" }, "Forward-scored ledger accumulating."), " The multi-horizon forward-return accountability below is a ", /* @__PURE__ */ React.createElement("b", null, "model"), ", not yet a live feed \u2014 a per-signal append-only store (every daily scan snapshot, scored at D1\u2013M12) is still being persisted. Real ", /* @__PURE__ */ React.createElement("i", null, "resolved"), " trades already drive the ", /* @__PURE__ */ React.createElement("b", null, "Portfolio"), " and ", /* @__PURE__ */ React.createElement("b", null, "Performance"), " surfaces. Treat these curves as illustrative until the ledger is wired."), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs trk-tabs" }, [["heatmap", "Heatmap"], ["leaderboard", "Leaderboard"], ["decay", "Decay curves"], ["ledger", "The Ledger"], ["calibration", "AI Calibration"], ["regime", "By Regime"], ["equity", "Equity curve"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${tab === id ? "is-on" : ""}`, onClick: () => setTab(id) }, l)), (tab === "heatmap" || tab === "decay") && /* @__PURE__ */ React.createElement("div", { className: "trk-grp" }, Object.entries(TR_GROUPS).map(([g, l]) => /* @__PURE__ */ React.createElement("button", { key: g, className: `trk-grp-btn ${group === g ? "is-on" : ""}`, onClick: () => setGroup(g), title: l }, g === "D" ? "Daily" : g === "W" ? "Weekly" : "Monthly")))), tab === "heatmap" && /* @__PURE__ */ React.createElement(HeatmapView, { SL, hzs, metric, group }), tab === "leaderboard" && /* @__PURE__ */ React.createElement(LeaderboardView, { board, metric, onPick: (s) => {
+  } }, /* @__PURE__ */ React.createElement("b", { className: "amb" }, "Live feed unavailable \u2014 showing modeled fallback."), " /v2/data_leaders.json could not be loaded, so the curves below are an illustrative model. Real resolved trades drive the ", /* @__PURE__ */ React.createElement("b", null, "Portfolio"), " and", /* @__PURE__ */ React.createElement("b", null, " Performance"), " surfaces. Reload once the ledger feed is reachable."), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs trk-tabs" }, [["heatmap", "Heatmap"], ["leaderboard", "Leaderboard"], ["decay", "Decay curves"], ["ledger", "The Ledger"], ["calibration", "AI Calibration"], ["regime", "By Regime"], ["equity", "Equity curve"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${tab === id ? "is-on" : ""}`, onClick: () => setTab(id) }, l)), (tab === "heatmap" || tab === "decay") && /* @__PURE__ */ React.createElement("div", { className: "trk-grp" }, Object.entries(TR_GROUPS).map(([g, l]) => /* @__PURE__ */ React.createElement("button", { key: g, className: `trk-grp-btn ${group === g ? "is-on" : ""}`, onClick: () => setGroup(g), title: l }, g === "D" ? "Daily" : g === "W" ? "Weekly" : "Monthly")))), tab === "heatmap" && /* @__PURE__ */ React.createElement(HeatmapView, { SL, hzs, metric, group }), tab === "leaderboard" && /* @__PURE__ */ React.createElement(LeaderboardView, { board, metric, onPick: (s) => {
     setSrcFilter(s);
     setTab("ledger");
-  } }), tab === "decay" && /* @__PURE__ */ React.createElement(DecayView, { SL, hzs, board, metric, group }), tab === "ledger" && /* @__PURE__ */ React.createElement(LedgerView, { SL, metric, srcFilter, setSrcFilter, onTicker }), tab === "calibration" && /* @__PURE__ */ React.createElement(CalibrationView, { SL, metric }), tab === "regime" && /* @__PURE__ */ React.createElement(RegimeView, { SL, metric }), tab === "equity" && /* @__PURE__ */ React.createElement(EquityView, { SL, metric }), /* @__PURE__ */ React.createElement("div", { className: "pf-note mono dim2" }, "Every published call is logged at signal time & scored forward \u2014 ", /* @__PURE__ */ React.createElement("b", null, "direction-aligned"), " (a short that falls is a win). ", /* @__PURE__ */ React.createElement("b", null, metric === "edge" ? "Edge vs SPY" : "Raw return"), " shown \xB7 only matured horizons enter stats; younger calls show partial paths labeled ", /* @__PURE__ */ React.createElement("b", null, "maturing"), ". Demo dataset \u2014 methodology is the point."));
+  } }), tab === "decay" && /* @__PURE__ */ React.createElement(DecayView, { SL, hzs, board, metric, group }), tab === "ledger" && /* @__PURE__ */ React.createElement(LedgerView, { SL, metric, srcFilter, setSrcFilter, onTicker }), tab === "calibration" && /* @__PURE__ */ React.createElement(CalibrationView, { SL, metric }), tab === "regime" && /* @__PURE__ */ React.createElement(RegimeView, { SL, metric }), tab === "equity" && /* @__PURE__ */ React.createElement(EquityView, { SL, metric }), /* @__PURE__ */ React.createElement("div", { className: "pf-note mono dim2" }, "Every published call is logged at signal time & scored forward \u2014 ", /* @__PURE__ */ React.createElement("b", null, "direction-aligned"), " (a short that falls is a win). ", /* @__PURE__ */ React.createElement("b", null, metric === "edge" ? "Edge vs SPY" : "Raw return"), " shown \xB7 only matured horizons enter stats; younger calls show partial paths labeled ", /* @__PURE__ */ React.createElement("b", null, "maturing"), ". ", SL.real ? "Live ledger \xB7 signal_log + audit_ledger." : "Modeled fallback \u2014 live feed unavailable."));
 }
 function HeatmapView({ SL, hzs, metric, group }) {
   const rows = SL.SOURCES.map((src) => ({ src, cells: hzs.map((hz) => ({ hz, ...SL.aggregate(src.id, hz, metric) })) }));

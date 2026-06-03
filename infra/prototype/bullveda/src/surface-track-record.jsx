@@ -38,23 +38,28 @@ function SurfaceTrackRecord({ onTicker }) {
             <button className={metric === "edge" ? "is-on" : ""} onClick={() => setMetric("edge")}>Edge vs SPY</button>
             <button className={metric === "raw" ? "is-on" : ""} onClick={() => setMetric("raw")}>Raw return</button>
           </div>
-          <FreshnessPill state="stale" age="modeled" />
+          <FreshnessPill state={SL.real ? "live" : "stale"} age={SL.real ? "EOD" : "modeled"} />
         </div>
       </div>
 
-      {/* BULLVEDA feed-honest: the forward-scored signal ledger is a known 🔶 gap.
-          A real per-signal append-only store (every daily scan snapshot) is not yet
-          published at this surface's 8-source × 23-horizon granularity. Real resolved
-          trades DO exist in the journal (/api/journal) and drive Portfolio/Performance. */}
-      <div className="trk-banner" style={{ margin: "10px 0 4px", padding: "10px 14px", borderRadius: 10,
-        background: "color-mix(in oklab, var(--amb) 12%, var(--bg-1))", border: "1px solid color-mix(in oklab, var(--amb) 35%, transparent)",
-        color: "var(--ink-1)", fontSize: 12.5, lineHeight: 1.5 }}>
-        <b className="amb">Forward-scored ledger accumulating.</b> The multi-horizon forward-return
-        accountability below is a <b>model</b>, not yet a live feed — a per-signal append-only store
-        (every daily scan snapshot, scored at D1–M12) is still being persisted. Real <i>resolved</i> trades
-        already drive the <b>Portfolio</b> and <b>Performance</b> surfaces. Treat these curves as illustrative
-        until the ledger is wired.
-      </div>
+      {SL.real ? (
+        <div className="trk-banner" style={{ margin: "10px 0 4px", padding: "9px 14px", borderRadius: 10,
+          background: "color-mix(in oklab, var(--gn) 9%, var(--bg-1))", border: "1px solid color-mix(in oklab, var(--gn) 30%, transparent)",
+          color: "var(--ink-1)", fontSize: 12.5, lineHeight: 1.5 }}>
+          <b className="up">Live forward-scored ledger.</b> Every published call is logged at signal time and
+          scored forward at each horizon as it matures — direction-aligned, real returns from the append-only
+          store (signal_log + audit_ledger, emitted nightly). <b>{SL.totalCalls.toLocaleString()}</b> calls across
+          {" "}{SL.SOURCES.length} sources. Younger calls show partial paths labeled <b>maturing</b> until their horizon resolves.
+        </div>
+      ) : (
+        <div className="trk-banner" style={{ margin: "10px 0 4px", padding: "10px 14px", borderRadius: 10,
+          background: "color-mix(in oklab, var(--amb) 12%, var(--bg-1))", border: "1px solid color-mix(in oklab, var(--amb) 35%, transparent)",
+          color: "var(--ink-1)", fontSize: 12.5, lineHeight: 1.5 }}>
+          <b className="amb">Live feed unavailable — showing modeled fallback.</b> /v2/data_leaders.json could not be
+          loaded, so the curves below are an illustrative model. Real resolved trades drive the <b>Portfolio</b> and
+          <b> Performance</b> surfaces. Reload once the ledger feed is reachable.
+        </div>
+      )}
 
       <div className="lab-tabs trk-tabs">
         {[["heatmap", "Heatmap"], ["leaderboard", "Leaderboard"], ["decay", "Decay curves"], ["ledger", "The Ledger"], ["calibration", "AI Calibration"], ["regime", "By Regime"], ["equity", "Equity curve"]].map(([id, l]) => (
@@ -76,7 +81,7 @@ function SurfaceTrackRecord({ onTicker }) {
       {tab === "equity" && <EquityView SL={SL} metric={metric} />}
 
       <div className="pf-note mono dim2">
-        Every published call is logged at signal time &amp; scored forward — <b>direction-aligned</b> (a short that falls is a win). <b>{metric === "edge" ? "Edge vs SPY" : "Raw return"}</b> shown · only matured horizons enter stats; younger calls show partial paths labeled <b>maturing</b>. Demo dataset — methodology is the point.
+        Every published call is logged at signal time &amp; scored forward — <b>direction-aligned</b> (a short that falls is a win). <b>{metric === "edge" ? "Edge vs SPY" : "Raw return"}</b> shown · only matured horizons enter stats; younger calls show partial paths labeled <b>maturing</b>. {SL.real ? "Live ledger · signal_log + audit_ledger." : "Modeled fallback — live feed unavailable."}
       </div>
     </div>
   );
