@@ -491,7 +491,9 @@ async def root():
     """Root opens the BullVeda terminal (owner preference 2026-06-02). The terminal
     is auth-gated at /v2/bullveda/BullVeda.html. The prior marketing landing is
     preserved at /landing (reversible). To revert: point this back at SwingTrade Landing.html."""
-    return RedirectResponse(url="/v2/bullveda/BullVeda.html", status_code=302)
+    r = RedirectResponse(url="/v2/bullveda/BullVeda.html", status_code=302)
+    r.headers["Cache-Control"] = "no-store"  # never let a CDN/browser cache the redirect target
+    return r
 
 @app.get("/landing")
 async def _marketing_landing():
@@ -531,11 +533,11 @@ async def _app_terminal(request: Request, auth: HTTPBasicCredentials = Depends(_
     qs = ("?" + urlencode(qd)) if qd else ""
 
     def _serve_desktop():
-        p = (_PROTOTYPE_DIR / "Stocksmith.html").resolve()
-        if not p.exists():
-            return RedirectResponse(url="/kairos.html" + qs, status_code=302)
-        return Response(content=p.read_bytes(), media_type="text/html",
-                        headers={"Cache-Control": "no-store"})
+        # BULLVEDA is the desktop terminal (owner preference 2026-06-02) — was Stocksmith.html.
+        # To revert: serve (_PROTOTYPE_DIR / "Stocksmith.html") here again.
+        r = RedirectResponse(url="/v2/bullveda/BullVeda.html" + qs, status_code=302)
+        r.headers["Cache-Control"] = "no-store"
+        return r
 
     def _go_mobile():
         return RedirectResponse(url="/v2/mobile/index.html" + qs, status_code=302)
