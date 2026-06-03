@@ -25,6 +25,7 @@ Wired into swing_trade.py universe build via _load_insider_cluster() (next).
 from __future__ import annotations
 import datetime
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -67,6 +68,74 @@ def _load_universe() -> list[str]:
         return (ec.index_components("SP500") or [])[:3000]
     except Exception:
         return []
+
+
+def _scan_openinsider_clusters(min_insiders: int, min_total_value: float,
+                               lookback_days: int) -> list[dict] | None:
+    """FREE, EODHD-independent cluster detection via openinsider.com/latest-cluster-buys.
+
+    The cluster-buys page is ALREADY aggregated — each row is a ticker with N
+    insiders buying, so we get the whole signal in ONE HTTP call instead of
+    ~3000 per-ticker EODHD insider_transactions calls. Column layout:
+      0=X 1=FilingDate 2=TradeDate 3=Ticker 4=Company 5=Industry 6=Ins(#)
+      7=TradeType 8=Price 9=Qty 10=Owned 11=ΔOwn 12=Value(cluster total)
+    Returns candidates (same shape as _scan_ticker output) or None on fetch failure.
+    """
+    import urllib.request
+    sys.path.insert(0, str(BASE / "scripts" / "scrapers"))
+    try:
+        import insider_openinsider as oi
+        req = urllib.request.Request("http://openinsider.com/latest-cluster-buys",
+                                     headers={"User-Agent": oi.UA, "Accept": "text/html"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            html = r.read().decode("utf-8", errors="ignore")
+        parser = oi._OITableParser()
+        parser.feed(html)
+        rows = parser.rows
+    except Exception as e:
+        print(f"[insider_cluster] openinsider fetch failed: {e}", file=sys.stderr)
+        return None
+
+    def _money(s: str) -> float:
+        s = re.sub(r"[\$,+]", "", (s or "").strip())
+        try:
+            return float(s)
+        except Exception:
+            return 0.0
+
+    cutoff = (datetime.date.today() - datetime.timedelta(days=lookback_days)).isoformat()
+    out: list[dict] = []
+    for r in rows[1:]:                       # skip header
+        if len(r) < 13:
+            continue
+        ticker = (r[3] or "").upper().strip()
+        if not (ticker and 1 <= len(ticker) <= 6):
+            continue
+        if "P" not in (r[7] or "").upper():   # open-market PURCHASE only (P - Purchase)
+            continue
+        try:
+            n_ins = int(re.sub(r"[^0-9]", "", r[6]) or 0)
+        except Exception:
+            n_ins = 0
+        if n_ins < min_insiders:
+            continue
+        tdate = (r[2] or "")[:10]
+        if tdate and tdate < cutoff:
+            continue
+        total = abs(_money(r[12]))
+        if total < min_total_value:
+            continue
+        out.append({
+            "ticker": ticker,
+            "company": (r[4] or "").strip(),
+            "n_insiders": n_ins,
+            "total_value": round(total, 0),
+            "latest_buy": tdate,
+            "insiders": [],                   # cluster page is pre-aggregated (no per-name rows)
+            "source": "openinsider",
+        })
+    out.sort(key=lambda x: -x["total_value"])
+    return out
 
 
 def _scan_ticker(ticker: str, from_date: str, to_date: str) -> dict | None:
@@ -114,43 +183,55 @@ def _scan_ticker(ticker: str, from_date: str, to_date: str) -> dict | None:
     }
 
 
+MIN_CLUSTER_TOTAL = 200_000   # $ · floor on the cluster's TOTAL value (openinsider path)
+
+
 def main() -> int:
-    universe = _load_universe()
-    if not universe:
-        print("[insider_cluster] empty universe, skipping", file=sys.stderr)
-        return 1
     today = datetime.date.today()
     start = (today - datetime.timedelta(days=LOOKBACK_DAYS)).isoformat()
     end = today.isoformat()
-    print(f"[insider_cluster] scanning {len(universe)} tickers · {start} → {end} · strict={USE_STRICT}", file=sys.stderr)
 
-    candidates = []
-    for i, tk in enumerate(universe):
-        if i % 250 == 0 and i:
-            print(f"  [insider_cluster] progress {i}/{len(universe)} · candidates so far={len(candidates)}", file=sys.stderr)
-        c = _scan_ticker(tk, start, end)
-        if c:
-            candidates.append(c)
+    # ── PRIMARY: free, EODHD-independent openinsider cluster-buys (1 HTTP call) ──
+    # Replaces the ~3000-call per-ticker EODHD scan. Works even when EODHD quota is
+    # exhausted. Falls back to the EODHD per-ticker scan only if the scrape fails.
+    src = "openinsider"
+    candidates = _scan_openinsider_clusters(MIN_INSIDERS, MIN_CLUSTER_TOTAL, LOOKBACK_DAYS)
+    if candidates is None:
+        print("[insider_cluster] openinsider unavailable → EODHD per-ticker fallback", file=sys.stderr)
+        src = "eodhd"
+        universe = _load_universe()
+        if not universe:
+            print("[insider_cluster] empty universe, skipping", file=sys.stderr)
+            return 1
+        print(f"[insider_cluster] scanning {len(universe)} tickers · {start} → {end} · strict={USE_STRICT}", file=sys.stderr)
+        candidates = []
+        for i, tk in enumerate(universe):
+            if i % 250 == 0 and i:
+                print(f"  [insider_cluster] progress {i}/{len(universe)} · candidates so far={len(candidates)}", file=sys.stderr)
+            c = _scan_ticker(tk, start, end)
+            if c:
+                candidates.append(c)
     candidates.sort(key=lambda x: -x["total_value"])
 
     out = {
         "_meta": {
             "generated_at": datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z",
             "n_candidates": len(candidates),
+            "source": src,
             "thresholds": {
                 "lookback_days": LOOKBACK_DAYS,
                 "min_insiders": MIN_INSIDERS,
                 "min_value_per_tx": MIN_VALUE_PER_TX,
+                "min_cluster_total": MIN_CLUSTER_TOTAL,
                 "strict_p_only": USE_STRICT,
             },
-            "universe_size": len(universe),
         },
         "candidates": candidates[:200],
         "tickers": [c["ticker"] for c in candidates],
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, indent=2))
-    print(f"[insider_cluster] wrote {OUT} · {len(candidates)} clusters from {len(universe)} universe")
+    print(f"[insider_cluster] wrote {OUT} · {len(candidates)} clusters · source={src}")
     return 0
 
 

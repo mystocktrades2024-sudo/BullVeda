@@ -30,7 +30,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "cache" / "retail_sentiment.json"
-UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Kairos-SwingTrade/1.0"
+# Clean browser UA — Reddit 403s the old "Kairos-SwingTrade/1.0" suffix (flagged as
+# a bot). StockTwits already accepts a browser UA, so this is safe across both. (2026-06-03)
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 # Words that look like tickers but aren't — common WSB noise
 _STOP = {
@@ -71,35 +74,27 @@ _TICKER_RE = re.compile(r"\$?([A-Z]{1,5})\b")
 
 def scrape_reddit(universe: set, subs=("wallstreetbets", "stocks", "options"),
                   limit=100) -> tuple[list, list]:
+    # Reddit's own public .json now 403s all non-OAuth clients (2023+ API lockdown) —
+    # confirmed dead on both www. and old. hosts regardless of UA (2026-06-03). We read
+    # the FREE ApeWisdom aggregator instead (apewisdom.io) — it rolls up r/wallstreetbets
+    # + r/stocks mention counts, no auth, no block. Same signal (ticker mentions/rank).
     import urllib.request
     errors = []
     counts = Counter()
-    for sub in subs:
-        for sort in ("hot", "new"):
-            url = f"https://www.reddit.com/r/{sub}/{sort}.json?limit={limit}"
-            try:
-                req = urllib.request.Request(url, headers={"User-Agent": UA})
-                with urllib.request.urlopen(req, timeout=8) as r:
-                    data = json.loads(r.read())
-                posts = (data.get("data") or {}).get("children") or []
-                for p in posts:
-                    d = p.get("data") or {}
-                    text = f"{d.get('title','')} {d.get('selftext','')}"
-                    # explicit $TICKER first (high confidence), then bare ALLCAPS
-                    explicit = set(re.findall(r"\$([A-Za-z]{1,5})", text))
-                    bare = set(m for m in _TICKER_RE.findall(text))
-                    for sym in explicit:
-                        s = sym.upper()
-                        if s in universe: counts[s] += 2   # weight explicit cashtags
-                    for s in bare:
-                        # bare ALLCAPS only counts for 3+ char tickers — 1-2 char
-                        # symbols (AI, PL, EV...) are dominated by buzzwords, so
-                        # they only count via explicit $cashtag above.
-                        if len(s) >= 3 and s in universe and s not in _STOP:
-                            counts[s] += 1
-                time.sleep(0.4)  # be polite
-            except Exception as e:
-                errors.append(f"reddit {sub}/{sort}: {type(e).__name__}: {str(e)[:80]}")
+    aw_subs = tuple(s for s in subs if s in ("wallstreetbets", "stocks", "options"))
+    for sub in (aw_subs or ("wallstreetbets",)):
+        url = f"https://apewisdom.io/api/v1.0/filter/{sub}/page/1"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read())
+            for row in (data.get("results") or []):
+                sym = (row.get("ticker") or "").upper()
+                if sym in universe and sym not in _STOP:
+                    counts[sym] += int(row.get("mentions") or 0)
+            time.sleep(0.3)  # be polite
+        except Exception as e:
+            errors.append(f"apewisdom {sub}: {type(e).__name__}: {str(e)[:80]}")
     ranked = [{"ticker": t, "mentions": n, "rank": i + 1}
               for i, (t, n) in enumerate(counts.most_common(25))]
     return ranked, errors
