@@ -127,7 +127,12 @@ def _warm_calendar_earnings(tickers: list[str]) -> dict:
 
 
 def _warm_fundamentals(tickers: list[str]) -> dict:
-    """Per-ticker fundamentals (24h cache). Threaded for throughput."""
+    """Per-ticker fundamentals — WEEKLY refresh (6-day read TTL).
+    Fundamentals are quarterly data, so re-pulling nightly (the old 24h TTL)
+    burned ~3,000 calls/night re-fetching unchanged numbers. Now wired to a
+    Saturday-only job (com.swingtrade.enrich-fundamentals-weekly): the 6-day
+    read TTL means Saturday (7 days since the last Saturday warm) reliably
+    re-fetches, while any stray weekday run finds the cache fresh and skips."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     try:
         import eodhd_client as eod
@@ -141,7 +146,7 @@ def _warm_fundamentals(tickers: list[str]) -> dict:
 
     def _one(t: str) -> bool:
         try:
-            data = eod.fundamentals(t, cache_ttl=86400)
+            data = eod.fundamentals(t, cache_ttl=518400)  # 6-day read TTL → weekly (Saturday) refresh
             return bool(data)
         except Exception:
             return False

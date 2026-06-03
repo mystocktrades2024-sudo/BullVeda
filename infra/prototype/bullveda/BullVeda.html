@@ -10767,6 +10767,10 @@ body {
   };
 
   // Synchronous click-time enrichment: fundamentals + ml + setup-backtest, all real.
+  // ⚠️ LEGACY — blocks the UI thread (synchronous XHR). The detail panel now uses
+  // detailInstant + detailAsync (render-from-cache-first, patch-in-background) so
+  // clicks are instant. Do NOT reintroduce detailSync in the click path — it caused
+  // the 5-10s freeze (2026-06-03).
   BV.detailSync = function (sym) {
     var sr = BV.findRow(sym);
     if (!sr) return null;
@@ -10774,6 +10778,73 @@ body {
     var fund = syncGet("/api/fundamentals/" + enc);
     var ml = syncGet("/api/ml/" + enc);
     return BV.detailFor(sr, fund, ml, null); // setup stats come from setup_family_stats (real, preloaded)
+  };
+
+  // INSTANT detail from the preloaded scanRow ONLY — ZERO network, renders immediately.
+  // detailFor is null-safe (fund/ml default to {}/null), so the panel paints from cache
+  // (price, score, plan, technicals, levels) with no fetch in the render path.
+  BV.detailInstant = function (sym) {
+    var sr = BV.findRow(sym);
+    return sr ? BV.detailFor(sr, null, null, null) : null;
+  };
+
+  BV._detailCache = BV._detailCache || {}; // {SYM: {fund, ml}} — populated by detailAsync, reused by detailLive
+
+  // ASYNC enrichment — fetch fundamentals + ml in PARALLEL (non-blocking), cache them,
+  // then hand the enriched detail to cb so the panel patches in place. Race-guarded:
+  // if the user clicks a different ticker before this resolves, the stale result is dropped.
+  BV.detailAsync = function (sym, cb) {
+    var sr = BV.findRow(sym);
+    if (!sr) return;
+    var enc = encodeURIComponent(sym);
+    BV._lastDetailReq = sym;
+    Promise.all([
+      BV.get("/api/fundamentals/" + enc).catch(function () { return null; }),
+      BV.get("/api/ml/" + enc).catch(function () { return null; })
+    ]).then(function (res) {
+      BV._detailCache[sym] = { fund: res[0] || null, ml: res[1] || null };
+      if (BV._lastDetailReq !== sym) return;            // stale — user moved on
+      try { cb(BV.detailFor(sr, res[0], res[1], null)); } catch (e) { BV.errors.push("detailAsync " + sym + " → " + (e && e.message)); }
+    });
+  };
+
+  // ── LIVE QUOTE LAYER (class L) — Schwab, OFF the EODHD budget ──────────────
+  // Background patching only — NEVER in the render path. fetchLive merges live
+  // Schwab quotes into BV.live AND patches the in-memory scan row's price/chg so
+  // any re-render (scanner, detail) shows the live mark. detailLive rebuilds the
+  // open panel from cached fund/ml + the live-patched row → live R:R, P&L,
+  // distance-to-stop/target, 52w marker, all recomputed for free from one quote.
+  BV.live = BV.live || {};
+  BV.cfg = BV.cfg || {};
+  BV.cfg.liveDetailMs = BV.cfg.liveDetailMs || 5000;   // open-detail poll cadence
+  BV.cfg.liveScanMs   = BV.cfg.liveScanMs   || 20000;  // (reserved) scanner poll cadence
+
+  // Fetch live Schwab quotes for syms; merge into BV.live + patch in-memory rows.
+  BV.fetchLive = function (syms) {
+    var list = (syms || []).filter(Boolean);
+    if (!list.length) return Promise.resolve({});
+    return BV.get("/api/live_quotes?syms=" + encodeURIComponent(list.join(","))).then(function (d) {
+      var qs = (d && d.quotes) || {};
+      for (var s in qs) {
+        BV.live[s] = qs[s];
+        var row = BV.findRow(s);
+        if (row && qs[s].last != null) {
+          row.price = qs[s].last;
+          if (qs[s].chg != null) row.chg = qs[s].chg;
+          row.live = true;
+        }
+      }
+      return qs;
+    }).catch(function () { return {}; });
+  };
+
+  // Rebuild the open detail from cached fund/ml + the (live-patched) scan row.
+  BV.detailLive = function (sym) {
+    var sr = BV.findRow(sym);
+    if (!sr) return null;
+    var c = BV._detailCache[sym] || {};
+    try { return BV.detailFor(sr, c.fund || null, c.ml || null, null); }
+    catch (e) { return null; }
   };
 
   // ── light per-row Time Anatomy lookup (for the scanner TIME column / HOLD badge) ──
@@ -30495,11 +30566,28 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [t.focus, setTweak, ticker]);
+  // LIVE QUOTE POLLER (class L) — while a ticker detail is open, poll Schwab live
+  // quotes for that symbol and patch the panel in place. Background only — never
+  // blocks render (the panel is already painted by detailInstant). Off the EODHD
+  // budget (Schwab). Dep is symbol only, so setTicker patches don't re-arm the timer.
   useEffectApp(() => {
-    const i = setInterval(() => {
-    }, 3e4);
-    return () => clearInterval(i);
-  }, []);
+    const BV = window.__BV;
+    if (!BV || !BV.ready) return;
+    const sym = ticker && ticker.symbol;
+    if (!sym) return;
+    let stopped = false;
+    const tick = () => {
+      BV.fetchLive([sym]).then(() => {
+        if (stopped) return;
+        const d = BV.detailLive(sym);
+        if (d) setTicker(d);
+      });
+    };
+    tick();                                              // immediate first patch
+    const ms = (BV.cfg && BV.cfg.liveDetailMs) || 5000;
+    const i = setInterval(tick, ms);
+    return () => { stopped = true; clearInterval(i); };
+  }, [ticker && ticker.symbol]);
   const handleSurfaceClick = (id) => {
     setSurface(id);
     setTicker(null);
@@ -30508,9 +30596,12 @@ function App() {
     setLensId(lens || "overview");
     const BV = window.__BV;
     if (BV && BV.ready) {
-      const detail = BV.detailSync(sym);
-      if (detail) {
-        setTicker(detail);
+      // INSTANT: paint from preloaded scanRow (zero network) so the panel opens with
+      // no freeze, then patch fundamentals + ML in the background when they arrive.
+      const instant = BV.detailInstant(sym);
+      if (instant) {
+        setTicker(instant);
+        BV.detailAsync(sym, function (enriched) { if (enriched) setTicker(enriched); });
       } else {
         setTicker({ ...TICKER, symbol: sym, name: sym, live: true, _pulledAt: Date.now() });
       }
