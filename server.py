@@ -487,17 +487,31 @@ async def _v2_file(path: str, request: Request, auth: HTTPBasicCredentials = Dep
 from fastapi.responses import RedirectResponse
 
 @app.api_route("/", methods=["GET", "HEAD"])
-async def root(auth: HTTPBasicCredentials = Depends(_check_auth)):
-    """Root SERVES the BullVeda terminal in place (owner preference 2026-06-02) so the
-    address bar stays clean at the domain root — no redirect. Auth-gated (same basic
-    auth as /app) so the app's same-origin /api + /v2 data fetches carry credentials.
-    Prior marketing landing preserved at /landing. To revert: serve SwingTrade Landing.html."""
+async def root(request: Request, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Root serves BullVeda in place on DESKTOP (clean URL, no redirect) and the
+    mobile companion on PHONE/TABLET (owner preference 2026-06-02). Phones routed
+    server-side by UA; iPad (which reports a desktop Mac UA) routed client-side via
+    navigator.maxTouchPoints before the heavy bundle loads. Auth-gated like /app so
+    the app's /api + /v2 data fetches carry credentials. Marketing landing → /landing.
+    Escape hatch: /?view=desktop forces the desktop terminal on a tablet."""
     if isinstance(auth, Response):
         return auth
+    import re as _re_root
+    ua = request.headers.get("user-agent", "")
+    force_desktop = (request.query_params.get("view", "").lower() == "desktop")
+    # clear-cut phones → mobile companion
+    if not force_desktop and _re_root.search(r"iPhone|iPod|Android.*Mobile|Windows Phone|BlackBerry|Opera Mini|IEMobile", ua, _re_root.I):
+        return RedirectResponse(url="/v2/mobile/index.html", status_code=302)
     p = (_PROTOTYPE_DIR / "bullveda" / "BullVeda.html").resolve()
     if not p.exists():
         return RedirectResponse(url="/v2/bullveda/BullVeda.html", status_code=302)  # fallback
-    return Response(content=p.read_bytes(), media_type="text/html",
+    html = p.read_bytes()
+    if not force_desktop:
+        # iPad / Mac-UA touch tablets → bounce to mobile before the 2.5MB bundle loads
+        guard = (b"<script>try{if(navigator.maxTouchPoints>1&&/Macintosh|iPad/i.test(navigator.userAgent)"
+                 b"){location.replace('/v2/mobile/index.html');}}catch(e){}</script>")
+        html = html.replace(b"<head>", b"<head>" + guard, 1)
+    return Response(content=html, media_type="text/html",
                     headers={"Cache-Control": "no-store"})
 
 @app.get("/landing")
