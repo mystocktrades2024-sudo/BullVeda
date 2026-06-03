@@ -514,7 +514,11 @@ def _serve_bullveda_bundle(request: Request, inject_guard: bool):
         return RedirectResponse(url="/v2/bullveda/BullVeda.html", status_code=302)  # fallback
     st = p.stat()
     etag = f'W/"bv-{int(st.st_mtime)}-{st.st_size}-{1 if inject_guard else 0}"'
-    cc = "no-cache, must-revalidate"  # cache, but revalidate each load (cheap 304 when unchanged)
+    # Cloudflare strips the ETag over the tunnel, so conditional 304s don't work there.
+    # A short browser max-age makes repeat loads skip the 2.5MB download entirely; after
+    # it expires the ETag still gives a cheap 304 on same-origin (localhost). 90s keeps
+    # the post-deploy staleness small (hard-refresh always picks up a new bundle now).
+    cc = "private, max-age=90, must-revalidate"
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers={"ETag": etag, "Cache-Control": cc})
     html = p.read_bytes()
@@ -622,12 +626,8 @@ async def _app_terminal(request: Request, auth: HTTPBasicCredentials = Depends(_
 
     def _serve_desktop():
         # BULLVEDA is the desktop terminal (owner preference 2026-06-02) — was Stocksmith.html.
-        # Serve in place (no redirect) so the /app URL stays clean. Revert: serve Stocksmith.html.
-        p = (_PROTOTYPE_DIR / "bullveda" / "BullVeda.html").resolve()
-        if not p.exists():
-            return RedirectResponse(url="/kairos.html" + qs, status_code=302)
-        return Response(content=p.read_bytes(), media_type="text/html",
-                        headers={"Cache-Control": "no-store"})
+        # ETag-cached bundle (revert: serve Stocksmith.html).
+        return _serve_bullveda_bundle(request, inject_guard=False)
 
     def _go_mobile():
         return RedirectResponse(url="/v2/mobile/index.html" + qs, status_code=302)
