@@ -19,10 +19,12 @@ if [ -f /tmp/swing_trade_scan.lock ] && ! pgrep -f "swing_trade.py" >/dev/null 2
 fi
 
 # ONE scan (heavy default; warm cache → cheap). Then rebuild the v2 dashboard.
-echo "[eod-test] launching swing_trade.py …" >> "$LOG"
-"$PY" swing_trade.py >> "$LOG" 2>&1
+# Wrap in `caffeinate -i` so that if this fired from a scheduled-wake / catch-up
+# (lid closed), the Mac stays awake for the whole scan instead of re-sleeping mid-run.
+echo "[eod-test] launching swing_trade.py (caffeinated) …" >> "$LOG"
+caffeinate -i "$PY" swing_trade.py >> "$LOG" 2>&1
 echo "[eod-test] scan exit=$? — $(date)" >> "$LOG"
-"$PY" infra/prototype/build_data.py >> "$LOG" 2>&1
+caffeinate -i "$PY" infra/prototype/build_data.py >> "$LOG" 2>&1
 echo "[eod-test] build_data done — $(date)" >> "$LOG"
 
 # SELF-REMOVE — guarantees one-shot (won't fire again tomorrow).
