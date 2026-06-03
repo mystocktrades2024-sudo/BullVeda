@@ -941,6 +941,20 @@ def fetch_all_zacks_data(creds_path: str, force_fresh: bool = False) -> dict:
         "error": None,
     }
 
+    # ── REMOVE ZACKS (2026-06-03): owner disabled Zacks in the scan. The Selenium/
+    # undetected-chromedriver path is the system's most fragile dependency (Chrome
+    # auto-updates -> driver mismatch -> login crash that killed 2 scans). When
+    # config.skip_zacks is true, return the empty result WITHOUT launching a browser.
+    # All downstream zacks_data.get(...) callers safely get empty lists/dicts.
+    # Re-enable by setting skip_zacks=false. Themes/Zacks-Rank surfaces show empty-state.
+    try:
+        _cfg_sz = load_config()
+        if _cfg_sz.get("skip_zacks", False):
+            log.info("Zacks DISABLED (config.skip_zacks=true) — skipping Selenium scrape entirely")
+            return dict(empty)
+    except Exception:
+        pass
+
     # ── Disk cache: skip Selenium on same-day re-runs (weekend-aware TTL) ───────
     # Weekend: 6h (so Monday morning gets fresh data)
     # Monday pre-market (before 9:30 AM ET): 1h (catch overnight changes)
