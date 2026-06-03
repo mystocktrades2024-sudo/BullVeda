@@ -67,17 +67,28 @@ def _setup_to_source(setup: str, family: str) -> str:
     s = (setup or "").strip().lower()
     f = (family or "").strip().lower()
     if "insider" in s:                                   return "insiders"
-    if "momentum" in s:                                  return "momentum"
+    # Earnings / catalyst engine FIRST — PEAD/ESP/gap setups OR the Impulse Catalyst
+    # family. Checked before momentum so a catalyst play that happens to carry a
+    # trend-continuation setup is attributed to its driving engine (earnings), not
+    # mislabeled momentum.
+    if any(k in s for k in ("pead", "gap", "earnings", "esp")) or "impulse" in f or "catalyst" in f:
+        return "earnings"
+    # Momentum engine — the momentum-continuation sleeve's setups (audit 2026-06-03).
+    # These were falling through to the 'screeners' catch-all, leaving the Momentum
+    # source EMPTY despite being the largest engine: "Trend Continuation" alone = 1,609
+    # calls, plus EMA21/50 pullbacks, Pocket Pivot, 10-Week Pullback, RS New High.
+    if (any(k in s for k in ("momentum", "trend continuation", "continuation",
+                             "ema21 pullback", "ema50 pullback", "ema pullback",
+                             "pocket pivot", "rs new high", "10-week pullback", "10 week pullback"))
+            or "trend continuation" in f or "momentum" in f):
+        return "momentum"
     if any(k in s for k in ("vcp", "breakout", "52w", "cup", "squeeze", "spring")):
         return "smc"
-    if any(k in s for k in ("pead", "gap", "earnings", "esp")):
-        return "earnings"
     if any(k in s for k in ("uoa", "option")):           return "options"
     # family fallback
     if "breakout" in f:                                  return "smc"
-    if "impulse" in f or "catalyst" in f:                return "earnings"
     if "special" in f:                                   return "insiders"
-    # pullback / ema_pullback / bounce / mean_reversion / breakdown / rebreak / …
+    # bounce / mean_reversion / breakdown / rebreak / SAR / … → general screener pool
     return "screeners"
 
 
