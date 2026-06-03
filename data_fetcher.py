@@ -755,15 +755,20 @@ def _try_zacks_login(creds_path: str) -> object | None:
             uc_opts.add_argument("--headless=new")
             uc_opts.add_argument("--no-sandbox")
             uc_opts.add_argument("--disable-dev-shm-usage")
+            # 2026-06-03: do NOT pin version_main first. Pinning to the detected major (e.g.
+            # 149) makes uc 3.5.5 look for a driver build it can't fetch and poisons its cache,
+            # causing SessionNotCreated even on retry (killed the 00:10 scan). Auto-match first
+            # (verified working for Chrome 149 — uc downloads the correct driver); pin only as
+            # a fallback.
             _v = _chrome_version()
-            kwargs = {"options": uc_opts, "use_subprocess": True}
-            if _v:
-                kwargs["version_main"] = _v
             try:
-                driver = uc.Chrome(**kwargs)
-            except Exception as e:
-                log.warning(f"uc.Chrome with version_main={_v} failed: {e} — retrying without pin")
                 driver = uc.Chrome(options=uc_opts, use_subprocess=True)
+            except Exception as e:
+                log.warning(f"uc.Chrome auto-match failed: {e} — retrying with version_main={_v}")
+                kwargs = {"options": uc_opts, "use_subprocess": True}
+                if _v:
+                    kwargs["version_main"] = _v
+                driver = uc.Chrome(**kwargs)
         except Exception:
             driver = webdriver.Chrome(options=opts)
             driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
