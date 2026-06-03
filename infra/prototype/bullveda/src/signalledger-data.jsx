@@ -17,11 +17,17 @@
   // ── try the REAL forward-scored ledger (synchronous, like the boot loader) ──
   let LDR = null;
   try {
-    const xhr = new XMLHttpRequest();
-    xhr.open("GET", "/v2/data_leaders.json", false);
-    xhr.withCredentials = true;
-    xhr.send(null);
-    if (xhr.status === 200) LDR = JSON.parse(xhr.responseText);
+    // Prefer the preloaded copy from the combined /api/bullveda-boot payload (one
+    // round-trip); fall back to a direct sync fetch only if it wasn't preloaded.
+    if (window.__BV && window.__BV.leaders) {
+      LDR = window.__BV.leaders;
+    } else {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", "/v2/data_leaders.json", false);
+      xhr.withCredentials = true;
+      xhr.send(null);
+      if (xhr.status === 200) LDR = JSON.parse(xhr.responseText);
+    }
   } catch (e) { LDR = null; }
 
   if (LDR && Array.isArray(LDR.signals) && LDR.signals.length && Array.isArray(LDR.horizons)) {

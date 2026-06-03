@@ -561,6 +561,7 @@ async def bullveda_boot(auth: HTTPBasicCredentials = Depends(_check_auth)):
     out["earnings"] = _rj("data_earnings.json")
     out["critical"] = _rj("data.critical.json")
     out["time_table"] = _rj("bullveda/time_anatomy_table.json")
+    out["data_leaders"] = _rj("data_leaders.json")  # Track Record real ledger
     try:
         body = _bjson.dumps(out).encode("utf-8")
         _BV_BOOT_RESP["body"] = body; _BV_BOOT_RESP["ts"] = _btime.time()
@@ -6967,6 +6968,68 @@ async def portfolio_live_prices(tickers: str = ""):
         "source": "schwab.marketdata.v1",
         "elapsed_ms": int((_t.time() - t0) * 1000),
         "prices": prices,
+        "missing": missing,
+    }
+
+
+@app.get("/api/live_quotes")
+async def live_quotes(syms: str = ""):
+    """Richer Schwab live quotes for the BullVeda live layer (class L).
+
+    Query: ?syms=NVDA,AAPL,TWLO (comma-separated, batched 500/req by schwab_client)
+    Returns per-symbol: last, %chg, abs chg, bid/ask, mark, volume, spread, close —
+    so the client patches price + change + spread in place without re-rendering.
+
+    Schwab Market Data (schwab.marketdata.v1): OFF the EODHD daily quota, ~120/min
+    rate (no daily cap), so this is safe to poll frequently. Designed to be called
+    in the BACKGROUND and patched in — never in the render path.
+    """
+    import time as _t
+    t0 = _t.time()
+    symlist = [s.strip().upper() for s in (syms or "").split(",") if s.strip()]
+    if not symlist:
+        return {"ts": datetime.now(timezone.utc).isoformat(),
+                "source": "schwab.marketdata.v1", "elapsed_ms": 0,
+                "quotes": {}, "missing": []}
+
+    try:
+        import schwab_client
+        blobs = schwab_client.get_quotes_batch(symlist)
+    except Exception as e:
+        raise HTTPException(503, f"Schwab Market Data fetch failed: {e}")
+
+    quotes: dict[str, dict] = {}
+    missing: list[str] = []
+    for sym in symlist:
+        q = (blobs.get(sym) or {}).get("quote") or {}
+        last = q.get("lastPrice")
+        if last is None or not isinstance(last, (int, float)):
+            last = q.get("mark") or q.get("bidPrice")
+        if last is None or not isinstance(last, (int, float)):
+            missing.append(sym)
+            continue
+        bid, ask = q.get("bidPrice"), q.get("askPrice")
+        spread_pct = (round((ask - bid) / bid * 100, 3)
+                      if isinstance(bid, (int, float)) and isinstance(ask, (int, float)) and bid > 0
+                      else None)
+        quotes[sym] = {
+            "last":    round(float(last), 4),
+            "chg":     q.get("netPercentChange"),
+            "chgAbs":  q.get("netChange"),
+            "bid":     bid,
+            "ask":     ask,
+            "mark":    q.get("mark"),
+            "vol":     q.get("totalVolume"),
+            "spread":  spread_pct,
+            "close":   q.get("closePrice"),
+            "qtime":   q.get("quoteTime"),
+        }
+
+    return {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "source": "schwab.marketdata.v1",
+        "elapsed_ms": int((_t.time() - t0) * 1000),
+        "quotes": quotes,
         "missing": missing,
     }
 

@@ -365,6 +365,7 @@
     // critical subset — real market context + setup stats + options flow
     BV.critical = BOOT ? BOOT.critical : (syncGet("/v2/data.critical.json") || null);
     BV.optionsFlow = (BV.critical && BV.critical.options_flow_top30) || null; // ticker-level UOA (from critical)
+    BV.leaders = BOOT ? BOOT.data_leaders : null; // Track Record real ledger (signalledger-data.jsx reads this)
     // real per-setup track-record stats (Wilson) keyed by setup family
     BV.setupStatsBy = (function () {
       var sf = BV.critical && BV.critical.setup_family_stats;
@@ -374,7 +375,7 @@
         .forEach(function (s) { if (s && s.setup) m[s.setup] = s; });
       return m;
     })();
-  } else { BV.crypto = BV.earningsBeat = BV.earningsWatch = BV.optionsFlow = BV.critical = BV.setupStatsBy = null; }
+  } else { BV.crypto = BV.earningsBeat = BV.earningsWatch = BV.optionsFlow = BV.critical = BV.setupStatsBy = BV.leaders = null; }
 
   // ── real market context for the Home hero (regime · funnel · breadth · mood) ──
   BV.market = (function () {
