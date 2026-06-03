@@ -120,8 +120,17 @@ if [ $EXIT_CODE -eq 0 ]; then
         echo "Morning scan: retraining all 9 ML Edge models (swing/position/invest × dir/mag/hit)" >> "$LOG_FILE"
         "$PYTHON" -m ml.train_historical >> "$LOG_FILE" 2>&1 || echo "⚠ ml.train_historical failed (using prior model artifacts)" >> "$LOG_FILE"
     fi
-    "$PYTHON" -m ml.run_ml_edge >> "$LOG_FILE" 2>&1
-    ML_EXIT=$?
+    # ML inference runs only 4x/day (2026-06-03 · user) — pre-market / 2x session /
+    # post-market — NOT every 30-min scan. Predictions are stable enough intraday;
+    # 4 anchors keep them fresh without 16x compute. Anchors: <06:15 (pre/heavy),
+    # 09:30, 11:30, 13:30 (post-close). ml_edge_predictions.json persists between.
+    ML_EXIT=0
+    if [ "$_HHMM" -lt 615 ] || [ "$_HHMM" -eq 930 ] || [ "$_HHMM" -eq 1130 ] || [ "$_HHMM" -eq 1330 ]; then
+        "$PYTHON" -m ml.run_ml_edge >> "$LOG_FILE" 2>&1
+        ML_EXIT=$?
+    else
+        echo "ML inference skipped — not a 4x anchor (pre/09:30/11:30/13:30)" >> "$LOG_FILE"
+    fi
     # Build setup_stats.json — Wilson CI per (setup × regime) for Technicals §6/§8
     "$PYTHON" scripts/build_setup_stats.py >> "$LOG_FILE" 2>&1 || \
         echo "⚠ build_setup_stats failed (Technicals tab will show stale per-setup stats)" >> "$LOG_FILE"
