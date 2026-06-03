@@ -1,0 +1,94 @@
+// surface-social.jsx — Social Sentiment surface (quant-grade)
+const { useState: useSocS, useMemo: useSocM } = React;
+
+const SOC_ROWS = [
+  { sym:"ARGN", name:"Argentum Robotics", score:+0.62, d24:+0.18, mentions:4820, vel:"+38%", src:"Reddit·X·StockTwits", tone:"gn" },
+  { sym:"ARCM", name:"Arclight Materials", score:+0.41, d24:+0.09, mentions:2110, vel:"+12%", src:"X·StockTwits", tone:"gn" },
+  { sym:"GENO", name:"Genoa Biosystems",  score:+0.55, d24:+0.31, mentions:3640, vel:"+74%", src:"Reddit·X", tone:"gn" },
+  { sym:"MERC", name:"Mercia Semi",        score:-0.38, d24:-0.22, mentions:1890, vel:"+9%",  src:"X", tone:"rd" },
+  { sym:"DRSH", name:"Druseh Energy",      score:+0.28, d24:+0.04, mentions:980,  vel:"−3%",  src:"StockTwits", tone:"amb" },
+  { sym:"BIVO", name:"Bivota Pharma",      score:-0.51, d24:-0.34, mentions:2470, vel:"+41%", src:"Reddit", tone:"rd" },
+];
+
+function SurfaceSocial({ onTicker }) {
+  const [sort, setSort] = useSocS({ col:"mentions", dir:-1 });
+  const rows = useSocM(() => [...SOC_ROWS].sort((a,b)=>{ const v=(typeof a[sort.col]==="number"?a[sort.col]-b[sort.col]:String(a[sort.col]).localeCompare(String(b[sort.col]))); return v*sort.dir; }), [sort]);
+  const net = (SOC_ROWS.reduce((a,r)=>a+r.score,0)/SOC_ROWS.length);
+  return (
+    <div className="surface soc-surface">
+      <div className="soc-hdr">
+        <div>
+          <div className="soc-eyebrow mono">SOCIAL SENTIMENT · CROWD POSITIONING</div>
+          <h1 className="soc-title mono">Crowd net <span className={net>=0?"up":"dn"}>{net>=0?"+":""}{net.toFixed(2)}</span> · <span className="amb">contrarian-aware</span></h1>
+          <div className="soc-sub mono dim2">Reddit · X · StockTwits · aggregated, spam-filtered, velocity-weighted · src: social-feed aggregator</div>
+        </div>
+        <FreshnessPill state="live" age="42s" />
+      </div>
+
+      <div className="soc-kpis">
+        {[["NET TONE",(net>=0?"+":"")+net.toFixed(2),"gn","bullish crowd"],["MENTIONS 24h","15.9k","ink","+28% vs 7d avg"],["VELOCITY LEADER","GENO","cy","+74% surge"],["CONTRARIAN FLAG","BIVO","rd","bearish + spiking"],["BOT-FILTERED","18%","amb","spam removed"],["BREADTH","58%","gn","names net-positive"]].map((k,i)=>(
+          <div key={i} className={`soc-kpi soc-kpi--${k[2]}`}>
+            <div className="soc-kpi-l mono">{k[0]}</div>
+            <div className={`soc-kpi-v mono kpi-tone--${k[2]}`}>{k[1]}</div>
+            <div className="soc-kpi-s mono dim2">{k[3]}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="soc-main">
+        <div className="soc-tblwrap">
+          <div className="soc-card-h mono">CROWD LEADERBOARD · sentiment × velocity · <span className="dim2">click to open</span></div>
+          <table className="dtable soc-tbl">
+            <thead><tr>
+              {[["sym","Sym"],["name","Name"],["score","Tone"],["d24","Δ24h"],["mentions","Mentions"],["vel","Velocity"],["src","Sources"]].map(([c,l])=>(
+                <th key={c} className={["score","d24","mentions"].includes(c)?"r":""} onClick={()=>setSort(s=>({col:c,dir:s.col===c?-s.dir:-1}))} style={{cursor:"pointer"}}>{l}{sort.col===c?(sort.dir>0?" ▲":" ▼"):""}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {rows.map(r=>(
+                <tr key={r.sym} onClick={()=>onTicker(r.sym)} style={{cursor:"pointer"}}>
+                  <td className="mono"><b>{r.sym}</b></td>
+                  <td className="dim">{r.name}</td>
+                  <td className="r"><span className={`soc-bar soc-bar--${r.tone}`}><i style={{width:`${Math.abs(r.score)*50}%`, marginLeft:r.score<0?`${50-Math.abs(r.score)*50}%`:"50%"}}/></span> <span className={`mono kpi-tone--${r.tone}`}>{r.score>=0?"+":""}{r.score.toFixed(2)}</span></td>
+                  <td className={`r mono ${r.d24>=0?"up":"dn"}`}>{r.d24>=0?"+":""}{r.d24.toFixed(2)}</td>
+                  <td className="r mono">{r.mentions.toLocaleString()}</td>
+                  <td className={`mono ${r.vel.startsWith("+")?"up":r.vel.startsWith("−")?"dn":"dim2"}`}>{r.vel}</td>
+                  <td className="mono dim2">{r.src}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="soc-side">
+          <div className="soc-card">
+            <div className="soc-card-h mono">CONTRARIAN MATRIX</div>
+            <div className="soc-quad">
+              <div className="soc-q soc-q--rd"><span className="mono">crowd bull + price weak</span><span className="mono dim2">fade · 2 names</span></div>
+              <div className="soc-q soc-q--gn"><span className="mono">crowd bull + price strong</span><span className="mono dim2">confirm · 3 names</span></div>
+              <div className="soc-q soc-q--amb"><span className="mono">crowd bear + price strong</span><span className="mono dim2">squeeze · 1 name</span></div>
+              <div className="soc-q soc-q--ink"><span className="mono">crowd bear + price weak</span><span className="mono dim2">avoid · 4 names</span></div>
+            </div>
+            <div className="mono dim" style={{fontSize:10.5,marginTop:6}}>Social is a contrarian input — extreme bullish crowd + weak tape = fade signal, not confirmation.</div>
+          </div>
+          <div className="soc-card">
+            <div className="soc-card-h mono">MENTION VELOCITY · 24h</div>
+            <div className="soc-spark-list">
+              {SOC_ROWS.slice(0,4).map(r=>(
+                <div key={r.sym} className="soc-spk-row"><span className="mono">{r.sym}</span><div className="soc-spk"><div className={`soc-spk-f soc-spk--${r.tone}`} style={{width:`${Math.min(100,r.mentions/50)}%`}}/></div><span className={`mono ${r.vel.startsWith("+")?"up":"dim2"}`}>{r.vel}</span></div>
+              ))}
+            </div>
+          </div>
+          <div className="soc-card">
+            <div className="soc-card-h mono">SOURCE MIX</div>
+            <div className="soc-srcmix">
+              {[["Reddit",42,"violet"],["X / Twitter",38,"cy"],["StockTwits",20,"gn"]].map((s,i)=>(
+                <div key={i} className="soc-src-row"><span className="mono">{s[0]}</span><div className="soc-src-bar"><div style={{width:`${s[1]}%`,background:`var(--${s[2]})`}}/></div><span className="mono dim2">{s[1]}%</span></div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+window.SurfaceSocial = SurfaceSocial;

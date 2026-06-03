@@ -488,8 +488,15 @@ from fastapi.responses import RedirectResponse
 
 @app.get("/")
 async def root():
-    """Public marketing landing — UNAUTHENTICATED (crawlable). The terminal is
-    auth-gated at /app. (Handover §3.3: landing at /, terminal gated at /app.)"""
+    """Root opens the BullVeda terminal (owner preference 2026-06-02). The terminal
+    is auth-gated at /v2/bullveda/BullVeda.html. The prior marketing landing is
+    preserved at /landing (reversible). To revert: point this back at SwingTrade Landing.html."""
+    return RedirectResponse(url="/v2/bullveda/BullVeda.html", status_code=302)
+
+@app.get("/landing")
+async def _marketing_landing():
+    """Public marketing landing — UNAUTHENTICATED (crawlable). Was at / before
+    2026-06-02 when root was repointed to the BullVeda terminal."""
     p = (_PROTOTYPE_DIR / "SwingTrade Landing.html").resolve()
     if not p.exists():
         return RedirectResponse(url="/kairos.html", status_code=302)  # fallback if landing absent
