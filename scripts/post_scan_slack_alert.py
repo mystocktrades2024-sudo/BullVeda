@@ -119,12 +119,28 @@ def _momentum_picks() -> list:
             if not line.strip(): continue
             try: r = json.loads(line)
             except Exception: continue
-            if r.get("date") == today and r.get("rank") and r.get("rank") <= 5:
+            if r.get("date") == today and r.get("rank"):
                 rows.append(r)
     except Exception:
         return []
-    rows.sort(key=lambda r: r.get("rank") or 99)
-    return rows[:5]
+    if not rows:
+        return []
+    # The jsonl is APPEND-only — each scan writes a fresh top-N batch, so a single
+    # day holds several batches (all stamped with that scan's _written_at). Taking
+    # rank<=5 across the whole day produced duplicate ranks/tickers (e.g. two #1s).
+    # Keep ONLY the latest batch (max _written_at), then dedup by ticker as a safety.
+    latest_ts = max((r.get("_written_at") or "") for r in rows)
+    if latest_ts:
+        rows = [r for r in rows if (r.get("_written_at") or "") == latest_ts]
+    seen: dict = {}
+    for r in rows:
+        t = (r.get("ticker") or "").upper()
+        if not t:
+            continue
+        if t not in seen or (r.get("rank") or 99) < (seen[t].get("rank") or 99):
+            seen[t] = r
+    out = sorted(seen.values(), key=lambda r: r.get("rank") or 99)
+    return out[:5]
 
 
 def _ml_edge_picks() -> list:
