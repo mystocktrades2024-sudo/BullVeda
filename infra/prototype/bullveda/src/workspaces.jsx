@@ -34,6 +34,46 @@ const WS_UNIV = (() => {
 
 const tone = (v, hi, lo) => v >= hi ? "gn" : v <= lo ? "rd" : "amb";
 
+// ── REAL data adapter (audit 2026-06-03) ──
+// The decision tabs (Elite / BUY / Killed / Momentum) previously rendered the
+// SYNTHETIC WS_UNIV (score = 50 + chg*5, verdict = chg>1.5 ? "BUY") under a FALSE
+// "scan · last_bundle.json" provenance label — a trader was acting on a momentum
+// heuristic wearing the engine's name. Map the REAL scanRows (window.__BV, from
+// /api/universe → last_bundle.all_scored, fully gated) into the WS row shape.
+// wlb (Wilson LB) is genuinely ledger-derived and absent from the scan feed, so it
+// stays null (rendered "—") — never fabricated.
+const WS_LIVE_IDS = { elite: 1, buy: 1, momentum: 1 };
+function adaptWsRow(s) {
+  return {
+    sym: s.sym, name: s.name, sector: s.sector, mcap: s.mcap,
+    price: typeof s.price === "number" ? s.price : 0,
+    chg: typeof s.chg === "number" ? s.chg : 0,
+    score: typeof s.score === "number" ? s.score : 0,
+    verdict: s.verdict || "WATCH",
+    setup: s.setup || s.mechanism || "—",
+    rvol: parseFloat(s.rvol) || 0,
+    rs: parseFloat(s.rs) || 0,
+    iv: typeof s.iv === "number" ? s.iv : 0,
+    wlb: s.wlb != null ? s.wlb : null,   // ledger-derived — honest null, not fabricated
+    er: s.er != null ? s.er : 99,
+    insider: s.insNet || 0,
+    mom: (s.r1m != null ? s.r1m : s.chg) || 0,
+    _real: true,
+  };
+}
+function wsLiveRows() {
+  try {
+    if (typeof window !== "undefined" && window.__BV && window.__BV.ready && window.__BV.scanRows) {
+      const rows = window.__BV.scanRows();
+      if (Array.isArray(rows) && rows.length) return rows.map(adaptWsRow);
+    }
+  } catch (e) {}
+  return null;
+}
+// Average a field across rows, skipping nulls — so ledger-absent Wilson renders "—"
+// instead of NaN%, rather than inventing a number.
+const wsAvg = (rows, f) => { const v = rows.map(r => r[f]).filter(x => x != null && !isNaN(x)); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null; };
+
 // ── per-workspace configs ──
 const WS_CFG = {
   "elite": {
@@ -43,8 +83,8 @@ const WS_CFG = {
     filter: u => u.filter(r => r.score >= 72).sort((a,b)=>b.score-a.score),
     kpis: rows => [
       ["ELITE", rows.length, "violet", "score ≥ 72"],
-      ["AVG SCORE", Math.round(rows.reduce((s,r)=>s+r.score,0)/(rows.length||1)), "gn", "composite"],
-      ["AVG WILSON", Math.round(rows.reduce((s,r)=>s+r.wlb,0)/(rows.length||1))+"%", "gn", "LB · validated"],
+      ["AVG SCORE", wsAvg(rows,"score") ?? "—", "gn", "composite"],
+      ["AVG WILSON", wsAvg(rows,"wlb")!=null ? wsAvg(rows,"wlb")+"%" : "—", "gn", "LB · validated"],
       ["ALL-GREEN", rows.filter(r=>r.score>=80).length, "gn", "5 of 5 pillars"],
     ],
     cols: ["sym","name","sector","score","verdict","rr","wlb","rs","setup"],
@@ -69,9 +109,9 @@ const WS_CFG = {
     filter: u => u.filter(r => r.verdict === "BUY").sort((a,b)=>b.score-a.score),
     kpis: rows => [
       ["BUY", rows.length, "gn", "gated"],
-      ["AVG R:R", (rows.reduce((s,r)=>s+(1+(r.score-50)/30),0)/(rows.length||1)).toFixed(2), "gn", "to T1"],
+      ["AVG SCORE", wsAvg(rows,"score") ?? "—", "gn", "composite"],
       ["ER ≤ 10d", rows.filter(r=>r.er<=10).length, "amb", "cap size"],
-      ["AVG WILSON", Math.round(rows.reduce((s,r)=>s+r.wlb,0)/(rows.length||1))+"%", "gn", "LB"],
+      ["AVG WILSON", wsAvg(rows,"wlb")!=null ? wsAvg(rows,"wlb")+"%" : "—", "gn", "LB"],
     ],
     cols: ["sym","name","price","chg","rr","wlb","er","setup"],
   },
@@ -289,7 +329,13 @@ const WS_LABELS = {
 function WorkspaceSurface({ id, onTicker }) {
   const cfg = WS_CFG[id];
   const [sort, setSort] = useWS({ col: "score", dir: -1 });
-  const rows = useWSm(() => (cfg && cfg.filter ? cfg.filter(WS_UNIV) : WS_UNIV).slice(0, 40), [id]);
+  // Decision tabs (Elite/BUY/Killed/Momentum) source the REAL gated universe when
+  // available; everything else keeps WS_UNIV until the active wiring lands.
+  const live = !!(WS_LIVE_IDS[id] && wsLiveRows());
+  const rows = useWSm(() => {
+    const src = (WS_LIVE_IDS[id] ? wsLiveRows() : null) || WS_UNIV;
+    return (cfg && cfg.filter ? cfg.filter(src) : src).slice(0, 40);
+  }, [id]);
   if (!cfg) return <WorkspaceStub id={id} />;
   const kpis = cfg.kpis ? cfg.kpis(rows) : [];
 
@@ -302,8 +348,8 @@ function WorkspaceSurface({ id, onTicker }) {
           <div className="wsx-sub mono dim2">{cfg.sub}</div>
         </div>
         <div className="wsx-hdr-r">
-          <FreshnessPill state="live" age="18s" />
-          <span className="mono dim2">src · {cfg.src}</span>
+          <FreshnessPill state={live ? "live" : "scaffold"} age={live ? "scan" : "demo"} />
+          <span className="mono dim2">src · {live ? "live · /api/universe → last_bundle (gated)" : cfg.src + " (demo)"}</span>
         </div>
       </div>
 
