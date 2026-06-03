@@ -175,22 +175,73 @@ function AITCalibration() {
   );
 }
 
+// ── REAL track record (audit 2026-06-03) — computed from /v2/data_leaders.json ──
+// 3,598 logged calls across 8 sources over the live window. A call "resolves" once
+// its forward return reaches a horizon; hit = direction was right at that horizon.
+// Was AIT_MONTHS/AIT_LEDGER/AITEquity: fabricated 12-month ledger + Math.sin walk.
+function _ldrResolve(s) {
+  const r = s.ret || {};
+  const h = r.W2 != null ? r.W2 : (r.W1 != null ? r.W1 : (r.D5 != null ? r.D5 : (r.D3 != null ? r.D3 : null)));
+  if (h == null) return null;
+  const isShort = (s.dir || "long") === "short";
+  return { ret: h, hit: isShort ? h < 0 : h > 0 };
+}
 function AITrackRecord() {
-  const tot = AIT_MONTHS.reduce((a, m) => a + m.n, 0);
-  const wHit = AIT_MONTHS.reduce((a, m) => a + m.hit * m.n, 0) / tot;
-  const best = [...AIT_MONTHS].sort((a, b) => b.hit - a.hit)[0];
-  const worst = [...AIT_MONTHS].sort((a, b) => a.hit - b.hit)[0];
-  const ledgerHit = AIT_LEDGER.filter(r => r.out).length;
+  const [st, setSt] = React.useState({ loading: true, data: null, err: null });
+  React.useEffect(() => {
+    let alive = true;
+    if (typeof fetch === "undefined") { setSt({ loading: false, data: null, err: "no fetch" }); return; }
+    fetch("/v2/data_leaders.json", { credentials: "same-origin" })
+      .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then(d => { if (alive) setSt({ loading: false, data: d, err: null }); })
+      .catch(e => { if (alive) setSt({ loading: false, data: null, err: String(e) }); });
+    return () => { alive = false; };
+  }, []);
 
+  const M = useMemoAIT(() => {
+    const d = st.data; if (!d || !Array.isArray(d.signals)) return null;
+    const sigs = d.signals;
+    const resolved = [];
+    sigs.forEach(s => { const r = _ldrResolve(s); if (r) resolved.push({ ...s, _ret: r.ret, _hit: r.hit }); });
+    const tot = resolved.length;
+    const hits = resolved.filter(r => r._hit).length;
+    const wHit = tot ? hits / tot * 100 : 0;
+    const wilsonLB = (() => { const n = tot, p = wHit / 100, z = 1.96; if (!n) return 0; const dd = 1 + z * z / n; return ((p + z * z / (2 * n) - z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / dd) * 100; })();
+    // by month
+    const byMo = {};
+    resolved.forEach(r => { const m = String(r.date).slice(0, 7); (byMo[m] = byMo[m] || { n: 0, h: 0 }); byMo[m].n++; if (r._hit) byMo[m].h++; });
+    const months = Object.keys(byMo).sort().map(m => ({ m, n: byMo[m].n, hit: byMo[m].n ? byMo[m].h / byMo[m].n * 100 : 0 }));
+    // by source
+    const srcLabel = {}; (d.sources || []).forEach(s => srcLabel[s.id] = s.label);
+    const bySrc = {};
+    resolved.forEach(r => { const k = r.source || "?"; (bySrc[k] = bySrc[k] || { n: 0, h: 0 }); bySrc[k].n++; if (r._hit) bySrc[k].h++; });
+    const sources = Object.keys(bySrc).map(k => ({ k: srcLabel[k] || k, n: bySrc[k].n, hit: bySrc[k].n ? bySrc[k].h / bySrc[k].n * 100 : 0 })).sort((a, b) => b.n - a.n);
+    // by horizon — real hit at fixed horizons
+    const hz = [["D3", "3-day"], ["W1", "1-week"], ["W2", "2-week"], ["M1", "1-month"]].map(([key, lbl]) => {
+      let n = 0, h = 0;
+      sigs.forEach(s => { const v = (s.ret || {})[key]; if (v != null) { n++; const ok = (s.dir === "short") ? v < 0 : v > 0; if (ok) h++; } });
+      return { k: lbl, n, hit: n ? h / n * 100 : 0 };
+    }).filter(x => x.n > 0);
+    const best = [...months].sort((a, b) => b.hit - a.hit)[0] || null;
+    const worst = [...months].sort((a, b) => a.hit - b.hit)[0] || null;
+    const ledger = [...resolved].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 40);
+    return { tot, totalCalls: d.totalCalls || sigs.length, wHit, wilsonLB, months, sources, hz, best, worst, ledger,
+      span: (d._diag && d._diag.month_hist) ? Object.keys(d._diag.month_hist).sort() : [], gen: d.generated_at };
+  }, [st.data]);
+
+  if (st.loading) return <div className="ss-empty" style={{ padding: 40 }}>Loading track record from data_leaders.json…</div>;
+  if (st.err || !M) return <div className="ss-empty" style={{ padding: 40 }}>Track record unavailable ({st.err || "no data"}). Source: /v2/data_leaders.json.</div>;
+
+  const moMin = 35, moMax = 75;
   return (
     <div className="ait">
       <div className="ait-kpis">
-        <AITKpi k="RESOLVED · 12M" v={tot.toLocaleString()} tone="violet" s="forecasts reaching horizon" />
-        <AITKpi k="HIT RATE" v={`${wHit.toFixed(1)}%`} tone="gn" s="vs 50% coin-flip baseline" />
-        <AITKpi k="CUM. ALPHA vs SPY" v="+18.7%" tone="copper" s="paper book · net of costs" />
-        <AITKpi k="AVG EDGE / PICK" v="+1.4%" tone="gn" s="realized 10d move" />
-        <AITKpi k="BRIER · ECE" v="0.213 · 0.04" tone="cy" s="calibrated · low error" />
-        <AITKpi k="BEST / WORST MO" v={`${best.hit.toFixed(0)} / ${worst.hit.toFixed(0)}%`} tone="amb" s={`${best.m.split(" ")[0]} · ${worst.m.split(" ")[0]}`} />
+        <AITKpi k="RESOLVED" v={M.tot.toLocaleString()} tone="violet" s={`of ${M.totalCalls.toLocaleString()} logged calls`} />
+        <AITKpi k="HIT RATE" v={`${M.wHit.toFixed(1)}%`} tone={M.wHit >= 50 ? "gn" : "rd"} s="dir right at horizon · 50% = coin-flip" />
+        <AITKpi k="WILSON LB" v={`${M.wilsonLB.toFixed(1)}%`} tone={M.wilsonLB >= 45 ? "gn" : "amb"} s="95% lower bound" />
+        <AITKpi k="SOURCES" v={M.sources.length} tone="cy" s="signal families tracked" />
+        <AITKpi k="WINDOW" v={M.span.length ? `${M.span[0]} → ${M.span[M.span.length - 1]}` : "—"} tone="copper" s="live logging window" />
+        <AITKpi k="BEST / WORST MO" v={M.best && M.worst ? `${M.best.hit.toFixed(0)} / ${M.worst.hit.toFixed(0)}%` : "—"} tone="amb" s={M.best ? `${M.best.m} · ${M.worst.m}` : ""} />
       </div>
 
       <div className="ai-grid">
@@ -198,95 +249,81 @@ function AITrackRecord() {
           <div className="ai-card">
             <div className="ai-card-hdr">
               <div>
-                <div className="ai-card-title mono">Cumulative performance · trailing 12 months</div>
-                <div className="ai-card-sub mono dim2">paper book of every HIGH/MED signal vs SPY · daily mark · net of modeled slippage</div>
+                <div className="ai-card-title mono">Monthly hit-rate consistency</div>
+                <div className="ai-card-sub mono dim2">resolved hit-rate by month · 50% = no edge · real calls from signal_log + audit_ledger</div>
               </div>
               <FreshnessPill state="live" age="EOD" />
             </div>
-            <AITEquity />
-          </div>
-
-          <div className="ai-card">
-            <div className="ai-card-hdr">
-              <div>
-                <div className="ai-card-title mono">Monthly hit-rate consistency</div>
-                <div className="ai-card-sub mono dim2">resolved hit-rate by month · 50% = no edge · 10 of 12 months above baseline</div>
-              </div>
+            <div className="ait-month">
+              {M.months.map((mo, i) => {
+                const hgt = ((mo.hit - moMin) / (moMax - moMin)) * 100;
+                const tone = mo.hit >= 55 ? "gn" : mo.hit >= 50 ? "amb" : "rd";
+                return (
+                  <div key={i} className="ait-month-col" title={`${mo.m} · ${mo.n} resolved · ${mo.hit.toFixed(0)}% hit`}>
+                    <div className="ait-month-track"><div className="ait-month-base" /><div className={`ait-month-fill kpi-tone-bg--${tone}`} style={{ height: `${Math.max(4, Math.min(100, hgt))}%` }} /></div>
+                    <span className={`mono ait-month-v kpi-tone--${tone}`}>{mo.hit.toFixed(0)}</span>
+                    <span className="mono ait-month-m dim2">{mo.m.slice(5)}</span>
+                  </div>
+                );
+              })}
             </div>
-            <AITMonthly />
           </div>
 
           <div className="ai-card">
             <div className="ai-card-hdr">
               <div>
-                <div className="ai-card-title mono">Resolved-prediction ledger</div>
-                <div className="ai-card-sub mono dim2">most recent forecasts scored at horizon · {ledgerHit}/{AIT_LEDGER.length} hit shown</div>
+                <div className="ai-card-title mono">Resolved-call ledger</div>
+                <div className="ai-card-sub mono dim2">most recent calls scored at horizon · {M.ledger.filter(r => r._hit).length}/{M.ledger.length} hit shown</div>
               </div>
             </div>
             <table className="dtable ai-tbl ait-tbl">
-              <thead>
-                <tr>
-                  <th>Resolved</th><th>Symbol</th><th>Conf</th>
-                  <th className="r">P(up)</th><th className="r">Predicted</th>
-                  <th className="r">Realized</th><th className="r">Δ vs pred</th><th>Outcome</th>
+              <thead><tr><th>Date</th><th>Symbol</th><th>Source</th><th>Dir</th><th>Setup</th><th className="r">Fwd ret</th><th>Outcome</th></tr></thead>
+              <tbody>{M.ledger.map((r, i) => (
+                <tr key={i}>
+                  <td className="mono dim2">{r.date}</td>
+                  <td className="mono"><b>{r.sym}</b></td>
+                  <td className="mono dim">{r.source}</td>
+                  <td><Pill tone={r.dir === "short" ? "rd" : "gn"} small>{(r.dir || "long").toUpperCase()}</Pill></td>
+                  <td className="mono dim">{r.setup || r.verdict || "—"}</td>
+                  <td className={`r mono tabular ${r._ret >= 0 ? "up" : "dn"}`}>{r._ret >= 0 ? "+" : ""}{Number(r._ret).toFixed(1)}%</td>
+                  <td><span className={`ait-out ait-out--${r._hit ? "hit" : "miss"}`}>{r._hit ? "HIT" : "MISS"}</span></td>
                 </tr>
-              </thead>
-              <tbody>
-                {AIT_LEDGER.map((r, i) => (
-                  <tr key={i}>
-                    <td className="mono dim2">{r.d}</td>
-                    <td className="mono"><b>{r.sym}</b></td>
-                    <td><Pill tone={r.conf === "HIGH" ? "gn" : r.conf === "MED" ? "amb" : "ink"} small>{r.conf}</Pill></td>
-                    <td className="r mono tabular">{r.dir}%</td>
-                    <td className="r mono tabular up">+{r.pred.toFixed(1)}%</td>
-                    <td className={`r mono tabular ${r.act >= 0 ? "up" : "dn"}`}>{r.act >= 0 ? "+" : ""}{r.act.toFixed(1)}%</td>
-                    <td className={`r mono tabular ${r.act - r.pred >= 0 ? "up" : "dn"}`}>{r.act - r.pred >= 0 ? "+" : ""}{(r.act - r.pred).toFixed(1)}%</td>
-                    <td><span className={`ait-out ait-out--${r.out ? "hit" : "miss"}`}>{r.out ? "HIT" : "MISS"}</span></td>
-                  </tr>
-                ))}
-              </tbody>
+              ))}</tbody>
             </table>
           </div>
         </div>
 
         <div className="ai-col-side">
           <div className="ai-card">
-            <div className="ai-card-hdr">
-              <div className="ai-card-title mono">Calibration · reliability</div>
+            <div className="ai-card-hdr"><div className="ai-card-title mono">Hit-rate by source</div></div>
+            <div className="ait-break">
+              {M.sources.map((c, i) => {
+                const tone = c.hit >= 55 ? "gn" : c.hit >= 50 ? "amb" : "rd";
+                return (
+                  <div key={i} className="ait-break-row">
+                    <span className="mono ait-break-k">{c.k}</span>
+                    <span className="ait-break-bar"><i className={`kpi-tone-bg--${tone}`} style={{ width: `${Math.max(2, Math.min(100, (c.hit - 35) / 40 * 100))}%` }} /></span>
+                    <span className={`mono ait-break-v kpi-tone--${tone}`}>{c.hit.toFixed(0)}%</span>
+                    <span className="mono dim2 ait-break-n">{c.n}</span>
+                  </div>
+                );
+              })}
+              <div className="ait-break-foot mono dim2">Realized hit-rate per signal family over the live window — which sources actually carry edge.</div>
             </div>
-            <AITCalibration />
           </div>
 
           <div className="ai-card">
-            <div className="ai-card-hdr">
-              <div className="ai-card-title mono">Hit-rate by confidence</div>
-            </div>
+            <div className="ai-card-hdr"><div className="ai-card-title mono">Hit-rate by horizon</div></div>
             <div className="ait-break">
-              {AIT_BY_CONF.map((c, i) => (
+              {M.hz.map((c, i) => (
                 <div key={i} className="ait-break-row">
-                  <span className="mono ait-break-k"><Pill tone={c.tone} small>{c.k}</Pill></span>
-                  <span className="ait-break-bar"><i className={`kpi-tone-bg--${c.tone}`} style={{ width: `${(c.hit - 40) / 30 * 100}%` }} /></span>
-                  <span className={`mono ait-break-v kpi-tone--${c.tone}`}>{c.hit.toFixed(1)}%</span>
+                  <span className="mono ait-break-k">{c.k}</span>
+                  <span className="ait-break-bar"><i className="kpi-tone-bg--violet" style={{ width: `${Math.max(2, Math.min(100, (c.hit - 35) / 40 * 100))}%` }} /></span>
+                  <span className="mono ait-break-v kpi-tone--violet">{c.hit.toFixed(0)}%</span>
                   <span className="mono dim2 ait-break-n">{c.n}</span>
                 </div>
               ))}
-              <div className="ait-break-foot mono dim2">Confidence tiers separate cleanly — HIGH signals hit ~16pt above LOW, exactly what a calibrated ranking should do.</div>
-            </div>
-          </div>
-
-          <div className="ai-card">
-            <div className="ai-card-hdr">
-              <div className="ai-card-title mono">Hit-rate by horizon</div>
-            </div>
-            <div className="ait-break">
-              {AIT_BY_HORIZON.map((c, i) => (
-                <div key={i} className="ait-break-row">
-                  <span className="mono ait-break-k">{c.k}</span>
-                  <span className="ait-break-bar"><i className="kpi-tone-bg--violet" style={{ width: `${(c.hit - 40) / 30 * 100}%` }} /></span>
-                  <span className="mono ait-break-v kpi-tone--violet">{c.hit.toFixed(1)}%</span>
-                </div>
-              ))}
-              <div className="ait-break-foot mono dim2">The 10-day horizon the model is optimized for is also its strongest — edge decays at 20d as catalysts mean-revert.</div>
+              <div className="ait-break-foot mono dim2">Realized direction accuracy at each forward horizon (D3 → M1), computed from logged forward returns.</div>
             </div>
           </div>
         </div>
