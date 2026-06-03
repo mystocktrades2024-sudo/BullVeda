@@ -10935,6 +10935,35 @@ body {
     });
   };
 
+  // ── corporate events (real) — { _meta, ipos:[…], splits:[…] } · empty today ──
+  BV.corporateEvents = (BV.critical && BV.critical.corporate_events) || null;
+  // ── pre-market (real) — { _meta:{session_active,session_status}, gappers_up/dn:[…], catalysts:[…] } · empty pre-session ──
+  BV.premarket = (BV.critical && BV.critical.premarket) || null;
+  // ── system status (real) — { forced_cash, circuit_breaker, macro_calendar, prefomc_drift, sector_ranking_demotions } ──
+  BV.systemStatus = (BV.critical && BV.critical.system_status) || null;
+  // ── data health (real) — { checks:[…], ok_count, warn_count, fail_count, total_checks, timestamp } ──
+  BV.dataHealth = (BV.critical && BV.critical.data_health) || null;
+
+  // ── freshness helper — derive a real, honest age string from a bundle/feed timestamp ──
+  // Accepts "YYYY-MM-DD HH:MM" / ISO / epoch-ms. Returns { real, age, asOf } or honest fallback.
+  BV.bundleTimestamp = (BV.critical && (BV.critical.run_timestamp || BV.critical.run_date)) || null;
+  BV.freshness = function (ts) {
+    var raw = (ts == null) ? BV.bundleTimestamp : ts;
+    if (raw == null || raw === "") return { real: false, age: null, asOf: null };
+    var d;
+    if (typeof raw === "number") { d = new Date(raw); }
+    else if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) { d = new Date(raw + "T00:00:00"); }
+    else { d = new Date(String(raw).replace(" ", "T")); }
+    if (isNaN(d.getTime())) return { real: false, age: null, asOf: String(raw) };
+    var secs = Math.max(0, Math.round((Date.now() - d.getTime()) / 1e3));
+    var age;
+    if (secs < 90) age = secs + "s";
+    else if (secs < 5400) age = Math.round(secs / 60) + "m";
+    else if (secs < 172800) age = Math.round(secs / 3600) + "h";
+    else age = Math.round(secs / 86400) + "d";
+    return { real: true, age: age, asOf: String(raw) };
+  };
+
   if (!BV.ready) console.warn("[BullVeda] no live universe — surfaces will show feed-honest empty states.", BV.errors);
   else console.info("[BullVeda] live universe loaded:", BV.universe.length, "rows · NAV", BV.navStr(),
     "· crypto", BV.crypto && BV.crypto.all_scored && BV.crypto.all_scored.length,
@@ -12408,12 +12437,29 @@ function SectionHeader({ n, title, sub, freshness = "live", freshnessAge, right,
   }
   return /* @__PURE__ */ React.createElement("div", { className: "sec-hdr sec-hdr--copper" }, /* @__PURE__ */ React.createElement("div", { className: "sec-hdr-num" }, "\xA7", n), /* @__PURE__ */ React.createElement("div", { className: "sec-hdr-text" }, /* @__PURE__ */ React.createElement("div", { className: "sec-hdr-title" }, title), sub && /* @__PURE__ */ React.createElement("div", { className: "sec-hdr-sub" }, sub)), /* @__PURE__ */ React.createElement("div", { className: "sec-hdr-right" }, /* @__PURE__ */ React.createElement(FreshnessPill, { state: freshness, age: freshnessAge }), right));
 }
-function FreshnessPill({ state = "live", age }) {
+function FreshnessPill({ state = "live", age, real, ts }) {
+  // Honest freshness contract:
+  //  • Explicit lifecycle states (stale/loading/scaffold/empty) are passed through.
+  //  • `ts`  : a real feed/bundle timestamp → green LIVE + COMPUTED age (truth).
+  //  • `real`: bool flag for surfaces bound to real data without a per-row ts.
+  //  • If neither real-data signal is supplied, we DO NOT claim LIVE — render a
+  //    neutral grey "STATIC" pill. This kills the old hardcoded "LIVE · 18s" lie
+  //    that rendered over fabricated constants on every tab.
   if (state === "stale") return /* @__PURE__ */ React.createElement(Pill, { tone: "rd", small: true }, "STALE ", age || "");
   if (state === "loading") return /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "\xB7 \xB7 \xB7");
   if (state === "scaffold") return /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "SCAFFOLD");
   if (state === "empty") return /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "NO DATA");
-  return /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true, dot: true }, "LIVE ", age ? `\xB7 ${age}` : "");
+  // Try to derive a REAL age from a supplied timestamp.
+  if (ts != null && typeof BV !== "undefined" && BV.freshness) {
+    var f = BV.freshness(ts);
+    if (f.real) return /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true, dot: true }, "LIVE ", f.age ? `\xB7 ${f.age}` : "");
+    return /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "STATIC");
+  }
+  // Surface explicitly declares it is (not) bound to real data.
+  if (real === true) return /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true, dot: true }, "LIVE ", age ? `\xB7 ${age}` : "");
+  if (real === false) return /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "STATIC");
+  // No real-data signal supplied → be honest, not green. (was: hardcoded LIVE)
+  return /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "STATIC");
 }
 function Pill({ tone = "ink", children, small, dot, outline }) {
   const cls = [
@@ -24043,45 +24089,39 @@ window.SurfaceMomentum = SurfaceMomentum;
 </script>
 <script>/* src/surface-premarket.jsx */
 const { useState: usePM, useMemo: usePMm } = React;
-const PM_ROWS = (() => {
-  const cats = [
-    ["Earnings beat", "earnings", "gn"],
-    ["Guidance cut", "earnings", "rd"],
-    ["Analyst upgrade", "news", "gn"],
-    ["FDA / data", "news", "amb"],
-    ["M&A rumor", "news", "amb"],
-    ["Downgrade", "news", "rd"],
-    ["Sympathy move", "tech", "ink"],
-    ["Technical gap", "tech", "ink"]
-  ];
-  return HEATMAP.slice(0, 18).map(([sym, sector, mcap, chg], i) => {
-    const code = (sym.charCodeAt(0) || 65) + (sym.charCodeAt(1) || 66) + i * 7;
-    const gap = chg * 1.6 + (code % 14 - 6) * 0.4;
-    const pmVol = 0.4 + code % 40 / 10;
-    const [cat, catType, catTone] = cats[code % cats.length] || cats[0];
-    const w = WATCHLIST.find((x) => x.sym === sym);
-    const prevClose = (w == null ? void 0 : w.price) || 20 + code % 200;
-    const last = prevClose * (1 + gap / 100);
-    const taxon = Math.abs(gap) < 1.5 ? "\u2014" : gap > 0 && pmVol >= 2 ? "GAP & GO" : gap > 0 && pmVol < 1.2 ? "GAP FILL" : gap < 0 && pmVol >= 2 ? "BREAKDOWN" : Math.abs(gap) > 5 && pmVol < 1.5 ? "EXHAUSTION" : "WATCH";
+// \u2500\u2500 REAL pre-market gap board \u2014 BV.premarket.gappers_up + .gappers_dn (EODHD
+//    real-time). Each producer row: { ticker, price, previous_close, change_p,
+//    volume, timestamp }. catalysts is keyed by ticker. Empty out-of-session \u2192
+//    [] so the surface renders an honest "session not active" empty-state.
+function pmRowsReal() {
+  var pm = (typeof BV !== "undefined" && BV.premarket) || null;
+  if (!pm) return [];
+  var up = Array.isArray(pm.gappers_up) ? pm.gappers_up : [];
+  var dn = Array.isArray(pm.gappers_dn) ? pm.gappers_dn : [];
+  // catalysts: producer writes { ticker: [{type,title}] }; tolerate list form too.
+  var catMap = {};
+  if (pm.catalysts && !Array.isArray(pm.catalysts)) catMap = pm.catalysts;
+  else if (Array.isArray(pm.catalysts)) pm.catalysts.forEach(function (c) { if (c && c.ticker) (catMap[c.ticker] = catMap[c.ticker] || []).push(c); });
+  function map(r) {
+    var sym = String(r.ticker || r.code || "").replace(/\.US$/i, "");
+    var gap = +(r.change_p != null ? r.change_p : 0) || 0;
+    var prev = +(r.previous_close != null ? r.previous_close : (r.previousClose || 0)) || 0;
+    var last = +(r.price != null ? r.price : (r.close || 0)) || 0;
+    var pmVol = (+(r.volume || 0)) / 1e6;
+    var cats = catMap[sym] || [];
+    var c0 = cats[0] || null;
+    var ctype = c0 ? (String(c0.type || "").toUpperCase().indexOf("EARN") >= 0 ? "earnings" : String(c0.type || "").toUpperCase().indexOf("NEWS") >= 0 ? "news" : "tech") : "tech";
+    var ctone = ctype === "earnings" ? (gap >= 0 ? "gn" : "rd") : ctype === "news" ? "amb" : "ink";
+    var taxon = Math.abs(gap) < 1.5 ? "\u2014" : gap > 0 ? "GAP UP" : "GAP DOWN";
     return {
-      sym,
-      sector,
-      cat,
-      catType,
-      catTone,
-      gap,
-      pmVol,
-      prevClose,
-      last,
-      pmHigh: last * (1 + code % 5 / 100),
-      pmLow: last * (1 - code % 4 / 100),
-      fillProb: Math.max(18, Math.min(82, 50 - Math.round(gap * 2) + code % 20)),
-      adv: 0.6 + code % 12 / 10,
-      taxon,
-      halt: code % 17 === 0
+      sym: sym, sector: r.sector || "\u2014",
+      cat: c0 ? (c0.title || c0.type || "Catalyst") : "\u2014", catType: ctype, catTone: ctone,
+      gap: gap, pmVol: pmVol, prevClose: prev, last: last,
+      pmHigh: last, pmLow: last, fillProb: null, adv: null, taxon: taxon, halt: false,
     };
-  }).sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
-})();
+  }
+  return up.concat(dn).map(map).sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
+}
 const PM_FUT = [
   ["ES", "S&P fut", "+0.31%", "gn"],
   ["NQ", "Nasdaq fut", "+0.58%", "gn"],
@@ -24092,6 +24132,11 @@ const PM_FUT = [
 ];
 function SurfacePreMarket({ onTicker }) {
   const [filter, setFilter] = usePM("all");
+  // REAL feed: BV.premarket gappers (EODHD). Out-of-session today → [] → empty-state.
+  const PM_ROWS = usePMm(() => pmRowsReal(), []);
+  const pmMeta = (typeof BV !== "undefined" && BV.premarket && BV.premarket._meta) || {};
+  const pmFresh = (typeof BV !== "undefined" && BV.freshness) ? BV.freshness(pmMeta.generated_at || null) : { real: false };
+  const sessionActive = !!pmMeta.session_active;
   const gu = PM_ROWS.filter((r) => r.gap > 1.5).length;
   const gd = PM_ROWS.filter((r) => r.gap < -1.5).length;
   const news = PM_ROWS.filter((r) => r.catType !== "tech").length;
@@ -24101,8 +24146,8 @@ function SurfacePreMarket({ onTicker }) {
     if (filter === "news") return PM_ROWS.filter((r) => r.catType !== "tech");
     if (filter === "go") return PM_ROWS.filter((r) => r.taxon === "GAP & GO");
     return PM_ROWS;
-  }, [filter]);
-  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--violet pm2" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "PRE-MARKET COCKPIT \xB7 04:00\u201309:29 ET"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Pre-Market"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "gap board \xB7 catalyst-tagged \xB7 gap taxonomy \xB7 PM levels \xB7 futures tape")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement("div", { className: "pm-clock mono" }, /* @__PURE__ */ React.createElement("span", { className: "pm-clock-dot" }), "OPENS IN ", /* @__PURE__ */ React.createElement("b", null, "00:42:18")), /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "5s" }))), /* @__PURE__ */ React.createElement("div", { className: "pm-read" }, /* @__PURE__ */ React.createElement("div", { className: "pm-read-l" }, /* @__PURE__ */ React.createElement("span", { className: "pm-read-tag mono" }, "PRE-MARKET READ"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-stance mono" }, "STAND ASIDE \xB7 WAIT FOR 09:45")), /* @__PURE__ */ React.createElement("div", { className: "pm-read-body mono" }, "Futures firm, ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "risk-on tilt"), " (Tech +1.4% / Energy +2.1%) \u2014 but ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "CPI prints 08:30"), " and can override every single-name thesis, so keep risk light into the number. No clean pre-market ", /* @__PURE__ */ React.createElement("b", null, "buy"), ": the big movers (CRWV +9%, GENO \u22126%) are ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "earnings-gap blackout"), " \u2014 no fresh swing entries. Your held ", /* @__PURE__ */ React.createElement("b", { className: "cop" }, "BORA"), " reports BMO and gaps +1.8% \u2014 that's today's first risk to manage. ", /* @__PURE__ */ React.createElement("b", { className: "cop" }, "Action:"), " watch, don't chase; let CPI + the 09:45 range print, then revisit Signal Scanner."), /* @__PURE__ */ React.createElement("div", { className: "pm-read-chips" }, /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--gn" }, "REGIME \xB7 RISK-ON"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--rd" }, "MACRO \xB7 CPI 08:30"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--amb" }, "2 EARNINGS BLACKOUT"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--cy" }, "1 BOOK REPORTER \xB7 BORA"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip" }, "0 FRESH BUYS"))), /* @__PURE__ */ React.createElement("div", { className: "pm-tape" }, PM_FUT.map(([s, l, v, t], i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `pm-fut pm-fut--${t}` }, /* @__PURE__ */ React.createElement("span", { className: "pm-fut-s mono" }, s), /* @__PURE__ */ React.createElement("span", { className: `pm-fut-v mono kpi-tone--${t}` }, v), /* @__PURE__ */ React.createElement("span", { className: "pm-fut-l mono dim2" }, l)))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GAPPERS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--violet" }, gu + gd), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "> 1.5% gap")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GAP UP"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, gu), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, PM_ROWS.filter((r) => r.taxon === "GAP & GO").length, " gap-and-go")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--rd" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GAP DOWN"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--rd" }, gd), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, PM_ROWS.filter((r) => r.taxon === "BREAKDOWN").length, " breakdown")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--amb" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "NEWS-DRIVEN"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--amb" }, news), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "vs ", PM_ROWS.length - news, " technical"))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs" }, [["all", "All gaps"], ["up", "Gap up"], ["down", "Gap down"], ["news", "News-driven"], ["go", "Gap & Go"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${filter === id ? "is-on" : ""}`, onClick: () => setFilter(id) }, l))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl pm-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Sym"), /* @__PURE__ */ React.createElement("th", null, "Sector"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Prev"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "PM Last"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Gap %"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "PM Vol"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "vs ADV"), /* @__PURE__ */ React.createElement("th", null, "Catalyst"), /* @__PURE__ */ React.createElement("th", null, "Taxonomy"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Fill Prob"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "PM Range"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((t, i) => /* @__PURE__ */ React.createElement("tr", { key: t.sym + i, onClick: () => onTicker(t.sym) }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, t.sym), t.halt && /* @__PURE__ */ React.createElement("span", { className: "pm-halt mono" }, "HALT")), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, t.sector), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, "$", t.prevClose.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, "$", t.last.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.gap >= 0 ? "up" : "dn"}`, "data-field": "schwab.quote.pre.gap_pct" }, /* @__PURE__ */ React.createElement("b", null, t.gap >= 0 ? "+" : "", t.gap.toFixed(1), "%")), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular", "data-field": "schwab.quote.pre.volume" }, t.pmVol.toFixed(1), "M"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.pmVol / t.adv >= 2 ? "up" : "dim"}` }, (t.pmVol / t.adv).toFixed(1), "\xD7"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: t.catTone, small: true }, t.cat)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `pm-taxon pm-tax--${t.taxon === "GAP & GO" ? "gn" : t.taxon === "BREAKDOWN" ? "rd" : t.taxon === "EXHAUSTION" ? "amb" : "ink"}` }, t.taxon)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.fillProb >= 60 ? "amb" : "dim"}` }, t.fillProb, "%"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, "$", t.pmLow.toFixed(0), "\u2013$", t.pmHigh.toFixed(0)), /* @__PURE__ */ React.createElement("td", { className: "r mono dim" }, "\u203A")))))), /* @__PURE__ */ React.createElement("div", { className: "pm-panels" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "\u26A0 MACRO CALENDAR \xB7 pre-open prints"), /* @__PURE__ */ React.createElement("div", { className: "pm-macro" }, [
+  }, [PM_ROWS, filter]);
+  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--violet pm2" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "PRE-MARKET COCKPIT \xB7 04:00\u201309:29 ET"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Pre-Market"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "gap board \xB7 catalyst-tagged \xB7 gap taxonomy \xB7 PM levels \xB7 futures tape")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement("div", { className: "pm-clock mono" }, /* @__PURE__ */ React.createElement("span", { className: "pm-clock-dot" }), sessionActive ? "SESSION ACTIVE" : "SESSION CLOSED"), /* @__PURE__ */ React.createElement(FreshnessPill, (sessionActive && pmFresh.real) ? { real: true, age: pmFresh.age } : { state: "empty" }))), /* @__PURE__ */ React.createElement("div", { className: "pm-read" }, /* @__PURE__ */ React.createElement("div", { className: "pm-read-l" }, /* @__PURE__ */ React.createElement("span", { className: "pm-read-tag mono" }, "PRE-MARKET READ"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-stance mono" }, "STAND ASIDE \xB7 WAIT FOR 09:45")), /* @__PURE__ */ React.createElement("div", { className: "pm-read-body mono" }, "Futures firm, ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "risk-on tilt"), " (Tech +1.4% / Energy +2.1%) \u2014 but ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "CPI prints 08:30"), " and can override every single-name thesis, so keep risk light into the number. No clean pre-market ", /* @__PURE__ */ React.createElement("b", null, "buy"), ": the big movers (CRWV +9%, GENO \u22126%) are ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "earnings-gap blackout"), " \u2014 no fresh swing entries. Your held ", /* @__PURE__ */ React.createElement("b", { className: "cop" }, "BORA"), " reports BMO and gaps +1.8% \u2014 that's today's first risk to manage. ", /* @__PURE__ */ React.createElement("b", { className: "cop" }, "Action:"), " watch, don't chase; let CPI + the 09:45 range print, then revisit Signal Scanner."), /* @__PURE__ */ React.createElement("div", { className: "pm-read-chips" }, /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--gn" }, "REGIME \xB7 RISK-ON"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--rd" }, "MACRO \xB7 CPI 08:30"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--amb" }, "2 EARNINGS BLACKOUT"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--cy" }, "1 BOOK REPORTER \xB7 BORA"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip" }, "0 FRESH BUYS"))), /* @__PURE__ */ React.createElement("div", { className: "pm-tape" }, PM_FUT.map(([s, l, v, t], i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `pm-fut pm-fut--${t}` }, /* @__PURE__ */ React.createElement("span", { className: "pm-fut-s mono" }, s), /* @__PURE__ */ React.createElement("span", { className: `pm-fut-v mono kpi-tone--${t}` }, v), /* @__PURE__ */ React.createElement("span", { className: "pm-fut-l mono dim2" }, l)))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GAPPERS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--violet" }, gu + gd), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "> 1.5% gap")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GAP UP"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, gu), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, PM_ROWS.filter((r) => r.taxon === "GAP & GO").length, " gap-and-go")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--rd" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GAP DOWN"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--rd" }, gd), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, PM_ROWS.filter((r) => r.taxon === "BREAKDOWN").length, " breakdown")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--amb" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "NEWS-DRIVEN"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--amb" }, news), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "vs ", PM_ROWS.length - news, " technical"))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs" }, [["all", "All gaps"], ["up", "Gap up"], ["down", "Gap down"], ["news", "News-driven"], ["go", "Gap & Go"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${filter === id ? "is-on" : ""}`, onClick: () => setFilter(id) }, l))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl pm-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Sym"), /* @__PURE__ */ React.createElement("th", null, "Sector"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Prev"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "PM Last"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Gap %"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "PM Vol"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "vs ADV"), /* @__PURE__ */ React.createElement("th", null, "Catalyst"), /* @__PURE__ */ React.createElement("th", null, "Taxonomy"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Fill Prob"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "PM Range"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.length === 0 ? /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 12, className: "dim2", style: { textAlign: "center", padding: 26 } }, sessionActive ? "No qualifying pre-market gappers right now (EODHD real-time, >3% gap filter)." : "Pre-market session not active \u2014 the gap board is live only 04:00\u201309:29 ET. Last EODHD scan is shown when in session.")) : rows.map((t, i) => /* @__PURE__ */ React.createElement("tr", { key: t.sym + i, onClick: () => onTicker(t.sym) }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, t.sym), t.halt && /* @__PURE__ */ React.createElement("span", { className: "pm-halt mono" }, "HALT")), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, t.sector), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, t.prevClose ? "$" + t.prevClose.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, t.last ? "$" + t.last.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.gap >= 0 ? "up" : "dn"}`, "data-field": "schwab.quote.pre.gap_pct" }, /* @__PURE__ */ React.createElement("b", null, t.gap >= 0 ? "+" : "", t.gap.toFixed(1), "%")), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular", "data-field": "schwab.quote.pre.volume" }, t.pmVol ? t.pmVol.toFixed(1) + "M" : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, t.adv ? (t.pmVol / t.adv).toFixed(1) + "\xD7" : "\u2014"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: t.catTone, small: true }, t.cat)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `pm-taxon pm-tax--${t.taxon === "GAP UP" ? "gn" : t.taxon === "GAP DOWN" ? "rd" : "ink"}` }, t.taxon)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, t.fillProb != null ? t.fillProb + "%" : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono dim" }, "\u203A")))))), /* @__PURE__ */ React.createElement("div", { className: "pm-panels" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "\u26A0 MACRO CALENDAR \xB7 pre-open prints"), /* @__PURE__ */ React.createElement("div", { className: "pm-macro" }, [
     ["08:30", "CPI Core MoM", "HIGH", "+0.3%", "+0.3%", "amb"],
     ["08:30", "Jobless Claims", "MED", "218k", "221k", "ink"],
     ["10:00", "FOMC Speak \xB7 Powell", "HIGH", "\u2014", "\u2014", "amb"],
@@ -26315,21 +26360,45 @@ function PerfTab({ pf, sum }) {
 </script>
 <script>/* src/surface-ipo.jsx */
 const { useState: useIPO, useMemo: useIPOm } = React;
-const IPO_ROWS = [
-  { sym: "RBRK", name: "Riverbrook Robotics", sector: "Industrials", exch: "NASDAQ", date: "2026-06-04", lo: 27, hi: 30, shares: 18.5, lead: "Goldman Sachs \xB7 Morgan Stanley", status: "priced", priced: 29, note: "Warehouse automation; 41% rev growth" },
-  { sym: "NMBL", name: "Nimbus Cloud", sector: "Technology", exch: "NYSE", date: "2026-06-05", lo: 18, hi: 21, shares: 32, lead: "J.P. Morgan \xB7 BofA", status: "upcoming", note: "Infra SaaS; net retention 128%" },
-  { sym: "HELX", name: "Helix Therapeutics", sector: "Healthcare", exch: "NASDAQ", date: "2026-06-06", lo: 15, hi: 17, shares: 9.4, lead: "Jefferies \xB7 Cowen", status: "upcoming", note: "Phase-3 oncology readout Q3" },
-  { sym: "VOLT", name: "Voltaic Energy", sector: "Energy", exch: "NYSE", date: "2026-06-09", lo: 22, hi: 26, shares: 24, lead: "Citigroup \xB7 Barclays", status: "upcoming", note: "Grid-scale storage; backlog $1.4B" },
-  { sym: "FRSH", name: "Freshline Foods", sector: "Consumer", exch: "NASDAQ", date: "2026-06-11", lo: 16, hi: 18, shares: 12.2, lead: "Morgan Stanley", status: "filing", note: "DTC grocery; first profitable qtr" },
-  { sym: "QNTA", name: "Quanta Compute", sector: "Technology", exch: "NASDAQ", date: "2026-06-12", lo: 33, hi: 38, shares: 27.5, lead: "Goldman Sachs \xB7 Evercore", status: "upcoming", note: "AI inference silicon" },
-  { sym: "ATLS", name: "Atlas Logistics", sector: "Industrials", exch: "NYSE", date: "2026-06-16", lo: 19, hi: 22, shares: 15.8, lead: "Wells Fargo \xB7 RBC", status: "filing", note: "Last-mile freight network" },
-  { sym: "MRNE", name: "Marine Biosciences", sector: "Healthcare", exch: "NASDAQ", date: "2026-06-18", lo: 12, hi: 14, shares: 7, lead: "Piper Sandler", status: "filing", note: "Marine-derived therapeutics" },
-  { sym: "PYLN", name: "Paylon", sector: "Financials", exch: "NYSE", date: "2026-06-23", lo: 24, hi: 28, shares: 21, lead: "J.P. Morgan \xB7 Citigroup", status: "upcoming", note: "Embedded payments; take-rate 1.9%" },
-  { sym: "SOLR", name: "Solaria Materials", sector: "Materials", exch: "NASDAQ", date: "2026-06-25", lo: 20, hi: 23, shares: 14.5, lead: "BofA \xB7 Mizuho", status: "filing", note: "Perovskite cell maker" },
-  { sym: "VRDA", name: "Verda Bio", sector: "Healthcare", exch: "NASDAQ", date: "2026-07-01", lo: 17, hi: 19, shares: 10.1, lead: "Cowen \xB7 Leerink", status: "rumored", note: "Confidential S-1 reported" },
-  { sym: "DGTL", name: "Digitalis Media", sector: "Communications", exch: "NYSE", date: "2026-07-08", lo: 21, hi: 24, shares: 19.3, lead: "Morgan Stanley \xB7 UBS", status: "rumored", note: "Streaming adtech; targeting Q3" }
-];
-const IPO_STATUS = { priced: { l: "Priced", tone: "gn" }, upcoming: { l: "Upcoming", tone: "cy" }, filing: { l: "Filed (S-1)", tone: "amb" }, rumored: { l: "Rumored", tone: "ink" } };
+// ── REAL corporate-events adapter — maps EODHD calendar rows (BV.corporateEvents.ipos)
+//    into the row shape this surface consumes. Returns [] when the feed is empty
+//    (today) so the surface renders an honest empty-state, never fabricated IPOs.
+function ipoRowsReal() {
+  var ce = (typeof BV !== "undefined" && BV.corporateEvents) || null;
+  var raw = (ce && Array.isArray(ce.ipos)) ? ce.ipos : [];
+  return raw.map(function (r) {
+    var sym = String(r.code || r.symbol || "").replace(/\.US$/i, "");
+    var lo = +(r.price_from != null ? r.price_from : (r.offer_price != null ? r.offer_price : 0)) || 0;
+    var hi = +(r.price_to != null ? r.price_to : (r.offer_price != null ? r.offer_price : lo)) || lo;
+    var priced = (r.offer_price != null) ? +r.offer_price : null;
+    var status = priced != null ? "priced" : (r.start_date ? "upcoming" : (r.filing_date ? "filing" : "rumored"));
+    return {
+      sym: sym, name: r.name || r.company || sym,
+      sector: r.sector || r.industry || "—",
+      exch: r.exchange || r.exchange_short || "—",
+      date: (r.start_date || r.filing_date || "").slice(0, 10),
+      lo: lo, hi: hi, shares: +(r.shares || 0) / 1e6 || 0,
+      lead: r.underwriters || r.lead_underwriters || "—",
+      status: status, priced: priced,
+      dealM: r._deal_size_m != null ? +r._deal_size_m : null,
+      note: r.deal_type || r.note || "",
+    };
+  });
+}
+// ── REAL splits adapter — BV.corporateEvents.splits (EODHD), [] when empty. ──
+function splitRowsReal() {
+  var ce = (typeof BV !== "undefined" && BV.corporateEvents) || null;
+  var raw = (ce && Array.isArray(ce.splits)) ? ce.splits : [];
+  return raw.map(function (r) {
+    return {
+      sym: String(r.code || r.symbol || "").replace(/\.US$/i, ""),
+      date: (r.split_date || "").slice(0, 10),
+      ratio: r._ratio || (r.old_shares && r.new_shares ? (r.new_shares + "-for-" + r.old_shares) : "—"),
+      reverse: !!r._is_reverse,
+    };
+  });
+}
+const IPO_STATUS = { priced: { l: "Priced", tone: "gn" }, upcoming: { l: "Upcoming", tone: "cy" }, filing: { l: "Filed (S-1)", tone: "amb" }, rumored: { l: "Rumored", tone: "ink" }, listed: { l: "Listed", tone: "gn" } };
 function ipoMid(r) {
   return (r.lo + r.hi) / 2;
 }
@@ -26342,13 +26411,21 @@ function ipoDateStr(d) {
 function ipoDaysOut(d) {
   return Math.round(((/* @__PURE__ */ new Date(d + "T00:00:00")).getTime() - Date.now()) / 864e5);
 }
+function ipoDealM(r) {
+  // Prefer the producer-computed real deal size; fall back to midpoint × shares.
+  return (r.dealM != null) ? r.dealM : ipoDeal(r);
+}
 function SurfaceIPO({ onTicker }) {
   const [win, setWin] = useIPO("all");
   const [sec, setSec] = useIPO("all");
   const [stat, setStat] = useIPO("all");
-  const sectors = useIPOm(() => ["all", ...Array.from(new Set(IPO_ROWS.map((r) => r.sector)))], []);
+  // REAL feed: BV.corporateEvents.ipos / .splits (EODHD). Empty today → honest empty-state.
+  const allIpos = useIPOm(() => ipoRowsReal(), []);
+  const allSplits = useIPOm(() => splitRowsReal(), []);
+  const fresh = (typeof BV !== "undefined" && BV.freshness) ? BV.freshness((BV.corporateEvents && BV.corporateEvents._meta && BV.corporateEvents._meta.generated_at) || null) : { real: false };
+  const sectors = useIPOm(() => ["all", ...Array.from(new Set(allIpos.map((r) => r.sector)))], [allIpos]);
   const rows = useIPOm(() => {
-    return IPO_ROWS.filter((r) => {
+    return allIpos.filter((r) => {
       const d = ipoDaysOut(r.date);
       if (win === "week" && (d < 0 || d > 7)) return false;
       if (win === "month" && (d < 0 || d > 31)) return false;
@@ -26356,18 +26433,19 @@ function SurfaceIPO({ onTicker }) {
       if (stat !== "all" && r.status !== stat) return false;
       return true;
     }).sort((a, b) => a.date.localeCompare(b.date));
-  }, [win, sec, stat]);
-  const totalDeal = rows.reduce((s, r) => s + ipoDeal(r), 0);
-  const thisWeek = IPO_ROWS.filter((r) => {
+  }, [allIpos, win, sec, stat]);
+  const totalDeal = rows.reduce((s, r) => s + ipoDealM(r), 0);
+  const thisWeek = allIpos.filter((r) => {
     const d = ipoDaysOut(r.date);
     return d >= 0 && d <= 7;
   }).length;
-  const priced = IPO_ROWS.filter((r) => r.status === "priced").length;
-  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--copper ipo" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "PRIMARY MARKET \xB7 NEW LISTINGS"), /* @__PURE__ */ React.createElement("div", { className: "mpf-titlerow" }, /* @__PURE__ */ React.createElement("h2", { className: "ipo-title" }, "Upcoming IPOs")), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "expected date \xB7 price range \xB7 deal size \xB7 underwriters \xB7 demo calendar, replace with a live IPO feed")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "sim" }))), /* @__PURE__ */ React.createElement("div", { className: "ipo-kpis" }, /* @__PURE__ */ React.createElement(PfTile, { l: "On the calendar", v: IPO_ROWS.length, s: "next ~5 weeks", tone: "ink" }), /* @__PURE__ */ React.createElement(PfTile, { l: "Pricing this week", v: thisWeek, s: "\u2264 7 days out", tone: "cy" }), /* @__PURE__ */ React.createElement(PfTile, { l: "Already priced", v: priced, s: "live to trade", tone: "gn" }), /* @__PURE__ */ React.createElement(PfTile, { l: "Filtered deal size", v: `$${totalDeal.toFixed(0)}M`, s: `${rows.length} offerings`, tone: "copper" })), /* @__PURE__ */ React.createElement("div", { className: "ipo-bar" }, /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, [["week", "This week"], ["month", "This month"], ["all", "All"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: win === id ? "is-on" : "", onClick: () => setWin(id) }, l))), /* @__PURE__ */ React.createElement("div", { className: "ipo-chips" }, sectors.map((sc) => /* @__PURE__ */ React.createElement("button", { key: sc, className: `trk-chip ${sec === sc ? "is-on" : ""}`, onClick: () => setSec(sc) }, sc === "all" ? "All sectors" : sc))), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm ipo-bar-r" }, [["all", "Any"], ["priced", "Priced"], ["upcoming", "Upcoming"], ["filing", "Filed"], ["rumored", "Rumored"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: stat === id ? "is-on" : "", onClick: () => setStat(id) }, l)))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl pf-tbl ipo-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Expected"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Days"), /* @__PURE__ */ React.createElement("th", null, "Symbol"), /* @__PURE__ */ React.createElement("th", null, "Company"), /* @__PURE__ */ React.createElement("th", null, "Sector"), /* @__PURE__ */ React.createElement("th", null, "Exch"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Price range"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Shares"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Deal size"), /* @__PURE__ */ React.createElement("th", null, "Lead underwriters"), /* @__PURE__ */ React.createElement("th", null, "Status"))), /* @__PURE__ */ React.createElement("tbody", null, rows.length === 0 ? /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 11, className: "dim2", style: { textAlign: "center", padding: 26 } }, "No offerings match these filters.")) : rows.map((r) => {
+  const priced = allIpos.filter((r) => r.status === "priced").length;
+  const feedEmpty = allIpos.length === 0 && allSplits.length === 0;
+  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--copper ipo" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "PRIMARY MARKET \xB7 NEW LISTINGS"), /* @__PURE__ */ React.createElement("div", { className: "mpf-titlerow" }, /* @__PURE__ */ React.createElement("h2", { className: "ipo-title" }, "Upcoming IPOs")), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "expected date \xB7 price range \xB7 deal size \xB7 underwriters \xB7 EODHD calendar feed (US-listed, next 30d)")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement(FreshnessPill, fresh.real ? { real: true, age: fresh.age } : { state: "empty" }))), /* @__PURE__ */ React.createElement("div", { className: "ipo-kpis" }, /* @__PURE__ */ React.createElement(PfTile, { l: "On the calendar", v: allIpos.length, s: "next ~30 days", tone: "ink" }), /* @__PURE__ */ React.createElement(PfTile, { l: "Pricing this week", v: thisWeek, s: "\u2264 7 days out", tone: "cy" }), /* @__PURE__ */ React.createElement(PfTile, { l: "Already priced", v: priced, s: "live to trade", tone: "gn" }), /* @__PURE__ */ React.createElement(PfTile, { l: "Filtered deal size", v: `$${totalDeal.toFixed(0)}M`, s: `${rows.length} offerings`, tone: "copper" })), /* @__PURE__ */ React.createElement("div", { className: "ipo-bar" }, /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, [["week", "This week"], ["month", "This month"], ["all", "All"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: win === id ? "is-on" : "", onClick: () => setWin(id) }, l))), /* @__PURE__ */ React.createElement("div", { className: "ipo-chips" }, sectors.map((sc) => /* @__PURE__ */ React.createElement("button", { key: sc, className: `trk-chip ${sec === sc ? "is-on" : ""}`, onClick: () => setSec(sc) }, sc === "all" ? "All sectors" : sc))), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm ipo-bar-r" }, [["all", "Any"], ["priced", "Priced"], ["upcoming", "Upcoming"], ["filing", "Filed"], ["rumored", "Rumored"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: stat === id ? "is-on" : "", onClick: () => setStat(id) }, l)))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl pf-tbl ipo-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Expected"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Days"), /* @__PURE__ */ React.createElement("th", null, "Symbol"), /* @__PURE__ */ React.createElement("th", null, "Company"), /* @__PURE__ */ React.createElement("th", null, "Sector"), /* @__PURE__ */ React.createElement("th", null, "Exch"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Price range"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Shares"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Deal size"), /* @__PURE__ */ React.createElement("th", null, "Lead underwriters"), /* @__PURE__ */ React.createElement("th", null, "Status"))), /* @__PURE__ */ React.createElement("tbody", null, rows.length === 0 ? /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 11, className: "dim2", style: { textAlign: "center", padding: 26 } }, allIpos.length === 0 ? "No IPOs in the next 30 days — EODHD primary-market calendar is empty for the US window." : "No offerings match these filters.")) : rows.map((r) => {
     const st = IPO_STATUS[r.status];
     const d = ipoDaysOut(r.date);
-    return /* @__PURE__ */ React.createElement("tr", { key: r.sym, onClick: () => onTicker && onTicker(r.sym), title: r.note }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, ipoDateStr(r.date)), /* @__PURE__ */ React.createElement("td", { className: `r tabular mono ${d <= 7 ? "up" : "dim2"}` }, d < 0 ? "\u2014" : d + "d"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("b", { className: "ipo-sym" }, r.sym)), /* @__PURE__ */ React.createElement("td", null, r.name, /* @__PURE__ */ React.createElement("div", { className: "ipo-note dim2" }, r.note)), /* @__PURE__ */ React.createElement("td", { className: "dim2" }, r.sector), /* @__PURE__ */ React.createElement("td", { className: "dim2 mono" }, r.exch), /* @__PURE__ */ React.createElement("td", { className: "r tabular" }, "$", r.lo, "\u2013", r.hi, r.status === "priced" && /* @__PURE__ */ React.createElement("span", { className: "ipo-priced mono" }, " @ $", r.priced)), /* @__PURE__ */ React.createElement("td", { className: "r tabular dim2" }, r.shares.toFixed(1), "M"), /* @__PURE__ */ React.createElement("td", { className: "r tabular" }, /* @__PURE__ */ React.createElement("b", null, "$", ipoDeal(r).toFixed(0), "M")), /* @__PURE__ */ React.createElement("td", { className: "dim2 ipo-lead" }, r.lead), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `ipo-status ipo-status--${st.tone}` }, st.l)));
-  }))), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2" }, `Click a row to open the ticker's detail. Price range \xD7 shares = indicative deal size; "priced" rows show the final offer price. Replace `, /* @__PURE__ */ React.createElement("b", null, "IPO_ROWS"), " with a live primary-market calendar feed.")));
+    return /* @__PURE__ */ React.createElement("tr", { key: r.sym, onClick: () => onTicker && onTicker(r.sym), title: r.note }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, ipoDateStr(r.date)), /* @__PURE__ */ React.createElement("td", { className: `r tabular mono ${d <= 7 ? "up" : "dim2"}` }, d < 0 ? "\u2014" : d + "d"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("b", { className: "ipo-sym" }, r.sym)), /* @__PURE__ */ React.createElement("td", null, r.name, /* @__PURE__ */ React.createElement("div", { className: "ipo-note dim2" }, r.note)), /* @__PURE__ */ React.createElement("td", { className: "dim2" }, r.sector), /* @__PURE__ */ React.createElement("td", { className: "dim2 mono" }, r.exch), /* @__PURE__ */ React.createElement("td", { className: "r tabular" }, "$", r.lo, "\u2013", r.hi, r.status === "priced" && /* @__PURE__ */ React.createElement("span", { className: "ipo-priced mono" }, " @ $", r.priced)), /* @__PURE__ */ React.createElement("td", { className: "r tabular dim2" }, r.shares.toFixed(1), "M"), /* @__PURE__ */ React.createElement("td", { className: "r tabular" }, /* @__PURE__ */ React.createElement("b", null, "$", ipoDealM(r).toFixed(0), "M")), /* @__PURE__ */ React.createElement("td", { className: "dim2 ipo-lead" }, r.lead), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `ipo-status ipo-status--${st.tone}` }, st.l)));
+  }))), /* @__PURE__ */ React.createElement("div", { className: "ipo-splits", style: { marginTop: 18 } }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono", style: { marginBottom: 8 } }, "STOCK SPLITS \xB7 next 30 days \xB7 ", allSplits.length, " upcoming"), allSplits.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "dim2 mono", style: { padding: "12px 0" } }, "No splits in the next 30 days — EODHD splits calendar is empty for the US window.") : /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl pf-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Date"), /* @__PURE__ */ React.createElement("th", null, "Symbol"), /* @__PURE__ */ React.createElement("th", null, "Ratio"), /* @__PURE__ */ React.createElement("th", null, "Type"))), /* @__PURE__ */ React.createElement("tbody", null, allSplits.map((s, i) => /* @__PURE__ */ React.createElement("tr", { key: s.sym + i, onClick: () => onTicker && onTicker(s.sym) }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, s.date || "—"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("b", { className: "ipo-sym" }, s.sym)), /* @__PURE__ */ React.createElement("td", { className: "mono" }, s.ratio), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `ipo-status ipo-status--${s.reverse ? "amb" : "gn"}` }, s.reverse ? "Reverse" : "Forward"))))))), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2" }, `Click a row to open the ticker's detail. Price range \xD7 shares = indicative deal size; "priced" rows show the final offer price. Source: EODHD primary-market + splits calendar (`, /* @__PURE__ */ React.createElement("b", null, "BV.corporateEvents"), ").")));
 }
 window.SurfaceIPO = SurfaceIPO;
 </script>
@@ -27212,6 +27290,38 @@ const ST_INCIDENTS = [
   { t: "02:14", sev: "info", node: "EODHD", msg: "Nightly EOD ingest completed \xB7 11,940 symbols \xB7 0 errors", tone: "cy" }
 ];
 const ST_STATE = { ok: { c: "gn", l: "Operational" }, degraded: { c: "amb", l: "Degraded" }, lag: { c: "amb", l: "Lagging" }, down: { c: "rd", l: "Down" } };
+// ── REAL data-health adapter — BV.dataHealth.checks → feed-health rows ──
+function stFeedsReal() {
+  var dh = (typeof BV !== "undefined" && BV.dataHealth) || null;
+  var checks = (dh && Array.isArray(dh.checks)) ? dh.checks : [];
+  return checks.map(function (c) {
+    var status = c.status || (c.pct != null ? (c.pct >= 90 ? "ok" : c.pct >= 70 ? "lag" : "degraded") : "ok");
+    var tone = status === "ok" ? "gn" : status === "warn" || status === "lag" ? "amb" : "rd";
+    return {
+      src: c.source || "—", feed: c.label || "—", state: status, tone: tone,
+      rows: (c.available != null && c.total != null) ? (c.available.toLocaleString() + " / " + c.total.toLocaleString()) : "—",
+      cov: (c.pct != null) ? (c.pct.toFixed(1) + "%") : "—",
+    };
+  });
+}
+// ── REAL trading-system conditions — BV.systemStatus → honest incident-style feed ──
+function stConditionsReal() {
+  var ss = (typeof BV !== "undefined" && BV.systemStatus) || null;
+  if (!ss) return [];
+  var out = [];
+  var cb = ss.circuit_breaker || {};
+  out.push(cb.active ? { sev: "active", node: "Circuit Breaker", msg: ("TRIPPED \xB7 level " + (cb.level || "?") + " \xB7 " + ((cb.reasons || []).join("; ") || "drawdown guard")), tone: "rd" }
+                     : { sev: cb.disabled ? "disabled" : "ok", node: "Circuit Breaker", msg: ((cb.reasons || []).join("; ") || "normal") + (cb.review_date ? (" \xB7 review " + cb.review_date) : ""), tone: cb.disabled ? "amb" : "gn" });
+  var fc = ss.forced_cash || {};
+  out.push({ sev: fc.active ? "active" : "ok", node: "Forced Cash", msg: fc.active ? ("FORCED FLAT \xB7 " + (fc.reason || "risk-off")) : "not engaged", tone: fc.active ? "rd" : "gn" });
+  var mc = ss.macro_calendar || {};
+  var ne = mc.next_event || {};
+  out.push({ sev: mc.blackout_today ? "active" : "ok", node: "Macro Calendar", msg: mc.blackout_today ? ("BLACKOUT \xB7 " + (mc.blackout_reason || "high-impact print")) : (ne.label ? ("clear \xB7 next: " + ne.label + " in " + (ne.days_until != null ? ne.days_until + "d" : "?")) : "clear"), tone: mc.blackout_today ? "amb" : "gn" });
+  var pf = ss.prefomc_drift || {};
+  out.push({ sev: pf.active ? "active" : "ok", node: "Pre-FOMC Drift", msg: pf.active ? ("ARMED \xB7 " + (pf.fomc_date || "FOMC eve") + " \xB7 applied to " + (pf.applied_to_n_buys || 0) + " buys") : "not armed", tone: pf.active ? "cy" : "gn" });
+  if (ss.sector_ranking_demotions != null) out.push({ sev: "info", node: "Sector Ranking", msg: (ss.sector_ranking_demotions + " sector demotion(s) applied this scan"), tone: ss.sector_ranking_demotions > 0 ? "amb" : "gn" });
+  return out;
+}
 function SurfaceStatus() {
   const [tick, setTick] = useSt(0);
   const [view, setView] = useSt("pipeline");
@@ -27219,9 +27329,17 @@ function SurfaceStatus() {
     const t = setInterval(() => setTick((x) => x + 1), 3e3);
     return () => clearInterval(t);
   }, []);
-  const overall = ST_NODES.some((n) => n.state === "down") ? "down" : ST_NODES.some((n) => n.state === "degraded" || n.state === "lag") ? "degraded" : "ok";
-  const upPct = 99.95 - (overall === "ok" ? 0 : 0.07);
-  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--cy stat-srf" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "SYSTEM STATUS \xB7 OBSERVABILITY"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "System Status"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "data pipeline health \xB7 EODHD \u2192 Schwab \u2192 ingest \u2192 Supabase \u2192 app \xB7 throughput \xB7 latency \xB7 quotas \xB7 incidents")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement("span", { className: `stat-overall stat-overall--${ST_STATE[overall].c}` }, /* @__PURE__ */ React.createElement("span", { className: "stat-overall-dot" }), " ", overall === "ok" ? "ALL SYSTEMS OPERATIONAL" : "DEGRADED \xB7 1 service"), /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "3s" }))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs stat-viewtabs" }, [["pipeline", "Pipeline & Feeds"], ["supabase", "Supabase \xB7 Data"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${view === id ? "is-on" : ""}`, onClick: () => setView(id) }, l))), view === "supabase" ? /* @__PURE__ */ React.createElement(SurfaceSupabase, { embedded: true }) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "stat-kpis" }, /* @__PURE__ */ React.createElement(StatKpi, { k: "Uptime \xB7 30d", v: `${upPct.toFixed(2)}%`, tone: "gn", s: "SLA 99.9%" }), /* @__PURE__ */ React.createElement(StatKpi, { k: "Pipeline latency", v: "318ms", tone: "gn", s: "source\u2192app p50" }), /* @__PURE__ */ React.createElement(StatKpi, { k: "Ingest throughput", v: "161 rps", tone: "cy", s: "across 6 workers" }), /* @__PURE__ */ React.createElement(StatKpi, { k: "Active feeds", v: "7 / 8", tone: "amb", s: "1 lagging" }), /* @__PURE__ */ React.createElement(StatKpi, { k: "Open incidents", v: "1", tone: "amb", s: "Supabase degraded" }), /* @__PURE__ */ React.createElement(StatKpi, { k: "Error rate \xB7 1h", v: "0.04%", tone: "gn", s: "12 / 31.2k req" })), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "DATA PIPELINE ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 source \u2192 ingest \u2192 store \u2192 app \xB7 click a node for detail")), /* @__PURE__ */ React.createElement("div", { className: "stat-flow" }, ST_NODES.map((n, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: n.id }, /* @__PURE__ */ React.createElement(PipelineNode, { n, tick }), i < ST_NODES.length - 1 && /* @__PURE__ */ React.createElement("div", { className: `stat-arrow stat-arrow--${ST_NODES[i + 1].state === "down" ? "rd" : n.state !== "ok" || ST_NODES[i + 1].state !== "ok" ? "amb" : "gn"}` }, /* @__PURE__ */ React.createElement("span", { className: "stat-arrow-flow" }), /* @__PURE__ */ React.createElement("span", { className: "stat-arrow-head" }, "\u2192")))))), /* @__PURE__ */ React.createElement("div", { className: "stat-2col" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "FEED HEALTH ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 freshness \xB7 coverage")), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl stat-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Source"), /* @__PURE__ */ React.createElement("th", null, "Feed"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Fresh"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Rows"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Coverage"))), /* @__PURE__ */ React.createElement("tbody", null, ST_FEEDS.map((f, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, f.src), /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, f.feed)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `stat-pill stat-pill--${f.tone}` }, f.state === "ok" ? "OK" : f.state === "lag" ? "LAG" : "DEGRADED")), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim2" }, f.fresh), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, f.rows), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${f.tone === "gn" ? "up" : "warn"}` }, f.cov)))))), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "API QUOTAS ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 daily budget consumed")), /* @__PURE__ */ React.createElement("div", { className: "stat-quotas" }, [{ k: "EODHD calls", v: 0.61, n: "61,200 / 100k", tone: "gn" }, { k: "Schwab calls", v: 0.44, n: "init", tone: "gn" }, { k: "Supabase rows", v: 0.78, n: "780k / 1M", tone: "amb" }, { k: "Supabase storage", v: 0.52, n: "4.2 / 8 GB", tone: "gn" }, { k: "Realtime conns", v: 0.33, n: "66 / 200", tone: "gn" }].map((q, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "stat-quota" }, /* @__PURE__ */ React.createElement("div", { className: "stat-quota-top" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, q.k), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, q.n)), /* @__PURE__ */ React.createElement("div", { className: "stat-quota-track" }, /* @__PURE__ */ React.createElement("div", { className: `stat-quota-fill kpi-tone-bg--${q.tone}`, style: { width: `${q.v * 100}%` } }))))))), /* @__PURE__ */ React.createElement("div", { className: "stat-2col" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "SCHEDULED JOBS ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 launchd / cron")), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl stat-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Job"), /* @__PURE__ */ React.createElement("th", null, "Schedule"), /* @__PURE__ */ React.createElement("th", null, "Last run"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Next"))), /* @__PURE__ */ React.createElement("tbody", null, ST_JOBS.map((j, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("span", { className: `stat-dot stat-dot--${j.tone}` }), /* @__PURE__ */ React.createElement("b", null, j.job)), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, j.cron), /* @__PURE__ */ React.createElement("td", { className: `mono ${j.tone === "gn" ? "up" : "warn"}` }, j.last), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim2" }, j.next)))))), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "INCIDENT FEED ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 last 24h")), /* @__PURE__ */ React.createElement("div", { className: "stat-incidents" }, ST_INCIDENTS.map((inc, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "stat-inc" }, /* @__PURE__ */ React.createElement("span", { className: "stat-inc-t mono dim2" }, inc.t), /* @__PURE__ */ React.createElement("span", { className: `stat-pill stat-pill--${inc.tone}` }, inc.sev.toUpperCase()), /* @__PURE__ */ React.createElement("span", { className: "stat-inc-body" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, inc.node), " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, inc.msg))))))), /* @__PURE__ */ React.createElement("div", { className: "pf-note mono dim2" }, "Observability for the data layer \u2014 ", /* @__PURE__ */ React.createElement("b", null, "EODHD"), " (history \xB7 fundamentals \xB7 news \xB7 calendar) and ", /* @__PURE__ */ React.createElement("b", null, "Schwab"), " (real-time quotes \xB7 option chains \xB7 Greeks) flow through ", /* @__PURE__ */ React.createElement("b", null, "ingest workers"), " into ", /* @__PURE__ */ React.createElement("b", null, "Supabase"), " and out to the terminal. Metrics are simulated in this prototype; wire to your real status endpoints / Supabase logs & the Schwab + EODHD quota APIs to make it live.")));
+  // REAL: data_health counts + system_status conditions + bundle freshness.
+  const dh = (typeof BV !== "undefined" && BV.dataHealth) || {};
+  const ST_FEEDS = useStm(() => stFeedsReal(), []);
+  const conditions = useStm(() => stConditionsReal(), []);
+  const dhFresh = (typeof BV !== "undefined" && BV.freshness) ? BV.freshness(dh.timestamp || null) : { real: false };
+  const failN = dh.fail_count || 0, warnN = dh.warn_count || 0, okN = dh.ok_count || 0, totN = dh.total_checks || (okN + warnN + failN);
+  const cbActive = !!(BV && BV.systemStatus && BV.systemStatus.circuit_breaker && BV.systemStatus.circuit_breaker.active);
+  const fcActive = !!(BV && BV.systemStatus && BV.systemStatus.forced_cash && BV.systemStatus.forced_cash.active);
+  const overall = (failN > 0 || cbActive || fcActive) ? "down" : warnN > 0 ? "degraded" : "ok";
+  const upPct = totN ? (okN / totN * 100) : 0;
+  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--cy stat-srf" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "SYSTEM STATUS \xB7 OBSERVABILITY"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "System Status"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "data pipeline health \xB7 EODHD \u2192 Schwab \u2192 ingest \u2192 Supabase \u2192 app \xB7 throughput \xB7 latency \xB7 quotas \xB7 incidents")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement("span", { className: `stat-overall stat-overall--${ST_STATE[overall].c}` }, /* @__PURE__ */ React.createElement("span", { className: "stat-overall-dot" }), " ", overall === "ok" ? "ALL CHECKS PASSING" : overall === "degraded" ? ("DEGRADED \xB7 " + warnN + " warn") : (cbActive ? "CIRCUIT BREAKER ACTIVE" : fcActive ? "FORCED CASH ACTIVE" : ("FAIL \xB7 " + failN + " check(s)"))), /* @__PURE__ */ React.createElement(FreshnessPill, dhFresh.real ? { real: true, age: dhFresh.age } : { state: "empty" }))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs stat-viewtabs" }, [["pipeline", "Pipeline & Feeds"], ["supabase", "Supabase \xB7 Data"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${view === id ? "is-on" : ""}`, onClick: () => setView(id) }, l))), view === "supabase" ? /* @__PURE__ */ React.createElement(SurfaceSupabase, { embedded: true }) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "stat-kpis" }, /* @__PURE__ */ React.createElement(StatKpi, { k: "Checks passing", v: `${okN} / ${totN}`, tone: failN ? "rd" : warnN ? "amb" : "gn", s: "data_health" }), /* @__PURE__ */ React.createElement(StatKpi, { k: "Coverage", v: totN ? `${upPct.toFixed(0)}%` : "\u2014", tone: upPct >= 90 ? "gn" : upPct >= 70 ? "amb" : "rd", s: "checks OK" }), /* @__PURE__ */ React.createElement(StatKpi, { k: "Warnings", v: `${warnN}`, tone: warnN ? "amb" : "gn", s: "data_health" }), /* @__PURE__ */ React.createElement(StatKpi, { k: "Failures", v: `${failN}`, tone: failN ? "rd" : "gn", s: "data_health" }), /* @__PURE__ */ React.createElement(StatKpi, { k: "Circuit breaker", v: cbActive ? "TRIPPED" : "OK", tone: cbActive ? "rd" : "gn", s: cbActive ? "no new buys" : "normal" }), /* @__PURE__ */ React.createElement(StatKpi, { k: "Forced cash", v: fcActive ? "ON" : "OFF", tone: fcActive ? "rd" : "gn", s: fcActive ? "flat" : "deployed" })), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "DATA PIPELINE ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 source \u2192 ingest \u2192 store \u2192 app \xB7 click a node for detail")), /* @__PURE__ */ React.createElement("div", { className: "stat-flow" }, ST_NODES.map((n, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: n.id }, /* @__PURE__ */ React.createElement(PipelineNode, { n, tick }), i < ST_NODES.length - 1 && /* @__PURE__ */ React.createElement("div", { className: `stat-arrow stat-arrow--${ST_NODES[i + 1].state === "down" ? "rd" : n.state !== "ok" || ST_NODES[i + 1].state !== "ok" ? "amb" : "gn"}` }, /* @__PURE__ */ React.createElement("span", { className: "stat-arrow-flow" }), /* @__PURE__ */ React.createElement("span", { className: "stat-arrow-head" }, "\u2192")))))), /* @__PURE__ */ React.createElement("div", { className: "stat-2col" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "FEED HEALTH ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 freshness \xB7 coverage")), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl stat-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Source"), /* @__PURE__ */ React.createElement("th", null, "Feed"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Fresh"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Rows"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Coverage"))), /* @__PURE__ */ React.createElement("tbody", null, ST_FEEDS.length === 0 ? /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 6, className: "dim2", style: { textAlign: "center", padding: 22 } }, "No data-health checks available — run a scan to populate BV.dataHealth.")) : ST_FEEDS.map((f, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, f.src), /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, f.feed)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `stat-pill stat-pill--${f.tone}` }, f.state === "ok" ? "OK" : f.state === "warn" || f.state === "lag" ? "WARN" : "FAIL")), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim2" }, dhFresh.real ? dhFresh.age : "—"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, f.rows), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${f.tone === "gn" ? "up" : "warn"}` }, f.cov)))))), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "API QUOTAS ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 reference \xB7 not wired to live quota APIs")), /* @__PURE__ */ React.createElement("div", { className: "stat-quotas" }, [{ k: "EODHD calls", v: 0.61, n: "61,200 / 100k", tone: "gn" }, { k: "Schwab calls", v: 0.44, n: "init", tone: "gn" }, { k: "Supabase rows", v: 0.78, n: "780k / 1M", tone: "amb" }, { k: "Supabase storage", v: 0.52, n: "4.2 / 8 GB", tone: "gn" }, { k: "Realtime conns", v: 0.33, n: "66 / 200", tone: "gn" }].map((q, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "stat-quota" }, /* @__PURE__ */ React.createElement("div", { className: "stat-quota-top" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, q.k), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, q.n)), /* @__PURE__ */ React.createElement("div", { className: "stat-quota-track" }, /* @__PURE__ */ React.createElement("div", { className: `stat-quota-fill kpi-tone-bg--${q.tone}`, style: { width: `${q.v * 100}%` } }))))))), /* @__PURE__ */ React.createElement("div", { className: "stat-2col" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "SCHEDULED JOBS ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 configured launchd cadence \xB7 reference")), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl stat-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Job"), /* @__PURE__ */ React.createElement("th", null, "Schedule"), /* @__PURE__ */ React.createElement("th", null, "Last run"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Next"))), /* @__PURE__ */ React.createElement("tbody", null, ST_JOBS.map((j, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("span", { className: `stat-dot stat-dot--${j.tone}` }), /* @__PURE__ */ React.createElement("b", null, j.job)), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, j.cron), /* @__PURE__ */ React.createElement("td", { className: `mono ${j.tone === "gn" ? "up" : "warn"}` }, j.last), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim2" }, j.next)))))), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "TRADING SYSTEM STATE ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 live gates \xB7 system_status")), /* @__PURE__ */ React.createElement("div", { className: "stat-incidents" }, conditions.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "dim2 mono", style: { padding: "10px 0" } }, "No system_status payload — run a scan to populate BV.systemStatus.") : conditions.map((inc, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "stat-inc" }, /* @__PURE__ */ React.createElement("span", { className: `stat-pill stat-pill--${inc.tone}` }, inc.sev.toUpperCase()), /* @__PURE__ */ React.createElement("span", { className: "stat-inc-body" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, inc.node), " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, inc.msg))))))), /* @__PURE__ */ React.createElement("div", { className: "pf-note mono dim2" }, "Observability for the data layer \u2014 ", /* @__PURE__ */ React.createElement("b", null, "EODHD"), " (history \xB7 fundamentals \xB7 news \xB7 calendar) and ", /* @__PURE__ */ React.createElement("b", null, "Schwab"), " (real-time quotes \xB7 option chains \xB7 Greeks) flow through ", /* @__PURE__ */ React.createElement("b", null, "ingest workers"), " into the store and out to the terminal. ", /* @__PURE__ */ React.createElement("b", null, "Feed Health"), " + ", /* @__PURE__ */ React.createElement("b", null, "Trading System State"), " + KPIs are LIVE from ", /* @__PURE__ */ React.createElement("b", null, "BV.dataHealth"), " and ", /* @__PURE__ */ React.createElement("b", null, "BV.systemStatus"), " (this scan). Pipeline topology, API quotas and the job-schedule table are reference only — not wired to live infra metrics.")));
 }
 function StatKpi({ k, v, tone, s }) {
   return /* @__PURE__ */ React.createElement("div", { className: `wsx-kpi wsx-kpi--${tone}` }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, k), /* @__PURE__ */ React.createElement("div", { className: `wsx-kpi-v mono kpi-tone--${tone}` }, v), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, s));
@@ -28976,14 +29094,7 @@ const WS_CFG = {
     sub: "leveraged & inverse \xB7 path-dependency warnings",
     src: "EODHD /eod \xB7 leverage factor",
     accent: "rd",
-    filter: (u) => [...u].sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg)).slice(0, 14),
-    kpis: () => [
-      ["INSTRUMENTS", 24, "rd", "3\xD7/2\xD7"],
-      ["DECAY ALERT", 6, "amb", "hold > 5d"],
-      ["BEST 1D", "+9.4%", "gn", "TQQQ"],
-      ["WORST 1D", "\u22128.1%", "rd", "SQQQ"]
-    ],
-    cols: ["sym", "name", "chg", "rvol", "note"]
+    cols: ["sym", "price", "score", "verdict", "rr", "rs", "setup", "note"]
   },
   "crypto": {
     title: "Crypto",
@@ -29017,17 +29128,28 @@ const WS_CFG = {
   },
   "macro": {
     title: "Macro \xB7 Events",
-    eyebrow: "REGIME \xB7 CALENDAR \xB7 CROSS-ASSET",
-    sub: "FOMC \xB7 CPI \xB7 PCE \xB7 NFP \xB7 yields \xB7 surprise reactions",
-    src: "EODHD economic calendar",
+    eyebrow: "REGIME \xB7 CROSS-ASSET \xB7 BREADTH",
+    sub: "real cross-asset signals (HYG/LQD/DXY/GLD) \xB7 credit \xB7 put/call \xB7 breadth",
+    src: "macro_signals + market_breadth \xB7 data.critical.json",
     accent: "cy",
     macroRows: true,
-    kpis: () => [
-      ["REGIME", "RISK ON", "gn", "bull \xB7 low-vol"],
-      ["NEXT", "FOMC 14:00", "amb", "today"],
-      ["VIX", "16.3", "gn", "\u22121.8%"],
-      ["10Y", "4.32%", "gn", "\u221214bp 5d"]
-    ],
+    kpis: () => {
+      const BV = window.__BV;
+      const c = (BV && BV.critical) || null;
+      const ms = (c && c.macro_signals) || null;
+      const br = (c && c.market_breadth) || null;
+      const rg = (c && c.regime) || null;
+      const regLbl = rg ? (rg.regime4 || rg.regime || "\u2014").replace(/_/g, " ").toUpperCase() : "\u2014";
+      const risk = ms ? (ms.risk_signal || "neutral") : "\u2014";
+      const vix = (rg && rg.vix && rg.vix.vix_current != null) ? rg.vix.vix_current : null;
+      const dxy = (ms && ms.dxy) ? ms.dxy : null;
+      return [
+        ["REGIME", regLbl, regLbl.includes("TRENDING") ? "gn" : regLbl.includes("PANIC") || regLbl.includes("OFF") ? "rd" : "amb", rg && rg.max_size_pct != null ? "max size " + rg.max_size_pct + "%" : "4-regime"],
+        ["RISK SIGNAL", risk.toUpperCase().replace(/_/g, " "), risk === "risk_on" ? "gn" : risk === "risk_off" ? "rd" : "amb", ms && ms.credit ? "credit " + ms.credit.state : "cross-asset"],
+        ["VIX", vix != null ? vix.toFixed(1) : "\u2014", vix == null ? "dim" : vix < 18 ? "gn" : vix > 25 ? "rd" : "amb", rg && rg.vix ? (rg.vix.term_structure_state || rg.vix.vol_state || "") : ""],
+        ["BREADTH > 50d", br && br.pct_above_50d != null ? br.pct_above_50d.toFixed(0) + "%" : "\u2014", br && (br.pct_above_50d || 0) >= 60 ? "gn" : br && (br.pct_above_50d || 0) >= 40 ? "amb" : "rd", br ? (br.label_50 || "") : ""]
+      ];
+    },
     cols: ["when", "event", "impact", "forecast", "prior", "reaction"]
   },
   "events": {
@@ -29107,17 +29229,27 @@ const WS_CFG = {
   },
   "pairs": {
     title: "Pairs Trading",
-    eyebrow: "COINTEGRATION \xB7 Z-SCORE",
-    sub: "mean-reverting pairs \xB7 spread z \xB7 half-life",
-    src: "stat-arb engine",
+    eyebrow: "SECTOR STAT-ARB \xB7 RS SPREAD",
+    sub: "real long/short sector-ETF pairs \xB7 21d/63d spread \xB7 correlation",
+    src: "sector_pairs \xB7 data.critical.json",
     accent: "info",
     pairRows: true,
-    kpis: () => [
-      ["PAIRS", 12, "info", "cointegrated"],
-      ["SIGNAL", 3, "gn", "z > 2"],
-      ["AVG HALF-LIFE", "6.2d", "ink", "reversion"],
-      ["BEST SHARPE", "2.1", "gn", "KO/PEP"]
-    ],
+    kpis: () => {
+      const BV = window.__BV;
+      const sp = (BV && BV.critical && BV.critical.sector_pairs) || null;
+      const pairs = (sp && Array.isArray(sp.pairs)) ? sp.pairs : [];
+      if (!pairs.length) return [["PAIRS", "—", "info", "none"], ["SIGNAL", "—", "dim", ""], ["AVG ρ", "—", "ink", ""], ["WIDEST", "—", "gn", ""]];
+      const longs = pairs.filter((p) => p.spread_21d != null && p.spread_21d > 0).length;
+      const corrs = pairs.map((p) => p.correlation).filter((x) => x != null);
+      const avgCorr = corrs.length ? corrs.reduce((a, b) => a + b, 0) / corrs.length : null;
+      const widest = pairs.reduce((m, p) => (Math.abs(p.spread_21d || 0) > Math.abs(m.spread_21d || 0) ? p : m), pairs[0]);
+      return [
+        ["PAIRS", sp.n_pairs != null ? sp.n_pairs : pairs.length, "info", "sector long/short"],
+        ["LONG-SPREAD", longs, longs ? "gn" : "dim", "21d RS > 0"],
+        ["AVG ρ", avgCorr != null ? avgCorr.toFixed(2) : "—", "ink", "correlation"],
+        ["WIDEST", widest ? `${widest.long}/${widest.short}` : "—", "gn", widest && widest.spread_21d != null ? `${widest.spread_21d >= 0 ? "+" : ""}${widest.spread_21d.toFixed(1)}% 21d` : ""]
+      ];
+    },
     cols: ["pair", "z", "halflife", "corr", "signal"]
   }
 };
@@ -29137,6 +29269,8 @@ function WorkspaceSurface({ id, onTicker }) {
   const cfg = WS_CFG[id];
   const [sort, setSort] = useWS({ col: "score", dir: -1 });
   const BV = window.__BV;
+  // ── REAL DATA: options-flow routes to the live UOA cockpit (SurfaceOptionsFlow → OF_PRINTS = BV.optionsFlow) ──
+  if (id === "options-flow") return /* @__PURE__ */ React.createElement(SurfaceOptionsFlow, { onTicker });
   // elite-picks mode toggle (Swing / Position / Invest) — only used by the elite surface
   const [eliteMode, setEliteMode] = useWS("Swing");
   // ── REAL DATA: elite + buy route off BV.eliteRowsFor / BV.scanRows ──
@@ -29164,6 +29298,29 @@ function WorkspaceSurface({ id, onTicker }) {
       const k = (BV && BV.killed) || [];
       return k.map((x) => BV.eliteRow ? (BV.eliteRow(x) || x) : x).slice(0, 40);
     }
+    if (id === "leveraged") {
+      // ── REAL DATA: leveraged & inverse ETF picks (BV.critical.leveraged.picks) ──
+      const lv = (BV && BV.critical && BV.critical.leveraged) || null;
+      const picks = (lv && Array.isArray(lv.picks)) ? lv.picks : [];
+      return picks.map((p) => {
+        const tp = p.trade_plan || {};
+        return {
+          sym: p.ticker,
+          name: p.sector && p.sector !== "Unknown" ? p.sector : "Leveraged / Inverse ETF",
+          sector: p.sector || "—",
+          price: p.price != null ? p.price : (tp.price != null ? tp.price : 0),
+          score: p.score != null ? p.score : 0,
+          verdict: p.verdict || "WAIT",
+          setup: p.setup || tp.setup_type || "—",
+          rs: p.rs_rank != null ? p.rs_rank : null,
+          rr: tp.rr_ratio != null ? tp.rr_ratio : null,
+          chg: 0,
+          beta: tp.beta != null ? tp.beta : null,
+          note: tp.beta_adj_note || (tp.risk_flags && tp.risk_flags.length ? tp.risk_flags[0].detail : "decay-aware · path-dependent"),
+          _tp: tp
+        };
+      }).sort((a, b) => b.score - a.score);
+    }
     return (cfg && cfg.filter ? cfg.filter(WS_UNIV) : WS_UNIV).slice(0, 40);
   }, [id, eliteMode]);
   if (!cfg) return /* @__PURE__ */ React.createElement(WorkspaceStub, { id });
@@ -29173,7 +29330,19 @@ function WorkspaceSurface({ id, onTicker }) {
   const liveElite = (id === "elite" && BV && BV.elitePicks);
   const liveBuy = (id === "buy" && BV && (BV.elitePicks || BV.ready));
   const liveKilled = (id === "killed" && BV);
-  if (liveElite) {
+  const lvData = (BV && BV.critical && BV.critical.leveraged) || null;
+  const liveLeveraged = (id === "leveraged" && lvData);
+  if (liveLeveraged) {
+    const buys = rows.filter((r) => r.verdict === "BUY").length;
+    const maxBeta = rows.reduce((m, r) => (r.beta != null && r.beta > m ? r.beta : m), 0);
+    const topRr = avg(rows, (r) => r.rr);
+    kpis = [
+      ["IN SCAN", lvData.in_scan != null ? lvData.in_scan : rows.length, "rd", "leveraged picks"],
+      ["WATCHLIST", lvData.total != null ? lvData.total : (lvData.watchlist ? lvData.watchlist.length : "—"), "amb", "3×/2×/inverse"],
+      ["BUY", buys, buys ? "gn" : "dim", "verdict=BUY"],
+      ["MAX β", maxBeta ? maxBeta.toFixed(1) + "×" : "—", "rd", "decay risk"]
+    ];
+  } else if (liveElite) {
     const a = avg(rows, (r) => r.score), rr = avg(rows, (r) => r.rr), es = avg(rows, (r) => r.eliteScore);
     const buys = rows.filter((r) => r.verdict === "BUY").length;
     kpis = [
@@ -29206,10 +29375,18 @@ function WorkspaceSurface({ id, onTicker }) {
   const modeToggle = liveElite ? /* @__PURE__ */ React.createElement("div", { className: "seg q-period", style: { marginLeft: 10 } }, BV.eliteModes().map((m) => /* @__PURE__ */ React.createElement("button", { key: m, className: `seg-btn ${eliteMode === m ? "is-on" : ""}`, onClick: () => setEliteMode(m) }, m))) : null;
   // honest empty state for killed when the real list is empty
   const killedEmpty = (liveKilled && !rows.length);
+  const leveragedEmpty = (liveLeveraged && !rows.length);
   const body = killedEmpty
     ? /* @__PURE__ */ React.createElement("div", { className: "wsx-stub-banner" }, /* @__PURE__ */ React.createElement("span", null, "✓"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "No excluded names today."), " The rule engine flagged ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, (BV.killedCount || 0).toLocaleString()), " names below gate this scan, but the per-name exclusion feed is empty — nothing to display. (Real ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "killed[]"), " list, count from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "killed_count"), ".)"))
+    : leveragedEmpty
+    ? /* @__PURE__ */ React.createElement("div", { className: "wsx-stub-banner" }, /* @__PURE__ */ React.createElement("span", null, "⚠"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "No leveraged-ETF picks this scan."), " The ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "leveraged.picks[]"), " feed is empty — no 3×/2× or inverse instrument cleared the scan today."))
     : /* @__PURE__ */ React.createElement(WSTable, { cfg, rows, sort, setSort, onTicker });
-  return /* @__PURE__ */ React.createElement("div", { className: `surface wsx wsx--${cfg.accent}` }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, cfg.eyebrow), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, cfg.title, modeToggle), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, cfg.sub)), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "18s" }), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "src \xB7 ", cfg.src))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, kpis.map((k, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `wsx-kpi wsx-kpi--${k[2]}` }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, k[0]), /* @__PURE__ */ React.createElement("div", { className: `wsx-kpi-v mono kpi-tone--${k[2]}` }, k[1]), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, k[3])))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, body));
+  // Honest freshness: only WS surfaces actually bound to live BV data show LIVE.
+  // Everything else (factor-exposure, leaders, score-calibration, …) is static
+  // reference content → grey STATIC pill, not a fabricated "LIVE · 18s".
+  const WS_REAL_IDS = { "options-flow": 1, "elite": 1, "buy": 1, "killed": 1, "leveraged": 1 };
+  const wsFresh = WS_REAL_IDS[id] && BV && BV.freshness ? BV.freshness(BV.bundleTimestamp) : { real: false };
+  return /* @__PURE__ */ React.createElement("div", { className: `surface wsx wsx--${cfg.accent}` }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, cfg.eyebrow), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, cfg.title, modeToggle), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, cfg.sub)), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement(FreshnessPill, wsFresh.real ? { real: true, age: wsFresh.age } : { real: false }), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "src \xB7 ", cfg.src))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, kpis.map((k, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `wsx-kpi wsx-kpi--${k[2]}` }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, k[0]), /* @__PURE__ */ React.createElement("div", { className: `wsx-kpi-v mono kpi-tone--${k[2]}` }, k[1]), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, k[3])))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, body));
 }
 function WSTable({ cfg, rows, sort, setSort, onTicker }) {
   if (cfg.optionRows) return /* @__PURE__ */ React.createElement(WSOptions, { onTicker });
@@ -29239,6 +29416,7 @@ function WSTable({ cfg, rows, sort, setSort, onTicker }) {
     er: "ER d",
     setup: "Setup",
     mom: "Mom",
+    note: "Note",
     why: "Why killed"
   };
   const sorted = useWSm(() => {
@@ -29284,6 +29462,8 @@ function WSTable({ cfg, rows, sort, setSort, onTicker }) {
         return /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, r.setup);
       case "mom":
         return /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${r.mom >= 0 ? "up" : "dn"}` }, r.mom >= 0 ? "+" : "", r.mom.toFixed(1));
+      case "note":
+        return /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, r.note || "—");
       case "why":
         return /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, r.reject_reason || (r._raw && r._raw.reject_reason) || (r._pick && r._pick.reject_reason) || "—");
       default:
@@ -29376,14 +29556,49 @@ function WSCrypto() {
   return /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Sym"), /* @__PURE__ */ React.createElement("th", null, "Name"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Price"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "24h %"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Vol"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Funding"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r[0])), /* @__PURE__ */ React.createElement("td", { className: "dim" }, r[1]), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r[2]), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${r[3] >= 0 ? "up" : "dn"}` }, r[3] >= 0 ? "+" : "", r[3], "%"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, r[4]), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${r[5].startsWith("+") ? "up" : "dn"}` }, r[5])))));
 }
 function WSMacro() {
-  const rows = [
-    ["TODAY 14:00", "FOMC Minutes", "HIGH", "\u2014", "\u2014", "watch"],
-    ["May 30 08:30", "PCE Core MoM", "HIGH", "+0.3%", "+0.3%", "\xB1"],
-    ["Jun 03", "ISM Manufacturing", "MED", "49.5", "49.2", "\xB1"],
-    ["Jun 05", "ECB Rate Decision", "HIGH", "hold", "hold", "\u2014"],
-    ["Jun 07 08:30", "NFP Payrolls", "HIGH", "185k", "175k", "\xB1"]
-  ];
-  return /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "When"), /* @__PURE__ */ React.createElement("th", null, "Event"), /* @__PURE__ */ React.createElement("th", null, "Impact"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Forecast"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Prior"), /* @__PURE__ */ React.createElement("th", null, "Reaction"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, r[0]), /* @__PURE__ */ React.createElement("td", { className: "mono" }, r[1]), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: r[2] === "HIGH" ? "amb" : "ink", small: true }, r[2])), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r[3]), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, r[4]), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, r[5])))));
+  const BV = window.__BV;
+  // \u2500\u2500 REAL DATA: macro_signals (cross-asset) + market_breadth + regime ; economic_events empty \u2192 honest empty calendar \u2500\u2500
+  const c = (BV && BV.critical) || null;
+  const ms = (c && c.macro_signals) || null;
+  const br = (c && c.market_breadth) || null;
+  const rg = (c && c.regime) || null;
+  const events = (c && Array.isArray(c.economic_events)) ? c.economic_events : [];
+  if (!ms && !br && !rg) {
+    return /* @__PURE__ */ React.createElement("div", { className: "wsx-stub-banner" }, /* @__PURE__ */ React.createElement("span", null, "\u26a0"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "No macro data this scan."), " ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "macro_signals / market_breadth"), " are empty \u2014 run a scan to populate cross-asset signals."));
+  }
+  const pct = (v, suf) => v == null ? "\u2014" : (v >= 0 ? "+" : "") + Number(v).toFixed(2) + (suf || "");
+  const trendTone = (t) => t === "rising" ? "up" : t === "falling" ? "dn" : "dim";
+  // cross-asset rows from real macro_signals
+  const ca = [];
+  if (ms) {
+    [["HYG", ms.hyg, "high-yield credit"], ["LQD", ms.lqd, "IG credit"], ["DXY", ms.dxy, "US dollar"], ["GLD", ms.gld, "gold"]].forEach(([k, o, lbl]) => {
+      if (o) ca.push({ k, lbl, price: o.price, chg5d: o.chg5d, chg20d: o.chg20d, trend: o.trend });
+    });
+  }
+  return /* @__PURE__ */ React.createElement(React.Fragment, null,
+    /* regime + risk readout from real fields */
+    rg ? /* @__PURE__ */ React.createElement("div", { className: "lab-card", style: { marginBottom: 12 } },
+      /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "REGIME \xB7 RISK READOUT \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "real regime + breadth")),
+      /* @__PURE__ */ React.createElement("div", { className: "of-gamma" },
+        /* @__PURE__ */ React.createElement("div", { className: "of-gamma-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "4-Regime"), /* @__PURE__ */ React.createElement("span", { className: "mono amb" }, (rg.regime4 || rg.regime || "\u2014").replace(/_/g, " ")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "max size ", rg.max_size_pct != null ? rg.max_size_pct + "%" : "\u2014")),
+        ms ? /* @__PURE__ */ React.createElement("div", { className: "of-gamma-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "Risk signal"), /* @__PURE__ */ React.createElement("span", { className: `mono ${ms.risk_signal === "risk_on" ? "up" : ms.risk_signal === "risk_off" ? "dn" : "amb"}` }, (ms.risk_signal || "\u2014").replace(/_/g, " ")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "credit ", ms.credit ? ms.credit.state : "\u2014")) : null,
+        (ms && ms.put_call) ? /* @__PURE__ */ React.createElement("div", { className: "of-gamma-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "Equity P/C"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, ms.put_call.equity_pc != null ? ms.put_call.equity_pc.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: `mono ${ms.put_call.signal === "greed" ? "dn" : ms.put_call.signal === "fear" ? "up" : "dim2"}` }, ms.put_call.signal || "")) : null,
+        (rg.vix && rg.vix.vix_current != null) ? /* @__PURE__ */ React.createElement("div", { className: "of-gamma-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "VIX"), /* @__PURE__ */ React.createElement("span", { className: `mono ${rg.vix.vix_current < 18 ? "up" : rg.vix.vix_current > 25 ? "dn" : "amb"}` }, rg.vix.vix_current.toFixed(1)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, rg.vix.term_structure_state || rg.vix.vol_state || "")) : null,
+        (ms && ms.yield_curve && Object.keys(ms.yield_curve).length) ? /* @__PURE__ */ React.createElement("div", { className: "of-gamma-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "Yield curve"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, JSON.stringify(ms.yield_curve)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "")) : null)) : null,
+    /* cross-asset table from real macro_signals */
+    ca.length ? /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono", style: { marginBottom: 6 } }, "CROSS-ASSET \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "real EODHD prices \xB7 5d / 20d change")) : null,
+    ca.length ? /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Asset"), /* @__PURE__ */ React.createElement("th", null, "Proxy"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Price"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "5d %"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "20d %"), /* @__PURE__ */ React.createElement("th", null, "Trend"))),
+      /* @__PURE__ */ React.createElement("tbody", null, ca.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r.k)), /* @__PURE__ */ React.createElement("td", { className: "dim2" }, r.lbl), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r.price != null ? "$" + r.price.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${(r.chg5d || 0) >= 0 ? "up" : "dn"}` }, pct(r.chg5d, "%")), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${(r.chg20d || 0) >= 0 ? "up" : "dn"}` }, pct(r.chg20d, "%")), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: trendTone(r.trend), small: true }, r.trend || "\u2014")))))) : null,
+    /* breadth from real market_breadth */
+    br ? /* @__PURE__ */ React.createElement("div", { className: "lab-card", style: { marginTop: 12 } },
+      /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "MARKET BREADTH \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, br.total, " names \xB7 % above MA")),
+      /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Metric"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Above"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Pct"), /* @__PURE__ */ React.createElement("th", null, "Label"))),
+        /* @__PURE__ */ React.createElement("tbody", null,
+          [["% > 50d MA", br.above_50d, br.pct_above_50d, br.label_50], ["% > 100d MA", br.above_100d, br.pct_above_100d, br.label_100], ["% > 200d MA", br.above_200d, br.pct_above_200d, br.label_200]].map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, r[0]), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, r[1] != null ? r[1] : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${(r[2] || 0) >= 60 ? "up" : (r[2] || 0) >= 40 ? "amb" : "dn"}` }, r[2] != null ? r[2].toFixed(1) + "%" : "\u2014"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: (r[2] || 0) >= 60 ? "gn" : (r[2] || 0) >= 40 ? "amb" : "rd", small: true }, r[3] || "\u2014")))),
+          (br.new_highs != null) ? /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "mono" }, "New highs / lows"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular up" }, br.new_highs), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dn" }, br.new_lows), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: (br.hl_ratio || 0) >= 1 ? "gn" : "rd", small: true }, "H/L ", br.hl_ratio != null ? br.hl_ratio.toFixed(2) : "\u2014"))) : null)) ) : null,
+    /* economic calendar \u2014 empty today \u2192 honest empty-state (no faked CPI/FOMC) */
+    /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono", style: { marginTop: 12, marginBottom: 6 } }, "ECONOMIC CALENDAR \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "real ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "economic_events"))),
+    events.length ? /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "When"), /* @__PURE__ */ React.createElement("th", null, "Event"), /* @__PURE__ */ React.createElement("th", null, "Impact"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Forecast"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Prior"))), /* @__PURE__ */ React.createElement("tbody", null, events.map((e, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, e.date || e.when || e.d || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono" }, e.event || e.title || e.name || "\u2014"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: (e.impact === "HIGH" || e.importance === 3) ? "amb" : "ink", small: true }, e.impact || e.importance || "\u2014")), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, e.forecast != null ? e.forecast : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, e.prior != null ? e.prior : "\u2014"))))) : /* @__PURE__ */ React.createElement("div", { className: "wsx-stub-banner" }, /* @__PURE__ */ React.createElement("span", null, "\u25cb"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "No economic releases on the feed today."), " The ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "economic_events"), " calendar is empty for this scan \u2014 nothing scheduled or the provider returned no high-impact prints. (Not faked.)")));
 }
 function WSEvents({ onTicker }) {
   const rows = [
@@ -29456,13 +29671,29 @@ function WSLeaders() {
   return /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { className: "r" }, "Rank"), /* @__PURE__ */ React.createElement("th", null, "Handle"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "YTD"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "WR"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Sharpe"), /* @__PURE__ */ React.createElement("th", null, "Verified"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i, className: r[1].includes("you") ? "is-current" : "" }, /* @__PURE__ */ React.createElement("td", { className: "r mono" }, /* @__PURE__ */ React.createElement("b", null, "#", r[0])), /* @__PURE__ */ React.createElement("td", { className: "mono" }, r[1]), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular up" }, r[2]), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r[3]), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r[4]), /* @__PURE__ */ React.createElement("td", { className: "mono" }, r[5] === "\u2713" ? /* @__PURE__ */ React.createElement("span", { className: "up" }, "\u2713 verified") : /* @__PURE__ */ React.createElement("span", { className: "dim" }, "\u2014"))))));
 }
 function WSPairs() {
-  const rows = [
-    ["KO / PEP", "+2.3", "6.2d", "0.91", "SHORT spread"],
-    ["XLE / XLB", "\u22122.1", "8.4d", "0.84", "LONG spread"],
-    ["NVRH / BIVO", "+1.4", "5.1d", "0.78", "watch"],
-    ["ARCM / TURM", "\u22120.8", "7.0d", "0.88", "neutral"]
-  ];
-  return /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Pair"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Z-score"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Half-life"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Corr"), /* @__PURE__ */ React.createElement("th", null, "Signal"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r[0])), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${Math.abs(parseFloat(r[1])) >= 2 ? "warn" : "dim"}` }, r[1]), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, r[2]), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r[3]), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: r[4].includes("SHORT") ? "rd" : r[4].includes("LONG") ? "gn" : "ink", small: true }, r[4]))))));
+  const BV = window.__BV;
+  // \u2500\u2500 REAL DATA: sector-pair stat-arb spreads (BV.critical.sector_pairs.pairs) \u2500\u2500
+  const sp = (BV && BV.critical && BV.critical.sector_pairs) || null;
+  const pairs = (sp && Array.isArray(sp.pairs)) ? sp.pairs : [];
+  if (!pairs.length) {
+    return /* @__PURE__ */ React.createElement("div", { className: "wsx-stub-banner" }, /* @__PURE__ */ React.createElement("span", null, "\u26a0"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "No sector pairs this scan."), " The ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "sector_pairs.pairs[]"), " feed is empty \u2014 no cointegrated long/short spread computed today."));
+  }
+  const fnum = (v, suf) => v == null ? "\u2014" : (v >= 0 ? "+" : "") + Number(v).toFixed(1) + (suf || "");
+  return /* @__PURE__ */ React.createElement(React.Fragment, null,
+    /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Pair (long / short)"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Spread 21d"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Spread 63d"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Corr \u03c1"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Long RS"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Short RS"), /* @__PURE__ */ React.createElement("th", null, "Signal"))),
+      /* @__PURE__ */ React.createElement("tbody", null, pairs.map((p, i) => {
+        const sig = (p.spread_21d != null && p.spread_21d > 0) ? "LONG spread" : (p.spread_21d != null && p.spread_21d < 0) ? "SHORT spread" : "neutral";
+        return /* @__PURE__ */ React.createElement("tr", { key: i },
+          /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, p.long, " / ", p.short), /* @__PURE__ */ React.createElement("div", { className: "dim2", style: { fontSize: "9px" } }, p.long_name, " / ", p.short_name)),
+          /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${(p.spread_21d || 0) >= 0 ? "up" : "dn"}` }, fnum(p.spread_21d, "%")),
+          /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${(p.spread_63d || 0) >= 0 ? "up" : "dn"}` }, fnum(p.spread_63d, "%")),
+          /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, p.correlation != null ? Number(p.correlation).toFixed(2) : "\u2014"),
+          /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${(p.long_rs_21d || 0) >= 0 ? "up" : "dn"}` }, fnum(p.long_rs_21d, "%")),
+          /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${(p.short_rs_21d || 0) >= 0 ? "up" : "dn"}` }, fnum(p.short_rs_21d, "%")),
+          /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: sig.includes("SHORT") ? "rd" : sig.includes("LONG") ? "gn" : "ink", small: true }, sig)));
+      }))),
+    /* @__PURE__ */ React.createElement("div", { className: "pf-note mono dim2", style: { marginTop: "10px" } }, pairs.map((p, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { marginBottom: "4px" } }, /* @__PURE__ */ React.createElement("b", null, p.long, "/", p.short, ":"), " ", p.narrative))),
+    sp.computed_at ? /* @__PURE__ */ React.createElement("div", { className: "pf-note mono dim2" }, "Real sector-pair stat-arb \xB7 ", sp.n_pairs != null ? sp.n_pairs : pairs.length, " pairs \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "sector_pairs"), " \xB7 computed ", String(sp.computed_at).slice(0, 16)) : null);
 }
 function WorkspaceStub({ id }) {
   const label = WS_LABELS[id] || id;
