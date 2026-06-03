@@ -261,8 +261,14 @@
 
   // ── light per-row Time Anatomy lookup (for the scanner TIME column / HOLD badge) ──
   // Direct cell + 1-level collapse only (O(1)-ish) so it's cheap across ~1000 rows.
+  BV._tqCache = {};
   BV.timeQuick = function (sr) {
-    var TT = BV.timeTable; if (!TT || !TT.cells || !sr) return null;
+    var TT = BV.timeTable; if (!TT || !TT.cells || !sr) return null; // deferred → null until loaded
+    if (BV._tqCache[sr.sym] !== undefined) return BV._tqCache[sr.sym];
+    var _r = BV._timeQuickCompute(sr); BV._tqCache[sr.sym] = _r; return _r;
+  };
+  BV._timeQuickCompute = function (sr) {
+    var TT = BV.timeTable;
     var r = sr._raw || {};
     var entry = num(r.entry_lo, sr.price), stop = num(r.stop), t1 = num(r.t1);
     if (entry == null || stop == null || t1 == null || entry <= stop || t1 <= entry) return null;
@@ -360,12 +366,13 @@
     var ej = BOOT ? BOOT.earnings : syncGet("/v2/data_earnings.json");
     BV.earningsBeat = (ej && ej.earnings_beat_predictions) || null;
     BV.earningsWatch = (ej && ej.earnings_watchlist) || null;
-    // Time Anatomy survival table (calibrated offline from cached bars)
-    BV.timeTable = BOOT ? BOOT.time_table : (syncGet("/v2/bullveda/time_anatomy_table.json") || null);
-    // critical subset — real market context + setup stats + options flow
+    // Time Anatomy table + Track-Record ledger are DEFERRED (heavy) — loaded async
+    // after first paint via /api/bullveda-heavy, then bv:heavyready fires a re-render.
+    BV.timeTable = null;
+    BV.leaders = null;
+    // critical subset — real market context + setup stats + options flow (essential, stays sync)
     BV.critical = BOOT ? BOOT.critical : (syncGet("/v2/data.critical.json") || null);
     BV.optionsFlow = (BV.critical && BV.critical.options_flow_top30) || null; // ticker-level UOA (from critical)
-    BV.leaders = BOOT ? BOOT.data_leaders : null; // Track Record real ledger (signalledger-data.jsx reads this)
     // real per-setup track-record stats (Wilson) keyed by setup family
     BV.setupStatsBy = (function () {
       var sf = BV.critical && BV.critical.setup_family_stats;
@@ -405,4 +412,19 @@
   else console.info("[BullVeda] live universe loaded:", BV.universe.length, "rows · NAV", BV.navStr(),
     "· crypto", BV.crypto && BV.crypto.all_scored && BV.crypto.all_scored.length,
     "· earnings", BV.earningsBeat && BV.earningsBeat.length, "· optflow", BV.optionsFlow && BV.optionsFlow.length);
+
+  // ── deferred heavy feeds: load async after first paint, then notify for re-render ──
+  if (BV.ready && !MOCK) {
+    BV.get("/api/bullveda-heavy").then(function (h) {
+      if (h && h.time_table) BV.timeTable = h.time_table;
+      if (h && h.data_leaders) BV.leaders = h.data_leaders;
+      BV._tqCache = {}; // reset the timeQuick memo
+      // populate the scan rows' TIME fields so the scanner column + sort work after re-render
+      if (BV.timeTable) try {
+        BV.scanRows().forEach(function (r) { var q = BV.timeQuick(r); if (q) { r.taMedT1 = q.taMedT1; r.taStop = q.taStop; } });
+      } catch (e) {}
+      try { window.dispatchEvent(new CustomEvent("bv:heavyready")); } catch (e) {}
+      console.info("[BullVeda] heavy feeds ready — time table + ledger");
+    }).catch(function (e) { console.warn("[BullVeda] heavy feeds failed", e); });
+  }
 })();

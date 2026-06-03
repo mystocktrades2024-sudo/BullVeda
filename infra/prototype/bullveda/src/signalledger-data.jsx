@@ -15,39 +15,29 @@
   let HZ, HZ_BY, SOURCES, SOURCE_BY, SIGNALS, ret, totalCalls, REAL = false;
 
   // ── try the REAL forward-scored ledger (synchronous, like the boot loader) ──
-  let LDR = null;
-  try {
-    // Prefer the preloaded copy from the combined /api/bullveda-boot payload (one
-    // round-trip); fall back to a direct sync fetch only if it wasn't preloaded.
-    if (window.__BV && window.__BV.leaders) {
-      LDR = window.__BV.leaders;
-    } else {
-      const xhr = new XMLHttpRequest();
-      xhr.open("GET", "/v2/data_leaders.json", false);
-      xhr.withCredentials = true;
-      xhr.send(null);
-      if (xhr.status === 200) LDR = JSON.parse(xhr.responseText);
-    }
-  } catch (e) { LDR = null; }
-
-  if (LDR && Array.isArray(LDR.signals) && LDR.signals.length && Array.isArray(LDR.horizons)) {
-    // ── REAL path ──────────────────────────────────────────────────
+  // The real ledger (data_leaders) is DEFERRED — boot loads it async, so it's usually
+  // null at module-eval (→ synthetic) and the real path is applied later on bv:heavyready.
+  let LDR = (window.__BV && window.__BV.leaders) || null;
+  function _validLdr(L) { return L && Array.isArray(L.signals) && L.signals.length && Array.isArray(L.horizons); }
+  function _realRet(sig, hz) {
+    const v = (sig.ret || {})[hz.id];
+    if (v == null) return { edge: null, raw: null, mature: false };
+    const aligned = +(((sig.dir === "short") ? -v : v)).toFixed(2);
+    return { edge: aligned, raw: aligned, mature: true };
+  }
+  function applyReal(L) {
     REAL = true;
-    HZ = LDR.horizons.map((h, i) => ({ id: h.id, label: h.label, days: h.days, group: h.group, idx: h.idx != null ? h.idx : i }));
+    HZ = L.horizons.map((h, i) => ({ id: h.id, label: h.label, days: h.days, group: h.group, idx: h.idx != null ? h.idx : i }));
     HZ_BY = {}; HZ.forEach(h => { HZ_BY[h.id] = h; });
-    SOURCES = (LDR.sources || []).map(s => ({ id: s.id, label: s.label }));
+    SOURCES = (L.sources || []).map(s => ({ id: s.id, label: s.label }));
     SOURCE_BY = {}; SOURCES.forEach(s => { SOURCE_BY[s.id] = s; });
-    SIGNALS = LDR.signals; // real: {id, source, sym, dir, regime, age, date, refPrice, predProb, ret:{D1..M9}}
-    totalCalls = LDR.totalCalls || SIGNALS.length;
-    // Real forward return at a horizon, DIRECTION-ALIGNED (a short that falls is a win).
-    // The feed stores raw forward % per horizon; mature = a value exists for that horizon.
-    // No separate SPY-edge series in this feed, so edge == raw == aligned return (honest).
-    ret = function (sig, hz) {
-      const v = (sig.ret || {})[hz.id];
-      if (v == null) return { edge: null, raw: null, mature: false };
-      const aligned = +(((sig.dir === "short") ? -v : v)).toFixed(2);
-      return { edge: aligned, raw: aligned, mature: true };
-    };
+    SIGNALS = L.signals;
+    totalCalls = L.totalCalls || SIGNALS.length;
+    ret = _realRet;
+  }
+
+  if (_validLdr(LDR)) {
+    applyReal(LDR);  // REAL path (preloaded)
   } else {
     // ── SYNTHETIC fallback (only when /v2/data_leaders.json is unavailable) ──
     HZ = [];
@@ -155,4 +145,15 @@
   }
 
   window.SigLedger = { HZ, HZ_BY, SOURCES, SOURCE_BY, SIGNALS, aggregate, sourceSummary, leaderboard, ledger, calibration, regimeHits, equityCurve, totalCalls, real: REAL };
+
+  // The real ledger is loaded async by boot — when it lands, apply it and refresh the
+  // exported data (the aggregation fns close over the module vars, so reassigning is enough).
+  if (!REAL) window.addEventListener("bv:heavyready", function () {
+    const L = window.__BV && window.__BV.leaders;
+    if (!_validLdr(L)) return;
+    applyReal(L);
+    const SL = window.SigLedger;
+    SL.HZ = HZ; SL.HZ_BY = HZ_BY; SL.SOURCES = SOURCES; SL.SOURCE_BY = SOURCE_BY;
+    SL.SIGNALS = SIGNALS; SL.totalCalls = totalCalls; SL.real = REAL;
+  }, { once: true });
 })();

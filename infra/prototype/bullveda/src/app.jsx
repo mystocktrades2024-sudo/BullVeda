@@ -25,6 +25,13 @@ function App() {
   const [ticker, setTicker] = useStateApp(null);  // null = home page
   const [lensId, setLensId] = useStateApp("plan");
   const [tier, setTier] = useStateApp(4);  // commercial tier · default ELITE
+  // re-render once the deferred heavy feeds (Time table + Track-Record ledger) land
+  const [, _bvBump] = useStateApp(0);
+  useEffectApp(() => {
+    const onReady = () => _bvBump((n) => n + 1);
+    window.addEventListener("bv:heavyready", onReady);
+    return () => window.removeEventListener("bv:heavyready", onReady);
+  }, []);
   window.__tier = tier;
   window.__tmode = t.mode;
   window.__setLens = setLensId;

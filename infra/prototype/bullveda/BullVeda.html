@@ -10767,10 +10767,6 @@ body {
   };
 
   // Synchronous click-time enrichment: fundamentals + ml + setup-backtest, all real.
-  // ⚠️ LEGACY — blocks the UI thread (synchronous XHR). The detail panel now uses
-  // detailInstant + detailAsync (render-from-cache-first, patch-in-background) so
-  // clicks are instant. Do NOT reintroduce detailSync in the click path — it caused
-  // the 5-10s freeze (2026-06-03).
   BV.detailSync = function (sym) {
     var sr = BV.findRow(sym);
     if (!sr) return null;
@@ -10780,77 +10776,16 @@ body {
     return BV.detailFor(sr, fund, ml, null); // setup stats come from setup_family_stats (real, preloaded)
   };
 
-  // INSTANT detail from the preloaded scanRow ONLY — ZERO network, renders immediately.
-  // detailFor is null-safe (fund/ml default to {}/null), so the panel paints from cache
-  // (price, score, plan, technicals, levels) with no fetch in the render path.
-  BV.detailInstant = function (sym) {
-    var sr = BV.findRow(sym);
-    return sr ? BV.detailFor(sr, null, null, null) : null;
-  };
-
-  BV._detailCache = BV._detailCache || {}; // {SYM: {fund, ml}} — populated by detailAsync, reused by detailLive
-
-  // ASYNC enrichment — fetch fundamentals + ml in PARALLEL (non-blocking), cache them,
-  // then hand the enriched detail to cb so the panel patches in place. Race-guarded:
-  // if the user clicks a different ticker before this resolves, the stale result is dropped.
-  BV.detailAsync = function (sym, cb) {
-    var sr = BV.findRow(sym);
-    if (!sr) return;
-    var enc = encodeURIComponent(sym);
-    BV._lastDetailReq = sym;
-    Promise.all([
-      BV.get("/api/fundamentals/" + enc).catch(function () { return null; }),
-      BV.get("/api/ml/" + enc).catch(function () { return null; })
-    ]).then(function (res) {
-      BV._detailCache[sym] = { fund: res[0] || null, ml: res[1] || null };
-      if (BV._lastDetailReq !== sym) return;            // stale — user moved on
-      try { cb(BV.detailFor(sr, res[0], res[1], null)); } catch (e) { BV.errors.push("detailAsync " + sym + " → " + (e && e.message)); }
-    });
-  };
-
-  // ── LIVE QUOTE LAYER (class L) — Schwab, OFF the EODHD budget ──────────────
-  // Background patching only — NEVER in the render path. fetchLive merges live
-  // Schwab quotes into BV.live AND patches the in-memory scan row's price/chg so
-  // any re-render (scanner, detail) shows the live mark. detailLive rebuilds the
-  // open panel from cached fund/ml + the live-patched row → live R:R, P&L,
-  // distance-to-stop/target, 52w marker, all recomputed for free from one quote.
-  BV.live = BV.live || {};
-  BV.cfg = BV.cfg || {};
-  BV.cfg.liveDetailMs = BV.cfg.liveDetailMs || 5000;   // open-detail poll cadence
-  BV.cfg.liveScanMs   = BV.cfg.liveScanMs   || 20000;  // (reserved) scanner poll cadence
-
-  // Fetch live Schwab quotes for syms; merge into BV.live + patch in-memory rows.
-  BV.fetchLive = function (syms) {
-    var list = (syms || []).filter(Boolean);
-    if (!list.length) return Promise.resolve({});
-    return BV.get("/api/live_quotes?syms=" + encodeURIComponent(list.join(","))).then(function (d) {
-      var qs = (d && d.quotes) || {};
-      for (var s in qs) {
-        BV.live[s] = qs[s];
-        var row = BV.findRow(s);
-        if (row && qs[s].last != null) {
-          row.price = qs[s].last;
-          if (qs[s].chg != null) row.chg = qs[s].chg;
-          row.live = true;
-        }
-      }
-      return qs;
-    }).catch(function () { return {}; });
-  };
-
-  // Rebuild the open detail from cached fund/ml + the (live-patched) scan row.
-  BV.detailLive = function (sym) {
-    var sr = BV.findRow(sym);
-    if (!sr) return null;
-    var c = BV._detailCache[sym] || {};
-    try { return BV.detailFor(sr, c.fund || null, c.ml || null, null); }
-    catch (e) { return null; }
-  };
-
   // ── light per-row Time Anatomy lookup (for the scanner TIME column / HOLD badge) ──
   // Direct cell + 1-level collapse only (O(1)-ish) so it's cheap across ~1000 rows.
+  BV._tqCache = {};
   BV.timeQuick = function (sr) {
-    var TT = BV.timeTable; if (!TT || !TT.cells || !sr) return null;
+    var TT = BV.timeTable; if (!TT || !TT.cells || !sr) return null; // deferred → null until loaded
+    if (BV._tqCache[sr.sym] !== undefined) return BV._tqCache[sr.sym];
+    var _r = BV._timeQuickCompute(sr); BV._tqCache[sr.sym] = _r; return _r;
+  };
+  BV._timeQuickCompute = function (sr) {
+    var TT = BV.timeTable;
     var r = sr._raw || {};
     var entry = num(r.entry_lo, sr.price), stop = num(r.stop), t1 = num(r.t1);
     if (entry == null || stop == null || t1 == null || entry <= stop || t1 <= entry) return null;
@@ -10948,12 +10883,13 @@ body {
     var ej = BOOT ? BOOT.earnings : syncGet("/v2/data_earnings.json");
     BV.earningsBeat = (ej && ej.earnings_beat_predictions) || null;
     BV.earningsWatch = (ej && ej.earnings_watchlist) || null;
-    // Time Anatomy survival table (calibrated offline from cached bars)
-    BV.timeTable = BOOT ? BOOT.time_table : (syncGet("/v2/bullveda/time_anatomy_table.json") || null);
-    // critical subset — real market context + setup stats + options flow
+    // Time Anatomy table + Track-Record ledger are DEFERRED (heavy) — loaded async
+    // after first paint via /api/bullveda-heavy, then bv:heavyready fires a re-render.
+    BV.timeTable = null;
+    BV.leaders = null;
+    // critical subset — real market context + setup stats + options flow (essential, stays sync)
     BV.critical = BOOT ? BOOT.critical : (syncGet("/v2/data.critical.json") || null);
     BV.optionsFlow = (BV.critical && BV.critical.options_flow_top30) || null; // ticker-level UOA (from critical)
-    BV.leaders = BOOT ? BOOT.data_leaders : null; // Track Record real ledger (signalledger-data.jsx reads this)
     // real per-setup track-record stats (Wilson) keyed by setup family
     BV.setupStatsBy = (function () {
       var sf = BV.critical && BV.critical.setup_family_stats;
@@ -10993,6 +10929,21 @@ body {
   else console.info("[BullVeda] live universe loaded:", BV.universe.length, "rows · NAV", BV.navStr(),
     "· crypto", BV.crypto && BV.crypto.all_scored && BV.crypto.all_scored.length,
     "· earnings", BV.earningsBeat && BV.earningsBeat.length, "· optflow", BV.optionsFlow && BV.optionsFlow.length);
+
+  // ── deferred heavy feeds: load async after first paint, then notify for re-render ──
+  if (BV.ready && !MOCK) {
+    BV.get("/api/bullveda-heavy").then(function (h) {
+      if (h && h.time_table) BV.timeTable = h.time_table;
+      if (h && h.data_leaders) BV.leaders = h.data_leaders;
+      BV._tqCache = {}; // reset the timeQuick memo
+      // populate the scan rows' TIME fields so the scanner column + sort work after re-render
+      if (BV.timeTable) try {
+        BV.scanRows().forEach(function (r) { var q = BV.timeQuick(r); if (q) { r.taMedT1 = q.taMedT1; r.taStop = q.taStop; } });
+      } catch (e) {}
+      try { window.dispatchEvent(new CustomEvent("bv:heavyready")); } catch (e) {}
+      console.info("[BullVeda] heavy feeds ready — time table + ledger");
+    }).catch(function (e) { console.warn("[BullVeda] heavy feeds failed", e); });
+  }
 })();
 
 </script>
@@ -24131,28 +24082,6 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     if (tab === "ai-edge") r = [...r].sort((a, b) => b.aiEdge - a.aiEdge);
     return r;
   }, [tab, pills, side, sort, secF, setupF, q, wlTick]);
-  // LIVE SCANNER (class L) — poll Schwab live quotes for the visible rows and patch
-  // prices in place. BV.fetchLive mutates the shared row objects (SS_UNIVERSE refs);
-  // setLiveTick forces a re-render so cells show the live mark. liveTick is NOT in the
-  // rows-memo deps, so the SORT stays stable (prices tick, row order doesn't churn).
-  // Off the EODHD budget (Schwab, batched 500/req). Background only — never blocks.
-  const [, setLiveTick] = useStateSS(0);
-  const liveSymsRef = React.useRef([]);
-  liveSymsRef.current = rows.slice(0, 500).map((r) => r.sym);
-  React.useEffect(() => {
-    const BV = window.__BV;
-    if (!BV || !BV.ready || !BV.fetchLive) return;
-    let stopped = false;
-    const tick = () => {
-      const syms = liveSymsRef.current;
-      if (!syms || !syms.length) return;
-      BV.fetchLive(syms).then(() => { if (!stopped) setLiveTick((n) => n + 1); });
-    };
-    tick();                                              // immediate first patch
-    const ms = (BV.cfg && BV.cfg.liveScanMs) || 2e4;     // 20s default
-    const i = setInterval(tick, ms);
-    return () => { stopped = true; clearInterval(i); };
-  }, []);
   const consensusCount = useMemoSS(() => {
     const c = window.buildConsensus ? window.buildConsensus() : { rows: [] };
     return c.rows.filter((r) => r.count >= 2).length;
@@ -27415,40 +27344,34 @@ window.SurfaceBookRisk = SurfaceBookRisk;
 <script>/* src/signalledger-data.jsx */
 (function() {
   let HZ, HZ_BY, SOURCES, SOURCE_BY, SIGNALS, ret, totalCalls, REAL = false;
-  let LDR = null;
-  try {
-    if (window.__BV && window.__BV.leaders) {
-      LDR = window.__BV.leaders;
-    } else {
-      const xhr = new XMLHttpRequest();
-      xhr.open("GET", "/v2/data_leaders.json", false);
-      xhr.withCredentials = true;
-      xhr.send(null);
-      if (xhr.status === 200) LDR = JSON.parse(xhr.responseText);
-    }
-  } catch (e) {
-    LDR = null;
+  let LDR = window.__BV && window.__BV.leaders || null;
+  function _validLdr(L) {
+    return L && Array.isArray(L.signals) && L.signals.length && Array.isArray(L.horizons);
   }
-  if (LDR && Array.isArray(LDR.signals) && LDR.signals.length && Array.isArray(LDR.horizons)) {
+  function _realRet(sig, hz) {
+    const v = (sig.ret || {})[hz.id];
+    if (v == null) return { edge: null, raw: null, mature: false };
+    const aligned = +(sig.dir === "short" ? -v : v).toFixed(2);
+    return { edge: aligned, raw: aligned, mature: true };
+  }
+  function applyReal(L) {
     REAL = true;
-    HZ = LDR.horizons.map((h, i) => ({ id: h.id, label: h.label, days: h.days, group: h.group, idx: h.idx != null ? h.idx : i }));
+    HZ = L.horizons.map((h, i) => ({ id: h.id, label: h.label, days: h.days, group: h.group, idx: h.idx != null ? h.idx : i }));
     HZ_BY = {};
     HZ.forEach((h) => {
       HZ_BY[h.id] = h;
     });
-    SOURCES = (LDR.sources || []).map((s) => ({ id: s.id, label: s.label }));
+    SOURCES = (L.sources || []).map((s) => ({ id: s.id, label: s.label }));
     SOURCE_BY = {};
     SOURCES.forEach((s) => {
       SOURCE_BY[s.id] = s;
     });
-    SIGNALS = LDR.signals;
-    totalCalls = LDR.totalCalls || SIGNALS.length;
-    ret = function(sig, hz) {
-      const v = (sig.ret || {})[hz.id];
-      if (v == null) return { edge: null, raw: null, mature: false };
-      const aligned = +(sig.dir === "short" ? -v : v).toFixed(2);
-      return { edge: aligned, raw: aligned, mature: true };
-    };
+    SIGNALS = L.signals;
+    totalCalls = L.totalCalls || SIGNALS.length;
+    ret = _realRet;
+  }
+  if (_validLdr(LDR)) {
+    applyReal(LDR);
   } else {
     HZ = [];
     for (let d = 1; d <= 5; d++) HZ.push({ id: "D" + d, label: "D" + d, days: d, group: "D" });
@@ -27623,6 +27546,19 @@ window.SurfaceBookRisk = SurfaceBookRisk;
     return pts;
   }
   window.SigLedger = { HZ, HZ_BY, SOURCES, SOURCE_BY, SIGNALS, aggregate, sourceSummary, leaderboard, ledger, calibration, regimeHits, equityCurve, totalCalls, real: REAL };
+  if (!REAL) window.addEventListener("bv:heavyready", function() {
+    const L = window.__BV && window.__BV.leaders;
+    if (!_validLdr(L)) return;
+    applyReal(L);
+    const SL = window.SigLedger;
+    SL.HZ = HZ;
+    SL.HZ_BY = HZ_BY;
+    SL.SOURCES = SOURCES;
+    SL.SOURCE_BY = SOURCE_BY;
+    SL.SIGNALS = SIGNALS;
+    SL.totalCalls = totalCalls;
+    SL.real = REAL;
+  }, { once: true });
 })();
 </script>
 <script>/* src/surface-track-record.jsx */
@@ -30461,6 +30397,12 @@ function App() {
   const [ticker, setTicker] = useStateApp(null);
   const [lensId, setLensId] = useStateApp("plan");
   const [tier, setTier] = useStateApp(4);
+  const [, _bvBump] = useStateApp(0);
+  useEffectApp(() => {
+    const onReady = () => _bvBump((n) => n + 1);
+    window.addEventListener("bv:heavyready", onReady);
+    return () => window.removeEventListener("bv:heavyready", onReady);
+  }, []);
   window.__tier = tier;
   window.__tmode = t.mode;
   window.__setLens = setLensId;
@@ -30588,28 +30530,11 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [t.focus, setTweak, ticker]);
-  // LIVE QUOTE POLLER (class L) — while a ticker detail is open, poll Schwab live
-  // quotes for that symbol and patch the panel in place. Background only — never
-  // blocks render (the panel is already painted by detailInstant). Off the EODHD
-  // budget (Schwab). Dep is symbol only, so setTicker patches don't re-arm the timer.
   useEffectApp(() => {
-    const BV = window.__BV;
-    if (!BV || !BV.ready) return;
-    const sym = ticker && ticker.symbol;
-    if (!sym) return;
-    let stopped = false;
-    const tick = () => {
-      BV.fetchLive([sym]).then(() => {
-        if (stopped) return;
-        const d = BV.detailLive(sym);
-        if (d) setTicker(d);
-      });
-    };
-    tick();                                              // immediate first patch
-    const ms = (BV.cfg && BV.cfg.liveDetailMs) || 5000;
-    const i = setInterval(tick, ms);
-    return () => { stopped = true; clearInterval(i); };
-  }, [ticker && ticker.symbol]);
+    const i = setInterval(() => {
+    }, 3e4);
+    return () => clearInterval(i);
+  }, []);
   const handleSurfaceClick = (id) => {
     setSurface(id);
     setTicker(null);
@@ -30618,12 +30543,9 @@ function App() {
     setLensId(lens || "overview");
     const BV = window.__BV;
     if (BV && BV.ready) {
-      // INSTANT: paint from preloaded scanRow (zero network) so the panel opens with
-      // no freeze, then patch fundamentals + ML in the background when they arrive.
-      const instant = BV.detailInstant(sym);
-      if (instant) {
-        setTicker(instant);
-        BV.detailAsync(sym, function (enriched) { if (enriched) setTicker(enriched); });
+      const detail = BV.detailSync(sym);
+      if (detail) {
+        setTicker(detail);
       } else {
         setTicker({ ...TICKER, symbol: sym, name: sym, live: true, _pulledAt: Date.now() });
       }

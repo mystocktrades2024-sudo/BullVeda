@@ -578,11 +578,49 @@ async def bullveda_boot(auth: HTTPBasicCredentials = Depends(_check_auth)):
     out["crypto"] = _rj("data_crypto.json")
     out["earnings"] = _rj("data_earnings.json")
     out["critical"] = _rj("data.critical.json")
-    out["time_table"] = _rj("bullveda/time_anatomy_table.json")
-    out["data_leaders"] = _rj("data_leaders.json")  # Track Record real ledger
+    # NB: the two heavy feeds (Time table ~2.3MB, Track-Record ledger ~1.7MB) are NOT
+    # here — they load async via /api/bullveda-heavy after first paint, so the home +
+    # scanner paint fast. The Time column + Track Record fill in when that resolves.
     try:
         gz = _bgzip.compress(_bjson.dumps(out).encode("utf-8"), 6)
         _BV_BOOT_RESP["body"] = gz; _BV_BOOT_RESP["ts"] = _btime.time()
+        return Response(content=gz, media_type="application/json", headers=_GZH)
+    except Exception:
+        return out
+
+
+_BV_HEAVY_RESP = {"ts": 0.0, "body": None}
+
+@app.get("/api/bullveda-heavy")
+async def bullveda_heavy(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Deferred heavy feeds — Time Anatomy table + Track-Record ledger. Loaded async
+    after first paint (not part of the blocking boot). Pre-gzipped + cached 5min (they
+    change only after a scan/rebuild)."""
+    if isinstance(auth, Response):
+        return auth
+    import json as _hjson, time as _htime, gzip as _hgzip
+    _GZH = {"Content-Encoding": "gzip", "Vary": "Accept-Encoding", "Cache-Control": "private, max-age=120"}
+    if _BV_HEAVY_RESP["body"] is not None and (_htime.time() - _BV_HEAVY_RESP["ts"]) < 300:
+        return Response(content=_BV_HEAVY_RESP["body"], media_type="application/json", headers=_GZH)
+    def _rj2(rel):
+        p = (_PROTOTYPE_DIR / rel).resolve()
+        try:
+            if not p.exists():
+                return None
+            mt = p.stat().st_mtime
+            c = _BV_BOOT_CACHE.get(rel)
+            if c and c[0] == mt:
+                return c[1]
+            data = _hjson.loads(p.read_bytes())
+            _BV_BOOT_CACHE[rel] = (mt, data)
+            return data
+        except Exception:
+            return None
+    out = {"time_table": _rj2("bullveda/time_anatomy_table.json"),
+           "data_leaders": _rj2("data_leaders.json")}
+    try:
+        gz = _hgzip.compress(_hjson.dumps(out).encode("utf-8"), 6)
+        _BV_HEAVY_RESP["body"] = gz; _BV_HEAVY_RESP["ts"] = _htime.time()
         return Response(content=gz, media_type="application/json", headers=_GZH)
     except Exception:
         return out
