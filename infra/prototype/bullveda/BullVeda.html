@@ -24131,6 +24131,28 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     if (tab === "ai-edge") r = [...r].sort((a, b) => b.aiEdge - a.aiEdge);
     return r;
   }, [tab, pills, side, sort, secF, setupF, q, wlTick]);
+  // LIVE SCANNER (class L) — poll Schwab live quotes for the visible rows and patch
+  // prices in place. BV.fetchLive mutates the shared row objects (SS_UNIVERSE refs);
+  // setLiveTick forces a re-render so cells show the live mark. liveTick is NOT in the
+  // rows-memo deps, so the SORT stays stable (prices tick, row order doesn't churn).
+  // Off the EODHD budget (Schwab, batched 500/req). Background only — never blocks.
+  const [, setLiveTick] = useStateSS(0);
+  const liveSymsRef = React.useRef([]);
+  liveSymsRef.current = rows.slice(0, 500).map((r) => r.sym);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.ready || !BV.fetchLive) return;
+    let stopped = false;
+    const tick = () => {
+      const syms = liveSymsRef.current;
+      if (!syms || !syms.length) return;
+      BV.fetchLive(syms).then(() => { if (!stopped) setLiveTick((n) => n + 1); });
+    };
+    tick();                                              // immediate first patch
+    const ms = (BV.cfg && BV.cfg.liveScanMs) || 2e4;     // 20s default
+    const i = setInterval(tick, ms);
+    return () => { stopped = true; clearInterval(i); };
+  }, []);
   const consensusCount = useMemoSS(() => {
     const c = window.buildConsensus ? window.buildConsensus() : { rows: [] };
     return c.rows.filter((r) => r.count >= 2).length;
