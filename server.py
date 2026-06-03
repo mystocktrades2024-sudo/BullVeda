@@ -514,6 +514,61 @@ async def root(request: Request, auth: HTTPBasicCredentials = Depends(_check_aut
     return Response(content=html, media_type="text/html",
                     headers={"Cache-Control": "no-store"})
 
+
+_BV_BOOT_CACHE = {}  # rel-path → (mtime, parsed-json) for the combined boot endpoint
+_BV_BOOT_RESP = {"ts": 0.0, "body": None}  # serialized combined payload (short TTL)
+
+@app.get("/api/bullveda-boot")
+async def bullveda_boot(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """ONE round-trip for the whole BullVeda boot payload (2026-06-03). Replaces six
+    sequential blocking sync-XHRs (~7s over the tunnel) with a single merged JSON the
+    boot adapter unpacks — cuts cold load on the live tunnel from ~11s to ~3s. The
+    individual endpoints/files remain as a fallback in bullveda-boot.js."""
+    if isinstance(auth, Response):
+        return auth
+    import json as _bjson, time as _btime
+    # serve the cached serialized payload if fresh (60s) — skips re-assembly/serialize
+    if _BV_BOOT_RESP["body"] is not None and (_btime.time() - _BV_BOOT_RESP["ts"]) < 60:
+        return Response(content=_BV_BOOT_RESP["body"], media_type="application/json",
+                        headers={"Cache-Control": "private, max-age=30"})
+    def _rj(rel):
+        # mtime-keyed in-memory cache so warm calls skip re-parsing the heavy
+        # static feeds (time table ~1MB, critical) — they change only after a scan/rebuild.
+        p = (_PROTOTYPE_DIR / rel).resolve()
+        try:
+            if not p.exists():
+                return None
+            mt = p.stat().st_mtime
+            c = _BV_BOOT_CACHE.get(rel)
+            if c and c[0] == mt:
+                return c[1]
+            data = _bjson.loads(p.read_bytes())
+            _BV_BOOT_CACHE[rel] = (mt, data)
+            return data
+        except Exception:
+            return None
+    out = {}
+    try:
+        out["universe"] = await universe_api()
+    except Exception:
+        out["universe"] = None
+    try:
+        pf = await portfolio_get()
+        out["portfolio"] = pf if isinstance(pf, dict) else (_bjson.loads(pf.body) if hasattr(pf, "body") else None)
+    except Exception:
+        out["portfolio"] = None
+    out["crypto"] = _rj("data_crypto.json")
+    out["earnings"] = _rj("data_earnings.json")
+    out["critical"] = _rj("data.critical.json")
+    out["time_table"] = _rj("bullveda/time_anatomy_table.json")
+    try:
+        body = _bjson.dumps(out).encode("utf-8")
+        _BV_BOOT_RESP["body"] = body; _BV_BOOT_RESP["ts"] = _btime.time()
+        return Response(content=body, media_type="application/json",
+                        headers={"Cache-Control": "private, max-age=30"})
+    except Exception:
+        return out
+
 @app.get("/landing")
 async def _marketing_landing():
     """Public marketing landing — UNAUTHENTICATED (crawlable). Was at / before

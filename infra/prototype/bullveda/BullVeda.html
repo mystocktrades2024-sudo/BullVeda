@@ -10811,7 +10811,12 @@ body {
   };
 
   // ── perform the blocking load (skippable with ?mock=1 for A/B debugging) ──
-  var uni = /mock=1/.test(location.search) ? null : syncGet("/api/universe");
+  // ONE combined round-trip (cuts cold tunnel load ~11s→~3s); fall back to the six
+  // individual endpoints/files if the combined endpoint is unavailable.
+  var MOCK = /mock=1/.test(location.search);
+  var BOOT = MOCK ? null : syncGet("/api/bullveda-boot");
+  if (BOOT) console.info("[BullVeda] combined boot payload (1 request)");
+  var uni = BOOT ? BOOT.universe : (MOCK ? null : syncGet("/api/universe"));
   BV.universe = (uni && uni.screener) || [];
   var _rowsCache = null, _bySym = null;
   BV.scanRows = function () {
@@ -10826,7 +10831,7 @@ body {
   BV.ready = BV.universe.length > 0;
 
   // ── real portfolio (Alpaca paper sync) → NAV + positions ──
-  var pf = /mock=1/.test(location.search) ? null : syncGet("/api/portfolio");
+  var pf = BOOT ? BOOT.portfolio : (MOCK ? null : syncGet("/api/portfolio"));
   BV.portfolio = pf || null;
   BV.nav = (pf && num(pf.equity) != null) ? pf.equity : null;
   BV.navDayPct = (function () {
@@ -10859,17 +10864,17 @@ body {
     return m;
   })();
 
-  // ── slim domain feeds (served from infra/prototype at /v2/*) ──
-  if (!/mock=1/.test(location.search)) {
-    var cj = syncGet("/v2/data_crypto.json");
+  // ── slim domain feeds (from the combined payload, else individual /v2/* files) ──
+  if (!MOCK) {
+    var cj = BOOT ? BOOT.crypto : syncGet("/v2/data_crypto.json");
     BV.crypto = (cj && cj.crypto) || null; // { top_picks, all_scored, rejected }
-    var ej = syncGet("/v2/data_earnings.json");
+    var ej = BOOT ? BOOT.earnings : syncGet("/v2/data_earnings.json");
     BV.earningsBeat = (ej && ej.earnings_beat_predictions) || null;
     BV.earningsWatch = (ej && ej.earnings_watchlist) || null;
-    // Time Anatomy survival table (calibrated offline from cached bars; ~900KB)
-    BV.timeTable = syncGet("/v2/bullveda/time_anatomy_table.json") || null;
-    // critical subset (1.7MB) — real market context + setup stats + options flow
-    BV.critical = syncGet("/v2/data.critical.json") || null;
+    // Time Anatomy survival table (calibrated offline from cached bars)
+    BV.timeTable = BOOT ? BOOT.time_table : (syncGet("/v2/bullveda/time_anatomy_table.json") || null);
+    // critical subset — real market context + setup stats + options flow
+    BV.critical = BOOT ? BOOT.critical : (syncGet("/v2/data.critical.json") || null);
     BV.optionsFlow = (BV.critical && BV.critical.options_flow_top30) || null; // ticker-level UOA (from critical)
     // real per-setup track-record stats (Wilson) keyed by setup family
     BV.setupStatsBy = (function () {

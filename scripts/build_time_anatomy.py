@@ -240,14 +240,17 @@ def build():
         rc = sc_ = 0.0
         for t in range(HORIZON + 1):
             rc += cell["reach"][t]; sc_ += cell["stop"][t]
-            reach_cum.append(round(rc / N, 4))
-            stop_cum.append(round(sc_ / N, 4))
+            reach_cum.append(round(rc / N, 3))
+            stop_cum.append(round(sc_ / N, 3))
         return {"n": cell["n"], "recent_share": round(cell["recent"] / max(1, cell["n"]), 3),
                 "p_reach": reach_cum[-1], "p_stop": stop_cum[-1],
                 "S_reach": reach_cum, "S_stop": stop_cum}
 
     table = {}
+    MIN_CELL_N = 15  # drop ultra-sparse cells (they only ever appear via collapse-aggregation)
     for key, cell in cells.items():
+        if cell["n"] < MIN_CELL_N:
+            continue
         table["|".join(key)] = finalize(cell)
 
     meta = {
