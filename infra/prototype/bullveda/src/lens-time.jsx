@@ -353,6 +353,7 @@ function LensTime({ ticker, mode }) {
     const pastStop = k >= timeStop;
     monitor = { k, condReach, gainR, stall, pastStop, pnlPct: pos.unrealized_pnl_pct };
   }
+  const isShort = (ticker.verdict === "SHORT") || (pos && pos.direction === "short");
 
   return (
     <div className="lens-pad" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
@@ -373,6 +374,7 @@ function LensTime({ ticker, mode }) {
         <div className="mono" style={{ fontSize: 13, lineHeight: 1.6, color: "var(--ink-0)" }}>
           Across <b>{ta.confidence.analogues != null ? ta.confidence.analogues.toLocaleString() : "—"}</b> historical setups in <i>this exact context</i>, by your <b>{ta.holdMode}</b> horizon (<b>S{ta.ceiling}</b>): <b className="gn">{reached}</b> reached T1 first, <b className="rd">{stopped}</b> stopped out first. The ones that worked hit T1 in {readMedian}. <b>Edge decays after S{timeStop}</b> — exit there if still unresolved.{ta.earnWallT2 ? <span> Earnings land at <b className="rd">S{ta.earnDays}</b>, before the T2 median — treat as <b>T1-only into the event</b>.</span> : (ta.medianT2 != null ? <span> A runner to T2 needs a median <b>S{ta.medianT2}</b>.</span> : null)}
         </div>
+        {isShort && <div className="mono" style={{ marginTop: 7, fontSize: 11.5, color: "var(--amb)", lineHeight: 1.5 }}>↓ <b>SHORT setup</b> — the <i>clock</i> (how long to resolve) is direction-agnostic and applies; but the table is long-side calibrated, so read "reach / T1" as your <b>downside</b> target and take per-trade R from your own fill. Use the timing distribution as the proxy.</div>}
       </div>
 
       {/* ── LIVE MONITOR — only when this is a held position (conditional re-read) ── */}

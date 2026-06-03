@@ -256,6 +256,43 @@
     return BV.detailFor(sr, fund, ml, null); // setup stats come from setup_family_stats (real, preloaded)
   };
 
+  // ── light per-row Time Anatomy lookup (for the scanner TIME column / HOLD badge) ──
+  // Direct cell + 1-level collapse only (O(1)-ish) so it's cheap across ~1000 rows.
+  BV.timeQuick = function (sr) {
+    var TT = BV.timeTable; if (!TT || !TT.cells || !sr) return null;
+    var r = sr._raw || {};
+    var entry = num(r.entry_lo, sr.price), stop = num(r.stop), t1 = num(r.t1);
+    if (entry == null || stop == null || t1 == null || entry <= stop || t1 <= entry) return null;
+    var ATR = (entry - stop) / 1.25, dist = (t1 - entry) / ATR;
+    var distB = dist < 2 ? "<2" : dist <= 5 ? "2-5" : dist <= 10 ? "5-10" : ">10";
+    var reg = (BV.market && BV.market.regime4) || "risk_on_choppy";
+    var rv = num(sr.rvol), vb = rv == null ? "normal" : rv < 0.7 ? "compressed" : rv <= 1.1 ? "normal" : rv <= 1.5 ? "expanding" : "spike";
+    var rs = num(sr.rs), rb = rs == null ? "neutral" : rs >= 80 ? "strong_in" : rs >= 60 ? "mild_in" : rs >= 40 ? "neutral" : rs >= 20 ? "mild_out" : "strong_out";
+    var sco = num(sr.score, 60), qb = sco >= 80 ? "elite" : sco >= 65 ? "high" : "standard";
+    var st = (sr.setup || "").toLowerCase();
+    var fam = /breakout|vcp|52w|expansion|gap/.test(st) ? "breakout" : /pullback|bounce|ema|value/.test(st) ? "pullback" : /trend|continuation|momentum/.test(st) ? "trend" : "other";
+    var NMIN = TT.meta.n_min || 40, HZ = TT.meta.horizon;
+    var keys = [[reg, vb, rb, fam, qb, distB], [reg, vb, rb, fam, "any", distB]];
+    var cell = TT.cells[keys[0].join("|")];
+    if (!cell || cell.n < NMIN) { // 1-level collapse: aggregate over qual within same fam
+      var agN = 0, Sr = null;
+      for (var k in TT.cells) {
+        var p = k.split("|");
+        if (p[0] === reg && p[1] === vb && p[2] === rb && p[3] === fam && p[5] === distB) {
+          var c = TT.cells[k], w = c.n; agN += w;
+          if (!Sr) Sr = new Array(HZ + 1).fill(0);
+          for (var s = 0; s <= HZ; s++) Sr[s] += (c.S_reach[s] || 0) * w;
+        }
+      }
+      if (agN >= NMIN && Sr) { for (var s2 = 0; s2 <= HZ; s2++) Sr[s2] /= agN; cell = { n: agN, S_reach: Sr, p_reach: Sr[HZ] }; }
+    }
+    if (!cell || cell.n < NMIN || !(cell.p_reach > 0)) return null;
+    var med = null, stp = null;
+    for (var s3 = 0; s3 <= HZ; s3++) { if (med == null && cell.S_reach[s3] >= cell.p_reach * 0.5) med = s3; if (stp == null && cell.S_reach[s3] >= cell.p_reach * 0.6) stp = s3; }
+    var ceil = 21; // swing default ceiling for the badge
+    return { taMedT1: med, taStop: Math.min(stp == null ? ceil : stp, ceil), taPReach: +(cell.p_reach * 100).toFixed(0), taN: cell.n };
+  };
+
   // ── perform the blocking load (skippable with ?mock=1 for A/B debugging) ──
   var uni = /mock=1/.test(location.search) ? null : syncGet("/api/universe");
   BV.universe = (uni && uni.screener) || [];

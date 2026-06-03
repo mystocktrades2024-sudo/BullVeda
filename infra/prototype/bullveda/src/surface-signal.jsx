@@ -3,7 +3,7 @@
 const { useState: useStateSS, useMemo: useMemoSS } = React;
 
 // BULLVEDA: live scan rows (real /api/universe) when available; mock seed only offline.
-const SS_UNIVERSE = (window.__BV && window.__BV.ready) ? window.__BV.scanRows() : (() => {
+const SS_UNIVERSE = (window.__BV && window.__BV.ready) ? window.__BV.scanRows().map(r => (window.__BV.timeQuick ? Object.assign(r, window.__BV.timeQuick(r) || {}) : r)) : (() => {
   const seed = WATCHLIST.concat(
     HEATMAP.filter(h => !WATCHLIST.find(w => w.sym === h[0]))
       .slice(0, 16)
@@ -188,9 +188,10 @@ const SS_COLS = [
   { id: "er",        label: "Earnings (days)",     nth: 42, grp: "Catalyst" },
   { id: "signals",   label: "Signals",             nth: 43, grp: "Verdict" },
   { id: "aiEdge",    label: "AI Edge (ML)",        nth: 44, grp: "Verdict" },
+  { id: "time",      label: "Time → T1 (ETA)",     nth: 46, grp: "Plan" },
 ];
 const SS_PRESETS = {
-  Essentials: ["sector","score","verdict","setup","edge","price","chg","rr","plan","rvol","mtf","wlb","er","signals"],
+  Essentials: ["sector","score","verdict","setup","edge","price","chg","rr","plan","time","rvol","mtf","wlb","er","signals"],
   Momentum:   ["sector","score","verdict","setup","price","chg","off52","rvol","adx","mtf","rs","r1m","r3m","signals"],
   "Risk · liquidity": ["sector","score","verdict","price","rr","plan","atr","beta","dvol","si","spread","iv","signals"],
   Catalyst:   ["sector","score","verdict","price","chg","er","newsAge","insUsd","iv","sent","tgt","signals"],
@@ -599,6 +600,7 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
               <Th col="sigCount" sort={sort} onClick={setSort}>SIGNALS</Th>
               <Th col="aiEdge" sort={sort} onClick={setSort} r>AI EDGE</Th>
               <Th col="chg" sort={sort} onClick={setSort}>SPARK</Th>
+              <Th col="taMedT1" sort={sort} onClick={setSort} r>TIME→T1</Th>
             </tr>
           </thead>
           <tbody>
@@ -679,6 +681,10 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
                   <span className="ss2-aiedge-bar"><i className={t.aiEdge >= 0 ? "up" : "dn"} style={{ width: `${t.aiEdge == null ? 0 : Math.min(100, Math.abs(t.aiEdge) * 180)}%` }} /></span>
                 </td>
                 <td><SsSpark sym={t.sym} chg={t.chg} /></td>
+                <td className="r mono tabular" title="median sessions to T1 · time-stop (Time Anatomy)">
+                  {t.taMedT1 == null ? <span className="dim">—</span>
+                    : <span><b className="copper">S{t.taMedT1}</b><span className="dim2"> · ⏲S{t.taStop}</span></span>}
+                </td>
               </tr>
             ))}
           </tbody>
