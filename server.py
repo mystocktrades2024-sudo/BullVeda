@@ -3041,6 +3041,10 @@ async def universe_api(limit: int = 0):
             "iv_rank": ok.get("iv_rank") if ok.get("iv_rank") is not None else r.get("iv_rank"),
             "earn_days": earn.get("days_to_earnings"), "insider_net": insider_net,
             "p_up": ml_pup.get(str(r.get("ticker") or "").upper()),
+            # Engine's authoritative per-mode decision (audit #6) — so the frontend
+            # renders the REAL swing/position/invest verdict instead of a client-side
+            # recompute that can show BUY when the engine flagged WATCH for that mode.
+            "decisions_by_mode": r.get("decisions_by_mode"),
             "sharpe_126d": r.get("sharpe_126d"), "sortino_126d": r.get("sortino_126d"),
             "tech_score": T.get("score"), "tech_max": T.get("max"),
             "fund_score": F.get("score"), "fund_max": F.get("max"),
@@ -3093,7 +3097,23 @@ async def universe_api(limit: int = 0):
             return [_finite(v) for v in o]
         return o
     rows = [_finite(row(r)) for r in allsc if isinstance(r, dict) and r.get("ticker")]
-    payload = {"n": len(rows), "scan_count": bundle.get("scan_count") or len(rows), "screener": rows}
+    # Scan freshness (audit #7) — surface run_timestamp + age so the desktop can show
+    # "as of HH:MM · Nh old" and flag staleness, instead of serving a missed-scan
+    # bundle silently. run_timestamp is PT; server runs PT, so now()-ts is correct.
+    _run_ts = bundle.get("run_timestamp")
+    _age_min = None
+    _stale = False
+    try:
+        if _run_ts:
+            from datetime import datetime as _dt
+            _bt = _dt.strptime(str(_run_ts)[:16], "%Y-%m-%d %H:%M")
+            _age_min = int((_dt.now() - _bt).total_seconds() / 60)
+            _stale = _age_min is not None and _age_min > 1200  # > ~20h ≈ a skipped scan
+    except Exception:
+        pass
+    payload = {"n": len(rows), "scan_count": bundle.get("scan_count") or len(rows),
+               "run_timestamp": _run_ts, "age_min": _age_min, "stale": _stale,
+               "screener": rows}
     _UNIVERSE_CACHE = {"mtime": mt, "payload": payload}
     return _slice(payload)
 
