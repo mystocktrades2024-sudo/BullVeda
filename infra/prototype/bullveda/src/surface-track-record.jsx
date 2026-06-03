@@ -190,11 +190,42 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
   const maxAge = period === "all" ? Infinity : period === "ytd" ? ytdDays : ({ "1m": 30, "3m": 90, "6m": 180, "1y": 365 }[period]);
   const rows = useTRm(() => all.filter(r => r.age <= maxAge), [all, maxAge]);
   const PERIODS = [["1m", "1M"], ["3m", "3M"], ["6m", "6M"], ["1y", "1Y"], ["ytd", "YTD"], ["all", "All"]];
-  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  // sortable: col is "age" | "sym" | "label" | "dir" | "refPrice" | "last" | "maturedN"
+  // | "status" | a horizon id (D1…M12, sorted by that horizon's matured value).
+  const [srt, setSrt] = useTR({ col: "age", dir: 1 });
+  const sortBy = (col) => setSrt(s => s.col === col ? { col, dir: -s.dir } : { col, dir: col === "age" ? 1 : -1 });
+  const sortedRows = useTRm(() => {
+    const PUSH = srt.dir > 0 ? Infinity : -Infinity; // unmatured horizon cells sort to the end
+    const val = (r) => {
+      switch (srt.col) {
+        case "age": return r.age;
+        case "sym": return r.sym;
+        case "label": return r.label;
+        case "dir": return r.dir;
+        case "refPrice": return r.refPrice;
+        case "last": return r.last ? r.last.v : PUSH;
+        case "maturedN": return r.maturedN;
+        case "status": return r.status;
+        default: { const p = r.path.find(p => p.hz === srt.col); return (p && p.mature) ? p.v : PUSH; }
+      }
+    };
+    return [...rows].sort((a, b) => {
+      const av = val(a), bv = val(b);
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * srt.dir;
+      return String(av).localeCompare(String(bv)) * srt.dir;
+    });
+  }, [rows, srt]);
+  const pages = Math.max(1, Math.ceil(sortedRows.length / PAGE));
   const pg = Math.min(page, pages - 1);
-  const pageRows = rows.slice(pg * PAGE, pg * PAGE + PAGE);
+  const pageRows = sortedRows.slice(pg * PAGE, pg * PAGE + PAGE);
   const pickPeriod = (p) => { setPeriod(p); setPage(0); };
   React.useEffect(() => { setPage(0); }, [dir, srcFilter, view]);
+  // sortable header cell — arrow shows active column + direction
+  const Sh = ({ col, label, r, cls }) => (
+    <th className={`${cls || ""} ${r ? "r" : ""} ${srt.col === col ? "is-active" : ""}`.trim()} style={{ cursor: "pointer" }} onClick={() => sortBy(col)}>
+      {label}{srt.col === col ? <span className="wsx-arr mono">{srt.dir > 0 ? "▲" : "▼"}</span> : null}
+    </th>
+  );
   const NH = SL.HZ.length;
   const exportCSV = () => {
     const head = ["Logged date", "Days ago", "Symbol", "Source", "Direction", "Ref price", "Status", "Matured", ...SL.HZ.map(h => h.id)];
@@ -240,7 +271,7 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
       </div>
       {view === "path" ? (
         <table className="dtable wsx-tbl trk-led">
-          <thead><tr><th>Logged</th><th>Date</th><th>Symbol</th><th>Source</th><th>Dir</th><th className="r">Ref px</th><th>Forward path</th><th className="r">Latest</th><th className="r">Matured</th><th>Status</th></tr></thead>
+          <thead><tr><Sh col="age" label="Logged" /><Sh col="age" label="Date" /><Sh col="sym" label="Symbol" /><Sh col="label" label="Source" /><Sh col="dir" label="Dir" /><Sh col="refPrice" label="Ref px" r /><th>Forward path</th><Sh col="last" label="Latest" r /><Sh col="maturedN" label="Matured" r /><Sh col="status" label="Status" /></tr></thead>
           <tbody>{pageRows.map(r => {
             const d = new Date(Date.now() - r.age * 86400000);
             const dStr = d.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "2-digit" });
@@ -264,8 +295,8 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
         <div className="trk-full-wrap">
           <table className="trk-full">
             <thead><tr>
-              <th className="trk-full-sticky">Date</th><th className="trk-full-sticky2">Sym</th><th>Src</th><th>Dir</th>
-              {SL.HZ.map(h => <th key={h.id} className="trk-full-hz">{h.label}</th>)}
+              <Sh col="age" label="Date" cls="trk-full-sticky" /><Sh col="sym" label="Sym" cls="trk-full-sticky2" /><Sh col="label" label="Src" /><Sh col="dir" label="Dir" />
+              {SL.HZ.map(h => <Sh key={h.id} col={h.id} label={h.label} cls="trk-full-hz" />)}
             </tr></thead>
             <tbody>{pageRows.map(r => {
               const dStr = new Date(Date.now() - r.age * 86400000).toLocaleDateString("en-US", { day: "2-digit", month: "short" });
