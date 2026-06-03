@@ -526,11 +526,13 @@ async def bullveda_boot(auth: HTTPBasicCredentials = Depends(_check_auth)):
     individual endpoints/files remain as a fallback in bullveda-boot.js."""
     if isinstance(auth, Response):
         return auth
-    import json as _bjson, time as _btime
-    # serve the cached serialized payload if fresh (60s) — skips re-assembly/serialize
+    import json as _bjson, time as _btime, gzip as _bgzip
+    _GZH = {"Content-Encoding": "gzip", "Vary": "Accept-Encoding", "Cache-Control": "private, max-age=30"}
+    # serve the PRE-GZIPPED cached payload if fresh (60s). Returning already-compressed
+    # bytes skips both re-serialize AND re-gzip per request — the heavy cost under load.
+    # XHR/fetch transparently decompress via Content-Encoding. (2026-06-03)
     if _BV_BOOT_RESP["body"] is not None and (_btime.time() - _BV_BOOT_RESP["ts"]) < 60:
-        return Response(content=_BV_BOOT_RESP["body"], media_type="application/json",
-                        headers={"Cache-Control": "private, max-age=30"})
+        return Response(content=_BV_BOOT_RESP["body"], media_type="application/json", headers=_GZH)
     def _rj(rel):
         # mtime-keyed in-memory cache so warm calls skip re-parsing the heavy
         # static feeds (time table ~1MB, critical) — they change only after a scan/rebuild.
@@ -563,10 +565,9 @@ async def bullveda_boot(auth: HTTPBasicCredentials = Depends(_check_auth)):
     out["time_table"] = _rj("bullveda/time_anatomy_table.json")
     out["data_leaders"] = _rj("data_leaders.json")  # Track Record real ledger
     try:
-        body = _bjson.dumps(out).encode("utf-8")
-        _BV_BOOT_RESP["body"] = body; _BV_BOOT_RESP["ts"] = _btime.time()
-        return Response(content=body, media_type="application/json",
-                        headers={"Cache-Control": "private, max-age=30"})
+        gz = _bgzip.compress(_bjson.dumps(out).encode("utf-8"), 6)
+        _BV_BOOT_RESP["body"] = gz; _BV_BOOT_RESP["ts"] = _btime.time()
+        return Response(content=gz, media_type="application/json", headers=_GZH)
     except Exception:
         return out
 
