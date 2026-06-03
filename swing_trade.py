@@ -921,6 +921,16 @@ def run_daily_scan(force_fresh: bool = False):
                         _t = (_r.get("ticker") or _r.get("symbol") or _r.get("sym") or "").upper()
                         if _t:
                             pastpick_syms.add(_t)
+            # 2026-06-03: ALSO pull every ticker EVER in runs[].picks — many historical
+            # picks never became `trades`/`watch_triggers` (88 names were missed). A name
+            # the system ever PICKED must keep getting re-scored/ranked. This closes the gap.
+            for _run in (_phd.get("runs") or []):
+                if isinstance(_run, dict):
+                    for _p in (_run.get("picks") or []):
+                        if isinstance(_p, dict):
+                            _t = (_p.get("ticker") or _p.get("symbol") or _p.get("sym") or "").upper()
+                            if _t:
+                                pastpick_syms.add(_t)
     except Exception as _e:
         log.warning(f"  always-include set build failed (continuing): {_e}")
     # held names are never merely "past_pick"
