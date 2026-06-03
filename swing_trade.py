@@ -2755,6 +2755,19 @@ def run_daily_scan(force_fresh: bool = False):
                 except (KeyError, TypeError):
                     pass
             log.info(f"  RS percentile re-ranked across {n_valid} tickers")
+            # Persist the rs_ratio distribution so the deep-dive / server-live /
+            # single-ticker path can map to a TRUE percentile between scans, instead
+            # of the raw linear remap that over-promotes moderate outperformers past
+            # the RS>=85/90 elite gates (audit 2026-06-03 HIGH false-signal fix).
+            try:
+                import json as _jrs
+                _rsp = BASE_DIR / "cache" / "rs_distribution.json"
+                _rsp.write_text(_jrs.dumps({
+                    "sorted_ratios": valid_ratios, "n": n_valid,
+                    "generated_at": datetime.now().isoformat(),
+                }))
+            except Exception as _rse:
+                log.debug(f"rs distribution persist skipped: {_rse}")
     except Exception as e:
         log.warning(f"  RS percentile re-rank failed (non-fatal): {e}")
 

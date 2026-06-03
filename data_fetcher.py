@@ -2833,11 +2833,18 @@ def get_market_regime(breadth: dict | None = None) -> dict:
         else:
             regime = "neutral"
 
-        # Get VIX and breadth
+        # Get VIX and breadth. Track DEGRADED inputs explicitly: VIX and breadth drive
+        # the panic / trending edges, and silently defaulting them (VIX→20, breadth→50)
+        # masks a data outage as a plausible risk_on_choppy — exactly when the regime
+        # signal (principle 18: "regime detection IS the strategy") is blind. Record the
+        # gap so the decision layer / dashboard can flag low-confidence regime, instead
+        # of trusting a fabricated-neutral classification (audit 2026-06-03).
+        _regime_degraded = []
         vix_data   = get_vix_data()
         vix_cur    = (vix_data or {}).get("vix_current")
         if vix_cur is None:
-            vix_cur = 20  # safe default when VIX fetch failed
+            vix_cur = 20  # fallback so we don't crash — but the gap is recorded below
+            _regime_degraded.append("vix")
 
         # Get market breadth (% of stocks above 50DMA)
         pct_above_50d = 50  # default fallback
@@ -2845,6 +2852,14 @@ def get_market_regime(breadth: dict | None = None) -> dict:
             _b = breadth.get("pct_above_50d")
             if _b is not None:
                 pct_above_50d = _b
+            else:
+                _regime_degraded.append("breadth")
+        else:
+            _regime_degraded.append("breadth")
+        if _regime_degraded:
+            log.warning(f"  ⚠ REGIME on DEGRADED inputs {_regime_degraded} (defaulted) — "
+                        f"panic/trending edges unreliable until data restored; "
+                        f"classification confidence is LOW this scan")
 
         # 4-regime classification with hysteresis
         # Load previous regime from cache for hysteresis buffer
@@ -3141,6 +3156,11 @@ def get_market_regime(breadth: dict | None = None) -> dict:
         max_size_pct = _max_size_pct_map.get(_publish_regime4, 70)
 
         return {
+            # Data-quality flags — surface degraded regime inputs so the decision layer
+            # and dashboard can flag low-confidence regime instead of trusting a
+            # fabricated-neutral classification (audit 2026-06-03, principle 18).
+            "data_quality":         "degraded" if _regime_degraded else "ok",
+            "degraded_inputs":      _regime_degraded,
             # Legacy 3-regime (backward compatible)
             "regime":               _publish_regime,
             "regime_raw":           regime,

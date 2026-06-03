@@ -484,11 +484,45 @@ def _ttm_squeeze(df, bb_len=20, kc_len=20, kc_mult=1.5):
             "sqz_series_20": sqz_series_20}
 
 
+# RS distribution cache (written by the batch scan) — lets the single-ticker /
+# deep-dive / server-live path map rs_ratio to a TRUE cross-sectional percentile
+# instead of the raw linear 0.8–1.2 remap. The linear remap over-promotes moderate
+# outperformers past the RS>=85/90 elite gates (conviction tier, 52wk-breakout,
+# entry-quality) because rs_rank then means "~18% outperformance vs SPY", not
+# "top-15% of the universe". Audit 2026-06-03 (HIGH false-signal fix).
+_RS_DIST_CACHE = {"mtime": 0.0, "sorted": None}
+
+
+def _rs_percentile_from_distribution(rs_ratio):
+    """Map an rs_ratio to a percentile [0,100] vs the last batch scan's universe
+    (cache/rs_distribution.json). Returns None if no usable distribution cached,
+    so callers fall back to the linear remap. Cached in-memory keyed on mtime."""
+    try:
+        import os as _os, json as _json, bisect as _bisect
+        p = _os.path.join(_os.path.dirname(__file__), "cache", "rs_distribution.json")
+        if not _os.path.exists(p):
+            return None
+        mt = _os.path.getmtime(p)
+        if _RS_DIST_CACHE["sorted"] is None or _RS_DIST_CACHE["mtime"] != mt:
+            d = _json.loads(open(p).read())
+            srt = d.get("sorted_ratios") or []
+            _RS_DIST_CACHE["sorted"] = srt if len(srt) > 1 else None
+            _RS_DIST_CACHE["mtime"] = mt
+        srt = _RS_DIST_CACHE["sorted"]
+        if not srt:
+            return None
+        n = len(srt)
+        below = _bisect.bisect_left(srt, float(rs_ratio))
+        return max(0, min(100, int(below / n * 100)))
+    except Exception:
+        return None
+
+
 def _relative_strength_vs_spy(ticker_close, spy_close, period=63):
     """Relative strength vs SPY over ~3 months + RS momentum (improving vs deteriorating)."""
     if len(ticker_close) < period or len(spy_close) < period:
         return {"rs_ratio": 1.0, "rs_rank": 50, "outperforming": False,
-                "rs_momentum": "unknown", "rs_63d_pct": 0.0}
+                "rs_momentum": "unknown", "rs_63d_pct": 0.0, "rs_rank_source": "insufficient_history"}
 
     t_ret = (ticker_close.iloc[-1] / ticker_close.iloc[-period]) - 1
     s_ret = (spy_close.iloc[-1] / spy_close.iloc[-period]) - 1
@@ -496,7 +530,17 @@ def _relative_strength_vs_spy(ticker_close, spy_close, period=63):
     rs_ratio = (1 + t_ret) / (1 + s_ret) if (1 + s_ret) != 0 else 1.0
     if np.isnan(rs_ratio):
         rs_ratio = 1.0
-    rs_rank = min(100, max(0, int((rs_ratio - 0.8) / 0.4 * 100)))
+    # Prefer a TRUE cross-sectional percentile (from the persisted scan distribution);
+    # fall back to the linear remap only when no distribution is cached. The batch scan
+    # itself re-ranks against the same-day universe afterward (most accurate), so this
+    # primarily fixes the deep-dive / server-live single-ticker path between scans.
+    _pct = _rs_percentile_from_distribution(rs_ratio)
+    if _pct is not None:
+        rs_rank = _pct
+        rs_rank_source = "percentile"
+    else:
+        rs_rank = min(100, max(0, int((rs_ratio - 0.8) / 0.4 * 100)))
+        rs_rank_source = "linear_fallback"
     outperforming = rs_ratio > 1.0
 
     # Phase 4E: RS momentum — is relative strength improving or deteriorating?
@@ -518,6 +562,7 @@ def _relative_strength_vs_spy(ticker_close, spy_close, period=63):
     return {
         "rs_ratio": round(rs_ratio, 3),
         "rs_rank": rs_rank,
+        "rs_rank_source": rs_rank_source,
         "outperforming": outperforming,
         "rs_momentum": rs_momentum,
         "rs_63d_pct": round(t_ret * 100, 1),
@@ -720,6 +765,7 @@ def _52week_position(df: pd.DataFrame) -> dict:
     close = df["Close"].squeeze() if isinstance(df["Close"], pd.DataFrame) else df["Close"]
     high  = df["High"].squeeze()  if isinstance(df["High"],  pd.DataFrame) else df["High"]
     low   = df["Low"].squeeze()   if isinstance(df["Low"],   pd.DataFrame) else df["Low"]
+    vol   = (df["Volume"].squeeze() if isinstance(df.get("Volume"), pd.DataFrame) else df["Volume"]) if "Volume" in df else None
 
     n = min(252, len(df))
     sub_high = high.iloc[-n:]
@@ -732,13 +778,34 @@ def _52week_position(df: pd.DataFrame) -> dict:
     pct_from_high = (high_52 - price) / high_52 if high_52 > 0 else 1.0
     pct_from_low  = (price - low_52)  / price   if price  > 0 else 1.0
 
+    # REAL breakout (audit 2026-06-03): was `pct_from_high < 0.02`, which fired while a
+    # stock merely STALLED within 2% of resistance — and `at_52w_breakout` is a Tier-1
+    # catalyst, so it manufactured breakout BUYs on stocks that never broke out. Now
+    # require the close to have CLEARED the prior base high (window excl. last 3 bars so
+    # today's own high doesn't define the base) AND a volume thrust (>1.3× 50d avg).
+    if n > 6:
+        prior_high = float(high.iloc[-n:-3].max())
+    else:
+        prior_high = high_52
+    vol_confirm = False
+    if vol is not None and len(vol) >= 50:
+        try:
+            vol_confirm = float(vol.iloc[-1]) > 1.3 * float(vol.iloc[-50:].mean())
+        except Exception:
+            vol_confirm = False
+    cleared_base = price >= prior_high
+    at_breakout = bool(cleared_base and vol_confirm)
+
     return {
         "high_52w":      round(high_52, 2),
         "low_52w":       round(low_52,  2),
+        "prior_base_high": round(prior_high, 2),
         "pct_from_high": round(pct_from_high * 100, 1),
         "pct_from_low":  round(pct_from_low  * 100, 1),
-        "near_52w_high": pct_from_high < 0.05,   # within 5% — momentum zone
-        "at_breakout":   pct_from_high < 0.02,   # within 2% — breakout imminent
+        "near_52w_high": pct_from_high < 0.05,   # within 5% — momentum zone (proximity, NOT a breakout)
+        "at_breakout":   at_breakout,            # price cleared prior base high + volume thrust = REAL breakout
+        "breakout_vol_confirm": vol_confirm,
+        "breakout_unconfirmed": bool(cleared_base and not vol_confirm),  # cleared base but no volume — watch, don't tag
         "near_52w_low":  pct_from_low  < 0.10,   # within 10% below — danger zone
         "stage2":        pct_from_high < 0.05 and pct_from_low > 0.30,  # classic Stage 2
     }
@@ -2758,9 +2825,13 @@ def score_optionality(df: pd.DataFrame, info: dict, sr: dict,
         details["uoa"] = (f"Confirmed call sweep — ${top_sweep.get('strike','?')} strike, "
                           f"{_sv:.0f} vol vs {_so:.0f} OI (+5)")
     elif od.get("uoa"):
-        uoa_opt_pts = 5
-        catalysts.append("Unusual options activity (UOA)")
-        details["uoa"] = "Detected — large OTM sweep (+5 smart money)"
+        # Bare boolean UOA flag WITHOUT a confirmed chain sweep — its provenance is a
+        # looser upstream heuristic and may be stale options cache. Award PARTIAL credit
+        # (+2), not the full +5 reserved for a confirmed vol>5×OI sweep above. Prevents
+        # full smart-money conviction from an unverified flag (audit 2026-06-03).
+        uoa_opt_pts = 2
+        catalysts.append("UOA flagged (unconfirmed — no chain sweep)")
+        details["uoa"] = "Flagged unconfirmed UOA (no vol>5×OI sweep confirmation) — +2 partial"
     elif true_uoa_puts:
         top_put = true_uoa_puts[0]
         _pv = top_put.get('vol') or 0
@@ -4269,9 +4340,15 @@ def tag_catalysts(indicators: dict, pead_data: dict,
     # True UOA: prefer confirmed sweep from chain over boolean flag
     true_uoa_calls = oi.get("true_uoa_calls") or []
     legacy_uoa = (options_data or {}).get("uoa", False)
-    if true_uoa_calls or legacy_uoa:
+    if true_uoa_calls:
+        # Confirmed chain sweep (vol>5×OI) — genuine Tier-1 smart-money catalyst.
         tags.append("UOA")
         tier = min(tier, 1)
+    elif legacy_uoa:
+        # Bare boolean flag, no confirmed sweep — Tier 2, not Tier 1 (audit 2026-06-03).
+        # Was promoting to Tier 1 from an unverified/possibly-stale flag.
+        tags.append("UOA (unconfirmed)")
+        tier = min(tier, 2)
 
     if vcp:
         tags.append("VCP")
