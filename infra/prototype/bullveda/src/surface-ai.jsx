@@ -258,10 +258,36 @@ function AIPriceCone({ P }) {
 }
 
 // ── calibration / backtest ──────────────────────────────────────
+// Backtest tiles + SELECTIVITY ladder are wired to the REAL production model
+// via /api/ai_predict._model.backtest (historical 533k-holdout: AUC ~0.76,
+// hit ~0.44, + per-decile selectivity). Falls back to AP.BACKTEST only if the
+// fetch fails. The calibration scatter stays on AP.CALIB for now.
 function AICalib({ AP }) {
-  const cal = AP.CALIB, bt = AP.BACKTEST;
+  const cal = AP.CALIB;
+  const [realBt, setRealBt] = useStateAI(null);
+  React.useEffect(() => {
+    let alive = true;
+    if (typeof fetch === "undefined") return;
+    fetch("/api/ai_predict", { credentials: "same-origin" })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { const b = d && d._model && d._model.backtest; if (alive && b) setRealBt(b); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const bt = realBt || AP.BACKTEST;
   const w = 340, h = 300, pad = 42, plot = w - pad * 2;
   const x = p => pad + p * plot, y = p => h - pad - p * (h - pad * 2);
+  const num = v => (v == null || isNaN(v)) ? null : Number(v);
+  const pc = v => num(v) == null ? "—" : Math.round(num(v) * 100) + "%";
+
+  // SELECTIVITY — realized hit rate per P-rank decile (real holdout)
+  const sel = bt.selectivity || {};
+  const selT = Array.isArray(sel.by_target) ? sel.by_target : [];
+  const primaryPct = num(sel.primary_target_pct);
+  const primary = selT.find(t => num(t.target_pct) === primaryPct) || selT[0] || null;
+  const ladder = (primary && Array.isArray(primary.decile_ladder)) ? primary.decile_ladder.map(num) : [];
+  const ladderMax = ladder.length ? Math.max(...ladder.filter(v => v != null), 0.01) : 1;
+
   return (
     <div className="pf-expo">
       <div className="lab-card">
@@ -275,18 +301,54 @@ function AICalib({ AP }) {
         <div className="lab-verdict mono dim2">Dots near the diagonal = well-calibrated. The model is slightly <b>under-confident</b> in the 70–90% band (realized ≥ predicted) — its high-conviction calls are trustworthy.</div>
       </div>
       <div className="lab-card">
-        <div className="lab-card-h mono">OUT-OF-SAMPLE BACKTEST <span className="dim2">· since {bt.since}</span></div>
+        <div className="lab-card-h mono">OUT-OF-SAMPLE BACKTEST {realBt ? <span className="dim2">· live model</span> : (bt.since ? <span className="dim2">· since {bt.since}</span> : null)}</div>
         <div className="aip-bt-grid">
-          <div className="aip-btk"><div className="label-cap">ROC AUC</div><div className="aip-btk-v mono gn-c">{bt.auc}</div><div className="mono dim2">discrimination</div></div>
-          <div className="aip-btk"><div className="label-cap">Hit rate</div><div className="aip-btk-v mono">{Math.round(bt.hit * 100)}%</div><div className="mono dim2">directional</div></div>
-          <div className="aip-btk"><div className="label-cap">Brier score</div><div className="aip-btk-v mono">{bt.brier}</div><div className="mono dim2">lower = better</div></div>
-          <div className="aip-btk"><div className="label-cap">Strategy Sharpe</div><div className="aip-btk-v mono">{bt.sharpe}</div><div className="mono dim2">{bt.horizon} hold</div></div>
+          <div className="aip-btk"><div className="label-cap">ROC AUC</div><div className="aip-btk-v mono gn-c">{num(bt.auc) == null ? "—" : num(bt.auc).toFixed(2)}</div><div className="mono dim2">discrimination</div></div>
+          <div className="aip-btk"><div className="label-cap">Hit rate</div><div className="aip-btk-v mono">{pc(bt.hit)}</div><div className="mono dim2">directional</div></div>
+          <div className="aip-btk"><div className="label-cap">Brier score</div><div className="aip-btk-v mono">{num(bt.brier) == null ? "—" : num(bt.brier).toFixed(3)}</div><div className="mono dim2">lower = better</div></div>
+          <div className="aip-btk"><div className="label-cap">{realBt ? "Holdout n" : "Strategy Sharpe"}</div><div className="aip-btk-v mono">{realBt ? (num(bt.n) == null ? "—" : num(bt.n).toLocaleString()) : bt.sharpe}</div><div className="mono dim2">{bt.horizon || "5d"}{realBt ? " holdout" : " hold"}</div></div>
         </div>
         <table className="dtable wsx-tbl" style={{ marginTop: 10 }}>
           <thead><tr><th>Predicted band</th><th className="r">Realized</th><th className="r">n</th><th>Read</th></tr></thead>
           <tbody>{cal.map((c, i) => <tr key={i}><td className="mono">{Math.round(c.lo * 100)}–{Math.round(c.hi * 100)}%</td><td className={`r mono tabular ${c.realized >= c.pred ? "up" : "dn"}`}>{Math.round(c.realized * 100)}%</td><td className="r mono tabular dim2">{c.n}</td><td className="dim2">{c.realized >= c.pred ? "well-calibrated" : "slightly over-confident"}</td></tr>)}</tbody>
         </table>
       </div>
+      {selT.length > 0 ? (
+        <div className="lab-card">
+          <div className="lab-card-h mono">SELECTIVITY · realized hit rate by P-rank decile{primary ? <span className="dim2"> · target +{Math.round(num(primary.target_pct))}% · n={num(primary.n)}</span> : null}</div>
+          {ladder.length === 10 ? (
+            <div>
+              <svg width="100%" height="148" viewBox="0 0 340 148" preserveAspectRatio="none" style={{ display: "block" }}>
+                {(() => { const bw = 30, gap = 3, x0 = 8, ph = 110, by = 124;
+                  const baseY = primary && num(primary.base) != null ? by - (num(primary.base) / ladderMax) * ph : null;
+                  return (<g>
+                    {ladder.map((v, i) => { const hh = v == null ? 0 : (v / ladderMax) * ph; const bx = x0 + i * (bw + gap); const top = i >= 7;
+                      return (<g key={i}>
+                        <rect x={bx} y={by - hh} width={bw} height={hh} rx="2" fill={top ? "var(--gn)" : "var(--violet)"} opacity={top ? 0.92 : 0.5} />
+                        <text x={bx + bw / 2} y={by - hh - 4} fontSize="8.5" textAnchor="middle" className="mono" fill="var(--ink-1)">{v == null ? "" : Math.round(v * 100) + "%"}</text>
+                        <text x={bx + bw / 2} y={by + 12} fontSize="8" textAnchor="middle" className="mono" fill="var(--ink-3)">{i === 0 ? "low" : i === 9 ? "top" : "D" + i}</text>
+                      </g>); })}
+                    {baseY != null ? <g><line x1="4" y1={baseY} x2="336" y2={baseY} stroke="var(--amb)" strokeDasharray="4 3" opacity="0.8" /><text x="336" y={baseY - 3} fontSize="8.5" textAnchor="end" className="mono" fill="var(--amb)">base {pc(primary.base)}</text></g> : null}
+                  </g>); })()}
+              </svg>
+              <div className="lab-verdict mono dim2">Each bar = one decile of the model's P(hit) ranking on the holdout. <b>Green = top 30%</b>. The ladder climbs left→right because the ranking carries real edge — the most-confident calls hit far more often than the base rate (amber line). Trade the top decile, not the average name.</div>
+            </div>
+          ) : null}
+          <table className="dtable wsx-tbl" style={{ marginTop: 10 }}>
+            <thead><tr><th>Target</th><th className="r">Base</th><th className="r">Top 10%</th><th className="r">Top 25%</th><th className="r">Top 50%</th><th className="r">Lift</th></tr></thead>
+            <tbody>{selT.map((t, i) => { const isP = num(t.target_pct) === primaryPct;
+              return (<tr key={i} style={isP ? { background: "var(--bg-1)" } : null}>
+                <td className="mono">{isP ? "▸ " : ""}+{Math.round(num(t.target_pct))}%</td>
+                <td className="r mono tabular dim2">{pc(t.base)}</td>
+                <td className="r mono tabular up"><b>{pc(t.top10)}</b></td>
+                <td className="r mono tabular">{pc(t.top25)}</td>
+                <td className="r mono tabular">{pc(t.top50)}</td>
+                <td className="r mono tabular gn-c">{num(t.lift) == null ? "—" : num(t.lift).toFixed(1) + "×"}</td>
+              </tr>); })}</tbody>
+          </table>
+          <div className="lab-verdict mono dim2">How to read: at the <b>+{primary ? Math.round(num(primary.target_pct)) : "—"}%</b> target, the average name hits {primary ? pc(primary.base) : "—"}, but the model's top 10% hit {primary ? pc(primary.top10) : "—"} — a {primary && num(primary.lift) ? num(primary.lift).toFixed(1) : "—"}× lift. Lift grows for bigger targets: the model is strongest on larger moves. That's your tradeable threshold.</div>
+        </div>
+      ) : null}
     </div>
   );
 }
