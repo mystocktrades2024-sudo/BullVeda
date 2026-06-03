@@ -248,6 +248,7 @@ function DetailLens({ lensId, ticker, mode, sizeCat, headerStyle, kpiStyle, hero
   if (lensId === "risk") return <LensRisk {...props} />;
   if (lensId === "options") return <LensOptions {...props} />;
   if (lensId === "tape") return <LensTape {...props} />;
+  if (lensId === "time" && window.LensTime) return <window.LensTime {...props} />;
   if (lensId === "mledge") return (
     <div className="lens-ml-wrap">
       {window.AIAnalystView && React.createElement(window.AIAnalystView, { single: true, ticker: props.ticker, sym: props.ticker && (props.ticker.symbol || props.ticker.sym) })}

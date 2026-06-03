@@ -184,6 +184,7 @@ const LENSES = [
   { id: "options",     label: "Options",            kbd: "O", q: "IV · flow · payoff",             accent: "amb",    verdict: "amb" },
   { id: "tape",        label: "Tape · Flow",        kbd: "I", q: "News + insider + 13F",           accent: "violet", verdict: "gn"  },
   { id: "mledge",      label: "AI Edge",            kbd: "M", q: "3-headed model forecast",        accent: "violet", verdict: "gn"  },
+  { id: "time",        label: "Time Anatomy",       kbd: "8", q: "When does this resolve? (T1/T2)", accent: "copper", verdict: "gn"  },
 ];
 
 // Watchlist rows (mock)

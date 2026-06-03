@@ -312,6 +312,8 @@
     var ej = syncGet("/v2/data_earnings.json");
     BV.earningsBeat = (ej && ej.earnings_beat_predictions) || null;
     BV.earningsWatch = (ej && ej.earnings_watchlist) || null;
+    // Time Anatomy survival table (calibrated offline from cached bars; ~900KB)
+    BV.timeTable = syncGet("/v2/bullveda/time_anatomy_table.json") || null;
     // critical subset (1.7MB) — real market context + setup stats + options flow
     BV.critical = syncGet("/v2/data.critical.json") || null;
     BV.optionsFlow = (BV.critical && BV.critical.options_flow_top30) || null; // ticker-level UOA (from critical)

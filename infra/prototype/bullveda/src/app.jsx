@@ -121,7 +121,7 @@ function App() {
       "5":"smc","V":"investment","v":"investment",
       "E":"earnings","e":"earnings",
       "O":"options","o":"options",
-      "I":"tape","i":"tape","M":"mledge","m":"mledge",
+      "I":"tape","i":"tape","M":"mledge","m":"mledge","8":"time",
     };
     const onKey = (e) => {
       if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
