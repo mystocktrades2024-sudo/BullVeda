@@ -3301,7 +3301,9 @@ def main():
     themes = {}
     for theme_key in ('alt_energy','blockchain','tech_innovators','counterstrike','headlinetrader','tazr','bbt','ultimate'):
         t = b.get(theme_key) or {}
-        trades = t.get('trades') or t.get('rows') or []
+        # 'ultimate' stores members under all_trades (see canonical handling ~L1247);
+        # other baskets use trades/rows. Fall back so ultimate isn't silently empty.
+        trades = t.get('trades') or t.get('rows') or t.get('all_trades') or []
         themes[theme_key] = [
             {
                 "ticker":     r.get("ticker"),
