@@ -2,7 +2,9 @@
 # ─────────────────────────────────────────────────────────────
 #  SwingTrade — Daily Scan Runner
 #  Invoked by macOS LaunchAgent: com.swingtrade.daily.plist
-#  Runs 4×/day: 06:00, 10:00, 13:00, 13:30 PT (trimmed from 17/day on 2026-05-11)
+#  Runs 5×/day PT (2026-06-03): 05:15 HEAVY (pre-market full enrich),
+#  07:00 / 09:30 / 11:30 / 13:30 LIGHT (after-open · 2× session · after-close).
+#  SCAN_MODE chosen by clock below: <06:15 = heavy, else = light.
 # ─────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -126,6 +128,18 @@ if [ $EXIT_CODE -eq 0 ]; then
     set -e
     if [ $ML_EXIT -ne 0 ]; then
         echo "⚠ ml.run_ml_edge exited $ML_EXIT (ML Edge sub-tab will show stale predictions)" >> "$LOG_FILE"
+    fi
+
+    # ── SMC / Patterns scan (server-side smc_engine confluence) ──────────────
+    # Morning-scan only — SMC is computed from DAILY bars (daily-stable); intraday
+    # only price-vs-zone moves (handled by the live layer). Reuses cached bars →
+    # 0 EODHD. Writes cache/smc_scan.json → read by the Slack digest + dashboard.
+    if [ "$HOUR" -lt 7 ]; then
+        echo "── SMC / Patterns scan ──" >> "$LOG_FILE"
+        set +e
+        "$PYTHON" scripts/build_smc_scan.py >> "$LOG_FILE" 2>&1 || \
+            echo "⚠ build_smc_scan failed (SMC Slack section will be empty)" >> "$LOG_FILE"
+        set -e
     fi
 
     # ── ML A/B framework: pair every rules signal with ML prediction + backfill outcomes ──

@@ -31,6 +31,7 @@ BUNDLE_PATH = REPO / "cache" / "last_bundle.json"
 OPTIONS_PATH = REPO / "infra" / "prototype" / "options_flow.json"
 MOMENTUM_PATH = REPO / "data" / "momentum_snapshots.jsonl"
 ML_EDGE_PATH = REPO / "cache" / "ml_edge_predictions.json"
+SMC_PATH = REPO / "cache" / "smc_scan.json"
 STATE_PATH = REPO / "data" / "slack_alert_state.json"
 DASHBOARD_URL = "https://trade.mystockholding.com"
 
@@ -169,6 +170,19 @@ def _ml_edge_picks() -> list:
     return rows[:5]
 
 
+def _smc_picks() -> list:
+    """Top 5 SMC confluence candidates from cache/smc_scan.json (build_smc_scan.py)."""
+    if not SMC_PATH.exists():
+        return []
+    try:
+        d = json.loads(SMC_PATH.read_text())
+    except Exception:
+        return []
+    cands = d.get("candidates") or []
+    cands.sort(key=lambda r: -(r.get("smc_score") or 0))
+    return cands[:5]
+
+
 def _fmt_money(v):
     if v is None: return "—"
     try: v = float(v)
@@ -185,7 +199,7 @@ def _fmt_px(v):
 
 
 def _build_payload(scan_tag: str, swing, swing_ts, regime_info,
-                   options, momentum, ml_edge) -> dict:
+                   options, momentum, ml_edge, smc) -> dict:
     # Header
     when = datetime.now().strftime("%a %b %-d · %-I:%M %p PT")
     header = f"📊 *SwingTrade · {scan_tag} scan* — {when}"
@@ -250,19 +264,32 @@ def _build_payload(scan_tag: str, swing, swing_ts, regime_info,
     blocks.append({"type": "section", "text": {"type": "mrkdwn",
         "text": f"*🤖 ML EDGE — top {len(ml_edge)} (5d horizon)*\n{body}"}})
 
+    # 5) SMC / Patterns top 5 (server-side smc_engine confluence — 0 EODHD)
+    if smc:
+        body = "\n".join(
+            f"`{s['ticker']:<5}` {_fmt_px(s.get('price')):>8}  smc *{s.get('smc_score',0):.0f}*  · "
+            f"{', '.join(s.get('factors') or []) or '—'}"
+            for s in smc
+        )
+    else:
+        body = "_no SMC scan yet today_"
+    blocks.append({"type": "section", "text": {"type": "mrkdwn",
+        "text": f"*🧩 SMC / PATTERNS — top {len(smc)}*\n{body}"}})
+
     blocks.append({"type": "context", "elements": [{"type": "mrkdwn",
         "text": f"<{DASHBOARD_URL}|Open dashboard ↗>"}]})
 
     return {"text": f"SwingTrade {scan_tag} scan — {when}", "blocks": blocks}
 
 
-def _dedupe_hash(swing, options, momentum, ml_edge, bundle_ts: str) -> str:
+def _dedupe_hash(swing, options, momentum, ml_edge, bundle_ts: str, smc=None) -> str:
     """Hash top-ticker symbols + bundle timestamp → don't double-post same scan."""
     keys = [bundle_ts]
     keys += [p["ticker"] for p in swing]
     keys += [o["ticker"] for o in options]
     keys += [m["ticker"] for m in momentum]
     keys += [r["ticker"] for r in ml_edge]
+    keys += [s["ticker"] for s in (smc or [])]
     return hashlib.md5("|".join(keys).encode()).hexdigest()[:16]
 
 
@@ -291,19 +318,20 @@ def main() -> int:
     options = _options_picks()
     momentum = _momentum_picks()
     ml_edge = _ml_edge_picks()
+    smc = _smc_picks()
 
-    if not (swing or options or momentum or ml_edge):
-        print("nothing to post — all four sources empty", file=sys.stderr)
+    if not (swing or options or momentum or ml_edge or smc):
+        print("nothing to post — all sources empty", file=sys.stderr)
         return 0
 
-    h = _dedupe_hash(swing, options, momentum, ml_edge, bundle_ts)
+    h = _dedupe_hash(swing, options, momentum, ml_edge, bundle_ts, smc)
     state = _load_state()
     if not args.force and state.get("last_hash") == h:
         print(f"skip: dedupe hash {h} matches prior — use --force to override")
         return 0
 
     payload = _build_payload(args.scan_tag, swing, bundle_ts, regime_info,
-                             options, momentum, ml_edge)
+                             options, momentum, ml_edge, smc)
 
     if args.dry_run:
         print(json.dumps(payload, indent=2, default=str))
