@@ -167,6 +167,8 @@ def build():
         n = len(c)
         atr = atr14(h, l, c)
         avgv = np.array([vv[max(0, i - 19):i + 1].mean() for i in range(n)])
+        e8, e21, e50a = ema(c, 8), ema(c, 21), ema(c, 50)
+        hi20 = np.array([h[max(0, i - 19):i + 1].max() for i in range(n)])  # 20d high
         # iterate entry days with enough history + forward room
         for i in range(63, n - 5):  # need 63 back for RS, allow censored near the end
             A = atr[i]
@@ -184,11 +186,15 @@ def build():
             else:
                 rs = 0.0
             # proxy composite quality: trend + momentum + RS (0-100)
-            ema50 = ema(c[max(0, i - 80):i + 1], 50)[-1] if i >= 50 else c[i]
-            trend = 1 if c[i] > ema50 else 0
+            trend = 1 if c[i] > e50a[i] else 0
             mom = (c[i] / c[i - 20] - 1) * 100 if i >= 20 and c[i - 20] > 0 else 0
             score = 50 + trend * 12 + max(-15, min(18, mom * 0.8)) + max(-10, min(12, rs * 0.4))
             vb, rb, qb = vol_bucket(rvol), rs_bucket(rs), qual_bucket(score)
+            # setup family from price action (V4 dimension): each family resolves on its own clock
+            stacked = e8[i] > e21[i] and e21[i] > e50a[i]
+            at_high = hi20[i] > 0 and c[i] >= 0.985 * hi20[i]
+            near_e21 = e21[i] > 0 and 0.97 * e21[i] <= c[i] <= 1.03 * e21[i]
+            fam = "breakout" if at_high else "pullback" if (stacked and near_e21) else "trend" if (stacked and c[i] > e21[i]) else "other"
             entry = c[i]
             stop_px = entry - STOP_ATR * A
             fwd_h = h[i + 1:i + 1 + HORIZON]
@@ -207,7 +213,7 @@ def build():
                 tgt = entry + D * A * (1 + COST_FRAC)  # net-of-cost target
                 tgt_hits = np.where(fwd_h >= tgt)[0]
                 tgt_s = int(tgt_hits[0]) + 1 if len(tgt_hits) else None
-                key = (reg, vb, rb, qb, DIST_BUCKET[di])
+                key = (reg, vb, rb, fam, qb, DIST_BUCKET[di])
                 cell = cells.get(key)
                 if cell is None:
                     cell = {"reach": [0.0] * (HORIZON + 1), "stop": [0.0] * (HORIZON + 1),
@@ -250,6 +256,8 @@ def build():
         "horizon": HORIZON, "stop_atr": STOP_ATR, "dist_grid": DIST_GRID, "dist_bucket": DIST_BUCKET,
         "n_min": N_MIN, "halflife_d": HALFLIFE_D, "cost_frac": COST_FRAC,
         "regimes": REG, "vol": VOL, "rs": RSB, "qual": QB,
+        "families": ["breakout", "pullback", "trend", "other"],
+        "key_order": ["regime", "vol", "rs", "family", "qual", "dist"],
         "symbols": len(syms), "observations": obs, "cells": len(table),
         "date_range": [sdates[0], sdates[-1]],
         "source": "cached EODHD daily bars (zero new API)",

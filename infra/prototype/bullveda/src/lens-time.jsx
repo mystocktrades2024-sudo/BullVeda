@@ -44,40 +44,44 @@ function timeAnatomyTable(t, mode) {
   const rb = rs == null ? "neutral" : rs >= 80 ? "strong_in" : rs >= 60 ? "mild_in" : rs >= 40 ? "neutral" : rs >= 20 ? "mild_out" : "strong_out";
   const score = num(t.score) ?? 60;
   const qb = score >= 80 ? "elite" : score >= 65 ? "high" : "standard";
+  // map the live setup string → historical family bucket (V4)
+  const setupStr = (t.setupFamily || sc.setup || "").toLowerCase();
+  const fam = /breakout|vcp|52w|expansion|gap/.test(setupStr) ? "breakout"
+    : /pullback|bounce|ema|value/.test(setupStr) ? "pullback"
+    : /trend|continuation|momentum/.test(setupStr) ? "trend" : "other";
   const NMIN = M.n_min || 40;
 
-  // look up one (reg,vol,rs,qb,dist) cell with graceful collapse → {cell, depth}
+  // look up one [reg,vol,rs,family,qb,dist] cell with graceful collapse (qual→family→rs→vol)
   function lookup(distB) {
     if (!distB) return null;
     const tries = [
-      [regime4, vb, rb, qb, distB],          // depth 0 — exact
-      [regime4, vb, rb, "*", distB],          // drop qual
-      [regime4, vb, "*", "*", distB],         // drop rs
-      [regime4, "*", "*", "*", distB],        // drop vol
+      [regime4, vb, rb, fam, qb, distB],       // depth 0 — exact
+      [regime4, vb, rb, fam, "*", distB],      // drop qual
+      [regime4, vb, rb, "*", "*", distB],      // drop family
+      [regime4, vb, "*", "*", "*", distB],     // drop rs
+      [regime4, "*", "*", "*", "*", distB],    // drop vol
     ];
     for (let depth = 0; depth < tries.length; depth++) {
       const spec = tries[depth];
-      // exact key (no wildcard) → direct
       if (spec.indexOf("*") === -1) {
         const c = cells[spec.join("|")];
         if (c && c.n >= NMIN) return { cell: c, depth };
         continue;
       }
-      // wildcard → aggregate all matching cells (weighted by n)
       const agg = aggregate(spec);
       if (agg && agg.n >= NMIN) return { cell: agg, depth };
     }
     // last resort: best available even if < NMIN
-    const c0 = cells[[regime4, vb, rb, qb, distB].join("|")];
+    const c0 = cells[[regime4, vb, rb, fam, qb, distB].join("|")];
     if (c0) return { cell: c0, depth: 0, thin: true };
-    const aggAny = aggregate([regime4, "*", "*", "*", distB]);
-    return aggAny ? { cell: aggAny, depth: 3, thin: true } : null;
+    const aggAny = aggregate([regime4, "*", "*", "*", "*", distB]);
+    return aggAny ? { cell: aggAny, depth: 4, thin: true } : null;
   }
   function aggregate(spec) {
     let n = 0, recent = 0; const Sr = new Array(HZ + 1).fill(0), Ss = new Array(HZ + 1).fill(0);
     for (const key in cells) {
       const parts = key.split("|"); let ok = true;
-      for (let i = 0; i < 5; i++) if (spec[i] !== "*" && spec[i] !== parts[i]) { ok = false; break; }
+      for (let i = 0; i < 6; i++) if (spec[i] !== "*" && spec[i] !== parts[i]) { ok = false; break; }
       if (!ok) continue;
       const c = cells[key], w = c.n;
       n += c.n; recent += (c.recent_share || 0) * c.n;
@@ -113,7 +117,11 @@ function timeAnatomyTable(t, mode) {
     return null;
   };
   const medianT1 = sessAt(cT1, 0.5), medianT2 = cT2 ? sessAt(cT2, 0.5) : null;
-  const decayT1 = sessAt(cT1, 0.9), decayT2 = cT2 ? sessAt(cT2, 0.9) : null;
+  // decay / time-stop = session where ~60% of eventual winners have resolved (marginal
+  // reach rate has materially decayed). Backtested: edge-neutral, −18% holding / −20%
+  // loser-time vs holding to 30D (scripts/prove_time_stop.py). Earlier than 90%, which
+  // fired too late to free capital.
+  const decayT1 = sessAt(cT1, 0.6), decayT2 = cT2 ? sessAt(cT2, 0.6) : null;
   const captureLo = sessAt(cT1, 0.25), captureHi = sessAt(cT1, 0.75);
   let hardStop = ceiling;
   for (const c of curve) { if (c.sOp < 0.15) { hardStop = Math.min(c.s, ceiling); break; } }
@@ -249,6 +257,18 @@ function TaCurve({ data }) {
   const ys = (p) => PADT + (1 - p) * (H - PADT - PADB);
   const path = (key) => data.curve.map((c, i) => `${i ? "L" : "M"}${xs(c.s).toFixed(1)},${ys(c[key]).toFixed(1)}`).join("");
   const vline = (s, color, dash) => s == null ? null : <line x1={xs(s)} y1={PADT} x2={xs(s)} y2={H - PADB} stroke={color} strokeWidth="1.2" strokeDasharray={dash || "3 3"} opacity="0.7" />;
+  // 95% CI ribbon around the reach (T1) curve — normal-approx half-width from cell n
+  const nAna = (data.confidence && data.confidence.analogues) || 0;
+  const ciBand = (() => {
+    if (!nAna) return null;
+    const up = [], lo = [];
+    data.curve.forEach((c) => {
+      const p = c.sT1 || 0, hw = 1.96 * Math.sqrt(Math.max(p * (1 - p), 0.0001) / nAna);
+      up.push([xs(c.s), ys(Math.min(1, p + hw))]); lo.push([xs(c.s), ys(Math.max(0, p - hw))]);
+    });
+    return "M" + up.map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join("L") + "L" +
+      lo.reverse().map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join("L") + "Z";
+  })();
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block" }}>
       {[0, 0.25, 0.5, 0.75, 1].map((p) => (
@@ -265,6 +285,8 @@ function TaCurve({ data }) {
       )}
       {vline(data.decayT1, "var(--copper)")}
       {vline(data.hardStop, "var(--amb)", "1 2")}
+      {/* 95% CI ribbon on the reach curve */}
+      {ciBand && <path d={ciBand} fill="var(--gn)" opacity="0.12" stroke="none" />}
       {/* curves */}
       <path d={path("sOp")} fill="none" stroke="var(--ink-2)" strokeWidth="1" strokeDasharray="2 3" opacity="0.55" />
       <path d={path("sSt")} fill="none" stroke="var(--rd)" strokeWidth="1.4" opacity="0.8" />
@@ -315,6 +337,22 @@ function LensTime({ ticker, mode }) {
   else if (stopped >= reached + 12) { verdict = "STOP-HEAVY · TIGHT TIME BUDGET"; vtone = "rd"; }
   else { verdict = "BALANCED CLOCK"; vtone = "amb"; }
   const readMedian = ta.medianT1 != null ? `a median of ${ta.medianT1} sessions${p75 != null ? ` (a quarter need >${p75})` : ""}` : "an uncertain horizon";
+  // ── LIVE conditional monitor: if this ticker is a held position, re-read the clock given days_held ──
+  let monitor = null;
+  const pos = ((window.__BV && window.__BV.portfolio && window.__BV.portfolio.positions) || []).find(p => p.ticker === ticker.symbol);
+  if (pos && pos.days_held != null) {
+    const k = Math.min(pos.days_held, ta.curve.length - 1);
+    const ck = ta.curve[k] || ta.curve[ta.curve.length - 1];
+    const sOpenK = Math.max(0.02, ck.sOp || 0);
+    const condReach = Math.max(0, Math.min(1, (ta.pHitT1 - (ck.sT1 || 0)) / sOpenK));  // remaining reach mass / still-open
+    const entryP = parseFloat(pos.entry_price), stopP = parseFloat(pos.stop);
+    const oneRpct = (entryP && stopP && entryP > stopP) ? (entryP - stopP) / entryP * 100 : null;
+    const gainR = (oneRpct && pos.unrealized_pnl_pct != null) ? pos.unrealized_pnl_pct / oneRpct : null;
+    const pastZone = k >= (ta.captureHi != null ? ta.captureHi : ta.medianT1 || 99);
+    const stall = pastZone && gainR != null && gainR < 0.3;
+    const pastStop = k >= timeStop;
+    monitor = { k, condReach, gainR, stall, pastStop, pnlPct: pos.unrealized_pnl_pct };
+  }
 
   return (
     <div className="lens-pad" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
@@ -336,6 +374,20 @@ function LensTime({ ticker, mode }) {
           Across <b>{ta.confidence.analogues != null ? ta.confidence.analogues.toLocaleString() : "—"}</b> historical setups in <i>this exact context</i>, by your <b>{ta.holdMode}</b> horizon (<b>S{ta.ceiling}</b>): <b className="gn">{reached}</b> reached T1 first, <b className="rd">{stopped}</b> stopped out first. The ones that worked hit T1 in {readMedian}. <b>Edge decays after S{timeStop}</b> — exit there if still unresolved.{ta.earnWallT2 ? <span> Earnings land at <b className="rd">S{ta.earnDays}</b>, before the T2 median — treat as <b>T1-only into the event</b>.</span> : (ta.medianT2 != null ? <span> A runner to T2 needs a median <b>S{ta.medianT2}</b>.</span> : null)}
         </div>
       </div>
+
+      {/* ── LIVE MONITOR — only when this is a held position (conditional re-read) ── */}
+      {monitor && (
+        <div style={{ background: monitor.stall || monitor.pastStop ? "color-mix(in oklab, var(--rd) 11%, var(--bg-1))" : "color-mix(in oklab, var(--gn) 9%, var(--bg-1))", border: `1px solid color-mix(in oklab, var(--${monitor.stall || monitor.pastStop ? "rd" : "gn"}) 32%, transparent)`, borderRadius: 10, padding: "10px 14px", display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+          <span className="mono" style={{ fontSize: 11, fontWeight: 700, color: monitor.stall || monitor.pastStop ? "var(--rd)" : "var(--gn)" }}>● LIVE · HELD {monitor.k} SESSION{monitor.k === 1 ? "" : "S"}</span>
+          <span className="mono" style={{ fontSize: 12, color: "var(--ink-0)" }}>given still open at S{monitor.k}, P(T1 from here) <b>{(monitor.condReach * 100).toFixed(0)}%</b></span>
+          {monitor.gainR != null && <span className="mono dim2" style={{ fontSize: 12 }}>· at {monitor.gainR >= 0 ? "+" : ""}{monitor.gainR.toFixed(2)}R</span>}
+          {monitor.pastStop
+            ? <span className="mono" style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--rd)" }}>⏲ PAST TIME STOP (S{timeStop}) — edge decayed, free the slot</span>
+            : monitor.stall
+              ? <span className="mono" style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--rd)" }}>⚠ STALL — past capture zone with &lt;0.3R, soft-exit watch</span>
+              : <span className="mono" style={{ marginLeft: "auto", fontSize: 11, color: "var(--gn)" }}>within capture window · clock OK</span>}
+        </div>
+      )}
 
       {/* ── NATURAL FREQUENCY — the competing-risk outcome, in plain counts ── */}
       <div>
