@@ -304,6 +304,9 @@
   if (BOOT) console.info("[BullVeda] combined boot payload (1 request)");
   var uni = BOOT ? BOOT.universe : (MOCK ? null : syncGet("/api/universe"));
   BV.universe = (uni && uni.screener) || [];
+  // Scan freshness (audit #7) — so the desktop can show "as of HH:MM · Nh old" and
+  // flag a stale/missed-scan bundle instead of rendering it as if it were today's.
+  BV.scanMeta = uni ? { ts: uni.run_timestamp || null, ageMin: (uni.age_min != null ? uni.age_min : null), stale: !!uni.stale, n: uni.n } : null;
   var _rowsCache = null, _bySym = null;
   BV.scanRows = function () {
     if (!_rowsCache) {

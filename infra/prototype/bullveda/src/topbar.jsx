@@ -22,6 +22,21 @@ function TopBar({ mode, onMode, onOpenTicker, theme, onTheme }) {
       </div>
 
       <div className="tb-right">
+        {(() => {
+          // Scan freshness chip (audit #7) — surfaces the bundle age so a stale /
+          // missed-scan dataset is visible instead of looking like today's scan.
+          const m = (typeof window !== "undefined" && window.__BV && window.__BV.scanMeta) || null;
+          if (!m || !m.ts) return null;
+          const hrs = m.ageMin != null ? m.ageMin / 60 : null;
+          const ageStr = hrs == null ? "" : (hrs < 1 ? Math.round(m.ageMin) + "m" : hrs.toFixed(hrs < 10 ? 1 : 0) + "h");
+          const hhmm = String(m.ts).slice(11, 16);
+          return (
+            <div className="mono" title={`Scan bundle: ${m.ts} PT${m.stale ? " · STALE (>20h — scan may have been missed)" : ""}`}
+              style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, padding: "2px 8px", borderRadius: 6, border: "1px solid var(--line)", color: m.stale ? "var(--amb)" : "var(--ink-3)", whiteSpace: "nowrap" }}>
+              {m.stale ? "⚠ " : "● "}scan {hhmm}{ageStr ? " · " + ageStr + " old" : ""}
+            </div>
+          );
+        })()}
         <div className="tb-mode" role="tablist" aria-label="Trade horizon mode">
           {["SWING", "POSITION", "INVESTMENT"].map(m => (
             <button
