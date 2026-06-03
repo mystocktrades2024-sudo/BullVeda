@@ -204,6 +204,9 @@
     var divY = num(H.DividendYield);
     return {
       symbol: sr.sym, name: (fund && fund.name) || sr.name, exchange: r.exchange || "",
+      // Engine's authoritative per-mode verdict (audit #6) — so the composite verdict
+      // renders the REAL swing/position/invest call, not a client recompute.
+      decisionsByMode: r.decisions_by_mode || null,
       sector: sr.sector, industry: (fund && fund.industry) || sr.industry,
       mcap: num(H.MarketCapitalization) || (sr.mcap || 0) * 1e9,
       price: sr.price, chg: sr.chg, chgAbs: +(sr.price * (sr.chg / 100)).toFixed(2),

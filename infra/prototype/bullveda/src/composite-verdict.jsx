@@ -47,8 +47,19 @@ function compositeVerdict(ticker, mode) {
   const net = Math.round(lenses.reduce((a, l) => a + l.w * l.v, 0));
   const tone = v => v >= 62 ? "gn" : v >= 46 ? "amb" : "rd";
   lenses.forEach(l => { l.tone = tone(l.v); });
-  const verdict = net >= 66 ? "BUY" : net >= 50 ? "WATCH" : net >= 40 ? "AVOID" : "PASS";
-  const vtone = net >= 66 ? "gn" : net >= 50 ? "amb" : "rd";
+  // The engine's authoritative per-mode verdict overrides the client recompute
+  // (audit #6). The net score stays as the composite bias read, but the VERDICT LABEL
+  // must match what the engine actually decided for THIS mode — it was showing BUY
+  // while the engine flagged WATCH for swing/position/invest. decisions_by_mode keys
+  // are swing/position/investment; values may be a bare string or {verdict}.
+  const _dm = ticker.decisionsByMode || null;
+  const _dmKey = moKey === "invest" ? "investment" : moKey;
+  const _engRaw = _dm ? (_dm[_dmKey] != null ? _dm[_dmKey] : _dm[moKey]) : null;
+  const _engVerdict = _engRaw ? (typeof _engRaw === "string" ? _engRaw : _engRaw.verdict) : null;
+  const _vt = v => v === "BUY" ? "gn" : v === "WATCH" ? "amb" : "rd";
+  const verdict = _engVerdict || (net >= 66 ? "BUY" : net >= 50 ? "WATCH" : net >= 40 ? "AVOID" : "PASS");
+  const verdictSource = _engVerdict ? "engine" : "derived";
+  const vtone = _engVerdict ? _vt(_engVerdict) : (net >= 66 ? "gn" : net >= 50 ? "amb" : "rd");
   const agree   = lenses.filter(l => l.tone === "gn").length;
   const caution = lenses.filter(l => l.tone === "amb").length;
   const fail    = lenses.filter(l => l.tone === "rd").length;
@@ -62,7 +73,7 @@ function compositeVerdict(ticker, mode) {
   const sd = Math.sqrt(lenses.reduce((a, l) => a + (l.v - mean) ** 2, 0) / lenses.length);
   const conf = sd < 12 ? "HIGH" : sd < 20 ? "MED" : "LOW";
   const disagree = sd < 12 ? "low" : sd < 20 ? "moderate" : "high";
-  return { net, verdict, vtone, conf, disagree, lenses, agree, caution, fail, dissenters, mode };
+  return { net, verdict, verdictSource, vtone, conf, disagree, lenses, agree, caution, fail, dissenters, mode };
 }
 window.compositeVerdict = compositeVerdict;
 
