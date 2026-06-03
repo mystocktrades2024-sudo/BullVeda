@@ -486,14 +486,19 @@ async def _v2_file(path: str, request: Request, auth: HTTPBasicCredentials = Dep
 # -- Redirect / to Kairos (primary dashboard as of 2026-05-20). --
 from fastapi.responses import RedirectResponse
 
-@app.get("/")
-async def root():
-    """Root opens the BullVeda terminal (owner preference 2026-06-02). The terminal
-    is auth-gated at /v2/bullveda/BullVeda.html. The prior marketing landing is
-    preserved at /landing (reversible). To revert: point this back at SwingTrade Landing.html."""
-    r = RedirectResponse(url="/v2/bullveda/BullVeda.html", status_code=302)
-    r.headers["Cache-Control"] = "no-store"  # never let a CDN/browser cache the redirect target
-    return r
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Root SERVES the BullVeda terminal in place (owner preference 2026-06-02) so the
+    address bar stays clean at the domain root — no redirect. Auth-gated (same basic
+    auth as /app) so the app's same-origin /api + /v2 data fetches carry credentials.
+    Prior marketing landing preserved at /landing. To revert: serve SwingTrade Landing.html."""
+    if isinstance(auth, Response):
+        return auth
+    p = (_PROTOTYPE_DIR / "bullveda" / "BullVeda.html").resolve()
+    if not p.exists():
+        return RedirectResponse(url="/v2/bullveda/BullVeda.html", status_code=302)  # fallback
+    return Response(content=p.read_bytes(), media_type="text/html",
+                    headers={"Cache-Control": "no-store"})
 
 @app.get("/landing")
 async def _marketing_landing():
@@ -534,10 +539,12 @@ async def _app_terminal(request: Request, auth: HTTPBasicCredentials = Depends(_
 
     def _serve_desktop():
         # BULLVEDA is the desktop terminal (owner preference 2026-06-02) — was Stocksmith.html.
-        # To revert: serve (_PROTOTYPE_DIR / "Stocksmith.html") here again.
-        r = RedirectResponse(url="/v2/bullveda/BullVeda.html" + qs, status_code=302)
-        r.headers["Cache-Control"] = "no-store"
-        return r
+        # Serve in place (no redirect) so the /app URL stays clean. Revert: serve Stocksmith.html.
+        p = (_PROTOTYPE_DIR / "bullveda" / "BullVeda.html").resolve()
+        if not p.exists():
+            return RedirectResponse(url="/kairos.html" + qs, status_code=302)
+        return Response(content=p.read_bytes(), media_type="text/html",
+                        headers={"Cache-Control": "no-store"})
 
     def _go_mobile():
         return RedirectResponse(url="/v2/mobile/index.html" + qs, status_code=302)
