@@ -95,88 +95,100 @@ const MO_HIST = (() => {
 })();
 
 function MomentumHistory() {
-  const wins = MO_HIST.filter(h => h.status === "WIN");
-  const losses = MO_HIST.filter(h => h.status === "LOSS");
-  const closed = MO_HIST.filter(h => h.status !== "OPEN");
-  const wr = closed.length ? (wins.length / closed.length * 100) : 0;
-  const avgWin = wins.length ? wins.reduce((s,h)=>s+h.r,0)/wins.length : 0;
-  const avgLoss = losses.length ? losses.reduce((s,h)=>s+h.r,0)/losses.length : 0;
-  const expectancy = closed.length ? closed.reduce((s,h)=>s+h.r,0)/closed.length : 0;
-  const pf = Math.abs(losses.reduce((s,h)=>s+h.r,0)) > 0
-    ? wins.reduce((s,h)=>s+h.r,0) / Math.abs(losses.reduce((s,h)=>s+h.r,0)) : 0;
-  const wilsonLB = (() => {
-    const n = closed.length, p = wr/100, z = 1.96;
-    if (!n) return 0;
-    const d = 1 + z*z/n;
-    return ((p + z*z/(2*n) - z*Math.sqrt(p*(1-p)/n + z*z/(4*n*n))) / d) * 100;
-  })();
-  // equity curve from closed trades
-  const eq = []; let cum = 0;
-  [...closed].reverse().forEach(h => { cum += h.r; eq.push(cum); });
+  // REAL track record (audit #8) — fetches /api/momentum-signals (signal_log.json,
+  // momentum strategies). Was MO_HIST: a synthetic ledger of fabricated R-multiples
+  // biased to look profitable. Honest "unavailable" fallback, never synthetic.
+  const [st, setSt] = React.useState({ loading: true, summary: null, signals: null, err: null });
+  React.useEffect(() => {
+    let alive = true;
+    if (typeof fetch === "undefined") { setSt(s => ({ ...s, loading: false, err: "no fetch" })); return; }
+    fetch("/api/momentum-signals", { credentials: "same-origin" })
+      .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then(d => { if (alive) setSt({ loading: false, summary: d.summary || null, signals: d.signals || [], err: null }); })
+      .catch(e => { if (alive) setSt({ loading: false, summary: null, signals: null, err: String(e) }); });
+    return () => { alive = false; };
+  }, []);
+
+  if (st.loading) return <div className="ss-empty" style={{ padding: 40 }}>Loading momentum track record from signal_log…</div>;
+  if (st.err || !st.summary || !st.signals) return <div className="ss-empty" style={{ padding: 40 }}>Momentum track record unavailable ({st.err || "no data"}). Source: /api/momentum-signals · signal_log.json.</div>;
+
+  const sm = st.summary, sigs = st.signals;
+  const closed = sigs.filter(s => s.pnl_pct != null);
+  const wins = closed.filter(s => s.pnl_pct > 0).length;
+  const losses = closed.filter(s => s.pnl_pct <= 0).length;
+  const wr = sm.win_rate != null ? sm.win_rate : (closed.length ? (wins / closed.length) * 100 : 0);
+  const nReal = sm.n_realized || closed.length;
+  const wilsonLB = (() => { const n = nReal, p = wr / 100, z = 1.96; if (!n) return 0; const d = 1 + z * z / n; return ((p + z * z / (2 * n) - z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / d) * 100; })();
+  // equity curve = cumulative realized pnl_pct, chronological
+  const chron = [...closed].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const eq = []; let cum = 0; chron.forEach(s => { cum += s.pnl_pct; eq.push(cum); });
   const w = 620, h = 150, pad = 18;
   const min = Math.min(0, ...eq) - 1, max = Math.max(1, ...eq) + 1;
-  const x = i => pad + (i/Math.max(1,eq.length-1))*(w-pad*2);
-  const y = v => h - pad - ((v-min)/(max-min))*(h-pad*2);
+  const x = i => pad + (i / Math.max(1, eq.length - 1)) * (w - pad * 2);
+  const y = v => h - pad - ((v - min) / (max - min)) * (h - pad * 2);
+  const eqTone = (eq[eq.length - 1] || 0) >= 0 ? "gn" : "rd";
+  const tableRows = sigs.slice(0, 150);
 
   return (
     <div className="moh">
       <div className="moh-kpis">
-        <MohK k="SIGNALS" v={MO_HIST.length} tone="copper" s={`${closed.length} closed · ${MO_HIST.length-closed.length} open`} />
-        <MohK k="WIN RATE" v={`${wr.toFixed(0)}%`} tone={wr>=50?"gn":"rd"} s={`${wins.length}W · ${losses.length}L`} />
-        <MohK k="WILSON LB" v={`${wilsonLB.toFixed(0)}%`} tone={wilsonLB>=45?"gn":"amb"} s="95% lower bound" />
-        <MohK k="EXPECTANCY" v={`${expectancy>=0?"+":""}${expectancy.toFixed(2)}R`} tone={expectancy>=0?"gn":"rd"} s="per signal" />
-        <MohK k="PROFIT FACTOR" v={pf.toFixed(2)} tone={pf>=1.5?"gn":pf>=1?"amb":"rd"} s={`avg +${avgWin.toFixed(1)}R / ${avgLoss.toFixed(1)}R`} />
-        <MohK k="NET" v={`+$${closed.reduce((s,h)=>s+h.pnl,0).toLocaleString()}`} tone="gn" s="realized · 1R=$420" />
+        <MohK k="SIGNALS" v={sm.n_total} tone="copper" s={`${sm.n_closed} closed · ${sm.n_open} open`} />
+        <MohK k="WIN RATE" v={`${Math.round(wr)}%`} tone={wr >= 50 ? "gn" : "rd"} s={`${wins}W · ${losses}L · n=${nReal}`} />
+        <MohK k="WILSON LB" v={`${Math.round(wilsonLB)}%`} tone={wilsonLB >= 45 ? "gn" : "amb"} s="95% lower bound" />
+        <MohK k="AVG P&L" v={`${sm.avg_pnl_pct >= 0 ? "+" : ""}${sm.avg_pnl_pct}%`} tone={sm.avg_pnl_pct >= 0 ? "gn" : "rd"} s="per signal" />
+        <MohK k="AVG ALPHA" v={`${sm.avg_alpha_pp >= 0 ? "+" : ""}${sm.avg_alpha_pp}pp`} tone={sm.avg_alpha_pp >= 0 ? "gn" : "rd"} s="vs SPY" />
+        <MohK k="BEAT SPY" v={`${sm.beat_spy_pct}%`} tone={sm.beat_spy_pct >= 50 ? "gn" : "amb"} s={`${sm.n_days}d · ${sm.first_date}→${sm.last_date}`} />
       </div>
 
       <div className="moh-grid">
         <div className="lab-card">
-          <div className="lab-card-h mono">EQUITY CURVE · CLOSED MOMENTUM SIGNALS (R)</div>
+          <div className="lab-card-h mono">EQUITY CURVE · CUMULATIVE REALIZED P&L (%)</div>
           <svg viewBox={`0 0 ${w} ${h}`} className="lab-svg" preserveAspectRatio="xMidYMid meet">
-            <defs><linearGradient id="moh-eq" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--gn)" stopOpacity="0.3"/><stop offset="100%" stopColor="var(--gn)" stopOpacity="0"/></linearGradient></defs>
-            <line x1={pad} y1={y(0)} x2={w-pad} y2={y(0)} stroke="var(--glass-line)" strokeDasharray="2 3" />
-            <path d={`M ${pad} ${y(0)} L ${eq.map((v,i)=>`${x(i)},${y(v)}`).join(" L ")} L ${w-pad} ${y(0)} Z`} fill="url(#moh-eq)" />
-            <polyline points={eq.map((v,i)=>`${x(i)},${y(v)}`).join(" ")} stroke="var(--gn)" strokeWidth="1.8" fill="none" style={{filter:"drop-shadow(0 0 5px var(--gn))"}} />
-            <circle cx={x(eq.length-1)} cy={y(eq[eq.length-1]||0)} r="3.5" fill="var(--gn)" style={{filter:"drop-shadow(0 0 6px var(--gn))"}} />
+            <defs><linearGradient id="moh-eq" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={`var(--${eqTone})`} stopOpacity="0.3" /><stop offset="100%" stopColor={`var(--${eqTone})`} stopOpacity="0" /></linearGradient></defs>
+            <line x1={pad} y1={y(0)} x2={w - pad} y2={y(0)} stroke="var(--glass-line)" strokeDasharray="2 3" />
+            <path d={`M ${pad} ${y(0)} L ${eq.map((v, i) => `${x(i)},${y(v)}`).join(" L ")} L ${w - pad} ${y(0)} Z`} fill="url(#moh-eq)" />
+            <polyline points={eq.map((v, i) => `${x(i)},${y(v)}`).join(" ")} stroke={`var(--${eqTone})`} strokeWidth="1.8" fill="none" />
+            <circle cx={x(eq.length - 1)} cy={y(eq[eq.length - 1] || 0)} r="3.5" fill={`var(--${eqTone})`} />
           </svg>
-          <div className="moh-eqfoot mono dim2">Cumulative R across {closed.length} closed signals · max DD {Math.min(...eq.map((v,i)=>v-Math.max(...eq.slice(0,i+1)))).toFixed(1)}R</div>
+          <div className="moh-eqfoot mono dim2">Cumulative realized P&L across {closed.length} closed momentum signals · {sm.first_date} → {sm.last_date}</div>
         </div>
         <div className="lab-card">
           <div className="lab-card-h mono">OUTCOME DISTRIBUTION</div>
           <div className="moh-dist">
-            {[["WIN",wins.length,"gn"],["LOSS",losses.length,"rd"],["FLAT",closed.length-wins.length-losses.length,"amb"],["OPEN",MO_HIST.length-closed.length,"ink"]].map(([l,n,t],i)=>(
-              <div key={i} className="moh-distrow"><span className="mono dim2">{l}</span><div className="moh-distbar"><div style={{width:`${n/MO_HIST.length*100}%`,background:`var(--${t})`}}/></div><span className="mono">{n}</span></div>
+            {[["WIN", wins, "gn"], ["LOSS", losses, "rd"], ["OPEN", sm.n_open, "ink"]].map(([l, n, t], i) => (
+              <div key={i} className="moh-distrow"><span className="mono dim2">{l}</span><div className="moh-distbar"><div style={{ width: `${n / (sm.n_total || 1) * 100}%`, background: `var(--${t})` }} /></div><span className="mono">{n}</span></div>
             ))}
           </div>
-          <div className="moh-bysetup mono dim2" style={{marginTop:8}}>By setup family — RS breakout 64% · Accel cross 58% · Persistent add 71% WR</div>
+          <div className="moh-bysetup mono dim2" style={{ marginTop: 8 }}>Realized win rate {Math.round(wr)}% (Wilson LB {Math.round(wilsonLB)}%) · {sm.beat_spy_pct}% beat SPY over {sm.n_days} days.</div>
         </div>
       </div>
 
       <div className="wsx-body">
         <table className="dtable wsx-tbl moh-tbl">
           <thead><tr>
-            <th>Date</th><th>Sym</th><th>Setup</th><th className="r">Entry RS</th><th className="r">Exit RS</th>
-            <th className="r">Held</th><th className="r">MAE</th><th className="r">R</th><th className="r">P&L</th><th>Outcome</th>
+            <th>Date</th><th>Sym</th><th>Setup</th><th className="r">Score</th><th className="r">RS</th>
+            <th className="r">Stars</th><th className="r">P&L %</th><th className="r">Alpha</th><th>Outcome</th>
           </tr></thead>
-          <tbody>{MO_HIST.map((h,i)=>(
-            <tr key={i}>
-              <td className="mono dim2">{h.date}</td>
-              <td className="mono"><b>{h.sym}</b></td>
-              <td className="mono dim">{h.setup}</td>
-              <td className="r mono tabular">{h.entryRS}</td>
-              <td className="r mono tabular dim">{h.exitRS ?? "—"}</td>
-              <td className="r mono tabular dim">{h.held}d</td>
-              <td className="r mono tabular dn">{h.mae.toFixed(1)}R</td>
-              <td className={`r mono tabular ${h.r>=0?"up":"dn"}`}>{h.r>=0?"+":""}{h.r.toFixed(2)}R</td>
-              <td className={`r mono tabular ${h.pnl>=0?"up":"dn"}`}>{h.pnl>=0?"+":""}${Math.abs(h.pnl)}</td>
-              <td><Pill tone={h.status==="WIN"?"gn":h.status==="LOSS"?"rd":h.status==="OPEN"?"cy":"amb"} small>{h.status}</Pill></td>
-            </tr>
-          ))}</tbody>
+          <tbody>{tableRows.map((s, i) => {
+            const status = s.pnl_pct == null ? "OPEN" : (s.pnl_pct > 0 ? "WIN" : "LOSS");
+            return (
+              <tr key={i}>
+                <td className="mono dim2">{s.date}</td>
+                <td className="mono"><b>{s.ticker}</b></td>
+                <td className="mono dim">{s.strategy || "—"}</td>
+                <td className="r mono tabular">{s.score != null ? Math.round(s.score) : "—"}</td>
+                <td className="r mono tabular dim">{s.rs_rank != null ? Math.round(s.rs_rank) : "—"}</td>
+                <td className="r mono tabular dim">{s.stars != null ? "★" + Math.round(s.stars) : "—"}</td>
+                <td className={`r mono tabular ${s.pnl_pct == null ? "dim" : s.pnl_pct >= 0 ? "up" : "dn"}`}>{s.pnl_pct == null ? "—" : (s.pnl_pct >= 0 ? "+" : "") + s.pnl_pct.toFixed(2) + "%"}</td>
+                <td className={`r mono tabular ${s.alpha == null ? "dim" : s.alpha >= 0 ? "up" : "dn"}`}>{s.alpha == null ? "—" : (s.alpha >= 0 ? "+" : "") + Number(s.alpha).toFixed(1) + "pp"}</td>
+                <td><Pill tone={status === "WIN" ? "gn" : status === "LOSS" ? "rd" : "cy"} small>{status}</Pill></td>
+              </tr>
+            );
+          })}</tbody>
         </table>
       </div>
       <div className="moh-note mono dim2">
-        Every momentum signal the engine fires is logged here with its realized R-multiple, MAE, and outcome — the honest audit trail.
-        Win-rate is shown with its Wilson 95% lower bound so a small sample can't masquerade as edge. Source: signal_log.json + trade reconciliation.
+        Every momentum signal the engine fired (RS New High, Trend Continuation, EMA pullback, Pocket Pivot, VCP, 10-Week Pullback, Breakout/Impulse) logged with its realized P&L and alpha vs SPY — the honest audit trail. Win-rate shown with its Wilson 95% lower bound so a small sample can't masquerade as edge. Source: /api/momentum-signals · signal_log.json (showing latest {tableRows.length} of {sm.n_total}).
       </div>
     </div>
   );
