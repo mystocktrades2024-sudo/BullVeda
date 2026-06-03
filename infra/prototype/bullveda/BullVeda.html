@@ -10832,6 +10832,15 @@ body {
     // critical subset (1.7MB) — real market context + setup stats + options flow
     BV.critical = syncGet("/v2/data.critical.json") || null;
     BV.optionsFlow = (BV.critical && BV.critical.options_flow_top30) || null; // ticker-level UOA (from critical)
+    // ── lazy chunks (build_data stubs these to [] in data.critical to boot fast,
+    //    and ships the real data in separate /v2/data_*.json files). Fetch them so
+    //    Excluded/Performance/Screener show real data instead of the empty stub. ──
+    var kj = syncGet("/v2/data_killed.json");
+    BV.killed = (kj && kj.killed) || null;                  // 470 real excluded rows
+    var pj = syncGet("/v2/data_perf.json");
+    BV.performance = (pj && pj.performance) || null;        // real performance block (equity/attrib)
+    var scj = syncGet("/v2/data_screener.json");
+    BV.screenerRows = (scj && (scj.screener || scj.rows)) || null;  // full real screener universe
     // real per-setup track-record stats (Wilson) keyed by setup family
     BV.setupStatsBy = (function () {
       var sf = BV.critical && BV.critical.setup_family_stats;
@@ -10841,7 +10850,7 @@ body {
         .forEach(function (s) { if (s && s.setup) m[s.setup] = s; });
       return m;
     })();
-  } else { BV.crypto = BV.earningsBeat = BV.earningsWatch = BV.optionsFlow = BV.critical = BV.setupStatsBy = null; }
+  } else { BV.crypto = BV.earningsBeat = BV.earningsWatch = BV.optionsFlow = BV.critical = BV.setupStatsBy = BV.killed = BV.performance = BV.screenerRows = null; }
 
   // ── real market context for the Home hero (regime · funnel · breadth · mood) ──
   BV.market = (function () {
@@ -10915,9 +10924,13 @@ body {
   };
   BV.eliteModes = function () { return ["Swing", "Position", "Invest"]; };
 
-  // ── killed / excluded (real) — empty today (count tracked separately) ──
-  BV.killed = (BV.critical && Array.isArray(BV.critical.killed)) ? BV.critical.killed : [];
-  BV.killedCount = (BV.critical && num(BV.critical.killed_count, 0)) || 0;
+  // ── killed / excluded (real) — prefer the lazy chunk (data_killed.json, 470 rows);
+  //    data.critical.killed is stubbed to [] by build_data, so fall back to it only if
+  //    the chunk didn't load. (BV.killed is set from the chunk at the loader above.) ──
+  if (!(Array.isArray(BV.killed) && BV.killed.length)) {
+    BV.killed = (BV.critical && Array.isArray(BV.critical.killed)) ? BV.critical.killed : [];
+  }
+  BV.killedCount = (BV.critical && num(BV.critical.killed_count, 0)) || (Array.isArray(BV.killed) ? BV.killed.length : 0);
 
   // ── industries (real) — list[~30] { industry, avg_score, count, tickers:[…] } ──
   BV.industries = (BV.critical && Array.isArray(BV.critical.industries)) ? BV.critical.industries : [];
