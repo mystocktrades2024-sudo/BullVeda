@@ -39,6 +39,44 @@ export SCAN_MODE=""
 
 echo "[weekly-full] launching full heavy enrich (caffeinated) …" >> "$LOG"
 caffeinate -i "$PY" swing_trade.py >> "$LOG" 2>&1
-echo "[weekly-full] scan exit=$? — $(date)" >> "$LOG"
+SCAN_RC=$?
+echo "[weekly-full] scan exit=$SCAN_RC — $(date)" >> "$LOG"
 caffeinate -i "$PY" infra/prototype/build_data.py >> "$LOG" 2>&1
 echo "[weekly-full] build_data done — $(date)" >> "$LOG"
+
+# ── Self-report to Slack (the "Saturday check") — survives a closed laptop /
+# absent Claude session, so the result lands automatically. Reads this run's
+# EODHD cost + tier split + picks straight from the log. ──
+"$PY" - "$LOG" "$SCAN_RC" <<'PYEOF' >> "$LOG" 2>&1 || true
+import sys, re, json, urllib.request
+from pathlib import Path
+log_path, scan_rc = sys.argv[1], sys.argv[2]
+ROOT = Path("/Volumes/MyMacDisk/Claude Skills/SwingTrade")
+# pull the LAST run's lines from the log (after the last separator)
+txt = Path(log_path).read_text(errors="ignore").split("=========")[-1]
+def grab(pat, d="—"):
+    m = re.findall(pat, txt)
+    return m[-1] if m else d
+calls   = grab(r"EODHD calls this scan: ([\d,]+ network[^\n]*)")
+budget  = grab(r"EODHD budget: ([\d,]+/[\d,]+ \([\d]+%\))")
+tier    = grab(r"(tier1=\d+[^\n]*tier2=\d+[^\n]*)")
+elite   = grab(r"Elite picks: (\[[^\]]*\])")
+skipped = "SKIPPING scan" in txt
+status  = "🔴 SKIPPED (quota maxed)" if skipped else ("✅ completed" if scan_rc == "0" else f"⚠️ exit {scan_rc}")
+msg = (f"🛡️ *Weekly Saturday full deep-enrich* — {status}\n"
+       f"EODHD: {calls}\nBudget: {budget}\nTier split: {tier}\nElite: {elite}")
+# load webhook from .env
+wh = None
+for line in (ROOT/".env").read_text().splitlines():
+    if line.startswith("SLACK_WEBHOOK_URL=") and "=" in line:
+        wh = line.split("=",1)[1].strip().strip('"').strip("'")
+if wh:
+    req = urllib.request.Request(wh, data=json.dumps({"text": msg}).encode(),
+                                 headers={"Content-Type":"application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=8); print("[weekly-full] Slack summary posted")
+    except Exception as e:
+        print(f"[weekly-full] Slack post failed: {e}")
+else:
+    print("[weekly-full] no SLACK_WEBHOOK in .env")
+PYEOF
