@@ -564,8 +564,21 @@ function HomeHero({ mode, onSurface }) {
   return (
     <div className="home-hero qhero">
       <div className="qh-top">
-        <div className="qh-eyebrow mono">SwingTrade <span className="dim2">· 2026-05-28 · 14:23:08 ET</span></div>
-        <span className="qh-live mono"><span className="qh-live-dot" />LIVE · MARKET MOOD</span>
+        <div className="qh-eyebrow mono">SwingTrade {(() => {
+          // Real scan timestamp from BV.scanMeta (bundle run_timestamp) — was a
+          // hardcoded "2026-05-28 · 14:23:08 ET" that never updated (audit 2026-06-04).
+          const m = (typeof window !== "undefined" && window.__BV && window.__BV.scanMeta) || null;
+          if (!m || !m.ts) return <span className="dim2">· last refresh unavailable</span>;
+          const hrs = m.ageMin != null ? m.ageMin / 60 : null;
+          const age = hrs == null ? "" : (hrs < 1 ? Math.round(m.ageMin) + "m" : hrs.toFixed(hrs < 10 ? 1 : 0) + "h");
+          const cls = m.stale ? "amb" : "dim2";
+          return <span className={cls}>· refreshed {String(m.ts).replace(" ", " · ")} PT{age ? " · " + age + " ago" : ""}</span>;
+        })()}</div>
+        {(() => {
+          const m = (typeof window !== "undefined" && window.__BV && window.__BV.scanMeta) || null;
+          const stale = !!(m && m.stale);
+          return <span className={`qh-live mono${stale ? " is-stale" : ""}`}><span className="qh-live-dot" />{stale ? "STALE" : "LIVE"} · MARKET MOOD</span>;
+        })()}
       </div>
 
       <div className="qh-band">
