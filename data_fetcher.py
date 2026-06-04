@@ -2921,16 +2921,44 @@ def get_market_regime(breadth: dict | None = None) -> dict:
             # Insufficient history — fall back to single-bar behavior to stay safe
             _risk_off_confirmed = not above_50
 
+        # ── Audit 2026-06-03 regime guards (flag-gated, reversible) ──────────────
+        # Fix B (default ON): when VIX/breadth are DEGRADED we cannot confirm the
+        #   risk_on_trending criteria (VIX<18, breadth>65) — refuse the risk-on upgrade
+        #   and lean defensive instead of trusting the 20/50 defaults. Pure data-integrity
+        #   (principle 18); only ever REDUCES risk (trending→choppy).
+        # Fix A (default OFF): a sub-EMA50 tape that hasn't yet confirmed risk-off is NOT
+        #   "risk-on" — flag it transitioning/defensive so sizing can de-risk, WITHOUT
+        #   breaking the 4-regime contract or fighting the risk-off hysteresis. Default OFF
+        #   because the audit (n=23 below-50 trades, hit 74%) does NOT clear the n>=30 bar.
+        _flag_degraded_no_riskon = bool(_thr_cfg.get("regime_degraded_no_risk_on", True))
+        _flag_choppy_above50     = bool(_thr_cfg.get("regime_choppy_requires_above_50", False))
+        _defensive_lean = False
+        _defensive_reason = None
+
+        _can_trend = (above_50 and above_200 and qqq_above_ema50
+                      and vix_cur is not None and vix_cur < _vix_threshold_for_risk_on
+                      and pct_above_50d is not None and pct_above_50d > max(_trending_breadth, _breadth_for_bull))
+        if _flag_degraded_no_riskon and _regime_degraded and _can_trend:
+            _can_trend = False
+            _defensive_lean = True
+            _defensive_reason = "degraded_inputs_no_risk_on"
+
         if (vix_cur is not None and vix_cur > _panic_vix) or (pct_above_50d is not None and pct_above_50d < _panic_breadth):
             regime4 = "panic"
         elif _risk_off_confirmed:
             regime4 = "risk_off_trending"
-        elif (above_50 and above_200 and qqq_above_ema50
-              and vix_cur is not None and vix_cur < _vix_threshold_for_risk_on
-              and pct_above_50d is not None and pct_above_50d > max(_trending_breadth, _breadth_for_bull)):
+        elif _can_trend:
             regime4 = "risk_on_trending"
         else:
             regime4 = "risk_on_choppy"
+            # A sub-EMA50 'choppy' (below 50-day, risk-off not yet confirmed) is the
+            # mislabel window — lean defensive when the flag is on.
+            if not above_50:
+                _defensive_lean = True
+                _defensive_reason = _defensive_reason or "below_ema50_unconfirmed"
+            if _flag_degraded_no_riskon and _regime_degraded:
+                _defensive_lean = True
+                _defensive_reason = _defensive_reason or "degraded_inputs"
 
         # Persist current regime for next run's hysteresis
         try:
@@ -3155,7 +3183,25 @@ def get_market_regime(breadth: dict | None = None) -> dict:
         }
         max_size_pct = _max_size_pct_map.get(_publish_regime4, 70)
 
+        # Defensive size haircut when the regime is flagged transitioning/blind (audit
+        # 2026-06-03). Degraded-input haircut (Fix B) is default-ON but only fires on an
+        # actual VIX/breadth outage — normal scans pass real breadth so this is dark.
+        # Below-EMA50 haircut (Fix A) only fires when its flag is on (default OFF).
+        _defensive_size_mult = 1.0
+        if _defensive_lean:
+            if _defensive_reason in ("degraded_inputs", "degraded_inputs_no_risk_on") and _flag_degraded_no_riskon:
+                _defensive_size_mult = float(_thr_cfg.get("regime_degraded_size_mult", 0.5))
+            elif _defensive_reason == "below_ema50_unconfirmed" and _flag_choppy_above50:
+                _defensive_size_mult = float(_thr_cfg.get("regime_below50_size_mult", 0.5))
+        if _defensive_size_mult != 1.0:
+            max_size_pct = int(round(max_size_pct * _defensive_size_mult))
+
         return {
+            # Defensive-lean flags (audit 2026-06-03) — surfaced always (informational);
+            # only change max_size_pct when the controlling flag is on (see above).
+            "regime_transitioning": _defensive_lean,
+            "defensive_reason":     _defensive_reason,
+            "defensive_size_mult":  _defensive_size_mult,
             # Data-quality flags — surface degraded regime inputs so the decision layer
             # and dashboard can flag low-confidence regime instead of trusting a
             # fabricated-neutral classification (audit 2026-06-03, principle 18).
