@@ -12,6 +12,7 @@
 set -e
 cd "/Volumes/MyMacDisk/Claude Skills/SwingTrade"
 DATE=$(date +%Y-%m-%d)
+START_EPOCH=$(date +%s)
 LOG=/tmp/weekly-diagnostics.log
 echo "==== weekly diagnostics $DATE ====" >> "$LOG"
 
@@ -66,6 +67,6 @@ import time
 from lib.autorun_reporter import report
 report('weekly-diagnostics', 'success',
        summary='Weekly diagnostics complete: regime_sharpe_decomp + loss_streak + sharpe_screen + setup_trend + KPI + alerts run.',
-       duration_sec=int(time.time() - $(date -j -f '%H:%M:%S' $(grep -m1 '^==== weekly' \"\$LOG\" | awk '{print $5}') '+%s' 2>/dev/null || echo 0)))" 2>>"$LOG"
+       duration_sec=$(( $(date +%s) - START_EPOCH )))" 2>>"$LOG"
 
 echo "==== done $DATE ====" >> "$LOG"
